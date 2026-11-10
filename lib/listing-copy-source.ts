@@ -70,10 +70,13 @@ const decode = (s: string) => s
   .replace(/&(nbsp|amp|lt|gt|quot|apos|#39);/gi, (m, k) => ENT[String(k).toLowerCase()] ?? m);
 
 /**
- * HTML ของร้าน → ข้อความล้วน (ย่อหน้าคั่นบรรทัดว่าง · รายการเป็น "• ")
- * เอาออก: รูป (<img> — LINE ไม่รับลิงก์รูปนอกในรายละเอียด) · สคริปต์/สไตล์ · แท็กทั้งหมด
+ * HTML ของร้าน → ข้อความล้วน (1 ย่อหน้า = 1 บรรทัด · ย่อหน้าว่างของร้าน = บรรทัดว่าง · รายการเป็น "• ")
+ * เอาออก: รูป (<img> — LINE ไม่รับลิงก์รูปนอกในรายละเอียด) · สคริปต์/สไตล์ · แท็กทั้งหมด · บรรทัดที่มีแต่ขีด (เช่น "- -")
  * ข้อความล้วน = รูปแบบเดียวกับรายละเอียดในระบบ → แต่ละร้านแปลงต่อเอง (LINE: noteToHtml)
+ * บทเรียน IG-PROP001 (2026-11-10): เดิมแปลงทุก </p> เป็นบรรทัดว่าง → บน LINE มีบรรทัดว่างแทรกทุกบรรทัด
  */
+const BLOCK = "\u0001";   // ขอบย่อหน้า (หลายตัวติดกัน = ขึ้นบรรทัดใหม่ครั้งเดียว)
+const BLANK = "\u0002";   // ย่อหน้าว่างของร้าน = บรรทัดว่าง
 export function copyTextFromHtml(html: string | null | undefined): string {
   const src = String(html ?? "");
   if (!src.trim()) return "";
@@ -82,14 +85,18 @@ export function copyTextFromHtml(html: string | null | undefined): string {
     .replace(/<(script|style|iframe|noscript)[^>]*>[\s\S]*?<\/\1>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<img[^>]*>/gi, "")
-    .replace(/<li[^>]*>/gi, "\n• ")
+    .replace(/<(p|div)[^>]*>(?:\s|&nbsp;| |<br\s*\/?>|<\/?(?:span|b|strong|i|em|u)[^>]*>)*<\/\1>/gi, `${BLOCK}${BLANK}${BLOCK}`)
+    .replace(/<li[^>]*>/gi, `${BLOCK}• `)
+    .replace(/<\/li>/gi, BLOCK)
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?(p|div|h[1-6]|tr|table|section|article|blockquote|ul|ol)[^>]*>/gi, "\n\n")
-    .replace(/<\/li>/gi, "\n")
-    .replace(/<[^>]+>/g, "");
+    .replace(/<\/?(p|div|h[1-6]|tr|table|section|article|blockquote|ul|ol)[^>]*>/gi, BLOCK)
+    .replace(/<[^>]+>/g, "")
+    .replace(new RegExp(`${BLOCK}+`, "g"), "\n")
+    .replace(new RegExp(BLANK, "g"), "");
   return decode(text)
     .replace(/ /g, " ")
     .split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim())
+    .filter((l) => !/^[-–—•*·]+(\s+[-–—•*·]+)*$/.test(l))   // บรรทัดที่มีแต่ขีด/จุด (เช่น "- -") = ขยะ
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/(• [^\n]*)\n\n(?=• )/g, "$1\n")   // รายการติดกันไม่เว้นบรรทัด

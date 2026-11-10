@@ -31,8 +31,12 @@ const sys = (over: Partial<CopySystem> = {}): CopySystem => ({
 const emptyDraft: CopyDraft = { title: null, description: null, categoryPath: null, extra: {} };
 
 describe("copyTextFromHtml", () => {
-  it("เอารูป/แท็กออก · ย่อหน้าคั่นบรรทัดว่าง · รายการเป็น •", () => {
-    expect(copyTextFromHtml("<ul><li>ก</li><li>ข</li></ul><p>ย่อหน้า&nbsp;1</p><p>ย่อหน้า 2<img src='x'></p>")).toBe("• ก\n• ข\n\nย่อหน้า 1\n\nย่อหน้า 2");
+  it("เอารูป/แท็กออก · 1 ย่อหน้า = 1 บรรทัด · รายการเป็น •", () => {
+    expect(copyTextFromHtml("<ul><li>ก</li><li>ข</li></ul><p>ย่อหน้า&nbsp;1</p><p>ย่อหน้า 2<img src='x'></p>")).toBe("• ก\n• ข\nย่อหน้า 1\nย่อหน้า 2");
+  });
+  it("ย่อหน้าว่างของร้าน = บรรทัดว่าง · บรรทัดที่มีแต่ขีดตัดทิ้ง (IG-PROP001 บน Lazada)", () => {
+    const html = "<div><p>วัสดุ: เรซิน</p><p>- ลายฉลุ</p><p>- สะท้อนแสงดี</p><p>- -</p><p><br></p><p><span>แนะนำการสั่งซื้อ:</span></p><p>&nbsp;</p><p>ขนาด:</p><div>ทรงวงรี: 38 × 23 ซม.</div></div>";
+    expect(copyTextFromHtml(html)).toBe("วัสดุ: เรซิน\n- ลายฉลุ\n- สะท้อนแสงดี\n\nแนะนำการสั่งซื้อ:\n\nขนาด:\nทรงวงรี: 38 × 23 ซม.");
   });
   it("ข้อความธรรมดาคงเดิม (ไม่ยุบบรรทัด)", () => {
     expect(copyTextFromHtml("บรรทัด 1\nบรรทัด 2\n\n\n\nบรรทัด 3")).toBe("บรรทัด 1\nบรรทัด 2\n\nบรรทัด 3");
@@ -55,7 +59,7 @@ describe("แปลงร้านต้นทาง", () => {
     const src = sourceFromLazadaView(lazView, meta);
     expect(src.variants[0]).toMatchObject({ sku: "IG-PROP001-01", full: 299, sale: 199, weightKg: 0.8 });
     expect(src.variants[2]).toMatchObject({ full: null, sale: 100 });
-    expect(src.descriptionText).toBe("• กระจกแท้\n• ขอบทอง\n\nถาดกระจก สไตล์วินเทจ\n\nขนาด 30 ซม.");
+    expect(src.descriptionText).toBe("• กระจกแท้\n• ขอบทอง\n\nถาดกระจก สไตล์วินเทจ\nขนาด 30 ซม.");
     expect(src.brand).toBeNull();
     expect(src.images).toHaveLength(2);
     expect(src.weightKg).toBe(0.8);
