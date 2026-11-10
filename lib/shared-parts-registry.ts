@@ -176,9 +176,9 @@ export const SHARED_PARTS: SharedPart[] = [
 
   // ───────── ป๊อปอัป ─────────
   {
-    key: "modal", label: "หน้าต่างเด้ง + ยืนยัน + ลิ้นชัก", code: "ERPModal · ConfirmDialog · Drawer", category: "popup",
+    key: "modal", label: "หน้าต่างเด้ง + ยืนยัน + ลิ้นชัก", code: "ERPModal · ConfirmDialog · Drawer · BottomSheet", category: "popup",
     source: { path: "components/modal" },
-    what: "ป๊อปอัปกลางทุกแบบ ถามก่อนปิดเมื่อมีข้อมูลยังไม่บันทึก มีแบบปุ่มอันตราย จำขนาดที่ผู้ใช้ลากไว้",
+    what: "ป๊อปอัปกลางทุกแบบ ถามก่อนปิดเมื่อมีข้อมูลยังไม่บันทึก มีแบบปุ่มอันตราย จำขนาดที่ผู้ใช้ลากไว้ · BottomSheet = แผ่นเลื่อนจากล่างสำหรับจอมือถือ",
     when: "ทุกป๊อปอัป ทุกการยืนยันลบ / อนุมัติ / ยกเลิก ทุกลิ้นชักด้านข้าง",
     notWhen: "ห้ามเขียนป๊อปอัปเองในหน้า",
     doc: "popup-policy.md", sameJob: "popup", primary: true, legacyKey: "erp_modal",

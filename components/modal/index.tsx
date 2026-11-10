@@ -1172,3 +1172,6 @@ export function ApprovalDialog({
     document.body
   );
 }
+
+// แผ่นเลื่อนจากล่าง (มือถือ) — ไฟล์แยก ไม่ให้ index ใหญ่ขึ้น
+export { BottomSheet } from "./bottom-sheet";

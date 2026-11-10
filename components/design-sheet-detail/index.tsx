@@ -38,7 +38,7 @@ import type { Attachment } from "@/app/api/attachments/route";
 import { lineShapeArea, normalizePiece, pieceGeometry, refitLineShape, shapeBox, shapePathD, type LineShape, type Shape } from "@/lib/pattern-shape";
 import type { EditorPiece, PieceMat, RefImage, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import { SheetImagePicker } from "./sheet-image-picker";
-import { costLineFromItem, isPieceGroup, pieceArea, piecePricePerCm2, recomputeCostLine } from "@/lib/design-sheet-cost-row";
+import { COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCostLine, pieceArea, recomputeCostLine, restorePrevItem, withPrevItem } from "@/lib/design-sheet-cost-row";
 import { buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
@@ -62,18 +62,8 @@ import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/ro
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import dynamic from "next/dynamic";
 import { DblClickToEdit } from "@/components/dbl-click-edit";
-import { DriveUploadBox, type DriveUploadStart } from "@/components/drive-upload-box";
-
-/** เริ่มอัป 1 ไฟล์ขึ้นโฟลเดอร์ Drive ของใบงาน (API หา/สร้างโฟลเดอร์ + เปิด session + ลงประวัติ) → ตัวไฟล์ DriveUploadBox ส่งต่อเอง */
-async function startSheetDriveUpload(sheetId: string, file: File): Promise<DriveUploadStart> {
-  const res = await apiFetch(`/api/design-sheets/${sheetId}/drive`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: file.name, mime: file.type || "application/octet-stream", size: file.size }),
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || j.error || !j.data?.upload_url) throw new Error(j.error || tr(`เริ่มอัปไม่สำเร็จ (${res.status})`, `Could not start upload (${res.status})`));
-  return { upload_url: j.data.upload_url, folder_url: j.data.folder_url };
-}
+import { DriveUploadBox } from "@/components/drive-upload-box";
+import { fetchSheetDriveFolder, startSheetDriveUpload } from "@/lib/design-sheet-drive-client";
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 // ลงออเดอร์จากใบงานนี้ (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเฉพาะตอนกด
@@ -105,7 +95,7 @@ const PatternTicketLinks = dynamic(() => import("@/components/pattern-ticket-lin
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 // ค่าใช้จ่ายเพิ่ม: amount = ต่อชิ้นเสมอ · mode "split" = ค่าครั้งเดียวหารจำนวนสั่ง (ค่าบล็อกสกรีน) — สูตรอยู่ lib/design-sheet-cost-snapshot
 type CostExtra = SnapExtra;
-const SPLIT_TIERS = [100, 200, 500, 1000] as const;   // "ถ้าสั่ง…" ใต้สรุปต้นทุน = ขั้นจำนวนที่ใช้เสนอราคาบ่อย
+const SPLIT_TIERS = COST_QTY_TIERS;   // "ถ้าสั่ง…" ใต้สรุปต้นทุน — ตัวจริง lib/design-sheet-cost-row (มือถือใช้ร่วม)
 // ค่าใช้จ่ายเพิ่มเริ่มต้น (แก้/ลบ/เพิ่มได้) — ชื่อพวกนี้ "ถูกบันทึกเป็นข้อมูล" ของใบงาน (ไปโผล่ในใบพิมพ์ต้นทุน)
 // → คงภาษาไทยเสมอ ไม่แปลตามภาษาคนกด (กันข้อมูลในระบบปนไทย/อังกฤษ) — เหมือนข้อมูลอื่นที่คนพิมพ์เอง
 const defaultCostExtra = (): CostExtra[] => [
@@ -134,8 +124,7 @@ const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", de
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
 // บรรทัดตีราคาที่ "รวม = 0" ทั้งที่เริ่มกรอกแล้ว (มีวัสดุ/ตัวเลข) → เตือนสีแดง · บรรทัดว่างเปล่าที่เพิ่งเพิ่ม ไม่นับ
-const isZeroCostRow = (r: CostRow) => !(Number(r.amount) > 0)
-  && !!(r.item_id || r.item_name || r.item_sku_id || r.group_code || Number(r.qty) > 0 || Number(r.unit_price) > 0 || Number(r.width_cm) > 0);
+const isZeroCostRow = isZeroCostLine;   // ตัวจริง lib/design-sheet-cost-row (มือถือใช้ร่วม)
 const methodLabel = (m: string): string | undefined => ({
   area_face: tr("พื้นที่÷หน้ากว้าง", "Area÷width"), area_100: tr("พื้นที่÷100", "Area÷100"), length: tr("ความยาว", "Length"),
   count: tr("นับชิ้น", "Count pcs"), manual: tr("พิมพ์เอง", "Manual"),
@@ -173,18 +162,7 @@ function rowFromItem(it: PriceItem, idx: number): CostRow {
   return { key: `c${Date.now()}_${idx}`, ...costLineFromItem(it, idx) };
 }
 
-/** patch ตอน "เลือกวัสดุ" ให้บรรทัดที่มีอยู่ — คงขนาด/จำนวนเดิม เปลี่ยนแค่วัสดุ/ชนิด/ราคา (ใช้ทั้งเลือกทีละแถว + bulk) */
-function costItemPatch(it: PriceItem, r: CostRow): Partial<CostRow> {
-  const piece = isPieceGroup(it.group_code, it.group_name);
-  return {
-    item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
-    price_basis: piece ? null : "manual", calc_method: it.calc_method,
-    waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
-    pieces: piece ? (r.pieces ?? 1) : r.pieces,
-    uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
-    unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit,
-  };
-}
+// patch "เลือกวัสดุ" ให้บรรทัดเดิม (costItemPatch) + จำวัสดุเดิม (withPrevItem / restorePrevItem) อยู่ที่ lib/design-sheet-cost-row (มือถือใช้ร่วม)
 
 /**
  * เลือกวัตถุดิบ "จาก SKU คลังสินค้า" → เติมให้อัตโนมัติ: ประเภท(กลุ่ม) · สูตรคิด · ราคาซื้อมาตรฐาน · หน่วย · หน้ากว้าง · %เผื่อเสีย
@@ -258,35 +236,6 @@ function priceDrift(r: CostRow, item: PriceItem | null, g: PriceGroup | null): {
   return null;
 }
 
-/** ตัวตนวัสดุของบรรทัด (ไว้เทียบว่า "เปลี่ยนวัสดุ" จริงไหม) */
-const rowMatKey = (r: { item_id?: string | null; item_sku_id?: string | null; group_code?: string | null }) =>
-  r.item_id ? `i:${r.item_id}` : r.item_sku_id ? `s:${r.item_sku_id}` : r.group_code ? `g:${r.group_code}` : "";
-/**
- * ข้อ B — ตอนเปลี่ยนวัสดุให้บรรทัดที่มีวัสดุอยู่แล้ว: จำ "วัสดุเดิม + ราคาเดิม" ไว้ใน prev_item (ถาวรจนกดรับทราบ/กลับของเดิม)
- * - ถ้าเคยจำไว้แล้ว ไม่ทับ (ของเดิมคือของเดิมตัวแรกเสมอ)   - ถ้าเลือกกลับมาเป็นวัสดุเดิม → ล้างทิ้ง (ไม่มีอะไรต่าง)
- */
-function withPrevItem(r: CostRow, patch: Partial<CostRow>): Partial<CostRow> {
-  const before = rowMatKey(r); const after = rowMatKey({ ...r, ...patch });
-  if (!before || before === after) return patch;
-  if (r.prev_item) return rowMatKey(r.prev_item) === after ? { ...patch, prev_item: null } : patch;
-  const prev: PrevItem = {
-    item_id: r.item_id ?? null, item_sku_id: r.item_sku_id ?? null, item_sku_code: r.item_sku_code ?? null, item_name: r.item_name ?? null,
-    group_name: r.group_name ?? null, group_code: r.group_code ?? null, price_basis: r.price_basis ?? null,
-    unit_price: r.unit_price ?? null, uom: r.uom ?? null, calc_method: r.calc_method ?? null,
-    waste_percent: r.waste_percent ?? null, divisor: r.divisor ?? null, face_width_cm: r.face_width_cm ?? null,
-    amount: r.amount ?? null, changed_at: new Date().toISOString(),
-  };
-  return { ...patch, prev_item: prev };
-}
-/** กลับไปใช้วัสดุเดิม (↶) — คืนฟิลด์วัสดุ/ราคา คงขนาด/จำนวนที่กรอกไว้ */
-function restorePrevItem(p: PrevItem): Partial<CostRow> {
-  return {
-    item_id: p.item_id, item_sku_id: p.item_sku_id, item_sku_code: p.item_sku_code, item_name: p.item_name,
-    group_name: p.group_name, group_code: p.group_code, price_basis: p.price_basis,
-    unit_price: p.unit_price, uom: p.uom, calc_method: p.calc_method,
-    waste_percent: p.waste_percent, divisor: p.divisor, face_width_cm: p.face_width_cm, prev_item: null,
-  };
-}
 const fmtSigned = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtBaht(Math.abs(n))}`;
 const pct = (from: number | null | undefined, to: number | null | undefined) =>
   from && to != null ? ` (${to >= from ? "+" : "−"}${(Math.abs(to - from) / from * 100).toFixed(1)}%)` : "";
@@ -499,8 +448,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   useEffect(() => {
     if (!driveSheetId || modalTab !== "info" || driveFolder?.id === driveSheetId) return;   // หาแล้วของใบนี้ = ไม่ถามซ้ำตอนสลับแท็บ
     let alive = true;
-    apiFetch(`/api/design-sheets/${driveSheetId}/drive`).then((r) => r.json())
-      .then((j) => { if (alive && !j.error) setDriveFolder({ id: driveSheetId, url: j.data?.folder_url ?? null }); }).catch(() => {});
+    void fetchSheetDriveFolder(driveSheetId).then((url) => { if (alive) setDriveFolder({ id: driveSheetId, url }); });
     return () => { alive = false; };
   }, [driveSheetId, modalTab, driveFolder?.id]);
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย

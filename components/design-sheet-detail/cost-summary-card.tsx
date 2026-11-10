@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 
-const SEG_COLORS = ["#4f46e5", "#0d9488", "#d97706", "#db2777", "#0284c7", "#65a30d", "#7c3aed"];
+export const SEG_COLORS = ["#4f46e5", "#0d9488", "#d97706", "#db2777", "#0284c7", "#65a30d", "#7c3aed"];
 const EXTRA_COLOR = "#94a3b8";
 const baht = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 

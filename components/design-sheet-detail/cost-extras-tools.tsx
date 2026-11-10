@@ -19,7 +19,7 @@ import { Icon } from "@/components/icon";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import {
-  cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, ORDER_QTY_QUICK, stepOrderQty, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
+  cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, ORDER_QTY_QUICK, stepOrderQty, groupCutRows, overheadRows, overheadTotal, presetsOf, PRESET_KIND_META, PRESET_KINDS,
   type CartonOption, type PackSuggestion, type CostPreset, type CutMaterial, type CutMaterialGroup, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
 } from "@/lib/design-cost-presets";
 
@@ -59,7 +59,7 @@ export function useCostPresets(enabled: boolean) {
   return { presets, loaded, reload, save, remove };
 }
 export type CostPresetsApi = ReturnType<typeof useCostPresets>;
-export const presetsOf = (presets: CostPreset[], kind: PresetKind) => presets.filter((p) => p.kind === kind).sort((a, b) => a.sort_order - b.sort_order);
+export { presetsOf };   // ตัวจริงอยู่ lib/design-cost-presets (ย้ายให้หน้ามือถือใช้ร่วม 2026-11-10) — คงชื่อเดิมให้ที่ import จากไฟล์นี้
 
 // ── ค่าแรงที่เคยผลิต ──
 let refsCache: { at: number; data: Record<"bom" | "wo" | "ds", LaborRef[]> } | null = null;

@@ -5,11 +5,13 @@
  *   isPieceGroup      — วัสดุชนิด "ชิ้นสำเร็จขนาดตายตัว" (ผ้าชิ้น / ลายพิมพ์ / ตัวเสริม): คิดพื้นที่ cm² × ราคาต่อ cm²
  *   recomputeCostLine — คิดปริมาณ + ยอดเงินของบรรทัดใหม่ (วาดรูปทรง + คิดจากพื้นที่จริง = ใช้พื้นที่จริง)
  *   costLineFromItem  — บรรทัดใหม่จากวัสดุตีราคา (ยังไม่มีขนาด)
+ *   costItemPatch / withPrevItem / restorePrevItem — เปลี่ยนวัสดุของบรรทัดเดิม (+ จำวัสดุเดิมไว้เทียบ) · ย้ายจากหน้าคอม 2026-11-10 ให้มือถือใช้ร่วม
  *
- * ห้ามเขียนสูตรนี้ซ้ำที่อื่น — หน้าจอตีราคาและ API ต้องได้เลขเดียวกัน · เทสต์ lib/__tests__/pattern-costing.test.ts
+ * ห้ามเขียนสูตรนี้ซ้ำที่อื่น — หน้าจอตีราคา (คอม + มือถือ) และ API ต้องได้เลขเดียวกัน · เทสต์ lib/__tests__/pattern-costing.test.ts
  */
 import { calcCostQty } from "@/lib/design-sheets-meta";
 import { lineShapeArea, type LineShape } from "@/lib/pattern-shape";
+import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
 
 /** ช่องของบรรทัดที่สูตรใช้ (บรรทัดจริงมีช่องมากกว่านี้ — ส่งทั้งก้อนมาได้) */
 export type CostRowCalc = {
@@ -55,6 +57,58 @@ export function recomputeCostLine<T extends CostRowCalc>(r: T): T {
   }
   const amount = qty != null && r.unit_price != null ? Math.round(qty * r.unit_price * 100) / 100 : null;
   return { ...r, qty, amount };
+}
+
+/** บรรทัดที่ "รวม = 0" ทั้งที่เริ่มกรอกแล้ว (มีวัสดุ/ตัวเลข) → เตือนสีแดง · บรรทัดว่างเปล่าที่เพิ่งเพิ่ม ไม่นับ (หน้าคอม + มือถือ) */
+export const isZeroCostLine = (r: Pick<CostLine, "amount" | "item_id" | "item_name" | "qty" | "unit_price" | "width_cm"> & { item_sku_id?: string | null; group_code?: string | null }) => !(Number(r.amount) > 0)
+  && !!(r.item_id || r.item_name || r.item_sku_id || r.group_code || Number(r.qty) > 0 || Number(r.unit_price) > 0 || Number(r.width_cm) > 0);
+
+/** "ถ้าสั่ง…" ใต้สรุปต้นทุน = ขั้นจำนวนที่ใช้เสนอราคาบ่อย (หน้าคอม + มือถือ) */
+export const COST_QTY_TIERS = [100, 200, 500, 1000] as const;
+
+/** patch ตอน "เลือกวัสดุ" ให้บรรทัดที่มีอยู่ — คงขนาด/จำนวนเดิม เปลี่ยนแค่วัสดุ/ชนิด/ราคา (หน้าคอม: ทีละแถว + bulk · มือถือ: แผ่นแก้บรรทัด) */
+export function costItemPatch(it: CostItemLike, r: Pick<CostLine, "face_width_cm" | "pieces" | "uom">): Partial<CostLine> {
+  const piece = isPieceGroup(it.group_code, it.group_name);
+  return {
+    item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
+    price_basis: piece ? null : "manual", calc_method: it.calc_method,
+    waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
+    pieces: piece ? (r.pieces ?? 1) : r.pieces,
+    uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
+    unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit,
+  };
+}
+
+/** ตัวตนวัสดุของบรรทัด (ไว้เทียบว่า "เปลี่ยนวัสดุ" จริงไหม) */
+export const rowMatKey = (r: { item_id?: string | null; item_sku_id?: string | null; group_code?: string | null }) =>
+  r.item_id ? `i:${r.item_id}` : r.item_sku_id ? `s:${r.item_sku_id}` : r.group_code ? `g:${r.group_code}` : "";
+
+/**
+ * ข้อ B — ตอนเปลี่ยนวัสดุให้บรรทัดที่มีวัสดุอยู่แล้ว: จำ "วัสดุเดิม + ราคาเดิม" ไว้ใน prev_item (ถาวรจนกดรับทราบ/กลับของเดิม)
+ * - ถ้าเคยจำไว้แล้ว ไม่ทับ (ของเดิมคือของเดิมตัวแรกเสมอ)   - ถ้าเลือกกลับมาเป็นวัสดุเดิม → ล้างทิ้ง (ไม่มีอะไรต่าง)
+ */
+export function withPrevItem(r: CostLine, patch: Partial<CostLine>): Partial<CostLine> {
+  const before = rowMatKey(r); const after = rowMatKey({ ...r, ...patch });
+  if (!before || before === after) return patch;
+  if (r.prev_item) return rowMatKey(r.prev_item) === after ? { ...patch, prev_item: null } : patch;
+  const prev: PrevItem = {
+    item_id: r.item_id ?? null, item_sku_id: r.item_sku_id ?? null, item_sku_code: r.item_sku_code ?? null, item_name: r.item_name ?? null,
+    group_name: r.group_name ?? null, group_code: r.group_code ?? null, price_basis: r.price_basis ?? null,
+    unit_price: r.unit_price ?? null, uom: r.uom ?? null, calc_method: r.calc_method ?? null,
+    waste_percent: r.waste_percent ?? null, divisor: r.divisor ?? null, face_width_cm: r.face_width_cm ?? null,
+    amount: r.amount ?? null, changed_at: new Date().toISOString(),
+  };
+  return { ...patch, prev_item: prev };
+}
+
+/** กลับไปใช้วัสดุเดิม (↶) — คืนฟิลด์วัสดุ/ราคา คงขนาด/จำนวนที่กรอกไว้ */
+export function restorePrevItem(p: PrevItem): Partial<CostLine> {
+  return {
+    item_id: p.item_id, item_sku_id: p.item_sku_id, item_sku_code: p.item_sku_code, item_name: p.item_name,
+    group_name: p.group_name, group_code: p.group_code, price_basis: p.price_basis,
+    unit_price: p.unit_price, uom: p.uom, calc_method: p.calc_method,
+    waste_percent: p.waste_percent, divisor: p.divisor, face_width_cm: p.face_width_cm, prev_item: null,
+  };
 }
 
 /** บรรทัดตีราคาใหม่จากวัสดุ — ชนิดชิ้น: ไม่เติมขนาด (ให้กรอก/วาดขนาดที่ตัดจริง) · ราคา/หน่วย = ต่อ cm² */

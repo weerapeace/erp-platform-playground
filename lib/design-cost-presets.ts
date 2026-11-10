@@ -367,6 +367,9 @@ export const ORDER_QTY_QUICK = [100, 300, 500, 1000, 3000, 5000] as const;
 const ORDER_QTY_MAX = 10_000_000;
 
 /** {parentKey: qty} ที่ปลอดภัย — ตัดค่าที่ไม่ใช่จำนวนเต็มบวก · key ยาวไม่เกิน 120 */
+/** ราคากลางชนิดเดียว เรียงตามลำดับที่ตั้ง (ตัวแรก = ค่าที่ใช้) — หน้าคอม + มือถือ */
+export const presetsOf = (presets: CostPreset[], kind: PresetKind) => presets.filter((p) => p.kind === kind).sort((a, b) => a.sort_order - b.sort_order);
+
 export function cleanOrderQty(raw: unknown): Record<string, number> {
   const out: Record<string, number> = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
