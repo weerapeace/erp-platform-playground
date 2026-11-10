@@ -1255,6 +1255,22 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "listing-images", label: "รูปสินค้าบนร้าน (เรียง/ปก/ลบ/เพิ่มจากระบบ)", code: "ListingImageGrid", category: "feature",
+    source: { path: "components/platform-catalog/listing-images" },
+    what: "ตารางรูปสินค้าของรายการบนร้าน — ลากเรียง · ตั้งปก · ลบ (เหลือ ≥ 1) · ปุ่มเพิ่มจากคลังรูปของสินค้าที่จับคู่ + ป๊อปเลือกรูป (ListingImagePicker: เพิ่มรูปสินค้า / รูปตัวเลือก) · รูปจากระบบอยู่ในฟอร์มเป็น \"r2:<key>\"",
+    when: "ลิ้นชักสินค้าบนร้าน: แท็บรูป LINE + Lazada · ป๊อปเลือกรูปตัวเลือก (LINE รายละเอียดตัวเลือก · Lazada รูป·น้ำหนัก·กล่อง)",
+    notWhen: "คลังรูปของสินค้าในระบบ (หน้า Parent SKU) ให้ใช้ ProductImageGallery · อัปโหลดไฟล์ใหม่ ให้ใช้ ImageAttach",
+    doc: "platform-catalog.md",
+  },
+  {
+    key: "listing-links", label: "ปุ่มดูหน้าร้าน / Seller Center", code: "ListingLinks", category: "feature",
+    source: { path: "components/platform-catalog/listing-links" },
+    what: "ปุ่มเปิดหน้าสินค้าที่ลูกค้าเห็น + หลังร้าน (Seller Center) ของรายการบนร้าน ทุกแพลตฟอร์ม — ลิงก์จาก lib/platform-links (listingLinks) · หลังร้านที่ไม่มีลิงก์ตรง = หน้าแรก + คัดลอกรหัส · ตั้งร้านไม่ครบ = บอกว่าต้องตั้งอะไร",
+    when: "ทุกที่ที่โชว์สินค้า 1 รายการบนร้าน (ตอนนี้: หัวลิ้นชักสินค้าบนร้าน)",
+    notWhen: "ลิงก์หน้าร้านของบัญชี (ไม่ใช่สินค้า) ให้ใช้ platformShopUrl ใน lib/platform-links",
+    doc: "platform-catalog.md",
+  },
+  {
     key: "color-swatch-manager", label: "ทะเบียนสีกลาง", code: "ColorSwatchManager", category: "feature",
     source: { path: "components/color-swatch-manager" },
     what: "ตั้งหน้าตาจุดสีของแต่ละชื่อสี",

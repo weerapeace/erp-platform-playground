@@ -4,6 +4,7 @@ import {
   highlightsToLines, linesToHighlights, lazadaEditStateFromView, planLazadaEdit, foreignDescImages,
   lazUpdateProductXml, lazDeactivateXml, planLazadaDisplay, lazViewAfterWrite, lazRawAfterStatus,
   lazadaPriceRowsFromView, planLazadaPrices, lazPriceQuantityXml, applyLazadaBulkPrice, lazSaleDateText,
+  lazadaSkuMediaFromView, planLazadaSkuMedia, lazMigrateImageXml, lazResolveRefs, lazImageRefOk,
 } from "./lazada-listing-edit";
 
 // รูปแบบตามคู่มือ /product/item/get (open.lazada.com · สำรวจ 2026-11-10)
@@ -298,5 +299,74 @@ describe("ราคาลดไม่มีกำหนด (เจ้าขอ�
   it("lazViewAfterWrite: วันว่าง = ไม่มีวัน", () => {
     const vv = lazViewAfterWrite(v, { prices: [{ skuId: "127317001489", sellerSku: null, price: 328, salePrice: 150, saleStart: "", saleEnd: "" }] });
     expect(vv.skus[0]).toMatchObject({ specialPrice: 150, specialFrom: null, specialTo: null });
+  });
+});
+
+describe("เฟส 4: รูปสินค้า", () => {
+  const base = lazadaEditStateFromView(lazadaListingView(item)!);   // 2 รูป slatic
+  const A = "https://th-live.slatic.net/p/a.jpg", B = "https://th-live.slatic.net/p/b.jpg";
+  it("สถานะตั้งต้นมีรูป · ไม่แก้ = ไม่ส่ง", () => {
+    expect(base.images).toEqual([A, B]);
+    expect(planLazadaEdit(base, { ...base }).fields).toEqual({});
+  });
+  it("สลับปก → ส่งทั้งชุดตามลำดับ", () => {
+    const p = planLazadaEdit(base, { ...base, images: [B, A] });
+    expect(p.fields.images).toEqual([B, A]);
+    expect(p.changes[0]).toMatchObject({ label: "รูปสินค้า", after: "2 รูป (เปลี่ยนปก)" });
+  });
+  it("เพิ่มจากระบบ (r2:) ผ่าน + เตือนฝากรูป · ลบ = เตือนว่า Lazada อาจไม่ลบ", () => {
+    const p = planLazadaEdit(base, { ...base, images: [A, "r2:products/x.jpg"] });
+    expect(p.errors).toEqual([]);
+    expect(p.warnings.join(" ")).toContain("ฝากกับ Lazada");
+    expect(p.warnings.join(" ")).toContain("ลบไม่ได้");
+  });
+  it("0 รูป / เกิน 8 / ลิงก์ภายนอก = ไม่ผ่าน", () => {
+    expect(planLazadaEdit(base, { ...base, images: [] }).errors[0]).toContain("อย่างน้อย 1");
+    expect(planLazadaEdit(base, { ...base, images: Array.from({ length: 9 }, (_, i) => `https://th-live.slatic.net/p/${i}.jpg`) }).errors[0]).toContain("8");
+    expect(planLazadaEdit(base, { ...base, images: [A, "https://example.com/x.jpg"] }).errors[0]).toContain("ใช้ไม่ได้");
+  });
+  it("XML: รูปสินค้าอยู่นอก Skus ใน CDATA", () => {
+    const x = lazUpdateProductXml("99", [{ skuId: "1", sellerSku: "A", status: "active" }], { images: [B, A] });
+    expect(x).toContain(`<ItemId>99</ItemId><Images><Image><![CDATA[${B}]]></Image><Image><![CDATA[${A}]]></Image></Images><Attributes></Attributes>`);
+  });
+});
+
+describe("เฟส 4: รูปตัวเลือก + กล่อง", () => {
+  const v = lazadaListingView(item)!;   // SKU1 มีรูป 1 · กล่อง 0.3/30/10/5 · SKU2,3 ไม่มีรูป
+  const base = lazadaSkuMediaFromView(v);
+  const set = (i: number, patch: Partial<(typeof base)[number]>) => base.map((r, k) => (k === i ? { ...r, ...patch } : r));
+  it("ไม่แก้ = ไม่ส่ง", () => expect(planLazadaSkuMedia(base, base)).toMatchObject({ changes: [], errors: [] }));
+  it("แก้น้ำหนัก/ขนาด → ส่งเฉพาะช่องที่เปลี่ยน (ทศนิยม 2)", () => {
+    const p = planLazadaSkuMedia(base, set(0, { weight: 0.456, height: 6 }));
+    expect(p.errors).toEqual([]);
+    expect(p.extras.get("127317001489")).toEqual({ weight: 0.46, height: 6 });
+    expect(p.changes[0].after).toContain("น้ำหนัก (กก.) 0.46");
+  });
+  it("กล่อง 0/ว่าง/เกิน = ไม่ผ่าน", () => {
+    expect(planLazadaSkuMedia(base, set(0, { weight: 0 })).errors[0]).toContain("มากกว่า 0");
+    expect(planLazadaSkuMedia(base, set(0, { length: 500 })).errors[0]).toContain("เกิน 300");
+  });
+  it("รูปตัวเลือก: ต้องครบทุกตัว — มีตัวไม่มีรูป = ไม่ผ่าน", () => {
+    const p = planLazadaSkuMedia(base, set(0, { images: ["r2:k/new.jpg"] }));
+    expect(p.errors[0]).toContain("ครบทุกตัว");
+  });
+  it("รูปตัวเลือกครบทุกตัว → ส่งรูปของทุกตัว (ตัวที่ไม่ได้แก้ = รูปเดิม)", () => {
+    const full = base.map((r, k) => ({ ...r, images: [`https://th-live.slatic.net/p/s${k}.jpg`] }));
+    const p = planLazadaSkuMedia(full, full.map((r, k) => (k === 1 ? { ...r, images: ["r2:k/new.jpg"] } : r)));
+    expect(p.errors).toEqual([]);
+    expect([...p.extras.keys()]).toHaveLength(3);
+    expect(p.extras.get("127317001490")?.images).toEqual(["r2:k/new.jpg"]);
+    expect(p.extras.get("127317001489")?.images).toEqual(["https://th-live.slatic.net/p/s0.jpg"]);
+  });
+  it("XML: รูป + กล่องใน Sku ต่อจาก Status", () => {
+    const x = lazUpdateProductXml("99", [{ skuId: "1", sellerSku: "A", status: "active" }], {}, undefined, new Map([["1", { images: ["https://th-live.slatic.net/p/s.jpg"], weight: 0.5, length: 20 }]]));
+    expect(x).toContain("<Status>active</Status><Images><Image><![CDATA[https://th-live.slatic.net/p/s.jpg]]></Image></Images><package_weight>0.5</package_weight><package_length>20</package_length></Sku>");
+  });
+  it("ฝากรูป: URL ที่มี & อยู่ใน CDATA · แทน ref ด้วยลิงก์ที่ฝากแล้ว", () => {
+    expect(lazMigrateImageXml("https://erp/api/r2-image?key=a&w=1500&sq=1")).toContain("<Url><![CDATA[https://erp/api/r2-image?key=a&w=1500&sq=1]]></Url>");
+    expect(lazResolveRefs(["r2:a", "https://x.slatic.net/b.jpg"], new Map([["r2:a", "https://y.slatic.net/a.jpg"]]))).toEqual(["https://y.slatic.net/a.jpg", "https://x.slatic.net/b.jpg"]);
+    expect(lazImageRefOk("r2:k")).toBe(true);
+    expect(lazImageRefOk("https://img.lazcdn.com/a.jpg")).toBe(true);
+    expect(lazImageRefOk("https://evil.com/a.jpg")).toBe(false);
   });
 });

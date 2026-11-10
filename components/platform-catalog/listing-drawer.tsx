@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
+import { Drawer, ConfirmDialog } from "@/components/modal";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { MoneyInput } from "@/components/money-input";
@@ -29,16 +29,15 @@ import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { PlatformCategoryPicker, parseCategoryLabel } from "@/components/platform-category-picker";
 import { ImageLightbox } from "@/components/image-lightbox";
-import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
-import { r2ImageUrl } from "@/lib/r2-image";
 import { ListingVariantMap } from "./listing-variants";
+import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "./listing-images";
 import { useLineDisplay } from "./use-line-display";
 import { VariantStructureEditor } from "./variant-structure-editor";
 import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
 import { LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
-import { applyBulkPrice, planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
+import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อเปิดลิ้นชักเท่านั้น
@@ -48,8 +47,8 @@ type Tab = "info" | "images" | "options" | "match" | "history";
 const baht = (n: number | null | undefined) => (n == null ? "—" : `${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}฿`);
 const thDateTime = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); };
 const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() === "" || !Number.isFinite(n) ? null : n; };
-/** รูปในฟอร์ม: "r2:<key>" = รูปจากระบบ (ย่อจาก R2) · อื่น ๆ = ลิงก์ของ LINE */
-const imgSrc = (ref: string | null | undefined, w = 400) => { const k = systemImageKey(ref); return k ? r2ImageUrl(k, w) ?? "" : (ref ?? ""); };
+/** รูปในฟอร์ม: "r2:<key>" = รูปจากระบบ (ย่อจาก R2) · อื่น ๆ = ลิงก์ของร้าน — ของกลาง ./listing-images */
+const imgSrc = listingImgSrc;
 
 export function ListingDrawer({ listingId, onClose, onChanged, canPublish, matchTab }: {
   listingId: string | null;
@@ -72,8 +71,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const [saving, setSaving] = useState(false);
   const [lightbox, setLightbox] = useState(-1);
   const [descEdit, setDescEdit] = useState(false);
-  // เฟส 2: รูปในระบบ (คลังรูปของสินค้าที่จับคู่) — โหลดเมื่อกดเพิ่มรูป · ตัวเลือกราคา / รายละเอียด
-  const [sysImages, setSysImages] = useState<{ key: string; source: string }[] | null>(null);
+  // เฟส 2: ป๊อปเลือกรูป (คลังรูปของสินค้าที่จับคู่ — useSystemImages ด้านล่าง ผูกกับสินค้าที่จับคู่ สลับรายการ = โหลดใหม่เอง) · ตัวเลือกราคา / รายละเอียด
   const [picker, setPicker] = useState<null | { mode: "product" } | { mode: "variant"; id: string }>(null);
   const [optMode, setOptMode] = useState<"price" | "detail" | "structure">("price");
   // แก้ราคาหลายตัวเลือกพร้อมกัน (ติ๊กบางตัว = เฉพาะที่ติ๊ก · ไม่ติ๊ก = ทุกตัว) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง
@@ -89,7 +87,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     const fresh = loadedFor.current !== listingId;
     loadedFor.current = listingId;
     setError(null);
-    if (fresh) { setDetail(null); setVariants(null); setForm(null); setDescEdit(false); setSysImages(null); setPicker(null); setPriceSel(new Set()); setBulk({ full: "", pay: "", pct: "" }); setBulkErr(null); }
+    if (fresh) { setDetail(null); setVariants(null); setForm(null); setDescEdit(false); setPicker(null); setPriceSel(new Set()); setBulk({ full: "", pay: "", pct: "" }); setBulkErr(null); }
     const q = encodeURIComponent(listingId);
     Promise.all([
       apiFetch(`/api/platform-catalog?view=listing&listing_id=${q}`).then((r) => r.json() as Promise<ListingDetailResponse>),
@@ -143,18 +141,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       if (r.changed === 0) setBulkErr("ราคาเท่าเดิมทุกตัว — ไม่มีอะไรเปลี่ยน");
     }
   };
-  // รูปสินค้า: ลากเรียง (ของกลาง SortableList) · ตั้งปก = ย้ายไปแรก · ลบ (เหลืออย่างน้อย 1)
-  const drag = useDragReorder((from, to) => setForm((f) => (f ? { ...f, images: moveItem(f.images, from, to) } : f)), { group: "listing-images" });
+  // รูปสินค้า: ของกลาง ./listing-images (ลากเรียง · ตั้งปก · ลบ · เพิ่มจากคลังรูปในระบบ) — ใช้ร่วมกับ Lazada
   const setImages = (fn: (imgs: string[]) => string[]) => setForm((f) => (f ? { ...f, images: fn(f.images) } : f));
   const matchedParent = detail?.matched_parent_sku_id ?? null;
-  const loadSysImages = useCallback(async () => {
-    if (!matchedParent || sysImages) return;
-    try {
-      const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(matchedParent)}`).then((r) => r.json()) as { images?: { key: string; source: string }[] };
-      setSysImages(Array.isArray(j.images) ? j.images : []);
-    } catch { setSysImages([]); }
-  }, [matchedParent, sysImages]);
-  const openPicker = (p: { mode: "product" } | { mode: "variant"; id: string }) => { setPicker(p); void loadSysImages(); };
+  const sys = useSystemImages(matchedParent);
+  const sysImages = sys.images;
+  const openPicker = (p: { mode: "product" } | { mode: "variant"; id: string }) => { setPicker(p); sys.load(); };
   // ดึงข้อมูลสินค้าตัวนี้ตัวเดียวจาก LINE (POST /api/line-shopping/listing-refresh)
   const [refreshing, setRefreshing] = useState(false);
   const refreshOne = async () => {
@@ -330,37 +322,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     </div>
   );
   const imagesTab = !form || !line ? noLine : (
-    <div className="space-y-2">
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-        {form.images.map((ref, i) => {
-          const isNew = !!systemImageKey(ref);
-          return (
-            <div key={`${ref}-${i}`} {...(canEdit ? drag.rowProps(i) : {})}
-              className={`relative aspect-square overflow-hidden rounded-lg border bg-slate-50 ${isNew ? "border-violet-300" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
-              <button type="button" onClick={() => setLightbox(i)} className="h-full w-full"><img src={imgSrc(ref)} alt="" loading="lazy" className="h-full w-full object-cover" /></button>
-              {i === 0 && <span className="absolute left-1 top-1 rounded-full bg-white/90 px-1.5 text-[10px] text-violet-700">ปก</span>}
-              {isNew && <span className="absolute right-1 top-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">ใหม่</span>}
-              {canEdit && (
-                <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-white/90 px-1 py-0.5 text-[10px]">
-                  <DragHandle {...drag.handleProps(i)} title="ลากเพื่อเรียงลำดับ" />
-                  {i !== 0 && <button type="button" onClick={() => setImages((imgs) => moveItem(imgs, i, 0))} className="text-violet-700 hover:underline">ตั้งเป็นปก</button>}
-                  <button type="button" disabled={form.images.length <= 1} onClick={() => setImages((imgs) => imgs.filter((_, k) => k !== i))}
-                    title={form.images.length <= 1 ? "ต้องเหลืออย่างน้อย 1 รูป" : "เอารูปนี้ออก"} className="ml-auto text-rose-600 hover:underline disabled:opacity-30">ลบ</button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {canEdit && form.images.length < MAX_LINE_IMAGES && (
-          <button type="button" disabled={!matchedParent} onClick={() => openPicker({ mode: "product" })}
-            title={matchedParent ? "เลือกรูปจากคลังรูปของสินค้าในระบบ" : "จับคู่สินค้าในระบบก่อน ถึงจะเพิ่มรูปจากระบบได้"}
-            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">
-            <Icon name="add" />เพิ่มจากรูปในระบบ
-          </button>
-        )}
-      </div>
-      <p className="text-[11px] text-slate-400">LINE รับ 1–{MAX_LINE_IMAGES} รูป · รูปแรก = ปก · ลากที่หูจับเพื่อเรียง · รูปป้าย “ใหม่” = จากคลังรูปในระบบ (ส่งตอนกดบันทึก)</p>
-    </div>
+    <ListingImageGrid images={form.images} onChange={(next) => setImages(() => next)} canEdit={canEdit} max={MAX_LINE_IMAGES} platformName="LINE"
+      onOpen={setLightbox} onAdd={() => openPicker({ mode: "product" })} canAdd={!!matchedParent} />
   );
   const detailCols: MiniColumn<LineEditVariant>[] = [
     { key: "opt", header: "ตัวเลือก", width: "1.5fr", cell: (v) => <div className="min-w-0"><div className="truncate" title={v.label}>{v.label}</div><div className="truncate font-mono text-[11px] text-slate-400">{v.sku ?? "ไม่มีรหัส"}</div></div> },
@@ -478,7 +441,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
-                : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} /> : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} />)
+                : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
+                  : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -502,52 +466,15 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {isLazada && lazEdit.dialog}
       {isLazada && lazDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
-      {!line && lazView && <ImageLightbox images={lazView.images.map((url) => ({ url }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+      {!line && lazView && <ImageLightbox images={(lazEdit.form?.images ?? lazView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
 
       {/* เลือกรูป: เพิ่มรูปสินค้าจากคลังรูปในระบบ / เลือกรูปให้ตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ) */}
-      <ERPModal open={!!picker} onClose={() => setPicker(null)} size="lg" storageKey="listing-drawer-image-picker"
+      <ListingImagePicker open={!!picker && !!form} onClose={() => setPicker(null)} mode={picker?.mode ?? "product"}
         title={picker?.mode === "variant" ? `เลือกรูปให้ตัวเลือก ${form?.variants.find((v) => v.id === (picker as { id: string }).id)?.label ?? ""}` : "เพิ่มรูปสินค้าจากคลังรูปในระบบ"}
-        description={picker?.mode === "product" ? `เลือกได้อีก ${Math.max(0, MAX_LINE_IMAGES - (form?.images.length ?? 0))} รูป (LINE รับไม่เกิน ${MAX_LINE_IMAGES}) · ส่งขึ้นร้านตอนกดบันทึก` : "กดรูปที่ต้องการ · ส่งขึ้นร้านตอนกดบันทึก"}>
-        {picker && form && (
-          <div className="space-y-3">
-            {picker.mode === "variant" && form.images.length > 0 && (
-              <div>
-                <div className="mb-1 text-xs text-slate-500">รูปสินค้าบนร้าน</div>
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                  {form.images.map((ref, i) => (
-                    <button key={`p-${i}`} type="button" onClick={() => { setVariant(picker.id, { imageUrl: ref }); setPicker(null); }} className="aspect-square overflow-hidden rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300">
-                      <img src={imgSrc(ref, 300)} alt="" loading="lazy" className="h-full w-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div>
-              <div className="mb-1 text-xs text-slate-500">คลังรูปของสินค้าในระบบ{detail?.matched_code ? ` (${detail.matched_code})` : ""}</div>
-              {!matchedParent ? <p className="text-xs text-amber-700">ยังไม่จับคู่สินค้าในระบบ — จับคู่ก่อนถึงจะใช้รูปจากระบบได้</p>
-                : sysImages == null ? <LoadingState label="กำลังโหลดรูปในระบบ…" />
-                : sysImages.length === 0 ? <p className="text-xs text-slate-500">สินค้าในระบบยังไม่มีรูป</p>
-                : (
-                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                    {sysImages.map((im) => {
-                      const ref = systemImageRef(im.key);
-                      const used = picker.mode === "product" && form.images.includes(ref);
-                      const full = picker.mode === "product" && form.images.length >= MAX_LINE_IMAGES;
-                      return (
-                        <button key={im.key} type="button" disabled={used || full}
-                          onClick={() => { if (picker.mode === "product") setImages((imgs) => [...imgs, ref]); else { setVariant(picker.id, { imageUrl: ref }); setPicker(null); } }}
-                          className="relative aspect-square overflow-hidden rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300 disabled:opacity-40 disabled:hover:ring-0">
-                          <img src={r2ImageUrl(im.key, 300) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
-                          {used && <span className="absolute inset-x-0 bottom-0 bg-white/90 text-center text-[10px] text-slate-600">เพิ่มแล้ว</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-            </div>
-          </div>
-        )}
-      </ERPModal>
+        description={picker?.mode === "product" ? `เลือกได้อีก ${Math.max(0, MAX_LINE_IMAGES - (form?.images.length ?? 0))} รูป (LINE รับไม่เกิน ${MAX_LINE_IMAGES}) · ส่งขึ้นร้านตอนกดบันทึก` : "กดรูปที่ต้องการ · ส่งขึ้นร้านตอนกดบันทึก"}
+        shopImages={form?.images} matchedParent={matchedParent} matchedCode={detail?.matched_code} sysImages={sysImages}
+        isUsed={(ref) => !!form?.images.includes(ref)} full={(form?.images.length ?? 0) >= MAX_LINE_IMAGES}
+        onPick={(ref) => { if (!picker) return; if (picker.mode === "product") setImages((imgs) => [...imgs, ref]); else { setVariant(picker.id, { imageUrl: ref }); setPicker(null); } }} />
     </>
   );
 }

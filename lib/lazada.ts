@@ -200,6 +200,18 @@ export async function lazUpdateProduct(gateway: string, accessToken: string, pay
 export async function lazUpdatePriceQuantity(gateway: string, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/price_quantity/update", accessToken, { payload: payloadXml });
 }
+/**
+ * ฝากรูปจากลิงก์ภายนอกให้ Lazada (/image/migrate) → ลิงก์ของ Lazada (slatic.net) · payload จาก lazMigrateImageXml
+ * กติกา: jpg/png · ≤ 3MB · ด้านละ 330–5000px · Lazada ดาวน์โหลดภายใน 5 วิ · ไม่ได้ = LazApiError (เช่น 303 รูปเกินขนาด)
+ */
+export async function lazMigrateImage(gateway: string, accessToken: string, payloadXml: string): Promise<string> {
+  const j = await lazApiPost(gateway, "/image/migrate", accessToken, { payload: payloadXml });
+  const d = (j.data && typeof j.data === "object" ? j.data : {}) as Record<string, unknown>;
+  const img = (d.image && typeof d.image === "object" ? d.image : {}) as Record<string, unknown>;
+  const url = s0(img.url) ?? s0(d.url);
+  if (!url) throw new LazApiError("Lazada ฝากรูปแล้วไม่ส่งลิงก์กลับ", "NO_URL");
+  return url;
+}
 /** ปิดขาย ทั้งสินค้า/บาง SKU — body จาก lazDeactivateXml · แก้ร้านจริง */
 export async function lazDeactivateProduct(gateway: string, accessToken: string, bodyXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/deactivate", accessToken, { apiRequestBody: bodyXml });
