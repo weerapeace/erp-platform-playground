@@ -183,6 +183,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         else { copiedRef.current.add(id); setCopyErr((m) => { const n = { ...m }; delete n[id]; return n; }); }
       } catch (e) { setCopyErr((m) => ({ ...m, [id]: (e as Error).message || "คัดลอกไม่สำเร็จ" })); }
       setCopying({ done: i + 1, total: todo.length });
+      // เว้นจังหวะ — Lazada จำกัดความถี่การดึงสด
+      if (src.platform_code === "lazada" && i < todo.length - 1) await new Promise((r) => setTimeout(r, 400));
     }
     setCopying(null);
   };

@@ -48,7 +48,9 @@ export async function loadCopyContext(admin: SupabaseClient, listingId: string, 
   const meta: CopySourceMeta = { listingId, platformCode: str(sp.code), platformName: str(sp.name_th) || str(sp.code), externalId: str(row.external_product_id) || null, title: str(row.title) || null };
   let source: CopySource;
   if (meta.platformCode === "lazada") {
-    const live = await loadLazListingLive(admin, listingId, userId);
+    let live = await loadLazListingLive(admin, listingId, userId);
+    // Lazada จำกัดความถี่ ("Api access frequency exceeds the limit (ban 1s)") — รอแล้วลองอีกครั้งเดียว
+    if (!live.ok && /frequency|ban\s*\d/i.test(live.error)) { await new Promise((r) => setTimeout(r, 1200)); live = await loadLazListingLive(admin, listingId, userId); }
     const view = live.ok ? lazadaListingView(live.item) : null;
     source = view ? sourceFromLazadaView(view, meta)
       : sourceFromLazadaSlim(row.raw, meta, `ดึงข้อมูลสดจาก Lazada ไม่ได้ (${live.ok ? "ข้อมูลไม่ครบ" : live.error}) — ใช้สำเนาในระบบ มีแค่ชื่อกับราคา`);
