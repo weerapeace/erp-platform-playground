@@ -7,14 +7,17 @@
  *   ยืนยัน · ผ่าน (เจ้าของขอ 2026-11-07) = หน้าต่างตรวจก่อนทำ → ใบนี้ผ่าน → เปิดใบสั่งขาย (ถ้างานนี้ยังไม่มี · POST /api/so-orders)
  *     → ใบอื่นที่ติ๊ก ปิด (ร่าง = ยกเลิก · ส่งแล้ว = ปฏิเสธ "ลูกค้าเลือก …") · ใบที่มีงานอื่นร่วม ไม่ติ๊กให้
  * มีใบเปิดอยู่มากกว่า 1 ใบ = เตือนให้เหลือใบเดียว (เจ้าของขอ 2026-11-07: จะได้ไม่เปิดใบซ้ำ / ใบเก่าไม่ผ่านให้ยกเลิกใบเก่า)
+ * แบบกะทัดรัด (เจ้าของเลือกแบบ A 2026-11-10): แถวละปุ่มหลักปุ่มเดียว (ยืนยัน · ผ่าน / เปิดใบสั่งขาย / ลิงก์ใบสั่งขาย)
+ *   ที่เหลือ (พิมพ์ · ทำต่อในตะกร้า · ไม่ผ่าน · ไม่ผ่าน+เปิดใบใหม่) อยู่ในปุ่ม ⋮ (ของกลาง Popover) · คำเตือนเป็นป้ายเล็กที่หัวแผง
  *
  * ข้อมูล: GET/POST /api/design-sheets/[id]/quotations · กติกา lib/design-sheet-quotations.ts
- * ของกลาง: MiniTable · askText (ถามเหตุผล) · useToast · state-views · apiFetch · openLink
+ * ของกลาง: MiniTable · Popover (เมนู ⋮) · askText (ถามเหตุผล) · useToast · state-views · apiFetch · openLink
  */
 import { useCallback, useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { Popover } from "@/components/popover";
 import { askText } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { LoadingState, ErrorState } from "@/components/state-views";
@@ -137,20 +140,25 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
   if (err) return <ErrorState title={t("โหลดใบเสนอราคาไม่สำเร็จ", "Failed to load quotations")} hint={err} onRetry={() => void load()} />;
 
   const openCount = rows.filter((q) => isQuoteOpen(q.status)).length;
-  const btn = "h-7 px-2 rounded-md border text-[12px] whitespace-nowrap disabled:opacity-50";
+  const menuItem = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-slate-50 disabled:opacity-50";
 
   const columns: MiniColumn<SheetQuotation>[] = [
     { key: "no", header: t("เลขที่", "No."), width: "1.3fr", sortValue: (q) => q.quote_number ?? "",
       cell: (q) => (
         <div className="min-w-0">
           <a href={openLink("/quotations", q.quotation_id)} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-700 hover:underline">{q.quote_number ?? t("ร่าง", "Draft")}</a>
-          {q.quotation_id === cartId && <span className="ml-1 rounded bg-indigo-50 px-1 text-[11px] text-indigo-600">🧺 {t("ในตะกร้า", "In cart")}</span>}
-          {q.replaces_quote_number && <div className="text-[11px] text-slate-400">{t(`แทนใบ ${q.replaces_quote_number}`, `Replaces ${q.replaces_quote_number}`)}</div>}
-          {q.replaced_by_quote_number && <div className="text-[11px] text-slate-400">{t(`→ เปิดใบใหม่แล้ว ${q.replaced_by_quote_number}`, `→ Replaced by ${q.replaced_by_quote_number}`)}</div>}
-          {q.other_sheets.length > 0 && <div className="truncate text-[11px] text-slate-400" title={q.other_sheets.map((s) => `${s.code ?? ""} ${s.name ?? ""}`).join("\n")}>{t("รวมกับ", "With")} {q.other_sheets.map((s) => s.code).filter(Boolean).join(", ")}</div>}
+          {q.quotation_id === cartId && <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1 text-[11px] text-indigo-600"><Icon value="i:basket" className="text-[11px]" />{t("ในตะกร้า", "In cart")}</span>}
+          {(() => {
+            const sub = [
+              q.replaces_quote_number ? t(`แทนใบ ${q.replaces_quote_number}`, `Replaces ${q.replaces_quote_number}`) : null,
+              q.replaced_by_quote_number ? t(`→ เปิดใบใหม่แล้ว ${q.replaced_by_quote_number}`, `→ Replaced by ${q.replaced_by_quote_number}`) : null,
+              q.other_sheets.length ? `${t("รวมกับ", "With")} ${q.other_sheets.map((s) => s.code).filter(Boolean).join(", ")}` : null,
+            ].filter(Boolean).join(" · ");
+            return sub ? <div className="truncate text-[11px] text-slate-400" title={[sub, ...q.other_sheets.map((s) => `${s.code ?? ""} ${s.name ?? ""}`)].join("\n")}>{sub}</div> : null;
+          })()}
         </div>
       ) },
-    { key: "status", header: t("สถานะ", "Status"), width: "6.5rem", sortValue: (q) => (isQuoteOpen(q.status) ? 0 : 1),
+    { key: "status", header: t("สถานะ", "Status"), width: "5.5rem", sortValue: (q) => (isQuoteOpen(q.status) ? 0 : 1),
       cell: (q) => (
         <span title={q.reject_reason ?? undefined} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${QUOTE_STATUS_CLS[q.status] ?? "bg-slate-100 text-slate-600"}`}>{QUOTE_STATUS_TH[q.status] ?? q.status}</span>
       ) },
@@ -160,49 +168,61 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
       cell: (q) => <span className="tabular-nums">{fmtBaht(q.grand_total)}</span> },
     { key: "date", header: t("วันที่", "Date"), width: "5.5rem", sortValue: (q) => q.quote_date ?? "",
       cell: (q) => <span className="text-slate-500">{fmtDate(q.quote_date)}</span> },
-    { key: "act", header: "", width: compact ? "auto" : "minmax(15rem,auto)", align: "right",
+    { key: "act", header: "", width: "auto", align: "right",
       cell: (q) => {
         const fa = quoteFailAction(q.status);
         const working = busy === q.quotation_id;
+        // ยืนยัน · ผ่าน (ร่าง/ส่งแล้ว) · ตอบรับแล้วแต่ยังไม่มีใบสั่งขาย = "เปิดใบสั่งขาย" (ลองใหม่)
+        const canConfirm = canEdit && !q.order_id && (q.status === "draft" || q.status === "sent" || q.status === "accepted");
+        const canCart = canEdit && q.status === "draft" && q.quotation_id !== cartId;
         return (
-          <div className="flex flex-wrap justify-end gap-1">
-            <button type="button" className={`${btn} border-slate-200 text-slate-600 hover:bg-slate-50`} onClick={() => window.open(`/print/quotation/${q.quotation_id}`, "_blank", "noopener,noreferrer")}>{t("พิมพ์", "Print")}</button>
-            {q.order_id && (
-              <a href={openLink("/sales/orders", q.order_id)} target="_blank" rel="noopener noreferrer"
-                className={`${btn} inline-flex items-center gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}>
-                <Icon value="i:receipt" className="text-[12px]" /> {t("ใบสั่งขาย", "Sales order")} {q.order_no ?? ""}
-              </a>
-            )}
-            {canEdit && q.status === "draft" && q.quotation_id !== cartId && (
-              <button type="button" className={`${btn} border-indigo-200 text-indigo-700 hover:bg-indigo-50`} onClick={() => onUseAsCart(q.quotation_id)}>🧺 {t("ทำต่อ", "Continue")}</button>
-            )}
-            {/* ยืนยัน · ผ่าน (ร่าง/ส่งแล้ว) · ตอบรับแล้วแต่ยังไม่มีใบสั่งขาย = ปุ่ม "เปิดใบสั่งขาย" (ลองใหม่) */}
-            {canEdit && !q.order_id && (q.status === "draft" || q.status === "sent" || q.status === "accepted") && (
+          <div className="flex items-center justify-end gap-1">
+            {working && <span className="text-[11px] text-slate-400">{t("กำลังทำ...", "Working...")}</span>}
+            {canConfirm ? (
               <button type="button" disabled={!!busy} onClick={() => { const p = quoteConfirmPlan(rows, q.quotation_id); if (p) setConfirmPlan(p); }}
-                className={`${btn} inline-flex items-center gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50`}>
-                <Icon value="i:circle-check" className="text-[12px]" /> {q.status === "accepted" ? t("เปิดใบสั่งขาย", "Create sales order") : t("ยืนยัน · ผ่าน", "Confirm · passed")}
+                className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md bg-emerald-600 px-2.5 text-[12px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+                <Icon value="i:circle-check" className="text-[13px]" /> {q.status === "accepted" ? t("เปิดใบสั่งขาย", "Create sales order") : t("ยืนยัน · ผ่าน", "Confirm · passed")}
               </button>
-            )}
-            {canEdit && fa && (
-              <>
-                <button type="button" disabled={!!busy} className={`${btn} border-amber-300 text-amber-800 hover:bg-amber-50`} onClick={() => void fail(q, true)}>
-                  {working ? t("กำลังทำ...", "Working...") : t("ไม่ผ่าน · เปิดใบใหม่แทน", "Not passed · new one")}</button>
-                <button type="button" disabled={!!busy} className={`${btn} border-red-200 text-red-600 hover:bg-red-50`} onClick={() => void fail(q, false)}>{t("ไม่ผ่าน", "Not passed")}</button>
-              </>
-            )}
+            ) : q.order_id ? (
+              <a href={openLink("/sales/orders", q.order_id)} target="_blank" rel="noopener noreferrer" title={t("เปิดใบสั่งขาย", "Open the sales order")}
+                className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[12px] text-emerald-700 hover:bg-emerald-100">
+                <Icon value="i:receipt" className="text-[12px]" /> {q.order_no ?? t("ใบสั่งขาย", "Sales order")}
+              </a>
+            ) : null}
+            <Popover align="right" panelClassName="w-60 py-1"
+              trigger={(toggle, open) => (
+                <button type="button" onClick={toggle} aria-label={t("คำสั่งอื่น", "More actions")} title={t("พิมพ์ · ทำต่อ · ไม่ผ่าน", "Print · continue · not passed")}
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-slate-500 hover:bg-slate-50 ${open ? "border-slate-400 bg-slate-50" : "border-slate-200"}`}>
+                  <Icon value="i:dots-vertical" className="text-[15px]" />
+                </button>
+              )}>
+              {(close) => (
+                <>
+                  <button type="button" className={`${menuItem} text-slate-700`} onClick={() => { close(); window.open(`/print/quotation/${q.quotation_id}`, "_blank", "noopener,noreferrer"); }}>
+                    <Icon value="i:printer" className="text-[15px] text-slate-400" />{t("พิมพ์", "Print")}</button>
+                  {canCart && (
+                    <button type="button" className={`${menuItem} text-indigo-700`} onClick={() => { close(); onUseAsCart(q.quotation_id); }}>
+                      <Icon value="i:basket" className="text-[15px]" />{t("ทำต่อในตะกร้า", "Continue in the cart")}</button>
+                  )}
+                  {canEdit && fa && (
+                    <>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button type="button" disabled={!!busy} className={`${menuItem} text-amber-800`} onClick={() => { close(); void fail(q, true); }}>
+                        <Icon value="i:refresh" className="text-[15px]" />{t("ไม่ผ่าน · เปิดใบใหม่แทน", "Not passed · open a new one")}</button>
+                      <button type="button" disabled={!!busy} className={`${menuItem} text-red-600`} onClick={() => { close(); void fail(q, false); }}>
+                        <Icon value="i:circle-x" className="text-[15px]" />{t("ไม่ผ่าน", "Not passed")}</button>
+                    </>
+                  )}
+                </>
+              )}
+            </Popover>
           </div>
         );
       } },
   ];
 
   return (
-    <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
-      {openCount > 1 && (
-        <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
-          ⚠️ {t(`งานนี้มีใบเสนอราคาที่ยังเปิดอยู่ ${openCount} ใบ — ควรเหลือใบเดียว: กด "ไม่ผ่าน" ใบที่ไม่ใช้แล้ว (ใบร่าง = ยกเลิก · ใบที่ส่งแล้ว = ปฏิเสธ)`,
-                `This job has ${openCount} open quotations — keep only one: mark the unused ones "Not passed"`)}
-        </div>
-      )}
+    <div className="mb-3 rounded-xl border border-slate-200 bg-white p-2.5">
       {confirmPlan && (
         <ConfirmQuoteDialog plan={confirmPlan} busy={busy === confirmPlan.pick.quotation_id}
           onClose={() => setConfirmPlan(null)} onConfirm={(closeIds, makeOrder) => void confirm(confirmPlan, closeIds, makeOrder)} />
@@ -211,10 +231,20 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
         rows={rows}
         rowKey={(q) => q.quotation_id}
         columns={columns}
-        title={<span className="text-sm font-semibold text-slate-700">🧾 {t("ใบเสนอราคาของงานนี้", "Quotations for this job")}</span>}
+        title={(
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-700"><Icon value="i:file-invoice" className="text-[15px] text-slate-400" />{t("ใบเสนอราคาของงานนี้", "Quotations for this job")}</span>
+            {openCount > 1 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+                title={t(`งานนี้มีใบเสนอราคาที่ยังเปิดอยู่ ${openCount} ใบ — ควรเหลือใบเดียว: กด ⋮ → "ไม่ผ่าน" ใบที่ไม่ใช้แล้ว (ใบร่าง = ยกเลิก · ใบที่ส่งแล้ว = ปฏิเสธ)`, `${openCount} open quotations — keep only one: ⋮ → "Not passed" on the unused ones`)}>
+                <Icon value="i:alert-triangle" className="text-[12px]" />{t(`เปิดอยู่ ${openCount} ใบ · ควรเหลือ 1`, `${openCount} open · keep 1`)}
+              </span>
+            )}
+          </span>
+        )}
         countUnit={t("ใบ", "docs")}
         actions={canEdit && onSend ? (
-          <button type="button" onClick={onSend} className="h-8 px-3 rounded-lg bg-blue-600 text-[13px] text-white hover:bg-blue-700">{t("＋ ส่งไปใบเสนอราคา", "+ Send to quotation")}</button>
+          <button type="button" onClick={onSend} className="h-7 whitespace-nowrap rounded-md bg-blue-600 px-2.5 text-[12px] text-white hover:bg-blue-700">{t("＋ ส่งไปใบเสนอราคา", "+ Send to quotation")}</button>
         ) : undefined}
         emptyText={t("ยังไม่มีใบเสนอราคาของงานนี้ — กด \"ส่งไปใบเสนอราคา\" เพื่อเริ่มใบแรก", "No quotation for this job yet — press \"Send to quotation\" to start one")}
         dense

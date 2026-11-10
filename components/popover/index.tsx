@@ -13,6 +13,7 @@
  * - คำนวณตำแหน่งจากปุ่ม (anchor) แล้ววางแบบ fixed → ไม่โดน overflow ตัด
  * - พลิกขึ้นบนอัตโนมัติถ้าพื้นที่ด้านล่างไม่พอ + จำกัดความสูงให้พอดีจอ
  * - ปิดเมื่อคลิกนอกพื้นที่ / กด Escape / เลื่อนหรือย่อขยายจอ (รีตำแหน่ง)
+ * - Escape ปิดแค่เมนูนี้ — ดักก่อนป๊อปข้างหลัง (capture ที่ window + หยุดต่อ) ไม่งั้นกด Esc ครั้งเดียวป๊อปใบงานทั้งใบปิดตาม (เจอ 2026-11-10)
  */
 
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode, type CSSProperties } from "react";
@@ -49,12 +50,16 @@ export function Popover({ trigger, children, panelClassName = "", align = "left"
     const onMove = () => place();
     window.addEventListener("scroll", onMove, true);
     window.addEventListener("resize", onMove);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("keydown", onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation();   // ป๊อป (ERPModal) ฟังที่ document — ไม่ให้ถึง
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("scroll", onMove, true);
       window.removeEventListener("resize", onMove);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     };
   }, [open, place]);
 

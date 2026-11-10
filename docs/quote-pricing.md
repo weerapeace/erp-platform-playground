@@ -17,6 +17,7 @@
 - สูตร (ไม่แตะฐานข้อมูล): `lib/quote-pricing.ts` · เทสต์ `lib/__tests__/quote-pricing.test.ts`
 - หน้าต่าง: `components/design-sheet-detail/quote-pricing-helper.tsx` (ใช้ ERPModal)
 - ต่อกับฟอร์ม: `components/design-sheet-detail/quote-rounds.tsx` (prop `pricingHelper` · `fill` ส่งเข้า RoundEditor)
+- หน้าตาแท็บเสนอราคา (แบบกะทัดรัด A · 2026-11-10): รายการใบเสนอราคา `sheet-quotations.tsx` = แถวละปุ่มหลัก 1 ปุ่ม + เมนู ⋮ (Popover) · คำเตือน "เปิดอยู่ N ใบ" เป็นป้ายที่หัวแผง · รอบเสนอราคา = หัวการ์ดบรรทัดเดียว + ⋮ (แก้ไข/คัดลอก/ลบ) · ครั้งเก่าพับเหลือบรรทัดเดียวพร้อมช่วงราคาต่อไซส์ · ช่องราคา = ราคา + กำไร (%) บรรทัดเดียว
 - ข้อมูล: `GET /api/design-sheets/[id]/price-refs` (สิทธิ์ `products.cost.view` · อ่านอย่างเดียว)
   - `quotes` = design_sheet_quotes ของใบงานอื่นที่ brand_id เดียวกัน ที่มีทั้ง `price` (ตีราคาตอนเสนอ) และ `offered_price` (ล่าสุด 400 ช่อง)
   - `skus` = skus_v2.list_price > 0 ของรุ่นใน parent_skus_v2.brand_id เดียวกัน รวมต่อรุ่น (ใช้ fetchAllPages เพราะเกิน 1,000 แถว)

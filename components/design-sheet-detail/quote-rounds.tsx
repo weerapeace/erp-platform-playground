@@ -9,7 +9,9 @@
  *
  * ข้อมูล: design_sheet_quotes (1 แถว = 1 ช่อง; batch = ครั้งที่) · API /quotes (ช่อง) + /quotes/batch (ทั้งครั้ง)
  * 💰 ตัวช่วยตั้งราคา (เจ้าของขอ 2026-11-09) = ปุ่มบนแถบ → quote-pricing-helper.tsx → เลือกวิธีแล้ว "ใส่ราคา" = ตีราคาของทุกช่อง × ตัวคูณ (เปิดฟอร์มครั้งใหม่ให้ถ้ายังไม่เปิด)
- * ของกลาง: ConfirmDialog · useToast · apiFetch · lib/quote-pricing
+ * แบบกะทัดรัด (เจ้าของเลือกแบบ A 2026-11-10): หัวการ์ดบรรทัดเดียว · แก้ไข/คัดลอก/ลบ อยู่ในปุ่ม ⋮ · ครั้งเก่าพับเหลือบรรทัดเดียว (โชว์ช่วงราคาที่เสนอต่อไซส์)
+ *   เปิดครั้งล่าสุดไว้ให้ · ช่องราคา = ราคา + กำไร (%) บรรทัดเดียว · สถานะรายช่องโชว์ตอนชี้ (ถ้าทุกช่องสถานะเดียวกัน · จอสัมผัสโชว์ตลอด)
+ * ของกลาง: ConfirmDialog · Popover (เมนู ⋮) · InfoHint · useCanHover · useToast · apiFetch · lib/quote-pricing
  */
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/modal";
@@ -20,12 +22,18 @@ import { useT } from "@/components/i18n";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS } from "@/lib/design-sheets-meta";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import { Icon } from "@/components/icon";
+import { Popover } from "@/components/popover";
+import { InfoHint } from "@/components/info-hint";
+import { useCanHover } from "@/lib/use-can-hover";
 import { priceFromCost, tierPrice } from "@/lib/quote-pricing";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
 
 const fmtBaht = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH"));
 const sgn = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtBaht(Math.abs(n))}`;
+/** ตัวเลขสั้น: จำนวนเต็มไม่มีทศนิยม (45 · 45.50) — ใช้ในบรรทัดสรุป/กำไรใต้ราคา */
+const fmtShort = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+const sgnShort = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtShort(Math.abs(n))}`;
 const upDown = (n: number) => (n > 0.004 ? "text-emerald-700" : n < -0.004 ? "text-rose-600" : "text-slate-400");
 const costCls = (n: number) => (n > 0.004 ? "text-rose-600" : n < -0.004 ? "text-emerald-700" : "text-slate-400");
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -54,6 +62,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
   const t = useT();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const canHover = useCanHover();
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>({});   // การ์ดที่กดเปิด/พับเอง (ไม่กด = เปิดเฉพาะครั้งล่าสุด)
   const [delBatch, setDelBatch] = useState<Batch | null>(null);
   const [delCell, setDelCell] = useState<DesignSheetQuote | null>(null);
   const [editCell, setEditCell] = useState<{ id: string; val: string } | null>(null);
@@ -131,11 +141,14 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
     <div className="space-y-3">
       {canEdit && (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-xs text-slate-400">{compact ? "" : t("1 ครั้ง = 1 การ์ด (หลายไซส์ × หลายขั้นจำนวน) · กดตัวเลขราคาเพื่อแก้ · สถานะตั้งได้ทั้งครั้งหรือรายช่อง", "1 round = 1 card (sizes × quantity tiers) · click a price to edit · set status for the whole round or per cell")}</div>
-          <div className="flex gap-1.5">
-            {pricingHelper && <button type="button" onClick={() => setHelperOpen(true)} className="h-8 px-3 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap inline-flex items-center gap-1.5" title={t("บวกกำไรจากต้นทุน · เทียบงานอื่นในแบรนด์ · ปัดราคา · VAT · ย้อนจากงบลูกค้า", "Markup on cost · compare jobs in this brand · rounding · VAT · from budget")}><Icon value="i:calculator" className="text-[15px]" />{t("ตัวช่วยตั้งราคา", "Pricing helper")}</button>}
-            {onSendToQuotation && <button type="button" onClick={onSendToQuotation} className="h-8 px-3 text-sm border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">{t("🧾 ส่งไปใบเสนอราคา", "🧾 Send to quotation")}</button>}
-            <button type="button" onClick={() => { setAddFrom(null); setAddOpen(true); }} disabled={formOpen} title={editKey ? t("บันทึกหรือยกเลิกการแก้ไขก่อน", "Save or cancel the edit first") : undefined} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{t("＋ เสนอราคาครั้งที่", "＋ Quote round")} {Math.max(0, ...batches.map((x) => x.batch)) + 1}</button>
+          <div className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+            {t("รอบเสนอราคา", "Quote rounds")}{batches.length > 0 && <span className="text-xs font-normal text-slate-400">({batches.length})</span>}
+            {!compact && <InfoHint label={t("วิธีใช้รอบเสนอราคา", "How quote rounds work")}>{t("1 ครั้ง = 1 การ์ด (หลายไซส์ × หลายขั้นจำนวน) · กดตัวเลขราคาเพื่อแก้ · สถานะตั้งได้ทั้งครั้งหรือรายช่อง · ครั้งเก่าพับไว้ กดหัวการ์ดเพื่อเปิดดู", "1 round = 1 card (sizes × quantity tiers) · click a price to edit · set status for the whole round or per cell · older rounds are folded — click the header to open")}</InfoHint>}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {pricingHelper && <button type="button" onClick={() => setHelperOpen(true)} className="h-7 px-2.5 text-xs border border-emerald-300 text-emerald-700 rounded-md hover:bg-emerald-50 whitespace-nowrap inline-flex items-center gap-1" title={t("บวกกำไรจากต้นทุน · เทียบงานอื่นในแบรนด์ · ปัดราคา · VAT · ย้อนจากงบลูกค้า", "Markup on cost · compare jobs in this brand · rounding · VAT · from budget")}><Icon value="i:calculator" className="text-[14px]" />{t("ตัวช่วยตั้งราคา", "Pricing helper")}</button>}
+            {onSendToQuotation && <button type="button" onClick={onSendToQuotation} className="h-7 px-2.5 text-xs border border-indigo-300 text-indigo-700 rounded-md hover:bg-indigo-50 whitespace-nowrap inline-flex items-center gap-1"><Icon value="i:send" className="text-[14px]" />{t("ส่งไปใบเสนอราคา", "Send to quotation")}</button>}
+            <button type="button" onClick={() => { setAddFrom(null); setAddOpen(true); }} disabled={formOpen} title={editKey ? t("บันทึกหรือยกเลิกการแก้ไขก่อน", "Save or cancel the edit first") : undefined} className="h-7 px-2.5 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{t("＋ ครั้งที่", "＋ Round")} {Math.max(0, ...batches.map((x) => x.batch)) + 1}</button>
           </div>
         </div>
       )}
@@ -154,7 +167,15 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
       {batches.length === 0 && !addOpen && <div className="py-8 text-center text-sm text-slate-300">{t("— ยังไม่เคยเสนอราคา —", "— No quotes yet —")}</div>}
 
       {[...batches].reverse().map((b, bi) => {
-        void bi;
+        const isOpen = openMap[cardKey(b)] ?? bi === 0;   // ครั้งล่าสุดเปิดไว้ ครั้งเก่าพับ
+        const toggle = () => setOpenMap((m) => ({ ...m, [cardKey(b)]: !isOpen }));
+        // บรรทัดสรุปตอนพับ: ช่วงราคาที่เสนอต่อไซส์ เช่น "S 45–60 · M 50–65"
+        const priceSummary = b.sizes.map((s) => {
+          const ps = b.quotes.filter((q) => (q.parent_code ?? "") === s).map((q) => q.offered_price ?? q.price).filter((v): v is number => v != null);
+          if (!ps.length) return null;
+          const lo = Math.min(...ps), hi = Math.max(...ps);
+          return `${sizeLabel(s)} ${fmtShort(lo)}${hi !== lo ? `–${fmtShort(hi)}` : ""}`;
+        }).filter(Boolean).join(" · ");
         const prev = [...batches].reverse().find((x) => x.batch < b.batch) ?? null;   // ครั้งก่อนหน้า (ไว้เทียบราคาที่เสนอช่องต่อช่อง)
         const st = b.status === "mixed" ? null : (QUOTE_STATUS[b.status] ?? QUOTE_STATUS.pending);
         // "ที่เปลี่ยนจากครั้งก่อน" ต่อไซส์ (API คำนวณจากเวอร์ชันตีราคา) — เอาช่องแรกของแต่ละไซส์
@@ -166,35 +187,68 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
         );
         return (
           <div key={`${b.batch}-${b.part}`} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-            {/* หัวการ์ด: ครั้งที่ · วันที่ · สถานะรวม · หมายเหตุ · ลบ */}
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-              <span className="h-7 min-w-[2.5rem] px-2 rounded-lg bg-slate-800 text-white text-xs font-semibold flex items-center justify-center" title={b.part > 0 ? t("วันเดียวกันมีหลายรายการที่ไซส์/จำนวนซ้ำกัน (ข้อมูลเก่า) — แยกให้เห็นครบ", "Same day has several entries with the same size/qty (old data) — shown separately") : undefined}>{t(`ครั้งที่ ${b.batch}`, `Round ${b.batch}`)}{b.part > 0 ? t(` · รายการที่ ${b.part + 1}`, ` · entry ${b.part + 1}`) : ""}</span>
-              {canEdit
-                ? <input type="date" value={b.date ?? ""} onChange={(e) => void patchBatch(b, { quote_date: e.target.value || null })} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white" />
-                : <span className="text-xs text-slate-600">{fmtDate(b.date)}</span>}
-              {canEdit ? (
+            {/* หัวการ์ด (บรรทัดเดียว): ▸ ครั้งที่ · วันที่ · สถานะรวม · หมายเหตุ / สรุปราคา (ตอนพับ) · ⋮ */}
+            <div className={`flex items-center gap-1.5 px-2 py-1 bg-slate-50 ${isOpen ? "border-b border-slate-200" : ""}`}>
+              <button type="button" onClick={toggle} aria-expanded={isOpen} title={isOpen ? t("พับการ์ดนี้", "Fold this card") : t("เปิดดูการ์ดนี้", "Open this card")} className="flex items-center gap-1 shrink-0">
+                <Icon value="i:chevron-down" className={`text-[14px] text-slate-400 transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                <span className="h-6 min-w-[2.5rem] px-2 rounded-md bg-slate-800 text-white text-[11px] font-semibold flex items-center justify-center whitespace-nowrap" title={b.part > 0 ? t("วันเดียวกันมีหลายรายการที่ไซส์/จำนวนซ้ำกัน (ข้อมูลเก่า) — แยกให้เห็นครบ", "Same day has several entries with the same size/qty (old data) — shown separately") : undefined}>{t(`ครั้งที่ ${b.batch}`, `Round ${b.batch}`)}{b.part > 0 ? t(` · รายการที่ ${b.part + 1}`, ` · entry ${b.part + 1}`) : ""}</span>
+              </button>
+              {canEdit && isOpen
+                ? <input type="date" value={b.date ?? ""} onChange={(e) => void patchBatch(b, { quote_date: e.target.value || null })} className="h-6 px-1 text-[11px] border border-slate-200 rounded-md bg-white shrink-0" />
+                : <span className="text-[11px] text-slate-500 shrink-0 tabular-nums">{fmtDate(b.date)}</span>}
+              {canEdit && isOpen ? (
                 <select value={b.status} onChange={(e) => { if (e.target.value !== "mixed") void patchBatch(b, { status: e.target.value }, tr("ตั้งสถานะทั้งครั้งแล้ว", "Status set for the whole round")); }} title={t("สถานะทั้งครั้ง (ทุกช่อง) — ตั้งรายช่องได้ในตาราง", "Status for the whole round (all cells) — set per cell in the table")}
-                  className={`h-7 px-1.5 text-xs rounded-md cursor-pointer ${st ? st.cls : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+                  className={`h-6 px-1 text-[11px] rounded-md cursor-pointer shrink-0 ${st ? st.cls : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
                   {b.status === "mixed" && <option value="mixed">{t("◐ ผสม (ตั้งรายช่อง)", "◐ Mixed (set per cell)")}</option>}
                   {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
-              ) : <span className={`text-xs px-2 py-0.5 rounded ${st ? st.cls : "bg-amber-50 text-amber-700"}`}>{st ? st.label : t("◐ ผสม", "◐ Mixed")}</span>}
-              {/* หมายเหตุ — กดเพื่อแก้ (บันทึกทุกช่องของครั้งนี้) */}
-              {editNote?.batch === b.batch ? (
+              ) : <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${st ? st.cls : "bg-amber-50 text-amber-700"}`}>{st ? st.label : t("◐ ผสม", "◐ Mixed")}</span>}
+              {/* พับอยู่ = บรรทัดสรุปราคา (กดเพื่อเปิด) · เปิดอยู่ = หมายเหตุ กดเพื่อแก้ (บันทึกทุกช่องของครั้งนี้) */}
+              {!isOpen ? (
+                <button type="button" onClick={toggle} className="flex-1 min-w-0 text-left text-[11px] truncate" title={[priceSummary, b.note].filter(Boolean).join("\n")}>
+                  <span className="text-slate-400">{t(`${b.sizes.length} ไซส์ × ${b.qtys.length} ขั้น`, `${b.sizes.length} sizes × ${b.qtys.length} tiers`)}</span>
+                  {priceSummary && <span className="ml-1.5 font-medium text-blue-700 tabular-nums">{priceSummary}</span>}
+                  {b.note && <span className="ml-1.5 text-slate-400">· {b.note}</span>}
+                </button>
+              ) : editNote?.batch === b.batch ? (
                 <input autoFocus value={editNote.val} onChange={(e) => setEditNote({ batch: b.batch, val: e.target.value })}
                   onBlur={() => { const v = editNote.val; setEditNote(null); if (v.trim() !== (b.note ?? "")) void patchBatch(b, { note: v }); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditNote(null); }}
-                  className="h-7 flex-1 min-w-[10rem] px-2 text-xs border border-blue-300 rounded-md" placeholder={t("หมายเหตุ", "Note")} />
+                  className="h-6 flex-1 min-w-[8rem] px-2 text-[11px] border border-blue-300 rounded-md" placeholder={t("หมายเหตุ", "Note")} />
               ) : (
-                <button type="button" disabled={!canEdit} onClick={() => setEditNote({ batch: b.batch, val: b.note ?? "" })} className="flex-1 min-w-[8rem] text-left text-xs text-slate-500 truncate hover:text-slate-800 disabled:cursor-default" title={canEdit ? t("กดเพื่อแก้หมายเหตุ", "Click to edit the note") : undefined}>
-                  {b.note ? `📝 ${b.note}` : (canEdit ? <span className="text-slate-300">{t("＋ หมายเหตุ", "＋ Note")}</span> : null)}
+                <button type="button" disabled={!canEdit} onClick={() => setEditNote({ batch: b.batch, val: b.note ?? "" })} className="flex-1 min-w-0 inline-flex items-center gap-1 text-left text-[11px] text-slate-500 hover:text-slate-800 disabled:cursor-default" title={canEdit ? t("กดเพื่อแก้หมายเหตุ", "Click to edit the note") : undefined}>
+                  {b.note ? <><Icon value="i:notes" className="text-[12px] shrink-0 text-slate-400" /><span className="truncate">{b.note}</span></> : (canEdit ? <span className="text-slate-300">{t("＋ หมายเหตุ", "＋ Note")}</span> : null)}
                 </button>
               )}
-              {canEdit && <button type="button" onClick={() => setEditKey(cardKey(b))} disabled={formOpen} title={formOpen ? t("บันทึกหรือยกเลิกฟอร์มที่เปิดอยู่ก่อน", "Save or cancel the open form first") : t("แก้ทั้งการ์ด: ราคา · ไซส์ · ขั้นจำนวน · วันที่ · สถานะ · หมายเหตุ", "Edit the whole card: prices · sizes · quantity tiers · date · status · note")} className="h-7 px-2 text-xs border border-slate-300 rounded-md text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-40">{t("✏️ แก้ไข", "✏️ Edit")}</button>}
-              {canEdit && <button type="button" onClick={() => { setAddFrom(b); setAddOpen(true); }} disabled={formOpen} title={t("เปิดฟอร์มครั้งใหม่ โดยใส่ไซส์/ขั้นจำนวน/ราคาของครั้งนี้มาให้แก้ต่อ (ต่อรองรอบถัดไป)", "Open a new round prefilled with this round's sizes/quantity tiers/prices (for the next negotiation)")} className="h-7 px-2 text-xs border border-blue-200 rounded-md text-blue-700 bg-white hover:bg-blue-50 disabled:opacity-40">{t("📋 คัดลอกเป็นครั้งใหม่", "📋 Copy as new round")}</button>}
-              {canEdit && <button type="button" onClick={() => setDelBatch(b)} title={t("ลบทั้งครั้ง", "Delete the whole round")} className="h-7 px-2 text-xs border border-rose-200 rounded-md text-rose-500 hover:bg-rose-50">{t("🗑 ลบครั้งนี้", "🗑 Delete round")}</button>}
+              {canEdit && (
+                <Popover align="right" panelClassName="w-56 py-1"
+                  trigger={(open, opened) => (
+                    <button type="button" onClick={open} aria-label={t("คำสั่งของครั้งนี้", "Round actions")} title={t("แก้ไข · คัดลอกเป็นครั้งใหม่ · ลบ", "Edit · copy as new round · delete")}
+                      className={`h-6 w-6 shrink-0 inline-flex items-center justify-center rounded-md border text-slate-500 bg-white hover:bg-slate-50 ${opened ? "border-slate-400" : "border-slate-200"}`}>
+                      <Icon value="i:dots-vertical" className="text-[14px]" />
+                    </button>
+                  )}>
+                  {(close) => {
+                    const item = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent";
+                    return (
+                      <>
+                        <button type="button" disabled={formOpen} className={`${item} text-slate-700`} title={formOpen ? t("บันทึกหรือยกเลิกฟอร์มที่เปิดอยู่ก่อน", "Save or cancel the open form first") : t("แก้ทั้งการ์ด: ราคา · ไซส์ · ขั้นจำนวน · วันที่ · สถานะ · หมายเหตุ", "Edit the whole card: prices · sizes · quantity tiers · date · status · note")}
+                          onClick={() => { close(); setOpenMap((m) => ({ ...m, [cardKey(b)]: true })); setEditKey(cardKey(b)); }}>
+                          <Icon value="i:pencil" className="text-[15px] text-slate-400" />{t("แก้ไข", "Edit")}</button>
+                        <button type="button" disabled={formOpen} className={`${item} text-blue-700`} title={t("เปิดฟอร์มครั้งใหม่ โดยใส่ไซส์/ขั้นจำนวน/ราคาของครั้งนี้มาให้แก้ต่อ (ต่อรองรอบถัดไป)", "Open a new round prefilled with this round's sizes/quantity tiers/prices (for the next negotiation)")}
+                          onClick={() => { close(); setAddFrom(b); setAddOpen(true); }}>
+                          <Icon value="i:copy" className="text-[15px]" />{t("คัดลอกเป็นครั้งใหม่", "Copy as new round")}</button>
+                        <div className="my-1 border-t border-slate-100" />
+                        <button type="button" className={`${item} text-rose-600`} onClick={() => { close(); setDelBatch(b); }}>
+                          <Icon value="i:trash" className="text-[15px]" />{t("ลบครั้งนี้", "Delete round")}</button>
+                      </>
+                    );
+                  }}
+                </Popover>
+              )}
             </div>
 
+            {isOpen && <>
             {/* ที่เปลี่ยนจากครั้งก่อน (ต่อไซส์) */}
             {changes.length > 0 && (
               <div className="px-3 py-1.5 border-b border-slate-100 bg-amber-50/40 text-[11px] space-y-0.5">
@@ -215,7 +269,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                 <thead>
                   <tr className="text-[11px] text-slate-500">
                     <th className="px-3 py-1.5 text-left font-medium w-28">{t("ไซส์", "Size")}</th>
-                    <th className="px-2 py-1.5 text-right font-medium w-44" title={t("ราคาจากตีราคาตอนเสนอ → ตีราคาปัจจุบันของไซส์นี้ (ต้นทุนขึ้น=แดง ลง=เขียว)", "Costing at quote time → current costing for this size (cost up = red, down = green)")}>{t("ตีราคา → ปัจจุบัน", "Costing → now")}</th>
+                    <th className="px-2 py-1.5 text-right font-medium w-36" title={t("ราคาจากตีราคาตอนเสนอ → ตีราคาปัจจุบันของไซส์นี้ (ต้นทุนขึ้น=แดง ลง=เขียว)", "Costing at quote time → current costing for this size (cost up = red, down = green)")}>{t("ตีราคา → ปัจจุบัน", "Costing → now")}</th>
                     {b.qtys.map((qty) => <th key={qtyKey(qty)} className="px-2 py-1.5 text-right font-medium min-w-[7rem] bg-blue-50/60 text-blue-700">{qty == null ? t("ไม่ระบุจำนวน", "No qty") : t(`${fmtInt(qty)} ชิ้น`, `${fmtInt(qty)} pcs`)}</th>)}
                   </tr>
                 </thead>
@@ -246,6 +300,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                           const vs = pOff != null && offered != null ? offered - pOff : null;
                           const cst = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
                           const isEd = editCell?.id === q.id;
+                          // ทุกช่องสถานะเดียวกัน (ตั้งที่หัวการ์ดแล้ว) → ซ่อนตัวเลือกรายช่องจนกว่าจะชี้ · จอสัมผัสชี้ไม่ได้ = โชว์ตลอด
+                          const quietStatus = b.status !== "mixed" && canHover;
                           return (
                             <td key={q.id} className="px-2 py-1.5 text-right tabular-nums bg-blue-50/20 leading-tight align-top group">
                               {isEd ? (
@@ -253,18 +309,20 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                                   onBlur={() => commitCell(q)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditCell(null); }}
                                   className="h-7 w-24 px-1 text-sm text-right border border-blue-400 rounded-md" />
                               ) : (
-                                <button type="button" disabled={!canEdit} onClick={() => setEditCell({ id: q.id, val: offered != null ? String(offered) : "" })} className="font-semibold text-blue-700 hover:underline disabled:no-underline disabled:cursor-default" title={canEdit ? t("กดเพื่อแก้ราคาที่เสนอ", "Click to edit the offered price") : undefined}>{fmtBaht(offered)}</button>
-                              )}
-                              {margin != null && (
-                                <div className={`text-[10px] ${upDown(margin)}`} title={`${t(`กำไร ${sgn(margin)}/ชิ้น`, `Profit ${sgn(margin)}/pc`)}${pct != null ? t(` (${pct.toFixed(1)}% ของราคาที่เสนอ)`, ` (${pct.toFixed(1)}% of offered price)`) : ""}${q.qty != null ? t(` · รวม ${sgn(margin * q.qty)} (${fmtInt(q.qty)} ชิ้น)`, ` · total ${sgn(margin * q.qty)} (${fmtInt(q.qty)} pcs)`) : ""}`}>
-                                  {sgn(margin)}{pct != null ? ` (${pct.toFixed(0)}%)` : ""}
-                                </div>
+                                <span className="inline-flex items-baseline justify-end gap-1 whitespace-nowrap">
+                                  <button type="button" disabled={!canEdit} onClick={() => setEditCell({ id: q.id, val: offered != null ? String(offered) : "" })} className="font-semibold text-blue-700 hover:underline disabled:no-underline disabled:cursor-default" title={canEdit ? t("กดเพื่อแก้ราคาที่เสนอ", "Click to edit the offered price") : undefined}>{fmtBaht(offered)}</button>
+                                  {margin != null && (
+                                    <span className={`text-[10px] ${upDown(margin)}`} title={`${t(`กำไร ${sgn(margin)}/ชิ้น`, `Profit ${sgn(margin)}/pc`)}${pct != null ? t(` (${pct.toFixed(1)}% ของราคาที่เสนอ)`, ` (${pct.toFixed(1)}% of offered price)`) : ""}${q.qty != null ? t(` · รวม ${sgn(margin * q.qty)} (${fmtInt(q.qty)} ชิ้น)`, ` · total ${sgn(margin * q.qty)} (${fmtInt(q.qty)} pcs)`) : ""}`}>
+                                      {sgnShort(margin)}{pct != null ? ` (${pct.toFixed(0)}%)` : ""}
+                                    </span>
+                                  )}
+                                </span>
                               )}
                               <div className="flex items-center justify-end gap-1 mt-0.5">
                                 {vs != null && <span className={`text-[10px] ${vs === 0 ? "text-slate-300" : "text-slate-500"}`} title={t(`ครั้งที่ ${prev?.batch} เสนอ ${fmtBaht(pOff)}`, `Round ${prev?.batch} offered ${fmtBaht(pOff)}`)}>{vs === 0 ? "=" : sgn(vs)}</span>}
                                 {canEdit
-                                  ? <select value={q.status} onChange={(e) => void patchCell(q, { status: e.target.value })} title={t("สถานะช่องนี้", "Status of this cell")} className={`h-5 px-1 text-[10px] rounded cursor-pointer ${cst.cls}`}>{QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-                                  : <span className={`text-[10px] px-1 rounded ${cst.cls}`}>{cst.label}</span>}
+                                  ? <select value={q.status} onChange={(e) => void patchCell(q, { status: e.target.value })} title={t("สถานะช่องนี้", "Status of this cell")} className={`h-5 px-1 text-[10px] rounded cursor-pointer ${cst.cls} ${quietStatus ? "opacity-0 group-hover:opacity-100 focus:opacity-100" : ""}`}>{QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+                                  : b.status === "mixed" ? <span className={`text-[10px] px-1 rounded ${cst.cls}`}>{cst.label}</span> : null}
                                 {canEdit && <button type="button" onClick={() => setDelCell(q)} className="text-[10px] text-slate-300 opacity-0 group-hover:opacity-100 hover:text-rose-500" title={t("ลบช่องนี้", "Delete this cell")}>✕</button>}
                               </div>
                             </td>
@@ -276,6 +334,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                 </tbody>
               </table>
             </div>
+            </>}
           </div>
         );
       })}
