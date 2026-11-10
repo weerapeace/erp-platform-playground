@@ -69,7 +69,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       drive_link: str(b.drive_link, 400),
       source_folder: str(b.source_folder, 400),
       status: b.status === "done" || b.status === "partial" || b.status === "failed" ? b.status : null,
-      counts: { nas: num(c.nas), drive: num(c.drive), erp: num(c.erp), album: num(c.album), moved: num(c.moved), removed: num(c.removed), skipped: num(c.skipped), already: num(c.already), failed: num(c.failed) },
+      counts: { nas: num(c.nas), drive: num(c.drive), erp: num(c.erp), album: num(c.album), png: num(c.png), moved: num(c.moved), removed: num(c.removed), skipped: num(c.skipped), already: num(c.already), failed: num(c.failed) },
       // ย้ายโฟลเดอร์ (งานสินค้า) — what: raw/images = Rawfiles/Images · collection = ทั้งโฟลเดอร์เข้า Collection
       //   how: rename = ย้ายบน Z: · merge = รวมเข้ารุ่นที่มีใน Collection แล้ว (ไม่ทับ) · copy = ก๊อปจากเครื่อง · copy+trash = ก๊อปแล้วต้นฉบับลงถังขยะ
       moves: moveList(b.moves),

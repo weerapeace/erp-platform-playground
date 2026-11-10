@@ -253,3 +253,31 @@ describe("planProductCollection — เก็บทั้งโฟลเดอ�
     expect(fillNasPattern("Z:\\Work\\{กลุ่ม}\\{รุ่น}", { รุ่น: "BSD15" })).toBe("Z:\\Work\\BSD15");
   });
 });
+
+describe("planProductSort — PNG ไปโฟลเดอร์ PNG · JPEG ใน Images ให้เลือกส่ง Contents", () => {
+  const pp: CatalogParent[] = [{ parentId: "PX", code: "PIX39", name: "x", gallery: 0, galleryItems: [], desc: 0, descItems: [], png: false, pngKey: null, shopIds: [],
+    skus: [{ id: "SX1", code: "PIX39-01", label: "", gallery: 0, items: [] }, { id: "SX2", code: "PIX39-02", label: "", gallery: 0, items: [] }] }];
+  const ff: ProductFileIn[] = ["PIX39-01/1.jpeg", "PIX39-01/1.png", "PIX39-01/2.png", "PIX39-02/1.jpeg", "PIX39-02/1.png", "PIX39/1.jpeg", "PIX39/cut.png",
+    "[02] Images/IMG_1.jpeg", "[02] Images/IMG_2.JPG", "[02] Images/IMG_1.psd", "[02] Images/sub/IMG_3.jpg", "[03] Rawfiles/IMG_9.jpg"].map((path) => ({ path, size: 100 }));
+  it("ค่าเริ่ม: PNG ไม่ลงแกลเลอรี · ก๊อปไป [04] PNG ชื่อตามรหัสสี/รุ่น", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "PIX39" });
+    expect(p.pngs).toEqual([
+      { rel: "PIX39-01/1.png", name: "PIX39-01.png" }, { rel: "PIX39-01/2.png", name: "PIX39-01.png" },
+      { rel: "PIX39-02/1.png", name: "PIX39-02.png" }, { rel: "PIX39/cut.png", name: "PIX39.png" },
+    ].sort((a, b) => p.pngs.findIndex((x) => x.rel === a.rel) - p.pngs.findIndex((x) => x.rel === b.rel)));
+    expect(p.pngs.length).toBe(4);
+    const png1 = p.files.find((f) => f.rel === "PIX39-01/1.png")!;
+    expect(png1).toMatchObject({ erp: false, why: "png" });
+    expect(p.slots.flatMap((s) => s.rels).some((r) => r.endsWith(".png"))).toBe(false);
+    expect(p.contentCandidates.sort()).toEqual(["[02] Images/IMG_1.jpeg", "[02] Images/IMG_2.JPG", "[02] Images/sub/IMG_3.jpg"].sort());
+  });
+  it("ติ๊กให้ลงแกลเลอรีด้วย → PNG กลับเข้าแกลเลอรี (ยังก๊อปด้วย) · ปิดก๊อป → ไม่มีรายการก๊อป", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "PIX39", pngGallery: true });
+    expect(p.slots.find((s) => s.code === "PIX39-01")!.rels).toContain("PIX39-01/1.png");
+    expect(p.pngs.length).toBe(4);
+    const off = cleanProductConfig({ png: { mode: "off", folder: "x/y", gallery: false } });
+    expect(off.png).toEqual({ mode: "off", folder: "xy", gallery: false });
+    expect(planProductSort(ff, pp, off, { jobFolder: "PIX39" }).pngs).toEqual([]);
+    expect(cleanProductConfig({}).png).toEqual({ mode: "copy", folder: "[04] PNG", gallery: false });
+  });
+});

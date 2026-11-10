@@ -13,6 +13,8 @@
  * →   { profile:"product", job_name, nas_folder, mode, files, slots, groups, counts, warnings, parents, moves, brand_folder }   (lib/file-sort-product)
  *     moves[] = ย้ายโฟลเดอร์ Rawfiles / Images หลังลงรูปเสร็จ { role, folder, files, bytes, mode: stay|move, target, reason } (planProductMoves)
  *     collection = เก็บทั้งโฟลเดอร์เข้า Collection { mode, target (มี {กลุ่ม} ให้โปรแกรมหาเอง), reason, tidy, renames[{from,to}] } (planProductCollection)
+ *     pngs[] { rel, name } + png { mode, folder, gallery } = ก๊อป PNG ไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่น (ชื่อตามรหัสสี) · body png_gallery = ให้ PNG ลงแกลเลอรีด้วย
+ *     content_candidates[] = JPEG ในโฟลเดอร์ Images ที่ติ๊กส่งไปหน้า Contents ได้ (โปรแกรมขอแผน profile=content ของรูปที่ติ๊กตอนส่ง)
  *     files[]  = ไฟล์ละ { rel, erp, dest, slotKey, width, nas, why, note }
  *     slots[]  = ช่องรูปของสินค้า { kind, parentId, skuId, rels (ปกหน้าสุด), coverRel, replaces, remove{attachments,desc}, entity }
  *
@@ -103,7 +105,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 /** สูตรงานสินค้า: โหลดสินค้าตามรหัสในชื่อโฟลเดอร์/ไฟล์ (ตัวโหลดกลางชุดเดียวกับปุ่ม 📂 ในเว็บ) → แผนรายไฟล์/รายช่อง */
-async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; files?: FileSortInput[] }): Promise<NextResponse> {
+async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
   if (!(await apiCan(request, "products.view"))) return NextResponse.json({ error: "บัญชีนี้ไม่มีสิทธิ์ดูสินค้า (products.view)" }, { status: 403 });
   const job = String(b.job_folder ?? "").trim();
   const files = Array.isArray(b.files) ? b.files.filter((f) => f && typeof f.path === "string") : [];
@@ -116,7 +118,8 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   const codes = candidateCodes(files.map((f) => `${jobName}/${String(f.path).replace(/\\/g, "/")}`));
   const catalog = await loadImageCatalog(admin, cleanCatalogRequest({ codes }));
   const variant: ProductVariant = b.variant === "color" || b.variant === "edit" ? b.variant : "new";
-  const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined });
+  const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined,
+    pngGallery: typeof b.png_gallery === "boolean" ? b.png_gallery : undefined });
   if (catalog.truncated) plan.warnings.push("รหัสในโฟลเดอร์นี้ตรงกับสินค้าเกิน 60 รุ่น — แสดงแค่ 60 รุ่นแรก (แบ่งโฟลเดอร์ให้เล็กลง)");
   // ย้าย Rawfiles / Images: โฟลเดอร์แบรนด์ = แบรนด์ของรุ่นที่ชื่อตรงกับโฟลเดอร์ (ไม่มี = รุ่นแรกที่จับคู่ได้) · ไม่มีแบรนด์ = ไม่เดา
   const main = plan.parents.find((p) => p.code.toLowerCase() === jobName.toLowerCase()) ?? plan.parents[0];
@@ -131,7 +134,8 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   // เก็บทั้งโฟลเดอร์เข้า Collection ตามแบรนด์ (แบบปุ่ม Arrange) — {กลุ่ม} โปรแกรมหาเองบน Z:
   const coll = planProductCollection(files, cfg, { jobFolder: jobName, brand });
   return NextResponse.json({ profile: "product", job_name: safeFolderName(jobName), nas_folder: productNasFolder(cfg, jobName, variant), ...plan,
-    moves: mv.moves, collection: coll.collection, brand_folder: brandFolder, brand: brand ? { id: brand.id, name: brand.name } : null,
+    moves: mv.moves, collection: coll.collection, png: { mode: cfg.png.mode, folder: cfg.png.folder, gallery: typeof b.png_gallery === "boolean" ? b.png_gallery : cfg.png.gallery },
+    content_candidates: plan.contentCandidates, brand_folder: brandFolder, brand: brand ? { id: brand.id, name: brand.name } : null,
     warnings: [...plan.warnings, ...mv.warnings, ...coll.warnings], error: null });
 }
 

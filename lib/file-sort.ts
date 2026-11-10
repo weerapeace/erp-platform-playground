@@ -59,7 +59,13 @@ export type ProductSortConfig = {
   moveFolders: Record<MoveRole, string[]>;
   /** หลังลงรูปเสร็จ: เก็บทั้งโฟลเดอร์งานเข้า Collection (แบบปุ่ม Arrange ของ Create Folder Tool) · ตัวคิด planProductCollection */
   collection: CollectionMove;
+  /**
+   * รูป PNG ในโฟลเดอร์สี/รุ่น (เจ้าของเลือก 2026-11-10): ก๊อปไปโฟลเดอร์ย่อย folder ในโฟลเดอร์รุ่น (ปลายทางสุดท้าย — Collection ถ้าเก็บเข้า)
+   *   ตั้งชื่อใหม่ตามรหัสสี/รุ่น (PIX39-01.png · ชนกัน _2) · ต้นฉบับอยู่ที่เดิม · gallery = ลงแกลเลอรีด้วยไหม (ค่าเริ่มไม่ — ซ้ำกับ JPEG เบอร์เดียวกัน)
+   */
+  png: { mode: "copy" | "off"; folder: string; gallery: boolean };
 };
+export const PNG_FOLDER_DEFAULT = "[04] PNG";
 export const MOVE_ROLES = ["raw", "images"] as const;
 export type MoveRole = (typeof MOVE_ROLES)[number];
 export const MOVE_ROLE_LABEL: Record<MoveRole, string> = { raw: "Rawfiles", images: "Images" };
@@ -96,6 +102,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = {
   moves: { raw: { mode: "move", pattern: "Z:\\Raw Files\\{แบรนด์}\\{รุ่น}_rawfiles" }, images: { mode: "stay", pattern: "" } },
   moveFolders: { raw: ["rawfile", "rawfiles", "raw files", "raw file", "raw"], images: ["images", "image"] },
   collection: { mode: "move", pattern: "", byBrand: {}, tidy: true },
+  png: { mode: "copy", folder: PNG_FOLDER_DEFAULT, gallery: false },
 };
 
 const cleanPattern = (v: unknown): string => String(v ?? "").trim().replace(/[\\/]+$/, "").slice(0, 300);
@@ -132,7 +139,16 @@ export function cleanProductConfig(raw: unknown): ProductSortConfig {
     mode: o.mode === "append" ? "append" : "replace",
     ...cleanMoves(o),
     collection: cleanCollection(o.collection),
+    png: cleanPng(o.png),
   };
+}
+
+function cleanPng(raw: unknown): ProductSortConfig["png"] {
+  const d = DEFAULT_PRODUCT_CONFIG.png;
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  // ชื่อโฟลเดอร์ชั้นเดียว (ห้ามมี \ / : …) — ว่าง = ค่าเริ่ม
+  const folder = typeof o.folder === "string" ? String(o.folder).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim().replace(/[. ]+$/g, "").slice(0, 60) : "";
+  return { mode: o.mode === "off" || o.mode === "copy" ? o.mode : d.mode, folder: folder || d.folder, gallery: typeof o.gallery === "boolean" ? o.gallery : d.gallery };
 }
 
 function cleanCollection(raw: unknown): CollectionMove {

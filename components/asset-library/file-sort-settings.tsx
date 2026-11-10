@@ -453,6 +453,23 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                   <p className="text-[12px] text-slate-500 mt-1">{t("ตัวอย่างใช้รุ่น BSD15 · {กลุ่ม} = โฟลเดอร์กลุ่มที่โปรแกรมหาเองบน Z: (ชื่อตรงตัวอักษรหน้ารหัส เช่น BSD · ขึ้นต้นด้วยตัวนั้น เช่น BD (สร้อยข้อมือ) · มีรุ่นพี่น้องอยู่ เช่น JEAN10 → JEANS · ไม่เจอ = สร้างใหม่) · มีรุ่นนี้ใน Collection แล้ว = รวมเข้าไป ไม่ทับ (ชื่อชน → _v.2) · สินค้าที่ยังไม่ตั้งแบรนด์ = ไม่เก็บ · ทำหลังลงรูปครบเท่านั้น · ปิดได้ทีละงาน + ย้ายกลับได้ในโปรแกรม",
                     "Sample model BSD15 · {กลุ่ม} = group folder the app finds on Z: (same letters as the code, starts with them, or holds sibling models like JEAN10 → JEANS; none = created) · model already in Collection = merged, never overwritten (_v.2) · products without a brand stay · only after all images upload · can be turned off per job and undone in the app")}</p>
                 </div>
+                <div className="sm:col-span-2">
+                  <p className="text-[13px] font-medium text-slate-700 mb-1">{t("รูป PNG ในโฟลเดอร์สี / รุ่น", "PNG files in color / model folders")}</p>
+                  <label className="flex items-start gap-2 text-[13px]">
+                    <input type="checkbox" className={`${chk} mt-0.5`} checked={product.png.mode === "copy"} disabled={!canEdit} onChange={(e) => setProduct((p) => ({ ...p, png: { ...p.png, mode: e.target.checked ? "copy" : "off" } }))} />
+                    <span className="flex flex-wrap items-center gap-2">{t("ก๊อปไปโฟลเดอร์", "Copy into folder")}
+                      <input value={product.png.folder} disabled={!canEdit || product.png.mode !== "copy"} onChange={(e) => setProduct((p) => ({ ...p, png: { ...p.png, folder: e.target.value } }))} aria-label={t("ชื่อโฟลเดอร์ PNG", "PNG folder name")}
+                        className="h-8 w-36 px-2 text-[12px] font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                      {t("ในโฟลเดอร์รุ่น", "inside the model folder")}</span>
+                  </label>
+                  <label className="mt-1 flex items-start gap-2 text-[13px]">
+                    <input type="checkbox" className={`${chk} mt-0.5`} checked={product.png.gallery} disabled={!canEdit} onChange={(e) => setProduct((p) => ({ ...p, png: { ...p.png, gallery: e.target.checked } }))} />
+                    <span>{t("ลง PNG ในแกลเลอรีสีด้วย (ค่าเริ่มไม่ลง — ซ้ำกับรูป JPEG เบอร์เดียวกัน)", "Also add PNGs to the color gallery (off by default — duplicates the same-numbered JPEG)")}</span>
+                  </label>
+                  <p className="text-[12px] text-slate-500 mt-1 font-mono break-all">{`BSD15-01/1.png → Z:\\Collection\\BSD\\BSD15\\${product.png.folder || "[04] PNG"}\\BSD15-01.png`}</p>
+                  <p className="text-[12px] text-slate-500 mt-0.5">{t("ตั้งชื่อใหม่ตามรหัสสี (ชนกัน = _2) · ต้นฉบับอยู่ในโฟลเดอร์สีเหมือนเดิม · โฟลเดอร์รุ่น = ปลายทางสุดท้าย (Collection ถ้าเก็บเข้า) · รูปจากโฟลเดอร์ Images ส่งไปหน้า Contents ได้โดยติ๊กเลือกในโปรแกรม (ค่าเริ่มไม่ติ๊ก)",
+                    "Renamed by color code (clash = _2) · originals stay in the color folders · model folder = final location (Collection when filed) · JPEGs from the Images folder can be sent to Contents by ticking them in the app (none by default)")}</p>
+                </div>
               </section>
 
               <section className="rounded-lg bg-slate-50 p-3">

@@ -54,7 +54,7 @@ export type ProductFileAction = {
   group: string;
   /** ทำไมไม่ลงระบบ / หมายเหตุ */
   note?: string;
-  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope";
+  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope" | "png";
 };
 export type ProductPlanSlot = {
   key: string;
@@ -87,6 +87,10 @@ export type ProductPlan = {
   parents: { id: string; code: string; name: string }[];
   mode: MassMode;
   variant: ProductVariant;
+  /** รูป PNG ที่โปรแกรมก๊อปไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่น (cfg.png) — name = ชื่อใหม่ตามรหัสสี/รุ่น เช่น PIX39-01.png (ชนกันโปรแกรมต่อ _2) */
+  pngs: { rel: string; name: string }[];
+  /** รูป JPEG ในโฟลเดอร์ Images ที่เลือกส่งไปหน้า Contents ได้ (ติ๊กเองในโปรแกรม · ค่าเริ่มไม่ติ๊ก) */
+  contentCandidates: string[];
 };
 
 const extOf = (name: string) => (name.match(/\.([^.]+)$/)?.[1] ?? "").toLowerCase();
@@ -98,8 +102,12 @@ const isErpImage = (ext: string) => (ERP_IMAGE_EXTS as readonly string[]).includ
  *   color = เพิ่มสี — เฉพาะแกลเลอรีของสีที่ยังไม่มีรูปในระบบ (Parent/Description/สีเดิมที่ก๊อปมาจาก Collection ไม่แตะ)
  *   edit  = แก้สี — เฉพาะแกลเลอรีของสีที่อยู่ในโฟลเดอร์ (Parent/Description/PNG ไม่แตะ)
  */
-export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant }): ProductPlan {
+export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean }): ProductPlan {
   const mode: MassMode = opts.mode ?? cfg.mode;
+  // PNG ในโฟลเดอร์สี/รุ่น: ไม่ลงแกลเลอรี (ซ้ำกับ JPEG เบอร์เดียวกัน) → ก๊อปไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่นแทน · โปรแกรมติ๊กให้ลงแกลเลอรีด้วยได้
+  const pngGallery = opts.pngGallery ?? cfg.png.gallery;
+  const pngs: { rel: string; name: string }[] = [];
+  const pngFolderKey = folderLabelKey(cfg.png.folder);   // โฟลเดอร์ PNG ที่โปรแกรมก๊อปไว้รอบก่อน → ไม่ลงระบบซ้ำ
   const variant: ProductVariant = opts.variant === "color" || opts.variant === "edit" ? opts.variant : "new";
   const job = (opts.jobFolder ?? "").replace(/[\\/]+/g, "/").replace(/^\/+|\/+$/g, "").split("/").pop() ?? "";
   const out: ProductFileAction[] = [];
@@ -115,6 +123,7 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
     const base: ProductFileAction = { rel, name, ext, size, erp: false, nas: true, group: dir.split("/")[0] || job || "(ชั้นบน)" };
     if (isJunkFile(name)) out.push({ ...base, nas: false, why: "junk", note: "ไฟล์ระบบ — ข้าม" });
+    else if (dir && folderLabelKey(dir.split("/")[0]) === pngFolderKey) out.push({ ...base, why: "archive", note: "โฟลเดอร์ PNG ที่ก๊อปไว้ — อยู่บน Z:" });
     else if (!isErpImage(ext)) out.push({ ...base, why: "not_image", note: "ไม่ใช่รูปที่ลงระบบได้ — อยู่บน Z:" });
     else out.push(base);
   }
@@ -161,6 +170,16 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
       // รูปตัด PNG เป็นของทั้งรุ่น → เพิ่มสี/แก้สีไม่แตะ
       for (const im of images) if (im.dest === "png") Object.assign(byId.get(im.id)!, { why: "scope", note: "ไม่แตะ — รูปตัด PNG เป็นของทั้งรุ่น" });
       images = images.filter((im) => im.dest !== "png");
+    }
+    // ไฟล์ .png → ก๊อปไปโฟลเดอร์ PNG (ชื่อตามรหัสสี/รุ่นที่จับคู่ได้) · ไม่ลงแกลเลอรี เว้นแต่ติ๊ก pngGallery
+    if (cfg.png.mode === "copy" || !pngGallery) {
+      for (const im of images) {
+        const a = byId.get(im.id)!;
+        if (a.ext !== "png" || !(im.dest === "parent" || im.dest === "sku" || im.dest === "skuMain" || im.dest === "png")) continue;
+        if (cfg.png.mode === "copy") pngs.push({ rel: a.rel, name: `${safeFolderName(code ?? job)}.png` });
+        if (!pngGallery && im.dest !== "png") Object.assign(a, { why: "png", note: cfg.png.mode === "copy" ? `PNG — ก๊อปไป ${cfg.png.folder}` : "PNG — ไม่ลงแกลเลอรี" });
+      }
+      if (!pngGallery) images = images.filter((im) => !(byId.get(im.id)!.ext === "png" && im.dest !== "png"));
     }
     if (!images.length) continue;
     planGroups.push({ key: g.key, label: g.label, target: t, images });
@@ -222,6 +241,9 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     parents: parents.map((p) => ({ id: p.parentId, code: p.code, name: p.name })),
     mode,
     variant,
+    pngs,
+    // JPEG ในโฟลเดอร์ Images (ชื่อตาม cfg.moveFolders.images) → ให้ติ๊กส่งไปหน้า Contents
+    contentCandidates: out.filter((a) => (a.ext === "jpg" || a.ext === "jpeg") && a.rel.includes("/") && matchesFolderWord(a.rel.slice(0, a.rel.indexOf("/")), cfg.moveFolders.images)).map((a) => a.rel),
   };
 }
 

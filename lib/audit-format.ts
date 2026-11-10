@@ -392,8 +392,8 @@ export function describeAudit(row: AuditRowLike, ctx: AuditFormatCtx = {}): Audi
 // ── ตัวแยกไฟล์ ERP (file_sort.upload / file_sort.undo · โปรแกรมบนเครื่องจดผ่าน /api/file-sort/log) ──
 //   1 แถว = 1 ครั้งที่ใช้: รุ่น/งาน · ชนิดงาน · ลงกี่รูป · ย้ายอะไรจากไหนไปไหน (moves) · ย้ายกลับแล้ว (undone_at / undone_by — /api/file-sort/history แนบให้)
 const FS_KIND: Record<string, string> = { new: "สินค้าใหม่", color: "เพิ่มสี", edit: "แก้สี", content: "Content", artwork: "โลโก้ / Artwork" };
-const FS_WHAT: Record<string, string> = { raw: "Rawfiles", images: "Images", collection: "ทั้งโฟลเดอร์ → Collection" };
-const FS_HOW: Record<string, string> = { merge: " · รวมเข้าของเดิม ไม่ทับ", copy: " · ก๊อปจากเครื่อง", "copy+trash": " · ก๊อปแล้วต้นฉบับลงถังขยะ" };
+const FS_WHAT: Record<string, string> = { raw: "Rawfiles", images: "Images", collection: "ทั้งโฟลเดอร์ → Collection", png: "รูป PNG", content: "รูปไปหน้า Contents" };
+const FS_HOW: Record<string, string> = { merge: " · รวมเข้าของเดิม ไม่ทับ", copy: " · ก๊อปจากเครื่อง", "copy+trash": " · ก๊อปแล้วต้นฉบับลงถังขยะ", "png-copy": " · ก๊อป (ต้นฉบับอยู่ในโฟลเดอร์สี)", upload: "" };
 const FS_STATUS: Record<string, string> = { done: "ครบ", partial: "ได้บางส่วน", failed: "ไม่สำเร็จ" };
 
 /** ชนิดงานของตัวแยกไฟล์เป็นภาษาคน (สินค้าใหม่ / เพิ่มสี / แก้สี / Content / โลโก้) */
