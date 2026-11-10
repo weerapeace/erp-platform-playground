@@ -325,10 +325,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const cod = Math.max(0, Math.round((Number(b?.cod_amount) || 0) * 100) / 100);
 
   const admin = supabaseAdmin();
-  // platform_orders.platform_id ยัง NOT NULL → ทุกช่องทางที่เปิดต้องมีแถวใน erp_platforms (phone ปิดไว้ใน OPEN_MANUAL_CHANNELS)
-  const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", b!.channel).maybeSingle();
-  const platformId = (pf as { id?: string } | null)?.id ?? null;
-  if (!platformId) return NextResponse.json({ error: "ไม่พบช่องทางนี้ในระบบ" }, { status: 400 });
+  // phone = ไม่ผูกแพลตฟอร์ม (platform_id ว่างได้ตั้งแต่ migration 202612020200 · เลขซ้ำกันด้วย unique index เฉพาะใบที่ไม่มีแพลตฟอร์ม)
+  let platformId: string | null = null;
+  if (b!.channel !== "phone") {
+    const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", b!.channel).maybeSingle();
+    platformId = (pf as { id?: string } | null)?.id ?? null;
+    if (!platformId) return NextResponse.json({ error: "ไม่พบช่องทางนี้ในระบบ" }, { status: 400 });
+  }
   // SKU ที่เลือก → รหัสจริง + รุ่น (ใช้ตัดสต๊อก/น้ำหนัก)
   const skuIds = items.map((i) => i.sku_id).filter((x): x is string => !!x);
   const { data: skus } = skuIds.length ? await admin.from("skus_v2").select("id, code, parent_sku_id").in("id", skuIds) : { data: [] };

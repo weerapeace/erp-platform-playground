@@ -9,8 +9,8 @@
 --   RLS เปิด ไม่มี policy = เข้าได้ผ่าน API ฝั่งเซิร์ฟเวอร์ (service role) เท่านั้น
 --   (กุญแจ SHIPPOP ต่อบริษัท = ขั้น 2 · ยังไม่เก็บที่นี่)
 --
--- ⚠️ ยังไม่ได้ทำ (รอเจ้าของตัดสิน): ถอนสิทธิ์อ่านตรงของ authenticated บน platform_orders / platform_order_items
---    ตอนนี้ policy platform_orders_sel ให้ผู้ใช้ที่ล็อกอินอ่านตรงได้ · ทุกหน้าอ่านผ่าน API ฝั่งเซิร์ฟเวอร์อยู่แล้ว (ตรวจ 2026-11-10)
+-- ✅ ถอนสิทธิ์อ่านตรงของ anon/authenticated ทำแล้วใน 202612020200_order_center_phone_and_lock.sql (เจ้าของอนุมัติ 2026-11-10)
+--    (เดิม policy platform_orders_sel ให้ผู้ใช้ที่ล็อกอินอ่านตรงได้ · ทุกหน้าอ่านผ่าน API ฝั่งเซิร์ฟเวอร์อยู่แล้ว)
 
 alter table public.platform_orders
   add column if not exists ship_to jsonb,

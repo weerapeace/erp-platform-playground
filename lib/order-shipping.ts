@@ -17,15 +17,15 @@ export const ORDER_CENTER_SHIPPING_FORCE = "sim" as const;
 export const MARKETPLACE_CODES = ["shopee", "lazada", "tiktok"] as const;
 export const isMarketplace = (code: string | null | undefined) => (MARKETPLACE_CODES as readonly string[]).includes(String(code ?? ""));
 
-/** ช่องทางที่เลือกได้ตอนสร้างออเดอร์เอง · open=false = ยังเปิดไม่ได้
- *  phone: ไม่มีแถวใน erp_platforms แต่ platform_orders.platform_id ยัง NOT NULL → รอเจ้าของอนุมัติผ่อนเงื่อนไขฐานข้อมูล (2026-11-10) */
+/** ช่องทางที่เลือกได้ตอนสร้างออเดอร์เอง · open=false = ปิดไว้ (ซ่อนจากตัวเลือก + API ปฏิเสธ)
+ *  phone = ไม่ผูกแพลตฟอร์ม (platform_id ว่าง · migration 202612020200 ผ่อน NOT NULL + กันเลขซ้ำ) */
 export const MANUAL_CHANNELS = [
   { code: "line_oa", label: "LINE แชต", open: true },
   { code: "facebook", label: "Facebook", open: true },
   { code: "instagram", label: "Instagram", open: true },
   { code: "line_shopping", label: "LINE SHOPPING", open: true },
   { code: "website", label: "เว็บไซต์ (กรอกเอง)", open: true },
-  { code: "phone", label: "โทร / หน้าร้าน", open: false },
+  { code: "phone", label: "โทร / หน้าร้าน", open: true },
 ] as const;
 export const OPEN_MANUAL_CHANNELS = MANUAL_CHANNELS.filter((m) => m.open);
 export const isOpenManualChannel = (c: unknown) => OPEN_MANUAL_CHANNELS.some((m) => m.code === c);

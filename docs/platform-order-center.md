@@ -40,7 +40,7 @@
 แบบ Zort: เทียบราคาขนส่ง → จอง → ใบปะหน้า → สถานะ — ผ่าน SHIPPOP (`lib/shippop.ts` ตัวเดียวกับเว็บร้าน) · กติกาอยู่ `lib/order-shipping.ts`
 - **ขั้น 1 ล็อกโหมดจำลอง** (`ORDER_CENTER_SHIPPING_FORCE = "sim"`) — แม้ตั้งกุญแจ SHIPPOP แล้วก็ไม่เรียกขนส่งจริง ไม่เสียเงิน · เว็บร้านไม่กระทบ (พารามิเตอร์ `force` เป็นตัวเลือก)
 - **ใครส่งผ่านศูนย์นี้ได้**: เฉพาะออเดอร์ช่องทางของร้านเอง (LINE OA · Facebook · IG · LINE Shopping · เว็บ · โทร = `source: "manual"`) — ออเดอร์ Shopee/Lazada/TikTok ต้องใช้ขนส่งที่แพลตฟอร์มกำหนด, ออเดอร์จากเมลส่งไปแล้ว → ปุ่มบอกเหตุผล (`canShipViaShippop`)
-- ⚠️ ช่องทาง "โทร / หน้าร้าน" **ปิดไว้ก่อน** (`OPEN_MANUAL_CHANNELS`): ไม่มีแถวใน `erp_platforms` แต่ `platform_orders.platform_id` ยัง NOT NULL → ต้องผ่อนเงื่อนไข (drop not null + unique เลขออเดอร์เมื่อไม่มีแพลตฟอร์ม) รอเจ้าของอนุมัติ — เจอตอนตรวจหลัง deploy
+- ช่องทาง "โทร / หน้าร้าน" = ไม่ผูกแพลตฟอร์ม (`platform_id` ว่าง) — เดิม NOT NULL ทำให้บันทึกไม่ผ่าน (เจอตอนตรวจหลัง deploy) · เจ้าของอนุมัติผ่อนเงื่อนไข 2026-11-10 (migration `202612020200` + unique เลขออเดอร์เฉพาะใบที่ไม่มีแพลตฟอร์ม) · ปิด/เปิดช่องทางได้ที่ `open` ใน `MANUAL_CHANNELS`
 - **สร้างออเดอร์เอง** (ปุ่ม "สร้างออเดอร์"): ช่องทาง · แบรนด์ · ผู้รับ (ค้นที่อยู่ด้วยของกลาง `/api/public/address/search`) · รายการ (SkuPicker) · เก็บเงินปลายทาง → เลข `M{ปปดดวว}-{4 หลัก}` ตามเวลาไทย
 - **ตั้งค่าการส่ง** ต่อแบรนด์ (`shipping_profiles`): ผู้ส่ง/ที่อยู่รับของ · กล่องมาตรฐาน · น้ำหนักต่อชิ้น (ใช้เมื่อรุ่นไม่มี `weight_g` — IG ขาด 118/262 รุ่น, LM 157/961) · ขนส่งที่ใช้ประจำ
 - **จอง** (แถบติ๊กหลายใบ › "จัดส่ง" หรือในแผงรายละเอียด): ≤50 ใบ/ครั้ง · ได้เลขพัสดุ → สถานะ "แพ็กแล้ว" (ผ่าน `checkTransition`) · **ไม่ตัดสต๊อก** (ตัดตอน "ยืนยัน" เหมือนเดิม) · ยกเลิกการจองได้ตอนสถานะขนส่งยัง booking
@@ -48,9 +48,9 @@
 - API: `/api/platform-orders/ship` POST `action=quote|book|cancel|simulate` · GET `?ids=` = ข้อมูลใบปะหน้า · `/api/shipping-profiles` GET/PATCH · audit `ship_book` / `shipping_profile`
 - ขั้น 2 (ยังไม่ทำ): เจ้าของสมัคร SHIPPOP + ใส่กุญแจเอง → ปลดล็อกโหมดจริง · ขั้น 3: เรียกรถเข้ารับ/ติดตามอัตโนมัติ
 
-## ข้อมูล (migration `202612010100_platform_orders_center.sql` + `202612020100_order_center_shipping.sql` — เพิ่มช่องเท่านั้น)
+## ข้อมูล (migration `202612010100_platform_orders_center.sql` + `202612020100_order_center_shipping.sql` + `202612020200_order_center_phone_and_lock.sql`)
 `platform_orders` + `platform_status` · `ship_by_at` · `package_no` · `invoice_so_id` · `tax_invoice_request` · `ship_to` · `shipping` · `cod_amount` · `platform_accounts` + `tax_invoice_company_id` · ตาราง `shipping_profiles`
-- ⚠️ ตอนนี้ผู้ล็อกอินอ่านตาราง `platform_orders` / `platform_order_items` ตรงได้ (ไม่ผ่าน API) — เมื่อมีที่อยู่ผู้รับเก็บอยู่ ควรปิดการอ่านตรง (REVOKE จาก authenticated) รอเจ้าของตัดสินใจ
+- 🔒 `platform_orders` / `platform_order_items` / `shipping_profiles` ปิดสิทธิ์ anon + authenticated ทั้งหมด (มีที่อยู่/เบอร์ลูกค้า · เจ้าของอนุมัติ 2026-11-10) → **อ่าน/เขียนผ่าน API ฝั่ง server ด้วย service role เท่านั้น** · ห้ามเขียนหน้าเว็บที่อ่านตารางนี้ตรงด้วย supabase ฝั่ง browser
 
 ## API `/api/platform-orders`
 - GET รายการ: `view=todo|history|all` · `active=1` (ต้องจัดส่ง) · `due=late|today` · `invoice=requested|issued` · `status` · `q` · `page`/`page_size` (≤200) → `{ orders, total, summary }` · นับด้วย count ของฐานข้อมูล (เดิม `.limit(1000)` ตัดเหลือ 1,000 จาก 5,667)
