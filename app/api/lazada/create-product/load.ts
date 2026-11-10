@@ -5,10 +5,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
-import { lazGetCategoryAttributes, lazErrorText } from "@/lib/lazada";
+import { lazErrorText } from "@/lib/lazada";
 import { lazAttrDefsWithExtras } from "@/lib/lazada-listing-edit";
 import { planLazadaCreate, lazCategoryIdOf, type LazCreatePreview, type LazCreateSku } from "@/lib/lazada-create-plan";
-import { getPlatformId, lazTokenOrReason } from "../shared";
+import { getPlatformId, lazCategoryAttrsCached, lazTokenOrReason } from "../shared";
 
 type Row = Record<string, unknown>;
 const str = (v: unknown) => (v == null ? "" : String(v)).trim();
@@ -55,7 +55,8 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
     else {
       token = { accessToken: tok.accessToken, gateway: tok.gateway };
       if (categoryId) {
-        try { attrDefs = lazAttrDefsWithExtras(await lazGetCategoryAttributes(tok.gateway, tok.accessToken, categoryId)); }
+        // แคช 10 นาที + ลองซ้ำเมื่อโดนจำกัดความถี่ (ของใช้ร่วมกับลิ้นชัก Lazada)
+        try { attrDefs = lazAttrDefsWithExtras(await lazCategoryAttrsCached(tok.gateway, tok.accessToken, categoryId)); }
         catch (e) { blockers.push(`ดึงช่องของหมวดจาก Lazada ไม่ได้: ${lazErrorText(e)}`); }
       }
     }
