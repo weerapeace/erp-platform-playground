@@ -13,7 +13,7 @@
  *
  *   <PatternStudio initial={…} materials={…} onChange={applyBoard} readonly={!canEdit} … />
  *
- * ข้อจำกัดรอบ 1: ภาพ 3D ของกระดาน = ชิ้นแบน ยังประกอบเป็นกระเป๋าไม่ได้ (ต้องมีข้อมูลตะเข็บ = รอบ 2–3) · กระเป๋าที่ประกอบแล้วดูได้ในตัวสร้างจากแม่แบบ
+ * ภาพ 3D ของกระดานในกรอบนี้ = ชิ้นแบน · การประกอบเป็นกระเป๋าจากตะเข็บ = AssemblyView (แท็บ "ประกอบ 3D" ของแอปสตูดิโอแพทเทิร์น)
  * ใช้ที่: แท็บตีราคา (แบบวาด) ใบงานออกแบบ · คู่มือ: docs/pattern-studio.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -22,7 +22,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
 import type { Flat3DPiece } from "@/components/pattern-3d";
-import { bagSeamRefs, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
+import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
@@ -31,8 +31,8 @@ const SHOW3D_KEY = "pattern-studio-3d";
 const WIDE_PX = 1180;
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
-/** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + ค่าแม่แบบที่ใช้ */
-export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; params: BagParams };
+/** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + จุดติดหู/แผ่นหลังช่อง + ค่าแม่แบบที่ใช้ */
+export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; attach: BagAttachRef[]; params: BagParams };
 
 export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive"> & {
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
@@ -69,7 +69,7 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
     pieces.forEach((q, i) => { pidByKey[q.key] = `pc${stamp}t${i}`; });   // รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้นอ้างถึงได้
     setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
     setShow3d(true);
-    onTemplateInsert?.({ pidByKey, seams: bagSeamRefs(G), params: G.p });
+    onTemplateInsert?.({ pidByKey, seams: bagSeamRefs(G), attach: bagAttachRefs(G), params: G.p });
   };
 
   const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs";
@@ -85,7 +85,7 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
         <button type="button" onClick={() => setShow3d(!show3d)} aria-pressed={show3d} className={`${btn} ${show3d ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
           <Icon value={show3d ? "i:eye-off" : "i:box"} className="text-sm" />{show3d ? t("ซ่อนภาพ 3D", "Hide 3D") : t("ดูภาพ 3D", "Show 3D")}
         </button>
-        {show3d && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ยังประกอบเป็นกระเป๋าไม่ได้จนกว่าจะกำหนดตะเข็บได้ (รอบถัดไป)", "The pieces on the table are the ones on the board. Select on either side and the other lights up · assembling into a bag needs seams (next round)")}</span>}
+        {show3d && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ภาพนี้คือชิ้นแบน การประกอบเป็นกระเป๋าอยู่ในแอปสตูดิโอแพทเทิร์น แท็บ ประกอบ 3D", "The pieces on the table are the ones on the board. Select on either side and the other lights up · this view shows flat pieces; assembling into a bag is in the Pattern studio app, Assemble 3D tab")}</span>}
       </div>
 
       <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>

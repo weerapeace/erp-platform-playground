@@ -276,3 +276,11 @@ export function bagSeamRefs(G: BagGeometry): BagSeamRef[] {
     { key: "C", a: R("side", 2), b: R("bottom", 3) },
   ];
 }
+
+/** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ (หู · แผ่น PVC หลังช่องโชว์) — พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่นที่ติด (y ลง) · ใช้ตอนประกอบ 3D (lib/pattern-assembly) */
+export type BagAttachRef = { kind: "handle" | "behind"; piece: BagPieceKey; on: BagPieceKey; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
+export function bagAttachRefs(G: BagGeometry): BagAttachRef[] {
+  const { p, ext } = G, Htop = p.H + ext, halfTop = p.W / 2 + (p.flare * Htop) / p.H;
+  const handle = (on: BagPieceKey): BagAttachRef => ({ kind: "handle", piece: "handle", on, a: [r3(halfTop - p.g / 2), r3(ext)], b: [r3(halfTop + p.g / 2), r3(ext)], len: p.Lh, w: p.wh, tail: BAG_HANDLE_ATTACH });
+  return G.win ? [handle("front"), handle("back"), { kind: "behind", piece: "pvc", on: "front" }] : [handle("front")];
+}

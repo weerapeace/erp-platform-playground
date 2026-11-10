@@ -4,6 +4,8 @@
  * สตูดิโอของแพทเทิร์น 1 ใบ (แอปหลัก · เจ้าของสั่ง 2026-11-10)
  *   หัว: ชื่อ · รหัสรุ่น · สถานะ · สรุป (ชิ้น / พื้นที่ / ตะเข็บ)
  *   แท็บ "วาดชิ้น" = PatternStudio (กระดานวาดเดิม + แม่แบบทรง + ภาพ 3D) · แท็บ "เย็บ" = SewView (จับคู่ขอบ + ตรวจความยาว)
+ *   แท็บ "ประกอบ 3D" = AssemblyView (ประกอบชิ้นเป็นกระเป๋าจากตะเข็บ + เย็บทีละขั้น)
+ *   จุดติดหู/แผ่นหลังช่อง (จากแม่แบบ) เก็บในช่อง template: { params, attach }
  *   สร้างจากแม่แบบทรง → ได้ชิ้น + ตะเข็บตั้งต้นครบ
  *   บันทึกด้วยแถบบันทึกกลาง (SaveBar) → PATCH /api/pattern-projects/<id> · ไม่มีสิทธิ์แก้ = ดูอย่างเดียว
  */
@@ -20,12 +22,14 @@ import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/
 import type { TemplateInsertInfo } from "@/components/pattern-studio";
 import { PATTERN_PROJECT_STATUSES, PATTERN_STATUS_LABEL, projectSummary, type PatternProject, type PatternProjectStatus, type ProjectPiece } from "@/lib/pattern-project";
 import { checkSeam, type Seam } from "@/lib/pattern-seams";
+import { cleanAttaches, type Attach } from "@/lib/pattern-assembly";
 
 const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });
 const SewView = dynamic(() => import("@/components/pattern-studio/sew-view").then((m) => m.SewView), { ssr: false });
+const AssemblyView = dynamic(() => import("@/components/pattern-studio/assembly-view").then((m) => m.AssemblyView), { ssr: false });
 
 const SQFT = 929.03;
-type Tab = "draw" | "sew";
+type Tab = "draw" | "sew" | "asm";
 
 export function PatternProjectEditor({ id }: { id: string }) {
   const t = useT();
@@ -40,7 +44,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const [pieces, setPieces] = useState<ProjectPiece[]>([]);
   const [seams, setSeams] = useState<Seam[]>([]);
   const [basis, setBasis] = useState<"box" | "area">("box");
-  const [template, setTemplate] = useState<Record<string, unknown> | null>(null);
+  const [template, setTemplate] = useState<Record<string, unknown> | null>(null);   // { params: ค่าแม่แบบล่าสุด, attach: จุดติด }
+  const [attaches, setAttaches] = useState<Attach[]>([]);
   const [tab, setTab] = useState<Tab>("draw");
   const [boardNonce, setBoardNonce] = useState(0);        // เปลี่ยน = เปิดกระดานใหม่จากชิ้นล่าสุด (โหลดเสร็จ / กลับจากแท็บเย็บ / ละทิ้ง)
   const [dirty, setDirty] = useState(false);
@@ -60,6 +65,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
       const p = j.data as PatternProject;
       setMe(j.me ?? null); setPatternNo(p.pattern_no); setName(p.name); setSku(p.sku_code ?? ""); setStatus(p.status);
       setPieces(p.pieces ?? []); piecesRef.current = p.pieces ?? []; setSeams(p.seams ?? []); setBasis(p.basis === "area" ? "area" : "box"); setTemplate(p.template ?? null);
+      setAttaches(cleanAttaches((p.template as { attach?: unknown } | null)?.attach, new Set((p.pieces ?? []).map((x) => x.pid))));
       setDirty(false); setSaveErr(null); setBoardNonce((n) => n + 1);
     } catch (e) { setErr((e as Error).message); }
     finally { setLoading(false); }
@@ -84,13 +90,20 @@ export function PatternProjectEditor({ id }: { id: string }) {
       const a = info.pidByKey[r.a.piece], b = info.pidByKey[r.b.piece];
       if (a && b) made.push({ id: `s${stamp}t${i}`, a: { pid: a, from: r.a.from, count: r.a.count, n: r.a.n }, b: { pid: b, from: r.b.from, count: r.b.count, n: r.b.n } });
     });
-    setSeams((prev) => [...prev, ...made]); setTemplate(info.params as unknown as Record<string, unknown>); setDirty(true);
+    const att: Attach[] = [];
+    info.attach.forEach((r, i) => {
+      const pid = info.pidByKey[r.piece], on = info.pidByKey[r.on];
+      if (pid && on) att.push({ id: `a${stamp}t${i}`, kind: r.kind, pid, on, a: r.a, b: r.b, len: r.len, w: r.w, tail: r.tail });
+    });
+    setSeams((prev) => [...prev, ...made]); setDirty(true);
+    setAttaches((prev) => { const next = [...prev, ...att]; setTemplate({ params: info.params, attach: next }); return next; });
   }, []);
   const onSeams = (next: Seam[]) => { setSeams(next); setDirty(true); };
   const switchTab = (next: Tab) => { if (next === tab) return; if (next === "draw") setBoardNonce((n) => n + 1); setTab(next); };
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, p.shape])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
+  const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes })), [pieces]);
   const badSeams = useMemo(() => seams.filter((s) => checkSeam(shapes, s).status !== "ok").length, [seams, shapes]);
 
   const save = async () => {
@@ -99,11 +112,13 @@ export function PatternProjectEditor({ id }: { id: string }) {
     try {
       const pids = new Set(piecesRef.current.map((p) => p.pid));
       const keep = seams.filter((s) => pids.has(s.a.pid) && pids.has(s.b.pid));   // ตะเข็บของชิ้นที่ลบไปแล้ว = ทิ้ง
+      const keepAtt = attaches.filter((a) => pids.has(a.pid) && pids.has(a.on));
+      const tpl = template || keepAtt.length ? { ...(template ?? {}), attach: keepAtt } : null;
       const res = await apiFetch(`/api/pattern-projects/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), sku_code: sku.trim(), status, basis, template, pieces: piecesRef.current, seams: keep }) });
+        body: JSON.stringify({ name: name.trim(), sku_code: sku.trim(), status, basis, template: tpl, pieces: piecesRef.current, seams: keep }) });
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      setSeams(keep); setDirty(false); setSavedAt(new Date());
+      setSeams(keep); setAttaches(keepAtt); setTemplate(tpl); setDirty(false); setSavedAt(new Date());
     } catch (e) { setSaveErr((e as Error).message); }
     finally { setSaving(false); }
   };
@@ -152,6 +167,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ขั้นตอน", "Step")}>
           {tabBtn("draw", "i:vector-bezier", t("วาดชิ้น", "Draw pieces"))}
           {tabBtn("sew", "i:needle-thread", t("เย็บ", "Sew"), badSeams)}
+          {tabBtn("asm", "i:box", t("ประกอบ 3D", "Assemble 3D"))}
         </div>
         {me?.can_delete && (
           <button type="button" onClick={() => setAsk("delete")} title={t("ลบแพทเทิร์นนี้", "Delete this pattern")} className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600">
@@ -163,8 +179,10 @@ export function PatternProjectEditor({ id }: { id: string }) {
       {tab === "draw" ? (
         <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate}
           footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
-      ) : (
+      ) : tab === "sew" ? (
         <SewView pieces={pieces.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes }))} seams={seams} onChange={onSeams} readonly={!canEdit} />
+      ) : (
+        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => switchTab("sew")} onGoDraw={() => switchTab("draw")} />
       )}
 
       {canEdit && <SaveBar dirty={dirty} saving={saving} error={saveErr} savedAt={savedAt} onSave={save} onDiscard={() => void load()} />}

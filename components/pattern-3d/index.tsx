@@ -5,19 +5,21 @@
  *   2 แบบ:
  *     mode="flat" = ชิ้นแบนวางบนโต๊ะตามตำแหน่งบนกระดานวาด (ชิ้นหนา มีรูเจาะจริง เส้นเย็บประ ป้ายชื่อ) · เลือกชิ้น = ยกขึ้น + สว่าง
  *     mode="bag"  = กระเป๋าที่ประกอบแล้วจากแม่แบบทรง (lib/bag-templates) · แถบ "แยกชิ้นดู" ดึงชิ้นออกจากกัน
+ *     mode="assembly" = กระเป๋าที่ประกอบจากชิ้นจริง + ตะเข็บ (lib/pattern-assembly) · joined = เย็บทีละขั้น
  *   ลากเพื่อหมุน · ล้อเมาส์ซูม · ปุ่มมุมมอง · ชี้ = สว่าง · คลิกชิ้น = onSelect
  *   วาดใหม่เฉพาะตอนมีอะไรเปลี่ยน (ไม่วนวาดตลอด) · ไลบรารี 3D โหลดตอนเปิดครั้งแรก (lib/three-loader)
  *
  *   <Pattern3D mode="flat" pieces={[{ pid, name, cut, sew, holes }]} selected={pid} onSelect={(pid) => …} />
  *   <Pattern3D mode="bag" bag={bagGeometry(params)} explode={0.5} />
  *
- * ข้อจำกัด: แบบ "bag" ประกอบจากสูตรของแม่แบบเท่านั้น — ชิ้นที่วาดเองยังประกอบไม่ได้ (ต้องมีข้อมูลตะเข็บ = รอบถัดไป) · ยังไม่จำลองวัสดุทิ้งตัว
+ * ข้อจำกัด: ประกอบทรงตามกติกา (แผ่นหน้า/หลังขนานกัน + ผิวข้างลากข้ามความลึก) · ยังไม่จำลองวัสดุทิ้งตัว/ย่น
  * ใช้ที่: components/pattern-studio · คู่มือ: docs/pattern-studio.md
  */
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { loadThree, type Three } from "@/lib/three-loader";
 import { BAG_HANDLE_ATTACH, BAG_PVC_MARGIN, bagWindowShape, type BagGeometry } from "@/lib/bag-templates";
+import type { AssemblyOk } from "@/lib/pattern-assembly";
 import { flattenShape, offsetPolygon, type Pt } from "@/lib/pattern-shape";
 
 export type Flat3DPiece = { pid: string; name: string; cut: Pt[]; sew: Pt[]; holes: Pt[][]; color?: string };
@@ -30,11 +32,14 @@ const DEFAULT_COLORS: BagColors = { body: "#9a6a45", handle: "#4a3023" };
 const PAPER = "#d8c08c";
 
 type V3 = [number, number, number];
-type Part = { key: string; id: string; g: any; base: V3; dir: V3; carrier: string | null; mats: any[]; e: number; l: number };
+type Part = { key: string; id: string; g: any; base: V3; dir: V3; carrier: string | null; mats: any[]; e: number; l: number; join: string };
 type Stage = {
   setFlat: (pieces: Flat3DPiece[]) => void;
   setBag: (G: BagGeometry, colors: BagColors) => void;
   setSelected: (id: string | null) => void;
+  setAssembly: (A: AssemblyOk, colors: BagColors) => void;
+  /** โหมดประกอบ: ขั้นที่เย็บแล้ว (null = ใช้แถบแยกชิ้นแทน) */
+  setJoined: (keys: string[] | null) => void;
   setExplode: (e: number) => void;
   setView: (v: Pattern3DView) => void;
   dispose: () => void;
@@ -78,7 +83,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   const S = {
     root: new THREE.Group(), parts: [] as Part[], byKey: {} as Record<string, Part>, pick: [] as any[],
     az: 0.62, pol: 1.22, taz: 0.62, tpol: 1.22, zoom: 1, dist: 100, target: new THREE.Vector3(),
-    dirty: true, hl: null as string | null, sel: null as string | null, explode: 0, mode: "bag" as "bag" | "flat", dead: false,
+    dirty: true, hl: null as string | null, sel: null as string | null, explode: 0, mode: "bag" as "bag" | "flat" | "asm", joined: null as string[] | null, dead: false,
   };
   scene.add(S.root);
 
@@ -108,8 +113,10 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     S.root.traverse((o: any) => { o.geometry?.dispose(); if (o.material) { if (o.isSprite) o.material.map?.dispose(); o.material.dispose(); } });
     scene.remove(S.root); S.root = new THREE.Group(); scene.add(S.root); S.parts = []; S.byKey = {}; S.pick = [];
   };
-  const add = (key: string, id: string, grp: any, base: V3, dir: V3, mats: any[], carrier: string | null = null) => {
-    const p: Part = { key, id, g: grp, base, dir, carrier, mats, e: S.mode === "bag" ? S.explode : 0, l: 0 };
+  // ชิ้นควรอยู่ห่างจากตำแหน่งประกอบแค่ไหน (0 = ประกอบแล้ว · 1 = แยกออก)
+  const target = (join: string) => (S.mode === "flat" ? 0 : S.mode === "asm" && S.joined ? (join === "front" || S.joined.includes(join) ? 0 : 1) : S.explode);
+  const add = (key: string, id: string, grp: any, base: V3, dir: V3, mats: any[], carrier: string | null = null, join = "") => {
+    const p: Part = { key, id, g: grp, base, dir, carrier, mats, e: target(join), l: 0, join };
     S.root.add(grp); S.parts.push(p); S.byKey[key] = p;
   };
   const view = (v: [number, number], snap = false) => {
@@ -253,6 +260,104 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     paint();
   };
 
+  // ── หู: แถบโค้งจากจุดติด a ถึง b (ตั้งตรงแล้วโค้งครึ่งวงกลม · หูสั้น = โค้งแบน) ──
+  const buildHandle = (a: Pt, b: Pt, len: number, w: number, tail: number, color: string, threadCol: number) => {
+    const g = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, e: Pt = [(b[0] - a[0]) / g, (b[1] - a[1]) / g];
+    let n: Pt = [-e[1], e[0]]; if (n[1] < 0) n = [-n[0], -n[1]];
+    const r = g / 2, m0: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], hw = w / 2;
+    const L = (s: number, h: number): Pt => [m0[0] + e[0] * s + n[0] * h, m0[1] + e[1] * s + n[1] * h];
+    let v = (len - Math.PI * r) / 2, eb = 0;
+    if (v < 0) {
+      v = 0; let lo = 0.3, hi = r;
+      for (let i = 0; i < 30; i++) {
+        const mid = (lo + hi) / 2; let l = 0, px = -r, py = 0;
+        for (let k = 1; k <= 48; k++) { const ph = Math.PI * (1 - k / 48), x = r * Math.cos(ph), y = mid * Math.sin(ph); l += Math.hypot(x - px, y - py); px = x; py = y; }
+        if (l > len) hi = mid; else lo = mid;
+      }
+      eb = Math.max(lo, 0.8);
+    }
+    const path: Pt[] = [L(-r, -tail), L(-r, -tail / 2), L(-r, 0)];
+    if (eb) { for (let i = 1; i < 48; i++) { const ph = Math.PI * (1 - i / 48); path.push(L(r * Math.cos(ph), eb * Math.sin(ph))); } path.push(L(r, 0)); }
+    else {
+      const nv = Math.max(2, Math.round(v / 2));
+      for (let i = 1; i <= nv; i++) path.push(L(-r, (v * i) / nv));
+      for (let i = 1; i < 36; i++) { const ph = Math.PI * (1 - i / 36); path.push(L(r * Math.cos(ph), v + r * Math.sin(ph))); }
+      for (let i = 0; i <= nv; i++) path.push(L(r, v * (1 - i / nv)));
+    }
+    path.push(L(r, -tail / 2), L(r, -tail));
+    const pos: number[] = [], nor: number[] = [], uv: number[] = [], Lp: Pt[] = [], Rp: Pt[] = [];
+    for (let i = 0; i < path.length; i++) {
+      const p0 = path[Math.max(0, i - 1)], p1 = path[Math.min(path.length - 1, i + 1)], t = norm(p1[0] - p0[0], p1[1] - p0[1]);
+      Lp.push([path[i][0] - t[1] * hw, path[i][1] + t[0] * hw]); Rp.push([path[i][0] + t[1] * hw, path[i][1] - t[0] * hw]);
+    }
+    let sl = 0, top = -Infinity;
+    for (let i = 0; i < path.length - 1; i++) {
+      const dl = Math.hypot(path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]);
+      const V: [Pt, number, number][] = [[Lp[i], sl, 0], [Rp[i], sl, 1], [Rp[i + 1], sl + dl, 1], [Lp[i], sl, 0], [Rp[i + 1], sl + dl, 1], [Lp[i + 1], sl + dl, 0]];
+      for (const q of V) { pos.push(q[0][0], q[0][1], 0); nor.push(0, 0, 1); uv.push(q[1], q[2]); top = Math.max(top, q[0][1]); }
+      sl += dl;
+    }
+    const grp = new THREE.Group(), geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, side: THREE.DoubleSide }), mesh = new THREE.Mesh(geo, mat);
+    mesh.position.z = 0.1; grp.add(mesh);
+    if (tail > 0.9 && hw > 0.5) [-r, r].forEach((cx) => {
+      const c = [L(cx - hw + 0.3, -tail + 0.3), L(cx + hw - 0.3, -tail + 0.3), L(cx + hw - 0.3, -0.4), L(cx - hw + 0.3, -0.4)];
+      grp.add(dashed([c[0], c[1], c[2], c[3], c[0], c[2]].map((q) => [q[0], q[1], 0.16] as V3), threadCol));
+      grp.add(dashed([c[3], c[1]].map((q) => [q[0], q[1], 0.16] as V3), threadCol));
+    });
+    return { grp, mat, mesh, top };
+  };
+
+  // ── กระเป๋าที่ประกอบจากชิ้นจริง + ตะเข็บ (lib/pattern-assembly) ──
+  const setAssembly = (A: AssemblyOk, colors: BagColors) => {
+    const was = S.mode; S.mode = "asm"; clear(); lights(false);
+    const D = A.depth, H = Math.max(A.height, 1), zOut = 5 + D * 0.5;
+    const thread = lum(colors.body) < 0.5 ? 0xe9dfc8 : 0x4a3a2a, threadH = lum(colors.handle) < 0.5 ? 0xe9dfc8 : 0x4a3a2a;
+    const outer = (c: string) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, metalness: 0, bumpMap: bump, bumpScale: 0.03, side: THREE.FrontSide });
+    const lining = () => new THREE.MeshStandardMaterial({ color: 0xb8ab8e, roughness: 0.95, side: THREE.BackSide, vertexColors: true });
+    const shade = (geo: any) => { const ps = geo.attributes.position, c: number[] = []; for (let k = 0; k < ps.count; k++) { const s = 0.38 + 0.62 * clamp(ps.getY(k) / H, 0, 1); c.push(s, s, s); } geo.setAttribute("color", new THREE.Float32BufferAttribute(c, 3)); return geo; };
+    const V2 = (P: Pt[]) => P.map((q) => new THREE.Vector2(q[0], q[1]));
+    const loop = (P: Pt[], col: number) => dashed([...P, P[0]].map((q) => [q[0], q[1], 0.05] as V3), col);
+    for (const pn of A.panels) {
+      if (pn.outline.length < 3) continue;
+      const grp = new THREE.Group(), shape = new THREE.Shape(V2(pn.outline));
+      pn.holes.forEach((h) => { if (h.length >= 3) shape.holes.push(new THREE.Path(V2(h))); });
+      const geo = shade(new THREE.ShapeGeometry(shape)), m = outer(colors.body), mesh = new THREE.Mesh(geo, m);
+      mesh.userData.piece = pn.pid; S.pick.push(mesh); grp.add(mesh, new THREE.Mesh(geo, lining()));
+      const inset = offsetPolygon(pn.outline, -0.45); if (inset.length >= 3) grp.add(loop(inset, thread));
+      pn.holes.forEach((h) => { const st = offsetPolygon(h, 0.5); if (st.length >= 3) grp.add(loop(st, thread)); });
+      if (pn.side < 0) grp.rotation.y = Math.PI;
+      add(pn.side > 0 ? "front" : "back", pn.pid, grp, [0, 0, (pn.side * D) / 2], [0, 0, pn.side * zOut], [m], null, pn.side > 0 ? "front" : "back");
+    }
+    A.sweeps.forEach((sw, i) => {
+      if (sw.pts.length < 2) return;
+      const grp = new THREE.Group(), geo = gussetGeo(sw.pts, D, H), m = outer(colors.body), mesh = new THREE.Mesh(geo, m);
+      mesh.userData.piece = sw.pid; S.pick.push(mesh); grp.add(mesh, new THREE.Mesh(geo, lining()));
+      const n = sw.pts.length, nv = sw.pts.map((_, k) => { const a = sw.pts[Math.max(0, k - 1)], b = sw.pts[Math.min(n - 1, k + 1)], t = norm(b[0] - a[0], b[1] - a[1]); return [t[1], -t[0]] as Pt; });
+      if (D > 1.6) [D / 2 - 0.45, -(D / 2 - 0.45)].forEach((z) => grp.add(dashed(sw.pts.map((q, k) => [q[0] + nv[k][0] * 0.05, q[1] + nv[k][1] * 0.05, z] as V3), thread)));
+      add(`sw${i}`, sw.pid, grp, [0, 0, 0], [sw.dir[0] * 8, sw.dir[1] * 8, 0], [m], null, A.kind === "pouch" ? "back" : "gusset");
+    });
+    let top = H;
+    A.handles.forEach((h, i) => {
+      const hd = buildHandle(h.a, h.b, h.len, h.w, h.tail, colors.handle, threadH);
+      top = Math.max(top, hd.top); hd.mesh.userData.piece = h.pid; S.pick.push(hd.mesh);
+      if (h.side < 0) hd.grp.rotation.y = Math.PI;
+      add(`h${i}`, h.pid, hd.grp, [0, 0, (h.side * D) / 2], [0, 7, 0], [hd.mat], h.side > 0 ? "front" : "back", "handle");
+    });
+    A.behind.forEach((bh, i) => {
+      const pg = new THREE.Group(), pgeo = new THREE.ShapeGeometry(new THREE.Shape(V2([[bh.x, bh.y], [bh.x + bh.w, bh.y], [bh.x + bh.w, bh.y + bh.h], [bh.x, bh.y + bh.h]])));
+      const pm = new THREE.MeshStandardMaterial({ color: 0xd4ecf7, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
+      const pmesh = new THREE.Mesh(pgeo, pm); pmesh.position.z = -0.18; pmesh.userData.piece = bh.pid; S.pick.push(pmesh); pg.add(pmesh);
+      if (bh.side < 0) pg.rotation.y = Math.PI;
+      add(`b${i}`, bh.pid, pg, [0, 0, (bh.side * D) / 2], [0, 0, -4.5 * bh.side], [pm], bh.side > 0 ? "front" : "back", "behind");
+    });
+    S.target.set(0, top * 0.47, 0); S.dist = Math.max(top, A.width * 1.05, D) * 2.15;
+    shadow.visible = true; shadow.scale.set(A.width * 1.7, Math.max(D, 3) * 2.6, 1);
+    if (was !== "asm") view(VIEWS.iso, true);
+    paint();
+  };
+
   // ── เมาส์/นิ้ว ──
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   let drag: { x: number; y: number; sx: number; sy: number; moved: boolean } | null = null;
@@ -288,7 +393,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     S.dirty = false;
     const k = reduce ? 1 : 0.16; let anim = false, maxE = 0;
     for (const p of S.parts) {
-      const te = S.mode === "bag" ? S.explode : 0, tl = S.mode === "flat" && p.id === S.sel ? 1 : 0;
+      const te = target(p.join), tl = S.mode === "flat" && p.id === S.sel ? 1 : 0;
       if (Math.abs(te - p.e) > 0.003) { p.e += (te - p.e) * k; anim = true; } else p.e = te;
       if (Math.abs(tl - p.l) > 0.003) { p.l += (tl - p.l) * k; anim = true; } else p.l = tl;
       if (p.e > maxE) maxE = p.e;
@@ -307,7 +412,8 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   loop();
 
   return {
-    setFlat, setBag,
+    setFlat, setBag, setAssembly,
+    setJoined: (keys) => { S.joined = keys; S.dirty = true; },
     setSelected: (id) => { if (S.sel !== id) { S.sel = id; paint(); } },
     setExplode: (e) => { S.explode = clamp(e, 0, 1); S.dirty = true; },
     setView: (v) => view(S.mode === "flat" && v === "iso" ? FLAT_VIEW : VIEWS[v]),
@@ -320,8 +426,12 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   };
 }
 
-export function Pattern3D({ mode, pieces, bag, colors, selected = null, onSelect, explode = 0, height = 420, className = "" }: {
-  mode: "flat" | "bag";
+export function Pattern3D({ mode, pieces, bag, assembly, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "" }: {
+  mode: "flat" | "bag" | "assembly";
+  /** mode="assembly": ผลจาก assemble() ของ lib/pattern-assembly (ประกอบจากชิ้นจริง + ตะเข็บ) */
+  assembly?: AssemblyOk | null;
+  /** mode="assembly": ขั้นที่เย็บแล้ว เช่น ["handle","gusset"] — ชิ้นของขั้นที่ยังไม่เย็บจะแยกออก · null = ใช้ explode */
+  joined?: string[] | null;
   /** mode="flat": ชิ้นบนโต๊ะ (พิกัดกระดานวาด ซม. · y ลง) */
   pieces?: Flat3DPiece[];
   /** mode="bag": เรขาคณิตจาก bagGeometry */
@@ -354,9 +464,13 @@ export function Pattern3D({ mode, pieces, bag, colors, selected = null, onSelect
   const col = colors ?? DEFAULT_COLORS;
   useEffect(() => {
     const s = stage.current; if (state !== "ready" || !s) return;
-    if (mode === "bag" && bag) s.setBag(bag, col); else s.setFlat(pieces ?? []);
-  }, [state, mode, bag, pieces, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (state === "ready") stage.current?.setSelected(selected); }, [state, selected, mode, bag, pieces]);
+    if (mode === "assembly" && assembly) s.setAssembly(assembly, col);
+    else if (mode === "bag" && bag) s.setBag(bag, col);
+    else s.setFlat(pieces ?? []);
+  }, [state, mode, bag, pieces, assembly, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (state === "ready") stage.current?.setSelected(selected); }, [state, selected, mode, bag, pieces, assembly]);
+  const joinedKey = joined ? joined.join(",") : null;
+  useEffect(() => { if (state === "ready") stage.current?.setJoined(joined); }, [state, joinedKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state === "ready") stage.current?.setExplode(explode); }, [state, explode]);
 
   const views: [Pattern3DView, string][] = [["iso", t("มุมเฉียง", "Angled")], ["front", t("ด้านหน้า", "Front")], ["side", t("ด้านข้าง", "Side")], ["top", t("มองจากบน", "Top")]];
