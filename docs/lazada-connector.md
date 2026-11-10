@@ -47,7 +47,7 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 | เฟส | ทำอะไร | แตะร้านจริงไหม | สถานะ |
 |---|---|---|---|
 | 1 | ลิ้นชักโชว์ข้อมูลเต็มจาก Lazada (ชื่อ · แบรนด์ · หมวด · รายละเอียด · จุดเด่น · รูป · ชื่อตัวเลือก · ราคาปกติ/ราคาลด+ช่วงวัน · สต๊อก · สถานะต่อตัวเลือก · กล่อง · เหตุผลที่ถูกปัดตก) + ปุ่ม "ดึงตัวนี้จาก Lazada" | อ่านอย่างเดียว | ✅ 2026-11-10 |
-| 2 | แก้ชื่อ/รายละเอียด/จุดเด่น (`/product/update`) + เปิด/ปิดขาย ทั้งสินค้าหรือทีละตัวเลือก (`/product/deactivate` · เปิดกลับ = update `Status active`) | เขียน | รอเจ้าของ · หลัง 11.11 |
+| 2 | แก้ชื่อ/รายละเอียด/จุดเด่น (`/product/update`) + เปิด/ปิดขาย ทั้งสินค้าหรือทีละตัวเลือก (`/product/deactivate` · เปิดกลับ = update `Status active`) | เขียน | ✅ deploy be5b647b (2026-11-10) · **ยังไม่ทดสอบกับร้านจริง** — เจ้าของกดทดสอบ 1 สินค้าก่อน |
 | 3 | ราคา/ราคาลดต่อตัวเลือก (`/product/price_quantity/update` ชุดละ 20 · **ไม่ส่ง Quantity**) · ไม่ยอมส่งราคาที่ขยับ ≥ 80% | เขียน | รอเจ้าของ |
 | 4 | รูปสินค้า/รูปตัวเลือก (`/images/migrate` → update) + น้ำหนัก/ขนาดกล่อง | เขียน | รอเจ้าของ |
 | — | สต๊อก (รอเลิก BigSeller) · เพิ่ม/ลบตัวเลือก · เปลี่ยนหมวด/แบรนด์ | — | ยังไม่ทำ |
@@ -57,6 +57,14 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 - กฎแปลง `lib/lazada-listing-edit.ts` (pure + test · ใช้ได้ทั้งหน้าเว็บ/หลังบ้าน — **ห้าม import lib/lazada** เพราะมีโค้ดเซ็นคำขอ): `lazadaListingView` · `lazSkuLabel` (ชื่อตัวเลือกจาก saleProp เช่น "สี: Black") · `lazImageList` (รูปเป็น array หรือข้อความ JSON) · `lazDateText` · `lazStatusBadge`
 - ข้อมูลเต็ม (รูป/HTML) **ไม่เก็บในระบบ** → ดึงสดทุกครั้งที่เปิด · สำเนาย่อเพิ่มช่อง `label` ต่อ SKU (ดึงทั้งร้านครั้งถัดไปก็ได้) → ตาราง "ตัวเลือกบนร้าน ↔ SKU" โชว์สี/ไซซ์แทนรหัส
 - UI: `components/platform-catalog/lazada-listing-panels.tsx` (แท็บข้อมูล/รูป/ตัวเลือก + ป้ายสถานะหัวลิ้นชัก) · หัว/แท็บจับคู่/ประวัติ ใช้ร่วมกับ LINE ใน `listing-drawer` · HTML รายละเอียดผ่าน `sanitizeRichHtml`
+
+**เฟส 2 (แก้ร้านจริง · ถามก่อนเสมอ · สิทธิ์ `products.platforms.publish`):**
+- แท็บข้อมูล: ชื่อ (≤ 255) · จุดเด่น = textarea บรรทัดละข้อ (`highlightsToLines` ↔ `linesToHighlights` → `<ul><li>`) · รายละเอียด = RichTextEditor (รูปต้องเป็นโดเมน Lazada `slatic.net/lazcdn.com/alicdn.com` ไม่งั้นไม่ให้ส่ง) → แถบท้าย "บันทึกขึ้น Lazada" → ป๊อปก่อน → หลัง
+- `POST /api/lazada/listing-edit {listing_id, before, edit}`: ดึงสดก่อน → ร้านต่างจาก `before` = **409 ไม่ส่งทับ** (คืนข้อมูลล่าสุดให้ฟอร์มเริ่มใหม่) → `planLazadaEdit` → `lazUpdateProductXml` (SKU ครบตามลำดับเดิม + **สถานะเดิมทุกตัว** · ชื่อ escape · HTML ใน CDATA) → ดึงกลับตรวจชื่อ/สถานะ SKU/Pending QC → สำเนาย่อ → audit `lazada_listing_edit`
+- `POST /api/lazada/listing-display {listing_id, open, sku_ids?}`: `planLazadaDisplay` ข้ามตัวที่อยู่สถานะนั้นแล้ว · ปิดทั้งสินค้า = deactivate ระบุแค่ ItemId · ปิดบางตัว = ระบุ SkuId · เปิด = update ตั้ง active เฉพาะตัวที่สั่ง ตัวอื่นคงเดิม → ดึงกลับตรวจ → audit `lazada_listing_display`
+- UI: สวิตช์หัวลิ้นชัก = ทั้งสินค้า · ปุ่ม "เปิด/ปิด" ต่อแถวในแท็บตัวเลือก · ปุ่มดึงตัวนี้ปิดไว้ระหว่างมีที่แก้ค้าง · ราคา/รูป ยังดูอย่างเดียว
+- `lazApiPost` แบบ SDK ทางการ: พารามิเตอร์ระบบ + sign ใน URL · payload ในเนื้อคำขอ · ลายเซ็นคิดจากทั้งหมด · ไม่มี `code` ในคำตอบ = ถือว่าไม่สำเร็จ
+- ⚠️ ยังไม่ยืนยันกับร้านจริง: รูปแบบ XML ของ update/deactivate · การส่ง SKU พร้อม Status ไม่ไปล้างราคา/สต๊อก/รูป (มีแค่ repo ภายนอกยืนยันว่าส่ง SkuId+SellerSku แล้วช่องอื่นไม่หาย) · ทดสอบแนะนำ: สินค้าขายน้อย/ปิดขายอยู่ 1 ตัว · นอกช่วงที่ Lazada ปิดระบบ
 
 **กติกา Lazada ที่ต้องระวังตอนทำเฟส 2–4** (สำรวจจาก JSON ของคู่มือ open.lazada.com 2026-11-10):
 - `/product/item/get` ใช้ `item_id` เท่านั้น (seller_sku เลิกรองรับแล้ว)
