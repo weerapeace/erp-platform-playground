@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  columnTokens, defaultPrefs, docColumnsOrdered, docPrintPerms, docWidthUsedMm, normalizePrefs, renderDocTable,
+  columnTokens, defaultPrefs, docColumnsOrdered, docPrintPerms, docWidthUsedMm, normalizePrefs, renderDocTable, templateHasCopyLabel, withCopies,
 } from "@/lib/doc-print-prefs";
 import { renderTemplate } from "@/lib/template";
 
@@ -64,5 +64,26 @@ describe("doc-print-prefs — ตารางปรับได้ (ใบวา
     expect(out).toContain("<table class=\"bn-lines doc-t\"");
     expect(out).toContain(">ISG2569-11-002</td>");
     expect(docColumnsOrdered(E, defaultPrefs(E)).filter((c) => c.shown)).toHaveLength(8);
+  });
+});
+
+describe("ต้นฉบับ / สำเนา (withCopies)", () => {
+  it("ปิด = หน้าเดียวต่อใบ ช่องคำว่าง", () => {
+    expect(withCopies([{ n: "A" }, { n: "B" }], {})).toEqual([{ n: "A", copy_label: "" }, { n: "B", copy_label: "" }]);
+    expect(withCopies([{ n: "A" }], null)).toEqual([{ n: "A", copy_label: "" }]);
+  });
+  it("เปิด = เรียงทีละใบ ต้นฉบับแล้วสำเนา", () => {
+    expect(withCopies([{ n: "A" }, { n: "B" }], { copies: true }).map((d) => `${d.n}:${d.copy_label}`))
+      .toEqual(["A:ต้นฉบับ", "A:สำเนา", "B:ต้นฉบับ", "B:สำเนา"]);
+  });
+  it("จำค่าเปิดไว้ได้ (normalizePrefs) · ค่าแปลก ๆ ไม่นับ", () => {
+    expect(normalizePrefs("billing_note", { copies: true }).copies).toBe(true);
+    expect(normalizePrefs("billing_note", { copies: "yes" }).copies).toBeUndefined();
+  });
+  it("หาช่อง {{copy_label}} ในแม่แบบ", () => {
+    expect(templateHasCopyLabel({ header_html: '<div class="bn-copy">{{copy_label}}</div>' })).toBe(true);
+    expect(templateHasCopyLabel({ header_html: "{{{ copy_label }}}" })).toBe(true);
+    expect(templateHasCopyLabel({ header_html: "<div>ใบวางบิล</div>" })).toBe(false);
+    expect(templateHasCopyLabel(null)).toBe(false);
   });
 });

@@ -40,13 +40,43 @@ export function useDocPrintPrefs(entityType: string) {
   return { prefs, setPrefs, reload, saved, setSaved };
 }
 
+/**
+ * สวิตช์ "พิมพ์ต้นฉบับ + สำเนา" (เจ้าของ 2026-11-10) — ใช้ทั้ง DocPrintPanel และ DocPrintSettings
+ * เปิด = แต่ละใบพิมพ์ 2 หน้า (หน้าพิมพ์ใช้ withCopies + buildReportHtmlMulti) · บันทึกเป็นค่าเริ่มต้นไปพร้อมค่าอื่น
+ * supported = แม่แบบมีช่อง {{copy_label}} (templateHasCopyLabel) — ไม่มี = เตือน เพราะจะไม่เห็นคำบนกระดาษ
+ */
+export function CopiesSwitch({ prefs, onChange, supported, compact = false }: {
+  prefs: DocPrintPrefs; onChange: (next: DocPrintPrefs) => void; supported: boolean; compact?: boolean;
+}) {
+  const on = !!prefs.copies;
+  const toggle = () => { const next = { ...prefs }; if (on) delete next.copies; else next.copies = true; onChange(next); };
+  return (
+    <div className={compact ? "flex items-center gap-2" : ""}>
+      <button type="button" role="switch" aria-checked={on} onClick={toggle}
+        title="เปิด = แต่ละใบพิมพ์ 2 หน้า: ต้นฉบับ แล้วสำเนา"
+        className={`flex items-center justify-between gap-3 rounded-lg border px-3 text-sm ${compact ? "h-8" : "h-10 w-full"} ${on ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+        <span>พิมพ์ต้นฉบับ + สำเนา</span>
+        <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${on ? "bg-violet-600" : "bg-slate-300"}`}>
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+        </span>
+      </button>
+      {on && !supported && (
+        <p className={`text-[11px] text-amber-700 ${compact ? "" : "mt-1"}`}>แบบฟอร์มนี้ยังไม่มีช่องคำว่า &ldquo;ต้นฉบับ/สำเนา&rdquo; — พิมพ์ 2 หน้าได้ แต่ไม่มีคำบนกระดาษ (เพิ่ม {"{{copy_label}}"} ที่หน้าแม่แบบรายงาน)</p>
+      )}
+      {on && supported && !compact && <p className="mt-1 text-[11px] text-slate-500">แต่ละใบพิมพ์ 2 หน้า: ต้นฉบับ แล้วสำเนา (หลายใบ = เรียงทีละใบ)</p>}
+    </div>
+  );
+}
+
 export function DocPrintSettings({
-  entityType, templates, prefs, onChange,
+  entityType, templates, prefs, onChange, copySupported = false,
 }: {
   entityType: string;
   templates: ReportTemplateRow[];
   prefs: DocPrintPrefs;
   onChange: (next: DocPrintPrefs) => void;
+  /** แม่แบบที่เลือกมีช่อง {{copy_label}} ไหม (templateHasCopyLabel) */
+  copySupported?: boolean;
 }) {
   const toast = useToast();
   const canEdit = usePermission("products.edit");
@@ -90,6 +120,8 @@ export function DocPrintSettings({
             ))}
           </select>
         </label>
+
+        <CopiesSwitch prefs={prefs} onChange={onChange} supported={copySupported} compact />
 
         {cols.length > 0 && (
           <button type="button" onClick={() => setOpen((v) => !v)}
@@ -221,8 +253,10 @@ function StyleRange({ label, unit, value, min, max, step, fallback, onChange }: 
 }
 
 export function DocPrintPanel({
-  entityType, templates, prefs, saved, onChange, onSaved, onAutoFit, tableSupported = true,
+  entityType, templates, prefs, saved, onChange, onSaved, onAutoFit, tableSupported = true, copySupported = false,
 }: {
+  /** แม่แบบที่เลือกมีช่อง {{copy_label}} ไหม (templateHasCopyLabel) — สวิตช์ต้นฉบับ+สำเนา */
+  copySupported?: boolean;
   entityType: string;
   templates: ReportTemplateRow[];
   prefs: DocPrintPrefs;
@@ -291,6 +325,8 @@ export function DocPrintPanel({
         <h3 className="font-semibold text-slate-800">ตั้งค่าการพิมพ์</h3>
         <p className="mt-0.5 text-[11px] text-slate-500">ปรับแล้วเห็นผลทันที · ลากขอบหัวคอลัมน์บนกระดาษได้ (ดับเบิลคลิก = อัตโนมัติ)</p>
       </div>
+
+      <CopiesSwitch prefs={prefs} onChange={change} supported={copySupported} />
 
       {templates.length > 1 && (
         <label className="block">

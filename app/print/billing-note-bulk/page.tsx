@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
 import { buildBillingNoteData, type BillingNotePrintDoc } from "@/lib/billing-note-print";
+import { withCopies } from "@/lib/doc-print-prefs";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
 function BulkInner() {
@@ -60,7 +61,8 @@ function BulkInner() {
     (docs && docs.length && tpl && prefs)
       ? buildReportHtmlMulti(
           { paper_size: tpl.paper_size, orientation: tpl.orientation, header_html: tpl.header_html, body_html: tpl.body_html, footer_html: tpl.footer_html, custom_css: tpl.custom_css },
-          docs.map((d) => buildBillingNoteData(d, prefs)),
+          // ต้นฉบับ + สำเนา → เรียงทีละใบ (ต้นฉบับ A · สำเนา A · ต้นฉบับ B …)
+          withCopies(docs.map((d) => buildBillingNoteData(d, prefs)), prefs),
           fileName,
         )
       : "",

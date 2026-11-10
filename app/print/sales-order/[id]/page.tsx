@@ -5,8 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
 import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
-import { buildReportHtml } from "@/lib/template";
-import { columnTokens } from "@/lib/doc-print-prefs";
+import { buildReportHtml, buildReportHtmlMulti } from "@/lib/template";
+import { columnTokens, templateHasCopyLabel, withCopies } from "@/lib/doc-print-prefs";
 import { DocPrintSettings, useDocPrintPrefs } from "@/components/doc-print-settings";
 import { thaiBahtText } from "@/lib/quotation-print";
 import type { SODetail } from "@/app/api/sales-orders/route";
@@ -160,25 +160,25 @@ export default function PrintSOPage() {
 
   const html = useMemo(() => {
     if (!so || !template || !prefs) return "";
-    return buildReportHtml(
-      {
-        paper_size:  template.paper_size,
-        orientation: template.orientation,
-        header_html: template.header_html,
-        body_html:   template.body_html,
-        footer_html: template.footer_html,
-        custom_css:  template.custom_css,
-      },
-      // คอลัมน์ที่ติ๊กเปิด → token col_<key> ให้แม่แบบซ่อน/โชว์ + colspan ของแถวสรุปยอด
-      { ...buildSoData(so), ...columnTokens("so", prefs) },
-    );
+    const tpl = {
+      paper_size:  template.paper_size,
+      orientation: template.orientation,
+      header_html: template.header_html,
+      body_html:   template.body_html,
+      footer_html: template.footer_html,
+      custom_css:  template.custom_css,
+    };
+    // คอลัมน์ที่ติ๊กเปิด → token col_<key> ให้แม่แบบซ่อน/โชว์ + colspan ของแถวสรุปยอด
+    // ต้นฉบับ + สำเนา (สวิตช์) → 2 หน้า · ปิด = หน้าเดียว (lib/doc-print-prefs withCopies)
+    const pages = withCopies([{ ...buildSoData(so), ...columnTokens("so", prefs) }], prefs);
+    return pages.length > 1 ? buildReportHtmlMulti(tpl, pages) : buildReportHtml(tpl, pages[0]);
   }, [so, template, prefs]);
 
   return (
     <div className="min-h-screen bg-slate-100">
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบกำกับภาษี", so?.tax_invoice_no || so?.so_number)} />
       {prefs && templates.length > 0 && (
-        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
+        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} copySupported={templateHasCopyLabel(template)} />
       )}
       <div className="py-6 px-4">
         {loading ? (

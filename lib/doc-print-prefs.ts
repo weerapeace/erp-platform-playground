@@ -95,6 +95,8 @@ export type DocPrintPrefs = {
   /** (ตารางปรับได้) ชื่อหัวคอลัมน์ที่ตั้งเอง */
   labels?: Record<string, string>;
   style?: DocPrintStyle;
+  /** พิมพ์ต้นฉบับ + สำเนา (แต่ละใบ = 2 หน้า) — ช่อง {{copy_label}} ในแม่แบบ (เจ้าของ 2026-11-10) */
+  copies?: boolean;
 };
 
 export const DOC_WIDTH_MIN_MM = 6;
@@ -175,7 +177,27 @@ export function normalizePrefs(entityType: string, raw: unknown): DocPrintPrefs 
     if (bmm !== undefined) style.border_mm = bmm;
     if (Object.keys(style).length) out.style = style;
   }
+  if (r.copies === true) out.copies = true;
   return out;
+}
+
+// ── ต้นฉบับ / สำเนา ─────────────────────────────────────────
+/** คำในกล่องบนหัวกระดาษ — แม่แบบใส่ {{copy_label}} ตรงที่อยากให้ขึ้น (ว่าง = ปิดสวิตช์ → ซ่อนกล่องด้วย CSS :empty) */
+export const COPY_LABELS = { original: "ต้นฉบับ", copy: "สำเนา" } as const;
+
+/**
+ * เปิด "ต้นฉบับ + สำเนา" → แต่ละใบกลายเป็น 2 หน้า เรียงทีละใบ (ต้นฉบับ A · สำเนา A · ต้นฉบับ B · สำเนา B — เจ้าของเลือก 2026-11-10)
+ * ปิด → หน้าเดียวต่อใบ copy_label ว่าง · ใช้คู่กับ buildReportHtmlMulti (lib/template)
+ */
+export function withCopies<T extends Record<string, unknown>>(list: T[], prefs: Pick<DocPrintPrefs, "copies"> | null | undefined): (T & { copy_label: string })[] {
+  if (!prefs?.copies) return list.map((d) => ({ ...d, copy_label: "" }));
+  return list.flatMap((d) => [{ ...d, copy_label: COPY_LABELS.original }, { ...d, copy_label: COPY_LABELS.copy }]);
+}
+
+/** แม่แบบนี้มีช่องคำว่าต้นฉบับ/สำเนาไหม — ไม่มี = แผงตั้งค่าเตือน (เปิดสวิตช์ได้ แต่จะไม่เห็นคำบนกระดาษ) */
+export function templateHasCopyLabel(tpl: { header_html?: string | null; body_html?: string | null; footer_html?: string | null } | null | undefined): boolean {
+  if (!tpl) return false;
+  return /\{\{\{?\s*copy_label\s*\}?\}\}/.test(`${tpl.header_html ?? ""}${tpl.body_html ?? ""}${tpl.footer_html ?? ""}`);
 }
 
 /**

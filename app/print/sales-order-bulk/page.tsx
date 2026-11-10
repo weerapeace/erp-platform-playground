@@ -18,7 +18,7 @@ import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/co
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { columnTokens } from "@/lib/doc-print-prefs";
+import { columnTokens, templateHasCopyLabel, withCopies } from "@/lib/doc-print-prefs";
 import { DocPrintSettings, useDocPrintPrefs } from "@/components/doc-print-settings";
 import { buildSoData, type SODetailExt } from "@/app/print/sales-order/[id]/page";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -67,7 +67,8 @@ function BulkInner() {
       ? buildReportHtmlMulti(
           { paper_size: tpl.paper_size, orientation: tpl.orientation, header_html: tpl.header_html, body_html: tpl.body_html, footer_html: tpl.footer_html, custom_css: tpl.custom_css },
           // คอลัมน์ที่ติ๊กเปิด → ต้องแนบให้ "ทุกใบ" ไม่งั้นใบนั้นเหลือ 2 คอลัมน์
-          data.map((d) => ({ ...d, ...columnTokens("so", prefs) })),
+          // ต้นฉบับ + สำเนา → เรียงทีละใบ
+          withCopies(data.map((d) => ({ ...d, ...columnTokens("so", prefs) })), prefs),
           docFileName("ใบกำกับภาษีรวม", `${ids.length} ใบ`),
         )
       : "",
@@ -85,7 +86,7 @@ function BulkInner() {
         </PrintDocLinkButton>
       </div>
       {prefs && templates.length > 0 && (
-        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} />
+        <DocPrintSettings entityType="so" templates={templates} prefs={prefs} onChange={setPrefs} copySupported={templateHasCopyLabel(tpl)} />
       )}
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>

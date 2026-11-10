@@ -13,9 +13,9 @@ import { DocPrintPanel, measureDocColumns, useDocPrintPrefs } from "@/components
 import { Icon } from "@/components/icon";
 import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
-import { buildReportHtml } from "@/lib/template";
+import { buildReportHtml, buildReportHtmlMulti } from "@/lib/template";
 import { buildBillingNoteData, type BillingNotePrintDoc } from "@/lib/billing-note-print";
-import { defaultPrefs, DOC_COLUMNS, type DocPrintPrefs } from "@/lib/doc-print-prefs";
+import { defaultPrefs, DOC_COLUMNS, templateHasCopyLabel, withCopies, type DocPrintPrefs } from "@/lib/doc-print-prefs";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
 const ENTITY = "billing_note";
@@ -63,14 +63,16 @@ export default function PrintBillingNotePage() {
     `${template.header_html ?? ""}${template.body_html ?? ""}${template.footer_html ?? ""}`);
   const fileName = docFileName("ใบวางบิล", doc?.bill_number);
 
+  const copySupported = templateHasCopyLabel(template);
   const html = useMemo(() => {
     if (!doc || !template) return "";
-    return buildReportHtml(
-      { paper_size: template.paper_size, orientation: template.orientation,
-        header_html: template.header_html, body_html: template.body_html,
-        footer_html: template.footer_html, custom_css: template.custom_css },
-      buildBillingNoteData(doc, viewPrefs ?? defaultPrefs(ENTITY)),
-    );
+    const tpl = { paper_size: template.paper_size, orientation: template.orientation,
+      header_html: template.header_html, body_html: template.body_html,
+      footer_html: template.footer_html, custom_css: template.custom_css };
+    // ต้นฉบับ + สำเนา (สวิตช์ในแผง) → 2 หน้า · ปิด = หน้าเดียว copy_label ว่าง (lib/doc-print-prefs withCopies)
+    const p = viewPrefs ?? defaultPrefs(ENTITY);
+    const pages = withCopies([buildBillingNoteData(doc, p)], p);
+    return pages.length > 1 ? buildReportHtmlMulti(tpl, pages) : buildReportHtml(tpl, pages[0]);
   }, [doc, template, viewPrefs]);
 
   // ลากขอบหัวคอลัมน์บนพรีวิว → ตั้งความกว้าง (ตรึงคอลัมน์อื่นตามที่เห็น · "หมายเหตุ" ได้ที่เหลือเสมอ)
@@ -132,7 +134,7 @@ export default function PrintBillingNotePage() {
         {panelOpen && prefs && doc && template && (
           <aside className="no-print sticky top-16 w-80 shrink-0 max-h-[calc(100vh-5rem)] overflow-y-auto">
             <DocPrintPanel entityType={ENTITY} templates={templates} prefs={prefs} saved={saved}
-              onChange={setPrefs} onSaved={setSaved} onAutoFit={autoFit} tableSupported={tableSupported} />
+              onChange={setPrefs} onSaved={setSaved} onAutoFit={autoFit} tableSupported={tableSupported} copySupported={copySupported} />
           </aside>
         )}
       </div>
