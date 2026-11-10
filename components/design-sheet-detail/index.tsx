@@ -61,6 +61,18 @@ import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/ro
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import dynamic from "next/dynamic";
 import { DblClickToEdit } from "@/components/dbl-click-edit";
+import { DriveUploadBox, type DriveUploadStart } from "@/components/drive-upload-box";
+
+/** เริ่มอัป 1 ไฟล์ขึ้นโฟลเดอร์ Drive ของใบงาน (API หา/สร้างโฟลเดอร์ + เปิด session + ลงประวัติ) → ตัวไฟล์ DriveUploadBox ส่งต่อเอง */
+async function startSheetDriveUpload(sheetId: string, file: File): Promise<DriveUploadStart> {
+  const res = await apiFetch(`/api/design-sheets/${sheetId}/drive`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: file.name, mime: file.type || "application/octet-stream", size: file.size }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error || !j.data?.upload_url) throw new Error(j.error || tr(`เริ่มอัปไม่สำเร็จ (${res.status})`, `Could not start upload (${res.status})`));
+  return { upload_url: j.data.upload_url, folder_url: j.data.folder_url };
+}
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 // ลงออเดอร์จากใบงานนี้ (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเฉพาะตอนกด
@@ -517,6 +529,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [noticeCount, setNoticeCount] = useState<number | null>(null);
   const noticeSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   useEffect(() => { if (modalTab === "notice") setNoticeMounted(true); }, [modalTab]);
+  // 📁 โฟลเดอร์ Drive ของใบ (ไฟล์งาน AI/PSD/PDF) — หาเฉพาะตอนเปิดแท็บข้อมูลงานของใบที่บันทึกแล้ว · ไม่เจอ = สร้างตอนอัปไฟล์แรก
+  const [driveFolder, setDriveFolder] = useState<{ id: string; url: string | null } | null>(null);
+  const driveSheetId = form?.id ?? null;
+  const driveFolderUrl = driveFolder && driveFolder.id === driveSheetId ? driveFolder.url : null;
+  useEffect(() => {
+    if (!driveSheetId || modalTab !== "info" || driveFolder?.id === driveSheetId) return;   // หาแล้วของใบนี้ = ไม่ถามซ้ำตอนสลับแท็บ
+    let alive = true;
+    apiFetch(`/api/design-sheets/${driveSheetId}/drive`).then((r) => r.json())
+      .then((j) => { if (alive && !j.error) setDriveFolder({ id: driveSheetId, url: j.data?.folder_url ?? null }); }).catch(() => {});
+    return () => { alive = false; };
+  }, [driveSheetId, modalTab, driveFolder?.id]);
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);   // 🕘 ป๊อปเวอร์ชันตีราคา (ข้อ C)
@@ -2025,19 +2048,31 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     // ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึกใบงาน) — โชว์บนการ์ด + กล่อง hover ของ Design Dashboard · ต้องมีเลขใบก่อน
     waiting: form.id ? (
       <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={form.id} canEdit={canEdit}
-        presetType={DESIGN_WAITING.presetType} label={t("⏳ รออะไรอยู่", "⏳ Waiting on")} emptyText={t("ไม่มีอะไรรอ", "Nothing pending")} />
+        presetType={DESIGN_WAITING.presetType} autoNew label={t("⏳ รออะไรอยู่", "⏳ Waiting on")} emptyText={t("ไม่มีอะไรรอ", "Nothing pending")} />
     ) : null,
     drive: (
-      <label className="block">
-        <span className="text-[11px] text-slate-500">{t("ลิงก์ไฟล์งาน (Google Drive)", "Work file link (Google Drive)")}</span>
-        <div className="flex gap-1.5 mt-0.5">
-          <input value={form.drive_link} onChange={(e) => patch({ drive_link: e.target.value })} disabled={!canEdit} placeholder="https://drive.google.com/..."
-            className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-          {form.drive_link && <a href={form.drive_link} target="_blank" rel="noreferrer"
-            className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">{t("↗ เปิด", "↗ Open")}</a>}
-        </div>
-      </label>
+      <div className="block">
+        <label className="block">
+          <span className="text-[11px] text-slate-500">{t("ลิงก์ไฟล์งาน (Google Drive)", "Work file link (Google Drive)")}</span>
+          <div className="flex gap-1.5 mt-0.5">
+            <input value={form.drive_link} onChange={(e) => patch({ drive_link: e.target.value })} disabled={!canEdit} placeholder="https://drive.google.com/..."
+              className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+            {form.drive_link && <a href={form.drive_link} target="_blank" rel="noreferrer"
+              className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">{t("↗ เปิด", "↗ Open")}</a>}
+          </div>
+        </label>
+        {!form.id && <p className="mt-1 text-[10px] text-slate-400">{t("บันทึกใบงานก่อน แล้วจะลากไฟล์งาน (AI / PSD / PDF) ขึ้น Drive ได้", "Save the design sheet first, then you can drop work files (AI / PSD / PDF) to Drive")}</p>}
+      </div>
     ),
+    /* 📁 โยนไฟล์งาน AI / PSD / PDF ขึ้นโฟลเดอร์ Drive ของใบ (ของกลาง DriveUploadBox · ไฟล์ใหญ่ได้ถึง 5GB) — ใบที่บันทึกแล้วเท่านั้น
+       อัปไฟล์แรก = ระบบสร้างโฟลเดอร์ + เติมลิงก์ช่องบนให้ (ถ้าช่องยังว่าง) → อัปเดตฟอร์มด้วย กันกด "บันทึก" ทีหลังแล้วลิงก์หาย */
+    driveFiles: form.id ? (
+      <DriveUploadBox key={form.id} folderUrl={driveFolderUrl} canUpload={canEdit}
+        title={t("ไฟล์งานใน Drive", "Work files in Drive")}
+        hint={t("หรือลากมาวาง · AI PSD PDF ฯลฯ ได้ถึง 5GB", "or drag here · AI PSD PDF etc. up to 5GB")}
+        startUpload={(file) => startSheetDriveUpload(form.id!, file)}
+        onUploaded={({ folderUrl }) => { setDriveFolder({ id: form.id!, url: folderUrl }); if (!form.drive_link.trim()) patch({ drive_link: folderUrl }); }} />
+    ) : null,
     /* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้)
         ช่องนี้ (และร่าง Parent) เป็น "ช่อง quick" = เพิ่ม/เอาออกได้ในโหมดดูเลย ไม่ต้องกด ✏️ แก้ไขก่อน
         (เดิมผูก fullEdit → โหมดดูเห็นแค่หัวข้อเปล่า ๆ ไม่มีช่องให้พิมพ์ เจ้าของแจ้งว่า "ใช้ไม่ได้") · มีผลจริงตอนกดบันทึก */
@@ -2382,6 +2417,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       <div className="grid grid-cols-2 gap-2">{fld.code}{fld.status}</div>
                       {fld.name}
                       <div className={`grid gap-2 ${narrow ? "grid-cols-1" : "grid-cols-2"}`}>{fld.brand}{fld.drive}</div>
+                      {fld.driveFiles}
                       {/* 📅 วันสำคัญ — การ์ดกลาง DateCards (กดการ์ดเลือกวัน · ป้ายอีก/เลยกี่วัน · เส้นเวลา) · งานปิดแล้วไม่เตือนสี */}
                       <div>
                         <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500"><Icon name="calendar" className="text-slate-400" /> {t("วันสำคัญ", "Key dates")}</div>

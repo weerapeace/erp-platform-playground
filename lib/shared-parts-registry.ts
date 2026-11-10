@@ -408,6 +408,22 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "duplicate-upload.md",
   },
   {
+    key: "drive-upload-box", label: "กล่องอัปไฟล์ขึ้น Google Drive", code: "DriveUploadBox", category: "file",
+    source: { path: "components/drive-upload-box" },
+    what: "ลากวาง / กดแนบไฟล์งาน (AI · PSD · PDF ฯลฯ ใหญ่ได้ถึง 5GB) ขึ้นโฟลเดอร์ Drive ของรายการ + โชว์ไฟล์ในโฟลเดอร์ · ส่งทีละชิ้นผ่าน lib/drive-chunk-upload",
+    when: "รายการที่มีโฟลเดอร์ Drive ของตัวเอง (เช่น ใบงานออกแบบ) — API ของโมดูลคุมเองว่าโฟลเดอร์อยู่ไหน ใครอัปได้ และลงประวัติ",
+    notWhen: "รูปสินค้า/รูปเล็กที่ต้องโชว์ในระบบ → ImageManager / ไฟล์แนบ R2 (FileInput, Attachments) · ไฟล์ปริ้น → Drive ตามกฎที่เก็บไฟล์",
+    doc: "drive-upload-box.md",
+    note: "ใบสั่งแพทเทิร์น / คลัง Contents ยังมีปุ่มอัป Drive ของตัวเอง — ย้ายมาใช้ตัวนี้ได้ภายหลัง",
+  },
+  {
+    key: "drive-folder-files", label: "รายการไฟล์ในโฟลเดอร์ Drive", code: "DriveFolderFiles", category: "file",
+    source: { path: "components/drive-folder-files" },
+    what: "โชว์ว่าในโฟลเดอร์ Google Drive มีไฟล์อะไร + ปุ่มเปิดใน Drive (โหลดแบบไม่บล็อกป๊อปอัป)",
+    when: "มีลิงก์โฟลเดอร์ Drive แล้วอยากให้เห็นไฟล์ข้างใน (ดูอย่างเดียว) — อยากอัปด้วยใช้ DriveUploadBox ซึ่งรวมตัวนี้ไว้แล้ว",
+    doc: "drive-upload-box.md",
+  },
+  {
     key: "file-drop", label: "ลากไฟล์มาวาง", code: "useFileDrop", category: "file",
     source: { path: "components/file-drop" },
     what: "ให้กล่องไหนก็ได้รับไฟล์ที่ลากมาวาง",

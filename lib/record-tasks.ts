@@ -14,6 +14,10 @@ const MAX_LINK_LABEL = 60;
  *  links[i] = ลิงก์ของข้อนั้น (มีเฉพาะเมื่อมีข้อค้างที่ใส่ลิงก์ไว้) */
 export type ChecklistSummary = { open: string[]; who?: (string | null)[]; ids?: string[]; aids?: (string | null)[]; links?: TaskLink[][]; done: number };
 
+/** สวิตช์ในค่าที่ใช้บ่อย (erp_lookups.metadata.auto_new) = "ใส่ข้อนี้ให้เองทุกครั้งที่สร้างเรคคอร์ดใหม่" — ฝั่งสร้างเรียก seedChecklistOnCreate */
+export const PRESET_AUTO_NEW = "auto_new";
+export const isAutoNewPreset = (metadata: unknown) => (metadata as Record<string, unknown> | null)?.[PRESET_AUTO_NEW] === true;
+
 /** "เสร็จ" ในตาราง = resolved (check constraint: open/in_progress/resolved/ignored/archived) */
 export const isTaskDone = (status: string | null | undefined) => status === "resolved";
 

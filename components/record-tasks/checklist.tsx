@@ -16,7 +16,7 @@ import { UserPicker, useRecentUsers } from "@/components/pickers";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, summarizeTasks, taskTitleWithLinks, taskWithWho, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
+import { isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, PRESET_AUTO_NEW, summarizeTasks, taskTitleWithLinks, taskWithWho, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
 import { TaskLinkList, TaskLinksButton } from "./task-links";
@@ -72,6 +72,8 @@ export function WhoPicker({ onPick, onCancel, allowNone }: { onPick: (u: { id: s
 
 /** สวิตช์ในป๊อปตั้งค่าปุ่มลัด: ค่านี้กดแล้วเปิดช่องลิงก์ให้เอง (metadata.links ของค่ากลาง) */
 const PRESET_FLAGS: LookupFlag[] = [{ key: "links", label: "🔗", title: "กดปุ่มนี้แล้วเปิดช่องวางลิงก์ให้เลย (เช่น ซื้อของ)" }];
+/** สวิตช์ "ใส่ให้เองตอนสร้างใหม่" (metadata.auto_new) — โชว์เฉพาะเช็กลิสต์ที่ฝั่งสร้างเรียก seedChecklistOnCreate (prop autoNew) */
+const AUTO_NEW_FLAG: LookupFlag = { key: PRESET_AUTO_NEW, label: "ใบใหม่", title: "ใส่ข้อนี้ให้เองทุกครั้งที่สร้างใบใหม่" };
 
 /** ช่องเพิ่มลิงก์ใต้ข้อ — วางลิงก์ + ชื่อกำกับ (ไม่บังคับ) · Enter = เพิ่ม · ไม่ใช่ลิงก์/ซ้ำ = เตือน ไม่บันทึก */
 function LinkAdder({ existing, onAdd, onClose }: { existing: TaskLink[]; onAdd: (l: TaskLink) => Promise<boolean>; onClose: () => void }) {
@@ -110,9 +112,11 @@ function LinkAdder({ existing, onAdd, onClose }: { existing: TaskLink[]; onAdd: 
 }
 
 export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdit, onChange, presetType = null, label = null,
-  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true }: Common & {
+  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true, autoNew = false }: Common & {
   /** ชนิดค่ากลางของปุ่มลัด (null = ไม่มีปุ่มลัด) */
   presetType?: string | null;
+  /** ป๊อปตั้งค่าปุ่มลัดมีสวิตช์ "ใส่ให้เองตอนสร้างใหม่" — ใส่เฉพาะเรคคอร์ดที่ API สร้างเรียก seedChecklistOnCreate แล้ว */
+  autoNew?: boolean;
   label?: ReactNode;
   emptyText?: string;
   placeholder?: string;
@@ -235,8 +239,9 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
           </div>
         )}
       </div>
-      {presetType && <LookupValuesEditor lookupType={presetType} open={presetOpen} onClose={() => setPresetOpen(false)} title={presetTitle} flags={PRESET_FLAGS}
-        description="เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · 🔗 = กดแล้วเปิดช่องวางลิงก์ให้เลย · ใช้ร่วมกันทั้งทีม" />}
+      {presetType && <LookupValuesEditor lookupType={presetType} open={presetOpen} onClose={() => setPresetOpen(false)} title={presetTitle}
+        flags={autoNew ? [...PRESET_FLAGS, AUTO_NEW_FLAG] : PRESET_FLAGS}
+        description={`เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · 🔗 = กดแล้วเปิดช่องวางลิงก์ให้เลย${autoNew ? " · ใบใหม่ = ใส่ข้อนี้ให้เองตอนสร้างใบใหม่" : ""} · ใช้ร่วมกันทั้งทีม`} />}
     </div>
   );
 }

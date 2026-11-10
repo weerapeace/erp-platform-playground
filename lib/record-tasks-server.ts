@@ -4,10 +4,11 @@
  *   userNames             = id ผู้ใช้ → ชื่อ (ผู้รับผิดชอบ)
  *   notifyAssignee        = กระดิ่งเด้งบอกผู้รับผิดชอบคนใหม่ (ไม่เด้งถ้ามอบให้ตัวเอง)
  *   loadChecklistPresets / findUserByName / createRecordTasks = เพิ่มข้อจากนอกหน้าเว็บ (Discord: ปุ่มพิมพ์เพิ่ม + เมนูค่าที่ใช้บ่อย)
+ *   seedChecklistOnCreate = ใส่ข้อตั้งต้นให้เรคคอร์ดใหม่ (ค่าที่ใช้บ่อยที่เปิดสวิตช์ "ใส่ให้เองตอนสร้างใหม่")
  * doc: docs/record-tasks.md
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { linksOf, summarizeTasks, type ChecklistSummary } from "@/lib/record-tasks";
+import { isAutoNewPreset, linksOf, summarizeTasks, type ChecklistSummary } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { writeAudit } from "@/lib/audit";
@@ -80,6 +81,32 @@ export async function loadChecklistPresets(admin: Admin, moduleKey: string, limi
   const { data } = await admin.from("erp_lookups").select("name").eq("lookup_type", type).eq("is_active", true)
     .order("sort_order", { ascending: true }).order("name", { ascending: true }).limit(limit);
   return [...new Set(((data ?? []) as { name: string | null }[]).map((r) => (r.name ?? "").trim()).filter(Boolean))];
+}
+
+/** ใส่ข้อตั้งต้นให้เรคคอร์ดที่เพิ่งสร้าง = ค่าที่ใช้บ่อยที่เปิดสวิตช์ "ใส่ให้เองตอนสร้างใหม่" (metadata.auto_new)
+ *  เรียงตามลำดับในค่ากลาง (created_at ห่างกันทีละ 1 ms เพราะรายการเรียงตามเวลาที่เพิ่ม) · ประวัติทีละข้อ
+ *  คืนชื่อข้อที่ใส่ · ไม่มีค่าที่เปิดสวิตช์ / พลาด = [] — ไม่ขวางการสร้างเรคคอร์ด */
+export async function seedChecklistOnCreate(admin: Admin, moduleKey: string, recordId: string, actor: { id: string | null; name: string }): Promise<string[]> {
+  const t = TARGETS[moduleKey];
+  if (!t?.presetType || !isUuid(recordId)) return [];
+  try {
+    const { data } = await admin.from("erp_lookups").select("name, metadata").eq("lookup_type", t.presetType).eq("is_active", true)
+      .order("sort_order", { ascending: true }).order("name", { ascending: true }).limit(50);
+    const titles = [...new Set(((data ?? []) as { name: string | null; metadata: unknown }[])
+      .filter((r) => isAutoNewPreset(r.metadata)).map((r) => (r.name ?? "").trim().slice(0, 300)).filter(Boolean))].slice(0, 10);
+    if (!titles.length) return [];
+    const base = Date.now();
+    const { data: rows, error } = await admin.from("erp_record_tasks").insert(titles.map((title, i) => ({
+      module_key: moduleKey, record_id: recordId, record_type: t.entity, title, status: "open", created_by: actor.name,
+      created_at: new Date(base + i).toISOString(),
+    }))).select("id, title");
+    if (error) return [];
+    for (const r of (rows ?? []) as { id: string; title: string }[]) {
+      await writeAudit(admin, { action: "create", entityType: "record_task", entityId: r.id, actorId: actor.id, actorName: actor.name,
+        metadata: { module_key: moduleKey, record_id: recordId, title: r.title, via: "auto_new" } });
+    }
+    return titles;
+  } catch { return []; }
 }
 
 /** หา "ผู้ใช้ที่ยังทำงานอยู่" จากชื่อที่พิมพ์ (ชื่อที่โชว์ / username / ชื่อหน้าอีเมล) — ตรงเป๊ะก่อน แล้วค่อยขึ้นต้น/มีคำนี้ (ต้องเจอคนเดียว) */

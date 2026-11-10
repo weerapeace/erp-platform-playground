@@ -5,6 +5,7 @@
  *      → list (server mode) + รูปหลักจากระบบแนบไฟล์กลาง (erp_playground_attachments)
  * POST /api/design-sheets → สร้างใบงาน (เลขรันอัตโนมัติ DS-{YYYY}-{0000})
  *      + line_inbox_id = เปิดใบงานจากร่างใน "กล่องงานจากไลน์" (จองร่างก่อน → สร้างใบ → แนบรูปจากไลน์ + ผูกร่าง)
+ *      + ⏳ รออะไรอยู่ ตั้งต้นให้เอง (seedChecklistOnCreate · ค่าใช้บ่อยที่เปิด "ใส่ให้เองตอนสร้างใบใหม่")
  *
  * ของกลาง: guardApi (products.view/products.edit) + writeAudit → audit_logs
  */
@@ -16,7 +17,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { isValidDsStatus } from "./shared";
 import { designSheetCoverMap } from "@/lib/design-sheet-covers";
-import { loadChecklistSummaries } from "@/lib/record-tasks-server";
+import { loadChecklistSummaries, seedChecklistOnCreate } from "@/lib/record-tasks-server";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import type { ChecklistSummary } from "@/lib/record-tasks";
 import { requestActor } from "@/lib/request-actor";
@@ -248,7 +249,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // เปิดจากร่างในกล่องงานจากไลน์ — จองก่อนออกเลข (กันสองคนกดพร้อมกัน / กดซ้ำ ได้ใบงานซ้ำ)
   const inboxId = String(body.line_inbox_id ?? "").trim();
   let inboxRow: Record<string, unknown> | null = null;
-  const actor = inboxId ? await requestActor(supabaseFromRequest(request)) : null;
+  const actor = await requestActor(supabaseFromRequest(request));   // ชื่อคนสร้าง: ร่างจากไลน์ + ข้อตั้งต้น "รออะไรอยู่"
   if (inboxId) {
     if (!/^[0-9a-f-]{36}$/i.test(inboxId)) return NextResponse.json({ error: "line_inbox_id ไม่ถูกต้อง" }, { status: 400 });
     const claim = await claimInboxForSheet(admin, inboxId, { id: actor?.id ?? null, name: actor?.name ?? null });
@@ -277,8 +278,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: inboxRow ? { code, name, from_line_inbox: inboxId } : { code, name },
   });
+  // ⏳ รออะไรอยู่ ตั้งต้น = ค่าที่ใช้บ่อยที่เปิดสวิตช์ "ใส่ให้เองตอนสร้างใบใหม่" (ตั้งที่ ⚙️ ข้างปุ่มใช้บ่อย) · พลาด = ใบงานยังสร้างได้ปกติ
+  const waitingSeeded = await seedChecklistOnCreate(admin, DESIGN_WAITING.moduleKey, String(row.id), { id: actor.id ?? user?.id ?? null, name: actor.name ?? user?.email ?? "system" });
   const lineImages = inboxRow
     ? await finishInboxConvert(admin, inboxRow, { id: String(row.id), code }, { id: actor?.id ?? null, name: actor?.name ?? null })
     : 0;
-  return NextResponse.json({ id: row.id, code, line_images: lineImages, error: null });
+  return NextResponse.json({ id: row.id, code, line_images: lineImages, waiting_seeded: waitingSeeded.length, error: null });
 }

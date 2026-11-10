@@ -396,7 +396,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         {/* ⏳ รออะไรอยู่ = เช็กลิสต์กลาง ชุดเดียวกับหน้าคอม (บันทึกทีละข้อทันที) */}
         <div className="col-span-2">
           <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={sheet.id} canEdit={canEdit}
-            presetType={DESIGN_WAITING.presetType} label={t("⏳ รออะไรอยู่", "⏳ Waiting for")} />
+            presetType={DESIGN_WAITING.presetType} autoNew label={t("⏳ รออะไรอยู่", "⏳ Waiting for")} />
         </div>
         <div className="col-span-2">
           <div className="text-[11px] text-slate-400">Parent SKU</div>
