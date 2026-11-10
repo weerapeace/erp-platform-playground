@@ -8,13 +8,15 @@
  * - ขวา: แก้สีที่เลือก — สีเดียว / หลายสีแบ่งช่อง (2–4) / รูปลาย (อัปโหลด · คลังรูป · ✂️ ครอปจากรูป SKU ที่ใช้สีนี้ = ImageCropPicker)
  * - 💧 ดูดสี: รูป SKU ที่ใช้สีนี้ทั้งหมด (รวมตัวที่ยังไม่ขึ้นเว็บ + รูปของรุ่น · โหลดตอนกด ใช้ร่วมกับ ✂️) หรือ "เลือกรูปอื่น" จากคลัง/รูปสินค้าบนเว็บ (ImageEyedropper)
  * - ชื่อสีผสม ("กรมท่า-ครีม-ขาว") ประกอบจากสีย่อยให้เอง → ตั้งสีย่อยครบก็ขึ้นเอง หรือกด "ตั้งเองเฉพาะชื่อนี้"
+ * - 📏 แบบ "ไซส์ (ไม่มีสี)" (2026-11-10): ชื่ออย่าง "M (20.5 cm.)" · "10 รู" ที่ติดมากับช่องสี SKU → ไม่ต้องมีจุดสี
+ *   ชื่อผสม "ดำ (01),M (20.5 cm.)" ใช้แค่ส่วนสี · ชื่อที่ดูเป็นไซส์ (looksLikeSize) มีปุ่มแนะนำ แต่ต้องกดเอง + บันทึกทีเดียวเหมือนสีอื่น
  * - 💾 ตั้งหลายสีแล้วบันทึกทีเดียว (2026-11-05): ที่แก้ค้างอยู่ใน drafts (ต่อแถว) · สลับสีได้ไม่ถาม · ในตาราง = จุดสีใหม่ + "รอบันทึก"/"ยังไม่ครบ"
  *   แถบล่าง SaveBar "บันทึกทั้งหมด (N สี)" → POST { items } ครั้งเดียว · ตัวที่ยังไม่ครบ/บันทึกพลาด ค้างไว้ให้แก้ต่อ · "ล้างจุดสี" ยังทำทันทีทีละสี
  *
  * ใช้: <ColorSwatchButton /> (ปุ่ม + ป๊อปอัป · 2 แท็บ: หน้าตาจุดสี / สีหลักในตัวกรอง = ColorToneMatcher) หรือ <ColorSwatchManager /> ฝังในหน้า
  * focusNames = เปิดมาโชว์ "เฉพาะสีเหล่านี้" (เช่น สีของสินค้าที่กำลังแก้ · ชื่อผสมพ่วงสีย่อยให้) — สลับแท็บ ทั้งหมด ได้
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
@@ -26,13 +28,15 @@ import { ColorInput } from "@/components/color-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ImageEyedropper } from "@/components/image-eyedropper";
 import { ImageCropPicker, type CropSourceGroup } from "@/components/image-crop-picker";
+import { Icon } from "@/components/icon";
 import {
-  SwatchIndex, swatchCss, splitColorName, hasSwatch, normColorName, isHex,
+  SwatchIndex, swatchCss, splitColorName, hasSwatch, normColorName, isHex, looksLikeSize,
   SWATCH_KIND_LABEL, MAX_SPLIT, type SwatchEntry, type SwatchKind,
 } from "@/lib/color-swatch";
 
 interface Used { name: string; skus: number; shops: string[]; images?: string[] }
-type Status = "set" | "auto" | "unset";
+/** size = ตั้งเป็น "ไซส์ (ไม่มีสี)" — ไม่ต้องมีจุดสี · ชื่อผสมที่มีส่วนนี้ใช้แค่ส่วนที่เป็นสี */
+type Status = "set" | "auto" | "unset" | "size";
 interface Row {
   key: string;
   name: string;
@@ -53,24 +57,33 @@ const STATUS_UI: Record<Status, { label: string; cls: string }> = {
   set: { label: "ตั้งแล้ว", cls: "bg-emerald-50 text-emerald-700" },
   auto: { label: "ผสมอัตโนมัติ", cls: "bg-blue-50 text-blue-700" },
   unset: { label: "ยังไม่ตั้ง", cls: "bg-amber-50 text-amber-700" },
+  size: { label: "ไซส์ (ไม่มีสี)", cls: "bg-slate-100 text-slate-600" },
 };
 const thumb = (k: string) => keyUrl(k, 96) ?? "";
 const isAscii = (s: string) => /^[\x20-\x7E]+$/.test(s);
 /** หน้าตาจุดสีของค่าที่กำลังแก้ (ยังไม่มีสีที่ใช้ได้ = null) */
 const draftCssOf = (d: Draft) =>
-  d.kind === "image"
+  d.kind === "none" ? null
+  : d.kind === "image"
     ? d.imageKey ? swatchCss({ colors: [], imageKey: d.imageKey }, thumb) : null
     : d.colors.filter(isHex).length ? swatchCss({ colors: d.colors.filter(isHex), imageKey: null }, thumb) : null;
 // ทุกช่องสีต้องกรอกถูก (ช่องว่างที่กด "+ เพิ่มสี" ค้างไว้ = ยังไม่ครบ ไม่ปล่อยให้หายเงียบตอนบันทึก) · คำใหม่ต้องมีชื่ออังกฤษ
 const draftReady = (d: Draft) => (!d.isNew || d.en.trim().length > 0) && (
-  d.kind === "image" ? !!d.imageKey
+  d.kind === "none" ? true
+  : d.kind === "image" ? !!d.imageKey
     : d.kind === "split" ? d.colors.length >= 2 && d.colors.every(isHex)
     : isHex(d.colors[0])
 );
 const draftMissing = (d: Draft) => (d.isNew && !d.en.trim() ? "ใส่ชื่ออังกฤษ" : d.kind === "image" ? "เลือกรูปลาย" : "เลือกสีให้ครบ");
 const sameDraft = (a: Draft, b: Draft) => a.en.trim() === b.en.trim() && a.kind === b.kind && a.imageKey === b.imageKey && a.colors.join("|") === b.colors.join("|");
 
-function Dot({ css, size = 22 }: { css: string | null; size?: number }) {
+function Dot({ css, size = 22, sizeMark }: { css: string | null; size?: number; sizeMark?: boolean }) {
+  // 📏 ไซส์ (ไม่มีสี) = ไม้บรรทัดแทนจุดสี
+  if (sizeMark) return (
+    <span className="inline-flex items-center justify-center rounded-full shrink-0 bg-slate-100 text-slate-500" style={{ width: size, height: size, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.1)" }} title="ไซส์ (ไม่มีสี)">
+      <Icon name="ruler" size={Math.round(size * 0.6)} />
+    </span>
+  );
   return (
     <span
       className="inline-block rounded-full shrink-0"
@@ -115,7 +128,9 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
   }
 
   for (const r of rows.values()) {
-    if (hasSwatch(r.entry)) {
+    if (r.entry?.kind === "none") {
+      r.status = "size";
+    } else if (hasSwatch(r.entry)) {
       r.status = "set";
       r.css = swatchCss({ colors: r.entry.colors, imageKey: r.entry.kind === "image" ? r.entry.imageKey : null }, thumb);
     } else if (r.compound) {
@@ -140,7 +155,12 @@ function focusKeysFor(names: string[], entries: SwatchEntry[]): Set<string> {
   return out;
 }
 
-export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChange?: (dirty: boolean) => void; focusNames?: string[] }) {
+export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
+  onDirtyChange?: (dirty: boolean) => void;
+  focusNames?: string[];
+  /** อยู่ในป๊อปหลายแท็บ: กลับมาที่แท็บนี้ (และไม่มีที่แก้ค้าง) = โหลดใหม่ — แท็บสีหลักตั้ง "ไม่ใช่สี/ไซส์" แล้วเห็นทันที */
+  active?: boolean;
+}) {
   const toast = useToast();
   const [entries, setEntries] = useState<SwatchEntry[]>([]);
   const [used, setUsed] = useState<Used[]>([]);
@@ -183,6 +203,12 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && wasActive.current === false && !dirty) void load();
+    wasActive.current = active;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // focusNames ใส่เป็นแถวด้วยเสมอ (สีที่ยังไม่มีในทะเบียน/ยังไม่ถูกนับ ก็ยังกดตั้งได้ · นับ 0 SKU ไม่กระทบยอด)
   const rows = useMemo(() => buildRows(entries, [...used, ...focus.map((name) => ({ name, skus: 0, shops: [] }))]), [entries, used, focus]);
@@ -197,6 +223,8 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     return true;
   });
   const sel = rows.find((r) => r.key === selKey) ?? null;
+  // 📏 ชื่อที่ "ดูเป็นไซส์" แต่ยังไม่ได้ตั้ง (แนะนำเท่านั้น — เจ้าของกดเองถึงจะตั้ง)
+  const sizeSuggest = shown.filter((r) => r.status === "unset" && !r.compound && !drafts[r.key] && looksLikeSize(r.name));
   // เปิดจากสินค้า → เลือกสีแรกที่ยังไม่ตั้งให้เลย (ตั้งต่อได้ทันที)
   const [autoPicked, setAutoPicked] = useState(false);
 
@@ -229,6 +257,13 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     });
   };
   const discard = (key: string) => setDrafts((m) => { const n = { ...m }; delete n[key]; return n; });
+  // 📏 ตั้งเป็น "ไซส์ (ไม่มีสี)" — เป็นรายการค้างเหมือนแก้สีอื่น (กดบันทึกทั้งหมดที่แถบล่างทีเดียว)
+  const sizeDraft = (r: Row): Draft => ({ th: r.entry?.th ?? r.name, en: r.entry?.en || r.name, kind: "none", colors: [], imageKey: null, isNew: !r.entry });
+  const markSize = (list: Row[]) => setDrafts((m) => {
+    const n = { ...m };
+    for (const r of list) if (r.entry?.kind !== "none") n[r.key] = sizeDraft(r);
+    return n;
+  });
   const loadSources = async () => {
     if (!sel || (src?.key === sel.key && !src.error)) return;
     const key = sel.key;
@@ -306,11 +341,12 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
   const clearSwatch = async () => {
     if (!sel?.entry) return;
     const { th, en } = sel.entry;
+    const wasSize = sel.entry.kind === "none";
     setSaving(true);
     try {
       const j = await apiFetch("/api/color-swatches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ th, en, kind: null }) }).then((r) => r.json());
       if (j.error) { toast.error(j.error); return; }
-      toast.success(`ล้างจุดสี "${th}" แล้ว`);
+      toast.success(wasSize ? `ยกเลิกไซส์ "${th}" แล้ว — กลับเป็นชื่อสีที่ยังไม่ตั้งจุดสี` : `ล้างจุดสี "${th}" แล้ว`);
       discard(sel.key);
       await load();
     } catch {
@@ -347,6 +383,12 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
               {label}
             </button>
           ))}
+          {sizeSuggest.length > 0 && (
+            <button type="button" onClick={() => markSize(sizeSuggest)} title={`ตั้งเป็นไซส์ (ไม่มีสี): ${sizeSuggest.map((r) => r.name).join(", ")} — กดบันทึกทั้งหมดด้านล่างถึงจะมีผล`}
+              className="px-2.5 py-1 rounded-full text-xs border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1">
+              <Icon name="ruler" /> ตั้งชื่อที่ดูเป็นไซส์ ({sizeSuggest.length}) เป็นไซส์
+            </button>
+          )}
           {shops.length > 1 && filter !== "focus" && (
             <select value={shop} onChange={(e) => setShop(e.target.value)} className="ml-auto text-xs border border-slate-200 rounded-md px-2 py-1 bg-white">
               <option value="">ทุกร้าน</option>
@@ -365,7 +407,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
           onRowClick={select}
           emptyText={loading ? "กำลังโหลด…" : filter === "todo" ? "🎉 สีที่ใช้บนเว็บตั้งครบแล้ว" : filter === "focus" ? "ไม่พบชื่อสีของสินค้านี้ในทะเบียน — ลองค้นในแท็บ ทั้งหมด" : "ไม่มีรายการ"}
           columns={[
-            { key: "dot", header: "", width: "2.25rem", cell: (r) => <Dot css={drafts[r.key] ? draftCssOf(drafts[r.key]) : r.css} /> },
+            { key: "dot", header: "", width: "2.25rem", cell: (r) => <Dot css={drafts[r.key] ? draftCssOf(drafts[r.key]) : r.css} sizeMark={drafts[r.key] ? drafts[r.key].kind === "none" : r.status === "size"} /> },
             {
               key: "name", header: "ชื่อสี", width: "minmax(0,1.6fr)", sortValue: (r) => r.name, sortLabel: "ชื่อสี",
               cell: (r) => (
@@ -373,12 +415,13 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
                   <div className="truncate">{r.name}</div>
                   {r.entry?.en && r.entry.en !== r.name && <div className="text-[11px] text-slate-400 truncate">{r.entry.en}</div>}
                   {r.missing.length > 0 && <div className="text-[11px] text-amber-600 truncate">ขาด: {r.missing.join(", ")}</div>}
+                  {r.status === "unset" && !r.compound && !drafts[r.key] && looksLikeSize(r.name) && <div className="text-[11px] text-slate-500 truncate">ดูเป็นไซส์ — ตั้งเป็น “ไซส์ (ไม่มีสี)” ได้</div>}
                 </div>
               ),
             },
             {
               key: "kind", header: "แบบ", width: "6.5rem",
-              cell: (r) => <span className="text-xs text-slate-500">{r.compound && !r.entry ? "ผสม" : r.entry?.kind ? SWATCH_KIND_LABEL[r.entry.kind].replace(" (แบ่งช่อง)", "") : "—"}</span>,
+              cell: (r) => <span className="text-xs text-slate-500">{r.compound && !r.entry ? "ผสม" : r.entry?.kind ? SWATCH_KIND_LABEL[r.entry.kind].replace(" (แบ่งช่อง)", "").replace(" (ไม่มีสี)", "") : "—"}</span>,
             },
             { key: "skus", header: "บนเว็บ", align: "right", width: "4.5rem", sortValue: (r) => r.skus, sortLabel: "จำนวน SKU", cell: (r) => <span className="text-xs text-slate-500">{r.skus ? `${r.skus} SKU` : "—"}</span> },
             {
@@ -407,24 +450,45 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
               <div className="font-medium">ประกอบจากสีย่อย:</div>
               {splitColorName(sel.name).slice(0, MAX_SPLIT).map((p) => {
                 const r = rows.find((x) => x.key === normColorName(new SwatchIndex(entries).find(p)?.th ?? p));
+                const d = r ? drafts[r.key] : undefined;
+                const isSize = d ? d.kind === "none" : r?.status === "size";
                 return (
-                  <button key={p} type="button" onClick={() => r && select(r)} className="flex items-center gap-2 hover:underline">
-                    <Dot css={r?.css ?? null} size={14} /> {p} {r?.status === "unset" && <span className="text-amber-600">(ยังไม่ตั้ง — กดเพื่อตั้ง)</span>}
-                  </button>
+                  <div key={p} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <button type="button" onClick={() => r && select(r)} className="flex items-center gap-2 hover:underline text-left">
+                      <Dot css={r?.css ?? null} size={14} sizeMark={isSize} /> {p}
+                      {isSize
+                        ? <span className="text-slate-500">(ไซส์ — ไม่นับเป็นสี{d ? " · รอบันทึก" : ""})</span>
+                        : r?.status === "unset" && !d && <span className="text-amber-600">(ยังไม่ตั้ง — กดเพื่อตั้ง)</span>}
+                    </button>
+                    {r && !isSize && r.status === "unset" && looksLikeSize(p) && (
+                      <button type="button" onClick={() => markSize([r])}
+                        className="text-[11px] px-1.5 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1">
+                        <Icon name="ruler" /> ตั้งเป็นไซส์ (ไม่มีสี)
+                      </button>
+                    )}
+                  </div>
                 );
               })}
+              <p className="text-[11px] text-slate-400 pt-1">ส่วนที่ตั้งเป็นไซส์ไม่นับเป็นสี — จุดสีใช้แค่ส่วนที่เป็นสี · หน้าสินค้าโชว์ชื่อสีอย่างเดียว + บรรทัด “ไซส์” ในหัวข้อขนาด</p>
             </div>
             <button type="button" onClick={() => setDrafts((m) => ({ ...m, [sel.key]: draftFor(sel) }))} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">✏️ ตั้งเองเฉพาะชื่อนี้</button>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <Dot css={draftCss} size={56} />
+              <Dot css={draftCss} size={56} sizeMark={draft.kind === "none"} />
               <div className="min-w-0">
                 <div className="font-semibold text-slate-800 truncate">{draft.th}</div>
-                <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-400">ขนาดจริง <Dot css={draftCss} size={14} /> <Dot css={draftCss} size={28} /></div>
+                {draft.kind !== "none" && <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-400">ขนาดจริง <Dot css={draftCss} size={14} /> <Dot css={draftCss} size={28} /></div>}
               </div>
             </div>
+
+            {sel.status === "unset" && draft.kind !== "none" && looksLikeSize(draft.th) && (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                <Icon name="ruler" /> ชื่อนี้ดูเป็นไซส์
+                <button type="button" onClick={() => markSize([sel])} className="ml-auto px-2 py-1 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">ตั้งเป็นไซส์ (ไม่มีสี)</button>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">ชื่ออังกฤษ{draft.isNew && <span className="text-red-500"> *</span>}</label>
@@ -436,9 +500,12 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">แบบ</label>
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs bg-white">
-                {(["solid", "split", "image"] as SwatchKind[]).map((k) => (
+                {(["solid", "split", "image", "none"] as SwatchKind[]).map((k) => (
                   <button key={k} type="button"
-                    onClick={() => edit({ kind: k, colors: k === "split" && draft.colors.length < 2 ? [...draft.colors, "", ""].slice(0, Math.max(2, draft.colors.length)) : draft.colors })}
+                    onClick={() => edit(k === "none"
+                      // ไซส์: ไม่มีสี · คำใหม่ใช้ชื่อเดิมเป็นชื่ออังกฤษไปเลย (เช่น "M (20.5 cm.)")
+                      ? { kind: k, colors: [], imageKey: null, en: draft.en.trim() ? draft.en : draft.th }
+                      : { kind: k, colors: k === "split" && draft.colors.length < 2 ? [...draft.colors, "", ""].slice(0, Math.max(2, draft.colors.length)) : draft.colors })}
                     className={`px-2.5 py-1 ${draft.kind === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
                     {SWATCH_KIND_LABEL[k].replace(" (แบ่งช่อง)", "")}
                   </button>
@@ -446,13 +513,20 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
               </div>
             </div>
 
+            {draft.kind === "none" && (
+              <div className="rounded-lg bg-slate-100 px-3 py-2 text-[11px] text-slate-600 space-y-1">
+                <p>ชื่อนี้ไม่ต้องมีจุดสี · ไม่ขึ้น “ยังไม่ตั้ง/ขาด” · ไม่โชว์ในตัวกรองสีบนเว็บ</p>
+                <p>ชื่อผสม เช่น “ดำ (01),M (20.5 cm.)” ใช้แค่ส่วนที่เป็นสี (จุดสีดำ) · หน้าสินค้าโชว์ชื่อสีอย่างเดียว + บรรทัด “ไซส์: M (20.5 cm.)” ในหัวข้อขนาด (เมื่อทั้งรุ่นใช้ไซส์เดียวกัน)</p>
+              </div>
+            )}
+
             {draft.kind === "solid" && (
               <div className="flex items-center gap-1.5">
                 <div className="flex-1"><ColorInput value={draft.colors[0] ?? ""} onChange={(v) => edit({ colors: [v] })} invalid={!isHex(draft.colors[0])} /></div>
                 <button type="button" onClick={() => openDrop(0)} title="ดูดสีจากรูปสินค้า (SKU ที่ใช้สีนี้ หรือเลือกรูปอื่น)" className="h-8 px-2 rounded border border-slate-200 bg-white text-sm hover:border-blue-400">💧</button>
               </div>
             )}
-            {draft.kind !== "image" && (
+            {(draft.kind === "solid" || draft.kind === "split") && (
               <p className="text-[11px] text-slate-400">💧 = ดูดสีจากรูป SKU ที่ใช้สีนี้ (รวมตัวที่ยังไม่ขึ้นเว็บ) หรือกด “เลือกรูปอื่น” หารูปจากคลัง/รูปสินค้าบนเว็บ แล้วกดจุดบนรูป</p>
             )}
             {draft.kind === "split" && (
@@ -490,8 +564,10 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
               ) : (
                 <span className="text-slate-400">ตั้งเสร็จกดสีถัดไปทางซ้ายได้เลย — ที่แก้ไว้ไม่หาย บันทึกทีเดียวตอนท้าย</span>
               )}
-              {hasSwatch(sel.entry) && (
-                <button type="button" disabled={saving} onClick={() => void clearSwatch()} className="ml-auto px-2 py-1 rounded-lg text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">ล้างจุดสี</button>
+              {(sel.entry?.kind === "none" || hasSwatch(sel.entry)) && (
+                <button type="button" disabled={saving} onClick={() => void clearSwatch()} className="ml-auto px-2 py-1 rounded-lg text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">
+                  {sel.entry?.kind === "none" ? "ยกเลิกไซส์" : "ล้างจุดสี"}
+                </button>
               )}
             </div>
           </div>
@@ -608,7 +684,7 @@ export function ColorSwatchButton({
               ))}
             </ScrollTabs>
             <div className={tab === "swatch" ? "" : "hidden"}>
-              <ColorSwatchManager onDirtyChange={setSwatchDirty} focusNames={focusNames} />
+              <ColorSwatchManager onDirtyChange={setSwatchDirty} focusNames={focusNames} active={tab === "swatch"} />
             </div>
             {(tab === "tone" || toneSeen) && (
               <div className={tab === "tone" ? "" : "hidden"}>

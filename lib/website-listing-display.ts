@@ -26,7 +26,7 @@ export type ListingDisplay = {
   imageKey: string | null;
   imageCount: number;
   /** img = รูปของสีนี้บนเว็บมาจากไหน · skuId = SKU ตัวแทนของสี (เปิดหน้าแก้ไปที่แถวสีนั้น) · กรอกตัวเลือกทับเอง = ไม่มีทั้งคู่ */
-  colors: { label: string; swatch: string | null; hasImage: boolean; img?: ColorImageSource; skuId?: string }[];
+  colors: { label: string; swatch: string | null; hasImage: boolean; img?: ColorImageSource; skuId?: string; noColor?: boolean }[];
   hero: boolean;
   productUrl: string | null;
   /** 📐 ร้านเปิดเช็คขนาด แต่ยังไม่ได้วัดช่องใส่ของ (compartments = null) */
@@ -66,7 +66,9 @@ export function computeListingDisplay(a: {
     colors: (eff.options?.items ?? []).map((it) => {
       const spec = it.swatch ? null : a.swatches.resolve(it.label);
       const src = sources?.get(it.label);
-      return { label: it.label, swatch: it.swatch || (spec ? swatchCss(spec, thumb) : null), hasImage: !!(it.image || it.images?.length), ...(src ? { img: src.img, skuId: src.skuId } : {}) };
+      // 📏 ไซส์ล้วน (ตั้งในทะเบียนสี เช่น "10 รู") = ไม่ต้องมีจุดสี → ไม่เตือน "สียังไม่ผูกทะเบียนสี"
+      const noColor = !it.swatch && !spec && a.swatches.isSizeOnly(it.label);
+      return { label: it.label, swatch: it.swatch || (spec ? swatchCss(spec, thumb) : null), hasImage: !!(it.image || it.images?.length), ...(src ? { img: src.img, skuId: src.skuId } : {}), ...(noColor ? { noColor } : {}) };
     }),
     hero: !!normalizeHero(l.web_hero),
     productUrl: productPageUrl(a.siteUrl, a.code),

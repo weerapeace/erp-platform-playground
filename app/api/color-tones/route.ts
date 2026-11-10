@@ -7,8 +7,10 @@
  *        { action: "unassign", color, toneId }                  → เอาออกจากโทน (ย้ายเข้าเอง = ลบ · จับอัตโนมัติ = ใส่ข้อยกเว้น)
  *        { action: "delete", id } · { action: "reorder", ids }
  *        { action: "batch", items: [{ color, tone }] }          → จับคู่หลายชื่อทีเดียว (หน้าจับคู่สีหลักในทะเบียนสี — กดบันทึกทั้งหมด)
- *          tone = key โทน · "" = ไม่อยู่โทนไหน · "_not_color" = ไม่ใช่สี (เก็บในแถวพิเศษ is_active=false — เว็บร้านไม่เห็น)
- *   GET ส่ง notColor = ชื่อที่ตั้งว่าไม่ใช่สี (ไม่นับเป็น "ยังไม่มีสีหลัก")
+ *          tone = key โทน · "" = ไม่อยู่โทนไหน · "_not_color" = ไม่ใช่สี
+ *          ไม่ใช่สี = ตั้งชนิด "ไซส์ (ไม่มีสี)" ในทะเบียนสี (erp_color_dictionary · ตัวเดียวกับแท็บหน้าตาจุดสี — lib/color-swatch-save)
+ *          ชื่อที่มีจุดสีอยู่แล้ว (ไม่ลบจุดสีทิ้ง) → เก็บในแถวพิเศษ erp_color_tones key _not_color (is_active=false — เว็บร้านไม่เห็น)
+ *   GET ส่ง notColor = ชื่อที่ตั้งว่าไม่ใช่สี/ไซส์ ทั้งสองที่ (ไม่นับเป็น "ยังไม่มีสีหลัก")
  * ตรรกะว่าสีไหนอยู่โทนไหน = lib/color-tone.ts (ตัวเดียวกับที่ API สินค้าสาธารณะใช้)
  * สิทธิ์เหมือนทะเบียนสี: อ่าน = products.view · แก้ = products.edit · ทุกการแก้เขียน audit + สั่งเว็บร้านทุกร้านล้างแคช
  */
@@ -18,7 +20,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-import { rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
+import { rowToSwatchEntry, SWATCH_SELECT, normColorName, hasSwatch } from "@/lib/color-swatch";
+import { saveSwatch, type SwatchDbRow } from "@/lib/color-swatch-save";
 import { rowToTone, TONE_SELECT, NOT_COLOR_KEY, applyToneAssignments, toneOfColor, type ToneAssign } from "@/lib/color-tone";
 import { fetchAllPages } from "@/lib/fetch-all";
 
@@ -72,7 +75,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({
     tones: ((tones ?? []) as ToneRow[]).map(rowToTone),
-    notColor: ((nc as { members: string[] | null } | null)?.members ?? []).map(normColorName),
+    // ไม่ใช่สี = ชื่อที่ตั้งเป็น "ไซส์ (ไม่มีสี)" ในทะเบียนสี (ตัวหลัก) + รายชื่อในแถวพิเศษ (ชื่อที่มีจุดสีอยู่แล้ว)
+    notColor: [...new Set([
+      ...((nc as { members: string[] | null } | null)?.members ?? []),
+      ...((dict ?? []) as { th: string; swatch_kind: string | null }[]).filter((d) => d.swatch_kind === "none").map((d) => d.th),
+    ].map(normColorName))],
     used: [...used.values()].map((u) => ({ name: u.name, skus: u.skus, products: u.products.size, shops: [...u.shops].sort() })),
     swatches: ((dict ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry),
   });
@@ -167,6 +174,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const nc = ncRow as { id: string; members: string[] | null } | null;
         if (nc?.members?.some((m) => normColorName(m) === color))
           await sb.from("erp_color_tones").update({ members: nc.members.filter((m) => normColorName(m) !== color), updated_at: now }).eq("id", nc.id);
+        // ตั้งเป็นไซส์ (ไม่มีสี) ไว้ในทะเบียนสี → ยกเลิก (กลับเป็นชื่อสีที่ยังไม่ตั้งจุดสี)
+        const { data: dictData } = await sb.from("erp_color_dictionary").select(SWATCH_SELECT);
+        const dictRows = [...((dictData ?? []) as SwatchDbRow[])];
+        const d = dictRows.find((x) => normColorName(x.th) === color);
+        if (d?.swatch_kind === "none") await saveSwatch(sb, dictRows, user, { id: d.id, th: d.th, kind: null }, "color_tones_assign");
       }
       await audit({ kind: b.action, color, tone: target.name }, target.id);
       return done();
@@ -179,20 +191,50 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const items = raw.map((x) => ({ color: normColorName(String(x?.color ?? "")), tone: String(x?.tone ?? "") }));
       const bad = items.find((x) => !x.color || !keys.has(x.tone));
       if (bad) return NextResponse.json({ error: bad.color ? `ไม่พบสีหลักของ "${bad.color}" — โหลดหน้าใหม่แล้วลองอีกครั้ง` : "ชื่อสีว่าง" }, { status: 400 });
+      // ชื่อตามที่พิมพ์ (ตัวพิมพ์ใหญ่เล็ก) — ใช้ตอนเพิ่มคำใหม่ในทะเบียนสี เช่น "M (20.5 cm.)"
+      const rawName = new Map(raw.map((x) => [normColorName(String(x?.color ?? "")), String(x?.color ?? "").trim().replace(/\s+/g, " ")]));
 
-      const { data: ncRow } = await sb.from("erp_color_tones").select("id, members").eq("key", NOT_COLOR_KEY).maybeSingle();
+      const [{ data: ncRow }, { data: dictData }] = await Promise.all([
+        sb.from("erp_color_tones").select("id, members").eq("key", NOT_COLOR_KEY).maybeSingle(),
+        sb.from("erp_color_dictionary").select(SWATCH_SELECT),
+      ]);
       const before = (ncRow as { id: string; members: string[] | null } | null) ?? null;
-      const ncBefore = (before?.members ?? []).map(normColorName);
+      const dictRows = [...((dictData ?? []) as SwatchDbRow[])];
+      const dictOf = (c: string) => dictRows.find((d) => normColorName(d.th) === c);
+      const ncList = (before?.members ?? []).map(normColorName);
+      // ไม่ใช่สี ตอนนี้ = แถวพิเศษ + ชื่อที่ตั้งเป็นไซส์ในทะเบียนสี
+      const ncBefore = [...new Set([...ncList, ...dictRows.filter((d) => d.swatch_kind === "none").map((d) => normColorName(d.th))])];
       const res = applyToneAssignments(all, ncBefore, items);
       for (const t of res.tones.filter((x) => res.changed.has(x.id))) {
         const { error } = await sb.from("erp_color_tones").update({ members: t.members, excludes: t.excludes, updated_at: now, updated_by: user?.id ?? null }).eq("id", t.id);
         if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
       }
-      if (res.notColor.join("|") !== ncBefore.join("|")) {
+      // 📏 ไม่ใช่สี → ตั้งชนิด "ไซส์ (ไม่มีสี)" ในทะเบียนสี (แท็บหน้าตาจุดสีเห็นด้วย ไม่ต้องตั้งซ้ำ)
+      //    ชื่อที่มีจุดสีอยู่แล้ว → ไม่ลบจุดสีทิ้ง เก็บในแถวพิเศษแทน · ย้ายออกจากไม่ใช่สี → ยกเลิกทั้งสองที่
+      const nowNc = new Set(res.notColor);
+      const ncKeep = new Set(ncList.filter((c) => nowNc.has(c)));
+      for (const c of res.notColor) {
+        if (ncBefore.includes(c)) continue;
+        const d = dictOf(c);
+        if (d && hasSwatch(rowToSwatchEntry(d))) { ncKeep.add(c); continue; }
+        const name = d?.th ?? rawName.get(c) ?? c;
+        const r = await saveSwatch(sb, dictRows, user, { th: name, en: d?.en || name, kind: "none" }, "color_tones_not_color");
+        if (!r.ok) return NextResponse.json({ error: `ตั้ง "${name}" เป็นไม่ใช่สีไม่สำเร็จ: ${r.error}` }, { status: 500 });
+      }
+      for (const c of ncBefore) {
+        if (nowNc.has(c)) continue;
+        const d = dictOf(c);
+        if (d?.swatch_kind === "none") {
+          const r = await saveSwatch(sb, dictRows, user, { id: d.id, th: d.th, kind: null }, "color_tones_not_color");
+          if (!r.ok) return NextResponse.json({ error: `ยกเลิกไม่ใช่สีของ "${d.th}" ไม่สำเร็จ: ${r.error}` }, { status: 500 });
+        }
+      }
+      const ncAfter = [...ncKeep];
+      if ([...ncAfter].sort().join("|") !== [...ncList].sort().join("|")) {
         // แถวพิเศษ "ไม่ใช่สี" — is_active=false เสมอ (เว็บร้าน/รายการโทนอ่านเฉพาะ is_active)
         const { error } = before
-          ? await sb.from("erp_color_tones").update({ members: res.notColor, updated_at: now, updated_by: user?.id ?? null }).eq("id", before.id)
-          : await sb.from("erp_color_tones").insert({ key: NOT_COLOR_KEY, name: "ไม่ใช่สี (ไม่โชว์ในตัวกรอง)", hex: "#CCCCCC", members: res.notColor, sort_order: 0, is_active: false, updated_by: user?.id ?? null });
+          ? await sb.from("erp_color_tones").update({ members: ncAfter, updated_at: now, updated_by: user?.id ?? null }).eq("id", before.id)
+          : await sb.from("erp_color_tones").insert({ key: NOT_COLOR_KEY, name: "ไม่ใช่สี (ไม่โชว์ในตัวกรอง)", hex: "#CCCCCC", members: ncAfter, sort_order: 0, is_active: false, updated_by: user?.id ?? null });
         if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
       }
       const label = (c: string, tones: typeof all, nc: string[]) => (nc.includes(c) ? "ไม่ใช่สี" : toneOfColor(c, tones)?.tone.name ?? "ไม่มี");

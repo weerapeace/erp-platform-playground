@@ -3,7 +3,7 @@
  *   GET  → { entries: แถวในพจนานุกรม + จุดสี, used: ชื่อสีที่ SKU บนเว็บใช้อยู่ (นับ SKU + ร้าน) }
  *   GET ?images=ชื่อ1|ชื่อ2 → { groups: SKU ที่ใช้สีนี้ + รูปทั้งหมดของแต่ละตัว (ปก · แกลเลอรี · รูปเว็บ)
  *                               + กลุ่ม "รูปของรุ่น" (kind parent: ปก/แกลเลอรี Parent + รูปเว็บของรุ่น) } — ✂️ ครอปรูปลายจากรูปสินค้า
- *   POST { id?, th, en?, kind, colors, imageKey } → ตั้งจุดสี (มีชื่อนี้แล้ว = แก้ · ยังไม่มี = เพิ่มคำใหม่ ต้องมีคำอังกฤษ)
+ *   POST { id?, th, en?, kind, colors, imageKey } → ตั้งจุดสี  (kind "none" = ไซส์ / ไม่มีสี) (มีชื่อนี้แล้ว = แก้ · ยังไม่มี = เพิ่มคำใหม่ ต้องมีคำอังกฤษ)
  *   POST { items: [ {th, en, kind, colors, imageKey}, … ] } → ตั้งหลายสีในครั้งเดียว (กดบันทึกทีเดียว) · ผล results[] ตรงลำดับ
  *        สีไหนพลาด ({ok:false,error}) ไม่ล้มทั้งชุด · audit ทีละสี · ล้างแคชเว็บครั้งเดียว
  *
@@ -14,19 +14,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { writeAudit } from "@/lib/audit";
+import { saveSwatch, type SwatchDbRow, type SwatchInput, type SwatchSaveResult } from "@/lib/color-swatch-save";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-import { normalizeSwatchInput, rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
+import { rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
 import { swatchSourceImages } from "@/lib/color-swatch-images";
 import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Row = { id: string; th: string; en: string | null; swatch_kind: string | null; swatch_colors: string[] | null; swatch_image_key: string | null };
+type Row = SwatchDbRow;
 
 const KEY_RE = /^[\w\-./%()]+$/; // r2 object key ที่ยอมรับ
-type Sb = ReturnType<typeof supabaseAdmin>;
+const MAX_BATCH = 200;
 
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -84,51 +84,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-type SwatchInput = { id?: string; th?: string; en?: string; kind?: unknown; colors?: unknown; imageKey?: unknown };
-type Actor = { id: string; email?: string | null } | null;
-type SaveResult = { ok: true; id: string | null } | { ok: false; error: string };
-const MAX_BATCH = 200;
-
-/** ตั้งจุดสี 1 ชื่อ + audit · rows = พจนานุกรมที่โหลดไว้ (คำใหม่ที่เพิ่ม ใส่เข้า rows ให้ตัวถัดไปในชุดเดียวกันเห็น) */
-async function saveSwatch(admin: Sb, rows: Row[], user: Actor, b: SwatchInput): Promise<SaveResult> {
-  const th = (b.th ?? "").trim();
-  const en = (b.en ?? "").trim();
-  if (!th) return { ok: false, error: "ต้องมีชื่อสี" };
-  const sw = normalizeSwatchInput(b);
-  if (!sw.ok) return { ok: false, error: sw.error };
-
-  // หาแถวเดิม: id ที่ส่งมา หรือชื่อไทยตรงกัน (ไม่สนตัวพิมพ์/ช่องว่าง — ตรงกับ unique index)
-  const existing = rows.find((r) => (b.id ? r.id === b.id : normColorName(r.th) === normColorName(th)));
-
-  const swatch = { swatch_kind: sw.kind, swatch_colors: sw.colors, swatch_image_key: sw.imageKey };
-  const stamp = { updated_at: new Date().toISOString(), updated_by: user?.id ?? null };
-  let id: string | null = existing?.id ?? null;
-  if (existing) {
-    const { error } = await admin.from("erp_color_dictionary").update({ ...swatch, ...(en ? { en } : {}), ...stamp }).eq("id", existing.id);
-    if (error) return { ok: false, error: error.message };
-  } else {
-    if (!en) return { ok: false, error: `"${th}" ยังไม่มีในพจนานุกรมสี — ใส่ชื่อภาษาอังกฤษด้วย (ใช้แปลชื่อสีด้วย)` };
-    const { data, error } = await admin.from("erp_color_dictionary").insert({ th, en, ...swatch, ...stamp }).select("id").maybeSingle();
-    if (error) return { ok: false, error: error.message };
-    id = (data as { id: string } | null)?.id ?? null;
-    if (id) rows.push({ id, th, en, swatch_kind: sw.kind, swatch_colors: sw.colors, swatch_image_key: sw.imageKey });
-  }
-
-  await writeAudit(admin, {
-    action: existing ? "update" : "create",
-    entityType: "color_dictionary",
-    entityId: id,
-    actorId: user?.id ?? null,
-    actorName: user?.email ?? null,
-    metadata: {
-      th,
-      field: "swatch",
-      before: existing ? { kind: existing.swatch_kind, colors: existing.swatch_colors, imageKey: existing.swatch_image_key } : null,
-      after: { kind: sw.kind, colors: sw.colors, imageKey: sw.imageKey },
-    },
-  });
-  return { ok: true, id };
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "products.edit")))
@@ -144,7 +99,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const rows = [...((dict ?? []) as Row[])];
 
   // ทีละชุด (items) = ทำทีละสีตามลำดับ · ผลตรงลำดับที่ส่งมา · สีไหนพลาดไม่ล้มทั้งชุด
-  const results: SaveResult[] = [];
+  const results: SwatchSaveResult[] = [];
   for (const item of batch ?? [b]) results.push(await saveSwatch(admin, rows, user, item && typeof item === "object" ? item : {}));
   if (!batch && !results[0].ok) return NextResponse.json({ error: results[0].error }, { status: 400 });
 

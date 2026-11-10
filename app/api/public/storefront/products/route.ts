@@ -35,7 +35,7 @@ import { productDimensions, bilingualDimensions, fitLabels, type FitItem, type D
 import { fitNames, fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
 import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
 import { normalizeBanners } from "@/lib/website-banners";
-import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
+import { SwatchIndex, swatchCss, rowToSwatchEntry, SWATCH_SELECT, splitOptionSizes } from "@/lib/color-swatch";
 import { normalizeCardColors, resolveCardColors } from "@/lib/website-card-colors";
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
 import { dropFromRow, hiddenDropCodes, liveDropByCode } from "@/lib/website-new-drops";
@@ -285,6 +285,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         ? { ...pr, zones: pr.zones.map((z) => ({ ...z, imageUrl: imageUrl(z.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? "") })) }
         : null;
       const attrs = productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues);
+      // 📏 ชื่อตัวเลือกที่ติดไซส์มากับช่องสี ("ดำ (01),M (20.5 cm.)") + ทะเบียนสีตั้งส่วนนั้นเป็น "ไซส์ (ไม่มีสี)" แล้ว
+      //    → หน้าเว็บโชว์แค่สี + บรรทัด "ไซส์: M (20.5 cm.)" ในหัวข้อขนาด · ไม่ครบเงื่อนไข (เช่น มีหลายไซส์) = ชื่อเต็มเหมือนเดิม
+      //    เฉพาะที่โชว์บนเว็บ — ออเดอร์/หลังบ้านยังใช้ชื่อสีเต็มของ SKU (lib/website-orders pickSku)
+      const optSizes = r.options ? splitOptionSizes(r.options.items.map((it) => it.label), swatches) : null;
       return {
         id: p.id,
         code,
@@ -359,18 +363,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
                 const en = (r.options.label === optLabel && optLabelEn) || commonLabelEn(r.options.label);
                 return en ? { label_en: en } : {};
               })(),
-              items: r.options.items.map((it) => {
+              items: r.options.items.map((it, i) => {
                 const spec = it.swatch ? null : swatches.resolve(it.label);
+                const label = optSizes?.labels[i] ?? it.label;
                 // 🌐 ชื่อสีภาษาอังกฤษ: ช่อง Color ของ SKU (แก้ได้ในแถวสีของแท็บ 🛍) → ไม่มี = ทะเบียนสีกลาง (กรมท่า → Navy · สีผสมแปลทีละคำ)
-                const labelEn = it.label_en || swatches.english(it.label);
+                const labelEn = (it.label_en && (optSizes ? swatches.stripSizes(it.label_en).label : it.label_en)) || swatches.english(label);
                 return {
                   ...it,
+                  label,
                   ...(labelEn ? { label_en: labelEn } : {}),
                   swatch: it.swatch || (spec ? swatchCss(spec, (k) => `${imageUrl(k)}&w=96`) : undefined),
                   image: it.image ? imageUrl(it.image) : undefined,
                   images: it.images?.length ? it.images.map(imageUrl) : undefined,
                   // 🎨 โทนของสีนี้ (key) — สีผสมได้หลายโทน · ไม่อยู่โทนไหน = [] (ตัวกรองสีหาไม่เจอ)
-                  tones: tonesOfLabel(it.label, colorTones).map((t) => t.key),
+                  tones: tonesOfLabel(label, colorTones).map((t) => t.key),
                 };
               }),
             }
@@ -400,10 +406,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         dimensions: (() => {
           const comps = fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null;
           const row = p as unknown as DimensionRow & { fits?: unknown };
-          return bilingualDimensions(
+          const d = bilingualDimensions(
             withFitLines(productDimensions(row, fitCatalog), comps, fitTargets),
             withFitLines(productDimensions(row, fitCatalog, "en"), comps, fitTargetsEn, "en"),
           );
+          if (!optSizes) return d;
+          // 📏 ไซส์ที่ตัดออกจากชื่อสี → บรรทัดแรกของหัวข้อ "ขนาด" (ไม่มีนิ้ว · เว็บร้านไม่เอาไปคิดตัวกรองขนาด/ภาพเทียบ เพราะไม่ขึ้นต้นด้วยตัวเลข)
+          const sizeRow = { key: "size", label: "ไซส์", label_en: "Size", cm: optSizes.size, cm_en: optSizes.size, inch: "" };
+          return d ? { ...d, rows: [sizeRow, ...d.rows] } : { fits: [], rows: [sizeRow] };
         })(),
         /** 📐 ช่องใส่ของ (ขนาดด้านใน ซม.) — เฉพาะร้านที่เปิดเช็คขนาด + รุ่นที่วัดแล้ว · Section "เช็คขนาด" ใช้คิดขนาดที่ลูกค้าพิมพ์เอง */
         fitBoxes: (() => { const c = fitOn ? parseCompartments((p as { compartments?: unknown }).compartments) : null; return c?.length ? c : undefined; })(),

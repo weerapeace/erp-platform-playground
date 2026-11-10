@@ -8,7 +8,7 @@
  * - ชิป "ยังไม่มีสีหลัก" = ลูกค้ากรองสีแล้วหาไม่เจอ · ชิปต่อสีหลัก = ดูว่ามีชื่อไหนบ้าง
  * - คำแนะนำ (suggestTone): ชื่ออีกภาษาในพจนานุกรมสี → จุดสีในทะเบียนสี → ขนาด/จำนวนรู = ไม่ใช่สี · กด "ใช้" ทีละชื่อ หรือ "ใช้คำแนะนำทั้งหมด"
  * - ติ๊กหลายชื่อ → ตั้งทีเดียว · ที่แก้ค้างไว้ → SaveBar "บันทึกทั้งหมด" (POST action batch ครั้งเดียว + audit + ล้างแคชเว็บ)
- * - "ไม่ใช่สี" = ไม่โชว์ในตัวกรองและไม่นับว่ายังไม่มีสีหลัก (เช่น 10 รู)
+ * - "ไม่ใช่สี / ไซส์" = ไม่โชว์ในตัวกรองและไม่นับว่ายังไม่มีสีหลัก (เช่น 10 รู · M (20.5 cm.)) — ป้ายเดียวกับแบบ "ไซส์ (ไม่มีสี)" ในแท็บหน้าตาจุดสี (เก็บในทะเบียนสี)
  * ตั้งชื่อ/สี/คำจับอัตโนมัติ/ลำดับของสีหลัก = ปุ่ม "ตั้งค่าสีหลัก" (ColorToneManager ตัวเดิม)
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -34,7 +34,7 @@ interface Row {
   sug: { key: string; why: string } | null;
 }
 
-const NOT_COLOR_LABEL = "ไม่ใช่สี (ไม่โชว์ในตัวกรอง)";
+const NOT_COLOR_LABEL = "ไม่ใช่สี / ไซส์ (ไม่โชว์ในตัวกรอง)";
 const selectCls = "w-full h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs";
 
 function Dot({ css, size = 18 }: { css: string | null; size?: number }) {
@@ -82,7 +82,7 @@ export function ColorToneMatcher({ onDirtyChange, active = true }: { onDirtyChan
   useEffect(() => { if (active && !dirty) void load(); }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
-  const toneName = useCallback((k: string) => (k === NOT_COLOR_KEY ? "ไม่ใช่สี" : tones.find((t) => t.key === k)?.name ?? "ยังไม่มี"), [tones]);
+  const toneName = useCallback((k: string) => (k === NOT_COLOR_KEY ? "ไม่ใช่สี / ไซส์" : tones.find((t) => t.key === k)?.name ?? "ยังไม่มี"), [tones]);
 
   // ชื่อสีเดี่ยวทุกชื่อบนเว็บ (แตกสีผสม) + จำนวน SKU (รวมที่อยู่ในสีผสม) + สีหลักตอนนี้ + คำแนะนำ
   const rows = useMemo<Row[]>(() => {
@@ -180,7 +180,7 @@ export function ColorToneMatcher({ onDirtyChange, active = true }: { onDirtyChan
         {chip("todo", "ยังไม่มีสีหลัก", todo.length, true)}
         {chip("all", "ทั้งหมด", rows.length)}
         {tones.map((t) => chip(t.key, <><Dot css={t.hex} size={12} />{t.name}</>, rows.filter((r) => r.saved === t.key).length))}
-        {chip(NOT_COLOR_KEY, "ไม่ใช่สี", rows.filter((r) => r.saved === NOT_COLOR_KEY).length)}
+        {chip(NOT_COLOR_KEY, "ไม่ใช่สี / ไซส์", rows.filter((r) => r.saved === NOT_COLOR_KEY).length)}
         <ColorToneButton
           label="ตั้งค่าสีหลัก"
           onClosed={() => { if (!dirty) void load(); }}

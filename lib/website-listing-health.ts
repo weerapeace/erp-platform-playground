@@ -16,7 +16,8 @@ export interface ListingHealthInput {
 }
 
 /** img = รูปของสีบนเว็บมาจากไหน (web รูปเว็บรายสี · sku รูปปก SKU แทน · none ไม่มี) · skuId = SKU ตัวแทนของสี */
-export type HealthColor = { label: string; swatch: string | null; hasImage: boolean; img?: "web" | "sku" | "none"; skuId?: string };
+/** noColor = ชื่อนี้ตั้งเป็น "ไซส์ (ไม่มีสี)" ในทะเบียนสี (เช่น 10 รู) → ไม่ต้องมีจุดสี ไม่เตือน */
+export type HealthColor = { label: string; swatch: string | null; hasImage: boolean; img?: "web" | "sku" | "none"; skuId?: string; noColor?: boolean };
 
 export interface ListingIssue {
   key: "no_price" | "no_image" | "no_category" | "swatch_missing" | "color_no_image" | "color_no_web_image" | "no_compartments";
@@ -46,7 +47,7 @@ export function listingIssues(x: ListingHealthInput): ListingIssue[] {
   if (!(x.price > 0)) out.push({ key: "no_price", label: "ยังไม่มีราคา" });
   if (x.imageCount <= 0) out.push({ key: "no_image", label: "ยังไม่มีรูป" });
   if (!x.categories.length) out.push({ key: "no_category", label: "ยังไม่อยู่หมวดไหน" });
-  const noSwatch = x.colors.filter((c) => !c.swatch);
+  const noSwatch = x.colors.filter((c) => !c.swatch && !c.noColor);
   if (noSwatch.length)
     out.push({ key: "swatch_missing", label: `สียังไม่ผูกทะเบียนสี ${noSwatch.length}`, detail: noSwatch.map((c) => c.label).join(", "), names: noSwatch.map((c) => c.label) });
   // ตัวเลือกกรอกทับเอง (ไม่รู้ที่มารูป) = เช็กแบบเดิม "สีนี้มีรูปไหม"

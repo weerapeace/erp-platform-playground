@@ -11,7 +11,7 @@
  * สีผสม "กรมท่า-ส้ม" (แยกด้วย - / , + &) → นับเข้าทุกโทนของสีย่อย · ถ้าย้ายชื่อเต็มเข้าโทนเอง = ใช้โทนนั้นโทนเดียว
  * หน้าจับคู่ชื่อสี ↔ สีหลัก (ทะเบียนสี แท็บ "สีหลักในตัวกรอง"): applyToneAssignments (บันทึกทีเดียว) · suggestTone (คำแนะนำ) · NOT_COLOR_KEY (ไม่ใช่สี)
  */
-import { normColorName, splitColorName } from "@/lib/color-swatch";
+import { normColorName, splitColorName, looksLikeSize } from "@/lib/color-swatch";
 
 export interface ColorTone {
   id: string;
@@ -173,9 +173,6 @@ export function hexToneKey(hex: string): string | null {
   return l < 0.35 ? "purple" : "pink";
 }
 
-/** ชื่อที่ไม่น่าใช่สี (ขนาด/จำนวนรู) — แนะนำ "ไม่ใช่สี" */
-const NOT_COLOR_RE = /^\d+\s*(รู|ช่อง|ชิ้น|นิ้ว|cm|ซม\.?|mm|มม\.?)$/i;
-
 /**
  * แนะนำโทนให้ชื่อสีที่ยังไม่มีโทน (pure) — ลำดับ: ชื่ออีกภาษาในพจนานุกรมสี → จุดสีในทะเบียนสี → ชื่อที่ไม่ใช่สี
  * entry = แถวพจนานุกรมสีของชื่อนี้ (ไม่มี = ข้ามข้อ 1–2)
@@ -186,6 +183,7 @@ export function suggestTone(
   entry?: { th: string; en: string; kind: string | null; colors: string[] } | null,
 ): { key: string; why: string } | null {
   const c = normColorName(name);
+  if (entry?.kind === "none") return { key: NOT_COLOR_KEY, why: "ตั้งเป็นไซส์ในทะเบียนสีแล้ว" };
   if (entry) {
     for (const other of [entry.en, entry.th]) {
       if (!other || normColorName(other) === c) continue;
@@ -200,7 +198,8 @@ export function suggestTone(
       if (t) return { key: t.key, why: `จุดสีใกล้ ${t.name}` };
     }
   }
-  if (NOT_COLOR_RE.test(c)) return { key: NOT_COLOR_KEY, why: "ดูเป็นขนาด/จำนวน" };
+  // ไซส์/จำนวน (กติกากลาง looksLikeSize — ตัวเดียวกับแท็บหน้าตาจุดสี) → "ไม่ใช่สี"
+  if (looksLikeSize(name)) return { key: NOT_COLOR_KEY, why: "ดูเป็นไซส์/จำนวน" };
   return null;
 }
 
