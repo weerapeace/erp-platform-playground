@@ -44,7 +44,8 @@ import { ConfirmDialog } from "@/components/modal";
 import { UnsavedGuardProvider, useUnsavedGuardHost } from "@/components/save-bar";
 import { AccessDenied, useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { designAccess, designTabTopicOf, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS } from "@/lib/website-access";
+import { designAccess, designTabTopicOf, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS, type WebsiteGroup } from "@/lib/website-access";
+import { WebsiteManagerMenu } from "@/components/website-manager-menu";
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
@@ -72,6 +73,12 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
     if (guard.anyDirty()) setPendingTab(k);
     else setTab(k);
   };
+  // 🧭 เมนู 2 ชั้น: จำแท็บย่อยล่าสุดของแต่ละกลุ่ม → กดกลุ่มกลับมาแล้วอยู่แท็บเดิม
+  const [lastTabOf, setLastTabOf] = useState<Partial<Record<WebsiteGroup, TabKey>>>({});
+  useEffect(() => {
+    const g = websiteGroupOfTab(tab);
+    if (g) setLastTabOf((m) => (m[g] === tab ? m : { ...m, [g]: tab }));
+  }, [tab]);
   const [categories, setCategories] = useState<CategoryDef[]>([]);
   // 🔐 สิทธิ์เว็บไซต์ — สิทธิ์ยังโหลดไม่เสร็จ = ถือว่าได้ (API ตรวจซ้ำเสมอ)
   const { can, permsReady, user } = useAuth();
@@ -229,46 +236,16 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
           </p>
         </div>
 
-        {/* แท็บ */}
+        {/* 🧭 เมนู 2 ชั้น (เจ้าของเลือก 2026-11-10 แบบ A) — ชั้นบน = กลุ่ม (ตัวเดียวกับสิทธิ์ WEBSITE_GROUPS) · ชั้นล่าง = แท็บย่อยของกลุ่มที่เลือก
+            ไอคอนเส้นมีสีตามกลุ่ม · components/website-manager-menu (ชื่อ/ไอคอน/สี = lib/website-access) · กลุ่มที่ไม่มีสิทธิ์ดู = ไม่โชว์ */}
         {shop && (
-          <div className="flex items-center gap-1 mb-4 border-b border-slate-200 overflow-x-auto">
-            {([
-              { k: "listings", l: "สินค้าบนเว็บ" },
-              { k: "categories", l: "📂 หมวดหมู่" },
-              { k: "collections", l: "🎞 คอลเลกชัน" },
-              { k: "newdrops", l: "🆕 มาใหม่" },
-              { k: "sizeguides", l: "📏 ตารางไซส์" },
-              { k: "fieldmap", l: "⚙️ จับคู่ฟิลด์" },
-              { k: "design", l: "🎨 ดีไซน์" },
-              { k: "layout", l: "🧱 หน้าแรก" },
-              { k: "imagesets", l: "🖼 ชุดรูป" },
-              { k: "webimages", l: "🗂 รูปบนเว็บ" },
-              { k: "pages", l: "📄 หน้าเว็บ" },
-              { k: "info", l: "🏪 ข้อมูลร้าน" },
-              { k: "shipping", l: "🚚 การจัดส่ง" },
-              { k: "i18n", l: "🌐 แปลภาษา" },
-              { k: "orders", l: "🧾 ออเดอร์" },
-              { k: "returns", l: "↩️ คืน/เปลี่ยน" },
-              { k: "coupons", l: "🎟️ คูปอง" },
-              { k: "promotions", l: "🏷 โปรโมชัน" },
-              { k: "members", l: "👥 สมาชิก" },
-              { k: "reviews", l: "⭐ รีวิว" },
-              { k: "stats", l: "📈 สถิติ" },
-            ] as const).filter((t) => levelOfTab(t.k) !== "none").map((t) => (
-              <button
-                key={t.k}
-                onClick={() => goTab(t.k)}
-                className={`shrink-0 px-4 py-2 text-sm border-b-2 -mb-px transition ${
-                  tab === t.k
-                    ? "border-blue-600 text-blue-700 font-medium"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {t.l}
-                {know && viewOnlyTab(t.k) && <span className="ml-1 text-[10px] text-slate-400" title="ดูได้อย่างเดียว">👁</span>}
-              </button>
-            ))}
-          </div>
+          <WebsiteManagerMenu<TabKey>
+            tab={tab}
+            onGo={goTab}
+            canSee={(k) => levelOfTab(k) !== "none"}
+            viewOnly={know ? viewOnlyTab : undefined}
+            lastTabOf={lastTabOf}
+          />
         )}
 
         {/* 👁 กลุ่มนี้ดูได้อย่างเดียว — ปุ่มบันทึกยังกดได้ แต่ระบบไม่ให้บันทึก (API ตรวจสิทธิ์) */}

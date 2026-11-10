@@ -34,6 +34,44 @@ export const WEBSITE_GROUPS: WebsiteGroupDef[] = [
   { key: "stats", label: "สถิติ", icon: "📈", editable: false, tabs: ["stats"], hint: "ยอดเข้าชม คำค้นหา" },
 ];
 
+/**
+ * 🧭 หน้าตาเมนูหน้าเว็บไซต์ (/website/[shop]) — เจ้าของเลือก 2026-11-10 "แบบ A 2 ชั้น + ไอคอนเส้นมีสี"
+ *   ชั้นบน = กลุ่ม (WEBSITE_GROUPS ตัวเดียวกับสิทธิ์) · ชั้นล่าง = แท็บย่อยของกลุ่มที่เลือก
+ *   icon = ชื่อในชุดไอคอนเส้นกลาง lib/erp-icons (ใช้ <Icon value={`i:${icon}`} />) · color = รหัสสี (ใส่เป็น style — ไฟล์ lib ไม่อยู่ในที่ Tailwind สแกน · ห้ามใช้ blue เพราะธีมเปลี่ยน blue เป็นส้มแบรนด์)
+ *   เพิ่มแท็บใหม่ = ใส่ key ใน tabs ของกลุ่ม + ใส่ชื่อ/ไอคอนที่ WEBSITE_TAB_META
+ */
+export const WEBSITE_GROUP_STYLE: Record<WebsiteGroup, { icon: string; color: string }> = {
+  products: { icon: "shopping-bag", color: "#0284c7" },
+  design: { icon: "palette", color: "#7c3aed" },
+  orders: { icon: "receipt", color: "#059669" },
+  promos: { icon: "percentage", color: "#e11d48" },
+  settings: { icon: "settings", color: "#64748b" },
+  stats: { icon: "chart-bar", color: "#d97706" },
+};
+export const WEBSITE_TAB_META: Record<string, { label: string; icon: string }> = {
+  listings: { label: "สินค้าบนเว็บ", icon: "list" },
+  categories: { label: "หมวดหมู่", icon: "folders" },
+  collections: { label: "คอลเลกชัน", icon: "stack-2" },
+  newdrops: { label: "มาใหม่", icon: "sparkles" },
+  sizeguides: { label: "ตารางไซส์", icon: "ruler-measure" },
+  fieldmap: { label: "จับคู่ฟิลด์", icon: "arrows-exchange" },
+  imagesets: { label: "ชุดรูป", icon: "layout-grid" },
+  design: { label: "ดีไซน์", icon: "brush" },
+  layout: { label: "หน้าแรก", icon: "home" },
+  pages: { label: "หน้าเว็บ", icon: "file-text" },
+  webimages: { label: "รูปบนเว็บ", icon: "photo" },
+  i18n: { label: "แปลภาษา", icon: "world" },
+  orders: { label: "ออเดอร์", icon: "receipt" },
+  returns: { label: "คืน/เปลี่ยน", icon: "arrow-back-up" },
+  members: { label: "สมาชิก", icon: "users" },
+  reviews: { label: "รีวิว", icon: "star" },
+  coupons: { label: "คูปอง", icon: "gift" },
+  promotions: { label: "โปรโมชัน", icon: "tag" },
+  info: { label: "ข้อมูลร้าน", icon: "building-store" },
+  shipping: { label: "การจัดส่ง", icon: "truck-delivery" },
+  stats: { label: "สถิติ", icon: "chart-line" },
+};
+
 export const WEBSITE_ACCESS_PERM = "website.access";
 export const WEBSITE_LEVEL_LABEL: Record<WebsiteLevel, string> = { none: "ไม่เห็น", view: "ดูได้", edit: "แก้ได้" };
 
