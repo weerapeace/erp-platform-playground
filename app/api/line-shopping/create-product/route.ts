@@ -11,12 +11,15 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lineCreateProduct } from "@/lib/line-shopping";
+import { lineCreateProduct, lineGetProduct, lineUpdateProduct } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
 import { buildLineCreate } from "@/lib/line-create-payload";
+import { publicImageUrl } from "@/lib/line-shopping-server";
+import { appendDescImages, countPresent, lineHostImagesViaGallery } from "@/lib/line-desc-images";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60;   // + รูปในรายละเอียด (ฝากรูปผ่านแกลเลอรี รอ LINE ก๊อปรูป)
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
@@ -38,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const b = await buildLineCreate(admin, parent_sku_id);
   if (!b.ok) return NextResponse.json({ error: b.error }, { status: b.status });
-  const { preview: pv, payload, credential, draftProductId } = b;
+  const { preview: pv, payload, credential, draftProductId, descImageKeys } = b;
   const platform_id = pv.platform_id;
   const brand_id = pv.brand_id;
   if (draftProductId) return NextResponse.json({ error: "สินค้านี้มีบน LINE แล้ว — ใช้ปุ่มส่ง update แทน" }, { status: 400 });
@@ -82,6 +85,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       matched_parent_sku_id: parent_sku_id, price: Number.isFinite(priceMin) ? priceMin : null, last_imported_at: now, raw: { created_by_erp: true },
     }, { onConflict: "id", ignoreDuplicates: false });
   }
-  await writeAudit(admin, { action: "create", entityType: "platform_catalog", entityId: productId || null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_create", parent_sku_id, brand_id, product_id: productId } });
-  return NextResponse.json({ ok: true, product_id: productId, error: null });
+  // รูปในรายละเอียด (ทดลอง — ทดสอบผ่าน 2026-11-10 LMTS05/WL53): ฝากรูปผ่านแกลเลอรี → ต่อท้ายรายละเอียด
+  //   พลาด = สินค้าลงแล้ว แค่ไม่มีรูปในรายละเอียด (ไม่ถือว่าลงไม่สำเร็จ)
+  let descImages: { ok: boolean; present: number; total: number; hosted: string[]; error: string | null } | null = null;
+  if (productId && descImageKeys.length) {
+    const host = await lineHostImagesViaGallery(apiKey, productId, descImageKeys.map(publicImageUrl));
+    let present = 0;
+    const errs: string[] = host.error ? [host.error] : [];
+    if (host.hosted.length) {
+      const cur = await lineGetProduct(apiKey, productId);
+      const curDesc = String((cur.row?.description as string | undefined) ?? payload.description ?? "");
+      const r = await lineUpdateProduct(apiKey, productId, { description: appendDescImages(curDesc, host.hosted) });
+      if (!r.ok) errs.push(`ใส่รายละเอียดไม่สำเร็จ: ${r.error ?? `HTTP ${r.status}`}`);
+      else { const f = await lineGetProduct(apiKey, productId); present = countPresent(String(f.row?.description ?? ""), host.hosted); }
+    }
+    if (!errs.length && present < descImageKeys.length) errs.push(`รูปอยู่ในรายละเอียดจริง ${present}/${descImageKeys.length}`);
+    descImages = { ok: errs.length === 0 && host.restored, present, total: descImageKeys.length, hosted: host.hosted, error: errs.length ? errs.join(" · ") : null };
+  }
+  await writeAudit(admin, { action: "create", entityType: "platform_catalog", entityId: productId || null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_create", parent_sku_id, brand_id, product_id: productId, ...(descImages ? { desc_images: descImages } : {}) } });
+  return NextResponse.json({ ok: true, product_id: productId, desc_images: descImages, error: null });
 }

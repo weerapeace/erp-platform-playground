@@ -20,6 +20,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { linePrice } from "@/lib/platform-listing-builder";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
+import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
 
 /** รายละเอียดในระบบเป็นข้อความธรรมดา แต่ LINE เก็บเป็น HTML ย่อหน้า (920/934 รายการบนร้าน) → แปลงก่อนส่ง
  *  เก็บบรรทัดว่าง + ย่อหน้าเยื้อง · ขีด "- " คงเป็นข้อความ (ไม่แปลงเป็น <ul> — ยังไม่รู้ว่า LINE รับไหม) · เป็น HTML อยู่แล้ว = ใช้ตามนั้น */
@@ -53,6 +54,8 @@ export type LineCreatePreview = {
   brand: LineCreateField<string>;
   weight: { kg: number; src: string };
   images: { keys: string[]; src: string; custom: boolean };
+  /** รูปในรายละเอียด (ทดลอง · ร่าง extra.line_desc_images) — ต่อท้ายข้อความหลังสร้างสินค้า ด้วยวิธีฝากรูปผ่านแกลเลอรี (lib/line-desc-images) */
+  desc_images: string[];
   option_names: string[];
   variants: LineCreateVariantRow[];
   /** ส่วนลดระดับสินค้าที่ส่งตอนสร้าง (ใช้ได้เมื่อทุกตัวเลือกลดเท่ากัน) */
@@ -69,7 +72,7 @@ export type LineCreatePreview = {
 };
 export type LineCreateBuild =
   | { ok: false; status: number; error: string }
-  | { ok: true; preview: LineCreatePreview; payload: Record<string, unknown>; credential: string | null; draftProductId: string | null };
+  | { ok: true; preview: LineCreatePreview; payload: Record<string, unknown>; credential: string | null; draftProductId: string | null; descImageKeys: string[] };
 
 const baseUrl = () => (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
 export const lineCategoryIdOf = (path: unknown): string | null => {
@@ -212,6 +215,8 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
     imgSrc = `${imageKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU (อัตโนมัติ)"}${descImgKeys.length ? " + รูปในรายละเอียด" : ""}`;
   }
   const imageUrls = galleryKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
+  // รูปในรายละเอียด (ทดลอง) — ไม่อยู่ใน payload สร้างสินค้า (LINE ไม่รับลิงก์นอก) · route ใส่ให้หลังสร้างเสร็จ
+  const descImageKeys = Array.isArray(extra.line_desc_images) ? [...new Set((extra.line_desc_images as unknown[]).map(str).filter(Boolean))].slice(0, MAX_LINE_DESC_IMAGES) : [];
 
   // ---------- ตรวจครบ ----------
   const missing: string[] = [];
@@ -236,7 +241,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   };
 
   return {
-    ok: true, credential, draftProductId, payload,
+    ok: true, credential, draftProductId, payload, descImageKeys,
     preview: {
       parent_id: parentSkuId, parent_code: str(p.code), platform_id, brand_id,
       name: { value: name, src: nameSrc },
@@ -245,6 +250,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
       brand: { value: brandVal, src: brandSrc },
       weight: { kg: weightKg, src: weightSrc },
       images: { keys: galleryKeys, src: imgSrc, custom: lineImages.length > 0 },
+      desc_images: descImageKeys,
       option_names: dims.map((dm) => dm.name),
       variants: variantRows,
       top_discount: topDiscount,

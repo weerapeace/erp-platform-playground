@@ -24,6 +24,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { linePrice } from "@/lib/platform-listing-builder";
+import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
 import { LINE_CREATE_MAX_IMAGES, type LineCreatePreview, type LineCreateVariantRow } from "@/lib/line-create-payload";
 
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
@@ -48,6 +49,8 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
   const [val, setVal] = useState("");
   const [saving, setSaving] = useState(false);
   const [sel, setSel] = useState<string[] | null>(null);            // รูปที่ติ๊กเลือก (null = ตามที่จะส่งตอนนี้)
+  const [dsel, setDsel] = useState<string[] | null>(null);          // รูปในรายละเอียด (ทดลอง) ที่ติ๊ก (null = ตามร่าง)
+  const [dpick, setDpick] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
   const [pool, setPool] = useState<{ key: string; source: string }[] | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({});  // `${sku_id}:fake|sale` → ค่าที่พิมพ์
@@ -60,7 +63,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
       setPv(j.preview); onLoaded?.(j.preview);
     } catch (e) { setErr((e as Error).message); }
   }, [parentId, onLoaded]);
-  useEffect(() => { setPv(null); setEdit(null); setSel(null); setPool(null); setPrices({}); setDescOpen(false); void load(); }, [load]);
+  useEffect(() => { setPv(null); setEdit(null); setSel(null); setDsel(null); setDpick(false); setPool(null); setPrices({}); setDescOpen(false); void load(); }, [load]);
 
   const patchDraft = async (body: Record<string, unknown>, okMsg: string) => {
     if (!pv) return;
@@ -69,7 +72,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
       const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentId, platform_id: pv.platform_id, ...body }) });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      toast.success(okMsg); setEdit(null); setSel(null);
+      toast.success(okMsg); setEdit(null); setSel(null); setDsel(null); setDpick(false);
       await load();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSaving(false); }
@@ -98,6 +101,16 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
     if (cur.includes(key)) return cur.filter((k) => k !== key);
     return cur.length < LINE_CREATE_MAX_IMAGES ? [...cur, key] : cur;
   });
+  // รูปในรายละเอียด (ทดลอง): ต่อท้ายข้อความหลังลงร้าน (ฝากรูปผ่านแกลเลอรี) · บันทึก = ร่าง extra.line_desc_images
+  const curDesc = dsel ?? pv?.desc_images ?? [];
+  const descDirty = !!dsel && !!pv && dsel.join("|") !== pv.desc_images.join("|");
+  const dragDesc = useDragReorder((from, to) => setDsel((xs) => moveItem(xs ?? curDesc, from, to)), { group: "line-create-desc-images" });
+  const toggleDesc = (key: string) => setDsel(() => {
+    const cur = curDesc;
+    if (cur.includes(key)) return cur.filter((k) => k !== key);
+    return cur.length < MAX_LINE_DESC_IMAGES ? [...cur, key] : cur;
+  });
+
   useEffect(() => {
     if (!pv || pool) return;
     let alive = true;
@@ -285,7 +298,69 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
               dangerouslySetInnerHTML={{ __html: pv.description.value }} />
             <button type="button" onClick={() => setDescOpen((o) => !o)} className="mt-1 text-xs text-violet-700 hover:underline">{descOpen ? "ย่อ" : "ดูทั้งหมด"}</button>
           </div>
-        ) : "(ไม่มีรายละเอียด)", `${pv.description.src} · จัดย่อหน้าให้แบบเดียวกับบน LINE · รูปในรายละเอียด LINE ไม่รับ → ใช้เป็นรูปสินค้าแทน`, pv.description.value, !pv.description.value)}
+        ) : "(ไม่มีรายละเอียด)", `${pv.description.src} · จัดย่อหน้าให้แบบเดียวกับบน LINE · รูปต่อท้ายเลือกได้ที่ช่อง "รูปในรายละเอียด" ด้านล่าง`, pv.description.value, !pv.description.value)}
+        {/* รูปในรายละเอียด (ทดลอง) */}
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-start gap-2 border-t border-slate-100 py-2 text-sm">
+          <span className="pt-0.5 text-slate-500">รูปในรายละเอียด<br /><span className="rounded bg-amber-100 px-1 text-[10px] text-amber-800">ทดลอง</span></span>
+          <div className="min-w-0">
+            {curDesc.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {curDesc.map((k, i) => (
+                  <div key={`${k}-${i}`} {...(canEdit ? dragDesc.rowProps(i) : {})} className={`relative h-16 w-16 overflow-hidden rounded-md border border-slate-200 bg-slate-50 ${canEdit ? dragDesc.rowCls(i) : ""}`}>
+                    <img src={r2ImageUrl(k, 160) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    <span className="absolute left-0.5 top-0.5 rounded-full bg-white/90 px-1 text-[10px] text-slate-600">{i + 1}</span>
+                    {canEdit && (
+                      <div className="absolute inset-x-0 bottom-0 flex items-center bg-white/90 px-0.5 text-[10px]">
+                        <DragHandle {...dragDesc.handleProps(i)} title="ลากเพื่อเรียง" />
+                        <button type="button" onClick={() => toggleDesc(k)} className="ml-auto text-rose-600 hover:underline">ออก</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : <span className="text-slate-400">ไม่มี</span>}
+            <div className="mt-0.5 text-[11px] text-slate-400">ต่อท้ายข้อความรายละเอียด หลังลงร้านเสร็จ (ฝากรูปผ่านรูปสินค้าชั่วคราวแล้วคืน) · สูงสุด {MAX_LINE_DESC_IMAGES} รูป · ร้านส่วนใหญ่ใส่ 6–7 รูป</div>
+            {canEdit && dpick && (
+              <div className="mt-2 rounded-lg border border-slate-200 p-2">
+                {!pool ? <div className="text-xs text-slate-400">กำลังโหลดรูป...</div> : pool.length === 0 ? <div className="text-xs text-slate-400">สินค้านี้ยังไม่มีรูปในระบบ</div> : (
+                  <>
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                      <span>กดเลือกตามลำดับที่อยากให้เรียง · เลือกแล้ว {curDesc.length}</span>
+                      {pool.some((im) => im.source.startsWith("รูปในรายละเอียด")) && (
+                        <button type="button" onClick={() => setDsel(pool.filter((im) => im.source.startsWith("รูปในรายละเอียด")).map((im) => im.key).slice(0, MAX_LINE_DESC_IMAGES))} className="text-violet-700 hover:underline">
+                          ใช้รูปรายละเอียดในระบบทั้งหมด ({pool.filter((im) => im.source.startsWith("รูปในรายละเอียด")).length})
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid max-h-64 grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1.5 overflow-y-auto">
+                      {pool.map((im) => {
+                        const idx = curDesc.indexOf(im.key);
+                        const full = idx < 0 && curDesc.length >= MAX_LINE_DESC_IMAGES;
+                        return (
+                          <button key={im.key} type="button" disabled={full} onClick={() => toggleDesc(im.key)} title={im.source}
+                            className={`min-w-0 rounded-md border p-0.5 text-left ${idx >= 0 ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-40`}>
+                            <div className="relative aspect-square overflow-hidden rounded bg-slate-50">
+                              <img src={r2ImageUrl(im.key, 160) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
+                              {idx >= 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-600 px-1 text-[10px] text-white">{idx + 1}</span>}
+                            </div>
+                            <div className="truncate text-[10px] text-slate-500">{im.source}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {canEdit && (
+            <div className="flex flex-col gap-1">
+              {descDirty && <button type="button" disabled={saving} onClick={() => void patchExtra({ line_desc_images: curDesc.length ? curDesc : null }, "บันทึกรูปในรายละเอียดแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>}
+              {descDirty && <button type="button" onClick={() => { setDsel(null); setDpick(false); }} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>}
+              {!descDirty && <button type="button" disabled={saving} onClick={() => setDpick((o) => !o)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50 disabled:opacity-40">{dpick ? "ปิด" : "เลือกรูป"}</button>}
+            </div>
+          )}
+        </div>
         {fieldRow("weight", "น้ำหนัก", pv.weight.kg > 0 ? `${pv.weight.kg} กก. (ทุกตัวเลือก)` : "ไม่ส่ง", pv.weight.src, pv.weight.kg > 0 ? String(pv.weight.kg) : "")}
       </div>
 

@@ -243,7 +243,12 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
           const r = await apiFetch(REAL_CREATE_ENDPOINT[pf.code], { method: "POST", body: JSON.stringify({ parent_sku_id: id }) });
           const j = await r.json();
           if (j.error || j.ok === false) res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${j.error ?? "ไม่ทราบสาเหตุ"}` });
-          else res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}` });
+          else {
+            // รูปในรายละเอียด (ทดลอง) — พลาดไม่ทำให้ลงไม่สำเร็จ แค่บอกให้รู้
+            const di = j.desc_images as { ok: boolean; present: number; total: number; error: string | null } | null | undefined;
+            const diText = di ? (di.ok ? ` · รูปในรายละเอียด ${di.present} รูป` : ` · รูปในรายละเอียดไม่สำเร็จ (${di.error ?? "ไม่ทราบสาเหตุ"})`) : "";
+            res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${diText}` });
+          }
         } catch (e) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${(e as Error).message}` }); }
         setProgress({ done: i + 1, total: toCreate.length, label: "กำลังลงบนร้าน" });
       }
