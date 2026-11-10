@@ -32,8 +32,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          SRC=$(gh api "repos/$REPO/git/ref/heads/feat/host-portable" --jq .object.sha)
-          DST=$(gh api "repos/$REPO/git/ref/heads/prod" --jq .object.sha 2>/dev/null || true)
+          # อ่านด้วย git ls-remote (repo สาธารณะ) — gh api พิมพ์ข้อความ 404 ลง stdout ตอนยังไม่มีสาขา prod
+          SRC=$(git ls-remote "https://github.com/$REPO.git" refs/heads/feat/host-portable | cut -f1)
+          DST=$(git ls-remote "https://github.com/$REPO.git" refs/heads/prod | cut -f1)
+          if [ -z "$SRC" ]; then echo "อ่าน feat/host-portable ไม่ได้"; exit 1; fi
           echo "feat/host-portable=$SRC prod=${DST:-none}"
           if [ "$SRC" = "$DST" ]; then
             echo "ไม่มีงานใหม่ — ไม่ต้อง build"
