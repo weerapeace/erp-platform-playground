@@ -103,6 +103,22 @@ export function isUrgent(sheet: DesignSheetListItem, statusMeta: StatusMeta): bo
   return days !== null && days <= 2;
 }
 
+/**
+ * ตัวกรองของตัวเลขสรุป + หน้า "วันนี้" บนมือถือ (เฉพาะงานที่ยังไม่ปิด)
+ *   overdue = เลยวันส่ง · due2 = ส่งวันนี้ถึงอีก 2 วัน · soon7 = อีก 3–7 วัน · await_quote = เสนอราคาครั้งล่าสุดรอลูกค้าตอบ · nodl = ยังไม่ตั้งวันส่ง
+ */
+export type PhoneFilter = "overdue" | "due2" | "soon7" | "await_quote" | "nodl";
+export function passPhoneFilter(sheet: DesignSheetListItem, f: PhoneFilter, statusMeta: StatusMeta): boolean {
+  if (statusMeta.finished.has(sheet.status)) return false;
+  if (f === "await_quote") return sheet.quote_latest?.status === "pending";
+  const d = daysUntil(sheet.deadline);
+  if (f === "nodl") return d === null;
+  if (d === null) return false;
+  if (f === "overdue") return d < 0;
+  if (f === "due2") return d >= 0 && d <= 2;
+  return d >= 3 && d <= 7;
+}
+
 export function deadlineTone(sheet: DesignSheetListItem, statusMeta: StatusMeta): Tone {
   if (statusMeta.finished.has(sheet.status)) return sheet.status === "sku_created" ? "done" : "good";
   const days = daysUntil(sheet.deadline);

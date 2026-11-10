@@ -24,11 +24,14 @@ import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provid
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { useStickyHeader } from "@/components/sticky-header";
-import { type ListResponse, type StatusResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, LoadingCard } from "./dashboard-helpers";
+import { type ListResponse, type StatusResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard } from "./dashboard-helpers";
 import { BoardCard, GalleryCard } from "./dashboard-cards";
 import { BrandBar } from "./brand-bar";
 import { BrandSettingsModal } from "./brand-settings-modal";
 import { StatusBoard } from "./status-board";
+import { PhoneTodayView } from "./phone-today";
+import { BottomSheet } from "@/components/modal";
+import { DesignStatusSheet } from "@/components/design-sheet-mobile/status-sheet";
 import { PickActionBar } from "./pick-action-bar";
 import { LineInboxButton, LineInboxDrawer, useLineInboxCount } from "./line-inbox";
 import type { LineInboxItem, MergeSheetOption } from "@/lib/design-line-inbox-shared";
@@ -105,6 +108,8 @@ export function DesignDashboard() {
   // 📌 หัวหน้าติดบนตอนเลื่อน (ของกลาง sticky-header · เจ้าของขอ 2026-10-24) — จอคอม/แท็บเล็ต เหลือแถบบาง ชื่อหน้า + ปุ่ม · มือถือ ติดทั้งหัว
   const sticky = useStickyHeader({ watch: layout });
   const [phoneStatus, setPhoneStatus] = useState<string | null>(null); // มือถือ: บอร์ดเป็น "แท็บสถานะ" ทีละสถานะ (ไม่ใช่คอลัมน์เรียงข้าง)
+  const [phoneView, setPhoneView] = useState<"board" | "today">("board");   // มือถือ: แถบล่าง บอร์ด / วันนี้
+  const [quickStatusFor, setQuickStatusFor] = useState<DesignSheetListItem | null>(null);   // มือถือ: กดค้างที่การ์ด → แผ่นเปลี่ยนสถานะ
   const galleryStyle = useMemo(() => (
     // แกลเลอรีบนมือถือ = 2 ต่อแถว · แท็บเล็ต = ไม่เกิน 4 (การ์ดไม่จิ๋วเกินอ่าน) · จอคอม = ตามที่ผู้ใช้เลือก
     isPhone ? { display: "grid", gap: "0.5rem", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }
@@ -242,7 +247,8 @@ export function DesignDashboard() {
       .then((j) => { if (!j.error && Array.isArray(j.data)) { setSheets(j.data as DesignSheetListItem[]); setTotal(typeof j.total === "number" ? j.total : j.data.length); } })
       .catch(() => {});
   };
-  const [quickFilter, setQuickFilter] = useState<"all" | "active" | "urgent" | "soon" | "closed">("all");
+  // ตัวกรองด่วน — overdue/due2/await_quote/nodl ใช้กับตัวเลขสรุปบนมือถือ (จอคอมยังมี 5 ตัวเดิมในเมนู)
+  const [quickFilter, setQuickFilter] = useState<"all" | "active" | "urgent" | "soon" | "closed" | "overdue" | "due2" | "await_quote" | "nodl">("all");
 
   // ── โหมดติ๊กเลือกใบงาน — ใช้ 2 งาน: 🎨 ส่งขึ้นกระดานแคมเปญ (ของกลาง campaign-board-send) / 📋 สรุปงาน (ของกลาง design-sheet-summary) ──
   const [pickMode, setPickMode] = useState(false);
@@ -387,14 +393,15 @@ export function DesignDashboard() {
     if (f === "urgent") return isUrgent(sheet, statusMeta);
     if (f === "soon") { const dd = daysUntil(sheet.deadline); return !statusMeta.finished.has(sheet.status) && dd !== null && dd <= 7; }
     if (f === "closed") return statusMeta.finished.has(sheet.status);
+    if (f === "overdue" || f === "due2" || f === "await_quote" || f === "nodl") return passPhoneFilter(sheet, f, statusMeta);
     return true;
   };
   const filteredSheets = useMemo(() => (quickFilter === "all" ? scopedSheets : scopedSheets.filter((s) => passQuick(s, quickFilter))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedSheets, quickFilter, statusMeta]);
   const filterCounts = useMemo(() => {
-    const c = { all: scopedSheets.length, active: 0, urgent: 0, soon: 0, closed: 0 };
-    for (const s of scopedSheets) for (const f of ["active", "urgent", "soon", "closed"] as const) if (passQuick(s, f)) c[f]++;
+    const c = { all: scopedSheets.length, active: 0, urgent: 0, soon: 0, closed: 0, overdue: 0, due2: 0, await_quote: 0, nodl: 0 };
+    for (const s of scopedSheets) for (const f of ["active", "urgent", "soon", "closed", "overdue", "due2", "await_quote", "nodl"] as const) if (passQuick(s, f)) c[f]++;
     return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedSheets, statusMeta]);
@@ -620,8 +627,15 @@ export function DesignDashboard() {
   // การ์ดใบงาน (ของกลางในโมดูล ./dashboard-cards) — แกลเลอรี/บอร์ด ใช้ค่าร่วมชุดเดียวกัน
   // ⏳ ติ๊ก "รออะไรอยู่" บนการ์ด → อัปเดตสรุปของใบนั้นในรายการทันที (ไม่ต้องโหลดทั้งหน้า)
   const onWaitingChange = (id: string, s: ChecklistSummary) => setSheets((items) => items.map((it) => (it.id === id ? { ...it, waiting_items: s } : it)));
-  const cardProps = { statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting: canEdit, onWaitingChange, brandStrip };
+  // มือถือ/แท็บเล็ต + มีสิทธิ์แก้: กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว (จอคอมใช้ลากการ์ดเหมือนเดิม)
+  const onCardLongPress = !isDesktop && canEdit && !pickMode ? (s: DesignSheetListItem) => setQuickStatusFor(s) : undefined;
+  const cardProps = { statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting: canEdit, onWaitingChange, brandStrip, onLongPress: onCardLongPress };
   const renderGalleryCard = (sheet: DesignSheetListItem) => <GalleryCard key={sheet.id} sheet={sheet} {...cardProps} />;
+  // หน้า "วันนี้" (มือถือ) ใช้การ์ดแถวย่อเสมอ — ตัวเดียวกับบอร์ด
+  const renderRowCard = (sheet: DesignSheetListItem) => (
+    <BoardCard key={sheet.id} sheet={sheet} {...cardProps} draggingSheetId={null} movingSheetId={movingSheetId} cardSize="row" isDesktop={isDesktop}
+      handleCardDragStart={handleCardDragStart} setDraggingSheetId={setDraggingSheetId} setDropTargetStatus={setDropTargetStatus} />
+  );
   const renderBoardCard = (sheet: DesignSheetListItem) => (
     <BoardCard key={sheet.id} sheet={sheet} {...cardProps} draggingSheetId={draggingSheetId} movingSheetId={movingSheetId} cardSize={cardSize} isDesktop={isDesktop}
       handleCardDragStart={handleCardDragStart} setDraggingSheetId={setDraggingSheetId} setDropTargetStatus={setDropTargetStatus} />
@@ -645,40 +659,7 @@ export function DesignDashboard() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef}>
-              {inboxCount.pending > 0 && (
-                <button type="button" onClick={() => setInboxOpen(true)} title={t("งานจากไลน์ รอเปิดใบงาน", "Jobs from LINE waiting")}
-                  aria-label={t(`งานจากไลน์ ${inboxCount.pending} งาน`, `${inboxCount.pending} jobs from LINE`)}
-                  className="relative flex h-9 w-9 items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800">
-                  <Icon name="chat" size={18} />
-                  <span className="absolute -right-1.5 -top-1.5 rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-4 text-white">{inboxCount.pending}</span>
-                </button>
-              )}
               <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
-              <button type="button" onClick={() => setMoreOpen((o) => !o)} title={t("เมนูเพิ่มเติม", "More menu")} aria-label={t("เมนูเพิ่มเติม", "More menu")}
-                className={`flex h-9 w-9 items-center justify-center rounded-md border text-lg leading-none ${moreOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>⋯</button>
-              <FloatingDropdown anchorRef={moreAnchorRef} open={moreOpen} onClose={() => setMoreOpen(false)} minWidth={224} maxWidth={280}>
-                <div className="rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
-                  <div className="px-1 py-0.5"><RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} /></div>
-                  <button type="button" className={menuItem} onClick={() => { setInboxOpen(true); setMoreOpen(false); }}>
-                    <Icon name="chat" /> {t("งานจากไลน์", "Jobs from LINE")}{inboxCount.pending > 0 ? ` (${inboxCount.pending})` : ""}
-                  </button>
-                  <a href="/master/design-sheets" className={menuItem}>📄 {t("กลับ Design Sheets", "Back to Design Sheets")}</a>
-                  <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 {t("รีเฟรชข้อมูล", "Refresh data")}</button>
-                  {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 {t("ปรับธีม", "Theme")} {selectedBrand?.name}</button>}
-                  <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 {t("จัดการสถานะ", "Manage statuses")}</button>
-                  <button type="button" className={menuItem} onClick={() => { changeCardSize(cardSize === "row" ? "compact" : "row"); setMoreOpen(false); }}>
-                    {cardSize === "row" ? t("▦ การ์ดเล็ก (มีรูป)", "▦ Small cards (with image)") : t("☰ การ์ดแถวย่อ", "☰ Compact rows")}
-                  </button>
-                  <button type="button" className={menuItem} onClick={() => { toggleBrandStrip(); setMoreOpen(false); }}>
-                    <Icon name="design" /> {brandStrip ? t("ปิดแถบสีแบรนด์", "Hide brand strip") : t("เปิดแถบสีแบรนด์", "Show brand strip")}
-                  </button>
-                  {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>}
-                  {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 {t("สรุปงานใหม่ (เลือกใบงาน)", "New summary (pick sheets)")}</button>}
-                  {canOrder && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("order"); setMoreOpen(false); }}><Icon name="cart" /> {t("ลงออเดอร์ (เลือกใบงาน)", "Add orders (pick sheets)")}</button>}
-                  {canEdit && <button type="button" className={menuItem} onClick={() => { setMoreOpen(false); setSummaryMenuOpen(true); }}>📂 {t("สรุปที่บันทึกไว้", "Saved summaries")}</button>}
-                  <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ {t("ตั้งค่าแบรนด์", "Brand settings")}</button>
-                </div>
-              </FloatingDropdown>
             </div>
           </div>
         ) : (
@@ -757,6 +738,10 @@ export function DesignDashboard() {
         <div className="space-y-4">
 
           <main className="min-w-0 space-y-4">
+            {/* มือถือ ปุ่ม "วันนี้" แถบล่าง = รวมงานที่ต้องสนใจ (แทนบอร์ด · แถบแบรนด์ยังใช้กรองได้) */}
+            {isPhone && phoneView === "today" ? (
+              <PhoneTodayView sheets={scopedSheets} statusMeta={statusMeta} renderRow={renderRowCard} scopeLabel={scopeLabel} />
+            ) : (
             <section data-gg-panel className={`min-w-0 rounded-lg border border-white/70 bg-white/80 shadow-sm backdrop-blur ${isPhone ? "p-3" : "p-4"}`}>
               {!isPhone && (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -787,12 +772,39 @@ export function DesignDashboard() {
                       ))}
                     </div>
                   </div>
-                  <div className="-mx-3 flex gap-1 overflow-x-auto px-3 pb-1">
-                    {([["all", t("ทั้งหมด", "All")], ["active", t("🛠 กำลังทำ", "🛠 In progress")], ["urgent", t("🔴 ด่วน", "🔴 Urgent")], ["soon", t("🟠 ใกล้กำหนด", "🟠 Due soon")], ["closed", t("✅ ปิดงาน", "✅ Closed")]] as const).map(([key, label]) => (
-                      <button key={key} type="button" onClick={() => setQuickFilter(key)}
-                        className={`h-8 shrink-0 rounded-full border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{label}</button>
-                    ))}
+                  {/* ตัวเลขสรุป 3 ช่อง (เจ้าของเลือกแบบ widget 2026-11-10) — แตะ = กรองเฉพาะกลุ่มนั้น · แตะซ้ำ = เลิกกรอง · นับตามแบรนด์ที่เลือก */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { key: "overdue", label: t("เกินกำหนด", "Overdue"), on: "border-rose-500 bg-rose-500 text-white", off: "border-rose-200 bg-rose-50 text-rose-700" },
+                      { key: "due2", label: t("ส่งใน 2 วัน", "Due in 2 days"), on: "border-amber-500 bg-amber-500 text-white", off: "border-amber-200 bg-amber-50 text-amber-800" },
+                      { key: "await_quote", label: t("รอลูกค้าตอบราคา", "Awaiting quote reply"), on: "border-slate-900 bg-slate-900 text-white", off: "border-slate-200 bg-white text-slate-700" },
+                    ] as const).map((k) => {
+                      const on = quickFilter === k.key;
+                      return (
+                        <button key={k.key} type="button" onClick={() => setQuickFilter(on ? "all" : k.key)} aria-pressed={on}
+                          className={`flex min-w-0 flex-col items-start rounded-xl border px-2.5 py-2 text-left transition active:scale-[0.98] ${on ? k.on : k.off}`}>
+                          <span className="text-xl font-semibold leading-tight tabular-nums">{filterCounts[k.key]}</span>
+                          <span className="w-full truncate text-[11px] leading-tight">{k.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
+                  {/* งานที่ยังไม่ตั้ง Deadline = ตัวเลขข้างบนนับไม่ได้ → บอกให้รู้ + แตะดูรายการไปตั้งทีละใบ */}
+                  {(filterCounts.nodl > 0 || quickFilter !== "all") && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      {filterCounts.nodl > 0 && (
+                        <button type="button" onClick={() => setQuickFilter(quickFilter === "nodl" ? "all" : "nodl")}
+                          className={`rounded-full border px-2.5 py-1 ${quickFilter === "nodl" ? "border-slate-900 bg-slate-900 text-white" : "border-dashed border-slate-300 text-slate-500"}`}>
+                          {t(`ยังไม่ตั้งวันส่ง ${filterCounts.nodl} ใบ`, `${filterCounts.nodl} without a deadline`)}
+                        </button>
+                      )}
+                      {quickFilter !== "all" && quickFilter !== "nodl" && (
+                        <button type="button" onClick={() => setQuickFilter("all")} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
+                          <Icon value="i:x" className="text-[11px]" /> {t("ล้างตัวกรอง", "Clear filter")}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
               <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -831,14 +843,65 @@ export function DesignDashboard() {
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
                 <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} foldedCols={foldedSet} onToggleFold={toggleFoldCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
               )}
+              {isPhone && onCardLongPress && filteredSheets.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">{t("กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว", "Press and hold a card to change its status")}</p>}
             </section>
+            )}
 
           </main>
         </div>
         {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}
         {isPhone && !pickMode && (
           <button type="button" onClick={() => setCreateOpen(true)} title={t("เพิ่มงานใหม่", "Add new job")} aria-label={t("เพิ่มงานใหม่", "Add new job")}
-            className="fixed bottom-5 right-4 z-[60] flex h-[52px] w-[52px] items-center justify-center rounded-full bg-slate-900 text-2xl leading-none text-white shadow-lg shadow-slate-900/30 active:scale-95">＋</button>
+            className="fixed bottom-[76px] right-4 z-[60] flex h-[52px] w-[52px] items-center justify-center rounded-full bg-slate-900 text-2xl leading-none text-white shadow-lg shadow-slate-900/30 active:scale-95">＋</button>
+        )}
+        {/* มือถือ: แถบล่าง บอร์ด · วันนี้ · ไลน์ · เมนู (เจ้าของเลือกแบบ widget 2026-11-10) — ซ่อนตอนโหมดเลือก (แถบเลือกไว้ N ใบใช้ที่นั้น) */}
+        {isPhone && !pickMode && (
+          <nav className="sticky bottom-0 z-[55] -mx-3 -mb-3 mt-3 grid grid-cols-4 border-t border-slate-200 bg-white/95 backdrop-blur" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label={t("เมนูล่าง", "Bottom menu")}>
+            {([
+              { key: "board", icon: "folders", label: t("บอร์ด", "Board"), on: phoneView === "board", onClick: () => setPhoneView("board") },
+              { key: "today", icon: "calendar", label: t("วันนี้", "Today"), on: phoneView === "today", onClick: () => setPhoneView("today"), badge: filterCounts.overdue + filterCounts.due2 },
+              { key: "line", icon: "chat", label: t("ไลน์", "LINE"), on: inboxOpen, onClick: () => setInboxOpen(true), badge: inboxCount.pending },
+              { key: "menu", icon: "list", label: t("เมนู", "Menu"), on: moreOpen, onClick: () => setMoreOpen(true) },
+            ] as { key: string; icon: string; label: string; on: boolean; onClick: () => void; badge?: number }[]).map((b) => (
+              <button key={b.key} type="button" onClick={b.onClick} aria-pressed={b.on}
+                className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] ${b.on ? "font-semibold text-slate-900" : "text-slate-500"}`}>
+                <Icon name={b.icon} size={20} />
+                {b.label}
+                {!!b.badge && <span className="absolute right-[calc(50%-20px)] top-1 rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-4 text-white">{b.badge}</span>}
+              </button>
+            ))}
+          </nav>
+        )}
+        {/* เมนู (เดิมปุ่ม ⋯ บนหัว) — แผ่นเลื่อนจากล่าง กดง่ายด้วยนิ้วโป้ง */}
+        {isPhone && (
+          <BottomSheet open={moreOpen} onClose={() => setMoreOpen(false)} title={t("เมนู", "Menu")} backKey="dd-menu">
+            <div className="space-y-0.5 pb-1">
+            <div className="px-1 py-0.5"><RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} /></div>
+            <button type="button" className={menuItem} onClick={() => { setInboxOpen(true); setMoreOpen(false); }}>
+              <Icon name="chat" /> {t("งานจากไลน์", "Jobs from LINE")}{inboxCount.pending > 0 ? ` (${inboxCount.pending})` : ""}
+            </button>
+            <a href="/master/design-sheets" className={menuItem}>📄 {t("กลับ Design Sheets", "Back to Design Sheets")}</a>
+            <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 {t("รีเฟรชข้อมูล", "Refresh data")}</button>
+            {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 {t("ปรับธีม", "Theme")} {selectedBrand?.name}</button>}
+            <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 {t("จัดการสถานะ", "Manage statuses")}</button>
+            <button type="button" className={menuItem} onClick={() => { changeCardSize(cardSize === "row" ? "compact" : "row"); setMoreOpen(false); }}>
+              {cardSize === "row" ? t("▦ การ์ดเล็ก (มีรูป)", "▦ Small cards (with image)") : t("☰ การ์ดแถวย่อ", "☰ Compact rows")}
+            </button>
+            <button type="button" className={menuItem} onClick={() => { toggleBrandStrip(); setMoreOpen(false); }}>
+              <Icon name="design" /> {brandStrip ? t("ปิดแถบสีแบรนด์", "Hide brand strip") : t("เปิดแถบสีแบรนด์", "Show brand strip")}
+            </button>
+            {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>}
+            {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 {t("สรุปงานใหม่ (เลือกใบงาน)", "New summary (pick sheets)")}</button>}
+            {canOrder && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("order"); setMoreOpen(false); }}><Icon name="cart" /> {t("ลงออเดอร์ (เลือกใบงาน)", "Add orders (pick sheets)")}</button>}
+            {canEdit && <button type="button" className={menuItem} onClick={() => { setMoreOpen(false); setSummaryMenuOpen(true); }}>📂 {t("สรุปที่บันทึกไว้", "Saved summaries")}</button>}
+            <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ {t("ตั้งค่าแบรนด์", "Brand settings")}</button>
+            </div>
+          </BottomSheet>
+        )}
+        {/* กดค้างที่การ์ด → เปลี่ยนสถานะเร็ว (ของกลาง DesignStatusSheet · บันทึกผ่าน moveSheetToStatus ตัวเดียวกับลากการ์ดบนจอคอม) */}
+        {quickStatusFor && (
+          <DesignStatusSheet open onClose={() => setQuickStatusFor(null)} statusMeta={statusMeta} own={sheetIsOwn(quickStatusFor)} current={quickStatusFor.status}
+            subtitle={`${quickStatusFor.code} · ${quickStatusFor.name}`} onPick={(key) => void moveSheetToStatus(quickStatusFor.id, key)} />
         )}
       </div>
   );

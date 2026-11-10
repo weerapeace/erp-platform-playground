@@ -18,7 +18,7 @@ import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/r
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { apiFetch } from "@/lib/api";
-import { buildStatusMeta, isOwnBrandJob, statusOptsFor, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { buildStatusMeta, isOwnBrandJob, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -27,6 +27,7 @@ import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } fr
 import { QuoteRounds } from "@/components/design-sheet-detail/quote-rounds";
 import { SheetQuotations } from "@/components/design-sheet-detail/sheet-quotations";
 import { RecordChecklist } from "@/components/record-tasks";
+import { DesignStatusSheet } from "./status-sheet";
 import { Icon } from "@/components/icon";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { DriveUploadBox } from "@/components/drive-upload-box";
@@ -582,24 +583,10 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         </div>
       )}
 
-      {/* แผ่นเลือกสถานะ (เลื่อนขึ้นจากล่าง) — ไม่ portal เพื่อให้อยู่ในกรอบพรีวิวตอนดูบนจอคอม */}
-      {statusSheet && sheet && (
-        <div className="fixed inset-0 z-[70] flex items-end bg-black/40" onClick={() => setStatusSheet(false)}>
-          <div className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl bg-white p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
-            <div className="mb-2 text-sm font-semibold text-slate-800">{t("เปลี่ยนสถานะ", "Change status")}</div>
-            {/* แบรนด์เรา = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลางเดียวกับบอร์ด/ป๊อปอัป) */}
-            {statusOptsFor(statusMeta, isOwnBrandJob(sheet.brand), sheet.status).map(([key, label]) => {
-              const on = key === sheet.status; const color = statusMeta.colorHex[key] ?? "#94a3b8";
-              return (
-                <button key={key} type="button" onClick={() => { setStatusSheet(false); if (!on) void patchField({ status: key }, t("สถานะ", "Status")); }}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${on ? "bg-slate-100 font-semibold text-slate-900" : "text-slate-700 active:bg-slate-50"}`}>
-                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />{label}{on && <span className="ml-auto text-xs text-slate-400">{t("ปัจจุบัน", "Current")}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      {/* แผ่นเลือกสถานะ — ของกลาง DesignStatusSheet (ตัวเดียวกับ Design Dashboard มือถือ) */}
+      {sheet && (
+        <DesignStatusSheet open={statusSheet} onClose={() => setStatusSheet(false)} statusMeta={statusMeta} own={isOwnBrandJob(sheet.brand)} current={sheet.status}
+          subtitle={`${sheet.code} · ${sheet.name}`} onPick={(key) => void patchField({ status: key }, t("สถานะ", "Status"))} />
       )}
 
       <ImageLightbox images={lightboxImages} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />
