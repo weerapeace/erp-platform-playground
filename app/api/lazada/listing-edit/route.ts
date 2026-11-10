@@ -138,6 +138,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (fields.name && freshView.name.replace(/\s+/g, " ").trim() !== fields.name) warnings.push("Lazada ตอบรับแล้ว แต่ชื่อบนร้านยังเป็นชื่อเดิม (อาจรอตรวจ) — ดูอีกครั้งภายหลัง");
   if (fields.images && freshView.images.length !== fields.images.length) warnings.push(`ส่งรูปสินค้า ${fields.images.length} รูป แต่บนร้านเห็น ${freshView.images.length} รูป — ตรวจในแท็บรูป (Lazada อาจไม่ลบรูปที่เอาออก)`);
+  // เรียงใหม่/เปลี่ยนปกด้วยรูปเดิม (ไม่มีรูปฝากใหม่) → ลิงก์ต้องตรงลำดับ · ไม่ตรง = เตือน (ไม่ใช่แค่นับจำนวน)
+  else if (fields.images && migrated.size === 0 && freshView.images.join("\n") !== fields.images.join("\n")) warnings.push("Lazada ตอบรับแล้ว แต่ลำดับรูป/ปกบนร้านยังไม่ตรงกับที่ส่ง — ตรวจในแท็บรูป");
+  // น้ำหนัก/กล่องที่ส่ง ต้องเห็นค่าเดียวกันบนร้าน
+  const pkgOff = [...extras].filter(([id, e]) => {
+    const f = freshView.skus.find((s) => s.skuId === id); if (!f) return false;
+    return (e.weight != null && f.weight !== e.weight) || (e.length != null && f.length !== e.length) || (e.width != null && f.width !== e.width) || (e.height != null && f.height !== e.height);
+  }).length;
+  if (pkgOff) warnings.push(`Lazada ตอบรับแล้ว แต่น้ำหนัก/ขนาดกล่องบนร้านยังไม่ตรง ${pkgOff} ตัวเลือก — ตรวจในแท็บตัวเลือก`);
   const changedStatus = freshView.skus.filter((s) => liveView.skus.find((b) => b.skuId === s.skuId)?.status !== s.status).length;
   if (changedStatus) warnings.push(`สถานะตัวเลือกเปลี่ยนไป ${changedStatus} ตัวหลังแก้ — ตรวจในแท็บตัวเลือก`);
   const err = await saveLazSlimCopy(admin, live.row, fresh!);
