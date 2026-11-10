@@ -23,9 +23,14 @@ import { ErrorState } from "@/components/state-views";
 import { formatDateTime } from "@/lib/date";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { SHOPEE_STATUS_LABEL, SHIP_DUE_LABEL, platformStatusWarning, shipDue, type PlatformOrderRow } from "@/lib/platform-order-status";
+import { courierLabel, shippopStatusLabel } from "@/lib/shippop";
+import { manualChannelLabel } from "@/lib/order-shipping";
 import { StatusChip } from "./status-chip";
 import { OrderDrawer } from "./order-drawer";
 import { InvoiceModal } from "./invoice-modal";
+import { ShipModal } from "./ship-modal";
+import { ManualOrderModal } from "./manual-order-modal";
+import { ShippingProfileModal } from "./shipping-profile-modal";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
@@ -72,6 +77,9 @@ function PlatformOrdersInner() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [askPacked, setAskPacked] = useState(false);
+  const [shipIds, setShipIds] = useState<string[] | null>(null);
+  const [showManual, setShowManual] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const reqSeq = useRef(0);   // กันคำตอบเก่ามาทับ (สลับร้าน/การ์ดเร็ว ๆ)
@@ -136,7 +144,9 @@ function PlatformOrdersInner() {
         <div className="min-w-0">
           <div className="truncate font-mono text-xs text-slate-800">{o.order_no || o.external_order_id || "—"}</div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
-            {p ? <PlatformBadge code={p.code} name={p.name_th} iconKey={p.icon_key} size="xs" /> : o.source === "demo" ? <PlatformBadge code="shopee" name="Shopee (ตัวอย่าง)" size="xs" /> : null}
+            {p ? <PlatformBadge code={p.code} name={p.name_th} iconKey={p.icon_key} size="xs" />
+              : (o.source === "manual" || (o.source === "demo" && o.channel)) ? <span className="rounded-full border border-slate-200 px-1.5 text-[11px] text-slate-600">{manualChannelLabel(o.channel) || "สร้างเอง"}{o.source === "demo" ? " (ตัวอย่าง)" : ""}</span>
+              : o.source === "demo" ? <PlatformBadge code="shopee" name="Shopee (ตัวอย่าง)" size="xs" /> : null}
             <span>{formatDateTime(o.ordered_at ?? o.created_at)}</span>
           </div>
         </div>
@@ -163,6 +173,15 @@ function PlatformOrdersInner() {
         </div>
       );
     } },
+    { key: "ship", header: "ขนส่ง", width: "1fr", cell: (o) => o.shipping_status && o.shipping_status !== "cancel"
+      ? (
+        <div className="text-xs">
+          <div className="truncate text-slate-700">{o.shipping_courier ? courierLabel(o.shipping_courier) : "SHIPPOP"}{o.shipping_mode === "sim" && <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-800">จำลอง</span>}</div>
+          <div className="truncate font-mono text-[11px] text-slate-400">{o.tracking_no ?? ""}</div>
+          <div className="text-[11px] text-slate-500">{shippopStatusLabel(o.shipping_status)}</div>
+        </div>
+      )
+      : o.tracking_no ? <span className="font-mono text-[11px] text-slate-500">{o.tracking_no}</span> : <span className="text-slate-300">—</span> },
     { key: "inv", header: "ใบกำกับ", width: "6.5rem", cell: (o) => o.invoice_so_id
       ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">ออกแล้ว</span>
       : o.tax_invoice_requested ? <button type="button" onClick={(e) => { e.stopPropagation(); setInvoiceId(o.id); }} className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-100">ขอใบกำกับ</button>
@@ -220,10 +239,14 @@ function PlatformOrdersInner() {
           <h1 className="text-xl font-semibold text-slate-900"><Icon value="i:truck-delivery" className="mr-1.5" />ศูนย์ออเดอร์ออนไลน์</h1>
           <p className="mt-0.5 text-sm text-slate-500">ออเดอร์จากทุกร้านในที่เดียว · เลือกหลายใบแล้วพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า · ออกใบกำกับภาษีได้จากออเดอร์</p>
         </div>
-        <button type="button" onClick={toggleDemo} aria-pressed={demo}
-          className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${demo ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-          <Icon value="i:flask" />{demo ? "ออกจากโหมดทดลอง" : "โหมดทดลอง"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canManage && !demo && <button type="button" onClick={() => setShowManual(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"><Icon value="i:plus" />สร้างออเดอร์</button>}
+          <button type="button" onClick={() => setShowProfile(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:settings" />ตั้งค่าการส่ง</button>
+          <button type="button" onClick={toggleDemo} aria-pressed={demo}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${demo ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            <Icon value="i:flask" />{demo ? "ออกจากโหมดทดลอง" : "โหมดทดลอง"}
+          </button>
+        </div>
       </div>
 
       {demo && <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">โหมดทดลอง — ออเดอร์ตัวอย่างหน้าตาแบบ Shopee กดได้ทุกปุ่ม แต่ไม่บันทึกอะไรและไม่ส่งอะไรขึ้นร้าน</p>}
@@ -267,11 +290,15 @@ function PlatformOrdersInner() {
           <button type="button" onClick={() => openPrint("pack")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:package" />ใบแพ็ก</button>
           <button type="button" onClick={() => openPrint("label")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:printer" />ใบปะหน้า</button>
           {canManage && <button type="button" onClick={() => setAskPacked(true)} disabled={busy} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm text-white hover:bg-slate-800 disabled:opacity-50"><Icon value="i:box" />แพ็กแล้ว</button>}
-          <button type="button" onClick={() => toast.info("นัดขนส่งมารับผ่านระบบได้หลังเชื่อม Shopee แล้ว (เฟส B) — ตอนนี้นัดใน Seller Centre ไปก่อน")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-500 hover:bg-slate-50"><Icon value="i:calendar-event" />นัดขนส่ง</button>
+          {canManage && <button type="button" onClick={() => setShipIds(selIds)} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50" title="เทียบราคาขนส่ง → เรียกเข้ารับ (ออเดอร์ช่องทางของเรา · ออเดอร์แพลตฟอร์มใช้ขนส่งของแพลตฟอร์ม)"><Icon value="i:truck" />จัดส่ง</button>}
         </BulkActionBar>
       )}
 
-      {openId && <OrderDrawer id={openId} canManage={canManage} onClose={() => setOpenId(null)} onChanged={() => void load()} onInvoice={(id) => setInvoiceId(id)} />}
+      {shipIds && <ShipModal ids={shipIds} onClose={() => setShipIds(null)} onBooked={() => { setSel(new Set()); void load(); }} onOpenSettings={() => { setShipIds(null); setShowProfile(true); }} />}
+      {showManual && <ManualOrderModal brands={brands} defaultBrandId={brandId} onClose={() => setShowManual(false)} onCreated={(id) => { setShowManual(false); void load(); setOpenId(id); }} />}
+      {showProfile && <ShippingProfileModal brands={brands} defaultBrandId={brandId} canManage={canManage} onClose={() => setShowProfile(false)} />}
+
+      {openId && <OrderDrawer id={openId} canManage={canManage} onClose={() => setOpenId(null)} onChanged={() => void load()} onInvoice={(id) => setInvoiceId(id)} onShip={(id) => setShipIds([id])} />}
       {invoiceId && <InvoiceModal orderId={invoiceId} canManage={canManage} onClose={() => setInvoiceId(null)} onIssued={() => void load()} />}
       <ConfirmDialog open={askPacked} onClose={() => setAskPacked(false)} onConfirm={() => void markPacked()} loading={busy}
         title={`ทำเครื่องหมาย "แพ็กแล้ว" ${sel.size} ออเดอร์?`} message="ออเดอร์ที่ส่งแล้ว/ยกเลิกแล้ว หรือมาจากอีเมล จะถูกข้าม (ระบบแจ้งจำนวนที่ไม่สำเร็จ)" confirmText="แพ็กแล้ว" />

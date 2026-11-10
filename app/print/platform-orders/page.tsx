@@ -20,7 +20,8 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { estimateListPages } from "@/lib/list-print";
 import {
-  PICK_GROUPS, PICK_PRESETS, PICK_SORTS, PICK_TITLE, buildPickPrint, demoLabelsHtml, packSlipsHtml, pickColumns, pickDefaults, type PrintOrder,
+  PICK_GROUPS, PICK_PRESETS, PICK_SORTS, PICK_TITLE, buildPickPrint, demoLabelsHtml, packSlipsHtml, pickColumns, pickDefaults, shippingSimLabelsHtml,
+  type PrintOrder, type ShipSimLabel,
 } from "@/lib/platform-order-print";
 
 type Kind = "pick" | "pack" | "label";
@@ -68,17 +69,30 @@ function Inner() {
   }, [ids]);
 
   const isDemo = !!orders?.length && orders.every((o) => o.source === "demo");
+  // ใบปะหน้าของออเดอร์ที่จองขนส่งแล้ว (ศูนย์ออเดอร์ › จัดส่ง) — จองจำลอง = ใบของเรามีลายน้ำ · จองจริง = ไฟล์จาก SHIPPOP (ขั้น 2)
+  const [ship, setShip] = useState<{ html: string | null; sims: ShipSimLabel[] } | null>(null);
+  useEffect(() => {
+    if (kind !== "label" || isDemo || !orders?.length || ship) return;
+    apiFetch(`/api/platform-orders/ship?ids=${encodeURIComponent(ids.join(","))}`).then((r) => r.json())
+      .then((j) => setShip({ html: j.html ?? null, sims: (j.sims ?? []) as ShipSimLabel[] })).catch(() => setShip({ html: null, sims: [] }));
+  }, [kind, isDemo, orders, ids, ship]);
   const barcodes = useMemo(() => {
     const m: Record<string, string> = {};
-    if (typeof document !== "undefined") for (const o of orders ?? []) { const no = o.order_no ?? o.id; m[no] = barcodeSvg(no); }
+    if (typeof document !== "undefined") {
+      for (const o of orders ?? []) { const no = o.order_no ?? o.id; m[no] = barcodeSvg(no); }
+      for (const s of ship?.sims ?? []) m[s.tracking] = barcodeSvg(s.tracking);
+    }
     return m;
-  }, [orders]);
+  }, [orders, ship]);
   const simpleHtml = useMemo(() => {
     if (!orders?.length) return "";
     if (kind === "pack") return packSlipsHtml(orders, { shop, barcodes });
     if (kind === "label" && isDemo) return demoLabelsHtml(orders, { shop, barcodes });
+    if (kind === "label" && ship?.html) return ship.html;
+    if (kind === "label" && ship?.sims.length) return shippingSimLabelsHtml(ship.sims, { sender: shop, barcodes });
     return "";
-  }, [orders, kind, shop, barcodes, isDemo]);
+  }, [orders, kind, shop, barcodes, isDemo, ship]);
+  const notBooked = kind === "label" && ship ? orders?.filter((o) => !ship.sims.some((s) => s.orderNo === (o.order_no ?? o.id))) ?? [] : [];
 
   const tabs = (
     <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
@@ -101,13 +115,14 @@ function Inner() {
         <div className="flex-1" />
         {simpleHtml && <button onClick={() => printReportHtmlInNewWindow(simpleHtml)} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">พิมพ์ / บันทึก PDF</button>}
       </div>
-      {kind === "label" && !isDemo ? (
-        <div className="mx-auto mt-10 max-w-xl rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-700">
-          <p className="font-medium text-slate-900"><Icon value="i:printer" className="mr-1.5" />ใบปะหน้าจริงต้องใช้ไฟล์ของ Shopee</p>
-          <p className="mt-2">ใบปะหน้ามีเลขพัสดุและบาร์โค้ดของขนส่งที่ Shopee ออกให้ — ระบบจะดึงไฟล์มารวมพิมพ์ให้ได้หลังเชื่อมร้าน Shopee (เฟส B)</p>
-          <p className="mt-2 text-slate-500">ระหว่างนี้: พิมพ์ใบปะหน้าจาก Seller Centre ตามเดิม · ใช้ <b>ใบหยิบรวม</b> และ <b>ใบแพ็ก</b> จากหน้านี้ได้เลย</p>
+      {kind === "label" && !isDemo && notBooked.length > 0 && (
+        <div className="mx-auto mt-6 max-w-xl rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-700">
+          <p className="font-medium text-slate-900"><Icon value="i:printer" className="mr-1.5" />{notBooked.length} ออเดอร์ยังไม่มีใบปะหน้า</p>
+          <p className="mt-2">ออเดอร์ช่องทางของเรา: กด <b>จัดส่ง</b> ในศูนย์ออเดอร์ก่อน (เทียบราคา → เรียกขนส่ง) แล้วกลับมาพิมพ์ · ออเดอร์ Shopee/Lazada: ใบปะหน้ามาจากแพลตฟอร์ม — ตอนนี้พิมพ์จาก Seller Centre ตามเดิม</p>
+          <p className="mt-2 text-xs text-slate-500">{notBooked.slice(0, 8).map((o) => o.order_no ?? o.id).join(", ")}{notBooked.length > 8 ? ` และอีก ${notBooked.length - 8}` : ""}</p>
         </div>
-      ) : (
+      )}
+      {kind === "label" && !isDemo && !simpleHtml ? null : (
         <>
           <p className="no-print px-6 pt-3 text-xs text-slate-500">ตอนพิมพ์ให้ตั้ง “ขนาดจริง (100%)”{kind === "label" ? " · กระดาษสติกเกอร์ 100×150 มม. (4×6 นิ้ว)" : " · กระดาษ A4 ตัดครึ่ง"}</p>
           <div className="p-6"><PrintFrame html={simpleHtml} maxWidth={kind === "label" ? 420 : 860} /></div>

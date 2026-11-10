@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPickPrint, demoLabelsHtml, packSlipsHtml, pickDefaults, pickRows, type PrintOrder } from "../platform-order-print";
+import { buildPickPrint, demoLabelsHtml, packSlipsHtml, pickDefaults, pickRows, shippingSimLabelsHtml, type PrintOrder } from "../platform-order-print";
 import { demoOrders } from "../platform-order-demo";
 
 /** 🖨 งานพิมพ์ศูนย์ออเดอร์ (เฟส A3 · 2026-11-10) */
@@ -46,5 +46,18 @@ describe("🖨 ใบหยิบรวม / ใบแพ็ก / ใบปะ�
     expect(d.some((o) => o.platform_status === "UNPAID")).toBe(true);
     expect(d.some((o) => o.platform_status === "IN_CANCEL")).toBe(true);
     expect(d.find((o) => o.platform_status === "PROCESSED")!.status).toBe("packed");
+  });
+});
+
+describe("🚚 ใบปะหน้าขนส่ง (จำลอง ขั้น 1)", () => {
+  it("มีลายน้ำจำลอง · กัน HTML ในชื่อ · COD โชว์เมื่อ > 0 เท่านั้น", () => {
+    const html = shippingSimLabelsHtml([
+      { orderNo: "M1", name: "<b>x</b>", tel: "081", address: "ที่อยู่", courier: "Flash", tracking: "SIM123", cod: 900 },
+      { orderNo: "M2", name: "ข", tel: "", address: "ที่อยู่ 2", courier: "Kerry", tracking: "SIM456", cod: 0 },
+    ], { sender: "ร้าน" });
+    expect(html).toContain("จำลอง · ห้ามใช้ส่งจริง");
+    expect(html).not.toContain("<b>x</b>");
+    expect(html.match(/เก็บเงินปลายทาง/g)?.length).toBe(1);
+    expect(html).toContain("SIM456");
   });
 });

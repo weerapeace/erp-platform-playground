@@ -24,7 +24,7 @@
 ## งานพิมพ์ (`/print/platform-orders?kind=pick|pack|label&ids=` · ตัวสร้าง `lib/platform-order-print.ts`)
 - **ใบหยิบรวม**: รวมรหัสทุกออเดอร์ (ตัวเลือกต่างกัน = คนละบรรทัด) · ตั้งค่าหน้าพิมพ์ด้วยของกลาง ListPrintPanel (แบบสำเร็จรูป "ตัวใหญ่ อ่านง่ายหน้าชั้นวาง")
 - **ใบแพ็ก**: ออเดอร์ละใบ 2 ใบ/แผ่น A4 · บาร์โค้ดเลขออเดอร์ · ช่องติ๊กต่อรายการ
-- **ใบปะหน้า**: ของจริงต้องใช้ไฟล์ของ Shopee (เลขพัสดุ/บาร์โค้ดขนส่ง) → เฟส B · ตอนนี้มีแค่ใบตัวอย่าง 100×150 มม. ลายน้ำ "จำลอง ห้ามใช้ส่งจริง" ในโหมดทดลอง
+- **ใบปะหน้า**: ออเดอร์ช่องทางของร้านเองที่จองขนส่งแล้ว → ใบปะหน้าจากระบบขนส่ง (ขั้น 1 = ใบจำลอง 100×150 มม. ลายน้ำ "จำลอง" ตัวสร้าง `shippingSimLabelsHtml`) · ออเดอร์ Shopee/Lazada/TikTok ต้องใช้ไฟล์ของแพลตฟอร์ม → เฟส B · ออเดอร์ที่ยังไม่จองจะขึ้นกล่องบอกในหน้าพิมพ์
 
 ## ใบกำกับภาษี (`/api/platform-orders/invoice`)
 - ออก **ผ่านใบขาย** (เลขชุดเดียวกับใบกำกับที่ออกอยู่ เช่น ISG2569-…) → เข้า `/sales/tax-report` เอง · พิมพ์ด้วย `/print/sales-order/<id>`
@@ -36,13 +36,26 @@
 - ใบขายที่ผูกไว้ถูกยกเลิก = ออกใหม่ได้
 - สิทธิ์: `platform_orders.manage` + สิทธิ์สร้างใบขาย `so.create` (ฐานข้อมูลเช็กเอง)
 
-## ข้อมูล (migration `202612010100_platform_orders_center.sql` — เพิ่มช่องเท่านั้น)
-`platform_orders` + `platform_status` · `ship_by_at` · `package_no` · `invoice_so_id` · `tax_invoice_request` · `platform_accounts` + `tax_invoice_company_id`
+## จัดส่ง (ขั้น 1 — โหมดจำลอง) · อนุมัติ 2026-11-10 ("Approve phase 1")
+แบบ Zort: เทียบราคาขนส่ง → จอง → ใบปะหน้า → สถานะ — ผ่าน SHIPPOP (`lib/shippop.ts` ตัวเดียวกับเว็บร้าน) · กติกาอยู่ `lib/order-shipping.ts`
+- **ขั้น 1 ล็อกโหมดจำลอง** (`ORDER_CENTER_SHIPPING_FORCE = "sim"`) — แม้ตั้งกุญแจ SHIPPOP แล้วก็ไม่เรียกขนส่งจริง ไม่เสียเงิน · เว็บร้านไม่กระทบ (พารามิเตอร์ `force` เป็นตัวเลือก)
+- **ใครส่งผ่านศูนย์นี้ได้**: เฉพาะออเดอร์ช่องทางของร้านเอง (LINE OA · Facebook · IG · LINE Shopping · เว็บ · โทร = `source: "manual"`) — ออเดอร์ Shopee/Lazada/TikTok ต้องใช้ขนส่งที่แพลตฟอร์มกำหนด, ออเดอร์จากเมลส่งไปแล้ว → ปุ่มบอกเหตุผล (`canShipViaShippop`)
+- **สร้างออเดอร์เอง** (ปุ่ม "สร้างออเดอร์"): ช่องทาง · แบรนด์ · ผู้รับ (ค้นที่อยู่ด้วยของกลาง `/api/public/address/search`) · รายการ (SkuPicker) · เก็บเงินปลายทาง → เลข `M{ปปดดวว}-{4 หลัก}` ตามเวลาไทย
+- **ตั้งค่าการส่ง** ต่อแบรนด์ (`shipping_profiles`): ผู้ส่ง/ที่อยู่รับของ · กล่องมาตรฐาน · น้ำหนักต่อชิ้น (ใช้เมื่อรุ่นไม่มี `weight_g` — IG ขาด 118/262 รุ่น, LM 157/961) · ขนส่งที่ใช้ประจำ
+- **จอง** (แถบติ๊กหลายใบ › "จัดส่ง" หรือในแผงรายละเอียด): ≤50 ใบ/ครั้ง · ได้เลขพัสดุ → สถานะ "แพ็กแล้ว" (ผ่าน `checkTransition`) · **ไม่ตัดสต๊อก** (ตัดตอน "ยืนยัน" เหมือนเดิม) · ยกเลิกการจองได้ตอนสถานะขนส่งยัง booking
+- ขั้น 1 มีปุ่ม "จำลองสถานะถัดไป" (booking → shipping → complete) ให้ลองดูว่าสถานะออเดอร์เปลี่ยนตาม · ผู้รับ/COD แก้ได้เฉพาะออเดอร์ร้านเองที่ยังไม่จอง
+- API: `/api/platform-orders/ship` POST `action=quote|book|cancel|simulate` · GET `?ids=` = ข้อมูลใบปะหน้า · `/api/shipping-profiles` GET/PATCH · audit `ship_book` / `shipping_profile`
+- ขั้น 2 (ยังไม่ทำ): เจ้าของสมัคร SHIPPOP + ใส่กุญแจเอง → ปลดล็อกโหมดจริง · ขั้น 3: เรียกรถเข้ารับ/ติดตามอัตโนมัติ
+
+## ข้อมูล (migration `202612010100_platform_orders_center.sql` + `202612020100_order_center_shipping.sql` — เพิ่มช่องเท่านั้น)
+`platform_orders` + `platform_status` · `ship_by_at` · `package_no` · `invoice_so_id` · `tax_invoice_request` · `ship_to` · `shipping` · `cod_amount` · `platform_accounts` + `tax_invoice_company_id` · ตาราง `shipping_profiles`
+- ⚠️ ตอนนี้ผู้ล็อกอินอ่านตาราง `platform_orders` / `platform_order_items` ตรงได้ (ไม่ผ่าน API) — เมื่อมีที่อยู่ผู้รับเก็บอยู่ ควรปิดการอ่านตรง (REVOKE จาก authenticated) รอเจ้าของตัดสินใจ
 
 ## API `/api/platform-orders`
 - GET รายการ: `view=todo|history|all` · `active=1` (ต้องจัดส่ง) · `due=late|today` · `invoice=requested|issued` · `status` · `q` · `page`/`page_size` (≤200) → `{ orders, total, summary }` · นับด้วย count ของฐานข้อมูล (เดิม `.limit(1000)` ตัดเหลือ 1,000 จาก 5,667)
 - GET `?id=` (ใบเดียว + รายการ) · `?ids=a,b` (หลายใบ ให้หน้าพิมพ์) · `?demo=1` (ตัวอย่าง)
-- PATCH `{ id | ids[] (≤200), status?, tracking_no?, carrier? }` → ตรวจกติกา → audit ค่าเดิม→ใหม่ (`platform_order`)
+- PATCH `{ id | ids[] (≤200), status?, tracking_no?, carrier?, ship_to?, cod_amount? }` → ตรวจกติกา → audit ค่าเดิม→ใหม่ (`platform_order`)
+- POST สร้างออเดอร์เอง `{ channel, brand_id, ship_to, items[], cod_amount?, note? }` → `source: "manual"`
 - id ขึ้นต้น `demo-` = ตอบผลจำลอง ไม่บันทึก
 
 ## ข้อจำกัด / ต่อไป

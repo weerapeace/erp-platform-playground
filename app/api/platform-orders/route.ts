@@ -11,6 +11,9 @@
  *   - status=confirmed → ตัดสต๊อก (ledger เดิม, ครั้งเดียว) · status=cancelled → คืนสต๊อกถ้าเคยตัด
  *   - id ขึ้นต้น demo- = ตอบผลจำลอง ไม่บันทึก
  *
+ * POST  { channel, brand_id, ship_to, items[], cod_amount?, note? }  (platform_orders.manage) → สร้างออเดอร์เอง (แชต/โทร) source=manual
+ * PATCH ...ship_to? cod_amount? — แก้ที่อยู่ผู้รับ/ยอดเก็บปลายทาง (ช่องทางของเรา · ยังไม่จองขนส่ง) · ขนส่ง = /api/platform-orders/ship
+ *
  * 🐛 แก้ 2026-11-10: เดิม .limit(1000) (มี 5,667 ใบ) → รายการ/ตัวเลขสถานะผิด · เดิมกดยืนยันออเดอร์จากเมลแล้วตัดสต๊อกคลังออนไลน์ได้
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -23,12 +26,13 @@ import {
   type PlatformOrderRow,
 } from "@/lib/platform-order-status";
 import { demoOrder, demoOrders, isDemoId } from "@/lib/platform-order-demo";
+import { cleanShipTo, isManualChannel, isMarketplace, isShippingActive, manualOrderNo, type OrderShipping } from "@/lib/order-shipping";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-const LIST_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, total, currency, ordered_at, ship_by_at, tracking_no, carrier, stock_deducted, source, invoice_so_id, tax_invoice_request, created_at";
+const LIST_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, total, currency, ordered_at, ship_by_at, tracking_no, carrier, stock_deducted, source, invoice_so_id, tax_invoice_request, shipping, cod_amount, raw->>channel, created_at";
 const PAGE_MAX = 200;
 const OPEN_STATUSES = ["new", "confirmed", "packed"];
 
@@ -76,6 +80,8 @@ function toRow(r: Record<string, unknown>): PlatformOrderRow {
     tracking_no: (r.tracking_no as string) ?? null, carrier: (r.carrier as string) ?? null,
     stock_deducted: !!r.stock_deducted, source: (r.source as string) ?? null, invoice_so_id: (r.invoice_so_id as string) ?? null,
     tax_invoice_requested: r.tax_invoice_request != null, created_at: String(r.created_at ?? ""),
+    shipping_status: (r.shipping as OrderShipping | null)?.status ?? null, shipping_courier: (r.shipping as OrderShipping | null)?.courierCode ?? null,
+    shipping_mode: (r.shipping as OrderShipping | null)?.mode ?? null, cod_amount: Number(r.cod_amount) || 0, channel: (r.channel as string) ?? null,
   };
 }
 
@@ -124,8 +130,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const admin = supabaseAdmin();
     const { data: order } = await admin.from("platform_orders").select("*").eq("id", id).maybeSingle();
     if (!order) return NextResponse.json({ error: "ไม่พบออเดอร์" }, { status: 404 });
-    const { data: items } = await admin.from("platform_order_items").select("*").eq("order_id", id);
-    return NextResponse.json({ order, items: items ?? [], error: null });
+    const [{ data: items }, platform_code] = await Promise.all([
+      admin.from("platform_order_items").select("*").eq("order_id", id),
+      platformCodeOf(admin, (order as Record<string, unknown>).platform_id),
+    ]);
+    return NextResponse.json({ order: { ...(order as Record<string, unknown>), platform_code }, items: items ?? [], error: null });
   }
 
   // ?ids=a,b,c → ออเดอร์ + รายการ หลายใบ (หน้าพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า)
@@ -189,7 +198,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-type PatchBody = { id?: string; ids?: string[]; status?: string; tracking_no?: string; carrier?: string };
+type PatchBody = { id?: string; ids?: string[]; status?: string; tracking_no?: string; carrier?: string; ship_to?: unknown; cod_amount?: unknown };
+
+async function platformCodeOf(admin: Admin, platformId: unknown): Promise<string | null> {
+  if (!platformId) return null;
+  const { data } = await admin.from("erp_platforms").select("code").eq("id", String(platformId)).maybeSingle();
+  return (data as { code?: string } | null)?.code ?? null;
+}
 
 /** เปลี่ยนสถานะ/เลขพัสดุ 1 ใบ — คืนผล (ไม่ throw) */
 async function patchOne(admin: Admin, id: string, body: PatchBody, actor: { id: string | null; email: string | null }): Promise<{ ok: boolean; error?: string; warnings: string[] }> {
@@ -206,6 +221,24 @@ async function patchOne(admin: Admin, id: string, body: PatchBody, actor: { id: 
   if (typeof body.tracking_no === "string") patch.tracking_no = body.tracking_no.trim() || null;
   if (typeof body.carrier === "string") patch.carrier = body.carrier.trim() || null;
   const label = (order.order_no as string) || (order.external_order_id as string) || "";
+
+  // ที่อยู่ผู้รับ / ยอดเก็บปลายทาง: เฉพาะออเดอร์ช่องทางของเรา และยังไม่จองขนส่ง (จองแล้ว = ยกเลิกการจองก่อน)
+  if (body.ship_to !== undefined || body.cod_amount !== undefined) {
+    if (isMarketplace(await platformCodeOf(admin, order.platform_id))) return { ok: false, error: "ออเดอร์แพลตฟอร์ม — ที่อยู่ผู้รับแก้บนร้าน", warnings };
+    if (isShippingActive(order.shipping as OrderShipping | null)) return { ok: false, error: "จองขนส่งไปแล้ว — ยกเลิกการจองก่อนแก้ที่อยู่/ยอดเก็บปลายทาง", warnings };
+    if (cur === "shipped" || cur === "cancelled") return { ok: false, error: "ออเดอร์ส่งแล้ว/ยกเลิกแล้ว แก้ไม่ได้", warnings };
+    if (body.ship_to !== undefined) {
+      const st = cleanShipTo(body.ship_to);
+      if (!st.ok) return { ok: false, error: st.error, warnings };
+      patch.ship_to = st.value;
+      if (!order.customer_name) patch.customer_name = st.value.name;
+    }
+    if (body.cod_amount !== undefined) {
+      const cod = Math.round((Number(body.cod_amount) || 0) * 100) / 100;
+      if (cod < 0) return { ok: false, error: "ยอดเก็บปลายทางติดลบไม่ได้", warnings };
+      patch.cod_amount = cod;
+    }
+  }
 
   // ยืนยัน → ตัดสต๊อก (ครั้งเดียว)
   if (newStatus === "confirmed" && !order.stock_deducted) {
@@ -268,4 +301,66 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // ใบเดียวแล้วไม่สำเร็จ = ตอบเป็น error ให้หน้าจอโชว์เหตุผลตรง ๆ
   if (ids.length === 1 && failed.length) return NextResponse.json({ error: failed[0].error, warnings }, { status: 400 });
   return NextResponse.json({ ok: failed.length === 0, done, failed, warnings, error: null });
+}
+
+type ManualItem = { sku_id?: string | null; sku_code?: string | null; name?: string | null; qty?: unknown; price?: unknown };
+const UUID = /^[0-9a-f-]{36}$/i;
+
+/** สร้างออเดอร์เอง (ลูกค้าสั่งทาง LINE แชต / Facebook / IG / โทร) — ส่งของผ่าน SHIPPOP ได้ทันที */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "platform_orders.manage"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const b = (await request.json().catch(() => null)) as { channel?: string; brand_id?: string; ship_to?: unknown; items?: ManualItem[]; cod_amount?: unknown; note?: string } | null;
+  if (!isManualChannel(b?.channel)) return NextResponse.json({ error: "เลือกช่องทางที่ลูกค้าสั่ง" }, { status: 400 });
+  const brandId = String(b?.brand_id ?? "").trim();
+  if (!UUID.test(brandId)) return NextResponse.json({ error: "เลือกแบรนด์" }, { status: 400 });
+  const st = cleanShipTo(b?.ship_to);
+  if (!st.ok) return NextResponse.json({ error: st.error }, { status: 400 });
+  const raw = (Array.isArray(b?.items) ? b!.items : []).slice(0, 100);
+  const items = raw.map((it) => ({ sku_id: UUID.test(String(it.sku_id ?? "")) ? String(it.sku_id) : null, sku_code: String(it.sku_code ?? "").trim() || null, name: String(it.name ?? "").trim(), qty: Math.round(Number(it.qty) || 0), price: Math.round((Number(it.price) || 0) * 100) / 100 }));
+  if (!items.length) return NextResponse.json({ error: "เพิ่มสินค้าอย่างน้อย 1 รายการ" }, { status: 400 });
+  const bad = items.find((it) => !it.name || it.qty <= 0 || it.price < 0);
+  if (bad) return NextResponse.json({ error: `รายการ "${bad.name || bad.sku_code || "?"}" ต้องมีชื่อ จำนวนมากกว่า 0 และราคาไม่ติดลบ` }, { status: 400 });
+  const cod = Math.max(0, Math.round((Number(b?.cod_amount) || 0) * 100) / 100);
+
+  const admin = supabaseAdmin();
+  let platformId: string | null = null;
+  if (b!.channel !== "phone") {
+    const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", b!.channel).maybeSingle();
+    platformId = (pf as { id?: string } | null)?.id ?? null;
+    if (!platformId) return NextResponse.json({ error: "ไม่พบช่องทางนี้ในระบบ" }, { status: 400 });
+  }
+  // SKU ที่เลือก → รหัสจริง + รุ่น (ใช้ตัดสต๊อก/น้ำหนัก)
+  const skuIds = items.map((i) => i.sku_id).filter((x): x is string => !!x);
+  const { data: skus } = skuIds.length ? await admin.from("skus_v2").select("id, code, parent_sku_id").in("id", skuIds) : { data: [] };
+  const sku = new Map(((skus ?? []) as { id: string; code: string; parent_sku_id: string | null }[]).map((s) => [s.id, s]));
+
+  const total = Math.round(items.reduce((a, i) => a + i.qty * i.price, 0) * 100) / 100;
+  const now = new Date().toISOString();
+  let order: { id: string; order_no: string } | null = null;
+  for (let attempt = 0; attempt < 5 && !order; attempt++) {
+    const no = manualOrderNo();
+    const { data: ins, error } = await admin.from("platform_orders").insert({
+      platform_id: platformId, brand_id: brandId, source: "manual", external_order_id: no, order_no: no, customer_name: st.value.name,
+      status: "new", total, currency: "THB", ordered_at: now, ship_to: st.value, cod_amount: cod,
+      raw: { channel: b!.channel, note: String(b?.note ?? "").trim().slice(0, 500) || null }, created_by: user?.id ?? null,
+    }).select("id, order_no").single();
+    if (error && (error as { code?: string }).code === "23505") continue;   // เลขชน → สุ่มใหม่
+    if (error || !ins) return NextResponse.json({ error: "สร้างออเดอร์ไม่สำเร็จ" }, { status: 500 });
+    order = ins as { id: string; order_no: string };
+  }
+  if (!order) return NextResponse.json({ error: "ระบบไม่ว่าง กรุณาลองใหม่" }, { status: 503 });
+  const { error: itErr } = await admin.from("platform_order_items").insert(items.map((i) => {
+    const s = i.sku_id ? sku.get(i.sku_id) : null;
+    return { order_id: order!.id, sku_code: s?.code ?? i.sku_code, matched_sku_id: s?.id ?? null, matched_parent_sku_id: s?.parent_sku_id ?? null, name: i.name, qty: i.qty, price: i.price, raw: { source: "manual" } };
+  }));
+  if (itErr) {
+    await admin.from("platform_orders").delete().eq("id", order.id);   // ไม่ทิ้งออเดอร์ว่าง
+    return NextResponse.json({ error: "บันทึกรายการสินค้าไม่สำเร็จ" }, { status: 500 });
+  }
+  await writeAudit(admin, {
+    action: "create", entityType: "platform_order", entityId: order.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { order_no: order.order_no, channel: b!.channel, items: items.length, total, cod, source: "manual" },
+  });
+  return NextResponse.json({ ok: true, id: order.id, order_no: order.order_no, error: null });
 }

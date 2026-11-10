@@ -97,9 +97,16 @@ export interface ShippopInfo {
 
 /* ─────────── ตัวเรียก API (ฝั่งเซิร์ฟเวอร์) ─────────── */
 
-export function shippopMode(): "sim" | "live" {
+export type ShippopMode = "sim" | "live";
+export function shippopMode(): ShippopMode {
   return process.env.SHIPPOP_API_KEY?.trim() ? "live" : "sim";
 }
+/**
+ * โหมดที่ใช้จริงของคำขอนี้ — ส่ง force = "sim" เพื่อบังคับจำลองแม้มีกุญแจแล้ว
+ * (ศูนย์ออเดอร์ขั้น 1 ล็อกจำลองไว้จนเจ้าของอนุมัติขั้น 2 · เว็บร้านไม่ส่ง = ตามกุญแจเหมือนเดิม)
+ * บังคับ "live" ไม่ได้ถ้าไม่มีกุญแจ
+ */
+const effMode = (force?: ShippopMode): ShippopMode => (force === "sim" ? "sim" : shippopMode());
 const baseUrl = () => (process.env.SHIPPOP_ENV === "prod" ? "https://mkpservice.shippop.com" : "https://mkpservice.shippop.dev");
 
 type Json = Record<string, unknown>;
@@ -130,8 +137,8 @@ export interface Quote {
 }
 
 /** ดูราคาทุกขนส่ง (showall) สำหรับพัสดุ 1 ชิ้น */
-export async function shippopQuote(from: ShippopAddress, to: ShippopAddress, parcel: ShippopParcel): Promise<Quote[]> {
-  if (shippopMode() === "sim") return SHIPPOP_COURIERS.map((c) => ({ courierCode: c.code, courierName: c.label, price: simPrice(c.code, parcel.weight), available: true, estimate: c.code === "LLM" ? "ภายในวัน" : "1–3 วัน" }));
+export async function shippopQuote(from: ShippopAddress, to: ShippopAddress, parcel: ShippopParcel, force?: ShippopMode): Promise<Quote[]> {
+  if (effMode(force) === "sim") return SHIPPOP_COURIERS.map((c) => ({ courierCode: c.code, courierName: c.label, price: simPrice(c.code, parcel.weight), available: true, estimate: c.code === "LLM" ? "ภายในวัน" : "1–3 วัน" }));
   const j = await call("/pricelist/", { data: { "0": { from, to, parcel, showall: 1 } } });
   const row = ((j.data as Json | undefined)?.["0"] ?? {}) as Record<string, Json>;
   return Object.values(row).map((q) => ({ courierCode: String(q.courier_code), courierName: String(q.courier_name ?? q.courier_code), price: Number(q.price) || 0, available: q.available === true, estimate: String(q.estimate_time ?? "") }));
@@ -156,8 +163,8 @@ export interface BookResult {
 }
 
 /** จอง + ยืนยันทันที (ส่งข้อมูลให้ขนส่ง) — หลายออเดอร์ในใบสั่งซื้อเดียว · คืนผลรายออเดอร์ */
-export async function shippopBookAndConfirm(items: BookItem[]): Promise<{ purchaseId: string; mode: "sim" | "live"; results: BookResult[] }> {
-  if (shippopMode() === "sim") {
+export async function shippopBookAndConfirm(items: BookItem[], force?: ShippopMode): Promise<{ purchaseId: string; mode: "sim" | "live"; results: BookResult[] }> {
+  if (effMode(force) === "sim") {
     return {
       purchaseId: simNo("SIMP"),
       mode: "sim",
@@ -188,8 +195,8 @@ export async function shippopBookAndConfirm(items: BookItem[]): Promise<{ purcha
 }
 
 /** ใบปะหน้า (HTML ขนาด 4×6 นิ้ว) ของรหัส SP… หลายรายการ — โหมดจำลอง = null (ใช้ใบปะหน้าของเราเอง) */
-export async function shippopLabelHtml(trackingCodes: string[]): Promise<string | null> {
-  if (shippopMode() === "sim" || !trackingCodes.length) return null;
+export async function shippopLabelHtml(trackingCodes: string[], force?: ShippopMode): Promise<string | null> {
+  if (effMode(force) === "sim" || !trackingCodes.length) return null;
   const j = await call("/label_tracking_code/", { tracking_code: trackingCodes.join(","), size: "sticker4x6", type: "html" });
   return typeof j.html === "string" ? j.html : null;
 }
@@ -203,8 +210,8 @@ export async function shippopTrack(trackingCode: string): Promise<{ status: stri
 }
 
 /** ยกเลิก (ก่อนขนส่งเข้ารับ) */
-export async function shippopCancel(courierTrackingCode: string): Promise<boolean> {
-  if (shippopMode() === "sim") return true;
+export async function shippopCancel(courierTrackingCode: string, force?: ShippopMode): Promise<boolean> {
+  if (effMode(force) === "sim") return true;
   const j = await call("/cancel/", { courier_tracking_code: courierTrackingCode });
   return j.status === true;
 }

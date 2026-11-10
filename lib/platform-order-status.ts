@@ -19,6 +19,10 @@ export type PlatformOrderRow = {
   ordered_at: string | null; ship_by_at: string | null; tracking_no: string | null; carrier: string | null;
   stock_deducted: boolean; source: string | null; invoice_so_id: string | null; tax_invoice_requested: boolean;
   item_count?: number; created_at: string;
+  /** ขนส่ง (lib/order-shipping) — สถานะ SHIPPOP ล่าสุด · รหัสขนส่ง · sim/live */
+  shipping_status?: string | null; shipping_courier?: string | null; shipping_mode?: string | null;
+  /** ยอดเก็บเงินปลายทาง · ช่องทางของออเดอร์ที่สร้างเอง (raw.channel เช่น phone) */
+  cod_amount?: number; channel?: string | null;
 };
 export type PlatformOrderItemRow = {
   id: string; sku_code: string | null; matched_sku_id: string | null; matched_parent_sku_id?: string | null;

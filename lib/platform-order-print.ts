@@ -140,6 +140,28 @@ table{width:100%;border-collapse:collapse;font-size:11pt}th,td{border-bottom:1px
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(opts.title ?? "ใบแพ็กสินค้า")}</title><style>${css}</style></head><body>${pages.join("") || "<p>ไม่มีออเดอร์</p>"}</body></html>`;
 }
 
+/** ใบปะหน้าของการจองขนส่งแบบจำลอง (ศูนย์ออเดอร์ › จัดส่ง ขั้น 1) 100×150 มม. — ที่อยู่/เลขพัสดุจริงของออเดอร์ แต่ลายน้ำ "จำลอง" ห้ามใช้ส่ง */
+export type ShipSimLabel = { orderNo: string; name: string; tel: string; address: string; courier: string; tracking: string; cod: number };
+export function shippingSimLabelsHtml(list: ShipSimLabel[], opts: { sender: string; barcodes?: Record<string, string> }): string {
+  const bc = opts.barcodes ?? {};
+  const label = (s: ShipSimLabel) => `<section class="lb"><div class="wm">จำลอง · ห้ามใช้ส่งจริง</div>
+      <div class="c">${esc(s.courier)}</div>
+      <div class="tr">${esc(s.tracking)}</div>
+      <div class="to"><b>ผู้รับ</b> ${esc(s.name)}${s.tel ? ` · ${esc(s.tel)}` : ""}<br>${esc(s.address)}</div>
+      ${s.cod > 0 ? `<div class="cod">เก็บเงินปลายทาง ฿${esc(s.cod.toLocaleString("th-TH"))}</div>` : ""}
+      <div class="from"><b>ผู้ส่ง</b> ${esc(opts.sender)}</div>
+      <div class="ref">${bc[s.tracking] ?? ""}<div>ออเดอร์ ${esc(s.orderNo)}</div></div>
+    </section>`;
+  const css = `${PAGE_CSS}@page{size:100mm 150mm;margin:0}
+.lb{position:relative;width:100mm;height:150mm;padding:6mm;border:1px dashed #999;page-break-after:always;break-after:page;overflow:hidden;display:flex;flex-direction:column;gap:3mm}
+.lb:last-child{page-break-after:auto;break-after:auto}
+.wm{position:absolute;top:62mm;left:-12mm;right:-12mm;transform:rotate(-25deg);text-align:center;font-size:22px;font-weight:700;color:rgba(220,38,38,.38)}
+.c{font-size:15px;font-weight:700}.tr{font-family:monospace;font-size:19px;letter-spacing:1px;border:2px solid #111;padding:2mm;text-align:center}
+.to{font-size:13.5px;line-height:1.5;flex:1}.cod{font-size:17px;font-weight:800;border:2px solid #111;padding:1.5mm;text-align:center}
+.from{font-size:11px;color:#444;border-top:1px dashed #999;padding-top:2mm}.ref{font-size:11px;color:#444}.ref svg{height:10mm;max-width:80mm;display:block}`;
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบปะหน้า (จองจำลอง)</title><style>${css}</style></head><body>${list.map(label).join("") || "<p>ไม่มีออเดอร์ที่จองขนส่ง</p>"}</body></html>`;
+}
+
 /** ใบปะหน้าตัวอย่าง (โหมดทดลอง) 100×150 มม. — ลายน้ำชัด ห้ามใช้ส่งจริง */
 export function demoLabelsHtml(orders: PrintOrder[], opts: { shop: string; barcodes?: Record<string, string> }): string {
   const bc = opts.barcodes ?? {};

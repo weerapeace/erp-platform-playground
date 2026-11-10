@@ -11,6 +11,7 @@
 import type { PlatformOrderItemRow, PlatformOrderRow } from "@/lib/platform-order-status";
 import { shopeeToInternal } from "@/lib/platform-order-status";
 import type { TaxInvoiceRequest } from "@/lib/website-tax-invoice";
+import type { ShipTo } from "@/lib/order-shipping";
 
 export const DEMO_PREFIX = "demo-";
 export const isDemoId = (id: string | null | undefined) => String(id ?? "").startsWith(DEMO_PREFIX);
@@ -20,12 +21,17 @@ export type DemoOrder = PlatformOrderRow & {
   tax_invoice_request: TaxInvoiceRequest | null;
   recipient: { name: string; phone: string; address: string };
   note: string | null;
+  /** shopee = ออเดอร์แบบ Shopee (ขนส่งของแพลตฟอร์ม) · null = ช่องทางของเรา (ส่งผ่าน SHIPPOP ได้) */
+  platform_code: string | null;
+  ship_to: ShipTo | null;
 };
 
 type Seed = {
   sn: string; status: string; shipInH: number | null; orderedAgoH: number; buyer: string; phone: string; address: string;
   items: [sku: string, name: string, variant: string | null, qty: number, price: number][];
   tracking?: string; invoice?: TaxInvoiceRequest; note?: string;
+  /** ช่องทางของเรา (LINE แชต / โทร) + ที่อยู่แยกช่อง · ไม่มี = ออเดอร์แบบ Shopee */
+  own?: { channel: string; shipTo: ShipTo; cod?: number };
 };
 
 // สินค้าตัวอย่าง = รหัสแบบเดียวกับร้าน IG (ตัวเลข/ชื่อสมมติ)
@@ -49,6 +55,13 @@ const SEEDS: Seed[] = [
     items: [["IG-EQ008", "ที่ง้างโซ่ IG-EQ008", null, 1, 290]], tracking: "TH24DEMO0008" },
   { sn: "251108ABCD09", status: "CANCELLED", shipInH: null, orderedAgoH: 80, buyer: "ก***", phone: "(+66) 8*****02", address: "ต.ในเมือง อ.เมือง จ.อุบลราชธานี 34000",
     items: [["BCN25-BLK", "กระเป๋าสตางค์หนังแท้ BCN25", "ดำ", 1, 890]] },
+  // ช่องทางของเรา → ส่งผ่าน SHIPPOP (ลองกด จัดส่ง)
+  { sn: "M261110-LINE", status: "READY_TO_SHIP", shipInH: null, orderedAgoH: 2, buyer: "คุณมานี (LINE)", phone: "081-111-2222", address: "12 ถ.ประชาอุทิศ แขวงสามเสนนอก เขตห้วยขวาง กรุงเทพมหานคร 10310",
+    items: [["BT01-BLK-36", "เข็มขัดหนังแท้ BT01", "ดำ / 36", 1, 790]],
+    own: { channel: "line_oa", shipTo: { name: "มานี มีสุข", phone: "0811112222", address: "12 ถ.ประชาอุทิศ", subdistrict: "สามเสนนอก", district: "ห้วยขวาง", province: "กรุงเทพมหานคร", postal: "10310" } } },
+  { sn: "M261110-TEL1", status: "READY_TO_SHIP", shipInH: null, orderedAgoH: 1, buyer: "คุณวิชัย (โทร)", phone: "089-333-4444", address: "45/2 ม.3 ต.หนองปรือ อ.บางละมุง จ.ชลบุรี 20150",
+    items: [["BCN32", "กระเป๋าใส่บัตร BCN32", "น้ำตาล", 2, 450]],
+    own: { channel: "phone", cod: 900, shipTo: { name: "วิชัย ใจงาม", phone: "0893334444", address: "45/2 ม.3", subdistrict: "หนองปรือ", district: "บางละมุง", province: "ชลบุรี", postal: "20150" } } },
 ];
 
 /** ออเดอร์ตัวอย่างทั้งหมด (คิดกำหนดส่งจาก now) */
@@ -62,7 +75,7 @@ export function demoOrders(now = Date.now()): DemoOrder[] {
     const iso = (h: number) => new Date(now + h * 3600_000).toISOString();
     return {
       id, platform_id: null, brand_id: null, external_order_id: s.sn, order_no: s.sn, customer_name: s.buyer,
-      status: shopeeToInternal(s.status) ?? "new", platform_status: s.status, total, currency: "THB",
+      status: shopeeToInternal(s.status) ?? "new", total, currency: "THB",
       ordered_at: iso(-s.orderedAgoH), ship_by_at: s.shipInH == null ? null : iso(s.shipInH),
       tracking_no: s.tracking ?? null, carrier: s.tracking ? "SPX Express" : null,
       stock_deducted: false, source: "demo", invoice_so_id: null, tax_invoice_requested: !!s.invoice,
@@ -70,6 +83,9 @@ export function demoOrders(now = Date.now()): DemoOrder[] {
       items, tax_invoice_request: s.invoice ?? null,
       recipient: { name: s.buyer, phone: s.phone, address: s.address },
       note: s.note ?? null,
+      platform_code: s.own ? null : "shopee", ship_to: s.own?.shipTo ?? null,
+      channel: s.own?.channel ?? null, cod_amount: s.own?.cod ?? 0,
+      platform_status: s.own ? null : s.status,
     };
   });
 }
