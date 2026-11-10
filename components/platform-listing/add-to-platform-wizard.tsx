@@ -28,6 +28,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { LoadingState } from "@/components/state-views";
 import { LineCreatePreviewEditor } from "./line-create-preview";
+import { LineStorefrontPreview } from "./line-storefront-preview";
 import type { LineCreatePreview } from "@/lib/line-create-payload";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
@@ -88,6 +89,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [focus, setFocus] = useState<string | null>(null);                 // ขั้น 2: สินค้าที่กำลังดู (LINE)
   const [pvState, setPvState] = useState<Record<string, number>>({});      // parent id → จำนวนข้อที่ขาด (จากหน้าดูก่อนส่ง)
   const [preparing, setPreparing] = useState(false);
+  const [afterDisplay, setAfterDisplay] = useState<"hide" | "onsale">("hide");   // ขั้น 3: หลังลง เปิด/ปิดขาย (ค่าเริ่ม ปิดไว้ก่อน)
+  const [previewFor, setPreviewFor] = useState<string | null>(null);              // ขั้น 3: ดูแบบหน้าร้าน (parent id)
   const preparedRef = useRef<Set<string>>(new Set());                      // บันทึกร่าง LINE ไปแล้ว (ไม่ทำซ้ำตอนย้อนไปมา)
   const stopRef = useRef(false);
 
@@ -95,7 +98,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   useEffect(() => {
     if (!open) return;
     setStep(1); setRows({}); setSkipped(new Set()); setTyped(""); setOutcomes(null); setCheckErr(null); setProgress({ done: 0, total: 0, label: "" });
-    setFocus(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false);
+    setFocus(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false); setAfterDisplay("hide"); setPreviewFor(null);
     let alive = true;
     apiFetch(`/api/platform-accounts${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`).then((r) => r.json()).then((j) => {
       if (!alive) return;
@@ -240,14 +243,18 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         const { pf, id } = toCreate[i];
         if (stopRef.current) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: "หยุดก่อนลง (บันทึกร่างไว้แล้ว)" }); continue; }
         try {
-          const r = await apiFetch(REAL_CREATE_ENDPOINT[pf.code], { method: "POST", body: JSON.stringify({ parent_sku_id: id }) });
+          const r = await apiFetch(REAL_CREATE_ENDPOINT[pf.code], { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: afterDisplay }) });
           const j = await r.json();
           if (j.error || j.ok === false) res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${j.error ?? "ไม่ทราบสาเหตุ"}` });
           else {
             // รูปในรายละเอียด (ทดลอง) — พลาดไม่ทำให้ลงไม่สำเร็จ แค่บอกให้รู้
             const di = j.desc_images as { ok: boolean; present: number; total: number; error: string | null } | null | undefined;
             const diText = di ? (di.ok ? ` · รูปในรายละเอียด ${di.present} รูป` : ` · รูปในรายละเอียดไม่สำเร็จ (${di.error ?? "ไม่ทราบสาเหตุ"})`) : "";
-            res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${diText}` });
+            const gf = j.gift as { ok: boolean; error: string | null } | null | undefined;
+            const gfText = gf ? (gf.ok ? " · ตั้งของขวัญแล้ว" : " · ของขวัญ: ตั้งเองใน LINE Seller Center") : "";
+            const dp = j.display as { ok: boolean; status: "onsale" | "hide" } | null | undefined;
+            const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : " · ตั้งเปิด/ปิดขายไม่สำเร็จ") : "";
+            res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
           }
         } catch (e) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${(e as Error).message}` }); }
         setProgress({ done: i + 1, total: toCreate.length, label: "กำลังลงบนร้าน" });
@@ -508,6 +515,51 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                     );
                   })}
                 </div>
+                {/* LINE: ตัวที่จะลง (ดูแบบหน้าร้าน) + ตัวที่ข้ามพร้อมเหตุผล (กลับไปแก้) + เปิด/ปิดขายหลังลง */}
+                {linePf && (() => {
+                  const mine = plan.filter((x) => x.pf === linePf);
+                  const pub = mine.filter((x) => x.decision === "publish");
+                  const miss = mine.filter((x) => x.decision === "skip_missing");
+                  return (pub.length > 0 || miss.length > 0) && (
+                    <div className="space-y-2 rounded-xl border border-slate-200 px-3 py-2">
+                      {pub.length > 0 && (
+                        <div className="max-h-56 divide-y divide-slate-100 overflow-auto">
+                          {pub.map((x) => (
+                            <div key={x.row.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm">
+                              <span className="text-emerald-600"><Icon name="done" /></span>
+                              <span className="min-w-0 flex-1 truncate">{x.row.name || x.row.code} <span className="font-mono text-[11px] text-slate-400">{x.row.code}</span></span>
+                              <button type="button" onClick={() => setPreviewFor(x.row.id)} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50"><Icon name="mobile" />ดูแบบหน้าร้าน</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {miss.length > 0 && (
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
+                          {miss.map((x) => (
+                            <div key={x.row.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm">
+                              <span className="text-rose-600"><Icon name="warning" /></span>
+                              <span className="min-w-0 flex-1">{x.row.name || x.row.code} <span className="text-xs text-rose-700">· ข้าม — ขาด: {missingList(x.row.missing).join(" · ") || "ข้อมูลไม่ครบ"}</span></span>
+                              <button type="button" onClick={() => { setFocus(x.row.id); setStep(2); }} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">กลับไปแก้</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {pub.length > 0 && (
+                        <div className="border-t border-slate-100 pt-2">
+                          <div className="mb-1 text-xs text-slate-500">หลังลงร้านเสร็จ</div>
+                          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="เปิดหรือปิดขายหลังลง">
+                            {([["hide", "ปิดไว้ก่อน (ตรวจบนร้านแล้วค่อยเปิด)"], ["onsale", "เปิดขายทันที"]] as const).map(([v, l]) => (
+                              <button key={v} type="button" role="radio" aria-checked={afterDisplay === v} onClick={() => setAfterDisplay(v)}
+                                className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs ${afterDisplay === v ? "border-violet-400 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                                <span className={`h-3 w-3 rounded-full border ${afterDisplay === v ? "border-[4px] border-violet-600" : "border-slate-300"}`} />{l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <p className="text-xs text-slate-500">ตัวที่มีบนร้านแล้ว/กำลังลงอยู่ ระบบข้ามให้เอง · ทุกตัวบันทึกประวัติว่าใครลงอะไร{summary.publish > 0 ? " · ลงจริงทีละตัว (ร้านใหญ่อาจใช้เวลาหลายนาที)" : ""}</p>
                 {needTyped && (
                   <div className="flex flex-wrap items-center gap-2">
@@ -521,6 +573,11 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         )}
       </ERPModal>
 
+      {previewFor && (
+        <ERPModal open onClose={() => setPreviewFor(null)} title="ดูแบบหน้าร้าน LINE (จำลอง)" size="sm">
+          <LineStorefrontPreview parentId={previewFor} />
+        </ERPModal>
+      )}
       {fixFor && (
         <ProductPlatformManager parentSkuId={fixFor.parentId} initialPlatformId={fixFor.platformId} canEdit={canEdit} canPublish={false}
           onClose={() => { setFixFor(null); void check(); }} />

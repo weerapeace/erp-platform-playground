@@ -13,6 +13,7 @@ import { duplicateCounts, isGoneStatus, LIVE_LISTING_OR, summarizeListing, type 
 import { expectedLinePrice, linePriceDiff, matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 import { lineEditStateFromRaw, listingHistoryText, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import { lineOptionStructure } from "@/lib/line-variant-structure";
+import { giftFromLine } from "@/lib/line-gift";
 import { computeMatchSuggestions } from "@/lib/platform-match-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -384,6 +385,7 @@ export async function loadListingDetail(admin: Admin, listingId: string): Promis
         display: typeof lineObj.isDisplay === "boolean" ? lineObj.isDisplay : null,
         structure: lineOptionStructure(lineObj),
         edit,
+        gift: giftFromLine(lineObj),
       } : null,
       history: ((logs ?? []) as { created_at: string; metadata: Record<string, unknown> | null }[]).map((a) => ({
         at: a.created_at, actor: a.metadata && typeof a.metadata.actor === "string" ? a.metadata.actor : null, text: listingHistoryText(a.metadata),

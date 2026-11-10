@@ -25,6 +25,8 @@ import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { linePrice } from "@/lib/platform-listing-builder";
 import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
+import { sameGift, type GiftSetting } from "@/lib/line-gift";
+import { LineGiftPicker } from "./line-gift-picker";
 import { LINE_CREATE_MAX_IMAGES, type LineCreatePreview, type LineCreateVariantRow } from "@/lib/line-create-payload";
 
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
@@ -50,6 +52,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
   const [saving, setSaving] = useState(false);
   const [sel, setSel] = useState<string[] | null>(null);            // รูปที่ติ๊กเลือก (null = ตามที่จะส่งตอนนี้)
   const [dsel, setDsel] = useState<string[] | null>(null);          // รูปในรายละเอียด (ทดลอง) ที่ติ๊ก (null = ตามร่าง)
+  const [gsel, setGsel] = useState<GiftSetting | null>(null);       // ของขวัญที่กำลังแก้ (null = ตามร่าง/ค่าเริ่ม)
   const [dpick, setDpick] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
   const [pool, setPool] = useState<{ key: string; source: string }[] | null>(null);
@@ -63,7 +66,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
       setPv(j.preview); onLoaded?.(j.preview);
     } catch (e) { setErr((e as Error).message); }
   }, [parentId, onLoaded]);
-  useEffect(() => { setPv(null); setEdit(null); setSel(null); setDsel(null); setDpick(false); setPool(null); setPrices({}); setDescOpen(false); void load(); }, [load]);
+  useEffect(() => { setPv(null); setEdit(null); setSel(null); setDsel(null); setGsel(null); setDpick(false); setPool(null); setPrices({}); setDescOpen(false); void load(); }, [load]);
 
   const patchDraft = async (body: Record<string, unknown>, okMsg: string) => {
     if (!pv) return;
@@ -72,7 +75,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
       const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentId, platform_id: pv.platform_id, ...body }) });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      toast.success(okMsg); setEdit(null); setSel(null); setDsel(null); setDpick(false);
+      toast.success(okMsg); setEdit(null); setSel(null); setDsel(null); setGsel(null); setDpick(false);
       await load();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSaving(false); }
@@ -361,6 +364,26 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
             </div>
           )}
         </div>
+        {/* ส่งเป็นของขวัญ (ทดลอง) — ร่าง extra.gift_status / gift_categories (คีย์เดียวกับ ProductPlatformManager) */}
+        {(() => {
+          const g = gsel ?? pv.gift;
+          const gDirty = !!gsel && !sameGift(gsel, pv.gift);
+          return (
+            <div className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-start gap-2 border-t border-slate-100 py-2 text-sm">
+              <span className="pt-0.5 text-slate-500">ของขวัญ<br /><span className="rounded bg-amber-100 px-1 text-[10px] text-amber-800">ทดลอง</span></span>
+              <div className="min-w-0">
+                <LineGiftPicker value={g} onChange={setGsel} disabled={!canEdit || saving} />
+                <div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.gift.isDefault && !gDirty ? "ค่าเริ่มของร้าน (แบบเดียวกับ 119 สินค้าบน LINE)" : "ตั้งไว้สำหรับ LINE"} · ตั้งหลังลงร้านเสร็จ — ถ้า LINE ไม่รับ จะบอกให้ไปตั้งใน LINE Seller Center</div>
+              </div>
+              {canEdit && gDirty && (
+                <div className="flex flex-col gap-1">
+                  <button type="button" disabled={saving} onClick={() => void patchExtra({ gift_status: g.status, gift_categories: g.categories }, "บันทึกของขวัญแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>
+                  <button type="button" onClick={() => setGsel(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {fieldRow("weight", "น้ำหนัก", pv.weight.kg > 0 ? `${pv.weight.kg} กก. (ทุกตัวเลือก)` : "ไม่ส่ง", pv.weight.src, pv.weight.kg > 0 ? String(pv.weight.kg) : "")}
       </div>
 

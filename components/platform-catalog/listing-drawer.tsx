@@ -31,6 +31,7 @@ import { ListingVariantMap } from "./listing-variants";
 import { useLineDisplay } from "./use-line-display";
 import { VariantStructureEditor } from "./variant-structure-editor";
 import { DescImagesTest } from "./desc-images-test";
+import { LineGiftSection } from "./line-gift-section";
 import { applyBulkPrice, planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
@@ -140,6 +141,19 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     } catch { setSysImages([]); }
   }, [matchedParent, sysImages]);
   const openPicker = (p: { mode: "product" } | { mode: "variant"; id: string }) => { setPicker(p); void loadSysImages(); };
+  // ดึงข้อมูลสินค้าตัวนี้ตัวเดียวจาก LINE (POST /api/line-shopping/listing-refresh)
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshOne = async () => {
+    if (!listingId) return;
+    setRefreshing(true);
+    try {
+      const r = await apiFetch("/api/line-shopping/listing-refresh", { method: "POST", body: JSON.stringify({ listing_id: listingId }) });
+      const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` })) as { ok?: boolean; error: string | null };
+      if (j.ok) { toast.success("ดึงข้อมูลจาก LINE แล้ว"); setReload((n) => n + 1); }
+      else toast.error(j.error || "ดึงไม่สำเร็จ");
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setRefreshing(false); }
+  };
 
   const save = useCallback(async () => {
     if (!listingId || !form) return;
@@ -239,12 +253,21 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   );
 
   // ---------- เนื้อหาแท็บ ----------
+  // ยังไม่มีข้อมูลจาก LINE (เช่น ลงจากระบบแล้วแต่ยังไม่ดึง) → ปุ่มดึง "ตัวนี้ตัวเดียว" ไม่ต้องดึงทั้งร้าน
+  const canRefreshOne = detail?.platform_code === "line_shopping" && !!detail.external_product_id && detail.status !== "removed";
   const noLine = (
-    <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-      {detail?.platform_code && detail.platform_code !== "line_shopping"
-        ? "แก้จากหน้านี้ได้เฉพาะสินค้าบน LINE ตอนนี้ — ร้านนี้ดูข้อมูลได้ที่แท็บจับคู่"
-        : "ยังไม่มีข้อมูลสินค้านี้จาก LINE — กด “ดึงสินค้าจาก LINE” ด้านบนหนึ่งครั้ง แล้วเปิดใหม่"}
-    </p>
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+      <span className="min-w-[12rem] flex-1">
+        {detail?.platform_code && detail.platform_code !== "line_shopping"
+          ? "แก้จากหน้านี้ได้เฉพาะสินค้าบน LINE ตอนนี้ — ร้านนี้ดูข้อมูลได้ที่แท็บจับคู่"
+          : canRefreshOne ? "ยังไม่มีข้อมูลสินค้านี้จาก LINE ในระบบ — กดดึงตัวนี้ได้เลย" : "ยังไม่มีข้อมูลสินค้านี้จาก LINE — กด “ดึงสินค้าจาก LINE” ด้านบนหนึ่งครั้ง แล้วเปิดใหม่"}
+      </span>
+      {canRefreshOne && (
+        <button type="button" disabled={refreshing} onClick={() => void refreshOne()} className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+          <Icon name="refresh" />{refreshing ? "กำลังดึง..." : `ดึงตัวนี้จาก LINE (#${detail?.external_product_id})`}
+        </button>
+      )}
+    </div>
   );
   const infoTab = !form || !line ? noLine : (
     <div className="space-y-3 text-sm">
@@ -277,6 +300,9 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
               dangerouslySetInnerHTML={{ __html: form.description || "<p class=\"text-slate-400\">(ไม่มีรายละเอียด)</p>" }} />}
       </div>
       {/* ทดสอบใส่รูปจากระบบลงในรายละเอียด (ช่วงทดสอบ · เฉพาะสินค้าปิดขาย) */}
+      {listingId && line.gift && (
+        <LineGiftSection listingId={listingId} current={line.gift} canEdit={canEdit} onDone={() => setReload((n) => n + 1)} />
+      )}
       {canEdit && listingId && (
         <DescImagesTest listingId={listingId} matchedParent={matchedParent} display={line.display}
           blocked={dirty ? "มีการแก้ที่ยังไม่ได้ส่งขึ้น LINE — ส่งหรือยกเลิกก่อน" : null}

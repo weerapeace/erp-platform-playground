@@ -21,6 +21,7 @@ import { linePrice } from "@/lib/platform-listing-builder";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
 import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
+import { giftFromExtra, type GiftSetting } from "@/lib/line-gift";
 
 /** รายละเอียดในระบบเป็นข้อความธรรมดา แต่ LINE เก็บเป็น HTML ย่อหน้า (920/934 รายการบนร้าน) → แปลงก่อนส่ง
  *  เก็บบรรทัดว่าง + ย่อหน้าเยื้อง · ขีด "- " คงเป็นข้อความ (ไม่แปลงเป็น <ul> — ยังไม่รู้ว่า LINE รับไหม) · เป็น HTML อยู่แล้ว = ใช้ตามนั้น */
@@ -56,6 +57,8 @@ export type LineCreatePreview = {
   images: { keys: string[]; src: string; custom: boolean };
   /** รูปในรายละเอียด (ทดลอง · ร่าง extra.line_desc_images) — ต่อท้ายข้อความหลังสร้างสินค้า ด้วยวิธีฝากรูปผ่านแกลเลอรี (lib/line-desc-images) */
   desc_images: string[];
+  /** ส่งเป็นของขวัญ (ทดลอง · ร่าง extra.gift_status / gift_categories · ยังไม่ตั้ง = ค่าเริ่มของร้าน) — ตั้งหลังสร้างสินค้า (lib/line-gift-server) */
+  gift: GiftSetting & { isDefault: boolean };
   option_names: string[];
   variants: LineCreateVariantRow[];
   /** ส่วนลดระดับสินค้าที่ส่งตอนสร้าง (ใช้ได้เมื่อทุกตัวเลือกลดเท่ากัน) */
@@ -251,6 +254,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
       weight: { kg: weightKg, src: weightSrc },
       images: { keys: galleryKeys, src: imgSrc, custom: lineImages.length > 0 },
       desc_images: descImageKeys,
+      gift: giftFromExtra(extra),
       option_names: dims.map((dm) => dm.name),
       variants: variantRows,
       top_discount: topDiscount,

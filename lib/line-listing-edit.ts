@@ -289,6 +289,8 @@ export type ListingDetail = {
     structure: LineOptionStructure | null;
     /** ค่าตั้งต้นของฟอร์มแก้ (ชื่อ/แบรนด์/หมวด/รายละเอียด/ราคาต่อตัวเลือก) */
     edit: LineEditState;
+    /** ส่งเป็นของขวัญ (lib/line-gift) */
+    gift: { status: "on" | "gift_only" | "off"; categories: string[] };
   } | null;
   history: { at: string; actor: string | null; text: string }[];
 };

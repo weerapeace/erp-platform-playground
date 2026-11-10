@@ -1,8 +1,10 @@
 /**
  * สร้างสินค้าใหม่บน LINE SHOPPING — /api/line-shopping/create-product
  *  GET  ?parent_sku_id=  (products.platforms.view) → ดูก่อนส่ง: ทุกช่องที่จะส่ง + มาจากไหน + ช่องที่ขาด (ตัวช่วยลงสินค้า ขั้น "ดูและแก้")
- *  POST { parent_sku_id }  (products.platforms.edit) → สร้างจริงบน LINE (POST /products)
+ *  POST { parent_sku_id, display?: "onsale"|"hide" (ค่าเริ่ม hide) }  (products.platforms.edit) → สร้างจริงบน LINE (POST /products)
  *   → เก็บ platform_product_id ในร่าง + สร้าง catalog listing (จับคู่ parent)
+ *   → หลังสร้าง (พลาดไม่ทำให้ลงไม่สำเร็จ): รูปในรายละเอียด (ทดลอง) · ของขวัญ (ทดลอง) · เปิด/ปิดขายตามที่เลือก
+ *   → ดึงสินค้าที่เพิ่งลงกลับมาเก็บ raw.line (ลิ้นชักเห็นข้อมูลทันที)
  * ประกอบข้อมูลด้วยของกลางตัวเดียว lib/line-create-payload (ดูก่อนส่ง = ส่งจริง ตรงกันเสมอ)
  * หมายเหตุ: เขียนสร้างสินค้าจริงบนร้าน LINE — payload อาจต้องปรับตาม error จาก API (ทดสอบทีละตัว)
  */
@@ -11,7 +13,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lineCreateProduct, lineGetProduct, lineUpdateProduct } from "@/lib/line-shopping";
+import { lineCreateProduct, lineGetProduct, lineSetDisplay, lineUpdateProduct } from "@/lib/line-shopping";
+import { lineSetGift } from "@/lib/line-gift-server";
 import { decryptSecret } from "@/lib/secret-box";
 import { buildLineCreate } from "@/lib/line-create-payload";
 import { publicImageUrl } from "@/lib/line-shopping-server";
@@ -33,10 +36,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { parent_sku_id?: string };
+  let body: { parent_sku_id?: string; display?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const parent_sku_id = (body.parent_sku_id ?? "").trim();
   if (!parent_sku_id) return NextResponse.json({ error: "ต้องระบุ parent_sku_id" }, { status: 400 });
+  // หลังลงเสร็จ: เปิดขายทันที / ปิดไว้ก่อน (ค่าเริ่ม — ตรวจบนร้านก่อนเปิด · เจ้าของขอให้เลือกได้ 2026-11-10)
+  const afterDisplay: "onsale" | "hide" = body.display === "onsale" ? "onsale" : "hide";
 
   const admin = supabaseAdmin();
   const b = await buildLineCreate(admin, parent_sku_id);
@@ -78,13 +83,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const now = new Date().toISOString();
   // เก็บรหัสสินค้าในร่าง + สร้าง catalog listing (จับคู่ parent)
   await admin.from("platform_listing_drafts").upsert({ parent_sku_id, platform_id, platform_product_id: productId, last_sync_status: "created", last_synced_at: now, updated_by: user?.id ?? null, updated_at: now }, { onConflict: "parent_sku_id,platform_id" });
+  let listingRowId: string | null = null;
   if (productId) {
     const priceMin = Math.min(...variants.map((v) => Number(v.price) || 0).filter((n) => n > 0), Infinity);
-    await admin.from("platform_catalog_listings").upsert({
+    const { data: ins } = await admin.from("platform_catalog_listings").insert({
       platform_id, brand_id, source: "api", external_product_id: productId, title: String(payload.name ?? ""), sku_code: pv.parent_code,
       matched_parent_sku_id: parent_sku_id, price: Number.isFinite(priceMin) ? priceMin : null, last_imported_at: now, raw: { created_by_erp: true },
-    }, { onConflict: "id", ignoreDuplicates: false });
+    }).select("id").maybeSingle();
+    listingRowId = (ins as { id?: string } | null)?.id ?? null;
   }
+  // รูปในรายละเอียดต้องสลับรูปสินค้าชั่วคราว → ปิดขายก่อน (ลูกค้าไม่เห็น) แล้วค่อยเปิดตามที่เลือกตอนท้าย
+  if (productId && descImageKeys.length) await lineSetDisplay(apiKey, productId, "hide");
   // รูปในรายละเอียด (ทดลอง — ทดสอบผ่าน 2026-11-10 LMTS05/WL53): ฝากรูปผ่านแกลเลอรี → ต่อท้ายรายละเอียด
   //   พลาด = สินค้าลงแล้ว แค่ไม่มีรูปในรายละเอียด (ไม่ถือว่าลงไม่สำเร็จ)
   let descImages: { ok: boolean; present: number; total: number; hosted: string[]; error: string | null } | null = null;
@@ -102,6 +111,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!errs.length && present < descImageKeys.length) errs.push(`รูปอยู่ในรายละเอียดจริง ${present}/${descImageKeys.length}`);
     descImages = { ok: errs.length === 0 && host.restored, present, total: descImageKeys.length, hosted: host.hosted, error: errs.length ? errs.join(" · ") : null };
   }
-  await writeAudit(admin, { action: "create", entityType: "platform_catalog", entityId: productId || null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_create", parent_sku_id, brand_id, product_id: productId, ...(descImages ? { desc_images: descImages } : {}) } });
-  return NextResponse.json({ ok: true, product_id: productId, desc_images: descImages, error: null });
+  // ของขวัญ (ทดลอง — คู่มือ API ไม่มีช่องนี้ · lib/line-gift-server ลองแล้วดึงกลับตรวจ) · พลาด = ลงแล้ว แค่ต้องไปตั้งเองใน LINE
+  let gift: { ok: boolean; shape: string | null; error: string | null } | null = null;
+  if (productId) {
+    const g = await lineSetGift(apiKey, productId, { status: pv.gift.status, categories: pv.gift.categories });
+    gift = { ok: g.ok, shape: g.shape, error: g.error };
+  }
+  // เปิด/ปิดขายตามที่เลือก
+  let display: { ok: boolean; status: "onsale" | "hide"; error: string | null } | null = null;
+  if (productId) {
+    const d = await lineSetDisplay(apiKey, productId, afterDisplay);
+    display = { ok: d.ok, status: afterDisplay, error: d.ok ? null : (d.error ?? `HTTP ${d.status}`) };
+  }
+  // ดึงสินค้าที่เพิ่งลงกลับมาเก็บ → ลิ้นชักเห็นรูป/ราคา/สวิตช์เปิดปิดขายทันที (เดิมต้องกดดึงทั้งร้าน)
+  if (productId && listingRowId) {
+    const fresh = await lineGetProduct(apiKey, productId);
+    if (fresh.ok && fresh.row) {
+      await admin.from("platform_catalog_listings").update({ raw: { created_by_erp: true, line: fresh.row }, ...(typeof fresh.row.name === "string" && fresh.row.name.trim() ? { title: fresh.row.name.trim() } : {}), updated_at: new Date().toISOString() }).eq("id", listingRowId);
+    }
+  }
+  await writeAudit(admin, { action: "create", entityType: "platform_catalog", entityId: productId || null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_create", parent_sku_id, brand_id, product_id: productId, ...(descImages ? { desc_images: descImages } : {}), ...(gift ? { gift } : {}), ...(display ? { display } : {}) } });
+  return NextResponse.json({ ok: true, product_id: productId, desc_images: descImages, gift, display, error: null });
 }
