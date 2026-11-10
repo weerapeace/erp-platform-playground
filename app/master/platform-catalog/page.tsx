@@ -98,6 +98,7 @@ export default function PlatformCatalogPage() {
   const canPublish = can("products.platforms.publish");   // ส่งขึ้นร้านจริง (แก้สินค้า/เปิดปิดขายจากลิ้นชัก)
   const [addPick, setAddPick] = useState(false);              // ป๊อปเลือกสินค้าที่ยังไม่ลง
   const [addFor, setAddFor] = useState<AddWizardParent[] | null>(null);
+  const [pendingOpen, setPendingOpen] = useState<string | null>(null);   // ป๊อปเพิ่มสินค้า → "ไปจับคู่" → เปิดลิ้นชักรายการนั้นเมื่อตารางโหลดเสร็จ
   const fileRef = useRef<HTMLInputElement>(null);
   const catFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -518,6 +519,13 @@ export default function PlatformCatalogPage() {
         .catch(() => setModalSugs([]));
     }
   };
+  // ป๊อปเพิ่มสินค้า แท็บ "อาจมีบนร้านแล้ว" → ไปจับคู่: สลับมาแท็บจับคู่ แล้วเปิดลิ้นชักของรายการนั้น
+  useEffect(() => {
+    if (!pendingOpen) return;
+    const l = listings.find((x) => x.id === pendingOpen);
+    if (l) { setPendingOpen(null); openRow(l); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOpen, listings]);
   // ลบรายการที่นำเข้าผิด (สำเนาในระบบเรา — ของบนร้านจริงไม่ถูกแตะ)
   const deleteListing = async () => {
     if (!openListing) return;
@@ -1155,7 +1163,8 @@ export default function PlatformCatalogPage() {
 
       {disp.dialog}
       <NotListedPicker open={addPick} onClose={() => setAddPick(false)} platformId={platformId} brandId={brandId} where={where}
-        onPick={(ps) => { setAddPick(false); setAddFor(ps); }} />
+        onPick={(ps) => { setAddPick(false); setAddFor(ps); }}
+        onGoMatch={(listingId) => { setAddPick(false); setFilter("all"); setPendingOpen(listingId); if (view !== "match") setView("match"); }} />
       {addFor && (
         <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : undefined}
           onClose={() => setAddFor(null)} onDone={() => { setAddFor(null); void reloadCurrent(); }} />

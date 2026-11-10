@@ -235,6 +235,15 @@ export type ShopParent = {
   category_id: string | null;
 };
 
+/**
+ * ปุ่ม "เพิ่มสินค้าขึ้นร้าน" — สินค้าของแบรนด์ที่ยังไม่ได้จับคู่กับรายการบนร้าน แยก 3 กอง (GET /api/platform-catalog?view=notlisted)
+ *   parents = พร้อมลง (มี SKU เปิดขาย · ไม่มีรายการบนร้านที่เดาว่าเป็นตัวนี้)
+ *   maybe   = อาจมีบนร้านแล้ว (รายการบนร้านที่ยังไม่จับคู่ ถูกเดาว่าเป็นตัวนี้ — ตัวเดาเดียวกับหน้าจับคู่) → ไปจับคู่ ไม่ลงซ้ำ
+ *   no_sku  = ไม่มี SKU ที่เปิดขาย → ลงไม่ได้
+ */
+export type NotListedMaybe = ShopParent & { listing_id: string; external_product_id: string | null; listing_title: string | null; score: number };
+export type NotListedResponse = { parents: ShopParent[]; maybe: NotListedMaybe[]; no_sku: ShopParent[]; error: string | null };
+
 /** หมวดกลางที่ใช้ในแบรนด์นี้ (ชิปกรอง) */
 export type ShopCategory = { id: string; name: string; sort: number };
 

@@ -291,3 +291,29 @@ export type ListingDetail = {
   history: { at: string; actor: string | null; text: string }[];
 };
 export type ListingDetailResponse = { detail: ListingDetail | null; error: string | null };
+
+/**
+ * แก้ราคาหลายตัวเลือกพร้อมกัน (แถบ "แก้ทุกตัวเลือก" ในแท็บราคา) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง (ต้องกดบันทึกขึ้น LINE)
+ * ids = ตัวที่ติ๊ก (null/ว่าง = ทุกตัว) · ช่องที่ไม่กรอก = ไม่เปลี่ยน · ลด % = คิดราคาจ่ายจากราคาเต็ม (ปัดเป็นบาทเต็ม)
+ */
+export function applyBulkPrice(
+  variants: LineEditVariant[], ids: Set<string> | null,
+  opt: { full?: number | null; pay?: number | null; discountPct?: number | null },
+): { variants: LineEditVariant[]; changed: number; error: string | null } {
+  const full = opt.full ?? null; const pay = opt.pay ?? null; const pct = opt.discountPct ?? null;
+  if (full == null && pay == null && pct == null) return { variants, changed: 0, error: "กรอกราคาเต็ม ราคาที่ลูกค้าจ่าย หรือ % ส่วนลด" };
+  if (full != null && !(full > 0)) return { variants, changed: 0, error: "ราคาเต็มต้องมากกว่า 0" };
+  if (pay != null && !(pay > 0)) return { variants, changed: 0, error: "ราคาที่ลูกค้าจ่ายต้องมากกว่า 0" };
+  if (pay == null && pct != null && !(pct >= 0 && pct < 100)) return { variants, changed: 0, error: "% ส่วนลดต้องอยู่ระหว่าง 0–99" };
+  const useAll = !ids || ids.size === 0;
+  let changed = 0;
+  const next = variants.map((v) => {
+    if (!useAll && !ids!.has(v.id)) return v;
+    const price = full ?? v.price;
+    const newPay = pay != null ? pay : pct != null && price != null ? Math.round(price * (1 - pct / 100)) : v.pay;
+    if (price === v.price && newPay === v.pay) return v;
+    changed++;
+    return { ...v, price, pay: newPay };
+  });
+  return { variants: next, changed, error: null };
+}

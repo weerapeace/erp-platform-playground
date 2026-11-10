@@ -7,7 +7,7 @@
  *   view=shop → มุมมองหน้าร้าน ShopViewResponse (lib/platform-listing-health) — สต๊อก/สถานะ/รูปจากร้าน · ยังไม่ลง · ไม่มีรูป · งานค้าง
  *   view=variants&listing_id= → ตัวเลือกบนร้าน ↔ SKU ในระบบ ListingVariantsResponse (lib/platform-variant-match) · อ่านอย่างเดียว
  *   view=listing&listing_id= → รายละเอียดสินค้าบนร้าน 1 รายการ + ประวัติ ListingDetailResponse (ลิ้นชักสินค้าบนร้าน)
- *   view=notlisted&platform_id&brand_id → สินค้าของแบรนด์ที่ยังไม่ลงร้านนี้ (ปุ่มเพิ่มสินค้าขึ้นร้าน)
+ *   view=notlisted&platform_id&brand_id → สินค้าของแบรนด์ที่ยังไม่ลงร้านนี้ แยก พร้อมลง / อาจมีบนร้านแล้ว / ไม่มี SKU (NotListedResponse)
  *   view=summary → รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ ListingSummariesResponse (หน้าจับคู่ โหลดตามหลังตาราง)
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
  * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
@@ -22,7 +22,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit, writeAuditMany } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
-import { loadBrandSummaries, loadListingDetail, loadListingSummaries, loadListingVariants, loadNotListed, loadShopView } from "@/lib/platform-shop-view-server";
+import { loadBrandSummaries, loadListingDetail, loadListingSummaries, loadListingVariants, loadNotListedGroups, loadShopView } from "@/lib/platform-shop-view-server";
 import { LISTING_GONE_STATUS, LIVE_LISTING_OR, type ListingSummariesResponse, type ShopBrandsResponse, type ShopViewResponse } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
@@ -69,8 +69,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ปุ่มเพิ่มสินค้าขึ้นร้าน: สินค้าของแบรนด์ที่ยังไม่ลงร้านนี้
   if (sp.get("view") === "notlisted") {
-    if (!brandId) return NextResponse.json({ parents: [], error: "เลือกแบรนด์ก่อน" }, { status: 400 });
-    return NextResponse.json({ parents: await loadNotListed(admin, platformId, brandId), error: null });
+    if (!brandId) return NextResponse.json({ parents: [], maybe: [], no_sku: [], error: "เลือกแบรนด์ก่อน" }, { status: 400 });
+    return NextResponse.json({ ...(await loadNotListedGroups(admin, platformId, brandId)), error: null });
   }
 
   // หน้าจับคู่: รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (โหลดตามหลังตาราง ตารางขึ้นก่อน)

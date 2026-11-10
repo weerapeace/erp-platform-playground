@@ -30,7 +30,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { ListingVariantMap } from "./listing-variants";
 import { useLineDisplay } from "./use-line-display";
 import { VariantStructureEditor } from "./variant-structure-editor";
-import { planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
+import { applyBulkPrice, planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อเปิดลิ้นชักเท่านั้น
@@ -68,6 +68,10 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const [sysImages, setSysImages] = useState<{ key: string; source: string }[] | null>(null);
   const [picker, setPicker] = useState<null | { mode: "product" } | { mode: "variant"; id: string }>(null);
   const [optMode, setOptMode] = useState<"price" | "detail" | "structure">("price");
+  // แก้ราคาหลายตัวเลือกพร้อมกัน (ติ๊กบางตัว = เฉพาะที่ติ๊ก · ไม่ติ๊ก = ทุกตัว) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง
+  const [priceSel, setPriceSel] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<{ full: string; pay: string; pct: string }>({ full: "", pay: "", pct: "" });
+  const [bulkErr, setBulkErr] = useState<string | null>(null);
 
   // โหลดรายละเอียด + ตัวเลือก↔SKU พร้อมกัน · สลับรายการ = เริ่มใหม่ (ล้างของเดิม + กลับแท็บแรก) · โหลดซ้ำหลังส่ง = คงแท็บไว้
   const loadedFor = useRef<string | null>(null);
@@ -77,7 +81,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     const fresh = loadedFor.current !== listingId;
     loadedFor.current = listingId;
     setError(null);
-    if (fresh) { setDetail(null); setVariants(null); setForm(null); setDescEdit(false); setSysImages(null); setPicker(null); }
+    if (fresh) { setDetail(null); setVariants(null); setForm(null); setDescEdit(false); setSysImages(null); setPicker(null); setPriceSel(new Set()); setBulk({ full: "", pay: "", pct: "" }); setBulkErr(null); }
     const q = encodeURIComponent(listingId);
     Promise.all([
       apiFetch(`/api/platform-catalog?view=listing&listing_id=${q}`).then((r) => r.json() as Promise<ListingDetailResponse>),
@@ -114,6 +118,15 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     }),
   } : f));
   const resetForm = () => { if (base) setForm(structuredClone(base)); setDescEdit(false); };
+  const applyBulk = () => {
+    if (!form) return;
+    const r = applyBulkPrice(form.variants, priceSel, { full: numOrNull(bulk.full), pay: numOrNull(bulk.pay), discountPct: numOrNull(bulk.pct) });
+    setBulkErr(r.error);
+    if (!r.error) {
+      setForm((f) => (f ? { ...f, variants: r.variants } : f));
+      if (r.changed === 0) setBulkErr("ราคาเท่าเดิมทุกตัว — ไม่มีอะไรเปลี่ยน");
+    }
+  };
   // รูปสินค้า: ลากเรียง (ของกลาง SortableList) · ตั้งปก = ย้ายไปแรก · ลบ (เหลืออย่างน้อย 1)
   const drag = useDragReorder((from, to) => setForm((f) => (f ? { ...f, images: moveItem(f.images, from, to) } : f)), { group: "listing-images" });
   const setImages = (fn: (imgs: string[]) => string[]) => setForm((f) => (f ? { ...f, images: fn(f.images) } : f));
@@ -335,8 +348,20 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
             className={`h-8 px-3 ${i ? "border-l border-slate-200" : ""} ${optMode === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
         ))}
       </div>
+      {optMode === "price" && canEdit && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-2 text-xs text-violet-900">
+          <span className="font-medium">แก้{priceSel.size ? `ตัวที่ติ๊ก (${priceSel.size})` : `ทุกตัวเลือก (${form.variants.length})`}พร้อมกัน:</span>
+          <label className="inline-flex items-center gap-1">ราคาเต็ม<MoneyInput value={bulk.full} onChange={(raw) => { setBulk((b) => ({ ...b, full: raw })); setBulkErr(null); }} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
+          <label className="inline-flex items-center gap-1">ลูกค้าจ่าย<MoneyInput value={bulk.pay} onChange={(raw) => { setBulk((b) => ({ ...b, pay: raw })); setBulkErr(null); }} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
+          <label className="inline-flex items-center gap-1">หรือ ลด<input type="number" min="0" max="99" value={bulk.pct} onChange={(e) => { setBulk((b) => ({ ...b, pct: e.target.value })); setBulkErr(null); }} className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-right" />%</label>
+          <button type="button" onClick={applyBulk} className="h-8 rounded-md bg-violet-600 px-2.5 text-white hover:bg-violet-700">ใช้กับ{priceSel.size ? `ที่ติ๊ก ${priceSel.size} ตัว` : "ทุกตัว"}</button>
+          {bulkErr && <span className="w-full text-rose-600">{bulkErr}</span>}
+          <span className="w-full text-[11px] text-violet-700/80">ช่องที่ว่าง = ไม่เปลี่ยน · ลด % คิดจากราคาเต็ม · กดแล้วยังไม่ส่ง — ต้องกด “บันทึกขึ้น LINE” (โชว์ก่อน → หลัง ให้ตรวจ)</span>
+        </div>
+      )}
       {optMode === "price"
-        ? <MiniTable rows={form.variants} columns={optCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options" />
+        ? <MiniTable rows={form.variants} columns={optCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options"
+            selectable={canEdit} selected={priceSel} onSelectedChange={setPriceSel} />
         : optMode === "detail"
           ? <MiniTable rows={form.variants} columns={detailCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options-detail" />
           : listingId && <VariantStructureEditor listingId={listingId} structure={line.structure} display={line.display} canEdit={canEdit}

@@ -8,10 +8,11 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { duplicateCounts, isGoneStatus, LIVE_LISTING_OR, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
+import { duplicateCounts, isGoneStatus, LIVE_LISTING_OR, summarizeListing, type NotListedMaybe, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
 import { expectedLinePrice, linePriceDiff, matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 import { lineEditStateFromRaw, listingHistoryText, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import { lineOptionStructure } from "@/lib/line-variant-structure";
+import { computeMatchSuggestions } from "@/lib/platform-match-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช้า → ถามเป็นชุด
@@ -96,12 +97,13 @@ async function imageStates(admin: Admin, noCover: string[]): Promise<Map<string,
   const hasGallery = new Set<string>();
   const hasSku = new Set<string>();
   await Promise.all(chunks(noCover).map(async (ids) => {
-    const [{ data: slots }, { data: skus }] = await Promise.all([
-      admin.from("product_image_slots").select("owner_id").in("owner_id", ids),
-      admin.from("skus_v2").select("parent_sku_id").in("parent_sku_id", ids).not("cover_image_r2_key", "is", null),
+    // ไล่ทีละหน้า — รุ่นละหลายรูป/หลาย SKU ชุดละ 200 รุ่นเกิน 1,000 แถวได้ (PostgREST ตัดเงียบ ๆ)
+    const [slots, skus] = await Promise.all([
+      fetchAllPages<{ owner_id: string }>((from, to) => admin.from("product_image_slots").select("owner_id").in("owner_id", ids).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { owner_id: string }[] | null; error: unknown }>),
+      fetchAllPages<{ parent_sku_id: string }>((from, to) => admin.from("skus_v2").select("parent_sku_id").in("parent_sku_id", ids).not("cover_image_r2_key", "is", null).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { parent_sku_id: string }[] | null; error: unknown }>),
     ]);
-    for (const s of (slots ?? []) as { owner_id: string }[]) hasGallery.add(s.owner_id);
-    for (const s of (skus ?? []) as { parent_sku_id: string }[]) hasSku.add(s.parent_sku_id);
+    for (const s of slots) hasGallery.add(s.owner_id);
+    for (const s of skus) hasSku.add(s.parent_sku_id);
   }));
   const out = new Map<string, "sku_only" | "none">();
   // มีรูปในแกลเลอรีแต่ไม่ตั้งปก = ยังมีรูปให้ใช้ → นับรวมกับ "มีรูปที่ SKU" (ตั้งปกได้เลย ไม่ต้องถ่ายใหม่)
@@ -366,8 +368,40 @@ export async function loadListingDetail(admin: Admin, listingId: string): Promis
 
 /**
  * สินค้าของแบรนด์ที่ยังไม่ได้ลงร้านนี้ (ปุ่ม "เพิ่มสินค้าขึ้นร้าน") — Parent SKU ที่เปิดใช้ ลบตัวที่จับคู่กับรายการที่ยังอยู่บนร้าน
- * กฎเดียวกับแท็บ "ยังไม่ลง" ของมุมมองหน้าร้าน (นับเฉพาะรายการที่ยังอยู่บนร้าน)
+ * กฎเดียวกับแท็บ "ยังไม่ลง" ของมุมมองหน้าร้าน (นับเฉพาะรายการที่ยังอยู่บนร้าน) — แล้วแยก 3 กอง (NotListedResponse):
+ *   พร้อมลง · อาจมีบนร้านแล้ว (ตัวเดาของหน้าจับคู่ชี้มาที่ตัวนี้ — กันลงซ้ำแบบ JEAN08) · ไม่มี SKU เปิดขาย
  */
+export async function loadNotListedGroups(admin: Admin, platformId: string, brandId: string): Promise<{ parents: ShopParent[]; maybe: NotListedMaybe[]; no_sku: ShopParent[] }> {
+  const [all, sugg] = await Promise.all([loadNotListed(admin, platformId, brandId), computeMatchSuggestions(admin, { platformId, brandId })]);
+  const ids = all.map((p) => p.id);
+  const withSku = new Set<string>();
+  // ⚠️ PostgREST ตัดที่ 1,000 แถว — รุ่นละหลาย SKU (IG ~10+) ชุดละ 200 รุ่นเกินพันแน่ → ไล่ทีละหน้า (เคยพลาด: BCN25 มี 15 SKU ถูกนับว่า "ไม่มี SKU")
+  await Promise.all(chunks(ids).map(async (part) => {
+    const rows = await fetchAllPages<{ parent_sku_id: string }>((from, to) => admin.from("skus_v2").select("parent_sku_id")
+      .in("parent_sku_id", part).eq("is_active", true).not("sale_ok", "is", false).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { parent_sku_id: string }[] | null; error: unknown }>);
+    for (const s of rows) withSku.add(s.parent_sku_id);
+  }));
+  // รายการบนร้านที่ยังไม่จับคู่ → ตัวเดาอันดับ 1 ชี้ Parent ไหน (เก็บคะแนนสูงสุดต่อ Parent)
+  const idSet = new Set(ids);
+  const hint = new Map<string, { listing_id: string; external_product_id: string | null; listing_title: string | null; score: number }>();
+  for (const l of sugg.listings) {
+    const top = sugg.suggestions[l.id]?.[0];
+    if (!top || !idSet.has(top.parent_sku_id)) continue;
+    const prev = hint.get(top.parent_sku_id);
+    if (!prev || top.score > prev.score) hint.set(top.parent_sku_id, { listing_id: l.id, external_product_id: l.external_product_id ?? null, listing_title: l.title ?? null, score: top.score });
+  }
+  const parents: ShopParent[] = []; const maybe: NotListedMaybe[] = []; const noSku: ShopParent[] = [];
+  for (const p of all) {
+    const h = hint.get(p.id);
+    if (h) maybe.push({ ...p, ...h });
+    else if (!withSku.has(p.id)) noSku.push(p);
+    else parents.push(p);
+  }
+  maybe.sort((a, b) => b.score - a.score);
+  return { parents, maybe, no_sku: noSku };
+}
+
+/** สินค้าของแบรนด์ที่ยังไม่จับคู่กับรายการบนร้านนี้ (ทั้งหมด ยังไม่แยกกอง) */
 export async function loadNotListed(admin: Admin, platformId: string, brandId: string): Promise<ShopParent[]> {
   type P = { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; platform_category_id: string | null };
   const [parents, listed] = await Promise.all([

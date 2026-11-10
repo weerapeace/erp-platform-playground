@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyLineEditToRaw, lineEditStateFromRaw, listingHistoryText, planLineEdit } from "@/lib/line-listing-edit";
+import { applyBulkPrice, applyLineEditToRaw, lineEditStateFromRaw, listingHistoryText, planLineEdit } from "@/lib/line-listing-edit";
 
 // ข้อมูลจริงย่อจาก LINE (Louis Montini WHB08 #319762282)
 const raw = {
@@ -131,5 +131,30 @@ describe("เฟส 2 — รูปสินค้า + รายละเอี
   });
   it("ประวัติ: รายละเอียดตัวเลือก", () => {
     expect(listingHistoryText({ source: "line_listing_edit", changes: [{ label: "รูปสินค้า" }, { label: "ตัวเลือก สีดำ" }] })).toBe("แก้บน LINE: รูปสินค้า · รายละเอียด 1 ตัวเลือก");
+  });
+});
+
+describe("แก้ราคาหลายตัวเลือกพร้อมกัน", () => {
+  // MGN386: 6 ตัวเลือก ราคาเต็ม 1,499 (ตัวหนึ่ง 1,599) จ่าย 850
+  const vs = ["01S", "01M", "01L", "02S", "02M", "02L"].map((x, i) => ({ id: x, label: x, sku: `MGN386-${x}`, price: i === 2 ? 1599 : 1499, pay: 850, weight: 0.3, barcode: null, imageUrl: null }));
+  it("ตั้งราคาเต็มทุกตัว (ไม่ติ๊ก = ทุกตัว) · ราคาจ่ายเดิมคงไว้", () => {
+    const r = applyBulkPrice(vs, null, { full: 1499 });
+    expect(r.error).toBeNull();
+    expect(r.changed).toBe(1);
+    expect(r.variants.every((v) => v.price === 1499 && v.pay === 850)).toBe(true);
+  });
+  it("เฉพาะที่ติ๊ก + ลด % คิดจากราคาเต็ม ปัดบาทเต็ม", () => {
+    const r = applyBulkPrice(vs, new Set(["01S", "01L"]), { discountPct: 40 });
+    expect(r.variants.find((v) => v.id === "01S")!.pay).toBe(899);   // 1499 × 0.6 = 899.4
+    expect(r.variants.find((v) => v.id === "01L")!.pay).toBe(959);   // 1599 × 0.6 = 959.4
+    expect(r.variants.find((v) => v.id === "01M")!.pay).toBe(850);
+    expect(r.changed).toBe(2);
+  });
+  it("กรอกทั้งราคาเต็ม+จ่าย = ใช้ตามนั้น (% ไม่ใช้) · ไม่กรอกอะไร/ค่าผิด = error", () => {
+    const r = applyBulkPrice(vs, null, { full: 1290, pay: 790, discountPct: 50 });
+    expect(r.variants.every((v) => v.price === 1290 && v.pay === 790)).toBe(true);
+    expect(applyBulkPrice(vs, null, {}).error).toBe("กรอกราคาเต็ม ราคาที่ลูกค้าจ่าย หรือ % ส่วนลด");
+    expect(applyBulkPrice(vs, null, { discountPct: 100 }).error).toBe("% ส่วนลดต้องอยู่ระหว่าง 0–99");
+    expect(applyBulkPrice(vs, null, { full: 0 }).error).toBe("ราคาเต็มต้องมากกว่า 0");
   });
 });
