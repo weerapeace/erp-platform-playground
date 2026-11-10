@@ -8,7 +8,8 @@
  *     ที่เหลือให้ตัวเดาคู่ (lib/platform-match-suggest) เสนอ แล้วคนกดยืนยันในหน้า สินค้าบนแพลตฟอร์ม
  *   - คู่ที่มีอยู่แล้วไม่ทับ (คนจับคู่/แก้ไว้ = คนตัดสินแล้ว)
  *   - ตัวที่กด "ไม่ต้องจับคู่" ไม่จับคู่อัตโนมัติ และไม่แตะช่องสถานะข้าม
- *   - markMissing (ส่งเฉพาะตอนดึงได้ "ครบทั้งร้าน") → รายการเดิมที่รอบนี้ไม่เจอ = ติดป้าย status "removed" (ไม่อยู่บนร้านแล้ว)
+ *   - markMissing (ส่งเฉพาะตอนดึงได้ "ครบทั้งร้าน" ในครั้งเดียว — LINE) → รายการเดิมที่รอบนี้ไม่เจอ = ติดป้าย status "removed" (ไม่อยู่บนร้านแล้ว)
+ *     ดึงหลายครั้งต่อกัน (Lazada) → ใช้ markMissingSince ตอนครั้งสุดท้ายจบครบ (ตัวที่ไม่ถูกบันทึกตั้งแต่เริ่มรอบ = ไม่เจอ)
  *     ไม่ลบแถว (คนกดล้างเอง) · เจอกลับมาบนร้านรอบไหน ป้ายหายเอง (ทำทุกรอบ ไม่ต้องส่ง markMissing)
  *     กันพลาด: ถ้าจะติดป้ายเกินครึ่งร้าน (และเกิน 20 ตัว) = ไม่ติด (น่าจะดึงมาไม่ครบ) → แจ้งกลับเป็น removed_skipped
  */
@@ -124,32 +125,63 @@ export async function upsertCatalogListings(
     const { error } = await admin.from("platform_catalog_listings").upsert(updates.slice(i, i + CHUNK), { onConflict: "id" });
     if (error) throw new Error(`${error.message} (อัปเดตไปแล้ว ${i} จาก ${updates.length})`);
   }
+  const seen = new Set(extIds);
   const gone = args.markMissing
-    ? await markMissingListings(admin, { platformId, brandId, seen: new Set(extIds), now })
+    ? await tagMissing(admin, { platformId, brandId, now, isMissing: (r) => !seen.has(String(r.external_product_id)) })
     : { removed: 0, removed_skipped: 0 };
   return { created: inserts.length, updated: updates.length, matched, newly_matched: newlyMatched, restored, ...gone };
 }
 
-/**
- * รายการเดิมของ (ร้าน × แบรนด์) ที่ไม่อยู่ใน seen → status "removed"
- * ไล่ทีละหน้า (ร้านเกินพันตัว) · ข้ามตัวที่ไม่มีเลขบนร้าน (เทียบไม่ได้) และตัวที่ติดป้ายอยู่แล้ว
- */
-async function markMissingListings(
-  admin: Admin,
-  args: { platformId: string; brandId: string; seen: Set<string>; now: string },
-): Promise<{ removed: number; removed_skipped: number }> {
+type ListingRowLite = { id: string; external_product_id: string | null; status: string | null; last_imported_at: string | null };
+
+/** รายการทั้งหมดของ (ร้าน × แบรนด์) — ไล่ทีละหน้า (ร้านเกินพันตัว) */
+async function loadShopRows(admin: Admin, platformId: string, brandId: string): Promise<ListingRowLite[]> {
   const PAGE = 1000;
-  const rows: { id: string; external_product_id: string | null; status: string | null }[] = [];
+  const rows: ListingRowLite[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await admin.from("platform_catalog_listings").select("id, external_product_id, status")
-      .eq("platform_id", args.platformId).eq("brand_id", args.brandId).order("id", { ascending: true }).range(from, from + PAGE - 1);
+    const { data, error } = await admin.from("platform_catalog_listings").select("id, external_product_id, status, last_imported_at")
+      .eq("platform_id", platformId).eq("brand_id", brandId).order("id", { ascending: true }).range(from, from + PAGE - 1);
     if (error) throw new Error(`อ่านรายการเดิมไม่สำเร็จ: ${error.message}`);
-    const got = (data ?? []) as typeof rows;
+    const got = (data ?? []) as ListingRowLite[];
     rows.push(...got);
     if (got.length < PAGE) break;
   }
+  return rows;
+}
+
+/**
+ * ดึงทั้งร้านแบบหลายรอบ (ร้านใหญ่/API ช้า เช่น Lazada ~10 วิต่อหน้า) — เรียกตอนรอบสุดท้ายจบครบ
+ * รายการที่ "ไม่ได้ถูกบันทึกตั้งแต่เริ่มดึงรอบนี้" (last_imported_at < since) = ร้านไม่ส่งมา → ติดป้ายไม่อยู่บนร้านแล้ว
+ * ต้องเช็กเองก่อนว่าครบ: จำนวนที่บันทึกตั้งแต่ since ≥ ยอดที่ร้านรายงาน (seenSince ช่วยนับ)
+ */
+export async function markMissingSince(admin: Admin, args: { platformId: string; brandId: string; since: string }): Promise<{ removed: number; removed_skipped: number }> {
+  const since = Date.parse(args.since);
+  if (!Number.isFinite(since)) return { removed: 0, removed_skipped: 0 };
+  return tagMissing(admin, {
+    platformId: args.platformId, brandId: args.brandId, now: new Date().toISOString(),
+    isMissing: (r) => !r.last_imported_at || Date.parse(r.last_imported_at) < since,
+  });
+}
+
+/** นับรายการของ (ร้าน × แบรนด์) ที่บันทึกตั้งแต่ since (= ร้านส่งมาในรอบดึงนี้) */
+export async function seenSince(admin: Admin, args: { platformId: string; brandId: string; since: string }): Promise<number> {
+  const { count, error } = await admin.from("platform_catalog_listings").select("id", { count: "exact", head: true })
+    .eq("platform_id", args.platformId).eq("brand_id", args.brandId).gte("last_imported_at", args.since);
+  if (error) throw new Error(`นับรายการที่ดึงมาไม่สำเร็จ: ${error.message}`);
+  return count ?? 0;
+}
+
+/**
+ * ติดป้าย status "removed" ให้รายการที่ isMissing — ข้ามตัวที่ไม่มีเลขบนร้าน (เทียบไม่ได้) และตัวที่ติดป้ายอยู่แล้ว
+ * กันพลาด: เกินครึ่งร้าน (และเกิน GONE_GUARD_MIN) = ไม่ติด → removed_skipped
+ */
+async function tagMissing(
+  admin: Admin,
+  args: { platformId: string; brandId: string; now: string; isMissing: (r: ListingRowLite) => boolean },
+): Promise<{ removed: number; removed_skipped: number }> {
+  const rows = await loadShopRows(admin, args.platformId, args.brandId);
   const active = rows.filter((r) => r.external_product_id && !isGoneStatus(r.status));
-  const missing = active.filter((r) => !args.seen.has(String(r.external_product_id)));
+  const missing = active.filter(args.isMissing);
   if (missing.length === 0) return { removed: 0, removed_skipped: 0 };
   if (missing.length > Math.max(GONE_GUARD_MIN, active.length * GONE_GUARD_RATIO)) return { removed: 0, removed_skipped: missing.length };
   const ids = missing.map((r) => r.id);

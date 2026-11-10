@@ -602,16 +602,46 @@ export default function PlatformCatalogPage() {
       .then((j) => { if (my === lazSeq.current && !j.error) setLazStatus(j as LazStatus); })
       .catch(() => { /* โชว์ปุ่มไม่ได้ก็ไม่เป็นไร */ });
   }, [platformCode, brandId]);
+  // ดึงทั้งร้านแบบหลายครั้งต่อกัน (Lazada ตอบช้า ~10 วิต่อ 50 ตัว · ครั้งละไม่เกิน ~45 วิ) — เรียกต่อเองจนครบ
+  //   Lazada ตอบผิดพลาด → ลองครั้งนั้นซ้ำ 1 ครั้ง · ยังไม่ได้ = หยุด แล้วจำจุดค้างไว้ กดอีกครั้ง = ดึงต่อจากตรงนั้น (ภายใน 25 นาที)
+  const lazResume = useRef<{ brandId: string; offset: number; run: string; at: number } | null>(null);
   const syncLazada = async () => {
     if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (การเชื่อม Lazada ผูกกับแบรนด์)"); return; }
-    setImporting(true); setNote("กำลังดึงสินค้าจาก Lazada... (ร้านใหญ่อาจใช้เวลาเกือบนาที)");
+    const resume = lazResume.current && lazResume.current.brandId === brandId && Date.now() - lazResume.current.at < 25 * 60_000 ? lazResume.current : null;
+    let offset = resume?.offset ?? 0, run = resume?.run ?? "", apiTotal = 0, retried = false;
+    const sum = { fetched: 0, created: 0, updated: 0, newly_matched: 0 };
+    type LazSyncRes = { error?: string | null; api_total?: number; fetched?: number; created?: number; updated?: number; newly_matched?: number; next_offset?: number | null; done?: boolean; complete?: boolean; run_started_at?: string; stop_reason?: string | null; removed?: number; removed_skipped?: number };
+    setImporting(true);
     try {
-      const r = await apiFetch("/api/lazada/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-      const part = j.partial ? " · ⚠️ ยังดึงไม่ครบ (หมดเวลา) กดดึงอีกครั้งเพื่อเติมส่วนที่เหลือ" : "";
-      setNote(`ดึงจาก Lazada แล้ว: ${j.fetched} สินค้า${j.api_total ? ` (Lazada รายงาน ${j.api_total})` : ""} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่รหัสตรงอัตโนมัติ ${j.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${goneNote(j)}${part}`);
+      for (let round = 0; round < 60; round++) {
+        setNote(`กำลังดึงสินค้าจาก Lazada... ${offset.toLocaleString()}${apiTotal ? ` / ${apiTotal.toLocaleString()}` : ""} ตัว (Lazada ตอบช้า ~10 วิต่อ 50 ตัว)`);
+        const r = await apiFetch("/api/lazada/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId, offset, run_started_at: run || undefined }) });
+        const j = (await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }))) as LazSyncRes;
+        const stop = j.error || j.stop_reason;
+        if (j.run_started_at) run = j.run_started_at;
+        if (j.api_total) apiTotal = j.api_total;
+        sum.fetched += j.fetched ?? 0; sum.created += j.created ?? 0; sum.updated += j.updated ?? 0; sum.newly_matched += j.newly_matched ?? 0;
+        if (typeof j.next_offset === "number") offset = j.next_offset;
+        if (j.done) {
+          lazResume.current = null;
+          const totalNote = apiTotal ? ` (Lazada รายงาน ${apiTotal.toLocaleString()})` : "";
+          setNote(`ดึงจาก Lazada ครบแล้ว${totalNote} · รอบนี้ได้ ${sum.fetched.toLocaleString()} ตัว · เพิ่มใหม่ ${sum.created} · อัปเดต ${sum.updated} · จับคู่รหัสตรงอัตโนมัติ ${sum.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${goneNote(j)}${j.stop_reason ? ` · ⚠️ ${j.stop_reason}` : ""}`);
+          break;
+        }
+        if (stop) {
+          // ลองซ้ำครั้งเดียว (Lazada มักจำกัดความถี่ — รอแป๊บแล้วค่อยถามใหม่)
+          if (!retried) { retried = true; await new Promise((res) => setTimeout(res, 4000)); continue; }
+          lazResume.current = { brandId, offset, run, at: Date.now() };
+          setNote(`⚠️ ดึงจาก Lazada ได้ถึงตัวที่ ${offset.toLocaleString()}${apiTotal ? ` จาก ${apiTotal.toLocaleString()}` : ""} แล้ว Lazada ตอบผิดพลาด: ${stop} — กด "ดึงสินค้าจาก Lazada" อีกครั้งเพื่อดึงต่อจากตัวที่ ${(offset + 1).toLocaleString()} (ยังไม่เช็กว่าตัวไหนร้านลบ จนกว่าจะดึงครบ)`);
+          break;
+        }
+        retried = false;
+      }
       await reloadCurrent();
-    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    } catch (e) {
+      lazResume.current = { brandId, offset, run, at: Date.now() };
+      setNote(`ผิดพลาด: ${(e as Error).message} — กดดึงอีกครั้งเพื่อดึงต่อจากตัวที่ ${(offset + 1).toLocaleString()}`);
+    }
     finally { setImporting(false); }
   };
 

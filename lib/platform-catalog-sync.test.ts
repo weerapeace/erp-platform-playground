@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { upsertCatalogListings, type CatalogSyncItem } from "./platform-catalog-sync";
+import { markMissingSince, seenSince, upsertCatalogListings, type CatalogSyncItem } from "./platform-catalog-sync";
 
 // ฐานข้อมูลจำลอง: จำว่าถูกเรียกอะไร (ไม่แตะของจริง)
-function fakeAdmin(opts: { existing?: Record<string, unknown>[]; skus?: { code: string; parent_sku_id: string }[]; parents?: { id: string; code: string }[] }) {
+function fakeAdmin(opts: { existing?: Record<string, unknown>[]; skus?: { code: string; parent_sku_id: string }[]; parents?: { id: string; code: string }[]; count?: number }) {
   const calls: { op: "insert" | "upsert" | "update"; rows: Record<string, unknown>[] }[] = [];
   const from = (table: string) => {
     const result = () => {
       if (table === "skus_v2") return { data: opts.skus ?? [], error: null };
       if (table === "parent_skus_v2") return { data: opts.parents ?? [], error: null };
-      return { data: opts.existing ?? [], error: null };
+      return { data: opts.existing ?? [], error: null, count: opts.count ?? 0 };
     };
     const q: Record<string, unknown> = {};
-    for (const k of ["select", "eq", "in", "order", "range"]) q[k] = () => q;
+    for (const k of ["select", "eq", "in", "order", "range", "gte"]) q[k] = () => q;
     q.then = (res: (v: unknown) => unknown) => Promise.resolve(result()).then(res);
     q.insert = (rows: Record<string, unknown>[]) => { calls.push({ op: "insert", rows }); return Promise.resolve({ error: null }); };
     q.upsert = (rows: Record<string, unknown>[]) => { calls.push({ op: "upsert", rows }); return Promise.resolve({ error: null }); };
@@ -86,5 +86,34 @@ describe("ป้าย ไม่อยู่บนร้านแล้ว (mark
     const { admin } = fakeAdmin({ existing: [row("a", "1"), row("b", "2"), row("c", "3")] });
     const r = await upsertCatalogListings(admin, { platformId: "pf", brandId: "b", source: "api", items: [item("1", "X")], markMissing: true });
     expect(r).toMatchObject({ removed: 2, removed_skipped: 0 });
+  });
+});
+
+describe("ดึงหลายครั้งต่อกัน (Lazada) — markMissingSince / seenSince", () => {
+  const since = "2026-11-10T07:00:00.000Z";
+  const r = (id: string, ext: string | null, at: string | null, status: string | null = null) => ({ id, external_product_id: ext, status, last_imported_at: at });
+  it("ตัวที่ไม่ถูกบันทึกตั้งแต่เริ่มรอบ = ติดป้าย · ข้ามตัวไม่มีเลขบนร้าน/ติดป้ายแล้ว", async () => {
+    const { admin, calls } = fakeAdmin({ existing: [
+      r("a", "1", "2026-11-10T07:00:05Z"), r("b", "2", "2026-11-10T07:01:00Z"),
+      r("c", "3", "2026-11-09T02:00:00Z"), r("d", null, "2026-11-01T00:00:00Z"), r("e", "5", "2026-11-01T00:00:00Z", "removed"), r("f", "6", null),
+    ] });
+    const res = await markMissingSince(admin, { platformId: "pf", brandId: "b", since });
+    expect(calls.filter((c) => c.op === "update").flatMap((c) => c.rows).map((x) => x.id).sort()).toEqual(["c", "f"]);
+    expect(res).toEqual({ removed: 2, removed_skipped: 0 });
+  });
+  it("กันพลาดเหมือนเดิม: เกินครึ่งร้าน (>20) ไม่ติด", async () => {
+    const existing = Array.from({ length: 60 }, (_, i) => r(`r${i}`, String(i), i < 10 ? "2026-11-10T07:05:00Z" : "2026-11-01T00:00:00Z"));
+    const { admin, calls } = fakeAdmin({ existing });
+    expect(await markMissingSince(admin, { platformId: "pf", brandId: "b", since })).toEqual({ removed: 0, removed_skipped: 50 });
+    expect(calls.some((c) => c.op === "update")).toBe(false);
+  });
+  it("since อ่านไม่ออก → ไม่ทำอะไร", async () => {
+    const { admin, calls } = fakeAdmin({ existing: [r("c", "3", "2026-11-09T02:00:00Z")] });
+    expect(await markMissingSince(admin, { platformId: "pf", brandId: "b", since: "x" })).toEqual({ removed: 0, removed_skipped: 0 });
+    expect(calls.length).toBe(0);
+  });
+  it("seenSince คืนจำนวนจากฐานข้อมูล", async () => {
+    const { admin } = fakeAdmin({ count: 232 });
+    expect(await seenSince(admin, { platformId: "pf", brandId: "b", since })).toBe(232);
   });
 });

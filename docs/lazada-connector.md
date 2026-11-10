@@ -24,7 +24,11 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 
 ## ดึงสินค้าบนร้าน (ขั้น 1)
 
-- `POST /api/lazada/sync-products {brand_id}` (`products.platforms.edit`) — `/products/get` filter=all ทีละ 50 · หมดเวลา 45 วิ = `partial` (กดอีกครั้งเติมต่อ)
+- `POST /api/lazada/sync-products {brand_id, offset?, run_started_at?}` (`products.platforms.edit`) — `/products/get` filter=all ทีละ 50
+  - **ดึงหลายครั้งต่อกัน** (2026-11-10): Lazada ตอบ ~10 วิต่อหน้า (วัดจริง) → ครั้งหนึ่งไม่เริ่มหน้าใหม่หลัง 30 วิ แล้วคืน `next_offset` · หน้าเว็บเรียกต่อเองจนครบ (`done`) พร้อมแสดงความคืบหน้า
+  - Lazada ตอบผิดพลาด → server ลองซ้ำ 1 ครั้ง (ถ้ายังไม่เกิน 20 วิ) · หน้าเว็บลองซ้ำอีก 1 ครั้ง · ยังไม่ได้ = หยุดพร้อม **บอกเหตุผลจาก Lazada** (`stop_reason`) และจำจุดค้าง กดอีกครั้ง = ดึงต่อจากตรงนั้น (ภายใน 25 นาที)
+  - 🐛 เดิมเริ่มตัวแรกทุกครั้ง + error หน้า 3 แล้วเงียบ → IG ได้ 100/232 กดซ้ำก็ได้ 100 เดิม
+  - ป้าย "ไม่อยู่บนร้านแล้ว": ครั้งสุดท้ายจบครบ + จำนวนที่บันทึกตั้งแต่เริ่มรอบ (`seenSince`) ≥ ยอดที่ Lazada รายงาน → `markMissingSince` (ตัวที่ไม่ถูกบันทึกในรอบนี้) · รอบเก่ากว่า 30 นาที = เริ่มรอบใหม่ (ไม่ติดป้าย)
 - แปลงด้วย `lazProductToCatalogItem` (เก็บรหัส/ชื่อ/สถานะ/ราคา/สต๊อกต่อ SKU ใน `raw.lazada` · ไม่เก็บ HTML/รูป)
 - บันทึกด้วยของกลาง `lib/platform-catalog-sync.ts` `upsertCatalogListings`: upsert ตาม item_id · จับคู่อัตโนมัติเฉพาะรหัสตรง (SKU ลูก > Parent) · ไม่ทับคู่เดิม · ไม่แตะ "ไม่ต้องจับคู่"
 - ที่เหลือให้ตัวเดาคู่ (`lib/platform-match-suggest`) เสนอในหน้า สินค้าบนแพลตฟอร์ม (การ์ด "รอยืนยัน")
