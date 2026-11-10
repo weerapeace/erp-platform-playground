@@ -490,11 +490,18 @@ export const NOTIFY_NODE_SUGGEST: Record<string, string[]> = {
 
 /** สวิตช์เปิด/ปิดทั้งเรื่องจากแผงกระดิ่ง: กฎกระดิ่งที่มีอยู่จริง + สวิตช์ LINE ในศูนย์ LINE (ไม่นับที่คนกดส่งเอง)
  *  can = มีอะไรให้สลับ · on = อย่างน้อย 1 ทางเปิดอยู่ · ค่าเก็บที่เดิม (erp_notification_rules / line_config.disabled_events) */
-export function notifyTopicSwitch(topic: NotifyTopic, live: NotifyLive): { rules: string[]; events: string[]; can: boolean; on: boolean } {
-  const rules = [...new Set(topic.send.flatMap((s) => (s.kind === "bell" && s.rule && live.rules.some((r) => r.event === s.rule) ? [s.rule] : [])))];
-  const events = [...new Set(topic.send.flatMap((s) => (s.kind === "group" && s.event && !s.manual ? [s.event] : [])))];
+export function notifyTopicSwitch(topic: NotifyTopic, live: NotifyLive): { rules: string[]; events: string[]; can: boolean; on: boolean; switched: string[]; fixed: string[] } {
+  const ruleOk = (s: NotifyTarget) => s.kind === "bell" && !!s.rule && live.rules.some((r) => r.event === s.rule);
+  const eventOk = (s: NotifyTarget) => s.kind === "group" && !!s.event && !s.manual;
+  const rules = [...new Set(topic.send.flatMap((s) => (s.kind === "bell" && ruleOk(s) ? [s.rule!] : [])))];
+  const events = [...new Set(topic.send.flatMap((s) => (s.kind === "group" && eventOk(s) ? [s.event!] : [])))];
   const on = rules.some((k) => live.rules.find((r) => r.event === k)?.active) || events.some((e) => !live.line.off[e]);
-  return { rules, events, can: rules.length + events.length > 0, on };
+  // ป้ายภาษาคน: ทางที่สวิตช์นี้คุม / ทางที่ยังส่งต่อ (ไม่มีสวิตช์) — ใช้บอกในป๊อปยืนยันปิด ไม่ให้เข้าใจผิดว่าเงียบทั้งเรื่อง
+  const label = (s: NotifyTarget) => (s.kind === "bell" ? "กระดิ่งในแอป" : s.kind === "group" ? `LINE ${s.to}${s.manual ? " (กดส่งเอง)" : ""}`
+    : s.kind === "dm" ? "LINE ส่วนตัว" : s.kind === "oa" ? "LINE OA" : s.kind === "email" ? "อีเมล" : s.kind === "popup" ? "ป๊อปอัป" : "Discord");
+  const switched = [...new Set(topic.send.filter((s) => ruleOk(s) || eventOk(s)).map(label))];
+  const fixed = [...new Set(topic.send.filter((s) => !ruleOk(s) && !eventOk(s)).map(label))];
+  return { rules, events, can: rules.length + events.length > 0, on, switched, fixed };
 }
 
 /** กลุ่ม LINE ที่ใช้ทดสอบส่งของเรื่องนี้ = กลุ่มแรกที่ตั้งแล้ว (ไม่นับกลุ่มหลัก — ศูนย์ LINE ทดสอบได้เฉพาะช่องที่มีชื่อ) · null = ทดสอบ LINE ไม่ได้ */

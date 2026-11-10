@@ -57,7 +57,10 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
   const toggle = async (topic: NotifyTopic, on: boolean) => {
     if (!live) return;
     const sw = notifyTopicSwitch(topic, live);
-    if (!on && !(await askConfirm({ title: t(`ปิดแจ้งเตือน “${topic.label}”?`, `Turn off “${topic.label}”?`), message: t("คนที่เคยได้รับจะไม่ได้รับเรื่องนี้อีก จนกว่าจะเปิดใหม่ (เปิดกลับได้ทุกเมื่อ)", "Recipients stop getting this until it is turned back on"), confirmText: t("ปิดแจ้งเตือน", "Turn off") }))) return;
+    const msg = sw.fixed.length
+      ? t(`จะปิด: ${sw.switched.join(" · ")}\nยังส่งต่อ (ยังไม่มีสวิตช์): ${sw.fixed.join(" · ")}\nเปิดกลับได้ทุกเมื่อ`, `Turns off: ${sw.switched.join(", ")}. Still sent: ${sw.fixed.join(", ")}`)
+      : t(`จะปิด: ${sw.switched.join(" · ")} — คนที่เคยได้รับจะไม่ได้รับเรื่องนี้อีก จนกว่าจะเปิดใหม่ (เปิดกลับได้ทุกเมื่อ)`, "Recipients stop getting this until it is turned back on");
+    if (!on && !(await askConfirm({ title: t(`ปิดแจ้งเตือน “${topic.label}”?`, `Turn off “${topic.label}”?`), message: <span className="whitespace-pre-line">{msg}</span>, confirmText: t("ปิดแจ้งเตือน", "Turn off") }))) return;
     setBusy(topic.id);
     const fails = await saveNotifyTopicSwitch(sw.rules, sw.events, on, user?.email ?? null);
     setBusy(null);
@@ -141,11 +144,12 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
             <div className="flex items-start gap-2.5">
               <div className="pt-0.5">
                 {canAdmin && sw.can
-                  ? <ToggleSwitch size="sm" on={sw.on} disabled={busy === topic.id} onChange={(v) => void toggle(topic, v)} title={sw.on ? t("ปิดเรื่องนี้", "Turn off") : t("เปิดเรื่องนี้", "Turn on")} />
+                  ? <ToggleSwitch size="sm" on={sw.on} disabled={busy === topic.id} onChange={(v) => void toggle(topic, v)}
+                      title={`${sw.on ? t("ปิด", "Turn off") : t("เปิด", "Turn on")}: ${sw.switched.join(" · ")}${sw.fixed.length ? t(` (${sw.fixed.join(" · ")} ยังไม่มีสวิตช์)`, "") : ""}`} />
                   : <span title={sw.can ? undefined : t("เรื่องนี้ส่งทุกครั้ง ยังไม่มีสวิตช์เปิด/ปิด", "Always sent — no switch yet")} className="inline-flex h-5 items-center"><Icon value={sw.can ? "i:bell" : "i:lock"} size={14} className="text-slate-400" /></span>}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-slate-800">{topic.label}{off && <span className="ml-1.5 text-[11px] font-normal text-slate-500">{t("(ปิดอยู่)", "(off)")}</span>}</div>
+                <div className="font-medium text-slate-800">{topic.label}{off && <span className="ml-1.5 text-[11px] font-normal text-slate-500">{sw.fixed.length ? t(`(ปิด ${sw.switched.join(" · ")} · ${sw.fixed.join(" · ")} ยังส่ง)`, "(partly off)") : t("(ปิดอยู่)", "(off)")}</span>}</div>
                 <div className="text-[12px] text-slate-500">{topic.when}</div>
               </div>
               <div className="shrink-0 text-right">
@@ -163,10 +167,10 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
               {topic.send.map((s, i) => {
                 const c = cells[i];
                 return (
-                  <span key={i} title={c.text} className={`inline-flex items-center gap-1 text-[11.5px] px-2 py-0.5 rounded-full border ${NOTIFY_STATES[c.state].chip}`}>
-                    <Icon value={NOTIFY_CHANNELS[notifyChannelOf(s)].icon} size={12} />
-                    <span className="font-medium">{KIND_LABEL[s.kind]}</span>
-                    <span>· {c.short ?? (c.state === "ok" ? s.to : c.text)}</span>
+                  <span key={i} title={c.text} className={`inline-flex items-start gap-1 max-w-full text-[11.5px] leading-snug px-2 py-1 rounded-lg border ${NOTIFY_STATES[c.state].chip}`}>
+                    <Icon value={NOTIFY_CHANNELS[notifyChannelOf(s)].icon} size={12} className="mt-px shrink-0" />
+                    <span className="font-medium whitespace-nowrap shrink-0">{KIND_LABEL[s.kind]}</span>
+                    <span className="min-w-0">· {c.short ?? (c.state === "ok" ? s.to : c.text)}</span>
                   </span>
                 );
               })}

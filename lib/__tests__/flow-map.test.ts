@@ -90,7 +90,10 @@ describe("แผนผังการทำงาน — แผงกระด�
     }
   });
   it("สวิตช์ทั้งเรื่อง: นับกฎที่มีจริง + สวิตช์ LINE (ไม่นับที่กดส่งเอง)", () => {
-    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE)).toEqual({ rules: [], events: ["pr_created"], can: true, on: true });
+    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE)).toMatchObject({ rules: [], events: ["pr_created"], can: true, on: true, fixed: ["กระดิ่งในแอป"] });
+    // ป๊อปยืนยันปิดต้องบอกได้ว่าทางไหนยังส่งต่อ (กระดิ่งของใบขอซื้อยังไม่มีสวิตช์)
+    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE).switched[0]).toContain("LINE");
+    expect(notifyTopicSwitch(topic("qc_pending"), NOTIFY_LIVE).fixed).toEqual([]);
     expect(notifyTopicSwitch(topic("qc_defect"), NOTIFY_LIVE)).toMatchObject({ rules: [], events: ["qc_defect"], can: true, on: false });
     expect(notifyTopicSwitch(topic("qc_pending"), NOTIFY_LIVE)).toMatchObject({ rules: ["qc.pending"], events: ["qc_pending"], on: true });
     expect(notifyTopicSwitch(topic("wo_due_soon"), { ...NOTIFY_LIVE, line: { ...NOTIFY_LIVE.line, off: { wo_due_soon: true } } }).on).toBe(false);
