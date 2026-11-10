@@ -321,6 +321,45 @@ describe("planProductSort — เลือกรายช่อง: แทนท
     expect(s.remove.desc).toEqual([{ assetId: "d2", sort: 1 }]);
     expect(s.existingItems.map((x) => x.id)).toEqual(["d1", "d2"]);
   });
+  it("ข้ามรูปที่หน้าตาเหมือน (skip) + เก็บรูปเดิมที่ตรง (keep): แทนที่ทั้งหมดเอาออกเฉพาะที่ไม่ตรง · รูปที่ข้ามไม่นับเพดาน", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", mode: "replace",
+      slotModes: { [KEY]: { mode: "replace", skip: ["ZZ1-01/1.jpg", "ZZ1-01/2.jpg"], keep: ["o1", "o2", "ไม่มี"] } } });
+    const s = p.slots.find((x) => x.key === KEY)!;
+    expect(s.mode).toBe("replace");
+    expect(s.remove.attachments.map((x) => x.id)).toEqual(["o3", "o4", "o5", "o6", "o7"]);
+    expect(s.rels).toEqual(["ZZ1-01/3.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg"]);
+    expect([...s.skipped].sort()).toEqual(["ZZ1-01/1.jpg", "ZZ1-01/2.jpg"]);
+    expect(s.order).toEqual(["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg"]);   // ลำดับตามแม่แบบ รวมที่ข้าม
+    expect(s.existing).toBe(2);
+    expect(p.files.find((f) => f.rel === "ZZ1-01/1.jpg")).toMatchObject({ erp: false, why: "same", slotKey: KEY });
+    expect(p.files.filter((f) => f.why === "over").length).toBe(0);
+  });
+  it("ต่อท้าย + skip: รูปที่มีแล้วไม่กินที่ว่าง → รูปที่ต่างจริงได้ลง", () => {
+    const s = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1",
+      slotModes: { [KEY]: { mode: "append", skip: ["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg"] } } }).slots.find((x) => x.key === KEY)!;
+    expect(s.rels).toEqual(["ZZ1-01/4.jpg", "ZZ1-01/5.jpg"]);   // ที่ว่าง 9-7 = 2 พอดีกับรูปที่ต่าง 2 รูป
+    expect(s.remove.attachments).toEqual([]);
+  });
+  it("รูปใหม่มีแล้วทุกรูป → ยังมีช่อง (ไม่มีรูปให้ลง) · แทนที่ทั้งหมดยังเอารูปเดิมที่ไม่ตรงออก", () => {
+    const all = ["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg"];
+    const s = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1",
+      slotModes: { [KEY]: { mode: "replace", skip: all, keep: ["o1", "o2", "o3", "o4", "o5"] } } }).slots.find((x) => x.key === KEY)!;
+    expect(s).toBeTruthy();
+    expect(s.rels).toEqual([]);
+    expect(s.skipped.length).toBe(5);
+    expect(s.remove.attachments.map((x) => x.id)).toEqual(["o6", "o7"]);
+    expect(s.replaces).toBe(true);
+    expect(s.order).toEqual(all);
+    // ช่องที่ข้ามหมดอยู่ลำดับเดิม (ไม่กองท้ายรายการ)
+    const keys = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1" }).slots.map((x) => x.key);
+    const keys2 = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { [KEY]: { mode: "replace", skip: all, keep: ["o1"] } } }).slots.map((x) => x.key);
+    expect(keys2).toEqual(keys);
+  });
+  it("เลือกแทนบางรูป + keep: รูปที่ตรงกับรูปใหม่ไม่ถูกเอาออกแม้เลือกไว้", () => {
+    const s = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1",
+      slotModes: { [KEY]: { mode: "pick", remove: ["o1", "o2"], keep: ["o2"] } } }).slots.find((x) => x.key === KEY)!;
+    expect(s.remove.attachments.map((x) => x.id)).toEqual(["o1"]);
+  });
   it("Collection มีรุ่นนี้แล้ว: ค่าเริ่ม = แทนที่ เก็บของเก่า · ค่าผิด = ค่าเริ่ม · [99] ของเก่า ไม่ลงระบบ", () => {
     expect(DEFAULT_PRODUCT_CONFIG.collection.whenExists).toBe("replace");
     expect(cleanProductConfig({ collection: { whenExists: "separate" } }).collection.whenExists).toBe("separate");

@@ -15,6 +15,7 @@
  */
 import {
   DEFAULT_TEMPLATE,
+  GALLERY_MAX,
   RESIZE_AUTO,
   applyRowMode,
   codeOfTarget,
@@ -55,7 +56,7 @@ export type ProductFileAction = {
   group: string;
   /** ทำไมไม่ลงระบบ / หมายเหตุ */
   note?: string;
-  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope" | "png";
+  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope" | "png" | "same";
 };
 export type ProductPlanSlot = {
   key: string;
@@ -77,14 +78,21 @@ export type ProductPlanSlot = {
   mode: SlotFileMode;
   /** รูปที่อยู่ในระบบตอนนี้ (ไว้โชว์รูปย่อให้เลือก) · key = R2 key (Description: route เติมจากคลัง) */
   existingItems: { id: string; key: string | null; primary: boolean }[];
+  /** รูปใหม่ที่ข้ามเพราะหน้าตาเหมือนรูปในระบบ (โปรแกรมเทียบรูปเองแล้วส่ง skip มา) — ไม่อัป ไม่นับเพดาน */
+  skipped: string[];
+  /** ลำดับรูปใหม่ทั้งหมดของช่องนี้ตามแม่แบบ (ปกหน้าสุด · รวมที่ข้าม) — โปรแกรมใช้จัดลำดับแกลเลอรีหลังทำ */
+  order: string[];
   /** เจ้าของแกลเลอรี (ช่อง desc/png = Parent) */
   entity: { type: "skus_v2" | "parent_skus_v2"; id: string };
   /** ของเดิมไว้ "ย้อนทั้งชุด": ปกเดิมของแกลเลอรี (โหมดต่อท้าย) · รูปตัด PNG เดิม */
   prev: { primaryId: string | null; pngKey: string | null };
 };
 export type SlotFileMode = "replace" | "append" | "pick";
-/** โหมดรายช่องที่โปรแกรมส่งมา (key = ProductPlanSlot.key) · pick + remove = id รูปเดิมที่จะเอาออก (แกลเลอรี = attachment id · Description = asset id) */
-export type SlotModeInput = Record<string, { mode: SlotFileMode; remove?: string[] }>;
+/**
+ * โหมดรายช่องที่โปรแกรมส่งมา (key = ProductPlanSlot.key) · pick + remove = id รูปเดิมที่จะเอาออก (แกลเลอรี = attachment id · Description = asset id)
+ * skip = rel รูปใหม่ที่หน้าตาเหมือนรูปในระบบ (ไม่อัปซ้ำ) · keep = id รูปเดิมที่ตรงกับรูปใหม่ (แทนที่ทั้งหมด/เลือกแทนบางรูปก็ไม่เอาออก)
+ */
+export type SlotModeInput = Record<string, { mode: SlotFileMode; remove?: string[]; skip?: string[]; keep?: string[] }>;
 export type ProductPlanGroup = { label: string; role: GroupRole | null; code: string | null; count: number; note?: string };
 export type ProductPlan = {
   files: ProductFileAction[];
@@ -207,19 +215,47 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     return [];
   };
   const isMode = (m: unknown): m is SlotFileMode => m === "replace" || m === "append" || m === "pick";
+  const slotModeOf = (key: string): SlotFileMode => { const m = opts.slotModes?.[key]?.mode; return isMode(m) ? m : mode; };
+  // รูปใหม่ที่หน้าตาเหมือนรูปในระบบ (โปรแกรมเทียบเอง → skip) · รูปเดิมที่ตรงกับรูปใหม่ (keep = ไม่เอาออก)
+  const skipSlot = new Map<string, string>();   // rel (ตัวเล็ก) → key ช่อง
+  const keepOf = new Map<string, Set<string>>();
+  for (const [key, v] of Object.entries(opts.slotModes ?? {})) {
+    if (!v) continue;
+    for (const r of Array.isArray(v.skip) ? v.skip : []) if (r) skipSlot.set(String(r).toLowerCase(), key);
+    const ids = new Set(existingOf(key).map((x) => x.id));
+    const kp = new Set((Array.isArray(v.keep) ? v.keep : []).map(String).filter((id) => ids.has(id)));
+    if (kp.size) keepOf.set(key, kp);
+  }
+  const relOfId = (id: string) => byId.get(id)!.rel;
+  // ลำดับรูปใหม่ตามแม่แบบของแต่ละช่อง (รวมรูปที่จะข้าม · ปกหน้าสุด) — คิดด้วยตัวจัดช่องตัวเดิมก่อนตัดรูปที่ข้ามออก
+  const naturalOrder = new Map<string, string[]>();
+  if (skipSlot.size) {
+    for (const s of planRoute(planGroups, parents, { shopIds: [], mode: "replace" }).slots) naturalOrder.set(s.key, s.ids.map(relOfId));
+    for (const g of planGroups) {
+      g.images = g.images.filter((im) => {
+        const a = byId.get(im.id)!;
+        const key = skipSlot.get(a.rel.toLowerCase());
+        if (!key) return true;
+        Object.assign(a, { why: "same", slotKey: key, note: "หน้าตาเหมือนรูปในระบบ — ข้าม ไม่อัปซ้ำ" });
+        return false;
+      });
+    }
+  }
   const pickRemove = new Map<string, Set<string>>();
   const routeModes: Record<string, SlotModeOverride> = {};
   for (const [key, v] of Object.entries(opts.slotModes ?? {})) {
     if (!v || !isMode(v.mode)) continue;
+    const kp = keepOf.get(key) ?? new Set<string>();
+    const ids = existingOf(key).map((x) => x.id);
     if (v.mode === "pick") {
-      const ids = new Set(existingOf(key).map((x) => x.id));
-      const rm = new Set((Array.isArray(v.remove) ? v.remove : []).map(String).filter((id) => ids.has(id)));
+      const idSet = new Set(ids);
+      const rm = new Set((Array.isArray(v.remove) ? v.remove : []).map(String).filter((id) => idSet.has(id) && !kp.has(id)));
       pickRemove.set(key, rm);
       routeModes[key] = { mode: "append", drop: rm.size };
-    } else routeModes[key] = { mode: v.mode };
+    } else if (v.mode === "replace" && kp.size) routeModes[key] = { mode: "append", drop: ids.length - kp.size };   // แทนที่ทั้งหมด ยกเว้นรูปที่ตรงกับรูปใหม่
+    else routeModes[key] = { mode: v.mode };
   }
-  const slotModeOf = (key: string): SlotFileMode => { const m = opts.slotModes?.[key]?.mode; return isMode(m) ? m : mode; };
-  const plan = planRoute(planGroups, parents, { shopIds: [], mode, slotModes: routeModes });
+  const plan = planRoute(planGroups.filter((g) => g.images.length), parents, { shopIds: [], mode, slotModes: routeModes });
   for (const [id, pi] of plan.images) {
     const a = byId.get(id);
     if (!a) continue;
@@ -237,34 +273,60 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   if (errs.length) warnings.push(`${errs.length} รูปลงไม่ได้: ${[...new Set(errs.map((a) => a.note))].join(" · ")}`);
 
   const pById = new Map(parents.map((p) => [p.parentId, p]));
-  const relOf = (id: string) => byId.get(id)!.rel;
-  const slots: ProductPlanSlot[] = plan.slots.map((s) => {
+  const relOf = relOfId;
+  const skippedOf = (key: string) => out.filter((a) => a.why === "same" && a.slotKey === key).map((a) => a.rel);
+  const buildSlot = (s: { key: string; kind: SlotKind; parentId: string; skuId: string | null; ids: string[]; coverId?: string; existing: number; total: number; limit: number | null; replaces: boolean }): ProductPlanSlot => {
     const p = pById.get(s.parentId)!;
     const sku = s.skuId ? p.skus.find((x) => x.id === s.skuId) : undefined;
     const remove = { attachments: [] as { id: string; key: string }[], desc: [] as { assetId: string; sort: number | null }[] };
     const sm: SlotFileMode = s.kind === "png" ? "replace" : slotModeOf(s.key);
     const exist = existingOf(s.key);
-    // แทนที่ทั้งหมด = เอารูปเดิมออกทั้งช่อง · เลือกแทนบางรูป = เอาออกเฉพาะที่เลือก · ต่อท้าย = ไม่เอาออก
-    const drop = sm === "replace" && s.replaces ? new Set(exist.map((x) => x.id)) : sm === "pick" ? (pickRemove.get(s.key) ?? new Set<string>()) : new Set<string>();
+    const kp = keepOf.get(s.key) ?? new Set<string>();
+    // แทนที่ทั้งหมด = เอารูปเดิมออกทั้งช่อง (ยกเว้นที่ตรงกับรูปใหม่) · เลือกแทนบางรูป = เอาออกเฉพาะที่เลือก · ต่อท้าย = ไม่เอาออก
+    const drop = sm === "replace" && kp.size ? new Set(exist.filter((x) => !kp.has(x.id)).map((x) => x.id))
+      : sm === "replace" && s.replaces ? new Set(exist.map((x) => x.id))
+      : sm === "pick" ? (pickRemove.get(s.key) ?? new Set<string>()) : new Set<string>();
     if (s.kind === "parentGallery" || s.kind === "skuGallery") remove.attachments = exist.filter((x) => drop.has(x.id)).map((x) => ({ id: x.id, key: x.key ?? "" }));
     if (s.kind === "desc") remove.desc = exist.filter((x) => drop.has(x.id)).map((x) => ({ assetId: x.id, sort: x.sort }));
     const primaryId = exist.find((x) => x.primary)?.id ?? null;
     const rels = s.ids.map(relOf);
-    // เลือกเอารูปปกเดิมออก + ไม่มีรูปปกใหม่ → รูปแรกที่ลงเป็นปก (กันแกลเลอรีไม่มีปก)
-    const coverRel = s.coverId ? relOf(s.coverId) : sm === "pick" && primaryId && drop.has(primaryId) && rels.length ? rels[0] : undefined;
+    // เอารูปปกเดิมออก (เลือกเอง / แทนที่แต่เก็บบางรูป) + ไม่มีรูปปกใหม่ → รูปแรกที่ลงเป็นปก (กันแกลเลอรีไม่มีปก)
+    const coverRel = s.coverId ? relOf(s.coverId) : (sm === "pick" || kp.size > 0) && primaryId && drop.has(primaryId) && rels.length ? rels[0] : undefined;
+    const skipped = skippedOf(s.key);
     return {
       key: s.key, kind: s.kind, parentId: s.parentId, skuId: s.skuId, code: sku?.code ?? p.code,
       rels, coverRel,
       existing: s.existing, total: s.total, limit: s.limit,
       replaces: s.kind === "png" ? s.replaces : remove.attachments.length + remove.desc.length > 0, remove,
       mode: sm, existingItems: exist.map((x) => ({ id: x.id, key: x.key, primary: x.primary })),
+      skipped, order: naturalOrder.get(s.key) ?? [...rels],
       entity: s.kind === "skuGallery" && s.skuId ? { type: "skus_v2", id: s.skuId } : { type: "parent_skus_v2", id: s.parentId },
       prev: {
         primaryId: s.kind === "skuGallery" || s.kind === "parentGallery" ? primaryId : null,
         pngKey: s.kind === "png" ? p.pngKey : null,
       },
     };
-  });
+  };
+  const slots: ProductPlanSlot[] = plan.slots.map(buildSlot);
+  // ช่องที่รูปใหม่ "มีแล้วทุกรูป" (ข้ามหมด) ยังต้องมีช่องไว้: โชว์ในโปรแกรม + แทนที่ทั้งหมดยังเอารูปเดิมที่ไม่ตรงออก
+  for (const key of new Set(skipSlot.values())) {
+    if (slots.some((x) => x.key === key)) continue;
+    const [pid, kind, sid] = key.split("|");
+    if (!pById.has(pid) || !(kind === "parentGallery" || kind === "skuGallery" || kind === "desc")) continue;
+    if (!skippedOf(key).length) continue;
+    const skuId = kind === "skuGallery" ? sid : null;
+    if (kind === "skuGallery" && !pById.get(pid)!.skus.some((x) => x.id === skuId)) continue;
+    const cur = existingOf(key).length;
+    const sm = slotModeOf(key);
+    const kept = sm === "replace" ? (keepOf.get(key)?.size ?? 0) : sm === "pick" ? cur - (pickRemove.get(key)?.size ?? 0) : cur;
+    slots.push(buildSlot({ key, kind: kind as SlotKind, parentId: pid, skuId, ids: [], existing: kept, total: kept, limit: kind === "desc" ? null : GALLERY_MAX, replaces: sm === "replace" && cur > 0 }));
+  }
+  // เรียงช่องตามลำดับเดิม (ช่องที่ข้ามหมดไม่ไปกองท้าย)
+  if (naturalOrder.size) {
+    const pos = [...naturalOrder.keys()];
+    const at = (k: string) => { const i = pos.indexOf(k); return i < 0 ? pos.length : i; };
+    slots.sort((a, b) => at(a.key) - at(b.key));
+  }
   // ปกจากแม่แบบที่ยอมให้ไฟล์ชื่อรหัส (planRoute) → ป้ายรายไฟล์ต้องตรงกับผลจริง
   const byRel = new Map(out.map((a) => [a.rel, a]));
   for (const s of slots) for (const r of s.rels) { const a = byRel.get(r); if (a?.dest === "skuMain" && r !== s.coverRel) a.dest = "sku"; }
