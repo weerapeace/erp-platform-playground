@@ -9,6 +9,21 @@ import type { NextConfig } from "next";
  */
 const IMG_WORKER = (process.env.IMG_WORKER_URL ?? "https://erp-img.weerapeace.workers.dev").trim().replace(/\/+$/, "");
 
+/**
+ * 🧠 กัน build บน Vercel "memory หมด" (เครื่อง build 8 GB · ล้ม 7 ครั้งต้น พ.ย. 2026) — คู่มือ docs/build-memory.md
+ * ไลบรารีที่ใช้ "เฉพาะในเบราว์เซอร์" (โหลดด้วย import() ใน useEffect / ตอนกดปุ่ม หรือ next/dynamic ssr:false)
+ * → ฝั่งเซิร์ฟเวอร์ไม่ต้อง build (เดิมกินครึ่งหนึ่งของไฟล์ฝั่งเซิร์ฟเวอร์) — ได้ "โมดูลว่าง" แทน
+ * ⚠️ ห้าม import ตรง ๆ (ยกเว้น import type) และห้ามใช้ในโค้ดฝั่งเซิร์ฟเวอร์ — เทสต์ lib/__tests__/browser-only-libs.test.ts คอยจับ
+ * จะใช้ฝั่งเซิร์ฟเวอร์จริง (เช่นสร้าง PDF ใน API) → เอาชื่อออกจากรายการนี้ก่อน
+ */
+export const BROWSER_ONLY_LIBS = [
+  "@pdfme/ui",
+  "@pdfme/schemas",
+  "@pdfme/generator",
+  "@pdfme/common",
+  "@excalidraw/excalidraw",
+] as const;
+
 const nextConfig: NextConfig = {
   async redirects() {
     if (!IMG_WORKER || IMG_WORKER === "off") return [];
@@ -33,6 +48,23 @@ const nextConfig: NextConfig = {
   },
   eslint:     { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors:  true },
+  experimental: {
+    // ต้องเปิดเองเมื่อมี webpack() ข้างล่าง — ไม่งั้น Next คอมไพล์ server+client ในโปรเซสเดียว (กิน memory กว่าเดิม)
+    webpackBuildWorker: true,
+  },
+  webpack: (config, { dev, isServer }) => {
+    // build จริงไม่เก็บแคช webpack ลงดิสก์: แคช 2–3.5 GB ตอนโหลด/เขียนกิน RAM ~1.5 GB (dev ใช้ turbopack ไม่ผ่านตรงนี้)
+    if (!dev) config.cache = Object.freeze({ type: "memory" as const });
+    if (isServer) {
+      config.resolve ??= {};
+      config.resolve.alias = {
+        ...(config.resolve.alias ?? {}),
+        // "$" = ตัดเฉพาะตัวหลักของไลบรารี — ไฟล์ย่อย เช่น "@excalidraw/excalidraw/index.css" ไม่โดน
+        ...Object.fromEntries(BROWSER_ONLY_LIBS.map((name) => [`${name}$`, false])),
+      };
+    }
+    return config;
+  },
   // NOTE: เคยลอง experimental.staleTimes (เก็บแคชหน้า 5 นาที) เพื่อเลี่ยง cold start ตอนข้ามแอป
   // แต่บน OpenNext/Cloudflare ทำให้เกิด version skew หลัง deploy (เบราว์เซอร์ปนโค้ดเก่า+ใหม่ → หน้าพัง)
   // → ถอดออก. แก้ cold start ด้วย warmer (cron-job.org) แทน

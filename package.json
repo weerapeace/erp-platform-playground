@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port 3001",
-    "prebuild": "node scripts/shared-parts-scan.mjs",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
+    "prebuild": "node scripts/clear-webpack-cache.mjs && node scripts/shared-parts-scan.mjs",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=5120 next build",
     "start": "next start --port 3001",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
