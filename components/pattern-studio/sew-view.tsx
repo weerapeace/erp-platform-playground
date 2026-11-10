@@ -26,7 +26,9 @@ const midOf = (P: Pt[]): Pt => {
   return P[0];
 };
 
-export function SewView({ pieces, seams, onChange, readonly = false }: {
+export function SewView({ pieces, seams, onChange, readonly = false, onBack }: {
+  /** ฝังในหน้าวาดชิ้น: มีแถบเครื่องมือซ้าย (ลูกศร = กลับไปวาด · เข็ม = กำลังใช้อยู่) — ไม่ส่ง = ไม่มีแถบ */
+  onBack?: () => void;
   pieces: SewPiece[];
   seams: Seam[];
   onChange: (next: Seam[]) => void;
@@ -85,7 +87,14 @@ export function SewView({ pieces, seams, onChange, readonly = false }: {
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-2">
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white">
+          {onBack && (
+            <div className="absolute left-2 top-2 z-10 flex flex-col gap-0.5 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" aria-label={t("เครื่องมือ", "Tools")}>
+              <button type="button" onClick={onBack} title={t("กลับไปวาดชิ้น", "Back to drawing")} aria-label={t("กลับไปวาดชิ้น", "Back to drawing")} className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"><Icon value="i:pointer" className="text-[16px]" /></button>
+              <span className="my-0.5 h-px w-5 self-center bg-slate-200" />
+              <span title={t("เครื่องมือเย็บ (กำลังใช้)", "Sewing tool (active)")} aria-current="true" className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700"><Icon value="i:needle-thread" className="text-[16px]" /></span>
+            </div>
+          )}
           <svg viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} className="block max-h-[640px] w-full" role="img" aria-label={t("ชิ้นแพทเทิร์นสำหรับกำหนดตะเข็บ", "Pattern pieces for assigning seams")}>
             {pieces.map((p) => (
               <g key={p.pid}>

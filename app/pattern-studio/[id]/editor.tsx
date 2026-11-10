@@ -3,7 +3,8 @@
 /**
  * สตูดิโอของแพทเทิร์น 1 ใบ (แอปหลัก · เจ้าของสั่ง 2026-11-10)
  *   หัว: ชื่อ · รหัสรุ่น · สถานะ · สรุป (ชิ้น / พื้นที่ / ตะเข็บ)
- *   แท็บ "วาดชิ้น" = PatternStudio (กระดานวาดเดิม + แม่แบบทรง + ภาพ 3D) · แท็บ "เย็บ" = SewView (จับคู่ขอบ + ตรวจความยาว)
+ *   แท็บ "วาดชิ้น + เย็บ" = PatternStudio (กระดานวาดเดิม + แม่แบบทรง + ภาพ 3D) · เครื่องมือเย็บ (SewView) อยู่ในหน้าเดียวกัน กดรูปเข็มในแถบเครื่องมือ (เจ้าของสั่ง 2026-11-10 รวมแท็บเย็บ)
+ *   รหัสรุ่น = เลือกจากรุ่นสินค้า (ParentSkuPicker) หรือ SKU (SkuPicker) ของกลาง — เก็บเป็นรหัส
  *   แท็บ "ประกอบ 3D" = AssemblyView (ประกอบชิ้นเป็นกระเป๋าจากตะเข็บ + เย็บทีละขั้น)
  *   จุดติดหู/แผ่นหลังช่อง (จากแม่แบบ) เก็บในช่อง template: { params, attach }
  *   สร้างจากแม่แบบทรง → ได้ชิ้น + ตะเข็บตั้งต้นครบ
@@ -25,14 +26,14 @@ import { PATTERN_PROJECT_STATUSES, PATTERN_STATUS_LABEL, projectSummary, type Pa
 import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
 import { checkSeam, type Seam } from "@/lib/pattern-seams";
 import { cleanAttaches, type Attach } from "@/lib/pattern-assembly";
+import { ParentSkuPicker, SkuPicker } from "@/components/pickers";
 
 const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });
-const SewView = dynamic(() => import("@/components/pattern-studio/sew-view").then((m) => m.SewView), { ssr: false });
 const SendCostingModal = dynamic(() => import("@/components/pattern-studio/send-costing-modal").then((m) => m.SendCostingModal), { ssr: false });
 const AssemblyView = dynamic(() => import("@/components/pattern-studio/assembly-view").then((m) => m.AssemblyView), { ssr: false });
 
 const SQFT = 929.03;
-type Tab = "draw" | "sew" | "asm";
+type Tab = "draw" | "asm";
 
 export function PatternProjectEditor({ id }: { id: string }) {
   const t = useT();
@@ -52,6 +53,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const [template, setTemplate] = useState<Record<string, unknown> | null>(null);   // { params: ค่าแม่แบบล่าสุด, attach: จุดติด }
   const [attaches, setAttaches] = useState<Attach[]>([]);
   const [tab, setTab] = useState<Tab>("draw");
+  const [sewing, setSewing] = useState(false);            // เครื่องมือเย็บเปิดอยู่ (ในแท็บวาดชิ้น)
+  const [skuKind, setSkuKind] = useState<"parent" | "sku">("parent");
   const [boardNonce, setBoardNonce] = useState(0);        // เปลี่ยน = เปิดกระดานใหม่จากชิ้นล่าสุด (โหลดเสร็จ / กลับจากแท็บเย็บ / ละทิ้ง)
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -116,6 +119,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, p.shape])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
+  const sewPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes })), [pieces]);
   const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes })), [pieces]);
   const badSeams = useMemo(() => seams.filter((s) => checkSeam(shapes, s).status !== "ok").length, [seams, shapes]);
 
@@ -168,8 +172,23 @@ export function PatternProjectEditor({ id }: { id: string }) {
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3">
         <label className="min-w-[220px] flex-1 space-y-1"><span className="text-xs text-slate-500">{t("ชื่อแพทเทิร์น", "Pattern name")}</span>
           <input value={name} disabled={!canEdit} maxLength={120} onChange={(e) => { setName(e.target.value); setDirty(true); }} className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-medium disabled:bg-slate-50" /></label>
-        <label className="w-48 space-y-1"><span className="text-xs text-slate-500">{t("รหัสรุ่น / สินค้า", "Model / product code")}</span>
-          <input value={sku} disabled={!canEdit} maxLength={80} onChange={(e) => { setSku(e.target.value); setDirty(true); }} className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm disabled:bg-slate-50" /></label>
+        <div className="w-80 max-w-full space-y-1"><span className="text-xs text-slate-500">{t("รหัสรุ่น / สินค้า", "Model / product code")}</span>
+          {sku ? (
+            <div className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-sm">
+              <Icon value="i:tag" className="text-slate-400" /><span className="min-w-0 flex-1 truncate font-medium">{sku}</span>
+              {canEdit && <button type="button" onClick={() => { setSku(""); setDirty(true); }} title={t("เอารหัสออก เพื่อเลือกใหม่", "Remove to pick another")} aria-label={t("เอารหัสออก", "Remove code")} className="text-slate-400 hover:text-red-600"><Icon value="i:x" /></button>}
+            </div>
+          ) : canEdit ? (
+            <div className="flex items-center gap-1.5">
+              <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("เลือกจาก", "Pick from")}>
+                {(["parent", "sku"] as const).map((k) => <button key={k} type="button" onClick={() => setSkuKind(k)} aria-pressed={skuKind === k} className={`h-8 rounded-md px-2 text-xs ${skuKind === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "parent" ? t("รุ่น", "Model") : "SKU"}</button>)}
+              </div>
+              <div className="min-w-0 flex-1">{skuKind === "parent"
+                ? <ParentSkuPicker value={null} disableCreate placeholder={t("ค้นหารุ่นสินค้า…", "Search models…")} onChange={(v) => { if (v?.code) { setSku(v.code); setDirty(true); } }} />
+                : <SkuPicker value={null} placeholder={t("ค้นหา SKU…", "Search SKUs…")} onChange={(v) => { if (v?.code) { setSku(v.code); setDirty(true); } }} />}</div>
+            </div>
+          ) : <div className="flex h-9 items-center px-1 text-sm text-slate-400">—</div>}
+        </div>
         <label className="w-40 space-y-1"><span className="text-xs text-slate-500">{t("สถานะ", "Status")}</span>
           {canEdit ? (
             <select value={status} onChange={(e) => { setStatus(e.target.value as PatternProjectStatus); setDirty(true); }} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
@@ -178,8 +197,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
           ) : <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${st.tone}`}>{t(st.th, st.en)}</span>}
         </label>
         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ขั้นตอน", "Step")}>
-          {tabBtn("draw", "i:vector-bezier", t("วาดชิ้น", "Draw pieces"))}
-          {tabBtn("sew", "i:needle-thread", t("เย็บ", "Sew"), badSeams)}
+          {tabBtn("draw", "i:vector-bezier", t("วาดชิ้น + เย็บ", "Draw and sew"), badSeams)}
           {tabBtn("asm", "i:box", t("ประกอบ 3D", "Assemble 3D"))}
         </div>
         <button type="button" disabled={dirty || !pieces.length} onClick={() => window.open(`/print/pattern-project/${id}`, "_blank", "noopener")}
@@ -203,11 +221,10 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
       {tab === "draw" ? (
         <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
+          sew={{ active: sewing, pieces: sewPieces, seams, onChange: onSeams, bad: badSeams, onToggle: (on) => { setSewing(on); if (!on) setBoardNonce((n) => n + 1); } }}
           footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
-      ) : tab === "sew" ? (
-        <SewView pieces={pieces.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes }))} seams={seams} onChange={onSeams} readonly={!canEdit} />
       ) : (
-        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => switchTab("sew")} onGoDraw={() => switchTab("draw")}
+        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => { setSewing(true); switchTab("draw"); }} onGoDraw={() => switchTab("draw")}
           onAttachesChange={canEdit ? (next) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); } : undefined} />
       )}
 

@@ -125,7 +125,7 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, toolExtra }: {
   /** ชิ้นบนกระดานแบบสด (ตอนเปิด + ทุกครั้งที่เปลี่ยน รวมระหว่างลาก) — ไว้วาดภาพ 3D ตาม */
   onLive?: (pieces: ResultPiece[]) => void;
   /** เพิ่มชิ้นเข้ากระดานจากภายนอก (เช่น ตัวสร้างจากแม่แบบทรง) — nonce เปลี่ยน = เพิ่ม 1 ครั้ง · ชิ้นที่มี at วางเป็นกลุ่มต่อจากขวาสุดของกระดาน · ย้อนกลับได้ */
@@ -148,6 +148,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   /** pid ของชิ้นที่ให้เลือกไว้ตอนเปิด */
   initialSel?: string | null;
   footerNote?: ReactNode;
+  /** ปุ่มเพิ่มท้ายแถบเครื่องมือวาด (ซ้าย) — เช่น ปุ่มเครื่องมือเย็บของสตูดิโอแพทเทิร์น · ไม่ส่ง = ไม่มี */
+  toolExtra?: ReactNode;
   initial?: EditorPiece[];
   initialBasis?: ShapeBasis;
   title?: string;
@@ -1071,6 +1073,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         {!readonly && toolIcon("pen", "vector-bezier", t("ปากกา", "Pen"), "P")}
         {toolIcon("hand", "hand-stop", t("เลื่อนดู", "Pan"), "H")}
         {toolIcon("measure", "ruler-measure", t("ไม้บรรทัด", "Measure"), "M")}
+        {toolExtra && <><span className="my-0.5 h-px w-5 self-center bg-slate-200" />{toolExtra}</>}
         {refPicker && <button type="button" onClick={() => setRefPickOpen((v) => !v)} title={t("ใส่รูปสินค้าเป็นภาพอ้างอิงใต้กระดาน (วาดลอกตาม)", "Put a product photo under the board as a tracing reference")} aria-label={t("รูปอ้างอิง", "Reference")} className={ibCls(refPickOpen)}><Icon value="i:photo" className="text-[16px]" /></button>}
       </div>
       {/* บนซ้าย: คำสั่ง */}
