@@ -11,6 +11,7 @@ import { fetchAllPages } from "@/lib/fetch-all";
 import { duplicateCounts, isGoneStatus, LIVE_LISTING_OR, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
 import { expectedLinePrice, linePriceDiff, matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 import { lineEditStateFromRaw, listingHistoryText, type ListingDetailResponse } from "@/lib/line-listing-edit";
+import { lineOptionStructure } from "@/lib/line-variant-structure";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช้า → ถามเป็นชุด
@@ -352,6 +353,7 @@ export async function loadListingDetail(admin: Admin, listingId: string): Promis
       line: edit && lineObj ? {
         images: (Array.isArray(lineObj.imageUrls) ? lineObj.imageUrls : []).map((u) => String(u ?? "")).filter(Boolean),
         display: typeof lineObj.isDisplay === "boolean" ? lineObj.isDisplay : null,
+        structure: lineOptionStructure(lineObj),
         edit,
       } : null,
       history: ((logs ?? []) as { created_at: string; metadata: Record<string, unknown> | null }[]).map((a) => ({

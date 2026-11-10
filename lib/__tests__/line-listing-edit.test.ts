@@ -84,6 +84,8 @@ describe("ประวัติ → ข้อความ", () => {
   it("แก้บน LINE / เปิดปิด / จับคู่ / ข้าม", () => {
     expect(listingHistoryText({ source: "line_listing_edit", changes: [{ label: "ชื่อ" }, { label: "ราคา สีดำ" }, { label: "ราคา สีแดง" }] })).toBe("แก้บน LINE: ชื่อ · ราคา 2 ตัวเลือก");
     expect(listingHistoryText({ source: "line_listing_display", status: "hide" })).toBe("ปิดขายบน LINE");
+    expect(listingHistoryText({ source: "line_listing_variants", action: "delete", option: "ไซส์", value: "S", affected: ["a", "b"], ok: true })).toBe("ลบไซส์ “S” บน LINE (2 ตัวเลือก)");
+    expect(listingHistoryText({ source: "line_listing_variants", action: "add", option: "สี", value: "แดง", added: ["x"], ok: false, error: "HTTP 400" })).toBe("เพิ่มสี “แดง” บน LINE (1 ตัวเลือก) — ไม่สำเร็จ: HTTP 400");
     expect(listingHistoryText({ manual_match: "x", to: "x", matched_code: "WHB08" })).toBe("จับคู่กับ WHB08");
     expect(listingHistoryText({ match_ignored: { from: false, to: true }, reason: "สินค้าซ้ำบนร้าน" })).toBe("ตั้งไม่ต้องจับคู่ · สินค้าซ้ำบนร้าน");
   });

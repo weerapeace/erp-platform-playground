@@ -12,6 +12,8 @@
  * ยังไม่ทำ: เพิ่ม/ลบตัวเลือก (ลบของ LINE ลบตามชื่อค่า เช่น "แดง" — เสี่ยงลบเกิน) · สต๊อก (ไประบบซิงค์สต๊อกกลาง)
  */
 
+import type { LineOptionStructure } from "@/lib/line-variant-structure";
+
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : null);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
@@ -249,6 +251,11 @@ export function listingHistoryText(meta: unknown): string {
     const fail = str(m.error);
     return `แก้บน LINE: ${parts.join(" · ") || "—"}${fail ? ` (บางส่วนไม่สำเร็จ: ${fail})` : ""}`;
   }
+  if (src === "line_listing_variants") {
+    const n = arr(m.action === "delete" ? m.affected : m.added).length;
+    const verb = m.action === "delete" ? "ลบ" : "เพิ่ม";
+    return `${verb}${str(m.option)} “${str(m.value)}” บน LINE (${n} ตัวเลือก)${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
+  }
   if (src === "line_listing_display" || src === "line_display") return str(m.status) === "hide" ? "ปิดขายบน LINE" : "เปิดขายบน LINE";
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
@@ -276,6 +283,8 @@ export type ListingDetail = {
   line: {
     images: string[];
     display: boolean | null;
+    /** โครงตัวเลือก (ชั้น + ค่า) — เพิ่ม/ลบค่าตัวเลือก (lib/line-variant-structure) */
+    structure: LineOptionStructure | null;
     /** ค่าตั้งต้นของฟอร์มแก้ (ชื่อ/แบรนด์/หมวด/รายละเอียด/ราคาต่อตัวเลือก) */
     edit: LineEditState;
   } | null;

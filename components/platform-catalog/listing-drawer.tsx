@@ -29,6 +29,7 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { r2ImageUrl } from "@/lib/r2-image";
 import { ListingVariantMap } from "./listing-variants";
 import { useLineDisplay } from "./use-line-display";
+import { VariantStructureEditor } from "./variant-structure-editor";
 import { planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
@@ -66,7 +67,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   // เฟส 2: รูปในระบบ (คลังรูปของสินค้าที่จับคู่) — โหลดเมื่อกดเพิ่มรูป · ตัวเลือกราคา / รายละเอียด
   const [sysImages, setSysImages] = useState<{ key: string; source: string }[] | null>(null);
   const [picker, setPicker] = useState<null | { mode: "product" } | { mode: "variant"; id: string }>(null);
-  const [optMode, setOptMode] = useState<"price" | "detail">("price");
+  const [optMode, setOptMode] = useState<"price" | "detail" | "structure">("price");
 
   // โหลดรายละเอียด + ตัวเลือก↔SKU พร้อมกัน · สลับรายการ = เริ่มใหม่ (ล้างของเดิม + กลับแท็บแรก) · โหลดซ้ำหลังส่ง = คงแท็บไว้
   const loadedFor = useRef<string | null>(null);
@@ -329,14 +330,19 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const optionsTab = !form || !line ? noLine : (
     <div className="space-y-2">
       <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-sm">
-        {([["price", "ราคา"], ["detail", "น้ำหนัก · บาร์โค้ด · รูป · SKU"]] as const).map(([k, label], i) => (
+        {([["price", "ราคา"], ["detail", "น้ำหนัก · บาร์โค้ด · รูป · SKU"], ["structure", "เพิ่ม/ลบตัวเลือก"]] as const).map(([k, label], i) => (
           <button key={k} type="button" onClick={() => setOptMode(k)} aria-pressed={optMode === k}
             className={`h-8 px-3 ${i ? "border-l border-slate-200" : ""} ${optMode === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
         ))}
       </div>
       {optMode === "price"
         ? <MiniTable rows={form.variants} columns={optCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options" />
-        : <MiniTable rows={form.variants} columns={detailCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options-detail" />}
+        : optMode === "detail"
+          ? <MiniTable rows={form.variants} columns={detailCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options-detail" />
+          : listingId && <VariantStructureEditor listingId={listingId} structure={line.structure} display={line.display} canEdit={canEdit}
+              blockedReason={dirty ? "มีที่แก้ค้างยังไม่ได้บันทึก — กด “บันทึกขึ้น LINE” หรือ “ยกเลิกที่แก้” ก่อน แล้วค่อยเพิ่ม/ลบตัวเลือก" : null}
+              defaults={{ price: form.variants[0]?.price ?? null, weight: form.variants[0]?.weight ?? null }}
+              onDone={() => { setReload((n) => n + 1); if (listingId) onChanged?.(listingId, {}); }} />}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         {priceDiffN > 0 && <span className="text-rose-600">ลูกค้าจ่ายไม่ตรงในระบบ {priceDiffN.toLocaleString()} ตัวเลือก</span>}
         {canEdit && priceDiffN > 0 && <button type="button" onClick={() => applyErpPrice()} className="rounded-md border border-violet-200 px-2 py-1 text-violet-700 hover:bg-violet-50">ใช้ราคาในระบบทั้งหมด</button>}

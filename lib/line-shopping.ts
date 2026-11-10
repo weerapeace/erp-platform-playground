@@ -109,6 +109,26 @@ export async function lineUpdateVariant(apiKey: string, productId: string, v: { 
   } catch (e) { return { ok: false, status: 0, sent: [], error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
 }
 
+// เพิ่มตัวเลือก (POST /products/{id}/variants) — payload จาก lib/line-variant-structure planAddOptionValue
+export async function lineAddVariants(apiKey: string, productId: string, payload: Record<string, unknown>): Promise<{ ok: boolean; status: number; error?: string }> {
+  try {
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/variants`, { method: "POST", headers: headers(apiKey), body: JSON.stringify(payload) });
+    if (r.ok) return { ok: true, status: r.status };
+    const body = await r.text().catch(() => "");
+    return { ok: false, status: r.status, error: friendly(r.status, body) };
+  } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
+// ลบค่าตัวเลือก (POST /products/{id}/delete-variant-option { name, value }) — ลบทุกตัวเลือกที่มีค่านี้ (เช่น สี=แดง ทุกไซส์)
+export async function lineDeleteVariantOption(apiKey: string, productId: string, name: string, value: string): Promise<{ ok: boolean; status: number; error?: string }> {
+  try {
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/delete-variant-option`, { method: "POST", headers: headers(apiKey), body: JSON.stringify({ name, value }) });
+    if (r.ok) return { ok: true, status: r.status };
+    const body = await r.text().catch(() => "");
+    return { ok: false, status: r.status, error: friendly(r.status, body) };
+  } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
 // อ่านสินค้า 1 ตัวจากร้าน (GET /products?ids=…) — ไว้ดึงข้อมูลล่าสุดหลังแก้ (รูปจะกลายเป็นลิงก์ของ LINE เอง)
 // API ไม่มี GET /products/{id} → ใช้ตัวกรอง ids ของรายการสินค้า · ไม่เจอ = row null
 export async function lineGetProduct(apiKey: string, productId: string): Promise<{ ok: boolean; status: number; row: Record<string, unknown> | null; error?: string }> {
