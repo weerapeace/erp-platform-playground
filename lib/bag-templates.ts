@@ -225,14 +225,15 @@ export function bagPieces(G: BagGeometry): BagPiece[] {
   const hl = p.Lh + 2 * BAG_HANDLE_ATTACH, hw = 2 * p.wh;
   const handle = rect("handle", "หูหิ้ว (พับครึ่ง)", "Handle (folded in half)", 2, hl, hw, sa,
     [[BAG_HANDLE_ATTACH, 0], [BAG_HANDLE_ATTACH, hw], [hl - BAG_HANDLE_ATTACH, 0], [hl - BAG_HANDLE_ATTACH, hw]]);
+  const extS = (ext * G.Ls) / H;   // ส่วนพับปากวัดตามแนวขอบข้างที่เอียง — ให้ขอบที่เย็บติดกันยาวเท่ากันพอดีแม้ปากบาน
   if (G.strip) {
-    const len = G.Lg + 2 * ext;
-    const xs = [...G.marks.map((s) => ext + s), ...(ext > 0.05 ? [ext, ext + G.Lg] : [])];
+    const len = G.Lg + 2 * extS;
+    const xs = [...G.marks.map((s) => extS + s), ...(ext > 0.05 ? [extS, extS + G.Lg] : [])];
     list.push(handle, rect("strip", "ข้าง + ก้น ชิ้นเดียว", "Gusset strip (sides + bottom)", 1, len, D, sa, xs.flatMap((x) => [[x, 0], [x, D]] as Pt[]), [[len * 0.06, D / 2], [len * 0.2, D / 2]]));
   } else {
-    const sideH = G.Ls + ext;
+    const sideH = G.Ls + extS;
     list.push(
-      rect("side", "ข้าง", "Side piece", 2, D, sideH, sa, ext > 0.05 ? [[0, ext], [D, ext]] : [], [[D / 2, sideH * 0.25], [D / 2, sideH * 0.75]]),
+      rect("side", "ข้าง", "Side piece", 2, D, sideH, sa, ext > 0.05 ? [[0, extS], [D, extS]] : [], [[D / 2, sideH * 0.25], [D / 2, sideH * 0.75]]),
       rect("bottom", "ก้น", "Bottom piece", 1, W, D, sa, [[W / 2, 0], [W / 2, D]], [[W * 0.1, D / 2], [W * 0.3, D / 2]]),
       handle,
     );
@@ -246,4 +247,32 @@ export function bagPieces(G: BagGeometry): BagPiece[] {
     x += q.cut.w + gap; rowH = Math.max(rowH, q.cut.h);
     return { ...q, at };
   });
+}
+
+/** ขอบของชิ้นจากแม่แบบ: ชิ้นไหน · เริ่มที่ขอบลำดับไหน · กี่ขอบติดกัน · ชิ้นนั้นมีกี่ขอบ (ลำดับขอบ = ลำดับจุดของรูป — ดู lib/pattern-seams) */
+export type BagEdgeRef = { piece: BagPieceKey; from: number; count: number; n: number };
+export type BagSeamRef = { key: "A" | "B" | "C"; a: BagEdgeRef; b: BagEdgeRef };
+/**
+ * ตะเข็บของกระเป๋าจากแม่แบบ — คู่ขอบที่ต้องเย็บติดกัน (ใช้ตั้งต้นให้เครื่องมือเย็บ ไม่ต้องจับคู่เอง)
+ *   ตัวหน้า/หลัง: จุดเรียง ปากซ้าย → (มุมก้นซ้าย) → (มุมก้นขวา) → ปากขวา · ขอบสุดท้าย = ขอบปาก
+ *   สี่เหลี่ยม: ขอบ 0 บน · 1 ขวา · 2 ล่าง · 3 ซ้าย
+ */
+export function bagSeamRefs(G: BagGeometry): BagSeamRef[] {
+  const pn = G.p.r > 0 ? 6 : 4, back: BagPieceKey = G.win ? "back" : "front";
+  const R = (piece: BagPieceKey, from: number, count = 1, n = 4): BagEdgeRef => ({ piece, from, count, n });
+  if (G.strip) return [
+    { key: "A", a: R("front", 0, pn - 1, pn), b: R("strip", 2) },
+    { key: "A", a: R(back, 0, pn - 1, pn), b: R("strip", 0) },
+  ];
+  const sides = (panel: BagPieceKey): BagSeamRef[] => [
+    { key: "A", a: R(panel, 0), b: R("side", 3) },
+    { key: "A", a: R(panel, 2), b: R("side", 1) },
+  ];
+  return [
+    ...sides("front"), ...(G.win ? sides("back") : []),
+    { key: "B", a: R("front", 1), b: R("bottom", 0) },
+    { key: "B", a: R(back, 1), b: R("bottom", 2) },
+    { key: "C", a: R("side", 2), b: R("bottom", 1) },
+    { key: "C", a: R("side", 2), b: R("bottom", 3) },
+  ];
 }

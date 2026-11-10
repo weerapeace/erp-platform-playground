@@ -22,7 +22,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
 import type { Flat3DPiece } from "@/components/pattern-3d";
-import type { BagPiece } from "@/lib/bag-templates";
+import { bagSeamRefs, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
@@ -31,7 +31,13 @@ const SHOW3D_KEY = "pattern-studio-3d";
 const WIDE_PX = 1180;
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
-export function PatternStudio(props: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive">) {
+/** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + ค่าแม่แบบที่ใช้ */
+export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; params: BagParams };
+
+export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive"> & {
+  /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
+  onTemplateInsert?: (info: TemplateInsertInfo) => void;
+}) {
   const t = useT();
   const { readonly = false } = props;
   const [show3d, setShow3dState] = useState(false);
@@ -57,10 +63,13 @@ export function PatternStudio(props: Omit<EditorProps, "open" | "embedded" | "in
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
   const pick3d = useCallback((pid: string | null) => setSelectReq({ nonce: Date.now(), pid }), []);
-  const insert = (pieces: BagPiece[]) => {
+  const insert = (pieces: BagPiece[], G: BagGeometry) => {
     setWizard(false);
-    setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
+    const stamp = Date.now().toString(36), pidByKey: Partial<Record<BagPieceKey, string>> = {};
+    pieces.forEach((q, i) => { pidByKey[q.key] = `pc${stamp}t${i}`; });   // รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้นอ้างถึงได้
+    setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
     setShow3d(true);
+    onTemplateInsert?.({ pidByKey, seams: bagSeamRefs(G), params: G.p });
   };
 
   const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs";

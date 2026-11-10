@@ -11,7 +11,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { RangeInput } from "@/components/range-input";
 import { Pattern3D } from "@/components/pattern-3d";
-import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagNumKey, type BagParams, type BagPiece, type BagWindow } from "@/lib/bag-templates";
+import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow } from "@/lib/bag-templates";
 
 const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
@@ -21,7 +21,7 @@ export function BagTemplateWizard({ open, onClose, onInsert }: {
   open: boolean;
   onClose: () => void;
   /** ผู้ใช้กดวางชิ้นลงกระดาน */
-  onInsert: (pieces: BagPiece[]) => void;
+  onInsert: (pieces: BagPiece[], G: BagGeometry) => void;
 }) {
   const t = useT();
   const [params, setParams] = useState<BagParams>(BAG_DEFAULT);
@@ -61,7 +61,7 @@ export function BagTemplateWizard({ open, onClose, onInsert }: {
       description={t("ใส่ขนาดกระเป๋าตอนเสร็จ ระบบคิดชิ้นแพทเทิร์นให้ครบ แล้ววางลงกระดานเป็นชิ้นที่แก้ต่อได้", "Enter the finished bag size. The pieces are worked out for you and placed on the board, ready to edit.")}
       footer={<>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" onClick={() => onInsert(pieces)} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`วางชิ้นลงกระดาน (${pieces.length} แบบ ${total} ชิ้น)`, `Place on the board (${pieces.length} patterns, ${total} pcs)`)}</button>
+        <button type="button" onClick={() => onInsert(pieces, G)} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`วางชิ้นลงกระดาน (${pieces.length} แบบ ${total} ชิ้น)`, `Place on the board (${pieces.length} patterns, ${total} pcs)`)}</button>
       </>}>
       <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* ── ซ้าย: ขนาด ── */}

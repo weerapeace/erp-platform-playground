@@ -55,9 +55,10 @@ describe("ชิ้นแพทเทิร์น (bagPieces)", () => {
     const G = bagGeometry(BAG_DEFAULT), list = bagPieces(G);
     expect(list.map((q) => `${q.key}×${q.count}`)).toEqual(["front×2", "handle×2", "strip×1"]);
     const strip = byKey(list, "strip");
-    close(strip.finished.w, G.Lg + 2 * (3 - 1), 1e-6);
+    const extS = (2 * G.Ls) / 28;                            // ส่วนพับปาก (พับ 3 − เผื่อ 1) วัดตามแนวขอบข้างที่เอียง
+    close(strip.finished.w, G.Lg + 2 * extS, 1e-6);
     close(strip.finished.h, 12, 1e-9);
-    close(strip.cut.w, G.Lg + 2 * 3, 1e-6);                 // เส้นตัดปลายชิ้น = พับปาก 3 ซม. พอดี
+    close(strip.cut.w, G.Lg + 2 * extS + 2, 1e-6);
   });
   it("ตัวหน้า: เส้นตัดด้านบน = สูง + พับปาก · ด้านล่าง = + เผื่อเย็บ · รูปทรงผ่านตัวตรวจของระบบ", () => {
     const G = bagGeometry(BAG_DEFAULT), front = byKey(bagPieces(G), "front");
@@ -82,7 +83,7 @@ describe("ชิ้นแพทเทิร์น (bagPieces)", () => {
   it("ก้นเหลี่ยมแยกชิ้น: ข้าง 2 (สูง = ขอบข้าง + ส่วนพับปาก) + ก้น 1", () => {
     const G = bagGeometry({ ...BAG_DEFAULT, ...BAG_PRESETS[2].params }), list = bagPieces(G);
     expect(list.map((q) => `${q.key}×${q.count}`)).toEqual(["front×2", "side×2", "bottom×1", "handle×2"]);
-    close(byKey(list, "side").finished.h, G.Ls + 2, 1e-6);
+    close(byKey(list, "side").finished.h, G.Ls + (2 * G.Ls) / 34, 1e-6);
     close(byKey(list, "side").finished.w, 15, 1e-9);
     close(byKey(list, "bottom").finished.w, 40, 1e-9);
   });
