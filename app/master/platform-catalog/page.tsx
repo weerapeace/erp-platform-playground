@@ -30,7 +30,6 @@ import { listingMatchStatus, type ListingMatchStatus, type MatchSuggestion } fro
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
-import { ListingDrawer } from "@/components/platform-catalog/listing-drawer";
 import { NotListedPicker } from "@/components/platform-catalog/not-listed-picker";
 import { useLineDisplay } from "@/components/platform-catalog/use-line-display";
 import { ToggleSwitch } from "@/components/toggle-switch";
@@ -44,6 +43,8 @@ import {
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
+// ลิ้นชักสินค้าบนร้าน (LINE/Lazada แก้ได้ · หนัก) — เปิดเมื่อกดแถว/การ์ด → โหลดแยกจากหน้า (perf-check: หน้าโต 423→476KB เมื่อรวมไว้)
+const ListingDrawer = dynamic(() => import("@/components/platform-catalog/listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
 // ตัวช่วยลงสินค้า (ของกลาง) — ปุ่ม "เพิ่มสินค้าขึ้นร้าน"
 const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 

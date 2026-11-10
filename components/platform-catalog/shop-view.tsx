@@ -30,12 +30,13 @@ import {
 } from "@/lib/platform-listing-health";
 import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
 import { ListingCard, SHOP_STATE_CLS } from "./listing-card";
-import { ListingDrawer } from "./listing-drawer";
 import { useLineDisplay } from "./use-line-display";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { AddToPlatformWizard, type AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 
 // ป๊อปสร้างงาน (หนัก) — โหลดตอนกดเท่านั้น
+// ลิ้นชักสินค้าบนร้าน (หนัก) — โหลดแยก ไม่รวมในหน้า
+const ListingDrawer = dynamic(() => import("./listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
 const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 
 const IMG_STATE_LABEL: Record<ShopParent["image_state"], string> = { ok: "มีรูปปก", sku_only: "มีรูป SKU · ยังไม่ตั้งปก", none: "ไม่มีรูปเลย" };
