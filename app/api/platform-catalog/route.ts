@@ -6,6 +6,8 @@
  *   view=brands → การ์ดหน้าเลือกแบรนด์ ShopBrandsResponse (ไม่ต้องมี platform_id)
  *   view=shop → มุมมองหน้าร้าน ShopViewResponse (lib/platform-listing-health) — สต๊อก/สถานะ/รูปจากร้าน · ยังไม่ลง · ไม่มีรูป · งานค้าง
  *   view=variants&listing_id= → ตัวเลือกบนร้าน ↔ SKU ในระบบ ListingVariantsResponse (lib/platform-variant-match) · อ่านอย่างเดียว
+ *   view=listing&listing_id= → รายละเอียดสินค้าบนร้าน 1 รายการ + ประวัติ ListingDetailResponse (ลิ้นชักสินค้าบนร้าน)
+ *   view=notlisted&platform_id&brand_id → สินค้าของแบรนด์ที่ยังไม่ลงร้านนี้ (ปุ่มเพิ่มสินค้าขึ้นร้าน)
  *   view=summary → รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ ListingSummariesResponse (หน้าจับคู่ โหลดตามหลังตาราง)
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
  * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
@@ -20,7 +22,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit, writeAuditMany } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
-import { loadBrandSummaries, loadListingSummaries, loadListingVariants, loadShopView } from "@/lib/platform-shop-view-server";
+import { loadBrandSummaries, loadListingDetail, loadListingSummaries, loadListingVariants, loadNotListed, loadShopView } from "@/lib/platform-shop-view-server";
 import { LISTING_GONE_STATUS, LIVE_LISTING_OR, type ListingSummariesResponse, type ShopBrandsResponse, type ShopViewResponse } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +42,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(body);
   }
   // ตัวเลือกบนร้าน ↔ SKU ในระบบ (ป๊อปรายละเอียดสินค้าบนร้าน) — ไม่ต้องระบุร้าน (รู้จากรายการเอง)
+  if (sp.get("view") === "listing") {
+    const listingId = (sp.get("listing_id") ?? "").trim();
+    if (!listingId) return NextResponse.json({ detail: null, error: "ต้องระบุสินค้าบนร้าน (listing_id)" }, { status: 400 });
+    return NextResponse.json(await loadListingDetail(supabaseAdmin(), listingId));
+  }
   if (sp.get("view") === "variants") {
     const listingId = (sp.get("listing_id") ?? "").trim();
     if (!listingId) return NextResponse.json({ error: "ต้องระบุสินค้าบนร้าน (listing_id)" }, { status: 400 });
@@ -58,6 +65,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ]);
     const body: ShopViewResponse = { platform_code: platformCode, ...shop, ...(platformCounts ? { platform_counts: platformCounts } : {}), error: null };
     return NextResponse.json(body);
+  }
+
+  // ปุ่มเพิ่มสินค้าขึ้นร้าน: สินค้าของแบรนด์ที่ยังไม่ลงร้านนี้
+  if (sp.get("view") === "notlisted") {
+    if (!brandId) return NextResponse.json({ parents: [], error: "เลือกแบรนด์ก่อน" }, { status: 400 });
+    return NextResponse.json({ parents: await loadNotListed(admin, platformId, brandId), error: null });
   }
 
   // หน้าจับคู่: รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (โหลดตามหลังตาราง ตารางขึ้นก่อน)

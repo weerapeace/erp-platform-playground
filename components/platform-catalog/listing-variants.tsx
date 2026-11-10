@@ -23,19 +23,26 @@ const KIND: Record<VariantMatchKind, { label: string; cls: string; why: string }
 };
 const money = (n: number | null) => (n == null ? "—" : `${n.toLocaleString()}฿`);
 
-export function ListingVariantMap({ listingId, reloadKey = 0 }: { listingId: string; reloadKey?: number }) {
-  const [data, setData] = useState<ListingVariantsResponse | null>(null);
+export function ListingVariantMap({ listingId, reloadKey = 0, data: given }: {
+  listingId: string;
+  reloadKey?: number;
+  /** ข้อมูลที่ผู้เรียกโหลดไว้แล้ว (ลิ้นชักสินค้าบนร้าน) — ส่งมา = ไม่โหลดซ้ำ */
+  data?: ListingVariantsResponse;
+}) {
+  const [loaded, setData] = useState<ListingVariantsResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const data = given ?? loaded;
 
   useEffect(() => {
+    if (given) return;
     let alive = true;
     setData(null); setErr(null);
     apiFetch(`/api/platform-catalog?view=variants&listing_id=${encodeURIComponent(listingId)}`).then((r) => r.json())
       .then((j: ListingVariantsResponse) => { if (!alive) return; if (j.error) setErr(j.error); else setData(j); })
       .catch(() => { if (alive) setErr("โหลดตัวเลือกบนร้านไม่สำเร็จ"); });
     return () => { alive = false; };
-  }, [listingId, reloadKey, retry]);
+  }, [listingId, reloadKey, retry, given]);
 
   if (err) return <ErrorState title={err} onRetry={() => setRetry((n) => n + 1)} />;
   if (!data) return <LoadingState label="กำลังเทียบตัวเลือกกับ SKU…" />;

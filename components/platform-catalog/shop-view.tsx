@@ -24,11 +24,14 @@ import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
-  SHOP_STATE_LABEL, SHOP_TABS, inShopQueue, inShopTab, notListedTrustworthy,
+  SHOP_STATE_LABEL, SHOP_TABS, inShopQueue, inShopTab, notListedTrustworthy, shopStateOf,
   type ShopItem, type ShopParent, type ShopTab, type ShopViewResponse,
 } from "@/lib/platform-listing-health";
 import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
 import { ListingCard, SHOP_STATE_CLS } from "./listing-card";
+import { ListingDrawer } from "./listing-drawer";
+import { useLineDisplay } from "./use-line-display";
+import { ToggleSwitch } from "@/components/toggle-switch";
 import { AddToPlatformWizard, type AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 
 // ป๊อปสร้างงาน (หนัก) — โหลดตอนกดเท่านั้น
@@ -85,6 +88,18 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const [cat, setCat] = useState("");   // หมวดกลาง ("" = ทุกหมวด · "__none" = ไม่รู้หมวด เช่น ยังไม่จับคู่)
   const canAdd = can("products.platforms.edit");
   const [layout, setLayout] = useMiniTableLayout("platform-shop-items");   // ตาราง / การ์ด (การ์ดใบเดียวกับแท็บจับคู่)
+  // ลิ้นชักสินค้าบนร้าน (กดแถว/การ์ด) + เปิด/ปิดขายบน LINE
+  const canPublish = can("products.platforms.publish");
+  const isLine = platformCode === "line_shopping";
+  const [openId, setOpenId] = useState<string | null>(null);
+  const patchItem = useCallback((id: string, p: { title?: string; display?: boolean }) => {
+    setData((d) => (d ? { ...d, items: d.items.map((it) => {
+      if (it.id !== id) return it;
+      const display = p.display ?? it.display;
+      return { ...it, ...(p.title ? { title: p.title } : {}), display, state: p.display != null ? shopStateOf(display, it.stock, true) : it.state };
+    }) } : d));
+  }, []);
+  const disp = useLineDisplay((results) => { for (const r of results) if (r.ok) patchItem(r.listing_id, { display: !!r.display }); });
 
   // เลขรอบ: สลับร้าน/แบรนด์ระหว่างโหลด → ทิ้งคำตอบของรอบเก่า (บั๊กเดิมของหน้านี้)
   const seq = useRef(0);
@@ -162,6 +177,9 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const pickerOf = (id: string, code: string | null, name: string | null, coverKey: string | null): ParentSkuPickerValue =>
     ({ id, code: code ?? "", name: name ?? code ?? "", image_key: coverKey });
   const selItems = items.filter((it) => selected.has(it.id));
+  const selLive = isLine && !parentMode ? selItems.filter((it) => it.display != null && it.state !== "gone") : [];
+  const selToOpen = selLive.filter((it) => !it.display);
+  const selToHide = selLive.filter((it) => it.display);
   const selParents = (parentRowsAll ?? []).filter((p) => selected.has(p.id));
   const selTargets: ParentSkuPickerValue[] = parentMode
     ? selParents.map((p) => pickerOf(p.id, p.code, p.name, p.cover_key))
@@ -213,6 +231,12 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
       cell: (it) => it.stock == null ? <span className="text-slate-300">—</span>
         : <span className={`tabular-nums ${it.state === "out" ? "text-rose-600 font-medium" : it.state === "low" ? "text-amber-600 font-medium" : ""}`}>{it.stock.toLocaleString()}</span>,
     },
+    ...(isLine ? [{
+      key: "disp", header: "เปิดขาย", width: "4.5rem", align: "center" as const,
+      cell: (it: ShopItem) => (it.display == null || it.state === "gone" ? <span className="text-slate-300">—</span>
+        : <ToggleSwitch size="sm" on={it.display} disabled={!canPublish || disp.busy} title={canPublish ? "เปิด/ปิดขายบน LINE (ถามก่อน)" : "ไม่มีสิทธิ์ส่งขึ้นร้าน"}
+            onChange={(v) => disp.request([it.id], v ? "onsale" : "hide", [it.title || it.sku_code || ""])} />),
+    }] : []),
     {
       key: "state", header: "สถานะ", width: "0.8fr", align: "center",
       cell: (it) => <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${SHOP_STATE_CLS[it.state]}`}>{SHOP_STATE_LABEL[it.state]}</span>,
@@ -361,11 +385,22 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
             emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : tab === "notlisted" ? `สินค้า${brandName ? ` ${brandName}` : ""} ลงร้านนี้ครบแล้ว` : "ทุกสินค้ามีรูปแล้ว"} dense
             resizable storageKey="platform-shop-parents" />
         ) : (
-          <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id}
-            selectable={canCreateTask} selected={selected} onSelectedChange={setSelected}
+          <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id} onRowClick={(it) => setOpenId(it.id)}
+            selectable={canCreateTask || (canPublish && isLine)} selected={selected} onSelectedChange={setSelected}
             layout={layout} cardPick cardGrid="repeat(auto-fill,minmax(170px,1fr))"
             renderCard={(it) => (
-              <ListingCard badges={it.open_tasks > 0 ? <div className="flex flex-wrap gap-1">{taskBadge(it.open_tasks)}</div> : undefined} data={{
+              <ListingCard badges={(
+                <>
+                  {it.open_tasks > 0 && <div className="flex flex-wrap gap-1">{taskBadge(it.open_tasks)}</div>}
+                  {isLine && it.display != null && it.state !== "gone" && (
+                    <div className="flex items-center justify-between text-[11px] text-slate-500" onClick={(e) => e.stopPropagation()}>
+                      <span>{it.display ? "เปิดขายบน LINE" : "ปิดขายอยู่"}</span>
+                      <ToggleSwitch size="sm" on={it.display} disabled={!canPublish || disp.busy} title={canPublish ? "เปิด/ปิดขายบน LINE (ถามก่อน)" : "ไม่มีสิทธิ์ส่งขึ้นร้าน"}
+                        onChange={(v) => disp.request([it.id], v ? "onsale" : "hide", [it.title || it.sku_code || ""])} />
+                    </div>
+                  )}
+                </>
+              )} data={{
                 image: it.image ?? r2ImageUrl(it.matched_cover_key, 400), title: it.title, sku: it.sku_code, externalId: it.external_product_id,
                 state: it.state, stock: it.stock, price: it.price, salePrice: it.salePrice, variants: it.variants, dupCount: it.dup_count,
               }} footer={(
@@ -390,9 +425,15 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       </div>
 
-      {(canCreateTask || (canAdd && parentMode)) && (
+      {(canCreateTask || (canAdd && parentMode) || (canPublish && isLine)) && (
         <BulkActionBar count={selected.size} unit={parentMode ? "สินค้า" : "รายการ"} onClear={() => setSelected(new Set())}
           extra={selUnmatched > 0 ? `${selUnmatched.toLocaleString()} รายการยังไม่จับคู่ จะไม่ถูกใส่ในงาน` : undefined}>
+          {canPublish && selToOpen.length > 0 && (
+            <button type="button" disabled={disp.busy} onClick={() => disp.request(selToOpen.map((it) => it.id), "onsale", selToOpen.map((it) => it.title || it.sku_code || ""))} className="h-8 px-3 text-sm rounded-lg bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">เปิดขาย ({selToOpen.length.toLocaleString()})</button>
+          )}
+          {canPublish && selToHide.length > 0 && (
+            <button type="button" disabled={disp.busy} onClick={() => disp.request(selToHide.map((it) => it.id), "hide", selToHide.map((it) => it.title || it.sku_code || ""))} className="h-8 px-3 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50">ปิดขาย ({selToHide.length.toLocaleString()})</button>
+          )}
           {canAdd && tab === "notlisted" && selParents.length > 0 && (
             <button type="button" onClick={() => setAddFor(selParents.map((p) => ({ id: p.id, code: p.code, name: p.name })))} className="h-8 px-3 text-sm rounded-lg bg-violet-500 text-white hover:bg-violet-400 inline-flex items-center gap-1.5">
               <Icon name="upload" />ลงสินค้า ({selParents.length.toLocaleString()})
@@ -410,6 +451,26 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : []}
           onClose={() => { setAddFor(null); setSelected(new Set()); }} onDone={() => void load()} />
       )}
+
+      {disp.dialog}
+      <ListingDrawer listingId={openId} onClose={() => setOpenId(null)} canPublish={canPublish} onChanged={patchItem}
+        matchTab={(() => {
+          const it = allItems.find((x) => x.id === openId);
+          if (!it) return null;
+          return (
+            <div className="space-y-2 rounded-xl border border-slate-200 p-3 text-sm">
+              <div className="text-xs font-semibold text-slate-600">จับคู่กับสินค้าในระบบ</div>
+              {it.matched_parent_sku_id
+                ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">จับคู่อยู่กับ <span className="font-mono">{it.matched_code}</span>{it.matched_name ? ` · ${it.matched_name}` : ""}</div>
+                : it.match_ignored ? <div className="text-xs text-slate-500">ตั้งไว้ว่าไม่ต้องจับคู่</div>
+                : <button type="button" onClick={() => { setOpenId(null); onGoMatch(); }} className="text-xs text-amber-700 hover:underline">ยังไม่จับคู่ — ไปหน้าจับคู่</button>}
+              {canCreateTask && it.matched_parent_sku_id && (
+                <button type="button" onClick={() => setTaskFor([pickerOf(it.matched_parent_sku_id as string, it.matched_code, it.matched_name, it.matched_cover_key)])}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50"><Icon name="add" />สร้างงานของสินค้านี้</button>
+              )}
+            </div>
+          );
+        })()} />
 
       {taskFor && (
         <CreateTaskModal open onClose={() => setTaskFor(null)} onCreated={onCreated}

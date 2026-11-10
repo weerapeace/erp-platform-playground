@@ -14,7 +14,7 @@ import { useToast } from "@/components/toast";
 import { MiniTable, LayoutSwitch, useMiniTableLayout, type MiniColumn } from "@/components/mini-table";
 import { HoverImage } from "@/components/hover-image";
 import { ListingCard, ShopStateBadge } from "@/components/platform-catalog/listing-card";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { StatFilterCards } from "@/components/stat-filter-cards";
@@ -23,7 +23,6 @@ import { Icon } from "@/components/icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
 import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
 import { IgnoreDialog, IGNORE_REASON_DUP } from "@/components/platform-catalog/ignore-dialog";
-import { ListingVariantMap } from "@/components/platform-catalog/listing-variants";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { isSellingPlatform } from "@/lib/selling-platforms";
@@ -31,14 +30,21 @@ import { listingMatchStatus, type ListingMatchStatus, type MatchSuggestion } fro
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
+import { ListingDrawer } from "@/components/platform-catalog/listing-drawer";
+import { NotListedPicker } from "@/components/platform-catalog/not-listed-picker";
+import { useLineDisplay } from "@/components/platform-catalog/use-line-display";
+import { ToggleSwitch } from "@/components/toggle-switch";
+import type { AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
 import {
-  duplicateCounts, duplicateKey, discountPct, effectivePrice, priceFlags, isGoneStatus, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
+  duplicateCounts, duplicateKey, discountPct, effectivePrice, priceFlags, isGoneStatus, shopStateOf, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
   type ListingCardSummary, type ListingSummariesResponse, type ShopBrandSummary, type ShopState,
 } from "@/lib/platform-listing-health";
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
+// ตัวช่วยลงสินค้า (ของกลาง) — ปุ่ม "เพิ่มสินค้าขึ้นร้าน"
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
@@ -89,6 +95,9 @@ export default function PlatformCatalogPage() {
   const { can } = useAuth();
   const toast = useToast();
   const canEdit = can("products.platforms.edit");
+  const canPublish = can("products.platforms.publish");   // ส่งขึ้นร้านจริง (แก้สินค้า/เปิดปิดขายจากลิ้นชัก)
+  const [addPick, setAddPick] = useState(false);              // ป๊อปเลือกสินค้าที่ยังไม่ลง
+  const [addFor, setAddFor] = useState<AddWizardParent[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const catFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -141,6 +150,29 @@ export default function PlatformCatalogPage() {
   const [summLoading, setSummLoading] = useState(false);
   const [shopFilter, setShopFilter] = useState<ShopFilter>("");
   const [layout, setLayout] = useMiniTableLayout("platform-catalog-listings");
+  // เปิด/ปิดขายบน LINE (สวิตช์ในแถว/การ์ด/แถบเลือกหลายตัว) → อัปเดตสถานะในหน้าเลย ไม่ต้องโหลดใหม่
+  const disp = useLineDisplay((results) => {
+    setSumm((m) => {
+      const n = { ...m };
+      for (const r of results) {
+        const s = n[r.listing_id];
+        if (r.ok && s) { const display = !!r.display; n[r.listing_id] = { ...s, display, state: shopStateOf(display, s.stock, true) }; }
+      }
+      return n;
+    });
+  });
+  // ลิ้นชักส่งขึ้น LINE สำเร็จ → แก้ชื่อ/สถานะในตารางให้ตรง
+  const onListingChanged = useCallback((id: string, patch: { title?: string; display?: boolean }) => {
+    if (patch.title) {
+      const t = patch.title;
+      setListings((ls) => ls.map((x) => (x.id === id ? { ...x, title: t } : x)));
+      setOpenListing((o) => (o && o.id === id ? { ...o, title: t } : o));
+    }
+    if (patch.display != null) {
+      const display = patch.display;
+      setSumm((m) => { const s = m[id]; return s ? { ...m, [id]: { ...s, display, state: shopStateOf(display, s.stock, true) } } : m; });
+    }
+  }, []);
   const [sortKey, setSortKey] = useState("todo");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   useEffect(() => {
@@ -357,6 +389,10 @@ export default function PlatformCatalogPage() {
   const selectedRows = useMemo(() => listings.filter((l) => selected.has(l.id)), [listings, selected]);
   const selIgnorable = selectedRows.filter((l) => !l.matched_parent_sku_id && !l.match_ignored && !isGoneStatus(l.status)).map((l) => l.id);
   const selGone = selectedRows.filter((l) => isGoneStatus(l.status)).map((l) => l.id);
+  // เปิด/ปิดขายหลายตัว (LINE เท่านั้น · ตัวที่รู้สถานะบนร้าน · ไม่นับตัวที่ไม่อยู่บนร้านแล้ว)
+  const selLive = platforms.find((p) => p.id === platformId)?.code === "line_shopping" ? selectedRows.filter((l) => { const s = summ[l.id]; return s && s.display != null && s.state !== "gone"; }) : [];
+  const selToOpen = selLive.filter((l) => !summ[l.id]?.display);
+  const selToHide = selLive.filter((l) => summ[l.id]?.display);
   const goneIds = useMemo(() => listings.filter((l) => isGoneStatus(l.status)).map((l) => l.id), [listings]);
   // ล้างรายการที่ไม่อยู่บนร้านแล้ว (สำเนาในระบบเรา — ร้านลบไปแล้ว) · ลบได้เฉพาะตัวที่ติดป้ายจริง (server เช็กซ้ำ)
   const [goneBusy, setGoneBusy] = useState(false);
@@ -706,6 +742,15 @@ export default function PlatformCatalogPage() {
         return full != null ? <span className="leading-tight"><span className="block">{full.toLocaleString()}฿</span>{warn}</span> : <span className="text-slate-300">—</span>;
       },
     },
+    ...(platformCode === "line_shopping" && hasShopData ? [{
+      key: "disp", header: "เปิดขาย", width: "4.5rem", align: "center" as const, sortValue: (l: Listing) => (summ[l.id]?.display ? 1 : 0),
+      cell: (l: Listing) => {
+        const s = summ[l.id];
+        if (!s || s.display == null || s.state === "gone") return <span className="text-slate-300">—</span>;
+        return <ToggleSwitch size="sm" on={s.display} disabled={!canPublish || disp.busy} title={canPublish ? "เปิด/ปิดขายบน LINE (ถามก่อน)" : "ไม่มีสิทธิ์ส่งขึ้นร้าน"}
+          onChange={(v) => disp.request([l.id], v ? "onsale" : "hide", [l.title || l.sku_code || ""])} />;
+      },
+    }] : []),
     { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3, gone: 4 })[statusOf(l)], cell: (l) => matchCell(l) },
   ];
   const fcols: MiniColumn<FieldRow>[] = [
@@ -806,6 +851,9 @@ export default function PlatformCatalogPage() {
         <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
         {/* ปุ่มนำเข้า + ⚙️ ติดกันเสมอ (ร้านเยอะแล้วแถวเต็ม ⚙️ เคยตกไปอยู่บรรทัดใหม่คนเดียว) */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
+          <button type="button" onClick={() => setAddPick(true)} disabled={!canEdit || !platformId || !brandId}
+            title={!brandId ? "เลือกแบรนด์ก่อน" : `เลือกสินค้าในระบบที่ยังไม่ได้ลง ${activePf?.name_th ?? "ร้านนี้"} แล้วลงขึ้นร้าน`}
+            className="h-9 px-3 text-sm text-violet-700 border border-violet-200 bg-white rounded-lg hover:bg-violet-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="add" />เพิ่มสินค้าขึ้นร้าน</button>
           <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">{importing ? "กำลังนำเข้า..." : "⬆️ นำเข้าสินค้าจากร้าน"}</button>
           <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" aria-label="จัดการชนิดไฟล์นำเข้า" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
         </div>
@@ -962,9 +1010,18 @@ export default function PlatformCatalogPage() {
                 renderCard={(l) => {
                   const s = summ[l.id];
                   return (
-                    <ListingCard footer={matchCell(l, true)} badges={priceFlagText(s) ? (
-                      <span className="inline-flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" title={priceFlagText(s)}><Icon name="warning" />{priceFlagText(s)}</span>
-                    ) : undefined} data={{
+                    <ListingCard footer={matchCell(l, true)} badges={(
+                      <>
+                        {priceFlagText(s) && <span className="inline-flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" title={priceFlagText(s)}><Icon name="warning" />{priceFlagText(s)}</span>}
+                        {platformCode === "line_shopping" && s && s.display != null && s.state !== "gone" && (
+                          <div className="flex items-center justify-between text-[11px] text-slate-500" onClick={(e) => e.stopPropagation()}>
+                            <span>{s.display ? "เปิดขายบน LINE" : "ปิดขายอยู่"}</span>
+                            <ToggleSwitch size="sm" on={s.display} disabled={!canPublish || disp.busy} title={canPublish ? "เปิด/ปิดขายบน LINE (ถามก่อน)" : "ไม่มีสิทธิ์ส่งขึ้นร้าน"}
+                              onChange={(v) => disp.request([l.id], v ? "onsale" : "hide", [l.title || l.sku_code || ""])} />
+                          </div>
+                        )}
+                      </>
+                    )} data={{
                       image: s?.image ?? null, title: l.title, sku: l.sku_code, externalId: l.external_product_id,
                       state: s?.state ?? null, stock: s?.stock ?? null, price: s?.price ?? l.price, salePrice: s?.salePrice ?? null,
                       variants: s?.variants ?? null, dupCount: dupCounts.get(l.id),
@@ -1053,6 +1110,12 @@ export default function PlatformCatalogPage() {
       {canEdit && view === "match" && tab === "catalog" && (
         <BulkActionBar count={selected.size} unit="รายการ" onClear={() => setSelected(new Set())}
           extra={[selGuessDup > 0 ? `ตัวซ้ำบนร้าน ${selGuessDup} ไม่รวมในการยืนยัน` : "", selected.size !== selIgnorable.length + selIgnored.length ? "ตัวที่จับคู่อยู่แล้วจะไม่ถูกข้าม" : ""].filter(Boolean).join(" · ") || undefined}>
+          {canPublish && selToOpen.length > 0 && (
+            <button type="button" disabled={disp.busy} onClick={() => disp.request(selToOpen.map((l) => l.id), "onsale", selToOpen.map((l) => l.title || l.sku_code || ""))} className="h-8 px-3 text-sm rounded-lg bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">เปิดขาย ({selToOpen.length.toLocaleString()})</button>
+          )}
+          {canPublish && selToHide.length > 0 && (
+            <button type="button" disabled={disp.busy} onClick={() => disp.request(selToHide.map((l) => l.id), "hide", selToHide.map((l) => l.title || l.sku_code || ""))} className="h-8 px-3 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50">ปิดขาย ({selToHide.length.toLocaleString()})</button>
+          )}
           {selGuess.length > 0 && (
             <button type="button" disabled={bulkBusy} onClick={() => setBulkAsk("selected")} className="h-8 px-3 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">✓ ยืนยันคู่ที่ระบบเดา ({selGuess.length.toLocaleString()})</button>
           )}
@@ -1090,19 +1153,16 @@ export default function PlatformCatalogPage() {
         )}
       />
 
-      <ERPModal open={!!openListing} onClose={() => setOpenListing(null)} title="สินค้าบนร้าน" size="md" defaultExpanded={false} storageKey="platform-catalog-listing">
-        {openListing && (
+      {disp.dialog}
+      <NotListedPicker open={addPick} onClose={() => setAddPick(false)} platformId={platformId} brandId={brandId} where={where}
+        onPick={(ps) => { setAddPick(false); setAddFor(ps); }} />
+      {addFor && (
+        <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : undefined}
+          onClose={() => setAddFor(null)} onDone={() => { setAddFor(null); void reloadCurrent(); }} />
+      )}
+      <ListingDrawer listingId={openListing?.id ?? null} onClose={() => setOpenListing(null)} canPublish={canPublish} onChanged={onListingChanged}
+        matchTab={openListing ? (
           <div className="space-y-4 text-sm">
-            <div className="space-y-1.5">
-              <div className="text-slate-800 font-medium">{openListing.title || "—"}</div>
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
-                <span>ร้าน: <span className="text-slate-700">{where}</span></span>
-                <span>รหัสบนร้าน: <span className="font-mono text-slate-700">{openListing.external_product_id || "—"}</span></span>
-                <span>SKU: <span className="font-mono text-slate-700">{openListing.sku_code || "—"}</span></span>
-                <span>ราคา: <span className="text-slate-700">{openListing.price != null ? `${openListing.price.toLocaleString()}฿` : "—"}</span></span>
-              </div>
-            </div>
-
             <div className="border border-slate-200 rounded-xl p-3 space-y-2">
               <div className="text-xs font-semibold text-slate-600">จับคู่กับสินค้าในระบบ</div>
               {openListing.matched_parent_sku_id
@@ -1155,14 +1215,6 @@ export default function PlatformCatalogPage() {
               </div>
             )}
 
-            {/* ตัวเลือกบนร้าน ↔ SKU (ระบบจับเองด้วยรหัสตอนส่งราคา/สต๊อก) — LINE/Lazada มีข้อมูลตัวเลือก */}
-            {(platformCode === "line_shopping" || platformCode === "lazada") && (
-              <div className="border border-slate-200 rounded-xl p-3 space-y-2">
-                <div className="text-xs font-semibold text-slate-600">ตัวเลือกบนร้าน ↔ SKU ในระบบ</div>
-                <ListingVariantMap listingId={openListing.id} />
-              </div>
-            )}
-
             {/* ส่งราคาขึ้น LINE เฉพาะสินค้านี้ (เฉพาะ LINE + จับคู่แล้ว) */}
             {canEdit && platformCode === "line_shopping" && openListing.matched_parent_sku_id && (
               <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 space-y-1.5">
@@ -1180,8 +1232,7 @@ export default function PlatformCatalogPage() {
               <button onClick={() => void deleteListing()} disabled={deleting} className="text-[11px] text-slate-400 hover:text-rose-600 hover:underline disabled:opacity-50">{deleting ? "กำลังลบ…" : "🗑 นำเข้าผิด? ลบรายการนี้"}</button>
             )}
           </div>
-        )}
-      </ERPModal>
+        ) : null} />
 
       <ConfirmDialog
         open={dupKeepAsk && dupOthers.length > 0} onClose={() => { if (!ignoreBusy) setDupKeepAsk(false); }} loading={ignoreBusy}

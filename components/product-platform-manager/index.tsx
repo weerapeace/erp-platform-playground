@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { requiredChecks } from "@/lib/platform-required-fields";
 import { listingCtx } from "@/lib/platform-listing-builder";
 import { PlatformIcon } from "@/components/platform-icon";
+import { PlatformCategoryPicker } from "@/components/platform-category-picker";
 
 // ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -43,42 +44,6 @@ const PLATFORM_COLOR: Record<string, string> = {
 function platformColor(p: { code: string; theme_color: string | null }): string {
   if (p.theme_color && /^#[0-9a-fA-F]{6}$/.test(p.theme_color)) return p.theme_color;
   return PLATFORM_COLOR[p.code] ?? "#7c3aed";
-}
-
-// ค้นหา + เลือกหมวดหมู่ของแพลตฟอร์ม (จาก platform_category_options ที่นำเข้ามา) — คืนค่า "id · ชื่อ"
-function CategoryOptionPicker({ platformId, onPick }: { platformId: string; onPick: (label: string) => void }) {
-  const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<{ external_id: string; name_th: string; name_en: string }[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    let live = true; setLoading(true);
-    const t = setTimeout(async () => {
-      try { const j = await apiFetch(`/api/platform-category-options?${new URLSearchParams({ platform_id: platformId, search: q, limit: "30" })}`).then((r) => r.json()); if (live) { setResults(j.categories ?? []); setTotal(j.total ?? 0); } }
-      catch { if (live) setResults([]); } finally { if (live) setLoading(false); }
-    }, 250);
-    return () => { live = false; clearTimeout(t); };
-  }, [open, q, platformId]);
-  return (
-    <div className="relative">
-      <input value={q} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        placeholder="🔍 เลือกหมวดจาก LINE (พิมพ์ค้น เช่น กระเป๋า / bag)" className="h-9 w-full border border-violet-200 rounded-md px-2 text-sm" />
-      {open && (
-        <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-          {total === 0 ? <div className="p-3 text-xs text-amber-600">ยังไม่ได้นำเข้าหมวดหมู่ของแพลตฟอร์มนี้ — กด “📂 นำเข้าหมวดหมู่” ที่หน้าสินค้าบนแพลตฟอร์มก่อน</div>
-            : loading ? <div className="p-3 text-xs text-slate-400">กำลังค้นหา...</div>
-            : results.length === 0 ? <div className="p-3 text-xs text-slate-400">ไม่พบหมวดที่ตรง</div>
-            : results.map((c) => (
-              <button key={c.external_id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { onPick(`${c.external_id} · ${c.name_th || c.name_en}`); setOpen(false); setQ(""); }} className="block w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50">
-                <span className="text-slate-400 font-mono">{c.external_id}</span> {c.name_th || c.name_en}
-              </button>
-            ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ค้นหา + เลือกสินค้าบนร้าน (platform_catalog_listings) เพื่อจับคู่กับ Parent SKU นี้
@@ -646,7 +611,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   <div className="rounded-lg border border-slate-200 p-3 space-y-2">
                     <p className="text-xs font-medium text-slate-600">หมวดหมู่ปลายทาง — {activePf.name_th}</p>
                     <p className="text-[11px] text-slate-400">หมวดกลาง: <span className="text-slate-600">{parent.platform_category_name || "—"}</span></p>
-                    {canEdit && <CategoryOptionPicker platformId={active} onPick={(label) => { setCatInput(label); saveField("category_path", label); }} />}
+                    {canEdit && <PlatformCategoryPicker platformId={active} onPick={(label) => { setCatInput(label); saveField("category_path", label); }} />}
                     <ERPInput value={catInput} disabled={!canEdit} placeholder="หรือพิมพ์เอง เช่น Women's Bags > Shoulder Bags" onChange={(e) => setCatInput(e.target.value)} onBlur={() => saveField("category_path", catInput)} />
                     {!catInput.trim() && <p className="text-[11px] text-rose-600">⚠ ยังไม่ได้ตั้งค่าหมวดหมู่สำหรับแพลตฟอร์มนี้</p>}
                     {canEdit && (

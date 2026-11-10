@@ -10,6 +10,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { duplicateCounts, isGoneStatus, LIVE_LISTING_OR, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
 import { expectedLinePrice, linePriceDiff, matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
+import { lineEditStateFromRaw, listingHistoryText, type ListingDetailResponse } from "@/lib/line-listing-edit";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช้า → ถามเป็นชุด
@@ -320,4 +321,62 @@ export async function loadListingVariants(admin: Admin, listingId: string): Prom
     matched_parent_code: row.matched_parent_sku_id ? parentCode.get(row.matched_parent_sku_id) ?? null : null,
     supported, fetched, rows, counts: c, error: null,
   };
+}
+
+/**
+ * รายละเอียดสินค้าบนร้าน 1 รายการ (ลิ้นชักสินค้าบนร้าน) — ข้อมูล LINE ที่ดึงมา + คู่ในระบบ + ประวัติ
+ * อ่านอย่างเดียว · ตัวเลือก↔SKU/ราคาในระบบ ใช้ loadListingVariants (view=variants)
+ */
+export async function loadListingDetail(admin: Admin, listingId: string): Promise<ListingDetailResponse> {
+  const { data: l, error } = await admin.from("platform_catalog_listings")
+    .select("id, platform_id, brand_id, external_product_id, title, sku_code, status, matched_parent_sku_id, last_imported_at, line_raw:raw->line")
+    .eq("id", listingId).maybeSingle();
+  if (error) return { detail: null, error: "โหลดสินค้าบนร้านไม่สำเร็จ ลองใหม่อีกครั้ง" };
+  if (!l) return { detail: null, error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)" };
+  const r = l as { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; sku_code: string | null; status: string | null; matched_parent_sku_id: string | null; last_imported_at: string | null; line_raw: unknown };
+  const [{ data: pf }, parentRes, { data: logs }] = await Promise.all([
+    admin.from("erp_platforms").select("code").eq("id", r.platform_id).maybeSingle(),
+    r.matched_parent_sku_id ? admin.from("parent_skus_v2").select("code, name_th").eq("id", r.matched_parent_sku_id).maybeSingle() : Promise.resolve({ data: null }),
+    admin.from("audit_logs").select("created_at, metadata").eq("entity_type", "platform_catalog").eq("entity_id", r.id).order("created_at", { ascending: false }).limit(30),
+  ]);
+  const platformCode = String((pf as { code?: string } | null)?.code ?? "");
+  const parent = (parentRes as { data: { code: string | null; name_th: string | null } | null }).data;
+  const edit = platformCode === "line_shopping" ? lineEditStateFromRaw(r.line_raw) : null;
+  const lineObj = (r.line_raw && typeof r.line_raw === "object") ? r.line_raw as Record<string, unknown> : null;
+  return {
+    detail: {
+      id: r.id, platform_id: r.platform_id, platform_code: platformCode, brand_id: r.brand_id,
+      external_product_id: r.external_product_id, title: r.title, sku_code: r.sku_code, status: r.status,
+      matched_parent_sku_id: r.matched_parent_sku_id, matched_code: parent?.code ?? null, matched_name: parent?.name_th ?? null,
+      last_imported_at: r.last_imported_at,
+      line: edit && lineObj ? {
+        images: (Array.isArray(lineObj.imageUrls) ? lineObj.imageUrls : []).map((u) => String(u ?? "")).filter(Boolean),
+        display: typeof lineObj.isDisplay === "boolean" ? lineObj.isDisplay : null,
+        edit,
+      } : null,
+      history: ((logs ?? []) as { created_at: string; metadata: Record<string, unknown> | null }[]).map((a) => ({
+        at: a.created_at, actor: a.metadata && typeof a.metadata.actor === "string" ? a.metadata.actor : null, text: listingHistoryText(a.metadata),
+      })),
+    },
+    error: null,
+  };
+}
+
+/**
+ * สินค้าของแบรนด์ที่ยังไม่ได้ลงร้านนี้ (ปุ่ม "เพิ่มสินค้าขึ้นร้าน") — Parent SKU ที่เปิดใช้ ลบตัวที่จับคู่กับรายการที่ยังอยู่บนร้าน
+ * กฎเดียวกับแท็บ "ยังไม่ลง" ของมุมมองหน้าร้าน (นับเฉพาะรายการที่ยังอยู่บนร้าน)
+ */
+export async function loadNotListed(admin: Admin, platformId: string, brandId: string): Promise<ShopParent[]> {
+  type P = { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; platform_category_id: string | null };
+  const [parents, listed] = await Promise.all([
+    fetchAllPages<P>((from, to) => admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key, platform_category_id")
+      .eq("brand_id", brandId).eq("is_active", true).order("code", { ascending: true }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: P[] | null; error: unknown }>),
+    fetchAllPages<{ matched_parent_sku_id: string | null }>((from, to) => admin.from("platform_catalog_listings").select("matched_parent_sku_id")
+      .eq("platform_id", platformId).not("matched_parent_sku_id", "is", null).or(LIVE_LISTING_OR).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { matched_parent_sku_id: string | null }[] | null; error: unknown }>),
+  ]);
+  const listedIds = new Set(listed.map((x) => x.matched_parent_sku_id).filter(Boolean) as string[]);
+  return parents.filter((p) => !listedIds.has(p.id)).map((p) => ({
+    id: p.id, code: p.code ?? "", name: p.name_th, cover_key: p.cover_image_r2_key,
+    image_state: p.cover_image_r2_key ? "ok" as const : "none" as const, open_tasks: 0, category_id: p.platform_category_id,
+  }));
 }

@@ -1215,6 +1215,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "line-display-toggle", label: "เปิด/ปิดขายสินค้าบน LINE", code: "useLineDisplay", category: "feature",
+    source: { path: "components/platform-catalog/use-line-display" },
+    what: "เปิด/ปิดขายรายการบนร้าน LINE ทีละตัวหรือหลายตัว — ถามก่อนเสมอ (เกิน 20 ต้องพิมพ์ยืนยัน) · ส่งทีละ 200 · แก้สำเนาในระบบ + ประวัติฝั่ง API (/api/line-shopping/listing-display)",
+    when: "สวิตช์ \"เปิดขาย\" ในแถว/การ์ด/ลิ้นชักสินค้าบนร้าน + ปุ่มเปิด/ปิดขายของแถบเลือกหลายตัว (แท็บจับคู่ · มุมมองหน้าร้าน)",
+    notWhen: "เปิด/ปิดขายจากหน้า Parent SKU (ใช้ร่างของสินค้า) ให้ใช้ /api/line-shopping/set-display เดิมใน ProductPlatformManager",
+    doc: "platform-catalog.md",
+  },
+  {
     key: "color-swatch-manager", label: "ทะเบียนสีกลาง", code: "ColorSwatchManager", category: "feature",
     source: { path: "components/color-swatch-manager" },
     what: "ตั้งหน้าตาจุดสีของแต่ละชื่อสี",
