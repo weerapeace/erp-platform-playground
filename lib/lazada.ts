@@ -6,7 +6,7 @@
 // การเซ็นคำขอ (sha256): sign = HMAC-SHA256( apiPath + concat(sortedParams key+value), app_secret ) → hex ตัวใหญ่
 // ============================================================
 
-import { lazSkuLabel } from "@/lib/lazada-listing-edit";
+import { lazSkuLabel, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 
 export const LAZADA_AUTH_BASE = "https://auth.lazada.com/rest";
 
@@ -142,20 +142,31 @@ export async function lazGetCategoryTree(gateway: string, accessToken: string): 
   return (j.data as LazCategoryNode[]) ?? [];
 }
 
-export type LazAttribute = { name: string; label: string; required: boolean; input_type: string; is_sale_prop: boolean; options: string[] };
+/** 1 ช่องคุณสมบัติของหมวด — รูปเดียวกับ LazadaAttrDef (lib/lazada-listing-edit · ลิ้นชักใช้) · options = ชื่อภาษาร้าน (หน้า /admin/lazada-categories ใช้) */
+export type LazAttribute = LazadaAttrDef;
 const truthy = (v: unknown) => v === 1 || v === true || String(v) === "1" || String(v) === "true";
-// คุณสมบัติที่หมวดนี้ต้องการ (name/label/บังคับ/ชนิด input/ตัวเลือก)
-export async function lazGetCategoryAttributes(gateway: string, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
-  const j = await lazApiGet(gateway, "/category/attributes/get", accessToken, { primary_category_id: String(categoryId) });
-  const rows = (j.data as Record<string, unknown>[]) ?? [];
-  return rows.map((a) => ({
+/** แปลง 1 แถวจาก /category/attributes/get (pure · มี test) — ค่าที่ต้องส่งกลับคือ en_name (คู่มือ) */
+export function lazAttributeFromApi(a: Record<string, unknown>): LazAttribute {
+  const opts = Array.isArray(a.options) ? (a.options as Record<string, unknown>[]) : [];
+  const choices = opts.map((o) => ({ name: String(o.name ?? o.en_name ?? "").trim(), en: String(o.en_name ?? o.name ?? "").trim() })).filter((c) => c.en);
+  const adv = a.advanced && typeof a.advanced === "object" ? a.advanced as Record<string, unknown> : {};
+  return {
     name: String(a.name ?? ""),
     label: String(a.label ?? a.name ?? ""),
     required: truthy(a.is_mandatory),
     input_type: String(a.input_type ?? ""),
     is_sale_prop: truthy(a.is_sale_prop),
-    options: Array.isArray(a.options) ? (a.options as Record<string, unknown>[]).map((o) => String(o.name ?? "")).filter(Boolean) : [],
-  }));
+    attribute_type: String(a.attribute_type ?? "normal"),
+    is_key_prop: truthy(adv.is_key_prop ?? a.is_key_prop),
+    options: choices.map((c) => c.name).filter(Boolean),
+    choices,
+  };
+}
+// คุณสมบัติที่หมวดนี้ต้องการ (name/label/บังคับ/ชนิด input/ตัวเลือก + en_name/KEY/ระดับ)
+export async function lazGetCategoryAttributes(gateway: string, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
+  const j = await lazApiGet(gateway, "/category/attributes/get", accessToken, { primary_category_id: String(categoryId) });
+  const rows = (j.data as Record<string, unknown>[]) ?? [];
+  return rows.map(lazAttributeFromApi);
 }
 
 // ---- สถานะกุญแจ (pure · มี test) ----

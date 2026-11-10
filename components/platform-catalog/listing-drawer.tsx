@@ -37,7 +37,7 @@ import { VariantStructureEditor } from "./variant-structure-editor";
 import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
-import { LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
+import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
@@ -47,7 +47,7 @@ const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อเปิดลิ้นชักเท่านั้น
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
 
-type Tab = "info" | "images" | "options" | "match" | "history";
+type Tab = "info" | "attrs" | "images" | "options" | "match" | "history";
 const baht = (n: number | null | undefined) => (n == null ? "—" : `${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}฿`);
 const thDateTime = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); };
 const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() === "" || !Number.isFinite(n) ? null : n; };
@@ -121,7 +121,9 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const laz = useLazadaListing(isLazada ? listingId : null, useCallback(() => setReload((n) => n + 1), []));
   // เฟส 2 (แก้ร้านจริง · ถามก่อนเสมอ): สิทธิ์เดียวกับ LINE (products.platforms.publish) · รายการที่ไม่อยู่บนร้านแล้วแก้ไม่ได้
   const lazCanEdit = canPublish && isLazada && detail?.status !== "removed";
-  const lazEdit = useLazadaEdit(laz, lazCanEdit, useCallback((name: string) => { if (listingId) onChanged?.(listingId, { title: name }); setReload((n) => n + 1); }, [listingId, onChanged]));
+  // เฟส B: รายการช่องข้อมูลเฉพาะของหมวด (โหลดเมื่อเปิดแท็บข้อมูลเฉพาะ)
+  const lazDefs = useLazadaAttrDefs(isLazada ? detail?.brand_id ?? null : null, isLazada ? laz.view?.categoryId ?? null : null);
+  const lazEdit = useLazadaEdit(laz, lazCanEdit, useCallback((name: string) => { if (listingId) onChanged?.(listingId, { title: name }); setReload((n) => n + 1); }, [listingId, onChanged]), lazDefs.defs);
   const lazDisp = useLazadaDisplay(laz, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
 
   const disp = useLineDisplay((results) => {
@@ -192,6 +194,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const optCount = form ? form.variants.length : lazView ? lazView.skus.length : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
+    ...(isLazada ? [{ key: "attrs" as Tab, label: "ข้อมูลเฉพาะ" }] : []),
     { key: "images", label: `รูป${imgCount != null ? ` (${imgCount})` : ""}` },
     { key: "options", label: `ตัวเลือก & ราคา${optCount != null ? ` (${optCount})` : ""}` },
     { key: "match", label: "จับคู่" },
@@ -453,6 +456,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
+                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}

@@ -102,6 +102,8 @@ export type LazadaListingView = {
   promoLong: string | null;
   /** ชั้นตัวเลือกที่ใส่รูปได้ (Lazada: เฉพาะชั้นแรก และต้องไม่ใช่ไซซ์) · null = ไม่มีข้อมูลชั้นตัวเลือก */
   imageVariation: { name: string; label: string; isSize: boolean } | null;
+  /** เฟส B: ค่าคุณสมบัติทุกช่องของสินค้า (attributes ของ Lazada เป็นข้อความ · หลายค่าคั่น ",") ไม่รวม HTML/รูป */
+  attributes: Record<string, string>;
 };
 
 /** วันที่ราคาลด — Lazada ส่งทั้งข้อความวันที่ และเลขมิลลิวินาที → ข้อความสั้น "YYYY-MM-DD HH:mm" (เวลาไทย) */
@@ -169,7 +171,20 @@ export function lazadaListingView(item: unknown): LazadaListingView | null {
     promoSquare: lazImageList(a.promotion_square_image)[0] ?? null,
     promoLong: lazImageList(a.promotion_long_image)[0] ?? null,
     imageVariation,
+    attributes: lazAttrValues(a),
   };
+}
+
+const ATTR_VALUE_SKIP = new Set(["description", "description_en", "short_description", "short_description_en", "promotion_square_image", "promotion_long_image"]);
+/** attributes ของ Lazada → ข้อความต่อช่อง (ตัวเลข/ข้อความ/รายการ) · ข้าม HTML รายละเอียดและรูป */
+export function lazAttrValues(a: Obj): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(a)) {
+    if (ATTR_VALUE_SKIP.has(k) || v == null) continue;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = String(v);
+    else if (Array.isArray(v) && v.every((x) => typeof x === "string" || typeof x === "number")) out[k] = v.join(",");
+  }
+  return out;
 }
 
 /** สถานะสินค้าบน Lazada → ป้ายภาษาคน + โทนสี (ใช้ในหัวลิ้นชัก) */
@@ -245,7 +260,7 @@ function imageListChange(before: string[], after: string[]): string {
 export type LazadaEditChange = { label: string; before: string; after: string };
 export type LazadaEditPlan = {
   /** ช่องที่จะส่ง (เฉพาะที่เปลี่ยน) · shortDescription เป็น HTML แล้ว */
-  fields: { name?: string; description?: string; shortDescription?: string; /** เฟส 4: รูปสินค้าทั้งชุดตามลำดับ (ref) */ images?: string[]; /** รูปส่งเสริม 1:1 / 3:4 (ref) */ promoSquare?: string; promoLong?: string };
+  fields: { name?: string; description?: string; shortDescription?: string; /** เฟส 4: รูปสินค้าทั้งชุดตามลำดับ (ref) */ images?: string[]; /** รูปส่งเสริม 1:1 / 3:4 (ref) */ promoSquare?: string; promoLong?: string; /** เฟส B: คุณสมบัติ (ชื่อช่อง → ค่าที่ส่ง เช่น en_name) */ attrs?: Record<string, string> };
   changes: LazadaEditChange[];
   errors: string[];
   warnings: string[];
@@ -389,6 +404,89 @@ export function planLazadaSkuMedia(before: LazadaSkuMediaRow[], after: LazadaSku
   return { extras, changes, errors, warnings };
 }
 
+// ═════════════════════════════ เฟส B: ข้อมูลเฉพาะของสินค้า + ประกัน + ห่อของขวัญ (แตะร้านจริง) ═════════════════════════════
+//  รายการช่องมาจาก /category/attributes/get ของหมวดสินค้า (ดึงสด) · ค่าที่ส่ง = en_name ของตัวเลือก (คู่มือ) · เลือกนอกรายการไม่ได้ (4115/4140)
+//  ช่องจำเป็นขาด → Lazada ไม่ให้แก้สินค้า (ตั้งแต่ 2024-06) → เตือน · ยี่ห้อ (brand_id) ดูอย่างเดียว
+
+export type LazadaAttrChoice = { name: string; en: string };
+/** 1 ช่องคุณสมบัติของหมวด (lib/lazada lazGetCategoryAttributes ส่งรูปนี้) */
+export type LazadaAttrDef = {
+  name: string; label: string; required: boolean; input_type: string; is_sale_prop: boolean;
+  /** normal = ระดับสินค้า · sku = ระดับตัวเลือก */
+  attribute_type: string;
+  /** ป้าย KEY ใน Seller Center (ช่วยการค้นหา ไม่บังคับ) */
+  is_key_prop: boolean;
+  /** ชื่อตัวเลือก (ภาษาร้าน) — คงไว้ให้หน้าเดิมใช้ */
+  options: string[];
+  choices: LazadaAttrChoice[];
+};
+
+const ATTR_EDIT_SKIP = new Set(["name", "name_en", "description", "description_en", "short_description", "short_description_en", "brand", "brand_id", "video", "promotion_square_image", "promotion_long_image", "Hazmat"]);
+const ATTR_INPUTS = new Set(["singleSelect", "multiSelect", "enumInput", "multiEnumInput", "text", "numeric", "date"]);
+export const LAZ_WARRANTY_ATTRS = ["warranty_type", "warranty", "product_warranty", "product_warranty_en"];
+export const LAZ_GIFT_ATTR = "gift_wrapping";
+const SELECT_INPUTS = new Set(["singleSelect", "multiSelect"]);
+const MULTI_INPUTS = new Set(["multiSelect", "multiEnumInput"]);
+
+/** ช่องที่แก้จากลิ้นชักได้ (ระดับสินค้า · ไม่ใช่ตัวเลือกขาย · ไม่ใช่ชื่อ/รายละเอียด/ยี่ห้อ/รูป) */
+export const lazAttrEditable = (d: LazadaAttrDef) => d.attribute_type !== "sku" && !d.is_sale_prop && !ATTR_EDIT_SKIP.has(d.name) && ATTR_INPUTS.has(d.input_type);
+export const lazAttrGroup = (d: LazadaAttrDef): "spec" | "warranty" | "gift" => (d.name === LAZ_GIFT_ATTR ? "gift" : LAZ_WARRANTY_ATTRS.includes(d.name) ? "warranty" : "spec");
+
+/** หมวดไม่ส่งช่องห่อของขวัญมา → เติมให้ (Yes/No ตามคู่มือ · Lazada เปิดให้เฉพาะร้านที่อนุญาต) */
+export function lazAttrDefsWithExtras(defs: LazadaAttrDef[]): LazadaAttrDef[] {
+  if (defs.some((d) => d.name === LAZ_GIFT_ATTR)) return defs;
+  return [...defs, { name: LAZ_GIFT_ATTR, label: "บริการห่อของขวัญ", required: false, input_type: "singleSelect", is_sale_prop: false, attribute_type: "normal", is_key_prop: false, options: ["Yes", "No"], choices: [{ name: "เปิด", en: "Yes" }, { name: "ปิด", en: "No" }] }];
+}
+
+const ci = (s: string) => s.trim().toLowerCase();
+const findChoice = (d: LazadaAttrDef, v: string) => d.choices.find((c) => ci(c.en) === ci(v) || ci(c.name) === ci(v)) ?? null;
+/** ค่าที่ส่งให้ Lazada (ตัวเลือก → en_name · หลายค่า → คั่น ",") — ไม่เจอในรายการ = คงค่าเดิม (ตรวจในแผน) */
+export function lazNormAttr(d: LazadaAttrDef, v: string | null | undefined): string {
+  const t = String(v ?? "").trim();
+  if (!t) return "";
+  const one = (x: string) => (d.choices.length ? findChoice(d, x)?.en ?? x.trim() : x.trim());
+  return MULTI_INPUTS.has(d.input_type) ? t.split(",").map((x) => x.trim()).filter(Boolean).map(one).join(",") : one(t);
+}
+/** ค่าที่โชว์คน (ชื่อตัวเลือกภาษาร้าน) */
+export function lazAttrDisplay(d: LazadaAttrDef, v: string | null | undefined): string {
+  const t = String(v ?? "").trim();
+  if (!t) return "";
+  const one = (x: string) => findChoice(d, x)?.name || x.trim();
+  return MULTI_INPUTS.has(d.input_type) ? t.split(",").map((x) => x.trim()).filter(Boolean).map(one).join(", ") : one(t);
+}
+
+export type LazadaAttrPlan = { attrs: Record<string, string>; changes: LazadaEditChange[]; errors: string[]; warnings: string[]; missingRequired: string[] };
+/** เทียบค่าคุณสมบัติในฟอร์มกับของบนร้าน → ส่งอะไร (en_name) / ตรวจไม่ผ่าน / ช่องจำเป็นที่ขาด (หน้าเว็บกับ API ใช้ตัวเดียวกัน) */
+export function planLazadaAttrs(defs: LazadaAttrDef[], before: Record<string, string>, after: Record<string, string>): LazadaAttrPlan {
+  const attrs: Record<string, string> = {}; const changes: LazadaEditChange[] = []; const errors: string[] = []; const warnings: string[] = [];
+  const editable = lazAttrDefsWithExtras(defs).filter(lazAttrEditable);
+  for (const d of editable) {
+    if (!(d.name in after)) continue;
+    const b = lazNormAttr(d, before[d.name]); const a = lazNormAttr(d, after[d.name]);
+    if (a === b) continue;
+    if (!a) { errors.push(d.required ? `${d.label}: ช่องจำเป็น ห้ามว่าง` : `${d.label}: ล้างค่ายังไม่รองรับ — เลือกค่าใหม่แทน`); continue; }
+    if (SELECT_INPUTS.has(d.input_type) && d.choices.length) {
+      const parts = MULTI_INPUTS.has(d.input_type) ? a.split(",") : [a];
+      const bad = parts.filter((x) => !d.choices.some((c) => c.en === x));
+      if (bad.length) { errors.push(`${d.label}: ต้องเลือกจากรายการของ Lazada (“${bad[0]}” ไม่มีในรายการ)`); continue; }
+    }
+    if (d.input_type === "numeric" && !/^-?\d+(\.\d+)?(\s+\S.*)?$/.test(a)) { errors.push(`${d.label}: ต้องเป็นตัวเลข`); continue; }
+    if (a.length > 1000) { errors.push(`${d.label}: ยาวเกิน 1,000 ตัวอักษร`); continue; }
+    attrs[d.name] = a;
+    changes.push({ label: lazAttrGroup(d) === "spec" ? `ข้อมูลเฉพาะ: ${d.label}` : d.label, before: lazAttrDisplay(d, b) || "(ว่าง)", after: lazAttrDisplay(d, a) });
+    if (d.name === LAZ_GIFT_ATTR) warnings.push("บริการห่อของขวัญ: Lazada เปิดให้เฉพาะร้านที่ได้รับอนุญาต — ถ้าไม่รับ ระบบจะบอก (เปิดเองได้ใน Seller Center)");
+  }
+  const missingRequired = editable.filter((d) => d.required && !lazNormAttr(d, d.name in after ? after[d.name] : before[d.name])).map((d) => d.label);
+  if (missingRequired.length) warnings.push(`ช่องจำเป็นยังว่าง ${missingRequired.length} ช่อง (${missingRequired.slice(0, 4).join(", ")}${missingRequired.length > 4 ? " …" : ""}) — Lazada อาจไม่ให้บันทึกสินค้านี้จนกว่าจะกรอกครบ`);
+  return { attrs, changes, errors, warnings, missingRequired };
+}
+
+/** กรอกแล้วกี่ช่อง (ช่องข้อมูลเฉพาะที่แก้ได้) — แถบ Fill rate */
+export function lazAttrFill(defs: LazadaAttrDef[], values: Record<string, string>): { filled: number; total: number } {
+  const ed = lazAttrDefsWithExtras(defs).filter((d) => lazAttrEditable(d) && lazAttrGroup(d) === "spec");
+  return { filled: ed.filter((d) => !!lazNormAttr(d, values[d.name])).length, total: ed.length };
+}
+
 /** ใช้รูปชุดนี้กับทุกตัวเลือกที่ค่าชั้นแรกเดียวกัน (เช่น สีดำทุกไซซ์) — groupOf = skuId → ค่าชั้นแรก (pure · มี test) */
 export function lazApplyImagesToGroup(rows: LazadaSkuMediaRow[], skuId: string, images: string[], groupOf: Map<string, string | null>): { rows: LazadaSkuMediaRow[]; count: number } {
   const g = groupOf.get(skuId) ?? null;
@@ -427,6 +525,8 @@ export function lazUpdateProductXml(itemId: string, skus: LazSkuRef[], fields: L
     // รูปส่งเสริม: คู่มือเขียนเป็น JSON array (≤ 1 รูป) แต่ไม่บอกรูปแบบ XML → ส่งลิงก์เดียว · route ดึงกลับเช็กว่าติดจริง
     fields.promoSquare != null ? `<promotion_square_image>${cdata(fields.promoSquare)}</promotion_square_image>` : "",
     fields.promoLong != null ? `<promotion_long_image>${cdata(fields.promoLong)}</promotion_long_image>` : "",
+    // เฟส B: คุณสมบัติ — แท็ก = ชื่อช่องของ Lazada (อังกฤษ) · ชื่อแปลก ๆ ข้าม (กันแท็ก XML พัง)
+    ...Object.entries(fields.attrs ?? {}).filter(([k]) => /^[A-Za-z][A-Za-z0-9_]*$/.test(k)).map(([k, v]) => `<${k}>${cdata(v)}</${k}>`),
   ].join("");
   const imgs = (list: string[]) => `<Images>${list.map((u) => `<Image>${cdata(u)}</Image>`).join("")}</Images>`;
   // รูปสินค้า (เฟส 4) อยู่นอก Skus · ต้องเป็นลิงก์ Lazada แล้ว (ผู้เรียกฝากรูป r2: ก่อน)
@@ -620,6 +720,7 @@ export function lazViewAfterWrite(view: LazadaListingView, w: { fields?: LazadaE
     name: f.name ?? view.name, description: f.description ?? view.description, shortDescription: f.shortDescription ?? view.shortDescription,
     images: f.images ?? view.images,
     promoSquare: f.promoSquare ?? view.promoSquare, promoLong: f.promoLong ?? view.promoLong,
+    attributes: f.attrs ? { ...view.attributes, ...f.attrs } : view.attributes,
     skus, status: w.statusOverride && w.statusOverride.size ? (anyOpen ? "Active" : "InActive") : view.status,
   };
 }

@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { lazAttributeFromApi } from "./lazada";
 import {
   lazadaListingView, lazImageList, lazDateText, lazSkuLabel, lazStatusBadge,
   highlightsToLines, linesToHighlights, lazadaEditStateFromView, planLazadaEdit, foreignDescImages,
   lazUpdateProductXml, lazDeactivateXml, planLazadaDisplay, lazViewAfterWrite, lazRawAfterStatus,
   lazadaPriceRowsFromView, planLazadaPrices, lazPriceQuantityXml, applyLazadaBulkPrice, lazSaleDateText,
   lazadaSkuMediaFromView, planLazadaSkuMedia, lazMigrateImageXml, lazResolveRefs, lazImageRefOk, lazApplyImagesToGroup,
+  lazAttrDefsWithExtras, lazAttrEditable, lazAttrGroup, lazNormAttr, lazAttrDisplay, planLazadaAttrs, lazAttrFill, lazAttrValues, type LazadaAttrDef,
 } from "./lazada-listing-edit";
 
 // รูปแบบตามคู่มือ /product/item/get (open.lazada.com · สำรวจ 2026-11-10)
@@ -422,5 +424,70 @@ describe("เฟส A: รูปส่งเสริม + รูปตัวเ
     expect(planLazadaSkuMedia(full, many, { label: "Size", isSize: true }).errors[0]).toContain("ไซซ์");
     expect(planLazadaSkuMedia(full, many, { label: "Color", isSize: false }).extras.get("127317001489")?.images).toHaveLength(3);
     expect(planLazadaSkuMedia(full, full.map((r, k) => (k === 0 ? { ...r, images: Array.from({ length: 9 }, (_, i) => `r2:${i}`) } : r))).errors[0]).toContain("8");
+  });
+});
+
+describe("เฟส B: ข้อมูลเฉพาะ + ประกัน + ห่อของขวัญ", () => {
+  const defs: LazadaAttrDef[] = [
+    { name: "material", label: "วัสดุ", required: true, input_type: "singleSelect", is_sale_prop: false, attribute_type: "normal", is_key_prop: false, options: ["หนังแท้", "ผ้า"], choices: [{ name: "หนังแท้", en: "Genuine Leather" }, { name: "ผ้า", en: "Fabric" }] },
+    { name: "bag_features", label: "คุณสมบัติกระเป๋า", required: false, input_type: "multiSelect", is_sale_prop: false, attribute_type: "normal", is_key_prop: true, options: [], choices: [{ name: "กันน้ำ", en: "Waterproof" }, { name: "มีช่องซิป", en: "Zipper Pocket" }] },
+    { name: "style", label: "สไตล์", required: false, input_type: "enumInput", is_sale_prop: false, attribute_type: "normal", is_key_prop: true, options: [], choices: [{ name: "ไม่เป็นทางการ", en: "Casual" }, { name: "สง่างาม", en: "Elegant" }] },
+    { name: "warranty_type", label: "การรับประกัน", required: false, input_type: "singleSelect", is_sale_prop: false, attribute_type: "normal", is_key_prop: false, options: [], choices: [{ name: "มีการรับประกัน", en: "Local seller warranty" }, { name: "ไม่มีการรับประกัน", en: "No Warranty" }] },
+    { name: "warranty", label: "ระยะเวลาการรับประกัน", required: false, input_type: "enumInput", is_sale_prop: false, attribute_type: "normal", is_key_prop: false, options: [], choices: [{ name: "1 ปี", en: "1 Year" }, { name: "2 ปี", en: "2 Years" }] },
+    { name: "color_family", label: "สี", required: true, input_type: "singleSelect", is_sale_prop: true, attribute_type: "sku", is_key_prop: false, options: [], choices: [] },
+    { name: "brand", label: "ยี่ห้อ", required: true, input_type: "singleSelect", is_sale_prop: false, attribute_type: "normal", is_key_prop: false, options: [], choices: [] },
+    { name: "package_content", label: "สิ่งที่อยู่ในกล่อง", required: false, input_type: "text", is_sale_prop: false, attribute_type: "normal", is_key_prop: false, options: [], choices: [] },
+  ];
+  const before = { material: "หนังแท้", style: "Casual", brand: "No Brand" };
+  it("แปลงจาก API: en_name + KEY + ระดับ (คงชื่อตัวเลือกเดิมให้หน้าเดิม)", () => {
+    const a = lazAttributeFromApi({ name: "material", label: "วัสดุ", is_mandatory: 1, input_type: "singleSelect", attribute_type: "normal", advanced: { is_key_prop: 1 }, options: [{ name: "หนังแท้", en_name: "Genuine Leather", id: 1 }] });
+    expect(a).toMatchObject({ required: true, is_key_prop: true, attribute_type: "normal", options: ["หนังแท้"], choices: [{ name: "หนังแท้", en: "Genuine Leather" }] });
+  });
+  it("ช่องที่แก้ได้: ไม่รวมยี่ห้อ/ตัวเลือกขาย · จัดกลุ่มประกัน/ห่อของขวัญ · เติมช่องห่อของขวัญถ้าหมวดไม่มี", () => {
+    const ed = lazAttrDefsWithExtras(defs).filter(lazAttrEditable).map((d) => d.name);
+    expect(ed).toEqual(["material", "bag_features", "style", "warranty_type", "warranty", "package_content", "gift_wrapping"]);
+    expect(lazAttrGroup(defs[3])).toBe("warranty");
+    expect(lazAttrGroup(lazAttrDefsWithExtras(defs).at(-1)!)).toBe("gift");
+  });
+  it("ค่าที่ส่ง = en_name (รับได้ทั้งชื่อไทย/อังกฤษ) · ค่าที่โชว์ = ชื่อไทย", () => {
+    expect(lazNormAttr(defs[0], "หนังแท้")).toBe("Genuine Leather");
+    expect(lazNormAttr(defs[1], "กันน้ำ, Zipper Pocket")).toBe("Waterproof,Zipper Pocket");
+    expect(lazAttrDisplay(defs[1], "Waterproof,Zipper Pocket")).toBe("กันน้ำ, มีช่องซิป");
+    expect(lazNormAttr(defs[2], "ลายพราง")).toBe("ลายพราง");   // enumInput = พิมพ์เองได้
+  });
+  it("ค่าเดิมเป็นชื่อไทย เลือกค่าเดียวกันแบบอังกฤษ = ไม่ถือว่าเปลี่ยน", () => {
+    const p = planLazadaAttrs(defs, before, { ...before, material: "Genuine Leather" });
+    expect(p.changes).toEqual([]);
+  });
+  it("แก้สไตล์ + ประกัน → ส่ง en_name · ป้ายก่อน → หลังเป็นไทย", () => {
+    const p = planLazadaAttrs(defs, before, { ...before, style: "Elegant", warranty_type: "Local seller warranty", warranty: "2 ปี" });
+    expect(p.errors).toEqual([]);
+    expect(p.attrs).toEqual({ style: "Elegant", warranty_type: "Local seller warranty", warranty: "2 Years" });
+    expect(p.changes.find((c) => c.label === "ข้อมูลเฉพาะ: สไตล์")).toMatchObject({ before: "ไม่เป็นทางการ", after: "สง่างาม" });
+    expect(p.changes.find((c) => c.label === "การรับประกัน")).toMatchObject({ before: "(ว่าง)", after: "มีการรับประกัน" });
+  });
+  it("เลือกนอกรายการ (select) = ไม่ผ่าน · ช่องจำเป็นห้ามว่าง · ล้างช่องไม่จำเป็น = ยังไม่รองรับ", () => {
+    expect(planLazadaAttrs(defs, before, { ...before, material: "เหล็ก" }).errors[0]).toContain("ต้องเลือกจากรายการ");
+    expect(planLazadaAttrs(defs, before, { ...before, material: "" }).errors[0]).toContain("ช่องจำเป็น");
+    expect(planLazadaAttrs(defs, before, { ...before, style: "" }).errors[0]).toContain("ล้างค่า");
+  });
+  it("ห่อของขวัญ → ส่ง Yes + เตือนต้องได้รับอนุญาต", () => {
+    const p = planLazadaAttrs(defs, before, { ...before, gift_wrapping: "Yes" });
+    expect(p.attrs).toEqual({ gift_wrapping: "Yes" });
+    expect(p.warnings.join(" ")).toContain("ได้รับอนุญาต");
+  });
+  it("ช่องจำเป็นยังว่าง = เตือน (ไม่บล็อก) + นับ Fill rate", () => {
+    const p = planLazadaAttrs(defs, {}, { style: "Elegant" });
+    expect(p.missingRequired).toEqual(["วัสดุ"]);
+    expect(p.warnings.join(" ")).toContain("ช่องจำเป็นยังว่าง 1 ช่อง");
+    expect(lazAttrFill(defs, before)).toEqual({ filled: 2, total: 4 });
+  });
+  it("XML: คุณสมบัติใน Attributes (ชื่อช่องแปลก ๆ ข้าม)", () => {
+    const x = lazUpdateProductXml("9", [{ skuId: "1", sellerSku: null, status: "active" }], { attrs: { warranty: "2 Years", "bad tag": "x" } });
+    expect(x).toContain("<Attributes><warranty><![CDATA[2 Years]]></warranty></Attributes>");
+    expect(x).not.toContain("bad tag");
+  });
+  it("อ่านค่าคุณสมบัติจากสินค้า (ข้าม HTML/รูป · รายการคั่น ,)", () => {
+    expect(lazAttrValues({ name: "x", material: "Genuine Leather", tags: ["a", "b"], description: "<p>x</p>", promotion_square_image: ["u"] })).toEqual({ name: "x", material: "Genuine Leather", tags: "a,b" });
   });
 });

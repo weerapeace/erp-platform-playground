@@ -30,6 +30,7 @@ import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } 
 import {
   applyLazadaBulkPrice, lazadaEditStateFromView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazStatusBadge, planLazadaDisplay, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia, LAZADA_NAME_MAX, MAX_LAZADA_IMAGES,
   lazApplyImagesToGroup, lazSystemImageKey, type LazadaSkuMediaPlan, type LazadaSkuMediaRow,
+  planLazadaAttrs, lazAttrDefsWithExtras, lazAttrEditable, lazAttrGroup, lazAttrDisplay, lazAttrFill, lazNormAttr, type LazadaAttrDef, type LazadaAttrPlan,
   type LazadaEditChange, type LazadaEditPlan, type LazadaEditState, type LazadaListingDetailResponse, type LazadaListingView, type LazadaPricePlan, type LazadaPriceRow, type LazadaSkuView, type LazadaWriteResponse,
 } from "@/lib/lazada-listing-edit";
 
@@ -114,6 +115,10 @@ export type LazadaEditApi = {
   setSkuMedia: (skuId: string, patch: Partial<LazadaSkuMediaRow>) => void;
   /** แทนทั้งชุด (เช่น ใช้รูปกับทุกตัวเลือกสีเดียวกัน) */
   setSkuMediaRows: (rows: LazadaSkuMediaRow[]) => void;
+  /** เฟส B: ข้อมูลเฉพาะ/ประกัน/ห่อของขวัญ (ชื่อช่อง → ค่า) · แผนคำนวณเมื่อโหลดรายการช่องของหมวดแล้ว */
+  attrs: Record<string, string> | null;
+  setAttr: (name: string, value: string) => void;
+  attrPlan: LazadaAttrPlan | null;
   skuPlan: LazadaSkuMediaPlan | null;
   setImages: (next: string[]) => void;
   setPrice: (skuId: string, patch: Partial<LazadaPriceRow>) => void;
@@ -131,7 +136,7 @@ export type LazadaEditApi = {
   dialog: ReactNode;
 };
 
-export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSaved?: (name: string) => void): LazadaEditApi {
+export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSaved?: (name: string) => void, attrDefs?: LazadaAttrDef[] | null): LazadaEditApi {
   const toast = useToast();
   const base = useMemo(() => (state.view ? lazadaEditStateFromView(state.view) : null), [state.view]);
   const priceBase = useMemo(() => (state.view ? lazadaPriceRowsFromView(state.view) : null), [state.view]);
@@ -139,6 +144,11 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
   const [skuMedia, setSkuMediaState] = useState<LazadaSkuMediaRow[] | null>(null);
   useEffect(() => { setSkuMediaState(skuBase ? skuBase.map((r) => ({ ...r, images: [...r.images] })) : null); }, [skuBase]);
   const skuPlan = useMemo(() => (skuBase && skuMedia ? planLazadaSkuMedia(skuBase, skuMedia, state.view?.imageVariation) : null), [skuBase, skuMedia, state.view]);
+  // เฟส B: คุณสมบัติ (เริ่มจากค่าบนร้าน · แผนต้องรู้รายการช่องของหมวด)
+  const attrBase = useMemo(() => (state.view ? state.view.attributes : null), [state.view]);
+  const [attrs, setAttrs] = useState<Record<string, string> | null>(null);
+  useEffect(() => { setAttrs(attrBase ? { ...attrBase } : null); }, [attrBase]);
+  const attrPlan = useMemo(() => (attrDefs && attrBase && attrs ? planLazadaAttrs(attrDefs, attrBase, attrs) : null), [attrDefs, attrBase, attrs]);
   const [form, setForm] = useState<LazadaEditState | null>(null);
   const [prices, setPricesState] = useState<LazadaPriceRow[] | null>(null);
   const [descEdit, setDescEdit] = useState(false);
@@ -149,12 +159,12 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
   useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
   const plan = useMemo(() => (base && form ? planLazadaEdit(base, form) : null), [base, form]);
   const pricePlan = useMemo(() => (priceBase && prices ? planLazadaPrices(priceBase, prices) : null), [priceBase, prices]);
-  const infoDirty = (!!plan && plan.changes.length > 0) || (!!skuPlan && skuPlan.changes.length > 0);   // ข้อมูล + รูป + กล่อง ส่งทาง listing-edit
+  const infoDirty = (!!plan && plan.changes.length > 0) || (!!skuPlan && skuPlan.changes.length > 0) || (!!attrPlan && attrPlan.changes.length > 0);   // ข้อมูล + รูป + กล่อง + คุณสมบัติ ส่งทาง listing-edit
   const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
   const dirty = infoDirty || priceDirty;
-  const changes = [...(plan?.changes ?? []), ...(skuPlan?.changes ?? []), ...(pricePlan?.changes ?? [])];
-  const errors = [...(plan?.errors ?? []), ...(skuPlan?.errors ?? []), ...(pricePlan?.errors ?? [])];
-  const warnings = [...(plan?.warnings ?? []), ...(skuPlan?.warnings ?? []), ...(pricePlan?.warnings ?? [])];
+  const changes = [...(plan?.changes ?? []), ...(skuPlan?.changes ?? []), ...(attrPlan?.changes ?? []), ...(pricePlan?.changes ?? [])];
+  const errors = [...(plan?.errors ?? []), ...(skuPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(pricePlan?.errors ?? [])];
+  const warnings = [...(plan?.warnings ?? []), ...(skuPlan?.warnings ?? []), ...(attrPlan && attrPlan.changes.length ? attrPlan.warnings : []), ...(pricePlan?.warnings ?? [])];
 
   const post = async (url: string, payload: unknown) => {
     const r = await apiFetch(url, { method: "POST", body: JSON.stringify(payload) });
@@ -169,7 +179,7 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
     let saved = false;
     try {
       if (infoDirty) {
-        const { r, j } = await post("/api/lazada/listing-edit", { listing_id: state.listingId, before: base, edit: form, sku_before: skuBase, sku_edit: skuMedia });
+        const { r, j } = await post("/api/lazada/listing-edit", { listing_id: state.listingId, before: base, edit: form, sku_before: skuBase, sku_edit: skuMedia, ...(attrPlan && attrPlan.changes.length ? { attrs_before: attrBase, attrs_edit: attrs } : {}) });
         if (!j.ok) {
           toast.error(r.status === 401 ? "ไม่มีสิทธิ์ส่งขึ้นร้าน หรือระบบยังไม่ยืนยันการล็อกอิน — รอสักครู่แล้วลองใหม่" : `ข้อมูลสินค้า: ${j.error ?? `HTTP ${r.status}`}${priceDirty ? " (ยังไม่ได้ส่งราคา)" : ""}`);
           if (r.status === 409 && j.view) { setAsking(false); state.apply(j.view); }   // ร้านเปลี่ยน → โหลดของล่าสุดให้ (ฟอร์มเริ่มใหม่)
@@ -216,11 +226,13 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
     canEdit, form, base, plan, prices, pricePlan, skuMedia, skuPlan, changes, errors, dirty, descEdit, setDescEdit, saving, dialog,
     setSkuMedia: (skuId, patch) => setSkuMediaState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
     setSkuMediaRows: (rows) => setSkuMediaState(rows),
+    attrs, attrPlan,
+    setAttr: (name, value) => setAttrs((a) => (a ? { ...a, [name]: value } : a)),
     setImages: (next) => setForm((f) => (f ? { ...f, images: next } : f)),
     setField: (k, v) => setForm((f) => (f ? { ...f, [k]: v } : f)),
     setPrice: (skuId, patch) => setPricesState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
     setPrices: (rows) => setPricesState(rows),
-    reset: () => { if (base) setForm({ ...base }); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); if (skuBase) setSkuMediaState(skuBase.map((r) => ({ ...r, images: [...r.images] }))); setDescEdit(false); },
+    reset: () => { if (base) setForm({ ...base }); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); if (skuBase) setSkuMediaState(skuBase.map((r) => ({ ...r, images: [...r.images] }))); if (attrBase) setAttrs({ ...attrBase }); setDescEdit(false); },
     ask: () => setAsking(true),
   };
 }
@@ -711,6 +723,153 @@ function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { stat
           isUsed={(ref) => row.images.includes(ref)} full={row.images.length >= MAX_LAZADA_IMAGES}
           onPick={(ref) => edit!.setSkuMedia(row.skuId, { images: [...row.images, ref] })} />
       )}
+    </div>
+  );
+}
+
+// ───────────────────────── เฟส B: ข้อมูลเฉพาะ + ประกัน + ห่อของขวัญ ─────────────────────────
+export type LazadaAttrDefsState = { defs: LazadaAttrDef[] | null; error: string | null; loading: boolean; load: () => void };
+/** รายการช่องของหมวด (GET /api/lazada/category-attributes · ดึงสดจาก Lazada) — โหลดเมื่อเปิดแท็บข้อมูลเฉพาะครั้งแรก */
+export function useLazadaAttrDefs(brandId: string | null, categoryId: string | null): LazadaAttrDefsState {
+  const [st, setSt] = useState<{ key: string | null; defs: LazadaAttrDef[] | null; error: string | null; loading: boolean }>({ key: null, defs: null, error: null, loading: false });
+  const key = brandId && categoryId ? `${brandId}|${categoryId}` : null;
+  const load = useCallback(() => {
+    if (!key || (st.key === key && (st.defs || st.loading))) return;
+    setSt({ key, defs: null, error: null, loading: true });
+    apiFetch(`/api/lazada/category-attributes?brand_id=${encodeURIComponent(brandId!)}&category_id=${encodeURIComponent(categoryId!)}`)
+      .then((r) => r.json())
+      .then((j: { attributes?: LazadaAttrDef[]; error?: string | null }) => setSt((cur) => (cur.key !== key ? cur : { key, defs: Array.isArray(j.attributes) ? lazAttrDefsWithExtras(j.attributes) : null, error: j.error ?? (Array.isArray(j.attributes) ? null : "ดึงรายการช่องไม่สำเร็จ"), loading: false })))
+      .catch(() => setSt((cur) => (cur.key !== key ? cur : { key, defs: null, error: "ดึงรายการช่องของหมวดจาก Lazada ไม่สำเร็จ — ลองใหม่", loading: false })));
+  }, [key, brandId, categoryId, st]);
+  const mine = st.key === key;
+  return { defs: mine ? st.defs : null, error: mine ? st.error : null, loading: mine && st.loading, load };
+}
+
+const MULTI = new Set(["multiSelect", "multiEnumInput"]);
+
+/** ช่องกรอก 1 ช่อง ตามชนิดของ Lazada (เลือก 1 / เลือกหลาย / พิมพ์+รายการ / ข้อความ / ตัวเลข / วันที่) */
+function LazadaAttrField({ def, value, base, can, onChange }: { def: LazadaAttrDef; value: string; base: string; can: boolean; onChange: (v: string) => void }) {
+  const changed = lazNormAttr(def, value) !== lazNormAttr(def, base);
+  const empty = !lazNormAttr(def, value);
+  const ring = changed ? "border-violet-400 bg-violet-50" : def.required && empty ? "border-rose-300 bg-rose-50" : "border-slate-200";
+  const norm = lazNormAttr(def, value);
+  let control: ReactNode;
+  if (!can) control = <div className="min-h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{lazAttrDisplay(def, value) || <span className="text-slate-400">(ว่าง)</span>}</div>;
+  else if (def.input_type === "singleSelect" && def.choices.length) {
+    const known = !norm || def.choices.some((c) => c.en === norm);
+    control = (
+      <select value={norm} onChange={(e) => onChange(e.target.value)} className={`h-9 w-full rounded-lg border px-2 text-sm ${ring}`}>
+        <option value="">— เลือก —</option>
+        {!known && <option value={norm}>{`(ค่าเดิม: ${value})`}</option>}
+        {def.choices.map((c) => <option key={c.en} value={c.en}>{c.name || c.en}</option>)}
+      </select>
+    );
+  } else if (MULTI.has(def.input_type) && def.choices.length && def.choices.length <= 40) {
+    const set = new Set(norm ? norm.split(",") : []);
+    control = (
+      <div className={`flex flex-wrap gap-1 rounded-lg border p-1.5 ${ring}`}>
+        {def.choices.map((c) => {
+          const on = set.has(c.en);
+          return (
+            <button key={c.en} type="button" onClick={() => { const next = new Set(set); if (on) next.delete(c.en); else next.add(c.en); onChange([...next].join(",")); }}
+              className={`rounded-full px-2 py-0.5 text-xs ${on ? "bg-violet-600 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"}`}>{c.name || c.en}</button>
+          );
+        })}
+      </div>
+    );
+  } else if (def.input_type === "date") {
+    control = <DateInput value={value.slice(0, 10)} onChange={(iso) => onChange(iso)} className="w-full" />;
+  } else {
+    const listId = def.choices.length ? `laz-attr-${def.name}` : undefined;
+    control = (
+      <>
+        <input value={def.choices.length ? lazAttrDisplay(def, value) : value} list={listId} onChange={(e) => onChange(e.target.value)}
+          inputMode={def.input_type === "numeric" ? "decimal" : undefined} placeholder={MULTI.has(def.input_type) ? "หลายค่าคั่นด้วย ," : def.choices.length ? "พิมพ์ หรือเลือกจากรายการ" : ""}
+          className={`h-9 w-full rounded-lg border px-3 text-sm ${ring}`} />
+        {listId && <datalist id={listId}>{def.choices.map((c) => <option key={c.en} value={c.name || c.en} />)}</datalist>}
+      </>
+    );
+  }
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center gap-1 text-xs text-slate-500">
+        {def.required && <span className="text-rose-500">*</span>}{def.label}
+        {def.is_key_prop && <span className="rounded bg-sky-50 px-1 text-[10px] font-medium text-sky-700">KEY</span>}
+      </span>
+      {control}
+      {can && changed && <span className="mt-0.5 block text-[11px] text-violet-700">เดิม: {lazAttrDisplay(def, base) || "(ว่าง)"}</span>}
+      {can && !changed && def.required && empty && <span className="mt-0.5 block text-[11px] text-rose-600">ช่องจำเป็น — ยังว่าง</span>}
+    </label>
+  );
+}
+
+/** แท็บข้อมูลเฉพาะ (Lazada) — ช่องของหมวด + ประกัน + ห่อของขวัญ · แก้แล้วส่งพร้อมปุ่ม "บันทึกขึ้น Lazada" เดียวกัน */
+export function LazadaAttrsPanel({ state, edit, defsState }: { state: LazadaListingState; edit: LazadaEditApi; defsState: LazadaAttrDefsState }) {
+  const [more, setMore] = useState(false);
+  const { load } = defsState;
+  useEffect(() => { load(); }, [load]);
+  const g = gate(state); if (g) return g;
+  const v = state.view!;
+  if (!v.categoryId) return <p className="text-xs text-slate-500">สินค้านี้ไม่มีหมวดบน Lazada — ไม่มีข้อมูลเฉพาะให้แก้</p>;
+  if (defsState.error) return <ErrorState title={defsState.error} onRetry={defsState.load} />;
+  if (!defsState.defs) return <LoadingState label="กำลังดึงรายการช่องของหมวดจาก Lazada…" />;
+  const can = edit.canEdit && !!edit.attrs;
+  const values = edit.attrs ?? v.attributes;
+  const base = v.attributes;
+  const ed = defsState.defs.filter(lazAttrEditable);
+  const spec = ed.filter((d) => lazAttrGroup(d) === "spec").sort((a, b) => Number(b.required) - Number(a.required) || Number(b.is_key_prop) - Number(a.is_key_prop));
+  const main = spec.filter((d) => d.required || d.is_key_prop || lazNormAttr(d, values[d.name]));
+  const rest = spec.filter((d) => !main.includes(d));
+  const warranty = ed.filter((d) => lazAttrGroup(d) === "warranty");
+  const gift = ed.find((d) => lazAttrGroup(d) === "gift");
+  const fill = lazAttrFill(defsState.defs, values);
+  const pct = fill.total ? Math.round((fill.filled / fill.total) * 100) : 100;
+  const field = (d: LazadaAttrDef) => <LazadaAttrField key={d.name} def={d} value={values[d.name] ?? ""} base={base[d.name] ?? ""} can={can} onChange={(x) => edit.setAttr(d.name, x)} />;
+  const errs = edit.attrPlan?.errors ?? [];
+  const brand = defsState.defs.find((d) => d.name === "brand");
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs font-semibold text-slate-600">กรอกแล้ว {fill.filled}/{fill.total}</span>
+        <div className="h-2 min-w-[8rem] flex-1 rounded-full bg-slate-100"><div className={`h-2 rounded-full ${pct === 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pct}%` }} /></div>
+        <span className="text-xs text-slate-500">{pct}%</span>
+      </div>
+      {(edit.attrPlan?.missingRequired.length ?? 0) > 0 && (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">ช่องจำเป็นยังว่าง {edit.attrPlan!.missingRequired.length} ช่อง — Lazada อาจไม่ให้บันทึกสินค้านี้จนกว่าจะกรอกครบ (ช่องที่มีกรอบแดง)</p>
+      )}
+      <div className="rounded-xl border border-slate-200 p-3">
+        <div className="mb-2 text-xs font-semibold text-slate-600">ข้อมูลเฉพาะของสินค้า</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {brand && (
+            <label className="block">
+              <span className="mb-1 flex items-center gap-1 text-xs text-slate-500"><span className="text-rose-500">*</span>ยี่ห้อ</span>
+              <div className="min-h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{v.brand ?? "—"}</div>
+              <span className="mt-0.5 block text-[11px] text-slate-400">ดูอย่างเดียว (Lazada ใช้รหัสแบรนด์ของเขา)</span>
+            </label>
+          )}
+          {main.map(field)}
+          {more && rest.map(field)}
+        </div>
+        {rest.length > 0 && <button type="button" onClick={() => setMore((x) => !x)} className="mt-2 text-xs text-violet-700 hover:underline">{more ? "ซ่อนช่องเพิ่มเติม" : `แสดงเพิ่มเติม (${rest.length} ช่อง)`}</button>}
+      </div>
+      {(warranty.length > 0 || gift) && (
+        <div className="rounded-xl border border-slate-200 p-3">
+          <div className="mb-2 text-xs font-semibold text-slate-600">การรับประกัน & บริการ</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {warranty.map(field)}
+            {gift && (
+              <div>
+                <span className="mb-1 block text-xs text-slate-500">บริการห่อของขวัญ (ฟรี)</span>
+                <ToggleSwitch on={lazNormAttr(gift, values[gift.name]) === "Yes"} disabled={!can} label={<span className="text-xs text-slate-600">{lazNormAttr(gift, values[gift.name]) === "Yes" ? "เปิด" : "ปิด"}</span>}
+                  onChange={(on) => edit.setAttr(gift.name, on ? "Yes" : "No")} />
+                <span className="mt-0.5 block text-[11px] text-amber-700">Lazada เปิดให้เฉพาะร้านที่ได้รับอนุญาต — ถ้าไม่รับ ระบบจะบอก (เปิดเองได้ใน Seller Center)</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {errs.length > 0 && <ul className="space-y-0.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{errs.slice(0, 6).map((e, i) => <li key={i}>{e}</li>)}</ul>}
+      <p className="text-[11px] text-slate-400">{can ? "ช่องที่แก้มีกรอบม่วง (บอกค่าเดิมใต้ช่อง) · ตัวเลือกมาจากหมวดของสินค้าบน Lazada · ส่งพร้อมปุ่ม “บันทึกขึ้น Lazada” ด้านล่าง" : "ดูอย่างเดียว"} · ให้ AI ช่วยเลือก = เฟสถัดไป</p>
     </div>
   );
 }

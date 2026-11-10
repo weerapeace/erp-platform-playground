@@ -1,6 +1,7 @@
 /**
  * แก้ข้อมูลสินค้าบน Lazada — ลิ้นชักสินค้าบนร้าน (แก้ร้านจริง)
  *  เฟส 2: ชื่อ / รายละเอียด / จุดเด่น · เฟส 4: รูปสินค้า + รูปตัวเลือก (≤ 8/ตัว) + น้ำหนัก/ขนาดกล่อง · เฟส A: รูปส่งเสริม 1:1 / 3:4
+ *  เฟส B: ข้อมูลเฉพาะ + ประกัน + ห่อของขวัญ (attrs_before/attrs_edit · รายการช่องดึงสดจากหมวด · ส่ง en_name)
  *  POST { listing_id, before: LazadaEditState, edit: LazadaEditState, sku_before?: LazadaSkuMediaRow[], sku_edit?: LazadaSkuMediaRow[] }   (products.platforms.publish)
  *
  *   1) ดึงสินค้าตัวนี้สดจาก Lazada → ถ้าต่างจาก "before" (ที่คนเห็นตอนเปิดลิ้นชัก) = มีคนแก้บนร้านไปแล้ว → 409 ไม่ส่งทับ
@@ -16,10 +17,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lazErrorText, lazMigrateImage, lazUpdateProduct } from "@/lib/lazada";
+import { lazErrorText, lazGetCategoryAttributes, lazMigrateImage, lazUpdateProduct } from "@/lib/lazada";
 import {
   lazadaEditStateFromView, lazadaListingView, lazadaSkuMediaFromView, lazMigrateImageXml, lazResolveRefs, lazSystemImageKey, lazUpdateProductXml, lazViewAfterWrite,
-  planLazadaEdit, planLazadaSkuMedia, type LazadaEditState, type LazadaSkuMediaRow, type LazadaWriteResponse, type LazSkuExtra,
+  planLazadaEdit, planLazadaSkuMedia, planLazadaAttrs, lazNormAttr, lazAttrDefsWithExtras, type LazadaAttrDef, type LazadaEditState, type LazadaSkuMediaRow, type LazadaWriteResponse, type LazSkuExtra,
 } from "@/lib/lazada-listing-edit";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { isGoneStatus } from "@/lib/platform-listing-health";
@@ -49,6 +50,13 @@ const cleanSku = (v: unknown): LazadaSkuMediaRow[] | null => {
     images: strList(o.images) ?? [], weight: num(o.weight), length: num(o.length), width: num(o.width), height: num(o.height),
   })).filter((r) => r.skuId);
 };
+/** คุณสมบัติ: { ชื่อช่อง: ค่า } (ข้อความล้วน) · ไม่ส่งมา = null */
+const cleanAttrs = (v: unknown): Record<string, string> | null => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) if (/^[A-Za-z][A-Za-z0-9_]*$/.test(k) && x != null && typeof x !== "object") out[k] = String(x);
+  return out;
+};
 const norm = (s: LazadaEditState) => [s.name.replace(/\s+/g, " ").trim(), s.description, s.highlights.split("\n").map((x) => x.trim()).filter(Boolean).join("\n"), s.images.join("\n"), s.promoSquare ?? "", s.promoLong ?? ""].join("\u0000");
 const skuSame = (a: LazadaSkuMediaRow, b: LazadaSkuMediaRow) => a.images.join("\n") === b.images.join("\n") && a.weight === b.weight && a.length === b.length && a.width === b.width && a.height === b.height;
 /** ลิงก์ที่ Lazada ดาวน์โหลดได้: รูปในระบบ → JPG จัตุรัสพื้นขาว 1500px (Lazada รับ jpg/png เท่านั้น · /api/r2-image &sq=1) */
@@ -59,12 +67,13 @@ const PROMO_SOURCE = { promoSquare: (key: string) => `${publicImageUrl(key)}&w=1
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { listing_id?: string; before?: unknown; edit?: unknown; sku_before?: unknown; sku_edit?: unknown };
+  let body: { listing_id?: string; before?: unknown; edit?: unknown; sku_before?: unknown; sku_edit?: unknown; attrs_before?: unknown; attrs_edit?: unknown };
   try { body = await request.json(); } catch { return reply({ ok: false, view: null, error: "invalid JSON" }, 400); }
   const listingId = String(body.listing_id ?? "").trim();
   const seen0 = cleanState(body.before); const after0 = cleanState(body.edit);
   if (!listingId || !seen0 || !after0) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + before + edit)" }, 400);
   const skuSeen = cleanSku(body.sku_before); const skuEdit = cleanSku(body.sku_edit);
+  const attrSeen = cleanAttrs(body.attrs_before); const attrEdit = cleanAttrs(body.attrs_edit);
 
   const admin = supabaseAdmin();
   const live = await loadLazListingLive(admin, listingId, user?.id ?? null);
@@ -101,9 +110,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // 2) ตรวจ + เลือกเฉพาะที่เปลี่ยน
   const plan = planLazadaEdit(liveState, after);
   const skuPlan = planLazadaSkuMedia(liveSku, skuAfter, liveView.imageVariation);
-  const errors = [...plan.errors, ...skuPlan.errors];
+  // เฟส B: คุณสมบัติ — เฉพาะช่องที่คนแก้ (เทียบ before ของคน) · รายการช่อง/ตัวเลือกดึงสดจากหมวด (ตรวจ + แปลงเป็น en_name)
+  let attrPlan: ReturnType<typeof planLazadaAttrs> | null = null;
+  let attrDefs: LazadaAttrDef[] = [];
+  if (attrSeen && attrEdit) {
+    const touchedKeys = Object.keys(attrEdit).filter((k) => (attrEdit[k] ?? "").trim() !== (attrSeen[k] ?? "").trim());
+    if (touchedKeys.length) {
+      if (!liveView.categoryId) return reply({ ok: false, view: liveView, error: "สินค้านี้ไม่มีหมวดบน Lazada — แก้ข้อมูลเฉพาะไม่ได้" }, 400);
+      try { attrDefs = lazAttrDefsWithExtras(await lazGetCategoryAttributes(live.gateway, live.accessToken, liveView.categoryId)); }
+      catch (e) { return reply({ ok: false, view: liveView, error: `ดึงรายการช่องของหมวดจาก Lazada ไม่สำเร็จ: ${lazErrorText(e)}` }, 502); }
+      const defOf = new Map(attrDefs.map((d) => [d.name, d]));
+      const n = (k: string, v: string | undefined) => { const d = defOf.get(k); return d ? lazNormAttr(d, v) : String(v ?? "").trim(); };
+      if (touchedKeys.some((k) => n(k, attrSeen[k]) !== n(k, liveView.attributes[k]))) return reply({ ok: false, view: liveView, error: staleMsg }, 409);
+      attrPlan = planLazadaAttrs(attrDefs, liveView.attributes, Object.fromEntries(touchedKeys.map((k) => [k, attrEdit[k]])));
+    }
+  }
+  const errors = [...plan.errors, ...skuPlan.errors, ...(attrPlan?.errors ?? [])];
   if (errors.length) return reply({ ok: false, view: liveView, error: errors.join(" · ") }, 400);
-  const changes = [...plan.changes, ...skuPlan.changes];
+  const changes = [...plan.changes, ...skuPlan.changes, ...(attrPlan?.changes ?? [])];
   if (changes.length === 0) return reply({ ok: true, view: liveView, changes: [], error: null });
 
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
@@ -136,7 +160,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return reply({ ok: false, view: liveView, error: `${error} · ยังไม่ได้แก้อะไรบนร้าน` }, 502);
     }
   }
-  const fields = { ...plan.fields, ...promoUrl, ...(plan.fields.images ? { images: lazResolveRefs(plan.fields.images, migrated) } : {}) };
+  const fields = {
+    ...plan.fields, ...promoUrl, ...(plan.fields.images ? { images: lazResolveRefs(plan.fields.images, migrated) } : {}),
+    ...(attrPlan && Object.keys(attrPlan.attrs).length ? { attrs: attrPlan.attrs } : {}),
+  };
   const extras = new Map<string, LazSkuExtra>([...skuPlan.extras].map(([id, e]) => [id, e.images ? { ...e, images: lazResolveRefs(e.images, migrated) } : e]));
 
   // 4) ส่งขึ้น Lazada
@@ -150,7 +177,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // 5) ดึงใหม่ → ตรวจผล + สำเนาย่อ
-  const warnings = [...plan.warnings, ...skuPlan.warnings].filter((w) => !w.includes("ตรวจใหม่") && !w.includes("ฝากกับ Lazada"));
+  const warnings = [...plan.warnings, ...skuPlan.warnings, ...(attrPlan?.warnings ?? [])].filter((w) => !w.includes("ตรวจใหม่") && !w.includes("ฝากกับ Lazada") && !w.includes("ได้รับอนุญาต") && !w.includes("ช่องจำเป็นยังว่าง"));
   const resData = res.data && typeof res.data === "object" ? res.data as Record<string, unknown> : {};
   const fresh = await refetchLazItem(live.gateway, live.accessToken, live.itemId);   // ลองซ้ำถ้า Lazada จำกัดความถี่
   const freshView = fresh ? lazadaListingView(fresh) : null;
@@ -175,6 +202,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (pkgOff) warnings.push(`Lazada ตอบรับแล้ว แต่น้ำหนัก/ขนาดกล่องบนร้านยังไม่ตรง ${pkgOff} ตัวเลือก — ตรวจในแท็บตัวเลือก`);
   const changedStatus = freshView.skus.filter((s) => liveView.skus.find((b) => b.skuId === s.skuId)?.status !== s.status).length;
   if (changedStatus) warnings.push(`สถานะตัวเลือกเปลี่ยนไป ${changedStatus} ตัวหลังแก้ — ตรวจในแท็บตัวเลือก`);
+  // คุณสมบัติที่ส่ง ต้องเห็นค่าเดียวกันบนร้าน (เทียบแบบ en_name)
+  if (fields.attrs) {
+    const defOf = new Map(attrDefs.map((d) => [d.name, d]));
+    const off = Object.entries(fields.attrs).filter(([k, v]) => { const d = defOf.get(k); return (d ? lazNormAttr(d, freshView.attributes[k]) : (freshView.attributes[k] ?? "")) !== v; }).map(([k]) => defOf.get(k)?.label ?? k);
+    if (off.length) warnings.push(`Lazada ตอบรับแล้ว แต่ข้อมูลเฉพาะบนร้านยังไม่ตรง ${off.length} ช่อง (${off.slice(0, 3).join(", ")}) — ห่อของขวัญต้องได้รับอนุญาตจาก Lazada · ช่องอื่นตรวจในแท็บข้อมูลเฉพาะ`);
+  }
   // รูปส่งเสริม: Lazada ทิ้งเงียบ ๆ ถ้าสัดส่วน/รูปแบบไม่รับ → เช็กว่าติดจริง
   if (fields.promoSquare && !freshView.promoSquare) warnings.push("Lazada ตอบรับแล้ว แต่ยังไม่เห็นรูปส่งเสริม (จัตุรัส) บนร้าน — Lazada อาจทิ้งรูปนี้ (สัดส่วน/พื้นหลังไม่ผ่าน) · ตรวจในแท็บรูป");
   if (fields.promoLong && !freshView.promoLong) warnings.push("Lazada ตอบรับแล้ว แต่ยังไม่เห็นรูปส่งเสริม (แนวตั้ง) บนร้าน — Lazada อาจทิ้งรูปนี้ · ตรวจในแท็บรูป");
