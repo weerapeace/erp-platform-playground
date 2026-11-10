@@ -4,7 +4,8 @@
  *   บนสุด: ไซส์ · จำนวนที่สั่ง (− / + ตั้งต้นจากแถบจำนวนที่สั่ง) · ต้นทุน/ใบ (คิดตามจำนวน: หารจำนวนสั่ง + ลังส่ง)
  *   บวกกำไร: แถบเลื่อน + พิมพ์ % + ปุ่ม 25–200% + "แบรนด์นี้เคยตกลงเฉลี่ย"
  *   ผล 4 ช่อง: ราคา/ใบ · กำไร/ใบ · ยอดขายทั้งล็อต · กำไรทั้งล็อต · ปัดเลขสวย (0/5/9)
- *   ราคาตามจำนวน (100/300/500/1,000 + ที่ใส่) · ตัวช่วยเพิ่มเติม (พับไว้): งานในแบรนด์ · ราคาป้าย · VAT · งบลูกค้า · วิธีปัดอื่น
+ *   ราคาตามจำนวน (100/300/500/1,000 + ที่ใส่) + ลดราคาตามจำนวนเป็น % (ปัดเลขสวยที่ใกล้สุด · lib tierPrice)
+ *   ตัวช่วยเพิ่มเติม (พับไว้): งานในแบรนด์ · ราคาป้าย · VAT · งบลูกค้า · วิธีปัดอื่น
  *   กด "ใส่ราคาในรอบเสนอราคา" → ส่ง "ตัวคูณ" กลับไปให้ฟอร์มรอบเสนอราคาคูณกับตีราคาของทุกช่อง (ไซส์ × ขั้นจำนวน)
  *
  *   สูตร: lib/quote-pricing · ข้อมูล: GET /api/design-sheets/[id]/price-refs (สิทธิ์เห็นต้นทุน)
@@ -17,18 +18,18 @@ import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { QUOTE_STATUS } from "@/lib/design-sheets-meta";
 import {
-  brandMarkupSummary, budgetCheck, costShareOfPrice, markupPctOf, median, priceFromCost, withVat,
-  PRICE_STEPS, ROUND_LABEL,
-  type BrandQuoteRef, type BrandSkuRef, type PriceRound,
+  brandMarkupSummary, budgetCheck, costShareOfPrice, discountFor, markupPctOf, median, priceFromCost, tierPrice, withVat,
+  DEFAULT_QTY_DISC, PRICE_STEPS, ROUND_LABEL,
+  type BrandQuoteRef, type BrandSkuRef, type PriceRound, type QtyDiscount,
 } from "@/lib/quote-pricing";
 
-/** ที่ส่งกลับไปให้ฟอร์มรอบเสนอราคา: ราคา = ตีราคาของช่อง × mult แล้วปัด */
-export type PriceFill = { id: number; mult: number; round: PriceRound; label: string };
+/** ที่ส่งกลับไปให้ฟอร์มรอบเสนอราคา: ราคา = ตีราคาของช่อง × mult แล้วปัด · disc = ลดราคาตามจำนวน (ไม่มี = ไม่ลด) */
+export type PriceFill = { id: number; mult: number; round: PriceRound; label: string; disc?: QtyDiscount[] };
 
 type Size = { key: string; label: string };
 type Refs = { brand: { id: string; name: string } | null; quotes: BrandQuoteRef[]; skus: BrandSkuRef[] };
 
-const TIER_QTYS = [100, 300, 500, 1000];
+
 const fmt = (n: number | null | undefined, dp = 0) => (n == null || !Number.isFinite(n) ? "—" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: dp, maximumFractionDigits: dp }));
 const money = (n: number | null | undefined) => fmt(n, 2);
 const pctTxt = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "—" : `${Math.round(n)}%`);
@@ -53,6 +54,8 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
   const [vat, setVat] = useState(false);
   const [budget, setBudget] = useState("");
   const [more, setMore] = useState(false);
+  const [discOn, setDiscOn] = useState(true);   // ลดราคาตามจำนวน
+  const [disc, setDisc] = useState<QtyDiscount[]>(DEFAULT_QTY_DISC);
   const [refs, setRefs] = useState<Refs | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -74,14 +77,19 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
   const cost = currentCost(sizeKey, qty);
   const costNoQty = currentCost(sizeKey);
   const mult = 1 + Math.max(0, pct) / 100;
+  const tiersDisc = discOn ? disc : [];
+  const costAt = (q: number) => currentCost(sizeKey, q);
+  const myDisc = discountFor(qty, tiersDisc);
+  const listPrice = priceFromCost(cost, mult, round);   // ราคาก่อนลดตามจำนวน
   const raw = cost > 0 ? cost * mult : null;
-  const price = priceFromCost(cost, mult, round);
+  const price = tierPrice(costAt, qty, mult, round, tiersDisc);
   const profit = price != null ? price - cost : null;
   const summary = useMemo(() => brandMarkupSummary(refs?.quotes ?? []), [refs]);
   const brandPct = summary.suggestPct != null ? Math.round(summary.suggestPct) : null;
   const showVat = (v: number | null) => (v == null ? null : vat ? withVat(v) : v);
   const bud = budgetCheck(Number(budget), cost, mult, vat);
-  const tiers = [...new Set([...TIER_QTYS, qty])].sort((a, b) => a - b);
+  const tiers = [...new Set([...disc.map((d) => d.qty), qty])].sort((a, b) => a - b);
+  const setTierPct = (q: number, v: string) => setDisc((l) => l.map((d) => (d.qty === q ? { ...d, pct: Math.min(90, Math.max(0, Number(v) || 0)) } : d)));
   const quotesShown = refs ? (showAll ? refs.quotes : refs.quotes.slice(0, 8)) : [];
   const skuList = useMemo(() => {
     const q = skuQ.trim().toLowerCase();
@@ -89,7 +97,8 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
     return (q ? all.filter((s) => `${s.code} ${s.name ?? ""}`.toLowerCase().includes(q)) : all).slice(0, 12);
   }, [refs, skuQ]);
   const skuMedian = useMemo(() => median((refs?.skus ?? []).map((s) => s.max)), [refs]);
-  const label = t(`บวกกำไร ${pct}%`, `Markup ${pct}%`) + (round !== "none" ? ` · ${ROUND_LABEL[round]}` : "");
+  const label = t(`บวกกำไร ${pct}%`, `Markup ${pct}%`) + (round !== "none" ? ` · ${ROUND_LABEL[round]}` : "")
+    + (discOn && disc.some((d) => d.pct > 0) ? t(` · ลดตามจำนวน ${disc.map((d) => `${fmt(d.qty)}:${d.pct}%`).join(" ")}`, ` · qty discount`) : "");
 
   const chip = (on: boolean, tone: "blue" | "green" = "blue") => `h-7 rounded-md border px-2.5 text-xs tabular-nums ${on
     ? tone === "blue" ? "border-blue-500 bg-blue-600 text-white" : "border-emerald-500 bg-emerald-600 text-white"
@@ -105,7 +114,7 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
           <span className="ml-2 text-xs text-slate-400">{label}{vat ? t(" · รวม VAT", " · incl. VAT") : ""}</span>
         </div>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ปิด", "Close")}</button>
-        <button type="button" disabled={!(cost > 0)} onClick={() => { onApply({ mult, round, label }); onClose(); }}
+        <button type="button" disabled={!(cost > 0)} onClick={() => { onApply({ mult, round, label, ...(discOn ? { disc } : {}) }); onClose(); }}
           title={t("ใส่ราคาให้ทุกไซส์ที่ติ๊ก × ทุกขั้นจำนวนในฟอร์ม คิดจากตีราคาของแต่ละช่อง × บวกกำไรเดียวกัน", "Fill every ticked size × quantity tier in the form from each cell's costing × the same markup")}
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
           <Icon value="i:check" className="text-[14px]" />{t("ใส่ราคาในรอบเสนอราคา", "Put into quote round")}
@@ -160,7 +169,8 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
           <div className={tile}>
             <div className="text-[11px] text-slate-500">{vat ? t("ราคาขาย/ใบ (รวม VAT)", "Price/pc (incl. VAT)") : t("ราคาขาย/ใบ", "Price/pc")}</div>
             <div className="text-xl font-semibold tabular-nums text-blue-700">{money(showVat(price))}</div>
-            <div className="truncate text-[11px] text-slate-400">{raw != null && price != null && Math.abs(price - raw) > 0.004 ? t(`คิดได้ ${money(raw)} → ปัดเป็น ${fmt(price, price % 1 ? 2 : 0)}`, `${money(raw)} → rounded`) : t(`ต้นทุน × ${fmt(mult, 2)}`, `cost × ${fmt(mult, 2)}`)}</div>
+            <div className="truncate text-[11px] text-slate-400">{myDisc > 0 && listPrice != null ? t(`ลด ${myDisc}% จาก ${money(listPrice)} (สั่ง ${fmt(qty)})`, `${myDisc}% off ${money(listPrice)}`)
+              : raw != null && price != null && Math.abs(price - raw) > 0.004 ? t(`คิดได้ ${money(raw)} → ปัดเป็น ${fmt(price, price % 1 ? 2 : 0)}`, `${money(raw)} → rounded`) : t(`ต้นทุน × ${fmt(mult, 2)}`, `cost × ${fmt(mult, 2)}`)}</div>
           </div>
           <div className={tile}>
             <div className="text-[11px] text-slate-500">{t("กำไร/ใบ", "Profit/pc")}</div>
@@ -186,10 +196,15 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
 
         {/* ราคาตามจำนวน */}
         <div>
-          <div className="mb-1 text-sm font-semibold text-slate-700">{t("ราคาตามจำนวน", "Price by quantity")} <span className="text-[11px] font-normal text-slate-400">{t("— สั่งน้อย ต้นทุน/ใบสูงขึ้น (ค่าที่หารตามจำนวน · ลังส่ง) · บวกกำไรเท่ากัน", "— fewer pieces cost more each · same markup")}</span></div>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-slate-700">{t("ราคาตามจำนวน", "Price by quantity")}</span>
+            <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={discOn} onChange={(e) => setDiscOn(e.target.checked)} className="h-3.5 w-3.5" />{t("ลดราคาตามจำนวน (%)", "Quantity discount (%)")}</label>
+            <span className="text-[11px] text-slate-400">{discOn ? t("ขั้นแรก = ราคาตั้งต้น · ขั้นถัดไปลด % แล้วปัดเลขสวยที่ใกล้สุด · แก้ % ในตารางได้", "First tier = list price · next tiers take % off, rounded to the nearest tidy price") : t("สั่งน้อย ต้นทุน/ใบสูงขึ้น · บวกกำไรเท่ากัน", "Same markup on each tier's cost")}</span>
+          </div>
           <table className="w-full text-sm">
             <thead><tr className="text-[11px] text-slate-500">
               <th className="py-1 text-left font-medium">{t("จำนวน", "Qty")}</th>
+              {discOn && <th className="py-1 text-right font-medium">{t("ลด", "Off")}</th>}
               <th className="py-1 text-right font-medium">{t("ต้นทุน/ใบ", "Cost/pc")}</th>
               <th className="py-1 text-right font-medium">{vat ? t("ราคา/ใบ (รวม VAT)", "Price/pc (incl. VAT)") : t("ราคา/ใบ", "Price/pc")}</th>
               <th className="py-1 text-right font-medium">{t("กำไร/ใบ", "Profit/pc")}</th>
@@ -198,14 +213,24 @@ export function QuotePricingHelper({ open, onClose, sheetId, sizes, currentCost,
             <tbody>
               {tiers.map((q) => {
                 const c = currentCost(sizeKey, q);
-                const p = priceFromCost(c, mult, round);
+                const p = tierPrice(costAt, q, mult, round, tiersDisc);
                 const cur = q === qty;
+                const own = disc.find((d) => d.qty === q);
+                const loss = p != null && c > 0 && p < c;
                 return (
                   <tr key={q} onClick={() => setQtyText(String(q))} className={`cursor-pointer border-t border-slate-100 ${cur ? "bg-blue-50 text-blue-800" : "hover:bg-slate-50"}`} title={t("กด = ใช้จำนวนนี้", "Click to use this qty")}>
                     <td className="py-1.5">{fmt(q)} {t("ใบ", "pcs")}{cur ? t(" (ที่ใส่)", " (entered)") : ""}</td>
+                    {discOn && (
+                      <td className="py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        {own ? (
+                          <span className="inline-flex items-center gap-0.5"><input type="number" min={0} max={90} step={1} value={own.pct} onChange={(e) => setTierPct(q, e.target.value)} aria-label={t(`ลดกี่ % ที่ ${fmt(q)} ใบ`, `Discount at ${q}`)}
+                            className="h-7 w-14 rounded border border-slate-200 bg-white px-1 text-right text-xs tabular-nums" />%</span>
+                        ) : <span className="text-xs tabular-nums text-slate-400">{discountFor(q, tiersDisc)}%</span>}
+                      </td>
+                    )}
                     <td className="py-1.5 text-right tabular-nums text-slate-500">{c > 0 ? money(c) : "—"}</td>
                     <td className="py-1.5 text-right font-medium tabular-nums">{money(showVat(p))}</td>
-                    <td className="py-1.5 text-right tabular-nums text-emerald-700">{p != null ? money(p - c) : "—"}</td>
+                    <td className={`py-1.5 text-right tabular-nums ${loss ? "text-rose-600" : "text-emerald-700"}`}>{p != null ? money(p - c) : "—"}{loss ? t(" ขาดทุน", " loss") : ""}</td>
                     <td className="py-1.5 text-right tabular-nums">{p != null ? fmt((p - c) * q) : "—"}</td>
                   </tr>
                 );

@@ -123,3 +123,37 @@ export function brandMarkupSummary(refs: BrandQuoteRef[]): BrandMarkupSummary {
 
 /** ต้นทุนงานนี้คิดเป็นกี่ % ของราคาป้ายสินค้าในแบรนด์ (ช่วยดูว่าขายส่งแพง/ถูกไปไหม) */
 export const costShareOfPrice = (cost: number, price: number): number | null => (cost > 0 && price > 0 ? (cost / price) * 100 : null);
+
+// ── ลดราคาตามจำนวน (ตัวช่วยตั้งราคา · เจ้าของขอ 2026-11-09 "ลดเป็น % แต่ปัดให้สวย") ──
+export type QtyDiscount = { qty: number; pct: number };
+export const DEFAULT_QTY_DISC: QtyDiscount[] = [{ qty: 100, pct: 0 }, { qty: 300, pct: 5 }, { qty: 500, pct: 10 }, { qty: 1000, pct: 15 }];
+
+/** ลดกี่ % ที่จำนวนนี้ = ขั้นที่จำนวนมากสุดที่ไม่เกินจำนวนนี้ (ต่ำกว่าขั้นแรก = ไม่ลด) */
+export function discountFor(qty: number, tiers: QtyDiscount[]): number {
+  let pct = 0, at = -1;
+  for (const t of tiers) if (t.qty <= qty && t.qty > at && Number.isFinite(t.pct)) { at = t.qty; pct = Math.min(90, Math.max(0, t.pct)); }
+  return pct;
+}
+
+/** ปัดเป็นเลขสวยที่ใกล้ที่สุด (ลงท้าย 0 / 5 / 9 · เท่ากันเอาตัวต่ำ) — ใช้กับราคาที่ลดแล้ว (ปัดขึ้นจะกินส่วนลดหมด) */
+export function niceNear(v: number): number {
+  const x = r2(v);
+  let lo = Math.floor(x), hi = Math.ceil(x);
+  while (![0, 5, 9].includes(((lo % 10) + 10) % 10)) lo--;
+  while (![0, 5, 9].includes(hi % 10)) hi++;
+  return x - lo <= hi - x ? lo : hi;
+}
+
+/**
+ * ราคาต่อใบที่จำนวนนี้: ไม่ลด = ต้นทุนของจำนวนนั้น × ตัวคูณ (ปัดขึ้นตามวิธี)
+ * ลด = ราคาตั้งต้น (ต้นทุนที่ขั้นจำนวนน้อยสุด × ตัวคูณ ปัดขึ้น) × (1 − ลด%) แล้วปัดเลขสวยที่ใกล้สุด
+ */
+export function tierPrice(costAt: (qty: number) => number, qty: number, mult: number, round: PriceRound, tiers: QtyDiscount[]): number | null {
+  const d = discountFor(qty, tiers);
+  if (!d) return priceFromCost(costAt(qty), mult, round);
+  const minQ = Math.min(...tiers.map((t) => t.qty));
+  const base = priceFromCost(costAt(minQ), mult, round);
+  if (base == null) return null;
+  const v = base * (1 - d / 100);
+  return round === "none" ? r2(v) : round === "nice" ? niceNear(v) : roundQuotePrice(v, round);
+}

@@ -83,3 +83,29 @@ describe("ปัดราคาเลขสวย (0/5/9)", () => {
     expect(priceFromCost(37.56, 1.5, "nice")).toBe(59);
   });
 });
+
+describe("ลดราคาตามจำนวน", () => {
+  it("discountFor ใช้ขั้นที่ไม่เกินจำนวน · niceNear ปัดเลขสวยที่ใกล้สุด", async () => {
+    const { discountFor, niceNear, DEFAULT_QTY_DISC } = await import("@/lib/quote-pricing");
+    expect(discountFor(50, DEFAULT_QTY_DISC)).toBe(0);
+    expect(discountFor(300, DEFAULT_QTY_DISC)).toBe(5);
+    expect(discountFor(450, DEFAULT_QTY_DISC)).toBe(5);
+    expect(discountFor(5000, DEFAULT_QTY_DISC)).toBe(15);
+    expect(niceNear(65.55)).toBe(65);
+    expect(niceNear(62.1)).toBe(60);
+    expect(niceNear(58.65)).toBe(59);
+    expect(niceNear(67)).toBe(65);
+    expect(niceNear(67.5)).toBe(69);
+  });
+  it("tierPrice: ขั้นแรกบวกกำไรปกติ · ขั้นถัดไปลด % จากราคาตั้งต้นแล้วปัดสวย", async () => {
+    const { tierPrice, DEFAULT_QTY_DISC } = await import("@/lib/quote-pricing");
+    const cost = () => 37.56;
+    expect(tierPrice(cost, 100, 1.75, "nice", DEFAULT_QTY_DISC)).toBe(69);    // 65.73 → 69
+    expect(tierPrice(cost, 300, 1.75, "nice", DEFAULT_QTY_DISC)).toBe(65);    // 69 × 0.95 = 65.55 → 65
+    expect(tierPrice(cost, 500, 1.75, "nice", DEFAULT_QTY_DISC)).toBe(60);    // 62.1 → 60
+    expect(tierPrice(cost, 1000, 1.75, "nice", DEFAULT_QTY_DISC)).toBe(59);   // 58.65 → 59
+    expect(tierPrice(cost, 300, 1.75, "none", DEFAULT_QTY_DISC)).toBe(62.44); // 65.73 × 0.95 = 62.4435
+    expect(tierPrice(cost, 300, 1.75, "nice", [])).toBe(69);                  // ไม่มีขั้นลด = เหมือนเดิม
+    expect(tierPrice(() => 0, 300, 1.75, "nice", DEFAULT_QTY_DISC)).toBeNull();
+  });
+});

@@ -20,7 +20,7 @@ import { useT } from "@/components/i18n";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS } from "@/lib/design-sheets-meta";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import { Icon } from "@/components/icon";
-import { priceFromCost } from "@/lib/quote-pricing";
+import { priceFromCost, tierPrice } from "@/lib/quote-pricing";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
 
 const fmtBaht = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -353,7 +353,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     for (const s of rowSizes) {
       if (!onSizes.includes(s.key)) continue;
       for (const qty of qtys) {
-        const p = priceFromCost(currentCost(s.key, qty), fill.mult, fill.round);
+        const p = fill.disc?.length && qty != null ? tierPrice((q) => currentCost(s.key, q), qty, fill.mult, fill.round, fill.disc) : priceFromCost(currentCost(s.key, qty), fill.mult, fill.round);
         if (p == null) { skipped++; continue; }
         next[key(s.key, qty)] = String(p); n++;
       }
