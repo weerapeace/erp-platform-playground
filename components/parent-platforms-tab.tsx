@@ -17,6 +17,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { CentralCategoryPicker } from "@/components/central-category-picker";
 import { useAuth } from "@/components/auth";
 import { isSellingPlatform } from "@/lib/selling-platforms";
+import { hasCreatePreview } from "@/lib/platform-create-registry";
 
 // dynamic กัน import วน (ProductPlatformManager → master-crud → ParentPlatformsTab)
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -88,6 +89,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
   if (platforms.length === 0) return <div className="text-sm text-slate-400 py-8 text-center">ยังไม่มีแพลตฟอร์มที่เปิดใช้ — เพิ่มที่ตั้งค่า</div>;
 
+  // ลงทุกร้านในครั้งเดียว: ร้านที่มีตัวสร้างสินค้า (lib/platform-create-registry) และสินค้านี้ยังไม่อยู่บนร้านนั้น
+  const isOnSale = (p: Platform) => { const d = drafts[p.id] ?? {}; return d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id || !!matched[p.id]; };
+  const allCodes = platforms.filter((p) => hasCreatePreview(p.code) && !isOnSale(p)).map((p) => p.code);
+
   return (
     <div className="space-y-3">
       {/* หมวดกลางสำหรับลงขาย — เลือกครั้งเดียว เติมทุกร้านอัตโนมัติ */}
@@ -100,6 +105,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
 
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-slate-500">รายละเอียดการขายแต่ละแพลตฟอร์ม — กด “จัดการ” เพื่อแก้ชื่อ/หมวดหมู่/รูป/ราคา แล้วส่งขึ้นแพลตฟอร์มนั้น</p>
+        {canAdd && allCodes.length > 1 && (
+          <button type="button" onClick={() => setAddOn("__all")} title="ดูก่อนส่งทีละร้าน แล้วลงทุกร้านในครั้งเดียว (ร้านที่ยังไม่เปิดลงจริงจะบันทึกร่างไว้)"
+            className="ml-auto shrink-0 text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5">ลงทุกร้าน ({allCodes.length})</button>
+        )}
         <button type="button" onClick={refreshAll} disabled={loading} title="โหลดข้อมูลล่าสุด"
           className="shrink-0 text-xs text-slate-500 hover:text-violet-700 border border-slate-200 rounded-lg px-2 py-1 hover:bg-violet-50 disabled:opacity-40">
           <span className={loading ? "inline-block animate-spin" : ""}>🔄</span> รีเฟรช
@@ -142,7 +151,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       })}
       {addOn && parentId && (
         <AddToPlatformWizard open parents={[{ id: parentId, code: parent?.code ?? "", name: parent?.name_th || parent?.name_platform || null }]}
-          initialPlatformCodes={[addOn]} onClose={() => setAddOn(null)} onDone={() => void load()} />
+          initialPlatformCodes={addOn === "__all" ? allCodes : [addOn]} onClose={() => setAddOn(null)} onDone={() => void load()} />
       )}
       {manage && parentId && (
         <ProductPlatformManager parentSkuId={parentId} initialPlatformId={manage} onClose={() => { setManage(null); void load(); }} />

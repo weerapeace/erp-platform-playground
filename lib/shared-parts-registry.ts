@@ -1255,6 +1255,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "lazada-create-preview", label: "ดูก่อนส่ง + สร้างสินค้าใหม่บน Lazada", code: "LazadaCreatePreviewEditor · lib/lazada-create-plan · /api/lazada/create-product", category: "feature",
+    source: { path: "components/platform-listing/lazada-create-preview" },
+    what: "แท็บ Lazada ในตัวช่วยลงสินค้า — ทุกช่องที่จะส่งขึ้น Lazada + มาจากไหน + ที่ขาด (หมวด · รูป ≤ 8 · ชั้นตัวเลือก color_family/size/กำหนดเอง · ราคาเต็ม/ลด · น้ำหนัก/กล่อง · ช่องบังคับของหมวด) แก้ลงร่าง Lazada ได้ · ตัวประกอบข้อมูลตัวเดียวกับตอนลงจริง",
+    when: "ตัวช่วยลงสินค้าเมื่อเลือก Lazada (รวม \"ลงทุกร้าน\") · ลงจริงเปิดด้วย LAZADA_CREATE_LIVE ใน lib/platform-create-registry",
+    notWhen: "แก้สินค้าที่มีบน Lazada แล้ว ให้ใช้ลิ้นชักสินค้าบนร้าน (lazada-listing-panels) · ห้ามประกอบ payload สร้างสินค้า Lazada ที่อื่น (ใช้ lib/lazada-create-plan)",
+    doc: "lazada-connector.md",
+  },
+  {
     key: "line-display-toggle", label: "เปิด/ปิดขายสินค้าบน LINE", code: "useLineDisplay", category: "feature",
     source: { path: "components/platform-catalog/use-line-display" },
     what: "เปิด/ปิดขายรายการบนร้าน LINE ทีละตัวหรือหลายตัว — ถามก่อนเสมอ (เกิน 20 ต้องพิมพ์ยืนยัน) · ส่งทีละ 200 · แก้สำเนาในระบบ + ประวัติฝั่ง API (/api/line-shopping/listing-display)",

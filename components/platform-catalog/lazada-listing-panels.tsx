@@ -748,7 +748,7 @@ export function useLazadaAttrDefs(brandId: string | null, categoryId: string | n
 const MULTI = new Set(["multiSelect", "multiEnumInput"]);
 
 /** ช่องกรอก 1 ช่อง ตามชนิดของ Lazada (เลือก 1 / เลือกหลาย / พิมพ์+รายการ / ข้อความ / ตัวเลข / วันที่) */
-function LazadaAttrField({ def, value, base, can, onChange }: { def: LazadaAttrDef; value: string; base: string; can: boolean; onChange: (v: string) => void }) {
+export function LazadaAttrField({ def, value, base, can, onChange }: { def: LazadaAttrDef; value: string; base: string; can: boolean; onChange: (v: string) => void }) {
   const changed = lazNormAttr(def, value) !== lazNormAttr(def, base);
   const empty = !lazNormAttr(def, value);
   const ring = changed ? "border-violet-400 bg-violet-50" : def.required && empty ? "border-rose-300 bg-rose-50" : "border-slate-200";

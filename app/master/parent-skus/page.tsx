@@ -19,6 +19,7 @@ import { parentSkuExtraTabs, parentSkuPngSlots } from "@/components/master-crud/
 import { useAuth } from "@/components/auth";
 import { AddToPlanModal, type PlanSource } from "@/components/team-plan/add-to-plan";
 import { apiFetch } from "@/lib/api";
+import { CREATOR_CODES } from "@/lib/platform-create-registry";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -224,7 +225,7 @@ export default function ParentSKUsV2Page() {
       <MasterCRUDPage config={config} />
       {routerOpen !== null && <ProductImageRouter open={routerOpen} onClose={() => setRouterOpen(false)} />}
       {planFor && <AddToPlanModal open defaultTitle={planFor.title} source={planFor.source} onClose={() => setPlanFor(null)} />}
-      {addRows && <AddToPlatformWizard open parents={addRows.parents} brandId={addRows.brandId} onClose={() => setAddRows(null)} />}
+      {addRows && <AddToPlatformWizard open parents={addRows.parents} brandId={addRows.brandId} initialPlatformCodes={CREATOR_CODES} onClose={() => setAddRows(null)} />}
       {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} canPublish={can("products.platforms.publish")} />}
     </>
   );

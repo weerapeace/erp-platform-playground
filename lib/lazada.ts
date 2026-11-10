@@ -227,6 +227,18 @@ export async function lazMigrateImage(gateway: string, accessToken: string, payl
 export async function lazDeactivateProduct(gateway: string, accessToken: string, bodyXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/deactivate", accessToken, { apiRequestBody: bodyXml });
 }
+/**
+ * สร้างสินค้าใหม่ (/product/create) — payload JSON จาก lib/lazada-create-plan (planLazadaCreate · รูปฝากเข้า Lazada แล้ว) · สร้างบนร้านจริง
+ * คืน { item_id, sku_list[{ seller_sku, sku_id, shop_sku }] }
+ */
+export async function lazCreateProduct(gateway: string, accessToken: string, payloadJson: string): Promise<{ itemId: string; skus: { seller_sku: string; sku_id: string }[]; raw: Record<string, unknown> }> {
+  const j = await lazApiPost(gateway, "/product/create", accessToken, { payload: payloadJson });
+  const d = (j.data && typeof j.data === "object" ? j.data : {}) as Record<string, unknown>;
+  const itemId = s0(d.item_id);
+  if (!itemId) throw new LazApiError("Lazada สร้างสินค้าแล้วไม่ส่งรหัสสินค้ากลับ — กดดึงสินค้าจาก Lazada เพื่อตรวจก่อนลองใหม่", "NO_ITEM_ID");
+  const list = Array.isArray(d.sku_list) ? d.sku_list as Record<string, unknown>[] : [];
+  return { itemId, skus: list.map((s) => ({ seller_sku: s0(s.seller_sku) ?? "", sku_id: s0(s.sku_id) ?? "" })), raw: d };
+}
 
 export type LazCatalogItem = { external_product_id: string; title: string | null; skus: string[]; price: number | null; status: string | null; raw: Record<string, unknown> };
 const s0 = (v: unknown): string | null => { const s = v == null ? "" : String(v).trim(); return s || null; };

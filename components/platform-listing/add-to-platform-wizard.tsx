@@ -18,6 +18,9 @@
  * ลงร้านอื่นจากรายการบนร้าน (prop sources — เปิดจากลิ้นชักสินค้าบนร้าน / ติ๊กหลายรายการในมุมมองหน้าร้าน · เจ้าของอนุมัติเฟส 1 2026-11-10):
  *   ไม่ให้เลือกร้านต้นทางเป็นปลายทาง · เข้าขั้น 2 = คัดลอกข้อมูลจากร้านต้นทางลงร่าง LINE (ค่าเริ่ม) ทีละตัว
  *   → ตารางจับคู่ CopyMappingTable (เปลี่ยนแหล่งรายช่อง / เติมราคาที่ว่าง) อยู่เหนือหน้าดูก่อนส่ง · ลงจริงใช้ create-product เดิม (อ่านร่าง)
+ * ลงทุกร้านในครั้งเดียว (เจ้าของอนุมัติ 2026-11-10 เฟส A+B): ร้านที่ลงจริงได้/ดูก่อนส่งได้ มาจากทะเบียนกลาง lib/platform-create-registry
+ *   ขั้น 2 = แท็บต่อร้าน (LINE: LineCreatePreviewEditor · Lazada: LazadaCreatePreviewEditor) · ขั้น 3 ลงทุกร้านในรอบเดียว + ผลแยกร้าน
+ *   Lazada ยังไม่เปิดลงจริง (LAZADA_CREATE_LIVE) → ดูก่อนส่ง + บันทึกร่าง · ร้านใหม่ = เพิ่มแถวในทะเบียน + หน้าดูก่อนส่งของร้านนั้น
  * กันซ้ำ: ข้ามตัวที่มีบนร้านแล้ว (on_shop / ร่างมีรหัส) · ลงจริงทีละตัว · server ล็อกระหว่างสร้าง · ลงจริง > 20 ต้องพิมพ์ยืนยัน
  * สิทธิ์: บันทึกร่าง = products.platforms.edit · ลงจริง = products.platforms.publish · สร้างงาน = tasks.create
  */
@@ -33,8 +36,10 @@ import { LoadingState } from "@/components/state-views";
 import { LineCreatePreviewEditor } from "./line-create-preview";
 import { LineStorefrontPreview } from "./line-storefront-preview";
 import type { LineCreatePreview } from "@/lib/line-create-payload";
+import type { LazCreatePreview } from "@/lib/lazada-create-plan";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
+import { creatorOf, hasCreatePreview, liveCreateEndpoint } from "@/lib/platform-create-registry";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
   ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, decideAdd, isOnShop, missingList, needsTypedConfirm, summarizePlan,
@@ -45,9 +50,8 @@ const ProductPlatformManager = dynamic(() => import("@/components/product-platfo
 const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 // ตารางจับคู่ช่อง (ลงร้านอื่นจากรายการนี้) — โหลดเมื่อใช้โหมดคัดลอกเท่านั้น (ไม่ถ่วงหน้าที่ใช้ตัวช่วยแบบปกติ)
 const CopyMappingTable = dynamic(() => import("./copy-mapping-table").then((m) => m.CopyMappingTable), { ssr: false });
-
-/** ร้านที่ลงจริงได้แล้ว → ปลายทางสร้างสินค้า (ร้านอื่น = บันทึกร่างอย่างเดียวจนกว่าจะต่อตัวเชื่อม) */
-const REAL_CREATE_ENDPOINT: Record<string, string> = { line_shopping: "/api/line-shopping/create-product" };
+// หน้าดูก่อนส่งของ Lazada — โหลดเมื่อเลือก Lazada เท่านั้น
+const LazadaCreatePreviewEditor = dynamic(() => import("./lazada-create-preview").then((m) => m.LazadaCreatePreviewEditor), { ssr: false });
 
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
@@ -95,8 +99,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [fixFor, setFixFor] = useState<{ parentId: string; platformId: string } | null>(null);
   const [taskFor, setTaskFor] = useState<ParentSkuPickerValue[] | null>(null);
   const [othersOpen, setOthersOpen] = useState(false);                     // ขั้น 1: กล่องร้านอื่น (บันทึกร่าง)
-  const [focus, setFocus] = useState<string | null>(null);                 // ขั้น 2: สินค้าที่กำลังดู (LINE)
-  const [pvState, setPvState] = useState<Record<string, number>>({});      // parent id → จำนวนข้อที่ขาด (จากหน้าดูก่อนส่ง)
+  const [focus, setFocus] = useState<string | null>(null);                 // ขั้น 2: สินค้าที่กำลังดู
+  const [tab, setTab] = useState<string | null>(null);                     // ขั้น 2: แท็บร้าน (code)
+  const [pvState, setPvState] = useState<Record<string, number>>({});      // "code:parent id" → จำนวนข้อที่ขาด (จากหน้าดูก่อนส่ง)
   const [preparing, setPreparing] = useState(false);
   const [afterDisplay, setAfterDisplay] = useState<"hide" | "onsale">("hide");   // ขั้น 3: หลังลง เปิด/ปิดขาย (ค่าเริ่ม ปิดไว้ก่อน)
   const [previewFor, setPreviewFor] = useState<string | null>(null);              // ขั้น 3: ดูแบบหน้าร้าน (parent id)
@@ -115,7 +120,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   useEffect(() => {
     if (!open) return;
     setStep(1); setRows({}); setSkipped(new Set()); setTyped(""); setOutcomes(null); setCheckErr(null); setProgress({ done: 0, total: 0, label: "" });
-    setFocus(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false); setAfterDisplay("hide"); setPreviewFor(null);
+    setFocus(null); setTab(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false); setAfterDisplay("hide"); setPreviewFor(null);
     copiedRef.current = new Set(); setCopyErr({}); setCopying(null);
     let alive = true;
     apiFetch(`/api/platform-accounts${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`).then((r) => r.json()).then((j) => {
@@ -125,18 +130,22 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
       setPfs(sel);
       const init = new Set(initialPlatformCodes.filter((c) => sel.some((p) => p.code === c)));
       setPicked(init);
-      setReal(new Set(sel.filter((p) => init.has(p.code) && p.can_publish && REAL_CREATE_ENDPOINT[p.code] && canPublish).map((p) => p.code)));
+      setReal(new Set(sel.filter((p) => init.has(p.code) && liveCreateEndpoint(p.code) && canPublish).map((p) => p.code)));
     }).catch(() => { if (alive) setPfs([]); });
     return () => { alive = false; };
   }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickedPfs = useMemo(() => (pfs ?? []).filter((p) => picked.has(p.code)), [pfs, picked]);
-  const realOk = (p: Pf) => !!p.can_publish && !!REAL_CREATE_ENDPOINT[p.code] && canPublish;
+  // ลงจริงได้ = ทะเบียนกลางเปิดตัวสร้างของร้านนั้นแล้ว (lib/platform-create-registry) + มีสิทธิ์ลงขาย
+  const realOk = (p: Pf) => !!liveCreateEndpoint(p.code) && canPublish;
 
   const realOn = (p: Pf) => real.has(p.code) && realOk(p);
-  // ร้านที่มีหน้า "ดูก่อนส่ง" (ตอนนี้ LINE) — เลือกลงจริงไว้
-  const linePf = pickedPfs.find((p) => p.code === "line_shopping" && realOn(p)) ?? null;
-  const othersPfs = pickedPfs.filter((p) => p !== linePf);
+  // ร้านที่มีหน้า "ดูก่อนส่ง": เลือกลงจริงไว้ (LINE) หรือมีตัวสร้างแต่ยังไม่เปิดลงจริง (Lazada — ดูก่อนส่ง + บันทึกร่าง)
+  const showPreview = (p: Pf) => hasCreatePreview(p.code) && (realOn(p) || !creatorOf(p.code)?.live);
+  const previewPfs = pickedPfs.filter(showPreview);
+  const linePf = previewPfs.find((p) => p.code === "line_shopping" && realOn(p)) ?? null;
+  const othersPfs = pickedPfs.filter((p) => !previewPfs.includes(p));
+  const activePf = previewPfs.find((p) => p.code === tab) ?? previewPfs[0] ?? null;
 
   // ---------- ตรวจความครบ (เฉพาะสินค้าที่เลือก ทีละร้าน) ----------
   const check = useCallback(async (): Promise<Record<string, AddReadinessRow[]> | null> => {
@@ -155,16 +164,16 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
     finally { setChecking(false); }
   }, [list, pickedPfs]);
 
-  // บันทึกร่าง LINE ให้ก่อน (เติมเฉพาะช่องที่ว่าง — ไม่ทับที่เคยแก้) → หน้าดูก่อนส่งเห็นหมวด/รูปที่ระบบเติมให้ และแก้ลงร่างได้
+  // บันทึกร่างของร้านที่มีหน้าดูก่อนส่งให้ก่อน (เติมเฉพาะช่องที่ว่าง — ไม่ทับที่เคยแก้) → เห็นหมวด/รูปที่ระบบเติมให้ และแก้ลงร่างได้
   const prepareLine = async (pf: Pf, ids: string[]) => {
-    const todo = ids.filter((id) => !preparedRef.current.has(id));
+    const todo = ids.filter((id) => !preparedRef.current.has(`${pf.code}:${id}`));
     if (!todo.length || !canEdit) return;
     setPreparing(true);
     try {
       for (let i = 0; i < todo.length; i += 100) {
         const chunk = todo.slice(i, i + 100);
         const j = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: pf.code, parent_sku_ids: chunk, price_rule: normalizePriceRule({ mode: "same", pct: 0 }), overwrite: false }) }).then((r) => r.json());
-        if (!j.error) for (const id of chunk) preparedRef.current.add(id);
+        if (!j.error) for (const id of chunk) preparedRef.current.add(`${pf.code}:${id}`);
       }
     } catch { /* ดูก่อนส่งยังเปิดได้ — แค่หมวด/รูปอาจยังไม่ถูกเติม */ }
     finally { setPreparing(false); }
@@ -194,10 +203,11 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
       if (!pickedPfs.length) { toast.warning("เลือกร้านอย่างน้อย 1 ร้าน"); return; }
       setStep(2);
       const m = await check();
-      if (m && linePf) {
-        const todo = (m[linePf.code] ?? []).filter((r) => !isOnShop(r)).map((r) => r.id);
-        await prepareLine(linePf, todo);
-        setFocus((f) => f ?? todo[0] ?? (m[linePf.code] ?? [])[0]?.id ?? null);
+      // ทุกร้านที่มีหน้าดูก่อนส่ง (LINE / Lazada …): เตรียมร่างก่อน
+      if (m) for (const pf of previewPfs) {
+        const todo = (m[pf.code] ?? []).filter((r) => !isOnShop(r)).map((r) => r.id);
+        await prepareLine(pf, todo);
+        setFocus((f) => f ?? todo[0] ?? (m[pf.code] ?? [])[0]?.id ?? null);
       }
       // ลงร้านอื่น: คัดลอกจากร้านต้นทางลงร่าง LINE (ทั้งลงจริงและบันทึกร่าง) — หลังเตรียมร่าง เพื่อให้ค่าจากร้านต้นทางอยู่บนสุด
       const copyPf = pickedPfs.find((p) => p.code === "line_shopping");
@@ -223,27 +233,31 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const problemParents = useMemo(() => {
     const m = new Map<string, { row: AddReadinessRow; pfs: { pf: Pf; missing: string[] }[] }>();
     for (const x of plan) {
-      if (x.pf === linePf) continue;   // LINE ลงจริง = แก้ในหน้าดูก่อนส่ง (ไม่อยู่ในรายการนี้)
+      if (previewPfs.includes(x.pf)) continue;   // ร้านที่มีหน้าดูก่อนส่ง = แก้ในแท็บของร้านนั้น (ไม่อยู่ในรายการนี้)
       if (isOnShop(x.row) || x.row.ready_now) continue;
       const cur = m.get(x.row.id) ?? { row: x.row, pfs: [] };
       cur.pfs.push({ pf: x.pf, missing: missingList(x.row.missing) });
       m.set(x.row.id, cur);
     }
     return [...m.values()];
-  }, [plan, linePf]);
+  }, [plan, previewPfs]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ขั้น 1: แยกร้านที่ลงจริงได้ (เด่น) / ร้านอื่น (พับไว้)
-  const realPfs = (pfs ?? []).filter((p) => p.can_publish && REAL_CREATE_ENDPOINT[p.code]);
-  const draftPfs = (pfs ?? []).filter((p) => !(p.can_publish && REAL_CREATE_ENDPOINT[p.code]));
+  // ขั้น 1: ร้านที่ลงจริงได้ (เด่น) · ร้านที่ดูก่อนส่งได้แต่ยังไม่เปิดลงจริง (เด่น + บอกเหตุผล) · ร้านอื่น (บันทึกร่าง · พับไว้)
+  const realPfs = (pfs ?? []).filter((p) => !!liveCreateEndpoint(p.code));
+  const soonPfs = (pfs ?? []).filter((p) => hasCreatePreview(p.code) && !liveCreateEndpoint(p.code));
+  const draftPfs = (pfs ?? []).filter((p) => !hasCreatePreview(p.code));
   const pickedDraftN = draftPfs.filter((p) => picked.has(p.code)).length;
   const togglePick = (code: string) => setPicked((s) => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n; });
   const toggleSkip = (id: string) => setSkipped((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  // ขั้น 2: สินค้าที่กำลังดูก่อนส่ง (LINE)
-  const lineRows = linePf ? rows[linePf.code] ?? [] : [];
+  // ขั้น 2: แท็บร้าน → สินค้าที่กำลังดูก่อนส่ง
+  const lineRows = activePf ? rows[activePf.code] ?? [] : [];
   const focusRow = lineRows.find((r) => r.id === focus) ?? lineRows[0] ?? null;
   // ต้องคงที่ (หน้าดูก่อนส่งโหลดใหม่เมื่อ onLoaded เปลี่ยน)
+  const onLazLoaded = useCallback((pv: LazCreatePreview, blockers: string[]) => {
+    setPvState((s) => ({ ...s, [`lazada:${pv.parent_id}`]: pv.missing.length + blockers.filter((b) => !b.startsWith("มีบน Lazada")).length }));
+  }, []);
   const onPvLoaded = useCallback((pv: LineCreatePreview) => {
-    setPvState((s) => ({ ...s, [pv.parent_id]: pv.missing.length + pv.blockers.filter((b) => !b.startsWith("มีบน LINE")).length }));
+    setPvState((s) => ({ ...s, [`line_shopping:${pv.parent_id}`]: pv.missing.length + pv.blockers.filter((b) => !b.startsWith("มีบน LINE")).length }));
   }, []);
 
   // ---------- ขั้น 3: ลง ----------
@@ -262,8 +276,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         const mine = plan.filter((x) => x.pf.code === p.code && (x.decision === "prepare" || x.decision === "publish"));
         for (let i = 0; i < mine.length; i += 100) {
           const chunk = mine.slice(i, i + 100);
-          // ร้านที่มีหน้าดูก่อนส่ง (LINE ลงจริง) ห้ามเขียนทับ — ผู้ใช้แก้ร่างไว้แล้วในขั้น 2 · ลงร้านอื่น: ร่าง LINE มีค่าที่คัดลอกมา ห้ามทับ
-          const keepDraft = p === linePf || (copyMode && p.code === "line_shopping");
+          // ร้านที่มีหน้าดูก่อนส่ง (LINE / Lazada) ห้ามเขียนทับ — ผู้ใช้แก้ร่างไว้แล้วในขั้น 2 · ลงร้านอื่น: ร่าง LINE มีค่าที่คัดลอกมา ห้ามทับ
+          const keepDraft = previewPfs.includes(p) || (copyMode && p.code === "line_shopping");
           const r = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: p.code, parent_sku_ids: chunk.map((x) => x.row.id), price_rule: rule, overwrite: keepDraft ? false : overwrite }) });
           const j = await r.json();
           if (j.error) { for (const x of chunk) res.push({ parent_id: x.row.id, platform: p.name_th, ok: false, text: `บันทึกร่างไม่สำเร็จ: ${j.error}` }); }
@@ -284,8 +298,10 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
       for (let i = 0; i < toCreate.length; i++) {
         const { pf, id } = toCreate[i];
         if (stopRef.current) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: "หยุดก่อนลง (บันทึกร่างไว้แล้ว)" }); continue; }
+        const endpoint = liveCreateEndpoint(pf.code);
+        if (!endpoint) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: "บันทึกร่างแล้ว · ร้านนี้ยังไม่เปิดลงจริง" }); continue; }
         try {
-          const r = await apiFetch(REAL_CREATE_ENDPOINT[pf.code], { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: afterDisplay }) });
+          const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: afterDisplay }) });
           const j = await r.json();
           if (j.error || j.ok === false) res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${j.error ?? "ไม่ทราบสาเหตุ"}` });
           else {
@@ -401,6 +417,21 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                 );
               })}
 
+              {/* ร้านที่ดูก่อนส่งได้ แต่ยังไม่เปิดลงจริง (เช่น Lazada ช่วงแคมเปญ) — เด่น + บอกเหตุผล · ลงรอบนี้ = บันทึกร่าง */}
+              {soonPfs.map((p) => {
+                const on = picked.has(p.code);
+                return (
+                  <div key={p.id} className={`rounded-xl border px-3 py-2.5 ${on ? "border-violet-400 bg-violet-50/40" : "border-slate-200"}`}>
+                    <label className="flex cursor-pointer flex-wrap items-center gap-2">
+                      <input type="checkbox" checked={on} onChange={() => togglePick(p.code)} />
+                      <PlatformIcon code={p.code} iconKey={p.icon_key} size={20} /><span className="text-sm font-medium">{p.name_th}</span>
+                      <span className="text-[11px] text-sky-700">ดูก่อนส่งได้ · บันทึกร่าง</span>
+                    </label>
+                    <p className="mt-1 pl-6 text-[11px] text-slate-500">{creatorOf(p.code)?.notLiveReason}</p>
+                  </div>
+                );
+              })}
+
               {/* ร้านอื่น (ยังลงจริงไม่ได้) — พับไว้ */}
               {draftPfs.length > 0 && (
                 <div className="rounded-xl border border-dashed border-slate-300">
@@ -447,14 +478,24 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             <LoadingState label={`กำลังดึงข้อมูลจาก ${sourceNames} ${copying.done.toLocaleString()}/${copying.total.toLocaleString()}...`} />
           ) : (
             <div className="space-y-4">
-              {linePf && (
+              {activePf && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-sm font-medium"><PlatformIcon code={linePf.code} iconKey={linePf.icon_key} size={16} />{linePf.name_th} — สิ่งที่จะส่งขึ้นร้าน</div>
+                  {previewPfs.length > 1 ? (
+                    <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-2" role="tablist" aria-label="ร้านที่จะลง">
+                      {previewPfs.map((p) => (
+                        <button key={p.id} type="button" role="tab" aria-selected={p === activePf} onClick={() => setTab(p.code)}
+                          className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-sm ${p === activePf ? "border-violet-400 bg-violet-50 font-medium text-violet-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                          <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} />{p.name_th}
+                          {!realOn(p) && <span className="text-[10px] text-sky-700">ร่าง</span>}
+                        </button>
+                      ))}
+                    </div>
+                  ) : <div className="flex items-center gap-1.5 text-sm font-medium"><PlatformIcon code={activePf.code} iconKey={activePf.icon_key} size={16} />{activePf.name_th} — สิ่งที่จะส่งขึ้นร้าน</div>}
                   {lineRows.length > 1 && (
                     <div className="flex gap-1.5 overflow-x-auto pb-1">
                       {lineRows.map((r) => {
                         const shop = isOnShop(r); const sk = skipped.has(r.id);
-                        const miss = pvState[r.id] ?? (r.ready_now ? 0 : 1);
+                        const miss = pvState[`${activePf.code}:${r.id}`] ?? (r.ready_now ? 0 : 1);
                         return (
                           <button key={r.id} type="button" onClick={() => setFocus(r.id)}
                             className={`max-w-[12rem] shrink-0 rounded-lg border px-2 py-1 text-left text-xs ${focus === r.id ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:bg-slate-50"} ${shop || sk ? "opacity-60" : ""}`}>
@@ -481,7 +522,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                       </div>
                       {skipped.has(focusRow.id)
                         ? <p className="py-3 text-center text-xs text-slate-500">ข้ามตัวนี้ — จะไม่ลงร้าน</p>
-                        : (
+                        : activePf.code === "lazada" ? (
+                          <LazadaCreatePreviewEditor key={`laz:${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} onLoaded={onLazLoaded} />
+                        ) : (
                           <>
                             {/* ลงร้านอื่น: ตารางจับคู่ช่อง (ร้านต้นทาง / ข้อมูลในระบบ) — ใช้แล้วหน้าดูก่อนส่งด้านล่างโหลดใหม่ */}
                             {sources?.[focusRow.id] && (
@@ -501,7 +544,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
 
               {othersPfs.length > 0 && (
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700">{linePf ? "ร้านอื่น — บันทึกร่างไว้ก่อน" : "ความครบของข้อมูล"}</div>
+                  <div className="text-sm font-medium text-slate-700">{previewPfs.length ? "ร้านอื่น — บันทึกร่างไว้ก่อน" : "ความครบของข้อมูล"}</div>
                   {copyMode && othersPfs.some((p) => p.code === "line_shopping") && (
                     <p className="text-xs text-violet-700">คัดลอกข้อมูลจาก {sourceNames} ลงร่าง LINE แล้ว {copiedRef.current.size.toLocaleString()} ตัว{Object.keys(copyErr).length ? ` · ไม่สำเร็จ ${Object.keys(copyErr).length.toLocaleString()} ตัว (${Object.values(copyErr)[0]})` : ""}</p>
                   )}
@@ -573,6 +616,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                         <span className="inline-flex items-center gap-1.5 font-medium"><PlatformIcon code={p.code} iconKey={p.icon_key} size={16} />{p.name_th}</span>
                         {s.publish > 0 && <span className="text-emerald-700">ลงบนร้านจริง {s.publish.toLocaleString()}</span>}
                         {s.prepare > 0 && <span className="text-sky-700">บันทึกร่าง {s.prepare.toLocaleString()}</span>}
+                        {s.prepare > 0 && creatorOf(p.code) && !creatorOf(p.code)!.live && <span className="text-[11px] text-slate-400">· ลงจริงเปิดเมื่อ {p.name_th} ให้สร้างสินค้าอีกครั้ง</span>}
                         {s.skip_listed > 0 && <span className="text-slate-500">มีบนร้านแล้ว {s.skip_listed.toLocaleString()}</span>}
                         {s.skip_missing > 0 && <span className="text-rose-700">ข้าม (ไม่ครบ) {s.skip_missing.toLocaleString()}</span>}
                         {s.skip_user > 0 && <span className="text-slate-500">เลือกไม่ลง {s.skip_user.toLocaleString()}</span>}

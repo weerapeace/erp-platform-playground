@@ -113,3 +113,21 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 - ช่วงแคมเปญ: ประกาศ 11.11 (2026-10-30) ปิด update/ราคา/รูป **10 พ.ย. 19:30–20:30 และ 23:30–00:30 (เวลาไทย)** · error 998 = ปิดระบบ · 501 `THD_IC_ERR_F_IC_ABILITY_PG_00x` = ตัวเลือกร่วมแคมเปญ แก้ไม่ได้ · 12.12 น่าจะมีประกาศแบบเดียวกัน
 - ราคาเปลี่ยน ≥ 80% → QC: อยู่ในคู่มือรุ่นเก่า (lazada-sellercenter.readme.io) ไม่มีในคู่มือปัจจุบัน — ยังถือเป็นกฎไว้ก่อน
 - เพดานเรียก: แอป Online 10 ล้านครั้ง/วัน · เกิน = ถูกแบน ~14 ชม. · ApiCallLimit = รอแล้วลองใหม่ (1→2→4→8 วิ)
+
+## สร้างสินค้าใหม่บน Lazada + ลงทุกร้านในครั้งเดียว (เฟส A+B · 2026-11-10)
+
+เจ้าของขอ "เพิ่มสินค้าใหม่ทุกที่ทีเดียว" → เฟส A (ตัวสร้าง Lazada · ดูก่อนส่ง) + B (ตัวช่วยลงหลายร้านพร้อมกัน) · ไม่แตะร้าน · เฟส C = เปิดลงจริง (หลัง Lazada เลิกปิดการสร้างสินค้าช่วงแคมเปญ)
+
+- **รูปแบบคำขอ** (อ่านคู่มือทางการ 2026-11-10: API `/product/create` + "Create a product" + "Custom sales attributes"):
+  - payload JSON `{Request:{Product:{PrimaryCategory, Images{Image[]}, variation{variation1..2{name,hasImage,customize,options{option[]}}}, Attributes{name,description,short_description,brand,...}, Skus{Sku[{SellerSku,quantity,price,special_price,package_*,saleProp{...},Images}]}}}}`
+  - ชั้นตัวเลือก = ช่อง `is_sale_prop` ของหมวด (color_family / size) หรือกำหนดเอง (`customize:true` ชื่อ ≤ 15) · ≤ 2 ชั้น · ค่า ≤ 20 ตัวอักษร · ≤ 50 ค่า · ซ้ำไม่ได้ (4112) · รูปต่อตัวเลือกเฉพาะชั้น 1 ที่ไม่ใช่ size และต้องครบทุก SKU
+  - รูป ≤ 8 ต้องเป็นของ Lazada (4138) · รายละเอียดใส่รูปได้เฉพาะลิงก์ Lazada · พัสดุบังคับ (ทศนิยม ≤ 2 · ≤ 40 กก. · กว้าง+ยาว+สูง ≤ 300) · `brand` (เก่า) / `brand_id` — ร้าน IG ใช้ "No Brand" ทุกรายการ
+  - ตอบกลับ `{item_id, sku_list[{seller_sku, sku_id, shop_sku}], item_status}` · ไม่มีช่องสร้างแบบปิดขาย → สร้างแล้ว `/product/deactivate` (ค่าเริ่ม "ปิดไว้ก่อน")
+- **ตัวประกอบข้อมูลตัวเดียว** `lib/lazada-create-plan.ts` (`planLazadaCreate` · pure + เทสต์ `lib/__tests__/lazada-create-plan.test.ts`) — ใช้ทั้งดูก่อนส่งและลงจริง (ห้ามประกอบที่อื่น) · ตัวโหลด `app/api/lazada/create-product/load.ts` (ช่องของหมวดดึงสด `lazGetCategoryAttributes`)
+  - ร่าง Lazada: `title/description/category_path` + extra `lazada_images` (ref `r2:<key>`/ลิงก์) · `lazada_highlights` (บรรทัดละจุดเด่น) · `lazada_weight` · `lazada_variation {color|option|code: {name, customize}}` · `lazada_attrs`
+  - ราคา = ราคาเต็ม + ราคาลด (ราคาขาย) · ไม่มีราคาเต็ม = ราคาขายเป็นราคาปกติ · ตัวขายไม่มี → ตัวสี · สต๊อก 0
+- **API** `GET /api/lazada/create-product?parent_sku_id=` (ดูก่อนส่ง) · `POST {parent_sku_id, display}` **ปิดไว้** (`LAZADA_CREATE_LIVE=false` ใน `lib/platform-create-registry`) — ลำดับเมื่อเปิด: กันซ้ำ → ล็อก 3 นาที → `/image/migrate` ทีละรูป (`r2:` = `/api/r2-image?…&w=1500&sq=1`) → `lazCreateProduct` → รหัสในร่าง + รายการบนร้าน (จับคู่) → ปิดขาย → audit `lazada_create`
+- **หน้าจอ** `components/platform-listing/lazada-create-preview.tsx` (แท็บ Lazada ในตัวช่วยลงสินค้า) — ใช้ของกลาง `ListingImageGrid/ListingImagePicker` · `LazadaAttrField` (export จาก lazada-listing-panels) + `useLazadaAttrDefs` · `PlatformCategoryPicker`
+- **ทะเบียนตัวสร้าง** `lib/platform-create-registry.ts` — LINE live · Lazada ดูก่อนส่ง · ร้านใหม่ (Shopee/TikTok/Amaze) = เพิ่มแถว + หน้าดูก่อนส่งของร้านนั้น
+- **ตัวช่วยลงสินค้า**: ขั้น 1 ร้านลงจริงได้ / ดูก่อนส่งได้ (บอกเหตุผล) / ร้านอื่น · ขั้น 2 แท็บต่อร้าน · ขั้น 3 ลงทุกร้านรอบเดียว (ร้านที่ยังไม่ live = บันทึกร่าง) · ทางเข้าใหม่: แท็บแพลตฟอร์มของ Parent SKU ปุ่ม "ลงทุกร้าน" + ติ๊กหลายรุ่นในหน้า Parent SKU (ติ๊กทุกร้านที่มีตัวสร้างให้)
+- **เฟส C (ยังไม่ทำ · แตะร้าน):** เปลี่ยน `LAZADA_CREATE_LIVE = true` หลังพ้นแคมเปญ → ทดสอบ 1 ตัว (ปิดขาย) · ⚠️ ยังไม่เคยส่ง `/product/create` จริง — JSON payload / variation block / ปิดขายหลังสร้าง ต้องยืนยันกับร้าน
