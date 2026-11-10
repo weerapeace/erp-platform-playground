@@ -13,10 +13,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lazDeactivateProduct, lazErrorText, lazGetItem, lazUpdateProduct } from "@/lib/lazada";
-import { lazadaListingView, lazDeactivateXml, lazUpdateProductXml, planLazadaDisplay, type LazadaWriteResponse } from "@/lib/lazada-listing-edit";
+import { lazDeactivateProduct, lazErrorText, lazUpdateProduct } from "@/lib/lazada";
+import { lazadaListingView, lazDeactivateXml, lazRawAfterStatus, lazUpdateProductXml, lazViewAfterWrite, planLazadaDisplay, type LazadaWriteResponse } from "@/lib/lazada-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadLazListingLive, saveLazSlimCopy } from "../shared";
+import { loadLazListingLive, refetchLazItem, saveLazSlimCopy } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -59,19 +59,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return reply({ ok: false, view, error: `${body.open ? "เปิด" : "ปิด"}ขายบน Lazada ไม่สำเร็จ: ${error}` }, 502);
   }
 
-  // ดึงใหม่ → ตรวจว่าเปลี่ยนจริงทุกตัว
+  // ดึงใหม่ → ตรวจว่าเปลี่ยนจริงทุกตัว (ลองซ้ำถ้า Lazada จำกัดความถี่)
   const warnings: string[] = [];
-  let fresh: Record<string, unknown> | null = null;
-  try { fresh = await lazGetItem(live.gateway, live.accessToken, live.itemId); } catch { /* ทำสำเร็จแล้ว ดึงกลับไม่ได้ */ }
+  const fresh = await refetchLazItem(live.gateway, live.accessToken, live.itemId);
   const freshView = fresh ? lazadaListingView(fresh) : null;
-  if (freshView) {
+  if (!freshView) {
+    // ส่งสำเร็จแล้ว แต่ดึงกลับไม่ได้ → แสดง/เก็บตามที่สั่ง + เตือนให้ยืนยันเอง (เคยโชว์ของเก่า = คนเข้าใจว่าไม่สำเร็จ)
+    warnings.push("Lazada ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ (Lazada ตอบช้า) — ระบบแสดงตามที่สั่งไว้ก่อน กด “ดึงตัวนี้จาก Lazada” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
+    const after = lazRawAfterStatus(live.row.raw?.lazada, plan.statusOverride);
+    const { error: e2 } = await admin.from("platform_catalog_listings").update({ raw: { ...(live.row.raw ?? {}), lazada: after.lazada }, status: after.status, updated_at: new Date().toISOString() }).eq("id", live.row.id);
+    if (e2) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${e2.message}`);
+    await audit({ ok: true, warnings, refreshed: false, optimistic: true });
+    return reply({ ok: true, view: lazViewAfterWrite(view, { statusOverride: plan.statusOverride }), summary: plan.summary, warnings, error: null });
+  }
+  {
     const want = body.open ? "active" : "inactive";
     const notYet = plan.targets.filter((t) => (freshView.skus.find((s) => s.skuId === t.skuId)?.status ?? "") !== want);
     if (notYet.length) warnings.push(`Lazada ตอบรับแล้ว แต่ยังเห็น ${notYet.length} ตัวเลือกสถานะเดิม (อาจใช้เวลาสักครู่) — กดดึงตัวนี้อีกครั้งภายหลัง`);
     const others = freshView.skus.filter((s) => !plan.targets.some((t) => t.skuId === s.skuId) && view.skus.find((b) => b.skuId === s.skuId)?.status !== s.status).length;
     if (others) warnings.push(`ตัวเลือกอื่นเปลี่ยนสถานะไปด้วย ${others} ตัว — ตรวจในแท็บตัวเลือก`);
   }
-  if (fresh) { const err = await saveLazSlimCopy(admin, live.row, fresh); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
-  await audit({ ok: true, warnings, refreshed: !!freshView });
-  return reply({ ok: true, view: freshView ?? view, summary: plan.summary, warnings, error: null });
+  const err = await saveLazSlimCopy(admin, live.row, fresh!);
+  if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`);
+  await audit({ ok: true, warnings, refreshed: true });
+  return reply({ ok: true, view: freshView, summary: plan.summary, warnings, error: null });
 }

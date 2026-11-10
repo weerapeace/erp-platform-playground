@@ -14,10 +14,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lazErrorText, lazGetItem, lazUpdateProduct } from "@/lib/lazada";
-import { lazadaEditStateFromView, lazadaListingView, lazUpdateProductXml, planLazadaEdit, type LazadaEditState, type LazadaWriteResponse } from "@/lib/lazada-listing-edit";
+import { lazErrorText, lazUpdateProduct } from "@/lib/lazada";
+import { lazadaEditStateFromView, lazadaListingView, lazUpdateProductXml, lazViewAfterWrite, planLazadaEdit, type LazadaEditState, type LazadaWriteResponse } from "@/lib/lazada-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadLazListingLive, saveLazSlimCopy } from "../shared";
+import { loadLazListingLive, refetchLazItem, saveLazSlimCopy } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -75,19 +75,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // 4) ดึงใหม่ → ตรวจผล + สำเนาย่อ
   const warnings = [...plan.warnings.filter((w) => !w.includes("ตรวจใหม่"))];
   const resData = res.data && typeof res.data === "object" ? res.data as Record<string, unknown> : {};
-  let fresh: Record<string, unknown> | null = null;
-  try { fresh = await lazGetItem(live.gateway, live.accessToken, live.itemId); } catch { /* ส่งสำเร็จแล้ว ดึงกลับไม่ได้ = ใช้ของเดิม */ }
+  const fresh = await refetchLazItem(live.gateway, live.accessToken, live.itemId);   // ลองซ้ำถ้า Lazada จำกัดความถี่
   const freshView = fresh ? lazadaListingView(fresh) : null;
   const qc = /pending/i.test(String(resData.item_status ?? "")) || /pending/i.test(String(freshView?.status ?? ""));
   if (qc) warnings.push("Lazada ส่งสินค้าไปรอตรวจ (Pending QC · ไม่เกิน 24 ชม.)");
-  if (freshView && plan.fields.name && freshView.name.replace(/\s+/g, " ").trim() !== plan.fields.name) warnings.push("Lazada ตอบรับแล้ว แต่ชื่อบนร้านยังเป็นชื่อเดิม (อาจรอตรวจ) — ดูอีกครั้งภายหลัง");
-  if (freshView) {
-    const changedStatus = freshView.skus.filter((s) => liveView.skus.find((b) => b.skuId === s.skuId)?.status !== s.status).length;
-    if (changedStatus) warnings.push(`สถานะตัวเลือกเปลี่ยนไป ${changedStatus} ตัวหลังแก้ — ตรวจในแท็บตัวเลือก`);
+  if (!freshView) {
+    // ส่งสำเร็จแล้ว แต่ดึงกลับไม่ได้ → แสดงตามที่ส่ง + ชื่อในระบบตามที่ส่ง + เตือนให้ยืนยันเอง (ไม่โชว์ของเก่าให้เข้าใจผิดว่าไม่สำเร็จ)
+    warnings.push("Lazada ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ (Lazada ตอบช้า) — ระบบแสดงตามที่ส่งไว้ก่อน กด “ดึงตัวนี้จาก Lazada” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
+    if (plan.fields.name) await admin.from("platform_catalog_listings").update({ title: plan.fields.name, updated_at: new Date().toISOString() }).eq("id", live.row.id);
+    await audit({ ok: true, qc, warnings, refreshed: false, optimistic: true });
+    return reply({ ok: true, view: lazViewAfterWrite(liveView, { fields: plan.fields }), changes: plan.changes, qc, warnings, error: null });
   }
-  if (fresh) { const err = await saveLazSlimCopy(admin, live.row, fresh); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
+  if (plan.fields.name && freshView.name.replace(/\s+/g, " ").trim() !== plan.fields.name) warnings.push("Lazada ตอบรับแล้ว แต่ชื่อบนร้านยังเป็นชื่อเดิม (อาจรอตรวจ) — ดูอีกครั้งภายหลัง");
+  const changedStatus = freshView.skus.filter((s) => liveView.skus.find((b) => b.skuId === s.skuId)?.status !== s.status).length;
+  if (changedStatus) warnings.push(`สถานะตัวเลือกเปลี่ยนไป ${changedStatus} ตัวหลังแก้ — ตรวจในแท็บตัวเลือก`);
+  const err = await saveLazSlimCopy(admin, live.row, fresh!);
+  if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`);
 
   // 5) ประวัติ
-  await audit({ ok: true, qc, warnings, refreshed: !!freshView });
-  return reply({ ok: true, view: freshView ?? liveView, changes: plan.changes, qc, warnings, error: null });
+  await audit({ ok: true, qc, warnings, refreshed: true });
+  return reply({ ok: true, view: freshView, changes: plan.changes, qc, warnings, error: null });
 }

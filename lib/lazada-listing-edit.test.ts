@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   lazadaListingView, lazImageList, lazDateText, lazSkuLabel, lazStatusBadge,
   highlightsToLines, linesToHighlights, lazadaEditStateFromView, planLazadaEdit, foreignDescImages,
-  lazUpdateProductXml, lazDeactivateXml, planLazadaDisplay,
+  lazUpdateProductXml, lazDeactivateXml, planLazadaDisplay, lazViewAfterWrite, lazRawAfterStatus,
 } from "./lazada-listing-edit";
 
 // รูปแบบตามคู่มือ /product/item/get (open.lazada.com · สำรวจ 2026-11-10)
@@ -178,5 +178,24 @@ describe("เฟส 2: planLazadaDisplay", () => {
     const p = planLazadaDisplay(v, { open: true, skuIds: ["nope"] });
     expect(p.api).toBe("none");
     expect(p.errors[0]).toContain("nope");
+  });
+});
+
+describe("ส่งสำเร็จแต่ดึงกลับไม่ได้ (เจอจริง 2026-11-10 LB-01 ปิด→เปิด)", () => {
+  const v = lazadaListingView(item)!;
+  it("lazViewAfterWrite: สถานะตามที่สั่ง + สถานะสินค้า · ชื่อ/จุดเด่นตามที่ส่ง", () => {
+    const closed = lazViewAfterWrite(v, { statusOverride: new Map([["127317001489", "inactive"], ["127317001491", "inactive"]]) });
+    expect(closed.skus.map((s) => s.status)).toEqual(["inactive", "inactive", "inactive"]);
+    expect(closed.status).toBe("InActive");
+    const opened = lazViewAfterWrite(closed, { statusOverride: new Map([["127317001490", "active"]]) });
+    expect(opened.status).toBe("Active");
+    const edited = lazViewAfterWrite(v, { fields: { name: "ใหม่", shortDescription: "<ul><li>a</li></ul>" } });
+    expect(edited).toMatchObject({ name: "ใหม่", shortDescription: "<ul><li>a</li></ul>", description: v.description, status: v.status });
+  });
+  it("lazRawAfterStatus: แก้สถานะ SKU ใน raw.lazada + สถานะสินค้า", () => {
+    const raw = { item_id: "1", status: "InActive", skus: [{ sku_id: "23194862631", seller_sku: "LB-01", status: "inactive", price: 36 }] };
+    const r = lazRawAfterStatus(raw, new Map([["23194862631", "active"]]));
+    expect(r.status).toBe("active");
+    expect(r.lazada).toMatchObject({ status: "Active", skus: [{ sku_id: "23194862631", status: "active", price: 36 }] });
   });
 });

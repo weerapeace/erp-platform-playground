@@ -128,6 +128,19 @@ export async function saveLazSlimCopy(admin: SupabaseClient, row: LazListingRow,
   return error ? error.message : null;
 }
 
+/**
+ * ดึงสินค้ากลับมาเช็กหลังส่งขึ้นร้าน — Lazada มักจำกัดความถี่ถ้าเรียกติดกัน (เจอจริง 2026-11-10: ปิด→เปิดห่างกัน 5 วิ แล้วดึงกลับไม่ได้)
+ * → รอแล้วลองซ้ำ (0.8 วิ · 2 วิ) · ไม่ได้ทั้งหมด = null (route ต้องเตือนให้กด "ดึงตัวนี้จาก Lazada" ยืนยันเอง)
+ */
+export async function refetchLazItem(gateway: string, accessToken: string, itemId: string): Promise<Record<string, unknown> | null> {
+  for (const wait of [800, 2000, 0]) {
+    try { const it = await lazGetItem(gateway, accessToken, itemId); if (it) return it; }
+    catch (e) { console.warn(`[lazada] ดึงสินค้า #${itemId} กลับมาเช็กไม่ได้: ${lazErrorText(e)} (${(e as Error).message})`); }
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+  }
+  return null;
+}
+
 // แบบเดิม (คืน null แทนเหตุผล) — route เก่าใช้อยู่
 export async function ensureLazToken(admin: SupabaseClient, brandId: string, platformId: string, userId: string | null): Promise<{ accessToken: string; gateway: string } | null> {
   const r = await lazTokenOrReason(admin, brandId, platformId, userId);

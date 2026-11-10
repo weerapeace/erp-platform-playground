@@ -313,6 +313,32 @@ export type LazadaDisplayPlan = {
   summary: string;
   errors: string[];
 };
+/**
+ * ส่งสำเร็จแต่ดึงกลับมาเช็กไม่ได้ (Lazada ตอบช้า/จำกัดความถี่) → มุมมองตามที่สั่งไว้ (ไม่โชว์ของเก่าให้คนเข้าใจผิดว่าไม่สำเร็จ)
+ * ใช้คู่กับคำเตือนให้กด "ดึงตัวนี้จาก Lazada" ยืนยันภายหลังเสมอ (pure · มี test)
+ */
+export function lazViewAfterWrite(view: LazadaListingView, w: { fields?: LazadaEditPlan["fields"]; statusOverride?: Map<string, "active" | "inactive"> }): LazadaListingView {
+  const f = w.fields ?? {};
+  const skus = w.statusOverride && w.statusOverride.size ? view.skus.map((s) => (w.statusOverride!.has(s.skuId) ? { ...s, status: w.statusOverride!.get(s.skuId)! } : s)) : view.skus;
+  const anyOpen = skus.some((s) => s.status !== "inactive");
+  return {
+    ...view,
+    name: f.name ?? view.name, description: f.description ?? view.description, shortDescription: f.shortDescription ?? view.shortDescription,
+    skus, status: w.statusOverride && w.statusOverride.size ? (anyOpen ? "Active" : "InActive") : view.status,
+  };
+}
+/** สำเนาย่อในระบบ (raw.lazada) แบบเดียวกัน — สถานะ SKU ตามที่สั่ง + สถานะสินค้า (เปิดอยู่ ≥ 1 ตัว = active) */
+export function lazRawAfterStatus(rawLazada: unknown, statusOverride: Map<string, "active" | "inactive">): { lazada: Obj; status: "active" | "inactive" } {
+  const l = { ...(obj(rawLazada) ?? {}) };
+  const skus = (Array.isArray(l.skus) ? l.skus : []).map((s) => {
+    const o = obj(s); if (!o) return s;
+    const id = str(o.sku_id ?? o.SkuId);
+    return id && statusOverride.has(id) ? { ...o, status: statusOverride.get(id) } : o;
+  });
+  const status = skus.some((s) => str(obj(s)?.status) !== "inactive") ? "active" : "inactive";
+  return { lazada: { ...l, skus, status: status === "active" ? "Active" : "InActive" }, status };
+}
+
 /** คำตอบของ POST /api/lazada/listing-edit และ /listing-display */
 export type LazadaWriteResponse = {
   ok: boolean;
