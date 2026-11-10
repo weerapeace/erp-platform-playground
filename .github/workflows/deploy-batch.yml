@@ -1,0 +1,48 @@
+name: Deploy Batch (ขึ้นเว็บเป็นรอบ)
+
+# เจ้าของเลือก 2026-11-10: "10 นาที แต่มีปุ่มขึ้นทันทีด้วย" — ลดค่า build ของ Vercel (เดิม build ทุก push ~43 ครั้ง/วัน)
+# ทุก session ยัง push ลง feat/host-portable เหมือนเดิม (Vercel ไม่ build สาขานี้แล้ว — vercel.json git.deploymentEnabled)
+# ไฟล์นี้: ทุก ~10 นาที ถ้า feat/host-portable มีงานใหม่ → เลื่อนสาขา prod ไปที่เดียวกัน → Vercel build prod 1 ครั้ง (= เว็บจริง)
+# ขึ้นทันที: กด "Run workflow" หน้า Actions หรือ `gh workflow run deploy-batch.yml` หรือปุ่มในแอป
+# ⚠️ schedule / workflow_dispatch ทำงานจากไฟล์บนสาขา default (main) เท่านั้น — แก้ไฟล์นี้ที่ main (ใส่ [skip ci] กัน deploy สำรอง CF)
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "เหตุผล (ไม่บังคับ)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-batch
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: เลื่อน prod ไปงานล่าสุดของ feat/host-portable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SRC=$(gh api "repos/$REPO/git/ref/heads/feat/host-portable" --jq .object.sha)
+          DST=$(gh api "repos/$REPO/git/ref/heads/prod" --jq .object.sha 2>/dev/null || true)
+          echo "feat/host-portable=$SRC prod=${DST:-none}"
+          if [ "$SRC" = "$DST" ]; then
+            echo "ไม่มีงานใหม่ — ไม่ต้อง build"
+            exit 0
+          fi
+          if [ -z "$DST" ]; then
+            gh api -X POST "repos/$REPO/git/refs" -f ref=refs/heads/prod -f sha="$SRC" > /dev/null
+          else
+            gh api -X PATCH "repos/$REPO/git/refs/heads/prod" -f sha="$SRC" -F force=true > /dev/null
+          fi
+          echo "ขึ้นเว็บรอบนี้: prod → ${SRC:0:8}"
+          echo "### ขึ้นเว็บรอบนี้ → \`${SRC:0:8}\`" >> "$GITHUB_STEP_SUMMARY"
