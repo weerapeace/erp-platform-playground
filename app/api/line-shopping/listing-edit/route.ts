@@ -16,6 +16,7 @@ import { writeAudit } from "@/lib/audit";
 import { lineUpdatePrices, lineUpdateProduct } from "@/lib/line-shopping";
 import { lineApiKey } from "@/lib/line-shopping-server";
 import { applyLineEditToRaw, lineEditStateFromRaw, planLineEdit, type LineEditState } from "@/lib/line-listing-edit";
+import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,9 +44,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!listingId || !after) return NextResponse.json({ error: "ข้อมูลไม่ครบ (listing_id + edit)" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: l } = await admin.from("platform_catalog_listings").select("id, platform_id, brand_id, external_product_id, title, raw").eq("id", listingId).maybeSingle();
-  const row = l as { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; raw: Record<string, unknown> | null } | null;
+  const { data: l } = await admin.from("platform_catalog_listings").select("id, platform_id, brand_id, external_product_id, title, status, raw").eq("id", listingId).maybeSingle();
+  const row = l as { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; status: string | null; raw: Record<string, unknown> | null } | null;
   if (!row) return NextResponse.json({ error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)" }, { status: 404 });
+  if (isGoneStatus(row.status)) return NextResponse.json({ error: "สินค้านี้ไม่อยู่บนร้าน LINE แล้ว — แก้ไม่ได้" }, { status: 400 });
   const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
   if ((pf as { code?: string } | null)?.code !== "line_shopping") return NextResponse.json({ error: "แก้จากหน้านี้ได้เฉพาะสินค้าบน LINE" }, { status: 400 });
   const productId = String(row.external_product_id ?? "").trim();

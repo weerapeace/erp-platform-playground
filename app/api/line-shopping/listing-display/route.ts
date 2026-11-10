@@ -13,6 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAuditMany } from "@/lib/audit";
 import { lineSetDisplay } from "@/lib/line-shopping";
 import { lineApiKey } from "@/lib/line-shopping-server";
+import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,8 +34,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", "line_shopping").maybeSingle();
   const lineId = (pf as { id?: string } | null)?.id;
-  const { data: rows } = await admin.from("platform_catalog_listings").select("id, platform_id, brand_id, external_product_id, title, raw").in("id", ids);
-  type Row = { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; raw: Record<string, unknown> | null };
+  const { data: rows } = await admin.from("platform_catalog_listings").select("id, platform_id, brand_id, external_product_id, title, status, raw").in("id", ids);
+  type Row = { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; status: string | null; raw: Record<string, unknown> | null };
   const list = (rows ?? []) as Row[];
 
   const results: { listing_id: string; ok: boolean; display: boolean | null; error?: string }[] = [];
@@ -45,6 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const work = list.filter((r) => {
     if (r.platform_id !== lineId) { results.push({ listing_id: r.id, ok: false, display: null, error: "ไม่ใช่สินค้าบน LINE" }); return false; }
     if (!r.external_product_id) { results.push({ listing_id: r.id, ok: false, display: null, error: "ไม่มีเลขสินค้าบน LINE" }); return false; }
+    if (isGoneStatus(r.status)) { results.push({ listing_id: r.id, ok: false, display: null, error: "ไม่อยู่บนร้านแล้ว" }); return false; }
     return true;
   });
   for (let i = 0; i < work.length; i += POOL) {

@@ -1216,7 +1216,7 @@ export default function PlatformCatalogPage() {
             )}
 
             {/* ส่งราคาขึ้น LINE เฉพาะสินค้านี้ (เฉพาะ LINE + จับคู่แล้ว) */}
-            {canEdit && platformCode === "line_shopping" && openListing.matched_parent_sku_id && (
+            {canEdit && platformCode === "line_shopping" && openListing.matched_parent_sku_id && !isGoneStatus(openListing.status) && (
               <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 space-y-1.5">
                 <div className="text-xs font-semibold text-slate-600">ส่งราคาขึ้น LINE</div>
                 <div className="flex flex-wrap gap-2">
