@@ -7,6 +7,8 @@
  *   เช่น สินค้าบนแพลตฟอร์ม: ทั้งหมด / จับคู่แล้ว / ระบบเดาให้ / ยังไม่มีคู่
  * ห้ามใช้: ตัวเลขที่ไม่ได้กรองอะไร (แดชบอร์ด/สรุปเฉย ๆ) — คนจะกดแล้วงงว่าทำไมไม่เกิดอะไร
  * กติกา: การ์ดใบแรกควรเป็น "ทั้งหมด" · กดใบที่เลือกอยู่ซ้ำ = กลับไปใบแรก · value = null/undefined → ขึ้น "…"
+ * กติกากลาง (เจ้าของ 2026-11-10): การ์ดที่เป็น 0 ซ่อนอัตโนมัติ — ยกเว้น ใบแรก · ใบที่เลือกอยู่ · กำลังโหลด (null) · keep: true
+ *   หน้าที่อยากโชว์ 0 ทุกใบ (เช่น ตัวเลข 0 มีความหมาย) ส่ง showZero
  */
 
 import type { ReactNode } from "react";
@@ -20,6 +22,8 @@ export type StatFilterCard = {
   icon?: ReactNode;
   /** บรรทัดเล็กใต้ตัวเลข เช่น "40% ของทั้งหมด" */
   hint?: ReactNode;
+  /** โชว์แม้เป็น 0 (ปกติการ์ดที่เป็น 0 ซ่อน) */
+  keep?: boolean;
 };
 
 const TONE: Record<StatTone, { label: string; on: string }> = {
@@ -32,17 +36,20 @@ const TONE: Record<StatTone, { label: string; on: string }> = {
 // Tailwind ต้องเห็นชื่อคลาสเต็ม — จำนวนการ์ด → คอลัมน์บนจอกว้าง
 const COLS: Record<number, string> = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5", 6: "sm:grid-cols-6" };
 
-export function StatFilterCards({ cards, value, onChange, className = "" }: {
+export function StatFilterCards({ cards, value, onChange, className = "", showZero = false }: {
   cards: StatFilterCard[];
   /** key ของการ์ดที่เลือกอยู่ */
   value: string;
   onChange: (key: string) => void;
   className?: string;
+  /** โชว์การ์ดที่เป็น 0 ด้วย (ค่าเริ่ม = ซ่อน) */
+  showZero?: boolean;
 }) {
   const first = cards[0]?.key ?? "";
+  const shown = showZero ? cards : cards.filter((c) => c.key === first || c.key === value || c.value == null || c.value !== 0 || c.keep);
   return (
-    <div className={`grid grid-cols-2 ${COLS[cards.length] ?? "sm:grid-cols-4"} gap-2 ${className}`}>
-      {cards.map((c) => {
+    <div className={`grid grid-cols-2 ${COLS[shown.length] ?? "sm:grid-cols-4"} gap-2 ${className}`}>
+      {shown.map((c) => {
         const tone = TONE[c.tone ?? "neutral"];
         const on = c.key === value;
         return (

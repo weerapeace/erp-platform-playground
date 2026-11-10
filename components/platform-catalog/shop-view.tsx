@@ -324,7 +324,9 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-slate-500 mr-0.5">หมวด</span>
           {[{ id: "", name: "ทุกหมวด", n: allItems.length }, ...data.categories.map((c) => ({ id: c.id, name: c.name, n: allItems.filter((it) => it.category_id === c.id).length })),
-            ...(allItems.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: allItems.filter((it) => !it.category_id).length }] : [])].map((c) => (
+            ...(allItems.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: allItems.filter((it) => !it.category_id).length }] : [])]
+            .filter((c) => c.id === "" || c.n > 0 || cat === c.id)   // หมวดที่เป็น 0 ซ่อน (กติกาเดียวกับการ์ดกลาง)
+            .map((c) => (
             <button key={c.id || "all"} type="button" onClick={() => { setCat(c.id); setPage(1); setSelected(new Set()); }} aria-pressed={cat === c.id}
               className={`h-7 px-2.5 rounded-full border text-xs whitespace-nowrap ${cat === c.id ? "bg-violet-50 border-violet-300 text-violet-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
               {c.name} <span className="tabular-nums text-slate-400">{c.n.toLocaleString()}</span>

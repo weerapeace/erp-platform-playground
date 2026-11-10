@@ -34,6 +34,7 @@ import { ListingDrawer } from "@/components/platform-catalog/listing-drawer";
 import { NotListedPicker } from "@/components/platform-catalog/not-listed-picker";
 import { useLineDisplay } from "@/components/platform-catalog/use-line-display";
 import { ToggleSwitch } from "@/components/toggle-switch";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 import type { AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
 import {
@@ -53,6 +54,7 @@ type Listing = {
   id: string; external_product_id: string | null; title: string | null; sku_code: string | null;
   matched_parent_sku_id: string | null; matched_code?: string | null; matched_name?: string | null; price: number | null; status: string | null;
   match_ignored?: boolean | null; match_ignore_reason?: string | null; match_ignored_at?: string | null;
+  last_imported_at?: string | null;
 };
 type Filter = "all" | ListingMatchStatus | "dup";
 // กรองตามสถานะบนร้าน (ใช้ร่วมกับการ์ดกรองสถานะจับคู่) — "หมดแต่ยังเปิดขาย" = ลูกค้าเห็นแต่ซื้อไม่ได้
@@ -75,6 +77,11 @@ const priceFlagText = (s: ListingCardSummary | undefined) => priceFlags(s).map((
 // เรียงตามสถานะบนร้าน: ปัญหาก่อน
 const STATE_RANK: Record<ShopState, number> = { out: 0, low: 1, review: 2, hidden: 3, selling: 4, nodata: 5, gone: 6 };
 const SORT_LS = "platform-catalog:sort";
+// สีพื้นไอคอนในเมนูตั้งค่าร้าน (ไอคอนเส้นมีสี)
+const TOOL_TONE = {
+  emerald: "bg-emerald-50 text-emerald-700", amber: "bg-amber-50 text-amber-700", rose: "bg-rose-50 text-rose-700",
+  violet: "bg-violet-50 text-violet-700", indigo: "bg-indigo-50 text-indigo-700", slate: "bg-slate-100 text-slate-600",
+} as const;
 type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
 
 // มุมมอง: จับคู่ (เดิม · ค่าเริ่มต้นในแอปช่องทางขาย) / หน้าร้าน (แบบ Seller Center · เมนูในแอปจัดการงานเปิดด้วย ?view=shop)
@@ -98,7 +105,11 @@ export default function PlatformCatalogPage() {
   const canPublish = can("products.platforms.publish");   // ส่งขึ้นร้านจริง (แก้สินค้า/เปิดปิดขายจากลิ้นชัก)
   const [addPick, setAddPick] = useState(false);              // ป๊อปเลือกสินค้าที่ยังไม่ลง
   const [addFor, setAddFor] = useState<AddWizardParent[] | null>(null);
-  const [pendingOpen, setPendingOpen] = useState<string | null>(null);   // ป๊อปเพิ่มสินค้า → "ไปจับคู่" → เปิดลิ้นชักรายการนั้นเมื่อตารางโหลดเสร็จ
+  const [pendingOpen, setPendingOpen] = useState<string | null>(null);
+  // เมนูตั้งค่าร้าน (ปุ่ม "ตั้งค่า" หัวหน้า) + ยืนยันก่อนส่งราคาทั้งหมด
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLButtonElement>(null);
+  const [pushAllAsk, setPushAllAsk] = useState(false);   // ป๊อปเพิ่มสินค้า → "ไปจับคู่" → เปิดลิ้นชักรายการนั้นเมื่อตารางโหลดเสร็จ
   const fileRef = useRef<HTMLInputElement>(null);
   const catFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -779,6 +790,25 @@ export default function PlatformCatalogPage() {
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
   // มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน (เจ้าของขอ 2026-11-08) — ยังไม่เลือก = หน้าเลือกแบรนด์
   const gate = viewReady && view === "shop" && !brandId;
+  // เมนูตั้งค่าร้าน — จุดเตือนบนปุ่ม (Lazada ใกล้หมดอายุ/หมดแล้ว/ยังไม่เชื่อม) · วันที่ดึงข้อมูลล่าสุด · ราคาไม่ตรงระบบ (มีเมื่อโหลดสรุปแล้ว)
+  const toolsAlert = platformCode === "lazada" && !!brandId && !!lazStatus && (!lazStatus.connected || lazStatus.health === "expiring" || lazStatus.health === "expired");
+  const lastImported = listings.reduce<string | null>((m, l) => (l.last_imported_at && (!m || l.last_imported_at > m) ? l.last_imported_at : m), null);
+  const priceMismatchN = summList.filter((s) => (s.erpPriceDiff ?? 0) > 0).length;
+  const toolItem = (o: { icon: string; tone: keyof typeof TOOL_TONE; title: string; sub?: string; disabled?: boolean; warn?: boolean; onClick?: () => void; href?: string }) => {
+    const inner = (
+      <>
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base ${TOOL_TONE[o.tone]}`}><Icon name={o.icon} mode="line" /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-slate-800">{o.title}</span>
+          {o.sub && <span className={`block text-[11px] ${o.warn ? "text-amber-700" : "text-slate-400"}`}>{o.sub}</span>}
+        </span>
+      </>
+    );
+    const cls = "flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent";
+    return o.href
+      ? <a key={o.title} href={o.href} className={cls} onClick={() => setToolsOpen(false)}>{inner}</a>
+      : <button key={o.title} type="button" disabled={o.disabled} className={cls} onClick={() => { setToolsOpen(false); o.onClick?.(); }}>{inner}</button>;
+  };
   // ป๊อปรายละเอียด: ชิ้นที่ชื่อ+รหัสเหมือนตัวที่เปิดอยู่ (รวมตัวเอง) → เก็บไว้ตัวเดียว ที่เหลือตั้งไม่ต้องจับคู่
   const openDupKey = openListing && !openListing.match_ignored ? duplicateKey(openListing.title, openListing.sku_code) : null;
   const openSiblings = openDupKey ? activeListings.filter((l) => duplicateKey(l.title, l.sku_code) === openDupKey) : [];
@@ -820,7 +850,7 @@ export default function PlatformCatalogPage() {
             <li>ของที่ไม่มีในระบบเราจริง ๆ (งานบริการ/เลิกขาย/ซ้ำบนร้าน) กด <b>🚫 ไม่ต้องจับคู่ตัวนี้</b> หรือติ๊กหลายตัวแล้วกดจากแถบด้านล่าง — ไม่นับใน &quot;ยังไม่จับคู่&quot; · กด &quot;เลิกข้าม&quot; ได้ทุกเมื่อ</li>
           </ol>
           <p className="pt-1"><b>แท็บอื่น:</b> “ช่องข้อมูลของร้าน” = คอลัมน์ที่อ่านได้จากไฟล์ · “ตั้งค่าส่งข้อมูล” = บอกว่าจะเอาข้อมูลในระบบเราตัวไหนไปใส่ช่องไหนของร้าน</p>
-          <p><b>ปุ่ม ⚙️</b> = จัดการ “ชนิดไฟล์นำเข้า” เพิ่ม/แก้เองได้ถ้าร้านเปลี่ยนคอลัมน์ · ระบบแค่ <b>เดา</b> ให้ — ไม่จับคู่เองโดยไม่มีคนกดยืนยัน</p>
+          <p><b>ปุ่ม ตั้งค่า</b> = ดึงสินค้าจากร้าน (LINE/Lazada) · ส่งราคาทั้งหมด · นำเข้าหมวด · จัดการ “ชนิดไฟล์นำเข้า” (เพิ่ม/แก้เองได้ถ้าร้านเปลี่ยนคอลัมน์) · ระบบแค่ <b>เดา</b> ให้ — ไม่จับคู่เองโดยไม่มีคนกดยืนยัน</p>
         </div>
       )}
 
@@ -862,48 +892,63 @@ export default function PlatformCatalogPage() {
           <button type="button" onClick={() => setAddPick(true)} disabled={!canEdit || !platformId || !brandId}
             title={!brandId ? "เลือกแบรนด์ก่อน" : `เลือกสินค้าในระบบที่ยังไม่ได้ลง ${activePf?.name_th ?? "ร้านนี้"} แล้วลงขึ้นร้าน`}
             className="h-9 px-3 text-sm text-violet-700 border border-violet-200 bg-white rounded-lg hover:bg-violet-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="add" />เพิ่มสินค้าขึ้นร้าน</button>
-          <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">{importing ? "กำลังนำเข้า..." : "⬆️ นำเข้าสินค้าจากร้าน"}</button>
-          <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" aria-label="จัดการชนิดไฟล์นำเข้า" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
+          <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="import" mode="line" />{importing ? "กำลังนำเข้า..." : "นำเข้าสินค้าจากไฟล์"}</button>
+          <input ref={catFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCategoryFile(f); }} />
+          <button ref={toolsRef} type="button" onClick={() => setToolsOpen((o) => !o)} disabled={!platformId} aria-expanded={toolsOpen}
+            title="ตั้งค่าร้าน: ดึงสินค้าจากร้าน · ส่งราคา · นำเข้าหมวด · ชนิดไฟล์นำเข้า · บัญชีร้าน"
+            className="relative h-9 px-3 text-sm text-slate-700 border border-slate-200 bg-white rounded-lg hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5">
+            <Icon name="settings" mode="line" />ตั้งค่า
+            {toolsAlert && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white" title="มีเรื่องต้องดูในตั้งค่า" />}
+          </button>
         </div>
       </div>
-      {platformCode === "lazada" && (
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <span className="text-xs text-slate-500">Lazada (ต่อ API · อ่านอย่างเดียว):</span>
-          {!brandId ? (
-            <span className="text-xs text-slate-400">เลือกแบรนด์ก่อน — การเชื่อม Lazada ผูกกับแบรนด์</span>
-          ) : !lazStatus ? (
-            <span className="text-xs text-slate-400">กำลังเช็กการเชื่อมต่อ…</span>
-          ) : lazStatus.connected ? (
-            <>
-              <button onClick={() => void syncLazada()} disabled={!canEdit || importing} title="อ่านรายการสินค้าที่ลงไว้บน Lazada เข้ามา (ไม่แก้อะไรบนร้าน)"
-                className="h-8 px-3 text-sm text-[#0F146D] border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 inline-flex items-center gap-1.5">
-                <Icon name="refresh" />{importing ? "กำลังดึง..." : "ดึงสินค้าจาก Lazada"}
-              </button>
-              <span className="text-[11px] text-emerald-600">● เชื่อมอยู่{lazStatus.short_code ? ` (${lazStatus.short_code})` : ""}</span>
-              {lazStatus.health === "expiring" && (
-                <a href="/admin/platform-accounts" className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 inline-flex items-center gap-1">
-                  <Icon name="warning" />อีก {lazStatus.days_left ?? 0} วันต้องกดเชื่อมใหม่ — กดที่นี่
-                </a>
-              )}
-            </>
-          ) : (
-            <a href="/admin/platform-accounts" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 inline-flex items-center gap-1.5">
-              <Icon name="warning" />
-              {lazStatus.health === "expired" ? "การเชื่อมต่อ Lazada หมดอายุแล้ว" : "แบรนด์นี้ยังไม่ได้เชื่อมต่อ Lazada"} — ไปที่ จัดการร้าน/บัญชีแพลตฟอร์ม แล้วกด เชื่อมต่อ Lazada
-              <Icon name="link" />
-            </a>
-          )}
+      {/* เมนูตั้งค่าร้าน (เจ้าของ 2026-11-10: ย้ายแถว "ต่อ API" มาไว้ในตั้งค่า · ไอคอนเส้นมีสี) */}
+      <FloatingDropdown anchorRef={toolsRef} open={toolsOpen} onClose={() => setToolsOpen(false)} minWidth={340} maxWidth={390}>
+        <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-1.5 pb-2 pt-1">
+            {activePf && <PlatformIcon code={activePf.code} iconKey={activePf.icon_key} size={18} />}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-slate-800">{activePf?.name_th ?? "ร้าน"}{activeBrand ? ` · ${activeBrand.name}` : ""}</div>
+              <div className="truncate text-[11px] text-slate-400">
+                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
+                {lastImported ? ` · ข้อมูลจากร้านล่าสุด ${new Date(lastImported).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}` : ""}
+              </div>
+            </div>
+            {platformCode === "lazada" && brandId && lazStatus && (
+              lazStatus.connected
+                ? <span className={`shrink-0 text-[11px] ${lazStatus.health === "expiring" ? "text-amber-700" : "text-emerald-600"}`}>{lazStatus.health === "expiring" ? `อีก ${lazStatus.days_left ?? 0} วันต้องเชื่อมใหม่` : "● เชื่อมอยู่"}</span>
+                : <span className="shrink-0 text-[11px] text-amber-700">{lazStatus.health === "expired" ? "หมดอายุ" : "ยังไม่เชื่อม"}</span>
+            )}
+          </div>
+          {(platformCode === "line_shopping" || platformCode === "lazada") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
+          {platformCode === "line_shopping" && toolItem({ icon: "refresh", tone: "emerald", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก LINE", sub: brandId ? "อัปเดตชื่อ ราคา สต๊อก รูป จากร้าน" : "เลือกแบรนด์ก่อน", disabled: !canEdit || importing || !brandId, onClick: () => void syncLine() })}
+          {platformCode === "line_shopping" && toolItem({ icon: "folder", tone: "amber", title: "นำเข้าหมวดหมู่ LINE", sub: "จากไฟล์ template (ชีตตัวเลือกหมวด) · ใช้ครั้งเดียว", disabled: !canEdit || importing, onClick: () => catFileRef.current?.click() })}
+          {platformCode === "lazada" && toolItem({
+            icon: "refresh", tone: "indigo", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก Lazada",
+            sub: !brandId ? "เลือกแบรนด์ก่อน — การเชื่อม Lazada ผูกกับแบรนด์" : lazStatus?.connected ? "อ่านรายการที่ลงไว้บนร้าน (ไม่แก้อะไรบนร้าน)" : "ต้องเชื่อม Lazada ก่อน (ดูบัญชีร้านด้านล่าง)",
+            disabled: !canEdit || importing || !brandId || !lazStatus?.connected, onClick: () => void syncLazada(),
+          })}
+          {platformCode === "line_shopping" && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ส่งขึ้นร้าน (ร้านจริง)</div>}
+          {platformCode === "line_shopping" && toolItem({
+            icon: "upload", tone: "rose", title: "ส่งราคาทั้งหมดขึ้น LINE",
+            sub: priceMismatchN > 0 ? `ราคาขายไม่ตรงระบบ ${priceMismatchN.toLocaleString()} รุ่น — ถามยืนยันก่อนส่ง` : "ทุกสินค้าที่จับคู่แล้ว ตามราคาในระบบ · ถามยืนยันก่อนส่ง",
+            warn: priceMismatchN > 0, disabled: !canEdit || importing || !brandId, onClick: () => setPushAllAsk(true),
+          })}
+          <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ตั้งค่า</div>
+          {toolItem({ icon: "settings", tone: "violet", title: "จัดการชนิดไฟล์นำเข้า", sub: "เพิ่ม/แก้คอลัมน์ของไฟล์ export แต่ละร้าน", disabled: !canEdit || !platformId, onClick: () => setShowManager(true) })}
+          {toolItem({ icon: "link", tone: "slate", title: platformCode === "lazada" ? "บัญชีร้าน / เชื่อม Lazada" : "บัญชีร้าน / API Key", sub: "ไปหน้าจัดการร้าน/บัญชีแพลตฟอร์ม", href: "/admin/platform-accounts", warn: !!toolsAlert })}
         </div>
-      )}
-      {platformCode === "line_shopping" && (
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <span className="text-xs text-slate-500">LINE SHOPPING (ต่อ API):</span>
-          <button onClick={syncLine} disabled={!canEdit || importing || !brandId} title={!brandId ? "เลือกแบรนด์/ร้านก่อน" : "ดึงสินค้าจาก LINE SHOPPING ผ่าน API"} className="h-8 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{importing ? "กำลังดึง..." : "🟢 ดึงสินค้าจาก LINE"}</button>
-          <button onClick={pushPricesLine} disabled={!canEdit || importing || !brandId} title="ส่งราคาขาย (ERP) ขึ้น LINE สำหรับสินค้าที่จับคู่แล้ว" className="h-8 px-3 text-sm text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">⬆️ ส่งราคาขึ้น LINE</button>
-          <input ref={catFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCategoryFile(f); }} />
-          <button onClick={() => catFileRef.current?.click()} disabled={!canEdit || importing} title="นำเข้ารายการหมวดหมู่ LINE จากไฟล์ template (ชีตตัวเลือกหมวดสินค้า) — ใช้ครั้งเดียว" className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">📂 นำเข้าหมวดหมู่</button>
-        </div>
-      )}
+      </FloatingDropdown>
+      <ConfirmDialog open={pushAllAsk} onClose={() => { if (!importing) setPushAllAsk(false); }} variant="danger" requireTyped="ยืนยัน"
+        onConfirm={() => { setPushAllAsk(false); void pushPricesLine(); }}
+        title={`ส่งราคาทั้งหมดขึ้น LINE${activeBrand ? ` — ${activeBrand.name}` : ""}?`} confirmText="ส่งราคาทั้งหมด"
+        message={(
+          <div className="space-y-2 text-sm">
+            <p>ระบบจะตั้งราคาบนร้าน LINE ของ <b>ทุกสินค้าที่จับคู่แล้ว</b> ตามราคาในระบบ (ราคาเต็ม + ราคาขาย) — ส่งขึ้นร้านจริงทันที · มีประวัติว่าใครกด</p>
+            {priceMismatchN > 0 && <p className="text-amber-700">ตอนนี้ราคาที่ลูกค้าจ่ายไม่ตรงระบบ {priceMismatchN.toLocaleString()} รุ่น → ราคาเหล่านี้จะเปลี่ยน · ในระบบไม่มีราคาเต็ม = ตัวขีดฆ่าบนร้านหาย</p>}
+            <p className="text-xs text-slate-500">แนะนำตรวจด้วยชิป “ราคาผิดปกติ” ก่อน · แก้ทีละสินค้าได้ในลิ้นชัก (แท็บตัวเลือก &amp; ราคา)</p>
+          </div>
+        )} />
       {note && <p className="text-xs text-slate-500 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{note}</p>}
 
       {queue.length > 0 && (
@@ -963,7 +1008,7 @@ export default function PlatformCatalogPage() {
         : tab === "catalog" ? (
           listings.length === 0 ? (
             <EmptyState icon="🛒" title={`ยังไม่มีสินค้าจาก ${where}`}
-              hint={platformCode === "line_shopping" ? "กด 🟢 ดึงสินค้าจาก LINE ด้านบน แล้วระบบจะช่วยจับคู่ให้"
+              hint={platformCode === "line_shopping" ? "กดปุ่ม “ตั้งค่า” ด้านบน → ดึงสินค้าจาก LINE แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "lazada" ? "กด ดึงสินค้าจาก Lazada ด้านบน (ต้องเชื่อมร้านก่อน) หรือนำเข้าไฟล์ export แล้วระบบจะช่วยจับคู่ให้"
                 : "นำเข้าไฟล์ export จาก Seller Center เข้ามาก่อน แล้วระบบจะช่วยจับคู่ให้"}
               action={canEdit && platformCode === "lazada" && lazStatus?.connected ? { label: "ดึงสินค้าจาก Lazada", onClick: () => void syncLazada() }
@@ -1002,7 +1047,7 @@ export default function PlatformCatalogPage() {
                     <>
                       <button type="button" onClick={() => setShopFilter("")} aria-pressed={!shopFilter}
                         className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${!shopFilter ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทั้งหมด</button>
-                      {SHOP_FILTERS.map((f) => (
+                      {SHOP_FILTERS.filter((f) => shopCounts[f.key] > 0 || shopFilter === f.key).map((f) => (
                         <button key={f.key} type="button" onClick={() => setShopFilter(shopFilter === f.key ? "" : f.key)} aria-pressed={shopFilter === f.key} title={f.tip}
                           className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${shopFilter === f.key ? "border-violet-300 bg-violet-50 text-violet-800" : (f.key === "out" || f.key === "price") && shopCounts[f.key] > 0 ? "border-rose-200 bg-rose-50/60 text-rose-700 hover:bg-rose-50" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
                           {f.label} <span className="tabular-nums opacity-70">{shopCounts[f.key].toLocaleString()}</span>
