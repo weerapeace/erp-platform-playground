@@ -259,6 +259,12 @@ export function listingHistoryText(meta: unknown): string {
     return `${verb}${str(m.option)} “${str(m.value)}” บน LINE (${n} ตัวเลือก)${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
   }
   if (src === "line_listing_display" || src === "line_display") return str(m.status) === "hide" ? "ปิดขายบน LINE" : "เปิดขายบน LINE";
+  // Lazada (app/api/lazada/listing-edit · listing-display)
+  if (src === "lazada_listing_edit") {
+    const parts = [...new Set(arr(m.changes).map(obj).filter((c): c is Obj => !!c).map((c) => str(c.label)))];
+    return `แก้บน Lazada: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : m.qc ? " (Lazada ส่งไปรอตรวจ)" : ""}`;
+  }
+  if (src === "lazada_listing_display") return `${str(m.summary) || (m.open ? "เปิดขาย" : "ปิดขาย")} บน Lazada${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
   if (ig) return ig.to ? `ตั้งไม่ต้องจับคู่${m.reason ? ` · ${str(m.reason)}` : ""}` : "เลิกข้าม (กลับไปรอจับคู่)";

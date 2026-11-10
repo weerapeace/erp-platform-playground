@@ -8,7 +8,8 @@
  * เฟส 2: รูปสินค้า (ลากเรียง · ตั้งปก · ลบ · เพิ่มจากรูปในระบบ ≤7) · น้ำหนัก/บาร์โค้ด/SKU/รูปต่อตัวเลือก
  * ยังไม่ทำ: เพิ่ม/ลบตัวเลือก · สต๊อก (ระบบซิงค์สต๊อกกลาง)
  *
- * Lazada (เฟส 1 · ดูอย่างเดียว): แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก Lazada → ./lazada-listing-panels (GET /api/lazada/listing-detail)
+ * Lazada: แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก Lazada → ./lazada-listing-panels (GET /api/lazada/listing-detail)
+ *   เฟส 2: แก้ชื่อ/รายละเอียด/จุดเด่น (useLazadaEdit → /api/lazada/listing-edit) + เปิด/ปิดขาย ทั้งสินค้า/ทีละตัวเลือก (useLazadaDisplay → /listing-display)
  *   หัว/แท็บจับคู่/ประวัติ ใช้ร่วมกับ LINE · แผนเปิดให้แก้ขึ้น Lazada ทีละเฟส: docs/lazada-connector.md
  *
  * ข้อมูล: GET /api/platform-catalog?view=listing (รายละเอียด+ประวัติ) + ?view=variants (ตัวเลือก↔SKU + ราคาที่ระบบจะส่ง)
@@ -35,7 +36,7 @@ import { useLineDisplay } from "./use-line-display";
 import { VariantStructureEditor } from "./variant-structure-editor";
 import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
-import { LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaListing } from "./lazada-listing-panels";
+import { LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { applyBulkPrice, planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
@@ -112,6 +113,10 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   // Lazada: ดึงสดจากร้านเมื่อเปิด (ข้อมูลเต็มไม่ได้เก็บในระบบ) · กดดึงตัวนี้ = อัปเดตสำเนาในระบบ → โหลดรายละเอียด/ตัวเลือก↔SKU ใหม่
   const isLazada = detail?.platform_code === "lazada" && detail.id === listingId;
   const laz = useLazadaListing(isLazada ? listingId : null, useCallback(() => setReload((n) => n + 1), []));
+  // เฟส 2 (แก้ร้านจริง · ถามก่อนเสมอ): สิทธิ์เดียวกับ LINE (products.platforms.publish) · รายการที่ไม่อยู่บนร้านแล้วแก้ไม่ได้
+  const lazCanEdit = canPublish && isLazada && detail?.status !== "removed";
+  const lazEdit = useLazadaEdit(laz, lazCanEdit, useCallback((name: string) => { if (listingId) onChanged?.(listingId, { title: name }); setReload((n) => n + 1); }, [listingId, onChanged]));
+  const lazDisp = useLazadaDisplay(laz, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
 
   const disp = useLineDisplay((results) => {
     const r = results.find((x) => x.listing_id === listingId);
@@ -261,7 +266,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
             onChange={(v) => listingId && disp.request([listingId], v ? "onsale" : "hide", [form?.name || detail.title || ""])} />
         </div>
       )}
-      {isLazada && detail.status !== "removed" && <LazadaHeaderStatus state={laz} />}
+      {isLazada && detail.status !== "removed" && <LazadaHeaderStatus state={laz} disp={lazCanEdit ? lazDisp : null} dirty={lazEdit.dirty} />}
     </div>
   );
 
@@ -453,11 +458,11 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 disabled:opacity-40"><Icon name="upload" />บันทึกขึ้น LINE</button>
     </div>
   ) : detail?.line && !canPublish ? <span className="text-xs text-slate-400">ดูอย่างเดียว — ไม่มีสิทธิ์ส่งขึ้นร้าน</span>
-    : isLazada ? <span className="text-xs text-slate-400">Lazada: ดูอย่างเดียว (ข้อมูลสดจากร้าน) — การแก้ขึ้นร้านจะเปิดให้ทีละเฟส</span> : undefined;
+    : isLazada ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน Lazada แล้ว — แก้ไม่ได้</span> : <LazadaEditFooter edit={lazEdit} state={laz} />) : undefined;
 
   return (
     <>
-      <Drawer open={!!listingId} onClose={onClose} title="สินค้าบนร้าน" size="xl" storageKey="platform-listing-drawer" hasUnsavedChanges={dirty} footer={footer}>
+      <Drawer open={!!listingId} onClose={onClose} title="สินค้าบนร้าน" size="xl" storageKey="platform-listing-drawer" hasUnsavedChanges={dirty || (isLazada && lazEdit.dirty)} footer={footer}>
         {error ? <ErrorState title={error} onRetry={() => setReload((n) => n + 1)} />
           : !detail ? <LoadingState label="กำลังโหลดสินค้าจากร้าน…" />
           : (
@@ -470,7 +475,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
-                : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} /> : <LazadaOptionsPanel state={laz} />)
+                : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} /> : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -491,6 +496,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         ) : ""} />
 
       {disp.dialog}
+      {isLazada && lazEdit.dialog}
+      {isLazada && lazDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && lazView && <ImageLightbox images={lazView.images.map((url) => ({ url }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
 

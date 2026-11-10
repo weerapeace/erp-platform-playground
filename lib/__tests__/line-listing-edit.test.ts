@@ -158,3 +158,14 @@ describe("แก้ราคาหลายตัวเลือกพร้อ�
     expect(applyBulkPrice(vs, null, { full: 0 }).error).toBe("ราคาเต็มต้องมากกว่า 0");
   });
 });
+
+describe("listingHistoryText: Lazada", () => {
+  it("แก้บน Lazada สำเร็จ / รอตรวจ / ไม่สำเร็จ", () => {
+    expect(listingHistoryText({ source: "lazada_listing_edit", ok: true, changes: [{ label: "ชื่อ" }, { label: "จุดเด่นสินค้า" }] })).toBe("แก้บน Lazada: ชื่อ · จุดเด่นสินค้า");
+    expect(listingHistoryText({ source: "lazada_listing_edit", ok: true, qc: true, changes: [{ label: "ชื่อ" }] })).toContain("รอตรวจ");
+    expect(listingHistoryText({ source: "lazada_listing_edit", ok: false, error: "ปิดระบบ", changes: [{ label: "ชื่อ" }] })).toContain("ไม่สำเร็จ: ปิดระบบ");
+  });
+  it("เปิด/ปิดขายบน Lazada", () => {
+    expect(listingHistoryText({ source: "lazada_listing_display", ok: true, open: false, summary: "ปิดขายทั้งสินค้า (4 ตัวเลือก)" })).toBe("ปิดขายทั้งสินค้า (4 ตัวเลือก) บน Lazada");
+  });
+});

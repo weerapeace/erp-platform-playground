@@ -169,3 +169,177 @@ export function lazStatusBadge(status: string | null | undefined): { label: stri
 
 /** คำตอบของ GET/POST /api/lazada/listing-detail */
 export type LazadaListingDetailResponse = { view: LazadaListingView | null; fetched_at: string | null; saved?: boolean; error: string | null };
+
+// ═════════════════════════════ เฟส 2: แก้ชื่อ / รายละเอียด / จุดเด่น + เปิดปิดขาย (แตะร้านจริง) ═════════════════════════════
+//
+// กติกา Lazada ที่ต้องระวัง (คู่มือ open.lazada.com สำรวจ 2026-11-10 · รายละเอียด docs/lazada-connector.md):
+//  - /product/update ต้องมี SkuId ทุก SKU · สถานะ SKU "ค่าเริ่ม = active" → ส่งสถานะเดิมของทุก SKU ไปด้วยเสมอ (ไม่งั้นตัวที่ปิดอยู่อาจเปิดเอง)
+//  - ส่ง SKU ครบตามลำดับเดิม (ส่งสลับ = Lazada เรียงตัวเลือกใหม่) · ชื่อ ≤ 255 · รายละเอียด HTML ≤ 25,000 ตัวอักษร รูปต้องเป็นของ Lazada
+//  - จุดเด่น = ข้อความล้วนแบบหัวข้อย่อย (<ul><li>) — Lazada ตัดรูป/ลิงก์ทิ้ง
+//  - ปิดขาย = /product/deactivate (ทั้งสินค้า หรือระบุ SKU) · ไม่มี API เปิดขาย → /product/update ตั้ง Status active
+
+export const LAZADA_NAME_MAX = 255;
+export const LAZADA_DESC_MAX = 25_000;
+/** โดเมนรูปของ Lazada (รูปในรายละเอียดต้องอยู่บน Lazada แล้ว — รูปภายนอกโดนปฏิเสธ error 4138) */
+const LAZADA_IMG_HOST = /(^|\.)(slatic\.net|lazcdn\.com|alicdn\.com)$/i;
+
+/** ค่าที่แก้ได้ในเฟส 2 · จุดเด่นเก็บเป็น "บรรทัดละข้อ" (คนทั่วไปแก้ง่ายกว่า HTML) */
+export type LazadaEditState = { name: string; description: string; highlights: string };
+
+const decodeEntities = (s: string) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'");
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** จุดเด่น HTML (<ul><li>…) → บรรทัดละข้อ · ไม่มี <li> = แยกตามขึ้นบรรทัด/<br>/<p> */
+export function highlightsToLines(html: string | null | undefined): string {
+  const h = String(html ?? "");
+  if (!h.trim()) return "";
+  const items = /<li\b/i.test(h)
+    ? [...h.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => m[1])
+    : h.split(/<br\s*\/?>|<\/p>|\n/i);
+  return items.map((x) => decodeEntities(x.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
+}
+/** บรรทัดละข้อ → <ul><li>…</li></ul> (ข้อความล้วน ตามกติกา Lazada) */
+export function linesToHighlights(lines: string): string {
+  const items = String(lines ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
+  return items.length ? `<ul>${items.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>` : "";
+}
+
+export function lazadaEditStateFromView(v: LazadaListingView): LazadaEditState {
+  return { name: v.name, description: v.description, highlights: highlightsToLines(v.shortDescription) };
+}
+
+export type LazadaEditChange = { label: string; before: string; after: string };
+export type LazadaEditPlan = {
+  /** ช่องที่จะส่ง (เฉพาะที่เปลี่ยน) · shortDescription เป็น HTML แล้ว */
+  fields: { name?: string; description?: string; shortDescription?: string };
+  changes: LazadaEditChange[];
+  errors: string[];
+  warnings: string[];
+};
+
+const plain = (h: string) => decodeEntities(h.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+const short = (h: string, n = 60) => { const t = plain(h); return t.length > n ? `${t.slice(0, n)}…` : t || "(ว่าง)"; };
+const countTag = (h: string, tag: string) => (h.match(new RegExp(`<${tag}\\b`, "gi")) ?? []).length;
+/** ลิงก์รูปในรายละเอียดที่ไม่ใช่ของ Lazada */
+export function foreignDescImages(html: string): string[] {
+  return [...html.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]).filter((src) => {
+    try { return !LAZADA_IMG_HOST.test(new URL(src, "https://x.invalid").hostname); } catch { return true; }
+  });
+}
+
+/** เทียบฟอร์มกับของบนร้าน → ส่งอะไร / ตรวจไม่ผ่านตรงไหน / ก่อน → หลัง (หน้าเว็บกับ API ใช้ตัวเดียวกัน) */
+export function planLazadaEdit(before: LazadaEditState, after: LazadaEditState): LazadaEditPlan {
+  const fields: LazadaEditPlan["fields"] = {};
+  const changes: LazadaEditChange[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const name = after.name.replace(/\s+/g, " ").trim();
+  if (name !== before.name.replace(/\s+/g, " ").trim()) {
+    if (!name) errors.push("ชื่อสินค้าห้ามว่าง");
+    else if (name.length > LAZADA_NAME_MAX) errors.push(`ชื่อสินค้ายาวเกิน ${LAZADA_NAME_MAX} ตัวอักษร (ตอนนี้ ${name.length})`);
+    else { fields.name = name; changes.push({ label: "ชื่อ", before: before.name || "(ว่าง)", after: name }); }
+  }
+
+  if (after.description !== before.description) {
+    const foreign = foreignDescImages(after.description);
+    if (!plain(after.description) && countTag(after.description, "img") === 0) errors.push("รายละเอียดสินค้าห้ามว่าง");
+    else if (after.description.length > LAZADA_DESC_MAX) errors.push(`รายละเอียดยาวเกิน ${LAZADA_DESC_MAX.toLocaleString()} ตัวอักษร (ตอนนี้ ${after.description.length.toLocaleString()})`);
+    else if (foreign.length) errors.push(`รูปในรายละเอียดต้องเป็นรูปที่อยู่บน Lazada แล้ว — มีรูปจากที่อื่น ${foreign.length} รูป (เพิ่มรูปใหม่ได้ในเฟสรูป)`);
+    else {
+      fields.description = after.description;
+      changes.push({ label: "รายละเอียด", before: short(before.description), after: short(after.description) });
+      const bi = countTag(before.description, "img"), ai = countTag(after.description, "img");
+      if (ai < bi) warnings.push(`รูปในรายละเอียดลดลง ${bi} → ${ai} รูป — ตรวจว่าตั้งใจลบไหม`);
+      const bt = countTag(before.description, "table"), at = countTag(after.description, "table");
+      if (at < bt) warnings.push(`ตารางในรายละเอียดหายไป ${bt - at} ตาราง (กล่องแก้ของระบบอาจไม่รองรับตารางแบบเดิม) — ตรวจก่อนส่ง`);
+      // กล่องแก้จัดรูป HTML ใหม่เองได้ แม้คนไม่ได้พิมพ์อะไร → บอกให้รู้ จะได้ยกเลิกถ้าไม่ได้ตั้งใจ
+      if (plain(before.description) === plain(after.description) && ai === bi) warnings.push("ข้อความรายละเอียดเหมือนเดิม (เปลี่ยนแค่รูปแบบ) — ถ้าไม่ได้ตั้งใจแก้รายละเอียด กด \"ยกเลิกที่แก้\"");
+    }
+  }
+
+  const bl = before.highlights.split("\n").map((x) => x.trim()).filter(Boolean);
+  const al = after.highlights.split("\n").map((x) => x.trim()).filter(Boolean);
+  if (bl.join("\n") !== al.join("\n")) {
+    if (!al.length) errors.push("ล้างจุดเด่นทั้งหมดยังไม่รองรับ — ต้องเหลืออย่างน้อย 1 ข้อ");
+    else {
+      fields.shortDescription = linesToHighlights(al.join("\n"));
+      changes.push({ label: "จุดเด่นสินค้า", before: bl.length ? `${bl.length} ข้อ: ${short(bl.join(" · "), 50)}` : "(ไม่มี)", after: `${al.length} ข้อ: ${short(al.join(" · "), 50)}` });
+      if (/https?:\/\/|www\./i.test(al.join(" "))) warnings.push("จุดเด่นมีลิงก์ — Lazada จะตัดลิงก์ทิ้ง");
+    }
+  }
+  if (Object.keys(fields).length) warnings.push("Lazada อาจส่งสินค้าไปตรวจใหม่ (ไม่เกิน 24 ชม.) หลังแก้ข้อมูล — ช่วงแคมเปญใหญ่ควรเลี่ยง");
+  return { fields, changes, errors, warnings };
+}
+
+// ───────── ประกอบคำขอ XML (pure · มี test) ─────────
+const xmlText = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** HTML ใส่ใน CDATA — แตก "]]>" กัน CDATA ปิดก่อน */
+const cdata = (s: string) => `<![CDATA[${s.replace(/]]>/g, "]]]]><![CDATA[>")}]]>`;
+export type LazSkuRef = { skuId: string; sellerSku: string | null; status: string | null };
+
+/**
+ * /product/update (payload) — แก้ข้อมูลสินค้า และ/หรือ สถานะ SKU
+ * ส่ง SKU ครบตามลำดับเดิม พร้อม "สถานะ" ทุกตัว (statusOverride = ตัวที่จะเปลี่ยน · ที่เหลือ = สถานะเดิม)
+ */
+export function lazUpdateProductXml(itemId: string, skus: LazSkuRef[], fields: LazadaEditPlan["fields"], statusOverride?: Map<string, "active" | "inactive">): string {
+  const attrs = [
+    fields.name != null ? `<name>${xmlText(fields.name)}</name>` : "",
+    fields.description != null ? `<description>${cdata(fields.description)}</description>` : "",
+    fields.shortDescription != null ? `<short_description>${cdata(fields.shortDescription)}</short_description>` : "",
+  ].join("");
+  const skuXml = skus.map((s) => {
+    const st = statusOverride?.get(s.skuId) ?? (s.status === "inactive" ? "inactive" : "active");
+    return `<Sku><SkuId>${xmlText(s.skuId)}</SkuId>${s.sellerSku ? `<SellerSku>${xmlText(s.sellerSku)}</SellerSku>` : ""}<Status>${st}</Status></Sku>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><Request><Product><ItemId>${xmlText(itemId)}</ItemId><Attributes>${attrs}</Attributes><Skus>${skuXml}</Skus></Product></Request>`;
+}
+/** /product/deactivate (apiRequestBody) — ไม่ระบุ SKU = ปิดทั้งสินค้า */
+export function lazDeactivateXml(itemId: string, skuIds?: string[]): string {
+  const skus = skuIds && skuIds.length ? `<Skus>${skuIds.map((id) => `<SkuId>${xmlText(id)}</SkuId>`).join("")}</Skus>` : "";
+  return `<Request><Product><ItemId>${xmlText(itemId)}</ItemId>${skus}</Product></Request>`;
+}
+
+// ───────── เปิด / ปิดขาย ─────────
+export type LazadaDisplayAction = { open: boolean; /** ว่าง/ไม่ส่ง = ทั้งสินค้า */ skuIds?: string[] };
+export type LazadaDisplayPlan = {
+  /** deactivate = ปิด · update = เปิด (ตั้ง Status active) · none = ไม่มีอะไรต้องทำ */
+  api: "deactivate" | "update" | "none";
+  /** ทั้งสินค้า (ปิด) — ไม่ระบุ SKU ใน deactivate */
+  wholeItem: boolean;
+  /** SKU ที่จะเปลี่ยนจริง (ข้ามตัวที่อยู่สถานะนั้นแล้ว) */
+  targets: LazadaSkuView[];
+  statusOverride: Map<string, "active" | "inactive">;
+  summary: string;
+  errors: string[];
+};
+/** คำตอบของ POST /api/lazada/listing-edit และ /listing-display */
+export type LazadaWriteResponse = {
+  ok: boolean;
+  /** ข้อมูลล่าสุดหลังส่ง (ดึงจาก Lazada ใหม่) — null = ดึงไม่ได้ */
+  view: LazadaListingView | null;
+  changes?: LazadaEditChange[];
+  summary?: string;
+  /** Lazada ส่งไปรอตรวจ (Pending QC) */
+  qc?: boolean;
+  warnings?: string[];
+  error: string | null;
+};
+
+export function planLazadaDisplay(view: LazadaListingView, action: LazadaDisplayAction): LazadaDisplayPlan {
+  const ids = new Set((action.skuIds ?? []).map(String));
+  const whole = ids.size === 0;
+  const unknown = [...ids].filter((id) => !view.skus.some((s) => s.skuId === id));
+  const errors = unknown.length ? [`ไม่พบตัวเลือก ${unknown.join(", ")} บน Lazada (อาจถูกลบ/เปลี่ยนแล้ว — โหลดใหม่)`] : [];
+  const scope = whole ? view.skus : view.skus.filter((s) => ids.has(s.skuId));
+  const want = action.open ? "active" : "inactive";
+  const targets = scope.filter((s) => (s.status === "inactive" ? "inactive" : "active") !== want);
+  const statusOverride = new Map(targets.map((s) => [s.skuId, want] as [string, "active" | "inactive"]));
+  const verb = action.open ? "เปิดขาย" : "ปิดขาย";
+  const api = errors.length || targets.length === 0 ? "none" : action.open ? "update" : "deactivate";
+  const summary = targets.length === 0
+    ? `${whole ? "ทุกตัวเลือก" : "ตัวเลือกที่เลือก"}${action.open ? "เปิดขาย" : "ปิดขาย"}อยู่แล้ว`
+    : whole && targets.length === view.skus.length ? `${verb}ทั้งสินค้า (${targets.length} ตัวเลือก)` : `${verb} ${targets.length} ตัวเลือก`;
+  // ปิดทั้งสินค้าเมื่อเลือกทั้งหมด → deactivate ระดับสินค้า (ไม่ต้องระบุ SKU)
+  return { api, wholeItem: !action.open && whole, targets, statusOverride, summary, errors };
+}

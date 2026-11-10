@@ -1,7 +1,8 @@
 // ของใช้ร่วมของ Lazada API (แยกจาก route.ts — route ต้อง export แค่ handler)
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
-import { lazRefreshToken, lazGateway, lazConnHealth } from "@/lib/lazada";
+import { lazRefreshToken, lazGateway, lazConnHealth, lazErrorText, lazGetItem, lazProductToCatalogItem } from "@/lib/lazada";
+import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export function baseUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
@@ -80,6 +81,51 @@ export async function lazTokenOrReason(admin: SupabaseClient, brandId: string, p
   } catch (e) {
     return { ok: false, reason: `ต่ออายุการเชื่อมต่อ Lazada ไม่สำเร็จ (${(e as Error).message}) — ${LAZ_RECONNECT_HINT}` };
   }
+}
+
+// ───────── สินค้า 1 รายการบน Lazada (ลิ้นชักสินค้าบนร้าน: ดู / แก้ / เปิดปิดขาย) ─────────
+export type LazListingRow = { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; price: number | null; status: string | null; raw: Record<string, unknown> | null };
+
+/**
+ * โหลดรายการในระบบ + ดึงสินค้าตัวนี้ "สด" จาก Lazada (/product/item/get) + กุญแจที่ใช้ได้
+ * ใช้ก่อนแก้ทุกครั้ง → เทียบกับของจริงล่าสุด (ไม่เชื่อสำเนาในระบบ) · ไม่ผ่าน = error ภาษาคน + HTTP status
+ */
+export async function loadLazListingLive(admin: SupabaseClient, listingId: string, userId: string | null): Promise<
+  { ok: true; row: LazListingRow; item: Record<string, unknown>; itemId: string; gateway: string; accessToken: string } | { ok: false; error: string; status: number }
+> {
+  const { data: l } = await admin.from("platform_catalog_listings")
+    .select("id, platform_id, brand_id, external_product_id, title, price, status, raw").eq("id", listingId).maybeSingle();
+  const row = l as LazListingRow | null;
+  if (!row) return { ok: false, error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)", status: 404 };
+  const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
+  if ((pf as { code?: string } | null)?.code !== "lazada") return { ok: false, error: "ใช้ได้เฉพาะสินค้าบน Lazada", status: 400 };
+  const itemId = String(row.external_product_id ?? "").trim();
+  if (!itemId || !row.brand_id) return { ok: false, error: "รายการนี้ไม่มีรหัสสินค้าบน Lazada", status: 400 };
+  const tok = await lazTokenOrReason(admin, row.brand_id, row.platform_id, userId);
+  if (!tok.ok) return { ok: false, error: tok.reason, status: 400 };
+  try {
+    const item = await lazGetItem(tok.gateway, tok.accessToken, itemId);
+    if (!item) return { ok: false, error: `ไม่พบสินค้า #${itemId} บน Lazada (อาจถูกลบไปแล้ว)`, status: 404 };
+    return { ok: true, row, item, itemId, gateway: tok.gateway, accessToken: tok.accessToken };
+  } catch (e) {
+    return { ok: false, error: lazErrorText(e), status: 502 };
+  }
+}
+
+/**
+ * อัปเดตสำเนาย่อในระบบจากข้อมูลเต็มที่เพิ่งดึง — กติกาเดียวกับ upsertCatalogListings (lib/platform-catalog-sync):
+ * ตัวแปลงเดียวกับดึงทั้งร้าน (lazProductToCatalogItem) · เจอบนร้าน = ล้างป้าย "ไม่อยู่บนร้านแล้ว" · ไม่แตะคู่ที่จับไว้
+ */
+export async function saveLazSlimCopy(admin: SupabaseClient, row: LazListingRow, item: Record<string, unknown>): Promise<string | null> {
+  const slim = lazProductToCatalogItem(item);
+  if (!slim) return "ข้อมูลจาก Lazada ไม่ครบ";
+  const now = new Date().toISOString();
+  const { error } = await admin.from("platform_catalog_listings").update({
+    raw: { ...(row.raw ?? {}), ...slim.raw },
+    title: slim.title ?? row.title, price: slim.price ?? row.price, status: slim.status ?? (isGoneStatus(row.status) ? null : row.status),
+    sku_code: slim.skus[0] ?? null, last_imported_at: now, updated_at: now,
+  }).eq("id", row.id);
+  return error ? error.message : null;
 }
 
 // แบบเดิม (คืน null แทนเหตุผล) — route เก่าใช้อยู่

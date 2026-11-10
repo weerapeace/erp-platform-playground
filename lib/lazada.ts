@@ -74,6 +74,27 @@ export async function lazApiGet(gateway: string, apiPath: string, accessToken: s
 }
 
 /**
+ * เรียก API แบบเขียน (POST) — แบบเดียวกับ SDK ทางการ: พารามิเตอร์ระบบ + sign อยู่ใน URL · พารามิเตอร์งาน (payload ฯลฯ) อยู่ในเนื้อคำขอ
+ * ลายเซ็นคิดจากทุกพารามิเตอร์ (ระบบ + งาน) · error = LazApiError (รวมรายละเอียดรายช่องจาก detail[] ถ้ามี)
+ * ⚠️ แก้ของบนร้านจริง — เรียกจาก route ที่ผ่านสิทธิ์ products.platforms.publish + มี audit เท่านั้น
+ */
+export async function lazApiPost(gateway: string, apiPath: string, accessToken: string, biz: Record<string, string>): Promise<Record<string, unknown>> {
+  const sys: Record<string, string> = { app_key: APP_KEY(), access_token: accessToken, sign_method: "sha256", timestamp: String(Date.now()) };
+  const s = await sign(apiPath, { ...sys, ...biz }, APP_SECRET());
+  const r = await fetch(`${gateway}${apiPath}?${new URLSearchParams({ ...sys, sign: s }).toString()}`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" }, body: new URLSearchParams(biz),
+  });
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+  // ไม่มี code = ตอบผิดรูปแบบ → ถือว่าไม่สำเร็จ (กันรายงานว่าแก้ร้านแล้วทั้งที่ไม่รู้ผล) · ยกเว้นตอบ 200 พร้อม data
+  const code = j.code != null ? String(j.code) : (r.ok && "data" in j ? "0" : `HTTP ${r.status}`);
+  if (code !== "0") {
+    const detail = Array.isArray(j.detail) ? (j.detail as Record<string, unknown>[]).map((d) => [d.field, d.message].filter(Boolean).join(": ")).filter(Boolean).join(" · ") : "";
+    throw new LazApiError([String(j.message || j.code || `HTTP ${r.status}`), detail].filter(Boolean).join(" — "), code);
+  }
+  return j;
+}
+
+/**
  * error จาก Lazada → ภาษาคน (pure · มี test) — ใช้ตอบผู้ใช้ทุกจุดที่คุยกับ Lazada
  * รหัส/ข้อความจากคู่มือ open.lazada.com (สำรวจ 2026-11-10) · ไม่รู้จัก = ข้อความเดิมของ Lazada
  */
@@ -167,6 +188,15 @@ export async function lazGetItem(gateway: string, accessToken: string, itemId: s
   const j = await lazApiGet(gateway, "/product/item/get", accessToken, { item_id: String(itemId) });
   const d = j.data;
   return d && typeof d === "object" && !Array.isArray(d) ? d as Record<string, unknown> : null;
+}
+
+/** แก้สินค้า (ชื่อ/รายละเอียด/จุดเด่น/สถานะ SKU) — payload จาก lazUpdateProductXml (lib/lazada-listing-edit) · แก้ร้านจริง */
+export async function lazUpdateProduct(gateway: string, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
+  return lazApiPost(gateway, "/product/update", accessToken, { payload: payloadXml });
+}
+/** ปิดขาย ทั้งสินค้า/บาง SKU — body จาก lazDeactivateXml · แก้ร้านจริง */
+export async function lazDeactivateProduct(gateway: string, accessToken: string, bodyXml: string): Promise<Record<string, unknown>> {
+  return lazApiPost(gateway, "/product/deactivate", accessToken, { apiRequestBody: bodyXml });
 }
 
 export type LazCatalogItem = { external_product_id: string; title: string | null; skus: string[]; price: number | null; status: string | null; raw: Record<string, unknown> };
