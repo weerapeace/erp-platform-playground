@@ -24,11 +24,11 @@ type ListingRow = {
   matched_parent_sku_id: string | null; price: number | null; match_ignored: boolean | null; last_imported_at: string | null;
   /** "removed" = ไม่อยู่บนร้านแล้ว (lib/platform-catalog-sync ติดป้ายตอนดึงครบทั้งร้าน) */
   status: string | null;
-  /** ข้อมูลดิบ LINE เฉพาะช่องที่ใช้ { id, isDisplay, variants, imageUrls, category } · ไม่มี = null */
-  line: { id?: unknown; isDisplay?: unknown; variants?: unknown; imageUrls?: unknown; category?: unknown } | null;
+  /** ข้อมูลดิบ LINE เฉพาะช่องที่ใช้ { id, isDisplay, variants, imageUrls, category, giftOption } · ไม่มี = null */
+  line: { id?: unknown; isDisplay?: unknown; variants?: unknown; imageUrls?: unknown; category?: unknown; giftOption?: unknown } | null;
   lazada: unknown;
 };
-type LegacyListingRow = Omit<ListingRow, "line"> & { line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown };
+type LegacyListingRow = Omit<ListingRow, "line"> & { line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown; line_gift: unknown };
 
 function chunks<T>(xs: T[]): T[][] {
   const out: T[][] = [];
@@ -61,14 +61,14 @@ async function loadListings(admin: Admin, platformId: string, brandId: string): 
 async function loadListingsLegacy(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
   const rows = await fetchAllPages<LegacyListingRow>((from, to) => {
     let q = admin.from("platform_catalog_listings")
-      .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, status, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, lazada:raw->lazada")
+      .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, status, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, line_gift:raw->line->giftOption, lazada:raw->lazada")
       .eq("platform_id", platformId);
     if (brandId) q = q.eq("brand_id", brandId);
     return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: LegacyListingRow[] | null; error: unknown }>;
   }, { page: PAGE });
-  return rows.map(({ line_id, line_display, line_variants, line_images, line_cat, ...r }) => ({
+  return rows.map(({ line_id, line_display, line_variants, line_images, line_cat, line_gift, ...r }) => ({
     ...r,
-    line: line_id != null || line_variants != null ? { id: line_id, isDisplay: line_display, variants: line_variants, imageUrls: line_images, category: line_cat } : null,
+    line: line_id != null || line_variants != null ? { id: line_id, isDisplay: line_display, variants: line_variants, imageUrls: line_images, category: line_cat, giftOption: line_gift } : null,
   }));
 }
 
@@ -244,6 +244,8 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
       matched_cover_key: p?.cover_image_r2_key ?? null, category_id: p?.platform_category_id ?? null,
       match_ignored: !!r.match_ignored, dup_count: dups.get(r.id) ?? 0,
       open_tasks: r.matched_parent_sku_id ? (tasks.get(r.matched_parent_sku_id) ?? 0) : 0,
+      // ของขวัญ (LINE เท่านั้น · ไม่มีข้อมูล = null) — กอง "ยังไม่เปิดของขวัญ"
+      gift_on: platformCode === "line_shopping" && r.line?.giftOption != null ? r.line.giftOption !== "NO_GIFT" : null,
     };
   });
 

@@ -220,6 +220,8 @@ export type ShopItem = ListingShopSummary & {
   dup_count: number;
   /** งาน (แอปจัดการงาน) ที่ยังไม่ปิดของสินค้าที่จับคู่ไว้ */
   open_tasks: number;
+  /** เปิดส่งเป็นของขวัญไหม (LINE giftOption ≠ NO_GIFT) · null = ไม่รู้ / ไม่ใช่ LINE */
+  gift_on?: boolean | null;
 };
 
 /** สินค้าของเรา (Parent SKU) — ใช้ในแท็บ "ยังไม่ลง" และกอง "ไม่มีรูป" */
@@ -315,7 +317,10 @@ export function inShopTab(it: ShopItem, tab: ShopTab): boolean {
 
 // ───────── กองงาน (แบบ D) ─────────
 
-export type ShopQueue = "out" | "low" | "hidden" | "review" | "noimg_shop" | "dup" | "unmatched" | "gone";
+export type ShopQueue = "out" | "low" | "hidden" | "review" | "noimg_shop" | "dup" | "unmatched" | "nogift" | "gone";
+
+/** กองที่ไม่นับรวมใน "งานที่ต้องทำ" (เยอะมาก/ไม่ด่วน — ไม่ให้กลบปัญหาอื่น) */
+export const SHOP_QUEUES_NOT_IN_TOTAL: ShopQueue[] = ["nogift"];
 
 export const SHOP_QUEUES: { key: ShopQueue; label: string; why: string; tone: "danger" | "warning" | "info" | "neutral" }[] = [
   { key: "out", label: "หมดแต่ยังเปิดขาย", why: "ลูกค้าเห็นสินค้าแต่กดซื้อไม่ได้ — เติมสต๊อกหรือปิดขาย", tone: "danger" },
@@ -325,6 +330,7 @@ export const SHOP_QUEUES: { key: ShopQueue; label: string; why: string; tone: "d
   { key: "noimg_shop", label: "ไม่มีรูปบนร้าน", why: "สินค้าบนร้านไม่มีรูป — ทำรูปแล้วอัปขึ้นร้าน", tone: "warning" },
   { key: "dup", label: "ชื่อ+รหัสซ้ำ", why: "รายการบนร้านที่ชื่อและรหัสเหมือนกันทุกตัว — ตรวจว่าซ้ำจริงไหม", tone: "danger" },
   { key: "unmatched", label: "ยังไม่จับคู่", why: "ยังไม่รู้ว่าตรงกับสินค้าไหนในระบบ — ไปหน้าจับคู่ (ระบบเดาให้แล้ว)", tone: "neutral" },
+  { key: "nogift", label: "ยังไม่เปิดของขวัญ", why: "LINE ไม่ให้ตั้งผ่านระบบ — เปิด LINE Seller Center ติ๊ก “เปิดการส่งของขวัญ” + For Her / For Him / Couples แล้วกด “ดึงสินค้าจาก LINE” · ทำตัวที่เปิดขายก่อน", tone: "info" },
   { key: "gone", label: "ไม่อยู่บนร้านแล้ว", why: "ดึงสินค้าครบทั้งร้านแล้วไม่เจอ (ร้านลบไปแล้ว) — ล้างออกได้ที่หน้าจับคู่", tone: "neutral" },
 ];
 
@@ -339,6 +345,7 @@ export function inShopQueue(it: ShopItem, q: ShopQueue): boolean {
     case "noimg_shop": return it.imageKnown && !it.image;
     case "dup": return it.dup_count > 1;
     case "unmatched": return isUnmatched(it);
+    case "nogift": return it.gift_on === false;
     default: return false;
   }
 }

@@ -6,7 +6,7 @@
  * โชว์เฉพาะกองที่มีของ (กองว่าง = ไม่ต้องทำ ไม่ต้องรก) · การ์ดใบแรก = "ไม่กรอง" ตามกติกาการ์ดกลาง
  */
 import { StatFilterCards, type StatFilterCard } from "@/components/stat-filter-cards";
-import { SHOP_QUEUES, inShopQueue, type ShopItem, type ShopParent, type ShopQueue } from "@/lib/platform-listing-health";
+import { SHOP_QUEUES, SHOP_QUEUES_NOT_IN_TOTAL, inShopQueue, type ShopItem, type ShopParent, type ShopQueue } from "@/lib/platform-listing-health";
 
 /** กองของรายการบนร้าน + กอง "ไม่มีรูปในระบบ" (เป็นสินค้าของเรา) · none = ไม่กรอง */
 export type QueueKey = ShopQueue | "noimg_erp" | "none";
@@ -21,11 +21,17 @@ export function ShopQueues({ items, noImage, value, onChange }: {
   const counts = SHOP_QUEUES.map((q) => ({ ...q, n: items.filter((it) => inShopQueue(it, q.key)).length }));
   const noneImg = noImage?.filter((p) => p.image_state === "none").length ?? 0;
   const skuOnly = noImage?.filter((p) => p.image_state === "sku_only").length ?? 0;
-  const problemItems = items.filter((it) => SHOP_QUEUES.some((q) => inShopQueue(it, q.key))).length;
+  // "งานที่ต้องทำ" ไม่นับกองที่เยอะ/ไม่ด่วน (ยังไม่เปิดของขวัญ ~800) — ไม่ให้กลบปัญหาอื่น
+  const problemItems = items.filter((it) => SHOP_QUEUES.some((q) => !SHOP_QUEUES_NOT_IN_TOTAL.includes(q.key) && inShopQueue(it, q.key))).length;
+  // กองของขวัญ: บอกว่ากี่ตัวเปิดขายอยู่ (ทำก่อน)
+  const giftOnSale = items.filter((it) => inShopQueue(it, "nogift") && (it.state === "selling" || it.state === "low" || it.state === "out")).length;
 
   const cards: StatFilterCard[] = [
     { key: "none", label: "งานที่ต้องทำ", value: problemItems + noneImg, hint: "กดการ์ดเพื่อดูรายการ" },
-    ...counts.filter((q) => q.n > 0).map((q) => ({ key: q.key, label: q.label, value: q.n, tone: q.tone === "neutral" ? "neutral" as const : q.tone, hint: q.why })),
+    ...counts.filter((q) => q.n > 0).map((q) => ({
+      key: q.key, label: q.label, value: q.n, tone: q.tone === "neutral" ? "neutral" as const : q.tone,
+      hint: q.key === "nogift" ? `เปิดขายอยู่ ${giftOnSale.toLocaleString()} ตัว — ตั้งใน LINE Seller Center` : q.why,
+    })),
   ];
   if (noneImg + skuOnly > 0) {
     cards.push({ key: "noimg_erp", label: "ไม่มีรูปในระบบ", value: noneImg, tone: "warning", hint: skuOnly ? `อีก ${skuOnly.toLocaleString()} มีรูป SKU แต่ยังไม่ตั้งปก` : "ลงร้านใหม่ไม่ได้ถ้าไม่มีรูป" });
