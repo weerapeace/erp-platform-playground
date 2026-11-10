@@ -370,10 +370,11 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
           const gDirty = !!gsel && !sameGift(gsel, pv.gift);
           return (
             <div className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-start gap-2 border-t border-slate-100 py-2 text-sm">
-              <span className="pt-0.5 text-slate-500">ของขวัญ<br /><span className="rounded bg-amber-100 px-1 text-[10px] text-amber-800">ทดลอง</span></span>
+              <span className="pt-0.5 text-slate-500">ของขวัญ<br /><span className="rounded bg-amber-100 px-1 text-[10px] text-amber-800">ตั้งเองใน LINE</span></span>
               <div className="min-w-0">
                 <LineGiftPicker value={g} onChange={setGsel} disabled={!canEdit || saving} />
-                <div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.gift.isDefault && !gDirty ? "ค่าเริ่มของร้าน (แบบเดียวกับ 119 สินค้าบน LINE)" : "ตั้งไว้สำหรับ LINE"} · ตั้งหลังลงร้านเสร็จ — ถ้า LINE ไม่รับ จะบอกให้ไปตั้งใน LINE Seller Center</div>
+                <div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.gift.isDefault && !gDirty ? "ค่าเริ่มของร้าน (แบบเดียวกับ 119 สินค้าบน LINE)" : "ตั้งไว้สำหรับ LINE"}</div>
+                <div className="text-[11px] text-amber-700">LINE ไม่ให้ตั้งของขวัญผ่านระบบ (ทดสอบแล้ว) — ลงเสร็จต้องไปติ๊กเองใน LINE Seller Center · ระบบจะเตือนค่านี้ในผลลัพธ์</div>
               </div>
               {canEdit && gDirty && (
                 <div className="flex flex-col gap-1">

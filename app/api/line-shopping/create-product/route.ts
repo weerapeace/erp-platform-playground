@@ -3,7 +3,7 @@
  *  GET  ?parent_sku_id=  (products.platforms.view) → ดูก่อนส่ง: ทุกช่องที่จะส่ง + มาจากไหน + ช่องที่ขาด (ตัวช่วยลงสินค้า ขั้น "ดูและแก้")
  *  POST { parent_sku_id, display?: "onsale"|"hide" (ค่าเริ่ม hide) }  (products.platforms.edit) → สร้างจริงบน LINE (POST /products)
  *   → เก็บ platform_product_id ในร่าง + สร้าง catalog listing (จับคู่ parent)
- *   → หลังสร้าง (พลาดไม่ทำให้ลงไม่สำเร็จ): รูปในรายละเอียด (ทดลอง) · ของขวัญ (ทดลอง) · เปิด/ปิดขายตามที่เลือก
+ *   → หลังสร้าง (พลาดไม่ทำให้ลงไม่สำเร็จ): รูปในรายละเอียด (ทดลอง) · เปิด/ปิดขายตามที่เลือก · ของขวัญ = เตือนให้ตั้งเอง (LINE ไม่รับผ่าน API)
  *   → ดึงสินค้าที่เพิ่งลงกลับมาเก็บ raw.line (ลิ้นชักเห็นข้อมูลทันที)
  * ประกอบข้อมูลด้วยของกลางตัวเดียว lib/line-create-payload (ดูก่อนส่ง = ส่งจริง ตรงกันเสมอ)
  * หมายเหตุ: เขียนสร้างสินค้าจริงบนร้าน LINE — payload อาจต้องปรับตาม error จาก API (ทดสอบทีละตัว)
@@ -14,7 +14,6 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { lineCreateProduct, lineGetProduct, lineSetDisplay, lineUpdateProduct } from "@/lib/line-shopping";
-import { lineSetGift } from "@/lib/line-gift-server";
 import { decryptSecret } from "@/lib/secret-box";
 import { buildLineCreate } from "@/lib/line-create-payload";
 import { publicImageUrl } from "@/lib/line-shopping-server";
@@ -111,12 +110,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!errs.length && present < descImageKeys.length) errs.push(`รูปอยู่ในรายละเอียดจริง ${present}/${descImageKeys.length}`);
     descImages = { ok: errs.length === 0 && host.restored, present, total: descImageKeys.length, hosted: host.hosted, error: errs.length ? errs.join(" · ") : null };
   }
-  // ของขวัญ (ทดลอง — คู่มือ API ไม่มีช่องนี้ · lib/line-gift-server ลองแล้วดึงกลับตรวจ) · พลาด = ลงแล้ว แค่ต้องไปตั้งเองใน LINE
-  let gift: { ok: boolean; shape: string | null; error: string | null } | null = null;
-  if (productId) {
-    const g = await lineSetGift(apiKey, productId, { status: pv.gift.status, categories: pv.gift.categories });
-    gift = { ok: g.ok, shape: g.shape, error: g.error };
-  }
+  // ของขวัญ: ทดสอบแล้ว 2026-11-10 (LMTS05) LINE ไม่รับผ่าน API (ตอบ 200 แต่ค่าไม่เปลี่ยน ทั้ง 3 รูปแบบ) → ไม่ส่ง
+  //   แค่ส่งค่าที่ตั้งใจไว้กลับไปเตือนในผลลัพธ์ ให้ไปติ๊กเองใน LINE Seller Center (สินค้าใหม่บน LINE = ปิดของขวัญ)
+  const gift = productId && pv.gift.status !== "off" ? { ok: false, manual: true, want: { status: pv.gift.status, categories: pv.gift.categories }, error: null } : null;
   // เปิด/ปิดขายตามที่เลือก
   let display: { ok: boolean; status: "onsale" | "hide"; error: string | null } | null = null;
   if (productId) {

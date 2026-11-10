@@ -4,6 +4,10 @@
  *   → ลองส่งทีละรูปแบบผ่าน PATCH /products/{id} (แนบชื่อเดิมไปด้วย) แล้วดึงสินค้ากลับมาเทียบ — ตรง = สำเร็จ หยุด
  *   รูปแบบที่ใช้ได้จริงจดลงประวัติ (shape) → รู้แล้วค่อยตัดรูปแบบอื่นทิ้ง
  * ไม่สำเร็จ = ไม่พัง แค่บอกให้ไปตั้งใน LINE Seller Center เอง
+ *
+ * ⚠️ ผลทดสอบ 2026-11-10 (LMTS05 #1004276913 · audit line_listing_gift): ทั้ง 3 รูปแบบ LINE ตอบ 200 แต่ค่าไม่เปลี่ยน
+ *   = LINE ไม่รับการตั้งของขวัญผ่าน API → ตัวช่วยลงสินค้า/ลิ้นชักไม่เรียกตัวนี้แล้ว (แค่เตือนให้ตั้งเอง)
+ *   เก็บไว้ให้ /api/line-shopping/listing-gift ทดสอบซ้ำ ถ้า LINE เพิ่ม API ภายหลัง
  */
 import { LINE_SHOPPING_BASE, lineGetProduct } from "@/lib/line-shopping";
 import { giftFromLine, giftGroupIds, giftOptionOf, sameGift, type GiftSetting } from "@/lib/line-gift";

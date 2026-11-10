@@ -71,8 +71,8 @@ export function LineStorefrontPreview({ parentId }: { parentId: string }) {
             {pays.length > 1 && Math.min(...pays) !== Math.max(...pays) && <span className="text-[11px] text-slate-400">({baht(Math.min(...pays))} – {baht(Math.max(...pays))})</span>}
           </div>
           {pv.gift.status !== "off" && (
-            <div className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
-              <Icon name="gift" />{pv.gift.status === "gift_only" ? "สินค้านี้ส่งเป็นของขวัญเท่านั้น" : "ส่งเป็นของขวัญได้"}{pv.gift.categories.length ? ` · ${pv.gift.categories.join(", ")}` : ""}
+            <div className="inline-flex items-center gap-1 rounded-full border border-dashed border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800" title="LINE ไม่ให้ตั้งของขวัญผ่านระบบ — ป้ายนี้จะขึ้นจริงหลังไปติ๊กเองใน LINE Seller Center">
+              <Icon name="gift" />{pv.gift.status === "gift_only" ? "ส่งเป็นของขวัญเท่านั้น" : "ส่งเป็นของขวัญได้"} · ต้องติ๊กเองใน LINE
             </div>
           )}
           {dims.map((d, i) => (

@@ -250,8 +250,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             // รูปในรายละเอียด (ทดลอง) — พลาดไม่ทำให้ลงไม่สำเร็จ แค่บอกให้รู้
             const di = j.desc_images as { ok: boolean; present: number; total: number; error: string | null } | null | undefined;
             const diText = di ? (di.ok ? ` · รูปในรายละเอียด ${di.present} รูป` : ` · รูปในรายละเอียดไม่สำเร็จ (${di.error ?? "ไม่ทราบสาเหตุ"})`) : "";
-            const gf = j.gift as { ok: boolean; error: string | null } | null | undefined;
-            const gfText = gf ? (gf.ok ? " · ตั้งของขวัญแล้ว" : " · ของขวัญ: ตั้งเองใน LINE Seller Center") : "";
+            // ของขวัญ: LINE ไม่รับผ่าน API (ทดสอบ 2026-11-10) → เตือนให้ไปติ๊กเอง พร้อมค่าที่ตั้งใจไว้
+            const gf = j.gift as { manual?: boolean; want?: { status: string; categories: string[] } } | null | undefined;
+            const gfText = gf?.manual && gf.want ? ` · ของขวัญ: ไปติ๊กเองใน LINE (${gf.want.status === "gift_only" ? "เฉพาะของขวัญ" : "เปิด"}${gf.want.categories.length ? ` · ${gf.want.categories.join(", ")}` : ""})` : "";
             const dp = j.display as { ok: boolean; status: "onsale" | "hide" } | null | undefined;
             const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : " · ตั้งเปิด/ปิดขายไม่สำเร็จ") : "";
             res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });

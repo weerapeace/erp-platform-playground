@@ -216,8 +216,9 @@
 
 - **ของขวัญ (ทดลอง)** — ของกลาง `lib/line-gift` (pure: สถานะ on/gift_only/off ↔ ALLOW_GIFT/GIFT_ONLY/NO_GIFT · หมวด For Her=1 For Him=2 Couples=5 ยืนยันจากข้อมูลจริง · Mom & Kids=3 Seniors=4 Pet Lovers=6 เดาตามลำดับหน้า LINE) · ค่าเริ่ม = เปิด + For Her/For Him/Couples (ร้านใช้อยู่ 119 สินค้า) · ร่าง `extra.gift_status` / `gift_categories` (คีย์เดียวกับ ProductPlatformManager)
   - คู่มือ API มี giftOption/giftGroups แค่ในคำตอบ → `lib/line-gift-server` `lineSetGift` ลอง 3 รูปแบบผ่าน PATCH (แนบชื่อเดิม) แล้วดึงกลับเทียบ · จดรูปแบบที่ได้ผลใน audit (`shape`) → รู้แล้วตัดรูปแบบอื่นทิ้ง
-  - ทดสอบจากเครื่องไม่ได้ (กุญแจถอดรหัส API Key อยู่บน Vercel เท่านั้น) → ทดสอบผ่านลิ้นชัก: กล่อง "ส่งเป็นของขวัญ" (`LineGiftSection` → `POST /api/line-shopping/listing-gift` · audit `line_listing_gift`)
-  - ตัวเลือก UI ใช้ร่วม: `LineGiftPicker` (หน้าดูก่อนส่ง + ลิ้นชัก)
+  - ทดสอบจากเครื่องไม่ได้ (กุญแจถอดรหัส API Key อยู่บน Vercel เท่านั้น) → ทดสอบผ่านลิ้นชัก (`POST /api/line-shopping/listing-gift` · audit `line_listing_gift`)
+  - **ผล 2026-11-10 (เจ้าของกด LMTS05): LINE ไม่รับ** — ทั้ง 3 รูปแบบตอบ 200 แต่ค่าไม่เปลี่ยน → ตัวช่วยลงสินค้าไม่ส่งแล้ว: หน้าดูก่อนส่งเก็บ "ค่าที่ตั้งใจ" ไว้เตือน · ผลลัพธ์หลังลงขึ้น "ของขวัญ: ไปติ๊กเองใน LINE (…)" · ลิ้นชักแสดงค่าบน LINE อย่างเดียว · ดูแบบหน้าร้านป้ายของขวัญเป็น "ต้องติ๊กเองใน LINE" · endpoint + lineSetGift เก็บไว้ทดสอบซ้ำถ้า LINE เพิ่ม API
+  - ตัวเลือก UI ใช้ร่วม: `LineGiftPicker` (หน้าดูก่อนส่ง + ลิ้นชักแบบอ่านอย่างเดียว)
 - **เปิด/ปิดขายหลังลง:** ขั้นยืนยันเลือก "ปิดไว้ก่อน" (ค่าเริ่ม) / "เปิดขายทันที" → `POST create-product { display }` → `lineSetDisplay` ตอนท้าย
 - **ขั้นยืนยันบอกตัวที่ข้าม + เหตุผล + "กลับไปแก้"** (เดิมขึ้นแค่ "ข้าม (ไม่ครบ) 1" — เคส BSD15 ไม่มีหมวด LINE)
 - **ดูแบบหน้าร้าน:** `LineStorefrontPreview` จำลองหน้าสินค้า LINE บนมือถือ (รูปเลื่อน · ราคา/ขีดฆ่า/% · ตัวเลือกกดเปลี่ยนราคา/สต๊อก · ป้ายของขวัญ · รายละเอียด + รูปท้าย) จากข้อมูลชุดเดียวกับที่ส่ง

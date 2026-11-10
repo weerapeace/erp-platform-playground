@@ -300,9 +300,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
               dangerouslySetInnerHTML={{ __html: form.description || "<p class=\"text-slate-400\">(ไม่มีรายละเอียด)</p>" }} />}
       </div>
       {/* ทดสอบใส่รูปจากระบบลงในรายละเอียด (ช่วงทดสอบ · เฉพาะสินค้าปิดขาย) */}
-      {listingId && line.gift && (
-        <LineGiftSection listingId={listingId} current={line.gift} canEdit={canEdit} onDone={() => setReload((n) => n + 1)} />
-      )}
+      {line.gift && <LineGiftSection current={line.gift} />}
       {canEdit && listingId && (
         <DescImagesTest listingId={listingId} matchedParent={matchedParent} display={line.display}
           blocked={dirty ? "มีการแก้ที่ยังไม่ได้ส่งขึ้น LINE — ส่งหรือยกเลิกก่อน" : null}
