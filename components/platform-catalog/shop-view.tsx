@@ -32,7 +32,9 @@ import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
 import { ListingCard, SHOP_STATE_CLS } from "./listing-card";
 import { useLineDisplay } from "./use-line-display";
 import { ToggleSwitch } from "@/components/toggle-switch";
-import { AddToPlatformWizard, type AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
+import { AddToPlatformWizard, type AddWizardParent, type CopySourceRef } from "@/components/platform-listing/add-to-platform-wizard";
+import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
+import { COPY_MAX_ITEMS } from "@/lib/listing-copy-map";
 
 // ป๊อปสร้างงาน (หนัก) — โหลดตอนกดเท่านั้น
 // ลิ้นชักสินค้าบนร้าน (หนัก) — โหลดแยก ไม่รวมในหน้า
@@ -102,6 +104,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [taskFor, setTaskFor] = useState<ParentSkuPickerValue[] | null>(null);
   const [addFor, setAddFor] = useState<AddWizardParent[] | null>(null);   // ตัวช่วยลงสินค้า (ของกลาง)
+  const [copySources, setCopySources] = useState<Record<string, CopySourceRef> | undefined>(undefined);   // ลงร้านอื่นจากรายการที่ติ๊ก (โหมดคัดลอกของตัวช่วยเดียวกัน)
   const [cat, setCat] = useState("");   // หมวดกลาง ("" = ทุกหมวด · "__none" = ไม่รู้หมวด เช่น ยังไม่จับคู่)
   const canAdd = can("products.platforms.edit");
   const [layout, setLayout] = useMiniTableLayout("platform-shop-items");   // ตาราง / การ์ด (การ์ดใบเดียวกับแท็บจับคู่)
@@ -194,6 +197,14 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
     ? selParents.map((p) => pickerOf(p.id, p.code, p.name, p.cover_key))
     : [...new Map(selItems.filter((it) => it.matched_parent_sku_id).map((it) => [it.matched_parent_sku_id as string, pickerOf(it.matched_parent_sku_id as string, it.matched_code, it.matched_name, it.matched_cover_key)])).values()];
   const selUnmatched = parentMode ? 0 : selItems.filter((it) => !it.matched_parent_sku_id).length;
+  // ลงร้านอื่นจากรายการที่ติ๊ก: เฉพาะที่จับคู่แล้วและยังอยู่บนร้าน · 1 สินค้า = รายการแรกที่ติ๊ก
+  const canCopy = canAdd && !parentMode && isCopySourcePlatform(platformCode);
+  const selCopy = canCopy ? [...new Map(selItems.filter((it) => it.matched_parent_sku_id && it.state !== "gone").map((it) => [it.matched_parent_sku_id as string, it])).values()] : [];
+  const openCopy = () => {
+    if (selCopy.length > COPY_MAX_ITEMS) { toast.warning(`ลงร้านอื่นได้ครั้งละไม่เกิน ${COPY_MAX_ITEMS} สินค้า (เลือกไว้ ${selCopy.length.toLocaleString()})`); return; }
+    setCopySources(Object.fromEntries(selCopy.map((it) => [it.matched_parent_sku_id as string, { listing_id: it.id, platform_code: platformCode, platform_name: copySourceName(platformCode) }])));
+    setAddFor(selCopy.map((it) => ({ id: it.matched_parent_sku_id as string, code: it.matched_code ?? "", name: it.matched_name ?? it.title })));
+  };
 
   const onCreated = (res: { id: string; task_no: string }) => {
     setTaskFor(null); setSelected(new Set());
@@ -290,7 +301,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
       cell: (p) => (
         <span className="inline-flex gap-1">
           {canAdd && tab === "notlisted" && (
-            <button type="button" onClick={() => setAddFor([{ id: p.id, code: p.code, name: p.name }])} title="ลงสินค้านี้ขึ้นร้าน (ตัวช่วยลงสินค้า)"
+            <button type="button" onClick={() => { setCopySources(undefined); setAddFor([{ id: p.id, code: p.code, name: p.name }]); }} title="ลงสินค้านี้ขึ้นร้าน (ตัวช่วยลงสินค้า)"
               className="h-7 px-2 text-xs text-white bg-violet-600 rounded-md hover:bg-violet-700 inline-flex items-center gap-1 whitespace-nowrap">
               <Icon name="upload" />ลงร้าน
             </button>
@@ -398,7 +409,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
             resizable storageKey="platform-shop-parents" />
         ) : (
           <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id} onRowClick={(it) => setOpenId(it.id)}
-            selectable={canCreateTask || (canPublish && isLine)} selected={selected} onSelectedChange={setSelected}
+            selectable={canCreateTask || (canPublish && isLine) || canCopy} selected={selected} onSelectedChange={setSelected}
             layout={layout} cardPick cardGrid="repeat(auto-fill,minmax(170px,1fr))"
             renderCard={(it) => (
               <ListingCard badges={(
@@ -437,7 +448,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       </div>
 
-      {(canCreateTask || (canAdd && parentMode) || (canPublish && isLine)) && (
+      {(canCreateTask || (canAdd && parentMode) || (canPublish && isLine) || canCopy) && (
         <BulkActionBar count={selected.size} unit={parentMode ? "สินค้า" : "รายการ"} onClear={() => setSelected(new Set())}
           extra={selUnmatched > 0 ? `${selUnmatched.toLocaleString()} รายการยังไม่จับคู่ จะไม่ถูกใส่ในงาน` : undefined}>
           {canPublish && selToOpen.length > 0 && (
@@ -447,8 +458,13 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
             <button type="button" disabled={disp.busy} onClick={() => disp.request(selToHide.map((it) => it.id), "hide", selToHide.map((it) => it.title || it.sku_code || ""))} className="h-8 px-3 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50">ปิดขาย ({selToHide.length.toLocaleString()})</button>
           )}
           {canAdd && tab === "notlisted" && selParents.length > 0 && (
-            <button type="button" onClick={() => setAddFor(selParents.map((p) => ({ id: p.id, code: p.code, name: p.name })))} className="h-8 px-3 text-sm rounded-lg bg-violet-500 text-white hover:bg-violet-400 inline-flex items-center gap-1.5">
+            <button type="button" onClick={() => { setCopySources(undefined); setAddFor(selParents.map((p) => ({ id: p.id, code: p.code, name: p.name }))); }} className="h-8 px-3 text-sm rounded-lg bg-violet-500 text-white hover:bg-violet-400 inline-flex items-center gap-1.5">
               <Icon name="upload" />ลงสินค้า ({selParents.length.toLocaleString()})
+            </button>
+          )}
+          {canCopy && selCopy.length > 0 && (
+            <button type="button" onClick={openCopy} title={`ใช้รายการบน ${copySourceName(platformCode)} ที่ติ๊กเป็นต้นแบบ ลงสินค้าเดียวกันบนร้านอื่น`} className="h-8 px-3 text-sm rounded-lg bg-violet-500 text-white hover:bg-violet-400 inline-flex items-center gap-1.5">
+              <Icon name="documents" />ลงร้านอื่น ({selCopy.length.toLocaleString()})
             </button>
           )}
           {canCreateTask && selTargets.length > 0 && (
@@ -460,8 +476,9 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
       )}
 
       {addFor && (
-        <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : []}
-          onClose={() => { setAddFor(null); setSelected(new Set()); }} onDone={() => void load()} />
+        <AddToPlatformWizard open parents={addFor} brandId={brandId || null} sources={copySources}
+          initialPlatformCodes={copySources ? ["line_shopping"] : platformCode ? [platformCode] : []}
+          onClose={() => { setAddFor(null); setCopySources(undefined); setSelected(new Set()); }} onDone={() => void load()} />
       )}
 
       {disp.dialog}

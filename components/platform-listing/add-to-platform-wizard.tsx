@@ -15,6 +15,9 @@
  *   ตรวจ = GET /api/product-platforms/readiness?parent_sku_ids= (+on_shop) · บันทึกร่าง = POST /api/product-platforms/prepare
  *   ลงจริง = POST /api/line-shopping/create-product (เฉพาะร้านที่มีตัวเชื่อมจริง — ตอนนี้ LINE) · แก้ = ProductPlatformManager
  *   สร้างงาน = CreateTaskModal (presetProducts) · ป๊อป = ERPModal · กฎตัดสิน = lib/platform-add-plan (pure + เทสต์)
+ * ลงร้านอื่นจากรายการบนร้าน (prop sources — เปิดจากลิ้นชักสินค้าบนร้าน / ติ๊กหลายรายการในมุมมองหน้าร้าน · เจ้าของอนุมัติเฟส 1 2026-11-10):
+ *   ไม่ให้เลือกร้านต้นทางเป็นปลายทาง · เข้าขั้น 2 = คัดลอกข้อมูลจากร้านต้นทางลงร่าง LINE (ค่าเริ่ม) ทีละตัว
+ *   → ตารางจับคู่ CopyMappingTable (เปลี่ยนแหล่งรายช่อง / เติมราคาที่ว่าง) อยู่เหนือหน้าดูก่อนส่ง · ลงจริงใช้ create-product เดิม (อ่านร่าง)
  * กันซ้ำ: ข้ามตัวที่มีบนร้านแล้ว (on_shop / ร่างมีรหัส) · ลงจริงทีละตัว · server ล็อกระหว่างสร้าง · ลงจริง > 20 ต้องพิมพ์ยืนยัน
  * สิทธิ์: บันทึกร่าง = products.platforms.edit · ลงจริง = products.platforms.publish · สร้างงาน = tasks.create
  */
@@ -40,16 +43,20 @@ import {
 
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
 const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
+// ตารางจับคู่ช่อง (ลงร้านอื่นจากรายการนี้) — โหลดเมื่อใช้โหมดคัดลอกเท่านั้น (ไม่ถ่วงหน้าที่ใช้ตัวช่วยแบบปกติ)
+const CopyMappingTable = dynamic(() => import("./copy-mapping-table").then((m) => m.CopyMappingTable), { ssr: false });
 
 /** ร้านที่ลงจริงได้แล้ว → ปลายทางสร้างสินค้า (ร้านอื่น = บันทึกร่างอย่างเดียวจนกว่าจะต่อตัวเชื่อม) */
 const REAL_CREATE_ENDPOINT: Record<string, string> = { line_shopping: "/api/line-shopping/create-product" };
 
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
+/** รายการบนร้านต้นทางที่ใช้เป็นต้นแบบ (ลงร้านอื่นจากรายการนี้) */
+export type CopySourceRef = { listing_id: string; platform_code: string; platform_name?: string | null };
 type Outcome = { parent_id: string; platform: string; ok: boolean; text: string };
 const STEPS = ["เลือกร้าน", "ดูและแก้รายละเอียด", "ยืนยัน"];
 
-export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, initialPlatformCodes = [] }: {
+export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, initialPlatformCodes = [], sources }: {
   open: boolean;
   onClose: () => void;
   /** ลงเสร็จ (มีอะไรเปลี่ยน) — ให้หน้าแม่โหลดใหม่ */
@@ -59,6 +66,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   brandId?: string | null;
   /** ร้านที่ติ๊กไว้ให้ก่อน (code) */
   initialPlatformCodes?: string[];
+  /** ลงร้านอื่นจากรายการบนร้าน: parent id → รายการต้นทาง (ไม่ส่ง = ลงจากข้อมูลในระบบตามเดิม) */
+  sources?: Record<string, CopySourceRef>;
 }) {
   const { can } = useAuth();
   const toast = useToast();
@@ -93,16 +102,26 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [previewFor, setPreviewFor] = useState<string | null>(null);              // ขั้น 3: ดูแบบหน้าร้าน (parent id)
   const preparedRef = useRef<Set<string>>(new Set());                      // บันทึกร่าง LINE ไปแล้ว (ไม่ทำซ้ำตอนย้อนไปมา)
   const stopRef = useRef(false);
+  // ลงร้านอื่นจากรายการบนร้าน: คัดลอกลงร่าง LINE แล้ว (ไม่ทำซ้ำ — ไม่ทับที่ผู้ใช้เลือกใหม่ในตาราง) · ผลต่อสินค้า · ความคืบหน้า
+  const copyMode = !!sources && Object.keys(sources).length > 0;
+  const sourceCodes = useMemo(() => new Set(Object.values(sources ?? {}).map((s) => s.platform_code)), [sources]);
+  const sourceNames = useMemo(() => [...new Set(Object.values(sources ?? {}).map((s) => s.platform_name || s.platform_code))].join(" · "), [sources]);
+  const copiedRef = useRef<Set<string>>(new Set());
+  const [copyErr, setCopyErr] = useState<Record<string, string>>({});
+  const [copying, setCopying] = useState<{ done: number; total: number } | null>(null);
+  const [pvNonce, setPvNonce] = useState(0);                               // หน้าดูก่อนส่งโหลดใหม่หลังใช้ตารางจับคู่
 
   // เปิดใหม่ = เริ่มขั้น 1 · ติ๊กร้านที่ส่งมาให้ · ร้านลงจริงได้ + มีสิทธิ์ = ติ๊ก "ลงจริง" ไว้ให้
   useEffect(() => {
     if (!open) return;
     setStep(1); setRows({}); setSkipped(new Set()); setTyped(""); setOutcomes(null); setCheckErr(null); setProgress({ done: 0, total: 0, label: "" });
     setFocus(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false); setAfterDisplay("hide"); setPreviewFor(null);
+    copiedRef.current = new Set(); setCopyErr({}); setCopying(null);
     let alive = true;
     apiFetch(`/api/platform-accounts${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`).then((r) => r.json()).then((j) => {
       if (!alive) return;
-      const sel = ((j.platforms ?? []) as Pf[]).filter((p) => isSellingPlatform(p.code));
+      // ลงร้านอื่น: ร้านต้นทางไม่ใช่ปลายทาง
+      const sel = ((j.platforms ?? []) as Pf[]).filter((p) => isSellingPlatform(p.code) && !sourceCodes.has(p.code));
       setPfs(sel);
       const init = new Set(initialPlatformCodes.filter((c) => sel.some((p) => p.code === c)));
       setPicked(init);
@@ -151,6 +170,23 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
     finally { setPreparing(false); }
   };
 
+  // ลงร้านอื่น: คัดลอกข้อมูลจากรายการต้นทางลงร่าง LINE (ค่าเริ่มของตารางจับคู่) ทีละตัว — Lazada ต้องดึงสดทีละรายการ
+  const copyLine = async (ids: string[]) => {
+    const todo = ids.filter((id) => sources?.[id] && !copiedRef.current.has(id));
+    if (!todo.length || !canEdit) return;
+    setCopying({ done: 0, total: todo.length });
+    for (let i = 0; i < todo.length; i++) {
+      const id = todo[i]; const src = sources![id];
+      try {
+        const j = await apiFetch("/api/platform-listing/copy", { method: "POST", body: JSON.stringify({ listing_id: src.listing_id, target: "line_shopping", action: "apply" }) }).then((r) => r.json()) as { error: string | null };
+        if (j.error) setCopyErr((m) => ({ ...m, [id]: j.error as string }));
+        else { copiedRef.current.add(id); setCopyErr((m) => { const n = { ...m }; delete n[id]; return n; }); }
+      } catch (e) { setCopyErr((m) => ({ ...m, [id]: (e as Error).message || "คัดลอกไม่สำเร็จ" })); }
+      setCopying({ done: i + 1, total: todo.length });
+    }
+    setCopying(null);
+  };
+
   const goNext = async () => {
     if (step === 1) {
       if (!pickedPfs.length) { toast.warning("เลือกร้านอย่างน้อย 1 ร้าน"); return; }
@@ -161,6 +197,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         await prepareLine(linePf, todo);
         setFocus((f) => f ?? todo[0] ?? (m[linePf.code] ?? [])[0]?.id ?? null);
       }
+      // ลงร้านอื่น: คัดลอกจากร้านต้นทางลงร่าง LINE (ทั้งลงจริงและบันทึกร่าง) — หลังเตรียมร่าง เพื่อให้ค่าจากร้านต้นทางอยู่บนสุด
+      const copyPf = pickedPfs.find((p) => p.code === "line_shopping");
+      if (m && copyMode && copyPf) await copyLine((m[copyPf.code] ?? []).filter((r) => !isOnShop(r)).map((r) => r.id));
       return;
     }
     if (step === 2) {
@@ -221,8 +260,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         const mine = plan.filter((x) => x.pf.code === p.code && (x.decision === "prepare" || x.decision === "publish"));
         for (let i = 0; i < mine.length; i += 100) {
           const chunk = mine.slice(i, i + 100);
-          // ร้านที่มีหน้าดูก่อนส่ง (LINE ลงจริง) ห้ามเขียนทับ — ผู้ใช้แก้ร่างไว้แล้วในขั้น 2
-          const r = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: p.code, parent_sku_ids: chunk.map((x) => x.row.id), price_rule: rule, overwrite: p === linePf ? false : overwrite }) });
+          // ร้านที่มีหน้าดูก่อนส่ง (LINE ลงจริง) ห้ามเขียนทับ — ผู้ใช้แก้ร่างไว้แล้วในขั้น 2 · ลงร้านอื่น: ร่าง LINE มีค่าที่คัดลอกมา ห้ามทับ
+          const keepDraft = p === linePf || (copyMode && p.code === "line_shopping");
+          const r = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: p.code, parent_sku_ids: chunk.map((x) => x.row.id), price_rule: rule, overwrite: keepDraft ? false : overwrite }) });
           const j = await r.json();
           if (j.error) { for (const x of chunk) res.push({ parent_id: x.row.id, platform: p.name_th, ok: false, text: `บันทึกร่างไม่สำเร็จ: ${j.error}` }); }
           else {
@@ -272,7 +312,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const nameOf = (id: string) => { const p = list.find((x) => x.id === id); return p ? `${p.code}${p.name ? ` · ${p.name}` : ""}` : id; };
   const fails = outcomes?.filter((o) => !o.ok) ?? [];
   const lineFail = fails.some((o) => o.text.startsWith("ลงไม่สำเร็จ"));
-  const title = outcomes ? "ผลการลงสินค้า" : `ลงสินค้า · ${list.length.toLocaleString()} สินค้า`;
+  const title = outcomes ? "ผลการลงสินค้า" : copyMode ? `ลงร้านอื่นจาก ${sourceNames} · ${list.length.toLocaleString()} สินค้า` : `ลงสินค้า · ${list.length.toLocaleString()} สินค้า`;
 
   const footer = outcomes ? (
     <div className="flex justify-end"><button type="button" onClick={onClose} className="h-9 px-4 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700">ปิด</button></div>
@@ -281,7 +321,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
       <button type="button" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1 || running} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:invisible">ย้อนกลับ</button>
       <span className="text-xs text-slate-500">ขั้น {step}/{STEPS.length} · {STEPS[step - 1]}</span>
       {step < STEPS.length ? (
-        <button type="button" onClick={() => void goNext()} disabled={checking || preparing || (step === 1 && !pfs)} className="h-9 px-4 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">{step === 2 ? "ถัดไป: ยืนยัน" : "ถัดไป"}</button>
+        <button type="button" onClick={() => void goNext()} disabled={checking || preparing || !!copying || (step === 1 && !pfs)} className="h-9 px-4 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">{step === 2 ? "ถัดไป: ยืนยัน" : "ถัดไป"}</button>
       ) : running ? (
         <button type="button" onClick={() => { stopRef.current = true; }} className="h-9 px-4 text-sm rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50">หยุด</button>
       ) : (
@@ -329,6 +369,11 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         ) : step === 1 ? (
           !pfs ? <LoadingState label="กำลังโหลดร้าน..." /> : (
             <div className="space-y-3">
+              {copyMode && (
+                <p className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+                  <Icon name="documents" /> ใช้รายการบน {sourceNames} เป็นต้นแบบ — ขั้นถัดไปจะดึงชื่อ รายละเอียด รูป และน้ำหนักจากร้านต้นทางมาใส่ให้ (ช่องที่ร้านไม่มีใช้ข้อมูลในระบบ) และเลือกเปลี่ยนได้ทีละช่อง · ตอนนี้คัดลอกได้เฉพาะไป LINE SHOPPING · สต๊อกไม่คัดลอก
+                </p>
+              )}
               {/* ร้านที่ลงจริงได้ (มีตัวเชื่อม) — เด่น */}
               {realPfs.map((p) => {
                 const on = picked.has(p.code);
@@ -396,7 +441,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         ) : step === 2 ? (
           checking && Object.keys(rows).length === 0 ? <LoadingState label="กำลังตรวจความครบ..." /> : checkErr ? (
             <div className="space-y-2 text-sm text-rose-700"><p>{checkErr}</p><button type="button" onClick={() => void check()} className="h-8 rounded-lg border border-slate-200 px-3 text-sm">ลองใหม่</button></div>
-          ) : preparing ? <LoadingState label="กำลังเตรียมข้อมูลที่จะส่งขึ้นร้าน..." /> : (
+          ) : preparing ? <LoadingState label="กำลังเตรียมข้อมูลที่จะส่งขึ้นร้าน..." /> : copying ? (
+            <LoadingState label={`กำลังดึงข้อมูลจาก ${sourceNames} ${copying.done.toLocaleString()}/${copying.total.toLocaleString()}...`} />
+          ) : (
             <div className="space-y-4">
               {linePf && (
                 <div className="space-y-2">
@@ -432,7 +479,19 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                       </div>
                       {skipped.has(focusRow.id)
                         ? <p className="py-3 text-center text-xs text-slate-500">ข้ามตัวนี้ — จะไม่ลงร้าน</p>
-                        : <LineCreatePreviewEditor key={focusRow.id} parentId={focusRow.id} canEdit={canEdit} canEditPrice={canEditPrice} onLoaded={onPvLoaded} />}
+                        : (
+                          <>
+                            {/* ลงร้านอื่น: ตารางจับคู่ช่อง (ร้านต้นทาง / ข้อมูลในระบบ) — ใช้แล้วหน้าดูก่อนส่งด้านล่างโหลดใหม่ */}
+                            {sources?.[focusRow.id] && (
+                              <>
+                                {copyErr[focusRow.id] && <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"><Icon name="warning" /> คัดลอกจากร้านต้นทางไม่สำเร็จ: {copyErr[focusRow.id]} — ด้านล่างเป็นข้อมูลในระบบ</p>}
+                                <CopyMappingTable key={`copy-${focusRow.id}`} listingId={sources[focusRow.id].listing_id} canEdit={canEdit} canEditPrice={canEditPrice}
+                                  onApplied={() => { copiedRef.current.add(focusRow.id); setCopyErr((m) => { const n = { ...m }; delete n[focusRow.id]; return n; }); setPvNonce((n) => n + 1); }} />
+                              </>
+                            )}
+                            <LineCreatePreviewEditor key={`${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} canEditPrice={canEditPrice} onLoaded={onPvLoaded} />
+                          </>
+                        )}
                     </div>
                   ))}
                 </div>
@@ -441,6 +500,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
               {othersPfs.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-700">{linePf ? "ร้านอื่น — บันทึกร่างไว้ก่อน" : "ความครบของข้อมูล"}</div>
+                  {copyMode && othersPfs.some((p) => p.code === "line_shopping") && (
+                    <p className="text-xs text-violet-700">คัดลอกข้อมูลจาก {sourceNames} ลงร่าง LINE แล้ว {copiedRef.current.size.toLocaleString()} ตัว{Object.keys(copyErr).length ? ` · ไม่สำเร็จ ${Object.keys(copyErr).length.toLocaleString()} ตัว (${Object.values(copyErr)[0]})` : ""}</p>
+                  )}
                   <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                     {othersPfs.map((p) => {
                       const rs = rows[p.code] ?? [];

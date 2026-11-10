@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { useAuth } from "@/components/auth";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -39,7 +40,10 @@ import { ListingLinks } from "./listing-links";
 import { LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
+import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
 
+// ตัวช่วยลงสินค้า (ลงร้านอื่นจากรายการนี้) — โหลดเมื่อกดปุ่มเท่านั้น
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อเปิดลิ้นชักเท่านั้น
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
 
@@ -61,6 +65,9 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   matchTab?: ReactNode;
 }) {
   const toast = useToast();
+  const { can } = useAuth();
+  // ลงร้านอื่นจากรายการนี้ (ตัวช่วยลงสินค้า โหมดคัดลอก) — เฉพาะรายการที่จับคู่สินค้าแล้ว
+  const [copyOpen, setCopyOpen] = useState(false);
   const [detail, setDetail] = useState<ListingDetail | null>(null);
   const [variants, setVariants] = useState<ListingVariantsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -253,6 +260,11 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         </div>
         {/* ดูหน้าร้าน / หลังร้าน — ทุกแพลตฟอร์ม (lib/platform-links) */}
         {detail.status !== "removed" && <ListingLinks platformCode={detail.platform_code} externalProductId={detail.external_product_id} shopRef={detail.shop_ref} className="mt-1.5" />}
+        {/* ลงร้านอื่นจากรายการนี้ — ใช้ข้อมูลรายการนี้เป็นต้นแบบ (เฟส 1: ไป LINE) */}
+        {detail.status !== "removed" && detail.matched_parent_sku_id && isCopySourcePlatform(detail.platform_code) && can("products.platforms.edit") && (
+          <button type="button" onClick={() => setCopyOpen(true)} title="ใช้ชื่อ รายละเอียด รูป จากรายการนี้ ลงสินค้าเดียวกันบนร้านอื่น"
+            className="mt-1.5 inline-flex h-7 items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 text-xs text-violet-800 hover:bg-violet-100"><Icon name="documents" />ลงร้านอื่นจากรายการนี้</button>
+        )}
       </div>
       {line && line.display != null && detail.status !== "removed" && (
         <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -475,6 +487,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         shopImages={form?.images} matchedParent={matchedParent} matchedCode={detail?.matched_code} sysImages={sysImages}
         isUsed={(ref) => !!form?.images.includes(ref)} full={(form?.images.length ?? 0) >= MAX_LINE_IMAGES}
         onPick={(ref) => { if (!picker) return; if (picker.mode === "product") setImages((imgs) => [...imgs, ref]); else { setVariant(picker.id, { imageUrl: ref }); setPicker(null); } }} />
+      {copyOpen && detail?.matched_parent_sku_id && (
+        <AddToPlatformWizard open onClose={() => setCopyOpen(false)} brandId={detail.brand_id}
+          parents={[{ id: detail.matched_parent_sku_id, code: detail.matched_code ?? "", name: detail.matched_name ?? detail.title }]}
+          sources={{ [detail.matched_parent_sku_id]: { listing_id: detail.id, platform_code: detail.platform_code, platform_name: copySourceName(detail.platform_code) } }}
+          initialPlatformCodes={["line_shopping"]} />
+      )}
     </>
   );
 }

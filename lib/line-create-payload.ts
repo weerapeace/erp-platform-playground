@@ -15,8 +15,11 @@
  *   ราคา = กฎกลาง linePrice(ราคาเต็ม, ราคาขาย) · สต๊อก = พร้อมขาย (มี − จอง) รวมทุกคลัง
  *   ตัวเลือก: สี = มิติหลัก (+รูปต่อสี) · ตัวเลือกที่ 2 = attribute_values.variant_option · ไม่มีเลย = ใช้รหัส SKU (ลงแบบมีตัวเลือกเสมอ)
  *   ไม่ส่งตอนสร้าง: บาร์โค้ด (กันชนข้ามตัวเลือก) · ขนาดกล่อง
+ *   ลงร้านอื่นจากรายการนี้ (lib/listing-copy-map): ช่องที่คัดลอกจากร้านต้นทาง → "มาจาก" = "จากร้าน Lazada (#…)" (ร่าง extra.copied_from)
+ *     รูป extra.line_images อาจเป็นลิงก์รูปของร้านต้นทาง (http) → ส่งลิงก์นั้นตรง ๆ
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { copiedLabel } from "@/lib/listing-copy-map";
 import { linePrice } from "@/lib/platform-listing-builder";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
@@ -116,7 +119,8 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   // ---------- ชื่อ / หมวด / รายละเอียด / แบรนด์ / น้ำหนัก (+ มาจากไหน) ----------
   const namePf = str(p.name_platform), nameTh = str(p.name_th), dTitle = str(d.title);
   const name = dTitle || namePf || nameTh;
-  const nameSrc = !name ? "ยังไม่มีชื่อ" : dTitle && dTitle !== namePf && dTitle !== nameTh ? "แก้ไว้สำหรับ LINE" : (dTitle ? dTitle : name) === namePf ? "ชื่อสำหรับแพลตฟอร์ม" : "ชื่อสินค้า";
+  const nameCopied = dTitle ? copiedLabel(extra, "title", dTitle) : null;
+  const nameSrc = !name ? "ยังไม่มีชื่อ" : nameCopied ? nameCopied : dTitle && dTitle !== namePf && dTitle !== nameTh ? "แก้ไว้สำหรับ LINE" : (dTitle ? dTitle : name) === namePf ? "ชื่อสำหรับแพลตฟอร์ม" : "ชื่อสินค้า";
 
   const catPath = str(d.category_path);
   const categoryId = lineCategoryIdOf(catPath);
@@ -127,15 +131,17 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const descPf = String(p.platform_description ?? ""), descMain = String(p.description ?? ""), dDesc = String(d.description ?? "");
   const descRaw = dDesc || descPf || descMain;
   const descText = noteToHtml(descRaw, LINE_DESC_HTML);
-  const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด" : dDesc && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ LINE" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
+  const descCopied = dDesc.trim() ? copiedLabel(extra, "description", dDesc) : null;
+  const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด" : descCopied ? descCopied : dDesc && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ LINE" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
 
   const brandVal = str(extra.brand) || brandName;
-  const brandSrc = !brandVal ? "ยังไม่มีแบรนด์" : str(extra.brand) && str(extra.brand) !== brandName ? "แก้ไว้สำหรับ LINE" : "แบรนด์ของสินค้า";
+  const brandCopied = str(extra.brand) ? copiedLabel(extra, "brand", str(extra.brand)) : null;
+  const brandSrc = !brandVal ? "ยังไม่มีแบรนด์" : brandCopied ? brandCopied : str(extra.brand) && str(extra.brand) !== brandName ? "แก้ไว้สำหรับ LINE" : "แบรนด์ของสินค้า";
 
   const weightRaw = extra.weight ? Number(extra.weight) : (p.weight_g != null ? Number(p.weight_g) / 1000 : 0);
   const weightKg = Number.isFinite(weightRaw) ? Math.round(weightRaw * 100) / 100 : 0;   // LINE: น้ำหนัก ≤ 2 ตำแหน่งทศนิยม
   const wg = p.weight_g != null ? Number(p.weight_g) : 0;
-  const weightSrc = extra.weight ? "แก้ไว้สำหรับ LINE"
+  const weightSrc = extra.weight ? (copiedLabel(extra, "weight", String(extra.weight)) ?? "แก้ไว้สำหรับ LINE")
     : wg > 0 && weightKg <= 0 ? `น้ำหนักสินค้า ${wg.toLocaleString()} กรัม — น้อยเกินไป ไม่ส่ง (เช็กว่ากรอกเป็นกรัมหรือยัง)`
     : wg > 0 ? `น้ำหนักสินค้า (${wg.toLocaleString()} กรัม)` : "ยังไม่มีน้ำหนัก (ไม่ส่ง)";
 
@@ -207,7 +213,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const imageKeys = Array.isArray(d.image_keys) ? (d.image_keys as string[]).filter(Boolean) : [];
   const descImgKeys = Array.isArray(d.description_image_keys) ? (d.description_image_keys as string[]).filter(Boolean) : [];
   let galleryKeys: string[]; let imgSrc: string;
-  if (lineImages.length) { galleryKeys = [...new Set(lineImages)].slice(0, LINE_CREATE_MAX_IMAGES); imgSrc = "เลือกไว้สำหรับ LINE"; }
+  if (lineImages.length) { galleryKeys = [...new Set(lineImages)].slice(0, LINE_CREATE_MAX_IMAGES); imgSrc = copiedLabel(extra, "images", lineImages) ?? "เลือกไว้สำหรับ LINE"; }
   else {
     const autoKeys = imageKeys.length ? imageKeys : [...new Set([
       ...skuRows.filter((s) => masterCodes.has(s.code)).map((s) => s.cover_image_r2_key),
@@ -217,7 +223,8 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
     galleryKeys = [...new Set([...autoKeys, ...descImgKeys])].slice(0, LINE_CREATE_MAX_IMAGES);
     imgSrc = `${imageKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU (อัตโนมัติ)"}${descImgKeys.length ? " + รูปในรายละเอียด" : ""}`;
   }
-  const imageUrls = galleryKeys.map((k) => `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`);
+  // รูปในระบบ = R2 key → ลิงก์สาธารณะของเรา · รูปจากร้านต้นทาง (คัดลอกมา) = ลิงก์ http ของร้านนั้น ส่งตรง
+  const imageUrls = galleryKeys.map((k) => (/^https?:\/\//i.test(k) ? k : `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`));
   // รูปในรายละเอียด (ทดลอง) — ไม่อยู่ใน payload สร้างสินค้า (LINE ไม่รับลิงก์นอก) · route ใส่ให้หลังสร้างเสร็จ
   const descImageKeys = Array.isArray(extra.line_desc_images) ? [...new Set((extra.line_desc_images as unknown[]).map(str).filter(Boolean))].slice(0, MAX_LINE_DESC_IMAGES) : [];
 

@@ -22,7 +22,7 @@ import { PlatformCategoryPicker } from "@/components/platform-category-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
-import { r2ImageUrl } from "@/lib/r2-image";
+import { r2ImageUrl, avatarSrc } from "@/lib/r2-image";
 import { linePrice } from "@/lib/platform-listing-builder";
 import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
 import { sameGift, type GiftSetting } from "@/lib/line-gift";
@@ -224,8 +224,8 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
     </div>
   );
 
-  // รูปทั้งหมดให้เลือก = รูปของสินค้าในระบบ + รูปที่ใช้อยู่แต่ไม่อยู่ในคลัง (เช่น ร่างเก่า)
-  const poolAll = [...curImgs.filter((k) => !(pool ?? []).some((im) => im.key === k)).map((k) => ({ key: k, source: "ใช้อยู่" })), ...(pool ?? [])];
+  // รูปทั้งหมดให้เลือก = รูปของสินค้าในระบบ + รูปที่ใช้อยู่แต่ไม่อยู่ในคลัง (เช่น ร่างเก่า / ลิงก์รูปที่คัดลอกจากร้านต้นทาง — เอาออกแล้วเลือกกลับได้)
+  const poolAll = [...[...new Set([...curImgs, ...pv.images.keys])].filter((k) => !(pool ?? []).some((im) => im.key === k)).map((k) => ({ key: k, source: /^https?:\/\//i.test(k) ? "จากร้านต้นทาง" : "ใช้อยู่" })), ...(pool ?? [])];
   return (
     <div className="space-y-3">
       {(pv.missing.length > 0 || pv.blockers.length > 0) && (
@@ -250,7 +250,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
         <div className="flex flex-wrap gap-2">
           {curImgs.map((k, i) => (
             <div key={`${k}-${i}`} {...(canEdit ? drag.rowProps(i) : {})} className={`relative h-20 w-20 overflow-hidden rounded-lg border bg-slate-50 ${i === 0 ? "border-violet-400" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
-              <img src={r2ImageUrl(k, 200) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
+              <img src={avatarSrc(k, 200) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
               <span className={`absolute left-1 top-1 rounded-full px-1.5 text-[10px] ${i === 0 ? "bg-violet-600 text-white" : "bg-white/90 text-slate-600"}`}>{i === 0 ? "ปก" : i + 1}</span>
               {canEdit && (
                 <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-white/90 px-1 text-[10px]">
@@ -276,7 +276,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
                       title={full ? `เลือกครบ ${LINE_CREATE_MAX_IMAGES} รูปแล้ว — เอารูปอื่นออกก่อน` : idx >= 0 ? "กดเพื่อเอาออก" : "กดเพื่อเลือก"}
                       className={`min-w-0 rounded-lg border p-1 text-left ${idx >= 0 ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-40`}>
                       <div className="relative aspect-square overflow-hidden rounded bg-slate-50">
-                        <img src={r2ImageUrl(im.key, 200) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
+                        <img src={avatarSrc(im.key, 200) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
                         <span className={`absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] ${idx >= 0 ? "bg-violet-600 text-white" : "border border-slate-300 bg-white/90 text-transparent"}`}>{idx >= 0 ? (idx === 0 ? "ปก" : idx + 1) : "·"}</span>
                       </div>
                       <div className="mt-0.5 truncate text-[10px] text-slate-500" title={im.source}>{im.source}</div>

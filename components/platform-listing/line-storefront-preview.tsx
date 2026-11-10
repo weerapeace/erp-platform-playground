@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
-import { r2ImageUrl } from "@/lib/r2-image";
+import { r2ImageUrl, avatarSrc } from "@/lib/r2-image";
 import type { LineCreatePreview } from "@/lib/line-create-payload";
 
 const baht = (n: number) => `฿${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
@@ -51,14 +51,14 @@ export function LineStorefrontPreview({ parentId }: { parentId: string }) {
       <div className="w-[300px] overflow-hidden rounded-[28px] border-[6px] border-slate-800 bg-white shadow-sm">
         {/* รูป */}
         <div className="relative aspect-square bg-slate-100">
-          {imgs[img] ? <img src={r2ImageUrl(imgs[img], 700) ?? ""} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-slate-400">ไม่มีรูป</div>}
+          {imgs[img] ? <img src={avatarSrc(imgs[img], 700) ?? ""} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-slate-400">ไม่มีรูป</div>}
           {imgs.length > 1 && <span className="absolute bottom-2 right-2 rounded-full bg-black/50 px-2 text-[11px] text-white">{img + 1}/{imgs.length}</span>}
         </div>
         {imgs.length > 1 && (
           <div className="flex gap-1 overflow-x-auto px-2 pt-2">
             {imgs.map((k, i) => (
               <button key={`${k}-${i}`} type="button" onClick={() => setImg(i)} className={`h-11 w-11 shrink-0 overflow-hidden rounded border ${i === img ? "border-emerald-500" : "border-slate-200"}`}>
-                <img src={r2ImageUrl(k, 120) ?? ""} alt="" className="h-full w-full object-cover" />
+                <img src={avatarSrc(k, 120) ?? ""} alt="" className="h-full w-full object-cover" />
               </button>
             ))}
           </div>
