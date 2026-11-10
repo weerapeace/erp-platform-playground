@@ -54,7 +54,7 @@ export function pieceLineShape(p: ProjectPiece, basis: "box" | "area"): LineShap
   const n = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches });
   return {
     v: 1, shape: n.shape, basis, pid: p.pid, at: p.at,
-    ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}),
+    ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}),
     ...(p.name ? { name: p.name } : {}),
     ...(n.grain && n.grain.length === 2 ? { grain: [n.grain[0], n.grain[1]] as NonNullable<LineShape["grain"]> } : {}),
     ...(n.notches?.length ? { notches: n.notches } : {}),

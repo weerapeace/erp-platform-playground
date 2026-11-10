@@ -198,11 +198,16 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     });
     // แผ่น PVC ใส
     if (G.win) {
-      const pg = new THREE.Group(), pw = G.win.w / 2 + BAG_PVC_MARGIN, ph = G.win.h / 2 + BAG_PVC_MARGIN, cy = G.win.cy;
-      const pgeo = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-pw, cy - ph), new THREE.Vector2(pw, cy - ph), new THREE.Vector2(pw, cy + ph), new THREE.Vector2(-pw, cy + ph)]));
-      const pm = new THREE.MeshStandardMaterial({ color: 0xd4ecf7, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
-      const pmesh = new THREE.Mesh(pgeo, pm); pmesh.position.z = -0.18; pmesh.userData.piece = "pvc"; S.pick.push(pmesh); pg.add(pmesh);
-      add("pvc", "pvc", pg, [0, 0, D / 2], [0, 0, -4.5], [pm], "front");
+      // หน้าต่างโชว์ = แผ่นใสใหญ่กว่ารู · ช่องซิป/ช่องสอด = ถุงซับในห้อยจากเหนือช่องลงไป (ทึบ)
+      const pk = G.win.pocket, key = pk ? "pocket" : "pvc";
+      const pw = pk ? pk.w / 2 : G.win.w / 2 + BAG_PVC_MARGIN, top = pk ? G.win.cy + G.win.h / 2 + 1.5 : G.win.cy + G.win.h / 2 + BAG_PVC_MARGIN;
+      const bot = pk ? G.win.cy - G.win.h / 2 - pk.depth : G.win.cy - G.win.h / 2 - BAG_PVC_MARGIN;
+      const pg = new THREE.Group();
+      const pgeo = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-pw, bot), new THREE.Vector2(pw, bot), new THREE.Vector2(pw, top), new THREE.Vector2(-pw, top)]));
+      const pm = pk ? new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.9, metalness: 0, side: THREE.DoubleSide })
+        : new THREE.MeshStandardMaterial({ color: 0xd4ecf7, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
+      const pmesh = new THREE.Mesh(pgeo, pm); pmesh.position.z = -0.18; pmesh.userData.piece = key; S.pick.push(pmesh); pg.add(pmesh);
+      add(key, "pvc", pg, [0, 0, D / 2], [0, 0, -4.5], [pm], "front");
     }
     // ข้าง + ก้น
     const gusset = (key: string, id: string, pts: Pt[], dir: V3, hemL: boolean, hemR: boolean) => {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  cleanLineShape, edgeAllowances, flattenShape, flattenWithEdges, notchSegments, offsetPolygon, offsetPolygonBy, pieceGeometry, refitLineShape, shapeEdgeCount,
+  cleanFoldEdges, cleanLineShape, edgeAllowances, foldSegments, flattenShape, flattenWithEdges, notchSegments, offsetPolygon, offsetPolygonBy, pieceGeometry, refitLineShape, shapeEdgeCount,
   type Pt, type Shape,
 } from "@/lib/pattern-shape";
-import { patternPieces } from "@/lib/pattern-sheet";
+import { buildPatternDxf, buildPatternSvg, patternPieces, shelfLayout } from "@/lib/pattern-sheet";
 import { cleanProjectPieces, projectPatternLines, projectSummary } from "@/lib/pattern-project";
 
 const close = (a: number, b: number, eps = 0.01) => expect(Math.abs(a - b)).toBeLessThan(eps);
@@ -71,6 +71,26 @@ describe("เผื่อเย็บรายขอบ (allowEdges)", () => {
     expect(p.h).toBe(12); expect(p.w).toBe(10);
     expect(p.sewD).toBeTruthy();
     expect(p.sewOutline).toHaveLength(4);
+  });
+  it("ขอบพับ (foldEdges): ต้องครบทุกขอบ · เส้นพับ = เส้นเย็บของขอบนั้น · ไปถึงหน้าพิมพ์และไฟล์ตัด (ชั้น FOLD) · รูเจาะอยู่ชั้น HOLE", () => {
+    expect(cleanFoldEdges(R(10, 10), [1, 0, 0, 0])).toEqual([1, 0, 0, 0]);
+    expect(cleanFoldEdges(R(10, 10), [1, 0, 0])).toBeNull();
+    expect(cleanFoldEdges(R(10, 10), [0, 0, 0, 0])).toBeNull();
+    expect(foldSegments(R(10, 10), [1, 0, 1, 0])).toEqual([[[0, 0], [10, 0]], [[10, 10], [0, 10]]]);
+    const curved: Shape = { k: "path", nodes: [{ x: 0, y: 0 }, { x: 20, y: 0, oy: 6 }, { x: 20, y: 20, iy: -6 }, { x: 0, y: 20 }] };
+    const [seg] = foldSegments(curved, [0, 1, 0, 0]);
+    expect(seg[0]).toEqual([20, 0]); expect(seg[seg.length - 1]).toEqual([20, 20]); expect(seg.length).toBeGreaterThan(10);
+    const ls = cleanLineShape({ v: 1, shape: R(10, 10), basis: "box", allow: 1, allowEdges: [3, 1, 1, 1], foldEdges: [1, 0, 0, 0], holes: [{ k: "rect", x: 2, y: 2, w: 6, h: 6 }] })!;
+    expect(ls.foldEdges).toEqual([1, 0, 0, 0]);
+    const [p] = patternPieces([{ item_name: "หนัง", pieces: 1, shape: ls }]);
+    expect(p.foldSegs).toEqual([[[1, 3], [11, 3]]]);            // เลื่อนตามมุมเส้นตัด (ซ้าย 1 · บน 3)
+    expect(p.foldD).toBe("M1 3L11 3");
+    const dxf = buildPatternDxf(shelfLayout([p], 100));
+    const count = (layer: string) => (dxf.match(new RegExp(`\\n8\\n${layer}\\n`, "g")) ?? []).length;
+    expect([count("CUT"), count("HOLE"), count("SEW"), count("FOLD"), count("LABEL")]).toEqual([4, 4, 4, 1, 1]);
+    expect(buildPatternSvg(shelfLayout([p], 100))).toContain('d="M1 3L11 3"');
+    expect(cleanProjectPieces([{ pid: "a", allow: 1, foldEdges: [1, 0, 0, 0], shape: R(5, 5) }])[0].foldEdges).toEqual([1, 0, 0, 0]);
+    expect(cleanProjectPieces([{ pid: "a", allow: 1, foldEdges: [1], shape: R(5, 5) }])[0].foldEdges).toBeUndefined();
   });
   it("แพทเทิร์นในแอป: เก็บรายขอบ · สรุปพื้นที่และบรรทัดส่งพิมพ์ใช้รายขอบ", () => {
     const [piece] = cleanProjectPieces([{ pid: "a", name: "ตัวหน้า", count: 2, allow: 1, allowEdges: [3, 1, 1, 1], shape: R(10, 10), holes: [], notches: [], at: [0, 0] }]);

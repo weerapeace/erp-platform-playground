@@ -67,7 +67,7 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
     setWizard(false);
     const stamp = Date.now().toString(36), pidByKey: Partial<Record<BagPieceKey, string>> = {};
     pieces.forEach((q, i) => { pidByKey[q.key] = `pc${stamp}t${i}`; });   // รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้นอ้างถึงได้
-    setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, allowEdges: q.allowEdges, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
+    setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
     setShow3d(true);
     onTemplateInsert?.({ pidByKey, seams: bagSeamRefs(G), attach: bagAttachRefs(G), params: G.p });
   };

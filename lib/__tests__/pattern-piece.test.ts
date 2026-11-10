@@ -95,7 +95,7 @@ describe("แก้จุด", () => {
 });
 
 describe("หน้าแพทเทิร์น: เส้นตัด + เส้นเย็บ + รู", () => {
-  it("บรรทัดมีเผื่อพับ 1 ซม. + รู → ชิ้นขนาดตัด · มีเส้นเย็บ · DXF มี layer SEW และรูอยู่ใน CUT", async () => {
+  it("บรรทัดมีเผื่อพับ 1 ซม. + รู → ชิ้นขนาดตัด · มีเส้นเย็บ · DXF มี layer SEW · รูอยู่ชั้น HOLE แยกจากเส้นรอบชิ้น", async () => {
     const { patternPieces, shelfLayout, buildPatternDxf } = await import("@/lib/pattern-sheet");
     const [p] = patternPieces([{ calc_method: "area_face", item_name: "หนัง", width_cm: 22, length_cm: 32, pieces: 2,
       shape: { v: 1, shape: R(0, 0, 20, 30), holes: [R(5, 5, 10, 4)], allow: 1, name: "ตัวหน้า", basis: "box" } }]);
@@ -104,6 +104,7 @@ describe("หน้าแพทเทิร์น: เส้นตัด + เ�
     expect(p.holes).toHaveLength(1);
     const dxf = buildPatternDxf(shelfLayout([p], 40));
     expect(dxf).toContain("\nSEW\n");
-    expect((dxf.match(/\n8\nCUT\n/g) ?? []).length).toBe(p.outline!.length + p.holes![0].length);
+    expect((dxf.match(/\n8\nCUT\n/g) ?? []).length).toBe(p.outline!.length);
+    expect((dxf.match(/\n8\nHOLE\n/g) ?? []).length).toBe(p.holes![0].length);
   });
 });

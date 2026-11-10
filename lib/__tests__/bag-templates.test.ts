@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BAG_DEFAULT, BAG_HANDLE_ATTACH, BAG_PRESETS, BAG_PVC_MARGIN, bagAttachRefs, bagGeometry, bagPieces, bagWindowShape, type BagPiece } from "@/lib/bag-templates";
+import { BAG_DEFAULT, BAG_HANDLE_ATTACH, BAG_POCKET_MARGIN, BAG_POCKET_TOP, BAG_PRESETS, BAG_PVC_MARGIN, BAG_SLOT_OPEN, BAG_ZIP_OPEN, bagAttachRefs, bagGeometry, bagPieces, bagWindowShape, type BagPiece } from "@/lib/bag-templates";
 import { cleanShape, flattenShape, pieceGeometry, projectOnOutline, shapeBox, shapeInside, shapePerimeter, type Pt } from "@/lib/pattern-shape";
 
 const close = (a: number, b: number, eps = 0.02) => expect(Math.abs(a - b)).toBeLessThan(eps);
@@ -113,6 +113,31 @@ describe("ชิ้นแพทเทิร์น (bagPieces)", () => {
     close(pvc.finished.w, hb.w + 2 * BAG_PVC_MARGIN, 0.01);
     expect(pvc.allow).toBe(0);
     expect(geoOf(front).finishedArea).toBeLessThan(geoOf(back).finishedArea);   // พื้นที่ตัวหน้าหักรูแล้ว
+  });
+  it("ช่องซิป: ช่องแคบ 1.2 ซม. + ถุงซับในหลังช่อง (ไม่มีแผ่นใส) · ถุงไม่เลยก้นกระเป๋า · ช่องสอด = รอยกรีด 0.4 ซม.", () => {
+    const G = bagGeometry({ ...BAG_DEFAULT, win: "heart", winType: "zip", ws: 18, wy: 17 }), list = bagPieces(G);
+    expect(G.p.win).toBe("rect");                                  // ช่องซิปเป็นเหลี่ยมมนเสมอ
+    expect(list.map((q) => q.key)).toEqual(["front", "back", "pocket", "handle", "strip"]);
+    const front = byKey(list, "front"), pocket = byKey(list, "pocket"), hb = shapeBox(front.holes[0]);
+    close(hb.w, 18, 0.01); close(hb.h, BAG_ZIP_OPEN, 0.01);
+    expect(shapeInside(front.holes[0], front.shape)).toBe(true);
+    close(pocket.finished.w, 18 + 2 * BAG_POCKET_MARGIN, 1e-9);
+    close(pocket.finished.h, 2 * G.win!.pocket!.depth + BAG_POCKET_TOP, 1e-9);
+    expect(G.win!.cy - G.win!.h / 2 - G.win!.pocket!.depth).toBeGreaterThanOrEqual(2 - 1e-9);   // ก้นถุงสูงกว่าตะเข็บก้น
+    expect(bagAttachRefs(G).find((a) => a.kind === "behind")?.piece).toBe("pocket");
+    const S = bagGeometry({ ...BAG_DEFAULT, win: "rect", winType: "slot" });
+    close(S.win!.h, BAG_SLOT_OPEN, 1e-9);
+    expect(bagPieces(S).some((q) => q.key === "pvc")).toBe(false);
+    expect(bagGeometry({ ...BAG_DEFAULT, win: "none", winType: "zip" }).win).toBeNull();          // ไม่มีช่อง = ไม่สนชนิด
+    expect(bagGeometry({ ...BAG_DEFAULT, win: "heart" }).win).toMatchObject({ type: "window", kind: "heart", pocket: null });
+  });
+  it("ขอบพับ: ขอบปากของตัวหน้า/ชิ้นข้างติดธงพับ · พับปาก 0 = ไม่มีขอบพับ · หู/ก้นไม่มี", () => {
+    const list = bagPieces(bagGeometry(BAG_DEFAULT));
+    expect(byKey(list, "front").foldEdges).toEqual([0, 0, 0, 0, 0, 1]);
+    expect(byKey(list, "strip").foldEdges).toEqual([0, 1, 0, 1]);
+    expect(byKey(list, "handle").foldEdges).toBeNull();
+    expect(byKey(bagPieces(bagGeometry({ ...BAG_DEFAULT, hem: 1 })), "front").foldEdges).toEqual([0, 0, 0, 0, 0, 1]);   // เผื่อเท่ากันก็ยังเป็นขอบพับ
+    expect(byKey(bagPieces(bagGeometry({ ...BAG_DEFAULT, hem: 0 })), "front").foldEdges).toBeNull();
   });
   it("ช่องโชว์ 3 รูป: กรอบตรงตามที่สั่ง", () => {
     for (const kind of ["rect", "heart", "circle"] as const) {

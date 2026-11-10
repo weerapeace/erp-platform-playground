@@ -11,7 +11,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { RangeInput } from "@/components/range-input";
 import { Pattern3D } from "@/components/pattern-3d";
-import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow } from "@/lib/bag-templates";
+import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow, type BagWinType } from "@/lib/bag-templates";
 
 const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
@@ -44,6 +44,7 @@ export function BagTemplateWizard({ open, onClose, onInsert }: {
       min={lim?.min ?? BAG_LIMITS[k].min} max={lim?.max ?? BAG_LIMITS[k].max} onChange={(v) => set(k, v)} />
   );
   const seg = (on: boolean) => `h-8 flex-1 rounded-md px-2 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
+  const winTypes: [BagWinType | "none", string, string][] = [["none", "ไม่มี", "None"], ["window", "หน้าต่างโชว์", "Display window"], ["zip", "ช่องซิป", "Zip opening"], ["slot", "ช่องสอด", "Slot"]];
   const wins: [BagWindow, string, string][] = [["none", "ไม่มี", "None"], ["rect", "เหลี่ยมมน", "Rounded"], ["heart", "หัวใจ", "Heart"], ["circle", "วงกลม", "Circle"]];
   const swatches = (value: string, onPick: (c: string) => void, label: string) => (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -88,12 +89,18 @@ export function BagTemplateWizard({ open, onClose, onInsert }: {
             {p.r > 0 && <p className="text-[11px] text-slate-400">{t("มุมก้นโค้งต้องใช้ข้าง+ก้นเป็นชิ้นเดียว ตั้งมุมโค้งเป็น 0 ถ้าต้องการแยกชิ้น", "Rounded corners need a single gusset strip. Set the radius to 0 to split it.")}</p>}
           </div>
           <div className="space-y-2.5">
-            <div className="text-xs font-medium text-slate-500">{t("ช่องโชว์ PVC", "PVC display window")}</div>
-            <div className="flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("รูปช่องโชว์", "Window shape")}>
-              {wins.map(([k, th, en]) => <button key={k} type="button" className={seg(p.win === k)} onClick={() => setParams((o) => ({ ...o, win: k }))}>{t(th, en)}</button>)}
+            <div className="text-xs font-medium text-slate-500">{t("ช่องบนตัวหน้า", "Opening on the front panel")}</div>
+            <div className="flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ชนิดช่อง", "Opening type")}>
+              {winTypes.map(([k, th, en]) => <button key={k} type="button" className={seg(k === "none" ? p.win === "none" : p.win !== "none" && p.winType === k)}
+                onClick={() => setParams((o) => (k === "none" ? { ...o, win: "none" } : { ...o, winType: k, win: o.win === "none" || k !== "window" ? "rect" : o.win }))}>{t(th, en)}</button>)}
             </div>
+            {G.win?.type === "window" && (
+              <div className="flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("รูปช่องโชว์", "Window shape")}>
+                {wins.filter(([k]) => k !== "none").map(([k, th, en]) => <button key={k} type="button" className={seg(p.win === k)} onClick={() => setParams((o) => ({ ...o, win: k }))}>{t(th, en)}</button>)}
+              </div>
+            )}
             {G.win && <>
-              {field("ws", "กว้างช่อง", "Window width", { max: G.win.wsMax })}
+              {field("ws", G.win.type === "window" ? "กว้างช่อง" : "ยาวช่อง", G.win.type === "window" ? "Window width" : "Opening length", { max: G.win.wsMax })}
               {field("wy", "กลางช่องสูงจากก้น", "Window centre above base", { min: G.win.yMin, max: Math.max(G.win.yMin + 0.5, G.win.yMax) })}
             </>}
           </div>
@@ -149,7 +156,11 @@ export function BagTemplateWizard({ open, onClose, onInsert }: {
               : <>{t(`ชิ้นข้างยาว ${f1(G.Ls)} ซม. เท่าขอบข้างของตัวหน้า · ชิ้นก้นยาว ${f1(p.W)} ซม. เท่าขอบก้น`, `Side piece ${f1(G.Ls)} cm = front side edge · bottom piece ${f1(p.W)} cm = front bottom edge`)}</>}</p>
             <p><b>{t("ขนาดตัดใหญ่กว่าขนาดจริง", "Cut size is larger than finished size")}</b> · {t(`เผื่อเย็บรอบชิ้น ${f1(p.sa)} ซม. เป็นเนื้อวัสดุที่ซ่อนอยู่ในตะเข็บ`, `${f1(p.sa)} cm seam allowance all round is material hidden inside the seam`)}{p.hem > 0 ? t(` · ขอบปากเผื่อ ${f1(p.hem)} ซม. เพราะต้องพับเข้าด้านใน (เผื่อเฉพาะขอบปาก)`, ` · the top edge alone gets ${f1(p.hem)} cm because it folds inward`) : ""}</p>
             <p><b>{t("รอยบาก = จุดนัดพบตอนเย็บ", "Notches = meeting points when sewing")}</b> · {t("ขีดสั้นที่กึ่งกลางก้นและจุดเริ่ม-จบมุมโค้ง จับให้ตรงกันก่อนเย็บ ชิ้นยาวจะไม่เลื่อน", "Short marks at the bottom centre and where corners start and end. Match them first so long pieces do not drift.")}</p>
-            {G.win && <p><b>{t("ช่องโชว์", "Display window")}</b> · {t(`ตัวหน้าถูกเจาะเป็นรูจริง แผ่น PVC ใหญ่กว่ารูรอบละ ${f1(BAG_PVC_MARGIN)} ซม. ไว้เป็นที่เย็บ ตัวหน้ากับตัวหลังจึงเป็นคนละแบบ`, `The front panel gets a real hole. The PVC sheet is ${f1(BAG_PVC_MARGIN)} cm larger all round for stitching, so front and back become different patterns.`)}</p>}
+            {G.win?.pocket && <p><b>{G.win.type === "zip" ? t("ช่องซิป", "Zip opening") : t("ช่องสอด", "Slot")}</b> · {G.win.type === "zip"
+              ? t(`ตัวหน้าเจาะช่องยาว ${f1(G.win.w)} กว้าง ${f1(G.win.h)} ซม. ให้ฟันซิปโผล่ ซิปที่ใช้ควรยาวกว่าช่องราว 2.5 ซม. ด้านหลังเย็บถุงซับในกว้าง ${f1(G.win.pocket.w)} ลึก ${f1(G.win.pocket.depth)} ซม. (ตัดผ้าสูง 2 เท่าของความลึก + 3 ซม. แล้วพับครึ่งเป็นถุง)`, `The front panel gets a ${f1(G.win.w)} × ${f1(G.win.h)} cm opening for the zip teeth; use a zip about 2.5 cm longer. A lining pocket bag ${f1(G.win.pocket.w)} wide and ${f1(G.win.pocket.depth)} cm deep is sewn behind it.`)
+              : t(`ตัวหน้ากรีดช่องยาว ${f1(G.win.w)} ซม. (กว้าง ${f1(G.win.h)} ซม.) ไว้สอดของ ด้านหลังเย็บถุงซับในกว้าง ${f1(G.win.pocket.w)} ลึก ${f1(G.win.pocket.depth)} ซม.`, `The front panel gets a ${f1(G.win.w)} cm slit with a lining pocket bag ${f1(G.win.pocket.w)} wide and ${f1(G.win.pocket.depth)} cm deep behind it.`)}
+              {" "}{t("ขนาดถุงเป็นค่าทั่วไป ให้ช่างยืนยัน", "Pocket sizes are generic — confirm with your pattern maker.")}</p>}
+            {G.win && !G.win.pocket && <p><b>{t("ช่องโชว์", "Display window")}</b> · {t(`ตัวหน้าถูกเจาะเป็นรูจริง แผ่น PVC ใหญ่กว่ารูรอบละ ${f1(BAG_PVC_MARGIN)} ซม. ไว้เป็นที่เย็บ ตัวหน้ากับตัวหลังจึงเป็นคนละแบบ`, `The front panel gets a real hole. The PVC sheet is ${f1(BAG_PVC_MARGIN)} cm larger all round for stitching, so front and back become different patterns.`)}</p>}
             <p className="text-slate-500">{t("ค่าหูหิ้ว (โคนเย็บ 4 ซม. · แถบกว้าง 2 เท่าของหู) และขอบ PVC เป็นค่าทั่วไป ให้ช่างยืนยันก่อนตัดจริง", "Handle values (4 cm attachment, strip twice the handle width) and the PVC margin are general defaults. Have your pattern maker confirm before cutting.")}</p>
           </div>
         </div>

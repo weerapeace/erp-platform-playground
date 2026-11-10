@@ -35,7 +35,7 @@ export type ShapeBasis = "box" | "area";
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; allowEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[] };
 /** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
 export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null };
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
@@ -224,6 +224,8 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   if (allow) out.allow = allow;
   const per = edgeAllowances(norm.shape, o.allowEdges, allow);
   if (per) out.allowEdges = per;
+  const fold = cleanFoldEdges(norm.shape, o.foldEdges);
+  if (fold) out.foldEdges = fold;
   if (typeof o.pid === "string" && /^[\w-]{1,40}$/.test(o.pid)) out.pid = o.pid;
   if (typeof o.name === "string" && o.name.trim()) out.name = o.name.trim().slice(0, 60);
   if (Array.isArray(o.at) && o.at.length === 2) { const x = fin(o.at[0]), y = fin(o.at[1]); if (x != null && y != null && Math.abs(x) < 1e5 && Math.abs(y) < 1e5) out.at = [r3(x), r3(y)]; }
@@ -610,6 +612,25 @@ export function edgeAllowances(s: Shape, raw: unknown, base = 0): number[] | nul
   if (!Array.isArray(raw) || raw.length !== shapeEdgeCount(s)) return null;
   const out = raw.map(cleanAllow);
   return out.some((v) => Math.abs(v - base) > 1e-9) ? out : null;
+}
+
+/** ขอบที่ "พับเข้าใน" (เช่น ขอบปากพับ) — 1 ค่าต่อขอบ (1 = พับ · 0 = เย็บปกติ) ต้องครบทุกขอบและมีอย่างน้อย 1 ขอบที่พับ ไม่งั้น = ไม่มี */
+export function cleanFoldEdges(s: Shape, raw: unknown): number[] | null {
+  if (!Array.isArray(raw) || raw.length !== shapeEdgeCount(s)) return null;
+  const out = raw.map((v) => (v === 1 || v === true ? 1 : 0));
+  return out.some(Boolean) ? out : null;
+}
+/** เส้นพับ = เส้นเย็บของขอบที่ตั้งว่าพับ (แต่ละขอบ = เส้นต่อเนื่อง 1 เส้น) — ใช้วาดเส้นพับบนกระดาน / หน้าพิมพ์ / ชั้น FOLD ของไฟล์ตัด */
+export function foldSegments(s: Shape, fold: number[] | null | undefined): Pt[][] {
+  if (!fold?.some(Boolean)) return [];
+  const { pts, edge } = flattenWithEdges(s), out: Pt[][] = [];
+  for (let e = 0; e < fold.length; e++) {
+    if (!fold[e]) continue;
+    const line: Pt[] = [];
+    for (let i = 0; i < pts.length; i++) if (edge[i] === e) { line.push(pts[i]); if (edge[(i + 1) % pts.length] !== e || pts.length === i + 1) line.push(pts[(i + 1) % pts.length]); }
+    if (line.length >= 2) out.push(line);
+  }
+  return out;
 }
 
 /**
