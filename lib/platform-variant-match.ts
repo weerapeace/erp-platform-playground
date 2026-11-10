@@ -48,7 +48,8 @@ export function shopVariantsOf(platformCode: string, raw: unknown): ShopVariant[
       const price = num(v.price); const sale = num(v.special_price);
       const sku = str(v.seller_sku) ?? str(v.SellerSku);
       return {
-        key: str(v.sku_id) ?? `#${i + 1}`, sku, label: sku ?? `ตัวเลือก ${i + 1}`,
+        // ชื่อตัวเลือก (สี/ไซซ์) มีเมื่อดึงหลัง 2026-11-10 (lazSkuLabel ใน lib/lazada) · ไม่มี = ใช้รหัส
+        key: str(v.sku_id) ?? `#${i + 1}`, sku, label: str(v.label) ?? sku ?? `ตัวเลือก ${i + 1}`,
         price, sale_price: sale != null && sale > 0 && (price == null || sale < price) ? sale : null,
         stock: num(v.available) ?? num(v.quantity), image: null,
       };

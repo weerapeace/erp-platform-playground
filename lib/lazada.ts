@@ -6,6 +6,8 @@
 // การเซ็นคำขอ (sha256): sign = HMAC-SHA256( apiPath + concat(sortedParams key+value), app_secret ) → hex ตัวใหญ่
 // ============================================================
 
+import { lazSkuLabel } from "@/lib/lazada-listing-edit";
+
 export const LAZADA_AUTH_BASE = "https://auth.lazada.com/rest";
 
 const APP_KEY = () => (process.env.LAZADA_APP_KEY ?? "").trim();
@@ -54,14 +56,39 @@ async function authCall(apiPath: string, extra: Record<string, string>): Promise
 export const lazExchangeToken = (code: string) => authCall("/auth/token/create", { code });
 export const lazRefreshToken = (refreshToken: string) => authCall("/auth/token/refresh", { refresh_token: refreshToken });
 
+/** Lazada ตอบ error — message เหมือนเดิม (ผู้เรียกเก่าใช้ได้) + code ไว้แปลเป็นภาษาคน (lazErrorText) */
+export class LazApiError extends Error {
+  code: string;
+  constructor(message: string, code: string) { super(message); this.name = "LazApiError"; this.code = code; }
+}
+
 // เรียก API ทั่วไป (GET, เซ็นคำขอ + แนบ access_token)
 export async function lazApiGet(gateway: string, apiPath: string, accessToken: string, biz: Record<string, string> = {}): Promise<Record<string, unknown>> {
   const params: Record<string, string> = { app_key: APP_KEY(), access_token: accessToken, sign_method: "sha256", timestamp: String(Date.now()), ...biz };
   params.sign = await sign(apiPath, params, APP_SECRET());
   const r = await fetch(`${gateway}${apiPath}?${new URLSearchParams(params).toString()}`);
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
-  if (String(j.code ?? "0") !== "0") throw new Error(String(j.message || j.code || `HTTP ${r.status}`));
+  const code = String(j.code ?? "0");
+  if (code !== "0") throw new LazApiError(String(j.message || j.code || `HTTP ${r.status}`), code);
   return j;
+}
+
+/**
+ * error จาก Lazada → ภาษาคน (pure · มี test) — ใช้ตอบผู้ใช้ทุกจุดที่คุยกับ Lazada
+ * รหัส/ข้อความจากคู่มือ open.lazada.com (สำรวจ 2026-11-10) · ไม่รู้จัก = ข้อความเดิมของ Lazada
+ */
+export function lazErrorText(e: unknown): string {
+  const code = e instanceof LazApiError ? e.code : "";
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  const all = `${code} ${msg}`;
+  if (/ApiCallLimit|AppApiCallLimit|E1002|\b901\b/i.test(all)) return "Lazada ให้เรียกถี่เกินไป — รอสักครู่แล้วลองใหม่";
+  if (/\b998\b|service is disabled/i.test(all)) return "Lazada ปิดระบบนี้ชั่วคราว (มักเป็นช่วงแคมเปญใหญ่ เช่น 11.11 / 12.12) — ลองใหม่หลังช่วงที่ Lazada ประกาศ";
+  if (/IC_ABILITY_PG|campaign participation/i.test(all)) return "สินค้า/ตัวเลือกนี้ร่วมแคมเปญอยู่ — Lazada ไม่ให้แก้จนกว่าแคมเปญจบ";
+  if (/IllegalAccessToken|InvalidAccessToken|access.?token/i.test(all)) return "การเชื่อมต่อ Lazada ใช้ไม่ได้แล้ว — ไปที่ 🏪 จัดการร้าน/บัญชีแพลตฟอร์ม แล้วกด เชื่อมต่อ Lazada ใหม่";
+  if (/IncompleteSignature|InvalidSignature/i.test(all)) return "ลายเซ็นคำขอไม่ผ่าน (เวลาเครื่องเพี้ยนหรือกุญแจแอปผิด) — แจ้งผู้ดูแลระบบ";
+  if (/E0501|SELLER_NOT_PERMITTED|SellerNotActive/i.test(all)) return "ร้านถูก Lazada จำกัดสิทธิ์ — ตรวจสถานะร้านใน Lazada Seller Center";
+  if (/\b4137\b|not.{0,20}(exist|found)/i.test(all)) return "ไม่พบสินค้านี้ในร้าน Lazada (อาจถูกลบไปแล้ว)";
+  return msg ? `Lazada ตอบว่า: ${msg}` : "Lazada ไม่ตอบ — ลองใหม่อีกครั้ง";
 }
 
 // ดึงออเดอร์ (สร้างหลังเวลา createdAfter — ISO8601 มี timezone เช่น 2026-06-01T00:00:00+07:00)
@@ -135,9 +162,17 @@ export async function lazGetProducts(gateway: string, accessToken: string, opts:
   return { products: data?.products ?? [], total: Number(data?.total_products ?? 0) || 0 };
 }
 
+/** สินค้า 1 ตัวแบบเต็ม (รูป · รายละเอียด HTML · ชื่อตัวเลือก · ราคาลด+วัน · ขนาดกล่อง) — GET /product/item/get · อ่านอย่างเดียว */
+export async function lazGetItem(gateway: string, accessToken: string, itemId: string): Promise<Record<string, unknown> | null> {
+  const j = await lazApiGet(gateway, "/product/item/get", accessToken, { item_id: String(itemId) });
+  const d = j.data;
+  return d && typeof d === "object" && !Array.isArray(d) ? d as Record<string, unknown> : null;
+}
+
 export type LazCatalogItem = { external_product_id: string; title: string | null; skus: string[]; price: number | null; status: string | null; raw: Record<string, unknown> };
 const s0 = (v: unknown): string | null => { const s = v == null ? "" : String(v).trim(); return s || null; };
 const n0 = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+
 
 /**
  * แปลงสินค้า 1 ตัวจาก /products/get → รายการมาตรฐานของหน้า "สินค้าบนแพลตฟอร์ม" (pure · มี test)
@@ -151,6 +186,8 @@ export function lazProductToCatalogItem(p: Record<string, unknown>): LazCatalogI
   const skus = (Array.isArray(p.skus) ? p.skus as Record<string, unknown>[] : []).map((s) => ({
     seller_sku: s0(s.SellerSku ?? s.seller_sku), sku_id: s0(s.SkuId ?? s.sku_id), shop_sku: s0(s.ShopSku ?? s.shop_sku),
     price: n0(s.price), special_price: n0(s.special_price), quantity: n0(s.quantity), available: n0(s.Available ?? s.available), status: s0(s.Status ?? s.status),
+    // ชื่อตัวเลือก (สี/ไซซ์) — สั้น ๆ ไม่บวม · ไม่มี saleProp = ไม่เก็บช่องนี้
+    ...(() => { const label = lazSkuLabel(s, p.variation); return label ? { label } : {}; })(),
   }));
   const prices = skus.map((s) => s.price).filter((n): n is number => n != null && n > 0);
   const status = s0(p.status);

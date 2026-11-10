@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lazConnHealth, lazProductToCatalogItem } from "./lazada";
+import { LazApiError, lazConnHealth, lazErrorText, lazProductToCatalogItem } from "./lazada";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 9, 28);
@@ -44,4 +44,28 @@ describe("lazProductToCatalogItem", () => {
     expect(JSON.stringify(raw)).not.toContain("1.jpg");
   });
   it("ไม่มี item_id = ข้าม", () => expect(lazProductToCatalogItem({ attributes: { name: "x" } })).toBeNull());
+  it("มี saleProp → เก็บชื่อตัวเลือก (label) · ไม่มี = ไม่มีช่อง label", () => {
+    const raw = lazProductToCatalogItem({ ...sample, skus: [{ ...sample.skus[0], saleProp: { color_family: "Gold" } }, sample.skus[1]] })!.raw.lazada as Record<string, unknown>;
+    const skus = raw.skus as Record<string, unknown>[];
+    expect(skus[0].label).toBe("สี: Gold");
+    expect("label" in skus[1]).toBe(false);
+  });
+});
+
+describe("lazErrorText", () => {
+  it("แปลรหัสที่รู้จักเป็นภาษาคน", () => {
+    expect(lazErrorText(new LazApiError("ApiCallLimit", "ApiCallLimit"))).toContain("ถี่เกินไป");
+    expect(lazErrorText(new LazApiError("this API service is disabled, please get more information from Notice", "998"))).toContain("ปิดระบบนี้ชั่วคราว");
+    expect(lazErrorText(new LazApiError("sku under campaign participation and cannot be edited", "501"))).toContain("ร่วมแคมเปญ");
+    expect(lazErrorText(new LazApiError("Invalid access token", "IllegalAccessToken"))).toContain("เชื่อมต่อ Lazada ใหม่");
+  });
+  it("ไม่รู้จัก = ข้อความเดิมของ Lazada · ไม่มีข้อความ = บอกให้ลองใหม่", () => {
+    expect(lazErrorText(new Error("E9999 something odd"))).toBe("Lazada ตอบว่า: E9999 something odd");
+    expect(lazErrorText(new Error(""))).toContain("ลองใหม่");
+  });
+  it("LazApiError ยังเป็น Error เดิม (ผู้เรียกเก่าอ่าน message ได้เหมือนเดิม)", () => {
+    const e = new LazApiError("boom", "E1");
+    expect(e).toBeInstanceOf(Error);
+    expect(e.message).toBe("boom");
+  });
 });
