@@ -586,6 +586,14 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "ทุกการส่ง LINE",
     notWhen: "ห้ามยิง LINE API เองในหน้า/API อื่น",
   },
+  {
+    key: "bell-switch", label: "สวิตช์เปิด/ปิดกระดิ่งที่ส่งตรง", code: "lib/bell-switch", category: "notify",
+    source: { path: "lib/bell-switch" },
+    what: "เช็กว่าแอดมินปิดกระดิ่งเรื่องนี้ไว้ไหม ก่อนส่งกระดิ่งที่โค้ดส่งตรง (ไม่ผ่านกฎ) · สวิตช์อยู่ในแผงกระดิ่งของแผนผังการทำงาน",
+    when: "ส่งกระดิ่งถึงคนที่เกี่ยวข้องกับเอกสารด้วยโค้ดเอง (insert erp_notifications / erp_notify) → bellAllowed / dropDisabledBells ก่อนส่ง แล้วลงเรื่องใน lib/flow-map-notify",
+    notWhen: "กระดิ่งที่ส่งตามกฎ (erp_notify_for_event) เปิด/ปิดที่กฎอยู่แล้ว · ความปลอดภัย/ปุ่มกดขอเอง ห้ามให้ปิด",
+    doc: "flow-map.md",
+  },
 
   // ───────── ระบบ / สิทธิ์ ─────────
   {

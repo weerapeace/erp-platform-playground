@@ -11,6 +11,7 @@ import { linksOf, summarizeTasks, type ChecklistSummary } from "@/lib/record-tas
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { writeAudit } from "@/lib/audit";
+import { bellAllowed } from "@/lib/bell-switch";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -117,6 +118,7 @@ export async function createRecordTasks(admin: Admin, p: { module_key: string; r
 
 export async function notifyAssignee(admin: Admin, task: { module_key: string; record_id: string; title: string; assigned_to: string | null }, actor: { id: string | null; name: string | null }) {
   if (!isUuid(task.assigned_to) || task.assigned_to === actor.id) return;
+  if (!(await bellAllowed(admin, "checklist.assigned"))) return;   // สวิตช์กระดิ่งในแผนผัง ปิด → ไม่ส่ง
   try {
     const t = TARGETS[task.module_key];
     const label = t ? await t.label(admin, task.record_id).catch(() => null) : null;

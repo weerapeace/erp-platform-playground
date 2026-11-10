@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { notifyEvent, pushLineTpl, boardLink } from "@/lib/board-notify";
+import { bellAllowed } from "@/lib/bell-switch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -145,7 +146,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   // แจ้งผู้ขอว่าคำขอได้ผลแล้ว — ยิงตรงถึง user id (ตัวเลือก "requester" ของ rule engine ใช้ได้เฉพาะใบขอซื้อ)
   const vals = (row.values ?? {}) as Record<string, unknown>;
-  if (action !== "cancel" && row.requested_by && String(row.requested_by) !== String(user?.id ?? "")) {
+  // สวิตช์กระดิ่งในแผนผัง (lib/bell-switch) ปิด → ไม่ส่ง
+  if (action !== "cancel" && row.requested_by && String(row.requested_by) !== String(user?.id ?? "") && await bellAllowed(admin, "material_request.result")) {
     const ok = action === "approve";
     await admin.rpc("erp_notify", {
       p_user_ids: [String(row.requested_by)],

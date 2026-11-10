@@ -22,7 +22,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { DAY_LABELS, emailReportToInput, type EmailReport, type EmailReportInput } from "@/lib/email-report/shared";
 import {
-  NOTIFY_CHANNELS, NOTIFY_REMARK_MAX, NOTIFY_STATES, notifyChannelOf, notifyGroupLabel, notifyRemark, notifyTopicCells,
+  NOTIFY_CHANNELS, NOTIFY_REMARK_MAX, NOTIFY_STATES, notifyBellSwitchable, notifyChannelOf, notifyGroupLabel, notifyRemark, notifyTopicCells,
   type NotifyGroup, type NotifyLive, type NotifyTarget, type NotifyTopic,
 } from "@/lib/flow-map-notify";
 
@@ -44,7 +44,7 @@ const OTHER_WORD: Record<string, string> = { approvers: "ผู้อนุม�
  *   สวิตช์ LINE → /api/admin/line-console { event, enabled }
  * rules/events มาจาก notifyTopicSwitch() · คืนรายการที่ล้ม (ว่าง = สำเร็จหมด) · ทุก API ลงประวัติเอง
  */
-export async function saveNotifyTopicSwitch(rules: string[], events: string[], enabled: boolean, actor: string | null): Promise<string[]> {
+export async function saveNotifyTopicSwitch(rules: string[], events: string[], enabled: boolean, actor: string | null, bells: string[] = []): Promise<string[]> {
   const fails: string[] = [];
   const send = async (label: string, url: string, method: string, body: unknown) => {
     try {
@@ -63,6 +63,8 @@ export async function saveNotifyTopicSwitch(rules: string[], events: string[], e
     } catch { fails.push("กระดิ่ง: อ่านกฎเดิมไม่สำเร็จ"); }
   }
   for (const ev of events) await send("สวิตช์ LINE", "/api/admin/line-console", "POST", { event: ev, enabled });
+  // กระดิ่งที่โค้ดส่งตรง (ไม่มีกฎ) → สวิตช์ก้อนเดียว lib/bell-switch
+  if (bells.length) await send("กระดิ่งในแอป", "/api/admin/bell-switches", "POST", { events: bells, enabled });
   return fails;
 }
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -93,6 +95,10 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
   const [rep, setRep] = useState<ReportDraft | null>(null);
   const [remark, setRemark] = useState("");   // หมายเหตุ (ร่าง)
   const remark0 = topic ? notifyRemark(topic, live) : "";
+  // กระดิ่งที่โค้ดส่งตรง (ไม่มีกฎ) — สวิตช์ lib/bell-switch ต่อ event ของเรื่อง · เปิด = มีอย่างน้อย 1 event ไม่ได้ปิด
+  const bellSw = !!topic && notifyBellSwitchable(topic);
+  const bellOn0 = bellSw && !!topic && (topic.events ?? []).some((e) => !live?.bellOff?.[e]);
+  const [bellOn, setBellOn] = useState(bellOn0);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -100,7 +106,7 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
   useEffect(() => {
     if (!open || !topic) return;
     let alive = true;
-    setLoading(true); setLoadErr(null); setErr(null); setAssign(new Set()); setRemark(notifyRemark(topic, live));
+    setLoading(true); setLoadErr(null); setErr(null); setAssign(new Set()); setRemark(notifyRemark(topic, live)); setBellOn(bellOn0);
     const jobs: Promise<void>[] = [];
     if (ruleKeys.length) {
       jobs.push(apiFetch("/api/admin/roles").then((r) => r.json()).then((j) => {
@@ -157,7 +163,8 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
   const repDirty = !!(report && rep && (rep.is_enabled !== report.is_enabled || rep.send_time !== report.send_time || !sameJson([...rep.days].sort(), [...report.days].sort())
     || rep.email !== (report.email_enabled !== false) || rep.popup !== !!report.popup?.enabled || rep.line !== !!report.line?.enabled || rep.discord !== !!report.discord?.enabled));
   const remarkDirty = remark.trim() !== remark0.trim();
-  const dirty = dirtyRules.length > 0 || dirtyEvents.length > 0 || assign.size > 0 || repDirty || remarkDirty;
+  const bellDirty = bellSw && bellOn !== bellOn0;
+  const dirty = dirtyRules.length > 0 || dirtyEvents.length > 0 || assign.size > 0 || repDirty || remarkDirty || bellDirty;
 
   const setRule = (k: string, patch: Partial<RuleDraft>) => setRules((s) => (s[k] ? { ...s, [k]: { ...s[k]!, ...patch } } : s));
 
@@ -182,6 +189,7 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
     for (const ev of dirtyEvents) await call("สวิตช์ LINE", "/api/admin/line-console", "POST", { event: ev, enabled: !lineOff[ev] });
     for (const slot of assign) await call(`กลุ่ม LINE (${notifyGroupLabel(slot as NotifyGroup)})`, "/api/admin/line-console", "POST", { slot, group_id: lineData?.captured });
     if (remarkDirty) await call("หมายเหตุ", "/api/flow-map/notify/remarks", "PATCH", { id: topic.id, text: remark.trim() });
+    if (bellDirty) await call("กระดิ่งในแอป", "/api/admin/bell-switches", "POST", { events: topic.events ?? [], enabled: bellOn });
     if (report && rep && repDirty) {
       const change: Partial<EmailReportInput> = {
         is_enabled: rep.is_enabled, send_time: rep.send_time, days: [...rep.days].sort((a, b) => a - b), email_enabled: rep.email,
@@ -201,9 +209,12 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
     if (!s.rule) {
       return (
         <div key={i} className={box}>
-          <div className="flex items-center gap-1.5 text-[13px] font-medium text-slate-800"><Icon value="🔔" />กระดิ่ง ERP</div>
+          <div className="flex items-center gap-1.5 text-[13px] font-medium text-slate-800">
+            <Icon value="🔔" />กระดิ่ง ERP
+            {bellSw && <span className="ml-auto"><ToggleSwitch size="sm" on={bellOn} onChange={setBellOn} label={bellOn ? "เปิด" : "ปิด"} /></span>}
+          </div>
           <div className="mt-1 flex gap-1.5 text-[12.5px] text-slate-600"><Icon value="i:lock" size={13} className="mt-0.5 shrink-0 text-slate-400" />
-            ส่งถึง “{s.to}” ของเรื่องนั้นเสมอ — เปลี่ยนคนรับไม่ได้ (ตามเอกสาร)</div>
+            ส่งถึง “{s.to}” ของเรื่องนั้น — เปลี่ยนคนรับไม่ได้ (ตามเอกสาร){bellSw ? " · ปิดได้ทั้งเรื่อง" : " · เรื่องนี้ปิดไม่ได้"}</div>
         </div>
       );
     }

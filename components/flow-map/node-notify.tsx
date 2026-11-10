@@ -62,7 +62,7 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
       : t(`จะปิด: ${sw.switched.join(" · ")} — คนที่เคยได้รับจะไม่ได้รับเรื่องนี้อีก จนกว่าจะเปิดใหม่ (เปิดกลับได้ทุกเมื่อ)`, "Recipients stop getting this until it is turned back on");
     if (!on && !(await askConfirm({ title: t(`ปิดแจ้งเตือน “${topic.label}”?`, `Turn off “${topic.label}”?`), message: <span className="whitespace-pre-line">{msg}</span>, confirmText: t("ปิดแจ้งเตือน", "Turn off") }))) return;
     setBusy(topic.id);
-    const fails = await saveNotifyTopicSwitch(sw.rules, sw.events, on, user?.email ?? null);
+    const fails = await saveNotifyTopicSwitch(sw.rules, sw.events, on, user?.email ?? null, sw.bells);
     setBusy(null);
     await api.reload();
     if (fails.length) toast.error(fails.join(" · "));
@@ -170,7 +170,7 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
                   <span key={i} title={c.text} className={`inline-flex items-start gap-1 max-w-full text-[11.5px] leading-snug px-2 py-1 rounded-lg border ${NOTIFY_STATES[c.state].chip}`}>
                     <Icon value={NOTIFY_CHANNELS[notifyChannelOf(s)].icon} size={12} className="mt-px shrink-0" />
                     <span className="font-medium whitespace-nowrap shrink-0">{KIND_LABEL[s.kind]}</span>
-                    <span className="min-w-0">· {c.short ?? (c.state === "ok" ? s.to : c.text)}</span>
+                    <span className="min-w-0">· {c.state === "off" ? `${c.short ?? s.to} — ${t("ปิดไว้", "off")}` : c.short ?? (c.state === "ok" ? s.to : c.text)}</span>
                   </span>
                 );
               })}

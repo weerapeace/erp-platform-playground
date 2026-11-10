@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
 import { lineEventEnabled } from "@/lib/line-registry";
 import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
+import { bellAllowed } from "@/lib/bell-switch";
 import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveFindFolder, driveListImages, driveListChildFolders, driveMoveFile, driveTrashFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
@@ -425,6 +426,7 @@ export async function notify(
   n: { userId: string; eventType: string; title: string; body?: string | null; linkUrl?: string | null; entityId?: string | null; priority?: "low" | "normal" | "high" },
 ): Promise<void> {
   if (!n.userId) return;
+  if (!(await bellAllowed(admin, n.eventType))) return;   // สวิตช์กระดิ่งในแผนผัง (lib/bell-switch) ปิด → ไม่ส่ง
   try {
     await admin.from("erp_notifications").insert({
       user_id: n.userId, event_type: n.eventType, title: n.title, body: n.body ?? null,

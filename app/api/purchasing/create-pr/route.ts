@@ -16,6 +16,7 @@ import { bracketCode, skuIdsByBracketCode } from "@/lib/pr-line-code";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { shopDefaultCurrency, type ShopCurrencyInfo } from "@/lib/po-currency";
 import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
+import { dropDisabledBells } from "@/lib/bell-switch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -200,7 +201,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         link_url: "/purchasing/orders", entity_type: "purchase_requests_v2",
         entity_id: (created[0]?.id as string) ?? null, priority: urgent ? "high" : "normal",
       }));
-    if (notifRows.length) await admin.from("erp_notifications").insert(notifRows);
+    const bellRows = await dropDisabledBells(admin, notifRows);   // ปิดจากแผนผัง (สวิตช์กระดิ่ง) → ไม่ส่ง
+    if (bellRows.length) await admin.from("erp_notifications").insert(bellRows);
 
     // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request → fallback กลุ่มหลัก) · ใช้บอท/โทเคนเดิม
     const cfg = await loadLineConfig(admin);

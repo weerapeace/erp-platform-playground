@@ -7,6 +7,7 @@
 // ============================================================
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeAudit } from "@/lib/audit";
+import { bellAllowed } from "@/lib/bell-switch";
 import { checkMetaReady, finalizeIgReel, normalizeMedia, publishMeta, setContentPostStatus, type Actor } from "./meta";
 import type { PostMedia } from "./media";
 
@@ -103,7 +104,7 @@ async function failJob(admin: SupabaseClient, job: PublishJob, message: string):
   await setContentPostStatus(admin, job.content_id, job.platform, "failed");
   await writeAudit(admin, { action: "social_publish:failed", entityType: "creative_content", entityId: job.content_id, actorId: null, actorName: SYSTEM.name, metadata: { job_id: job.id, platform: job.platform, error: message } });
   // แจ้งคนตั้งคิว (กระดิ่งในระบบ) — ล้มเงียบ ๆ ไม่ได้ เพราะคนคิดว่าโพสต์ไปแล้ว
-  if (job.created_by) {
+  if (job.created_by && await bellAllowed(admin, "social_publish_failed")) {   // สวิตช์กระดิ่งในแผนผัง ปิด → ไม่ส่ง
     const { data: c } = await admin.from("erp_creative_content").select("title, content_no").eq("id", job.content_id).maybeSingle();
     const head = ((c as { title?: string | null; content_no?: string | null } | null)?.title ?? "") || ((c as { content_no?: string | null } | null)?.content_no ?? "คอนเทนต์");
     try {

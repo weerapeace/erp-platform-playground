@@ -73,6 +73,8 @@ export type NotifyLive = {
   reports: NotifyReport[];
   /** หมายเหตุที่แอดมินเขียนเอง ต่อเรื่อง (id → ข้อความ · "" = ซ่อนข้อสังเกตในทะเบียน) — notifyRemark() */
   remarks?: Record<string, string>;
+  /** สวิตช์ "กระดิ่งที่โค้ดส่งตรง" ที่ปิดอยู่ (event_type → true) — lib/bell-switch · ไม่มี = เปิดหมด */
+  bellOff?: Record<string, boolean>;
 };
 
 export const NOTIFY_DAYS = 90;
@@ -218,7 +220,7 @@ export const NOTIFY_TOPICS: NotifyTopic[] = [
     when: "เปิดระบบแล้วมีงานครีเอทีฟเลย/ใกล้วันส่ง",
     send: [B("ผู้รับงาน")],
     note: "เด้งวันละหลายสิบครั้ง — งานเก่าที่ค้างทำให้กลายเป็นเสียงรบกวน ควรเก็บงานค้างหรือรวมเป็นสรุปวันละครั้ง",
-    files: ["lib/creative-reminders.ts"] },
+    files: ["lib/creative-reminders.ts", "lib/creative-tasks-server.ts"] },
   { id: "creative_new_task", area: "creative", label: "มีงานครีเอทีฟใหม่ / มอบหมายงาน", events: ["task_assigned"],
     when: "สร้างงานใหม่ หรือเปลี่ยนผู้รับงาน",
     send: [B("ผู้รับงาน"), G("กลุ่มครีเอทีฟ", ["creative", "main"], "new_task")],
@@ -232,7 +234,7 @@ export const NOTIFY_TOPICS: NotifyTopic[] = [
     events: ["task_need_review", "task_approve", "task_mention", "subtask_assigned", "subtask_self_join"],
     when: "เปลี่ยนสถานะงาน / @ชื่อในคอมเมนต์ / มอบงานย่อย",
     send: [B("คนที่เกี่ยวข้อง")],
-    files: ["app/api/creative-tasks/[id]/route.ts", "app/api/creative-tasks/[id]/comments/route.ts", "app/api/creative-tasks/[id]/subtasks/route.ts"] },
+    files: ["app/api/creative-tasks/[id]/route.ts", "app/api/creative-tasks/[id]/comments/route.ts", "app/api/creative-tasks/[id]/subtasks/route.ts", "lib/creative-tasks-server.ts"] },
   { id: "design_sheet_send", area: "creative", label: "ส่งสรุปใบงานออกแบบ (กดเอง)",
     when: "พนักงานกดส่งสรุปใบงานให้ลูกค้า/ทีม",
     send: [{ kind: "email", to: "ผู้รับที่เลือก", manual: true }],
@@ -265,8 +267,9 @@ export const NOTIFY_TOPICS: NotifyTopic[] = [
     when: "คิวโพสต์ Facebook / IG อัตโนมัติล้ม",
     send: [B("คนตั้งโพสต์")],
     files: ["lib/social-publish/queue.ts"] },
-  { id: "checklist_assigned", area: "system", label: "ได้รับเช็กลิสต์ / แผนงานทีม", events: ["checklist.assigned", "team_plan.assigned", "team_plan.summary"],
-    when: "มีคนมอบหมายเช็กลิสต์ในเอกสาร หรือลงแผนงานทีม",
+  { id: "checklist_assigned", area: "system", label: "ได้รับเช็กลิสต์ / แผนงานทีม",
+    events: ["checklist.assigned", "team_plan.assigned", "team_plan.summary", "team_plan.remind", "team_plan.overdue", "team_plan.waiting", "team_plan.snooze"],
+    when: "มีคนมอบหมายเช็กลิสต์ในเอกสาร หรือลงแผนงานทีม · เตือนก่อน/เลยกำหนด · สรุปเช้า",
     send: [B("ผู้ได้รับมอบหมาย")],
     files: ["lib/record-tasks-server.ts", "lib/team-plan-server.ts"] },
   { id: "gif_poke", area: "system", label: "สะกิดเพื่อน (GIF)", events: ["gif_poke"],
@@ -384,7 +387,14 @@ export function notifyRemark(topic: NotifyTopic, live: NotifyLive | null): strin
 /** สถานะรวมของเรื่อง: ok = มีอย่างน้อย 1 ทางถึงคน · warn = เงียบทุกทาง · off = ปิดทุกทาง */
 /** ผลทุกปลายทางของเรื่อง (เรียงตาม topic.send) */
 export const notifyTopicCells = (topic: NotifyTopic, live: NotifyLive): NotifyCell[] =>
-  topic.send.map((t) => (topic.paused ? { state: "off" as const, text: `${t.to} — ปิดไว้` } : notifyTargetCell(t, live)));
+  topic.send.map((t) => {
+    if (topic.paused) return { state: "off" as const, text: `${t.to} — ปิดไว้` };
+    // กระดิ่งที่โค้ดส่งตรง + ปิดสวิตช์ครบทุก event ของเรื่อง (lib/bell-switch) = ปิด
+    if (t.kind === "bell" && !t.rule && notifyBellSwitchable(topic) && topic.events!.every((e) => live.bellOff?.[e])) {
+      return { state: "off" as const, text: `${t.to} — ปิดสวิตช์ไว้`, short: t.to, fix: "เปิดสวิตช์เรื่องนี้ (แผงกระดิ่งบนกล่อง หรือปุ่มแก้ไขในแท็บแจ้งเตือน)" };
+    }
+    return notifyTargetCell(t, live);
+  });
 
 export function notifyTopicState(topic: NotifyTopic, live: NotifyLive): { state: NotifyState; silent: number } {
   const cells = notifyTopicCells(topic, live);
@@ -490,19 +500,34 @@ export const NOTIFY_NODE_SUGGEST: Record<string, string[]> = {
 
 /** สวิตช์เปิด/ปิดทั้งเรื่องจากแผงกระดิ่ง: กฎกระดิ่งที่มีอยู่จริง + สวิตช์ LINE ในศูนย์ LINE (ไม่นับที่คนกดส่งเอง)
  *  can = มีอะไรให้สลับ · on = อย่างน้อย 1 ทางเปิดอยู่ · ค่าเก็บที่เดิม (erp_notification_rules / line_config.disabled_events) */
-export function notifyTopicSwitch(topic: NotifyTopic, live: NotifyLive): { rules: string[]; events: string[]; can: boolean; on: boolean; switched: string[]; fixed: string[] } {
+export function notifyTopicSwitch(topic: NotifyTopic, live: NotifyLive): { rules: string[]; events: string[]; bells: string[]; can: boolean; on: boolean; switched: string[]; fixed: string[] } {
   const ruleOk = (s: NotifyTarget) => s.kind === "bell" && !!s.rule && live.rules.some((r) => r.event === s.rule);
   const eventOk = (s: NotifyTarget) => s.kind === "group" && !!s.event && !s.manual;
+  const bellSw = notifyBellSwitchable(topic);
+  const bellOk = (s: NotifyTarget) => bellSw && s.kind === "bell" && !s.rule;   // กระดิ่งที่โค้ดส่งตรง → สวิตช์ lib/bell-switch
   const rules = [...new Set(topic.send.flatMap((s) => (s.kind === "bell" && ruleOk(s) ? [s.rule!] : [])))];
   const events = [...new Set(topic.send.flatMap((s) => (s.kind === "group" && eventOk(s) ? [s.event!] : [])))];
-  const on = rules.some((k) => live.rules.find((r) => r.event === k)?.active) || events.some((e) => !live.line.off[e]);
+  const bells = topic.send.some(bellOk) ? [...(topic.events ?? [])] : [];
+  const on = rules.some((k) => live.rules.find((r) => r.event === k)?.active) || events.some((e) => !live.line.off[e]) || bells.some((e) => !live.bellOff?.[e]);
   // ป้ายภาษาคน: ทางที่สวิตช์นี้คุม / ทางที่ยังส่งต่อ (ไม่มีสวิตช์) — ใช้บอกในป๊อปยืนยันปิด ไม่ให้เข้าใจผิดว่าเงียบทั้งเรื่อง
   const label = (s: NotifyTarget) => (s.kind === "bell" ? "กระดิ่งในแอป" : s.kind === "group" ? `LINE ${s.to}${s.manual ? " (กดส่งเอง)" : ""}`
     : s.kind === "dm" ? "LINE ส่วนตัว" : s.kind === "oa" ? "LINE OA" : s.kind === "email" ? "อีเมล" : s.kind === "popup" ? "ป๊อปอัป" : "Discord");
-  const switched = [...new Set(topic.send.filter((s) => ruleOk(s) || eventOk(s)).map(label))];
-  const fixed = [...new Set(topic.send.filter((s) => !ruleOk(s) && !eventOk(s)).map(label))];
-  return { rules, events, can: rules.length + events.length > 0, on, switched, fixed };
+  const sw = (s: NotifyTarget) => ruleOk(s) || eventOk(s) || bellOk(s);
+  const switched = [...new Set(topic.send.filter(sw).map(label))];
+  const fixed = [...new Set(topic.send.filter((s) => !sw(s)).map(label))];
+  return { rules, events, bells, can: rules.length + events.length + bells.length > 0, on, switched, fixed };
 }
+
+/** เรื่องที่กระดิ่ง "ปิดไม่ได้" ถึงจะโค้ดส่งตรง — ความปลอดภัย · ปุ่มที่คนกดเพื่อแจ้งคนอื่นโดยเฉพาะ (ปิดแล้วปุ่มไร้ผล) */
+export const NOTIFY_BELL_LOCKED: ReadonlySet<string> = new Set(["security_new_device", "website_design_review", "gif_poke"]);
+
+/** กระดิ่งที่โค้ดส่งตรงของเรื่องนี้ปิด/เปิดได้ไหม (สวิตช์ lib/bell-switch ต่อ event_type ของเรื่อง) */
+export function notifyBellSwitchable(topic: NotifyTopic): boolean {
+  return !NOTIFY_BELL_LOCKED.has(topic.id) && !!topic.events?.length && topic.send.some((s) => s.kind === "bell" && !s.rule);
+}
+
+/** event_type ทั้งหมดที่ /api/admin/bell-switches ยอมให้ปิด */
+export const NOTIFY_BELL_SWITCH_EVENTS: ReadonlySet<string> = new Set(NOTIFY_TOPICS.filter(notifyBellSwitchable).flatMap((t) => t.events ?? []));
 
 /** กลุ่ม LINE ที่ใช้ทดสอบส่งของเรื่องนี้ = กลุ่มแรกที่ตั้งแล้ว (ไม่นับกลุ่มหลัก — ศูนย์ LINE ทดสอบได้เฉพาะช่องที่มีชื่อ) · null = ทดสอบ LINE ไม่ได้ */
 export function notifyTestGroup(topic: NotifyTopic, live: NotifyLive): LineSlotKey | null {

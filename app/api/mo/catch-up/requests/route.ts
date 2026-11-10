@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { bellAllowed } from "@/lib/bell-switch";
 import { CU_PERM } from "@/app/master/work-board/catch-up";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +74,7 @@ async function approverIds(admin: Admin): Promise<string[]> {
 
 async function notify(admin: Admin, userIds: string[], row: { title: string; body: string; id: string; priority?: string }) {
   if (!userIds.length) return;
+  if (!(await bellAllowed(admin, "catch_up_request"))) return;   // สวิตช์กระดิ่งในแผนผัง ปิด → ไม่ส่ง
   const { error } = await admin.from("erp_notifications").insert(userIds.map((uid) => ({
     user_id: uid, event_type: "catch_up_request", title: row.title, body: row.body,
     link_url: BOARD, entity_type: "work_catch_up_requests", entity_id: row.id, priority: row.priority ?? "normal",

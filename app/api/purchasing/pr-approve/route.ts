@@ -17,6 +17,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAuditMany } from "@/lib/audit";
 import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
+import { dropDisabledBells } from "@/lib/bell-switch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -118,7 +119,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             };
           })
           .filter(Boolean) as Record<string, unknown>[];
-        if (notifRows.length) await admin.from("erp_notifications").insert(notifRows);
+        const bellRows = await dropDisabledBells(admin, notifRows);   // ปิดจากแผนผัง (สวิตช์กระดิ่ง) → ไม่ส่ง
+        if (bellRows.length) await admin.from("erp_notifications").insert(bellRows);
       }
 
       // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request) · ใช้บอท/โทเคนเดิม

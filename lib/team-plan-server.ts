@@ -10,6 +10,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { bellAllowed } from "@/lib/bell-switch";
 import { todayBangkok } from "@/lib/date";
 import { linksOf } from "@/lib/record-tasks";
 import { isUuid } from "@/lib/record-tasks-server";
@@ -42,6 +43,7 @@ export const planLink = (id: string) => `/tasks/plan?item=${encodeURIComponent(i
 
 export async function notifyPlanAssignee(admin: Admin, item: { id: string; title: string; assigned_to: string | null; due_label?: string }, actor: { id: string | null; name: string | null }) {
   if (!isUuid(item.assigned_to) || item.assigned_to === actor.id) return;
+  if (!(await bellAllowed(admin, "team_plan.assigned"))) return;   // สวิตช์กระดิ่งในแผนผัง ปิด → ไม่ส่ง
   try {
     await admin.rpc("erp_notify", {
       p_user_ids: [item.assigned_to], p_event_type: "team_plan.assigned",
@@ -125,6 +127,7 @@ export async function runTeamPlanReminders(admin: Admin, now: Date = new Date())
   }
   for (const n of notes) {
     if (!saved.has(n.item_id)) continue;   // บันทึกกันซ้ำไม่ได้ = ไม่ส่ง (รอบหน้าลองใหม่)
+    if (!(await bellAllowed(admin, NOTE_EVENT[n.kind]))) continue;   // สวิตช์กระดิ่งในแผนผัง ปิด → ไม่ส่ง
     const { error: e } = await admin.rpc("erp_notify", {
       p_user_ids: [n.user_id], p_event_type: NOTE_EVENT[n.kind], p_title: n.title.slice(0, 200), p_body: n.body,
       p_link_url: planLink(n.item_id), p_entity_type: "team_plan", p_entity_id: n.item_id, p_priority: n.high ? "high" : "normal",
@@ -133,7 +136,7 @@ export async function runTeamPlanReminders(admin: Admin, now: Date = new Date())
   }
 
   // สรุปเช้า 9:00 (ส่งได้ถึง 11:59 · วันละครั้งต่อคน)
-  if (isSummaryWindow(now)) {
+  if (isSummaryWindow(now) && await bellAllowed(admin, "team_plan.summary")) {
     const users = [...new Set(items.map((t) => t.assigned_to ?? t.plan.created_by_id).filter(isUuid))];
     if (users.length) {
       const midnight = new Date(`${todayBangkok(now)}T00:00:00+07:00`).toISOString();

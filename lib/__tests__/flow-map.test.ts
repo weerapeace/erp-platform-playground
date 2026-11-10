@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS, FLOW_JOURNEY, FLOW_ISSUE_APP, FLOW_FINANCE_ONLY, flowViewsFor } from "@/lib/flow-map";
 import { flowGeometryProblems, isRecentEdge } from "@/lib/flow-map-layout";
@@ -11,8 +11,10 @@ import { LINE_SLOTS, LINE_ALL_EVENTS } from "@/lib/line-registry";
 import {
   NOTIFY_TOPICS, NOTIFY_AREAS, NOTIFY_REPORT_FILES, notifyTargetCell, notifyTopicState, notifyGhostRules, notifyReportTopics, notifyDaysText, notifyGapNodes,
   NOTIFY_SAMPLES, NOTIFY_NODE_SUGGEST, notifyTopicSwitch, notifyTestGroup, notifyTopicStat,
+  NOTIFY_BELL_LOCKED, NOTIFY_BELL_SWITCH_EVENTS, notifyBellSwitchable, notifyTopicCells,
   type NotifyLive,
 } from "@/lib/flow-map-notify";
+import { BELL_SWITCH_LOCKED, cleanBellOff } from "@/lib/bell-switch";
 
 const NOTIFY_LIVE: NotifyLive = {
   line: { token: true, main: true, groups: { purchase_request: true, creative: true }, off: { qc_defect: true } },
@@ -90,15 +92,34 @@ describe("แผนผังการทำงาน — แผงกระด�
     }
   });
   it("สวิตช์ทั้งเรื่อง: นับกฎที่มีจริง + สวิตช์ LINE (ไม่นับที่กดส่งเอง)", () => {
-    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE)).toMatchObject({ rules: [], events: ["pr_created"], can: true, on: true, fixed: ["กระดิ่งในแอป"] });
-    // ป๊อปยืนยันปิดต้องบอกได้ว่าทางไหนยังส่งต่อ (กระดิ่งของใบขอซื้อยังไม่มีสวิตช์)
-    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE).switched[0]).toContain("LINE");
+    // ใบขอซื้อใหม่: กระดิ่งที่โค้ดส่งตรง → สวิตช์ lib/bell-switch + สวิตช์ LINE · ไม่มีทางที่ "ยังส่งต่อ"
+    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE)).toMatchObject({ rules: [], events: ["pr_created"], bells: ["pr_created"], can: true, on: true, fixed: [] });
+    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE).switched).toEqual(["กระดิ่งในแอป", "LINE กลุ่มขอซื้อ"]);
+    expect(notifyTopicSwitch(topic("pr_created"), { ...NOTIFY_LIVE, bellOff: { pr_created: true }, line: { ...NOTIFY_LIVE.line, off: { pr_created: true } } }).on).toBe(false);
     expect(notifyTopicSwitch(topic("qc_pending"), NOTIFY_LIVE).fixed).toEqual([]);
+    // ป๊อปยืนยันปิดต้องบอกได้ว่าทางไหนยังส่งต่อ: ใบจ่ายงาน ปิดได้แค่ LINE กลุ่ม · LINE ส่วนตัวช่างยังส่ง
+    expect(notifyTopicSwitch(topic("wo_dispatched"), NOTIFY_LIVE).fixed).toEqual(["LINE ส่วนตัว"]);
     expect(notifyTopicSwitch(topic("qc_defect"), NOTIFY_LIVE)).toMatchObject({ rules: [], events: ["qc_defect"], can: true, on: false });
     expect(notifyTopicSwitch(topic("qc_pending"), NOTIFY_LIVE)).toMatchObject({ rules: ["qc.pending"], events: ["qc_pending"], on: true });
     expect(notifyTopicSwitch(topic("wo_due_soon"), { ...NOTIFY_LIVE, line: { ...NOTIFY_LIVE.line, off: { wo_due_soon: true } } }).on).toBe(false);
     expect(notifyTopicSwitch(topic("china_pay"), NOTIFY_LIVE).can).toBe(false);
-    expect(notifyTopicSwitch(topic("catch_up_request"), NOTIFY_LIVE).can).toBe(false);
+    expect(notifyTopicSwitch(topic("catch_up_request"), NOTIFY_LIVE)).toMatchObject({ bells: ["catch_up_request"], can: true });
+    expect(notifyTopicSwitch(topic("security_new_device"), NOTIFY_LIVE).can).toBe(false);   // ความปลอดภัย ปิดไม่ได้
+  });
+  it("สวิตช์กระดิ่งที่โค้ดส่งตรง: ทุกเรื่องที่ปิดได้ ไฟล์ที่ส่งต้องเรียก lib/bell-switch · เรื่องล็อกปิดไม่ได้ · ปิดครบ = ช่องเป็น 'ปิด'", () => {
+    const switchable = NOTIFY_TOPICS.filter(notifyBellSwitchable);
+    expect(switchable.length).toBeGreaterThan(5);
+    for (const x of switchable) {
+      const uses = x.files.some((f) => readFileSync(resolve(process.cwd(), f), "utf8").includes("@/lib/bell-switch"));
+      expect(uses, `${x.id}: ไฟล์ที่ส่งกระดิ่งยังไม่เช็กสวิตช์ (bellAllowed / dropDisabledBells)`).toBe(true);
+    }
+    for (const id of NOTIFY_BELL_LOCKED) expect(notifyBellSwitchable(topic(id)), id).toBe(false);
+    for (const e of ["security.new_device", "website_design_review", "gif_poke"]) expect(NOTIFY_BELL_SWITCH_EVENTS.has(e), e).toBe(false);
+    for (const e of BELL_SWITCH_LOCKED) expect(NOTIFY_BELL_SWITCH_EVENTS.has(e), e).toBe(false);
+    const off = { ...NOTIFY_LIVE, bellOff: { task_overdue: true, task_due_soon: true } };
+    expect(notifyTopicCells(topic("task_due"), off)[0].state).toBe("off");
+    expect(notifyTopicCells(topic("task_due"), { ...NOTIFY_LIVE, bellOff: { task_overdue: true } })[0].state).toBe("ok");   // ปิดแค่บาง event = ยังส่ง
+    expect(cleanBellOff({ pr_created: true, x: false, "security.new_device": true, y: "true" })).toEqual({ pr_created: true });
   });
   it("กลุ่มทดสอบ LINE = กลุ่มแรกที่ตั้งแล้ว · ไม่ตั้ง / ปิดสวิตช์ / ไม่มีบอท = ทดสอบไม่ได้", () => {
     expect(notifyTestGroup(topic("pr_created"), NOTIFY_LIVE)).toBe("purchase_request");
