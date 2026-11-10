@@ -105,6 +105,8 @@ export function lazErrorText(e: unknown): string {
   if (/ApiCallLimit|AppApiCallLimit|E1002|\b901\b/i.test(all)) return "Lazada ให้เรียกถี่เกินไป — รอสักครู่แล้วลองใหม่";
   if (/\b998\b|service is disabled/i.test(all)) return "Lazada ปิดระบบนี้ชั่วคราว (มักเป็นช่วงแคมเปญใหญ่ เช่น 11.11 / 12.12) — ลองใหม่หลังช่วงที่ Lazada ประกาศ";
   if (/IC_ABILITY_PG|campaign participation/i.test(all)) return "สินค้า/ตัวเลือกนี้ร่วมแคมเปญอยู่ — Lazada ไม่ให้แก้จนกว่าแคมเปญจบ";
+  if (/\b4119\b|SPECIAL_PRICE_RATE/i.test(all)) return "ส่วนลด (ราคาลด เทียบราคาปกติ) เกินช่วงที่ Lazada อนุญาต — ลดน้อยลง";
+  if (/\b4117\b/.test(all)) return "วันเริ่มราคาลดอยู่หลังวันสิ้นสุด — แก้ช่วงวัน";
   if (/IllegalAccessToken|InvalidAccessToken|access.?token/i.test(all)) return "การเชื่อมต่อ Lazada ใช้ไม่ได้แล้ว — ไปที่ 🏪 จัดการร้าน/บัญชีแพลตฟอร์ม แล้วกด เชื่อมต่อ Lazada ใหม่";
   if (/IncompleteSignature|InvalidSignature/i.test(all)) return "ลายเซ็นคำขอไม่ผ่าน (เวลาเครื่องเพี้ยนหรือกุญแจแอปผิด) — แจ้งผู้ดูแลระบบ";
   if (/E0501|SELLER_NOT_PERMITTED|SellerNotActive/i.test(all)) return "ร้านถูก Lazada จำกัดสิทธิ์ — ตรวจสถานะร้านใน Lazada Seller Center";
@@ -193,6 +195,10 @@ export async function lazGetItem(gateway: string, accessToken: string, itemId: s
 /** แก้สินค้า (ชื่อ/รายละเอียด/จุดเด่น/สถานะ SKU) — payload จาก lazUpdateProductXml (lib/lazada-listing-edit) · แก้ร้านจริง */
 export async function lazUpdateProduct(gateway: string, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/update", accessToken, { payload: payloadXml });
+}
+/** ราคา/ราคาลด ≤ 50 SKU ต่อครั้ง (แนะนำ 20) — payload จาก lazPriceQuantityXml (ไม่มี Quantity) · แก้ร้านจริง */
+export async function lazUpdatePriceQuantity(gateway: string, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
+  return lazApiPost(gateway, "/product/price_quantity/update", accessToken, { payload: payloadXml });
 }
 /** ปิดขาย ทั้งสินค้า/บาง SKU — body จาก lazDeactivateXml · แก้ร้านจริง */
 export async function lazDeactivateProduct(gateway: string, accessToken: string, bodyXml: string): Promise<Record<string, unknown>> {

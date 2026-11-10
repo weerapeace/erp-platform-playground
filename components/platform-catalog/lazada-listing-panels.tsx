@@ -24,9 +24,11 @@ import { ToggleSwitch } from "@/components/toggle-switch";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
+import { MoneyInput } from "@/components/money-input";
+import { DateInput } from "@/components/date-input";
 import {
-  lazadaEditStateFromView, lazStatusBadge, planLazadaDisplay, planLazadaEdit, LAZADA_NAME_MAX, MAX_LAZADA_IMAGES,
-  type LazadaEditPlan, type LazadaEditState, type LazadaListingDetailResponse, type LazadaListingView, type LazadaSkuView, type LazadaWriteResponse,
+  applyLazadaBulkPrice, lazadaEditStateFromView, lazadaPriceRowsFromView, lazStatusBadge, planLazadaDisplay, planLazadaEdit, planLazadaPrices, LAZADA_NAME_MAX, MAX_LAZADA_IMAGES,
+  type LazadaEditChange, type LazadaEditPlan, type LazadaEditState, type LazadaListingDetailResponse, type LazadaListingView, type LazadaPricePlan, type LazadaPriceRow, type LazadaSkuView, type LazadaWriteResponse,
 } from "@/lib/lazada-listing-edit";
 
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อกด "แก้รายละเอียด" เท่านั้น
@@ -96,13 +98,21 @@ export function useLazadaListing(listingId: string | null, onSaved?: () => void)
   return { listingId, view, error, loading, fetchedAt, reload: () => setN((x) => x + 1), refresh, refreshing, apply };
 }
 
-// ───────────────────────── เฟส 2: แก้ชื่อ / รายละเอียด / จุดเด่น ─────────────────────────
+// ───────────────────────── เฟส 2–3: แก้ชื่อ / รายละเอียด / จุดเด่น + ราคา (ปุ่มบันทึกเดียว) ─────────────────────────
 export type LazadaEditApi = {
   canEdit: boolean;
   form: LazadaEditState | null;
   base: LazadaEditState | null;
   setField: <K extends keyof LazadaEditState>(k: K, v: LazadaEditState[K]) => void;
   plan: LazadaEditPlan | null;
+  /** เฟส 3: ราคาต่อตัวเลือก */
+  prices: LazadaPriceRow[] | null;
+  setPrice: (skuId: string, patch: Partial<LazadaPriceRow>) => void;
+  setPrices: (rows: LazadaPriceRow[]) => void;
+  pricePlan: LazadaPricePlan | null;
+  /** รวมทั้งข้อมูล + ราคา */
+  changes: LazadaEditChange[];
+  errors: string[];
   dirty: boolean;
   descEdit: boolean;
   setDescEdit: (v: boolean) => void;
@@ -115,54 +125,86 @@ export type LazadaEditApi = {
 export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSaved?: (name: string) => void): LazadaEditApi {
   const toast = useToast();
   const base = useMemo(() => (state.view ? lazadaEditStateFromView(state.view) : null), [state.view]);
+  const priceBase = useMemo(() => (state.view ? lazadaPriceRowsFromView(state.view) : null), [state.view]);
   const [form, setForm] = useState<LazadaEditState | null>(null);
+  const [prices, setPricesState] = useState<LazadaPriceRow[] | null>(null);
   const [descEdit, setDescEdit] = useState(false);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวใหม่ / ดึงใหม่ / ส่งสำเร็จ) → ฟอร์มเริ่มจากของล่าสุด
   useEffect(() => { setForm(base ? { ...base } : null); setDescEdit(false); }, [base]);
+  useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
   const plan = useMemo(() => (base && form ? planLazadaEdit(base, form) : null), [base, form]);
-  const dirty = !!plan && plan.changes.length > 0;
+  const pricePlan = useMemo(() => (priceBase && prices ? planLazadaPrices(priceBase, prices) : null), [priceBase, prices]);
+  const infoDirty = !!plan && plan.changes.length > 0;
+  const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
+  const dirty = infoDirty || priceDirty;
+  const changes = [...(plan?.changes ?? []), ...(pricePlan?.changes ?? [])];
+  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? [])];
+  const warnings = [...(plan?.warnings ?? []), ...(pricePlan?.warnings ?? [])];
 
+  const post = async (url: string, payload: unknown) => {
+    const r = await apiFetch(url, { method: "POST", body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as LazadaWriteResponse;
+    return { r, j };
+  };
+  // ส่งทีละส่วน: ข้อมูล (listing-edit) → ราคา (listing-prices) · ส่วนแรกพลาด = ไม่ส่งต่อ
   const save = async () => {
-    if (!state.listingId || !base || !form) return;
+    if (!state.listingId || !base || !form || !priceBase || !prices) return;
     setSaving(true);
+    const done: string[] = [];
+    let saved = false;
     try {
-      const r = await apiFetch("/api/lazada/listing-edit", { method: "POST", body: JSON.stringify({ listing_id: state.listingId, before: base, edit: form }) });
-      const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as LazadaWriteResponse;
-      if (j.ok) {
-        toast.success(j.qc ? "ส่งขึ้น Lazada แล้ว — Lazada ส่งไปรอตรวจ (ไม่เกิน 24 ชม.)" : "ส่งขึ้น Lazada แล้ว — บันทึกประวัติแล้ว");
+      if (infoDirty) {
+        const { r, j } = await post("/api/lazada/listing-edit", { listing_id: state.listingId, before: base, edit: form });
+        if (!j.ok) {
+          toast.error(r.status === 401 ? "ไม่มีสิทธิ์ส่งขึ้นร้าน หรือระบบยังไม่ยืนยันการล็อกอิน — รอสักครู่แล้วลองใหม่" : `ข้อมูลสินค้า: ${j.error ?? `HTTP ${r.status}`}${priceDirty ? " (ยังไม่ได้ส่งราคา)" : ""}`);
+          if (r.status === 409 && j.view) { setAsking(false); state.apply(j.view); }   // ร้านเปลี่ยน → โหลดของล่าสุดให้ (ฟอร์มเริ่มใหม่)
+          return;
+        }
+        saved = true; done.push(j.qc ? "ข้อมูลสินค้า (Lazada ส่งไปรอตรวจ)" : "ข้อมูลสินค้า");
         (j.warnings ?? []).filter((w) => !w.includes("รอตรวจ")).forEach((w) => toast.warning(w));
-        setAsking(false);
-        if (j.view) state.apply(j.view);
-        onSaved?.(form.name);
-      } else {
-        toast.error(r.status === 401 ? "ไม่มีสิทธิ์ส่งขึ้นร้าน หรือระบบยังไม่ยืนยันการล็อกอิน — รอสักครู่แล้วลองใหม่" : (j.error ?? `HTTP ${r.status}`));
-        if (r.status === 409 && j.view) { setAsking(false); state.apply(j.view); }   // ร้านเปลี่ยน → โหลดของล่าสุดให้ (ฟอร์มเริ่มใหม่)
+        if (j.view && !priceDirty) state.apply(j.view);
       }
+      if (priceDirty) {
+        const { r, j } = await post("/api/lazada/listing-prices", { listing_id: state.listingId, before: priceBase, edit: prices });
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        if (j.ok) { saved = true; done.push(`ราคา ${(j.changes ?? []).length} ตัวเลือก`); }
+        else {
+          toast.error(r.status === 401 ? "ไม่มีสิทธิ์ส่งขึ้นร้าน หรือระบบยังไม่ยืนยันการล็อกอิน — รอสักครู่แล้วลองใหม่" : `ราคา: ${j.error ?? `HTTP ${r.status}`}`);
+          if (r.status === 207) saved = true;   // ส่งได้บางส่วน
+        }
+        if (j.view) state.apply(j.view);
+        else if (saved) state.reload();
+        if (!j.ok && r.status !== 207) { if (r.status === 409) setAsking(false); if (!saved) return; }
+      }
+      if (done.length) toast.success(`ส่งขึ้น Lazada แล้ว: ${done.join(" · ")} — บันทึกประวัติแล้ว`);
+      setAsking(false);
     } catch (e) { toast.error(`ส่งขึ้น Lazada ไม่สำเร็จ: ${(e as Error).message}`); }
-    finally { setSaving(false); }
+    finally { setSaving(false); if (saved) onSaved?.(form.name); }
   };
 
   const dialog = (
-    <ConfirmDialog open={asking && !!plan} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
-      title={`ส่งการแก้ไข ${plan?.changes.length ?? 0} ช่องขึ้นร้าน Lazada?`} confirmText="ส่งขึ้น Lazada"
-      message={plan ? (
+    <ConfirmDialog open={asking && changes.length > 0} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
+      title={`ส่งการแก้ไข ${changes.length} รายการขึ้นร้าน Lazada?`} confirmText="ส่งขึ้น Lazada"
+      message={(
         <div className="space-y-2 text-sm">
-          <p>ระบบจะแก้สินค้าบนร้าน Lazada จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · สถานะเปิด/ปิดของทุกตัวเลือกคงเดิม) · มีประวัติว่าใครแก้อะไร</p>
+          <p>ระบบจะแก้สินค้าบนร้าน Lazada จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · สถานะเปิด/ปิดของทุกตัวเลือกคงเดิม · ไม่แตะสต๊อก) · มีประวัติว่าใครแก้อะไร</p>
           <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
-            {plan.changes.map((c, i) => (
+            {changes.map((c, i) => (
               <li key={i}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400 line-through">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
             ))}
           </ul>
-          {plan.warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
+          {warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
         </div>
-      ) : ""} />
+      )} />
   );
   return {
-    canEdit, form, base, plan, dirty, descEdit, setDescEdit, saving, dialog,
+    canEdit, form, base, plan, prices, pricePlan, changes, errors, dirty, descEdit, setDescEdit, saving, dialog,
     setField: (k, v) => setForm((f) => (f ? { ...f, [k]: v } : f)),
-    reset: () => { if (base) setForm({ ...base }); setDescEdit(false); },
+    setPrice: (skuId, patch) => setPricesState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
+    setPrices: (rows) => setPricesState(rows),
+    reset: () => { if (base) setForm({ ...base }); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); setDescEdit(false); },
     ask: () => setAsking(true),
   };
 }
@@ -171,14 +213,13 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
 export function LazadaEditFooter({ edit, state }: { edit: LazadaEditApi; state: LazadaListingState }) {
   if (!edit.canEdit) return <span className="text-xs text-slate-400">Lazada: ดูอย่างเดียว — ไม่มีสิทธิ์ส่งขึ้นร้าน</span>;
   if (!state.view || !edit.plan) return <span className="text-xs text-slate-400">กำลังดึงข้อมูลจาก Lazada…</span>;
-  const p = edit.plan;
   return (
     <div className="flex w-full flex-wrap items-center gap-2">
       <span className="min-w-0 flex-1 text-xs text-slate-500">
-        {p.errors.length ? <span className="text-rose-600">{p.errors[0]}</span> : edit.dirty ? `แก้แล้ว ${p.changes.length.toLocaleString()} ช่อง — ยังไม่ได้ส่งขึ้น Lazada` : "ยังไม่ได้แก้อะไร"}
+        {edit.errors.length ? <span className="text-rose-600">{edit.errors[0]}{edit.errors.length > 1 ? ` (และอีก ${edit.errors.length - 1})` : ""}</span> : edit.dirty ? `แก้แล้ว ${edit.changes.length.toLocaleString()} รายการ — ยังไม่ได้ส่งขึ้น Lazada` : "ยังไม่ได้แก้อะไร"}
       </span>
       {edit.dirty && <button type="button" onClick={edit.reset} disabled={edit.saving} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">ยกเลิกที่แก้</button>}
-      <button type="button" disabled={!edit.dirty || p.errors.length > 0 || edit.saving} onClick={edit.ask}
+      <button type="button" disabled={!edit.dirty || edit.errors.length > 0 || edit.saving} onClick={edit.ask}
         className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 disabled:opacity-40"><Icon name="upload" />บันทึกขึ้น Lazada</button>
     </div>
   );
@@ -294,7 +335,7 @@ export function LazadaInfoPanel({ state, edit }: { state: LazadaListingState; ed
     <div className="space-y-3 text-sm">
       <p className="flex items-start gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
         <Icon name="info" className="mt-0.5 shrink-0" />
-        {can ? "ข้อมูลสดจากร้าน Lazada · แก้แล้วกด “บันทึกขึ้น Lazada” ด้านล่าง (โชว์ก่อน → หลัง ให้ยืนยัน) · ราคา/รูป จะเปิดให้แก้ในเฟสถัดไป" : "ดูอย่างเดียว — ข้อมูลสดจากร้าน Lazada"}
+        {can ? "ข้อมูลสดจากร้าน Lazada · แก้แล้วกด “บันทึกขึ้น Lazada” ด้านล่าง (โชว์ก่อน → หลัง ให้ยืนยัน) · ราคาแก้ที่แท็บตัวเลือก & ราคา · รูปจะเปิดให้แก้ในเฟสถัดไป" : "ดูอย่างเดียว — ข้อมูลสดจากร้าน Lazada"}
       </p>
       {v.rejectReasons.length > 0 && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -367,23 +408,75 @@ export function LazadaImagesPanel({ state, onOpen }: { state: LazadaListingState
   );
 }
 
-/** แท็บตัวเลือก & ราคา — ราคาดูอย่างเดียว (เฟส 3) · เปิด/ปิดขายทีละตัวเลือกได้เมื่อมีสิทธิ์ (disp) */
-export function LazadaOptionsPanel({ state, disp }: { state: LazadaListingState; disp: LazadaDisplayApi | null }) {
+const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() === "" || !Number.isFinite(n) ? null : n; };
+
+/** แถบแก้ราคาหลายตัวเลือกพร้อมกัน — เติมฟอร์มอย่างเดียว (applyLazadaBulkPrice) ต้องกดบันทึกขึ้น Lazada อีกที */
+function LazadaBulkPriceBar({ edit, selected }: { edit: LazadaEditApi; selected: Set<string> }) {
+  const [b, setB] = useState({ price: "", special: "", pct: "", from: "", to: "" });
+  const [err, setErr] = useState<string | null>(null);
+  const n = selected.size || (edit.prices?.length ?? 0);
+  const apply = () => {
+    if (!edit.prices) return;
+    const r = applyLazadaBulkPrice(edit.prices, selected, { price: numOrNull(b.price), special: numOrNull(b.special), pct: numOrNull(b.pct), from: b.from || null, to: b.to || null });
+    setErr(r.error ?? (r.changed === 0 ? "ค่าเท่าเดิมทุกตัว — ไม่มีอะไรเปลี่ยน" : null));
+    if (!r.error && r.changed) edit.setPrices(r.rows);
+  };
+  const upd = (k: keyof typeof b) => (v: string) => { setB((x) => ({ ...x, [k]: v })); setErr(null); };
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-2 text-xs text-violet-900">
+      <span className="font-medium">แก้{selected.size ? `ตัวที่ติ๊ก (${selected.size})` : `ทุกตัวเลือก (${n})`}พร้อมกัน:</span>
+      <label className="inline-flex items-center gap-1">ราคาปกติ<MoneyInput value={b.price} onChange={upd("price")} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
+      <label className="inline-flex items-center gap-1">ราคาลด<MoneyInput value={b.special} onChange={upd("special")} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
+      <label className="inline-flex items-center gap-1">หรือ ลด<input type="number" min="1" max="99" value={b.pct} onChange={(e) => upd("pct")(e.target.value)} className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-right" />%</label>
+      <span className="inline-flex items-center gap-1">ช่วงราคาลด<DateInput value={b.from} onChange={upd("from")} className="w-32" /><span>–</span><DateInput value={b.to} onChange={upd("to")} className="w-32" /></span>
+      <button type="button" onClick={apply} className="h-8 rounded-md bg-violet-600 px-2.5 text-white hover:bg-violet-700">ใช้กับ{selected.size ? `ที่ติ๊ก ${selected.size} ตัว` : "ทุกตัว"}</button>
+      {err && <span className="w-full text-rose-600">{err}</span>}
+      <span className="w-full text-[11px] text-violet-700/80">ช่องว่าง = ไม่เปลี่ยน · ลด % คิดจากราคาปกติ · ราคาลดต้องมีช่วงวัน · ระบบไม่ยอมส่งราคาที่ขยับตั้งแต่ 80% · กดแล้วยังไม่ส่ง — ต้องกด “บันทึกขึ้น Lazada”</span>
+    </div>
+  );
+}
+
+/** แท็บตัวเลือก & ราคา — แก้ราคา/ราคาลด/ช่วงวัน (edit · เฟส 3) · เปิด/ปิดขายทีละตัวเลือก (disp · เฟส 2) · สต๊อกดูอย่างเดียว */
+export function LazadaOptionsPanel({ state, disp, edit }: { state: LazadaListingState; disp: LazadaDisplayApi | null; edit?: LazadaEditApi | null }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const g = gate(state); if (g) return g;
   const v = state.view!;
-  const cols: MiniColumn<LazadaSkuView>[] = [
+  const canPrice = !!edit?.canEdit && !!edit.prices;
+  const rowOf = new Map((edit?.prices ?? []).map((r) => [r.skuId, r]));
+  const baseOf = new Map(v.skus.map((s) => [s.skuId, s]));
+  const changedCls = (on: boolean) => (on ? "border-violet-400 bg-violet-50" : "border-slate-200");
+  const priceCols: MiniColumn<LazadaSkuView>[] = canPrice ? [
     {
-      key: "opt", header: "ตัวเลือก", width: "1.6fr",
-      cell: (s) => (
-        <div className="flex min-w-0 items-center gap-2">
-          {s.images[0] ? <img src={s.images[0]} alt="" loading="lazy" className="h-8 w-8 shrink-0 rounded object-cover" /> : null}
-          <div className="min-w-0">
-            <div className="truncate" title={s.label}>{s.label}</div>
-            <div className="truncate font-mono text-[11px] text-slate-400">{s.sellerSku ?? "ไม่มีรหัส"}</div>
-          </div>
-        </div>
-      ),
+      key: "price", header: "ราคาปกติ", width: "6.5rem", align: "right",
+      cell: (s) => { const r = rowOf.get(s.skuId); return <MoneyInput value={r?.price ?? null} onChange={(raw) => edit!.setPrice(s.skuId, { price: numOrNull(raw) })} className={`h-8 w-full rounded-md border px-2 text-right text-sm ${changedCls(r?.price !== s.price)}`} />; },
     },
+    {
+      key: "sp", header: "ราคาลด", width: "6.5rem", align: "right",
+      cell: (s) => {
+        const r = rowOf.get(s.skuId);
+        return (
+          <span className="block leading-tight">
+            <MoneyInput value={r?.special ?? null} onChange={(raw) => edit!.setPrice(s.skuId, { special: numOrNull(raw) })} placeholder="ไม่มี" className={`h-8 w-full rounded-md border px-2 text-right text-sm ${changedCls(r?.special !== s.specialPrice)}`} />
+            {r?.special != null && r.price ? <span className="block text-right text-[11px] text-rose-600">-{Math.round((1 - r.special / r.price) * 100)}%</span> : null}
+          </span>
+        );
+      },
+    },
+    {
+      key: "dates", header: "ช่วงราคาลด", width: "8.5rem",
+      cell: (s) => {
+        const r = rowOf.get(s.skuId); const b = baseOf.get(s.skuId);
+        if (!r || r.special == null) return <span className="text-slate-300">—</span>;
+        const ch = r.from !== (b?.specialFrom?.slice(0, 10) ?? null) || r.to !== (b?.specialTo?.slice(0, 10) ?? null);
+        return (
+          <span className={`flex flex-col gap-0.5 rounded-md ${ch ? "bg-violet-50" : ""}`}>
+            <DateInput value={r.from ?? ""} onChange={(iso) => edit!.setPrice(s.skuId, { from: iso || null })} className="w-full" />
+            <DateInput value={r.to ?? ""} onChange={(iso) => edit!.setPrice(s.skuId, { to: iso || null })} className="w-full" />
+          </span>
+        );
+      },
+    },
+  ] : [
     { key: "price", header: "ราคาปกติ", width: "5.5rem", align: "right", cell: (s) => <span>{baht(s.price)}</span> },
     {
       key: "sp", header: "ราคาลด", width: "7rem", align: "right",
@@ -394,6 +487,24 @@ export function LazadaOptionsPanel({ state, disp }: { state: LazadaListingState;
         </span>
       ),
     },
+  ];
+  const cols: MiniColumn<LazadaSkuView>[] = [
+    {
+      key: "opt", header: "ตัวเลือก", width: "1.6fr",
+      cell: (s) => (
+        <div className="flex min-w-0 items-center gap-2">
+          {s.images[0] ? <img src={s.images[0]} alt="" loading="lazy" className="h-8 w-8 shrink-0 rounded object-cover" /> : null}
+          <div className="min-w-0">
+            <div className="truncate" title={s.label}>{s.label}</div>
+            <div className="flex items-center gap-1 truncate font-mono text-[11px] text-slate-400">
+              {s.sellerSku ?? "ไม่มีรหัส"}
+              {s.url && <a href={s.url} target="_blank" rel="noopener noreferrer" title="เปิดตัวเลือกนี้บนเว็บ Lazada" className="text-violet-600 hover:text-violet-800"><Icon name="open" /></a>}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    ...priceCols,
     {
       key: "stock", header: "สต๊อก", width: "4rem", align: "right",
       cell: (s) => { const q = s.available ?? s.quantity; return q == null ? <span className="text-slate-300">—</span> : <span className={q === 0 ? "text-rose-600" : ""}>{q.toLocaleString()}</span>; },
@@ -423,12 +534,21 @@ export function LazadaOptionsPanel({ state, disp }: { state: LazadaListingState;
     },
   ];
   const off = v.skus.filter((s) => s.status === "inactive").length;
+  const priceChanged = edit?.pricePlan?.changes.length ?? 0;
   return (
     <div className="space-y-2">
-      <MiniTable rows={v.skus} columns={cols} rowKey={(s) => s.skuId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-lazada-options" />
+      {canPrice && <LazadaBulkPriceBar edit={edit!} selected={selected} />}
+      <MiniTable rows={v.skus} columns={cols} rowKey={(s) => s.skuId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey={canPrice ? "listing-drawer-lazada-prices" : "listing-drawer-lazada-options"}
+        selectable={canPrice} selected={selected} onSelectedChange={setSelected} />
+      {canPrice && edit!.pricePlan && edit!.pricePlan.errors.length > 0 && (
+        <ul className="space-y-0.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          {edit!.pricePlan.errors.slice(0, 6).map((e, i) => <li key={i}>{e}</li>)}
+          {edit!.pricePlan.errors.length > 6 && <li>… และอีก {edit!.pricePlan.errors.length - 6}</li>}
+        </ul>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-        <span>{v.skus.length.toLocaleString()} ตัวเลือก{off ? ` · ปิดขาย ${off.toLocaleString()}` : ""}</span>
-        <span className="ml-auto">ราคาดูอย่างเดียว (แก้ราคาเฟสถัดไป) · สต๊อกดูอย่างเดียว (BigSeller ยังซิงค์สต๊อก Lazada อยู่)</span>
+        <span>{v.skus.length.toLocaleString()} ตัวเลือก{off ? ` · ปิดขาย ${off.toLocaleString()}` : ""}{priceChanged ? ` · แก้ราคาแล้ว ${priceChanged} ตัว (ยังไม่ส่ง)` : ""}</span>
+        <span className="ml-auto">{canPrice ? "ช่องที่แก้มีกรอบม่วง · " : "ราคาดูอย่างเดียว · "}สต๊อกดูอย่างเดียว (BigSeller ยังซิงค์สต๊อก Lazada อยู่)</span>
       </div>
     </div>
   );

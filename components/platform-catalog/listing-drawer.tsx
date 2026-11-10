@@ -36,6 +36,7 @@ import { useLineDisplay } from "./use-line-display";
 import { VariantStructureEditor } from "./variant-structure-editor";
 import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
+import { ListingLinks } from "./listing-links";
 import { LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { applyBulkPrice, planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
@@ -258,6 +259,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
           {detail.matched_code ? <span className="font-mono text-emerald-700">จับคู่ {detail.matched_code}</span> : <span className="text-amber-700">ยังไม่จับคู่</span>}
           {detail.status === "removed" && <span className="rounded bg-slate-100 px-1.5 text-slate-500">ไม่อยู่บนร้านแล้ว</span>}
         </div>
+        {/* ดูหน้าร้าน / หลังร้าน — ทุกแพลตฟอร์ม (lib/platform-links) */}
+        {detail.status !== "removed" && <ListingLinks platformCode={detail.platform_code} externalProductId={detail.external_product_id} shopRef={detail.shop_ref} className="mt-1.5" />}
       </div>
       {line && line.display != null && detail.status !== "removed" && (
         <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -475,7 +478,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
-                : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} /> : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} />)
+                : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} /> : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}

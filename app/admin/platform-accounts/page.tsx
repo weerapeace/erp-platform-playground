@@ -17,8 +17,9 @@ import { Icon } from "@/components/icon";
 import { capsOf } from "@/lib/social-publish/capabilities";
 import { BackButton } from "@/components/back-button";
 import { formatDateTime } from "@/lib/date";
+import { platformShopUrl } from "@/lib/platform-links";
 
-type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
+type Platform ={ id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null };
 type Account = { label: string | null; external_shop_id: string | null; is_active: boolean };
 type Msg = { text: string; bad?: boolean } | null;
@@ -27,31 +28,8 @@ type PostStat = { posted30: number; queued: number; failed: number; next_run_at:
 // แพลตฟอร์มที่ระบบเชื่อมบัญชีได้จริง (OAuth / API Key) — ขึ้นกลุ่มบนสุด
 const AUTO_CODES = ["facebook", "instagram", "lazada", "line_shopping"];
 
-// ลิงก์หน้าร้านจากค่าที่กรอก — รองรับทั้ง "ลิงก์เต็ม" และ "@handle/ชื่อร้าน"
-// คืน null ถ้าเดาไม่ได้ (จะไม่โชว์ปุ่มเปิดลิงก์ ดีกว่าพาไปหน้าผิด)
-const SHOP_URL: Record<string, (h: string) => string> = {
-  line_shopping: (h) => `https://shop.line.me/@${h}`,
-  line: (h) => `https://shop.line.me/@${h}`,
-  facebook: (h) => `https://www.facebook.com/${h}`,
-  instagram: (h) => `https://www.instagram.com/${h}`,
-  tiktok: (h) => `https://www.tiktok.com/@${h}`,
-  youtube: (h) => `https://www.youtube.com/@${h}`,
-  pinterest: (h) => `https://www.pinterest.com/${h}`,
-  x: (h) => `https://x.com/${h}`,
-  twitter: (h) => `https://x.com/${h}`,
-  shopee: (h) => `https://shopee.co.th/${h}`,
-  lazada: (h) => `https://www.lazada.co.th/shop/${h}`,
-  line_oa: (h) => `https://line.me/R/ti/p/@${h}`,
-};
-function shopUrlOf(code: string, raw: string | null | undefined): string | null {
-  const v = (raw ?? "").trim();
-  if (!v) return null;
-  if (/^https?:\/\//i.test(v)) return v;                    // กรอกลิงก์เต็มมาแล้ว
-  const handle = v.replace(/^@/, "").trim();                // ตัด @ นำหน้า (แต่ละเจ้าเติมเองตามรูปแบบ)
-  if (!handle) return null;
-  const make = SHOP_URL[(code || "").toLowerCase()];
-  return make ? make(handle) : null;
-}
+// ลิงก์หน้าร้านจากค่าที่กรอก (ลิงก์เต็ม / @handle) — ของกลาง lib/platform-links (ลิงก์สินค้า/หลังร้านของลิ้นชักสินค้าบนร้านใช้ตัวเดียวกัน)
+const shopUrlOf = platformShopUrl;
 
 // ── วิธีตั้งต่อแพลตฟอร์ม (โชว์ในกล่องตอนยังไม่ตั้ง + ปุ่ม "วิธีตั้ง" บนหัวรายละเอียด) ──
 // เพิ่มแพลตฟอร์มใหม่ → เพิ่มที่นี่ (ไม่มี = ใช้ GUIDE_DEFAULT)

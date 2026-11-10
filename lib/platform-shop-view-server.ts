@@ -367,11 +367,14 @@ export async function loadListingDetail(admin: Admin, listingId: string): Promis
   if (error) return { detail: null, error: "โหลดสินค้าบนร้านไม่สำเร็จ ลองใหม่อีกครั้ง" };
   if (!l) return { detail: null, error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)" };
   const r = l as { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; sku_code: string | null; status: string | null; matched_parent_sku_id: string | null; last_imported_at: string | null; line_raw: unknown };
-  const [{ data: pf }, parentRes, { data: logs }] = await Promise.all([
+  const [{ data: pf }, parentRes, { data: logs }, accRes] = await Promise.all([
     admin.from("erp_platforms").select("code").eq("id", r.platform_id).maybeSingle(),
     r.matched_parent_sku_id ? admin.from("parent_skus_v2").select("code, name_th").eq("id", r.matched_parent_sku_id).maybeSingle() : Promise.resolve({ data: null }),
     admin.from("audit_logs").select("created_at, metadata").eq("entity_type", "platform_catalog").eq("entity_id", r.id).order("created_at", { ascending: false }).limit(30),
+    // ลิงก์ร้านของแบรนด์ (ทำปุ่ม "ดูหน้าร้าน" — lib/platform-links)
+    r.brand_id ? admin.from("platform_accounts").select("external_shop_id").eq("brand_id", r.brand_id).eq("platform_id", r.platform_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
+  const shopRef = ((accRes as { data: { external_shop_id: string | null } | null }).data?.external_shop_id ?? "").trim() || null;
   const platformCode = String((pf as { code?: string } | null)?.code ?? "");
   const parent = (parentRes as { data: { code: string | null; name_th: string | null } | null }).data;
   const edit = platformCode === "line_shopping" ? lineEditStateFromRaw(r.line_raw) : null;
@@ -382,6 +385,7 @@ export async function loadListingDetail(admin: Admin, listingId: string): Promis
       external_product_id: r.external_product_id, title: r.title, sku_code: r.sku_code, status: r.status,
       matched_parent_sku_id: r.matched_parent_sku_id, matched_code: parent?.code ?? null, matched_name: parent?.name_th ?? null,
       last_imported_at: r.last_imported_at,
+      shop_ref: shopRef,
       line: edit && lineObj ? {
         images: (Array.isArray(lineObj.imageUrls) ? lineObj.imageUrls : []).map((u) => String(u ?? "")).filter(Boolean),
         display: typeof lineObj.isDisplay === "boolean" ? lineObj.isDisplay : null,

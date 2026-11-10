@@ -3,6 +3,7 @@ import {
   lazadaListingView, lazImageList, lazDateText, lazSkuLabel, lazStatusBadge,
   highlightsToLines, linesToHighlights, lazadaEditStateFromView, planLazadaEdit, foreignDescImages,
   lazUpdateProductXml, lazDeactivateXml, planLazadaDisplay, lazViewAfterWrite, lazRawAfterStatus,
+  lazadaPriceRowsFromView, planLazadaPrices, lazPriceQuantityXml, applyLazadaBulkPrice, lazSaleDateText,
 } from "./lazada-listing-edit";
 
 // รูปแบบตามคู่มือ /product/item/get (open.lazada.com · สำรวจ 2026-11-10)
@@ -197,5 +198,71 @@ describe("ส่งสำเร็จแต่ดึงกลับไม่ไ�
     const r = lazRawAfterStatus(raw, new Map([["23194862631", "active"]]));
     expect(r.status).toBe("active");
     expect(r.lazada).toMatchObject({ status: "Active", skus: [{ sku_id: "23194862631", status: "active", price: 36 }] });
+  });
+});
+
+describe("เฟส 3: ราคา", () => {
+  const v = lazadaListingView(item)!;   // SKU1 328/ลด 159 (1–30 พ.ย.) · SKU2 328 · SKU3 328
+  const base = lazadaPriceRowsFromView(v);
+  const T = "2026-11-10";
+  const set = (i: number, patch: Partial<(typeof base)[number]>) => base.map((r, k) => (k === i ? { ...r, ...patch } : r));
+  it("แปลงจากมุมมอง: วันที่ราคาลดเป็น YYYY-MM-DD + เก็บค่าเต็มเดิม", () => {
+    expect(base[0]).toMatchObject({ price: 328, special: 159, from: "2026-11-01", to: "2026-11-30", toRaw: "2026-11-30 23:59" });
+    expect(base[1].special).toBeNull();
+  });
+  it("ไม่แก้ = ไม่ส่ง", () => expect(planLazadaPrices(base, base, T)).toMatchObject({ skus: [], changes: [], errors: [] }));
+  it("แก้ราคาปกติตัวเดียว → ส่งแค่ Price ตัวนั้น", () => {
+    const p = planLazadaPrices(base, set(1, { price: 350 }), T);
+    expect(p.errors).toEqual([]);
+    expect(p.skus).toEqual([{ skuId: "127317001490", sellerSku: "IG-EQ011-02", price: 350 }]);
+  });
+  it("ราคาขยับ ≥80% = ไม่ผ่าน · ≥50% = เตือน", () => {
+    expect(planLazadaPrices(base, set(1, { price: 60 }), T).errors[0]).toContain("80%");
+    const w = planLazadaPrices(base, set(1, { price: 500 }), T);
+    expect(w.errors).toEqual([]);
+    expect(w.warnings[0]).toContain("52%");
+  });
+  it("ราคาลด: ต้องต่ำกว่าราคาปกติ · ลดเกิน 80% ไม่ผ่าน · ต้องมีช่วงวัน · วันจบผ่านแล้วไม่ผ่าน", () => {
+    expect(planLazadaPrices(base, set(1, { special: 400, from: "2026-11-11", to: "2026-11-20" }), T).errors[0]).toContain("ต่ำกว่าราคาปกติ");
+    expect(planLazadaPrices(base, set(1, { special: 50, from: "2026-11-11", to: "2026-11-20" }), T).errors[0]).toContain("ลด 85%");
+    expect(planLazadaPrices(base, set(1, { special: 290 }), T).errors[0]).toContain("ช่วงวัน");
+    expect(planLazadaPrices(base, set(1, { special: 290, from: "2026-11-01", to: "2026-11-05" }), T).errors[0]).toContain("ผ่านไปแล้ว");
+  });
+  it("ราคาลดใหม่ → SalePrice + วันเริ่ม 00:00:00 / จบ 23:59:59", () => {
+    const p = planLazadaPrices(base, set(1, { special: 290, from: "2026-11-12", to: "2026-11-30" }), T);
+    expect(p.skus[0]).toEqual({ skuId: "127317001490", sellerSku: "IG-EQ011-02", price: 328, salePrice: 290, saleStart: "2026-11-12 00:00", saleEnd: "2026-11-30 23:59" });
+  });
+  it("แก้ราคาลดแต่วันเดิม → ใช้เวลาเดิมจาก Lazada", () => {
+    const p = planLazadaPrices(base, set(0, { special: 169 }), T);
+    expect(p.skus[0]).toMatchObject({ price: 328, salePrice: 169, saleStart: "2026-11-01 00:00", saleEnd: "2026-11-30 23:59" });
+  });
+  it("ล้างราคาลด = ยังไม่รองรับ · ราคาปกติใหม่ต่ำกว่าราคาลดเดิม = ไม่ผ่าน", () => {
+    expect(planLazadaPrices(base, set(0, { special: null }), T).errors[0]).toContain("ล้างราคาลด");
+    expect(planLazadaPrices(base, set(0, { price: 150 }), T).errors[0]).toContain("ต่ำกว่า/เท่าราคาลดเดิม");
+    expect(planLazadaPrices(base, set(0, { price: 60 }), T).errors[0]).toContain("80%");
+    expect(planLazadaPrices(base, set(0, { price: 159 }), T).errors.join(" ")).toMatch(/ต่ำกว่า\/เท่าราคาลดเดิม|80%/);
+  });
+  it("lazSaleDateText", () => {
+    expect(lazSaleDateText("2026-11-30", "to", "2026-11-30 23:59")).toBe("2026-11-30 23:59");
+    expect(lazSaleDateText("2026-12-01", "to", "2026-11-30 23:59")).toBe("2026-12-01 23:59");
+    expect(lazSaleDateText("2026-12-01", "from")).toBe("2026-12-01 00:00");
+  });
+  it("XML: ไม่มี Quantity · ส่งเฉพาะช่องที่เปลี่ยน", () => {
+    const x = lazPriceQuantityXml("99", [{ skuId: "1", sellerSku: "A", price: 350 }, { skuId: "2", sellerSku: "B&C", salePrice: 290, saleStart: "2026-11-12 00:00:00", saleEnd: "2026-11-30 23:59:59" }]);
+    expect(x).not.toContain("Quantity");
+    expect(x).toContain("<Sku><ItemId>99</ItemId><SkuId>1</SkuId><SellerSku>A</SellerSku><Price>350</Price></Sku>");
+    expect(x).toContain("<SellerSku>B&amp;C</SellerSku><SalePrice>290</SalePrice><SaleStartDate>2026-11-12 00:00:00</SaleStartDate><SaleEndDate>2026-11-30 23:59:59</SaleEndDate>");
+  });
+  it("แก้หลายตัวพร้อมกัน: ราคา / ลด % / ช่วงวัน · ติ๊กบางตัว", () => {
+    const r = applyLazadaBulkPrice(base, null, { price: 350, pct: 10, from: "2026-11-12", to: "2026-11-30" });
+    expect(r.changed).toBe(3);
+    expect(r.rows[1]).toMatchObject({ price: 350, special: 315, from: "2026-11-12", to: "2026-11-30" });
+    const one = applyLazadaBulkPrice(base, new Set(["127317001491"]), { special: 300, from: "2026-11-12", to: "2026-11-30" });
+    expect(one.changed).toBe(1);
+    expect(applyLazadaBulkPrice(base, null, {}).error).toBeTruthy();
+  });
+  it("lazViewAfterWrite: ราคาตามที่ส่ง", () => {
+    const vv = lazViewAfterWrite(v, { prices: [{ skuId: "127317001490", sellerSku: null, price: 350, salePrice: 290, saleStart: "2026-11-12 00:00:00", saleEnd: "2026-11-30 23:59:59" }] });
+    expect(vv.skus[1]).toMatchObject({ price: 350, specialPrice: 290, specialFrom: "2026-11-12 00:00", specialTo: "2026-11-30 23:59" });
   });
 });

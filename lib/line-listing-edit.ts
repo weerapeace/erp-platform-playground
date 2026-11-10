@@ -264,6 +264,10 @@ export function listingHistoryText(meta: unknown): string {
     const parts = [...new Set(arr(m.changes).map(obj).filter((c): c is Obj => !!c).map((c) => str(c.label)))];
     return `แก้บน Lazada: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : m.qc ? " (Lazada ส่งไปรอตรวจ)" : ""}`;
   }
+  if (src === "lazada_listing_prices") {
+    const n = arr(m.changes).length;
+    return `แก้ราคาบน Lazada ${n} ตัวเลือก${m.ok === false ? ` — ${Number(m.sent) > 0 ? "บางส่วน" : ""}ไม่สำเร็จ: ${str(m.error)}` : ""}`;
+  }
   if (src === "lazada_listing_display") return `${str(m.summary) || (m.open ? "เปิดขาย" : "ปิดขาย")} บน Lazada${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
@@ -287,6 +291,8 @@ export type ListingDetail = {
   matched_code: string | null;
   matched_name: string | null;
   last_imported_at: string | null;
+  /** ลิงก์ร้าน/Shop ID ของแบรนด์บนร้านนี้ (platform_accounts.external_shop_id — ตั้งที่ /admin/platform-accounts) · ใช้ทำลิงก์ "ดูหน้าร้าน" (lib/platform-links) */
+  shop_ref?: string | null;
   /** ข้อมูลบนร้าน LINE (null = ร้านอื่น หรือยังไม่ได้ดึงจาก LINE) */
   line: {
     images: string[];

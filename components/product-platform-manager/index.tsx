@@ -20,6 +20,7 @@ import { requiredChecks } from "@/lib/platform-required-fields";
 import { listingCtx } from "@/lib/platform-listing-builder";
 import { PlatformIcon } from "@/components/platform-icon";
 import { PlatformCategoryPicker } from "@/components/platform-category-picker";
+import { listingLinks } from "@/lib/platform-links";
 
 // ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -418,12 +419,11 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   // ลงขาย (mock connector) — เดี่ยว / ทุกที่พร้อม
   const account = accounts[active];
   const published = activeDraft.last_sync_status === "success" || activeDraft.status === "published";
-  // ลิงก์สินค้าบนร้าน (LINE): https://shop.line.me/@{shopId}/product/{productId} — รับทั้ง URL เต็มที่วางมา หรือ @handle
+  // ลิงก์สินค้าบนร้าน — ของกลาง lib/platform-links (LINE: https://shop.line.me/@{shopId}/product/{productId} · Lazada/Shopee/TikTok ตามรูปแบบของร้าน)
   const shopLink = (() => {
-    const pid = activeDraft.platform_product_id; const sid = (account?.external_shop_id ?? "").trim();
-    if (!pid || !sid) return "";
-    const base = /^https?:\/\//i.test(sid) ? sid.replace(/\/+$/, "") : `https://shop.line.me/@${sid.replace(/^@/, "")}`;
-    return `${base}/product/${pid}`;
+    const pid = activeDraft.platform_product_id;
+    if (!pid) return "";
+    return listingLinks(platforms.find((p) => p.id === active)?.code ?? "", pid, account?.external_shop_id).storefront ?? "";
   })();
   const copyShopLink = async () => {
     if (!shopLink) return;
