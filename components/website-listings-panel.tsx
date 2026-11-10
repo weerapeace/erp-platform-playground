@@ -31,6 +31,7 @@ import { CopyButton } from "@/components/copy-button";
 import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/components/footer-save";
 import { useViewPref } from "@/lib/use-view-pref";
 import { colorWebImages, listingIssues, type HealthColor, type ListingIssue } from "@/lib/website-listing-health";
+import { WEB_FIX_PRINT_STORE, type WebFixGroupKey, type WebFixPayload, type WebFixRow } from "@/lib/website-fix-print-payload";
 import { Icon } from "@/components/icon";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
@@ -506,6 +507,40 @@ export function WebsiteListingsPanel({
     ...imgFilter("partimg", "บางสียังไม่มีรูปเว็บ", "ลงรูปเว็บไว้บางสีแล้ว แต่บางสียังไม่ได้ลง"),
   ];
 
+  // 🖨 เช็กลิสต์ "ต้องแก้" ของรุ่นที่เห็นอยู่ (ตามตัวกรอง/ค้นหา/หมวด) → หน้าพิมพ์ /print/website-fix (lib/website-fix-print · เจ้าของ 2026-11-10)
+  const fixShown = view !== "sort" ? shown.filter((l) => (issuesById.get(l.parentId) ?? []).length > 0).length : 0;
+  const printFixList = () => {
+    const rows: WebFixRow[] = shown.flatMap((l) => {
+      const iss = issuesById.get(l.parentId) ?? [];
+      if (!iss.length) return [];
+      const img = l.display?.imageKey ?? l.erpImageKey;
+      const cats = (l.categories ?? []).map(catLabel);
+      return [{
+        id: l.parentId, code: l.code, name: l.display?.name || l.webName || l.erpName, image_url: img ? keyUrl(img, 96) : null,
+        category: cats.length ? cats.join(", ") : l.erpCategory ?? null, published: l.published,
+        issues: iss.map((i) => ({ key: i.key, label: i.label, detail: i.detail })),
+      }];
+    });
+    if (!rows.length) { toast.warning("รุ่นที่เห็นอยู่ไม่มีเรื่องที่ต้องแก้"); return; }
+    const fLabel = (FILTERS.find((x) => x.k === filter)?.label ?? "ทั้งหมด").replace(/^[^\p{L}\p{N}]+/u, "");
+    const scope = [`ตัวกรอง ${fLabel}`, q.trim() ? `ค้นหา "${q.trim()}"` : "", cat ? `หมวด ${cat === "__none" ? "ยังไม่อยู่หมวด" : catLabel(cat)}` : ""].filter(Boolean).join(" · ");
+    const focus: WebFixGroupKey | null = filter === "noimg" ? "web_none" : filter === "partimg" ? "web_part" : filter === "fit" ? "no_compartments" : null;
+    const key = Date.now().toString(36);
+    try {
+      // ล้างชุดเก่าเกิน 1 วัน กันพื้นที่เก็บในเบราว์เซอร์เต็ม
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k?.startsWith(WEB_FIX_PRINT_STORE) && Date.now() - parseInt(k.slice(WEB_FIX_PRINT_STORE.length), 36) > 864e5) localStorage.removeItem(k);
+      }
+      const payload: WebFixPayload = { shop: shop.name, scope, focus, rows, at: Date.now() };
+      localStorage.setItem(WEB_FIX_PRINT_STORE + key, JSON.stringify(payload));
+    } catch {
+      toast.error("เปิดหน้าพิมพ์ไม่สำเร็จ — พื้นที่เก็บในเบราว์เซอร์เต็ม ลองกรองให้น้อยลง");
+      return;
+    }
+    window.open(`/print/website-fix?k=${key}`, "_blank");
+  };
+
   const priceText = (l: Listing) => (shownPrice(l) > 0 ? `${l.display?.priceVaries ? "เริ่ม " : ""}${baht(shownPrice(l))}` : "—");
 
   return (
@@ -560,6 +595,15 @@ export function WebsiteListingsPanel({
               className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
             >
               📸 ลงรูปทีละมาก
+            </button>
+          )}
+          {fixShown > 0 && (
+            <button
+              onClick={printFixList}
+              title={`พิมพ์เช็กลิสต์เรื่องที่ต้องแก้ของ ${fixShown} รุ่นที่เห็นอยู่ (ตามตัวกรอง/ค้นหา/หมวดที่เลือก) — แยกตามเรื่องหรือ 1 แถวต่อรุ่น · บันทึก PDF/JPG ได้`}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
+            >
+              <Icon value="i:printer" /> พิมพ์เช็กลิสต์ ({fixShown})
             </button>
           )}
           <button
