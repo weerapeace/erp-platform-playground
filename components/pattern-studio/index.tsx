@@ -25,6 +25,7 @@ import type { Flat3DPiece } from "@/components/pattern-3d";
 import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
+const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
 const SHOW3D_KEY = "pattern-studio-3d";
@@ -44,6 +45,8 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
   useEffect(() => { try { setShow3dState(localStorage.getItem(SHOW3D_KEY) === "1"); } catch { /* อ่านไม่ได้ = ปิดไว้ */ } }, []);
   const setShow3d = (v: boolean) => { setShow3dState(v); try { localStorage.setItem(SHOW3D_KEY, v ? "1" : "0"); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
   const [wizard, setWizard] = useState(false);
+  const [photo, setPhoto] = useState(false);
+  const [draft, setDraft] = useState<{ params: BagParams; notice: string } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
   const [inject, setInject] = useState<{ nonce: number; pieces: EditorPiece[] } | null>(null);
   const [live, setLive] = useState<ResultPiece[]>([]);
   const [selPid, setSelPid] = useState<string | null>(null);
@@ -64,7 +67,7 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
   const pick3d = useCallback((pid: string | null) => setSelectReq({ nonce: Date.now(), pid }), []);
   const insert = (pieces: BagPiece[], G: BagGeometry) => {
-    setWizard(false);
+    setWizard(false); setDraft(null);
     const stamp = Date.now().toString(36), pidByKey: Partial<Record<BagPieceKey, string>> = {};
     pieces.forEach((q, i) => { pidByKey[q.key] = `pc${stamp}t${i}`; });   // รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้นอ้างถึงได้
     setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
@@ -78,8 +81,13 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700"><Icon value="i:shopping-bag" className="text-sm" />{t("สตูดิโอแพทเทิร์น", "Pattern studio")}</span>
         {!readonly && (
-          <button type="button" onClick={() => setWizard(true)} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+          <button type="button" onClick={() => { setDraft(null); setWizard(true); }} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:wand" className="text-sm" />{t("สร้างจากแม่แบบทรง", "Create from a bag template")}
+          </button>
+        )}
+        {!readonly && (
+          <button type="button" onClick={() => setPhoto(true)} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+            <Icon value="i:photo" className="text-sm" />{t("แกะจากรูป", "Start from a photo")}
           </button>
         )}
         <button type="button" onClick={() => setShow3d(!show3d)} aria-pressed={show3d} className={`${btn} ${show3d ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
@@ -102,7 +110,18 @@ export function PatternStudio({ onTemplateInsert, ...props }: Omit<EditorProps, 
         )}
       </div>
 
-      {wizard && <BagTemplateWizard open onClose={() => setWizard(false)} onInsert={insert} />}
+      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} />}
+      {photo && <PhotoModal open onClose={() => setPhoto(false)}
+        onPieces={(pieces) => { setPhoto(false); const stamp = Date.now().toString(36); setInject({ nonce: Date.now(), pieces: pieces.map((q, i) => ({ ...q, pid: `pc${stamp}p${i}` })) }); }}
+        onDraft={(params, info) => {
+          setPhoto(false);
+          setDraft({ params, notice: [
+            t(`ค่าด้านล่างเป็นค่าที่ AI ประมาณจากรูป${info.style ? ` (${info.style})` : ""} · ความมั่นใจ ${Math.round(info.confidence * 100)}% — ตรวจและแก้ให้ตรงของจริงก่อนวาง`, `The values below were estimated by AI from the photo${info.style ? ` (${info.style})` : ""} · confidence ${Math.round(info.confidence * 100)}% — check and adjust before placing`),
+            info.fits ? "" : t("AI บอกว่ากระเป๋าในรูปไม่ตรงกับแม่แบบ Tote นัก ค่านี้เป็นทรงที่ใกล้ที่สุดเท่านั้น", "The AI says this bag does not match the tote template well; this is only the nearest shape"),
+            info.notes,
+          ].filter(Boolean).join(" · ") });
+          setWizard(true);
+        }} />}
     </div>
   );
 }

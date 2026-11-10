@@ -17,14 +17,18 @@ const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
 const COLORS: [string, string, string][] = [["#9a6a45", "น้ำตาลแทน", "Tan"], ["#4a3023", "น้ำตาลเข้ม", "Dark brown"], ["#26272b", "ดำ", "Black"], ["#d9cdb4", "ครีมแคนวาส", "Canvas cream"], ["#5d6b45", "เขียวมะกอก", "Olive"], ["#6f2531", "แดงเบอร์กันดี", "Burgundy"], ["#27364f", "กรมท่า", "Navy"]];
 
-export function BagTemplateWizard({ open, onClose, onInsert }: {
+export function BagTemplateWizard({ open, onClose, onInsert, initial, notice }: {
   open: boolean;
   onClose: () => void;
+  /** ค่าตั้งต้น (เช่น ค่าที่ AI ร่างจากรูปกระเป๋า) — ไม่ส่ง = ค่าเริ่มต้นของแม่แบบ */
+  initial?: Partial<BagParams>;
+  /** ข้อความแจ้งเหนือฟอร์ม (เช่น "ค่าจาก AI ตรวจก่อนวาง") */
+  notice?: string;
   /** ผู้ใช้กดวางชิ้นลงกระดาน */
   onInsert: (pieces: BagPiece[], G: BagGeometry) => void;
 }) {
   const t = useT();
-  const [params, setParams] = useState<BagParams>(BAG_DEFAULT);
+  const [params, setParams] = useState<BagParams>(() => ({ ...BAG_DEFAULT, ...initial }));
   const [explode, setExplode] = useState(0);
   const [pick, setPick] = useState<string | null>(null);
   const [body, setBody] = useState(COLORS[0][0]);
@@ -64,6 +68,7 @@ export function BagTemplateWizard({ open, onClose, onInsert }: {
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button type="button" onClick={() => onInsert(pieces, G)} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`วางชิ้นลงกระดาน (${pieces.length} แบบ ${total} ชิ้น)`, `Place on the board (${pieces.length} patterns, ${total} pcs)`)}</button>
       </>}>
+      {notice && <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><Icon value="i:sparkles" className="mt-0.5 text-sm" /><span>{notice}</span></div>}
       <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* ── ซ้าย: ขนาด ── */}
         <div className="space-y-4 text-sm">

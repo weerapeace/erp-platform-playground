@@ -110,6 +110,10 @@ export const PAID_SERVICES: PaidService[] = [
   { key: "ai.work_log", th: "อ่านใบจดผลงาน", en: "Work log reader", group: "ผลิต / งานทีม",
     usedAt: "ใบจดผลงาน (อ่านลายมือจากรูป)", provider: "openai", kind: "ai_chat",
     offBehavior: "อัปรูปได้ตามปกติ แต่ต้องกรอกตัวเลขเอง", costHint: GPT_COST, files: ["lib/work-log-server.ts"] },
+  { key: "ai.bag_draft", th: "ร่างแพทเทิร์นจากรูปกระเป๋า", en: "Bag pattern draft from a photo", group: "ผลิต / งานทีม",
+    usedAt: "สตูดิโอแพทเทิร์น → แกะจากรูป → รูปกระเป๋าสำเร็จ (AI ประมาณสัดส่วน)", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่มนี้ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ใส่ขนาดเองในตัวสร้างจากแม่แบบได้ตามปกติ · ลอกเส้นจากรูปแพทเทิร์นกระดาษไม่ใช้ AI ใช้ได้ต่อ", costHint: GPT_COST,
+    files: ["app/api/pattern-projects/ai-draft/route.ts"] },
   { key: "ai.team_split", th: "แบ่งงานทีมด้วย AI", en: "Team plan AI split", group: "ผลิต / งานทีม",
     usedAt: "แผนทีม", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/team-plan/ai-split/route.ts"] },
   // ── การเงิน
