@@ -222,10 +222,9 @@ describe("เฟส 3: ราคา", () => {
     expect(w.errors).toEqual([]);
     expect(w.warnings[0]).toContain("52%");
   });
-  it("ราคาลด: ต้องต่ำกว่าราคาปกติ · ลดเกิน 80% ไม่ผ่าน · ต้องมีช่วงวัน · วันจบผ่านแล้วไม่ผ่าน", () => {
+  it("ราคาลด: ต้องต่ำกว่าราคาปกติ · ลดเกิน 80% ไม่ผ่าน · วันจบผ่านแล้วไม่ผ่าน", () => {
     expect(planLazadaPrices(base, set(1, { special: 400, from: "2026-11-11", to: "2026-11-20" }), T).errors[0]).toContain("ต่ำกว่าราคาปกติ");
     expect(planLazadaPrices(base, set(1, { special: 50, from: "2026-11-11", to: "2026-11-20" }), T).errors[0]).toContain("ลด 85%");
-    expect(planLazadaPrices(base, set(1, { special: 290 }), T).errors[0]).toContain("ช่วงวัน");
     expect(planLazadaPrices(base, set(1, { special: 290, from: "2026-11-01", to: "2026-11-05" }), T).errors[0]).toContain("ผ่านไปแล้ว");
   });
   it("ราคาลดใหม่ → SalePrice + วันเริ่ม 00:00:00 / จบ 23:59:59", () => {
@@ -264,5 +263,40 @@ describe("เฟส 3: ราคา", () => {
   it("lazViewAfterWrite: ราคาตามที่ส่ง", () => {
     const vv = lazViewAfterWrite(v, { prices: [{ skuId: "127317001490", sellerSku: null, price: 350, salePrice: 290, saleStart: "2026-11-12 00:00:00", saleEnd: "2026-11-30 23:59:59" }] });
     expect(vv.skus[1]).toMatchObject({ price: 350, specialPrice: 290, specialFrom: "2026-11-12 00:00", specialTo: "2026-11-30 23:59" });
+  });
+});
+
+describe("ราคาลดไม่มีกำหนด (เจ้าของขอ 2026-11-10 · LB-01 ราคาลดบนร้านไม่มีวัน)", () => {
+  const v = lazadaListingView(item)!;
+  const base = lazadaPriceRowsFromView(v);
+  const T = "2026-11-10";
+  const set = (i: number, patch: Partial<(typeof base)[number]>) => base.map((r, k) => (k === i ? { ...r, ...patch } : r));
+  it("ราคาลดเดิมไม่มีวัน → แก้ราคาลด ไม่ต้องใส่วัน · ส่งแท็กวันว่าง + Price คู่", () => {
+    const noDate = base.map((r, k) => (k === 0 ? { ...r, from: null, to: null, fromRaw: null, toRaw: null } : r));
+    const p = planLazadaPrices(noDate, noDate.map((r, k) => (k === 0 ? { ...r, special: 160 } : r)), T);
+    expect(p.errors).toEqual([]);
+    expect(p.skus[0]).toEqual({ skuId: "127317001489", sellerSku: "IG-EQ011-01", price: 328, salePrice: 160, saleStart: "", saleEnd: "" });
+    expect(p.changes[0].after).toContain("ไม่มีกำหนด");
+    expect(lazPriceQuantityXml("1", p.skus)).toContain("<SalePrice>160</SalePrice><SaleStartDate></SaleStartDate><SaleEndDate></SaleEndDate>");
+  });
+  it("ราคาลดใหม่ไม่ใส่วัน = ไม่มีกำหนด · ใส่แค่วันสิ้นสุด = เริ่มวันนี้ · ใส่แค่วันเริ่ม = ไม่มีวันจบ", () => {
+    expect(planLazadaPrices(base, set(1, { special: 290 }), T).skus[0]).toMatchObject({ salePrice: 290, saleStart: "", saleEnd: "" });
+    expect(planLazadaPrices(base, set(1, { special: 290, to: "2026-11-30" }), T).skus[0]).toMatchObject({ saleStart: "2026-11-10 00:00", saleEnd: "2026-11-30 23:59" });
+    expect(planLazadaPrices(base, set(1, { special: 290, from: "2026-11-12" }), T).skus[0]).toMatchObject({ saleStart: "2026-11-12 00:00", saleEnd: "" });
+  });
+  it("ล้างวันเดิม (เปลี่ยนเป็นไม่มีกำหนด) = ส่งได้ แต่เตือน", () => {
+    const p = planLazadaPrices(base, set(0, { from: null, to: null }), T);
+    expect(p.errors).toEqual([]);
+    expect(p.skus[0]).toMatchObject({ salePrice: 159, saleStart: "", saleEnd: "" });
+    expect(p.warnings.join(" ")).toContain("ไม่มีกำหนด");
+  });
+  it("แถบแก้หลายตัว: ติ๊กไม่มีกำหนด = ล้างวันทุกตัวที่มีราคาลด", () => {
+    const r = applyLazadaBulkPrice(base, null, { noEnd: true });
+    expect(r.changed).toBe(1);
+    expect(r.rows[0]).toMatchObject({ special: 159, from: null, to: null });
+  });
+  it("lazViewAfterWrite: วันว่าง = ไม่มีวัน", () => {
+    const vv = lazViewAfterWrite(v, { prices: [{ skuId: "127317001489", sellerSku: null, price: 328, salePrice: 150, saleStart: "", saleEnd: "" }] });
+    expect(vv.skus[0]).toMatchObject({ specialPrice: 150, specialFrom: null, specialTo: null });
   });
 });

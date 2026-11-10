@@ -383,28 +383,33 @@ export function planLazadaPrices(before: LazadaPriceRow[], after: LazadaPriceRow
       else if (price != null && sp >= price) { errors.push(`${name}: ราคาลด (${sp}) ต้องต่ำกว่าราคาปกติ (${price})`); bad = true; }
       else if (price != null && price > 0 && 1 - sp / price >= PRICE_JUMP_BLOCK) { errors.push(`${name}: ลด ${pct(1 - sp / price)} จากราคาปกติ — ตั้งแต่ 80% เสี่ยงโดน Lazada ตรวจ/ปัดตก`); bad = true; }
       else if (b.special != null && b.special > 0 && jump(b.special, sp) >= PRICE_JUMP_BLOCK) { errors.push(`${name}: ราคาลดขยับ ${pct(jump(b.special, sp))} (${b.special}→${sp}) — ตั้งแต่ 80% Lazada จะส่งไปตรวจใหม่`); bad = true; }
-      else if (!a.from || !a.to) { errors.push(`${name}: ใส่ช่วงวันของราคาลด (เริ่ม–สิ้นสุด)`); bad = true; }
-      else if (a.to < a.from) { errors.push(`${name}: วันสิ้นสุดราคาลดต้องไม่ก่อนวันเริ่ม`); bad = true; }
-      else if (a.to < today) { errors.push(`${name}: วันสิ้นสุดราคาลด (${a.to}) ผ่านไปแล้ว`); bad = true; }
+      // ช่วงวันไม่บังคับ: ว่างทั้งคู่ = ไม่มีกำหนด (Lazada: ราคาลดไม่มีวัน = ใช้ตลอด) · มีแต่วันเริ่ม = ไม่มีวันสิ้นสุด · มีแต่วันสิ้นสุด = เริ่มวันนี้
+      else if (a.from && a.to && a.to < a.from) { errors.push(`${name}: วันสิ้นสุดราคาลดต้องไม่ก่อนวันเริ่ม`); bad = true; }
+      else if (a.to && a.to < today) { errors.push(`${name}: วันสิ้นสุดราคาลด (${a.to}) ผ่านไปแล้ว`); bad = true; }
       else {
         out.salePrice = r2(sp);
         // ตัวอย่างทางการส่ง Price คู่ SalePrice เสมอ → แนบราคาปกติ (ค่าปัจจุบัน/ใหม่) ไปด้วย
         if (out.price == null && price != null && price > 0) out.price = r2(price);
-        out.saleStart = lazSaleDateText(a.from, "from", a.from === b.from ? b.fromRaw : null);
-        out.saleEnd = lazSaleDateText(a.to, "to", a.to === b.to ? b.toRaw : null);
+        const from = a.from ?? (a.to ? today : null);
+        out.saleStart = from ? lazSaleDateText(from, "from", from === b.from ? b.fromRaw : null) : "";
+        out.saleEnd = a.to ? lazSaleDateText(a.to, "to", a.to === b.to ? b.toRaw : null) : "";
         if (b.special != null && jump(b.special, sp) >= PRICE_JUMP_WARN) warnings.push(`${name}: ราคาลดขยับ ${pct(jump(b.special, sp))}`);
+        if ((b.from || b.to) && !a.from && !a.to) warnings.push(`${name}: เปลี่ยนราคาลดเป็น "ไม่มีกำหนด" (ล้างวันเดิม) — ถ้าหลังส่งยังเห็นวันเดิม ให้แก้วันใน Seller Center`);
       }
     } else if (priceChanged && b.special != null && price != null && b.special >= price) {
       errors.push(`${name}: ราคาปกติใหม่ (${price}) ต่ำกว่า/เท่าราคาลดเดิม (${b.special}) — แก้ราคาลดด้วย`); bad = true;
     }
-    const fmt = (p: number | null, s: number | null, f: string | null, t: string | null) => `${p ?? "—"}฿${s != null ? ` → ลด ${s}฿${f || t ? ` (${f ?? "?"}–${t ?? "?"})` : ""}` : ""}`;
+    const fmt = (p: number | null, s: number | null, f: string | null, t: string | null) => `${p ?? "—"}฿${s != null ? ` → ลด ${s}฿ (${f || t ? `${f ?? "วันนี้"}–${t ?? "ไม่มีกำหนด"}` : "ไม่มีกำหนด"})` : ""}`;
     changes.push({ label: `ราคา ${name}`, before: fmt(b.price, b.special, b.from, b.to), after: fmt(a.price, a.special, a.special != null ? a.from : null, a.special != null ? a.to : null) });
     if (!bad && (out.price != null || out.salePrice != null)) skus.push(out);
   }
   return { skus, changes, errors, warnings };
 }
 
-/** /product/price_quantity/update (payload) 1 ชุด — ไม่มี Quantity เสมอ (สต๊อก = ระบบอื่นดูแล) */
+/**
+ * /product/price_quantity/update (payload) 1 ชุด — ไม่มี Quantity เสมอ (สต๊อก = ระบบอื่นดูแล)
+ * ราคาลดส่งแท็กวันคู่เสมอ — ว่าง = ไม่มีกำหนด (ตัวอย่างในคู่มือรุ่นเก่าก็ส่ง SalePrice กับแท็กวันว่าง)
+ */
 export function lazPriceQuantityXml(itemId: string, skus: LazPriceSku[]): string {
   const rows = skus.map((s) => [
     "<Sku>", `<ItemId>${xmlText(itemId)}</ItemId>`, `<SkuId>${xmlText(s.skuId)}</SkuId>`, s.sellerSku ? `<SellerSku>${xmlText(s.sellerSku)}</SellerSku>` : "",
@@ -418,10 +423,11 @@ export function lazPriceQuantityXml(itemId: string, skus: LazPriceSku[]): string
 /**
  * แก้ราคาหลายตัวเลือกพร้อมกัน (แถบในแท็บราคา) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง
  * ids ว่าง = ทุกตัว · ช่องที่ไม่กรอก = ไม่เปลี่ยน · ลด % = ราคาลดจากราคาปกติ (ปัดเป็นบาทเต็ม) · ช่วงวันใส่ให้ทุกตัวที่มีราคาลด
+ * noEnd = ราคาลด "ไม่มีกำหนด" (ล้างวันทุกตัวที่มีราคาลด)
  */
-export function applyLazadaBulkPrice(rows: LazadaPriceRow[], ids: Set<string> | null, opt: { price?: number | null; special?: number | null; pct?: number | null; from?: string | null; to?: string | null }): { rows: LazadaPriceRow[]; changed: number; error: string | null } {
-  const { price = null, special = null, pct: dp = null, from = null, to = null } = opt;
-  if (price == null && special == null && dp == null && !from && !to) return { rows, changed: 0, error: "กรอกราคาปกติ ราคาลด % ส่วนลด หรือช่วงวัน" };
+export function applyLazadaBulkPrice(rows: LazadaPriceRow[], ids: Set<string> | null, opt: { price?: number | null; special?: number | null; pct?: number | null; from?: string | null; to?: string | null; noEnd?: boolean }): { rows: LazadaPriceRow[]; changed: number; error: string | null } {
+  const { price = null, special = null, pct: dp = null, from = null, to = null, noEnd = false } = opt;
+  if (price == null && special == null && dp == null && !from && !to && !noEnd) return { rows, changed: 0, error: "กรอกราคาปกติ ราคาลด % ส่วนลด ช่วงวัน หรือติ๊กไม่มีกำหนด" };
   if (price != null && !(price > 0)) return { rows, changed: 0, error: "ราคาปกติต้องมากกว่า 0" };
   if (special != null && !(special > 0)) return { rows, changed: 0, error: "ราคาลดต้องมากกว่า 0" };
   if (special == null && dp != null && !(dp > 0 && dp < 100)) return { rows, changed: 0, error: "% ส่วนลดต้องอยู่ระหว่าง 1–99" };
@@ -432,8 +438,8 @@ export function applyLazadaBulkPrice(rows: LazadaPriceRow[], ids: Set<string> | 
     if (!all && !ids!.has(r.skuId)) return r;
     const p = price ?? r.price;
     const sp = special != null ? special : dp != null && p != null ? Math.round(p * (1 - dp / 100)) : r.special;
-    const f = sp != null ? (from || r.from) : r.from;
-    const t = sp != null ? (to || r.to) : r.to;
+    const f = sp != null ? (noEnd ? null : (from || r.from)) : r.from;
+    const t = sp != null ? (noEnd ? null : (to || r.to)) : r.to;
     if (p === r.price && sp === r.special && f === r.from && t === r.to) return r;
     changed++;
     return { ...r, price: p, special: sp, from: f, to: t };
@@ -451,7 +457,7 @@ export function lazViewAfterWrite(view: LazadaListingView, w: { fields?: LazadaE
   let skus = w.statusOverride && w.statusOverride.size ? view.skus.map((s) => (w.statusOverride!.has(s.skuId) ? { ...s, status: w.statusOverride!.get(s.skuId)! } : s)) : view.skus;
   if (priceOf.size) skus = skus.map((s) => {
     const p = priceOf.get(s.skuId); if (!p) return s;
-    return { ...s, price: p.price ?? s.price, ...(p.salePrice != null ? { specialPrice: p.salePrice, specialFrom: p.saleStart?.slice(0, 16) ?? s.specialFrom, specialTo: p.saleEnd?.slice(0, 16) ?? s.specialTo } : {}) };
+    return { ...s, price: p.price ?? s.price, ...(p.salePrice != null ? { specialPrice: p.salePrice, specialFrom: p.saleStart ? p.saleStart.slice(0, 16) : null, specialTo: p.saleEnd ? p.saleEnd.slice(0, 16) : null } : {}) };
   });
   const anyOpen = skus.some((s) => s.status !== "inactive");
   return {

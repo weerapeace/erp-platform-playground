@@ -413,11 +413,12 @@ const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() ==
 /** แถบแก้ราคาหลายตัวเลือกพร้อมกัน — เติมฟอร์มอย่างเดียว (applyLazadaBulkPrice) ต้องกดบันทึกขึ้น Lazada อีกที */
 function LazadaBulkPriceBar({ edit, selected }: { edit: LazadaEditApi; selected: Set<string> }) {
   const [b, setB] = useState({ price: "", special: "", pct: "", from: "", to: "" });
+  const [noEnd, setNoEnd] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const n = selected.size || (edit.prices?.length ?? 0);
   const apply = () => {
     if (!edit.prices) return;
-    const r = applyLazadaBulkPrice(edit.prices, selected, { price: numOrNull(b.price), special: numOrNull(b.special), pct: numOrNull(b.pct), from: b.from || null, to: b.to || null });
+    const r = applyLazadaBulkPrice(edit.prices, selected, { price: numOrNull(b.price), special: numOrNull(b.special), pct: numOrNull(b.pct), from: noEnd ? null : (b.from || null), to: noEnd ? null : (b.to || null), noEnd });
     setErr(r.error ?? (r.changed === 0 ? "ค่าเท่าเดิมทุกตัว — ไม่มีอะไรเปลี่ยน" : null));
     if (!r.error && r.changed) edit.setPrices(r.rows);
   };
@@ -428,10 +429,11 @@ function LazadaBulkPriceBar({ edit, selected }: { edit: LazadaEditApi; selected:
       <label className="inline-flex items-center gap-1">ราคาปกติ<MoneyInput value={b.price} onChange={upd("price")} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
       <label className="inline-flex items-center gap-1">ราคาลด<MoneyInput value={b.special} onChange={upd("special")} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
       <label className="inline-flex items-center gap-1">หรือ ลด<input type="number" min="1" max="99" value={b.pct} onChange={(e) => upd("pct")(e.target.value)} className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-right" />%</label>
-      <span className="inline-flex items-center gap-1">ช่วงราคาลด<DateInput value={b.from} onChange={upd("from")} className="w-32" /><span>–</span><DateInput value={b.to} onChange={upd("to")} className="w-32" /></span>
+      <span className={`inline-flex items-center gap-1 ${noEnd ? "opacity-40" : ""}`}>ช่วงราคาลด<DateInput value={b.from} onChange={upd("from")} disabled={noEnd} className="w-32" /><span>–</span><DateInput value={b.to} onChange={upd("to")} disabled={noEnd} className="w-32" /></span>
+      <label className="inline-flex items-center gap-1"><input type="checkbox" checked={noEnd} onChange={(e) => { setNoEnd(e.target.checked); setErr(null); }} />ไม่มีกำหนด</label>
       <button type="button" onClick={apply} className="h-8 rounded-md bg-violet-600 px-2.5 text-white hover:bg-violet-700">ใช้กับ{selected.size ? `ที่ติ๊ก ${selected.size} ตัว` : "ทุกตัว"}</button>
       {err && <span className="w-full text-rose-600">{err}</span>}
-      <span className="w-full text-[11px] text-violet-700/80">ช่องว่าง = ไม่เปลี่ยน · ลด % คิดจากราคาปกติ · ราคาลดต้องมีช่วงวัน · ระบบไม่ยอมส่งราคาที่ขยับตั้งแต่ 80% · กดแล้วยังไม่ส่ง — ต้องกด “บันทึกขึ้น Lazada”</span>
+      <span className="w-full text-[11px] text-violet-700/80">ช่องว่าง = ไม่เปลี่ยน · ลด % คิดจากราคาปกติ · ราคาลดไม่ใส่วัน / ติ๊ก “ไม่มีกำหนด” = ลดตลอด ไม่มีวันหมด · ระบบไม่ยอมส่งราคาที่ขยับตั้งแต่ 80% · กดแล้วยังไม่ส่ง — ต้องกด “บันทึกขึ้น Lazada”</span>
     </div>
   );
 }
@@ -468,10 +470,14 @@ export function LazadaOptionsPanel({ state, disp, edit }: { state: LazadaListing
         const r = rowOf.get(s.skuId); const b = baseOf.get(s.skuId);
         if (!r || r.special == null) return <span className="text-slate-300">—</span>;
         const ch = r.from !== (b?.specialFrom?.slice(0, 10) ?? null) || r.to !== (b?.specialTo?.slice(0, 10) ?? null);
+        const open = !r.from && !r.to;
         return (
           <span className={`flex flex-col gap-0.5 rounded-md ${ch ? "bg-violet-50" : ""}`}>
-            <DateInput value={r.from ?? ""} onChange={(iso) => edit!.setPrice(s.skuId, { from: iso || null })} className="w-full" />
-            <DateInput value={r.to ?? ""} onChange={(iso) => edit!.setPrice(s.skuId, { to: iso || null })} className="w-full" />
+            <DateInput value={r.from ?? ""} onChange={(iso) => edit!.setPrice(s.skuId, { from: iso || null })} placeholder="เริ่ม: วันนี้" className="w-full" />
+            <DateInput value={r.to ?? ""} onChange={(iso) => edit!.setPrice(s.skuId, { to: iso || null })} placeholder="ไม่มีกำหนด" className="w-full" />
+            {open
+              ? <span className="text-[10px] text-emerald-700">ไม่มีกำหนด (ลดตลอด)</span>
+              : <button type="button" onClick={() => edit!.setPrice(s.skuId, { from: null, to: null })} className="self-start text-[10px] text-violet-700 hover:underline" title="ล้างวัน = ราคาลดใช้ตลอด ไม่มีวันหมด">ตั้งเป็นไม่มีกำหนด</button>}
           </span>
         );
       },
@@ -483,7 +489,9 @@ export function LazadaOptionsPanel({ state, disp, edit }: { state: LazadaListing
       cell: (s) => s.specialPrice == null ? <span className="text-slate-300">—</span> : (
         <span className="leading-tight">
           <span className="block text-rose-600">{baht(s.specialPrice)}{s.price ? <span className="ml-1 text-[11px]">-{Math.round((1 - s.specialPrice / s.price) * 100)}%</span> : null}</span>
-          {(s.specialFrom || s.specialTo) && <span className="block text-[10px] text-slate-400" title={`${s.specialFrom ?? "?"} ถึง ${s.specialTo ?? "?"}`}>{(s.specialFrom ?? "?").slice(0, 10)} – {(s.specialTo ?? "?").slice(0, 10)}</span>}
+          {(s.specialFrom || s.specialTo)
+            ? <span className="block text-[10px] text-slate-400" title={`${s.specialFrom ?? "?"} ถึง ${s.specialTo ?? "ไม่มีกำหนด"}`}>{(s.specialFrom ?? "?").slice(0, 10)} – {s.specialTo ? s.specialTo.slice(0, 10) : "ไม่มีกำหนด"}</span>
+            : <span className="block text-[10px] text-slate-400">ไม่มีกำหนด</span>}
         </span>
       ),
     },
