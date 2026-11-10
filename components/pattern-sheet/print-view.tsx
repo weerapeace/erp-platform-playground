@@ -40,7 +40,7 @@ const download = (name: string, text: string, type: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls }: {
+export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable }: {
   /** บรรทัดที่จะวาดเป็นชิ้น (กรองแท็บ/เรียงมาแล้ว) */
   lines: PatternLineInput[];
   /** บรรทัดเล็กเหนือชื่อ เช่น "แพทเทิร์นจากตีราคา · ทั่วไป" */
@@ -54,6 +54,8 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
   emptyText: ReactNode;
   /** ปุ่มเพิ่มทางซ้ายของแผงตั้งค่า (เช่น ปุ่มเลือกแท็บตีราคา) */
   controls?: ReactNode;
+  /** เนื้อหาเพิ่มใต้ตารางชิ้นในหน้าภาพรวม (เช่น ตารางตะเข็บของสตูดิโอแพทเทิร์น) */
+  afterTable?: ReactNode;
 }) {
   const [mode, setMode] = useState<"overview" | "tiles">("overview");
   const [mono, setMono] = useState(false);
@@ -141,6 +143,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
         <div className="mx-auto my-4 max-w-[860px] space-y-4 bg-white p-6 shadow-sm print:my-0 print:max-w-none print:p-0 print:shadow-none">
           {head}
           {pieceTable}
+          {afterTable}
           {skipped > 0 && <p className="text-[11px] text-slate-500">ไม่ได้วาด {skipped} บรรทัด (ไม่ได้คิดแบบกว้าง × ยาว เช่น อะไหล่ / สาย-เทปคิดตามยาว / ชิ้นสำเร็จ)</p>}
           <div>
             <div className="mb-1 text-[11px] text-slate-500">ภาพชิ้นทั้งหมด (ย่อให้พอดีหน้า · วางบนแผ่นกว้าง {overview.width} × {overview.height} ซม. เหมือนในไฟล์ DXF/SVG)</div>

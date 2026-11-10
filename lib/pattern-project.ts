@@ -11,7 +11,7 @@
  */
 import { cleanAllow, cleanFoldEdges, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type Pt, type Shape } from "@/lib/pattern-shape";
 import type { PatternLineInput } from "@/lib/pattern-sheet";
-import { cleanSeams, type Seam } from "@/lib/pattern-seams";
+import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, pieceEdges, seamLabel, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 export const PATTERN_PROJECT_STATUSES = ["draft", "ready", "archived"] as const;
 export type PatternProjectStatus = (typeof PATTERN_PROJECT_STATUSES)[number];
@@ -28,6 +28,8 @@ export type ProjectPiece = {
   allowEdges?: number[];
   /** ขอบที่พับเข้าใน (1 ค่าต่อขอบ · 1 = พับ) — ไม่มี = ไม่มีขอบพับ */
   foldEdges?: number[];
+  /** งานขอบรายขอบ: กุ้นขอบ / เดินด้ายทับ (1 ค่าต่อขอบ) — ไม่มี = ไม่ได้ตั้ง */
+  edgeMeta?: EdgeMeta[];
   shape: Shape; holes: Shape[]; grain: [Pt, Pt] | null; notches: Pt[]; at: [number, number];
   /** วัสดุของชิ้น (รหัสวัสดุตีราคา design_price_items + ชื่อ/ชนิด ณ ตอนเลือก) — 1 ชิ้นตัดจากหลายวัสดุได้ (เช่น หนัง + ซับใน) · ไม่มี = ยังไม่เลือก */
   mats?: PieceMaterial[];
@@ -60,7 +62,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
     const at = pt(r.at);
     seen.add(pid);
     const allow = cleanAllow(r.allow), per = edgeAllowances(shape, r.allowEdges, allow);
-    const fold = cleanFoldEdges(shape, r.foldEdges);
+    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta);
     const mats: PieceMaterial[] = [];
     for (const m of (Array.isArray(r.mats) ? r.mats : []).slice(0, 8)) {
       const o = m as Record<string, unknown> | null;
@@ -68,7 +70,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
       if (mid && nm && !mats.some((y) => y.id === mid)) mats.push({ id: mid, name: nm, ...(grp ? { group: grp } : {}) });
     }
     out.push({
-      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(mats.length ? { mats } : {}),
+      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}),
       name: String(r.name ?? "").trim().slice(0, 60),
       count: Math.min(999, Math.max(1, Math.round(fin(r.count) ?? 1))),
       allow,
@@ -143,4 +145,34 @@ export function cleanProjectPatch(body: Record<string, unknown>, currentPieces: 
     if (!("seams" in body)) delete patch.seams;   // ส่งมาแต่ชิ้น = ไม่แตะตะเข็บ (หน้าจอส่งคู่กันเสมอ)
   }
   return { patch, error: null };
+}
+
+/** แถวของ "ตารางตะเข็บ" ในใบพิมพ์: ตะเข็บไหน เย็บขอบไหนกับขอบไหน ยาวเท่าไร วิธีเย็บ เดินด้ายทับ */
+export type SeamRow = { label: string; name: string; a: string; b: string; la: number | null; lb: number | null; status: "ok" | "mismatch" | "broken"; diff: number; kind: string; top: string; rev: boolean };
+const pieceTitle = (pieces: ProjectPiece[], pid: string) => { const k = pieces.findIndex((p) => p.pid === pid); return k < 0 ? "?" : pieces[k].name || `ชิ้น ${k + 1}`; };
+const sideTitle = (pieces: ProjectPiece[], x: SeamSide) => `${pieceTitle(pieces, x.pid)} · ${x.count > 1 ? `ขอบ ${x.from + 1}–${((x.from + x.count - 1) % x.n) + 1}` : `ขอบ ${x.from + 1}`}`;
+export function projectSeamRows(pieces: ProjectPiece[], seams: Seam[]): SeamRow[] {
+  const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
+  return seams.map((x, i) => {
+    const c = checkSeam(shapes, x);
+    return {
+      label: seamLabel(i), name: x.name ?? "", a: sideTitle(pieces, x.a), b: sideTitle(pieces, x.b), la: c.la, lb: c.lb, status: c.status, diff: c.diff, rev: !!x.rev,
+      kind: SEAM_KINDS.find((k) => k.key === x.kind)?.th ?? "",
+      top: x.top ? `ห่าง ${x.top.off} มม. · ${x.top.rows} แถว · ${x.top.spi} ฝีเข็ม/นิ้ว` : "",
+    };
+  });
+}
+/** แถวของ "งานขอบ" ในใบพิมพ์: ขอบที่พับ / กุ้น / เดินด้ายทับ (ขอบธรรมดาไม่ออก) */
+export type EdgeRow = { piece: string; edge: number; len: number; allow: number; fold: boolean; bind: boolean; top: number | null };
+export function projectEdgeRows(pieces: ProjectPiece[]): EdgeRow[] {
+  const out: EdgeRow[] = [];
+  for (const [k, p] of pieces.entries()) {
+    const E = pieceEdges(p.shape);
+    for (const e of E) {
+      const fold = !!p.foldEdges?.[e.i], m = p.edgeMeta?.[e.i];
+      if (!fold && !m?.bind && m?.top == null) continue;
+      out.push({ piece: p.name || `ชิ้น ${k + 1}`, edge: e.i + 1, len: Math.round(e.len * 10) / 10, allow: p.allowEdges?.[e.i] ?? p.allow, fold, bind: !!m?.bind, top: m?.top ?? null });
+    }
+  }
+  return out;
 }
