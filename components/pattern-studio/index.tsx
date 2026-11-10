@@ -68,7 +68,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
     return () => ro.disconnect();
   }, []);
 
-  const flat: Flat3DPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, cut: p.geo.cut, sew: p.geo.sew, holes: p.geo.holesCut })), [live]);
+  const flat: Flat3DPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, cut: p.geo.cut, sew: p.geo.sew, holes: p.geo.holesCut, color: p.mats.map((m) => props.matProps?.[m.id]?.color).find(Boolean) })), [live, props.matProps]);
   // ด้ายเย็บในภาพ 3D: ขอบทั้งสองด้านของตะเข็บ (พิกัดกระดาน) สีเดียวกับบนกระดาน
   const threads: Flat3DThread[] = useMemo(() => {
     if (!sew?.seams.length) return [];

@@ -22,7 +22,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { TemplateInsertInfo } from "@/components/pattern-studio";
-import { PATTERN_PROJECT_STATUSES, PATTERN_STATUS_LABEL, projectSummary, type PatternProject, type PatternProjectStatus, type ProjectPiece } from "@/lib/pattern-project";
+import { PATTERN_PROJECT_STATUSES, PATTERN_STATUS_LABEL, cleanMatProps, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type ProjectPiece } from "@/lib/pattern-project";
 import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
 import { checkSeam, type Seam } from "@/lib/pattern-seams";
 import { cleanAttaches, type Attach } from "@/lib/pattern-assembly";
@@ -52,6 +52,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const [basis, setBasis] = useState<"box" | "area">("box");
   const [template, setTemplate] = useState<Record<string, unknown> | null>(null);   // { params: ค่าแม่แบบล่าสุด, attach: จุดติด }
   const [attaches, setAttaches] = useState<Attach[]>([]);
+  const [matProps, setMatProps] = useState<Record<string, MatProps>>({});   // ค่าของวัสดุในแพทเทิร์นใบนี้ (เก็บใน template.matProps)
   const [tab, setTab] = useState<Tab>("draw");
   const [sewStart, setSewStart] = useState(false);        // เปิดกระดานมาถือเครื่องมือเย็บเลย (มาจากปุ่ม "ไปเย็บ" ของแท็บประกอบ 3D)
   const [skuKind, setSkuKind] = useState<"parent" | "sku">("parent");
@@ -74,6 +75,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
       setMe(j.me ?? null); setPatternNo(p.pattern_no); setName(p.name); setSku(p.sku_code ?? ""); setStatus(p.status);
       setPieces(p.pieces ?? []); piecesRef.current = p.pieces ?? []; setSeams(p.seams ?? []); setBasis(p.basis === "area" ? "area" : "box"); setTemplate(p.template ?? null);
       setAttaches(cleanAttaches((p.template as { attach?: unknown } | null)?.attach, new Set((p.pieces ?? []).map((x) => x.pid))));
+      setMatProps(cleanMatProps((p.template as { matProps?: unknown } | null)?.matProps));
       setDirty(false); setSaveErr(null); setBoardNonce((n) => n + 1);
     } catch (e) { setErr((e as Error).message); }
     finally { setLoading(false); }
@@ -89,11 +91,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const canEdit = !!me?.can_edit;
   // ชิ้นตั้งต้นของกระดาน — อ่านครั้งเดียวต่อการเปิดกระดาน (ระหว่างวาด กระดานถือข้อมูลเอง แล้วส่งกลับทาง onChange)
-  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, info: p.info, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onBoard = useCallback((res: ShapeEditorResult) => {
     setPieces(res.pieces.map((p) => ({
-      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
+      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}), ...(p.info ? { info: p.info } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
       grain: p.grain && p.grain.length === 2 ? [p.grain[0], p.grain[1]] : null,
       ...(p.mats.length ? { mats: p.mats.map((m) => { const g = matGroup.get(m.id) ?? piecesRef.current.find((q) => q.pid === p.pid)?.mats?.find((x) => x.id === m.id)?.group; return { id: m.id, name: m.name, ...(g ? { group: g } : {}) }; }) } : {}),
     })));
@@ -220,10 +222,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
       {tab === "draw" ? (
         <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
-          sew={{ seams, onChange: onSeams, start: sewStart }}
+          sew={{ seams, onChange: onSeams, start: sewStart }} pieceInfoFields matProps={matProps}
+          onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
           footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
       ) : (
-        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => { setSewStart(true); switchTab("draw"); }} onGoDraw={() => switchTab("draw")}
+        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => { setSewStart(true); switchTab("draw"); }} pieceStiff={(pid, fallback) => { const p = pieces.find((x) => x.pid === pid); return p ? pieceStiffness(p, matProps, fallback) : null; }} onGoDraw={() => switchTab("draw")}
           onAttachesChange={canEdit ? (next) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); } : undefined} />
       )}
 

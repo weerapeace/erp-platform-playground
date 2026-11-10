@@ -18,12 +18,15 @@ export type SimMesh = {
   rest: Float32Array;       // ตำแหน่งตอนประกอบ (x, y, z ต่อจุด)
   tri: Uint32Array;         // สามเหลี่ยม (3 จุดต่อรูป) — หันหน้าออกนอกกระเป๋า
   part: Uint8Array;         // จุดนี้เป็นของ 0 = แผ่นหน้า · 1 = แผ่นหลัง · 2 = ชิ้นคั่นกลาง
+  pids: string[];           // รหัสชิ้นที่มีในตาข่าย
+  vpid: Uint16Array;        // จุดนี้เป็นของชิ้นไหน (ลำดับใน pids) — จุดบนตะเข็บนับเป็นของแผ่นหน้า/หลัง
   edges: Uint32Array; edgeLen: Float32Array;     // ระยะที่ต้องคงเดิม (ผ้าไม่ยืด)
   bends: Uint32Array; bendLen: Float32Array;     // คู่จุดตรงข้ามของสามเหลี่ยมติดกัน (ต้านการพับ)
   stitches: Uint32Array;                          // คู่จุดที่เย็บติดกันแต่ตำแหน่งไม่ตรงกันพอดี (ดึงเข้าหากัน)
   width: number; height: number; depth: number;
 };
-export type SimParams = { stiffness: number; fill: number };
+/** stiffness = ความอยู่ทรงกลาง · perPiece = ความอยู่ทรงรายชิ้น (รหัสชิ้น → 0–1) ทับค่ากลางของชิ้นนั้น */
+export type SimParams = { stiffness: number; fill: number; perPiece?: Record<string, number> };
 
 const inPoly = (x: number, y: number, P: Pt[]) => {
   let c = false;
@@ -115,18 +118,19 @@ function panelMesh(outline: Pt[], holes: Pt[][], cell: number): { pts: Pt[]; tri
 export function buildSimMesh(A: AssemblyOk, cell?: number): SimMesh {
   const D = A.depth, zf = D / 2, zb = -D / 2;
   const c = cell ?? Math.max(1.2, Math.min(3, Math.sqrt((2 * A.width * A.height + (2 * A.height + A.width) * D) / 1200)));
-  const pos: number[] = [], part: number[] = [], tri: number[] = [], index = new Map<string, number>();
+  const pos: number[] = [], part: number[] = [], vpid: number[] = [], pids: string[] = [], tri: number[] = [], index = new Map<string, number>();
+  const pidIx = (pid: string) => { const k = pids.indexOf(pid); return k >= 0 ? k : pids.push(pid) - 1; };
   const key = (x: number, y: number, z: number) => `${Math.round(x * 200)},${Math.round(y * 200)},${Math.round(z * 200)}`;
-  const vertex = (x: number, y: number, z: number, p: number): number => {
+  const vertex = (x: number, y: number, z: number, p: number, owner: number): number => {
     const k = key(x, y, z), hit = index.get(k);
     if (hit !== undefined) return hit;
-    const i = part.length; index.set(k, i); pos.push(x, y, z); part.push(p); return i;
+    const i = part.length; index.set(k, i); pos.push(x, y, z); part.push(p); vpid.push(owner); return i;
   };
   const backBoundary: number[] = [];
   A.panels.forEach((pn, pi) => {
     if (pn.outline.length < 3) return;
     const m = panelMesh(pn.outline, pn.holes, c), z = pn.side > 0 ? zf : zb, p = pn.side > 0 ? 0 : 1;
-    const ids = m.pts.map(([x, y]) => vertex(x, y, z, p));
+    const owner = pidIx(pn.pid), ids = m.pts.map(([x, y]) => vertex(x, y, z, p, owner));
     if (pi === 1) for (let i = 0; i < resampleLine(pn.outline, c, true).length; i++) backBoundary.push(ids[i]);
     for (let i = 0; i < m.tri.length; i += 3) {
       const a = ids[m.tri[i]], b = ids[m.tri[i + 1]], q = ids[m.tri[i + 2]];
@@ -138,18 +142,18 @@ export function buildSimMesh(A: AssemblyOk, cell?: number): SimMesh {
   for (const sw of A.sweeps) {
     const line = resampleLine(sw.pts, c, false);
     if (line.length < 2) continue;
-    const rows: number[][] = [];
+    const rows: number[][] = [], owner = pidIx(sw.pid);
     for (let j = 0; j <= nz; j++) {
       const z = zf + ((zb - zf) * j) / nz;
       rows.push(line.map(([x, y]) => {
         if (j === nz && !index.has(key(x, y, z)) && backBoundary.length) {
-          const v = vertex(x, y, z, 2);
+          const v = vertex(x, y, z, 2, owner);
           let best = -1, bd = c * 1.6;
           for (const b of backBoundary) { const d = Math.hypot(pos[b * 3] - x, pos[b * 3 + 1] - y); if (d < bd) { bd = d; best = b; } }
           if (best >= 0) stitches.push(v, best);
           return v;
         }
-        return vertex(x, y, z, 2);
+        return vertex(x, y, z, 2, owner);
       }));
     }
     for (let j = 0; j < nz; j++) for (let i = 0; i + 1 < line.length; i++) {
@@ -173,7 +177,7 @@ export function buildSimMesh(A: AssemblyOk, cell?: number): SimMesh {
   }
   const lens = (pairs: number[]) => Float32Array.from({ length: pairs.length / 2 }, (_, i) => len(pairs[i * 2], pairs[i * 2 + 1]));
   return {
-    n, rest: Float32Array.from(pos), tri: Uint32Array.from(tri), part: Uint8Array.from(part),
+    n, rest: Float32Array.from(pos), tri: Uint32Array.from(tri), part: Uint8Array.from(part), pids, vpid: Uint16Array.from(vpid),
     edges: Uint32Array.from(edges), edgeLen: lens(edges), bends: Uint32Array.from(bends), bendLen: lens(bends), stitches: Uint32Array.from(stitches),
     width: A.width, height: A.height, depth: D,
   };
@@ -197,10 +201,23 @@ const DAMP = 0.9;
 const ITER = 6;
 const GAP = 0.15;           // แผ่นหน้า/หลังห้ามเข้าใกล้กึ่งกลางเกินนี้ (กันทะลุกันแบบง่าย)
 
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
 export function createBagSim(mesh: SimMesh, params: SimParams = { stiffness: 0.5, fill: 0 }): BagSim {
   const n = mesh.n, pos = Float32Array.from(mesh.rest), prev = Float32Array.from(mesh.rest);
   let p = { ...params }, quiet = 0, steps = 0, done = false;
-  const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
+  // ค่าต่อจุด / ต่อสปริงพับ — คิดใหม่ทุกครั้งที่เปลี่ยนค่า (ไม่คิดในวงจำลอง)
+  const kRestV = new Float32Array(n), kBendE = new Float32Array(mesh.bendLen.length);
+  const prepare = () => {
+    const base = clamp01(p.stiffness), sv = new Float32Array(n);
+    const per = mesh.pids.map((pid) => { const v = p.perPiece?.[pid]; return v == null || !Number.isFinite(v) ? base : clamp01(v); });
+    for (let v = 0; v < n; v++) {
+      const s = per[mesh.vpid[v]] ?? base; sv[v] = s;
+      // จุดอิสระจะทรุดลงได้ราว sag ซม. ก่อนแรงดึงกลับทรงเดิมจะสู้แรงโน้มถ่วงได้ (แข็งสุด = ไม่ทรุดเลย)
+      const sag = mesh.height * 0.6 * (1 - s) * (1 - s);
+      kRestV[v] = sag < 1e-4 ? 1 : Math.min(1, G_STEP / sag);
+    }
+    for (let e = 0; e < kBendE.length; e++) { const s = (sv[mesh.bends[e * 2]] + sv[mesh.bends[e * 2 + 1]]) / 2; kBendE[e] = 0.03 + 0.9 * s * s; }
+  };
   const pair = (a: number, b: number, rest: number, k: number) => {
     const ax = a * 3, bx = b * 3, dx = pos[bx] - pos[ax], dy = pos[bx + 1] - pos[ax + 1], dz = pos[bx + 2] - pos[ax + 2];
     const d = Math.hypot(dx, dy, dz); if (d < 1e-9) return;
@@ -208,9 +225,7 @@ export function createBagSim(mesh: SimMesh, params: SimParams = { stiffness: 0.5
     pos[ax] += dx * f; pos[ax + 1] += dy * f; pos[ax + 2] += dz * f; pos[bx] -= dx * f; pos[bx + 1] -= dy * f; pos[bx + 2] -= dz * f;
   };
   const step = (): number => {
-    const s = clamp01(p.stiffness), fill = clamp01(p.fill);
-    // ความอยู่ทรง: จุดอิสระจะทรุดลงได้ราว sag ซม. ก่อนแรงดึงกลับทรงเดิมจะสู้แรงโน้มถ่วงได้ (แข็งสุด = ไม่ทรุดเลย)
-    const sag = mesh.height * 0.6 * (1 - s) * (1 - s), kRest = sag < 1e-4 ? 1 : Math.min(1, G_STEP / sag), kBend = 0.03 + 0.9 * s * s;
+    const fill = clamp01(p.fill);
     const fillH = fill * mesh.height, fillZ = Math.max(GAP, (mesh.depth / 2) * fill * 0.9);
     for (let i = 0; i < n * 3; i += 3) {
       const vx = (pos[i] - prev[i]) * DAMP, vy = (pos[i + 1] - prev[i + 1]) * DAMP, vz = (pos[i + 2] - prev[i + 2]) * DAMP;
@@ -219,7 +234,7 @@ export function createBagSim(mesh: SimMesh, params: SimParams = { stiffness: 0.5
     }
     for (let it = 0; it < ITER; it++) {
       for (let e = 0; e < mesh.edgeLen.length; e++) pair(mesh.edges[e * 2], mesh.edges[e * 2 + 1], mesh.edgeLen[e], 1);
-      for (let e = 0; e < mesh.bendLen.length; e++) pair(mesh.bends[e * 2], mesh.bends[e * 2 + 1], mesh.bendLen[e], kBend);
+      for (let e = 0; e < mesh.bendLen.length; e++) pair(mesh.bends[e * 2], mesh.bends[e * 2 + 1], mesh.bendLen[e], kBendE[e]);
       for (let e = 0; e < mesh.stitches.length; e += 2) pair(mesh.stitches[e], mesh.stitches[e + 1], 0, 1);
       for (let v = 0, i = 0; v < n; v++, i += 3) {
         if (pos[i + 1] < 0) { pos[i + 1] = 0; pos[i] = prev[i] + (pos[i] - prev[i]) * 0.3; pos[i + 2] = prev[i + 2] + (pos[i + 2] - prev[i + 2]) * 0.3; }   // พื้นโต๊ะ + แรงเสียดทาน
@@ -230,15 +245,16 @@ export function createBagSim(mesh: SimMesh, params: SimParams = { stiffness: 0.5
     }
     let move = 0;
     for (let i = 0; i < n * 3; i++) {
-      pos[i] += (mesh.rest[i] - pos[i]) * kRest;
+      pos[i] += (mesh.rest[i] - pos[i]) * kRestV[(i / 3) | 0];
       if (!Number.isFinite(pos[i])) pos[i] = mesh.rest[i];                          // กันตัวเลขพัง (ไม่ควรเกิด)
       const d = Math.abs(pos[i] - prev[i]); if (d > move) move = d;
     }
     return move;
   };
+  prepare();
   return {
     mesh, pos,
-    setParams: (next) => { p = { ...next }; done = false; quiet = 0; steps = 0; },
+    setParams: (next) => { p = { ...next }; prepare(); done = false; quiet = 0; steps = 0; },
     advance: (count = 1) => {
       if (done) return false;
       for (let k = 0; k < count; k++) {

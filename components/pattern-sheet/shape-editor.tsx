@@ -30,15 +30,17 @@ import {
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 import { SEAM_KINDS, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, extendSide, pieceEdges, pointAlong, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
+import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
+import { ColorInput } from "@/components/color-picker";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
 /** pid = รหัสชิ้น (ผูกบรรทัดตีราคา) · at = ตำแหน่งบนกระดาน (มุมซ้ายบนเส้นเย็บ) · src = บรรทัดเดิมที่ชิ้นนี้มาจาก */
-export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[] };
-export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges: number[] | null; foldEdges: number[] | null; edgeMeta: EdgeMeta[] | null; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[] };
+export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[] };
+export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges: number[] | null; foldEdges: number[] | null; edgeMeta: EdgeMeta[] | null; info: PieceInfo | null; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[] };
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
-type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[] };
+type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[] };
 export type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure" | "sew" | "sewedit";
 export const SEAM_COLORS = ["#c2410c", "#2563eb", "#059669", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#4b5563"];
 type MeasureMode = "line" | "curve" | "edge";
@@ -126,7 +128,7 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange }: {
   /** ชิ้นบนกระดานแบบสด (ตอนเปิด + ทุกครั้งที่เปลี่ยน รวมระหว่างลาก) — ไว้วาดภาพ 3D ตาม */
   onLive?: (pieces: ResultPiece[]) => void;
   /** เพิ่มชิ้นเข้ากระดานจากภายนอก (เช่น ตัวสร้างจากแม่แบบทรง) — nonce เปลี่ยน = เพิ่ม 1 ครั้ง · ชิ้นที่มี at วางเป็นกลุ่มต่อจากขวาสุดของกระดาน · ย้อนกลับได้ */
@@ -155,6 +157,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   onSeamsChange?: (next: Seam[]) => void;
   /** เครื่องมือตอนเปิดกระดาน (เช่น "sew" เมื่อมาจากปุ่ม ไปเย็บ) */
   initialTool?: Tool;
+  /** แผงชิ้นมีหัวข้อ "ข้อมูลชิ้นและการอยู่ทรง" (รหัส · ชนิด · แผ่นเสริม · ปาดขอบ · แข็งอยู่ทรง) + ทิศทางผ้าเป็นองศา — แอปสตูดิโอแพทเทิร์นเปิด · ใบงานออกแบบไม่เปิด */
+  pieceInfoFields?: boolean;
+  /** ค่าของวัสดุ (ความอยู่ทรง · ความหนา · สี) ต่อรหัสวัสดุ — ส่งพร้อม onMatPropsChange = ป้ายวัสดุมีปุ่มตั้งค่า */
+  matProps?: Record<string, MatProps>;
+  onMatPropsChange?: (next: Record<string, MatProps>) => void;
   initial?: EditorPiece[];
   initialBasis?: ShapeBasis;
   title?: string;
@@ -179,7 +186,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if (p.at) { dx = p.at[0] - b.x; dy = p.at[1] - b.y; }
       else { dx = x + a - b.x; dy = a - b.y; x += b.w + 2 * a + 2; }
       const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [] }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, info: p.info ?? null, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
     });
   });
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
@@ -198,6 +205,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [sewA, setSewA] = useState<SeamSide | null>(null);        // ด้านแรกที่เลือกไว้ รอคลิกขอบคู่
   const [sewSel, setSewSel] = useState<string | null>(null);      // ตะเข็บที่เลือก (เครื่องมือแก้ตะเข็บ)
   const [edgeSel, setEdgeSel] = useState<{ pid: string; i: number; n: number } | null>(null);   // ขอบที่เลือก (เครื่องมือแก้ตะเข็บ) → แผงขวาแสดงค่าของขอบ
+  const [matOpen, setMatOpen] = useState<string | null>(null);     // วัสดุที่กำลังเปิดตั้งค่า (ในแผงชิ้น)
   const [divN, setDivN] = useState(2);                            // แบ่งขอบเป็นกี่ช่วง (วางรอยบาก)
   const [notchAt, setNotchAt] = useState(5);                      // วางรอยบากที่ระยะจากต้นขอบ (ซม.)
   const [sewHover, setSewHover] = useState<string | null>(null);  // ขอบที่ชี้อยู่ "pid:i:n"
@@ -356,7 +364,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       const dx = (p.at ? x0 + p.at[0] : x + a) - b.x, dy = (p.at ? p.at[1] : a) - b.y;
       if (!p.at) x += b.w + 2 * a + 2;
       const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [] }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, info: p.info ?? null, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
     });
     const next = addPieces(list);
     if (next) { changeTool("move"); fitView(next); }
@@ -925,7 +933,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const buildResult = (): ShapeEditorResult => ({
     pieces: piecesRef.current.map((p) => {
       const g = pieceGeometry(p);
-      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: edgeAllowances(p.shape, p.allowEdges, p.allow), foldEdges: cleanFoldEdges(p.shape, p.foldEdges), edgeMeta: cleanEdgeMeta(p.shape, p.edgeMeta), name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [] };
+      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: edgeAllowances(p.shape, p.allowEdges, p.allow), foldEdges: cleanFoldEdges(p.shape, p.foldEdges), edgeMeta: cleanEdgeMeta(p.shape, p.edgeMeta), info: cleanPieceInfo(p.info), name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [] };
     }),
     basis: basisRef.current,
     refs: refsRef.current.map((r) => ({ url: r.url, ...(r.label ? { label: r.label } : {}), x: r.x, y: r.y, w: r.w, ar: r.ar, op: r.op })),
@@ -935,7 +943,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     onSave?.(buildResult());
   };
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
-  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches, p.allowEdges ?? null, p.foldEdges ?? null, p.edgeMeta ?? null]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
+  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches, p.allowEdges ?? null, p.foldEdges ?? null, p.edgeMeta ?? null, p.info ?? null]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
   const lastSig = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flush = useCallback(() => {
@@ -1700,7 +1708,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <div className="mb-1.5 flex flex-wrap gap-1">
                   {selPiece.mats.length ? selPiece.mats.map((m) => (
                     <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
+                      {matProps?.[m.id]?.color && <span className="h-2.5 w-2.5 rounded-full border border-white" style={{ background: matProps[m.id].color }} />}
                       {m.name}
+                      {onMatPropsChange && <button type="button" onClick={() => setMatOpen(matOpen === m.id ? null : m.id)} aria-pressed={matOpen === m.id} title={t("ตั้งค่าวัสดุ: ความอยู่ทรง ความหนา สี", "Material settings: stiffness, thickness, colour")} aria-label={t(`ตั้งค่า ${m.name}`, `Settings for ${m.name}`)} className={matProps?.[m.id] ? "text-blue-600" : "text-blue-300 hover:text-blue-600"}><Icon value="i:adjustments-horizontal" className="text-[13px]" /></button>}
                       <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, mats: p.mats.filter((x) => x.id !== m.id) }))} aria-label={t(`เอา ${m.name} ออก`, `Remove ${m.name}`)} className="text-blue-400 hover:text-rose-600">✕</button>
                     </span>
                   )) : <span className="text-amber-600">{t("ยังไม่เลือกวัสดุ", "No material yet")}</span>}
@@ -1709,7 +1719,55 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   ? <SearchableSelect value="" options={matOptions} placeholder={t("＋ เพิ่มวัสดุ (เช่น หนัง, ซับใน)", "＋ Add material (e.g. leather, lining)")}
                       onChange={(v) => { const m = materials.find((x) => x.id === v); if (m) patchPiece(selPiece.id, (p) => ({ ...p, mats: [...p.mats, { id: m.id, name: m.name }] })); }} />
                   : <div className="text-slate-400">{t("เลือกวัสดุในตารางตีราคาทีหลังได้", "Pick materials in the costing table later")}</div>}
+                {onMatPropsChange && matOpen && selPiece.mats.some((m) => m.id === matOpen) && (() => {
+                  const m = selPiece.mats.find((x) => x.id === matOpen)!, cur = matProps?.[m.id], val: MatProps = cur ?? { stiff: 0.5, thick: 1 };
+                  const put = (next: MatProps) => onMatPropsChange({ ...(matProps ?? {}), [m.id]: next });
+                  return (
+                    <div className="mt-2 space-y-1.5 rounded-md border border-blue-200 bg-white p-2">
+                      <div className="font-medium text-slate-700">{t(`ค่าของวัสดุ: ${m.name}`, `Material values: ${m.name}`)}</div>
+                      <label className="block space-y-1"><span className="text-slate-500">{t("ชุดค่าสำเร็จ", "Preset")}</span>
+                        <select value={val.preset ?? ""} disabled={readonly} onChange={(e) => { const pz = MAT_PRESETS.find((x) => x.key === e.target.value); if (pz) put({ ...val, preset: pz.key, stiff: pz.stiff, thick: pz.thick }); else { const { preset: _p, ...rest } = val; void _p; put(rest); } }} className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5">
+                          <option value="">{t("ตั้งเอง", "Custom")}</option>
+                          {MAT_PRESETS.map((pz) => <option key={pz.key} value={pz.key}>{t(pz.th, pz.en)}</option>)}
+                        </select></label>
+                      <label className="block space-y-0.5"><span className="flex justify-between text-slate-500"><span>{t("ความอยู่ทรง (0 นิ่ม – 1 แข็ง)", "Holds its shape (0 soft – 1 rigid)")}</span><b className="tabular-nums text-slate-700">{val.stiff.toFixed(2)}</b></span>
+                        <input type="range" min={0} max={1} step={0.05} value={val.stiff} disabled={readonly} onChange={(e) => { const { preset: _p, ...rest } = val; void _p; put({ ...rest, stiff: Number(e.target.value) }); }} className="w-full accent-blue-600" /></label>
+                      <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("ความหนา (มม.)", "Thickness (mm)")}</span><NumField value={val.thick} min={0.1} max={20} label={t("ความหนา มม.", "Thickness mm")} onCommit={(v) => { const { preset: _p, ...rest } = val; void _p; put({ ...rest, thick: v }); }} className="w-16" /></div>
+                      <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("สีในภาพ 3D", "Colour in 3D")}</span><ColorInput value={val.color ?? "#d8c08c"} allowText={false} onChange={(c) => put({ ...val, color: c })} /></div>
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400"><span>{t("ค่านี้ใช้ทั้งแพทเทิร์นใบนี้ (ทุกชิ้นที่ใช้วัสดุนี้) · เป็นค่าประมาณ ไม่ใช่ค่าวัดจริง", "Applies to every piece using this material in this pattern · estimates, not measured values")}</span>
+                        {cur && !readonly && <button type="button" onClick={() => { const next = { ...(matProps ?? {}) }; delete next[m.id]; onMatPropsChange(next); }} className="shrink-0 text-blue-700 hover:underline">{t("ล้างค่า", "Clear")}</button>}</div>
+                    </div>
+                  );
+                })()}
               </div>
+              {pieceInfoFields && (() => {
+                const inf = selPiece.info ?? {};
+                const setInfo = (f: (x: PieceInfo) => PieceInfo, key?: string) => patchPiece(selPiece.id, (p) => { const next = f(p.info ?? {}); return { ...p, info: Object.keys(next).length ? next : null }; }, key);
+                const drop = <K extends keyof PieceInfo>(x: PieceInfo, k: K): PieceInfo => { const { [k]: _d, ...rest } = x; void _d; return rest; };
+                return (
+                  <div className="space-y-1.5">
+                    <div className="font-medium text-slate-600">{t("ข้อมูลชิ้นและการอยู่ทรง", "Piece details and stiffness")}</div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="space-y-0.5"><span className="text-slate-500">{t("รหัสชิ้น", "Piece code")}</span>
+                        <input key={`${selPiece.id}:${inf.code ?? ""}`} defaultValue={inf.code ?? ""} disabled={readonly} maxLength={30} placeholder="FR-01" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (inf.code ?? "")) setInfo((x) => (v ? { ...x, code: v } : drop(x, "code"))); }} className="h-8 w-full rounded-md border border-slate-200 px-2 disabled:bg-slate-50" /></label>
+                      <label className="space-y-0.5"><span className="text-slate-500">{t("ชนิดชิ้น", "Piece type")}</span>
+                        <select value={inf.role ?? ""} disabled={readonly} onChange={(e) => { const v = e.target.value as PieceRole | ""; setInfo((x) => (v ? { ...x, role: v } : drop(x, "role"))); }} className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 disabled:bg-slate-50">
+                          <option value="">{t("ยังไม่ระบุ", "Not set")}</option>{PIECE_ROLES.map((r0) => <option key={r0.key} value={r0.key}>{t(r0.th, r0.en)}</option>)}
+                        </select></label>
+                    </div>
+                    <label className="block space-y-0.5"><span className="text-slate-500">{t("ติดแผ่นเสริม", "Bonded reinforcement")}</span>
+                      <select value={inf.bond ?? ""} disabled={readonly} onChange={(e) => { const v = e.target.value as BondKind | ""; setInfo((x) => (v ? { ...x, bond: v } : drop(x, "bond"))); }} className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 disabled:bg-slate-50">
+                        <option value="">{t("ไม่ติด", "None")}</option>{BOND_KINDS.map((b0) => <option key={b0.key} value={b0.key}>{t(b0.th, b0.en)}</option>)}
+                      </select></label>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2"><input type="checkbox" checked={inf.skive != null} disabled={readonly} onChange={(e) => setInfo((x) => (e.target.checked ? { ...x, skive: 8 } : drop(x, "skive")))} className="h-3.5 w-3.5 accent-blue-600" />{t("ปาดขอบ", "Skive edges")}</label>
+                      {inf.skive != null && <><NumField value={inf.skive} min={1} max={50} step={1} label={t("กว้างที่ปาด มม.", "Skive width mm")} onCommit={(v) => setInfo((x) => ({ ...x, skive: v }), `skive-${selPiece.id}`)} className="w-14" /><span className="text-slate-400">{t("มม.", "mm")}</span></>}
+                    </div>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={!!inf.solid} disabled={readonly} onChange={(e) => setInfo((x) => (e.target.checked ? { ...x, solid: true } : drop(x, "solid")))} className="h-3.5 w-3.5 accent-blue-600" />{t("ชิ้นนี้แข็งอยู่ทรง (ไม่ทรุดในภาพจำลอง)", "This piece is rigid (does not slump in the simulation)")}</label>
+                    <div className="text-[11px] text-slate-400">{t("แผ่นเสริมกับแข็งอยู่ทรง มีผลกับภาพจำลองวัสดุทิ้งตัวในแท็บประกอบ 3D · รหัส ชนิด ปาดขอบ ออกในใบพิมพ์", "Reinforcement and rigid affect the drape simulation in the Assemble 3D tab · code, type and skive print on the sheet")}</div>
+                  </div>
+                );
+              })()}
 
               <div>
                 <div className="mb-1 font-medium text-slate-600">{t("เผื่อพับ / เผื่อเย็บ (ซม.)", "Fold / seam allowance (cm)")}</div>
@@ -1820,6 +1878,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     <span className="w-16">{t("เส้นทางผ้า", "Grain")}</span>
                     <button type="button" onClick={toggleGrain} className={`h-7 rounded-md border px-2 ${selPiece.grain ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 hover:bg-slate-50"}`}>{selPiece.grain ? t("ซ่อน", "Hide") : t("แสดง", "Show")}</button>
                     {selPiece.grain && <button type="button" onClick={turnGrain} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50">{t("หมุน 90°", "Turn 90°")}</button>}
+                    {pieceInfoFields && selPiece.grain && selPiece.grain.length === 2 && (() => {   // ทิศทางผ้าเป็นองศา: 0 = แนวตั้ง · บวก = เอียงตามเข็ม
+                      const [[x1, y1], [x2, y2]] = selPiece.grain, deg = Math.round(((Math.atan2(x2 - x1, -(y2 - y1)) * 180) / Math.PI + 360) % 180);
+                      return <><NumField value={deg} min={0} max={179} step={1} label={t("ทิศทางผ้า องศา", "Grain angle degrees")} className="w-14" onCommit={(v) => patchPiece(selPiece.id, (p) => {
+                        if (!p.grain || p.grain.length !== 2) return p;
+                        const [[a1, b1], [a2, b2]] = p.grain, mx = (a1 + a2) / 2, my = (b1 + b2) / 2, h = Math.hypot(a2 - a1, b2 - b1) / 2, r = (v * Math.PI) / 180;
+                        return { ...p, grain: [[mx - Math.sin(r) * h, my + Math.cos(r) * h], [mx + Math.sin(r) * h, my - Math.cos(r) * h]] };
+                      })} /><span className="text-slate-400">°</span></>;
+                    })()}
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <span className="w-16">{t("รอยบาก", "Notches")}</span>

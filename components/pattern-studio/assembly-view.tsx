@@ -34,7 +34,9 @@ function handleAttaches(A: AssemblyOk, f: HandleForm, stamp: string): Attach[] {
   return A.back === A.front ? [one("front", 0)] : [one("front", 0), one("back", 1)];
 }
 
-export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange }: {
+export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange, pieceStiff }: {
+  /** ความอยู่ทรงของชิ้น (จากวัสดุ / แผ่นเสริม / ตั้งให้แข็ง) — fallback = ค่ากลางจากแถบเลื่อน · ไม่ส่ง = ใช้ค่ากลางทุกชิ้น */
+  pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null;
   /** แก้จุดติด (ติดหู / ปิดหลังช่อง / เอาออก) — ไม่ส่ง = ดูอย่างเดียว */
   onAttachesChange?: (next: Attach[]) => void;
   pieces: AsmPiece[];
@@ -56,7 +58,9 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const [simWake, setSimWake] = useState(0);
   const [simInfo, setSimInfo] = useState<{ h: number; done: boolean } | null>(null);
   const sim = useMemo(() => { if (!simOn || !A0.ok) return null; try { return createBagSim(buildSimMesh(A0), { stiffness: 0.5, fill: 0 }); } catch { return null; } }, [simOn, A0]);
-  useEffect(() => { if (!sim) return; sim.setParams({ stiffness: stiff, fill }); setSimWake((n) => n + 1); }, [sim, stiff, fill]);
+  const stiffRows = useMemo(() => (sim ? sim.mesh.pids.map((pid) => ({ pid, ...(pieceStiff?.(pid, stiff) ?? { s: stiff, why: "" }) })) : []), [sim, pieceStiff, stiff]);
+  const stiffKey = stiffRows.map((x) => `${x.pid}:${x.s}`).join("|");
+  useEffect(() => { if (!sim) return; sim.setParams({ stiffness: stiff, fill, perPiece: Object.fromEntries(stiffRows.map((x) => [x.pid, x.s])) }); setSimWake((n) => n + 1); }, [sim, stiff, fill, stiffKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!sim) { setSimInfo(null); return; }
     const id = window.setInterval(() => setSimInfo({ h: sim.height(), done: sim.settled() }), 400);
@@ -127,8 +131,14 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
         </div>
         {simOn && sim && (
           <div className="grid gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs sm:grid-cols-2">
-            <RangeInput label={t("ความอยู่ทรงของวัสดุ (0 = ผ้านิ่ม · 1 = แข็งอยู่ทรง)", "How well the material holds its shape (0 = soft · 1 = rigid)")} min={0} max={1} step={0.05} value={stiff} onChange={setStiff} />
+            <RangeInput label={t("ความอยู่ทรงกลาง — ใช้กับชิ้นที่ยังไม่ได้ตั้งค่าวัสดุ (0 = ผ้านิ่ม · 1 = แข็ง)", "Default stiffness — for pieces without material values (0 = soft · 1 = rigid)")} min={0} max={1} step={0.05} value={stiff} onChange={setStiff} />
             <RangeInput label={t("ของข้างใน (0 = เปล่า · 1 = เต็มใบ)", "Contents (0 = empty · 1 = full)")} min={0} max={1} step={0.05} value={fill} onChange={setFill} />
+            {stiffRows.length > 0 && (
+              <ul className="space-y-0.5 rounded-md bg-slate-50 p-2 text-[11px] text-slate-600 sm:col-span-2">
+                {stiffRows.map((x) => <li key={x.pid} className="flex justify-between gap-2"><span className="min-w-0 truncate">{nameOf(x.pid)}{x.why ? <span className="text-slate-400"> · {x.why}</span> : null}</span><b className="tabular-nums">{x.s.toFixed(2)}</b></li>)}
+                <li className="text-slate-400">{t("ตั้งค่าได้ที่แท็บวาดชิ้น: กดชิ้น → ปุ่มตั้งค่าบนป้ายวัสดุ / หัวข้อ ข้อมูลชิ้นและการอยู่ทรง", "Set these in the Draw tab: select a piece → the settings button on a material chip / Piece details and stiffness")}</li>
+              </ul>
+            )}
             <p className="text-[11px] text-slate-500 sm:col-span-2">{t("นี่คือการประมาณเพื่อให้เห็นภาพว่าวัสดุแข็งกับนิ่มต่างกันยังไง ไม่ใช่การคำนวณจากค่าวัสดุจริง (ไม่รู้น้ำหนัก ความหนา หรือตัวเสริมข้างใน) · ไม่แสดงหู ซับใน แผ่นใส · ชิ้นข้างอาจทะลุกันได้เมื่อวัสดุนิ่มมาก · ค่านี้ไม่ถูกบันทึก", "An approximation to show how firm and soft materials differ — not computed from real material data (weight, thickness or stiffeners are unknown). Handles, lining and clear panels are not shown; sides may pass through each other when very soft. These values are not saved.")}</p>
             <p className="text-[11px] text-slate-500 sm:col-span-2"><b>{t("ช่างคิดยังไง", "How a pattern maker thinks")}</b> · {t("กระเป๋าจะอยู่ทรงหรือไม่ ขึ้นกับวัสดุและตัวเสริม (แผ่นรองก้น ผ้ากาว กระดาษแข็ง) มากกว่ารูปแพทเทิร์น — ถ้าลองเลื่อนแล้วทรุดมาก แปลว่าทรงนี้ต้องใช้วัสดุแข็งขึ้นหรือเพิ่มตัวเสริม", "Whether a bag stands up depends on the material and stiffeners (base board, interfacing) more than on the pattern. If it slumps a lot here, this shape needs a firmer material or added stiffeners.")}</p>
           </div>

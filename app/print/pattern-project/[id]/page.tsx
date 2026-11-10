@@ -11,7 +11,7 @@ import { usePrintLog } from "@/components/report/use-print-log";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { PatternPrintView } from "@/components/pattern-sheet/print-view";
-import { projectEdgeRows, projectPatternLines, projectSeamRows, type PatternProject } from "@/lib/pattern-project";
+import { projectEdgeRows, projectPatternLines, projectPieceRows, projectSeamRows, type PatternProject } from "@/lib/pattern-project";
 
 export default function PrintPatternProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,9 +33,28 @@ export default function PrintPatternProjectPage() {
   const lines = useMemo(() => (project ? projectPatternLines(project.pieces ?? [], project.basis === "area" ? "area" : "box") : []), [project]);
   const seamRows = useMemo(() => (project ? projectSeamRows(project.pieces ?? [], project.seams ?? []) : []), [project]);
   const edgeRows = useMemo(() => (project ? projectEdgeRows(project.pieces ?? []) : []), [project]);
+  const pieceRows = useMemo(() => (project ? projectPieceRows(project.pieces ?? []) : []), [project]);
   const f1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
-  const th = "py-1 pr-2", tables = seamRows.length || edgeRows.length ? (
+  const th = "py-1 pr-2", tables = seamRows.length || edgeRows.length || pieceRows.length ? (
     <div className="space-y-3">
+      {pieceRows.length > 0 && (
+        <div className="break-inside-avoid">
+          <div className="mb-1 text-[11px] font-medium text-slate-600">รายละเอียดชิ้น</div>
+          <table className="w-full border-collapse text-[12px]">
+            <thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500">
+              <th className={th}>ชิ้น</th><th className={th}>รหัส</th><th className={th}>ชนิด</th><th className={th}>แผ่นเสริม</th><th className={th}>ปาดขอบ</th><th className="py-1">อยู่ทรง</th>
+            </tr></thead>
+            <tbody>
+              {pieceRows.map((r, i) => (
+                <tr key={i} className="border-b border-slate-100">
+                  <td className={th}>{r.piece}</td><td className={th}>{r.code || "—"}</td><td className={th}>{r.role || "—"}</td><td className={th}>{r.bond || "—"}</td>
+                  <td className={th}>{r.skive != null ? `${r.skive} มม.` : "—"}</td><td className="py-1">{r.solid ? "แข็งอยู่ทรง" : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {seamRows.length > 0 && (
         <div className="break-inside-avoid">
           <div className="mb-1 text-[11px] font-medium text-slate-600">ตารางตะเข็บ ({seamRows.length} แนว)</div>

@@ -33,7 +33,81 @@ export type ProjectPiece = {
   shape: Shape; holes: Shape[]; grain: [Pt, Pt] | null; notches: Pt[]; at: [number, number];
   /** วัสดุของชิ้น (รหัสวัสดุตีราคา design_price_items + ชื่อ/ชนิด ณ ตอนเลือก) — 1 ชิ้นตัดจากหลายวัสดุได้ (เช่น หนัง + ซับใน) · ไม่มี = ยังไม่เลือก */
   mats?: PieceMaterial[];
+  /** ค่าของชิ้นแบบ CLO (รหัส · ชนิด · แผ่นเสริม · ปาดขอบ · แข็งอยู่ทรง) — ไม่มี = ไม่ได้ตั้ง */
+  info?: PieceInfo;
 };
+/** ชนิดชิ้น */
+export type PieceRole = "body" | "lining" | "reinforce" | "part";
+export const PIECE_ROLES: { key: PieceRole; th: string; en: string }[] = [
+  { key: "body", th: "ตัวกระเป๋า", en: "Body" }, { key: "lining", th: "ซับใน", en: "Lining" },
+  { key: "reinforce", th: "ตัวเสริม", en: "Reinforcement" }, { key: "part", th: "อะไหล่ / ชิ้นประกอบ", en: "Trim / part" },
+];
+/** แผ่นเสริมที่ติดกับชิ้น — add = ความอยู่ทรงที่เพิ่ม · min = อยู่ทรงอย่างน้อยเท่านี้ (ค่าประมาณให้เห็นภาพ ไม่ใช่ค่าวัดจริง) */
+export type BondKind = "fusible" | "foam" | "board";
+export const BOND_KINDS: { key: BondKind; th: string; en: string; add: number; min: number }[] = [
+  { key: "fusible", th: "ผ้ากาว", en: "Fusible interfacing", add: 0.2, min: 0 },
+  { key: "foam", th: "โฟม / ฟองน้ำ", en: "Foam", add: 0.15, min: 0.5 },
+  { key: "board", th: "กระดาษแข็ง / แผ่นรอง", en: "Board", add: 0, min: 0.9 },
+];
+export type PieceInfo = { code?: string; role?: PieceRole; bond?: BondKind; skive?: number; solid?: boolean };
+export function cleanPieceInfo(raw: unknown): PieceInfo | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>, out: PieceInfo = {};
+  const code = typeof r.code === "string" ? r.code.trim().slice(0, 30) : "";
+  if (code) out.code = code;
+  if (PIECE_ROLES.some((x) => x.key === r.role)) out.role = r.role as PieceRole;
+  if (BOND_KINDS.some((x) => x.key === r.bond)) out.bond = r.bond as BondKind;
+  const sk = fin(r.skive);
+  if (sk != null && sk >= 1 && sk <= 50) out.skive = Math.round(sk * 10) / 10;
+  if (r.solid === true) out.solid = true;
+  return Object.keys(out).length ? out : null;
+}
+
+/** ค่าของวัสดุในแพทเทิร์นใบนี้ (แบบ Fabric ของ CLO แต่ย่อ): ความอยู่ทรง 0–1 · ความหนา มม. · สีในภาพ 3D — เก็บใน template.matProps (ไม่แตะข้อมูลวัสดุกลาง) */
+export type MatProps = { preset?: string; stiff: number; thick: number; color?: string };
+/** ชุดค่าสำเร็จ — ค่าประมาณจากลักษณะวัสดุทั่วไป ให้ช่างปรับตามของจริง */
+export const MAT_PRESETS: { key: string; th: string; en: string; stiff: number; thick: number }[] = [
+  { key: "pu", th: "หนัง PU / หนังเทียม", en: "PU leather", stiff: 0.7, thick: 1.2 },
+  { key: "leather", th: "หนังแท้หนา", en: "Thick leather", stiff: 0.8, thick: 1.8 },
+  { key: "canvas", th: "แคนวาสหนา", en: "Heavy canvas", stiff: 0.55, thick: 0.8 },
+  { key: "nylon", th: "ไนลอน / โพลีเอสเตอร์", en: "Nylon / polyester", stiff: 0.25, thick: 0.4 },
+  { key: "lining", th: "ผ้าซับใน", en: "Lining fabric", stiff: 0.12, thick: 0.3 },
+  { key: "pvc", th: "แผ่นใส PVC", en: "Clear PVC", stiff: 0.6, thick: 0.5 },
+];
+export function cleanMatProps(raw: unknown): Record<string, MatProps> {
+  const out: Record<string, MatProps> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>).slice(0, 60)) {
+    if (!v || typeof v !== "object" || id.length > 80) continue;
+    const r = v as Record<string, unknown>, stiff = fin(r.stiff), thick = fin(r.thick);
+    if (stiff == null || thick == null) continue;
+    const m: MatProps = { stiff: Math.min(1, Math.max(0, Math.round(stiff * 100) / 100)), thick: Math.min(20, Math.max(0.1, Math.round(thick * 10) / 10)) };
+    if (typeof r.preset === "string" && MAT_PRESETS.some((x) => x.key === r.preset)) m.preset = r.preset;
+    if (typeof r.color === "string" && /^#[0-9a-fA-F]{6}$/.test(r.color)) m.color = r.color.toLowerCase();
+    out[id] = m;
+  }
+  return out;
+}
+/**
+ * ความอยู่ทรงของชิ้น (0 นิ่ม – 1 แข็ง) ที่ตัวจำลองใช้ + เหตุผลภาษาคน
+ *   แข็งอยู่ทรง = 1 · ไม่งั้นเริ่มจากวัสดุแรกที่ตั้งค่าไว้ (ไม่มี = ค่ากลางที่ส่งมา) แล้วบวกแผ่นเสริม
+ */
+export function pieceStiffness(p: ProjectPiece, matProps: Record<string, MatProps>, fallback: number): { s: number; why: string } {
+  if (p.info?.solid) return { s: 1, why: "ตั้งให้แข็งอยู่ทรง" };
+  const m = (p.mats ?? []).find((x) => matProps[x.id]);
+  let s = m ? matProps[m.id].stiff : fallback, why = m ? `วัสดุ ${m.name}` : "ยังไม่ได้ตั้งค่าวัสดุ (ใช้ค่ากลาง)";
+  const b = BOND_KINDS.find((x) => x.key === p.info?.bond);
+  if (b) { s = Math.max(b.min, Math.min(1, s + b.add)); why += ` + ${b.th}`; }
+  return { s: Math.round(Math.min(1, Math.max(0, s)) * 100) / 100, why };
+}
+/** แถวของ "รายละเอียดชิ้น" ในใบพิมพ์ (เฉพาะชิ้นที่ตั้งค่าอะไรไว้) */
+export type PieceRow = { piece: string; code: string; role: string; bond: string; skive: number | null; solid: boolean };
+export function projectPieceRows(pieces: ProjectPiece[]): PieceRow[] {
+  return pieces.flatMap((p, k) => (p.info ? [{
+    piece: p.name || `ชิ้น ${k + 1}`, code: p.info.code ?? "", role: PIECE_ROLES.find((x) => x.key === p.info?.role)?.th ?? "",
+    bond: BOND_KINDS.find((x) => x.key === p.info?.bond)?.th ?? "", skive: p.info.skive ?? null, solid: !!p.info.solid,
+  }] : []));
+}
 export type PieceMaterial = { id: string; name: string; group?: string };
 export const NO_MATERIAL = "ยังไม่เลือกวัสดุ";
 export type PatternProject = {
@@ -62,7 +136,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
     const at = pt(r.at);
     seen.add(pid);
     const allow = cleanAllow(r.allow), per = edgeAllowances(shape, r.allowEdges, allow);
-    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta);
+    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta), info = cleanPieceInfo(r.info);
     const mats: PieceMaterial[] = [];
     for (const m of (Array.isArray(r.mats) ? r.mats : []).slice(0, 8)) {
       const o = m as Record<string, unknown> | null;
@@ -70,7 +144,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
       if (mid && nm && !mats.some((y) => y.id === mid)) mats.push({ id: mid, name: nm, ...(grp ? { group: grp } : {}) });
     }
     out.push({
-      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}),
+      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}), ...(info ? { info } : {}),
       name: String(r.name ?? "").trim().slice(0, 60),
       count: Math.min(999, Math.max(1, Math.round(fin(r.count) ?? 1))),
       allow,
@@ -119,8 +193,9 @@ export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area
       ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}),
     });
     // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
-    if (!p.mats?.length) return [{ key: p.pid, item_name: pieceName, group_name: group, material: NO_MATERIAL, pieces: p.count, shape: shape(false) }];
-    return p.mats.map((m) => ({ key: `${p.pid}:${m.id}`, item_name: m.name, group_name: m.group || group, material: m.name, pieces: p.count, shape: shape(true) }));
+    const note = p.info?.code || null;   // รหัสชิ้นออกในช่องหมายเหตุของตารางชิ้น
+    if (!p.mats?.length) return [{ key: p.pid, item_name: pieceName, group_name: group, material: NO_MATERIAL, pieces: p.count, note, shape: shape(false) }];
+    return p.mats.map((m) => ({ key: `${p.pid}:${m.id}`, item_name: m.name, group_name: m.group || group, material: m.name, pieces: p.count, note, shape: shape(true) }));
   });
 }
 
@@ -133,7 +208,7 @@ export function cleanProjectPatch(body: Record<string, unknown>, currentPieces: 
   if ("note" in body) patch.note = String(body.note ?? "").slice(0, 4000);
   if ("sku_code" in body) patch.sku_code = String(body.sku_code ?? "").trim().slice(0, 80) || null;
   if ("basis" in body) patch.basis = body.basis === "area" ? "area" : "box";
-  if ("template" in body) patch.template = body.template && typeof body.template === "object" && !Array.isArray(body.template) && JSON.stringify(body.template).length < 4000 ? (body.template as Record<string, unknown>) : null;
+  if ("template" in body) patch.template = body.template && typeof body.template === "object" && !Array.isArray(body.template) && JSON.stringify(body.template).length < 12000 ? (body.template as Record<string, unknown>) : null;
   if ("pieces" in body) {
     if (!Array.isArray(body.pieces)) return { patch, error: "ข้อมูลชิ้นไม่ถูกรูปแบบ" };
     patch.pieces = cleanProjectPieces(body.pieces);
