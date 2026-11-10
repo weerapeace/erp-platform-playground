@@ -10,13 +10,14 @@
  *   <AssemblyView pieces={[{ pid, name, count, shape, holes }]} seams={seams} attaches={attaches} onGoSew={() => …} />
  * ใช้ที่: app/pattern-studio/[id] · คู่มือ: docs/pattern-studio.md
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { Pattern3D } from "@/components/pattern-3d";
 import { RangeInput } from "@/components/range-input";
 import { assemble, type AsmPiece, type AsmStepKey, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
 import { shapeBox } from "@/lib/pattern-shape";
+import { buildSimMesh, createBagSim } from "@/lib/pattern-sim";
 import type { Seam } from "@/lib/pattern-seams";
 
 const f1 = (x: number) => x.toFixed(1);
@@ -48,6 +49,19 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const A0 = useMemo(() => assemble(pieces, seams, attaches), [pieces, seams, attaches]);
   const A = useMemo(() => (hForm && A0.ok ? assemble(pieces, seams, [...attaches, ...handleAttaches(A0, hForm, "draft")]) : A0), [A0, hForm, pieces, seams, attaches]);
   const [explode, setExplode] = useState(0);
+  // จำลองวัสดุทิ้งตัว (ทดลอง): ตาข่ายสร้างจากผลประกอบที่บันทึกจุดติดแล้ว (ไม่รวมหูที่กำลังตั้งค่า) · ค่าความอยู่ทรง/ของข้างใน ไม่บันทึก
+  const [simOn, setSimOn] = useState(false);
+  const [stiff, setStiff] = useState(0.5);
+  const [fill, setFill] = useState(0);
+  const [simWake, setSimWake] = useState(0);
+  const [simInfo, setSimInfo] = useState<{ h: number; done: boolean } | null>(null);
+  const sim = useMemo(() => { if (!simOn || !A0.ok) return null; try { return createBagSim(buildSimMesh(A0), { stiffness: 0.5, fill: 0 }); } catch { return null; } }, [simOn, A0]);
+  useEffect(() => { if (!sim) return; sim.setParams({ stiffness: stiff, fill }); setSimWake((n) => n + 1); }, [sim, stiff, fill]);
+  useEffect(() => {
+    if (!sim) { setSimInfo(null); return; }
+    const id = window.setInterval(() => setSimInfo({ h: sim.height(), done: sim.settled() }), 400);
+    return () => window.clearInterval(id);
+  }, [sim]);
   const [stepMode, setStepMode] = useState(false);
   const [done, setDone] = useState(0);                       // เย็บไปแล้วกี่ขั้น (โหมดเย็บทีละขั้น)
   const [pick, setPick] = useState<string | null>(null);
@@ -100,8 +114,26 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-2">
-        <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />
-        {!stepMode && (
+        {simOn && sim
+          ? <Pattern3D mode="sim" sim={sim} simWake={simWake} colors={colors} height={560} />
+          : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />}
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+            <Icon value="i:wind" className="text-sm" />{simOn ? t("กลับไปภาพประกอบ", "Back to the assembled view") : t("จำลองวัสดุทิ้งตัว (ทดลอง)", "Simulate material drape (experimental)")}
+          </button>
+          {simOn && sim && <button type="button" onClick={() => { sim.reset(); setSimWake((n) => n + 1); }} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50">{t("เริ่มใหม่", "Restart")}</button>}
+          {simOn && simInfo && <span className="text-xs tabular-nums text-slate-600">{simInfo.done ? t("นิ่งแล้ว", "Settled") : t("กำลังทิ้งตัว…", "Settling…")} · {t(`สูง ${simInfo.h.toFixed(1)} จาก ${A.height.toFixed(1)} ซม.`, `height ${simInfo.h.toFixed(1)} of ${A.height.toFixed(1)} cm`)}</span>}
+          {simOn && !sim && <span className="text-xs text-red-600">{t("จำลองทรงนี้ไม่ได้", "This shape cannot be simulated")}</span>}
+        </div>
+        {simOn && sim && (
+          <div className="grid gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs sm:grid-cols-2">
+            <RangeInput label={t("ความอยู่ทรงของวัสดุ (0 = ผ้านิ่ม · 1 = แข็งอยู่ทรง)", "How well the material holds its shape (0 = soft · 1 = rigid)")} min={0} max={1} step={0.05} value={stiff} onChange={setStiff} />
+            <RangeInput label={t("ของข้างใน (0 = เปล่า · 1 = เต็มใบ)", "Contents (0 = empty · 1 = full)")} min={0} max={1} step={0.05} value={fill} onChange={setFill} />
+            <p className="text-[11px] text-slate-500 sm:col-span-2">{t("นี่คือการประมาณเพื่อให้เห็นภาพว่าวัสดุแข็งกับนิ่มต่างกันยังไง ไม่ใช่การคำนวณจากค่าวัสดุจริง (ไม่รู้น้ำหนัก ความหนา หรือตัวเสริมข้างใน) · ไม่แสดงหู ซับใน แผ่นใส · ชิ้นข้างอาจทะลุกันได้เมื่อวัสดุนิ่มมาก · ค่านี้ไม่ถูกบันทึก", "An approximation to show how firm and soft materials differ — not computed from real material data (weight, thickness or stiffeners are unknown). Handles, lining and clear panels are not shown; sides may pass through each other when very soft. These values are not saved.")}</p>
+            <p className="text-[11px] text-slate-500 sm:col-span-2"><b>{t("ช่างคิดยังไง", "How a pattern maker thinks")}</b> · {t("กระเป๋าจะอยู่ทรงหรือไม่ ขึ้นกับวัสดุและตัวเสริม (แผ่นรองก้น ผ้ากาว กระดาษแข็ง) มากกว่ารูปแพทเทิร์น — ถ้าลองเลื่อนแล้วทรุดมาก แปลว่าทรงนี้ต้องใช้วัสดุแข็งขึ้นหรือเพิ่มตัวเสริม", "Whether a bag stands up depends on the material and stiffeners (base board, interfacing) more than on the pattern. If it slumps a lot here, this shape needs a firmer material or added stiffeners.")}</p>
+          </div>
+        )}
+        {!stepMode && !simOn && (
           <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             {t("แยกชิ้นดู", "Pull pieces apart")}
             <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-56 max-w-full accent-blue-600" />
