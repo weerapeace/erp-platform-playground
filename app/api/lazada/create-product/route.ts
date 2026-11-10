@@ -21,6 +21,7 @@ import { publicImageUrl } from "@/lib/line-shopping-server";
 import { upsertCatalogListings } from "@/lib/platform-catalog-sync";
 import { LAZADA_CREATE_LIVE } from "@/lib/platform-create-registry";
 import { loadLazadaCreate } from "./load";
+import { lazWithRetry } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -81,12 +82,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1) ฝากรูปเข้า Lazada ทีละรูป (Lazada ไม่รับลิงก์นอก — 4138) · ฝากไม่ผ่าน = หยุด ไม่สร้างสินค้า
   const migrated = new Map<string, string>();
   for (const ref of lazCreateImageRefs(r.payload)) {
-    try { migrated.set(ref, await lazMigrateImage(token.gateway, token.accessToken, lazMigrateImageXml(migrateUrlOf(ref)))); }
+    try { migrated.set(ref, await lazWithRetry(() => lazMigrateImage(token.gateway, token.accessToken, lazMigrateImageXml(migrateUrlOf(ref))), "create-product migrate")); }
     catch (e) { return fail(`ฝากรูปกับ Lazada ไม่สำเร็จ: ${lazErrorText(e)}`); }
   }
   const payload = lazCreateResolveImages(r.payload, migrated);
 
-  // 2) สร้างสินค้า
+  // 2) สร้างสินค้า — ไม่ลองซ้ำอัตโนมัติ (กันสร้างซ้ำ) · ⚠️ เฟส C ตรวจ: คู่มือบอก brand จะเลิกใช้ → ถ้า Lazada ไม่รับ "No Brand" ต้องหา brand_id (GetBrandByPages)
   let created: Awaited<ReturnType<typeof lazCreateProduct>>;
   try { created = await lazCreateProduct(token.gateway, token.accessToken, JSON.stringify(payload)); }
   catch (e) { return fail(`Lazada ไม่รับ: ${lazErrorText(e)} — ถ้าไม่แน่ใจว่าสร้างไปแล้วหรือยัง ให้ดึงสินค้าจาก Lazada ก่อนลองใหม่`); }
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 4) เก็บรายการบนร้าน + จับคู่สินค้านี้ (ดึงกลับจาก Lazada — ไม่ได้ = เก็บเท่าที่รู้)
   try {
-    const item = await lazGetItem(token.gateway, token.accessToken, itemId).catch(() => null);
+    const item = await lazWithRetry(() => lazGetItem(token.gateway, token.accessToken, itemId), "create-product refetch").catch(() => null);
     const slim = item ? lazProductToCatalogItem(item) : null;
     const prev = r.preview;
     await upsertCatalogListings(admin, {
