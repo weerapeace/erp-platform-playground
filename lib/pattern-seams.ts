@@ -16,7 +16,8 @@ import { flattenShape, type Pt, type Shape } from "@/lib/pattern-shape";
 
 export type PieceEdge = { i: number; pts: Pt[]; len: number };
 export type SeamSide = { pid: string; from: number; count: number; n: number };
-export type Seam = { id: string; a: SeamSide; b: SeamSide };
+/** rev = ด้าน b เย็บกลับทิศ (จุดเริ่มของ b ไปชนจุดจบของ a) — ตอนนี้ใช้แสดงขีดบอกทิศบนกระดาน ยังไม่มีผลกับการประกอบ 3D */
+export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean };
 export type SeamStatus = "ok" | "mismatch" | "broken";
 export type SeamCheck = { status: SeamStatus; la: number | null; lb: number | null; diff: number };
 
@@ -112,7 +113,7 @@ export function cleanSeams(raw: unknown, pids: Set<string>): Seam[] {
     const id = typeof r.id === "string" && /^[\w-]{1,40}$/.test(r.id) ? r.id : "";
     const a = cleanSide(r.a, pids), b = cleanSide(r.b, pids);
     if (!id || seen.has(id) || !a || !b) continue;
-    seen.add(id); out.push({ id, a, b });
+    seen.add(id); out.push(r.rev === true ? { id, a, b, rev: true } : { id, a, b });
   }
   return out;
 }

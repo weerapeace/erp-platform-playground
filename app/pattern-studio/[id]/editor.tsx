@@ -3,7 +3,7 @@
 /**
  * สตูดิโอของแพทเทิร์น 1 ใบ (แอปหลัก · เจ้าของสั่ง 2026-11-10)
  *   หัว: ชื่อ · รหัสรุ่น · สถานะ · สรุป (ชิ้น / พื้นที่ / ตะเข็บ)
- *   แท็บ "วาดชิ้น + เย็บ" = PatternStudio (กระดานวาดเดิม + แม่แบบทรง + ภาพ 3D) · เครื่องมือเย็บ (SewView) อยู่ในหน้าเดียวกัน กดรูปเข็มในแถบเครื่องมือ (เจ้าของสั่ง 2026-11-10 รวมแท็บเย็บ)
+ *   แท็บ "วาดชิ้น + เย็บ" = PatternStudio (กระดานวาดเดิม + แม่แบบทรง + ภาพ 3D) · เครื่องมือเย็บ (N) + แก้ตะเข็บ (B) เป็นเครื่องมือของกระดานเอง เย็บบนกระดานเดิมแบบ CLO ไม่เปลี่ยนหน้า (เจ้าของสั่ง 2026-11-10)
  *   รหัสรุ่น = เลือกจากรุ่นสินค้า (ParentSkuPicker) หรือ SKU (SkuPicker) ของกลาง — เก็บเป็นรหัส
  *   แท็บ "ประกอบ 3D" = AssemblyView (ประกอบชิ้นเป็นกระเป๋าจากตะเข็บ + เย็บทีละขั้น)
  *   จุดติดหู/แผ่นหลังช่อง (จากแม่แบบ) เก็บในช่อง template: { params, attach }
@@ -53,7 +53,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const [template, setTemplate] = useState<Record<string, unknown> | null>(null);   // { params: ค่าแม่แบบล่าสุด, attach: จุดติด }
   const [attaches, setAttaches] = useState<Attach[]>([]);
   const [tab, setTab] = useState<Tab>("draw");
-  const [sewing, setSewing] = useState(false);            // เครื่องมือเย็บเปิดอยู่ (ในแท็บวาดชิ้น)
+  const [sewStart, setSewStart] = useState(false);        // เปิดกระดานมาถือเครื่องมือเย็บเลย (มาจากปุ่ม "ไปเย็บ" ของแท็บประกอบ 3D)
   const [skuKind, setSkuKind] = useState<"parent" | "sku">("parent");
   const [boardNonce, setBoardNonce] = useState(0);        // เปลี่ยน = เปิดกระดานใหม่จากชิ้นล่าสุด (โหลดเสร็จ / กลับจากแท็บเย็บ / ละทิ้ง)
   const [dirty, setDirty] = useState(false);
@@ -119,7 +119,6 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, p.shape])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
-  const sewPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes })), [pieces]);
   const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes })), [pieces]);
   const badSeams = useMemo(() => seams.filter((s) => checkSeam(shapes, s).status !== "ok").length, [seams, shapes]);
 
@@ -221,10 +220,10 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
       {tab === "draw" ? (
         <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
-          sew={{ active: sewing, pieces: sewPieces, seams, onChange: onSeams, bad: badSeams, onToggle: (on) => { setSewing(on); if (!on) setBoardNonce((n) => n + 1); } }}
+          sew={{ seams, onChange: onSeams, start: sewStart }}
           footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
       ) : (
-        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => { setSewing(true); switchTab("draw"); }} onGoDraw={() => switchTab("draw")}
+        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => { setSewStart(true); switchTab("draw"); }} onGoDraw={() => switchTab("draw")}
           onAttachesChange={canEdit ? (next) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); } : undefined} />
       )}
 

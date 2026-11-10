@@ -122,6 +122,9 @@ download("x.dxf", buildPatternDxf(L));
 - `LineShape.foldEdges?: number[]` — 1 ค่าต่อขอบ (1 = ขอบนี้พับเข้าใน) ต้องครบทุกขอบ ไม่ครบ = ไม่มี · `cleanFoldEdges()` · `foldSegments()` (เส้นพับ = เส้นเย็บของขอบนั้น)
 - ไฟล์ DXF: รูเจาะย้ายไปชั้น `HOLE` (เดิมอยู่ `CUT`) · เส้นพับชั้น `FOLD` · ชั้นอื่นเหมือนเดิม (`CUT` `SEW` `GRAIN` `NOTCH` `LABEL`)
 
+### เครื่องมือเย็บในตัววาด (2026-11-10)
+`ShapeEditor` รับ `seams` / `onSeamsChange` / `initialTool` (ไม่ส่ง = ไม่มีเครื่องมือเย็บ เหมือนเดิม) → เครื่องมือ "เย็บขอบกับขอบ (N)" + "แก้ตะเข็บ (B)" · ตะเข็บอยู่กับหน้าที่เรียก กระดานแค่วาดและส่งการแก้กลับ · รายละเอียดดู [pattern-studio.md](pattern-studio.md)
+
 ### สตูดิโอแพทเทิร์น (2026-11-10)
 แบบวาดในแท็บตีราคาครอบด้วย `PatternStudio` แล้ว: ปุ่มสร้างชิ้นจากแม่แบบทรงกระเป๋า + ภาพ 3D ของชิ้นบนกระดาน — ดู [pattern-studio.md](pattern-studio.md)
 ShapeEditor มีช่องเชื่อมเพิ่ม (ไม่ส่ง = เหมือนเดิม): `inject` · `onSelChange` · `selectPid` · `onLive`

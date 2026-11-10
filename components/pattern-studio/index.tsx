@@ -20,14 +20,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps 
 import dynamic from "next/dynamic";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
-import { ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
-import type { Flat3DPiece } from "@/components/pattern-3d";
-import type { Seam } from "@/lib/pattern-seams";
-import type { SewPiece } from "./sew-view";
+import { SEAM_COLORS, ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
+import type { Flat3DPiece, Flat3DThread } from "@/components/pattern-3d";
+import { sidePoints, type Seam } from "@/lib/pattern-seams";
 import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
-const SewView = dynamic(() => import("./sew-view").then((m) => m.SewView), { ssr: false });                              // โหลดเมื่อกดเครื่องมือเย็บ
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
@@ -38,13 +36,13 @@ type EditorProps = ComponentProps<typeof ShapeEditor>;
 /** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + จุดติดหู/แผ่นหลังช่อง + ค่าแม่แบบที่ใช้ */
 export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; attach: BagAttachRef[]; params: BagParams };
 
-/** เครื่องมือเย็บในหน้าวาดชิ้น (แอปสตูดิโอแพทเทิร์น): active = กำลังอยู่ในโหมดเย็บ (กระดานวาดถูกสลับเป็นตัวจับคู่ขอบ ที่เดิม) */
-export type StudioSew = { active: boolean; pieces: SewPiece[]; seams: Seam[]; onChange: (next: Seam[]) => void; onToggle: (on: boolean) => void; bad?: number };
+/** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
+export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean };
 
 export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive"> & {
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
   onTemplateInsert?: (info: TemplateInsertInfo) => void;
-  /** ส่ง = มีปุ่มรูปเข็มในแถบเครื่องมือซ้าย กดแล้วเข้าโหมดเย็บในหน้าเดิม (ใบงานออกแบบไม่ส่ง = ไม่มี) */
+  /** ส่ง = มีเครื่องมือเย็บ (N) + แก้ตะเข็บ (B) ในแถบเครื่องมือซ้ายของกระดาน และเห็นด้ายเย็บในภาพ 3D (ใบงานออกแบบไม่ส่ง = ไม่มี) */
   sew?: StudioSew;
 }) {
   const t = useT();
@@ -71,6 +69,15 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   }, []);
 
   const flat: Flat3DPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, cut: p.geo.cut, sew: p.geo.sew, holes: p.geo.holesCut })), [live]);
+  // ด้ายเย็บในภาพ 3D: ขอบทั้งสองด้านของตะเข็บ (พิกัดกระดาน) สีเดียวกับบนกระดาน
+  const threads: Flat3DThread[] = useMemo(() => {
+    if (!sew?.seams.length) return [];
+    const shapes = new Map(live.map((p) => [p.pid, p.shape]));
+    return sew.seams.flatMap((x, i) => {
+      const A = shapes.get(x.a.pid), B = shapes.get(x.b.pid), a = A ? sidePoints(A, x.a) : null, b = B ? sidePoints(B, x.b) : null;
+      return a && b ? [{ a, b, color: SEAM_COLORS[i % SEAM_COLORS.length] }] : [];
+    });
+  }, [live, sew?.seams]);
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
   const pick3d = useCallback((pid: string | null) => setSelectReq({ nonce: Date.now(), pid }), []);
@@ -88,18 +95,12 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
     <div ref={boxRef} className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700"><Icon value="i:shopping-bag" className="text-sm" />{t("สตูดิโอแพทเทิร์น", "Pattern studio")}</span>
-        {!readonly && !sew?.active && (
+        {!readonly && (
           <button type="button" onClick={() => { setDraft(null); setWizard(true); }} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:wand" className="text-sm" />{t("สร้างจากแม่แบบทรง", "Create from a bag template")}
           </button>
         )}
-        {sew?.active && (
-          <button type="button" onClick={() => sew.onToggle(false)} className={`${btn} border-slate-800 bg-slate-800 text-white`}>
-            <Icon value="i:arrow-left" className="text-sm" />{t("กลับไปวาดชิ้น", "Back to drawing")}
-          </button>
-        )}
-        {sew?.active && <span className="text-[11px] text-slate-500">{t("โหมดเย็บ: กดขอบของชิ้นแรก แล้วกดขอบที่จะเย็บติดกัน", "Sewing mode: click an edge, then the edge it is sewn to")}</span>}
-        {!readonly && !sew?.active && (
+        {!readonly && (
           <button type="button" onClick={() => setPhoto(true)} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:photo" className="text-sm" />{t("แกะจากรูป", "Start from a photo")}
           </button>
@@ -112,19 +113,12 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
 
       <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>
         <div className="min-w-0">
-          {sew?.active
-            ? <SewView pieces={sew.pieces} seams={sew.seams} onChange={sew.onChange} readonly={readonly} onBack={() => sew.onToggle(false)} />
-            : <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive} toolExtra={sew ? (
-              <button type="button" onClick={() => sew.onToggle(true)} title={t("เครื่องมือเย็บ: จับคู่ขอบที่เย็บติดกัน + ตรวจความยาว", "Sewing tool: pair edges that are sewn together and check their lengths")} aria-label={t("เครื่องมือเย็บ", "Sewing tool")}
-                className="relative inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-1.5 text-xs text-slate-600 hover:bg-slate-100">
-                <Icon value="i:needle-thread" className="text-[16px]" />
-                {sew.seams.length > 0 && <span className={`absolute -right-1 -top-1 rounded-full px-1 text-[10px] leading-4 text-white ${sew.bad ? "bg-red-500" : "bg-slate-500"}`}>{sew.seams.length}</span>}
-              </button>
-            ) : undefined} />}
+          <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
+            seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} />
         </div>
         {show3d && (
           <div className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2" : ""}`}>
-            <Pattern3D mode="flat" pieces={flat} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
+            <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
             <p className="text-[11px] text-slate-400">{flat.length
               ? t(`${flat.length} ชิ้นบนโต๊ะ · ความหนาในภาพเป็นค่าสมมติ · เส้นประ = เส้นเย็บ`, `${flat.length} pieces on the table · thickness is illustrative · dashed = sew line`)
               : t("ยังไม่มีชิ้นบนกระดาน — วาดชิ้น หรือกด สร้างจากแม่แบบทรง", "No pieces yet — draw one, or use Create from a bag template")}</p>

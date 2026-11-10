@@ -24,6 +24,8 @@ import type { AssemblyOk } from "@/lib/pattern-assembly";
 import { flattenShape, offsetPolygon, type Pt } from "@/lib/pattern-shape";
 
 export type Flat3DPiece = { pid: string; name: string; cut: Pt[]; sew: Pt[]; holes: Pt[][]; color?: string };
+/** ด้ายเย็บในโหมดชิ้นแบน: ขอบสองด้านของตะเข็บ (พิกัดกระดาน ซม. · y ลง) + สี */
+export type Flat3DThread = { a: Pt[]; b: Pt[]; color: string };
 export type Pattern3DView = "iso" | "front" | "side" | "top";
 export type BagColors = { body: string; handle: string };
 
@@ -35,7 +37,7 @@ const PAPER = "#d8c08c";
 type V3 = [number, number, number];
 type Part = { key: string; id: string; g: any; base: V3; dir: V3; carrier: string | null; mats: any[]; e: number; l: number; join: string };
 type Stage = {
-  setFlat: (pieces: Flat3DPiece[]) => void;
+  setFlat: (pieces: Flat3DPiece[], threads?: Flat3DThread[]) => void;
   setBag: (G: BagGeometry, colors: BagColors) => void;
   setSelected: (id: string | null) => void;
   setAssembly: (A: AssemblyOk, colors: BagColors) => void;
@@ -133,7 +135,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   };
 
   // ── ชิ้นแบนบนโต๊ะ ──
-  const setFlat = (pieces: Flat3DPiece[]) => {
+  const setFlat = (pieces: Flat3DPiece[], threads: Flat3DThread[] = []) => {
     const was = S.mode; S.mode = "flat"; clear(); lights(true);
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     const ok = pieces.filter((pc) => pc.cut.length >= 3);
@@ -153,6 +155,29 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       const tag = label(pc.name || `P${i + 1}`, lh); tag.position.set(cx, -cy, 0.6); grp.add(tag);
       add(`${pc.pid}#${i}`, pc.pid, grp, [0, 0, 0], [0, 0, 0], [m]);
     });
+    // ด้ายเย็บ (แบบ CLO): ขอบที่เย็บเป็นเส้นสี + เส้นด้ายโค้งโยงจากขอบหนึ่งไปอีกขอบ หลายเส้นตามความยาว
+    if (threads.length) {
+      const tg = new THREE.Group(); tg.rotation.x = -Math.PI / 2;
+      const at = (P: Pt[], f: number): Pt => {
+        let L = 0; for (let k = 1; k < P.length; k++) L += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]);
+        let d = L * f;
+        for (let k = 1; k < P.length; k++) { const l = Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); if (d <= l && l > 0) return [P[k - 1][0] + ((P[k][0] - P[k - 1][0]) * d) / l, P[k - 1][1] + ((P[k][1] - P[k - 1][1]) * d) / l]; d -= l; }
+        return P[P.length - 1];
+      };
+      const line = (pts: V3[], col: string, op: number) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts.map((q) => new THREE.Vector3(q[0], q[1], q[2]))), new THREE.LineBasicMaterial({ color: col, transparent: op < 1, opacity: op })); tg.add(l); };
+      for (const th of threads) {
+        if (th.a.length < 2 || th.b.length < 2) continue;
+        line(th.a.map(([x, y]) => [x, -y, 0.26] as V3), th.color, 1);
+        line(th.b.map(([x, y]) => [x, -y, 0.26] as V3), th.color, 1);
+        const n = 7;
+        for (let k = 0; k < n; k++) {
+          const f = (k + 0.5) / n, p = at(th.a, f), q = at(th.b, f), dist = Math.hypot(q[0] - p[0], q[1] - p[1]), up = clamp(dist * 0.28, 1.5, 14), arc: V3[] = [];
+          for (let j = 0; j <= 14; j++) { const u = j / 14; arc.push([p[0] + (q[0] - p[0]) * u, -(p[1] + (q[1] - p[1]) * u), 0.26 + 4 * up * u * (1 - u)]); }
+          line(arc, th.color, 0.7);
+        }
+      }
+      S.root.add(tg);
+    }
     const size = Math.ceil((span + 30) / 10) * 10, grid = new THREE.GridHelper(size, size / 5, 0x64748b, 0x94a3b8);
     grid.material.transparent = true; grid.material.opacity = 0.35; grid.position.set((x0 + x1) / 2, -0.02, (y0 + y1) / 2); S.root.add(grid);
     S.target.set((x0 + x1) / 2, 0, (y0 + y1) / 2);
@@ -462,7 +487,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   };
 }
 
-export function Pattern3D({ mode, pieces, bag, assembly, sim, simWake = 0, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "" }: {
+export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, simWake = 0, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "" }: {
   mode: "flat" | "bag" | "assembly" | "sim";
   /** mode="sim": ตัวจำลองวัสดุทิ้งตัว (lib/pattern-sim createBagSim) — ตัวแสดงเดินตัวจำลองเองทุกเฟรมจนนิ่ง */
   sim?: BagSim | null;
@@ -474,6 +499,8 @@ export function Pattern3D({ mode, pieces, bag, assembly, sim, simWake = 0, joine
   joined?: string[] | null;
   /** mode="flat": ชิ้นบนโต๊ะ (พิกัดกระดานวาด ซม. · y ลง) */
   pieces?: Flat3DPiece[];
+  /** mode="flat": ด้ายเย็บระหว่างขอบของชิ้น (ตะเข็บ) */
+  threads?: Flat3DThread[];
   /** mode="bag": เรขาคณิตจาก bagGeometry */
   bag?: BagGeometry;
   colors?: BagColors;
@@ -507,8 +534,8 @@ export function Pattern3D({ mode, pieces, bag, assembly, sim, simWake = 0, joine
     if (mode === "sim" && sim) s.setSim(sim, col);
     else if (mode === "assembly" && assembly) s.setAssembly(assembly, col);
     else if (mode === "bag" && bag) s.setBag(bag, col);
-    else s.setFlat(pieces ?? []);
-  }, [state, mode, bag, pieces, assembly, sim, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
+    else s.setFlat(pieces ?? [], threads ?? []);
+  }, [state, mode, bag, pieces, threads, assembly, sim, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state === "ready") stage.current?.wake(); }, [state, simWake]);
   useEffect(() => { if (state === "ready") stage.current?.setSelected(selected); }, [state, selected, mode, bag, pieces, assembly]);
   const joinedKey = joined ? joined.join(",") : null;
