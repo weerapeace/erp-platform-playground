@@ -106,6 +106,10 @@ download("x.dxf", buildPatternDxf(L));
 - **ไม้บรรทัดตามขอบ**: กดลากไปตามขอบทางที่ต้องการ (อ้อมทางยาวได้ · `outlineStep`/`outlineWalk`) ปล่อย = จบ · คลิก-คลิกยังได้
 - เทสต์ `lib/__tests__/pattern-vector.test.ts`
 
+### สตูดิโอแพทเทิร์น (2026-11-10)
+แบบวาดในแท็บตีราคาครอบด้วย `PatternStudio` แล้ว: ปุ่มสร้างชิ้นจากแม่แบบทรงกระเป๋า + ภาพ 3D ของชิ้นบนกระดาน — ดู [pattern-studio.md](pattern-studio.md)
+ShapeEditor มีช่องเชื่อมเพิ่ม (ไม่ส่ง = เหมือนเดิม): `inject` · `onSelChange` · `selectPid` · `onLive`
+
 **ขั้นถัดไป (ยังไม่ทำ)**: วางชิ้นบนหน้าผ้าอัตโนมัติ (nesting) · นำเข้า DXF · รูปสินค้าจาก Parent SKU ในตัวเลือกรูปอ้างอิง
 
 ## ห้ามใช้เมื่อไหร่

@@ -1,0 +1,383 @@
+"use client";
+/* eslint-disable @typescript-eslint/no-explicit-any -- three.js โหลดจาก public/vendor ไม่มีไฟล์ชนิดข้อมูล (ดู lib/three-loader) */
+/**
+ * 🧊 Pattern3D — ตัวแสดงชิ้นแพทเทิร์นเป็นภาพ 3D (ของกลาง) · เจ้าของขอ 2026-11-10 "เวลาทำแบบมี Model 3D ให้ดูว่าเย็บแล้วเป็นยังไง"
+ *   2 แบบ:
+ *     mode="flat" = ชิ้นแบนวางบนโต๊ะตามตำแหน่งบนกระดานวาด (ชิ้นหนา มีรูเจาะจริง เส้นเย็บประ ป้ายชื่อ) · เลือกชิ้น = ยกขึ้น + สว่าง
+ *     mode="bag"  = กระเป๋าที่ประกอบแล้วจากแม่แบบทรง (lib/bag-templates) · แถบ "แยกชิ้นดู" ดึงชิ้นออกจากกัน
+ *   ลากเพื่อหมุน · ล้อเมาส์ซูม · ปุ่มมุมมอง · ชี้ = สว่าง · คลิกชิ้น = onSelect
+ *   วาดใหม่เฉพาะตอนมีอะไรเปลี่ยน (ไม่วนวาดตลอด) · ไลบรารี 3D โหลดตอนเปิดครั้งแรก (lib/three-loader)
+ *
+ *   <Pattern3D mode="flat" pieces={[{ pid, name, cut, sew, holes }]} selected={pid} onSelect={(pid) => …} />
+ *   <Pattern3D mode="bag" bag={bagGeometry(params)} explode={0.5} />
+ *
+ * ข้อจำกัด: แบบ "bag" ประกอบจากสูตรของแม่แบบเท่านั้น — ชิ้นที่วาดเองยังประกอบไม่ได้ (ต้องมีข้อมูลตะเข็บ = รอบถัดไป) · ยังไม่จำลองวัสดุทิ้งตัว
+ * ใช้ที่: components/pattern-studio · คู่มือ: docs/pattern-studio.md
+ */
+import { useEffect, useRef, useState } from "react";
+import { useT } from "@/components/i18n";
+import { loadThree, type Three } from "@/lib/three-loader";
+import { BAG_HANDLE_ATTACH, BAG_PVC_MARGIN, bagWindowShape, type BagGeometry } from "@/lib/bag-templates";
+import { flattenShape, offsetPolygon, type Pt } from "@/lib/pattern-shape";
+
+export type Flat3DPiece = { pid: string; name: string; cut: Pt[]; sew: Pt[]; holes: Pt[][]; color?: string };
+export type Pattern3DView = "iso" | "front" | "side" | "top";
+export type BagColors = { body: string; handle: string };
+
+const VIEWS: Record<Pattern3DView, [number, number]> = { iso: [0.62, 1.22], front: [0, 1.5], side: [Math.PI / 2, 1.5], top: [0, 0.1] };
+const FLAT_VIEW: [number, number] = [0.25, 0.62];
+const DEFAULT_COLORS: BagColors = { body: "#9a6a45", handle: "#4a3023" };
+const PAPER = "#d8c08c";
+
+type V3 = [number, number, number];
+type Part = { key: string; id: string; g: any; base: V3; dir: V3; carrier: string | null; mats: any[]; e: number; l: number };
+type Stage = {
+  setFlat: (pieces: Flat3DPiece[]) => void;
+  setBag: (G: BagGeometry, colors: BagColors) => void;
+  setSelected: (id: string | null) => void;
+  setExplode: (e: number) => void;
+  setView: (v: Pattern3DView) => void;
+  dispose: () => void;
+};
+
+const norm = (x: number, y: number): Pt => { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
+function lum(hex: string): number { const c = parseInt(hex.slice(1), 16); return (0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255)) / 255; }
+
+function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null) => void): Stage {
+  const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const el: HTMLCanvasElement = renderer.domElement;
+  Object.assign(el.style, { position: "absolute", inset: "0", width: "100%", height: "100%", display: "block", touchAction: "pan-y", cursor: "grab" });
+  host.appendChild(el);
+  const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(32, 1, 1, 4000);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x7d8580, 0.95); scene.add(hemi);
+  const d1 = new THREE.DirectionalLight(0xffffff, 0.7); d1.position.set(40, 80, 70); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0xffffff, 0.25); d2.position.set(-60, 30, -50); scene.add(d2);
+  // ชิ้นแบนหงายรับแสงเต็ม ๆ → ลดแสงลง ไม่งั้นสีกระดาษขาวโพลน
+  const lights = (flat: boolean) => { hemi.intensity = flat ? 0.55 : 0.95; d1.intensity = flat ? 0.42 : 0.7; d2.intensity = flat ? 0.12 : 0.25; };
+
+  const softTex = (kind: "shadow" | "grain") => {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const x = c.getContext("2d")!;
+    if (kind === "shadow") {
+      const g = x.createRadialGradient(64, 64, 4, 64, 64, 64);
+      g.addColorStop(0, "rgba(0,0,0,.55)"); g.addColorStop(0.6, "rgba(0,0,0,.18)"); g.addColorStop(1, "rgba(0,0,0,0)");
+      x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+      return new THREE.CanvasTexture(c);
+    }
+    x.fillStyle = "#808080"; x.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 1400; i++) { const v = (90 + Math.random() * 90) | 0; x.fillStyle = `rgba(${v},${v},${v},.5)`; x.beginPath(); x.arc(Math.random() * 128, Math.random() * 128, 0.6 + Math.random() * 1.6, 0, 7); x.fill(); }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(0.3, 0.3); return t;
+  };
+  const shadowTex = softTex("shadow"), bump = softTex("grain");
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: 0.5 }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = -0.02; scene.add(shadow);
+
+  const S = {
+    root: new THREE.Group(), parts: [] as Part[], byKey: {} as Record<string, Part>, pick: [] as any[],
+    az: 0.62, pol: 1.22, taz: 0.62, tpol: 1.22, zoom: 1, dist: 100, target: new THREE.Vector3(),
+    dirty: true, hl: null as string | null, sel: null as string | null, explode: 0, mode: "bag" as "bag" | "flat", dead: false,
+  };
+  scene.add(S.root);
+
+  const paint = () => {
+    // กระเป๋า: เรืองแสงทับสีวัสดุ · ชิ้นแบน (สีกระดาษอ่อน): เปลี่ยนสีพื้นแทน เพราะเรืองแสงบนสีอ่อนมองไม่ออก
+    S.parts.forEach((p) => p.mats.forEach((m) => {
+      if (S.mode === "flat") m.color.set(p.id === S.sel ? "#f0b040" : p.id === S.hl ? "#e8c877" : m.userData.base);
+      else m.emissive?.setHex(p.id === S.sel ? 0x6b4a12 : p.id === S.hl ? 0x4a3410 : 0);
+    }));
+    S.dirty = true;
+  };
+  const dashed = (pts: V3[], col: number) => {
+    const geo = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
+    const l = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: col, dashSize: 0.4, gapSize: 0.26 }));
+    l.computeLineDistances(); return l;
+  };
+  const label = (text: string, h: number) => {
+    const c = document.createElement("canvas"), x = c.getContext("2d")!, font = '600 40px "IBM Plex Sans Thai","Leelawadee UI",Tahoma,sans-serif';
+    x.font = font; const w = Math.ceil(x.measureText(text).width) + 36; c.width = w; c.height = 68; x.font = font;
+    x.fillStyle = "rgba(20,30,26,.82)"; const r = 18;
+    x.beginPath(); x.moveTo(r, 2); x.lineTo(w - r, 2); x.quadraticCurveTo(w - 2, 2, w - 2, r); x.lineTo(w - 2, 66 - r); x.quadraticCurveTo(w - 2, 66, w - r, 66); x.lineTo(r, 66); x.quadraticCurveTo(2, 66, 2, 66 - r); x.lineTo(2, r); x.quadraticCurveTo(2, 2, r, 2); x.fill();
+    x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(text, w / 2, 36);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+    s.scale.set((h * w) / 68, h, 1); s.renderOrder = 10; return s;
+  };
+  const clear = () => {
+    S.root.traverse((o: any) => { o.geometry?.dispose(); if (o.material) { if (o.isSprite) o.material.map?.dispose(); o.material.dispose(); } });
+    scene.remove(S.root); S.root = new THREE.Group(); scene.add(S.root); S.parts = []; S.byKey = {}; S.pick = [];
+  };
+  const add = (key: string, id: string, grp: any, base: V3, dir: V3, mats: any[], carrier: string | null = null) => {
+    const p: Part = { key, id, g: grp, base, dir, carrier, mats, e: S.mode === "bag" ? S.explode : 0, l: 0 };
+    S.root.add(grp); S.parts.push(p); S.byKey[key] = p;
+  };
+  const view = (v: [number, number], snap = false) => {
+    S.taz = v[0]; S.tpol = v[1];
+    let d = S.az - v[0]; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+    S.az = snap ? v[0] : v[0] + d; if (snap) S.pol = v[1];
+    S.zoom = 1; S.dirty = true;
+  };
+
+  // ── ชิ้นแบนบนโต๊ะ ──
+  const setFlat = (pieces: Flat3DPiece[]) => {
+    const was = S.mode; S.mode = "flat"; clear(); lights(true);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const ok = pieces.filter((pc) => pc.cut.length >= 3);
+    for (const pc of ok) for (const [x, y] of pc.cut) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    if (!ok.length) { x0 = y0 = 0; x1 = y1 = 40; }
+    const span = Math.max(x1 - x0, y1 - y0, 20), lh = clamp(span * 0.03, 1.6, 4.5);
+    ok.forEach((pc, i) => {
+      const shape = new THREE.Shape(pc.cut.map(([x, y]) => new THREE.Vector2(x, -y)));
+      pc.holes.forEach((h) => { if (h.length >= 3) shape.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, -y)))); });
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.18, bevelEnabled: false });
+      const m = new THREE.MeshStandardMaterial({ color: pc.color || PAPER, roughness: 0.86, metalness: 0 });
+      m.userData.base = pc.color || PAPER;
+      const mesh = new THREE.Mesh(geo, m); mesh.userData.piece = pc.pid; S.pick.push(mesh);
+      const grp = new THREE.Group(); grp.rotation.x = -Math.PI / 2; grp.add(mesh);
+      if (pc.sew.length >= 3) grp.add(dashed([...pc.sew, pc.sew[0]].map(([x, y]) => [x, -y, 0.2] as V3), 0x5b4a2e));
+      let cx = 0, cy = 0; for (const [x, y] of pc.cut) { cx += x; cy += y; } cx /= pc.cut.length; cy /= pc.cut.length;
+      const tag = label(pc.name || `P${i + 1}`, lh); tag.position.set(cx, -cy, 0.6); grp.add(tag);
+      add(`${pc.pid}#${i}`, pc.pid, grp, [0, 0, 0], [0, 0, 0], [m]);
+    });
+    const size = Math.ceil((span + 30) / 10) * 10, grid = new THREE.GridHelper(size, size / 5, 0x64748b, 0x94a3b8);
+    grid.material.transparent = true; grid.material.opacity = 0.35; grid.position.set((x0 + x1) / 2, -0.02, (y0 + y1) / 2); S.root.add(grid);
+    S.target.set((x0 + x1) / 2, 0, (y0 + y1) / 2);
+    S.dist = Math.max(x1 - x0, (y1 - y0) * 1.25, 30) * 1.7;
+    shadow.visible = false;
+    if (was !== "flat") view(FLAT_VIEW, true);
+    paint();
+  };
+
+  // ── กระเป๋าที่ประกอบแล้ว (จากแม่แบบทรง) ──
+  const gussetGeo = (pts: Pt[], D: number, H: number) => {
+    const n = pts.length - 1, pos: number[] = [], nor: number[] = [], uv: number[] = [], col: number[] = [], sn: Pt[] = [], cum = [0];
+    for (let i = 0; i < n; i++) { const a = pts[i], b = pts[i + 1], e = norm(b[0] - a[0], b[1] - a[1]); sn.push([e[1], -e[0]]); cum.push(cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    const vn = (i: number, j: number): Pt => { if (j < 0 || j >= n) return sn[i]; const a = sn[i], b = sn[j]; return a[0] * b[0] + a[1] * b[1] < 0.86 ? a : norm(a[0] + b[0], a[1] + b[1]); };
+    for (let i = 0; i < n; i++) {
+      const A = pts[i], B = pts[i + 1], na = vn(i, i - 1), nb = vn(i, i + 1), h = D / 2;
+      const V: [Pt, number, Pt, number][] = [[A, h, na, cum[i]], [A, -h, na, cum[i]], [B, -h, nb, cum[i + 1]], [A, h, na, cum[i]], [B, -h, nb, cum[i + 1]], [B, h, nb, cum[i + 1]]];
+      for (const v of V) { pos.push(v[0][0], v[0][1], v[1]); nor.push(v[2][0], v[2][1], 0); uv.push(v[3], v[1]); const s = 0.38 + 0.62 * clamp(v[0][1] / H, 0, 1); col.push(s, s, s); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    return g;
+  };
+  const setBag = (G: BagGeometry, colors: BagColors) => {
+    const was = S.mode; S.mode = "bag"; clear(); lights(false);
+    const { W, H, D } = G.p, fl = G.p.flare, U = G.U, Wt = G.Wt, ATT = BAG_HANDLE_ATTACH;
+    const thread = lum(colors.body) < 0.5 ? 0xe9dfc8 : 0x4a3a2a, threadH = lum(colors.handle) < 0.5 ? 0xe9dfc8 : 0x4a3a2a;
+    const outer = (c: string) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, metalness: 0, bumpMap: bump, bumpScale: 0.03, side: THREE.FrontSide });
+    const lining = () => new THREE.MeshStandardMaterial({ color: 0xb8ab8e, roughness: 0.95, side: THREE.BackSide, vertexColors: true });
+    const shade = (geo: any) => { const ps = geo.attributes.position, c: number[] = []; for (let k = 0; k < ps.count; k++) { const s = 0.38 + 0.62 * clamp(ps.getY(k) / H, 0, 1); c.push(s, s, s); } geo.setAttribute("color", new THREE.Float32BufferAttribute(c, 3)); return geo; };
+    const hy = G.p.hem > 0.2 ? H - Math.max(G.p.hem - 0.4, 0.5) : null, halfW = (y: number) => W / 2 + (fl * y) / H;
+    const zOut = 5 + D * 0.5;
+    const hole: Pt[] | null = G.win ? flattenShape(bagWindowShape(G.win.kind, -G.win.w / 2, -(G.win.cy + G.win.h / 2), G.win.w, G.win.h)).map(([x, y]) => [x, -y] as Pt) : null;
+    // ตัวหน้า + ตัวหลัง
+    const closed: Pt[] = [...U];
+    const inset = offsetPolygon(closed, -0.45);
+    [1, -1].forEach((sg) => {
+      const grp = new THREE.Group(), shape = new THREE.Shape(U.map((p) => new THREE.Vector2(p[0], p[1])));
+      if (sg > 0 && hole) shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p[0], p[1]))));
+      const geo = shade(new THREE.ShapeGeometry(shape)), id = sg < 0 && G.win ? "back" : "front";
+      const m = outer(colors.body), mesh = new THREE.Mesh(geo, m); mesh.userData.piece = id; S.pick.push(mesh);
+      grp.add(mesh, new THREE.Mesh(geo, lining()));
+      if (inset.length >= 3) grp.add(dashed([...inset, inset[0]].map((p) => [p[0], p[1], 0.05] as V3), thread));
+      if (sg > 0 && hole) { const st = offsetPolygon(hole, 0.5); grp.add(dashed([...st, st[0]].map((p) => [p[0], p[1], 0.05] as V3), thread)); }
+      if (hy !== null) grp.add(dashed([[-halfW(hy) + 0.5, hy, 0.05], [halfW(hy) - 0.5, hy, 0.05]], thread));
+      if (sg < 0) grp.rotation.y = Math.PI;
+      add(sg > 0 ? "front" : "back", id, grp, [0, 0, (sg * D) / 2], [0, 0, sg * zOut], [m]);
+    });
+    // แผ่น PVC ใส
+    if (G.win) {
+      const pg = new THREE.Group(), pw = G.win.w / 2 + BAG_PVC_MARGIN, ph = G.win.h / 2 + BAG_PVC_MARGIN, cy = G.win.cy;
+      const pgeo = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-pw, cy - ph), new THREE.Vector2(pw, cy - ph), new THREE.Vector2(pw, cy + ph), new THREE.Vector2(-pw, cy + ph)]));
+      const pm = new THREE.MeshStandardMaterial({ color: 0xd4ecf7, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
+      const pmesh = new THREE.Mesh(pgeo, pm); pmesh.position.z = -0.18; pmesh.userData.piece = "pvc"; S.pick.push(pmesh); pg.add(pmesh);
+      add("pvc", "pvc", pg, [0, 0, D / 2], [0, 0, -4.5], [pm], "front");
+    }
+    // ข้าง + ก้น
+    const gusset = (key: string, id: string, pts: Pt[], dir: V3, hemL: boolean, hemR: boolean) => {
+      const grp = new THREE.Group(), geo = gussetGeo(pts, D, H), m = outer(colors.body), mesh = new THREE.Mesh(geo, m);
+      mesh.userData.piece = id; S.pick.push(mesh); grp.add(mesh, new THREE.Mesh(geo, lining()));
+      const n = pts.length, nv = pts.map((_, k) => { const a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)], e = norm(b[0] - a[0], b[1] - a[1]); return [e[1], -e[0]] as Pt; });
+      [D / 2 - 0.45, -(D / 2 - 0.45)].forEach((z) => grp.add(dashed(pts.map((p, k) => [p[0] + nv[k][0] * 0.05, p[1] + nv[k][1] * 0.05, z] as V3), thread)));
+      if (hy !== null) {
+        if (hemL) grp.add(dashed([[-halfW(hy) + nv[0][0] * 0.05, hy, -D / 2 + 0.5], [-halfW(hy) + nv[0][0] * 0.05, hy, D / 2 - 0.5]], thread));
+        if (hemR) grp.add(dashed([[halfW(hy) + nv[n - 1][0] * 0.05, hy, -D / 2 + 0.5], [halfW(hy) + nv[n - 1][0] * 0.05, hy, D / 2 - 0.5]], thread));
+      }
+      add(key, id, grp, [0, 0, 0], dir, [m]);
+    };
+    if (G.strip) gusset("strip", "strip", U, [0, -8, 0], true, true);
+    else { gusset("sideL", "side", [U[0], U[1]], [-8, 0, 0], true, false); gusset("bottom", "bottom", [U[1], U[2]], [0, -8, 0], false, false); gusset("sideR", "side", [U[2], U[3]], [8, 0, 0], false, true); }
+    // หู
+    const A = G.arch, a = A.a, path: Pt[] = [[-a, H - ATT], [-a, H - ATT / 2], [-a, H]];
+    if (A.eb) { for (let i = 1; i < 48; i++) { const ph = Math.PI * (1 - i / 48); path.push([a * Math.cos(ph), H + A.eb * Math.sin(ph)]); } path.push([a, H]); }
+    else {
+      const nv2 = Math.max(2, Math.round(A.v / 2));
+      for (let i = 1; i <= nv2; i++) path.push([-a, H + (A.v * i) / nv2]);
+      for (let i = 1; i < 36; i++) { const ph = Math.PI * (1 - i / 36); path.push([a * Math.cos(ph), H + A.v + a * Math.sin(ph)]); }
+      for (let i = 0; i <= nv2; i++) path.push([a, H + A.v * (1 - i / nv2)]);
+    }
+    path.push([a, H - ATT / 2], [a, H - ATT]);
+    const pos: number[] = [], nor: number[] = [], uv: number[] = [], hw = G.p.wh / 2, Lp: Pt[] = [], Rp: Pt[] = [];
+    for (let i = 0; i < path.length; i++) {
+      const p0 = path[Math.max(0, i - 1)], p1 = path[Math.min(path.length - 1, i + 1)], e = norm(p1[0] - p0[0], p1[1] - p0[1]);
+      Lp.push([path[i][0] - e[1] * hw, path[i][1] + e[0] * hw]); Rp.push([path[i][0] + e[1] * hw, path[i][1] - e[0] * hw]);
+    }
+    let sl = 0;
+    for (let i = 0; i < path.length - 1; i++) {
+      const dl = Math.hypot(path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]);
+      const V: [Pt, number, number][] = [[Lp[i], sl, 0], [Rp[i], sl, 1], [Rp[i + 1], sl + dl, 1], [Lp[i], sl, 0], [Rp[i + 1], sl + dl, 1], [Lp[i + 1], sl + dl, 0]];
+      for (const v of V) { pos.push(v[0][0], v[0][1], 0); nor.push(0, 0, 1); uv.push(v[1], v[2]); }
+      sl += dl;
+    }
+    [1, -1].forEach((sg) => {
+      const grp = new THREE.Group(), geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      const m = new THREE.MeshStandardMaterial({ color: colors.handle, roughness: 0.75, side: THREE.DoubleSide }), mesh = new THREE.Mesh(geo, m);
+      mesh.position.z = 0.1; mesh.userData.piece = "handle"; S.pick.push(mesh); grp.add(mesh);
+      [-a, a].forEach((cx) => {
+        const xa = cx - hw + 0.3, xb = cx + hw - 0.3, ya = H - ATT + 0.3, yb = H - 0.4;
+        grp.add(dashed([[xa, ya, 0.16], [xb, ya, 0.16], [xb, yb, 0.16], [xa, yb, 0.16], [xa, ya, 0.16], [xb, yb, 0.16]], threadH));
+        grp.add(dashed([[xa, yb, 0.16], [xb, ya, 0.16]], threadH));
+      });
+      if (sg < 0) grp.rotation.y = Math.PI;
+      add(sg > 0 ? "handleF" : "handleB", "handle", grp, [0, 0, (sg * D) / 2], [0, 7, 0], [m], sg > 0 ? "front" : "back");
+    });
+    const top = H + A.h;
+    S.target.set(0, top * 0.47, 0); S.dist = Math.max(top, Wt * 1.05, D) * 2.15;
+    shadow.visible = true; shadow.scale.set(Wt * 1.7, D * 2.6, 1);
+    if (was !== "bag") view(VIEWS.iso, true);
+    paint();
+  };
+
+  // ── เมาส์/นิ้ว ──
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  let drag: { x: number; y: number; sx: number; sy: number; moved: boolean } | null = null;
+  const hit = (e: PointerEvent): string | null => {
+    const r = el.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam); const h = ray.intersectObjects(S.pick, false);
+    return h.length ? (h[0].object.userData.piece as string) : null;
+  };
+  const onDown = (e: PointerEvent) => { drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false }; try { el.setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์ */ } };
+  const onMove = (e: PointerEvent) => {
+    if (drag) {
+      if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 4) drag.moved = true;
+      S.az -= (e.clientX - drag.x) * 0.008; S.pol = clamp(S.pol - (e.clientY - drag.y) * 0.008, 0.08, 1.72); S.taz = S.az; S.tpol = S.pol;
+      drag.x = e.clientX; drag.y = e.clientY; S.dirty = true; return;
+    }
+    const id = hit(e); if (id !== S.hl) { S.hl = id; paint(); }
+  };
+  const onUp = (e: PointerEvent) => { const d = drag; drag = null; if (d && !d.moved) onPick(hit(e)); };
+  const onCancel = () => { drag = null; };
+  const onLeave = () => { if (!drag && S.hl) { S.hl = null; paint(); } };
+  const onWheel = (e: WheelEvent) => { e.preventDefault(); S.zoom = clamp(S.zoom * Math.exp(e.deltaY * 0.001), 0.4, 2.6); S.dirty = true; };
+  el.addEventListener("pointerdown", onDown); el.addEventListener("pointermove", onMove); el.addEventListener("pointerup", onUp);
+  el.addEventListener("pointercancel", onCancel); el.addEventListener("pointerleave", onLeave); el.addEventListener("wheel", onWheel, { passive: false });
+  const size = () => { const w = host.clientWidth || 600, h = host.clientHeight || 400; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); S.dirty = true; };
+  const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(size) : null;
+  ro?.observe(host); size();
+
+  let raf = 0;
+  const loop = () => {
+    if (S.dead) return;
+    raf = requestAnimationFrame(loop);
+    if (!S.dirty) return;
+    S.dirty = false;
+    const k = reduce ? 1 : 0.16; let anim = false, maxE = 0;
+    for (const p of S.parts) {
+      const te = S.mode === "bag" ? S.explode : 0, tl = S.mode === "flat" && p.id === S.sel ? 1 : 0;
+      if (Math.abs(te - p.e) > 0.003) { p.e += (te - p.e) * k; anim = true; } else p.e = te;
+      if (Math.abs(tl - p.l) > 0.003) { p.l += (tl - p.l) * k; anim = true; } else p.l = tl;
+      if (p.e > maxE) maxE = p.e;
+    }
+    for (const p of S.parts) {
+      const c = p.carrier ? S.byKey[p.carrier] : null, ce = c ? c.e : 0, cd: V3 = c ? c.dir : [0, 0, 0];
+      p.g.position.set(p.base[0] + p.dir[0] * p.e + cd[0] * ce, p.base[1] + p.dir[1] * p.e + cd[1] * ce + p.l * 3, p.base[2] + p.dir[2] * p.e + cd[2] * ce);
+    }
+    if (Math.abs(S.taz - S.az) > 0.002 || Math.abs(S.tpol - S.pol) > 0.002) { S.az += (S.taz - S.az) * k; S.pol += (S.tpol - S.pol) * k; anim = true; } else { S.az = S.taz; S.pol = S.tpol; }
+    shadow.material.opacity = 0.5 * (1 - maxE);
+    const dist = S.dist * S.zoom * Math.max(1, 0.95 / cam.aspect) * (1 + 0.5 * maxE);
+    cam.position.set(S.target.x + dist * Math.sin(S.pol) * Math.sin(S.az), S.target.y + dist * Math.cos(S.pol), S.target.z + dist * Math.sin(S.pol) * Math.cos(S.az));
+    cam.lookAt(S.target); renderer.render(scene, cam);
+    if (anim) S.dirty = true;
+  };
+  loop();
+
+  return {
+    setFlat, setBag,
+    setSelected: (id) => { if (S.sel !== id) { S.sel = id; paint(); } },
+    setExplode: (e) => { S.explode = clamp(e, 0, 1); S.dirty = true; },
+    setView: (v) => view(S.mode === "flat" && v === "iso" ? FLAT_VIEW : VIEWS[v]),
+    dispose: () => {
+      S.dead = true; cancelAnimationFrame(raf); ro?.disconnect();
+      el.removeEventListener("pointerdown", onDown); el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onCancel); el.removeEventListener("pointerleave", onLeave); el.removeEventListener("wheel", onWheel);
+      clear(); shadowTex.dispose(); bump.dispose(); shadow.geometry.dispose(); shadow.material.dispose(); renderer.dispose(); el.remove();
+    },
+  };
+}
+
+export function Pattern3D({ mode, pieces, bag, colors, selected = null, onSelect, explode = 0, height = 420, className = "" }: {
+  mode: "flat" | "bag";
+  /** mode="flat": ชิ้นบนโต๊ะ (พิกัดกระดานวาด ซม. · y ลง) */
+  pieces?: Flat3DPiece[];
+  /** mode="bag": เรขาคณิตจาก bagGeometry */
+  bag?: BagGeometry;
+  colors?: BagColors;
+  /** รหัสชิ้นที่เลือก (flat = pid · bag = ชนิดชิ้น เช่น "front") */
+  selected?: string | null;
+  onSelect?: (id: string | null) => void;
+  /** mode="bag": 0 = ประกอบ · 1 = แยกชิ้น */
+  explode?: number;
+  height?: number;
+  className?: string;
+}) {
+  const t = useT();
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const stage = useRef<Stage | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const onSelectRef = useRef(onSelect); onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    let dead = false;
+    loadThree().then((THREE) => {
+      if (dead || !hostRef.current) return;
+      try { stage.current = createStage(THREE, hostRef.current, (id) => onSelectRef.current?.(id)); setState("ready"); }
+      catch { setState("error"); }
+    }).catch(() => { if (!dead) setState("error"); });
+    return () => { dead = true; stage.current?.dispose(); stage.current = null; };
+  }, []);
+
+  const col = colors ?? DEFAULT_COLORS;
+  useEffect(() => {
+    const s = stage.current; if (state !== "ready" || !s) return;
+    if (mode === "bag" && bag) s.setBag(bag, col); else s.setFlat(pieces ?? []);
+  }, [state, mode, bag, pieces, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (state === "ready") stage.current?.setSelected(selected); }, [state, selected, mode, bag, pieces]);
+  useEffect(() => { if (state === "ready") stage.current?.setExplode(explode); }, [state, explode]);
+
+  const views: [Pattern3DView, string][] = [["iso", t("มุมเฉียง", "Angled")], ["front", t("ด้านหน้า", "Front")], ["side", t("ด้านข้าง", "Side")], ["top", t("มองจากบน", "Top")]];
+  return (
+    <div className={`relative overflow-hidden rounded-lg border border-slate-200 bg-gradient-to-b from-slate-50 to-slate-200 ${className}`} style={{ height }}>
+      <div ref={hostRef} className="absolute inset-0" />
+      {state !== "ready" && (
+        <div className="absolute inset-0 grid place-items-center px-6 text-center text-sm text-slate-500">
+          {state === "loading" ? t("กำลังเปิดภาพ 3D…", "Opening the 3D view…") : t("เครื่องนี้เปิดภาพ 3D ไม่ได้ ส่วนอื่นยังใช้ได้ตามปกติ", "This device cannot show 3D. Everything else still works.")}
+        </div>
+      )}
+      {state === "ready" && (
+        <>
+          <div className="absolute right-2 top-2 flex flex-wrap justify-end gap-1">
+            {views.map(([v, lb]) => (
+              <button key={v} type="button" onClick={() => stage.current?.setView(v)} className="h-6 rounded-full border border-slate-200 bg-white/90 px-2 text-[11px] text-slate-600 hover:border-blue-300 hover:text-blue-700">{lb}</button>
+            ))}
+          </div>
+          <div className="pointer-events-none absolute bottom-1.5 left-2 text-[11px] text-slate-500">{t("ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม", "Drag to rotate · scroll to zoom")}</div>
+        </>
+      )}
+    </div>
+  );
+}

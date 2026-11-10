@@ -124,7 +124,15 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive }: {
+  /** ชิ้นบนกระดานแบบสด (ตอนเปิด + ทุกครั้งที่เปลี่ยน รวมระหว่างลาก) — ไว้วาดภาพ 3D ตาม */
+  onLive?: (pieces: ResultPiece[]) => void;
+  /** เพิ่มชิ้นเข้ากระดานจากภายนอก (เช่น ตัวสร้างจากแม่แบบทรง) — nonce เปลี่ยน = เพิ่ม 1 ครั้ง · ชิ้นที่มี at วางเป็นกลุ่มต่อจากขวาสุดของกระดาน · ย้อนกลับได้ */
+  inject?: { nonce: number; pieces: EditorPiece[] } | null;
+  /** ชิ้นที่เลือกเปลี่ยน → ส่ง pid กลับ (null = ไม่ได้เลือก) — ใช้ให้ภาพ 3D สว่างตาม */
+  onSelChange?: (pid: string | null) => void;
+  /** สั่งเลือกชิ้นจากภายนอก (เช่น คลิกชิ้นในภาพ 3D) — nonce เปลี่ยน = เลือก 1 ครั้ง */
+  selectPid?: { nonce: number; pid: string | null } | null;
   open: boolean;
   onClose?: () => void;
   onSave?: (r: ShapeEditorResult) => void;
@@ -312,7 +320,34 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     return next;
   };
   const rightEdge = () => piecesRef.current.reduce((m, p) => { const b = pieceGeometry(p).cutBox; return Math.max(m, b.x + b.w); }, -2) + 2;
-  const patchPiece = (id: string, f: (p: Piece) => Piece, key?: string) => commit(piecesRef.current.map((p) => (p.id === id ? f(p) : p)), key);
+  // ── เชื่อมกับภายนอก (สตูดิโอแพทเทิร์น): รับชิ้นจากแม่แบบ · บอก/รับชิ้นที่เลือก — ไม่ส่ง prop = ทำงานเหมือนเดิมทุกอย่าง ──
+  const injectSeen = useRef<number | null>(inject?.nonce ?? null);   // ค่าที่มีอยู่ตอนเปิด = เคยเพิ่มไปแล้ว ไม่เพิ่มซ้ำ
+  useEffect(() => {
+    if (!inject || injectSeen.current === inject.nonce) return;
+    injectSeen.current = inject.nonce;
+    if (readonly || !inject.pieces.length) return;
+    const x0 = rightEdge();
+    let x = x0;
+    const list: Piece[] = inject.pieces.map((p) => {
+      const b = shapeBox(p.shape), a = cleanAllow(p.allow);
+      const dx = (p.at ? x0 + p.at[0] : x + a) - b.x, dy = (p.at ? p.at[1] : a) - b.y;
+      if (!p.at) x += b.w + 2 * a + 2;
+      const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [] }, dx, dy);
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
+    });
+    const next = addPieces(list);
+    if (next) { changeTool("move"); fitView(next); }
+  }, [inject]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const onSelRef = useRef(onSelChange); onSelRef.current = onSelChange;
+  const selPid = pieces.find((p) => p.id === sel)?.pid ?? null;
+  useEffect(() => { onSelRef.current?.(selPid); }, [selPid]);
+  useEffect(() => {
+    if (!selectPid) return;
+    const hit = selectPid.pid ? piecesRef.current.find((p) => p.pid === selectPid.pid) : undefined;
+    setMulti(new Set()); setEditId(null); setSel(hit ? hit.id : null);
+    if (hit) setTool("move");
+  }, [selectPid]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const patchPiece =(id: string, f: (p: Piece) => Piece, key?: string) => commit(piecesRef.current.map((p) => (p.id === id ? f(p) : p)), key);
 
   const commitPen = () => {
     if (!pen) return;
@@ -879,6 +914,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     timer.current = setTimeout(flush, 250);
   }, [pieces, basis, refs]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (timer.current) flush(); }, [flush]);   // ปิด/สลับมุมมองระหว่างรอ = ส่งทันที ไม่หาย
+  // ภาพสดของชิ้นบนกระดาน (ตอนเปิด + ทุกครั้งที่ขยับ รวมระหว่างลาก) → ภาพ 3D วาดตาม · ไม่แตะการบันทึก
+  const onLiveRef = useRef(onLive); onLiveRef.current = onLive;
+  useEffect(() => {
+    if (!onLiveRef.current) return;
+    const id = setTimeout(() => onLiveRef.current?.(buildResult().pieces), 120);
+    return () => clearTimeout(id);
+  }, [pieces]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (initialSel) { const pc = piecesRef.current.find((x) => x.pid === initialSel); if (pc) { setSel(pc.id); setTool("move"); } } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── รูปอ้างอิง ──

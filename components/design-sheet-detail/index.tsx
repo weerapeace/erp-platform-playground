@@ -69,7 +69,7 @@ const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entr
 const DesignSheetSpecTab = dynamic(() => import("./spec-tab").then((m) => m.DesignSheetSpecTab), { ssr: false });
 const DesignSheetNoticeTab = dynamic(() => import("./notice-tab").then((m) => m.DesignSheetNoticeTab), { ssr: false });
 // ⚡ ส่วนในป๊อปใบงาน/ป๊อปย่อย (ตัวแก้ข้อความ tiptap ~300KB ฯลฯ) → โหลดโค้ดตอนเปิดใช้ (จุดวางเดิม พฤติกรรมเดิม — npm run perf-check 2026-11-07 หน้า /master/design-sheets 729KB)
-const ShapeEditor = dynamic(() => import("@/components/pattern-sheet/shape-editor").then((m) => m.ShapeEditor), { ssr: false });   // ✏️ วาดชิ้นวัสดุ (โหลดเมื่อเปิด)
+const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });   // ✏️ วาดชิ้นวัสดุ + ภาพ 3D + แม่แบบทรงกระเป๋า (ครอบ ShapeEditor · โหลดเมื่อเปิด)
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false });
 const SupplierQuoteSection = dynamic(() => import("./supplier-quote").then((m) => m.SupplierQuoteSection), { ssr: false });
 const AddToPlanButton = dynamic(() => import("@/components/team-plan/add-to-plan").then((m) => m.AddToPlanButton), { ssr: false });
@@ -2728,7 +2728,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 cutPiecesPerUnit={cutLaborSummary(cutRows).pieces} onChange={setOrderQty} />
 
               {costView === "draw" && board ? (
-                <ShapeEditor key={`board-${costParent}-${board.nonce}`} open embedded readonly={!canEdit}
+                <PatternStudio key={`board-${costParent}-${board.nonce}`} readonly={!canEdit}
                   initial={board.initial} initialRefs={board.refs} initialBasis={board.basis} initialSel={board.sel}
                   materials={priceItems.map((p) => ({ id: p.id, name: p.name, sub: p.group_name }))}
                   refPicker={form.id ? (pick) => <SheetImagePicker sheetId={form.id!} usedKeys={new Set<string>()} onPick={(im) => pick({ url: im.url, label: im.source_label })} /> : undefined}

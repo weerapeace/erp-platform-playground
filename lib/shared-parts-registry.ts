@@ -541,6 +541,22 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "pattern-sheet.md",
   },
   {
+    key: "pattern-studio", label: "สตูดิโอแพทเทิร์น (กระดานวาด + ภาพ 3D + แม่แบบทรงกระเป๋า)", code: "PatternStudio · BagTemplateWizard · lib/bag-templates", category: "feature",
+    source: { path: "components/pattern-studio" },
+    what: "ครอบตัววาดชิ้นวัสดุเดิม แล้วเพิ่มปุ่มสร้างชิ้นจากแม่แบบทรงกระเป๋า (ใส่ขนาด → ได้ชิ้นแพทเทิร์นครบพร้อมภาพกระเป๋าที่เย็บแล้ว) กับภาพ 3D ของชิ้นบนกระดานที่ขยับตามทันที เลือกชิ้นฝั่งไหนอีกฝั่งสว่างตาม",
+    when: "หน้าที่ให้ผู้ใช้ทำแพทเทิร์นกระเป๋า/ชิ้นวัสดุแล้วอยากเห็นภาพ 3D ไปด้วย เช่น แท็บตีราคา (แบบวาด) ใบงานออกแบบ — รับค่าชุดเดียวกับ ShapeEditor แบบฝัง",
+    notWhen: "ป๊อปวาดชิ้นเดี่ยวที่ไม่ต้องการ 3D ให้ใช้ ShapeEditor ตรง ๆ · ยังประกอบชิ้นที่วาดเองเป็นกระเป๋าไม่ได้ (ต้องมีข้อมูลตะเข็บ = รอบถัดไป)",
+    doc: "pattern-studio.md",
+  },
+  {
+    key: "pattern-3d", label: "ตัวแสดงชิ้นแพทเทิร์นเป็นภาพ 3D", code: "Pattern3D · lib/three-loader", category: "feature",
+    source: { path: "components/pattern-3d" },
+    what: "วาดชิ้นแพทเทิร์นเป็นแผ่น 3D วางบนโต๊ะ (มีรูเจาะจริง เส้นเย็บ ป้ายชื่อ) หรือวาดกระเป๋าที่ประกอบแล้วจากแม่แบบทรง หมุน ซูม แยกชิ้นดู คลิกเลือกชิ้นได้ ไลบรารี 3D โหลดจาก public/vendor ตอนเปิดครั้งแรก ไม่ทำให้หน้าอื่นหนัก",
+    when: "ต้องการให้เห็นชิ้นแพทเทิร์นหรือกระเป๋าจากแม่แบบเป็นภาพ 3D",
+    notWhen: "รูปสินค้าจริง/ภาพถ่าย ใช้ตัวแสดงรูปเดิม · ห้ามลง three.js เป็นแพ็กเกจ (ขั้น build เสี่ยงหน่วยความจำหมด) ให้ใช้ loadThree จาก lib/three-loader",
+    doc: "pattern-studio.md",
+  },
+  {
     key: "print-history", label: "ป้ายพิมพ์แล้ว N ครั้ง", code: "PrintHistoryBadge", category: "print",
     source: { path: "components/print-history" },
     what: "บอกว่าเอกสารนี้พิมพ์ไปกี่ครั้ง ล่าสุดเมื่อไหร่ ใครพิมพ์",
