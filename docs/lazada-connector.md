@@ -89,6 +89,14 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 - ✅ 2026-11-10 19:16 ลบรูป LB-01 5→4: ส่งชุดที่สั้นลง → ดึงกลับเห็น 4 รูปตรงลำดับ = **Lazada ลบรูปได้** (คู่มือที่ว่า "แทนได้ ลบไม่ได้" ไม่ตรงกับของจริง) → เลิกเตือนก่อนส่ง (route ยังเทียบจำนวน/ลำดับหลังส่ง)
 - ⚠️ ยังไม่ยืนยัน: รูปตัวเลือก
 
+**เฟส A (เจ้าของขอ 2026-11-10 · widget 4 เรื่อง → เลือก A ก่อน) — รูปส่งเสริม + รูปตัวเลือกหลายรูป · deploy e3d09ba2 · ยังไม่ทดสอบกับร้านจริง:**
+- รูปส่งเสริม = `attributes.promotion_square_image` (1:1 · ≥ 330 แนะนำ 1000 · พื้นขาว/โปร่งใส · array ≤ 1) + `promotion_long_image` (3:4 · ≥ 750×1000) — ไม่ใช่ `promotion_whitebkg_image` (ไม่มีในคู่มือ) · ต้องเป็นลิงก์ Lazada · สัดส่วนผิด = Lazada ทิ้งเงียบ ๆ แต่ update สำเร็จ
+  - แท็บรูป: กล่อง "รูปภาพส่งเสริมการขาย" (จัตุรัส: รูปบนร้าน/ระบบ · แนวตั้ง: ระบบเท่านั้น) → ฝากด้วย `/api/r2-image?key=…&w=1000&sq=1` / `&w=750&pad=34` (pad=34 ใหม่ = 3:4 พื้นขาว JPEG) · ล้าง = ยังไม่รองรับ
+  - XML: `<promotion_square_image>ลิงก์</promotion_square_image>` ใน Attributes (คู่มือเขียนแบบ JSON array ไม่บอกรูปแบบ XML) → route ดึงกลับเช็ก `view.promoSquare/promoLong` ไม่เห็น = เตือน (ถ้าไม่ติดเลย ให้ลองส่งแบบ JSON payload)
+- รูปตัวเลือก ≤ 8 รูป: แท็บตัวเลือก → โหมดรูป → กดรูปในแถว → ป๊อป `ListingImageGrid` + `ListingImagePicker` (showShop) · "ใช้รูปชุดนี้กับทุกตัวเลือกสีเดียวกัน" (`lazApplyImagesToGroup` · ค่าชั้นแรกจาก saleProp = `LazadaSkuView.groupValue`)
+  - กฎ: ใส่รูปได้เฉพาะชั้นตัวเลือกแรก (Variation1) ที่ไม่ใช่ไซซ์ (`view.imageVariation.isSize`) · รูปครบทุกตัว · ส่งแล้วเทียบจำนวนรูปต่อตัวเลือก
+- ถัดไป (รอเจ้าของ): เฟส B ข้อมูลเฉพาะ (`/category/attributes/get` · ส่ง `en_name` · ช่องจำเป็นขาด = Lazada ไม่ให้แก้สินค้า · brand_id ดูอย่างเดียว) + ประกัน (`warranty_type` / `warranty` / `product_warranty`) + ห่อของขวัญ (`gift_wrapping` Yes/No · Lazada เปิดให้เฉพาะร้านที่อนุญาต) · เฟส C ให้ AI เลือก (ลงทะเบียน `ai.platform_attrs` ในศูนย์ AI)
+
 **กติกา Lazada ที่ต้องระวังตอนทำเฟส 2–4** (สำรวจจาก JSON ของคู่มือ open.lazada.com 2026-11-10):
 - `/product/item/get` ใช้ `item_id` เท่านั้น (seller_sku เลิกรองรับแล้ว)
 - `/product/update`: ต้องมี `SkuId` ทุก SKU · ⚠️ คู่มือบอกสถานะ SKU "ค่าเริ่ม = active" → **ต้องส่งสถานะเดิมของทุก SKU ไปด้วยเสมอ** (ไม่งั้นตัวเลือกที่ปิดอยู่อาจเปิดเอง — IG ปิดอยู่ 48 ตัว) · ส่ง SKU ครบตามลำดับเดิม (ส่งสลับ Lazada เรียงตัวเลือกใหม่) · รูปลบไม่ได้ ทำได้แค่แทน · ล้างช่องด้วย `d_description`/`d_short_description` · คำตอบอาจได้ `item_status = Pending QC` (ตรวจภายใน 24 ชม.) · Lazada แนะนำห้ามใช้ตัวนี้แก้ราคา/สต๊อก/ปิดขาย
