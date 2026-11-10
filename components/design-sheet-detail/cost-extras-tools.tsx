@@ -11,7 +11,7 @@
  *   OrderQtyBar         — แถบ "จำนวนที่สั่ง" บนแท็บตีราคา (ใส่ครั้งเดียว ใช้ทุกที่: หารจำนวนสั่ง · ค่าตัดทั้งล็อต · ต้นทุนทั้งล็อต)
  * คิดเลขอยู่ lib/design-cost-presets · ของกลาง: Popover · ERPModal · askConfirm · Icon
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Popover } from "@/components/popover";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
@@ -266,7 +266,12 @@ export function CostPresetsManager({ open, api, initialKind, onClose, materials,
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { if (open) { setKind(initialKind ?? "labor_cut"); setErr(null); } }, [open, initialKind]);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
+  // บันทึกทั้งหมด (เจ้าของสั่ง 2026-11-10: หน้าที่ต้องกดบันทึกหลายแถว ต้องมีปุ่มบันทึกทั้งหมด) — แถวราคากลาง + ค่าตัดรายวัตถุดิบ
+  const [matPending, setMatPending] = useState(0);
+  const matSaveAll = useRef<(() => Promise<{ ok: number; fail: number }>) | null>(null);
+  const onMatPending = useCallback((n: number, fn: () => Promise<{ ok: number; fail: number }>) => { setMatPending(n); matSaveAll.current = fn; }, []);
+  useEffect(() => { if (open) { setKind(initialKind ?? "labor_cut"); setErr(null); setOkMsg(null); } }, [open, initialKind]);
   useEffect(() => { setDrafts(presetsOf(api.presets, kind).map(toDraft)); }, [api.presets, kind]);
   const meta = PRESET_KIND_META[kind];
   const orig = (key: string) => api.presets.find((p) => p.id === key);
@@ -275,7 +280,22 @@ export function CostPresetsManager({ open, api, initialKind, onClose, materials,
     if (!o) return true;
     return (["label", "amount", "w_cm", "l_cm", "h_cm", "max_kg", "mode"] as const).some((k) => String(o[k] ?? "") !== String(d[k] ?? ""));
   };
-  const patch = (key: string, p: Partial<Draft>) => setDrafts((l) => l.map((d) => (d._key === key ? { ...d, ...p } : d)));
+  const patch = (key: string, p: Partial<Draft>) => { setOkMsg(null); setDrafts((l) => l.map((d) => (d._key === key ? { ...d, ...p } : d))); };
+  const dirtyDrafts = drafts.filter(dirty);
+  const pending = dirtyDrafts.length + (kind === "cut_rate" ? matPending : 0);
+  const saveAll = async () => {
+    setBusy("all"); setErr(null); setOkMsg(null);
+    let ok = 0, fail = 0, lastErr: string | null = null;
+    for (const d of dirtyDrafts) {
+      const { _key, ...p } = d; void _key;
+      const e = await api.save({ ...p, sort_order: p.sort_order ?? drafts.indexOf(d) });
+      if (e) { fail++; lastErr = e; } else ok++;
+    }
+    if (kind === "cut_rate" && matSaveAll.current) { const r = await matSaveAll.current(); ok += r.ok; fail += r.fail; }
+    setBusy(null);
+    if (fail) setErr(`บันทึกไม่สำเร็จ ${fail} รายการ${lastErr ? ` — ${lastErr}` : ""}`);
+    if (ok) setOkMsg(`บันทึกแล้ว ${ok} รายการ`);
+  };
   const saveRow = async (d: Draft) => {
     setBusy(d._key); setErr(null);
     const { _key, ...p } = d; void _key;
@@ -298,9 +318,17 @@ export function CostPresetsManager({ open, api, initialKind, onClose, materials,
       className={`${inCls} ${w} text-right tabular-nums`} />
   );
   return (
-    <ERPModal open={open} onClose={onClose} title="ราคากลางค่าใช้จ่ายเพิ่ม" size="lg"
+    <ERPModal open={open} onClose={onClose} title="ราคากลางค่าใช้จ่ายเพิ่ม" size="lg" hasUnsavedChanges={pending > 0}
       description="ใช้ร่วมกันทุกใบงาน · แก้แล้วใบที่ใส่ราคาไปแล้วไม่เปลี่ยน · มีประวัติว่าใครแก้เมื่อไหร่"
-      footer={<button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ปิด</button>}>
+      footer={<>
+        <span className="mr-auto text-xs">{pending > 0 ? <span className="text-amber-700">แก้ค้างไว้ {pending} รายการ — ยังไม่ได้บันทึก</span> : okMsg ? <span className="text-emerald-700">{okMsg}</span> : null}</span>
+        <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ปิด</button>
+        {pending > 0 && (
+          <button type="button" disabled={busy === "all"} onClick={() => void saveAll()} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            {busy === "all" ? "กำลังบันทึก…" : `บันทึกทั้งหมด (${pending})`}
+          </button>
+        )}
+      </>}>
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1">
           {PRESET_KINDS.map((k) => (
@@ -344,7 +372,7 @@ export function CostPresetsManager({ open, api, initialKind, onClose, materials,
         )}
         {err && <p className="text-sm text-rose-600">{err}</p>}
         {kind === "cut_rate" && materials && onMaterialRate && (
-          <CutRateByMaterial materials={materials} central={presetsOf(api.presets, "cut_rate")[0]?.amount ?? null} onSave={onMaterialRate} />
+          <CutRateByMaterial materials={materials} central={presetsOf(api.presets, "cut_rate")[0]?.amount ?? null} onSave={onMaterialRate} onPending={onMatPending} />
         )}
       </div>
     </ERPModal>
@@ -412,10 +440,12 @@ const GROUP_STATE_CLS: Record<CutMaterialGroup["state"], string> = {
   none: "border-slate-200 bg-white text-slate-500",
 };
 
-export function CutRateByMaterial({ materials, central, onSave }: {
+export function CutRateByMaterial({ materials, central, onSave, onPending }: {
   materials: CutMaterial[];
   central: number | null;
   onSave: (itemId: string, rate: number | null) => Promise<string | null>;
+  /** แจ้งจำนวนที่แก้ค้าง + ฟังก์ชันบันทึกทั้งหมด (ให้ปุ่ม "บันทึกทั้งหมด" ท้ายป๊อปใช้) */
+  onPending?: (count: number, saveAll: () => Promise<{ ok: number; fail: number }>) => void;
 }) {
   const [wage, setWage] = useState("400");
   useEffect(() => { try { const v = localStorage.getItem(WAGE_KEY); if (v) setWage(v); } catch { /* ไม่มีก็ใช้ 400 */ } }, []);
@@ -427,6 +457,22 @@ export function CutRateByMaterial({ materials, central, onSave }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const groups = useMemo(() => cutMaterialGroups(materials), [materials]);
+  const curOf = (id: string) => { const m = materials.find((x) => x.id === id); return m?.cut_rate != null ? String(m.cut_rate) : ""; };
+  const dirtyIds = Object.keys(edits).filter((id) => edits[id] !== curOf(id));
+  const saveAllMats = async (): Promise<{ ok: number; fail: number }> => {
+    let ok = 0, fail = 0;
+    setBusy("all"); setErr(null);
+    for (const id of dirtyIds) {
+      const v = edits[id];
+      const e = await onSave(id, v === "" ? null : Math.max(0, Number(v) || 0));
+      if (e) { fail++; setErr(e); } else { ok++; setEdits((m) => { const n = { ...m }; delete n[id]; return n; }); }
+    }
+    setBusy(null);
+    return { ok, fail };
+  };
+  const saveAllRef = useRef(saveAllMats); saveAllRef.current = saveAllMats;
+  const dirtyKey = dirtyIds.join(",");
+  useEffect(() => { onPending?.(dirtyIds.length, () => saveAllRef.current()); }, [dirtyKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const ql = q.trim().toLowerCase();
   const visible = groups.filter((g) => showHw || !g.hardware || (ql && g.items.some((i) => i.name.toLowerCase().includes(ql))))
     .map((g) => ({ g, items: ql ? g.items.filter((i) => i.name.toLowerCase().includes(ql) || g.group.toLowerCase().includes(ql)) : g.items }))
@@ -460,7 +506,13 @@ export function CutRateByMaterial({ materials, central, onSave }: {
 
   return (
     <div className="space-y-2 border-t border-slate-100 pt-3">
-      <div className="text-sm font-semibold text-slate-700">ตั้งตามวัตถุดิบ <span className="text-xs font-normal text-slate-400">— ตีราคาใช้ราคาของวัตถุดิบก่อน ไม่มีค่อยใช้ค่ากลาง · คิดให้อัตโนมัติ</span></div>
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-white py-1">
+        <span className="text-sm font-semibold text-slate-700">ตั้งตามวัตถุดิบ <span className="text-xs font-normal text-slate-400">— ตีราคาใช้ราคาของวัตถุดิบก่อน ไม่มีค่อยใช้ค่ากลาง · คิดให้อัตโนมัติ</span></span>
+        {dirtyIds.length > 0 && (
+          <button type="button" disabled={busy === "all"} onClick={() => void saveAllMats()}
+            className="ml-auto h-7 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === "all" ? "กำลังบันทึก…" : `บันทึกทั้งหมด (${dirtyIds.length})`}</button>
+        )}
+      </div>
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
         <Icon value="i:calculator" className="text-[14px]" />ค่าแรงช่างตัดต่อวัน
         <input type="number" min={0} step="any" value={wage} onChange={(e) => saveWage(e.target.value)} aria-label="ค่าแรงช่างตัดต่อวัน" className={`${inCls} w-20 text-right tabular-nums`} />บาท
