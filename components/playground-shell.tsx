@@ -3,7 +3,7 @@
 import { shortcutKey } from "@/lib/shortcut-key";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -30,7 +30,8 @@ import { DevicePreviewButton } from "@/components/device-preview";
 import { cachedGetJson } from "@/lib/shell-cache";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
-import { appHomeHref, visibleAppMenus } from "@/lib/app-orbit";
+import { appHomeHref, appPickState, choosePageApp, visibleAppMenus } from "@/lib/app-orbit";
+import { clearAppPick, initialActiveApp, pendingAppPick, pickActiveApp, rememberLastApp, setTabActiveApp } from "@/lib/active-app";
 import { Icon } from "@/components/icon";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 
@@ -462,19 +463,15 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
   const [sections, setSections] = useState<MenuSectionRow[]>([]);   // ไอคอน/ลำดับหมวด (ต่อแอป)
   const [activeApp, setActiveAppState] = useState<string | null>(null);
-  // หน้าที่อยู่หลายแอป: เลือกแอปที่ผู้ใช้เข้าได้ (ไม่มี permission_key หรือมีสิทธิ์) ตัวแรก · ไม่มีเลย → ตัวแรกในรายการ (ให้ตัวกันสิทธิ์บอกเหตุผลตามเดิม)
-  const pickAccessibleApp = (keys: string[]): string | undefined => {
-    const valid = keys.filter((k) => appGroups.some((a) => a.key === k));
-    if (!valid.length) return undefined;
-    const ok = valid.find((k) => { const ag = appGroups.find((a) => a.key === k); return !ag?.permission_key || can(ag.permission_key as Parameters<typeof can>[0]); });
-    return ok ?? valid[0];
+  // ผู้ใช้เข้าแอปนี้ได้ไหม (ไม่ล็อก หรือมีสิทธิ์)
+  const canOpenApp = (k: string): boolean => {
+    const ag = appGroups.find((a) => a.key === k);
+    return !ag?.permission_key || can(ag.permission_key as Parameters<typeof can>[0]);
   };
-  // แอปที่ผู้ใช้ "กดแท็บเอง" → ต้องชนะ auto-sync (หน้าที่อยู่หลายแอป เช่น work-board = [dispatch,production]
-  //  เดิม sync เลือก app_keys ตัวแรกเสมอ = เด้งไป "จ่ายงาน" ทั้งที่กด "ผลิต" → ต้องกด 2 รอบ)
-  const pickedAppRef = useRef<string | null>(null);
+  // เปลี่ยนแอปที่ไฮไลต์ + จำไว้ (แท็บนี้ในหน่วยความจำ — รอดตอนเชลล์ mount ใหม่ · แอปล่าสุดใน localStorage ให้แท็บใหม่)
   const setActiveApp = (k: string | null) => {
     setActiveAppState(k);
-    try { if (k) localStorage.setItem("erp-active-app", k); else localStorage.removeItem("erp-active-app"); } catch { /* ignore */ }
+    setTabActiveApp(k);
   };
 
   // โหลดทะเบียนเมนู + โมดูลใหญ่ (App) จาก DB — ถ้าว่าง/พลาด ใช้ default ในโค้ด
@@ -491,10 +488,9 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       if (!alive || !Array.isArray(j.data)) return;
       const apps = (j.data as AppGroup[]).filter((a) => a.is_active);
       setAppGroups(apps);
-      try {
-        const saved = localStorage.getItem("erp-active-app");
-        setActiveAppState(saved && apps.some((a) => a.key === saved) ? saved : (apps[0]?.key ?? null));
-      } catch { setActiveAppState(apps[0]?.key ?? null); }
+      // เพิ่งกดเลือกแอป → แอปของแท็บนี้ → แอปล่าสุดที่ใช้ (lib/active-app)
+      const saved = initialActiveApp();
+      setActiveApp(saved && apps.some((a) => a.key === saved) ? saved : (apps[0]?.key ?? null));
     }).catch(() => { if (alive) setAppGroups([]); });
     return () => { alive = false; };
   }, []);
@@ -510,10 +506,34 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
     return appHomeHref(its, appGroups.find((a) => a.key === key) ?? { key });
   };
 
+  // หน้าที่อยู่หลายแอป (เช่น SKUs = Master Data + จัดซื้อ + จัดการงาน) ควรไฮไลต์แอปไหน — กฎกลาง lib/app-orbit choosePageApp:
+  //   เพิ่งกดแท็บ → แอปที่เปิดอยู่ (ถ้ามีหน้านี้) → แอปเจ้าของหน้า (ตั้งหน้านี้เป็นหน้าแรก) → ตามลำดับ (เลือกแอปที่เข้าได้ก่อน)
+  //   (เข้าได้ก่อน: เดิมพนักงานเปิด SKU การตลาดจากแอปจัดการงาน ถูกเช็กสิทธิ์แอป "การตลาด" ที่ไม่มี แล้วโดนกั้น)
+  const pageApp = (keys: string[], pageHref: string, current: string | null, picked: string | null = null) =>
+    choosePageApp({
+      keys: keys.filter((k) => appGroups.some((a) => a.key === k)), pageHref, current, picked,
+      canOpen: canOpenApp, homeOf: firstHrefForApp,
+    });
+
+  // กดแท็บแอปด้านบน → จำว่ากดแอปไหน (lib/active-app — รอดตอนเชลล์ mount ใหม่) แล้วไฮไลต์ทันที
+  //   Ctrl/⌘/Shift+คลิก = เปิดแท็บใหม่ → แท็บนี้อยู่แอปเดิม แค่จำไว้ให้แท็บใหม่เปิดในแอปที่กด
+  const onAppTabClick = (e: React.MouseEvent, key: string, href: string | null) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { rememberLastApp(key); return; }
+    pickActiveApp(key, pathname, href);
+    setActiveAppState(key);
+  };
+
   // ซิงก์ App ที่เลือก (หัวบน + sidebar) ให้ตรงกับ "หน้าที่เปิดอยู่" อัตโนมัติ
   // จับคู่ pathname กับเมนู (ตรงเป๊ะ หรือขึ้นต้นตรงกัน) → สลับ App ให้ตรงหน้า
   useEffect(() => {
     if (!menuRows || menuRows.length === 0 || appGroups.length === 0) return;
+    // เพิ่งกดแท็บแอป: หน้าเก่ายังไม่เปลี่ยน → รอ ห้ามดึงแอปกลับ (บั๊ก "กด Master Data แต่ไฮไลต์จัดซื้อ")
+    //   ถึงหน้าใหม่แล้ว → ใช้แอปที่กด (ครั้งเดียว)
+    const pick = pendingAppPick();
+    const pickState = appPickState(pick, pathname, Date.now());
+    if (pickState === "wait") return;
+    const picked = pickState === "use" && pick && appGroups.some((a) => a.key === pick.app) ? pick.app : null;
+    if (pick) clearAppPick();
     const matches = menuRows.filter((r) =>
       r.is_active && r.href && (pathname === r.href || pathname.startsWith(r.href + "/")));
     let target: string | undefined;
@@ -522,17 +542,10 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       // หน้าเดียวกันอาจมีเมนูหลายแถว (แต่ละแอปตั้งชื่อหมวดของตัวเอง เช่น "สั่งซื้อ" อยู่ทั้งแอปจัดซื้อและหมวด "เงินออก" ของแอปการเงิน)
       // → รวม app_keys ของทุกแถวที่ href เดียวกัน ไม่งั้นกดเมนูจากแอปการเงินแล้วเด้งไปแอปจัดซื้อ
       const keys = [...new Set(matches.filter((r) => r.href === best.href).flatMap((r) => r.app_keys ?? []))];
-      // ผู้ใช้เพิ่งกดแท็บเอง + หน้านี้เป็นของแอปที่กด → เคารพการเลือก (กันเด้งไป app_keys ตัวแรก เช่น "จ่ายงาน")
-      const picked = pickedAppRef.current;
-      if (picked && keys.includes(picked) && appGroups.some((a) => a.key === picked)) {
-        pickedAppRef.current = null;
-        if (activeApp !== picked) setActiveApp(picked);
-        return;
-      }
-      if (activeApp && keys.includes(activeApp)) return;   // App ปัจจุบันถูกต้องแล้ว → ไม่กระตุก
-      // หน้าอยู่หลายแอป → เลือกแอปที่ผู้ใช้ "เข้าได้" ก่อน (เดิมเอาตัวแรกในรายการเสมอ → พนักงานเปิด SKU การตลาด
-      // จากแอปจัดการงาน ถูกเช็กสิทธิ์แอป "การตลาด" ที่ไม่มี แล้วโดนกั้นทั้งที่มีสิทธิ์หน้านั้น)
-      target = pickAccessibleApp(keys);
+      target = pageApp(keys, best.href, activeApp, picked);
+      if (target === activeApp) return;   // ถูกแล้ว → ไม่กระตุก
+    } else if (picked) {
+      target = picked;   // หน้าที่ไม่อยู่ในเมนู (เช่นหน้าแรกมี ?query) → เชื่อแท็บที่เพิ่งกด
     } else {
       // หา match จากตารางสำรอง (หน้าจริงที่ลิงก์ไม่ตรงเมนู)
       const fb = ROUTE_APP_FALLBACK
@@ -542,8 +555,8 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       if (activeApp === fb.app) return;
       if (appGroups.some((a) => a.key === fb.app)) target = fb.app;
     }
-    // ใช้ setActiveApp (เซฟลง localStorage ด้วย) — กัน "เด้งกลับแอปเดิม" ตอนเปลี่ยนหน้า
-    // (Shell mount ใหม่ทุกหน้า → อ่าน activeApp จาก localStorage; ถ้า effect แก้แล้วไม่เซฟ
+    // ใช้ setActiveApp (จำไว้ใน lib/active-app ด้วย) — กัน "เด้งกลับแอปเดิม" ตอนเปลี่ยนหน้า
+    // (เชลล์ mount ใหม่เมื่อข้ามโซนหน้า → อ่านแอปจาก lib/active-app; ถ้า effect แก้แล้วไม่จำ
     //  ค่าจะค้างที่แอปที่กดแท็บล่าสุด พอเข้าหน้าที่ใช้ได้หลายแอปเลยเด้งกลับ)
     if (target && target !== activeApp) setActiveApp(target);
   }, [pathname, menuRows, appGroups, activeApp]);
@@ -616,11 +629,11 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       const matches = menuRows.filter((r) => r.is_active && r.href && (pathname === r.href || pathname.startsWith(r.href + "/")));
       if (matches.length > 0) {
         const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
-        // หน้าที่อยู่หลายแอป (เช่น SKUs อยู่ทั้ง master+purchasing) → ยึดแอปที่เปิดอยู่ก่อน
+        // หน้าที่อยู่หลายแอป (เช่น SKUs อยู่ทั้ง master+purchasing) → ยึดแอปที่เปิดอยู่ก่อน (กฎเดียวกับแถบแอป — pageApp)
         // (ไม่งั้น favicon/ชื่อแท็บ/ตัวกันสิทธิ์จะเดาเป็น app_key ตัวแรกเสมอ = เด้งเป็น Master Data)
         const allKeys = [...new Set(matches.filter((r) => r.href === best.href).flatMap((r) => r.app_keys ?? []))];
-        const valid = allKeys.filter((x) => appGroups.some((a) => a.key === x));
-        if (valid.length) return (activeApp && valid.includes(activeApp)) ? activeApp : (pickAccessibleApp(valid) ?? valid[0]);
+        const k = pageApp(allKeys, best.href, activeApp);
+        if (k) return k;
       }
     }
     const fb = ROUTE_APP_FALLBACK
@@ -859,11 +872,11 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
                     : "border-transparent text-slate-500 hover:text-slate-800"
                 }`;
                 return href ? (
-                  <Link key={a.key} href={href} onClick={() => { pickedAppRef.current = a.key; setActiveApp(a.key); }} className={cls}>
+                  <Link key={a.key} href={href} onClick={(e) => onAppTabClick(e, a.key, href)} className={cls}>
                     <AppTabIcon icon={a.icon} iconUrl={a.icon_url} /><span>{a.label}</span>
                   </Link>
                 ) : (
-                  <button key={a.key} onClick={() => { pickedAppRef.current = a.key; setActiveApp(a.key); }} className={cls}>
+                  <button key={a.key} onClick={(e) => onAppTabClick(e, a.key, null)} className={cls}>
                     <AppTabIcon icon={a.icon} iconUrl={a.icon_url} /><span>{a.label}</span>
                   </button>
                 );

@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { orbitAppMatches, orbitCardBox, orbitPose, orbitSnapTarget, searchOrbit, topIndex, ROW_PX_PER_RAD, type OrbitApp, type OrbitMenu } from "@/lib/app-orbit";
 import { ORBIT_DEFAULT, type OrbitColor, type OrbitStyle } from "@/lib/app-orbit-style";
+import { pickActiveApp } from "@/lib/active-app";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useViewportLayout } from "@/components/device-view";
 
@@ -29,9 +30,9 @@ const STAGE_H_PHONE = 160;
 const PANEL_ROWS = 5;       // เมนูที่โชว์ในแผงก่อนกด "ดูทั้งหมด"
 const NARROW_W = 700;       // กว้างไม่ถึงนี้ = ใช้แบบแกลเลอรีมือถือ
 
-/** เปิดแอปแล้วให้แท็บแอปด้านบนของเชลล์ตรงกับแอปที่กด (PlaygroundShell อ่าน key นี้ตอนเปิดหน้า) */
+/** เปิดแอปแล้วให้แท็บแอปด้านบนของเชลล์ตรงกับแอปที่กด (ความจำกลาง lib/active-app — PlaygroundShell อ่านตอนเปิดหน้า) */
 function rememberActiveApp(key: string) {
-  try { localStorage.setItem("erp-active-app", key); } catch { /* ignore */ }
+  pickActiveApp(key, typeof window === "undefined" ? "" : window.location.pathname, null);
 }
 
 /** สีการ์ด: tint = สีอ่อนจาก theme_color แอป · solid = สีเต็ม · white = ขาวล้วน (ไม่ได้ตั้งสี = ขาว/เทาเข้ม) */

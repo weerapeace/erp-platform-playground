@@ -6,7 +6,8 @@
  *     👁 ใครเห็นเมนูไหน lib/menu-audience, ↕️ ซ่อน/ชื่อ/ลำดับต่อแอป lib/app-menu-layout)
  *   - กด "เปิดแอป" ไปหน้าไหน → appHomeHref (ตัวเดียวกับแท็บแอปด้านบนของ PlaygroundShell)
  *   - ตำแหน่งการ์ด: orbitPoint (วงรีรอบแผงกลาง) · gallerySlot (แถบเลื่อนมือถือ ใบกลางใหญ่)
- * ใช้ที่: components/app-orbit (หน้า /apps) · components/playground-shell (firstHrefForApp)
+ *   - หน้าที่อยู่หลายแอปควรไฮไลต์แท็บแอปไหน → choosePageApp + appPickState (เชลล์ใช้)
+ * ใช้ที่: components/app-orbit (หน้า /apps) · components/playground-shell (firstHrefForApp + แท็บแอปที่ไฮไลต์)
  */
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { applyAppOverrides, menuPlace } from "@/lib/app-menu-layout";
@@ -50,6 +51,55 @@ export function appHomeHref(menus: { href: string }[], app: { key: string; defau
   const pref = app ? APP_DEFAULT_HREF[app.key] : undefined;
   if (pref && menus.some((r) => r.href === pref)) return pref;
   return menus[0]?.href ?? null;
+}
+
+// ===== แถบแอปด้านบนของเชลล์: หน้านี้ควรไฮไลต์แอปไหน =====
+/** path ล้วน (ตัด ?query / #hash) ไว้เทียบกับ pathname */
+export function hrefPath(href: string | null | undefined): string {
+  return (href ?? "").split(/[?#]/)[0];
+}
+
+/**
+ * แอปที่ผู้ใช้ "เพิ่งกดแท็บ" — ค้างไว้ระหว่างรอเปลี่ยนหน้า
+ *   from = หน้าที่อยู่ตอนกด · to = หน้าแรกของแอปที่กด · at = เวลาที่กด (ms)
+ */
+export type AppPick = { app: string; from: string; to: string; at: number };
+/** กดแล้วเกินเวลานี้ยังไม่เปลี่ยนหน้า = ถือว่ายกเลิก */
+export const APP_PICK_TTL_MS = 15000;
+
+/**
+ * สถานะของ "เพิ่งกดแท็บ" ณ หน้าปัจจุบัน
+ *   wait = หน้าเก่ายังไม่เปลี่ยน → ห้ามดึงแอปกลับ (บั๊กเดิม: กด Master Data จากหน้าจัดซื้อ หน้าเก่าดึงกลับเป็นจัดซื้อ
+ *          แล้วหน้า SKUs ที่โหลดเสร็จก็เชื่อค่านั้น เพราะ SKUs อยู่ในแอปจัดซื้อด้วย)
+ *   use  = ถึงหน้าใหม่แล้ว (หรือกดแอปที่หน้าแรกคือหน้าเดิม) → ใช้แอปที่กด
+ *   none = ไม่มี/หมดเวลา
+ */
+export function appPickState(pick: AppPick | null | undefined, pathname: string, now: number): "wait" | "use" | "none" {
+  if (!pick || now - pick.at > APP_PICK_TTL_MS) return "none";
+  if (pathname === pick.from && pick.to !== pick.from) return "wait";
+  return "use";
+}
+
+/**
+ * หน้าที่อยู่หลายแอป (เช่น SKUs = Master Data + จัดซื้อ + จัดการงาน) ควรไฮไลต์แอปไหน — กฎเดียวทั้งเชลล์
+ *   1) เพิ่งกดแท็บแอปที่มีหน้านี้ → แอปนั้น
+ *   2) แอปที่เปิดอยู่มีหน้านี้ → คงไว้ (กด SKUs จากเมนูจัดซื้อ = ยังอยู่จัดซื้อ)
+ *   3) มาจากแอปอื่น/เปิดลิงก์ตรง → "แอปเจ้าของหน้า" = แอปที่ตั้งหน้านี้เป็นหน้าแรก → ไม่มี = ตามลำดับ app_keys
+ *      (เลือกจากแอปที่ผู้ใช้เข้าได้ก่อน · เข้าไม่ได้เลยสักแอป = ตัวแรก ให้ตัวกันสิทธิ์บอกเหตุผล)
+ * keys = แอปที่มีหน้านี้ (กรองเฉพาะแอปที่เปิดใช้แล้ว) · pageHref = href เมนูของหน้านี้
+ */
+export function choosePageApp(opts: {
+  keys: string[]; pageHref: string; current?: string | null; picked?: string | null;
+  canOpen: (key: string) => boolean; homeOf: (key: string) => string | null;
+}): string | undefined {
+  const { keys, current, picked, canOpen, homeOf } = opts;
+  if (!keys.length) return undefined;
+  if (picked && keys.includes(picked)) return picked;
+  if (current && keys.includes(current)) return current;
+  const ok = keys.filter(canOpen);
+  const pool = ok.length ? ok : keys;
+  const page = hrefPath(opts.pageHref);
+  return pool.find((k) => hrefPath(homeOf(k)) === page) ?? pool[0];
 }
 
 /** แอปที่โชว์ในวง: เปิดใช้ + ไม่ล็อก/มีสิทธิ์ + มีเมนูที่เห็นอย่างน้อย 1 อัน · ตัดลิงก์หน้า /apps เอง */

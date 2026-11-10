@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appHomeHref, buildOrbitApps, gallerySlot, orbitAppMatches, orbitPoint, searchOrbit, snapRotation, topIndex, visibleAppMenus, type OrbitAppRow, type OrbitMenuRow } from "@/lib/app-orbit";
+import { APP_PICK_TTL_MS, appHomeHref, appPickState, buildOrbitApps, choosePageApp, gallerySlot, orbitAppMatches, orbitPoint, searchOrbit, snapRotation, topIndex, visibleAppMenus, type OrbitAppRow, type OrbitMenuRow } from "@/lib/app-orbit";
 
 const row = (id: string, href: string, app_keys: string[], extra: Partial<OrbitMenuRow> = {}): OrbitMenuRow => ({
   id, href, label: id, icon: "📄", sort_order: 10, is_active: true, show_in_sidebar: true, permission_key: null, app_keys, ...extra,
@@ -88,5 +88,48 @@ describe("ตำแหน่งการ์ด", () => {
     expect(gallerySlot(0, 0, 5)).toBe(0);
     expect(gallerySlot(4, 0, 5)).toBe(-1);
     expect(gallerySlot(1, 0, 5)).toBe(1);
+  });
+});
+
+describe("แถบแอปด้านบน: หน้าที่อยู่หลายแอปไฮไลต์แอปไหน", () => {
+  // SKUs อยู่ทั้ง Master Data + จัดซื้อ + จัดการงาน · หน้าแรกของ Master Data = SKUs · จัดซื้อ = แดชบอร์ด
+  const homes: Record<string, string> = { master: "/master/skus", purchasing: "/purchasing", tasks: "/tasks" };
+  const base = { keys: ["purchasing", "master", "tasks"], pageHref: "/master/skus", canOpen: () => true, homeOf: (k: string) => homes[k] ?? null };
+
+  it("เพิ่งกดแท็บ Master Data ขณะอยู่จัดซื้อ → Master Data (บั๊กเดิมไฮไลต์จัดซื้อ)", () => {
+    expect(choosePageApp({ ...base, current: "purchasing", picked: "master" })).toBe("master");
+  });
+  it("กด SKUs จากเมนูของจัดซื้อ → ยังอยู่จัดซื้อ", () => {
+    expect(choosePageApp({ ...base, current: "purchasing" })).toBe("purchasing");
+  });
+  it("มาจากแอปอื่น/เปิดลิงก์ตรง → แอปเจ้าของหน้า (ตั้งหน้านี้เป็นหน้าแรก) ไม่ใช่ตัวแรกในรายการ", () => {
+    expect(choosePageApp({ ...base, current: "sales" })).toBe("master");
+    expect(choosePageApp({ ...base, current: null })).toBe("master");
+    expect(choosePageApp({ ...base, pageHref: "/master/skus?view=tags", current: null })).toBe("master");
+  });
+  it("เจ้าของหน้าเข้าไม่ได้ → แอปที่เข้าได้ตัวแรก · เข้าไม่ได้เลย → ตัวแรก (ให้ตัวกันสิทธิ์บอกเหตุผล)", () => {
+    expect(choosePageApp({ ...base, current: null, canOpen: (k) => k !== "master" })).toBe("purchasing");
+    expect(choosePageApp({ ...base, current: null, canOpen: (k) => k === "tasks" })).toBe("tasks");
+    expect(choosePageApp({ ...base, current: null, canOpen: () => false })).toBe("master");
+  });
+  it("กดแท็บแอปที่ไม่มีหน้านี้ → ไม่เชื่อแท็บที่กด ใช้กฎปกติ · ไม่มีแอปเลย = undefined", () => {
+    expect(choosePageApp({ ...base, current: "sales", picked: "sales" })).toBe("master");
+    expect(choosePageApp({ ...base, keys: [] })).toBeUndefined();
+  });
+});
+
+describe("แถบแอปด้านบน: สถานะ 'เพิ่งกดแท็บ'", () => {
+  const pick = { app: "master", from: "/purchasing", to: "/master/skus", at: 1000 };
+  it("หน้าเก่ายังไม่เปลี่ยน → รอ (ห้ามดึงแอปกลับ)", () => {
+    expect(appPickState(pick, "/purchasing", 1500)).toBe("wait");
+  });
+  it("ถึงหน้าใหม่ (หรือถูกพาไปหน้าอื่น) → ใช้", () => {
+    expect(appPickState(pick, "/master/skus", 1500)).toBe("use");
+    expect(appPickState(pick, "/purchasing/dashboard", 1500)).toBe("use");
+  });
+  it("กดแอปที่หน้าแรกคือหน้าเดิม → ใช้ทันที · หมดเวลา/ไม่มี → none", () => {
+    expect(appPickState({ ...pick, from: "/master/skus" }, "/master/skus", 1500)).toBe("use");
+    expect(appPickState(pick, "/purchasing", 1000 + APP_PICK_TTL_MS + 1)).toBe("none");
+    expect(appPickState(null, "/purchasing", 1500)).toBe("none");
   });
 });
