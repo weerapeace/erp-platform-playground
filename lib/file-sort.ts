@@ -78,7 +78,20 @@ export type FolderMove = { mode: "stay" | "move"; pattern: string };
  *   tidy = จัดชื่อก่อนเก็บ: โฟลเดอร์ที่มีคำว่า description → [01] Description · lifestyle / model → ย้ายเข้า [02] Images\
  *   แบรนด์ที่ยังไม่มีที่ใน Z:\Collection (Good Goods / Cansooba / Findig / อื่นๆ — เช็ก 2026-11-09) = ไม่มีค่าตั้งต้น → ไม่เก็บจนกว่าจะตั้ง (ไม่เดา)
  */
-export type CollectionMove = { mode: "stay" | "move"; pattern: string; byBrand: Record<string, string>; tidy: boolean };
+export type CollectionMove = { mode: "stay" | "move"; pattern: string; byBrand: Record<string, string>; tidy: boolean; whenExists: CollectionExists };
+/**
+ * มีรุ่นนี้ใน Collection แล้ว (เจ้าของเลือก 2026-11-10 · ค่าเริ่ม replace):
+ *   replace  = แทนที่ของเดิม เก็บของเก่าไว้ — ไฟล์ชื่อชน: ตัวเก่าย้ายไป [99] ของเก่า\<วันที่>\… · ไฟล์เหมือนเป๊ะ (SHA-256) = ข้าม
+ *   merge    = รวมเข้าไป ไม่ทับ (แบบปุ่ม Arrange) — ชื่อชน → _v.2
+ *   separate = แยกเป็นโฟลเดอร์ใหม่ <รุ่น>_v.2 ไม่แตะของเดิม
+ *   stay     = ไม่เก็บ (อยู่ที่ Work In Process)
+ */
+export type CollectionExists = "replace" | "merge" | "separate" | "stay";
+export const COLLECTION_EXISTS: CollectionExists[] = ["replace", "merge", "separate", "stay"];
+export const COLLECTION_EXISTS_LABEL: Record<CollectionExists, string> = {
+  replace: "แทนที่ของเดิม เก็บของเก่าไว้", merge: "รวมเข้าไป ไม่ทับ (_v.2)", separate: "แยกเป็นโฟลเดอร์ใหม่ (_v.2)", stay: "ไม่เก็บ (อยู่ที่ Work In Process)",
+};
+export const COLLECTION_OLD_FOLDER = "[99] ของเก่า";
 export const COLLECTION_PATTERN_DEFAULT = "Z:\\Collection\\{กลุ่ม}\\{รุ่น}";
 /** ค่าตั้งต้นตามชื่อแบรนด์ (ตรงกับปุ่ม Arrange + โครงจริงใน Z:\Collection) — ตั้งทับรายแบรนด์ได้ในหน้าตั้งค่า */
 export const COLLECTION_BRAND_DEFAULTS: Record<string, string> = {
@@ -101,7 +114,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = {
   // ที่เดียวกับปุ่ม Arrange ของ Create Folder Tool: Z:\Raw Files\<แบรนด์>\<รุ่น>_rawfiles · Images อยู่กับรุ่น
   moves: { raw: { mode: "move", pattern: "Z:\\Raw Files\\{แบรนด์}\\{รุ่น}_rawfiles" }, images: { mode: "stay", pattern: "" } },
   moveFolders: { raw: ["rawfile", "rawfiles", "raw files", "raw file", "raw"], images: ["images", "image"] },
-  collection: { mode: "move", pattern: "", byBrand: {}, tidy: true },
+  collection: { mode: "move", pattern: "", byBrand: {}, tidy: true, whenExists: "replace" },
   png: { mode: "copy", folder: PNG_FOLDER_DEFAULT, gallery: false },
 };
 
@@ -166,6 +179,7 @@ function cleanCollection(raw: unknown): CollectionMove {
     pattern: typeof o.pattern === "string" ? cleanPattern(o.pattern) : d.pattern,
     byBrand,
     tidy: typeof o.tidy === "boolean" ? o.tidy : d.tidy,
+    whenExists: COLLECTION_EXISTS.includes(o.whenExists as CollectionExists) ? (o.whenExists as CollectionExists) : d.whenExists,
   };
 }
 

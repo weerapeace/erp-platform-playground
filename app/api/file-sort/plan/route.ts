@@ -15,6 +15,8 @@
  *     collection = เก็บทั้งโฟลเดอร์เข้า Collection { mode, target (มี {กลุ่ม} ให้โปรแกรมหาเอง), reason, tidy, renames[{from,to}] } (planProductCollection)
  *     pngs[] { rel, name } + png { mode, folder, gallery } = ก๊อป PNG ไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่น (ชื่อตามรหัสสี) · body png_gallery = ให้ PNG ลงแกลเลอรีด้วย
  *     content_candidates[] = JPEG ในโฟลเดอร์ Images ที่ติ๊กส่งไปหน้า Contents ได้ (โปรแกรมขอแผน profile=content ของรูปที่ติ๊กตอนส่ง)
+ *     slots[].mode / existingItems = โหมดรายช่อง (replace แทนที่ทั้งหมด · pick เลือกแทนบางรูป · append ต่อท้าย) + รูปเดิมในระบบ (R2 key ไว้ทำรูปย่อ)
+ *     body slot_modes { "<slot key>": { mode, remove?: [id] } } = โปรแกรมเลือกรายช่อง · collection.whenExists = มีรุ่นนี้ใน Collection แล้วทำยังไง
  *     files[]  = ไฟล์ละ { rel, erp, dest, slotKey, width, nas, why, note }
  *     slots[]  = ช่องรูปของสินค้า { kind, parentId, skuId, rels (ปกหน้าสุด), coverRel, replaces, remove{attachments,desc}, entity }
  *
@@ -29,7 +31,7 @@ import { driveConfigured } from "@/lib/google-drive";
 import { findArtworkDriveFolder } from "@/lib/artwork-drive";
 import { findProfile, nasFolderFor, nasPatternFor, planFileSort, safeFolderName, type FileSortInput, type ProductVariant } from "@/lib/file-sort";
 import { artworkTypeFolderName, brandFolderName, loadFileSortConfig } from "@/lib/file-sort-server";
-import { PRODUCT_MAX_FILES, planProductCollection, planProductMoves, planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { PRODUCT_MAX_FILES, planProductCollection, planProductMoves, planProductSort, productNasFolder, type SlotModeInput } from "@/lib/file-sort-product";
 import { CONTENT_MAX_FILES, contentNasFolder, planContentSort } from "@/lib/file-sort-content";
 import { loadAlbumFiles } from "@/lib/content-albums-server";
 import { resolveBrandContentFolder } from "@/lib/content-drive";
@@ -104,8 +106,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
 }
 
+/** โหมดรายช่องจากโปรแกรม { "<slot key>": { mode: replace|append|pick, remove?: [id] } } — รูปแบบผิดทิ้ง · ไม่เกิน 60 ช่อง */
+function cleanSlotModes(raw: unknown): SlotModeInput | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: SlotModeInput = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>).slice(0, 60)) {
+    const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+    if (!/^[\w-]{1,64}\|[A-Za-z]{1,20}\|[\w-]{1,64}$/.test(k) || !(o.mode === "replace" || o.mode === "append" || o.mode === "pick")) continue;
+    out[k] = { mode: o.mode, remove: (Array.isArray(o.remove) ? o.remove : []).map((x) => String(x ?? "").slice(0, 64)).filter(Boolean).slice(0, 50) };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** สูตรงานสินค้า: โหลดสินค้าตามรหัสในชื่อโฟลเดอร์/ไฟล์ (ตัวโหลดกลางชุดเดียวกับปุ่ม 📂 ในเว็บ) → แผนรายไฟล์/รายช่อง */
-async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
+async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; slot_modes?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
   if (!(await apiCan(request, "products.view"))) return NextResponse.json({ error: "บัญชีนี้ไม่มีสิทธิ์ดูสินค้า (products.view)" }, { status: 403 });
   const job = String(b.job_folder ?? "").trim();
   const files = Array.isArray(b.files) ? b.files.filter((f) => f && typeof f.path === "string") : [];
@@ -119,7 +133,14 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   const catalog = await loadImageCatalog(admin, cleanCatalogRequest({ codes }));
   const variant: ProductVariant = b.variant === "color" || b.variant === "edit" ? b.variant : "new";
   const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined,
-    pngGallery: typeof b.png_gallery === "boolean" ? b.png_gallery : undefined });
+    pngGallery: typeof b.png_gallery === "boolean" ? b.png_gallery : undefined, slotModes: cleanSlotModes(b.slot_modes) });
+  // รูปย่อของ Description เดิม (ให้เลือกแทนบางรูป) — คลังเก็บ r2_key ไว้
+  const descIds = [...new Set(plan.slots.filter((s) => s.kind === "desc").flatMap((s) => s.existingItems.map((x) => x.id)))];
+  if (descIds.length) {
+    const { data: as } = await admin.from("assets").select("id, r2_key").in("id", descIds.slice(0, 200));
+    const keyOf = new Map(((as ?? []) as { id: string; r2_key: string | null }[]).map((a) => [String(a.id), a.r2_key]));
+    for (const s of plan.slots) if (s.kind === "desc") for (const x of s.existingItems) x.key = keyOf.get(x.id) ?? null;
+  }
   if (catalog.truncated) plan.warnings.push("รหัสในโฟลเดอร์นี้ตรงกับสินค้าเกิน 60 รุ่น — แสดงแค่ 60 รุ่นแรก (แบ่งโฟลเดอร์ให้เล็กลง)");
   // ย้าย Rawfiles / Images: โฟลเดอร์แบรนด์ = แบรนด์ของรุ่นที่ชื่อตรงกับโฟลเดอร์ (ไม่มี = รุ่นแรกที่จับคู่ได้) · ไม่มีแบรนด์ = ไม่เดา
   const main = plan.parents.find((p) => p.code.toLowerCase() === jobName.toLowerCase()) ?? plan.parents[0];

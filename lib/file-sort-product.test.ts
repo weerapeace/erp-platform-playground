@@ -281,3 +281,53 @@ describe("planProductSort — PNG ไปโฟลเดอร์ PNG · JPEG ใ
     expect(cleanProductConfig({}).png).toEqual({ mode: "copy", folder: "[04] PNG", gallery: false });
   });
 });
+
+describe("planProductSort — เลือกรายช่อง: แทนที่ทั้งหมด / เลือกแทนบางรูป / ต่อท้าย", () => {
+  const items = (n: number, pre: string) => Array.from({ length: n }, (_, i) => ({ id: `${pre}${i + 1}`, key: `k/${pre}${i + 1}.jpg`, primary: i === 0 }));
+  const pp: CatalogParent[] = [{ parentId: "PZ", code: "ZZ1", name: "z", gallery: 0, galleryItems: [], desc: 2, descItems: [{ assetId: "d1", sort: 0 }, { assetId: "d2", sort: 1 }], png: false, pngKey: null, shopIds: [],
+    skus: [{ id: "SZ1", code: "ZZ1-01", label: "", gallery: 7, items: items(7, "o") }] }];
+  const ff: ProductFileIn[] = ["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg", "[01] Description/1.jpg"].map((path) => ({ path, size: 10 }));
+  const KEY = "PZ|skuGallery|SZ1";
+  it("ค่าเริ่ม (แทนที่ทั้งหมด): เอารูปเดิม 7 ออก · ลงใหม่ 5 · ช่องบอกรูปเดิมไว้โชว์รูปย่อ", () => {
+    const s = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", mode: "replace" }).slots.find((x) => x.key === KEY)!;
+    expect(s).toMatchObject({ mode: "replace", replaces: true });
+    expect(s.remove.attachments.length).toBe(7);
+    expect(s.rels.length).toBe(5);
+    expect(s.existingItems.map((x) => x.key)).toEqual(items(7, "o").map((x) => x.key));
+  });
+  it("ต่อท้าย (รายช่อง): ไม่เอาออก · ที่ว่าง 9-7 = 2 รูป ที่เหลือเกินเพดาน", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", mode: "replace", slotModes: { [KEY]: { mode: "append" } } });
+    const s = p.slots.find((x) => x.key === KEY)!;
+    expect(s).toMatchObject({ mode: "append", replaces: false, existing: 7 });
+    expect(s.remove.attachments).toEqual([]);
+    expect(s.rels.length).toBe(2);
+    expect(p.files.filter((f) => f.why === "over").length).toBe(3);
+    // ช่องอื่นยังแทนที่ตามค่าเริ่ม
+    expect(p.slots.find((x) => x.kind === "desc")).toMatchObject({ mode: "replace", replaces: true });
+  });
+  it("เลือกแทนบางรูป: เอาออกเฉพาะที่เลือก (รวมปกเดิม → รูปแรกที่ลงเป็นปก) · ที่ว่างเพิ่มตาม · id มั่ว ๆ ไม่นับ", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { [KEY]: { mode: "pick", remove: ["o1", "o2", "o3", "ไม่มี"] } } });
+    const s = p.slots.find((x) => x.key === KEY)!;
+    expect(s).toMatchObject({ mode: "pick", replaces: true, existing: 4 });
+    expect(s.remove.attachments.map((x) => x.id)).toEqual(["o1", "o2", "o3"]);
+    expect(s.rels.length).toBe(5);
+    expect(s.coverRel).toBe(s.rels[0]);
+    const keepCover = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { [KEY]: { mode: "pick", remove: ["o5"] } } }).slots.find((x) => x.key === KEY)!;
+    expect(keepCover.coverRel).toBe("ZZ1-01/1.jpg");   // ปกตามกติกาเดิม (รูปเบอร์ 1 = ปก) — ไม่ได้มาจากการเอาปกเดิมออก
+    expect(keepCover.rels.length).toBe(3);         // 9 - (7-1) = 3
+  });
+  it("Description เลือกแทนบางรูปได้ (id = asset)", () => {
+    const s = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { "PZ|desc|-": { mode: "pick", remove: ["d2"] } } }).slots.find((x) => x.kind === "desc")!;
+    expect(s.remove.desc).toEqual([{ assetId: "d2", sort: 1 }]);
+    expect(s.existingItems.map((x) => x.id)).toEqual(["d1", "d2"]);
+  });
+  it("Collection มีรุ่นนี้แล้ว: ค่าเริ่ม = แทนที่ เก็บของเก่า · ค่าผิด = ค่าเริ่ม · [99] ของเก่า ไม่ลงระบบ", () => {
+    expect(DEFAULT_PRODUCT_CONFIG.collection.whenExists).toBe("replace");
+    expect(cleanProductConfig({ collection: { whenExists: "separate" } }).collection.whenExists).toBe("separate");
+    expect(cleanProductConfig({ collection: { whenExists: "x" } }).collection.whenExists).toBe("replace");
+    const c = planProductCollection(ff, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", brand: { id: "b", name: "Louis Montini", folder: "[01] Louis Montini" } }).collection;
+    expect(c).toMatchObject({ whenExists: "replace", oldFolder: "[99] ของเก่า" });
+    const p = planProductSort([...ff, { path: "[99] ของเก่า/2026-11-10/ZZ1-01/1.jpg", size: 1 }], pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1" });
+    expect(p.files.find((f) => f.rel.startsWith("[99]"))).toMatchObject({ erp: false, why: "archive" });
+  });
+});

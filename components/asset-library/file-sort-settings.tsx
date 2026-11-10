@@ -17,7 +17,7 @@ import { Icon } from "@/components/icon";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
   DEFAULT_ARTWORK_PROFILE, DEFAULT_CONTENT_CONFIG, DEFAULT_PRODUCT_CONFIG, MOVE_ROLES, MOVE_ROLE_LABEL, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL, type MoveRole,
-  cleanContentConfig, cleanFileSortConfig, collectionDefaultFor, fillNasPattern, findProfile, nasDateValues, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
+  COLLECTION_EXISTS, COLLECTION_EXISTS_LABEL, cleanContentConfig, cleanFileSortConfig, collectionDefaultFor, fillNasPattern, findProfile, nasDateValues, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
   type ContentSortConfig, type FileSortConfig, type FileSortProfile, type FileSortRule, type NasToken, type ProductSortConfig, type ProductVariant,
 } from "@/lib/file-sort";
 import { planProductMoves, planProductSort, planTidyRenames, productNasFolder } from "@/lib/file-sort-product";
@@ -445,6 +445,18 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                         </div>
                       );
                     })}
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-[13px] text-slate-700 mb-1">{t("ถ้า Collection มีรุ่นนี้อยู่แล้ว (ค่าเริ่ม · เปลี่ยนได้ทีละงานในโปรแกรม)", "If Collection already has this model (default · changeable per job)")}</p>
+                    <div className="flex flex-col gap-1 text-[13px]" role="radiogroup" aria-label={t("ถ้ามีรุ่นนี้แล้ว", "When it exists")}>
+                      {COLLECTION_EXISTS.map((k) => (
+                        <label key={k} className="inline-flex items-start gap-2">
+                          <input type="radio" name="fs-coll-exists" className={`${chk} mt-0.5`} checked={product.collection.whenExists === k} disabled={!canEdit}
+                            onChange={() => setProduct((p) => ({ ...p, collection: { ...p.collection, whenExists: k } }))} />
+                          <span>{COLLECTION_EXISTS_LABEL[k]}{k === "replace" && <span className="block text-[12px] text-slate-500">{t("ไฟล์ชื่อชน: ของใหม่ใช้ชื่อเดิม · ตัวเก่าย้ายไป [99] ของเก่า\\<วันที่>\\… ในโฟลเดอร์รุ่น · ไฟล์เหมือนเป๊ะ = ข้าม", "Name clash: new file keeps the name · old one moves to [99] ของเก่า\\<date>\\… · identical files skipped")}</span>}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <label className="mt-2 inline-flex items-start gap-2 text-[13px]">
                     <input type="checkbox" className={`${chk} mt-0.5`} checked={product.collection.tidy} disabled={!canEdit} onChange={(e) => setProduct((p) => ({ ...p, collection: { ...p.collection, tidy: e.target.checked } }))} />

@@ -27,9 +27,10 @@ import {
   type PlanGroupIn,
   type RouteDest,
   type SlotKind,
+  type SlotModeOverride,
 } from "@/lib/product-image-routing";
 import type { CatalogParent } from "@/lib/product-image-catalog-server";
-import { MOVE_ROLES, collectionPatternFor, fillNasPattern, isJunkFile, nasDateValues, relPathOf, safeFolderName, type MoveRole, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
+import { COLLECTION_OLD_FOLDER, MOVE_ROLES, collectionPatternFor, fillNasPattern, isJunkFile, nasDateValues, relPathOf, safeFolderName, type CollectionExists, type MoveRole, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
 import { folderLabelKey } from "@/lib/role-folders";
 
 export const ERP_IMAGE_EXTS = ["jpg", "jpeg", "png", "webp"] as const;
@@ -69,14 +70,21 @@ export type ProductPlanSlot = {
   existing: number;
   total: number;
   limit: number | null;
-  /** โหมดแทนที่ + มีรูปเดิม → เอารูปเดิมออกก่อน (remove) */
+  /** มีรูปเดิมที่จะเอาออกก่อนลง (remove) — แทนที่ทั้งหมด หรือเลือกแทนบางรูป */
   replaces: boolean;
   remove: { attachments: { id: string; key: string }[]; desc: { assetId: string; sort: number | null }[] };
+  /** โหมดของช่องนี้: replace แทนที่ทั้งหมด · pick เลือกแทนบางรูป (remove = ที่เลือก) · append ต่อท้าย — ทับได้รายช่องจากโปรแกรม (slotModes) */
+  mode: SlotFileMode;
+  /** รูปที่อยู่ในระบบตอนนี้ (ไว้โชว์รูปย่อให้เลือก) · key = R2 key (Description: route เติมจากคลัง) */
+  existingItems: { id: string; key: string | null; primary: boolean }[];
   /** เจ้าของแกลเลอรี (ช่อง desc/png = Parent) */
   entity: { type: "skus_v2" | "parent_skus_v2"; id: string };
   /** ของเดิมไว้ "ย้อนทั้งชุด": ปกเดิมของแกลเลอรี (โหมดต่อท้าย) · รูปตัด PNG เดิม */
   prev: { primaryId: string | null; pngKey: string | null };
 };
+export type SlotFileMode = "replace" | "append" | "pick";
+/** โหมดรายช่องที่โปรแกรมส่งมา (key = ProductPlanSlot.key) · pick + remove = id รูปเดิมที่จะเอาออก (แกลเลอรี = attachment id · Description = asset id) */
+export type SlotModeInput = Record<string, { mode: SlotFileMode; remove?: string[] }>;
 export type ProductPlanGroup = { label: string; role: GroupRole | null; code: string | null; count: number; note?: string };
 export type ProductPlan = {
   files: ProductFileAction[];
@@ -102,12 +110,13 @@ const isErpImage = (ext: string) => (ERP_IMAGE_EXTS as readonly string[]).includ
  *   color = เพิ่มสี — เฉพาะแกลเลอรีของสีที่ยังไม่มีรูปในระบบ (Parent/Description/สีเดิมที่ก๊อปมาจาก Collection ไม่แตะ)
  *   edit  = แก้สี — เฉพาะแกลเลอรีของสีที่อยู่ในโฟลเดอร์ (Parent/Description/PNG ไม่แตะ)
  */
-export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean }): ProductPlan {
+export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean; slotModes?: SlotModeInput }): ProductPlan {
   const mode: MassMode = opts.mode ?? cfg.mode;
   // PNG ในโฟลเดอร์สี/รุ่น: ไม่ลงแกลเลอรี (ซ้ำกับ JPEG เบอร์เดียวกัน) → ก๊อปไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่นแทน · โปรแกรมติ๊กให้ลงแกลเลอรีด้วยได้
   const pngGallery = opts.pngGallery ?? cfg.png.gallery;
   const pngs: { rel: string; name: string }[] = [];
   const pngFolderKey = folderLabelKey(cfg.png.folder);   // โฟลเดอร์ PNG ที่โปรแกรมก๊อปไว้รอบก่อน → ไม่ลงระบบซ้ำ
+  const oldFolderKey = folderLabelKey(COLLECTION_OLD_FOLDER);   // [99] ของเก่า (แทนที่ใน Collection) → ไม่ลงระบบ
   const variant: ProductVariant = opts.variant === "color" || opts.variant === "edit" ? opts.variant : "new";
   const job = (opts.jobFolder ?? "").replace(/[\\/]+/g, "/").replace(/^\/+|\/+$/g, "").split("/").pop() ?? "";
   const out: ProductFileAction[] = [];
@@ -124,6 +133,7 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     const base: ProductFileAction = { rel, name, ext, size, erp: false, nas: true, group: dir.split("/")[0] || job || "(ชั้นบน)" };
     if (isJunkFile(name)) out.push({ ...base, nas: false, why: "junk", note: "ไฟล์ระบบ — ข้าม" });
     else if (dir && folderLabelKey(dir.split("/")[0]) === pngFolderKey) out.push({ ...base, why: "archive", note: "โฟลเดอร์ PNG ที่ก๊อปไว้ — อยู่บน Z:" });
+    else if (dir && folderLabelKey(dir.split("/")[0]) === oldFolderKey) out.push({ ...base, why: "archive", note: "ของเก่าที่เก็บไว้ตอนแทนที่ — อยู่บน Z:" });
     else if (!isErpImage(ext)) out.push({ ...base, why: "not_image", note: "ไม่ใช่รูปที่ลงระบบได้ — อยู่บน Z:" });
     else out.push(base);
   }
@@ -186,7 +196,30 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     for (const im of images) byId.get(im.id)!.dest = im.dest;
   }
 
-  const plan = planRoute(planGroups, parents, { shopIds: [], mode });
+  // รูปเดิมของแต่ละช่อง (key แบบเดียวกับ planRoute) + โหมดรายช่องจากโปรแกรม (เลือกแทนบางรูป = ต่อท้าย + เอาออกเฉพาะที่เลือก)
+  const existingOf = (key: string): { id: string; key: string | null; primary: boolean; sort: number | null }[] => {
+    const [pid, kind, sid] = key.split("|");
+    const p = parents.find((x) => x.parentId === pid);
+    if (!p) return [];
+    if (kind === "parentGallery") return p.galleryItems.map((x) => ({ id: x.id, key: x.key, primary: x.primary, sort: null }));
+    if (kind === "skuGallery") return (p.skus.find((x) => x.id === sid)?.items ?? []).map((x) => ({ id: x.id, key: x.key, primary: x.primary, sort: null }));
+    if (kind === "desc") return p.descItems.map((x) => ({ id: x.assetId, key: null, primary: false, sort: x.sort }));
+    return [];
+  };
+  const isMode = (m: unknown): m is SlotFileMode => m === "replace" || m === "append" || m === "pick";
+  const pickRemove = new Map<string, Set<string>>();
+  const routeModes: Record<string, SlotModeOverride> = {};
+  for (const [key, v] of Object.entries(opts.slotModes ?? {})) {
+    if (!v || !isMode(v.mode)) continue;
+    if (v.mode === "pick") {
+      const ids = new Set(existingOf(key).map((x) => x.id));
+      const rm = new Set((Array.isArray(v.remove) ? v.remove : []).map(String).filter((id) => ids.has(id)));
+      pickRemove.set(key, rm);
+      routeModes[key] = { mode: "append", drop: rm.size };
+    } else routeModes[key] = { mode: v.mode };
+  }
+  const slotModeOf = (key: string): SlotFileMode => { const m = opts.slotModes?.[key]?.mode; return isMode(m) ? m : mode; };
+  const plan = planRoute(planGroups, parents, { shopIds: [], mode, slotModes: routeModes });
   for (const [id, pi] of plan.images) {
     const a = byId.get(id);
     if (!a) continue;
@@ -209,18 +242,25 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     const p = pById.get(s.parentId)!;
     const sku = s.skuId ? p.skus.find((x) => x.id === s.skuId) : undefined;
     const remove = { attachments: [] as { id: string; key: string }[], desc: [] as { assetId: string; sort: number | null }[] };
-    if (s.replaces && mode === "replace") {
-      if (s.kind === "parentGallery") remove.attachments = p.galleryItems.map((x) => ({ id: x.id, key: x.key }));
-      if (s.kind === "skuGallery") remove.attachments = (sku?.items ?? []).map((x) => ({ id: x.id, key: x.key }));
-      if (s.kind === "desc") remove.desc = p.descItems.map((x) => ({ assetId: x.assetId, sort: x.sort }));
-    }
+    const sm: SlotFileMode = s.kind === "png" ? "replace" : slotModeOf(s.key);
+    const exist = existingOf(s.key);
+    // แทนที่ทั้งหมด = เอารูปเดิมออกทั้งช่อง · เลือกแทนบางรูป = เอาออกเฉพาะที่เลือก · ต่อท้าย = ไม่เอาออก
+    const drop = sm === "replace" && s.replaces ? new Set(exist.map((x) => x.id)) : sm === "pick" ? (pickRemove.get(s.key) ?? new Set<string>()) : new Set<string>();
+    if (s.kind === "parentGallery" || s.kind === "skuGallery") remove.attachments = exist.filter((x) => drop.has(x.id)).map((x) => ({ id: x.id, key: x.key ?? "" }));
+    if (s.kind === "desc") remove.desc = exist.filter((x) => drop.has(x.id)).map((x) => ({ assetId: x.id, sort: x.sort }));
+    const primaryId = exist.find((x) => x.primary)?.id ?? null;
+    const rels = s.ids.map(relOf);
+    // เลือกเอารูปปกเดิมออก + ไม่มีรูปปกใหม่ → รูปแรกที่ลงเป็นปก (กันแกลเลอรีไม่มีปก)
+    const coverRel = s.coverId ? relOf(s.coverId) : sm === "pick" && primaryId && drop.has(primaryId) && rels.length ? rels[0] : undefined;
     return {
       key: s.key, kind: s.kind, parentId: s.parentId, skuId: s.skuId, code: sku?.code ?? p.code,
-      rels: s.ids.map(relOf), coverRel: s.coverId ? relOf(s.coverId) : undefined,
-      existing: s.existing, total: s.total, limit: s.limit, replaces: s.replaces && mode === "replace", remove,
+      rels, coverRel,
+      existing: s.existing, total: s.total, limit: s.limit,
+      replaces: s.kind === "png" ? s.replaces : remove.attachments.length + remove.desc.length > 0, remove,
+      mode: sm, existingItems: exist.map((x) => ({ id: x.id, key: x.key, primary: x.primary })),
       entity: s.kind === "skuGallery" && s.skuId ? { type: "skus_v2", id: s.skuId } : { type: "parent_skus_v2", id: s.parentId },
       prev: {
-        primaryId: (s.kind === "skuGallery" ? sku?.items : s.kind === "parentGallery" ? p.galleryItems : undefined)?.find((x) => x.primary)?.id ?? null,
+        primaryId: s.kind === "skuGallery" || s.kind === "parentGallery" ? primaryId : null,
         pngKey: s.kind === "png" ? p.pngKey : null,
       },
     };
@@ -306,7 +346,7 @@ export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig,
 export const TIDY_DESC_FOLDER = "[01] Description";
 export const TIDY_IMAGES_FOLDER = "[02] Images";
 export type TidyRename = { from: string; to: string };
-export type ProductCollection = { mode: "stay" | "move"; target: string | null; reason: string | null; tidy: boolean; renames: TidyRename[] };
+export type ProductCollection = { mode: "stay" | "move"; target: string | null; reason: string | null; tidy: boolean; renames: TidyRename[]; whenExists: CollectionExists; oldFolder: string };
 
 /** จัดชื่อแบบปุ่ม Arrange: ชื่อมีคำว่า description → [01] Description (มีอยู่แล้ว = ไม่แตะ) · lifestyle / model → [02] Images/<ชื่อเดิม> · ข้ามโฟลเดอร์ Rawfiles / Images */
 export function planTidyRenames(tops: string[], cfg: ProductSortConfig): TidyRename[] {
@@ -334,7 +374,7 @@ export function planProductCollection(files: ProductFileIn[], cfg: ProductSortCo
   const warnings = c.mode === "move" && !target
     ? [`เก็บเข้า Collection ไม่ได้: ${reason} — ${reason === "สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ" ? "ตั้งแบรนด์ที่หน้า Parent SKU หรือ" : ""}กด "เปลี่ยนที่…" ในโปรแกรมเพื่อเลือกที่เอง`]
     : [];
-  return { collection: { mode: c.mode, target, reason, tidy: c.tidy, renames }, warnings };
+  return { collection: { mode: c.mode, target, reason, tidy: c.tidy, renames, whenExists: c.whenExists, oldFolder: COLLECTION_OLD_FOLDER }, warnings };
 }
 
 export function productNasFolder(cfg: ProductSortConfig, jobFolder: string, variant: ProductVariant = "new", now?: Date): string | null {

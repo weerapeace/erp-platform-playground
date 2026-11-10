@@ -421,7 +421,13 @@ export interface PlanSlot {
 const slotKind = (d: RealDest): SlotKind =>
   d === "skuMain" || d === "sku" ? "skuGallery" : d === "parent" ? "parentGallery" : d === "desc" ? "desc" : d === "webColor" ? "webColor" : d;
 
-export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: { shopIds: string[]; mode: MassMode }): { images: Map<string, PlanImage>; slots: PlanSlot[] } {
+/**
+ * slotModes (ไม่บังคับ · ตัวแยกไฟล์ ERP): โหมดรายช่อง ทับ opts.mode — key = PlanSlot.key ("<parentId>|<kind>|<skuId|->")
+ *   drop = จำนวนรูปเดิมที่จะเอาออก (โหมด "เลือกแทนบางรูป" = append + drop) → ที่ว่างเพิ่มตาม · ช่องรูปเดียว (PNG/hero) แทนที่เสมอ
+ */
+export type SlotModeOverride = { mode: MassMode; drop?: number };
+
+export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: { shopIds: string[]; mode: MassMode; slotModes?: Record<string, SlotModeOverride> }): { images: Map<string, PlanImage>; slots: PlanSlot[] } {
   const byId = new Map(parents.map((p) => [p.parentId, p]));
   const images = new Map<string, PlanImage>();
   const slots = new Map<string, PlanSlot & { queue: { id: string; cover: boolean; by: RouteImage["by"] }[] }>();
@@ -488,8 +494,9 @@ export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: {
     }
     const single = s.kind === "heroD" || s.kind === "heroM" || s.kind === "png";
     // โหมดแทนที่: แกลเลอรี + รูป Description + รูปบนเว็บ (Description เดิมเอาออกแล้วคืนได้ตอนย้อนชุด — lib/image-batches descReplaced)
-    const replaceAll = single || opts.mode === "replace";
-    const existing = replaceAll ? 0 : current;
+    const ov = opts.slotModes?.[s.key];
+    const replaceAll = single || (ov?.mode ?? opts.mode) === "replace";
+    const existing = replaceAll ? 0 : Math.max(0, current - Math.max(0, Math.round(ov?.drop ?? 0)));
     const ordered = [...s.queue.filter((q) => q.cover), ...s.queue.filter((q) => !q.cover)];
     const room = limit == null ? ordered.length : Math.max(0, limit - existing);
     const take = ordered.slice(0, room);
