@@ -17,14 +17,14 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lazErrorText, lazGetCategoryAttributes, lazMigrateImage, lazUpdateProduct } from "@/lib/lazada";
+import { lazErrorText, lazMigrateImage, lazUpdateProduct } from "@/lib/lazada";
 import {
   lazadaEditStateFromView, lazadaListingView, lazadaSkuMediaFromView, lazMigrateImageXml, lazResolveRefs, lazSystemImageKey, lazUpdateProductXml, lazViewAfterWrite,
   planLazadaEdit, planLazadaSkuMedia, planLazadaAttrs, lazNormAttr, lazAttrDefsWithExtras, type LazadaAttrDef, type LazadaEditState, type LazadaSkuMediaRow, type LazadaWriteResponse, type LazSkuExtra,
 } from "@/lib/lazada-listing-edit";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadLazListingLive, refetchLazItem, saveLazSlimCopy } from "../shared";
+import { lazCategoryAttrsCached, loadLazListingLive, refetchLazItem, saveLazSlimCopy } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -117,8 +117,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const touchedKeys = Object.keys(attrEdit).filter((k) => (attrEdit[k] ?? "").trim() !== (attrSeen[k] ?? "").trim());
     if (touchedKeys.length) {
       if (!liveView.categoryId) return reply({ ok: false, view: liveView, error: "สินค้านี้ไม่มีหมวดบน Lazada — แก้ข้อมูลเฉพาะไม่ได้" }, 400);
-      try { attrDefs = lazAttrDefsWithExtras(await lazGetCategoryAttributes(live.gateway, live.accessToken, liveView.categoryId)); }
-      catch (e) { return reply({ ok: false, view: liveView, error: `ดึงรายการช่องของหมวดจาก Lazada ไม่สำเร็จ: ${lazErrorText(e)}` }, 502); }
+      try { attrDefs = lazAttrDefsWithExtras(await lazCategoryAttrsCached(live.gateway, live.accessToken, liveView.categoryId)); }
+      catch (e) {
+        console.warn(`[lazada] ดึงช่องของหมวด ${liveView.categoryId} ไม่สำเร็จ: ${(e as Error).message}`);
+        return reply({ ok: false, view: liveView, error: `ดึงรายการช่องของหมวดจาก Lazada ไม่สำเร็จ: ${lazErrorText(e)} · ยังไม่ได้แก้อะไรบนร้าน` }, 502);
+      }
       const defOf = new Map(attrDefs.map((d) => [d.name, d]));
       const n = (k: string, v: string | undefined) => { const d = defOf.get(k); return d ? lazNormAttr(d, v) : String(v ?? "").trim(); };
       if (touchedKeys.some((k) => n(k, attrSeen[k]) !== n(k, liveView.attributes[k]))) return reply({ ok: false, view: liveView, error: staleMsg }, 409);

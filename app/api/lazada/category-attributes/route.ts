@@ -6,8 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { lazGetCategoryAttributes } from "@/lib/lazada";
-import { getPlatformId, ensureLazToken } from "../shared";
+import { getPlatformId, ensureLazToken, lazCategoryAttrsCached } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!tok) return NextResponse.json({ error: "แบรนด์นี้ยังไม่ได้เชื่อมต่อ Lazada" }, { status: 400 });
 
   try {
-    const attributes = await lazGetCategoryAttributes(tok.gateway, tok.accessToken, categoryId);
+    const attributes = await lazCategoryAttrsCached(tok.gateway, tok.accessToken, categoryId);   // แคช 10 นาที + ลองซ้ำเมื่อ Lazada ให้รอ
     return NextResponse.json({ attributes, error: null });
   } catch (e) {
     return NextResponse.json({ error: `ดึงคุณสมบัติไม่สำเร็จ: ${(e as Error).message}` }, { status: 400 });

@@ -1,7 +1,7 @@
 // ของใช้ร่วมของ Lazada API (แยกจาก route.ts — route ต้อง export แค่ handler)
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
-import { lazRefreshToken, lazGateway, lazConnHealth, lazErrorText, lazGetItem, lazProductToCatalogItem } from "@/lib/lazada";
+import { lazRefreshToken, lazGateway, lazConnHealth, lazErrorText, lazGetCategoryAttributes, lazGetItem, lazProductToCatalogItem, type LazAttribute } from "@/lib/lazada";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export function baseUrl(): string {
@@ -83,6 +83,32 @@ export async function lazTokenOrReason(admin: SupabaseClient, brandId: string, p
   }
 }
 
+// ───────── เรียก Lazada ติดกันหลายครั้ง: ลองซ้ำเมื่อโดนจำกัดความถี่ ─────────
+// เจอจริง 2026-11-10: ดึงสินค้าแล้วดึงช่องของหมวดทันที → "Api access frequency exceeds the limit (ban 1 seconds)" → บันทึกไม่ผ่าน
+const isRateLimit = (e: unknown) => /ApiCallLimit|AppApiCallLimit|E1002|\b901\b|frequency exceeds/i.test(`${(e as { code?: string })?.code ?? ""} ${(e as Error)?.message ?? ""}`);
+/** เรียก fn · โดนจำกัดความถี่ = รอ 1.2 / 2.4 วิ แล้วลองใหม่ (สูงสุด 3 ครั้ง) · error อื่นโยนต่อทันที */
+export async function lazWithRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i >= 2 || !isRateLimit(e)) throw e;
+      console.warn(`[lazada] ${label}: Lazada ให้รอ (เรียกถี่) — ลองใหม่ครั้งที่ ${i + 2}`);
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
+}
+
+/** ช่องคุณสมบัติของหมวด (แคช 10 นาทีต่อเครื่อง — ตัวเลือกของหมวดไม่ค่อยเปลี่ยน · ลดการเรียกซ้ำตอนเปิดแท็บ+บันทึก) */
+const catAttrCache = new Map<string, { at: number; defs: LazAttribute[] }>();
+export async function lazCategoryAttrsCached(gateway: string, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
+  const hit = catAttrCache.get(categoryId);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.defs;
+  const defs = await lazWithRetry(() => lazGetCategoryAttributes(gateway, accessToken, categoryId), `ช่องของหมวด ${categoryId}`);
+  if (catAttrCache.size > 200) catAttrCache.clear();
+  catAttrCache.set(categoryId, { at: Date.now(), defs });
+  return defs;
+}
+
 // ───────── สินค้า 1 รายการบน Lazada (ลิ้นชักสินค้าบนร้าน: ดู / แก้ / เปิดปิดขาย) ─────────
 export type LazListingRow = { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; price: number | null; status: string | null; raw: Record<string, unknown> | null };
 
@@ -104,10 +130,11 @@ export async function loadLazListingLive(admin: SupabaseClient, listingId: strin
   const tok = await lazTokenOrReason(admin, row.brand_id, row.platform_id, userId);
   if (!tok.ok) return { ok: false, error: tok.reason, status: 400 };
   try {
-    const item = await lazGetItem(tok.gateway, tok.accessToken, itemId);
+    const item = await lazWithRetry(() => lazGetItem(tok.gateway, tok.accessToken, itemId), `ดึงสินค้า #${itemId}`);
     if (!item) return { ok: false, error: `ไม่พบสินค้า #${itemId} บน Lazada (อาจถูกลบไปแล้ว)`, status: 404 };
     return { ok: true, row, item, itemId, gateway: tok.gateway, accessToken: tok.accessToken };
   } catch (e) {
+    console.warn(`[lazada] ดึงสินค้า #${itemId} ไม่สำเร็จ: ${(e as Error).message}`);
     return { ok: false, error: lazErrorText(e), status: 502 };
   }
 }
