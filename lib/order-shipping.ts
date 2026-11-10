@@ -17,15 +17,18 @@ export const ORDER_CENTER_SHIPPING_FORCE = "sim" as const;
 export const MARKETPLACE_CODES = ["shopee", "lazada", "tiktok"] as const;
 export const isMarketplace = (code: string | null | undefined) => (MARKETPLACE_CODES as readonly string[]).includes(String(code ?? ""));
 
-/** ช่องทางที่เลือกได้ตอนสร้างออเดอร์เอง (phone = ไม่ผูกแพลตฟอร์ม) */
+/** ช่องทางที่เลือกได้ตอนสร้างออเดอร์เอง · open=false = ยังเปิดไม่ได้
+ *  phone: ไม่มีแถวใน erp_platforms แต่ platform_orders.platform_id ยัง NOT NULL → รอเจ้าของอนุมัติผ่อนเงื่อนไขฐานข้อมูล (2026-11-10) */
 export const MANUAL_CHANNELS = [
-  { code: "line_oa", label: "LINE แชต" },
-  { code: "facebook", label: "Facebook" },
-  { code: "instagram", label: "Instagram" },
-  { code: "line_shopping", label: "LINE SHOPPING" },
-  { code: "website", label: "เว็บไซต์ (กรอกเอง)" },
-  { code: "phone", label: "โทร / หน้าร้าน" },
+  { code: "line_oa", label: "LINE แชต", open: true },
+  { code: "facebook", label: "Facebook", open: true },
+  { code: "instagram", label: "Instagram", open: true },
+  { code: "line_shopping", label: "LINE SHOPPING", open: true },
+  { code: "website", label: "เว็บไซต์ (กรอกเอง)", open: true },
+  { code: "phone", label: "โทร / หน้าร้าน", open: false },
 ] as const;
+export const OPEN_MANUAL_CHANNELS = MANUAL_CHANNELS.filter((m) => m.open);
+export const isOpenManualChannel = (c: unknown) => OPEN_MANUAL_CHANNELS.some((m) => m.code === c);
 export type ManualChannel = (typeof MANUAL_CHANNELS)[number]["code"];
 export const isManualChannel = (c: unknown): c is ManualChannel => MANUAL_CHANNELS.some((m) => m.code === c);
 export const manualChannelLabel = (c: unknown) => MANUAL_CHANNELS.find((m) => m.code === c)?.label ?? "";

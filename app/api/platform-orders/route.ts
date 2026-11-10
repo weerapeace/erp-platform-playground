@@ -26,7 +26,7 @@ import {
   type PlatformOrderRow,
 } from "@/lib/platform-order-status";
 import { demoOrder, demoOrders, isDemoId } from "@/lib/platform-order-demo";
-import { cleanShipTo, isManualChannel, isMarketplace, isShippingActive, manualOrderNo, type OrderShipping } from "@/lib/order-shipping";
+import { cleanShipTo, isManualChannel, isOpenManualChannel, isMarketplace, isShippingActive, manualOrderNo, type OrderShipping } from "@/lib/order-shipping";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -312,6 +312,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const b = (await request.json().catch(() => null)) as { channel?: string; brand_id?: string; ship_to?: unknown; items?: ManualItem[]; cod_amount?: unknown; note?: string } | null;
   if (!isManualChannel(b?.channel)) return NextResponse.json({ error: "เลือกช่องทางที่ลูกค้าสั่ง" }, { status: 400 });
+  if (!isOpenManualChannel(b?.channel)) return NextResponse.json({ error: "ช่องทางนี้ยังเปิดใช้ไม่ได้ — เลือกช่องทางอื่นไปก่อน" }, { status: 400 });
   const brandId = String(b?.brand_id ?? "").trim();
   if (!UUID.test(brandId)) return NextResponse.json({ error: "เลือกแบรนด์" }, { status: 400 });
   const st = cleanShipTo(b?.ship_to);
@@ -324,12 +325,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const cod = Math.max(0, Math.round((Number(b?.cod_amount) || 0) * 100) / 100);
 
   const admin = supabaseAdmin();
-  let platformId: string | null = null;
-  if (b!.channel !== "phone") {
-    const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", b!.channel).maybeSingle();
-    platformId = (pf as { id?: string } | null)?.id ?? null;
-    if (!platformId) return NextResponse.json({ error: "ไม่พบช่องทางนี้ในระบบ" }, { status: 400 });
-  }
+  // platform_orders.platform_id ยัง NOT NULL → ทุกช่องทางที่เปิดต้องมีแถวใน erp_platforms (phone ปิดไว้ใน OPEN_MANUAL_CHANNELS)
+  const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", b!.channel).maybeSingle();
+  const platformId = (pf as { id?: string } | null)?.id ?? null;
+  if (!platformId) return NextResponse.json({ error: "ไม่พบช่องทางนี้ในระบบ" }, { status: 400 });
   // SKU ที่เลือก → รหัสจริง + รุ่น (ใช้ตัดสต๊อก/น้ำหนัก)
   const skuIds = items.map((i) => i.sku_id).filter((x): x is string => !!x);
   const { data: skus } = skuIds.length ? await admin.from("skus_v2").select("id, code, parent_sku_id").in("id", skuIds) : { data: [] };

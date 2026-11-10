@@ -75,3 +75,14 @@ describe("🔁 สถานะ + เลขออเดอร์", () => {
     expect(no).toBe("M261111-2222");
   });
 });
+
+describe("ช่องทางสร้างออเดอร์เอง", () => {
+  it("ทุกช่องทางที่เปิด ต้องมีรหัสใน erp_platforms (platform_id ยัง NOT NULL) · โทร/หน้าร้าน ปิดไว้ก่อน", async () => {
+    const m = await import("../order-shipping");
+    const DB_PLATFORM_CODES = ["facebook", "instagram", "lazada", "line_oa", "line_shopping", "pinterest", "shopee", "tiktok", "website", "x", "youtube"]; // ณ 2026-11-10
+    for (const c of m.OPEN_MANUAL_CHANNELS) expect(DB_PLATFORM_CODES).toContain(c.code);
+    expect(m.isOpenManualChannel("phone")).toBe(false);
+    expect(m.isManualChannel("phone")).toBe(true);
+    expect(m.manualChannelLabel("phone")).toBe("โทร / หน้าร้าน");
+  });
+});

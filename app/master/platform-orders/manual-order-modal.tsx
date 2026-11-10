@@ -10,7 +10,7 @@ import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { EMPTY_SHIP_TO, MANUAL_CHANNELS, cleanShipTo, type ShipTo } from "@/lib/order-shipping";
+import { EMPTY_SHIP_TO, OPEN_MANUAL_CHANNELS, cleanShipTo, type ShipTo } from "@/lib/order-shipping";
 import { ShipToFields } from "./ship-to-fields";
 
 type Line = { sku: SkuPickerValue | null; name: string; qty: string; price: string };
@@ -67,7 +67,7 @@ export function ManualOrderModal({ brands, defaultBrandId, onClose, onCreated }:
       <div className="space-y-5 text-sm">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block"><span className="mb-1 block text-xs text-slate-500">ลูกค้าสั่งทาง</span>
-            <ERPSelect value={channel} onChange={(e) => { setChannel(e.target.value); touch(); }} options={MANUAL_CHANNELS.map((c) => ({ value: c.code, label: c.label }))} />
+            <ERPSelect value={channel} onChange={(e) => { setChannel(e.target.value); touch(); }} options={OPEN_MANUAL_CHANNELS.map((c) => ({ value: c.code, label: c.label }))} />
           </label>
           <label className="block"><span className="mb-1 block text-xs text-slate-500">แบรนด์ (ใช้จุดส่งของของแบรนด์นี้)</span>
             <ERPSelect value={brandId} onChange={(e) => { setBrandId(e.target.value); touch(); }} options={brands.map((b) => ({ value: b.id, label: b.name }))} placeholder="เลือกแบรนด์" />
