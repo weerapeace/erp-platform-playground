@@ -5,7 +5,8 @@
  * แท็บ: ข้อมูลสินค้า (ชื่อ · แบรนด์ · หมวด LINE · รายละเอียดจัดรูปแบบ) · รูป · ตัวเลือก & ราคา · จับคู่ · ประวัติ
  * แก้แล้วกด "บันทึกขึ้น LINE" → โชว์ก่อน → หลัง ทุกช่องให้ยืนยัน → ส่งขึ้นร้านจริง (ส่งเฉพาะที่เปลี่ยน) → แก้สำเนาในระบบ + ประวัติ
  * เปิด/ปิดขาย = สวิตช์ที่หัว (useLineDisplay — ถามก่อนเสมอ)
- * ยังไม่ทำ (เฟส 2): แก้รูป · น้ำหนัก/บาร์โค้ด · เพิ่ม/ลบตัวเลือก · สต๊อก (ระบบซิงค์สต๊อกกลาง)
+ * เฟส 2: รูปสินค้า (ลากเรียง · ตั้งปก · ลบ · เพิ่มจากรูปในระบบ ≤7) · น้ำหนัก/บาร์โค้ด/SKU/รูปต่อตัวเลือก
+ * ยังไม่ทำ: เพิ่ม/ลบตัวเลือก · สต๊อก (ระบบซิงค์สต๊อกกลาง)
  *
  * ข้อมูล: GET /api/platform-catalog?view=listing (รายละเอียด+ประวัติ) + ?view=variants (ตัวเลือก↔SKU + ราคาที่ระบบจะส่ง)
  * ส่ง: POST /api/line-shopping/listing-edit · กฎกลาง lib/line-listing-edit (planLineEdit — หน้าเว็บกับ API ใช้ตัวเดียวกัน)
@@ -15,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { Drawer, ConfirmDialog } from "@/components/modal";
+import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { MoneyInput } from "@/components/money-input";
@@ -24,9 +25,11 @@ import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { PlatformCategoryPicker, parseCategoryLabel } from "@/components/platform-category-picker";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { ListingVariantMap } from "./listing-variants";
 import { useLineDisplay } from "./use-line-display";
-import { planLineEdit, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
+import { planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อเปิดลิ้นชักเท่านั้น
@@ -36,6 +39,8 @@ type Tab = "info" | "images" | "options" | "match" | "history";
 const baht = (n: number | null | undefined) => (n == null ? "—" : `${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}฿`);
 const thDateTime = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); };
 const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() === "" || !Number.isFinite(n) ? null : n; };
+/** รูปในฟอร์ม: "r2:<key>" = รูปจากระบบ (ย่อจาก R2) · อื่น ๆ = ลิงก์ของ LINE */
+const imgSrc = (ref: string | null | undefined, w = 400) => { const k = systemImageKey(ref); return k ? r2ImageUrl(k, w) ?? "" : (ref ?? ""); };
 
 export function ListingDrawer({ listingId, onClose, onChanged, canPublish, matchTab }: {
   listingId: string | null;
@@ -58,6 +63,10 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const [saving, setSaving] = useState(false);
   const [lightbox, setLightbox] = useState(-1);
   const [descEdit, setDescEdit] = useState(false);
+  // เฟส 2: รูปในระบบ (คลังรูปของสินค้าที่จับคู่) — โหลดเมื่อกดเพิ่มรูป · ตัวเลือกราคา / รายละเอียด
+  const [sysImages, setSysImages] = useState<{ key: string; source: string }[] | null>(null);
+  const [picker, setPicker] = useState<null | { mode: "product" } | { mode: "variant"; id: string }>(null);
+  const [optMode, setOptMode] = useState<"price" | "detail">("price");
 
   // โหลดรายละเอียด + ตัวเลือก↔SKU พร้อมกัน · สลับรายการ = เริ่มใหม่ (ล้างของเดิม + กลับแท็บแรก) · โหลดซ้ำหลังส่ง = คงแท็บไว้
   const loadedFor = useRef<string | null>(null);
@@ -67,7 +76,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     const fresh = loadedFor.current !== listingId;
     loadedFor.current = listingId;
     setError(null);
-    if (fresh) { setDetail(null); setVariants(null); setForm(null); setDescEdit(false); }
+    if (fresh) { setDetail(null); setVariants(null); setForm(null); setDescEdit(false); setSysImages(null); setPicker(null); }
     const q = encodeURIComponent(listingId);
     Promise.all([
       apiFetch(`/api/platform-catalog?view=listing&listing_id=${q}`).then((r) => r.json() as Promise<ListingDetailResponse>),
@@ -104,6 +113,18 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     }),
   } : f));
   const resetForm = () => { if (base) setForm(structuredClone(base)); setDescEdit(false); };
+  // รูปสินค้า: ลากเรียง (ของกลาง SortableList) · ตั้งปก = ย้ายไปแรก · ลบ (เหลืออย่างน้อย 1)
+  const drag = useDragReorder((from, to) => setForm((f) => (f ? { ...f, images: moveItem(f.images, from, to) } : f)), { group: "listing-images" });
+  const setImages = (fn: (imgs: string[]) => string[]) => setForm((f) => (f ? { ...f, images: fn(f.images) } : f));
+  const matchedParent = detail?.matched_parent_sku_id ?? null;
+  const loadSysImages = useCallback(async () => {
+    if (!matchedParent || sysImages) return;
+    try {
+      const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(matchedParent)}`).then((r) => r.json()) as { images?: { key: string; source: string }[] };
+      setSysImages(Array.isArray(j.images) ? j.images : []);
+    } catch { setSysImages([]); }
+  }, [matchedParent, sysImages]);
+  const openPicker = (p: { mode: "product" } | { mode: "variant"; id: string }) => { setPicker(p); void loadSysImages(); };
 
   const save = useCallback(async () => {
     if (!listingId || !form) return;
@@ -242,24 +263,80 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       </div>
     </div>
   );
-  const imagesTab = !line ? noLine : (
+  const imagesTab = !form || !line ? noLine : (
     <div className="space-y-2">
-      {line.images.length === 0 ? <p className="text-xs text-slate-500">ร้านไม่มีรูปสินค้านี้</p> : (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-          {line.images.map((u, i) => (
-            <button key={i} type="button" onClick={() => setLightbox(i)} className="relative aspect-square overflow-hidden rounded-lg bg-slate-50">
-              <img src={u} alt="" loading="lazy" className="h-full w-full object-cover" />
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {form.images.map((ref, i) => {
+          const isNew = !!systemImageKey(ref);
+          return (
+            <div key={`${ref}-${i}`} {...(canEdit ? drag.rowProps(i) : {})}
+              className={`relative aspect-square overflow-hidden rounded-lg border bg-slate-50 ${isNew ? "border-violet-300" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
+              <button type="button" onClick={() => setLightbox(i)} className="h-full w-full"><img src={imgSrc(ref)} alt="" loading="lazy" className="h-full w-full object-cover" /></button>
               {i === 0 && <span className="absolute left-1 top-1 rounded-full bg-white/90 px-1.5 text-[10px] text-violet-700">ปก</span>}
-            </button>
-          ))}
-        </div>
-      )}
-      <p className="text-[11px] text-slate-400">แก้รูป (เพิ่ม · ลบ · เรียง · ตั้งปก) จะทำในเฟส 2 — ต้องทดสอบกับร้าน LINE 1 สินค้าก่อน</p>
+              {isNew && <span className="absolute right-1 top-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">ใหม่</span>}
+              {canEdit && (
+                <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-white/90 px-1 py-0.5 text-[10px]">
+                  <DragHandle {...drag.handleProps(i)} title="ลากเพื่อเรียงลำดับ" />
+                  {i !== 0 && <button type="button" onClick={() => setImages((imgs) => moveItem(imgs, i, 0))} className="text-violet-700 hover:underline">ตั้งเป็นปก</button>}
+                  <button type="button" disabled={form.images.length <= 1} onClick={() => setImages((imgs) => imgs.filter((_, k) => k !== i))}
+                    title={form.images.length <= 1 ? "ต้องเหลืออย่างน้อย 1 รูป" : "เอารูปนี้ออก"} className="ml-auto text-rose-600 hover:underline disabled:opacity-30">ลบ</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {canEdit && form.images.length < MAX_LINE_IMAGES && (
+          <button type="button" disabled={!matchedParent} onClick={() => openPicker({ mode: "product" })}
+            title={matchedParent ? "เลือกรูปจากคลังรูปของสินค้าในระบบ" : "จับคู่สินค้าในระบบก่อน ถึงจะเพิ่มรูปจากระบบได้"}
+            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">
+            <Icon name="add" />เพิ่มจากรูปในระบบ
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-400">LINE รับ 1–{MAX_LINE_IMAGES} รูป · รูปแรก = ปก · ลากที่หูจับเพื่อเรียง · รูปป้าย “ใหม่” = จากคลังรูปในระบบ (ส่งตอนกดบันทึก)</p>
     </div>
   );
+  const detailCols: MiniColumn<LineEditVariant>[] = [
+    { key: "opt", header: "ตัวเลือก", width: "1.5fr", cell: (v) => <div className="min-w-0"><div className="truncate" title={v.label}>{v.label}</div><div className="truncate font-mono text-[11px] text-slate-400">{v.sku ?? "ไม่มีรหัส"}</div></div> },
+    {
+      key: "img", header: "รูป", width: "5.5rem",
+      cell: (v) => (
+        <div className="flex items-center gap-1.5">
+          {v.imageUrl ? <img src={imgSrc(v.imageUrl, 120)} alt="" className="h-9 w-9 rounded object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded bg-slate-50 text-slate-300"><Icon name="image" /></span>}
+          {canEdit && <button type="button" onClick={() => openPicker({ mode: "variant", id: v.id })} className="text-[11px] text-violet-700 hover:underline">เปลี่ยน</button>}
+        </div>
+      ),
+    },
+    {
+      key: "w", header: "น้ำหนัก (กก.)", width: "6rem", align: "right",
+      cell: (v) => canEdit
+        ? <input type="number" step="0.01" min="0.01" max="999.99" value={v.weight ?? ""} onChange={(e) => setVariant(v.id, { weight: numOrNull(e.target.value) })} className="h-8 w-full rounded-md border border-slate-200 px-2 text-right text-sm" />
+        : <span>{v.weight ?? "—"}</span>,
+    },
+    {
+      key: "bc", header: "บาร์โค้ด", width: "1fr",
+      cell: (v) => canEdit
+        ? <input value={v.barcode ?? ""} onChange={(e) => setVariant(v.id, { barcode: e.target.value })} className="h-8 w-full rounded-md border border-slate-200 px-2 font-mono text-xs" />
+        : <span className="font-mono text-xs">{v.barcode || "—"}</span>,
+    },
+    {
+      key: "sku", header: "SKU บนร้าน", width: "1fr",
+      cell: (v) => canEdit
+        ? <input value={v.sku ?? ""} onChange={(e) => setVariant(v.id, { sku: e.target.value })} title="ระบบจับตัวเลือกกับ SKU ในระบบด้วยรหัสนี้ — เปลี่ยนแล้วตรวจให้ตรง" className="h-8 w-full rounded-md border border-slate-200 px-2 font-mono text-xs" />
+        : <span className="font-mono text-xs">{v.sku || "—"}</span>,
+    },
+  ];
   const optionsTab = !form || !line ? noLine : (
     <div className="space-y-2">
-      <MiniTable rows={form.variants} columns={optCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options" />
+      <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-sm">
+        {([["price", "ราคา"], ["detail", "น้ำหนัก · บาร์โค้ด · รูป · SKU"]] as const).map(([k, label], i) => (
+          <button key={k} type="button" onClick={() => setOptMode(k)} aria-pressed={optMode === k}
+            className={`h-8 px-3 ${i ? "border-l border-slate-200" : ""} ${optMode === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+        ))}
+      </div>
+      {optMode === "price"
+        ? <MiniTable rows={form.variants} columns={optCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options" />
+        : <MiniTable rows={form.variants} columns={detailCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options-detail" />}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         {priceDiffN > 0 && <span className="text-rose-600">ลูกค้าจ่ายไม่ตรงในระบบ {priceDiffN.toLocaleString()} ตัวเลือก</span>}
         {canEdit && priceDiffN > 0 && <button type="button" onClick={() => applyErpPrice()} className="rounded-md border border-violet-200 px-2 py-1 text-violet-700 hover:bg-violet-50">ใช้ราคาในระบบทั้งหมด</button>}
@@ -336,7 +413,52 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         ) : ""} />
 
       {disp.dialog}
-      {line && <ImageLightbox images={line.images.map((u) => ({ url: u }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+      {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+
+      {/* เลือกรูป: เพิ่มรูปสินค้าจากคลังรูปในระบบ / เลือกรูปให้ตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ) */}
+      <ERPModal open={!!picker} onClose={() => setPicker(null)} size="lg" storageKey="listing-drawer-image-picker"
+        title={picker?.mode === "variant" ? `เลือกรูปให้ตัวเลือก ${form?.variants.find((v) => v.id === (picker as { id: string }).id)?.label ?? ""}` : "เพิ่มรูปสินค้าจากคลังรูปในระบบ"}
+        description={picker?.mode === "product" ? `เลือกได้อีก ${Math.max(0, MAX_LINE_IMAGES - (form?.images.length ?? 0))} รูป (LINE รับไม่เกิน ${MAX_LINE_IMAGES}) · ส่งขึ้นร้านตอนกดบันทึก` : "กดรูปที่ต้องการ · ส่งขึ้นร้านตอนกดบันทึก"}>
+        {picker && form && (
+          <div className="space-y-3">
+            {picker.mode === "variant" && form.images.length > 0 && (
+              <div>
+                <div className="mb-1 text-xs text-slate-500">รูปสินค้าบนร้าน</div>
+                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                  {form.images.map((ref, i) => (
+                    <button key={`p-${i}`} type="button" onClick={() => { setVariant(picker.id, { imageUrl: ref }); setPicker(null); }} className="aspect-square overflow-hidden rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300">
+                      <img src={imgSrc(ref, 300)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div>
+              <div className="mb-1 text-xs text-slate-500">คลังรูปของสินค้าในระบบ{detail?.matched_code ? ` (${detail.matched_code})` : ""}</div>
+              {!matchedParent ? <p className="text-xs text-amber-700">ยังไม่จับคู่สินค้าในระบบ — จับคู่ก่อนถึงจะใช้รูปจากระบบได้</p>
+                : sysImages == null ? <LoadingState label="กำลังโหลดรูปในระบบ…" />
+                : sysImages.length === 0 ? <p className="text-xs text-slate-500">สินค้าในระบบยังไม่มีรูป</p>
+                : (
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                    {sysImages.map((im) => {
+                      const ref = systemImageRef(im.key);
+                      const used = picker.mode === "product" && form.images.includes(ref);
+                      const full = picker.mode === "product" && form.images.length >= MAX_LINE_IMAGES;
+                      return (
+                        <button key={im.key} type="button" disabled={used || full}
+                          onClick={() => { if (picker.mode === "product") setImages((imgs) => [...imgs, ref]); else { setVariant(picker.id, { imageUrl: ref }); setPicker(null); } }}
+                          className="relative aspect-square overflow-hidden rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300 disabled:opacity-40 disabled:hover:ring-0">
+                          <img src={r2ImageUrl(im.key, 300) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
+                          {used && <span className="absolute inset-x-0 bottom-0 bg-white/90 text-center text-[10px] text-slate-600">เพิ่มแล้ว</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+            </div>
+          </div>
+        )}
+      </ERPModal>
     </>
   );
 }

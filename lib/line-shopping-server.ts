@@ -8,6 +8,12 @@ import { decryptSecret } from "@/lib/secret-box";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
+/** ลิงก์สาธารณะของรูปในคลังรูประบบ (R2) — ให้ LINE ดึงรูปไปเอง (แบบเดียวกับตอนสร้างสินค้า create-product) */
+export function publicImageUrl(key: string): string {
+  const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
+  return `${base}/api/r2-image?key=${encodeURIComponent(key)}`;
+}
+
 /** กุญแจ API ของแบรนด์บนร้านนี้ (ถอดรหัสแล้ว) · error = ข้อความภาษาคน */
 export async function lineApiKey(admin: Admin, brandId: string | null, platformId: string): Promise<{ apiKey: string | null; error: string | null }> {
   if (!brandId) return { apiKey: null, error: "รายการนี้ไม่มีแบรนด์ — ไม่รู้จะใช้กุญแจร้านไหน" };

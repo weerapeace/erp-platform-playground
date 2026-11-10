@@ -15,7 +15,8 @@ describe("ข้อมูลบนร้าน → ฟอร์ม", () => {
   it("อ่านชื่อ/แบรนด์/หมวด/รายละเอียด/ราคาเต็ม+ราคาจ่าย", () => {
     const s = lineEditStateFromRaw(raw)!;
     expect(s).toMatchObject({ name: "Louis Montini กระเป๋าถือ WHB08", brand: "Louis Montini", categoryId: 61, categoryName: "กระเป๋า>กระเป๋าสะพาย" });
-    expect(s.variants[0]).toEqual({ id: "25000001", label: "สี: สีดำ", sku: "WHB08-01", price: 2690, pay: 1640 });
+    expect(s.variants[0]).toEqual({ id: "25000001", label: "สี: สีดำ", sku: "WHB08-01", price: 2690, pay: 1640, weight: null, barcode: null, imageUrl: null });
+    expect(s.images).toEqual([]);
   });
   it("ยังไม่ได้ดึงจาก LINE = null · ไม่มีส่วนลด = จ่ายเท่าราคาเต็ม", () => {
     expect(lineEditStateFromRaw(null)).toBeNull();
@@ -26,7 +27,7 @@ describe("ข้อมูลบนร้าน → ฟอร์ม", () => {
 describe("planLineEdit — ส่งเฉพาะที่เปลี่ยน + ตรวจค่า", () => {
   const before = lineEditStateFromRaw(raw)!;
   it("ไม่แก้อะไร = ไม่ส่ง", () => {
-    expect(planLineEdit(before, before)).toEqual({ fields: {}, prices: null, changes: [], errors: [], warnings: [] });
+    expect(planLineEdit(before, before)).toEqual({ fields: {}, prices: null, variantDetails: null, changes: [], errors: [], warnings: [] });
   });
   it("แก้ชื่อ + หมวด → ส่งแค่ 2 ช่อง พร้อมก่อน→หลัง", () => {
     const p = planLineEdit(before, { ...before, name: " ชื่อใหม่ ", categoryId: 62, categoryName: "กระเป๋า>กระเป๋าถือ" });
@@ -85,5 +86,48 @@ describe("ประวัติ → ข้อความ", () => {
     expect(listingHistoryText({ source: "line_listing_display", status: "hide" })).toBe("ปิดขายบน LINE");
     expect(listingHistoryText({ manual_match: "x", to: "x", matched_code: "WHB08" })).toBe("จับคู่กับ WHB08");
     expect(listingHistoryText({ match_ignored: { from: false, to: true }, reason: "สินค้าซ้ำบนร้าน" })).toBe("ตั้งไม่ต้องจับคู่ · สินค้าซ้ำบนร้าน");
+  });
+});
+
+describe("เฟส 2 — รูปสินค้า + รายละเอียดตัวเลือก", () => {
+  const raw2 = {
+    ...raw, imageUrls: ["https://line/a.jpg", "https://line/b.jpg", "https://line/c.jpg"],
+    variants: raw.variants.map((v, i) => ({ ...v, weight: 0.5, barcode: i === 0 ? "885000001" : "", imageUrl: `https://line/v${i}.jpg` })),
+  };
+  const b = lineEditStateFromRaw(raw2)!;
+  it("อ่านรูป/น้ำหนัก/บาร์โค้ด/รูปตัวเลือกจากร้าน", () => {
+    expect(b.images).toEqual(["https://line/a.jpg", "https://line/b.jpg", "https://line/c.jpg"]);
+    expect(b.variants[0]).toMatchObject({ weight: 0.5, barcode: "885000001", imageUrl: "https://line/v0.jpg" });
+    expect(b.variants[1].barcode).toBeNull();
+  });
+  it("เรียงใหม่ + เปลี่ยนปก + เพิ่มรูปจากระบบ → ส่งทั้งชุดตามลำดับ", () => {
+    const p = planLineEdit(b, { ...b, images: ["https://line/c.jpg", "https://line/a.jpg", "r2:product/x.jpg"] });
+    expect(p.fields.imageUrls).toEqual(["https://line/c.jpg", "https://line/a.jpg", "r2:product/x.jpg"]);
+    expect(p.changes[0]).toEqual({ label: "รูปสินค้า", before: "3 รูป", after: "3 รูป (เพิ่ม 1 · ลบ 1 · เปลี่ยนปก)" });
+  });
+  it("รูป 0 หรือเกิน 7 = ส่งไม่ได้", () => {
+    expect(planLineEdit(b, { ...b, images: [] }).errors).toEqual(["ต้องมีรูปสินค้าอย่างน้อย 1 รูป"]);
+    expect(planLineEdit(b, { ...b, images: Array.from({ length: 8 }, (_, i) => `https://line/${i}.jpg`) }).errors).toEqual(["LINE รับรูปได้ไม่เกิน 7 รูป"]);
+  });
+  it("น้ำหนัก/บาร์โค้ด ส่งเฉพาะตัวและช่องที่เปลี่ยน", () => {
+    const p = planLineEdit(b, { ...b, variants: [{ ...b.variants[0], weight: 0.6 }, { ...b.variants[1], barcode: "885000002" }] });
+    expect(p.variantDetails).toEqual([{ id: "25000001", weight: 0.6 }, { id: "25000002", barcode: "885000002" }]);
+    expect(p.prices).toBeNull();
+    expect(p.changes.map((c) => c.label)).toEqual(["ตัวเลือก สี: สีดำ", "ตัวเลือก สี: สีน้ำเงิน"]);
+  });
+  it("น้ำหนักนอกช่วง / SKU ว่าง / ล้างรูป = ส่งไม่ได้ · เปลี่ยน SKU = เตือน", () => {
+    const bad = planLineEdit(b, { ...b, variants: [{ ...b.variants[0], weight: 0, sku: "" }, { ...b.variants[1], imageUrl: null }] });
+    expect(bad.errors).toEqual(["สี: สีดำ: น้ำหนักต้องอยู่ระหว่าง 0.01–999.99 กก.", "สี: สีดำ: SKU ห้ามว่าง", "สี: สีน้ำเงิน: ล้างรูปตัวเลือกไม่ได้ — เลือกรูปใหม่แทน"]);
+    const sku = planLineEdit(b, { ...b, variants: [{ ...b.variants[0], sku: "WHB08-01X" }, b.variants[1]] });
+    expect(sku.errors).toEqual([]);
+    expect(sku.warnings[0]).toContain("เปลี่ยน SKU บนร้าน");
+  });
+  it("แก้สำเนาในระบบ: รูป + รายละเอียดตัวเลือก", () => {
+    const l = applyLineEditToRaw(raw2, { fields: { imageUrls: ["https://x/1.jpg"] }, variantDetails: [{ id: "25000001", weight: 0.6, imageUrl: "https://x/v.jpg" }] });
+    expect(l.imageUrls).toEqual(["https://x/1.jpg"]);
+    expect((l.variants as Record<string, unknown>[])[0]).toMatchObject({ weight: 0.6, imageUrl: "https://x/v.jpg", sku: "WHB08-01", price: 2690 });
+  });
+  it("ประวัติ: รายละเอียดตัวเลือก", () => {
+    expect(listingHistoryText({ source: "line_listing_edit", changes: [{ label: "รูปสินค้า" }, { label: "ตัวเลือก สีดำ" }] })).toBe("แก้บน LINE: รูปสินค้า · รายละเอียด 1 ตัวเลือก");
   });
 });

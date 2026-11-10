@@ -5,8 +5,11 @@
  *   ฟอร์มที่แก้ → planLineEdit: ส่งเฉพาะช่องที่เปลี่ยน + ตรวจค่า + รายการ "ก่อน → หลัง" ให้คนยืนยัน
  *   ส่งสำเร็จ → applyLineEditToRaw: แก้สำเนาในระบบให้ตรงร้าน (ไม่ต้องรอดึงใหม่)
  *
- * ที่ส่งได้ตอนนี้ (lib/line-shopping): ชื่อ · รายละเอียด · แบรนด์ · หมวด (PATCH /products/{id}) · ราคาเต็ม+ส่วนลดต่อตัวเลือก (PATCH /prices)
- * ยังไม่ส่ง: รูป · น้ำหนัก/บาร์โค้ด · เพิ่ม/ลบตัวเลือก (ต้องทดสอบกับร้านจริงก่อน — เฟส 2) · สต๊อก (ไประบบซิงค์สต๊อกกลาง)
+ * ที่ส่งได้ (lib/line-shopping · สเปก OpenAPI MyShop):
+ *   ชื่อ · รายละเอียด · แบรนด์ · หมวด · รูปสินค้า 1–7 รูป (PATCH /products/{id})
+ *   ราคาเต็ม+ส่วนลดต่อตัวเลือก (PATCH /prices) · น้ำหนัก/บาร์โค้ด/SKU/รูปต่อตัวเลือก (PATCH /variant ทีละตัว)
+ * รูปใหม่จากระบบ = "r2:<key>" ในฟอร์ม → API แปลงเป็นลิงก์สาธารณะก่อนส่ง (systemImageRef / systemImageKey)
+ * ยังไม่ทำ: เพิ่ม/ลบตัวเลือก (ลบของ LINE ลบตามชื่อค่า เช่น "แดง" — เสี่ยงลบเกิน) · สต๊อก (ไประบบซิงค์สต๊อกกลาง)
  */
 
 type Obj = Record<string, unknown>;
@@ -15,6 +18,12 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const str = (v: unknown): string => (v == null ? "" : String(v));
 const num = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** LINE รับรูปสินค้าได้ 1–7 รูป (รูปแรก = ปก) */
+export const MAX_LINE_IMAGES = 7;
+/** รูปจากคลังรูปในระบบ (R2) ในฟอร์ม = "r2:<key>" — API แปลงเป็นลิงก์สาธารณะก่อนส่ง LINE */
+export const systemImageRef = (key: string) => `r2:${key}`;
+export const systemImageKey = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) : null);
 
 export type LineEditVariant = {
   /** id ตัวเลือกของ LINE (ตัวเลข) */
@@ -25,6 +34,11 @@ export type LineEditVariant = {
   price: number | null;
   /** ราคาที่ลูกค้าจ่าย (= ราคาเต็ม − ส่วนลด) */
   pay: number | null;
+  /** น้ำหนัก (กก.) */
+  weight: number | null;
+  barcode: string | null;
+  /** รูปของตัวเลือก (ลิงก์ LINE หรือ "r2:<key>") */
+  imageUrl: string | null;
 };
 export type LineEditState = {
   name: string;
@@ -33,6 +47,8 @@ export type LineEditState = {
   categoryId: number | null;
   /** ชื่อหมวด (ไว้โชว์/แก้สำเนาในระบบ — ไม่ได้ส่งไป LINE) */
   categoryName: string | null;
+  /** รูปสินค้าตามลำดับ (รูปแรก = ปก) — ลิงก์ LINE หรือ "r2:<key>" */
+  images: string[];
   variants: LineEditVariant[];
 };
 
@@ -54,11 +70,13 @@ export function lineEditStateFromRaw(line: unknown): LineEditState | null {
     description: str(l.description),
     categoryId: num(cat?.id),
     categoryName: cat ? (str(cat.nameTh) || str(cat.nameEn) || null) : null,
+    images: arr(l.imageUrls).map((u) => str(u).trim()).filter(Boolean),
     variants: arr(l.variants).map(obj).filter((v): v is Obj => !!v).map((v, i) => {
       const price = num(v.price); const disc = num(v.discountedPrice);
       return {
         id: str(v.id), label: variantLabelOf(v, i), sku: str(v.sku) || null,
         price, pay: disc != null && disc > 0 && (price == null || disc <= price) ? disc : price,
+        weight: num(v.weight), barcode: str(v.barcode) || null, imageUrl: str(v.imageUrl) || null,
       };
     }).filter((v) => v.id),
   };
@@ -67,9 +85,11 @@ export function lineEditStateFromRaw(line: unknown): LineEditState | null {
 export type LineEditChange = { label: string; before: string; after: string };
 export type LineEditPlan = {
   /** ช่องรายละเอียดที่จะส่ง (PATCH /products/{id}) */
-  fields: { name?: string; description?: string; brand?: string; categoryId?: number };
+  fields: { name?: string; description?: string; brand?: string; categoryId?: number; imageUrls?: string[] };
   /** ราคาทุกตัวเลือก (PATCH /prices) — null = ราคาไม่เปลี่ยน ไม่ต้องส่ง */
   prices: { variantId: string; price: number; instantDiscount: number }[] | null;
+  /** รายละเอียดตัวเลือกที่เปลี่ยน (PATCH /variant ทีละตัว · ส่งเฉพาะช่องที่เปลี่ยน) — null = ไม่มี */
+  variantDetails: { id: string; weight?: number; barcode?: string; sku?: string; imageUrl?: string }[] | null;
   changes: LineEditChange[];
   errors: string[];
   /** ไม่บล็อก แต่ควรดูก่อนกด (เช่น รูปในรายละเอียดหายไป) */
@@ -109,6 +129,49 @@ export function planLineEdit(before: LineEditState, after: LineEditState): LineE
     }
   }
 
+  // รูปสินค้า: ส่งทั้งชุดตามลำดับ (รูปแรก = ปก) · 1–7 รูป
+  const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+  if (!sameList(after.images, before.images)) {
+    if (after.images.length < 1) errors.push("ต้องมีรูปสินค้าอย่างน้อย 1 รูป");
+    else if (after.images.length > MAX_LINE_IMAGES) errors.push(`LINE รับรูปได้ไม่เกิน ${MAX_LINE_IMAGES} รูป`);
+    else {
+      fields.imageUrls = [...after.images];
+      const added = after.images.filter((x) => !before.images.includes(x)).length;
+      const removed = before.images.filter((x) => !after.images.includes(x)).length;
+      const notes = [added ? `เพิ่ม ${added}` : "", removed ? `ลบ ${removed}` : "", after.images[0] !== before.images[0] ? "เปลี่ยนปก" : "", !added && !removed && after.images[0] === before.images[0] ? "เรียงใหม่" : ""].filter(Boolean);
+      changes.push({ label: "รูปสินค้า", before: `${before.images.length} รูป`, after: `${after.images.length} รูป${notes.length ? ` (${notes.join(" · ")})` : ""}` });
+    }
+  }
+
+  // รายละเอียดตัวเลือก: น้ำหนัก / บาร์โค้ด / SKU / รูป — ส่งเฉพาะตัวและช่องที่เปลี่ยน
+  const details: NonNullable<LineEditPlan["variantDetails"]> = [];
+  const beforeDetail = new Map(before.variants.map((v) => [v.id, v]));
+  for (const v of after.variants) {
+    const b = beforeDetail.get(v.id);
+    if (!b) continue;
+    const d: NonNullable<LineEditPlan["variantDetails"]>[number] = { id: v.id };
+    const was: string[] = []; const now: string[] = [];
+    if (v.weight !== b.weight) {
+      if (v.weight == null || v.weight < 0.01 || v.weight > 999.99) errors.push(`${v.label}: น้ำหนักต้องอยู่ระหว่าง 0.01–999.99 กก.`);
+      else { d.weight = round2(v.weight); was.push(`น้ำหนัก ${b.weight ?? "—"} กก.`); now.push(`น้ำหนัก ${d.weight} กก.`); }
+    }
+    if ((v.barcode ?? "").trim() !== (b.barcode ?? "").trim()) {
+      const bc = (v.barcode ?? "").trim();
+      if (bc.length > 50) errors.push(`${v.label}: บาร์โค้ดยาวเกิน 50 ตัวอักษร`);
+      else { d.barcode = bc; was.push(`บาร์โค้ด ${b.barcode || "—"}`); now.push(`บาร์โค้ด ${bc || "(ว่าง)"}`); }
+    }
+    if ((v.sku ?? "").trim() !== (b.sku ?? "").trim()) {
+      const sku = (v.sku ?? "").trim();
+      if (!sku) errors.push(`${v.label}: SKU ห้ามว่าง`);
+      else { d.sku = sku; was.push(`SKU ${b.sku || "—"}`); now.push(`SKU ${sku}`); warnings.push(`${v.label}: เปลี่ยน SKU บนร้าน — ระบบจับตัวเลือกกับ SKU ในระบบด้วยรหัสนี้ (ส่งราคา/สต๊อก) ตรวจว่ารหัสใหม่ตรงกับในระบบ`); }
+    }
+    if ((v.imageUrl ?? "") !== (b.imageUrl ?? "")) {
+      if (!v.imageUrl) errors.push(`${v.label}: ล้างรูปตัวเลือกไม่ได้ — เลือกรูปใหม่แทน`);
+      else { d.imageUrl = v.imageUrl; was.push(b.imageUrl ? "รูปเดิม" : "ไม่มีรูป"); now.push("รูปใหม่"); }
+    }
+    if (Object.keys(d).length > 1) { details.push(d); changes.push({ label: `ตัวเลือก ${v.label}`, before: was.join(" · "), after: now.join(" · ") }); }
+  }
+
   // ราคา: เปลี่ยนตัวไหนก็ส่งทุกตัวเลือก (LINE คิดส่วนลดระดับสินค้าจากทุกตัว) · ตรวจทุกตัวก่อนส่ง
   const beforeById = new Map(before.variants.map((v) => [v.id, v]));
   let priceChanged = false;
@@ -130,19 +193,20 @@ export function planLineEdit(before: LineEditState, after: LineEditState): LineE
   if (priceChanged && prices.length !== after.variants.filter((v) => beforeById.has(v.id)).length && errors.length === 0) {
     errors.push("บางตัวเลือกไม่มีราคาที่ใช้ได้ — กรอกราคาให้ครบทุกตัวเลือกก่อนส่ง");
   }
-  return { fields, prices: priceChanged ? prices : null, changes, errors, warnings };
+  return { fields, prices: priceChanged ? prices : null, variantDetails: details.length ? details : null, changes, errors, warnings };
 }
 
 /** ส่งสำเร็จ → แก้สำเนา raw.line ในระบบให้ตรงร้าน (ส่งเฉพาะส่วนที่ส่งสำเร็จเข้ามา) */
 export function applyLineEditToRaw(
   line: unknown,
-  sent: { fields?: LineEditPlan["fields"]; categoryName?: string | null; prices?: LineEditPlan["prices"] },
+  sent: { fields?: LineEditPlan["fields"]; categoryName?: string | null; prices?: LineEditPlan["prices"]; variantDetails?: LineEditPlan["variantDetails"] },
 ): Obj {
   const l = { ...(obj(line) ?? {}) };
   const f = sent.fields ?? {};
   if (f.name != null) l.name = f.name;
   if (f.brand != null) l.brand = f.brand;
   if (f.description != null) l.description = f.description;
+  if (f.imageUrls && f.imageUrls.length) l.imageUrls = [...f.imageUrls];
   if (f.categoryId != null) {
     const cat = { ...(obj(l.category) ?? {}) };
     cat.id = f.categoryId;
@@ -159,6 +223,15 @@ export function applyLineEditToRaw(
     const discs = sent.prices.map((p) => p.instantDiscount);
     l.instantDiscount = discs.every((d) => d === discs[0]) ? discs[0] : 0;
   }
+  if (sent.variantDetails && sent.variantDetails.length) {
+    const byId = new Map(sent.variantDetails.map((d) => [String(d.id), d]));
+    l.variants = arr(l.variants).map((v) => {
+      const o = obj(v); if (!o) return v;
+      const d = byId.get(str(o.id)); if (!d) return o;
+      const { id: _id, ...rest } = d; void _id;
+      return { ...o, ...rest };
+    });
+  }
   return l;
 }
 
@@ -169,8 +242,10 @@ export function listingHistoryText(meta: unknown): string {
   if (src === "line_listing_edit") {
     const labels = arr(m.changes).map(obj).filter((c): c is Obj => !!c).map((c) => str(c.label));
     const priceN = labels.filter((l) => l.startsWith("ราคา ")).length;
-    const parts = [...new Set(labels.filter((l) => !l.startsWith("ราคา ")))];
+    const optN = labels.filter((l) => l.startsWith("ตัวเลือก ")).length;
+    const parts = [...new Set(labels.filter((l) => !l.startsWith("ราคา ") && !l.startsWith("ตัวเลือก ")))];
     if (priceN) parts.push(`ราคา ${priceN} ตัวเลือก`);
+    if (optN) parts.push(`รายละเอียด ${optN} ตัวเลือก`);
     const fail = str(m.error);
     return `แก้บน LINE: ${parts.join(" · ") || "—"}${fail ? ` (บางส่วนไม่สำเร็จ: ${fail})` : ""}`;
   }

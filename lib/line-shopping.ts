@@ -72,14 +72,16 @@ export async function lineUpdatePrices(apiKey: string, productId: string, varian
   } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
 }
 
-// อัปเดตรายละเอียดสินค้า (PATCH /products/{id}) — ส่งเฉพาะฟิลด์ที่มีค่า (name/description/brand/categoryId)
-export async function lineUpdateProduct(apiKey: string, productId: string, fields: { name?: string; description?: string; brand?: string; categoryId?: number | string }): Promise<{ ok: boolean; status: number; sent: string[]; error?: string }> {
+// อัปเดตรายละเอียดสินค้า (PATCH /products/{id}) — ส่งเฉพาะฟิลด์ที่มีค่า (name/description/brand/categoryId/imageUrls)
+// imageUrls = รายการรูปทั้งชุด 1–7 รูป (รูปแรก = ปก) — สเปก OpenAPI ของ MyShop (product.UpdateProductDetailsRequest)
+export async function lineUpdateProduct(apiKey: string, productId: string, fields: { name?: string; description?: string; brand?: string; categoryId?: number | string; imageUrls?: string[] }): Promise<{ ok: boolean; status: number; sent: string[]; error?: string }> {
   try {
     const body: Record<string, unknown> = {};
     if (fields.name?.trim()) body.name = fields.name.trim();
     if (fields.description != null && String(fields.description).trim()) body.description = String(fields.description).trim();
     if (fields.brand?.trim()) body.brand = fields.brand.trim();
     if (fields.categoryId != null && String(fields.categoryId).trim()) { const n = Number(fields.categoryId); body.categoryId = Number.isFinite(n) ? n : String(fields.categoryId); }
+    if (Array.isArray(fields.imageUrls) && fields.imageUrls.length > 0) body.imageUrls = fields.imageUrls.slice(0, 7);
     const sent = Object.keys(body);
     if (sent.length === 0) return { ok: false, status: 0, sent, error: "ไม่มีข้อมูลให้ส่ง (กรอกชื่อ/รายละเอียด/แบรนด์/หมวดก่อน)" };
     const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}`, { method: "PATCH", headers: headers(apiKey), body: JSON.stringify(body) });
@@ -87,6 +89,38 @@ export async function lineUpdateProduct(apiKey: string, productId: string, field
     const bodyt = await r.text().catch(() => "");
     return { ok: false, status: r.status, sent, error: friendly(r.status, bodyt) };
   } catch (e) { return { ok: false, status: 0, sent: [], error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
+// อัปเดตรายละเอียดตัวเลือก 1 ตัว (PATCH /products/{id}/variant · id ของตัวเลือกอยู่ใน body)
+// รับ: barcode / sku / imageUrl / weight (กก. 0.01–999.99) — สเปก product.ProductVariantDetailsUpdateRequest · ไม่ส่งราคา/สต๊อกจากตรงนี้
+export async function lineUpdateVariant(apiKey: string, productId: string, v: { id: string | number; weight?: number; barcode?: string; sku?: string; imageUrl?: string }): Promise<{ ok: boolean; status: number; sent: string[]; error?: string }> {
+  try {
+    const body: Record<string, unknown> = { id: Number(v.id) };
+    if (v.weight != null && Number.isFinite(v.weight)) body.weight = Math.round(v.weight * 100) / 100;
+    if (v.barcode != null) body.barcode = String(v.barcode).trim();
+    if (v.sku != null && String(v.sku).trim()) body.sku = String(v.sku).trim();
+    if (v.imageUrl != null && String(v.imageUrl).trim()) body.imageUrl = String(v.imageUrl).trim();
+    const sent = Object.keys(body).filter((k) => k !== "id");
+    if (sent.length === 0) return { ok: false, status: 0, sent, error: "ไม่มีข้อมูลตัวเลือกให้ส่ง" };
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}/variant`, { method: "PATCH", headers: headers(apiKey), body: JSON.stringify(body) });
+    if (r.ok) return { ok: true, status: r.status, sent };
+    const bodyt = await r.text().catch(() => "");
+    return { ok: false, status: r.status, sent, error: friendly(r.status, bodyt) };
+  } catch (e) { return { ok: false, status: 0, sent: [], error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
+// อ่านสินค้า 1 ตัวจากร้าน (GET /products?ids=…) — ไว้ดึงข้อมูลล่าสุดหลังแก้ (รูปจะกลายเป็นลิงก์ของ LINE เอง)
+// API ไม่มี GET /products/{id} → ใช้ตัวกรอง ids ของรายการสินค้า · ไม่เจอ = row null
+export async function lineGetProduct(apiKey: string, productId: string): Promise<{ ok: boolean; status: number; row: Record<string, unknown> | null; error?: string }> {
+  try {
+    const q = new URLSearchParams({ ids: String(productId), page: "1", perPage: "1" });
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products?${q.toString()}`, { headers: headers(apiKey) });
+    if (!r.ok) { const body = await r.text().catch(() => ""); return { ok: false, status: r.status, row: null, error: friendly(r.status, body) }; }
+    const j = await r.json().catch(() => null) as Record<string, unknown> | null;
+    const rows = Array.isArray(j?.data) ? j!.data as Record<string, unknown>[] : (Array.isArray(j) ? j as Record<string, unknown>[] : []);
+    const row = rows.find((x) => String(x.id ?? "") === String(productId)) ?? null;   // กันตัวกรองไม่ทำงาน → ได้สินค้าตัวอื่นมา
+    return { ok: true, status: r.status, row };
+  } catch (e) { return { ok: false, status: 0, row: null, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
 }
 
 // สร้างสินค้าใหม่ (POST /products) — route เป็นคนประกอบ payload (name/categoryId/imageUrls/variants/...)
