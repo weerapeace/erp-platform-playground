@@ -314,11 +314,14 @@ describe("เฟส 4: รูปสินค้า", () => {
     expect(p.fields.images).toEqual([B, A]);
     expect(p.changes[0]).toMatchObject({ label: "รูปสินค้า", after: "2 รูป (เปลี่ยนปก)" });
   });
-  it("เพิ่มจากระบบ (r2:) ผ่าน + เตือนฝากรูป · ลบ = เตือนว่า Lazada อาจไม่ลบ", () => {
+  it("เพิ่มจากระบบ (r2:) ผ่าน + เตือนฝากรูป · ลบรูป = ส่งได้ไม่เตือน (ทดสอบจริงแล้วลบได้)", () => {
     const p = planLazadaEdit(base, { ...base, images: [A, "r2:products/x.jpg"] });
     expect(p.errors).toEqual([]);
     expect(p.warnings.join(" ")).toContain("ฝากกับ Lazada");
-    expect(p.warnings.join(" ")).toContain("ลบไม่ได้");
+    expect(p.warnings.join(" ")).not.toContain("ลบไม่ได้");
+    const rm = planLazadaEdit(base, { ...base, images: [A] });
+    expect(rm.fields.images).toEqual([A]);
+    expect(rm.changes[0].after).toBe("1 รูป (ลบ 1)");
   });
   it("0 รูป / เกิน 8 / ลิงก์ภายนอก = ไม่ผ่าน", () => {
     expect(planLazadaEdit(base, { ...base, images: [] }).errors[0]).toContain("อย่างน้อย 1");

@@ -296,7 +296,7 @@ export function planLazadaEdit(before: LazadaEditState, after: LazadaEditState):
     else {
       fields.images = [...aImgs];
       changes.push({ label: "รูปสินค้า", before: `${bImgs.length} รูป`, after: imageListChange(bImgs, aImgs) });
-      if (bImgs.some((x) => !aImgs.includes(x))) warnings.push("คู่มือ Lazada บอกว่ารูป \"แทนได้ แต่ลบไม่ได้\" — รูปที่เอาออกอาจยังอยู่ ตรวจในแท็บรูปหลังส่ง");
+      // ลบรูป: คู่มือ Lazada บอก "แทนได้ ลบไม่ได้" แต่ทดสอบจริง 2026-11-10 (LB-01 5→4) ส่งชุดที่สั้นลง = ลบได้ → ไม่เตือนแล้ว (route ยังเทียบจำนวน/ลำดับหลังส่ง)
       if (aImgs.some((r) => lazSystemImageKey(r))) warnings.push("รูปจากคลังรูปในระบบจะถูกฝากกับ Lazada ก่อน (แปลงเป็น JPG สี่เหลี่ยมจัตุรัสพื้นขาว 1500px) — รูปไหนไม่ผ่านกติกา Lazada ระบบจะหยุดและบอก");
     }
   }
