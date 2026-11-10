@@ -34,15 +34,17 @@ import type { FlowBasket } from "./request";
 const fmtNum = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
 const KIND_LABEL: Record<NotifyTarget["kind"], string> = { bell: "ในแอป (กระดิ่ง)", group: "LINE กลุ่ม", dm: "LINE ส่วนตัว", oa: "LINE OA", email: "อีเมล", popup: "ป๊อปอัป", discord: "Discord" };
 
-export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLine, onOpenAll, onBack }: {
+export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLine, onOpenAll, onBack, bare }: {
   node: string; api: FlowNotifyApi; canAdmin: boolean; basket: FlowBasket;
   /** เปิดป๊อปแก้การแจ้งเตือนเดิมของเรื่องนี้ */
   onEdit: (id: string) => void;
   onOpenLine: () => void;
   /** ไปแท็บแจ้งเตือน (ภาพรวมทุกเรื่อง) */
   onOpenAll: () => void;
-  /** กลับไปแผงรายละเอียดกล่อง */
-  onBack: () => void;
+  /** กลับไปแผงรายละเอียดกล่อง (ไม่ส่ง = ไม่มีปุ่ม) */
+  onBack?: () => void;
+  /** อยู่ในแท็บ "แจ้งเตือน" ของลิ้นชักกล่อง (หัวลิ้นชักบอกชื่อกล่องแล้ว) → ไม่โชว์ชื่อกล่อง/ปุ่มกลับซ้ำ */
+  bare?: boolean;
 }) {
   const t = useT();
   const { user } = useAuth();
@@ -102,18 +104,22 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
 
   return (
     <div className="space-y-2">
-      <div className="rounded-xl border border-slate-200 bg-white p-4 text-[13px] leading-relaxed">
-        <div className="flex items-start gap-2">
-          <Icon value="i:bell" size={18} className="mt-0.5 text-slate-500" />
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-[15px] text-slate-800">{n.label}</div>
-            <div className="text-[11px] text-slate-500">{topics.length ? t(`แจ้งเตือน ${topics.length} เรื่อง`, `${topics.length} notifications`) : t("ยังไม่มีแจ้งเตือน", "No notifications yet")}</div>
+      <div className={bare ? "text-[13px] leading-relaxed" : "rounded-xl border border-slate-200 bg-white p-4 text-[13px] leading-relaxed"}>
+        {!bare && (
+          <div className="flex items-start gap-2">
+            <Icon value="i:bell" size={18} className="mt-0.5 text-slate-500" />
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-[15px] text-slate-800">{n.label}</div>
+              <div className="text-[11px] text-slate-500">{topics.length ? t(`แจ้งเตือน ${topics.length} เรื่อง`, `${topics.length} notifications`) : t("ยังไม่มีแจ้งเตือน", "No notifications yet")}</div>
+            </div>
+            {onBack && (
+              <button type="button" onClick={onBack} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1 text-[12px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                <Icon value="i:arrow-left" size={13} />{t("รายละเอียดกล่อง", "Box details")}
+              </button>
+            )}
           </div>
-          <button type="button" onClick={onBack} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1 text-[12px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            <Icon value="i:arrow-left" size={13} />{t("รายละเอียดกล่อง", "Box details")}
-          </button>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+        )}
+        <div className={`${bare ? "" : "mt-2 "}flex flex-wrap gap-x-3 gap-y-1 text-[12px]`}>
           <button type="button" onClick={onOpenAll} className="text-indigo-600 hover:underline">{t("ภาพรวมแจ้งเตือนทุกเรื่อง", "All notifications")}</button>
           {canAdmin && <>
             <Link href="/admin/notification-rules" className="text-indigo-600 hover:underline">{t("ตั้งกฎกระดิ่ง", "Bell rules")} ↗</Link>

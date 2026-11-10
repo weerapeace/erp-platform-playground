@@ -6,7 +6,9 @@
  * ของเสริม: ช่องอยากแก้ + สร้าง prompt + ตะกร้า + ส่งรายงานปัญหา (./request) · กดตัวเลขดูรายการ (./metric-list)
  *          แท็บออเดอร์ 1 ใบ (./journey) · ป้ายเพิ่งแก้ (FlowEdge.changed) · พิมพ์ /print/flow-map
  *          ผังการเงิน 5 แท็บ เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM (flowViewsFor) · กล่องสูงหลายแถว · เส้นรวมสาย (feeds)
- *          แท็บแจ้งเตือน (./notify · ทะเบียน lib/flow-map-notify.ts) + กระดิ่งบนกล่อง + หัวข้อแจ้งเตือนในแผงกล่อง
+ *          แท็บแจ้งเตือน (./notify · ทะเบียน lib/flow-map-notify.ts) + กระดิ่งบนกล่อง
+ *          กดกล่อง/เส้น → ลิ้นชักขวา (DrawerShell modal={false} — ผังกดต่อได้) แบ่งแท็บ: กล่อง = ภาพรวม/ช่องโหว่/แจ้งเตือน/เส้นเข้า-ออก/โน้ต/อยากแก้อะไร
+ *            · เส้น = รายละเอียด/คำแนะนำ/โน้ต/อยากแก้อะไร · กระดิ่ง = เปิดแท็บแจ้งเตือน · แผงขวาของหน้า = ภาพรวมผัง (ช่องโหว่ + ทุกเส้น + โน้ตผัง)
  * ใช้ที่ /master/flow-map · แก้เนื้อหาแผนผังที่ lib/flow-map.ts ที่เดียว (ดู docs/flow-map.md)
  */
 import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent, type ReactNode } from "react";
@@ -24,7 +26,10 @@ import { FlowRequestBox, FlowBasketPanel, useFlowBasket } from "./request";
 import { FlowMetricListModal } from "./metric-list";
 import { FlowJourney } from "./journey";
 import { useFlowNotes, FlowInternalNotes } from "./notes";
-import { useFlowNotify, FlowNotifyBoard, FlowNotifyPanel, NodeNotifyList, notifyNodeColor } from "./notify";
+import { useFlowNotify, FlowNotifyBoard, FlowNotifyPanel, notifyNodeColor } from "./notify";
+import { DrawerShell } from "@/components/modal";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { LineConsole } from "@/components/line-console";
 import { NotifyEditModal } from "@/components/flow-map/notify-edit";
 import { NodeNotifyPanel } from "@/components/flow-map/node-notify";
@@ -32,6 +37,9 @@ import { NOTIFY_NODE_SUGGEST, notifyAllTopics, notifyTopicsOfNode } from "@/lib/
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 
 type Sel = { k: "n"; id: string } | { k: "e"; id: string } | null;
+/** แท็บในลิ้นชักกล่อง / ลิ้นชักเส้น */
+type NodeTab = "ov" | "gaps" | "notify" | "links" | "notes" | "req";
+type EdgeTab = "d" | "advice" | "notes" | "req";
 
 /** คำแนะนำของเส้น — ควรทำอัตโนมัติไหม · ข้อดี · ข้อเสีย · จุดเสี่ยง · flow แบบอื่น (lib/flow-map-advice.ts) */
 function AdviceBox({ id }: { id: string }) {
@@ -121,7 +129,11 @@ export function FlowMap() {
   const [notifySel, setNotifySel] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [notifyEditId, setNotifyEditId] = useState<string | null>(null);   // ป๊อปแก้การแจ้งเตือน (แอดมิน)
-  const [bellNode, setBellNode] = useState<string | null>(null);   // กดกระดิ่งบนกล่อง → แผงแจ้งเตือนของกล่อง (ผังยังอยู่ ไม่สลับแท็บ)
+  // ลิ้นชักรายละเอียด (เจ้าของเลือก 2026-11-10): กดกล่อง/เส้น → ลิ้นชักขวา ไม่มืดพื้นหลัง (กดกล่องอื่นต่อได้) + แท็บแยกประเภท
+  const [dTab, setDTab] = useState<NodeTab>("ov");   // แท็บของกล่อง — จำไว้ตอนกดกล่องอื่น (ไล่เทียบได้)
+  const [eTab, setETab] = useState<EdgeTab>("d");    // แท็บของเส้น
+  const [backNode, setBackNode] = useState<string | null>(null);   // เปิดเส้นจากแท็บ "เส้นเข้า/ออก" → ปุ่มกลับไปกล่องเดิม
+  const drawerSize = useDrawerResize("erp.flowMap.drawerW", 440, 360);
   const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
   const notesApi = useFlowNotes();
@@ -168,8 +180,10 @@ export function FlowMap() {
     const d = drawn.find((x) => x.id === sel.id);
     return !d || fmTouches(d, id);
   };
-  const pick = (s: Sel) => { setSel(s); setBasketOpen(false); setBellNode(null); };
-  const openBell = (id: string) => { setSel({ k: "n", id }); setBasketOpen(false); setBellNode(id); };
+  const pick = (s: Sel) => { setSel(s); setBasketOpen(false); setBackNode(null); };
+  /** กดกระดิ่งบนกล่อง = เปิดลิ้นชักกล่องที่แท็บแจ้งเตือน */
+  const openBell = (id: string) => { setSel({ k: "n", id }); setBasketOpen(false); setBackNode(null); setDTab("notify"); };
+  const closeDrawer = () => { setSel(null); setBackNode(null); };
 
   // ── โน้ตภายใน (อยู่ในแผงขวาเท่านั้น ไม่วาดบนผัง) ──
   const promptNotes = notesApi.notes.map((n) => ({ attach: n.attach, text: n.text, author: n.author }));
@@ -184,14 +198,15 @@ export function FlowMap() {
     e.stopPropagation();
     pick(toggle && sel?.k === "e" && sel.id === id ? null : { k: "e", id });
   };
-  const pickView = (k: string) => { setViewKey(k); setSel(null); setBellNode(null); };
+  const pickView = (k: string) => { setViewKey(k); setSel(null); setBackNode(null); };
   /** แท็บแจ้งเตือน → กล่องในผังแรกที่มีกล่องนั้น */
   const openNodeOnMap = (id: string) => { const v = views.find((x) => x.pos[id]); setViewKey(v?.key ?? views[0].key); setSel({ k: "n", id }); setBasketOpen(false); };
   const openNotify = (id: string | null) => { setViewKey(NOTIFY); setSel(null); setBasketOpen(false); setNotifySel(id); };
   const closeLine = () => { setLineOpen(false); void notify.reload(); };
 
-  const rowFor = (id: string, a: string, b: string, type: FlowEdgeType) => (
-    <button key={id} type="button" onClick={() => pick({ k: "e", id })}
+  /** แถวเส้น 1 เส้น — fromNode = เปิดจากแท็บ "เส้นเข้า/ออก" ของกล่องนั้น (ลิ้นชักเส้นมีปุ่มกลับ) */
+  const rowFor = (id: string, a: string, b: string, type: FlowEdgeType, fromNode?: string) => (
+    <button key={id} type="button" onClick={() => { if (fromNode) { setSel({ k: "e", id }); setBackNode(fromNode); } else pick({ k: "e", id }); }}
       className="w-full flex items-start gap-2.5 px-2 py-2 text-left border-t border-slate-100 hover:bg-slate-50 rounded-md">
       <NumBadge n={numOf(id)} type={type} />
       <span className="flex-1 min-w-0">
@@ -203,88 +218,172 @@ export function FlowMap() {
       <TypeChip type={type} />
     </button>
   );
-  const closeBtn = <button type="button" onClick={() => setSel(null)} className="mt-3 h-8 px-3 text-[12px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">{t("ดูทุกเส้น", "Show all")}</button>;
+  // ── ลิ้นชักรายละเอียดกล่อง / เส้น (DrawerShell ของกลาง แบบไม่มืดพื้นหลัง → กดกล่องอื่นบนผังต่อได้) ──
+  const tabBtn = (key: string, active: string, set: (k: string) => void, label: string, count?: number, red?: boolean) => (
+    <button key={key} type="button" data-tab-key={key} onClick={() => set(key)}
+      className={`h-10 px-2.5 inline-flex items-center gap-1 text-[12.5px] whitespace-nowrap border-b-2 ${active === key ? "border-indigo-600 text-indigo-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+      {label}
+      {count ? <span className={`text-[10.5px] px-1.5 rounded-full tabular-nums ${red ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"}`}>{count}</span> : null}
+    </button>
+  );
+  const closeX = (
+    <button type="button" onClick={closeDrawer} aria-label={t("ปิด", "Close")} title={t("ปิด (Esc)", "Close (Esc)")}
+      className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"><Icon value="i:x" size={16} /></button>
+  );
+  let drawerHead: ReactNode = null, drawerTabs: ReactNode = null, drawerBody: ReactNode = null;
+  if (sel?.k === "n" && !isNotify && !basketOpen) {
+    const n = FLOW_NODES[sel.id];
+    const rel = isJourney
+      ? Object.keys(FLOW_EDGES).filter((id) => FLOW_EDGES[id].from === sel.id || FLOW_EDGES[id].to === sel.id).map((id) => ({ id, a: FLOW_EDGES[id].from, b: FLOW_EDGES[id].to, type: FLOW_EDGES[id].type }))
+      : drawn.filter((e) => fmTouches(e, sel.id));
+    const badMetrics = (n.metrics ?? []).filter((k) => FLOW_METRICS[k].bad && (health?.[k] ?? 0) > 0);
+    const gapCount = (n.gaps?.length ?? 0) + badMetrics.length;
+    const topics = notifyTopicsOfNode(sel.id);
+    const nNotes = notesOf("n", sel.id);
+    const tab: NodeTab = dTab;
+    drawerHead = (
+      <div className="flex items-start gap-2 px-4 pt-4 pb-2">
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-[16px] text-slate-800">{n.label}</div>
+          <div className="text-[11.5px] text-slate-500">{FLOW_AREA_LABEL[n.area]} · {n.sub}</div>
+        </div>
+        {n.href && (
+          <Link href={n.href} className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+            {t("เปิดหน้า", "Open")} <span aria-hidden="true">↗</span>
+          </Link>
+        )}
+        {closeX}
+      </div>
+    );
+    const set = (k: string) => setDTab(k as NodeTab);
+    drawerTabs = (
+      <ScrollTabs activeKey={tab} className="border-b border-slate-200 px-2">
+        {tabBtn("ov", tab, set, t("ภาพรวม", "Overview"))}
+        {tabBtn("gaps", tab, set, t("ช่องโหว่", "Gaps"), gapCount, true)}
+        {tabBtn("notify", tab, set, t("แจ้งเตือน", "Notifications"), topics.length)}
+        {tabBtn("links", tab, set, t("เส้นเข้า/ออก", "Links"), rel.length)}
+        {tabBtn("notes", tab, set, t("โน้ต", "Notes"), nNotes.length)}
+        {tabBtn("req", tab, set, t("อยากแก้อะไร", "Request a change"))}
+      </ScrollTabs>
+    );
+    const jump = (k: NodeTab, label: string, count: number, icon: string, tone = "text-slate-500") => (
+      <button type="button" onClick={() => setDTab(k)} className="h-9 px-2.5 inline-flex items-center gap-1.5 text-[12.5px] rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
+        <Icon value={icon} size={14} className={tone} />{label}<span className="ml-auto tabular-nums font-medium">{count}</span>
+      </button>
+    );
+    drawerBody = tab === "ov" ? (
+      <div className="text-[13px] leading-relaxed">
+        {n.metrics?.length ? <><div className="text-[11px] text-slate-500">{t("ตัวเลขตอนนี้ (กดดูรายการ)", "Live numbers (click for list)")}</div><MetricRows keys={n.metrics} health={health} onOpen={setMetric} /></> : null}
+        <div className="mt-3 text-[11px] text-slate-500">{t("เก็บที่ (ตาราง)", "Stored in")}</div>
+        <div className="font-mono text-[12px] text-slate-700 break-all">{n.tables}</div>
+        <div className="mt-3 text-[11px] text-slate-500">{t("สถานะ", "Statuses")}</div>
+        <div className="text-slate-800">{n.statuses}</div>
+        <div className="mt-3 text-[11px] text-slate-500">{t("หน้าที่ใช้", "Pages")}</div>
+        <div className="text-[12.5px] text-slate-600">{n.pages}</div>
+        <div className="mt-4 text-[11px] text-slate-500">{t("ในแท็บอื่น", "In other tabs")}</div>
+        <div className="mt-1 grid grid-cols-2 gap-1.5">
+          {jump("gaps", t("ช่องโหว่", "Gaps"), gapCount, "i:alert-triangle", gapCount ? "text-red-600" : "text-slate-400")}
+          {jump("notify", t("แจ้งเตือน", "Notifications"), topics.length, "i:bell")}
+          {jump("links", t("เส้นเข้า/ออก", "Links"), rel.length, "i:arrows-exchange")}
+          {jump("notes", t("โน้ต", "Notes"), nNotes.length, "i:notes")}
+        </div>
+      </div>
+    ) : tab === "gaps" ? (
+      <div className="text-[13px] leading-relaxed">
+        {n.gaps?.length ? n.gaps.map((g) => <div key={g} className="flex gap-1.5 text-red-700 mt-1.5"><Icon value="i:alert-triangle" size={14} className="mt-0.5 shrink-0" />{g}</div>) : null}
+        {badMetrics.length ? <><div className="mt-3 text-[11px] text-slate-500">{t("ตัวเลขที่ต้องตาม (กดดูรายการ)", "Numbers to follow (click for list)")}</div><MetricRows keys={badMetrics} health={health} onOpen={setMetric} /></> : null}
+        {!gapCount && <div className="py-2 text-slate-500">{t("ไม่มีช่องโหว่ที่รู้ในขั้นนี้", "No known gaps here")}</div>}
+        {gapCount > 0 && (
+          <button type="button" onClick={() => setDTab("req")} className="mt-3 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Icon value="i:edit" size={13} />{t("อยากให้แก้ข้อไหน → เลือกในแท็บอยากแก้อะไร", "Pick what to fix")}
+          </button>
+        )}
+      </div>
+    ) : tab === "notify" ? (
+      <NodeNotifyPanel bare node={sel.id} api={notify} canAdmin={canAdmin} basket={basket} onEdit={setNotifyEditId}
+        onOpenLine={() => setLineOpen(true)} onOpenAll={() => openNotify(null)} />
+    ) : tab === "links" ? (
+      <div className="-mx-2">
+        {rel.length ? rel.map((e) => rowFor(e.id, e.a, e.b, e.type, sel.id)) : <div className="px-2 py-2 text-[13px] text-slate-500">{t("ไม่มีเส้นในมุมมองนี้", "No links in this view")}</div>}
+        <div className="px-2 pt-2 text-[11px] text-slate-400">{t("กดบรรทัด = ดูรายละเอียดเส้นในลิ้นชักนี้ (มีปุ่มกลับ)", "Click a line for its details")}</div>
+      </div>
+    ) : tab === "notes" ? (
+      <div className="[&>div:first-child]:mt-0 [&>div:first-child]:border-t-0 [&>div:first-child]:pt-0">
+        <FlowInternalNotes notes={nNotes} api={notesApi} attach={{ kind: "n", id: sel.id }} view={noteView} />
+      </div>
+    ) : (
+      <div className="[&>div:first-child]:mt-0 [&>div:first-child]:border-t-0 [&>div:first-child]:pt-0">
+        <FlowRequestBox kind="n" target={sel.id} gaps={n.gaps ?? []} health={health} basket={basket} notes={promptNotes} />
+      </div>
+    );
+  } else if (sel?.k === "e" && !isNotify && !basketOpen) {
+    const x = FLOW_EDGES[sel.id];
+    const d = isJourney ? undefined : drawn.find((e) => e.id === sel.id);   // บางผังเปลี่ยนต้น/ปลายเพื่อวาด (เช่น ภาพรวม) — แท็บออเดอร์ใช้ของจริง
+    const a = d?.a ?? x.from, b = d?.b ?? x.to;
+    const gaps = [...(x.type === "missing" ? [`${x.title} — ${x.detail}`] : []), ...(x.warn ? [x.warn] : [])];
+    const eNotes = notesOf("e", sel.id);
+    const adv = FLOW_ADVICE[sel.id];
+    const tab: EdgeTab = eTab;
+    drawerHead = (
+      <div className="flex items-start gap-2 px-4 pt-4 pb-2">
+        {backNode && FLOW_NODES[backNode] && (
+          <button type="button" onClick={() => { setSel({ k: "n", id: backNode }); setBackNode(null); }} title={t(`กลับไป ${FLOW_NODES[backNode].label}`, "Back")}
+            className="shrink-0 h-8 px-2 inline-flex items-center gap-1 text-[12px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Icon value="i:arrow-left" size={13} />{FLOW_NODES[backNode].label}
+          </button>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <NumBadge n={numOf(sel.id)} type={x.type} />
+            <span className="font-semibold text-[15px] text-slate-800">{FLOW_NODES[a].label} → {FLOW_NODES[b].label}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 flex-wrap"><TypeChip type={x.type} /><RecentPill id={sel.id} /></div>
+        </div>
+        {closeX}
+      </div>
+    );
+    const set = (k: string) => setETab(k as EdgeTab);
+    drawerTabs = (
+      <ScrollTabs activeKey={tab} className="border-b border-slate-200 px-2">
+        {tabBtn("d", tab, set, t("รายละเอียด", "Details"))}
+        {tabBtn("advice", tab, set, t("คำแนะนำ", "Advice"), adv && adv.verdict !== "keep" && x.type !== "auto" ? 1 : 0)}
+        {tabBtn("notes", tab, set, t("โน้ต", "Notes"), eNotes.length)}
+        {tabBtn("req", tab, set, t("อยากแก้อะไร", "Request a change"))}
+      </ScrollTabs>
+    );
+    drawerBody = tab === "d" ? (
+      <div className="text-[13px] leading-relaxed">
+        <div className="text-[11px] text-slate-500">{t("กด / ทำอะไร", "Trigger")}</div>
+        <div className="text-slate-800">{x.title}</div>
+        <div className="mt-3 text-[11px] text-slate-500">{t("แล้วระบบทำอะไรต่อ", "What happens next")}</div>
+        <div className="text-slate-800">{x.detail}</div>
+        {x.warn && <div className="mt-3 flex gap-1.5 text-red-700"><Icon value="i:alert-triangle" size={14} className="mt-0.5 shrink-0" />{x.warn}</div>}
+        {x.changed && <div className="mt-3 text-[12px] text-violet-700">{t("แก้ล่าสุด", "Last change")} {shortDate(x.changed.date)} — {x.changed.note}</div>}
+        {x.metrics?.length ? <><div className="mt-3 text-[11px] text-slate-500">{t("ตัวเลขตอนนี้ (กดดูรายการ)", "Live numbers (click for list)")}</div><MetricRows keys={x.metrics} health={health} onOpen={setMetric} /></> : null}
+        <details className="mt-4 text-[12px] text-slate-500">
+          <summary className="cursor-pointer select-none">{t("สำหรับทีมพัฒนา", "For developers")}</summary>
+          <div className="mt-1 font-mono break-all">{x.files.join(" · ")}</div>
+          {x.workflow && <div className="mt-1 font-mono">npm run where-used -- {x.workflow}</div>}
+        </details>
+      </div>
+    ) : tab === "advice" ? (
+      adv ? <div className="[&>div:first-child]:mt-0"><AdviceBox id={sel.id} /></div> : <div className="py-2 text-[13px] text-slate-500">{t("เส้นนี้ยังไม่มีคำแนะนำ", "No advice for this link")}</div>
+    ) : tab === "notes" ? (
+      <div className="[&>div:first-child]:mt-0 [&>div:first-child]:border-t-0 [&>div:first-child]:pt-0">
+        <FlowInternalNotes notes={eNotes} api={notesApi} attach={{ kind: "e", id: sel.id }} view={noteView} />
+      </div>
+    ) : (
+      <div className="[&>div:first-child]:mt-0 [&>div:first-child]:border-t-0 [&>div:first-child]:pt-0">
+        <FlowRequestBox kind="e" target={sel.id} gaps={gaps} health={health} basket={basket} notes={promptNotes} />
+      </div>
+    );
+  }
 
   let panel: ReactNode;
   if (isNotify && !basketOpen) {
     panel = <FlowNotifyPanel api={notify} selected={notifySel} onSelect={setNotifySel} onOpenNode={openNodeOnMap} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} onEdit={setNotifyEditId} />;
   } else if (basketOpen) {
     panel = <FlowBasketPanel basket={basket} health={health} notes={promptNotes} onClose={() => setBasketOpen(false)} onPick={(kind, ref) => pick(kind === "n" ? { k: "n", id: ref } : { k: "e", id: ref })} />;
-  } else if (bellNode && sel?.k === "n" && sel.id === bellNode) {
-    panel = <NodeNotifyPanel node={bellNode} api={notify} canAdmin={canAdmin} basket={basket} onEdit={setNotifyEditId}
-      onOpenLine={() => setLineOpen(true)} onOpenAll={() => openNotify(null)} onBack={() => setBellNode(null)} />;
-  } else if (sel?.k === "e") {
-    const x = FLOW_EDGES[sel.id];
-    const d = isJourney ? undefined : drawn.find((e) => e.id === sel.id);   // บางผังเปลี่ยนต้น/ปลายเพื่อวาด (เช่น ภาพรวม) — แท็บออเดอร์ใช้ของจริง
-    const a = d?.a ?? x.from, b = d?.b ?? x.to;
-    const gaps = [...(x.type === "missing" ? [`${x.title} — ${x.detail}`] : []), ...(x.warn ? [x.warn] : [])];
-    panel = (
-      <div className="rounded-xl border border-slate-200 bg-white p-4 text-[13px] leading-relaxed">
-        <div className="flex items-center gap-2 flex-wrap mb-2">
-          <NumBadge n={numOf(sel.id)} type={x.type} />
-          <span className="font-semibold text-[15px] text-slate-800">{FLOW_NODES[a].label} → {FLOW_NODES[b].label}</span>
-          <TypeChip type={x.type} />
-          <RecentPill id={sel.id} />
-        </div>
-        <div className="text-[11px] text-slate-500">{t("กด / ทำอะไร", "Trigger")}</div>
-        <div className="text-slate-800">{x.title}</div>
-        <div className="mt-2 text-[11px] text-slate-500">{t("แล้วระบบทำอะไรต่อ", "What happens next")}</div>
-        <div className="text-slate-800">{x.detail}</div>
-        {x.warn && <div className="mt-2 flex gap-1.5 text-red-700"><Icon value="⚠️" className="mt-0.5 shrink-0" />{x.warn}</div>}
-        {x.changed && <div className="mt-2 text-[12px] text-violet-700">{t("แก้ล่าสุด", "Last change")} {shortDate(x.changed.date)} — {x.changed.note}</div>}
-        {x.metrics?.length ? <><div className="mt-2 text-[11px] text-slate-500">{t("ตัวเลขตอนนี้ (กดดูรายการ)", "Live numbers (click for list)")}</div><MetricRows keys={x.metrics} health={health} onOpen={setMetric} /></> : null}
-        <details className="mt-3 text-[12px] text-slate-500">
-          <summary className="cursor-pointer select-none">{t("สำหรับทีมพัฒนา", "For developers")}</summary>
-          <div className="mt-1 font-mono break-all">{x.files.join(" · ")}</div>
-          {x.workflow && <div className="mt-1 font-mono">npm run where-used -- {x.workflow}</div>}
-        </details>
-        <AdviceBox id={sel.id} />
-        <FlowInternalNotes notes={notesOf("e", sel.id)} api={notesApi} attach={{ kind: "e", id: sel.id }} view={noteView} />
-        <FlowRequestBox kind="e" target={sel.id} gaps={gaps} health={health} basket={basket} notes={promptNotes} />
-        {closeBtn}
-      </div>
-    );
-  } else if (sel?.k === "n") {
-    const n = FLOW_NODES[sel.id];
-    const rel = isJourney
-      ? Object.keys(FLOW_EDGES).filter((id) => FLOW_EDGES[id].from === sel.id || FLOW_EDGES[id].to === sel.id).map((id) => ({ id, a: FLOW_EDGES[id].from, b: FLOW_EDGES[id].to, type: FLOW_EDGES[id].type }))
-      : drawn.filter((e) => fmTouches(e, sel.id));
-    panel = (
-      <div className="space-y-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 text-[13px] leading-relaxed">
-          <div className="flex items-start gap-2">
-            <div className="flex-1 min-w-0">
-              <div className="font-semibold text-[15px] text-slate-800">{n.label}</div>
-              <div className="text-[11px] text-slate-500">{FLOW_AREA_LABEL[n.area]} · {n.pages}</div>
-            </div>
-            {n.href && (
-              <Link href={n.href} className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
-                {t("เปิดหน้า", "Open")} <span aria-hidden="true">↗</span>
-              </Link>
-            )}
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500">{t("เก็บที่ (ตาราง)", "Stored in")}</div>
-          <div className="font-mono text-[12px] text-slate-700 break-all">{n.tables}</div>
-          <div className="mt-2 text-[11px] text-slate-500">{t("สถานะ", "Statuses")}</div>
-          <div className="text-slate-800">{n.statuses}</div>
-          {n.metrics?.length ? <><div className="mt-2 text-[11px] text-slate-500">{t("ตัวเลขตอนนี้ (กดดูรายการ)", "Live numbers (click for list)")}</div><MetricRows keys={n.metrics} health={health} onOpen={setMetric} /></> : null}
-          {n.gaps?.length ? (
-            <div className="mt-2">
-              <div className="text-[11px] text-slate-500">{t("ช่องโหว่ / ข้อควรระวัง", "Gaps / cautions")}</div>
-              {n.gaps.map((g) => <div key={g} className="flex gap-1.5 text-red-700 mt-0.5"><span aria-hidden="true">•</span>{g}</div>)}
-            </div>
-          ) : null}
-          <NodeNotifyList topics={notifyTopicsOfNode(sel.id)} live={notify.live} onPick={() => setBellNode(sel.id)} />
-          <FlowInternalNotes notes={notesOf("n", sel.id)} api={notesApi} attach={{ kind: "n", id: sel.id }} view={noteView} />
-          <FlowRequestBox kind="n" target={sel.id} gaps={n.gaps ?? []} health={health} basket={basket} notes={promptNotes} />
-          {closeBtn}
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-2">
-          <div className="px-2 pt-1 pb-1.5 text-[11px] text-slate-500">{t("เส้นที่เข้า/ออกจากกล่องนี้", "Links in/out of this box")}</div>
-          {rel.map((e) => rowFor(e.id, e.a, e.b, e.type))}
-        </div>
-      </div>
-    );
   } else if (isJourney) {
     panel = (
       <div className="rounded-xl border border-slate-200 bg-white p-4 text-[13px] text-slate-600 leading-relaxed">
@@ -469,6 +568,15 @@ export function FlowMap() {
         {t("แผนผังนี้อ่านจากทะเบียนกลาง lib/flow-map.ts (ตรวจกับระบบจริง 2 พ.ย. 2569 · ผังการเงิน 3 พ.ย.) · แก้ระบบแล้วต้องแก้ทะเบียน มีเทสต์เตือนเมื่อไฟล์ที่อ้างหายไป", "Built from the central registry lib/flow-map.ts — update it when the system changes")}
         {healthErr ? t(" · โหลดตัวเลขสดไม่สำเร็จ", " · live numbers failed to load") : healthAt ? t(` · ตัวเลขสด ณ ${new Date(healthAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`, ` · numbers as of ${new Date(healthAt).toLocaleTimeString()}`) : ""}
       </p>
+      {/* ลิ้นชักรายละเอียด — ไม่มืดพื้นหลัง: ผังกดต่อได้ · ลากขอบซ้ายปรับกว้าง (จำไว้) · Esc / ✕ ปิด */}
+      <DrawerShell open={!!drawerHead} modal={false} onClose={closeDrawer} width={drawerSize.width}>
+        <div onMouseDown={drawerSize.startResize} onDoubleClick={drawerSize.resetWidth}
+          title={t("ลากเพื่อปรับความกว้าง · ดับเบิลคลิก = คืนค่าเดิม", "Drag to resize · double-click to reset")}
+          className="absolute left-0 top-0 z-10 hidden h-full w-1.5 cursor-ew-resize hover:bg-indigo-200 sm:block" />
+        {drawerHead}
+        {drawerTabs}
+        <div className="flex-1 overflow-y-auto px-4 py-3">{drawerBody}</div>
+      </DrawerShell>
       <FlowMetricListModal metric={metric} onClose={() => setMetric(null)} />
       {canAdmin && <LineConsole open={lineOpen} onClose={closeLine} />}
       {canAdmin && notifyEditId && (

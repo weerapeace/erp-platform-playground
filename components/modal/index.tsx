@@ -1001,6 +1001,12 @@ export interface DrawerShellProps {
   style?: React.CSSProperties;
   closeOnBackdrop?: boolean;
   closeOnEsc?: boolean;
+  /**
+   * ค่าเริ่ม true = พื้นหลังมืด กดพื้นหลังปิด (แบบเดิม)
+   * false = "ลิ้นชักข้างหน้า" ไม่มืดพื้นหลัง · หน้าข้างหลังยังกด/เลื่อนได้ (เช่น แผนผังการทำงาน: เปิดลิ้นชักค้างแล้วกดกล่องอื่นต่อ)
+   *   ปิดด้วยปุ่มของตัวเอง / Esc เท่านั้น · ปิดแล้วรีเฟรชหน้าข้างหลังเฉพาะเมื่อมีการบันทึก (ไม่รีเฟรชทุกครั้งแบบโหมดมืด)
+   */
+  modal?: boolean;
   children: React.ReactNode;
 }
 
@@ -1011,10 +1017,10 @@ export interface DrawerShellProps {
  * ถ้าหัว/ท้ายแบบมาตรฐานพอ → ใช้ <Drawer> (มีหัว ปุ่มปิด ลากขยาย จำขนาด ด่านยังไม่บันทึก ให้ครบ)
  * Esc ตอนกำลังพิมพ์ในช่องกรอก = ไม่ปิด (กันพิมพ์หาย — ช่องนั้นใช้ Esc ยกเลิกของตัวเองได้)
  */
-export function DrawerShell({ open = true, onClose, width, className = "", style, closeOnBackdrop = true, closeOnEsc = true, children }: DrawerShellProps) {
+export function DrawerShell({ open = true, onClose, width, className = "", style, closeOnBackdrop = true, closeOnEsc = true, modal = true, children }: DrawerShellProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  useRefreshOnClose(open, true);   // ปิด drawer = หน้าข้างล่างโหลดใหม่ทุกครั้ง
+  useRefreshOnClose(open, modal);   // ปิด drawer = หน้าข้างล่างโหลดใหม่ทุกครั้ง (ไม่มืดพื้นหลัง = เฉพาะเมื่อมีการบันทึก)
   const isTopEsc = useEscTop(open);
   useEffect(() => {
     if (!open || !closeOnEsc) return;
@@ -1031,9 +1037,9 @@ export function DrawerShell({ open = true, onClose, width, className = "", style
 
   if (!mounted || !open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 flex">
-      <div className="absolute inset-0 bg-black/20" {...backdropDismiss} />
-      <div className={`relative ml-auto h-full max-w-[100vw] sm:max-w-[97vw] bg-white shadow-2xl flex flex-col border-l border-slate-200 ${className}`}
+    <div className={`fixed inset-0 z-50 flex ${modal ? "" : "pointer-events-none"}`}>
+      {modal && <div className="absolute inset-0 bg-black/20" {...backdropDismiss} />}
+      <div className={`relative ml-auto h-full max-w-[100vw] sm:max-w-[97vw] bg-white shadow-2xl flex flex-col border-l border-slate-200 ${modal ? "" : "pointer-events-auto"} ${className}`}
         style={{ ...(width !== undefined ? { width } : {}), ...style }} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
