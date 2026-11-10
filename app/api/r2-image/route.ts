@@ -5,6 +5,8 @@
  *   &w=<px>   ย่อให้กว้างไม่เกินนี้ (ไม่ขยาย · ถึง 3200) → webp
  *   &q=<50-92> คุณภาพ webp (ไม่ใส่ = 75) — รูปใหญ่เต็มจอ (แบนเนอร์/สไลด์) ขอ 85 ให้คม
  *   &meta=1   คืน JSON { width, height, bytes, type } ของไฟล์ต้นฉบับ (ฟอร์มเตือน "รูปเล็กไป")
+ *   &sq=1     (คู่ w) จัตุรัส 1:1 พื้นขาว JPEG — รูปตัวเลือก LINE · รูปฝาก Lazada
+ *   &pad=34   (คู่ w) แนวตั้ง 3:4 พื้นขาว JPEG — รูปส่งเสริมแนวตั้ง Lazada (promotion_long_image)
  *
  * F21: ใช้ R2 native binding (env.R2_IMAGES.get) ตรงๆ — ไม่มี AWS SDK
  * → bundle เล็ก → ไม่ชน Worker 1102 + ไม่ต้อง sign URL
@@ -166,6 +168,8 @@ export async function GET(request: NextRequest): Promise<Response> {
     const quality = qRaw >= 50 && qRaw <= 92 ? Math.round(qRaw) : 75;
     // sq=1 → บังคับสี่เหลี่ยมจัตุรัส (1:1) แบบ contain + พื้นขาว (ไม่ครอปสินค้าหาย) — ใช้กับรูปตัวเลือก LINE ที่ต้อง 1:1
     const sq = new URL(request.url).searchParams.get("sq") === "1";
+    // pad=34 → แนวตั้ง 3:4 (กว้าง w · สูง w×4/3) แบบ contain + พื้นขาว · JPEG — รูปส่งเสริมแนวตั้งของ Lazada (promotion_long_image ≥ 750×1000)
+    const pad34 = !sq && new URL(request.url).searchParams.get("pad") === "34";
     // ไม่ย่อ GIF (sharp→webp จะได้เฟรมเดียว = ภาพนิ่ง) → เสิร์ฟตัวเต็มให้ยังขยับได้
     // ถึง 3200px: แบนเนอร์/สไลด์เต็มจอบนจอคมชัดสูง (Retina) ต้องการรูปกว้าง ~2,500–3,000px
     const canResize = wParam > 0 && wParam <= 3200 && ct0.startsWith("image/") && ct0 !== "image/svg+xml" && ct0 !== "image/gif";
@@ -174,7 +178,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         const sharp = (await import("sharp")).default;
         const input = Buffer.from(await new Response(obj.body as ReadableStream).arrayBuffer());
         // WebP ขยับ (หลายเฟรม) — ย่อแล้วเหลือเฟรมเดียว = ภาพนิ่ง → ส่งตัวเต็มแทน (เหมือน GIF) · ไอคอนเคลื่อนไหวกลาง components/animated-icon
-        if (ct0 === "image/webp" && !sq) {
+        if (ct0 === "image/webp" && !sq && !pad34) {
           const pages = await sharp(input).metadata().then((m) => m.pages ?? 1).catch(() => 1);
           if (pages > 1) {
             const raw = new Uint8Array(input);
@@ -185,8 +189,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         // sq (รูปตัวเลือก LINE): 1:1 + LINE ไม่รับ webp ("Unsupported media type") → ออกเป็น JPEG · โหมดย่อทั่วไป → webp (เบากว่า)
         const out = sq
           ? await pipeline.resize({ width: wParam, height: wParam, fit: "contain", background: { r: 255, g: 255, b: 255 } }).jpeg({ quality: 82 }).toBuffer()
-          : await pipeline.resize({ width: wParam, withoutEnlargement: true }).webp({ quality }).toBuffer();
-        const outType = sq ? "image/jpeg" : "image/webp";
+          : pad34
+            ? await pipeline.resize({ width: wParam, height: Math.round((wParam * 4) / 3), fit: "contain", background: { r: 255, g: 255, b: 255 } }).flatten({ background: { r: 255, g: 255, b: 255 } }).jpeg({ quality: 82 }).toBuffer()
+            : await pipeline.resize({ width: wParam, withoutEnlargement: true }).webp({ quality }).toBuffer();
+        const outType = sq || pad34 ? "image/jpeg" : "image/webp";
         const body = new Uint8Array(out);   // Buffer → Uint8Array<ArrayBuffer> (BodyInit ที่ถูกชนิด)
         const res = new Response(body, {
           status: 200,

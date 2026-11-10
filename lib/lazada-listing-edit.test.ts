@@ -4,7 +4,7 @@ import {
   highlightsToLines, linesToHighlights, lazadaEditStateFromView, planLazadaEdit, foreignDescImages,
   lazUpdateProductXml, lazDeactivateXml, planLazadaDisplay, lazViewAfterWrite, lazRawAfterStatus,
   lazadaPriceRowsFromView, planLazadaPrices, lazPriceQuantityXml, applyLazadaBulkPrice, lazSaleDateText,
-  lazadaSkuMediaFromView, planLazadaSkuMedia, lazMigrateImageXml, lazResolveRefs, lazImageRefOk,
+  lazadaSkuMediaFromView, planLazadaSkuMedia, lazMigrateImageXml, lazResolveRefs, lazImageRefOk, lazApplyImagesToGroup,
 } from "./lazada-listing-edit";
 
 // รูปแบบตามคู่มือ /product/item/get (open.lazada.com · สำรวจ 2026-11-10)
@@ -371,5 +371,56 @@ describe("เฟส 4: รูปตัวเลือก + กล่อง", () 
     expect(lazImageRefOk("r2:k")).toBe(true);
     expect(lazImageRefOk("https://img.lazcdn.com/a.jpg")).toBe(true);
     expect(lazImageRefOk("https://evil.com/a.jpg")).toBe(false);
+  });
+});
+
+describe("เฟส A: รูปส่งเสริม + รูปตัวเลือกหลายรูป", () => {
+  const withPromo = { ...item, attributes: { ...item.attributes, promotion_square_image: ["https://th-live.slatic.net/p/promo.jpg"] } };
+  const v = lazadaListingView(withPromo)!;
+  it("อ่านรูปส่งเสริม (array) + ชั้นตัวเลือกที่มีรูป + ค่าชั้นแรกต่อ SKU", () => {
+    expect(v.promoSquare).toBe("https://th-live.slatic.net/p/promo.jpg");
+    expect(v.promoLong).toBeNull();
+    expect(v.imageVariation).toEqual({ name: "color_family", label: "Color Family", isSize: false });
+    expect(v.skus.map((s) => s.groupValue)).toEqual(["Black", "Brown", null]);
+  });
+  it("ชั้นแรกเป็นไซซ์ = isSize", () => {
+    expect(lazadaListingView({ ...item, variation: { Variation1: { name: "size", label: "Size" } } })!.imageVariation?.isSize).toBe(true);
+  });
+  const base = lazadaEditStateFromView(v);
+  it("ตั้งรูปส่งเสริมจากระบบ → ส่ง + เตือนพื้นขาว · รูป Lazada ตรง ๆ = เตือนสัดส่วน · ล้าง = ไม่ผ่าน", () => {
+    const p = planLazadaEdit(base, { ...base, promoLong: "r2:k/long.jpg" });
+    expect(p.fields.promoLong).toBe("r2:k/long.jpg");
+    expect(p.changes[0]).toMatchObject({ label: "รูปส่งเสริม (แนวตั้ง 3:4)", before: "ไม่มี" });
+    expect(p.warnings.join(" ")).toContain("พื้นขาว");
+    const q = planLazadaEdit(base, { ...base, promoSquare: "https://th-live.slatic.net/p/a.jpg" });
+    expect(q.warnings.join(" ")).toContain("ทิ้งเงียบ");
+    expect(planLazadaEdit(base, { ...base, promoSquare: null }).errors[0]).toContain("ล้าง");
+    expect(planLazadaEdit(base, { ...base, promoSquare: "https://evil.com/x.jpg" }).errors[0]).toContain("ต้องเป็นรูปบน Lazada");
+  });
+  it("ไม่แตะรูปส่งเสริม (หน้าเว็บไม่ส่งช่องนี้) = ไม่ส่ง", () => {
+    const { promoSquare: _a, promoLong: _b, ...rest } = base; void _a; void _b;
+    expect(planLazadaEdit(base, { ...rest }).fields).toEqual({});
+  });
+  it("XML: รูปส่งเสริมใน Attributes (CDATA)", () => {
+    const x = lazUpdateProductXml("9", [{ skuId: "1", sellerSku: null, status: "active" }], { promoSquare: "https://th-live.slatic.net/p/s.jpg" });
+    expect(x).toContain("<Attributes><promotion_square_image><![CDATA[https://th-live.slatic.net/p/s.jpg]]></promotion_square_image></Attributes>");
+  });
+  it("รูปตัวเลือกหลายรูป: ใช้กับสีเดียวกันทั้งหมด", () => {
+    const rows = [
+      { skuId: "a", sellerSku: null, label: "ดำ M", images: ["x"], weight: null, length: null, width: null, height: null },
+      { skuId: "b", sellerSku: null, label: "ดำ L", images: ["y"], weight: null, length: null, width: null, height: null },
+      { skuId: "c", sellerSku: null, label: "แดง M", images: ["z"], weight: null, length: null, width: null, height: null },
+    ];
+    const g = new Map<string, string | null>([["a", "Black"], ["b", "Black"], ["c", "Red"]]);
+    const r = lazApplyImagesToGroup(rows, "a", ["n1", "n2"], g);
+    expect(r.count).toBe(2);
+    expect(r.rows.map((x) => x.images)).toEqual([["n1", "n2"], ["n1", "n2"], ["z"]]);
+  });
+  it("ชั้นที่มีรูปเป็นไซซ์ → แก้รูปตัวเลือกไม่ได้ · รูปเกิน 8 = ไม่ผ่าน · หลายรูปครบทุกตัว = ส่งได้", () => {
+    const full = lazadaSkuMediaFromView(v).map((r, k) => ({ ...r, images: [`https://th-live.slatic.net/p/s${k}.jpg`] }));
+    const many = full.map((r, k) => (k === 0 ? { ...r, images: ["r2:a", "r2:b", "https://th-live.slatic.net/p/s0.jpg"] } : r));
+    expect(planLazadaSkuMedia(full, many, { label: "Size", isSize: true }).errors[0]).toContain("ไซซ์");
+    expect(planLazadaSkuMedia(full, many, { label: "Color", isSize: false }).extras.get("127317001489")?.images).toHaveLength(3);
+    expect(planLazadaSkuMedia(full, full.map((r, k) => (k === 0 ? { ...r, images: Array.from({ length: 9 }, (_, i) => `r2:${i}`) } : r))).errors[0]).toContain("8");
   });
 });

@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { Icon } from "@/components/icon";
@@ -29,7 +29,7 @@ import { DateInput } from "@/components/date-input";
 import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "./listing-images";
 import {
   applyLazadaBulkPrice, lazadaEditStateFromView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazStatusBadge, planLazadaDisplay, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia, LAZADA_NAME_MAX, MAX_LAZADA_IMAGES,
-  type LazadaSkuMediaPlan, type LazadaSkuMediaRow,
+  lazApplyImagesToGroup, lazSystemImageKey, type LazadaSkuMediaPlan, type LazadaSkuMediaRow,
   type LazadaEditChange, type LazadaEditPlan, type LazadaEditState, type LazadaListingDetailResponse, type LazadaListingView, type LazadaPricePlan, type LazadaPriceRow, type LazadaSkuView, type LazadaWriteResponse,
 } from "@/lib/lazada-listing-edit";
 
@@ -112,6 +112,8 @@ export type LazadaEditApi = {
   /** เฟส 4: รูปตัวเลือก + น้ำหนัก/ขนาดกล่อง */
   skuMedia: LazadaSkuMediaRow[] | null;
   setSkuMedia: (skuId: string, patch: Partial<LazadaSkuMediaRow>) => void;
+  /** แทนทั้งชุด (เช่น ใช้รูปกับทุกตัวเลือกสีเดียวกัน) */
+  setSkuMediaRows: (rows: LazadaSkuMediaRow[]) => void;
   skuPlan: LazadaSkuMediaPlan | null;
   setImages: (next: string[]) => void;
   setPrice: (skuId: string, patch: Partial<LazadaPriceRow>) => void;
@@ -136,7 +138,7 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
   const skuBase = useMemo(() => (state.view ? lazadaSkuMediaFromView(state.view) : null), [state.view]);
   const [skuMedia, setSkuMediaState] = useState<LazadaSkuMediaRow[] | null>(null);
   useEffect(() => { setSkuMediaState(skuBase ? skuBase.map((r) => ({ ...r, images: [...r.images] })) : null); }, [skuBase]);
-  const skuPlan = useMemo(() => (skuBase && skuMedia ? planLazadaSkuMedia(skuBase, skuMedia) : null), [skuBase, skuMedia]);
+  const skuPlan = useMemo(() => (skuBase && skuMedia ? planLazadaSkuMedia(skuBase, skuMedia, state.view?.imageVariation) : null), [skuBase, skuMedia, state.view]);
   const [form, setForm] = useState<LazadaEditState | null>(null);
   const [prices, setPricesState] = useState<LazadaPriceRow[] | null>(null);
   const [descEdit, setDescEdit] = useState(false);
@@ -213,6 +215,7 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
   return {
     canEdit, form, base, plan, prices, pricePlan, skuMedia, skuPlan, changes, errors, dirty, descEdit, setDescEdit, saving, dialog,
     setSkuMedia: (skuId, patch) => setSkuMediaState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
+    setSkuMediaRows: (rows) => setSkuMediaState(rows),
     setImages: (next) => setForm((f) => (f ? { ...f, images: next } : f)),
     setField: (k, v) => setForm((f) => (f ? { ...f, [k]: v } : f)),
     setPrice: (skuId, patch) => setPricesState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
@@ -406,15 +409,42 @@ export function LazadaImagesPanel({ state, onOpen, edit, matchedParent, matchedC
 }) {
   const sys = useSystemImages(matchedParent ?? null);
   const [picking, setPicking] = useState(false);
+  const [promoPick, setPromoPick] = useState<null | "promoSquare" | "promoLong">(null);
   const g = gate(state); if (g) return g;
   const v = state.view!;
   const can = !!edit?.canEdit && !!edit.form;
   const images = can ? edit!.form!.images : v.images;
-  if (!can && images.length === 0) return <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">สินค้านี้ยังไม่มีรูปบน Lazada</p>;
+  const promo = { promoSquare: can ? edit!.form!.promoSquare ?? null : v.promoSquare, promoLong: can ? edit!.form!.promoLong ?? null : v.promoLong };
+  const promoBox = (k: "promoSquare" | "promoLong", label: string, ratio: string, w: number, h: number) => {
+    const ref = promo[k]; const changed = can && ref !== (k === "promoSquare" ? v.promoSquare : v.promoLong);
+    return (
+      <div className="flex items-start gap-2">
+        <div style={{ width: w, height: h }} className={`flex shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white ${changed ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200"} ${ref ? "" : "border-dashed text-slate-300"}`}>
+          {ref ? <img src={listingImgSrc(ref, 300)} alt="" className="h-full w-full object-contain" /> : <Icon name="image" />}
+        </div>
+        <div className="min-w-0 text-xs">
+          <div className="font-medium text-slate-700">{label}</div>
+          <div className="text-[11px] text-slate-400">{ratio} · {ref ? (lazSystemImageKey(ref) ? "รูปใหม่จากระบบ (ส่งตอนบันทึก)" : "อยู่บน Lazada") : "ยังไม่มี"}</div>
+          {can && <button type="button" onClick={() => { setPromoPick(k); sys.load(); }} className="mt-1 text-[11px] text-violet-700 hover:underline">{ref ? "เปลี่ยนรูป" : "เลือกรูป"}</button>}
+        </div>
+      </div>
+    );
+  };
   return (
-    <>
-      <ListingImageGrid images={images} onChange={(next) => edit?.setImages(next)} canEdit={can} max={MAX_LAZADA_IMAGES} platformName="Lazada" dragGroup="lazada-listing-images"
-        onOpen={onOpen} onAdd={() => { setPicking(true); sys.load(); }} canAdd={!!matchedParent} note={can ? LAZADA_IMG_NOTE : "ดูอย่างเดียว"} />
+    <div className="space-y-4">
+      {!can && images.length === 0
+        ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">สินค้านี้ยังไม่มีรูปบน Lazada</p>
+        : <ListingImageGrid images={images} onChange={(next) => edit?.setImages(next)} canEdit={can} max={MAX_LAZADA_IMAGES} platformName="Lazada" dragGroup="lazada-listing-images"
+            onOpen={onOpen} onAdd={() => { setPicking(true); sys.load(); }} canAdd={!!matchedParent} note={can ? LAZADA_IMG_NOTE : "ดูอย่างเดียว"} />}
+      {/* เฟส A: รูปส่งเสริมการขาย (attributes.promotion_square_image / promotion_long_image) */}
+      <div className="rounded-xl border border-slate-200 p-3">
+        <div className="mb-2 text-xs font-semibold text-slate-600">รูปภาพส่งเสริมการขาย</div>
+        <div className="flex flex-wrap gap-6">
+          {promoBox("promoSquare", "พื้นขาว จัตุรัส", "1:1", 80, 80)}
+          {promoBox("promoLong", "แนวตั้ง (ไม่บังคับ)", "3:4", 60, 80)}
+        </div>
+        <p className="mt-2 text-[11px] text-slate-400">สินค้าต้องอยู่บนพื้นขาว ไม่มีตัวหนังสือ/กรอบ · รูปจากระบบจะถูกเติมขอบขาวให้ได้สัดส่วน (จัตุรัส 1000px / แนวตั้ง 750×1000) แล้วฝากกับ Lazada · ไม่ได้ลบพื้นหลังเดิม · สัดส่วนผิด Lazada ทิ้งเงียบ ๆ — ส่งแล้วระบบเช็กให้</p>
+      </div>
       {can && (
         <ListingImagePicker open={picking} onClose={() => setPicking(false)} mode="product" storageKey="lazada-image-picker"
           title="เพิ่มรูปสินค้าจากคลังรูปในระบบ" description={`เลือกได้อีก ${Math.max(0, MAX_LAZADA_IMAGES - images.length)} รูป (Lazada รับไม่เกิน ${MAX_LAZADA_IMAGES}) · ส่งขึ้นร้านตอนกดบันทึก`}
@@ -422,7 +452,14 @@ export function LazadaImagesPanel({ state, onOpen, edit, matchedParent, matchedC
           isUsed={(ref) => images.includes(ref)} full={images.length >= MAX_LAZADA_IMAGES}
           onPick={(ref) => edit!.setImages([...images, ref])} />
       )}
-    </>
+      {can && (
+        <ListingImagePicker open={!!promoPick} onClose={() => setPromoPick(null)} mode="variant" storageKey="lazada-promo-picker"
+          title={promoPick === "promoLong" ? "เลือกรูปส่งเสริม (แนวตั้ง 3:4)" : "เลือกรูปส่งเสริม (จัตุรัสพื้นขาว)"}
+          description={promoPick === "promoLong" ? "เลือกจากคลังรูปในระบบ — ระบบทำเป็น 3:4 พื้นขาวให้ (รูปบนร้านส่วนใหญ่เป็นจัตุรัส ใช้เป็นแนวตั้งไม่ได้)" : "เลือกรูปที่สินค้าอยู่บนพื้นขาว · รูปจากระบบจะถูกทำเป็นจัตุรัสพื้นขาวให้"}
+          shopImages={promoPick === "promoSquare" ? images : undefined} matchedParent={matchedParent ?? null} matchedCode={matchedCode} sysImages={sys.images}
+          onPick={(ref) => { if (promoPick) edit!.setField(promoPick, ref); setPromoPick(null); }} />
+      )}
+    </div>
   );
 }
 
@@ -594,16 +631,20 @@ export function LazadaOptionsPanel({ state, disp, edit, matchedParent, matchedCo
 }
 
 /**
- * เฟส 4: รูปตัวเลือก + น้ำหนัก/ขนาดกล่อง ต่อตัวเลือก (โหมด "รูป · น้ำหนัก · กล่อง" ของแท็บตัวเลือก)
- * รูป = เปลี่ยน "รูปแรก" ของตัวเลือก (เลือกจากรูปสินค้าบนร้าน หรือคลังรูปในระบบ) · Lazada ให้รูปตัวเลือกมีครบทุกตัว (planLazadaSkuMedia ตรวจ)
+ * เฟส 4 + A: รูปตัวเลือก (≤ 8 รูปต่อตัว) + น้ำหนัก/ขนาดกล่อง ต่อตัวเลือก (โหมด "รูป · น้ำหนัก · กล่อง" ของแท็บตัวเลือก)
+ * กดรูปในแถว → ป๊อปจัดการรูปของตัวเลือกนั้น (ลากเรียง/ปก/ลบ/เพิ่ม — ชิ้นส่วนเดียวกับแท็บรูป) + "ใช้กับทุกตัวเลือกสีเดียวกัน"
+ * กติกา Lazada (planLazadaSkuMedia): รูปตัวเลือกครบทุกตัว · ใส่ได้เฉพาะชั้นแรกที่ไม่ใช่ไซซ์
  */
 function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { state: LazadaListingState; edit: LazadaEditApi | null; matchedParent: string | null; matchedCode: string | null }) {
   const sys = useSystemImages(matchedParent);
-  const [pickFor, setPickFor] = useState<string | null>(null);
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const v = state.view!;
   const can = !!edit?.canEdit && !!edit.skuMedia;
   const rows = can ? edit!.skuMedia! : lazadaSkuMediaFromView(v);
   const baseOf = new Map(v.skus.map((s) => [s.skuId, s]));
+  const groupOf = new Map(v.skus.map((s) => [s.skuId, s.groupValue]));
+  const iv = v.imageVariation;
   const numCell = (k: "weight" | "length" | "width" | "height", step: string) => (r: LazadaSkuMediaRow) => {
     const b = baseOf.get(r.skuId);
     const changed = !!b && b[k] !== r[k];
@@ -613,16 +654,18 @@ function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { stat
       : <span>{r[k] ?? "—"}</span>;
   };
   const cols: MiniColumn<LazadaSkuMediaRow>[] = [
-    { key: "opt", header: "ตัวเลือก", width: "1.5fr", cell: (r) => <div className="min-w-0"><div className="truncate" title={r.label}>{r.label}</div><div className="truncate font-mono text-[11px] text-slate-400">{r.sellerSku ?? "ไม่มีรหัส"}</div></div> },
+    { key: "opt", header: "ตัวเลือก", width: "1.4fr", cell: (r) => <div className="min-w-0"><div className="truncate" title={r.label}>{r.label}</div><div className="truncate font-mono text-[11px] text-slate-400">{r.sellerSku ?? "ไม่มีรหัส"}</div></div> },
     {
-      key: "img", header: "รูป", width: "6rem",
+      key: "img", header: "รูป (สูงสุด 8)", width: "9rem",
       cell: (r) => {
-        const changed = (baseOf.get(r.skuId)?.images[0] ?? null) !== (r.images[0] ?? null);
+        const changed = (baseOf.get(r.skuId)?.images ?? []).join("\n") !== r.images.join("\n");
         return (
-          <div className="flex items-center gap-1.5">
-            {r.images[0] ? <img src={listingImgSrc(r.images[0], 120)} alt="" className={`h-9 w-9 rounded object-cover ${changed ? "ring-2 ring-violet-400" : ""}`} /> : <span className="flex h-9 w-9 items-center justify-center rounded bg-slate-50 text-slate-300"><Icon name="image" /></span>}
-            {can && <button type="button" onClick={() => { setPickFor(r.skuId); sys.load(); }} className="text-[11px] text-violet-700 hover:underline">เปลี่ยน</button>}
-          </div>
+          <button type="button" onClick={() => setOpenFor(r.skuId)} title={can ? "จัดการรูปของตัวเลือกนี้" : "ดูรูปของตัวเลือกนี้"}
+            className={`flex items-center gap-1 rounded-md p-0.5 hover:bg-slate-50 ${changed ? "ring-2 ring-violet-300" : ""}`}>
+            {r.images.slice(0, 3).map((ref, i) => <img key={`${ref}-${i}`} src={listingImgSrc(ref, 120)} alt="" className="h-8 w-8 rounded object-cover" />)}
+            {r.images.length === 0 && <span className="flex h-8 w-8 items-center justify-center rounded bg-slate-50 text-slate-300"><Icon name="image" /></span>}
+            <span className="text-[11px] text-violet-700">{r.images.length > 3 ? `+${r.images.length - 3}` : ""} {can ? "จัดการ" : "ดู"}</span>
+          </button>
         );
       },
     },
@@ -631,18 +674,42 @@ function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { stat
     { key: "wd", header: "กว้าง (ซม.)", width: "5rem", align: "right", cell: numCell("width", "0.1") },
     { key: "h", header: "สูง (ซม.)", width: "5rem", align: "right", cell: numCell("height", "0.1") },
   ];
-  const pickRow = rows.find((r) => r.skuId === pickFor);
+  const row = rows.find((r) => r.skuId === openFor) ?? null;
+  const group = row ? groupOf.get(row.skuId) ?? null : null;
+  const sameGroup = row && group != null ? rows.filter((r) => groupOf.get(r.skuId) === group).length : 0;
   const errs = edit?.skuPlan?.errors ?? [];
   return (
     <div className="space-y-2">
+      {iv?.isSize && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">ชั้นตัวเลือกแรกของสินค้านี้คือ “{iv.label}” (ไซซ์) — Lazada ไม่ให้ใส่รูปตามไซซ์ แก้ได้แค่น้ำหนัก/กล่อง</p>}
       <MiniTable rows={rows} columns={cols} rowKey={(r) => r.skuId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-lazada-media" />
       {errs.length > 0 && <ul className="space-y-0.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{errs.slice(0, 6).map((e, i) => <li key={i}>{e}</li>)}</ul>}
-      <p className="text-[11px] text-slate-400">{can ? "ช่องที่แก้มีกรอบม่วง · รูปตัวเลือก Lazada ต้องมีครบทุกตัว · รูปจากระบบจะถูกฝากกับ Lazada ตอนกดบันทึก · " : "ดูอย่างเดียว · "}น้ำหนักเป็นกิโลกรัม · ขนาดกล่องเป็นเซนติเมตร (ใช้คิดค่าส่ง)</p>
-      {can && (
-        <ListingImagePicker open={!!pickRow} onClose={() => setPickFor(null)} mode="variant" storageKey="lazada-sku-image-picker"
-          title={`เลือกรูปให้ตัวเลือก ${pickRow?.label ?? ""}`} description="กดรูปที่ต้องการ (แทนรูปแรกของตัวเลือก) · ส่งขึ้นร้านตอนกดบันทึก"
+      <p className="text-[11px] text-slate-400">{can ? "ช่องที่แก้มีกรอบม่วง · รูปตัวเลือกต้องมีครบทุกตัว · รูปจากระบบจะถูกฝากกับ Lazada ตอนกดบันทึก · " : "ดูอย่างเดียว · "}น้ำหนักเป็นกิโลกรัม · ขนาดกล่องเป็นเซนติเมตร (ใช้คิดค่าส่ง)</p>
+
+      {/* ป๊อปจัดการรูปของตัวเลือก 1 ตัว */}
+      <ERPModal open={!!row} onClose={() => { setOpenFor(null); setAdding(false); }} size="lg" storageKey="lazada-sku-images"
+        title={`รูปของตัวเลือก ${row?.label ?? ""}`} description={can ? "ลากเรียง · ตั้งปก · ลบ · เพิ่มจากรูปสินค้าบนร้าน/คลังรูปในระบบ — ส่งขึ้นร้านตอนกดบันทึก" : "ดูอย่างเดียว"}>
+        {row && (
+          <div className="space-y-3">
+            {row.images.length === 0 && !can
+              ? <p className="text-xs text-slate-500">ตัวเลือกนี้ยังไม่มีรูป</p>
+              : <ListingImageGrid images={row.images} onChange={(next) => edit?.setSkuMedia(row.skuId, { images: next })} canEdit={can && !iv?.isSize} max={MAX_LAZADA_IMAGES} platformName="Lazada (รูปตัวเลือก)"
+                  dragGroup="lazada-sku-images" onOpen={() => {}} onAdd={() => { setAdding(true); sys.load(); }} canAdd note="รูปจากระบบจะถูกทำเป็นจัตุรัสพื้นขาวแล้วฝากกับ Lazada" />}
+            {can && !iv?.isSize && sameGroup > 1 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-2 text-xs text-violet-900">
+                <span className="flex-1">ตัวเลือก “{group}” มี {sameGroup} ตัว (เช่น หลายไซซ์) — Lazada แนะนำให้ใช้รูปชุดเดียวกัน</span>
+                <button type="button" onClick={() => { const r = lazApplyImagesToGroup(edit!.skuMedia!, row.skuId, row.images, groupOf); edit!.setSkuMediaRows(r.rows); }}
+                  className="h-8 rounded-md bg-violet-600 px-2.5 text-white hover:bg-violet-700">ใช้รูปชุดนี้กับทั้ง {sameGroup} ตัว</button>
+              </div>
+            )}
+          </div>
+        )}
+      </ERPModal>
+      {can && row && (
+        <ListingImagePicker open={adding} onClose={() => setAdding(false)} mode="product" showShop storageKey="lazada-sku-image-picker"
+          title={`เพิ่มรูปให้ตัวเลือก ${row.label}`} description={`เลือกได้อีก ${Math.max(0, MAX_LAZADA_IMAGES - row.images.length)} รูป (ไม่เกิน ${MAX_LAZADA_IMAGES}) · ส่งขึ้นร้านตอนกดบันทึก`}
           shopImages={edit!.form?.images ?? v.images} matchedParent={matchedParent} matchedCode={matchedCode} sysImages={sys.images}
-          onPick={(ref) => { if (pickRow) edit!.setSkuMedia(pickRow.skuId, { images: [ref, ...pickRow.images.slice(1).filter((x) => x !== ref)] }); setPickFor(null); }} />
+          isUsed={(ref) => row.images.includes(ref)} full={row.images.length >= MAX_LAZADA_IMAGES}
+          onPick={(ref) => edit!.setSkuMedia(row.skuId, { images: [...row.images, ref] })} />
       )}
     </div>
   );

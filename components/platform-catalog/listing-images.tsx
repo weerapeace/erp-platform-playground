@@ -96,14 +96,16 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
 /**
  * เลือกรูป — mode "product" = เพิ่มรูปสินค้า (เลือกได้หลายรูป ป๊อปค้างไว้) · "variant" = รูปของตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ · เลือกแล้วผู้เรียกปิดเอง)
  */
-export function ListingImagePicker({ open, onClose, mode, title, description, shopImages, matchedParent, matchedCode, sysImages, isUsed, full, onPick, storageKey = "listing-drawer-image-picker" }: {
+export function ListingImagePicker({ open, onClose, mode, title, description, shopImages, showShop, matchedParent, matchedCode, sysImages, isUsed, full, onPick, storageKey = "listing-drawer-image-picker" }: {
   open: boolean;
   onClose: () => void;
   mode: "product" | "variant";
   title: string;
   description: string;
-  /** รูปสินค้าบนร้าน (โชว์เฉพาะ mode variant) */
+  /** รูปสินค้าบนร้าน (โชว์ใน mode variant หรือเมื่อ showShop) */
   shopImages?: string[];
+  /** โชว์รูปสินค้าบนร้านใน mode product ด้วย (เลือกหลายรูป — เช่น รูปตัวเลือก Lazada) */
+  showShop?: boolean;
   matchedParent: string | null;
   matchedCode?: string | null;
   sysImages: SystemImage[] | null;
@@ -118,15 +120,20 @@ export function ListingImagePicker({ open, onClose, mode, title, description, sh
     <ERPModal open={open} onClose={onClose} size="lg" storageKey={storageKey} title={title} description={description}>
       {open && (
         <div className="space-y-3">
-          {mode === "variant" && (shopImages?.length ?? 0) > 0 && (
+          {(mode === "variant" || showShop) && (shopImages?.length ?? 0) > 0 && (
             <div>
               <div className="mb-1 text-xs text-slate-500">รูปสินค้าบนร้าน</div>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                {shopImages!.map((ref, i) => (
-                  <button key={`p-${i}`} type="button" onClick={() => onPick(ref)} className="aspect-square overflow-hidden rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300">
-                    <img src={listingImgSrc(ref, 300)} alt="" loading="lazy" className="h-full w-full object-cover" />
-                  </button>
-                ))}
+                {shopImages!.map((ref, i) => {
+                  const used = mode === "product" && !!isUsed?.(ref);
+                  return (
+                    <button key={`p-${i}`} type="button" disabled={used || (mode === "product" && !!full)} onClick={() => onPick(ref)}
+                      className="relative aspect-square overflow-hidden rounded-lg border border-slate-200 hover:ring-2 hover:ring-violet-300 disabled:opacity-40 disabled:hover:ring-0">
+                      <img src={listingImgSrc(ref, 300)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      {used && <span className="absolute inset-x-0 bottom-0 bg-white/90 text-center text-[10px] text-slate-600">เพิ่มแล้ว</span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

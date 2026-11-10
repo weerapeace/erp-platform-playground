@@ -78,6 +78,8 @@ export type LazadaSkuView = {
   weight: number | null; length: number | null; width: number | null; height: number | null;
   /** ลิงก์หน้าสินค้าบน Lazada */
   url: string | null;
+  /** ค่าของชั้นตัวเลือกที่มีรูป (ชั้นแรก เช่น สี "Black") — ตัวเลือกสีเดียวกันควรใช้รูปชุดเดียวกัน */
+  groupValue: string | null;
 };
 export type LazadaListingView = {
   itemId: string;
@@ -95,6 +97,11 @@ export type LazadaListingView = {
   /** เหตุผลที่ Lazada ปัดตก/ระงับ (ถ้ามี) */
   rejectReasons: string[];
   skus: LazadaSkuView[];
+  /** รูปส่งเสริมการขาย (attributes.promotion_square_image 1:1 พื้นขาว · promotion_long_image 3:4) — ไม่มี = null */
+  promoSquare: string | null;
+  promoLong: string | null;
+  /** ชั้นตัวเลือกที่ใส่รูปได้ (Lazada: เฉพาะชั้นแรก และต้องไม่ใช่ไซซ์) · null = ไม่มีข้อมูลชั้นตัวเลือก */
+  imageVariation: { name: string; label: string; isSize: boolean } | null;
 };
 
 /** วันที่ราคาลด — Lazada ส่งทั้งข้อความวันที่ และเลขมิลลิวินาที → ข้อความสั้น "YYYY-MM-DD HH:mm" (เวลาไทย) */
@@ -123,6 +130,11 @@ export function lazadaListingView(item: unknown): LazadaListingView | null {
   const itemId = str(p?.item_id);
   if (!p || !itemId) return null;
   const a = obj(p.attributes) ?? {};
+  // ชั้นตัวเลือกแรก (Variation1) = ชั้นเดียวที่ Lazada ให้มีรูป
+  const vars = obj(p.variation);
+  const v1 = obj(vars?.Variation1 ?? vars?.variation1) ?? (vars ? Object.values(vars).map(obj).find((x) => !!x) ?? null : null);
+  const v1Name = str(v1?.name);
+  const imageVariation = v1Name ? { name: v1Name, label: str(v1?.label) ?? v1Name, isSize: /size|ไซซ์|ขนาด/i.test(`${v1Name} ${str(v1?.label) ?? ""}`) } : null;
   const skus = (Array.isArray(p.skus) ? p.skus : []).map(obj).filter((s): s is Obj => !!s).map((s, i): LazadaSkuView => {
     const sellerSku = str(s.SellerSku ?? s.seller_sku);
     const price = num(s.price); const sp = num(s.special_price);
@@ -139,6 +151,7 @@ export function lazadaListingView(item: unknown): LazadaListingView | null {
       images: lazImageList(s.Images ?? s.images),
       weight: num(s.package_weight), length: num(s.package_length), width: num(s.package_width), height: num(s.package_height),
       url: str(s.Url ?? s.url),
+      groupValue: v1Name ? str(obj(s.saleProp ?? s.sale_prop)?.[v1Name]) : null,
     };
   });
   return {
@@ -153,6 +166,9 @@ export function lazadaListingView(item: unknown): LazadaListingView | null {
     subStatus: str(p.subStatus ?? p.sub_status),
     rejectReasons: rejectReasonsOf(p.rejectReason ?? p.reject_reason),
     skus,
+    promoSquare: lazImageList(a.promotion_square_image)[0] ?? null,
+    promoLong: lazImageList(a.promotion_long_image)[0] ?? null,
+    imageVariation,
   };
 }
 
@@ -187,7 +203,7 @@ const LAZADA_IMG_HOST = /(^|\.)(slatic\.net|lazcdn\.com|alicdn\.com)$/i;
  * ค่าที่แก้ได้ในเฟส 2 + 4 · จุดเด่นเก็บเป็น "บรรทัดละข้อ" (คนทั่วไปแก้ง่ายกว่า HTML)
  * images (เฟส 4) = รูปสินค้าตามลำดับ (รูปแรก = ปก) — ลิงก์ Lazada หรือ "r2:<key>" (รูปจากคลังรูปในระบบ → API ฝากกับ Lazada ก่อนส่ง)
  */
-export type LazadaEditState = { name: string; description: string; highlights: string; images: string[] };
+export type LazadaEditState = { name: string; description: string; highlights: string; images: string[]; /** รูปส่งเสริม (เฟส A) */ promoSquare?: string | null; promoLong?: string | null };
 
 const decodeEntities = (s: string) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'");
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -208,7 +224,7 @@ export function linesToHighlights(lines: string): string {
 }
 
 export function lazadaEditStateFromView(v: LazadaListingView): LazadaEditState {
-  return { name: v.name, description: v.description, highlights: highlightsToLines(v.shortDescription), images: [...v.images] };
+  return { name: v.name, description: v.description, highlights: highlightsToLines(v.shortDescription), images: [...v.images], promoSquare: v.promoSquare, promoLong: v.promoLong };
 }
 
 /** รูป "r2:<key>" = จากคลังรูปในระบบ (ชื่อเดียวกับ systemImageRef ของ LINE — lib/line-listing-edit) */
@@ -229,7 +245,7 @@ function imageListChange(before: string[], after: string[]): string {
 export type LazadaEditChange = { label: string; before: string; after: string };
 export type LazadaEditPlan = {
   /** ช่องที่จะส่ง (เฉพาะที่เปลี่ยน) · shortDescription เป็น HTML แล้ว */
-  fields: { name?: string; description?: string; shortDescription?: string; /** เฟส 4: รูปสินค้าทั้งชุดตามลำดับ (ref) */ images?: string[] };
+  fields: { name?: string; description?: string; shortDescription?: string; /** เฟส 4: รูปสินค้าทั้งชุดตามลำดับ (ref) */ images?: string[]; /** รูปส่งเสริม 1:1 / 3:4 (ref) */ promoSquare?: string; promoLong?: string };
   changes: LazadaEditChange[];
   errors: string[];
   warnings: string[];
@@ -300,6 +316,17 @@ export function planLazadaEdit(before: LazadaEditState, after: LazadaEditState):
       if (aImgs.some((r) => lazSystemImageKey(r))) warnings.push("รูปจากคลังรูปในระบบจะถูกฝากกับ Lazada ก่อน (แปลงเป็น JPG สี่เหลี่ยมจัตุรัสพื้นขาว 1500px) — รูปไหนไม่ผ่านกติกา Lazada ระบบจะหยุดและบอก");
     }
   }
+  // เฟส A: รูปส่งเสริมการขาย — 1 รูปต่อชนิด · ต้องเป็นรูปบน Lazada หรือรูปจากระบบ (ฝาก + ทำสัดส่วนให้) · ล้างยังไม่รองรับ
+  for (const [k, label, ratio] of [["promoSquare", "รูปส่งเสริม (จัตุรัส 1:1)", "1:1"], ["promoLong", "รูปส่งเสริม (แนวตั้ง 3:4)", "3:4"]] as const) {
+    const b = before[k] ?? null; const a = after[k] === undefined ? b : after[k] ?? null;
+    if (a === b) continue;
+    if (!a) { errors.push(`ล้าง${label}ยังไม่รองรับ — เลือกรูปใหม่แทน หรือแก้ใน Seller Center`); continue; }
+    if (!lazImageRefOk(a)) { errors.push(`${label}: ต้องเป็นรูปบน Lazada หรือรูปจากคลังรูปในระบบ`); continue; }
+    fields[k] = a;
+    changes.push({ label, before: b ? "มีรูป" : "ไม่มี", after: "รูปใหม่" });
+    if (!lazSystemImageKey(a)) warnings.push(`${label}: ใช้รูปที่อยู่บน Lazada ตรง ๆ — ถ้าสัดส่วนไม่ใช่ ${ratio} Lazada จะทิ้งเงียบ ๆ (ระบบดึงกลับมาเช็กให้) · รูปจากระบบจะถูกทำเป็น ${ratio} พื้นขาวให้`);
+  }
+  if (fields.promoSquare || fields.promoLong) warnings.push("รูปส่งเสริมต้องเป็นสินค้าบนพื้นขาว ไม่มีตัวหนังสือ/กรอบ — ระบบเติมขอบขาวให้ได้สัดส่วน แต่ไม่ได้ลบพื้นหลังเดิม");
   if (Object.keys(fields).length) warnings.push("Lazada อาจส่งสินค้าไปตรวจใหม่ (ไม่เกิน 24 ชม.) หลังแก้ข้อมูล — ช่วงแคมเปญใหญ่ควรเลี่ยง");
   return { fields, changes, errors, warnings };
 }
@@ -329,7 +356,7 @@ export type LazadaSkuMediaPlan = {
 const PKG_LABEL: Record<"weight" | "length" | "width" | "height", string> = { weight: "น้ำหนัก (กก.)", length: "ยาว (ซม.)", width: "กว้าง (ซม.)", height: "สูง (ซม.)" };
 
 /** เทียบรูปตัวเลือก/กล่องในฟอร์มกับของบนร้าน → ส่งอะไร / ตรวจไม่ผ่าน / ก่อน → หลัง (หน้าเว็บกับ API ใช้ตัวเดียวกัน) */
-export function planLazadaSkuMedia(before: LazadaSkuMediaRow[], after: LazadaSkuMediaRow[]): LazadaSkuMediaPlan {
+export function planLazadaSkuMedia(before: LazadaSkuMediaRow[], after: LazadaSkuMediaRow[], imageVariation?: { label: string; isSize: boolean } | null): LazadaSkuMediaPlan {
   const extras = new Map<string, LazSkuExtra>(); const changes: LazadaEditChange[] = []; const errors: string[] = []; const warnings: string[] = [];
   const byId = new Map(before.map((b) => [b.skuId, b]));
   let imgChanged = false;
@@ -352,13 +379,27 @@ export function planLazadaSkuMedia(before: LazadaSkuMediaRow[], after: LazadaSku
     if (was.length) changes.push({ label: `ตัวเลือก ${a.label}`, before: was.join(" · "), after: now.join(" · ") });
     if (Object.keys(ex).length) extras.set(a.skuId, ex);
   }
-  if (imgChanged) {
+  if (imgChanged && imageVariation?.isSize) errors.push(`Lazada ไม่ให้ใส่รูปตามชั้น "${imageVariation.label}" (ไซซ์) — รูปตัวเลือกใส่ได้เฉพาะชั้นแรกที่ไม่ใช่ไซซ์ เช่น สี`);
+  else if (imgChanged) {
     // รูปตัวเลือกต้องครบทุกตัว → ส่งรูปของทุกตัว (ตัวที่ไม่ได้แก้ = รูปเดิม)
     const missing = after.filter((a) => a.images.length === 0);
     if (missing.length) errors.push(`Lazada ให้รูปตัวเลือกมีครบทุกตัว — ยังไม่มีรูป ${missing.length} ตัว: ${missing.slice(0, 4).map((m) => m.label).join(", ")}${missing.length > 4 ? " …" : ""}`);
     else for (const a of after) extras.set(a.skuId, { ...(extras.get(a.skuId) ?? {}), images: [...a.images] });
   }
   return { extras, changes, errors, warnings };
+}
+
+/** ใช้รูปชุดนี้กับทุกตัวเลือกที่ค่าชั้นแรกเดียวกัน (เช่น สีดำทุกไซซ์) — groupOf = skuId → ค่าชั้นแรก (pure · มี test) */
+export function lazApplyImagesToGroup(rows: LazadaSkuMediaRow[], skuId: string, images: string[], groupOf: Map<string, string | null>): { rows: LazadaSkuMediaRow[]; count: number } {
+  const g = groupOf.get(skuId) ?? null;
+  let count = 0;
+  const next = rows.map((r) => {
+    const same = r.skuId === skuId || (g != null && groupOf.get(r.skuId) === g);
+    if (!same) return r;
+    count++;
+    return { ...r, images: [...images] };
+  });
+  return { rows: next, count };
 }
 
 /** /image/migrate (payload) — ฝากรูปจากลิงก์ภายนอกให้ Lazada · ลิงก์มี & → CDATA (คู่มือ) */
@@ -383,6 +424,9 @@ export function lazUpdateProductXml(itemId: string, skus: LazSkuRef[], fields: L
     fields.name != null ? `<name>${xmlText(fields.name)}</name>` : "",
     fields.description != null ? `<description>${cdata(fields.description)}</description>` : "",
     fields.shortDescription != null ? `<short_description>${cdata(fields.shortDescription)}</short_description>` : "",
+    // รูปส่งเสริม: คู่มือเขียนเป็น JSON array (≤ 1 รูป) แต่ไม่บอกรูปแบบ XML → ส่งลิงก์เดียว · route ดึงกลับเช็กว่าติดจริง
+    fields.promoSquare != null ? `<promotion_square_image>${cdata(fields.promoSquare)}</promotion_square_image>` : "",
+    fields.promoLong != null ? `<promotion_long_image>${cdata(fields.promoLong)}</promotion_long_image>` : "",
   ].join("");
   const imgs = (list: string[]) => `<Images>${list.map((u) => `<Image>${cdata(u)}</Image>`).join("")}</Images>`;
   // รูปสินค้า (เฟส 4) อยู่นอก Skus · ต้องเป็นลิงก์ Lazada แล้ว (ผู้เรียกฝากรูป r2: ก่อน)
@@ -575,6 +619,7 @@ export function lazViewAfterWrite(view: LazadaListingView, w: { fields?: LazadaE
     ...view,
     name: f.name ?? view.name, description: f.description ?? view.description, shortDescription: f.shortDescription ?? view.shortDescription,
     images: f.images ?? view.images,
+    promoSquare: f.promoSquare ?? view.promoSquare, promoLong: f.promoLong ?? view.promoLong,
     skus, status: w.statusOverride && w.statusOverride.size ? (anyOpen ? "Active" : "InActive") : view.status,
   };
 }
