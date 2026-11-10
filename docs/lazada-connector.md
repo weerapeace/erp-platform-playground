@@ -97,6 +97,14 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
   - กฎ: ใส่รูปได้เฉพาะชั้นตัวเลือกแรก (Variation1) ที่ไม่ใช่ไซซ์ (`view.imageVariation.isSize`) · รูปครบทุกตัว · ส่งแล้วเทียบจำนวนรูปต่อตัวเลือก
 - ถัดไป (รอเจ้าของ): เฟส B ข้อมูลเฉพาะ (`/category/attributes/get` · ส่ง `en_name` · ช่องจำเป็นขาด = Lazada ไม่ให้แก้สินค้า · brand_id ดูอย่างเดียว) + ประกัน (`warranty_type` / `warranty` / `product_warranty`) + ห่อของขวัญ (`gift_wrapping` Yes/No · Lazada เปิดให้เฉพาะร้านที่อนุญาต) · เฟส C ให้ AI เลือก (ลงทะเบียน `ai.platform_attrs` ในศูนย์ AI)
 
+**เฟส B — แท็บ "ข้อมูลเฉพาะ" + ประกัน + ห่อของขวัญ (เจ้าของสั่ง 2026-11-10) · deploy f9da76a4 · ยังไม่ทดสอบกับร้านจริง:**
+- รายการช่อง = `/category/attributes/get` ของหมวดสินค้า (ดึงสดเมื่อเปิดแท็บ · `GET /api/lazada/category-attributes` เดิม) → `lazAttributeFromApi` เพิ่ม `choices{name,en}` / `attribute_type` / `is_key_prop` (`options` เดิมคงไว้ให้ /admin/lazada-categories)
+- แสดงเฉพาะช่องระดับสินค้าที่ไม่ใช่ตัวเลือกขาย/ชื่อ/รายละเอียด/ยี่ห้อ/รูป (`lazAttrEditable`) · กลุ่ม: ข้อมูลเฉพาะ / การรับประกัน (`warranty_type` `warranty` `product_warranty`) / ห่อของขวัญ (`gift_wrapping` Yes/No — หมวดไม่ส่งมา = เติมให้ `lazAttrDefsWithExtras`)
+- ค่า: ส่ง **en_name** (`lazNormAttr` รับชื่อไทย/อังกฤษ) · โชว์ชื่อไทย (`lazAttrDisplay`) · เลือกนอกรายการ (select) = ไม่ผ่าน · ล้างค่า = ยังไม่รองรับ · ช่องจำเป็นว่าง = เตือน + กรอบแดง (Lazada ไม่ให้แก้สินค้าที่ช่องจำเป็นไม่ครบ) · ยี่ห้อดูอย่างเดียว
+- ส่งทาง `POST /api/lazada/listing-edit` (`attrs_before`/`attrs_edit` · เฉพาะช่องที่แก้ · ร้านเปลี่ยน = 409) → `<Attributes><ชื่อช่อง>…` → ดึงกลับเทียบค่า (ไม่ตรง = เตือน เช่น ห่อของขวัญไม่ได้รับอนุญาต)
+- ⚠️ ยังไม่ยืนยัน: Lazada รับ en_name ผ่าน XML · multiSelect คั่น "," · gift_wrapping ร้านเราได้รับอนุญาตไหม
+- ถัดไป: เฟส C ให้ AI เลือก (ลงทะเบียน `ai.platform_attrs` ในศูนย์ AI · เลือกได้เฉพาะในรายการ · โชว์ เดิม → แนะนำ ให้กดใช้)
+
 **กติกา Lazada ที่ต้องระวังตอนทำเฟส 2–4** (สำรวจจาก JSON ของคู่มือ open.lazada.com 2026-11-10):
 - `/product/item/get` ใช้ `item_id` เท่านั้น (seller_sku เลิกรองรับแล้ว)
 - `/product/update`: ต้องมี `SkuId` ทุก SKU · ⚠️ คู่มือบอกสถานะ SKU "ค่าเริ่ม = active" → **ต้องส่งสถานะเดิมของทุก SKU ไปด้วยเสมอ** (ไม่งั้นตัวเลือกที่ปิดอยู่อาจเปิดเอง — IG ปิดอยู่ 48 ตัว) · ส่ง SKU ครบตามลำดับเดิม (ส่งสลับ Lazada เรียงตัวเลือกใหม่) · รูปลบไม่ได้ ทำได้แค่แทน · ล้างช่องด้วย `d_description`/`d_short_description` · คำตอบอาจได้ `item_status = Pending QC` (ตรวจภายใน 24 ชม.) · Lazada แนะนำห้ามใช้ตัวนี้แก้ราคา/สต๊อก/ปิดขาย
