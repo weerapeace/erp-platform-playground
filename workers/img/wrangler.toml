@@ -1,0 +1,18 @@
+# erp-img — ตัวเสิร์ฟรูปบน Cloudflare (แยกจากแอปหลัก) · อ่านรูปจาก R2 ตรง + เก็บรูปย่อไว้ใน R2 (_variants/)
+# Deploy: .github/workflows/deploy-img.yml (ใช้ secret CF ชุดเดียวกับ collab worker)
+# URL: https://erp-img.weerapeace.workers.dev/api/r2-image?key=...
+name = "erp-img"
+main = "src/index.ts"
+compatibility_date = "2026-05-31"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "odoo-product-images"
+
+[vars]
+# แอปที่ย่อรูป (sharp) ตอนรูปขนาดนั้นยังไม่เคยถูกย่อ — ย่อครั้งเดียวแล้วเก็บไว้ใน R2
+ORIGIN = "https://erp-platform-playground.vercel.app"
+
+[observability]
+enabled = true
+head_sampling_rate = 0.05
