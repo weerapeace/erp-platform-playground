@@ -4,6 +4,7 @@
  * WebsiteListingsPanel — แท็บ "สินค้าบนเว็บ" ของหน้าจัดการเว็บร้าน (/website/<slug>)
  * --------------------------------------------------------------------------
  * - ตัวกรองบน: ทั้งหมด · ขึ้นเว็บ · ซ่อนอยู่ · แนะนำ · ⚠️ ต้องแก้ (นับจากกฎกลาง lib/website-listing-health)
+ * - 📄 แบ่งหน้า (2026-11-10) ด้วย Pager ของกลาง 25/50/100/200 ต่อหน้า (จำต่อคน) — ตัวกรอง/ตัวเลข/พิมพ์ยังคิดทุกรุ่น · ติ๊กจำข้ามหน้า · ลากเรียงได้ในหน้าเดียวกัน · เปิด/ซ่อนเกิน 20 รุ่นถามก่อน (100+ พิมพ์ CONFIRM)
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด/🗂 จัดหมวด (จำต่อคนด้วย useViewPref)
  * - 🗂 จัดหมวด = components/website-category-sorter (ขั้น 1 ใส่หมวดหลักจากหมวด ERP · ขั้น 2 กระดานจัดหมวดย่อย) — ทั้งร้าน ไม่สนตัวกรอง
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
@@ -19,12 +20,13 @@
  * ของกลาง: BulkActionBar · useDragReorder/DragHandle · CopyButton · Drawer/ConfirmDialog · footer-save · ParentWebListings
  * ข้อมูล: /api/website/listings (guardApi products.view/edit + audit) — โหลดที่ manager-client แล้วส่งเข้ามา
  */
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { Pager } from "@/components/pager";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { SortButton, sortRows, type SortState } from "@/components/sort-th";
 import { CopyButton } from "@/components/copy-button";
@@ -115,6 +117,11 @@ export type CategoryDef = { key: string; label: string; icon: string; parent?: s
 
 type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit" | "noimg" | "partimg";
 const VIEWS = ["list", "grid", "sort"] as const;
+/** 📄 จำนวนต่อหน้า (จำต่อคนด้วย useViewPref) */
+const PAGE_SIZES = ["25", "50", "100", "200"] as const;
+/** เปิด/ซ่อนทีละมากเกินนี้ = ถามก่อน · ตั้งแต่ BULK_TYPED ขึ้นไป = ต้องพิมพ์ยืนยัน (กฎ Bulk Edit Safety) */
+const BULK_CONFIRM = 20;
+const BULK_TYPED = 100;
 /** ↕ เรียงในตาราง (ดูอย่างเดียว ไม่เปลี่ยนลำดับบนเว็บ) · "" = ลำดับบนเว็บ (ลาก ⠿ ได้) — ค่า = `${key}:${dir}` ของ SortState */
 const SORT_OPTS = [
   { v: "", label: "ลำดับบนเว็บ (ลาก ⠿ ได้)" },
@@ -362,6 +369,16 @@ export function WebsiteListingsPanel({
     });
     return sortRows(rows, sort, sortVal);
   }, [listings, filter, q, cat, sort, issuesById, imgById]);
+  // 📄 แบ่งหน้า (เจ้าของ 2026-11-10 "ทำเป็นหน้าๆ จะได้โหลดไม่นาน") — วาดเฉพาะหน้าที่ดู (รูป/แถวน้อยลง) ด้วยของกลาง Pager
+  //    ตัวกรอง/ค้นหา/ตัวเลข/พิมพ์เช็กลิสต์/ลงรูปตามตัวกรอง ยังคิดจากทุกรุ่น · ติ๊กเลือกจำข้ามหน้า (sel = รหัสรุ่น) · จำนวนต่อหน้าจำต่อคน
+  const pageSizePref = useViewPref("website_listings_page_size", PAGE_SIZES, "50");
+  const pageSize = Number(pageSizePref.view);
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [filter, q, cat, sort, pageSize]);
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+  const curPage = Math.min(page, pageCount - 1);
+  const pageRows = useMemo(() => shown.slice(curPage * pageSize, (curPage + 1) * pageSize), [shown, curPage, pageSize]);
+  const listTopRef = useRef<HTMLDivElement>(null);
   const filtered = filter !== "all" || !!q.trim() || !!cat;
   // ⠿ ลากได้เฉพาะตอนเห็นครบทุกตัวตามลำดับบนเว็บ (ไม่กรอง · ไม่เรียงแบบอื่น)
   const canDrag = !filtered && !sort;
@@ -397,10 +414,22 @@ export function WebsiteListingsPanel({
       else shown.forEach((l) => n.add(l.parentId));
       return n;
     });
+  // ช่องติ๊กหัวตาราง = เฉพาะหน้านี้ · "เลือกทั้งหมดที่ตรงตัวกรอง" อยู่ที่แถบล่าง
+  const allPageSelected = pageRows.length > 0 && pageRows.every((l) => sel.has(l.parentId));
+  const togglePage = () =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (allPageSelected) pageRows.forEach((l) => n.delete(l.parentId));
+      else pageRows.forEach((l) => n.add(l.parentId));
+      return n;
+    });
 
-  const bulk = async (p: { isPublished?: boolean; featured?: boolean }, msg: string) => {
+  // ⚠️ เปิด/ซ่อนทีละมาก = ถามก่อน (2026-11-10: ติ๊กทั้งหมดแล้วกด "ขึ้นเว็บ" ทีเดียว 389 รุ่น ไม่มีอะไรเตือน)
+  const [bulkAsk, setBulkAsk] = useState<{ p: { isPublished?: boolean; featured?: boolean }; msg: string } | null>(null);
+  const bulk = async (p: { isPublished?: boolean; featured?: boolean }, msg: string, confirmed = false) => {
     const ids = [...sel];
     if (!ids.length) return;
+    if (!confirmed && p.isPublished !== undefined && ids.length > BULK_CONFIRM) { setBulkAsk({ p, msg }); return; }
     setBulkBusy(true);
     try {
       const j = await post({ shopId: shop.id, action: "bulk", parentIds: ids, patch: p });
@@ -705,7 +734,8 @@ export function WebsiteListingsPanel({
         </div>
       )}
 
-      {/* รายการสินค้าบนเว็บ */}
+      {/* รายการสินค้าบนเว็บ (listTopRef = จุดเลื่อนกลับตอนเปลี่ยนหน้า) */}
+      <div ref={listTopRef} className="scroll-mt-20" />
       {loading ? (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
@@ -745,7 +775,7 @@ export function WebsiteListingsPanel({
         </div>
       ) : view === "grid" ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {shown.map((l) => {
+          {pageRows.map((l) => {
             const key = l.display?.imageKey ?? l.erpImageKey;
             const iss = issuesById.get(l.parentId) ?? [];
             return (
@@ -786,7 +816,7 @@ export function WebsiteListingsPanel({
         <div {...rowDrop.guard} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
           {/* หัวตาราง */}
           <div className="hidden md:flex items-center gap-3 px-3 py-2 border-b border-slate-100 bg-slate-50/70 text-[11px] text-slate-500">
-            <input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} className="w-4 h-4 accent-blue-600" aria-label="เลือกทั้งหมดที่เห็น" />
+            <input type="checkbox" checked={allPageSelected} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label="เลือกทั้งหน้านี้" title="เลือกทั้งหน้านี้ (เลือกทุกรุ่นที่ตรงตัวกรองได้ที่แถบล่าง)" />
             <span className="w-3" />
             <span className="w-5" />
             <span className="w-12" />
@@ -804,7 +834,7 @@ export function WebsiteListingsPanel({
             <span className="w-16" />
           </div>
           <ul>
-            {shown.map((l) => {
+            {pageRows.map((l) => {
               const isOpen = open === l.parentId;
               const isExp = expanded.has(l.parentId);
               const iss = issuesById.get(l.parentId) ?? [];
@@ -944,9 +974,24 @@ export function WebsiteListingsPanel({
         </div>
       )}
 
+      {/* 📄 แถบแบ่งหน้า (ของกลาง Pager) — เปลี่ยนหน้าแล้วเลื่อนกลับขึ้นหัวรายการ */}
+      {view !== "sort" && !loading && shown.length > 0 && (
+        <div className="mt-3">
+          <Pager
+            page={curPage}
+            pageSize={pageSize}
+            total={shown.length}
+            unitLabel="รุ่น"
+            onPage={(p) => { setPage(p); listTopRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }); }}
+            pageSizes={PAGE_SIZES.map(Number)}
+            onPageSize={(s) => { const v = String(s) as (typeof PAGE_SIZES)[number]; pageSizePref.setView(v); void pageSizePref.saveDefault(v); }}
+          />
+        </div>
+      )}
+
       {listings.length > 0 && !loading && (
         <p className="mt-2 text-[11px] text-slate-400">
-          แสดง {shown.length} จาก {listings.length} รายการ ·{" "}
+          {pageCount > 1 ? `หน้า ${curPage + 1}/${pageCount} · ` : ""}ตรงตัวกรอง {shown.length} จาก {listings.length} รายการ ·{" "}
           {sort ? (
             <>
               เรียงตาม{sortLabel} (ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน){" "}
@@ -956,6 +1001,8 @@ export function WebsiteListingsPanel({
             </>
           ) : filtered ? (
             "ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ"
+          ) : pageCount > 1 ? (
+            `ลาก ⠿ เรียงลำดับบนเว็บได้ภายในหน้าเดียวกัน (ย้ายข้ามหน้า: ตั้ง ${PAGE_SIZES[PAGE_SIZES.length - 1]} ต่อหน้าก่อน)`
           ) : (
             "ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ"
           )}{" "}
@@ -971,7 +1018,7 @@ export function WebsiteListingsPanel({
         extra={
           !allShownSelected && shown.length > sel.size ? (
             <button type="button" onClick={toggleAllShown} className="underline text-white/80 hover:text-white">
-              เลือกทั้งหมดที่เห็น ({shown.length})
+              เลือกทั้งหมดที่ตรงตัวกรอง ({shown.length}{pageCount > 1 ? ` · ทุกหน้า` : ""})
             </button>
           ) : null
         }
@@ -1139,6 +1186,21 @@ export function WebsiteListingsPanel({
           onChanged={() => void reload()}
         />
       )}
+
+      <ConfirmDialog
+        open={!!bulkAsk}
+        onClose={() => setBulkAsk(null)}
+        onConfirm={() => { const a = bulkAsk; setBulkAsk(null); if (a) void bulk(a.p, a.msg, true); }}
+        title={`${bulkAsk?.msg ?? ""} ${sel.size} รุ่นพร้อมกัน?`}
+        message={bulkAsk?.p.isPublished
+          ? `ทั้ง ${sel.size} รุ่นจะโชว์บนเว็บ ${shop.name} ให้ลูกค้าเห็นทันทีที่ร้านเปิด (ตอนนี้ขึ้นเว็บอยู่ ${counts.pub} จาก ${listings.length} รุ่น)${sel.size >= BULK_TYPED ? " — พิมพ์ CONFIRM เพื่อยืนยัน" : ""}`
+          : `ทั้ง ${sel.size} รุ่นจะหายจากหน้าเว็บ ${shop.name} (สินค้าและข้อมูลไม่หาย เปิดกลับได้)${sel.size >= BULK_TYPED ? " — พิมพ์ CONFIRM เพื่อยืนยัน" : ""}`}
+        confirmText={`${bulkAsk?.msg ?? ""} ${sel.size} รุ่น`}
+        cancelText="ยกเลิก"
+        variant={bulkAsk?.p.isPublished ? "default" : "danger"}
+        requireTyped={sel.size >= BULK_TYPED ? "CONFIRM" : undefined}
+        loading={bulkBusy}
+      />
 
       <ConfirmDialog
         open={!!removing}
