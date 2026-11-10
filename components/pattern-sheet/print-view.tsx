@@ -40,7 +40,7 @@ const download = (name: string, text: string, type: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, singleMaterial }: {
+export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls }: {
   /** บรรทัดที่จะวาดเป็นชิ้น (กรองแท็บ/เรียงมาแล้ว) */
   lines: PatternLineInput[];
   /** บรรทัดเล็กเหนือชื่อ เช่น "แพทเทิร์นจากตีราคา · ทั่วไป" */
@@ -54,8 +54,6 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
   emptyText: ReactNode;
   /** ปุ่มเพิ่มทางซ้ายของแผงตั้งค่า (เช่น ปุ่มเลือกแท็บตีราคา) */
   controls?: ReactNode;
-  /** ใส่ชื่อ = วางบนผ้ารวมทุกชิ้นเป็นวัสดุเดียวชื่อนี้ (แพทเทิร์นที่ยังไม่ได้ผูกวัสดุ) · ไม่ใส่ = แยกตามชื่อวัสดุของชิ้น */
-  singleMaterial?: string;
 }) {
   const [mode, setMode] = useState<"overview" | "tiles">("overview");
   const [mono, setMono] = useState(false);
@@ -77,7 +75,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
   // วางบนผ้า — แยกตามชื่อวัสดุ (ตัววางผ้าตัวเดียวกับเครื่องคิดเลขผ้า lib/fabric-calc)
   const fabric = useMemo(() => {
     const byMat = new Map<string, PatternPiece[]>();
-    for (const p of pieces) { const k = singleMaterial ?? p.name; byMat.set(k, [...(byMat.get(k) ?? []), p]); }
+    for (const p of pieces) { const k = p.material; byMat.set(k, [...(byMat.get(k) ?? []), p]); }
     return [...byMat.entries()].map(([name, ps]) => {
       const fw = faceW[name] ?? ps.find((p) => p.faceWidth)?.faceWidth ?? 150;
       const result = packFabric({
@@ -86,7 +84,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
       });
       return { name, pieces: ps, fw, result };
     });
-  }, [pieces, faceW, orderQty, singleMaterial]);
+  }, [pieces, faceW, orderQty]);
 
   const head = (
     <div className="flex items-end justify-between gap-3 border-b border-slate-300 pb-2">

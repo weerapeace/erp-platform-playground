@@ -20,6 +20,8 @@ export type PatternLineInput = {
   /** วิธีคิดของบรรทัด (ตีราคา) — ส่งมา = เอาเฉพาะแบบคิดพื้นที่ (area_face / area_100) · ไม่ส่ง = เอาทุกบรรทัดที่มีกว้าง×ยาว */
   calc_method?: string | null;
   item_name?: string | null;
+  /** วัสดุที่ใช้จัดกลุ่ม "วางบนผ้า" — ไม่ส่ง = ชื่อวัสดุของบรรทัด (item_name) */
+  material?: string | null;
   group_name?: string | null;
   width_cm?: number | null;
   length_cm?: number | null;
@@ -30,7 +32,8 @@ export type PatternLineInput = {
 
 export type PatternPiece = {
   id: string;          // P1, P2, …
-  name: string;        // ชื่อวัสดุ
+  name: string;        // ชื่อวัสดุ (· ชื่อชิ้น ถ้าวาดไว้)
+  material: string;    // วัสดุที่ตัด — ชิ้นวัสดุเดียวกันวางบนผ้าผืนเดียวกัน
   group: string;       // ชนิด (ผ้า / ตัวเสริม …) — ใช้แยกสี
   w: number;           // กว้าง (ซม.)
   h: number;           // ยาว (ซม.)
@@ -91,6 +94,7 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
     out.push({
       id: `P${out.length + 1}`,
       name: [(l.item_name ?? "").trim() || "ไม่ระบุวัสดุ", ls?.name].filter(Boolean).join(" · "),
+      material: (l.material ?? "").trim() || (l.item_name ?? "").trim() || "ไม่ระบุวัสดุ",
       group: (l.group_name ?? "").trim() || "ไม่ระบุชนิด",
       w: r1(w), h: r1(h),
       d: ls && g ? (hasAllow ? polyD(sh(g.cut)) + g.holesCut.map((x) => polyD(sh(x))).join("") : shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("")) : null,

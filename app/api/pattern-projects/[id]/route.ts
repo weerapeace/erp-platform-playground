@@ -1,14 +1,15 @@
 /**
  * /api/pattern-projects/[id] — แพทเทิร์น 1 ใบ
  *
- * GET    → { data: แพทเทิร์นเต็ม (ชิ้น + ตะเข็บ), me: { can_edit, can_delete }, error }   (pattern_studio.view)
+ * GET    → { data: แพทเทิร์นเต็ม (ชิ้น + ตะเข็บ), me: { can_edit, can_delete, can_cost }, error }   (pattern_studio.view)
  * PATCH  { name?, status?, note?, sku_code?, basis?, template?, pieces?, seams? }  → บันทึก (pattern_studio.edit)
  *        ส่งชิ้นมา = คิดช่องสรุป (จำนวนชิ้น · พื้นที่ · ภาพย่อ) ใหม่ · ประวัติจดช่องที่เปลี่ยน (ชิ้น/ตะเข็บจดเป็นจำนวน ไม่จดทั้งก้อน)
  * DELETE → ซ่อนจากรายการ (is_active = false · กู้คืนได้ในฐานข้อมูล)   (pattern_studio.delete)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM } from "@/lib/cost-access";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { cleanProjectPatch, cleanProjectPieces } from "@/lib/pattern-project";
 import { cleanSeams } from "@/lib/pattern-seams";
@@ -25,16 +26,17 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   const { id } = await params;
   if (!UUID.test(id)) return NextResponse.json({ error: "ไม่พบแพทเทิร์นนี้" }, { status: 404 });
   const admin = supabaseAdmin();
-  const [{ data, error }, actor] = await Promise.all([
+  const [{ data, error }, actor, canCost] = await Promise.all([
     admin.from(PROJECT_TABLE).select("*").eq("id", id).eq("is_active", true).maybeSingle(),
     loadProjectActor(request, admin),
+    apiCan(request, COST_PERM),
   ]);
   if (error) return NextResponse.json({ error: "โหลดแพทเทิร์นไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   if (!data) return NextResponse.json({ error: "ไม่พบแพทเทิร์นนี้ (อาจถูกลบไปแล้ว)" }, { status: 404 });
   const pieces = cleanProjectPieces(data.pieces);
   return NextResponse.json({
     data: { ...data, pieces, seams: cleanSeams(data.seams, new Set(pieces.map((p) => p.pid))) },
-    me: { can_edit: actor.canEdit, can_delete: actor.canDelete }, error: null,
+    me: { can_edit: actor.canEdit, can_delete: actor.canDelete, can_cost: actor.canEdit && canCost }, error: null,   // can_cost = ส่งชิ้นไปตีราคาได้
   });
 }
 

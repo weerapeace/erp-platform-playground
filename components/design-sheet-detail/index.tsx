@@ -38,7 +38,8 @@ import type { Attachment } from "@/app/api/attachments/route";
 import { lineShapeArea, normalizePiece, pieceGeometry, refitLineShape, shapeBox, shapePathD, type LineShape, type Shape } from "@/lib/pattern-shape";
 import type { EditorPiece, PieceMat, RefImage, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import { SheetImagePicker } from "./sheet-image-picker";
-import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { costLineFromItem, isPieceGroup, pieceArea, piecePricePerCm2, recomputeCostLine } from "@/lib/design-sheet-cost-row";
+import { buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { CostSummaryCard } from "./cost-summary-card";
@@ -154,38 +155,11 @@ const fmtQty = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-T
 const fmtBaht = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const pkey = (s: string | null | undefined) => s ?? "";   // ข้อ 7: คีย์แท็บ Parent ของบรรทัดตีราคา ("" = ทั่วไป)
 
-// ชนิด "ชิ้นสำเร็จขนาดตายตัว" — กว้าง×ยาว→พื้นที่ cm², ราคาต่อชิ้น (ไม่ใช้หน้ากว้าง/สูตรพื้นที่หาร)
-// ตรวจจาก code (ตอนเลือกสด) หรือชื่อกลุ่ม (ตอนโหลดจาก DB) — ไม่แตะ material_groups ที่ BOM ใช้
-const PIECE_CODES = new Set(["fabric_piece", "print", "reinforce"]);
-const PIECE_NAMES = new Set(["ผ้า (ชิ้น)", "ลายพิมพ์", "ตัวเสริม"]);
-const isPieceGroup = (code?: string | null, name?: string | null) =>
-  (!!code && PIECE_CODES.has(code)) || (!!name && PIECE_NAMES.has(name));
+// ชนิด "ชิ้นสำเร็จขนาดตายตัว" + สูตรคิดบรรทัด อยู่ที่ lib/design-sheet-cost-row (ใช้ร่วมกับ API ส่งชิ้นจากสตูดิโอแพทเทิร์น)
 const rowIsPiece = (r: CostRow) => isPieceGroup(r.group_code, r.group_name);
 /** แถวที่เลือกวัสดุ (master) แล้วแต่ยังไม่มีชนิดหรือราคา — เช่น วัสดุที่เพิ่งพิมพ์สร้างจาก dropdown → โชว์ปุ่ม "ใส่รายละเอียด" */
 const rowNeedsItemDetails = (r: CostRow) => !!r.item_id && (!r.group_name || r.unit_price == null);
-const pieceArea = (r: { width_cm: number | null; length_cm: number | null }) =>
-  (r.width_cm && r.length_cm) ? Math.round(r.width_cm * r.length_cm * 100) / 100 : null;
-
-/** ราคาต่อ cm² ของวัสดุชนิดชิ้น = ราคาแผ่น ÷ พื้นที่แผ่น (กว้าง×ยาว) */
-function piecePricePerCm2(it: { price_per_unit: number | null; width_cm: number | null; length_cm: number | null }): number | null {
-  const area = (it.width_cm && it.length_cm) ? it.width_cm * it.length_cm : null;
-  if (!area || it.price_per_unit == null) return it.price_per_unit;   // ไม่มีขนาด → ใช้ราคาดิบ
-  return Math.round((it.price_per_unit / area) * 1e6) / 1e6;
-}
-/** คิดปริมาณ+ยอดเงินใหม่ — ชิ้นสำเร็จ: ปริมาณ = พื้นที่ที่ใช้(กว้าง×ยาว) × จำนวนชิ้น, ราคา/หน่วย = ต่อ cm² */
-function recomputeRow(r: CostRow): CostRow {
-  let qty: number | null;
-  const shapeA = lineShapeArea(r.shape);                     // ✏️ วาดรูปทรง + เลือก "คิดจากพื้นที่จริง" → ใช้พื้นที่จริงแทน กว้าง×ยาว
-  if (rowIsPiece(r)) {
-    const a = shapeA ?? pieceArea(r);                        // พื้นที่ที่ใช้ต่อชิ้น (cm²)
-    const k = 1 + (r.waste_percent || 0) / 100;              // เผื่อเสีย
-    qty = a != null ? Math.round(a * k * (r.pieces ?? 1) * 10000) / 10000 : null;
-  } else {
-    qty = calcCostQty({ ...r, area_cm2: shapeA }) ?? r.qty;
-  }
-  const amount = qty != null && r.unit_price != null ? Math.round(qty * r.unit_price * 100) / 100 : null;
-  return { ...r, qty, amount };
-}
+const recomputeRow = recomputeCostLine;
 
 // ช่องที่แต่ละชนิด (วิธีคำนวณ) ต้องกรอก — ช่องอื่นโชว์ "—"
 const usesWidth  = (m: string | null) => m === "area_face" || m === "area_100";
@@ -196,18 +170,7 @@ const isManualM  = (m: string | null) => !m || m === "manual";
 
 /** สร้างบรรทัดตีราคาจากวัสดุ (ใช้ทั้งเลือกใน dropdown และกด "ลงตะกร้า" จากการ์ด) */
 function rowFromItem(it: PriceItem, idx: number): CostRow {
-  const piece = isPieceGroup(it.group_code, it.group_name);
-  return recomputeRow({
-    key: `c${Date.now()}_${idx}`,
-    item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code, calc_method: it.calc_method,
-    // ชนิดชิ้น: ไม่เติมขนาด default (เว้นว่าง ให้กรอกขนาดที่ตัดใช้จริง), ราคา/หน่วย = ต่อ cm² (หารจากขนาดแผ่นในตัววัสดุ)
-    width_cm: null, length_cm: null, pieces: piece ? 1 : null,
-    face_width_cm: it.face_width_cm,
-    waste_percent: it.loss_percent, divisor: it.divisor, qty: null,
-    uom: piece ? "cm²" : (it.uom ?? it.uom_default),
-    unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit,
-    amount: null, note: null, sort_order: idx + 1,
-  });
+  return { key: `c${Date.now()}_${idx}`, ...costLineFromItem(it, idx) };
 }
 
 /** patch ตอน "เลือกวัสดุ" ให้บรรทัดที่มีอยู่ — คงขนาด/จำนวนเดิม เปลี่ยนแค่วัสดุ/ชนิด/ราคา (ใช้ทั้งเลือกทีละแถว + bulk) */

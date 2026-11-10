@@ -27,7 +27,11 @@ export type ProjectPiece = {
   /** เผื่อเย็บรายขอบ (ครบทุกขอบ · ดู lib/pattern-shape edgeAllowances) — ไม่มี = allow ค่าเดียวทั้งชิ้น */
   allowEdges?: number[];
   shape: Shape; holes: Shape[]; grain: [Pt, Pt] | null; notches: Pt[]; at: [number, number];
+  /** วัสดุของชิ้น (รหัสวัสดุตีราคา design_price_items + ชื่อ/ชนิด ณ ตอนเลือก) — 1 ชิ้นตัดจากหลายวัสดุได้ (เช่น หนัง + ซับใน) · ไม่มี = ยังไม่เลือก */
+  mats?: PieceMaterial[];
 };
+export type PieceMaterial = { id: string; name: string; group?: string };
+export const NO_MATERIAL = "ยังไม่เลือกวัสดุ";
 export type PatternProject = {
   id: string; pattern_no: string | null; name: string; status: PatternProjectStatus; note: string; sku_code: string | null;
   pieces: ProjectPiece[]; seams: Seam[]; basis: "box" | "area"; template: Record<string, unknown> | null;
@@ -54,8 +58,14 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
     const at = pt(r.at);
     seen.add(pid);
     const allow = cleanAllow(r.allow), per = edgeAllowances(shape, r.allowEdges, allow);
+    const mats: PieceMaterial[] = [];
+    for (const m of (Array.isArray(r.mats) ? r.mats : []).slice(0, 8)) {
+      const o = m as Record<string, unknown> | null;
+      const mid = typeof o?.id === "string" ? o.id.slice(0, 80) : "", nm = String(o?.name ?? "").trim().slice(0, 120), grp = String(o?.group ?? "").trim().slice(0, 80);
+      if (mid && nm && !mats.some((y) => y.id === mid)) mats.push({ id: mid, name: nm, ...(grp ? { group: grp } : {}) });
+    }
     out.push({
-      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}),
+      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(mats.length ? { mats } : {}),
       name: String(r.name ?? "").trim().slice(0, 60),
       count: Math.min(999, Math.max(1, Math.round(fin(r.count) ?? 1))),
       allow,
@@ -95,16 +105,17 @@ export function projectThumb(pieces: ProjectPiece[]): string | null {
 
 /** ชิ้นของแพทเทิร์น → "บรรทัด" ของตัวพิมพ์/ส่งออกกลาง (lib/pattern-sheet · PatternPrintView) — ชื่อชิ้นไปอยู่ช่องชื่อ · ตัดกี่ชิ้น = จำนวนของชิ้น */
 export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area" = "box", group = "ชิ้นแพทเทิร์น"): PatternLineInput[] {
-  return pieces.map((p, i) => {
+  return pieces.flatMap((p, i) => {
     const n = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches });
-    return {
-      key: p.pid, item_name: p.name || `ชิ้น ${i + 1}`, group_name: group, pieces: p.count,
-      shape: {
-        v: 1, shape: n.shape, basis,
-        ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}),
-        ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}),
-      },
-    };
+    const pieceName = p.name || `ชิ้น ${i + 1}`;
+    const shape = (withName: boolean) => ({
+      v: 1, shape: n.shape, basis, ...(withName ? { name: pieceName } : {}),
+      ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}),
+      ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}),
+    });
+    // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
+    if (!p.mats?.length) return [{ key: p.pid, item_name: pieceName, group_name: group, material: NO_MATERIAL, pieces: p.count, shape: shape(false) }];
+    return p.mats.map((m) => ({ key: `${p.pid}:${m.id}`, item_name: m.name, group_name: m.group || group, material: m.name, pieces: p.count, shape: shape(true) }));
   });
 }
 

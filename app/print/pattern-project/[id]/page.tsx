@@ -40,7 +40,6 @@ export default function PrintPatternProjectPage() {
   return (
     <PatternPrintView lines={lines} fileName={docFileName("แพทเทิร์น", code || String(id))}
       eyebrow={`สตูดิโอแพทเทิร์น${project?.sku_code ? ` · ${project.sku_code}` : ""}`} title={`${code} ${project?.name ?? ""}`} footCode={code || (project?.name ?? "")}
-      singleMaterial="ทุกชิ้น (ยังไม่ได้แยกวัสดุ)"
       emptyText="แพทเทิร์นนี้ยังไม่มีชิ้น — วาดชิ้นหรือสร้างจากแม่แบบทรงในสตูดิโอ กดบันทึก แล้วเปิดหน้านี้ใหม่" />
   );
 }

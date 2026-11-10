@@ -59,7 +59,7 @@ describe("tilePages / patternSheetWidth", () => {
     expect(last.y + last.h).toBeGreaterThanOrEqual(40);
   });
   it("ตัดหน้าว่างทิ้ง (ไม่มีชิ้นทับ)", () => {
-    const L = { placed: [{ id: "P1", name: "a", group: "g", w: 10, h: 10, count: 1, faceWidth: null, note: null, x: 0, y: 0 }], width: 37, height: 40 };
+    const L = { placed: [{ id: "P1", name: "a", material: "a", group: "g", w: 10, h: 10, count: 1, faceWidth: null, note: null, x: 0, y: 0 }], width: 37, height: 40 };
     const all = tilePages(37, 40, A4_PRINTABLE.w, A4_PRINTABLE.h, 1);
     const used = pagesWithPieces(all, L);
     expect(all.length).toBe(4);

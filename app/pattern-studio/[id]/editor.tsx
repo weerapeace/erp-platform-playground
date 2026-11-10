@@ -7,6 +7,7 @@
  *   แท็บ "ประกอบ 3D" = AssemblyView (ประกอบชิ้นเป็นกระเป๋าจากตะเข็บ + เย็บทีละขั้น)
  *   จุดติดหู/แผ่นหลังช่อง (จากแม่แบบ) เก็บในช่อง template: { params, attach }
  *   สร้างจากแม่แบบทรง → ได้ชิ้น + ตะเข็บตั้งต้นครบ
+ *   วัสดุของชิ้น = รายชื่อวัสดุตีราคา (/api/pattern-projects/materials) · ปุ่ม "ส่งไปตีราคา" = SendCostingModal (ต้องมีสิทธิ์ดูต้นทุน)
  *   บันทึกด้วยแถบบันทึกกลาง (SaveBar) → PATCH /api/pattern-projects/<id> · ไม่มีสิทธิ์แก้ = ดูอย่างเดียว
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,11 +22,13 @@ import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { TemplateInsertInfo } from "@/components/pattern-studio";
 import { PATTERN_PROJECT_STATUSES, PATTERN_STATUS_LABEL, projectSummary, type PatternProject, type PatternProjectStatus, type ProjectPiece } from "@/lib/pattern-project";
+import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
 import { checkSeam, type Seam } from "@/lib/pattern-seams";
 import { cleanAttaches, type Attach } from "@/lib/pattern-assembly";
 
 const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });
 const SewView = dynamic(() => import("@/components/pattern-studio/sew-view").then((m) => m.SewView), { ssr: false });
+const SendCostingModal = dynamic(() => import("@/components/pattern-studio/send-costing-modal").then((m) => m.SendCostingModal), { ssr: false });
 const AssemblyView = dynamic(() => import("@/components/pattern-studio/assembly-view").then((m) => m.AssemblyView), { ssr: false });
 
 const SQFT = 929.03;
@@ -36,7 +39,9 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [me, setMe] = useState<{ can_edit: boolean; can_delete: boolean } | null>(null);
+  const [me, setMe] = useState<{ can_edit: boolean; can_delete: boolean; can_cost?: boolean } | null>(null);
+  const [materials, setMaterials] = useState<{ id: string; name: string; group: string | null }[]>([]);   // วัสดุให้เลือกติดกับชิ้น (ชื่อ + ชนิด ไม่มีราคา)
+  const [costOpen, setCostOpen] = useState(false);
   const [patternNo, setPatternNo] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
@@ -71,18 +76,26 @@ export function PatternProjectEditor({ id }: { id: string }) {
     finally { setLoading(false); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/pattern-projects/materials").then((r) => r.json()).then((j) => { if (alive && Array.isArray(j?.data)) setMaterials(j.data); }).catch(() => { /* โหลดไม่ได้ = ยังเลือกวัสดุไม่ได้ แต่วาดได้ตามปกติ */ });
+    return () => { alive = false; };
+  }, []);
+  const matGroup = useMemo(() => new Map(materials.map((m) => [m.id, m.group])), [materials]);
+  const matOptions = useMemo(() => materials.map((m) => ({ id: m.id, name: m.name, sub: m.group })), [materials]);
 
   const canEdit = !!me?.can_edit;
   // ชิ้นตั้งต้นของกระดาน — อ่านครั้งเดียวต่อการเปิดกระดาน (ระหว่างวาด กระดานถือข้อมูลเอง แล้วส่งกลับทาง onChange)
-  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, name: p.name, at: p.at, grain: p.grain, notches: p.notches })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onBoard = useCallback((res: ShapeEditorResult) => {
     setPieces(res.pieces.map((p) => ({
       pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
       grain: p.grain && p.grain.length === 2 ? [p.grain[0], p.grain[1]] : null,
+      ...(p.mats.length ? { mats: p.mats.map((m) => { const g = matGroup.get(m.id) ?? piecesRef.current.find((q) => q.pid === p.pid)?.mats?.find((x) => x.id === m.id)?.group; return { id: m.id, name: m.name, ...(g ? { group: g } : {}) }; }) } : {}),
     })));
     setBasis(res.basis); setDirty(true);
-  }, []);
+  }, [matGroup]);
   const onTemplate = useCallback((info: TemplateInsertInfo) => {
     const stamp = Date.now().toString(36);
     const made: Seam[] = [];
@@ -174,6 +187,13 @@ export function PatternProjectEditor({ id }: { id: string }) {
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
           <Icon value="i:printer" className="text-sm" />{t("พิมพ์ / ไฟล์ตัด", "Print / cut files")}
         </button>
+        {me?.can_cost && (
+          <button type="button" disabled={dirty || !pieces.length} onClick={() => setCostOpen(true)}
+            title={dirty ? t("บันทึกก่อน แล้วค่อยส่ง (ส่งจากข้อมูลที่บันทึกแล้ว)", "Save first — sending uses the saved pattern") : t("ส่งชิ้นไปเป็นบรรทัดตีราคาของใบงานออกแบบ", "Send the pieces to a design sheet's costing lines")}
+            className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+            <Icon value="i:calculator" className="text-sm" />{t("ส่งไปตีราคา", "Send to costing")}
+          </button>
+        )}
         {me?.can_delete && (
           <button type="button" onClick={() => setAsk("delete")} title={t("ลบแพทเทิร์นนี้", "Delete this pattern")} className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600">
             <Icon value="i:trash" className="text-sm" />{t("ลบ", "Delete")}
@@ -182,7 +202,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
       </div>
 
       {tab === "draw" ? (
-        <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate}
+        <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
           footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
       ) : tab === "sew" ? (
         <SewView pieces={pieces.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes }))} seams={seams} onChange={onSeams} readonly={!canEdit} />
@@ -190,6 +210,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
         <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => switchTab("sew")} onGoDraw={() => switchTab("draw")}
           onAttachesChange={canEdit ? (next) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); } : undefined} />
       )}
+
+      {(() => { const c = (template as { costing?: CostingTarget } | null)?.costing; return c?.code ? (
+        <p className="text-xs text-slate-500">{t(`ส่งตีราคาล่าสุด: ${c.code} ${c.name ?? ""}${c.parent_code ? ` · แท็บ ${c.parent_code}` : ""}`, `Last sent to costing: ${c.code} ${c.name ?? ""}${c.parent_code ? ` · tab ${c.parent_code}` : ""}`)} · <a className="text-blue-700 hover:underline" href={`/master/design-sheets?open=${c.sheet_id}`} target="_blank" rel="noopener">{t("เปิดใบงาน", "Open sheet")}</a></p>
+      ) : null; })()}
+      {costOpen && <SendCostingModal open onClose={() => setCostOpen(false)} projectId={id} last={(template as { costing?: CostingTarget } | null)?.costing ?? null} onSent={(tpl) => setTemplate(tpl)} />}
 
       {canEdit && <SaveBar dirty={dirty} saving={saving} error={saveErr} savedAt={savedAt} onSave={save} onDiscard={() => void load()} />}
 
