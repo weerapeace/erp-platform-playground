@@ -4,7 +4,12 @@
  * ตัวช่วยลงสินค้าขึ้นร้าน (ของกลาง) — เจ้าของเลือก flow "เข้าได้ 2 ทาง ใช้ตัวช่วยตัวเดียว" (2026-11-08)
  * --------------------------------------------------------------------------
  * ใช้ที่: หน้าสินค้าบนแพลตฟอร์ม (มุมมองหน้าร้าน แท็บ "ยังไม่ลง") · Parent SKU (แท็บแพลตฟอร์ม "ลงร้านนี้" + ติ๊กหลายตัวในหน้ารายการ)
- * 4 ขั้น: เลือกร้าน → ตรวจความครบ → แก้เลย / สร้างงานเติม / ข้าม → ยืนยัน + ติดตามผล
+ * 3 ขั้น (เจ้าของขอ 2026-11-10 "ต้องบอกว่ารายละเอียดจะดึงอะไรไปบ้าง แก้ได้ด้วย ทำให้ดูง่าย"):
+ *   1 เลือกร้าน — ร้านที่ลงจริงได้ (LINE) เด่น · ร้านอื่น (บันทึกร่าง) พับไว้ พร้อมตัวเลือกราคา/ร่างเดิม
+ *   2 ดูและแก้รายละเอียด — LINE: LineCreatePreviewEditor (ทุกช่องที่จะส่ง + มาจากไหน + แก้ได้ · ราคาแก้ = ราคาในระบบ)
+ *       ร้านอื่น: ความครบ + แก้เลย / สร้างงานเติม / ข้าม (เหมือนเดิม)
+ *   3 ยืนยัน + ติดตามผล
+ *   เข้าขั้น 2 = บันทึกร่าง LINE ให้ก่อน (เติมเฉพาะช่องที่ว่าง) เพื่อให้เห็นหมวด/รูปที่ระบบเติมให้ และแก้ลงร่างได้ · ตอนลงจริงไม่เขียนทับสิ่งที่แก้
  *
  * ของเดิมที่ใช้ (ไม่ทำซ้ำ):
  *   ตรวจ = GET /api/product-platforms/readiness?parent_sku_ids= (+on_shop) · บันทึกร่าง = POST /api/product-platforms/prepare
@@ -22,6 +27,8 @@ import { ERPModal } from "@/components/modal";
 import { PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { LoadingState } from "@/components/state-views";
+import { LineCreatePreviewEditor } from "./line-create-preview";
+import type { LineCreatePreview } from "@/lib/line-create-payload";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
 import type { ParentSkuPickerValue } from "@/components/pickers";
@@ -39,7 +46,7 @@ const REAL_CREATE_ENDPOINT: Record<string, string> = { line_shopping: "/api/line
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
 type Outcome = { parent_id: string; platform: string; ok: boolean; text: string };
-const STEPS = ["เลือกร้าน", "ตรวจความครบ", "แก้ / ส่งงาน", "ยืนยัน"];
+const STEPS = ["เลือกร้าน", "ดูและแก้รายละเอียด", "ยืนยัน"];
 
 export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, initialPlatformCodes = [] }: {
   open: boolean;
@@ -57,6 +64,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const canEdit = can("products.platforms.edit");
   const canPublish = can("products.platforms.publish" as Parameters<typeof can>[0]);
   const canTask = can("tasks.create" as Parameters<typeof can>[0]);
+  const canEditPrice = can("products.edit");
 
   const list = useMemo(() => parents.slice(0, ADD_MAX_ITEMS), [parents]);
   const [step, setStep] = useState(1);
@@ -76,12 +84,18 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [outcomes, setOutcomes] = useState<Outcome[] | null>(null);
   const [fixFor, setFixFor] = useState<{ parentId: string; platformId: string } | null>(null);
   const [taskFor, setTaskFor] = useState<ParentSkuPickerValue[] | null>(null);
+  const [othersOpen, setOthersOpen] = useState(false);                     // ขั้น 1: กล่องร้านอื่น (บันทึกร่าง)
+  const [focus, setFocus] = useState<string | null>(null);                 // ขั้น 2: สินค้าที่กำลังดู (LINE)
+  const [pvState, setPvState] = useState<Record<string, number>>({});      // parent id → จำนวนข้อที่ขาด (จากหน้าดูก่อนส่ง)
+  const [preparing, setPreparing] = useState(false);
+  const preparedRef = useRef<Set<string>>(new Set());                      // บันทึกร่าง LINE ไปแล้ว (ไม่ทำซ้ำตอนย้อนไปมา)
   const stopRef = useRef(false);
 
   // เปิดใหม่ = เริ่มขั้น 1 · ติ๊กร้านที่ส่งมาให้ · ร้านลงจริงได้ + มีสิทธิ์ = ติ๊ก "ลงจริง" ไว้ให้
   useEffect(() => {
     if (!open) return;
     setStep(1); setRows({}); setSkipped(new Set()); setTyped(""); setOutcomes(null); setCheckErr(null); setProgress({ done: 0, total: 0, label: "" });
+    setFocus(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false);
     let alive = true;
     apiFetch(`/api/platform-accounts${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`).then((r) => r.json()).then((j) => {
       if (!alive) return;
@@ -97,8 +111,13 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const pickedPfs = useMemo(() => (pfs ?? []).filter((p) => picked.has(p.code)), [pfs, picked]);
   const realOk = (p: Pf) => !!p.can_publish && !!REAL_CREATE_ENDPOINT[p.code] && canPublish;
 
-  // ---------- ขั้น 2: ตรวจความครบ (เฉพาะสินค้าที่เลือก ทีละร้าน) ----------
-  const check = useCallback(async () => {
+  const realOn = (p: Pf) => real.has(p.code) && realOk(p);
+  // ร้านที่มีหน้า "ดูก่อนส่ง" (ตอนนี้ LINE) — เลือกลงจริงไว้
+  const linePf = pickedPfs.find((p) => p.code === "line_shopping" && realOn(p)) ?? null;
+  const othersPfs = pickedPfs.filter((p) => p !== linePf);
+
+  // ---------- ตรวจความครบ (เฉพาะสินค้าที่เลือก ทีละร้าน) ----------
+  const check = useCallback(async (): Promise<Record<string, AddReadinessRow[]> | null> => {
     setChecking(true); setCheckErr(null);
     try {
       const ids = list.map((p) => p.id).join(",");
@@ -107,17 +126,46 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         if (j.error) throw new Error(`${p.name_th}: ${j.error}`);
         return [p.code, (j.data ?? []) as AddReadinessRow[]] as const;
       }));
-      setRows(Object.fromEntries(res));
-    } catch (e) { setCheckErr((e as Error).message || "ตรวจไม่สำเร็จ"); }
+      const m = Object.fromEntries(res);
+      setRows(m);
+      return m;
+    } catch (e) { setCheckErr((e as Error).message || "ตรวจไม่สำเร็จ"); return null; }
     finally { setChecking(false); }
   }, [list, pickedPfs]);
+
+  // บันทึกร่าง LINE ให้ก่อน (เติมเฉพาะช่องที่ว่าง — ไม่ทับที่เคยแก้) → หน้าดูก่อนส่งเห็นหมวด/รูปที่ระบบเติมให้ และแก้ลงร่างได้
+  const prepareLine = async (pf: Pf, ids: string[]) => {
+    const todo = ids.filter((id) => !preparedRef.current.has(id));
+    if (!todo.length || !canEdit) return;
+    setPreparing(true);
+    try {
+      for (let i = 0; i < todo.length; i += 100) {
+        const chunk = todo.slice(i, i + 100);
+        const j = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: pf.code, parent_sku_ids: chunk, price_rule: normalizePriceRule({ mode: "same", pct: 0 }), overwrite: false }) }).then((r) => r.json());
+        if (!j.error) for (const id of chunk) preparedRef.current.add(id);
+      }
+    } catch { /* ดูก่อนส่งยังเปิดได้ — แค่หมวด/รูปอาจยังไม่ถูกเติม */ }
+    finally { setPreparing(false); }
+  };
 
   const goNext = async () => {
     if (step === 1) {
       if (!pickedPfs.length) { toast.warning("เลือกร้านอย่างน้อย 1 ร้าน"); return; }
-      setStep(2); await check(); return;
+      setStep(2);
+      const m = await check();
+      if (m && linePf) {
+        const todo = (m[linePf.code] ?? []).filter((r) => !isOnShop(r)).map((r) => r.id);
+        await prepareLine(linePf, todo);
+        setFocus((f) => f ?? todo[0] ?? (m[linePf.code] ?? [])[0]?.id ?? null);
+      }
+      return;
     }
-    setStep((s) => Math.min(4, s + 1));
+    if (step === 2) {
+      // ตรวจใหม่หลังแก้ (ราคา/หมวด/รูป) → ขั้นยืนยันตัดสิน "ลงจริง/ข้าม" จากข้อมูลล่าสุด
+      const m = await check();
+      if (m) setStep(3);
+      return;
+    }
   };
 
   // ---------- แผน (ต่อร้าน × สินค้า) ----------
@@ -131,15 +179,30 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const problemParents = useMemo(() => {
     const m = new Map<string, { row: AddReadinessRow; pfs: { pf: Pf; missing: string[] }[] }>();
     for (const x of plan) {
+      if (x.pf === linePf) continue;   // LINE ลงจริง = แก้ในหน้าดูก่อนส่ง (ไม่อยู่ในรายการนี้)
       if (isOnShop(x.row) || x.row.ready_now) continue;
       const cur = m.get(x.row.id) ?? { row: x.row, pfs: [] };
       cur.pfs.push({ pf: x.pf, missing: missingList(x.row.missing) });
       m.set(x.row.id, cur);
     }
     return [...m.values()];
-  }, [plan]);
+  }, [plan, linePf]);
 
-  // ---------- ขั้น 4: ลง ----------
+  // ขั้น 1: แยกร้านที่ลงจริงได้ (เด่น) / ร้านอื่น (พับไว้)
+  const realPfs = (pfs ?? []).filter((p) => p.can_publish && REAL_CREATE_ENDPOINT[p.code]);
+  const draftPfs = (pfs ?? []).filter((p) => !(p.can_publish && REAL_CREATE_ENDPOINT[p.code]));
+  const pickedDraftN = draftPfs.filter((p) => picked.has(p.code)).length;
+  const togglePick = (code: string) => setPicked((s) => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n; });
+  const toggleSkip = (id: string) => setSkipped((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // ขั้น 2: สินค้าที่กำลังดูก่อนส่ง (LINE)
+  const lineRows = linePf ? rows[linePf.code] ?? [] : [];
+  const focusRow = lineRows.find((r) => r.id === focus) ?? lineRows[0] ?? null;
+  // ต้องคงที่ (หน้าดูก่อนส่งโหลดใหม่เมื่อ onLoaded เปลี่ยน)
+  const onPvLoaded = useCallback((pv: LineCreatePreview) => {
+    setPvState((s) => ({ ...s, [pv.parent_id]: pv.missing.length + pv.blockers.filter((b) => !b.startsWith("มีบน LINE")).length }));
+  }, []);
+
+  // ---------- ขั้น 3: ลง ----------
   const run = async () => {
     if (needTyped && typed.trim() !== ADD_CONFIRM_WORD) { toast.warning(`พิมพ์ "${ADD_CONFIRM_WORD}" ก่อนลงจริง`); return; }
     setRunning(true); stopRef.current = false;
@@ -155,7 +218,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         const mine = plan.filter((x) => x.pf.code === p.code && (x.decision === "prepare" || x.decision === "publish"));
         for (let i = 0; i < mine.length; i += 100) {
           const chunk = mine.slice(i, i + 100);
-          const r = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: p.code, parent_sku_ids: chunk.map((x) => x.row.id), price_rule: rule, overwrite }) });
+          // ร้านที่มีหน้าดูก่อนส่ง (LINE ลงจริง) ห้ามเขียนทับ — ผู้ใช้แก้ร่างไว้แล้วในขั้น 2
+          const r = await apiFetch("/api/product-platforms/prepare", { method: "POST", body: JSON.stringify({ platform_code: p.code, parent_sku_ids: chunk.map((x) => x.row.id), price_rule: rule, overwrite: p === linePf ? false : overwrite }) });
           const j = await r.json();
           if (j.error) { for (const x of chunk) res.push({ parent_id: x.row.id, platform: p.name_th, ok: false, text: `บันทึกร่างไม่สำเร็จ: ${j.error}` }); }
           else {
@@ -202,9 +266,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   ) : (
     <div className="flex items-center justify-between gap-2">
       <button type="button" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1 || running} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:invisible">ย้อนกลับ</button>
-      <span className="text-xs text-slate-500">ขั้น {step}/4 · {STEPS[step - 1]}</span>
-      {step < 4 ? (
-        <button type="button" onClick={() => void goNext()} disabled={checking || (step === 1 && !pfs)} className="h-9 px-4 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">ถัดไป</button>
+      <span className="text-xs text-slate-500">ขั้น {step}/{STEPS.length} · {STEPS[step - 1]}</span>
+      {step < STEPS.length ? (
+        <button type="button" onClick={() => void goNext()} disabled={checking || preparing || (step === 1 && !pfs)} className="h-9 px-4 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">{step === 2 ? "ถัดไป: ยืนยัน" : "ถัดไป"}</button>
       ) : running ? (
         <button type="button" onClick={() => { stopRef.current = true; }} className="h-9 px-4 text-sm rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50">หยุด</button>
       ) : (
@@ -252,111 +316,165 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         ) : step === 1 ? (
           !pfs ? <LoadingState label="กำลังโหลดร้าน..." /> : (
             <div className="space-y-3">
-              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
-                {pfs.map((p) => {
-                  const on = picked.has(p.code);
-                  const canReal = realOk(p);
-                  return (
-                    <div key={p.id} className="flex flex-wrap items-center gap-2.5 px-3 py-2.5">
-                      <label className="flex items-center gap-2 flex-1 min-w-[10rem] cursor-pointer">
-                        <input type="checkbox" checked={on} onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(p.code)) n.delete(p.code); else n.add(p.code); return n; })} />
-                        <PlatformIcon code={p.code} iconKey={p.icon_key} size={18} /><span className="text-sm">{p.name_th}</span>
-                      </label>
-                      {p.can_publish && REAL_CREATE_ENDPOINT[p.code] ? (
-                        canPublish ? (
-                          <select value={real.has(p.code) ? "real" : "draft"} disabled={!on}
-                            onChange={(e) => setReal((s) => { const n = new Set(s); if (e.target.value === "real") n.add(p.code); else n.delete(p.code); return n; })}
-                            className="h-8 border border-slate-200 rounded-md px-2 text-xs bg-white disabled:opacity-50">
-                            <option value="real">ลงบนร้านจริง</option>
-                            <option value="draft">บันทึกร่างอย่างเดียว</option>
-                          </select>
-                        ) : <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">บันทึกร่าง · ลงจริงต้องมีสิทธิ์ลงขาย</span>
-                      ) : <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">บันทึกร่าง · ยังลงจริงไม่ได้ (ยังไม่ต่อตัวเชื่อม)</span>}
-                      {on && canReal && real.has(p.code) && <span className="basis-full text-[11px] text-emerald-700 pl-6">สร้างสินค้าบนร้านจริงทีละตัว แล้วจับคู่ให้อัตโนมัติ</span>}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-slate-500">ราคาบนร้าน</span>
-                <select value={mode} onChange={(e) => setMode(e.target.value as "same" | "pct")} className="h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-                  <option value="same">ใช้ราคาขายในระบบ</option>
-                  <option value="pct">บวกเพิ่ม % (ปัดขึ้น)</option>
-                </select>
-                {mode === "pct" && <input value={pct} onChange={(e) => setPct(e.target.value.replace(/[^0-9.]/g, ""))} className="h-8 w-16 border border-slate-200 rounded-md px-2 text-sm" aria-label="บวกเพิ่มกี่เปอร์เซ็นต์" />}
-                <span className="text-slate-500 ml-2">ร่างเดิม</span>
-                <select value={overwrite ? "1" : "0"} onChange={(e) => setOverwrite(e.target.value === "1")} className="h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-                  <option value="0">เติมเฉพาะช่องที่ว่าง</option>
-                  <option value="1">เขียนทับด้วยข้อมูลในระบบ</option>
-                </select>
-              </div>
-              {!canEdit && <p className="text-xs text-rose-700">คุณไม่มีสิทธิ์บันทึกร่าง/ลงสินค้า (ดูความครบได้อย่างเดียว)</p>}
-            </div>
-          )
-        ) : step === 2 ? (
-          checking ? <LoadingState label="กำลังตรวจความครบ..." /> : checkErr ? (
-            <div className="text-sm text-rose-700 space-y-2"><p>{checkErr}</p><button type="button" onClick={() => void check()} className="h-8 px-3 text-sm border border-slate-200 rounded-lg">ลองใหม่</button></div>
-          ) : (
-            <div className="space-y-3">
-              {pickedPfs.map((p) => {
-                const rs = rows[p.code] ?? [];
-                const shop = rs.filter(isOnShop).length;
-                const ok = rs.filter((r) => !isOnShop(r) && r.ready_now).length;
+              {/* ร้านที่ลงจริงได้ (มีตัวเชื่อม) — เด่น */}
+              {realPfs.map((p) => {
+                const on = picked.has(p.code);
                 return (
-                  <div key={p.id} className="border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="flex flex-wrap items-center gap-2 bg-slate-50 px-3 py-2 text-sm">
-                      <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /><span className="font-medium">{p.name_th}</span>
-                      <span className="text-xs text-emerald-700">พร้อม {ok.toLocaleString()}</span>
-                      <span className="text-xs text-rose-700">ขาดข้อมูล {(rs.length - ok - shop).toLocaleString()}</span>
-                      {shop > 0 && <span className="text-xs text-slate-500">มีบนร้านแล้ว {shop.toLocaleString()} (ข้ามให้)</span>}
+                  <div key={p.id} className={`rounded-xl border px-3 py-2.5 ${on ? "border-violet-400 bg-violet-50/40" : "border-slate-200"}`}>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <label className="flex min-w-[10rem] flex-1 cursor-pointer items-center gap-2">
+                        <input type="checkbox" checked={on} onChange={() => togglePick(p.code)} />
+                        <PlatformIcon code={p.code} iconKey={p.icon_key} size={20} /><span className="text-sm font-medium">{p.name_th}</span>
+                        <span className="text-[11px] text-emerald-700">ลงบนร้านจริงได้</span>
+                      </label>
+                      {canPublish ? (
+                        <select value={real.has(p.code) ? "real" : "draft"} disabled={!on}
+                          onChange={(e) => setReal((s) => { const n = new Set(s); if (e.target.value === "real") n.add(p.code); else n.delete(p.code); return n; })}
+                          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs disabled:opacity-50">
+                          <option value="real">ลงบนร้านจริง</option>
+                          <option value="draft">บันทึกร่างอย่างเดียว</option>
+                        </select>
+                      ) : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">บันทึกร่าง · ลงจริงต้องมีสิทธิ์ลงขาย</span>}
                     </div>
-                    <div className="divide-y divide-slate-100 max-h-[40vh] overflow-auto">
-                      {rs.map((r) => (
-                        <div key={r.id} className="flex items-start gap-2 px-3 py-1.5 text-sm">
-                          <span className={isOnShop(r) ? "text-slate-400" : r.ready_now ? "text-emerald-600" : "text-rose-600"}><Icon name={isOnShop(r) ? "store" : r.ready_now ? "done" : "warning"} /></span>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate">{r.name || r.code} <span className="text-[11px] text-slate-400 font-mono">{r.code}</span></div>
-                            <div className="text-xs text-slate-500">{isOnShop(r) ? "มีบนร้านแล้ว — ไม่ลงซ้ำ" : r.ready_now ? (r.warnings ? `พร้อม · ควรเติม: ${r.warnings}` : "พร้อมลง") : `ขาด: ${r.missing}`}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    {on && realOn(p) && <p className="mt-1 pl-6 text-[11px] text-slate-500">ขั้นถัดไปจะเห็นทุกอย่างที่จะส่งขึ้นร้าน (รูป ชื่อ หมวด รายละเอียด ราคา สต๊อก) ว่ามาจากไหน และแก้ได้ก่อนลง</p>}
                   </div>
                 );
               })}
+
+              {/* ร้านอื่น (ยังลงจริงไม่ได้) — พับไว้ */}
+              {draftPfs.length > 0 && (
+                <div className="rounded-xl border border-dashed border-slate-300">
+                  <button type="button" onClick={() => setOthersOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-600">
+                    <Icon name="store" />ร้านอื่น {draftPfs.length.toLocaleString()} ร้าน
+                    <span className="text-xs text-slate-400">· บันทึกร่างไว้ก่อน (ยังลงจริงไม่ได้)</span>
+                    <span className="ml-auto text-xs text-violet-700">{pickedDraftN > 0 ? `เลือก ${pickedDraftN} · ` : ""}{othersOpen ? "ซ่อน" : "แสดง"}</span>
+                  </button>
+                  {othersOpen && (
+                    <div className="space-y-2 border-t border-slate-100 px-3 py-2.5">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                        {draftPfs.map((p) => (
+                          <label key={p.id} className="inline-flex cursor-pointer items-center gap-1.5 text-sm">
+                            <input type="checkbox" checked={picked.has(p.code)} onChange={() => togglePick(p.code)} />
+                            <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} />{p.name_th}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="text-slate-500">ราคาในร่าง</span>
+                        <select value={mode} onChange={(e) => setMode(e.target.value as "same" | "pct")} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm">
+                          <option value="same">ใช้ราคาขายในระบบ</option>
+                          <option value="pct">บวกเพิ่ม % (ปัดขึ้น)</option>
+                        </select>
+                        {mode === "pct" && <input value={pct} onChange={(e) => setPct(e.target.value.replace(/[^0-9.]/g, ""))} className="h-8 w-16 rounded-md border border-slate-200 px-2 text-sm" aria-label="บวกเพิ่มกี่เปอร์เซ็นต์" />}
+                        <span className="ml-2 text-slate-500">ร่างเดิม</span>
+                        <select value={overwrite ? "1" : "0"} onChange={(e) => setOverwrite(e.target.value === "1")} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm">
+                          <option value="0">เติมเฉพาะช่องที่ว่าง</option>
+                          <option value="1">เขียนทับด้วยข้อมูลในระบบ</option>
+                        </select>
+                      </div>
+                      <p className="text-[11px] text-slate-400">ร่าง = เตรียมข้อมูลไว้ในระบบ ยังไม่ขึ้นร้าน · ลงจริงได้เมื่อต่อตัวเชื่อมของร้านนั้นแล้ว</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!canEdit && <p className="text-xs text-rose-700">คุณไม่มีสิทธิ์บันทึกร่าง/ลงสินค้า (ดูได้อย่างเดียว)</p>}
             </div>
           )
-        ) : step === 3 ? (
-          problemParents.length === 0 ? (
-            <p className="text-sm text-emerald-700 py-6 text-center">ทุกตัวพร้อมแล้ว (หรือมีบนร้านแล้ว) — กดถัดไป</p>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-500">ตัวที่ข้อมูลยังไม่ครบจะไม่ถูกลงจริง (บันทึกร่างได้) — แก้เลย หรือส่งงานให้ทีมเติม แล้วกด &quot;ตรวจใหม่&quot;</p>
-                <div className="flex gap-2">
-                  {canTask && <button type="button" onClick={() => setTaskFor(problemParents.map((x) => ({ id: x.row.id, code: x.row.code, name: x.row.name || x.row.code })))} className="h-8 px-3 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1"><Icon name="add" />สร้างงานเติมทั้งหมด ({problemParents.length})</button>}
-                  <button type="button" onClick={() => void check()} disabled={checking} className="h-8 px-3 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1 disabled:opacity-50"><Icon name="refresh" />ตรวจใหม่</button>
-                </div>
-              </div>
-              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[50vh] overflow-auto">
-                {problemParents.map(({ row, pfs: ps }) => {
-                  const sk = skipped.has(row.id);
-                  return (
-                    <div key={row.id} className={`flex flex-wrap items-start gap-2 px-3 py-2 text-sm ${sk ? "opacity-50" : ""}`}>
-                      <span className="text-rose-600 mt-0.5"><Icon name="warning" /></span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate">{row.name || row.code} <span className="text-[11px] text-slate-400 font-mono">{row.code}</span></div>
-                        {ps.map(({ pf, missing }) => <div key={pf.code} className="text-xs text-rose-700">{pf.name_th}: ขาด {missing.join(" · ")}</div>)}
-                      </div>
-                      <div className="flex flex-wrap gap-1 justify-end">
-                        {canEdit && <button type="button" onClick={() => setFixFor({ parentId: row.id, platformId: ps[0].pf.id })} className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1"><Icon name="edit" />แก้เลย</button>}
-                        {canTask && <button type="button" onClick={() => setTaskFor([{ id: row.id, code: row.code, name: row.name || row.code }])} className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1"><Icon name="add" />สร้างงานเติม</button>}
-                        <button type="button" onClick={() => setSkipped((s) => { const n = new Set(s); if (n.has(row.id)) n.delete(row.id); else n.add(row.id); return n; })} className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50">{sk ? "เอากลับมา" : "ข้ามตัวนี้"}</button>
-                      </div>
+        ) : step === 2 ? (
+          checking && Object.keys(rows).length === 0 ? <LoadingState label="กำลังตรวจความครบ..." /> : checkErr ? (
+            <div className="space-y-2 text-sm text-rose-700"><p>{checkErr}</p><button type="button" onClick={() => void check()} className="h-8 rounded-lg border border-slate-200 px-3 text-sm">ลองใหม่</button></div>
+          ) : preparing ? <LoadingState label="กำลังเตรียมข้อมูลที่จะส่งขึ้นร้าน..." /> : (
+            <div className="space-y-4">
+              {linePf && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium"><PlatformIcon code={linePf.code} iconKey={linePf.icon_key} size={16} />{linePf.name_th} — สิ่งที่จะส่งขึ้นร้าน</div>
+                  {lineRows.length > 1 && (
+                    <div className="flex gap-1.5 overflow-x-auto pb-1">
+                      {lineRows.map((r) => {
+                        const shop = isOnShop(r); const sk = skipped.has(r.id);
+                        const miss = pvState[r.id] ?? (r.ready_now ? 0 : 1);
+                        return (
+                          <button key={r.id} type="button" onClick={() => setFocus(r.id)}
+                            className={`max-w-[12rem] shrink-0 rounded-lg border px-2 py-1 text-left text-xs ${focus === r.id ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:bg-slate-50"} ${shop || sk ? "opacity-60" : ""}`}>
+                            <div className="flex items-center gap-1">
+                              <span className={shop || sk ? "text-slate-400" : miss ? "text-rose-600" : "text-emerald-600"}><Icon name={shop ? "store" : sk ? "cancel" : miss ? "warning" : "done"} /></span>
+                              <span className="truncate font-mono">{r.code}</span>
+                            </div>
+                            <div className="truncate text-slate-500">{shop ? "มีบนร้านแล้ว" : sk ? "ข้ามตัวนี้" : miss ? `ขาด ${miss} อย่าง` : "พร้อมลง"}</div>
+                          </button>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                  )}
+                  {focusRow && (isOnShop(focusRow) ? (
+                    <p className="rounded-lg bg-slate-50 px-3 py-4 text-center text-sm text-slate-500">{focusRow.name || focusRow.code} มีบนร้านแล้ว — ไม่ลงซ้ำ</p>
+                  ) : (
+                    <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0 text-sm"><span className="font-medium">{focusRow.name || focusRow.code}</span> <span className="font-mono text-[11px] text-slate-400">{focusRow.code}</span></div>
+                        <div className="flex gap-1">
+                          {canTask && <button type="button" onClick={() => setTaskFor([{ id: focusRow.id, code: focusRow.code, name: focusRow.name || focusRow.code }])} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50"><Icon name="add" />สร้างงานให้ทีมเติม</button>}
+                          <button type="button" onClick={() => toggleSkip(focusRow.id)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">{skipped.has(focusRow.id) ? "เอากลับมา" : "ข้ามตัวนี้"}</button>
+                        </div>
+                      </div>
+                      {skipped.has(focusRow.id)
+                        ? <p className="py-3 text-center text-xs text-slate-500">ข้ามตัวนี้ — จะไม่ลงร้าน</p>
+                        : <LineCreatePreviewEditor key={focusRow.id} parentId={focusRow.id} canEdit={canEdit} canEditPrice={canEditPrice} onLoaded={onPvLoaded} />}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {othersPfs.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-slate-700">{linePf ? "ร้านอื่น — บันทึกร่างไว้ก่อน" : "ความครบของข้อมูล"}</div>
+                  <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    {othersPfs.map((p) => {
+                      const rs = rows[p.code] ?? [];
+                      const shop = rs.filter(isOnShop).length;
+                      const ok = rs.filter((r) => !isOnShop(r) && r.ready_now).length;
+                      return (
+                        <div key={p.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                          <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /><span>{p.name_th}</span>
+                          <span className="text-xs text-emerald-700">พร้อม {ok.toLocaleString()}</span>
+                          {rs.length - ok - shop > 0 && <span className="text-xs text-rose-700">ขาดข้อมูล {(rs.length - ok - shop).toLocaleString()}</span>}
+                          {shop > 0 && <span className="text-xs text-slate-500">มีบนร้านแล้ว {shop.toLocaleString()} (ข้ามให้)</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {problemParents.length > 0 && (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-slate-500">ตัวที่ข้อมูลยังไม่ครบ — แก้เลย หรือส่งงานให้ทีมเติม แล้วกด &quot;ตรวจใหม่&quot;</p>
+                        <div className="flex gap-2">
+                          {canTask && <button type="button" onClick={() => setTaskFor(problemParents.map((x) => ({ id: x.row.id, code: x.row.code, name: x.row.name || x.row.code })))} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50"><Icon name="add" />สร้างงานเติมทั้งหมด ({problemParents.length})</button>}
+                          <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50 disabled:opacity-50"><Icon name="refresh" />ตรวจใหม่</button>
+                        </div>
+                      </div>
+                      <div className="max-h-[40vh] divide-y divide-slate-100 overflow-auto rounded-xl border border-slate-200">
+                        {problemParents.map(({ row, pfs: ps }) => {
+                          const sk = skipped.has(row.id);
+                          return (
+                            <div key={row.id} className={`flex flex-wrap items-start gap-2 px-3 py-2 text-sm ${sk ? "opacity-50" : ""}`}>
+                              <span className="mt-0.5 text-rose-600"><Icon name="warning" /></span>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate">{row.name || row.code} <span className="font-mono text-[11px] text-slate-400">{row.code}</span></div>
+                                {ps.map(({ pf, missing }) => <div key={pf.code} className="text-xs text-rose-700">{pf.name_th}: ขาด {missing.join(" · ")}</div>)}
+                              </div>
+                              <div className="flex flex-wrap justify-end gap-1">
+                                {canEdit && <button type="button" onClick={() => setFixFor({ parentId: row.id, platformId: ps[0].pf.id })} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50"><Icon name="edit" />แก้เลย</button>}
+                                {canTask && <button type="button" onClick={() => setTaskFor([{ id: row.id, code: row.code, name: row.name || row.code }])} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50"><Icon name="add" />สร้างงานเติม</button>}
+                                <button type="button" onClick={() => toggleSkip(row.id)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">{sk ? "เอากลับมา" : "ข้ามตัวนี้"}</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )
         ) : (
