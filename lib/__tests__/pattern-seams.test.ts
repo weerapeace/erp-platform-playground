@@ -110,13 +110,14 @@ describe("แพทเทิร์น 1 ใบ (pattern-project)", () => {
   it("ชิ้นจากแม่แบบทุกแบบ (โค้ง · รูหัวใจ · รอยบาก) ผ่านตัวตรวจก่อนบันทึกครบทุกชิ้น ไม่มีอะไรหาย", () => {
     for (const preset of BAG_PRESETS) {
       const list = bagPieces(bagGeometry({ ...BAG_DEFAULT, ...preset.params }));
-      const sent = list.map((q, i) => ({ pid: `pc${i}`, name: q.name, count: q.count, allow: q.allow, shape: q.shape, holes: q.holes, grain: q.grain, notches: q.notches, at: q.at }));
+      const sent = list.map((q, i) => ({ pid: `pc${i}`, name: q.name, count: q.count, allow: q.allow, allowEdges: q.allowEdges, shape: q.shape, holes: q.holes, grain: q.grain, notches: q.notches, at: q.at }));
       const r = cleanProjectPatch({ pieces: JSON.parse(JSON.stringify(sent)), seams: [] }, []);
       expect(r.error).toBeNull();
       expect(r.patch.pieces).toHaveLength(list.length);
       r.patch.pieces!.forEach((p, i) => {
         expect(p.holes).toHaveLength(list[i].holes.length);
         expect(p.notches).toHaveLength(list[i].notches.length);
+        expect(p.allowEdges ?? null).toEqual(list[i].allowEdges);
         expect(pieceEdges(p.shape)).toHaveLength(pieceEdges(list[i].shape).length);
       });
     }

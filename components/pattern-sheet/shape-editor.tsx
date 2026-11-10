@@ -24,20 +24,21 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
-  SNAP_STEPS, cleanAllow, defaultGrain, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
+  SNAP_STEPS, cleanAllow, defaultGrain, edgeAllowances, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth,
   type Box, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
+import { pieceEdges } from "@/lib/pattern-seams";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
 /** pid = รหัสชิ้น (ผูกบรรทัดตีราคา) · at = ตำแหน่งบนกระดาน (มุมซ้ายบนเส้นเย็บ) · src = บรรทัดเดิมที่ชิ้นนี้มาจาก */
-export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[] };
-export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[] };
+export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; allowEdges?: number[] | null; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[] };
+export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges: number[] | null; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[] };
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
-type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[] };
+type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[] };
 type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure";
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
@@ -171,7 +172,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if (p.at) { dx = p.at[0] - b.x; dy = p.at[1] - b.y; }
       else { dx = x + a - b.x; dy = a - b.y; x += b.w + 2 * a + 2; }
       const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [] }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
     });
   });
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
@@ -181,6 +182,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [guides, setGuides] = useState<{ x?: number; y?: number }[]>([]);
   const clipRef = useRef<{ id: string; pieces: Piece[]; n: number } | null>(null);
   const [notchMode, setNotchMode] = useState(false);
+  const [edgeHover, setEdgeHover] = useState<{ id: string; i: number } | null>(null);   // ขอบที่ชี้อยู่ในรายการเผื่อรายขอบ (ไฮไลต์บนกระดาน)
+  const [edgeOpen, setEdgeOpen] = useState(false);
   const [roundR, setRoundR] = useState("1");
   const [offD, setOffD] = useState("1");
   const [tool, setTool] = useState<Tool>("rect");
@@ -333,7 +336,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       const dx = (p.at ? x0 + p.at[0] : x + a) - b.x, dy = (p.at ? p.at[1] : a) - b.y;
       if (!p.at) x += b.w + 2 * a + 2;
       const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [] }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
     });
     const next = addPieces(list);
     if (next) { changeTool("move"); fitView(next); }
@@ -459,12 +462,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       return;
     }
     if (d.k === "resize") {
-      const sb = d.start, a = d.orig.allow, min = 2 * a + 0.2;
+      // ส่วนเผื่อแต่ละด้านของกรอบตัด (เผื่อรายขอบ = ไม่เท่ากันทุกด้าน · ค่าเดียวทั้งชิ้น = เท่ากับ allow เหมือนเดิม)
+      const og = pieceGeometry(d.orig), mL = og.finished.x - og.cutBox.x, mT = og.finished.y - og.cutBox.y;
+      const mR = og.cutBox.x + og.cutBox.w - og.finished.x - og.finished.w, mB = og.cutBox.y + og.cutBox.h - og.finished.y - og.finished.h;
+      const sb = d.start, minW = mL + mR + 0.2, minH = mT + mB + 0.2;
       let x0 = sb.x, y0 = sb.y, x1 = sb.x + sb.w, y1 = sb.y + sb.h;
-      if (d.dir.includes("w")) x0 = Math.min(p.x, x1 - min);
-      if (d.dir.includes("e")) x1 = Math.max(p.x, x0 + min);
-      if (d.dir.includes("n")) y0 = Math.min(p.y, y1 - min);
-      if (d.dir.includes("s")) y1 = Math.max(p.y, y0 + min);
+      if (d.dir.includes("w")) x0 = Math.min(p.x, x1 - minW);
+      if (d.dir.includes("e")) x1 = Math.max(p.x, x0 + minW);
+      if (d.dir.includes("n")) y0 = Math.min(p.y, y1 - minH);
+      if (d.dir.includes("s")) y1 = Math.max(p.y, y0 + minH);
       if ((lock || e.shiftKey) && d.dir.length === 2 && sb.w > 0 && sb.h > 0) {   // มุม + คงสัดส่วน
         const r = sb.w / sb.h; let w = x1 - x0, h = y1 - y0;
         if (w / h > r) h = w / r; else w = h * r;
@@ -472,7 +478,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         if (d.dir.includes("n")) y0 = y1 - h; else y1 = y0 + h;
       }
       d.moved = true;
-      setPieces((ps) => ps.map((x) => (x.id === d.id ? fitPiece(d.orig, x0 + a, y0 + a, x1 - x0 - 2 * a, y1 - y0 - 2 * a) : x)));
+      setPieces((ps) => ps.map((x) => (x.id === d.id ? fitPiece(d.orig, x0 + mL, y0 + mT, x1 - x0 - mL - mR, y1 - y0 - mT - mB) : x)));
       return;
     }
     if (d.k === "rotate") {
@@ -846,7 +852,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const [[x1, y1], [x2, y2]] = selPiece.grain, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
     patchPiece(selPiece.id, (p) => ({ ...p, grain: [[mx - (y1 - my), my + (x1 - mx)], [mx - (y2 - my), my + (x2 - mx)]] }));
   };
-  const setAllow = (v: number) => { if (!selPiece) return; const a = cleanAllow(v); patchPiece(selPiece.id, (p) => ({ ...p, allow: a }), `allow-${selPiece.id}`); setLastAllow(a); saveNum(ALLOW_KEY, a); };
+  const setAllow = (v: number) => { if (!selPiece) return; const a = cleanAllow(v); patchPiece(selPiece.id, (p) => ({ ...p, allow: a, allowEdges: null }), `allow-${selPiece.id}`); setLastAllow(a); saveNum(ALLOW_KEY, a); };
   const hostOf = (p: Piece) => pieces.find((o) => o.id !== p.id && shapeInside(p.shape, o.shape)) ?? null;
   const makeHole = (p: Piece) => {
     const host = hostOf(p); if (!host) return;
@@ -889,7 +895,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const buildResult = (): ShapeEditorResult => ({
     pieces: piecesRef.current.map((p) => {
       const g = pieceGeometry(p);
-      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [] };
+      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: edgeAllowances(p.shape, p.allowEdges, p.allow), name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [] };
     }),
     basis: basisRef.current,
     refs: refsRef.current.map((r) => ({ url: r.url, ...(r.label ? { label: r.label } : {}), x: r.x, y: r.y, w: r.w, ar: r.ar, op: r.op })),
@@ -899,7 +905,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     onSave?.(buildResult());
   };
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
-  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
+  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches, p.allowEdges ?? null]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
   const lastSig = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flush = useCallback(() => {
@@ -1229,24 +1235,28 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 {ticks(view.y, vh, gridStep).map((y) => <line key={`gy${y}`} y1={y} y2={y} x1={view.x} x2={view.x + view.w} stroke={isMajor(y, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
                 {rows.map(({ p, i, g }) => {
                   const on = p.id === sel || multi.has(p.id), single = p.id === sel && multi.size < 2, b = g.finished, cb = g.cutBox;
-                  const cutD = p.allow > 0 ? polyD(g.cut) + g.holesCut.map((h) => polyD(h)).join("") : shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("");
+                  const cutD = p.allow > 0 || g.segAllow ? polyD(g.cut) + g.holesCut.map((h) => polyD(h)).join("") : shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("");
                   return (
                     <g key={p.id}>
                       <path d={cutD} fillRule="evenodd" data-piece={p.id} fill={COLORS.fill} fillOpacity={on ? Math.min(1, pieceFade + 0.15) : pieceFade} stroke={on ? COLORS.sel : COLORS.stroke} strokeWidth={on ? 2.5 : 1.5} vectorEffect="non-scaling-stroke" style={{ cursor: editId === p.id ? "copy" : "move" }} />
-                      {p.allow > 0 && <path d={shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("")} fill="none" stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+                      {(p.allow > 0 || !!g.segAllow) && <path d={shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("")} fill="none" stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+                      {edgeHover && edgeHover.id === p.id && (() => {   // ขอบที่ชี้อยู่ในรายการเผื่อรายขอบ
+                        const ed = pieceEdges(p.shape)[edgeHover.i];
+                        return ed ? <path d={"M" + ed.pts.map((q) => `${q[0]} ${q[1]}`).join("L")} fill="none" stroke={COLORS.sel} strokeWidth={5} strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} /> : null;
+                      })()}
                       {p.grain && p.grain.length === 2 && (() => {   // เส้นทางผ้า: ลูกศร 2 หัว
                         const [[x1, y1], [x2, y2]] = p.grain; const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L, hs = fs * 0.45;
                         const head = (x: number, y: number, s: number) => `M${x + s * ux * hs - uy * hs * 0.6} ${y + s * uy * hs + ux * hs * 0.6}L${x} ${y}L${x + s * ux * hs + uy * hs * 0.6} ${y + s * uy * hs - ux * hs * 0.6}`;
                         return <path d={`M${x1} ${y1}L${x2} ${y2}${head(x1, y1, 1)}${head(x2, y2, -1)}`} fill="none" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />;
                       })()}
-                      {(p.notches ?? []).length > 0 && notchSegments(g.sew, p.notches ?? [], p.allow, Math.max(0.5, fs * 0.45)).map(([a, c], ni) => (
+                      {(p.notches ?? []).length > 0 && notchSegments(g.sew, p.notches ?? [], p.allow, Math.max(0.5, fs * 0.45), g.segAllow).map(([a, c], ni) => (
                         <line key={ni} x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke={MARK_COLOR} strokeWidth={2} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                       ))}
                       {notchMode && p.id === sel && (p.notches ?? []).map((n, ni) => <circle key={`n${ni}`} cx={n[0]} cy={n[1]} r={fs * 0.22} fill="#fff" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />)}
                       <text x={b.x + b.w / 2} y={b.y + b.h / 2} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fill={COLORS.text} style={{ pointerEvents: "none" }}>P{i + 1}{p.name ? ` ${p.name}` : ""}{p.count > 1 ? ` ×${p.count}` : ""}</text>
                       {single && editId !== p.id && <>
                         <rect x={cb.x} y={cb.y} width={cb.w} height={cb.h} fill="none" stroke={COLORS.sel} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
-                        <text x={cb.x + cb.w / 2} y={cb.y + cb.h + fs * 1.1} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{p.allow > 0 ? t("ตัด ", "cut ") : ""}{r1(cb.w)} {t("ซม.", "cm")}</text>
+                        <text x={cb.x + cb.w / 2} y={cb.y + cb.h + fs * 1.1} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{p.allow > 0 || g.segAllow ? t("ตัด ", "cut ") : ""}{r1(cb.w)} {t("ซม.", "cm")}</text>
                         <text x={cb.x + cb.w + fs * 0.6} y={cb.y + cb.h / 2} fontSize={fs * 0.9} dominantBaseline="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{r1(cb.h)} {t("ซม.", "cm")}</text>
                         {!readonly && tool !== "measure" && !pen && (() => {
                           const hs = fs * 0.22, cx = cb.x + cb.w / 2, ry = cb.y - fs * 1.8;
@@ -1464,6 +1474,34 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   <NumField value={selPiece.allow} min={0} max={20} label={t("เผื่อพับ ซม.", "Allowance cm")} onCommit={setAllow} className="w-16" />
                 </div>
                 <div className="mt-1 text-slate-400">{t("เส้นประ = แนวเย็บ · เส้นทึบ = แนวตัด (รวมเผื่อ) · รูเจาะหดเข้าตามเผื่อ", "Dashed = sewing line · solid = cutting line · holes shrink by the allowance")}</div>
+                {(() => {   // เผื่อรายขอบ: ขอบปากพับ 3 ซม. ขอบอื่น 1 ซม. ฯลฯ — แก้ขอบไหน ขอบนั้นสว่างบนกระดาน · กดค่าเดียวด้านบน = ล้างรายขอบ
+                  const E = pieceEdges(selPiece.shape);
+                  if (E.length < 2 || E.length > 24) return null;
+                  const per = edgeAllowances(selPiece.shape, selPiece.allowEdges, selPiece.allow);
+                  const setEdge = (i: number, v: number) => patchPiece(selPiece.id, (p) => {
+                    const cur = edgeAllowances(p.shape, p.allowEdges, p.allow) ?? E.map(() => p.allow);
+                    return { ...p, allowEdges: cur.map((x, k) => (k === i ? cleanAllow(v) : x)) };
+                  }, `allow-edge-${selPiece.id}-${i}`);
+                  return (
+                    <div className="mt-1.5">
+                      <button type="button" onClick={() => setEdgeOpen(!edgeOpen)} className="text-blue-700 hover:underline">{edgeOpen || per ? "▾" : "▸"} {t("เผื่อรายขอบ (เช่น ขอบปากพับ 3 ซม.)", "Per-edge allowance (e.g. 3 cm top hem)")}</button>
+                      {per && <span className="ml-1.5 rounded bg-amber-50 px-1 text-amber-700">{t("ใช้อยู่", "in use")}</span>}
+                      {(edgeOpen || !!per) && (
+                        <div className="mt-1 space-y-1" onPointerLeave={() => setEdgeHover(null)}>
+                          {E.map((ed) => (
+                            <div key={ed.i} className="flex items-center gap-1.5" onPointerEnter={() => setEdgeHover({ id: selPiece.id, i: ed.i })}>
+                              <span className="w-28 shrink-0 tabular-nums text-slate-600">{t(`ขอบ ${ed.i + 1}`, `Edge ${ed.i + 1}`)} · {r1(ed.len)} {t("ซม.", "cm")}</span>
+                              {readonly ? <span className="tabular-nums">{per ? per[ed.i] : selPiece.allow}</span>
+                                : <NumField value={per ? per[ed.i] : selPiece.allow} min={0} max={20} label={t(`เผื่อของขอบ ${ed.i + 1} ซม.`, `Allowance of edge ${ed.i + 1} cm`)} onCommit={(v) => setEdge(ed.i, v)} className="w-16" />}
+                            </div>
+                          ))}
+                          <div className="text-slate-400">{t("ชี้ที่แถว = ขอบนั้นสว่างบนกระดาน · เพิ่ม/ลบจุดของชิ้น = กลับไปใช้ค่าเดียวทั้งชิ้น", "Hover a row to light up that edge · adding or removing points resets to one value")}</div>
+                          {per && !readonly && <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, allowEdges: null }))} className="text-blue-700 hover:underline">{t("กลับไปใช้ค่าเดียวทุกขอบ", "Back to one value for all edges")}</button>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>

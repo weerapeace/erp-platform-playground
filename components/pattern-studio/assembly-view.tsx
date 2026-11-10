@@ -6,6 +6,7 @@
  *   ชี้ชื่อชิ้น = ชิ้นนั้นสว่างในภาพ · ประกอบไม่ได้ = บอกเหตุผลและทางแก้ (ไม่วาดภาพหลอก)
  *   สีในภาพเป็นสีตัวอย่าง ไม่บันทึก · เป็นการประกอบทรงตามกติกา ไม่ใช่การจำลองวัสดุ
  *
+ *   ชิ้นที่ยังไม่ได้ประกอบ (ไม่ได้เย็บขอบชนขอบ) → กด "ติดเป็นหู" ตั้งระยะห่างโคนหู/ความยาว แล้วเห็นผลในภาพทันที · หรือ "ใช้ปิดหลังช่อง"
  *   <AssemblyView pieces={[{ pid, name, count, shape, holes }]} seams={seams} attaches={attaches} onGoSew={() => …} />
  * ใช้ที่: app/pattern-studio/[id] · คู่มือ: docs/pattern-studio.md
  */
@@ -13,13 +14,28 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { Pattern3D } from "@/components/pattern-3d";
-import { assemble, type AsmPiece, type AsmStepKey, type Attach } from "@/lib/pattern-assembly";
+import { RangeInput } from "@/components/range-input";
+import { assemble, type AsmPiece, type AsmStepKey, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
+import { shapeBox } from "@/lib/pattern-shape";
 import type { Seam } from "@/lib/pattern-seams";
 
 const f1 = (x: number) => x.toFixed(1);
 const COLORS: [string, string, string][] = [["#9a6a45", "น้ำตาลแทน", "Tan"], ["#4a3023", "น้ำตาลเข้ม", "Dark brown"], ["#26272b", "ดำ", "Black"], ["#d9cdb4", "ครีมแคนวาส", "Canvas cream"], ["#5d6b45", "เขียวมะกอก", "Olive"], ["#6f2531", "แดงเบอร์กันดี", "Burgundy"], ["#27364f", "กรมท่า", "Navy"]];
 
-export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw }: {
+type HandleForm = { pid: string; gap: number; drop: number; len: number; w: number };
+/** จุดติดหูจากค่าที่ตั้ง: โคนหู 2 จุด ห่างกัน gap กึ่งกลางแผ่น ต่ำจากปาก drop — ติดแผ่นหน้า และแผ่นหลังด้วยถ้าเป็นคนละชิ้น */
+function handleAttaches(A: AssemblyOk, f: HandleForm, stamp: string): Attach[] {
+  const r3 = (p: [number, number]): [number, number] => [Math.round(p[0] * 1000) / 1000 + 0, Math.round(p[1] * 1000) / 1000 + 0];
+  const one = (side: "front" | "back", i: number): Attach => {
+    const top = A.panelH[side === "front" ? 0 : 1] - f.drop;
+    return { id: `a${stamp}h${i}`, kind: "handle", pid: f.pid, on: side === "front" ? A.front : A.back, a: r3(A.toLocal[side]([-f.gap / 2, top])), b: r3(A.toLocal[side]([f.gap / 2, top])), len: f.len, w: f.w, tail: 4 };
+  };
+  return A.back === A.front ? [one("front", 0)] : [one("front", 0), one("back", 1)];
+}
+
+export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange }: {
+  /** แก้จุดติด (ติดหู / ปิดหลังช่อง / เอาออก) — ไม่ส่ง = ดูอย่างเดียว */
+  onAttachesChange?: (next: Attach[]) => void;
   pieces: AsmPiece[];
   seams: Seam[];
   attaches: Attach[];
@@ -28,7 +44,9 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw }: {
   onGoDraw?: () => void;
 }) {
   const t = useT();
-  const A = useMemo(() => assemble(pieces, seams, attaches), [pieces, seams, attaches]);
+  const [hForm, setHForm] = useState<HandleForm | null>(null);   // กำลังตั้งค่าติดหูให้ชิ้นไหน (ภาพแสดงผลทันที ยังไม่บันทึกจนกด "ติดหู")
+  const A0 = useMemo(() => assemble(pieces, seams, attaches), [pieces, seams, attaches]);
+  const A = useMemo(() => (hForm && A0.ok ? assemble(pieces, seams, [...attaches, ...handleAttaches(A0, hForm, "draft")]) : A0), [A0, hForm, pieces, seams, attaches]);
   const [explode, setExplode] = useState(0);
   const [stepMode, setStepMode] = useState(false);
   const [done, setDone] = useState(0);                       // เย็บไปแล้วกี่ขั้น (โหมดเย็บทีละขั้น)
@@ -89,7 +107,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw }: {
             <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-56 max-w-full accent-blue-600" />
           </label>
         )}
-        <p className="text-[11px] text-slate-400">{t("ภาพนี้ประกอบจากรูปชิ้นและตะเข็บจริงตามกติกาของโครงสร้าง ยังไม่ได้จำลองวัสดุทิ้งตัวหรือย่น · ส่วนพับปากยังไม่ถูกพับลง กระเป๋าในภาพจึงสูงกว่าจริงเท่าส่วนพับ", "Assembled from the real piece shapes and seams by structural rules. Material drape is not simulated · the top hem is not folded down yet, so the bag looks taller by the hem.")}</p>
+        <p className="text-[11px] text-slate-400">{t("ภาพนี้ประกอบจากรูปชิ้นและตะเข็บจริงตามกติกาของโครงสร้าง ยังไม่ได้จำลองวัสดุทิ้งตัวหรือย่น · ภาพใช้ขนาดสำเร็จ (เส้นเย็บ) ของชิ้น ส่วนเผื่อเย็บและพับปากไม่แสดง", "Assembled from the real piece shapes and seams by structural rules. Material drape is not simulated · the view uses finished (sew-line) sizes; allowances and hems are not shown.")}</p>
       </div>
 
       <aside className="min-w-0 space-y-3 text-sm">
@@ -101,11 +119,49 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw }: {
             {used.map((pid) => (
               <li key={pid} onPointerEnter={() => setPick(pid)} onPointerLeave={() => setPick(null)} className={`flex items-center justify-between gap-2 rounded px-1.5 py-1 ${pick === pid ? "bg-amber-50" : ""}`}>
                 <span className="min-w-0 truncate">{nameOf(pid)}</span>
+                {onAttachesChange && !hForm && attaches.some((a) => a.pid === pid) && (
+                  <button type="button" onClick={() => onAttachesChange(attaches.filter((a) => a.pid !== pid))} title={t("เอาชิ้นนี้ออกจากการประกอบ (ชิ้นยังอยู่บนกระดาน)", "Detach this piece (it stays on the board)")}
+                    className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:bg-red-50 hover:text-red-600">{t("เอาออก", "Detach")}</button>
+                )}
                 <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : A.handles.some((h) => h.pid === pid) ? t("หู", "handle") : t("ปิดหลังช่อง", "behind window")}</span>
               </li>
             ))}
           </ul>
-          {A.loose.length > 0 && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t(`ยังไม่ได้ประกอบ: ${names(A.loose)} — ชิ้นเหล่านี้ไม่มีตะเข็บที่ระบบใช้ประกอบได้`, `Not assembled: ${names(A.loose)} — no usable seams for these pieces`)}</p>}
+          {A.loose.length > 0 && (
+            <div className="space-y-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+              <div>{t("ยังไม่ได้ประกอบ — ชิ้นเหล่านี้ไม่ได้เย็บขอบชนขอบกับชิ้นอื่น", "Not assembled — these pieces are not sewn edge to edge with another piece")}</div>
+              {A.loose.map((pid) => (
+                <div key={pid} className="flex flex-wrap items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate font-medium">{nameOf(pid)}</span>
+                  {onAttachesChange && <>
+                    <button type="button" onClick={() => {
+                      const p = pieces.find((x) => x.pid === pid); if (!p) return;
+                      const b = shapeBox(p.shape), long = Math.max(b.w, b.h), short = Math.min(b.w, b.h);
+                      setHForm({ pid, gap: Math.max(4, Math.min(Math.round(A.width * 0.4), Math.floor(A.width - 4))), drop: 0, len: Math.max(10, Math.round(long - 8)), w: Math.max(0.5, Math.round((short / 2) * 10) / 10) });
+                    }} className="h-6 rounded border border-amber-300 bg-white px-2 text-[11px] text-amber-900 hover:bg-amber-100">{t("ติดเป็นหู", "Attach as handle")}</button>
+                    {(A.panels[0]?.holes.length ?? 0) > 0 && A.behind.length === 0 && (
+                      <button type="button" onClick={() => onAttachesChange([...attaches, { id: `a${Date.now().toString(36)}b`, kind: "behind", pid, on: A.front }])}
+                        className="h-6 rounded border border-amber-300 bg-white px-2 text-[11px] text-amber-900 hover:bg-amber-100">{t("ใช้ปิดหลังช่อง", "Use behind the window")}</button>
+                    )}
+                  </>}
+                </div>
+              ))}
+            </div>
+          )}
+          {hForm && onAttachesChange && (
+            <div className="space-y-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs">
+              <div className="font-medium text-blue-900">{t(`ติดหู: ${nameOf(hForm.pid)}`, `Attach handle: ${nameOf(hForm.pid)}`)}</div>
+              <RangeInput label={t("ระยะห่างโคนหู", "Gap between handle ends")} unit={t("ซม.", "cm")} min={4} max={Math.max(5, Math.floor(A.width - 2))} step={0.5} value={hForm.gap} onChange={(v) => setHForm({ ...hForm, gap: v })} />
+              <RangeInput label={t("โคนหูต่ำจากปาก", "Ends below the rim")} unit={t("ซม.", "cm")} min={0} max={Math.max(1, Math.floor(A.height / 2))} step={0.5} value={hForm.drop} onChange={(v) => setHForm({ ...hForm, drop: v })} />
+              <RangeInput label={t("ยาวหู ส่วนที่โผล่", "Handle length above the ends")} unit={t("ซม.", "cm")} min={8} max={150} step={1} value={hForm.len} onChange={(v) => setHForm({ ...hForm, len: v })} />
+              <RangeInput label={t("กว้างหู", "Handle width")} unit={t("ซม.", "cm")} min={0.5} max={10} step={0.5} value={hForm.w} onChange={(v) => setHForm({ ...hForm, w: v })} />
+              <p className="text-[11px] text-slate-500">{t("ค่าตั้งต้นเดาจากขนาดชิ้น (ยาว − โคน 2 ข้าง · กว้างครึ่งหนึ่งถ้าพับครึ่ง) ปรับให้ตรงกับของจริงได้ · ติดทั้งแผ่นหน้าและแผ่นหลัง", "Defaults are guessed from the piece size. Adjust to match the real handle · attached to both front and back.")}</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { if (A0.ok) onAttachesChange([...attaches, ...handleAttaches(A0, hForm, Date.now().toString(36))]); setHForm(null); }} className="h-7 rounded-lg bg-blue-600 px-3 text-white hover:bg-blue-700">{t("ติดหู", "Attach")}</button>
+                <button type="button" onClick={() => setHForm(null)} className="h-7 rounded-lg border border-slate-200 bg-white px-3 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+              </div>
+            </div>
+          )}
           {A.notes.includes("mismatch") && <p className="rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-700">{t("มีตะเข็บที่ยาวไม่เท่ากัน ภาพนี้ประกอบตามขอบของแผ่นหน้า ของจริงจะย่นหรือเหลือปลาย", "Some seams differ in length. This view follows the front panel edge; the real bag would pucker or overhang.")}{onGoSew && <button type="button" onClick={onGoSew} className="ml-1 underline">{t("ดูที่แท็บเย็บ", "See the Sew tab")}</button>}</p>}
           {A.notes.includes("depth-differs") && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t("ชิ้นคั่นกลางกว้างไม่เท่ากัน ใช้ค่ากลางเป็นความลึกของกระเป๋า", "Gusset pieces have different widths; the middle value is used as the depth")}</p>}
           {A.notes.includes("same-back") && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t("แผ่นหน้าตั้งจำนวนตัดไว้ 1 ชิ้น ระบบใช้รูปเดียวกันเป็นแผ่นหลังให้ ถ้าใช้แผ่นเดียวกันจริงให้ตั้งจำนวนตัดเป็น 2", "The front panel has a cut count of 1; the same shape is used for the back. Set the count to 2 if that is intended.")}</p>}

@@ -74,11 +74,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const canEdit = !!me?.can_edit;
   // ชิ้นตั้งต้นของกระดาน — อ่านครั้งเดียวต่อการเปิดกระดาน (ระหว่างวาด กระดานถือข้อมูลเอง แล้วส่งกลับทาง onChange)
-  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name, at: p.at, grain: p.grain, notches: p.notches })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, name: p.name, at: p.at, grain: p.grain, notches: p.notches })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onBoard = useCallback((res: ShapeEditorResult) => {
     setPieces(res.pieces.map((p) => ({
-      pid: p.pid, name: p.name, count: p.count, allow: p.allow, shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
+      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
       grain: p.grain && p.grain.length === 2 ? [p.grain[0], p.grain[1]] : null,
     })));
     setBasis(res.basis); setDirty(true);
@@ -169,6 +169,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
           {tabBtn("sew", "i:needle-thread", t("เย็บ", "Sew"), badSeams)}
           {tabBtn("asm", "i:box", t("ประกอบ 3D", "Assemble 3D"))}
         </div>
+        <button type="button" disabled={dirty || !pieces.length} onClick={() => window.open(`/print/pattern-project/${id}`, "_blank", "noopener")}
+          title={dirty ? t("บันทึกก่อน แล้วค่อยพิมพ์ (หน้าพิมพ์ใช้ข้อมูลที่บันทึกแล้ว)", "Save first — the print page uses the saved pattern") : t("พิมพ์ขนาดจริง A4 / ดาวน์โหลดไฟล์เครื่องตัด DXF / SVG", "Print at real size on A4 / download DXF or SVG cut files")}
+          className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+          <Icon value="i:printer" className="text-sm" />{t("พิมพ์ / ไฟล์ตัด", "Print / cut files")}
+        </button>
         {me?.can_delete && (
           <button type="button" onClick={() => setAsk("delete")} title={t("ลบแพทเทิร์นนี้", "Delete this pattern")} className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600">
             <Icon value="i:trash" className="text-sm" />{t("ลบ", "Delete")}
@@ -182,7 +187,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
       ) : tab === "sew" ? (
         <SewView pieces={pieces.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes }))} seams={seams} onChange={onSeams} readonly={!canEdit} />
       ) : (
-        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => switchTab("sew")} onGoDraw={() => switchTab("draw")} />
+        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => switchTab("sew")} onGoDraw={() => switchTab("draw")}
+          onAttachesChange={canEdit ? (next) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); } : undefined} />
       )}
 
       {canEdit && <SaveBar dirty={dirty} saving={saving} error={saveErr} savedAt={savedAt} onSave={save} onDiscard={() => void load()} />}

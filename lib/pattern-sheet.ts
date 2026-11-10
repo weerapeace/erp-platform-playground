@@ -84,19 +84,20 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
     const w = cb ? cb.w : num(l.width_cm), h = cb ? cb.h : num(l.length_cm);
     const sh = (P: Pt[]): Pt[] => P.map(([x, y]) => [x - (cb?.x ?? 0), y - (cb?.y ?? 0)]);   // ให้มุมซ้ายบนของเส้นตัด = 0,0
     const allow = ls?.allow ?? 0;
+    const hasAllow = allow > 0 || !!g?.segAllow;   // มีเส้นตัดแยกจากเส้นเย็บ (ค่าเดียวทั้งชิ้น หรือ เผื่อรายขอบ)
     if (!(w > 0) || !(h > 0)) continue;
     const grainSegs = ls?.grain ? grainArrowSegs(...(sh(ls.grain) as [Pt, Pt])) : [];
-    const notchSegs = g && ls?.notches?.length ? notchSegments(g.sew, ls.notches, allow, 0.5).map((s) => sh(s) as [Pt, Pt]) : [];
+    const notchSegs = g && ls?.notches?.length ? notchSegments(g.sew, ls.notches, allow, 0.5, g.segAllow).map((s) => sh(s) as [Pt, Pt]) : [];
     out.push({
       id: `P${out.length + 1}`,
       name: [(l.item_name ?? "").trim() || "ไม่ระบุวัสดุ", ls?.name].filter(Boolean).join(" · "),
       group: (l.group_name ?? "").trim() || "ไม่ระบุชนิด",
       w: r1(w), h: r1(h),
-      d: ls && g ? (allow ? polyD(sh(g.cut)) + g.holesCut.map((x) => polyD(sh(x))).join("") : shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("")) : null,
-      sewD: ls && g && allow ? shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("") : null,
+      d: ls && g ? (hasAllow ? polyD(sh(g.cut)) + g.holesCut.map((x) => polyD(sh(x))).join("") : shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("")) : null,
+      sewD: ls && g && hasAllow ? shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("") : null,
       outline: g ? sh(g.cut) : null,
       holes: g ? g.holesCut.map(sh) : null,
-      sewOutline: g && allow ? sh(g.sew) : null,
+      sewOutline: g && hasAllow ? sh(g.sew) : null,
       ...(grainSegs.length ? { grainSegs } : {}),
       ...(notchSegs.length ? { notchSegs } : {}),
       ...(grainSegs.length || notchSegs.length ? { marksD: segsD([...grainSegs, ...notchSegs]) } : {}),

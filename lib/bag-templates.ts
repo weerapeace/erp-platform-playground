@@ -7,15 +7,14 @@
  *   ทรงที่มีตอนนี้: Tote อยู่ทรง = ตัวหน้า + ตัวหลัง + (ข้าง+ก้นชิ้นเดียว หรือ ข้าง 2 + ก้น 1) + หูหิ้ว 2 · ช่องโชว์ PVC (เหลี่ยมมน / หัวใจ / วงกลม)
  *   หน่วย = ซม. · bagGeometry ใช้แกน y ชี้ขึ้น (ก้นกระเป๋า y = 0) · bagPieces ใช้แกน y ชี้ลงแบบ lib/pattern-shape
  *
- *   ข้อจำกัดรอบ 1 (ตัววาดยังเผื่อเย็บได้ค่าเดียวทั้งชิ้น):
- *     • พับปาก = ต่อรูปชิ้นขึ้นไปด้านบน (พับปาก − เผื่อเย็บ) แล้วใส่รอยบาก 2 ข้างบอกแนวพับ → เส้นตัดด้านบน = สูง + พับปาก พอดี
+ *   รูปชิ้น = ขนาดสำเร็จ (เส้นเย็บ) พอดี · พับปาก = เผื่อเย็บของ "ขอบปาก" (เผื่อรายขอบ allowEdges — 2026-11-10 แทนวิธีเดิมที่ต่อรูปชิ้นขึ้นไป)
  *     • หูหิ้ว = แถบกว้าง 2 เท่าของหู (พับครึ่ง) เผื่อเย็บรอบชิ้น · รอยบากบอกจุดที่หูโผล่พ้นปากกระเป๋า
  *   ค่าที่สมมติ (ต้องให้ช่างยืนยัน): ระยะเย็บโคนหู 4 ซม. · แผ่น PVC ใหญ่กว่ารูรอบละ 1.5 ซม.
  *
  * ใช้ที่: components/pattern-studio (ตัวสร้างจากแม่แบบ) · components/pattern-3d (โมเดลกระเป๋า) · เทสต์ lib/__tests__/bag-templates.test.ts
  * คู่มือ: docs/pattern-studio.md
  */
-import { fitShape, roundCorners, type PNode, type Pt, type Shape } from "@/lib/pattern-shape";
+import { fitShape, pieceGeometry, roundCorners, type PNode, type Pt, type Shape } from "@/lib/pattern-shape";
 
 export type BagWindow = "none" | "rect" | "heart" | "circle";
 export type BagParams = {
@@ -75,7 +74,6 @@ export type BagGeometry = {
   arch: { a: number; v: number; eb: number; h: number };   // หู: ครึ่งระยะโคน · ช่วงตั้งตรง · โค้งแบน (ถ้าหูสั้น) · สูงพ้นปาก
   seams: BagSeam[];
   hemLen: number;             // รอบปาก
-  ext: number;                // ส่วนต่อด้านบนของชิ้น (พับปาก − เผื่อเย็บ)
 };
 
 /** ปรับค่าให้อยู่ในขอบเขต + คิดเรขาคณิตของกระเป๋าที่เย็บแล้ว */
@@ -152,7 +150,7 @@ export function bagGeometry(raw: Partial<BagParams>): BagGeometry {
     ];
   return {
     p, Wt, Ls, tan, arc, U, Lg, parts, marks, strip, rMax, gMin, gMax, win,
-    arch: { a, v, eb, h: eb ? eb : v + a }, seams, hemLen: p.hem > 0 ? 2 * Wt + 2 * D : 0, ext: Math.max(0, p.hem - p.sa),
+    arch: { a, v, eb, h: eb ? eb : v + a }, seams, hemLen: p.hem > 0 ? 2 * Wt + 2 * D : 0,
   };
 }
 
@@ -160,7 +158,7 @@ export type BagPieceKey = "front" | "back" | "pvc" | "strip" | "side" | "bottom"
 /** ชิ้นแพทเทิร์น 1 แบบ — รูปทรง/รู/รอยบาก/เส้นทางผ้า อยู่ในพิกัดของชิ้นเอง (กรอบเส้นเย็บเริ่มที่ 0,0 · y ลง) · at = ตำแหน่งวางบนกระดาน */
 export type BagPiece = {
   key: BagPieceKey; name: string; nameEn: string; count: number;
-  shape: Shape; holes: Shape[]; allow: number; grain: [Pt, Pt] | null; notches: Pt[];
+  shape: Shape; holes: Shape[]; allow: number; allowEdges: number[] | null; grain: [Pt, Pt] | null; notches: Pt[];
   finished: { w: number; h: number }; cut: { w: number; h: number }; at: [number, number];
 };
 
@@ -190,32 +188,39 @@ export function bagWindowShape(kind: Exclude<BagWindow, "none">, x: number, y: n
   return roundCorners({ k: "rect", x: r3(x), y: r3(y), w: r3(w), h: r3(h) }, Math.min(w, h) * 0.2);
 }
 
-/** ชิ้นแพทเทิร์นทั้งหมดของกระเป๋า (พร้อมตำแหน่งวางเรียงเป็นแถว กว้างไม่เกิน ~110 ซม.) */
+/**
+ * ชิ้นแพทเทิร์นทั้งหมดของกระเป๋า (พร้อมตำแหน่งวางเรียงเป็นแถว กว้างไม่เกิน ~110 ซม.)
+ *   รูปชิ้น = ขนาดสำเร็จพอดี (เส้นเย็บ) · เผื่อเย็บรอบชิ้น = sa · ขอบปาก (ขอบที่พับเข้าใน) เผื่อ = พับปาก → ใช้เผื่อรายขอบ (allowEdges)
+ */
 export function bagPieces(G: BagGeometry): BagPiece[] {
-  const { p, Wt, ext } = G, { W, H, D, sa } = p, fl = p.flare;
-  const Htop = H + ext, halfTop = W / 2 + (fl * Htop) / H;     // ต่อขอบข้างขึ้นไปตามแนวเอียงเดิม
-  const X = (x: number) => r3(x + halfTop), Y = (y: number) => r3(Htop - y);   // y ขึ้น (ก้น = 0) → พิกัดชิ้น (y ลง)
-  const TL: Pt = [X(-halfTop), Y(Htop)], BL: Pt = [X(-W / 2), Y(0)], BR: Pt = [X(W / 2), Y(0)], TR: Pt = [X(halfTop), Y(Htop)];
+  const { p, Wt } = G, { W, H, D, sa, hem } = p;
+  const X = (x: number) => r3(x + Wt / 2), Y = (y: number) => r3(H - y);   // y ขึ้น (ก้น = 0) → พิกัดชิ้น (y ลง)
+  const TL: Pt = [X(-Wt / 2), Y(H)], BL: Pt = [X(-W / 2), Y(0)], BR: Pt = [X(W / 2), Y(0)], TR: Pt = [X(Wt / 2), Y(H)];
   const panelShape: Shape = { k: "path", nodes: [{ x: TL[0], y: TL[1] }, ...filletNodes(TL, BL, BR, p.r), ...filletNodes(BL, BR, TR, p.r), { x: TR[0], y: TR[1] }] };
+  const pn = p.r > 0 ? 6 : 4;                                                         // จำนวนขอบของตัวหน้า (ขอบสุดท้าย = ขอบปาก)
+  /** เผื่อรายขอบ: ขอบในรายการ = พับปาก · ขอบอื่น = เผื่อเย็บ — ถ้าเท่ากันหมด = ไม่ต้องใช้รายขอบ */
+  const edges = (n: number, hemEdges: number[]): number[] | null => (hemEdges.length && hem !== sa ? Array.from({ length: n }, (_, i) => (hemEdges.includes(i) ? hem : sa)) : null);
   const sideAt = (s: number): Pt => { const t = s / G.Ls; return [-Wt / 2 + (Wt / 2 - W / 2) * t, H - H * t]; };   // จุดบนขอบข้างซ้าย ห่างจากปาก s
   const panelNotches: Pt[] = [[X(0), Y(0)]];                                          // กึ่งกลางก้น
   if (p.r > 0) {
     const l1 = sideAt(G.Ls - G.tan);                                                  // จุดเริ่มโค้ง (ขอบข้าง)
     panelNotches.push([X(l1[0]), Y(l1[1])], [X(-l1[0]), Y(l1[1])], [X(-W / 2 + G.tan), Y(0)], [X(W / 2 - G.tan), Y(0)]);
   }
-  if (ext > 0.05) panelNotches.push([X(-Wt / 2), Y(H)], [X(Wt / 2), Y(H)]);           // แนวพับปาก
   const grainX = X(-(W / 2 - 2.2));
   const panelGrain: [Pt, Pt] = [[grainX, Y(H * 0.8)], [grainX, Y(H * 0.45)]];
-  const panel = (key: "front" | "back", name: string, nameEn: string, count: number, holes: Shape[]): Omit<BagPiece, "at"> => ({
-    key, name, nameEn, count, shape: panelShape, holes, allow: sa, grain: panelGrain, notches: panelNotches,
-    finished: { w: 2 * halfTop, h: Htop }, cut: { w: 2 * halfTop + 2 * sa, h: Htop + 2 * sa },
-  });
-  const rect = (key: BagPieceKey, name: string, nameEn: string, count: number, w: number, h: number, allow: number, notches: Pt[] = [], grain: [Pt, Pt] | null = null): Omit<BagPiece, "at"> => ({
-    key, name, nameEn, count, shape: { k: "rect", x: 0, y: 0, w: r3(w), h: r3(h) }, holes: [], allow, grain, notches: notches.map(([x, y]) => [r3(x), r3(y)] as Pt),
-    finished: { w, h }, cut: { w: w + 2 * allow, h: h + 2 * allow },
-  });
+  type Raw = Omit<BagPiece, "at" | "finished" | "cut"> & { off: [number, number] };
+  type Sized = Omit<BagPiece, "at"> & { off: [number, number] };
+  /** ขนาดสำเร็จ/ขนาดตัด คิดจากรูปจริง (ตัวคิดเดียวกับตัววาด) · off = ระยะจากมุมกรอบตัดถึงมุมกรอบเส้นเย็บ */
+  const sized = (q: Omit<Raw, "off">): Sized => {
+    const g = pieceGeometry({ shape: q.shape, holes: q.holes, allow: q.allow, allowEdges: q.allowEdges });
+    return { ...q, finished: { w: g.finished.w, h: g.finished.h }, cut: { w: g.cutBox.w, h: g.cutBox.h }, off: [g.finished.x - g.cutBox.x, g.finished.y - g.cutBox.y] };
+  };
+  const panel = (key: "front" | "back", name: string, nameEn: string, count: number, holes: Shape[]) =>
+    sized({ key, name, nameEn, count, shape: panelShape, holes, allow: sa, allowEdges: edges(pn, [pn - 1]), grain: panelGrain, notches: panelNotches });
+  const rect = (key: BagPieceKey, name: string, nameEn: string, count: number, w: number, h: number, allow: number, hemEdges: number[] = [], notches: Pt[] = [], grain: [Pt, Pt] | null = null) =>
+    sized({ key, name, nameEn, count, shape: { k: "rect", x: 0, y: 0, w: r3(w), h: r3(h) }, holes: [], allow, allowEdges: allow ? edges(4, hemEdges) : null, grain, notches: notches.map(([x, y]) => [r3(x), r3(y)] as Pt) });
 
-  const list: Omit<BagPiece, "at">[] = [];
+  const list: Sized[] = [];
   if (G.win) {
     const w = G.win, hole = bagWindowShape(w.kind, X(-w.w / 2), Y(w.cy + w.h / 2), w.w, w.h);
     list.push(panel("front", "ตัวหน้า", "Front panel", 1, [hole]), panel("back", "ตัวหลัง", "Back panel", 1, []));
@@ -223,27 +228,24 @@ export function bagPieces(G: BagGeometry): BagPiece[] {
   } else list.push(panel("front", "ตัวหน้า / ตัวหลัง", "Front / back panel", 2, []));
 
   const hl = p.Lh + 2 * BAG_HANDLE_ATTACH, hw = 2 * p.wh;
-  const handle = rect("handle", "หูหิ้ว (พับครึ่ง)", "Handle (folded in half)", 2, hl, hw, sa,
+  const handle = rect("handle", "หูหิ้ว (พับครึ่ง)", "Handle (folded in half)", 2, hl, hw, sa, [],
     [[BAG_HANDLE_ATTACH, 0], [BAG_HANDLE_ATTACH, hw], [hl - BAG_HANDLE_ATTACH, 0], [hl - BAG_HANDLE_ATTACH, hw]]);
-  const extS = (ext * G.Ls) / H;   // ส่วนพับปากวัดตามแนวขอบข้างที่เอียง — ให้ขอบที่เย็บติดกันยาวเท่ากันพอดีแม้ปากบาน
   if (G.strip) {
-    const len = G.Lg + 2 * extS;
-    const xs = [...G.marks.map((s) => extS + s), ...(ext > 0.05 ? [extS, extS + G.Lg] : [])];
-    list.push(handle, rect("strip", "ข้าง + ก้น ชิ้นเดียว", "Gusset strip (sides + bottom)", 1, len, D, sa, xs.flatMap((x) => [[x, 0], [x, D]] as Pt[]), [[len * 0.06, D / 2], [len * 0.2, D / 2]]));
+    // ชิ้นข้าง+ก้น: ยาว = ขอบ U ของตัวหน้าพอดี · ปลาย 2 ข้าง (ขอบขวา/ซ้าย) อยู่ที่ปากกระเป๋า → เผื่อ = พับปาก
+    list.push(handle, rect("strip", "ข้าง + ก้น ชิ้นเดียว", "Gusset strip (sides + bottom)", 1, G.Lg, D, sa, [1, 3], G.marks.flatMap((x) => [[x, 0], [x, D]] as Pt[]), [[G.Lg * 0.06, D / 2], [G.Lg * 0.2, D / 2]]));
   } else {
-    const sideH = G.Ls + extS;
     list.push(
-      rect("side", "ข้าง", "Side piece", 2, D, sideH, sa, ext > 0.05 ? [[0, extS], [D, extS]] : [], [[D / 2, sideH * 0.25], [D / 2, sideH * 0.75]]),
-      rect("bottom", "ก้น", "Bottom piece", 1, W, D, sa, [[W / 2, 0], [W / 2, D]], [[W * 0.1, D / 2], [W * 0.3, D / 2]]),
+      rect("side", "ข้าง", "Side piece", 2, D, G.Ls, sa, [0], [], [[D / 2, G.Ls * 0.25], [D / 2, G.Ls * 0.75]]),   // ขอบบน = ปาก
+      rect("bottom", "ก้น", "Bottom piece", 1, W, D, sa, [], [[W / 2, 0], [W / 2, D]], [[W * 0.1, D / 2], [W * 0.3, D / 2]]),
       handle,
     );
   }
   // วางเรียงเป็นแถว (ตำแหน่ง = มุมซ้ายบนของเส้นเย็บ)
   const gap = 3, rowMax = Math.max(110, ...list.map((q) => q.cut.w));
   let x = 0, y = 0, rowH = 0;
-  return list.map((q) => {
+  return list.map(({ off, ...q }) => {
     if (x > 0 && x + q.cut.w > rowMax + 0.01) { x = 0; y += rowH + gap; rowH = 0; }
-    const at: [number, number] = [r3(x + q.allow), r3(y + q.allow)];
+    const at: [number, number] = [r3(x + off[0]), r3(y + off[1])];
     x += q.cut.w + gap; rowH = Math.max(rowH, q.cut.h);
     return { ...q, at };
   });
@@ -280,7 +282,7 @@ export function bagSeamRefs(G: BagGeometry): BagSeamRef[] {
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ (หู · แผ่น PVC หลังช่องโชว์) — พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่นที่ติด (y ลง) · ใช้ตอนประกอบ 3D (lib/pattern-assembly) */
 export type BagAttachRef = { kind: "handle" | "behind"; piece: BagPieceKey; on: BagPieceKey; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
 export function bagAttachRefs(G: BagGeometry): BagAttachRef[] {
-  const { p, ext } = G, Htop = p.H + ext, halfTop = p.W / 2 + (p.flare * Htop) / p.H;
-  const handle = (on: BagPieceKey): BagAttachRef => ({ kind: "handle", piece: "handle", on, a: [r3(halfTop - p.g / 2), r3(ext)], b: [r3(halfTop + p.g / 2), r3(ext)], len: p.Lh, w: p.wh, tail: BAG_HANDLE_ATTACH });
+  const { p, Wt } = G;   // ขอบบนของแผ่น = ปากกระเป๋า → โคนหูอยู่ที่ y = 0
+  const handle = (on: BagPieceKey): BagAttachRef => ({ kind: "handle", piece: "handle", on, a: [r3(Wt / 2 - p.g / 2), 0], b: [r3(Wt / 2 + p.g / 2), 0], len: p.Lh, w: p.wh, tail: BAG_HANDLE_ATTACH });
   return G.win ? [handle("front"), handle("back"), { kind: "behind", piece: "pvc", on: "front" }] : [handle("front")];
 }

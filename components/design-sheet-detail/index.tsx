@@ -629,7 +629,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const r = g[0];
       const mats: PieceMat[] = [];
       for (const x of g) { const m = matOf(x); if (m && !mats.some((y) => y.id === m.id)) mats.push(m); }
-      if (r.shape) return { shape: r.shape.shape, holes: r.shape.holes, count: r.pieces ?? 1, allow: r.shape.allow, name: r.shape.name, mats, pid: r.shape.pid ?? `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, at: r.shape.at, src: g.map((x) => x.key), grain: r.shape.grain ?? null, notches: r.shape.notches ?? [] };
+      if (r.shape) return { shape: r.shape.shape, holes: r.shape.holes, count: r.pieces ?? 1, allow: r.shape.allow, allowEdges: r.shape.allowEdges, name: r.shape.name, mats, pid: r.shape.pid ?? `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, at: r.shape.at, src: g.map((x) => x.key), grain: r.shape.grain ?? null, notches: r.shape.notches ?? [] };
       return { shape: { k: "rect", x: 0, y: 0, w: Number(r.width_cm), h: Number(r.length_cm) }, count: r.pieces ?? 1, mats, pid: `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, src: [r.key] };
     });
     const refMap = new Map<string, RefImage>();
@@ -660,7 +660,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         const norm = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches });   // เส้นทางผ้า/รอยบาก เลื่อนไปพร้อมชิ้น
         const ls: LineShape = {
           v: 1, shape: norm.shape, basis: res.basis, pid: p.pid, at: p.at,
-          ...(norm.holes.length ? { holes: norm.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.name ? { name: p.name } : {}), ...(res.refs.length ? { refs: res.refs } : {}),
+          ...(norm.holes.length ? { holes: norm.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.name ? { name: p.name } : {}), ...(res.refs.length ? { refs: res.refs } : {}),
           ...(norm.grain && norm.grain.length === 2 ? { grain: [norm.grain[0], norm.grain[1]] as NonNullable<LineShape["grain"]> } : {}),
           ...(norm.notches?.length ? { notches: norm.notches } : {}),
         };

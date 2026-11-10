@@ -34,6 +34,10 @@ export type AssemblyOk = {
   front: string; back: string; bridges: string[];
   panels: AsmPanel[]; sweeps: AsmSweep[]; handles: AsmHandle[]; behind: AsmBehind[];
   steps: AsmStep[]; loose: string[]; notes: AsmNote[];
+  /** สูงของแผ่นหน้า / แผ่นหลัง ในกรอบประกอบ */
+  panelH: [number, number];
+  /** แปลงจุดในกรอบประกอบ (x กึ่งกลาง = 0 · y ขึ้น) → พิกัดจุดติดของแผ่น (เทียบมุมซ้ายบนของกรอบเส้นเย็บ · y ลง) — ไว้สร้าง Attach จากหน้าจอ */
+  toLocal: { front: (p: Pt) => Pt; back: (p: Pt) => Pt };
 };
 export type Assembly = AssemblyOk | { ok: false; reason: "no-pieces" | "no-seams" | "no-structure"; loose: string[] };
 
@@ -53,7 +57,7 @@ const signed = (P: Pt[]) => { let s = 0; for (let i = 0; i < P.length; i++) { co
 const sameSide = (a: SeamSide, b: SeamSide) => a.pid === b.pid && a.from === b.from && a.count === b.count && a.n === b.n;
 
 /** กรอบของแผ่น: พิกัดกระดาน (y ลง) → พิกัดประกอบ (y ขึ้น · ปากหันขึ้น · กึ่งกลาง x = 0 · ก้น y = 0) */
-function frameOf(shape: Shape, swept: Pt[][]): { map: (p: Pt) => Pt; outline: Pt[]; w: number; h: number; ccw: boolean } {
+function frameOf(shape: Shape, swept: Pt[][]): { map: (p: Pt) => Pt; unmap: (p: Pt) => Pt; outline: Pt[]; w: number; h: number; ccw: boolean } {
   const flip = (P: Pt[]) => P.map(([x, y]) => [x, -y] as Pt);
   const O = flip(flattenShape(shape)), closed = [...O, O[0]];
   let up: Pt = [0, 1];
@@ -69,8 +73,9 @@ function frameOf(shape: Shape, swept: Pt[][]): { map: (p: Pt) => Pt; outline: Pt
   for (const [x, y] of R) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   const tx = -(x0 + x1) / 2, ty = -y0;
   const map = (p: Pt): Pt => { const q = rot([p[0], -p[1]]); return [q[0] + tx, q[1] + ty]; };
+  const unmap = ([x, y]: Pt): Pt => { const u = x - tx, v = y - ty; return [u * c + v * s, -(-u * s + v * c)]; };   // ย้อน: เลื่อนกลับ → หมุนกลับ → กลับแกน y
   const outline = R.map(([x, y]) => [x + tx, y + ty] as Pt);
-  return { map, outline, w: x1 - x0, h: y1 - y0, ccw: signed(outline) > 0 };
+  return { map, unmap, outline, w: x1 - x0, h: y1 - y0, ccw: signed(outline) > 0 };
 }
 
 type Link = { mine: SeamSide; other: SeamSide };
@@ -197,6 +202,11 @@ export function assemble(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] =
   return {
     ok: true, kind, depth, width: Math.max(ff.w, fb.w), height: Math.max(ff.h, fb.h), front, back, bridges,
     panels, sweeps, handles, behind, steps, loose: all.filter((pid) => !used.has(pid)), notes,
+    panelH: [ff.h, fb.h],
+    toLocal: {
+      front: (q) => { const b = shapeBox(F.shape), u = ff.unmap(q); return [u[0] - b.x, u[1] - b.y]; },
+      back: (q) => { const b = shapeBox(B.shape), u = fb.unmap(q); return [u[0] - b.x, u[1] - b.y]; },
+    },
   };
 }
 

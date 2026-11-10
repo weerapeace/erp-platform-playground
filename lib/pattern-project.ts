@@ -9,7 +9,8 @@
  *
  * ใช้ที่: app/api/pattern-projects · app/pattern-studio · เทสต์ lib/__tests__/pattern-project.test.ts
  */
-import { cleanAllow, cleanShape, pieceGeometry, type Pt, type Shape } from "@/lib/pattern-shape";
+import { cleanAllow, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type Pt, type Shape } from "@/lib/pattern-shape";
+import type { PatternLineInput } from "@/lib/pattern-sheet";
 import { cleanSeams, type Seam } from "@/lib/pattern-seams";
 
 export const PATTERN_PROJECT_STATUSES = ["draft", "ready", "archived"] as const;
@@ -23,6 +24,8 @@ export const MAX_PROJECT_PIECES = 60;
 
 export type ProjectPiece = {
   pid: string; name: string; count: number; allow: number;
+  /** เผื่อเย็บรายขอบ (ครบทุกขอบ · ดู lib/pattern-shape edgeAllowances) — ไม่มี = allow ค่าเดียวทั้งชิ้น */
+  allowEdges?: number[];
   shape: Shape; holes: Shape[]; grain: [Pt, Pt] | null; notches: Pt[]; at: [number, number];
 };
 export type PatternProject = {
@@ -50,11 +53,12 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
     const notches = (Array.isArray(r.notches) ? r.notches : []).map(pt).filter((n): n is Pt => !!n).slice(0, 200);
     const at = pt(r.at);
     seen.add(pid);
+    const allow = cleanAllow(r.allow), per = edgeAllowances(shape, r.allowEdges, allow);
     out.push({
-      pid, shape, holes, notches,
+      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}),
       name: String(r.name ?? "").trim().slice(0, 60),
       count: Math.min(999, Math.max(1, Math.round(fin(r.count) ?? 1))),
-      allow: cleanAllow(r.allow),
+      allow,
       grain: g && g[0] && g[1] ? [g[0], g[1]] : null,
       at: at ?? [0, 0],
     });
@@ -66,7 +70,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
 export function projectSummary(pieces: ProjectPiece[], basis: "box" | "area" = "box"): { pieceCount: number; areaCm2: number } {
   let pieceCount = 0, areaCm2 = 0;
   for (const p of pieces) {
-    const g = pieceGeometry({ shape: p.shape, holes: p.holes, allow: p.allow });
+    const g = pieceGeometry({ shape: p.shape, holes: p.holes, allow: p.allow, allowEdges: p.allowEdges });
     pieceCount += p.count;
     areaCm2 += (basis === "box" ? g.cutBox.w * g.cutBox.h : g.cutArea) * p.count;
   }
@@ -78,7 +82,7 @@ export function projectThumb(pieces: ProjectPiece[]): string | null {
   if (!pieces.length) return null;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const polys = pieces.slice(0, 30).map((p) => {
-    const g = pieceGeometry({ shape: p.shape, holes: p.holes, allow: p.allow });
+    const g = pieceGeometry({ shape: p.shape, holes: p.holes, allow: p.allow, allowEdges: p.allowEdges });
     for (const [x, y] of g.cut) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
     return [g.cut, ...g.holesCut];
   });
@@ -87,6 +91,21 @@ export function projectThumb(pieces: ProjectPiece[]): string | null {
   const d = polys.flat().map((P) => "M" + P.map(([x, y]) => `${f(x - x0)} ${f(y - y0)}`).join("L") + "Z").join("");
   const out = `${f(x1 - x0)} ${f(y1 - y0)}|${d}`;
   return out.length > 20000 ? null : out;
+}
+
+/** ชิ้นของแพทเทิร์น → "บรรทัด" ของตัวพิมพ์/ส่งออกกลาง (lib/pattern-sheet · PatternPrintView) — ชื่อชิ้นไปอยู่ช่องชื่อ · ตัดกี่ชิ้น = จำนวนของชิ้น */
+export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area" = "box", group = "ชิ้นแพทเทิร์น"): PatternLineInput[] {
+  return pieces.map((p, i) => {
+    const n = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches });
+    return {
+      key: p.pid, item_name: p.name || `ชิ้น ${i + 1}`, group_name: group, pieces: p.count,
+      shape: {
+        v: 1, shape: n.shape, basis,
+        ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}),
+        ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}),
+      },
+    };
+  });
 }
 
 export type ProjectPatch = Partial<{ name: string; status: PatternProjectStatus; note: string; sku_code: string | null; pieces: ProjectPiece[]; seams: Seam[]; basis: "box" | "area"; template: Record<string, unknown> | null }>;

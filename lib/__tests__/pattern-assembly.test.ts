@@ -25,9 +25,9 @@ describe("ประกอบกระเป๋าจากตะเข็บ (as
     expect(A.kind).toBe("wrap");
     expect([A.front, A.back, A.bridges]).toEqual(["front", "front", ["strip"]]);
     close(A.depth, 12);
-    close(A.height, 28 + 2);                                  // สูง + ส่วนพับปากที่ยังไม่ได้พับ
+    close(A.height, 28);                                      // รูปชิ้น = ขนาดสำเร็จ (พับปากเป็นเผื่อรายขอบ ไม่อยู่ในรูป)
     expect(A.sweeps).toHaveLength(1);
-    close(polyLen(A.sweeps[0].pts), G.Lg + (2 * (2 * G.Ls)) / 28, 0.1);
+    close(polyLen(A.sweeps[0].pts), G.Lg, 0.1);
     expect(A.sweeps[0].dir[1]).toBeLessThan(-0.9);            // ผิวข้าง+ก้นอยู่ใต้/รอบแผ่น → แยกชิ้นลงล่าง
     expect(A.handles.map((h) => h.side)).toEqual([1, -1]);    // หูทั้งสองฝั่ง
     close(A.handles[0].a[1], 28, 0.05);                       // โคนหูอยู่ระดับปากกระเป๋า
@@ -79,8 +79,8 @@ describe("ประกอบกระเป๋าจากตะเข็บ (as
     const { pieces, seams } = fromTemplate({});
     const turned = pieces.map((p) => (p.pid === "front" ? { ...p, ...rotatePiece({ shape: p.shape, holes: p.holes }, 90) } : p));
     const A = ok(assemble(turned, seams, []));
-    close(A.height, 30, 0.1);
-    close(A.width, 38.43, 0.2);
+    close(A.height, 28, 0.1);
+    close(A.width, 38, 0.2);
     expect(A.sweeps[0].dir[1]).toBeLessThan(-0.9);
   });
   it("ซองแบน: สี่เหลี่ยม 2 แผ่นเย็บ 3 ขอบ → pouch ปากหันขึ้น", () => {
@@ -106,6 +106,34 @@ describe("ประกอบกระเป๋าจากตะเข็บ (as
     const { pieces, seams } = fromTemplate({});
     const longer = pieces.map((p) => (p.pid === "strip" && p.shape.k === "rect" ? { ...p, shape: { ...p.shape, w: p.shape.w + 3 } } : p));
     expect(ok(assemble(longer, seams)).notes).toContain("mismatch");
+  });
+  it("toLocal: จุดในกรอบประกอบ แปลงกลับเป็นจุดติดของแผ่นได้ตรงกับที่แม่แบบให้มา", () => {
+    const { pieces, seams, attaches } = fromTemplate({});
+    const A = ok(assemble(pieces, seams, attaches)), h = A.handles[0], at = attaches[0];
+    const a = A.toLocal.front(h.a), b = A.toLocal.front(h.b);
+    close(a[0], at.a![0], 1e-6); close(a[1], at.a![1], 1e-6);
+    close(b[0], at.b![0], 1e-6); close(b[1], at.b![1], 1e-6);
+    close(A.panelH[0], 28, 0.05);
+  });
+  it("ติดหูเอง: วางโคนหูในกรอบประกอบ (ห่าง 10 · ต่ำจากปาก 2) → หูขึ้นตรงจุดนั้น แม้ตัวหน้าถูกหมุนบนกระดาน · ชิ้นหูไม่ค้างเป็นชิ้นยังไม่ได้ประกอบ", () => {
+    const { pieces, seams } = fromTemplate(BAG_PRESETS[1].params);            // ตัวหน้ากับตัวหลังคนละชิ้น
+    const turned = pieces.map((p) => (p.pid === "front" ? { ...p, ...rotatePiece({ shape: p.shape, holes: p.holes }, 90) } : p));
+    const A0 = ok(assemble(turned, seams, []));
+    expect(A0.loose).toContain("handle");
+    const mk = (side: "front" | "back", id: string): Attach => {
+      const top = A0.panelH[side === "front" ? 0 : 1] - 2;
+      return { id, kind: "handle", pid: "handle", on: side === "front" ? A0.front : A0.back, a: A0.toLocal[side]([-5, top]), b: A0.toLocal[side]([5, top]), len: 40, w: 2.5, tail: 4 };
+    };
+    const mine = [mk("front", "h0"), mk("back", "h1")];
+    expect(cleanAttaches(mine, new Set(turned.map((p) => p.pid)))).toHaveLength(2);
+    const A = ok(assemble(turned, seams, mine));
+    expect(A.loose).not.toContain("handle");
+    expect(A.handles.map((h) => h.side).sort()).toEqual([-1, 1]);
+    for (const h of A.handles) {
+      close(h.a[0], -5, 1e-6); close(h.b[0], 5, 1e-6);
+      close(h.a[1], A.height - 2, 0.05); close(h.b[1], A.height - 2, 0.05);
+    }
+    expect(A.steps.map((s) => s.key)).toContain("handle");
   });
   it("cleanAttaches: ทิ้งจุดติดที่ชี้ชิ้นที่ไม่มี / ค่าผิด / รหัสซ้ำ", () => {
     const good: Attach = { id: "a1", kind: "handle", pid: "h", on: "f", a: [1, 2], b: [9, 2], len: 40, w: 2.5, tail: 4 };

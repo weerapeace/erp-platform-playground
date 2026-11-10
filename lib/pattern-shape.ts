@@ -30,16 +30,18 @@ export type ShapeBasis = "box" | "area";
 /**
  * รูปทรงของบรรทัดตีราคา (design_sheet_cost_lines.shape) — shape/holes = เส้นเย็บ (ขนาดสำเร็จ) เริ่มที่ 0,0
  *   allow = เผื่อพับ/เผื่อเย็บ (ซม.) → เส้นตัด = ขยายออก allow · รูเจาะหดเข้า allow · กว้าง×ยาวในบรรทัด = กรอบของเส้นตัด
+ *   allowEdges = เผื่อเย็บรายขอบ (ซม. · 1 ค่าต่อขอบ เรียงตามจุดของรูป — สี่เหลี่ยม: บน ขวา ล่าง ซ้าย) เช่น ขอบปากพับ 3 ซม. ขอบอื่น 1 ซม.
+ *     ต้องมีครบทุกขอบ — จำนวนไม่ตรงกับรูป (เพิ่ม/ลบจุด) = ไม่ใช้ กลับไปใช้ allow ค่าเดียวทั้งชิ้น · รูเจาะใช้ allow เสมอ
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; allowEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[] };
 /** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
 export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null };
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
 export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };
 /** ชิ้นงาน 1 ชิ้น = เส้นรอบนอก + รูเจาะ + เผื่อพับ */
-export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number };
+export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number; allowEdges?: number[] | null };
 export type Box = { x: number; y: number; w: number; h: number };
 export type ShapeStats = { w: number; h: number; area: number; perimeter: number; fill: number };
 
@@ -220,6 +222,8 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   if (norm.notches?.length) out.notches = norm.notches;
   const allow = cleanAllow(o.allow);
   if (allow) out.allow = allow;
+  const per = edgeAllowances(norm.shape, o.allowEdges, allow);
+  if (per) out.allowEdges = per;
   if (typeof o.pid === "string" && /^[\w-]{1,40}$/.test(o.pid)) out.pid = o.pid;
   if (typeof o.name === "string" && o.name.trim()) out.name = o.name.trim().slice(0, 60);
   if (Array.isArray(o.at) && o.at.length === 2) { const x = fin(o.at[0]), y = fin(o.at[1]); if (x != null && y != null && Math.abs(x) < 1e5 && Math.abs(y) < 1e5) out.at = [r3(x), r3(y)]; }
@@ -258,7 +262,9 @@ export function refitLineShape(ls: LineShape | null | undefined, w: number | nul
   if (!ls) return ls;
   const a = ls.allow ?? 0;
   const b = shapeBox(ls.shape);
-  const nw = w != null && w > 2 * a ? w - 2 * a : b.w, nh = h != null && h > 2 * a ? h - 2 * a : b.h;
+  const g0 = ls.allowEdges ? pieceGeometry(ls) : null;   // เผื่อรายขอบ: ส่วนเผื่อซ้าย+ขวา / บน+ล่าง ไม่เท่ากัน → วัดจากกรอบจริง
+  const mw = g0?.segAllow ? g0.cutBox.w - g0.finished.w : 2 * a, mh = g0?.segAllow ? g0.cutBox.h - g0.finished.h : 2 * a;
+  const nw = w != null && w > mw ? w - mw : b.w, nh = h != null && h > mh ? h - mh : b.h;
   const f = fitPiece({ shape: ls.shape, holes: ls.holes ?? [], grain: ls.grain ?? null, notches: ls.notches ?? [] }, 0, 0, nw, nh);
   const norm = normalizePiece(f.shape, f.holes, { grain: f.grain, notches: f.notches });
   const { grain: _g, notches: _n, ...rest } = ls;   // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -576,6 +582,69 @@ export function offsetPolygon(P: Pt[], d: number): Pt[] {
   return out;
 }
 
+/** จุดรอบรูป + ขอบลำดับไหนของแต่ละช่วง (ช่วง i = จากจุด i ไปจุดถัดไป) — ขอบ = ช่วงระหว่างจุดของรูป (สี่เหลี่ยม 4 · วงรี 1) ลำดับเดียวกับ lib/pattern-seams */
+export function flattenWithEdges(s: Shape, steps = CURVE_STEPS): { pts: Pt[]; edge: number[]; n: number } {
+  if (s.k === "rect") return { pts: flattenShape(s), edge: [0, 1, 2, 3], n: 4 };
+  if (s.k === "ellipse") { const pts = flattenShape(s); return { pts, edge: pts.map(() => 0), n: 1 }; }
+  const N = s.nodes, pts: Pt[] = [], edge: number[] = [];
+  for (let i = 0; i < N.length; i++) {
+    const a = N[i], b = N[(i + 1) % N.length];
+    pts.push([a.x, a.y]); edge.push(i);
+    if (hasOut(a) || hasIn(b)) {
+      const x1 = a.x + (a.ox ?? 0), y1 = a.y + (a.oy ?? 0), x2 = b.x + (b.ix ?? 0), y2 = b.y + (b.iy ?? 0);
+      for (let t = 1; t < steps; t++) {
+        const u = t / steps, v = 1 - u;
+        pts.push([v * v * v * a.x + 3 * v * v * u * x1 + 3 * v * u * u * x2 + u * u * u * b.x, v * v * v * a.y + 3 * v * v * u * y1 + 3 * v * u * u * y2 + u * u * u * b.y]);
+        edge.push(i);
+      }
+    }
+  }
+  return { pts, edge, n: N.length };
+}
+
+/** จำนวนขอบของรูป (สี่เหลี่ยม 4 · วงรี 1 · รูปจากจุด = จำนวนจุด) */
+export const shapeEdgeCount = (s: Shape): number => (s.k === "rect" ? 4 : s.k === "ellipse" ? 1 : s.nodes.length);
+
+/** เผื่อเย็บรายขอบที่ใช้ได้จริง: ต้องครบทุกขอบ (จำนวนตรงกับรูป) และมีอย่างน้อย 1 ขอบที่ต่างจากค่ารวม — ไม่งั้น = null (ใช้ค่ารวมทั้งชิ้น) */
+export function edgeAllowances(s: Shape, raw: unknown, base = 0): number[] | null {
+  if (!Array.isArray(raw) || raw.length !== shapeEdgeCount(s)) return null;
+  const out = raw.map(cleanAllow);
+  return out.some((v) => Math.abs(v - base) > 1e-9) ? out : null;
+}
+
+/**
+ * ขยายรูปหลายเหลี่ยมออกด้วยระยะต่างกันในแต่ละช่วง (d[i] = ระยะของช่วงจากจุด i ไปจุดถัดไป) — เส้นตัดของชิ้นที่เผื่อเย็บรายขอบ
+ * มุมที่สองขอบเผื่อไม่เท่ากัน = ต่อเส้นขนานของสองขอบให้ชนกัน · ขอบแนวเดียวกันแต่เผื่อต่างกัน = หักเป็นขั้น · มุมแหลมมาก = ตัดมุมเป็น 2 จุด
+ */
+export function offsetPolygonBy(P: Pt[], d: number[]): Pt[] {
+  if (P.length < 3) return P;
+  const idx: number[] = [];
+  for (let i = 0; i < P.length; i++) { const q = P[(i + 1) % P.length]; if (Math.hypot(q[0] - P[i][0], q[1] - P[i][1]) > 1e-9) idx.push(i); }
+  const n = idx.length;
+  if (n < 3) return P;
+  const pts = idx.map((i) => P[i]), dd = idx.map((i) => d[i] ?? 0);
+  const s = signedArea(pts) > 0 ? 1 : -1;
+  const L = pts.map((a, i) => {
+    const b = pts[(i + 1) % n];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    const nx = s * dy, ny = -s * dx;
+    return { p: [a[0] + nx * dd[i], a[1] + ny * dd[i]] as Pt, v: [dx, dy] as Pt, n: [nx, ny] as Pt, d: dd[i] };
+  });
+  const out: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const l1 = L[(i - 1 + n) % n], l2 = L[i], v = pts[i];
+    const e1: Pt = [v[0] + l1.n[0] * l1.d, v[1] + l1.n[1] * l1.d], e2: Pt = [v[0] + l2.n[0] * l2.d, v[1] + l2.n[1] * l2.d];
+    const den = l1.v[0] * l2.v[1] - l1.v[1] * l2.v[0];
+    if (Math.abs(den) < 1e-9) { if (Math.hypot(e1[0] - e2[0], e1[1] - e2[1]) > 1e-9) out.push(e1, e2); else out.push(e2); continue; }
+    const t = ((l2.p[0] - l1.p[0]) * l2.v[1] - (l2.p[1] - l1.p[1]) * l2.v[0]) / den;
+    const q: Pt = [l1.p[0] + l1.v[0] * t, l1.p[1] + l1.v[1] * t];
+    if (Math.hypot(q[0] - v[0], q[1] - v[1]) > Math.max(Math.abs(l1.d), Math.abs(l2.d), 0.01) * 4) out.push(e1, e2);
+    else out.push(q);
+  }
+  return out;
+}
+
 export type PieceGeometry = {
   sew: Pt[];            // เส้นเย็บ (ขนาดสำเร็จ)
   cut: Pt[];            // เส้นตัด (รวมเผื่อพับ)
@@ -584,13 +653,17 @@ export type PieceGeometry = {
   finished: Box; cutBox: Box;
   finishedArea: number; cutArea: number;   // หักรูแล้ว
   perimeter: number; cutPerimeter: number; // รอบรูปเส้นเย็บ (รวมขอบรู) / เส้นตัด
+  segAllow: number[] | null;               // เผื่อเย็บของแต่ละช่วงเส้นเย็บ (มีเมื่อใช้เผื่อรายขอบ · ไม่มี = ค่าเดียวทั้งชิ้น)
 };
 
 /** คิดทุกอย่างของชิ้น: เส้นเย็บ · เส้นตัด · รู · กรอบ · พื้นที่ · รอบรูป */
 export function pieceGeometry(g: PieceGeom): PieceGeometry {
   const a = cleanAllow(g.allow);
-  const sew = flattenShape(g.shape);
-  const cut = a ? offsetPolygon(sew, a) : sew;
+  const per = edgeAllowances(g.shape, g.allowEdges, a);   // เผื่อรายขอบ (ครบทุกขอบและต่างจากค่ารวม) — ไม่มี = ค่าเดียวทั้งชิ้นแบบเดิม
+  const fe = per ? flattenWithEdges(g.shape) : null;
+  const sew = fe ? fe.pts : flattenShape(g.shape);
+  const segAllow = fe && per ? fe.edge.map((e) => per[e]) : null;
+  const cut = segAllow ? offsetPolygonBy(sew, segAllow) : a ? offsetPolygon(sew, a) : sew;
   const holesSew = (g.holes ?? []).map((h) => flattenShape(h));
   const holesCut = holesSew.map((h) => {
     if (!a) return h;
@@ -601,10 +674,10 @@ export function pieceGeometry(g: PieceGeom): PieceGeometry {
   }).filter((h): h is Pt[] => !!h);
   const holesA = (hs: Pt[][]) => hs.reduce((m, h) => m + polyArea(h), 0);
   return {
-    sew, cut, holesSew, holesCut,
+    sew, cut, holesSew, holesCut, segAllow,
     finished: polyBox(sew), cutBox: polyBox(cut),
     finishedArea: Math.max(0, shapeArea(g.shape) - (g.holes ?? []).reduce((m, h) => m + shapeArea(h), 0)),
-    cutArea: a ? Math.max(0, polyArea(cut) - holesA(holesCut)) : Math.max(0, shapeArea(g.shape) - (g.holes ?? []).reduce((m, h) => m + shapeArea(h), 0)),   // ไม่เผื่อ = พื้นที่แม่นตามสูตร
+    cutArea: a || segAllow ? Math.max(0, polyArea(cut) - holesA(holesCut)) : Math.max(0, shapeArea(g.shape) - (g.holes ?? []).reduce((m, h) => m + shapeArea(h), 0)),   // ไม่เผื่อ = พื้นที่แม่นตามสูตร
     perimeter: shapePerimeter(g.shape) + holesSew.reduce((m, h) => m + polyLen(h), 0),
     cutPerimeter: polyLen(cut) + holesCut.reduce((m, h) => m + polyLen(h), 0),
   };
@@ -1017,20 +1090,21 @@ export function midEdgeNotches(s: Shape, minLen = 3): Pt[] {
  * เส้นรอยบากสำหรับพิมพ์/DXF: จากเส้นตัด (ห่างเส้นเย็บ = เผื่อพับ) เข้าไปในชิ้น len ซม.
  * sew = จุดรอบเส้นเย็บ · notches = จุดรอยบาก (บน/ใกล้เส้นเย็บ)
  */
-export function notchSegments(sew: Pt[], notches: Pt[], allow = 0, len = 0.5): [Pt, Pt][] {
+export function notchSegments(sew: Pt[], notches: Pt[], allow = 0, len = 0.5, segAllow?: number[] | null): [Pt, Pt][] {
   if (sew.length < 3) return [];
   const s = signedArea(sew) > 0 ? 1 : -1;
   return notches.map((q): [Pt, Pt] => {
-    let best = { d: Infinity, nx: 0, ny: 0, px: q[0], py: q[1] };
+    let best = { d: Infinity, nx: 0, ny: 0, px: q[0], py: q[1], i: -1 };
     for (let i = 0; i < sew.length; i++) {
       const a = sew[i], b = sew[(i + 1) % sew.length];
       const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
       if (L2 <= 0) continue;
       const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2));
       const px = a[0] + dx * t, py = a[1] + dy * t, d = Math.hypot(px - q[0], py - q[1]);
-      if (d < best.d) { const L = Math.sqrt(L2); best = { d, nx: (s * dy) / L, ny: (-s * dx) / L, px, py }; }
+      if (d < best.d) { const L = Math.sqrt(L2); best = { d, nx: (s * dy) / L, ny: (-s * dx) / L, px, py, i }; }
     }
-    const sx = best.px + best.nx * allow, sy = best.py + best.ny * allow;
+    const al = segAllow && best.i >= 0 && segAllow[best.i] != null ? segAllow[best.i] : allow;   // เผื่อรายขอบ: รอยบากเริ่มจากเส้นตัดของขอบนั้น
+    const sx = best.px + best.nx * al, sy = best.py + best.ny * al;
     return [[sx, sy], [sx - best.nx * len, sy - best.ny * len]];
   });
 }
