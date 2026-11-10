@@ -10,6 +10,7 @@ import { WORKFLOWS } from "@/lib/workflow-registry";
 import { LINE_SLOTS, LINE_ALL_EVENTS } from "@/lib/line-registry";
 import {
   NOTIFY_TOPICS, NOTIFY_AREAS, NOTIFY_REPORT_FILES, notifyTargetCell, notifyTopicState, notifyGhostRules, notifyReportTopics, notifyDaysText, notifyGapNodes,
+  NOTIFY_SAMPLES, NOTIFY_NODE_SUGGEST, notifyTopicSwitch, notifyTestGroup, notifyTopicStat,
   type NotifyLive,
 } from "@/lib/flow-map-notify";
 
@@ -67,6 +68,46 @@ describe("แผนผังการทำงาน — แท็บแจ้�
     expect(notifyDaysText([0, 1, 2, 3, 4, 5, 6])).toBe("ทุกวัน");
     expect(notifyGapNodes("sell")).toContain("qt");
     expect(notifyGapNodes("sell")).not.toContain("bill");
+  });
+});
+
+describe("แผนผังการทำงาน — แผงกระดิ่งบนกล่อง", () => {
+  const topic = (id: string) => NOTIFY_TOPICS.find((x) => x.id === id)!;
+  it("ทุกเรื่องที่ผูกกล่องมีตัวอย่างข้อความ · เรื่องที่ลงกระดิ่งมีตัวอย่างกระดิ่ง · ไม่มีตัวเลขเงินจริง", () => {
+    for (const k of Object.keys(NOTIFY_SAMPLES)) expect(NOTIFY_TOPICS.some((x) => x.id === k), `ตัวอย่างของเรื่องที่ไม่มี: ${k}`).toBe(true);
+    for (const x of NOTIFY_TOPICS.filter((y) => y.node)) {
+      const s = NOTIFY_SAMPLES[x.id];
+      expect(s?.bell || s?.line, `${x.id}: ไม่มีตัวอย่างข้อความ`).toBeTruthy();
+      if (x.send.some((t) => t.kind === "bell")) expect(s?.bell, `${x.id}: ลงกระดิ่งแต่ไม่มีตัวอย่างกระดิ่ง`).toBeTruthy();
+      if (x.send.some((t) => t.kind === "group" || t.kind === "dm")) expect(s?.line, `${x.id}: ส่ง LINE แต่ไม่มีตัวอย่าง LINE`).toBeTruthy();
+      expect(JSON.stringify(s), `${x.id}: มีตัวเลขเงิน`).not.toMatch(/฿\s*\d/);
+    }
+  });
+  it("ข้อเสนอชี้กล่องที่มีจริง", () => {
+    for (const [n, list] of Object.entries(NOTIFY_NODE_SUGGEST)) {
+      expect(FLOW_NODES[n], n).toBeTruthy();
+      expect(list.length, n).toBeGreaterThan(0);
+    }
+  });
+  it("สวิตช์ทั้งเรื่อง: นับกฎที่มีจริง + สวิตช์ LINE (ไม่นับที่กดส่งเอง)", () => {
+    expect(notifyTopicSwitch(topic("pr_created"), NOTIFY_LIVE)).toEqual({ rules: [], events: ["pr_created"], can: true, on: true });
+    expect(notifyTopicSwitch(topic("qc_defect"), NOTIFY_LIVE)).toMatchObject({ rules: [], events: ["qc_defect"], can: true, on: false });
+    expect(notifyTopicSwitch(topic("qc_pending"), NOTIFY_LIVE)).toMatchObject({ rules: ["qc.pending"], events: ["qc_pending"], on: true });
+    expect(notifyTopicSwitch(topic("wo_due_soon"), { ...NOTIFY_LIVE, line: { ...NOTIFY_LIVE.line, off: { wo_due_soon: true } } }).on).toBe(false);
+    expect(notifyTopicSwitch(topic("china_pay"), NOTIFY_LIVE).can).toBe(false);
+    expect(notifyTopicSwitch(topic("catch_up_request"), NOTIFY_LIVE).can).toBe(false);
+  });
+  it("กลุ่มทดสอบ LINE = กลุ่มแรกที่ตั้งแล้ว · ไม่ตั้ง / ปิดสวิตช์ / ไม่มีบอท = ทดสอบไม่ได้", () => {
+    expect(notifyTestGroup(topic("pr_created"), NOTIFY_LIVE)).toBe("purchase_request");
+    expect(notifyTestGroup(topic("po_created"), NOTIFY_LIVE)).toBe("purchase_request");
+    expect(notifyTestGroup(topic("subtask_submitted"), NOTIFY_LIVE)).toBe("creative");
+    expect(notifyTestGroup(topic("wo_dispatched"), NOTIFY_LIVE)).toBeNull();
+    expect(notifyTestGroup(topic("qc_defect"), NOTIFY_LIVE)).toBeNull();
+    expect(notifyTestGroup(topic("pr_created"), { ...NOTIFY_LIVE, line: { ...NOTIFY_LIVE.line, token: false } })).toBeNull();
+  });
+  it("ตัวเลข 7 วันรวมหลาย event_type", () => {
+    const live = { ...NOTIFY_LIVE, stats: { task_overdue: { n: 10, read: 2, users: 3, last: "2026-11-09", n7: 4, read7: 1 }, task_due_soon: { n: 5, read: 0, users: 2, last: "2026-11-08", n7: 2, read7: 1 } } };
+    expect(notifyTopicStat(topic("task_due"), live)).toMatchObject({ n: 15, n7: 6, read7: 2, last: "2026-11-09" });
   });
 });
 

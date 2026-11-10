@@ -37,6 +37,34 @@ type LineData = { groups: Record<string, string>; disabled_events: Record<string
 type ReportDraft = { is_enabled: boolean; send_time: string; days: number[]; email: boolean; popup: boolean; line: boolean; discord: boolean };
 
 const OTHER_WORD: Record<string, string> = { approvers: "ผู้อนุมัติของเอกสาร", requester: "ผู้ขอของเอกสาร", mentioned: "คนที่ถูกแท็ก" };
+
+/**
+ * สวิตช์เปิด/ปิดทั้งเรื่องแบบด่วน (แผงกระดิ่งบนกล่อง components/flow-map/node-notify) — เขียนที่เดียวกับป๊อปนี้:
+ *   กฎกระดิ่ง → /api/admin/notification-rules (อ่านกฎเต็มก่อน แล้วส่งกลับทั้งก้อนพร้อม active ใหม่ · API เป็น upsert)
+ *   สวิตช์ LINE → /api/admin/line-console { event, enabled }
+ * rules/events มาจาก notifyTopicSwitch() · คืนรายการที่ล้ม (ว่าง = สำเร็จหมด) · ทุก API ลงประวัติเอง
+ */
+export async function saveNotifyTopicSwitch(rules: string[], events: string[], enabled: boolean, actor: string | null): Promise<string[]> {
+  const fails: string[] = [];
+  const send = async (label: string, url: string, method: string, body: unknown) => {
+    try {
+      const r = await apiFetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) fails.push(`${label}: ${j?.error ?? "บันทึกไม่สำเร็จ"}`);
+    } catch { fails.push(`${label}: บันทึกไม่สำเร็จ`); }
+  };
+  for (const k of rules) {
+    try {
+      const j = await apiFetch(`/api/admin/notification-rules?event_type=${encodeURIComponent(k)}`).then((r) => r.json());
+      const rule = ((j?.data ?? []) as Rule[])[0];
+      if (!rule) { fails.push(`กระดิ่ง: ไม่พบกฎ “${k}”`); continue; }
+      if (rule.active === enabled) continue;
+      await send(`กระดิ่ง (${rule.name})`, "/api/admin/notification-rules", "PATCH", { ...rule, active: enabled, actor });
+    } catch { fails.push("กระดิ่ง: อ่านกฎเดิมไม่สำเร็จ"); }
+  }
+  for (const ev of events) await send("สวิตช์ LINE", "/api/admin/line-console", "POST", { event: ev, enabled });
+  return fails;
+}
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const box = "rounded-lg border border-slate-200 bg-white px-3 py-2.5";
 

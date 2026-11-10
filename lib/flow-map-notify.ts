@@ -52,7 +52,8 @@ export type NotifyTopic = {
 };
 
 /** สถานะสดจาก /api/flow-map/notify — boolean / ตัวนับเท่านั้น (ไม่มี token / group id) */
-export type NotifyStat = { n: number; read: number; users: number; last: string | null };
+/** n/read = 90 วัน · n7/read7 = 7 วันล่าสุด (แผงกระดิ่งบนกล่อง) */
+export type NotifyStat = { n: number; read: number; users: number; last: string | null; n7?: number; read7?: number };
 export type NotifyReport = { id: string; name: string; time: string | null; days: number[]; on: boolean; email: boolean; popup: boolean; discord: boolean; line: boolean };
 export type NotifyLive = {
   line: { token: boolean; main: boolean; groups: Partial<Record<string, boolean>>; off: Record<string, boolean> };
@@ -75,6 +76,8 @@ export type NotifyLive = {
 };
 
 export const NOTIFY_DAYS = 90;
+/** ช่วงสั้นที่โชว์ในแผงกระดิ่งบนกล่อง */
+export const NOTIFY_RECENT_DAYS = 7;
 export const NOTIFY_CHANNELS: Record<NotifyChannel, { label: string; icon: string }> = {
   erp: { label: "ERP (กระดิ่ง/ป๊อปอัป)", icon: "🔔" },
   line: { label: "LINE", icon: "💬" },
@@ -223,6 +226,7 @@ export const NOTIFY_TOPICS: NotifyTopic[] = [
   { id: "subtask_submitted", area: "creative", label: "ส่งงานย่อยรอตรวจ", node: "ds", events: ["subtask_submitted"],
     when: "คนทำกดส่งงานย่อย",
     send: [B("ผู้ตรวจ"), G("กลุ่มครีเอทีฟ", ["creative", "main"], "subtask_submitted")],
+    note: "เป็นงานย่อยครีเอทีฟทุกชนิด (รวมงานคอนเทนต์) ไม่ใช่เฉพาะใบงานออกแบบ — ใบงานออกแบบเองยังไม่มีแจ้งเตือนของตัวเอง",
     files: ["app/api/creative-tasks/[id]/subtasks/route.ts", "lib/creative-tasks-server.ts"] },
   { id: "creative_review", area: "creative", label: "รอตรวจ · อนุมัติ · ถูกพูดถึง · รับงานย่อย",
     events: ["task_need_review", "task_approve", "task_mention", "subtask_assigned", "subtask_self_join"],
@@ -393,10 +397,12 @@ export function notifyTopicState(topic: NotifyTopic, live: NotifyLive): { state:
 export function notifyTopicStat(topic: NotifyTopic, live: NotifyLive): NotifyStat | null {
   if (!topic.events?.length) return null;
   const out: NotifyStat = { n: 0, read: 0, users: 0, last: null };
+  out.n7 = 0; out.read7 = 0;
   for (const e of topic.events) {
     const s = live.stats[e];
     if (!s) continue;
     out.n += s.n; out.read += s.read; out.users = Math.max(out.users, s.users);
+    out.n7 += s.n7 ?? 0; out.read7 += s.read7 ?? 0;
     if (s.last && (!out.last || s.last > out.last)) out.last = s.last;
   }
   return out;
@@ -414,3 +420,90 @@ export const notifyGhostRules = (live: NotifyLive) => live.rules.filter((r) => r
 export const notifyTopicsOfNode = (node: string): NotifyTopic[] => NOTIFY_TOPICS.filter((t) => t.node === node);
 /** กล่องของฝ่ายที่ยังไม่มีแจ้งเตือนเลย */
 export const notifyGapNodes = (area: NotifyArea): string[] => NOTIFY_AREAS[area].nodes.filter((n) => !NOTIFY_TOPICS.some((t) => t.node === n));
+
+// ── แผงกระดิ่งบนกล่อง (2026-11-10) ──
+// เจ้าของขอ "กดกระดิ่งแล้วดูได้ว่าแจ้งอะไรบ้าง จัดการได้ด้วย" → กดกระดิ่งเปิดแผงขวาของผัง (components/flow-map/node-notify.tsx) ไม่สลับแท็บ
+// ตัวอย่างข้อความ = รูปแบบเดียวกับที่โค้ดส่งจริง (คำใน {} = ค่าจริงตอนส่ง) · ห้ามใส่ตัวเลขเงินจริง / ชื่อลูกค้าจริง
+//   เปลี่ยนข้อความแจ้งเตือนในโค้ดเมื่อไร → แก้ตัวอย่างที่นี่ด้วย (เทสต์บังคับ: ทุกเรื่องที่ผูกกล่องต้องมีตัวอย่าง)
+
+export type NotifySample = {
+  /** กระดิ่งในระบบ [หัวข้อ, รายละเอียด] */
+  bell?: [string, string];
+  /** LINE (กลุ่ม / ส่วนตัว) */
+  line?: string;
+};
+
+export const NOTIFY_SAMPLES: Record<string, NotifySample> = {
+  pr_created: {
+    bell: ["ใบขอซื้อใหม่ 2 ใบ", "{ผู้ขอ} · 24 ชิ้น · {ยอดรวม}\n• ซิป #5 สีส้ม ×12 หลา — {ใช้กับ MO}\n• ผ้าซับใน ×12 เมตร"],
+    line: "ใบขอซื้อใหม่ 2 ใบ\nผู้ขอ: {ผู้ขอ}\n• ซิป #5 สีส้ม ×12 หลา\n• ผ้าซับใน ×12 เมตร\nจำนวนรวม: 24 ชิ้น\nยอดรวม: {ยอดรวม}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ",
+  },
+  pr_rejected: {
+    bell: ["ใบขอซื้อ {เลขใบ} ไม่ได้รับอนุมัติ", "เหตุผล: {เหตุผล}"],
+    line: "ใบขอซื้อไม่อนุมัติ 1 ใบ\nโดย: {ผู้อนุมัติ}\nเหตุผล: {เหตุผล}\n• {สินค้า} ×{จำนวน}\n→ เปิดแอปจัดซื้อเพื่อดูรายละเอียด",
+  },
+  po_created: { line: "สั่งซื้อแล้ว 2 ใบ\nโดย: {ชื่อ}\n• {เลข PO} · {ร้าน} · {ยอด} (3 รายการ)\n→ เปิดแอปจัดซื้อเพื่อติดตามของเข้า" },
+  goods_received: { line: "รับของเข้าแล้ว · {เลขใบรับ}\nPO {เลข PO} · {ร้าน}\nรับ 3 รายการ · เข้าสต๊อก 3 รายการ\nสถานะใบสั่งซื้อ: {สถานะ}\nผู้รับ: {ชื่อ}" },
+  wo_dispatched: { line: "จ่ายงานใหม่ · {SKU}\n{ชื่อสินค้า}\nช่าง {ชื่อ} · โต๊ะ {แผนก} · {จำนวน} ชิ้น\nกำหนด {วันที่}\n{ลิงก์}" },
+  wo_due_soon: {
+    bell: ["งานใกล้/เกินกำหนด 12 รายการ", "เลยกำหนดแล้ว 9 รายการ · {SKU} · {โต๊ะ} · เลยกำหนด 66 วัน | …"],
+    line: "งานใกล้/เกินกำหนด · {SKU}\nโต๊ะ {แผนก} · เหลือส่ง {จำนวน} ชิ้น\n{วันที่} ({เหลือกี่วัน})\n{ลิงก์}",
+  },
+  material_request: {
+    bell: ["ขอเพิ่มวัตถุดิบ · {ชื่อวัตถุดิบ}", "ผู้ขอ: {ชื่อ} · {หมายเหตุ}"],
+    line: "ขอเพิ่มวัตถุดิบ · {ชื่อวัตถุดิบ}\nผู้ขอ: {ชื่อ}\n{หมายเหตุ}\n{ลิงก์}",
+  },
+  material_request_result: { bell: ["อนุมัติแล้ว · {ชื่อวัตถุดิบ}", "สร้างเป็น {รหัสใหม่} แล้ว"] },
+  bom_request: {
+    bell: ["ขอแก้สูตร · {SKU}", "ผู้ขอ: {ชื่อ} · เปลี่ยน 3 รายการ · {หมายเหตุ}"],
+    line: "ขอแก้สูตร · {SKU}\n{ชื่อสินค้า}\nผู้ขอ: {ชื่อ} · 3 รายการ\n{หมายเหตุ}\n{ลิงก์}",
+  },
+  bom_request_result: { bell: ["อนุมัติแล้ว · แก้สูตร {SKU}", "เขียนลงสูตร {รหัสสูตร} แล้ว"] },
+  catch_up_request: { bell: ["รอยืนยันอัปเดตงาน · {SKU}", "{ชื่อ} ส่งอัปเดต {เลข MO} — {ขั้นที่ทำ}"] },
+  qc_pending: {
+    bell: ["มีงานรอ QC · {SKU}", "{ช่าง} · 30 ชิ้น · {ชื่อสินค้า}"],
+    line: "มีงานรอ QC · {SKU}\n{ชื่อสินค้า}\nช่าง {ชื่อ} · 30 ชิ้น\n{ลิงก์}",
+  },
+  qc_defect: {
+    bell: ["พบของเสีย · {SKU}", "{เหตุผล} · 2 ชิ้น · ช่าง {ชื่อ}"],
+    line: "พบของเสีย · {SKU}\n{ชื่อสินค้า}\n{เหตุผล} · 2 ชิ้น · ช่าง {ชื่อ}\n{ลิงก์}",
+  },
+  qc_return: { line: "งานถูกตีกลับให้แก้/ทำใหม่\n{SKU} · {ชื่อสินค้า}\nจำนวน 2 ชิ้น\n{ลิงก์}" },
+  so_confirm: { bell: ["SO {เลขที่} ยืนยันแล้ว", "{ลูกค้า} · {ยอด} · โดย {ชื่อ}"] },
+  subtask_submitted: {
+    bell: ["รออนุมัติงานย่อย: {ชนิดงานย่อย}", "{เลขงาน} {ชื่องาน}"],
+    line: "ส่งงานย่อยรอตรวจ · {ชนิดงานย่อย}\n{เลขงาน} {ชื่องาน}\nโดย {ชื่อ}\n[ปุ่ม เปิดดูงาน]",
+  },
+  china_pay: { line: "{ข้อความที่พนักงานกดส่งจากแอปโอนเงินจีน — บิล / ยอดโอน / เรตหยวน}" },
+};
+
+/** เรื่องแจ้งเตือนที่ "ควรมี" ต่อกล่อง (ยังไม่ได้ทำ) — แผงกระดิ่งโชว์ใต้รายการ + ปุ่มใส่ตะกร้าขอให้ทำ
+ *  ทำแล้วเมื่อไร → ย้ายเป็นเรื่องใน NOTIFY_TOPICS แล้วลบข้อเสนอนั้นทิ้ง */
+export const NOTIFY_NODE_SUGGEST: Record<string, string[]> = {
+  qt: ["ลูกค้าตอบรับใบเสนอราคา → แจ้งเซลส์ให้เปิดใบสั่งขาย (ในแอป)", "ใบเสนอราคาใกล้หมดอายุแต่ลูกค้ายังไม่ตอบ → แจ้งเซลส์เจ้าของใบ"],
+  so: ["ใบสั่งขายใหม่ → แจ้งหัวหน้าผลิตให้เปิดใบสั่งผลิต (ในแอป)", "ใกล้วันส่งแต่ยังไม่มีใบสั่งผลิต → แจ้งเซลส์ + หัวหน้าผลิต"],
+  mo: ["มีใบสั่งผลิตใหม่ → แจ้งหัวหน้าผลิต (ในแอป · ไม่ส่ง LINE เพราะเกิดบ่อย)"],
+  ds: ["ใบงานออกแบบรอตรวจ / ลูกค้าตอบกลับ → แจ้งผู้ออกแบบ"],
+  pay: ["รอบเงินเดือนอนุมัติแล้วแต่ยังไม่กดจ่าย → แจ้งแอดมินในแอป (ห้ามส่งเข้า LINE กลุ่ม เพราะเป็นตัวเลขเงิน)"],
+  wo: ["จ่ายงานบ่อย → ส่ง LINE เป็นสรุปวันละครั้งแทนทีละใบ (ประหยัดโควตา LINE)"],
+};
+
+/** สวิตช์เปิด/ปิดทั้งเรื่องจากแผงกระดิ่ง: กฎกระดิ่งที่มีอยู่จริง + สวิตช์ LINE ในศูนย์ LINE (ไม่นับที่คนกดส่งเอง)
+ *  can = มีอะไรให้สลับ · on = อย่างน้อย 1 ทางเปิดอยู่ · ค่าเก็บที่เดิม (erp_notification_rules / line_config.disabled_events) */
+export function notifyTopicSwitch(topic: NotifyTopic, live: NotifyLive): { rules: string[]; events: string[]; can: boolean; on: boolean } {
+  const rules = [...new Set(topic.send.flatMap((s) => (s.kind === "bell" && s.rule && live.rules.some((r) => r.event === s.rule) ? [s.rule] : [])))];
+  const events = [...new Set(topic.send.flatMap((s) => (s.kind === "group" && s.event && !s.manual ? [s.event] : [])))];
+  const on = rules.some((k) => live.rules.find((r) => r.event === k)?.active) || events.some((e) => !live.line.off[e]);
+  return { rules, events, can: rules.length + events.length > 0, on };
+}
+
+/** กลุ่ม LINE ที่ใช้ทดสอบส่งของเรื่องนี้ = กลุ่มแรกที่ตั้งแล้ว (ไม่นับกลุ่มหลัก — ศูนย์ LINE ทดสอบได้เฉพาะช่องที่มีชื่อ) · null = ทดสอบ LINE ไม่ได้ */
+export function notifyTestGroup(topic: NotifyTopic, live: NotifyLive): LineSlotKey | null {
+  if (!live.line.token) return null;
+  for (const s of topic.send) {
+    if (s.kind !== "group" || (s.event && live.line.off[s.event])) continue;
+    const g = s.groups.find((x) => (x === "main" ? live.line.main : !!live.line.groups[x]));
+    if (g && g !== "main") return g;
+  }
+  return null;
+}

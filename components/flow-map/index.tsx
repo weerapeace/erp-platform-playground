@@ -27,7 +27,8 @@ import { useFlowNotes, FlowInternalNotes } from "./notes";
 import { useFlowNotify, FlowNotifyBoard, FlowNotifyPanel, NodeNotifyList, notifyNodeColor } from "./notify";
 import { LineConsole } from "@/components/line-console";
 import { NotifyEditModal } from "@/components/flow-map/notify-edit";
-import { notifyAllTopics, notifyTopicsOfNode } from "@/lib/flow-map-notify";
+import { NodeNotifyPanel } from "@/components/flow-map/node-notify";
+import { NOTIFY_NODE_SUGGEST, notifyAllTopics, notifyTopicsOfNode } from "@/lib/flow-map-notify";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 
 type Sel = { k: "n"; id: string } | { k: "e"; id: string } | null;
@@ -120,6 +121,7 @@ export function FlowMap() {
   const [notifySel, setNotifySel] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [notifyEditId, setNotifyEditId] = useState<string | null>(null);   // ป๊อปแก้การแจ้งเตือน (แอดมิน)
+  const [bellNode, setBellNode] = useState<string | null>(null);   // กดกระดิ่งบนกล่อง → แผงแจ้งเตือนของกล่อง (ผังยังอยู่ ไม่สลับแท็บ)
   const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
   const notesApi = useFlowNotes();
@@ -166,7 +168,8 @@ export function FlowMap() {
     const d = drawn.find((x) => x.id === sel.id);
     return !d || fmTouches(d, id);
   };
-  const pick = (s: Sel) => { setSel(s); setBasketOpen(false); };
+  const pick = (s: Sel) => { setSel(s); setBasketOpen(false); setBellNode(null); };
+  const openBell = (id: string) => { setSel({ k: "n", id }); setBasketOpen(false); setBellNode(id); };
 
   // ── โน้ตภายใน (อยู่ในแผงขวาเท่านั้น ไม่วาดบนผัง) ──
   const promptNotes = notesApi.notes.map((n) => ({ attach: n.attach, text: n.text, author: n.author }));
@@ -181,7 +184,7 @@ export function FlowMap() {
     e.stopPropagation();
     pick(toggle && sel?.k === "e" && sel.id === id ? null : { k: "e", id });
   };
-  const pickView = (k: string) => { setViewKey(k); setSel(null); };
+  const pickView = (k: string) => { setViewKey(k); setSel(null); setBellNode(null); };
   /** แท็บแจ้งเตือน → กล่องในผังแรกที่มีกล่องนั้น */
   const openNodeOnMap = (id: string) => { const v = views.find((x) => x.pos[id]); setViewKey(v?.key ?? views[0].key); setSel({ k: "n", id }); setBasketOpen(false); };
   const openNotify = (id: string | null) => { setViewKey(NOTIFY); setSel(null); setBasketOpen(false); setNotifySel(id); };
@@ -207,6 +210,9 @@ export function FlowMap() {
     panel = <FlowNotifyPanel api={notify} selected={notifySel} onSelect={setNotifySel} onOpenNode={openNodeOnMap} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} onEdit={setNotifyEditId} />;
   } else if (basketOpen) {
     panel = <FlowBasketPanel basket={basket} health={health} notes={promptNotes} onClose={() => setBasketOpen(false)} onPick={(kind, ref) => pick(kind === "n" ? { k: "n", id: ref } : { k: "e", id: ref })} />;
+  } else if (bellNode && sel?.k === "n" && sel.id === bellNode) {
+    panel = <NodeNotifyPanel node={bellNode} api={notify} canAdmin={canAdmin} basket={basket} onEdit={setNotifyEditId}
+      onOpenLine={() => setLineOpen(true)} onOpenAll={() => openNotify(null)} onBack={() => setBellNode(null)} />;
   } else if (sel?.k === "e") {
     const x = FLOW_EDGES[sel.id];
     const d = isJourney ? undefined : drawn.find((e) => e.id === sel.id);   // บางผังเปลี่ยนต้น/ปลายเพื่อวาด (เช่น ภาพรวม) — แท็บออเดอร์ใช้ของจริง
@@ -268,7 +274,7 @@ export function FlowMap() {
               {n.gaps.map((g) => <div key={g} className="flex gap-1.5 text-red-700 mt-0.5"><span aria-hidden="true">•</span>{g}</div>)}
             </div>
           ) : null}
-          <NodeNotifyList topics={notifyTopicsOfNode(sel.id)} live={notify.live} onPick={(id) => openNotify(id)} />
+          <NodeNotifyList topics={notifyTopicsOfNode(sel.id)} live={notify.live} onPick={() => setBellNode(sel.id)} />
           <FlowInternalNotes notes={notesOf("n", sel.id)} api={notesApi} attach={{ kind: "n", id: sel.id }} view={noteView} />
           <FlowRequestBox kind="n" target={sel.id} gaps={n.gaps ?? []} health={health} basket={basket} notes={promptNotes} />
           {closeBtn}
@@ -411,11 +417,21 @@ export function FlowMap() {
                     {view.finance && n.cashflow && <circle cx={x + 9} cy={y + 9} r={3.5} fill={FM_CASHFLOW_DOT}><title>{t("นับในกระแสเงินสด", "Counted in cash flow")}</title></circle>}
                     {(() => {
                       const nt = notifyTopicsOfNode(id);
-                      if (!nt.length) return null;
                       const bx = x + (view.finance && n.cashflow ? 21 : 10), by = y + 10;
+                      if (!nt.length) {
+                        // ยังไม่มีแจ้งเตือนแต่มีข้อเสนอ (NOTIFY_NODE_SUGGEST) → กระดิ่งเส้นประ กดดูข้อเสนอ
+                        if (!NOTIFY_NODE_SUGGEST[id]?.length) return null;
+                        return (
+                          <g transform={`translate(${bx} ${by})`} onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
+                            <title>{t("ยังไม่มีแจ้งเตือน — กดดูข้อเสนอ", "No notifications — see suggestions")}</title>
+                            <circle r={7} fill="#fff" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 2" />
+                            <path d="M0 -3.5v7M-3.5 0h7" stroke="#94a3b8" strokeWidth={1.2} strokeLinecap="round" />
+                          </g>
+                        );
+                      }
                       return (
-                        <g transform={`translate(${bx} ${by})`} onClick={(ev) => { ev.stopPropagation(); openNotify(nt[0].id); }}>
-                          <title>{t(`แจ้งเตือน ${nt.length} เรื่อง: ${nt.map((tp) => tp.label).join(" · ")} — กดดู`, `${nt.length} notifications — click`)}</title>
+                        <g transform={`translate(${bx} ${by})`} onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
+                          <title>{t(`แจ้งเตือน ${nt.length} เรื่อง: ${nt.map((tp) => tp.label).join(" · ")} — กดดู/จัดการ`, `${nt.length} notifications — click to view/manage`)}</title>
                           <circle r={7} fill="#fff" stroke={notifyNodeColor(nt, notify.live)} strokeWidth={1.25} />
                           <path d={BELL_D} fill={notifyNodeColor(nt, notify.live)} stroke={notifyNodeColor(nt, notify.live)} strokeWidth={0.6} strokeLinecap="round" strokeLinejoin="round" />
                         </g>
@@ -439,7 +455,7 @@ export function FlowMap() {
             <div className="px-2 pt-1 text-[11px] text-slate-400 flex flex-wrap gap-x-3">
               <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1 align-middle" />{t("มีช่องโหว่ / ตัวเลขที่ต้องตาม", "Gap or number to follow")}</span>
               <span><span className="inline-block w-2 h-2 rounded-full bg-violet-600 mr-1 align-middle" />{t(`เพิ่งแก้ (${FLOW_RECENT_DAYS} วัน)`, `Updated (${FLOW_RECENT_DAYS} days)`)}</span>
-              <span className="inline-flex items-center gap-1"><Icon value="🔔" />{t("มีแจ้งเตือน (เขียว = ถึงคนครบ · เหลือง = บางทางยังเงียบ) กดดู", "Has notifications (green = reaches · amber = partly silent)")}</span>
+              <span className="inline-flex items-center gap-1"><Icon value="🔔" />{t("กดกระดิ่งดู/จัดการแจ้งเตือน (เขียว = ถึงคนครบ · เหลือง = บางทางยังเงียบ · เส้นประ = ยังไม่มี มีข้อเสนอ)", "Click a bell to view/manage (green = reaches · amber = partly silent · dashed = none yet)")}</span>
               {view.finance && <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: FM_CASHFLOW_DOT }} />{t("นับในกระแสเงินสด /cashflow", "Counted in /cashflow")}</span>}
               <span>{t("กล่องสีเทา = อยู่ส่วนอื่น", "Grey box = other area")}</span>
               <span>{t("โน้ต: ลากแถบบนเพื่อย้าย · กดรูปกุญแจ/คน สลับส่วนตัว ↔ ทั้งทีม", "Notes: drag the top strip · toggle private / team")}</span>

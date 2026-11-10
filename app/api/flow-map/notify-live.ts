@@ -7,7 +7,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { emailConfigured } from "@/lib/email";
 import { shopLineToken } from "@/lib/webshop-line";
 import { readSiteInfo } from "@/lib/website-site-info";
-import { NOTIFY_DAYS, NOTIFY_REMARKS_KEY, cleanNotifyRemarks, type NotifyLive, type NotifyStat } from "@/lib/flow-map-notify";
+import { NOTIFY_DAYS, NOTIFY_RECENT_DAYS, NOTIFY_REMARKS_KEY, cleanNotifyRemarks, type NotifyLive, type NotifyStat } from "@/lib/flow-map-notify";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -85,14 +85,17 @@ async function stats(admin: Admin): Promise<NotifyLive["stats"]> {
   const pages = Math.min(Math.ceil((count ?? 0) / 1000), 60);
   const chunks = await Promise.all(Array.from({ length: pages }, (_, i) =>
     admin.from("erp_notifications").select("event_type, user_id, read_at, created_at").gte("created_at", since).order("created_at").order("id").range(i * 1000, i * 1000 + 999)));
+  const recent = new Date(Date.now() - NOTIFY_RECENT_DAYS * 86400000).toISOString();   // แผงกระดิ่งบนกล่อง
   const acc = new Map<string, NotifyStat & { who: Set<string> }>();
   for (const c of chunks) {
     if (c.error) throw new Error(c.error.message);
     for (const r of (c.data ?? []) as Row[]) {
       const k = String(r.event_type ?? "");
-      const s = acc.get(k) ?? { n: 0, read: 0, users: 0, last: null, who: new Set<string>() };
+      const s = acc.get(k) ?? { n: 0, read: 0, users: 0, last: null, n7: 0, read7: 0, who: new Set<string>() };
       s.n++;
       if (r.read_at) s.read++;
+      // created_at จาก PostgREST = "2026-11-10T03:00:00.123+00:00" · recent = "…Z" → เทียบเป็นเวลา ไม่เทียบข้อความ
+      if (Date.parse(String(r.created_at ?? "")) >= Date.parse(recent)) { s.n7 = (s.n7 ?? 0) + 1; if (r.read_at) s.read7 = (s.read7 ?? 0) + 1; }
       if (r.user_id) s.who.add(String(r.user_id));
       const d = String(r.created_at ?? "").slice(0, 10);
       if (d && (!s.last || d > s.last)) s.last = d;
@@ -100,7 +103,7 @@ async function stats(admin: Admin): Promise<NotifyLive["stats"]> {
     }
   }
   const out: Record<string, NotifyStat> = {};
-  for (const [k, s] of acc) out[k] = { n: s.n, read: s.read, users: s.who.size, last: s.last };
+  for (const [k, s] of acc) out[k] = { n: s.n, read: s.read, users: s.who.size, last: s.last, n7: s.n7 ?? 0, read7: s.read7 ?? 0 };
   return out;
 }
 
