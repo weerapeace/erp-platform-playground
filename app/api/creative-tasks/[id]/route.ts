@@ -190,6 +190,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const label = action === "approve" ? "อนุมัติงาน" : action === "reject" ? "ตีกลับ (ไม่ผ่าน)" : "ขอให้แก้ไข";
     auditAction = `task_${action}`;
     notifyTarget = { empId: (current.assignee_id as string) ?? null, eventType: `task_${action}`, title: `${label}: ${current.title}` };
+  } else if (action === "claim") {
+    // 🙋 รับงาน = ใส่ตัวเองเป็นผู้รับผิดชอบ (เจ้าของขอ 2026-11-11: งานโหมดใหม่ส่วนใหญ่ไม่มีผู้รับผิดชอบ → พนักงานกดแก้สินค้าไม่ได้)
+    // รับได้เฉพาะงานที่ "ยังไม่มีผู้รับผิดชอบเลย" (กันทับชื่อคนอื่น / กดพร้อมกัน) และงานยังไม่ปิด
+    if (!user?.id) return NextResponse.json({ error: "ต้องเข้าสู่ระบบก่อน" }, { status: 401 });
+    const curMeta = await getStatusMeta(admin, String(current.status));
+    if (curMeta?.is_terminal) return NextResponse.json({ error: `งานนี้ปิดแล้ว (สถานะ "${curMeta.label}") — รับงานไม่ได้` }, { status: 400 });
+    const { data: curA } = await admin.from("erp_creative_task_assignees").select("user_id").eq("task_id", id);
+    if ((curA ?? []).length > 0 || current.assignee_id)
+      return NextResponse.json({ error: "งานนี้มีผู้รับผิดชอบแล้ว — รีเฟรชเพื่อดูชื่อล่าสุด", code: "already_assigned" }, { status: 409 });
+    await setTaskAssignees(admin, id, [user.id]);
+    patch.assignee_id = user.id;
+    auditAction = "task_claim";
   } else {
     // ── ล็อกงานที่ปิดจบแล้ว (สถานะ terminal เช่น เสร็จ/ยกเลิก) — ห้ามแก้ฟิลด์ทั่วไป ต้องย้อนสถานะก่อน ──
     const curMeta = await getStatusMeta(admin, String(current.status));

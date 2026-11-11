@@ -11,6 +11,7 @@
  * 🔁 รุ่นที่แม่นกว่า + ค้นทั้งคลังจากฐานข้อมูล: lib/image-hash (assets.phash · ใช้ในป๊อปถามรูปซ้ำ components/duplicate-upload)
  *    วัดจากคลังจริง 2026-11-01: สีเฉลี่ย 4×4 แยกด้ายหลอดคนละเฉด (ส้ม #744/#939) ไม่ออก — ถ้าจะ "เสนอใช้รูปเดิม" ให้ใช้ lib/image-hash
  */
+import { tr } from "@/lib/lang";   // ป้าย SIMILAR_LABEL 2 ภาษา (getter อ่านภาษาตอนแสดง)
 
 export interface VisualPrint {
   /** dHash 64 ตัว ("0"/"1") */
@@ -19,7 +20,7 @@ export interface VisualPrint {
   col: number[];
 }
 export type SimilarLevel = "same" | "near";
-export const SIMILAR_LABEL: Record<SimilarLevel, string> = { same: "ภาพเหมือนกัน", near: "คล้ายมาก" };
+export const SIMILAR_LABEL: Record<SimilarLevel, string> = { get same() { return tr("ภาพเหมือนกัน", "Identical image"); }, get near() { return tr("คล้ายมาก", "Very similar"); } };
 
 /** จาก pixel (RGBA) ของภาพย่อ 9×8 + 4×4 → ลายนิ้วมือภาพ (pure) */
 export function printFromPixels(d98: ArrayLike<number>, d44: ArrayLike<number>): VisualPrint {

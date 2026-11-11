@@ -21,6 +21,7 @@ import {
   type MassImageItem,
 } from "@/lib/website-image-match";
 import { BIG_IMAGE_MAX_BYTES } from "@/lib/media-upload-limits";
+import { tr } from "@/lib/lang";   // ป้าย/ข้อความ 2 ภาษา — ป้ายคงที่เป็น getter (อ่านภาษาตอนแสดง) · ข้อความในฟังก์ชันแปลตอนเรียก
 import { DEFAULT_ROLE_FOLDERS, folderLabelKey, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
 export { DEFAULT_ROLE_FOLDERS, cleanRoleFolders, folderLabelKey, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
 
@@ -28,15 +29,15 @@ export type RouteDest = "skuMain" | "sku" | "parent" | "desc" | "webColor" | "he
 type RealDest = Exclude<RouteDest, "skip">;
 
 export const DEST_LABEL: Record<RouteDest, string> = {
-  skuMain: "รูปหลัก SKU ลูก (ปก)",
-  sku: "รูป SKU ลูก",
-  parent: "แกลเลอรี Parent",
-  desc: "รูป Description",
-  webColor: "รูปบนเว็บ · สีนี้",
-  heroD: "Hero คอม",
-  heroM: "Hero มือถือ",
-  png: "รูปตัด PNG",
-  skip: "ข้าม ไม่อัป",
+  get skuMain() { return tr("รูปหลัก SKU ลูก (ปก)", "Child SKU main image (cover)"); },
+  get sku() { return tr("รูป SKU ลูก", "Child SKU images"); },
+  get parent() { return tr("แกลเลอรี Parent", "Parent gallery"); },
+  get desc() { return tr("รูป Description", "Description images"); },
+  get webColor() { return tr("รูปบนเว็บ · สีนี้", "Web images · this color"); },
+  get heroD() { return tr("Hero คอม", "Hero desktop"); },
+  get heroM() { return tr("Hero มือถือ", "Hero mobile"); },
+  get png() { return tr("รูปตัด PNG", "PNG cut-out"); },
+  get skip() { return tr("ข้าม ไม่อัป", "Skip, don't upload"); },
 };
 /** ช่องรูปของสินค้าในระบบ (ERP) / ช่องของหน้าเว็บร้าน — ใช้แบ่งกลุ่มในช่องเลือก */
 export const ERP_DESTS: RealDest[] = ["skuMain", "sku", "parent", "desc", "png"];
@@ -95,7 +96,7 @@ export function matchName(name: string, parents: RouteParent[], index: CodeRef[]
   const hit = findCodePrefix(name.trim(), index);
   if (!hit) {
     const c = codeLike(name.trim());
-    return { target: null, how: "none", note: c ? `ไม่พบรหัส ${c}` : "ชื่อไม่มีรหัสสินค้า" };
+    return { target: null, how: "none", note: c ? tr(`ไม่พบรหัส ${c}`, `Code ${c} not found`) : tr("ชื่อไม่มีรหัสสินค้า", "No product code in the name") };
   }
   const { ref, rest } = hit;
   const p = parents.find((x) => x.parentId === ref.parentId);
@@ -103,13 +104,13 @@ export function matchName(name: string, parents: RouteParent[], index: CodeRef[]
     const s = p?.skus.find((x) => x.id === ref.skuId);
     if (s && s.code.toUpperCase() !== ref.code) {
       const size = ref.code.slice(s.code.length).replace(/^[-_\s]+/, "") || ref.code;
-      return { target: { parentId: ref.parentId, skuId: ref.skuId }, how: "size", note: `รหัสไซส์ ${size} → สี${s.label}` };
+      return { target: { parentId: ref.parentId, skuId: ref.skuId }, how: "size", note: tr(`รหัสไซส์ ${size} → สี${s.label}`, `Size code ${size} → color ${s.label}`) };
     }
     return { target: { parentId: ref.parentId, skuId: ref.skuId }, how: "color" };
   }
   // รหัสรุ่น + "-xx" แต่รุ่นนี้ไม่มีสีนั้น → ไม่เดา ให้เลือกเอง
   const dash = rest.match(/^-([A-Za-z0-9#.]+)/);
-  if (dash && p && p.skus.length) return { target: null, how: "none", guessParentId: p.parentId, note: `ไม่มีสี ${dash[1].toUpperCase()} ในรุ่น ${p.code}` };
+  if (dash && p && p.skus.length) return { target: null, how: "none", guessParentId: p.parentId, note: tr(`ไม่มีสี ${dash[1].toUpperCase()} ในรุ่น ${p.code}`, `No color ${dash[1].toUpperCase()} in model ${p.code}`) };
   return { target: { parentId: ref.parentId, skuId: null }, how: "parent" };
 }
 
@@ -202,7 +203,7 @@ export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], in
       match = matchName(base, parents, index);
       const t = match.target;
       key = t ? `f:${t.parentId}|${t.skuId ?? "P"}` : match.guessParentId ? `f:?${match.guessParentId}` : "f:none";
-      label = t ? `${codeOfTarget(t, parents) ?? base} · ไฟล์เดี่ยว` : "ไฟล์ที่ไม่มีโฟลเดอร์";
+      label = t ? `${codeOfTarget(t, parents) ?? base} · ${tr("ไฟล์เดี่ยว", "single file")}` : tr("ไฟล์ที่ไม่มีโฟลเดอร์", "Files without a folder");
     }
     const g = groups.get(key) ?? { label, folders: gFolders, files: [], match, role };
     g.files.push({ id: f.id, base, path: f.path });
@@ -219,7 +220,7 @@ export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], in
       match = tries.find((m) => m.target || m.guessParentId);
       if (!match && g.role !== "archive") {
         const byFile = g.files.map((x) => matchName(x.base, parents, index)).find((m) => m.target);
-        match = byFile ? { ...byFile, how: "file", note: "จับคู่จากชื่อไฟล์ข้างใน" } : tries[0];
+        match = byFile ? { ...byFile, how: "file", note: tr("จับคู่จากชื่อไฟล์ข้างใน", "Matched from the file names inside") } : tries[0];
       }
     }
     match = match ?? { target: null, how: "none" };
@@ -227,9 +228,9 @@ export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], in
       // Description เป็นของทั้งรุ่น (ไม่ผูกสี)
       const t = match.target ? { parentId: match.target.parentId, skuId: null } : null;
       const code = t ? codeOfTarget(t, parents) : null;
-      match = { ...match, target: t, note: g.role === "old" ? "Description เวอร์ชันเก่า — ข้าม (ใช้เวอร์ชันล่าสุด)" : code ? `โฟลเดอร์ Description → รูป Description ของรุ่น ${code}` : match.note };
+      match = { ...match, target: t, note: g.role === "old" ? tr("Description เวอร์ชันเก่า — ข้าม (ใช้เวอร์ชันล่าสุด)", "Old Description version — skipped (latest is used)") : code ? tr(`โฟลเดอร์ Description → รูป Description ของรุ่น ${code}`, `Description folder → Description images of model ${code}`) : match.note };
     }
-    if (g.role === "archive") match = { target: null, how: "none", note: "โฟลเดอร์เก็บไฟล์ — ไม่ลงระบบ" };
+    if (g.role === "archive") match = { target: null, how: "none", note: tr("โฟลเดอร์เก็บไฟล์ — ไม่ลงระบบ", "Archive folder — not uploaded") };
     resolved.push({ ...g, key, match, hints: {} });
   }
 
@@ -248,7 +249,7 @@ export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], in
       if (exact && hit!.ref.skuId && t && !t.skuId && !g.key.startsWith("f:")) {
         const key = `f:${hit!.ref.parentId}|${hit!.ref.skuId}`;
         const target = { parentId: hit!.ref.parentId, skuId: hit!.ref.skuId };
-        const x = extra.get(key) ?? resolved.find((r) => r.key === key) ?? { key, label: `${codeOfTarget(target, parents) ?? f.base} · ไฟล์ชื่อรหัส`, folders: [], files: [], match: { target, how: "file" as const, note: "ไฟล์ชื่อตรงรหัส SKU → ปก" }, hints: {} };
+        const x = extra.get(key) ?? resolved.find((r) => r.key === key) ?? { key, label: `${codeOfTarget(target, parents) ?? f.base} · ${tr("ไฟล์ชื่อรหัส", "file named by code")}`, folders: [], files: [], match: { target, how: "file" as const, note: tr("ไฟล์ชื่อตรงรหัส SKU → ปก", "File named exactly as the SKU code → cover") }, hints: {} };
         x.files.push(f);
         x.hints[f.id] = "skuMain";
         if (!resolved.includes(x)) extra.set(key, x);
@@ -345,12 +346,12 @@ export function templateFrom(colorDests: RouteDest[] | null, parentDests: RouteD
 
 export type RowMode = "tpl" | "skuAll" | "parent" | "desc" | "webColor" | "skip";
 export const ROW_MODE_LABEL: Record<RowMode, string> = {
-  tpl: "ตามแม่แบบ",
-  skuAll: "ทุกรูป → SKU ลูก (รูปแรก = ปก)",
-  parent: "ทุกรูป → แกลเลอรี Parent",
-  desc: "ทุกรูป → รูป Description",
-  webColor: "ทุกรูป → รูปบนเว็บ · สีนี้",
-  skip: "ข้ามทั้งโฟลเดอร์",
+  get tpl() { return tr("ตามแม่แบบ", "Follow template"); },
+  get skuAll() { return tr("ทุกรูป → SKU ลูก (รูปแรก = ปก)", "All → child SKU (first = cover)"); },
+  get parent() { return tr("ทุกรูป → แกลเลอรี Parent", "All → Parent gallery"); },
+  get desc() { return tr("ทุกรูป → รูป Description", "All → Description images"); },
+  get webColor() { return tr("ทุกรูป → รูปบนเว็บ · สีนี้", "All → web images · this color"); },
+  get skip() { return tr("ข้ามทั้งโฟลเดอร์", "Skip the whole folder"); },
 };
 export interface RouteImage {
   id: string;
@@ -441,16 +442,16 @@ export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: {
       const t = g.target;
       const p = t ? byId.get(t.parentId) : undefined;
       if (!t || !p) {
-        images.set(im.id, { id: im.id, state: "error", note: NEED_COLOR.includes(d) ? "เลือกสีก่อน" : "เลือกรุ่นก่อน" });
+        images.set(im.id, { id: im.id, state: "error", note: NEED_COLOR.includes(d) ? tr("เลือกสีก่อน", "Pick a color first") : tr("เลือกรุ่นก่อน", "Pick a model first") });
         continue;
       }
       if (NEED_COLOR.includes(d) && !t.skuId) {
-        images.set(im.id, { id: im.id, state: "error", note: "โฟลเดอร์ทั้งรุ่น — เลือกสีก่อน" });
+        images.set(im.id, { id: im.id, state: "error", note: tr("โฟลเดอร์ทั้งรุ่น — เลือกสีก่อน", "Whole-model folder — pick a color first") });
         continue;
       }
       const shops = WEB_DESTS.includes(d) ? opts.shopIds.filter((s) => p.shopIds.includes(s)) : [];
       if (WEB_DESTS.includes(d) && !shops.length) {
-        images.set(im.id, { id: im.id, state: "error", note: p.shopIds.length ? "ยังไม่ได้เลือกร้านที่ขายรุ่นนี้" : "รุ่นนี้ยังไม่ได้ขายบนเว็บ" });
+        images.set(im.id, { id: im.id, state: "error", note: p.shopIds.length ? tr("ยังไม่ได้เลือกร้านที่ขายรุ่นนี้", "No shop selling this model is selected") : tr("รุ่นนี้ยังไม่ได้ขายบนเว็บ", "This model isn't sold on the website yet") });
         continue;
       }
       const kind = slotKind(d);
@@ -464,7 +465,7 @@ export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: {
         if (prevCover.by === "tpl" && im.by !== "tpl") prevCover.cover = false;
         else if (im.by === "tpl") cover = false;
         else {
-          images.set(im.id, { id: im.id, state: "error", note: "ปกได้รูปเดียว — เลือกช่องอื่น" });
+          images.set(im.id, { id: im.id, state: "error", note: tr("ปกได้รูปเดียว — เลือกช่องอื่น", "Only one cover allowed — pick another slot") });
           continue;
         }
       }
@@ -502,7 +503,7 @@ export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: {
     const take = ordered.slice(0, room);
     for (const q of take) images.set(q.id, { id: q.id, state: "upload", slotKey: s.key });
     for (const q of ordered.slice(room)) {
-      images.set(q.id, { id: q.id, state: "over", note: single ? "ช่องนี้มีได้ 1 รูป — ใช้รูปแรก" : `เกิน ${limit} รูป — ไม่ลง` });
+      images.set(q.id, { id: q.id, state: "over", note: single ? tr("ช่องนี้มีได้ 1 รูป — ใช้รูปแรก", "This slot takes 1 image — using the first") : tr(`เกิน ${limit} รูป — ไม่ลง`, `Over ${limit} images — not uploaded`) });
     }
     if (!take.length) continue;
     const coverId = take.find((q) => q.cover)?.id;
@@ -523,14 +524,14 @@ export interface ImageFacts {
 }
 export function imageWarning(dest: RouteDest, f: ImageFacts, resize: { forced: boolean }): string | null {
   if (dest === "skip") return null;
-  if (f.dupOf) return `ซ้ำกับ ${f.dupOf}`;
+  if (f.dupOf) return tr(`ซ้ำกับ ${f.dupOf}`, `Duplicate of ${f.dupOf}`);
   const w = f.width ?? 0;
   const h = f.height ?? 0;
-  if (dest === "heroD" && w && (w < 1920 || w / Math.max(h, 1) < 1.5)) return "เล็ก/ไม่ใช่แนวนอน 16:9 (ควรกว้าง ≥ 1,920)";
-  if (dest === "heroM" && w && w < 1080) return "เล็กเกิน (ควรกว้าง ≥ 1,080)";
-  if (dest === "png" && !f.isPng) return "ไม่ใช่ไฟล์ PNG พื้นใส";
-  if (resize.forced) return `ไฟล์ ${mb(f.bytes)} MB เกิน 20 MB — จะลดให้`;
-  if (w && w < 1000) return `รูปเล็ก ${w}px ซูมแล้วแตก`;
+  if (dest === "heroD" && w && (w < 1920 || w / Math.max(h, 1) < 1.5)) return tr("เล็ก/ไม่ใช่แนวนอน 16:9 (ควรกว้าง ≥ 1,920)", "Too small / not 16:9 landscape (should be ≥ 1,920 wide)");
+  if (dest === "heroM" && w && w < 1080) return tr("เล็กเกิน (ควรกว้าง ≥ 1,080)", "Too small (should be ≥ 1,080 wide)");
+  if (dest === "png" && !f.isPng) return tr("ไม่ใช่ไฟล์ PNG พื้นใส", "Not a transparent PNG");
+  if (resize.forced) return tr(`ไฟล์ ${mb(f.bytes)} MB เกิน 20 MB — จะลดให้`, `File is ${mb(f.bytes)} MB, over 20 MB — will be reduced`);
+  if (w && w < 1000) return tr(`รูปเล็ก ${w}px ซูมแล้วแตก`, `Small image (${w}px) — looks blurry when zoomed`);
   return null;
 }
 
@@ -541,9 +542,9 @@ export type ResizeMode = "auto" | "fixed" | "none";
 export const RESIZE_AUTO: Record<RealDest, number> = { skuMain: 1500, sku: 1500, parent: 1500, desc: 1200, webColor: 2000, heroD: 2560, heroM: 1440, png: 2000 };
 export const RESIZE_FIXED_OPTIONS = [1200, 1600, 2000, 2500, 3000] as const;
 export const RESIZE_HINT: Record<ResizeMode, string> = {
-  auto: "รูปสินค้า 1,500 px · รูปบนเว็บ 2,000 px · Hero คอม 2,560 px · Hero มือถือ 1,440 px · Description 1,200 px · รูปที่เล็กกว่านี้ไม่ขยาย",
-  fixed: "ทุกช่องย่อให้กว้างไม่เกินที่เลือก · รูปที่เล็กกว่านี้ไม่ขยาย",
-  none: "เก็บไฟล์ตัวเต็มตามที่ถ่ายมา · อัปช้ากว่าและใช้พื้นที่มากกว่า · ไฟล์เกิน 20 MB จะถูกลดให้ · หน้าจอยังเปิดเร็ว เพราะระบบย่อตอนแสดงผลให้อยู่แล้ว",
+  get auto() { return tr("รูปสินค้า 1,500 px · รูปบนเว็บ 2,000 px · Hero คอม 2,560 px · Hero มือถือ 1,440 px · Description 1,200 px · รูปที่เล็กกว่านี้ไม่ขยาย", "Product images 1,500 px · web 2,000 px · Hero desktop 2,560 px · Hero mobile 1,440 px · Description 1,200 px · smaller images aren't enlarged"); },
+  get fixed() { return tr("ทุกช่องย่อให้กว้างไม่เกินที่เลือก · รูปที่เล็กกว่านี้ไม่ขยาย", "Every slot is resized to at most the chosen width · smaller images aren't enlarged"); },
+  get none() { return tr("เก็บไฟล์ตัวเต็มตามที่ถ่ายมา · อัปช้ากว่าและใช้พื้นที่มากกว่า · ไฟล์เกิน 20 MB จะถูกลดให้ · หน้าจอยังเปิดเร็ว เพราะระบบย่อตอนแสดงผลให้อยู่แล้ว", "Keeps the full original file · slower upload and more storage · files over 20 MB are reduced · pages stay fast because images are resized when shown"); },
 };
 
 /** กว้างสูงสุดที่จะย่อ · null = เก็บตัวเต็ม · forced = เลือกไม่ลด แต่ไฟล์ใหญ่เกิน 20 MB */

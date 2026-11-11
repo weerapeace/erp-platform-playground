@@ -40,7 +40,7 @@ export type ViewerGroup = {
 
 const countGroup = (g: ViewerGroup) => g.owners.reduce((n, o) => n + o.images.length, 0);
 
-export function GroupedImageViewer({ open, onClose, title, description, groups, loading = false, error = null, onRetry, emptyTitle, emptyHint }: {
+export function GroupedImageViewer({ open, onClose, title, description, groups, loading = false, error = null, onRetry, emptyTitle, emptyHint, actions }: {
   open: boolean;
   onClose: () => void;
   title: string;
@@ -51,6 +51,8 @@ export function GroupedImageViewer({ open, onClose, title, description, groups, 
   onRetry?: () => void;
   emptyTitle?: string;
   emptyHint?: string;
+  /** ปุ่มเสริมชิดขวาบนเนื้อหาป๊อป (เช่น "แก้ที่สินค้า" ในงานโหมดใหม่) — ไม่ส่ง = ดูอย่างเดียวเหมือนเดิม */
+  actions?: React.ReactNode;
 }) {
   const [filter, setFilter] = useState<string>("all");
   const [lbIndex, setLbIndex] = useState(-1);
@@ -137,6 +139,7 @@ export function GroupedImageViewer({ open, onClose, title, description, groups, 
     <>
       {/* กด Esc ตอนดูเต็มจอ = ปิดแค่จอเต็ม (ป๊อปยังอยู่) */}
       <ERPModal open={open} onClose={() => { if (lbIndex < 0) onClose(); }} title={title} description={description} size="xl" storageKey="grouped-image-viewer">
+        {actions && <div className="flex flex-wrap justify-end gap-1.5 mb-3">{actions}</div>}
         {body}
       </ERPModal>
       <ImageLightbox images={flat} index={lbIndex} onClose={() => setLbIndex(-1)} onIndex={setLbIndex} groups={lbGroups} thumbnails />

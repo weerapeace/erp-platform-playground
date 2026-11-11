@@ -197,6 +197,11 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   return j.data as CreativeTask;
 }
 
+/** 🙋 รับงาน = ใส่ตัวเองเป็นผู้รับผิดชอบ — server รับเฉพาะงานที่ยังไม่มีผู้รับผิดชอบเลย (มีคนรับแล้วตอบ 409) */
+export async function claimTask(id: string): Promise<CreativeTask> {
+  return updateTask(id, { action: "claim" });
+}
+
 // closeOpenSubtasks = ยืนยันแล้วว่า "ปิดงานได้ งานย่อยที่ค้างให้ยกเลิก" (server ตอบ 409 code open_subtasks ถ้ายังไม่ยืนยัน)
 export async function transitionTask(id: string, to: string, comment?: string, force?: boolean, closeOpenSubtasks?: boolean): Promise<CreativeTask> {
   return updateTask(id, { action: "transition", to, comment, force, ...(closeOpenSubtasks ? { close_open_subtasks: true } : {}) });

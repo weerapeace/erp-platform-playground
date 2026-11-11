@@ -16,7 +16,11 @@ import { getTaskImages } from "./data";
 
 const toImg = (im: TaskImage): ViewerImage => ({ url: r2ImageUrl(im.key) ?? "", thumbUrl: r2ImageUrl(im.key, 360), cover: !!im.cover });
 
-export function TaskImagesViewer({ taskId, title, onClose }: { taskId: string; title: string; onClose: () => void }) {
+export function TaskImagesViewer({ taskId, title, onClose, editActions }: {
+  taskId: string; title: string; onClose: () => void;
+  /** ปุ่ม "แก้ที่สินค้า" ชิดขวาบน (เปิดจากกล่องโหมดใหม่ · เฉพาะคนที่แก้ได้) — ไม่ส่ง = ดูอย่างเดียว */
+  editActions?: React.ReactNode;
+}) {
   const t = useT();
   const [data, setData] = useState<TaskImagesPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +53,8 @@ export function TaskImagesViewer({ taskId, title, onClose }: { taskId: string; t
   return (
     <GroupedImageViewer open onClose={onClose}
       title={`${t("ดูรูป", "Images")} · ${title}`}
-      description={t("ดูอย่างเดียว — แก้รูปได้ที่หน้าสินค้า", "View only — edit images on the product page")}
+      description={editActions ? t("รูปทั้งหมดของงาน — อยากแก้ กด \"แก้ที่สินค้า\"", "All images in this task — press \"Edit product\" to change them") : t("ดูอย่างเดียว — แก้รูปได้ที่หน้าสินค้า", "View only — edit images on the product page")}
+      actions={editActions}
       groups={noProduct ? [] : groups} loading={!data && !error} error={error} onRetry={() => void load()}
       emptyTitle={t("งานนี้ยังไม่ผูกสินค้าหรือคอนเทนต์", "This task has no product or content yet")}
       emptyHint={t("ผูก Parent SKU ในลิ้นชักงานก่อน แล้วรูปจะขึ้นที่นี่", "Link a Parent SKU in the task drawer and its images will show here")} />

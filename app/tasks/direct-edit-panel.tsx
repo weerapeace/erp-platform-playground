@@ -23,6 +23,7 @@ import { DEFAULT_SKIP_SUBTASKS, DIRECT_TARGETS, isDirectTask, useProductModeCfg,
 import { type PushToast } from "@/components/toast";
 
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+const TaskImagesViewer = dynamic(() => import("./task-images-viewer").then((m) => m.TaskImagesViewer), { ssr: false });
 
 type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 export type TaskChange = {
@@ -111,8 +112,12 @@ export function ChangeList({ changes, canUndo, onUndo, compact = false }: { chan
   );
 }
 
-export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, canEdit, canUndo, onBeforeEdit, onAddParent, changes, error, reloadChanges, pushToast }: {
+export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, parents, skus, canEdit, canUndo, onBeforeEdit, onAddParent, onClaim, changes, error, reloadChanges, pushToast }: {
   taskId: string; subId: string | null; approveTarget: string;
+  /** ชื่องาน (หัวป๊อป "ดูรูปทั้งหมด") */
+  taskTitle?: string;
+  /** แก้ไม่ได้เพราะงานยังไม่มีผู้รับผิดชอบ → ปุ่มแก้กลายเป็น "รับงาน + แก้ที่สินค้า" (กดแล้วใส่ชื่อตัวเองก่อน แล้วเปิดตัวแก้) */
+  onClaim?: () => Promise<void>;
   parents: TaskParentRef[]; skus: TaskSkuRef[];
   /** เลือก/สร้าง Parent SKU จากการ์ด → ผูกเข้างาน (การ์ดเปิดหน้า Parent ให้ต่อทันที) · ไม่ส่ง = ไม่มีช่องเลือก */
   onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
@@ -138,6 +143,20 @@ export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, c
     setEditContext({ taskId, subtaskId: subId });
     setEditing({ kind, id });
   };
+  // 🙋 งานยังไม่มีผู้รับผิดชอบ → กดปุ่มแก้ = รับงาน (ใส่ชื่อตัวเอง) ก่อน แล้วเปิดตัวแก้ต่อทันที (เจ้าของเลือก 2026-11-11)
+  const claimable = !canEdit && !!onClaim;
+  const [claiming, setClaiming] = useState(false);
+  const [imagesOpen, setImagesOpen] = useState(false);
+  const openProduct = async (kind: "parent" | "sku", id: string) => {
+    if (claimable && onClaim) {
+      setClaiming(true);
+      try { await onClaim(); pushToast("success", t("รับงานแล้ว — ชื่อคุณขึ้นเป็นผู้รับผิดชอบ", "Task claimed — you're now the assignee")); }
+      catch (e) { pushToast("error", e instanceof Error ? e.message : t("รับงานไม่สำเร็จ", "Couldn't claim the task")); return; }
+      finally { setClaiming(false); }
+    }
+    await open(kind, id);
+  };
+  const editLabel = claimable ? `🙋 ${t("รับงาน + แก้ที่สินค้า", "Claim + edit product")}` : `✏️ ${t("แก้ที่สินค้า", "Edit product")}`;
   const close = () => { clearEditContext(); setEditing(null); void reloadChanges(); };
   useEffect(() => () => clearEditContext(), []);
 
@@ -185,20 +204,27 @@ export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, c
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {parents.map((p) => (
-            <button key={p.id} type="button" disabled={!canEdit} onClick={() => void open("parent", p.id)}
-              title={canEdit ? t("เปิดตัวแก้สินค้าตัวจริง", "Open the real product editor") : t("ต้องเป็นผู้รับผิดชอบ/ผู้ตรวจ และงานยังไม่ปิด", "Assignee/reviewer only, while the task is open")}
+            <button key={p.id} type="button" disabled={(!canEdit && !claimable) || claiming} onClick={() => void openProduct("parent", p.id)}
+              title={canEdit ? t("เปิดตัวแก้สินค้าตัวจริง", "Open the real product editor")
+                : claimable ? t("งานนี้ยังไม่มีผู้รับผิดชอบ — กดเพื่อรับงาน (ใส่ชื่อคุณ) แล้วเปิดตัวแก้ทันที", "Nobody is assigned yet — click to claim the task (adds your name) and open the editor")
+                : t("ต้องเป็นผู้รับผิดชอบ/ผู้ตรวจ และงานยังไม่ปิด", "Assignee/reviewer only, while the task is open")}
               className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-lg border border-violet-200 bg-white text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50">
               <HoverImage url={r2ImageUrl(p.image_key)} size={24} rounded="rounded" fallback="📦" />
-              ✏️ {t("แก้ที่สินค้า", "Edit product")} <span className="font-mono text-slate-500">{p.code || p.name}</span>
+              {claiming ? t("กำลังรับงาน…", "Claiming…") : editLabel} <span className="font-mono text-slate-500">{p.code || p.name}</span>
             </button>
           ))}
           {showSkus && skus.filter((s) => s.id && s.id !== "_").map((s) => (
-            <button key={s.id} type="button" disabled={!canEdit} onClick={() => void open("sku", s.id)}
+            <button key={s.id} type="button" disabled={(!canEdit && !claimable) || claiming} onClick={() => void openProduct("sku", s.id)}
               className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50">
               <HoverImage url={r2ImageUrl(s.image_key)} size={24} rounded="rounded" fallback="🎨" />
-              ✏️ SKU <span className="font-mono text-slate-500">{s.code || s.name}</span>
+              {claimable ? "🙋" : "✏️"} SKU <span className="font-mono text-slate-500">{s.code || s.name}</span>
             </button>
           ))}
+          {/* 🖼 ดูรูปทั้งหมดของงาน (ป๊อปดูรูปกลาง) — ในป๊อปมีปุ่มแก้ที่สินค้าให้ด้วย (เจ้าของขอ 2026-11-11) */}
+          <button type="button" onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (Parent · SKU · Description)", "View all images in this task (Parent · SKU · Description)")}
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">
+            🖼 {t("ดูรูปทั้งหมด", "View all images")}
+          </button>
           {picker && !pickOpen && (
             <button type="button" onClick={() => setPickOpen(true)} className="inline-flex items-center h-8 px-2.5 rounded-lg border border-dashed border-violet-300 text-xs text-violet-600 hover:bg-white">＋ {t("เพิ่ม Parent SKU", "Add Parent SKU")}</button>
           )}
@@ -222,6 +248,15 @@ export function DirectEditPanel({ taskId, subId, approveTarget, parents, skus, c
         )}
       </div>
 
+      {imagesOpen && (
+        <TaskImagesViewer taskId={taskId} title={taskTitle || parents[0]?.code || ""} onClose={() => setImagesOpen(false)}
+          editActions={(canEdit || claimable) && parents.length > 0 ? parents.map((p) => (
+            <button key={p.id} type="button" disabled={claiming} onClick={() => { setImagesOpen(false); void openProduct("parent", p.id); }}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-violet-200 bg-violet-50 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50">
+              {editLabel} <span className="font-mono text-slate-500">{p.code || p.name}</span>
+            </button>
+          )) : undefined} />
+      )}
       {editing && (
         <MasterRecordDrawer
           moduleKey={editing.kind === "parent" ? "parent-skus-v2" : "skus-v2"}
@@ -278,7 +313,7 @@ export function DirectSubmitModal({ changes, onClose, onConfirm }: { changes: Ta
  * มีงานย่อยสินค้าอยู่แล้ว = ไม่โชว์ (การ์ดงานย่อยมีแผงของมันเอง)
  */
 type DirectPanelTask = {
-  id: string; task_type: string | null; created_at: string; parent_skus?: TaskParentRef[]; skus?: TaskSkuRef[];
+  id: string; title?: string; task_type: string | null; created_at: string; parent_skus?: TaskParentRef[]; skus?: TaskSkuRef[];
   subtasks?: { subtask_type?: string | null; config?: { approve_target?: string } | null; status?: string }[];
 };
 /** แผงระดับงานโผล่ไหม (โหมดใหม่ + ไม่มีงานย่อยสินค้า) — ใช้ร่วมกับกล่อง Parent SKU ใน drawer กันช่องเลือก Parent ซ้ำ 2 ที่ */
@@ -288,10 +323,12 @@ export function isTaskDirectPanelOn(cfg: ProductModeCfg | null, task: DirectPane
   return isDirectTask(cfg, task.task_type, task.created_at) && !hasProductSubs;
 }
 
-export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, pushToast }: {
+export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, onClaim, pushToast }: {
   task: DirectPanelTask;
   canEdit: boolean; canUndo: boolean;
   onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
+  /** งานยังไม่มีผู้รับผิดชอบ → ปุ่มกลายเป็น "รับงาน + แก้ที่สินค้า" (ไม่ส่ง = ไม่มีทางรับงานจากตรงนี้) */
+  onClaim?: () => Promise<void>;
   pushToast: ToastFn;
 }) {
   const modeCfg = useProductModeCfg();
@@ -299,9 +336,9 @@ export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, pushToast
   const { changes, error, reload } = useTaskChanges(task.id, null, on);
   if (!on) return null;
   return (
-    <DirectEditPanel taskId={task.id} subId={null} approveTarget="sku_media"
+    <DirectEditPanel taskId={task.id} subId={null} approveTarget="sku_media" taskTitle={task.title}
       parents={task.parent_skus ?? []} skus={task.skus ?? []}
       canEdit={canEdit} canUndo={canUndo} onBeforeEdit={async () => { /* ระดับงาน: ใช้สถานะงานตามปกติ */ }}
-      onAddParent={onAddParent} changes={changes} error={error} reloadChanges={reload} pushToast={pushToast} />
+      onAddParent={onAddParent} onClaim={onClaim} changes={changes} error={error} reloadChanges={reload} pushToast={pushToast} />
   );
 }

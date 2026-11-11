@@ -11,6 +11,7 @@ import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { isGeneratedColumn, generatedHint } from "@/lib/generated-columns";
 import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 import { ImageInput } from "@/components/image-input";
 import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
@@ -85,6 +86,7 @@ async function fetchGroups(): Promise<Grp[]> {
 function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
   moduleKey: string; labelField: string; onClose: () => void; onChanged: () => void;
 }) {
+  const t = useT();
   const [rows, setRows] = useState<Opt[]>([]);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [newName, setNewName] = useState("");
@@ -103,16 +105,16 @@ function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
     setBusy(true);
     try {
       const res = await apiFetch(`/api/master-v2/${moduleKey}/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [labelField]: name.trim() }) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); alert("แก้ชื่อไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert(tr("แก้ชื่อไม่สำเร็จ: ", "Rename failed: ") + (j.error ?? res.status)); return; }
       onChanged(); load();
     } finally { setBusy(false); }
   };
   const del = async (id: string, label: string) => {
-    if (!confirm(`ลบแท็ก “${label}” ?\n(สินค้าที่เคยติดแท็กนี้จะไม่เห็นแท็กนี้แล้ว)`)) return;
+    if (!confirm(tr(`ลบแท็ก “${label}” ?\n(สินค้าที่เคยติดแท็กนี้จะไม่เห็นแท็กนี้แล้ว)`, `Delete tag “${label}”?\n(Products that had this tag will no longer show it)`))) return;
     setBusy(true);
     try {
       const res = await apiFetch(`/api/master-v2/${moduleKey}/${id}`, { method: "DELETE" });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); alert("ลบไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert(tr("ลบไม่สำเร็จ: ", "Delete failed: ") + (j.error ?? res.status)); return; }
       onChanged(); load();
     } finally { setBusy(false); }
   };
@@ -121,7 +123,7 @@ function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
     setBusy(true);
     try {
       const res = await apiFetch(`/api/master-v2/${moduleKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [labelField]: n }) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); alert("เพิ่มไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert(tr("เพิ่มไม่สำเร็จ: ", "Add failed: ") + (j.error ?? res.status)); return; }
       setNewName(""); onChanged(); load();
     } finally { setBusy(false); }
   };
@@ -130,11 +132,11 @@ function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-[440px] max-w-[92vw] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-800">🗂️ จัดการแท็ก (Product Family)</h3>
+          <h3 className="font-semibold text-slate-800">{t("🗂️ จัดการแท็ก (Product Family)", "🗂️ Manage tags (Product Family)")}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-          {rows.length === 0 && <div className="text-sm text-slate-400 py-4 text-center">ยังไม่มีแท็ก</div>}
+          {rows.length === 0 && <div className="text-sm text-slate-400 py-4 text-center">{t("ยังไม่มีแท็ก", "No tags yet")}</div>}
           {rows.map((r) => (
             <div key={r.id} className="flex items-center gap-2">
               <input
@@ -142,18 +144,18 @@ function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
                 onChange={(e) => setDraft((d) => ({ ...d, [r.id]: e.target.value }))}
                 className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
               <button type="button" disabled={busy || (draft[r.id] ?? r.label) === r.label} onClick={() => rename(r.id, draft[r.id] ?? r.label)}
-                className="h-8 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">บันทึก</button>
+                className="h-8 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">{t("บันทึก", "Save")}</button>
               <button type="button" disabled={busy} onClick={() => del(r.id, r.label)}
                 className="h-8 px-2 text-xs rounded-md text-red-500 hover:bg-red-50">🗑️</button>
             </div>
           ))}
         </div>
         <div className="flex gap-2 px-3 py-3 border-t border-slate-100">
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อแท็กใหม่…"
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("ชื่อแท็กใหม่…", "New tag name…")}
             onKeyDown={(e) => { if (e.key === "Enter") add(); }}
             className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md" />
           <button type="button" onClick={add} disabled={busy || !newName.trim()}
-            className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">+ เพิ่ม</button>
+            className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{t("+ เพิ่ม", "+ Add")}</button>
         </div>
       </div>
     </div>,
@@ -177,7 +179,8 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const isCreate = !recordId;
   const usesGroups = moduleKey === "product_families";   // แท็กที่มีระบบกลุ่ม
   const allowCreate = usesGroups && config.allow_create !== false;   // สร้าง/จัดการ เฉพาะแท็ก product_families
-  const pickTitle = usesGroups ? "เลือกแท็ก (Product Family)" : "เลือกข้อมูล";
+  const t = useT();
+  const pickTitle = usesGroups ? t("เลือกแท็ก (Product Family)", "Select tags (Product Family)") : t("เลือกข้อมูล", "Select items");
 
   const [opts, setOpts] = useState<Opt[]>([]);
   const [groups, setGroups] = useState<Grp[]>([]);
@@ -243,11 +246,11 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
       });
       const j = await res.json().catch(() => ({}));
       const id = (j.data as { id?: string } | undefined)?.id;
-      if (!res.ok || j.error || !id) { alert("สร้างแท็กไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      if (!res.ok || j.error || !id) { alert(tr("สร้างแท็กไม่สำเร็จ: ", "Create tag failed: ") + (j.error ?? `HTTP ${res.status}`)); return; }
       setOpts((o) => [...o, { id, label: name, group_id: null }]);
       setQ("");
       toggle(id);
-    } catch (e) { alert("สร้างแท็กไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    } catch (e) { alert(tr("สร้างแท็กไม่สำเร็จ: ", "Create tag failed: ") + (e instanceof Error ? e.message : "network")); }
     finally { setBusy(false); }
   };
 
@@ -280,10 +283,10 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
 
   return (
     <div className="mt-0.5">
-      {loading && <div className="text-xs text-slate-400 italic py-1">กำลังโหลด…</div>}
+      {loading && <div className="text-xs text-slate-400 italic py-1">{t("กำลังโหลด…", "Loading…")}</div>}
       {/* แท็กที่เลือก */}
       <div className="flex flex-wrap gap-1.5 mb-1.5">
-        {!loading && linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือก —</span>}
+        {!loading && linked.length === 0 && <span className="text-xs text-slate-300">{t("— ยังไม่เลือก —", "— None selected —")}</span>}
         {linked.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
             {labelOf(id)}
@@ -294,9 +297,9 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
       {editable && !loading && (
         <div className="flex gap-1.5">
           <button type="button" onClick={() => { setPickerOpen(true); setQ(""); }}
-            className="h-8 px-3 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">＋ {usesGroups ? "เลือก/แก้ไขแท็ก" : "เลือก"}</button>
+            className="h-8 px-3 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">＋ {usesGroups ? t("เลือก/แก้ไขแท็ก", "Select/edit tags") : t("เลือก", "Select")}</button>
           {usesGroups && (
-            <button type="button" onClick={() => setMgrOpen(true)} title="จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)"
+            <button type="button" onClick={() => setMgrOpen(true)} title={t("จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)", "Manage tags (add/rename/delete)")}
               className="h-8 px-2.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️</button>
           )}
         </div>
@@ -309,12 +312,12 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <div>
                 <h3 className="font-semibold text-slate-800">{pickTitle}</h3>
-                {usesGroups && <p className="text-[11px] text-slate-400 mt-0.5">เลือกแท็กย่อย (↳) = เลือกแท็กแม่ให้ด้วย · เอาแท็กแม่ออกเองได้</p>}
+                {usesGroups && <p className="text-[11px] text-slate-400 mt-0.5">{t("เลือกแท็กย่อย (↳) = เลือกแท็กแม่ให้ด้วย · เอาแท็กแม่ออกเองได้", "Picking a sub-tag (↳) also picks its parent tag · you can remove the parent yourself")}</p>}
               </div>
               <button type="button" onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
             </div>
             <div className="px-3 pt-3">
-              <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
+              <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder={t("ค้นหา / พิมพ์เพื่อเพิ่ม…", "Search / type to add…")}
                 className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -327,7 +330,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
                   <div key={g.id} className="border border-slate-100 rounded-lg">
                     <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
                       <span className="text-sm font-medium text-slate-700">{g.name}</span>
-                      {g.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">เลือกได้ 1</span>}
+                      {g.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">{t("เลือกได้ 1", "Pick 1")}</span>}
                     </div>
                     <div className="p-1">
                       {direct.map((o) => tagRow(o))}
@@ -335,7 +338,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
                         <div key={s.id} className="mt-1">
                           <div className="px-2 py-1 flex items-center gap-2">
                             <span className="text-xs font-medium text-slate-500">↳ {s.name}</span>
-                            {s.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">เลือกได้ 1</span>}
+                            {s.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">{t("เลือกได้ 1", "Pick 1")}</span>}
                           </div>
                           {tags.map((o) => tagRow(o))}
                         </div>
@@ -346,23 +349,23 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
               })}
               {ungrouped.length > 0 && (
                 <div className="border border-slate-100 rounded-lg">
-                  <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-500">{usesGroups ? "ไม่มีกลุ่ม" : "แท็กทั้งหมด"}</div>
+                  <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-500">{usesGroups ? t("ไม่มีกลุ่ม", "No group") : t("แท็กทั้งหมด", "All tags")}</div>
                   <div className="p-1">{ungrouped.map((o) => tagRow(o))}</div>
                 </div>
               )}
-              {filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">{usesGroups ? "— ยังไม่มีแท็ก —" : "— ไม่มีข้อมูลให้เลือก —"}</div>}
+              {filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">{usesGroups ? t("— ยังไม่มีแท็ก —", "— No tags yet —") : t("— ไม่มีข้อมูลให้เลือก —", "— Nothing to select —")}</div>}
               {allowCreate && ql && !exact && (
                 <button type="button" onClick={createNew} disabled={busy}
                   className="flex items-center gap-2 w-full px-2 py-2 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border border-dashed border-blue-200">
-                  ➕ สร้างแท็กใหม่ “{q.trim()}”
+                  {t(`➕ สร้างแท็กใหม่ “${q.trim()}”`, `➕ Create new tag “${q.trim()}”`)}
                 </button>
               )}
             </div>
             <div className="flex items-center justify-between px-3 py-3 border-t border-slate-100">
               {usesGroups
-                ? <button type="button" onClick={() => setMgrOpen(true)} className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️ จัดการแท็ก</button>
+                ? <button type="button" onClick={() => setMgrOpen(true)} className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">{t("🗂️ จัดการแท็ก", "🗂️ Manage tags")}</button>
                 : <span />}
-              <button type="button" onClick={() => setPickerOpen(false)} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">เสร็จ ({linked.length})</button>
+              <button type="button" onClick={() => setPickerOpen(false)} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">{t(`เสร็จ (${linked.length})`, `Done (${linked.length})`)}</button>
             </div>
           </div>
         </div>,
@@ -400,6 +403,7 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
   onSave: (next: string[]) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const hidden = new Set(["id", titleField, imageField].filter(Boolean) as string[]);
   const valid = (k: string) => allFields.some((f) => f.key === k);
   const [selected, setSelected] = useState<string[]>(current.filter(valid));
@@ -416,43 +420,43 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">⚙ เลือกคอลัมน์ตารางลูก</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{t("⚙ เลือกคอลัมน์ตารางลูก", "⚙ Choose child table columns")}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
         </div>
         <div className="px-4 py-2 text-[11px] text-slate-400 border-b border-slate-100">
-          คอลัมน์หลัก: <b className="text-slate-600">{labelOf(titleField)}</b> (แสดงเสมอ) — เลือกคอลัมน์เพิ่มด้านล่าง
+          {t("คอลัมน์หลัก:", "Main column:")} <b className="text-slate-600">{labelOf(titleField)}</b> {t("(แสดงเสมอ) — เลือกคอลัมน์เพิ่มด้านล่าง", "(always shown) — pick more columns below")}
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
-            <div className="text-xs font-medium text-slate-500 mb-1.5">แสดงอยู่ ({selected.length}) — เรียงลำดับได้</div>
-            {selected.length === 0 && <div className="text-xs text-slate-300 italic">— ยังไม่เลือกคอลัมน์เพิ่ม —</div>}
+            <div className="text-xs font-medium text-slate-500 mb-1.5">{t(`แสดงอยู่ (${selected.length}) — เรียงลำดับได้`, `Showing (${selected.length}) — can reorder`)}</div>
+            {selected.length === 0 && <div className="text-xs text-slate-300 italic">{t("— ยังไม่เลือกคอลัมน์เพิ่ม —", "— No extra columns yet —")}</div>}
             <ul className="space-y-1">
               {selected.map((k, i) => (
                 <li key={k} className="flex items-center gap-1 px-2 py-1.5 bg-blue-50/60 border border-blue-100 rounded-md text-sm">
                   <span className="flex-1 truncate text-slate-700">{labelOf(k)}</span>
-                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title="ขึ้น" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▲</button>
-                  <button type="button" onClick={() => move(i, 1)} disabled={i === selected.length - 1} title="ลง" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▼</button>
-                  <button type="button" onClick={() => setSelected(selected.filter((x) => x !== k))} title="เอาออก" className="w-6 h-6 rounded text-slate-400 hover:text-red-500">✕</button>
+                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0} title={t("ขึ้น", "Move up")} className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▲</button>
+                  <button type="button" onClick={() => move(i, 1)} disabled={i === selected.length - 1} title={t("ลง", "Move down")} className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▼</button>
+                  <button type="button" onClick={() => setSelected(selected.filter((x) => x !== k))} title={t("เอาออก", "Remove")} className="w-6 h-6 rounded text-slate-400 hover:text-red-500">✕</button>
                 </li>
               ))}
             </ul>
           </div>
           <div>
-            <div className="text-xs font-medium text-slate-500 mb-1.5">เพิ่มคอลัมน์</div>
+            <div className="text-xs font-medium text-slate-500 mb-1.5">{t("เพิ่มคอลัมน์", "Add column")}</div>
             {available.length === 0 ? (
-              <span className="text-xs text-slate-300 italic">— เลือกครบทุกคอลัมน์แล้ว —</span>
+              <span className="text-xs text-slate-300 italic">{t("— เลือกครบทุกคอลัมน์แล้ว —", "— All columns selected —")}</span>
             ) : (
               <select value="" onChange={(e) => { if (e.target.value) setSelected([...selected, e.target.value]); }}
                 className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md bg-white">
-                <option value="">+ เลือกคอลัมน์เพิ่ม… ({available.length})</option>
+                <option value="">{t(`+ เลือกคอลัมน์เพิ่ม… (${available.length})`, `+ Add a column… (${available.length})`)}</option>
                 {available.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
               </select>
             )}
           </div>
         </div>
         <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
-          <button type="button" onClick={() => onSave(selected)} className="h-8 px-4 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">บันทึก (ทุกคนเห็น)</button>
+          <button type="button" onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={() => onSave(selected)} className="h-8 px-4 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">{t("บันทึก (ทุกคนเห็น)", "Save (for everyone)")}</button>
         </div>
       </div>
     </div>
@@ -468,13 +472,14 @@ function ColorDictModal({ rows, suggest, onReload, onClose }: {
   onReload: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState<{ id?: string; th: string; en: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
   const save = async (payload: { id?: string; th: string; en: string }) => {
-    if (!payload.th.trim() || !payload.en.trim()) { setMsg("กรอกทั้งคำไทยและคำอังกฤษ"); return false; }
+    if (!payload.th.trim() || !payload.en.trim()) { setMsg(tr("กรอกทั้งคำไทยและคำอังกฤษ", "Enter both the Thai and English word")); return false; }
     setBusy(true); setMsg("");
     try {
       const j = await apiFetch("/api/color-dictionary", {
@@ -482,17 +487,17 @@ function ColorDictModal({ rows, suggest, onReload, onClose }: {
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       onReload(); setEdit(null); return true;
-    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); return false; }
+    } catch (e) { setMsg(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); return false; }
     finally { setBusy(false); }
   };
   const del = async (id: string, th: string) => {
-    if (!window.confirm(`ลบคำ "${th}" ออกจากพจนานุกรม?`)) return;
+    if (!window.confirm(tr(`ลบคำ "${th}" ออกจากพจนานุกรม?`, `Remove "${th}" from the dictionary?`))) return;
     setBusy(true);
     try {
       const j = await apiFetch(`/api/color-dictionary?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       onReload();
-    } catch (e) { setMsg(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    } catch (e) { setMsg(e instanceof Error ? e.message : tr("ลบไม่สำเร็จ", "Delete failed")); }
     finally { setBusy(false); }
   };
   const saveAllSuggest = async () => {
@@ -505,7 +510,7 @@ function ColorDictModal({ rows, suggest, onReload, onClose }: {
         if (!j.error) ok++;
       } catch { /* ข้าม */ }
     }
-    setBusy(false); setMsg(`บันทึกคำใหม่แล้ว ${ok} คำ`); onReload();
+    setBusy(false); setMsg(tr(`บันทึกคำใหม่แล้ว ${ok} คำ`, `Saved ${ok} new words`)); onReload();
   };
 
   const shown = q.trim()
@@ -517,50 +522,50 @@ function ColorDictModal({ rows, suggest, onReload, onClose }: {
       <div className="w-full max-w-lg bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-800">⚙ ตั้งค่าคำแปลสี / วัสดุ</h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">เจอคำนี้ → แปลเป็นคำนี้ · ใช้ก่อน AI เสมอ · คำประกอบเช่น “ดำ/หนังเรียบ” แยกแปลทีละคำ</p>
+            <h3 className="text-sm font-semibold text-slate-800">{t("⚙ ตั้งค่าคำแปลสี / วัสดุ", "⚙ Color / material translations")}</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">{t("เจอคำนี้ → แปลเป็นคำนี้ · ใช้ก่อน AI เสมอ · คำประกอบเช่น “ดำ/หนังเรียบ” แยกแปลทีละคำ", "This word → translates to this · always used before AI · compound words like “ดำ/หนังเรียบ” are translated word by word")}</p>
           </div>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
         </div>
 
         {suggest.length > 0 && (
           <div className="mx-4 mt-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
-            <p className="text-[12px] text-amber-800 mb-1.5">AI เพิ่งแปล {suggest.length} คำที่ยังไม่มีในพจนานุกรม — ตรวจแล้วบันทึกไว้ใช้ครั้งต่อไปได้</p>
+            <p className="text-[12px] text-amber-800 mb-1.5">{t(`AI เพิ่งแปล ${suggest.length} คำที่ยังไม่มีในพจนานุกรม — ตรวจแล้วบันทึกไว้ใช้ครั้งต่อไปได้`, `AI just translated ${suggest.length} words not in the dictionary — review and save them for next time`)}</p>
             <div className="flex flex-wrap gap-1.5 mb-2">
               {suggest.slice(0, 12).map((s) => (
                 <span key={`${s.th}|${s.en}`} className="text-[11px] px-1.5 py-0.5 rounded bg-white border border-amber-200 text-slate-600">{s.th} → {s.en}</span>
               ))}
             </div>
             <button type="button" onClick={() => void saveAllSuggest()} disabled={busy}
-              className="h-7 px-2.5 text-[12px] font-medium rounded-md bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">บันทึกทั้งหมด</button>
+              className="h-7 px-2.5 text-[12px] font-medium rounded-md bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">{t("บันทึกทั้งหมด", "Save all")}</button>
           </div>
         )}
 
         <div className="px-4 pt-3 flex items-center gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาคำ (ไทย/อังกฤษ)"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาคำ (ไทย/อังกฤษ)", "Search words (Thai/English)")}
             className="flex-1 h-8 px-2.5 text-[13px] border border-slate-200 rounded-md" />
           <button type="button" onClick={() => setEdit({ th: "", en: "" })}
-            className="h-8 px-2.5 text-[12px] font-medium rounded-md border border-violet-200 text-violet-700 hover:bg-violet-50">＋ เพิ่มคำ</button>
+            className="h-8 px-2.5 text-[12px] font-medium rounded-md border border-violet-200 text-violet-700 hover:bg-violet-50">{t("＋ เพิ่มคำ", "＋ Add word")}</button>
         </div>
 
         {edit && (
           <div className="mx-4 mt-2 p-2.5 rounded-lg border border-violet-200 bg-violet-50/60 flex items-center gap-2 flex-wrap">
-            <input value={edit.th} onChange={(e) => setEdit({ ...edit, th: e.target.value })} placeholder="คำไทย เช่น น้ำตาล" autoFocus
+            <input value={edit.th} onChange={(e) => setEdit({ ...edit, th: e.target.value })} placeholder={t("คำไทย เช่น น้ำตาล", "Thai word, e.g. น้ำตาล")} autoFocus
               className="w-[150px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
             <span className="text-slate-400">→</span>
-            <input value={edit.en} onChange={(e) => setEdit({ ...edit, en: e.target.value })} placeholder="คำอังกฤษ เช่น Brown"
+            <input value={edit.en} onChange={(e) => setEdit({ ...edit, en: e.target.value })} placeholder={t("คำอังกฤษ เช่น Brown", "English word, e.g. Brown")}
               onKeyDown={(e) => { if (e.key === "Enter") void save(edit); }}
               className="w-[150px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
             <button type="button" onClick={() => void save(edit)} disabled={busy}
-              className="h-8 px-3 text-[12px] font-medium rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>
-            <button type="button" onClick={() => { setEdit(null); setMsg(""); }} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+              className="h-8 px-3 text-[12px] font-medium rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">{t("บันทึก", "Save")}</button>
+            <button type="button" onClick={() => { setEdit(null); setMsg(""); }} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">{t("ยกเลิก", "Cancel")}</button>
           </div>
         )}
         {msg && <p className="px-4 pt-2 text-[12px] text-slate-500">{msg}</p>}
 
         <div className="flex-1 overflow-y-auto p-4">
           <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
-            {shown.length === 0 && <p className="px-3 py-4 text-[12.5px] text-slate-400 text-center">ไม่พบคำที่ค้นหา</p>}
+            {shown.length === 0 && <p className="px-3 py-4 text-[12.5px] text-slate-400 text-center">{t("ไม่พบคำที่ค้นหา", "No matching words")}</p>}
             {shown.map((r) => (
               <div key={r.id} className="group flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-slate-50">
                 <span className="w-[45%] truncate text-slate-700">{r.th}</span>
@@ -573,7 +578,7 @@ function ColorDictModal({ rows, suggest, onReload, onClose }: {
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-slate-400">มีทั้งหมด {rows.length} คำ · แก้ที่นี่มีผลกับทุกสินค้าที่กดปุ่มแปลสี</p>
+          <p className="mt-2 text-[11px] text-slate-400">{t(`มีทั้งหมด ${rows.length} คำ · แก้ที่นี่มีผลกับทุกสินค้าที่กดปุ่มแปลสี`, `${rows.length} words total · changes here apply to every product when you translate colors`)}</p>
         </div>
       </div>
     </div>
@@ -589,6 +594,7 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
   bases: Record<string, unknown>[]; existingCodes: Set<string>;
   onDone: (created: number, skipped: number) => void; onClose: () => void;
 }) {
+  const t = useT();
   const nameOf = (b: Record<string, unknown>) => String(b.color_th ?? b[groupField] ?? b.color ?? String(b[titleField] ?? ""));
   const multi = bases.length > 1;
   // สีที่ติ๊กไว้ (โหมดหลายสี) — ค่าเริ่มต้นติ๊กทุกสี
@@ -620,8 +626,8 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
   const savePreset = async () => {
     if (!presetEdit) return;
     const items = opts.map((o) => ({ code: o.code.trim(), value: o.value.trim() })).filter((o) => o.code && o.value);
-    if (!presetEdit.label.trim()) { setMsg("ตั้งชื่อชุดก่อน"); return; }
-    if (items.length === 0) { setMsg("กรอกตัวย่อ + ชื่อ อย่างน้อย 1 บรรทัด ก่อนบันทึกเป็นชุด"); return; }
+    if (!presetEdit.label.trim()) { setMsg(tr("ตั้งชื่อชุดก่อน", "Name the preset first")); return; }
+    if (items.length === 0) { setMsg(tr("กรอกตัวย่อ + ชื่อ อย่างน้อย 1 บรรทัด ก่อนบันทึกเป็นชุด", "Enter a code + name on at least 1 line before saving as a preset")); return; }
     setPresetBusy(true); setMsg(null);
     try {
       const j = await apiFetch("/api/variant-presets", {
@@ -629,26 +635,26 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
         body: JSON.stringify({ id: presetEdit.id, label: presetEdit.label.trim(), option_name: presetEdit.option_name.trim() || optName, items }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setPresetEdit(null); void loadPresets(); setMsg("บันทึกชุดสำเร็จแล้ว");
-    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      setPresetEdit(null); void loadPresets(); setMsg(tr("บันทึกชุดสำเร็จแล้ว", "Preset saved"));
+    } catch (e) { setMsg(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setPresetBusy(false); }
   };
   const deletePreset = async (p: Preset) => {
-    if (!window.confirm(`ลบชุด "${p.label}" ?`)) return;
+    if (!window.confirm(tr(`ลบชุด "${p.label}" ?`, `Delete preset "${p.label}"?`))) return;
     setPresetBusy(true);
     try {
       const j = await apiFetch(`/api/variant-presets?id=${encodeURIComponent(p.id)}`, { method: "DELETE" }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       void loadPresets();
-    } catch (e) { setMsg(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    } catch (e) { setMsg(e instanceof Error ? e.message : tr("ลบไม่สำเร็จ", "Delete failed")); }
     finally { setPresetBusy(false); }
   };
   const setOpt = (i: number, k: "code" | "value", v: string) => setOpts((p) => p.map((o, j) => (j === i ? { ...o, [k]: v } : o)));
 
   const create = async () => {
     const rows = opts.map((o) => ({ code: o.code.trim(), value: o.value.trim() })).filter((o) => o.code && o.value);
-    if (!rows.length) { setMsg("กรอกตัวย่อ (รหัส) + ชื่ออย่างน้อย 1 แบบ"); return; }
-    if (chosen.length === 0) { setMsg("ติ๊กเลือกสีอย่างน้อย 1 สี"); return; }
+    if (!rows.length) { setMsg(tr("กรอกตัวย่อ (รหัส) + ชื่ออย่างน้อย 1 แบบ", "Enter a code + name for at least 1 option")); return; }
+    if (chosen.length === 0) { setMsg(tr("ติ๊กเลือกสีอย่างน้อย 1 สี", "Tick at least 1 color")); return; }
     setSaving(true); setMsg(null);
     let ok = 0, skip = 0;
     // ทุกสีที่เลือก × ทุกแบบ/ไซส์ที่กรอก
@@ -672,7 +678,7 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
         try {
           const res = await apiFetch(`/api/master-v2/${moduleKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
           const j = await res.json().catch(() => ({}));
-          if (!res.ok || j.error) throw new Error(j.error || "ผิดพลาด");
+          if (!res.ok || j.error) throw new Error(j.error || tr("ผิดพลาด", "Error"));
           ok++;
         } catch { skip++; }
       }
@@ -686,25 +692,25 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
       <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-800">
-            {multi ? `＋ เพิ่มแบบ/ไซส์ ให้หลายสี (${bases.length} สี)` : `＋ เพิ่มแบบ/ไซส์ ให้สี “${colorLabel}”`}
+            {multi ? t(`＋ เพิ่มแบบ/ไซส์ ให้หลายสี (${bases.length} สี)`, `＋ Add options/sizes to several colors (${bases.length} colors)`) : t(`＋ เพิ่มแบบ/ไซส์ ให้สี “${colorLabel}”`, `＋ Add options/sizes to color “${colorLabel}”`)}
           </h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           <div className="text-[11px] text-slate-400">
             {multi
-              ? <>รหัสใหม่ = <b className="text-slate-600">รหัสของแต่ละสี</b><span className="text-emerald-600">+ตัวย่อ</span> · ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากสีนั้น ๆ</>
-              : <>รหัสฐาน <b className="text-slate-600">{baseCode}</b> · รหัสใหม่ = {baseCode}<span className="text-emerald-600">+ตัวย่อ</span> · ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากตัวฐาน</>}
+              ? <>{t("รหัสใหม่ =", "New code =")} <b className="text-slate-600">{t("รหัสของแต่ละสี", "each color's code")}</b><span className="text-emerald-600">{t("+ตัวย่อ", "+suffix")}</span> {t("· ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากสีนั้น ๆ", "· name = color / option name · price copied from that color")}</>
+              : <>{t("รหัสฐาน", "Base code")} <b className="text-slate-600">{baseCode}</b> {t("· รหัสใหม่ =", "· new code =")} {baseCode}<span className="text-emerald-600">{t("+ตัวย่อ", "+suffix")}</span> {t("· ชื่อ = สี / ชื่อแบบ · ราคาก๊อปจากตัวฐาน", "· name = color / option name · price copied from the base")}</>}
           </div>
 
           {/* โหมดหลายสี: ติ๊กว่าจะใส่แบบ/ไซส์ให้สีไหน (เริ่มต้นติ๊กทุกสี) */}
           {multi && (
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs text-slate-500">ใส่ให้สี</span>
-                <button type="button" onClick={() => setPicked(new Set(bases.map((b) => String(b.id))))} className="text-[11px] text-blue-600 hover:underline">เลือกทั้งหมด</button>
-                <button type="button" onClick={() => setPicked(new Set())} className="text-[11px] text-slate-400 hover:underline">ล้าง</button>
-                <span className="text-[11px] text-slate-400 ml-auto">เลือกแล้ว {picked.size}/{bases.length}</span>
+                <span className="text-xs text-slate-500">{t("ใส่ให้สี", "Apply to colors")}</span>
+                <button type="button" onClick={() => setPicked(new Set(bases.map((b) => String(b.id))))} className="text-[11px] text-blue-600 hover:underline">{t("เลือกทั้งหมด", "Select all")}</button>
+                <button type="button" onClick={() => setPicked(new Set())} className="text-[11px] text-slate-400 hover:underline">{t("ล้าง", "Clear")}</button>
+                <span className="text-[11px] text-slate-400 ml-auto">{t(`เลือกแล้ว ${picked.size}/${bases.length}`, `Selected ${picked.size}/${bases.length}`)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto border border-slate-100 rounded-lg p-2">
                 {bases.map((b) => {
@@ -721,71 +727,71 @@ function O2MVariantAdder({ moduleKey, fkField, parentValue, titleField, groupFie
             </div>
           )}
           <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-500 w-20 flex-shrink-0">ชุดตัวเลือก</label>
-            <input value={optName} onChange={(e) => setOptName(e.target.value)} placeholder="เช่น แบบพิมพ์ / ไซส์"
+            <label className="text-xs text-slate-500 w-20 flex-shrink-0">{t("ชุดตัวเลือก", "Option set")}</label>
+            <input value={optName} onChange={(e) => setOptName(e.target.value)} placeholder={t("เช่น แบบพิมพ์ / ไซส์", "e.g. Print style / Size")}
               className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
           </div>
           <div className="flex flex-wrap gap-1.5 items-center">
-            <span className="text-[11px] text-slate-400">ชุดสำเร็จ:</span>
+            <span className="text-[11px] text-slate-400">{t("ชุดสำเร็จ:", "Presets:")}</span>
             {(presets ?? []).map((p) => (
               <span key={p.id} className="group inline-flex items-center rounded-md border border-slate-200 overflow-hidden">
                 <button type="button" title={p.items.map((i) => `${i.code}=${i.value}`).join(" · ")}
                   onClick={() => { if (p.option_name) setOptName(p.option_name); setOpts(p.items.length ? p.items : [{ code: "", value: "" }]); }}
                   className="h-7 px-2 text-[11px] hover:bg-slate-50">{p.label}</button>
-                <button type="button" title="แก้ชุดนี้ (ใช้ค่าที่กรอกอยู่ตอนนี้เป็นรายการใหม่)"
+                <button type="button" title={t("แก้ชุดนี้ (ใช้ค่าที่กรอกอยู่ตอนนี้เป็นรายการใหม่)", "Edit this preset (uses the values entered now as its new items)")}
                   onClick={() => setPresetEdit({ id: p.id, label: p.label, option_name: p.option_name })}
                   className="h-7 px-1 text-[10px] text-slate-400 border-l border-slate-200 hover:text-blue-600 hover:bg-slate-50">✎</button>
-                <button type="button" title="ลบชุดนี้" onClick={() => void deletePreset(p)} disabled={presetBusy}
+                <button type="button" title={t("ลบชุดนี้", "Delete this preset")} onClick={() => void deletePreset(p)} disabled={presetBusy}
                   className="h-7 px-1 text-[10px] text-slate-400 border-l border-slate-200 hover:text-rose-600 hover:bg-slate-50 disabled:opacity-40">🗑</button>
               </span>
             ))}
-            {presets === null && <span className="text-[11px] text-slate-300">กำลังโหลด…</span>}
-            <button type="button" title="บันทึกรายการที่กรอกอยู่ตอนนี้เป็นชุดสำเร็จใหม่"
+            {presets === null && <span className="text-[11px] text-slate-300">{t("กำลังโหลด…", "Loading…")}</span>}
+            <button type="button" title={t("บันทึกรายการที่กรอกอยู่ตอนนี้เป็นชุดสำเร็จใหม่", "Save the items entered now as a new preset")}
               onClick={() => setPresetEdit({ label: "", option_name: optName })}
-              className="h-7 px-2 text-[11px] rounded-md border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50">＋ บันทึกเป็นชุด</button>
+              className="h-7 px-2 text-[11px] rounded-md border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50">{t("＋ บันทึกเป็นชุด", "＋ Save as preset")}</button>
           </div>
 
           {presetEdit && (
             <div className="p-2.5 rounded-lg border border-blue-200 bg-blue-50/60 space-y-2">
               <p className="text-[11px] text-blue-800">
-                {presetEdit.id ? "แก้ชุดสำเร็จ" : "บันทึกเป็นชุดสำเร็จใหม่"} — รายการของชุดจะใช้ “ตัวย่อ/ชื่อ” ที่กรอกอยู่ด้านล่างนี้
+                {presetEdit.id ? t("แก้ชุดสำเร็จ", "Edit preset") : t("บันทึกเป็นชุดสำเร็จใหม่", "Save as new preset")} {t("— รายการของชุดจะใช้ “ตัวย่อ/ชื่อ” ที่กรอกอยู่ด้านล่างนี้", "— the preset items will use the “code/name” lines entered below")}
               </p>
               <div className="flex items-center gap-2 flex-wrap">
                 <input value={presetEdit.label} onChange={(e) => setPresetEdit({ ...presetEdit, label: e.target.value })}
-                  placeholder="ชื่อปุ่ม เช่น ไซส์ S–XXL" autoFocus
+                  placeholder={t("ชื่อปุ่ม เช่น ไซส์ S–XXL", "Button name, e.g. Size S–XXL")} autoFocus
                   className="w-[170px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
                 <input value={presetEdit.option_name} onChange={(e) => setPresetEdit({ ...presetEdit, option_name: e.target.value })}
-                  placeholder="ชุดตัวเลือก เช่น ไซส์"
+                  placeholder={t("ชุดตัวเลือก เช่น ไซส์", "Option set, e.g. Size")}
                   className="w-[130px] h-8 px-2 text-[13px] border border-slate-200 rounded-md" />
                 <button type="button" onClick={() => void savePreset()} disabled={presetBusy}
                   className="h-8 px-3 text-[12px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-                  {presetBusy ? "กำลังบันทึก…" : "บันทึกชุด"}
+                  {presetBusy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกชุด", "Save preset")}
                 </button>
-                <button type="button" onClick={() => { setPresetEdit(null); setMsg(null); }} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">ยกเลิก</button>
+                <button type="button" onClick={() => { setPresetEdit(null); setMsg(null); }} className="h-8 px-2 text-[12px] text-slate-500 hover:bg-white rounded-md">{t("ยกเลิก", "Cancel")}</button>
               </div>
             </div>
           )}
           <div className="space-y-1.5">
-            <div className="flex gap-2 text-[11px] text-slate-400"><span className="w-16">ตัวย่อ</span><span className="flex-1">ชื่อที่โชว์</span></div>
+            <div className="flex gap-2 text-[11px] text-slate-400"><span className="w-16">{t("ตัวย่อ", "Code")}</span><span className="flex-1">{t("ชื่อที่โชว์", "Display name")}</span></div>
             {opts.map((o, i) => (
               <div key={i} className="flex items-center gap-2">
                 <input value={o.code} onChange={(e) => setOpt(i, "code", e.target.value)} placeholder="S"
                   className="w-16 h-8 px-2 text-sm border border-slate-200 rounded-md font-mono" />
-                <input value={o.value} onChange={(e) => setOpt(i, "value", e.target.value)} placeholder="เช่น พิมพ์จม / S"
+                <input value={o.value} onChange={(e) => setOpt(i, "value", e.target.value)} placeholder={t("เช่น พิมพ์จม / S", "e.g. Debossed / S")}
                   className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
                 <button type="button" onClick={() => setOpts((p) => p.filter((_, j) => j !== i))} disabled={opts.length === 1}
                   className="w-7 h-7 rounded text-slate-400 hover:text-red-500 disabled:opacity-30">✕</button>
               </div>
             ))}
             <button type="button" onClick={() => setOpts((p) => [...p, { code: "", value: "" }])}
-              className="text-xs text-blue-600 hover:underline">＋ เพิ่มบรรทัด</button>
+              className="text-xs text-blue-600 hover:underline">{t("＋ เพิ่มบรรทัด", "＋ Add line")}</button>
           </div>
           {msg && <div className="text-xs text-red-600">{msg}</div>}
         </div>
         <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+          <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">{t("ยกเลิก", "Cancel")}</button>
           <button type="button" onClick={create} disabled={saving} className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50">
-            {saving ? "กำลังสร้าง…" : `สร้าง${(() => { const n = chosen.length * opts.filter((o) => o.code.trim() && o.value.trim()).length; return n > 0 ? ` ${n} รายการ` : ""; })()}`}
+            {saving ? t("กำลังสร้าง…", "Creating…") : (() => { const n = chosen.length * opts.filter((o) => o.code.trim() && o.value.trim()).length; return n > 0 ? t(`สร้าง ${n} รายการ`, `Create ${n} items`) : t("สร้าง", "Create"); })()}
           </button>
         </div>
       </div>
@@ -800,6 +806,7 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
   labels: Record<string, string>; alreadyIds: Set<string>; title?: string;
   onAttached: () => void; onClose: () => void;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -820,14 +827,14 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       const sp = q.trim() ? `&search=${encodeURIComponent(q.trim())}` : "";
       apiFetch(`/api/master-v2/${moduleKey}?limit=30&offset=0${sp}`).then((r) => r.json())
         .then((j) => { if (alive) setRows((j.data ?? j.rows ?? []) as Record<string, unknown>[]); })
         .catch(() => { if (alive) setRows([]); })
         .finally(() => { if (alive) setLoading(false); });
     }, 300);
-    return () => { alive = false; clearTimeout(t); };
+    return () => { alive = false; clearTimeout(timer); };
   }, [q, moduleKey]);
 
   const candidates = rows.filter((r) => !alreadyIds.has(String(r.id)));   // ตัดตัวที่เป็นลูกใบนี้อยู่แล้วออก
@@ -842,9 +849,9 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { alert("แนบไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      if (!res.ok || j.error) { alert(tr("แนบไม่สำเร็จ: ", "Attach failed: ") + (j.error ?? `HTTP ${res.status}`)); return; }
       onAttached(); onClose();
-    } catch (e) { alert("แนบไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    } catch (e) { alert(tr("แนบไม่สำเร็จ: ", "Attach failed: ") + (e instanceof Error ? e.message : "network")); }
     finally { setSaving(false); }
   };
 
@@ -852,16 +859,16 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">เลือก{title ? ` ${title}` : "รายการ"}ที่มีอยู่แล้ว</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{title ? t(`เลือก ${title}ที่มีอยู่แล้ว`, `Select existing ${title}`) : t("เลือกรายการที่มีอยู่แล้ว", "Select existing items")}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
         </div>
         <div className="p-3 border-b border-slate-100">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส/ชื่อ…" autoFocus
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหารหัส/ชื่อ…", "Search code/name…")} autoFocus
             className="w-full h-8 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-400" />
         </div>
         <div className="flex-1 overflow-y-auto py-1">
-          {loading && <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด…</div>}
-          {!loading && candidates.length === 0 && <div className="px-3 py-6 text-xs text-slate-400 text-center">— ไม่พบรายการให้เลือก —</div>}
+          {loading && <div className="px-3 py-4 text-xs text-slate-400 text-center">{t("กำลังโหลด…", "Loading…")}</div>}
+          {!loading && candidates.length === 0 && <div className="px-3 py-6 text-xs text-slate-400 text-center">{t("— ไม่พบรายการให้เลือก —", "— No items to select —")}</div>}
           {!loading && candidates.map((r) => {
             const id = String(r.id);
             const checked = picked.has(id);
@@ -882,18 +889,18 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, la
                   <span className="block text-sm text-slate-800 truncate">{String(r[titleField] ?? r.name ?? id)}</span>
                   {secField && r[secField] != null && r[secField] !== "" && <span className="block text-[11px] text-slate-400 truncate">{String(r[secField])}</span>}
                 </span>
-                {linkedElsewhere && <span className="flex-shrink-0 text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">อยู่ใบอื่น</span>}
+                {linkedElsewhere && <span className="flex-shrink-0 text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">{t("อยู่ใบอื่น", "On another record")}</span>}
               </button>
             );
           })}
         </div>
         <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">{picked.size > 0 ? `เลือก ${picked.size} รายการ` : "เลือกรายการที่จะผูก"}</span>
+          <span className="text-xs text-slate-500">{picked.size > 0 ? t(`เลือก ${picked.size} รายการ`, `${picked.size} selected`) : t("เลือกรายการที่จะผูก", "Select items to link")}</span>
           <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+            <button type="button" onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">{t("ยกเลิก", "Cancel")}</button>
             <button type="button" onClick={attach} disabled={saving || picked.size === 0}
               className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-40">
-              {saving ? "กำลังผูก…" : `ผูกเป็นลูก (${picked.size})`}
+              {saving ? t("กำลังผูก…", "Linking…") : t(`ผูกเป็นลูก (${picked.size})`, `Link as child (${picked.size})`)}
             </button>
           </div>
         </div>
@@ -908,6 +915,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const fk = config.target_fk_column ?? "";
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
   const imageField = config.list_image_field;
+  const t = useT();
   const toast = useToast();
   const { user, can } = useAuth();
   // 🖼 มุมมองตารางลูก: ตาราง / รูปภาพ (การ์ดรูปทั้งหมดต่อแถว + ลากรูปลงได้) — จำต่อผู้ใช้ (ของกลาง useViewPref)
@@ -1049,13 +1057,13 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         // ไม่มีสิทธิ์ลบถาวร → ปิดใช้แทน (กู้คืนได้ที่หน้า SKU)
         res = await apiFetch(`/api/master-v2/${moduleKey}/${encodeURIComponent(id)}`, { method: "DELETE" });
         j = await res.json().catch(() => ({}));
-        if (res.ok && !j.error) toast.info(`ไม่มีสิทธิ์ลบถาวร — ปิดใช้ ${label} แทนแล้ว`);
+        if (res.ok && !j.error) toast.info(tr(`ไม่มีสิทธิ์ลบถาวร — ปิดใช้ ${label} แทนแล้ว`, `No permission to delete permanently — ${label} was deactivated instead`));
       }
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      toast.success(mustSoft ? `ปิดใช้ ${label} แล้ว (กู้คืนได้ที่หน้า SKU)` : `ลบ ${label} ถาวรแล้ว`);
+      toast.success(mustSoft ? tr(`ปิดใช้ ${label} แล้ว (กู้คืนได้ที่หน้า SKU)`, `${label} deactivated (restore it on the SKU page)`) : tr(`ลบ ${label} ถาวรแล้ว`, `${label} deleted permanently`));
       setDelTarget(null);
       load();
-    } catch (e) { toast.error(`ลบไม่สำเร็จ: ${e instanceof Error ? e.message : "network"}`); }
+    } catch (e) { toast.error(tr(`ลบไม่สำเร็จ: ${e instanceof Error ? e.message : "network"}`, `Delete failed: ${e instanceof Error ? e.message : "network"}`)); }
     finally { setDeleting(false); }
   };
   const deleteDialog = delTarget ? (() => {
@@ -1065,23 +1073,23 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     const soft = !!u?.used || (isSku && !u);
     return (
       <ConfirmDialog open onClose={() => !deleting && setDelTarget(null)} onConfirm={() => void confirmDelete()}
-        title={delTarget.checking ? `กำลังตรวจว่า ${label} ถูกใช้ที่ไหนบ้าง…` : soft ? `ปิดใช้ ${label}` : `ลบ ${label} ถาวร`}
+        title={delTarget.checking ? t(`กำลังตรวจว่า ${label} ถูกใช้ที่ไหนบ้าง…`, `Checking where ${label} is used…`) : soft ? t(`ปิดใช้ ${label}`, `Deactivate ${label}`) : t(`ลบ ${label} ถาวร`, `Delete ${label} permanently`)}
         variant={soft ? "default" : "danger"}
-        confirmText={delTarget.checking ? "กำลังตรวจ…" : deleting ? "กำลังลบ…" : soft ? "ปิดใช้" : "ลบถาวร"}
-        message={delTarget.checking ? <span className="text-sm text-slate-500">เช็กสต๊อก / ใบสั่งซื้อ / ใบขาย / ใบสั่งผลิต ฯลฯ</span> : (
+        confirmText={delTarget.checking ? t("กำลังตรวจ…", "Checking…") : deleting ? t("กำลังลบ…", "Deleting…") : soft ? t("ปิดใช้", "Deactivate") : t("ลบถาวร", "Delete permanently")}
+        message={delTarget.checking ? <span className="text-sm text-slate-500">{t("เช็กสต๊อก / ใบสั่งซื้อ / ใบขาย / ใบสั่งผลิต ฯลฯ", "Checking stock / purchase orders / sales docs / manufacturing orders, etc.")}</span> : (
           <div className="space-y-2 text-sm">
             {u?.used ? (
               <>
-                <div className="text-slate-700">SKU นี้ <b>ถูกใช้อยู่</b> ลบถาวรไม่ได้ (เอกสารจะอ้างอิงไม่เจอ) — ระบบจะ <b>ปิดใช้</b> แทน: หายจากรายการ แต่เอกสารเดิมยังเปิดดูได้ และกู้คืนได้ที่หน้า SKU</div>
+                <div className="text-slate-700">{t("SKU นี้", "This SKU is")} <b>{t("ถูกใช้อยู่", "in use")}</b> {t("ลบถาวรไม่ได้ (เอกสารจะอ้างอิงไม่เจอ) — ระบบจะ", "and can't be deleted permanently (documents would lose their reference) — it will be")} <b>{t("ปิดใช้", "deactivated")}</b> {t("แทน: หายจากรายการ แต่เอกสารเดิมยังเปิดดูได้ และกู้คืนได้ที่หน้า SKU", "instead: hidden from lists, old documents still open, and it can be restored on the SKU page")}</div>
                 <ul className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {u.stock_qty !== 0 && <li>สต๊อกคงเหลือ {u.stock_qty.toLocaleString("th-TH")}</li>}
-                  {u.refs.map((r) => <li key={r.label}>{r.label} {r.count.toLocaleString("th-TH")} รายการ</li>)}
+                  {u.stock_qty !== 0 && <li>{t("สต๊อกคงเหลือ", "Stock on hand")} {u.stock_qty.toLocaleString("th-TH")}</li>}
+                  {u.refs.map((r) => <li key={r.label}>{r.label} {r.count.toLocaleString("th-TH")} {t("รายการ", "items")}</li>)}
                 </ul>
               </>
             ) : isSku && !u ? (
-              <div className="text-slate-700">ตรวจการใช้งานไม่ได้ในตอนนี้ — เพื่อความปลอดภัยจะ <b>ปิดใช้</b> แทนการลบถาวร (กู้คืนได้)</div>
+              <div className="text-slate-700">{t("ตรวจการใช้งานไม่ได้ในตอนนี้ — เพื่อความปลอดภัยจะ", "Can't check usage right now — to be safe it will be")} <b>{t("ปิดใช้", "deactivated")}</b> {t("แทนการลบถาวร (กู้คืนได้)", "instead of deleted permanently (can be restored)")}</div>
             ) : (
-              <div className="text-slate-700">{isSku ? "SKU นี้ยังไม่ถูกใช้ในเอกสารใด" : "รายการนี้"} จะถูก <b className="text-rose-600">ลบออกถาวร</b> กู้คืนไม่ได้ (รูป/ไฟล์แนบของรายการนี้ถูกลบตามไปด้วย)</div>
+              <div className="text-slate-700">{isSku ? t("SKU นี้ยังไม่ถูกใช้ในเอกสารใด", "This SKU isn't used in any document and") : t("รายการนี้", "This item")} {t("จะถูก", "will be")} <b className="text-rose-600">{t("ลบออกถาวร", "deleted permanently")}</b> {t("กู้คืนไม่ได้ (รูป/ไฟล์แนบของรายการนี้ถูกลบตามไปด้วย)", "and can't be restored (its images/attachments are deleted too)")}</div>
             )}
           </div>
         )} />
@@ -1102,7 +1110,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     const { ok, errors } = await uploadImagesToRecord({ entityType, moduleKey, imageField, row: r, files: imgs, actor: user?.name ?? null });
     errors.forEach((m) => toast.error(m));
     setUploadingRowId(null);
-    if (ok) { toast.success(`เพิ่มรูปให้ ${String(r[titleField] ?? rowId)} ${ok} รูป`); load(); }
+    if (ok) { toast.success(tr(`เพิ่มรูปให้ ${String(r[titleField] ?? rowId)} ${ok} รูป`, `Added ${ok} image(s) to ${String(r[titleField] ?? rowId)}`)); load(); }
   };
   // 🖼 โหมดรูปภาพ — ตารางที่มีฟิลด์รูป · ลากรูปลงได้ทันทีถ้าแก้ได้ (โหมดแก้ไข หรือสินค้าที่ผู้ใช้มีสิทธิ์แก้สินค้า — ไม่ต้องกด "แก้ไข")
   const canImageMode = !!imageField && !!entityType && !!moduleKey;
@@ -1115,10 +1123,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [editVal, setEditVal] = useState("");
   const fkCol = config.target_fk_column ?? "";
   // ช่องตัวเลข/ราคา → บีบคอลัมน์ให้แคบ (หัวตารางตัดเป็น 2 บรรทัดได้) เพราะเลขสั้นแต่ชื่อหัวยาว
-  const isNumCol = (f: string) => { const t = typeByField[f] ?? "text"; return t === "number" || t === "currency"; };
+  const isNumCol = (f: string) => { const ft = typeByField[f] ?? "text"; return ft === "number" || ft === "currency"; };
   const parseByType = (f: string, raw: string): unknown => {
-    const t = typeByField[f] ?? "text";
-    if (t === "number" || t === "currency") { const n = Number(raw); return raw === "" ? null : (isFinite(n) ? n : null); }
+    const ft = typeByField[f] ?? "text";
+    if (ft === "number" || ft === "currency") { const n = Number(raw); return raw === "" ? null : (isFinite(n) ? n : null); }
     return raw === "" ? null : raw;
   };
   const saveCell = async (rowId: string, field: string, raw: string) => {
@@ -1131,8 +1139,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         body: JSON.stringify({ edits: [{ id: rowId, changes: { [field]: val } }] }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); load(); }
-    } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); load(); }
+      if (!res.ok || j.error) { alert(tr("บันทึกไม่สำเร็จ: ", "Save failed: ") + (j.error ?? `HTTP ${res.status}`)); load(); }
+    } catch (e) { alert(tr("บันทึกไม่สำเร็จ: ", "Save failed: ") + (e instanceof Error ? e.message : "network")); load(); }
   };
   // 🌐 แปลชื่อสีระหว่างช่องไทย/อังกฤษ (Color Th ↔ Color)
   //    ① ใช้ "พจนานุกรมสี" ที่ตั้งค่าไว้ก่อน (ตายตัว แม่นกว่า) — AI แปลชื่อสีเพี้ยนบ่อย เช่น น้ำตาล→Sugar
@@ -1180,7 +1188,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     const srcKey = dir === "th2en" ? "color_th" : "color";
     const dstKey = dir === "th2en" ? "color" : "color_th";
     // ต้องทำกับ "ทุกแถว" ไม่ใช่แค่ 20 แถวที่โชว์อยู่ (ไม่งั้นแปลได้แค่ครึ่งชุด)
-    setColorTranslating("โหลด…");
+    setColorTranslating("…");   // ระหว่างโหลดทุกแถว → ป้ายขึ้น "กำลังโหลด…" / "Loading…"
     const allRows = await fetchAllRows();
     setColorTranslating("");
     const withSrc = (allRows.length ? allRows : rows).filter((r) => String(r[srcKey] ?? "").trim());
@@ -1192,12 +1200,15 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     // ทุกแถวมีค่าถูกภาษาอยู่แล้ว — แต่คำแปลอาจผิดความหมาย (เช่น Sugar ที่ควรเป็น Brown)
     // → ถามยืนยันก่อนแปลทับ ไม่ตัดจบเงียบ ๆ เหมือนเดิม
     if (targets.length === 0) {
-      if (withSrc.length === 0) { alert(`ไม่มีข้อมูลต้นทางให้แปล (ช่อง ${dir === "th2en" ? "Color Th" : "Color"} ว่างทุกแถว)`); return; }
-      const ok = window.confirm(
+      if (withSrc.length === 0) { alert(tr(`ไม่มีข้อมูลต้นทางให้แปล (ช่อง ${dir === "th2en" ? "Color Th" : "Color"} ว่างทุกแถว)`, `Nothing to translate (the ${dir === "th2en" ? "Color Th" : "Color"} field is empty on every row)`)); return; }
+      const ok = window.confirm(tr(
         `ทุกแถวมีชื่อสีถูกภาษาอยู่แล้ว (${withSrc.length} แถว)\n\n` +
         `ต้องการ "แปลทับ" ใหม่ทั้งหมดด้วยพจนานุกรมสีไหม?\n` +
         `(ใช้ตอนคำแปลเดิมผิดความหมาย เช่น น้ำตาล → Sugar ที่ควรเป็น Brown)`,
-      );
+        `Every row already has a color name in the right language (${withSrc.length} rows)\n\n` +
+        `Re-translate and overwrite all of them using the color dictionary?\n` +
+        `(Use this when old translations are wrong, e.g. น้ำตาล → Sugar instead of Brown)`,
+      ));
       if (!ok) return;
       targets = withSrc;
     }
@@ -1241,21 +1252,24 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     }
     setColorTranslating("");
     if (learned.length) setNewWords(learned);                     // โชว์แถบ "บันทึกคำใหม่เข้าพจนานุกรม"
-    if (edits.length === 0) { alert(`แปลไม่สำเร็จ (${failed} แถว) — เพิ่มคำที่ยังไม่มีในพจนานุกรมสี (ปุ่ม ⚙) แล้วลองอีกครั้ง`); return; }
+    if (edits.length === 0) { alert(tr(`แปลไม่สำเร็จ (${failed} แถว) — เพิ่มคำที่ยังไม่มีในพจนานุกรมสี (ปุ่ม ⚙) แล้วลองอีกครั้ง`, `Translation failed (${failed} rows) — add the missing words to the color dictionary (⚙ button) and try again`)); return; }
     try {
       const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
-      alert(`แปลและบันทึกแล้ว ${edits.length} แถว (จากพจนานุกรม ${byDict} · ใช้ AI ช่วย ${byAi})${failed ? ` · แปลไม่ได้ ${failed}` : ""}`);
+      if (!res.ok || j.error) { alert(tr("บันทึกไม่สำเร็จ: ", "Save failed: ") + (j.error ?? `HTTP ${res.status}`)); return; }
+      alert(tr(
+        `แปลและบันทึกแล้ว ${edits.length} แถว (จากพจนานุกรม ${byDict} · ใช้ AI ช่วย ${byAi})${failed ? ` · แปลไม่ได้ ${failed}` : ""}`,
+        `Translated and saved ${edits.length} rows (from dictionary ${byDict} · with AI ${byAi})${failed ? ` · couldn't translate ${failed}` : ""}`,
+      ));
       load();
-    } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    } catch (e) { alert(tr("บันทึกไม่สำเร็จ: ", "Save failed: ") + (e instanceof Error ? e.message : "network")); }
   };
 
   const fillColumn = async (field: string) => {
     if (matchValue == null || !fkCol) return;
-    const raw = window.prompt(`เติมค่า "${labelOf(field)}" ให้รายการลูกทุกตัวของใบนี้:`, "");
+    const raw = window.prompt(tr(`เติมค่า "${labelOf(field)}" ให้รายการลูกทุกตัวของใบนี้:`, `Fill "${labelOf(field)}" for every child item of this record:`), "");
     if (raw == null) return;
     const val = parseByType(field, raw);
     try {
@@ -1264,10 +1278,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         body: JSON.stringify({ changes: { [field]: val }, filters: { [fkCol]: matchCond } }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { alert("เติมไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
-      alert(`เติมค่าให้ ${j.affected ?? 0} รายการแล้ว`);
+      if (!res.ok || j.error) { alert(tr("เติมไม่สำเร็จ: ", "Fill failed: ") + (j.error ?? `HTTP ${res.status}`)); return; }
+      alert(tr(`เติมค่าให้ ${j.affected ?? 0} รายการแล้ว`, `Filled ${j.affected ?? 0} items`));
       load();
-    } catch (e) { alert("เติมไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    } catch (e) { alert(tr("เติมไม่สำเร็จ: ", "Fill failed: ") + (e instanceof Error ? e.message : "network")); }
   };
   const labelOf = (k: string) => labels[k] ?? k;
 
@@ -1312,18 +1326,18 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // บันทึกคอลัมน์ที่เลือก → ทะเบียน field กลาง (ทุกคนเห็นเหมือนกัน)
   const saveColumns = async (next: string[]) => {
-    if (!fieldId) { alert("บันทึกไม่ได้ — ไม่พบรหัส field"); return; }
+    if (!fieldId) { alert(tr("บันทึกไม่ได้ — ไม่พบรหัส field", "Can't save — field ID not found")); return; }
     try {
       const res = await apiFetch(`/api/admin/field-registry-v2/${fieldId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ relation_config: { ...config, list_sub_fields: next } }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { alert("บันทึกคอลัมน์ไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      if (!res.ok || j.error) { alert(tr("บันทึกคอลัมน์ไม่สำเร็จ: ", "Saving columns failed: ") + (j.error ?? `HTTP ${res.status}`)); return; }
       setSubFields(next);   // อัปเดตคอลัมน์ใน inline ทันที (ไม่ reload → ไม่ปิด drawer)
       setPickerOpen(false);
     } catch (e) {
-      alert("บันทึกคอลัมน์ไม่สำเร็จ: " + (e instanceof Error ? e.message : "network error"));
+      alert(tr("บันทึกคอลัมน์ไม่สำเร็จ: ", "Saving columns failed: ") + (e instanceof Error ? e.message : "network error"));
     }
   };
 
@@ -1335,7 +1349,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // ปุ่มตั้งค่าคอลัมน์ (เฉพาะคนมีสิทธิ์ + เป็น field จริง)
   const gearBtn = canConfig ? (
-    <button type="button" onClick={() => setPickerOpen(true)} title="เลือกคอลัมน์ที่จะแสดง"
+    <button type="button" onClick={() => setPickerOpen(true)} title={t("เลือกคอลัมน์ที่จะแสดง", "Choose columns to show")}
       className="flex-shrink-0 w-6 h-6 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 inline-flex items-center justify-center text-xs">⚙</button>
   ) : null;
   const pickerModal = pickerOpen ? (
@@ -1387,7 +1401,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const submitNewRow = async () => {
     const code = (newRow[titleField] ?? "").trim();
     if (!code || matchValue == null || !fk) return;
-    if (newCodeCheck.duplicate) { toast.error(`รหัส ${code} ซ้ำกับ ${newCodeCheck.duplicate.code} ที่มีอยู่แล้ว — เปลี่ยนรหัสก่อน`); return; }
+    if (newCodeCheck.duplicate) { toast.error(tr(`รหัส ${code} ซ้ำกับ ${newCodeCheck.duplicate.code} ที่มีอยู่แล้ว — เปลี่ยนรหัสก่อน`, `Code ${code} duplicates existing ${newCodeCheck.duplicate.code} — change the code first`)); return; }
     setAdding(true);
     try {
       const body: Record<string, unknown> = { [fk]: matchValue, [titleField]: code, is_active: true };
@@ -1401,29 +1415,29 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { alert("เพิ่มไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      if (!res.ok || j.error) { alert(tr("เพิ่มไม่สำเร็จ: ", "Add failed: ") + (j.error ?? `HTTP ${res.status}`)); return; }
       setNewRow({});
       setNewImg(null);
       load();
-    } catch (e) { alert("เพิ่มไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    } catch (e) { alert(tr("เพิ่มไม่สำเร็จ: ", "Add failed: ") + (e instanceof Error ? e.message : "network")); }
     finally { setAdding(false); }
   };
   const addBtn = canAdd ? (
-    <button type="button" onClick={() => setCreating(true)} title="เพิ่มแบบกรอกครบทุกช่อง (popup)"
-      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1">+ เพิ่มแบบเต็ม</button>
+    <button type="button" onClick={() => setCreating(true)} title={t("เพิ่มแบบกรอกครบทุกช่อง (popup)", "Add with all fields (popup)")}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1">{t("+ เพิ่มแบบเต็ม", "+ Add (full form)")}</button>
   ) : null;
   const createModal = creating ? (
     <MasterRecordDrawer moduleKey={moduleKey} recordId={null}
       createDefaults={{ [fk]: matchValue, is_active: true }}
-      createTitle={title ? `เพิ่ม ${title}` : "เพิ่มรายการใหม่"}
+      createTitle={title ? t(`เพิ่ม ${title}`, `Add ${title}`) : t("เพิ่มรายการใหม่", "Add new item")}
       onChanged={load} onClose={() => setCreating(false)} />
   ) : null;
 
   // เลือก "ที่มีอยู่แล้ว" มาผูกเป็นลูก (ตั้งค่า FK ให้ชี้มาหาใบนี้) — ของกลาง ใช้ได้ทุก one2many
   const [attaching, setAttaching] = useState(false);
   const attachBtn = (canAdd && matchValue != null && matchValue !== "") ? (
-    <button type="button" onClick={() => setAttaching(true)} title="เลือกรายการที่มีอยู่แล้วมาผูกเป็นลูก"
-      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-600 hover:bg-emerald-50 inline-flex items-center gap-1">+ เลือกที่มีอยู่</button>
+    <button type="button" onClick={() => setAttaching(true)} title={t("เลือกรายการที่มีอยู่แล้วมาผูกเป็นลูก", "Pick existing items and link them as children")}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-600 hover:bg-emerald-50 inline-flex items-center gap-1">{t("+ เลือกที่มีอยู่", "+ Pick existing")}</button>
   ) : null;
   const attachModal = attaching ? (
     <O2MAttachPicker moduleKey={moduleKey} fk={fk} matchValue={matchValue as string | number}
@@ -1436,16 +1450,16 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const colorBtn = colorPair ? (
     <div className="flex-shrink-0 inline-flex rounded-md border border-violet-200 overflow-hidden">
       <span className="h-6 px-1.5 text-[11px] font-medium text-violet-700 bg-violet-50 inline-flex items-center">
-        {colorTranslating ? `แปล ${colorTranslating}…` : "🌐 แปลสี"}
+        {colorTranslating === "…" ? t("กำลังโหลด…", "Loading…") : colorTranslating ? t(`แปล ${colorTranslating}…`, `Translating ${colorTranslating}…`) : t("🌐 แปลสี", "🌐 Translate colors")}
       </span>
       <button type="button" disabled={!!colorTranslating} onClick={() => void translateColors("th2en")}
-        title="แปลชื่อสีไทย → อังกฤษ (เติมช่อง Color ที่ว่างหรือยังเป็นภาษาไทย)"
+        title={t("แปลชื่อสีไทย → อังกฤษ (เติมช่อง Color ที่ว่างหรือยังเป็นภาษาไทย)", "Translate color names Thai → English (fills Color where empty or still in Thai)")}
         className="h-6 px-1.5 text-[11px] font-medium text-violet-600 border-l border-violet-200 hover:bg-violet-50 disabled:opacity-40">TH→EN</button>
       <button type="button" disabled={!!colorTranslating} onClick={() => void translateColors("en2th")}
-        title="แปลชื่อสีอังกฤษ → ไทย (เติมช่อง Color Th ที่ว่างหรือยังเป็นภาษาอังกฤษ)"
+        title={t("แปลชื่อสีอังกฤษ → ไทย (เติมช่อง Color Th ที่ว่างหรือยังเป็นภาษาอังกฤษ)", "Translate color names English → Thai (fills Color Th where empty or still in English)")}
         className="h-6 px-1.5 text-[11px] font-medium text-violet-600 border-l border-violet-200 hover:bg-violet-50 disabled:opacity-40">EN→TH</button>
       <button type="button" onClick={() => { setDictOpen(true); if (!colorDict) void loadDict(); }}
-        title="ตั้งค่าคำแปลสี — กำหนดเองว่าคำไหนแปลเป็นอะไร (ใช้ก่อน AI)"
+        title={t("ตั้งค่าคำแปลสี — กำหนดเองว่าคำไหนแปลเป็นอะไร (ใช้ก่อน AI)", "Color translation settings — set which word translates to what (used before AI)")}
         className="h-6 px-1.5 text-[11px] text-violet-500 border-l border-violet-200 hover:bg-violet-50">⚙</button>
     </div>
   ) : null;
@@ -1465,15 +1479,15 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         body: JSON.stringify({ edits: edits.map((e) => ({ id: e.id, changes: { fake_price: e.fake_price } })) }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { toast.error("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return false; }
-      toast.success(`ใส่ Fake Price แล้ว ${edits.length} ตัว`);
+      if (!res.ok || j.error) { toast.error(tr("บันทึกไม่สำเร็จ: ", "Save failed: ") + (j.error ?? `HTTP ${res.status}`)); return false; }
+      toast.success(tr(`ใส่ Fake Price แล้ว ${edits.length} ตัว`, `Fake Price set on ${edits.length} items`));
       load();
       return true;
-    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); return false; }
+    } catch (e) { toast.error(tr("บันทึกไม่สำเร็จ: ", "Save failed: ") + (e instanceof Error ? e.message : "network")); return false; }
   };
   const fakeBtn = fakePair ? (
-    <button type="button" onClick={() => void openFakePrice()} title="ใส่ Fake Price (ราคาเต็มขีดฆ่า) ทุกตัวตามสูตร — เลือก/เพิ่มสูตรได้ ดูตัวอย่างก่อนบันทึก"
-      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1" data-fake-price-btn>🏷 ใส่ Fake Price</button>
+    <button type="button" onClick={() => void openFakePrice()} title={t("ใส่ Fake Price (ราคาเต็มขีดฆ่า) ทุกตัวตามสูตร — เลือก/เพิ่มสูตรได้ ดูตัวอย่างก่อนบันทึก", "Set Fake Price (struck-through full price) on all items by formula — pick/add formulas, preview before saving")}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1" data-fake-price-btn>{t("🏷 ใส่ Fake Price", "🏷 Set Fake Price")}</button>
   ) : null;
   const fakeModal = fakeRows ? <FakePriceDialog rows={fakeRows} onApply={applyFakePrices} onClose={() => setFakeRows(null)} /> : null;
 
@@ -1485,9 +1499,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const allCollapsed = groupBaseIds.length > 0 && groupBaseIds.every((id) => collapsed.has(id));
   const collapseBtn = hasAnyVariant ? (
     <button type="button" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(groupBaseIds))}
-      title={allCollapsed ? "ขยายทุกกลุ่ม (โชว์ไซส์ทั้งหมด)" : "พับทุกกลุ่ม (เห็นแต่ตัวหลักของแต่ละสี)"}
+      title={allCollapsed ? t("ขยายทุกกลุ่ม (โชว์ไซส์ทั้งหมด)", "Expand all groups (show all sizes)") : t("พับทุกกลุ่ม (เห็นแต่ตัวหลักของแต่ละสี)", "Collapse all groups (show only the main item of each color)")}
       className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50">
-      {allCollapsed ? "▼ โชว์ทั้งหมด" : "▶ พับทั้งหมด"}
+      {allCollapsed ? t("▼ โชว์ทั้งหมด", "▼ Show all") : t("▶ พับทั้งหมด", "▶ Collapse all")}
     </button>
   ) : null;
 
@@ -1502,8 +1516,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       const bases = (all.length ? all : rows).filter((r) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !(av && av.variant_option); });
       setVariantBases(bases.length ? bases : variantBaseRows);
     })()}
-      title={`เพิ่มแบบ/ไซส์ให้หลายสีพร้อมกัน (${variantBaseRows.length} สี) — เลือกสีและไซส์ แล้วสร้างทีเดียว`}
-      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 inline-flex items-center gap-1">＋ ไซส์/แบบ (หลายสี)</button>
+      title={t(`เพิ่มแบบ/ไซส์ให้หลายสีพร้อมกัน (${variantBaseRows.length} สี) — เลือกสีและไซส์ แล้วสร้างทีเดียว`, `Add options/sizes to several colors at once (${variantBaseRows.length} colors) — pick colors and sizes, then create in one go`)}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 inline-flex items-center gap-1">{t("＋ ไซส์/แบบ (หลายสี)", "＋ Sizes/options (multi-color)")}</button>
   ) : null;
 
   // 🖼 สลับ ตาราง / รูปภาพ — กดแล้วจำเป็นค่าเริ่มต้นของผู้ใช้คนนั้น (เปิดครั้งหน้าเจอแบบเดิม)
@@ -1511,9 +1525,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     <div className="flex-shrink-0 inline-flex rounded-md border border-slate-200 overflow-hidden">
       {(["table", "images"] as const).map((v) => (
         <button key={v} type="button" onClick={() => { viewPref.setView(v); void viewPref.saveDefault(v); }}
-          title={v === "images" ? "โชว์รูปทั้งหมดของแต่ละรายการ + ลากรูปลงได้เลย" : "มุมมองตาราง"}
+          title={v === "images" ? t("โชว์รูปทั้งหมดของแต่ละรายการ + ลากรูปลงได้เลย", "Show all images of each item + drag images straight in") : t("มุมมองตาราง", "Table view")}
           className={`h-6 px-2 text-[11px] font-medium ${v === "images" ? "border-l border-slate-200" : ""} ${viewPref.view === v ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>
-          {v === "images" ? "🖼 รูปภาพ" : "📋 ตาราง"}
+          {v === "images" ? t("🖼 รูปภาพ", "🖼 Images") : t("📋 ตาราง", "📋 Table")}
         </button>
       ))}
     </div>
@@ -1522,8 +1536,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   // 📂 จัดรูปหลายโฟลเดอร์ (เปิดหน้าต่างเปล่า แล้วลาก/เลือกโฟลเดอร์ในนั้น)
   const routerBtn = routerParentId ? (
     <button type="button" onClick={() => setRouter({ open: true, files: null })}
-      title="ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก) แล้วเลือกว่ารูปไหนลงช่องไหน — ปก · SKU ลูก · แกลเลอรี Parent · Hero · Description"
-      className="flex-shrink-0 h-6 px-2 rounded-md text-[11px] font-medium border border-blue-200 text-blue-700 hover:bg-blue-50">📂 จัดรูปหลายโฟลเดอร์</button>
+      title={t("ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก) แล้วเลือกว่ารูปไหนลงช่องไหน — ปก · SKU ลูก · แกลเลอรี Parent · Hero · Description", "Drag several folders (folder name = child SKU code), then choose where each image goes — cover · child SKU · Parent gallery · Hero · Description")}
+      className="flex-shrink-0 h-6 px-2 rounded-md text-[11px] font-medium border border-blue-200 text-blue-700 hover:bg-blue-50">{t("📂 จัดรูปหลายโฟลเดอร์", "📂 Sort images from folders")}</button>
   ) : null;
 
   // หัวข้อ + จำนวน (สำหรับ 360 view)
@@ -1548,8 +1562,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const rich = displayMode === "tags" ? false : !!(imageField || subFields.length > 0);
   const showInlineAdd = canAdd && rich;   // แถวเพิ่มแบบ inline (เฉพาะโหมดตาราง)
 
-  if (matchValue == null || matchValue === "") return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
-  if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div>{pickerModal}</>;
+  if (matchValue == null || matchValue === "") return <>{header}<div className="text-xs text-slate-400 italic">{t("บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง", "Save the record first to see related items")}</div>{pickerModal}</>;
+  if (!loaded) return <>{header}<div className="text-xs text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>{pickerModal}</>;
 
   // โหมด tag-ชิป — แสดงแต่ละลูกเป็นชิป (เพิ่มผ่านปุ่ม "+ เพิ่มแบบเต็ม")
   if (displayMode === "tags") {
@@ -1557,7 +1571,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       <>
         {header}
         {rows.length === 0 ? (
-          <div className="text-xs text-slate-300">— ไม่มีรายการ —</div>
+          <div className="text-xs text-slate-300">{t("— ไม่มีรายการ —", "— No items —")}</div>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {rows.map((r) => (
@@ -1588,7 +1602,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       <>
         {header}
         {rows.length === 0 ? (
-          <div className="text-xs text-slate-300">— ไม่มีรายการ —</div>
+          <div className="text-xs text-slate-300">{t("— ไม่มีรายการ —", "— No items —")}</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {rows.map((r) => (
@@ -1610,7 +1624,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {rows.length < total && (
           <button type="button" onClick={loadMore} disabled={loadingMore}
             className="mt-1.5 w-full h-8 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-            {loadingMore ? "กำลังโหลด…" : `ดูเพิ่ม (เหลืออีก ${total - rows.length})`}
+            {loadingMore ? t("กำลังโหลด…", "Loading…") : t(`ดูเพิ่ม (เหลืออีก ${total - rows.length})`, `Show more (${total - rows.length} left)`)}
           </button>
         )}
         {peek && moduleKey && (
@@ -1622,7 +1636,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   }
 
   // ว่าง + เพิ่ม inline ไม่ได้ → โชว์ข้อความ; ถ้าเพิ่ม inline ได้ → ตกลงไปเรนเดอร์ตาราง (มีแถวว่างให้พิมพ์)
-  if (rows.length === 0 && !showInlineAdd) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}{deleteDialog}</>;
+  if (rows.length === 0 && !showInlineAdd) return <>{header}<div className="text-xs text-slate-300">{t("— ไม่มีรายการ —", "— No items —")}</div>{pickerModal}{createModal}{deleteDialog}</>;
 
   const list = !rich ? (
     <ul className="space-y-1">
@@ -1631,7 +1645,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           <button type="button" onClick={() => setPeek({ id: String(r.id), edit: false })} className="flex-1 min-w-0 text-left text-sm text-slate-700 inline-flex items-center gap-1">
             <span className="flex-1 truncate">{String(r[titleField] ?? r.name ?? r.id)}</span>
           </button>
-          <button type="button" onClick={() => setPeek({ id: String(r.id), edit: true })} title="แก้ไข"
+          <button type="button" onClick={() => setPeek({ id: String(r.id), edit: true })} title={t("แก้ไข", "Edit")}
             className="flex-shrink-0 w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
         </li>
       ))}
@@ -1654,7 +1668,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       return (
       <tr key={String(r.id)}
         className={`group cursor-pointer ${dropRowId === String(r.id) ? "bg-indigo-50 ring-1 ring-indigo-300" : opts?.indent ? "hover:bg-blue-50/40 bg-slate-50/40" : "hover:bg-blue-50/40"}`}
-        title={canDropImages ? "ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้" : undefined}
+        title={canDropImages ? t("ลากรูปมาวางเพื่อเพิ่มรูปให้รายการนี้", "Drop images here to add them to this item") : undefined}
         {...openOnRealClick(String(r.id))}
         onDragOver={canDropImages ? (e) => { e.preventDefault(); if (dropRowId !== String(r.id)) setDropRowId(String(r.id)); } : undefined}
         onDragLeave={canDropImages ? () => setDropRowId((p) => (p === String(r.id) ? null : p)) : undefined}
@@ -1709,10 +1723,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           );
         })}
         <td className="px-2 py-1.5 text-right whitespace-nowrap">
-          <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
+          <button type="button" title={t("แก้ไข", "Edit")} onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
             className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
           {canEditRows && (
-            <button type="button" title={moduleKey === "skus-v2" ? "ลบ SKU นี้ (ยังไม่ถูกใช้ = ลบถาวร · ถูกใช้แล้ว = ปิดใช้)" : "ลบรายการนี้"}
+            <button type="button" title={moduleKey === "skus-v2" ? t("ลบ SKU นี้ (ยังไม่ถูกใช้ = ลบถาวร · ถูกใช้แล้ว = ปิดใช้)", "Delete this SKU (unused = delete permanently · in use = deactivate)") : t("ลบรายการนี้", "Delete this item")}
               onClick={(e) => { e.stopPropagation(); void requestDelete(r); }}
               className="w-6 h-6 rounded text-xs text-slate-400 hover:text-rose-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">🗑</button>
           )}
@@ -1722,8 +1736,8 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     };
     const hasVariant = (r: Record<string, unknown>) => { const av = r.attribute_values as { variant_option?: unknown } | null; return !!(av && av.variant_option); };
     const addVariantBtn = (base: Record<string, unknown>) => canAdd ? (
-      <button type="button" title="เพิ่มแบบ/ไซส์ให้สีนี้" onClick={(e) => { e.stopPropagation(); setVariantBases([base]); }}
-        className="h-5 px-1.5 rounded text-[10px] font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-opacity">＋ เพิ่มแบบ/ไซส์</button>
+      <button type="button" title={t("เพิ่มแบบ/ไซส์ให้สีนี้", "Add options/sizes to this color")} onClick={(e) => { e.stopPropagation(); setVariantBases([base]); }}
+        className="h-5 px-1.5 rounded text-[10px] font-medium border border-emerald-200 text-emerald-700 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-opacity">{t("＋ เพิ่มแบบ/ไซส์", "＋ Add options/sizes")}</button>
     ) : null;
     // ทรี 2 ชั้น: ตัวหลักของสี (ไม่มี variant_option) = แถวแม่ + ปุ่มพับ/ขยาย · ตัวย่อย = ย่อหน้าใต้แม่
     const renderBody = () => {
@@ -1760,7 +1774,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           const id = String(base.id);
           const isColl = collapsed.has(id);
           const toggle = (
-            <button type="button" title={isColl ? "ขยาย" : "พับ"}
+            <button type="button" title={isColl ? t("ขยาย", "Expand") : t("พับ", "Collapse")}
               onClick={(e) => { e.stopPropagation(); setCollapsed((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }}
               className="w-5 h-5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center text-[10px]">{isColl ? "▶" : "▼"}</button>
           );
@@ -1771,7 +1785,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           out.push(
             <tr key={`grp-${label}`} className="bg-slate-100/70 border-t border-slate-200">
               <td colSpan={colCount} className="px-2 py-1.5">
-                <div className="flex items-center gap-2"><span className="text-xs font-semibold text-slate-600">🎨 {label} <span className="text-slate-400 font-normal">({grs.length})</span></span>{canAdd && addVariantBtn(grs[0])}</div>
+                <div className="flex items-center gap-2"><span className="text-xs font-semibold text-slate-600">🎨 {label === "— ไม่ระบุ —" ? t("— ไม่ระบุ —", "— Not set —") : label} <span className="text-slate-400 font-normal">({grs.length})</span></span>{canAdd && addVariantBtn(grs[0])}</div>
               </td>
             </tr>,
           );
@@ -1789,7 +1803,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
               {imageField && <th className="px-2 py-1.5 w-10" />}
               {/* คอลัมน์รหัส: กว้างพอดีข้อความที่ยาวสุด (w-0 + nowrap = shrink-to-fit) ไม่กินที่เหลือ */}
               <th className="px-2 py-1.5 text-left font-medium w-0 whitespace-nowrap">
-                <button type="button" onClick={() => toggleSort(titleField)} title="กดเพื่อเรียง"
+                <button type="button" onClick={() => toggleSort(titleField)} title={t("กดเพื่อเรียง", "Click to sort")}
                   className="inline-flex items-center gap-0.5 hover:text-slate-700">
                   {labelOf(titleField)}<span className="text-blue-500">{sortArrow(titleField)}</span>
                 </button>
@@ -1798,12 +1812,12 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                 // ช่องตัวเลข/ราคา: บีบให้แคบ ตัดคำได้ 2 บรรทัด (ชื่อหัวยาวไม่ต้องดันความกว้าง)
                 <th key={f} className={`px-1.5 py-1.5 font-medium ${isNumCol(f) ? "text-right w-[62px] leading-tight whitespace-normal break-words" : `whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}`}>
                   <span className={`inline-flex items-center gap-1 ${relCfgByField[f] ? "" : "flex-row-reverse"}`}>
-                    <button type="button" onClick={() => toggleSort(f)} title="กดเพื่อเรียง"
+                    <button type="button" onClick={() => toggleSort(f)} title={t("กดเพื่อเรียง", "Click to sort")}
                       className="inline-flex items-center gap-0.5 hover:text-slate-700">
                       {labelOf(f)}<span className="text-blue-500">{sortArrow(f)}</span>
                     </button>
                     {isEditableCol(f) && (
-                      <button type="button" title="เติมค่าเดียวกันทุกแถว" onClick={(e) => { e.stopPropagation(); fillColumn(f); }}
+                      <button type="button" title={t("เติมค่าเดียวกันทุกแถว", "Fill the same value on every row")} onClick={(e) => { e.stopPropagation(); fillColumn(f); }}
                         className="text-slate-300 hover:text-blue-600">⤓</button>
                     )}
                   </span>
@@ -1826,11 +1840,11 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                     <input value={newRow[titleField] ?? ""} disabled={adding}
                       onChange={(e) => setNewRow((p) => ({ ...p, [titleField]: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === "Enter") void submitNewRow(); }}
-                      placeholder={`+ ${labelOf(titleField)} ใหม่…`}
+                      placeholder={t(`+ ${labelOf(titleField)} ใหม่…`, `+ New ${labelOf(titleField)}…`)}
                       className="flex-1 min-w-0 h-7 px-1.5 text-sm border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
                     {parentCode && (
                       <button type="button" onClick={() => void genNextCode()} disabled={adding}
-                        title={`ไล่เลขอัตโนมัติ (${parentCode}-xx)`}
+                        title={t(`ไล่เลขอัตโนมัติ (${parentCode}-xx)`, `Auto-number (${parentCode}-xx)`)}
                         className="flex-shrink-0 h-7 px-1.5 rounded border border-amber-300 bg-white text-amber-600 hover:bg-amber-100 text-xs font-medium disabled:opacity-40">🔢</button>
                     )}
                   </div>
@@ -1850,10 +1864,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                   );
                 })}
                 <td className="px-2 py-1.5 text-right">
-                  <button type="button" onClick={() => void submitNewRow()} title="เพิ่ม (หรือกด Enter)"
+                  <button type="button" onClick={() => void submitNewRow()} title={t("เพิ่ม (หรือกด Enter)", "Add (or press Enter)")}
                     disabled={adding || !(newRow[titleField] ?? "").trim() || !!newCodeCheck.duplicate}
                     className="h-7 px-2 rounded-md text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40">
-                    {adding ? "…" : "เพิ่ม"}
+                    {adding ? "…" : t("เพิ่ม", "Add")}
                   </button>
                 </td>
               </tr>
@@ -1871,7 +1885,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             <tfoot className="bg-slate-50 font-semibold text-slate-700">
               <tr>
                 {imageField && <td />}
-                <td className="px-2 py-1.5 text-xs text-slate-500">รวม ({rows.length})</td>
+                <td className="px-2 py-1.5 text-xs text-slate-500">{t(`รวม (${rows.length})`, `Total (${rows.length})`)}</td>
                 {subFields.map((f) => <td key={f} className="px-2 py-1.5 text-right tabular-nums">{sums[f] != null ? sums[f].toLocaleString() : ""}</td>)}
                 <td />
               </tr>
@@ -1883,7 +1897,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   })();
 
   const dropHint = canDropImages ? (
-    <p className="text-[10px] text-slate-400 mt-1">💡 ลากรูปมาวางที่แถวเพื่อเพิ่มรูปให้รายการนั้น (เข้าคลังรูป + ตั้งรูปปกถ้ายังว่าง · ย่อ 1500px อัตโนมัติ)</p>
+    <p className="text-[10px] text-slate-400 mt-1">{t("💡 ลากรูปมาวางที่แถวเพื่อเพิ่มรูปให้รายการนั้น (เข้าคลังรูป + ตั้งรูปปกถ้ายังว่าง · ย่อ 1500px อัตโนมัติ)", "💡 Drop images on a row to add them to that item (saved to the image library + set as cover if empty · auto-resized to 1500px)")}</p>
   ) : null;
 
   return (
@@ -1904,7 +1918,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       {rows.length < total && (
         <button type="button" onClick={loadMore} disabled={loadingMore}
           className="mt-1.5 w-full h-8 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-          {loadingMore ? "กำลังโหลด…" : `ดูเพิ่ม (เหลืออีก ${total - rows.length})`}
+          {loadingMore ? t("กำลังโหลด…", "Loading…") : t(`ดูเพิ่ม (เหลืออีก ${total - rows.length})`, `Show more (${total - rows.length} left)`)}
         </button>
       )}
       {peek && moduleKey && (
@@ -1922,7 +1936,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           titleField={titleField} groupField={config.list_group_field ?? "color_th"} bases={variantBases}
           existingCodes={new Set(rows.map((r) => String(r[titleField] ?? "")))}
           onClose={() => setVariantBases(null)}
-          onDone={(ok, skip) => { setVariantBases(null); if (ok) { toast.success(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`); load(); } else toast.error("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)"); }} />
+          onDone={(ok, skip) => { setVariantBases(null); if (ok) { toast.success(tr(`สร้าง ${ok} รายการ${skip ? ` · ข้าม ${skip} (ซ้ำ/พลาด)` : ""}`, `Created ${ok} items${skip ? ` · skipped ${skip} (duplicate/failed)` : ""}`)); load(); } else toast.error(tr("ไม่ได้สร้าง (ซ้ำ/พลาด/ว่าง)", "Nothing created (duplicate/failed/empty)")); }} />
       )}
       {createModal}{deleteDialog}
       {attachModal}{fakeModal}
@@ -1939,6 +1953,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 export function MasterDetailRelation({ config, recordId, configurable, parentValues }: {
   config: RelConfig; recordId?: string | null; configurable?: boolean; parentValues?: Record<string, unknown>;
 }) {
+  const t = useT();
   const l1ModuleKey = config.target_module_key ?? config.target_table ?? "";  // เช่น bom-headers
   const l1Fk = config.target_fk_column ?? "";                                  // เช่น product_sku
   const l1MatchField = config.parent_match_field || "id";                      // เช่น code
@@ -1985,14 +2000,14 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
   const selected = headers.find((h) => String(h.id) === selId) ?? null;
   const canAdd = !!configurable && l1MatchValue != null && l1MatchValue !== "" && !!l1Fk;
 
-  if (l1MatchValue == null || l1MatchValue === "") return <div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>;
-  if (!loaded) return <div className="text-xs text-slate-400">กำลังโหลด…</div>;
+  if (l1MatchValue == null || l1MatchValue === "") return <div className="text-xs text-slate-400 italic">{t("บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง", "Save the record first to see related items")}</div>;
+  if (!loaded) return <div className="text-xs text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>;
 
   return (
     <div className="space-y-2">
       {/* ชั้น 1: เลือกใบ (version) เป็นแท็บ */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {headers.length === 0 && <span className="text-xs text-slate-300">— ยังไม่มี —</span>}
+        {headers.length === 0 && <span className="text-xs text-slate-300">{t("— ยังไม่มี —", "— None yet —")}</span>}
         {headers.map((h) => {
           const isSel = String(h.id) === selId;
           const isDefault = h.is_default === true;
@@ -2003,14 +2018,14 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
               }`}>
               <span>{String(h[l1TitleField] ?? h.id)}</span>
               {h.version != null && h.version !== "" && <span className="text-[10px] text-slate-400">{String(h.version)}</span>}
-              {isDefault && <span className="text-[10px] text-emerald-500" title="ค่าเริ่มต้น">★</span>}
+              {isDefault && <span className="text-[10px] text-emerald-500" title={t("ค่าเริ่มต้น", "Default")}>★</span>}
             </button>
           );
         })}
         {canAdd && (
           <button type="button" onClick={() => (isBom ? setBomEditor(true) : setCreating(true))}
-            title={isBom ? (headers.length > 0 ? "เปิดตัวทำ BOM เพื่อเพิ่มเวอร์ชั่นใหม่ (คัดลอกจากเวอร์ชั่นเดิมได้)" : "เปิดตัวทำ BOM เพื่อสร้างสูตรแรกของสินค้านี้") : undefined}
-            className="px-2.5 py-1 text-xs rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50">+ เพิ่ม version</button>
+            title={isBom ? (headers.length > 0 ? t("เปิดตัวทำ BOM เพื่อเพิ่มเวอร์ชั่นใหม่ (คัดลอกจากเวอร์ชั่นเดิมได้)", "Open the BOM editor to add a new version (can copy from an existing one)") : t("เปิดตัวทำ BOM เพื่อสร้างสูตรแรกของสินค้านี้", "Open the BOM editor to create this product's first BOM")) : undefined}
+            className="px-2.5 py-1 text-xs rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50">{t("+ เพิ่ม version", "+ Add version")}</button>
         )}
       </div>
 
@@ -2021,7 +2036,7 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
             configurable={configurable} parentCode={String(selected[l1TitleField] ?? "")} />
         </div>
       ) : selected && !detailCfg ? (
-        <div className="text-xs text-amber-600">— ยังไม่ได้ตั้งค่ารายการลูกชั้นใน (detail_field) —</div>
+        <div className="text-xs text-amber-600">{t("— ยังไม่ได้ตั้งค่ารายการลูกชั้นใน (detail_field) —", "— Inner child list not configured (detail_field) —")}</div>
       ) : null}
 
       {/* เพิ่มใบใหม่ (version) */}
@@ -2033,7 +2048,7 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
       {creating && (
         <MasterRecordDrawer moduleKey={l1ModuleKey} recordId={null}
           createDefaults={{ [l1Fk]: l1MatchValue, is_active: true }}
-          createTitle="เพิ่ม BOM version ใหม่"
+          createTitle={t("เพิ่ม BOM version ใหม่", "Add new BOM version")}
           onChanged={loadHeaders} onClose={() => setCreating(false)} />
       )}
     </div>

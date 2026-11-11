@@ -53,7 +53,7 @@ import { type PushToast } from "@/components/toast";
 import { BrandSelect } from "@/components/brand-select";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
-  getTask, updateTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
+  getTask, updateTask, claimTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
@@ -358,7 +358,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <TaskDirectPanel task={d} pushToast={pushToast}
                 canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
                 canUndo={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
-                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
+                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }}
+                // 🙋 งานยังไม่มีผู้รับผิดชอบเลย → ปุ่มแก้กลายเป็น "รับงาน + แก้ที่สินค้า" (เจ้าของเลือก 2026-11-11 · 11/14 งานโหมดใหม่ไม่มีผู้รับผิดชอบ)
+                onClaim={!isClosed && !!user?.id && !d.assignee_id && (d.assignees ?? []).length === 0
+                  ? async () => { await claimTask(d.id); await refresh(); } : undefined} />
 
               {/* 🛠 งานชุดรุ่นที่ผูกกับงานนี้ (หน้า SKU การตลาด) — ไม่ผูก = ไม่โชว์ */}
               <WorkJobLinkBox taskId={d.id} />
