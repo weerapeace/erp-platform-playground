@@ -109,7 +109,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
     const made: Seam[] = [];
     info.seams.forEach((r, i) => {
       const a = info.pidByKey[r.a.piece], b = info.pidByKey[r.b.piece];
-      if (a && b) made.push({ id: `s${stamp}t${i}`, a: { pid: a, from: r.a.from, count: r.a.count, n: r.a.n }, b: { pid: b, from: r.b.from, count: r.b.count, n: r.b.n } });
+      const side = (pid: string, x: typeof r.a) => ({ pid, from: x.from, count: x.count, n: x.n, ...(x.t0 != null && x.t1 != null ? { t0: x.t0, t1: x.t1 } : {}), ...(x.inner ? { inner: x.inner } : {}) });
+      if (a && b) made.push({ id: `s${stamp}t${i}`, a: side(a, r.a), b: side(b, r.b), ...(r.kind ? { kind: r.kind } : {}) });
     });
     const att: Attach[] = [];
     info.attach.forEach((r, i) => {
@@ -117,7 +118,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
       if (pid && on) att.push({ id: `a${stamp}t${i}`, kind: r.kind, pid, on, a: r.a, b: r.b, len: r.len, w: r.w, tail: r.tail });
     });
     setSeams((prev) => [...prev, ...made]); setDirty(true);
-    setAttaches((prev) => { const next = [...prev, ...att]; setTemplate({ params: info.params, attach: next }); return next; });
+    // เก็บค่าแม่แบบ + จุดติด โดยไม่ทับค่าอื่นของ template (ค่าวัสดุ · ซิป/อะไหล่ · เป้าหมายตีราคา) — เดิมทับทั้งก้อน
+    setAttaches((prev) => { const next = [...prev, ...att]; setTemplate((tp) => ({ ...(tp ?? {}), ...(info.params ? { params: info.params } : {}), style: info.style, attach: next })); return next; });
   }, []);
   const onSeams = (next: Seam[]) => { setSeams(next); setDirty(true); };
 

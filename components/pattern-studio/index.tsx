@@ -30,7 +30,8 @@ import { buildSewn } from "@/lib/pattern-sewn";
 import { assemble, type AsmPiece, type Attach } from "@/lib/pattern-assembly";
 import { liningPlan, pocketPlan, type PocketOpts } from "@/lib/pattern-lining";
 import { shapeBox } from "@/lib/pattern-shape";
-import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
+import type { BagParams } from "@/lib/bag-templates";
+import type { BagKit, BagStyle, KitAttach, KitSeam } from "@/lib/bag-kits";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
@@ -60,7 +61,7 @@ const WIDE_PX = 1180;
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
 /** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + จุดติดหู/แผ่นหลังช่อง + ค่าแม่แบบที่ใช้ */
-export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; attach: BagAttachRef[]; params: BagParams };
+export type TemplateInsertInfo = { pidByKey: Record<string, string>; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ทรงอื่นไม่มี) */ params?: BagParams; style: BagStyle };
 
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
 export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean;
@@ -169,13 +170,22 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
   const pick3d = useCallback((pid: string | null) => setSelectReq({ nonce: Date.now(), pid }), []);
-  const insert = (pieces: BagPiece[], G: BagGeometry) => {
+  /** วางชุดแม่แบบ (lib/bag-kits) ลงกระดาน: ชิ้นตัวนอก + ซับใน + ช่องใส่ของ — รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้น/การผูกรูปอ้างถึงได้ */
+  const insert = (kit: BagKit) => {
     setWizard(false); setDraft(null);
-    const stamp = Date.now().toString(36), pidByKey: Partial<Record<BagPieceKey, string>> = {};
-    pieces.forEach((q, i) => { pidByKey[q.key] = `pc${stamp}t${i}`; });   // รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้นอ้างถึงได้
-    setInject({ nonce: Date.now(), pieces: pieces.map((q) => ({ pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, name: q.name, at: q.at, grain: q.grain, notches: q.notches })) });
+    const stamp = Date.now().toString(36), pidByKey: Record<string, string> = {};
+    // หน้าที่ไม่มีเครื่องมือเย็บ (ใบงานออกแบบ): ไม่มีเส้นใน/ชั้นซับใน/ผูกรูป → ชิ้นซับในเป็นชิ้นธรรมดา และไม่วางช่องใส่ของ (ต้องเย็บกับเส้นใน)
+    const list = sew ? kit.pieces : kit.pieces.filter((q) => q.key !== "lpocket");
+    list.forEach((q, i) => { pidByKey[q.key] = `pc${stamp}t${i}`; });
+    setInject({ nonce: Date.now(), pieces: list.map((q) => ({
+      pid: pidByKey[q.key], shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, name: q.name, at: q.at, grain: q.grain, notches: q.notches,
+      ...(q.edgeMeta ? { edgeMeta: q.edgeMeta } : {}), ...(q.lining ? { mats: [] } : {}),
+      ...(sew && q.inner ? { inner: q.inner } : {}), ...(sew && q.lining ? { info: { role: "lining" as const } } : {}), ...(sew && q.linkTo && pidByKey[q.linkTo] ? { link: { to: pidByKey[q.linkTo] } } : {}),
+    })) });
     setShow3d(true);
-    onTemplateInsert?.({ pidByKey, seams: bagSeamRefs(G), attach: bagAttachRefs(G), params: G.p });
+    onTemplateInsert?.({ pidByKey, seams: kit.seams.filter((x) => pidByKey[x.a.piece] && pidByKey[x.b.piece]), attach: kit.attach, params: kit.params, style: kit.style });
+    const nl = list.filter((q) => q.lining).length;
+    if (nl) setNotice(t(`วางแล้ว ${list.length} แบบ รวมซับใน ${nl} แบบ (วางไว้ใต้ชุดตัวนอก${sew ? " ผูกรูปกับตัวนอก: แก้ตัวนอกแล้วซับในเปลี่ยนตาม" : ""}) — เลือกวัสดุซับในให้ชิ้นเหล่านั้นด้วย`, `Placed ${list.length} patterns including ${nl} lining patterns (below the outer set) — pick a lining material for them`));
   };
 
   const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs";
@@ -302,7 +312,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
         );
       })()}
 
-      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} />}
+      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} pocket={!!sew} />}
       {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}
         hosts={live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, box: shapeBox(p.shape), lining: liningPids.has(p.pid) }))} />}
       {dxf && <DxfModal open onClose={() => setDxf(false)} onInsert={(list) => {

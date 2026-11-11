@@ -15,7 +15,7 @@
  * คู่มือ: docs/pattern-studio.md
  */
 import { assemble, type AsmPiece, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
-import { checkSeam, cleanEdgeMeta, finishPts, isInnerSide, isPartialSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { checkSeam, cleanEdgeMeta, finishPts, isInnerSide, isPartialSeam, pieceEdges, pointAlong, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
 import { flattenShape, shapeArea, shapeBox, type InnerKind, type Pt } from "@/lib/pattern-shape";
 import { panelMesh } from "@/lib/pattern-sim";
 
@@ -173,6 +173,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
   };
   const frames = new Map<string, Frame>();       // ชิ้นที่วางแล้วและเป็นแผ่นเรียบ (ให้ชิ้นอื่นมาเกาะได้)
   const done = new Set<string>();
+  const folded = new Set<string>();              // ชิ้นที่พับข้ามปาก (แถบปิดปาก / ฝาปิด) — ไม่ใช่แผ่นเรียบ ชิ้นอื่นมาเกาะต่อไม่ได้
   const rootOf = new Map<string, string>();      // ชิ้นที่วางแล้ว → ชิ้นหลักต้นทาง (แผ่นพับที่เกาะแผ่นพับ ย้อนไปถึงแผ่นหน้า/หลัง)
   let joined = 0, zFront = 0;
 
@@ -231,21 +232,29 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     const c = checks.get(s.id);
     lines.push({ id: s.id, idx: idxOf.get(s.id) ?? 0, pts: P.map((q) => add(place(host, q), mul(host.n, 0.12))), bad: c?.status === "mismatch" && !s.ease, ...(on ? { on } : {}) });
   };
+  /** ชิ้นประกบของ C: ยังไม่ได้วาง · เย็บกับ C อย่างเดียว · ขนาดเท่า C (เช่น ซับในฝาปิดที่เย็บ 3 ขอบกับฝา) */
+  const isFacing = (pid: string, C: AsmPiece): boolean => {
+    const T = byPid.get(pid);
+    if (!T || done.has(pid) || pid === C.pid) return false;
+    if (linksOf(pid).some((s) => (s.a.pid === pid ? s.b.pid : s.a.pid) !== C.pid)) return false;
+    const a = shapeArea(C.shape);
+    return Math.abs(a - shapeArea(T.shape)) <= 0.03 * a;
+  };
   let progress = true;
   while (progress) {
     progress = false;
     for (const C of pieces) {
       if (done.has(C.pid)) continue;
-      const L = linksOf(C.pid);
+      const L = linksOf(C.pid).filter((s) => !isFacing(s.a.pid === C.pid ? s.b.pid : s.a.pid, C));   // ชิ้นประกบ (เช่น ซับในฝาปิด) ไม่นับเป็นที่เกาะ
       if (!L.length || L.length > 2 || L.some((s) => s.a.pid === s.b.pid)) continue;
       const ends = L.map((s) => {
         const mine = s.a.pid === C.pid ? s.a : s.b, other = s.a.pid === C.pid ? s.b : s.a, host = frames.get(other.pid), hp = byPid.get(other.pid);
         const cs = segOf(C, mine), hs = host && hp ? segOf(hp, other) : null;
         const line = hp && isInnerSide(other) ? (hp.inner ?? []).find((l) => l.id === other.inner) ?? null : null;
-        return host && cs && hs ? { s, host, cs, hs, on: rootOf.get(other.pid), line } : null;
+        return host && cs && hs ? { s, host, cs, hs, on: rootOf.get(other.pid), line, hostPid: other.pid } : null;
       });
       if (ends.some((e) => !e)) continue;
-      const E = ends as { s: Seam; host: Frame; cs: Seg; hs: Seg; on?: string; line: { kind: InnerKind } | null }[];
+      const E = ends as { s: Seam; host: Frame; cs: Seg; hs: Seg; on?: string; line: { kind: InnerKind } | null; hostPid: string }[];
       const world = (e: (typeof E)[number]) => {
         const M = place(e.host, e.hs.mid), Dv = unit3(dir3(e.host, e.hs.dir)), O = unit3(dir3(e.host, [-e.hs.inward[0], -e.hs.inward[1]]));
         return { M, Dv, O, N: e.host.n };
@@ -290,6 +299,26 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
           return [rx * e.hs.dir[0] + ry * e.hs.dir[1], -(rx * e.hs.inward[0] + ry * e.hs.inward[1])];   // [ตามแนวตะเข็บ, ยื่นออกจากตะเข็บ]
         };
         let reach = 0; for (const q of flattenShape(C.shape)) reach = Math.max(reach, local(q)[1]);
+        // แถบปิดปาก / ฝาปิด (2026-11-11): เย็บขอบเต็มกับขอบเต็มของแผ่นหน้า/หลังของตัวกระเป๋าที่ประกอบแล้ว → พับเข้าหาอีกแผ่นตามแนวตะเข็บจริง (ตะเข็บโค้งก็โค้งตาม)
+        //   ยื่นไม่เกินความหนา = ปิดปาก (แถบซิปบน) · ยื่นเกินความหนา = ข้ามปากแล้วพับลงแนบด้านนอกของอีกแผ่น (ฝาปิด)
+        const bodyD = isPartialSeam(e.s) ? 0 : asm && (e.hostPid === asm.front || e.hostPid === asm.back) ? asm.depth : L0.ok && (e.hostPid === L0.front || e.hostPid === L0.back) ? L0.depth * LINING_K : 0;
+        if (bodyD > 0) {
+          const P = e.hs.pts, toIn = mul(N, dot(N, M) > 0 ? -1 : 1), lc = e.cs.len || 1;
+          const edgeAt = (al: number): { p: V3; o: V3 } => {
+            const u = Math.max(0, Math.min(e.hs.len, (al / lc + 0.5) * e.hs.len));
+            const a = pointAlong(P, Math.max(0, u - 0.25)) ?? P[0], b = pointAlong(P, Math.min(e.hs.len, u + 0.25)) ?? P[P.length - 1], q = pointAlong(P, u) ?? P[0];
+            const tl = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, tx = (b[0] - a[0]) / tl, ty = (b[1] - a[1]) / tl;
+            let ox = -ty, oy = tx; if (ox * e.hs.inward[0] + oy * e.hs.inward[1] > 0) { ox = -ox; oy = -oy; }   // ทิศออกนอกแผ่น ณ จุดนั้น
+            return { p: place(e.host, q), o: unit3(dir3(e.host, [ox, oy]), O) };
+          };
+          emit(C, "flap", true, (q) => {
+            const [al, out] = local(q), g = edgeAt(al), base = add(g.p, mul(g.o, 0.15));
+            return out <= bodyD ? add(base, mul(toIn, Math.max(0, out))) : add(add(base, mul(toIn, bodyD + 0.3)), mul(g.o, -(out - bodyD)));
+          }, e.on);
+          folded.add(C.pid);
+          seamLine(e.s, e.host, e.hs.pts, e.on); joined++; progress = true;
+          continue;
+        }
         if (O[1] > 0.7 && Math.abs(N[1]) < 0.3 && reach > HANG_MIN) {
           // ชิ้นยาวที่เย็บขอบบน: พับลงมาห้อยด้านนอกของแผ่น ส่วนที่ยาวเกินพื้นวางราบไปข้างหน้า
           const Nh = unit3([N[0], 0, N[2]], [0, 0, 1]);
@@ -319,6 +348,15 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
         seamLine(e1.s, e1.host, e1.hs.pts, e1.on); seamLine(e2.s, e2.host, e2.hs.pts, e2.on); joined++; progress = true;
       }
     }
+  }
+  // ชิ้นประกบของฝาปิด / แถบปิดปาก (เช่น ซับในฝาปิด: เย็บกับฝาอย่างเดียว ขนาดเท่ากัน) = อยู่แนบกับชิ้นนั้น ไม่วาดแยก
+  for (const C of pieces) {
+    if (done.has(C.pid)) continue;
+    const others = new Set(linksOf(C.pid).map((s) => (s.a.pid === C.pid ? s.b.pid : s.a.pid)));
+    const h = others.size === 1 ? [...others][0] : null, H = h ? byPid.get(h) : null;
+    if (!h || !H || !folded.has(h)) continue;
+    const ah = shapeArea(H.shape);
+    if (Math.abs(ah - shapeArea(C.shape)) <= 0.03 * ah) { done.add(C.pid); joined++; }
   }
   if (!asm && !lining && joined > 0) joined++;                    // นับชิ้นหลักด้วย เมื่อมีชิ้นมาเกาะแล้ว
   // ช่องเจาะ (ซิป) บนแผ่นที่วางแล้ว → เส้นให้เห็นในภาพ

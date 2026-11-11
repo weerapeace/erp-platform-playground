@@ -3,7 +3,9 @@
  * 👜 BagTemplateWizard — สร้างชิ้นแพทเทิร์นจากแม่แบบทรงกระเป๋า (ส่วนของสตูดิโอแพทเทิร์น)
  *   ใส่ขนาดกระเป๋าตอนเสร็จ → เห็นกระเป๋าที่เย็บแล้วเป็นภาพ 3D ทันที + รายการชิ้นที่จะได้ + คำอธิบายว่าช่างคิดยังไง
  *   กด "วางชิ้นลงกระดาน" → ชิ้นไปอยู่บนกระดานวาดเป็นชิ้นจริง แก้ต่อได้ (ไม่ผูกกับแม่แบบอีก)
- * สูตร: lib/bag-templates · ภาพ 3D: components/pattern-3d · คู่มือ: docs/pattern-studio.md
+ *   เลือกทรงได้ 6 ทรง (2026-11-11 · lib/bag-kits): Tote (ฟอร์มเดิมทั้งหมด) · ถุงผ้า · ซองซิป · ทรงกล่อง · ฝาปิด · ทรงกลม — ทรง 2–6 ใช้ฟอร์มสั้น + ภาพชิ้นแบน (KitBody)
+ *   ทุกทรงได้ซับในมาพร้อมกัน (ติ๊กออกได้) + ช่องใส่ของในซับใน 1 ช่อง (ติ๊กออกได้) · กดวาง = ส่ง "ชุด" (BagKit: ชิ้น + ตะเข็บ + จุดติด) ให้หน้าจอวางทีเดียว
+ * สูตร: lib/bag-templates · lib/bag-kits · ภาพ 3D: components/pattern-3d · คู่มือ: docs/pattern-studio.md
  */
 import { useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -11,13 +13,17 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { RangeInput } from "@/components/range-input";
 import { Pattern3D } from "@/components/pattern-3d";
+import { BAG_STYLES, KIT_LIMITS, KIT_OPTS_DEFAULT, bagKit, bagStyle, kitParams, toteKit, type BagKit, type BagStyle, type KitKey, type KitOpts, type KitParams } from "@/lib/bag-kits";
+import { flattenShape, shapeBox } from "@/lib/pattern-shape";
 import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow, type BagWinType } from "@/lib/bag-templates";
 
 const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
 const COLORS: [string, string, string][] = [["#9a6a45", "น้ำตาลแทน", "Tan"], ["#4a3023", "น้ำตาลเข้ม", "Dark brown"], ["#26272b", "ดำ", "Black"], ["#d9cdb4", "ครีมแคนวาส", "Canvas cream"], ["#5d6b45", "เขียวมะกอก", "Olive"], ["#6f2531", "แดงเบอร์กันดี", "Burgundy"], ["#27364f", "กรมท่า", "Navy"]];
 
-export function BagTemplateWizard({ open, onClose, onInsert, initial, notice }: {
+export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, pocket: canPocket = true }: {
+  /** หน้านี้วางช่องใส่ของในซับในได้ไหม (ต้องมีเส้นในชิ้น + เครื่องมือเย็บ) — ใบงานออกแบบ = ไม่ได้ จึงไม่โชว์ตัวเลือก */
+  pocket?: boolean;
   open: boolean;
   onClose: () => void;
   /** ค่าตั้งต้น (เช่น ค่าที่ AI ร่างจากรูปกระเป๋า) — ไม่ส่ง = ค่าเริ่มต้นของแม่แบบ */
@@ -25,7 +31,7 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice }: 
   /** ข้อความแจ้งเหนือฟอร์ม (เช่น "ค่าจาก AI ตรวจก่อนวาง") */
   notice?: string;
   /** ผู้ใช้กดวางชิ้นลงกระดาน */
-  onInsert: (pieces: BagPiece[], G: BagGeometry) => void;
+  onInsert: (kit: BagKit) => void;
 }) {
   const t = useT();
   const [params, setParams] = useState<BagParams>(() => ({ ...BAG_DEFAULT, ...initial }));
@@ -38,6 +44,12 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice }: 
   const p = G.p;
   const set = (k: BagNumKey, v: number) => setParams((old) => ({ ...old, [k]: v }));
   const colors = useMemo(() => ({ body, handle }), [body, handle]);
+  // ทรงที่เลือก + ค่าของทรง 2–6 (จำแยกรายทรงระหว่างสลับ) + ตัวเลือกซับใน/ช่องใส่ของ
+  const [style, setStyle] = useState<BagStyle>("tote");
+  const [kp, setKp] = useState<Partial<Record<BagStyle, Partial<KitParams>>>>({});
+  const [opts, setOpts] = useState<KitOpts>(KIT_OPTS_DEFAULT);
+  const kit = useMemo(() => (style === "tote" ? toteKit(params, { ...opts, pocket: canPocket && opts.pocket }) : bagKit(style, kp[style] ?? {}, { ...opts, pocket: canPocket && opts.pocket })), [style, params, kp, opts, canPocket]);
+  const kitTotal = kit.pieces.reduce((n, q) => n + q.count, 0);
 
   const area = pieces.reduce((s, q) => s + q.cut.w * q.cut.h * q.count, 0);
   const total = pieces.reduce((s, q) => s + q.count, 0);
@@ -66,9 +78,27 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice }: 
       description={t("ใส่ขนาดกระเป๋าตอนเสร็จ ระบบคิดชิ้นแพทเทิร์นให้ครบ แล้ววางลงกระดานเป็นชิ้นที่แก้ต่อได้", "Enter the finished bag size. The pieces are worked out for you and placed on the board, ready to edit.")}
       footer={<>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" onClick={() => onInsert(pieces, G)} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`วางชิ้นลงกระดาน (${pieces.length} แบบ ${total} ชิ้น)`, `Place on the board (${pieces.length} patterns, ${total} pcs)`)}</button>
+        <button type="button" data-kit-insert onClick={() => onInsert(kit)} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`วางชิ้นลงกระดาน (${kit.pieces.length} แบบ ${kitTotal} ชิ้น)`, `Place on the board (${kit.pieces.length} patterns, ${kitTotal} pcs)`)}</button>
       </>}>
       {notice && <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><Icon value="i:sparkles" className="mt-0.5 text-sm" /><span>{notice}</span></div>}
+      {/* ── เลือกทรง + ซับใน ── */}
+      <div className="mb-3 space-y-2">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6" role="group" aria-label={t("ทรงกระเป๋า", "Bag style")}>
+          {BAG_STYLES.map((st) => (
+            <button key={st.key} type="button" data-style={st.key} onClick={() => setStyle(st.key)} aria-pressed={style === st.key}
+              className={`rounded-lg border px-2.5 py-2 text-left ${style === st.key ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-200 bg-white hover:border-blue-300"}`}>
+              <div className="text-[13px] font-medium text-slate-800">{t(st.th, st.en)}</div>
+              <div className="mt-0.5 text-[11px] leading-snug text-slate-500">{t(st.hintTh, st.hintEn)}</div>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" data-kit-lining checked={opts.lining} onChange={(e) => setOpts((o) => ({ ...o, lining: e.target.checked }))} className="h-3.5 w-3.5 accent-blue-600" />{t("สร้างซับในมาด้วย (ขนาดเท่าตัวนอก ผูกรูปกับตัวนอก)", "Create the lining too (same size, linked to the outer pieces)")}</label>
+          {canPocket && <label className={`inline-flex items-center gap-1.5 ${opts.lining ? "" : "opacity-40"}`}><input type="checkbox" data-kit-pocket checked={opts.lining && opts.pocket} disabled={!opts.lining} onChange={(e) => setOpts((o) => ({ ...o, pocket: e.target.checked }))} className="h-3.5 w-3.5 accent-blue-600" />{t("ช่องใส่ของในซับใน 1 ช่อง", "One pocket on the lining")}</label>}
+          <span className="text-slate-500">{t(`ตัวนอก ${kit.pieces.filter((q) => !q.lining).length} แบบ · ซับใน ${kit.pieces.filter((q) => q.lining).length} แบบ · ตะเข็บ ${kit.seams.length} แนว`, `${kit.pieces.filter((q) => !q.lining).length} outer · ${kit.pieces.filter((q) => q.lining).length} lining patterns · ${kit.seams.length} seams`)}</span>
+        </div>
+      </div>
+      {style !== "tote" ? <KitBody style={style} p={kitParams(style, kp[style] ?? {})} kit={kit} onChange={(k, v) => setKp((old) => ({ ...old, [style]: { ...(old[style] ?? {}), [k]: v } }))} /> : (
       <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* ── ซ้าย: ขนาด ── */}
         <div className="space-y-4 text-sm">
@@ -170,6 +200,56 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice }: 
           </div>
         </div>
       </div>
+      )}
     </ERPModal>
+  );
+}
+
+const KIT_LABEL: Record<KitKey, [string, string]> = {
+  W: ["กว้าง", "Width"], H: ["สูง", "Height"], D: ["หนา", "Depth"], r: ["มุมมน", "Corner radius"], sa: ["เผื่อเย็บรอบชิ้น", "Seam allowance"], hem: ["พับปาก", "Mouth hem"],
+  Lh: ["ยาวหู ส่วนที่โผล่", "Handle length"], wh: ["กว้างหู", "Handle width"], g: ["ระยะห่างโคนหู", "Gap between handle ends"],
+  strap: ["ยาวสายสะพาย", "Strap length"], ws: ["กว้างสาย", "Strap width"], flapH: ["ฝาทับด้านหน้าลงมา", "Flap overlap on the front"],
+};
+/** ฟอร์มของทรง 2–6: ค่าที่ปรับได้ + ภาพชิ้นแบน (ตัวนอก = ฟ้า · ซับใน = ส้ม) + รายการชิ้น — ภาพ 3 มิติขึ้นข้างกระดานหลังวาง */
+function KitBody({ style, p, kit, onChange }: { style: Exclude<BagStyle, "tote">; p: KitParams; kit: BagKit; onChange: (k: KitKey, v: number) => void }) {
+  const t = useT();
+  const st = bagStyle(style);
+  const drawn = kit.pieces.map((q) => { const b = shapeBox(q.shape), dx = q.at[0] - b.x, dy = q.at[1] - b.y; return { q, w: b.w, h: b.h, pts: flattenShape(q.shape).map(([x, y]) => [x + dx, y + dy] as [number, number]), inner: (q.inner ?? []).map((l) => l.pts.map(([x, y]) => [x + dx, y + dy] as [number, number])) }; });
+  let x1 = 1, y1 = 1; for (const d of drawn) for (const [x, y] of d.pts) { x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const pad = 2.5, sw = Math.max(x1, y1) / 320;
+  const path = (P: [number, number][], close = true) => P.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`).join("") + (close ? "Z" : "");
+  return (
+    <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]" data-kit-body={style}>
+      <div className="space-y-2.5 text-sm">
+        <div className="text-xs font-medium text-slate-500">{t("ขนาดตอนเสร็จ", "Finished size")}</div>
+        {st.fields.map((k) => (
+          <RangeInput key={k} label={style === "round" && k === "W" ? t("เส้นผ่านศูนย์กลาง", "Diameter") : t(KIT_LABEL[k][0], KIT_LABEL[k][1])} ariaLabel={t(KIT_LABEL[k][0], KIT_LABEL[k][1])} unit={t("ซม.", "cm")}
+            value={p[k]} step={KIT_LIMITS[k].step} min={KIT_LIMITS[k].min} max={KIT_LIMITS[k].max} onChange={(v) => onChange(k, v)} />
+        ))}
+        <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800">{t("สัดส่วนตั้งต้นของทรงนี้เป็นค่าประมาณ ไม่ใช่สูตรช่าง (เช่น ความกว้างแถบซิป ความสูงฝาปิด) — ให้ช่างยืนยัน และแก้ต่อบนกระดานได้ทุกชิ้น · ความยาวชิ้นข้าง/แถบ วัดจากขอบจริงของแผ่นหน้า ขอบคู่จึงยาวเท่ากัน", "The starting proportions are estimates, not a pattern maker's formula — have them confirmed; every piece can be edited on the board. Gusset and strip lengths are measured from the panel's real edge, so paired edges match.")}</p>
+      </div>
+      <div className="min-w-0 space-y-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <svg viewBox={`${-pad} ${-pad} ${x1 + 2 * pad} ${y1 + 2 * pad}`} className="max-h-[360px] w-full" role="img" aria-label={t("ชิ้นของทรงนี้", "Pieces of this style")}>
+            {drawn.map(({ q, pts, inner }, i) => (
+              <g key={q.key}>
+                <path d={path(pts)} fill={q.lining ? "#ffedd5" : "#dbeafe"} stroke={q.lining ? "#9a3412" : "#1e3a8a"} strokeWidth={sw * 1.6} strokeLinejoin="round" />
+                {inner.map((P, k) => <path key={k} d={path(P, false)} fill="none" stroke="#9a3412" strokeWidth={sw * 1.4} strokeDasharray={`${sw * 4} ${sw * 3}`} />)}
+                <text x={pts.reduce((a, c) => a + c[0], 0) / pts.length} y={pts.reduce((a, c) => a + c[1], 0) / pts.length} fontSize={Math.max(sw * 9, 1.6)} textAnchor="middle" dominantBaseline="central" fill={q.lining ? "#9a3412" : "#1e3a8a"}>{i + 1}</text>
+              </g>
+            ))}
+          </svg>
+        </div>
+        <ul className="grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
+          {drawn.map(({ q, w, h }, i) => (
+            <li key={q.key} className="flex items-baseline justify-between gap-2">
+              <span className="min-w-0 truncate"><span className={`mr-1 inline-block w-4 text-right tabular-nums ${q.lining ? "text-orange-800" : "text-blue-900"}`}>{i + 1}</span>{t(q.name, q.nameEn)}{q.count > 1 ? ` ×${q.count}` : ""}{q.edgeMeta?.some((m) => m.zip) ? <span className="ml-1 rounded bg-slate-200 px-1 text-[10px] text-slate-700">{t("ติดซิป", "zip")}</span> : null}</span>
+              <span className="shrink-0 tabular-nums text-slate-500">{w.toFixed(1)} × {h.toFixed(1)}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-[11px] text-slate-400">{t("ฟ้า = ตัวนอก · ส้ม = ซับใน · ภาพ 3 มิติจะขึ้นข้างกระดานหลังกดวาง (ทรงกล่อง ฝาปิด ทรงกลม: แถบซิป/ฝาพับปิดปากตามกติกา ไม่ใช่การจำลองผ้า)", "Blue = outer · orange = lining · the 3D view appears beside the board after placing (zip strips and flaps fold over the mouth by rule, not simulated)")}</p>
+      </div>
+    </div>
   );
 }

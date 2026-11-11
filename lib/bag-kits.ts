@@ -1,0 +1,220 @@
+/**
+ * 👜 ชุดแม่แบบทรงกระเป๋า 6 ทรง + ซับในทุกทรง — สูตรบริสุทธิ์ ไม่มีหน้าจอ
+ *   เจ้าของสั่ง 2026-11-11 (ผ่าน session เอกสารเทียบ CLO · ดูภาพตัวอย่างแล้วตอบ "ทำตามแบบนี้"):
+ *   "อยากเพิ่มแบบเริ่มต้นให้ครอบคลุมกระเป๋าหลายๆแบบ ต้องมีซับในทุกแบบนะ" → "เอา 6 ทรงนี้"
+ *
+ *   1) tote  Tote อยู่ทรง        = สูตรเดิม lib/bag-templates (หน้า/หลัง · ข้าง+ก้น · หูหิ้ว · ช่องโชว์/ช่องซิป) + ซับใน
+ *   2) flat  ถุงผ้า / ช้อปปิ้งแบน = หน้า/หลัง ×2 (เย็บ ข้าง–ก้น–ข้าง กับตัวเอง) · หูหิ้ว ×2
+ *   3) pouch ซองซิป / คลัทช์      = หน้า/หลัง ×2 มุมก้นมนได้ · ซิปปาก = ค่าของขอบ "ติดซิป" (อะไหล่ ไม่ใช่ชิ้นตัด)
+ *   4) box   สะพายข้างทรงกล่อง    = หน้า · หลัง · ข้าง+ก้น · แถบซิปบน 2 ชิ้น · สายสะพาย
+ *   5) flap  กระเป๋าฝาปิด          = หน้า · หลัง · ข้าง+ก้น · ฝาปิด (เย็บกับปากแผ่นหลัง) · สายสะพาย
+ *   6) round ทรงกลม               = หน้า · หลัง (วงกลม 5 ขอบ) · ชิ้นข้างรอบ (3 ขอบล่าง) · แถบซิป 2 ชิ้น (2 ขอบบน)
+ *
+ *   ทุกทรงได้ "ชุด" เดียวกัน (BagKit): ชิ้น + ตะเข็บ (อ้างชิ้นด้วย key) + จุดติดหู/สาย → หน้าจอวางลงกระดานทีเดียว
+ *   ซับใน (KitOpts.lining): คัดลอกชิ้นตัวกระเป๋า (หน้า หลัง ข้าง ก้น แถบซิป) เป็นชิ้นชั้นซับใน ขนาดเท่าตัวนอก + ตะเข็บชุดเดียวกัน
+ *     ผูกรูปกับตัวนอก (linkTo) · ฝาปิดมีซับในประกบ (เย็บ 3 ขอบกับฝา) · หู/สาย ไม่มีซับใน · ไม่มีตะเข็บปากซับในกับปากตัวนอก (กติกาเดิมของ lib/pattern-lining)
+ *   ช่องใส่ของในซับใน 1 ช่อง (KitOpts.pocket): pocketPlan เดิม บนซับในแผ่นหลัง (แผ่นเล็กเกิน = ไม่ใส่)
+ *
+ *   ⚠️ สัดส่วนตั้งต้นเป็นค่าสมมติ ไม่ใช่สูตรช่าง — ต้องให้ช่างยืนยัน: แถบซิปกว้าง หนา÷2 · ฝาปิดสูง หนา + 0.6×สูง · ทรงกลม ซิป 2/5 ของรอบ ชิ้นข้าง 3/5 ·
+ *     หูถุงผ้า 55×6 · สายสะพาย 120 · ความยาวชิ้นข้าง/แถบ = วัดจากขอบจริงของแผ่นหน้า (ขอบคู่จึงยาวเท่ากันเสมอ)
+ *   รูปชิ้น = ขนาดสำเร็จ (เส้นเย็บ) · ชิ้นแรกของแต่ละแถววางที่ 0 · at = มุมซ้ายบนของกรอบเส้นเย็บ
+ *
+ * ใช้ที่: components/pattern-studio (ตัวสร้างจากแม่แบบ) · เทสต์ lib/__tests__/bag-kits.test.ts · คู่มือ docs/pattern-studio.md
+ */
+import { BAG_HANDLE_ATTACH, bagAttachRefs, bagGeometry, bagPieces, bagSeamRefs, filletNodes, type BagParams } from "@/lib/bag-templates";
+import { LINING_GAP, pocketPlan } from "@/lib/pattern-lining";
+import { pieceEdges, type EdgeMeta, type SeamKind } from "@/lib/pattern-seams";
+import { pieceGeometry, shapeBox, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
+
+export type BagStyle = "tote" | "flat" | "pouch" | "box" | "flap" | "round";
+export type KitPiece = {
+  key: string; name: string; nameEn: string; count: number;
+  shape: Shape; holes: Shape[]; allow: number; allowEdges: number[] | null; foldEdges: number[] | null; grain: [Pt, Pt] | null; notches: Pt[];
+  at: [number, number];
+  /** ชิ้นชั้นซับใน */ lining?: true;
+  /** ผูกรูปกับชิ้นนี้ (key) — แก้ต้นแบบแล้วชิ้นนี้เปลี่ยนตาม */ linkTo?: string;
+  /** ค่ารายขอบ (เช่น ขอบปากติดซิป) */ edgeMeta?: EdgeMeta[];
+  /** เส้นในชิ้น (พิกัดของชิ้นเอง) */ inner?: InnerLine[];
+};
+export type KitSide = { piece: string; from: number; count: number; n: number; t0?: number; t1?: number; inner?: string };
+export type KitSeam = { a: KitSide; b: KitSide; kind?: SeamKind };
+export type KitAttach = { kind: "handle" | "behind"; piece: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
+export type BagKit = { style: BagStyle; pieces: KitPiece[]; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ไว้จำในแพทเทิร์น) */ params?: BagParams };
+export type KitOpts = { lining: boolean; pocket: boolean };
+export const KIT_OPTS_DEFAULT: KitOpts = { lining: true, pocket: true };
+
+/** ค่าที่ปรับได้ของทรง 2–6 (ซม.) — แต่ละทรงใช้บางตัว (BAG_STYLES.fields) */
+export type KitParams = { W: number; H: number; D: number; r: number; sa: number; hem: number; Lh: number; wh: number; g: number; strap: number; ws: number; flapH: number };
+export type KitKey = keyof KitParams;
+export const KIT_LIMITS: Record<KitKey, { min: number; max: number; step: number }> = {
+  W: { min: 8, max: 60, step: 0.5 }, H: { min: 8, max: 55, step: 0.5 }, D: { min: 2, max: 22, step: 0.5 }, r: { min: 0, max: 8, step: 0.5 },
+  sa: { min: 0.3, max: 2, step: 0.1 }, hem: { min: 0, max: 5, step: 0.5 }, Lh: { min: 20, max: 80, step: 1 }, wh: { min: 1.5, max: 5, step: 0.5 }, g: { min: 8, max: 30, step: 0.5 },
+  strap: { min: 60, max: 150, step: 1 }, ws: { min: 1, max: 5, step: 0.5 }, flapH: { min: 4, max: 40, step: 0.5 },
+};
+const BASE: KitParams = { W: 30, H: 22, D: 8, r: 2, sa: 1, hem: 3, Lh: 55, wh: 3, g: 14, strap: 120, ws: 1.5, flapH: 13 };
+export const BAG_STYLES: { key: BagStyle; th: string; en: string; hintTh: string; hintEn: string; fields: KitKey[]; defaults: KitParams }[] = [
+  { key: "tote", th: "Tote อยู่ทรง", en: "Structured tote", hintTh: "หน้า/หลัง · ข้าง+ก้น · หูหิ้ว", hintEn: "Front/back · gusset · handles", fields: [], defaults: BASE },
+  { key: "flat", th: "ถุงผ้า / ช้อปปิ้งแบน", en: "Flat tote / shopper", hintTh: "หน้า/หลัง · หูหิ้ว (ไม่มีความหนา)", hintEn: "Front/back · handles (no depth)", fields: ["W", "H", "Lh", "wh", "g", "sa", "hem"], defaults: { ...BASE, W: 38, H: 42, r: 0 } },
+  { key: "pouch", th: "ซองซิป / คลัทช์ / ใส่เหรียญ", en: "Zip pouch / clutch", hintTh: "หน้า/หลัง · ซิปปาก (ไม่มีความหนา)", hintEn: "Front/back · mouth zip (no depth)", fields: ["W", "H", "r", "sa"], defaults: { ...BASE, W: 20, H: 13, r: 2 } },
+  { key: "box", th: "สะพายข้างทรงกล่อง", en: "Boxy crossbody", hintTh: "หน้า · หลัง · ข้าง+ก้น · แถบซิปบน · สายสะพาย", hintEn: "Front · back · gusset · top zip strips · strap", fields: ["W", "H", "D", "r", "strap", "ws", "sa"], defaults: { ...BASE, W: 24, H: 16, D: 8, r: 3 } },
+  { key: "flap", th: "กระเป๋าฝาปิด (เมสเซนเจอร์)", en: "Flap bag (messenger)", hintTh: "หน้า · หลัง · ข้าง+ก้น · ฝาปิด · สายสะพาย", hintEn: "Front · back · gusset · flap · strap", fields: ["W", "H", "D", "r", "flapH", "strap", "ws", "sa", "hem"], defaults: { ...BASE, W: 30, H: 22, D: 8, r: 2, flapH: 13 } },
+  { key: "round", th: "ทรงกลม", en: "Round bag", hintTh: "หน้า · หลัง วงกลม · ชิ้นข้างรอบ · แถบซิป", hintEn: "Round front · back · side band · zip strips", fields: ["W", "D", "sa"], defaults: { ...BASE, W: 12, H: 12, D: 4, r: 0 } },
+];
+export const bagStyle = (key: BagStyle) => BAG_STYLES.find((s) => s.key === key) ?? BAG_STYLES[0];
+
+const r1 = (x: number) => Math.round(x * 10) / 10;
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
+type Raw = Omit<KitPiece, "at">;
+type Draft = { pieces: Raw[]; seams: KitSeam[]; attach: KitAttach[]; /** ชิ้นตัวกระเป๋าที่คัดลอกเป็นซับใน */ body: string[]; /** ชิ้นที่มีซับในประกบ (เย็บ 3 ขอบกับตัวเอง เช่น ฝาปิด) */ faced: string[]; /** ชิ้นตัวนอกที่ซับในของมันรับช่องใส่ของ */ pocketOn: string };
+const S = (piece: string, from: number, count = 1, n = 4): KitSide => ({ piece, from, count, n });
+
+/** ปรับค่าเข้าขอบเขตของทรง (มุมมนไม่เกินครึ่งด้านสั้น · ฝาปิดไม่ยาวเกินตัว) */
+export function kitParams(style: BagStyle, raw: Partial<KitParams>): KitParams {
+  const p: KitParams = { ...bagStyle(style).defaults, ...raw };
+  (Object.keys(KIT_LIMITS) as KitKey[]).forEach((k) => { const L = KIT_LIMITS[k], v = Number(p[k]); p[k] = clamp(Number.isFinite(v) ? v : bagStyle(style).defaults[k], L.min, L.max); });
+  if (style === "round") p.H = p.W;
+  p.r = clamp(p.r, 0, Math.max(0, Math.floor((Math.min(p.W, p.H) / 2 - 1) * 2) / 2));
+  p.g = clamp(p.g, Math.min(KIT_LIMITS.g.min, p.W - 4), Math.max(4, Math.min(p.W - 2 * p.wh - 2, p.Lh - 4)));
+  p.flapH = clamp(p.flapH, KIT_LIMITS.flapH.min, Math.max(KIT_LIMITS.flapH.min, p.H - 2));
+  return p;
+}
+
+const rectShape = (w: number, h: number): Shape => ({ k: "rect", x: 0, y: 0, w: r3(w), h: r3(h) });
+/** แผ่นหน้า/หลัง: ปากอยู่บน (ขอบสุดท้าย) · ขอบ ข้าง–(โค้ง)–ก้น–(โค้ง)–ข้าง เรียงจากปากซ้ายไปปากขวา — แบบเดียวกับ Tote */
+function uPanel(W: number, H: number, r: number): { shape: Shape; n: number; U: number } {
+  const TL: Pt = [0, 0], BL: Pt = [0, H], BR: Pt = [W, H], TR: Pt = [W, 0];
+  const shape: Shape = { k: "path", nodes: [{ x: 0, y: 0 }, ...filletNodes(TL, BL, BR, r), ...filletNodes(BL, BR, TR, r), { x: r3(W), y: 0 }] };
+  const n = r > 0 ? 6 : 4, E = pieceEdges(shape);
+  return { shape, n, U: r3(E.slice(0, n - 1).reduce((s, e) => s + e.len, 0)) };
+}
+/** วงกลม 5 ขอบ (โค้งละ 72°): ขอบ 0–1 = ครึ่งบน (ติดแถบซิป) · ขอบ 2–4 = ส่วนล่าง (ติดชิ้นข้างรอบ) */
+function circle5(R: number): Shape {
+  const h = (4 / 3) * Math.tan((72 * Math.PI) / 180 / 4) * R;
+  return { k: "path", nodes: [-162, -90, -18, 54, 126].map((deg) => {
+    const a = (deg * Math.PI) / 180, tx = -Math.sin(a), ty = Math.cos(a);
+    return { x: r3(R + R * Math.cos(a)), y: r3(R + R * Math.sin(a)), ix: r3(-tx * h), iy: r3(-ty * h), ox: r3(tx * h), oy: r3(ty * h) };
+  }) };
+}
+const allowE = (n: number, hemEdges: number[], sa: number, hem: number): number[] | null => (hemEdges.length && hem > 0 && hem !== sa ? Array.from({ length: n }, (_, i) => (hemEdges.includes(i) ? hem : sa)) : null);
+const foldE = (n: number, hemEdges: number[], hem: number): number[] | null => (hemEdges.length && hem > 0 ? Array.from({ length: n }, (_, i) => (hemEdges.includes(i) ? 1 : 0)) : null);
+const piece = (key: string, name: string, nameEn: string, count: number, shape: Shape, sa: number, extra: Partial<Raw> = {}): Raw =>
+  ({ key, name, nameEn, count, shape, holes: [], allow: sa, allowEdges: null, foldEdges: null, grain: null, notches: [], ...extra });
+const zipEdge = (n: number, i: number): EdgeMeta[] => Array.from({ length: n }, (_, k) => (k === i ? { zip: true } : {}));
+
+function draft(style: Exclude<BagStyle, "tote">, p: KitParams): Draft {
+  const { W, H, D, sa } = p;
+  const handle = (len: number, w: number, name: string, nameEn: string, count: number, key: string): Raw => {
+    const L = len + 2 * BAG_HANDLE_ATTACH, hw = 2 * w;
+    return piece(key, name, nameEn, count, rectShape(L, hw), sa, { notches: [[BAG_HANDLE_ATTACH, 0], [BAG_HANDLE_ATTACH, hw], [r3(L - BAG_HANDLE_ATTACH), 0], [r3(L - BAG_HANDLE_ATTACH), hw]] });
+  };
+  if (style === "flat" || style === "pouch") {
+    const zip = style === "pouch", hem = zip ? 0 : p.hem, P = uPanel(W, H, zip ? p.r : 0), m = P.n - 1;
+    const front = piece("front", "ตัวหน้า / ตัวหลัง", "Front / back panel", 2, P.shape, sa, { allowEdges: allowE(P.n, [m], sa, hem), foldEdges: foldE(P.n, [m], hem), ...(zip ? { edgeMeta: zipEdge(P.n, m) } : {}) });
+    const U = S("front", 0, m, P.n);
+    return {
+      pieces: zip ? [front] : [front, handle(p.Lh, p.wh, "หูหิ้ว (พับครึ่ง)", "Handle (folded in half)", 2, "handle")],
+      seams: [{ a: U, b: { ...U } }],                                        // ตัด 2 ชิ้น เย็บ ข้าง–ก้น–ข้าง ประกบกัน
+      attach: zip ? [] : [{ kind: "handle", piece: "handle", on: "front", a: [r3(W / 2 - p.g / 2), 0], b: [r3(W / 2 + p.g / 2), 0], len: p.Lh, w: p.wh, tail: BAG_HANDLE_ATTACH }],
+      body: ["front"], faced: [], pocketOn: "front",
+    };
+  }
+  const strap = handle(p.strap, p.ws, "สายสะพาย (พับครึ่ง)", "Shoulder strap (folded in half)", 1, "strap");
+  const strapAt: KitAttach = { kind: "handle", piece: "strap", on: "back", a: [1.5, 0], b: [r3(W - 1.5), 0], len: p.strap, w: p.ws, tail: BAG_HANDLE_ATTACH };
+  if (style === "box" || style === "flap") {
+    const box = style === "box", hem = box ? 0 : p.hem, P = uPanel(W, H, p.r), m = P.n - 1;
+    const panel = (key: string, name: string, nameEn: string, hemMouth: boolean, extra: Partial<Raw> = {}) =>
+      piece(key, name, nameEn, 1, P.shape, sa, { allowEdges: hemMouth ? allowE(P.n, [m], sa, hem) : null, foldEdges: hemMouth ? foldE(P.n, [m], hem) : null, ...extra });
+    const gusset = piece("gusset", "ข้าง + ก้น ชิ้นเดียว", "Gusset strip (sides + bottom)", 1, rectShape(P.U, D), sa, { allowEdges: allowE(4, [1, 3], sa, hem), foldEdges: foldE(4, [1, 3], hem) });
+    const seams: KitSeam[] = [{ a: S("front", 0, m, P.n), b: S("gusset", 2) }, { a: S("back", 0, m, P.n), b: S("gusset", 0) }];
+    if (box) {
+      // แถบซิปบน 2 ชิ้น: ขอบยาวด้านล่างเย็บกับปากของแผ่นหน้า / แผ่นหลัง · ขอบยาวด้านบน (ว่าง) = ที่ติดซิป — ซิป 1 เส้นติดทั้งสองแถบ จึงติ๊กที่แถบหน้าแถบเดียว
+      const zw = r3(D / 2);
+      return {
+        pieces: [panel("front", "ตัวหน้า", "Front panel", false), panel("back", "ตัวหลัง", "Back panel", false, { linkTo: "front" }), gusset,
+          piece("zipA", "แถบซิปบน (ฝั่งหน้า)", "Top zip strip (front side)", 1, rectShape(W, zw), sa, { edgeMeta: zipEdge(4, 0) }),
+          piece("zipB", "แถบซิปบน (ฝั่งหลัง)", "Top zip strip (back side)", 1, rectShape(W, zw), sa, { linkTo: "zipA" }), strap],
+        seams: [...seams, { a: S("front", m, 1, P.n), b: S("zipA", 2) }, { a: S("back", m, 1, P.n), b: S("zipB", 2) }],
+        attach: [strapAt], body: ["front", "back", "gusset", "zipA", "zipB"], faced: [], pocketOn: "back",
+      };
+    }
+    // ฝาปิด: ขอบบนเย็บกับปากของแผ่นหลัง แล้วพับข้ามปากลงมาปิดด้านหน้า (สูง = หนา + ส่วนที่ทับด้านหน้า)
+    return {
+      pieces: [panel("front", "ตัวหน้า", "Front panel", true), panel("back", "ตัวหลัง", "Back panel", false, { linkTo: "front" }), gusset,
+        piece("flap", "ฝาปิด", "Flap", 1, rectShape(W, D + p.flapH), sa), strap],
+      seams: [...seams, { a: S("back", m, 1, P.n), b: S("flap", 0) }],
+      attach: [strapAt], body: ["front", "back", "gusset"], faced: ["flap"], pocketOn: "back",
+    };
+  }
+  // ทรงกลม: ความยาวชิ้นข้างรอบ / แถบซิป วัดจากขอบจริงของวงกลม → ขอบคู่ยาวเท่ากันเสมอ
+  const C = circle5(W / 2), E = pieceEdges(C), top = r3(E[0].len + E[1].len), low = r3(E[2].len + E[3].len + E[4].len), zw = r3(D / 2);
+  return {
+    pieces: [piece("front", "ตัวหน้า (วงกลม)", "Front (round)", 1, C, sa), piece("back", "ตัวหลัง (วงกลม)", "Back (round)", 1, C, sa, { linkTo: "front" }),
+      piece("gusset", "ชิ้นข้างรอบ", "Side band", 1, rectShape(low, D), sa),
+      piece("zipA", "แถบซิป (ฝั่งหน้า)", "Zip strip (front side)", 1, rectShape(top, zw), sa, { edgeMeta: zipEdge(4, 0) }),
+      piece("zipB", "แถบซิป (ฝั่งหลัง)", "Zip strip (back side)", 1, rectShape(top, zw), sa, { linkTo: "zipA" })],
+    seams: [{ a: S("front", 2, 3, 5), b: S("gusset", 2) }, { a: S("back", 2, 3, 5), b: S("gusset", 0) }, { a: S("front", 0, 2, 5), b: S("zipA", 2) }, { a: S("back", 0, 2, 5), b: S("zipB", 2) }],
+    attach: [], body: ["front", "back", "gusset", "zipA", "zipB"], faced: [], pocketOn: "back",
+  };
+}
+
+/** กรอบตัดของชิ้น (รวมเผื่อ) เทียบกับกรอบเส้นเย็บ */
+const cutOf = (q: Raw) => { const g = pieceGeometry({ shape: q.shape, holes: q.holes, allow: q.allow, allowEdges: q.allowEdges }); return { w: g.cutBox.w, h: g.cutBox.h, ox: g.finished.x - g.cutBox.x, oy: g.finished.y - g.cutBox.y }; };
+/** วางเรียงเป็นแถว กว้างไม่เกิน ~110 ซม. (at = มุมซ้ายบนของกรอบเส้นเย็บ) */
+function layout(list: Raw[]): KitPiece[] {
+  const gap = 3, cuts = list.map(cutOf), rowMax = Math.max(110, ...cuts.map((c) => c.w));
+  let x = 0, y = 0, rowH = 0;
+  return list.map((q, i) => {
+    const c = cuts[i];
+    if (x > 0 && x + c.w > rowMax + 0.01) { x = 0; y += rowH + gap; rowH = 0; }
+    const at: [number, number] = [r3(x + c.ox), r3(y + c.oy)];
+    x += c.w + gap; rowH = Math.max(rowH, c.h);
+    return { ...q, at };
+  });
+}
+
+/** เติมซับใน + ช่องใส่ของ ให้ชุดตัวนอกที่วางตำแหน่งแล้ว */
+function finish(style: BagStyle, outer: KitPiece[], d: Omit<Draft, "pieces">, o: KitOpts, params?: BagParams): BagKit {
+  const kit: BagKit = { style, pieces: [...outer], seams: [...d.seams], attach: d.attach, ...(params ? { params } : {}) };
+  if (!o.lining) return kit;
+  const bottom = Math.max(0, ...outer.map((q) => { const c = cutOf(q); return q.at[1] - c.oy + c.h; }));
+  const dy = r1(bottom + LINING_GAP), L = (key: string) => `L:${key}`;
+  const copy = (q: KitPiece): KitPiece => ({
+    key: L(q.key), name: `ซับใน ${q.name}`, nameEn: `Lining ${q.nameEn}`, count: q.count, shape: q.shape, holes: [], allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges,
+    grain: q.grain, notches: q.notches, at: [q.at[0], r3(q.at[1] + dy)], lining: true, ...(q.holes.length ? {} : { linkTo: q.linkTo ?? q.key }),   // ชิ้นที่มีช่องโชว์: ซับในไม่เจาะช่อง จึงไม่ผูกรูป · ชิ้นที่ผูกกับชิ้นอื่นอยู่แล้ว (แผ่นหลัง → แผ่นหน้า) = ผูกกับต้นแบบตัวเดียวกัน (ระบบไม่รับการผูกต่อเป็นทอด)
+  });
+  const body = d.body.filter((k) => outer.some((q) => q.key === k)), faced = d.faced.filter((k) => outer.some((q) => q.key === k));
+  for (const k of [...body, ...faced]) kit.pieces.push(copy(outer.find((q) => q.key === k)!));
+  for (const s of d.seams) if (body.includes(s.a.piece) && body.includes(s.b.piece)) kit.seams.push({ ...s, a: { ...s.a, piece: L(s.a.piece) }, b: { ...s.b, piece: L(s.b.piece) } });
+  for (const k of faced) { const n = pieceEdges(outer.find((q) => q.key === k)!.shape).length; kit.seams.push({ a: S(k, 1, n - 1, n), b: S(L(k), 1, n - 1, n) }); }   // ซับในฝาปิด: ประกบแล้วเย็บ 3 ขอบ (ขอบบนเปิดไว้กลับตะเข็บ)
+  if (!o.pocket) return kit;
+  // ช่องใส่ของ 1 ช่องบนซับในแผ่นหลัง (ถุงผ้า/ซอง = ซับในของแผ่นหน้า/หลัง) — แผ่นเล็กเกินไป = ไม่ใส่
+  const host = kit.pieces.find((q) => q.key === L(outer.some((x) => x.key === d.pocketOn) ? d.pocketOn : "front"));
+  if (!host) return kit;
+  const hb = shapeBox(host.shape);
+  if (hb.w < 14 || hb.h < 12) return kit;
+  const w = Math.min(18, Math.floor(hb.w * 0.55)), depth = Math.min(11, Math.floor(hb.h * 0.4)), top = Math.max(3, Math.min(9, Math.floor(hb.h * 0.25)));
+  const plan = pocketPlan(hb, { kind: "patch", w, depth, top }, "kit");
+  if (plan.warnings.length) return kit;
+  host.inner = [...(host.inner ?? []), plan.line];
+  const right = Math.max(...kit.pieces.filter((q) => q.lining).map((q) => { const c = cutOf(q); return q.at[0] - c.ox + c.w; }));
+  kit.pieces.push({ key: "lpocket", name: plan.piece.name, nameEn: "Pocket", count: 1, shape: plan.piece.shape, holes: [], allow: 0, allowEdges: plan.piece.allowEdges ?? null, foldEdges: plan.piece.foldEdges ?? null,
+    grain: null, notches: [], at: [r3(right + 3), r3(dy + (plan.piece.allowEdges?.[0] ?? 0))], lining: true });
+  kit.seams.push({ a: { piece: host.key, from: 0, count: 1, n: 1, inner: plan.line.id }, b: { piece: "lpocket", ...plan.side }, kind: "lapped" });
+  return kit;
+}
+
+/** ชุดชิ้นของทรง 2–6 */
+export function bagKit(style: Exclude<BagStyle, "tote">, raw: Partial<KitParams>, o: KitOpts = KIT_OPTS_DEFAULT): BagKit {
+  const d = draft(style, kitParams(style, raw));
+  return finish(style, layout(d.pieces), d, o);
+}
+/** ชุดชิ้นของ Tote (สูตรเดิม) + ซับใน — ซับใน = หน้า หลัง ข้าง ก้น (แผ่นใส / ถุงช่องซิป / หู ไม่มีซับใน) */
+export function toteKit(raw: Partial<BagParams>, o: KitOpts = KIT_OPTS_DEFAULT): BagKit {
+  const G = bagGeometry(raw);
+  const outer: KitPiece[] = bagPieces(G).map((q) => ({ key: q.key, name: q.name, nameEn: q.nameEn, count: q.count, shape: q.shape, holes: q.holes, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, grain: q.grain, notches: q.notches, at: q.at }));
+  return finish("tote", outer, {
+    seams: bagSeamRefs(G).map((s) => ({ a: s.a, b: s.b })), attach: bagAttachRefs(G),
+    body: ["front", "back", "strip", "side", "bottom"], faced: [], pocketOn: G.win ? "back" : "front",
+  }, o, G.p);
+}

@@ -446,7 +446,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     S.depth = sc.asm?.depth ?? sc.lining?.asm.depth ?? 0;
     const tone: Record<string, string> = { base: colors.body, flap: colors.body, hang: colors.handle, loop: colors.handle, patch: colors.body, loose: PAPER };
     const w = 2 * Math.max(Math.abs(sc.min[0]), Math.abs(sc.max[0])), d = 2 * Math.max(Math.abs(sc.min[2]), Math.abs(sc.max[2])), top = Math.max(sc.max[1], asmTop, 1);
-    const lh = clamp(Math.max(w, top, 20) * 0.035, 1.3, 3);
+    const lh = clamp(Math.max(w, top, 20) * 0.035, Math.min(1.3, Math.max(0.6, Math.max(w, top) * 0.06)), 3);   // กระเป๋าใบเล็ก (เช่น ทรงกลม 12 ซม.) ป้ายชื่อเล็กลงตาม
     const LA = sc.lining?.asm;
     const carrierOf = (on?: string): string | null => {
       if (!on) return null;
@@ -516,7 +516,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     });
     applyCut();
     // กล้อง: เปลี่ยนเฉพาะเมื่อขนาดฉากเปลี่ยนมาก (ลากตะเข็บแล้วภาพไม่ขยับเข้าออก)
-    const dist = Math.max(top, w * 1.05, d * 1.05) * 2, ty = top * 0.46;
+    const dist = Math.max(top, w * 1.05, d * 1.05, 16) * 2, ty = top * 0.46;   // ฉากเล็กมาก = ถอยกล้องอย่างน้อยเท่าฉาก 16 ซม. (ไม่ให้ล้นกรอบ)
     if (was !== "sewn" || dist > S.dist * 1.02 || dist < S.dist * 0.82 || Math.abs(ty - S.target.y) > S.dist * 0.1) { S.target.set(0, ty, 0); S.dist = dist; }
     shadow.visible = true; shadow.scale.set(Math.max(w, 10) * 1.5, Math.max(d, 4) * 2.2, 1);
     if (was !== "sewn") view(VIEWS.iso, true);

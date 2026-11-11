@@ -181,7 +181,7 @@ export type BagPiece = {
 };
 
 /** มุมโค้งที่จุด v (ระหว่างเพื่อนบ้าน a → v → b) รัศมี r → จุดเริ่มโค้ง + จุดจบโค้ง พร้อมหูจับ (สูตรเดียวกับ roundCorners) */
-function filletNodes(a: Pt, v: Pt, b: Pt, r: number): PNode[] {
+export function filletNodes(a: Pt, v: Pt, b: Pt, r: number): PNode[] {
   if (!(r > 0)) return [{ x: v[0], y: v[1] }];
   const ua = unit(a[0] - v[0], a[1] - v[1]), ub = unit(b[0] - v[0], b[1] - v[1]);
   const th = Math.acos(clamp(ua[0] * ub[0] + ua[1] * ub[1], -1, 1));
