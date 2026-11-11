@@ -91,11 +91,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const canEdit = !!me?.can_edit;
   // ชิ้นตั้งต้นของกระดาน — อ่านครั้งเดียวต่อการเปิดกระดาน (ระหว่างวาด กระดานถือข้อมูลเอง แล้วส่งกลับทาง onChange)
-  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, info: p.info, inner: p.inner, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, info: p.info, inner: p.inner, link: p.link, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onBoard = useCallback((res: ShapeEditorResult) => {
     setPieces(res.pieces.map((p) => ({
-      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}), ...(p.info ? { info: p.info } : {}), ...(p.inner.length ? { inner: p.inner } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
+      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}), ...(p.info ? { info: p.info } : {}), ...(p.inner.length ? { inner: p.inner } : {}), ...(p.link ? { link: p.link } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
       grain: p.grain && p.grain.length === 2 ? [p.grain[0], p.grain[1]] : null,
       ...(p.mats.length ? { mats: p.mats.map((m) => { const g = matGroup.get(m.id) ?? piecesRef.current.find((q) => q.pid === p.pid)?.mats?.find((x) => x.id === m.id)?.group; return { id: m.id, name: m.name, ...(g ? { group: g } : {}) }; }) } : {}),
     })));

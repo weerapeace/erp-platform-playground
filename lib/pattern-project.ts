@@ -11,6 +11,7 @@
  */
 import { cleanAllow, cleanFoldEdges, cleanInnerLines, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
 import type { PatternLineInput } from "@/lib/pattern-sheet";
+import { cleanPieceLink, type PieceLink } from "@/lib/pattern-link";
 import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, isPartialSide, pieceEdges, seamLabel, sideRange, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 export const PATTERN_PROJECT_STATUSES = ["draft", "ready", "archived"] as const;
@@ -37,6 +38,8 @@ export type ProjectPiece = {
   info?: PieceInfo;
   /** เส้นในชิ้น (แนวเย็บ / ช่องเจาะ / แนวพับ / ตำแหน่ง · พิกัดเดียวกับ shape) — ไม่มี = ไม่มีเส้นใน */
   inner?: InnerLine[];
+  /** ชิ้นตาม: รูปเส้นรอบมาจากชิ้นต้นแบบ (lib/pattern-link) — ไม่มี = ชิ้นอิสระ */
+  link?: PieceLink;
 };
 /** ชนิดชิ้น */
 export type PieceRole = "body" | "lining" | "reinforce" | "part";
@@ -138,7 +141,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
     const at = pt(r.at);
     seen.add(pid);
     const allow = cleanAllow(r.allow), per = edgeAllowances(shape, r.allowEdges, allow);
-    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta), info = cleanPieceInfo(r.info), inner = cleanInnerLines(r.inner);
+    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta), info = cleanPieceInfo(r.info), inner = cleanInnerLines(r.inner), link = cleanPieceLink(r.link);
     const mats: PieceMaterial[] = [];
     for (const m of (Array.isArray(r.mats) ? r.mats : []).slice(0, 8)) {
       const o = m as Record<string, unknown> | null;
@@ -146,7 +149,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
       if (mid && nm && !mats.some((y) => y.id === mid)) mats.push({ id: mid, name: nm, ...(grp ? { group: grp } : {}) });
     }
     out.push({
-      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}), ...(info ? { info } : {}), ...(inner.length ? { inner } : {}),
+      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}), ...(info ? { info } : {}), ...(inner.length ? { inner } : {}), ...(link && link.to !== pid ? { link } : {}),
       name: String(r.name ?? "").trim().slice(0, 60),
       count: Math.min(999, Math.max(1, Math.round(fin(r.count) ?? 1))),
       allow,
@@ -154,7 +157,9 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
       at: at ?? [0, 0],
     });
   }
-  return out;
+  // การผูก: ต้นแบบต้องมีอยู่จริงและไม่ใช่ชิ้นตามของใคร (ห้ามผูกเป็นทอด) — ไม่งั้นทิ้งการผูก (รูปคงเดิม)
+  const byPid = new Map(out.map((p) => [p.pid, p]));
+  return out.map((p) => { if (!p.link) return p; const m = byPid.get(p.link.to); if (m && !m.link) return p; const { link: _l, ...rest } = p; void _l; return rest; });
 }
 
 /** จำนวนชิ้น (รวมจำนวนตัด) + พื้นที่ตัดรวม ตร.ซม. (basis box = กรอบสี่เหลี่ยม · area = พื้นที่จริงหักรู) */

@@ -32,15 +32,16 @@ import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, extendSide, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
 import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
+import { applyLinks, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
 /** pid = รหัสชิ้น (ผูกบรรทัดตีราคา) · at = ตำแหน่งบนกระดาน (มุมซ้ายบนเส้นเย็บ) · src = บรรทัดเดิมที่ชิ้นนี้มาจาก */
-export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null };
-export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges: number[] | null; foldEdges: number[] | null; edgeMeta: EdgeMeta[] | null; info: PieceInfo | null; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[]; inner: InnerLine[] };
+export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null; link?: PieceLink | null };
+export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges: number[] | null; foldEdges: number[] | null; edgeMeta: EdgeMeta[] | null; info: PieceInfo | null; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[]; inner: InnerLine[]; link: PieceLink | null };
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
-type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null };
+type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null; link?: PieceLink | null };
 export type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner";
 /** สีของเส้นในชิ้นตามชนิด (กระดาน) */
 const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 } };
@@ -131,7 +132,9 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false }: {
+  /** เปิดงาน "ชิ้นคู่ผูกกัน" (lib/pattern-link): ชิ้นตามเปลี่ยนรูปตามชิ้นต้นแบบ + ส่วนผูก/เลิกผูกในแผงชิ้น (แอปสตูดิโอแพทเทิร์น · ใบงานออกแบบไม่ส่ง = ไม่มี) */
+  pieceLinks?: boolean;
   /** เปิดงาน "เส้นในชิ้น": เครื่องมือวาดเส้นใน (L) + รายการเส้นในของชิ้นในแผงขวา + เย็บกับเส้นในได้ (แอปสตูดิโอแพทเทิร์น · ใบงานออกแบบไม่ส่ง = ไม่มี) */
   innerLines?: boolean;
   /** รหัสชิ้นที่ซ่อนไว้ (เช่น ดูเฉพาะชั้นซับใน) — ชิ้นยังอยู่ครบ แค่จางและกดไม่ได้ */
@@ -193,10 +196,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if (p.at) { dx = p.at[0] - b.x; dy = p.at[1] - b.y; }
       else { dx = x + a - b.x; dy = a - b.y; x += b.w + 2 * a + 2; }
       const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [], inner: p.inner ?? null }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], inner: m.inner ?? null, count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, info: p.info ?? null, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], inner: m.inner ?? null, count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, info: p.info ?? null, link: p.link ?? null, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
     });
   });
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
+  // ชิ้นคู่ผูกกัน: ทุกครั้งที่ชิ้นเปลี่ยน (รวมระหว่างลาก) ให้ชิ้นตามมีรูปตรงกับต้นแบบ — ไม่บันทึกเป็นขั้นย้อนกลับแยก (ย้อนการแก้ต้นแบบ = ชิ้นตามย้อนด้วย)
+  useEffect(() => { if (!pieceLinks) return; const next = applyLinks(pieces); if (next !== pieces) setPieces(next); }, [pieces, pieceLinks]);
   const [sel, setSel] = useState<string | null>(null);
   const [multi, setMulti] = useState<Set<string>>(() => new Set());   // เลือกหลายชิ้น (≥2) — sel = ชิ้นหลักในกลุ่ม
   const [marquee, setMarquee] = useState<{ a: XY; b: XY } | null>(null);
@@ -376,7 +381,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       const dx = (p.at ? x0 + p.at[0] : x + a) - b.x, dy = (p.at ? p.at[1] : a) - b.y;
       if (!p.at) x += b.w + 2 * a + 2;
       const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [], inner: p.inner ?? null }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], inner: m.inner ?? null, count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, info: p.info ?? null, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], inner: m.inner ?? null, count: Math.max(1, Math.round(p.count) || 1), allow: a, allowEdges: p.allowEdges ?? null, foldEdges: p.foldEdges ?? null, edgeMeta: p.edgeMeta ?? null, info: p.info ?? null, link: p.link ?? null, name: p.name ?? "", mats: p.mats ?? [...defaultMats], pid: p.pid || newPid(), src: [] };
     });
     const cur = piecesRef.current;
     const base = inject.inner?.length ? cur.map((q) => { const more = (inject.inner ?? []).filter((x) => x.pid === q.pid).flatMap((x) => x.lines); return more.length ? { ...q, inner: [...(q.inner ?? []), ...more] } : q; }) : cur;
@@ -881,6 +886,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (selPiece.shape.k === "ellipse") { setMsg({ tone: "err", text: t("วงกลมไม่มีมุมให้ลบ", "Circles have no corners") }); return; }
     patchPiece(selPiece.id, (p) => ({ ...p, shape: roundCorners(p.shape, r) }));
   };
+  /** สร้างชิ้นคู่ที่ผูกกับชิ้นที่เลือก (กลับซ้ายขวา) วางข้าง ๆ — แก้ชิ้นต้นแบบแล้วชิ้นคู่เปลี่ยนตาม · ชิ้นที่เลือกเป็นชิ้นตามอยู่ = ผูกกับต้นแบบตัวเดียวกัน */
+  const linkedCopy = () => {
+    if (!selPiece) return;
+    const master = selPiece.link ? pieces.find((p) => p.pid === selPiece.link?.to) ?? selPiece : selPiece;
+    const cb = pieceGeometry(selPiece).cutBox, b = shapeBox(selPiece.shape), link: PieceLink = { to: master.pid, mirror: "x" };
+    const np: Piece = { ...selPiece, id: newId(), pid: newPid(), src: [], link, inner: null, notches: [], grain: null, shape: linkedShape(master.shape, link, { x: b.x + cb.w + 2, y: b.y }), name: selPiece.name ? `${selPiece.name} (คู่)` : "" };
+    if (addPieces([np])) setTool("move");
+  };
   const mirrorCopy = () => {
     if (!selPiece) return;
     const cb = pieceGeometry(selPiece).cutBox;
@@ -970,7 +983,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const buildResult = (): ShapeEditorResult => ({
     pieces: piecesRef.current.map((p) => {
       const g = pieceGeometry(p);
-      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: edgeAllowances(p.shape, p.allowEdges, p.allow), foldEdges: cleanFoldEdges(p.shape, p.foldEdges), edgeMeta: cleanEdgeMeta(p.shape, p.edgeMeta), info: cleanPieceInfo(p.info), name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [], inner: p.inner ?? [] };
+      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: edgeAllowances(p.shape, p.allowEdges, p.allow), foldEdges: cleanFoldEdges(p.shape, p.foldEdges), edgeMeta: cleanEdgeMeta(p.shape, p.edgeMeta), info: cleanPieceInfo(p.info), name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [], inner: p.inner ?? [], link: p.link ?? null };
     }),
     basis: basisRef.current,
     refs: refsRef.current.map((r) => ({ url: r.url, ...(r.label ? { label: r.label } : {}), x: r.x, y: r.y, w: r.w, ar: r.ar, op: r.op })),
@@ -980,7 +993,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     onSave?.(buildResult());
   };
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
-  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches, p.allowEdges ?? null, p.foldEdges ?? null, p.edgeMeta ?? null, p.info ?? null, p.inner ?? null]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
+  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches, p.allowEdges ?? null, p.foldEdges ?? null, p.edgeMeta ?? null, p.info ?? null, p.inner ?? null, p.link ?? null]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
   const lastSig = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flush = useCallback(() => {
@@ -2160,6 +2173,38 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   </div>
                   {notchMode && <div className="text-[11px] text-rose-600">{t("โหมดรอยบาก: คลิกบนขอบชิ้นเพื่อเพิ่ม · คลิกที่รอยเดิมเพื่อลบ · Esc = เสร็จ", "Notch mode: click the edge to add · click a notch to remove · Esc = done")}</div>}
                 </div>
+                {pieceLinks && (() => {
+                  const master = selPiece.link ? pieces.find((p) => p.pid === selPiece.link?.to) ?? null : null;
+                  const followers = pieces.filter((p) => p.link?.to === selPiece.pid), targets = linkTargets(pieces, selPiece.pid);
+                  return (
+                    <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
+                      <div className="flex items-center gap-1.5 font-medium text-slate-600"><Icon value="i:link" className="text-[14px]" />{t("ชิ้นคู่ผูกกัน", "Linked pieces")}</div>
+                      {master ? (
+                        <>
+                          <div className="rounded-md bg-blue-50 px-2 py-1.5 text-blue-900">{t(`รูปของชิ้นนี้ตาม ${pieceNo(master.pid)} — แก้รูปที่ชิ้นต้นแบบ แล้วชิ้นนี้เปลี่ยนตาม (ย้าย ตั้งชื่อ วัสดุ เผื่อเย็บ เส้นใน เป็นของชิ้นนี้เอง)`, `This piece follows ${pieceNo(master.pid)} — edit the master's shape and this one changes with it (position, name, material, allowance and inner lines stay its own)`)}</div>
+                          {!readonly && <div className="flex flex-wrap items-center gap-2">
+                            <label className="flex items-center gap-1.5"><input type="checkbox" checked={selPiece.link?.mirror === "x"} onChange={(e) => patchPiece(selPiece.id, (p) => (p.link ? { ...p, link: e.target.checked ? { to: p.link.to, mirror: "x" } : { to: p.link.to } } : p))} className="h-3.5 w-3.5 accent-blue-600" />{t("กลับซ้ายขวา", "Mirrored left-right")}</label>
+                            <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, link: null }))} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ชิ้นนี้กลับเป็นชิ้นอิสระ รูปคงเดิม แก้เองได้", "Make this piece independent again (shape stays as is)")}>{t("เลิกผูก", "Unlink")}</button>
+                          </div>}
+                        </>
+                      ) : (
+                        <>
+                          {followers.length > 0 && <div className="rounded-md bg-emerald-50 px-2 py-1.5 text-emerald-900">{t(`ชิ้นนี้เป็นต้นแบบของ ${followers.map((p) => pieceNo(p.pid)).join(", ")} — แก้รูปชิ้นนี้ ชิ้นเหล่านั้นเปลี่ยนตาม`, `This piece is the master of ${followers.map((p) => pieceNo(p.pid)).join(", ")} — they follow its shape`)}</div>}
+                          {!readonly && <div className="flex flex-wrap items-center gap-1.5">
+                            <button type="button" onClick={linkedCopy} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("สร้างชิ้นคู่กลับซ้ายขวาวางข้าง ๆ และผูกรูปกับชิ้นนี้", "Create a mirrored twin next to this piece, linked to its shape")}>{t("+ สร้างชิ้นคู่ (ผูก)", "+ Linked twin")}</button>
+                            {followers.length === 0 && targets.length > 0 && (
+                              <select value="" aria-label={t("ผูกรูปกับชิ้น", "Link shape to piece")} onChange={(e) => { const to = e.target.value; if (to) patchPiece(selPiece.id, (p) => ({ ...p, link: { to } })); }} className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1">
+                                <option value="">{t("ผูกรูปกับชิ้น…", "Link shape to…")}</option>
+                                {targets.map((p) => <option key={p.pid} value={p.pid}>{pieceNo(p.pid)}</option>)}
+                              </select>
+                            )}
+                          </div>}
+                          {!readonly && followers.length === 0 && targets.length > 0 && <div className="text-[11px] text-slate-400">{t("ผูกแล้วรูปของชิ้นนี้จะเปลี่ยนเป็นรูปของชิ้นที่เลือกทันที (ย้อนกลับได้ด้วย Ctrl+Z)", "Linking replaces this piece's shape with the chosen piece's shape right away (Ctrl+Z undoes it)")}</div>}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
                 {innerLines && (
                   <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
                     <div className="flex items-center gap-1.5"><span className="font-medium text-slate-600">{t(`เส้นในชิ้น (${(selPiece.inner ?? []).length})`, `Inner lines (${(selPiece.inner ?? []).length})`)}</span>

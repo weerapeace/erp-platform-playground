@@ -48,7 +48,7 @@ export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
 export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
 
-export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines"> & {
+export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks"> & {
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
   onTemplateInsert?: (info: TemplateInsertInfo) => void;
   /** ส่ง = มีเครื่องมือเย็บ (N) + แก้ตะเข็บ (B) ในแถบเครื่องมือซ้ายของกระดาน และเห็นด้ายเย็บในภาพ 3D (ใบงานออกแบบไม่ส่ง = ไม่มี) */
@@ -111,11 +111,11 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
     const pieces: EditorPiece[] = body.flatMap((pid) => {
       const p = live.find((x) => x.pid === pid); if (!p) return [];
       const b = shapeBox(p.shape), no = live.indexOf(p) + 1;
-      return [{ pid: plan.map[pid], shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, name: `${t("ซับใน", "Lining")} ${p.name || `P${no}`}`, info: { role: "lining" as const }, mats: [], at: [b.x, b.y + plan.dy] as [number, number], grain: p.grain, notches: p.notches }];
+      return [{ pid: plan.map[pid], shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, name: `${t("ซับใน", "Lining")} ${p.name || `P${no}`}`, info: { role: "lining" as const }, link: { to: pid }, mats: [], at: [b.x, b.y + plan.dy] as [number, number], grain: p.grain, notches: p.notches }];   // ผูกรูปกับตัวนอก: แก้ตัวนอกแล้วซับในตาม
     });
     setInject({ nonce: Date.now(), abs: true, pieces });
     if (plan.seams.length) sew.onChange([...sew.seams, ...plan.seams]);
-    setNotice(t(`สร้างซับใน ${pieces.length} ชิ้นแล้ว (วางไว้ใต้ชิ้นเดิม ขนาดเท่าตัวนอก) — เลือกวัสดุซับในให้ชิ้นเหล่านี้ และกด เพิ่มช่อง เพื่อใส่ช่องใส่ของ/ช่องซิป`, `Created ${pieces.length} lining pieces (below the originals, same size as the outer) — pick a lining material for them, then use Add pocket`));
+    setNotice(t(`สร้างซับใน ${pieces.length} ชิ้นแล้ว (วางไว้ใต้ชิ้นเดิม ขนาดเท่าตัวนอก และผูกรูปกับตัวนอก: แก้ตัวนอกแล้วซับในเปลี่ยนตาม) — เลือกวัสดุซับในให้ชิ้นเหล่านี้ และกด เพิ่มช่อง เพื่อใส่ช่องใส่ของ/ช่องซิป`, `Created ${pieces.length} lining pieces (below the originals, same size as the outer) — pick a lining material for them, then use Add pocket`));
   };
   /** ชิ้นตั้งต้นของตัวช่วยเพิ่มช่อง: ชิ้นที่เลือกอยู่ถ้าเป็นแผ่นหน้า/หลังของซับใน · ไม่งั้น = แผ่นหลังของซับใน (ถ้าประกอบได้) · ไม่มีซับใน = ชิ้นที่เลือก */
   const pocketHost = (): string | null => {
@@ -200,7 +200,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
       <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>
         <div className="min-w-0">
           <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
-            seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} hidePids={hidePids} />
+            seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids} />
         </div>
         {show3d && (
           <div className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2" : ""}`}>
