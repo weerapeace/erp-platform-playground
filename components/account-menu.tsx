@@ -4,10 +4,14 @@
  * AccountMenu (ของกลาง) — คลิกชื่อผู้ใช้ → popup จัดการบัญชี
  *  - แก้ไขโปรไฟล์ (เปิด popup ในที่เดียว ไม่เปลี่ยนหน้า) · เปลี่ยนสีธีม (accent) · ออกจากระบบ
  *  - ฝัง <ThemeSync/> ให้สีธีมโหลด/บันทึกอัตโนมัติ
+ *  - ผู้ดูแลระบบ (admin.users): นับถอยหลังขึ้นเว็บ ลอยมุมจอ — ลอยค้างข้ามหน้า (components/deploy-countdown/pip-app) · เบราว์เซอร์ไม่รองรับ = ไปหน้า /admin/deploy
  */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth, roleLabel } from "@/components/auth";
+import { useAuth, usePermission, roleLabel } from "@/components/auth";
+import { Icon } from "@/components/icon";
+import { openPipWindow, pipSupported } from "@/components/pip-window";
+import { DEPLOY_PIP_SIZE } from "@/lib/deploy-queue";
 import { ThemeSync } from "@/components/theme-sync";
 import { ProfileEditor } from "@/components/profile-editor";
 import { SecurityDevices } from "@/components/security-devices";
@@ -37,7 +41,20 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
   const pwa = usePwaInstall();                                        // ติดตั้งแอปนี้บนเครื่องที่กำลังใช้อยู่ (แท็บเล็ต/มือถือไม่มีปุ่มที่หัว)
   const [installHint, setInstallHint] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);              // ป๊อปติดตั้งแอป (ของกลาง) — หน้าปกติที่ไม่มีส่วน 📟
+  const canDeploy = usePermission("admin.users");                     // นับถอยหลังขึ้นเว็บ (ผู้ดูแลระบบ)
   if (!user) return null;
+
+  /** หน้าต่างลอยนับถอยหลังขึ้นเว็บ — เปิดหน้าต่างก่อน (ต้องอยู่ในจังหวะกด) แล้วค่อยโหลดเนื้อหา · ไม่รองรับ = ไปหน้าเต็ม */
+  const openDeployCountdown = async () => {
+    setOpen(false);
+    if (!pipSupported()) { router.push("/admin/deploy"); return; }
+    try {
+      const w = await openPipWindow(DEPLOY_PIP_SIZE);
+      if (!w) { router.push("/admin/deploy"); return; }
+      const { mountDeployCountdownPip } = await import("@/components/deploy-countdown/pip-app");
+      mountDeployCountdownPip(w);
+    } catch { router.push("/admin/deploy"); }
+  };
 
   const pick = (c: string | null) => { setTheme(c); setCur(getTheme()); };
   const avatar = user.avatar ? (user.avatar.startsWith("http") ? user.avatar : `/api/r2-image?key=${encodeURIComponent(user.avatar)}`) : null;
@@ -96,6 +113,18 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
             <BrowserPushToggle />
             {/* ติดตั้งแอปบนเครื่อง — เชลล์แอปเดี่ยวมีปุ่มในส่วน 📟 ด้านล่างอยู่แล้ว */}
             {!device && <InstallAppMenuItem onClick={() => { setOpen(false); setInstallOpen(true); }} />}
+            {/* ผู้ดูแลระบบ: ตัวนับถอยหลังขึ้นเว็บ ลอยทับทุกโปรแกรม (เจ้าของขอ 2026-11-11) · "หน้าเต็ม" = /admin/deploy */}
+            {canDeploy && (
+              <div className="flex items-stretch border-t border-slate-100">
+                <button type="button" onClick={() => void openDeployCountdown()}
+                  className="flex-1 inline-flex items-center gap-1.5 text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  title="หน้าต่างจิ๋วลอยทับทุกโปรแกรม บอกว่าเว็บจริงจะอัปเดตอีกกี่นาที (Chrome / Edge บนคอม)">
+                  <Icon value="🚀" /> นับถอยหลังขึ้นเว็บ (ลอยมุมจอ)
+                </button>
+                <button type="button" onClick={() => { setOpen(false); router.push("/admin/deploy"); }}
+                  className="px-3 text-[11px] text-slate-400 hover:text-slate-700 hover:bg-slate-50">หน้าเต็ม</button>
+              </div>
+            )}
 
             {/* มุมมองอุปกรณ์ — ดูแอปนี้แบบแท็บเล็ต/มือถือบนจอคอม (กรอบจำลอง) + QR สแกนเปิดบนเครื่องจริง */}
             {device && (

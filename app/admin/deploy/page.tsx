@@ -15,9 +15,8 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { PipPortal, usePipWindow } from "@/components/pip-window";
-import { DeployCountdown, useDeployStatus, useNow } from "@/components/deploy-countdown";
-import { apiFetch } from "@/lib/api";
-import { DEPLOY_WORKFLOW_PAGE, ROUND_MINUTES } from "@/lib/deploy-queue";
+import { DeployCountdown, DeployMiniPanel, requestDeployNow, useDeployStatus, useNow } from "@/components/deploy-countdown";
+import { DEPLOY_PIP_SIZE, ROUND_MINUTES } from "@/lib/deploy-queue";
 
 const timeText = (s: string | null) => (s ? new Date(s).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
 
@@ -32,26 +31,17 @@ function DeployView() {
   const { status, error, loading, reload } = useDeployStatus(canUse, pip.win);
   const now = useNow(1000, pip.win);
   const [pushing, setPushing] = useState(false);
-  const [pipMsg, setPipMsg] = useState<string | null>(null);
 
-  /** fromWin = หน้าต่างที่กดปุ่ม (หน้าต่างลอยต้องเปิดหน้า GitHub จากตัวมันเอง ไม่งั้นเบราว์เซอร์บล็อกป๊อปอัป) */
-  const deployNow = async (fromWin?: Window | null) => {
+  const deployNow = async () => {
     setPushing(true);
-    const say = (ok: boolean, msg: string) => { if (fromWin) setPipMsg(msg); else (ok ? toast.success(msg) : toast.error(msg)); };
-    try {
-      const r = await apiFetch("/api/admin/deploy", { method: "POST" });
-      const j = await r.json().catch(() => ({}));
-      if (j.needsSetup) {
-        (fromWin ?? window).open(j.url || DEPLOY_WORKFLOW_PAGE, "_blank", "noopener");
-        say(true, fromWin ? "เปิดหน้า GitHub แล้ว กด Run workflow" : "เปิดหน้า GitHub แล้ว — กดปุ่ม “Run workflow” สีเขียว อีก 1 ครั้ง");
-      } else if (!r.ok || j.error) throw new Error(j.error || "สั่งขึ้นเว็บไม่สำเร็จ");
-      else { say(true, fromWin ? "สั่งขึ้นเว็บแล้ว" : "สั่งขึ้นเว็บแล้ว — เว็บจริงอัปเดตในราว 5 นาที"); setTimeout(() => void reload(), 15000); }
-    } catch (e) { say(false, e instanceof Error ? e.message : "สั่งขึ้นเว็บไม่สำเร็จ"); }
-    finally { setPushing(false); setTimeout(() => setPipMsg(null), 8000); }
+    const r = await requestDeployNow();
+    setPushing(false);
+    if (r.ok) toast.success(r.message); else toast.error(r.message);
+    if (r.ok && !r.openedGitHub) setTimeout(() => void reload(), 15000);
   };
 
   const popOut = async () => {
-    try { await pip.open({ width: 320, height: 170, title: "ขึ้นเว็บ" }); }
+    try { await pip.open(DEPLOY_PIP_SIZE); }
     catch { toast.error("เปิดหน้าต่างลอยไม่ได้ในเบราว์เซอร์นี้ — ใช้ Chrome หรือ Edge บนคอมพิวเตอร์ แล้วลองกดอีกครั้ง"); }
   };
 
@@ -121,12 +111,7 @@ function DeployView() {
             )}
 
             <PipPortal win={pip.win}>
-              <DeployCountdown status={status} now={now} variant="mini" message={pipMsg} actions={waiting.length > 0 && (
-                <button type="button" onClick={() => void deployNow(pip.win)} disabled={pushing}
-                  className="h-6 px-2 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
-                  {pushing ? "กำลังสั่ง…" : "ขึ้นทันที"}
-                </button>
-              )} />
+              <DeployMiniPanel status={status} now={now} win={pip.win} onDeployed={() => void reload()} />
             </PipPortal>
           </>
         )}

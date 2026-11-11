@@ -34,7 +34,25 @@ const now = useNow(1000, pip.win);            // ตัวจับเวลา�
 </PipPortal>
 ```
 
-- `open()` ต้องเรียกจากการกดปุ่มเท่านั้น (กฎเบราว์เซอร์) · มีได้ทีละ 1 บานต่อแท็บ (เปิดใหม่ = ปิดบานเก่า)
+### แบบลอยค้างข้ามหน้า (เปิดจากเมนู/ปุ่มที่อยู่ทุกหน้า)
+
+`usePipWindow` ผูกกับหน้า — ออกจากหน้าแล้วปิดตาม · ถ้าอยากให้ลอยค้างแม้เปลี่ยนหน้าในแท็บเดียวกัน ให้เปิดหน้าต่างเปล่าแล้ววาด React แยกลงไปเอง:
+
+```tsx
+import { openPipWindow, pipSupported } from "@/components/pip-window";
+
+const onClick = async () => {
+  if (!pipSupported()) return router.push("/หน้าเต็ม");
+  const w = await openPipWindow({ width: 320, height: 170 });       // ต้องเรียกก่อน await อื่น (ยังอยู่ในจังหวะกด)
+  if (!w) return;
+  const { mountMyPip } = await import("@/components/my-thing/pip-app"); // โหลดเนื้อหาตอนกด ไม่หนักทุกหน้า
+  mountMyPip(w);                                                     // ข้างใน: createRoot(div ใน w.document.body).render(...) + pagehide → unmount
+};
+```
+
+ตัวอย่างจริง: เมนูโปรไฟล์ → "นับถอยหลังขึ้นเว็บ (ลอยมุมจอ)" (`components/account-menu.tsx` + `components/deploy-countdown/pip-app.tsx`) · เนื้อหาต้องไม่พึ่ง Provider ของหน้า (Toast/Auth context) เพราะวาดแยก
+
+- `open()` / `openPipWindow()` ต้องเรียกจากการกดปุ่มเท่านั้น (กฎเบราว์เซอร์) · มีได้ทีละ 1 บานต่อแท็บ (เปิดใหม่ = ปิดบานเก่า)
 - `supported = false` บน Safari / Firefox / มือถือ → ปิดปุ่มพร้อมบอกว่า "ใช้ได้ใน Chrome หรือ Edge บนคอมพิวเตอร์"
 - หน้าตา: คัด CSS ทั้งหมด + คลาสของ `<html>`/`<body>` จากหน้าหลักไปให้อัตโนมัติ (Tailwind ใช้ได้ปกติ)
 
@@ -46,7 +64,7 @@ const now = useNow(1000, pip.win);            // ตัวจับเวลา�
 
 ## ข้อจำกัด
 
-- ปิดแท็บหลัก / ออกจากหน้า = หน้าต่างลอยปิดตาม (ต้องเปิดหน้านั้นทิ้งไว้)
+- ปิดแท็บหลัก / รีเฟรช = หน้าต่างลอยปิดตาม · แบบ `usePipWindow` ออกจากหน้าก็ปิด (แบบ `openPipWindow` + createRoot ไม่ปิด)
 - ชิ้นส่วนที่ลอยตัวเองไปแปะ `document.body` (Toast · FloatingDropdown · ป๊อปอัปกลาง · ConfirmDialog) จะไปโผล่ในหน้าหลัก ไม่ใช่ในหน้าต่างลอย
   → ในหน้าต่างลอยให้โชว์ผลเป็นข้อความในตัวเอง · ปุ่มที่เปิดหน้าใหม่ให้ใช้ `pip.win.open(...)` (ไม่งั้นเบราว์เซอร์บล็อกป๊อปอัป)
 - สิทธิ์ / audit: ตัวมันเองไม่ทำอะไรกับข้อมูล — ปุ่มข้างในต้องเช็กสิทธิ์และลง audit เหมือนหน้าเดิม

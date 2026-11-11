@@ -56,18 +56,34 @@ export function copyPageLook(to: Document) {
   to.body.className = document.body.className;
 }
 
+export type PipOpenOptions = { width: number; height: number; title?: string };
+
+/** เบราว์เซอร์นี้เปิดหน้าต่างลอยได้ไหม (เรียกฝั่งเบราว์เซอร์เท่านั้น) */
+export const pipSupported = (): boolean => !!documentPip();
+
+/**
+ * เปิดหน้าต่างลอยเปล่า (คัดหน้าตามาให้แล้ว) — ใช้นอก React tree ของหน้า เช่น ปุ่มในเมนูโปรไฟล์ แล้ว createRoot ลงไปเอง
+ *   → ลอยค้างได้แม้เปลี่ยนหน้าในแท็บเดียวกัน (ปิดเมื่อปิดแท็บ/รีเฟรช) · ต้องเรียกจากการกดปุ่ม · ไม่รองรับ = null
+ */
+export async function openPipWindow(opts: PipOpenOptions): Promise<Window | null> {
+  const api = documentPip();
+  if (!api) return null;
+  api.window?.close();                   // ทีละบาน
+  const w = await api.requestWindow({ width: opts.width, height: opts.height });
+  copyPageLook(w.document);
+  if (opts.title) w.document.title = opts.title;
+  return w;
+}
+
+/** หน้าต่างลอยผูกกับหน้า (ปิดตามเมื่อออกจากหน้า) — เนื้อหาวางด้วย <PipPortal> */
 export function usePipWindow() {
   const [win, setWin] = useState<Window | null>(null);
   const [supported, setSupported] = useState(false);
-  useEffect(() => setSupported(!!documentPip()), []);   // เช็กหลังโหลด (กันหน้าจอ server/เบราว์เซอร์ไม่ตรงกัน)
+  useEffect(() => setSupported(pipSupported()), []);   // เช็กหลังโหลด (กันหน้าจอ server/เบราว์เซอร์ไม่ตรงกัน)
 
-  const open = useCallback(async (opts: { width: number; height: number; title?: string }): Promise<Window | null> => {
-    const api = documentPip();
-    if (!api) return null;
-    api.window?.close();                 // ทีละบาน
-    const w = await api.requestWindow({ width: opts.width, height: opts.height });
-    copyPageLook(w.document);
-    if (opts.title) w.document.title = opts.title;
+  const open = useCallback(async (opts: PipOpenOptions): Promise<Window | null> => {
+    const w = await openPipWindow(opts);
+    if (!w) return null;
     w.addEventListener("pagehide", () => setWin(null), { once: true });
     setWin(w);
     return w;

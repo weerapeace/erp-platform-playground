@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Icon } from "@/components/icon";
 import { timerHost } from "@/components/pip-window";
 import { apiFetch } from "@/lib/api";
-import { deployPhase, formatCountdown, type DeployPhase, type DeployStatus } from "@/lib/deploy-queue";
+import { DEPLOY_WORKFLOW_PAGE, deployPhase, formatCountdown, type DeployPhase, type DeployStatus } from "@/lib/deploy-queue";
 
 /** เวลาปัจจุบัน เดินทุก `ms` — ตั้งบนหน้าต่างลอยถ้ามี (ไม่โดนเบราว์เซอร์หน่วงตอนแท็บหลักซ่อน) */
 export function useNow(ms: number, win?: Window | null): Date {
@@ -122,5 +122,61 @@ export function DeployCountdown({ status, now, variant, actions, message }: {
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/**
+ * กด "ขึ้นเว็บทันที" (POST /api/admin/deploy · สิทธิ์ + audit อยู่ฝั่ง server)
+ *   fromWin = หน้าต่างที่กดปุ่ม (หน้าต่างลอยต้องเปิดหน้า GitHub จากตัวมันเอง ไม่งั้นเบราว์เซอร์บล็อกป๊อปอัป)
+ */
+export async function requestDeployNow(fromWin?: Window | null): Promise<{ ok: boolean; message: string; openedGitHub?: boolean }> {
+  try {
+    const r = await apiFetch("/api/admin/deploy", { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (j.needsSetup) {
+      (fromWin ?? window).open(j.url || DEPLOY_WORKFLOW_PAGE, "_blank", "noopener");
+      return { ok: true, openedGitHub: true, message: "เปิดหน้า GitHub แล้ว — กดปุ่ม “Run workflow” สีเขียว อีก 1 ครั้ง" };
+    }
+    if (!r.ok || j.error) return { ok: false, message: j.error || "สั่งขึ้นเว็บไม่สำเร็จ" };
+    return { ok: true, message: "สั่งขึ้นเว็บแล้ว — เว็บจริงอัปเดตในราว 5 นาที" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "สั่งขึ้นเว็บไม่สำเร็จ" };
+  }
+}
+
+/** เนื้อหาหน้าต่างลอย (ตัวเลข + ปุ่มขึ้นทันทีเมื่อมีงานรอ + ข้อความผลกด) — ใช้ทั้งหน้า /admin/deploy และเมนูโปรไฟล์ */
+export function DeployMiniPanel({ status, error, now, win, onDeployed }: {
+  status: DeployStatus | null;
+  error?: string | null;
+  now: Date;
+  /** หน้าต่างลอยที่วางอยู่ (ใช้เปิดหน้า GitHub) */
+  win: Window | null;
+  onDeployed?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!status) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center gap-1 px-4 bg-white text-center">
+        <div className={`text-sm font-medium ${error ? "text-rose-700" : "text-slate-500"}`}>{error ? "ดูสถานะไม่ได้" : "กำลังดูสถานะ…"}</div>
+        {error && <div className="text-[11px] text-slate-500">{error}</div>}
+      </div>
+    );
+  }
+  const deploy = async () => {
+    setBusy(true);
+    const r = await requestDeployNow(win);
+    setBusy(false);
+    setMsg(r.openedGitHub ? "เปิดหน้า GitHub แล้ว กด Run workflow" : r.ok ? "สั่งขึ้นเว็บแล้ว" : r.message);
+    if (r.ok && !r.openedGitHub) setTimeout(() => onDeployed?.(), 15000);
+    setTimeout(() => setMsg(null), 8000);
+  };
+  return (
+    <DeployCountdown status={status} now={now} variant="mini" message={msg} actions={status.waiting.length > 0 && (
+      <button type="button" onClick={() => void deploy()} disabled={busy}
+        className="h-6 px-2 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
+        {busy ? "กำลังสั่ง…" : "ขึ้นทันที"}
+      </button>
+    )} />
   );
 }

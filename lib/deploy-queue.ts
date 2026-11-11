@@ -15,6 +15,8 @@ export const DEPLOY_WORKFLOW = "deploy-batch.yml";
 /** ตัวรวมงานเป็นรอบ (บน feat/host-portable · เด้งทุก push) */
 export const ROUND_WORKFLOW = "deploy-round.yml";
 export const ROUND_MINUTES = 10;
+/** ขนาด/ชื่อหน้าต่างลอยนับถอยหลัง (หน้า /admin/deploy และเมนูโปรไฟล์ใช้ค่าเดียวกัน) */
+export const DEPLOY_PIP_SIZE = { width: 320, height: 170, title: "ขึ้นเว็บ" };
 /** ⚠️ ต้องตรงกับ WAIT_SECONDS ใน .github/workflows/deploy-round.yml — รอบตื่นมาเลื่อน prod หลังเริ่มรันเท่านี้วินาที */
 export const ROUND_WAIT_SECONDS = 540;
 /** เวลา build ของ Vercel โดยประมาณ (เฉลี่ยจริง ~4.3 นาที: compile ~2.2 + page data ~1 + อัปโหลดแคช ~1) — ใช้เดาเท่านั้น */
