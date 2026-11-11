@@ -6,7 +6,8 @@
  *   งานลูกค้า → ตั้ง "ลูกค้าประจำแบรนด์" ใต้ชื่อ — หลายสาขาได้ (เจ้าของขอ 2026-11-07) · กติกา lib/brand-customers.ts
  *   ใช้ที่ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์: รายเดียว = เติมให้ · หลายราย = มีปุ่มให้กดเลือกสาขา (lib/mo-so-rule.ts)
  * - ช่างเหมา: ย้ายไปติ๊กที่หน้าพนักงาน (/payroll/employees/<id> ปุ่ม "ช่างเหมา" · employees.is_subcontract) — เดิมเป็นแท็บในหน้านี้
- * ของกลาง: ToggleSwitch · ImageInput · CustomerPicker · FloatingDropdown · askConfirm · useToast · Icon
+ *   ลูกค้าเยอะ (เช่น 30 สาขา) → โชว์ 3 รายแรก + "+N ดูทั้งหมด" · กางแล้วจัดกลุ่มตามบริษัท (เจ้าของขอ 2026-11-11)
+ * ของกลาง: ToggleSwitch · ImageInput · CustomerPicker · FloatingDropdown · askConfirm · useToast · Icon · ChipOverflow · lib/company-branch
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
@@ -21,6 +22,8 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import type { Brand } from "@/app/api/brands/route";
 import { BRAND_CUSTOMER_MAX, type BrandCustomer } from "@/lib/brand-customers";
+import { ChipOverflow } from "@/components/chip-overflow";
+import { groupByCompany } from "@/lib/company-branch";
 
 // คอลัมน์ตาราง: แบรนด์ | งานลูกค้า | OEM | ซ่อนใน Artwork | ⋯
 const GRID = "grid grid-cols-[minmax(0,1fr)_76px_64px_88px_36px] items-center gap-2";
@@ -149,22 +152,42 @@ function BrandCustomersCell({ list, onChange }: { list: BrandCustomer[]; onChang
     if (fresh.length > room) toast.error(`ตั้งลูกค้าประจำแบรนด์ได้สูงสุด ${BRAND_CUSTOMER_MAX} ราย — เพิ่มให้ ${room} รายแรก`);
     if (fresh.length && room > 0) onChange([...list, ...fresh.slice(0, room)]);
   };
+  // กางดูทั้งหมด → จัดกลุ่มตามบริษัท ชิปโชว์แค่ชื่อสาขา · สาขาชื่อซ้ำในบริษัทเดียวกัน = น่าจะเป็นคู่ค้าซ้ำในทะเบียน → ติดป้าย "ซ้ำ?"
+  const groups = groupByCompany(list, (c) => c.name);
+  const branchOf = new Map<string, string>();
+  const dupIds = new Set<string>();
+  for (const g of groups) {
+    const seen = new Map<string, string>();
+    for (const { item, branch } of g.items) {
+      branchOf.set(item.id, branch);
+      const k = branch.toLowerCase();
+      const first = seen.get(k);
+      if (branch && first) { dupIds.add(item.id); dupIds.add(first); }
+      else seen.set(k, item.id);
+    }
+  }
   return (
     <div className="mt-1 space-y-1">
-      {list.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {list.map((c) => (
-            <span key={c.id} title={c.code ? `${c.code} · ${c.name}` : c.name}
-              className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 py-0.5 pl-2 pr-1 text-[11px] leading-snug text-slate-700">
-              {/* ชื่อเต็ม (ไม่ตัด) — สาขามักต่างกันแค่ท้ายชื่อ เช่น "…สำนักงานใหญ่" / "…สาขาเซ็นทรัลเวิลด์" */}
-              <span className="min-w-0 break-words">{c.name}</span>
-              <button type="button" onClick={() => onChange(list.filter((x) => x.id !== c.id))} aria-label={`เอา ${c.name} ออก`} title="เอาออกจากลูกค้าประจำแบรนด์"
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-xs leading-none text-slate-400 hover:bg-slate-200 hover:text-slate-700">
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
+      <ChipOverflow
+        items={list} getKey={(c) => c.id} max={3}
+        groupItems={() => groups.map((g) => ({ label: g.company, items: g.items.map((x) => x.item) }))}
+        renderChip={(c, { grouped }) => (
+          <span title={c.code ? `${c.code} · ${c.name}` : c.name}
+            className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 py-0.5 pl-2 pr-1 text-[11px] leading-snug text-slate-700">
+            {/* ชื่อเต็ม (ไม่ตัด) — สาขามักต่างกันแค่ท้ายชื่อ เช่น "…สำนักงานใหญ่" / "…สาขาเซ็นทรัลเวิลด์" · ตอนจัดกลุ่มโชว์แค่สาขา (ชี้ดูชื่อเต็ม) */}
+            <span className="min-w-0 break-words">{grouped ? branchOf.get(c.id) || c.name : c.name}</span>
+            {grouped && dupIds.has(c.id) && (
+              <span className="rounded bg-amber-100 px-1 text-[10px] text-amber-700" title="สาขาชื่อนี้มี 2 รายในทะเบียนคู่ค้า — อาจเป็นรายเดียวกันที่ลงซ้ำ (ชี้ที่ชิปเพื่อดูชื่อเต็ม)">ซ้ำ?</span>
+            )}
+            <button type="button" onClick={() => onChange(list.filter((x) => x.id !== c.id))} aria-label={`เอา ${c.name} ออก`} title="เอาออกจากลูกค้าประจำแบรนด์"
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-xs leading-none text-slate-400 hover:bg-slate-200 hover:text-slate-700">
+              ×
+            </button>
+          </span>
+        )}
+      />
+      {full && (
+        <div className="text-[11px] text-slate-400">ใส่ครบ {BRAND_CUSTOMER_MAX} รายแล้ว (สูงสุด) — เอาออกก่อนถึงจะเพิ่มได้</div>
       )}
       {!full && (
         <div className="max-w-[240px]" title="ลูกค้าประจำแบรนด์ — ติ๊กได้หลายสาขาพร้อมกัน · ตอนสร้างใบสั่งขายจะมีปุ่มให้กดเลือกสาขา">

@@ -796,6 +796,15 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "หน้าที่มีแท็บหลายอัน โดยเฉพาะบนมือถือ",
   },
   {
+    key: "chip-overflow", label: "ชิปยาว โชว์ไม่กี่ตัว แล้วกดดูที่เหลือ", code: "ChipOverflow", category: "layout",
+    source: { path: "components/chip-overflow" },
+    what: "รายการชิปที่ยาวมาก (เช่น ลูกค้า 30 สาขา) โชว์แค่ 3 ตัวแรก + ปุ่ม \"+N ดูทั้งหมด\" กางแล้วจัดกลุ่มได้ มีปุ่มย่อกลับ",
+    when: "ชิป/ป้ายจำนวนไม่แน่นอนในแถวตาราง การ์ด หรือหัวข้อ ที่ยาวจนแถวสูงเกิน (ลูกค้า สาขา แท็ก ผู้รับผิดชอบ)",
+    notWhen: "ต้องติ๊กเลือกชิป ให้ใช้ FieldChipsPicker หรือ Picker กลาง · กรองตามแท็ก ให้ใช้ TagGroupFilter",
+    doc: "chip-overflow.md",
+    note: "จัดกลุ่มตามบริษัทจากชื่อคู่ค้า (\"…จำกัด ( สาขา 1 )\") ใช้ lib/company-branch · ใช้ที่หน้าแบรนด์ (ลูกค้าประจำแบรนด์)",
+  },
+  {
     key: "block-layout", label: "จัดกล่องในหน้า (ลากสลับ · ซ่อน · เต็ม/ครึ่ง)", code: "useBlockLayout · BlockLayoutRows · BlockLayoutEditor · lib/block-layout", category: "layout",
     source: { path: "components/block-layout", names: ["useBlockLayout", "BlockLayoutRows", "BlockLayoutEditor"] },
     what: "ให้ทีม (แอดมิน) และแต่ละคนจัดกล่องในหน้าเองได้ — ลากสลับลำดับ เปิด/ปิด ขนาดเต็มหรือครึ่ง (ครึ่ง 2 ใบติดกัน = วางคู่) · ทีมเก็บ ui_config admin_block_layout:<หน้า> · ของฉันเก็บ user_ui_prefs",
