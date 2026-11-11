@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildStateText, minutesToNextRound, queueFromCompare } from "@/lib/deploy-queue";
+import {
+  BUILD_SECONDS, buildStateText, deployPhase, formatCountdown, minutesToNextRound, queueFromCompare, ROUND_WAIT_SECONDS, statusFromGitHub, type DeployStatus,
+} from "@/lib/deploy-queue";
 
 describe("queueFromCompare", () => {
   it("งานรอขึ้นเว็บ ใหม่สุดก่อน · ข้อความบรรทัดแรก", () => {
@@ -33,5 +35,86 @@ describe("รอบถัดไป / สถานะ build", () => {
     expect(buildStateText("pending").tone).toBe("wait");
     expect(buildStateText("failure").tone).toBe("bad");
     expect(buildStateText(undefined).tone).toBe("none");
+  });
+});
+
+
+const live = (state: string | null, since: string | null = null): DeployStatus["live"] => ({ sha: "p1", message: "งานล่าสุดบนเว็บ", date: null, state, stateSince: since });
+const job = (sha: string, message: string) => ({ sha, message, author: "", date: null });
+
+describe("statusFromGitHub — รวมผล GitHub เป็นสถานะเดียว", () => {
+  const cmp = {
+    status: "ahead", ahead_by: 1, behind_by: 0,
+    base_commit: { sha: "p1", commit: { message: "งานบนเว็บ\n\nยาว", committer: { date: "2026-11-11T03:00:00Z" } } },
+    commits: [{ sha: "w1", commit: { message: "งานรอ", committer: { date: "2026-11-11T03:49:00Z" } } }],
+  };
+  const st = { state: "pending", sha: "p1", statuses: [
+    { state: "pending", context: "Vercel", created_at: "2026-11-11T03:47:50Z", updated_at: "2026-11-11T03:48:10Z" },
+    { state: "success", context: "ci/other", created_at: "2026-11-11T03:40:00Z" },
+  ] };
+
+  it("เว็บจริง = base ของ compare · เวลาเริ่ม build = สถานะ Vercel ที่ตรงกับสถานะรวม", () => {
+    const s = statusFromGitHub(cmp, st, { workflow_runs: [] }, { refreshSeconds: 15, now: new Date("2026-11-11T03:50:00Z") });
+    expect(s.live).toEqual({ sha: "p1", message: "งานบนเว็บ", date: "2026-11-11T03:00:00Z", state: "pending", stateSince: "2026-11-11T03:47:50Z" });
+    expect(s.waiting.map((c) => c.sha)).toEqual(["w1"]);
+    expect(s.round).toBeNull();
+    expect(s.refreshSeconds).toBe(15);
+  });
+
+  it("รอบที่กำลังรัน = เวลาเริ่ม · ตัวที่ต่อคิวไว้นับจากตอนรอบก่อนจบ (GitHub บอกเวลาเริ่ม = ตอน push)", () => {
+    const running = { workflow_runs: [{ status: "in_progress", created_at: "2026-11-11T03:49:23Z", run_started_at: "2026-11-11T03:49:23Z" }, { status: "completed", updated_at: "2026-11-11T03:47:46Z" }] };
+    expect(statusFromGitHub(cmp, st, running, { refreshSeconds: 15 }).round).toEqual({ startedAt: "2026-11-11T03:49:23Z" });
+    const queuedThenRan = { workflow_runs: [{ status: "in_progress", run_started_at: "2026-11-11T03:53:57Z" }, { status: "completed", updated_at: "2026-11-11T03:58:32Z" }] };
+    expect(statusFromGitHub(cmp, st, queuedThenRan, { refreshSeconds: 15 }).round).toEqual({ startedAt: "2026-11-11T03:58:32Z" });
+    expect(statusFromGitHub(cmp, st, { workflow_runs: [{ status: "pending" }] }, { refreshSeconds: 15 }).round).toBeNull();
+  });
+
+  it("GitHub ตอบไม่ครบ = ไม่พัง", () => {
+    const s = statusFromGitHub(null, null, null, { refreshSeconds: 120 });
+    expect(s.waiting).toEqual([]);
+    expect(s.live.state).toBeNull();
+    expect(s.round).toBeNull();
+  });
+});
+
+describe("deployPhase — ตอนนี้ขั้นไหน เหลือกี่วินาที", () => {
+  const start = "2026-11-11T03:49:23Z";
+  const at = (sec: number) => new Date(Date.parse(start) + sec * 1000);
+
+  it("มีงานรอ + รอบเดินอยู่ = นับถอยหลังแม่น (ไม่ใช่ค่าประมาณ)", () => {
+    const p = deployPhase({ waiting: [job("w2", "งานใหม่สุด"), job("w1", "งานแรก")], live: live("success"), round: { startedAt: start } }, at(60));
+    expect(p.key).toBe("round");
+    expect(p.secondsLeft).toBe(ROUND_WAIT_SECONDS - 60);
+    expect(p.approx).toBe(false);
+    expect(p.detail).toContain("รอ 2 งาน · งานใหม่สุด");
+  });
+
+  it("ครบเวลารอบแล้ว = กำลังส่งขึ้นเว็บ · มีงานแต่ไม่มีรอบ = รอรอบถัดไป", () => {
+    expect(deployPhase({ waiting: [job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(ROUND_WAIT_SECONDS + 5)).key).toBe("promoting");
+    expect(deployPhase({ waiting: [job("w1", "a")], live: live("success"), round: null }, at(0)).key).toBe("queued");
+  });
+
+  it("มีงานรอระหว่างเว็บกำลัง build รอบก่อน = ยังนับรอบใหม่ + บอกว่ากำลัง build", () => {
+    const p = deployPhase({ waiting: [job("w1", "a")], live: live("pending", start), round: { startedAt: start } }, at(10));
+    expect(p.key).toBe("round");
+    expect(p.detail).toContain("กำลัง build");
+  });
+
+  it("ไม่มีงานรอ: กำลัง build = ค่าประมาณ · เลยเวลา = ใกล้เสร็จ · ล้ม · ล่าสุดแล้ว", () => {
+    const b = deployPhase({ waiting: [], live: live("pending", start), round: null }, at(70));
+    expect(b).toMatchObject({ key: "building", secondsLeft: BUILD_SECONDS - 70, approx: true });
+    expect(deployPhase({ waiting: [], live: live("pending", start), round: null }, at(BUILD_SECONDS + 30))).toMatchObject({ key: "building", secondsLeft: null });
+    expect(deployPhase({ waiting: [], live: live("failure"), round: null }, at(0)).key).toBe("failed");
+    expect(deployPhase({ waiting: [], live: live("success"), round: { startedAt: start } }, at(0)).key).toBe("idle");
+    expect(deployPhase({ waiting: [], live: live(null), round: null }, at(0)).key).toBe("idle");
+  });
+});
+
+describe("formatCountdown", () => {
+  it("นาที:วินาที · เกินชั่วโมง · ติดลบ = 0", () => {
+    expect(formatCountdown(480)).toBe("8:00");
+    expect(formatCountdown(65)).toBe("1:05");
+    expect(formatCountdown(3725)).toBe("1:02:05");
+    expect(formatCountdown(-3)).toBe("0:00");
   });
 });

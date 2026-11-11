@@ -1,33 +1,24 @@
 "use client";
 
 // ============================================================
-// 🚀 ขึ้นเว็บ — งานที่ส่งมาแล้วแต่ยังไม่ขึ้นเว็บจริง + ปุ่ม "ขึ้นเว็บทันที" (เจ้าของขอ 2026-11-10 "10 นาที แต่มีปุ่มขึ้นทันทีด้วย")
-//   เว็บจริงอัปเดตเป็นรอบทุก ~10 นาที (GitHub Actions deploy-batch.yml) เพื่อลดค่า build ของ Vercel
-//   ข้อมูลคิว: GitHub API สาธารณะ (เบราว์เซอร์เรียกเอง) · ปุ่ม: POST /api/admin/deploy (ยังไม่ตั้งกุญแจ = เปิดหน้า GitHub ให้กด Run workflow)
-// ของกลาง: PlaygroundShell · LoadingState/ErrorState · Icon · useToast · กติกา lib/deploy-queue.ts · docs/deploy-batch.md
+// 🚀 ขึ้นเว็บ — นับถอยหลังว่าเว็บจริงจะอัปเดตเมื่อไร + งานที่รอ + ปุ่ม "ขึ้นเว็บทันที" (เจ้าของขอ 2026-11-10 "10 นาที แต่มีปุ่มขึ้นทันทีด้วย")
+//   เว็บจริงอัปเดตเป็นรอบ: ทุก push → deploy-round.yml รอรวมงาน ~9 นาที → เลื่อน prod → Vercel build (~4.5 นาที)
+//   ปุ่ม "ลอยไว้มุมจอ" (เจ้าของขอ 2026-11-11) = หน้าต่างนับถอยหลังจิ๋วลอยทับทุกโปรแกรม (Chrome/Edge) — เปิดหน้านี้ทิ้งไว้ ไปทำงานแท็บอื่นได้
+//   ข้อมูล: GET /api/admin/deploy (server ถาม GitHub + แคชกลาง — เดิมเบราว์เซอร์ถามเองจนโดน GitHub บล็อก) · ปุ่ม: POST /api/admin/deploy
+// ของกลาง: PlaygroundShell · LoadingState/ErrorState · Icon · useToast · pip-window · deploy-countdown · กติกา lib/deploy-queue.ts · docs/deploy-batch.md
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
+import { PipPortal, usePipWindow } from "@/components/pip-window";
+import { DeployCountdown, useDeployStatus, useNow } from "@/components/deploy-countdown";
 import { apiFetch } from "@/lib/api";
-import {
-  buildStateText, DEPLOY_REPO, DEPLOY_WORKFLOW, DEPLOY_WORKFLOW_PAGE, minutesToNextRound, PROD_BRANCH, queueFromCompare, ROUND_MINUTES, WORK_BRANCH,
-  type DeployQueue,
-} from "@/lib/deploy-queue";
+import { DEPLOY_WORKFLOW_PAGE, ROUND_MINUTES } from "@/lib/deploy-queue";
 
-type Live = { sha: string; message: string; date: string | null; state: string | null };
-type Run = { status: string; conclusion: string | null; created_at: string; event: string };
-
-const GH = `https://api.github.com/repos/${DEPLOY_REPO}`;
-const gh = async (path: string) => {
-  const r = await fetch(`${GH}${path}`, { headers: { Accept: "application/vnd.github+json" }, cache: "no-store" });
-  if (!r.ok) throw new Error(r.status === 403 ? "GitHub จำกัดจำนวนครั้งที่ดูได้ต่อชั่วโมง — ลองใหม่อีกสักครู่" : `อ่านข้อมูลจาก GitHub ไม่ได้ (${r.status})`);
-  return r.json();
-};
 const timeText = (s: string | null) => (s ? new Date(s).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
 
 export default function DeployPage() {
@@ -37,92 +28,79 @@ export default function DeployPage() {
 function DeployView() {
   const canUse = usePermission("admin.users");
   const toast = useToast();
-  const [queue, setQueue] = useState<DeployQueue | null>(null);
-  const [live, setLive] = useState<Live | null>(null);
-  const [run, setRun] = useState<Run | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const pip = usePipWindow();
+  const { status, error, loading, reload } = useDeployStatus(canUse, pip.win);
+  const now = useNow(1000, pip.win);
   const [pushing, setPushing] = useState(false);
+  const [pipMsg, setPipMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [cmp, prod, runs] = await Promise.all([
-        gh(`/compare/${PROD_BRANCH}...${encodeURIComponent(WORK_BRANCH)}`),
-        gh(`/commits/${PROD_BRANCH}`),
-        gh(`/actions/workflows/${DEPLOY_WORKFLOW}/runs?per_page=1`).catch(() => null),
-      ]);
-      const st = await gh(`/commits/${prod.sha}/status`).catch(() => null);
-      setQueue(queueFromCompare(cmp));
-      setLive({ sha: prod.sha, message: String(prod.commit?.message ?? "").split("\n")[0], date: prod.commit?.author?.date ?? null, state: st?.state ?? null });
-      const r = runs?.workflow_runs?.[0];
-      setRun(r ? { status: r.status, conclusion: r.conclusion, created_at: r.created_at, event: r.event } : null);
-      setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { if (canUse) void load(); }, [canUse, load]);
-  useEffect(() => { if (!canUse) return; const t = setInterval(() => void load(), 30000); return () => clearInterval(t); }, [canUse, load]);
-
-  const deployNow = async () => {
+  /** fromWin = หน้าต่างที่กดปุ่ม (หน้าต่างลอยต้องเปิดหน้า GitHub จากตัวมันเอง ไม่งั้นเบราว์เซอร์บล็อกป๊อปอัป) */
+  const deployNow = async (fromWin?: Window | null) => {
     setPushing(true);
+    const say = (ok: boolean, msg: string) => { if (fromWin) setPipMsg(msg); else (ok ? toast.success(msg) : toast.error(msg)); };
     try {
       const r = await apiFetch("/api/admin/deploy", { method: "POST" });
       const j = await r.json().catch(() => ({}));
       if (j.needsSetup) {
-        window.open(j.url || DEPLOY_WORKFLOW_PAGE, "_blank", "noopener");
-        toast.success("เปิดหน้า GitHub แล้ว — กดปุ่ม “Run workflow” สีเขียว อีก 1 ครั้ง");
+        (fromWin ?? window).open(j.url || DEPLOY_WORKFLOW_PAGE, "_blank", "noopener");
+        say(true, fromWin ? "เปิดหน้า GitHub แล้ว กด Run workflow" : "เปิดหน้า GitHub แล้ว — กดปุ่ม “Run workflow” สีเขียว อีก 1 ครั้ง");
       } else if (!r.ok || j.error) throw new Error(j.error || "สั่งขึ้นเว็บไม่สำเร็จ");
-      else { toast.success("สั่งขึ้นเว็บแล้ว — เว็บจริงอัปเดตในราว 5 นาที"); setTimeout(() => void load(), 15000); }
-    } catch (e) { toast.error(e instanceof Error ? e.message : "สั่งขึ้นเว็บไม่สำเร็จ"); }
-    finally { setPushing(false); }
+      else { say(true, fromWin ? "สั่งขึ้นเว็บแล้ว" : "สั่งขึ้นเว็บแล้ว — เว็บจริงอัปเดตในราว 5 นาที"); setTimeout(() => void reload(), 15000); }
+    } catch (e) { say(false, e instanceof Error ? e.message : "สั่งขึ้นเว็บไม่สำเร็จ"); }
+    finally { setPushing(false); setTimeout(() => setPipMsg(null), 8000); }
+  };
+
+  const popOut = async () => {
+    try { await pip.open({ width: 320, height: 170, title: "ขึ้นเว็บ" }); }
+    catch { toast.error("เปิดหน้าต่างลอยไม่ได้ในเบราว์เซอร์นี้ — ใช้ Chrome หรือ Edge บนคอมพิวเตอร์ แล้วลองกดอีกครั้ง"); }
   };
 
   if (!canUse) return <AccessDenied message="หน้านี้สำหรับผู้ดูแลระบบ" />;
-  const waiting = queue?.waiting ?? [];
-  const bs = buildStateText(live?.state);
-  const toneCls = { ok: "bg-emerald-50 text-emerald-700", wait: "bg-amber-50 text-amber-700", bad: "bg-rose-50 text-rose-700", none: "bg-slate-100 text-slate-500" }[bs.tone];
-  const running = run && run.status !== "completed";
+  const waiting = status?.waiting ?? [];
+  const btn = "h-10 px-4 text-sm font-medium rounded-lg inline-flex items-center gap-2 disabled:opacity-40";
 
   return (
     <div className="max-w-[860px] mx-auto px-5 py-5 space-y-4">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-800"><Icon value="🚀" /> ขึ้นเว็บ</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          งานที่ทำเสร็จจะรวมขึ้นเว็บจริงเป็นรอบ ~{ROUND_MINUTES} นาทีหลังงานแรกเข้ามา (ประหยัดค่า build) · งานด่วนกด “ขึ้นเว็บทันที”
+          งานที่ทำเสร็จจะรวมขึ้นเว็บจริงเป็นรอบ ~{ROUND_MINUTES} นาทีหลังงานแรกเข้ามา แล้ว build อีก ~4-5 นาที (ประหยัดค่า build) · งานด่วนกด “ขึ้นเว็บทันที”
         </p>
       </div>
 
-      {err ? <ErrorState title="ดูสถานะไม่ได้" hint={err} onRetry={() => void load()} retrying={loading} />
-        : !queue || !live ? <LoadingState label="กำลังดูสถานะ…" />
+      {error && !status ? <ErrorState title="ดูสถานะไม่ได้" hint={error} onRetry={() => void reload()} retrying={loading} />
+        : !status ? <LoadingState label="กำลังดูสถานะ…" />
         : (
           <>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm text-slate-500">งานที่รอขึ้นเว็บ</div>
-                <div className="text-3xl font-semibold text-slate-800">{waiting.length.toLocaleString("th-TH")} <span className="text-base font-normal text-slate-500">งาน</span></div>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  {waiting.length ? (() => { const m = minutesToNextRound(waiting[waiting.length - 1]?.date); return m > 0 ? `ขึ้นเว็บรอบถัดไปในราว ${m} นาที` : "กำลังขึ้นเว็บรอบนี้ (~5 นาที)"; })() : "เว็บจริงเป็นงานล่าสุดแล้ว"}
-                  {running ? " · กำลังส่งขึ้นเว็บอยู่" : ""}
-                </div>
-              </div>
+            <DeployCountdown status={status} now={now} variant="page" actions={<>
               <button type="button" onClick={() => void deployNow()} disabled={pushing || !waiting.length}
-                className="h-11 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-2"
+                className={`${btn} bg-blue-600 text-white hover:bg-blue-700`}
                 title={waiting.length ? "ไม่รอรอบ — ส่งขึ้นเว็บจริงเดี๋ยวนี้" : "ไม่มีงานรอ"}>
                 <Icon name="refresh" /> {pushing ? "กำลังสั่ง…" : "ขึ้นเว็บทันที"}
               </button>
-            </div>
+              {pip.win
+                ? <button type="button" onClick={pip.close} className={`${btn} border border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon name="back" /> เอาหน้าต่างลอยกลับ</button>
+                : <button type="button" onClick={() => void popOut()} disabled={!pip.supported}
+                    className={`${btn} border border-slate-200 text-slate-700 hover:bg-slate-50`}
+                    title={pip.supported ? "เปิดตัวนับถอยหลังเป็นหน้าต่างจิ๋วลอยทับทุกโปรแกรม" : "ใช้ได้ใน Chrome หรือ Edge บนคอมพิวเตอร์"}>
+                    <Icon name="pin" /> ลอยไว้มุมจอ
+                  </button>}
+            </>} />
+
+            {pip.win && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                ตัวนับถอยหลังลอยอยู่มุมจอแล้ว (ลากย้าย/ย่อขยายได้) — <b>เปิดหน้านี้ทิ้งไว้</b> ไปทำงานแท็บอื่นหรือโปรแกรมอื่นได้ ปิดหน้านี้ = หน้าต่างลอยปิดตาม
+              </div>
+            )}
+            {error && <div className="text-xs text-amber-700">อัปเดตล่าสุดไม่สำเร็จ: {error}</div>}
 
             <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500">เว็บจริงตอนนี้</span>
-                <span className={`text-[11px] px-2 py-0.5 rounded-full ${toneCls}`}>{bs.text}</span>
-              </div>
-              <div className="text-sm text-slate-800 truncate">{live.message || "—"}</div>
-              <div className="text-xs text-slate-400"><span className="font-mono">{live.sha.slice(0, 8)}</span> · {timeText(live.date)}</div>
+              <div className="text-sm text-slate-500">เว็บจริงตอนนี้</div>
+              <div className="text-sm text-slate-800 truncate">{status.live.message || "—"}</div>
+              <div className="text-xs text-slate-400"><span className="font-mono">{status.live.sha.slice(0, 8)}</span> · {timeText(status.live.date)}</div>
             </div>
 
-            {queue.diverged && (
+            {status.diverged && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 สาขาเว็บจริงไม่ตรงกับสาขางานแบบปกติ — กด “ขึ้นเว็บทันที” เพื่อให้ตรงกัน หรือบอกทีมดูแลระบบ
               </div>
@@ -130,9 +108,9 @@ function DeployView() {
 
             {waiting.length > 0 && (
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                <div className="px-4 py-2 bg-slate-50 text-xs font-medium text-slate-500">งานที่รอ (ใหม่สุดก่อน)</div>
+                <div className="px-4 py-2 bg-slate-50 text-xs font-medium text-slate-500">งานที่รอ {waiting.length.toLocaleString("th-TH")} งาน (ใหม่สุดก่อน)</div>
                 <div className="divide-y divide-slate-100">
-                  {waiting.slice(0, 50).map((c) => (
+                  {waiting.map((c) => (
                     <div key={c.sha} className="px-4 py-2">
                       <div className="text-sm text-slate-800 break-words">{c.message}</div>
                       <div className="text-[11px] text-slate-400"><span className="font-mono">{c.sha.slice(0, 8)}</span> · {timeText(c.date)}</div>
@@ -141,6 +119,15 @@ function DeployView() {
                 </div>
               </div>
             )}
+
+            <PipPortal win={pip.win}>
+              <DeployCountdown status={status} now={now} variant="mini" message={pipMsg} actions={waiting.length > 0 && (
+                <button type="button" onClick={() => void deployNow(pip.win)} disabled={pushing}
+                  className="h-6 px-2 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
+                  {pushing ? "กำลังสั่ง…" : "ขึ้นทันที"}
+                </button>
+              )} />
+            </PipPortal>
           </>
         )}
     </div>

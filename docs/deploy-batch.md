@@ -21,11 +21,20 @@ session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไ�
 - ค่าใช้จ่าย: รอบละ ~9 นาทีบนเครื่อง GitHub = **ฟรีเพราะ repo เป็นสาธารณะ** · ถ้าวันไหนเปลี่ยนเป็น private จะกินโควต้า Actions (~20+ รอบ/วัน ≈ 6,000+ นาที/เดือน > ฟรี 2,000) → ตอนนั้นย้ายตัวจับเวลาไป Cloudflare Worker cron (ฟรี) แทน
 - ไม่มีงานใหม่ = ไม่ build
 
+## นับถอยหลัง + หน้าต่างลอยมุมจอ (2026-11-11)
+
+- หน้า **`/admin/deploy`** โชว์ขั้นปัจจุบัน: **รอรวมงาน** (นับแม่นถึงวินาที — เวลาเริ่มรอบจาก deploy-round.yml + `ROUND_WAIT_SECONDS` 540) → **กำลังส่งขึ้นเว็บ** → **กำลัง build** (≈ ค่าประมาณ `BUILD_SECONDS` 270) → **ขึ้นเว็บแล้ว** · มีงานแต่ไม่มีรอบเดิน (push ที่มี `[skip ci]`) = "รอรอบถัดไป"
+- ปุ่ม **"ลอยไว้มุมจอ"** = หน้าต่างจิ๋วลอยทับทุกโปรแกรม (Chrome/Edge บนคอม · ของกลาง `components/pip-window` · docs/pip-window.md) — เปิดหน้า /admin/deploy ทิ้งไว้ ไปทำงานแท็บอื่นได้ · ปิดหน้า = หน้าต่างลอยปิดตาม
+- ข้อมูล: `GET /api/admin/deploy` (server ถาม GitHub 3 ครั้งต่อรอบแคช + แคชกลาง Vercel — `lib/deploy-status.ts`) · เดิมเบราว์เซอร์ถาม GitHub เอง ~480 ครั้ง/ชม. เกินโควต้าไม่มีกุญแจ 60 ครั้ง/ชม. → เปิดค้างแล้วโดนบล็อก
+  - ไม่มี `GITHUB_DEPLOY_TOKEN`: แคช 120 วิ (ตัวเลขยังเดินทุกวินาที แต่เปลี่ยนขั้นช้าได้ ~2 นาที · IP ของ Vercel ใช้ร่วมกับเว็บอื่น อาจโดนจำกัดบ้าง → โชว์ข้อมูลล่าสุด + "ข้อมูลอาจไม่อัปเดต")
+  - มีกุญแจ: แคช 15 วิ (5,000 ครั้ง/ชม.)
+- ⚠️ ถ้าแก้ `WAIT_SECONDS` ใน deploy-round.yml ต้องแก้ `ROUND_WAIT_SECONDS` ใน `lib/deploy-queue.ts` ด้วย (ไม่งั้นนับผิด)
+
 ## ขึ้นทันที (ไม่รอรอบ)
 
-- หน้า **`/admin/deploy`** ปุ่ม "ขึ้นเว็บทันที" (สิทธิ์ admin.users) — เห็นจำนวนงานที่รอ + เว็บจริงตอนนี้เป็นงานไหน/build เสร็จไหม
+- หน้า **`/admin/deploy`** ปุ่ม "ขึ้นเว็บทันที" (สิทธิ์ admin.users) — มีในหน้าต่างลอยด้วย (โชว์เมื่อมีงานรอ)
   - ถ้ายังไม่ตั้ง env `GITHUB_DEPLOY_TOKEN` ใน Vercel → ปุ่มเปิดหน้า GitHub ให้กด "Run workflow" เอง
-  - ตั้งแล้ว (fine-grained token เฉพาะ repo นี้ สิทธิ์ Actions: Read and write) → กดครั้งเดียวจบ + ลง audit `deploy_now`
+  - ตั้งแล้ว (fine-grained token เฉพาะ repo นี้ สิทธิ์ Actions: Read and write) → กดครั้งเดียวจบ + ลง audit `deploy_now` + ตัวนับถอยหลังอัปเดตถี่ขึ้น
 - session (Claude): `gh workflow run deploy-batch.yml --repo weerapeace/erp-platform-playground` — **ใช้เมื่อเจ้าของขอ/งานด่วนเท่านั้น** (กดทุกงาน = กลับไปเสียค่า build เท่าเดิม)
 
 ## ตรวจหลัง deploy (CLAUDE.md §46 Step 7) — เปลี่ยนจากเดิม
@@ -40,7 +49,8 @@ session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไ�
 - `.github/workflows/deploy-round.yml` — รอบอัตโนมัติ (เด้งเมื่อ push feat/host-portable)
 - `.github/workflows/deploy-batch.yml` (ชื่อใน Actions: "Deploy Now (ขึ้นเว็บทันที)") — ปุ่มขึ้นทันทีอย่างเดียว ไม่มี schedule · **อยู่บนสาขา main** (workflow_dispatch ทำงานจากสาขา default เท่านั้น) · แก้ผ่าน GitHub API ใส่ `[skip ci]` (กัน deploy สำรอง CF) — main ตั้ง `deploymentEnabled: false` แล้ว Vercel จึงไม่ build
 - `vercel.json` → `git.deploymentEnabled: { "feat/host-portable": false, "main": false }`
-- `lib/deploy-queue.ts` (กติกา pure + เทสต์) · `app/admin/deploy/page.tsx` · `app/api/admin/deploy/route.ts`
+- `lib/deploy-queue.ts` (กติกา pure + เทสต์ · นับถอยหลัง `deployPhase`) · `lib/deploy-status.ts` (server ถาม GitHub + แคช) · `app/admin/deploy/page.tsx` · `app/api/admin/deploy/route.ts` (GET สถานะ · POST ขึ้นทันที)
+- `components/deploy-countdown` (การ์ดนับถอยหลัง + ตัวดึงสถานะ) · `components/pip-window` (หน้าต่างลอย — ของกลาง)
 - `scripts/perf-check.mjs` — `PROD_BRANCH = "prod"` + รองานเข้า prod
 
 ## ย้อนกลับ (กลับไป build ทุก push)
