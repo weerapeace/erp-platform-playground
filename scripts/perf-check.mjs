@@ -21,7 +21,8 @@ import { execFileSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "weerapeace/erp-platform-playground";
-const PROD_BRANCH = "feat/host-portable";
+// เว็บจริง build จากสาขา prod (ขึ้นเว็บเป็นรอบทุก ~10 นาที จาก feat/host-portable — .github/workflows/deploy-batch.yml บน main · 2026-11-11)
+const PROD_BRANCH = "prod";
 const MAX_PAGES = 15;
 
 const P = await import(pathToFileURL(join(ROOT, "lib/perf-check.ts")).href);
@@ -73,8 +74,30 @@ function latestDeploy() {
   }
 }
 
+/** งานในเครื่อง (HEAD) ขึ้นเว็บจริงแล้วหรือยัง = สาขา prod มี commit นี้แล้ว · null = เช็กไม่ได้ */
+function headInProd() {
+  try {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const st = execFileSync("gh", ["api", `repos/${REPO}/compare/${head}...${PROD_BRANCH}`, "--jq", ".status"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20000 }).trim();
+    return st === "ahead" || st === "identical";
+  } catch {
+    return null;
+  }
+}
+
 async function waitForDeploy() {
   if (!IS_PROD || flag("--no-wait")) return;
+  // ขึ้นเว็บเป็นรอบ: รอให้งานนี้เข้า prod ก่อน (รอบละ ~10 นาที · กดขึ้นทันที = gh workflow run deploy-batch.yml)
+  const roundUntil = Date.now() + 15 * 60_000;
+  let saidRound = false;
+  for (;;) {
+    const inProd = headInProd();
+    if (inProd !== false) break;
+    if (Date.now() > roundUntil) { notes.push("งานนี้ยังไม่ขึ้นเว็บจริงหลังรอ 15 นาที — วัดของที่ขึ้นอยู่ตอนนี้ (ดู /admin/deploy)"); break; }
+    if (!saidRound && !JSON_OUT) { console.log("⏳ งานนี้ยังไม่ขึ้นเว็บจริง (ขึ้นเป็นรอบทุก ~10 นาที) รอก่อน…"); saidRound = true; }
+    await sleep(30_000);
+  }
   const until = Date.now() + 10 * 60_000;
   let said = false;
   for (;;) {
