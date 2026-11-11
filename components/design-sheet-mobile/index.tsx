@@ -41,6 +41,7 @@ import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 import { useT } from "@/components/i18n";
 import { tr, getLang } from "@/lib/lang";
+import { usePageOwnsBottomBar } from "@/lib/app-shell-bar";
 
 // ป๊อปอัปเต็ม (ของกลางเดิม) โหลดเฉพาะตอนกด "แก้ไขเต็ม"
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
@@ -131,6 +132,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const viewport = useViewportLayout();
   const { mode, layout } = useDeviceMode(viewport);
   const isPhone = layout === "phone";
+  usePageOwnsBottomBar(isPhone);   // มือถือมีแถบล่างของตัวเอง → เชลล์แอปเดี่ยวซ่อนแถบเมนูแอป (lib/app-shell-bar)
 
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);

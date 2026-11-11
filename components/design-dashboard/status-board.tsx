@@ -8,6 +8,8 @@ import { BrandSlot } from "@/components/brand-theme/slots";
 import { Icon } from "@/components/icon";
 import type { BoardColumn, StatusColumn } from "./dashboard-helpers";
 import { useT } from "@/components/i18n";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { useSwipeNav } from "@/lib/use-swipe-nav";
 
 const FOLD_W = 44;   // ความกว้างคอลัมน์ที่พับ (px)
 
@@ -35,16 +37,25 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
 }) {
   const t = useT();
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({});   // คอลัมน์สถานะ (โหมดแท็บเล็ต: กดชิปสถานะแล้วเลื่อนไปคอลัมน์นั้น)
+  // มือถือ: ปัดซ้าย ← = สถานะถัดไป (ทางขวา) · ปัดขวา → = ก่อนหน้า (ของกลาง lib/use-swipe-nav)
+  const phoneIdx = phoneCol ? boardColumns.findIndex((c) => c.key === phoneCol.key) : -1;
+  const goPhone = (d: number) => { const c = boardColumns[phoneIdx + d]; if (c) setPhoneStatus(c.key); };
+  const swipe = useSwipeNav({
+    enabled: isPhone && boardColumns.length > 1,
+    onNext: () => goPhone(1), onPrev: () => goPhone(-1),
+    canNext: phoneIdx >= 0 && phoneIdx < boardColumns.length - 1, canPrev: phoneIdx > 0,
+  });
   return (
     <>
       {isPhone ? (
-        /* ── มือถือ: แท็บสถานะ (ชิปสีตามสถานะ) → การ์ด 2 ต่อแถวของสถานะที่เลือก · ไม่มีคอลัมน์เรียงข้าง ── */
+        /* ── มือถือ: แท็บสถานะ (ชิปสีตามสถานะ · ScrollTabs เลื่อนตัวที่เลือกมาไว้กลาง) → การ์ดของสถานะที่เลือก
+              ปัดซ้าย-ขวาตรงรายการ = สถานะถัดไป/ก่อนหน้า (ของกลาง useSwipeNav · เจ้าของสั่ง 2026-11-11) ── */
         <div>
-          <div className="-mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-1">
+          <ScrollTabs activeKey={phoneCol?.key} className="pb-1">
             {boardColumns.map((column) => {
               const on = phoneCol?.key === column.key;
               return (
-                <button key={column.key} type="button" onClick={() => setPhoneStatus(column.key)}
+                <button key={column.key} type="button" data-tab-key={column.key} onClick={() => setPhoneStatus(column.key)}
                   className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${on ? "text-white" : "bg-white text-slate-700"}`}
                   style={on ? { backgroundColor: column.color, borderColor: column.color } : { borderColor: `${column.color}66` }}>
                   {!on && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: column.color }} />}
@@ -53,14 +64,27 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
                 </button>
               );
             })}
-          </div>
-          {phoneCol && phoneCol.sheets.length > 0 ? (
-            cardSize === "row"
-              ? <div className="space-y-1.5">{phoneCol.sheets.map(renderBoardCard)}</div>
-              : <div className="grid grid-cols-2 gap-2">{phoneCol.sheets.map(renderGalleryCard)}</div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">{t("ไม่มีงานในสถานะนี้", "No jobs in this status")}</div>
+          </ScrollTabs>
+          {/* จุดบอกตำแหน่งแท็บ (ปัดได้กี่หน้า อยู่หน้าไหน) */}
+          {boardColumns.length > 1 && (
+            <div className="mb-2 mt-1 flex items-center justify-center gap-1" aria-hidden>
+              {boardColumns.map((c, i) => (
+                <span key={c.key} className={`h-1.5 rounded-full transition-all ${i === phoneIdx ? "w-4" : "w-1.5 bg-slate-300"}`} style={i === phoneIdx ? { backgroundColor: c.color } : undefined} />
+              ))}
+            </div>
           )}
+          {/* กรอบตัดขอบตอนรายการเลื่อนตามนิ้ว · สูงขั้นต่ำ = ปัดตรงที่ว่างได้แม้การ์ดน้อย */}
+          <div className="-mx-3 overflow-hidden px-3">
+            <div ref={swipe.ref} {...swipe.bind} style={swipe.style} className="min-h-[45vh]">
+              {phoneCol && phoneCol.sheets.length > 0 ? (
+                cardSize === "row"
+                  ? <div className="space-y-1.5">{phoneCol.sheets.map(renderBoardCard)}</div>
+                  : <div className="grid grid-cols-2 gap-2">{phoneCol.sheets.map(renderGalleryCard)}</div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">{t("ไม่มีงานในสถานะนี้", "No jobs in this status")}</div>
+              )}
+            </div>
+          </div>
         </div>
       ) : (
       <div className="px-1 pb-2">

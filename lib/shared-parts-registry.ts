@@ -804,6 +804,20 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "block-layout.md",
   },
   {
+    key: "swipe-nav", label: "ปัดซ้าย-ขวาเปลี่ยนแท็บ (มือถือ)", code: "useSwipeNav", category: "layout",
+    source: { path: "lib/use-swipe-nav", names: ["useSwipeNav"] },
+    what: "ปัดตรงรายการเพื่อไปแท็บถัดไป/ก่อนหน้า (ปัดซ้าย = ถัดไป แบบ LINE/IG) · เลื่อนตามนิ้ว · กันปัดพลาด (ต้องแนวนอนชัด เกิน 60px · ขอบจอไม่นับ · ปัดแล้วไม่เปิดการ์ด)",
+    when: "หน้ามือถือที่เป็นแท็บเรียงกัน เช่น แท็บสถานะบอร์ด",
+    notWhen: "รูปที่ปัดดูทีละรูป / แถวที่เลื่อนแนวนอนเอง (ใส่ data-no-swipe) · จอคอมที่ลากวางการ์ด",
+  },
+  {
+    key: "app-shell-bar", label: "หน้าบอกแอปเดี่ยวว่ามีแถบล่างเอง (กันแถบล่างซ้อน)", code: "usePageOwnsBottomBar · useEmbeddedPageBar", category: "layout",
+    source: { path: "lib/app-shell-bar", names: ["usePageOwnsBottomBar", "useEmbeddedPageBar"] },
+    what: "หน้าที่มีแถบล่างของตัวเองเปิดในแอปเดี่ยว /app/<key> → เชลล์ซ่อนแถบเมนูแอป (เมนูแอปอยู่ที่ ☰) · หน้าอื่นแถบอยู่ตามเดิม",
+    when: "หน้ามือถือที่ทำแถบล่างของตัวเอง → เรียก usePageOwnsBottomBar(isPhone)",
+    notWhen: "หน้าที่ไม่มีแถบล่างเอง (ไม่ต้องเรียก)",
+  },
+  {
     key: "gallery-columns", label: "เลือกจำนวนการ์ดต่อแถว", code: "GalleryColumns", category: "layout",
     source: { path: "components/gallery-columns" },
     what: "ปุ่มเลือกว่ามุมมองกริดจะโชว์กี่การ์ดต่อแถว (จำค่าไว้)",

@@ -28,6 +28,7 @@ import { menuVisibleTo } from "@/lib/menu-audience";
 import { applyAppOverrides, menuPlace, moreLabelOf } from "@/lib/app-menu-layout";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { useAppGo } from "@/lib/app-go";
+import { useEmbeddedPageBar } from "@/lib/app-shell-bar";
 
 // ⚙️ ตั้งค่าแอป (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป · โหลดเมื่อกดครั้งแรก
 const AppSettingsPanel = dynamic(() => import("@/components/app-settings-panel").then((m) => m.AppSettingsPanel), { ssr: false });
@@ -206,6 +207,9 @@ export default function StandaloneApp() {
     try { sessionStorage.setItem(`appdeep:${appKey}`, path); } catch { /* noop */ }
     return true;
   });
+
+  // หน้าในกรอบมีแถบล่างของตัวเอง (เช่น Design Dashboard มือถือ) → ซ่อนแถบเมนูแอปด้านล่าง กันซ้อน 2 แถบ · เมนูแอปยังอยู่ที่ ☰ (lib/app-shell-bar)
+  const pageOwnsBar = useEmbeddedPageBar(iframeRef, `${items[active]?.href ?? ""}#${goNonce}`);
 
   if (!ready) return <AppLoading />;
   if (!user) return (
@@ -449,8 +453,9 @@ export default function StandaloneApp() {
         })()}
       </main>
 
-      {/* มือถือ: แถบเมนูล่าง (iPad ซ่อน เพราะใช้ ☰ drawer แทน) · เมนูแม่แตะ = เปิด drawer เลือกลูก */}
-      {topLevel.length > 0 && (
+      {/* มือถือ: แถบเมนูล่าง (iPad ซ่อน เพราะใช้ ☰ drawer แทน) · เมนูแม่แตะ = เปิด drawer เลือกลูก
+          หน้าที่มีแถบล่างของตัวเอง (pageOwnsBar) = ไม่โชว์แถบนี้ → เมนูแอปเปิดจาก ☰ บนหัว (เจ้าของสั่ง 2026-11-11) */}
+      {topLevel.length > 0 && !pageOwnsBar && (
         <nav className="md:hidden flex-shrink-0 bg-white border-t border-slate-200 grid z-20"
           style={{ gridTemplateColumns: `repeat(${barCols}, minmax(0,1fr))`, paddingBottom: "env(safe-area-inset-bottom)" }}>
           {barItems.map((it) => {

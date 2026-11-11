@@ -36,6 +36,7 @@ import { PickActionBar } from "./pick-action-bar";
 import { LineInboxButton, LineInboxDrawer, useLineInboxCount } from "./line-inbox";
 import type { LineInboxItem, MergeSheetOption } from "@/lib/design-line-inbox-shared";
 import type { DesignSheetPrefill } from "@/components/design-sheet-detail";
+import { usePageOwnsBottomBar } from "@/lib/app-shell-bar";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -103,6 +104,8 @@ export function DesignDashboard() {
   const { mode: deviceMode, setMode: setDeviceMode, layout } = useDeviceMode(viewport);
   const isDesktop = layout === "desktop";
   const isPhone = layout === "phone";
+  // มือถือมีแถบล่างของตัวเอง (บอร์ด/วันนี้/ไลน์/เมนู) → บอกเชลล์แอปเดี่ยวให้ซ่อนแถบเมนูแอป (กันซ้อน 2 แถบ · เมนูแอปอยู่ที่ ☰)
+  usePageOwnsBottomBar(isPhone);
   const [moreOpen, setMoreOpen] = useState(false);                     // มือถือ: เมนู ⋯ รวมปุ่มรอง (กลับ/รีเฟรช/ธีม/จัดการสถานะ/ส่งขึ้นกระดาน/ตั้งค่าแบรนด์)
   const moreAnchorRef = useRef<HTMLDivElement>(null);
   // 📌 หัวหน้าติดบนตอนเลื่อน (ของกลาง sticky-header · เจ้าของขอ 2026-10-24) — จอคอม/แท็บเล็ต เหลือแถบบาง ชื่อหน้า + ปุ่ม · มือถือ ติดทั้งหัว
@@ -843,7 +846,7 @@ export function DesignDashboard() {
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
                 <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} foldedCols={foldedSet} onToggleFold={toggleFoldCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
               )}
-              {isPhone && onCardLongPress && filteredSheets.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">{t("กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว", "Press and hold a card to change its status")}</p>}
+              {isPhone && viewMode !== "gallery" && filteredSheets.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">{t("ปัดซ้าย-ขวาตรงรายการ = ดูสถานะถัดไป", "Swipe the list left/right to see the next status")}{onCardLongPress ? t(" · กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว", " · Press and hold a card to change its status") : ""}</p>}
             </section>
             )}
 
