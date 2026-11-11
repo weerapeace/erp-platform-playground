@@ -29,7 +29,7 @@ const INVOICE_CODES = ["shopee", "lazada", "line_shopping", "tiktok"];
 type PostStat = { posted30: number; queued: number; failed: number; next_run_at: string | null; last_posted_at: string | null };
 
 // แพลตฟอร์มที่ระบบเชื่อมบัญชีได้จริง (OAuth / API Key) — ขึ้นกลุ่มบนสุด
-const AUTO_CODES = ["facebook", "instagram", "lazada", "line_shopping"];
+const AUTO_CODES = ["facebook", "instagram", "lazada", "tiktok", "line_shopping"];
 
 // ลิงก์หน้าร้านจากค่าที่กรอก (ลิงก์เต็ม / @handle) — ของกลาง lib/platform-links (ลิงก์สินค้า/หลังร้านของลิ้นชักสินค้าบนร้านใช้ตัวเดียวกัน)
 const shopUrlOf = platformShopUrl;
@@ -101,8 +101,13 @@ const GUIDE: Record<string, Guide> = {
       <>เปิดโปรไฟล์ TikTok ของแบรนด์ › ดู <b>@ชื่อผู้ใช้</b> ใต้รูปโปรไฟล์ (หรือแชร์โปรไฟล์ › คัดลอกลิงก์)</>,
       <>วาง <C>@ชื่อผู้ใช้</C> หรือลิงก์โปรไฟล์ในช่อง “Shop ID / ลิงก์ร้าน”</>,
       SAVE_ON,
+      <>ร้าน TikTok Shop: กด <b>เชื่อมต่อ TikTok Shop</b> ในส่วน “การเชื่อมต่อ” ด้านล่าง → เข้าสู่ระบบ Seller Center ด้วยบัญชีร้านของแบรนด์นี้ แล้วกดอนุญาต (เลือกอายุสิทธิ์ยาวที่สุด)</>,
     ],
-    notes: [<>โพสต์ TikTok อัตโนมัติยังไม่เปิด — อยู่ในแผนคิวโพสต์ก้อนถัดไป</>],
+    notes: [
+      <>ก่อนกดเชื่อม แอปใน TikTok Shop Partner Center ต้อง<b>ผ่านการตรวจและกดเผยแพร่แล้ว</b> — แอปที่ยังเป็นฉบับร่าง ร้านจริงกดอนุญาตไม่ได้ (คู่มือ: <C>_exports/คู่มือสมัคร-TikTok-Shop-API.md</C>)</>,
+      <>1 แอป = 1 ร้าน · กุญแจ TikTok อยู่ได้ ~7 วัน ระบบต่ออายุให้เองตอนใช้งาน</>,
+      <>โพสต์คลิป TikTok อัตโนมัติยังไม่เปิด — อยู่ในแผนคิวโพสต์ก้อนถัดไป</>,
+    ],
     shopPh: "@ชื่อผู้ใช้ TikTok",
   },
   website: {
@@ -249,7 +254,7 @@ export default function PlatformAccountsPage() {
   const [editPlat, setEditPlat] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังแก้ (ชื่อร้าน/Shop ID) — กันเผลอพิมพ์
   const [editKey, setEditKey] = useState<string | null>(null);      // แพลตฟอร์มที่กำลังแก้ API Key (มีคีย์แล้ว = อ่านอย่างเดียวจนกดแก้)
   const [clearKeyFor, setClearKeyFor] = useState<string | null>(null);  // แพลตฟอร์มที่กำลังยืนยัน "ล้างคีย์"
-  const [confirmDisc, setConfirmDisc] = useState<"facebook" | "lazada" | null>(null);   // ยืนยันตัดการเชื่อมต่อ
+  const [confirmDisc, setConfirmDisc] = useState<"facebook" | "lazada" | "tiktok" | null>(null);   // ยืนยันตัดการเชื่อมต่อ
   const [sel, setSel] = useState<string | null>(null);   // แพลตฟอร์มที่เลือกดูรายละเอียด (platform id)
   const [mobileDetail, setMobileDetail] = useState(false);   // จอแคบ: อยู่หน้ารายละเอียดไหม
   const wantCode = useRef<string | null>(null);   // กลับจาก OAuth → เปิดแพลตฟอร์มนั้นให้เลย
@@ -264,6 +269,10 @@ export default function PlatformAccountsPage() {
   type LazStatus = { connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_id: string | null; short_code: string | null; country: string | null; configured: boolean };
   const [laz, setLaz] = useState<LazStatus>({ connected: false, seller_id: null, short_code: null, country: null, configured: true });
   const [lazSyncing, setLazSyncing] = useState(false);
+  // สถานะเชื่อมต่อ TikTok Shop ต่อแบรนด์ (/api/tiktok-shop/status) — problem = ผลจากการกด "ตรวจการเชื่อมต่อ" (ลองกับ TikTok จริง)
+  type TtsStatus = { configured: boolean; connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_name: string | null; region: string | null; shops: { name: string; region: string | null; code: string | null }[]; checked?: boolean; problem?: string | null };
+  const [tts, setTts] = useState<TtsStatus>({ configured: true, connected: false, seller_name: null, region: null, shops: [] });
+  const [ttsChecking, setTtsChecking] = useState(false);
   const brandChosen = useRef(false);   // มีการเลือกแบรนด์แล้ว (จาก query/ผู้ใช้) — กัน auto-select ทับ
   const say = (text: string, bad = false) => setMsg({ text, bad });
   const flash = (text: string) => { setMsg({ text }); setTimeout(() => setMsg(null), 1800); };
@@ -271,12 +280,13 @@ export default function PlatformAccountsPage() {
   const load = useCallback(async (bid: string) => {
     setLoading(true);
     try {
-      const [j, kj, mj, lj, sj] = await Promise.all([
+      const [j, kj, mj, lj, sj, tj] = await Promise.all([
         apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
         bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
         bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}&check=1`).then((r) => r.json()) : Promise.resolve(null),   // check=1 = ลองกับ Meta จริงว่ายังใช้ได้
         bid ? apiFetch(`/api/lazada/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
         bid ? apiFetch(`/api/social-publish/stats?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()).catch(() => null) : Promise.resolve(null),   // ภาพรวมโหลดไม่ได้ ไม่ให้ทั้งหน้าพัง
+        bid ? apiFetch(`/api/tiktok-shop/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()).catch(() => null) : Promise.resolve(null),
       ]);
       setStats(((sj as { stats?: Record<string, PostStat> } | null)?.stats ?? {}));
       setPlatforms((j.platforms ?? []) as Platform[]);
@@ -285,6 +295,7 @@ export default function PlatformAccountsPage() {
       setKeys((kj.keys ?? {}) as Record<string, boolean>);
       if (mj) { setFb((mj.facebook ?? { connected: false, stage: "none", page_name: null, pages: [] }) as FbStatus); setFbHasIg(!!mj.instagram?.connected); setMetaCfg(mj.configured !== false); setPickPage(""); }
       if (lj) setLaz(lj as LazStatus);
+      if (tj && !tj.error) setTts(tj as TtsStatus);
       setTestMsg(null);
       setLoadedFor(bid);
       if (!bid && !brandChosen.current && j.brands?.[0]) setBrandId(j.brands[0].id);
@@ -315,15 +326,19 @@ export default function PlatformAccountsPage() {
     const sp = new URLSearchParams(window.location.search);
     const err = sp.get("meta_error"), ok = sp.get("meta_connected"), pick = sp.get("meta_pick"), brand = sp.get("brand");
     const lazErr = sp.get("laz_error"), lazOk = sp.get("laz_connected");
+    const ttsErr = sp.get("tts_error"), ttsOk = sp.get("tts_connected"), ttsWarn = sp.get("tts_warn");
     if (brand) { brandChosen.current = true; setBrandId(brand); }
     if (err) say(err, true);
     else if (ok) say("เชื่อมต่อ Facebook สำเร็จ");
     else if (pick) say("มีหลายเพจ — เลือกเพจที่จะใช้โพสต์");
     else if (lazErr) say(lazErr, true);
     else if (lazOk) say("เชื่อมต่อ Lazada สำเร็จ");
+    else if (ttsErr) say(ttsErr, true);
+    else if (ttsOk) say(ttsWarn || "เชื่อมต่อ TikTok Shop สำเร็จ", !!ttsWarn);
     if (err || ok || pick) wantCode.current = "facebook";
     if (lazErr || lazOk) wantCode.current = "lazada";
-    if (err || ok || pick || brand || lazErr || lazOk) window.history.replaceState({}, "", window.location.pathname);
+    if (ttsErr || ttsOk) wantCode.current = "tiktok";
+    if (err || ok || pick || brand || lazErr || lazOk || ttsErr || ttsOk) window.history.replaceState({}, "", window.location.pathname);
   }, []);
   // เลือกแพลตฟอร์มแรก (หรือที่เพิ่งเชื่อมกลับมา) เมื่อโหลดรายการแล้ว
   useEffect(() => {
@@ -403,6 +418,34 @@ export default function PlatformAccountsPage() {
     finally { setLazSyncing(false); }
   };
 
+  // ---- TikTok Shop ----
+  const connectTts = async () => {
+    if (!brandId) return;
+    try {
+      const r = await apiFetch(`/api/tiktok-shop/oauth/start?brand_id=${encodeURIComponent(brandId)}`);
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      if (j.auth_url) window.location.href = j.auth_url as string;
+    } catch (e) { say((e as Error).message, true); }
+  };
+  const disconnectTts = async () => {
+    try {
+      const r = await apiFetch("/api/tiktok-shop/disconnect", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      say("ตัดการเชื่อมต่อ TikTok Shop แล้ว"); await load(brandId);
+    } catch (e) { say((e as Error).message, true); }
+  };
+  // ลองกับ TikTok จริง: ต่ออายุกุญแจถ้าจำเป็น + ดึงรายชื่อร้านใหม่ (อ่านอย่างเดียว ไม่แก้อะไรบนร้าน)
+  const checkTts = async () => {
+    setTtsChecking(true);
+    try {
+      const r = await apiFetch(`/api/tiktok-shop/status?brand_id=${encodeURIComponent(brandId)}&check=1`);
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setTts(j as TtsStatus);
+      if (j.problem) say(j.problem as string, true); else say(`การเชื่อมต่อ TikTok Shop ใช้งานได้ — ร้าน ${((j.shops ?? []) as { name: string }[]).map((s) => s.name).join(", ") || "-"}`);
+    } catch (e) { say((e as Error).message, true); }
+    finally { setTtsChecking(false); }
+  };
+
   const save = async (platform_id: string, patch: Partial<Account>) => {
     setAccounts((a) => { const prev = a[platform_id] ?? { label: null, external_shop_id: null, is_active: true }; return { ...a, [platform_id]: { ...prev, ...patch } }; });
     try {
@@ -445,6 +488,10 @@ export default function PlatformAccountsPage() {
     if (p.code === "lazada") {
       if (laz.connected) return laz.health === "expiring" ? { tone: "warn", label: `อีก ${laz.days_left ?? 0} วันหมดอายุ` } : { tone: "ok", label: "เชื่อมแล้ว" };
       if (laz.health === "expired") return { tone: "bad", label: "หมดอายุ" };
+    }
+    if (p.code === "tiktok") {
+      if (tts.connected) return tts.problem ? { tone: "bad", label: "ต้องเชื่อมใหม่" } : tts.health === "expiring" ? { tone: "warn", label: `อีก ${tts.days_left ?? 0} วันหมดอายุ` } : { tone: "ok", label: "เชื่อมแล้ว" };
+      if (tts.health === "expired") return { tone: "bad", label: "หมดอายุ" };
     }
     if (p.code === "line_shopping" && keys[p.id]) return { tone: "ok", label: "ตั้งคีย์แล้ว" };
     if (acc.is_active && hasShop) return { tone: "on", label: "ใช้งาน" };
@@ -532,6 +579,32 @@ export default function PlatformAccountsPage() {
               <span className="text-xs text-slate-500">เข้าสู่ระบบ Lazada Seller แล้วอนุญาต → ดึงออเดอร์/สินค้าเข้าระบบได้</span>
             </div>
           ) : <p className="text-sm text-slate-500">ยังไม่ได้เชื่อมต่อ</p>}
+        </div>
+      );
+    }
+    if (p.code === "tiktok") {
+      if (!tts.configured) return <Note>ยังไม่ได้ตั้ง TIKTOK_SHOP_APP_KEY / TIKTOK_SHOP_APP_SECRET / TIKTOK_SHOP_SERVICE_ID ในโฮสต์ (Vercel)</Note>;
+      if (tts.connected) return (
+        <div className="space-y-3">
+          <StatusBar tone={tts.problem ? "bad" : tts.health === "expiring" ? "warn" : "ok"} actions={canManage && <><button onClick={connectTts} className="text-xs text-slate-600 hover:underline">เชื่อมใหม่</button><button onClick={() => setConfirmDisc("tiktok")} className={LINK_DANGER}>ตัดการเชื่อมต่อ</button></>}>
+            ร้าน <b className="font-medium text-slate-900">{tts.shops.map((s) => s.name).join(", ") || tts.seller_name || "-"}</b>{tts.region ? ` (${tts.region})` : ""}
+            {tts.health === "expiring" && <span className="text-amber-700"> · อีก {tts.days_left ?? 0} วันสิทธิ์หมด ต้องกดเชื่อมใหม่</span>}
+          </StatusBar>
+          {tts.problem && <Note>{tts.problem}</Note>}
+          {canManage && <button onClick={checkTts} disabled={ttsChecking} className={BTN_LINE}><Icon name="refresh" />{ttsChecking ? "กำลังตรวจ..." : "ตรวจการเชื่อมต่อ"}</button>}
+          <p className="text-xs text-slate-500">ตอนนี้ระบบแค่ถือกุญแจไว้ ยังไม่ดึงหรือแก้อะไรบนร้าน — ดึงสินค้า/ออเดอร์จะเปิดในขั้นถัดไป</p>
+        </div>
+      );
+      return (
+        <div className="space-y-3">
+          {tts.health === "expired" && <Note>สิทธิ์ที่ร้านให้ไว้หมดอายุแล้ว — กดเชื่อมใหม่</Note>}
+          {canManage ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={connectTts} disabled={!brandId} className={BTN_DARK}><PlatformIcon code="tiktok" size={16} />{tts.health === "expired" ? "เชื่อมต่อ TikTok Shop ใหม่" : "เชื่อมต่อ TikTok Shop"}</button>
+              <span className="text-xs text-slate-500">เข้าสู่ระบบ TikTok Shop Seller Center แล้วกดอนุญาต (เลือกอายุสิทธิ์ยาวที่สุด)</span>
+            </div>
+          ) : <p className="text-sm text-slate-500">ยังไม่ได้เชื่อมต่อ</p>}
+          <p className="text-xs text-slate-500">แอปใน Partner Center ต้องผ่านการตรวจและกด “เผยแพร่” ก่อน ร้านจริงถึงกดอนุญาตได้</p>
         </div>
       );
     }
@@ -778,7 +851,7 @@ export default function PlatformAccountsPage() {
 
                   {conn && (
                     <Section title={cur.code === "line_shopping" ? "API Key" : "การเชื่อมต่อ"}
-                      desc={cur.code === "facebook" || cur.code === "instagram" ? "ให้ระบบโพสต์คอนเทนต์ขึ้นเพจให้อัตโนมัติ" : cur.code === "lazada" ? "ดึงออเดอร์และสินค้าเข้าระบบอัตโนมัติ" : "เชื่อมร้านกับระบบผ่าน Open API ของ LINE SHOPPING"}>
+                      desc={cur.code === "facebook" || cur.code === "instagram" ? "ให้ระบบโพสต์คอนเทนต์ขึ้นเพจให้อัตโนมัติ" : cur.code === "lazada" ? "ดึงออเดอร์และสินค้าเข้าระบบอัตโนมัติ" : cur.code === "tiktok" ? "เชื่อมร้าน TikTok Shop กับระบบผ่าน Open API" : "เชื่อมร้านกับระบบผ่าน Open API ของ LINE SHOPPING"}>
                       {conn}
                     </Section>
                   )}
@@ -811,11 +884,13 @@ export default function PlatformAccountsPage() {
 
       {/* ยืนยันก่อนตัดการเชื่อมต่อ Facebook / Lazada */}
       <ConfirmDialog open={!!confirmDisc} onClose={() => setConfirmDisc(null)} variant="danger"
-        title={confirmDisc === "lazada" ? "ตัดการเชื่อมต่อ Lazada?" : "ตัดการเชื่อมต่อ Facebook?"} confirmText="ตัดการเชื่อมต่อ"
+        title={confirmDisc === "lazada" ? "ตัดการเชื่อมต่อ Lazada?" : confirmDisc === "tiktok" ? "ตัดการเชื่อมต่อ TikTok Shop?" : "ตัดการเชื่อมต่อ Facebook?"} confirmText="ตัดการเชื่อมต่อ"
         message={confirmDisc === "lazada"
           ? `${brand?.name ?? "แบรนด์นี้"} จะหยุดดึงออเดอร์จาก Lazada จนกว่าจะเชื่อมใหม่`
-          : `${brand?.name ?? "แบรนด์นี้"} จะโพสต์ Facebook/Instagram อัตโนมัติไม่ได้ (คิวโพสต์ที่รออยู่จะล้ม) จนกว่าจะเชื่อมใหม่`}
-        onConfirm={() => { const d = confirmDisc; setConfirmDisc(null); if (d === "lazada") void disconnectLaz(); else void disconnectFb(); }} />
+          : confirmDisc === "tiktok"
+            ? `ระบบจะลบกุญแจ TikTok Shop ของ ${brand?.name ?? "แบรนด์นี้"} — ต้องกดเชื่อมต่อใหม่ถึงจะใช้ได้อีก (ยกเลิกสิทธิ์ฝั่งร้านได้ที่ Seller Center › App Store › My apps)`
+            : `${brand?.name ?? "แบรนด์นี้"} จะโพสต์ Facebook/Instagram อัตโนมัติไม่ได้ (คิวโพสต์ที่รออยู่จะล้ม) จนกว่าจะเชื่อมใหม่`}
+        onConfirm={() => { const d = confirmDisc; setConfirmDisc(null); if (d === "lazada") void disconnectLaz(); else if (d === "tiktok") void disconnectTts(); else void disconnectFb(); }} />
     </div>
     </AppAccessGate>
   );
