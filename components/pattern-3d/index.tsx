@@ -490,6 +490,30 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, vs.length * 3), 0.3, 6, false), new THREE.MeshStandardMaterial({ color: "#c2410c", roughness: 0.6 })));
       add(`sm${mi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(mk.on), "front");
     });
+    // งานขอบ: กุ๊น = แถบฟ้าตามขอบ · ซิป = เทปเข้ม + ฟันซิปสีเงินเรียงตามแนว (ชิ้นเดียววาดทีเดียวด้วย InstancedMesh)
+    sc.finishes.forEach((fin, fi) => {
+      if (fin.pts.length < 2) return;
+      const vs = fin.pts.map((q) => new THREE.Vector3(q[0], q[1], q[2]));
+      const curve = vs.length === 2 ? new THREE.LineCurve3(vs[0], vs[1]) : new THREE.CatmullRomCurve3(vs, false, "centripetal");
+      const g = new THREE.Group();
+      if (fin.kind === "bind") g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, vs.length * 3), 0.34, 8, false), new THREE.MeshStandardMaterial({ color: "#0ea5e9", roughness: 0.75 })));
+      else {
+        g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, vs.length * 3), 0.3, 8, false), new THREE.MeshStandardMaterial({ color: "#334155", roughness: 0.8 })));
+        const L = curve.getLength(), count = Math.max(2, Math.min(400, Math.round(L / 0.7)));
+        const teeth = new THREE.InstancedMesh(new THREE.BoxGeometry(0.3, 0.78, 0.78), new THREE.MeshStandardMaterial({ color: "#cbd5e1", roughness: 0.35, metalness: 0.55 }), count);
+        const mtx = new THREE.Matrix4(), quat = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), nrm = new THREE.Vector3(fin.n[0], fin.n[1], fin.n[2]);
+        for (let k = 0; k < count; k++) {
+          const u = (k + 0.5) / count, pos = curve.getPointAt(u), tan = curve.getTangentAt(u).normalize();
+          const side = new THREE.Vector3().crossVectors(nrm, tan).normalize(), up = new THREE.Vector3().crossVectors(tan, side).normalize();
+          quat.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tan, up, side));
+          teeth.setMatrixAt(k, mtx.compose(pos, quat, one));
+        }
+        teeth.instanceMatrix.needsUpdate = true;
+        g.add(teeth);
+      }
+      g.userData.finish = fin.kind;
+      add(`sf${fi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(fin.on), "front");
+    });
     applyCut();
     // กล้อง: เปลี่ยนเฉพาะเมื่อขนาดฉากเปลี่ยนมาก (ลากตะเข็บแล้วภาพไม่ขยับเข้าออก)
     const dist = Math.max(top, w * 1.05, d * 1.05) * 2, ty = top * 0.46;

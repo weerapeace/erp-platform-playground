@@ -1301,7 +1301,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const lineD = (P: Pt[]) => "M" + P.map((q) => `${q[0]} ${q[1]}`).join("L");
   const polyLen = (P: Pt[]) => { let L = 0; for (let k = 1; k < P.length; k++) L += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); return L; };
   /** เลขความยาวข้างเส้นที่เย็บ (แบบ CLO) — ตัวหนังสือขนาดคงที่บนจอ มีขอบขาวให้อ่านออกบนชิ้น */
-  const lenLabel = (P: Pt[], col: string) => { const m = midOf(P); return <text x={m[0]} y={m[1] - 7 / ppc} fontSize={11 / ppc} textAnchor="middle" fill={col} stroke="#fff" strokeWidth={3 / ppc} paintOrder="stroke" style={{ fontVariantNumeric: "tabular-nums" }}>{r1(polyLen(P))}</text>; };
+  const lenLabel = (P: Pt[], col: string) => { if (!(ppc > 0)) return null; const m = midOf(P); return <text x={m[0]} y={m[1] - 7 / ppc} fontSize={11 / ppc} textAnchor="middle" fill={col} stroke="#fff" strokeWidth={3 / ppc} paintOrder="stroke" style={{ fontVariantNumeric: "tabular-nums" }}>{r1(polyLen(P))}</text>; };
   const edgePiece = edgeSel ? pieces.find((p) => p.pid === edgeSel.pid) ?? null : null;
   const edgeList = edgePiece ? pieceEdges(edgePiece.shape) : [];
   const selEdge = edgePiece && edgeSel && edgeList.length === edgeSel.n ? edgeList[edgeSel.i] ?? null : null;

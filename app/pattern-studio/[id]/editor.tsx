@@ -128,7 +128,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
-  const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}) })), [pieces]);
+  const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) })), [pieces]);
   const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes]);
 
   const save = async () => {

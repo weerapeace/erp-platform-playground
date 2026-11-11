@@ -98,7 +98,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   }, [live, sew?.seams]);
   // ภาพเย็บติด: คิดใหม่ทุกครั้งที่ชิ้นหรือตะเข็บเปลี่ยน (ระหว่างลากตะเข็บด้วย) — เฉพาะตอนเปิดดูภาพ 3D แบบเย็บติด
   const wantSewn = !!sew && show3d && view3d === "sewn";
-  const asmLive: AsmPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner.length ? { inner: p.inner } : {}) })), [live]);
+  const asmLive: AsmPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) })), [live]);
   const sewnScene = useMemo(() => (wantSewn && sew ? buildSewn(asmLive, sew.seams, sew.attaches ?? []) : null), [wantSewn, asmLive, sew?.seams, sew?.attaches]);   // eslint-disable-line react-hooks/exhaustive-deps
   const liningPids = useMemo(() => new Set(live.filter((p) => p.info?.role === "lining").map((p) => p.pid)), [live]);
   const hidePids = useMemo(() => (layer === "all" ? null : new Set(live.filter((p) => liningPids.has(p.pid) !== (layer === "lining")).map((p) => p.pid))), [layer, live, liningPids]);

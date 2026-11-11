@@ -20,11 +20,11 @@
  * คู่มือ: docs/pattern-studio.md
  */
 import { flattenShape, shapeArea, shapeBox, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
-import { checkSeam, isInnerSide, isPartialSeam, isRangedSide, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { checkSeam, isInnerSide, isPartialSeam, isRangedSide, pieceEdges, sidePoints, type Seam, type SeamSide, type EdgeMeta } from "@/lib/pattern-seams";
 
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ — handle: ปลายหู 2 จุดบนแผ่น (พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่น · y ลง) · behind: แผ่นปิดหลังรูแรกของแผ่น */
 export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
-export type AsmPiece = { pid: string; name: string; count: number; shape: Shape; holes: Shape[]; /** ชั้นซับใน (ไม่ใส่ = ชั้นนอก) */ layer?: "lining"; /** เส้นในชิ้น — ให้ชิ้นอื่นมาเย็บ (ภาพเย็บติด lib/pattern-sewn) */ inner?: InnerLine[] };
+export type AsmPiece = { pid: string; name: string; count: number; shape: Shape; holes: Shape[]; /** ชั้นซับใน (ไม่ใส่ = ชั้นนอก) */ layer?: "lining"; /** เส้นในชิ้น — ให้ชิ้นอื่นมาเย็บ (ภาพเย็บติด lib/pattern-sewn) */ inner?: InnerLine[]; /** ค่ารายขอบ (กุ้น / ติดซิป) — ภาพเย็บติดวาดเป็นเส้นตามขอบ */ edgeMeta?: EdgeMeta[] | null };
 
 export type AsmPanel = { pid: string; side: 1 | -1; outline: Pt[]; holes: Pt[][] };
 export type AsmSweep = { pid: string; pts: Pt[]; dir: Pt };
