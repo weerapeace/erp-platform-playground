@@ -1,0 +1,48 @@
+name: Deploy Round (รวมงานขึ้นเว็บทุก ~10 นาที)
+
+# เจ้าของเลือก 2026-11-11: "10 นาที แต่มีปุ่มขึ้นทันทีด้วย" — ลดค่า build ของ Vercel
+# ทุกครั้งที่มีงาน push ลง feat/host-portable: ถ้ายังไม่ขึ้นเว็บ → รอรวมงาน ~10 นาที → เลื่อนสาขา prod ไปงานล่าสุด → Vercel build prod (= เว็บจริง)
+#   งานที่ push ระหว่างรอ = เข้ารอบเดียวกัน (concurrency: รันได้ทีละตัว + รอคิวได้ 1 ตัว ตัวที่ใหม่กว่าแทนตัวเก่า)
+# ⚠️ ไม่ใช้ตัวตั้งเวลา (schedule) ของ GitHub แล้ว — 2026-11-11 รอ 1.5 ชม. ไม่ยิงสักครั้ง
+# ขึ้นทันที: deploy-batch.yml (บน main · workflow_dispatch) ← ปุ่ม /admin/deploy / `gh workflow run deploy-batch.yml`
+# docs/deploy-batch.md
+on:
+  push:
+    branches: [feat/host-portable]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-round
+  cancel-in-progress: false
+
+jobs:
+  round:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: รอรวมงาน แล้วเลื่อน prod ไปงานล่าสุด
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          WAIT_SECONDS: "540"
+        run: |
+          set -euo pipefail
+          tip() { git ls-remote "https://github.com/$REPO.git" "refs/heads/$1" | cut -f1; }
+          if [ "$(tip feat/host-portable)" = "$(tip prod)" ]; then
+            echo "งานนี้ขึ้นเว็บไปแล้ว (รอบก่อน/กดขึ้นทันที)"
+            exit 0
+          fi
+          echo "รอรวมงานรอบนี้ ~$((WAIT_SECONDS / 60)) นาที…"
+          sleep "$WAIT_SECONDS"
+          SRC=$(tip feat/host-portable)
+          DST=$(tip prod)
+          if [ -z "$SRC" ]; then echo "อ่าน feat/host-portable ไม่ได้"; exit 1; fi
+          if [ "$SRC" = "$DST" ]; then
+            echo "มีคนกดขึ้นทันทีไปแล้วระหว่างรอ"
+            exit 0
+          fi
+          gh api -X PATCH "repos/$REPO/git/refs/heads/prod" -f sha="$SRC" -F force=true > /dev/null
+          echo "ขึ้นเว็บรอบนี้: prod → ${SRC:0:8}"
+          echo "### ขึ้นเว็บรอบนี้ → \`${SRC:0:8}\`" >> "$GITHUB_STEP_SUMMARY"

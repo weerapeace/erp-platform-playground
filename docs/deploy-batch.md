@@ -8,14 +8,16 @@
 ```txt
 session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไม่ build สาขานี้แล้ว — vercel.json git.deploymentEnabled)
                               │
-        ทุก ~10 นาที (GitHub Actions deploy-batch.yml บนสาขา main)
-        ถ้ามีงานใหม่ → เลื่อนสาขา prod มาที่เดียวกัน
+        ทุก push → GitHub Actions deploy-round.yml (บน feat/host-portable)
+        ยังไม่ขึ้นเว็บ → รอรวมงาน ~10 นาที → เลื่อนสาขา prod ไปงานล่าสุด
                               ▼
                             prod  ──Vercel build──▶ เว็บจริง (erp-platform-playground.vercel.app)
 ```
 
 - Vercel ตั้ง **Production Branch = `prod`** (เจ้าของเปลี่ยนเองใน dashboard 2026-11-11)
-- ไม่มีงานใหม่ = ไม่ build · GitHub ตั้งเวลาอาจช้ากว่า 10 นาทีได้บ้าง (ปกติไม่กี่นาที)
+- รอบเริ่มนับตอนงานแรกที่ยังไม่ขึ้นเว็บถูก push · งานที่ตามมาระหว่างรอ = เข้ารอบเดียวกัน (concurrency รันทีละตัว + รอคิว 1 ตัว)
+- ⚠️ **ไม่ใช้ตัวตั้งเวลา (schedule) ของ GitHub** — 2026-11-11 เปิดแล้วรอ 1.5 ชม. ไม่ยิงสักครั้ง (deploy-batch.yml บน main ยังมี schedule ค้างไว้ ยิงเมื่อไหร่ก็แค่ทำซ้ำ ไม่เสียหาย)
+- ไม่มีงานใหม่ = ไม่ build
 
 ## ขึ้นทันที (ไม่รอรอบ)
 
@@ -33,7 +35,8 @@ session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไ�
 
 ## ไฟล์ที่เกี่ยวข้อง
 
-- `.github/workflows/deploy-batch.yml` — **อยู่บนสาขา main** (schedule/workflow_dispatch ทำงานจากสาขา default เท่านั้น) · แก้ผ่าน GitHub API ใส่ `[skip ci]` (กัน deploy สำรอง CF) — main ตั้ง `deploymentEnabled: false` แล้ว Vercel จึงไม่ build
+- `.github/workflows/deploy-round.yml` — รอบอัตโนมัติ (เด้งเมื่อ push feat/host-portable)
+- `.github/workflows/deploy-batch.yml` — ปุ่มขึ้นทันที · **อยู่บนสาขา main** (schedule/workflow_dispatch ทำงานจากสาขา default เท่านั้น) · แก้ผ่าน GitHub API ใส่ `[skip ci]` (กัน deploy สำรอง CF) — main ตั้ง `deploymentEnabled: false` แล้ว Vercel จึงไม่ build
 - `vercel.json` → `git.deploymentEnabled: { "feat/host-portable": false, "main": false }`
 - `lib/deploy-queue.ts` (กติกา pure + เทสต์) · `app/admin/deploy/page.tsx` · `app/api/admin/deploy/route.ts`
 - `scripts/perf-check.mjs` — `PROD_BRANCH = "prod"` + รองานเข้า prod
@@ -41,5 +44,5 @@ session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไ�
 ## ย้อนกลับ (กลับไป build ทุก push)
 
 1. Vercel → Settings → Environments → Production → Branch = `feat/host-portable`
-2. ลบ `git.deploymentEnabled` ออกจาก `vercel.json` · ปิด workflow: `gh workflow disable deploy-batch.yml`
+2. ลบ `git.deploymentEnabled` ออกจาก `vercel.json` (ทั้ง feat/host-portable และ main) · ปิด workflow: `gh workflow disable deploy-round.yml` + `deploy-batch.yml`
 3. `scripts/perf-check.mjs` PROD_BRANCH กลับเป็น `feat/host-portable`

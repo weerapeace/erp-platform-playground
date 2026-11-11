@@ -89,7 +89,7 @@ function DeployView() {
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-800"><Icon value="🚀" /> ขึ้นเว็บ</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          งานที่ทำเสร็จจะขึ้นเว็บจริงเป็นรอบ ทุก ~{ROUND_MINUTES} นาที (ประหยัดค่า build) · งานด่วนกด “ขึ้นเว็บทันที”
+          งานที่ทำเสร็จจะรวมขึ้นเว็บจริงเป็นรอบ ~{ROUND_MINUTES} นาทีหลังงานแรกเข้ามา (ประหยัดค่า build) · งานด่วนกด “ขึ้นเว็บทันที”
         </p>
       </div>
 
@@ -102,7 +102,7 @@ function DeployView() {
                 <div className="text-sm text-slate-500">งานที่รอขึ้นเว็บ</div>
                 <div className="text-3xl font-semibold text-slate-800">{waiting.length.toLocaleString("th-TH")} <span className="text-base font-normal text-slate-500">งาน</span></div>
                 <div className="text-xs text-slate-400 mt-0.5">
-                  {waiting.length ? `รอบถัดไปในราว ${minutesToNextRound()} นาที (GitHub อาจช้ากว่านี้เล็กน้อย)` : "เว็บจริงเป็นงานล่าสุดแล้ว"}
+                  {waiting.length ? (() => { const m = minutesToNextRound(waiting[waiting.length - 1]?.date); return m > 0 ? `ขึ้นเว็บรอบถัดไปในราว ${m} นาที` : "กำลังขึ้นเว็บรอบนี้ (~5 นาที)"; })() : "เว็บจริงเป็นงานล่าสุดแล้ว"}
                   {running ? " · กำลังส่งขึ้นเว็บอยู่" : ""}
                 </div>
               </div>

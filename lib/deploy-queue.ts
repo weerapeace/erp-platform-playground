@@ -2,8 +2,8 @@
  * ขึ้นเว็บเป็นรอบ (เจ้าของเลือก 2026-11-10: "10 นาที แต่มีปุ่มขึ้นทันทีด้วย") — ไฟล์ pure ใช้ทั้งหน้า /admin/deploy และ API
  *
  *   ทุก session push ลง feat/host-portable เหมือนเดิม (Vercel ไม่ build สาขานี้)
- *   GitHub Actions "deploy-batch.yml" (บนสาขา main) ทุก ~10 นาที: มีงานใหม่ → เลื่อนสาขา prod มาที่เดียวกัน → Vercel build prod = เว็บจริง
- *   ขึ้นทันที = สั่งรัน workflow นั้นเดี๋ยวนี้ (ปุ่มในหน้า /admin/deploy · `gh workflow run deploy-batch.yml`)
+ *   GitHub Actions "deploy-round.yml" (เด้งทุก push): รอรวมงาน ~10 นาที → เลื่อนสาขา prod ไปงานล่าสุด → Vercel build prod = เว็บจริง
+ *   ขึ้นทันที = รัน "deploy-batch.yml" (บนสาขา main) เดี๋ยวนี้ (ปุ่มในหน้า /admin/deploy · `gh workflow run deploy-batch.yml`)
  * memory vercel_cost_breakdown · docs/deploy-batch.md
  */
 
@@ -28,7 +28,7 @@ type GhCompare = {
   status?: string;
   ahead_by?: number;
   behind_by?: number;
-  commits?: { sha: string; commit?: { message?: string; author?: { name?: string; date?: string } } }[];
+  commits?: { sha: string; commit?: { message?: string; author?: { name?: string; date?: string }; committer?: { date?: string } } }[];
 };
 
 /** ผล compare ของ GitHub (prod...feat/host-portable) → รายการงานที่รอขึ้นเว็บ */
@@ -37,15 +37,20 @@ export function queueFromCompare(c: GhCompare | null | undefined): DeployQueue {
     sha: x.sha,
     message: (x.commit?.message ?? "").split("\n")[0].trim(),
     author: x.commit?.author?.name ?? "",
-    date: x.commit?.author?.date ?? null,
+    date: x.commit?.committer?.date ?? x.commit?.author?.date ?? null,   // committer = ตอนถูก commit/rebase จริง (author อาจเก่ากว่า)
   })).reverse();
   return { waiting: commits, diverged: c?.status === "diverged" || (c?.behind_by ?? 0) > 0 };
 }
 
-/** "อีกราว N นาที" ถึงรอบถัดไป (ตั้งเวลาทุก 10 นาทีตรงหลักสิบของนาที · GitHub อาจช้ากว่านั้นได้บ้าง) */
-export function minutesToNextRound(now: Date = new Date()): number {
-  const m = now.getUTCMinutes() % ROUND_MINUTES;
-  return m === 0 && now.getUTCSeconds() === 0 ? 0 : ROUND_MINUTES - m;
+/**
+ * "อีกราว N นาที" ถึงรอบถัดไป — รอบเริ่มนับตอนงานแรกที่ยังไม่ขึ้นเว็บถูก push (deploy-round.yml รอ ~10 นาทีแล้วขึ้นทั้งก้อน)
+ * oldestWaitingIso = เวลาของงานที่รอนานสุด · ไม่รู้ = ROUND_MINUTES · เลยเวลาแล้ว (กำลังขึ้น/ช้า) = 0
+ */
+export function minutesToNextRound(oldestWaitingIso: string | null | undefined, now: Date = new Date()): number {
+  const t = oldestWaitingIso ? Date.parse(oldestWaitingIso) : NaN;
+  if (!Number.isFinite(t)) return ROUND_MINUTES;
+  const left = ROUND_MINUTES - (now.getTime() - t) / 60000;
+  return Math.max(0, Math.ceil(left));
 }
 
 /** สถานะ build ของ Vercel (GitHub commit status) → ข้อความภาษาคน */

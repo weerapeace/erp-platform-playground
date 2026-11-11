@@ -22,10 +22,11 @@ describe("queueFromCompare", () => {
 });
 
 describe("รอบถัดไป / สถานะ build", () => {
-  it("นาทีถึงรอบถัดไป (ทุก 10 นาที)", () => {
-    expect(minutesToNextRound(new Date("2026-11-10T03:07:30Z"))).toBe(3);
-    expect(minutesToNextRound(new Date("2026-11-10T03:10:00Z"))).toBe(0);
-    expect(minutesToNextRound(new Date("2026-11-10T03:10:20Z"))).toBe(10);
+  it("นาทีถึงรอบถัดไป (นับจากงานที่รอนานสุด)", () => {
+    const now = new Date("2026-11-10T03:10:00Z");
+    expect(minutesToNextRound("2026-11-10T03:07:00Z", now)).toBe(7);
+    expect(minutesToNextRound("2026-11-10T02:50:00Z", now)).toBe(0);
+    expect(minutesToNextRound(null, now)).toBe(10);
   });
   it("ข้อความสถานะ", () => {
     expect(buildStateText("success").tone).toBe("ok");
