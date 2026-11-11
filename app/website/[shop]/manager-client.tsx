@@ -15,6 +15,7 @@ import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { loadWebListings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
+import { ErrorState } from "@/components/state-views";
 import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
 import { WebsiteCategoriesPanel } from "@/components/website-categories-panel";
 import { WebsiteCollectionsPanel } from "@/components/website-collections-panel";
@@ -60,6 +61,9 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // ⚠️ โหลดสินค้าไม่ครบ (ฐานข้อมูลตอบช้า) — เก็บข้อมูลเดิมไว้ ไม่แสดงของครึ่ง ๆ กลาง ๆ + ปุ่มลองใหม่
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   type TabKey = "listings" | "categories" | "collections" | "newdrops" | "sizeguides" | "fieldmap" | "design" | "layout" | "pages" | "info" | "shipping" | "i18n" | "orders" | "coupons" | "members" | "reviews" | "promotions" | "stats" | "returns" | "imagesets" | "webimages";
   const [tab, setTab] = useState<TabKey>("listings");
   // 🗂 รูปบนเว็บ → "✏️ ไปแก้" Section ในหน้าแรก = เปิดแท็บหน้าแรกแล้วเลือก Section นั้นให้
@@ -102,6 +106,13 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
       setLoading((v) => v || !slug);
       try {
         const j = await loadWebListings<Listing, ShopInfo, CategoryDef>(slug ?? "", true);
+        if ((j as { retryable?: boolean }).retryable) {
+          // ฐานข้อมูลตอบไม่ทัน → ไม่แตะรายการที่แสดงอยู่ (กันป้าย "ยังไม่มีราคา" ผิดทั้งร้าน) · รู้ร้านแล้วก็เก็บไว้
+          setLoadError(j.error || "โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง");
+          if (j.shop) setShop((cur) => cur ?? (j.shop as ShopInfo));
+          return;
+        }
+        setLoadError(null);
         if (!j.shop && (j as { error?: string }).error) {
           // ไม่มีสิทธิ์กลุ่มสินค้าบนเว็บ → ข้อมูลร้านจากรายชื่อร้าน (เห็นเฉพาะร้านที่เข้าได้)
           const s = await apiFetch("/api/website/shops").then((r) => r.json()).catch(() => null);
@@ -119,12 +130,17 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         setCategories(Array.isArray(j.categories) ? j.categories : []);
       } catch {
         toast.error("โหลดข้อมูลไม่สำเร็จ");
+        setLoadError("โหลดข้อมูลไม่สำเร็จ — เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา");
       } finally {
         setLoading(false);
       }
     },
     [toast]
   );
+  const retryLoad = async () => {
+    setRetrying(true);
+    try { await load(shopSlug); } finally { setRetrying(false); }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -255,6 +271,20 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
           </div>
         )}
 
+        {/* ⚠️ โหลดสินค้าไม่ครบ — ยังไม่เคยโหลดได้เลย = ข้อความเต็ม · มีข้อมูลรอบก่อนอยู่ = แถบเตือน + ลองใหม่ */}
+        {loadError && !loading && (!shop || (tab === "listings" && listings.length === 0)) && (
+          <ErrorState title="โหลดข้อมูลสินค้าไม่ครบ" hint={loadError} onRetry={() => void retryLoad()} retrying={retrying} />
+        )}
+        {loadError && !loading && shop && !(tab === "listings" && listings.length === 0) && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert" data-website-load-error>
+            <span className="flex-1 min-w-[200px]">⚠️ {loadError} · รายการสินค้าที่เห็นเป็นข้อมูลรอบก่อน อาจไม่ใช่ล่าสุด</span>
+            <button type="button" onClick={() => void retryLoad()} disabled={retrying}
+              className="shrink-0 rounded-md bg-rose-600 px-3 py-1 font-medium text-white hover:bg-rose-700 disabled:opacity-50">
+              {retrying ? "กำลังลองใหม่..." : "↻ ลองใหม่"}
+            </button>
+          </div>
+        )}
+
         {/* ⚠️ ยังไม่บันทึก → ถามก่อนสลับแท็บ (แต่ละแท็บแจ้งผ่าน SaveBar / useReportUnsaved) */}
         <ConfirmDialog
           open={!!pendingTab}
@@ -272,7 +302,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {/* 🖼 รายชื่อชุดรูปของร้าน → ช่องรูปทุกช่องในหน้านี้มีปุ่ม "🔗 ใช้ชุดรูป" */}
         <ImageSetsProvider shopSlug={shop?.slug ?? ""}>
         {/* แท็บสินค้าบนเว็บ (ตัวกรอง/ค้นหา/ทำหลายรายการ/ลากเรียง/แก้ด่วน) */}
-        {tab === "listings" && shop && (
+        {tab === "listings" && shop && !(loadError && !loading && listings.length === 0) && (
           <WebsiteListingsPanel
             shop={shop}
             listings={listings}

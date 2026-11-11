@@ -87,6 +87,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         loadWebListings<Listing>(shopSlug, true),
       ]);
       if (!fm?.fieldMap) throw new Error(fm?.error || "โหลดหมวดไม่สำเร็จ");
+      if ((ls as { retryable?: boolean })?.retryable) throw new Error(ls?.error || "โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง");
       setFieldMap(fm.fieldMap);
       const list = (fm.fieldMap.categories ?? []) as WebCategoryDef[];
       setCats(list);

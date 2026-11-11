@@ -39,7 +39,7 @@ import { sanitizeBulkPatch } from "@/lib/website-listing-fields";
 import { computeListingDisplay } from "@/lib/website-listing-display";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { readFitCheckShops } from "@/lib/website-site-info";
-import { fetchAllPages } from "@/lib/fetch-all";
+import { fetchAllPages, FetchAllError } from "@/lib/fetch-all";
 import { syncStoreListingUsages } from "@/lib/store-listing-usage";
 
 export const dynamic = "force-dynamic";
@@ -77,11 +77,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const sb = supabaseAdmin();
 
-  const { data: shopsData } = await sb
+  // ⚠️ ฐานข้อมูลช้า/ตอบไม่ทัน → ตอบ "โหลดไม่ครบ ลองใหม่" (503) — ห้ามส่งข้อมูลครึ่ง ๆ กลาง ๆ
+  //    (เดิม SKU ลูกดึงไม่ได้ = หน้าจอขึ้น "ยังไม่มีราคา" ทั้งร้าน + ป้ายเตือนรูปรายสีหาย ทั้งที่ข้อมูลครบ)
+  const dbBusy = (failed: string, extra: Record<string, unknown> = {}) =>
+    NextResponse.json(
+      { error: "ฐานข้อมูลตอบช้า โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง", retryable: true, failed, ...extra },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+
+  const { data: shopsData, error: shopsErr } = await sb
     .from("shops")
     .select("id, name, slug, is_default, status, field_map")
     .order("is_default", { ascending: false })
     .order("name");
+  if (shopsErr) return dbBusy("shops");
   const shops = (shopsData ?? []) as {
     id: string;
     name: string;
@@ -113,12 +122,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
 
   // สินค้าที่อยู่บนเว็บของร้านนี้
-  const { data: listData } = await sb
+  const { data: listData, error: listErr } = await sb
     .from("store_listings")
     .select("*")
     .eq("shop_id", shop.id)
     .order("sort_order")
     .order("created_at");
+  // ข้อมูลร้านที่ส่งไปพร้อมคำตอบ "โหลดไม่ครบ" (หน้าจอยังรู้ว่าอยู่ร้านไหน)
+  const busyShop = {
+    shops: shops.map((s) => ({ id: s.id, name: s.name, slug: s.slug, isDefault: s.is_default })),
+    shop: { id: shop.id, name: shop.name, slug: shop.slug, isDefault: shop.is_default, siteUrl: null as string | null },
+  };
+  if (listErr) return dbBusy("store_listings", busyShop);
   const rows = (listData ?? []) as Record<string, unknown>[];
 
   const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
@@ -129,10 +144,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const kidsByParent = new Map<string, ChildSku[]>();
   const catName = new Map<string, string>();
   // 🎨 ทะเบียนสีกลาง (จุดสีของแต่ละตัวเลือก — ตัวเดียวกับเว็บจริง) + 🌐 โดเมนร้าน (ลิงก์ดูหน้าเว็บ)
-  const [{ data: swatchRows }, siteUrls] = await Promise.all([
+  const [{ data: swatchRows, error: swatchErr }, siteUrls] = await Promise.all([
     sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
     loadShopSiteUrls(sb, [shop.id]),
   ]);
+  if (swatchErr) return dbBusy("erp_color_dictionary", busyShop);   // ไม่มีทะเบียนสี = ขึ้น "สียังไม่ผูกทะเบียนสี" ผิดทั้งร้าน
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const siteUrl = siteUrls.get(shop.id) ?? null;
   const fitCheck = (await readFitCheckShops(sb)).has(shop.id);
@@ -140,12 +156,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   if (parentIds.length) {
     // SKU ลูกทั้งร้านเกิน 1,000 ได้ (Louis Montini ~1,800) → ไล่ดึงทีละหน้า ไม่งั้นบางรุ่นสีหาย
-    const [{ data: parents }, { data: mapParents }, children] = await Promise.all([
+    const [{ data: parents, error: parentsErr }, { data: mapParents, error: mapParentsErr }, children] = await Promise.all([
       sb.from("parent_skus_v2").select(PARENT_COLS).in("id", parentIds),
       sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
+      // strict: ดึง SKU ลูกไม่ครบ = ราคา/สี/ป้ายเตือนผิดทั้งร้าน → ลองซ้ำแล้วยังไม่ได้ให้ตอบ "โหลดไม่ครบ"
       fetchAllPages<ChildSku & { parent_sku_id: string }>((from, to) =>
-        sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true).order("code").order("id").range(from, to)),
+        sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true).order("code").order("id").range(from, to),
+        { strict: true })
+        .catch((e) => (e instanceof FetchAllError ? null : Promise.reject(e))),
     ]);
+    if (parentsErr || mapParentsErr || !children) return dbBusy(!children ? "skus_v2" : "parent_skus_v2", { ...busyShop, categories: fieldMap.categories });
     for (const p of (parents ?? []) as ParentRow[]) parentById.set(p.id, p);
     if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (mapParents ?? []) as MapParentRow[]);
     for (const p of (mapParents ?? []) as MapParentRow[]) mapParentById.set(p.id, p);
