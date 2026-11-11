@@ -33,8 +33,18 @@ describe("อ่านตัวเลือกจากร้าน", () => {
     const vs = shopVariantsOf("lazada", { lazada: { skus: [{ seller_sku: "PIN-6-GD", sku_id: "111", label: "สี: Gold" }] } });
     expect(vs[0]).toMatchObject({ sku: "PIN-6-GD", label: "สี: Gold" });
   });
-  it("Shopee (ไฟล์ export) = ไม่มีข้อมูลตัวเลือก", () => {
+  it("Shopee ไฟล์ข้อมูลพื้นฐาน (basic_info) = ไม่มีข้อมูลตัวเลือก", () => {
     expect(shopVariantsOf("shopee", { basic_info: { name: "x" } })).toEqual([]);
+  });
+  it("Shopee ไฟล์ราคา/สต๊อก (sales_info) = ราคาต่อตัวเลือก (ไม่มีราคาลด)", () => {
+    const vs = shopVariantsOf("shopee", { sales_info: { variations: [
+      { sku: "WK46-01", name: "ดำ", external_variation_id: "v1", price: 729, stock: 12 },
+      { sku: null, name: null, price: "699", stock: null },
+    ] } });
+    expect(vs).toEqual([
+      { key: "v1", sku: "WK46-01", label: "ดำ", price: 729, sale_price: null, stock: 12, image: null },
+      { key: "#2", sku: null, label: "ตัวเลือก 2", price: 699, sale_price: null, stock: null, image: null },
+    ]);
   });
 });
 

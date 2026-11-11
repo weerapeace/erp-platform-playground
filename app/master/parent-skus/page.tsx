@@ -15,7 +15,7 @@
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
-import { parentSkuExtraTabs, parentSkuPngSlots } from "@/components/master-crud/parent-sku-extra-tabs";
+import { parentSkuExtraTabs, parentSkuPngSlots, parentSkuToolbarExtra } from "@/components/master-crud/parent-sku-extra-tabs";
 import { useAuth } from "@/components/auth";
 import { AddToPlanModal, type PlanSource } from "@/components/team-plan/add-to-plan";
 import { apiFetch } from "@/lib/api";
@@ -90,6 +90,7 @@ const CONFIG: MasterCRUDConfig = {
   aiProductDetail: true,
   copyFromRecord: true,   // 📋 คัดลอกค่าทั้งกลุ่ม (เช่น รายละเอียด Platform) จากสินค้าตัวอื่น
   copyFromRecordToolbar: true,   // 📋 "คัดลอกจากรุ่นอื่น" บนแถบเครื่องมือ — ทุกกลุ่ม + ตารางเทียบ ติ๊กเลือกได้
+  toolbarExtra: parentSkuToolbarExtra(),   // ป้าย "ต้องแก้ N อย่าง" (กดแล้วพาไปแท็บที่ต้องแก้)
   // server mode — โหลดทีละหน้า (smooth + กัน 1102) เหมือนหน้า SKU; card view เปิดได้ใน server mode แล้ว
   serverMode:  true,
   pageLimit:   200,

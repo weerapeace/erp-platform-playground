@@ -52,3 +52,33 @@ export function parsePriceTabPrefs(raw: unknown): { hiddenCost: CostColumnKey[];
   const hidden = Array.isArray(r.hiddenCost) ? r.hiddenCost.filter((k): k is CostColumnKey => typeof k === "string" && keys.has(k)) : [];
   return { hiddenCost: hidden, warn: r.warn !== false };
 }
+
+// ───────── ค่าธรรมเนียมร้าน + กำไรจริงต่อร้าน (เจ้าของขอ 2026-11-11 "กำไรจริงต่อร้าน หักค่าธรรมเนียม") ─────────
+/** เก็บใน ui_config key นี้ (แก้ได้คนมีสิทธิ์ products.edit · มี audit ที่ /api/ui-config) */
+export const FEE_RATES_KEY = "platform_fee_rates";
+/** ค่าธรรมเนียมต่อร้าน: pct = % ของราคาที่ลูกค้าจ่าย (รวมค่าคอม+ค่าธุรกรรม+โปรแกรมส่งฟรี ฯลฯ) · fixed = บาท/ชิ้น */
+export type FeeRate = { pct: number; fixed: number };
+export type FeeRates = Record<string, FeeRate>;   // key = รหัสแพลตฟอร์ม (shopee/lazada/line_shopping/website …)
+
+export function parseFeeRates(raw: unknown): FeeRates {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).rates : null;
+  const out: FeeRates = {};
+  if (!r || typeof r !== "object" || Array.isArray(r)) return out;
+  for (const [code, v] of Object.entries(r as Record<string, unknown>)) {
+    if (!v || typeof v !== "object") continue;
+    const pct = Number((v as Record<string, unknown>).pct); const fixed = Number((v as Record<string, unknown>).fixed);
+    const p = Number.isFinite(pct) && pct >= 0 && pct < 100 ? pct : 0;
+    const f = Number.isFinite(fixed) && fixed >= 0 ? fixed : 0;
+    if (p > 0 || f > 0) out[code] = { pct: p, fixed: f };
+  }
+  return out;
+}
+
+/** กำไรจริงต่อชิ้นบนร้าน = ราคาที่ลูกค้าจ่าย − ค่าธรรมเนียม (pct% + บาท/ชิ้น) − ต้นทุน/ชิ้น */
+export function netProfit(pay: number | null | undefined, costPP: number, fee: FeeRate | null | undefined): { fee: number; net: number; marginPct: number } | null {
+  if (pay == null || !Number.isFinite(Number(pay))) return null;
+  const p = Number(pay);
+  const f = fee ? Math.round((p * fee.pct / 100 + fee.fixed) * 100) / 100 : 0;
+  const net = Math.round((p - f - costPP) * 100) / 100;
+  return { fee: f, net, marginPct: p > 0 ? Math.round((net / p) * 1000) / 10 : 0 };
+}

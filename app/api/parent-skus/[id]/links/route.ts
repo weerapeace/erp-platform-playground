@@ -25,9 +25,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!parent) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
   const skuRows = (skus ?? []) as { id: string; code: string }[];
 
+  // ?only=assets,... = โหลดเฉพาะแหล่งนั้น (ปุ่ม "ค้น…" ของแหล่งช้า) · ไม่ส่ง = ทุกแหล่ง (แหล่งช้าคืนเป็นปุ่ม)
+  const only = (new URL(request.url).searchParams.get("only") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
   const out = await loadParentLinks(a, {
     parentId: id, parentCode: String((parent as { code?: string }).code ?? ""),
     skuIds: skuRows.map((s) => s.id), skuCodes: skuRows.map((s) => s.code).filter(Boolean),
-  });
+  }, { only });
   return NextResponse.json({ ...out, error: null }, { headers: { "Cache-Control": "no-store" } });
 }

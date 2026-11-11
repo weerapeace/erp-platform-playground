@@ -28,7 +28,7 @@ export type ShopVariant = {
   image: string | null;
 };
 
-/** อ่านตัวเลือกจาก raw — LINE (raw.line.variants) · Lazada (raw.lazada.skus) · ร้านอื่น/ไฟล์ export = [] */
+/** อ่านตัวเลือกจาก raw — LINE (raw.line.variants) · Lazada (raw.lazada.skus) · Shopee ไฟล์ราคา/สต๊อก (raw.sales_info.variations) · อื่น ๆ = [] */
 export function shopVariantsOf(platformCode: string, raw: unknown): ShopVariant[] {
   const r = obj(raw) ?? {};
   if (platformCode === "line_shopping") {
@@ -52,6 +52,18 @@ export function shopVariantsOf(platformCode: string, raw: unknown): ShopVariant[
         key: str(v.sku_id) ?? `#${i + 1}`, sku, label: str(v.label) ?? sku ?? `ตัวเลือก ${i + 1}`,
         price, sale_price: sale != null && sale > 0 && (price == null || sale < price) ? sale : null,
         stock: num(v.available) ?? num(v.quantity), image: null,
+      };
+    });
+  }
+  if (platformCode === "shopee") {
+    // ไฟล์ "ราคา/สต๊อก" (mass_update_sales_info) ที่นำเข้าหน้าสินค้าบนแพลตฟอร์ม → raw.sales_info.variations
+    //   (lib/platform-import-profiles · โปรไฟล์ shopee_sales_info) · ไฟล์ไม่มีราคาโปรโมชัน = ราคาปกติอย่างเดียว
+    //   ยังไม่ต่อ Shopee API — อัปไฟล์ใหม่ = ราคาอัปเดต
+    return arr(obj(r.sales_info)?.variations).map(obj).filter((v): v is Obj => !!v).map((v, i) => {
+      const sku = str(v.sku);
+      return {
+        key: str(v.external_variation_id) ?? `#${i + 1}`, sku, label: str(v.name) ?? sku ?? `ตัวเลือก ${i + 1}`,
+        price: num(v.price), sale_price: null, stock: num(v.stock), image: null,
       };
     });
   }

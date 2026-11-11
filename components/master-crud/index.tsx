@@ -46,7 +46,7 @@ import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
-import { parentSkuExtraTabs, parentSkuPngSlots } from "./parent-sku-extra-tabs";
+import { parentSkuExtraTabs, parentSkuPngSlots, parentSkuToolbarExtra } from "./parent-sku-extra-tabs";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import { formatAmount, currencyLabel } from "@/lib/money";
@@ -641,6 +641,12 @@ export type MasterCRUDConfig = {
    * กดได้ทั้งโหมดดู (เติมแล้วสลับเป็นโหมดแก้ให้) และโหมดแก้ · ยังไม่บันทึกจนกดบันทึก (เจ้าของขอ 2026-11-11)
    */
   copyFromRecordToolbar?: boolean;
+  /**
+   * ของเสริมท้ายแถบเครื่องมือของลิ้นชัก (ชิดขวา) เช่น ป้าย "ต้องแก้ N อย่าง" ของ Parent SKU
+   *   goto({ tab }) = ไปแท็บพิเศษ · goto({ field }) = ไปแท็บที่มีช่องนี้ (หาจาก layout) · คืน false = หาแท็บไม่เจอ
+   *   version = updated_at ของระเบียน (เปลี่ยนเมื่อบันทึก → ของเสริมโหลดใหม่ได้)
+   */
+  toolbarExtra?: (ctx: { recordId: string; version: string; goto: (t: { tab?: string; field?: string }) => boolean }) => React.ReactNode;
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -2488,6 +2494,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
    *   1) "📋 คัดลอกจากตัวอื่น" (config.copyFromRecord) — คัดลอกเฉพาะช่องที่แก้ได้ในกลุ่มนั้น (ยังไม่บันทึก)
    *   2) ปุ่มเฉพาะโมดูลจาก config.sectionActions[group_key] เช่น "บันทึกการจ่าย"
    */
+  // ไปแท็บของฟอร์ม/หน้าดู (ใช้กับป้าย "ต้องแก้" ฯลฯ) — field → แท็บที่มีกลุ่มของช่องนั้นใน layout
+  const gotoTab = (t: { tab?: string; field?: string }): boolean => {
+    let key = t.tab ?? null;
+    if (!key && t.field) {
+      const g = fieldByKey.get(t.field)?.groupKey ?? "other";
+      key = registryLayout?.tabs?.find((tb) => tb.sections.some((sec) => sec.key === g))?.key ?? null;
+    }
+    if (!key) return false;
+    gotoFormTab(config.moduleKey ?? config.tableId ?? null, key);
+    return true;
+  };
+
   const sectionAction = (config.copyFromRecord || config.sectionActions)
     ? (groupKey: string, groupLabel: string, groupFields: FieldDef[]) => {
       const custom = config.sectionActions?.[groupKey]?.({
@@ -3208,7 +3226,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               .map(({ f, g }) => ({ key: f.key, label: f.label, group: secs.find((s) => s.key === g)?.label ?? getGroupConfig(g).label }));
           })() : [];
           const copyAllBtn = copyFields.length > 0;
-          if (pairFields.length === 0 && !aiBtn && !modeBtn && !copyAllBtn) return null;
+          const extraEl = config.toolbarExtra && editingId ? config.toolbarExtra({ recordId: String(editingId), version: String(form.updated_at ?? ""), goto: gotoTab }) : null;
+          if (pairFields.length === 0 && !aiBtn && !modeBtn && !copyAllBtn && !extraEl) return null;
           const canTranslate = pairFields.some((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_translate !== false);
           // แถบเครื่องมือ: จัดเป็นกลุ่ม กรอบเส้นสี (เจ้าของขอ 2026-11-11 "เป็นเส้นสี จัดกลุ่มสวยๆ")
           //   ภาษา (คราม) · เนื้อหา = โหมดลงรายละเอียด + AI + คัดลอกจากรุ่นอื่น (ม่วง) · แปล (ฟ้า) — ปุ่มในกลุ่มเป็นแบบโปร่ง ไม่มีพื้นสี
@@ -3277,6 +3296,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 </div>
               )}
               {pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
+              {extraEl && <span className="ml-auto">{extraEl}</span>}
             </div>
           );
         })()}
@@ -3943,6 +3963,7 @@ export function MasterRecordDrawer({
       aiProductDetail: moduleKey === "parent-skus-v2",
       // 📋 "คัดลอกจากรุ่นอื่น" บนแถบเครื่องมือ (ทุกกลุ่ม + ตารางเทียบ) — Parent SKU (ต้องตั้งที่นี่ด้วยเหมือน aiProductDetail)
       copyFromRecordToolbar: moduleKey === "parent-skus-v2",
+      toolbarExtra: moduleKey === "parent-skus-v2" ? parentSkuToolbarExtra() : undefined,
       // 📋 "คัดลอกจากตัวอื่น" รายกลุ่มฟิลด์ — เปิดให้ทุกโมดูลที่เปิดผ่าน drawer (ยังไม่บันทึกจนกด "บันทึก")
       copyFromRecord: true,
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
@@ -4243,6 +4264,17 @@ function LayoutTabs({
   const shownOrdered = ordered.filter((o) => shownKeys.includes(o.t.key));
   const orderedKeys = shownOrdered.map((o) => o.t.key);
   const [active, setActive] = useState<string>(orderedKeys[0] ?? "");
+  // ฟังคำสั่ง "ไปแท็บ" (gotoFormTab) — แท็บที่ฉันซ่อนไว้ = เปิดกลับให้ด้วย
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ scope: string | null; key: string }>).detail;
+      if (!d || d.scope !== prefScope || !allKeys.includes(d.key)) return;
+      if (hiddenMine.includes(d.key)) setHiddenMine(hiddenMine.filter((k) => k !== d.key));
+      setActive(d.key);
+    };
+    window.addEventListener(GOTO_TAB_EVENT, on);
+    return () => window.removeEventListener(GOTO_TAB_EVENT, on);
+  }, [prefScope, allKeys.join("|"), hiddenMine.join("|")]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (orderedKeys.length > 0 && !orderedKeys.includes(active)) setActive(orderedKeys[0]);
   }, [orderedKeys.join("|"), active]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -4352,6 +4384,11 @@ function isCopyableField(f: FieldDef): boolean {
 // ขอบเขตของค่า "แท็บที่ฉันซ่อน" (= moduleKey/tableId ของ MasterCRUD) — LayoutTabs อ่านผ่าน context ไม่ต้องส่ง prop ผ่าน Form/DetailSections
 //   ไม่มี Provider (ใช้ LayoutTabs นอก MasterCRUD) = ไม่มีปุ่มเลือกแท็บ
 const TabPrefScope = createContext<string | null>(null);
+/** สั่งลิ้นชัก/ฟอร์มกลางของโมดูล scope ให้เปิดแท็บ key (LayoutTabs ฟังอยู่) */
+const GOTO_TAB_EVENT = "erp:goto-tab";
+export function gotoFormTab(scope: string | null, key: string): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(GOTO_TAB_EVENT, { detail: { scope, key } }));
+}
 // แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
 type BoundTab ={ key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string; after?: string };
 // แท็บว่างใน layout ที่จำตำแหน่ง/ซ่อน ของแท็บพิเศษ (ตั้งในตัวออกแบบหน้า) — key "x:<key>"

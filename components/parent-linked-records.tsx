@@ -42,6 +42,7 @@ export function ParentLinkedRecords({ parentId }: { parentId: string }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [openListing, setOpenListing] = useState<string | null>(null);
   const [openMo, setOpenMo] = useState<string | null>(null);
+  const [lazyBusy, setLazyBusy] = useState<string | null>(null);   // แหล่งช้าที่กำลังกดค้น
 
   const load = useCallback(async () => {
     setErr("");
@@ -53,6 +54,18 @@ export function ParentLinkedRecords({ parentId }: { parentId: string }) {
     } catch (e) { setErr(e instanceof Error ? e.message : "โหลดรายการที่เชื่อมไม่สำเร็จ"); }
   }, [parentId]);
   useEffect(() => { void load(); }, [load]);
+
+  // แหล่งค้นช้า (lazy) — กดแล้วค่อยโหลดแหล่งนั้น แล้วแทนที่ในรายการ
+  const loadLazy = async (key: string) => {
+    setLazyBusy(key);
+    try {
+      const r = await apiFetch(`/api/parent-skus/${encodeURIComponent(parentId)}/links?only=${encodeURIComponent(key)}`);
+      const j = await r.json();
+      const got = ((j.sources ?? []) as ParentLinkResult[]).find((x) => x.key === key);
+      if (got) setData((d) => d ? { ...d, sources: d.sources.map((x) => (x.key === key ? got : x)) } : d);
+    } catch { /* ปุ่มยังอยู่ กดใหม่ได้ */ } finally { setLazyBusy(null); }
+  };
+  const lazySources = (data?.sources ?? []).filter((s) => s.lazy);
 
   const withItems = useMemo(() => (data?.sources ?? []).filter((s) => s.total > 0 || s.error), [data]);
   const groupCount = useMemo(() => {
@@ -152,6 +165,17 @@ export function ParentLinkedRecords({ parentId }: { parentId: string }) {
                 );
               })}
             </section>
+          ))}
+        </div>
+      )}
+      {lazySources.length > 0 && (
+        <div className="px-3 pb-2 flex flex-wrap gap-1.5">
+          {lazySources.map((s) => (
+            <button key={s.key} type="button" disabled={lazyBusy === s.key} onClick={() => void loadLazy(s.key)}
+              title="ค้นช้า จึงไม่โหลดเองตอนเปิดแท็บ — กดเพื่อค้น"
+              className="h-7 px-2.5 text-xs rounded-md border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+              {lazyBusy === s.key ? "⏳ กำลังค้น…" : `🔍 ค้น${s.label}`}
+            </button>
           ))}
         </div>
       )}

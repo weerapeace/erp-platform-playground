@@ -15,12 +15,30 @@ export type ParentLinkCtx = { parentId: string; parentCode: string; skuIds: stri
 export type ParentLinkResult = {
   key: string; group: string; label: string; icon: string; thumbnails: boolean; hint: string | null; listHref: string | null;
   total: number; more: boolean; items: LinkItem[]; error: string | null;
+  /** แหล่งค้นช้า ยังไม่ได้โหลด (หน้าจอโชว์ปุ่มให้กดค้น) */
+  lazy: boolean;
 };
+
+/** เวลาสูงสุดต่อแหล่ง — แหล่งไหนช้ากว่านี้ = ตัดทิ้ง แจ้ง "ช้าเกินไป" (หน้าไม่ต้องรอทั้งก้อน) */
+export const PARENT_LINK_TIMEOUT_MS = 8000;
 
 async function idsVia(a: SupabaseClient, m: Extract<LinkMatch, { by: "via" }>, parentId: string): Promise<string[]> {
   const { data, error } = await a.from(m.table).select(m.idColumn).eq(m.parentColumn, parentId).limit(PARENT_LINK_LIMIT);
   if (error) throw new Error(error.message);
   return [...new Set(((data ?? []) as unknown as Row[]).map((r) => String(r[m.idColumn] ?? "")).filter(Boolean))];
+}
+
+/** บรรทัดเอกสารที่มี SKU ลูก → id หัวเอกสาร (ทีละ 100 รหัส · ตัดซ้ำ · สูงสุด PARENT_LINK_LIMIT×5 บรรทัด) */
+async function idsViaSku(a: SupabaseClient, m: Extract<LinkMatch, { by: "via_sku" }>, ctx: ParentLinkCtx): Promise<string[]> {
+  const keys = m.skuKind === "code" ? ctx.skuCodes : ctx.skuIds;
+  if (keys.length === 0) return [];
+  const out = new Set<string>();
+  for (let i = 0; i < keys.length; i += 100) {
+    const { data, error } = await a.from(m.table).select(m.idColumn).in(m.skuColumn, keys.slice(i, i + 100)).limit(PARENT_LINK_LIMIT * 5);
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as unknown as Row[]) { const id = String(r[m.idColumn] ?? ""); if (id) out.add(id); }
+  }
+  return [...out];
 }
 
 async function runMatch(a: SupabaseClient, src: ParentLinkSource, m: LinkMatch, ctx: ParentLinkCtx): Promise<Row[]> {
@@ -33,6 +51,7 @@ async function runMatch(a: SupabaseClient, src: ParentLinkSource, m: LinkMatch, 
     case "sku_ids": if (ctx.skuIds.length === 0) return []; q = q.in(m.column, ctx.skuIds); break;
     case "sku_codes": if (ctx.skuCodes.length === 0) return []; q = q.in(m.column, ctx.skuCodes); break;
     case "via": { const ids = await idsVia(a, m, ctx.parentId); if (ids.length === 0) return []; q = q.in("id", ids); break; }
+    case "via_sku": { const ids = await idsViaSku(a, m, ctx); if (ids.length === 0) return []; q = q.in("id", ids.slice(0, 300)); break; }
   }
   if (src.notFalse) q = q.not(src.notFalse, "is", false);
   if (src.mustBeNull) q = q.is(src.mustBeNull, null);
@@ -51,13 +70,16 @@ async function enrichAlbums(a: SupabaseClient, rows: Row[]): Promise<void> {
   for (const r of rows) if (Array.isArray(r.picked_asset_ids) && r.picked_asset_ids.length) r._cover_key = key.get(String(r.picked_asset_ids[0])) ?? null;
 }
 
-async function loadSource(a: SupabaseClient, src: ParentLinkSource, ctx: ParentLinkCtx): Promise<ParentLinkResult> {
+async function loadSource(a: SupabaseClient, src: ParentLinkSource, ctx: ParentLinkCtx, skip: boolean): Promise<ParentLinkResult> {
   const base = {
-    key: src.key, group: src.group, label: src.label, icon: src.icon, thumbnails: !!src.thumbnails, hint: src.hint ?? null,
+    key: src.key, group: src.group, label: src.label, icon: src.icon, thumbnails: !!src.thumbnails, hint: src.hint ?? null, lazy: skip,
     listHref: src.listHref?.({ parentId: ctx.parentId, parentCode: ctx.parentCode }) ?? null,
   };
+  if (skip) return { ...base, total: 0, more: false, items: [], error: null };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const parts = await Promise.all(src.match.map((m) => runMatch(a, src, m, ctx)));
+    const timeout = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("ค้นช้าเกินไป ลองใหม่อีกครั้ง")), PARENT_LINK_TIMEOUT_MS); });
+    const parts = await Promise.race([Promise.all(src.match.map((m) => runMatch(a, src, m, ctx))), timeout]);
     const seen = new Set<string>(); const rows: Row[] = [];
     for (const r of parts.flat()) { const id = String(r.id ?? ""); if (id && !seen.has(id)) { seen.add(id); rows.push(r); } }
     if (src.order) {
@@ -69,10 +91,12 @@ async function loadSource(a: SupabaseClient, src: ParentLinkSource, ctx: ParentL
     return { ...base, total: rows.length, more, items: rows.slice(0, PARENT_LINK_LIMIT).map(src.toItem), error: null };
   } catch (e) {
     return { ...base, total: 0, more: false, items: [], error: e instanceof Error ? e.message : "โหลดไม่สำเร็จ" };
-  }
+  } finally { if (timer) clearTimeout(timer); }
 }
 
-export async function loadParentLinks(a: SupabaseClient, ctx: ParentLinkCtx): Promise<{ groups: typeof LINK_GROUPS; sources: ParentLinkResult[] }> {
-  const sources = await Promise.all(PARENT_LINK_SOURCES.map((src) => loadSource(a, src, ctx)));
+/** only = โหลดเฉพาะแหล่งเหล่านี้ (ใช้กดค้นแหล่งช้า) · ไม่ส่ง = ทุกแหล่ง ยกเว้นแหล่งช้า (lazy) ที่คืนเป็นปุ่มให้กด */
+export async function loadParentLinks(a: SupabaseClient, ctx: ParentLinkCtx, opts: { only?: string[] } = {}): Promise<{ groups: typeof LINK_GROUPS; sources: ParentLinkResult[] }> {
+  const list = opts.only?.length ? PARENT_LINK_SOURCES.filter((s) => opts.only!.includes(s.key)) : PARENT_LINK_SOURCES;
+  const sources = await Promise.all(list.map((src) => loadSource(a, src, ctx, !opts.only?.length && !!src.lazy)));
   return { groups: LINK_GROUPS, sources };
 }

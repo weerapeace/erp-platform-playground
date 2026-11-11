@@ -20,12 +20,12 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { MoneyInput } from "@/components/money-input";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { PlatformIcon } from "@/components/platform-icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { DEFAULT_SCENARIO, deriveCost, normScenario } from "@/lib/cost-calc";
-import { COST_COLUMNS, parsePriceTabPrefs, pickSavedCosting, priceMismatch, type CostColumnKey, type SavedCostingLite } from "@/lib/parent-prices";
+import { COST_COLUMNS, FEE_RATES_KEY, netProfit, parseFeeRates, parsePriceTabPrefs, pickSavedCosting, priceMismatch, type CostColumnKey, type FeeRates, type SavedCostingLite } from "@/lib/parent-prices";
 import type { MoCostMaterial } from "@/app/api/mo/[id]/cost/route";
 
 const ListingDrawer = dynamic(() => import("@/components/platform-catalog/listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
@@ -57,6 +57,9 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
   const [openListing, setOpenListing] = useState<string | null>(null);
   const [priceSku, setPriceSku] = useState<Sku | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});   // ช่องที่กำลังพิมพ์ (key = skuId:field)
+  const [fees, setFees] = useState<FeeRates>({});                     // ค่าธรรมเนียมต่อร้าน (ui_config platform_fee_rates)
+  const [feeDraft, setFeeDraft] = useState<Record<string, { pct: string; fixed: string }> | null>(null);   // เปิดป๊อปตั้งค่าธรรมเนียม
+  const [feeSaving, setFeeSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -66,8 +69,33 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || `โหลดไม่สำเร็จ (${r.status})`);
       setData(j as Data);
+      // ค่าธรรมเนียมร้าน (อ่านพลาด = ถือว่ายังไม่ตั้ง ไม่ทำให้แท็บพัง)
+      apiFetch(`/api/ui-config?key=${FEE_RATES_KEY}`).then((x) => x.json()).then((x) => setFees(parseFeeRates(x.value))).catch(() => {});
     } catch (e) { setErr(e instanceof Error ? e.message : "โหลดราคาไม่สำเร็จ"); }
   }, [parentId]);
+
+  // ร้านที่ต้องตั้งค่าธรรมเนียม = แพลตฟอร์มที่รุ่นนี้ลงอยู่ + เว็บร้าน
+  const feePlatforms = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const sh of data?.shops ?? []) if (sh.platform_code) m.set(sh.platform_code, sh.platform_name);
+    if ((data?.web ?? []).length) m.set("website", "เว็บร้าน");
+    return [...m.entries()].map(([code, name]) => ({ code, name }));
+  }, [data]);
+  const saveFees = async () => {
+    if (!feeDraft) return;
+    setFeeSaving(true);
+    try {
+      const rates: Record<string, { pct: number; fixed: number }> = {};
+      for (const [code, v] of Object.entries(fees)) rates[code] = v;           // คงค่าของร้านอื่นที่ไม่ได้โชว์ในรุ่นนี้
+      for (const [code, v] of Object.entries(feeDraft)) rates[code] = { pct: Number(v.pct) || 0, fixed: Number(v.fixed) || 0 };
+      const r = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: FEE_RATES_KEY, value: { rates } }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || `บันทึกไม่สำเร็จ (${r.status})`);
+      setFees(parseFeeRates({ rates }));
+      setFeeDraft(null);
+      toast.success("บันทึกค่าธรรมเนียมร้านแล้ว — ใช้กับทุกสินค้า");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setFeeSaving(false); }
+  };
   useEffect(() => { void load(); }, [load]);
 
   // บันทึกราคากลาง/ราคาเต็มทีละ SKU (ออกจากช่อง = บันทึก · ค่าไม่เปลี่ยน = ไม่ยิง)
@@ -225,6 +253,41 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
       cell: (r) => <span className="text-[11px] text-slate-400">{r.from === "sku" ? "ต้นทุนเฉพาะสี" : r.from === "parent" ? "ต้นทุนทั้งรุ่น" : r.hasBom ? "คิดจากสูตร" : r.buy ? "ราคาซื้อ" : "—"}</span> },
   ];
 
+  // 💵 กำไรจริงต่อร้าน = ราคาที่ลูกค้าจ่ายบนร้านนั้น − ค่าธรรมเนียมร้าน − ต้นทุน/ชิ้น (lib/parent-prices netProfit)
+  type NetCol = { key: string; name: string; code: string; icon: string | null; payOf: (s: Sku) => number | null };
+  const netCols: NetCol[] = [
+    ...data.web.map((w): NetCol => ({ key: `web:${w.listing_id}`, name: `เว็บ ${w.shop_name}`, code: "website", icon: null, payOf: (s) => w.web_price ?? s.list_price })),
+    ...data.shops.map((sh): NetCol => ({ key: `shop:${sh.listing_id}`, name: sh.platform_name, code: sh.platform_code, icon: sh.icon_key,
+      payOf: (s) => (sh.supported && sh.fetched ? (sh.prices[s.code]?.pay ?? null) : sh.listing_price) })),
+  ];
+  const netRows = costRows.filter((r) => r.d);
+  const netTableCols: MiniColumn<CostRow>[] = [
+    { key: "sku", header: "สี / SKU", width: "minmax(9rem,1.4fr)", cell: (r) => skuCell(r.sku) },
+    { key: "cost", header: "ต้นทุน/ชิ้น", width: "6rem", align: "right", cell: (r) => <span className="tabular-nums text-slate-600">{baht(r.d!.costPP, 2)}</span> },
+    ...netCols.map((c): MiniColumn<CostRow> => {
+      const fee = fees[c.code] ?? null;
+      return {
+        key: c.key, width: "7.5rem", align: "right",
+        header: (
+          <span className="inline-flex flex-col items-end leading-tight" title={fee ? `ค่าธรรมเนียม ${fee.pct}% + ฿${fee.fixed}/ชิ้น` : "ยังไม่ตั้งค่าธรรมเนียมร้านนี้ (คิดเป็น 0)"}>
+            <span className="inline-flex items-center gap-1">{c.code !== "website" && <PlatformIcon code={c.code} iconKey={c.icon} size={13} />}{c.name}</span>
+            <span className={`text-[10px] font-normal ${fee ? "text-slate-400" : "text-amber-600"}`}>{fee ? `หัก ${fee.pct}%${fee.fixed ? ` + ฿${fee.fixed}` : ""}` : "ยังไม่ตั้งค่าธรรมเนียม"}</span>
+          </span>
+        ),
+        cell: (r) => {
+          const res = netProfit(c.payOf(r.sku), r.d!.costPP, fee);
+          if (!res) return <span className="text-slate-300">—</span>;
+          return (
+            <span className="inline-flex flex-col items-end leading-tight" title={`จ่าย ${baht(c.payOf(r.sku), 2)} − ค่าธรรมเนียม ${baht(res.fee, 2)} − ต้นทุน ${baht(r.d!.costPP, 2)}`}>
+              <span className={`tabular-nums font-medium ${res.net < 0 ? "text-rose-600" : "text-emerald-700"}`}>{baht(res.net, 2)}</span>
+              <span className="text-[10.5px] text-slate-400 tabular-nums">{res.marginPct}%</span>
+            </span>
+          );
+        },
+      };
+    }),
+  ];
+
   return (
     <div className="space-y-3">
       {/* แถบเครื่องมือ */}
@@ -298,10 +361,46 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
               ต้นทุน = วัตถุดิบตามสูตรผลิต + ค่าแรง + ค่าอื่น ๆ ที่ตั้งไว้ · ตั้งค่าแรง/ค่าอื่น ๆ แล้วบันทึกเป็นต้นทุนมาตรฐานได้ที่{" "}
               <a href="/master/cost-calculator" target="_blank" rel="noopener noreferrer" className="text-violet-700 hover:underline">เครื่องคิดต้นทุน ↗</a>
             </p>
+            {netCols.length > 0 && netRows.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <MiniTable rows={netRows} columns={netTableCols} rowKey={(r) => r.sku.id} hideSearch dense countUnit="SKU"
+                  title={<span className="text-sm font-medium text-slate-800">💵 กำไรจริงต่อร้าน <span className="text-[11px] font-normal text-slate-400">หลังหักค่าธรรมเนียม · ต่อชิ้น</span></span>}
+                  actions={canEdit ? (
+                    <button type="button" onClick={() => setFeeDraft(Object.fromEntries(feePlatforms.map((p) => [p.code, { pct: String(fees[p.code]?.pct ?? ""), fixed: String(fees[p.code]?.fixed ?? "") }])))}
+                      className="h-7 px-2.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">⚙ ค่าธรรมเนียมร้าน</button>
+                  ) : undefined}
+                  groupBy={(r) => r.sku.color || "ไม่ระบุสี"} groupLabel="สี" defaultGrouped={groupByColor} />
+                {feePlatforms.some((p) => !fees[p.code]) && (
+                  <p className="mt-1.5 text-[11px] text-amber-600">ร้านที่ยังไม่ตั้งค่าธรรมเนียม คิดเป็น 0 — กำไรจริงจะสูงกว่าความจริง · ตั้งครั้งเดียวใช้กับทุกสินค้า</p>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
 
+      {feeDraft && (
+        <ERPModal open onClose={() => (feeSaving ? undefined : setFeeDraft(null))} size="md" title="⚙ ค่าธรรมเนียมร้าน"
+          description="ใส่ % ที่ร้านหักจากราคาที่ลูกค้าจ่าย (รวมค่าคอม ค่าธุรกรรม โปรแกรมส่งฟรี ฯลฯ) + บาทต่อชิ้นถ้ามี — ตั้งครั้งเดียว ใช้กับทุกสินค้า"
+          footer={<div className="flex justify-end gap-2 w-full">
+            <button onClick={() => setFeeDraft(null)} disabled={feeSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={() => void saveFees()} disabled={feeSaving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{feeSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+          </div>}>
+          <div className="space-y-2">
+            {feePlatforms.map((p) => (
+              <div key={p.code} className="flex items-center gap-2 text-sm">
+                <span className="flex-1 inline-flex items-center gap-1.5">{p.code !== "website" && <PlatformIcon code={p.code} size={16} />}{p.name}</span>
+                <MoneyInput value={feeDraft[p.code]?.pct ?? ""} onChange={(raw) => setFeeDraft((d) => d ? { ...d, [p.code]: { pct: raw, fixed: d[p.code]?.fixed ?? "" } } : d)}
+                  placeholder="0" className="h-8 w-20 text-right rounded-md border border-slate-200 px-2" /> <span className="text-xs text-slate-500">%</span>
+                <span className="text-xs text-slate-400">+ ฿</span>
+                <MoneyInput value={feeDraft[p.code]?.fixed ?? ""} onChange={(raw) => setFeeDraft((d) => d ? { ...d, [p.code]: { pct: d[p.code]?.pct ?? "", fixed: raw } } : d)}
+                  placeholder="0" className="h-8 w-20 text-right rounded-md border border-slate-200 px-2" /> <span className="text-xs text-slate-500">/ชิ้น</span>
+              </div>
+            ))}
+            <p className="text-[11px] text-slate-400">ดูอัตราจริงได้จากหลังร้านแต่ละแพลตฟอร์ม (ค่าธรรมเนียมการขาย/ค่าธุรกรรม) · มีประวัติว่าใครแก้</p>
+          </div>
+        </ERPModal>
+      )}
       {confirm && (
         <ConfirmDialog open onClose={() => (busy ? undefined : setConfirm(null))} onConfirm={() => void runConfirm()} loading={busy}
           title={confirm.kind === "bulk" ? "ปรับราคากลางทั้งรุ่น" : "ส่งราคากลางขึ้น LINE"}

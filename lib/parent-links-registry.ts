@@ -30,7 +30,9 @@ export type LinkMatch =
   | { by: "parent_codes"; column: string }                    // คอลัมน์ jsonb array (["WK46", ...]) ที่มีรหัส Parent อยู่
   | { by: "sku_ids"; column: string }                         // คอลัมน์เก็บ id ของ SKU ลูก
   | { by: "sku_codes"; column: string }                       // คอลัมน์เก็บรหัส SKU ลูก
-  | { by: "via"; table: string; parentColumn: string; idColumn: string };   // ตารางเชื่อม: parent id → id ของตารางหลัก
+  | { by: "via"; table: string; parentColumn: string; idColumn: string }    // ตารางเชื่อม: parent id → id ของตารางหลัก
+  /** บรรทัดเอกสารที่เก็บ SKU ลูก (รหัสหรือ id) → id หัวเอกสาร เช่น บรรทัดใบเสนอราคา.sku → quote_id */
+  | { by: "via_sku"; table: string; skuColumn: string; skuKind: "code" | "id"; idColumn: string };
 
 export type LinkOpen = { kind: "listing" | "mo"; id: string };
 export type LinkItem = {
@@ -51,6 +53,11 @@ export type ParentLinkSource = {
   notFalse?: string; mustBeNull?: string;
   /** โชว์เป็นกริดรูป (งานครีเอทีฟ/คอนเทนต์/รูปในคลัง) */
   thumbnails?: boolean;
+  /**
+   * ค้นช้า (ตารางใหญ่ไม่มีดัชนี) → ไม่โหลดตอนเปิดแท็บ · หน้าจอโชว์ปุ่ม "ค้น…" ให้กดโหลดเอง (API ?only=<key>)
+   * assets: ยังไม่มีดัชนีบน parent_sku_codes (migration 202612030300 รอเจ้าของอนุมัติ) — ใส่ดัชนีแล้วเอา lazy ออกได้
+   */
+  lazy?: boolean;
   /** บอกผู้ใช้ว่าดู/แก้ที่ไหน เมื่อแถวไม่มีลิงก์ของตัวเอง เช่น "ดูในแท็บผลิต" */
   hint?: string;
   /** ลิงก์ "ดูทั้งหมด" ของหมวดนี้ */
@@ -63,6 +70,7 @@ const join = (...xs: unknown[]) => xs.map(s).filter(Boolean).join(" · ");
 const day = (...xs: unknown[]) => { for (const x of xs) if (s(x)) return s(x).slice(0, 10); return null; };
 const firstOf = (v: unknown) => (Array.isArray(v) && v.length ? s(v[0]) || null : null);
 const isHttp = (v: unknown) => /^https?:\/\//i.test(s(v));
+const money = (v: unknown) => (v == null || v === "" ? null : `฿${(Number(v) || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`);
 
 export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
   // ── งานครีเอทีฟ / คอนเทนต์ (มีรูป) ──
@@ -100,7 +108,7 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
       image: { key: s(r._cover_key) || null }, href: `/master/assets?source=contents&album=${encodeURIComponent(s(r.id))}` }),
   },
   {
-    key: "assets", group: "creative", label: "ไฟล์ในคลังรูป", icon: "🗃", thumbnails: true,
+    key: "assets", group: "creative", label: "ไฟล์ในคลังรูป", icon: "🗃", thumbnails: true, lazy: true,
     table: "assets", select: "id, title, file_name, r2_key, status, created_at",
     match: [{ by: "parent_codes", column: "parent_sku_codes" }],
     order: { column: "created_at", ascending: false },
@@ -195,6 +203,40 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
       sub: join(r.sku_code, `${Number(r.qty) || 0} × ฿${(Number(r.price) || 0).toLocaleString("th-TH")}`) }),
   },
 
+  // ── เอกสารขาย (ผูกผ่านบรรทัดที่มี SKU ลูก) ──
+  {
+    key: "quotations", group: "sales", label: "ใบเสนอราคา", icon: "📄",
+    table: "erp_playground_quotations", select: "id, quote_number, status, customer_name, grand_total, quote_date, updated_at",
+    match: [{ by: "via_sku", table: "erp_playground_quote_lines", skuColumn: "sku", skuKind: "code", idColumn: "quote_id" }],
+    order: { column: "quote_date", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.quote_number, r.customer_name) || "(ไม่มีเลข)", sub: money(r.grand_total),
+      status: s(r.status) || null, date: day(r.quote_date, r.updated_at), href: `/quotations?open=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "sales_orders", group: "sales", label: "ใบสั่งขาย", icon: "🧾",
+    table: "erp_playground_sales_orders", select: "id, so_number, status, customer_name, grand_total, order_date, updated_at",
+    match: [{ by: "via_sku", table: "erp_playground_so_lines", skuColumn: "sku", skuKind: "code", idColumn: "so_id" }],
+    order: { column: "order_date", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.so_number, r.customer_name) || "(ไม่มีเลข)", sub: money(r.grand_total),
+      status: s(r.status) || null, date: day(r.order_date, r.updated_at), href: `/sales-orders?open=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "so_orders", group: "sales", label: "ใบสั่งขาย (ระบบใหม่)", icon: "🧾",
+    table: "so_orders", select: "id, order_no, status, customer_name, grand_total, order_date, cancelled_at, updated_at",
+    match: [{ by: "via_sku", table: "so_order_lines", skuColumn: "sku", skuKind: "code", idColumn: "order_id" }],
+    order: { column: "order_date", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.order_no, r.customer_name) || "(ไม่มีเลข)", sub: money(r.grand_total),
+      status: s(r.cancelled_at) ? "cancelled" : s(r.status) || null, date: day(r.order_date, r.updated_at), href: `/sales/orders?open=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "delivery_notes", group: "sales", label: "ใบส่งของ", icon: "🚚",
+    table: "erp_playground_delivery_notes", select: "id, dn_number, status, customer_name, delivery_date, updated_at",
+    match: [{ by: "via_sku", table: "erp_playground_delivery_note_lines", skuColumn: "sku", skuKind: "code", idColumn: "delivery_note_id" }],
+    order: { column: "delivery_date", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.dn_number, r.customer_name) || "(ไม่มีเลข)", status: s(r.status) || null,
+      date: day(r.delivery_date, r.updated_at), href: `/delivery-notes?id=${encodeURIComponent(s(r.id))}` }),
+  },
+
   // ── เว็บร้าน ──
   {
     key: "store_listings", group: "web", label: "ลงขายบนเว็บร้าน", icon: "🛍", thumbnails: true,
@@ -240,6 +282,24 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
 
   // ── จัดซื้อ ──
   {
+    key: "purchase_orders", group: "purchase", label: "ใบสั่งซื้อ (PO)", icon: "🛒",
+    table: "purchase_orders_v2", select: "id, po_no, status, order_date, grand_total, is_active, updated_at",
+    match: [{ by: "via_sku", table: "purchase_order_lines_v2", skuColumn: "item_sku_id", skuKind: "id", idColumn: "po_id" }],
+    order: { column: "order_date", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: s(r.po_no) || "(ไม่มีเลข)", sub: money(r.grand_total),
+      status: r.is_active === false ? "cancelled" : s(r.status) || null, date: day(r.order_date, r.updated_at),
+      href: `/purchasing/po-list?open=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "purchase_requests", group: "purchase", label: "ใบขอซื้อ (สินค้านี้ / ซื้อเพื่อผลิตสินค้านี้)", icon: "📝", notFalse: "is_active",
+    table: "purchase_requests_v2", select: "id, pr_no, status, order_date, needed_date, source_mo_no, updated_at",
+    match: [{ by: "sku_ids", column: "item_sku_id" }, { by: "sku_ids", column: "used_for_sku_id" }],
+    order: { column: "updated_at", ascending: false },
+    listHref: () => "/purchasing",
+    toItem: (r) => ({ id: s(r.id), title: s(r.pr_no) || "(ไม่มีเลข)", sub: s(r.source_mo_no) ? `จากใบสั่งผลิต ${s(r.source_mo_no)}` : null,
+      status: s(r.status) || null, date: day(r.order_date, r.needed_date, r.updated_at) }),
+  },
+  {
     key: "taobao_products", group: "purchase", label: "สินค้าจาก Taobao", icon: "🛒", thumbnails: true,
     table: "taobao_products", select: "id, translated_name, original_name, image_url, taobao_url, status, created_at",
     match: [{ by: "parent_id", column: "matched_parent_sku_id" }, { by: "sku_ids", column: "matched_sku_id" }],
@@ -263,7 +323,7 @@ export function registeredLinkTables(): Set<string> {
   const out = new Set<string>();
   for (const src of PARENT_LINK_SOURCES) {
     out.add(src.table);
-    for (const m of src.match) if (m.by === "via") out.add(m.table);
+    for (const m of src.match) if (m.by === "via" || m.by === "via_sku") out.add(m.table);
   }
   return out;
 }

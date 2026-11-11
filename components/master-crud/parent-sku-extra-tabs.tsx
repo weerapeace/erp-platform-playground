@@ -41,6 +41,13 @@ const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-t
 const ParentProductionTab = dynamic(() => import("@/components/parent-production-tab").then((m) => m.ParentProductionTab), { ssr: false });
 // แท็บ "ราคา" (ใหม่ 2026-11-11): ราคากลาง/เต็ม/เว็บ/ทุกร้าน + ต้นทุน/กำไร (เฉพาะคนมีสิทธิ์ต้นทุน)
 const ParentPriceTab = dynamic(() => import("@/components/parent-price-tab").then((m) => m.ParentPriceTab), { ssr: false });
+// ป้าย "ต้องแก้ N อย่าง" ท้ายแถบเครื่องมือ (ใหม่ 2026-11-11) — กฎ lib/parent-health
+const ParentHealthBadge = dynamic(() => import("@/components/parent-health-badge").then((m) => m.ParentHealthBadge), { ssr: false });
+
+/** ของเสริมท้ายแถบเครื่องมือของ Parent SKU (ชุดกลาง — หน้า /master/parent-skus + MasterRecordDrawer) */
+export function parentSkuToolbarExtra(): NonNullable<MasterCRUDConfig["toolbarExtra"]> {
+  return ({ recordId, version, goto }) => <ParentHealthBadge parentId={recordId} version={version} goto={goto} />;
+}
 
 export function parentSkuExtraTabs(): NonNullable<MasterCRUDConfig["extraTabs"]> {
   return [

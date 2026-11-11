@@ -46,3 +46,18 @@ describe("cost-inputs (ต้นทุนวัตถุดิบจาก BOM �
     expect(r.materials[1]).toMatchObject({ sku: "B", line_pp: 5.85, has_price: true });
   });
 });
+
+describe("ค่าธรรมเนียมร้าน + กำไรจริง", () => {
+  it("อ่านค่าธรรมเนียม: ตัดค่าผิด/ศูนย์ทิ้ง", async () => {
+    const { parseFeeRates } = await import("@/lib/parent-prices");
+    expect(parseFeeRates({ rates: { shopee: { pct: 12.5, fixed: 0 }, lazada: { pct: "10", fixed: "3" }, line_shopping: { pct: 0, fixed: 0 }, bad: { pct: 150, fixed: -1 } } }))
+      .toEqual({ shopee: { pct: 12.5, fixed: 0 }, lazada: { pct: 10, fixed: 3 } });
+    expect(parseFeeRates(null)).toEqual({});
+  });
+  it("กำไรจริง = จ่าย − ค่าธรรมเนียม − ต้นทุน", async () => {
+    const { netProfit } = await import("@/lib/parent-prices");
+    expect(netProfit(729, 108.46, { pct: 12, fixed: 5 })).toEqual({ fee: 92.48, net: 528.06, marginPct: 72.4 });
+    expect(netProfit(729, 108.46, null)).toEqual({ fee: 0, net: 620.54, marginPct: 85.1 });
+    expect(netProfit(null, 10, null)).toBeNull();
+  });
+});
