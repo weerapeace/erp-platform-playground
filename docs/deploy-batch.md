@@ -16,7 +16,9 @@ session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไ�
 
 - Vercel ตั้ง **Production Branch = `prod`** (เจ้าของเปลี่ยนเองใน dashboard 2026-11-11)
 - รอบเริ่มนับตอนงานแรกที่ยังไม่ขึ้นเว็บถูก push · งานที่ตามมาระหว่างรอ = เข้ารอบเดียวกัน (concurrency รันทีละตัว + รอคิว 1 ตัว)
-- ⚠️ **ไม่ใช้ตัวตั้งเวลา (schedule) ของ GitHub** — 2026-11-11 เปิดแล้วรอ 1.5 ชม. ไม่ยิงสักครั้ง (deploy-batch.yml บน main ยังมี schedule ค้างไว้ ยิงเมื่อไหร่ก็แค่ทำซ้ำ ไม่เสียหาย)
+- ⚠️ **ไม่ใช้ตัวตั้งเวลา (schedule) ของ GitHub — และห้ามใส่กลับ** — 2026-11-11 เปิดแล้วไม่ยิงสักครั้ง (สงสัยว่าเพราะไฟล์ลง main ด้วย `[skip ci]` ทุกครั้ง · ไฟล์ `warmer.yml` ที่ลงด้วย commit ปกติเคยยิงได้) · เจ้าของเลือกเอา schedule ออกจาก deploy-batch.yml แล้ว (commit main `8b205dfb`) — ถ้าค้างไว้ วันที่ main ได้ commit ปกติ (เช่น merge feat/host-portable→main) มันอาจตื่นมายิงซ้อนรอบ → build ถี่ขึ้นเปล่า ๆ
+- push ที่ใส่ `[skip ci]` ลง feat/host-portable **จะไม่เริ่มรอบ** (GitHub ข้าม on: push) → งานนั้นขึ้นเว็บพร้อม push ปกติครั้งถัดไป · ใช้ได้กับงานที่ไม่ต้องขึ้นเว็บ (เช่นแก้แค่ docs) เพื่อประหยัด build
+- ค่าใช้จ่าย: รอบละ ~9 นาทีบนเครื่อง GitHub = **ฟรีเพราะ repo เป็นสาธารณะ** · ถ้าวันไหนเปลี่ยนเป็น private จะกินโควต้า Actions (~20+ รอบ/วัน ≈ 6,000+ นาที/เดือน > ฟรี 2,000) → ตอนนั้นย้ายตัวจับเวลาไป Cloudflare Worker cron (ฟรี) แทน
 - ไม่มีงานใหม่ = ไม่ build
 
 ## ขึ้นทันที (ไม่รอรอบ)
@@ -36,7 +38,7 @@ session ทุกตัว ──push──▶ feat/host-portable   (Vercel ไ�
 ## ไฟล์ที่เกี่ยวข้อง
 
 - `.github/workflows/deploy-round.yml` — รอบอัตโนมัติ (เด้งเมื่อ push feat/host-portable)
-- `.github/workflows/deploy-batch.yml` — ปุ่มขึ้นทันที · **อยู่บนสาขา main** (schedule/workflow_dispatch ทำงานจากสาขา default เท่านั้น) · แก้ผ่าน GitHub API ใส่ `[skip ci]` (กัน deploy สำรอง CF) — main ตั้ง `deploymentEnabled: false` แล้ว Vercel จึงไม่ build
+- `.github/workflows/deploy-batch.yml` (ชื่อใน Actions: "Deploy Now (ขึ้นเว็บทันที)") — ปุ่มขึ้นทันทีอย่างเดียว ไม่มี schedule · **อยู่บนสาขา main** (workflow_dispatch ทำงานจากสาขา default เท่านั้น) · แก้ผ่าน GitHub API ใส่ `[skip ci]` (กัน deploy สำรอง CF) — main ตั้ง `deploymentEnabled: false` แล้ว Vercel จึงไม่ build
 - `vercel.json` → `git.deploymentEnabled: { "feat/host-portable": false, "main": false }`
 - `lib/deploy-queue.ts` (กติกา pure + เทสต์) · `app/admin/deploy/page.tsx` · `app/api/admin/deploy/route.ts`
 - `scripts/perf-check.mjs` — `PROD_BRANCH = "prod"` + รองานเข้า prod
