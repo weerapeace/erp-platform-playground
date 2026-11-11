@@ -220,7 +220,36 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     for (const p of pieces) if (p.layer === "lining" && !L0.loose.includes(p.pid)) { done.add(p.pid); joined++; }
     if (!asm) zFront = D / 2;
   }
+  // ทรงถัง / ท่อ (2026-11-11): ชิ้นก้นที่ขอบทั้งรอบเย็บกับขอบเต็ม 1 ขอบของชิ้นสี่เหลี่ยม → ก้นวางราบ ชิ้นสี่เหลี่ยมม้วนขึ้นรอบก้นตามเส้นรอบจริง
+  //   ใช้เมื่อระบบไม่เห็นโครงตัวหน้า/ตัวหลัง · ชุดซับใน (ถ้ามี) ซ้อนอยู่ข้างในแบบเดียวกัน (ย่อเล็กน้อย + ยกขึ้น) · ตะเข็บข้างของตัวถัง (เย็บกับตัวเอง) ไม่ใช้วาง
+  let tubes = 0;
   if (!asm && !lining) {
+    for (const s of usable) {
+      if (isPartialSeam(s) || s.a.pid === s.b.pid) continue;
+      const pick = (b: SeamSide, w: SeamSide) => {
+        const B = byPid.get(b.pid), Wp = byPid.get(w.pid);
+        return B && Wp && !done.has(b.pid) && !done.has(w.pid) && b.count === b.n && b.n >= 3 && w.count === 1 && pieceEdges(Wp.shape).length === 4 ? { B, Wp, b, w } : null;
+      };
+      const tb = pick(s.a, s.b) ?? pick(s.b, s.a);
+      if (!tb) continue;
+      const loop = sidePoints({ shape: tb.B.shape, inner: tb.B.inner }, tb.b), ws = segOf(tb.Wp, tb.w);
+      if (!loop || loop.length < 3 || !ws) continue;
+      let per = 0; for (let k = 1; k < loop.length; k++) per += Math.hypot(loop[k][0] - loop[k - 1][0], loop[k][1] - loop[k - 1][1]);
+      if (!(per > 0)) continue;
+      const bb = shapeBox(tb.B.shape), cx = bb.x + bb.w / 2, cz = bb.y + bb.h / 2, lin = tb.B.layer === "lining", k = lin ? LINING_K : 1, y0 = lin ? LINING_LIFT : 0.05;
+      const ground = (q: Pt): V3 => [(q[0] - cx) * k, y0, (q[1] - cz) * k];
+      emit(tb.B, "base", false, ground);
+      frames.set(tb.B.pid, { o: ground([0, 0]), u: [k, 0, 0], v: [0, 0, k], n: [0, lin ? 1 : -1, 0] }); rootOf.set(tb.B.pid, tb.B.pid);
+      emit(tb.Wp, "base", true, (q) => {
+        const dx = q[0] - ws.mid[0], dy = q[1] - ws.mid[1], al = dx * ws.dir[0] + dy * ws.dir[1] + ws.len / 2, out = dx * ws.inward[0] + dy * ws.inward[1];
+        const g = ground(pointAlong(loop, Math.max(0, Math.min(per, (al / ws.len) * per))) ?? loop[0]);
+        return [g[0], y0 + Math.max(0, out) * k, g[2]];
+      });
+      folded.add(tb.Wp.pid); joined += 2; tubes++;
+      if (!lin) zFront = Math.max(zFront, (bb.h / 2) * k);
+    }
+  }
+  if (!asm && !lining && !tubes) {
     const inSeam = new Set(usable.flatMap((s) => [s.a.pid, s.b.pid]));
     const root = pieces.filter((p) => inSeam.has(p.pid)).sort((a, b) => shapeArea(b.shape) - shapeArea(a.shape))[0];
     if (root) {
@@ -364,7 +393,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     const ah = shapeArea(H.shape);
     if (Math.abs(ah - shapeArea(C.shape)) <= 0.03 * ah) { done.add(C.pid); joined++; }
   }
-  if (!asm && !lining && joined > 0) joined++;                    // นับชิ้นหลักด้วย เมื่อมีชิ้นมาเกาะแล้ว
+  if (!asm && !lining && !tubes && joined > 0) joined++;          // นับชิ้นหลักด้วย เมื่อมีชิ้นมาเกาะแล้ว (ทรงถังนับไปแล้ว)
   // ช่องเจาะ (ซิป) บนแผ่นที่วางแล้ว → เส้นให้เห็นในภาพ
   for (const p of pieces) {
     const f = frames.get(p.pid);

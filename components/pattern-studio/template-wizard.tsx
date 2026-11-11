@@ -223,7 +223,10 @@ function KitBody({ style, p, kit, onChange }: { style: Exclude<BagStyle, "tote">
       <div className="space-y-2.5 text-sm">
         <div className="text-xs font-medium text-slate-500">{t("ขนาดตอนเสร็จ", "Finished size")}</div>
         {st.fields.map((k) => (
-          <RangeInput key={k} label={style === "round" && k === "W" ? t("เส้นผ่านศูนย์กลาง", "Diameter") : t(KIT_LABEL[k][0], KIT_LABEL[k][1])} ariaLabel={t(KIT_LABEL[k][0], KIT_LABEL[k][1])} unit={t("ซม.", "cm")}
+          <RangeInput key={k} label={(style === "round" || style === "bucket") && k === "W" ? t(style === "bucket" ? "เส้นผ่านศูนย์กลางก้น" : "เส้นผ่านศูนย์กลาง", "Diameter")
+            : style === "duffel" && k === "W" ? t("ยาวตัวกระเป๋า", "Body length") : style === "duffel" && k === "H" ? t("เส้นผ่านศูนย์กลางปลาย", "End diameter")
+            : style === "backpack" && k === "strap" ? t("ยาวสายสะพายบ่า", "Shoulder strap length") : style === "wallet" && k === "W" ? t("กว้างตอนกางออก", "Open width")
+            : style === "drawstring" && k === "hem" ? t("พับปาก (ช่องร้อยเชือก)", "Casing fold") : t(KIT_LABEL[k][0], KIT_LABEL[k][1])} ariaLabel={t(KIT_LABEL[k][0], KIT_LABEL[k][1])} unit={t("ซม.", "cm")}
             value={p[k]} step={KIT_LIMITS[k].step} min={KIT_LIMITS[k].min} max={KIT_LIMITS[k].max} onChange={(v) => onChange(k, v)} />
         ))}
         <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800">{t("สัดส่วนตั้งต้นของทรงนี้เป็นค่าประมาณ ไม่ใช่สูตรช่าง (เช่น ความกว้างแถบซิป ความสูงฝาปิด) — ให้ช่างยืนยัน และแก้ต่อบนกระดานได้ทุกชิ้น · ความยาวชิ้นข้าง/แถบ วัดจากขอบจริงของแผ่นหน้า ขอบคู่จึงยาวเท่ากัน", "The starting proportions are estimates, not a pattern maker's formula — have them confirmed; every piece can be edited on the board. Gusset and strip lengths are measured from the panel's real edge, so paired edges match.")}</p>

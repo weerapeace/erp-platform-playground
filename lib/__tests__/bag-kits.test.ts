@@ -24,12 +24,13 @@ function board(kit: BagKit) {
 }
 const kitOf = (style: BagStyle, o = { lining: true, pocket: true }): BagKit => (style === "tote" ? toteKit({}, o) : bagKit(style, {}, o));
 const STYLES = BAG_STYLES.map((s) => s.key);
+const SET1: BagStyle[] = ["tote", "flat", "pouch", "box", "flap", "round"];
 const zRange = (pos: number[]) => { let lo = Infinity, hi = -Infinity; for (let i = 2; i < pos.length; i += 3) { lo = Math.min(lo, pos[i]); hi = Math.max(hi, pos[i]); } return [lo, hi]; };
 const yRange = (pos: number[]) => { let lo = Infinity, hi = -Infinity; for (let i = 1; i < pos.length; i += 3) { lo = Math.min(lo, pos[i]); hi = Math.max(hi, pos[i]); } return [lo, hi]; };
 
 describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง (lib/bag-kits)", () => {
-  it("มี 6 ทรง · ค่าตั้งต้นอยู่ในขอบเขต · ค่าเกินขอบเขตถูกปรับ", () => {
-    expect(STYLES).toEqual(["tote", "flat", "pouch", "box", "flap", "round"]);
+  it("มี 12 ทรง (ชุดแรก 6 + ชุดสอง 6) · ค่าตั้งต้นอยู่ในขอบเขต · ค่าเกินขอบเขตถูกปรับ", () => {
+    expect(STYLES).toEqual([...SET1, "bucket", "duffel", "backpack", "cosmetic", "drawstring", "wallet"]);
     expect(kitParams("pouch", { r: 99, W: 500 })).toMatchObject({ W: 60, r: 5.5 });      // มุมมนไม่เกินครึ่งด้านสั้น (13 ÷ 2 − 1)
     expect(kitParams("round", { W: 14, H: 30 }).H).toBe(14);                               // ทรงกลม: สูง = กว้าง
   });
@@ -49,7 +50,7 @@ describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง 
       }
     });
 
-    it(`${style}: มีซับในทุกทรง — ชิ้นซับในของตัวกระเป๋าครบ ขนาดเท่าตัวนอก ผูกรูปกับตัวนอก · ประกอบ 3 มิติได้ทั้งตัวนอกและซับใน`, () => {
+    (SET1.includes(style) ? it : it.skip)(`${style}: มีซับในทุกทรง — ชิ้นซับในของตัวกระเป๋าครบ ขนาดเท่าตัวนอก ผูกรูปกับตัวนอก · ประกอบ 3 มิติได้ทั้งตัวนอกและซับใน`, () => {
       const kit = kitOf(style), B = board(kit);
       const lining = kit.pieces.filter((q) => q.lining && q.key !== "lpocket");
       expect(lining.length).toBeGreaterThan(0);
@@ -66,7 +67,7 @@ describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง 
       expect(sc.parts.filter((p) => p.kind === "loose")).toHaveLength(0);
     });
 
-    it(`${style}: ไม่เอาซับใน = ได้เฉพาะตัวนอก · ไม่เอาช่องใส่ของ = ไม่มีชิ้นช่องและเส้นใน`, () => {
+    (SET1.includes(style) ? it : it.skip)(`${style}: ไม่เอาซับใน = ได้เฉพาะตัวนอก · ไม่เอาช่องใส่ของ = ไม่มีชิ้นช่องและเส้นใน`, () => {
       const bare = kitOf(style, { lining: false, pocket: true });
       expect(bare.pieces.some((q) => q.lining)).toBe(false);
       const noPocket = kitOf(style, { lining: true, pocket: false });
@@ -166,5 +167,68 @@ describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง 
     expect(win.pieces.find((q) => q.key === "L:back")!.linkTo).toBe("back");
     expect(win.pieces.some((q) => q.key === "L:pvc")).toBe(false);
     expect(win.params?.win).toBe("heart");
+  });
+});
+
+describe("แม่แบบชุดสอง: ทรงถัง · ดัฟเฟิล · เป้ · ก้นกล่อง · หูรูด · กระเป๋าสตางค์", () => {
+  const xzR = (pos: number[]) => { let r = 0; for (let i = 0; i < pos.length; i += 3) r = Math.max(r, Math.hypot(pos[i], pos[i + 2])); return r; };
+
+  it("ทรงถัง: ระบบไม่เห็นโครงหน้า/หลัง → ก้นวางราบ ตัวถังม้วนขึ้นรอบก้นสูงเท่าความสูง · ซับในซ้อนข้างในแบบเดียวกัน · สายสะพายยังไม่มีจุดติด (บอกว่ายังไม่ได้เย็บ)", () => {
+    const B = board(kitOf("bucket")), sc = buildSewn(B.asm, B.seams, B.attaches);
+    expect(assemble(B.asm, B.seams, B.attaches).ok).toBe(false);
+    expect(sc.asm).toBeNull();
+    const base = sc.parts.find((p) => p.pid === "base")!, wall = sc.parts.find((p) => p.pid === "wall")!, lw = sc.parts.find((p) => p.pid === "L_wall")!;
+    expect([base.kind, wall.kind, lw.kind, lw.layer]).toEqual(["base", "base", "base", "lining"]);
+    const [by0, by1] = yRange(base.pos), [wy0, wy1] = yRange(wall.pos);
+    expect(by1 - by0).toBeLessThan(0.01);                                                     // ก้นราบ
+    expect(wy0).toBeCloseTo(0.05, 1); expect(wy1).toBeCloseTo(24.05, 1);                       // ตัวถังสูงเท่าความสูง
+    expect(xzR(wall.pos)).toBeCloseTo(9, 0);                                                   // โค้งรอบก้นรัศมี 9
+    expect(xzR(lw.pos)).toBeLessThan(xzR(wall.pos));                                           // ซับในอยู่ข้างใน
+    expect(sc.notes).toEqual([{ pid: "strap", name: "สายสะพาย (พับครึ่ง)", why: "unsewn" }]);
+    expect(sc.joined).toBe(4);
+    expect(kitOf("bucket").pieces.some((q) => q.key === "lpocket")).toBe(false);
+  });
+
+  it("ดัฟเฟิล: ปลายวงกลม 2 ชิ้นเป็นแผ่นหน้า/หลัง ตัวกระเป๋าม้วนรอบ (ลึกเท่าความยาวตัว) · หูหิ้วพาดข้ามตัว · ซิป 1 เส้นยาวเท่าตัวกระเป๋า", () => {
+    const B = board(kitOf("duffel")), A = assemble(B.asm, B.seams, B.attaches), L = assemble(B.asm, B.seams, [], "lining");
+    if (!A.ok) throw new Error("ประกอบไม่ได้");
+    expect([A.kind, A.bridges, Math.round(A.depth), A.handles.map((h) => h.side), L.ok]).toEqual(["wrap", ["body"], 45, [0], true]);
+    const sc = buildSewn(B.asm, B.seams, B.attaches);
+    expect(sc.notes).toEqual([]);
+    expect(zipEdgeList(B.pieces).map((z) => [z.pid, z.len])).toEqual([["body", 45]]);
+  });
+
+  it("เป้: ข้าง+ก้น และแถบซิปบน เป็นชิ้นคั่นกลางครบรอบ · สายบ่าห้อยลงด้านนอกแผ่นหลัง · กระเป๋าหน้าปะบนแผ่นหน้า · ซิปจากช่องเจาะบนแถบซิป", () => {
+    const B = board(kitOf("backpack")), A = assemble(B.asm, B.seams, B.attaches);
+    if (!A.ok) throw new Error("ประกอบไม่ได้");
+    expect([A.kind, [...A.bridges].sort(), A.handles.length]).toEqual(["wrap", ["gusset", "ziptop"], 1]);
+    const sc = buildSewn(B.asm, B.seams, B.attaches), kind = (pid: string) => sc.parts.find((p) => p.pid === pid)?.kind;
+    expect([kind("strapL"), kind("strapR"), kind("fpocket"), kind("lpocket")]).toEqual(["hang", "hang", "patch", "patch"]);
+    expect(sc.notes).toEqual([]);
+    const sl = sc.parts.find((p) => p.pid === "strapL")!;
+    expect(zRange(sl.pos)[0]).toBeLessThan(-A.depth / 2);                                      // อยู่ด้านนอกของแผ่นหลัง
+    expect(slitList(B.pieces).map((x) => x.pid)).toEqual(["ziptop"]);
+    expect(assemble(B.asm, B.seams, [], "lining").ok).toBe(true);
+  });
+
+  it("ก้นกล่อง / หูรูด: ประกอบเป็นซองแบน (ภาพยังไม่พับมุมก้น) · ก้นกล่องได้ซิปปากยาว กว้าง + หนา · หูรูดไม่มีหูและซิป", () => {
+    for (const style of ["cosmetic", "drawstring"] as BagStyle[]) {
+      const B = board(kitOf(style)), A = assemble(B.asm, B.seams, B.attaches);
+      if (!A.ok) throw new Error("ประกอบไม่ได้");
+      expect([style, A.kind, assemble(B.asm, B.seams, [], "lining").ok, buildSewn(B.asm, B.seams, B.attaches).notes.length]).toEqual([style, "pouch", true, 0]);
+    }
+    expect(zipEdgeList(board(kitOf("cosmetic")).pieces).map((z) => z.len)).toEqual([30]);
+    const d = kitOf("drawstring");
+    expect([d.attach.length, zipEdgeList(board(d).pieces).length, d.pieces.filter((q) => !q.lining).map((q) => q.key)]).toEqual([0, 0, ["front"]]);
+  });
+
+  it("กระเป๋าสตางค์: ตัวนอก + แผ่นใน เย็บ 3 ด้าน (ซองแบน ด้านบนเปิด) · ช่องใส่บัตร 2 ช่องปะบนแผ่นใน · ไม่มีชุดซับในแยก (แผ่นในทำหน้าที่ซับใน)", () => {
+    const kit = kitOf("wallet"), B = board(kit), A = assemble(B.asm, B.seams, B.attaches);
+    if (!A.ok) throw new Error("ประกอบไม่ได้");
+    expect([A.kind, A.front, A.back]).toEqual(["pouch", "outer", "inner"]);
+    expect(kit.pieces.some((q) => q.lining)).toBe(false);
+    const sc = buildSewn(B.asm, B.seams, B.attaches);
+    expect([sc.parts.find((p) => p.pid === "slotL")?.kind, sc.parts.find((p) => p.pid === "slotR")?.kind, sc.notes.length]).toEqual(["patch", "patch", 0]);
+    expect(kit.pieces.find((q) => q.key === "inner")!.inner!.map((l) => l.kind)).toEqual(["fold", "sew", "sew"]);
   });
 });
