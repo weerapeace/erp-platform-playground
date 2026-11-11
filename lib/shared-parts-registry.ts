@@ -1230,6 +1230,15 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "parent-issues-panel", label: "แผงปัญหาของสินค้า", code: "ParentIssuesPanel", category: "feature",
     source: { path: "components/parent-issues-panel" },
     what: "จดปัญหาของรุ่นสินค้า แชร์ทุกสี ใช้ใน QC หน้ารุ่น ใบสั่งผลิต",
+    notWhen: "เช็กอัตโนมัติว่าข้อมูลลงขายครบไหม (Description/ชื่อสี/ราคา/รูป) ให้ใช้ ProductQuickCheck + lib/product-listing-checks",
+  },
+  {
+    key: "product-quick-check", label: "แผงตรวจสินค้าเร็ว (ดูอย่างเดียว)", code: "ProductQuickCheck", category: "feature",
+    source: { path: "components/product-quick-check" },
+    what: "ลิ้นชักข้างจอ ดูข้อมูลลงขายของสินค้าทีเดียว: กล่อง \"ระบบเช็กเจอ\" (กดแล้วเลื่อนไปจุดนั้น) · รูป · Description ไทย/อังกฤษ (บรรทัดซ้ำขึ้นสี) · ตารางชื่อสี + ราคาขาย/ขีดฆ่า (ช่องผิดขึ้นสี · รวมตามสีเมื่อแบบย่อยเยอะ) · ช่อง footer ให้ผู้เรียกใส่ปุ่มของตัวเอง · ตัวเช็ก = lib/product-listing-checks (เตือนอย่างเดียว)",
+    when: "ตรวจงาน/สินค้าเร็ว ๆ ก่อนอนุมัติ (ตอนนี้: ลิ้นชักงาน Task Manager ปุ่ม ตรวจเร็ว)",
+    notWhen: "แก้ข้อมูลสินค้า ให้เปิด MasterRecordDrawer (หน้าเต็ม) · จดปัญหาด้วยมือ ให้ใช้ ParentIssuesPanel · ห้ามส่งต้นทุนเข้ามา",
+    doc: "product-quick-check.md",
   },
   {
     key: "compartments-editor", label: "ช่องใส่ของ (ขนาดด้านใน)", code: "CompartmentsEditor", category: "feature",

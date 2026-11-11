@@ -35,9 +35,13 @@ async function withOpenSubtaskCheck(run: (closeOpen: boolean) => Promise<unknown
   }
 }
 
-/** ทำการเปลี่ยนสถานะ (approve/reject/revise/block/move) — คืน true ถ้าสำเร็จ (ผู้เรียก reload เอง) */
-export async function applyTaskTransition(task: CreativeTask, toKey: string, opts: { pushToast: ToastFn; force?: boolean }): Promise<boolean> {
+/**
+ * ทำการเปลี่ยนสถานะ (approve/reject/revise/block/move) — คืน true ถ้าสำเร็จ (ผู้เรียก reload เอง)
+ * opts.comment = เหตุผลที่ผู้เรียกเก็บมาเองแล้ว (เช่น แผงตรวจเร็วที่ติ๊กจุดที่ต้องแก้) → ข้ามป๊อปถามเหตุผล · ไม่ส่ง = ถามเหมือนเดิม
+ */
+export async function applyTaskTransition(task: CreativeTask, toKey: string, opts: { pushToast: ToastFn; force?: boolean; comment?: string }): Promise<boolean> {
   const { pushToast, force } = opts;
+  const preset = opts.comment?.trim() || null;
   try {
     let done: boolean;
     if (force) done = await withOpenSubtaskCheck((c) => transitionTask(task.id, toKey, undefined, true, c));
@@ -48,7 +52,7 @@ export async function applyTaskTransition(task: CreativeTask, toKey: string, opt
       else if (t.kind === "reject" || t.kind === "revise") {
         // กด "ยกเลิก" = ไม่ทำอะไรเลย (เดิมใช้ window.prompt แล้วค่าว่าง → ระบบยังตีกลับงานโดยไม่มีเหตุผล)
         const reject = t.kind === "reject";
-        const comment = await askText({
+        const comment = preset ?? await askText({
           title: reject ? lang("เหตุผลที่ไม่ผ่าน", "Reason for rejecting") : lang("สิ่งที่ต้องแก้", "What needs fixing"),
           message: `${task.task_no ? task.task_no + " " : ""}${task.title}`,
           placeholder: reject ? lang("เช่น รูปไม่ตรงบรีฟ", "e.g. images don't match the brief") : lang("เช่น ขอรูปพื้นหลังขาว 3 รูป", "e.g. need 3 images on white background"),
@@ -58,7 +62,7 @@ export async function applyTaskTransition(task: CreativeTask, toKey: string, opt
         if (comment === null) return false;
         done = await withOpenSubtaskCheck((c) => approveTask(task.id, t.kind as "reject" | "revise", comment, toKey, c));
       } else if (t.kind === "block") {
-        const reason = await askText({ title: lang("ติดปัญหาเรื่องอะไร?", "What's blocking this?"), message: task.title, required: true, confirmText: lang("บันทึก", "Save") });
+        const reason = preset ?? await askText({ title: lang("ติดปัญหาเรื่องอะไร?", "What's blocking this?"), message: task.title, required: true, confirmText: lang("บันทึก", "Save") });
         if (reason === null) return false;
         done = await withOpenSubtaskCheck((c) => transitionTask(task.id, toKey, reason, false, c));
       } else done = await withOpenSubtaskCheck((c) => transitionTask(task.id, toKey, undefined, false, c));

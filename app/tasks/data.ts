@@ -24,6 +24,7 @@ import type { BrandProfile } from "@/lib/marketing/brand-profile";
 import type { BriefTemplate } from "@/lib/brief-templates";
 import type { FitSpec } from "@/lib/social-publish/fit";
 import type { TaskImagesPayload } from "@/lib/task-images";
+import type { QuickCheckParent } from "@/lib/product-listing-checks";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -174,6 +175,12 @@ export async function getTask(id: string): Promise<TaskDetail> {
 export async function getTaskImages(id: string): Promise<TaskImagesPayload> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}/images`));
   return j.data as TaskImagesPayload;
+}
+
+/** ข้อมูลแผงตรวจสินค้าเร็ว: Description ไทย/อังกฤษ · ชื่อสี · ราคาขาย/ขีดฆ่า · จำนวนรูป (ไม่มีต้นทุน) */
+export async function getTaskQuickCheck(id: string): Promise<QuickCheckParent[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}/quick-check`));
+  return ((j.data as { parents?: QuickCheckParent[] } | null)?.parents) ?? [];
 }
 
 export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; title_en?: string | null; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[]; content_items?: TemplateContentItem[] };
