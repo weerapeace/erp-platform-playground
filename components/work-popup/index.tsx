@@ -10,7 +10,7 @@
  *   ซ่อน/เปิด + มุมจอ = เมนูโปรไฟล์ → 🔔 ป๊อปเตือนงาน (user_ui_prefs work_popup_float · ปิด = ไม่ถาม ไม่เด้ง)
  * WorkPopupBody = เนื้อในป๊อป (หน้าตั้งค่าใช้แสดงตัวอย่าง)
  */
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ERPModal } from "@/components/modal";
 import { useAuth, usePermission } from "@/components/auth";
@@ -18,11 +18,13 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useRefresh } from "@/lib/refresh-bus";
 import { isStandaloneAppPath, openInStandaloneApp } from "@/lib/app-go";
-import { TaskLinkList } from "@/components/record-tasks/task-links";
+import { TaskLinkList, TaskLinksButton } from "@/components/record-tasks/task-links";
+import { Icon } from "@/components/icon";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
 import { isChromelessPath } from "@/lib/chromeless-routes";
-import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupFloatPref, type FloatTab } from "./float";
+import { FloatViewContext, WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useFloatView, useWorkPopupFloatPref, type FloatTab } from "./float";
+import type { FloatLevel } from "./float-pref";
 import { GifInbox, type GifPoke } from "./gif-inbox";
 import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
 import type { LinePendingPayload } from "@/lib/line-pending";
@@ -68,60 +70,141 @@ function markSeen(uid: string, id: string) {
   try { sessionStorage.setItem(seenKey(uid), JSON.stringify([...new Set([...readSeen(uid), id])])); } catch { /* ignore */ }
 }
 
-const TONE: Record<WorkPopupFlag["tone"], string> = { danger: "text-rose-600", warn: "text-amber-600", muted: "text-slate-500", good: "text-emerald-600" };
+// สีป้ายเตือนต่อใบ (ไม่ขยับ X วัน / เกินกำหนด …) — พื้นอ่อน + ตัวเข้ม · สีเดียวกันทุกขนาดการ์ด
+const TONE: Record<WorkPopupFlag["tone"], string> = { danger: "bg-rose-50 text-rose-700", warn: "bg-amber-50 text-amber-700", muted: "bg-slate-100 text-slate-500", good: "bg-emerald-50 text-emerald-700" };
 
 type PopupTab = "today" | "waiting" | "all";
+/** ตัดอีโมจิ/สัญลักษณ์หน้าหัวข้อจากเซิร์ฟเวอร์ (เช่น "🔥 ต้องตามวันนี้") — หน้าจอใส่ไอคอนกลางเอง · ไม่มีอีโมจิ = คงเดิม */
+const plainLabel = (s: string) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim() || s;
 
-function Thumb({ src }: { src: string | null }) {
+/** คอลัมน์แบบกว้าง (1 บรรทัดต่องาน) — หัวคอลัมน์กับทุกแถวใช้ชุดเดียวกัน คอลัมน์จึงตรงกัน */
+const wideCols = (img: boolean, code: boolean) => `${img ? "28px " : ""}${code ? "92px " : ""}minmax(0,1.3fr) minmax(0,.9fr) minmax(0,1.3fr) 104px`;
+
+function Thumb({ src, size }: { src: string | null; size: number }) {
+  const st = { width: size, height: size };
   return src
     // eslint-disable-next-line @next/next/no-img-element
-    ? <img src={src} alt="" loading="lazy" className="h-11 w-11 shrink-0 rounded-md border border-slate-200 object-cover" />
-    : <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed border-slate-200 text-slate-300">🎨</div>;
+    ? <img src={src} alt="" loading="lazy" style={st} className="shrink-0 rounded-md border border-slate-200 object-cover" />
+    : <div style={st} className="flex shrink-0 items-center justify-center rounded-md border border-dashed border-slate-200 text-slate-300"><Icon name="design" /></div>;
 }
 
-/** 1 ใบงานในป๊อป — โชว์ตามช่องที่เลือก (data.fields) · ของรอ = ช่องติ๊ก (ติ๊กไม่ได้ = จางพร้อมบอกเหตุผล) */
-function ItemCard({ it, fields, tasks, canTick, onTick, onOpen, done, strong }: {
+/** 1 ใบงานในป๊อป — ยิ่งกว้างยิ่งเตี้ย (level จากความกว้างการ์ด · เจ้าของสั่ง 2026-11-11):
+ *    แคบ = 3 บรรทัด (ชื่อ+ป้าย / เลขที่·สถานะ / ของรอข้อแรก) · กลาง = 2 บรรทัด (ของรอย้ายไปขวา) · กว้าง = 1 บรรทัดแบบตาราง
+ *  ของรอ: โชว์ข้อแรกที่ยังไม่เสร็จ (ติ๊กได้เลย) + ปุ่ม "+N" กางดูทุกข้อ/ลิงก์/โน้ต · ช่องไหนโชว์ = data.fields เหมือนเดิม
+ *  ติ๊กไม่ได้ = จางพร้อมบอกเหตุผล (ชี้ค้าง) */
+function ItemRow({ it, fields, tasks, canTick, onTick, onOpen, done, strong, level, img }: {
   it: WorkPopupItem; fields: Set<string>; tasks: WorkPopupTask[];
   canTick: (t: WorkPopupTask) => boolean; onTick?: (taskId: string, done: boolean) => void; onOpen?: (path: string) => void;
-  done?: Set<string>; strong?: boolean;
+  done?: Set<string>; strong?: boolean; level: FloatLevel; img: boolean;
 }) {
-  const meta = [fields.has("brand") ? it.brand : null, fields.has("status") ? it.status : null, fields.has("due") ? it.due : null].filter(Boolean);
+  const [open, setOpen] = useState(false);
+  const meta = [fields.has("brand") ? it.brand : null, fields.has("status") ? it.status : null, fields.has("due") ? it.due : null].filter(Boolean).join(" · ");
+  const hasCode = fields.has("code");
+  const code = hasCode ? it.code : null;
+  const showImg = img && fields.has("img");
+  const note = fields.has("note") ? it.note : null;
+  const left = tasks.filter((t) => !done?.has(t.id));
+  const first = left[0];
+  const more = Math.max(0, left.length - 1);
+  const canExpand = tasks.length > 1 || !!note || tasks.some((t) => !!t.links?.length);
+  const who = (t: WorkPopupTask) => (fields.has("who") && t.who ? t.who : null);
+  const tickBox = (t: WorkPopupTask) => {
+    const ok = !!done?.has(t.id);
+    const can = !!onTick && canTick(t);
+    return (
+      <input type="checkbox" checked={ok} disabled={!can} onChange={(e) => onTick?.(t.id, e.target.checked)} aria-label={`ทำเสร็จ: ${t.title}`}
+        title={onTick && !can ? "ติ๊กได้เฉพาะผู้รับผิดชอบข้อนี้ / คนที่แก้ใบงานได้" : undefined}
+        className={`h-3.5 w-3.5 shrink-0 accent-indigo-600 ${can ? "cursor-pointer" : onTick ? "opacity-40" : ""}`} />
+    );
+  };
+  const titleBtn = (cls: string) => (
+    <button type="button" disabled={!onOpen} onClick={() => onOpen?.(it.path)} title={it.title}
+      className={`min-w-0 truncate text-left text-[13px] leading-snug text-slate-800 hover:underline disabled:hover:no-underline ${strong ? "font-semibold" : "font-medium"} ${cls}`}>{it.title}</button>
+  );
+  const flag = fields.has("flag") && it.flag.text
+    ? <span title={it.flag.text} className={`inline-block max-w-full truncate whitespace-nowrap rounded-full px-2 py-px align-middle text-[11px] leading-4 ${TONE[it.flag.tone]}`}>{it.flag.text}</span>
+    : null;
+  const subLine = (code || meta) && (
+    <div className="truncate text-[11px] leading-snug text-slate-500">
+      {code && <span className="font-mono text-slate-400">{code}</span>}{code && meta && " · "}{meta}
+    </div>
+  );
+  const expandBtn = canExpand && (
+    <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} title={open ? "ย่อ" : "ดูทุกข้อ / ลิงก์ / โน้ต"}
+      className="inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-full border border-slate-200 bg-white px-1.5 text-[11px] text-slate-500 hover:bg-slate-50">
+      {more > 0 && `+${more}`}<Icon value={open ? "i:chevron-up" : "i:chevron-down"} />
+    </button>
+  );
+  // บรรทัด "ต้องทำต่อ": ข้อแรกที่ยังไม่เสร็จ · ติ๊กครบแล้ว = ข้อสุดท้ายขีดฆ่า (ยังติ๊กกลับได้ กันกดพลาด) · ไม่มีของรอแต่มีโน้ต = โน้ตแทน
+  const lineTask = first ?? tasks[tasks.length - 1];
+  const taskLine = lineTask ? (
+    <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-700">
+      {tickBox(lineTask)}
+      <span className={`min-w-0 truncate ${first ? "" : "text-slate-400 line-through"}`} title={lineTask.title}>{lineTask.title}</span>
+      {!first && <span className="inline-flex shrink-0 items-center gap-0.5 text-emerald-600"><Icon name="done" /> ครบแล้ว</span>}
+      {first && who(first) && <span title={who(first)!} className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-indigo-50 text-[10px] font-semibold text-indigo-700">{who(first)!.slice(0, 1).toUpperCase()}</span>}
+      {first && !open && !!first.links?.length && <TaskLinksButton links={first.links} />}
+      {expandBtn}
+    </div>
+  ) : note ? (
+    <div className="flex min-w-0 items-center gap-1 text-xs text-amber-700" title={note}><Icon name="note" /><span className="min-w-0 truncate">{note}</span></div>
+  ) : null;
+  const expanded = open && (
+    <div className="space-y-1 pb-0.5 pt-1">
+      {note && <div className="flex items-start gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800"><Icon name="note" /><span>{note}</span></div>}
+      {tasks.map((t) => {
+        const ok = !!done?.has(t.id);
+        return (
+          <div key={t.id}>
+            <label className={`flex items-center gap-1.5 text-xs ${ok ? "text-slate-400 line-through" : "text-slate-700"}`}>
+              {tickBox(t)}<span className="min-w-0">{t.title}{who(t) && <span className="text-slate-400"> — {who(t)}</span>}</span>
+            </label>
+            {!ok && <TaskLinkList links={t.links} className="ml-5 mt-0.5" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (level === 3) return (
+    <div className="px-3 py-1 hover:bg-slate-50/80">
+      <div className="grid items-center gap-x-2.5" style={{ gridTemplateColumns: wideCols(showImg, hasCode) }}>
+        {showImg && <Thumb src={it.imageUrl} size={28} />}
+        {hasCode && <span className="truncate font-mono text-[11px] text-slate-400" title={code ?? undefined}>{code ?? ""}</span>}
+        {titleBtn("")}
+        <span className="truncate text-xs text-slate-500" title={meta || undefined}>{meta}</span>
+        <div className="min-w-0">{taskLine}</div>
+        <div className="flex min-w-0 justify-end">{flag}</div>
+      </div>
+      {expanded && <div style={{ paddingLeft: (showImg ? 38 : 0) + (hasCode ? 102 : 0) }}>{expanded}</div>}
+    </div>
+  );
+  if (level === 2) return (
+    <div className="px-3 py-1.5 hover:bg-slate-50/80">
+      <div className="flex items-center gap-2.5">
+        {showImg && <Thumb src={it.imageUrl} size={32} />}
+        <div className="min-w-0 flex-[1.15]">{titleBtn("block w-full")}{subLine}</div>
+        <div className="min-w-0 flex-1">{taskLine}</div>
+        {flag && <div className="max-w-[112px] shrink-0">{flag}</div>}
+      </div>
+      {expanded && <div style={{ paddingLeft: showImg ? 42 : 0 }}>{expanded}</div>}
+    </div>
+  );
   return (
-    <div className="flex gap-2.5">
-      {fields.has("img") && <Thumb src={it.imageUrl} />}
+    <div className="flex gap-2.5 px-3 py-2 hover:bg-slate-50/80">
+      {showImg && <Thumb src={it.imageUrl} size={36} />}
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-          <button type="button" disabled={!onOpen} onClick={() => onOpen?.(it.path)} className="min-w-0 text-left hover:underline disabled:hover:no-underline">
-            <span className={`text-sm text-slate-800 ${strong ? "font-medium" : ""}`}>{fields.has("code") && it.code && <span className="mr-1 text-slate-400">{it.code}</span>}{it.title}</span>
-          </button>
-          {fields.has("flag") && <span className={`shrink-0 text-xs ${TONE[it.flag.tone]}`}>{it.flag.text}</span>}
-        </div>
-        {meta.length > 0 && <div className="text-xs text-slate-500">{meta.join(" · ")}</div>}
-        {fields.has("note") && it.note && <div className="mt-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">📝 {it.note}</div>}
-        {tasks.length > 0 && (
-          <ul className="mt-1 space-y-0.5">
-            {tasks.map((t) => {
-              const ok = !!done?.has(t.id);
-              const can = !!onTick && canTick(t);
-              return (
-                <li key={t.id}>
-                  <label title={onTick && !can ? "ติ๊กได้เฉพาะผู้รับผิดชอบข้อนี้ / คนที่แก้ใบงานได้" : undefined}
-                    className={`inline-flex items-center gap-2 text-sm ${can ? "cursor-pointer" : ""} ${ok ? "text-slate-400 line-through" : "text-slate-700"}`}>
-                    <input type="checkbox" checked={ok} disabled={!can} onChange={(e) => onTick?.(t.id, e.target.checked)} className={`h-4 w-4 accent-indigo-600 ${!can && onTick ? "opacity-40" : ""}`} />
-                    <span>⏳ {t.title}{fields.has("who") && t.who && <span className="text-slate-400"> — {t.who}</span>}</span>
-                  </label>
-                  {!ok && <TaskLinkList links={t.links} className="ml-6 mt-0.5" />}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <div className="flex items-center gap-2">{titleBtn("flex-1")}{flag && <div className="max-w-[45%] shrink-0">{flag}</div>}</div>
+        {subLine}
+        {taskLine && <div className="mt-0.5">{taskLine}</div>}
+        {expanded}
       </div>
     </div>
   );
 }
 
-/** เนื้อในป๊อป (ไม่มีกรอบ) — ใช้ทั้งป๊อปจริงและตัวอย่างในหน้าตั้งค่า (preview = ติ๊กไม่ได้) */
+/** เนื้อในป๊อป (ไม่มีกรอบ · แถวชิดขอบ) — ใช้ทั้งป๊อปจริงและตัวอย่างในหน้าตั้งค่า (preview = ติ๊กไม่ได้)
+ *  ความกว้าง/รูป มาจากการ์ด (FloatViewContext) · นอกการ์ด = แบบแคบ */
 export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
   data: WorkPopupPayload;
   onOpen?: (path: string) => void;
@@ -129,86 +212,94 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
   done?: Set<string>;
   preview?: boolean;
 }) {
+  const { level, hideImg } = useFloatView();
+  const img = !hideImg;
   const s = data.stats;
   const fields = new Set<string>(data.fields ?? []);
   const canTick = (t: WorkPopupTask) => t.mine || data.can_tick_all;
   const mineOpen = data.mine.reduce((n, m) => n + m.tasks.filter((t) => !done?.has(t.id)).length, 0);
-  // ชิปตัวเลข = แท็บสลับรายการในป๊อป (ต้องตามวันนี้ / มีของรอ / ค้างทั้งหมด) — ข้อมูลเก่าที่ไม่มี all = ชิปเป็นป้ายเฉย ๆ แบบเดิม
+  // ปุ่มสลับรายการในป๊อป (ต้องตามวันนี้ / มีของรอ / ค้างทั้งหมด) — ข้อมูลเก่าที่ไม่มี all = ป้ายตัวเลขเฉย ๆ แบบเดิม
   const [tab, setTab] = useState<PopupTab>("today");
   const tabs = data.audience === "all" && !!data.all;
   const tabList = !tabs || tab === "today" ? null : (data.all ?? []).filter((i) => tab === "all" || i.waiting);
-  const chip = (k: PopupTab, label: string, idle: string) => (
+  const showStats = data.show_stats !== false;
+  const row = (it: WorkPopupItem, tasks: WorkPopupTask[], ct: (t: WorkPopupTask) => boolean, strong?: boolean) => (
+    <ItemRow key={it.id} it={it} fields={fields} tasks={tasks} canTick={ct} onTick={onTick} onOpen={onOpen} done={done} strong={strong} level={level} img={img} />
+  );
+  const seg = (k: PopupTab, label: string, n: number) => (
     <button type="button" onClick={() => setTab(k)} aria-pressed={tab === k}
-      className={`rounded-full px-2.5 py-1 ${tab === k ? "bg-indigo-600 font-medium text-white" : `${idle} hover:ring-1 hover:ring-indigo-300`}`}>{label}</button>
+      className={`h-6 whitespace-nowrap rounded-md px-2 text-xs ${tab === k ? "bg-white font-medium text-slate-800 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-800"}`}>
+      {label} <span className="text-slate-400">{n}</span>
+    </button>
+  );
+  const stat = (cls: string, label: string) => <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}>{label}</span>;
+  const band = (icon: string, label: string, extra?: ReactNode, indigo?: boolean, hint?: string) => (
+    <div title={hint} className={`flex items-center gap-1.5 border-y px-3 py-1 text-[11px] font-medium ${indigo ? "border-indigo-100 bg-indigo-50/70 text-indigo-800" : "border-slate-100 bg-slate-50 text-slate-600"}`}>
+      <Icon name={icon} /><span className="min-w-0 truncate">{label}</span>{extra}
+    </div>
+  );
+  const moreNote = (n: number) => <p className="px-3 py-1.5 text-[11px] text-slate-500">และอีก {n} งาน — กด &quot;ดูทั้งหมด&quot;</p>;
+  const empty = (text: string) => (
+    <p className="m-3 flex items-center justify-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-3 text-sm text-emerald-700"><Icon name="celebrate" /> {text}</p>
+  );
+  const hasRows = tabList ? tabList.length > 0 : data.mine.length > 0 || (data.audience === "all" && data.urgent.length > 0);
+  // แบบกว้าง: หัวคอลัมน์ครั้งเดียวบนสุด
+  const colHead = level === 3 && hasRows && (
+    <div className="grid items-center gap-x-2.5 px-3 pb-0.5 pt-1 text-[11px] text-slate-400" style={{ gridTemplateColumns: wideCols(img && fields.has("img"), fields.has("code")) }}>
+      {img && fields.has("img") && <span />}
+      {fields.has("code") && <span>เลขที่</span>}
+      <span>ชื่องาน</span><span>สถานะ</span><span>ต้องทำต่อ</span><span className="text-right">เตือน</span>
+    </div>
   );
   return (
-    <div className="space-y-4">
-      {data.audience === "all" && (data.show_stats !== false || tabs) && (
-        <div className="flex flex-wrap gap-1.5 text-xs">
-          {tabs && chip("today", `${data.urgent_label.replace(/^\S+\s/, "")} ${data.mine.length + data.urgent.length + data.more}`,"bg-white text-slate-700 border border-slate-200")}
-          {data.show_stats !== false && s.overdue > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 font-medium text-rose-700">เกินกำหนด {s.overdue}</span>}
-          {data.show_stats !== false && s.due_soon > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">ใกล้กำหนด {s.due_soon}</span>}
-          {s.waiting > 0 && (tabs ? chip("waiting", `⏳ มีของรอ ${s.waiting} ใบ`, "bg-blue-50 font-medium text-blue-700")
-            : data.show_stats !== false && <span className="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-700">⏳ มีของรอ {s.waiting} ใบ</span>)}
-          {tabs ? chip("all", `ค้างทั้งหมด ${s.total}`, "bg-slate-100 text-slate-600")
-            : data.show_stats !== false && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">ค้างทั้งหมด {s.total}</span>}
+    <div className="pb-1">
+      {data.audience === "all" && (showStats || tabs) && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5">
+          {tabs && (
+            <div className="inline-flex flex-wrap rounded-lg bg-slate-100 p-0.5">
+              {seg("today", plainLabel(data.urgent_label), data.mine.length + data.urgent.length + data.more)}
+              {s.waiting > 0 && seg("waiting", "มีของรอ", s.waiting)}
+              {seg("all", "ค้างทั้งหมด", s.total)}
+            </div>
+          )}
+          {showStats && s.overdue > 0 && stat("bg-rose-50 text-rose-700", `เกินกำหนด ${s.overdue}`)}
+          {showStats && s.due_soon > 0 && stat("bg-amber-50 text-amber-700", `ใกล้กำหนด ${s.due_soon}`)}
+          {!tabs && showStats && s.waiting > 0 && stat("bg-blue-50 text-blue-700", `มีของรอ ${s.waiting} ใบ`)}
+          {!tabs && showStats && stat("bg-slate-100 text-slate-600", `ค้างทั้งหมด ${s.total}`)}
         </div>
       )}
+      {colHead}
 
-      {/* แท็บ มีของรอ / ค้างทั้งหมด — รายการจาก data.all (ด่วนก่อน) · ติ๊กของรอได้ตามสิทธิ์เหมือนเดิม */}
+      {/* รายการ มีของรอ / ค้างทั้งหมด — จาก data.all (ด่วนก่อน) · ติ๊กของรอได้ตามสิทธิ์เหมือนเดิม */}
       {tabList && (
         <section>
-          <h3 className="mb-1.5 text-sm font-semibold text-slate-800">{tab === "all" ? "📋 ค้างทั้งหมด (ด่วนก่อน)" : "⏳ ใบที่มีของรอ"}</h3>
-          {tabList.length > 0 ? (
-            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-              {tabList.map((u) => (
-                <div key={u.id} className="p-2">
-                  <ItemCard it={u} fields={fields} tasks={fields.has("wait") ? u.tasks : []} canTick={canTick} onTick={onTick} onOpen={onOpen} done={done} />
-                </div>
-              ))}
-            </div>
-          ) : <p className="rounded-xl bg-emerald-50 p-4 text-center text-sm text-emerald-700">ไม่มีรายการในแท็บนี้ 🎉</p>}
-          {tab === "all" && s.total > tabList.length && <p className="mt-1.5 text-xs text-slate-500">และอีก {s.total - tabList.length} งาน — กด "ดูทั้งหมด"</p>}
+          {band(tab === "all" ? "list" : "waiting", tab === "all" ? "ค้างทั้งหมด (ด่วนก่อน)" : "ใบที่มีของรอ", <span className="font-normal text-slate-400">{tabList.length}</span>)}
+          {tabList.length > 0
+            ? <div className="divide-y divide-slate-100">{tabList.map((u) => row(u, fields.has("wait") ? u.tasks : [], canTick))}</div>
+            : empty("ไม่มีรายการในแท็บนี้")}
+          {tab === "all" && s.total > tabList.length && moreNote(s.total - tabList.length)}
         </section>
       )}
       {!tabList && (<>
-
-      {/* 👤 งานของคุณ — ขึ้นก่อน · ข้อของคุณติ๊กได้เสมอ */}
-      {data.mine.length > 0 && (
-        <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
-          <h3 className="mb-2 text-sm font-semibold text-indigo-900">👤 งานของคุณ <span className="font-normal text-indigo-700">({mineOpen > 0 ? `เหลือ ${mineOpen} ข้อ` : "ครบแล้ว 🎉"})</span></h3>
-          <div className="space-y-2">
-            {data.mine.map((m) => (
-              <div key={m.id} className="rounded-lg bg-white p-2 shadow-sm">
-                <ItemCard it={m} fields={fields} tasks={m.tasks} canTick={() => true} onTick={onTick} onOpen={onOpen} done={done} strong />
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[11px] text-indigo-700/80">ติ๊กเมื่อทำเสร็จ — ทีมเห็นในใบงานทันที</p>
-        </section>
-      )}
-
-      {/* 🔥 ต้องตามวันนี้ (หรือทุกงานเรียงด่วนก่อน — urgent_label) · ของรอติ๊กได้ตามสิทธิ์ (can_tick_all / ข้อของตัวเอง) */}
-      {data.audience === "all" && data.urgent.length > 0 && (
-        <section>
-          <h3 className="mb-1.5 text-sm font-semibold text-slate-800">{data.urgent_label}</h3>
-          <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-            {data.urgent.map((u) => (
-              <div key={u.id} className="p-2">
-                <ItemCard it={u} fields={fields} tasks={fields.has("wait") ? u.tasks : []} canTick={canTick} onTick={onTick} onOpen={onOpen} done={done} />
-              </div>
-            ))}
-          </div>
-          {data.more > 0 && <p className="mt-1.5 text-xs text-slate-500">และอีก {data.more} งาน — กด "ดูทั้งหมด"</p>}
-        </section>
-      )}
-
-      {data.mine.length === 0 && (data.audience === "mine" || data.urgent.length === 0) && (
-        <p className="rounded-xl bg-emerald-50 p-4 text-center text-sm text-emerald-700">ไม่มีงานที่ต้องตามตอนนี้ เยี่ยมมาก 🎉</p>
-      )}
+        {/* งานของคุณ — ขึ้นก่อน · ข้อของคุณติ๊กได้เสมอ */}
+        {data.mine.length > 0 && (
+          <section>
+            {band("user", "งานของคุณ", <span className="font-normal text-indigo-600">· {mineOpen > 0 ? `เหลือ ${mineOpen} ข้อ` : "ครบแล้ว"}</span>, true, "ติ๊กเมื่อทำเสร็จ — ทีมเห็นในใบงานทันที")}
+            <div className="divide-y divide-slate-100">{data.mine.map((m) => row(m, m.tasks, () => true, true))}</div>
+          </section>
+        )}
+        {/* ต้องตามวันนี้ (หรือทุกงานเรียงด่วนก่อน — urgent_label) · ของรอติ๊กได้ตามสิทธิ์ (can_tick_all / ข้อของตัวเอง) */}
+        {data.audience === "all" && data.urgent.length > 0 && (
+          <section>
+            {band("hot", plainLabel(data.urgent_label), <span className="font-normal text-slate-400">{data.urgent.length}</span>)}
+            <div className="divide-y divide-slate-100">{data.urgent.map((u) => row(u, fields.has("wait") ? u.tasks : [], canTick))}</div>
+            {data.more > 0 && moreNote(data.more)}
+          </section>
+        )}
+        {data.mine.length === 0 && (data.audience === "mine" || data.urgent.length === 0) && empty("ไม่มีงานที่ต้องตามตอนนี้ เยี่ยมมาก")}
       </>)}
       {data.audience === "mine" && data.mine.length > 0 && !preview && (
-        <p className="text-[11px] text-slate-400">คุณเห็นป๊อปนี้เพราะมีข้อในเช็กลิสต์ "รออะไรอยู่" ที่ใส่ชื่อคุณไว้</p>
+        <p className="px-3 pt-1.5 text-[11px] text-slate-400">คุณเห็นป๊อปนี้เพราะมีข้อในเช็กลิสต์ &quot;รออะไรอยู่&quot; ที่ใส่ชื่อคุณไว้</p>
       )}
     </div>
   );
@@ -259,7 +350,10 @@ export function WorkPopupHost() {
   const showIn = (key: string) => notifyOn(notifyPrefs, key, "center");
   const bounceOn = (key: string) => notifyOn(notifyPrefs, key, "bounce");
   const quietNow = inQuietHours(notifyPrefs.quiet);   // ห้ามรบกวน: ตัว Pet ไม่เด้ง (ยังเปิดดูได้)
-  const workShown = showIn("work");
+  // แท็บที่ผู้ใช้ปิดไว้ในหน้า "จัดศูนย์แจ้งเตือน" (work_popup_float.tabHidden) = ไม่โชว์ ไม่นับบนตัว Pet ไม่เด้ง (และไม่ถามข้อมูลแท็บนั้น)
+  const hiddenTabs = new Set(floatPref.tabHidden ?? []);
+  const tabOn = (k: string) => !hiddenTabs.has(k);
+  const workShown = showIn("work") && tabOn("work");
   const workShownRef = useRef(workShown);
   workShownRef.current = workShown;
   const quietRef = useRef(quietNow);   // ห้ามรบกวน = ไม่กางการ์ดเอง (ป๊อปยังอยู่ในตัว Pet)
@@ -303,15 +397,15 @@ export function WorkPopupHost() {
     return () => { clearTimeout(first); window.clearInterval(iv); };
   }, [uid, skip, enabled, wide, loadLine]);
   useRefresh(() => { if (wide && enabled && !skip) void loadLine(); });
-  const lineShown: LinePendingPayload | null = linePending && {
+  const lineShown: LinePendingPayload | null = linePending && tabOn("line") ? {
     design: showIn("line_design") ? linePending.design : undefined,
     order: showIn("line_order") ? linePending.order : undefined,
-  };
+  } : null;
   const lineCount = linePendingCount(lineShown);
 
   // ── แท็บ Task: งาน Task Manager ที่รอฉัน (รอตรวจ / ต้องแก้ / มอบให้ — GET /api/creative-tasks/inbox · lib/task-inbox) ──
   // ถามทุก 3 นาที เหมือนแท็บ LINE · ปิด "โชว์ในศูนย์" ของเรื่องนี้ = ไม่ถามเลย · ตัวนับ = รอตรวจ + ต้องแก้
-  const tasksOn = enabled && showIn("tasks");
+  const tasksOn = enabled && showIn("tasks") && tabOn("tasks");
   const tasksOnRef = useRef(tasksOn);
   tasksOnRef.current = tasksOn;
   const [inbox, setInbox] = useState<InboxPayload | null>(null);
@@ -343,7 +437,7 @@ export function WorkPopupHost() {
     : [];
 
   // ── แท็บ ของฉัน: การเตือนที่ตั้งเอง (components/my-watches · GET /api/my-watches) — โหลดพร้อมรอบ GIF ──
-  const watchesOn = enabled && showIn("watches");
+  const watchesOn = enabled && showIn("watches") && tabOn("watches");
   const [watchPref] = useMyWatches();
   const hasWatches = watchPref.list.some((w) => w.on);
   const { data: watchData, reload: reloadWatches } = useMyWatchesData(wide && !skip && watchesOn && hasWatches && !!uid);
@@ -377,7 +471,7 @@ export function WorkPopupHost() {
   // ── แท็บ ขึ้นเว็บ: สถานะขึ้นเว็บจริง (ผู้ดูแลระบบ · GET /api/admin/deploy ตัวเดียวกับหน้า /admin/deploy) ──
   //   ตัว Pet พูดเมื่อมี "เรื่องใหม่" (มีงานรอรอบ / ส่งขึ้นเว็บ / กำลัง build / ขึ้นแล้ว / build ล้ม — deployPetNews) · เปิดแท็บดู = เห็นแล้ว
   const canDeploy = usePermission("admin.users");
-  const deployOn = enabled && wide && !skip && !!uid && canDeploy && showIn("deploy");
+  const deployOn = enabled && wide && !skip && !!uid && canDeploy && showIn("deploy") && tabOn("deploy");
   const { status: deployStatus, error: deployError, reload: reloadDeploy } = useDeployStatus(deployOn);
   const [deployClock, setDeployClock] = useState(() => new Date());
   useEffect(() => { setDeployClock(new Date()); }, [deployStatus?.fetchedAt]);
@@ -401,8 +495,8 @@ export function WorkPopupHost() {
   }, [expanded, tab, deployNews?.key, deploySeenKey]);
 
   // ── แท็บ กระดิ่ง: แจ้งเตือนที่ยังไม่อ่าน (ตัวดึงกลางเดียวกับกระดิ่งบนแถบ) เฉพาะประเภทที่เปิดโชว์ในศูนย์ ──
-  const feed = useNotificationFeed(wide && enabled && !skip ? uid : null);
-  const bellItems = feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k); });
+  const feed = useNotificationFeed(wide && enabled && !skip && tabOn("bell") ? uid : null);
+  const bellItems = !tabOn("bell") ? [] : feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k); });
   const bellSeenKey = uid ? `fpet-bell-seen:${uid}` : "";
   const [bellSeen, setBellSeen] = useState<Set<string>>(new Set());
   useEffect(() => { if (bellSeenKey) setBellSeen(readIds(bellSeenKey)); }, [bellSeenKey]);
@@ -539,14 +633,14 @@ export function WorkPopupHost() {
   // ยังไม่ถึงเวลา/รับทราบแล้ว (เปิดดูเองจากปุ่มลอย) → ไม่ต้องมี "ไว้ทีหลัง" · รับทราบแล้วบอกไว้
   const pending = !!cur && cur.due !== false;
   const footer = cur && (
-    <div className="flex w-full flex-wrap items-center justify-end gap-2">
+    <div className="flex w-full flex-wrap items-center justify-end gap-1.5">
       {cur.view_all && cur.audience === "all" && (
-        <button onClick={() => open(cur, cur.view_all!, pending ? "ack" : "later")} className="mr-auto h-9 rounded-lg px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">ดูทั้งหมด →</button>
+        <button onClick={() => open(cur, cur.view_all!, pending ? "ack" : "later")} className="mr-auto inline-flex h-8 items-center rounded-md px-2 text-xs font-medium text-blue-700 hover:bg-blue-50">ดูทั้งหมด →</button>
       )}
-      {pending && <button onClick={() => finish(cur, "later")} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ไว้ทีหลัง</button>}
+      {pending && <button onClick={() => finish(cur, "later")} className="h-8 rounded-md border border-slate-300 px-3 text-xs text-slate-600 hover:bg-slate-50">ไว้ทีหลัง</button>}
       {!pending && cur.acked
-        ? <span className="h-9 inline-flex items-center rounded-lg bg-emerald-50 px-3 text-sm text-emerald-700">✓ รับทราบแล้ววันนี้</span>
-        : <button onClick={() => finish(cur, "ack")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">✓ รับทราบ</button>}
+        ? <span className="inline-flex h-8 items-center gap-1 rounded-md bg-emerald-50 px-2.5 text-xs text-emerald-700"><Icon value="i:check" /> รับทราบแล้ววันนี้</span>
+        : <button onClick={() => finish(cur, "ack")} className="inline-flex h-8 items-center gap-1 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"><Icon value="i:check" /> รับทราบ</button>}
     </div>
   );
 
@@ -554,13 +648,13 @@ export function WorkPopupHost() {
   // กดลิงก์ ?popup= เอง = เปิดป๊อปนั้นเสมอ แม้ปิด "โชว์ในศูนย์" ของป๊อปเตือนงานไว้
   const workTabOn = !!cur && visible && (workShown || forced.has(cur.report_id));
   const workCount = workTabOn && cur ? (cur.audience === "mine" ? mineOpen : cur.stats.total) : 0;
-  const gifOn = enabled && showIn("gif");
+  const gifOn = enabled && showIn("gif") && tabOn("gif");
   const gifCount = gifOn ? pokes.length : 0;
   const bellCount = enabled ? bellItems.length : 0;
   const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn || deployOn)));
   const tabs: FloatTab[] = [
     ...(workTabOn && cur ? [{
-      key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer,
+      key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer, flush: true,
       content: <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />,
     }] : []),
     ...(taskTabOn ? [{
@@ -638,7 +732,9 @@ export function WorkPopupHost() {
           title={`🔔 ${title}`}
           description={subtitle}
           footer={footer}>
-          <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
+          <FloatViewContext.Provider value={{ level: 2, hideImg: !!floatPref.hideImg }}>
+            <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
+          </FloatViewContext.Provider>
           <p className="mt-3 text-[11px] text-slate-400">💡 {WORK_POPUP_HIDE_HINT} แล้วปิดสวิตช์</p>
         </ERPModal>
       )}

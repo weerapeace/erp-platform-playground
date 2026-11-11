@@ -617,7 +617,9 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "work-popup", label: "ป๊อปเตือนงานตอนเข้าระบบ", code: "WorkPopupHost", category: "notify",
     source: { path: "components/work-popup" },
-    what: "เด้งเตือนงานค้างตอนเปิด ERP (ตั้งเงื่อนไขได้)",
+    what: "เด้งเตือนงานค้างตอนเปิด ERP (ตั้งเงื่อนไขได้) + ศูนย์แจ้งเตือนแบบแท็บ (ตัว Pet) — ปรับความกว้างได้ ยิ่งกว้างยิ่งเตี้ย · จัดลำดับ/เปิด-ปิดแท็บเองได้",
+    when: "แจ้งเตือนของแอปใหม่ที่อยากรวมไว้ที่เดียว → เพิ่มเป็นแท็บ (FloatTab + CENTER_TABS)",
+    notWhen: "ห้ามสร้างป๊อป/ปุ่มลอยแจ้งเตือนแยกของแต่ละแอป",
   },
   {
     key: "line-send", label: "ส่งข้อความ LINE", code: "lib/line-send", category: "notify",
