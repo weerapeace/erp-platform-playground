@@ -232,10 +232,13 @@ export function buildQuotationHtml(
   <title>${escapeHtml(docFileName("ใบเสนอราคา", quote.quote_number))}</title>
   <base href="${escapeHtml(origin || "/")}">
   <style>
-    @page { size: A4; margin: ${layout.topMarginMm}mm ${layout.horizontalMarginMm}mm ${layout.bottomMarginMm}mm; }
+    /* ขอบกระดาษอยู่ "ในตัวเอกสาร" (padding ของ .page) ไม่ใช่ที่ @page — เพราะ Chrome จำค่า Margins ล่าสุดไว้
+       ถ้าผู้ใช้เคยตั้ง None (เช่น ตอนพิมพ์สติกเกอร์/บาร์โค้ด) ค่าขอบใน @page จะถูกทิ้ง → เนื้อหาชิดขอบกระดาษ เส้นกรอบซ้าย-ขวาหาย
+       box-decoration-break: clone = เว้นขอบบน/ล่างซ้ำทุกหน้ากระดาษ (เอกสารยาวหลายหน้าไม่ชิดขอบ) */
+    @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff; color: #000; font-family: Tahoma, "Sarabun", Arial, sans-serif; font-size: ${layout.fontSizePx}px; }
-    .page { width: 210mm; min-height: 297mm; padding: ${layout.topMarginMm}mm ${layout.horizontalMarginMm}mm ${layout.bottomMarginMm}mm; margin: 0 auto; background: #fff; display: flex; flex-direction: column; }
+    .page { width: 210mm; min-height: 297mm; padding: ${layout.topMarginMm}mm ${layout.horizontalMarginMm}mm ${layout.bottomMarginMm}mm; margin: 0 auto; background: #fff; display: flex; flex-direction: column; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
     .company { text-align: center; line-height: 1.25; }
     .company-name { font-size: 15px; font-weight: 700; }
     .company-address { font-size: 10px; }
@@ -276,8 +279,8 @@ export function buildQuotationHtml(
     .sig-date { font-size: 10px; margin-top: 1mm; }
     @media print {
       body { background: #fff; }
-      /* ขอบกระดาษย้ายไป @page แล้ว → หน้าเอกสารสูงเท่าพื้นที่พิมพ์ (ลายเซ็นชิดล่างในหน้าเดียว, ยาวกว่าก็ต่อหน้าใหม่สวย ๆ) */
-      .page { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: calc(297mm - ${layout.topMarginMm + layout.bottomMarginMm}mm - 1mm); }
+      /* ขอบกระดาษ = padding ของ .page (ดู @page ข้างบน) → หน้าเอกสารสูงเกือบเท่ากระดาษ (ลายเซ็นชิดล่างในหน้าเดียว, ยาวกว่านั้นขึ้นหน้าใหม่เอง) */
+      .page { box-shadow: none; margin: 0; width: auto; min-height: calc(297mm - 1mm); }
     }
   </style>
 </head>
