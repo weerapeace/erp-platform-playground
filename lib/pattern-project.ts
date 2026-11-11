@@ -206,6 +206,8 @@ export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area
   });
 }
 
+/** ขนาดสูงสุดของช่อง template (ตัวอักษร JSON) */
+export const TEMPLATE_MAX_CHARS = 30000;
 export type ProjectPatch = Partial<{ name: string; status: PatternProjectStatus; note: string; sku_code: string | null; pieces: ProjectPiece[]; seams: Seam[]; basis: "box" | "area"; template: Record<string, unknown> | null }>;
 /** ตรวจค่าที่หน้าจอส่งมาแก้ — คืนเฉพาะช่องที่ส่งมาและถูกรูปแบบ · ตะเข็บตรวจเทียบกับชิ้นชุดที่ให้มา (หรือชุดเดิม) */
 export function cleanProjectPatch(body: Record<string, unknown>, currentPieces: ProjectPiece[]): { patch: ProjectPatch; error: string | null } {
@@ -215,7 +217,12 @@ export function cleanProjectPatch(body: Record<string, unknown>, currentPieces: 
   if ("note" in body) patch.note = String(body.note ?? "").slice(0, 4000);
   if ("sku_code" in body) patch.sku_code = String(body.sku_code ?? "").trim().slice(0, 80) || null;
   if ("basis" in body) patch.basis = body.basis === "area" ? "area" : "box";
-  if ("template" in body) patch.template = body.template && typeof body.template === "object" && !Array.isArray(body.template) && JSON.stringify(body.template).length < 12000 ? (body.template as Record<string, unknown>) : null;
+  if ("template" in body) {
+    const ok = !!body.template && typeof body.template === "object" && !Array.isArray(body.template);
+    // เกินขนาด = แจ้ง ไม่ล้างเงียบ ๆ (ในนี้มี จุดติดหู · ค่าวัสดุ · รายการซิป/อะไหล่ · เป้าหมายตีราคาล่าสุด)
+    if (ok && JSON.stringify(body.template).length >= TEMPLATE_MAX_CHARS) return { patch, error: "ข้อมูลประกอบของแพทเทิร์นใหญ่เกินไป (รายการซิป/อะไหล่ หรือค่าวัสดุมากเกิน) ลองลดรายการแล้วบันทึกใหม่" };
+    patch.template = ok ? (body.template as Record<string, unknown>) : null;
+  }
   if ("pieces" in body) {
     if (!Array.isArray(body.pieces)) return { patch, error: "ข้อมูลชิ้นไม่ถูกรูปแบบ" };
     patch.pieces = cleanProjectPieces(body.pieces);

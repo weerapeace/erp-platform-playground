@@ -6,6 +6,7 @@
  *   dry = true → ไม่เขียนอะไร คืนสรุปว่าจะเพิ่ม/อัปเดตกี่บรรทัด (ให้ผู้ใช้เห็นก่อนกดยืนยัน)
  *   ส่งจริง  → เพิ่มบรรทัดใหม่ + อัปเดตบรรทัดของชิ้นที่เคยส่ง (จับคู่ด้วยรหัสชิ้น + วัสดุ) — **ไม่ลบบรรทัดเดิมของใบงาน**
  *   ใช้ข้อมูลแพทเทิร์นที่ "บันทึกแล้ว" · สูตรจับคู่/คิดเงิน = lib/pattern-costing (สูตรเดียวกับหน้าตีราคา)
+ *   + ซิปและอะไหล่ของแพทเทิร์น (template.trims) → 1 วัสดุ = 1 บรรทัด ไม่มีรูปทรง จับคู่ตอนส่งซ้ำด้วย วัสดุ + ป้าย "[แพทเทิร์น <เลขที่>]" ในหมายเหตุ (lib/pattern-trims)
  *   จำเป้าหมายล่าสุดไว้ในช่อง template.costing ของแพทเทิร์น · จดประวัติทั้งฝั่งใบงานและฝั่งแพทเทิร์น
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +16,7 @@ import { COST_PERM } from "@/lib/cost-access";
 import { writeAudit } from "@/lib/audit";
 import { cleanProjectPieces } from "@/lib/pattern-project";
 import { planCostingSend, type ExistingCostLine } from "@/lib/pattern-costing";
+import { cleanTrims, openSlits, planTrimsSend, trimRows } from "@/lib/pattern-trims";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import { PROJECT_PERM, PROJECT_TABLE, loadProjectActor } from "@/lib/pattern-project-server";
 
@@ -23,7 +25,7 @@ export const revalidate = 0;
 
 type Params = { params: Promise<{ id: string }> };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const LINE_COLS = "id, parent_code, sort_order, item_id, item_name, item_sku_code, group_code, group_name, calc_method, width_cm, length_cm, pieces, face_width_cm, waste_percent, divisor, qty, uom, unit_price, amount, shape";
+const LINE_COLS = "id, parent_code, sort_order, item_id, item_name, item_sku_code, group_code, group_name, calc_method, width_cm, length_cm, pieces, face_width_cm, waste_percent, divisor, qty, uom, unit_price, amount, note, shape";
 const n = (v: unknown): number | null => (v == null ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 
 export async function POST(request: NextRequest, { params }: Params): Promise<NextResponse> {
@@ -52,7 +54,9 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   if (!pieces.length) return NextResponse.json({ error: "แพทเทิร์นนี้ยังไม่มีชิ้น — วาดชิ้นแล้วกดบันทึกก่อน" }, { status: 400 });
 
   // วัสดุตีราคาที่ชิ้นอ้างถึง (ไว้ตั้งชนิด/ราคาของบรรทัดใหม่)
-  const matIds = [...new Set(pieces.flatMap((p) => (p.mats ?? []).map((m) => m.id)).filter((x) => UUID.test(x)))];
+  const trims = cleanTrims((proj.template as { trims?: unknown } | null)?.trims);
+  const rows = trimRows(trims, pieces);
+  const matIds = [...new Set([...pieces.flatMap((p) => (p.mats ?? []).map((m) => m.id)), ...trims.map((x) => x.mat.id)].filter((x) => UUID.test(x)))];
   const items = new Map<string, CostItemLike>();
   if (matIds.length) {
     const { data: its } = await admin.from("design_price_items")
@@ -75,20 +79,30 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     waste_percent: n(r.waste_percent), divisor: n(r.divisor), qty: n(r.qty), unit_price: n(r.unit_price), amount: n(r.amount),
   })) as ExistingCostLine[];
   const plan = planCostingSend(pieces, proj.basis === "area" ? "area" : "box", existing, parent || null, items);
+  // ซิปและอะไหล่ — ต่อท้ายบรรทัดของชิ้น
+  const patternNo = (proj.pattern_no as string | null) || id.slice(0, 8);
+  const sortEnd = existing.reduce((m, r) => Math.max(m, r.sort_order ?? 0), 0) + plan.inserts.length;
+  const tp = planTrimsSend(rows, existing, parent || null, items, patternNo, sortEnd);
   const summary = {
     sheet: { id: sheet.id as string, code: sheet.code as string, name: sheet.name as string }, parent_code: parent || null,
-    added: plan.inserts.length, updated: plan.updates.length, stale: plan.stale, no_material: plan.noMaterial, missing_items: plan.missingItems, amount: plan.amount,
+    added: plan.inserts.length, updated: plan.updates.length, stale: plan.stale, no_material: plan.noMaterial, missing_items: plan.missingItems,
+    amount: Math.round((plan.amount + tp.amount) * 100) / 100,
+    trims: {
+      added: tp.inserts.length, updated: tp.updates.length, lines: tp.lines, stale: tp.stale, skipped: tp.skipped, missing_items: tp.missingItems,
+      no_qty: tp.noQty, gone: rows.filter((r) => r.gone).length, open_slits: openSlits(trims, pieces).length,
+    },
   };
   if (body.dry === true) return NextResponse.json({ data: summary, error: null });
 
-  if (plan.inserts.length) {
-    const { error } = await admin.from("design_sheet_cost_lines").insert(plan.inserts.map((r) => ({ ...r, sheet_id: sheetId })));
+  const inserts = [...plan.inserts, ...tp.inserts], updates = [...plan.updates, ...tp.updates];
+  if (inserts.length) {
+    const { error } = await admin.from("design_sheet_cost_lines").insert(inserts.map((r) => ({ ...r, sheet_id: sheetId })));
     if (error) return NextResponse.json({ error: "เพิ่มบรรทัดตีราคาไม่สำเร็จ ยังไม่มีอะไรเปลี่ยนในใบงาน กรุณาลองใหม่" }, { status: 500 });
   }
-  let failed = 0;
-  for (const u of plan.updates) {
+  let failed = 0, failedTrims = 0;
+  for (const [i, u] of updates.entries()) {
     const { error } = await admin.from("design_sheet_cost_lines").update(u.patch).eq("id", u.id).eq("sheet_id", sheetId);
-    if (error) failed++;
+    if (error) { failed++; if (i >= plan.updates.length) failedTrims++; }
   }
 
   const at = new Date().toISOString();
@@ -97,13 +111,13 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   await Promise.all([
     writeAudit(admin, {
       action: "cost_update", entityType: "design_sheet", entityId: sheetId, actorId: actor.userId, actorName: actor.name,
-      metadata: { source: "pattern_project", pattern_id: id, pattern_no: proj.pattern_no, parent_code: parent || null, lines_added: plan.inserts.length, lines_updated: plan.updates.length - failed, amount: plan.amount },
+      metadata: { source: "pattern_project", pattern_id: id, pattern_no: proj.pattern_no, parent_code: parent || null, lines_added: inserts.length, lines_updated: updates.length - failed, trim_lines: tp.lines.length, amount: summary.amount },
     }),
     writeAudit(admin, {
       action: "send_costing", entityType: PROJECT_TABLE, entityId: id, actorId: actor.userId, actorName: actor.name,
-      metadata: { pattern_no: proj.pattern_no, name: proj.name, sheet_id: sheetId, sheet_code: sheet.code, parent_code: parent || null, lines_added: plan.inserts.length, lines_updated: plan.updates.length - failed },
+      metadata: { pattern_no: proj.pattern_no, name: proj.name, sheet_id: sheetId, sheet_code: sheet.code, parent_code: parent || null, lines_added: inserts.length, lines_updated: updates.length - failed, trim_lines: tp.lines.length },
     }),
   ]);
-  if (failed) return NextResponse.json({ data: { ...summary, updated: plan.updates.length - failed, template: tpl }, error: `อัปเดตไม่สำเร็จ ${failed} บรรทัด — เปิดตีราคาของใบงานตรวจดู แล้วลองส่งใหม่` }, { status: 207 });
+  if (failed) return NextResponse.json({ data: { ...summary, updated: plan.updates.length - (failed - failedTrims), trims: { ...summary.trims, updated: tp.updates.length - failedTrims }, template: tpl }, error: `อัปเดตไม่สำเร็จ ${failed} บรรทัด — เปิดตีราคาของใบงานตรวจดู แล้วลองส่งใหม่` }, { status: 207 });
   return NextResponse.json({ data: { ...summary, template: tpl }, error: null });
 }

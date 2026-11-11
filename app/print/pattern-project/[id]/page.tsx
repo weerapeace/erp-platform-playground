@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { PatternPrintView } from "@/components/pattern-sheet/print-view";
 import { projectEdgeRows, projectPatternLines, projectPieceRows, projectSeamRows, type PatternProject } from "@/lib/pattern-project";
+import { cleanTrims, trimRows } from "@/lib/pattern-trims";
 
 export default function PrintPatternProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -34,9 +35,30 @@ export default function PrintPatternProjectPage() {
   const seamRows = useMemo(() => (project ? projectSeamRows(project.pieces ?? [], project.seams ?? []) : []), [project]);
   const edgeRows = useMemo(() => (project ? projectEdgeRows(project.pieces ?? []) : []), [project]);
   const pieceRows = useMemo(() => (project ? projectPieceRows(project.pieces ?? []) : []), [project]);
+  const trims = useMemo(() => (project ? trimRows(cleanTrims((project.template as { trims?: unknown } | null)?.trims), project.pieces ?? []).filter((r) => !r.gone) : []), [project]);
   const f1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
-  const th = "py-1 pr-2", tables = seamRows.length || edgeRows.length || pieceRows.length ? (
+  const th = "py-1 pr-2", tables = seamRows.length || edgeRows.length || pieceRows.length || trims.length ? (
     <div className="space-y-3">
+      {trims.length > 0 && (
+        <div className="break-inside-avoid">
+          <div className="mb-1 text-[11px] font-medium text-slate-600">ซิปและอะไหล่ (ต่อกระเป๋า 1 ใบ)</div>
+          <table className="w-full border-collapse text-[12px]">
+            <thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500">
+              <th className={th}>ใช้ตรงไหน</th><th className={th}>วัสดุ</th><th className={`${th} text-right`}>ยาวต่อเส้น</th><th className={`${th} text-right`}>จำนวน</th><th className="py-1 text-right">รวม</th>
+            </tr></thead>
+            <tbody>
+              {trims.map((r) => (
+                <tr key={r.trim.id} className="border-b border-slate-100">
+                  <td className={th}>{r.label}</td><td className={th}>{r.trim.mat.name}</td>
+                  <td className={`${th} text-right tabular-nums`}>{r.mode === "length" ? `${f1(r.each)} ซม.` : "—"}</td>
+                  <td className={`${th} text-right tabular-nums`}>{r.qty} {r.mode === "length" ? "เส้น" : "ตัว"}</td>
+                  <td className="py-1 text-right tabular-nums">{r.mode === "length" ? `${f1(r.total)} ซม.` : `${r.total} ตัว`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {pieceRows.length > 0 && (
         <div className="break-inside-avoid">
           <div className="mb-1 text-[11px] font-medium text-slate-600">รายละเอียดชิ้น</div>

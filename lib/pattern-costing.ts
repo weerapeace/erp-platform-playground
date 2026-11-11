@@ -22,6 +22,7 @@ export type ExistingCostLine = {
   width_cm: number | null; length_cm: number | null; pieces: number | null;
   face_width_cm: number | null; waste_percent: number | null; divisor: number | null;
   qty: number | null; uom?: string | null; unit_price: number | null; amount: number | null;
+  note?: string | null;
   shape?: unknown;
 };
 /** บรรทัดใหม่ที่จะเพิ่ม (ยังไม่มี sheet_id — API เติมเอง) */

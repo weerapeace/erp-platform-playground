@@ -135,7 +135,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
     setInject({ nonce: Date.now(), inner: [{ pid: hostPid, lines: [plan.line] }], pieces: [{ pid: newPid, shape: plan.piece.shape, count: 1, allow: 0, allowEdges: plan.piece.allowEdges, foldEdges: plan.piece.foldEdges, inner: plan.piece.inner, name: t(plan.piece.name, opts.kind === "patch" ? "Pocket" : "Zip pocket bag"), info: role ? { role } : null, mats: [] }] });
     sew.onChange([...sew.seams, { id: `s${stamp}k`, a: { pid: hostPid, from: 0, count: 1, n: 1, inner: plan.line.id }, b: { pid: newPid, ...plan.side }, kind: "lapped" }]);
     setNotice(opts.kind === "zip"
-      ? t(`เพิ่มช่องซิปแล้ว: ซิปยาว ${opts.w} ซม. 1 เส้น (ยังต้องใส่ซิปเป็นบรรทัดวัสดุในใบตีราคาเอง)`, `Zip pocket added: one ${opts.w} cm zip (add the zip to the costing sheet yourself for now)`)
+      ? t(`เพิ่มช่องซิปแล้ว: ซิปยาว ${opts.w} ซม. 1 เส้น (เลือกซิปของช่องนี้ได้ที่ปุ่ม ซิป / อะไหล่ แล้วไปตีราคาพร้อมชิ้น)`, `Zip pocket added: one ${opts.w} cm zip (choose its zip under Zips / hardware — it goes to costing with the pieces)`)
       : t("เพิ่มช่องใส่ของแล้ว", "Pocket added"));
   };
   const pieceColors = useMemo(() => { const out: Record<string, string> = {}; for (const p of live) { const c = p.mats.map((m) => props.matProps?.[m.id]?.color).find(Boolean); if (c) out[p.pid] = c; } return out; }, [live, props.matProps]);
