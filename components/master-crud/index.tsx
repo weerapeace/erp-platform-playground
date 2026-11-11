@@ -635,6 +635,11 @@ export type MasterCRUDConfig = {
   /** คีย์ที่ห้ามคัดลอกเพิ่มเติมเฉพาะโมดูลนี้ */
   copyExcludeKeys?: string[];
   /**
+   * ปุ่ม "📋 คัดลอกจากรุ่นอื่น" บนแถบเครื่องมือของลิ้นชัก — ทุกกลุ่มในครั้งเดียว (ตารางเทียบ ตอนนี้ ↔ จะได้ + ติ๊กเลือก)
+   * กดได้ทั้งโหมดดู (เติมแล้วสลับเป็นโหมดแก้ให้) และโหมดแก้ · ยังไม่บันทึกจนกดบันทึก (เจ้าของขอ 2026-11-11)
+   */
+  copyFromRecordToolbar?: boolean;
+  /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
    * Trade-off: ปิด client filter/saved-views (search + pagination ทำที่ server)
@@ -2489,15 +2494,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         mode: drawerMode,
         refresh: reloadRecord,
       });
-      const keys = groupFields
-        .filter((f) => !f.readonly && f.type !== "computed" && f.type !== "image" && f.type !== "one2many" && f.type !== "many2many")
-        .map((f) => f.key);
+      const keys = groupFields.filter(isCopyableField).map((f) => f.key);
       const copyBtn = (config.copyFromRecord && drawerMode === "edit" && canEdit && keys.length > 0) ? (
         <CopyFromRecordButton
           apiBase={apiBase} apiPath={config.apiPath} currentId={editingId ? String(editingId) : null}
           sectionLabel={groupLabel} fieldKeys={keys}
           labelKeys={["code", "name_th", "name", "title"]}
           currentValues={form} excludeKeys={config.copyExcludeKeys ?? []}
+          fields={groupFields.map((f) => ({ key: f.key, label: f.label }))} renderValue={copyPreviewValue}
           onApply={(values) => setForm((p) => ({ ...p, ...values }))}
         />
       ) : null;
@@ -2505,6 +2509,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       return <span className="inline-flex items-center gap-2">{custom}{copyBtn}</span>;
     }
     : undefined;
+
+  /** ค่าในตารางเทียบของป๊อป "คัดลอกจากรุ่นอื่น" — อ่านง่าย (id อ้างอิง → ชื่อ · HTML → ข้อความ · รายการ → คั่นจุลภาค) */
+  function copyPreviewValue(key: string, v: unknown, rec: Record<string, unknown>): React.ReactNode {
+    const f = fieldByKey.get(key);
+    if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return <span className="text-slate-300">—</span>;
+    if (f?.type === "boolean") return v ? tr("เปิด", "On") : tr("ปิด", "Off");
+    if (f?.type === "relation") {
+      const base = key.endsWith("_id") ? key.slice(0, -3) : key;
+      const lbl = rec[`${base}_label`] ?? rec[`${base}_name`];
+      return lbl ? String(lbl) : <RelationLabelValue id={String(v)} config={f.relationConfig as RelationConfig | undefined} />;
+    }
+    if (f?.cellRender && typeof v !== "object") return f.cellRender(v, rec);
+    if (typeof v === "string") return <span className="whitespace-pre-wrap">{v.includes("<") ? v.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|li|div)>/gi, "\n").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() : v}</span>;
+    const one = (x: unknown) => (x && typeof x === "object"
+      ? Object.values(x as Record<string, unknown>).filter((y) => y != null && typeof y !== "object" && String(y) !== "").join(" ")
+      : String(x));
+    if (Array.isArray(v)) return v.map(one).join(" · ");
+    if (typeof v === "object") return one(v);
+    return String(v);
+  }
 
   /** bare = ไม่วาดหัวข้อ/คำอธิบาย (ผู้เรียกวาดเอง เช่น หน้าจอโหมดลงรายละเอียด) */
   const renderField = (f: FieldDef, maxSpan = 3, bare = false) => {
@@ -3155,12 +3179,23 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const pairFields = effectiveFields.filter((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_en);
           const aiBtn = !!config.aiProductDetail && !!editingId && canEdit;
           const modeBtn = drawerMode === "view" && !!editingId && (entryModes.length > 0 || canEditModes);
-          if (pairFields.length === 0 && !aiBtn && !modeBtn) return null;
+          // 📋 คัดลอกจากรุ่นอื่น (ทุกกลุ่ม) — ช่องเรียงตาม layout (แท็บ → หัวข้อ) ป้ายกลุ่ม = ชื่อหัวข้อ
+          const copyFields = (config.copyFromRecordToolbar && editingId && canEdit) ? (() => {
+            const secs = (registryLayout?.tabs ?? []).flatMap((tb) => tb.sections.map((s) => ({ key: s.key, label: s.label || getGroupConfig(s.key).label })));
+            const secIdx = new Map(secs.map((s, i) => [s.key, i]));
+            return effectiveFields
+              .filter((f) => isCopyableField(f) && !f.hideInForm && f.key !== "cover_image_r2_key")
+              .map((f) => ({ f, g: f.groupKey ?? "other" }))
+              .sort((a, b) => (secIdx.get(a.g) ?? 999) - (secIdx.get(b.g) ?? 999) || (a.f.order ?? 999) - (b.f.order ?? 999))
+              .map(({ f, g }) => ({ key: f.key, label: f.label, group: secs.find((s) => s.key === g)?.label ?? getGroupConfig(g).label }));
+          })() : [];
+          const copyAllBtn = copyFields.length > 0;
+          if (pairFields.length === 0 && !aiBtn && !modeBtn && !copyAllBtn) return null;
           const canTranslate = pairFields.some((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_translate !== false);
           // แถบเครื่องมือ: จัดเป็นกลุ่ม กรอบเส้นสี (เจ้าของขอ 2026-11-11 "เป็นเส้นสี จัดกลุ่มสวยๆ")
-          //   ภาษา (คราม) · เนื้อหา = โหมดลงรายละเอียด + AI (ม่วง) · แปล (ฟ้า) — ปุ่มในกลุ่มเป็นแบบโปร่ง ไม่มีพื้นสี
+          //   ภาษา (คราม) · เนื้อหา = โหมดลงรายละเอียด + AI + คัดลอกจากรุ่นอื่น (ม่วง) · แปล (ฟ้า) — ปุ่มในกลุ่มเป็นแบบโปร่ง ไม่มีพื้นสี
           //   ห้ามใส่ overflow-hidden ที่กล่องกลุ่ม — เมนูโหมดลงรายละเอียดเป็น dropdown ลอยออกนอกกล่อง
-          const contentGroup = modeBtn || aiBtn;
+          const contentGroup = modeBtn || aiBtn || copyAllBtn;
           return (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               {pairFields.length > 0 && (
@@ -3192,6 +3227,19 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-fuchsia-700 hover:bg-fuchsia-50">
                     ✨ {tr("ให้ AI คิดรายละเอียด", "Let AI draft details")}
                   </button>
+                )}
+                {copyAllBtn && (
+                  <CopyFromRecordButton variant="toolbar"
+                    apiBase={apiBase} apiPath={config.apiPath} currentId={editingId ? String(editingId) : null}
+                    sectionLabel={config.title} fieldKeys={copyFields.map((f) => f.key)} fields={copyFields}
+                    labelKeys={["code", "name_th", "name", "title"]}
+                    currentValues={form} excludeKeys={config.copyExcludeKeys ?? []} renderValue={copyPreviewValue}
+                    onApply={(values) => {
+                      // โหมดดู → เติมแล้วสลับเป็นโหมดแก้ (แถบบันทึกขึ้น) · ยังไม่บันทึกจนกดบันทึกเอง
+                      //   อยู่ในโหมดลงรายละเอียด = เติมลงช่องของโหมดเลย (หน้าจอโหมดเป็นช่องกรอกอยู่แล้ว ไม่สลับ)
+                      setForm((p) => ({ ...p, ...values }));
+                      if (drawerMode === "view" && !activeMode) switchToEdit();
+                    }} />
                 )}
               </div>
               )}
@@ -3875,6 +3923,8 @@ export function MasterRecordDrawer({
       // ✨ ปุ่ม "ให้ AI คิดรายละเอียดสินค้า" — ต้องเปิดที่นี่ด้วย เพราะ drawer สร้าง config เอง
       // (ไม่ได้ใช้ CONFIG ของหน้า /master/parent-skus) ซึ่งเป็นทางที่ผู้ใช้เปิดจริงจากหน้าแท็ก/การ์ด
       aiProductDetail: moduleKey === "parent-skus-v2",
+      // 📋 "คัดลอกจากรุ่นอื่น" บนแถบเครื่องมือ (ทุกกลุ่ม + ตารางเทียบ) — Parent SKU (ต้องตั้งที่นี่ด้วยเหมือน aiProductDetail)
+      copyFromRecordToolbar: moduleKey === "parent-skus-v2",
       // 📋 "คัดลอกจากตัวอื่น" รายกลุ่มฟิลด์ — เปิดให้ทุกโมดูลที่เปิดผ่าน drawer (ยังไม่บันทึกจนกด "บันทึก")
       copyFromRecord: true,
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
@@ -4271,6 +4321,10 @@ function LayoutTabs({
   );
 }
 
+// ช่องที่คัดลอกจากระเบียนอื่นได้ (ปุ่มข้างหัวข้อกลุ่ม + ปุ่มแถบเครื่องมือ "คัดลอกจากรุ่นอื่น") — ค่าเก็บตรงในระเบียน แก้ได้
+function isCopyableField(f: FieldDef): boolean {
+  return !f.readonly && f.type !== "computed" && f.type !== "image" && f.type !== "one2many" && f.type !== "many2many";
+}
 // ขอบเขตของค่า "แท็บที่ฉันซ่อน" (= moduleKey/tableId ของ MasterCRUD) — LayoutTabs อ่านผ่าน context ไม่ต้องส่ง prop ผ่าน Form/DetailSections
 //   ไม่มี Provider (ใช้ LayoutTabs นอก MasterCRUD) = ไม่มีปุ่มเลือกแท็บ
 const TabPrefScope = createContext<string | null>(null);
