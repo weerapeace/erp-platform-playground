@@ -87,6 +87,17 @@ export function statusOptsFor(meta: StatusMeta, ownBrand: boolean, current?: str
   if (!ownBrand) return meta.opts;
   return meta.opts.filter(([k]) => !meta.customerOnly.has(k) || k === current);
 }
+/** ปุ่ม "ส่งต่อ" บนมือถือ: สถานะถัดไปตามลำดับ workflow ที่ยังเปิดอยู่ (เลือกได้สำหรับใบนี้)
+ *  ไม่แนะนำสถานะปิดงาน (ตั้ง SKU แล้ว / ยกเลิก / ฯลฯ — is_terminal) เด็ดขาด → ปิดงานต้องเลือกเองในแผ่นเปลี่ยนสถานะ
+ *  ใบที่ปิดแล้ว / ไม่มีขั้นถัดไปที่ยังเปิด / สถานะไม่รู้จัก = null */
+export function nextOpenStatus(meta: StatusMeta, ownBrand: boolean, current: string | null | undefined): readonly [string, string] | null {
+  if (!current || meta.finished.has(current)) return null;
+  const opts = statusOptsFor(meta, ownBrand, current);
+  const i = opts.findIndex(([k]) => k === current);
+  if (i < 0) return null;
+  const next = opts[i + 1];
+  return next && !meta.finished.has(next[0]) ? next : null;
+}
 /** ป้ายสถานะที่ไม่รู้จัก (เช่น สถานะถูกลบออกจาก workflow แล้ว) — โชว์ key เดิมสีเทา ข้อมูลไม่หาย */
 export const UNKNOWN_STATUS_CLS = "bg-slate-100 text-slate-400";
 

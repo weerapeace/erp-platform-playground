@@ -796,6 +796,14 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "หน้าที่มีแท็บหลายอัน โดยเฉพาะบนมือถือ",
   },
   {
+    key: "block-layout", label: "จัดกล่องในหน้า (ลากสลับ · ซ่อน · เต็ม/ครึ่ง)", code: "useBlockLayout · BlockLayoutRows · BlockLayoutEditor · lib/block-layout", category: "layout",
+    source: { path: "components/block-layout", names: ["useBlockLayout", "BlockLayoutRows", "BlockLayoutEditor"] },
+    what: "ให้ทีม (แอดมิน) และแต่ละคนจัดกล่องในหน้าเองได้ — ลากสลับลำดับ เปิด/ปิด ขนาดเต็มหรือครึ่ง (ครึ่ง 2 ใบติดกัน = วางคู่) · ทีมเก็บ ui_config admin_block_layout:<หน้า> · ของฉันเก็บ user_ui_prefs",
+    when: "หน้าที่เขียนเองแบ่งเป็นกล่อง (เช่น หน้าใบงานมือถือ หน้าภาพรวม) แล้วอยากให้คนจัดเอง",
+    notWhen: "ฟอร์ม/หน้าข้อมูล MasterCRUD (ใช้ตัวออกแบบฟอร์ม StudioPanel) · คอลัมน์ตาราง (Column Manager ของตารางกลาง) · แท็บในศูนย์แจ้งเตือน (CENTER_TABS)",
+    doc: "block-layout.md",
+  },
+  {
     key: "gallery-columns", label: "เลือกจำนวนการ์ดต่อแถว", code: "GalleryColumns", category: "layout",
     source: { path: "components/gallery-columns" },
     what: "ปุ่มเลือกว่ามุมมองกริดจะโชว์กี่การ์ดต่อแถว (จำค่าไว้)",

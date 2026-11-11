@@ -15,6 +15,7 @@ import { ORBIT_TEAM_KEY } from "@/lib/app-orbit-style";
 import { THEME_TEAM_KEY } from "@/lib/launcher-theme";
 import { PRINT_TEAM_PRESETS_KEY } from "@/lib/list-print";
 import { docPrintPerms } from "@/lib/doc-print-prefs";
+import { BLOCK_TEAM_PREFIX } from "@/lib/block-layout";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const docPerm = docPrintPerms(key);
   if (docPerm) {
     const denied = await guardApi(request, docPerm.view); if (denied) return denied;
-  } else if (LOGIN_READ_KEYS.has(key)) {
+  } else if (LOGIN_READ_KEYS.has(key) || key.startsWith(BLOCK_TEAM_PREFIX)) {   // แบบจัดกล่องของทีม (lib/block-layout) — ทุกคนที่ล็อกอินอ่านได้ (หน้าตาเท่านั้น ไม่มีข้อมูลธุรกิจ)
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     if (!user) return NextResponse.json({ value: {}, error: "unauthenticated" }, { status: 401 });
   } else {

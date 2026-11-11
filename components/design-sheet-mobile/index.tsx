@@ -12,13 +12,14 @@
  */
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { copyText } from "@/components/copy-button";
 import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { apiFetch } from "@/lib/api";
-import { buildStatusMeta, isOwnBrandJob, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { buildStatusMeta, isOwnBrandJob, nextOpenStatus, QUOTE_STATUS, QUOTE_STATUS_OPTS, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -29,6 +30,9 @@ import { SheetQuotations } from "@/components/design-sheet-detail/sheet-quotatio
 import { RecordChecklist } from "@/components/record-tasks";
 import { DesignStatusSheet } from "./status-sheet";
 import { Icon } from "@/components/icon";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { BottomSheet } from "@/components/modal";
+import { BlockLayoutEditor, BlockLayoutRows, useBlockLayout, type BlockDef } from "@/components/block-layout";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { DriveUploadBox } from "@/components/drive-upload-box";
 import { fetchSheetDriveFolder, startSheetDriveUpload } from "@/lib/design-sheet-drive-client";
@@ -73,6 +77,21 @@ type Sheet = {
   cost_restricted?: boolean;   // API บอก: คนนี้ไม่มีสิทธิ์เห็นต้นทุน → ไม่มีแท็บตีราคา
 };
 type SheetTab = "overview" | "cost" | "quote" | "chat" | "files";
+
+/** 🧱 กล่องในแท็บภาพรวม (ลำดับ = ค่าเริ่มต้น) — ทีม/แต่ละคนจัดลำดับ · เปิด/ปิด · เต็ม/ครึ่ง เองได้ (ของกลาง components/block-layout · เจ้าของสั่ง 2026-11-11)
+ *  ครึ่ง 2 กล่องติดกัน = วางคู่ในแถวเดียว · เพิ่มกล่องใหม่ = เพิ่มที่นี่ + ใน renderBlock (คนที่จัดไว้แล้วจะเห็นกล่องใหม่ต่อท้าย) */
+const DS_BLOCKS = (): BlockDef[] => [
+  { key: "gallery", label: tr("รูปงาน", "Job images"), icon: "image", hint: tr("แท็บเล็ต = อยู่คอลัมน์ซ้าย", "Tablet: left column") },
+  { key: "status", label: tr("สถานะ + กำหนดส่ง", "Status + deadline"), icon: "flag" },
+  { key: "waiting", label: tr("รออะไรอยู่", "Waiting for"), icon: "waiting" },
+  { key: "cost", label: tr("ต้นทุน/ใบ", "Cost/unit"), icon: "calc", sizes: ["half", "full"] },
+  { key: "quote", label: tr("เสนอราคา", "Quote"), icon: "receipt", sizes: ["half", "full"] },
+  { key: "note", label: tr("โน้ต", "Note"), icon: "note" },
+  { key: "detail", label: tr("รายละเอียดงาน", "Job details"), icon: "document" },
+  { key: "sku", label: "SKU", icon: "tag", sizes: ["half", "full"], hint: tr("แตะ = กางดู SKU", "Tap to view SKUs") },
+  { key: "dates", label: tr("วันที่สั่ง / นัดลูกค้า", "Order / appointment"), icon: "calendar", sizes: ["half", "full"] },
+  { key: "links", label: tr("Parent SKU + ไฟล์ Drive", "Parent SKU + Drive"), icon: "link" },
+];
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const money = (n: number | null | undefined) => (n == null ? "—" : `฿${Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`);
@@ -140,6 +159,12 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const [costMounted, setCostMounted] = useState(false);
   const [costDirty, setCostDirty] = useState(false);
   const [skuOpen, setSkuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);       // เมนู ⋯ (ปุ่มรองบนหัว ย้ายมารวมที่นี่)
+  const [layoutOpen, setLayoutOpen] = useState(false);   // แผ่น "จัดหน้า" (ของกลาง block-layout)
+  const lang = getLang();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const blockDefs = useMemo(() => DS_BLOCKS(), [lang]);
+  const blockLayout = useBlockLayout("design_sheet_mobile", blockDefs);
   useEffect(() => { if (tab === "cost") setCostMounted(true); }, [tab]);
   const commentRef = useRef<HTMLTextAreaElement>(null);
   // 📁 โฟลเดอร์ Drive ของใบ — หาเมื่อเปิดแท็บไฟล์ครั้งแรก (ไม่เจอ = สร้างตอนอัปไฟล์แรก)
@@ -193,8 +218,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const lightboxImages = images.map((im) => ({ url: im.url, label: im.source_label }));
 
   // บันทึกฟิลด์เดี่ยว (สถานะ / กำหนดส่ง / โน้ต) — optimistic + toast
-  async function patchField(patch: Record<string, unknown>, label: string) {
-    if (!sheet || !canEdit) return;
+  async function patchField(patch: Record<string, unknown>, label: string, opts: { silent?: boolean } = {}): Promise<boolean> {
+    if (!sheet || !canEdit) return false;
     const prev = sheet;
     setSaving(label);
     setSheet({ ...sheet, ...patch } as Sheet);
@@ -202,11 +227,27 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       const r = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
       const j = await r.json() as { error?: string | null };
       if (!r.ok || j.error) throw new Error(j.error || tr(`บันทึก${label}ไม่สำเร็จ`, `Failed to save ${label.toLowerCase()}`));
-      toast.success(tr(`บันทึก${label}แล้ว`, `${label} saved`));
+      if (!opts.silent) toast.success(tr(`บันทึก${label}แล้ว`, `${label} saved`));
+      return true;
     } catch (e) {
       setSheet(prev);
       toast.error(e instanceof Error ? e.message : tr(`บันทึก${label}ไม่สำเร็จ`, `Failed to save ${label.toLowerCase()}`));
+      return false;
     } finally { setSaving(null); }
+  }
+
+  // ปุ่ม "ส่งต่อ" (แถบล่าง): ขั้นถัดไปตาม workflow ที่ยังเปิดอยู่ — ไม่แนะนำสถานะปิดงาน (กฎกลาง nextOpenStatus)
+  //   กดพลาด = "ย้อนกลับ" ในแถบแจ้ง 10 วิ · ปิดงาน/ข้ามขั้น = เลือกเองในแผ่นเปลี่ยนสถานะ
+  const nextStatus = sheet ? nextOpenStatus(statusMeta, isOwnBrandJob(sheet.brand), sheet.status) : null;
+  async function advance() {
+    if (!sheet || !nextStatus) return;
+    const from = sheet.status, fromLabel = statusLabel;
+    const ok = await patchField({ status: nextStatus[0] }, t("สถานะ", "Status"), { silent: true });
+    if (ok) toast.action(t(`ย้ายไป "${nextStatus[1]}" แล้ว`, `Moved to "${nextStatus[1]}"`), t("ย้อนกลับ", "Undo"),
+      // ย้อนไม่สำเร็จ = โหลดใบใหม่ (ปุ่มนี้ถือข้อมูลใบตอนก่อนกด — ไม่ให้จอโชว์สถานะไม่ตรงกับที่บันทึกจริง)
+      () => void patchField({ status: from }, t("สถานะ", "Status"), { silent: true }).then((back) => {
+        if (back) toast.info(t(`กลับเป็น "${fromLabel}" แล้ว`, `Back to "${fromLabel}"`)); else setReloadKey((k) => k + 1);
+      }));
   }
 
   async function sendComment() {
@@ -268,7 +309,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     </div>
   );
 
-  const sectionCls = "rounded-xl border border-slate-200 bg-white p-3 shadow-sm";
+  const sectionCls = "rounded-2xl border border-slate-200 bg-white p-3";
   const dl = sheet ? deadlineChip(sheet.deadline, finished) : null;
 
   // ── ตีราคา: แท็บของตัวเอง (MobileCostTab — แก้บนมือถือได้) · ตรงนี้เก็บเฉพาะที่ภาพรวม/เสนอราคาใช้ ──
@@ -348,36 +389,39 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     { key: "chat", label: comments.length ? t(`คุยลูกค้า ${comments.length}`, `Customer ${comments.length}`) : t("คุยลูกค้า", "Customer") },
     { key: "files", label: t("ไฟล์", "Files") },
   ];
+  // แถบแท็บติดใต้หัวทุกจอ (2026-11-11 ย้ายขึ้นมาจากใต้การ์ดชื่อ) — ของกลาง ScrollTabs: เลื่อนได้ · กดแล้วเลื่อนให้อยู่กลาง · ปุ่ม ‹ › เมื่อเลยขอบ
   const tabBar = (
-    <div className={`sticky top-12 z-10 flex gap-1.5 overflow-x-auto border-b border-slate-200 bg-slate-50/95 py-2 backdrop-blur [scrollbar-width:none] ${isPhone ? "-mx-3 px-3" : ""}`}>
-      {tabs.map((x) => (
-        <button key={x.key} type="button" onClick={() => setTab(x.key)} aria-pressed={tab === x.key}
-          className={`h-8 shrink-0 rounded-full border px-3 text-xs font-medium ${tab === x.key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{x.label}{x.key === "cost" && costDirty ? " •" : ""}</button>
-      ))}
+    <div role="tablist" className="sticky top-12 z-10 border-b border-slate-200 bg-white px-2 py-1.5">
+      <ScrollTabs activeKey={tab}>
+        {tabs.map((x) => (
+          <button key={x.key} type="button" role="tab" data-tab-key={x.key} onClick={() => setTab(x.key)} aria-selected={tab === x.key}
+            className={`h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[13px] font-medium ${tab === x.key ? "bg-slate-900 text-white" : "text-slate-600 active:bg-slate-100"}`}>{x.label}{x.key === "cost" && costDirty ? " •" : ""}</button>
+        ))}
+      </ScrollTabs>
     </div>
   );
-  // ทางลัดในภาพรวม: ตีราคา / เสนอราคา → ไปแท็บนั้น · SKU → กางดู
-  const tileCls = "flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-center shadow-sm active:bg-slate-50";
-  const tiles = sheet && (
-    <div className={`grid gap-2 ${costAllowed ? "grid-cols-3" : "grid-cols-2"}`}>
-      {costAllowed && (
-        <button type="button" onClick={() => setTab("cost")} className={tileCls}>
-          <Icon name="calc" className={costLines.length ? "text-emerald-600" : "text-slate-400"} />
-          <span className="w-full truncate text-sm font-semibold tabular-nums text-slate-800">{costLines.length ? money(costTotalFor("")) : t("ยังไม่ตี", "Not yet")}</span>
-          <span className="text-[11px] text-slate-400">{t("ต้นทุน/ใบ", "Cost/unit")}</span>
-        </button>
-      )}
-      <button type="button" onClick={() => setTab("quote")} className={tileCls}>
-        <Icon name="receipt" className={latestQuote ? "text-blue-600" : "text-slate-400"} />
-        <span className="w-full truncate text-sm font-semibold text-slate-800">{latestQuote ? t(`รอบ ${latestQuote.batch ?? latestQuote.round}`, `Round ${latestQuote.batch ?? latestQuote.round}`) : t("ยังไม่เสนอ", "Not yet")}</span>
-        <span className="w-full truncate text-[11px] text-slate-400">{latestQuote ? (QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status) : t("เสนอราคา", "Quote")}</span>
-      </button>
-      <button type="button" onClick={() => setSkuOpen((o) => !o)} aria-expanded={skuOpen} className={tileCls}>
-        <Icon name="tag" className={sheet.linked_skus.length ? "text-slate-600" : "text-slate-400"} />
-        <span className="w-full truncate text-sm font-semibold text-slate-800">{sheet.linked_skus.length} SKU</span>
-        <span className="text-[11px] text-slate-400">{skuOpen ? t("แตะเพื่อพับ", "Tap to hide") : t("แตะดู", "Tap to view")}</span>
-      </button>
-    </div>
+  // กล่องทางลัด (ครึ่งจอได้): ตีราคา / เสนอราคา → ไปแท็บนั้น · SKU → กางดู
+  const tileCls = "flex h-full w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center active:bg-slate-50";
+  const costTile = sheet && costAllowed && (
+    <button type="button" onClick={() => setTab("cost")} className={tileCls}>
+      <Icon name="calc" className={costLines.length ? "text-emerald-600" : "text-slate-400"} />
+      <span className="w-full truncate text-base font-semibold tabular-nums text-slate-800">{costLines.length ? money(costTotalFor("")) : t("ยังไม่ตี", "Not yet")}</span>
+      <span className="text-[11px] text-slate-400">{t("ต้นทุน/ใบ", "Cost/unit")}</span>
+    </button>
+  );
+  const quoteTile = sheet && (
+    <button type="button" onClick={() => setTab("quote")} className={tileCls}>
+      <Icon name="receipt" className={latestQuote ? "text-blue-600" : "text-slate-400"} />
+      <span className="w-full truncate text-base font-semibold text-slate-800">{latestQuote ? t(`รอบ ${latestQuote.batch ?? latestQuote.round}`, `Round ${latestQuote.batch ?? latestQuote.round}`) : t("ยังไม่เสนอ", "Not yet")}</span>
+      <span className="w-full truncate text-[11px] text-slate-400">{latestQuote ? (QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status) : t("เสนอราคา", "Quote")}</span>
+    </button>
+  );
+  const skuTile = sheet && (
+    <button type="button" onClick={() => setSkuOpen((o) => !o)} aria-expanded={skuOpen} className={tileCls}>
+      <Icon name="tag" className={sheet.linked_skus.length ? "text-slate-600" : "text-slate-400"} />
+      <span className="w-full truncate text-base font-semibold text-slate-800">{sheet.linked_skus.length} SKU</span>
+      <span className="text-[11px] text-slate-400">{skuOpen ? t("แตะเพื่อพับ", "Tap to hide") : t("แตะดู", "Tap to view")}</span>
+    </button>
   );
   const filesSection = sheet && (
     <div className={`${sectionCls} space-y-2`}>
@@ -395,65 +439,59 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     </div>
   );
 
-  const content = sheet && (
-    <div className="space-y-3">
-      {/* ชื่อ + สถานะ + กำหนดส่ง */}
-      <div className={sectionCls}>
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-semibold leading-snug text-slate-900">{sheet.name}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />{sheet.brand?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
-              <span>·</span><span className="font-mono">{sheet.code}</span>
-            </div>
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {/* สถานะ: แตะเพื่อเปลี่ยน (แผ่นเลือกจากล่าง) */}
-          <button type="button" onClick={() => canEdit && setStatusSheet(true)} disabled={!canEdit || saving === t("สถานะ", "Status")}
-            className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm font-semibold text-white shadow-sm disabled:opacity-70"
-            style={{ backgroundColor: statusColor }}>
-            <span className="h-2 w-2 rounded-full bg-white/80" />{statusLabel}{canEdit && <span className="text-xs opacity-80">▾</span>}
-          </button>
-          {dl && (
-            <label className={`relative inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium ${dl.cls}`}>
-              📅 {dl.text}{sheet.deadline && <span className="text-xs opacity-70">· {fmtDate(sheet.deadline)}</span>}
-              {canEdit && <input type="date" value={sheet.deadline ?? ""} onChange={(e) => void patchField({ deadline: e.target.value || null }, t("กำหนดส่ง", "Deadline"))}
-                className="absolute inset-0 cursor-pointer opacity-0" aria-label={t("เปลี่ยนวันกำหนดส่ง", "Change deadline")} />}
-            </label>
-          )}
-        </div>
-      </div>
-      {tabBar}
-
-      {/* ภาพรวม */}
-      <div className={tab === "overview" ? "space-y-3" : "hidden"}>
-        {/* ข้อมูลสั้น */}
-        <div className={`${sectionCls} grid grid-cols-2 gap-x-3 gap-y-2 text-sm`}>
-          <div><div className="text-[11px] text-slate-400">{t("วันที่สั่ง", "Order date")}</div><div className="text-slate-800">{fmtDate(sheet.order_date)}</div></div>
-          <div><div className="text-[11px] text-slate-400">{t("นัดลูกค้า", "Customer appointment")}</div><div className="text-slate-800">{fmtDate(sheet.appointment_date)}</div></div>
-          {/* ⏳ รออะไรอยู่ = เช็กลิสต์กลาง ชุดเดียวกับหน้าคอม (บันทึกทีละข้อทันที) */}
-          <div className="col-span-2">
-            <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={sheet.id} canEdit={canEdit}
-              presetType={DESIGN_WAITING.presetType} autoNew label={t("⏳ รออะไรอยู่", "⏳ Waiting for")} />
-          </div>
-          <div className="col-span-2">
-            <div className="text-[11px] text-slate-400">Parent SKU</div>
-            {sheet.parent_sku_refs.length === 0 && !(sheet.parent_sku_drafts?.length) ? <div className="text-slate-400">{t("ยังไม่ตั้ง", "Not set")}</div> : (
-              <div className="mt-0.5 flex flex-wrap gap-1">
-                {sheet.parent_sku_refs.map((p) => <a key={p.id} href={`/master/skus?open=${encodeURIComponent(p.id)}`} className="rounded-md bg-emerald-50 px-2 py-0.5 font-mono text-xs text-emerald-700">{p.code}</a>)}
-                {(sheet.parent_sku_drafts ?? []).map((d) => <span key={d} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{t("ร่าง:", "Draft:")} {d}</span>)}
-              </div>
+  // ── กล่องในแท็บภาพรวม (วางตามที่ทีม/คนนั้นจัด — BlockLayoutRows) · คืน null = ใบนี้ไม่มีข้อมูลกล่องนั้น (ข้าม) ──
+  const noDeadline = !!sheet && !sheet.deadline && !finished;
+  const linksOk = !!sheet && (sheet.parent_sku_refs.length > 0 || !!sheet.parent_sku_drafts?.length || !!sheet.drive_link);
+  const missingBlocks = new Set<string>([...(costAllowed ? [] : ["cost"]), ...(sheet?.detail ? [] : ["detail"]), ...(linksOk ? [] : ["links"])]);
+  const galleryOn = blockLayout.blocks.find((b) => b.key === "gallery")?.on !== false;
+  const renderBlock = (key: string): ReactNode => {
+    if (!sheet || missingBlocks.has(key)) return null;
+    switch (key) {
+      // แท็บเล็ต/จอคอม: รูปอยู่คอลัมน์ซ้ายแยกต่างหาก
+      case "gallery": return isPhone ? <div className="overflow-hidden rounded-2xl border border-slate-200">{hero}</div> : null;
+      case "status": return (
+        <div className={sectionCls}>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* สถานะ: แตะเพื่อเปลี่ยน (แผ่นเลือกจากล่าง) */}
+            <button type="button" onClick={() => canEdit && setStatusSheet(true)} disabled={!canEdit || saving === t("สถานะ", "Status")}
+              className="inline-flex h-9 max-w-full items-center gap-2 rounded-full px-3 text-sm font-semibold text-white disabled:opacity-70"
+              style={{ backgroundColor: statusColor }}>
+              <span className="h-2 w-2 shrink-0 rounded-full bg-white/80" /><span className="truncate">{statusLabel}</span>{canEdit && <Icon value="i:chevron-down" />}
+            </button>
+            {dl && (
+              <label className={`relative inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium ${noDeadline && canEdit ? "border-amber-200 bg-amber-50 text-amber-800" : dl.cls}`}>
+                <Icon name="calendar" /> {dl.text}{sheet.deadline && <span className="text-xs opacity-70">· {fmtDate(sheet.deadline)}</span>}
+                {noDeadline && canEdit && <span className="text-xs font-semibold underline">{t("ตั้งวัน", "Set")}</span>}
+                {canEdit && <input type="date" value={sheet.deadline ?? ""} onChange={(e) => void patchField({ deadline: e.target.value || null }, t("กำหนดส่ง", "Deadline"))}
+                  className="absolute inset-0 cursor-pointer opacity-0" aria-label={t("เปลี่ยนวันกำหนดส่ง", "Change deadline")} />}
+              </label>
             )}
           </div>
-          {sheet.drive_link && (
-            <a href={sheet.drive_link} target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm font-medium text-slate-700">{t("📁 เปิดไฟล์งาน (Drive)", "📁 Open work files (Drive)")}</a>
-          )}
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />{sheet.brand?.name ?? t("ไม่ระบุแบรนด์", "No brand")}
+          </div>
         </div>
-
-        {/* โน้ต — แก้ได้ทันที */}
+      );
+      // รออะไรอยู่ = เช็กลิสต์กลาง ชุดเดียวกับหน้าคอม (บันทึกทีละข้อทันที)
+      case "waiting": return (
         <div className={sectionCls}>
-          <div className="mb-1 flex items-center justify-between"><span className="text-xs font-semibold text-slate-600">{t("📝 โน้ต", "📝 Note")}</span>
+          <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={sheet.id} canEdit={canEdit}
+            presetType={DESIGN_WAITING.presetType} autoNew label={t("รออะไรอยู่", "Waiting for")} />
+        </div>
+      );
+      case "cost": return costTile;
+      case "quote": return quoteTile;
+      case "sku": return skuOpen ? <div className="space-y-2">{skuTile}{skuSection}</div> : skuTile;
+      case "dates": return (
+        <div className={`${sectionCls} h-full text-sm`}>
+          <div className="text-[11px] text-slate-400">{t("วันที่สั่ง", "Order date")}</div><div className="text-slate-800">{fmtDate(sheet.order_date)}</div>
+          <div className="mt-1.5 text-[11px] text-slate-400">{t("นัดลูกค้า", "Customer appointment")}</div><div className="text-slate-800">{fmtDate(sheet.appointment_date)}</div>
+        </div>
+      );
+      // โน้ต — แก้ได้ทันที
+      case "note": return (
+        <div className={sectionCls}>
+          <div className="mb-1 flex items-center justify-between"><span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600"><Icon name="note" /> {t("โน้ต", "Note")}</span>
             {canEdit && note !== (sheet.note ?? "") && (
               <button type="button" onClick={() => void patchField({ note: note.trim() || null }, t("โน้ต", "Note"))} disabled={saving === t("โน้ต", "Note")}
                 className="h-7 rounded-md bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-50">{saving === t("โน้ต", "Note") ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
@@ -462,18 +500,45 @@ export function DesignSheetMobileView({ id }: { id: string }) {
           <textarea value={note} onChange={(e) => setNote(e.target.value)} disabled={!canEdit} rows={2} placeholder={t("พิมพ์โน้ตสั้น ๆ ที่ทีมต้องรู้…", "Type a short note the team needs to know…")}
             className="w-full resize-none rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-70" />
         </div>
+      );
+      // รายละเอียดงาน (อ่านอย่างเดียว — แก้ในป๊อปอัปเต็ม)
+      case "detail": return (
+        <div className={sectionCls}>
+          <div className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-600"><Icon name="document" /> {t("รายละเอียดงาน", "Job details")}</div>
+          <div className={`prose prose-sm max-w-none text-sm text-slate-700 [&_img]:max-w-full [&_img]:rounded-md ${detailOpen ? "" : "max-h-40 overflow-hidden"}`}
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(sheet.detail ?? "") }} />
+          <button type="button" onClick={() => setDetailOpen((o) => !o)} className="mt-1 text-xs font-medium text-blue-600">{detailOpen ? t("ย่อ ▲", "Collapse ▲") : t("ดูทั้งหมด ▼", "Show all ▼")}</button>
+        </div>
+      );
+      case "links": return (
+        <div className={`${sectionCls} space-y-2 text-sm`}>
+          {(sheet.parent_sku_refs.length > 0 || !!sheet.parent_sku_drafts?.length) && (
+            <div>
+              <div className="text-[11px] text-slate-400">Parent SKU</div>
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {sheet.parent_sku_refs.map((p) => <a key={p.id} href={`/master/skus?open=${encodeURIComponent(p.id)}`} className="rounded-md bg-emerald-50 px-2 py-0.5 font-mono text-xs text-emerald-700">{p.code}</a>)}
+                {(sheet.parent_sku_drafts ?? []).map((d) => <span key={d} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{t("ร่าง:", "Draft:")} {d}</span>)}
+              </div>
+            </div>
+          )}
+          {sheet.drive_link && (
+            <a href={sheet.drive_link} target="_blank" rel="noreferrer" className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium text-slate-700"><Icon name="folder-open" /> {t("เปิดไฟล์งาน (Drive)", "Open work files (Drive)")}</a>
+          )}
+        </div>
+      );
+      default: return null;
+    }
+  };
 
-        {/* รายละเอียดงาน (อ่านอย่างเดียว — แก้ในป๊อปอัปเต็ม) */}
-        {sheet.detail && (
-          <div className={sectionCls}>
-            <div className="mb-1 text-xs font-semibold text-slate-600">{t("📄 รายละเอียดงาน", "📄 Job details")}</div>
-            <div className={`prose prose-sm max-w-none text-sm text-slate-700 [&_img]:max-w-full [&_img]:rounded-md ${detailOpen ? "" : "max-h-40 overflow-hidden"}`}
-              dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(sheet.detail) }} />
-            <button type="button" onClick={() => setDetailOpen((o) => !o)} className="mt-1 text-xs font-medium text-blue-600">{detailOpen ? t("ย่อ ▲", "Collapse ▲") : t("ดูทั้งหมด ▼", "Show all ▼")}</button>
-          </div>
-        )}
-        {tiles}
-        {skuOpen && skuSection}
+  const content = sheet && (
+    <div className="space-y-3">
+      {/* ภาพรวม = กล่องตามที่จัด (ของกลาง block-layout · แผ่น "จัดหน้า") */}
+      <div className={tab === "overview" ? "" : "hidden"}>
+        <BlockLayoutRows blocks={blockLayout.blocks} render={renderBlock} sizeOverride={skuOpen ? { sku: "full" } : undefined} />
+        <button type="button" onClick={() => setLayoutOpen(true)}
+          className="mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-slate-300 text-xs text-slate-500 active:bg-slate-100">
+          <Icon value="i:layout-grid" /> {t("จัดหน้านี้ — ลากสลับ · ซ่อน · ขนาด", "Arrange this page — reorder · hide · size")}
+        </button>
       </div>
 
       {/* ตีราคา — คงไว้หลังเปิดครั้งแรก (สลับแท็บแล้วที่แก้ค้างไม่หาย) */}
@@ -534,20 +599,19 @@ export function DesignSheetMobileView({ id }: { id: string }) {
 
   const page = (
     <div className="min-h-[100dvh] bg-slate-50">
-      {/* แถบบน: ย้อนกลับ · รหัส · แก้ไขเต็ม */}
-      <div className="sticky top-0 z-20 flex h-12 items-center gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur">
-        <button type="button" onClick={() => void goBack()} aria-label={t("ย้อนกลับ", "Back")} className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-slate-700 active:bg-slate-100">←</button>
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-mono text-xs text-slate-500">{sheet?.code ?? "…"}</div>
-          <div className="truncate text-sm font-semibold text-slate-800">{sheet?.name ?? (loading ? t("กำลังโหลด…", "Loading…") : "")}</div>
+      {/* แถบบน: ย้อนกลับ · ชื่อ+รหัส · เมนู ⋯ (2026-11-11: ใบนำเสนอ A4 / หน้าเต็ม / คัดลอกลิงก์ / จัดหน้า ย้ายเข้าเมนู — หัวไม่แน่น) */}
+      <div className="sticky top-0 z-20 flex h-12 items-center gap-1 border-b border-slate-100 bg-white px-1.5">
+        <button type="button" onClick={() => void goBack()} aria-label={t("ย้อนกลับ", "Back")} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-700 active:bg-slate-100"><Icon value="i:arrow-left" size={20} /></button>
+        <div className="min-w-0 flex-1" title={sheet?.name}>
+          <div className="truncate text-[15px] font-semibold leading-tight text-slate-900">{sheet?.name ?? (loading ? t("กำลังโหลด…", "Loading…") : "")}</div>
+          <div className="truncate font-mono text-[11px] leading-tight text-slate-400">{sheet?.code ?? "…"}</div>
         </div>
         {sheet && (
-          <button type="button" onClick={() => setPresentOpen(true)} title={t("ใบนำเสนอ A4", "A4 presentation")} aria-label={t("ใบนำเสนอ A4", "A4 presentation")} className="h-8 shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 text-xs font-medium text-amber-800">📄</button>
-        )}
-        {sheet && canEdit && (
-          <button type="button" onClick={() => void openFull()} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-white px-2.5 text-xs font-medium text-blue-700"><Icon name="computer" /> {t("หน้าเต็ม", "Full view")}</button>
+          <button type="button" onClick={() => setMenuOpen(true)} aria-label={t("เมนูเพิ่มเติม", "More")} title={t("ใบนำเสนอ A4 · หน้าเต็ม · คัดลอกลิงก์ · จัดหน้า", "A4 · full view · copy link · arrange")}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 active:bg-slate-100"><Icon value="i:dots-vertical" size={20} /></button>
         )}
       </div>
+      {sheet && !loading && !error && tabBar}
 
       {loading ? (
         <div className="space-y-3 p-3">
@@ -561,25 +625,41 @@ export function DesignSheetMobileView({ id }: { id: string }) {
           <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="ml-2 underline">{t("ลองใหม่", "Retry")}</button>
         </div>
       ) : isPhone ? (
-        <div className="pb-20">
-          {/* รูปงานโชว์ในแท็บภาพรวม · แท็บอื่นเห็นเนื้อหาทันทีไม่ต้องเลื่อนผ่านรูป */}
-          {tab === "overview" && hero}
-          <div className="p-3">{content}</div>
-        </div>
+        // มือถือ: รูปงาน = กล่องหนึ่งในภาพรวม (จัดตำแหน่ง/ซ่อนได้) · แท็บอื่นเห็นเนื้อหาทันที
+        <div className="p-3 pb-24">{content}</div>
       ) : (
-        /* แท็บเล็ต/จอคอม: รูปซ้าย (ติดขอบบนตอนเลื่อน) · เนื้อหาขวา */
-        <div className="mx-auto grid max-w-5xl grid-cols-[minmax(280px,42%)_1fr] gap-4 p-4">
-          <div className="sticky top-16 self-start overflow-hidden rounded-xl border border-slate-200">{hero}</div>
+        /* แท็บเล็ต/จอคอม: รูปซ้าย (ติดขอบบนตอนเลื่อน — ซ่อนได้ในจัดหน้า) · เนื้อหาขวา */
+        <div className={`mx-auto grid max-w-5xl gap-4 p-4 ${galleryOn ? "grid-cols-[minmax(280px,42%)_1fr]" : "grid-cols-1"}`}>
+          {galleryOn && <div className="sticky top-28 self-start overflow-hidden rounded-xl border border-slate-200">{hero}</div>}
           <div>{content}</div>
         </div>
       )}
 
-      {/* มือถือ: แถบปุ่มล่างติดจอ — แท็บตีราคามีแถบของตัวเอง (เพิ่มวัสดุ / บันทึก) */}
-      {isPhone && sheet && canEdit && !(tab === "cost" && !sheet.cost_restricted) && (
+      {/* มือถือ: แถบปุ่มล่างติดจอ (ใกล้นิ้วโป้ง) — คุยลูกค้า · ไฟล์ · ปุ่มหลัก "ส่งต่อ: <ขั้นถัดไป>" (ไม่มีขั้นถัดไปที่ยังเปิด = เปลี่ยนสถานะ)
+          แท็บตีราคามีแถบของตัวเอง (เพิ่มวัสดุ / บันทึก) */}
+      {isPhone && sheet && canEdit && !(tab === "cost" && costAllowed) && (
         <div className="sticky bottom-0 z-20 flex gap-2 border-t border-slate-200 bg-white/95 p-2 backdrop-blur" style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}>
-          <button type="button" onClick={() => setStatusSheet(true)} className="inline-flex h-11 flex-[1.3] items-center justify-center gap-1 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: statusColor }}><Icon name="shuffle" /> {t("เปลี่ยนสถานะ", "Change status")}</button>
-          <button type="button" onClick={() => { setTab("chat"); window.setTimeout(() => commentRef.current?.focus(), 80); }} className="inline-flex h-11 flex-1 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-800"><Icon name="chat" /> Comment</button>
-          <button type="button" onClick={() => setTab("files")} className="inline-flex h-11 flex-1 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-800"><Icon name="attach" /> {t("ไฟล์", "Files")}</button>
+          <button type="button" onClick={() => { setTab("chat"); window.setTimeout(() => commentRef.current?.focus(), 80); }} aria-label={t("คุยลูกค้า / Comment", "Customer chat")}
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-lg text-slate-700 active:bg-slate-50">
+            <Icon name="chat" />
+            {comments.length > 0 && <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full bg-slate-800 px-1 text-[10px] font-semibold leading-[18px] text-white">{comments.length}</span>}
+          </button>
+          <button type="button" onClick={() => setTab("files")} aria-label={t("ไฟล์", "Files")}
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-lg text-slate-700 active:bg-slate-50"><Icon name="attach" /></button>
+          {nextStatus ? (
+            <button type="button" onClick={() => void advance()} disabled={saving === t("สถานะ", "Status")}
+              className="inline-flex h-12 min-w-0 flex-1 items-center gap-2 rounded-xl bg-blue-600 px-3.5 text-white active:bg-blue-700 disabled:opacity-60">
+              {/* 2 บรรทัด: ชื่อสถานะยาว (เช่น "กำลังทำตัวอย่าง/แก้ไขตาม Comment") ยังอ่านได้ */}
+              <span className="flex min-w-0 flex-1 flex-col items-start text-left leading-tight">
+                <span className="text-[11px] opacity-85">{t("ส่งต่อไป", "Move to")}</span>
+                <span className="w-full truncate text-sm font-semibold">{nextStatus[1]}</span>
+              </span>
+              <span aria-hidden className="text-lg">→</span>
+            </button>
+          ) : (
+            <button type="button" onClick={() => setStatusSheet(true)}
+              className="inline-flex h-12 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white active:bg-blue-700"><Icon name="shuffle" /> {t("เปลี่ยนสถานะ", "Change status")}</button>
+          )}
         </div>
       )}
 
@@ -588,6 +668,30 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         <DesignStatusSheet open={statusSheet} onClose={() => setStatusSheet(false)} statusMeta={statusMeta} own={isOwnBrandJob(sheet.brand)} current={sheet.status}
           subtitle={`${sheet.code} · ${sheet.name}`} onPick={(key) => void patchField({ status: key }, t("สถานะ", "Status"))} />
       )}
+
+      {/* เมนู ⋯ — ปุ่มรองที่เคยอยู่บนหัว · เปิดแผ่นถัดไปหลังเมนูปิดสนิท (ปุ่ม back ของสองแผ่นไม่ชนกัน) */}
+      <BottomSheet open={menuOpen} onClose={() => setMenuOpen(false)} title={sheet?.name} subtitle={sheet?.code} backKey="ds-menu" maxHeight="75dvh">
+        <div className="space-y-0.5">
+          {[
+            ...(canEdit ? [{ icon: "shuffle", label: t("เปลี่ยนสถานะ", "Change status"), go: () => setStatusSheet(true) }] : []),
+            { icon: "grid-view", label: t("จัดหน้านี้", "Arrange this page"), hint: t("ลากสลับ · ซ่อน · ขนาดกล่อง", "Reorder · hide · block size"), go: () => setLayoutOpen(true) },
+            { icon: "document", label: t("ใบนำเสนอ A4", "A4 presentation"), go: () => setPresentOpen(true) },
+            ...(canEdit ? [{ icon: "computer", label: t("เปิดแบบจอคอม (แก้ไขเต็ม)", "Open full desktop view"), go: () => void openFull() }] : []),
+            { icon: "link", label: t("คัดลอกลิงก์ใบงาน", "Copy link"), go: () => void copyText(window.location.href).then((ok) => (ok ? toast.success(t("คัดลอกลิงก์แล้ว", "Link copied")) : toast.error(t("คัดลอกไม่สำเร็จ", "Couldn't copy")))) },
+          ].map((m: { icon: string; label: string; hint?: string; go: () => void }) => (
+            <button key={m.label} type="button" onClick={() => { setMenuOpen(false); window.setTimeout(m.go, 320); }}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-slate-800 active:bg-slate-50">
+              <span className="text-lg text-slate-500"><Icon name={m.icon} /></span>
+              <span className="min-w-0 flex-1">{m.label}{m.hint && <span className="block text-[11px] text-slate-400">{m.hint}</span>}</span>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
+      {/* จัดหน้า (ของกลาง block-layout): ของฉัน = จำเองทุกเครื่อง · ทั้งทีม = แอดมินบันทึกเป็นแบบมาตรฐาน */}
+      <BottomSheet open={layoutOpen} onClose={() => setLayoutOpen(false)} title={t("จัดหน้า ภาพรวม", "Arrange overview")} backKey="ds-layout" maxHeight="88dvh">
+        <BlockLayoutEditor layout={blockLayout} missing={missingBlocks} />
+      </BottomSheet>
 
       <ImageLightbox images={lightboxImages} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />
 
