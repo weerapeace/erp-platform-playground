@@ -32,7 +32,7 @@ export type CopyFieldInfo = { key: string; label: string; group?: string };
 
 export function CopyFromRecordButton({
   apiBase, apiPath, currentId, sectionLabel, fieldKeys, labelKeys, currentValues, onApply, excludeKeys = [],
-  fields, renderValue, variant = "chip",
+  fields, renderValue, variant = "chip", renderPicker,
 }: {
   apiBase: string;
   apiPath: string;
@@ -53,6 +53,11 @@ export function CopyFromRecordButton({
   renderValue?: (key: string, value: unknown, record: Record<string, unknown>) => ReactNode;
   /** chip = ปุ่มเล็กข้างหัวข้อกลุ่ม · toolbar = ปุ่มโปร่งในแถบเครื่องมือ */
   variant?: "chip" | "toolbar";
+  /**
+   * ตัวเลือกรายการต้นทางของโมดูลนั้น (ของกลาง เช่น ParentSkuPicker / SkuPicker) — ส่งมา = ใช้แทนช่องค้นหาในตัว
+   * เจ้าของย้ำ 2026-11-11 "ใช้ของกลางสิ pickup Parent SKU" · ไม่ส่ง = ช่องค้นหา+รายการแบบเดิม (โมดูลที่ไม่มี picker กลาง)
+   */
+  renderPicker?: (pick: (r: { id: string; code?: string; name?: string }) => void) => ReactNode;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -78,12 +83,12 @@ export function CopyFromRecordButton({
     } catch (e) { setErr(e instanceof Error ? e.message : t("ค้นหาไม่สำเร็จ", "Search failed")); setRows([]); }
   }, [apiBase, apiPath, currentId, t]);
 
-  // เปิดป๊อป = โหลดรายการล่าสุดให้เลย · พิมพ์แล้วหยุด 400ms ค่อยค้น (ไม่ยิงทุกตัวอักษร)
+  // เปิดป๊อป = โหลดรายการล่าสุดให้เลย · พิมพ์แล้วหยุด 400ms ค่อยค้น (ไม่ยิงทุกตัวอักษร) · มี picker กลาง = ไม่ต้องค้นเอง
   useEffect(() => {
-    if (!open || source) return;
+    if (!open || source || renderPicker) return;
     const id = setTimeout(() => { void search(q); }, q ? 400 : 0);
     return () => clearTimeout(id);
-  }, [open, q, search, source]);
+  }, [open, q, search, source, renderPicker]);
 
   const label = (r: Row) => labelKeys.map((k) => String(r[k] ?? "").trim()).filter(Boolean).join(" · ") || String(r.id ?? "");
 
@@ -91,6 +96,7 @@ export function CopyFromRecordButton({
 
   // ขั้น 1 → 2: ดึงระเบียนเต็ม (รายการค้นหาอาจส่งมาไม่ครบทุกคอลัมน์) แล้วเทียบ
   const loadSource = async (r: Row) => {
+    if (String(r.id ?? "") === String(currentId ?? "")) { setErr(t("เลือกรายการเดียวกับที่เปิดอยู่ไม่ได้ — เลือกรุ่นอื่น", "That's the record you're editing — pick another")); return; }
     setPicked(r); setBusy(true); setErr("");
     try {
       const j = await apiFetch(`${apiBase}${apiPath}/${encodeURIComponent(String(r.id))}`).then((x) => x.json());
@@ -184,7 +190,17 @@ export function CopyFromRecordButton({
               </div>
             </div>
           }>
-          {!source ? (
+          {!source && renderPicker ? (
+            <div className="space-y-2 min-h-[18rem]">
+              {/* ตัวเลือกกลางของโมดูล (รูป · ค้นหาเป๊ะก่อน · ล่าสุด/โปรด · โหลดเพิ่ม) */}
+              {renderPicker((r) => void loadSource({ id: r.id, code: r.code, name_th: r.name, name: r.name }))}
+              {busy && <p className="text-[12.5px] text-slate-500">⏳ {t("กำลังโหลดรายการที่เลือก…", "Loading the picked record…")}</p>}
+              {err && <p className="text-[12px] text-red-600">{err}</p>}
+              <p className="text-[11px] text-slate-400">
+                {t(`คัดลอกได้ ${copyKeys.length} ช่อง · ไม่คัดลอกรหัสสินค้า รูป และสถานะ`, `${copyKeys.length} copyable fields · never the code, images, or status`)}
+              </p>
+            </div>
+          ) : !source ? (
             <div className="space-y-2">
               <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus
                 placeholder={t("ค้นหาด้วยรหัสหรือชื่อ", "Search by code or name")}

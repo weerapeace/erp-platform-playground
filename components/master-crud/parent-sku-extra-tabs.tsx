@@ -37,13 +37,15 @@ export function parentSkuPngSlots(): NonNullable<MasterCRUDConfig["sidePngSlots"
 const Parent360Overview = dynamic(() => import("@/components/parent-360-overview").then((m) => m.Parent360Overview), { ssr: false });
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
-const ParentIssuesPanel = dynamic(() => import("@/components/parent-issues-panel").then((m) => m.ParentIssuesPanel), { ssr: false });
+// แท็บ "ผลิต" (เดิม "ปัญหา" — เจ้าของขอ 2026-11-11): สูตรผลิตทุกเวอร์ชัน + รายการปัญหาเดิม + ประวัติการผลิต
+const ParentProductionTab = dynamic(() => import("@/components/parent-production-tab").then((m) => m.ParentProductionTab), { ssr: false });
 
 export function parentSkuExtraTabs(): NonNullable<MasterCRUDConfig["extraTabs"]> {
   return [
     { key: "overview", label: tr("ภาพรวม", "Overview"), icon: "📊", render: ({ recordId }) => <Parent360Overview parentId={recordId} /> },
     { key: "web", label: tr("เว็บไซต์", "Website"), icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
     { key: "platforms", label: tr("แพลตฟอร์ม", "Platforms"), icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
-    { key: "issues", label: tr("ปัญหา", "Issues"), icon: "⚠️", render: ({ recordId }) => <div className="p-3"><ParentIssuesPanel parentSkuId={recordId} editable bare /></div> },
+    // key ยังเป็น "issues" ตั้งใจ — ตำแหน่ง/การซ่อนแท็บที่ทีมตั้งไว้ในตัวออกแบบหน้า (x:issues) และที่แต่ละคนซ่อนไว้ ใช้ต่อได้ไม่ต้องย้ายข้อมูล
+    { key: "issues", label: tr("ผลิต", "Production"), icon: "🏭", render: ({ recordId }) => <ParentProductionTab parentId={recordId} /> },
   ];
 }

@@ -13,6 +13,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { Popover } from "@/components/popover";
 import { Icon } from "@/components/icon";
 import { formHiddenTabsKey, parseHiddenTabs, toggleHiddenTab, visibleTabKeys } from "@/lib/form-tab-prefs";
+import { ParentSkuPicker, SkuPicker } from "@/components/pickers";   // เลือกต้นทางในป๊อป "คัดลอกจากรุ่นอื่น" (ของกลาง)
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
@@ -2501,13 +2502,29 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           sectionLabel={groupLabel} fieldKeys={keys}
           labelKeys={["code", "name_th", "name", "title"]}
           currentValues={form} excludeKeys={config.copyExcludeKeys ?? []}
-          fields={groupFields.map((f) => ({ key: f.key, label: f.label }))} renderValue={copyPreviewValue}
+          fields={groupFields.map((f) => ({ key: f.key, label: f.label }))} renderValue={copyPreviewValue} renderPicker={copyPicker}
           onApply={(values) => setForm((p) => ({ ...p, ...values }))}
         />
       ) : null;
       if (!custom && !copyBtn) return null;
       return <span className="inline-flex items-center gap-2">{custom}{copyBtn}</span>;
     }
+    : undefined;
+
+  /**
+   * ขั้นเลือกต้นทางของป๊อป "คัดลอกจากรุ่นอื่น" = ตัวเลือกกลางของสินค้า (เจ้าของย้ำ 2026-11-11 "ใช้ของกลางสิ pickup Parent SKU")
+   *   Parent SKU → ParentSkuPicker · SKU → SkuPicker · โมดูลอื่น = ช่องค้นหาในตัวป๊อป
+   */
+  const copyPicker = config.apiPath === "parent-skus"
+    ? (pick: (r: { id: string; code?: string; name?: string }) => void) => (
+      <ParentSkuPicker value={null} disableCreate placeholder={tr("เลือกรุ่นสินค้าที่จะคัดลอกมา…", "Pick the model to copy from…")}
+        onChange={(v) => { if (v) pick({ id: v.id, code: v.code, name: v.name }); }} />
+    )
+    : config.apiPath === "skus"
+    ? (pick: (r: { id: string; code?: string; name?: string }) => void) => (
+      <SkuPicker value={null} placeholder={tr("เลือกสินค้า (SKU) ที่จะคัดลอกมา…", "Pick the SKU to copy from…")}
+        onChange={(v) => { if (v) pick({ id: String(v.id), code: v.code, name: v.name }); }} />
+    )
     : undefined;
 
   /** ค่าในตารางเทียบของป๊อป "คัดลอกจากรุ่นอื่น" — อ่านง่าย (id อ้างอิง → ชื่อ · HTML → ข้อความ · รายการ → คั่นจุลภาค) */
@@ -3233,7 +3250,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     apiBase={apiBase} apiPath={config.apiPath} currentId={editingId ? String(editingId) : null}
                     sectionLabel={config.title} fieldKeys={copyFields.map((f) => f.key)} fields={copyFields}
                     labelKeys={["code", "name_th", "name", "title"]}
-                    currentValues={form} excludeKeys={config.copyExcludeKeys ?? []} renderValue={copyPreviewValue}
+                    currentValues={form} excludeKeys={config.copyExcludeKeys ?? []} renderValue={copyPreviewValue} renderPicker={copyPicker}
                     onApply={(values) => {
                       // โหมดดู → เติมแล้วสลับเป็นโหมดแก้ (แถบบันทึกขึ้น) · ยังไม่บันทึกจนกดบันทึกเอง
                       //   อยู่ในโหมดลงรายละเอียด = เติมลงช่องของโหมดเลย (หน้าจอโหมดเป็นช่องกรอกอยู่แล้ว ไม่สลับ)
