@@ -23,6 +23,7 @@ import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./a
 import { ReceiveMode } from "./receive-mode";
 import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
 import { apiFetch } from "@/lib/api";
+import { r2ReadableUrl } from "@/lib/r2-image";
 import { formatDate } from "@/lib/date";
 import { Icon } from "@/components/icon";
 import { PO_PRINT_PICK_KEY } from "@/lib/purchasing-print";
@@ -320,7 +321,7 @@ export default function PurchaseOrdersPage() {
       const amt = r.qty * (r.price || 0); grand += amt;
       const nameCell = (cn && r.name_en) ? `${esc(r.name)}<span class="en">${esc(r.name_en)}</span>` : esc(r.name);
       const priceCells = showPrice ? `<td class="r">${fmt(r.price || 0)}</td><td class="r">${fmt(amt)}</td>` : "";
-      return `<tr><td class="c">${i + 1}</td><td class="c">${r.image_url ? `<img src="${origin}${esc(r.image_url)}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${nameCell}</td><td class="r">${r.qty.toLocaleString()}</td><td class="c">${esc(r.uom || "")}</td>${priceCells}</tr>`;
+      return `<tr><td class="c">${i + 1}</td><td class="c">${r.image_url ? `<img src="${esc(r2ReadableUrl(`${origin}${r.image_url}`, origin))}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${nameCell}</td><td class="r">${r.qty.toLocaleString()}</td><td class="c">${esc(r.uom || "")}</td>${priceCells}</tr>`;
     }).join("");
     const totalRow = showPrice ? `<div class="totwrap"><div class="tot"><span>${L.total} (${cur})</span><span>${fmt(grand)}</span></div></div>` : "";
     const fname = "PO_" + String(shop).replace(/[\\/:*?"<>|]/g, "_") + ".png";

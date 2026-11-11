@@ -4,6 +4,7 @@
 // ============================================================
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { fetchR2Blob, r2ImagePath } from "@/lib/r2-image";
 
 export type Scene = { elements?: unknown[]; files?: Record<string, unknown> } | null;
 export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -61,4 +62,28 @@ export async function resizeDataUrl(dataURL: string, mime: string, max = 1600): 
   const type = mime === "image/png" ? "image/png" : "image/jpeg";
   const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b as Blob), type, 0.85));
   return { blob, type };
+}
+
+/**
+ * ไฟล์รูปของกระดานสำหรับ "ส่งออกเป็นรูป" (exportToBlob) — รูปบน R2 ถูกเก็บเป็นลิงก์ /api/r2-image
+ * ซึ่งเบราว์เซอร์โหลดจากตัวเสิร์ฟรูปคนละโดเมน → Excalidraw วาดแล้วอ่านกลับไม่ได้ (ส่งออกพัง · ใส่ crossOrigin ให้ไม่ได้)
+ * → ดึงเฉพาะรูปที่ใช้ในชิ้นงานที่ส่งออกมาเป็น blob: URL (โดเมนเดียวกัน) · ดึงไม่ได้ = ใช้ลิงก์เดิม
+ * เรียก release() เมื่อส่งออกเสร็จ (คืนหน่วยความจำ)
+ */
+export async function exportableFiles(files: Record<string, any> | undefined, elements: readonly any[]): Promise<{ files: Record<string, any>; release: () => void }> {
+  const out: Record<string, any> = { ...(files ?? {}) };
+  const made: string[] = [];
+  const used = new Set<string>();
+  for (const el of elements ?? []) if (el?.type === "image" && !el.isDeleted && el.fileId) used.add(String(el.fileId));
+  await Promise.all([...used].map(async (id) => {
+    const f = out[id];
+    const url = typeof f?.dataURL === "string" ? (f.dataURL as string) : "";
+    if (!r2ImagePath(url)) return;
+    try {
+      const u = URL.createObjectURL(await fetchR2Blob(url));
+      made.push(u);
+      out[id] = { ...f, dataURL: u };
+    } catch { /* ใช้ลิงก์เดิม */ }
+  }));
+  return { files: out, release: () => made.forEach((u) => URL.revokeObjectURL(u)) };
 }

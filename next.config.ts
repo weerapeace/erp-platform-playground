@@ -25,6 +25,8 @@ export const BROWSER_ONLY_LIBS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // หน้าเว็บรู้โดเมนตัวเสิร์ฟรูป ("" = ปิดอยู่) — ใช้ตอนต้อง "อ่านรูปกลับ" (lib/r2-image: r2ReadableUrl / fetchR2Blob)
+  env: { NEXT_PUBLIC_IMG_WORKER_URL: IMG_WORKER && IMG_WORKER !== "off" ? IMG_WORKER : "" },
   async redirects() {
     if (!IMG_WORKER || IMG_WORKER === "off") return [];
     return [{

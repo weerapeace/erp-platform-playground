@@ -26,7 +26,7 @@ import { useT } from "@/components/i18n";
 import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
-import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials } from "./utils";
+import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials, exportableFiles } from "./utils";
 import { parseSocialLink, socialEmbedSize, type SocialLink } from "@/lib/social-embed";
 import { SocialEmbedFrame, fetchSocialInfo } from "./social-embed-frame";
 
@@ -205,7 +205,11 @@ export function CanvasSketch({
       if (wantPng) {
         try {
           const blob: Blob = await Promise.race([
-            lib.exportToBlob({ elements, files, mimeType: "image/png", maxWidthOrHeight: 1600, appState: { ...appState, exportBackground: true, viewBackgroundColor: "#ffffff" } }),
+            (async () => {
+              const safe = await exportableFiles(files, elements);   // รูปบน R2 → อ่านกลับได้ (ไม่งั้นถ่ายภาพกระดานไม่สำเร็จ)
+              try { return await lib.exportToBlob({ elements, files: safe.files, mimeType: "image/png", maxWidthOrHeight: 1600, appState: { ...appState, exportBackground: true, viewBackgroundColor: "#ffffff" } }); }
+              finally { safe.release(); }
+            })(),
             new Promise<never>((_, rej) => setTimeout(() => rej(new Error("png timeout")), 6000)),
           ]);
           b64 = await new Promise<string>((resolve, reject) => {
@@ -961,10 +965,14 @@ export function CanvasSketch({
         !el.isDeleted && el.x < b.x && el.x + (el.width || 0) > a.x && el.y < b.y && el.y + (el.height || 0) > a.y);
       if (!inside.length) { setCapArmed(false); setCapBox(null); setCapMsg(null); setTimeout(() => window.alert(t("ไม่มีอะไรในกรอบที่เลือก ลองลากคลุมใหม่", "Nothing inside the selected area — try again")), 0); return; }
       const lib: any = await import("@excalidraw/excalidraw");
-      const blob: Blob = await lib.exportToBlob({
-        elements: inside, files: api.getFiles(), mimeType: "image/jpeg", quality: 0.92, maxWidthOrHeight: 1600,
-        appState: { exportBackground: true, viewBackgroundColor: "#ffffff" },
-      });
+      const safe = await exportableFiles(api.getFiles(), inside);   // รูปบน R2 → อ่านกลับได้ (ไม่งั้นจับภาพไม่สำเร็จ)
+      let blob: Blob;
+      try {
+        blob = await lib.exportToBlob({
+          elements: inside, files: safe.files, mimeType: "image/jpeg", quality: 0.92, maxWidthOrHeight: 1600,
+          appState: { exportBackground: true, viewBackgroundColor: "#ffffff" },
+        });
+      } finally { safe.release(); }
       setCapBox(null);
       setCapModal({ blob, url: URL.createObjectURL(blob) }); setCapCaption(""); setCapMsg(null);
     } catch (e) { console.error("[canvas-sketch] capture failed:", e); setCapArmed(false); setCapBox(null); }
