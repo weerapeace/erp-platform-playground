@@ -36,6 +36,7 @@ export type NotifySource = {
 /** เรื่องในศูนย์แจ้งเตือน (มีหน้าจอของตัวเองใน WorkPopupHost) */
 const CENTER_SOURCES: NotifySource[] = [
   { key: "work", group: "center", label: "ป๊อปเตือนงาน", hint: "งานค้างตามรายงานอัตโนมัติ", icon: "list", push: "work_popup" },
+  { key: "tasks", group: "center", label: "Task Manager: รอตรวจ / ต้องแก้", hint: "แท็บ Task — งานรอคุณตรวจ งานของคุณที่ถูกตีกลับ งานที่มอบให้คุณ + ปุ่มอนุมัติ/ตีกลับ", icon: "inspect", permission: "tasks.view", added: "2026-11-11" },
   { key: "line_design", group: "center", label: "LINE: งานออกแบบ", hint: "ส่งเข้ากลุ่มไลน์ รอเปิดใบงาน", icon: "design", permission: "products.view", added: "2026-11-05" },
   { key: "line_order", group: "center", label: "LINE: คำสั่งซื้อ", hint: "แคปคำสั่งซื้อจากไลน์ รอผูก PO", icon: "cart", permission: "po.view", defaults: { bounce: false }, added: "2026-11-05" },
   { key: "gif", group: "center", label: "GIF จากเพื่อน", hint: "เพื่อนส่ง GIF มาสะกิด", icon: "gift" },

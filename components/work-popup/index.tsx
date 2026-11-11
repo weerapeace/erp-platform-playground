@@ -26,6 +26,7 @@ import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupF
 import { GifInbox, type GifPoke } from "./gif-inbox";
 import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
 import type { LinePendingPayload } from "@/lib/line-pending";
+import { inboxCount, type InboxItem, type InboxPayload } from "@/lib/task-inbox";
 import { BellTab } from "./bell-tab";
 import { useNotificationFeed } from "@/components/notification-bell/feed";
 import { useNotifyPrefs } from "@/components/notify-settings";
@@ -36,6 +37,9 @@ import type { UserPickerValue } from "@/components/pickers";
 import dynamic from "next/dynamic";
 // หน้าต่างส่ง GIF (ของแอปจัดการงาน) — โหลดเฉพาะตอนกดตอบกลับ/ส่ง
 const GifPokeModal = dynamic(() => import("@/app/tasks/gif-poke-modal").then((m) => m.GifPokeModal), { ssr: false });
+// แท็บ Task (งาน Task Manager ที่รอฉัน) + แผงตรวจเร็ว — โหลดเฉพาะตอนมีงาน/เปิดดู (ไม่ถ่วงทุกหน้า)
+const TaskInboxTab = dynamic(() => import("./task-inbox").then((m) => m.TaskInboxTab), { ssr: false });
+const TaskInboxQuickCheck = dynamic(() => import("./task-inbox").then((m) => m.TaskInboxQuickCheck), { ssr: false });
 const RECHECK_MS = 30 * 60_000;
 const POKE_POLL_MS = 3 * 60_000;
 const pokeSeenKey = (uid: string) => `fpet-pokes-seen:${uid}`;
@@ -245,7 +249,7 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
-  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches">("work");
+  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches" | "tasks">("work");
   // ตั้งค่าการแจ้งเตือนต่อคน (หน้าต่างตัว Pet → การแจ้งเตือน · lib/notify-sources): โชว์ในศูนย์ / ตัว Pet เด้งบอก / ห้ามรบกวน
   const [notifyPrefs] = useNotifyPrefs();
   const showIn = (key: string) => notifyOn(notifyPrefs, key, "center");
@@ -301,6 +305,39 @@ export function WorkPopupHost() {
   };
   const lineCount = linePendingCount(lineShown);
 
+  // ── แท็บ Task: งาน Task Manager ที่รอฉัน (รอตรวจ / ต้องแก้ / มอบให้ — GET /api/creative-tasks/inbox · lib/task-inbox) ──
+  // ถามทุก 3 นาที เหมือนแท็บ LINE · ปิด "โชว์ในศูนย์" ของเรื่องนี้ = ไม่ถามเลย · ตัวนับ = รอตรวจ + ต้องแก้
+  const tasksOn = enabled && showIn("tasks");
+  const tasksOnRef = useRef(tasksOn);
+  tasksOnRef.current = tasksOn;
+  const [inbox, setInbox] = useState<InboxPayload | null>(null);
+  const [qc, setQc] = useState<{ item: InboxItem; mode?: "revise" } | null>(null);   // แผงตรวจเร็ว (วางนอกการ์ด)
+  const loadInbox = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const r = await apiFetch("/api/creative-tasks/inbox");
+      if (!r.ok) return;   // ไม่มีสิทธิ์ดูงาน = แท็บไม่ขึ้น
+      const j = (await r.json()) as { data?: InboxPayload };
+      setInbox(j.data ?? null);
+    } catch { /* เงียบ */ }
+  }, [uid]);
+  useEffect(() => {
+    if (!uid || skip || !tasksOn || !wide) { if (!tasksOn) setInbox(null); return; }
+    const first = setTimeout(() => void loadInbox(), 4000);
+    const iv = window.setInterval(() => { if (document.visibilityState === "visible") void loadInbox(); }, POKE_POLL_MS);
+    return () => { clearTimeout(first); window.clearInterval(iv); };
+  }, [uid, skip, tasksOn, wide, loadInbox]);
+  useRefresh(() => { if (wide && tasksOn && !skip) void loadInbox(); });
+  const taskCount = tasksOn ? inboxCount(inbox) : 0;
+  const taskTabOn = tasksOn && !!inbox && (inbox.review.length + inbox.revision.length + inbox.assigned.length) > 0;
+  const taskSeenKey = uid ? `fpet-task-seen:${uid}` : "";
+  const [taskSeen, setTaskSeen] = useState<Set<string>>(new Set());
+  useEffect(() => { if (taskSeenKey) setTaskSeen(readIds(taskSeenKey)); }, [taskSeenKey]);
+  // งานใหม่ที่ยังไม่เคยเห็น (รอตรวจ/ต้องแก้ · จำเป็น id+สถานะ: ถูกตีกลับรอบใหม่ = นับเป็นของใหม่)
+  const newTasks = tasksOn && bounceOn("tasks") && inbox
+    ? [...inbox.review, ...inbox.revision].filter((it) => !taskSeen.has(`${it.id}:${it.status}`))
+    : [];
+
   // ── แท็บ ของฉัน: การเตือนที่ตั้งเอง (components/my-watches · GET /api/my-watches) — โหลดพร้อมรอบ GIF ──
   const watchesOn = enabled && showIn("watches");
   const [watchPref] = useMyWatches();
@@ -345,8 +382,9 @@ export function WorkPopupHost() {
     if (!expanded || !uid) return;
     if (tab === "line" && newLine.length) { const n = new Set([...lineSeen, ...newLine.map((x) => x.id)]); setLineSeen(n); saveIds(lineSeenKey, n); }
     if (tab === "bell" && newBell.length) { const n = new Set([...bellSeen, ...newBell.map((x) => x.id)]); setBellSeen(n); saveIds(bellSeenKey, n); }
+    if (tab === "tasks" && newTasks.length) { const n = new Set([...taskSeen, ...newTasks.map((x) => `${x.id}:${x.status}`)]); setTaskSeen(n); saveIds(taskSeenKey, n); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, tab, uid, newLine.length, newBell.length]);
+  }, [expanded, tab, uid, newLine.length, newBell.length, newTasks.length]);
   const dismissPoke = (id: string) => {
     setPokes((ps) => ps.filter((p) => p.id !== id));
     void apiFetch("/api/gif-poke", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
@@ -414,11 +452,11 @@ export function WorkPopupHost() {
       const age = Date.now() - lastCheck.current;
       if (age > RECHECK_MS) void check();
       else if (wide && queueLenRef.current > 0 && age > 60_000) void check(undefined, true);
-      if (wide && age > 60_000) { void loadPokes(); void loadLine(); }
+      if (wide && age > 60_000) { void loadPokes(); void loadLine(); if (tasksOnRef.current) void loadInbox(); }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [uid, skip, check, wide, loadPokes, loadLine]);
+  }, [uid, skip, check, wide, loadPokes, loadLine, loadInbox]);
 
   // จอคอม: แสดงตัวที่ถึงเวลาก่อน ไม่มีก็ตัวแรก (เป็นปุ่มเล็ก) · จอเล็ก: เฉพาะตัวที่ถึงเวลา (หน้าต่างกลางจอแบบเดิม)
   const cur = (wide ? (queue.find((x) => x.due) ?? queue[0]) : queue.find((x) => x.due !== false)) ?? null;
@@ -489,11 +527,15 @@ export function WorkPopupHost() {
   const gifOn = enabled && showIn("gif");
   const gifCount = gifOn ? pokes.length : 0;
   const bellCount = enabled ? bellItems.length : 0;
-  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0)));
+  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn)));
   const tabs: FloatTab[] = [
     ...(workTabOn && cur ? [{
       key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer,
       content: <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />,
+    }] : []),
+    ...(taskTabOn ? [{
+      key: "tasks", label: "Task", icon: "inspect", count: taskCount, subtitle: "งาน Task Manager ที่รอคุณ",
+      content: <TaskInboxTab data={inbox} onGo={go} onQuickCheck={(item, mode) => setQc({ item, mode })} onChanged={() => void loadInbox()} />,
     }] : []),
     ...(enabled && lineCount > 0 ? [{
       key: "line", label: "LINE", icon: "chat", count: lineCount, subtitle: "ส่งเข้ากลุ่มไลน์แล้ว รอคนจัดการ",
@@ -520,13 +562,15 @@ export function WorkPopupHost() {
   const alertLine = enabled && newLine.length > 0;
   const alertBell = enabled && newBell.length > 0;
   const alertWatch = watchCount > 0 && newWatch.length > 0;
-  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch);
-  const total = workCount + gifCount + lineCount + bellCount + watchCount;
+  const alertTasks = taskTabOn && newTasks.length > 0;
+  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks);
+  const total = workCount + gifCount + lineCount + bellCount + watchCount + taskCount;
   const petState = {
     mood: petMood({ total, alert: petAlert }),
     badge: petBadge(total),
     bubble: quietNow ? null
       : alertWork ? pill
+      : alertTasks ? `${newTasks[0].status === "revision" ? "งานถูกตีกลับ" : "งานรอคุณตรวจ"}: ${newTasks[0].task_no ?? ""} ${newTasks[0].title}`.trim()
       : alertBell ? newBell[0].title
       : alertWatch ? `${newWatch[0].watch}: ${newWatch[0].title}`
       : alertLine ? `ไลน์: ${newLine[0].title}`
@@ -537,15 +581,16 @@ export function WorkPopupHost() {
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {wide ? (floatOn && tabs.length > 0 && (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" ? k : "work")} pet={petState}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" || k === "tasks" ? k : "work")} pet={petState}
           onMinimize={collapse}
           onExpand={() => {
             setExpanded(true);
             // เปิดแท็บของเรื่องที่ทำให้ตัว Pet เด้งก่อน
-            setTab(alertWork ? "work" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : "gif");
+            setTab(alertWork ? "work" : alertTasks ? "tasks" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : "gif");
             if (cur) void check(undefined, true);
             void loadPokes();
             void loadLine();
+            if (tasksOn) void loadInbox();
             void feed.refresh();
             if (hasWatches) void reloadWatches();
           }} />
@@ -559,6 +604,8 @@ export function WorkPopupHost() {
           <p className="mt-3 text-[11px] text-slate-400">💡 {WORK_POPUP_HIDE_HINT} แล้วปิดสวิตช์</p>
         </ERPModal>
       )}
+      {/* แผงตรวจเร็วของงานจากแท็บ Task — อยู่นอกการ์ด (การ์ดยุบตอนกดข้างนอก แผงยังเปิดอยู่) */}
+      {qc && <TaskInboxQuickCheck item={qc.item} mode={qc.mode} onClose={() => setQc(null)} onDone={() => void loadInbox()} />}
       {gifModal && (
         <GifPokeModal open onClose={() => setGifModal(null)} onSent={() => { setGifModal(null); toast.success("ส่ง GIF แล้ว"); }} isAdmin={user?.role === "admin"}
           prefillRecipient={gifModal.reply ? ({ id: gifModal.reply.from_user_id, name: gifModal.reply.from_name ?? "", code: null } as unknown as UserPickerValue) : null} />

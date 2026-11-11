@@ -8,17 +8,17 @@
 // ข้อมูล: GET /api/creative-tasks/[id]/quick-check
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ProductQuickCheck, type QuickCheckItem } from "@/components/product-quick-check";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { type PushToast } from "@/components/toast";
-import type { QuickCheckParent } from "@/lib/product-listing-checks";
+import { listingChecks, type QuickCheckParent } from "@/lib/product-listing-checks";
 import { getTaskQuickCheck, type CreativeTask } from "./data";
 import { applyTaskTransition } from "./task-actions";
 
-export function TaskQuickCheck({ task, approveTo, reviseTo, pushToast, onClose, onDone, onViewImages, onOpenParent }: {
-  task: CreativeTask;
+export function TaskQuickCheck({ task, approveTo, reviseTo, pushToast, onClose, onDone, onViewImages, onOpenParent, initialMode }: {
+  task: Pick<CreativeTask, "id" | "status" | "title" | "task_no">;
   approveTo: string | null;   // สถานะปลายทางของ "อนุมัติ" (null = ไม่มีสิทธิ์/สถานะนี้อนุมัติไม่ได้)
   reviseTo: string | null;    // สถานะปลายทางของ "ตีกลับแก้"
   pushToast: PushToast;
@@ -26,11 +26,19 @@ export function TaskQuickCheck({ task, approveTo, reviseTo, pushToast, onClose, 
   onDone: () => void | Promise<void>;   // หลังเปลี่ยนสถานะสำเร็จ (ลิ้นชักโหลดใหม่)
   onViewImages: () => void;
   onOpenParent: (id: string) => void;
+  /** เปิดมาที่ฟอร์มตีกลับเลย (เช่น กด "ตีกลับแก้" จากแท็บ Task ในศูนย์แจ้งเตือน) — ติ๊กจุดที่เช็กเจอไว้ให้ครบ */
+  initialMode?: "revise";
 }) {
   const t = useT();
   const [data, setData] = useState<QuickCheckParent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"" | "confirm" | "revise">("");
+  const [mode, setMode] = useState<"" | "confirm" | "revise">(initialMode && reviseTo ? initialMode : "");
+  // เส้นทางสถานะอาจโหลดเสร็จทีหลัง (เปิดจากศูนย์แจ้งเตือน) → พอรู้ปลายทาง "ตีกลับ" แล้วค่อยเปิดฟอร์มตีกลับ (ครั้งเดียว)
+  const modeSet = useRef(!!(initialMode && reviseTo));
+  useEffect(() => {
+    if (modeSet.current || initialMode !== "revise" || !reviseTo) return;
+    modeSet.current = true; setMode("revise");
+  }, [initialMode, reviseTo]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [note, setNote] = useState("");
   const [err, setErr] = useState("");
@@ -42,11 +50,19 @@ export function TaskQuickCheck({ task, approveTo, reviseTo, pushToast, onClose, 
     catch (e) { setError((e as Error).message); }
   }, [task.id]);
   useEffect(() => { setData(null); void load(); }, [load]);
+  // เปิดมาที่ฟอร์มตีกลับ → พอโหลดเสร็จ ติ๊กจุดที่ระบบเช็กเจอไว้ให้ครบ (เหมือนกดปุ่ม "ตีกลับแก้" ในแผง)
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (!data || prefilled.current || initialMode !== "revise") return;
+    prefilled.current = true;
+    setPicked(new Set(data.flatMap((p) => listingChecks(p).map((c) => `${p.code}|${c.key}`))));
+  }, [data, initialMode]);
 
   const run = async (toKey: string, comment?: string) => {
     setBusy(true);
     try {
-      if (await applyTaskTransition(task, toKey, { pushToast, comment })) { await onDone(); onClose(); }
+      // applyTaskTransition ใช้แค่ id / status / task_no / title ของงาน
+      if (await applyTaskTransition(task as CreativeTask, toKey, { pushToast, comment })) { await onDone(); onClose(); }
     } finally { setBusy(false); }
   };
 
