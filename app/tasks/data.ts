@@ -23,6 +23,7 @@ import type { MassCreatePost, MassFreq, MassRawRow } from "@/lib/marketing/mass-
 import type { BrandProfile } from "@/lib/marketing/brand-profile";
 import type { BriefTemplate } from "@/lib/brief-templates";
 import type { FitSpec } from "@/lib/social-publish/fit";
+import type { TaskImagesPayload } from "@/lib/task-images";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -167,6 +168,12 @@ export async function getTask(id: string): Promise<TaskDetail> {
   const res = await apiFetch(`/api/creative-tasks/${id}`);
   const j = await jsonOrThrow(res);
   return j.data as TaskDetail;
+}
+
+/** รูปทั้งหมดของงาน แบ่งกลุ่ม Parent / SKU / Description / คอนเทนต์ (ปุ่ม "ดูรูป" ในลิ้นชักงาน · ดูอย่างเดียว) */
+export async function getTaskImages(id: string): Promise<TaskImagesPayload> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}/images`));
+  return j.data as TaskImagesPayload;
 }
 
 export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; title_en?: string | null; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[]; content_items?: TemplateContentItem[] };

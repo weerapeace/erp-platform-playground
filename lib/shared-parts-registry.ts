@@ -1034,8 +1034,16 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "image-lightbox", label: "ดูรูปเต็มจอ", code: "ImageLightbox", category: "file",
     source: { path: "components/image-lightbox" },
-    what: "กดรูปแล้วขยายเต็มจอ เลื่อนดูรูปถัดไป ซูม ปัดนิ้วได้",
+    what: "กดรูปแล้วขยายเต็มจอ เลื่อนดูรูปถัดไป ซูม ปัดนิ้วได้ · เสริมได้ (ไม่บังคับ): ชิปกลุ่ม (groups) + แถบรูปเล็ก (thumbnails)",
     note: "ImageGallery ใน components/image-input ยังมีจอเต็มของตัวเอง ไม่ได้ใช้ตัวนี้",
+  },
+  {
+    key: "grouped-image-viewer", label: "ดูรูปแบ่งกลุ่ม (ดูอย่างเดียว)", code: "GroupedImageViewer", category: "file",
+    source: { path: "components/grouped-image-viewer" },
+    what: "ป๊อปดูรูปทั้งชุดแบบดูอย่างเดียว แบ่งกลุ่ม → เจ้าของรูป (เช่น Parent · SKU แต่ละสี · Description · คอนเทนต์) · ชิปกรองกลุ่ม · ตัวที่ยังไม่มีรูปขึ้นเตือน · กดรูป = เต็มจอพร้อมชิปกลุ่ม + แถบรูปเล็ก",
+    when: "ให้คนตรวจงาน/ดูรูปทั้งชุดของเรื่องหนึ่งเร็ว ๆ โดยไม่แก้ (ตอนนี้: ลิ้นชักงาน Task Manager ปุ่ม ดูรูป)",
+    notWhen: "จัดการรูปสินค้า (เรียง/ลบ/ตั้งปก) ให้ใช้ ProductImageGallery · เลือกรูปไปใช้ต่อ ให้ใช้ AssetPicker · รูปชุดเดียวไม่ต้องแบ่งกลุ่ม ใช้ ImageLightbox ตรง ๆ",
+    doc: "grouped-image-viewer.md",
   },
   {
     key: "image-crop-box", label: "เลือกส่วนที่เห็นของรูป", code: "ImageCropBox", category: "file",

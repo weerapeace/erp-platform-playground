@@ -17,6 +17,9 @@ import dynamic from "next/dynamic";
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 // drawer สินค้ากลาง — กด Parent SKU แล้วเปิดดูได้ · dynamic กัน import วน
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// ปุ่ม "ดูรูป" — รูปทั้งหมดของงานแบ่งกลุ่ม (ดูอย่างเดียว) · โหลดเฉพาะตอนกด
+const TaskImagesViewer = dynamic(() => import("./task-images-viewer").then((m) => m.TaskImagesViewer), { ssr: false });
+import { Icon } from "@/components/icon";
 import { ImageInput } from "@/components/image-input";
 import { ConfirmDialog, DrawerShell } from "@/components/modal";
 import { PublishModal } from "./publish-modal";
@@ -159,6 +162,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
   const [descEdit, setDescEdit] = useState<string | null>(null); // null=ไม่แก้ · string=กำลังแก้รายละเอียด
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
+  const [imagesOpen, setImagesOpen] = useState(false); // ป๊อปดูรูปอย่างเดียว (แบ่งกลุ่ม Parent/SKU/Description/คอนเทนต์)
   const [tab, setTab] = useState<"task" | "content" | "reference">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
   const [refHtml, setRefHtml] = useState("");     // เนื้อหาแท็บอ้างอิง (rich text)
   const [refSaving, setRefSaving] = useState(false);
@@ -278,6 +282,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             {d.created_by_label && <span className="text-xs text-slate-400 ml-2">· {t("สร้างโดย", "by")} {d.created_by_label}</span>}
           </div>
           <div className="flex items-center gap-1">
+            <button onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (ดูอย่างเดียว)", "View all task images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="image" />{t("ดูรูป", "Images")}</button>
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />
             {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ {t("แก้ไข", "Edit")}</button>}
             <button onClick={() => setConfirmDel(true)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>
@@ -491,7 +496,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <div style={{ order: tOrderOf("cover") }}>
                 {coverKey ? (
                   <div className="relative rounded-lg overflow-hidden border border-slate-200">
-                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" className="w-full h-32 object-contain bg-white" />
+                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" onClick={() => setImagesOpen(true)} title={t("กดดูรูปทั้งหมด", "View all images")} className="w-full h-32 object-contain bg-white cursor-zoom-in" />
                     {coverFromParent && <span className="absolute top-1.5 left-1.5 text-[9px] bg-black/55 text-white px-1 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
                     <button type="button" onClick={() => setCoverEdit((v) => !v)} title={t("เปลี่ยนรูปปก", "Change cover")} className="absolute top-1.5 right-1.5 text-[10px] bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded px-1.5 py-0.5">✎</button>
                   </div>
@@ -737,6 +742,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           })}
         </div>
       </DrawerShell>
+      {imagesOpen && <TaskImagesViewer taskId={d.id} title={d.title} onClose={() => setImagesOpen(false)} />}
       {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => { void load(); }} />}
       <ConfirmDialog open={!!linkDel} onClose={() => setLinkDel(null)} variant="danger"
         onConfirm={async () => { const x = linkDel; setLinkDel(null); if (!x) return; try { await deleteAttachment(d.id, x.id); await load(); pushToast("success", t("ลบลิงก์แล้ว", "Link removed")); } catch (e) { pushToast("error", (e as Error).message); } }}
