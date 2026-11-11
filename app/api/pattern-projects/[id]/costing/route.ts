@@ -16,7 +16,8 @@ import { COST_PERM } from "@/lib/cost-access";
 import { writeAudit } from "@/lib/audit";
 import { cleanProjectPieces } from "@/lib/pattern-project";
 import { planCostingSend, type ExistingCostLine } from "@/lib/pattern-costing";
-import { cleanTrims, openSlits, planTrimsSend, trimRows } from "@/lib/pattern-trims";
+import { cleanTrims, openTrims, planTrimsSend, trimRows } from "@/lib/pattern-trims";
+import { cleanSeams } from "@/lib/pattern-seams";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import { PROJECT_PERM, PROJECT_TABLE, loadProjectActor } from "@/lib/pattern-project-server";
 
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
   const admin = supabaseAdmin();
   const [{ data: proj }, { data: sheet }, { data: lines, error: lineErr }, actor] = await Promise.all([
-    admin.from(PROJECT_TABLE).select("id, pattern_no, name, pieces, basis, template").eq("id", id).eq("is_active", true).maybeSingle(),
+    admin.from(PROJECT_TABLE).select("id, pattern_no, name, pieces, seams, basis, template").eq("id", id).eq("is_active", true).maybeSingle(),
     admin.from("design_sheets").select("id, code, name, parent_sku_codes, parent_sku_drafts").eq("id", sheetId).maybeSingle(),
     admin.from("design_sheet_cost_lines").select(LINE_COLS).eq("sheet_id", sheetId),
     loadProjectActor(request, admin),
@@ -55,7 +56,8 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
   // วัสดุตีราคาที่ชิ้นอ้างถึง (ไว้ตั้งชนิด/ราคาของบรรทัดใหม่)
   const trims = cleanTrims((proj.template as { trims?: unknown } | null)?.trims);
-  const rows = trimRows(trims, pieces);
+  const seams = cleanSeams(proj.seams, new Set(pieces.map((p) => p.pid)));   // ตะเข็บชนิดหุ้มขอบ นับเป็นความยาวกุ๊น
+  const rows = trimRows(trims, pieces, seams);
   const matIds = [...new Set([...pieces.flatMap((p) => (p.mats ?? []).map((m) => m.id)), ...trims.map((x) => x.mat.id)].filter((x) => UUID.test(x)))];
   const items = new Map<string, CostItemLike>();
   if (matIds.length) {
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     amount: Math.round((plan.amount + tp.amount) * 100) / 100,
     trims: {
       added: tp.inserts.length, updated: tp.updates.length, lines: tp.lines, stale: tp.stale, skipped: tp.skipped, missing_items: tp.missingItems,
-      no_qty: tp.noQty, gone: rows.filter((r) => r.gone).length, open_slits: openSlits(trims, pieces).length,
+      no_qty: tp.noQty, gone: rows.filter((r) => r.gone).length, open_slits: openTrims(trims, pieces, seams).count,
     },
   };
   if (body.dry === true) return NextResponse.json({ data: summary, error: null });

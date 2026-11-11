@@ -29,7 +29,7 @@ import {
   type Box, type InnerKind, type InnerLine, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
-import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, extendSide, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
+import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, edgeMetaSet, extendSide, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
 import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
 import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
@@ -1305,6 +1305,29 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const edgePiece = edgeSel ? pieces.find((p) => p.pid === edgeSel.pid) ?? null : null;
   const edgeList = edgePiece ? pieceEdges(edgePiece.shape) : [];
   const selEdge = edgePiece && edgeSel && edgeList.length === edgeSel.n ? edgeList[edgeSel.i] ?? null : null;
+  /** งานขอบที่เห็นบนชิ้น (2026-11-11): ขอบที่กุ๊น = แถบฟ้า · ขอบที่ติดซิป = ฟันซิป (เส้นประหนา) — วาดเสมอ ไม่ต้องถือเครื่องมือเย็บ */
+  const finishLayer = pieces.some((p) => p.edgeMeta?.some((m) => m.bind || m.zip)) ? (
+    <g style={{ pointerEvents: "none" }} data-edge-finish>
+      {pieces.map((p) => {
+        if (hidePids?.has(p.pid)) return null;
+        const meta = cleanEdgeMeta(p.shape, p.edgeMeta);
+        if (!meta) return null;
+        return (
+          <g key={p.id}>
+            {pieceEdges(p.shape).map((e) => { const m = meta[e.i]; return !m?.bind && !m?.zip ? null : (
+              <g key={e.i}>
+                {m.bind && <path data-finish="bind" d={lineD(e.pts)} fill="none" stroke="#0ea5e9" strokeOpacity={0.5} strokeWidth={6} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+                {m.zip && <>
+                  <path data-finish="zip" d={lineD(e.pts)} fill="none" stroke="#334155" strokeWidth={8} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+                  <path d={lineD(e.pts)} fill="none" stroke="#f8fafc" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                </>}
+              </g>
+            ); })}
+          </g>
+        );
+      })}
+    </g>
+  ) : null;
   /** เส้นของตะเข็บทั้งหมดบนกระดาน: ขอบทั้งสองด้านสีเดียวกัน + เส้นประโยงคู่ + ขีดบอกจุดเริ่ม (rev = ขีดของด้านที่สองไปอยู่ปลายอีกข้าง) */
   const seamLayer = seams ? (
     <g style={{ pointerEvents: "none" }}>
@@ -1403,7 +1426,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const edgeAllow = edgePiece && selEdge ? (edgeAllowances(edgePiece.shape, edgePiece.allowEdges, edgePiece.allow)?.[selEdge.i] ?? edgePiece.allow) : 0;
   const edgeFold = !!(edgePiece && selEdge && cleanFoldEdges(edgePiece.shape, edgePiece.foldEdges)?.[selEdge.i]);
   const edgeMetaNow: EdgeMeta = (edgePiece && selEdge && cleanEdgeMeta(edgePiece.shape, edgePiece.edgeMeta)?.[selEdge.i]) || {};
-  const setEdgeMeta = (f: (m: EdgeMeta) => EdgeMeta) => { if (!edgePiece || !selEdge) return; const k = selEdge.i, n = edgeList.length; patchPiece(edgePiece.id, (p) => { const cur = cleanEdgeMeta(p.shape, p.edgeMeta) ?? Array.from({ length: n }, () => ({} as EdgeMeta)); const next = cur.map((m, q) => (q === k ? f(m) : m)); return { ...p, edgeMeta: next.some((m) => m.bind || m.top != null) ? next : null }; }); };
+  const setEdgeMeta = (f: (m: EdgeMeta) => EdgeMeta) => { if (!edgePiece || !selEdge) return; const k = selEdge.i, n = edgeList.length; patchPiece(edgePiece.id, (p) => { const cur = cleanEdgeMeta(p.shape, p.edgeMeta) ?? Array.from({ length: n }, () => ({} as EdgeMeta)); const next = cur.map((m, q) => (q === k ? f(m) : m)); return { ...p, edgeMeta: next.some(edgeMetaSet) ? next : null }; }); };
   const addNotches = (ds: number[]) => { if (!edgePiece || !selEdge) return; const pts = ds.map((d) => pointAlong(selEdge.pts, d)).filter((q): q is Pt => !!q); if (pts.length) patchPiece(edgePiece.id, (p) => ({ ...p, notches: [...(p.notches ?? []), ...pts] })); };
   const seamPanel = (
     <aside className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs" aria-label={t("ตะเข็บและขอบ", "Seams and edges")}>
@@ -1511,6 +1534,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               {ed ? <NumField value={edgeAllow} min={0} max={20} label={t("เผื่อของขอบ ซม.", "Edge allowance cm")} onCommit={(v) => patchPiece(edgePiece.id, (p) => { const cur = edgeAllowances(p.shape, p.allowEdges, p.allow) ?? edgeList.map(() => p.allow); return { ...p, allowEdges: cur.map((a, k) => (k === selEdge.i ? cleanAllow(v) : a)) }; })} className="w-16" /> : <b className="tabular-nums">{edgeAllow}</b>}</div>
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeFold} disabled={!ed} onChange={() => patchPiece(edgePiece.id, (p) => { const next = (cleanFoldEdges(p.shape, p.foldEdges) ?? edgeList.map(() => 0)).map((v, k) => (k === selEdge.i ? (v ? 0 : 1) : v)); return { ...p, foldEdges: next.some(Boolean) ? next : null }; })} className="h-3.5 w-3.5 accent-violet-600" />{t("พับเข้าใน", "Folds inward")}</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={!!edgeMetaNow.bind} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { bind: _b, ...rest } = m; void _b; return e.target.checked ? { ...rest, bind: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("กุ้นขอบ", "Bound edge")}</label>
+            <label className="flex items-center gap-2"><input type="checkbox" data-edge-zip checked={!!edgeMetaNow.zip} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { zip: _z, ...rest } = m; void _z; return e.target.checked ? { ...rest, zip: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ติดซิปตามขอบนี้", "Zip along this edge")}</label>
+            {(edgeMetaNow.zip || edgeMetaNow.bind) && <div className="pl-5 text-[11px] text-slate-400">{t("เลือกซิป / เทปกุ๊น ได้ที่ปุ่ม ซิป / อะไหล่ — ความยาวคิดจากขอบนี้ให้เอง", "Choose the zip / binding tape under Zips / hardware — the length comes from this edge")}</div>}
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeMetaNow.top != null} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { top: _t, ...rest } = m; void _t; return e.target.checked ? { ...rest, top: 3 } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("เดินด้ายทับ", "Topstitch")}</label>
             {edgeMetaNow.top != null && <div className={`${row} pl-5`}><span className="text-slate-500">{t("ห่างจากขอบ (มม.)", "Distance from edge (mm)")}</span><NumField value={edgeMetaNow.top} min={0.5} max={30} step={0.5} label={t("ห่างจากขอบ มม.", "Distance from edge mm")} onCommit={(v) => setEdgeMeta((m) => ({ ...m, top: v }))} className="w-16" /></div>}
             {ed && (
@@ -1841,6 +1866,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     </g>
                   );
                 })}
+                {finishLayer}
                 {seamLayer}
                 {edgeHits}
                 {seamGrips}

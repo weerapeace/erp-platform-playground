@@ -6,6 +6,10 @@
  *     • ซิปของช่องเจาะ: ผูกกับเส้นใน "ช่องเจาะ (ซิป)" ของชิ้น (src) → ยาว = ความยาวช่อง + เผื่อปลาย · จำนวน = จำนวนตัดของชิ้น
  *       แก้ความยาวช่องบนกระดาน ความยาวซิปเปลี่ยนตามเอง · ลบช่อง = แถวนี้หายตอนบันทึก
  *     • อะไหล่อื่น: ใส่เอง — วัสดุคิดตามยาว = ยาวต่อเส้น × จำนวน · วัสดุนับชิ้น = จำนวน
+ *     • ซิปตามขอบ (เพิ่ม 2026-11-11): ขอบที่ติ๊ก "ติดซิปตามขอบนี้" (edgeMeta.zip) → ยาว = ความยาวขอบ + เผื่อ (ตั้งต้น 0) · จำนวนใส่เอง (ตั้งต้น 1 —
+ *       ซิป 1 เส้นติดกับขอบของ 2 ชิ้น ให้ติ๊กขอบเดียว)
+ *     • กุ๊น / หุ้มขอบ (เพิ่ม 2026-11-11): 1 แถวรวมทั้งใบ = ขอบที่ติ๊ก "กุ้นขอบ" (× จำนวนตัดของชิ้น) + ตะเข็บชนิด "หุ้มขอบ" (นับครั้งเดียว ใช้ด้านที่ยาวกว่า)
+ *       ขอบที่อยู่ในตะเข็บหุ้มขอบทั้งขอบแล้ว ไม่นับซ้ำ · + เผื่อเพิ่มรวม (ซม.)
  *   วิธีคิดเงิน (ตามยาว / นับชิ้น) ตามกลุ่มของวัสดุตีราคา (material_groups.calc_method) — จำไว้ในแถวตอนเลือก (mode)
  *
  *   planTrimsSend = รวมรายการเป็นบรรทัดตีราคา **1 วัสดุ = 1 บรรทัด** (รวมความยาว / จำนวนทั้งใบ)
@@ -18,6 +22,7 @@
  */
 import { costLineFromItem, recomputeCostLine, type CostItemLike } from "@/lib/design-sheet-cost-row";
 import { cleanLineShape, type Pt } from "@/lib/pattern-shape";
+import { checkSeam, cleanEdgeMeta, isPartialSide, pieceEdges, type Seam } from "@/lib/pattern-seams";
 import type { CostingInsert, CostingUpdate, ExistingCostLine } from "@/lib/pattern-costing";
 import type { ProjectPiece } from "@/lib/pattern-project";
 
@@ -33,15 +38,19 @@ export type ProjectTrim = {
   qty: number;
   /** ยาวต่อเส้น ซม. (วัสดุคิดตามยาว) — แถวที่ผูกกับช่องเจาะไม่ใช้ (ใช้ความยาวช่อง) */
   len?: number;
-  /** เผื่อปลายซิป ซม. (เฉพาะแถวที่ผูกกับช่องเจาะ) */
+  /** เผื่อ ซม.: ซิปของช่องเจาะ / ซิปตามขอบ = เผื่อปลายต่อเส้น · กุ๊น = เผื่อเพิ่มรวมทั้งใบ */
   extra?: number;
   /** ผูกกับเส้นใน "ช่องเจาะ" ของชิ้น */
   src?: { pid: string; line: string };
+  /** ซิปตามขอบ: ผูกกับขอบที่ติ๊ก "ติดซิปตามขอบนี้" (i = ลำดับขอบ เริ่ม 0) */
+  edge?: { pid: string; i: number };
+  /** กุ๊น / หุ้มขอบ ทั้งใบ (มีได้แถวเดียว) */
+  bind?: true;
 };
 export const MAX_TRIMS = 40;
 /** เผื่อปลายซิปตั้งต้น (ซม.) — ซิปยาวกว่าช่องข้างละราว 1 ซม. · แก้ได้รายแถว */
 export const ZIP_EXTRA_DEFAULT = 2;
-export const TRIM_MAX_QTY = 999, TRIM_MAX_LEN = 2000, TRIM_MAX_EXTRA = 50;
+export const TRIM_MAX_QTY = 999, TRIM_MAX_LEN = 2000, TRIM_MAX_EXTRA = 50, BIND_MAX_EXTRA = 500;
 
 const ID = /^[\w-]{1,40}$/;
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -75,6 +84,22 @@ export function cleanTrims(raw: unknown): ProjectTrim[] {
       t.src = { pid: s.pid, line: s.line };
       const ex = fin(o.extra);
       t.extra = ex != null && ex >= 0 ? Math.min(TRIM_MAX_EXTRA, r1(ex)) : ZIP_EXTRA_DEFAULT;
+    } else if (o.edge && typeof o.edge === "object" && typeof (o.edge as Record<string, unknown>).pid === "string" && ID.test((o.edge as { pid: string }).pid)
+      && Number.isInteger((o.edge as Record<string, unknown>).i) && (o.edge as { i: number }).i >= 0 && (o.edge as { i: number }).i < 400) {
+      if (mode !== "length") continue;                       // ซิปตามขอบ = วัสดุคิดตามยาว
+      const e = o.edge as { pid: string; i: number }, key = `${e.pid}#${e.i}`;
+      if (srcs.has(key)) continue;
+      srcs.add(key);
+      t.edge = { pid: e.pid, i: e.i };
+      const ex = fin(o.extra), q = fin(o.qty);
+      t.extra = ex != null && ex >= 0 ? Math.min(TRIM_MAX_EXTRA, r1(ex)) : 0;
+      t.qty = q != null && q >= 1 ? Math.min(TRIM_MAX_QTY, Math.round(q)) : 1;
+    } else if (o.bind === true) {
+      if (mode !== "length" || srcs.has("bind")) continue;   // กุ๊นมีได้แถวเดียว
+      srcs.add("bind");
+      t.bind = true;
+      const ex = fin(o.extra);
+      t.extra = ex != null && ex >= 0 ? Math.min(BIND_MAX_EXTRA, r1(ex)) : 0;
     } else {
       const q = fin(o.qty);
       t.qty = q != null && q >= 1 ? Math.min(TRIM_MAX_QTY, Math.round(q)) : 1;
@@ -103,14 +128,63 @@ export function slitList(pieces: ProjectPiece[]): SlitRef[] {
   return out;
 }
 
-/** 1 แถวที่คิดเลขแล้ว — each = ยาวต่อเส้น (ซม. · เฉพาะตามยาว) · total = รวมทั้งใบ (ซม. หรือ ชิ้น) */
-export type TrimRow = { trim: ProjectTrim; label: string; mode: TrimMode; each: number | null; qty: number; total: number; slit?: SlitRef; gone?: true };
+/** ขอบที่ติ๊ก "ติดซิปตามขอบนี้" */
+export type ZipEdgeRef = { pid: string; i: number; piece: string; label: string; len: number };
+export function zipEdgeList(pieces: ProjectPiece[]): ZipEdgeRef[] {
+  const out: ZipEdgeRef[] = [];
+  pieces.forEach((p, k) => {
+    const meta = cleanEdgeMeta(p.shape, p.edgeMeta);
+    if (!meta) return;
+    for (const e of pieceEdges(p.shape)) if (meta[e.i]?.zip) out.push({ pid: p.pid, i: e.i, piece: p.name || `ชิ้น ${k + 1}`, label: `ขอบ ${e.i + 1}`, len: r1(e.len) });
+  });
+  return out;
+}
 
-/** รายการ → แถวที่คิดเลขแล้ว (ซิปของช่องเจาะอ่านความยาวจากชิ้นล่าสุด · ช่องถูกลบ = gone ยอด 0) */
-export function trimRows(trims: ProjectTrim[], pieces: ProjectPiece[]): TrimRow[] {
+/** กุ๊น / หุ้มขอบ ทั้งใบ: edges = จำนวนขอบที่กุ๊น (นับตามจำนวนตัด) · seams = ตะเข็บชนิดหุ้มขอบ · total = ความยาวรวม ซม. */
+export type BindRuns = { edges: number; seams: number; total: number };
+export function bindRuns(pieces: ProjectPiece[], seams: Seam[] = []): BindRuns {
+  const out: BindRuns = { edges: 0, seams: 0, total: 0 };
+  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
+  const inSeam = new Set<string>();   // ขอบที่อยู่ในตะเข็บหุ้มขอบทั้งขอบ → ไม่นับซ้ำกับ "กุ้นขอบ" ของขอบ
+  for (const s of seams) {
+    if (s.kind !== "bound") continue;
+    const c = checkSeam(shapes, s), len = Math.max(c.la ?? 0, c.lb ?? 0);
+    if (!(len > 0)) continue;
+    out.seams++; out.total += len;
+    for (const side of [s.a, s.b]) if (!isPartialSide(side)) for (let k = 0; k < side.count; k++) inSeam.add(`${side.pid}#${(side.from + k) % side.n}`);
+  }
+  for (const p of pieces) {
+    const meta = cleanEdgeMeta(p.shape, p.edgeMeta);
+    if (!meta) continue;
+    const n = Math.max(1, p.count || 1);
+    for (const e of pieceEdges(p.shape)) if (meta[e.i]?.bind && !inSeam.has(`${p.pid}#${e.i}`)) { out.edges += n; out.total += e.len * n; }
+  }
+  out.total = r1(out.total);
+  return out;
+}
+
+/** 1 แถวที่คิดเลขแล้ว — each = ยาวต่อเส้น (ซม. · เฉพาะตามยาว) · total = รวมทั้งใบ (ซม. หรือ ชิ้น) */
+export type TrimRow = { trim: ProjectTrim; label: string; mode: TrimMode; each: number | null; qty: number; total: number; slit?: SlitRef; edge?: ZipEdgeRef; runs?: BindRuns; gone?: true };
+
+/** รายการ → แถวที่คิดเลขแล้ว (ซิปของช่องเจาะ / ซิปตามขอบ / กุ๊น อ่านความยาวจากชิ้นล่าสุด · ช่องถูกลบ ขอบเลิกติ๊ก = gone ยอด 0) */
+export function trimRows(trims: ProjectTrim[], pieces: ProjectPiece[], seams: Seam[] = []): TrimRow[] {
   const slits = new Map(slitList(pieces).map((s) => [`${s.pid}/${s.line}`, s]));
+  const edges = new Map(zipEdgeList(pieces).map((e) => [`${e.pid}#${e.i}`, e]));
+  let runs: BindRuns | null = null;
   return trims.map((t) => {
     const mode = t.mat.mode;
+    if (t.edge) {
+      const edge = edges.get(`${t.edge.pid}#${t.edge.i}`);
+      if (!edge) return { trim: t, label: t.name || t.mat.name, mode, each: null, qty: 0, total: 0, gone: true as const };
+      const each = r1(edge.len + (t.extra ?? 0));
+      return { trim: t, label: t.name || `${edge.piece} · ${edge.label}`, mode, each, qty: t.qty, total: r1(each * t.qty), edge };
+    }
+    if (t.bind) {
+      runs ??= bindRuns(pieces, seams);
+      const parts = runs.edges + runs.seams;
+      if (!parts) return { trim: t, label: t.name || "กุ๊น / หุ้มขอบ", mode, each: null, qty: 0, total: 0, gone: true as const };
+      return { trim: t, label: t.name || "กุ๊น / หุ้มขอบ", mode, each: null, qty: parts, total: r1(runs.total + (t.extra ?? 0)), runs };
+    }
     if (t.src) {
       const slit = slits.get(`${t.src.pid}/${t.src.line}`);
       if (!slit) return { trim: t, label: t.name || t.mat.name, mode, each: null, qty: 0, total: 0, gone: true as const };
@@ -128,10 +202,20 @@ export function openSlits(trims: ProjectTrim[], pieces: ProjectPiece[]): SlitRef
   return slitList(pieces).filter((s) => !used.has(`${s.pid}/${s.line}`));
 }
 
-/** ทิ้งแถวที่ช่องเจาะถูกลบไปแล้ว (เรียกตอนบันทึก) — ไม่มีอะไรทิ้ง = คืนตัวเดิม */
-export function pruneTrims(trims: ProjectTrim[], pieces: ProjectPiece[]): ProjectTrim[] {
-  const slits = new Set(slitList(pieces).map((s) => `${s.pid}/${s.line}`));
-  const keep = trims.filter((t) => !t.src || slits.has(`${t.src.pid}/${t.src.line}`));
+/** ของที่ยังไม่ได้เลือกวัสดุ: ช่องซิป · ขอบที่ติดซิป · กุ๊น (มีขอบกุ๊นแต่ยังไม่เลือกเทป) — count = รวมกี่รายการ */
+export type OpenTrims = { slits: SlitRef[]; edges: ZipEdgeRef[]; bind: BindRuns | null; count: number };
+export function openTrims(trims: ProjectTrim[], pieces: ProjectPiece[], seams: Seam[] = []): OpenTrims {
+  const slits = openSlits(trims, pieces);
+  const used = new Set(trims.filter((t) => t.edge).map((t) => `${t.edge!.pid}#${t.edge!.i}`));
+  const edges = zipEdgeList(pieces).filter((e) => !used.has(`${e.pid}#${e.i}`));
+  const runs = trims.some((t) => t.bind) ? null : bindRuns(pieces, seams);
+  const bind = runs && runs.edges + runs.seams > 0 ? runs : null;
+  return { slits, edges, bind, count: slits.length + edges.length + (bind ? 1 : 0) };
+}
+
+/** ทิ้งแถวที่ของต้นทางหายไปแล้ว: ช่องเจาะถูกลบ · ขอบเลิกติดซิป · ไม่มีขอบกุ๊นเหลือ (เรียกตอนบันทึก) — ไม่มีอะไรทิ้ง = คืนตัวเดิม */
+export function pruneTrims(trims: ProjectTrim[], pieces: ProjectPiece[], seams: Seam[] = []): ProjectTrim[] {
+  const keep = trimRows(trims, pieces, seams).filter((r) => !r.gone).map((r) => r.trim);
   return keep.length === trims.length ? trims : keep;
 }
 

@@ -46,8 +46,10 @@ export type SeamTop = { off: number; rows: 1 | 2; spi: number };
 export const SEAM_TOP_DEFAULT: SeamTop = { off: 2, rows: 1, spi: 8 };
 /** rev = ด้าน b เย็บกลับทิศ (จุดเริ่มของ b ไปชนจุดจบของ a) — ตอนนี้ใช้แสดงขีดบอกทิศบนกระดาน ยังไม่มีผลกับการประกอบ 3D */
 export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean; name?: string; kind?: SeamKind; top?: SeamTop; ease?: boolean; /** รหัสชุด "1 ขอบกับหลายชิ้น" — ตะเข็บที่ group เดียวกันแบ่งขอบเดียวกันเป็นช่วงต่อกัน */ group?: string };
-/** ค่ารายขอบที่ไม่ใช่เผื่อเย็บ: กุ้นขอบ · เดินด้ายทับห่างจากขอบ (มม.) — เก็บเป็นรายการ 1 ค่าต่อขอบ (ครบทุกขอบ) */
-export type EdgeMeta = { bind?: boolean; top?: number };
+/** ค่ารายขอบที่ไม่ใช่เผื่อเย็บ: กุ้นขอบ · ติดซิปตามขอบ · เดินด้ายทับห่างจากขอบ (มม.) — เก็บเป็นรายการ 1 ค่าต่อขอบ (ครบทุกขอบ) */
+export type EdgeMeta = { bind?: boolean; zip?: boolean; top?: number };
+/** ขอบนี้มีค่าที่ตั้งไว้ไหม (ใช้ตัดสินว่าต้องเก็บรายการค่ารายขอบของชิ้นหรือไม่) */
+export const edgeMetaSet = (m: EdgeMeta | null | undefined): boolean => !!m && (!!m.bind || !!m.zip || m.top != null);
 export type SeamStatus = "ok" | "mismatch" | "broken";
 export type SeamCheck = { status: SeamStatus; la: number | null; lb: number | null; diff: number };
 
@@ -218,16 +220,17 @@ export function cleanSeamTop(raw: unknown): SeamTop | null {
   if (off == null || off < 0.5 || off > 30 || spi == null || spi < 2 || spi > 20) return null;
   return { off: Math.round(off * 10) / 10, rows: r.rows === 2 ? 2 : 1, spi: Math.round(spi * 10) / 10 };
 }
-/** ค่ารายขอบ (กุ้น / เดินด้ายทับ): ต้องครบทุกขอบและมีอย่างน้อย 1 ขอบที่ตั้งค่า ไม่งั้น = ไม่มี */
+/** ค่ารายขอบ (กุ้น / ติดซิป / เดินด้ายทับ): ต้องครบทุกขอบและมีอย่างน้อย 1 ขอบที่ตั้งค่า ไม่งั้น = ไม่มี */
 export function cleanEdgeMeta(shape: Shape, raw: unknown): EdgeMeta[] | null {
   if (!Array.isArray(raw) || raw.length !== pieceEdges(shape).length) return null;
   const out: EdgeMeta[] = raw.map((x) => {
     const r = (x && typeof x === "object" ? x : {}) as Record<string, unknown>, top = fin(r.top), m: EdgeMeta = {};
     if (r.bind === true) m.bind = true;
+    if (r.zip === true) m.zip = true;
     if (top != null && top >= 0.5 && top <= 30) m.top = Math.round(top * 10) / 10;
     return m;
   });
-  return out.some((m) => m.bind || m.top != null) ? out : null;
+  return out.some(edgeMetaSet) ? out : null;
 }
 /** จุดบนเส้น ห่างจากจุดเริ่ม d (ซม.) ตามแนวเส้น — เกินความยาว = null */
 export function pointAlong(P: Pt[], d: number): Pt | null {

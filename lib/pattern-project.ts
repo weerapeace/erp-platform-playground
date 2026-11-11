@@ -259,15 +259,15 @@ export function projectSeamRows(pieces: ProjectPiece[], seams: Seam[]): SeamRow[
   });
 }
 /** แถวของ "งานขอบ" ในใบพิมพ์: ขอบที่พับ / กุ้น / เดินด้ายทับ (ขอบธรรมดาไม่ออก) */
-export type EdgeRow = { piece: string; edge: number; len: number; allow: number; fold: boolean; bind: boolean; top: number | null };
+export type EdgeRow = { piece: string; edge: number; len: number; allow: number; fold: boolean; bind: boolean; zip: boolean; top: number | null };
 export function projectEdgeRows(pieces: ProjectPiece[]): EdgeRow[] {
   const out: EdgeRow[] = [];
   for (const [k, p] of pieces.entries()) {
     const E = pieceEdges(p.shape);
     for (const e of E) {
       const fold = !!p.foldEdges?.[e.i], m = p.edgeMeta?.[e.i];
-      if (!fold && !m?.bind && m?.top == null) continue;
-      out.push({ piece: p.name || `ชิ้น ${k + 1}`, edge: e.i + 1, len: Math.round(e.len * 10) / 10, allow: p.allowEdges?.[e.i] ?? p.allow, fold, bind: !!m?.bind, top: m?.top ?? null });
+      if (!fold && !m?.bind && !m?.zip && m?.top == null) continue;
+      out.push({ piece: p.name || `ชิ้น ${k + 1}`, edge: e.i + 1, len: Math.round(e.len * 10) / 10, allow: p.allowEdges?.[e.i] ?? p.allow, fold, bind: !!m?.bind, zip: !!m?.zip, top: m?.top ?? null });
     }
   }
   return out;

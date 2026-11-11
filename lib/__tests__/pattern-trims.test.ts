@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ZIP_EXTRA_DEFAULT, cleanTrims, openSlits, planTrimsSend, pruneTrims, slitList, trimMarker, trimModeOf, trimRows, trimTotals, type ProjectTrim } from "@/lib/pattern-trims";
+import { ZIP_EXTRA_DEFAULT, bindRuns, cleanTrims, openSlits, openTrims, planTrimsSend, pruneTrims, slitList, trimMarker, trimModeOf, trimRows, trimTotals, zipEdgeList } from "@/lib/pattern-trims";
+import type { Seam } from "@/lib/pattern-seams";
 import type { ExistingCostLine } from "@/lib/pattern-costing";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import { cleanProjectPieces, type ProjectPiece } from "@/lib/pattern-project";
@@ -152,5 +153,66 @@ describe("ซิปและอะไหล่ของแพทเทิร์�
     expect(plan.inserts).toHaveLength(0);
     expect(plan.skipped).toEqual([FABRIC.name]);
     expect(plan.noQty).toBe(1);
+  });
+});
+
+// ── ซิปตามขอบ + กุ๊น/หุ้มขอบ: ความยาวมาจากขอบของชิ้น (สี่เหลี่ยม 30×25: ขอบ 1,3 ยาว 30 · ขอบ 2,4 ยาว 25)
+const tapeMat = { id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", name: "เทปกุ๊น 2 ซม.", mode: "length" as const };
+const meta = (m: Record<number, { bind?: boolean; zip?: boolean }>) => [0, 1, 2, 3].map((i) => m[i] ?? {});
+const whole = (pid: string, i: number) => ({ pid, from: i, count: 1, n: 4 });
+
+describe("ซิปตามขอบ + กุ๊น คิดความยาวจากขอบ", () => {
+  it("ขอบที่ติ๊กติดซิป → รายการขอบ (ยาวตามขอบ) · ขอบที่ไม่ได้ติ๊กไม่นับ", () => {
+    const a = piece("a", { edgeMeta: meta({ 0: { zip: true }, 1: { bind: true } }) });
+    expect(zipEdgeList([a, piece("b")])).toEqual([{ pid: "a", i: 0, piece: "ชิ้น a", label: "ขอบ 1", len: 30 }]);
+  });
+
+  it("ซิปตามขอบ: ยาว = ขอบ + เผื่อ (ตั้งต้น 0) · จำนวนใส่เอง ไม่คูณจำนวนตัด · ยืดขอบ ซิปยาวตาม · เลิกติ๊ก = แถวหายตอนบันทึก", () => {
+    const trims = cleanTrims([{ id: "t1", mat: zipMat, edge: { pid: "a", i: 0 } }, { id: "t2", mat: zipMat, edge: { pid: "a", i: 0 }, qty: 2 }, { id: "t3", mat: ringMat, edge: { pid: "a", i: 2 } }]);
+    expect(trims.map((t) => t.id)).toEqual(["t1"]);                                    // ขอบเดียวกันซ้ำ / ห่วงผูกขอบ = ทิ้ง
+    expect(trims[0]).toMatchObject({ edge: { pid: "a", i: 0 }, extra: 0, qty: 1 });
+    const on = piece("a", { count: 2, edgeMeta: meta({ 0: { zip: true } }) });
+    const [r] = trimRows(trims, [on]);
+    expect([r.each, r.qty, r.total, r.label]).toEqual([30, 1, 30, "ชิ้น a · ขอบ 1"]);
+    const wide = piece("a", { shape: R(36, 25), edgeMeta: meta({ 0: { zip: true } }) });
+    expect(trimRows(cleanTrims([{ id: "t1", mat: zipMat, edge: { pid: "a", i: 0 }, extra: 1.5, qty: 2 }]), [wide])[0]).toMatchObject({ each: 37.5, total: 75 });
+    const off = piece("a");
+    expect(trimRows(trims, [off])[0].gone).toBe(true);
+    expect(pruneTrims(trims, [off])).toEqual([]);
+    expect(pruneTrims(trims, [on])).toBe(trims);
+  });
+
+  it("กุ๊น: รวมขอบที่ติ๊กกุ้นขอบ × จำนวนตัด + ตะเข็บชนิดหุ้มขอบ (ครั้งเดียว) · ขอบที่อยู่ในตะเข็บหุ้มขอบแล้วไม่นับซ้ำ", () => {
+    const a = piece("a", { count: 2, edgeMeta: meta({ 0: { bind: true }, 1: { bind: true } }) });   // 30 + 25 = 55 × 2 = 110
+    const b = piece("b", { edgeMeta: meta({ 2: { bind: true } }) });                                // ขอบ 3 (30) อยู่ในตะเข็บหุ้มขอบ → ไม่นับซ้ำ
+    const c = piece("c");
+    const seams: Seam[] = [
+      { id: "s1", a: whole("b", 2), b: whole("c", 0), kind: "bound" },                              // 30
+      { id: "s2", a: whole("b", 1), b: whole("c", 1), kind: "turned" },                             // ไม่ใช่หุ้มขอบ
+    ];
+    expect(bindRuns([a, b, c], seams)).toEqual({ edges: 4, seams: 1, total: 140 });
+    expect(bindRuns([a, b, c])).toEqual({ edges: 5, seams: 0, total: 140 });                        // ไม่มีตะเข็บ = นับขอบของ b
+    expect(bindRuns([c])).toEqual({ edges: 0, seams: 0, total: 0 });
+  });
+
+  it("แถวกุ๊น: 1 แถวทั้งใบ + เผื่อเพิ่มรวม · มีได้แถวเดียว · ไม่มีขอบกุ๊นเหลือ = แถวหายตอนบันทึก · ส่งตีราคาเป็นบรรทัดตามยาว", () => {
+    const trims = cleanTrims([{ id: "t1", mat: tapeMat, bind: true, extra: 10 }, { id: "t2", mat: tapeMat, bind: true }, { id: "t3", mat: ringMat, bind: true }]);
+    expect(trims.map((t) => t.id)).toEqual(["t1"]);
+    const a = piece("a", { count: 2, edgeMeta: meta({ 0: { bind: true } }) });                      // 30 × 2 = 60
+    const [r] = trimRows(trims, [a]);
+    expect([r.qty, r.total, r.label]).toEqual([2, 70, "กุ๊น / หุ้มขอบ"]);
+    expect(trimRows(trims, [piece("a")])[0].gone).toBe(true);
+    expect(pruneTrims(trims, [piece("a")])).toEqual([]);
+    const plan = planTrimsSend(trimRows(trims, [a]), [], null, items, "PT-0007", 0);
+    expect(plan.inserts[0]).toMatchObject({ item_id: null, item_name: tapeMat.name, calc_method: "length", length_cm: 70, shape: null });
+  });
+
+  it("ของที่ยังไม่เลือกวัสดุ: ช่องซิป + ขอบติดซิป + กุ๊น (นับเป็น 1) · เลือกครบ = 0", () => {
+    const pcs = [piece("a", { inner: [slit("s1", 18)], edgeMeta: meta({ 0: { zip: true }, 1: { bind: true } }) })];
+    const none = openTrims([], pcs);
+    expect([none.slits.length, none.edges.length, !!none.bind, none.count]).toEqual([1, 1, true, 3]);
+    const all = cleanTrims([{ id: "t1", mat: zipMat, src: { pid: "a", line: "s1" } }, { id: "t2", mat: zipMat, edge: { pid: "a", i: 0 } }, { id: "t3", mat: tapeMat, bind: true }]);
+    expect(openTrims(all, pcs).count).toBe(0);
+    expect(openTrims([], [piece("b")]).count).toBe(0);
   });
 });

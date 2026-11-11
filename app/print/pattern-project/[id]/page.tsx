@@ -35,7 +35,7 @@ export default function PrintPatternProjectPage() {
   const seamRows = useMemo(() => (project ? projectSeamRows(project.pieces ?? [], project.seams ?? []) : []), [project]);
   const edgeRows = useMemo(() => (project ? projectEdgeRows(project.pieces ?? []) : []), [project]);
   const pieceRows = useMemo(() => (project ? projectPieceRows(project.pieces ?? []) : []), [project]);
-  const trims = useMemo(() => (project ? trimRows(cleanTrims((project.template as { trims?: unknown } | null)?.trims), project.pieces ?? []).filter((r) => !r.gone) : []), [project]);
+  const trims = useMemo(() => (project ? trimRows(cleanTrims((project.template as { trims?: unknown } | null)?.trims), project.pieces ?? [], project.seams ?? []).filter((r) => !r.gone) : []), [project]);
   const f1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
   const th = "py-1 pr-2", tables = seamRows.length || edgeRows.length || pieceRows.length || trims.length ? (
     <div className="space-y-3">
@@ -50,8 +50,8 @@ export default function PrintPatternProjectPage() {
               {trims.map((r) => (
                 <tr key={r.trim.id} className="border-b border-slate-100">
                   <td className={th}>{r.label}</td><td className={th}>{r.trim.mat.name}</td>
-                  <td className={`${th} text-right tabular-nums`}>{r.mode === "length" ? `${f1(r.each)} ซม.` : "—"}</td>
-                  <td className={`${th} text-right tabular-nums`}>{r.qty} {r.mode === "length" ? "เส้น" : "ตัว"}</td>
+                  <td className={`${th} text-right tabular-nums`}>{r.mode === "length" && r.each != null ? `${f1(r.each)} ซม.` : "—"}</td>
+                  <td className={`${th} text-right tabular-nums`}>{r.qty} {r.trim.bind ? "ช่วง" : r.mode === "length" ? "เส้น" : "ตัว"}</td>
                   <td className="py-1 text-right tabular-nums">{r.mode === "length" ? `${f1(r.total)} ซม.` : `${r.total} ตัว`}</td>
                 </tr>
               ))}
@@ -99,7 +99,7 @@ export default function PrintPatternProjectPage() {
       )}
       {edgeRows.length > 0 && (
         <div className="break-inside-avoid">
-          <div className="mb-1 text-[11px] font-medium text-slate-600">งานขอบ (ขอบที่พับ กุ้น หรือเดินด้ายทับ)</div>
+          <div className="mb-1 text-[11px] font-medium text-slate-600">งานขอบ (ขอบที่พับ กุ้น ติดซิป หรือเดินด้ายทับ)</div>
           <table className="w-full border-collapse text-[12px]">
             <thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500">
               <th className={th}>ชิ้น</th><th className={th}>ขอบ</th><th className={`${th} text-right`}>ยาว (ซม.)</th><th className={`${th} text-right`}>เผื่อ (ซม.)</th><th className="py-1">งาน</th>
@@ -108,7 +108,7 @@ export default function PrintPatternProjectPage() {
               {edgeRows.map((r, i) => (
                 <tr key={i} className="border-b border-slate-100">
                   <td className={th}>{r.piece}</td><td className={th}>ขอบ {r.edge}</td><td className={`${th} text-right tabular-nums`}>{r.len.toFixed(1)}</td><td className={`${th} text-right tabular-nums`}>{r.allow}</td>
-                  <td className="py-1">{[r.fold ? "พับเข้าใน" : "", r.bind ? "กุ้นขอบ" : "", r.top != null ? `เดินด้ายทับห่างขอบ ${r.top} มม.` : ""].filter(Boolean).join(" · ")}</td>
+                  <td className="py-1">{[r.fold ? "พับเข้าใน" : "", r.bind ? "กุ้นขอบ" : "", r.zip ? "ติดซิป" : "", r.top != null ? `เดินด้ายทับห่างขอบ ${r.top} มม.` : ""].filter(Boolean).join(" · ")}</td>
                 </tr>
               ))}
             </tbody>
