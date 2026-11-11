@@ -151,6 +151,8 @@ export function SkuRenameDialog({ open, onClose, items, title, onDone }: {
       title={title ?? (single ? `เปลี่ยนชื่อสี “${items[0]?.from ?? ""}” ใน SKU` : `เปลี่ยนชื่อสีใน SKU (${items.length} ชื่อ)`)}
       description="แก้ช่องสีของ SKU จริง (ช่องที่ตรงกับชื่อเดิม: สี (ไทย) / Color) · ดูรายการก่อน แล้วกดยืนยัน · บันทึกประวัติทุก SKU"
       size="lg"
+      // จำขนาด/ตำแหน่งที่ลากไว้ต่อคน — ต้องตั้งชื่อตายตัว เพราะหัวป๊อปมีชื่อสี (ระบบตั้งชื่อเองจากหัว = ทุกสีเป็นป๊อปใหม่ ไม่จำ · เจ้าของแจ้ง 2026-11-11)
+      storageKey="color-sku-rename"
       zIndex={80}
       closeOnBackdrop={!busy && step !== "confirm"}
       footer={footer}
