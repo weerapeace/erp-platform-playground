@@ -129,6 +129,12 @@ describe("ภาพเย็บติด (buildSewn)", () => {
     expect(zip.pts.every((q) => Math.abs(q[1] - 0.25) < 1e-6)).toBe(true);               // เหนือชิ้นที่วางแบน (0.05) อีก 0.2
     expect(dist(sc.finishes[1].pts[0], sc.finishes[1].pts[sc.finishes[1].pts.length - 1])).toBeCloseTo(12, 3);
   });
+  it("ซิปเฉพาะบางช่วงของขอบ = เส้นในภาพยาวเท่าช่วง อยู่ตรงช่วงนั้น", () => {
+    const sc = buildSewn([{ ...body, edgeMeta: [{ zip: true, zipR: [10, 30] }, {}, {}, {}] }], []);
+    const [zip] = sc.finishes, whole = buildSewn([{ ...body, edgeMeta: meta4({ 0: { zip: true } }) }], []).finishes[0];
+    expect(dist(zip.pts[0], zip.pts[zip.pts.length - 1])).toBeCloseTo(20, 3);
+    expect(dist(zip.pts[0], whole.pts[0])).toBeCloseTo(10, 3);                             // เริ่มห่างจากต้นขอบ 10
+  });
   it("ชิ้นหลักที่ตั้งขึ้น (มีชิ้นมาเย็บ) = เส้นงานขอบอยู่บนผิวแผ่นนั้น หันออกด้านหน้า", () => {
     const sc = buildSewn([{ ...body, edgeMeta: meta4({ 0: { zip: true } }) }, strap], [sL, sR]);
     const [zip] = sc.finishes, base = box(part(sc, "body"));

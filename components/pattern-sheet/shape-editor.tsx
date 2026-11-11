@@ -29,7 +29,7 @@ import {
   type Box, type InnerKind, type InnerLine, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
-import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, edgeMetaSet, extendSide, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
+import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, edgeMetaSet, extendSide, finishPts, finishRange, withFinishRange, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
 import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
 import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
@@ -1316,10 +1316,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           <g key={p.id}>
             {pieceEdges(p.shape).map((e) => { const m = meta[e.i]; return !m?.bind && !m?.zip ? null : (
               <g key={e.i}>
-                {m.bind && <path data-finish="bind" d={lineD(e.pts)} fill="none" stroke="#0ea5e9" strokeOpacity={0.5} strokeWidth={6} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+                {m.bind && <path data-finish="bind" d={lineD(finishPts(e, m, "bind"))} fill="none" stroke="#0ea5e9" strokeOpacity={0.5} strokeWidth={6} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
                 {m.zip && <>
-                  <path data-finish="zip" d={lineD(e.pts)} fill="none" stroke="#334155" strokeWidth={8} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
-                  <path d={lineD(e.pts)} fill="none" stroke="#f8fafc" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                  <path data-finish="zip" d={lineD(finishPts(e, m, "zip"))} fill="none" stroke="#334155" strokeWidth={8} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+                  <path d={lineD(finishPts(e, m, "zip"))} fill="none" stroke="#f8fafc" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
                 </>}
               </g>
             ); })}
@@ -1524,6 +1524,26 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
       {selEdge && edgePiece && (() => {
         const canLen = !!setEdgeLength(edgePiece.shape, selEdge.i, selEdge.len), ed = !readonly;
+        /** ช่วงของซิป/กุ๊นบนขอบนี้: ยาวเท่าไร + ห่างจากต้นขอบเท่าไร (ยาวเท่าขอบ = ทั้งขอบ) — เห็นผลบนกระดานและภาพ 3 มิติทันที */
+        const finishRows = (kind: "zip" | "bind") => {
+          const L = selEdge.len, [a, b] = finishRange(edgeMetaNow, kind, L), span = b - a, part = span < L - 0.01, what = kind === "zip" ? t("ซิป", "zip") : t("กุ๊น", "binding");
+          const put = (na: number, nb: number) => setEdgeMeta((m) => withFinishRange(m, kind, [na, nb], L));
+          return (
+            <div className="space-y-1.5 pl-5" data-finish-range={kind}>
+              <div className={row}><span className="text-slate-500">{t(`ยาวของ${what}บนขอบ (ซม.)`, `Length of the ${what} on this edge (cm)`)}</span>
+                {ed ? <NumField value={Math.round(span * 100) / 100} min={SEAM_MIN_LEN} max={Math.round(L * 100) / 100} label={t(`ยาวของ${what}บนขอบ ซม.`, `Length of the ${what} cm`)} onCommit={(v) => { const s = Math.min(L, Math.max(SEAM_MIN_LEN, v)), na = Math.max(0, Math.min(a, L - s)); put(na, na + s); }} className="w-16" /> : <b className="tabular-nums">{r1(span)}</b>}</div>
+              {part ? (<>
+                <div className={row}><span className="text-slate-500">{t("ห่างจากต้นขอบ (ซม.)", "From the start of the edge (cm)")}</span>
+                  {ed ? <NumField value={Math.round(a * 100) / 100} min={0} max={Math.round((L - span) * 100) / 100} label={t(`${what}ห่างจากต้นขอบ ซม.`, `${what} offset cm`)} onCommit={(v) => { const na = Math.max(0, Math.min(L - span, v)); put(na, na + span); }} className="w-16" /> : <b className="tabular-nums">{r1(a)}</b>}</div>
+                {ed && <div className="flex gap-1.5">
+                  <button type="button" onClick={() => put((L - span) / 2, (L + span) / 2)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("กึ่งกลางขอบ", "Centre")}</button>
+                  <button type="button" onClick={() => put(L - b, L - a)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("สลับไปอีกปลาย", "Other end")}</button>
+                  <button type="button" onClick={() => setEdgeMeta((m) => withFinishRange(m, kind, null, L))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทั้งขอบ", "Whole edge")}</button>
+                </div>}
+              </>) : <div className="text-[11px] text-slate-400">{t(`ตอนนี้ทั้งขอบ — พิมพ์ความยาวที่สั้นกว่าขอบ เพื่อติด${what}เฉพาะบางช่วง`, `Whole edge now — type a shorter length to put the ${what} on part of the edge`)}</div>}
+            </div>
+          );
+        };
         return (
           <section className="space-y-2 rounded-md border border-slate-300 bg-white p-2.5" aria-label={t("ค่าของขอบ", "Edge values")}>
             <div className="font-semibold text-slate-700">{t(`ขอบ ${selEdge.i + 1}`, `Edge ${selEdge.i + 1}`)} <span className="font-normal text-slate-500">· {pieceNo(edgePiece.pid)}</span></div>
@@ -1533,8 +1553,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             <div className={row}><span className="text-slate-500">{t("เผื่อของขอบนี้ (ซม.)", "Allowance of this edge (cm)")}</span>
               {ed ? <NumField value={edgeAllow} min={0} max={20} label={t("เผื่อของขอบ ซม.", "Edge allowance cm")} onCommit={(v) => patchPiece(edgePiece.id, (p) => { const cur = edgeAllowances(p.shape, p.allowEdges, p.allow) ?? edgeList.map(() => p.allow); return { ...p, allowEdges: cur.map((a, k) => (k === selEdge.i ? cleanAllow(v) : a)) }; })} className="w-16" /> : <b className="tabular-nums">{edgeAllow}</b>}</div>
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeFold} disabled={!ed} onChange={() => patchPiece(edgePiece.id, (p) => { const next = (cleanFoldEdges(p.shape, p.foldEdges) ?? edgeList.map(() => 0)).map((v, k) => (k === selEdge.i ? (v ? 0 : 1) : v)); return { ...p, foldEdges: next.some(Boolean) ? next : null }; })} className="h-3.5 w-3.5 accent-violet-600" />{t("พับเข้าใน", "Folds inward")}</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={!!edgeMetaNow.bind} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { bind: _b, ...rest } = m; void _b; return e.target.checked ? { ...rest, bind: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("กุ้นขอบ", "Bound edge")}</label>
-            <label className="flex items-center gap-2"><input type="checkbox" data-edge-zip checked={!!edgeMetaNow.zip} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { zip: _z, ...rest } = m; void _z; return e.target.checked ? { ...rest, zip: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ติดซิปตามขอบนี้", "Zip along this edge")}</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={!!edgeMetaNow.bind} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { bind: _b, bindR: _r, ...rest } = m; void _b; void _r; return e.target.checked ? { ...rest, bind: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("กุ้นขอบ", "Bound edge")}</label>
+            {edgeMetaNow.bind && finishRows("bind")}
+            <label className="flex items-center gap-2"><input type="checkbox" data-edge-zip checked={!!edgeMetaNow.zip} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { zip: _z, zipR: _r, ...rest } = m; void _z; void _r; return e.target.checked ? { ...rest, zip: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ติดซิปตามขอบนี้", "Zip along this edge")}</label>
+            {edgeMetaNow.zip && finishRows("zip")}
             {(edgeMetaNow.zip || edgeMetaNow.bind) && <div className="pl-5 text-[11px] text-slate-400">{t("เลือกซิป / เทปกุ๊น ได้ที่ปุ่ม ซิป / อะไหล่ — ความยาวคิดจากขอบนี้ให้เอง", "Choose the zip / binding tape under Zips / hardware — the length comes from this edge")}</div>}
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeMetaNow.top != null} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { top: _t, ...rest } = m; void _t; return e.target.checked ? { ...rest, top: 3 } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("เดินด้ายทับ", "Topstitch")}</label>
             {edgeMetaNow.top != null && <div className={`${row} pl-5`}><span className="text-slate-500">{t("ห่างจากขอบ (มม.)", "Distance from edge (mm)")}</span><NumField value={edgeMetaNow.top} min={0.5} max={30} step={0.5} label={t("ห่างจากขอบ มม.", "Distance from edge mm")} onCommit={(v) => setEdgeMeta((m) => ({ ...m, top: v }))} className="w-16" /></div>}

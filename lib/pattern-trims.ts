@@ -10,6 +10,7 @@
  *       ซิป 1 เส้นติดกับขอบของ 2 ชิ้น ให้ติ๊กขอบเดียว)
  *     • กุ๊น / หุ้มขอบ (เพิ่ม 2026-11-11): 1 แถวรวมทั้งใบ = ขอบที่ติ๊ก "กุ้นขอบ" (× จำนวนตัดของชิ้น) + ตะเข็บชนิด "หุ้มขอบ" (นับครั้งเดียว ใช้ด้านที่ยาวกว่า)
  *       ขอบที่อยู่ในตะเข็บหุ้มขอบทั้งขอบแล้ว ไม่นับซ้ำ · + เผื่อเพิ่มรวม (ซม.)
+ *     • ซิป / กุ๊น เฉพาะบางช่วงของขอบ (EdgeMeta.zipR / bindR): ความยาว = ช่วงที่ตั้งไว้ ไม่ใช่ทั้งขอบ
  *   วิธีคิดเงิน (ตามยาว / นับชิ้น) ตามกลุ่มของวัสดุตีราคา (material_groups.calc_method) — จำไว้ในแถวตอนเลือก (mode)
  *
  *   planTrimsSend = รวมรายการเป็นบรรทัดตีราคา **1 วัสดุ = 1 บรรทัด** (รวมความยาว / จำนวนทั้งใบ)
@@ -22,7 +23,7 @@
  */
 import { costLineFromItem, recomputeCostLine, type CostItemLike } from "@/lib/design-sheet-cost-row";
 import { cleanLineShape, type Pt } from "@/lib/pattern-shape";
-import { checkSeam, cleanEdgeMeta, isPartialSide, pieceEdges, type Seam } from "@/lib/pattern-seams";
+import { checkSeam, cleanEdgeMeta, finishRange, isPartialSide, pieceEdges, type Seam } from "@/lib/pattern-seams";
 import type { CostingInsert, CostingUpdate, ExistingCostLine } from "@/lib/pattern-costing";
 import type { ProjectPiece } from "@/lib/pattern-project";
 
@@ -129,13 +130,17 @@ export function slitList(pieces: ProjectPiece[]): SlitRef[] {
 }
 
 /** ขอบที่ติ๊ก "ติดซิปตามขอบนี้" */
-export type ZipEdgeRef = { pid: string; i: number; piece: string; label: string; len: number };
+export type ZipEdgeRef = { pid: string; i: number; piece: string; label: string; /** ยาวของซิปบนขอบ (ทั้งขอบ หรือช่วงที่ตั้งไว้) */ len: number; /** ความยาวขอบทั้งเส้น — มีเมื่อซิปติดเฉพาะบางช่วง */ full?: number };
 export function zipEdgeList(pieces: ProjectPiece[]): ZipEdgeRef[] {
   const out: ZipEdgeRef[] = [];
   pieces.forEach((p, k) => {
     const meta = cleanEdgeMeta(p.shape, p.edgeMeta);
     if (!meta) return;
-    for (const e of pieceEdges(p.shape)) if (meta[e.i]?.zip) out.push({ pid: p.pid, i: e.i, piece: p.name || `ชิ้น ${k + 1}`, label: `ขอบ ${e.i + 1}`, len: r1(e.len) });
+    for (const e of pieceEdges(p.shape)) {
+      if (!meta[e.i]?.zip) continue;
+      const [a, b] = finishRange(meta[e.i], "zip", e.len), part = b - a < e.len - 0.01;
+      out.push({ pid: p.pid, i: e.i, piece: p.name || `ชิ้น ${k + 1}`, label: `ขอบ ${e.i + 1}`, len: r1(b - a), ...(part ? { full: r1(e.len) } : {}) });
+    }
   });
   return out;
 }
@@ -157,7 +162,7 @@ export function bindRuns(pieces: ProjectPiece[], seams: Seam[] = []): BindRuns {
     const meta = cleanEdgeMeta(p.shape, p.edgeMeta);
     if (!meta) continue;
     const n = Math.max(1, p.count || 1);
-    for (const e of pieceEdges(p.shape)) if (meta[e.i]?.bind && !inSeam.has(`${p.pid}#${e.i}`)) { out.edges += n; out.total += e.len * n; }
+    for (const e of pieceEdges(p.shape)) if (meta[e.i]?.bind && !inSeam.has(`${p.pid}#${e.i}`)) { const [a, b] = finishRange(meta[e.i], "bind", e.len); out.edges += n; out.total += (b - a) * n; }
   }
   out.total = r1(out.total);
   return out;

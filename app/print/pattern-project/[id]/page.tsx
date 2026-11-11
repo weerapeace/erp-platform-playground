@@ -108,7 +108,7 @@ export default function PrintPatternProjectPage() {
               {edgeRows.map((r, i) => (
                 <tr key={i} className="border-b border-slate-100">
                   <td className={th}>{r.piece}</td><td className={th}>ขอบ {r.edge}</td><td className={`${th} text-right tabular-nums`}>{r.len.toFixed(1)}</td><td className={`${th} text-right tabular-nums`}>{r.allow}</td>
-                  <td className="py-1">{[r.fold ? "พับเข้าใน" : "", r.bind ? "กุ้นขอบ" : "", r.zip ? "ติดซิป" : "", r.top != null ? `เดินด้ายทับห่างขอบ ${r.top} มม.` : ""].filter(Boolean).join(" · ")}</td>
+                  <td className="py-1">{[r.fold ? "พับเข้าใน" : "", r.bind ? (r.bindLen != null ? `กุ้นขอบ ${r.bindLen} ซม.` : "กุ้นขอบ") : "", r.zip ? (r.zipLen != null ? `ติดซิป ${r.zipLen} ซม.` : "ติดซิป") : "", r.top != null ? `เดินด้ายทับห่างขอบ ${r.top} มม.` : ""].filter(Boolean).join(" · ")}</td>
                 </tr>
               ))}
             </tbody>

@@ -15,7 +15,7 @@
  * คู่มือ: docs/pattern-studio.md
  */
 import { assemble, type AsmPiece, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
-import { checkSeam, cleanEdgeMeta, isInnerSide, isPartialSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { checkSeam, cleanEdgeMeta, finishPts, isInnerSide, isPartialSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
 import { flattenShape, shapeArea, shapeBox, type InnerKind, type Pt } from "@/lib/pattern-shape";
 import { panelMesh } from "@/lib/pattern-sim";
 
@@ -168,7 +168,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     if (!meta) return;
     for (const e of pieceEdges(p.shape)) {
       const m = meta[e.i];
-      for (const kind of ["bind", "zip"] as const) if (m?.[kind]) finishes.push({ pid: p.pid, edge: e.i, kind, pts: e.pts.map((q) => add(f(q), mul(n, kind === "zip" ? 0.2 : 0.14))), n, ...(on ? { on } : {}) });
+      for (const kind of ["bind", "zip"] as const) if (m?.[kind]) finishes.push({ pid: p.pid, edge: e.i, kind, pts: finishPts(e, m, kind).map((q) => add(f(q), mul(n, kind === "zip" ? 0.2 : 0.14))), n, ...(on ? { on } : {}) });
     }
   };
   const frames = new Map<string, Frame>();       // ชิ้นที่วางแล้วและเป็นแผ่นเรียบ (ให้ชิ้นอื่นมาเกาะได้)

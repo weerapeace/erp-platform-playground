@@ -47,7 +47,42 @@ export const SEAM_TOP_DEFAULT: SeamTop = { off: 2, rows: 1, spi: 8 };
 /** rev = ด้าน b เย็บกลับทิศ (จุดเริ่มของ b ไปชนจุดจบของ a) — ตอนนี้ใช้แสดงขีดบอกทิศบนกระดาน ยังไม่มีผลกับการประกอบ 3D */
 export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean; name?: string; kind?: SeamKind; top?: SeamTop; ease?: boolean; /** รหัสชุด "1 ขอบกับหลายชิ้น" — ตะเข็บที่ group เดียวกันแบ่งขอบเดียวกันเป็นช่วงต่อกัน */ group?: string };
 /** ค่ารายขอบที่ไม่ใช่เผื่อเย็บ: กุ้นขอบ · ติดซิปตามขอบ · เดินด้ายทับห่างจากขอบ (มม.) — เก็บเป็นรายการ 1 ค่าต่อขอบ (ครบทุกขอบ) */
-export type EdgeMeta = { bind?: boolean; zip?: boolean; top?: number };
+export type EdgeMeta = {
+  bind?: boolean; zip?: boolean; top?: number;
+  /** ซิป / กุ๊น เฉพาะบางช่วงของขอบ (2026-11-11): [เริ่ม, จบ] ซม. วัดจากต้นขอบ — ไม่มี = ทั้งขอบ */
+  zipR?: [number, number]; bindR?: [number, number];
+};
+export type EdgeFinish = "zip" | "bind";
+const FIN_R = { zip: "zipR", bind: "bindR" } as const;
+/**
+ * ตรวจช่วงของซิป/กุ๊นบนขอบยาว len: อยู่ในขอบ · ยาวอย่างน้อย SEAM_MIN_LEN — คืน null = ทั้งขอบ (ไม่มีช่วง / ช่วงครอบทั้งขอบ / ผิดรูปแบบ)
+ *   ขอบสั้นลงจนช่วงเลยปลาย → เลื่อนช่วงกลับเข้ามา (คงความยาวช่วงไว้เท่าที่ได้)
+ */
+export function cleanFinishRange(raw: unknown, len: number): [number, number] | null {
+  if (!Array.isArray(raw) || raw.length !== 2 || !(len > 0)) return null;
+  const x = fin(raw[0]), y = fin(raw[1]);
+  if (x == null || y == null) return null;
+  let a = Math.max(0, Math.min(x, y)), b = Math.max(x, y);
+  if (b > len) { a = Math.max(0, a - (b - len)); b = len; }
+  a = Math.round(a * 100) / 100; b = Math.round(b * 100) / 100;
+  if (b - a < SEAM_MIN_LEN || (a <= 0.01 && b >= len - 0.01)) return null;
+  return [a, b];
+}
+/** ช่วงของซิป/กุ๊นบนขอบ (ซม. จากต้นขอบ) — ไม่ได้ตั้งช่วง = ทั้งขอบ */
+export function finishRange(m: EdgeMeta | null | undefined, kind: EdgeFinish, len: number): [number, number] {
+  return cleanFinishRange(m?.[FIN_R[kind]], len) ?? [0, len];
+}
+/** จุดของเส้นซิป/กุ๊นบนขอบ (เฉพาะช่วงที่ตั้งไว้) */
+export function finishPts(e: PieceEdge, m: EdgeMeta | null | undefined, kind: EdgeFinish): Pt[] {
+  const r = cleanFinishRange(m?.[FIN_R[kind]], e.len);
+  return r ? subLine(e.pts, r[0], r[1]) : e.pts;
+}
+/** ตั้ง/ล้างช่วงของซิป/กุ๊น — range ครอบทั้งขอบหรือ null = ล้าง (กลับเป็นทั้งขอบ) */
+export function withFinishRange(m: EdgeMeta, kind: EdgeFinish, range: [number, number] | null, len: number): EdgeMeta {
+  const { [FIN_R[kind]]: _old, ...rest } = m; void _old;
+  const r = range ? cleanFinishRange(range, len) : null;
+  return r ? { ...rest, [FIN_R[kind]]: r } : rest;
+}
 /** ขอบนี้มีค่าที่ตั้งไว้ไหม (ใช้ตัดสินว่าต้องเก็บรายการค่ารายขอบของชิ้นหรือไม่) */
 export const edgeMetaSet = (m: EdgeMeta | null | undefined): boolean => !!m && (!!m.bind || !!m.zip || m.top != null);
 export type SeamStatus = "ok" | "mismatch" | "broken";
@@ -222,11 +257,12 @@ export function cleanSeamTop(raw: unknown): SeamTop | null {
 }
 /** ค่ารายขอบ (กุ้น / ติดซิป / เดินด้ายทับ): ต้องครบทุกขอบและมีอย่างน้อย 1 ขอบที่ตั้งค่า ไม่งั้น = ไม่มี */
 export function cleanEdgeMeta(shape: Shape, raw: unknown): EdgeMeta[] | null {
-  if (!Array.isArray(raw) || raw.length !== pieceEdges(shape).length) return null;
-  const out: EdgeMeta[] = raw.map((x) => {
+  const E = pieceEdges(shape);
+  if (!Array.isArray(raw) || raw.length !== E.length) return null;
+  const out: EdgeMeta[] = raw.map((x, i) => {
     const r = (x && typeof x === "object" ? x : {}) as Record<string, unknown>, top = fin(r.top), m: EdgeMeta = {};
-    if (r.bind === true) m.bind = true;
-    if (r.zip === true) m.zip = true;
+    if (r.bind === true) { m.bind = true; const rg = cleanFinishRange(r.bindR, E[i].len); if (rg) m.bindR = rg; }
+    if (r.zip === true) { m.zip = true; const rg = cleanFinishRange(r.zipR, E[i].len); if (rg) m.zipR = rg; }
     if (top != null && top >= 0.5 && top <= 30) m.top = Math.round(top * 10) / 10;
     return m;
   });

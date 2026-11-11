@@ -111,7 +111,7 @@ export function TrimsModal({ open, onClose, pieces, seams = [], trims, materials
                 const row = rows.find((r) => r.trim.edge?.pid === e.pid && r.trim.edge.i === e.i);
                 return (
                   <li key={`${e.pid}#${e.i}`} data-zipedge={`${e.pid}#${e.i}`} className={line}>
-                    {titleOf(`${e.piece} · ${e.label}`, t(`ซิปตามขอบ · ขอบยาว ${f1(e.len)} ซม.`, `Zip along the edge · edge ${f1(e.len)} cm`))}
+                    {titleOf(`${e.piece} · ${e.label}`, e.full != null ? t(`ซิปตามขอบ · ช่วง ${f1(e.len)} ซม. ของขอบยาว ${f1(e.full)} ซม.`, `Zip along part of the edge · ${f1(e.len)} of ${f1(e.full)} cm`) : t(`ซิปตามขอบ · ขอบยาว ${f1(e.len)} ซม.`, `Zip along the edge · edge ${f1(e.len)} cm`))}
                     {row ? <>{chip(row.trim.mat.name)}{extraInput(row, t("เผื่อ", "Allowance"), t(`เผื่อซิป ${e.piece} ${e.label}`, `Zip allowance ${e.piece} ${e.label}`), TRIM_MAX_EXTRA, 0)}{qtyInput(row)}{sum(row)}{del(row.trim.id, row.trim.mat.name)}</>
                       : picker(t("เลือกซิปของขอบนี้", "Choose the zip for this edge"), (v) => add(v, { extra: 0, edge: { pid: e.pid, i: e.i } }), t("ยังไม่เลือกซิป", "No zip chosen"))}
                   </li>

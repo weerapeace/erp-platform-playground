@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ZIP_EXTRA_DEFAULT, bindRuns, cleanTrims, openSlits, openTrims, planTrimsSend, pruneTrims, slitList, trimMarker, trimModeOf, trimRows, trimTotals, zipEdgeList } from "@/lib/pattern-trims";
-import type { Seam } from "@/lib/pattern-seams";
+import { cleanEdgeMeta, cleanFinishRange, finishPts, finishRange, pieceEdges, withFinishRange, type Seam } from "@/lib/pattern-seams";
+import { projectEdgeRows } from "@/lib/pattern-project";
 import type { ExistingCostLine } from "@/lib/pattern-costing";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import { cleanProjectPieces, type ProjectPiece } from "@/lib/pattern-project";
@@ -214,5 +215,45 @@ describe("ซิปตามขอบ + กุ๊น คิดความยา
     const all = cleanTrims([{ id: "t1", mat: zipMat, src: { pid: "a", line: "s1" } }, { id: "t2", mat: zipMat, edge: { pid: "a", i: 0 } }, { id: "t3", mat: tapeMat, bind: true }]);
     expect(openTrims(all, pcs).count).toBe(0);
     expect(openTrims([], [piece("b")]).count).toBe(0);
+  });
+});
+
+describe("ซิป / กุ๊น เฉพาะบางช่วงของขอบ", () => {
+  it("ตรวจช่วง: อยู่ในขอบ · สลับลำดับได้ · ครอบทั้งขอบ / สั้นเกิน / ผิดรูปแบบ = ทั้งขอบ · ขอบสั้นลง = เลื่อนช่วงกลับเข้ามา คงความยาว", () => {
+    expect(cleanFinishRange([5, 25], 30)).toEqual([5, 25]);
+    expect(cleanFinishRange([25, 5], 30)).toEqual([5, 25]);
+    expect(cleanFinishRange([0, 30], 30)).toBeNull();
+    expect(cleanFinishRange([3, 3.2], 30)).toBeNull();
+    expect(cleanFinishRange("x", 30)).toBeNull();
+    expect(cleanFinishRange([28, 40], 30)).toEqual([18, 30]);      // ยาว 12 เลยปลาย → เลื่อนเข้ามา
+    expect(cleanFinishRange([5, 25], 12)).toBeNull();              // ขอบเหลือ 12 ช่วงยาว 20 → ทั้งขอบ
+    expect(finishRange({ zip: true, zipR: [5, 25] }, "zip", 30)).toEqual([5, 25]);
+    expect(finishRange({ zip: true }, "zip", 30)).toEqual([0, 30]);
+  });
+
+  it("เก็บช่วงเฉพาะขอบที่ติ๊กอยู่ · ตั้งช่วงครอบทั้งขอบ = ล้างช่วง · จุดของเส้น = เฉพาะช่วง", () => {
+    const shape = R(30, 25);
+    const m = cleanEdgeMeta(shape, [{ zip: true, zipR: [5, 25] }, { bindR: [2, 8] }, { bind: true, bindR: [0, 10] }, {}])!;
+    expect(m).toEqual([{ zip: true, zipR: [5, 25] }, {}, { bind: true, bindR: [0, 10] }, {}]);
+    expect(withFinishRange(m[0], "zip", [0, 30], 30)).toEqual({ zip: true });
+    expect(withFinishRange(m[0], "zip", [10, 14], 30)).toEqual({ zip: true, zipR: [10, 14] });
+    expect(withFinishRange(m[0], "zip", null, 30)).toEqual({ zip: true });
+    const e = pieceEdges(shape)[0], P = finishPts(e, m[0], "zip");
+    expect(Math.hypot(P[P.length - 1][0] - P[0][0], P[P.length - 1][1] - P[0][1])).toBeCloseTo(20, 6);
+    expect(finishPts(e, { zip: true }, "zip")).toBe(e.pts);
+  });
+
+  it("ซิปบางช่วง: ความยาวซิป = ช่วง (ไม่ใช่ทั้งขอบ) + เผื่อ · บอกความยาวขอบเต็มไว้ด้วย", () => {
+    const a = piece("a", { edgeMeta: [{ zip: true, zipR: [5, 25] }, {}, {}, {}] });
+    expect(zipEdgeList([a])).toEqual([{ pid: "a", i: 0, piece: "ชิ้น a", label: "ขอบ 1", len: 20, full: 30 }]);
+    const [r] = trimRows(cleanTrims([{ id: "t1", mat: zipMat, edge: { pid: "a", i: 0 }, extra: 2 }]), [a]);
+    expect([r.each, r.total]).toEqual([22, 22]);
+  });
+
+  it("กุ๊นบางช่วง: นับเฉพาะช่วง × จำนวนตัด · ใบพิมพ์บอกความยาวช่วง", () => {
+    const a = piece("a", { count: 2, edgeMeta: [{ bind: true, bindR: [0, 10] }, { bind: true }, {}, {}] });   // 10 + 25 = 35 × 2
+    expect(bindRuns([a])).toEqual({ edges: 4, seams: 0, total: 70 });
+    const rows = projectEdgeRows([a]);
+    expect(rows.map((r) => [r.edge, r.bind, r.bindLen ?? null])).toEqual([[1, true, 10], [2, true, null]]);
   });
 });

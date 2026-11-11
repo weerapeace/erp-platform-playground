@@ -259,7 +259,7 @@ export function projectSeamRows(pieces: ProjectPiece[], seams: Seam[]): SeamRow[
   });
 }
 /** แถวของ "งานขอบ" ในใบพิมพ์: ขอบที่พับ / กุ้น / เดินด้ายทับ (ขอบธรรมดาไม่ออก) */
-export type EdgeRow = { piece: string; edge: number; len: number; allow: number; fold: boolean; bind: boolean; zip: boolean; top: number | null };
+export type EdgeRow = { piece: string; edge: number; len: number; allow: number; fold: boolean; bind: boolean; zip: boolean; top: number | null; /** ยาวของช่วงซิป/กุ๊น (ซม.) เมื่อไม่ใช่ทั้งขอบ */ zipLen?: number; bindLen?: number };
 export function projectEdgeRows(pieces: ProjectPiece[]): EdgeRow[] {
   const out: EdgeRow[] = [];
   for (const [k, p] of pieces.entries()) {
@@ -267,7 +267,8 @@ export function projectEdgeRows(pieces: ProjectPiece[]): EdgeRow[] {
     for (const e of E) {
       const fold = !!p.foldEdges?.[e.i], m = p.edgeMeta?.[e.i];
       if (!fold && !m?.bind && !m?.zip && m?.top == null) continue;
-      out.push({ piece: p.name || `ชิ้น ${k + 1}`, edge: e.i + 1, len: Math.round(e.len * 10) / 10, allow: p.allowEdges?.[e.i] ?? p.allow, fold, bind: !!m?.bind, zip: !!m?.zip, top: m?.top ?? null });
+      out.push({ piece: p.name || `ชิ้น ${k + 1}`, edge: e.i + 1, len: Math.round(e.len * 10) / 10, allow: p.allowEdges?.[e.i] ?? p.allow, fold, bind: !!m?.bind, zip: !!m?.zip, top: m?.top ?? null,
+        ...(m?.zip && m.zipR ? { zipLen: Math.round((m.zipR[1] - m.zipR[0]) * 10) / 10 } : {}), ...(m?.bind && m.bindR ? { bindLen: Math.round((m.bindR[1] - m.bindR[0]) * 10) / 10 } : {}) });
     }
   }
   return out;
