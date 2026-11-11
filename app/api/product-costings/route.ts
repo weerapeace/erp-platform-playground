@@ -15,11 +15,11 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import type { MoCostMaterial } from "@/app/api/mo/[id]/cost/route";
+import { bomMaterialCost } from "@/lib/cost-inputs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
-const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 type SavedCosting = { id: string; target_type: string; target_code: string; qty_basis: number; scenario: unknown; summary: unknown; note: string | null; created_by_name: string | null; created_at: string };
 
@@ -141,13 +141,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const { data: cs } = await admin.from("skus_v2").select("code, standard_price").in("code", codes);
       for (const c of (cs ?? []) as Record<string, unknown>[]) stdMap.set(String(c.code), num(c.standard_price));
     }
-    materials = lineRows.map((x) => {
-      const csku = (x.component_sku as string) ?? null; const qp = num(x.qty);
-      const unit = csku ? (stdMap.get(csku) ?? 0) : 0; const line = r4(unit * qp);
-      const has = unit > 0; if (!has) missing_price += 1; material_cost_pp += line;
-      return { sku: csku, name: (x.component_name as string) ?? null, material_type: (x.material_type as string) ?? null, uom: (x.uom as string) ?? null, qty_per: qp, unit_cost: unit, line_pp: line, has_price: has };
-    });
-    material_cost_pp = r4(material_cost_pp);
+    // ต้นทุนวัตถุดิบ/ชิ้น = ของกลาง lib/cost-inputs (ใช้ร่วมกับแท็บราคาของ Parent SKU — สูตรเดียว)
+    ({ materials, material_cost_pp, missing_price } = bomMaterialCost(lineRows, stdMap));
   }
 
   const [savedSku, savedParent] = await Promise.all([

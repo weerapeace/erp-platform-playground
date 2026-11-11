@@ -39,12 +39,16 @@ const ParentWebListings = dynamic(() => import("@/components/parent-web-listings
 const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-tab").then((m) => m.ParentPlatformsTab), { ssr: false });
 // แท็บ "ผลิต" (เดิม "ปัญหา" — เจ้าของขอ 2026-11-11): สูตรผลิตทุกเวอร์ชัน + รายการปัญหาเดิม + ประวัติการผลิต
 const ParentProductionTab = dynamic(() => import("@/components/parent-production-tab").then((m) => m.ParentProductionTab), { ssr: false });
+// แท็บ "ราคา" (ใหม่ 2026-11-11): ราคากลาง/เต็ม/เว็บ/ทุกร้าน + ต้นทุน/กำไร (เฉพาะคนมีสิทธิ์ต้นทุน)
+const ParentPriceTab = dynamic(() => import("@/components/parent-price-tab").then((m) => m.ParentPriceTab), { ssr: false });
 
 export function parentSkuExtraTabs(): NonNullable<MasterCRUDConfig["extraTabs"]> {
   return [
     { key: "overview", label: tr("ภาพรวม", "Overview"), icon: "📊", render: ({ recordId }) => <Parent360Overview parentId={recordId} /> },
     { key: "web", label: tr("เว็บไซต์", "Website"), icon: "🛍", render: ({ recordId }) => <ParentWebListings parentId={recordId} /> },
     { key: "platforms", label: tr("แพลตฟอร์ม", "Platforms"), icon: "🏬", render: ({ recordId }) => <ParentPlatformsTab parentId={recordId} /> },
+    // ยังไม่ได้วางในตัวออกแบบหน้า → อยู่ต่อจาก "รายละเอียด Platform" (key content) · ทีมย้ายเองได้ในตัวออกแบบหน้า
+    { key: "prices", label: tr("ราคา", "Prices"), icon: "💰", after: "content", render: ({ recordId }) => <ParentPriceTab parentId={recordId} /> },
     // key ยังเป็น "issues" ตั้งใจ — ตำแหน่ง/การซ่อนแท็บที่ทีมตั้งไว้ในตัวออกแบบหน้า (x:issues) และที่แต่ละคนซ่อนไว้ ใช้ต่อได้ไม่ต้องย้ายข้อมูล
     { key: "issues", label: tr("ผลิต", "Production"), icon: "🏭", render: ({ recordId }) => <ParentProductionTab parentId={recordId} /> },
   ];

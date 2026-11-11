@@ -614,7 +614,8 @@ export type MasterCRUDConfig = {
   /** section พิเศษเต็มความกว้าง ใต้ฟอร์ม (โหมดดู) — เช่น ตารางร้านที่จำหน่ายในหน้า SKU (ของกลาง) */
   recordSections?: { key: string; title?: string; render: (ctx: { recordId: string; row: Record<string, unknown>; readonly: boolean; refresh: () => Promise<void> }) => React.ReactNode }[];
   /** แท็บพิเศษต่อโมดูล — โผล่ในแถบแท็บ (ต่อจากแท็บจาก Field Registry) เช่น "🛍 เว็บไซต์" ของ Parent SKU */
-  extraTabs?: { key: string; label: string; icon?: string; inTab?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
+  //   after = ตำแหน่งตั้งต้นเมื่อตัวออกแบบหน้ายังไม่ได้วาง (ต่อท้ายแท็บ key นี้ · ไม่ใส่ = ต่อท้ายสุด)
+  extraTabs?: { key: string; label: string; icon?: string; inTab?: string; after?: string; render: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode }[];
   /**
    * 🧩 หน้า "ดูรายละเอียด" ที่ออกแบบเฉพาะโมดูล (จุดเสียบของกลาง) — แทนแถบสลับภาษา + แท็บฟิลด์ เฉพาะตอน "ดู" ระเบียนที่บันทึกแล้ว
    * ฟอร์มแก้ไข/สร้างใหม่ + แถบหัว/แถบล่าง (ก่อนหน้า/ถัดไป/ลบ/แก้ไข) ยังเป็นของกลางเหมือนเดิม
@@ -3392,7 +3393,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           // แท็บพิเศษต่อโมดูล (เช่น "🛍 เว็บไซต์" ของ Parent SKU) — ผูก ctx แล้วส่งเข้า Form/DetailSections
           const boundExtraTabs = [
             ...(config.extraTabs ?? []).map((t) => ({
-              key: t.key, label: t.label, icon: t.icon, inTab: t.inTab,
+              key: t.key, label: t.label, icon: t.icon, inTab: t.inTab, after: t.after,
               node: t.render({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit }),
             })),
             // label ว่าง = ไม่ใส่หัวข้อซ้ำ (แผงประวัติเวอร์ชันมีหัวข้อของตัวเองแล้ว)
@@ -4227,7 +4228,13 @@ function LayoutTabs({
       if (ex && !placed.has(ex.key)) { ordered.push({ kind: "extra", t: ex }); placed.add(ex.key); }
     } else if (tabs.includes(t)) ordered.push({ kind: "field", t });
   }
-  for (const ex of ownTabs) if (!placed.has(ex.key)) ordered.push({ kind: "extra", t: ex });
+  // แท็บพิเศษที่ตัวออกแบบหน้ายังไม่ได้วาง: มี after → แทรกต่อจากแท็บนั้น · ไม่มี/หาไม่เจอ → ต่อท้ายสุด
+  for (const ex of ownTabs) {
+    if (placed.has(ex.key)) continue;
+    const at = ex.after ? ordered.findIndex((o) => o.t.key === ex.after || o.t.key === `x:${ex.after}`) : -1;
+    if (at >= 0) ordered.splice(at + 1, 0, { kind: "extra", t: ex }); else ordered.push({ kind: "extra", t: ex });
+    placed.add(ex.key);
+  }
   // 👁 แท็บที่ "ฉัน" ซ่อนไว้ (ต่อคน ต่อโมดูล — lib/form-tab-prefs) · ค่าตั้งต้นของทีมยังมาจากตัวออกแบบหน้า
   const prefScope = useContext(TabPrefScope);
   const [hiddenMine, setHiddenMine] = useUserPref<string[]>(formHiddenTabsKey(prefScope ?? "_"), [], parseHiddenTabs);
@@ -4346,7 +4353,7 @@ function isCopyableField(f: FieldDef): boolean {
 //   ไม่มี Provider (ใช้ LayoutTabs นอก MasterCRUD) = ไม่มีปุ่มเลือกแท็บ
 const TabPrefScope = createContext<string | null>(null);
 // แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
-type BoundTab ={ key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string };
+type BoundTab ={ key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string; after?: string };
 // แท็บว่างใน layout ที่จำตำแหน่ง/ซ่อน ของแท็บพิเศษ (ตั้งในตัวออกแบบหน้า) — key "x:<key>"
 const isExtraLayoutTab = (t: { key: string; extra?: boolean }) => !!t.extra || t.key.startsWith("x:");
 const extraKeyOf = (t: { key: string }) => t.key.replace(/^x:/, "");
