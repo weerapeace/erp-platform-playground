@@ -32,7 +32,7 @@ import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, extendSide, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
 import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
-import { applyLinks, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
+import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
@@ -916,7 +916,20 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const master = selPiece.link ? pieces.find((p) => p.pid === selPiece.link?.to) ?? selPiece : selPiece;
     const cb = pieceGeometry(selPiece).cutBox, b = shapeBox(selPiece.shape), link: PieceLink = { to: master.pid, mirror: "x" };
     const np: Piece = { ...selPiece, id: newId(), pid: newPid(), src: [], link, inner: null, notches: [], grain: null, shape: linkedShape(master.shape, link, { x: b.x + cb.w + 2, y: b.y }), name: selPiece.name ? `${selPiece.name} (คู่)` : "" };
-    if (addPieces([np])) setTool("move");
+    const next = addPieces([np]);
+    if (!next) return;
+    setTool("move");
+    sewLikeMaster(np.pid, next, t("สร้างชิ้นคู่แล้ว", "Linked twin created"));
+  };
+  /** คัดลอกตะเข็บของชิ้นต้นแบบให้ชิ้นตาม (lib/pattern-link followerSeams) — เฉพาะหน้าที่มีเครื่องมือเย็บ · บอกผลเป็นข้อความ */
+  const sewLikeMaster = (pid: string, list: Piece[] = piecesRef.current, lead = "") => {
+    if (!seams || !onSeamsChange || readonly) { if (lead) setMsg({ tone: "ok", text: lead }); return; }
+    const cur = seams, { add, skipped } = followerSeams(list, cur, pid, Date.now().toString(36));
+    if (add.length) { seamHist.current.push(cur); if (seamHist.current.length > 60) seamHist.current.shift(); onSeamsChange([...cur, ...add]); }
+    const body = add.length || skipped
+      ? t(`เย็บตามชิ้นต้นแบบให้ ${add.length} แนว${skipped ? ` · ข้าม ${skipped} แนว (หาขอบคู่ไม่เจอ หรือขอบนั้นเย็บไปแล้ว — เย็บเองด้วยเครื่องมือเย็บ)` : ""}`, `${add.length} seams copied from the master${skipped ? ` · ${skipped} skipped (no matching edge, or it is already sewn — sew those yourself)` : ""}`)
+      : t("ชิ้นต้นแบบยังไม่มีตะเข็บให้คัดลอก (หรือมีครบแล้ว)", "The master has no seams to copy (or they are all there already)");
+    setMsg({ tone: skipped && !add.length ? "err" : "ok", text: lead ? `${lead} · ${body}` : body });
   };
   const mirrorCopy = () => {
     if (!selPiece) return;
@@ -2213,13 +2226,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                           {!readonly && <div className="flex flex-wrap items-center gap-2">
                             <label className="flex items-center gap-1.5"><input type="checkbox" checked={selPiece.link?.mirror === "x"} onChange={(e) => patchPiece(selPiece.id, (p) => (p.link ? { ...p, link: e.target.checked ? { to: p.link.to, mirror: "x" } : { to: p.link.to } } : p))} className="h-3.5 w-3.5 accent-blue-600" />{t("กลับซ้ายขวา", "Mirrored left-right")}</label>
                             <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, link: null }))} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ชิ้นนี้กลับเป็นชิ้นอิสระ รูปคงเดิม แก้เองได้", "Make this piece independent again (shape stays as is)")}>{t("เลิกผูก", "Unlink")}</button>
+                            {seams && onSeamsChange && <button type="button" onClick={() => sewLikeMaster(selPiece.pid)} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("คัดลอกตะเข็บของชิ้นต้นแบบมาให้ชิ้นนี้ (เย็บกับคู่ของชิ้นที่ต้นแบบเย็บอยู่ · ที่มีอยู่แล้วไม่สร้างซ้ำ)", "Copy the master's seams to this piece (sewn to the counterparts of the master's partners · existing ones are not duplicated)")}>{t("เย็บตามต้นแบบ", "Sew like the master")}</button>}
                           </div>}
                         </>
                       ) : (
                         <>
                           {followers.length > 0 && <div className="rounded-md bg-emerald-50 px-2 py-1.5 text-emerald-900">{t(`ชิ้นนี้เป็นต้นแบบของ ${followers.map((p) => pieceNo(p.pid)).join(", ")} — แก้รูปชิ้นนี้ ชิ้นเหล่านั้นเปลี่ยนตาม`, `This piece is the master of ${followers.map((p) => pieceNo(p.pid)).join(", ")} — they follow its shape`)}</div>}
                           {!readonly && <div className="flex flex-wrap items-center gap-1.5">
-                            <button type="button" onClick={linkedCopy} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("สร้างชิ้นคู่กลับซ้ายขวาวางข้าง ๆ และผูกรูปกับชิ้นนี้", "Create a mirrored twin next to this piece, linked to its shape")}>{t("+ สร้างชิ้นคู่ (ผูก)", "+ Linked twin")}</button>
+                            <button type="button" onClick={linkedCopy} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("สร้างชิ้นคู่กลับซ้ายขวาวางข้าง ๆ ผูกรูปกับชิ้นนี้ และเย็บตามชิ้นนี้ให้ (เย็บกับขอบฝั่งตรงข้ามของชิ้นที่สมมาตร)", "Create a mirrored twin next to this piece, linked to its shape and sewn like it (to the opposite edge of symmetric partners)")}>{t("+ สร้างชิ้นคู่ (ผูก)", "+ Linked twin")}</button>
                             {followers.length === 0 && targets.length > 0 && (
                               <select value="" aria-label={t("ผูกรูปกับชิ้น", "Link shape to piece")} onChange={(e) => { const to = e.target.value; if (to) patchPiece(selPiece.id, (p) => ({ ...p, link: { to } })); }} className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1">
                                 <option value="">{t("ผูกรูปกับชิ้น…", "Link shape to…")}</option>
