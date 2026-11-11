@@ -18,7 +18,7 @@ import { TemplateMenu } from "@/components/barcode-print/template-menu";
 import { scanUrl } from "@/lib/scan-code";
 
 const loadImg = (src: string): Promise<HTMLImageElement> =>
-  new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
+  new Promise((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous"; /* โลโก้จาก /api/r2-image ถูกส่งต่อไป erp-img (คนละโดเมน) — ไม่ใส่ = โลโก้กลาง QR หาย */ im.onload = () => res(im); im.onerror = rej; im.src = src; });
 
 /**
  * ข้อความที่ฝังใน QR ของแต่ละดวง

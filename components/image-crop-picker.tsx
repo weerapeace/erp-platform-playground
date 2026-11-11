@@ -35,6 +35,7 @@ const ZOOM_MAX = 2000;
 /** ตัดส่วน win (สัดส่วนของรูป 0–1) ของรูป r2 → Blob webp กว้าง outW px */
 export async function cropImageKey(key: string, win: { x: number; y: number; w: number; h: number }, outW: number, outH: number): Promise<Blob> {
   const img = new Image();
+  img.crossOrigin = "anonymous"; // รูปถูกส่งต่อไป erp-img (คนละโดเมน) — ไม่ใส่ = ตัดรูปออกมาเป็นไฟล์ไม่ได้
   // รูปใหญ่สุดที่ระบบย่อให้ (ไม่ขยายเกินต้นฉบับ) — กรอบเล็กมากก็ยังได้พิกเซลจริงพอ
   img.src = imgUrl(key, 3200);
   await img.decode();

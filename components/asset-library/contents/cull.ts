@@ -11,6 +11,7 @@ const SIDE = 256;   // ย่อก่อนวัด — เทียบกั�
 async function sharpnessOf(url: string): Promise<number | null> {
   try {
     const img = new Image();
+    img.crossOrigin = "anonymous"; // รูปถูกส่งต่อไป erp-img (คนละโดเมน) — ไม่ใส่ = อ่านจุดภาพมาวัดความคมไม่ได้
     img.decoding = "async";
     img.src = url;
     await img.decode();
