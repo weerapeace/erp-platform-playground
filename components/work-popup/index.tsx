@@ -13,7 +13,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ERPModal } from "@/components/modal";
-import { useAuth } from "@/components/auth";
+import { useAuth, usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useRefresh } from "@/lib/refresh-bus";
@@ -33,6 +33,8 @@ import { useNotifyPrefs } from "@/components/notify-settings";
 import { WatchesTab, useMyWatches, useMyWatchesData } from "@/components/my-watches";
 import { bellSourceOf, inQuietHours, notifyOn } from "@/lib/notify-sources";
 import { petBadge, petMood } from "@/lib/floating-pet";
+import { useDeployStatus } from "@/components/deploy-countdown";
+import { deployPetNews } from "@/lib/deploy-queue";
 import type { UserPickerValue } from "@/components/pickers";
 import dynamic from "next/dynamic";
 // หน้าต่างส่ง GIF (ของแอปจัดการงาน) — โหลดเฉพาะตอนกดตอบกลับ/ส่ง
@@ -40,6 +42,8 @@ const GifPokeModal = dynamic(() => import("@/app/tasks/gif-poke-modal").then((m)
 // แท็บ Task (งาน Task Manager ที่รอฉัน) + แผงตรวจเร็ว — โหลดเฉพาะตอนมีงาน/เปิดดู (ไม่ถ่วงทุกหน้า)
 const TaskInboxTab = dynamic(() => import("./task-inbox").then((m) => m.TaskInboxTab), { ssr: false });
 const TaskInboxQuickCheck = dynamic(() => import("./task-inbox").then((m) => m.TaskInboxQuickCheck), { ssr: false });
+// แท็บ ขึ้นเว็บ (ผู้ดูแลระบบ) — โหลดเฉพาะตอนเปิดดู
+const DeployTab = dynamic(() => import("./deploy-tab").then((m) => m.DeployTab), { ssr: false });
 const RECHECK_MS = 30 * 60_000;
 const POKE_POLL_MS = 3 * 60_000;
 const pokeSeenKey = (uid: string) => `fpet-pokes-seen:${uid}`;
@@ -249,7 +253,7 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
-  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches" | "tasks">("work");
+  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches" | "tasks" | "deploy">("work");
   // ตั้งค่าการแจ้งเตือนต่อคน (หน้าต่างตัว Pet → การแจ้งเตือน · lib/notify-sources): โชว์ในศูนย์ / ตัว Pet เด้งบอก / ห้ามรบกวน
   const [notifyPrefs] = useNotifyPrefs();
   const showIn = (key: string) => notifyOn(notifyPrefs, key, "center");
@@ -369,6 +373,32 @@ export function WorkPopupHost() {
     ...(lineShown?.design && bounceOn("line_design") ? lineShown.design.items : []),
     ...(lineShown?.order && bounceOn("line_order") ? lineShown.order.items : []),
   ].filter((it) => !lineSeen.has(it.id));
+
+  // ── แท็บ ขึ้นเว็บ: สถานะขึ้นเว็บจริง (ผู้ดูแลระบบ · GET /api/admin/deploy ตัวเดียวกับหน้า /admin/deploy) ──
+  //   ตัว Pet พูดเมื่อมี "เรื่องใหม่" (มีงานรอรอบ / ส่งขึ้นเว็บ / กำลัง build / ขึ้นแล้ว / build ล้ม — deployPetNews) · เปิดแท็บดู = เห็นแล้ว
+  const canDeploy = usePermission("admin.users");
+  const deployOn = enabled && wide && !skip && !!uid && canDeploy && showIn("deploy");
+  const { status: deployStatus, error: deployError, reload: reloadDeploy } = useDeployStatus(deployOn);
+  const [deployClock, setDeployClock] = useState(() => new Date());
+  useEffect(() => { setDeployClock(new Date()); }, [deployStatus?.fetchedAt]);
+  const deployNews = deployOn && deployStatus ? deployPetNews(deployStatus, deployClock) : null;
+  // ตัวเลขในคำพูด ("อีกราว N นาที") + หมดเวลาพูด "ขึ้นเว็บแล้ว" — เดินทุก 15 วิ เฉพาะตอนมีเรื่อง (ไม่ re-render ทั้งศูนย์ทุกวินาที)
+  const hasDeployNews = !!deployNews;
+  useEffect(() => {
+    if (!hasDeployNews) return;
+    const t = window.setInterval(() => setDeployClock(new Date()), 15_000);
+    return () => window.clearInterval(t);
+  }, [hasDeployNews]);
+  const deploySeenKey = uid ? `fpet-deploy-seen:${uid}` : "";
+  const [deploySeen, setDeploySeen] = useState<Set<string>>(new Set());
+  useEffect(() => { if (deploySeenKey) setDeploySeen(readIds(deploySeenKey)); }, [deploySeenKey]);
+  const newDeploy = deployNews && bounceOn("deploy") && !deploySeen.has(deployNews.key) ? deployNews : null;
+  const deployCount = deployOn ? deployStatus?.waiting.length ?? 0 : 0;
+  useEffect(() => {
+    if (!expanded || tab !== "deploy" || !deployNews || !deploySeenKey || deploySeen.has(deployNews.key)) return;
+    const n = new Set([...deploySeen, deployNews.key]); setDeploySeen(n); saveIds(deploySeenKey, n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, tab, deployNews?.key, deploySeenKey]);
 
   // ── แท็บ กระดิ่ง: แจ้งเตือนที่ยังไม่อ่าน (ตัวดึงกลางเดียวกับกระดิ่งบนแถบ) เฉพาะประเภทที่เปิดโชว์ในศูนย์ ──
   const feed = useNotificationFeed(wide && enabled && !skip ? uid : null);
@@ -527,7 +557,7 @@ export function WorkPopupHost() {
   const gifOn = enabled && showIn("gif");
   const gifCount = gifOn ? pokes.length : 0;
   const bellCount = enabled ? bellItems.length : 0;
-  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn)));
+  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn || deployOn)));
   const tabs: FloatTab[] = [
     ...(workTabOn && cur ? [{
       key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer,
@@ -554,6 +584,10 @@ export function WorkPopupHost() {
       content: <GifInbox pokes={pokes} newIds={new Set(newPokes.map((p) => p.id))} onDismiss={dismissPoke}
         onReply={(p) => setGifModal({ reply: p })} onSend={() => setGifModal({ reply: null })} />,
     }] : []),
+    ...(deployOn ? [{
+      key: "deploy", label: "ขึ้นเว็บ", icon: "build", count: deployCount, subtitle: "สถานะขึ้นเว็บจริง (รวมงานเป็นรอบ ~10 นาที)",
+      content: <DeployTab status={deployStatus} error={deployError} onReload={() => void reloadDeploy()} />,
+    }] : []),
   ];
   const activeTab = tabs.some((x) => x.key === tab) ? tab : (tabs[0]?.key ?? "work");
   // ตัว Pet เด้งบอก: เฉพาะเรื่องที่เปิด "Pet เด้งบอก" และไม่อยู่ในช่วงห้ามรบกวน
@@ -563,13 +597,16 @@ export function WorkPopupHost() {
   const alertBell = enabled && newBell.length > 0;
   const alertWatch = watchCount > 0 && newWatch.length > 0;
   const alertTasks = taskTabOn && newTasks.length > 0;
-  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks);
+  const alertDeploy = !!newDeploy;
+  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks || alertDeploy);
+  // ตัวเลขบนตัว Pet ไม่นับงานรอขึ้นเว็บ (ไม่ใช่งานของคน) — แต่ตอนมีเรื่องขึ้นเว็บใหม่ ตัว Pet ต้องตื่นมาพูด
   const total = workCount + gifCount + lineCount + bellCount + watchCount + taskCount;
   const petState = {
-    mood: petMood({ total, alert: petAlert }),
+    mood: petMood({ total: total + (alertDeploy ? 1 : 0), alert: petAlert }),
     badge: petBadge(total),
     bubble: quietNow ? null
       : alertWork ? pill
+      : alertDeploy && newDeploy ? newDeploy.text
       : alertTasks ? `${newTasks[0].status === "revision" ? "งานถูกตีกลับ" : "งานรอคุณตรวจ"}: ${newTasks[0].task_no ?? ""} ${newTasks[0].title}`.trim()
       : alertBell ? newBell[0].title
       : alertWatch ? `${newWatch[0].watch}: ${newWatch[0].title}`
@@ -581,18 +618,19 @@ export function WorkPopupHost() {
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {wide ? (floatOn && tabs.length > 0 && (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" || k === "tasks" ? k : "work")} pet={petState}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" || k === "tasks" || k === "deploy" ? k : "work")} pet={petState}
           onMinimize={collapse}
           onExpand={() => {
             setExpanded(true);
             // เปิดแท็บของเรื่องที่ทำให้ตัว Pet เด้งก่อน
-            setTab(alertWork ? "work" : alertTasks ? "tasks" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : "gif");
+            setTab(alertWork ? "work" : alertDeploy ? "deploy" : alertTasks ? "tasks" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : "gif");
             if (cur) void check(undefined, true);
             void loadPokes();
             void loadLine();
             if (tasksOn) void loadInbox();
             void feed.refresh();
             if (hasWatches) void reloadWatches();
+            if (deployOn) void reloadDeploy();
           }} />
       )) : visible && cur && (workShown || forced.has(cur.report_id)) && (
         <ERPModal open onClose={() => finish(cur, "later")} size="lg" defaultExpanded={false} storageKey="work-popup" zIndex={300}

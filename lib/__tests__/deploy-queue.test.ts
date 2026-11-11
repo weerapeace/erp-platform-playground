@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  BUILD_SECONDS, buildStateText, deployPhase, formatCountdown, minutesToNextRound, queueFromCompare, ROUND_WAIT_SECONDS, statusFromGitHub, type DeployStatus,
+  BUILD_SECONDS, buildStateText, DEPLOY_DONE_TALK_SECONDS, deployPetNews, deployPhase, formatCountdown, minutesToNextRound, queueFromCompare, ROUND_WAIT_SECONDS, statusFromGitHub, type DeployStatus,
 } from "@/lib/deploy-queue";
 
 describe("queueFromCompare", () => {
@@ -116,5 +116,38 @@ describe("formatCountdown", () => {
     expect(formatCountdown(65)).toBe("1:05");
     expect(formatCountdown(3725)).toBe("1:02:05");
     expect(formatCountdown(-3)).toBe("0:00");
+  });
+});
+
+describe("deployPetNews — คำพูดของตัว Pet (ศูนย์แจ้งเตือน แท็บ ขึ้นเว็บ)", () => {
+  const start = "2026-11-11T05:00:00Z";
+  const at = (sec: number) => new Date(Date.parse(start) + sec * 1000);
+
+  it("รอรอบ: บอกจำนวนงาน + อีกกี่นาที · รหัสเรื่องผูกกับรอบ", () => {
+    const n = deployPetNews({ waiting: [job("w2", "b"), job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(60));
+    expect(n).toEqual({ key: `round:${start}`, text: "มีงานรอขึ้นเว็บ 2 งาน · อีกราว 8 นาที", tone: "blue" });
+    const last = deployPetNews({ waiting: [job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(ROUND_WAIT_SECONDS - 30));
+    expect(last?.text).toContain("อีกไม่ถึง 1 นาที");
+  });
+
+  it("ส่งขึ้นเว็บ → build (เรื่องใหม่ = รหัสใหม่ ตัว Pet เด้งใหม่)", () => {
+    const p = deployPetNews({ waiting: [job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(ROUND_WAIT_SECONDS + 5));
+    expect(p?.key).toBe(`promoting:${start}`);
+    const b = deployPetNews({ waiting: [], live: live("pending", start), round: null }, at(60));
+    expect(b).toMatchObject({ key: "building:p1", tone: "amber" });
+    expect(b?.text).toBe(`กำลัง build เว็บจริง · อีกราว ${Math.ceil((BUILD_SECONDS - 60) / 60)} นาที`);
+    expect(deployPetNews({ waiting: [], live: live("pending", start), round: null }, at(BUILD_SECONDS + 10))?.text).toBe("กำลัง build — ใกล้เสร็จแล้ว");
+  });
+
+  it("ขึ้นเว็บแล้ว: พูดเฉพาะช่วงสั้น ๆ หลังเสร็จ แล้วเงียบ", () => {
+    expect(deployPetNews({ waiting: [], live: live("success", start), round: null }, at(30))).toMatchObject({ key: "done:p1", tone: "green" });
+    expect(deployPetNews({ waiting: [], live: live("success", start), round: null }, at(DEPLOY_DONE_TALK_SECONDS + 1))).toBeNull();
+    expect(deployPetNews({ waiting: [], live: live("success", null), round: null }, at(0))).toBeNull();
+    expect(deployPetNews({ waiting: [], live: live(null), round: null }, at(0))).toBeNull();
+  });
+
+  it("build ล้ม = พูดค้าง · มีงานแต่ไม่มีรอบเดิน = เงียบ", () => {
+    expect(deployPetNews({ waiting: [], live: live("failure", start), round: null }, at(3600))).toMatchObject({ key: "failed:p1", tone: "red" });
+    expect(deployPetNews({ waiting: [job("w1", "a")], live: live("success"), round: null }, at(0))).toBeNull();
   });
 });

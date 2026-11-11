@@ -41,6 +41,8 @@ const CENTER_SOURCES: NotifySource[] = [
   { key: "line_order", group: "center", label: "LINE: คำสั่งซื้อ", hint: "แคปคำสั่งซื้อจากไลน์ รอผูก PO", icon: "cart", permission: "po.view", defaults: { bounce: false }, added: "2026-11-05" },
   { key: "gif", group: "center", label: "GIF จากเพื่อน", hint: "เพื่อนส่ง GIF มาสะกิด", icon: "gift" },
   { key: "watches", group: "center", label: "การเตือนของฉัน", hint: "เงื่อนไขที่คุณตั้งเอง (แท็บ การเตือนของฉัน)", icon: "star", added: "2026-11-06" },
+  // ข้อมูลเดียวกับหน้า /admin/deploy (GET /api/admin/deploy · สิทธิ์ admin.users) — คำพูด = deployPetNews ใน lib/deploy-queue
+  { key: "deploy", group: "center", label: "ขึ้นเว็บ (สถานะ build)", hint: "แท็บ ขึ้นเว็บ — นับถอยหลังรอบขึ้นเว็บ · ตัว Pet พูดบอกตอนมีงานรอ / เริ่ม build / ขึ้นแล้ว / build ล้ม", icon: "build", permission: "admin.users", added: "2026-11-11" },
 ];
 
 /** ตัว Pet เด้งบอกเรื่องกระดิ่งแค่บางประเภทโดยเริ่มต้น (ที่เหลือ = แค่นับตัวเลข ไม่รบกวน) */

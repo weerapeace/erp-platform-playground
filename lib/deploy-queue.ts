@@ -19,8 +19,11 @@ export const ROUND_MINUTES = 10;
 export const DEPLOY_PIP_SIZE = { width: 320, height: 170, title: "ขึ้นเว็บ" };
 /** ⚠️ ต้องตรงกับ WAIT_SECONDS ใน .github/workflows/deploy-round.yml — รอบตื่นมาเลื่อน prod หลังเริ่มรันเท่านี้วินาที */
 export const ROUND_WAIT_SECONDS = 540;
-/** เวลา build ของ Vercel โดยประมาณ (เฉลี่ยจริง ~4.3 นาที: compile ~2.2 + page data ~1 + อัปโหลดแคช ~1) — ใช้เดาเท่านั้น */
-export const BUILD_SECONDS = 270;
+/**
+ * เวลา build ของ Vercel โดยประมาณ — ใช้เดาเท่านั้น
+ * ตั้งแต่ 2026-11-10 (commit cc132ba7 กัน build memory หมด · ไม่ใช้แคชดิสก์) วัดจริง ~5.3 นาที: compile ~3.4 + page data ~1 + อื่น ๆ
+ */
+export const BUILD_SECONDS = 320;
 
 /** หน้า GitHub ที่กด "Run workflow" เองได้ (ใช้ตอนยังไม่ได้ตั้งกุญแจให้แอปกดแทน) */
 export const DEPLOY_WORKFLOW_PAGE = `https://github.com/${DEPLOY_REPO}/actions/workflows/${DEPLOY_WORKFLOW}`;
@@ -66,7 +69,7 @@ export function minutesToNextRound(oldestWaitingIso: string | null | undefined, 
 export function buildStateText(state: string | null | undefined): { text: string; tone: "ok" | "wait" | "bad" | "none" } {
   switch (state) {
     case "success": return { text: "ขึ้นเว็บแล้ว", tone: "ok" };
-    case "pending": return { text: "กำลัง build (~4 นาที)", tone: "wait" };
+    case "pending": return { text: "กำลัง build (~5 นาที)", tone: "wait" };
     case "failure":
     case "error": return { text: "build ล้ม — เว็บจริงยังเป็นรอบก่อนหน้า", tone: "bad" };
     default: return { text: "ยังไม่มีสถานะ", tone: "none" };
@@ -170,6 +173,48 @@ export function deployPhase(s: Pick<DeployStatus, "waiting" | "live" | "round">,
   if (s.live.state === "failure" || s.live.state === "error")
     return { key: "failed", title: "build ล้ม", secondsLeft: null, approx: false, detail: "เว็บจริงยังเป็นรอบก่อนหน้า — บอกทีมดูแลระบบ", tone: "red" };
   return { key: "idle", title: "เว็บจริงเป็นงานล่าสุดแล้ว", secondsLeft: null, approx: false, detail: s.live.message || "", tone: "green" };
+}
+
+// ── คำพูดของตัว Pet ในศูนย์แจ้งเตือน (แท็บ "ขึ้นเว็บ" · components/work-popup) ──────────────────
+/**
+ * หลังขึ้นเว็บเสร็จ ตัว Pet พูด "ขึ้นเว็บแล้ว" ค้างได้นานสุดกี่วินาที (นับจากเวลาที่ Vercel แจ้งว่าเสร็จ)
+ * เผื่อความช้าของสถานะ: ไม่มีกุญแจ GitHub = แคช server 120 วิ + หน้าจอถามทุก 60 วิ → รู้ช้าสุด ~3 นาที (ตั้งสั้นกว่านี้ = พลาดไม่ได้พูด)
+ */
+export const DEPLOY_DONE_TALK_SECONDS = 240;
+export type DeployPetNews = {
+  /** รหัสเรื่อง — เรื่องใหม่ (เริ่มรอบ / เริ่ม build / ขึ้นแล้ว / ล้ม) = ตัว Pet เด้งบอกใหม่ · เปิดแท็บดูแล้ว = เงียบจนกว่าจะมีเรื่องถัดไป */
+  key: string;
+  /** ข้อความในฟองคำพูด (สั้น ภาษาคน) */
+  text: string;
+  tone: DeployPhase["tone"];
+};
+const aboutMinutes = (sec: number) => (sec <= 60 ? "ไม่ถึง 1 นาที" : `ราว ${Math.ceil(sec / 60)} นาที`);
+/** ตอนนี้ตัว Pet ควรพูดเรื่องขึ้นเว็บว่าอะไร — null = ไม่มีเรื่องให้พูด (เงียบ) · pure เรียกซ้ำได้ */
+export function deployPetNews(s: Pick<DeployStatus, "waiting" | "live" | "round">, now: Date = new Date()): DeployPetNews | null {
+  const p = deployPhase(s, now);
+  const n = s.waiting.length.toLocaleString("th-TH");
+  switch (p.key) {
+    case "round":
+      return { key: `round:${s.round?.startedAt ?? ""}`, text: `มีงานรอขึ้นเว็บ ${n} งาน · อีก${aboutMinutes(p.secondsLeft ?? 0)}`, tone: p.tone };
+    case "promoting":
+      return { key: `promoting:${s.round?.startedAt ?? ""}`, text: `กำลังส่งงาน ${n} งานขึ้นเว็บ`, tone: p.tone };
+    case "building":
+      return {
+        key: `building:${s.live.sha}`,
+        text: p.secondsLeft != null ? `กำลัง build เว็บจริง · อีก${aboutMinutes(p.secondsLeft)}` : "กำลัง build — ใกล้เสร็จแล้ว",
+        tone: p.tone,
+      };
+    case "failed":
+      return { key: `failed:${s.live.sha}`, text: "build ล้ม — เว็บจริงยังเป็นรอบก่อน", tone: p.tone };
+    case "idle": {
+      const since = s.live.stateSince ? Date.parse(s.live.stateSince) : NaN;
+      const ago = now.getTime() - since;
+      if (s.live.state !== "success" || !Number.isFinite(since) || ago < 0 || ago > DEPLOY_DONE_TALK_SECONDS * 1000) return null;
+      return { key: `done:${s.live.sha}`, text: "ขึ้นเว็บแล้ว · กด Ctrl+Shift+R ดูของใหม่", tone: p.tone };
+    }
+    default:
+      return null;   // queued = มีงานแต่ไม่มีรอบเดิน (push ที่มี [skip ci]) — ยังไม่มีอะไรเกิดขึ้น ไม่ต้องพูด
+  }
 }
 
 /** วินาที → "m:ss" (เกินชั่วโมง → "h:mm:ss") */
