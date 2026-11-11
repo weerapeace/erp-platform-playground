@@ -2,10 +2,12 @@
 
 /**
  * ✂ หน้าพิมพ์ / ไฟล์เครื่องตัด ของแพทเทิร์นในแอปสตูดิโอแพทเทิร์น — เปิดจากปุ่ม "พิมพ์ / ไฟล์ตัด" ในสตูดิโอ
+ *   ใบสเปก (2026-11-11): ภาพ 3 มิติ 2 มุม (ถ่ายจากฉากเย็บติดของแพทเทิร์นที่บันทึกแล้ว) + ขนาดตัวกระเป๋า + รายการชิ้น/วัสดุ + ซิป/อะไหล่ + ตะเข็บ + งานขอบ ในเอกสารเดียว
  *   ภาพรวม + วางบนผ้า · พิมพ์ขนาดจริง A4 1:1 · ดาวน์โหลด DXF / SVG — ตัวหน้าพิมพ์ = ของกลาง PatternPrintView (ตัวเดียวกับใบงานออกแบบ)
  *   อ่านแพทเทิร์นที่ "บันทึกแล้ว" จาก /api/pattern-projects/<id> (ต้องมีสิทธิ์ pattern_studio.view)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { usePrintLog } from "@/components/report/use-print-log";
 import { apiFetch } from "@/lib/api";
@@ -13,6 +15,11 @@ import { docFileName } from "@/lib/print-filename";
 import { PatternPrintView } from "@/components/pattern-sheet/print-view";
 import { projectEdgeRows, projectPatternLines, projectPieceRows, projectSeamRows, type PatternProject } from "@/lib/pattern-project";
 import { cleanTrims, trimRows } from "@/lib/pattern-trims";
+import { buildSewn } from "@/lib/pattern-sewn";
+import { cleanAttaches, type AsmPiece } from "@/lib/pattern-assembly";
+import type { Pattern3DApi } from "@/components/pattern-3d";
+
+const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });
 import { HW_KINDS, hwKind, hwSpot, shapeBox } from "@/lib/pattern-shape";
 
 export default function PrintPatternProjectPage() {
@@ -42,6 +49,50 @@ export default function PrintPatternProjectPage() {
     const s = hwSpot(l), b = shapeBox(p.shape), k = HW_KINDS.find((x) => x.key === hwKind(l.hw));
     return { key: `${p.pid}:${l.id}`, piece: p.name || `ชิ้น ${i + 1}`, kind: k?.th ?? "อะไหล่", size: s.size, top: s.c[1] - b.y, left: s.c[0] - b.x, count: Math.max(1, p.count || 1) };
   })), [project]);
+  // ภาพ 3 มิติของใบสเปก: ประกอบฉากเย็บติดจากข้อมูลที่บันทึกแล้ว → วาดนอกจอ → ถ่าย 2 มุม (เฉียงหน้า / เฉียงหลัง) เป็นรูป ใส่ในเอกสาร (พิมพ์ได้แน่นอน)
+  const scene = useMemo(() => {
+    if (!project?.pieces?.length) return null;
+    const asm: AsmPiece[] = project.pieces.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) }));
+    const sc = buildSewn(asm, project.seams ?? [], cleanAttaches((project.template as { attach?: unknown } | null)?.attach, new Set(asm.map((p) => p.pid))));
+    return sc.joined > 0 ? sc : null;
+  }, [project]);
+  const [shots, setShots] = useState<{ url: string; label: string }[] | null>(null);
+  const shotFor = useRef<unknown>(null);
+  const onReady3d = (api: Pattern3DApi) => {
+    if (!scene || shotFor.current === scene) return;
+    shotFor.current = scene;
+    window.setTimeout(() => {   // รอ 1 จังหวะให้ขนาดผืนวาดนิ่ง แล้วถ่าย
+      const a = api.snapshot("iso"), b = api.snapshot("back");
+      setShots([...(a ? [{ url: a, label: "มุมเฉียงด้านหน้า" }] : []), ...(b ? [{ url: b, label: "มุมเฉียงด้านหลัง" }] : [])]);
+    }, 350);
+  };
+  const body = scene?.asm ?? null;
+  const spec = scene ? (
+    <div className="break-inside-avoid" data-spec-3d>
+      <div className="mb-1 text-[11px] font-medium text-slate-600">ภาพ 3 มิติ (ประกอบจากชิ้นและตะเข็บของแพทเทิร์นตามกติกา ไม่ใช่การจำลองผ้า)</div>
+      {shots ? (shots.length ? (
+        <div className="grid grid-cols-2 gap-2">
+          {shots.map((s) => (
+            <figure key={s.label} className="overflow-hidden rounded-lg border border-slate-200">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={s.url} alt={s.label} className="block w-full" />
+              <figcaption className="border-t border-slate-100 px-2 py-1 text-center text-[11px] text-slate-500">{s.label}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : <p className="text-[12px] text-slate-500">เครื่องนี้สร้างภาพ 3 มิติไม่ได้ ส่วนอื่นของใบสเปกยังครบ</p>) : <p className="text-[12px] text-slate-400">กำลังสร้างภาพ 3 มิติ…</p>}
+      <div className="mt-1.5 text-[12px] text-slate-700">
+        {body ? <>ขนาดตัวกระเป๋าตอนเย็บแล้ว (จากเส้นเย็บ): <b className="tabular-nums">กว้าง {body.width.toFixed(1)} × สูง {body.height.toFixed(1)} × ลึก {body.depth.toFixed(1)} ซม.</b> · </> : null}
+        เย็บติดแล้ว {scene.joined} ชิ้น · ตะเข็บ {(project?.seams ?? []).length} แนว
+        {scene.notes.length > 0 && <span className="text-amber-700"> · ยังไม่อยู่ในภาพ: {scene.notes.map((n) => n.name).join(", ")}</span>}
+      </div>
+      {!shots && (
+        <div aria-hidden className="no-print pointer-events-none fixed" style={{ left: -4000, top: 0, width: 720, height: 540 }}>
+          <Pattern3D mode="sewn" sewn={scene} height={540} onReady={onReady3d} />
+        </div>
+      )}
+    </div>
+  ) : null;
   const f1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
   const th = "py-1 pr-2", tables = seamRows.length || edgeRows.length || pieceRows.length || trims.length || hwRows.length ? (
     <div className="space-y-3">
@@ -149,7 +200,7 @@ export default function PrintPatternProjectPage() {
   if (err) return <div className="p-10 text-center text-sm text-rose-600">{err}</div>;
 
   return (
-    <PatternPrintView lines={lines} afterTable={tables} fileName={docFileName("แพทเทิร์น", code || String(id))}
+    <PatternPrintView lines={lines} afterTable={tables} beforeTable={spec} overviewLabel="ใบสเปก + วางบนผ้า" fileName={docFileName("แพทเทิร์น", code || String(id))}
       eyebrow={`สตูดิโอแพทเทิร์น${project?.sku_code ? ` · ${project.sku_code}` : ""}`} title={`${code} ${project?.name ?? ""}`} footCode={code || (project?.name ?? "")}
       emptyText="แพทเทิร์นนี้ยังไม่มีชิ้น — วาดชิ้นหรือสร้างจากแม่แบบทรงในสตูดิโอ กดบันทึก แล้วเปิดหน้านี้ใหม่" />
   );

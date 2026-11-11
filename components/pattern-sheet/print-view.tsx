@@ -40,7 +40,11 @@ const download = (name: string, text: string, type: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable }: {
+export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า" }: {
+  /** เนื้อหาเพิ่มเหนือตารางชิ้นในหน้าภาพรวม (เช่น ภาพ 3 มิติของใบสเปก) */
+  beforeTable?: ReactNode;
+  /** ป้ายของแท็บภาพรวม (สตูดิโอแพทเทิร์น = "ใบสเปก + วางบนผ้า") */
+  overviewLabel?: string;
   /** บรรทัดที่จะวาดเป็นชิ้น (กรองแท็บ/เรียงมาแล้ว) */
   lines: PatternLineInput[];
   /** บรรทัดเล็กเหนือชื่อ เช่น "แพทเทิร์นจากตีราคา · ทั่วไป" */
@@ -123,7 +127,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
       {/* แผงตั้งค่า (ไม่พิมพ์) */}
       <div className="no-print mx-auto flex max-w-[860px] flex-wrap items-center gap-2 px-4 pt-4">
         {controls}
-        <Seg value={mode} onChange={setMode} options={[{ v: "overview", label: "ภาพรวม + วางบนผ้า" }, { v: "tiles", label: "พิมพ์ขนาดจริง (A4)" }]} />
+        <Seg value={mode} onChange={setMode} options={[{ v: "overview", label: overviewLabel }, { v: "tiles", label: "พิมพ์ขนาดจริง (A4)" }]} />
         {mode === "tiles" && (
           <label className="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={mono} onChange={(e) => setMono(e.target.checked)} className="h-3.5 w-3.5" /> ขาวดำ (ประหยัดหมึก)</label>
         )}
@@ -142,6 +146,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
       ) : mode === "overview" ? (
         <div className="mx-auto my-4 max-w-[860px] space-y-4 bg-white p-6 shadow-sm print:my-0 print:max-w-none print:p-0 print:shadow-none">
           {head}
+          {beforeTable}
           {pieceTable}
           {afterTable}
           {skipped > 0 && <p className="text-[11px] text-slate-500">ไม่ได้วาด {skipped} บรรทัด (ไม่ได้คิดแบบกว้าง × ยาว เช่น อะไหล่ / สาย-เทปคิดตามยาว / ชิ้นสำเร็จ)</p>}

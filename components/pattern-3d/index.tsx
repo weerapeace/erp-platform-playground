@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { loadThree, type Three } from "@/lib/three-loader";
+import { Icon } from "@/components/icon";
 import type { BagSim } from "@/lib/pattern-sim";
 import { BAG_HANDLE_ATTACH, BAG_PVC_MARGIN, bagWindowShape, type BagGeometry } from "@/lib/bag-templates";
 import type { AssemblyOk } from "@/lib/pattern-assembly";
@@ -59,8 +60,12 @@ type Stage = {
   setJoined: (keys: string[] | null) => void;
   setExplode: (e: number) => void;
   setView: (v: Pattern3DView) => void;
+  /** ถ่ายภาพฉากตอนนี้เป็นรูป JPG (พื้นขาว) — v = มุมที่ต้องการ ("back" = มุมเฉียงจากด้านหลัง · ไม่ส่ง = มุมที่ดูอยู่) · ไม่เปลี่ยนมุมบนจอ */
+  snapshot: (v?: Pattern3DView | "back") => string | null;
   dispose: () => void;
 };
+/** สิ่งที่หน้าอื่นเรียกใช้ได้เมื่อภาพพร้อม (เช่น ใบสเปกถ่ายภาพไปวางในเอกสาร) */
+export type Pattern3DApi = { snapshot: (v?: Pattern3DView | "back") => string | null };
 
 const norm = (x: number, y: number): Pt => { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
@@ -597,7 +602,11 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     if (simTick && simTick()) S.dirty = true;   // โหมดจำลอง: วาดทุกเฟรมที่ยังขยับ (นิ่งแล้วคืน false ทันที ไม่กินแรง)
     if (!S.dirty) return;
     S.dirty = false;
-    const k = reduce ? 1 : 0.16; let anim = false, maxE = 0;
+    if (drawFrame(reduce ? 1 : 0.16)) S.dirty = true;
+  };
+  /** วาด 1 เฟรม — k = ความเร็วเข้าหาเป้า (1 = ถึงทันที) · คืน true = ยังเคลื่อนไหวอยู่ */
+  const drawFrame = (k: number): boolean => {
+    let anim = false, maxE = 0;
     for (const p of S.parts) {
       const te = target(p.join), tl = S.mode === "flat" && p.id === S.sel ? 1 : 0;
       if (Math.abs(te - p.e) > 0.003) { p.e += (te - p.e) * k; anim = true; } else p.e = te;
@@ -613,12 +622,27 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     const dist = S.dist * S.zoom * Math.max(1, 0.95 / cam.aspect) * (1 + 0.5 * maxE);
     cam.position.set(S.target.x + dist * Math.sin(S.pol) * Math.sin(S.az), S.target.y + dist * Math.cos(S.pol), S.target.z + dist * Math.sin(S.pol) * Math.cos(S.az));
     cam.lookAt(S.target); renderer.render(scene, cam);
-    if (anim) S.dirty = true;
+    return anim;
+  };
+  /** ถ่ายภาพ: ตั้งมุมชั่วคราว → วาดทันที → คัดลอกลงพื้นขาว → คืนมุมเดิม (บนจอไม่กระโดด) */
+  const snapshot = (v?: Pattern3DView | "back"): string | null => {
+    const keep = [S.az, S.pol, S.taz, S.tpol, S.zoom];
+    try {
+      if (v) { const a = v === "back" ? [Math.PI - VIEWS.iso[0], VIEWS.iso[1]] : VIEWS[v]; S.az = S.taz = a[0]; S.pol = S.tpol = a[1]; S.zoom = 1; }
+      drawFrame(1);
+      const src = renderer.domElement as HTMLCanvasElement, c = document.createElement("canvas");
+      c.width = src.width; c.height = src.height;
+      const g = c.getContext("2d");
+      if (!g || !src.width || !src.height) return null;
+      g.fillStyle = "#ffffff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0);
+      return c.toDataURL("image/jpeg", 0.92);
+    } catch { return null; }
+    finally { [S.az, S.pol, S.taz, S.tpol, S.zoom] = keep; S.dirty = true; }
   };
   loop();
 
   return {
-    setFlat, setBag, setAssembly, setSim, setSewn,
+    setFlat, setBag, setAssembly, setSim, setSewn, snapshot,
     wake: () => { S.dirty = true; },
     setJoined: (keys) => { S.joined = keys; S.dirty = true; },
     setCut: (cut) => {
@@ -638,7 +662,11 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   };
 }
 
-export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pieceColors, seamColors, cut = "none", simWake = 0, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "" }: {
+export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pieceColors, seamColors, cut = "none", simWake = 0, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "", saveName, onReady }: {
+  /** ชื่อไฟล์ของปุ่ม "บันทึกรูป" (ไม่ต้องมีนามสกุล) — ไม่ส่ง = "ภาพ 3 มิติ" */
+  saveName?: string;
+  /** เรียกเมื่อฉากถูกวางแล้ว (ทุกครั้งที่ฉากเปลี่ยน) — ไว้ถ่ายภาพไปใช้ที่อื่น เช่น ใบสเปก */
+  onReady?: (api: Pattern3DApi) => void;
   mode: "flat" | "bag" | "assembly" | "sim" | "sewn";
   /** mode="sewn": ฉากจาก buildSewn() ของ lib/pattern-sewn (ภาพเย็บติดของกระดานวาด) */
   sewn?: SewnScene | null;
@@ -675,6 +703,15 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
   const stage = useRef<Stage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const onSelectRef = useRef(onSelect); onSelectRef.current = onSelect;
+  const onReadyRef = useRef(onReady); onReadyRef.current = onReady;
+  /** บันทึกภาพที่เห็นอยู่เป็นไฟล์ JPG (มุมและการซูมตามที่ดูอยู่) */
+  const saveImage = () => {
+    const url = stage.current?.snapshot();
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url; a.download = `${(saveName || "ภาพ 3 มิติ").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80)}.jpg`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
 
   useEffect(() => {
     let dead = false;
@@ -694,6 +731,7 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
     else if (mode === "assembly" && assembly) s.setAssembly(assembly, col);
     else if (mode === "bag" && bag) s.setBag(bag, col);
     else s.setFlat(pieces ?? [], threads ?? []);
+    onReadyRef.current?.({ snapshot: (v) => stage.current?.snapshot(v) ?? null });
   }, [state, mode, bag, pieces, threads, assembly, sim, sewn, pieceColors, seamColors, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state === "ready") stage.current?.setCut(mode === "sewn" ? cut : "none"); }, [state, cut, mode]);
   useEffect(() => { if (state === "ready") stage.current?.wake(); }, [state, simWake]);
@@ -717,6 +755,8 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
             {views.map(([v, lb]) => (
               <button key={v} type="button" onClick={() => stage.current?.setView(v)} className="h-6 rounded-full border border-slate-200 bg-white/90 px-2 text-[11px] text-slate-600 hover:border-blue-300 hover:text-blue-700">{lb}</button>
             ))}
+            <button type="button" data-save-3d onClick={saveImage} title={t("บันทึกภาพที่เห็นอยู่เป็นไฟล์รูป JPG (มุมและการซูมตามที่ดูอยู่)", "Save the current view as a JPG image")} aria-label={t("บันทึกรูป", "Save image")}
+              className="inline-flex h-6 items-center gap-1 rounded-full border border-slate-200 bg-white/90 px-2 text-[11px] text-slate-600 hover:border-blue-300 hover:text-blue-700"><Icon value="i:camera" className="text-[12px]" />{t("บันทึกรูป", "Save image")}</button>
           </div>
           <div className="pointer-events-none absolute bottom-1.5 left-2 text-[11px] text-slate-500">{t("ลากเพื่อหมุน · ล้อเมาส์เพื่อซูม", "Drag to rotate · scroll to zoom")}</div>
         </>

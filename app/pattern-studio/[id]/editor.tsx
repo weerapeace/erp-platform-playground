@@ -202,7 +202,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
         <button type="button" disabled={dirty || !pieces.length} onClick={() => window.open(`/print/pattern-project/${id}`, "_blank", "noopener")}
           title={dirty ? t("บันทึกก่อน แล้วค่อยพิมพ์ (หน้าพิมพ์ใช้ข้อมูลที่บันทึกแล้ว)", "Save first — the print page uses the saved pattern") : t("พิมพ์ขนาดจริง A4 / ดาวน์โหลดไฟล์เครื่องตัด DXF / SVG", "Print at real size on A4 / download DXF or SVG cut files")}
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
-          <Icon value="i:printer" className="text-sm" />{t("พิมพ์ / ไฟล์ตัด", "Print / cut files")}
+          <Icon value="i:printer" className="text-sm" />{t("ใบสเปก / พิมพ์ / ไฟล์ตัด", "Spec sheet / print / cut files")}
         </button>
         <button type="button" onClick={() => setTrimsOpen(true)} data-trims-open
           title={t("ซิป กุ๊น สาย/เทป ห่วง ล็อก หมุด — ของที่ไม่ใช่ชิ้นตัด ใส่จำนวนต่อกระเป๋า 1 ใบ แล้วไปตีราคาพร้อมชิ้น", "Zips, tapes, rings, locks, rivets — enter the amount per bag; they go to costing with the pieces")}
@@ -225,7 +225,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
         )}
       </div>
 
-      <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
+      <PatternStudio key={`board-${boardNonce}`} imageName={`${patternNo ?? ""} ${name}`.trim() || undefined} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
         sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
         footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />

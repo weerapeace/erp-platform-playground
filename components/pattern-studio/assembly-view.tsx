@@ -38,7 +38,9 @@ function handleAttaches(A: AssemblyOk, f: HandleForm, stamp: string): Attach[] {
   return A.back === A.front ? [one("front", 0)] : [one("front", 0), one("back", 1)];
 }
 
-export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange, pieceStiff, compact = false, height, view }: {
+export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange, pieceStiff, compact = false, height, view, saveName }: {
+  /** ชื่อไฟล์ของปุ่ม "บันทึกรูป" บนภาพ 3 มิติ */
+  saveName?: string;
   /** ใช้ในช่องแคบข้างกระดาน (จอเดียว 3D คู่กับกระดาน): เรียงลงมาแถวเดียว ไม่แบ่ง 2 คอลัมน์ · ซ่อนกล่องคำอธิบายยาว */
   compact?: boolean;
   /** ความสูงของภาพ (ค่าเริ่ม 560) */
@@ -108,7 +110,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
     return (
       <div className={wrapCls} data-asm-view>
         <div className="min-w-0 space-y-2">
-          <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={H} />
+          <Pattern3D saveName={saveName} mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={H} />
           <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             {t("แยกชิ้นดู", "Pull pieces apart")}
             <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-56 max-w-full accent-blue-600" />
@@ -193,10 +195,10 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
     <div className={wrapCls} data-asm-view>
       <div className="min-w-0 space-y-2">
         {simOn && sim
-          ? <Pattern3D mode="sim" sim={sim} simWake={simWake} colors={colors} height={H} />
+          ? <Pattern3D saveName={saveName} mode="sim" sim={sim} simWake={simWake} colors={colors} height={H} />
           : extras.length || LA
-            ? <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />
-            : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />}
+            ? <Pattern3D saveName={saveName} mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />
+            : <Pattern3D saveName={saveName} mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />}
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`${view ? "hidden" : "inline-flex"} h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
             <Icon value="i:wind" className="text-sm" />{simOn ? t("กลับไปภาพประกอบ", "Back to the assembled view") : t("จำลองวัสดุทิ้งตัว (ทดลอง)", "Simulate material drape (experimental)")}

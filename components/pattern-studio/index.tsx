@@ -69,7 +69,9 @@ export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start
   /** แก้จุดติด (ติดหู / ปิดหลังช่อง) จากภาพ 3D แบบ แยกชิ้น — ไม่ส่ง = ดูอย่างเดียว */ onAttachesChange?: (next: Attach[]) => void;
   /** ความอยู่ทรงของชิ้น (ภาพ ทิ้งตัว) */ pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
 
-export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks"> & {
+export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks"> & {
+  /** ชื่อไฟล์ของปุ่ม "บันทึกรูป" บนภาพ 3 มิติ (เช่น เลขที่ + ชื่อแพทเทิร์น) */
+  imageName?: string;
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
   onTemplateInsert?: (info: TemplateInsertInfo) => void;
   /** ส่ง = มีเครื่องมือเย็บ (N) + แก้ตะเข็บ (B) ในแถบเครื่องมือซ้ายของกระดาน และเห็นด้ายเย็บในภาพ 3D (ใบงานออกแบบไม่ส่ง = ไม่มี) */
@@ -250,8 +252,8 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
             {sewnOn && sewnScene
-              ? <Pattern3D mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />
-              : <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />}
+              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />
+              : <Pattern3D saveName={imageName} mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />}
             {sewnOn && sewnScene ? (
               <div className="space-y-1 text-[11px] text-slate-500">
                 <p>{t(`เย็บติดแล้ว ${sewnScene.joined} จาก ${flat.length} ชิ้น · ลากเส้นตะเข็บบนกระดาน ภาพนี้ขยับตาม · เป็นการวางตามสูตร ไม่ใช่การจำลองผ้า (ตำแหน่งถูก การทิ้งตัวเป็นค่าประมาณ)`, `${sewnScene.joined} of ${flat.length} pieces sewn · drag a seam on the board and this view follows · placed by rules, not a cloth simulation (positions are right, drape is approximate)`)}</p>
@@ -293,7 +295,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
               </div>
             )}
             {asmMode
-              ? <AssemblyView compact height={Math.max(300, h3 - 60)} view={view3d === "explode" ? "whole" : view3d} pieces={asmLive} seams={sew.seams} attaches={sew.attaches ?? []} onAttachesChange={readonly ? undefined : sew.onAttachesChange} pieceStiff={sew.pieceStiff} />
+              ? <AssemblyView saveName={imageName} compact height={Math.max(300, h3 - 60)} view={view3d === "explode" ? "whole" : view3d} pieces={asmLive} seams={sew.seams} attaches={sew.attaches ?? []} onAttachesChange={readonly ? undefined : sew.onAttachesChange} pieceStiff={sew.pieceStiff} />
               : viewEl}
           </div>
         ) : null;
