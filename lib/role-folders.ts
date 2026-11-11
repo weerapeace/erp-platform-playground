@@ -11,11 +11,17 @@ export interface RoleFolderConfig {
   desc: string[];
   archive: string[];
 }
-export const DEFAULT_ROLE_FOLDERS: RoleFolderConfig = { desc: ["description", "desc", "รายละเอียด"], archive: ["images", "rawfiles", "raw files", "raw"] };
+// ชื่อที่เจอจริง: "_Description" · "image" (ไม่มี s) · "rawfile" — เจ้าของขอให้รองรับ 2026-11-11
+export const DEFAULT_ROLE_FOLDERS: RoleFolderConfig = { desc: ["description", "desc", "รายละเอียด"], archive: ["images", "image", "rawfiles", "rawfile", "raw files", "raw file", "raw"] };
 
-/** ชื่อโฟลเดอร์ตัดเลขลำดับหน้าออก: "[01] Description" · "01_Description" · "1. Description" · "(2) Images" → "description" */
+/** ชื่อโฟลเดอร์ตัดเลขลำดับ + ขีด/จุด/ขีดล่างหน้าออก: "[01] Description" · "01_Description" · "1. Description" · "(2) Images" · "_Description" → "description" */
 export function folderLabelKey(name: string): string {
-  return name.trim().replace(/^(\[\s*\d+\s*\]|\(\s*\d+\s*\)|\d+\s*[._)\-]+)\s*/, "").trim().toLowerCase();
+  return name.trim().replace(/^(\[\s*\d+\s*\]|\(\s*\d+\s*\)|\d+\s*[._)\-]+)\s*/, "").replace(/^[\s_\-.~#]+/, "").trim().toLowerCase();
+}
+
+/** ชื่อโฟลเดอร์ (key แล้ว) ตรงกับคำในรายการไหม: ตรงตัว หรือคำนั้นตามด้วยเลข/ขีดเท่านั้น ("images 2" · "description_1") */
+export function matchesRoleWord(key: string, words: string[]): boolean {
+  return words.some((w) => !!w && (key === w || (key.startsWith(w) && /^[\s_\-.\d]*$/.test(key.slice(w.length)))));
 }
 
 /** ค่าตั้งจาก DB/หน้าจอ → ใช้ได้เสมอ (ไม่ใช่ array = ค่าเริ่มต้น · array ว่าง = ไม่ใช้โฟลเดอร์หน้าที่ชนิดนั้น) */

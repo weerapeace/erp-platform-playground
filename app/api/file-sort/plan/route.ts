@@ -126,7 +126,7 @@ function cleanSlotModes(raw: unknown): SlotModeInput | undefined {
 }
 
 /** สูตรงานสินค้า: โหลดสินค้าตามรหัสในชื่อโฟลเดอร์/ไฟล์ (ตัวโหลดกลางชุดเดียวกับปุ่ม 📂 ในเว็บ) → แผนรายไฟล์/รายช่อง */
-async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; slot_modes?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
+async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; slot_modes?: unknown; scope_slots?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
   if (!(await apiCan(request, "products.view"))) return NextResponse.json({ error: "บัญชีนี้ไม่มีสิทธิ์ดูสินค้า (products.view)" }, { status: 403 });
   const job = String(b.job_folder ?? "").trim();
   const files = Array.isArray(b.files) ? b.files.filter((f) => f && typeof f.path === "string") : [];
@@ -140,7 +140,9 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   const catalog = await loadImageCatalog(admin, cleanCatalogRequest({ codes }));
   const variant: ProductVariant = b.variant === "color" || b.variant === "edit" ? b.variant : "new";
   const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined,
-    pngGallery: typeof b.png_gallery === "boolean" ? b.png_gallery : undefined, slotModes: cleanSlotModes(b.slot_modes) });
+    pngGallery: typeof b.png_gallery === "boolean" ? b.png_gallery : undefined, slotModes: cleanSlotModes(b.slot_modes),
+    // โปรแกรม v1.12+ ส่ง scope_slots="ask" → ช่องที่เพิ่มสี/แก้สีไม่แตะ ส่งมาเป็นช่องตั้งไว้ไม่ลง (รุ่นเก่าไม่ส่ง = ข้ามเงียบเหมือนเดิม)
+    scopeAsk: b.scope_slots === "ask" });
   // รูปย่อของ Description เดิม (ให้เลือกแทนบางรูป) — คลังเก็บ r2_key ไว้
   const descIds = [...new Set(plan.slots.filter((s) => s.kind === "desc").flatMap((s) => s.existingItems.map((x) => x.id)))];
   if (descIds.length) {

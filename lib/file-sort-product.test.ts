@@ -158,6 +158,27 @@ describe("เพิ่มสี / แก้สี", () => {
     expect(p.slots).toEqual([]);
     expect(p.warnings.some((w) => w.includes("ไม่พบสีใหม่"))).toBe(true);
   });
+  it("scopeAsk (โปรแกรม v1.12+): เพิ่มสี — สีใหม่ลงตามปกติ · Parent / Description / PNG / สีที่มีรูปแล้ว = ช่องตั้งไว้ไม่ลง (ไม่ใช่ข้ามเงียบ)", () => {
+    const p = planProductSort(files, ps(), DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", variant: "color", scopeAsk: true });
+    const by = (code: string, kind: string) => p.slots.find((s) => s.code === code && s.kind === kind);
+    expect(by("BSD15-02", "skuGallery")?.defaultOff).toBe(false);
+    expect(by("BSD15-01", "skuGallery")?.defaultOff).toBe(true);
+    expect(by("BSD15", "parentGallery")?.defaultOff).toBe(true);
+    expect(by("BSD15", "desc")?.defaultOff).toBe(true);
+    expect(p.files.filter((f) => f.why === "scope")).toEqual([]);
+    expect(p.warnings.some((w) => w.includes("ไม่พบสีใหม่"))).toBe(false);
+  });
+  it("scopeAsk: เพิ่มสีแต่ทุกสีมีรูปแล้ว (เช่นรูปตัวอย่างตอนสร้าง SKU) → ยังมีช่องให้เลือกลง + เตือนแบบใหม่", () => {
+    const p = planProductSort([{ path: "BSD15-01/1.jpg" }, { path: "BSD15/1.jpg" }], ps(), DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", variant: "color", scopeAsk: true });
+    expect(p.slots.length).toBe(2);
+    expect(p.slots.every((s) => s.defaultOff)).toBe(true);
+    expect(p.warnings.some((w) => w.includes("ตั้งไว้ไม่ลง") && w.includes("Parent"))).toBe(true);
+  });
+  it("scopeAsk: แก้สี — Parent ตั้งไว้ไม่ลง (เลือกลงได้) · สีในโฟลเดอร์ลงตามปกติ", () => {
+    const p = planProductSort(files, ps(), DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", variant: "edit", scopeAsk: true });
+    expect(p.slots.find((s) => s.kind === "parentGallery")?.defaultOff).toBe(true);
+    expect(p.slots.filter((s) => s.kind === "skuGallery").every((s) => !s.defaultOff)).toBe(true);
+  });
   it("ที่เก็บบน Z: แยกตามชนิดงานย่อย", () => {
     const cfg = { ...DEFAULT_PRODUCT_CONFIG, nasPatterns: { new: "Z:\\NP\\{รุ่น}", color: "Z:\\NC\\{ปี}-{เดือน}\\{รุ่น}", edit: "" } };
     expect(productNasFolder(cfg, "BSD15", "color", new Date("2026-11-08T00:00:00Z"))).toBe("Z:\\NC\\2026-11\\BSD15");
@@ -211,8 +232,8 @@ describe("planProductCollection — เก็บทั้งโฟลเดอ�
     const { collection, warnings } = planProductCollection(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", brand: LOUIS });
     expect(collection).toMatchObject({ mode: "move", target: "Z:\\Collection\\{กลุ่ม}\\BSD15", reason: null, tidy: true });
     expect(collection.renames).toEqual([
+      { from: "Description", to: "[01] Description" },   // เปลี่ยนเป็นชื่อมาตรฐานก่อน แล้วค่อยย้าย lifestyle/model เข้า
       { from: "BSD15 Model", to: "[02] Images/BSD15 Model" },
-      { from: "Description", to: "[01] Description" },
       { from: "Lifestyle", to: "[02] Images/Lifestyle" },
     ]);
     expect(warnings).toEqual([]);
@@ -244,10 +265,26 @@ describe("planProductCollection — เก็บทั้งโฟลเดอ�
     expect(planProductCollection(files, stay, { jobFolder: "JEAN10", brand: null }).warnings).toEqual([]);
     expect(cleanProductConfig({}).collection).toEqual(DEFAULT_PRODUCT_CONFIG.collection);
   });
-  it("จัดชื่อ: มี [01] Description อยู่แล้ว = ไม่แตะ · ข้าม Rawfiles/Images · Description หลายอันเปลี่ยนแค่อันแรก", () => {
+  it("จัดชื่อ: มีชื่อมาตรฐานอยู่แล้ว = ไม่แตะ · Description หลายอันเปลี่ยนแค่อันแรก · Rawfiles ชื่ออื่น → [03] Rawfiles", () => {
     expect(planTidyRenames(["[01] Description", "Description2", "[02] Images", "Raw files model", "Models"], DEFAULT_PRODUCT_CONFIG))
-      .toEqual([{ from: "Models", to: "[02] Images/Models" }]);
+      .toEqual([{ from: "Raw files model", to: "[03] Rawfiles" }, { from: "Models", to: "[02] Images/Models" }]);
     expect(planTidyRenames(["Description A", "Description B"], DEFAULT_PRODUCT_CONFIG)).toEqual([{ from: "Description A", to: "[01] Description" }]);
+    expect(planTidyRenames(["[03] Rawfiles", "raw"], DEFAULT_PRODUCT_CONFIG)).toEqual([]);
+  });
+  it("จัดชื่อ (เจ้าของขอ 2026-11-11): _Description · image · rawfile → ชื่อมาตรฐาน · Lifestyle เข้า [02] Images หลังเปลี่ยนชื่อ Images", () => {
+    const r = planTidyRenames(["Lifestyle", "_Description", "image", "rawfile"], DEFAULT_PRODUCT_CONFIG);
+    expect(r).toHaveLength(4);
+    expect(r).toContainEqual({ from: "_Description", to: "[01] Description" });
+    expect(r).toContainEqual({ from: "image", to: "[02] Images" });
+    expect(r).toContainEqual({ from: "rawfile", to: "[03] Rawfiles" });
+    expect(r[3]).toEqual({ from: "Lifestyle", to: "[02] Images/Lifestyle" });
+  });
+  it("ชื่อโฟลเดอร์แปลก ๆ ยังรู้หน้าที่: _Description = Description (ไม่ลงแกลเลอรี Parent) · image = Images (ไม่ลงระบบ)", () => {
+    const pp: CatalogParent[] = [{ parentId: "P", code: "BSD15", name: "x", gallery: 0, galleryItems: [], desc: 0, descItems: [], png: false, pngKey: null, shopIds: [], skus: [] }];
+    const p = planProductSort(["_Description/1.jpg", "image/x.jpg", "Images 2/y.jpg"].map((path) => ({ path, size: 1 })), pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15" });
+    expect(p.files.find((f) => f.rel === "_Description/1.jpg")).toMatchObject({ erp: true, dest: "desc" });
+    expect(p.files.find((f) => f.rel === "image/x.jpg")?.erp).toBe(false);
+    expect(p.files.find((f) => f.rel === "Images 2/y.jpg")?.erp).toBe(false);
   });
   it("{กลุ่ม} ในแม่แบบอื่นที่ไม่ได้ส่งค่า = ตัดชั้นนั้นทิ้ง (ไม่ค้างเป็นข้อความ)", () => {
     expect(fillNasPattern("Z:\\Work\\{กลุ่ม}\\{รุ่น}", { รุ่น: "BSD15" })).toBe("Z:\\Work\\BSD15");

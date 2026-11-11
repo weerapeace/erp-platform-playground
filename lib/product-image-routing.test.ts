@@ -309,7 +309,9 @@ describe("ชื่อโฟลเดอร์หน้าที่", () => {
     expect(versionOfFolder("v10")).toBe(10);
     expect(versionOfFolder("Version 3")).toBe(3);
     expect(versionOfFolder("Select")).toBeNull();
-    expect(cleanRoleFolders({ desc: ["[01] Description", "description", " "], archive: "x" })).toEqual({ desc: ["description"], archive: ["images", "rawfiles", "raw files", "raw"] });
+    expect(cleanRoleFolders({ desc: ["[01] Description", "description", " "], archive: "x" })).toEqual({ desc: ["description"], archive: ["images", "image", "rawfiles", "rawfile", "raw files", "raw file", "raw"] });
+    expect(folderLabelKey("_Description")).toBe("description");   // ขีดล่างนำหน้า (เจอจริง 2026-11-11)
+    expect(fileRoles(["A/_Description/1.jpg", "A/image/x.jpg", "A/Images 2/y.jpg"])).toMatchObject([{ role: "desc" }, { role: "archive" }, { role: "archive" }]);
     expect(fileRoles(["A/[02] Images/x.jpg", "A/x.jpg"])).toMatchObject([{ role: "archive" }, { role: null }]);
   });
 });

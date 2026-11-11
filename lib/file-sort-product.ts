@@ -32,7 +32,7 @@ import {
 } from "@/lib/product-image-routing";
 import type { CatalogParent } from "@/lib/product-image-catalog-server";
 import { COLLECTION_OLD_FOLDER, MOVE_ROLES, collectionPatternFor, fillNasPattern, isJunkFile, nasDateValues, relPathOf, safeFolderName, type CollectionExists, type MoveRole, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
-import { folderLabelKey } from "@/lib/role-folders";
+import { folderLabelKey, matchesRoleWord } from "@/lib/role-folders";
 
 export const ERP_IMAGE_EXTS = ["jpg", "jpeg", "png", "webp"] as const;
 export const PRODUCT_MAX_FILES = 3000;
@@ -80,6 +80,8 @@ export type ProductPlanSlot = {
   existingItems: { id: string; key: string | null; primary: boolean }[];
   /** รูปใหม่ที่ข้ามเพราะหน้าตาเหมือนรูปในระบบ (โปรแกรมเทียบรูปเองแล้วส่ง skip มา) — ไม่อัป ไม่นับเพดาน */
   skipped: string[];
+  /** เพิ่มสี/แก้สี (scopeAsk): ช่องที่ชนิดงานไม่แตะ (Parent · Description · PNG · สีที่มีรูปแล้ว) → โปรแกรมตั้งไว้ "ไม่ลงช่องนี้" เลือกลงเองได้ */
+  defaultOff: boolean;
   /** ลำดับรูปใหม่ทั้งหมดของช่องนี้ตามแม่แบบ (ปกหน้าสุด · รวมที่ข้าม) — โปรแกรมใช้จัดลำดับแกลเลอรีหลังทำ */
   order: string[];
   /** เจ้าของแกลเลอรี (ช่อง desc/png = Parent) */
@@ -118,8 +120,10 @@ const isErpImage = (ext: string) => (ERP_IMAGE_EXTS as readonly string[]).includ
  *   color = เพิ่มสี — เฉพาะแกลเลอรีของสีที่ยังไม่มีรูปในระบบ (Parent/Description/สีเดิมที่ก๊อปมาจาก Collection ไม่แตะ)
  *   edit  = แก้สี — เฉพาะแกลเลอรีของสีที่อยู่ในโฟลเดอร์ (Parent/Description/PNG ไม่แตะ)
  */
-export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean; slotModes?: SlotModeInput }): ProductPlan {
+export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean; slotModes?: SlotModeInput; scopeAsk?: boolean }): ProductPlan {
   const mode: MassMode = opts.mode ?? cfg.mode;
+  // เพิ่มสี/แก้สี: ช่องที่ "ไม่แตะ" ตามชนิดงาน (Parent · Description · PNG · สีที่มีรูปแล้ว) — scopeAsk (โปรแกรม v1.12+) = ส่งเป็นช่องตั้งไว้ไม่ลง ให้เลือกลงเองได้ · ไม่ส่ง = ข้ามเงียบเหมือนเดิม (โปรแกรมรุ่นเก่า)
+  const offRels = new Set<string>();
   // PNG ในโฟลเดอร์สี/รุ่น: ไม่ลงแกลเลอรี (ซ้ำกับ JPEG เบอร์เดียวกัน) → ก๊อปไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่นแทน · โปรแกรมติ๊กให้ลงแกลเลอรีด้วยได้
   const pngGallery = opts.pngGallery ?? cfg.png.gallery;
   const pngs: { rel: string; name: string }[] = [];
@@ -178,16 +182,22 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
         ? (variant === "color" ? "ไม่แตะ — ก๊อปมาจาก Collection (เพิ่มสีลงเฉพาะสีใหม่)" : "ไม่แตะ — แก้สีลงเฉพาะแกลเลอรีสี")
         : variant === "color" && (sku?.gallery ?? 0) > 0 ? "ไม่แตะ — สีนี้มีรูปในระบบแล้ว (จะเปลี่ยนใช้ \"แก้สี\")" : "";
       if (note) {
-        for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "scope", note });
-        continue;
+        if (opts.scopeAsk) for (const id of g.fileIds) offRels.add(byId.get(id)!.rel);
+        else {
+          for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "scope", note });
+          continue;
+        }
       }
     }
     const rows = g.fileIds.map((id) => ({ id, base: (byId.get(id)!.name).replace(/\.[^.]+$/, "") }));
     let images = applyRowMode(rows, defaultRowModeOf(g), { parentLevel: !t.skuId, template: DEFAULT_TEMPLATE, loose: g.key.startsWith("f:"), hints: g.hints });
     if (variant !== "new") {
-      // รูปตัด PNG เป็นของทั้งรุ่น → เพิ่มสี/แก้สีไม่แตะ
-      for (const im of images) if (im.dest === "png") Object.assign(byId.get(im.id)!, { why: "scope", note: "ไม่แตะ — รูปตัด PNG เป็นของทั้งรุ่น" });
-      images = images.filter((im) => im.dest !== "png");
+      // รูปตัด PNG เป็นของทั้งรุ่น → เพิ่มสี/แก้สีไม่แตะ (scopeAsk = ตั้งไว้ไม่ลง เลือกลงได้)
+      if (opts.scopeAsk) { for (const im of images) if (im.dest === "png") offRels.add(byId.get(im.id)!.rel); }
+      else {
+        for (const im of images) if (im.dest === "png") Object.assign(byId.get(im.id)!, { why: "scope", note: "ไม่แตะ — รูปตัด PNG เป็นของทั้งรุ่น" });
+        images = images.filter((im) => im.dest !== "png");
+      }
     }
     // ไฟล์ .png → ก๊อปไปโฟลเดอร์ PNG (ชื่อตามรหัสสี/รุ่นที่จับคู่ได้) · ไม่ลงแกลเลอรี เว้นแต่ติ๊ก pngGallery
     if (cfg.png.mode === "copy" || !pngGallery) {
@@ -293,7 +303,9 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     // เอารูปปกเดิมออก (เลือกเอง / แทนที่แต่เก็บบางรูป) + ไม่มีรูปปกใหม่ → รูปแรกที่ลงเป็นปก (กันแกลเลอรีไม่มีปก)
     const coverRel = s.coverId ? relOf(s.coverId) : (sm === "pick" || kp.size > 0) && primaryId && drop.has(primaryId) && rels.length ? rels[0] : undefined;
     const skipped = skippedOf(s.key);
+    const defaultOff = [...rels, ...skipped].some((r) => offRels.has(r));
     return {
+      defaultOff,
       key: s.key, kind: s.kind, parentId: s.parentId, skuId: s.skuId, code: sku?.code ?? p.code,
       rels, coverRel,
       existing: s.existing, total: s.total, limit: s.limit,
@@ -331,8 +343,12 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   const byRel = new Map(out.map((a) => [a.rel, a]));
   for (const s of slots) for (const r of s.rels) { const a = byRel.get(r); if (a?.dest === "skuMain" && r !== s.coverRel) a.dest = "sku"; }
   if (!parents.length && imgs.length) warnings.unshift(`ไม่พบสินค้าที่ตรงกับชื่อโฟลเดอร์ "${job}" ในระบบ — ตรวจรหัสรุ่น/สีให้ตรงกับ ERP`);
-  else if (variant === "color" && parents.length && !slots.length) warnings.push("ไม่พบสีใหม่ที่ต้องลงรูป — ทุกสีในโฟลเดอร์มีรูปในระบบแล้ว (จะเปลี่ยนรูปใช้ \"แก้สี\")");
-  else if (variant === "edit" && parents.length && !slots.length) warnings.push("ไม่พบโฟลเดอร์สีที่ตรงกับ SKU ในระบบ — ไม่มีอะไรให้แก้");
+  else if (variant === "color" && parents.length && !slots.some((s) => !s.defaultOff)) warnings.push(slots.length
+    ? "ทุกสีในโฟลเดอร์มีรูปในระบบแล้ว — ตั้งไว้ไม่ลง · เลือกลงทีละช่องได้ (สี · Parent · Description)"
+    : "ไม่พบสีใหม่ที่ต้องลงรูป — ทุกสีในโฟลเดอร์มีรูปในระบบแล้ว (จะเปลี่ยนรูปใช้ \"แก้สี\")");
+  else if (variant === "edit" && parents.length && !slots.some((s) => !s.defaultOff)) warnings.push(slots.length
+    ? "ไม่พบโฟลเดอร์สีที่ตรงกับ SKU ในระบบ — ช่องอื่นตั้งไว้ไม่ลง เลือกลงทีละช่องได้"
+    : "ไม่พบโฟลเดอร์สีที่ตรงกับ SKU ในระบบ — ไม่มีอะไรให้แก้");
 
   return {
     files: out,
@@ -359,8 +375,7 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
 export type ProductMove = { role: MoveRole; folder: string; files: number; bytes: number; mode: "stay" | "move"; target: string | null; reason: string | null };
 
 export function matchesFolderWord(name: string, words: string[]): boolean {
-  const k = folderLabelKey(name);
-  return words.some((w) => !!w && (k === w || (k.startsWith(w) && /^[\s_\-.\d]*$/.test(k.slice(w.length)))));
+  return matchesRoleWord(folderLabelKey(name), words);
 }
 
 /** โฟลเดอร์ชั้นบนของงาน → จำนวนไฟล์/ขนาด (ไม่นับไฟล์ระบบ) */
@@ -407,21 +422,30 @@ export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig,
  */
 export const TIDY_DESC_FOLDER = "[01] Description";
 export const TIDY_IMAGES_FOLDER = "[02] Images";
+export const TIDY_RAW_FOLDER = "[03] Rawfiles";
 export type TidyRename = { from: string; to: string };
 export type ProductCollection = { mode: "stay" | "move"; target: string | null; reason: string | null; tidy: boolean; renames: TidyRename[]; whenExists: CollectionExists; oldFolder: string };
 
-/** จัดชื่อแบบปุ่ม Arrange: ชื่อมีคำว่า description → [01] Description (มีอยู่แล้ว = ไม่แตะ) · lifestyle / model → [02] Images/<ชื่อเดิม> · ข้ามโฟลเดอร์ Rawfiles / Images */
+/**
+ * จัดชื่อแบบปุ่ม Arrange (ชื่อมาตรฐาน · มีชื่อมาตรฐานอยู่แล้ว = ไม่แตะ):
+ *   ชื่อมีคำว่า description / desc ("_Description") → [01] Description
+ *   โฟลเดอร์ Images ชื่ออื่น ("image" · "Images 2") → [02] Images · โฟลเดอร์ Rawfiles ชื่ออื่น ("rawfile" · "Raw") → [03] Rawfiles (เจ้าของขอ 2026-11-11)
+ *   lifestyle / model → [02] Images/<ชื่อเดิม> (เปลี่ยนชื่อ Images ก่อน แล้วค่อยย้ายเข้า)
+ */
 export function planTidyRenames(tops: string[], cfg: ProductSortConfig): TidyRename[] {
-  const out: TidyRename[] = [];
-  const skip = (n: string) => /raw\s*file/i.test(n) || MOVE_ROLES.some((r) => matchesFolderWord(n, cfg.moveFolders[r]));
-  let descTaken = tops.some((n) => n.toLowerCase() === TIDY_DESC_FOLDER.toLowerCase());
+  const first: TidyRename[] = [], later: TidyRename[] = [];
+  const has = (std: string) => tops.some((n) => n.toLowerCase() === std.toLowerCase());
+  const taken = { [TIDY_DESC_FOLDER]: has(TIDY_DESC_FOLDER), [TIDY_IMAGES_FOLDER]: has(TIDY_IMAGES_FOLDER), [TIDY_RAW_FOLDER]: has(TIDY_RAW_FOLDER) } as Record<string, boolean>;
+  const toStd = (n: string, std: string) => { if (!taken[std]) { first.push({ from: n, to: std }); taken[std] = true; } };
   for (const n of [...tops].sort((a, b) => a.localeCompare(b))) {
     const low = n.toLowerCase();
-    if (low === TIDY_DESC_FOLDER.toLowerCase() || low === TIDY_IMAGES_FOLDER.toLowerCase() || skip(n)) continue;
-    if (/description/i.test(n)) { if (!descTaken) { out.push({ from: n, to: TIDY_DESC_FOLDER }); descTaken = true; } continue; }
-    if (/lifestyle|model/i.test(n)) out.push({ from: n, to: `${TIDY_IMAGES_FOLDER}/${n}` });
+    if (low === TIDY_DESC_FOLDER.toLowerCase() || low === TIDY_IMAGES_FOLDER.toLowerCase() || low === TIDY_RAW_FOLDER.toLowerCase()) continue;
+    if (/raw\s*file/i.test(n) || matchesFolderWord(n, cfg.moveFolders.raw)) { toStd(n, TIDY_RAW_FOLDER); continue; }
+    if (matchesFolderWord(n, cfg.moveFolders.images)) { toStd(n, TIDY_IMAGES_FOLDER); continue; }
+    if (/description/i.test(n) || matchesFolderWord(n, cfg.roleFolders.desc)) { toStd(n, TIDY_DESC_FOLDER); continue; }
+    if (/lifestyle|model/i.test(n)) later.push({ from: n, to: `${TIDY_IMAGES_FOLDER}/${n}` });
   }
-  return out;
+  return [...first, ...later];
 }
 
 export function planProductCollection(files: ProductFileIn[], cfg: ProductSortConfig, opts: { jobFolder: string; brand: { id: string; name: string; folder: string | null } | null; now?: Date }): { collection: ProductCollection; warnings: string[] } {

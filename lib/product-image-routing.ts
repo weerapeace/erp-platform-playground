@@ -22,7 +22,7 @@ import {
 } from "@/lib/website-image-match";
 import { BIG_IMAGE_MAX_BYTES } from "@/lib/media-upload-limits";
 import { tr } from "@/lib/lang";   // ป้าย/ข้อความ 2 ภาษา — ป้ายคงที่เป็น getter (อ่านภาษาตอนแสดง) · ข้อความในฟังก์ชันแปลตอนเรียก
-import { DEFAULT_ROLE_FOLDERS, folderLabelKey, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
+import { DEFAULT_ROLE_FOLDERS, folderLabelKey, matchesRoleWord, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
 export { DEFAULT_ROLE_FOLDERS, cleanRoleFolders, folderLabelKey, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
 
 export type RouteDest = "skuMain" | "sku" | "parent" | "desc" | "webColor" | "heroD" | "heroM" | "png" | "skip";
@@ -154,12 +154,12 @@ export interface FileRoleInfo {
 
 /** ไฟล์แต่ละไฟล์อยู่ในโฟลเดอร์หน้าที่ไหม · Description มีหลายเวอร์ชัน → ใช้เวอร์ชันสูงสุด ที่เหลือ = old */
 export function fileRoles(paths: string[], cfg: RoleFolderConfig = DEFAULT_ROLE_FOLDERS): FileRoleInfo[] {
-  const desc = new Set(cfg.desc), archive = new Set(cfg.archive);
   const out: FileRoleInfo[] = paths.map((p) => {
     const folders = [...splitPath(p).folders].reverse();   // รากก่อน
     for (let i = 0; i < folders.length; i++) {
       const k = folderLabelKey(folders[i]);
-      const isDesc = desc.has(k), isArch = archive.has(k);
+      // ตรงตัว หรือตามด้วยเลข/ขีด ("Images 2") · ชื่อขึ้นต้นด้วยขีดล่าง ("_Description") ตัดออกแล้วใน folderLabelKey
+      const isDesc = matchesRoleWord(k, cfg.desc), isArch = matchesRoleWord(k, cfg.archive);
       if (!isDesc && !isArch) continue;
       const base = { roleChain: folders.slice(0, i + 1).join("/"), roleFolder: folders[i], above: folders.slice(0, i).reverse() };
       if (isArch) return { role: "archive" as const, ...base };
