@@ -10,7 +10,9 @@
  *   หู / แผ่นหลังช่องโชว์ ไม่ได้เย็บขอบชนขอบ → ใช้ "จุดติด" (Attach) ที่ได้จากแม่แบบทรง
  *   โครงสร้างที่ไม่เข้ากติกา = ok:false พร้อมเหตุผล (หน้าจอบอกตรง ๆ ว่าประกอบไม่ได้ — ไม่วาดภาพหลอก)
  *   ชั้นของชิ้น: layer "lining" = ซับใน — ประกอบแยกจากตัวนอก (assemble(…, "lining")) · ตะเข็บข้ามชั้น (เช่น ปากซับในกับปากตัวนอก) ไม่ใช้หาโครงสร้าง
- *   ตะเข็บที่เย็บบางช่วงของขอบ ไม่ใช้หาโครงสร้าง (ใช้เฉพาะตะเข็บเต็มขอบ) — ชิ้นที่ติดด้วยตะเข็บบางช่วงไปอยู่ในภาพเย็บติด (lib/pattern-sewn)
+ *   ตะเข็บชุด "1 ขอบกับหลายชิ้น" (Seam.group · 2026-11-11) ใช้หาโครงสร้างได้: ขอบยาวของแผ่นถูกแบ่งเป็นช่วง แต่ละช่วงเย็บกับขอบเต็มของชิ้นคั่นกลาง 1 ชิ้น
+ *     → ชิ้นคั่นกลางหลายชิ้นต่อกันรอบแผ่นเดียวได้ (เช่น กระเป๋ากลม: แถบซิปด้านบน + แถบก้น) · ด้านของชิ้นคั่นกลางต้องเป็นขอบเต็ม
+ *   ตะเข็บที่เย็บบางช่วงของขอบแบบอื่น (ไม่มี group เช่น โคนหู) ไม่ใช้หาโครงสร้าง (ใช้เฉพาะตะเข็บเต็มขอบ) — ชิ้นที่ติดด้วยตะเข็บบางช่วงไปอยู่ในภาพเย็บติด (lib/pattern-sewn)
  *
  *   ผลลัพธ์อยู่ในกรอบของตัวหน้า: x ขวา · y ขึ้น (ก้น = 0) · กึ่งกลางซ้ายขวา = 0 · ตัวหน้าอยู่ z = +ลึก/2 ตัวหลัง z = −ลึก/2 (กลับด้าน)
  *
@@ -18,7 +20,7 @@
  * คู่มือ: docs/pattern-studio.md
  */
 import { flattenShape, shapeArea, shapeBox, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
-import { checkSeam, isPartialSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { checkSeam, isInnerSide, isPartialSeam, isRangedSide, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ — handle: ปลายหู 2 จุดบนแผ่น (พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่น · y ลง) · behind: แผ่นปิดหลังรูแรกของแผ่น */
 export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
@@ -59,7 +61,7 @@ function lineCentroid(lines: Pt[][]): { c: Pt; len: number } {
   return { c: L ? [sx / L, sy / L] : [0, 0], len: L };
 }
 const signed = (P: Pt[]) => { let s = 0; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
-const sameSide = (a: SeamSide, b: SeamSide) => a.pid === b.pid && a.from === b.from && a.count === b.count && a.n === b.n;
+const sameSide = (a: SeamSide, b: SeamSide) => a.pid === b.pid && a.from === b.from && a.count === b.count && a.n === b.n && (a.t0 ?? -1) === (b.t0 ?? -1) && (a.t1 ?? -1) === (b.t1 ?? -1);
 
 /** กรอบของแผ่น: พิกัดกระดาน (y ลง) → พิกัดประกอบ (y ขึ้น · ปากหันขึ้น · กึ่งกลาง x = 0 · ก้น y = 0) */
 function frameOf(shape: Shape, swept: Pt[][]): { map: (p: Pt) => Pt; unmap: (p: Pt) => Pt; outline: Pt[]; w: number; h: number; ccw: boolean } {
@@ -91,7 +93,8 @@ export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Atta
   const pieces = allPieces.filter((p) => (p.layer === "lining") === (layer === "lining"));
   if (!pieces.length) return { ok: false, reason: "no-pieces", loose: [] };
   const inLayer = new Set(pieces.map((p) => p.pid));
-  const seams = allSeams.filter((s) => !isPartialSeam(s) && inLayer.has(s.a.pid) && inLayer.has(s.b.pid));
+  const structural = (s: Seam) => !isPartialSeam(s) || (!!s.group && !isInnerSide(s.a) && !isInnerSide(s.b));   // เต็มขอบ หรือ ชุด 1 ขอบกับหลายชิ้น
+  const seams = allSeams.filter((s) => structural(s) && inLayer.has(s.a.pid) && inLayer.has(s.b.pid));
   const byPid = new Map(pieces.map((p) => [p.pid, p]));
   const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
   const all = pieces.map((p) => p.pid);
@@ -112,7 +115,8 @@ export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Atta
     const L = links.get(p.pid) ?? [];
     for (const i of [0, 1]) {
       const j = i + 2;
-      const li = L.filter((l) => l.mine.count === 1 && l.mine.from === i), lj = L.filter((l) => l.mine.count === 1 && l.mine.from === j);
+      const whole = (l: Link, k: number) => l.mine.count === 1 && l.mine.from === k && !isRangedSide(l.mine);   // ด้านของชิ้นคั่นกลางต้องเป็นขอบเต็ม
+      const li = L.filter((l) => whole(l, i)), lj = L.filter((l) => whole(l, j));
       if (!li.length || !lj.length) continue;
       const ends = [...li, ...lj].map((l) => l.other), endPids = [...new Set(ends.map((e) => e.pid))].sort();
       if (endPids.includes(p.pid) || endPids.length > 2) continue;

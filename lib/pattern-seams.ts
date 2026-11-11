@@ -11,6 +11,9 @@
  *   เย็บบางช่วง (2026-11-11): ด้านมี t0/t1 = เย็บแค่ช่วงนั้นของด้าน (ซม. จากจุดเริ่มของด้าน ตามแนวเส้น) → ขอบเดียวมีได้หลายตะเข็บ (ห้ามทับกัน)
  *     ชิ้นถูกแก้จนขอบสั้นกว่าช่วง → ตัดช่วงให้อยู่บนขอบ · ไม่เหลือช่วงเลย = "ต้องเย็บใหม่"
  *     ease = ตั้งใจให้สองด้านยาวต่างกัน (รูด / ย่น) → ไม่นับเป็นข้อผิดพลาด
+ *   เย็บ 1 ขอบกับหลายชิ้น (2026-11-11): ตะเข็บหลายแนวที่ group เดียวกัน = ขอบยาว 1 ขอบถูกแบ่งเป็นช่วงต่อกัน แต่ละช่วงเย็บกับขอบของชิ้นหนึ่ง
+ *     ข้อมูลยังเป็นตะเข็บบางช่วงธรรมดา (ย้าย/ยืดหดทีละแนวได้) — group บอกแค่ว่า "ตั้งใจให้เป็นโครงของกระเป๋า" → ตัวประกอบทรงใช้ตะเข็บชุดนี้หาชิ้นคั่นกลางได้
+ *     ชิ้นที่ตั้งจำนวนตัด 2 ขึ้นไป (เช่น ตัวหน้า/ตัวหลังชิ้นเดียวกัน) ช่วงเดียวกันถูกเย็บซ้ำได้เท่าจำนวนตัด (rangeFree cap)
  *   เย็บกับเส้นในชิ้น (2026-11-11): ด้านมี inner = รหัสเส้นในของชิ้นนั้น → เส้นของด้าน = เส้นในทั้งเส้น (ไม่ใช้ from/count/n)
  *     ฟังก์ชันที่รับ "รูปชิ้น" รับได้ทั้งรูป (Shape) และ { shape, inner } — ต้องส่งแบบหลังถ้าอยากให้ด้านที่อยู่บนเส้นในหาเส้นเจอ
  *     เส้นในถูกลบ = ตะเข็บนั้น "ต้องเย็บใหม่" · ตะเข็บที่มีด้านบนเส้นใน นับเป็นตะเข็บบางช่วง (ไม่ใช้หาทรงกระเป๋า)
@@ -29,6 +32,8 @@ const innerOf = (p: SeamPiece, id: string): InnerLine | null => ("k" in p ? null
 /** ด้านที่อยู่บนเส้นในชิ้น (ไม่ใช่ขอบ) */
 export const isInnerSide = (side: SeamSide): boolean => typeof side.inner === "string" && side.inner.length > 0;
 const hasRange = (side: SeamSide): boolean => side.t0 != null && side.t1 != null;
+/** ด้านที่เย็บแค่ช่วงของขอบ (มี t0/t1) — ไม่รวมด้านบนเส้นใน */
+export const isRangedSide = hasRange;
 /** วิธีเย็บของตะเข็บ (ค่ารายตะเข็บแบบ CLO · 2026-11-10) — ตอนนี้เป็นข้อมูลที่จดไว้ + ออกในตารางตะเข็บของใบพิมพ์ ยังไม่มีผลกับภาพ 3D */
 export type SeamKind = "turned" | "lapped" | "bound";
 export const SEAM_KINDS: { key: SeamKind; th: string; en: string; hintTh: string; hintEn: string }[] = [
@@ -40,7 +45,7 @@ export const SEAM_KINDS: { key: SeamKind; th: string; en: string; hintTh: string
 export type SeamTop = { off: number; rows: 1 | 2; spi: number };
 export const SEAM_TOP_DEFAULT: SeamTop = { off: 2, rows: 1, spi: 8 };
 /** rev = ด้าน b เย็บกลับทิศ (จุดเริ่มของ b ไปชนจุดจบของ a) — ตอนนี้ใช้แสดงขีดบอกทิศบนกระดาน ยังไม่มีผลกับการประกอบ 3D */
-export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean; name?: string; kind?: SeamKind; top?: SeamTop; ease?: boolean };
+export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean; name?: string; kind?: SeamKind; top?: SeamTop; ease?: boolean; /** รหัสชุด "1 ขอบกับหลายชิ้น" — ตะเข็บที่ group เดียวกันแบ่งขอบเดียวกันเป็นช่วงต่อกัน */ group?: string };
 /** ค่ารายขอบที่ไม่ใช่เผื่อเย็บ: กุ้นขอบ · เดินด้ายทับห่างจากขอบ (มม.) — เก็บเป็นรายการ 1 ค่าต่อขอบ (ครบทุกขอบ) */
 export type EdgeMeta = { bind?: boolean; top?: number };
 export type SeamStatus = "ok" | "mismatch" | "broken";
@@ -149,8 +154,8 @@ export function edgeBusy(seams: Seam[], pid: string, i: number, n: number, edgeL
   }
   return out;
 }
-/** ช่วง a–b ไม่ทับกับช่วงที่ถูกเย็บไปแล้ว (ชนปลายกันพอดีได้) */
-export const rangeFree = (busy: [number, number][], a: number, b: number): boolean => busy.every(([p, q]) => b <= p + 0.01 || a >= q - 0.01);
+/** ช่วง a–b ยังเย็บได้: ทับกับช่วงที่ถูกเย็บไปแล้วน้อยกว่า cap แนว (ชนปลายกันพอดีไม่นับ) — cap = จำนวนตัดของชิ้น (ปกติ 1 = ห้ามทับเลย) */
+export const rangeFree = (busy: [number, number][], a: number, b: number, cap = 1): boolean => busy.filter(([p, q]) => !(b <= p + 0.01 || a >= q - 0.01)).length < Math.max(1, cap);
 /** ด้าน 1 ขอบที่เย็บช่วง a–b ของขอบยาว len — คลุมทั้งขอบ = ด้านเต็มขอบ (ไม่มี t0/t1) */
 export function rangedSide(pid: string, i: number, n: number, a: number, b: number, len: number): SeamSide {
   const t0 = Math.round(Math.max(0, a) * 100) / 100, t1 = Math.round(Math.min(len, b) * 100) / 100;
@@ -266,6 +271,7 @@ export function cleanSeams(raw: unknown, pids: Set<string>): Seam[] {
     const seam: Seam = { id, a, b };
     if (r.rev === true) seam.rev = true;
     if (r.ease === true) seam.ease = true;
+    if (typeof r.group === "string" && /^[\w-]{1,40}$/.test(r.group)) seam.group = r.group;
     const name = typeof r.name === "string" ? r.name.trim().slice(0, 60) : "";
     if (name) seam.name = name;
     if (SEAM_KINDS.some((k) => k.key === r.kind)) seam.kind = r.kind as SeamKind;
