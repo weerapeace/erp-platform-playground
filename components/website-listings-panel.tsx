@@ -5,6 +5,7 @@
  * --------------------------------------------------------------------------
  * - ตัวกรองบน: ทั้งหมด · ขึ้นเว็บ · ซ่อนอยู่ · แนะนำ · ⚠️ ต้องแก้ (นับจากกฎกลาง lib/website-listing-health)
  * - 📄 แบ่งหน้า (2026-11-10) ด้วย Pager ของกลาง 25/50/100/200 ต่อหน้า (จำต่อคน) — ตัวกรอง/ตัวเลข/พิมพ์ยังคิดทุกรุ่น · ติ๊กจำข้ามหน้า · ลากเรียงได้ในหน้าเดียวกัน · เปิด/ซ่อนเกิน 20 รุ่นถามก่อน (100+ พิมพ์ CONFIRM)
+ * - 🙈 สวิตช์ "ซ่อนรายการที่ไม่ขึ้นเว็บ" (2026-11-11 · ค่าเริ่มเปิด · จำต่อคน useViewPref website_listings_hide_off) — ไม่โชว์/ไม่นับในชิปต้องแก้-รูป-แนะนำ/ไม่อยู่ในเช็กลิสต์ · ชิป "ซ่อนอยู่" ยังดูได้
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด/🗂 จัดหมวด (จำต่อคนด้วย useViewPref)
  * - 🗂 จัดหมวด = components/website-category-sorter (ขั้น 1 ใส่หมวดหลักจากหมวด ERP · ขั้น 2 กระดานจัดหมวดย่อย) — ทั้งร้าน ไม่สนตัวกรอง
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
@@ -27,6 +28,7 @@ import { useToast } from "@/components/toast";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { Pager } from "@/components/pager";
+import { ToggleSwitch } from "@/components/toggle-switch";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { SortButton, sortRows, type SortState } from "@/components/sort-th";
 import { CopyButton } from "@/components/copy-button";
@@ -119,6 +121,8 @@ type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit" | "noimg" | "parti
 const VIEWS = ["list", "grid", "sort"] as const;
 /** 📄 จำนวนต่อหน้า (จำต่อคนด้วย useViewPref) */
 const PAGE_SIZES = ["25", "50", "100", "200"] as const;
+/** 🙈 ซ่อนรายการที่ไม่ขึ้นเว็บ (จำต่อคนด้วย useViewPref · ค่าเริ่ม on) */
+const HIDE_OFF = ["on", "off"] as const;
 /** เปิด/ซ่อนทีละมากเกินนี้ = ถามก่อน · ตั้งแต่ BULK_TYPED ขึ้นไป = ต้องพิมพ์ยืนยัน (กฎ Bulk Edit Safety) */
 const BULK_CONFIRM = 20;
 const BULK_TYPED = 100;
@@ -339,23 +343,30 @@ export function WebsiteListingsPanel({
       ),
     [listings, issuesById]
   );
+  // 🙈 ซ่อนรายการที่ไม่ขึ้นเว็บ (เจ้าของ 2026-11-11 · ค่าเริ่ม = ซ่อน · จำต่อคน) — "อาจไม่ขายแล้ว ไม่ต้องแก้"
+  //    ไม่โชว์ในรายการ · ไม่นับในชิป แนะนำ/ต้องแก้/รูป/วัดช่อง · ไม่อยู่ในเช็กลิสต์ที่พิมพ์ · ชิป "ซ่อนอยู่" ยังกดดู/เปิดกลับได้
+  const hideOffPref = useViewPref("website_listings_hide_off", HIDE_OFF, "on");
+  const hideOff = hideOffPref.view === "on";
+  const setHideOff = (v: boolean) => { const x = v ? "on" : "off"; hideOffPref.setView(x); void hideOffPref.saveDefault(x); };
+  const live = useMemo(() => (hideOff ? listings.filter((l) => l.published) : listings), [listings, hideOff]);
   const counts = useMemo(
     () => ({
       all: listings.length,
       pub: listings.filter((l) => l.published).length,
       hide: listings.filter((l) => !l.published).length,
-      feat: listings.filter((l) => l.featured).length,
-      fix: listings.filter((l) => (issuesById.get(l.parentId) ?? []).length > 0).length,
+      feat: live.filter((l) => l.featured).length,
+      fix: live.filter((l) => (issuesById.get(l.parentId) ?? []).length > 0).length,
       // 📐 รายงาน "ยังไม่วัดช่องใส่ของ" (ร้านเปิดเช็คขนาด · รุ่นที่ไม่ใช่กระเป๋ากด "ไม่มีช่องใส่ของ" แล้วไม่นับ)
-      fit: listings.filter((l) => l.display?.compartmentsMissing).length,
-      noimg: listings.filter((l) => imgById.get(l.parentId) === "none").length,
-      partimg: listings.filter((l) => imgById.get(l.parentId) === "part").length,
+      fit: live.filter((l) => l.display?.compartmentsMissing).length,
+      noimg: live.filter((l) => imgById.get(l.parentId) === "none").length,
+      partimg: live.filter((l) => imgById.get(l.parentId) === "part").length,
     }),
-    [listings, issuesById, imgById]
+    [listings, live, issuesById, imgById]
   );
   const shown = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const rows = listings.filter((l) => {
+    // ชิป "ซ่อนอยู่" = ดูของที่ซ่อนได้เสมอ (เปิดกลับได้) · ตัวกรองอื่นใช้รายการที่ไม่ซ่อน
+    const rows = (filter === "hide" ? listings : live).filter((l) => {
       if (filter === "pub" && !l.published) return false;
       if (filter === "hide" && l.published) return false;
       if (filter === "feat" && !l.featured) return false;
@@ -368,7 +379,7 @@ export function WebsiteListingsPanel({
       return true;
     });
     return sortRows(rows, sort, sortVal);
-  }, [listings, filter, q, cat, sort, issuesById, imgById]);
+  }, [listings, live, filter, q, cat, sort, issuesById, imgById]);
   // 📄 แบ่งหน้า (เจ้าของ 2026-11-10 "ทำเป็นหน้าๆ จะได้โหลดไม่นาน") — วาดเฉพาะหน้าที่ดู (รูป/แถวน้อยลง) ด้วยของกลาง Pager
   //    ตัวกรอง/ค้นหา/ตัวเลข/พิมพ์เช็กลิสต์/ลงรูปตามตัวกรอง ยังคิดจากทุกรุ่น · ติ๊กเลือกจำข้ามหน้า (sel = รหัสรุ่น) · จำนวนต่อหน้าจำต่อคน
   const pageSizePref = useViewPref("website_listings_page_size", PAGE_SIZES, "50");
@@ -714,6 +725,8 @@ export function WebsiteListingsPanel({
               </option>
             ))}
           </select>
+          <ToggleSwitch on={hideOff} onChange={setHideOff} size="sm" label={<span className="text-xs text-slate-600 whitespace-nowrap">ซ่อนรายการที่ไม่ขึ้นเว็บ</span>}
+            title="ไม่โชว์รุ่นที่ปิดจากเว็บ และไม่นับในต้องแก้/เช็กลิสต์ (จำค่าไว้ให้คุณ)" />
           </>}
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
             {VIEWS.map((v) => (
@@ -731,6 +744,15 @@ export function WebsiteListingsPanel({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* 🙈 บอกเสมอว่าซ่อนอะไรไว้ (กันคนอื่นงงว่าสินค้าหายไปไหน) */}
+      {hideOff && counts.hide > 0 && filter !== "hide" && view !== "sort" && !loading && (
+        <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+          <Icon value="i:eye-off" /> ไม่โชว์ {counts.hide} รายการที่ปิดจากเว็บ — ไม่นับใน “ต้องแก้” และไม่อยู่ในเช็กลิสต์
+          <button type="button" onClick={() => setFilter("hide")} className="underline hover:text-slate-900">ดูรายการที่ซ่อน</button>
+          <button type="button" onClick={() => setHideOff(false)} className="underline hover:text-slate-900">โชว์ทั้งหมด</button>
         </div>
       )}
 
