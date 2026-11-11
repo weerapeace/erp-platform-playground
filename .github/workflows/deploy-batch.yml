@@ -1,14 +1,13 @@
-name: Deploy Batch (ขึ้นเว็บเป็นรอบ)
+name: Deploy Now (ขึ้นเว็บทันที)
 
-# เจ้าของเลือก 2026-11-10: "10 นาที แต่มีปุ่มขึ้นทันทีด้วย" — ลดค่า build ของ Vercel (เดิม build ทุก push ~43 ครั้ง/วัน)
-# ทุก session ยัง push ลง feat/host-portable เหมือนเดิม (Vercel ไม่ build สาขานี้แล้ว — vercel.json git.deploymentEnabled)
-# ไฟล์นี้: ทุก ~10 นาที ถ้า feat/host-portable มีงานใหม่ → เลื่อนสาขา prod ไปที่เดียวกัน → Vercel build prod 1 ครั้ง (= เว็บจริง)
-# ขึ้นทันที: กด "Run workflow" หน้า Actions หรือ `gh workflow run deploy-batch.yml` หรือปุ่มในแอป
-# (2026-11-11: แก้ไฟล์ให้ GitHub ลงทะเบียนตั้งเวลาใหม่หลังปิด-เปิด workflow)
-# ⚠️ schedule / workflow_dispatch ทำงานจากไฟล์บนสาขา default (main) เท่านั้น — แก้ไฟล์นี้ที่ main (ใส่ [skip ci] กัน deploy สำรอง CF)
+# ปุ่ม "ขึ้นเว็บทันที" — เลื่อนสาขา prod ไปงานล่าสุดของ feat/host-portable เดี๋ยวนี้ → Vercel build prod 1 ครั้ง (= เว็บจริง)
+# กดจาก: หน้า /admin/deploy · หน้า Actions "Run workflow" · `gh workflow run deploy-batch.yml` (ใช้เมื่อเจ้าของขอ/งานด่วนเท่านั้น)
+# รอบอัตโนมัติ ~10 นาที = deploy-round.yml (บน feat/host-portable · เด้งทุก push) — ไม่ใช่ไฟล์นี้
+# 2026-11-11: เอา schedule ออกแล้ว (เจ้าของเลือก) — ตั้งเวลาของ GitHub ไม่เคยยิงสักครั้ง (ไฟล์นี้ลงด้วย [skip ci] ทุกครั้ง)
+#   ถ้าปล่อยไว้ วันที่ main ได้ commit ปกติ มันอาจตื่นมายิงซ้อน deploy-round → build ถี่ขึ้นเปล่า ๆ · ห้ามใส่ schedule กลับ
+# ⚠️ workflow_dispatch ทำงานจากไฟล์บนสาขา default (main) เท่านั้น — แก้ไฟล์นี้ที่ main (ใส่ [skip ci] กัน CI/deploy สำรอง)
+# docs/deploy-batch.md (บน feat/host-portable)
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       reason:
