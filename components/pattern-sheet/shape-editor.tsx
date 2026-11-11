@@ -120,15 +120,15 @@ const isMajor = (v: number, major: number) => Math.abs(v / major - Math.round(v 
 const hasH = (n: PNode | undefined, w: "i" | "o") => !!n && (w === "i" ? !!(n.ix || n.iy) : !!(n.ox || n.oy));
 
 /** ช่องตัวเลขที่พิมพ์ได้ลื่น (ไม่เด้งค่ากลับระหว่างพิมพ์) — เปลี่ยนค่าจากข้างนอกเมื่อไม่ได้โฟกัส */
-function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w-20" }: { value: number; onCommit: (v: number) => void; min?: number; max?: number; label: string; step?: number; className?: string }) {
+function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w-20", disabled = false }: { value: number; onCommit: (v: number) => void; min?: number; max?: number; label: string; step?: number; className?: string; disabled?: boolean }) {
   const [txt, setTxt] = useState(r2s(value));
   const [focus, setFocus] = useState(false);
   useEffect(() => { if (!focus) setTxt(r2s(value)); }, [value, focus]);
   return (
-    <input type="number" step={step} min={min} max={max} value={txt} aria-label={label}
+    <input type="number" step={step} min={min} max={max} value={txt} aria-label={label} disabled={disabled}
       onFocus={() => setFocus(true)} onBlur={() => { setFocus(false); setTxt(r2s(value)); }}
       onChange={(e) => { setTxt(e.target.value); const v = Number(e.target.value); if (e.target.value.trim() !== "" && Number.isFinite(v) && (min == null || v >= min) && (max == null || v <= max)) onCommit(v); }}
-      className={`h-8 rounded-md border border-slate-200 px-1.5 text-right text-sm tabular-nums ${className}`} />
+      className={`h-8 rounded-md border border-slate-200 px-1.5 text-right text-sm tabular-nums disabled:bg-slate-100 disabled:text-slate-400 ${className}`} />
   );
 }
 
@@ -2196,9 +2196,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
               <div>
                 <div className="mb-1 font-medium text-slate-600">{t("ขนาดสำเร็จ (เส้นประ)", "Finished size (dashed)")}</div>
+                {selPiece.link && <div className="mb-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800" data-link-note>{t(`ชิ้นนี้ผูกรูปกับ ${pieceNo(selPiece.link.to)} — ขนาด รูปทรง หมุน ย่อขยาย ต้องแก้ที่ชิ้นต้นแบบ (แก้ที่ชิ้นนี้ค่าจะกลับตามต้นแบบ) · ถ้าต้องการให้ต่างกัน กด เลิกผูก ที่หัวข้อ ชิ้นคู่ผูกกัน`, `This piece follows ${pieceNo(selPiece.link.to)} — change size, shape, rotation or scale on the master piece (changes here snap back) · to make it different, press Unlink under Linked pieces`)}</div>}
                 <div className="grid grid-cols-[auto_auto_auto_auto] items-center gap-x-2 gap-y-1.5 text-slate-500">
-                  <span>{t("กว้าง", "W")}</span><NumField value={selGeo.finished.w} min={0.1} label={t("กว้าง ซม.", "Width cm")} onCommit={(v) => setSelBox({ w: v }, `w-${selPiece.id}`)} className="w-16" />
-                  <span>{t("สูง", "H")}</span><NumField value={selGeo.finished.h} min={0.1} label={t("สูง ซม.", "Height cm")} onCommit={(v) => setSelBox({ h: v }, `h-${selPiece.id}`)} className="w-16" />
+                  <span>{t("กว้าง", "W")}</span><NumField value={selGeo.finished.w} min={0.1} label={t("กว้าง ซม.", "Width cm")} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ w: v }, `w-${selPiece.id}`)} className="w-16" />
+                  <span>{t("สูง", "H")}</span><NumField value={selGeo.finished.h} min={0.1} label={t("สูง ซม.", "Height cm")} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ h: v }, `h-${selPiece.id}`)} className="w-16" />
                   <span>X</span><NumField value={selGeo.finished.x} label="X" onCommit={(v) => setSelBox({ x: v }, `x-${selPiece.id}`)} className="w-16" />
                   <span>Y</span><NumField value={selGeo.finished.y} label="Y" onCommit={(v) => setSelBox({ y: v }, `y-${selPiece.id}`)} className="w-16" />
                 </div>
@@ -2310,6 +2311,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     </div>
                   );
                 })()}
+                {seams && !readonly && (
+                  <div className="mt-2 border-t border-slate-100 pt-2">
+                    <button type="button" data-edge-values onClick={() => { changeTool("sewedit"); setMsg({ tone: "ok", text: t("กดขอบของชิ้นที่ต้องการบนกระดาน แล้วตั้งค่าในแผงขวา: ติดซิป · กุ้นขอบ · พับเข้าใน · เผื่อของขอบ · เดินด้ายทับ", "Click the edge you want on the board, then set it in the right panel: zip · binding · fold · allowance · topstitch") }); }}
+                      title={t("ค่าของขอบอยู่ในเครื่องมือ แก้ตะเข็บ (B): กดขอบแล้วตั้งค่าได้", "Edge settings live in the Edit sewing tool (B): click an edge to set it")}
+                      className="inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50"><Icon value="i:needle" className="text-[13px]" />{t("ตั้งค่าขอบ: ติดซิป · กุ๊น · พับ · เผื่อรายขอบ", "Edge settings: zip · binding · fold · allowance")}</button>
+                  </div>
+                )}
                 {innerLines && (
                   <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
                     <div className="flex items-center gap-1.5"><span className="font-medium text-slate-600">{t(`เส้นในชิ้น (${(selPiece.inner ?? []).length})`, `Inner lines (${(selPiece.inner ?? []).length})`)}</span>

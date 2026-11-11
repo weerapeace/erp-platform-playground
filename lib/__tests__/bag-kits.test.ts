@@ -107,6 +107,7 @@ describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง 
     expect(za1).toBeCloseTo(D / 2, 1); expect(za0).toBeCloseTo(0, 1);                         // แถบหน้า: จากแผ่นหน้าถึงกึ่งกลาง
     expect(zb0).toBeCloseTo(-D / 2, 1); expect(zb1).toBeCloseTo(0, 1);                        // แถบหลัง: จากแผ่นหลังถึงกึ่งกลาง
     expect(sc.finishes.map((f) => [f.pid, f.kind])).toEqual([]);                             // ซิปอยู่บนแถบ (ชิ้นพับ) ยังไม่วาดเส้นซิปในภาพ
+    expect([a.fold, b.fold, sc.bodyH]).toEqual([true, true, H]);                             // แถบซิป = ชิ้นปิดปาก (ไม่ใช่ชิ้นเสริมเย็บบางช่วง)
   });
 
   it("ภาพ 3 มิติ ทรงฝาปิด: ฝาเย็บกับปากแผ่นหลัง ข้ามปากแล้วพับลงปิดด้านหน้า · ซับในฝาประกบไม่วาดแยก", () => {
@@ -173,7 +174,7 @@ describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง 
 describe("แม่แบบชุดสอง: ทรงถัง · ดัฟเฟิล · เป้ · ก้นกล่อง · หูรูด · กระเป๋าสตางค์", () => {
   const xzR = (pos: number[]) => { let r = 0; for (let i = 0; i < pos.length; i += 3) r = Math.max(r, Math.hypot(pos[i], pos[i + 2])); return r; };
 
-  it("ทรงถัง: ระบบไม่เห็นโครงหน้า/หลัง → ก้นวางราบ ตัวถังม้วนขึ้นรอบก้นสูงเท่าความสูง · ซับในซ้อนข้างในแบบเดียวกัน · สายสะพายยังไม่มีจุดติด (บอกว่ายังไม่ได้เย็บ)", () => {
+  it("ทรงถัง: ระบบไม่เห็นโครงหน้า/หลัง → ก้นวางราบ ตัวถังม้วนขึ้นรอบก้นสูงเท่าความสูง · ซับในซ้อนข้างในแบบเดียวกัน · สายสะพายพาดข้ามปากถัง", () => {
     const B = board(kitOf("bucket")), sc = buildSewn(B.asm, B.seams, B.attaches);
     expect(assemble(B.asm, B.seams, B.attaches).ok).toBe(false);
     expect(sc.asm).toBeNull();
@@ -184,8 +185,12 @@ describe("แม่แบบชุดสอง: ทรงถัง · ดัฟ�
     expect(wy0).toBeCloseTo(0.05, 1); expect(wy1).toBeCloseTo(24.05, 1);                       // ตัวถังสูงเท่าความสูง
     expect(xzR(wall.pos)).toBeCloseTo(9, 0);                                                   // โค้งรอบก้นรัศมี 9
     expect(xzR(lw.pos)).toBeLessThan(xzR(wall.pos));                                           // ซับในอยู่ข้างใน
-    expect(sc.notes).toEqual([{ pid: "strap", name: "สายสะพาย (พับครึ่ง)", why: "unsewn" }]);
-    expect(sc.joined).toBe(4);
+    expect(sc.notes).toEqual([]);
+    const st = sc.parts.find((p) => p.pid === "strap")!;
+    expect(st.kind).toBe("loop");
+    expect(yRange(st.pos)[0]).toBeCloseTo(22.05, 1);                                          // โคนสายต่ำจากปากถัง 2 ซม.
+    expect(yRange(st.pos)[1]).toBeGreaterThan(24.05);                                          // โค้งขึ้นเหนือปากถัง
+    expect([sc.joined, sc.bodyH]).toEqual([5, 24]);
     expect(kitOf("bucket").pieces.some((q) => q.key === "lpocket")).toBe(false);
   });
 
@@ -230,5 +235,16 @@ describe("แม่แบบชุดสอง: ทรงถัง · ดัฟ�
     const sc = buildSewn(B.asm, B.seams, B.attaches);
     expect([sc.parts.find((p) => p.pid === "slotL")?.kind, sc.parts.find((p) => p.pid === "slotR")?.kind, sc.notes.length]).toEqual(["patch", "patch", 0]);
     expect(kit.pieces.find((q) => q.key === "inner")!.inner!.map((l) => l.kind)).toEqual(["fold", "sew", "sew"]);
+  });
+});
+
+describe("ของบนชิ้นที่ตัด 2 ชิ้น ขึ้นในภาพทั้งแผ่นหน้าและแผ่นหลัง", () => {
+  it("ซองซิป: ซิปที่ขอบปากขึ้นทั้งสองแผ่น (แผ่นหลังมีธง back) · อะไหล่บนชิ้นก็ขึ้นสองแผ่น", () => {
+    const kit = kitOf("pouch", { lining: false, pocket: false });
+    kit.pieces[0].inner = [{ id: "h1", kind: "hw", hw: "magnet", pts: [[9, 3], [10.8, 3]] }];
+    const B = board(kit), sc = buildSewn(B.asm, B.seams, B.attaches), D = sc.asm!.depth;
+    expect(sc.finishes.map((f) => [f.kind, f.back ?? false, Math.sign(f.n[2])])).toEqual([["zip", false, 1], ["zip", true, -1]]);
+    expect(sc.finishes[1].pts.every((q) => q[2] < -D / 2)).toBe(true);                       // อยู่ด้านนอกของแผ่นหลัง
+    expect(sc.marks.filter((m) => m.kind === "hw").map((m) => [m.hw, m.back ?? false])).toEqual([["magnet", false], ["magnet", true]]);
   });
 });

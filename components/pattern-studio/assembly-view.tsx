@@ -68,6 +68,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const onLining = (on?: string) => !!LA && !!on && (on === LA.front || on === LA.back);
   const extras = useMemo(() => scene.parts.filter((p) => isSewnExtra(p) && !onLining(p.on)).map((p) => p.pid), [scene]);   // eslint-disable-line react-hooks/exhaustive-deps
   const liningPids = useMemo(() => (LA ? [...new Set([LA.front, LA.back, ...LA.bridges, ...scene.parts.filter((p) => isSewnExtra(p) && onLining(p.on)).map((p) => p.pid)])] : []), [scene]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const closers = useMemo(() => new Set(scene.parts.filter((p) => p.fold).map((p) => p.pid)), [scene]);   // ชิ้นปิดปาก / ฝาปิด (เย็บเต็มขอบ)
   const [cut, setCut] = useState<Pattern3DCut>("none");
   const [explode, setExplode] = useState(0);
   // จำลองวัสดุทิ้งตัว (ทดลอง): ตาข่ายสร้างจากผลประกอบที่บันทึกจุดติดแล้ว (ไม่รวมหูที่กำลังตั้งค่า) · ค่าความอยู่ทรง/ของข้างใน ไม่บันทึก
@@ -156,11 +157,15 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const stepText = (key: AsmStepKey, pids: string[]) => key === "behind"
     ? t(`เย็บ ${names(pids)} เข้าด้านหลังช่องของ ${nameOf(A.front)}`, `Sew ${names(pids)} behind the window of ${nameOf(A.front)}`)
     : key === "handle"
-      ? t(`เย็บโคน ${names(pids)} เข้ากับแผ่นหน้าและแผ่นหลัง ทำตอนชิ้นยังแบนอยู่เพราะเย็บง่ายที่สุด`, `Sew the ends of ${names(pids)} onto the front and back while they are still flat`)
+      ? (A.handles.filter((h) => pids.includes(h.pid)).every((h) => h.side === 0)
+        ? t(`เย็บโคน ${names(pids)} เข้ากับชิ้นข้างซ้ายและขวา (สายพาดข้างถึงข้าง) ทำตอนชิ้นข้างยังแบนอยู่`, `Sew the ends of ${names(pids)} onto the left and right sides (side-to-side strap) while the gusset is still flat`)
+        : t(`เย็บโคน ${names(pids)} เข้ากับแผ่นหน้าและแผ่นหลัง ทำตอนชิ้นยังแบนอยู่เพราะเย็บง่ายที่สุด`, `Sew the ends of ${names(pids)} onto the front and back while they are still flat`))
       : key === "lining"
         ? t(`ใส่ซับใน (${names(pids)}) เข้าไปในตัวกระเป๋า แล้วเย็บรอบปาก — ช่องใส่ของและช่องซิปต้องเย็บติดซับในให้เสร็จก่อนขั้นนี้`, `Drop the lining (${names(pids)}) into the bag and sew around the mouth — pockets must already be sewn to the lining`)
+      : key === "extra" && pids.every((p) => closers.has(p))
+        ? t(`เย็บ ${names(pids)} เข้ากับขอบปากของแผ่นหน้า/แผ่นหลัง ตลอดทั้งขอบ (ชิ้นปิดปาก เช่น แถบซิป ฝาปิด) ทำตอนแผ่นยังแบนอยู่`, `Sew ${names(pids)} along the whole mouth edge of the front/back panel (closing pieces such as zip strips or a flap) while the panel is still flat`)
       : key === "extra"
-        ? t(`เย็บ ${names(pids)} เข้ากับตำแหน่งที่กำหนดไว้บนแผ่น (ตะเข็บบางช่วง) ทำตอนแผ่นยังแบนอยู่`, `Sew ${names(pids)} at their marked positions on the panel (partial seams) while the panel is still flat`)
+        ? t(`เย็บ ${names(pids)} เข้ากับตำแหน่งที่กำหนดไว้บนแผ่น${pids.some((p) => closers.has(p)) ? " (ชิ้นปิดปากเย็บเต็มขอบปาก · ชิ้นอื่นเย็บบางช่วง)" : " (ตะเข็บบางช่วง)"} ทำตอนแผ่นยังแบนอยู่`, `Sew ${names(pids)} at their marked positions on the panel (partial seams) while the panel is still flat`)
       : key === "gusset"
         ? t(`เย็บ ${names(pids)} เข้ากับขอบของ ${nameOf(A.front)}`, `Sew ${names(pids)} to the edge of ${nameOf(A.front)}`)
         : A.kind === "pouch"
@@ -200,6 +205,9 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
           {simOn && simInfo && <span className="text-xs tabular-nums text-slate-600">{simInfo.done ? t("นิ่งแล้ว", "Settled") : t("กำลังทิ้งตัว…", "Settling…")} · {t(`สูง ${simInfo.h.toFixed(1)} จาก ${A.height.toFixed(1)} ซม.`, `height ${simInfo.h.toFixed(1)} of ${A.height.toFixed(1)} cm`)}</span>}
           {simOn && !sim && <span className="text-xs text-red-600">{t("จำลองทรงนี้ไม่ได้", "This shape cannot be simulated")}</span>}
         </div>
+        {simOn && sim && (extras.length > 0 || liningPids.length > 0 || scene.marks.length > 0 || scene.finishes.length > 0) && (
+          <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800" data-sim-note>{t("โหมดทิ้งตัวจำลองเฉพาะตัวกระเป๋า (แผ่นหน้า แผ่นหลัง ชิ้นคั่นกลาง หู) — แถบซิป ฝาปิด ชิ้นเสริม ซับใน ซิป และอะไหล่ ไม่อยู่ในภาพนี้ จึงเห็นปากกระเป๋าเปิด", "Drape mode simulates the body only (front, back, gusset, handles) — zip strips, flaps, added pieces, lining, zips and hardware are not in this view, so the mouth looks open")}</p>
+        )}
         {simOn && sim && (
           <div className="grid gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs sm:grid-cols-2">
             <RangeInput label={t("ความอยู่ทรงกลาง — ใช้กับชิ้นที่ยังไม่ได้ตั้งค่าวัสดุ (0 = ผ้านิ่ม · 1 = แข็ง)", "Default stiffness — for pieces without material values (0 = soft · 1 = rigid)")} min={0} max={1} step={0.05} value={stiff} onChange={setStiff} />
@@ -232,7 +240,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
       </div>
 
       <aside className={`min-w-0 text-sm ${compact ? "flex flex-col gap-3" : "space-y-3"}`}>
-        <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-3">
+        <div className={`space-y-1.5 rounded-lg border border-slate-200 bg-white p-3 ${compact ? "max-h-64 overflow-y-auto" : ""}`}>
           <div className="text-xs font-medium text-slate-500">{t("โครงสร้างที่ระบบอ่านได้", "Structure found")}</div>
           <div className="font-medium text-slate-800">{A.kind === "wrap" ? t("ตัวหน้า + ตัวหลัง มีชิ้นคั่นกลางพันรอบ", "Front + back panels joined by a gusset") : t("ซองแบน: สองแผ่นเย็บขอบติดกัน", "Flat pouch: two panels sewn edge to edge")}</div>
           <div className="text-xs tabular-nums text-slate-600">{t(`กว้าง ${f1(A.width)} · สูง ${f1(A.height)} · ลึก ${f1(A.depth)} ซม.`, `W ${f1(A.width)} · H ${f1(A.height)} · D ${f1(A.depth)} cm`)}</div>
@@ -244,7 +252,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
                   <button type="button" onClick={() => onAttachesChange(attaches.filter((a) => a.pid !== pid))} title={t("เอาชิ้นนี้ออกจากการประกอบ (ชิ้นยังอยู่บนกระดาน)", "Detach this piece (it stays on the board)")}
                     className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:bg-red-50 hover:text-red-600">{t("เอาออก", "Detach")}</button>
                 )}
-                <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : liningPids.includes(pid) ? t("ซับใน", "lining") : extras.includes(pid) ? t("ชิ้นเสริม (เย็บบางช่วง)", "added piece (partial seam)") : A.handles.some((h) => h.pid === pid) ? t("หู", "handle") : t("ปิดหลังช่อง", "behind window")}</span>
+                <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : liningPids.includes(pid) ? t("ซับใน", "lining") : extras.includes(pid) ? (closers.has(pid) ? t("ชิ้นปิดปาก / ฝา (เย็บเต็มขอบ)", "closing piece / flap (whole edge)") : t("ชิ้นเสริม (เย็บบางช่วง)", "added piece (partial seam)")) : A.handles.some((h) => h.pid === pid) ? (A.handles.some((h) => h.pid === pid && h.side === 0) ? t("สายพาดข้างถึงข้าง", "side-to-side strap") : t("หู", "handle")) : t("ปิดหลังช่อง", "behind window")}</span>
               </li>
             ))}
           </ul>
@@ -308,7 +316,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
           <p className="text-[11px] text-slate-400">{t("ลำดับนี้เป็นลำดับทั่วไป แต่ละโรงงานอาจสลับขั้นได้ ให้ช่างยืนยัน", "This is a typical order. Workshops differ, so have your pattern maker confirm.")}</p>
         </div>
 
-        <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-3">
+        <div className={`${compact ? "hidden " : ""}space-y-1.5 rounded-lg border border-slate-200 bg-white p-3`}>
           <div className="text-xs font-medium text-slate-500">{t("สีในภาพตัวอย่าง (ไม่บันทึก)", "Preview colours (not saved)")}</div>
           {swatches(body, setBody, t("ตัวกระเป๋า", "Body"))}
           {swatches(handle, setHandle, t("หู", "Handles"))}

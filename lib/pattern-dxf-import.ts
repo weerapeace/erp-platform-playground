@@ -145,6 +145,7 @@ const roleOf = (layer: string): Role => {
   if (L === "FOLD" || L === "6") return "fold";
   if (L === "NOTCH" || L === "4") return "notch";
   if (L === "GRAIN" || L === "7") return "grain";
+  if (L === "HW") return "skip";   // ตำแหน่งอะไหล่ในไฟล์ที่ระบบนี้ส่งออก — ไม่ใช่เส้นตัด
   if (L === "LABEL" || L === "15" || L === "2" || L === "3" || L === "5" || L === "13") return "skip";
   return "cut";
 };

@@ -58,6 +58,7 @@ const VIEWS_3D: { key: View3D; th: string; en: string; hintTh: string; hintEn: s
   { key: "flat", th: "ชิ้นแบน", en: "Flat", hintTh: "ชิ้นแบนวางบนโต๊ะ ยังไม่ประกอบ", hintEn: "Flat pieces on the table, not assembled" },
 ];
 const WIDE_PX = 1180;
+const SPLIT_PX = 860;   // หน้าที่มีเครื่องมือเย็บ: กว้างเท่านี้ก็วางภาพ 3D คู่กับกระดานซ้าย-ขวาได้ (เดิม 1180 → โน้ตบุ๊กทั่วไปกลายเป็นบน-ล่าง ต้องเลื่อนหา)
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
 /** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + จุดติดหู/แผ่นหลังช่อง + ค่าแม่แบบที่ใช้ */
@@ -106,10 +107,13 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   // กว้างพอ = ซ้ายขวา · แคบ = บนล่าง (วัดกล่องแม่ ไม่ใช่จอ)
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [wide, setWide] = useState(false);
+  const [roomy, setRoomy] = useState(true);   // กว้างพอให้ภาพ 3D กินที่ตามที่ตั้งไว้ — จอแคบ (860–1180) จำกัดภาพ 3D ไม่เกิน 33% ให้กระดานมีที่พอ
   useEffect(() => {
     const el = boxRef.current; if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setWide(el.clientWidth >= WIDE_PX));
-    ro.observe(el); setWide(el.clientWidth >= WIDE_PX);
+    const lim = sew ? SPLIT_PX : WIDE_PX;
+    const measure = () => { setWide(el.clientWidth >= lim); setRoomy(el.clientWidth >= WIDE_PX); };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el); measure();
     return () => ro.disconnect();
   }, []);
 
@@ -184,8 +188,10 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
     })) });
     setShow3d(true);
     onTemplateInsert?.({ pidByKey, seams: kit.seams.filter((x) => pidByKey[x.a.piece] && pidByKey[x.b.piece]), attach: kit.attach, params: kit.params, style: kit.style });
-    const nl = list.filter((q) => q.lining).length;
-    if (nl) setNotice(t(`วางแล้ว ${list.length} แบบ รวมซับใน ${nl} แบบ (วางไว้ใต้ชุดตัวนอก${sew ? " ผูกรูปกับตัวนอก: แก้ตัวนอกแล้วซับในเปลี่ยนตาม" : ""}) — เลือกวัสดุซับในให้ชิ้นเหล่านั้นด้วย`, `Placed ${list.length} patterns including ${nl} lining patterns (below the outer set) — pick a lining material for them`));
+    const nl = list.filter((q) => q.lining).length, had = (sew?.seams.length ?? 0) > 0;
+    if (nl && sew) setLayer("outer");   // ชิ้นเยอะ: เริ่มที่ชั้นนอกก่อน (ซับในจางไว้) — สลับดูได้ที่ปุ่ม ทุกชั้น / ชั้นนอก / ซับใน
+    if (had) setNotice(t(`วางแล้ว ${list.length} แบบ — แพทเทิร์นนี้มีกระเป๋าที่เย็บไว้อยู่แล้ว ภาพ 3 มิติประกอบได้ทีละ 1 ใบ (อีกใบจะขึ้นว่ายังประกอบไม่ได้) · แนะนำให้สร้างแพทเทิร์นใหม่สำหรับทรงใหม่`, `Placed ${list.length} patterns — this pattern already has a sewn bag and the 3D view assembles one bag at a time (the other shows as not assembled) · create a new pattern for a new style`));
+    else if (nl) setNotice(t(`วางแล้ว ${list.length} แบบ รวมซับใน ${nl} แบบ (วางไว้ใต้ชุดตัวนอก${sew ? " ผูกรูปกับตัวนอก: แก้ตัวนอกแล้วซับในเปลี่ยนตาม · ตอนนี้กระดานโชว์ชั้นนอก สลับดูซับในได้ที่ปุ่ม ทุกชั้น / ชั้นนอก / ซับใน" : ""}) — เลือกวัสดุซับในให้ชิ้นเหล่านั้นด้วย`, `Placed ${list.length} patterns including ${nl} lining patterns (below the outer set) — pick a lining material for them`));
   };
 
   const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs";
@@ -271,7 +277,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
         const ib3 = "inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100";
         const asmMode = view3d === "explode" || view3d === "steps" || view3d === "sim";
         const pane = show3d ? (
-          <div data-pane-3d className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2 shrink-0" : ""}`} style={wide ? { width: `${pct3d}%` } : undefined}>
+          <div data-pane-3d className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2 shrink-0" : ""}`} style={wide ? { width: `${roomy ? pct3d : Math.min(pct3d, 33)}%` } : undefined}>
             <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
               <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("แบบของภาพ 3D", "3D view type")}>
                 {VIEWS_3D.map((v) => <button key={v.key} type="button" data-view3d={v.key} onClick={() => setView3d(v.key)} aria-pressed={view3d === v.key} title={t(v.hintTh, v.hintEn)} className={seg3(view3d === v.key)}>{t(v.th, v.en)}</button>)}

@@ -22,11 +22,11 @@ import { panelMesh } from "@/lib/pattern-sim";
 export type V3 = [number, number, number];
 /** base = ชิ้นหลัก (แผ่นตั้ง) · flap = แผ่นพับเกาะตะเข็บ · hang = ห้อยลง · loop = ห่วง (สายหู) · patch = ชิ้นปะแนบผิวแผ่น (เย็บกับเส้นใน) · loose = วางแบนข้างหน้า */
 export type SewnKind = "base" | "flap" | "hang" | "loop" | "patch" | "loose";
-export type SewnPart = { pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3; /** ชิ้นหลักที่ชิ้นนี้เกาะอยู่ (แผ่นหน้า/หลังของตัวกระเป๋า หรือชิ้นหลักที่ตั้งเป็นแผ่น) — ชิ้นที่ไม่ได้เกาะ = ไม่มี */ on?: string; /** ชิ้นของชั้นซับใน */ layer?: "lining" };
+export type SewnPart = { /** ชิ้นปิดปาก / ฝาปิด (เย็บเต็มขอบกับปากแผ่นหน้า/หลัง แล้วพับข้ามปาก) */ fold?: true; pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3; /** ชิ้นหลักที่ชิ้นนี้เกาะอยู่ (แผ่นหน้า/หลังของตัวกระเป๋า หรือชิ้นหลักที่ตั้งเป็นแผ่น) — ชิ้นที่ไม่ได้เกาะ = ไม่มี */ on?: string; /** ชิ้นของชั้นซับใน */ layer?: "lining" };
 /** เส้นในชิ้นที่ต้องเห็นในภาพ (ตอนนี้ = ช่องเจาะ/ซิป) บนแผ่นที่วางแล้ว */
-export type SewnMark = { pts: V3[]; kind: InnerKind; on?: string; /** อะไหล่ (kind = "hw"): ชนิด · ขนาด ซม. · ทิศตั้งฉากผิวชิ้น — pts[0] = ตำแหน่ง */ hw?: HwKind; size?: number; n?: V3 };
+export type SewnMark = { pts: V3[]; kind: InnerKind; on?: string; /** อะไหล่ (kind = "hw"): ชนิด · ขนาด ซม. · ทิศตั้งฉากผิวชิ้น — pts[0] = ตำแหน่ง */ hw?: HwKind; size?: number; n?: V3; /** อยู่บนแผ่นหลัง ของชิ้นที่ตัด 2 ชิ้น */ back?: true };
 /** งานขอบที่ต้องเห็นในภาพ (2026-11-11): ขอบที่ติดซิป / กุ๊น — เส้นตามขอบของชิ้นที่วางแล้ว · n = ทิศตั้งฉากผิวชิ้น (ให้ฟันซิปหันออก) */
-export type SewnFinish = { pid: string; edge: number; kind: "zip" | "bind"; pts: V3[]; n: V3; on?: string };
+export type SewnFinish = { pid: string; edge: number; kind: "zip" | "bind"; pts: V3[]; n: V3; on?: string; /** อยู่บนแผ่นหลัง ของชิ้นที่เป็นทั้งแผ่นหน้าและแผ่นหลัง (ตัด 2 ชิ้น) */ back?: true };
 /** เส้นตะเข็บในภาพ (ตำแหน่งบนชิ้นที่ถูกเย็บติด) · idx = ลำดับตะเข็บ (ใช้สีเดียวกับกระดาน) · bad = ยาวไม่เท่ากันและไม่ได้ตั้งใจ */
 export type SewnLine = { id: string; idx: number; pts: V3[]; bad: boolean; /** ชิ้นหลักที่เส้นนี้อยู่บนนั้น */ on?: string };
 /** unsewn = ยังไม่ได้เย็บ · unsupported = มีตะเข็บแต่ยังวางไม่ได้ · short = สายสั้นกว่าระยะระหว่างสองโคน */
@@ -44,6 +44,8 @@ export type SewnScene = {
   notes: SewnNote[];
   /** จำนวนชิ้นที่ "เย็บติดแล้ว" ในภาพ (รวมชิ้นของตัวกระเป๋า) — 0 = ยังไม่มีอะไรเย็บติด */
   joined: number;
+  /** ความสูงของตัวกระเป๋า (ไม่รวมหู/สาย) — ตัวแสดงใช้จัดกล้องไม่ให้สายยาวทำให้กระเป๋าเล็ก · 0 = ไม่มีตัวกระเป๋า */
+  bodyH: number;
   min: V3; max: V3;
 };
 
@@ -222,7 +224,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
   }
   // ทรงถัง / ท่อ (2026-11-11): ชิ้นก้นที่ขอบทั้งรอบเย็บกับขอบเต็ม 1 ขอบของชิ้นสี่เหลี่ยม → ก้นวางราบ ชิ้นสี่เหลี่ยมม้วนขึ้นรอบก้นตามเส้นรอบจริง
   //   ใช้เมื่อระบบไม่เห็นโครงตัวหน้า/ตัวหลัง · ชุดซับใน (ถ้ามี) ซ้อนอยู่ข้างในแบบเดียวกัน (ย่อเล็กน้อย + ยกขึ้น) · ตะเข็บข้างของตัวถัง (เย็บกับตัวเอง) ไม่ใช้วาง
-  let tubes = 0;
+  let tubes = 0, tubeH = 0;
   if (!asm && !lining) {
     for (const s of usable) {
       if (isPartialSeam(s) || s.a.pid === s.b.pid) continue;
@@ -246,7 +248,23 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
         return [g[0], y0 + Math.max(0, out) * k, g[2]];
       });
       folded.add(tb.Wp.pid); joined += 2; tubes++;
-      if (!lin) zFront = Math.max(zFront, (bb.h / 2) * k);
+      let wallH = 0; for (const q of flattenShape(tb.Wp.shape)) wallH = Math.max(wallH, (q[0] - ws.mid[0]) * ws.inward[0] + (q[1] - ws.mid[1]) * ws.inward[1]);
+      if (!lin) { zFront = Math.max(zFront, (bb.h / 2) * k); tubeH = Math.max(tubeH, wallH); }
+      // สายสะพายพาดข้ามปากถัง (จุดติดแบบพาดข้างถึงข้าง): โค้งจากขอบถังซ้ายไปขวา ยาวเท่าสาย — แถบกว้างเท่าสาย
+      if (!lin) for (const at of attaches) {
+        const Sp = byPid.get(at.pid);
+        if (at.kind !== "handle" || !at.across || !at.len || !at.w || !Sp || done.has(at.pid) || (at.on !== tb.B.pid && at.on !== tb.Wp.pid)) continue;
+        const a = bb.w / 2 + 0.15, yA = y0 + wallH - Math.max(0, at.a?.[1] ?? 0), v = Math.max(0, (at.len - Math.PI * a) / 2), eb = v > 0 ? a : Math.max(1.5, (at.len - 2 * a) / 1.14);
+        const line: Pt[] = [[-a, yA]];
+        if (v > 0) line.push([-a, yA + v]);
+        for (let i = 1; i < 32; i++) { const ph = Math.PI * (1 - i / 32); line.push([a * Math.cos(ph), yA + v + eb * Math.sin(ph)]); }
+        if (v > 0) line.push([a, yA + v]);
+        line.push([a, yA]);
+        const pos: number[] = [], tri: number[] = [], hw = at.w / 2;
+        line.forEach(([x, y], i) => { pos.push(x, y, -hw, x, y, hw); if (i) { const b = 2 * (i - 1); tri.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); } });
+        parts.push({ pid: at.pid, name: Sp.name, kind: "loop", pos, tri, label: [0, yA + v + eb, 0] });
+        done.add(at.pid); joined++;
+      }
     }
   }
   if (!asm && !lining && !tubes) {
@@ -350,7 +368,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
             const [al, out] = local(q), g = edgeAt(al), base = add(g.p, mul(g.o, 0.15));
             return out <= bodyD ? add(base, mul(toIn, Math.max(0, out))) : add(add(base, mul(toIn, bodyD + 0.3)), mul(g.o, -(out - bodyD)));
           }, e.on);
-          folded.add(C.pid);
+          folded.add(C.pid); parts[parts.length - 1].fold = true;
           seamLine(e.s, e.host, e.hs.pts, e.on); joined++; progress = true;
           continue;
         }
@@ -401,6 +419,19 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     if (f) finishOf(p, (q) => place(f, q), f.n, rootOf.get(p.pid));
     if (f) hwOf(p, (q) => place(f, q), f.n, rootOf.get(p.pid));
   }
+  // แผ่นหน้ากับแผ่นหลังเป็นชิ้นเดียวกัน (ตัด 2 ชิ้น — ซองซิป ถุงผ้า ก้นกล่อง Tote): ของที่อยู่บนชิ้น (ช่องเจาะ ซิป กุ๊น อะไหล่) ขึ้นที่แผ่นหลังด้วย
+  if (asm && asm.back === asm.front) {
+    const p = byPid.get(asm.front);
+    if (p && p.count >= 2) {
+      const D = asm.depth, bo = asm.fromBoard.back([0, 0]), bx = asm.fromBoard.back([1, 0]), by = asm.fromBoard.back([0, 1]);
+      const fb: Frame = { o: [-bo[0], bo[1], -D / 2], u: [-(bx[0] - bo[0]), bx[1] - bo[1], 0], v: [-(by[0] - bo[0]), by[1] - bo[1], 0], n: [0, 0, -1] };
+      const m0 = marks.length, f0 = finishes.length;
+      for (const l of p.inner ?? []) if (l.kind === "slit") marks.push({ pts: l.pts.map((q) => add(place(fb, q), mul(fb.n, 0.14))), kind: l.kind, on: p.pid });
+      finishOf(p, (q) => place(fb, q), fb.n, p.pid); hwOf(p, (q) => place(fb, q), fb.n, p.pid);
+      for (let i = m0; i < marks.length; i++) marks[i].back = true;
+      for (let i = f0; i < finishes.length; i++) finishes[i].back = true;
+    }
+  }
 
   // 4) ชิ้นที่เหลือ: วางแบนเรียงกันข้างหน้า
   const rest = pieces.filter((p) => !done.has(p.pid));
@@ -420,7 +451,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
   for (const p of parts) for (let i = 0; i < p.pos.length; i += 3) grow(p.pos[i], p.pos[i + 1], p.pos[i + 2]);
   for (const a of [asm, lining?.asm]) if (a) { grow(-a.width / 2, 0, -a.depth / 2); grow(a.width / 2, a.height, a.depth / 2); }
   if (min[0] === Infinity) { min[0] = min[1] = min[2] = 0; max[0] = max[1] = max[2] = 1; }
-  return { asm, lining, marks, finishes, parts, lines, notes, joined: asm || lining || joined > 1 ? joined : 0, min, max };
+  return { bodyH: asm?.height ?? lining?.asm.height ?? tubeH, asm, lining, marks, finishes, parts, lines, notes, joined: asm || lining || joined > 1 ? joined : 0, min, max };
 }
 
 /** ชิ้นนี้ "เย็บติด" กับชิ้นอื่นในภาพ (แผ่นพับ / ห้อย / ห่วง) — ไม่ใช่ชิ้นหลักและไม่ใช่ชิ้นที่วางแบน */

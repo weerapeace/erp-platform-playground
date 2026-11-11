@@ -52,7 +52,8 @@ export type PatternPiece = {
   foldSegs?: Pt[][] | null;        // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน) — DXF layer FOLD
   foldD?: string | null;           // เส้นพับเป็น SVG path (วาดเส้นประยาว-สั้น)
   innerSegs?: Pt[][] | null;       // เส้นในชิ้น (แนวเย็บ / ช่องเจาะ / แนวพับ / ตำแหน่ง) — DXF layer INNER
-  innerD?: string | null;          // เส้นในชิ้นเป็น SVG path (วาดเส้นประสั้น)
+  innerD?: string | null;          // เส้นในชิ้นเป็น SVG path (วาดเส้นประสั้น) — รวมสัญลักษณ์อะไหล่ (วงกลม + กากบาท)
+  hwMarks?: { c: Pt; r: number }[] | null;   // อะไหล่ที่วางบนชิ้น (กึ่งกลาง + รัศมี ซม.) — DXF: วงกลมในชั้น HW
 };
 
 /** ลูกศรเส้นทางผ้า 2 หัว → ชุดเส้นตรง (ก้าน + หัว 4 เส้น) */
@@ -95,7 +96,10 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
     if (!(w > 0) || !(h > 0)) continue;
     const grainSegs = ls?.grain ? grainArrowSegs(...(sh(ls.grain) as [Pt, Pt])) : [];
     const foldSegs = ls?.foldEdges ? foldSegments(ls.shape, ls.foldEdges).map(sh) : [];
-    const innerSegs = (ls?.inner ?? []).filter((x) => x.pts.length >= 2).map((x) => sh(x.pts));
+    const innerSegs = (ls?.inner ?? []).filter((x) => x.pts.length >= 2 && x.kind !== "hw").map((x) => sh(x.pts));
+    // อะไหล่ที่วางบนชิ้น: วงกลมขนาดจริง + กากบาทกึ่งกลาง (ใบพิมพ์) · วงกลมในชั้น HW (ไฟล์ตัด) — ไม่ใช่เส้นสั้นในชั้น INNER
+    const hwMarks = (ls?.inner ?? []).filter((x) => x.kind === "hw" && x.pts.length >= 2).map((x) => { const [a, b] = sh([x.pts[0], x.pts[x.pts.length - 1]]); return { c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Pt, r: Math.max(0.15, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2) }; });
+    const hwD = hwMarks.map(({ c, r }) => `M${r2(c[0] - r)} ${r2(c[1])}a${r2(r)} ${r2(r)} 0 1 0 ${r2(2 * r)} 0a${r2(r)} ${r2(r)} 0 1 0 ${r2(-2 * r)} 0M${r2(c[0] - r / 2)} ${r2(c[1])}h${r2(r)}M${r2(c[0])} ${r2(c[1] - r / 2)}v${r2(r)}`).join("");
     const notchSegs = g && ls?.notches?.length ? notchSegments(g.sew, ls.notches, allow, 0.5, g.segAllow).map((s) => sh(s) as [Pt, Pt]) : [];
     out.push({
       id: `P${out.length + 1}`,
@@ -112,7 +116,8 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
       ...(notchSegs.length ? { notchSegs } : {}),
       ...(grainSegs.length || notchSegs.length ? { marksD: segsD([...grainSegs, ...notchSegs]) } : {}),
       ...(foldSegs.length ? { foldSegs, foldD: foldSegs.map((L) => "M" + L.map(([x, y]) => `${r2(x)} ${r2(y)}`).join("L")).join("") } : {}),
-      ...(innerSegs.length ? { innerSegs, innerD: innerSegs.map((L) => "M" + L.map(([x, y]) => `${r2(x)} ${r2(y)}`).join("L")).join("") } : {}),
+      ...(innerSegs.length || hwMarks.length ? { ...(innerSegs.length ? { innerSegs } : {}), innerD: innerSegs.map((L) => "M" + L.map(([x, y]) => `${r2(x)} ${r2(y)}`).join("L")).join("") + hwD } : {}),
+      ...(hwMarks.length ? { hwMarks } : {}),
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
@@ -192,6 +197,7 @@ export function buildPatternDxf(layout: PatternLayout): string {
       segs(p.grainSegs, "GRAIN");
       segs(p.notchSegs, "NOTCH");
       for (const L of p.foldSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "FOLD");
+      for (const m of p.hwMarks ?? []) out.push("0", "CIRCLE", "8", "HW", "10", String(mm(p.x + m.c[0])), "20", String(H - mm(p.y + m.c[1])), "30", "0", "40", String(mm(m.r)));   // อะไหล่ = วงกลมในชั้น HW (ตำแหน่งเจาะ/ติด)
       for (const L of p.innerSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "INNER");   // เส้นในชิ้น: วาดตำแหน่ง ไม่ใช่เส้นตัด
     } else { line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot); }
     const textH = Math.max(3, Math.min(8, mm(Math.min(p.w, p.h)) / 8));

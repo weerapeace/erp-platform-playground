@@ -175,7 +175,8 @@ function draft(style: Exclude<BagStyle, "tote">, p: KitParams): Draft {
     return {
       pieces: [piece("base", "ก้น (วงกลม)", "Base (round)", 1, C, sa), piece("wall", "ตัวถัง (ม้วนรอบก้น)", "Body (wraps the base)", 1, rectShape(per, H), sa, { allowEdges: allowE(4, [0], sa, p.hem), foldEdges: foldE(4, [0], p.hem) }), strap],
       seams: [{ a: S("base", 0, 5, 5), b: S("wall", 2) }, { a: S("wall", 1), b: S("wall", 3) }],
-      attach: [], body: ["base", "wall"], faced: [], pocketOn: "",
+      attach: [{ kind: "handle", piece: "strap", on: "wall", across: true, a: [0, 2], b: [0, 2], len: p.strap, w: p.ws, tail: BAG_HANDLE_ATTACH }],   // สายพาดข้ามปากถัง โคนต่ำจากปาก 2 ซม. (ค่าสมมติ)
+      body: ["base", "wall"], faced: [], pocketOn: "",
     };
   }
   if (style === "duffel") {

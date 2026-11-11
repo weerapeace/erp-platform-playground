@@ -425,7 +425,8 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   const setAssembly = (A: AssemblyOk, colors: BagColors) => {
     const was = S.mode; S.mode = "asm"; clear(); lights(false);
     const top = buildAsm(A, colors), D = A.depth;
-    S.target.set(0, top * 0.47, 0); S.dist = Math.max(top, A.width * 1.05, D) * 2.15;
+    const vt = Math.min(top, Math.max(A.height * 2.2, 20));   // สายสะพายยาวไม่ดึงกล้องถอยจนกระเป๋าเล็ก
+    S.target.set(0, vt * 0.47, 0); S.dist = Math.max(vt, A.width * 1.05, D) * 2.15;
     shadow.visible = true; shadow.scale.set(A.width * 1.7, Math.max(D, 3) * 2.6, 1);
     if (was !== "asm") view(VIEWS.iso, true);
     paint();
@@ -448,9 +449,9 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     const w = 2 * Math.max(Math.abs(sc.min[0]), Math.abs(sc.max[0])), d = 2 * Math.max(Math.abs(sc.min[2]), Math.abs(sc.max[2])), top = Math.max(sc.max[1], asmTop, 1);
     const lh = clamp(Math.max(w, top, 20) * 0.035, Math.min(1.3, Math.max(0.6, Math.max(w, top) * 0.06)), 3);   // กระเป๋าใบเล็ก (เช่น ทรงกลม 12 ซม.) ป้ายชื่อเล็กลงตาม
     const LA = sc.lining?.asm;
-    const carrierOf = (on?: string): string | null => {
+    const carrierOf = (on?: string, back?: boolean): string | null => {
       if (!on) return null;
-      if (sc.asm && on === sc.asm.front) return "front";
+      if (sc.asm && on === sc.asm.front) return back ? "back" : "front";   // ชิ้นที่เป็นทั้งแผ่นหน้าและแผ่นหลัง: ของบนแผ่นหลังไปกับแผ่นหลัง
       if (sc.asm && on === sc.asm.back) return "back";
       if (LA && on === LA.back) return "Lback";               // แผ่นหน้า/หลังของซับในเป็นชิ้นเดียวกัน = เกาะแผ่นหลัง (ตรงกับ lib/pattern-sewn)
       if (LA && on === LA.front) return "Lfront";
@@ -494,7 +495,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
         mesh.quaternion.setFromUnitVectors(mk.hw === "rivet" || mk.hw === "magnet" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1), nrm);   // จานกลมตั้งแกน y · วงแหวน/แผ่น ตั้งแกน z
         mesh.position.set(mk.pts[0][0], mk.pts[0][1], mk.pts[0][2]);
         const g = new THREE.Group(); g.add(mesh); g.userData.hw = mk.hw;
-        add(`sm${mi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(mk.on), "front");
+        add(`sm${mi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(mk.on, mk.back), "front");
         return;
       }
       if (mk.pts.length < 2) return;
@@ -502,7 +503,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       const curve = vs.length === 2 ? new THREE.LineCurve3(vs[0], vs[1]) : new THREE.CatmullRomCurve3(vs, false, "centripetal");
       const g = new THREE.Group();
       g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, vs.length * 3), 0.3, 6, false), new THREE.MeshStandardMaterial({ color: "#c2410c", roughness: 0.6 })));
-      add(`sm${mi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(mk.on), "front");
+      add(`sm${mi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(mk.on, mk.back), "front");
     });
     // งานขอบ: กุ๊น = แถบฟ้าตามขอบ · ซิป = เทปเข้ม + ฟันซิปสีเงินเรียงตามแนว (ชิ้นเดียววาดทีเดียวด้วย InstancedMesh)
     sc.finishes.forEach((fin, fi) => {
@@ -526,11 +527,13 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
         g.add(teeth);
       }
       g.userData.finish = fin.kind;
-      add(`sf${fi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(fin.on), "front");
+      add(`sf${fi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(fin.on, fin.back), "front");
     });
     applyCut();
     // กล้อง: เปลี่ยนเฉพาะเมื่อขนาดฉากเปลี่ยนมาก (ลากตะเข็บแล้วภาพไม่ขยับเข้าออก)
-    const dist = Math.max(top, w * 1.05, d * 1.05, 16) * 2, ty = top * 0.46;   // ฉากเล็กมาก = ถอยกล้องอย่างน้อยเท่าฉาก 16 ซม. (ไม่ให้ล้นกรอบ)
+    // กล้องจัดตามตัวกระเป๋า: สายสะพายยาว ๆ ไม่ดึงกล้องถอยจนกระเป๋าเล็ก (ส่วนบนของสายอาจเลยกรอบ — ซูมออกดูได้) · ฉากเล็กมาก = ถอยอย่างน้อยเท่าฉาก 16 ซม.
+    const vt = sc.bodyH > 0 ? Math.min(top, Math.max(sc.bodyH * 2.2, 20)) : top;
+    const dist = Math.max(vt, w * 1.05, d * 1.05, 16) * 2, ty = vt * 0.46;
     if (was !== "sewn" || dist > S.dist * 1.02 || dist < S.dist * 0.82 || Math.abs(ty - S.target.y) > S.dist * 0.1) { S.target.set(0, ty, 0); S.dist = dist; }
     shadow.visible = true; shadow.scale.set(Math.max(w, 10) * 1.5, Math.max(d, 4) * 2.2, 1);
     if (was !== "sewn") view(VIEWS.iso, true);
