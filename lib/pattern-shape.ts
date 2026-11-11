@@ -71,6 +71,27 @@ export function cleanInnerLines(raw: unknown): InnerLine[] {
   }
   return out;
 }
+/** เลื่อนเส้นในทั้งเส้น */
+export const moveInner = (l: InnerLine, dx: number, dy: number): InnerLine => ({ ...l, pts: l.pts.map(([x, y]) => [r3(x + dx), r3(y + dy)] as Pt) });
+/** ตำแหน่งของเส้นในเทียบกรอบของชิ้น: จุดบนสุดห่างจากขอบบน · จุดซ้ายสุดห่างจากขอบซ้าย (ซม.) */
+export function innerOffset(l: InnerLine, piece: Box): { top: number; left: number } {
+  const b = polyBox(l.pts);
+  return { top: r3(b.y - piece.y), left: r3(b.x - piece.x) };
+}
+/** ย้ายเส้นในให้ห่างจากขอบบน / ขอบซ้ายของกรอบชิ้นตามที่กำหนด · center = จัดกึ่งกลางซ้ายขวาของชิ้น (ทับค่า left) */
+export function placeInner(l: InnerLine, piece: Box, to: { top?: number; left?: number; center?: boolean }): InnerLine {
+  const b = polyBox(l.pts);
+  const dx = to.center ? piece.x + piece.w / 2 - (b.x + b.w / 2) : to.left != null ? piece.x + to.left - b.x : 0;
+  const dy = to.top != null ? piece.y + to.top - b.y : 0;
+  return dx || dy ? moveInner(l, dx, dy) : l;
+}
+/** ตั้งความยาวของเส้นในแบบเส้นตรง 2 จุด (คงจุดแรก ยืด/หดไปตามแนวเดิม) — เส้นหลายจุด / ยาวไม่สมเหตุผล = null */
+export function setInnerLength(l: InnerLine, len: number): InnerLine | null {
+  if (l.pts.length !== 2 || !(len >= 0.2 && len <= 500)) return null;
+  const [a, b] = l.pts, d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (!(d > 1e-6)) return null;
+  return { ...l, pts: [a, [r3(a[0] + ((b[0] - a[0]) * len) / d), r3(a[1] + ((b[1] - a[1]) * len) / d)]] };
+}
 export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null; inner?: InnerLine[] | null };
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
 export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };

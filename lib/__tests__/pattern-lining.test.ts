@@ -5,7 +5,7 @@ import { freeEdges, liningPlan, pocketPlan, POCKET_HEM } from "@/lib/pattern-lin
 import { cleanProjectPieces, projectPatternLines, projectSeamRows } from "@/lib/pattern-project";
 import { checkSeam, cleanSeams, edgeBusy, isPartialSeam, sideLength, sidePoints, type Seam } from "@/lib/pattern-seams";
 import { buildSewn, isSewnExtra, type SewnPart } from "@/lib/pattern-sewn";
-import { cleanInnerLines, flipPiece, movePiece, rotatePiece, shapeBox, type InnerLine, type Shape } from "@/lib/pattern-shape";
+import { cleanInnerLines, flipPiece, innerOffset, moveInner, movePiece, placeInner, rotatePiece, setInnerLength, shapeBox, type InnerLine, type Shape } from "@/lib/pattern-shape";
 import { buildPatternDxf, patternPieces, shelfLayout } from "@/lib/pattern-sheet";
 
 const R = (x: number, y: number, w: number, h: number): Shape => ({ k: "rect", x, y, w, h });
@@ -37,6 +37,33 @@ describe("เส้นในชิ้น", () => {
     expect(pp[0].innerD).toContain("M20 9");
     const dxf = buildPatternDxf(shelfLayout(pp, 140));
     expect((dxf.match(/\nINNER\n/g) ?? []).length).toBe(3);                      // 3 ช่วงของเส้นรูปตัว U
+  });
+});
+
+describe("ย้ายเส้นใน / พิมพ์ระยะจากขอบ", () => {
+  const piece = { x: 10, y: 40, w: 28, h: 26 };
+  const U: InnerLine = { id: "u1", kind: "sew", pts: [[33, 49], [33, 60], [15, 60], [15, 49]] };
+  it("innerOffset: จุดบนสุดห่างจากขอบบน · จุดซ้ายสุดห่างจากขอบซ้าย", () => {
+    expect(innerOffset(U, piece)).toEqual({ top: 9, left: 5 });
+  });
+  it("placeInner: ตั้งระยะจากขอบบน/ซ้าย = เลื่อนทั้งเส้น รูปเดิม · จัดกึ่งกลางซ้ายขวา", () => {
+    const a = placeInner(U, piece, { top: 4 });
+    expect(a.pts).toEqual([[33, 44], [33, 55], [15, 55], [15, 44]]);
+    expect(innerOffset(placeInner(U, piece, { left: 2 }), piece)).toEqual({ top: 9, left: 2 });
+    const off = moveInner(U, -4, 0), c = placeInner(off, piece, { center: true });
+    expect(innerOffset(c, piece).left).toBe(5);                                  // กว้าง 18 ในชิ้นกว้าง 28 → เหลือข้างละ 5
+    expect(placeInner(U, piece, {})).toBe(U);                                    // ไม่ได้สั่งอะไร = ตัวเดิม
+  });
+  it("setInnerLength: เส้นตรง 2 จุด ยืด/หดตามแนวเดิมจากจุดแรก · เส้นหลายจุด = ไม่ได้", () => {
+    const slit: InnerLine = { id: "z", kind: "slit", pts: [[16, 44], [32, 44]] };
+    expect(setInnerLength(slit, 20)?.pts).toEqual([[16, 44], [36, 44]]);
+    expect(setInnerLength(U, 20)).toBeNull();
+    expect(setInnerLength(slit, 0)).toBeNull();
+  });
+  it("ย้ายเส้นในรูปตัว U แล้วตะเข็บกับชิ้นปะยังยาวเท่ากัน", () => {
+    const seam: Seam = { id: "s", a: { pid: "h", from: 0, count: 1, n: 1, inner: "u1" }, b: { pid: "p", from: 1, count: 3, n: 4 } };
+    const moved = placeInner(U, piece, { top: 3, left: 1 });
+    expect(checkSeam({ h: { shape: R(10, 40, 28, 26), inner: [moved] }, p: R(60, 0, 18, 11) }, seam)).toMatchObject({ status: "ok", la: 40, lb: 40 });
   });
 });
 
