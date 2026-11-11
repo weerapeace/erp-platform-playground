@@ -23,7 +23,7 @@ import { BottomSheet } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { CostSummaryCard, SEG_COLORS } from "@/components/design-sheet-detail/cost-summary-card";
 import {
-  COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCostLine, recomputeCostLine, restorePrevItem, withPrevItem,
+  COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCostLine, missingCostFields, recomputeCostLine, restorePrevItem, withPrevItem,
 } from "@/lib/design-sheet-cost-row";
 import { cleanExtra, extraAmountAt, extraKindOf, type SnapExtra, type SnapExtraMap } from "@/lib/design-sheet-cost-snapshot";
 import { cutLaborRows, cutLaborSummary, overheadRows, overheadTotal, presetsOf, type CostPreset } from "@/lib/design-cost-presets";
@@ -72,8 +72,10 @@ const METHOD_LABEL: Record<string, () => string> = {
 };
 
 // ── ช่องตัวเลข (พิมพ์ทศนิยมได้ลื่น · ตัวอักษร 16px กันมือถือซูม) ──
-function NumField({ label, value, onChange, suffix, step }: {
+function NumField({ label, value, onChange, suffix, step, need = false }: {
   label: string; value: number | null | undefined; onChange: (v: number | null) => void; suffix?: string;
+  /** ช่องที่ต้องกรอกแต่ยังว่าง (missingCostFields) = พื้นแดงอ่อน เหมือนตารางหน้าคอม */
+  need?: boolean;
   /** มีค่า = โชว์ปุ่ม − / + ทีละ step */
   step?: number;
 }) {
@@ -84,7 +86,7 @@ function NumField({ label, value, onChange, suffix, step }: {
   return (
     <label className="block min-w-0">
       <span className="text-[11px] text-slate-500">{label}</span>
-      <div className="mt-0.5 flex h-10 items-center rounded-lg border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-blue-500">
+      <div className={`mt-0.5 flex h-10 items-center rounded-lg border focus-within:ring-2 focus-within:ring-blue-500 ${need ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white"}`}>
         {step != null && <button type="button" onClick={() => bump(-step)} aria-label={tr("ลด", "Decrease")} className="h-full w-9 shrink-0 text-lg text-slate-500 active:bg-slate-50">−</button>}
         <input inputMode="decimal" value={txt}
           onFocus={() => { focused.current = true; }}
@@ -458,6 +460,7 @@ function LineSheet({ row: r, index, total, item, onChange, onChangeMaterial, onD
   const manual = !piece && (!m || m === "manual");
   const methodText = piece ? t("ชิ้นสำเร็จ · คิดตามพื้นที่", "Fixed piece · by area") : (METHOD_LABEL[m ?? "manual"]?.() ?? m ?? "");
   const prev = r.prev_item;
+  const miss = missingCostFields(r);
   return (
     <BottomSheet open onClose={onClose} backKey="cost-line"
       title={r.item_name || r.item_sku_code || t("บรรทัดตีราคา", "Cost line")}
@@ -495,13 +498,13 @@ function LineSheet({ row: r, index, total, item, onChange, onChangeMaterial, onD
         )}
 
         <div className="grid grid-cols-2 gap-2">
-          {showW && <NumField label={t("กว้าง", "Width")} suffix={t("ซม.", "cm")} value={r.width_cm} onChange={(v) => onChange({ width_cm: v })} />}
-          {showL && <NumField label={t("ยาว", "Length")} suffix={t("ซม.", "cm")} value={r.length_cm} onChange={(v) => onChange({ length_cm: v })} />}
-          {showPcs && <NumField label={t("จำนวนชิ้น", "Pieces")} value={r.pieces} step={1} onChange={(v) => onChange({ pieces: v })} />}
+          {showW && <NumField label={t("กว้าง", "Width")} suffix={t("ซม.", "cm")} value={r.width_cm} need={miss.has("width_cm")} onChange={(v) => onChange({ width_cm: v })} />}
+          {showL && <NumField label={t("ยาว", "Length")} suffix={t("ซม.", "cm")} value={r.length_cm} need={miss.has("length_cm")} onChange={(v) => onChange({ length_cm: v })} />}
+          {showPcs && <NumField label={t("จำนวนชิ้น", "Pieces")} value={r.pieces} step={1} need={miss.has("pieces")} onChange={(v) => onChange({ pieces: v })} />}
           {showWaste && <NumField label={t("เผื่อเสีย", "Waste")} suffix="%" value={r.waste_percent} onChange={(v) => onChange({ waste_percent: v })} />}
-          {!piece && m === "area_face" && <NumField label={t("หน้ากว้างผ้า", "Fabric width")} suffix={t("ซม.", "cm")} value={r.face_width_cm} onChange={(v) => onChange({ face_width_cm: v })} />}
-          {manual && <NumField label={t("ปริมาณที่ใช้", "Quantity")} suffix={r.uom ?? ""} value={r.qty} onChange={(v) => onChange({ qty: v })} />}
-          <NumField label={t("ราคา / หน่วย", "Price / unit")} suffix={`฿/${r.uom ?? ""}`} value={r.unit_price} onChange={(v) => onChange({ unit_price: v })} />
+          {!piece && m === "area_face" && <NumField label={t("หน้ากว้างผ้า", "Fabric width")} suffix={t("ซม.", "cm")} value={r.face_width_cm} need={miss.has("face_width_cm")} onChange={(v) => onChange({ face_width_cm: v })} />}
+          {manual && <NumField label={t("ปริมาณที่ใช้", "Quantity")} suffix={r.uom ?? ""} value={r.qty} need={miss.has("qty")} onChange={(v) => onChange({ qty: v })} />}
+          <NumField label={t("ราคา / หน่วย", "Price / unit")} suffix={`฿/${r.uom ?? ""}`} value={r.unit_price} need={miss.has("unit_price")} onChange={(v) => onChange({ unit_price: v })} />
         </div>
 
         <label className="block">

@@ -108,6 +108,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .lig-lines .lig-cell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [data-field-trigger]):focus { border-bottom-color: #3b82f6; outline: none; box-shadow: none; }
 /* LineItemsGrid onRequestEdit: ช่องที่ล็อก (disabled) ไม่รับเมาส์ → ดับเบิลคลิกตกถึงแถว (เบราว์เซอร์ไม่ส่งเหตุการณ์เมาส์จากช่อง disabled) */
 .lig-dbl :is(input, select, textarea, button):disabled { pointer-events: none; }
+/* ช่องที่ต้องกรอกแต่ยังว่าง (ตารางตีราคา · lib/design-sheet-cost-row missingCostFields) — พื้นแดงอ่อน ชนะสไตล์ช่องแบนของ .lig-lines */
+.lig-need { background-color: #fff1f2 !important; border-bottom-color: #fda4af !important; border-radius: 4px !important; }   /* !important: ชนะ .lig-lines ที่ specificity สูงกว่า */
 /* SplitPanes (components/split-panes): กล่องที่ยังไม่ขยาย — ช่องที่ปิดอยู่ (disabled) ไม่กลืนคลิก → คลิกทะลุไปขยายกล่อง */
 .split-grow :is(input, select, textarea, button):disabled { pointer-events: none; }
 

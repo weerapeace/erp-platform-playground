@@ -68,6 +68,9 @@ export type LineItemsGridProps<T> = {
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
   stickyHeader?: boolean;
   maxHeight?:    string;
+  /** ตรึงหัวตารางกับการเลื่อน "หน้า/ป๊อปอัป" (ไม่ใช่เลื่อนในกล่องตัวเอง) — ค่า = ระยะจากขอบบน (px) · หัวค้างจนเลื่อนพ้นตาราง
+   *  ตารางที่กว้างเกินจอยังเลื่อนซ้าย-ขวาได้ หัวเลื่อนตาม (หัวแยกกล่อง ซิงก์ระยะเลื่อน) · ห้าม ancestor มี overflow (sticky จะตาย) · ใช้แทน stickyHeader */
+  stickyTop?: number;
   /** เรียงเริ่มต้นเมื่อเปิดตาราง (เช่น เรียงตามชื่อวัตถุดิบ) */
   defaultSort?:  { key: string; dir: "asc" | "desc" } | null;
   /** โหมดกะทัดรัด — แถว/ตัวอักษรเล็กลง เหมาะกับตารางอ่านอย่างเดียวรายการเยอะ */
@@ -103,7 +106,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
-  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
+  stickyHeader = false, maxHeight, stickyTop, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
   const [sort, setSort]       = useState<SortState>(defaultSort);
@@ -112,6 +115,11 @@ export function LineItemsGrid<T>({
   const [widths, setWidths]   = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());   // แถวที่ติ๊กเลือก (rowId)
   const gridRef = useRef<HTMLDivElement>(null);
+  // stickyTop: หัวอยู่คนละกล่องกับแถว → ซิงก์ระยะเลื่อนซ้าย-ขวาให้คอลัมน์ตรงกัน
+  const pageSticky = stickyTop != null && !stickyHeader;
+  const headScrollRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const syncHeadScroll = () => { if (headScrollRef.current && bodyScrollRef.current) headScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft; };
   const pendingFocus = useRef<{ id: string; col: string | null } | null>(null);   // ดับเบิลคลิกแถวตอน readonly
   const pendingAdd = useRef(false);   // กด "เพิ่มบรรทัด" ตอน readonly → เพิ่มให้หลังเข้าโหมดแก้
 
@@ -289,6 +297,71 @@ export function LineItemsGrid<T>({
   const applyGroupPatch = (groupLabel: string, patch: Partial<T>) =>
     onChange(rows.map((r) => (groupKeyOf(r) === groupLabel ? { ...r, ...patch } : r)));
 
+  // หัวตาราง + แถว ใช้ร่วม 2 แบบ (หัวติดในกล่อง/ไม่ติด · หัวติดตอนเลื่อนหน้า stickyTop)
+  const headerRow = (
+        <div style={{ gridTemplateColumns: template }}
+          className={`grid ${lines ? "bg-white border-b border-slate-300 text-[11px] font-normal text-slate-400" : "bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500"} ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
+          {selectable && (
+            <span className="flex items-center justify-center">
+              <input type="checkbox" aria-label="เลือกทั้งหมด" checked={allSelected} disabled={readonly || rows.length === 0}
+                ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={toggleSelAll} className="h-4 w-4 accent-indigo-600 cursor-pointer" />
+            </span>
+          )}
+          {canDrag && <span />}
+          {columns.map((c) => (
+            <div key={c.key} className={`relative ${lines ? "" : "border-r border-slate-100 last:border-r-0"}`}>
+              <button type="button" disabled={!c.sortable} onClick={() => c.sortable && toggleSort(c.key)}
+                className={`w-full px-2 ${dense ? "py-1" : "py-2"} flex items-center gap-1 ${c.align === "right" ? "justify-end" : c.align === "center" ? "justify-center" : ""} ${c.sortable ? "hover:text-slate-800 cursor-pointer" : "cursor-default"}`}>
+                <span className="truncate" data-colhead={c.key}>{c.header}</span>
+                {sort?.key === c.key && <span className="text-blue-600">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+              </button>
+              {/* resize handle — ลากปรับ / ดับเบิลคลิกขยายพอดี */}
+              <span onMouseDown={(e) => startResize(c.key, e)} onDoubleClick={() => autoFit(c.key)}
+                title="ลากเพื่อปรับขนาด · ดับเบิลคลิกเพื่อขยายพอดี — ความกว้างจะใช้กับทุก SKU"
+                className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-300/60" />
+            </div>
+          ))}
+          {!readonly && <span />}
+        </div>
+  );
+  const rowsBlock = (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={rows.map(rowId)} strategy={verticalListSortingStrategy}>
+            {display.map((d, i) =>
+              d.type === "group" ? (
+                <div key={`g${i}`} className="flex items-center gap-2 bg-slate-100/70 border-b border-slate-200 px-2 py-1.5 text-xs">
+                  <button type="button" onClick={() => toggleCollapse(d.label)} className="w-5 h-5 flex items-center justify-center text-slate-500 hover:bg-slate-200 rounded">
+                    {collapsed.has(d.label) ? "▸" : "▾"}
+                  </button>
+                  {groupCol?.setValue && !readonly ? (
+                    <input defaultValue={d.label} onBlur={(e) => { if (e.target.value !== d.label) applyGroupEdit(d.label, e.target.value); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      title="แก้ที่นี่ → ทุกบรรทัดในกลุ่มเปลี่ยนตาม"
+                      className="h-7 px-2 text-xs font-semibold text-slate-700 border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  ) : (
+                    <span className="font-semibold text-slate-700">{d.label}</span>
+                  )}
+                  <span className="text-slate-400">· {d.count} รายการ</span>
+                  {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch))}
+                  {d.sums.filter((s) => s.total).map((s) => (
+                    <span key={s.header} className="text-slate-500">· รวม{s.header} <span className="font-semibold text-slate-700 tabular-nums">{fmtNum(s.total)}</span></span>
+                  ))}
+                  {groupNote?.(d.rows, d.label)}
+                </div>
+              ) : (
+                <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
+                  columns={columns} row={d.row} dense={dense} lines={lines} toneClass={rowClassName?.(d.row)}
+                  selectable={selectable} selected={selected.has(rowId(d.row))} onToggleSelect={() => toggleSel(rowId(d.row))}
+                  onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
+                  onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined}
+                  onRequestEdit={readonly && onRequestEdit ? (col) => { pendingFocus.current = { id: rowId(d.row), col }; onRequestEdit(d.row); } : undefined} />
+              ),
+            )}
+          </SortableContext>
+        </DndContext>
+  );
+
   return (
     <div className="space-y-2">
       {(groupByOptions.length > 0 || sort) && (
@@ -336,73 +409,35 @@ export function LineItemsGrid<T>({
           {emptyAction && <div className="mt-1 flex justify-center">{emptyAction}</div>}
         </div>
       ) : (
+        pageSticky ? (
+          /* หัวค้างตอนเลื่อนหน้า/ป๊อปอัป: หัวกล่องแยก (sticky) + แถวเลื่อนซ้าย-ขวาเอง แล้วซิงก์ระยะเลื่อนให้หัว */
+          <div ref={gridRef} className={lines ? "lig-lines" : "border border-slate-200 rounded-lg"}>
+            <div className="sticky z-20" style={{ top: stickyTop }}>
+              <div ref={headScrollRef} className="overflow-hidden"
+                onWheel={(e) => { if (e.deltaX && bodyScrollRef.current) bodyScrollRef.current.scrollLeft += e.deltaX; }}>
+                <div style={{ minWidth }}>
+                  {headerRow}
+                </div>
+              </div>
+            </div>
+            <div ref={bodyScrollRef} className="overflow-x-auto" onScroll={syncHeadScroll}>
+              <div style={{ minWidth }}>
+                {rowsBlock}
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className={`${stickyHeader ? "overflow-auto" : "overflow-x-auto"} ${lines ? "lig-lines" : "border border-slate-200 rounded-lg"}`}
           style={stickyHeader && maxHeight ? { maxHeight } : undefined}>
           <div ref={gridRef} style={{ minWidth }}>
             {/* header */}
-            <div style={{ gridTemplateColumns: template }}
-              className={`grid ${lines ? "bg-white border-b border-slate-300 text-[11px] font-normal text-slate-400" : "bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500"} ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
-              {selectable && (
-                <span className="flex items-center justify-center">
-                  <input type="checkbox" aria-label="เลือกทั้งหมด" checked={allSelected} disabled={readonly || rows.length === 0}
-                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                    onChange={toggleSelAll} className="h-4 w-4 accent-indigo-600 cursor-pointer" />
-                </span>
-              )}
-              {canDrag && <span />}
-              {columns.map((c) => (
-                <div key={c.key} className={`relative ${lines ? "" : "border-r border-slate-100 last:border-r-0"}`}>
-                  <button type="button" disabled={!c.sortable} onClick={() => c.sortable && toggleSort(c.key)}
-                    className={`w-full px-2 ${dense ? "py-1" : "py-2"} flex items-center gap-1 ${c.align === "right" ? "justify-end" : c.align === "center" ? "justify-center" : ""} ${c.sortable ? "hover:text-slate-800 cursor-pointer" : "cursor-default"}`}>
-                    <span className="truncate" data-colhead={c.key}>{c.header}</span>
-                    {sort?.key === c.key && <span className="text-blue-600">{sort.dir === "asc" ? "▲" : "▼"}</span>}
-                  </button>
-                  {/* resize handle — ลากปรับ / ดับเบิลคลิกขยายพอดี */}
-                  <span onMouseDown={(e) => startResize(c.key, e)} onDoubleClick={() => autoFit(c.key)}
-                    title="ลากเพื่อปรับขนาด · ดับเบิลคลิกเพื่อขยายพอดี — ความกว้างจะใช้กับทุก SKU"
-                    className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-300/60" />
-                </div>
-              ))}
-              {!readonly && <span />}
-            </div>
+            {headerRow}
 
             {/* rows */}
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-              <SortableContext items={rows.map(rowId)} strategy={verticalListSortingStrategy}>
-                {display.map((d, i) =>
-                  d.type === "group" ? (
-                    <div key={`g${i}`} className="flex items-center gap-2 bg-slate-100/70 border-b border-slate-200 px-2 py-1.5 text-xs">
-                      <button type="button" onClick={() => toggleCollapse(d.label)} className="w-5 h-5 flex items-center justify-center text-slate-500 hover:bg-slate-200 rounded">
-                        {collapsed.has(d.label) ? "▸" : "▾"}
-                      </button>
-                      {groupCol?.setValue && !readonly ? (
-                        <input defaultValue={d.label} onBlur={(e) => { if (e.target.value !== d.label) applyGroupEdit(d.label, e.target.value); }}
-                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                          title="แก้ที่นี่ → ทุกบรรทัดในกลุ่มเปลี่ยนตาม"
-                          className="h-7 px-2 text-xs font-semibold text-slate-700 border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      ) : (
-                        <span className="font-semibold text-slate-700">{d.label}</span>
-                      )}
-                      <span className="text-slate-400">· {d.count} รายการ</span>
-                      {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch))}
-                      {d.sums.filter((s) => s.total).map((s) => (
-                        <span key={s.header} className="text-slate-500">· รวม{s.header} <span className="font-semibold text-slate-700 tabular-nums">{fmtNum(s.total)}</span></span>
-                      ))}
-                      {groupNote?.(d.rows, d.label)}
-                    </div>
-                  ) : (
-                    <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
-                      columns={columns} row={d.row} dense={dense} lines={lines} toneClass={rowClassName?.(d.row)}
-                      selectable={selectable} selected={selected.has(rowId(d.row))} onToggleSelect={() => toggleSel(rowId(d.row))}
-                      onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
-                      onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined}
-                      onRequestEdit={readonly && onRequestEdit ? (col) => { pendingFocus.current = { id: rowId(d.row), col }; onRequestEdit(d.row); } : undefined} />
-                  ),
-                )}
-              </SortableContext>
-            </DndContext>
+            {rowsBlock}
           </div>
         </div>
+        )
       )}
 
       {(onAdd || footer || addExtra) && rows.length > 0 && !readonly && (

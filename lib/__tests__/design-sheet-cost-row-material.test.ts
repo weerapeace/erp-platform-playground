@@ -63,3 +63,25 @@ describe("isZeroCostLine", () => {
     expect(isZeroCostLine({ amount: null, item_id: null, item_name: null, qty: null, unit_price: null, width_cm: null })).toBe(false);
   });
 });
+
+// ช่องที่ต้องกรอก (พื้นแดงอ่อนในตารางตีราคา · 2026-11-11)
+import { missingCostFields } from "@/lib/design-sheet-cost-row";
+describe("missingCostFields", () => {
+  it("บรรทัดว่างที่ยังไม่เลือกวัสดุ = ไม่ทาแดง", () => {
+    expect(missingCostFields(line({ item_id: null, item_name: null, group_code: null, width_cm: null, length_cm: null, unit_price: null })).size).toBe(0);
+  });
+  it("พื้นที่÷หน้ากว้าง: ต้องมี กว้าง ยาว หน้ากว้าง ราคา", () => {
+    expect([...missingCostFields(line({ width_cm: null, length_cm: 0, face_width_cm: null, unit_price: null }))].sort())
+      .toEqual(["face_width_cm", "length_cm", "unit_price", "width_cm"]);
+    expect(missingCostFields(line()).size).toBe(0);
+  });
+  it("ชิ้นสำเร็จ: กว้าง ยาว ราคา (ไม่บังคับหน้ากว้าง · ชิ้นว่าง = 1)", () => {
+    const m = missingCostFields(line({ group_code: "fabric_piece", group_name: "ผ้า (ชิ้น)", calc_method: "area_sheet", width_cm: null, pieces: null, face_width_cm: null }));
+    expect([...m]).toEqual(["width_cm"]);
+  });
+  it("ความยาว / นับชิ้น / ใส่เอง", () => {
+    expect([...missingCostFields(line({ calc_method: "length", length_cm: null }))]).toEqual(["length_cm"]);
+    expect([...missingCostFields(line({ calc_method: "count", pieces: null }))]).toEqual(["pieces"]);
+    expect([...missingCostFields(line({ calc_method: null, qty: null }))]).toEqual(["qty"]);
+  });
+});

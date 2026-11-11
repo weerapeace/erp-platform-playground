@@ -63,6 +63,35 @@ export function recomputeCostLine<T extends CostRowCalc>(r: T): T {
 export const isZeroCostLine = (r: Pick<CostLine, "amount" | "item_id" | "item_name" | "qty" | "unit_price" | "width_cm"> & { item_sku_id?: string | null; group_code?: string | null }) => !(Number(r.amount) > 0)
   && !!(r.item_id || r.item_name || r.item_sku_id || r.group_code || Number(r.qty) > 0 || Number(r.unit_price) > 0 || Number(r.width_cm) > 0);
 
+/** ช่องของบรรทัดตีราคาที่อาจต้องกรอก */
+export type CostField = "width_cm" | "length_cm" | "face_width_cm" | "pieces" | "qty" | "unit_price";
+/**
+ * ช่องที่ "ต้องกรอก" แต่ยังว่าง → ตารางตีราคาทาพื้นแดงอ่อน (หน้าคอม + มือถือ · เจ้าของขอ 2026-11-11)
+ *   นับเฉพาะบรรทัดที่เลือกวัสดุแล้ว (บรรทัดว่างที่เพิ่งเพิ่มไม่ทาแดงทั้งแถว) · เฉพาะช่องที่ขาดแล้วคิดยอดไม่ได้:
+ *   ชิ้นสำเร็จ / พื้นที่÷100 = กว้าง ยาว · พื้นที่÷หน้ากว้าง = กว้าง ยาว หน้ากว้าง · ความยาว = ยาว · นับชิ้น = จำนวนชิ้น · อื่น ๆ = ปริมาณ
+ *   + ราคา/หน่วย ทุกแบบ · วาดรูปทรงแบบ "คิดจากพื้นที่จริง" = ไม่ต้องกรอกกว้าง/ยาว (จำนวนชิ้นว่าง = คิดเป็น 1 จึงไม่บังคับ)
+ */
+export function missingCostFields(r: CostRowCalc & { item_id?: string | null; item_name?: string | null; item_sku_id?: string | null }): Set<CostField> {
+  const out = new Set<CostField>();
+  if (!(r.item_id || r.item_name || r.item_sku_id || r.group_code)) return out;
+  const empty = (v: number | null | undefined) => !(Number(v) > 0);
+  const piece = isPieceGroup(r.group_code, r.group_name);
+  const m = r.calc_method;
+  if (piece || m === "area_face" || m === "area_100") {
+    if (lineShapeArea(r.shape) == null) {
+      if (empty(r.width_cm)) out.add("width_cm");
+      if (empty(r.length_cm)) out.add("length_cm");
+    }
+    if (!piece && m === "area_face" && empty(r.face_width_cm)) out.add("face_width_cm");
+  } else if (m === "length") {
+    if (empty(r.length_cm)) out.add("length_cm");
+  } else if (m === "count") {
+    if (empty(r.pieces)) out.add("pieces");
+  } else if (empty(r.qty)) out.add("qty");
+  if (empty(r.unit_price)) out.add("unit_price");
+  return out;
+}
+
 /** "ถ้าสั่ง…" ใต้สรุปต้นทุน = ขั้นจำนวนที่ใช้เสนอราคาบ่อย (หน้าคอม + มือถือ) */
 export const COST_QTY_TIERS = [100, 200, 500, 1000] as const;
 

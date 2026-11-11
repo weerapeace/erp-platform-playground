@@ -38,7 +38,7 @@ import type { Attachment } from "@/app/api/attachments/route";
 import { lineShapeArea, normalizePiece, pieceGeometry, refitLineShape, shapeBox, shapePathD, type LineShape, type Shape } from "@/lib/pattern-shape";
 import type { EditorPiece, PieceMat, RefImage, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import { SheetImagePicker } from "./sheet-image-picker";
-import { COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCostLine, pieceArea, recomputeCostLine, restorePrevItem, withPrevItem } from "@/lib/design-sheet-cost-row";
+import { COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCostLine, missingCostFields, pieceArea, recomputeCostLine, restorePrevItem, withPrevItem } from "@/lib/design-sheet-cost-row";
 import { buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
@@ -127,8 +127,14 @@ type CostRow = CostLine & { key: string; group_code?: string | null };
 const isZeroCostRow = isZeroCostLine;   // ตัวจริง lib/design-sheet-cost-row (มือถือใช้ร่วม)
 const methodLabel = (m: string): string | undefined => ({
   area_face: tr("พื้นที่÷หน้ากว้าง", "Area÷width"), area_100: tr("พื้นที่÷100", "Area÷100"), length: tr("ความยาว", "Length"),
-  count: tr("นับชิ้น", "Count pcs"), manual: tr("พิมพ์เอง", "Manual"),
+  count: tr("นับชิ้น", "Count pcs"), manual: tr("พิมพ์เอง", "Manual"), area_sheet: tr("พื้นที่÷ผืน", "Area÷sheet"),
 } as Record<string, string>)[m];
+/** ไอคอนวิธีคิดในช่อง "ชนิด / สูตร" (แทนบรรทัดที่ 2 · ชี้ = ชื่อวิธีคิด) — ชิ้นสำเร็จ/พื้นที่ = สี่เหลี่ยม · ความยาว = ไม้บรรทัด · นับชิ้น = # · ใส่เอง = ดินสอ */
+const methodIcon = (r: { calc_method: string | null; group_code?: string | null; group_name: string | null }): string => {
+  if (isPieceGroup(r.group_code, r.group_name)) return "i:square";
+  const m = r.calc_method ?? "manual";
+  return m.startsWith("area") ? "i:square" : m === "length" ? "i:ruler-2" : m === "count" ? "i:hash" : "i:pencil";
+};
 
 // หมายเหตุที่บรรทัด "ดึงจาก BOM" ใส่ไว้ = อ้างอิงชื่อวัสดุเดิม → ใช้เป็นคำค้นตั้งต้นตอนเลือกวัสดุ
 const BOM_REF_NOTE_PREFIX = "อ้างอิง BOM: ";
@@ -1628,10 +1634,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const roTip = !fullEdit ? t("อยู่ในโหมดดูอย่างเดียว — ดับเบิลคลิกที่แถวเพื่อแก้ไข (การจัดกลุ่ม/เรียงลำดับใช้ได้ตลอด)", "View-only mode — double-click a row to edit (grouping/sorting always works)") : undefined;
   const cellEdit = fullEdit;
   // ช่องตัวเลข: โหมดแก้ = ช่องกรอก · โหมดดู (บันทึกแล้ว) = ตัวเลขเรียบ แถวเตี้ยลง (เจ้าของขอ 2026-11-07 "บันทึกแล้วเป็น readonly + แคบลง")
-  const numCell = (v: number | null | undefined, set: (v: number | null) => void, placeholder?: string) => (!cellEdit
-    ? <span className="block truncate px-1 text-right text-sm tabular-nums text-slate-700" title={roTip}>{v ?? "—"}</span>
+  const numCell = (v: number | null | undefined, set: (v: number | null) => void, placeholder?: string, need = false) => (!cellEdit
+    ? <span className={`block truncate px-1 text-right text-sm tabular-nums text-slate-700 ${need ? "lig-need" : ""}`} title={need ? t("ต้องกรอกช่องนี้ — ดับเบิลคลิกเพื่อแก้", "This field is required — double-click to edit") : roTip}>{v ?? "—"}</span>
     : <input type="number" min={0} step="any" value={v ?? ""} placeholder={placeholder}
-        onChange={(e) => set(e.target.value === "" ? null : Number(e.target.value))} className={numInputCls} />);
+        onChange={(e) => set(e.target.value === "" ? null : Number(e.target.value))} className={`${numInputCls} ${need ? "lig-need" : ""}`} />);
   const textCell = (v: string | null | undefined, set: (v: string | null) => void, placeholder?: string) => (!cellEdit
     ? <span className="block truncate px-1 text-sm text-slate-600" title={v || roTip}>{v || "—"}</span>
     : <input value={v ?? ""} onChange={(e) => set(e.target.value || null)} placeholder={placeholder}
@@ -1652,79 +1658,75 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           return <span className="block truncate text-sm text-slate-800" title={name || roTip}>{name || <span className="text-slate-300">{t("— ยังไม่เลือกวัสดุ —", "— No material yet —")}</span>}</span>;
         }
         return (
-          <div className="space-y-1">
-            <div className="flex items-center gap-1">
-              <div className="flex-1 min-w-0">
-                {/* แหล่งวัสดุ 2 ทาง: master "วัสดุตีราคา" (เดิม) หรือ "SKU คลังสินค้า" (ดึงประเภท/ราคา/หน่วย/หน้ากว้างมาให้) */}
-                {r.item_sku_id ? (
-                  <ComponentPicker sku={r.item_sku_code ?? ""} name={r.item_name ?? ""}
-                    placeholder={t("— เลือก SKU วัตถุดิบ —", "— Select material SKU —")}
-                    onPick={(c) => u(withPrevItem(r, costSkuPatch(c, priceGroups, r)))} />
-                ) : (
-                <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder={t("— เลือกกลุ่ม / วัสดุ —", "— Select group / material —")}
-                  initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
-                  options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
-                  onChange={(val) => {
-                    const it = priceItems.find((p) => p.id === val);
-                    if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
-                    applyItem(it);
-                  }}
-                  onCreate={fullEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
-                  createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
-                )}
-              </div>
-              {/* สลับแหล่ง: 🏷️ = เลือกจาก SKU คลังสินค้า · 🧮 = กลับไปใช้ master วัสดุตีราคา */}
-              {fullEdit && (
-                <button type="button"
-                  onClick={() => u(r.item_sku_id
-                    ? { item_sku_id: null, item_sku_code: null }
-                    : { item_sku_id: "", item_sku_code: "", item_id: null, price_basis: null })}
-                  title={r.item_sku_id
-                    ? t("กลับไปเลือกจาก “วัสดุตีราคา” (master)", "Back to picking from “Costing materials” (master)")
-                    : t("เลือกวัตถุดิบจากคลังสินค้า (SKU) — ดึงประเภท ราคาซื้อ หน่วย หน้ากว้าง มาให้", "Pick material from inventory (SKU) — fills type, purchase price, unit, roll width")}
-                  className={`h-7 shrink-0 rounded border px-1.5 text-xs ${r.item_sku_id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
-                  🏷️
-                </button>
-              )}
-              {/* ฐานราคาของวัสดุ (ปุ่ม compact มีสัญลักษณ์) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
-              {item && !rowIsPiece(r) && fullEdit && (
-                <BasisPicker value={r.price_basis ?? "manual"}
-                  onChange={(v) => u({ price_basis: v, unit_price: itemBasisPrice(item, v) })}
-                  options={[
-                    { value: "manual", symbol: "✍️", label: t("กรอกเอง", "Manual"), price: item.price_per_unit },
-                    { value: "latest", symbol: "🕐", label: t("ซื้อจริงล่าสุด", "Latest purchase"), price: item.sku_latest_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
-                    { value: "avg", symbol: "≈", label: t("เฉลี่ยจาก SKU", "Average from SKU"), price: item.sku_avg_price, note: t("ยังไม่มี", "None yet") },
-                    { value: "max", symbol: "🔺", label: t("แพงสุดจาก SKU", "Highest from SKU"), price: item.sku_max_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
-                    { value: "min", symbol: "🔻", label: t("ถูกสุดจาก SKU", "Lowest from SKU"), price: item.sku_min_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
-                    { value: "used", symbol: "♻️", label: t("ที่ใช้ตีล่าสุด", "Last used in costing"), price: item.last_used_price, note: t("ยังไม่เคยใช้", "Never used") },
-                  ]} />
-              )}
-              {inGroupMode && fullEdit && (
-                <BasisPicker value={r.price_basis ?? "avg"}
-                  onChange={(v) => u({ price_basis: v, unit_price: g ? groupBasisPrice(g, v) : r.unit_price })}
-                  options={[
-                    { value: "avg", symbol: "≈", label: t("เฉลี่ย", "Average"), price: g?.avg_price ?? null },
-                    { value: "set", symbol: "📌", label: t("ตั้งไว้", "Set price"), price: g?.set_price ?? null, note: t("ยังไม่ตั้ง", "Not set") },
-                    { value: "latest", symbol: "🕐", label: t("ซื้อจริงล่าสุด", "Latest purchase"), price: g?.latest_price ?? null },
-                  ]} />
+          <div className="flex items-center gap-1">
+            <div className="flex-1 min-w-0">
+              {/* แหล่งวัสดุ 2 ทาง: master "วัสดุตีราคา" (เดิม) หรือ "SKU คลังสินค้า" (ดึงประเภท/ราคา/หน่วย/หน้ากว้างมาให้) */}
+              {r.item_sku_id ? (
+                <ComponentPicker sku={r.item_sku_code ?? ""} name={r.item_name ?? ""}
+                  placeholder={t("— เลือก SKU วัตถุดิบ —", "— Select material SKU —")}
+                  onPick={(c) => u(withPrevItem(r, costSkuPatch(c, priceGroups, r)))} />
+              ) : (
+              <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder={t("— เลือกกลุ่ม / วัสดุ —", "— Select group / material —")}
+                initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
+                options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
+                onChange={(val) => {
+                  const it = priceItems.find((p) => p.id === val);
+                  if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
+                  applyItem(it);
+                }}
+                onCreate={fullEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
+                createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
               )}
             </div>
-            {/* ใส่รายละเอียดวัสดุ — ยังไม่มีชนิด/ราคา = ปุ่มเด่นสีส้ม · ครบแล้ว = ไอคอนดินสอโผล่ตอนชี้แถว */}
+            {/* สลับแหล่ง: 🏷️ = เลือกจาก SKU คลังสินค้า · 🧮 = กลับไปใช้ master วัสดุตีราคา */}
+            {fullEdit && (
+              <button type="button"
+                onClick={() => u(r.item_sku_id
+                  ? { item_sku_id: null, item_sku_code: null }
+                  : { item_sku_id: "", item_sku_code: "", item_id: null, price_basis: null })}
+                title={r.item_sku_id
+                  ? t("กลับไปเลือกจาก “วัสดุตีราคา” (master)", "Back to picking from “Costing materials” (master)")
+                  : t("เลือกวัตถุดิบจากคลังสินค้า (SKU) — ดึงประเภท ราคาซื้อ หน่วย หน้ากว้าง มาให้", "Pick material from inventory (SKU) — fills type, purchase price, unit, roll width")}
+                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border text-xs ${r.item_sku_id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
+                <Icon name="tag" />
+              </button>
+            )}
+            {/* ฐานราคาของวัสดุ (ปุ่ม compact มีสัญลักษณ์) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
+            {item && !rowIsPiece(r) && fullEdit && (
+              <BasisPicker value={r.price_basis ?? "manual"}
+                onChange={(v) => u({ price_basis: v, unit_price: itemBasisPrice(item, v) })}
+                options={[
+                  { value: "manual", symbol: "✍️", label: t("กรอกเอง", "Manual"), price: item.price_per_unit },
+                  { value: "latest", symbol: "🕐", label: t("ซื้อจริงล่าสุด", "Latest purchase"), price: item.sku_latest_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
+                  { value: "avg", symbol: "≈", label: t("เฉลี่ยจาก SKU", "Average from SKU"), price: item.sku_avg_price, note: t("ยังไม่มี", "None yet") },
+                  { value: "max", symbol: "🔺", label: t("แพงสุดจาก SKU", "Highest from SKU"), price: item.sku_max_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
+                  { value: "min", symbol: "🔻", label: t("ถูกสุดจาก SKU", "Lowest from SKU"), price: item.sku_min_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
+                  { value: "used", symbol: "♻️", label: t("ที่ใช้ตีล่าสุด", "Last used in costing"), price: item.last_used_price, note: t("ยังไม่เคยใช้", "Never used") },
+                ]} />
+            )}
+            {inGroupMode && fullEdit && (
+              <BasisPicker value={r.price_basis ?? "avg"}
+                onChange={(v) => u({ price_basis: v, unit_price: g ? groupBasisPrice(g, v) : r.unit_price })}
+                options={[
+                  { value: "avg", symbol: "≈", label: t("เฉลี่ย", "Average"), price: g?.avg_price ?? null },
+                  { value: "set", symbol: "📌", label: t("ตั้งไว้", "Set price"), price: g?.set_price ?? null, note: t("ยังไม่ตั้ง", "Not set") },
+                  { value: "latest", symbol: "🕐", label: t("ซื้อจริงล่าสุด", "Latest purchase"), price: g?.latest_price ?? null },
+                ]} />
+            )}
+            {/* รายละเอียดวัสดุ = ไอคอนท้ายบรรทัด (เดิมเป็นปุ่มบรรทัดที่ 2 ทำให้แถวสูง · เจ้าของขอ 2026-11-11) — ยังไม่มีชนิด/ราคา = ไอคอนเตือนสีส้ม */}
             {r.item_id && fullEdit && (rowNeedsItemDetails(r) ? (
               <button type="button" onClick={() => void openPmForRef.current(r.item_id as string, r.item_name ?? "")}
-                title={t("ใส่ชนิด ราคา หน่วย หน้ากว้าง ของวัสดุนี้ — บันทึกแล้วแถวนี้คำนวณให้เอง", "Set this material's type, price, unit, roll width — the line recalculates after saving")}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-800 hover:underline">
-                <Icon name="edit" /> {t("ใส่รายละเอียด (ยังไม่มีชนิด/ราคา)", "Add details (no type/price yet)")}
-              </button>
+                title={t("วัสดุนี้ยังไม่มีชนิด/ราคา — กดเพื่อใส่ชนิด ราคา หน่วย หน้ากว้าง (บันทึกแล้วแถวนี้คำนวณให้เอง)", "This material has no type/price — click to set type, price, unit, roll width (this line recalculates)")}
+                aria-label={t("ใส่รายละเอียดวัสดุ", "Add material details")}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-amber-600 hover:bg-amber-50"><Icon value="i:alert-circle" /></button>
             ) : (
               <button type="button" onClick={() => void openPmForRef.current(r.item_id as string, r.item_name ?? "")}
                 title={t("แก้รายละเอียดวัสดุนี้ (ชนิด ราคา หน่วย หน้ากว้าง)", "Edit this material's details (type, price, unit, roll width)")}
-                className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-blue-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100">
-                <Icon name="edit" /> {t("รายละเอียดวัสดุ", "Material details")}
-              </button>
+                aria-label={t("รายละเอียดวัสดุ", "Material details")}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-blue-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"><Icon name="edit" /></button>
             ))}
-            {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
-              <div className="text-[10px] text-amber-600">{t(`⚠ ราคาเป็น ${item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”`, `⚠ Price is in ${item.sku_latest_currency} — convert to THB yourself in “Price/unit”`)}</div>
+          {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-amber-600" title={t(`⚠ ราคาเป็น ${item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”`, `⚠ Price is in ${item.sku_latest_currency} — convert to THB yourself in “Price/unit”`)}><Icon value="i:alert-triangle" /></span>
             )}
           </div>
         );
@@ -1733,8 +1735,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       groupLabel: (r) => r.group_name || t("ไม่ระบุชนิด", "Unspecified type"),
       render: (r) => (!fullEdit
         ? <span className="block truncate px-1 text-xs text-slate-500" title={methodLabel(r.calc_method ?? "manual") ?? r.calc_method ?? undefined}>{r.group_name ?? "—"}</span>
-        : <span className="block px-1 text-xs text-slate-500 leading-tight">{r.group_name ?? "—"}<br />
-          <span className="text-[10px] text-slate-300">{methodLabel(r.calc_method ?? "manual") ?? r.calc_method}</span></span>
+        : <span className="flex min-w-0 items-center gap-1 px-1 text-xs text-slate-500" title={methodLabel(r.calc_method ?? "manual") ?? r.calc_method ?? undefined}>
+            <Icon value={methodIcon(r)} className="shrink-0 text-[13px] text-slate-400" /><span className="truncate">{r.group_name ?? "—"}</span></span>
       ) },
     { key: "width_cm", header: t("กว้าง (ซม.)", "Width (cm)"), width: cw(112, 70), align: "right", sortable: true, getValue: (r) => r.width_cm,
       render: (r, u) => {
@@ -1748,7 +1750,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             title={r.shape
               ? t(`รูปทรงวาด${r.shape.name ? ` "${r.shape.name}"` : ""}${r.shape.allow ? ` · เผื่อพับ ${r.shape.allow} ซม.` : ""}${r.shape.holes?.length ? ` · เจาะ ${r.shape.holes.length} รู` : ""} · พื้นที่ตัด ${Math.round(pieceGeometry(r.shape).cutArea)} cm² · คิดผ้าจาก${r.shape.basis === "area" ? "พื้นที่จริง" : "กรอบสี่เหลี่ยม"} — กดเพื่อแก้รูป`, `Drawn shape${r.shape.name ? ` "${r.shape.name}"` : ""}${r.shape.allow ? ` · allowance ${r.shape.allow} cm` : ""}${r.shape.holes?.length ? ` · ${r.shape.holes.length} holes` : ""} · cut area ${Math.round(pieceGeometry(r.shape).cutArea)} cm² · fabric from ${r.shape.basis === "area" ? "actual area" : "bounding box"} — click to edit`)
               : t("วาดรูปทรงชิ้นนี้ (สี่เหลี่ยม วงกลม ปากกา หรือวางจาก Illustrator)", "Draw this piece (rectangle, circle, pen, or paste from Illustrator)")}
-            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border ${r.shape ? "border-blue-300 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:border-blue-300 hover:text-blue-600"} disabled:cursor-default`}>
+            className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border ${r.shape ? "border-blue-300 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:border-blue-300 hover:text-blue-600"} disabled:cursor-default`}>
             {r.shape ? <ShapeMini shape={r.shape.shape} holes={r.shape.holes} /> : <Icon value="i:vector-bezier" className="text-[14px]" />}
           </button>
         ) : null;
@@ -1756,17 +1758,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         return (
           <div className="flex items-center gap-1">
             {btn}
-            {showNum && <div className="min-w-0 flex-1">{numCell(r.width_cm, (v) => u({ width_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, v, r.length_cm) } : {}) }))}</div>}
+            {showNum && <div className="min-w-0 flex-1">{numCell(r.width_cm, (v) => u({ width_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, v, r.length_cm) } : {}) }), undefined, missingCostFields(r).has("width_cm"))}</div>}
           </div>
         );
       } },
     { key: "length_cm", header: t("ยาว (ซม.)", "Length (cm)"), width: cw(84, 60), align: "right", sortable: true, getValue: (r) => r.length_cm,
       render: (r, u) => usesLength(r.calc_method) || rowIsPiece(r) || !!r.shape
-        ? numCell(r.length_cm, (v) => u({ length_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, r.width_cm, v) } : {}) }))
+        ? numCell(r.length_cm, (v) => u({ length_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, r.width_cm, v) } : {}) }), undefined, missingCostFields(r).has("length_cm"))
         : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้ความยาว", "This type doesn't use length")}></span> },
     { key: "pieces", header: t("จำนวนชิ้น", "Pcs"), width: cw(80, 56), align: "right", sortable: true, getValue: (r) => r.pieces,
       render: (r, u) => usesPieces(r.calc_method) || rowIsPiece(r) || !!r.shape   // ชิ้นที่วาด/ชนิดชิ้น = มีจำนวนชิ้นเหมือนบรรทัดปกติ
-        ? numCell(r.pieces, (v) => u({ pieces: v }))
+        ? numCell(r.pieces, (v) => u({ pieces: v }), undefined, missingCostFields(r).has("pieces"))
         : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้จำนวนชิ้น", "This type doesn't use pcs")}></span> },
     { key: "waste_percent", header: t("เผื่อเสีย %", "Waste %"), width: cw(84, 60), align: "right", sortable: true, getValue: (r) => r.waste_percent,
       render: (r, u) => usesWaste(r.calc_method) || rowIsPiece(r) || !!r.shape   // ชิ้นที่วาด/ชนิดชิ้น = มีเผื่อเสียเหมือนบรรทัดปกติ
@@ -1777,17 +1779,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         // ชนิดชิ้น: ไม่ใช้หน้ากว้าง — โชว์พื้นที่ cm² (กว้าง×ยาว) แทนไว้อ้างอิง
         ? <span className="block px-1 text-right text-xs text-violet-600" title={t("พื้นที่ = กว้าง×ยาว (อ้างอิง ไม่ได้คูณราคา)", "Area = width×length (reference only, not multiplied by price)")}>{pieceArea(r) != null ? `${fmtQty(pieceArea(r))} cm²` : "—"}</span>
         : r.calc_method === "area_face"
-        ? numCell(r.face_width_cm, (v) => u({ face_width_cm: v }))
+        ? numCell(r.face_width_cm, (v) => u({ face_width_cm: v }), undefined, missingCostFields(r).has("face_width_cm"))
         : <span className="block h-7"></span> },
     { key: "qty", header: t("ปริมาณ", "Qty"), width: cw(96, 72), align: "right", summable: true, sortable: true, getValue: (r) => r.qty,
       render: (r, u) => isManualM(r.calc_method) && fullEdit
         ? <input type="number" min={0} step="any" value={r.qty ?? ""} placeholder={t("พิมพ์เอง", "Type in")}
-            onChange={(e) => u({ qty: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
+            onChange={(e) => u({ qty: e.target.value === "" ? null : Number(e.target.value) })} className={`${numInputCls} ${missingCostFields(r).has("qty") ? "lig-need" : ""}`} />
         : <span className="block px-1 text-right tabular-nums font-medium text-slate-700 cursor-help underline decoration-dotted decoration-slate-300" title={calcTooltip(r)}>{fmtQty(r.qty)}</span> },
     { key: "uom", header: t("หน่วย", "Unit"), width: cw(70, 52), sortable: true, getValue: (r) => r.uom,
       render: (r, u) => textCell(r.uom, (v) => u({ uom: v })) },
     { key: "unit_price", header: t("ราคา/หน่วย", "Price/unit"), width: cw(96, 80), align: "right", sortable: true, getValue: (r) => r.unit_price,
-      render: (r, u) => numCell(r.unit_price, (v) => u({ unit_price: v })) },
+      render: (r, u) => numCell(r.unit_price, (v) => u({ unit_price: v }), undefined, missingCostFields(r).has("unit_price")) },
     { key: "amount", header: t("รวม (บาท)", "Total (THB)"), width: cw(104, 92), align: "right", summable: true, sortable: true, getValue: (r) => r.amount,
       // รวม = 0 (มีวัสดุ/ตัวเลขแล้วแต่ยังไม่มียอด) = ตัวแดง + ไอคอนเตือน · แถวเป็นพื้นแดง (rowClassName) — เจ้าของขอ 2026-11-07
       render: (r) => (isZeroCostRow(r)
@@ -2684,6 +2686,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               ) : (
               <LineItemsGrid<CostRow>
                 variant="lines"
+                stickyTop={0}   // หัวตารางค้างบนสุดของป๊อปอัปจนเลื่อนพ้นตาราง (เจ้าของขอ 2026-11-11)
                 rows={curLines}
                 columns={costCols}
                 onChange={(rows) => {
@@ -2694,7 +2697,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 rowId={(r) => r.key}
                 readonly={!fullEdit}
                 dense={!fullEdit}
-                rowClassName={(r) => (isZeroCostRow(r) ? "bg-rose-50 hover:bg-rose-100/70" : undefined)}
+                /* แถวยอด 0: แดงเฉพาะช่องที่ขาด (missingCostFields) + ช่องรวมตัวแดง — ไม่ทาทั้งแถวแล้ว (เจ้าของขอ 2026-11-11) */
                 // ดับเบิลคลิกแถวตอนดูอย่างเดียว → เข้าโหมดแก้ไข (เหมือนกด ✏️) แล้วเคอร์เซอร์ไปช่องที่คลิก (เจ้าของขอ 2026-11-03)
                 onRequestEdit={canEdit ? () => setEditing(true) : undefined}
                 groupByOptions={[{ key: "group", label: t("ชนิดวัสดุ", "Material type") }, { key: "item", label: t("วัสดุ", "Material") }, { key: "uom", label: t("หน่วย", "Unit") }]}
