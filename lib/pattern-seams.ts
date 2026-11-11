@@ -11,14 +11,24 @@
  *   เย็บบางช่วง (2026-11-11): ด้านมี t0/t1 = เย็บแค่ช่วงนั้นของด้าน (ซม. จากจุดเริ่มของด้าน ตามแนวเส้น) → ขอบเดียวมีได้หลายตะเข็บ (ห้ามทับกัน)
  *     ชิ้นถูกแก้จนขอบสั้นกว่าช่วง → ตัดช่วงให้อยู่บนขอบ · ไม่เหลือช่วงเลย = "ต้องเย็บใหม่"
  *     ease = ตั้งใจให้สองด้านยาวต่างกัน (รูด / ย่น) → ไม่นับเป็นข้อผิดพลาด
+ *   เย็บกับเส้นในชิ้น (2026-11-11): ด้านมี inner = รหัสเส้นในของชิ้นนั้น → เส้นของด้าน = เส้นในทั้งเส้น (ไม่ใช้ from/count/n)
+ *     ฟังก์ชันที่รับ "รูปชิ้น" รับได้ทั้งรูป (Shape) และ { shape, inner } — ต้องส่งแบบหลังถ้าอยากให้ด้านที่อยู่บนเส้นในหาเส้นเจอ
+ *     เส้นในถูกลบ = ตะเข็บนั้น "ต้องเย็บใหม่" · ตะเข็บที่มีด้านบนเส้นใน นับเป็นตะเข็บบางช่วง (ไม่ใช้หาทรงกระเป๋า)
  *
  * ใช้ที่: components/pattern-studio/sew-view · lib/pattern-project · เทสต์ lib/__tests__/pattern-seams.test.ts
  * คู่มือ: docs/pattern-studio.md
  */
-import { flattenShape, type Pt, type Shape } from "@/lib/pattern-shape";
+import { flattenShape, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
 
 export type PieceEdge = { i: number; pts: Pt[]; len: number };
-export type SeamSide = { pid: string; from: number; count: number; n: number; t0?: number; t1?: number };
+export type SeamSide = { pid: string; from: number; count: number; n: number; t0?: number; t1?: number; inner?: string };
+/** รูปชิ้นสำหรับงานตะเข็บ: รูปอย่างเดียว หรือรูป + เส้นในชิ้น */
+export type SeamPiece = Shape | { shape: Shape; inner?: InnerLine[] | null };
+const shapeOf = (p: SeamPiece): Shape => ("k" in p ? p : p.shape);
+const innerOf = (p: SeamPiece, id: string): InnerLine | null => ("k" in p ? null : (p.inner ?? []).find((l) => l.id === id) ?? null);
+/** ด้านที่อยู่บนเส้นในชิ้น (ไม่ใช่ขอบ) */
+export const isInnerSide = (side: SeamSide): boolean => typeof side.inner === "string" && side.inner.length > 0;
+const hasRange = (side: SeamSide): boolean => side.t0 != null && side.t1 != null;
 /** วิธีเย็บของตะเข็บ (ค่ารายตะเข็บแบบ CLO · 2026-11-10) — ตอนนี้เป็นข้อมูลที่จดไว้ + ออกในตารางตะเข็บของใบพิมพ์ ยังไม่มีผลกับภาพ 3D */
 export type SeamKind = "turned" | "lapped" | "bound";
 export const SEAM_KINDS: { key: SeamKind; th: string; en: string; hintTh: string; hintEn: string }[] = [
@@ -67,13 +77,14 @@ export function pieceEdges(shape: Shape): PieceEdge[] {
 }
 
 /** ด้านนี้เย็บแค่บางช่วง (มี t0/t1) */
-export const isPartialSide = (side: SeamSide): boolean => side.t0 != null && side.t1 != null;
+export const isPartialSide = (side: SeamSide): boolean => hasRange(side) || isInnerSide(side);
 /** ตะเข็บนี้มีด้านที่เย็บบางช่วง → ไม่ใช้ในการประกอบทรงตามกติกา (lib/pattern-assembly) แต่ใช้ในภาพเย็บติด (lib/pattern-sewn) */
 export const isPartialSeam = (seam: Seam): boolean => isPartialSide(seam.a) || isPartialSide(seam.b);
 
 /** จุดของด้านตะเข็บแบบเต็มด้าน (ขอบที่ติดกันต่อเป็นเส้นเดียว · ไม่สนช่วง) · ใช้ไม่ได้แล้ว (จำนวนขอบเปลี่ยน / ลำดับเกิน) = null */
-export function sideFullPoints(shape: Shape, side: SeamSide): Pt[] | null {
-  const E = pieceEdges(shape);
+export function sideFullPoints(piece: SeamPiece, side: SeamSide): Pt[] | null {
+  if (isInnerSide(side)) { const l = innerOf(piece, side.inner as string); return l && l.pts.length >= 2 ? l.pts : null; }
+  const E = pieceEdges(shapeOf(piece));
   if (!E.length || E.length !== side.n || side.from < 0 || side.from >= E.length || side.count < 1 || side.count > E.length) return null;
   const out: Pt[] = [];
   for (let k = 0; k < side.count; k++) { const e = E[(side.from + k) % E.length]; out.push(...(k ? e.pts.slice(1) : e.pts)); }
@@ -95,18 +106,18 @@ export function subLine(P: Pt[], t0: number, t1: number): Pt[] {
   return out;
 }
 /** ช่วงที่เย็บจริงของด้าน (ตัดให้อยู่บนเส้นปัจจุบัน) + ความยาวเต็มของด้าน · ด้านใช้ไม่ได้แล้ว = null */
-export function sideRange(shape: Shape, side: SeamSide): { t0: number; t1: number; full: number } | null {
+export function sideRange(shape: SeamPiece, side: SeamSide): { t0: number; t1: number; full: number } | null {
   const P = sideFullPoints(shape, side);
   if (!P) return null;
   const full = lenOf(P);
-  if (!isPartialSide(side)) return { t0: 0, t1: full, full };
+  if (!hasRange(side)) return { t0: 0, t1: full, full };
   const t0 = Math.max(0, side.t0 as number), t1 = Math.min(full, side.t1 as number);
   return t1 - t0 < 0.05 ? null : { t0, t1, full };
 }
 /** จุดของด้านตะเข็บ (เฉพาะช่วงที่เย็บ ถ้าเย็บบางช่วง) · ใช้ไม่ได้แล้ว (จำนวนขอบเปลี่ยน / ลำดับเกิน / ช่วงหลุดจากขอบ) = null */
-export function sidePoints(shape: Shape, side: SeamSide): Pt[] | null {
+export function sidePoints(shape: SeamPiece, side: SeamSide): Pt[] | null {
   const P = sideFullPoints(shape, side);
-  if (!P || !isPartialSide(side)) return P;
+  if (!P || !hasRange(side)) return P;
   const r = sideRange(shape, side);
   if (!r) return null;
   const out = subLine(P, r.t0, r.t1);
@@ -133,7 +144,7 @@ export function edgeBusy(seams: Seam[], pid: string, i: number, n: number, edgeL
   for (const x of seams) for (const which of ["a", "b"] as const) {
     const s = x[which];
     if (s.pid !== pid || s.n !== n || !sideHasEdge(s, i) || (skip && skip.id === x.id && skip.which === which)) continue;
-    if (s.count === 1 && isPartialSide(s)) out.push([Math.max(0, s.t0 as number), Math.min(edgeLen, s.t1 as number)]);
+    if (s.count === 1 && hasRange(s)) out.push([Math.max(0, s.t0 as number), Math.min(edgeLen, s.t1 as number)]);
     else out.push([0, edgeLen]);
   }
   return out;
@@ -145,10 +156,11 @@ export function rangedSide(pid: string, i: number, n: number, a: number, b: numb
   const t0 = Math.round(Math.max(0, a) * 100) / 100, t1 = Math.round(Math.min(len, b) * 100) / 100;
   return t0 <= 0.005 && t1 >= len - 0.005 ? { pid, from: i, count: 1, n } : { pid, from: i, count: 1, n, t0, t1 };
 }
-export function sideLength(shape: Shape, side: SeamSide): number | null { const P = sidePoints(shape, side); return P ? lenOf(P) : null; }
+export function sideLength(shape: SeamPiece, side: SeamSide): number | null { const P = sidePoints(shape, side); return P ? lenOf(P) : null; }
 
 /** ขอบลำดับ i อยู่ในด้านนี้ไหม */
 export function sideHasEdge(side: SeamSide, i: number): boolean {
+  if (isInnerSide(side)) return false;                       // ด้านบนเส้นใน ไม่ได้กินขอบของชิ้น
   for (let k = 0; k < side.count; k++) if ((side.from + k) % side.n === i) return true;
   return false;
 }
@@ -158,14 +170,14 @@ export function sideHasEdge(side: SeamSide, i: number): boolean {
  * คืนด้านใหม่ · ไม่ติดกัน/ซ้ำ = null
  */
 export function extendSide(side: SeamSide, i: number): SeamSide | null {
-  if (sideHasEdge(side, i) || side.count >= side.n) return null;
+  if (isInnerSide(side) || sideHasEdge(side, i) || side.count >= side.n) return null;
   if (i === (side.from + side.count) % side.n) return { ...side, count: side.count + 1 };
   if (i === (side.from - 1 + side.n) % side.n) return { ...side, from: i, count: side.count + 1 };
   return null;
 }
 
 /** ตรวจตะเข็บ: ความยาวสองด้านเท่ากันไหม · ชิ้นหาย/จำนวนขอบเปลี่ยน = broken */
-export function checkSeam(shapes: Map<string, Shape> | Record<string, Shape>, seam: Seam, tol = SEAM_TOL): SeamCheck {
+export function checkSeam(shapes: Map<string, SeamPiece> | Record<string, SeamPiece>, seam: Seam, tol = SEAM_TOL): SeamCheck {
   const get = (pid: string) => (shapes instanceof Map ? shapes.get(pid) : shapes[pid]);
   const sa = get(seam.a.pid), sb = get(seam.b.pid);
   const la = sa ? sideLength(sa, seam.a) : null, lb = sb ? sideLength(sb, seam.b) : null;
@@ -188,6 +200,7 @@ function cleanSide(raw: unknown, pids: Set<string>): SeamSide | null {
   const pid = typeof r.pid === "string" ? r.pid : "", from = int(r.from), count = int(r.count), n = int(r.n);
   if (!pid || !pids.has(pid) || from == null || count == null || n == null) return null;
   if (n < 1 || n > 4000 || from < 0 || from >= n || count < 1 || count > n) return null;
+  if (typeof r.inner === "string" && /^[\w-]{1,40}$/.test(r.inner)) return { pid, from: 0, count: 1, n: 1, inner: r.inner };
   const t0 = fin(r.t0), t1 = fin(r.t1);
   if (t0 != null && t1 != null && t0 >= 0 && t1 - t0 >= 0.05 && t1 <= 5000) return { pid, from, count, n, t0: Math.round(t0 * 100) / 100, t1: Math.round(t1 * 100) / 100 };
   return { pid, from, count, n };

@@ -35,9 +35,43 @@ export type ShapeBasis = "box" | "area";
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
 /** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
-export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null };
+/**
+ * เส้นในชิ้น (2026-11-11) — เส้นที่อยู่ "ข้างใน" ชิ้น ไม่ใช่เส้นตัด: บอกตำแหน่งให้ช่าง และเป็นที่ให้ชิ้นอื่นมาเย็บ
+ *   sew = แนวเย็บ (เช่น แนวเย็บช่องใส่ของ 3 ด้าน) · slit = ช่องเจาะ (ช่องซิป) · fold = แนวพับ · mark = ตำแหน่ง/เครื่องหมาย
+ *   pts = จุดของเส้น (พิกัดเดียวกับรูปชิ้น) — ย้าย/ย่อขยาย/หมุน/กลับด้านชิ้น เส้นในไปตามชิ้น
+ */
+export type InnerKind = "sew" | "slit" | "fold" | "mark";
+export const INNER_KINDS: { key: InnerKind; th: string; en: string }[] = [
+  { key: "sew", th: "แนวเย็บ", en: "Sewing line" }, { key: "slit", th: "ช่องเจาะ (ซิป)", en: "Slit (zip)" },
+  { key: "fold", th: "แนวพับ", en: "Fold line" }, { key: "mark", th: "ตำแหน่ง", en: "Position mark" },
+];
+export type InnerLine = { id: string; kind: InnerKind; pts: Pt[]; name?: string };
+export const MAX_INNER_LINES = 40;
+/** ตรวจเส้นในชิ้นจากหน้าจอ/ฐานข้อมูล — ผิดรูปแบบ / จุดน้อยกว่า 2 / ยาวเกือบศูนย์ = ทิ้งเส้นนั้น */
+export function cleanInnerLines(raw: unknown): InnerLine[] {
+  if (!Array.isArray(raw)) return [];
+  const out: InnerLine[] = [];
+  for (const x of raw.slice(0, MAX_INNER_LINES)) {
+    if (!x || typeof x !== "object") continue;
+    const r = x as Record<string, unknown>;
+    const id = typeof r.id === "string" && /^[\w-]{1,40}$/.test(r.id) ? r.id : "";
+    const kind = INNER_KINDS.find((k) => k.key === r.kind)?.key;
+    const pts: Pt[] = [];
+    for (const q of (Array.isArray(r.pts) ? r.pts : []).slice(0, 60)) {
+      if (!Array.isArray(q) || q.length !== 2) continue;
+      const px = fin(q[0]), py = fin(q[1]);
+      if (px != null && py != null && Math.abs(px) < 1e5 && Math.abs(py) < 1e5) pts.push([r3(px), r3(py)]);
+    }
+    let len = 0; for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (!id || !kind || pts.length < 2 || len < 0.05 || out.some((o) => o.id === id)) continue;
+    const name = typeof r.name === "string" ? r.name.trim().slice(0, 40) : "";
+    out.push({ id, kind, pts, ...(name ? { name } : {}) });
+  }
+  return out;
+}
+export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null; inner?: InnerLine[] | null };
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
 export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };
 /** ชิ้นงาน 1 ชิ้น = เส้นรอบนอก + รูเจาะ + เผื่อพับ */
@@ -215,11 +249,12 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   const pt = (v: unknown): Pt | null => (Array.isArray(v) && v.length === 2 && fin(v[0]) != null && fin(v[1]) != null && Math.abs(Number(v[0])) < 1e5 && Math.abs(Number(v[1])) < 1e5 ? [Number(v[0]), Number(v[1])] : null);
   const grain = Array.isArray(o.grain) && o.grain.length === 2 ? o.grain.map(pt) : null;
   const notches = Array.isArray(o.notches) ? o.notches.slice(0, 100).map(pt).filter((q): q is Pt => !!q) : [];
-  const norm = normalizePiece(shape, holes, { grain: grain && grain[0] && grain[1] ? (grain as Pt[]) : null, notches });
+  const norm = normalizePiece(shape, holes, { grain: grain && grain[0] && grain[1] ? (grain as Pt[]) : null, notches, inner: cleanInnerLines(o.inner) });
   const out: LineShape = { v: 1, shape: norm.shape, basis: o.basis === "area" ? "area" : "box" };
   if (norm.holes.length) out.holes = norm.holes;
   if (norm.grain && norm.grain.length === 2) out.grain = [norm.grain[0], norm.grain[1]];
   if (norm.notches?.length) out.notches = norm.notches;
+  if (norm.inner?.length) out.inner = norm.inner;
   const allow = cleanAllow(o.allow);
   if (allow) out.allow = allow;
   const per = edgeAllowances(norm.shape, o.allowEdges, allow);
@@ -710,6 +745,7 @@ function mapMarks<T>(p: T, f: (q: Pt) => Pt): T {
   const o: PieceMarks = {};
   if (m.grain && m.grain.length === 2) o.grain = [f(m.grain[0]), f(m.grain[1])];
   if (m.notches?.length) o.notches = m.notches.map(f);
+  if (m.inner?.length) o.inner = m.inner.map((l) => ({ ...l, pts: l.pts.map(f) }));
   return Object.keys(o).length ? { ...p, ...o } : p;
 }
 
@@ -728,13 +764,14 @@ export function fitPiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, x: n
 }
 
 /** เลื่อนชิ้น (เส้นนอก+รู) ให้กรอบเส้นนอกเริ่มที่ 0,0 + ปัดทศนิยม (ก่อนเก็บ) */
-export function normalizePiece(shape: Shape, holes: Shape[] = [], marks: PieceMarks = {}): { shape: Shape; holes: Shape[]; grain?: Pt[]; notches?: Pt[] } {
+export function normalizePiece(shape: Shape, holes: Shape[] = [], marks: PieceMarks = {}): { shape: Shape; holes: Shape[]; grain?: Pt[]; notches?: Pt[]; inner?: InnerLine[] } {
   const b = shapeBox(shape);
   const sh = ([x, y]: Pt): Pt => [r3(x - b.x), r3(y - b.y)];
   return {
     shape: normalizeShape(shape), holes: holes.map((h) => roundShape(moveShape(h, -b.x, -b.y))),
     ...(marks.grain && marks.grain.length === 2 ? { grain: marks.grain.map(sh) } : {}),
     ...(marks.notches?.length ? { notches: marks.notches.map(sh) } : {}),
+    ...(marks.inner?.length ? { inner: marks.inner.map((l) => ({ ...l, pts: l.pts.map(sh) })) } : {}),
   };
 }
 function roundShape(s: Shape): Shape {

@@ -9,7 +9,7 @@
  *
  * ใช้ที่: app/api/pattern-projects · app/pattern-studio · เทสต์ lib/__tests__/pattern-project.test.ts
  */
-import { cleanAllow, cleanFoldEdges, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type Pt, type Shape } from "@/lib/pattern-shape";
+import { cleanAllow, cleanFoldEdges, cleanInnerLines, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
 import type { PatternLineInput } from "@/lib/pattern-sheet";
 import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, isPartialSide, pieceEdges, seamLabel, sideRange, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
@@ -35,6 +35,8 @@ export type ProjectPiece = {
   mats?: PieceMaterial[];
   /** ค่าของชิ้นแบบ CLO (รหัส · ชนิด · แผ่นเสริม · ปาดขอบ · แข็งอยู่ทรง) — ไม่มี = ไม่ได้ตั้ง */
   info?: PieceInfo;
+  /** เส้นในชิ้น (แนวเย็บ / ช่องเจาะ / แนวพับ / ตำแหน่ง · พิกัดเดียวกับ shape) — ไม่มี = ไม่มีเส้นใน */
+  inner?: InnerLine[];
 };
 /** ชนิดชิ้น */
 export type PieceRole = "body" | "lining" | "reinforce" | "part";
@@ -136,7 +138,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
     const at = pt(r.at);
     seen.add(pid);
     const allow = cleanAllow(r.allow), per = edgeAllowances(shape, r.allowEdges, allow);
-    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta), info = cleanPieceInfo(r.info);
+    const fold = cleanFoldEdges(shape, r.foldEdges), meta = cleanEdgeMeta(shape, r.edgeMeta), info = cleanPieceInfo(r.info), inner = cleanInnerLines(r.inner);
     const mats: PieceMaterial[] = [];
     for (const m of (Array.isArray(r.mats) ? r.mats : []).slice(0, 8)) {
       const o = m as Record<string, unknown> | null;
@@ -144,7 +146,7 @@ export function cleanProjectPieces(raw: unknown): ProjectPiece[] {
       if (mid && nm && !mats.some((y) => y.id === mid)) mats.push({ id: mid, name: nm, ...(grp ? { group: grp } : {}) });
     }
     out.push({
-      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}), ...(info ? { info } : {}),
+      pid, shape, holes, notches, ...(per ? { allowEdges: per } : {}), ...(fold ? { foldEdges: fold } : {}), ...(meta ? { edgeMeta: meta } : {}), ...(mats.length ? { mats } : {}), ...(info ? { info } : {}), ...(inner.length ? { inner } : {}),
       name: String(r.name ?? "").trim().slice(0, 60),
       count: Math.min(999, Math.max(1, Math.round(fin(r.count) ?? 1))),
       allow,
@@ -185,12 +187,12 @@ export function projectThumb(pieces: ProjectPiece[]): string | null {
 /** ชิ้นของแพทเทิร์น → "บรรทัด" ของตัวพิมพ์/ส่งออกกลาง (lib/pattern-sheet · PatternPrintView) — ชื่อชิ้นไปอยู่ช่องชื่อ · ตัดกี่ชิ้น = จำนวนของชิ้น */
 export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area" = "box", group = "ชิ้นแพทเทิร์น"): PatternLineInput[] {
   return pieces.flatMap((p, i) => {
-    const n = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches });
+    const n = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches, inner: p.inner });
     const pieceName = p.name || `ชิ้น ${i + 1}`;
     const shape = (withName: boolean) => ({
       v: 1, shape: n.shape, basis, ...(withName ? { name: pieceName } : {}),
       ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}),
-      ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}),
+      ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}), ...(n.inner?.length ? { inner: n.inner } : {}),
     });
     // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
     const note = p.info?.code || null;   // รหัสชิ้นออกในช่องหมายเหตุของตารางชิ้น
@@ -228,12 +230,13 @@ const pieceTitle = (pieces: ProjectPiece[], pid: string) => { const k = pieces.f
 const f1 = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
 /** ชื่อด้านของตะเข็บในใบพิมพ์ — เย็บบางช่วง = บอกช่วง (ซม. จากจุดเริ่มของขอบ) */
 const sideTitle = (pieces: ProjectPiece[], x: SeamSide) => {
+  if (x.inner) { const l = pieces.find((p) => p.pid === x.pid)?.inner?.find((q) => q.id === x.inner); return `${pieceTitle(pieces, x.pid)} · เส้นใน${l?.name ? ` ${l.name}` : ""}`; }
   const base = `${pieceTitle(pieces, x.pid)} · ${x.count > 1 ? `ขอบ ${x.from + 1}–${((x.from + x.count - 1) % x.n) + 1}` : `ขอบ ${x.from + 1}`}`;
   const shape = pieces.find((p) => p.pid === x.pid)?.shape, r = shape && isPartialSide(x) ? sideRange(shape, x) : null;
   return r ? `${base} ช่วง ${f1(r.t0)}–${f1(r.t1)} ซม.` : base;
 };
 export function projectSeamRows(pieces: ProjectPiece[], seams: Seam[]): SeamRow[] {
-  const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
+  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
   return seams.map((x, i) => {
     const c = checkSeam(shapes, x);
     return {

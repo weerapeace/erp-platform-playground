@@ -9,6 +9,7 @@
  *   ถ้าเลือกแกนได้หลายแบบ (เช่น ทรงกล่องก้นเหลี่ยม) เลือกแบบที่ "แผ่นหน้า" ใหญ่ที่สุด และแผ่นที่มีหูติดอยู่ก่อน
  *   หู / แผ่นหลังช่องโชว์ ไม่ได้เย็บขอบชนขอบ → ใช้ "จุดติด" (Attach) ที่ได้จากแม่แบบทรง
  *   โครงสร้างที่ไม่เข้ากติกา = ok:false พร้อมเหตุผล (หน้าจอบอกตรง ๆ ว่าประกอบไม่ได้ — ไม่วาดภาพหลอก)
+ *   ชั้นของชิ้น: layer "lining" = ซับใน — ประกอบแยกจากตัวนอก (assemble(…, "lining")) · ตะเข็บข้ามชั้น (เช่น ปากซับในกับปากตัวนอก) ไม่ใช้หาโครงสร้าง
  *   ตะเข็บที่เย็บบางช่วงของขอบ ไม่ใช้หาโครงสร้าง (ใช้เฉพาะตะเข็บเต็มขอบ) — ชิ้นที่ติดด้วยตะเข็บบางช่วงไปอยู่ในภาพเย็บติด (lib/pattern-sewn)
  *
  *   ผลลัพธ์อยู่ในกรอบของตัวหน้า: x ขวา · y ขึ้น (ก้น = 0) · กึ่งกลางซ้ายขวา = 0 · ตัวหน้าอยู่ z = +ลึก/2 ตัวหลัง z = −ลึก/2 (กลับด้าน)
@@ -16,19 +17,19 @@
  * ใช้ที่: components/pattern-studio/assembly-view · components/pattern-3d (mode assembly) · เทสต์ lib/__tests__/pattern-assembly.test.ts
  * คู่มือ: docs/pattern-studio.md
  */
-import { flattenShape, shapeArea, shapeBox, type Pt, type Shape } from "@/lib/pattern-shape";
+import { flattenShape, shapeArea, shapeBox, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
 import { checkSeam, isPartialSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ — handle: ปลายหู 2 จุดบนแผ่น (พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่น · y ลง) · behind: แผ่นปิดหลังรูแรกของแผ่น */
 export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
-export type AsmPiece = { pid: string; name: string; count: number; shape: Shape; holes: Shape[] };
+export type AsmPiece = { pid: string; name: string; count: number; shape: Shape; holes: Shape[]; /** ชั้นซับใน (ไม่ใส่ = ชั้นนอก) */ layer?: "lining"; /** เส้นในชิ้น — ให้ชิ้นอื่นมาเย็บ (ภาพเย็บติด lib/pattern-sewn) */ inner?: InnerLine[] };
 
 export type AsmPanel = { pid: string; side: 1 | -1; outline: Pt[]; holes: Pt[][] };
 export type AsmSweep = { pid: string; pts: Pt[]; dir: Pt };
 export type AsmHandle = { pid: string; side: 1 | -1; a: Pt; b: Pt; len: number; w: number; tail: number };
 export type AsmBehind = { pid: string; side: 1 | -1; x: number; y: number; w: number; h: number };
 /** extra = ชิ้นเสริมที่เย็บบางช่วงกับแผ่นหน้า/หลัง (มาจากภาพเย็บติด lib/pattern-sewn · assemble() เองไม่สร้างขั้นนี้) */
-export type AsmStepKey = "behind" | "handle" | "extra" | "gusset" | "back";
+export type AsmStepKey = "behind" | "handle" | "extra" | "gusset" | "back" | "lining";
 export type AsmStep = { key: AsmStepKey; pids: string[] };
 export type AsmNote = "depth-differs" | "mismatch" | "same-back";
 export type AssemblyOk = {
@@ -86,9 +87,11 @@ type Link = { mine: SeamSide; other: SeamSide };
 type Cand = { pid: string; depth: number; ends: SeamSide[]; endPids: string[] };
 
 /** ประกอบ: หาตัวหน้า/ตัวหลัง/ชิ้นสะพานจากตะเข็บ แล้วคิดเรขาคณิต 3D */
-export function assemble(pieces: AsmPiece[], allSeams: Seam[], attaches: Attach[] = []): Assembly {
+export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Attach[] = [], layer: "outer" | "lining" = "outer"): Assembly {
+  const pieces = allPieces.filter((p) => (p.layer === "lining") === (layer === "lining"));
   if (!pieces.length) return { ok: false, reason: "no-pieces", loose: [] };
-  const seams = allSeams.filter((s) => !isPartialSeam(s));
+  const inLayer = new Set(pieces.map((p) => p.pid));
+  const seams = allSeams.filter((s) => !isPartialSeam(s) && inLayer.has(s.a.pid) && inLayer.has(s.b.pid));
   const byPid = new Map(pieces.map((p) => [p.pid, p]));
   const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
   const all = pieces.map((p) => p.pid);

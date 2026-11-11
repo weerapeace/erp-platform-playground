@@ -91,11 +91,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
   const canEdit = !!me?.can_edit;
   // ชิ้นตั้งต้นของกระดาน — อ่านครั้งเดียวต่อการเปิดกระดาน (ระหว่างวาด กระดานถือข้อมูลเอง แล้วส่งกลับทาง onChange)
-  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, info: p.info, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const initial: EditorPiece[] = useMemo(() => piecesRef.current.map((p) => ({ pid: p.pid, shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, info: p.info, inner: p.inner, name: p.name, at: p.at, grain: p.grain, notches: p.notches, mats: (p.mats ?? []).map((m) => ({ id: m.id, name: m.name })) })), [boardNonce]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onBoard = useCallback((res: ShapeEditorResult) => {
     setPieces(res.pieces.map((p) => ({
-      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}), ...(p.info ? { info: p.info } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
+      pid: p.pid, name: p.name, count: p.count, allow: p.allow, ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}), ...(p.info ? { info: p.info } : {}), ...(p.inner.length ? { inner: p.inner } : {}), shape: p.shape, holes: p.holes, notches: p.notches, at: p.at,
       grain: p.grain && p.grain.length === 2 ? [p.grain[0], p.grain[1]] : null,
       ...(p.mats.length ? { mats: p.mats.map((m) => { const g = matGroup.get(m.id) ?? piecesRef.current.find((q) => q.pid === p.pid)?.mats?.find((x) => x.id === m.id)?.group; return { id: m.id, name: m.name, ...(g ? { group: g } : {}) }; }) } : {}),
     })));
@@ -119,9 +119,9 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const onSeams = (next: Seam[]) => { setSeams(next); setDirty(true); };
   const switchTab = (next: Tab) => { if (next === tab) return; if (next === "draw") setBoardNonce((n) => n + 1); setTab(next); };
 
-  const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, p.shape])), [pieces]);
+  const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
-  const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes })), [pieces]);
+  const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}) })), [pieces]);
   const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes]);
 
   const save = async () => {

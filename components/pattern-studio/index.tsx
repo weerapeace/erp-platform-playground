@@ -8,6 +8,8 @@
  *     1) ปุ่ม "สร้างจากแม่แบบทรง" → BagTemplateWizard → ชิ้นลงกระดานเป็นชิ้นจริง (แก้ต่อ/ย้อนกลับได้)
  *     2) ปุ่ม "ดู 3D" (จำในเครื่อง · ปิดไว้เป็นค่าเริ่ม = หน้าเดิมเหมือนเดิม) → ชิ้นบนกระดานขึ้นเป็นแผ่น 3D วางบนโต๊ะ ขยับตามทันที
  *     3) เลือกชิ้นฝั่งไหน อีกฝั่งสว่างตาม (กระดาน ↔ 3D)
+ *     5) หน้าที่มีเครื่องมือเย็บ: งานข้างในกระเป๋า (2026-11-11) — ปุ่ม "สร้างซับใน" (คัดลอกตัวกระเป๋าเป็นชั้นซับใน) · "เพิ่มช่อง" (ช่องใส่ของ / ช่องซิป → PocketModal)
+ *        · สลับดูชั้น ทั้งหมด / ชั้นนอก / ซับใน บนกระดาน · ภาพ 3D ผ่าดูข้างใน (ผ่าหน้า / ผ่าหลัง) · เครื่องมือเส้นในชิ้น (L) ในกระดาน
  *     4) หน้าที่มีเครื่องมือเย็บ (ส่ง sew): ภาพ 3D สลับได้ 2 แบบ — "เย็บติดแล้ว" (lib/pattern-sewn · ค่าเริ่ม) / "ชิ้นแบน" · ลากตะเข็บบนกระดาน ภาพเปลี่ยนตามทันที
  *   จอกว้าง ≥ 1180px = กระดานซ้าย 3D ขวา · แคบกว่า = 3D อยู่ใต้กระดาน
  *   (ไม่ใช้ SplitPanes: ตัวนั้นขยายฝั่งที่ถูกคลิก — กระดานวาดต้องคลิกตลอด จะดันไปมาทุกครั้ง)
@@ -22,14 +24,17 @@ import dynamic from "next/dynamic";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SEAM_COLORS, ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
-import type { Flat3DPiece, Flat3DThread } from "@/components/pattern-3d";
+import type { Flat3DPiece, Flat3DThread, Pattern3DCut } from "@/components/pattern-3d";
 import { sidePoints, type Seam } from "@/lib/pattern-seams";
 import { buildSewn } from "@/lib/pattern-sewn";
-import type { Attach } from "@/lib/pattern-assembly";
+import { assemble, type AsmPiece, type Attach } from "@/lib/pattern-assembly";
+import { liningPlan, pocketPlan, type PocketOpts } from "@/lib/pattern-lining";
+import { shapeBox } from "@/lib/pattern-shape";
 import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
+const PocketModal = dynamic(() => import("./pocket-modal").then((m) => m.PocketModal), { ssr: false });                     // โหลดเมื่อกดเพิ่มช่อง
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
 const SHOW3D_KEY = "pattern-studio-3d";
@@ -43,7 +48,7 @@ export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
 export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
 
-export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive"> & {
+export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines"> & {
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
   onTemplateInsert?: (info: TemplateInsertInfo) => void;
   /** ส่ง = มีเครื่องมือเย็บ (N) + แก้ตะเข็บ (B) ในแถบเครื่องมือซ้ายของกระดาน และเห็นด้ายเย็บในภาพ 3D (ใบงานออกแบบไม่ส่ง = ไม่มี) */
@@ -60,7 +65,11 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   const [wizard, setWizard] = useState(false);
   const [photo, setPhoto] = useState(false);
   const [draft, setDraft] = useState<{ params: BagParams; notice: string } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
-  const [inject, setInject] = useState<{ nonce: number; pieces: EditorPiece[] } | null>(null);
+  const [inject, setInject] = useState<EditorProps["inject"]>(null);
+  const [layer, setLayer] = useState<"all" | "outer" | "lining">("all");   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
+  const [cut, setCut] = useState<Pattern3DCut>("none");                     // ผ่าดูข้างในของภาพ 3D
+  const [pocket, setPocket] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [live, setLive] = useState<ResultPiece[]>([]);
   const [selPid, setSelPid] = useState<string | null>(null);
   const [selectReq, setSelectReq] = useState<{ nonce: number; pid: string | null } | null>(null);
@@ -79,15 +88,54 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   // ด้ายเย็บในภาพ 3D: ขอบทั้งสองด้านของตะเข็บ (พิกัดกระดาน) สีเดียวกับบนกระดาน
   const threads: Flat3DThread[] = useMemo(() => {
     if (!sew?.seams.length) return [];
-    const shapes = new Map(live.map((p) => [p.pid, p.shape]));
+    const shapes = new Map(live.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
     return sew.seams.flatMap((x, i) => {
-      const A = shapes.get(x.a.pid), B = shapes.get(x.b.pid), a = A ? sidePoints(A, x.a) : null, b = B ? sidePoints(B, x.b) : null;
+      const A = shapes.get(x.a.pid), B = shapes.get(x.b.pid), a = A ? sidePoints(A, x.a) : null, b = B ? sidePoints(B, x.b) : null;   // ด้านบนเส้นในชิ้นหาเส้นเจอ เพราะส่งเส้นในไปด้วย
       return a && b ? [{ a, b, color: SEAM_COLORS[i % SEAM_COLORS.length] }] : [];
     });
   }, [live, sew?.seams]);
   // ภาพเย็บติด: คิดใหม่ทุกครั้งที่ชิ้นหรือตะเข็บเปลี่ยน (ระหว่างลากตะเข็บด้วย) — เฉพาะตอนเปิดดูภาพ 3D แบบเย็บติด
   const wantSewn = !!sew && show3d && view3d === "sewn";
-  const sewnScene = useMemo(() => (wantSewn && sew ? buildSewn(live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes })), sew.seams, sew.attaches ?? []) : null), [wantSewn, live, sew?.seams, sew?.attaches]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const asmLive: AsmPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner.length ? { inner: p.inner } : {}) })), [live]);
+  const sewnScene = useMemo(() => (wantSewn && sew ? buildSewn(asmLive, sew.seams, sew.attaches ?? []) : null), [wantSewn, asmLive, sew?.seams, sew?.attaches]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const liningPids = useMemo(() => new Set(live.filter((p) => p.info?.role === "lining").map((p) => p.pid)), [live]);
+  const hidePids = useMemo(() => (layer === "all" ? null : new Set(live.filter((p) => liningPids.has(p.pid) !== (layer === "lining")).map((p) => p.pid))), [layer, live, liningPids]);
+  /** สร้างซับใน: คัดลอกชิ้นตัวกระเป๋า (แผ่นหน้า/หลัง + ชิ้นคั่นกลาง ที่ระบบประกอบได้) เป็นชิ้นชั้นซับใน วางใต้ชิ้นทั้งหมด พร้อมตะเข็บชุดเดียวกัน */
+  const makeLining = () => {
+    if (!sew) return;
+    if (liningPids.size) { setNotice(t(`มีชิ้นซับในอยู่แล้ว ${liningPids.size} ชิ้น — ถ้าจะสร้างใหม่ ให้ลบชุดเดิมก่อน`, `There are already ${liningPids.size} lining pieces — delete them first to create a new set`)); return; }
+    const A = assemble(asmLive, sew.seams, sew.attaches ?? []);
+    if (!A.ok) { setNotice(t("ยังสร้างซับในให้ไม่ได้ เพราะระบบยังไม่เห็นตัวกระเป๋า (ตัวหน้า + ตัวหลัง + ชิ้นคั่นกลาง หรือซองแบน) — เย็บตัวกระเป๋าให้ครบก่อน หรือวาดชิ้นซับในเองแล้วตั้ง ชนิดชิ้น = ซับใน", "Cannot create a lining yet — no bag body (front + back + gusset, or a flat pouch) was found. Finish sewing the body first, or draw the lining pieces yourself and set their type to Lining")); return; }
+    const stamp = Date.now().toString(36), body = [...new Set([A.front, A.back, ...A.bridges])];
+    const plan = liningPlan(live, sew.seams, body, stamp);
+    const pieces: EditorPiece[] = body.flatMap((pid) => {
+      const p = live.find((x) => x.pid === pid); if (!p) return [];
+      const b = shapeBox(p.shape), no = live.indexOf(p) + 1;
+      return [{ pid: plan.map[pid], shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, name: `${t("ซับใน", "Lining")} ${p.name || `P${no}`}`, info: { role: "lining" as const }, mats: [], at: [b.x, b.y + plan.dy] as [number, number], grain: p.grain, notches: p.notches }];
+    });
+    setInject({ nonce: Date.now(), abs: true, pieces });
+    if (plan.seams.length) sew.onChange([...sew.seams, ...plan.seams]);
+    setNotice(t(`สร้างซับใน ${pieces.length} ชิ้นแล้ว (วางไว้ใต้ชิ้นเดิม ขนาดเท่าตัวนอก) — เลือกวัสดุซับในให้ชิ้นเหล่านี้ และกด เพิ่มช่อง เพื่อใส่ช่องใส่ของ/ช่องซิป`, `Created ${pieces.length} lining pieces (below the originals, same size as the outer) — pick a lining material for them, then use Add pocket`));
+  };
+  /** ชิ้นตั้งต้นของตัวช่วยเพิ่มช่อง: ชิ้นที่เลือกอยู่ถ้าเป็นแผ่นหน้า/หลังของซับใน · ไม่งั้น = แผ่นหลังของซับใน (ถ้าประกอบได้) · ไม่มีซับใน = ชิ้นที่เลือก */
+  const pocketHost = (): string | null => {
+    const L = sew ? assemble(asmLive, sew.seams, [], "lining") : null;
+    if (L?.ok) return selPid && (selPid === L.front || selPid === L.back) ? selPid : L.back;
+    return selPid;
+  };
+  /** เพิ่มช่องใส่ของ / ช่องซิป: เส้นในบนชิ้นที่ติด + ชิ้นใหม่ + ตะเข็บ (lib/pattern-lining) */
+  const addPocket = (hostPid: string, opts: PocketOpts) => {
+    setPocket(false);
+    const host = live.find((p) => p.pid === hostPid);
+    if (!host || !sew) return;
+    const stamp = Date.now().toString(36), plan = pocketPlan(shapeBox(host.shape), opts, stamp), newPid = `pk${stamp}`;
+    const role = opts.kind === "zip" || host.info?.role === "lining" ? "lining" as const : host.info?.role;
+    setInject({ nonce: Date.now(), inner: [{ pid: hostPid, lines: [plan.line] }], pieces: [{ pid: newPid, shape: plan.piece.shape, count: 1, allow: 0, allowEdges: plan.piece.allowEdges, foldEdges: plan.piece.foldEdges, inner: plan.piece.inner, name: t(plan.piece.name, opts.kind === "patch" ? "Pocket" : "Zip pocket bag"), info: role ? { role } : null, mats: [] }] });
+    sew.onChange([...sew.seams, { id: `s${stamp}k`, a: { pid: hostPid, from: 0, count: 1, n: 1, inner: plan.line.id }, b: { pid: newPid, ...plan.side }, kind: "lapped" }]);
+    setNotice(opts.kind === "zip"
+      ? t(`เพิ่มช่องซิปแล้ว: ซิปยาว ${opts.w} ซม. 1 เส้น (ยังต้องใส่ซิปเป็นบรรทัดวัสดุในใบตีราคาเอง)`, `Zip pocket added: one ${opts.w} cm zip (add the zip to the costing sheet yourself for now)`)
+      : t("เพิ่มช่องใส่ของแล้ว", "Pocket added"));
+  };
   const pieceColors = useMemo(() => { const out: Record<string, string> = {}; for (const p of live) { const c = p.mats.map((m) => props.matProps?.[m.id]?.color).find(Boolean); if (c) out[p.pid] = c; } return out; }, [live, props.matProps]);
   const sewnOn = !!sewnScene && sewnScene.joined > 0;
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
@@ -117,6 +165,19 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
             <Icon value="i:photo" className="text-sm" />{t("แกะจากรูป", "Start from a photo")}
           </button>
         )}
+        {!readonly && sew && <>
+          <button type="button" onClick={makeLining} title={t("คัดลอกชิ้นตัวกระเป๋าเป็นชั้นซับใน พร้อมตะเข็บ", "Copy the body pieces into a lining layer, with their seams")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+            <Icon value="i:layers-subtract" className="text-sm" />{t("สร้างซับใน", "Create lining")}
+          </button>
+          <button type="button" onClick={() => setPocket(true)} disabled={!live.length} title={t("ช่องใส่ของ หรือ ช่องซิป บนชิ้นที่เลือก", "A patch pocket or a zip pocket on a piece")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-40`}>
+            <Icon value="i:square-plus" className="text-sm" />{t("เพิ่มช่อง", "Add pocket")}
+          </button>
+        </>}
+        {sew && liningPids.size > 0 && (
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ชั้นที่ดูบนกระดาน", "Layer shown on the board")}>
+            {(["all", "outer", "lining"] as const).map((k) => <button key={k} type="button" onClick={() => setLayer(k)} aria-pressed={layer === k} className={`h-7 rounded-md px-2.5 text-xs ${layer === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "all" ? t("ทุกชั้น", "All layers") : k === "outer" ? t("ชั้นนอก", "Outer") : t("ซับใน", "Lining")}</button>)}
+          </div>
+        )}
         <button type="button" onClick={() => setShow3d(!show3d)} aria-pressed={show3d} className={`${btn} ${show3d ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
           <Icon value={show3d ? "i:eye-off" : "i:box"} className="text-sm" />{show3d ? t("ซ่อนภาพ 3D", "Hide 3D") : t("ดูภาพ 3D", "Show 3D")}
         </button>
@@ -126,18 +187,25 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
           </div>
         )}
         {show3d && !sew && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ภาพนี้คือชิ้นแบน การประกอบเป็นกระเป๋าอยู่ในแอปสตูดิโอแพทเทิร์น แท็บ ประกอบ 3D", "The pieces on the table are the ones on the board. Select on either side and the other lights up · this view shows flat pieces; assembling into a bag is in the Pattern studio app, Assemble 3D tab")}</span>}
+        {show3d && sew && sewnOn && sewnScene && (sewnScene.asm || sewnScene.lining) && (
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ผ่าดูข้างใน", "Cut-away view")}>
+            {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}
+          </div>
+        )}
         {show3d && sew && <span className="text-[11px] text-slate-500">{t("ภาพเปลี่ยนตามกระดานทันที เลือกชิ้นฝั่งไหนอีกฝั่งสว่างตาม", "The view follows the board live. Select on either side and the other lights up")}</span>}
       </div>
+
+      {notice && <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><span className="min-w-0 flex-1">{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label={t("ปิดข้อความ", "Dismiss")} className="shrink-0 text-amber-700 hover:text-amber-900"><Icon value="i:x" /></button></p>}
 
       <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>
         <div className="min-w-0">
           <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
-            seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} />
+            seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} hidePids={hidePids} />
         </div>
         {show3d && (
           <div className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2" : ""}`}>
             {sewnOn && sewnScene
-              ? <Pattern3D mode="sewn" sewn={sewnScene} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
+              ? <Pattern3D mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
               : <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />}
             {sewnOn && sewnScene ? (
               <div className="space-y-1 text-[11px] text-slate-500">
@@ -156,6 +224,8 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
       </div>
 
       {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} />}
+      {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}
+        hosts={live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, box: shapeBox(p.shape), lining: liningPids.has(p.pid) }))} />}
       {photo && <PhotoModal open onClose={() => setPhoto(false)}
         materials={props.materials}
         onPieces={(pieces, aiSeams) => {

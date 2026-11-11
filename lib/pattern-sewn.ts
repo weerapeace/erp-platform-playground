@@ -6,6 +6,8 @@
  *     1) ตัวกระเป๋า: ถ้าตะเข็บเต็มขอบประกอบเป็นทรงได้ (lib/pattern-assembly) ใช้ทรงนั้น · ไม่งั้นตั้ง "ชิ้นหลัก" (ชิ้นใหญ่สุดที่มีตะเข็บ) ขึ้นเป็นแผ่นตั้ง
  *     2) ชิ้นที่เย็บติดกับแผ่นที่วางแล้ว ด้วย ตะเข็บเดียว = "แผ่นพับ" เกาะที่ตำแหน่งตะเข็บ (ชิ้นยาวที่เย็บขอบบน = ห้อยลงมาด้านนอก)
  *     3) ชิ้นที่เย็บ 2 ตะเข็บ (ปลายสองข้าง เช่น สายหู) = "ห่วง" โค้งระหว่างสองโคน ยาวตามระยะจริงระหว่างสองปลายของชิ้น
+ *     5) ซับใน (ชิ้นที่ตั้งชั้นเป็นซับใน): ประกอบแยกเป็นถุงอีกใบ วางซ้อนอยู่ข้างในตัวนอก (ย่อเล็กน้อยให้เห็นเป็นคนละชั้น)
+ *     6) ชิ้นที่เย็บกับ "เส้นในชิ้น" ของแผ่นที่วางแล้ว = "ชิ้นปะ" แนบอยู่บนผิวแผ่นนั้น (ช่องใส่ของ) · เส้นในแบบช่องเจาะ (ซิป) = ชิ้นไปอยู่ด้านหลังแผ่น (ถุงช่องซิป) · ชิ้นที่มีแนวพับ = พับทบตรงนั้น
  *     4) ที่เหลือ: ชิ้นที่มีตะเข็บแต่ยังวางไม่ได้ (เย็บ 3 จุดขึ้นไป / เย็บกับชิ้นที่ยังไม่ได้วาง) และชิ้นที่ยังไม่ได้เย็บ → วางแบนข้างหน้า พร้อมหมายเหตุ (ไม่เดาภาพ)
  *   เป็นการ "วางตามสูตร" ไม่ใช่การจำลองผ้า: ตำแหน่ง/สัดส่วนถูก แต่การทิ้งตัวเป็นค่าประมาณ
  *
@@ -13,14 +15,16 @@
  * คู่มือ: docs/pattern-studio.md
  */
 import { assemble, type AsmPiece, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
-import { checkSeam, isPartialSeam, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
-import { flattenShape, shapeArea, shapeBox, type Pt, type Shape } from "@/lib/pattern-shape";
+import { checkSeam, isInnerSide, isPartialSeam, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { flattenShape, shapeArea, shapeBox, type InnerKind, type Pt } from "@/lib/pattern-shape";
 import { panelMesh } from "@/lib/pattern-sim";
 
 export type V3 = [number, number, number];
-/** base = ชิ้นหลัก (แผ่นตั้ง) · flap = แผ่นพับเกาะตะเข็บ · hang = ห้อยลง · loop = ห่วง (สายหู) · loose = วางแบนข้างหน้า */
-export type SewnKind = "base" | "flap" | "hang" | "loop" | "loose";
-export type SewnPart = { pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3; /** ชิ้นหลักที่ชิ้นนี้เกาะอยู่ (แผ่นหน้า/หลังของตัวกระเป๋า หรือชิ้นหลักที่ตั้งเป็นแผ่น) — ชิ้นที่ไม่ได้เกาะ = ไม่มี */ on?: string };
+/** base = ชิ้นหลัก (แผ่นตั้ง) · flap = แผ่นพับเกาะตะเข็บ · hang = ห้อยลง · loop = ห่วง (สายหู) · patch = ชิ้นปะแนบผิวแผ่น (เย็บกับเส้นใน) · loose = วางแบนข้างหน้า */
+export type SewnKind = "base" | "flap" | "hang" | "loop" | "patch" | "loose";
+export type SewnPart = { pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3; /** ชิ้นหลักที่ชิ้นนี้เกาะอยู่ (แผ่นหน้า/หลังของตัวกระเป๋า หรือชิ้นหลักที่ตั้งเป็นแผ่น) — ชิ้นที่ไม่ได้เกาะ = ไม่มี */ on?: string; /** ชิ้นของชั้นซับใน */ layer?: "lining" };
+/** เส้นในชิ้นที่ต้องเห็นในภาพ (ตอนนี้ = ช่องเจาะ/ซิป) บนแผ่นที่วางแล้ว */
+export type SewnMark = { pts: V3[]; kind: InnerKind; on?: string };
 /** เส้นตะเข็บในภาพ (ตำแหน่งบนชิ้นที่ถูกเย็บติด) · idx = ลำดับตะเข็บ (ใช้สีเดียวกับกระดาน) · bad = ยาวไม่เท่ากันและไม่ได้ตั้งใจ */
 export type SewnLine = { id: string; idx: number; pts: V3[]; bad: boolean; /** ชิ้นหลักที่เส้นนี้อยู่บนนั้น */ on?: string };
 /** unsewn = ยังไม่ได้เย็บ · unsupported = มีตะเข็บแต่ยังวางไม่ได้ · short = สายสั้นกว่าระยะระหว่างสองโคน */
@@ -28,6 +32,9 @@ export type SewnNote = { pid: string; name: string; why: "unsewn" | "unsupported
 export type SewnScene = {
   /** ตัวกระเป๋าที่ประกอบจากตะเข็บเต็มขอบ (ถ้าประกอบได้) — ตัวแสดงวาดส่วนนี้ด้วยวิธีเดิมของโหมดประกอบ */
   asm: AssemblyOk | null;
+  /** ซับในที่ประกอบได้ (ถุงอีกใบซ้อนอยู่ข้างใน) — k = ย่อเท่านี้รอบจุดกึ่งกลางก้น · lift = ยกขึ้นจากก้น (ซม.) */
+  lining: { asm: AssemblyOk; k: number; lift: number } | null;
+  marks: SewnMark[];
   parts: SewnPart[];
   lines: SewnLine[];
   notes: SewnNote[];
@@ -40,6 +47,9 @@ const HINGE = 0.26;        // แผ่นพับเอนเข้าใน�
 const HANG_MIN = 12;       // ชิ้นที่ยื่นจากตะเข็บเกินนี้ (ซม.) และเย็บที่ขอบบน = ห้อยลง
 const LOOSE_GAP = 6;       // ชิ้นที่ยังไม่เย็บ วางห่างจากตัวกระเป๋าไปข้างหน้า (ซม.)
 const CURVE_N = 48;
+const LINING_K = 0.965;    // ซับในย่อเล็กน้อยให้เห็นเป็นอีกชั้นข้างในตัวนอก (รูปชิ้นจริงไม่ได้ย่อ)
+const LINING_LIFT = 0.25;
+const PATCH_OFF = 0.3;     // ชิ้นปะลอยจากผิวแผ่นเท่านี้ (ซม.) กันภาพซ้อนกัน
 
 type Frame = { o: V3; u: V3; v: V3; n: V3 };
 const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -73,10 +83,10 @@ function meshOf(p: AsmPiece, fine: boolean): { pts: Pt[]; tri: number[] } {
   return m;
 }
 
-type Seg = { mid: Pt; dir: Pt; inward: Pt; len: number; pts: Pt[] };
-/** ช่วงที่เย็บของด้าน: จุดกึ่งกลาง · ทิศตามแนว (จากปลายถึงปลาย) · ทิศเข้าหาเนื้อชิ้น */
-function segOf(shape: Shape, side: SeamSide): Seg | null {
-  const P = sidePoints(shape, side);
+type Seg = { mid: Pt; dir: Pt; inward: Pt; len: number; pts: Pt[]; bulk: Pt | null };
+/** ช่วงที่เย็บของด้าน: จุดกึ่งกลาง · ทิศตามแนว (จากปลายถึงปลาย) · ทิศเข้าหาเนื้อชิ้น · bulk = ทิศที่เส้นโป่งไป (เส้นรูปตัว U) · เส้นตรง = null */
+function segOf(piece: AsmPiece, side: SeamSide): Seg | null {
+  const shape = piece.shape, P = sidePoints({ shape, inner: piece.inner }, side);
   if (!P || P.length < 2) return null;
   const a = P[0], b = P[P.length - 1], d = Math.hypot(b[0] - a[0], b[1] - a[1]);
   if (d < 0.05) return null;                                       // ด้านที่วนกลับมาจุดเดิม (เช่น ทั้งรอบวงกลม) — ยังวางไม่ได้
@@ -86,7 +96,9 @@ function segOf(shape: Shape, side: SeamSide): Seg | null {
   let inward: Pt = [-dir[1], dir[0]];
   if (inward[0] * (cx - mid[0]) + inward[1] * (cy - mid[1]) < 0) inward = [-inward[0], -inward[1]];
   let len = 0; for (let k = 1; k < P.length; k++) len += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]);
-  return { mid, dir, inward, len, pts: P };
+  let bx = 0, by = 0; for (const q of P) { bx += q[0] - mid[0]; by += q[1] - mid[1]; } bx /= P.length; by /= P.length;
+  const bl = Math.hypot(bx, by);
+  return { mid, dir, inward, len, pts: P, bulk: bl > 0.03 * len ? [bx / bl, by / bl] : null };
 }
 
 /** เส้นกลางของห่วง: โค้งจากโคน F1 (ออกทาง T1) ไปโคน F2 (กลับเข้าทาง −T2) ให้ยาวเท่า L + ทิศความกว้างตลอดเส้น (บิดให้ตรงกับแนวตะเข็บที่โคนทั้งสอง) */
@@ -141,11 +153,11 @@ function loopCurve(F1: V3, T1: V3, W1: V3, F2: V3, T2: V3, W2: V3, L: number): {
 /** สร้างฉากภาพเย็บติดจากชิ้น + ตะเข็บ (+ จุดติดหูของแม่แบบ) */
 export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] = []): SewnScene {
   const byPid = new Map(pieces.map((p) => [p.pid, p]));
-  const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
+  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
   const idxOf = new Map(seams.map((s, i) => [s.id, i]));
   const checks = new Map(seams.map((s) => [s.id, checkSeam(shapes, s)]));
   const usable = seams.filter((s) => checks.get(s.id)?.status !== "broken" && byPid.has(s.a.pid) && byPid.has(s.b.pid));
-  const parts: SewnPart[] = [], lines: SewnLine[] = [], notes: SewnNote[] = [];
+  const parts: SewnPart[] = [], lines: SewnLine[] = [], notes: SewnNote[] = [], marks: SewnMark[] = [];
   const frames = new Map<string, Frame>();       // ชิ้นที่วางแล้วและเป็นแผ่นเรียบ (ให้ชิ้นอื่นมาเกาะได้)
   const done = new Set<string>();
   const rootOf = new Map<string, string>();      // ชิ้นที่วางแล้ว → ชิ้นหลักต้นทาง (แผ่นพับที่เกาะแผ่นพับ ย้อนไปถึงแผ่นหน้า/หลัง)
@@ -156,7 +168,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     let sx = 0, sy = 0, sz = 0;
     for (const q of m.pts) { const v = f(q); pos.push(v[0], v[1], v[2]); sx += v[0]; sy += v[1]; sz += v[2]; }
     const n = Math.max(1, m.pts.length);
-    parts.push({ pid: p.pid, name: p.name, kind, pos, tri: m.tri, label: [sx / n, sy / n, sz / n], ...(on ? { on } : {}) });
+    parts.push({ pid: p.pid, name: p.name, kind, pos, tri: m.tri, label: [sx / n, sy / n, sz / n], ...(on ? { on } : {}), ...(p.layer === "lining" ? { layer: "lining" as const } : {}) });
     done.add(p.pid);
   };
 
@@ -170,10 +182,27 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
       const bo = asm.fromBoard.back([0, 0]), bx = asm.fromBoard.back([1, 0]), by = asm.fromBoard.back([0, 1]);
       frames.set(asm.back, { o: [-bo[0], bo[1], -D / 2], u: [-(bx[0] - bo[0]), bx[1] - bo[1], 0], v: [-(by[0] - bo[0]), by[1] - bo[1], 0], n: [0, 0, -1] });
     }
-    for (const p of pieces) if (!asm.loose.includes(p.pid)) { done.add(p.pid); joined++; }
+    for (const p of pieces) if (p.layer !== "lining" && !asm.loose.includes(p.pid)) { done.add(p.pid); joined++; }
     rootOf.set(asm.front, asm.front); rootOf.set(asm.back, asm.back);
     zFront = D / 2;
-  } else {
+  }
+  // ซับใน: ถุงอีกใบ ประกอบจากชิ้นชั้นซับใน วางซ้อนข้างในตัวนอก — ผิวที่เห็น (และที่ชิ้นปะไปเกาะ) หันเข้าหากลางกระเป๋า
+  const L0 = assemble(pieces, usable, [], "lining");
+  const lining = L0.ok ? { asm: L0, k: LINING_K, lift: LINING_LIFT } : null;
+  if (L0.ok) {
+    const D = L0.depth, k = LINING_K;
+    const bo = L0.fromBoard.back([0, 0]), bx = L0.fromBoard.back([1, 0]), by = L0.fromBoard.back([0, 1]);
+    const backF: Frame = { o: [-bo[0] * k, bo[1] * k + LINING_LIFT, (-D / 2) * k], u: [-(bx[0] - bo[0]) * k, (bx[1] - bo[1]) * k, 0], v: [-(by[0] - bo[0]) * k, (by[1] - bo[1]) * k, 0], n: [0, 0, 1] };
+    if (L0.back !== L0.front) {
+      const fo = L0.fromBoard.front([0, 0]), fx = L0.fromBoard.front([1, 0]), fy = L0.fromBoard.front([0, 1]);
+      frames.set(L0.front, { o: [fo[0] * k, fo[1] * k + LINING_LIFT, (D / 2) * k], u: [(fx[0] - fo[0]) * k, (fx[1] - fo[1]) * k, 0], v: [(fy[0] - fo[0]) * k, (fy[1] - fo[1]) * k, 0], n: [0, 0, -1] });
+    }
+    frames.set(L0.back, backF);                                   // แผ่นหน้า/หลังเป็นชิ้นเดียวกัน (ตัด 2) = ใช้แผ่นหลัง → ผ่าด้านหน้าแล้วเห็นช่อง
+    rootOf.set(L0.front, L0.front); rootOf.set(L0.back, L0.back);
+    for (const p of pieces) if (p.layer === "lining" && !L0.loose.includes(p.pid)) { done.add(p.pid); joined++; }
+    if (!asm) zFront = D / 2;
+  }
+  if (!asm && !lining) {
     const inSeam = new Set(usable.flatMap((s) => [s.a.pid, s.b.pid]));
     const root = pieces.filter((p) => inSeam.has(p.pid)).sort((a, b) => shapeArea(b.shape) - shapeArea(a.shape))[0];
     if (root) {
@@ -198,16 +227,42 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
       if (!L.length || L.length > 2 || L.some((s) => s.a.pid === s.b.pid)) continue;
       const ends = L.map((s) => {
         const mine = s.a.pid === C.pid ? s.a : s.b, other = s.a.pid === C.pid ? s.b : s.a, host = frames.get(other.pid), hp = byPid.get(other.pid);
-        const cs = segOf(C.shape, mine), hs = host && hp ? segOf(hp.shape, other) : null;
-        return host && cs && hs ? { s, host, cs, hs, on: rootOf.get(other.pid) } : null;
+        const cs = segOf(C, mine), hs = host && hp ? segOf(hp, other) : null;
+        const line = hp && isInnerSide(other) ? (hp.inner ?? []).find((l) => l.id === other.inner) ?? null : null;
+        return host && cs && hs ? { s, host, cs, hs, on: rootOf.get(other.pid), line } : null;
       });
       if (ends.some((e) => !e)) continue;
-      const E = ends as { s: Seam; host: Frame; cs: Seg; hs: Seg; on?: string }[];
+      const E = ends as { s: Seam; host: Frame; cs: Seg; hs: Seg; on?: string; line: { kind: InnerKind } | null }[];
       const world = (e: (typeof E)[number]) => {
         const M = place(e.host, e.hs.mid), Dv = unit3(dir3(e.host, e.hs.dir)), O = unit3(dir3(e.host, [-e.hs.inward[0], -e.hs.inward[1]]));
         return { M, Dv, O, N: e.host.n };
       };
-      if (E.length === 1) {
+      if (E.length === 1 && E[0].line) {
+        // เย็บกับเส้นในชิ้น = ชิ้นปะ: หมุนชิ้นบนระนาบของแผ่นให้แนวเย็บทับกัน (ด้านที่เส้นรูปตัว U โป่งไปต้องตรงกัน · เส้นตรง = ให้ชิ้นห้อยลง) แล้วแนบผิวแผ่น
+        const e = E[0], N = e.host.n, cb = e.cs.bulk ?? e.cs.inward;
+        let c = 1, s = 0, best = -Infinity;
+        for (const sg of [1, -1]) {
+          const th = Math.atan2(sg * e.hs.dir[1], sg * e.hs.dir[0]) - Math.atan2(e.cs.dir[1], e.cs.dir[0]), cc = Math.cos(th), ss = Math.sin(th);
+          const bx = cb[0] * cc - cb[1] * ss, by = cb[0] * ss + cb[1] * cc;
+          const score = e.hs.bulk ? bx * e.hs.bulk[0] + by * e.hs.bulk[1] : -dir3(e.host, [bx, by])[1];
+          if (score > best) { best = score; c = cc; s = ss; }
+        }
+        const off = e.line?.kind === "slit" ? -PATCH_OFF - 0.05 : PATCH_OFF;      // ช่องเจาะ (ซิป) = ถุงอยู่ด้านหลังแผ่น
+        const fold = (C.inner ?? []).find((l) => l.kind === "fold" && l.pts.length >= 2);
+        const f0 = fold?.pts[0], f1 = fold?.pts[fold.pts.length - 1];
+        const sideOf = (q: Pt) => (f0 && f1 ? (f1[0] - f0[0]) * (q[1] - f0[1]) - (f1[1] - f0[1]) * (q[0] - f0[0]) : 0);
+        const seamSide = Math.sign(sideOf(e.cs.mid));
+        emit(C, "patch", !!fold, (q) => {
+          let p = q, second = false;
+          if (f0 && f1 && seamSide !== 0 && sideOf(q) * seamSide < 0) {         // เลยแนวพับ = ทบกลับมาเป็นชั้นที่สอง
+            const dx = f1[0] - f0[0], dy = f1[1] - f0[1], l2 = dx * dx + dy * dy || 1, t = ((q[0] - f0[0]) * dx + (q[1] - f0[1]) * dy) / l2;
+            p = [2 * (f0[0] + dx * t) - q[0], 2 * (f0[1] + dy * t) - q[1]]; second = true;
+          }
+          const dx = p[0] - e.cs.mid[0], dy = p[1] - e.cs.mid[1];
+          return add(place(e.host, [e.hs.mid[0] + dx * c - dy * s, e.hs.mid[1] + dx * s + dy * c]), mul(N, off + (second ? Math.sign(off) * PATCH_OFF : 0)));
+        }, e.on);
+        seamLine(e.s, e.host, e.hs.pts, e.on); joined++; progress = true;
+      } else if (E.length === 1) {
         const e = E[0], { M, Dv, O, N } = world(e);
         // หมุนชิ้นบนระนาบ (ไม่กลับด้าน) ให้แนวตะเข็บทับกัน และเนื้อชิ้นยื่นออกนอกแผ่นที่เกาะ
         let c = 1, s = 0;
@@ -252,7 +307,12 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
       }
     }
   }
-  if (!asm && joined > 0) joined++;                               // นับชิ้นหลักด้วย เมื่อมีชิ้นมาเกาะแล้ว
+  if (!asm && !lining && joined > 0) joined++;                    // นับชิ้นหลักด้วย เมื่อมีชิ้นมาเกาะแล้ว
+  // ช่องเจาะ (ซิป) บนแผ่นที่วางแล้ว → เส้นให้เห็นในภาพ
+  for (const p of pieces) {
+    const f = frames.get(p.pid);
+    if (f) for (const l of p.inner ?? []) if (l.kind === "slit") marks.push({ pts: l.pts.map((q) => add(place(f, q), mul(f.n, 0.14))), kind: l.kind, ...(rootOf.get(p.pid) ? { on: rootOf.get(p.pid) } : {}) });
+  }
 
   // 4) ชิ้นที่เหลือ: วางแบนเรียงกันข้างหน้า
   const rest = pieces.filter((p) => !done.has(p.pid));
@@ -268,13 +328,13 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
   const min: V3 = [Infinity, Infinity, Infinity], max: V3 = [-Infinity, -Infinity, -Infinity];
   const grow = (x: number, y: number, z: number) => { min[0] = Math.min(min[0], x); min[1] = Math.min(min[1], y); min[2] = Math.min(min[2], z); max[0] = Math.max(max[0], x); max[1] = Math.max(max[1], y); max[2] = Math.max(max[2], z); };
   for (const p of parts) for (let i = 0; i < p.pos.length; i += 3) grow(p.pos[i], p.pos[i + 1], p.pos[i + 2]);
-  if (asm) { grow(-asm.width / 2, 0, -asm.depth / 2); grow(asm.width / 2, asm.height, asm.depth / 2); }
+  for (const a of [asm, lining?.asm]) if (a) { grow(-a.width / 2, 0, -a.depth / 2); grow(a.width / 2, a.height, a.depth / 2); }
   if (min[0] === Infinity) { min[0] = min[1] = min[2] = 0; max[0] = max[1] = max[2] = 1; }
-  return { asm, parts, lines, notes, joined: asm || joined > 1 ? joined : 0, min, max };
+  return { asm, lining, marks, parts, lines, notes, joined: asm || lining || joined > 1 ? joined : 0, min, max };
 }
 
 /** ชิ้นนี้ "เย็บติด" กับชิ้นอื่นในภาพ (แผ่นพับ / ห้อย / ห่วง) — ไม่ใช่ชิ้นหลักและไม่ใช่ชิ้นที่วางแบน */
-export const isSewnExtra = (p: SewnPart): boolean => p.kind === "flap" || p.kind === "hang" || p.kind === "loop";
+export const isSewnExtra = (p: SewnPart): boolean => p.kind === "flap" || p.kind === "hang" || p.kind === "loop" || p.kind === "patch";
 
 /** ตะเข็บบางช่วงกี่แนว (ไว้บอกบนหน้าจอว่าตะเข็บแบบนี้ไม่ได้ใช้หาทรงกระเป๋า) */
 export const partialSeamCount = (seams: Seam[]): number => seams.filter(isPartialSeam).length;

@@ -58,6 +58,7 @@ export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, 
                 <path d={p.d} fillRule="evenodd" fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
                   strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />
                 {p.sewD && <path d={p.sewD} fill="none" stroke={mono ? "#555" : c.stroke} strokeWidth={printMm ? 0.025 : Math.max(0.05, v.w / 900)} strokeDasharray={printMm ? "0.2 0.15" : "0.6 0.4"} />}
+                {p.innerD && <path d={p.innerD} fill="none" stroke={mono ? "#000" : "#2563eb"} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} strokeDasharray={printMm ? "0.25 0.15" : "0.6 0.4"} />}
                 {p.foldD && <path d={p.foldD} fill="none" stroke={mono ? "#000" : "#7c3aed"} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} strokeDasharray={printMm ? "0.5 0.15 0.1 0.15" : "1.2 0.4 0.3 0.4"} />}
                 {p.marksD && <path d={p.marksD} fill="none" stroke={mono ? "#000" : c.stroke} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} />}
               </g>

@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
-import { Pattern3D } from "@/components/pattern-3d";
+import { Pattern3D, type Pattern3DCut } from "@/components/pattern-3d";
 import { RangeInput } from "@/components/range-input";
 import { SEAM_COLORS } from "@/components/pattern-sheet/shape-editor";
 import { assemble, type AsmPiece, type AsmStepKey, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
@@ -57,7 +57,12 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const A = useMemo(() => (liveAtt === attaches ? A0 : assemble(pieces, seams, liveAtt)), [A0, liveAtt, pieces, seams, attaches]);
   // ภาพเย็บติด: ตัวกระเป๋าเดียวกับ A + ชิ้นที่เย็บบางช่วง (แผ่นพับ / ห้อย / ห่วง)
   const scene = useMemo(() => buildSewn(pieces.map((p, i) => ({ ...p, name: p.name || `P${i + 1}` })), seams, liveAtt), [pieces, seams, liveAtt]);
-  const extras = useMemo(() => scene.parts.filter(isSewnExtra).map((p) => p.pid), [scene]);
+  // ซับใน (ถ้าประกอบได้) = ถุงอีกใบซ้อนข้างใน · ชิ้นที่เกาะอยู่กับซับใน (ช่องใส่ของ / ถุงช่องซิป) ไปกับซับใน ไม่ใช่ขั้น "ชิ้นเสริม"
+  const LA = scene.lining?.asm ?? null;
+  const onLining = (on?: string) => !!LA && !!on && (on === LA.front || on === LA.back);
+  const extras = useMemo(() => scene.parts.filter((p) => isSewnExtra(p) && !onLining(p.on)).map((p) => p.pid), [scene]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const liningPids = useMemo(() => (LA ? [...new Set([LA.front, LA.back, ...LA.bridges, ...scene.parts.filter((p) => isSewnExtra(p) && onLining(p.on)).map((p) => p.pid)])] : []), [scene]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [cut, setCut] = useState<Pattern3DCut>("none");
   const [explode, setExplode] = useState(0);
   // จำลองวัสดุทิ้งตัว (ทดลอง): ตาข่ายสร้างจากผลประกอบที่บันทึกจุดติดแล้ว (ไม่รวมหูที่กำลังตั้งค่า) · ค่าความอยู่ทรง/ของข้างใน ไม่บันทึก
   const [simOn, setSimOn] = useState(false);
@@ -94,7 +99,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
     return (
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-2">
-          <Pattern3D mode="sewn" sewn={scene} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={560} />
+          <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={560} />
           <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             {t("แยกชิ้นดู", "Pull pieces apart")}
             <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-56 max-w-full accent-blue-600" />
@@ -144,6 +149,8 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
     ? t(`เย็บ ${names(pids)} เข้าด้านหลังช่องของ ${nameOf(A.front)}`, `Sew ${names(pids)} behind the window of ${nameOf(A.front)}`)
     : key === "handle"
       ? t(`เย็บโคน ${names(pids)} เข้ากับแผ่นหน้าและแผ่นหลัง ทำตอนชิ้นยังแบนอยู่เพราะเย็บง่ายที่สุด`, `Sew the ends of ${names(pids)} onto the front and back while they are still flat`)
+      : key === "lining"
+        ? t(`ใส่ซับใน (${names(pids)}) เข้าไปในตัวกระเป๋า แล้วเย็บรอบปาก — ช่องใส่ของและช่องซิปต้องเย็บติดซับในให้เสร็จก่อนขั้นนี้`, `Drop the lining (${names(pids)}) into the bag and sew around the mouth — pockets must already be sewn to the lining`)
       : key === "extra"
         ? t(`เย็บ ${names(pids)} เข้ากับตำแหน่งที่กำหนดไว้บนแผ่น (ตะเข็บบางช่วง) ทำตอนแผ่นยังแบนอยู่`, `Sew ${names(pids)} at their marked positions on the panel (partial seams) while the panel is still flat`)
       : key === "gusset"
@@ -154,6 +161,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   // ขั้นเย็บ: ของตัวกระเป๋า + ขั้น "ชิ้นเสริม" (ชิ้นที่เย็บบางช่วง) แทรกก่อนเย็บชิ้นคั่นกลาง/แผ่นหลัง
   const steps: { key: AsmStepKey; pids: string[] }[] = [...A.steps];
   if (extras.length) { const at = steps.findIndex((s) => s.key === "gusset" || s.key === "back"); steps.splice(at < 0 ? steps.length : at, 0, { key: "extra", pids: extras }); }
+  if (liningPids.length) steps.push({ key: "lining", pids: liningPids });
   const looseLeft = A.loose.filter((pid) => !extras.includes(pid));
   const joined = stepMode ? steps.slice(0, done).map((s) => s.key) : null;
   const seg = (on: boolean) => `h-8 flex-1 rounded-md px-3 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
@@ -166,15 +174,15 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
       ))}
     </div>
   );
-  const used = [...new Set([A.front, A.back, ...A.bridges, ...A.handles.map((h) => h.pid), ...A.behind.map((b) => b.pid), ...extras])];
+  const used = [...new Set([A.front, A.back, ...A.bridges, ...A.handles.map((h) => h.pid), ...A.behind.map((b) => b.pid), ...extras, ...liningPids])];
 
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-2">
         {simOn && sim
           ? <Pattern3D mode="sim" sim={sim} simWake={simWake} colors={colors} height={560} />
-          : extras.length
-            ? <Pattern3D mode="sewn" sewn={scene} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />
+          : extras.length || LA
+            ? <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />
             : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />}
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
@@ -196,6 +204,14 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
             )}
             <p className="text-[11px] text-slate-500 sm:col-span-2">{t("นี่คือการประมาณเพื่อให้เห็นภาพว่าวัสดุแข็งกับนิ่มต่างกันยังไง ไม่ใช่การคำนวณจากค่าวัสดุจริง (ไม่รู้น้ำหนัก ความหนา หรือตัวเสริมข้างใน) · ไม่แสดงหู ชิ้นเสริมที่เย็บบางช่วง ซับใน แผ่นใส · ชิ้นข้างอาจทะลุกันได้เมื่อวัสดุนิ่มมาก · ค่านี้ไม่ถูกบันทึก", "An approximation to show how firm and soft materials differ — not computed from real material data (weight, thickness or stiffeners are unknown). Handles, lining and clear panels are not shown; sides may pass through each other when very soft. These values are not saved.")}</p>
             <p className="text-[11px] text-slate-500 sm:col-span-2"><b>{t("ช่างคิดยังไง", "How a pattern maker thinks")}</b> · {t("กระเป๋าจะอยู่ทรงหรือไม่ ขึ้นกับวัสดุและตัวเสริม (แผ่นรองก้น ผ้ากาว กระดาษแข็ง) มากกว่ารูปแพทเทิร์น — ถ้าลองเลื่อนแล้วทรุดมาก แปลว่าทรงนี้ต้องใช้วัสดุแข็งขึ้นหรือเพิ่มตัวเสริม", "Whether a bag stands up depends on the material and stiffeners (base board, interfacing) more than on the pattern. If it slumps a lot here, this shape needs a firmer material or added stiffeners.")}</p>
+          </div>
+        )}
+        {!simOn && (extras.length > 0 || LA) && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            {t("ผ่าดูข้างใน", "Cut-away view")}
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ผ่าดูข้างใน", "Cut-away view")}>
+              {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}
+            </div>
           </div>
         )}
         {!stepMode && !simOn && (
@@ -220,7 +236,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
                   <button type="button" onClick={() => onAttachesChange(attaches.filter((a) => a.pid !== pid))} title={t("เอาชิ้นนี้ออกจากการประกอบ (ชิ้นยังอยู่บนกระดาน)", "Detach this piece (it stays on the board)")}
                     className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:bg-red-50 hover:text-red-600">{t("เอาออก", "Detach")}</button>
                 )}
-                <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : extras.includes(pid) ? t("ชิ้นเสริม (เย็บบางช่วง)", "added piece (partial seam)") : A.handles.some((h) => h.pid === pid) ? t("หู", "handle") : t("ปิดหลังช่อง", "behind window")}</span>
+                <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : liningPids.includes(pid) ? t("ซับใน", "lining") : extras.includes(pid) ? t("ชิ้นเสริม (เย็บบางช่วง)", "added piece (partial seam)") : A.handles.some((h) => h.pid === pid) ? t("หู", "handle") : t("ปิดหลังช่อง", "behind window")}</span>
               </li>
             ))}
           </ul>
