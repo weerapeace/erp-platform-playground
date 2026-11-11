@@ -3,6 +3,8 @@
 // ============================================================
 // PartnerManager (ของกลาง) — หน้า Partner: ลูกค้า + ผู้จำหน่าย (partners_v2)
 //   list: การ์ดสรุป + แท็บประเภท + ค้นหา + ตาราง (ดึงครั้งเดียว กรอง/แบ่งหน้าฝั่ง client — 193 ราย)
+//   แท็บ "⚠️ ข้อมูลไม่ครบ" (ย้ายมาจากหน้า /master/partner-data-check 2026-11-11 · ลิงก์ ?tab=incomplete)
+//     → กดแถวเปิดป๊อปบนหน้านี้ มีกล่องเติมเฉพาะช่องที่ขาด + ข้ามไปรายถัดไป · กติกา lib/partner-data-check
 //   drawer: ดู (view) + แก้ไข/เพิ่ม (form) · โซนร้านจีนเฉพาะผู้ขาย
 //   บันทึกผ่าน master-v2 กลาง (POST/PATCH) → เคารพ field permission + audit
 // ============================================================
@@ -23,6 +25,9 @@ import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
 import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { shopNameSimilarity } from "@/lib/partner-match";
+import { checkRow, isChinaPartner, isIncomplete, sortCheckRows, type PartnerCheckRow } from "@/lib/partner-data-check";
+import { PartnerIncompleteTab } from "./incomplete-tab";
+import { PartnerQuickFix } from "./quick-fix";
 
 // drawer รายละเอียด record ของกลาง (คลิกวัตถุดิบ → เปิด SKU ตัวจริง) — โหลดเฉพาะตอนใช้
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -30,14 +35,14 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
 const DuplicateScanModal = nextDynamic(() => import("./duplicate-scan").then((m) => m.DuplicateScanModal), { ssr: false });
 
 type Partner = Record<string, unknown> & { id: string };
-type Tab = "all" | "customer" | "supplier" | "china";
+type Tab = "all" | "customer" | "supplier" | "china" | "incomplete";
 type Mode = "view" | "edit" | "create";
 const PAGE = 25;
 
 const s = (p: Partner | null, k: string): string => { const v = p?.[k]; return v == null ? "" : String(v); };
 const b = (p: Partner | null, k: string): boolean => p?.[k] === true;
 const nameOf = (p: Partner) => s(p, "display_name") || s(p, "name_th") || s(p, "name_en") || s(p, "code") || "(ไม่มีชื่อ)";
-const isChina = (p: Partner) => b(p, "is_supplier") && (b(p, "is_taobao") || !!s(p, "shop_country") || !!s(p, "wechat_id") || !!s(p, "sale_name"));
+const isChina = (p: Partner) => isChinaPartner(p);   // กติกาเดียวกับแท็บข้อมูลไม่ครบ (lib/partner-data-check)
 
 const AV = ["#4f46e5", "#0891b2", "#7c3aed", "#db2777", "#059669", "#d97706", "#2563eb", "#dc2626"];
 function initials(n: string) { const m = n.replace(/[^\p{L}\p{N} ]/gu, "").trim().split(/\s+/); return ((m[0]?.[0] || "") + (m.length > 1 ? m[m.length - 1][0] : (m[0]?.[1] || ""))).toUpperCase() || "?"; }
@@ -85,12 +90,19 @@ export function PartnerManager() {
 
   const [all, setAll] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>("all");
+  // ลิงก์ ?tab=incomplete (หน้า /master/partner-data-check เดิมพามาที่นี่) → เปิดแท็บข้อมูลไม่ครบเลย
+  const [tab, setTab] = useState<Tab>(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "incomplete" ? "incomplete" : "all");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [sel, setSel] = useState<Partner | null>(null);
   const [mode, setMode] = useState<Mode>("view");
+  const [fix, setFix] = useState(false);   // ป๊อปเปิดจากแท็บข้อมูลไม่ครบ → โชว์กล่องเติมช่องที่ขาด
   const [dupOpen, setDupOpen] = useState(false);
+  // แท็บ "ข้อมูลไม่ครบ" — นับเอกสารที่เคยออกต้องใช้ฝั่ง server (ใบขาย/ใบสั่งซื้อ)
+  const [inc, setInc] = useState<PartnerCheckRow[]>([]);
+  const [incLoading, setIncLoading] = useState(true);
+  const [incError, setIncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,7 +113,17 @@ export function PartnerManager() {
     } catch { toast.error("โหลดรายชื่อ Partner ไม่สำเร็จ"); }
     finally { setLoading(false); }
   }, [toast]);
-  useEffect(() => { void load(); }, [load]);
+  const loadInc = useCallback(async () => {
+    setIncLoading(true); setIncError(null);
+    try {
+      const res = await apiFetch("/api/master/partner-data-check");
+      const j = (await res.json()) as { data?: PartnerCheckRow[]; error?: string | null };
+      if (!res.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
+      setInc(j.data ?? []);
+    } catch (e) { setIncError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
+    finally { setIncLoading(false); }
+  }, []);
+  useEffect(() => { void load(); void loadInc(); }, [load, loadInc]);
 
   const counts = useMemo(() => ({
     all: all.length,
@@ -109,7 +131,9 @@ export function PartnerManager() {
     supplier: all.filter((p) => b(p, "is_supplier")).length,
     both: all.filter((p) => b(p, "is_customer") && b(p, "is_supplier")).length,
     china: all.filter(isChina).length,
-  }), [all]);
+    // ตัวเลขบนการ์ด = รายที่เคยออกเอกสารแล้ว และขาดช่องที่เอกสารต้องพิมพ์ (กรอกพวกนี้ก่อนคุ้มสุด)
+    incomplete: inc.filter((r) => r.doc_count > 0 && r.missing_required).length,
+  }), [all, inc]);
 
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
@@ -128,7 +152,19 @@ export function PartnerManager() {
   useEffect(() => { setPage(0); }, [tab, q]);
   const pageRows = filtered.slice(page * PAGE, page * PAGE + PAGE);
 
-  const openView = (p: Partner) => { setSel(p); setMode("view"); };
+  const openView = (p: Partner) => { setSel(p); setMode("view"); setFix(false); };
+  // จากแท็บข้อมูลไม่ครบ: เปิดป๊อปบนหน้านี้ + กล่องเติมช่องที่ขาด
+  const openFix = useCallback((r: PartnerCheckRow) => {
+    const p = all.find((x) => x.id === r.id);
+    if (!p) { toast.error("ยังโหลดรายชื่อคู่ค้าไม่เสร็จ ลองอีกครั้ง"); return; }
+    setSel(p); setMode("view"); setFix(true);
+  }, [all, toast]);
+  // รายถัดไปในแท็บข้อมูลไม่ครบ (ลำดับเดียวกับตาราง: ออกเอกสารบ่อยสุดก่อน)
+  const nextFix = useMemo(() => {
+    if (!sel || !fix) return null;
+    const i = inc.findIndex((r) => r.id === sel.id);
+    return inc.find((r, j) => j > i && r.id !== sel.id) ?? null;
+  }, [inc, sel, fix]);
   // ลิงก์ตรงถึงคู่ค้า `?open=<id>` (จาก Global Search / หน้าอื่น) → เปิดป๊อปให้เลยเมื่อโหลดรายชื่อเสร็จ
   useOpenParam(!loading && all.length > 0, (id) => { const p = all.find((x) => x.id === id); if (p) openView(p); });
   const openCreate = () => {
@@ -138,6 +174,13 @@ export function PartnerManager() {
   useNewParam(canCreate && !loading, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
   const afterSave = (saved: Partner) => {
     setAll((rows) => { const i = rows.findIndex((r) => r.id === saved.id); if (i < 0) return [saved, ...rows]; const c = [...rows]; c[i] = saved; return c; });
+    // คิดแถว "ข้อมูลไม่ครบ" ใหม่ด้วยกติกาเดียวกับ server (ครบแล้ว = หายจากรายการ · คงจำนวนเอกสารเดิม)
+    setInc((rows) => {
+      const old = rows.find((r) => r.id === saved.id);
+      const row = checkRow(saved, old?.so_count ?? 0, old?.po_count ?? 0);
+      const rest = rows.filter((r) => r.id !== saved.id);
+      return isIncomplete(row) ? sortCheckRows([...rest, row]) : rest;
+    });
     setSel(saved); setMode("view");
   };
 
@@ -146,12 +189,14 @@ export function PartnerManager() {
     { key: "customer", label: "ลูกค้า", n: counts.customer },
     { key: "supplier", label: "ผู้จำหน่าย", n: counts.supplier },
     { key: "china", label: "🇨🇳 ร้านจีน", n: counts.china },
+    { key: "incomplete", label: "⚠️ ข้อมูลไม่ครบ", n: counts.incomplete },
   ];
-  const STATS: { key: Tab; label: string; n: number; color: string; rail: string }[] = [
+  const STATS: { key: Tab; label: string; n: number; color: string; rail: string; hint?: string }[] = [
     { key: "all", label: "👥 ทั้งหมด", n: counts.all, color: "text-slate-800", rail: "bg-indigo-500" },
     { key: "customer", label: "🛍️ ลูกค้า", n: counts.customer, color: "text-blue-600", rail: "bg-blue-500" },
     { key: "supplier", label: "🏭 ผู้จำหน่าย", n: counts.supplier, color: "text-emerald-600", rail: "bg-emerald-500" },
     { key: "china", label: "🔄 ร้านจีน", n: counts.china, color: "text-rose-600", rail: "bg-rose-500" },
+    { key: "incomplete", label: "⚠️ ข้อมูลไม่ครบ", n: counts.incomplete, color: counts.incomplete > 0 ? "text-amber-600" : "text-slate-300", rail: "bg-amber-500", hint: "เฉพาะรายที่ออกเอกสารแล้ว" },
   ];
 
   return (
@@ -164,13 +209,14 @@ export function PartnerManager() {
         {canCreate && <button onClick={openCreate} className="h-[38px] px-4 text-[13px] font-semibold bg-indigo-600 text-white rounded-[10px] hover:bg-indigo-700">＋ เพิ่ม Partner</button>}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
         {STATS.map((st) => (
-          <button key={st.key} onClick={() => setTab(st.key)}
+          <button key={st.key} onClick={() => setTab(st.key)} title={st.hint}
             className={`relative overflow-hidden text-left bg-white border rounded-[14px] px-4 py-3.5 transition hover:-translate-y-px ${tab === st.key ? "border-indigo-300 ring-1 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
             <span className={`absolute left-0 top-0 bottom-0 w-[3px] ${st.rail}`} />
             <div className="text-[12px] text-slate-500">{st.label}</div>
-            <div className={`text-[26px] font-bold mt-1 tabular-nums ${st.color}`}>{st.n}</div>
+            <div className={`text-[26px] font-bold mt-1 tabular-nums ${st.color}`}>{st.key === "incomplete" && incLoading ? <Spinner /> : st.n}</div>
+            {st.hint && <div className="text-[10.5px] text-slate-400">{st.hint}</div>}
           </button>
         ))}
       </div>
@@ -184,6 +230,8 @@ export function PartnerManager() {
             </button>
           ))}
         </div>
+        {/* แท็บข้อมูลไม่ครบใช้ตารางกลาง (มีค้นหา/ส่งออกในตัว) → ซ่อนแถบค้นหาของรายชื่อหลัก */}
+        {tab !== "incomplete" && <>
         <div className="relative flex-1 min-w-[200px]">
           <svg className="absolute left-3 top-3 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / เบอร์โทร / เลขภาษี / จังหวัด…"
@@ -195,8 +243,12 @@ export function PartnerManager() {
         <button onClick={() => exportCsv(filtered)} disabled={!filtered.length}
           title="ส่งออกรายชื่อที่กรองอยู่เป็นไฟล์ CSV (เปิดใน Excel ได้)"
           className="h-10 px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[11px] hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap">⬇ Export</button>
+        </>}
       </div>
 
+      {tab === "incomplete" ? (
+        <PartnerIncompleteTab rows={inc} loading={incLoading} error={incError} onRetry={() => void loadInc()} onOpen={openFix} />
+      ) : <>
       <div className="bg-white border border-slate-200 rounded-[14px] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse min-w-[760px]">
@@ -244,10 +296,12 @@ export function PartnerManager() {
       {!loading && filtered.length > PAGE && (
         <div className="mt-3"><Pager page={page} pageSize={PAGE} total={filtered.length} onPage={setPage} unitLabel="ราย" /></div>
       )}
+      </>}
 
       {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit} others={all.filter((p) => p.id !== sel.id)}
         onMode={setMode} onClose={() => setSel(null)} onSaved={afterSave}
-        onRemoved={() => { setSel(null); void load(); }} />}
+        onRemoved={() => { setSel(null); void load(); void loadInc(); }}
+        fix={fix} onNext={nextFix ? () => openFix(nextFix) : undefined} />}
 
       <DuplicateScanModal open={dupOpen} onClose={() => setDupOpen(false)}
         onOpenPartner={(id) => { const p = all.find((r) => r.id === id); if (p) { setDupOpen(false); openView(p); } }} />
@@ -270,11 +324,15 @@ function KV({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved, onRemoved }: {
+function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved, onRemoved, fix, onNext }: {
   partner: Partner; mode: Mode; canEdit: boolean; others: Partner[];
   onMode: (m: Mode) => void; onClose: () => void; onSaved: (p: Partner) => void;
   /** ปิดใช้งานสำเร็จ → หน้าแม่ปิดป๊อป + โหลดรายชื่อใหม่ */
   onRemoved: () => void;
+  /** เปิดจากแท็บข้อมูลไม่ครบ → โชว์กล่องเติมช่องที่ขาดบนสุด */
+  fix?: boolean;
+  /** ไปรายถัดไปในแท็บข้อมูลไม่ครบ */
+  onNext?: () => void;
 }) {
   const toast = useToast();
   // ปิดใช้งาน (ไม่ลบทิ้ง — ใบสั่งซื้อ/ใบขาย/ราคาซัพพลายเออร์ ยังอ้างถึงคู่ค้านี้) · กู้คืนได้ที่หน้า ผู้จำหน่าย / ลูกค้า
@@ -297,18 +355,20 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
   const [tab, setTab] = useState<"info" | "rel">("info");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [fixDirty, setFixDirty] = useState(false);   // กล่องเติมช่องที่ขาดมีค่าที่ยังไม่บันทึก
   const [confirmClose, setConfirmClose] = useState(false);
   const editing = mode === "edit" || mode === "create";
 
   useEffect(() => { setForm(partner); setDirty(false); setTab("info"); }, [partner, mode]);
+  useEffect(() => { setFixDirty(false); }, [partner.id]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") tryClose(); };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, dirty]);
+  }, [editing, dirty, fixDirty]);
 
   const set = (k: string, v: unknown) => { setForm((f) => ({ ...f, [k]: v })); setDirty(true); };
-  const tryClose = () => { if (editing && dirty) setConfirmClose(true); else onClose(); };
+  const tryClose = () => { if ((editing && dirty) || (!editing && fixDirty)) setConfirmClose(true); else onClose(); };
 
   const cur = s(form, "default_currency") || "THB";
   const isSup = b(form, "is_supplier");
@@ -384,6 +444,9 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
         )}
 
         <div className="px-[22px] py-4.5 overflow-y-auto flex-1">
+          {!editing && fix && tab === "info" && (
+            <PartnerQuickFix partner={partner} canEdit={canEdit} onSaved={onSaved} onNext={onNext} onDirtyChange={setFixDirty} />
+          )}
           {editing ? <EditForm form={form} set={set} isSup={isSup} showChina={showChina} cur={cur} others={others} />
             : tab === "info" ? <ViewInfo form={form} isSup={isSup} showChina={showChina} cur={cur} />
               : <RelData partner={form} />}
