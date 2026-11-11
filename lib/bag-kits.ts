@@ -17,6 +17,7 @@
  *
  *   ⚠️ สัดส่วนตั้งต้นเป็นค่าสมมติ ไม่ใช่สูตรช่าง — ต้องให้ช่างยืนยัน: แถบซิปกว้าง หนา÷2 · ฝาปิดสูง หนา + 0.6×สูง · ทรงกลม ซิป 2/5 ของรอบ ชิ้นข้าง 3/5 ·
  *     หูถุงผ้า 55×6 · สายสะพาย 120 · ความยาวชิ้นข้าง/แถบ = วัดจากขอบจริงของแผ่นหน้า (ขอบคู่จึงยาวเท่ากันเสมอ)
+ *   สายสะพาย (ทรงกล่อง / ฝาปิด) = พาดข้างถึงข้าง โคนเย็บกับชิ้นข้าง (KitAttach.across) · ปลายแถบซิปเย็บกับปลายชิ้นข้าง ครึ่งละชิ้น (ตะเข็บบางช่วงของปลายชิ้นข้าง)
  *   รูปชิ้น = ขนาดสำเร็จ (เส้นเย็บ) · ชิ้นแรกของแต่ละแถววางที่ 0 · at = มุมซ้ายบนของกรอบเส้นเย็บ
  *
  * ใช้ที่: components/pattern-studio (ตัวสร้างจากแม่แบบ) · เทสต์ lib/__tests__/bag-kits.test.ts · คู่มือ docs/pattern-studio.md
@@ -38,7 +39,7 @@ export type KitPiece = {
 };
 export type KitSide = { piece: string; from: number; count: number; n: number; t0?: number; t1?: number; inner?: string };
 export type KitSeam = { a: KitSide; b: KitSide; kind?: SeamKind };
-export type KitAttach = { kind: "handle" | "behind"; piece: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
+export type KitAttach = { kind: "handle" | "behind"; piece: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number; /** สายพาดข้างถึงข้าง (โคนอยู่ที่ชิ้นข้าง) */ across?: boolean };
 export type BagKit = { style: BagStyle; pieces: KitPiece[]; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ไว้จำในแพทเทิร์น) */ params?: BagParams };
 export type KitOpts = { lining: boolean; pocket: boolean };
 export const KIT_OPTS_DEFAULT: KitOpts = { lining: true, pocket: true };
@@ -120,7 +121,13 @@ function draft(style: Exclude<BagStyle, "tote">, p: KitParams): Draft {
     };
   }
   const strap = handle(p.strap, p.ws, "สายสะพาย (พับครึ่ง)", "Shoulder strap (folded in half)", 1, "strap");
-  const strapAt: KitAttach = { kind: "handle", piece: "strap", on: "back", a: [1.5, 0], b: [r3(W - 1.5), 0], len: p.strap, w: p.ws, tail: BAG_HANDLE_ATTACH };
+  // สายสะพายพาดข้างถึงข้าง: โคนสายเย็บกับชิ้นข้างซ้าย/ขวา ต่ำจากปาก 2 ซม. (ค่าสมมติ)
+  const strapAt: KitAttach = { kind: "handle", piece: "strap", on: "back", across: true, a: [0, 2], b: [0, 2], len: p.strap, w: p.ws, tail: BAG_HANDLE_ATTACH };
+  /** ปลายแถบซิป 2 ชิ้น เย็บกับปลายชิ้นข้าง (ปลายชิ้นข้างกว้าง = หนา · แถบซิปชิ้นละครึ่ง) — ครึ่งฝั่งแผ่นหน้า = แถบหน้า · ครึ่งฝั่งแผ่นหลัง = แถบหลัง */
+  const zipEnds = (zw: number): KitSeam[] => [
+    { a: { ...S("gusset", 1), t0: 0, t1: zw }, b: S("zipB", 3) }, { a: { ...S("gusset", 1), t0: zw, t1: r3(2 * zw) }, b: S("zipA", 3) },
+    { a: { ...S("gusset", 3), t0: 0, t1: zw }, b: S("zipA", 1) }, { a: { ...S("gusset", 3), t0: zw, t1: r3(2 * zw) }, b: S("zipB", 1) },
+  ];
   if (style === "box" || style === "flap") {
     const box = style === "box", hem = box ? 0 : p.hem, P = uPanel(W, H, p.r), m = P.n - 1;
     const panel = (key: string, name: string, nameEn: string, hemMouth: boolean, extra: Partial<Raw> = {}) =>
@@ -134,7 +141,7 @@ function draft(style: Exclude<BagStyle, "tote">, p: KitParams): Draft {
         pieces: [panel("front", "ตัวหน้า", "Front panel", false), panel("back", "ตัวหลัง", "Back panel", false, { linkTo: "front" }), gusset,
           piece("zipA", "แถบซิปบน (ฝั่งหน้า)", "Top zip strip (front side)", 1, rectShape(W, zw), sa, { edgeMeta: zipEdge(4, 0) }),
           piece("zipB", "แถบซิปบน (ฝั่งหลัง)", "Top zip strip (back side)", 1, rectShape(W, zw), sa, { linkTo: "zipA" }), strap],
-        seams: [...seams, { a: S("front", m, 1, P.n), b: S("zipA", 2) }, { a: S("back", m, 1, P.n), b: S("zipB", 2) }],
+        seams: [...seams, { a: S("front", m, 1, P.n), b: S("zipA", 2) }, { a: S("back", m, 1, P.n), b: S("zipB", 2) }, ...zipEnds(zw)],
         attach: [strapAt], body: ["front", "back", "gusset", "zipA", "zipB"], faced: [], pocketOn: "back",
       };
     }
@@ -153,7 +160,7 @@ function draft(style: Exclude<BagStyle, "tote">, p: KitParams): Draft {
       piece("gusset", "ชิ้นข้างรอบ", "Side band", 1, rectShape(low, D), sa),
       piece("zipA", "แถบซิป (ฝั่งหน้า)", "Zip strip (front side)", 1, rectShape(top, zw), sa, { edgeMeta: zipEdge(4, 0) }),
       piece("zipB", "แถบซิป (ฝั่งหลัง)", "Zip strip (back side)", 1, rectShape(top, zw), sa, { linkTo: "zipA" })],
-    seams: [{ a: S("front", 2, 3, 5), b: S("gusset", 2) }, { a: S("back", 2, 3, 5), b: S("gusset", 0) }, { a: S("front", 0, 2, 5), b: S("zipA", 2) }, { a: S("back", 0, 2, 5), b: S("zipB", 2) }],
+    seams: [{ a: S("front", 2, 3, 5), b: S("gusset", 2) }, { a: S("back", 2, 3, 5), b: S("gusset", 0) }, { a: S("front", 0, 2, 5), b: S("zipA", 2) }, { a: S("back", 0, 2, 5), b: S("zipB", 2) }, ...zipEnds(zw)],
     attach: [], body: ["front", "back", "gusset", "zipA", "zipB"], faced: [], pocketOn: "back",
   };
 }

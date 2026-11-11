@@ -115,7 +115,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
     const att: Attach[] = [];
     info.attach.forEach((r, i) => {
       const pid = info.pidByKey[r.piece], on = info.pidByKey[r.on];
-      if (pid && on) att.push({ id: `a${stamp}t${i}`, kind: r.kind, pid, on, a: r.a, b: r.b, len: r.len, w: r.w, tail: r.tail });
+      if (pid && on) att.push({ id: `a${stamp}t${i}`, kind: r.kind, pid, on, a: r.a, b: r.b, len: r.len, w: r.w, tail: r.tail, ...(r.across ? { across: true } : {}) });
     });
     setSeams((prev) => [...prev, ...made]); setDirty(true);
     // เก็บค่าแม่แบบ + จุดติด โดยไม่ทับค่าอื่นของ template (ค่าวัสดุ · ซิป/อะไหล่ · เป้าหมายตีราคา) — เดิมทับทั้งก้อน

@@ -23,12 +23,14 @@ import { flattenShape, shapeArea, shapeBox, type InnerLine, type Pt, type Shape 
 import { checkSeam, isInnerSide, isPartialSeam, isRangedSide, pieceEdges, sidePoints, type Seam, type SeamSide, type EdgeMeta } from "@/lib/pattern-seams";
 
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ — handle: ปลายหู 2 จุดบนแผ่น (พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่น · y ลง) · behind: แผ่นปิดหลังรูแรกของแผ่น */
-export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
+export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number;
+  /** สายพาดข้างถึงข้าง (2026-11-11): โคนสายอยู่ที่ชิ้นข้างซ้าย/ขวา กึ่งกลางความหนา ต่ำจากปาก = a[1] — ไม่ใช่บนแผ่นหน้า/หลัง */ across?: boolean };
 export type AsmPiece = { pid: string; name: string; count: number; shape: Shape; holes: Shape[]; /** ชั้นซับใน (ไม่ใส่ = ชั้นนอก) */ layer?: "lining"; /** เส้นในชิ้น — ให้ชิ้นอื่นมาเย็บ (ภาพเย็บติด lib/pattern-sewn) */ inner?: InnerLine[]; /** ค่ารายขอบ (กุ้น / ติดซิป) — ภาพเย็บติดวาดเป็นเส้นตามขอบ */ edgeMeta?: EdgeMeta[] | null };
 
 export type AsmPanel = { pid: string; side: 1 | -1; outline: Pt[]; holes: Pt[][] };
 export type AsmSweep = { pid: string; pts: Pt[]; dir: Pt };
-export type AsmHandle = { pid: string; side: 1 | -1; a: Pt; b: Pt; len: number; w: number; tail: number };
+/** side: 1 = แผ่นหน้า · -1 = แผ่นหลัง · 0 = กึ่งกลางความหนา (สายพาดข้างถึงข้าง โคนอยู่ที่ชิ้นข้าง) */
+export type AsmHandle = { pid: string; side: 1 | -1 | 0; a: Pt; b: Pt; len: number; w: number; tail: number };
 export type AsmBehind = { pid: string; side: 1 | -1; x: number; y: number; w: number; h: number };
 /** extra = ชิ้นเสริมที่เย็บบางช่วงกับแผ่นหน้า/หลัง (มาจากภาพเย็บติด lib/pattern-sewn · assemble() เองไม่สร้างขั้นนี้) */
 export type AsmStepKey = "behind" | "handle" | "extra" | "gusset" | "back" | "lining";
@@ -191,6 +193,13 @@ export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Atta
   for (const at of attaches) {
     const child = byPid.get(at.pid);
     if (!child || (at.on !== front && at.on !== back)) continue;
+    if (at.kind === "handle" && at.across && at.len && at.w) {
+      // สายพาดข้างถึงข้าง: โคนซ้าย/ขวาอยู่ที่ขอบข้างสุดของแผ่นหน้า ณ ความสูงนั้น (= ผิวชิ้นข้าง) กึ่งกลางความหนา
+      const y = Math.max(0, ff.h - Math.max(0, at.a?.[1] ?? 0)), near = ff.outline.filter((q) => q[1] >= y - 1.5), P = near.length >= 2 ? near : ff.outline;
+      handles.push({ pid: at.pid, side: 0, a: [Math.min(...P.map((q) => q[0])) - 0.15, y], b: [Math.max(...P.map((q) => q[0])) + 0.15, y], len: at.len, w: at.w, tail: at.tail ?? 4 });
+      attached.add(at.pid);
+      continue;
+    }
     const sides: (1 | -1)[] = front === back ? [1, -1] : [at.on === front ? 1 : -1];
     for (const side of sides) {
       const P = side > 0 ? F : B, f = side > 0 ? ff : fb, box = shapeBox(P.shape);
@@ -238,7 +247,7 @@ export function cleanAttaches(raw: unknown, pids: Set<string>): Attach[] {
     if (r.kind === "behind") { out.push({ id, kind: "behind", pid, on }); continue; }
     const a = pt(r.a), b = pt(r.b), len = num(r.len), w = num(r.w), tail = num(r.tail);
     if (r.kind !== "handle" || !a || !b || !len || !w || len <= 0 || len > 300 || w <= 0 || w > 30) continue;
-    out.push({ id, kind: "handle", pid, on, a, b, len, w, tail: tail != null && tail >= 0 && tail <= 30 ? tail : 4 });
+    out.push({ id, kind: "handle", pid, on, a, b, len, w, tail: tail != null && tail >= 0 && tail <= 30 ? tail : 4, ...(r.across === true ? { across: true } : {}) });
   }
   return out;
 }

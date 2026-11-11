@@ -240,12 +240,14 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     const a = shapeArea(C.shape);
     return Math.abs(a - shapeArea(T.shape)) <= 0.03 * a;
   };
+  const bridgePids = new Set<string>([...(asm?.bridges ?? []), ...(L0.ok ? L0.bridges : [])]);
   let progress = true;
   while (progress) {
     progress = false;
     for (const C of pieces) {
       if (done.has(C.pid)) continue;
-      const L = linksOf(C.pid).filter((s) => !isFacing(s.a.pid === C.pid ? s.b.pid : s.a.pid, C));   // ชิ้นประกบ (เช่น ซับในฝาปิด) ไม่นับเป็นที่เกาะ
+      // ที่เกาะของชิ้น: ไม่นับชิ้นประกบ (เช่น ซับในฝาปิด) และไม่นับชิ้นคั่นกลางของตัวกระเป๋า (โค้งตามตัว ไม่ใช่แผ่นเรียบ — เช่น ปลายแถบซิปที่เย็บกับปลายชิ้นข้าง)
+      const L = linksOf(C.pid).filter((s) => { const o = s.a.pid === C.pid ? s.b.pid : s.a.pid; return !isFacing(o, C) && !bridgePids.has(o); });
       if (!L.length || L.length > 2 || L.some((s) => s.a.pid === s.b.pid)) continue;
       const ends = L.map((s) => {
         const mine = s.a.pid === C.pid ? s.a : s.b, other = s.a.pid === C.pid ? s.b : s.a, host = frames.get(other.pid), hp = byPid.get(other.pid);

@@ -18,7 +18,7 @@ function board(kit: BagKit) {
   const pieces = cleanProjectPieces(raw);
   const seamsRaw = kit.seams.map((s, i) => ({ id: `s${i}`, a: { ...s.a, pid: pid(s.a.piece) }, b: { ...s.b, pid: pid(s.b.piece) }, ...(s.kind ? { kind: s.kind } : {}) }));
   const seams: Seam[] = cleanSeams(seamsRaw, new Set(pieces.map((p) => p.pid)));
-  const attaches: Attach[] = cleanAttaches(kit.attach.map((a, i) => ({ id: `a${i}`, kind: a.kind, pid: pid(a.piece), on: pid(a.on), a: a.a, b: a.b, len: a.len, w: a.w, tail: a.tail })), new Set(pieces.map((p) => p.pid)));
+  const attaches: Attach[] = cleanAttaches(kit.attach.map((a, i) => ({ id: `a${i}`, kind: a.kind, pid: pid(a.piece), on: pid(a.on), a: a.a, b: a.b, len: a.len, w: a.w, tail: a.tail, across: a.across })), new Set(pieces.map((p) => p.pid)));
   const asm: AsmPiece[] = pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) }));
   return { raw, pieces, seams, attaches, asm };
 }
@@ -127,6 +127,31 @@ describe("ชุดแม่แบบทรงกระเป๋า 6 ทรง 
     expect(z1).toBeCloseTo(D / 2, 1); expect(z0).toBeCloseTo(0, 1);
     expect(y1 - y0).toBeGreaterThan(3);                                                       // โค้งตามวงกลม ไม่ใช่แถบแบนระดับเดียว
     expect(y1).toBeLessThan(sc.asm!.height + 0.5);
+  });
+
+  it("สายสะพาย (ทรงกล่อง / ฝาปิด) พาดข้างถึงข้าง: โคนอยู่ที่ผิวชิ้นข้างซ้าย/ขวา กึ่งกลางความหนา ต่ำจากปาก 2 ซม.", () => {
+    for (const style of ["box", "flap"] as BagStyle[]) {
+      const B = board(kitOf(style)), A = assemble(B.asm, B.seams, B.attaches);
+      if (!A.ok) throw new Error("ประกอบไม่ได้");
+      expect(A.handles).toHaveLength(1);
+      const h = A.handles[0];
+      expect([style, h.pid, h.side]).toEqual([style, "strap", 0]);
+      expect(h.a[0]).toBeCloseTo(-A.width / 2 - 0.15, 1); expect(h.b[0]).toBeCloseTo(A.width / 2 + 0.15, 1);
+      expect(h.a[1]).toBeCloseTo(A.height - 2, 1); expect(h.len).toBe(120);
+      expect(A.loose).not.toContain("strap");
+    }
+  });
+
+  it("ปลายแถบซิปเย็บกับปลายชิ้นข้าง (ทรงกล่อง / ทรงกลม): 4 ตะเข็บบางช่วง ครึ่งละชิ้น ยาวเท่ากัน · ภาพ 3 มิติยังปิดปากเหมือนเดิม ไม่มีชิ้นค้าง", () => {
+    for (const style of ["box", "round"] as BagStyle[]) {
+      const kit = kitOf(style, { lining: false, pocket: false }), B = board(kit);
+      const ends = B.seams.filter((s) => s.a.pid === "gusset" && s.a.t0 != null);
+      expect([style, ends.length, ends.map((s) => s.b.pid).sort().join()]).toEqual([style, 4, "zipA,zipA,zipB,zipB"]);
+      const shapes = new Map(B.pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
+      for (const s of ends) expect(checkSeam(shapes, s).status).toBe("ok");
+      const sc = buildSewn(B.asm, B.seams, B.attaches);
+      expect([style, sc.notes.length, sc.parts.find((p) => p.pid === "zipA")?.kind]).toEqual([style, 0, "flap"]);
+    }
   });
 
   it("Tote: ชิ้นตัวนอกเหมือนสูตรเดิมทุกชิ้น (ลำดับ ชื่อ รูป ตำแหน่ง) · ซับในวางใต้ชุดตัวนอก · แบบมีช่องโชว์ ซับในไม่เจาะช่องและไม่ผูกรูป", () => {

@@ -411,7 +411,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       const hd = buildHandle(h.a, h.b, h.len, h.w, h.tail, colors.handle, threadH);
       top = Math.max(top, hd.top); hd.mesh.userData.piece = h.pid; S.pick.push(hd.mesh);
       if (h.side < 0) hd.grp.rotation.y = Math.PI;
-      add(`h${i}`, h.pid, hd.grp, [0, 0, (h.side * D) / 2], [0, 7, 0], [hd.mat], h.side > 0 ? "front" : "back", "handle");
+      add(`h${i}`, h.pid, hd.grp, [0, 0, (h.side * D) / 2], [0, 7, 0], [hd.mat], h.side > 0 ? "front" : h.side < 0 ? "back" : null, "handle");   // side 0 = สายพาดข้างถึงข้าง อยู่กึ่งกลางความหนา
     });
     A.behind.forEach((bh, i) => {
       const pg = new THREE.Group(), pgeo = new THREE.ShapeGeometry(new THREE.Shape(V2([[bh.x, bh.y], [bh.x + bh.w, bh.y], [bh.x + bh.w, bh.y + bh.h], [bh.x, bh.y + bh.h]])));
