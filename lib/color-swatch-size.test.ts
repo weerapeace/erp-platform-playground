@@ -74,3 +74,15 @@ describe("ป้ายเตือนหน้ารายการ", () => {
     expect(issues.find((i) => i.key === "swatch_missing")?.names).toEqual(["Noir"]);
   });
 });
+
+describe("2026-11-11: เลขท้ายไม่มีวงเล็บ + วัสดุไม่ถูกตัดออกจากชื่อบนเว็บ", () => {
+  const idx2 = new SwatchIndex([...ENTRIES, e("ครีม", "Cream", "solid", ["#EFE6D2"]), e("ซาเฟียโน่", "Saffiano", "none")]);
+  it("ครีม 02 → หาเจอเป็น ครีม · 10 รู ไม่โดนตัด", () => {
+    expect(idx2.find("ครีม 02")?.th).toBe("ครีม");
+    expect(idx2.find("10 รู")?.th).toBe("10 รู");
+  });
+  it("ดำ/ซาเฟียโน่ = จุดสีดำ แต่ชื่อบนเว็บคงวัสดุไว้", () => {
+    expect(idx2.resolve("ดำ/ซาเฟียโน่")).toEqual({ colors: ["#1A1A1A"], imageKey: null });
+    expect(splitOptionSizes(["ดำ/ซาเฟียโน่", "แดง/ซาเฟียโน่"], idx2)).toBeNull();
+  });
+});

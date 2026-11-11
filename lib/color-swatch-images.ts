@@ -13,7 +13,8 @@ type Sb = ReturnType<typeof supabaseAdmin>;
 export async function swatchSourceImages(sb: Sb, names: string[]) {
   const esc = (s: string) => s.replace(/[\\%_]/g, (m) => "\\" + m);
   const res = await Promise.all(
-    names.map((n) => sb.from("skus_v2").select("id, code, name_th, color, cover_image_r2_key, parent_sku_id").ilike("color", esc(n)).eq("is_active", true).order("code").limit(40)),
+    // ชื่อสีที่เว็บโชว์ = ช่อง "สี (ไทย)" ก่อน ช่อง Color (baseColor) → หาได้ทั้งสองช่อง
+    names.flatMap((n) => (["color", "color_th"] as const).map((col) => sb.from("skus_v2").select("id, code, name_th, color, cover_image_r2_key, parent_sku_id").ilike(col, esc(n)).eq("is_active", true).order("code").limit(40))),
   );
   type K = { id: string; code: string | null; name_th: string | null; color: string | null; cover_image_r2_key: string | null; parent_sku_id: string | null };
   const kids = new Map<string, K>();

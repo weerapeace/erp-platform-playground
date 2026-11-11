@@ -2,7 +2,8 @@
  * POST /api/ai/translate — แปลข้อความ ไทย↔อังกฤษ
  * body: { text, to? }   คืน: { data: { translated, target, engine } }
  * body: { texts[], to? } คืน: { data: { translated_list, target, engine } }  ← ชุดเดียวหลายข้อความ
- *   engine: "free" = ใช้ Google ฟรีอย่างเดียว ไม่เรียก GPT (โหมดแปลโน้ตบรีฟในป๊อปโพสต์)
+ *   engine: "free" = ใช้ Google ฟรีอย่างเดียว ไม่เรียก GPT (โหมดแปลโน้ตบรีฟในป๊อปโพสต์) · "cf" = Cloudflare ฟรีก่อน ตกไป Google (ไม่เรียก GPT)
+ *   kind: "colors" = ชื่อสีสินค้า (ทะเบียนสี) — แปลเป็นชื่อสีแบบแบรนด์แฟชั่น
  *   kind: "labels" (ค่าเริ่มต้น = ชื่อช่องสั้น ๆ) | "content" (ข้อความบนหน้าเว็บร้าน — เรียบเรียงให้ลูกค้าอ่าน · ใช้กับ 🌐 ในตัวจัดหน้าเว็บ)
  *   (ใช้กับปุ่ม "แปลชื่อฟิลด์ทั้งโมดูล" — ยิงครั้งเดียวแทนการยิงทีละฟิลด์เป็นร้อยครั้ง
  *    ลำดับผลลัพธ์ตรงกับลำดับที่ส่งไป · ช่องที่แปลไม่ได้จะคืนเป็นค่าว่าง ไม่ใช่ทำให้ทั้งชุดพัง)
@@ -45,8 +46,39 @@ function pickTarget(sample: string, to?: string): { tlCode: string; target: stri
 // แปลหลายข้อความในคำขอเดียว — GPT ก่อน (ครั้งเดียวจบ) ตกไป Google ทีละข้อความ (ทีละ 5 พร้อมกัน)
 // คืนลำดับตรงกับที่ส่งมาเสมอ · ช่องที่แปลไม่ได้ = "" ให้ฝั่งเรียกข้ามไปเอง
 // free = ข้าม GPT ไปใช้ Google ฟรีเลย (เช่น โหมดแปลโน้ตบรีฟ — เจ้าของเลือก "แปลแบบไม่เสียเงิน")
-async function translateBatch(list: string[], to: string | undefined, kind: "labels" | "content", free: boolean, ctx: UseCtx): Promise<NextResponse> {
+// engine: "gpt" (ค่าเริ่ม = GPT ก่อน) · "free" = Google อย่างเดียว · "cf" = Cloudflare ฟรีก่อน (ไม่เรียก GPT) ตกไป Google
+// kind "colors" = ชื่อสีสินค้า (ทะเบียนสี — เจ้าของขอ 2026-11-11 "ใช้ cloudflare ก่อน ไม่สวยค่อยเปลี่ยนเป็น GPT")
+async function translateBatch(list: string[], to: string | undefined, kind: "labels" | "content" | "colors", engine: "gpt" | "free" | "cf", ctx: UseCtx): Promise<NextResponse> {
   const { tlCode, target } = pickTarget(list.find(Boolean) ?? "", to);
+  const free = engine !== "gpt";
+  const colorHint = "These are product colour names for a Thai fashion/leather-goods brand. Translate each into a short colour name the way fashion brands write it (e.g. กะปิ → Taupe, มอคค่า → Mocha, เขียวสาหร่าย → Seaweed Green). Keep anything in parentheses and codes unchanged.";
+
+  // ☁️ Cloudflare ก่อน (ฟรีตามโควตา) — ส่งเป็นรายการมีเลข ทีละ 40 บรรทัด · บรรทัดที่หายไปค่อยให้ Google เติม
+  if (engine === "cf") {
+    const ai = await getAiFor("cf.translate", ctx);
+    if (ai) {
+      const got = new Array<string>(list.length).fill("");
+      for (let s = 0; s < list.length; s += 40) {
+        const chunk = list.slice(s, s + 40);
+        try {
+          const out: any = await ai.run(MODEL, {
+            messages: [
+              { role: "system", content: [`Translate each numbered line into ${target}.`, kind === "colors" ? colorHint : "Keep proper nouns, product codes (SKU) and brand names unchanged.", 'Reply with exactly the same numbered list, one line per input in the form "1. translation", nothing else.'].join(" ") },
+              { role: "user", content: chunk.map((t, i) => `${i + 1}. ${t}`).join("\n") },
+            ],
+            max_tokens: 2048,
+          });
+          for (const line of String(out?.response ?? "").split("\n")) {
+            const m = /^\s*(\d+)[.)]\s*(.+?)\s*$/.exec(line);
+            const i = m ? Number(m[1]) : 0;
+            if (i >= 1 && i <= chunk.length && m![2]) got[s + i - 1] = m![2].replace(/^["']|["']$/g, "");
+          }
+        } catch { /* ช่วงนี้ให้ Google เติม */ }
+      }
+      for (let i = 0; i < list.length; i++) if (!got[i] && list[i]) { try { got[i] = await googleTranslate(list[i], tlCode); } catch { /* ปล่อยว่าง */ } }
+      if (got.some(Boolean)) return NextResponse.json({ data: { translated_list: got, target, engine: "cf" }, error: null });
+    }
+  }
 
   if (openAiKey() && !free && (await aiAvailable("ai.translate", ctx))) {   // ปิดในศูนย์ AI/API (ทั้งหมด/รายที่) หรือเกินงบ = ข้ามไปตัวแปลฟรี
     try {
@@ -63,7 +95,7 @@ async function translateBatch(list: string[], to: string | undefined, kind: "lab
           ].filter(Boolean).join(" ")
         : [
             `You are a professional translator for a Thai e-commerce/ERP system. Translate each numbered line into ${target}.`,
-            "These are short data-entry field names (labels) in a business form — translate them as concise UI labels, not sentences.",
+            kind === "colors" ? colorHint : "These are short data-entry field names (labels) in a business form — translate them as concise UI labels, not sentences.",
             "Keep proper nouns, URLs, product codes (SKU), and brand names unchanged.",
             style || "",
             'Reply as JSON: {"items":[{"i":1,"en":"..."}]} — exactly one entry per input line, keeping the same i number. No other keys.',
@@ -120,7 +152,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!listIn.some(Boolean)) return NextResponse.json({ error: "no text" }, { status: 400 });
     if (listIn.length > 400) return NextResponse.json({ error: "ส่งมาเกิน 400 ข้อความ" }, { status: 400 });
     if (listIn.join("").length > 12000) return NextResponse.json({ error: "ข้อความรวมกันยาวเกินไป (จำกัด 12000 ตัวอักษร)" }, { status: 400 });
-    return translateBatch(listIn, body.to, body.kind === "content" ? "content" : "labels", body.engine === "free", ctx);
+    const kind = body.kind === "content" ? "content" : body.kind === "colors" ? "colors" : "labels";
+    return translateBatch(listIn, body.to, kind, body.engine === "free" ? "free" : body.engine === "cf" ? "cf" : "gpt", ctx);
   }
 
   const text = (body.text ?? "").trim();
@@ -132,7 +165,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 0) GPT ก่อน (คุณภาพดีสุด — เรียบเรียงใหม่ให้อ่านลื่น ไม่แปลตรงตัวแบบเครื่องแปล)
   //    ราคา ~0.02 บาท/ช่องข้อความยาว · สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt (platform = "translate")
-  if (openAiKey() && (await aiAvailable("ai.translate", ctx))) {
+  if (body.engine !== "cf" && openAiKey() && (await aiAvailable("ai.translate", ctx))) {   // engine "cf" = ไม่ใช้ GPT
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
       const sys = [

@@ -73,6 +73,7 @@ export const PAID_SERVICES: PaidService[] = [
       { key: "fields", th: "ชื่อฟิลด์ / ตั้งค่าโมดูล / แท็ก", files: ["components/master-crud/index.tsx", "components/master-crud/studio-panel.tsx", "components/relation-multi/index.tsx", "components/tag-organizer/index.tsx"] },
       { key: "content", th: "คอนเทนต์ (โน้ตบรีฟ · กระดานวาด)", files: ["app/tasks/content/content-brief.tsx", "components/canvas-sketch/index.tsx"] },
       { key: "purchasing", th: "จัดซื้อ (ใบสั่งซื้อ)", files: ["app/purchasing/orders/page.tsx"] },
+      { key: "color", th: "ทะเบียนสี (ชื่อสีภาษาอังกฤษ)", files: ["components/color-swatch-manager/index.tsx"] },
       { key: OTHER_PLACE, th: "อื่น ๆ (ไม่ได้ระบุที่มา)", files: [] },
     ] },
   { key: "cf.translate", th: "แปลภาษา (ตัวสำรองฟรี)", en: "Translate (free fallback)", group: "ทั่วทั้งระบบ",

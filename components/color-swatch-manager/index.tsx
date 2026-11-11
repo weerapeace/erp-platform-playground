@@ -10,6 +10,9 @@
  * - ชื่อสีผสม ("กรมท่า-ครีม-ขาว") ประกอบจากสีย่อยให้เอง → ตั้งสีย่อยครบก็ขึ้นเอง หรือกด "ตั้งเองเฉพาะชื่อนี้"
  * - 📏 แบบ "ไซส์ (ไม่มีสี)" (2026-11-10): ชื่ออย่าง "M (20.5 cm.)" · "10 รู" ที่ติดมากับช่องสี SKU → ไม่ต้องมีจุดสี
  *   ชื่อผสม "ดำ (01),M (20.5 cm.)" ใช้แค่ส่วนสี · ชื่อที่ดูเป็นไซส์ (looksLikeSize) มีปุ่มแนะนำ แต่ต้องกดเอง + บันทึกทีเดียวเหมือนสีอื่น
+ * - 🧹 จัดระเบียบชื่อ (2026-11-11): ตัวกรอง มีเลขท้าย / ชื่อคล้าย-สะกด / รหัส SKU / หนัง-ลาย · ปุ่ม "ดู/แก้ SKU" → SkuRenameDialog
+ *   (พรีวิว SKU เดิม→ใหม่ · ข้ามตัวที่ชื่อจะชนกันในรุ่นเดียว · ยืนยันก่อนเขียน · audit) · ตรรกะ = lib/color-name-tools
+ *   🌐 แปลชื่ออังกฤษ (/api/ai/translate kind colors · Cloudflare ฟรีก่อน · เลือก GPT ได้ — place "color") · ✂️ ครอปรูปตรงแถวชื่อผสม
  * - 💾 ตั้งหลายสีแล้วบันทึกทีเดียว (2026-11-05): ที่แก้ค้างอยู่ใน drafts (ต่อแถว) · สลับสีได้ไม่ถาม · ในตาราง = จุดสีใหม่ + "รอบันทึก"/"ยังไม่ครบ"
  *   แถบล่าง SaveBar "บันทึกทั้งหมด (N สี)" → POST { items } ครั้งเดียว · ตัวที่ยังไม่ครบ/บันทึกพลาด ค้างไว้ให้แก้ต่อ · "ล้างจุดสี" ยังทำทันทีทีละสี
  *
@@ -33,6 +36,8 @@ import {
   SwatchIndex, swatchCss, splitColorName, hasSwatch, normColorName, isHex, looksLikeSize,
   SWATCH_KIND_LABEL, MAX_SPLIT, type SwatchEntry, type SwatchKind,
 } from "@/lib/color-swatch";
+import { looksLikeMaterial, similarGroups, skuCodeColors, skuCodesIn, trailingNumberFix, typoFix, type SimilarGroup } from "@/lib/color-name-tools";
+import { SkuRenameDialog, type RenameItem } from "./sku-rename-dialog";
 
 interface Used { name: string; skus: number; shops: string[]; images?: string[] }
 /** size = ตั้งเป็น "ไซส์ (ไม่มีสี)" — ไม่ต้องมีจุดสี · ชื่อผสมที่มีส่วนนี้ใช้แค่ส่วนที่เป็นสี */
@@ -50,6 +55,8 @@ interface Row {
   missing: string[];
   /** รูปปก SKU ที่ใช้สีนี้ (ไว้ดูดสี) */
   images: string[];
+  /** ชื่อจริงใน SKU ที่ถูกรวมเข้าแถวนี้ (เช่น "ครีม 02" · "ดำ (01)" → แถว ครีม/ดำ) → จำนวน SKU — ไว้ตัดเลข/เปลี่ยนชื่อใน SKU */
+  aliases: Map<string, number>;
 }
 interface Draft { th: string; en: string; kind: SwatchKind | null; colors: string[]; imageKey: string | null; isNew: boolean }
 
@@ -57,7 +64,7 @@ const STATUS_UI: Record<Status, { label: string; cls: string }> = {
   set: { label: "ตั้งแล้ว", cls: "bg-emerald-50 text-emerald-700" },
   auto: { label: "ผสมอัตโนมัติ", cls: "bg-blue-50 text-blue-700" },
   unset: { label: "ยังไม่ตั้ง", cls: "bg-amber-50 text-amber-700" },
-  size: { label: "ไซส์ (ไม่มีสี)", cls: "bg-slate-100 text-slate-600" },
+  size: { label: "ไม่ใช่สี", cls: "bg-slate-100 text-slate-600" },
 };
 const thumb = (k: string) => keyUrl(k, 96) ?? "";
 const isAscii = (s: string) => /^[\x20-\x7E]+$/.test(s);
@@ -69,7 +76,9 @@ const draftCssOf = (d: Draft) =>
     : d.colors.filter(isHex).length ? swatchCss({ colors: d.colors.filter(isHex), imageKey: null }, thumb) : null;
 // ทุกช่องสีต้องกรอกถูก (ช่องว่างที่กด "+ เพิ่มสี" ค้างไว้ = ยังไม่ครบ ไม่ปล่อยให้หายเงียบตอนบันทึก) · คำใหม่ต้องมีชื่ออังกฤษ
 const draftReady = (d: Draft) => (!d.isNew || d.en.trim().length > 0) && (
-  d.kind === "none" ? true
+  // kind null = คำใหม่ที่แปลชื่ออังกฤษไว้อย่างเดียว (ยังไม่เลือกจุดสี) — บันทึกเป็นคำในพจนานุกรมได้
+  d.kind === null ? d.isNew && d.en.trim().length > 0
+  : d.kind === "none" ? true
   : d.kind === "image" ? !!d.imageKey
     : d.kind === "split" ? d.colors.length >= 2 && d.colors.every(isHex)
     : isHex(d.colors[0])
@@ -80,7 +89,7 @@ const sameDraft = (a: Draft, b: Draft) => a.en.trim() === b.en.trim() && a.kind 
 function Dot({ css, size = 22, sizeMark }: { css: string | null; size?: number; sizeMark?: boolean }) {
   // 📏 ไซส์ (ไม่มีสี) = ไม้บรรทัดแทนจุดสี
   if (sizeMark) return (
-    <span className="inline-flex items-center justify-center rounded-full shrink-0 bg-slate-100 text-slate-500" style={{ width: size, height: size, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.1)" }} title="ไซส์ (ไม่มีสี)">
+    <span className="inline-flex items-center justify-center rounded-full shrink-0 bg-slate-100 text-slate-500" style={{ width: size, height: size, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.1)" }} title="ไม่ใช่สี (ไซส์/หนัง/ลาย)">
       <Icon name="ruler" size={Math.round(size * 0.6)} />
     </span>
   );
@@ -101,22 +110,24 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
   const idx = new SwatchIndex(entries);
   const rows = new Map<string, Row>();
   const blank = (name: string, entry: SwatchEntry | null, compound = false): Row => ({
-    key: normColorName(name), name, entry, compound, skus: 0, shops: new Set(), css: null, status: "unset", missing: [], images: [],
+    key: normColorName(name), name, entry, compound, skus: 0, shops: new Set(), css: null, status: "unset", missing: [], images: [], aliases: new Map(),
   });
   for (const e of entries) rows.set(normColorName(e.th), blank(e.th, e));
 
-  const tally = (name: string, u: Used) => {
+  const tally = (name: string, u: Used, whole = true) => {
     const e = idx.find(name);
     const key = e ? normColorName(e.th) : normColorName(name);
     if (!rows.has(key)) rows.set(key, blank(name, null));
     const r = rows.get(key)!;
     r.skus += u.skus;
+    if (whole && normColorName(name) !== key) r.aliases.set(name, (r.aliases.get(name) ?? 0) + u.skus);
     u.shops.forEach((s) => r.shops.add(s));
     for (const im of u.images ?? []) if (r.images.length < 8 && !r.images.includes(im)) r.images.push(im);
   };
   for (const u of used) {
     const parts = splitColorName(u.name);
-    if (!parts.length || idx.find(u.name)) { tally(u.name, u); continue; }
+    // ชื่อที่เป็นรหัส SKU ของชิ้นในเซ็ต (WK21-02,WK18-02) = ชื่อเดียว ไม่แยกเป็นสีย่อย (ไม่งั้นได้แถวขยะ "WK21" "02")
+    if (!parts.length || idx.find(u.name) || skuCodesIn(u.name).length) { tally(u.name, u); continue; }
     // ชื่อผสม: แถวของชื่อเต็ม (ประกอบอัตโนมัติ) + นับให้สีย่อยด้วย จะได้รู้ว่าสีย่อยไหนสำคัญ
     const key = normColorName(u.name);
     if (!rows.has(key)) rows.set(key, blank(u.name, null, true));
@@ -124,7 +135,7 @@ function buildRows(entries: SwatchEntry[], used: Used[]): Row[] {
     r.skus += u.skus;
     u.shops.forEach((s) => r.shops.add(s));
     for (const im of u.images ?? []) if (r.images.length < 8 && !r.images.includes(im)) r.images.push(im);
-    parts.forEach((p) => tally(p, u));
+    parts.forEach((p) => tally(p, u, false));
   }
 
   for (const r of rows.values()) {
@@ -171,7 +182,13 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const focus = useMemo(() => focusNames ?? [], [focusSig]);
   const hasFocus = focus.length > 0;
-  const [filter, setFilter] = useState<"focus" | "todo" | "done" | "all">(hasFocus ? "focus" : "todo");
+  const [filter, setFilter] = useState<"focus" | "todo" | "done" | "all" | "num" | "similar" | "codes" | "material">(hasFocus ? "focus" : "todo");
+  // 🔁 หน้าต่างเปลี่ยนชื่อสีใน SKU (พรีวิว → ยืนยัน) · 🌐 ตัวแปลที่เลือก (ฟรีก่อน)
+  const [rename, setRename] = useState<{ items: RenameItem[]; title?: string } | null>(null);
+  const [engine, setEngine] = useState<"cf" | "gpt">("cf");
+  const [translating, setTranslating] = useState(false);
+  // ④ ชื่อสีที่เป็นรหัส SKU → สีของชิ้นในเซ็ต (โหลดตอนเลือกแถว)
+  const [codeInfo, setCodeInfo] = useState<{ key: string; suggestion: string | null; missing: string[]; parts: { code: string; color: string | null }[] } | null>(null);
   const [shop, setShop] = useState("");
   const [selKey, setSelKey] = useState<string | null>(null);
   // ✏️ สีที่แก้ค้างไว้ (key ของแถว → ค่าที่แก้) — สลับไปตั้งสีอื่นได้เลย ของที่แก้ไม่หาย · กด "บันทึกทั้งหมด" ทีเดียว
@@ -215,13 +232,46 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
   const shops = useMemo(() => [...new Set(rows.flatMap((r) => [...r.shops]))].sort(), [rows]);
   const todoCount = rows.filter((r) => r.status === "unset" && r.skus > 0).length;
   const focusKeys = useMemo(() => focusKeysFor(focus, entries), [focus, entries]);
+  // 🧹 จัดระเบียบชื่อ (เฉพาะชื่อที่ SKU บนเว็บใช้อยู่) — lib/color-name-tools
+  const groups = useMemo(() => similarGroups(rows.filter((r) => r.skus > 0).map((r) => ({ name: r.name, skus: r.skus }))), [rows]);
+  const groupOf = useMemo(() => {
+    const m = new Map<string, SimilarGroup>();
+    for (const g of groups) for (const x of g.members) m.set(normColorName(x.name), g);
+    return m;
+  }, [groups]);
+  /** ① ชื่อที่ติดเลข (ชื่อแถวเอง + ชื่อใน SKU ที่ถูกรวมเข้าแถวนี้ เช่น "ครีม 02" ในแถว ครีม) → ตัดเลข */
+  const numItems = (r: Row): RenameItem[] => [r.name, ...r.aliases.keys()].flatMap((n) => { const to = trailingNumberFix(n); return to ? [{ from: n, to }] : []; });
+  const isNum = (r: Row) => r.skus > 0 && numItems(r).length > 0;
+  /** ทุกชื่อใน SKU ของแถวนี้ (ชื่อแถว + ชื่อที่ถูกรวม) พร้อมชื่อแนะนำ — ปุ่ม "ดู/แก้ SKU ที่ใช้ชื่อนี้" */
+  const allNameItems = (r: Row, to: string): RenameItem[] => [{ from: r.name, to }, ...[...r.aliases.keys()].map((a) => ({ from: a, to: trailingNumberFix(a) ?? a }))];
+  const isSimilar = (r: Row) => r.skus > 0 && (groupOf.has(r.key) || !!typoFix(r.name));
+  const isCodes = (r: Row) => r.skus > 0 && skuCodesIn(r.name).length > 0;
+  const isMaterial = (r: Row) => r.skus > 0 && r.compound && r.status === "unset" && splitColorName(r.name).some(looksLikeMaterial);
   const shown = rows.filter((r) => {
     if (filter === "focus") return focusKeys.has(r.key);
     if (shop && !r.shops.has(shop)) return false;
     if (filter === "todo") return r.status === "unset" && r.skus > 0;
     if (filter === "done") return r.status !== "unset";
+    if (filter === "num") return isNum(r);
+    if (filter === "similar") return isSimilar(r);
+    if (filter === "codes") return isCodes(r);
+    if (filter === "material") return isMaterial(r);
     return true;
   });
+  // ชื่อคล้าย: เรียงให้อยู่ติดกันตามกลุ่ม
+  if (filter === "similar") shown.sort((a, b) => (groupOf.get(a.key)?.main ?? typoFix(a.name) ?? a.name).localeCompare(groupOf.get(b.key)?.main ?? typoFix(b.name) ?? b.name, "th") || b.skus - a.skus);
+  const counts = { num: rows.filter(isNum).length, similar: rows.filter(isSimilar).length, codes: rows.filter(isCodes).length, material: rows.filter(isMaterial).length };
+  /** ชื่อแนะนำของแถวนี้ (ไม่มี = null): รหัสเซ็ต (ต้องโหลด) · ตัดเลข · แก้สะกด · ชื่อหลักของกลุ่ม */
+  const fixOf = (r: Row): { to: string; why: string } | null => {
+    const num = trailingNumberFix(r.name);
+    if (num) return { to: num, why: "ตัดเลขท้าย" };
+    const t = typoFix(r.name);
+    if (t) return { to: t, why: "แก้คำสะกด" };
+    const g = groupOf.get(r.key);
+    if (g && normColorName(g.main) !== r.key) return { to: g.main, why: g.kind === "exact" ? "รวมกับชื่อหลัก" : "คล้ายกับ (ตรวจก่อน)" };
+    return null;
+  };
+  const openRename = (items: RenameItem[], title?: string) => { if (items.length) setRename({ items, title }); };
   const sel = rows.find((r) => r.key === selKey) ?? null;
   // 📏 ชื่อที่ "ดูเป็นไซส์" แต่ยังไม่ได้ตั้ง (แนะนำเท่านั้น — เจ้าของกดเองถึงจะตั้ง)
   const sizeSuggest = shown.filter((r) => r.status === "unset" && !r.compound && !drafts[r.key] && looksLikeSize(r.name));
@@ -261,9 +311,75 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
   const sizeDraft = (r: Row): Draft => ({ th: r.entry?.th ?? r.name, en: r.entry?.en || r.name, kind: "none", colors: [], imageKey: null, isNew: !r.entry });
   const markSize = (list: Row[]) => setDrafts((m) => {
     const n = { ...m };
-    for (const r of list) if (r.entry?.kind !== "none") n[r.key] = sizeDraft(r);
+    // คงชื่ออังกฤษที่แปลค้างไว้ (เช่น ซาเฟียโน่ → Saffiano)
+    for (const r of list) if (r.entry?.kind !== "none") n[r.key] = { ...sizeDraft(r), en: m[r.key]?.en.trim() || sizeDraft(r).en };
     return n;
   });
+
+  /** 🌐 แปลชื่อไทย → อังกฤษ (ตัวแปลกลาง · Cloudflare ฟรีก่อน / GPT ตามที่เลือก) — คืนรายการตรงลำดับ ("" = แปลไม่ได้) */
+  const translateNames = async (list: string[]): Promise<string[]> => {
+    const j = await apiFetch("/api/ai/translate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texts: list, to: "en", kind: "colors", engine, place: "color" }),
+    }).then((r) => r.json());
+    if (j.error) throw new Error(j.error);
+    return ((j.data?.translated_list ?? []) as string[]).map((s) => String(s ?? "").trim());
+  };
+  // ชื่อไทยที่ยังไม่มีชื่ออังกฤษ (คำใหม่ · ไม่ใช่ชื่อผสม — ชื่อผสมแปลทีละคำให้เองตอนขึ้นเว็บ)
+  const needEn = rows.filter((r) => (r.skus > 0 || focusKeys.has(r.key)) && !r.entry && !r.compound && /[฀-๿]/.test(r.name) && !drafts[r.key]?.en.trim() && !fixOf(r));   // ชื่อที่ควรแก้ก่อน (สะกด/เลข/ชื่อคล้าย) ไม่แปล
+  const translateAll = async () => {
+    if (!needEn.length) return;
+    setTranslating(true);
+    try {
+      const out: string[] = [];
+      for (let i = 0; i < needEn.length; i += 100) out.push(...(await translateNames(needEn.slice(i, i + 100).map((r) => r.name))));
+      setDrafts((m) => {
+        const next = { ...m };
+        needEn.forEach((r, i) => {
+          const en = out[i];
+          if (!en) return;
+          next[r.key] = next[r.key] ? { ...next[r.key], en } : { th: r.name, en, kind: null, colors: [], imageKey: null, isNew: true };
+        });
+        return next;
+      });
+      toast.success(`แปลแล้ว ${out.filter(Boolean).length} ชื่อ — ตรวจในตาราง (ชื่ออังกฤษใต้ชื่อไทย) แล้วกดบันทึกทั้งหมด`);
+    } catch (e) {
+      toast.error(e instanceof Error ? `แปลไม่สำเร็จ: ${e.message}` : "แปลไม่สำเร็จ");
+    } finally {
+      setTranslating(false);
+    }
+  };
+  const translateOne = async () => {
+    if (!draft) return;
+    setTranslating(true);
+    try {
+      const [en] = await translateNames([draft.th]);
+      if (en) edit({ en }); else toast.warning("แปลไม่ได้ — พิมพ์เองได้เลย");
+    } catch (e) {
+      toast.error(e instanceof Error ? `แปลไม่สำเร็จ: ${e.message}` : "แปลไม่สำเร็จ");
+    } finally {
+      setTranslating(false);
+    }
+  };
+  // ④ เลือกแถวที่ชื่อเป็นรหัส SKU → ไปดูสีของชิ้นในเซ็ต (WK21-02 = น้ำตาล …) เสนอชื่อใหม่
+  const selCodes = sel ? skuCodesIn(sel.name) : [];
+  const selCodesSig = selCodes.join("|");
+  useEffect(() => {
+    if (!sel || !selCodesSig || codeInfo?.key === sel.key) return;
+    const key = sel.key, name = sel.name;
+    apiFetch(`/api/color-swatches/skus?codes=${encodeURIComponent(selCodesSig)}`).then((r) => r.json()).then((j) => {
+      const colorOf = new Map(Object.entries((j.data?.colorOf ?? {}) as Record<string, string>));
+      const res = skuCodeColors(name, colorOf);
+      if (res) setCodeInfo({ key, suggestion: res.suggestion, missing: res.missing, parts: res.codes });
+    }).catch(() => { /* ไม่มีคำแนะนำ */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.key, selCodesSig]);
+  // ✂️ ชื่อผสม (เช่น ดำ/ซาเฟียโน่) → ตั้งเป็นรูปลายเฉพาะชื่อนี้แล้วเปิดตัวครอปจากรูปสินค้าเลย
+  const cropCompound = () => {
+    if (!sel) return;
+    setDrafts((m) => ({ ...m, [sel.key]: { ...draftFor(sel), kind: "image", colors: [], imageKey: null } }));
+    openCrop();
+  };
   const loadSources = async () => {
     if (!sel || (src?.key === sel.key && !src.error)) return;
     const key = sel.key;
@@ -346,7 +462,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
     try {
       const j = await apiFetch("/api/color-swatches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ th, en, kind: null }) }).then((r) => r.json());
       if (j.error) { toast.error(j.error); return; }
-      toast.success(wasSize ? `ยกเลิกไซส์ "${th}" แล้ว — กลับเป็นชื่อสีที่ยังไม่ตั้งจุดสี` : `ล้างจุดสี "${th}" แล้ว`);
+      toast.success(wasSize ? `ยกเลิก "ไม่ใช่สี" ของ "${th}" แล้ว — กลับเป็นชื่อสีที่ยังไม่ตั้งจุดสี` : `ล้างจุดสี "${th}" แล้ว`);
       discard(sel.key);
       await load();
     } catch {
@@ -377,6 +493,11 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
             ["todo", `ต้องตั้ง (${todoCount})`],
             ["done", "ตั้งแล้ว"],
             ["all", "ทั้งหมด"],
+            // 🧹 จัดระเบียบชื่อ — โผล่เมื่อมีชื่อเข้าข่าย
+            ...((counts.num || filter === "num") ? ([["num", `มีเลขท้าย (${counts.num})`]] as const) : []),
+            ...((counts.similar || filter === "similar") ? ([["similar", `ชื่อคล้าย/สะกด (${counts.similar})`]] as const) : []),
+            ...((counts.codes || filter === "codes") ? ([["codes", `เป็นรหัส SKU (${counts.codes})`]] as const) : []),
+            ...((counts.material || filter === "material") ? ([["material", `มีหนัง/ลาย (${counts.material})`]] as const) : []),
           ] as const).map(([k, label]) => (
             <button key={k} type="button" onClick={() => setFilter(k)}
               className={`px-2.5 py-1 rounded-full text-xs border ${filter === k ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
@@ -394,6 +515,41 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
               <option value="">ทุกร้าน</option>
               {shops.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
+          )}
+        </div>
+
+        {/* 🧹 ทำทีละมาก ตามตัวกรองที่เลือก — ทุกปุ่มที่แก้ชื่อใน SKU เปิดหน้าต่างพรีวิวให้ยืนยันก่อน */}
+        <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
+          {filter === "num" && counts.num > 0 && (
+            <button type="button" onClick={() => openRename(shown.flatMap(numItems), `ตัดเลขท้ายชื่อสี (${shown.flatMap(numItems).length} ชื่อ)`)}
+              className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">ตัดเลขท้ายทั้งหมด ({shown.flatMap(numItems).length} ชื่อ) — ดูก่อนเปลี่ยน</button>
+          )}
+          {filter === "similar" && (() => {
+            const items = shown.flatMap((r) => { const f = fixOf(r); return f && (f.why !== "คล้ายกับ (ตรวจก่อน)") ? [{ from: r.name, to: f.to }] : []; });
+            return items.length > 0 && (
+              <button type="button" onClick={() => openRename(items, `รวมชื่อที่ต่างแค่ช่องว่าง/คำสะกด (${items.length} ชื่อ)`)}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">รวมชื่อที่ต่างแค่ช่องว่าง/คำสะกด ({items.length}) — ดูก่อนเปลี่ยน</button>
+            );
+          })()}
+          {filter === "material" && (() => {
+            // คำหนัง/ลายที่ยังไม่ตั้ง → ตั้งเป็น "ไม่ใช่สี" ทีเดียว (จุดสีใช้แค่ส่วนที่เป็นสี · ชื่อบนเว็บยังโชว์ชนิดหนัง)
+            const parts = rows.filter((r) => !r.compound && r.status === "unset" && (!drafts[r.key] || drafts[r.key].kind === null) && looksLikeMaterial(r.name));
+            return parts.length > 0 && (
+              <button type="button" onClick={() => markSize(parts)} title={parts.map((r) => r.name).join(", ")}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">ตั้งคำหนัง/ลายเป็น “ไม่ใช่สี” ({parts.length} คำ) — แล้วกดบันทึกทั้งหมด</button>
+            );
+          })()}
+          {needEn.length > 0 && (
+            <span className="inline-flex items-center gap-1 ml-auto">
+              <button type="button" disabled={translating} onClick={() => void translateAll()}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1">
+                <Icon value="i:world" /> {translating ? "กำลังแปล…" : `แปลชื่ออังกฤษที่ยังไม่มี (${needEn.length})`}
+              </button>
+              <select value={engine} onChange={(e) => setEngine(e.target.value as "cf" | "gpt")} className="border border-slate-200 rounded-md px-1.5 py-1 bg-white" title="ตัวแปล: ฟรี = Cloudflare · GPT = สวยกว่า มีค่าใช้จ่าย (ดูในศูนย์ค่าใช้จ่าย)">
+                <option value="cf">ตัวแปลฟรี</option>
+                <option value="gpt">GPT (สวยกว่า)</option>
+              </select>
+            </span>
           )}
         </div>
         <MiniTable<Row>
@@ -414,14 +570,28 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
                 <div className={`min-w-0 ${r.key === selKey ? "font-semibold text-blue-700" : ""}`}>
                   <div className="truncate">{r.name}</div>
                   {r.entry?.en && r.entry.en !== r.name && <div className="text-[11px] text-slate-400 truncate">{r.entry.en}</div>}
-                  {r.missing.length > 0 && <div className="text-[11px] text-amber-600 truncate">ขาด: {r.missing.join(", ")}</div>}
+                  {!r.entry?.en && drafts[r.key]?.en && <div className="text-[11px] text-blue-600 truncate" title="แปลแล้ว — รอบันทึก">{drafts[r.key].en}</div>}
+                  {isCodes(r) ? <div className="text-[11px] text-amber-700 truncate">เป็นรหัส SKU ของชิ้นในเซ็ต — กดเพื่อดูสีที่แนะนำ</div>
+                    : r.missing.length > 0 && <div className="text-[11px] text-amber-600 truncate">ขาด: {r.missing.join(", ")}</div>}
+                  {r.skus > 0 && (() => { const f = fixOf(r); return f && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); openRename([{ from: r.name, to: f.to }]); }}
+                      className="block max-w-full truncate text-left text-[11px] text-violet-700 hover:underline" title="ดู SKU ที่ใช้ชื่อนี้ แล้วยืนยันก่อนเปลี่ยน">
+                      {f.why} → “{f.to}”
+                    </button>
+                  ); })()}
+                  {r.skus > 0 && !trailingNumberFix(r.name) && numItems(r).length > 0 && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); openRename(numItems(r), `ตัดเลขในชื่อสีของ “${r.name}”`); }}
+                      className="block max-w-full truncate text-left text-[11px] text-violet-700 hover:underline" title="ชื่อใน SKU ที่ติดเลข — ดูก่อนเปลี่ยน">
+                      ใน SKU เขียน {numItems(r).map((i) => `“${i.from}”`).join(", ")} → ตัดเลข
+                    </button>
+                  )}
                   {r.status === "unset" && !r.compound && !drafts[r.key] && looksLikeSize(r.name) && <div className="text-[11px] text-slate-500 truncate">ดูเป็นไซส์ — ตั้งเป็น “ไซส์ (ไม่มีสี)” ได้</div>}
                 </div>
               ),
             },
             {
               key: "kind", header: "แบบ", width: "6.5rem",
-              cell: (r) => <span className="text-xs text-slate-500">{r.compound && !r.entry ? "ผสม" : r.entry?.kind ? SWATCH_KIND_LABEL[r.entry.kind].replace(" (แบ่งช่อง)", "").replace(" (ไม่มีสี)", "") : "—"}</span>,
+              cell: (r) => <span className="text-xs text-slate-500">{r.compound && !r.entry ? "ผสม" : r.entry?.kind ? SWATCH_KIND_LABEL[r.entry.kind].replace(" (แบ่งช่อง)", "").replace(" (ไซส์/วัสดุ)", "") : "—"}</span>,
             },
             { key: "skus", header: "บนเว็บ", align: "right", width: "4.5rem", sortValue: (r) => r.skus, sortLabel: "จำนวน SKU", cell: (r) => <span className="text-xs text-slate-500">{r.skus ? `${r.skus} SKU` : "—"}</span> },
             {
@@ -440,6 +610,33 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 h-fit">
+        {/* 🧹 ชื่อนี้ใน SKU: คำแนะนำ (รหัสเซ็ต / ตัดเลข / สะกด / ชื่อคล้าย) + ดู/แก้ SKU ที่ใช้ชื่อนี้ — แก้จริงต้องยืนยันในหน้าต่างพรีวิว */}
+        {sel && (sel.skus > 0 || focusKeys.has(sel.key)) && (() => {
+          const f = fixOf(sel);
+          const ci = codeInfo?.key === sel.key ? codeInfo : null;
+          return (
+            <div className="mb-3 space-y-1.5 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-slate-700">
+              {isCodes(sel) ? (
+                ci ? (
+                  <>
+                    <div>ชื่อนี้เป็นรหัส SKU ของชิ้นในเซ็ต: {ci.parts.map((p) => `${p.code} = ${p.color ?? "ไม่พบ SKU"}`).join(" · ")}</div>
+                    {ci.suggestion
+                      ? <button type="button" onClick={() => openRename([{ from: sel.name, to: ci.suggestion! }], "ใช้สีของชิ้นในเซ็ตเป็นชื่อสี")} className="px-2 py-1 rounded-md border border-violet-300 bg-white hover:bg-violet-50 font-medium">ใช้ “{ci.suggestion}” เป็นชื่อสีใน SKU</button>
+                      : <div className="text-amber-700">หา SKU ไม่เจอ: {ci.missing.join(", ")} (อาจพิมพ์รหัสผิด) — แก้ชื่อเองได้จากปุ่มด้านล่าง</div>}
+                  </>
+                ) : <div className="text-slate-400">กำลังดูสีของชิ้นในเซ็ต…</div>
+              ) : f ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>แนะนำ: {f.why} → <b>“{f.to}”</b></span>
+                  <button type="button" onClick={() => openRename([{ from: sel.name, to: f.to }])} className="px-2 py-0.5 rounded-md border border-violet-300 bg-white hover:bg-violet-50">เปลี่ยนใน SKU</button>
+                </div>
+              ) : null}
+              <button type="button" onClick={() => openRename(allNameItems(sel, f?.to ?? ci?.suggestion ?? sel.name))} className="text-violet-700 underline hover:text-violet-900">
+                ดู/แก้ SKU ที่ใช้ชื่อนี้{sel.skus ? ` (${sel.skus} SKU)` : ""}
+              </button>
+            </div>
+          );
+        })()}
         {!sel ? (
           <p className="text-sm text-slate-500">เลือกชื่อสีทางซ้ายเพื่อตั้งหน้าตาจุดสี<br /><span className="text-xs text-slate-400">สีผสม เช่น “กรมท่า-ครีม-ขาว” ไม่ต้องตั้งเอง — ตั้งสีย่อยครบแล้วระบบแบ่งช่องให้</span></p>
         ) : !draft ? (
@@ -448,30 +645,34 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
             <div className="flex items-center gap-3"><Dot css={sel.css} size={56} /><div className="font-semibold text-slate-800">{sel.name}</div></div>
             <div className="text-xs text-slate-600 space-y-1">
               <div className="font-medium">ประกอบจากสีย่อย:</div>
-              {splitColorName(sel.name).slice(0, MAX_SPLIT).map((p) => {
+              {splitColorName(sel.name).slice(0, MAX_SPLIT).map((p, pi) => {
                 const r = rows.find((x) => x.key === normColorName(new SwatchIndex(entries).find(p)?.th ?? p));
                 const d = r ? drafts[r.key] : undefined;
                 const isSize = d ? d.kind === "none" : r?.status === "size";
                 return (
-                  <div key={p} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <div key={`${p}-${pi}`} className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <button type="button" onClick={() => r && select(r)} className="flex items-center gap-2 hover:underline text-left">
                       <Dot css={r?.css ?? null} size={14} sizeMark={isSize} /> {p}
                       {isSize
-                        ? <span className="text-slate-500">(ไซส์ — ไม่นับเป็นสี{d ? " · รอบันทึก" : ""})</span>
+                        ? <span className="text-slate-500">(ไม่ใช่สี — ไม่นับ{d ? " · รอบันทึก" : ""})</span>
                         : r?.status === "unset" && !d && <span className="text-amber-600">(ยังไม่ตั้ง — กดเพื่อตั้ง)</span>}
                     </button>
-                    {r && !isSize && r.status === "unset" && looksLikeSize(p) && (
+                    {r && !isSize && r.status === "unset" && (looksLikeSize(p) || looksLikeMaterial(p)) && (
                       <button type="button" onClick={() => markSize([r])}
                         className="text-[11px] px-1.5 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1">
-                        <Icon name="ruler" /> ตั้งเป็นไซส์ (ไม่มีสี)
+                        <Icon name="ruler" /> {looksLikeMaterial(p) ? "ตั้งเป็นไม่ใช่สี (หนัง/ลาย)" : "ตั้งเป็นไซส์ (ไม่มีสี)"}
                       </button>
                     )}
                   </div>
                 );
               })}
-              <p className="text-[11px] text-slate-400 pt-1">ส่วนที่ตั้งเป็นไซส์ไม่นับเป็นสี — จุดสีใช้แค่ส่วนที่เป็นสี · หน้าสินค้าโชว์ชื่อสีอย่างเดียว + บรรทัด “ไซส์” ในหัวข้อขนาด</p>
+              <p className="text-[11px] text-slate-400 pt-1">ส่วนที่ตั้งเป็น “ไม่ใช่สี” ไม่นับ — จุดสีใช้แค่ส่วนที่เป็นสี · ไซส์ย้ายไปบรรทัด “ไซส์” ในหัวข้อขนาด · หนัง/ลายยังโชว์ในชื่อบนเว็บ</p>
             </div>
-            <button type="button" onClick={() => setDrafts((m) => ({ ...m, [sel.key]: draftFor(sel) }))} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">✏️ ตั้งเองเฉพาะชื่อนี้</button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setDrafts((m) => ({ ...m, [sel.key]: draftFor(sel) }))} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">✏️ ตั้งเองเฉพาะชื่อนี้</button>
+              {/* ✂️ เห็นลายหนังจริง (ซาเฟียโน่/ลายจระเข้) — ครอปจากรูปสินค้าเป็นจุดสีรูปลายของชื่อนี้ */}
+              <button type="button" onClick={cropCompound} className="text-xs px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">✂️ ครอปจากรูปสินค้า</button>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">
@@ -492,8 +693,20 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
 
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">ชื่ออังกฤษ{draft.isNew && <span className="text-red-500"> *</span>}</label>
-              <input value={draft.en} onChange={(e) => edit({ en: e.target.value })} placeholder="เช่น Natural Cream"
-                className={`w-full text-sm border rounded-md px-2 py-1.5 bg-white ${draft.isNew && !draft.en.trim() ? "border-red-300" : "border-slate-200"}`} />
+              <div className="flex items-center gap-1">
+                <input value={draft.en} onChange={(e) => edit({ en: e.target.value })} placeholder="เช่น Natural Cream"
+                  className={`min-w-0 flex-1 text-sm border rounded-md px-2 py-1.5 bg-white ${draft.isNew && !draft.en.trim() ? "border-red-300" : "border-slate-200"}`} />
+                {/* 🌐 แปลจากชื่อไทย — ฟรี (Cloudflare) ก่อน · ไม่สวยสลับเป็น GPT แล้วกดใหม่ */}
+                <button type="button" disabled={translating} onClick={() => void translateOne()} title="แปลชื่อไทยเป็นอังกฤษ"
+                  className="h-8 shrink-0 px-2 rounded-md border border-slate-200 bg-white text-xs hover:border-blue-400 disabled:opacity-50 inline-flex items-center gap-1">
+                  <Icon value="i:world" /> {translating ? "…" : "แปล"}
+                </button>
+                <select value={engine} onChange={(e) => setEngine(e.target.value as "cf" | "gpt")} aria-label="ตัวแปล" title="ตัวแปล: ฟรี = Cloudflare · GPT = สวยกว่า มีค่าใช้จ่าย"
+                  className="h-8 shrink-0 rounded-md border border-slate-200 bg-white px-1 text-[11px]">
+                  <option value="cf">ฟรี</option>
+                  <option value="gpt">GPT</option>
+                </select>
+              </div>
               {draft.isNew && <p className="text-[11px] text-slate-400 mt-0.5">ยังไม่มีคำนี้ในพจนานุกรมสี — ใช้แปลชื่อสีด้วย</p>}
             </div>
 
@@ -507,7 +720,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
                       ? { kind: k, colors: [], imageKey: null, en: draft.en.trim() ? draft.en : draft.th }
                       : { kind: k, colors: k === "split" && draft.colors.length < 2 ? [...draft.colors, "", ""].slice(0, Math.max(2, draft.colors.length)) : draft.colors })}
                     className={`px-2.5 py-1 ${draft.kind === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-                    {SWATCH_KIND_LABEL[k].replace(" (แบ่งช่อง)", "")}
+                    {SWATCH_KIND_LABEL[k].replace(" (แบ่งช่อง)", "").replace(" (ไซส์/วัสดุ)", "")}
                   </button>
                 ))}
               </div>
@@ -515,9 +728,12 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
 
             {draft.kind === "none" && (
               <div className="rounded-lg bg-slate-100 px-3 py-2 text-[11px] text-slate-600 space-y-1">
-                <p>ชื่อนี้ไม่ต้องมีจุดสี · ไม่ขึ้น “ยังไม่ตั้ง/ขาด” · ไม่โชว์ในตัวกรองสีบนเว็บ</p>
-                <p>ชื่อผสม เช่น “ดำ (01),M (20.5 cm.)” ใช้แค่ส่วนที่เป็นสี (จุดสีดำ) · หน้าสินค้าโชว์ชื่อสีอย่างเดียว + บรรทัด “ไซส์: M (20.5 cm.)” ในหัวข้อขนาด (เมื่อทั้งรุ่นใช้ไซส์เดียวกัน)</p>
+                <p>ชื่อนี้ไม่ใช่สี (ไซส์ / หนัง / ลาย) · ไม่ต้องมีจุดสี · ไม่ขึ้น “ยังไม่ตั้ง/ขาด” · ไม่โชว์ในตัวกรองสีบนเว็บ</p>
+                <p>ชื่อผสม เช่น “ดำ (01),M (20.5 cm.)” หรือ “ดำ/ซาเฟียโน่” ใช้แค่ส่วนที่เป็นสี (จุดสีดำ) · ไซส์ย้ายไปบรรทัด “ไซส์” ในหัวข้อขนาด · หนัง/ลายยังอยู่ในชื่อบนเว็บ</p>
               </div>
+            )}
+            {draft.kind === null && (
+              <p className="rounded-lg bg-blue-50 px-3 py-2 text-[11px] text-blue-800">ยังไม่ได้เลือกแบบจุดสี — บันทึกได้เฉพาะชื่ออังกฤษ (ใช้แปลชื่อสีบนเว็บภาษาอังกฤษ) · เลือกแบบด้านบนถ้าจะตั้งจุดสีด้วย</p>
             )}
 
             {draft.kind === "solid" && (
@@ -566,13 +782,27 @@ export function ColorSwatchManager({ onDirtyChange, focusNames, active }: {
               )}
               {(sel.entry?.kind === "none" || hasSwatch(sel.entry)) && (
                 <button type="button" disabled={saving} onClick={() => void clearSwatch()} className="ml-auto px-2 py-1 rounded-lg text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">
-                  {sel.entry?.kind === "none" ? "ยกเลิกไซส์" : "ล้างจุดสี"}
+                  {sel.entry?.kind === "none" ? "ยกเลิก “ไม่ใช่สี”" : "ล้างจุดสี"}
                 </button>
               )}
             </div>
           </div>
         )}
       </div>
+
+      {/* 🔁 เปลี่ยนชื่อสีใน SKU — พรีวิว → ยืนยัน (แตะข้อมูลจริง) */}
+      <SkuRenameDialog
+        open={!!rename}
+        onClose={() => setRename(null)}
+        items={rename?.items ?? []}
+        title={rename?.title}
+        onDone={(renamed) => {
+          const gone = new Set(renamed.map(normColorName));
+          setDrafts((m) => { const n = { ...m }; for (const k of Object.keys(n)) if (gone.has(k)) delete n[k]; return n; });
+          setCodeInfo(null);
+          void load();
+        }}
+      />
 
       <ImageEyedropper
         open={dropSlot !== null && !!sel}

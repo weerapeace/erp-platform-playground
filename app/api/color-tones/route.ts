@@ -24,6 +24,7 @@ import { rowToSwatchEntry, SWATCH_SELECT, normColorName, hasSwatch } from "@/lib
 import { saveSwatch, type SwatchDbRow } from "@/lib/color-swatch-save";
 import { rowToTone, TONE_SELECT, NOT_COLOR_KEY, applyToneAssignments, toneOfColor, type ToneAssign } from "@/lib/color-tone";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { baseColor } from "@/lib/website-size-options";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -59,10 +60,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (let i = 0; i < parentIds.length; i += 200) {
     // 200 รุ่นมี SKU ลูกเกิน 1,000 ได้ → ไล่ดึงทีละหน้า ไม่งั้นสีที่ใช้อยู่บางสีไม่ถูกนับ
     const part = parentIds.slice(i, i + 200);
-    const kids = await fetchAllPages<{ parent_sku_id: string; color: string | null }>((from, to) =>
-      sb.from("skus_v2").select("parent_sku_id, color").in("parent_sku_id", part).eq("is_active", true).order("code").order("id").range(from, to));
+    const kids = await fetchAllPages<{ parent_sku_id: string; color: string | null; color_th: string | null; attribute_values: Record<string, unknown> | null }>((from, to) =>
+      sb.from("skus_v2").select("parent_sku_id, color, color_th, attribute_values").in("parent_sku_id", part).eq("is_active", true).order("code").order("id").range(from, to));
     for (const k of kids) {
-      const name = (k.color ?? "").trim();
+      // ชื่อที่ลูกค้าเห็น = "สี (ไทย)" ก่อน Color (baseColor ตัวเดียวกับปุ่มเลือกสีบนเว็บ)
+      const name = baseColor({ id: "", code: null, ...k });
       if (!name) continue;
       const key = normColorName(name);
       const u = used.get(key) ?? { name, skus: 0, products: new Set<string>(), shops: new Set<string>() };

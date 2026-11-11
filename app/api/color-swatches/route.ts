@@ -19,6 +19,7 @@ import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
 import { swatchSourceImages } from "@/lib/color-swatch-images";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { baseColor } from "@/lib/website-size-options";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -61,10 +62,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (let i = 0; i < parentIds.length; i += 200) {
     // 200 รุ่นมี SKU ลูกเกิน 1,000 ได้ → ไล่ดึงทีละหน้า ไม่งั้นสีที่ใช้อยู่บางสีไม่ถูกนับ
     const part = parentIds.slice(i, i + 200);
-    const kids = await fetchAllPages<{ parent_sku_id: string; color: string | null; cover_image_r2_key: string | null }>((from, to) =>
-      sb.from("skus_v2").select("parent_sku_id, color, cover_image_r2_key").in("parent_sku_id", part).eq("is_active", true).order("code").order("id").range(from, to));
+    const kids = await fetchAllPages<{ parent_sku_id: string; color: string | null; color_th: string | null; attribute_values: Record<string, unknown> | null; cover_image_r2_key: string | null }>((from, to) =>
+      sb.from("skus_v2").select("parent_sku_id, color, color_th, attribute_values, cover_image_r2_key").in("parent_sku_id", part).eq("is_active", true).order("code").order("id").range(from, to));
     for (const k of kids) {
-      const name = (k.color ?? "").trim();
+      // ชื่อที่ลูกค้าเห็นบนเว็บ = "สี (ไทย)" ก่อน แล้วค่อยช่อง Color (ตัวเดียวกับปุ่มเลือกสี — เดิมอ่านแค่ Color เลยโชว์ชื่ออังกฤษ 212 SKU)
+      const name = baseColor({ id: "", code: null, ...k });
       if (!name) continue;
       const key = normColorName(name);
       const u = used.get(key) ?? { name, skus: 0, shops: new Set<string>(), images: [] };

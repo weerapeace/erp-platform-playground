@@ -30,7 +30,7 @@ export interface SwatchSpec {
   imageKey: string | null;
 }
 
-export const SWATCH_KIND_LABEL: Record<SwatchKind, string> = { solid: "สีเดียว", split: "หลายสี (แบ่งช่อง)", image: "รูปลาย", none: "ไซส์ (ไม่มีสี)" };
+export const SWATCH_KIND_LABEL: Record<SwatchKind, string> = { solid: "สีเดียว", split: "หลายสี (แบ่งช่อง)", image: "รูปลาย", none: "ไม่ใช่สี (ไซส์/วัสดุ)" };
 export const MAX_SPLIT = 4;
 
 const HEX_RE = /^#[0-9a-f]{6}$/i;
@@ -99,13 +99,17 @@ export class SwatchIndex {
     }
   }
 
-  /** หาแถวของชื่อนี้ (ไทย → อังกฤษ → ตัดวงเล็บท้ายแล้วลองใหม่) */
+  /** หาแถวของชื่อนี้ (ไทย → อังกฤษ → ตัดวงเล็บท้าย → ตัดเลขท้ายแบบไม่มีวงเล็บ "ครีม 02" แล้วลองใหม่) */
   find(name: string): SwatchEntry | undefined {
     const n = normColorName(name);
     const hit = this.byTh.get(n) ?? this.byEn.get(n);
     if (hit) return hit;
     const stripped = normColorName(name.replace(/\s*\([^)]*\)\s*/g, " "));
-    return stripped && stripped !== n ? this.byTh.get(stripped) ?? this.byEn.get(stripped) : undefined;
+    const byStrip = stripped && stripped !== n ? this.byTh.get(stripped) ?? this.byEn.get(stripped) : undefined;
+    if (byStrip) return byStrip;
+    // 📛 "ครีม 02" · "เชอรี่เรด 01" (เลขสีพิมพ์ติดไม่มีวงเล็บ — 2026-11-11) · ต้องเหลือตัวอักษร (ไม่แตะ "10 รู")
+    const m = /^(.*[A-Za-z฀-๿)])\s+\d{1,3}$/.exec(stripped);
+    return m ? this.byTh.get(m[1].trim()) ?? this.byEn.get(m[1].trim()) : undefined;
   }
 
   /**
@@ -152,7 +156,8 @@ export class SwatchIndex {
     const tokens = label.split(/(\s*[-–—/,+&]\s*)/);
     const partIdx = tokens.map((t, i) => (i % 2 === 0 && t.trim() ? i : -1)).filter((i) => i >= 0);
     if (partIdx.length < 2) return same;
-    const flag = new Set(partIdx.filter((i) => isSizeEntry(this.find(tokens[i].trim()))));
+    // ตัดออกจากชื่อเฉพาะส่วนที่ "ไม่ใช่สี" และดูเป็นไซส์ — วัสดุ (ซาเฟียโน่) คงไว้ในชื่อให้ลูกค้าเห็น (จุดสีข้ามให้อยู่แล้ว)
+    const flag = new Set(partIdx.filter((i) => isSizeEntry(this.find(tokens[i].trim())) && looksLikeSize(tokens[i])));
     if (!flag.size || flag.size === partIdx.length) return same;
     let out = "";
     for (const i of partIdx) {
