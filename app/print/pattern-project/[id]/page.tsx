@@ -67,7 +67,7 @@ export default function PrintPatternProjectPage() {
                 <tr key={r.label} className="border-b border-slate-100 align-top">
                   <td className={`${th} font-semibold`}>{r.label}{r.name ? <span className="ml-1 font-normal text-slate-600">{r.name}</span> : null}</td>
                   <td className={th}>{r.a}</td><td className={th}>{r.b}{r.rev ? <span className="text-slate-500"> (กลับทิศ)</span> : null}</td>
-                  <td className={`${th} text-right tabular-nums`}>{f1(r.la)} / {f1(r.lb)}{r.status === "mismatch" ? <span className="ml-1 font-semibold text-red-600">ต่าง {r.diff.toFixed(1)}</span> : r.status === "broken" ? <span className="ml-1 text-amber-700">ต้องเย็บใหม่</span> : null}</td>
+                  <td className={`${th} text-right tabular-nums`}>{f1(r.la)} / {f1(r.lb)}{r.status === "mismatch" ? (r.ease ? <span className="ml-1 text-amber-700">ตั้งใจให้ย่น {r.diff.toFixed(1)}</span> : <span className="ml-1 font-semibold text-red-600">ต่าง {r.diff.toFixed(1)}</span>) : r.status === "broken" ? <span className="ml-1 text-amber-700">ต้องเย็บใหม่</span> : null}</td>
                   <td className={th}>{r.kind || <span className="text-slate-400">—</span>}</td><td className="py-1">{r.top || <span className="text-slate-400">—</span>}</td>
                 </tr>
               ))}

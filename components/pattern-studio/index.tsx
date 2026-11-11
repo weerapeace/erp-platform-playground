@@ -8,12 +8,13 @@
  *     1) ปุ่ม "สร้างจากแม่แบบทรง" → BagTemplateWizard → ชิ้นลงกระดานเป็นชิ้นจริง (แก้ต่อ/ย้อนกลับได้)
  *     2) ปุ่ม "ดู 3D" (จำในเครื่อง · ปิดไว้เป็นค่าเริ่ม = หน้าเดิมเหมือนเดิม) → ชิ้นบนกระดานขึ้นเป็นแผ่น 3D วางบนโต๊ะ ขยับตามทันที
  *     3) เลือกชิ้นฝั่งไหน อีกฝั่งสว่างตาม (กระดาน ↔ 3D)
+ *     4) หน้าที่มีเครื่องมือเย็บ (ส่ง sew): ภาพ 3D สลับได้ 2 แบบ — "เย็บติดแล้ว" (lib/pattern-sewn · ค่าเริ่ม) / "ชิ้นแบน" · ลากตะเข็บบนกระดาน ภาพเปลี่ยนตามทันที
  *   จอกว้าง ≥ 1180px = กระดานซ้าย 3D ขวา · แคบกว่า = 3D อยู่ใต้กระดาน
  *   (ไม่ใช้ SplitPanes: ตัวนั้นขยายฝั่งที่ถูกคลิก — กระดานวาดต้องคลิกตลอด จะดันไปมาทุกครั้ง)
  *
  *   <PatternStudio initial={…} materials={…} onChange={applyBoard} readonly={!canEdit} … />
  *
- * ภาพ 3D ของกระดานในกรอบนี้ = ชิ้นแบน · การประกอบเป็นกระเป๋าจากตะเข็บ = AssemblyView (แท็บ "ประกอบ 3D" ของแอปสตูดิโอแพทเทิร์น)
+ * ใบงานออกแบบ (ไม่ส่ง sew): ภาพ 3D = ชิ้นแบนอย่างเดียวเหมือนเดิม · เย็บทีละขั้น / จำลองวัสดุ = AssemblyView (แท็บ "ประกอบ 3D" ของแอปสตูดิโอแพทเทิร์น)
  * ใช้ที่: แท็บตีราคา (แบบวาด) ใบงานออกแบบ · คู่มือ: docs/pattern-studio.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -23,6 +24,8 @@ import { useT } from "@/components/i18n";
 import { SEAM_COLORS, ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
 import type { Flat3DPiece, Flat3DThread } from "@/components/pattern-3d";
 import { sidePoints, type Seam } from "@/lib/pattern-seams";
+import { buildSewn } from "@/lib/pattern-sewn";
+import type { Attach } from "@/lib/pattern-assembly";
 import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type BagParams, type BagPiece, type BagPieceKey, type BagSeamRef } from "@/lib/bag-templates";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
@@ -30,6 +33,7 @@ const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModa
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
 const SHOW3D_KEY = "pattern-studio-3d";
+const VIEW3D_KEY = "pattern-studio-3d-view";
 const WIDE_PX = 1180;
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
@@ -37,7 +41,7 @@ type EditorProps = ComponentProps<typeof ShapeEditor>;
 export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; attach: BagAttachRef[]; params: BagParams };
 
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
-export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean };
+export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
 
 export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive"> & {
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
@@ -50,6 +54,9 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   const [show3d, setShow3dState] = useState(false);
   useEffect(() => { try { setShow3dState(localStorage.getItem(SHOW3D_KEY) === "1"); } catch { /* อ่านไม่ได้ = ปิดไว้ */ } }, []);
   const setShow3d = (v: boolean) => { setShow3dState(v); try { localStorage.setItem(SHOW3D_KEY, v ? "1" : "0"); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const [view3d, setView3dState] = useState<"sewn" | "flat">("sewn");   // ภาพ 3D ของหน้าที่มีเครื่องมือเย็บ: เย็บติดแล้ว / ชิ้นแบน (จำในเครื่อง)
+  useEffect(() => { try { if (localStorage.getItem(VIEW3D_KEY) === "flat") setView3dState("flat"); } catch { /* อ่านไม่ได้ = เย็บติดแล้ว */ } }, []);
+  const setView3d = (v: "sewn" | "flat") => { setView3dState(v); try { localStorage.setItem(VIEW3D_KEY, v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
   const [wizard, setWizard] = useState(false);
   const [photo, setPhoto] = useState(false);
   const [draft, setDraft] = useState<{ params: BagParams; notice: string } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
@@ -78,6 +85,11 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
       return a && b ? [{ a, b, color: SEAM_COLORS[i % SEAM_COLORS.length] }] : [];
     });
   }, [live, sew?.seams]);
+  // ภาพเย็บติด: คิดใหม่ทุกครั้งที่ชิ้นหรือตะเข็บเปลี่ยน (ระหว่างลากตะเข็บด้วย) — เฉพาะตอนเปิดดูภาพ 3D แบบเย็บติด
+  const wantSewn = !!sew && show3d && view3d === "sewn";
+  const sewnScene = useMemo(() => (wantSewn && sew ? buildSewn(live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes })), sew.seams, sew.attaches ?? []) : null), [wantSewn, live, sew?.seams, sew?.attaches]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const pieceColors = useMemo(() => { const out: Record<string, string> = {}; for (const p of live) { const c = p.mats.map((m) => props.matProps?.[m.id]?.color).find(Boolean); if (c) out[p.pid] = c; } return out; }, [live, props.matProps]);
+  const sewnOn = !!sewnScene && sewnScene.joined > 0;
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
   const pick3d = useCallback((pid: string | null) => setSelectReq({ nonce: Date.now(), pid }), []);
@@ -108,7 +120,13 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
         <button type="button" onClick={() => setShow3d(!show3d)} aria-pressed={show3d} className={`${btn} ${show3d ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
           <Icon value={show3d ? "i:eye-off" : "i:box"} className="text-sm" />{show3d ? t("ซ่อนภาพ 3D", "Hide 3D") : t("ดูภาพ 3D", "Show 3D")}
         </button>
-        {show3d && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ภาพนี้คือชิ้นแบน การประกอบเป็นกระเป๋าอยู่ในแอปสตูดิโอแพทเทิร์น แท็บ ประกอบ 3D", "The pieces on the table are the ones on the board. Select on either side and the other lights up · this view shows flat pieces; assembling into a bag is in the Pattern studio app, Assemble 3D tab")}</span>}
+        {show3d && sew && (
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("แบบของภาพ 3D", "3D view type")}>
+            {(["sewn", "flat"] as const).map((k) => <button key={k} type="button" onClick={() => setView3d(k)} aria-pressed={view3d === k} className={`h-7 rounded-md px-2.5 text-xs ${view3d === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "sewn" ? t("เย็บติดแล้ว", "Sewn") : t("ชิ้นแบน", "Flat pieces")}</button>)}
+          </div>
+        )}
+        {show3d && !sew && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ภาพนี้คือชิ้นแบน การประกอบเป็นกระเป๋าอยู่ในแอปสตูดิโอแพทเทิร์น แท็บ ประกอบ 3D", "The pieces on the table are the ones on the board. Select on either side and the other lights up · this view shows flat pieces; assembling into a bag is in the Pattern studio app, Assemble 3D tab")}</span>}
+        {show3d && sew && <span className="text-[11px] text-slate-500">{t("ภาพเปลี่ยนตามกระดานทันที เลือกชิ้นฝั่งไหนอีกฝั่งสว่างตาม", "The view follows the board live. Select on either side and the other lights up")}</span>}
       </div>
 
       <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>
@@ -118,10 +136,21 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
         </div>
         {show3d && (
           <div className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2" : ""}`}>
-            <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
-            <p className="text-[11px] text-slate-400">{flat.length
-              ? t(`${flat.length} ชิ้นบนโต๊ะ · ความหนาในภาพเป็นค่าสมมติ · เส้นประ = เส้นเย็บ`, `${flat.length} pieces on the table · thickness is illustrative · dashed = sew line`)
-              : t("ยังไม่มีชิ้นบนกระดาน — วาดชิ้น หรือกด สร้างจากแม่แบบทรง", "No pieces yet — draw one, or use Create from a bag template")}</p>
+            {sewnOn && sewnScene
+              ? <Pattern3D mode="sewn" sewn={sewnScene} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
+              : <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />}
+            {sewnOn && sewnScene ? (
+              <div className="space-y-1 text-[11px] text-slate-500">
+                <p>{t(`เย็บติดแล้ว ${sewnScene.joined} จาก ${flat.length} ชิ้น · ลากเส้นตะเข็บบนกระดาน ภาพนี้ขยับตาม · เป็นการวางตามสูตร ไม่ใช่การจำลองผ้า (ตำแหน่งถูก การทิ้งตัวเป็นค่าประมาณ)`, `${sewnScene.joined} of ${flat.length} pieces sewn · drag a seam on the board and this view follows · placed by rules, not a cloth simulation (positions are right, drape is approximate)`)}</p>
+                {sewnScene.notes.filter((n) => n.why === "short").map((n) => <p key={`s${n.pid}`} className="text-red-600">{t(`${n.name}: สั้นกว่าระยะระหว่างสองจุดที่เย็บ ยาวไม่ถึง — ขยับตะเข็บเข้ามาใกล้กัน หรือทำชิ้นให้ยาวขึ้น`, `${n.name}: shorter than the distance between its two seams — move the seams closer or lengthen the piece`)}</p>)}
+                {sewnScene.notes.some((n) => n.why === "unsupported") && <p className="text-amber-700">{t(`ยังประกอบชิ้นนี้ในภาพไม่ได้ (วางไว้ข้างหน้า): ${sewnScene.notes.filter((n) => n.why === "unsupported").map((n) => n.name).join(", ")} — ตอนนี้ภาพรองรับชิ้นที่เย็บ 1 ตะเข็บ (เกาะที่ตะเข็บ) หรือ 2 ตะเข็บ (โค้งเป็นห่วง เช่น สายหู) กับแผ่นที่ตั้งอยู่แล้ว`, `Cannot place these in the view yet (laid in front): ${sewnScene.notes.filter((n) => n.why === "unsupported").map((n) => n.name).join(", ")} — the view handles pieces joined by 1 seam (hinged at the seam) or 2 seams (looped, like a handle) to a piece that is already standing`)}</p>}
+                {sewnScene.notes.some((n) => n.why === "unsewn") && <p>{t(`ยังไม่ได้เย็บ (วางไว้ข้างหน้า): ${sewnScene.notes.filter((n) => n.why === "unsewn").map((n) => n.name).join(", ")}`, `Not sewn yet (laid in front): ${sewnScene.notes.filter((n) => n.why === "unsewn").map((n) => n.name).join(", ")}`)}</p>}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">{flat.length
+                ? (wantSewn ? t("ยังไม่มีชิ้นที่เย็บติดกัน ภาพนี้จึงเป็นชิ้นแบน — ใช้เครื่องมือเย็บ (N) หรือเย็บบางช่วง (J) แล้วภาพจะเปลี่ยนเป็นตอนเย็บติดแล้ว", "Nothing is sewn together yet, so this shows flat pieces — use Sew (N) or Sew part (J) and the view switches to the sewn result") : t(`${flat.length} ชิ้นบนโต๊ะ · ความหนาในภาพเป็นค่าสมมติ · เส้นประ = เส้นเย็บ`, `${flat.length} pieces on the table · thickness is illustrative · dashed = sew line`))
+                : t("ยังไม่มีชิ้นบนกระดาน — วาดชิ้น หรือกด สร้างจากแม่แบบทรง", "No pieces yet — draw one, or use Create from a bag template")}</p>
+            )}
           </div>
         )}
       </div>

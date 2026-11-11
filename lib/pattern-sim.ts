@@ -89,7 +89,7 @@ export function delaunay(pts: Pt[]): number[] {
 }
 
 /** แผ่น 1 แผ่น (เส้นรอบ + รู) → จุด + สามเหลี่ยม (หมุนทวนเข็มเมื่อมองจากด้าน +z) */
-function panelMesh(outline: Pt[], holes: Pt[][], cell: number): { pts: Pt[]; tri: number[] } {
+export function panelMesh(outline: Pt[], holes: Pt[][], cell: number): { pts: Pt[]; tri: number[] } {
   const rings = [resampleLine(outline, cell, true), ...holes.filter((h) => h.length >= 3).map((h) => resampleLine(h, cell, true))];
   const pts: Pt[] = rings.flat();
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

@@ -9,6 +9,7 @@
  *   ถ้าเลือกแกนได้หลายแบบ (เช่น ทรงกล่องก้นเหลี่ยม) เลือกแบบที่ "แผ่นหน้า" ใหญ่ที่สุด และแผ่นที่มีหูติดอยู่ก่อน
  *   หู / แผ่นหลังช่องโชว์ ไม่ได้เย็บขอบชนขอบ → ใช้ "จุดติด" (Attach) ที่ได้จากแม่แบบทรง
  *   โครงสร้างที่ไม่เข้ากติกา = ok:false พร้อมเหตุผล (หน้าจอบอกตรง ๆ ว่าประกอบไม่ได้ — ไม่วาดภาพหลอก)
+ *   ตะเข็บที่เย็บบางช่วงของขอบ ไม่ใช้หาโครงสร้าง (ใช้เฉพาะตะเข็บเต็มขอบ) — ชิ้นที่ติดด้วยตะเข็บบางช่วงไปอยู่ในภาพเย็บติด (lib/pattern-sewn)
  *
  *   ผลลัพธ์อยู่ในกรอบของตัวหน้า: x ขวา · y ขึ้น (ก้น = 0) · กึ่งกลางซ้ายขวา = 0 · ตัวหน้าอยู่ z = +ลึก/2 ตัวหลัง z = −ลึก/2 (กลับด้าน)
  *
@@ -16,7 +17,7 @@
  * คู่มือ: docs/pattern-studio.md
  */
 import { flattenShape, shapeArea, shapeBox, type Pt, type Shape } from "@/lib/pattern-shape";
-import { checkSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { checkSeam, isPartialSeam, pieceEdges, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ — handle: ปลายหู 2 จุดบนแผ่น (พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่น · y ลง) · behind: แผ่นปิดหลังรูแรกของแผ่น */
 export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number };
@@ -38,6 +39,8 @@ export type AssemblyOk = {
   panelH: [number, number];
   /** แปลงจุดในกรอบประกอบ (x กึ่งกลาง = 0 · y ขึ้น) → พิกัดจุดติดของแผ่น (เทียบมุมซ้ายบนของกรอบเส้นเย็บ · y ลง) — ไว้สร้าง Attach จากหน้าจอ */
   toLocal: { front: (p: Pt) => Pt; back: (p: Pt) => Pt };
+  /** แปลงจุดบนกระดานวาดของแผ่นหน้า / แผ่นหลัง → กรอบประกอบของแผ่นนั้น (x กึ่งกลาง = 0 · y ขึ้น) — ไว้วางชิ้นที่เย็บติดกับแผ่น (lib/pattern-sewn) */
+  fromBoard: { front: (p: Pt) => Pt; back: (p: Pt) => Pt };
 };
 export type Assembly = AssemblyOk | { ok: false; reason: "no-pieces" | "no-seams" | "no-structure"; loose: string[] };
 
@@ -82,8 +85,9 @@ type Link = { mine: SeamSide; other: SeamSide };
 type Cand = { pid: string; depth: number; ends: SeamSide[]; endPids: string[] };
 
 /** ประกอบ: หาตัวหน้า/ตัวหลัง/ชิ้นสะพานจากตะเข็บ แล้วคิดเรขาคณิต 3D */
-export function assemble(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] = []): Assembly {
+export function assemble(pieces: AsmPiece[], allSeams: Seam[], attaches: Attach[] = []): Assembly {
   if (!pieces.length) return { ok: false, reason: "no-pieces", loose: [] };
+  const seams = allSeams.filter((s) => !isPartialSeam(s));
   const byPid = new Map(pieces.map((p) => [p.pid, p]));
   const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
   const all = pieces.map((p) => p.pid);
@@ -207,6 +211,7 @@ export function assemble(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] =
       front: (q) => { const b = shapeBox(F.shape), u = ff.unmap(q); return [u[0] - b.x, u[1] - b.y]; },
       back: (q) => { const b = shapeBox(B.shape), u = fb.unmap(q); return [u[0] - b.x, u[1] - b.y]; },
     },
+    fromBoard: { front: ff.map, back: fb.map },
   };
 }
 

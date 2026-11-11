@@ -122,7 +122,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, p.shape])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
   const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes })), [pieces]);
-  const badSeams = useMemo(() => seams.filter((s) => checkSeam(shapes, s).status !== "ok").length, [seams, shapes]);
+  const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes]);
 
   const save = async () => {
     if (!name.trim()) { setSaveErr(t("ใส่ชื่อแพทเทิร์นก่อน", "Enter a pattern name first")); return; }
@@ -222,7 +222,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
 
       {tab === "draw" ? (
         <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
-          sew={{ seams, onChange: onSeams, start: sewStart }} pieceInfoFields matProps={matProps}
+          sew={{ seams, onChange: onSeams, start: sewStart, attaches }} pieceInfoFields matProps={matProps}
           onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
           footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
       ) : (

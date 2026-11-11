@@ -11,7 +11,7 @@
  */
 import { cleanAllow, cleanFoldEdges, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type Pt, type Shape } from "@/lib/pattern-shape";
 import type { PatternLineInput } from "@/lib/pattern-sheet";
-import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, pieceEdges, seamLabel, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
+import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, isPartialSide, pieceEdges, seamLabel, sideRange, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 export const PATTERN_PROJECT_STATUSES = ["draft", "ready", "archived"] as const;
 export type PatternProjectStatus = (typeof PATTERN_PROJECT_STATUSES)[number];
@@ -223,15 +223,21 @@ export function cleanProjectPatch(body: Record<string, unknown>, currentPieces: 
 }
 
 /** แถวของ "ตารางตะเข็บ" ในใบพิมพ์: ตะเข็บไหน เย็บขอบไหนกับขอบไหน ยาวเท่าไร วิธีเย็บ เดินด้ายทับ */
-export type SeamRow = { label: string; name: string; a: string; b: string; la: number | null; lb: number | null; status: "ok" | "mismatch" | "broken"; diff: number; kind: string; top: string; rev: boolean };
+export type SeamRow = { label: string; name: string; a: string; b: string; la: number | null; lb: number | null; status: "ok" | "mismatch" | "broken"; diff: number; kind: string; top: string; rev: boolean; ease: boolean };
 const pieceTitle = (pieces: ProjectPiece[], pid: string) => { const k = pieces.findIndex((p) => p.pid === pid); return k < 0 ? "?" : pieces[k].name || `ชิ้น ${k + 1}`; };
-const sideTitle = (pieces: ProjectPiece[], x: SeamSide) => `${pieceTitle(pieces, x.pid)} · ${x.count > 1 ? `ขอบ ${x.from + 1}–${((x.from + x.count - 1) % x.n) + 1}` : `ขอบ ${x.from + 1}`}`;
+const f1 = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
+/** ชื่อด้านของตะเข็บในใบพิมพ์ — เย็บบางช่วง = บอกช่วง (ซม. จากจุดเริ่มของขอบ) */
+const sideTitle = (pieces: ProjectPiece[], x: SeamSide) => {
+  const base = `${pieceTitle(pieces, x.pid)} · ${x.count > 1 ? `ขอบ ${x.from + 1}–${((x.from + x.count - 1) % x.n) + 1}` : `ขอบ ${x.from + 1}`}`;
+  const shape = pieces.find((p) => p.pid === x.pid)?.shape, r = shape && isPartialSide(x) ? sideRange(shape, x) : null;
+  return r ? `${base} ช่วง ${f1(r.t0)}–${f1(r.t1)} ซม.` : base;
+};
 export function projectSeamRows(pieces: ProjectPiece[], seams: Seam[]): SeamRow[] {
   const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));
   return seams.map((x, i) => {
     const c = checkSeam(shapes, x);
     return {
-      label: seamLabel(i), name: x.name ?? "", a: sideTitle(pieces, x.a), b: sideTitle(pieces, x.b), la: c.la, lb: c.lb, status: c.status, diff: c.diff, rev: !!x.rev,
+      label: seamLabel(i), name: x.name ?? "", a: sideTitle(pieces, x.a), b: sideTitle(pieces, x.b), la: c.la, lb: c.lb, status: c.status, diff: c.diff, rev: !!x.rev, ease: !!x.ease,
       kind: SEAM_KINDS.find((k) => k.key === x.kind)?.th ?? "",
       top: x.top ? `ห่าง ${x.top.off} มม. · ${x.top.rows} แถว · ${x.top.spi} ฝีเข็ม/นิ้ว` : "",
     };

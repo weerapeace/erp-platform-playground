@@ -29,7 +29,7 @@ import {
   type Box, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
-import { SEAM_KINDS, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, extendSide, pieceEdges, pointAlong, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
+import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, extendSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
 import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
 export type { RefImage };
@@ -41,7 +41,7 @@ export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: 
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
 type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[] };
-export type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure" | "sew" | "sewedit";
+export type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewedit";
 export const SEAM_COLORS = ["#c2410c", "#2563eb", "#059669", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#4b5563"];
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
@@ -66,7 +66,8 @@ type Drag =
   | { k: "rotate"; id: string; c: XY; a0: number; orig: Piece; before: Piece[]; moved: boolean; deg: number }
   | { k: "mline" }
   | { k: "medge"; sx: number; sy: number; moved: boolean }
-  | { k: "mHandle"; idx: number; origin: XY };
+  | { k: "mHandle"; idx: number; origin: XY }
+  | { k: "seam"; mode: "move" | "end"; id: string; which: "a" | "b"; end: 0 | 1; off: number; moved: boolean };
 
 const SNAP_KEY = "pattern-shape-snap";
 const FADE_KEY = "pattern-shape-fade";
@@ -211,7 +212,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [sewHover, setSewHover] = useState<string | null>(null);  // ขอบที่ชี้อยู่ "pid:i:n"
   const lastSeam = useRef<string | null>(null);                   // ตะเข็บที่เพิ่งเย็บ (Shift+คลิก = ต่อด้านที่ 2 ให้ยาวขึ้น)
   const seamHist = useRef<Seam[][]>([]);                          // ย้อนกลับของตะเข็บ (Ctrl+Z ตอนถือเครื่องมือเย็บ)
-  const sewTool = tool === "sew" || tool === "sewedit";
+  const [sewP, setSewP] = useState<{ pid: string; i: number; n: number; at: number } | null>(null);   // เย็บบางช่วง: จุดเริ่มของช่วงแรก (รอกดจุดจบบนขอบเดียวกัน)
+  const sewTool = tool === "sew" || tool === "sewpart" || tool === "sewedit";
   const [lastDraw, setLastDraw] = useState<DrawTool>("rect");
   const [snap, setSnapState] = useState<number>(1);
   const [lastAllow, setLastAllow] = useState(0);
@@ -333,10 +335,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   };
   const changeTool = (tl: Tool) => {
     if (readonly && (tl === "rect" || tl === "ellipse" || tl === "pen")) return;
-    if ((tl === "sew" || tl === "sewedit") && !seams) return;
+    if ((tl === "sew" || tl === "sewpart" || tl === "sewedit") && !seams) return;
     setTool(tl); if (tl === "rect" || tl === "ellipse" || tl === "pen") setLastDraw(tl); setPen(null); setBox(null); setMDraft(null); if (tl !== "move") setEditId(null);
-    setSewA(null); if (tl !== "sewedit") { setSewSel(null); setEdgeSel(null); }
-    if (tl === "sew" || tl === "sewedit") { setPanelOpen(true); setNotchMode(false); }
+    setSewA(null); setSewP(null); if (tl !== "sewedit") setEdgeSel(null); if (tl !== "sewedit" && tl !== "sewpart") setSewSel(null);
+    if (tl === "sew" || tl === "sewpart" || tl === "sewedit") { setPanelOpen(true); setNotchMode(false); }
   };
   const newPiece = (shape: Shape, holes: Shape[] = []): Piece => ({ id: newId(), shape, holes, count: 1, allow: lastAllow, name: "", mats: [...defaultMats], pid: newPid(), src: [] });
   const selIds: string[] = multi.size ? [...multi] : sel ? [sel] : [];
@@ -404,9 +406,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (e.button !== 0) return;
     const raw = toCm(e), p = snapPt(raw);
     const target = e.target as Element;
-    if (sewTool) {   // เครื่องมือเย็บ / แก้ตะเข็บ: คลิกได้เฉพาะขอบ — ไม่วาด ไม่ย้ายชิ้น
-      const ed = target.getAttribute?.("data-edge");
-      if (ed) sewClick(ed, e.shiftKey); else if (tool === "sewedit") { setSewSel(null); setEdgeSel(null); }
+    if (sewTool) {   // เครื่องมือเย็บ / เย็บบางช่วง / แก้ตะเข็บ: กดได้เฉพาะขอบและตะเข็บ — ไม่วาด ไม่ย้ายชิ้น
+      const se = target.getAttribute?.("data-seamend"), ss = target.getAttribute?.("data-seamside"), ed = target.getAttribute?.("data-edge");
+      if (se) { const [id, which, k] = se.split(":"); drag.current = { k: "seam", mode: "end", id, which: which === "b" ? "b" : "a", end: k === "1" ? 1 : 0, off: 0, moved: false }; capture(); }
+      else if (ss) { const [id, which] = ss.split(":"); if (seamGrab(id, which === "b" ? "b" : "a", raw)) capture(); }
+      else if (ed) { if (tool === "sewpart") sewPartClick(ed, raw); else sewClick(ed, e.shiftKey); }
+      else if (tool !== "sew") { setSewSel(null); setEdgeSel(null); }
       return;
     }
     // ตั้งขนาดจริงของรูปอ้างอิง: คลิก 2 จุดบนรูป
@@ -533,6 +538,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       return;
     }
     if (d.k === "pan") { setView({ x: d.v.x - (e.clientX - d.sx) / ppc, y: d.v.y - (e.clientY - d.sy) / ppc, w: d.v.w }); return; }
+    if (d.k === "seam") { seamDrag(d, raw); return; }
     if (d.k === "marquee") { setMarquee({ a: d.a, b: raw }); return; }
     if (d.k === "move") {
       const ob = unionBox(d.orig.map((o) => pieceGeometry(o).cutBox));
@@ -684,7 +690,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         return;
       }
       if (sewTool) {   // ถือเครื่องมือเย็บอยู่: Esc = ยกเลิกที่เลือก · Delete = ลบตะเข็บที่เลือก (ไม่ลบชิ้น) · Ctrl+Z = ย้อนตะเข็บ
-        if (e.key === "Escape" && (sewA || sewSel || edgeSel)) { e.stopPropagation(); e.preventDefault(); setSewA(null); setSewSel(null); setEdgeSel(null); return; }
+        if (e.key === "Escape" && (sewA || sewP || sewSel || edgeSel)) { e.stopPropagation(); e.preventDefault(); setSewA(null); setSewP(null); setSewSel(null); setEdgeSel(null); return; }
         if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); if (sewSel) removeSeam(sewSel); return; }
         if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey && seamHist.current.length) { e.preventDefault(); const prev = seamHist.current.pop(); if (prev) onSeamsChange?.(prev); setSewA(null); setSewSel(null); return; }
       }
@@ -717,7 +723,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if (e.key === " ") { spaceDown.current = true; e.preventDefault(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", p: "pen", v: "move", h: "hand", m: "measure", ...(seams ? { n: "sew", b: "sewedit" } : {}) };
+      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", p: "pen", v: "move", h: "hand", m: "measure", ...(seams ? { n: "sew", j: "sewpart", b: "sewedit" } : {}) };
       if (map[k]) { e.preventDefault(); changeTool(map[k]); }
     };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === " ") spaceDown.current = false; };
@@ -748,7 +754,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     window.addEventListener("copy", onCopy);
     return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onKeyUp); window.removeEventListener("paste", onPaste); window.removeEventListener("copy", onCopy); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pen, box, sel, multi, editId, selNode, step, mDraft, cal, readonly, notchMode, tool, sewA, sewSel, edgeSel, seams]);
+  }, [open, pen, box, sel, multi, editId, selNode, step, mDraft, cal, readonly, notchMode, tool, sewA, sewP, sewSel, edgeSel, seams]);
   useEffect(() => { setNotchMode(false); }, [sel]);   // เปลี่ยนชิ้น = ออกจากโหมดรอยบาก
 
   // ฝังในหน้า: คลิกในกระดาน = เปิดคีย์ลัด · คลิกนอกกระดาน = ปิด
@@ -1049,7 +1055,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const seamList = seams ?? [];
   const byPidShape = useMemo(() => new Map(pieces.map((p) => [p.pid, p.shape])), [pieces]);
   const seamChecks = useMemo(() => seamList.map((x) => checkSeam(byPidShape, x)), [seamList, byPidShape]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const seamBad = seamChecks.some((c) => c.status !== "ok");
+  const seamBad = seamChecks.some((c, i) => c.status === "broken" || (c.status === "mismatch" && !seamList[i]?.ease));
   const canSew = !readonly && !!onSeamsChange;
   const seamAt = (pid: string, i: number, n: number) => seamList.find((x) => (x.a.pid === pid && x.a.n === n && sideHasEdge(x.a, i)) || (x.b.pid === pid && x.b.n === n && sideHasEdge(x.b, i)));
   const commitSeams = (next: Seam[]) => { seamHist.current.push(seamList); if (seamHist.current.length > 60) seamHist.current.shift(); onSeamsChange?.(next); };
@@ -1076,7 +1082,92 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     lastSeam.current = id; setSewA(null);
   };
   const pieceNo = (pid: string) => { const k = pieces.findIndex((p) => p.pid === pid); return k < 0 ? "?" : `P${k + 1}${pieces[k].name ? ` ${pieces[k].name}` : ""}`; };
-  const sideTxt = (x: SeamSide) => `${pieceNo(x.pid)} · ${x.count > 1 ? t(`${x.count} ขอบติดกัน`, `${x.count} joined edges`) : t(`ขอบ ${x.from + 1}`, `edge ${x.from + 1}`)}`;
+  const sideTxt = (x: SeamSide) => {
+    const base = `${pieceNo(x.pid)} · ${x.count > 1 ? t(`${x.count} ขอบติดกัน`, `${x.count} joined edges`) : t(`ขอบ ${x.from + 1}`, `edge ${x.from + 1}`)}`;
+    const S = isPartialSide(x) ? byPidShape.get(x.pid) : null, r = S ? sideRange(S, x) : null;
+    return r ? `${base} ${t(`ช่วง ${r1(r.t0)}–${r1(r.t1)}`, `range ${r1(r.t0)}–${r1(r.t1)}`)}` : base;
+  };
+  // ── เย็บบางช่วงของขอบ + ย้าย/ปรับช่วงหลังเย็บ (2026-11-11) ──
+  /** ระยะตามขอบที่ใช้วางจุด: ลงล็อกทีละ 0.5 ซม. (หรือละเอียดกว่าตามค่าลงล็อกของกระดาน) · ใกล้ปลายขอบ = ดูดเข้าปลาย */
+  const snapAlong = (v: number, len: number) => { const st = Math.min(snap > 0 ? snap : 0.1, 0.5), r = Math.round(v / st) * st; return r < 0.3 ? 0 : r > len - 0.3 ? len : Math.round(r * 100) / 100; };
+  /** ด้านของตะเข็บที่อยู่บนขอบเดียว: ขอบ + ช่วงที่เย็บตอนนี้ (ด้านหลายขอบ / ชิ้นถูกแก้จนขอบเปลี่ยน = null → ปรับช่วงไม่ได้) */
+  const seamEdge = (id: string, which: "a" | "b") => {
+    const x = seamList.find((q) => q.id === id), side = x?.[which], pc = side ? pieces.find((p) => p.pid === side.pid) : null;
+    if (!x || !side || !pc || side.count !== 1) return null;
+    const E = pieceEdges(pc.shape);
+    if (E.length !== side.n || !E[side.from]) return null;
+    const ed = E[side.from], part = isPartialSide(side);
+    return { x, side, ed, t0: part ? Math.max(0, side.t0 as number) : 0, t1: part ? Math.min(ed.len, side.t1 as number) : ed.len };
+  };
+  /** กดบนเส้นตะเข็บ: เลือกตะเข็บนั้น + เริ่มลากย้ายช่วง (คืน true = เริ่มลากแล้ว) */
+  const seamGrab = (id: string, which: "a" | "b", raw: XY): boolean => {
+    const g = seamEdge(id, which), x = seamList.find((q) => q.id === id);
+    setSewSel(id); setSewA(null); setSewP(null);
+    setEdgeSel(tool === "sewedit" && x ? { pid: x[which].pid, i: x[which].from, n: x[which].n } : null);
+    if (!g || !canSew) return false;
+    drag.current = { k: "seam", mode: "move", id, which, end: 0, off: posOnLine(g.ed.pts, [raw.x, raw.y]).pos - g.t0, moved: false };
+    return true;
+  };
+  /** ระหว่างลาก: ย้ายทั้งช่วง หรือยืด/หดปลายข้างหนึ่ง — ส่งตะเข็บใหม่ออกทันที (ภาพ 3D ขยับตาม) · ย้อนกลับได้ 1 ครั้งต่อการลาก */
+  const seamDrag = (d: Extract<Drag, { k: "seam" }>, raw: XY) => {
+    const g = seamEdge(d.id, d.which);
+    if (!g || !canSew) return;
+    const L = g.ed.len, pos = posOnLine(g.ed.pts, [raw.x, raw.y]).pos;
+    let t0 = g.t0, t1 = g.t1;
+    if (d.mode === "move") { const w = g.t1 - g.t0; t0 = Math.max(0, Math.min(L - w, snapAlong(pos - d.off, L))); t1 = t0 + w; }
+    else if (d.end === 0) t0 = Math.min(snapAlong(pos, L), g.t1 - SEAM_MIN_LEN);
+    else t1 = Math.max(snapAlong(pos, L), g.t0 + SEAM_MIN_LEN);
+    if (t0 < -1e-6 || t1 > L + 1e-6 || (Math.abs(t0 - g.t0) < 1e-6 && Math.abs(t1 - g.t1) < 1e-6)) return;
+    if (!rangeFree(edgeBusy(seamList, g.side.pid, g.side.from, g.side.n, L, { id: d.id, which: d.which }), t0, t1)) return;
+    const side = rangedSide(g.side.pid, g.side.from, g.side.n, t0, t1, L);
+    const next = seamList.map((q) => (q.id === d.id ? (d.which === "a" ? { ...q, a: side } : { ...q, b: side }) : q));
+    if (!d.moved) { d.moved = true; commitSeams(next); } else onSeamsChange?.(next);
+  };
+  /** ตั้งช่วงของด้านด้วยตัวเลข — เกินขอบ / สั้นเกิน / ทับตะเข็บอื่น = ไม่เปลี่ยน + บอกเหตุผล */
+  const setSeamRange = (id: string, which: "a" | "b", t0: number, t1: number): boolean => {
+    const g = seamEdge(id, which);
+    if (!g || !canSew) return false;
+    const L = g.ed.len, a = Math.round(t0 * 100) / 100, b = Math.round(t1 * 100) / 100;
+    if (a < -1e-6 || b > L + 0.005 || b - a < SEAM_MIN_LEN - 1e-6) { setMsg({ tone: "err", text: t(`ช่วงนี้เกินขอบ (ขอบยาว ${r1(L)} ซม.) หรือสั้นกว่า ${SEAM_MIN_LEN} ซม.`, `That range runs past the edge (${r1(L)} cm long) or is shorter than ${SEAM_MIN_LEN} cm`) }); return false; }
+    if (!rangeFree(edgeBusy(seamList, g.side.pid, g.side.from, g.side.n, L, { id, which }), a, b)) { setMsg({ tone: "err", text: t("ช่วงนี้ทับกับตะเข็บอื่นบนขอบเดียวกัน", "That range overlaps another seam on the same edge") }); return false; }
+    const side = rangedSide(g.side.pid, g.side.from, g.side.n, Math.max(0, a), Math.min(L, b), L);
+    commitSeams(seamList.map((q) => (q.id === id ? (which === "a" ? { ...q, a: side } : { ...q, b: side }) : q)));
+    return true;
+  };
+  /** ทำให้ด้าน target ยาวเท่าอีกด้าน (คงจุดเริ่ม · ถ้าล้นปลายขอบ = เลื่อนกลับ) */
+  const fitSeam = (id: string, target: "a" | "b") => {
+    const g = seamEdge(id, target);
+    if (!g) return;
+    const o = g.x[target === "a" ? "b" : "a"], S = byPidShape.get(o.pid), want = S ? sideLength(S, o) : null;
+    if (want == null) return;
+    if (want > g.ed.len + 0.005) { setMsg({ tone: "err", text: t(`${sideTxt(g.side)} ยาวแค่ ${r1(g.ed.len)} ซม. ยาวไม่พอ — ให้ปรับอีกด้านแทน`, `${sideTxt(g.side)} is only ${r1(g.ed.len)} cm long — adjust the other side instead`) }); return; }
+    const t0 = Math.max(0, Math.min(g.t0, g.ed.len - want));
+    if (setSeamRange(id, target, t0, t0 + want)) setMsg({ tone: "ok", text: t(`ปรับแล้ว ทั้งสองด้านยาว ${r1(want)} ซม.`, `Done — both sides are ${r1(want)} cm`) });
+  };
+  /** เครื่องมือเย็บบางช่วง: กดจุดเริ่ม → จุดจบบนขอบเดียวกัน → จุดเริ่มบนขอบของอีกชิ้น (ระบบวางให้ยาวเท่าช่วงแรก) */
+  const sewPartClick = (key: string, raw: XY) => {
+    if (!canSew) return;
+    const [pid, iS, nS] = key.split(":"), i = Number(iS), n = Number(nS), pc = pieces.find((p) => p.pid === pid), ed = pc ? pieceEdges(pc.shape)[i] : null;
+    if (!pc || !ed) return;
+    const L = ed.len, pos = snapAlong(posOnLine(ed.pts, [raw.x, raw.y]).pos, L), busy = edgeBusy(seamList, pid, i, n, L);
+    if (!sewA) {
+      if (!sewP || sewP.pid !== pid || sewP.i !== i) {
+        if (busy.some(([p, q]) => (pos > p + 0.01 && pos < q - 0.01) || (p <= 0.01 && q >= L - 0.01))) { setMsg({ tone: "err", text: t("ตรงนี้เย็บไปแล้ว — กดบนส่วนของขอบที่ยังว่าง หรือกดเส้นตะเข็บเดิมเพื่อย้าย", "This part is already sewn — click a free part of the edge, or click the seam to move it") }); return; }
+        setSewP({ pid, i, n, at: pos }); setSewSel(null); return;
+      }
+      const a = Math.min(sewP.at, pos), b = Math.max(sewP.at, pos);
+      if (b - a < SEAM_MIN_LEN) { setMsg({ tone: "err", text: t(`ช่วงสั้นเกินไป (อย่างน้อย ${SEAM_MIN_LEN} ซม.) — กดจุดจบให้ห่างจากจุดเริ่ม`, `Too short (at least ${SEAM_MIN_LEN} cm) — click the end further from the start`) }); return; }
+      if (!rangeFree(busy, a, b)) { setMsg({ tone: "err", text: t("ช่วงนี้ทับกับตะเข็บเดิมบนขอบนี้", "That range overlaps a seam already on this edge") }); return; }
+      setSewA(rangedSide(pid, i, n, a, b, L)); setSewP(null); return;
+    }
+    if (sewA.pid === pid && sewA.from === i) { setMsg({ tone: "err", text: t("ด้านที่สองต้องเป็นอีกขอบหนึ่ง", "The second side must be a different edge") }); return; }
+    const A = byPidShape.get(sewA.pid), want = (A ? sideLength(A, sewA) : null) ?? 0, w = Math.min(want, L), t0 = Math.max(0, Math.min(pos, L - w));
+    if (w < SEAM_MIN_LEN || !rangeFree(busy, t0, t0 + w)) { setMsg({ tone: "err", text: t("วางช่วงตรงนี้ไม่ได้ (ทับกับตะเข็บเดิม หรือขอบสั้นเกินไป) — กดตำแหน่งอื่น", "Cannot place the range here (it overlaps a seam, or the edge is too short) — click elsewhere") }); return; }
+    const id = `s${Date.now().toString(36)}${seamList.length}`;
+    commitSeams([...seamList, { id, a: sewA, b: rangedSide(pid, i, n, t0, t0 + w, L) }]);
+    lastSeam.current = null; setSewA(null); setSewSel(id); setEdgeSel(null);
+    if (want > L + 0.1) setMsg({ tone: "err", text: t(`ขอบนี้ยาวแค่ ${r1(L)} ซม. สั้นกว่าช่วงแรก (${r1(want)} ซม.) — เย็บเต็มขอบให้แล้ว ปรับให้เท่ากันได้ในแผงขวา`, `This edge is only ${r1(L)} cm, shorter than the first range (${r1(want)} cm) — sewn along the whole edge; make them equal in the panel on the right`) });
+  };
   const midOf = (P: Pt[]): Pt => { let L = 0; for (let k = 1; k < P.length; k++) L += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); let d = L / 2; for (let k = 1; k < P.length; k++) { const l = Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); if (d <= l && l > 0) return [P[k - 1][0] + ((P[k][0] - P[k - 1][0]) * d) / l, P[k - 1][1] + ((P[k][1] - P[k - 1][1]) * d) / l]; d -= l; } return P[P.length - 1]; };
   const lineD = (P: Pt[]) => "M" + P.map((q) => `${q[0]} ${q[1]}`).join("L");
   const polyLen = (P: Pt[]) => { let L = 0; for (let k = 1; k < P.length; k++) L += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); return L; };
@@ -1095,7 +1186,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           const p = atEnd ? P[P.length - 1] : P[0], q = atEnd ? P[P.length - 2] : P[1], bx = shapeBox(shape);
           let nx = -(q[1] - p[1]), ny = q[0] - p[0]; const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
           if (nx * (p[0] - (bx.x + bx.w / 2)) + ny * (p[1] - (bx.y + bx.h / 2)) < 0) { nx = -nx; ny = -ny; }
-          const len = 9 / ppc;
+          const len = ppc > 0 ? 9 / ppc : 0;   // ยังไม่ได้วัดขนาดกระดาน (วาดครั้งแรก) = ยังไม่วาดขีด
           return <line x1={p[0]} y1={p[1]} x2={p[0] + nx * len} y2={p[1] + ny * len} stroke={col} strokeWidth={3} strokeLinecap="round" vectorEffect="non-scaling-stroke" />;
         };
         return (
@@ -1111,7 +1202,26 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         );
       })}
       {sewA && (() => { const A = byPidShape.get(sewA.pid), P = A ? sidePoints(A, sewA) : null; return P ? <path d={lineD(P)} fill="none" stroke="#f59e0b" strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" /> : null; })()}
+      {sewP && (() => { const pc = pieces.find((p) => p.pid === sewP.pid), ed = pc ? pieceEdges(pc.shape)[sewP.i] : null, q = ed ? pointAlong(ed.pts, sewP.at) : null; return q ? <circle cx={q[0]} cy={q[1]} r={6 / ppc} fill="#f59e0b" stroke="#fff" strokeWidth={2} vectorEffect="non-scaling-stroke" /> : null; })()}
       {selEdge && <path d={lineD(selEdge.pts)} fill="none" stroke={COLORS.sel} strokeWidth={7} strokeOpacity={0.55} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+    </g>
+  ) : null;
+  /** เส้นตะเข็บที่กดได้ (เครื่องมือเย็บบางช่วง / แก้ตะเข็บ): กด = เลือก · ลากเส้น = ย้ายทั้งช่วง · ลากจุดกลมที่ปลาย = ยืด/หด — วางทับขอบที่กดได้ */
+  const seamGrips = seams && (tool === "sewedit" || tool === "sewpart") ? (
+    <g>
+      {seamList.map((x, si) => (["a", "b"] as const).map((which) => {
+        const side = x[which], S = side.count === 1 ? byPidShape.get(side.pid) : null, P = S ? sidePoints(S, side) : null;
+        if (!P || P.length < 2) return null;
+        const on = x.id === sewSel, col = SEAM_COLORS[si % SEAM_COLORS.length];
+        return (
+          <g key={`${x.id}:${which}`}>
+            <path data-seamside={`${x.id}:${which}`} d={lineD(P)} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: canSew && isPartialSide(side) ? "grab" : "pointer" }}>
+              <title>{`${t("ตะเข็บ", "Seam")} ${seamLabel(si)} · ${sideTxt(side)}${canSew ? ` · ${t("ลากเพื่อย้าย", "drag to move")}` : ""}`}</title>
+            </path>
+            {on && canSew && [0, 1].map((k) => { const q = k ? P[P.length - 1] : P[0]; return <circle key={k} data-seamend={`${x.id}:${which}:${k}`} cx={q[0]} cy={q[1]} r={6.5 / ppc} fill="#fff" stroke={col} strokeWidth={2.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}><title>{t("ลากเพื่อยืดหรือหดช่วงที่เย็บ", "Drag to lengthen or shorten the sewn range")}</title></circle>; })}
+          </g>
+        );
+      }))}
     </g>
   ) : null;
   /** ขอบที่กดได้ (เฉพาะตอนถือเครื่องมือเย็บ / แก้ตะเข็บ) — วางทับชิ้น */
@@ -1148,6 +1258,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             : t("กดขอบแรกบนกระดาน", "Click the first edge on the board")}
         </div>
       )}
+      {tool === "sewpart" && canSew && (
+        <div className="rounded-md border border-slate-200 bg-white p-2 text-slate-600">
+          {sewA ? <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{sideTxt(sewA)} · <b className="tabular-nums">{r1(sideLength(byPidShape.get(sewA.pid)!, sewA) ?? 0)}</b> {t("ซม.", "cm")}<div className="mt-1 text-slate-400">{t("กดจุดเริ่มบนขอบของอีกชิ้น ระบบจะวางให้ยาวเท่ากันเอง", "Click the start on the other piece's edge — the range is made the same length")}</div></>
+            : sewP ? t("กดจุดจบของช่วงบนขอบเดียวกัน", "Click the end of the range on the same edge")
+            : t("กดจุดเริ่มของช่วงบนขอบ · หรือกดเส้นตะเข็บเดิมแล้วลากเพื่อย้าย", "Click where the range starts on an edge · or click a seam and drag to move it")}
+        </div>
+      )}
       {tool === "sewedit" && !selSeam && !selEdge && <p className="rounded-md border border-dashed border-slate-200 bg-white p-2 text-slate-500">{t("กดขอบของชิ้นบนกระดาน เพื่อดูและปรับค่าของขอบนั้น (และของตะเข็บ ถ้าขอบนั้นเย็บไว้)", "Click an edge on the board to see and adjust its values (and its seam, if sewn)")}</p>}
 
       {selSeam && (() => {
@@ -1156,9 +1273,35 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           <section className="space-y-2 rounded-md border border-blue-200 bg-white p-2.5" aria-label={t("ค่าของตะเข็บ", "Seam values")}>
             <div className="flex items-center gap-1.5 font-semibold text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: SEAM_COLORS[selSeamIdx % SEAM_COLORS.length] }} />{t(`ตะเข็บ ${seamLabel(selSeamIdx)}`, `Seam ${seamLabel(selSeamIdx)}`)}</div>
             <div className="text-slate-600">{sideTxt(x.a)} <span className="text-slate-400">{t("กับ", "to")}</span> {sideTxt(x.b)}</div>
-            <div className={`tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" ? "text-red-600" : "text-amber-700"}`}>
-              {c.status === "broken" ? t("ชิ้นถูกแก้จนขอบเปลี่ยน ต้องเย็บใหม่", "The piece changed — sew this again") : `${r1(c.la ?? 0)} ${t("กับ", "and")} ${r1(c.lb ?? 0)} ${t("ซม.", "cm")} · ${c.status === "ok" ? t("ยาวเท่ากัน", "same length") : t(`ต่างกัน ${r1(c.diff)} ซม.`, `differ by ${r1(c.diff)} cm`)}`}
+            <div className={`tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" && !x.ease ? "text-red-600" : "text-amber-700"}`}>
+              {c.status === "broken" ? t("ชิ้นถูกแก้จนขอบเปลี่ยน ต้องเย็บใหม่", "The piece changed — sew this again") : `${r1(c.la ?? 0)} ${t("กับ", "and")} ${r1(c.lb ?? 0)} ${t("ซม.", "cm")} · ${c.status === "ok" ? t("ยาวเท่ากัน", "same length") : x.ease ? t(`ตั้งใจให้ย่น ${r1(c.diff)} ซม.`, `eased by ${r1(c.diff)} cm on purpose`) : t(`ต่างกัน ${r1(c.diff)} ซม.`, `differ by ${r1(c.diff)} cm`)}`}
             </div>
+            {(["a", "b"] as const).map((which, k) => {
+              const g = seamEdge(x.id, which);
+              if (!g) return null;
+              const len = Math.round((g.t1 - g.t0) * 100) / 100, start = Math.round(g.t0 * 100) / 100;
+              return (
+                <div key={which} className="space-y-1 rounded-md bg-slate-50 p-1.5">
+                  <div className="text-slate-500">{t(`ด้านที่ ${k + 1}`, `Side ${k + 1}`)} · {pieceNo(g.side.pid)} · {t(`ขอบ ${g.side.from + 1}`, `edge ${g.side.from + 1}`)} <span className="text-slate-400">({t(`ขอบยาว ${r1(g.ed.len)}`, `edge ${r1(g.ed.len)}`)})</span></div>
+                  {canSew ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span>{t("เริ่มที่", "Start")}</span><NumField value={start} min={0} max={500} step={0.5} label={t(`ด้านที่ ${k + 1} เริ่มที่ ซม.`, `Side ${k + 1} start cm`)} onCommit={(v) => setSeamRange(x.id, which, v, v + len)} className="w-16" />
+                      <span>{t("ยาว", "Length")}</span><NumField value={len} min={SEAM_MIN_LEN} max={500} step={0.5} label={t(`ด้านที่ ${k + 1} ยาว ซม.`, `Side ${k + 1} length cm`)} onCommit={(v) => setSeamRange(x.id, which, start, start + v)} className="w-16" />
+                      {isPartialSide(g.side) && <button type="button" onClick={() => setSeamRange(x.id, which, 0, g.ed.len)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("เต็มขอบ", "Whole edge")}</button>}
+                    </div>
+                  ) : <div className="tabular-nums">{r1(g.t0)}–{r1(g.t1)} {t("ซม.", "cm")}</div>}
+                </div>
+              );
+            })}
+            {canSew && c.status === "mismatch" && (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {seamEdge(x.id, "b") && <button type="button" onClick={() => fitSeam(x.id, "b")} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ให้ด้านที่ 2 ยาวเท่าด้านที่ 1", "Make side 2 match side 1")}</button>}
+                  {seamEdge(x.id, "a") && <button type="button" onClick={() => fitSeam(x.id, "a")} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ให้ด้านที่ 1 ยาวเท่าด้านที่ 2", "Make side 1 match side 2")}</button>}
+                </div>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={!!x.ease} onChange={(e) => patchSeam(x.id, (q) => { const { ease: _e, ...rest } = q; void _e; return e.target.checked ? { ...rest, ease: true } : rest; })} className="h-3.5 w-3.5 accent-amber-600" />{t("ตั้งใจให้ต่างกัน (รูด / ย่น)", "Different on purpose (gather / ease)")}</label>
+              </div>
+            )}
             <label className="block space-y-1"><span className="text-slate-500">{t("ชื่อตะเข็บ", "Seam name")}</span>
               <input key={`${x.id}:${x.name ?? ""}`} defaultValue={x.name ?? ""} disabled={!canSew} maxLength={60} placeholder={t("เช่น ข้าง–ก้น ด้านหน้า", "e.g. side–base, front")}
                 onBlur={(e) => { const v = e.target.value.trim(); if (v !== (x.name ?? "")) patchSeam(x.id, (q) => { const { name: _n, ...rest } = q; void _n; return v ? { ...rest, name: v } : rest; }); }}
@@ -1223,12 +1366,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         {seamList.map((x, si) => {
           const c = seamChecks[si], on = x.id === sewSel, kind = SEAM_KINDS.find((k) => k.key === x.kind);
           return (
-            <div key={x.id} role="button" tabIndex={0} onClick={() => { setSewSel(x.id); setEdgeSel(null); if (tool !== "sewedit") { setTool("sewedit"); setSewA(null); } }} onKeyDown={(e) => { if (e.key === "Enter") { setSewSel(x.id); setEdgeSel(null); } }}
+            <div key={x.id} role="button" tabIndex={0} onClick={() => { setSewSel(x.id); setEdgeSel(null); if (tool !== "sewedit" && tool !== "sewpart") { setTool("sewedit"); setSewA(null); } }} onKeyDown={(e) => { if (e.key === "Enter") { setSewSel(x.id); setEdgeSel(null); } }}
               className={`cursor-pointer rounded-md border p-2 ${on ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
               <div className="flex items-start gap-1.5"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SEAM_COLORS[si % SEAM_COLORS.length] }} />
                 <span className="min-w-0 flex-1"><b>{seamLabel(si)}</b>{x.name ? ` ${x.name}` : ""} <span className="text-slate-500">· {sideTxt(x.a)} {t("กับ", "to")} {sideTxt(x.b)}</span></span></div>
-              <div className={`mt-0.5 tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" ? "text-red-600" : "text-amber-700"}`}>
-                {c.status === "broken" ? t("ต้องเย็บใหม่", "Needs redoing") : `${r1(c.la ?? 0)} ${t("กับ", "and")} ${r1(c.lb ?? 0)} ${t("ซม.", "cm")} · ${c.status === "ok" ? t("เท่ากัน", "same") : t(`ต่าง ${r1(c.diff)}`, `differ ${r1(c.diff)}`)}`}
+              <div className={`mt-0.5 tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" && !x.ease ? "text-red-600" : "text-amber-700"}`}>
+                {c.status === "broken" ? t("ต้องเย็บใหม่", "Needs redoing") : `${r1(c.la ?? 0)} ${t("กับ", "and")} ${r1(c.lb ?? 0)} ${t("ซม.", "cm")} · ${c.status === "ok" ? t("เท่ากัน", "same") : x.ease ? t(`ตั้งใจให้ย่น ${r1(c.diff)}`, `eased ${r1(c.diff)}`) : t(`ต่าง ${r1(c.diff)}`, `differ ${r1(c.diff)}`)}`}
                 {kind ? <span className="text-slate-500"> · {t(kind.th, kind.en)}</span> : null}{x.top ? <span className="text-slate-500"> · {t("เดินด้ายทับ", "topstitch")}</span> : null}{x.rev ? <span className="text-slate-500"> · {t("กลับทิศ", "reversed")}</span> : null}
               </div>
             </div>
@@ -1238,6 +1381,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       <div className="space-y-1 text-[11px] text-slate-500">
         <div className="font-medium text-slate-600">{t("ช่างคิดยังไง", "How a pattern maker thinks")}</div>
         <p>{t("ตะเข็บ 1 แนว = ขอบ 2 ขอบที่จะถูกเย็บติดกัน กฎข้อแรกคือสองขอบต้องยาวเท่ากัน ถ้าไม่เท่า ชิ้นที่ยาวกว่าจะย่นหรือเหลือปลาย", "One seam = two edges sewn together. Rule one: both edges must be the same length, or the longer one puckers or overhangs.")}</p>
+        <p>{t("เย็บบางช่วง (J) ใช้ตอนชิ้นเล็กติดกับส่วนหนึ่งของขอบยาว เช่น โคนหูบนขอบปาก ขอบเดียวมีได้หลายตะเข็บแต่ห้ามทับกัน ย้ายตำแหน่งทีหลังได้ด้วยการลากเส้นตะเข็บ", "Sew part of an edge (J) when a small piece joins part of a long edge, like a handle base on the mouth. One edge can hold several seams as long as they do not overlap; drag a seam later to move it.")}</p>
         <p>{t("วิธีเย็บ เดินด้ายทับ กุ้นขอบ เป็นข้อมูลให้ช่างเย็บ จะออกในตารางตะเข็บของใบพิมพ์ ยังไม่เปลี่ยนภาพ 3D", "Seam type, topstitch and binding are instructions for the sewer — they print in the seam table and do not change the 3D view yet.")}</p>
       </div>
     </aside>
@@ -1248,7 +1392,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     : editPiece ? t("แก้จุด: ลากจุด = ย้าย · ลากหูจับ = ดัดโค้ง (Alt = แยกหูจับ) · ดับเบิลคลิกจุด = มุม↔โค้ง · ดับเบิลคลิกเส้น = เพิ่มจุด · Delete = ลบจุด · Esc = เสร็จ", "Edit points: drag a point to move · drag a handle to bend (Alt = break) · double-click a point = corner↔smooth · double-click the outline = add point · Delete = remove point · Esc = done")
     : tool === "pen" ? t("ปากกา: คลิกวางจุด (มุม) · กดค้างแล้วลาก = เส้นโค้ง · Shift = เส้น 45°", "Pen: click to place corners · press and drag for curves · Shift = 45°")
     : tool === "sew" ? (sewA ? t("เย็บ: กดขอบของอีกชิ้นที่จะเย็บติดกัน · Shift+คลิกขอบที่ติดกัน = ต่อด้านแรกให้ยาวขึ้น · Esc = ยกเลิก", "Sew: click the edge to sew it to · Shift+click a neighbouring edge to extend the first side · Esc cancels") : t("เย็บขอบกับขอบ: กดขอบแรก แล้วกดขอบที่จะเย็บติดกัน · หลังเย็บ Shift+คลิกขอบที่ติดกัน = ต่อด้านที่สอง · Ctrl+Z ย้อนตะเข็บ", "Sew edge to edge: click the first edge, then the edge it is sewn to · after sewing, Shift+click a neighbouring edge to extend the second side · Ctrl+Z undoes"))
-    : tool === "sewedit" ? t("แก้ตะเข็บ: กดตะเข็บบนกระดานหรือในรายการ แล้วกลับทิศหรือลบ (Delete)", "Edit sewing: click a seam on the board or in the list, then reverse or delete it (Delete)")
+    : tool === "sewpart" ? (sewA ? t("เย็บบางช่วง: กดจุดเริ่มบนขอบของอีกชิ้น ระบบวางให้ยาวเท่าช่วงแรก · Esc = ยกเลิก", "Sew part: click the start on the other piece's edge — it is made as long as the first range · Esc cancels") : sewP ? t("เย็บบางช่วง: กดจุดจบของช่วงบนขอบเดียวกัน · Esc = ยกเลิก", "Sew part: click the end of the range on the same edge · Esc cancels") : t("เย็บบางช่วง: กดจุดเริ่ม แล้วจุดจบบนขอบเดียวกัน ตามด้วยจุดเริ่มบนขอบของอีกชิ้น · กดเส้นตะเข็บแล้วลาก = ย้าย · ลากจุดกลมที่ปลาย = ยืด/หด · Ctrl+Z ย้อน", "Sew part: click a start, then an end on the same edge, then a start on the other piece's edge · click a seam and drag to move it · drag an end dot to resize · Ctrl+Z undoes"))
+    : tool === "sewedit" ? t("แก้ตะเข็บ: กดตะเข็บบนกระดานหรือในรายการ · ลากเส้นตะเข็บ = ย้ายช่วง · ลากจุดกลมที่ปลาย = ยืด/หด · กลับทิศหรือลบ (Delete) ได้ในแผงขวา", "Edit sewing: click a seam on the board or in the list · drag the seam to move its range · drag an end dot to resize · reverse or delete (Delete) in the panel")
     : tool === "hand" ? t("ลากเพื่อเลื่อนดู", "Drag to pan")
     : tool === "measure" ? (measureMode === "line" ? t("ไม้บรรทัด วัดตรง: กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Measure straight: drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("ไม้บรรทัด วัดโค้ง: คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Measure curve: click points along the line · drag = curve · double-click/Enter = finish") : t("ไม้บรรทัด ตามขอบ: กดบนชิ้นที่จุดเริ่ม แล้วลากไปตามขอบทางที่ต้องการ (อ้อมทางยาวก็ได้) ปล่อย = จบ · หรือคลิกจุดเริ่ม → เลื่อนตามขอบ → คลิกจุดปลาย — วัดตามเส้นเย็บ", "Measure along edge: press on a piece at the start and drag along the edge the way you want (long way works too) · release = done · or click start → move along → click end — measured along the sewing line"))
     : t("กดลากที่ว่างเพื่อวาด (Shift = จัตุรัส/วงกลม) · กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · Ctrl+Z ย้อนกลับ", "Drag on empty space to draw (Shift = square/circle) · click a piece = move + details · drag the handles = resize · top circle = rotate · Ctrl+Z undo");
@@ -1315,6 +1460,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             <Icon value="i:needle-thread" className="text-[16px]" />
             {seams.length > 0 && <span className={`absolute -right-1 -top-1 rounded-full px-1 text-[10px] leading-4 text-white ${seamBad ? "bg-red-500" : "bg-slate-500"}`}>{seams.length}</span>}
           </button>
+          {toolIcon("sewpart", "line-dashed", t("เย็บบางช่วงของขอบ", "Sew part of an edge"), "J")}
           {toolIcon("sewedit", "needle", t("แก้ตะเข็บ", "Edit sewing"), "B")}
         </>}
         {refPicker && <button type="button" onClick={() => setRefPickOpen((v) => !v)} title={t("ใส่รูปสินค้าเป็นภาพอ้างอิงใต้กระดาน (วาดลอกตาม)", "Put a product photo under the board as a tracing reference")} aria-label={t("รูปอ้างอิง", "Reference")} className={ibCls(refPickOpen)}><Icon value="i:photo" className="text-[16px]" /></button>}
@@ -1526,6 +1672,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 })}
                 {seamLayer}
                 {edgeHits}
+                {seamGrips}
                 {marquee && <rect x={Math.min(marquee.a.x, marquee.b.x)} y={Math.min(marquee.a.y, marquee.b.y)} width={Math.abs(marquee.a.x - marquee.b.x)} height={Math.abs(marquee.a.y - marquee.b.y)} fill={COLORS.stroke} fillOpacity={0.08} stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
                 {guides.map((gd, gi) => gd.x != null
                   ? <line key={`gd${gi}`} x1={gd.x} x2={gd.x} y1={view.y} y2={view.y + vh} stroke={GUIDE_COLOR} strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
