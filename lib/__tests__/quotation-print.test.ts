@@ -165,4 +165,14 @@ describe("quotation print", () => {
     expect(html).toContain("width: 30mm");
     expect(html).toContain("translate(calc(-50% + 22mm), -8mm)");
   });
+
+  // 2026-11-11: Chrome จำค่า Margins ล่าสุด — ถ้าเป็น None ค่าขอบใน @page ถูกทิ้ง → เนื้อหาชิดขอบกระดาษ เส้นกรอบซ้าย-ขวาหาย
+  it("ขอบกระดาษอยู่ในตัวเอกสาร (ไม่พึ่ง @page) — พิมพ์แบบ Margins: None ก็ยังมีขอบทุกหน้า", () => {
+    const html = buildQuotationHtml(quote, "https://erp.example.com", { topMarginMm: 13, horizontalMarginMm: 12, bottomMarginMm: 11 });
+    expect(html).toContain("@page { size: A4; margin: 0; }");
+    expect(html).toContain("padding: 13mm 12mm 11mm;");
+    expect(html).toContain("box-decoration-break: clone");   // เว้นขอบบน/ล่างซ้ำทุกหน้า
+    const print = html.slice(html.indexOf("@media print"));
+    expect(print.slice(0, print.indexOf("</style>"))).not.toMatch(/padding:\s*0/);   // ตอนพิมพ์ห้ามล้างขอบทิ้ง
+  });
 });
