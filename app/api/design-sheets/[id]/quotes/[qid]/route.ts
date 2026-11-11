@@ -1,7 +1,7 @@
 /**
  * Design Sheets — รอบเสนอราคา รายแถว (เฟส 3)
  *
- * PATCH  /api/design-sheets/[id]/quotes/[qid] → แก้ { quote_date, price, offered_price, qty, status, note, parent_code }
+ * PATCH  /api/design-sheets/[id]/quotes/[qid] → แก้ { quote_date, price, offered_price, qty, status, note, parent_code, colors }
  * DELETE /api/design-sheets/[id]/quotes/[qid] → ลบรอบ
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -11,6 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
 import { QUOTE_STATUSES } from "../shared";
+import { cleanQuoteColors } from "@/lib/quote-colors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,7 +20,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id, qid } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null; parent_code?: string | null; qty?: number | null };
+  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null; parent_code?: string | null; qty?: number | null; colors?: unknown };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -54,6 +55,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
   if (body.note !== undefined) patch.note = body.note?.trim() || null;
   if (body.parent_code !== undefined) patch.parent_code = body.parent_code == null ? null : String(body.parent_code);
+  if (body.colors !== undefined) patch.colors = cleanQuoteColors(body.colors);   // 🎨 สีของช่อง (lib/quote-colors)
 
   const admin = supabaseAdmin();
   const { data: before } = await admin.from("design_sheet_quotes").select("*").eq("id", qid).eq("sheet_id", id).maybeSingle();   // ค่าเดิม ไว้จดประวัติ

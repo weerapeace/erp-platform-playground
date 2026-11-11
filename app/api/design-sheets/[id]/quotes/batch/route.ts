@@ -10,6 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit, writeAuditFor, type AuditChangeRecord } from "@/lib/audit";
+import { cleanQuoteColors } from "@/lib/quote-colors";
 import { QUOTE_STATUSES } from "../shared";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
 import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
@@ -17,7 +18,7 @@ import { todayBangkok } from "@/lib/date";   // วันนี้ตามเ�
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type CellIn = { parent_code?: string | null; qty?: number | null; price?: number | null; offered_price?: number | null; status?: string };
+type CellIn = { parent_code?: string | null; qty?: number | null; price?: number | null; offered_price?: number | null; status?: string; colors?: unknown };
 const num = (v: unknown): number | null => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 const okStatus = (s: unknown, fallback: string) => (typeof s === "string" && (QUOTE_STATUSES as readonly string[]).includes(s) ? s : fallback);
 
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const rows = cells.map((c) => ({
     sheet_id: id, batch, round: ++round, quote_date, note, created_by: user?.id ?? null,
     parent_code: c.parent_code == null ? "" : String(c.parent_code),
-    qty: num(c.qty), price: num(c.price), offered_price: num(c.offered_price) ?? num(c.price),
+    qty: num(c.qty), price: num(c.price), offered_price: num(c.offered_price) ?? num(c.price), colors: cleanQuoteColors(c.colors),
     status: okStatus(c.status, status), cost_snapshot_id: (snap?.id as string | undefined) ?? null,
   }));
   const { error } = await admin.from("design_sheet_quotes").insert(rows);

@@ -9,6 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { cleanQuoteColors, type QuoteColor } from "@/lib/quote-colors";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { QUOTE_STATUSES } from "./shared";
 
@@ -23,6 +24,7 @@ export type DesignSheetQuote = {
   quote_date: string | null; price: number | null; offered_price: number | null; status: string; note: string | null;
   parent_code: string | null;   // ไซส์/แท็บที่เสนอราคา ("" = ทั่วไป · null = รอบเก่าไม่ระบุ)
   qty: number | null;           // จำนวนที่ราคานี้ใช้ (ราคาขั้นบันได) · null = ไม่ระบุ
+  colors?: QuoteColor[] | null;       // 🎨 สีของช่องนี้ (จำนวน/ราคาต่างต่อสี) · null = ไม่แยกสี — lib/quote-colors
   batch?: number | null;              // "ครั้งที่" จริง (1 ครั้ง = หลายไซส์ × หลายขั้นจำนวน; แถวนี้ = 1 ช่อง) · null = แถวเก่าก่อนมี batch
   cost_snapshot_id?: string | null;   // เวอร์ชันตีราคาที่ใช้ตอนเสนอรอบนี้ (null = รอบเก่าก่อนมีเวอร์ชัน)
   /** ต้นทุนเปลี่ยนอะไรจากรอบก่อน (ไซส์เดียวกัน) — คำนวณฝั่งเซิร์ฟเวอร์จากเวอร์ชันตีราคา · null = ไม่มีรอบก่อนที่เทียบได้ */
@@ -62,7 +64,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number; offered_price?: number; status?: string; note?: string; parent_code?: string | null; qty?: number | null; cost_snapshot_id?: string | null; batch?: number | null };
+  let body: { quote_date?: string; price?: number; offered_price?: number; status?: string; note?: string; parent_code?: string | null; qty?: number | null; cost_snapshot_id?: string | null; batch?: number | null; colors?: unknown };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const price = body.price != null ? Number(body.price) : null;
@@ -98,7 +100,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     sheet_id: id, round, quote_date: body.quote_date || todayBangkok(),
     price, offered_price: offered, qty, status, note: body.note?.trim() || null, created_by: user?.id ?? null,
     parent_code: body.parent_code == null ? null : String(body.parent_code),   // ไซส์ที่เสนอ ("" = ทั่วไป)
-    cost_snapshot_id: costSnapshotId, batch,
+    cost_snapshot_id: costSnapshotId, batch, colors: cleanQuoteColors(body.colors),
   }).select("id, round").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 

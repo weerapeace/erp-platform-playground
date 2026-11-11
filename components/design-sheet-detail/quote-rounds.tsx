@@ -11,9 +11,11 @@
  * 💰 ตัวช่วยตั้งราคา (เจ้าของขอ 2026-11-09) = ปุ่มบนแถบ → quote-pricing-helper.tsx → เลือกวิธีแล้ว "ใส่ราคา" = ตีราคาของทุกช่อง × ตัวคูณ (เปิดฟอร์มครั้งใหม่ให้ถ้ายังไม่เปิด)
  * แบบกะทัดรัด (เจ้าของเลือกแบบ A 2026-11-10): หัวการ์ดบรรทัดเดียว · แก้ไข/คัดลอก/ลบ อยู่ในปุ่ม ⋮ · ครั้งเก่าพับเหลือบรรทัดเดียว (โชว์ช่วงราคาที่เสนอต่อไซส์)
  *   เปิดครั้งล่าสุดไว้ให้ · ช่องราคา = ราคา + กำไร (%) บรรทัดเดียว · สถานะรายช่องโชว์ตอนชี้ (ถ้าทุกช่องสถานะเดียวกัน · จอสัมผัสโชว์ตลอด)
- * ของกลาง: ConfirmDialog · Popover (เมนู ⋮) · InfoHint · useCanHover · useToast · apiFetch · lib/quote-pricing
+ * 🎨 หลายสีต่อไซส์ (เจ้าของขอ 2026-11-11): ฟอร์ม = แถวสีใต้ไซส์ · จำนวนต่อสีแยกตามขั้น (หรือใส่เป็น %) · แบ่งเท่ากัน · แยกราคาตามสี (± บาท จากราคาไซส์)
+ *   เก็บที่ design_sheet_quotes.colors ทีละช่อง · กติกา lib/quote-colors · การ์ดโชว์จำนวนต่อสี + เตือนแบ่งไม่ครบ/เกิน · ส่งไปใบเสนอราคา 1 สี = 1 บรรทัด
+ * ของกลาง: ConfirmDialog · Popover (เมนู ⋮) · InfoHint · useCanHover · useToast · apiFetch · lib/quote-pricing · lib/quote-colors
  */
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -27,6 +29,12 @@ import { InfoHint } from "@/components/info-hint";
 import { useCanHover } from "@/lib/use-can-hover";
 import { priceFromCost, tierPrice } from "@/lib/quote-pricing";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
+import { QUOTE_COLOR_PALETTE, cleanQuoteColors, colorQtyStatus, colorUnitPrice, paletteHex, percentsToQty, qtyToPercent, splitEvenly, type QuoteColor } from "@/lib/quote-colors";
+
+/** จุดสีของสินค้า (ไม่รู้สี = เทา) */
+const ColorDot = ({ hex, title }: { hex: string | null | undefined; title?: string }) => (
+  <span title={title} className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-slate-300" style={{ background: hex ?? "#cbd5e1" }} />
+);
 
 const fmtBaht = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH"));
@@ -131,6 +139,39 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
     if (v !== "" && (!Number.isFinite(n) || (n as number) < 0)) { toast.error(tr("ราคาต้องเป็นตัวเลขไม่ติดลบ", "Price must be a non-negative number")); return; }
     if ((n ?? null) === (q.offered_price ?? null)) return;
     void patchCell(q, { offered_price: n });
+  };
+  // 🎨 แถวสีใต้ไซส์ในการ์ด: ชิปสี (+ ราคาต่าง) · ช่องละขั้น = จำนวนต่อสี + เตือนแบ่งไม่ครบ/เกิน · ไม่มีสี = ไม่มีแถว
+  const colorRow = (b: Batch, size: string) => {
+    const per = b.qtys.map((qty) => cleanQuoteColors(cellOf(b, size, qty)?.colors));
+    const names: { name: string; hex: string | null; delta: number | null }[] = [];
+    for (const cs of per) for (const c of cs ?? []) if (!names.some((x) => x.name === c.name)) names.push({ name: c.name, hex: c.hex, delta: c.delta });
+    if (!names.length) return null;
+    return (
+      <tr className="border-t border-slate-50">
+        <td className="px-3 py-1 pl-6 text-[10px] text-slate-400">{t("สี", "Colors")}</td>
+        <td className="px-2 py-1">
+          <div className="flex flex-wrap justify-end gap-1">
+            {names.map((c) => (
+              <span key={c.name} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-1.5 text-[10px] text-slate-600">
+                <ColorDot hex={c.hex} />{c.name}{c.delta ? <span className="text-slate-400">{c.delta > 0 ? "+" : "−"}{fmtShort(Math.abs(c.delta))}</span> : null}
+              </span>
+            ))}
+          </div>
+        </td>
+        {b.qtys.map((qty, i) => {
+          const cs = per[i]; const st = colorQtyStatus(cs, qty);
+          return (
+            <td key={qtyKey(qty)} className="px-2 py-1 text-right align-top bg-blue-50/10">
+              <div className="flex flex-col items-end gap-0.5 text-[10px] tabular-nums text-slate-600">
+                {(cs ?? []).map((c) => <span key={c.name} className="inline-flex items-center gap-1" title={c.name}><ColorDot hex={c.hex} title={c.name} />{c.qty != null ? fmtInt(c.qty) : "—"}</span>)}
+                {st.state === "under" && <span className="text-amber-600">{t(`ยังไม่แบ่ง ${fmtInt(st.remaining)}`, `${fmtInt(st.remaining)} unassigned`)}</span>}
+                {st.state === "over" && <span className="text-rose-600">{t(`เกิน ${fmtInt(-st.remaining)}`, `${fmtInt(-st.remaining)} over`)}</span>}
+              </div>
+            </td>
+          );
+        })}
+      </tr>
+    );
   };
   const addCell = (b: Batch, size: string, qty: number | null) => call(async () => {
     const cost = currentCost(size, qty);
@@ -278,7 +319,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                     const first = b.quotes.find((q) => (q.parent_code ?? "") === size);
                     const costAt = first?.price ?? null; const cur = currentCost(size, first?.qty); const dCost = costAt != null && cur > 0 ? cur - costAt : null;
                     return (
-                      <tr key={size} className="border-t border-slate-100">
+                      <Fragment key={size}>
+                      <tr className="border-t border-slate-100">
                         <td className="px-3 py-1.5 text-xs font-medium text-slate-700">{sizeLabel(size)}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums leading-tight">
                           <div className="text-slate-500 text-xs">{fmtBaht(costAt)}</div>
@@ -329,6 +371,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                           );
                         })}
                       </tr>
+                      {colorRow(b, size)}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -383,6 +427,60 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     }
     return m;
   });
+  // 🎨 สีต่อไซส์: รายการสี + ราคาต่าง (ใช้ทุกขั้นจำนวน) · จำนวนต่อสีแยกตามขั้น (key = ไซส์|ขั้น|ชื่อสี) · โหมด % = 1 ค่าต่อสีใช้ทุกขั้น
+  type ColorDef = { name: string; hex: string | null; delta: string };
+  const ckey = (sz: string, qty: number | null, name: string) => `${sz}|${qtyKey(qty)}|${name}`;
+  const [colorInit] = useState(() => {
+    const defs: Record<string, ColorDef[]> = {}; const qty: Record<string, string> = {}; const split: Record<string, boolean> = {};
+    for (const q of src?.quotes ?? []) {
+      const sz = q.parent_code ?? "";
+      for (const c of cleanQuoteColors(q.colors) ?? []) {
+        const list = defs[sz] ?? (defs[sz] = []);
+        if (!list.some((x) => x.name === c.name)) list.push({ name: c.name, hex: c.hex, delta: c.delta ? String(c.delta) : "" });
+        if (c.delta) split[sz] = true;
+        if (c.qty != null) qty[ckey(sz, q.qty, c.name)] = String(c.qty);
+      }
+    }
+    return { defs, qty, split };
+  });
+  const [colorDefs, setColorDefs] = useState<Record<string, ColorDef[]>>(colorInit.defs);
+  const [colorQty, setColorQty] = useState<Record<string, string>>(colorInit.qty);
+  const [splitBy, setSplitBy] = useState<Record<string, boolean>>(colorInit.split);
+  const [pctBy, setPctBy] = useState<Record<string, boolean>>({});
+  const [pcts, setPcts] = useState<Record<string, string>>({});   // key = ไซส์|ชื่อสี
+  const [pickerFor, setPickerFor] = useState<string | null>(null);   // ไซส์ที่เปิดจานสีอยู่
+  const [customColor, setCustomColor] = useState("");
+  const colorsOf = (sz: string) => colorDefs[sz] ?? [];
+  const addColor = (sz: string, name: string, hex?: string | null) => {
+    const n = name.trim().slice(0, 40); if (!n) return;
+    if (colorsOf(sz).some((c) => c.name === n)) { toast.info(tr(`มีสี ${n} แล้ว`, `${n} is already added`)); return; }
+    setColorDefs((m) => ({ ...m, [sz]: [...(m[sz] ?? []), { name: n, hex: hex ?? paletteHex(n), delta: "" }] }));
+  };
+  const removeColor = (sz: string, name: string) => setColorDefs((m) => ({ ...m, [sz]: (m[sz] ?? []).filter((c) => c.name !== name) }));
+  const setDelta = (sz: string, name: string, v: string) => setColorDefs((m) => ({ ...m, [sz]: (m[sz] ?? []).map((c) => (c.name === name ? { ...c, delta: v } : c)) }));
+  const splitEven = (sz: string) => {
+    const cs = colorsOf(sz); if (!cs.length) return;
+    setPctBy((m) => ({ ...m, [sz]: false }));
+    setColorQty((m) => { const n = { ...m }; for (const qty of qtys) { if (qty == null) continue; splitEvenly(cs.length, qty).forEach((v, i) => { n[ckey(sz, qty, cs[i].name)] = String(v); }); } return n; });
+  };
+  const colorQtyFor = (sz: string, qty: number | null, i: number): number | null => {
+    const cs = colorsOf(sz); const c = cs[i]; if (!c) return null;
+    if (pctBy[sz]) return qty == null ? null : percentsToQty(cs.map((x) => Number(pcts[`${sz}|${x.name}`]) || 0), qty)[i];
+    const v = colorQty[ckey(sz, qty, c.name)]?.trim();
+    return v ? Math.max(0, Math.round(Number(v)) || 0) : null;
+  };
+  const setPctMode = (sz: string, on: boolean) => {
+    if (on) {   // เปิดโหมด % = ตั้งต้นจากจำนวนของขั้นแรกที่มีตัวเลข
+      const cs = colorsOf(sz); const tier = qtys.find((q) => q != null) ?? null;
+      setPcts((m) => { const n = { ...m }; for (const c of cs) n[`${sz}|${c.name}`] = tier ? String(qtyToPercent(Number(colorQty[ckey(sz, tier, c.name)]) || 0, tier)) : ""; return n; });
+    } else {   // ปิดโหมด % = เก็บจำนวนที่คำนวณได้ไว้ในช่องชิ้น
+      setColorQty((m) => { const n = { ...m }; for (const qty of qtys) colorsOf(sz).forEach((c, i) => { const v = colorQtyFor(sz, qty, i); if (v != null) n[ckey(sz, qty, c.name)] = String(v); }); return n; });
+    }
+    setPctBy((m) => ({ ...m, [sz]: on }));
+  };
+  /** สีของช่อง (ไซส์ × ขั้น) ที่จะบันทึก · ไม่มีสี = null */
+  const colorsForCell = (sz: string, qty: number | null): QuoteColor[] | null =>
+    cleanQuoteColors(colorsOf(sz).map((c, i) => ({ name: c.name, hex: c.hex, qty: colorQtyFor(sz, qty, i), delta: splitBy[sz] ? Number(c.delta) || 0 : null })));
   const [newQty, setNewQty] = useState("");
   const [editQty, setEditQty] = useState<{ from: number | null; val: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -402,6 +500,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     if (qtys.some((q) => qtyKey(q) === qtyKey(to))) { toast.error(tr("มีขั้นจำนวนนี้แล้ว", "This quantity tier already exists")); return; }
     setQtys((qs) => qs.map((q) => (qtyKey(q) === qtyKey(from) ? to : q)).sort(byQty));
     setCells((m) => { const n = { ...m }; for (const s of rowSizes) { const a = key(s.key, from); if (a in n) { n[key(s.key, to)] = n[a]; delete n[a]; } } return n; });
+    setColorQty((m) => { const n = { ...m }; for (const s of rowSizes) for (const c of colorsOf(s.key)) { const a = ckey(s.key, from, c.name); if (a in n) { n[ckey(s.key, to, c.name)] = n[a]; delete n[a]; } } return n; });
     setOrigQty((o) => { const n = { ...o }; if (qtyKey(from) in n) { n[qtyKey(to)] = n[qtyKey(from)]; delete n[qtyKey(from)]; } return n; });
   };
   // 💰 ตัวช่วยตั้งราคาส่งวิธีคิดมา → ใส่ทุกช่อง (ไซส์ที่ติ๊ก × ขั้นจำนวน) จากตีราคาของช่องนั้น · ช่องที่ยังไม่ได้ตีราคา ไม่แตะ
@@ -471,17 +570,19 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
       const patch: Record<string, unknown> = {};
       if (n !== (q.offered_price ?? q.price)) patch.offered_price = n;
       if (qtyKey(col) !== qtyKey(q.qty)) patch.qty = col;
+      const nc = colorsForCell(size, col);
+      if (JSON.stringify(nc) !== JSON.stringify(cleanQuoteColors(q.colors))) patch.colors = nc;
       if (dateChanged && newDate !== (q.quote_date ?? null)) patch.quote_date = newDate;
       if (noteChanged && newNote !== (q.note?.trim() || null)) patch.note = newNote;
       if (statusChanged && newStatus !== q.status) patch.status = newStatus;
       if (Object.keys(patch).length) changes.push({ id: q.id, patch });
     }
-    const adds: { parent_code: string; qty: number | null; offered: number }[] = [];
+    const adds: { parent_code: string; qty: number | null; offered: number; colors: QuoteColor[] | null }[] = [];
     for (const s of rowSizes) {
       if (!onSizes.includes(s.key)) continue;
       for (const qty of qtys) {
         const n = priceOf(s.key, qty);
-        if (n !== null && !kept.has(key(s.key, qty))) adds.push({ parent_code: s.key, qty, offered: n });
+        if (n !== null && !kept.has(key(s.key, qty))) adds.push({ parent_code: s.key, qty, offered: n, colors: colorsForCell(s.key, qty) });
       }
     }
     if (!changes.length && !removes.length && !adds.length) { toast.info(tr("ไม่มีอะไรเปลี่ยน", "Nothing changed")); onClose(); return; }
@@ -500,7 +601,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
         const c = currentCost(a.parent_code, a.qty);
         await call(`/api/design-sheets/${sheetId}/quotes`, json({
           quote_date: newDate ?? todayStr(), price: c > 0 ? Math.round(c * 100) / 100 : null, offered_price: a.offered, qty: a.qty,
-          status: newStatus ?? "pending", note: newNote, parent_code: a.parent_code, batch: b.batch,
+          status: newStatus ?? "pending", note: newNote, parent_code: a.parent_code, batch: b.batch, colors: a.colors,
         }, "POST"));
       }
       await onSaved(b.batch);
@@ -512,12 +613,12 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
   };
   const save = async () => {
     if (editing) return saveEdit(editing);
-    const list: { parent_code: string; qty: number | null; price: number | null; offered_price: number | null }[] = [];
+    const list: { parent_code: string; qty: number | null; price: number | null; offered_price: number | null; colors: QuoteColor[] | null }[] = [];
     for (const s of sizes.filter((x) => onSizes.includes(x.key))) for (const qty of qtys) {
       const v = cells[key(s.key, qty)]?.trim(); if (!v) continue;
       const n = Number(v); if (!Number.isFinite(n) || n < 0) { toast.error(tr(`ราคา ${sizeLabel(s.key)} ${qty ?? ""} ไม่ถูกต้อง`, `Invalid price: ${sizeLabel(s.key)} ${qty ?? ""}`)); return; }
       const c = currentCost(s.key, qty);
-      list.push({ parent_code: s.key, qty, price: c > 0 ? Math.round(c * 100) / 100 : null, offered_price: n });
+      list.push({ parent_code: s.key, qty, price: c > 0 ? Math.round(c * 100) / 100 : null, offered_price: n, colors: colorsForCell(s.key, qty) });
     }
     if (!list.length) { toast.error(tr("ใส่ราคาที่เสนออย่างน้อย 1 ช่อง", "Enter at least 1 offered price")); return; }
     setSaving(true);
@@ -578,8 +679,10 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
           <tbody>
             {rowSizes.map((s) => {
               const on = onSizes.includes(s.key); const cost = currentCost(s.key);
+              const cs = colorsOf(s.key);
               return (
-                <tr key={s.key} className={`border-t border-blue-100 ${on ? "" : "opacity-40"}`}>
+                <Fragment key={s.key}>
+                <tr className={`border-t border-blue-100 ${on ? "" : "opacity-40"}`}>
                   <td className="px-3 py-1 text-xs"><label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={on} onChange={(e) => setOnSizes((xs) => (e.target.checked ? [...xs, s.key] : xs.filter((x) => x !== s.key)))} className="h-3.5 w-3.5" /><span className="font-medium text-slate-700">{s.label}</span></label></td>
                   <td className="px-2 py-1 text-right text-xs text-slate-500 tabular-nums">{cost > 0 ? fmtBaht(cost) : <span className="text-slate-300" title={t("ยังไม่ได้ตีราคาไซส์นี้", "This size hasn't been costed yet")}>—</span>}</td>
                   {qtys.map((qty) => {
@@ -594,6 +697,89 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
                   })}
                   <td />
                 </tr>
+                {/* 🎨 สีของไซส์นี้: ชิป + เพิ่มสี + แยกราคาตามสี + แบ่งเท่ากัน + ชิ้น/% · แถวละสี (จำนวนต่อขั้น) · แถวสถานะแบ่งครบ/ขาด/เกิน */}
+                {on && (
+                  <tr className="bg-white/50">
+                    <td colSpan={qtys.length + 3} className="px-3 pb-1">
+                      <div className="flex flex-wrap items-center gap-1.5 pl-5 text-[11px] text-slate-500">
+                        <span>{t("สี", "Colors")}</span>
+                        {cs.map((c) => (
+                          <span key={c.name} className="inline-flex h-6 items-center gap-1 rounded-full border border-slate-200 bg-white pl-1.5 pr-1 text-xs text-slate-700">
+                            <ColorDot hex={c.hex} />{c.name}
+                            <button type="button" onClick={() => removeColor(s.key, c.name)} aria-label={t(`เอาสี ${c.name} ออก`, `Remove ${c.name}`)} className="px-0.5 text-slate-400 hover:text-rose-500">×</button>
+                          </span>
+                        ))}
+                        <button type="button" onClick={() => { setPickerFor(pickerFor === s.key ? null : s.key); setCustomColor(""); }}
+                          className={`inline-flex h-6 items-center rounded-full border border-dashed px-2 text-xs ${pickerFor === s.key ? "border-blue-400 text-blue-700" : "border-slate-300 text-slate-500 hover:border-blue-300 hover:text-blue-600"}`}>{t("＋ สี", "＋ Color")}</button>
+                        {cs.length > 0 && <>
+                          <label className="ml-1 inline-flex cursor-pointer items-center gap-1" title={t("บางสีแพงกว่า — ใส่ ± บาท จากราคาไซส์ (ใช้ทุกขั้นจำนวน)", "Some colors cost more — enter ± THB from the size price (all tiers)")}>
+                            <input type="checkbox" checked={!!splitBy[s.key]} onChange={(e) => setSplitBy((m) => ({ ...m, [s.key]: e.target.checked }))} className="h-3.5 w-3.5" />{t("แยกราคาตามสี", "Price per color")}
+                          </label>
+                          <button type="button" onClick={() => splitEven(s.key)} className="h-6 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50" title={t("แบ่งจำนวนทุกขั้นให้ทุกสีเท่ากัน", "Split every tier equally across colors")}>{t("แบ่งเท่ากัน", "Split equally")}</button>
+                          <span className="inline-flex overflow-hidden rounded-md border border-slate-200 text-xs">
+                            <button type="button" onClick={() => setPctMode(s.key, false)} className={`h-6 px-2 ${pctBy[s.key] ? "bg-white text-slate-600" : "bg-slate-800 text-white"}`}>{t("ชิ้น", "pcs")}</button>
+                            <button type="button" onClick={() => setPctMode(s.key, true)} className={`h-6 px-2 ${pctBy[s.key] ? "bg-slate-800 text-white" : "bg-white text-slate-600"}`} title={t("ใส่เป็น % — ระบบแปลงเป็นชิ้นทุกขั้นให้", "Enter % — converted to pieces for every tier")}>%</button>
+                          </span>
+                        </>}
+                      </div>
+                      {pickerFor === s.key && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1 pl-5">
+                          {QUOTE_COLOR_PALETTE.filter((p) => !cs.some((c) => c.name === p.name)).map((p) => (
+                            <button key={p.name} type="button" onClick={() => addColor(s.key, p.name, p.hex)} className="inline-flex h-6 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:border-blue-300">
+                              <ColorDot hex={p.hex} />{p.name}
+                            </button>
+                          ))}
+                          <input value={customColor} onChange={(e) => setCustomColor(e.target.value)} placeholder={t("พิมพ์สีเอง แล้ว Enter", "Type a color, then Enter")}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addColor(s.key, customColor); setCustomColor(""); } }}
+                            className="h-6 w-36 rounded-md border border-slate-200 px-2 text-xs" />
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {on && cs.map((c, i) => (
+                  <tr key={`c-${c.name}`} className="bg-white/50">
+                    <td className="py-0.5 pl-9 pr-2 text-xs text-slate-600"><span className="inline-flex items-center gap-1.5"><ColorDot hex={c.hex} />{c.name}</span></td>
+                    <td className="px-2 py-0.5 text-right">
+                      <span className="inline-flex items-center justify-end gap-1">
+                        {splitBy[s.key] && <input type="number" step="any" value={c.delta} onChange={(e) => setDelta(s.key, c.name, e.target.value)} placeholder={t("± บาท", "± THB")}
+                          title={t("ราคาต่างจากราคาไซส์ (บาท) เช่น 3 = แพงกว่า 3 บาท", "Price difference from the size price (THB), e.g. 3 = 3 THB more")} className="h-7 w-16 rounded border border-slate-200 px-1 text-right text-xs" />}
+                        {pctBy[s.key] && <><input type="number" min={0} step="any" value={pcts[`${s.key}|${c.name}`] ?? ""} onChange={(e) => setPcts((m) => ({ ...m, [`${s.key}|${c.name}`]: e.target.value }))}
+                          aria-label={t(`สัดส่วนสี ${c.name} (%)`, `${c.name} share (%)`)} className="h-7 w-14 rounded border border-slate-200 px-1 text-right text-xs" /><span className="text-[11px] text-slate-400">%</span></>}
+                      </span>
+                    </td>
+                    {qtys.map((qty) => {
+                      const v = cells[key(s.key, qty)]; const cp = v && Number(c.delta) ? colorUnitPrice(Number(v), { delta: Number(c.delta) }) : null;
+                      return (
+                        <td key={qtyKey(qty)} className="px-2 py-0.5 text-right align-top">
+                          {pctBy[s.key]
+                            ? <span className="inline-block w-24 text-right text-xs tabular-nums text-slate-600">{qty == null ? "—" : fmtInt(colorQtyFor(s.key, qty, i) ?? 0)}</span>
+                            : <input type="number" min={0} step={1} value={colorQty[ckey(s.key, qty, c.name)] ?? ""} onChange={(e) => setColorQty((m) => ({ ...m, [ckey(s.key, qty, c.name)]: e.target.value }))}
+                                placeholder={qty == null ? "—" : "0"} aria-label={t(`จำนวนสี ${c.name}`, `${c.name} quantity`)} className="h-7 w-24 rounded border border-slate-200 bg-white px-1.5 text-right text-xs tabular-nums" />}
+                          {splitBy[s.key] && cp != null && <div className="text-[10px] tabular-nums text-slate-500">{t("ราคา", "price")} {fmtBaht(cp)}</div>}
+                        </td>
+                      );
+                    })}
+                    <td />
+                  </tr>
+                ))}
+                {on && cs.length > 0 && (
+                  <tr className="bg-white/50">
+                    <td colSpan={2} className="py-0.5 pl-9 text-[10px] text-slate-400">{t("แบ่งจำนวน", "Split")}</td>
+                    {qtys.map((qty) => {
+                      const st = colorQtyStatus(cs.map((_, i) => ({ qty: colorQtyFor(s.key, qty, i) })), qty);
+                      return (
+                        <td key={qtyKey(qty)} className="px-2 pb-1 text-right text-[10px]">
+                          {st.state === "ok" && <span className="text-emerald-600">{t(`ครบ ${fmtInt(qty)}`, `All ${fmtInt(qty)}`)}</span>}
+                          {st.state === "under" && <span className="text-amber-600">{t(`ยังไม่แบ่ง ${fmtInt(st.remaining)}`, `${fmtInt(st.remaining)} unassigned`)}</span>}
+                          {st.state === "over" && <span className="text-rose-600">{t(`เกิน ${fmtInt(-st.remaining)}`, `${fmtInt(-st.remaining)} over`)}</span>}
+                        </td>
+                      );
+                    })}
+                    <td />
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>

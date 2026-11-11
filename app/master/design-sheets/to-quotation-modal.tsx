@@ -5,6 +5,7 @@
 // ของกลาง: ERPModal · useToast · CustomerPicker · apiFetch → POST /api/design-sheets/[id]/to-quotation
 // มีตะกร้าอยู่แล้ว = หย่อนเข้าตะกร้าเลย (ไม่ถามซ้ำ) · ไม่มีตะกร้า = เลือกลูกค้า → สร้างใบใหม่ → ตั้งเป็นตะกร้า
 // variation เก็บที่ note · ระบบขายบังคับต้องมีลูกค้า (เลือกครั้งเดียวตอนเปิดตะกร้า)
+// 🎨 ช่องที่แยกสี (design_sheet_quotes.colors) → 1 สี = 1 แถว/1 บรรทัด · จำนวน = ที่แบ่งไว้ · ราคา = ราคาช่อง ± ราคาต่างของสี (lib/quote-colors)
 // มีรอบเสนอราคา (quotes) = ติ๊กเลือกได้ว่าจะส่งราคาไหน + จำนวนเท่าไหร่ (1 รอบที่ติ๊ก = 1 บรรทัดในใบเสนอราคา)
 // ============================================================
 
@@ -18,6 +19,7 @@ import { CustomerPicker } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
 import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
+import { cleanQuoteColors, colorUnitPrice } from "@/lib/quote-colors";
 import { duplicateQuoteWarning, latestOpenDraft, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type SheetQuotation } from "@/lib/design-sheet-quotations";
 
 /** แถวเลือกรอบเสนอราคา: ติ๊ก + จำนวน/ราคาที่แก้ได้ก่อนส่ง */
@@ -25,6 +27,7 @@ type RoundPick = {
   id: string; round: number; size: string; status: string; checked: boolean; qty: string; price: string;
   batch: number; date: string | null; note: string | null;   // ครั้งที่จริง (1 ครั้ง = หลายไซส์ × หลายขั้นจำนวน) + วันที่/หมายเหตุของครั้ง
   cost: number | null;                                       // ราคาจากตีราคา ณ ตอนเสนอ (ไว้โชว์กำไร/ชิ้น)
+  tier: number | null; color: string | null; hex: string | null; ci: number;   // ขั้นจำนวนของช่อง · สี (null = ไม่แยกสี) · ลำดับสี
 };
 const fmt2 = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d: string | null) => { if (!d) return ""; const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString(tr("th-TH", "en-GB"), { day: "numeric", month: "short", year: "2-digit" }); };
@@ -116,12 +119,23 @@ export function ToQuotationModal({
     // รอบที่มีราคา → เป็นตัวเลือก · ติ๊กรอบ "ผ่าน" ไว้ก่อน (ไม่มีรอบผ่าน = ไม่ติ๊กอะไร ให้เลือกเอง)
     const priced = (quotes ?? []).filter((q) => (q.offered_price ?? q.price) != null);
     const anyPassed = priced.some((q) => q.status === "passed");
-    setPicks(priced.map((q) => ({
-      id: q.id, round: q.round, size: q.parent_code ?? "", status: q.status,
-      checked: anyPassed && q.status === "passed",
-      qty: roundQty(q), price: String(q.offered_price ?? q.price),
-      batch: q.batch ?? q.round, date: q.quote_date ?? null, note: q.note ?? null, cost: q.price != null ? Number(q.price) : null,
-    })));
+    setPicks(priced.flatMap<RoundPick>((q) => {
+      const base = {
+        round: q.round, size: q.parent_code ?? "", status: q.status,
+        batch: q.batch ?? q.round, date: q.quote_date ?? null, note: q.note ?? null, cost: q.price != null ? Number(q.price) : null,
+        tier: q.qty != null ? Number(q.qty) : null,
+      };
+      const checked = anyPassed && q.status === "passed";
+      const offered = Number(q.offered_price ?? q.price);
+      const colors = cleanQuoteColors(q.colors);
+      if (!colors) return [{ ...base, id: q.id, checked, qty: roundQty(q), price: String(offered), color: null, hex: null, ci: 0 }];
+      // แยกสี: สีที่ยังไม่แบ่งจำนวน = ไม่ติ๊กไว้ก่อน (ให้กรอกเอง)
+      return colors.map((c, i) => ({
+        ...base, id: `${q.id}#${i}`, checked: checked && (c.qty ?? 0) > 0,
+        qty: c.qty != null && c.qty > 0 ? String(c.qty) : "", price: String(colorUnitPrice(offered, c) ?? offered),
+        color: c.name, hex: c.hex, ci: i,
+      }));
+    }));
     setManual(priced.length === 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- รีเซ็ตเฉพาะตอนเปิดป๊อป (quotes อัปเดตระหว่างเปิดไม่ต้องล้างที่ติ๊กไว้)
   }, [open, sheetName, defaultPrice]);
@@ -157,7 +171,7 @@ export function ToQuotationModal({
     return [...byBatch.entries()].sort((a, b) => b[0] - a[0]).map(([batch, ps]) => {
       const bySize = new Map<string, RoundPick[]>();
       for (const p of ps) (bySize.get(p.size) ?? bySize.set(p.size, []).get(p.size)!).push(p);
-      const sizes = [...bySize.entries()].map(([size, rows]) => ({ size, rows: rows.sort((a, b) => (Number(a.qty) || 0) - (Number(b.qty) || 0)) }));
+      const sizes = [...bySize.entries()].map(([size, rows]) => ({ size, rows: rows.sort((a, b) => ((a.tier ?? Number(a.qty)) || 0) - ((b.tier ?? Number(b.qty)) || 0) || a.ci - b.ci) }));
       const sts = new Set(ps.map((p) => p.status));
       return { batch, date: ps[0]?.date ?? null, note: ps.find((p) => p.note)?.note ?? null, status: sts.size === 1 ? ps[0].status : "mixed", sizes, ids: new Set(ps.map((p) => p.id)), checked: ps.filter((p) => p.checked).length };
     });
@@ -174,10 +188,10 @@ export function ToQuotationModal({
     if (!hasCart && !customer) { toast.error(tr("เลือกลูกค้าก่อน", "Select a customer first")); return; }
     if (isNew && dupWarn && !confirmDup) { toast.error(tr("งานนี้มีใบเสนอราคาที่ยังเปิดอยู่ — ติ๊กยืนยันก่อนถ้าจะเปิดใบใหม่จริง", "This job already has an open quotation — tick the confirmation to really start a new one")); return; }
     const sel = sheetSkus.find((x) => x.id === selSkuId);
-    // โหมดติ๊กรอบ: 1 รอบ = 1 บรรทัด · ตัวเลือกบรรทัด = variation ที่กรอก + ไซส์ (ถ้าไม่ใช่ "ทั่วไป")
+    // โหมดติ๊กรอบ: 1 รอบ (หรือ 1 สี) = 1 บรรทัด · ตัวเลือกบรรทัด = variation ที่กรอก + ไซส์ (ถ้าไม่ใช่ "ทั่วไป") + สี
     const roundLines = roundMode ? checkedPicks.map((p) => ({
       product_name: name.trim(),
-      variation: [variation.trim(), p.size ? labelOf(p.size) : ""].filter(Boolean).join(" · ") || null,
+      variation: [variation.trim(), p.size ? labelOf(p.size) : "", p.color ?? ""].filter(Boolean).join(" · ") || null,
       unit_price: Number(p.price), qty: Number(p.qty),
       sku: sel?.code ?? null, product_id: sel?.id ?? null,
     })) : null;
@@ -354,7 +368,7 @@ export function ToQuotationModal({
                         return [
                           <tr key={`h-${size}`} className="bg-blue-50/40">
                             <td className="px-2 py-1 text-center"><input type="checkbox" checked={sizeChecked === rows.length} ref={(el) => { if (el) el.indeterminate = sizeChecked > 0 && sizeChecked < rows.length; }} onChange={(e) => setMany(sizeIds, e.target.checked)} className="h-3.5 w-3.5 cursor-pointer" /></td>
-                            <td colSpan={5} className="px-2 py-1 text-xs font-semibold text-blue-800">{labelOf(size)} <span className="font-normal text-blue-500">{t(`· ${rows.length} ขั้นจำนวน`, `· ${rows.length} qty tiers`)}</span></td>
+                            <td colSpan={5} className="px-2 py-1 text-xs font-semibold text-blue-800">{labelOf(size)} <span className="font-normal text-blue-500">{(() => { const nt = new Set(rows.map((r) => r.tier ?? r.id)).size; const nc = rows.filter((r) => r.color).length; return t(`· ${nt} ขั้นจำนวน${nc ? ` · แยกสี` : ""}`, `· ${nt} qty tiers${nc ? " · by color" : ""}`); })()}</span></td>
                           </tr>,
                           ...rows.map((p) => {
                             const price = Number(p.price) || 0; const qn = Number(p.qty) || 0;
@@ -364,7 +378,13 @@ export function ToQuotationModal({
                               <tr key={p.id} className={`border-t border-slate-50 ${p.checked ? "bg-blue-50/40" : ""}`}>
                                 <td className="px-2 py-1 text-center"><input type="checkbox" checked={p.checked} onChange={(e) => setPick(p.id, { checked: e.target.checked })} className="h-4 w-4 cursor-pointer" /></td>
                                 <td className="px-2 py-1 pl-6 text-slate-600">
-                                  {qn ? `${qn.toLocaleString("th-TH")} ${t("ชิ้น", "pcs")}` : t("ไม่ระบุจำนวน", "No qty")}
+                                  {p.color
+                                    ? <span className="inline-flex items-center gap-1.5">
+                                        <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-slate-300" style={{ background: p.hex ?? "#cbd5e1" }} />
+                                        <span className="text-slate-700">{p.color}</span>
+                                        <span className="text-[11px] text-slate-400">{p.tier ? t(`ขั้น ${p.tier.toLocaleString("th-TH")}`, `tier ${p.tier.toLocaleString("th-TH")}`) : t("ไม่ระบุขั้น", "no tier")}</span>
+                                      </span>
+                                    : qn ? `${qn.toLocaleString("th-TH")} ${t("ชิ้น", "pcs")}` : t("ไม่ระบุจำนวน", "No qty")}
                                   <span className={`ml-1.5 text-[10px] px-1 py-px rounded border ${STATUS_CLS[p.status] ?? "bg-slate-50 text-slate-400 border-slate-200"}`}>{STATUS_LABEL[p.status]?.() ?? p.status}</span>
                                   {p.cost != null && <span className="ml-1.5 text-[10px] text-slate-400" title={t("ราคาจากตีราคาตอนเสนอ", "Costing price at time of quote")}>{t("ต้นทุน", "Cost")} {fmt2(p.cost)}</span>}
                                 </td>
