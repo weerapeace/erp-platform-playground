@@ -7,8 +7,12 @@
  * แต่ละหน้าแค่ pass config object → ได้หน้าครบ list + create + edit + soft delete + bulk + export + audit
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
+import { useUserPref } from "@/lib/use-user-pref";
+import { Popover } from "@/components/popover";
+import { Icon } from "@/components/icon";
+import { formHiddenTabsKey, parseHiddenTabs, toggleHiddenTab, visibleTabKeys } from "@/lib/form-tab-prefs";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
@@ -2869,6 +2873,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   if (!canView && !embedded) return <Wrap><AccessDenied /></Wrap>;
 
   return (
+    <TabPrefScope.Provider value={config.moduleKey ?? config.tableId ?? null}>
     <Wrap>
       {!embedded && (
       <div className="w-full px-6 py-6" style={{ "--dt-sticky-top": `${headerH}px` } as React.CSSProperties}>
@@ -3152,49 +3157,58 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const modeBtn = drawerMode === "view" && !!editingId && (entryModes.length > 0 || canEditModes);
           if (pairFields.length === 0 && !aiBtn && !modeBtn) return null;
           const canTranslate = pairFields.some((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_translate !== false);
+          // แถบเครื่องมือ: จัดเป็นกลุ่ม กรอบเส้นสี (เจ้าของขอ 2026-11-11 "เป็นเส้นสี จัดกลุ่มสวยๆ")
+          //   ภาษา (คราม) · เนื้อหา = โหมดลงรายละเอียด + AI (ม่วง) · แปล (ฟ้า) — ปุ่มในกลุ่มเป็นแบบโปร่ง ไม่มีพื้นสี
+          //   ห้ามใส่ overflow-hidden ที่กล่องกลุ่ม — เมนูโหมดลงรายละเอียดเป็น dropdown ลอยออกนอกกล่อง
+          const contentGroup = modeBtn || aiBtn;
           return (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               {pairFields.length > 0 && (
-              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+              <div className="inline-flex items-center gap-0.5 rounded-lg border border-indigo-300 bg-white p-0.5" role="group" aria-label={tr("ภาษา", "Language")}>
                 {(["th", "en"] as const).map((m) => (
                   <button key={m} type="button" onClick={() => { setLangMode(m); setLangField({}); }}
                     title={m === "th" ? tr("สลับทุกช่องเป็นภาษาไทย (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to Thai (or switch one field with the TH/EN button by its label)") : tr("สลับทุกช่องเป็นภาษาอังกฤษ (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to English (or switch one field with the TH/EN button by its label)")}
-                    className={`h-8 px-3 text-[12.5px] font-semibold ${pairFields.every((f) => (langField[f.key] ?? langMode) === m) ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-500 hover:bg-slate-50"} ${m === "en" ? "border-l border-slate-200" : ""}`}>
+                    className={`h-7 px-2.5 rounded-md text-[12.5px] font-semibold ${pairFields.every((f) => (langField[f.key] ?? langMode) === m) ? "bg-indigo-100 text-indigo-800" : "text-slate-500 hover:bg-indigo-50"}`}>
                     {m === "th" ? `🇹🇭 ${tr("ไทย", "TH")}` : "🇬🇧 EN"}
                   </button>
                 ))}
               </div>
               )}
-              {/* 📝 โหมดลงรายละเอียด — โชว์เฉพาะช่องที่งานนั้นต้องลง + เตือนช่องที่ขาด */}
-              {modeBtn && (
-                <EntryModeMenu modes={entryModes} progressOf={modeProgressOf} activeKey={activeMode?.key ?? null} badgeKey={modeBadgeKey}
-                  onPick={(k) => { if (k === activeMode?.key) return; if (modeDirtyKeys.length) setModeExitTarget(k); else { setActiveModeKey(k); if (config.moduleKey) rememberEntryMode(config.moduleKey, k); } }}
-                  onExit={() => exitEntryMode()}
-                  onSettings={canEditModes ? () => setModeSettingsOpen(true) : undefined}
-                  systemStat={!activeMode || modeStatsErr ? undefined : (modeStats ? (modeStats.find((s) => s.key === activeMode.key) ?? undefined) : null)}
-                  onShowList={showModeList} />
-              )}
-              {modeBtn && activeMode && <EntryModeExitButton onExit={exitEntryMode} />}
-              {aiBtn && (
-                <button type="button" onClick={() => setAiDetailOpen(true)}
-                  title={tr("ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)", "Let AI look at the product images and write name / introduction / description in Thai and English (never touches size fields)")}
-                  className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100">
-                  ✨ {tr("ให้ AI คิดรายละเอียด", "Let AI draft details")}
-                </button>
+              {contentGroup && (
+              <div className="inline-flex items-center gap-0.5 rounded-lg border border-violet-300 bg-white p-0.5" role="group" aria-label={tr("เครื่องมือเนื้อหา", "Content tools")}>
+                {/* 📝 โหมดลงรายละเอียด — โชว์เฉพาะช่องที่งานนั้นต้องลง + เตือนช่องที่ขาด */}
+                {modeBtn && (
+                  <EntryModeMenu ghost modes={entryModes} progressOf={modeProgressOf} activeKey={activeMode?.key ?? null} badgeKey={modeBadgeKey}
+                    onPick={(k) => { if (k === activeMode?.key) return; if (modeDirtyKeys.length) setModeExitTarget(k); else { setActiveModeKey(k); if (config.moduleKey) rememberEntryMode(config.moduleKey, k); } }}
+                    onExit={() => exitEntryMode()}
+                    onSettings={canEditModes ? () => setModeSettingsOpen(true) : undefined}
+                    systemStat={!activeMode || modeStatsErr ? undefined : (modeStats ? (modeStats.find((s) => s.key === activeMode.key) ?? undefined) : null)}
+                    onShowList={showModeList} />
+                )}
+                {modeBtn && activeMode && <EntryModeExitButton ghost onExit={exitEntryMode} />}
+                {aiBtn && (
+                  <button type="button" onClick={() => setAiDetailOpen(true)}
+                    title={tr("ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)", "Let AI look at the product images and write name / introduction / description in Thai and English (never touches size fields)")}
+                    className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-fuchsia-700 hover:bg-fuchsia-50">
+                    ✨ {tr("ให้ AI คิดรายละเอียด", "Let AI draft details")}
+                  </button>
+                )}
+              </div>
               )}
               {canTranslate && canEdit && (
-                <>
+                <div className="inline-flex items-center gap-0.5 rounded-lg border border-sky-300 bg-white p-0.5" role="group" aria-label={tr("แปลภาษา", "Translate")}>
                   <button type="button" onClick={() => void translateAll()} disabled={translating}
                     title={tr("แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)", "Translate Thai → empty English fields (filled ones are kept)")}
-                    className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">
+                    className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
                     {translating ? tr("กำลังแปล…", "Translating…") : `🌐 ${tr("แปลทั้งหมด", "Translate all")}`}
                   </button>
+                  <span className="h-4 w-px bg-sky-200" aria-hidden="true" />
                   <button type="button" onClick={() => void translateAll({ overwrite: true })} disabled={translating}
                     title={tr("แปลใหม่ทับของเดิมทุกช่อง", "Re-translate and overwrite every field")}
-                    className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                    className="h-7 px-2.5 rounded-md text-[12px] text-slate-500 hover:bg-sky-50 disabled:opacity-50">
                     ↻ {tr("แปลทับ", "Overwrite")}
                   </button>
-                </>
+                </div>
               )}
               {pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
             </div>
@@ -3306,11 +3320,19 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const createHeaderEl = (drawerMode === "edit" && !editingId && config.createFormHeader)
             ? <div className="mb-3">{config.createFormHeader({ form, updateForm })}</div>
             : null;
+          // 🕘 ประวัติเวอร์ชัน → ท้ายแท็บ "ระบบ" (เจ้าของขอ 2026-11-11 "เอาไปอยู่ในหน้าระบบ")
+          //   ใช้ได้เมื่อ layout มีแท็บ key "system" ที่มีช่องจริงให้โชว์ (แท็บว่างถูกซ่อน) · ไม่มี = ที่เดิม (คอลัมน์ซ้าย/ล่าง)
+          const versionsInSystemTab = !!versionsEl && !!registryLayout?.tabs?.some((t) =>
+            t.key === "system" && t.sections.some((s) => visibleFields.some((f) => (f.groupKey ?? "other") === s.key)));
           // แท็บพิเศษต่อโมดูล (เช่น "🛍 เว็บไซต์" ของ Parent SKU) — ผูก ctx แล้วส่งเข้า Form/DetailSections
-          const boundExtraTabs = (config.extraTabs ?? []).map((t) => ({
-            key: t.key, label: t.label, icon: t.icon, inTab: t.inTab,
-            node: t.render({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit }),
-          }));
+          const boundExtraTabs = [
+            ...(config.extraTabs ?? []).map((t) => ({
+              key: t.key, label: t.label, icon: t.icon, inTab: t.inTab,
+              node: t.render({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit }),
+            })),
+            // label ว่าง = ไม่ใส่หัวข้อซ้ำ (แผงประวัติเวอร์ชันมีหัวข้อของตัวเองแล้ว)
+            ...(versionsInSystemTab ? [{ key: "__record_versions", label: "", inTab: "system", node: versionsEl }] : []),
+          ];
           // 📝 อยู่ในโหมดลงรายละเอียด → ฝั่งรายละเอียดเปลี่ยนเป็นหน้าจอโหมด (ช่องกรอกจริงของฟอร์มกลาง · ไม่มีหัวข้อซ้ำ)
           const modePanelEl = drawerMode === "view" && editingId && activeMode && activeModeProgress ? (
             <EntryModePanel key={`${activeMode.key}:${editingId}`} mode={activeMode} progress={activeModeProgress}
@@ -3447,7 +3469,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
 
                 {/* 🕘 ประวัติเวอร์ชัน (ชื่อ/คำอธิบาย · รูปปก · รูปที่ถูกลบ) — ใต้รูป เห็นคู่กับของที่เปลี่ยน */}
-                {galleryLeft && versionsEl}
+                {galleryLeft && !versionsInSystemTab && versionsEl}
               </div>
 
               {/* ขวา: tabs (หมวดที่เหลือ) — gallery/description ปกติ (โมดูลที่ไม่ใช่ gallery layout) */}
@@ -3484,7 +3506,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
                 </div>
               )}
-              {!galleryLeft && versionsEl && <div className="w-full md:order-4">{versionsEl}</div>}
+              {!galleryLeft && !versionsInSystemTab && versionsEl && <div className="w-full md:order-4">{versionsEl}</div>}
 
               {/* ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage, ลบ record ถาวร=ลบไฟล์ตาม */}
               {config.fileAttachments && (
@@ -3793,6 +3815,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         <MasterRecordDrawer key={`${peek.moduleKey}|${peek.id}`} moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
       )}
     </Wrap>
+    </TabPrefScope.Provider>
   );
 }
 
@@ -4138,7 +4161,13 @@ function LayoutTabs({
     } else if (tabs.includes(t)) ordered.push({ kind: "field", t });
   }
   for (const ex of ownTabs) if (!placed.has(ex.key)) ordered.push({ kind: "extra", t: ex });
-  const orderedKeys = ordered.map((o) => o.t.key);
+  // 👁 แท็บที่ "ฉัน" ซ่อนไว้ (ต่อคน ต่อโมดูล — lib/form-tab-prefs) · ค่าตั้งต้นของทีมยังมาจากตัวออกแบบหน้า
+  const prefScope = useContext(TabPrefScope);
+  const [hiddenMine, setHiddenMine] = useUserPref<string[]>(formHiddenTabsKey(prefScope ?? "_"), [], parseHiddenTabs);
+  const allKeys = ordered.map((o) => o.t.key);
+  const shownKeys = prefScope ? visibleTabKeys(allKeys, hiddenMine) : allKeys;
+  const shownOrdered = ordered.filter((o) => shownKeys.includes(o.t.key));
+  const orderedKeys = shownOrdered.map((o) => o.t.key);
   const [active, setActive] = useState<string>(orderedKeys[0] ?? "");
   useEffect(() => {
     if (orderedKeys.length > 0 && !orderedKeys.includes(active)) setActive(orderedKeys[0]);
@@ -4150,16 +4179,19 @@ function LayoutTabs({
   byGroup.forEach((fs, g) => { if (!assigned.has(g)) leftover.push(...fs); });
 
   // แท็บพิเศษที่ตั้ง inTab → ไม่เป็นแท็บของตัวเอง แต่ไปแปะท้าย "แท็บที่ระบุ" (เช่นตารางร้านที่จำหน่ายอยู่ในแท็บราคา)
-  const activeExtra = ownTabs.find((t) => t.key === active);
-  const cur = tabs.find((t) => t.key === active) ?? (activeExtra ? undefined : tabs[0]);
+  const activeExtra = shownOrdered.some((o) => o.t.key === active) ? ownTabs.find((t) => t.key === active) : undefined;
+  const cur = tabs.find((t) => t.key === active && orderedKeys.includes(t.key))
+    ?? (activeExtra ? undefined : (tabs.find((t) => orderedKeys.includes(t.key)) ?? tabs[0]));
   if (!cur && !activeExtra) return null;
   const inlineExtras = cur ? extraTabs.filter((t) => t.inTab && t.inTab === cur.key) : [];
+  const hiddenCount = ordered.length - shownOrdered.length;
 
   return (
     <div>
       {ordered.length > 1 && (
-        <ScrollTabs activeKey={active} className="border-b border-slate-200">
-          {ordered.map((o) => (
+        <div className="flex items-end border-b border-slate-200">
+        <ScrollTabs activeKey={active} className="flex-1 min-w-0">
+          {shownOrdered.map((o) => (
             <button key={o.t.key} data-tab-key={o.t.key} type="button" onClick={() => setActive(o.t.key)}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 o.t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
@@ -4168,6 +4200,40 @@ function LayoutTabs({
             </button>
           ))}
         </ScrollTabs>
+        {/* ⚙ เลือกแท็บที่เห็น (เฉพาะตัวเอง) */}
+        {prefScope && (
+          <Popover align="right" panelClassName="w-60 p-2"
+            trigger={(toggle, open) => (
+              <button type="button" onClick={toggle} aria-label={tr("เลือกแท็บที่เห็น", "Choose visible tabs")}
+                title={tr("เลือกแท็บที่เห็น (เฉพาะตัวคุณ)", "Choose which tabs you see (just for you)")}
+                className={`shrink-0 mb-1 ml-1 h-7 px-2 rounded-md text-xs inline-flex items-center gap-1 ${open ? "bg-slate-100 text-slate-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-50"}`}>
+                <Icon name="settings" size={14} />{hiddenCount > 0 && <span className="tabular-nums">{tr(`ซ่อน ${hiddenCount}`, `${hiddenCount} hidden`)}</span>}
+              </button>
+            )}>
+            {() => (
+              <div className="text-sm">
+                <div className="px-1 pb-1.5 mb-1 border-b border-slate-100 text-[11.5px] text-slate-500">{tr("แท็บที่เห็น — ตั้งเฉพาะตัวคุณ", "Visible tabs — just for you")}</div>
+                {ordered.map((o) => {
+                  const on = shownKeys.includes(o.t.key);
+                  const lastOne = on && shownKeys.length <= 1;
+                  return (
+                    <label key={o.t.key} className={`flex items-center gap-2 px-1 py-1 rounded hover:bg-slate-50 ${lastOne ? "opacity-60" : "cursor-pointer"}`}>
+                      <input type="checkbox" checked={on} disabled={lastOne}
+                        onChange={() => setHiddenMine(toggleHiddenTab(allKeys, hiddenMine, o.t.key))} />
+                      <span className="truncate">{o.t.label}</span>
+                    </label>
+                  );
+                })}
+                {hiddenCount > 0 && (
+                  <button type="button" onClick={() => setHiddenMine([])}
+                    className="mt-1 w-full text-left px-1 py-1 text-xs text-violet-700 hover:underline">{tr("แสดงทุกแท็บ", "Show all tabs")}</button>
+                )}
+                <div className="px-1 pt-1.5 mt-1 border-t border-slate-100 text-[11px] text-slate-400">{tr("ลำดับ/ค่าตั้งต้นของทั้งทีม ตั้งที่ตัวออกแบบหน้า", "Team order and defaults are set in the page designer")}</div>
+              </div>
+            )}
+          </Popover>
+        )}
+        </div>
       )}
       {activeExtra ? (
         <div className="pt-3">{activeExtra.node}</div>
@@ -4195,7 +4261,7 @@ function LayoutTabs({
         {/* section พิเศษที่ฝังในแท็บนี้ (inTab) */}
         {inlineExtras.map((t) => (
           <div key={t.key} className="pt-1">
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{t.icon ? `${t.icon} ` : ""}{t.label}</h4>
+            {t.label && <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{t.icon ? `${t.icon} ` : ""}{t.label}</h4>}
             {t.node}
           </div>
         ))}
@@ -4205,8 +4271,11 @@ function LayoutTabs({
   );
 }
 
+// ขอบเขตของค่า "แท็บที่ฉันซ่อน" (= moduleKey/tableId ของ MasterCRUD) — LayoutTabs อ่านผ่าน context ไม่ต้องส่ง prop ผ่าน Form/DetailSections
+//   ไม่มี Provider (ใช้ LayoutTabs นอก MasterCRUD) = ไม่มีปุ่มเลือกแท็บ
+const TabPrefScope = createContext<string | null>(null);
 // แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
-type BoundTab = { key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string };
+type BoundTab ={ key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string };
 // แท็บว่างใน layout ที่จำตำแหน่ง/ซ่อน ของแท็บพิเศษ (ตั้งในตัวออกแบบหน้า) — key "x:<key>"
 const isExtraLayoutTab = (t: { key: string; extra?: boolean }) => !!t.extra || t.key.startsWith("x:");
 const extraKeyOf = (t: { key: string }) => t.key.replace(/^x:/, "");

@@ -8,7 +8,11 @@
  * หมวดกลางสำหรับลงขาย (platform_category_id → platform_central_categories):
  *   เลือกครั้งเดียวที่หัวแท็บ → หมวดของแต่ละร้านเติมอัตโนมัติตามที่จับคู่ไว้
  *   (/master/platform-categories) · ร่างต่อร้านยัง override ได้
- * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · ProductPlatformManager
+ *
+ * เจ้าของขอ 2026-11-11: ร้านที่แบรนด์นี้ยังไม่เชื่อม → ซ่อน (พับเป็นบรรทัดเดียว กด "แสดง" ได้) จะได้ไม่รก
+ *   · ลงขายแล้ว → ปุ่ม "ดูหน้าร้าน/หลังร้าน" (ของกลาง ListingLinks) + "จัดการบนร้าน" เปิดลิ้นชักสินค้าบนร้าน (ListingDrawer)
+ *   กฎแบ่งแถว = lib/platform-visibility (pure + เทสต์)
+ * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · ProductPlatformManager · ListingDrawer · ListingLinks
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
@@ -18,15 +22,19 @@ import { CentralCategoryPicker } from "@/components/central-category-picker";
 import { useAuth } from "@/components/auth";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { hasCreatePreview } from "@/lib/platform-create-registry";
+import { splitPlatformsByConnection } from "@/lib/platform-visibility";
+import { ListingLinks } from "@/components/platform-catalog/listing-links";
 
 // dynamic กัน import วน (ProductPlatformManager → master-crud → ParentPlatformsTab)
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
 // ตัวช่วยลงสินค้า (ของกลาง) — ปุ่ม "ลงร้านนี้" (ทาง 2 ของ flow ลงสินค้า · ทาง 1 = หน้าสินค้าบนแพลตฟอร์ม)
 const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
+// ลิ้นชักสินค้าบนร้าน (ของกลาง — ตัวเดียวกับหน้าสินค้าบนแพลตฟอร์ม) · เปิดเมื่อสินค้านี้มีรายการบนร้านจับคู่อยู่
+const ListingDrawer = dynamic(() => import("@/components/platform-catalog/listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
-type Account = { label: string | null; is_active: boolean };
+type Account = { label: string | null; is_active: boolean; external_shop_id?: string | null };
 type Parent = { code?: string; name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null };
 
 export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
@@ -38,10 +46,13 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [parent, setParent] = useState<Parent | null>(null);
   const [savingCat, setSavingCat] = useState(false);
   const [manage, setManage] = useState<string | null>(null); // platform id ที่เปิดตัวจัดการอยู่
-  const [matched, setMatched] = useState<Record<string, { external_id: string | null }>>({});   // platform_id → รายการบนร้านที่จับคู่สินค้านี้อยู่
+  const [matched, setMatched] = useState<Record<string, { id?: string; external_id: string | null }>>({});   // platform_id → รายการบนร้านที่จับคู่สินค้านี้อยู่
   const [addOn, setAddOn] = useState<string | null>(null);    // platform code ที่เปิดตัวช่วยลงสินค้า
+  const [openListing, setOpenListing] = useState<string | null>(null);   // id รายการบนร้าน (platform_catalog_listings) ที่เปิดลิ้นชักอยู่
+  const [showHidden, setShowHidden] = useState(false);        // กด "แสดง" ร้านที่ยังไม่เชื่อม
   const { can } = useAuth();
   const canAdd = can("products.platforms.edit");
+  const canPublish = can("products.platforms.publish");
   const lastLoadRef = useRef(0);                              // เวลาที่โหลดล่าสุด (ใช้หน่วง auto-refresh)
 
   const load = useCallback(async () => {
@@ -54,7 +65,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setParent((j.parent ?? null) as Parent | null);
-      setMatched((j.matchedListings ?? {}) as Record<string, { external_id: string | null }>);
+      setMatched((j.matchedListings ?? {}) as Record<string, { id?: string; external_id: string | null }>);
       lastLoadRef.current = Date.now();
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [parentId]);
@@ -89,9 +100,12 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
   if (platforms.length === 0) return <div className="text-sm text-slate-400 py-8 text-center">ยังไม่มีแพลตฟอร์มที่เปิดใช้ — เพิ่มที่ตั้งค่า</div>;
 
-  // ลงทุกร้านในครั้งเดียว: ร้านที่มีตัวสร้างสินค้า (lib/platform-create-registry) และสินค้านี้ยังไม่อยู่บนร้านนั้น
   const isOnSale = (p: Platform) => { const d = drafts[p.id] ?? {}; return d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id || !!matched[p.id]; };
-  const allCodes = platforms.filter((p) => hasCreatePreview(p.code) && !isOnSale(p)).map((p) => p.code);
+  // ร้านที่แบรนด์ยังไม่เชื่อม → พับซ่อน (กฎ lib/platform-visibility)
+  const { shown, hidden } = splitPlatformsByConnection(platforms, (p) => !!accounts[p.id]?.is_active, isOnSale);
+  const rows = showHidden ? [...shown, ...hidden] : shown;
+  // ลงทุกร้านในครั้งเดียว: ร้านที่เชื่อมแล้ว + มีตัวสร้างสินค้า (lib/platform-create-registry) + สินค้านี้ยังไม่อยู่บนร้านนั้น
+  const allCodes = shown.filter((p) => hasCreatePreview(p.code) && !isOnSale(p)).map((p) => p.code);
 
   return (
     <div className="space-y-3">
@@ -114,11 +128,17 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
           <span className={loading ? "inline-block animate-spin" : ""}>🔄</span> รีเฟรช
         </button>
       </div>
-      {platforms.map((p) => {
+      {shown.length === 0 && !showHidden && (
+        <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500">
+          แบรนด์ของสินค้านี้ยังไม่ได้เชื่อมร้านไหน — เชื่อมร้านได้ที่ตั้งค่าบัญชีร้านของแบรนด์
+        </div>
+      )}
+      {rows.map((p) => {
         const d = drafts[p.id] ?? {};
         const acct = accounts[p.id];
         const onShop = matched[p.id];   // มีรายการบนร้านจับคู่อยู่ (เช่น นำเข้า/ดึงจากร้าน) แม้ร่างยังไม่มีรหัส
         const onSale = d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id || !!onShop;
+        const extId = d.platform_product_id || onShop?.external_id || null;
         const showAdd = canAdd && !onSale && isSellingPlatform(p.code);
         const hasDraft = !!(d.title || d.category_path || (d.image_keys?.length));
         const status = onSale ? { t: "ลงขายแล้ว", c: "text-emerald-700 bg-emerald-50 border-emerald-200" }
@@ -133,12 +153,24 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
               <span className="text-sm font-medium text-slate-800 inline-flex items-center gap-1.5"><PlatformIcon code={p.code} iconKey={p.icon_key} size={18} /> {p.name_th}</span>
               <span className={`text-[11px] px-2 py-0.5 rounded-full border ${status.c}`}>{status.t}</span>
-              {(d.platform_product_id || onShop?.external_id) && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{d.platform_product_id || onShop?.external_id}</span>}
+              {extId && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{extId}</span>}
+              <span className="ml-auto" />
+              {/* ลงขายแล้ว → ลิงก์ไปดูสินค้าที่ร้านจริง (หน้าร้าน + หลังร้าน) — ของกลาง lib/platform-links */}
+              {onSale && extId && <ListingLinks platformCode={p.code} externalProductId={extId} shopRef={acct?.external_shop_id ?? null} />}
               {showAdd && (
                 <button type="button" onClick={() => setAddOn(p.code)} title="ตรวจความครบ แล้วลงสินค้านี้ขึ้นร้าน (หรือบันทึกร่าง)"
-                  className="ml-auto text-xs border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5">ลงร้านนี้</button>
+                  className="text-xs border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5">ลงร้านนี้</button>
               )}
-              <button onClick={() => setManage(p.id)} className={`${showAdd ? "" : "ml-auto "}text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5`}>จัดการ →</button>
+              {onShop?.id ? (
+                <>
+                  <button type="button" onClick={() => setManage(p.id)} title="ร่างในระบบ (ชื่อ/หมวด/รูป ที่จะส่งขึ้นร้าน)"
+                    className="text-xs border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">ร่างในระบบ</button>
+                  <button type="button" onClick={() => setOpenListing(onShop.id ?? null)} title="เปิดสินค้าบนร้าน — แก้ชื่อ/รูป/ราคา/เปิด-ปิดขาย (ร้านที่รองรับ)"
+                    className="text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5">จัดการบนร้าน →</button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setManage(p.id)} className="text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5">จัดการ →</button>
+              )}
             </div>
             <div className="p-3 grid sm:grid-cols-2 gap-y-1.5 gap-x-4">
               <Row label="ชื่อ" value={name} />
@@ -149,6 +181,17 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
           </div>
         );
       })}
+      {hidden.length > 0 && (
+        <button type="button" onClick={() => setShowHidden((v) => !v)}
+          className="w-full text-left text-xs text-slate-500 hover:text-violet-700 px-1 py-1">
+          {showHidden
+            ? `▴ ซ่อน ${hidden.length} ช่องทางที่ยังไม่เชื่อมร้าน`
+            : `▾ ซ่อนไว้ ${hidden.length} ช่องทางที่แบรนด์นี้ยังไม่เชื่อมร้าน (${hidden.map((p) => p.name_th).join(", ")}) · แสดง`}
+        </button>
+      )}
+      {openListing && (
+        <ListingDrawer listingId={openListing} canPublish={canPublish} onClose={() => { setOpenListing(null); void load(); }} />
+      )}
       {addOn && parentId && (
         <AddToPlatformWizard open parents={[{ id: parentId, code: parent?.code ?? "", name: parent?.name_th || parent?.name_platform || null }]}
           initialPlatformCodes={addOn === "__all" ? allCodes : [addOn]} onClose={() => setAddOn(null)} onDone={() => void load()} />

@@ -72,8 +72,10 @@ function useHideDone(): [boolean, (v: boolean) => void] {
 // ───────────────────────── ปุ่ม + รายการโหมด ─────────────────────────
 // แบบ C (เจ้าของเลือก 2026-10-22): ตัวเลขความครบอยู่บนปุ่ม · ทั้งระบบ/ซ่อนที่ลงแล้ว/ออกจากโหมด อยู่ในเมนูของปุ่ม
 export function EntryModeMenu({
-  modes, progressOf, activeKey, badgeKey, onPick, onExit, onSettings, systemStat, onShowList,
+  modes, progressOf, activeKey, badgeKey, onPick, onExit, onSettings, systemStat, onShowList, ghost,
 }: {
+  /** ปุ่มแบบโปร่ง (อยู่ในกล่องกลุ่มเครื่องมือที่มีกรอบสีแล้ว — แถบบนของลิ้นชัก MasterCRUD) */
+  ghost?: boolean;
   modes: EntryMode[];
   progressOf: (m: EntryMode) => EntryModeProgress;
   activeKey: string | null;
@@ -98,8 +100,9 @@ export function EntryModeMenu({
     <div className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)}
         title={tr("โชว์เฉพาะช่องที่ต้องลงสำหรับงานนั้น + เตือนช่องที่ยังไม่ลง + คำแนะนำต่อช่อง", "Show only the fields a job needs + flag missing ones + per-field tips")}
-        className={`h-8 px-3 text-[12.5px] font-medium rounded-lg border inline-flex items-center gap-1.5 ${active
+        className={`${ghost ? "h-7 px-2.5 rounded-md" : "h-8 px-3 rounded-lg"} text-[12.5px] font-medium border inline-flex items-center gap-1.5 ${active
           ? "border-blue-400 bg-blue-600 text-white hover:bg-blue-700"
+          : ghost ? "border-transparent text-violet-700 bg-transparent hover:bg-violet-50"
           : "border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"}`}>
         {active ? <>
           {active.icon || "📝"} {active.label}
@@ -168,10 +171,10 @@ export function EntryModeMenu({
 }
 
 /** ปุ่ม "✕ ออกจากโหมด" ข้างปุ่มโหมด (เห็นตลอดตอนอยู่ในโหมด — เจ้าของขอ 2026-10-22 "จะได้กดง่าย") */
-export function EntryModeExitButton({ onExit }: { onExit: () => void }) {
+export function EntryModeExitButton({ onExit, ghost }: { onExit: () => void; ghost?: boolean }) {
   return (
     <button type="button" onClick={onExit} title={tr("ออกจากโหมด กลับหน้าปกติ", "Exit mode — back to the normal view")}
-      className="h-8 px-2.5 text-[12.5px] font-medium rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-800 inline-flex items-center gap-1">
+      className={`${ghost ? "h-7 rounded-md border-transparent" : "h-8 rounded-lg border-slate-300"} px-2.5 text-[12.5px] font-medium border bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-800 inline-flex items-center gap-1`}>
       ✕ {tr("ออกจากโหมด", "Exit mode")}
     </button>
   );
