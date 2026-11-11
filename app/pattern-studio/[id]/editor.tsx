@@ -209,7 +209,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50">
           <Icon value="i:link" className="text-sm" />{t("ซิป / อะไหล่", "Zips / hardware")}
           {trims.length > 0 && <span className="rounded-full bg-slate-100 px-1.5 text-[11px] tabular-nums text-slate-600">{trims.length}</span>}
-          {slitsOpen > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[11px] text-amber-800" title={t(`${slitsOpen} รายการ (ช่องซิป / ขอบติดซิป / กุ๊น) ยังไม่เลือกวัสดุ`, `${slitsOpen} items (zip slits / zip edges / binding) have no material yet`)}>{t(`ขาด ${slitsOpen}`, `${slitsOpen} missing`)}</span>}
+          {slitsOpen > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[11px] text-amber-800" title={t(`${slitsOpen} รายการ (ช่องซิป / ขอบติดซิป / กุ๊น / อะไหล่บนชิ้น) ยังไม่เลือกวัสดุ`, `${slitsOpen} items (zip slits / zip edges / binding / placed hardware) have no material yet`)}>{t(`ขาด ${slitsOpen}`, `${slitsOpen} missing`)}</span>}
         </button>
         {me?.can_cost && (
           <button type="button" disabled={dirty || !pieces.length} onClick={() => setCostOpen(true)}

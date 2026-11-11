@@ -18,7 +18,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import { StepInput } from "@/components/step-input";
-import { BIND_MAX_EXTRA, MAX_TRIMS, TRIM_MAX_EXTRA, TRIM_MAX_LEN, TRIM_MAX_QTY, ZIP_EXTRA_DEFAULT, bindRuns, slitList, trimModeOf, trimRows, trimTotals, zipEdgeList, type ProjectTrim, type TrimMode, type TrimRow } from "@/lib/pattern-trims";
+import { BIND_MAX_EXTRA, MAX_TRIMS, TRIM_MAX_EXTRA, TRIM_MAX_LEN, TRIM_MAX_QTY, ZIP_EXTRA_DEFAULT, bindRuns, hwCounts, slitList, trimModeOf, trimRows, trimTotals, zipEdgeList, type ProjectTrim, type TrimMode, type TrimRow } from "@/lib/pattern-trims";
 import type { ProjectPiece } from "@/lib/pattern-project";
 import type { Seam } from "@/lib/pattern-seams";
 
@@ -46,9 +46,11 @@ export function TrimsModal({ open, onClose, pieces, seams = [], trims, materials
   const slits = useMemo(() => slitList(pieces), [pieces]);
   const zipEdges = useMemo(() => zipEdgeList(pieces), [pieces]);
   const runs = useMemo(() => bindRuns(pieces, seams), [pieces, seams]);
+  const placed = useMemo(() => hwCounts(pieces), [pieces]);
+  const countOptions = useMemo(() => usable.filter((m) => m.mode === "count").map((m) => ({ value: m.id, label: m.name, sub: m.group ?? undefined })), [usable]);
   const rows = useMemo(() => trimRows(trims, pieces, seams), [trims, pieces, seams]);
   const totals = useMemo(() => trimTotals(rows), [rows]);
-  const manual = rows.filter((r) => !r.trim.src && !r.trim.edge && !r.trim.bind), gone = rows.filter((r) => r.gone);
+  const manual = rows.filter((r) => !r.trim.src && !r.trim.edge && !r.trim.bind && !r.trim.hw), gone = rows.filter((r) => r.gone);
   const bindRow = rows.find((r) => r.trim.bind && !r.gone) ?? null, hasBind = runs.edges + runs.seams > 0;
   const full = trims.length >= MAX_TRIMS;
 
@@ -122,7 +124,7 @@ export function TrimsModal({ open, onClose, pieces, seams = [], trims, materials
           <p className="text-xs text-slate-400">{t("ช่องซิป: ปุ่ม เพิ่มช่อง บนกระดาน หรือวาดเส้นในชนิด ช่องเจาะ (ซิป) · ซิปตามขอบ (เช่น ซิปปากกระเป๋า): ถือเครื่องมือ แก้ตะเข็บ (B) กดขอบ แล้วติ๊ก ติดซิปตามขอบนี้ — ซิป 1 เส้นที่ติดกับขอบของ 2 ชิ้น ให้ติ๊กขอบเดียว", "Zip slits: Add pocket on the board, or draw an inner line of kind Slit (zip) · Zip along an edge (e.g. the mouth zip): with the Edit sewing tool (B), click the edge and tick Zip along this edge — for one zip joining two pieces, tick only one edge")}</p>
           {gone.map((r) => (
             <div key={r.trim.id} className="flex items-center justify-between gap-2 rounded-md bg-rose-50 px-3 py-1.5 text-xs text-rose-700">
-              <span>{t(`${r.trim.mat.name}: ${r.trim.bind ? "ไม่มีขอบกุ๊นเหลือแล้ว" : r.trim.edge ? "ขอบนี้เลิกติดซิปแล้ว" : "ช่องของซิปเส้นนี้ถูกลบไปแล้ว"} — แถวนี้จะหายตอนบันทึก`, `${r.trim.mat.name}: its source on the board is gone — this row goes away on save`)}</span>{del(r.trim.id, r.trim.mat.name)}
+              <span>{t(`${r.trim.mat.name}: ${r.trim.hw ? "ไม่มีอะไหล่ชนิดนี้บนชิ้นแล้ว" : r.trim.bind ? "ไม่มีขอบกุ๊นเหลือแล้ว" : r.trim.edge ? "ขอบนี้เลิกติดซิปแล้ว" : "ช่องของซิปเส้นนี้ถูกลบไปแล้ว"} — แถวนี้จะหายตอนบันทึก`, `${r.trim.mat.name}: its source on the board is gone — this row goes away on save`)}</span>{del(r.trim.id, r.trim.mat.name)}
             </div>
           ))}
         </section>
@@ -140,6 +142,26 @@ export function TrimsModal({ open, onClose, pieces, seams = [], trims, materials
             </div>
           )}
         </section>
+
+        {/* อะไหล่ที่วางบนชิ้น (นับจากกระดาน) */}
+        {placed.length > 0 && (
+          <section className="space-y-1.5">
+            <div className={head}>{t(`อะไหล่ที่วางบนชิ้น (${placed.length} ชนิด) — นับจากกระดาน`, `Hardware placed on pieces (${placed.length} kinds) — counted from the board`)}</div>
+            <ul className={`${box} divide-y divide-slate-100`}>
+              {placed.map((h) => {
+                const row = rows.find((r) => r.trim.hw === h.hw && !r.gone);
+                return (
+                  <li key={h.hw} data-hw-row={h.hw} className={line}>
+                    {titleOf(t(h.th, h.en), t(`วางบนชิ้นรวม ${h.count} ตัว (นับจำนวนตัดของชิ้นแล้ว)`, `${h.count} placed in total (piece counts included)`))}
+                    {row ? <>{chip(row.trim.mat.name)}<span className="text-xs tabular-nums text-slate-700" data-row-total>{t(`= ${row.total} ตัว`, `= ${row.total} pcs`)}</span>{del(row.trim.id, row.trim.mat.name)}</>
+                      : readonly ? <span className="text-xs text-amber-600">{t("ยังไม่เลือกวัสดุ", "No material chosen")}</span>
+                      : <div className="w-64 max-w-full"><SearchableSelect value="" options={countOptions} disabled={!countOptions.length || full} placeholder={t("เลือกวัสดุของอะไหล่นี้", "Choose the material for this hardware")} onChange={(v) => add(v, { hw: h.hw })} /></div>}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         {/* 3) อะไหล่ / สาย / ซิปอื่น */}
         <section className="space-y-1.5">

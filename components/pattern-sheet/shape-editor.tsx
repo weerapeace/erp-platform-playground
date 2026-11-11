@@ -25,8 +25,8 @@ import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
   SNAP_STEPS, cleanAllow, defaultGrain, cleanFoldEdges, edgeAllowances, foldSegments, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
-  shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth, pointInPolygon, INNER_KINDS, innerOffset, placeInner, setInnerLength,
-  type Box, type InnerKind, type InnerLine, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
+  shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth, pointInPolygon, INNER_KINDS, HW_KINDS, hwKind, hwLine, hwSpot, innerOffset, placeInner, setInnerLength,
+  type Box, type HwKind, type InnerKind, type InnerLine, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, edgeMetaSet, extendSide, finishPts, finishRange, withFinishRange, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
@@ -44,7 +44,7 @@ export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs
 type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null; link?: PieceLink | null };
 export type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner";
 /** สีของเส้นในชิ้นตามชนิด (กระดาน) */
-const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 } };
+const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 }, hw: { col: "#a16207", w: 2 } };
 export const SEAM_COLORS = ["#c2410c", "#2563eb", "#059669", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#4b5563"];
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
@@ -1394,11 +1394,22 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         return (
           <g key={`${p.id}:${l.id}`}>
             {picked && <path d={d} fill="none" stroke={COLORS.sel} strokeWidth={st.w + 5} strokeOpacity={0.35} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
-            <path d={d} fill="none" stroke={st.col} strokeWidth={st.w} strokeDasharray={st.dash} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+            {l.kind === "hw" ? (() => {
+              // อะไหล่: สัญลักษณ์ตามชนิด ขนาดจริง (ห่วง = วงแหวน · หมุดย้ำ = จุดทึบ · ตัวล็อก = แผ่นเหลี่ยม · แม่เหล็ก = วงกลมมีกากบาท · ตาไก่ = วงซ้อน)
+              const { c, size } = hwSpot(l), r = Math.max(size / 2, 0.15), k = hwKind(l.hw), sw = { stroke: st.col, strokeWidth: 2, vectorEffect: "non-scaling-stroke" as const, style: { pointerEvents: "none" as const } };
+              return (
+                <g data-hw={k}>
+                  {k === "lock" ? <rect x={c[0] - r} y={c[1] - r * 0.6} width={2 * r} height={1.2 * r} rx={r * 0.2} fill="#fde68a" {...sw} />
+                    : <circle cx={c[0]} cy={c[1]} r={r} fill={k === "rivet" ? st.col : k === "ring" ? "none" : "#fde68a"} {...sw} strokeWidth={k === "ring" ? 4 : 2} />}
+                  {k === "eyelet" && <circle cx={c[0]} cy={c[1]} r={r * 0.45} fill="#fff" {...sw} />}
+                  {k === "magnet" && <path d={`M${c[0] - r * 0.5} ${c[1]}H${c[0] + r * 0.5}M${c[0]} ${c[1] - r * 0.5}V${c[1] + r * 0.5}`} fill="none" {...sw} />}
+                </g>
+              );
+            })() : <path d={d} fill="none" stroke={st.col} strokeWidth={st.w} strokeDasharray={st.dash} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
             {grab && <path data-innerline={`${p.id}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "move" }}><title>{t("กด = เลือก · ลาก = ย้ายเส้นใน", "Click to select · drag to move the inner line")}</title></path>}
             {grab && picked && l.pts.map((q, qi) => <circle key={qi} data-innerpt={`${p.id}:${l.id}:${qi}`} cx={q[0]} cy={q[1]} r={ppc > 0 ? 6 / ppc : 0} fill="#fff" stroke={st.col} strokeWidth={2.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />)}
-            {seams && sewTool && tool !== "sewpart" && tool !== "sewmany" && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}><title>{`${pieceNo(p.pid)} · ${t("เส้นใน", "inner line")}${l.name ? ` ${l.name}` : ""} · ${r1(lenOfPts(l.pts))} ${t("ซม.", "cm")}${sewn ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}`}</title></path>}
-            {seams && tool === "sewpart" && sewA && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />}
+            {seams && sewTool && l.kind !== "hw" && tool !== "sewpart" && tool !== "sewmany" && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}><title>{`${pieceNo(p.pid)} · ${t("เส้นใน", "inner line")}${l.name ? ` ${l.name}` : ""} · ${r1(lenOfPts(l.pts))} ${t("ซม.", "cm")}${sewn ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}`}</title></path>}
+            {seams && tool === "sewpart" && sewA && l.kind !== "hw" && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />}
           </g>
         );
       }))}
@@ -2314,6 +2325,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                           <select value={l.kind} disabled={readonly} aria-label={t("ชนิดของเส้นใน", "Inner line type")} onChange={(e) => patchPiece(selPiece.id, (p) => ({ ...p, inner: (p.inner ?? []).map((q) => (q.id === l.id ? { ...q, kind: e.target.value as InnerKind } : q)) }))} className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1 disabled:bg-slate-50">
                             {INNER_KINDS.map((k) => <option key={k.key} value={k.key}>{t(k.th, k.en)}</option>)}
                           </select>
+                          {l.kind === "hw" && <select value={hwKind(l.hw)} disabled={readonly} aria-label={t("ชนิดอะไหล่", "Hardware type")} onChange={(e) => setLine((q) => ({ ...q, hw: e.target.value as HwKind }))} className="h-7 min-w-0 rounded-md border border-slate-200 bg-white px-1 text-xs">
+                            {HW_KINDS.map((k) => <option key={k.key} value={k.key}>{t(k.th, k.en)}</option>)}
+                          </select>}
                           <span className="shrink-0 tabular-nums text-slate-500" title={l.name}>{r1(lenOfPts(l.pts))} {t("ซม.", "cm")}{used ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}</span>
                           {!readonly && <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, inner: (p.inner ?? []).filter((q) => q.id !== l.id) }))} title={used ? t("ลบเส้นนี้ (ตะเข็บที่เย็บกับเส้นนี้จะขึ้นว่าต้องเย็บใหม่)", "Delete this line (its seam will need redoing)") : t("ลบเส้นนี้", "Delete this line")} aria-label={t("ลบเส้นใน", "Delete inner line")} className="shrink-0 text-slate-400 hover:text-red-600"><Icon value="i:x" /></button>}
                         </div>
@@ -2328,6 +2342,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                         </div>
                       );
                     })}
+                    {!readonly && (
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5" data-hw-add>
+                        <span className="text-slate-500">{t("＋ วางอะไหล่:", "＋ Place hardware:")}</span>
+                        {HW_KINDS.map((k) => (
+                          <button key={k.key} type="button" data-hw-btn={k.key} title={t(`วาง${k.th} 1 ตัวที่กึ่งกลางชิ้น แล้วลากย้ายด้วยเครื่องมือเส้นใน (L) หรือพิมพ์ระยะจากขอบ`, `Place one ${k.en.toLowerCase()} at the piece centre, then drag it with the inner-line tool (L) or type its distance from the edges`)}
+                            onClick={() => { const b = shapeBox(selPiece.shape), n = (selPiece.inner ?? []).filter((q) => q.kind === "hw").length, id = `hw${Date.now().toString(36)}${n}`;
+                              patchPiece(selPiece.id, (p) => ({ ...p, inner: [...(p.inner ?? []), hwLine(id, k.key, [b.x + b.w / 2 + (n % 5) * 1.5, b.y + b.h / 2 + Math.floor(n / 5) * 1.5])] }));
+                              setInnerSel({ id: selPiece.id, line: id }); if (tool !== "inner") changeTool("inner"); }}
+                            className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t(k.th, k.en)}</button>
+                        ))}
+                      </div>
+                    )}
                     <div className="text-[11px] text-slate-400">{t("เส้นในไม่ใช่เส้นตัด: บอกตำแหน่งให้ช่าง (แนวเย็บช่องใส่ของ ช่องซิป แนวพับ) และให้ชิ้นอื่นมาเย็บได้ด้วยเครื่องมือเย็บ · ออกในใบพิมพ์และไฟล์ตัดเป็นชั้น INNER", "Inner lines are not cut lines: they mark positions (pocket stitching, zip slot, folds) and other pieces can be sewn to them · printed and exported on layer INNER")}</div>
                   </div>
                 )}

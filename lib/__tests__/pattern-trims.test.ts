@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ZIP_EXTRA_DEFAULT, bindRuns, cleanTrims, openSlits, openTrims, planTrimsSend, pruneTrims, slitList, trimMarker, trimModeOf, trimRows, trimTotals, zipEdgeList } from "@/lib/pattern-trims";
+import { ZIP_EXTRA_DEFAULT, bindRuns, cleanTrims, hwCounts, openSlits, openTrims, planTrimsSend, pruneTrims, slitList, trimMarker, trimModeOf, trimRows, trimTotals, zipEdgeList } from "@/lib/pattern-trims";
 import { cleanEdgeMeta, cleanFinishRange, finishPts, finishRange, pieceEdges, withFinishRange, type Seam } from "@/lib/pattern-seams";
 import { projectEdgeRows } from "@/lib/pattern-project";
 import type { ExistingCostLine } from "@/lib/pattern-costing";
@@ -215,6 +215,30 @@ describe("ซิปตามขอบ + กุ๊น คิดความยา
     const all = cleanTrims([{ id: "t1", mat: zipMat, src: { pid: "a", line: "s1" } }, { id: "t2", mat: zipMat, edge: { pid: "a", i: 0 } }, { id: "t3", mat: tapeMat, bind: true }]);
     expect(openTrims(all, pcs).count).toBe(0);
     expect(openTrims([], [piece("b")]).count).toBe(0);
+  });
+});
+
+describe("อะไหล่ที่วางบนชิ้น → นับไปตีราคา", () => {
+  const hw = (id: string, kind: string, x: number) => ({ id, kind: "hw" as const, hw: kind, pts: [[x, 5], [x + 1, 5]] as [number, number][] });
+  it("เส้นในชนิดอะไหล่เก็บชนิดไว้ (ไม่รู้จัก = หมุดย้ำ) · นับตามชนิด × จำนวนตัดของชิ้น เรียงตามลำดับชนิด", () => {
+    const a = piece("a", { count: 2, inner: [hw("h1", "rivet", 3), hw("h2", "rivet", 8), hw("h3", "ring", 12), hw("h4", "???", 16), slit("s1", 10)] as never });
+    expect(a.inner!.filter((l) => l.kind === "hw").map((l) => l.hw)).toEqual(["rivet", "rivet", "ring", "rivet"]);
+    expect(hwCounts([a, piece("b", { inner: [hw("h9", "magnet", 4)] as never })]).map((h) => [h.hw, h.count])).toEqual([["ring", 2], ["rivet", 6], ["magnet", 1]]);
+    expect(hwCounts([piece("c")])).toEqual([]);
+  });
+
+  it("แถวอะไหล่บนชิ้น: 1 แถวต่อชนิด วัสดุนับชิ้นเท่านั้น · จำนวนตามกระดาน · ไม่มีอะไหล่ชนิดนั้นแล้ว = แถวหายตอนบันทึก · ส่งตีราคาเป็นบรรทัดนับชิ้น", () => {
+    const trims = cleanTrims([{ id: "t1", mat: ringMat, hw: "rivet" }, { id: "t2", mat: ringMat, hw: "rivet" }, { id: "t3", mat: zipMat, hw: "ring" }, { id: "t4", mat: ringMat, hw: "nope" }]);
+    expect(trims.map((t) => [t.id, t.hw])).toEqual([["t1", "rivet"], ["t4", undefined]]);        // ซ้ำชนิด / วัสดุตามยาว = ทิ้ง · ชนิดไม่รู้จัก = แถวใส่เองธรรมดา
+    const a = piece("a", { count: 2, inner: [hw("h1", "rivet", 3), hw("h2", "rivet", 8)] as never });
+    const [r] = trimRows(trims.slice(0, 1), [a]);
+    expect([r.qty, r.total, r.label]).toEqual([4, 4, "หมุดย้ำ (วางบนชิ้น)"]);
+    expect(trimRows(trims.slice(0, 1), [piece("a")])[0].gone).toBe(true);
+    expect(pruneTrims(trims.slice(0, 1), [piece("a")])).toEqual([]);
+    const plan = planTrimsSend(trimRows(trims.slice(0, 1), [a]), [], null, items, "PT-0007", 0);
+    expect(plan.inserts[0]).toMatchObject({ item_id: RING.id, calc_method: "count", pieces: 4, qty: 4, amount: 14 });
+    expect(openTrims([], [a]).hw.map((h) => h.hw)).toEqual(["rivet"]);
+    expect(openTrims(trims.slice(0, 1), [a]).count).toBe(0);
   });
 });
 

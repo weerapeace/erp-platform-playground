@@ -11,6 +11,7 @@
  *     • กุ๊น / หุ้มขอบ (เพิ่ม 2026-11-11): 1 แถวรวมทั้งใบ = ขอบที่ติ๊ก "กุ้นขอบ" (× จำนวนตัดของชิ้น) + ตะเข็บชนิด "หุ้มขอบ" (นับครั้งเดียว ใช้ด้านที่ยาวกว่า)
  *       ขอบที่อยู่ในตะเข็บหุ้มขอบทั้งขอบแล้ว ไม่นับซ้ำ · + เผื่อเพิ่มรวม (ซม.)
  *     • ซิป / กุ๊น เฉพาะบางช่วงของขอบ (EdgeMeta.zipR / bindR): ความยาว = ช่วงที่ตั้งไว้ ไม่ใช่ทั้งขอบ
+ *     • อะไหล่ที่วางบนชิ้น (เพิ่ม 2026-11-11): เส้นในชนิด "อะไหล่" นับตามชนิด (ห่วง หมุดย้ำ ตัวล็อก กระดุมแม่เหล็ก ตาไก่) × จำนวนตัดของชิ้น → 1 แถวต่อชนิด (trim.hw) จำนวนตามกระดานเสมอ
  *   วิธีคิดเงิน (ตามยาว / นับชิ้น) ตามกลุ่มของวัสดุตีราคา (material_groups.calc_method) — จำไว้ในแถวตอนเลือก (mode)
  *
  *   planTrimsSend = รวมรายการเป็นบรรทัดตีราคา **1 วัสดุ = 1 บรรทัด** (รวมความยาว / จำนวนทั้งใบ)
@@ -22,7 +23,7 @@
  * ใช้ที่: app/api/pattern-projects/[id]/costing · components/pattern-studio/trims-modal · หน้าพิมพ์ · เทสต์ lib/__tests__/pattern-trims.test.ts
  */
 import { costLineFromItem, recomputeCostLine, type CostItemLike } from "@/lib/design-sheet-cost-row";
-import { cleanLineShape, type Pt } from "@/lib/pattern-shape";
+import { HW_KINDS, cleanLineShape, hwKind, type HwKind, type Pt } from "@/lib/pattern-shape";
 import { checkSeam, cleanEdgeMeta, finishRange, isPartialSide, pieceEdges, type Seam } from "@/lib/pattern-seams";
 import type { CostingInsert, CostingUpdate, ExistingCostLine } from "@/lib/pattern-costing";
 import type { ProjectPiece } from "@/lib/pattern-project";
@@ -47,6 +48,8 @@ export type ProjectTrim = {
   edge?: { pid: string; i: number };
   /** กุ๊น / หุ้มขอบ ทั้งใบ (มีได้แถวเดียว) */
   bind?: true;
+  /** อะไหล่ที่วางบนชิ้น ชนิดนี้ทั้งใบ (1 แถวต่อชนิด · วัสดุนับชิ้น) — จำนวน = ที่วางบนกระดาน × จำนวนตัดของชิ้น */
+  hw?: HwKind;
 };
 export const MAX_TRIMS = 40;
 /** เผื่อปลายซิปตั้งต้น (ซม.) — ซิปยาวกว่าช่องข้างละราว 1 ซม. · แก้ได้รายแถว */
@@ -95,6 +98,10 @@ export function cleanTrims(raw: unknown): ProjectTrim[] {
       const ex = fin(o.extra), q = fin(o.qty);
       t.extra = ex != null && ex >= 0 ? Math.min(TRIM_MAX_EXTRA, r1(ex)) : 0;
       t.qty = q != null && q >= 1 ? Math.min(TRIM_MAX_QTY, Math.round(q)) : 1;
+    } else if (typeof o.hw === "string" && HW_KINDS.some((k) => k.key === o.hw)) {
+      if (mode !== "count" || srcs.has(`hw:${o.hw}`)) continue;   // อะไหล่บนชิ้น = วัสดุนับชิ้น · 1 แถวต่อชนิด
+      srcs.add(`hw:${o.hw}`);
+      t.hw = hwKind(o.hw);
     } else if (o.bind === true) {
       if (mode !== "length" || srcs.has("bind")) continue;   // กุ๊นมีได้แถวเดียว
       srcs.add("bind");
@@ -168,16 +175,30 @@ export function bindRuns(pieces: ProjectPiece[], seams: Seam[] = []): BindRuns {
   return out;
 }
 
+/** อะไหล่ที่วางบนชิ้น นับตามชนิด (× จำนวนตัดของชิ้น) — เรียงตามลำดับชนิดใน HW_KINDS */
+export type HwCount = { hw: HwKind; th: string; en: string; count: number };
+export function hwCounts(pieces: ProjectPiece[]): HwCount[] {
+  const n = new Map<HwKind, number>();
+  for (const p of pieces) for (const l of p.inner ?? []) if (l.kind === "hw") { const k = hwKind(l.hw); n.set(k, (n.get(k) ?? 0) + Math.max(1, p.count || 1)); }
+  return HW_KINDS.filter((k) => n.has(k.key)).map((k) => ({ hw: k.key, th: k.th, en: k.en, count: n.get(k.key)! }));
+}
+
 /** 1 แถวที่คิดเลขแล้ว — each = ยาวต่อเส้น (ซม. · เฉพาะตามยาว) · total = รวมทั้งใบ (ซม. หรือ ชิ้น) */
-export type TrimRow = { trim: ProjectTrim; label: string; mode: TrimMode; each: number | null; qty: number; total: number; slit?: SlitRef; edge?: ZipEdgeRef; runs?: BindRuns; gone?: true };
+export type TrimRow = { trim: ProjectTrim; label: string; mode: TrimMode; each: number | null; qty: number; total: number; slit?: SlitRef; edge?: ZipEdgeRef; runs?: BindRuns; hw?: HwCount; gone?: true };
 
 /** รายการ → แถวที่คิดเลขแล้ว (ซิปของช่องเจาะ / ซิปตามขอบ / กุ๊น อ่านความยาวจากชิ้นล่าสุด · ช่องถูกลบ ขอบเลิกติ๊ก = gone ยอด 0) */
 export function trimRows(trims: ProjectTrim[], pieces: ProjectPiece[], seams: Seam[] = []): TrimRow[] {
   const slits = new Map(slitList(pieces).map((s) => [`${s.pid}/${s.line}`, s]));
   const edges = new Map(zipEdgeList(pieces).map((e) => [`${e.pid}#${e.i}`, e]));
   let runs: BindRuns | null = null;
+  const hws = new Map(hwCounts(pieces).map((h) => [h.hw, h]));
   return trims.map((t) => {
     const mode = t.mat.mode;
+    if (t.hw) {
+      const h = hws.get(t.hw);
+      if (!h) return { trim: t, label: t.name || t.mat.name, mode, each: null, qty: 0, total: 0, gone: true as const };
+      return { trim: t, label: t.name || `${h.th} (วางบนชิ้น)`, mode, each: null, qty: h.count, total: h.count, hw: h };
+    }
     if (t.edge) {
       const edge = edges.get(`${t.edge.pid}#${t.edge.i}`);
       if (!edge) return { trim: t, label: t.name || t.mat.name, mode, each: null, qty: 0, total: 0, gone: true as const };
@@ -208,14 +229,15 @@ export function openSlits(trims: ProjectTrim[], pieces: ProjectPiece[]): SlitRef
 }
 
 /** ของที่ยังไม่ได้เลือกวัสดุ: ช่องซิป · ขอบที่ติดซิป · กุ๊น (มีขอบกุ๊นแต่ยังไม่เลือกเทป) — count = รวมกี่รายการ */
-export type OpenTrims = { slits: SlitRef[]; edges: ZipEdgeRef[]; bind: BindRuns | null; count: number };
+export type OpenTrims = { slits: SlitRef[]; edges: ZipEdgeRef[]; bind: BindRuns | null; /** อะไหล่บนชิ้นชนิดที่ยังไม่เลือกวัสดุ */ hw: HwCount[]; count: number };
 export function openTrims(trims: ProjectTrim[], pieces: ProjectPiece[], seams: Seam[] = []): OpenTrims {
   const slits = openSlits(trims, pieces);
   const used = new Set(trims.filter((t) => t.edge).map((t) => `${t.edge!.pid}#${t.edge!.i}`));
   const edges = zipEdgeList(pieces).filter((e) => !used.has(`${e.pid}#${e.i}`));
   const runs = trims.some((t) => t.bind) ? null : bindRuns(pieces, seams);
   const bind = runs && runs.edges + runs.seams > 0 ? runs : null;
-  return { slits, edges, bind, count: slits.length + edges.length + (bind ? 1 : 0) };
+  const hw = hwCounts(pieces).filter((h) => !trims.some((t) => t.hw === h.hw));
+  return { slits, edges, bind, hw, count: slits.length + edges.length + (bind ? 1 : 0) + hw.length };
 }
 
 /** ทิ้งแถวที่ของต้นทางหายไปแล้ว: ช่องเจาะถูกลบ · ขอบเลิกติดซิป · ไม่มีขอบกุ๊นเหลือ (เรียกตอนบันทึก) — ไม่มีอะไรทิ้ง = คืนตัวเดิม */

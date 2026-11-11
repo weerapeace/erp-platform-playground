@@ -42,12 +42,32 @@ export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]
  *   sew = แนวเย็บ (เช่น แนวเย็บช่องใส่ของ 3 ด้าน) · slit = ช่องเจาะ (ช่องซิป) · fold = แนวพับ · mark = ตำแหน่ง/เครื่องหมาย
  *   pts = จุดของเส้น (พิกัดเดียวกับรูปชิ้น) — ย้าย/ย่อขยาย/หมุน/กลับด้านชิ้น เส้นในไปตามชิ้น
  */
-export type InnerKind = "sew" | "slit" | "fold" | "mark";
+export type InnerKind = "sew" | "slit" | "fold" | "mark" | "hw";
+/**
+ * อะไหล่ที่วางบนชิ้น (2026-11-11 · เจ้าของเลือกทำต่อ "วางอะไหล่ให้เห็นตำแหน่งบนชิ้นและในภาพ 3 มิติ"):
+ *   เก็บเป็นเส้นในชนิด "hw" ยาว = ขนาดของอะไหล่ จุดกึ่งกลางเส้น = ตำแหน่ง → ย้าย/หมุน/กลับด้านตามชิ้น · ลากย้าย · พิมพ์ระยะจากขอบ ได้ด้วยของเดิมทั้งหมด
+ */
+export type HwKind = "ring" | "rivet" | "lock" | "magnet" | "eyelet";
+export const HW_KINDS: { key: HwKind; th: string; en: string; size: number }[] = [
+  { key: "ring", th: "ห่วง", en: "Ring", size: 2.5 }, { key: "rivet", th: "หมุดย้ำ", en: "Rivet", size: 0.8 }, { key: "lock", th: "ตัวล็อก", en: "Lock", size: 2.5 },
+  { key: "magnet", th: "กระดุมแม่เหล็ก", en: "Magnetic snap", size: 1.8 }, { key: "eyelet", th: "ตาไก่", en: "Eyelet", size: 1 },
+];
+export const hwKind = (v: unknown): HwKind => HW_KINDS.find((k) => k.key === v)?.key ?? "rivet";
+/** เส้นในของอะไหล่ 1 ตัว: วางกึ่งกลางที่ c ขนาดตั้งต้นตามชนิด */
+export function hwLine(id: string, hw: HwKind, c: Pt): InnerLine {
+  const s = (HW_KINDS.find((k) => k.key === hw)?.size ?? 1) / 2;
+  return { id, kind: "hw", hw, pts: [[r3(c[0] - s), r3(c[1])], [r3(c[0] + s), r3(c[1])]] };
+}
+/** กึ่งกลาง + ขนาด (ซม.) ของอะไหล่ */
+export function hwSpot(l: InnerLine): { c: Pt; size: number } {
+  const a = l.pts[0], b = l.pts[l.pts.length - 1];
+  return { c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], size: Math.hypot(b[0] - a[0], b[1] - a[1]) };
+}
 export const INNER_KINDS: { key: InnerKind; th: string; en: string }[] = [
   { key: "sew", th: "แนวเย็บ", en: "Sewing line" }, { key: "slit", th: "ช่องเจาะ (ซิป)", en: "Slit (zip)" },
-  { key: "fold", th: "แนวพับ", en: "Fold line" }, { key: "mark", th: "ตำแหน่ง", en: "Position mark" },
+  { key: "fold", th: "แนวพับ", en: "Fold line" }, { key: "mark", th: "ตำแหน่ง", en: "Position mark" }, { key: "hw", th: "อะไหล่", en: "Hardware" },
 ];
-export type InnerLine = { id: string; kind: InnerKind; pts: Pt[]; name?: string };
+export type InnerLine = { id: string; kind: InnerKind; pts: Pt[]; name?: string; /** ชนิดอะไหล่ (เฉพาะ kind = "hw") */ hw?: HwKind };
 export const MAX_INNER_LINES = 40;
 /** ตรวจเส้นในชิ้นจากหน้าจอ/ฐานข้อมูล — ผิดรูปแบบ / จุดน้อยกว่า 2 / ยาวเกือบศูนย์ = ทิ้งเส้นนั้น */
 export function cleanInnerLines(raw: unknown): InnerLine[] {
@@ -67,7 +87,7 @@ export function cleanInnerLines(raw: unknown): InnerLine[] {
     let len = 0; for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
     if (!id || !kind || pts.length < 2 || len < 0.05 || out.some((o) => o.id === id)) continue;
     const name = typeof r.name === "string" ? r.name.trim().slice(0, 40) : "";
-    out.push({ id, kind, pts, ...(name ? { name } : {}) });
+    out.push({ id, kind, pts, ...(name ? { name } : {}), ...(kind === "hw" ? { hw: hwKind(r.hw) } : {}) });
   }
   return out;
 }

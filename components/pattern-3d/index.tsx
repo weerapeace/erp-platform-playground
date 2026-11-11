@@ -483,6 +483,20 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     });
     // ช่องเจาะ (ซิป): ท่อสีส้มตามแนวช่อง บนแผ่นที่มันอยู่
     sc.marks.forEach((mk, mi) => {
+      if (mk.kind === "hw" && mk.pts[0] && mk.n) {
+        // อะไหล่บนชิ้น: โลหะชิ้นเล็กหันตามผิวชิ้น — หมุด/ตาไก่/แม่เหล็ก = จานกลม · ห่วง = วงแหวน · ตัวล็อก = แผ่นเหลี่ยม
+        const sz = Math.max(0.4, mk.size ?? 1), metal = new THREE.MeshStandardMaterial({ color: mk.hw === "magnet" ? "#cbd5e1" : "#e3b93c", roughness: 0.42, metalness: 0.3 });   // โลหะจัดเกินจะดำ (ฉากไม่มีภาพสะท้อน) จึงใช้ค่ากลาง ๆ ให้เห็นสี
+        const geo = mk.hw === "ring" ? new THREE.TorusGeometry(sz / 2, Math.max(0.12, sz * 0.08), 10, 28)
+          : mk.hw === "eyelet" ? new THREE.TorusGeometry(sz / 2, Math.max(0.1, sz * 0.14), 10, 24)
+          : mk.hw === "lock" ? new THREE.BoxGeometry(sz, sz * 0.6, 0.35)
+          : new THREE.CylinderGeometry(sz / 2, sz / 2, mk.hw === "magnet" ? 0.3 : 0.22, 24);
+        const mesh = new THREE.Mesh(geo, metal), nrm = new THREE.Vector3(mk.n[0], mk.n[1], mk.n[2]).normalize();
+        mesh.quaternion.setFromUnitVectors(mk.hw === "rivet" || mk.hw === "magnet" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1), nrm);   // จานกลมตั้งแกน y · วงแหวน/แผ่น ตั้งแกน z
+        mesh.position.set(mk.pts[0][0], mk.pts[0][1], mk.pts[0][2]);
+        const g = new THREE.Group(); g.add(mesh); g.userData.hw = mk.hw;
+        add(`sm${mi}`, "", g, [0, 0, 0], [0, 0, 0], [], carrierOf(mk.on), "front");
+        return;
+      }
       if (mk.pts.length < 2) return;
       const vs = mk.pts.map((q) => new THREE.Vector3(q[0], q[1], q[2]));
       const curve = vs.length === 2 ? new THREE.LineCurve3(vs[0], vs[1]) : new THREE.CatmullRomCurve3(vs, false, "centripetal");

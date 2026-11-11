@@ -129,6 +129,16 @@ describe("ภาพเย็บติด (buildSewn)", () => {
     expect(zip.pts.every((q) => Math.abs(q[1] - 0.25) < 1e-6)).toBe(true);               // เหนือชิ้นที่วางแบน (0.05) อีก 0.2
     expect(dist(sc.finishes[1].pts[0], sc.finishes[1].pts[sc.finishes[1].pts.length - 1])).toBeCloseTo(12, 3);
   });
+  it("อะไหล่ที่วางบนชิ้น = จุดในภาพบนผิวชิ้นนั้น (ชนิด ขนาด ทิศผิว) ทั้งชิ้นที่ตั้งขึ้นและชิ้นวางแบน", () => {
+    const hw = { id: "h1", kind: "hw" as const, hw: "ring" as const, pts: [[18, 6], [20.5, 6]] as [number, number][] };
+    const flat = buildSewn([{ ...body, inner: [hw] }], []);
+    expect(flat.marks.map((m) => [m.kind, m.hw, m.size, m.n])).toEqual([["hw", "ring", 2.5, [0, 1, 0]]]);
+    const up = buildSewn([{ ...body, inner: [hw] }, strap], [sL, sR]);
+    const [m] = up.marks, base = box(part(up, "body"));
+    expect([m.hw, m.n]).toEqual(["ring", [0, 0, 1]]);
+    expect(m.pts[0][1]).toBeCloseTo(base.hi[1] - 6, 3);                                     // ต่ำจากขอบบนของแผ่น 6 ซม.
+    expect(m.pts[0][2]).toBeCloseTo(0.12, 3);
+  });
   it("ซิปเฉพาะบางช่วงของขอบ = เส้นในภาพยาวเท่าช่วง อยู่ตรงช่วงนั้น", () => {
     const sc = buildSewn([{ ...body, edgeMeta: [{ zip: true, zipR: [10, 30] }, {}, {}, {}] }], []);
     const [zip] = sc.finishes, whole = buildSewn([{ ...body, edgeMeta: meta4({ 0: { zip: true } }) }], []).finishes[0];

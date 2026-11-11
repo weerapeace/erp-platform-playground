@@ -16,7 +16,7 @@
  */
 import { assemble, type AsmPiece, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
 import { checkSeam, cleanEdgeMeta, finishPts, isInnerSide, isPartialSeam, pieceEdges, pointAlong, sidePoints, type Seam, type SeamSide } from "@/lib/pattern-seams";
-import { flattenShape, shapeArea, shapeBox, type InnerKind, type Pt } from "@/lib/pattern-shape";
+import { flattenShape, hwKind, hwSpot, shapeArea, shapeBox, type HwKind, type InnerKind, type Pt } from "@/lib/pattern-shape";
 import { panelMesh } from "@/lib/pattern-sim";
 
 export type V3 = [number, number, number];
@@ -24,7 +24,7 @@ export type V3 = [number, number, number];
 export type SewnKind = "base" | "flap" | "hang" | "loop" | "patch" | "loose";
 export type SewnPart = { pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3; /** ชิ้นหลักที่ชิ้นนี้เกาะอยู่ (แผ่นหน้า/หลังของตัวกระเป๋า หรือชิ้นหลักที่ตั้งเป็นแผ่น) — ชิ้นที่ไม่ได้เกาะ = ไม่มี */ on?: string; /** ชิ้นของชั้นซับใน */ layer?: "lining" };
 /** เส้นในชิ้นที่ต้องเห็นในภาพ (ตอนนี้ = ช่องเจาะ/ซิป) บนแผ่นที่วางแล้ว */
-export type SewnMark = { pts: V3[]; kind: InnerKind; on?: string };
+export type SewnMark = { pts: V3[]; kind: InnerKind; on?: string; /** อะไหล่ (kind = "hw"): ชนิด · ขนาด ซม. · ทิศตั้งฉากผิวชิ้น — pts[0] = ตำแหน่ง */ hw?: HwKind; size?: number; n?: V3 };
 /** งานขอบที่ต้องเห็นในภาพ (2026-11-11): ขอบที่ติดซิป / กุ๊น — เส้นตามขอบของชิ้นที่วางแล้ว · n = ทิศตั้งฉากผิวชิ้น (ให้ฟันซิปหันออก) */
 export type SewnFinish = { pid: string; edge: number; kind: "zip" | "bind"; pts: V3[]; n: V3; on?: string };
 /** เส้นตะเข็บในภาพ (ตำแหน่งบนชิ้นที่ถูกเย็บติด) · idx = ลำดับตะเข็บ (ใช้สีเดียวกับกระดาน) · bad = ยาวไม่เท่ากันและไม่ได้ตั้งใจ */
@@ -170,6 +170,10 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
       const m = meta[e.i];
       for (const kind of ["bind", "zip"] as const) if (m?.[kind]) finishes.push({ pid: p.pid, edge: e.i, kind, pts: finishPts(e, m, kind).map((q) => add(f(q), mul(n, kind === "zip" ? 0.2 : 0.14))), n, ...(on ? { on } : {}) });
     }
+  };
+  /** อะไหล่ที่วางบนชิ้น (เส้นในชนิด "hw") → ตำแหน่งในภาพ (เฉพาะชิ้นที่เป็นแผ่นเรียบ / ชิ้นวางแบน) */
+  const hwOf = (p: AsmPiece, f: (q: Pt) => V3, n: V3, on?: string) => {
+    for (const l of p.inner ?? []) if (l.kind === "hw") { const s = hwSpot(l); marks.push({ pts: [add(f(s.c), mul(n, 0.12))], kind: "hw", hw: hwKind(l.hw), size: s.size, n, ...(on ? { on } : {}) }); }
   };
   const frames = new Map<string, Frame>();       // ชิ้นที่วางแล้วและเป็นแผ่นเรียบ (ให้ชิ้นอื่นมาเกาะได้)
   const done = new Set<string>();
@@ -366,6 +370,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     const f = frames.get(p.pid);
     if (f) for (const l of p.inner ?? []) if (l.kind === "slit") marks.push({ pts: l.pts.map((q) => add(place(f, q), mul(f.n, 0.14))), kind: l.kind, ...(rootOf.get(p.pid) ? { on: rootOf.get(p.pid) } : {}) });
     if (f) finishOf(p, (q) => place(f, q), f.n, rootOf.get(p.pid));
+    if (f) hwOf(p, (q) => place(f, q), f.n, rootOf.get(p.pid));
   }
 
   // 4) ชิ้นที่เหลือ: วางแบนเรียงกันข้างหน้า
@@ -376,6 +381,7 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
     const b = shapeBox(p.shape), x0 = cur, z0 = zFront + LOOSE_GAP;
     emit(p, "loose", false, (q) => [x0 + (q[0] - b.x), 0.05, z0 + (q[1] - b.y)]);
     finishOf(p, (q) => [x0 + (q[0] - b.x), 0.05, z0 + (q[1] - b.y)], [0, 1, 0]);
+    hwOf(p, (q) => [x0 + (q[0] - b.x), 0.05, z0 + (q[1] - b.y)], [0, 1, 0]);
     cur += b.w + 2;
     notes.push({ pid: p.pid, name: p.name, why: linksOf(p.pid).length ? "unsupported" : "unsewn" });
   }
