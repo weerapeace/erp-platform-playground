@@ -528,6 +528,8 @@ export function WorkPopupHost() {
   const [deploySeen, setDeploySeen] = useState<Set<string>>(new Set());
   useEffect(() => { if (deploySeenKey) setDeploySeen(readIds(deploySeenKey)); }, [deploySeenKey]);
   const newDeploy = deployNews && bounceOn("deploy") && !deploySeen.has(deployNews.key) ? deployNews : null;
+  // กำลังขึ้นเว็บอยู่ (รอรอบ / ส่ง / build) = ตัว Pet พูดค้างจนเสร็จ แม้เปิดแท็บดูแล้ว — ตื่น (ลอยเบา ๆ) แต่ไม่กระโดด
+  const stickyDeploy = deployNews?.sticky && bounceOn("deploy") ? deployNews : null;
   const deployCount = deployOn ? deployStatus?.waiting.length ?? 0 : 0;
   useEffect(() => {
     if (!expanded || tab !== "deploy" || !deployNews || !deploySeenKey || deploySeen.has(deployNews.key)) return;
@@ -742,10 +744,14 @@ export function WorkPopupHost() {
   const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks || alertPlan || alertDeploy);
   // ตัวเลขบนตัว Pet ไม่นับงานรอขึ้นเว็บ (ไม่ใช่งานของคน) — แต่ตอนมีเรื่องขึ้นเว็บใหม่ ตัว Pet ต้องตื่นมาพูด
   const total = workCount + gifCount + lineCount + bellCount + watchCount + taskCount + planCount;
+  // ฟองค้าง = ไม่มีเรื่องใหม่อื่นให้พูด แต่ยังกำลังขึ้นเว็บอยู่ → พูดสถานะขึ้นเว็บต่อ (ไม่กระโดด)
+  const stickyTalk = !quietNow && !petAlert && !!stickyDeploy;
   const petState = {
-    mood: petMood({ total: total + (alertDeploy ? 1 : 0), alert: petAlert }),
+    mood: petMood({ total: total + (alertDeploy || stickyDeploy ? 1 : 0), alert: petAlert }),
     badge: petBadge(total),
+    stickyBubble: stickyTalk,
     bubble: quietNow ? null
+      : stickyTalk && stickyDeploy ? stickyDeploy.text
       : alertWork ? pill
       : alertDeploy && newDeploy ? newDeploy.text
       : alertPlan && newPlan[0].kind === "overdue" ? newPlan[0].text

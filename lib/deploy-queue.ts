@@ -187,6 +187,9 @@ export type DeployPetNews = {
   /** ข้อความในฟองคำพูด (สั้น ภาษาคน) */
   text: string;
   tone: DeployPhase["tone"];
+  /** กำลังขึ้นเว็บอยู่ (รอรอบ / กำลังส่ง / กำลัง build) = ตัว Pet พูดค้างจนเสร็จ แม้เปิดแท็บดูแล้ว
+   *  (เจ้าของขอ 2026-11-11 "เวลาเริ่มมีขึ้นเว็บให้ PET พูดค้างไว้เลย") · ขึ้นแล้ว/ล้ม = พูดจนเปิดดูแบบเดิม */
+  sticky: boolean;
 };
 const aboutMinutes = (sec: number) => (sec <= 60 ? "ไม่ถึง 1 นาที" : `ราว ${Math.ceil(sec / 60)} นาที`);
 /** ตอนนี้ตัว Pet ควรพูดเรื่องขึ้นเว็บว่าอะไร — null = ไม่มีเรื่องให้พูด (เงียบ) · pure เรียกซ้ำได้ */
@@ -195,22 +198,23 @@ export function deployPetNews(s: Pick<DeployStatus, "waiting" | "live" | "round"
   const n = s.waiting.length.toLocaleString("th-TH");
   switch (p.key) {
     case "round":
-      return { key: `round:${s.round?.startedAt ?? ""}`, text: `มีงานรอขึ้นเว็บ ${n} งาน · อีก${aboutMinutes(p.secondsLeft ?? 0)}`, tone: p.tone };
+      return { key: `round:${s.round?.startedAt ?? ""}`, text: `มีงานรอขึ้นเว็บ ${n} งาน · อีก${aboutMinutes(p.secondsLeft ?? 0)}`, tone: p.tone, sticky: true };
     case "promoting":
-      return { key: `promoting:${s.round?.startedAt ?? ""}`, text: `กำลังส่งงาน ${n} งานขึ้นเว็บ`, tone: p.tone };
+      return { key: `promoting:${s.round?.startedAt ?? ""}`, text: `กำลังส่งงาน ${n} งานขึ้นเว็บ`, tone: p.tone, sticky: true };
     case "building":
       return {
         key: `building:${s.live.sha}`,
         text: p.secondsLeft != null ? `กำลัง build เว็บจริง · อีก${aboutMinutes(p.secondsLeft)}` : "กำลัง build — ใกล้เสร็จแล้ว",
         tone: p.tone,
+        sticky: true,
       };
     case "failed":
-      return { key: `failed:${s.live.sha}`, text: "build ล้ม — เว็บจริงยังเป็นรอบก่อน", tone: p.tone };
+      return { key: `failed:${s.live.sha}`, text: "build ล้ม — เว็บจริงยังเป็นรอบก่อน", tone: p.tone, sticky: false };
     case "idle": {
       const since = s.live.stateSince ? Date.parse(s.live.stateSince) : NaN;
       const ago = now.getTime() - since;
       if (s.live.state !== "success" || !Number.isFinite(since) || ago < 0 || ago > DEPLOY_DONE_TALK_SECONDS * 1000) return null;
-      return { key: `done:${s.live.sha}`, text: "ขึ้นเว็บแล้ว · กด Ctrl+Shift+R ดูของใหม่", tone: p.tone };
+      return { key: `done:${s.live.sha}`, text: "ขึ้นเว็บแล้ว · กด Ctrl+Shift+R ดูของใหม่", tone: p.tone, sticky: false };
     }
     default:
       return null;   // queued = มีงานแต่ไม่มีรอบเดิน (push ที่มี [skip ci]) — ยังไม่มีอะไรเกิดขึ้น ไม่ต้องพูด

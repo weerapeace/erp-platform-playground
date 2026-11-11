@@ -13,7 +13,7 @@
  *   ลากขอบปรับความกว้าง (จำต่อคน) → เนื้อหาปรับตามผ่าน FloatViewContext (แคบ 3 บรรทัดต่องาน · กลาง 2 · กว้าง 1 + แท็บขึ้นแถวหัว)
  *   แท็บ = ScrollTabs (ของกลาง) · ปุ่มปรับ = หน้า "จัดศูนย์แจ้งเตือน" ในการ์ด (ลากสลับแท็บ · เปิด/ปิด · ความกว้าง · แบบ · รูป)
  */
-import { createContext, useContext, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useUserPref } from "@/lib/use-user-pref";
 import { cornerStyle, useCornerDrag, viewportSize } from "@/lib/use-corner-drag";
 import { useAuth } from "@/components/auth";
@@ -70,7 +70,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
   tab: string;
   onTab: (key: string) => void;
   /** สถานะตัว Pet ตอนยุบ — อารมณ์ / ตัวเลข / ฟองข้อความ */
-  pet: { mood: PetMood; badge: string | null; bubble?: string | null };
+  pet: { mood: PetMood; badge: string | null; bubble?: string | null; stickyBubble?: boolean };
   /** ✕ / กดข้างนอก / Esc = ซ่อนเป็นตัว Pet */
   onMinimize: () => void;
   onExpand: () => void;
@@ -122,26 +122,43 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
     return () => window.removeEventListener("resize", on);
   }, []);
   const room = drawer ? vw - 16 : vw - Math.min(anchor.x, vw) - 16;
+  // ระหว่างลาก: ขยับความกว้างที่กล่องตรง ๆ เฟรมละครั้ง (ไม่วาดเนื้อหาใหม่ทุกพิกเซล = ลื่น)
+  //   วาดเนื้อหาใหม่เฉพาะตอนข้ามขั้น แคบ/กลาง/กว้าง (liveW) · ปล่อยแล้วจำต่อคน
+  //   (เจ้าของบ่น 2026-11-11 "ลากแล้วกระตุก ค่อย ๆ ออก" — เดิม setState ทุกพิกเซล → แท็บงานทั้งรายการวาดใหม่ทุกครั้ง)
   const [liveW, setLiveW] = useState<number | null>(null);
+  const [resizing, setResizing] = useState(false);
   const width = clampFloatWidth(liveW ?? pref.width ?? FLOAT_WIDTH_DEFAULT, room);
   const level = floatLevel(width);
+  const hideImg = !!pref.hideImg;
+  const view = useMemo<FloatView>(() => ({ level, hideImg }), [level, hideImg]);   // ค่าเดิม = เนื้อหาไม่วาดใหม่
   const resizeLeft = drawer || anchor.h === "r";
   const setWidth = (w: number) => setPref({ ...pref, width: clampFloatWidth(w, room) });
   const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    const el = boxRef.current;
     const sx = e.clientX, sw = width;
-    let last = sw;
+    let last = sw, lastLevel = floatLevel(sw), raf = 0;
+    setResizing(true);
+    const paint = () => {
+      raf = 0;
+      if (el) el.style.width = `${last}px`;
+      const lv = floatLevel(last);
+      if (lv !== lastLevel) { lastLevel = lv; setLiveW(last); }
+    };
     const move = (ev: PointerEvent) => {
       ev.preventDefault();
       last = clampFloatWidth(sw + (resizeLeft ? sx - ev.clientX : ev.clientX - sx), room);
-      setLiveW(last);
+      if (!raf) raf = requestAnimationFrame(paint);
     };
     const end = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
+      if (raf) cancelAnimationFrame(raf);
+      if (el) el.style.width = `${last}px`;
+      setResizing(false);
       setLiveW(null);
       if (last !== sw) setPref({ ...pref, width: last });
     };
@@ -152,7 +169,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
 
   if (minimized) {
     return (<>
-      <FloatingPet source={petPref.source} size={petPref.size} mood={pet.mood} badge={pet.badge} bubble={pet.bubble}
+      <FloatingPet source={petPref.source} size={petPref.size} mood={pet.mood} badge={pet.badge} bubble={pet.bubble} stickyBubble={pet.stickyBubble}
         anchor={anchor} onDrop={(a) => setPref({ ...pref, anchor: a })} onClick={onExpand} label="ศูนย์แจ้งเตือน" />
       {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
     </>);
@@ -180,14 +197,14 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
   return (
     <>
     <div ref={boxRef} role={drawer ? "complementary" : "dialog"} aria-label="ศูนย์แจ้งเตือน"
-      className={drawer
+      className={`${drawer
         ? "fixed right-0 bottom-0 z-[45] max-w-[calc(100vw-2rem)] flex flex-col bg-white border-l border-slate-200 shadow-2xl overflow-hidden"
-        : "fixed z-[45] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"}
+        : "fixed z-[45] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"}${resizing ? " select-none cursor-ew-resize" : ""}`}
       style={drawer ? { top: drawerTop, width } : { ...(drag.liveStyle ?? cornerStyle(anchor, { w: width, h: 120 })), width, maxHeight: `calc(100vh - ${Math.min(anchor.y, 400) + 16}px)` }}>
       {/* ขอบลากปรับความกว้าง (ฝั่งที่ไม่ได้เกาะมุมจอ) */}
       <div onPointerDown={startResize} data-no-drag title="ลากเพื่อปรับความกว้าง (ยิ่งกว้าง รายการยิ่งเตี้ย)" aria-hidden
         className={`group absolute inset-y-0 z-20 w-2 cursor-ew-resize ${resizeLeft ? "left-0" : "right-0"}`} style={{ touchAction: "none" }}>
-        <span className={`absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${liveW != null ? "bg-indigo-400" : "bg-slate-200 group-hover:bg-indigo-300"}`} />
+        <span className={`absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${resizing ? "bg-indigo-400" : "bg-slate-200 group-hover:bg-indigo-300"}`} />
       </div>
       <div className="border-b border-slate-100">
         <div onPointerDown={drawer ? undefined : drag.onPointerDown} title={drawer ? undefined : "ลากที่หัวเพื่อย้ายที่"} style={drawer ? undefined : { touchAction: "none" }}
@@ -213,7 +230,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
         </div>
         {level < 3 && tabsBar}
       </div>
-      <FloatViewContext.Provider value={{ level, hideImg: !!pref.hideImg }}>
+      <FloatViewContext.Provider value={view}>
         {layoutOpen ? (
           <div className="flex-1 min-h-0 overflow-y-auto">
             <CenterLayoutPanel pref={pref} setPref={setPref} tabs={tabs} width={width} room={room} level={level}

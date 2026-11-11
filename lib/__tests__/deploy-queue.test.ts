@@ -125,7 +125,7 @@ describe("deployPetNews — คำพูดของตัว Pet (ศูนย�
 
   it("รอรอบ: บอกจำนวนงาน + อีกกี่นาที · รหัสเรื่องผูกกับรอบ", () => {
     const n = deployPetNews({ waiting: [job("w2", "b"), job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(60));
-    expect(n).toEqual({ key: `round:${start}`, text: "มีงานรอขึ้นเว็บ 2 งาน · อีกราว 8 นาที", tone: "blue" });
+    expect(n).toEqual({ key: `round:${start}`, text: "มีงานรอขึ้นเว็บ 2 งาน · อีกราว 8 นาที", tone: "blue", sticky: true });
     const last = deployPetNews({ waiting: [job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(ROUND_WAIT_SECONDS - 30));
     expect(last?.text).toContain("อีกไม่ถึง 1 นาที");
   });
@@ -137,6 +137,15 @@ describe("deployPetNews — คำพูดของตัว Pet (ศูนย�
     expect(b).toMatchObject({ key: "building:p1", tone: "amber" });
     expect(b?.text).toBe(`กำลัง build เว็บจริง · อีกราว ${Math.ceil((BUILD_SECONDS - 60) / 60)} นาที`);
     expect(deployPetNews({ waiting: [], live: live("pending", start), round: null }, at(BUILD_SECONDS + 10))?.text).toBe("กำลัง build — ใกล้เสร็จแล้ว");
+  });
+
+  it("กำลังขึ้นเว็บ (รอรอบ / ส่ง / build) = พูดค้าง · ขึ้นแล้ว / ล้ม = ไม่ค้าง (พูดจนเปิดดู)", () => {
+    expect(deployPetNews({ waiting: [job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(60))?.sticky).toBe(true);
+    expect(deployPetNews({ waiting: [job("w1", "a")], live: live("success"), round: { startedAt: start } }, at(ROUND_WAIT_SECONDS + 5))?.sticky).toBe(true);
+    expect(deployPetNews({ waiting: [], live: live("pending", start), round: null }, at(60))?.sticky).toBe(true);
+    expect(deployPetNews({ waiting: [], live: live("pending", start), round: null }, at(BUILD_SECONDS + 10))?.sticky).toBe(true);
+    expect(deployPetNews({ waiting: [], live: live("success", start), round: null }, at(30))?.sticky).toBe(false);
+    expect(deployPetNews({ waiting: [], live: live("failure", start), round: null }, at(60))?.sticky).toBe(false);
   });
 
   it("ขึ้นเว็บแล้ว: พูดเฉพาะช่วงสั้น ๆ หลังเสร็จ แล้วเงียบ", () => {

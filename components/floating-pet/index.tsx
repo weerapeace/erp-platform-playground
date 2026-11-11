@@ -86,7 +86,7 @@ export function PetArt({ source, size }: { source: PetSource; size: number }) {
   return <BuiltinArt id={source.id} size={size} />;
 }
 
-export function FloatingPet({ source, size = "m", mood, badge, bubble, anchor, onDrop, onClick, label }: {
+export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBubble, anchor, onDrop, onClick, label }: {
   source: PetSource;
   size?: PetSize;
   mood: PetMood;
@@ -94,6 +94,8 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, anchor, o
   badge: string | null;
   /** ฟองข้อความ (โชว์ตอน alert) */
   bubble?: string | null;
+  /** โชว์ฟองค้างแม้ไม่ alert (ไม่กระโดด) — เช่น กำลังขึ้นเว็บอยู่ */
+  stickyBubble?: boolean;
   anchor: CornerAnchor;
   /** ลากวางแล้ว → มุม + ระยะจากมุม (ผู้เรียกบันทึกต่อคน) */
   onDrop: (a: CornerAnchor) => void;
@@ -158,7 +160,7 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, anchor, o
       {badge && (
         <span className={`absolute -top-1 -right-1 min-w-[22px] h-[22px] px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-semibold flex items-center justify-center shadow ${mood === "alert" ? "ov-badge-pulse" : ""}`}>{badge}</span>
       )}
-      {bubble && mood === "alert" && !dragging && (
+      {bubble && (mood === "alert" || stickyBubble) && !dragging && (
         <span className={`ov-bubble-pop absolute whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-lg ${at.v === "b" ? "bottom-full mb-1.5" : "top-full mt-1.5"} ${at.h === "r" ? "right-0" : "left-0"}`}>{bubble}</span>
       )}
     </button>
