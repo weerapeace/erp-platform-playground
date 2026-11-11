@@ -4,6 +4,7 @@ name: Deploy Batch (ขึ้นเว็บเป็นรอบ)
 # ทุก session ยัง push ลง feat/host-portable เหมือนเดิม (Vercel ไม่ build สาขานี้แล้ว — vercel.json git.deploymentEnabled)
 # ไฟล์นี้: ทุก ~10 นาที ถ้า feat/host-portable มีงานใหม่ → เลื่อนสาขา prod ไปที่เดียวกัน → Vercel build prod 1 ครั้ง (= เว็บจริง)
 # ขึ้นทันที: กด "Run workflow" หน้า Actions หรือ `gh workflow run deploy-batch.yml` หรือปุ่มในแอป
+# (2026-11-11: แก้ไฟล์ให้ GitHub ลงทะเบียนตั้งเวลาใหม่หลังปิด-เปิด workflow)
 # ⚠️ schedule / workflow_dispatch ทำงานจากไฟล์บนสาขา default (main) เท่านั้น — แก้ไฟล์นี้ที่ main (ใส่ [skip ci] กัน deploy สำรอง CF)
 on:
   schedule:
