@@ -126,7 +126,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     scene.remove(S.root); S.root = new THREE.Group(); scene.add(S.root); S.parts = []; S.byKey = {}; S.pick = []; simTick = null;
   };
   // ชิ้นควรอยู่ห่างจากตำแหน่งประกอบแค่ไหน (0 = ประกอบแล้ว · 1 = แยกออก)
-  const target = (join: string) => (S.mode === "flat" ? 0 : S.mode === "asm" && S.joined ? (join === "front" || S.joined.includes(join) ? 0 : 1) : S.explode);
+  const target = (join: string) => (S.mode === "flat" ? 0 : (S.mode === "asm" || S.mode === "sewn") && S.joined ? (join === "front" || S.joined.includes(join) ? 0 : 1) : S.explode);
   const add = (key: string, id: string, grp: any, base: V3, dir: V3, mats: any[], carrier: string | null = null, join = "") => {
     const p: Part = { key, id, g: grp, base, dir, carrier, mats, e: target(join), l: 0, join };
     S.root.add(grp); S.parts.push(p); S.byKey[key] = p;
@@ -405,10 +405,11 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   // ── ภาพเย็บติดของกระดานวาด (lib/pattern-sewn): ตัวกระเป๋าจากตะเข็บเต็มขอบ + ชิ้นที่เย็บติด + ชิ้นที่ยังไม่เย็บ ──
   const setSewn = (sc: SewnScene, colors: BagColors, opt: { pieceColors?: Record<string, string>; seamColors?: string[] }) => {
     const was = S.mode; S.mode = "sewn"; clear(); lights(false);
-    if (sc.asm) buildAsm(sc.asm, colors);
+    const asmTop = sc.asm ? buildAsm(sc.asm, colors) : 0;   // สูงสุดของตัวกระเป๋ารวมหูจากจุดติด
     const tone: Record<string, string> = { base: colors.body, flap: colors.body, hang: colors.handle, loop: colors.handle, loose: PAPER };
-    const w = 2 * Math.max(Math.abs(sc.min[0]), Math.abs(sc.max[0])), d = 2 * Math.max(Math.abs(sc.min[2]), Math.abs(sc.max[2])), top = Math.max(sc.max[1], 1);
+    const w = 2 * Math.max(Math.abs(sc.min[0]), Math.abs(sc.max[0])), d = 2 * Math.max(Math.abs(sc.min[2]), Math.abs(sc.max[2])), top = Math.max(sc.max[1], asmTop, 1);
     const lh = clamp(Math.max(w, top, 20) * 0.035, 1.3, 3);
+    const carrierOf = (on?: string): string | null => (sc.asm && on ? (on === sc.asm.front ? "front" : on === sc.asm.back ? "back" : null) : null);
     sc.parts.forEach((p, i) => {
       if (p.tri.length < 3) return;
       const geo = new THREE.BufferGeometry();
@@ -417,20 +418,23 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       const mesh = new THREE.Mesh(geo, m); mesh.userData.piece = p.pid; S.pick.push(mesh);
       const grp = new THREE.Group(); grp.add(mesh);
       if (p.name && (p.kind !== "base" || !sc.asm)) { const tag = label(p.name, lh); tag.position.set(p.label[0], p.label[1] + (p.kind === "loose" ? 1.5 : 0), p.label[2]); grp.add(tag); }
-      add(`sp${i}`, p.pid, grp, [0, 0, 0], [0, 0, 0], [m]);
+      // ชิ้นที่เย็บติด = ขั้น "extra" (ยังไม่เย็บ/แยกชิ้น = ลอยขึ้น) และขยับตามแผ่นที่เกาะ · ชิ้นหลัก/ชิ้นวางแบน อยู่กับที่
+      const ext = p.kind === "flap" || p.kind === "hang" || p.kind === "loop";
+      add(`sp${i}`, p.pid, grp, [0, 0, 0], ext ? [0, 7, 0] : [0, 0, 0], [m], ext ? carrierOf(p.on) : null, ext ? "extra" : "front");
     });
     // เส้นตะเข็บ: ท่อเล็ก ๆ สีเดียวกับบนกระดาน (ยาวไม่เท่ากันและไม่ได้ตั้งใจ = แดง)
-    const lg = new THREE.Group(), nc = opt.seamColors?.length ?? 0;
-    for (const ln of sc.lines) {
-      if (ln.pts.length < 2) continue;
+    const nc = opt.seamColors?.length ?? 0;
+    sc.lines.forEach((ln, li) => {
+      if (ln.pts.length < 2) return;
       const vs = ln.pts.map((q) => new THREE.Vector3(q[0], q[1], q[2]));
       const curve = vs.length === 2 ? new THREE.LineCurve3(vs[0], vs[1]) : new THREE.CatmullRomCurve3(vs, false, "centripetal");
       const col = ln.bad ? "#dc2626" : nc ? opt.seamColors![ln.idx % nc] : "#2563eb";
+      const lg = new THREE.Group();
       lg.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, vs.length * 3), ln.bad ? 0.22 : 0.16, 6, false), new THREE.MeshBasicMaterial({ color: col })));
-    }
-    S.root.add(lg);
+      add(`sl${li}`, "", lg, [0, 0, 0], [0, 0, 0], [], carrierOf(ln.on), "front");   // เส้นตะเข็บอยู่บนแผ่นที่เกาะ → ขยับตามแผ่นนั้น
+    });
     // กล้อง: เปลี่ยนเฉพาะเมื่อขนาดฉากเปลี่ยนมาก (ลากตะเข็บแล้วภาพไม่ขยับเข้าออก)
-    const dist = Math.max(top, w * 1.05, d * 1.05) * 1.85, ty = top * 0.45;
+    const dist = Math.max(top, w * 1.05, d * 1.05) * 2, ty = top * 0.46;
     if (was !== "sewn" || dist > S.dist * 1.02 || dist < S.dist * 0.82 || Math.abs(ty - S.target.y) > S.dist * 0.1) { S.target.set(0, ty, 0); S.dist = dist; }
     shadow.visible = true; shadow.scale.set(Math.max(w, 10) * 1.5, Math.max(d, 4) * 2.2, 1);
     if (was !== "sewn") view(VIEWS.iso, true);

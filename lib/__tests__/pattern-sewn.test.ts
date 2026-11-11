@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSewn, type SewnPart } from "@/lib/pattern-sewn";
+import { buildSewn, isSewnExtra, type SewnPart } from "@/lib/pattern-sewn";
 import { BAG_DEFAULT, bagAttachRefs, bagGeometry, bagPieces, bagSeamRefs } from "@/lib/bag-templates";
 import { movePiece, type Shape } from "@/lib/pattern-shape";
 import type { Seam } from "@/lib/pattern-seams";
@@ -36,6 +36,8 @@ describe("ภาพเย็บติด (buildSewn)", () => {
     expect(part(sc, "body").kind).toBe("base");
     const lp = part(sc, "strap"), b = box(lp);
     expect(lp.kind).toBe("loop");
+    expect(lp.on).toBe("body");                                                    // เกาะอยู่กับชิ้นหลัก → ภาพเย็บทีละขั้นขยับตามแผ่นนั้น
+    expect(sc.lines.every((l) => l.on === "body")).toBe(true);
     // ตัวหน้ากว้าง 38 → กึ่งกลาง x = 0 · ขอบปากอยู่ที่ y = 12 · โคนซ้ายช่วง 9–13 → x −10…−6 · โคนขวา 25–29 → x 6…10
     expect(b.lo[0]).toBeGreaterThan(-10.6); expect(b.hi[0]).toBeLessThan(10.6);
     expect(b.lo[1]).toBeGreaterThan(11.5);
@@ -108,6 +110,8 @@ describe("ภาพเย็บติด (buildSewn)", () => {
     expect(sc.asm?.ok).toBe(true);
     const xp = part(sc, "x");
     expect(xp.kind).toBe("flap");
+    expect(xp.on).toBe(front.pid);
+    expect(sc.parts.filter(isSewnExtra).map((p) => p.pid)).toEqual(["x"]);
     expect(box(xp).lo[1]).toBeGreaterThan(sc.asm!.height - 1);                    // เกาะที่ขอบปาก (บนสุดของตัวกระเป๋า)
     expect(Math.abs(box(xp).lo[2] - sc.asm!.depth / 2)).toBeLessThan(2.5);        // อยู่ที่แผ่นหน้า
     expect(sc.joined).toBe(base.joined + 1);

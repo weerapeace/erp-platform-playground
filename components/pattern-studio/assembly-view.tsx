@@ -7,6 +7,8 @@
  *   สีในภาพเป็นสีตัวอย่าง ไม่บันทึก · เป็นการประกอบทรงตามกติกา ไม่ใช่การจำลองวัสดุ
  *
  *   ชิ้นที่ยังไม่ได้ประกอบ (ไม่ได้เย็บขอบชนขอบ) → กด "ติดเป็นหู" ตั้งระยะห่างโคนหู/ความยาว แล้วเห็นผลในภาพทันที · หรือ "ใช้ปิดหลังช่อง"
+ *   ชิ้นที่เย็บบางช่วงของขอบ (สายหู แถบ ฯลฯ · 2026-11-11) → มาจากภาพเย็บติด (lib/pattern-sewn): อยู่ในภาพ + เป็นขั้น "ชิ้นเสริม" ของเย็บทีละขั้น
+ *     ระบบยังไม่เห็นโครงตัวกระเป๋า แต่มีชิ้นเย็บติดกัน = แสดงเฉพาะชิ้นที่เย็บติด (ไม่ขึ้นหน้าว่าง)
  *   <AssemblyView pieces={[{ pid, name, count, shape, holes }]} seams={seams} attaches={attaches} onGoSew={() => …} />
  * ใช้ที่: app/pattern-studio/[id] · คู่มือ: docs/pattern-studio.md
  */
@@ -15,7 +17,9 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { Pattern3D } from "@/components/pattern-3d";
 import { RangeInput } from "@/components/range-input";
+import { SEAM_COLORS } from "@/components/pattern-sheet/shape-editor";
 import { assemble, type AsmPiece, type AsmStepKey, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
+import { buildSewn, isSewnExtra } from "@/lib/pattern-sewn";
 import { shapeBox } from "@/lib/pattern-shape";
 import { buildSimMesh, createBagSim } from "@/lib/pattern-sim";
 import type { Seam } from "@/lib/pattern-seams";
@@ -49,7 +53,11 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const t = useT();
   const [hForm, setHForm] = useState<HandleForm | null>(null);   // กำลังตั้งค่าติดหูให้ชิ้นไหน (ภาพแสดงผลทันที ยังไม่บันทึกจนกด "ติดหู")
   const A0 = useMemo(() => assemble(pieces, seams, attaches), [pieces, seams, attaches]);
-  const A = useMemo(() => (hForm && A0.ok ? assemble(pieces, seams, [...attaches, ...handleAttaches(A0, hForm, "draft")]) : A0), [A0, hForm, pieces, seams, attaches]);
+  const liveAtt = useMemo(() => (hForm && A0.ok ? [...attaches, ...handleAttaches(A0, hForm, "draft")] : attaches), [A0, hForm, attaches]);
+  const A = useMemo(() => (liveAtt === attaches ? A0 : assemble(pieces, seams, liveAtt)), [A0, liveAtt, pieces, seams, attaches]);
+  // ภาพเย็บติด: ตัวกระเป๋าเดียวกับ A + ชิ้นที่เย็บบางช่วง (แผ่นพับ / ห้อย / ห่วง)
+  const scene = useMemo(() => buildSewn(pieces.map((p, i) => ({ ...p, name: p.name || `P${i + 1}` })), seams, liveAtt), [pieces, seams, liveAtt]);
+  const extras = useMemo(() => scene.parts.filter(isSewnExtra).map((p) => p.pid), [scene]);
   const [explode, setExplode] = useState(0);
   // จำลองวัสดุทิ้งตัว (ทดลอง): ตาข่ายสร้างจากผลประกอบที่บันทึกจุดติดแล้ว (ไม่รวมหูที่กำลังตั้งค่า) · ค่าความอยู่ทรง/ของข้างใน ไม่บันทึก
   const [simOn, setSimOn] = useState(false);
@@ -75,6 +83,45 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const nameOf = (pid: string) => pieces.find((p) => p.pid === pid)?.name || t("ชิ้นไม่มีชื่อ", "Unnamed piece");
   const names = (pids: string[]) => pids.map(nameOf).join(" + ");
 
+  const sewnNotes = (
+    <>
+      {scene.notes.filter((n) => n.why === "short").map((n) => <p key={`s${n.pid}`} className="rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-700">{t(`${n.name}: สั้นกว่าระยะระหว่างสองจุดที่เย็บ ยาวไม่ถึง`, `${n.name}: shorter than the distance between its two seams`)}</p>)}
+      {scene.notes.some((n) => n.why === "unsupported") && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t(`ยังประกอบชิ้นนี้ในภาพไม่ได้ (วางไว้ข้างหน้า): ${scene.notes.filter((n) => n.why === "unsupported").map((n) => n.name).join(", ")} — ภาพรองรับชิ้นที่เย็บ 1 ตะเข็บ หรือ 2 ตะเข็บ (เช่น สายหู) กับแผ่นหน้า/แผ่นหลัง`, `Cannot place these yet (laid in front): ${scene.notes.filter((n) => n.why === "unsupported").map((n) => n.name).join(", ")} — the view handles pieces joined by 1 or 2 seams to the front/back panel`)}</p>}
+    </>
+  );
+  if (!A.ok && scene.joined > 0) {
+    // ยังไม่เห็นโครงตัวกระเป๋า แต่มีชิ้นที่เย็บติดกัน (เช่น ตัวหน้า + สายหู) → แสดงเท่าที่เย็บแล้ว
+    return (
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-2">
+          <Pattern3D mode="sewn" sewn={scene} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={560} />
+          <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            {t("แยกชิ้นดู", "Pull pieces apart")}
+            <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-56 max-w-full accent-blue-600" />
+          </label>
+          <p className="text-[11px] text-slate-400">{t("ภาพนี้วางชิ้นตามตะเข็บด้วยสูตร ไม่ใช่การจำลองวัสดุ — ตำแหน่งและสัดส่วนถูก การทิ้งตัวเป็นค่าประมาณ", "Pieces are placed from the seams by rules, not simulated — positions are right, drape is approximate.")}</p>
+        </div>
+        <aside className="min-w-0 space-y-3 text-sm">
+          <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-3">
+            <div className="text-xs font-medium text-slate-500">{t("ชิ้นที่เย็บติดกันแล้ว", "Pieces sewn together")}</div>
+            <ul className="space-y-0.5 text-xs">
+              {scene.parts.filter((p) => p.kind !== "loose").map((p) => (
+                <li key={p.pid} onPointerEnter={() => setPick(p.pid)} onPointerLeave={() => setPick(null)} className={`flex items-center justify-between gap-2 rounded px-1.5 py-1 ${pick === p.pid ? "bg-amber-50" : ""}`}>
+                  <span className="min-w-0 truncate">{p.name}</span><span className="shrink-0 text-slate-400">{p.kind === "base" ? t("ชิ้นหลัก", "main piece") : p.kind === "loop" ? t("ห่วง (เย็บ 2 ปลาย)", "loop (sewn at both ends)") : t("ชิ้นเสริม (เย็บบางช่วง)", "added piece")}</span>
+                </li>
+              ))}
+            </ul>
+            {sewnNotes}
+            <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t("ระบบยังไม่เห็นโครงตัวกระเป๋า (ตัวหน้า + ตัวหลัง + ชิ้นคั่นกลาง หรือซองแบน) จึงแสดงเฉพาะชิ้นที่เย็บติดกัน · เย็บทีละขั้นและจำลองวัสดุใช้ได้เมื่อประกอบตัวกระเป๋าได้แล้ว", "No bag body (front + back + gusset, or a flat pouch) was found, so only the pieces sewn together are shown · step-by-step sewing and the drape simulation need an assembled body.")}</p>
+            <div className="flex flex-wrap gap-2">
+              {onGoSew && <button type="button" onClick={onGoSew} className="h-8 rounded-lg bg-blue-600 px-3 text-xs text-white hover:bg-blue-700">{t("ไปเย็บต่อ", "Go to Sew")}</button>}
+              {onGoDraw && <button type="button" onClick={onGoDraw} className="h-8 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50">{t("ไปแท็บวาดชิ้น", "Go to Draw")}</button>}
+            </div>
+          </div>
+        </aside>
+      </div>
+    );
+  }
   if (!A.ok) {
     const msg = A.reason === "no-pieces"
       ? [t("ยังไม่มีชิ้นบนกระดาน", "No pieces on the board yet"), t("ไปที่แท็บวาดชิ้น แล้ววาดชิ้นหรือกด สร้างจากแม่แบบทรง", "Go to the Draw tab and draw pieces, or use Create from a bag template")]
@@ -97,12 +144,18 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
     ? t(`เย็บ ${names(pids)} เข้าด้านหลังช่องของ ${nameOf(A.front)}`, `Sew ${names(pids)} behind the window of ${nameOf(A.front)}`)
     : key === "handle"
       ? t(`เย็บโคน ${names(pids)} เข้ากับแผ่นหน้าและแผ่นหลัง ทำตอนชิ้นยังแบนอยู่เพราะเย็บง่ายที่สุด`, `Sew the ends of ${names(pids)} onto the front and back while they are still flat`)
+      : key === "extra"
+        ? t(`เย็บ ${names(pids)} เข้ากับตำแหน่งที่กำหนดไว้บนแผ่น (ตะเข็บบางช่วง) ทำตอนแผ่นยังแบนอยู่`, `Sew ${names(pids)} at their marked positions on the panel (partial seams) while the panel is still flat`)
       : key === "gusset"
         ? t(`เย็บ ${names(pids)} เข้ากับขอบของ ${nameOf(A.front)}`, `Sew ${names(pids)} to the edge of ${nameOf(A.front)}`)
         : A.kind === "pouch"
           ? t(`วาง ${nameOf(A.back)} ประกบ แล้วเย็บขอบติดกัน`, `Lay ${nameOf(A.back)} on top and sew the edges together`)
           : t(`เย็บ ${A.back === A.front ? t("แผ่นหลัง", "the back panel") : nameOf(A.back)} เข้ากับขอบอีกด้านของชิ้นคั่นกลาง`, `Sew ${A.back === A.front ? "the back panel" : nameOf(A.back)} to the other edge of the gusset`);
-  const joined = stepMode ? A.steps.slice(0, done).map((s) => s.key) : null;
+  // ขั้นเย็บ: ของตัวกระเป๋า + ขั้น "ชิ้นเสริม" (ชิ้นที่เย็บบางช่วง) แทรกก่อนเย็บชิ้นคั่นกลาง/แผ่นหลัง
+  const steps: { key: AsmStepKey; pids: string[] }[] = [...A.steps];
+  if (extras.length) { const at = steps.findIndex((s) => s.key === "gusset" || s.key === "back"); steps.splice(at < 0 ? steps.length : at, 0, { key: "extra", pids: extras }); }
+  const looseLeft = A.loose.filter((pid) => !extras.includes(pid));
+  const joined = stepMode ? steps.slice(0, done).map((s) => s.key) : null;
   const seg = (on: boolean) => `h-8 flex-1 rounded-md px-3 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
   const swatches = (value: string, onPick: (c: string) => void, label: string) => (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -113,14 +166,16 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
       ))}
     </div>
   );
-  const used = [...new Set([A.front, A.back, ...A.bridges, ...A.handles.map((h) => h.pid), ...A.behind.map((b) => b.pid)])];
+  const used = [...new Set([A.front, A.back, ...A.bridges, ...A.handles.map((h) => h.pid), ...A.behind.map((b) => b.pid), ...extras])];
 
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-2">
         {simOn && sim
           ? <Pattern3D mode="sim" sim={sim} simWake={simWake} colors={colors} height={560} />
-          : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />}
+          : extras.length
+            ? <Pattern3D mode="sewn" sewn={scene} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />
+            : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />}
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
             <Icon value="i:wind" className="text-sm" />{simOn ? t("กลับไปภาพประกอบ", "Back to the assembled view") : t("จำลองวัสดุทิ้งตัว (ทดลอง)", "Simulate material drape (experimental)")}
@@ -139,7 +194,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
                 <li className="text-slate-400">{t("ตั้งค่าได้ที่แท็บวาดชิ้น: กดชิ้น → ปุ่มตั้งค่าบนป้ายวัสดุ / หัวข้อ ข้อมูลชิ้นและการอยู่ทรง", "Set these in the Draw tab: select a piece → the settings button on a material chip / Piece details and stiffness")}</li>
               </ul>
             )}
-            <p className="text-[11px] text-slate-500 sm:col-span-2">{t("นี่คือการประมาณเพื่อให้เห็นภาพว่าวัสดุแข็งกับนิ่มต่างกันยังไง ไม่ใช่การคำนวณจากค่าวัสดุจริง (ไม่รู้น้ำหนัก ความหนา หรือตัวเสริมข้างใน) · ไม่แสดงหู ซับใน แผ่นใส · ชิ้นข้างอาจทะลุกันได้เมื่อวัสดุนิ่มมาก · ค่านี้ไม่ถูกบันทึก", "An approximation to show how firm and soft materials differ — not computed from real material data (weight, thickness or stiffeners are unknown). Handles, lining and clear panels are not shown; sides may pass through each other when very soft. These values are not saved.")}</p>
+            <p className="text-[11px] text-slate-500 sm:col-span-2">{t("นี่คือการประมาณเพื่อให้เห็นภาพว่าวัสดุแข็งกับนิ่มต่างกันยังไง ไม่ใช่การคำนวณจากค่าวัสดุจริง (ไม่รู้น้ำหนัก ความหนา หรือตัวเสริมข้างใน) · ไม่แสดงหู ชิ้นเสริมที่เย็บบางช่วง ซับใน แผ่นใส · ชิ้นข้างอาจทะลุกันได้เมื่อวัสดุนิ่มมาก · ค่านี้ไม่ถูกบันทึก", "An approximation to show how firm and soft materials differ — not computed from real material data (weight, thickness or stiffeners are unknown). Handles, lining and clear panels are not shown; sides may pass through each other when very soft. These values are not saved.")}</p>
             <p className="text-[11px] text-slate-500 sm:col-span-2"><b>{t("ช่างคิดยังไง", "How a pattern maker thinks")}</b> · {t("กระเป๋าจะอยู่ทรงหรือไม่ ขึ้นกับวัสดุและตัวเสริม (แผ่นรองก้น ผ้ากาว กระดาษแข็ง) มากกว่ารูปแพทเทิร์น — ถ้าลองเลื่อนแล้วทรุดมาก แปลว่าทรงนี้ต้องใช้วัสดุแข็งขึ้นหรือเพิ่มตัวเสริม", "Whether a bag stands up depends on the material and stiffeners (base board, interfacing) more than on the pattern. If it slumps a lot here, this shape needs a firmer material or added stiffeners.")}</p>
           </div>
         )}
@@ -165,14 +220,14 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
                   <button type="button" onClick={() => onAttachesChange(attaches.filter((a) => a.pid !== pid))} title={t("เอาชิ้นนี้ออกจากการประกอบ (ชิ้นยังอยู่บนกระดาน)", "Detach this piece (it stays on the board)")}
                     className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:bg-red-50 hover:text-red-600">{t("เอาออก", "Detach")}</button>
                 )}
-                <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : A.handles.some((h) => h.pid === pid) ? t("หู", "handle") : t("ปิดหลังช่อง", "behind window")}</span>
+                <span className="shrink-0 text-slate-400">{pid === A.front ? (A.back === A.front ? t("แผ่นหน้าและหลัง", "front and back") : t("แผ่นหน้า", "front")) : pid === A.back ? t("แผ่นหลัง", "back") : A.bridges.includes(pid) ? t("ชิ้นคั่นกลาง", "gusset") : extras.includes(pid) ? t("ชิ้นเสริม (เย็บบางช่วง)", "added piece (partial seam)") : A.handles.some((h) => h.pid === pid) ? t("หู", "handle") : t("ปิดหลังช่อง", "behind window")}</span>
               </li>
             ))}
           </ul>
-          {A.loose.length > 0 && (
+          {looseLeft.length > 0 && (
             <div className="space-y-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-              <div>{t("ยังไม่ได้ประกอบ — ชิ้นเหล่านี้ไม่ได้เย็บขอบชนขอบกับชิ้นอื่น", "Not assembled — these pieces are not sewn edge to edge with another piece")}</div>
-              {A.loose.map((pid) => (
+              <div>{t("ยังไม่ได้ประกอบ — ชิ้นเหล่านี้ยังไม่ได้เย็บกับแผ่นหน้า/แผ่นหลัง (เย็บบางช่วงในแท็บวาดชิ้นได้ หรือใช้ปุ่มด้านล่าง)", "Not assembled — these pieces are not sewn to the front/back panel yet (sew part of an edge in the Draw tab, or use the buttons below)")}</div>
+              {looseLeft.map((pid) => (
                 <div key={pid} className="flex flex-wrap items-center gap-1.5">
                   <span className="min-w-0 flex-1 truncate font-medium">{nameOf(pid)}</span>
                   {onAttachesChange && <>
@@ -204,6 +259,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
               </div>
             </div>
           )}
+          {sewnNotes}
           {A.notes.includes("mismatch") && <p className="rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-700">{t("มีตะเข็บที่ยาวไม่เท่ากัน ภาพนี้ประกอบตามขอบของแผ่นหน้า ของจริงจะย่นหรือเหลือปลาย", "Some seams differ in length. This view follows the front panel edge; the real bag would pucker or overhang.")}{onGoSew && <button type="button" onClick={onGoSew} className="ml-1 underline">{t("ดูที่แท็บเย็บ", "See the Sew tab")}</button>}</p>}
           {A.notes.includes("depth-differs") && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t("ชิ้นคั่นกลางกว้างไม่เท่ากัน ใช้ค่ากลางเป็นความลึกของกระเป๋า", "Gusset pieces have different widths; the middle value is used as the depth")}</p>}
           {A.notes.includes("same-back") && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t("แผ่นหน้าตั้งจำนวนตัดไว้ 1 ชิ้น ระบบใช้รูปเดียวกันเป็นแผ่นหลังให้ ถ้าใช้แผ่นเดียวกันจริงให้ตั้งจำนวนตัดเป็น 2", "The front panel has a cut count of 1; the same shape is used for the back. Set the count to 2 if that is intended.")}</p>}
@@ -215,11 +271,11 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
             <button type="button" className={seg(stepMode)} onClick={() => { setStepMode(true); setDone(0); }}>{t("เย็บทีละขั้น", "Sew step by step")}</button>
           </div>
           <ol className="list-decimal space-y-1 pl-5 text-xs">
-            {A.steps.map((s, i) => <li key={s.key} className={stepMode ? (i < done ? "text-slate-400" : i === done ? "font-semibold text-slate-800" : "text-slate-600") : "text-slate-700"}>{stepText(s.key, s.pids)}</li>)}
+            {steps.map((s, i) => <li key={s.key} className={stepMode ? (i < done ? "text-slate-400" : i === done ? "font-semibold text-slate-800" : "text-slate-600") : "text-slate-700"}>{stepText(s.key, s.pids)}</li>)}
           </ol>
           {stepMode && (
             <div className="flex flex-wrap items-center gap-2">
-              {done < A.steps.length
+              {done < steps.length
                 ? <button type="button" onClick={() => setDone(done + 1)} className="h-8 rounded-lg bg-blue-600 px-3 text-xs text-white hover:bg-blue-700">{t(`เย็บขั้นที่ ${done + 1}`, `Sew step ${done + 1}`)}</button>
                 : <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">{t("เย็บครบแล้ว", "All sewn")}</span>}
               <button type="button" disabled={!done} onClick={() => setDone(0)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50 disabled:opacity-40">{t("แยกชิ้นใหม่", "Start over")}</button>

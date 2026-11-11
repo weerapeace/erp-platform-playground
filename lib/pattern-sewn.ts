@@ -20,9 +20,9 @@ import { panelMesh } from "@/lib/pattern-sim";
 export type V3 = [number, number, number];
 /** base = ชิ้นหลัก (แผ่นตั้ง) · flap = แผ่นพับเกาะตะเข็บ · hang = ห้อยลง · loop = ห่วง (สายหู) · loose = วางแบนข้างหน้า */
 export type SewnKind = "base" | "flap" | "hang" | "loop" | "loose";
-export type SewnPart = { pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3 };
+export type SewnPart = { pid: string; name: string; kind: SewnKind; pos: number[]; tri: number[]; label: V3; /** ชิ้นหลักที่ชิ้นนี้เกาะอยู่ (แผ่นหน้า/หลังของตัวกระเป๋า หรือชิ้นหลักที่ตั้งเป็นแผ่น) — ชิ้นที่ไม่ได้เกาะ = ไม่มี */ on?: string };
 /** เส้นตะเข็บในภาพ (ตำแหน่งบนชิ้นที่ถูกเย็บติด) · idx = ลำดับตะเข็บ (ใช้สีเดียวกับกระดาน) · bad = ยาวไม่เท่ากันและไม่ได้ตั้งใจ */
-export type SewnLine = { id: string; idx: number; pts: V3[]; bad: boolean };
+export type SewnLine = { id: string; idx: number; pts: V3[]; bad: boolean; /** ชิ้นหลักที่เส้นนี้อยู่บนนั้น */ on?: string };
 /** unsewn = ยังไม่ได้เย็บ · unsupported = มีตะเข็บแต่ยังวางไม่ได้ · short = สายสั้นกว่าระยะระหว่างสองโคน */
 export type SewnNote = { pid: string; name: string; why: "unsewn" | "unsupported" | "short" };
 export type SewnScene = {
@@ -148,14 +148,15 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
   const parts: SewnPart[] = [], lines: SewnLine[] = [], notes: SewnNote[] = [];
   const frames = new Map<string, Frame>();       // ชิ้นที่วางแล้วและเป็นแผ่นเรียบ (ให้ชิ้นอื่นมาเกาะได้)
   const done = new Set<string>();
+  const rootOf = new Map<string, string>();      // ชิ้นที่วางแล้ว → ชิ้นหลักต้นทาง (แผ่นพับที่เกาะแผ่นพับ ย้อนไปถึงแผ่นหน้า/หลัง)
   let joined = 0, zFront = 0;
 
-  const emit = (p: AsmPiece, kind: SewnKind, fine: boolean, f: (q: Pt) => V3) => {
+  const emit = (p: AsmPiece, kind: SewnKind, fine: boolean, f: (q: Pt) => V3, on?: string) => {
     const m = meshOf(p, fine), pos: number[] = [];
     let sx = 0, sy = 0, sz = 0;
     for (const q of m.pts) { const v = f(q); pos.push(v[0], v[1], v[2]); sx += v[0]; sy += v[1]; sz += v[2]; }
     const n = Math.max(1, m.pts.length);
-    parts.push({ pid: p.pid, name: p.name, kind, pos, tri: m.tri, label: [sx / n, sy / n, sz / n] });
+    parts.push({ pid: p.pid, name: p.name, kind, pos, tri: m.tri, label: [sx / n, sy / n, sz / n], ...(on ? { on } : {}) });
     done.add(p.pid);
   };
 
@@ -170,22 +171,23 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
       frames.set(asm.back, { o: [-bo[0], bo[1], -D / 2], u: [-(bx[0] - bo[0]), bx[1] - bo[1], 0], v: [-(by[0] - bo[0]), by[1] - bo[1], 0], n: [0, 0, -1] });
     }
     for (const p of pieces) if (!asm.loose.includes(p.pid)) { done.add(p.pid); joined++; }
+    rootOf.set(asm.front, asm.front); rootOf.set(asm.back, asm.back);
     zFront = D / 2;
   } else {
     const inSeam = new Set(usable.flatMap((s) => [s.a.pid, s.b.pid]));
     const root = pieces.filter((p) => inSeam.has(p.pid)).sort((a, b) => shapeArea(b.shape) - shapeArea(a.shape))[0];
     if (root) {
       const b = shapeBox(root.shape), f: Frame = { o: [-(b.x + b.w / 2), b.y + b.h, 0], u: [1, 0, 0], v: [0, -1, 0], n: [0, 0, 1] };
-      frames.set(root.pid, f);
+      frames.set(root.pid, f); rootOf.set(root.pid, root.pid);
       emit(root, "base", false, (q) => place(f, q));
     }
   }
 
   // 2) + 3) ชิ้นที่เย็บติดกับแผ่นที่วางแล้ว — วนจนไม่มีชิ้นไหนวางเพิ่มได้ (แผ่นพับเป็นที่เกาะของชิ้นถัดไปได้)
   const linksOf = (pid: string) => usable.filter((s) => s.a.pid === pid || s.b.pid === pid);
-  const seamLine = (s: Seam, host: Frame, P: Pt[]) => {
+  const seamLine = (s: Seam, host: Frame, P: Pt[], on?: string) => {
     const c = checks.get(s.id);
-    lines.push({ id: s.id, idx: idxOf.get(s.id) ?? 0, pts: P.map((q) => add(place(host, q), mul(host.n, 0.12))), bad: c?.status === "mismatch" && !s.ease });
+    lines.push({ id: s.id, idx: idxOf.get(s.id) ?? 0, pts: P.map((q) => add(place(host, q), mul(host.n, 0.12))), bad: c?.status === "mismatch" && !s.ease, ...(on ? { on } : {}) });
   };
   let progress = true;
   while (progress) {
@@ -197,10 +199,10 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
       const ends = L.map((s) => {
         const mine = s.a.pid === C.pid ? s.a : s.b, other = s.a.pid === C.pid ? s.b : s.a, host = frames.get(other.pid), hp = byPid.get(other.pid);
         const cs = segOf(C.shape, mine), hs = host && hp ? segOf(hp.shape, other) : null;
-        return host && cs && hs ? { s, host, cs, hs } : null;
+        return host && cs && hs ? { s, host, cs, hs, on: rootOf.get(other.pid) } : null;
       });
       if (ends.some((e) => !e)) continue;
-      const E = ends as { s: Seam; host: Frame; cs: Seg; hs: Seg }[];
+      const E = ends as { s: Seam; host: Frame; cs: Seg; hs: Seg; on?: string }[];
       const world = (e: (typeof E)[number]) => {
         const M = place(e.host, e.hs.mid), Dv = unit3(dir3(e.host, e.hs.dir)), O = unit3(dir3(e.host, [-e.hs.inward[0], -e.hs.inward[1]]));
         return { M, Dv, O, N: e.host.n };
@@ -227,14 +229,15 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
             const [al, out] = local(q), v = add(add(M, mul(Dv, al)), mul(N, 0.3));
             const y = v[1] - out;
             return y >= 0.05 ? [v[0], y, v[2]] : add([v[0], 0.05, v[2]], mul(Nh, 0.05 - y));
-          });
+          }, e.on);
         } else {
           const Ot = unit3(sub(mul(O, Math.cos(HINGE)), mul(N, Math.sin(HINGE)))), at = (q: Pt): V3 => { const [al, out] = local(q); return add(add(M, mul(Dv, al)), mul(Ot, out)); };
-          emit(C, "flap", false, at);
+          emit(C, "flap", false, at, e.on);
+          if (e.on) rootOf.set(C.pid, e.on);
           const o = at([0, 0]);
           frames.set(C.pid, { o, u: sub(at([1, 0]), o), v: sub(at([0, 1]), o), n: unit3(add(mul(N, Math.cos(HINGE)), mul(O, Math.sin(HINGE)))) });
         }
-        seamLine(e.s, e.host, e.hs.pts); joined++; progress = true;
+        seamLine(e.s, e.host, e.hs.pts, e.on); joined++; progress = true;
       } else {
         const [e1, e2] = E, w1 = world(e1), w2 = world(e2);
         const ax = e2.cs.mid[0] - e1.cs.mid[0], ay = e2.cs.mid[1] - e1.cs.mid[1], Ls = Math.hypot(ax, ay);
@@ -243,9 +246,9 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
         // ทิศความกว้างที่โคน: หน้าของชิ้น (ด้านที่เห็นบนกระดาน) หันออกนอกแผ่นที่เกาะ
         const W1 = dot(cross(w1.Dv, w1.O), w1.N) > 0 ? w1.Dv : mul(w1.Dv, -1), tEnd = mul(w2.O, -1), W2 = dot(cross(w2.Dv, tEnd), w2.N) > 0 ? w2.Dv : mul(w2.Dv, -1);
         const curve = loopCurve(w1.M, w1.O, W1, w2.M, w2.O, W2, Ls);
-        emit(C, "loop", true, (q) => { const dx = q[0] - e1.cs.mid[0], dy = q[1] - e1.cs.mid[1]; return curve.at(dx * a[0] + dy * a[1], dx * ap[0] + dy * ap[1]); });
+        emit(C, "loop", true, (q) => { const dx = q[0] - e1.cs.mid[0], dy = q[1] - e1.cs.mid[1]; return curve.at(dx * a[0] + dy * a[1], dx * ap[0] + dy * ap[1]); }, e1.on);
         if (curve.short) notes.push({ pid: C.pid, name: C.name, why: "short" });
-        seamLine(e1.s, e1.host, e1.hs.pts); seamLine(e2.s, e2.host, e2.hs.pts); joined++; progress = true;
+        seamLine(e1.s, e1.host, e1.hs.pts, e1.on); seamLine(e2.s, e2.host, e2.hs.pts, e2.on); joined++; progress = true;
       }
     }
   }
@@ -269,6 +272,9 @@ export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] 
   if (min[0] === Infinity) { min[0] = min[1] = min[2] = 0; max[0] = max[1] = max[2] = 1; }
   return { asm, parts, lines, notes, joined: asm || joined > 1 ? joined : 0, min, max };
 }
+
+/** ชิ้นนี้ "เย็บติด" กับชิ้นอื่นในภาพ (แผ่นพับ / ห้อย / ห่วง) — ไม่ใช่ชิ้นหลักและไม่ใช่ชิ้นที่วางแบน */
+export const isSewnExtra = (p: SewnPart): boolean => p.kind === "flap" || p.kind === "hang" || p.kind === "loop";
 
 /** ตะเข็บบางช่วงกี่แนว (ไว้บอกบนหน้าจอว่าตะเข็บแบบนี้ไม่ได้ใช้หาทรงกระเป๋า) */
 export const partialSeamCount = (seams: Seam[]): number => seams.filter(isPartialSeam).length;
