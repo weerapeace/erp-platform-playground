@@ -18,8 +18,8 @@ import { useToast } from "@/components/toast";
 import { usePermission, type Permission } from "@/components/auth";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import {
-  DOC_BORDER_MM, DOC_COLUMNS, DOC_FONT_PT, DOC_ROW_PAD_MM, DOC_TABLE_SETUP, DOC_WIDTH_MAX_MM, DOC_WIDTH_MIN_MM,
-  defaultPrefs, docColumnsOrdered, docWidthUsedMm, normalizePrefs, prefsKey,
+  DOC_BORDER_MM, DOC_COLUMNS, DOC_FONT_PT, DOC_OPTIONS, DOC_ROW_PAD_MM, DOC_TABLE_SETUP, DOC_WIDTH_MAX_MM, DOC_WIDTH_MIN_MM,
+  defaultPrefs, docColumnsOrdered, docOption, docWidthUsedMm, normalizePrefs, prefsKey,
   type DocBorder, type DocPrintPrefs, type DocPrintStyle,
 } from "@/lib/doc-print-prefs";
 import type { ReportTemplateRow } from "@/app/api/admin/report-templates/route";
@@ -252,6 +252,49 @@ function StyleRange({ label, unit, value, min, max, step, fallback, onChange }: 
   );
 }
 
+/**
+ * ตัวเลือกเฉพาะเอกสาร (DOC_OPTIONS) — วาดให้เองตามทะเบียน: ติ๊ก / ปุ่มเลือก 1 อย่าง · ตัวเลือกลูก (parent) โชว์เมื่อตัวแม่เปิด
+ * เก็บใน prefs.options (ค่ากลางเดียวกับคอลัมน์ · กดบันทึกพร้อมกัน)
+ */
+function DocOptionsSection({ entityType, prefs, onChange }: { entityType: string; prefs: DocPrintPrefs; onChange: (next: DocPrintPrefs) => void }) {
+  const defs = DOC_OPTIONS[entityType] ?? [];
+  if (!defs.length) return null;
+  const set = (key: string, v: string | boolean) => {
+    const def = defs.find((o) => o.key === key);
+    const o = { ...(prefs.options ?? {}) };
+    if (def && def.def === v) delete o[key]; else o[key] = v;
+    onChange({ ...prefs, options: Object.keys(o).length ? o : undefined });
+  };
+  return (
+    <section className="space-y-2">
+      <span className="text-xs font-medium text-slate-600">ตัวเลือกของใบนี้</span>
+      {defs.map((o) => {
+        if (o.kind === "choice") {
+          const v = String(docOption(entityType, prefs, o.key));
+          return (
+            <div key={o.key}>
+              <div className="text-[11px] text-slate-500">{o.label}</div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {o.choices.map((c) => (
+                  <button key={c.value} type="button" onClick={() => set(o.key, c.value)} aria-pressed={v === c.value}
+                    className={`h-7 rounded-full border px-2.5 text-xs ${v === c.value ? "border-blue-600 bg-blue-600 font-medium text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{c.label}</button>
+                ))}
+              </div>
+            </div>
+          );
+        }
+        if (o.parent && docOption(entityType, prefs, o.parent) === false) return null;
+        return (
+          <label key={o.key} className={`flex cursor-pointer items-start gap-2 text-xs text-slate-700 ${o.parent ? "pl-5 text-slate-500" : ""}`} title={o.hint}>
+            <input type="checkbox" checked={docOption(entityType, prefs, o.key) === true} onChange={(e) => set(o.key, e.target.checked)} className="mt-0.5 rounded border-slate-300" />
+            <span>{o.label}</span>
+          </label>
+        );
+      })}
+    </section>
+  );
+}
+
 export function DocPrintPanel({
   entityType, templates, prefs, saved, onChange, onSaved, onAutoFit, tableSupported = true, copySupported = false,
 }: {
@@ -344,6 +387,8 @@ export function DocPrintPanel({
         </p>
       ) : (
         <>
+          <DocOptionsSection entityType={entityType} prefs={prefs} onChange={change} />
+
           <section>
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-600">คอลัมน์</span>

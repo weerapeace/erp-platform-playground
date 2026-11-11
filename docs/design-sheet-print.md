@@ -26,3 +26,14 @@
 | ตัวสร้าง HTML โหมดเน้น comment (pure) | `lib/design-sheet-print.ts` |
 | เทส | `lib/__tests__/design-sheet-print.test.ts` |
 | ข้อมูล comment + รูปแนบ | `GET /api/design-sheets/[id]/comments` (รูปแนบ = `erp_playground_attachments` entity `design_sheet_comment`) |
+
+## ใบตีราคาต้นทุน — ตั้งค่าได้ (2026-11-11)
+
+หน้าพิมพ์ `/print/design-sheet-cost/[id]` = พรีวิวซ้าย + แผง **"ตั้งค่าการพิมพ์"** ขวา (ของกลาง `DocPrintPanel` · ตัวเดียวกับใบวางบิล)
+
+- **ตัวเลือกของใบนี้** (`DOC_OPTIONS.design_sheet_cost` ใน `lib/doc-print-prefs`): รายการวัตถุดิบ ทุกบรรทัด / รวมตามวัสดุ / รวมตามชนิด / ไม่โชว์ตาราง · สรุปแยกตามชนิด · ค่าแรง (+ รายละเอียด วัสดุ × ชิ้น × ราคาตัด) · ค่าโสหุ้ย (+ รายละเอียด แพ็ค/QC/ถุง/ค่าส่ง) · ต้นทุนอื่น ๆ · ช่องเซ็น
+  - ซ่อนหมวดไหน = ยอดรวมไม่นับหมวดนั้น และหัวข้อเปลี่ยนเป็น "ต้นทุนรวม (ไม่รวม…)" กันเข้าใจผิด
+  - รายละเอียดค่าแรงตัด/โสหุ้ย คิดจากราคากลาง **ตอนพิมพ์** (สูตรกลาง `lib/design-cost-presets`) — รวมไม่ตรงยอดที่บันทึก = มีหมายเหตุบอก ยอดจริงคือที่บันทึกไว้
+- **คอลัมน์**: เปิด/ปิด · ชื่อหัว · ลำดับ · ความกว้าง มม. (ลากขอบหัวบนกระดาษได้) — วัสดุ / รวม ปิดไม่ได้
+- ไม่กดบันทึก = ใช้กับใบนี้ · **บันทึกเป็นค่าเริ่มต้น** = ทุกคน (`ui_config doc_print_design_sheet_cost` · สิทธิ์ products.edit)
+- ข้อมูลลงแม่แบบ: `lib/design-sheet-cost-print` (`buildCostPrintData`) → `{{{cost_summary_html}}}` `{{{lines_table}}}` `{{list_title}}` `{{#has_table}}` `{{#opt_sign}}` · แม่แบบเก่าที่เขียนตารางเอง (ใช้ `groups`/`extras`) ยังพิมพ์ได้ แต่ปรับจากแผงไม่ได้ · เทสต์ `lib/__tests__/design-sheet-cost-print.test.ts`

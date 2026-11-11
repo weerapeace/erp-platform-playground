@@ -52,7 +52,53 @@ export const DOC_COLUMNS: Record<string, DocColumn[]> = {
     { key: "total_amount", label: "จำนวนเงิน",        on: true, locked: true, align: "r", nowrap: true },
     { key: "note",         label: "หมายเหตุ",         on: true, flex: true },
   ],
+  // ใบตีราคาต้นทุน (ใบงานออกแบบ) — app/print/design-sheet-cost · lib/design-sheet-cost-print (เจ้าของขอ 2026-11-11)
+  design_sheet_cost: [
+    { key: "item_name",     label: "วัสดุ",        on: true, locked: true, flex: true },
+    { key: "dims",          label: "ขนาด",         on: true, align: "c", nowrap: true },
+    { key: "pieces",        label: "จำนวน",        on: true, align: "c", nowrap: true },
+    { key: "waste",         label: "เผื่อเสีย",     on: true, align: "c", nowrap: true },
+    { key: "qty",           label: "ปริมาณ",       on: true, align: "r", nowrap: true },
+    { key: "uom",           label: "หน่วย",        on: true, align: "c", nowrap: true },
+    { key: "unit_price_th", label: "ราคา/หน่วย",   on: true, align: "r", nowrap: true },
+    { key: "per_piece_th",  label: "฿/ชิ้น",       on: false, align: "r", nowrap: true },
+    { key: "per_yard_th",   label: "฿/หลา",        on: false, align: "r", nowrap: true },
+    { key: "amount_th",     label: "รวม (บาท)",    on: true, locked: true, align: "r", nowrap: true },
+    { key: "note",          label: "หมายเหตุ",     on: false },
+  ],
 };
+
+/**
+ * ตัวเลือกเฉพาะเอกสาร (นอกจากคอลัมน์) — แผงตั้งค่า (DocPrintPanel) วาดให้เอง · เก็บใน prefs.options ค่ากลางเดียวกับคอลัมน์
+ *   bool = ติ๊ก · choice = ปุ่มเลือก 1 อย่าง · parent = โชว์เมื่อตัวเลือกแม่เปิดอยู่ (เช่น "โชว์รายละเอียด" ใต้ "ค่าแรง")
+ *   หน้าพิมพ์อ่านค่าด้วย docOption() · เพิ่มเอกสารใหม่ = เพิ่ม key ตรงนี้ที่เดียว
+ */
+export type DocOption =
+  | { key: string; label: string; kind: "bool"; def: boolean; parent?: string; hint?: string }
+  | { key: string; label: string; kind: "choice"; def: string; choices: { value: string; label: string }[]; hint?: string };
+export const DOC_OPTIONS: Record<string, DocOption[]> = {
+  design_sheet_cost: [
+    { key: "list_mode", label: "รายการวัตถุดิบ", kind: "choice", def: "lines", choices: [
+      { value: "lines", label: "ทุกบรรทัด" }, { value: "material", label: "รวมตามวัสดุ" },
+      { value: "type", label: "รวมตามชนิด" }, { value: "none", label: "ไม่โชว์ตาราง" },
+    ] },
+    { key: "sum_by_type", label: "สรุป: แยกต้นทุนตามชนิดวัสดุ", kind: "bool", def: true },
+    { key: "show_labor", label: "สรุป: ค่าแรง", kind: "bool", def: true },
+    { key: "labor_detail", label: "โชว์รายละเอียด (วัสดุ × ชิ้น × ราคาตัด)", kind: "bool", def: false, parent: "show_labor" },
+    { key: "show_overhead", label: "สรุป: ค่าโสหุ้ย", kind: "bool", def: true },
+    { key: "overhead_detail", label: "โชว์รายละเอียด (แพ็ค · QC · ถุง · ค่าส่ง)", kind: "bool", def: false, parent: "show_overhead" },
+    { key: "show_other", label: "สรุป: ต้นทุนอื่น ๆ (ที่มียอด)", kind: "bool", def: true },
+    { key: "show_sign", label: "ช่องเซ็น ผู้ตีราคา / ผู้อนุมัติ", kind: "bool", def: true },
+  ],
+};
+
+/** ค่าตัวเลือกของเอกสาร (ไม่ได้ตั้ง = ค่าเริ่มต้นใน DOC_OPTIONS) */
+export function docOption(entityType: string, prefs: Pick<DocPrintPrefs, "options"> | null | undefined, key: string): string | boolean | undefined {
+  const def = (DOC_OPTIONS[entityType] ?? []).find((o) => o.key === key);
+  if (!def) return undefined;
+  const v = prefs?.options?.[key];
+  return v === undefined ? def.def : v;
+}
 
 /**
  * เอกสารที่ใช้ "ตารางปรับได้" (renderDocTable) + สิทธิ์อ่าน/บันทึกค่ากลาง + พื้นที่กว้างของกระดาษ (มม.)
@@ -61,6 +107,8 @@ export const DOC_COLUMNS: Record<string, DocColumn[]> = {
 export const DOC_TABLE_SETUP: Record<string, { view: string; edit: string; contentMm: number; tableClass: string }> = {
   // A4 แนวตั้ง 210 − ขอบซ้ายขวา 12+12 มม. (custom_css ของแม่แบบ) · เจ้าของเลือกให้ "คนที่แก้ใบขายได้" บันทึกค่าเริ่มต้น
   billing_note: { view: "so.view", edit: "so.edit", contentMm: 186, tableClass: "bn-lines" },
+  // A4 แนวตั้ง · .doc padding 5 มม. (custom_css แม่แบบ) · คนที่แก้ใบงานออกแบบได้ บันทึกค่าเริ่มต้น
+  design_sheet_cost: { view: "products.view", edit: "products.edit", contentMm: 190, tableClass: "dsc-lines" },
 };
 
 /** สิทธิ์อ่าน/บันทึกค่าตั้งการพิมพ์ ตาม key ใน ui_config (null = ไม่ใช่ key ตั้งค่าการพิมพ์ที่มีสิทธิ์เฉพาะ) */
@@ -97,6 +145,8 @@ export type DocPrintPrefs = {
   style?: DocPrintStyle;
   /** พิมพ์ต้นฉบับ + สำเนา (แต่ละใบ = 2 หน้า) — ช่อง {{copy_label}} ในแม่แบบ (เจ้าของ 2026-11-10) */
   copies?: boolean;
+  /** ตัวเลือกเฉพาะเอกสาร (DOC_OPTIONS) — ไม่มี key = ค่าเริ่มต้น */
+  options?: Record<string, string | boolean>;
 };
 
 export const DOC_WIDTH_MIN_MM = 6;
@@ -178,6 +228,15 @@ export function normalizePrefs(entityType: string, raw: unknown): DocPrintPrefs 
     if (Object.keys(style).length) out.style = style;
   }
   if (r.copies === true) out.copies = true;
+  if (r.options && typeof r.options === "object") {
+    const options: Record<string, string | boolean> = {};
+    for (const o of DOC_OPTIONS[entityType] ?? []) {
+      const v = (r.options as Record<string, unknown>)[o.key];
+      if (o.kind === "bool" && typeof v === "boolean") options[o.key] = v;
+      if (o.kind === "choice" && typeof v === "string" && o.choices.some((c) => c.value === v)) options[o.key] = v;
+    }
+    if (Object.keys(options).length) out.options = options;
+  }
   return out;
 }
 
@@ -273,7 +332,11 @@ export function renderDocTable(
   const colgroup = cols.map((c) =>
     `<col data-col="${c.key}"${c.flex ? ' data-flex="1"' : ""}${c.widthMm ? ` style="width:${c.widthMm}mm"` : ""}>`).join("");
   const head = cols.map((c) => `<th data-col="${c.key}" class="${cls(c)}">${esc(c.label)}</th>`).join("");
-  const body = rows.map((r) => `<tr>${cols.map((c) => `<td class="${cls(c)}">${esc(r[c.key])}</td>`).join("")}</tr>`).join("");
+  // แถวหัวกลุ่ม: { __group: "ชื่อกลุ่ม", __sum: "ยอดกลุ่ม" } → แถวเต็มกว้าง ชื่อซ้าย ยอดขวา (ใบตีราคา: แยกตามชนิดวัสดุ)
+  if (rows.some((r) => r.__group != null)) css.push(".doc-t tr.doc-grp td{font-weight:600;background:#eef2f7;}.doc-t .doc-grp-sum{float:right;}");
+  const body = rows.map((r) => (r.__group != null
+    ? `<tr class="doc-grp"><td colspan="${cols.length}">${esc(r.__group)}${r.__sum != null ? `<span class="doc-grp-sum">${esc(r.__sum)}</span>` : ""}</td></tr>`
+    : `<tr>${cols.map((c) => `<td class="${cls(c)}">${esc(r[c.key])}</td>`).join("")}</tr>`)).join("");
   const filler = opts.filler ? `<tr class="filler">${cols.map((c) => `<td class="${cls(c)}"></td>`).join("")}</tr>` : "";
   return `<style>${css.join("")}</style>`
     + `<table class="${setup?.tableClass ?? ""} doc-t${fixed ? " fixed" : ""}" data-doc-table="${entityType}">`

@@ -100,6 +100,11 @@ const ds = build({ "ใบงาน": [...DS_HEAD, ["status_label", "สถา�
 const dsCost = build({
   "ใบงาน": [...DS_HEAD, ["note", "หมายเหตุ", ""]],
   "ยอดเงิน": [["material_total_th", "รวมค่าวัตถุดิบ", "142.50"], ["grand_total_th", "ต้นทุนรวม/ชิ้น", "185.00"], ["qty", "จำนวนผลิต", "100"]],
+  // ใบแบบตั้งค่าได้ (แผงตั้งค่าการพิมพ์ · lib/design-sheet-cost-print) — แม่แบบวาง {{{cost_summary_html}}} + {{{lines_table}}}
+  "ตั้งค่าได้ (แผงตั้งค่าการพิมพ์)": [
+    ["cost_summary_html", "กล่องสรุปต้นทุน (ใช้ {{{ }}})", ""], ["lines_table", "ตารางวัตถุดิบ (ใช้ {{{ }}})", ""],
+    ["list_title", "หัวข้อตาราง", "รายการวัตถุดิบ (แยกตามชนิด)"], ["summary_total_th", "ต้นทุนรวมตามที่เลือกโชว์", "185.00"],
+  ],
 });
 const dsQuote = build({ "ใบงาน": [...DS_HEAD, ["status_label", "สถานะ", "รอลูกค้าตอบ"], ["date_th", "วันที่", "6 พ.ย. 2569"], ["note", "หมายเหตุ", "ราคานี้ยืนได้ 30 วัน"]] });
 const dsSup = build({
@@ -175,6 +180,11 @@ export const EXTRA_REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
         groups: [{ group_name: "ผ้า", subtotal_th: "52.80", lines: [lines[0]] }, { group_name: "อุปกรณ์", subtotal_th: "8.00", lines: [lines[1]] }],
         cost_groups: [{ label: "วัตถุดิบ", subtotal_th: "142.50" }, { label: "ค่าแรง", subtotal_th: "35.00" }],
         extras: [{ label: "ค่าบรรจุภัณฑ์", amount_th: "7.50" }],
+        has_table: true, opt_sign: true,
+        cost_summary_html: `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;"><div style="font-weight:700;font-size:13px;">สรุปต้นทุน</div><div style="display:flex;justify-content:space-between;font-size:12px;"><span>ต้นทุนวัสดุดิบรวม</span><span>142.50 ฿</span></div><div style="display:flex;justify-content:space-between;font-size:12px;color:#475569;"><span>ค่าแรง (ตัด/ปลอก/วาด)</span><span>35.00 ฿</span></div><div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:#047857;border-top:2px solid #0f172a;margin-top:6px;padding-top:6px;"><span>ต้นทุนสินค้า (รวมทั้งหมด)</span><span>185.00 ฿</span></div></div>`,
+        lines_table: renderDocTable("design_sheet_cost", defaultPrefs("design_sheet_cost"), [
+          { __group: "ผ้า", __sum: "52.80" }, { ...lines[0] }, { __group: "อุปกรณ์", __sum: "8.00" }, { ...lines[1] },
+        ]),
       };
     })(),
   },

@@ -541,7 +541,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "doc-print-settings", label: "แถบตั้งค่าการพิมพ์เอกสาร", code: "DocPrintSettings", category: "print",
     source: { path: "components/doc-print-settings" },
-    what: "เลือกแม่แบบ + ติ๊กคอลัมน์ที่จะโชว์ บนหน้าพิมพ์เอกสาร + สวิตช์พิมพ์ต้นฉบับ+สำเนา (CopiesSwitch · withCopies · ช่อง {{copy_label}} ในแม่แบบ · หลายใบเรียงทีละใบ)",
+    what: "เลือกแม่แบบ + ติ๊กคอลัมน์ที่จะโชว์ บนหน้าพิมพ์เอกสาร + สวิตช์พิมพ์ต้นฉบับ+สำเนา (CopiesSwitch · withCopies · ช่อง {{copy_label}} ในแม่แบบ · หลายใบเรียงทีละใบ) · ตัวเลือกเฉพาะเอกสาร (DOC_OPTIONS — ติ๊ก/ปุ่มเลือก · แผงวาดให้เอง เก็บใน prefs.options) · แถวหัวกลุ่มในตาราง ({ __group, __sum })",
   },
   {
     key: "print-setup-dialog", label: "หน้าปรับก่อนพิมพ์", code: "PrintSetupDialog", category: "print",
