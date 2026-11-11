@@ -35,6 +35,7 @@ import { bagAttachRefs, bagSeamRefs, type BagAttachRef, type BagGeometry, type B
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
 const PocketModal = dynamic(() => import("./pocket-modal").then((m) => m.PocketModal), { ssr: false });                     // โหลดเมื่อกดเพิ่มช่อง
+const DxfModal = dynamic(() => import("./dxf-modal").then((m) => m.DxfModal), { ssr: false });                              // โหลดเมื่อกดนำเข้า DXF
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
 const SHOW3D_KEY = "pattern-studio-3d";
@@ -69,6 +70,7 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   const [layer, setLayer] = useState<"all" | "outer" | "lining">("all");   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
   const [cut, setCut] = useState<Pattern3DCut>("none");                     // ผ่าดูข้างในของภาพ 3D
   const [pocket, setPocket] = useState(false);
+  const [dxf, setDxf] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [live, setLive] = useState<ResultPiece[]>([]);
   const [selPid, setSelPid] = useState<string | null>(null);
@@ -165,6 +167,11 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
             <Icon value="i:photo" className="text-sm" />{t("แกะจากรูป", "Start from a photo")}
           </button>
         )}
+        {!readonly && (
+          <button type="button" onClick={() => setDxf(true)} title={t("นำเข้าแพทเทิร์นจากไฟล์ DXF เช่น ที่ส่งออกจาก CLO3D", "Import a pattern from a DXF file, e.g. exported from CLO3D")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+            <Icon value="i:file-import" className="text-sm" />{t("นำเข้า DXF", "Import DXF")}
+          </button>
+        )}
         {!readonly && sew && <>
           <button type="button" onClick={makeLining} title={t("คัดลอกชิ้นตัวกระเป๋าเป็นชั้นซับใน พร้อมตะเข็บ", "Copy the body pieces into a lining layer, with their seams")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:layers-subtract" className="text-sm" />{t("สร้างซับใน", "Create lining")}
@@ -226,6 +233,12 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
       {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} />}
       {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}
         hosts={live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, box: shapeBox(p.shape), lining: liningPids.has(p.pid) }))} />}
+      {dxf && <DxfModal open onClose={() => setDxf(false)} onInsert={(list) => {
+        setDxf(false);
+        // ชิ้นจากไฟล์วางต่อจากขวาสุดของชิ้นเดิม เรียงตามตำแหน่งในไฟล์ · เส้นในเก็บเฉพาะหน้าที่มีงานเส้นใน (แอปสตูดิโอแพทเทิร์น)
+        setInject({ nonce: Date.now(), pieces: list.map((p) => ({ shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name, at: p.at, grain: p.grain, notches: p.notches, ...(sew && p.inner.length ? { inner: p.inner } : {}) })) });
+        setNotice(t(`นำเข้าแล้ว ${list.length} ชิ้น — ไฟล์ DXF ไม่มีตะเข็บและวัสดุ ต้องเย็บขอบและเลือกวัสดุเอง · ตรวจขนาดเทียบกับของจริงอย่างน้อย 1 ชิ้น`, `Imported ${list.length} pieces — DXF has no seams or materials, so sew the edges and pick materials yourself · check at least one size against the original`));
+      }} />}
       {photo && <PhotoModal open onClose={() => setPhoto(false)}
         materials={props.materials}
         onPieces={(pieces, aiSeams) => {
