@@ -796,6 +796,13 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "หน้าที่มีแท็บหลายอัน โดยเฉพาะบนมือถือ",
   },
   {
+    key: "settings-nav", label: "เมนูซ้ายจัดหมวด + ค้นหา", code: "SettingsNavLayout", category: "layout",
+    source: { path: "components/settings-nav" },
+    what: "หน้าที่มีหัวข้อเยอะ: เมนูซ้ายแบ่งหมวด มีช่องค้นหา กดแล้วโชว์เนื้อหาด้านขวา (มือถือเป็นช่องเลือกจัดหมวด)",
+    when: "หน้าตั้งค่า/หน้ารวมตารางที่มีเกิน ~5 หัวข้อ (ตั้งค่างาน · หน้าดีไซน์เว็บร้าน · ข้อมูลตั้งต้น)",
+    notWhen: "มีแค่ 2–4 หัวข้อ ให้ใช้แท็บธรรมดาหรือ ScrollTabs · แท็บในป๊อปอัป/ลิ้นชัก",
+  },
+  {
     key: "chip-overflow", label: "ชิปยาว โชว์ไม่กี่ตัว แล้วกดดูที่เหลือ", code: "ChipOverflow", category: "layout",
     source: { path: "components/chip-overflow" },
     what: "รายการชิปที่ยาวมาก (เช่น ลูกค้า 30 สาขา) โชว์แค่ 3 ตัวแรก + ปุ่ม \"+N ดูทั้งหมด\" กางแล้วจัดกลุ่มได้ มีปุ่มย่อกลับ",
