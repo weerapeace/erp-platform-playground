@@ -2,8 +2,8 @@
 
 /**
  * Parent360Overview — แท็บ "📊 ภาพรวม 360°" ใน Parent SKU
- * เห็นทุกด้านของสินค้าในหน้าเดียว: SKU ลูก · สต๊อก · ลงขายแพลตฟอร์ม · เว็บร้าน · คอนเทนต์/งาน
- * ดึงจาก /api/parent-skus/[id]/overview (guardApi products.view)
+ * เห็นทุกด้านของสินค้าในหน้าเดียว: SKU ลูก · สต๊อก · ลงขายแพลตฟอร์ม · ยอดขาย · ทุกรายการที่ผูกกับรุ่นนี้ (ParentLinkedRecords)
+ * ดึงจาก /api/parent-skus/[id]/overview (guardApi products.view) + /api/parent-skus/[id]/links
  */
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
@@ -11,6 +11,7 @@ import { postTypeLabel } from "@/lib/creative-tasks";
 import { PlatformIcon } from "@/components/platform-icon";
 import { ERPModal } from "@/components/modal";
 import type { CreativeTaskItem, CreativeContentItem } from "@/app/api/parent-skus/[id]/creative-items/route";
+import { ParentLinkedRecords } from "@/components/parent-linked-records";
 
 type Overview = {
   skus: { total: number; active: number };
@@ -166,22 +167,8 @@ export function Parent360Overview({ parentId }: { parentId: string | null }) {
         )}
       </div>
 
-      {/* การใช้งานด้านอื่น */}
-      <div className="grid sm:grid-cols-2 gap-2.5">
-        <div className="rounded-xl border border-slate-200 p-3">
-          <div className="text-xs font-medium text-slate-600 mb-2">🛍 เว็บร้าน (Store)</div>
-          <div className="text-sm text-slate-700">{data.store.listings > 0 ? `ลงขายบนเว็บ ${data.store.listings} รายการ` : <span className="text-slate-400">ยังไม่ได้ลงเว็บร้าน</span>}</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 p-3">
-          <div className="text-xs font-medium text-slate-600 mb-2">🎬 งานครีเอทีฟ</div>
-          <div className="text-xs text-slate-600 space-y-0.5">
-            <div>งาน/ถ่าย/โพสต์: <b className="tabular-nums">{c.tasks}</b></div>
-            <div>คอนเทนต์: <b className="tabular-nums">{c.content}</b> · โปรเจกต์: <b className="tabular-nums">{c.projects}</b> · บอร์ด: <b className="tabular-nums">{c.boards}</b></div>
-          </div>
-        </div>
-      </div>
-
-      <p className="text-[11px] text-slate-400">💡 ตัวเลขรวมจากทั้งระบบ — เจาะดูรายละเอียดได้ที่แต่ละแท็บ/โมดูล</p>
+      {/* 🔗 ทุกรายการที่ผูกกับรุ่นนี้ (ทะเบียนกลาง lib/parent-links-registry) — แทนกล่องนับ "เว็บร้าน/งานครีเอทีฟ" เดิม (เจ้าของขอ 2026-11-11) */}
+      <ParentLinkedRecords parentId={parentId} />
     </div>
   );
 }

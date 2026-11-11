@@ -1,0 +1,269 @@
+/**
+ * ทะเบียนกลาง "รายการที่ผูกกับรุ่นสินค้า (Parent SKU)" — แหล่งเดียวของแท็บภาพรวม → "รายการที่เชื่อมกับสินค้านี้"
+ *
+ * เจ้าของขอ 2026-11-11: "ตรงภาพรวมอยากให้โชว์รายการที่ลิ้งค์กับ Parent SKU นี้ทั้งหมด · ถ้ามีเพิ่มรายการใหม่ให้มาเพิ่มตรงนี้
+ *   (บางทีลืม) ทำเป็นของกลาง · ต้องเชื่อมกลับได้ กดไปที่รายการนั้นได้ · ถ้าเป็นงาน creative หรือ Content อยากให้โชว์รูปด้วย"
+ *
+ * วิธีเพิ่มแหล่งใหม่: ใส่ 1 ก้อนใน PARENT_LINK_SOURCES (ตาราง · วิธีผูก · หน้าตาแถว · ลิงก์) — หน้าจอ/API ไม่ต้องแก้
+ * กันลืม: เทสต์ lib/__tests__/parent-links-registry.test.ts อ่าน supabase/migrations ทุกไฟล์
+ *   ตารางไหนมีคอลัมน์ parent_sku* แต่ไม่อยู่ในทะเบียนนี้ และไม่อยู่ใน PARENT_LINK_IGNORED (พร้อมเหตุผล) → เทสต์ไม่ผ่าน
+ * ผู้ใช้: lib/parent-links-server (อ่านข้อมูลตามทะเบียน) → GET /api/parent-skus/[id]/links → components/parent-linked-records
+ * ฝั่ง server เท่านั้น (มีฟังก์ชันแปลงแถว) — หน้าเว็บได้แค่ผลลัพธ์จาก API
+ */
+
+export type LinkGroup = "creative" | "design" | "production" | "sales" | "web" | "marketing" | "purchase";
+
+export const LINK_GROUPS: { key: LinkGroup; label: string; icon: string }[] = [
+  { key: "creative", label: "งานครีเอทีฟ / คอนเทนต์", icon: "🎬" },
+  { key: "design", label: "ออกแบบ / แพทเทิร์น", icon: "📐" },
+  { key: "production", label: "ผลิต", icon: "🏭" },
+  { key: "sales", label: "ขาย / แพลตฟอร์ม", icon: "🏬" },
+  { key: "web", label: "เว็บร้าน", icon: "🛍" },
+  { key: "marketing", label: "การตลาด", icon: "📣" },
+  { key: "purchase", label: "จัดซื้อ", icon: "🛒" },
+];
+
+/** วิธีหาแถวที่ผูกกับรุ่นนี้ (ใช้หลายวิธีได้ ระบบรวม + ตัดซ้ำด้วย id) */
+export type LinkMatch =
+  | { by: "parent_id"; column: string }                       // คอลัมน์เก็บ id ของ Parent
+  | { by: "parent_code"; column: string }                     // คอลัมน์ข้อความเก็บรหัส Parent
+  | { by: "parent_codes"; column: string }                    // คอลัมน์ jsonb array (["WK46", ...]) ที่มีรหัส Parent อยู่
+  | { by: "sku_ids"; column: string }                         // คอลัมน์เก็บ id ของ SKU ลูก
+  | { by: "sku_codes"; column: string }                       // คอลัมน์เก็บรหัส SKU ลูก
+  | { by: "via"; table: string; parentColumn: string; idColumn: string };   // ตารางเชื่อม: parent id → id ของตารางหลัก
+
+export type LinkOpen = { kind: "listing" | "mo"; id: string };
+export type LinkItem = {
+  id: string; title: string; sub?: string | null; date?: string | null; status?: string | null;
+  /** รูป: key ใน R2 หรือ url ตรง (http) */
+  image?: { key?: string | null; url?: string | null } | null;
+  href?: string | null; external?: boolean;
+  /** เปิดป๊อปของกลางแทนการไปหน้าอื่น (รายการบนร้าน = ListingDrawer · ใบสั่งผลิต = MoStatusModal) */
+  open?: LinkOpen | null;
+};
+
+type Row = Record<string, unknown>;
+export type ParentLinkSource = {
+  key: string; group: LinkGroup; label: string; icon: string;
+  table: string; select: string; match: LinkMatch[];
+  order?: { column: string; ascending?: boolean };
+  /** กรองเพิ่ม: คอลัมน์ที่ต้องไม่เป็น false (is_active) / ต้องเป็น null (trashed_at) */
+  notFalse?: string; mustBeNull?: string;
+  /** โชว์เป็นกริดรูป (งานครีเอทีฟ/คอนเทนต์/รูปในคลัง) */
+  thumbnails?: boolean;
+  /** บอกผู้ใช้ว่าดู/แก้ที่ไหน เมื่อแถวไม่มีลิงก์ของตัวเอง เช่น "ดูในแท็บผลิต" */
+  hint?: string;
+  /** ลิงก์ "ดูทั้งหมด" ของหมวดนี้ */
+  listHref?: (ctx: { parentId: string; parentCode: string }) => string | null;
+  toItem: (r: Row) => LinkItem;
+};
+
+const s = (v: unknown) => (v == null ? "" : String(v).trim());
+const join = (...xs: unknown[]) => xs.map(s).filter(Boolean).join(" · ");
+const day = (...xs: unknown[]) => { for (const x of xs) if (s(x)) return s(x).slice(0, 10); return null; };
+const firstOf = (v: unknown) => (Array.isArray(v) && v.length ? s(v[0]) || null : null);
+const isHttp = (v: unknown) => /^https?:\/\//i.test(s(v));
+
+export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
+  // ── งานครีเอทีฟ / คอนเทนต์ (มีรูป) ──
+  {
+    key: "creative_tasks", group: "creative", label: "งาน / ถ่าย / โพสต์", icon: "🗂", thumbnails: true,
+    table: "erp_creative_tasks", select: "id, task_no, title, status, due_date, created_at, cover_image_r2_key",
+    match: [
+      { by: "parent_id", column: "parent_sku_id" },
+      { by: "via", table: "erp_creative_task_parent_skus", parentColumn: "parent_sku_id", idColumn: "task_id" },
+      { by: "sku_ids", column: "sku_id" },
+    ],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.task_no, r.title) || "(ไม่มีชื่อ)", status: s(r.status) || null, date: day(r.due_date, r.created_at),
+      image: { key: s(r.cover_image_r2_key) || null }, href: `/tasks?task=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "creative_content", group: "creative", label: "คอนเทนต์", icon: "📝", thumbnails: true,
+    table: "erp_creative_content", select: "id, content_no, title, status, post_status, created_at, ref_image_keys",
+    match: [
+      { by: "parent_id", column: "parent_sku_id" },
+      { by: "via", table: "erp_creative_content_products", parentColumn: "parent_sku_id", idColumn: "content_id" },
+      { by: "sku_ids", column: "sku_id" },
+    ],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.content_no, r.title) || "(ไม่มีชื่อ)", status: s(r.post_status) || s(r.status) || null, date: day(r.created_at),
+      image: { key: firstOf(r.ref_image_keys) }, href: `/tasks/content?content=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "content_albums", group: "creative", label: "อัลบั้มคอนเทนต์", icon: "🖼", thumbnails: true,
+    table: "content_albums", select: "id, phase, due_date, created_at, picked_asset_ids", mustBeNull: "trashed_at",
+    match: [{ by: "parent_codes", column: "parent_sku_codes" }],
+    order: { column: "created_at", ascending: false },
+    // รูปปก = ไฟล์แรกที่เลือกไว้ (เติมใน lib/parent-links-server → _cover_key)
+    toItem: (r) => ({ id: s(r.id), title: `อัลบั้ม${s(r.due_date) ? ` ส่ง ${s(r.due_date)}` : ""}`, status: s(r.phase) || null, date: day(r.due_date, r.created_at),
+      image: { key: s(r._cover_key) || null }, href: `/master/assets?source=contents&album=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "assets", group: "creative", label: "ไฟล์ในคลังรูป", icon: "🗃", thumbnails: true,
+    table: "assets", select: "id, title, file_name, r2_key, status, created_at",
+    match: [{ by: "parent_codes", column: "parent_sku_codes" }],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: s(r.title) || s(r.file_name) || "(ไม่มีชื่อ)", status: s(r.status) || null, date: day(r.created_at),
+      image: { key: s(r.r2_key) || null }, href: `/master/assets?asset=${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "creative_projects", group: "creative", label: "โปรเจกต์ครีเอทีฟ", icon: "📁",
+    table: "erp_creative_projects", select: "id, code, name, status, created_at, google_slides_url, drive_folder_url",
+    match: [
+      { by: "parent_id", column: "parent_sku_id" },
+      { by: "via", table: "erp_creative_project_skus", parentColumn: "parent_sku_id", idColumn: "project_id" },
+    ],
+    toItem: (r) => {
+      const ext = s(r.google_slides_url) || s(r.drive_folder_url);
+      return { id: s(r.id), title: join(r.code, r.name) || "(ไม่มีชื่อ)", status: s(r.status) || null, date: day(r.created_at), href: ext || null, external: !!ext };
+    },
+  },
+  {
+    key: "creative_board_items", group: "creative", label: "ไอเดียบนบอร์ด", icon: "📌", thumbnails: true,
+    table: "erp_creative_board_items", select: "id, title, url, r2_key, thumbnail_url, status, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }, { by: "sku_ids", column: "sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: s(r.title) || "(ไม่มีชื่อ)", status: s(r.status) || null, date: day(r.created_at),
+      image: { key: s(r.r2_key) || null, url: isHttp(r.thumbnail_url) ? s(r.thumbnail_url) : null },
+      href: isHttp(r.url) ? s(r.url) : null, external: isHttp(r.url) }),
+  },
+
+  // ── ออกแบบ / แพทเทิร์น ──
+  {
+    key: "design_sheets", group: "design", label: "ใบออกแบบ", icon: "📐",
+    table: "design_sheets", select: "id, code, name, status, order_date, created_at",
+    match: [{ by: "parent_code", column: "parent_sku_code" }, { by: "parent_codes", column: "parent_sku_codes" }],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.code, r.name) || "(ไม่มีชื่อ)", status: s(r.status) || null, date: day(r.order_date, r.created_at),
+      href: `/master/design-dashboard/sheet/${encodeURIComponent(s(r.id))}` }),
+  },
+  {
+    key: "pattern_tickets", group: "design", label: "ตั๋วแพทเทิร์น", icon: "✂️",
+    table: "pattern_tickets", select: "id, ticket_no, title, status, due_date, assignee_name, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.ticket_no, r.title) || "(ไม่มีชื่อ)", sub: s(r.assignee_name) || null, status: s(r.status) || null,
+      date: day(r.due_date, r.created_at), href: `/design/pattern-tickets?id=${encodeURIComponent(s(r.id))}` }),
+  },
+
+  // ── ผลิต (ผูกผ่าน SKU ลูก) ──
+  {
+    key: "manufacturing_orders", group: "production", label: "ใบสั่งผลิต", icon: "🏭",
+    table: "manufacturing_orders", select: "id, mo_no, product_sku, qty, status, order_date, created_at, is_active",
+    match: [{ by: "sku_codes", column: "product_sku" }],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: s(r.mo_no), sub: join(r.product_sku, `${Number(r.qty) || 0} ชิ้น`),
+      status: r.is_active === false ? "cancelled" : s(r.status) || null, date: day(r.order_date, r.created_at), open: { kind: "mo", id: s(r.id) } }),
+  },
+  {
+    key: "bom_headers", group: "production", label: "สูตรผลิต (BOM)", icon: "🧾", notFalse: "is_active",
+    table: "bom_headers", select: "id, bom_code, product_sku, version, status, updated_at",
+    match: [{ by: "sku_codes", column: "product_sku" }],
+    hint: "ดูทุกเวอร์ชันในแท็บ “ผลิต”",
+    toItem: (r) => ({ id: s(r.id), title: join(r.bom_code, r.version), sub: s(r.product_sku) || null, status: s(r.status) || null, date: day(r.updated_at),
+      href: s(r.product_sku) ? `/master/bom?open=${encodeURIComponent(s(r.product_sku))}` : null }),
+  },
+  {
+    key: "parent_sku_issues", group: "production", label: "ปัญหาของสินค้า", icon: "⚠️", notFalse: "is_active",
+    table: "parent_sku_issues", select: "id, problem_text, sku, created_by_name, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    hint: "เพิ่ม/แก้ในแท็บ “ผลิต”",
+    toItem: (r) => ({ id: s(r.id), title: s(r.problem_text) || "(ไม่มีรายละเอียด)", sub: join(r.sku, r.created_by_name) || null, date: day(r.created_at) }),
+  },
+
+  // ── ขาย / แพลตฟอร์ม ──
+  {
+    key: "platform_catalog_listings", group: "sales", label: "สินค้าบนร้าน (จับคู่แล้ว)", icon: "🏬",
+    table: "platform_catalog_listings", select: "id, title, sku_code, status, external_product_id, created_at",
+    match: [{ by: "parent_id", column: "matched_parent_sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: s(r.title) || s(r.sku_code) || "(ไม่มีชื่อ)", sub: join(r.sku_code, s(r.external_product_id) ? `#${s(r.external_product_id)}` : ""),
+      status: s(r.status) || null, date: day(r.created_at), open: { kind: "listing", id: s(r.id) } }),
+  },
+  {
+    key: "platform_listing_drafts", group: "sales", label: "ร่างลงร้าน", icon: "📝",
+    table: "platform_listing_drafts", select: "id, title, status, last_sync_status, updated_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    hint: "แก้ในแท็บ “แพลตฟอร์ม”",
+    toItem: (r) => ({ id: s(r.id), title: s(r.title) || "(ยังไม่ตั้งชื่อ)", status: s(r.last_sync_status) || s(r.status) || null, date: day(r.updated_at) }),
+  },
+  {
+    key: "platform_order_items", group: "sales", label: "ออเดอร์จากร้าน", icon: "🧾",
+    table: "platform_order_items", select: "id, order_id, sku_code, name, qty, price",
+    match: [{ by: "parent_id", column: "matched_parent_sku_id" }, { by: "sku_ids", column: "matched_sku_id" }],
+    listHref: () => "/master/platform-orders",
+    toItem: (r) => ({ id: s(r.id), title: s(r.name) || s(r.sku_code) || "(ไม่มีชื่อ)",
+      sub: join(r.sku_code, `${Number(r.qty) || 0} × ฿${(Number(r.price) || 0).toLocaleString("th-TH")}`) }),
+  },
+
+  // ── เว็บร้าน ──
+  {
+    key: "store_listings", group: "web", label: "ลงขายบนเว็บร้าน", icon: "🛍", thumbnails: true,
+    table: "store_listings", select: "id, web_name, web_images, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    hint: "แก้ในแท็บ “เว็บไซต์”",
+    toItem: (r) => ({ id: s(r.id), title: s(r.web_name) || "รายการบนเว็บ", date: day(r.created_at), image: { key: firstOf(r.web_images) } }),
+  },
+  {
+    key: "store_print_designs", group: "web", label: "ลายสั่งพิมพ์ของลูกค้า", icon: "🖨",
+    table: "store_print_designs", select: "id, code, status, review_status, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: s(r.code) || "ลายพิมพ์", status: s(r.review_status) || s(r.status) || null, date: day(r.created_at) }),
+  },
+  {
+    key: "store_restock_requests", group: "web", label: "ลูกค้าขอให้แจ้งเมื่อของเข้า", icon: "🔔",
+    table: "store_restock_requests", select: "id, name, status, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: s(r.name) || "ลูกค้า", status: s(r.status) || null, date: day(r.created_at) }),
+  },
+  {
+    key: "store_wishlists", group: "web", label: "ลูกค้ากดถูกใจ", icon: "❤️",
+    table: "store_wishlists", select: "id, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: "ถูกใจ", date: day(r.created_at) }),
+  },
+
+  // ── การตลาด ──
+  {
+    key: "marketing_skus", group: "marketing", label: "อยู่ในรายการสินค้าการตลาด", icon: "📣",
+    table: "marketing_skus", select: "id, note, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    listHref: () => "/marketing/skus",
+    toItem: (r) => ({ id: s(r.id), title: s(r.note) || "รายการสินค้าการตลาด", date: day(r.created_at), href: "/marketing/skus" }),
+  },
+  {
+    key: "marketing_work_job_items", group: "marketing", label: "งานโปรโมชัน / ตั้งราคา", icon: "🏷",
+    table: "marketing_work_job_items", select: "id, job_id, note, created_at",
+    match: [{ by: "parent_id", column: "parent_sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: s(r.note) || "งานการตลาด", date: day(r.created_at),
+      href: s(r.job_id) ? `/marketing/skus?job=${encodeURIComponent(s(r.job_id))}` : "/marketing/skus" }),
+  },
+
+  // ── จัดซื้อ ──
+  {
+    key: "taobao_products", group: "purchase", label: "สินค้าจาก Taobao", icon: "🛒", thumbnails: true,
+    table: "taobao_products", select: "id, translated_name, original_name, image_url, taobao_url, status, created_at",
+    match: [{ by: "parent_id", column: "matched_parent_sku_id" }, { by: "sku_ids", column: "matched_sku_id" }],
+    toItem: (r) => ({ id: s(r.id), title: s(r.translated_name) || s(r.original_name) || "(ไม่มีชื่อ)", status: s(r.status) || null, date: day(r.created_at),
+      image: { url: isHttp(r.image_url) ? s(r.image_url) : null }, href: isHttp(r.taobao_url) ? s(r.taobao_url) : null, external: isHttp(r.taobao_url) }),
+  },
+];
+
+/**
+ * ตารางที่มีคอลัมน์ parent_sku* แต่ตั้งใจ "ไม่" โชว์ (พร้อมเหตุผล) — เทสต์กันลืมจะข้ามตารางพวกนี้
+ * ตารางเชื่อม (via) ไม่ต้องใส่ — นับว่าอยู่ในทะเบียนแล้ว
+ */
+export const PARENT_LINK_IGNORED: Record<string, string> = {
+  platform_email_sku_rules: "กฎจับคู่อีเมลออเดอร์ (ตั้งค่าระบบ ไม่ใช่เอกสาร)",
+  platform_publish_jobs: "คิวส่งขึ้นร้านของระบบ (ดูผลในแท็บแพลตฟอร์ม)",
+  marketing_sku_badge_map: "ป้ายบนการ์ดการตลาด (ตั้งค่า ไม่ใช่เอกสาร)",
+};
+
+/** ตารางทั้งหมดที่ทะเบียนนี้ครอบคลุม (รวมตารางเชื่อม) — ใช้ในเทสต์ */
+export function registeredLinkTables(): Set<string> {
+  const out = new Set<string>();
+  for (const src of PARENT_LINK_SOURCES) {
+    out.add(src.table);
+    for (const m of src.match) if (m.by === "via") out.add(m.table);
+  }
+  return out;
+}
