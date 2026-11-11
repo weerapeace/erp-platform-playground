@@ -29,6 +29,8 @@ import { GifInbox, type GifPoke } from "./gif-inbox";
 import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
 import type { LinePendingPayload } from "@/lib/line-pending";
 import { inboxCount, type InboxItem, type InboxPayload } from "@/lib/task-inbox";
+import { groupMyPlan, planPetCount, planPetNews } from "@/lib/team-plan-pet";
+import type { PlanItem } from "@/lib/team-plan";
 import { BellTab } from "./bell-tab";
 import { useNotificationFeed } from "@/components/notification-bell/feed";
 import { useNotifyPrefs } from "@/components/notify-settings";
@@ -44,6 +46,9 @@ const GifPokeModal = dynamic(() => import("@/app/tasks/gif-poke-modal").then((m)
 // แท็บ Task (งาน Task Manager ที่รอฉัน) + แผงตรวจเร็ว — โหลดเฉพาะตอนมีงาน/เปิดดู (ไม่ถ่วงทุกหน้า)
 const TaskInboxTab = dynamic(() => import("./task-inbox").then((m) => m.TaskInboxTab), { ssr: false });
 const TaskInboxQuickCheck = dynamic(() => import("./task-inbox").then((m) => m.TaskInboxQuickCheck), { ssr: false });
+// แท็บ แผนงาน (แผนงานทีมของฉัน) + ป๊อปแก้งาน — โหลดเฉพาะตอนมีงาน/เปิดดู
+const PlanTab = dynamic(() => import("./plan-tab").then((m) => m.PlanTab), { ssr: false });
+const PlanItemEditor = dynamic(() => import("./plan-tab").then((m) => m.PlanItemEditor), { ssr: false });
 // แท็บ ขึ้นเว็บ (ผู้ดูแลระบบ) — โหลดเฉพาะตอนเปิดดู
 const DeployTab = dynamic(() => import("./deploy-tab").then((m) => m.DeployTab), { ssr: false });
 const RECHECK_MS = 30 * 60_000;
@@ -344,7 +349,7 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
-  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches" | "tasks" | "deploy">("work");
+  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches" | "tasks" | "plan" | "deploy">("work");
   // ตั้งค่าการแจ้งเตือนต่อคน (หน้าต่างตัว Pet → การแจ้งเตือน · lib/notify-sources): โชว์ในศูนย์ / ตัว Pet เด้งบอก / ห้ามรบกวน
   const [notifyPrefs] = useNotifyPrefs();
   const showIn = (key: string) => notifyOn(notifyPrefs, key, "center");
@@ -436,6 +441,42 @@ export function WorkPopupHost() {
     ? [...inbox.review, ...inbox.revision].filter((it) => !taskSeen.has(`${it.id}:${it.status}`))
     : [];
 
+  // ── แท็บ แผนงาน: งานแผนงานทีมของฉัน (GET /api/team-plan?mine=1 · กลุ่ม/คำพูด lib/team-plan-pet) ──
+  // ถามทุก 3 นาที · นาฬิกาในเครื่องเดินทุก 1 นาที (ถึงเวลาเตือน/เลยกำหนด → ตัว Pet พูดได้ทันที ไม่ต้องรอถามเซิร์ฟเวอร์)
+  // ตัวนับ = เกินกำหนด + ครบวันนี้ · เปิดแท็บนี้อยู่ → เรื่องแผนงานในแท็บกระดิ่งไม่ขึ้นซ้ำ (เด้งที่เครื่องยังเหมือนเดิม)
+  const planOn = enabled && showIn("plan") && tabOn("plan");
+  const planOnRef = useRef(planOn);
+  planOnRef.current = planOn;
+  const [planItems, setPlanItems] = useState<PlanItem[] | null>(null);
+  const [planEdit, setPlanEdit] = useState<PlanItem | null>(null);   // ป๊อปแก้งาน (วางนอกการ์ด)
+  const [planNow, setPlanNow] = useState(() => Date.now());
+  const loadPlan = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const r = await apiFetch("/api/team-plan?mine=1");
+      if (!r.ok) return;   // ไม่มีสิทธิ์ดูงาน = แท็บไม่ขึ้น
+      const j = (await r.json()) as { data?: PlanItem[] };
+      setPlanItems(Array.isArray(j.data) ? j.data : []);
+    } catch { /* เงียบ */ }
+  }, [uid]);
+  useEffect(() => {
+    if (!uid || skip || !planOn || !wide) { if (!planOn) setPlanItems(null); return; }
+    const first = setTimeout(() => void loadPlan(), 4500);
+    const iv = window.setInterval(() => { if (document.visibilityState === "visible") void loadPlan(); }, POKE_POLL_MS);
+    const tick = window.setInterval(() => setPlanNow(Date.now()), 60_000);
+    return () => { clearTimeout(first); window.clearInterval(iv); window.clearInterval(tick); };
+  }, [uid, skip, planOn, wide, loadPlan]);
+  useRefresh(() => { if (wide && planOn && !skip) void loadPlan(); });
+  const planGroups = planOn && planItems && uid ? groupMyPlan(planItems, uid, new Date(planNow)) : null;
+  const planCount = planPetCount(planGroups);
+  const planTabOn = !!planGroups && Object.values(planGroups).some((l) => l.length > 0);
+  const planSeenKey = uid ? `fpet-plan-seen:${uid}` : "";
+  const [planSeen, setPlanSeen] = useState<Set<string>>(new Set());
+  useEffect(() => { if (planSeenKey) setPlanSeen(readIds(planSeenKey)); }, [planSeenKey]);
+  const newPlan = planOn && bounceOn("plan") && planItems && uid
+    ? planPetNews(planItems, uid, new Date(planNow)).filter((n) => !planSeen.has(n.key))
+    : [];
+
   // ── แท็บ ของฉัน: การเตือนที่ตั้งเอง (components/my-watches · GET /api/my-watches) — โหลดพร้อมรอบ GIF ──
   const watchesOn = enabled && showIn("watches") && tabOn("watches");
   const [watchPref] = useMyWatches();
@@ -496,7 +537,7 @@ export function WorkPopupHost() {
 
   // ── แท็บ กระดิ่ง: แจ้งเตือนที่ยังไม่อ่าน (ตัวดึงกลางเดียวกับกระดิ่งบนแถบ) เฉพาะประเภทที่เปิดโชว์ในศูนย์ ──
   const feed = useNotificationFeed(wide && enabled && !skip && tabOn("bell") ? uid : null);
-  const bellItems = !tabOn("bell") ? [] : feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k); });
+  const bellItems = !tabOn("bell") ? [] : feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k) && !(k === "bell.team_plan" && planOn); });
   const bellSeenKey = uid ? `fpet-bell-seen:${uid}` : "";
   const [bellSeen, setBellSeen] = useState<Set<string>>(new Set());
   useEffect(() => { if (bellSeenKey) setBellSeen(readIds(bellSeenKey)); }, [bellSeenKey]);
@@ -507,8 +548,9 @@ export function WorkPopupHost() {
     if (tab === "line" && newLine.length) { const n = new Set([...lineSeen, ...newLine.map((x) => x.id)]); setLineSeen(n); saveIds(lineSeenKey, n); }
     if (tab === "bell" && newBell.length) { const n = new Set([...bellSeen, ...newBell.map((x) => x.id)]); setBellSeen(n); saveIds(bellSeenKey, n); }
     if (tab === "tasks" && newTasks.length) { const n = new Set([...taskSeen, ...newTasks.map((x) => `${x.id}:${x.status}`)]); setTaskSeen(n); saveIds(taskSeenKey, n); }
+    if (tab === "plan" && newPlan.length) { const n = new Set([...planSeen, ...newPlan.map((x) => x.key)]); setPlanSeen(n); saveIds(planSeenKey, n); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, tab, uid, newLine.length, newBell.length, newTasks.length]);
+  }, [expanded, tab, uid, newLine.length, newBell.length, newTasks.length, newPlan.length]);
   const dismissPoke = (id: string) => {
     setPokes((ps) => ps.filter((p) => p.id !== id));
     void apiFetch("/api/gif-poke", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
@@ -576,11 +618,11 @@ export function WorkPopupHost() {
       const age = Date.now() - lastCheck.current;
       if (age > RECHECK_MS) void check();
       else if (wide && queueLenRef.current > 0 && age > 60_000) void check(undefined, true);
-      if (wide && age > 60_000) { void loadPokes(); void loadLine(); if (tasksOnRef.current) void loadInbox(); }
+      if (wide && age > 60_000) { void loadPokes(); void loadLine(); if (tasksOnRef.current) void loadInbox(); if (planOnRef.current) void loadPlan(); }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [uid, skip, check, wide, loadPokes, loadLine, loadInbox]);
+  }, [uid, skip, check, wide, loadPokes, loadLine, loadInbox, loadPlan]);
 
   // จอคอม: แสดงตัวที่ถึงเวลาก่อน ไม่มีก็ตัวแรก (เป็นปุ่มเล็ก) · จอเล็ก: เฉพาะตัวที่ถึงเวลา (หน้าต่างกลางจอแบบเดิม)
   const cur = (wide ? (queue.find((x) => x.due) ?? queue[0]) : queue.find((x) => x.due !== false)) ?? null;
@@ -651,7 +693,7 @@ export function WorkPopupHost() {
   const gifOn = enabled && showIn("gif") && tabOn("gif");
   const gifCount = gifOn ? pokes.length : 0;
   const bellCount = enabled ? bellItems.length : 0;
-  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn || deployOn)));
+  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn || planTabOn || deployOn)));
   const tabs: FloatTab[] = [
     ...(workTabOn && cur ? [{
       key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer, flush: true,
@@ -660,6 +702,10 @@ export function WorkPopupHost() {
     ...(taskTabOn ? [{
       key: "tasks", label: "Task", icon: "inspect", count: taskCount, subtitle: "งาน Task Manager ที่รอคุณ",
       content: <TaskInboxTab data={inbox} onGo={go} onQuickCheck={(item, mode) => setQc({ item, mode })} onChanged={() => void loadInbox()} />,
+    }] : []),
+    ...(planTabOn && uid ? [{
+      key: "plan", label: "แผนงาน", icon: "calendar", count: planCount, subtitle: "แผนงานทีม · งานของฉัน",
+      content: <PlanTab items={planItems} me={uid} onChanged={() => void loadPlan()} onOpen={setPlanEdit} onGo={go} />,
     }] : []),
     ...(enabled && lineCount > 0 ? [{
       key: "line", label: "LINE", icon: "chat", count: lineCount, subtitle: "ส่งเข้ากลุ่มไลน์แล้ว รอคนจัดการ",
@@ -691,17 +737,20 @@ export function WorkPopupHost() {
   const alertBell = enabled && newBell.length > 0;
   const alertWatch = watchCount > 0 && newWatch.length > 0;
   const alertTasks = taskTabOn && newTasks.length > 0;
+  const alertPlan = planTabOn && newPlan.length > 0;
   const alertDeploy = !!newDeploy;
-  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks || alertDeploy);
+  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks || alertPlan || alertDeploy);
   // ตัวเลขบนตัว Pet ไม่นับงานรอขึ้นเว็บ (ไม่ใช่งานของคน) — แต่ตอนมีเรื่องขึ้นเว็บใหม่ ตัว Pet ต้องตื่นมาพูด
-  const total = workCount + gifCount + lineCount + bellCount + watchCount + taskCount;
+  const total = workCount + gifCount + lineCount + bellCount + watchCount + taskCount + planCount;
   const petState = {
     mood: petMood({ total: total + (alertDeploy ? 1 : 0), alert: petAlert }),
     badge: petBadge(total),
     bubble: quietNow ? null
       : alertWork ? pill
       : alertDeploy && newDeploy ? newDeploy.text
+      : alertPlan && newPlan[0].kind === "overdue" ? newPlan[0].text
       : alertTasks ? `${newTasks[0].status === "revision" ? "งานถูกตีกลับ" : "งานรอคุณตรวจ"}: ${newTasks[0].task_no ?? ""} ${newTasks[0].title}`.trim()
+      : alertPlan ? newPlan[0].text
       : alertBell ? newBell[0].title
       : alertWatch ? `${newWatch[0].watch}: ${newWatch[0].title}`
       : alertLine ? `ไลน์: ${newLine[0].title}`
@@ -712,16 +761,17 @@ export function WorkPopupHost() {
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {wide ? (floatOn && tabs.length > 0 && (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" || k === "tasks" || k === "deploy" ? k : "work")} pet={petState}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" || k === "tasks" || k === "plan" || k === "deploy" ? k : "work")} pet={petState}
           onMinimize={collapse}
           onExpand={() => {
             setExpanded(true);
             // เปิดแท็บของเรื่องที่ทำให้ตัว Pet เด้งก่อน
-            setTab(alertWork ? "work" : alertDeploy ? "deploy" : alertTasks ? "tasks" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : "gif");
+            setTab(alertWork ? "work" : alertDeploy ? "deploy" : alertPlan && newPlan[0].kind === "overdue" ? "plan" : alertTasks ? "tasks" : alertPlan ? "plan" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : planCount > 0 ? "plan" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : planTabOn ? "plan" : "gif");
             if (cur) void check(undefined, true);
             void loadPokes();
             void loadLine();
             if (tasksOn) void loadInbox();
+            if (planOn) void loadPlan();
             void feed.refresh();
             if (hasWatches) void reloadWatches();
             if (deployOn) void reloadDeploy();
@@ -740,6 +790,8 @@ export function WorkPopupHost() {
       )}
       {/* แผงตรวจเร็วของงานจากแท็บ Task — อยู่นอกการ์ด (การ์ดยุบตอนกดข้างนอก แผงยังเปิดอยู่) */}
       {qc && <TaskInboxQuickCheck item={qc.item} mode={qc.mode} onClose={() => setQc(null)} onDone={() => void loadInbox()} />}
+      {/* ป๊อปแก้งานแผนงาน (ตัวเดิมของหน้าแผนงาน) — อยู่นอกการ์ดเหมือนกัน */}
+      {planEdit && uid && <PlanItemEditor item={planEdit} me={uid} onClose={() => setPlanEdit(null)} onDone={() => void loadPlan()} />}
       {gifModal && (
         <GifPokeModal open onClose={() => setGifModal(null)} onSent={() => { setGifModal(null); toast.success("ส่ง GIF แล้ว"); }} isAdmin={user?.role === "admin"}
           prefillRecipient={gifModal.reply ? ({ id: gifModal.reply.from_user_id, name: gifModal.reply.from_name ?? "", code: null } as unknown as UserPickerValue) : null} />

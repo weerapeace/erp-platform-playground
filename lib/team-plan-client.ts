@@ -14,6 +14,8 @@ export type PlanPatch = Partial<{
   title: string; note: string | null; priority: Priority; due_at: string | null; assigned_to: string | null;
   status: "open" | "resolved"; important: boolean; star: boolean; waiting: { note: string } | null;
   repeat: RepeatRule | null; remind: RemindMode;
+  /** เตือนอีกครั้ง (กำหนดส่งไม่เปลี่ยน): "1h" = อีก 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 */
+  snooze: "1h" | "tomorrow";
 }>;
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -25,6 +27,8 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 export const listPlanItems = () => call<{ data: PlanItem[] }>("/api/team-plan").then((j) => j.data ?? []);
+/** เฉพาะงานของฉัน (แท็บแผนงานในศูนย์แจ้งเตือน) */
+export const listMyPlanItems = () => call<{ data: PlanItem[] }>("/api/team-plan?mine=1").then((j) => j.data ?? []);
 export const createPlanItem = (d: PlanDraft) => call<{ data: PlanItem }>("/api/team-plan", json("POST", d)).then((j) => j.data);
 export const patchPlanItem = (id: string, p: PlanPatch) =>
   call<{ data: PlanItem; next: PlanItem | null }>(`/api/team-plan/${encodeURIComponent(id)}`, json("PATCH", p)).then((j) => ({ item: j.data, next: j.next }));

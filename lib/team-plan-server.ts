@@ -36,7 +36,14 @@ export function toPlanItem(r: PlanRow, names: Map<string, string>): PlanItem {
     created_by: r.created_by, created_at: r.created_at, updated_at: r.updated_at,
     resolved_by: r.resolved_by, resolved_at: r.resolved_at,
     links: linksOf(r.metadata), plan: normalizePlanMeta(r.metadata?.plan),
+    snooze_until: normalizePlanSent(r.metadata?.plan_sent).snooze_until ?? null,
   };
+}
+
+/** "เตือนอีกครั้ง" — ค่าที่ต้องเขียนลง metadata.plan_sent (ใช้ร่วม ปุ่มบนแจ้งเตือนมือถือ + แท็บแผนงานในศูนย์แจ้งเตือน) · ตัวตั้งเวลาเตือนตอนถึงเวลา */
+export function snoozeMetadata(metadata: Record<string, unknown> | null, until: Date): Record<string, unknown> {
+  const sent = { ...normalizePlanSent(metadata?.plan_sent), snooze_until: until.toISOString(), snooze_sent: null };
+  return { ...(metadata ?? {}), plan_sent: sent };
 }
 
 export const planLink = (id: string) => `/tasks/plan?item=${encodeURIComponent(id)}`;

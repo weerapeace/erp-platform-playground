@@ -2,6 +2,7 @@
  * 📋 แผนงานทีม (Todo ตามความด่วน) — /api/team-plan
  *
  * GET  → { data: PlanItem[] } งานที่ยังไม่เสร็จทั้งหมด + งานที่เสร็จใน 7 วันล่าสุด (ทั้งทีม · หน้าเว็บกรอง "ของฉัน" เอง)
+ *      ?mine=1 = เฉพาะงานของฉัน (แท็บแผนงานในศูนย์แจ้งเตือน)
  * POST body { title, note?, priority?, due_at?, assigned_to?, important?, remind?, repeat?, waiting_note?, source?, links? } → สร้าง 1 งาน
  *      มอบให้คนอื่น → กระดิ่งเด้งบอกคนนั้น (+ มือถือ ถ้าเปิดรับ)
  *
@@ -23,6 +24,10 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
+  // ?mine=1 = เฉพาะงานของฉัน (ผู้รับผิดชอบคือฉัน หรือไม่มีผู้รับผิดชอบแต่ฉันสร้าง) — แท็บแผนงานในศูนย์แจ้งเตือนใช้
+  const mine = new URL(request.url).searchParams.get("mine") === "1";
+  const me = mine ? (await supabaseFromRequest(request).auth.getUser()).data.user?.id ?? null : null;
+  if (mine && !me) return NextResponse.json({ data: [], error: null });
   const admin = supabaseAdmin();
   const since = new Date(Date.now() - 7 * 86400e3).toISOString();
   const { data, error } = await admin.from("erp_record_tasks").select(PLAN_COLS)
@@ -30,7 +35,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .or(`status.neq.resolved,resolved_at.gte.${since}`)
     .order("created_at", { ascending: true }).limit(2000);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  const rows = (data ?? []) as PlanRow[];
+  const all = (data ?? []) as PlanRow[];
+  const rows = me ? all.filter((r) => (r.assigned_to ?? normalizePlanMeta(r.metadata?.plan).created_by_id) === me) : all;
   const names = await userNames(admin, rows.map((r) => r.assigned_to));
   return NextResponse.json({ data: rows.map((r) => toPlanItem(r, names)), error: null });
 }

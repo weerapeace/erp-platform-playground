@@ -53,6 +53,8 @@ export type PlanItem = {
   created_by: string | null; created_at: string; updated_at: string;
   resolved_by: string | null; resolved_at: string | null;
   links: TaskLink[]; plan: PlanMeta;
+  /** กด "เตือนอีกครั้ง" ไว้ถึงเมื่อไหร่ (metadata.plan_sent.snooze_until) — ตัว Pet ใช้พูดเตือนตอนถึงเวลา */
+  snooze_until?: string | null;
 };
 export const isPlanDone = (t: { status: string }) => t.status === "resolved";
 

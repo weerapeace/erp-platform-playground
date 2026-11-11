@@ -56,6 +56,7 @@ export function nextWidthPreset(w: number, room = Infinity): number {
 export const CENTER_TABS: { key: string; label: string; icon: string; perm?: string[] }[] = [
   { key: "work", label: "งาน", icon: "list" },
   { key: "tasks", label: "Task", icon: "inspect", perm: ["tasks.view"] },
+  { key: "plan", label: "แผนงาน", icon: "calendar", perm: ["tasks.view"] },
   { key: "line", label: "LINE", icon: "chat", perm: ["products.view", "po.view"] },
   { key: "bell", label: "กระดิ่ง", icon: "notify" },
   { key: "watches", label: "ของฉัน", icon: "star" },

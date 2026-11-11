@@ -2,7 +2,8 @@
  * 📋 แผนงานทีม — แก้/ลบ 1 งาน
  * PATCH /api/team-plan/[id] body (ส่งเฉพาะที่เปลี่ยน):
  *   { title?, note?, priority?, due_at? (null = ไม่กำหนด), assigned_to? (null = ไม่ระบุ), status? ("open"|"resolved"),
- *     important?, star? (true = ⭐ งานหลักวันนี้ · สูงสุด 3 ต่อคนต่อวัน), waiting? (null | { note }), repeat? (null | { every, n }), remind?, links? }
+ *     important?, star? (true = ⭐ งานหลักวันนี้ · สูงสุด 3 ต่อคนต่อวัน), waiting? (null | { note }), repeat? (null | { every, n }), remind?, links?,
+ *     snooze? ("1h" = เตือนอีกครั้งใน 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 — กำหนดส่งไม่เปลี่ยน · ตัวตั้งเวลาเตือนตอนถึงเวลา) }
  *   ติ๊กเสร็จงานทำซ้ำ → สร้างรอบถัดไปให้ (คืน next) · มอบให้คนใหม่ → กระดิ่งบอกคนนั้น
  * DELETE /api/team-plan/[id]  — คนสร้าง หรือคนที่มีสิทธิ์ tasks.delete
  * สิทธิ์แก้ tasks.edit · ทุกครั้งเขียนประวัติ (audit_logs entity record_task)
@@ -14,9 +15,9 @@ import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { isUuid, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
-import { todayBangkok } from "@/lib/date";
+import { addDaysYmd, todayBangkok } from "@/lib/date";
 import { asPriority, dueLabel, MAX_STARS, normalizePlanMeta, starCountFor, TEAM_PLAN_MODULE } from "@/lib/team-plan";
-import { createNextRepeat, notifyPlanAssignee, PLAN_COLS, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
+import { createNextRepeat, notifyPlanAssignee, PLAN_COLS, snoozeMetadata, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -103,7 +104,15 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     if (!Array.isArray(body.links)) return NextResponse.json({ error: "ลิงก์ไม่ถูกต้อง" }, { status: 400 });
     meta.links = normalizeTaskLinks(body.links);
   }
-  if (planChanged || body.links !== undefined) patch.metadata = meta;
+  // เตือนอีกครั้ง (ไม่เปลี่ยนกำหนดส่ง) — ค่าเดียวกับปุ่มบนแจ้งเตือนมือถือ (snoozeMetadata)
+  let snoozeUntil: string | null = null;
+  if (body.snooze !== undefined) {
+    if (body.snooze !== "1h" && body.snooze !== "tomorrow") return NextResponse.json({ error: "ตัวเลือกเตือนอีกครั้งไม่ถูกต้อง" }, { status: 400 });
+    const until = body.snooze === "1h" ? new Date(now.getTime() + 3600e3) : new Date(`${addDaysYmd(todayBangkok(now), 1)}T09:00:00+07:00`);
+    Object.assign(meta, { plan_sent: snoozeMetadata(meta, until).plan_sent });
+    snoozeUntil = until.toISOString();
+  }
+  if (planChanged || body.links !== undefined || snoozeUntil) patch.metadata = meta;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีอะไรให้แก้" }, { status: 400 });
 
   const { data, error } = await admin.from("erp_record_tasks").update(patch).eq("id", id).select(PLAN_COLS).single();
@@ -112,7 +121,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
 
   const { metadata: _m, ...changes } = patch;
   await writeAudit(admin, { action: "update", entityType: "record_task", entityId: id, actorId: user.id, actorName,
-    metadata: { module_key: TEAM_PLAN_MODULE, title: before.title, ...changes, ...(planChanged ? { plan } : {}), ...(body.links !== undefined ? { links: meta.links } : {}) } });
+    metadata: { module_key: TEAM_PLAN_MODULE, title: before.title, ...changes, ...(planChanged ? { plan } : {}), ...(body.links !== undefined ? { links: meta.links } : {}), ...(snoozeUntil ? { snooze_until: snoozeUntil } : {}) } });
 
   if (body.assigned_to !== undefined && row.assigned_to && row.assigned_to !== before.assigned_to) {
     await notifyPlanAssignee(admin, { id, title: row.title, assigned_to: row.assigned_to, due_label: dueLabel(row.due_at, now) }, { id: user.id, name: actorName });
