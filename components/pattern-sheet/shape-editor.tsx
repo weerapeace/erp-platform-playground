@@ -229,7 +229,6 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [sewP, setSewP] = useState<{ pid: string; i: number; n: number; at: number } | null>(null);   // เย็บบางช่วง: จุดเริ่มของช่วงแรก (รอกดจุดจบบนขอบเดียวกัน)
   const [manyA, setManyA] = useState<{ pid: string; i: number; n: number; at: number; dir: 1 | -1; group: string; made: number } | null>(null);   // เย็บ 1 ขอบกับหลายชิ้น: ขอบหลัก + ตำแหน่งที่ช่วงถัดไปจะเริ่ม + ทิศที่ไล่ไปตามขอบ
   const sewTool = tool === "sew" || tool === "sewpart" || tool === "sewmany" || tool === "sewedit";
-  const [lastDraw, setLastDraw] = useState<DrawTool>("rect");
   const [snap, setSnapState] = useState<number>(1);
   const [lastAllow, setLastAllow] = useState(0);
   const [view, setView] = useState<View>({ x: -2, y: -2, w: 62 });
@@ -353,7 +352,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if ((tl === "sew" || tl === "sewpart" || tl === "sewmany" || tl === "sewedit") && !seams) return;
     if (tl === "inner" && (!innerLines || readonly)) return;
     setInnerA(null);
-    setTool(tl); if (tl === "rect" || tl === "ellipse" || tl === "pen") setLastDraw(tl); setPen(null); setBox(null); setMDraft(null); if (tl !== "move") setEditId(null);
+    setTool(tl); setPen(null); setBox(null); setMDraft(null); if (tl !== "move") setEditId(null);
     setSewA(null); setSewP(null); setManyA(null); if (tl !== "sewedit") setEdgeSel(null); if (tl !== "sewedit" && tl !== "sewpart") setSewSel(null);
     if (tl === "sew" || tl === "sewpart" || tl === "sewmany" || tl === "sewedit") { setPanelOpen(true); setNotchMode(false); }
   };
@@ -424,7 +423,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     setMsg(null);
     const capture = () => { try { svgRef.current?.setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์ */ } };
-    if (e.button === 1 || tool === "hand" || spaceDown.current) { drag.current = { k: "pan", sx: e.clientX, sy: e.clientY, v: view }; capture(); e.preventDefault(); return; }
+    const startPan = () => { drag.current = { k: "pan", sx: e.clientX, sy: e.clientY, v: view }; capture(); };
+    // ถือ "เลื่อนดู" แล้วกดบนชิ้น = เลือก/ย้ายชิ้นนั้นได้เลย (กลับเป็น "ย้าย" เอง) — กดที่ว่าง = เลื่อนกระดาน
+    const handOnPiece = tool === "hand" && e.button === 0 && !spaceDown.current && !readonly && !!(e.target as Element).getAttribute?.("data-piece");
+    if (e.button === 1 || (tool === "hand" && !handOnPiece) || spaceDown.current) { startPan(); e.preventDefault(); return; }
     if (e.button !== 0) return;
     const raw = toCm(e), p = snapPt(raw);
     const target = e.target as Element;
@@ -440,7 +442,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if (!innerA) {
         const hit = [...piecesRef.current].reverse().find((pc) => !hidePids?.has(pc.pid) && pointInPolygon([p.x, p.y], flattenShape(pc.shape)));
-        if (!hit) { setMsg({ tone: "err", text: t("กดจุดแรกข้างในชิ้นที่จะใส่เส้นใน", "Click the first point inside the piece that gets the line") }); return; }
+        if (!hit) { startPan(); return; }   // กดนอกชิ้น = ลากเลื่อนกระดาน (ไม่เปลี่ยนเครื่องมือ) — เส้นในเริ่มได้เฉพาะข้างในชิ้น
         setInnerA({ id: hit.id, p }); setInnerSel(null); setSel(hit.id); setMulti(new Set()); return;
       }
       const q = e.shiftKey ? constrain45(innerA.p, p) : p;
@@ -456,7 +458,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if (se) { const [id, which, k] = se.split(":"); drag.current = { k: "seam", mode: "end", id, which: which === "b" ? "b" : "a", end: k === "1" ? 1 : 0, off: 0, moved: false }; capture(); }
       else if (ss) { const [id, which] = ss.split(":"); if (seamGrab(id, which === "b" ? "b" : "a", raw)) capture(); }
       else if (ed) { if (tool === "sewpart") sewPartClick(ed, raw); else if (tool === "sewmany") sewManyClick(ed, raw); else sewClick(ed, e.shiftKey); }
-      else if (tool !== "sew") { setSewSel(null); setEdgeSel(null); }
+      else { if (tool !== "sew") { setSewSel(null); setEdgeSel(null); } startPan(); }   // กดที่ไม่ใช่ขอบ/ตะเข็บ = ลากเลื่อนกระดานได้ (ไม่เปลี่ยนเครื่องมือ)
       return;
     }
     // ตั้งขนาดจริงของรูปอ้างอิง: คลิก 2 จุดบนรูป
@@ -522,10 +524,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     }
     // Shift + ลากที่ว่าง = กรอบเลือกหลายชิ้น
     if (e.shiftKey) { drag.current = { k: "marquee", a: raw, add: true }; setMarquee({ a: raw, b: raw }); capture(); return; }
-    // ที่ว่าง → วาดด้วยเครื่องมือล่าสุด
+    // ที่ว่าง (เจ้าของสั่ง 2026-11-11): ถือ "ย้าย" = เลิกเลือก + เปลี่ยนเป็น "เลื่อนดู" แล้วลากเลื่อนได้เลยในการกดครั้งเดียวกัน · ถือเครื่องมือวาด = วาดชิ้นใหม่
     setSel(null); setMulti(new Set());
-    const dt: DrawTool = tool === "move" ? lastDraw : (tool as DrawTool);
-    if (tool === "move") setTool(lastDraw);
+    if (tool === "move") { setTool("hand"); startPan(); return; }
+    const dt = tool as DrawTool;
     if (dt === "pen") { setPen({ nodes: [{ x: p.x, y: p.y }], hover: null }); drag.current = { k: "penHandle", idx: 0, origin: p }; capture(); return; }
     setBox({ k: dt, a: p, b: p }); drag.current = { k: "box" }; capture();
   };
@@ -669,6 +671,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       const x = Math.min(box.a.x, box.b.x), y = Math.min(box.a.y, box.b.y), w = Math.abs(box.a.x - box.b.x), h = Math.abs(box.a.y - box.b.y);
       setBox(null);
       if (w > 0 && h > 0) addPieces([newPiece({ k: box.k, x, y, w, h })]);
+      else setTool("hand");   // คลิกที่ว่างเฉย ๆ ไม่ได้ลาก = เปลี่ยนเป็น "เลื่อนดู" (ปากกาไม่เข้าข้อนี้ เพราะคลิก = วางจุด)
     }
   };
   const onDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -1105,7 +1108,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (mDraft?.kind === "edge") { finishEdge(edgeStep(mDraft, raw)); return; }   // คลิกจุดปลาย
     const hid = target.getAttribute?.("data-piece");
     const g = hid ? geo.get(hid) : null;
-    if (!hid || !g) { setMsg({ tone: "err", text: t("วัดตามขอบ: กดบนชิ้นตรงจุดเริ่ม แล้วลากไปตามขอบ", "Along edge: press on a piece at the start, then drag along the edge") }); return; }
+    if (!hid || !g) { drag.current = { k: "pan", sx: e.clientX, sy: e.clientY, v: view }; capture(); return; }   // วัดตามขอบ: กดนอกชิ้น = ลากเลื่อนกระดาน
     const pr = projectOnOutline(g.sew, [raw.x, raw.y]);
     setMDraft({ kind: "edge", pieceId: hid, a: pr.at, hover: null, pos: pr.pos, travel: 0, last: pr.pos });
     drag.current = { k: "medge", sx: e.clientX, sy: e.clientY, moved: false }; capture();
@@ -1610,9 +1613,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     : tool === "sewmany" ? (manyA ? t("เย็บ 1 ขอบกับหลายชิ้น: กดขอบของชิ้นถัดไปที่จะมาต่อกับขอบหลัก (ส่วนสีส้มคือที่ยังเหลือ) · Enter / Esc = จบ", "Sew one edge to many: click the edge of the next piece that joins the main edge (orange = what is left) · Enter / Esc = finish") : t("เย็บ 1 ขอบกับหลายชิ้น: กดขอบหลักตรงจุดที่ชิ้นแรกจะเริ่ม แล้วกดขอบของแต่ละชิ้นตามลำดับ ระบบวางช่วงต่อกันให้เอง · ใช้กับชิ้นข้าง/ก้นหลายท่อน แถบซิปรอบปาก", "Sew one edge to many: click the main edge where the first piece starts, then click each piece's edge in order — the ranges are laid end to end · for multi-part gussets and zip bands"))
     : tool === "sewpart" ? (sewA ? t("เย็บบางช่วง: กดจุดเริ่มบนขอบของอีกชิ้น ระบบวางให้ยาวเท่าช่วงแรก · Esc = ยกเลิก", "Sew part: click the start on the other piece's edge — it is made as long as the first range · Esc cancels") : sewP ? t("เย็บบางช่วง: กดจุดจบของช่วงบนขอบเดียวกัน · Esc = ยกเลิก", "Sew part: click the end of the range on the same edge · Esc cancels") : t("เย็บบางช่วง: กดจุดเริ่ม แล้วจุดจบบนขอบเดียวกัน ตามด้วยจุดเริ่มบนขอบของอีกชิ้น · กดเส้นตะเข็บแล้วลาก = ย้าย · ลากจุดกลมที่ปลาย = ยืด/หด · Ctrl+Z ย้อน", "Sew part: click a start, then an end on the same edge, then a start on the other piece's edge · click a seam and drag to move it · drag an end dot to resize · Ctrl+Z undoes"))
     : tool === "sewedit" ? t("แก้ตะเข็บ: กดตะเข็บบนกระดานหรือในรายการ · ลากเส้นตะเข็บ = ย้ายช่วง · ลากจุดกลมที่ปลาย = ยืด/หด · กลับทิศหรือลบ (Delete) ได้ในแผงขวา", "Edit sewing: click a seam on the board or in the list · drag the seam to move its range · drag an end dot to resize · reverse or delete (Delete) in the panel")
-    : tool === "hand" ? t("ลากเพื่อเลื่อนดู", "Drag to pan")
+    : tool === "hand" ? t("เลื่อนดู: ลากที่ว่าง = เลื่อนกระดาน · กดชิ้น = เลือกและย้ายชิ้นนั้น", "Pan: drag empty space to move the board · click a piece to select and move it")
     : tool === "measure" ? (measureMode === "line" ? t("ไม้บรรทัด วัดตรง: กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Measure straight: drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("ไม้บรรทัด วัดโค้ง: คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Measure curve: click points along the line · drag = curve · double-click/Enter = finish") : t("ไม้บรรทัด ตามขอบ: กดบนชิ้นที่จุดเริ่ม แล้วลากไปตามขอบทางที่ต้องการ (อ้อมทางยาวก็ได้) ปล่อย = จบ · หรือคลิกจุดเริ่ม → เลื่อนตามขอบ → คลิกจุดปลาย — วัดตามเส้นเย็บ", "Measure along edge: press on a piece at the start and drag along the edge the way you want (long way works too) · release = done · or click start → move along → click end — measured along the sewing line"))
-    : t("กดลากที่ว่างเพื่อวาด (Shift = จัตุรัส/วงกลม) · กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · Ctrl+Z ย้อนกลับ", "Drag on empty space to draw (Shift = square/circle) · click a piece = move + details · drag the handles = resize · top circle = rotate · Ctrl+Z undo");
+    : tool === "move" ? t("ย้าย: กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · กดที่ว่าง = เลื่อนดู · Shift+ลากที่ว่าง = กรอบเลือก · Ctrl+Z ย้อนกลับ", "Move: click a piece to move it and open its panel · drag the handles to resize · the round handle rotates · click empty space to pan · Shift+drag empty space = selection box · Ctrl+Z undo")
+    : t("กดลากที่ว่างเพื่อวาด (Shift = จัตุรัส/วงกลม) · คลิกที่ว่างเฉย ๆ = เลื่อนดู · กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · Ctrl+Z ย้อนกลับ", "Drag on empty space to draw (Shift = square/circle) · click a piece = move + details · drag the handles = resize · top circle = rotate · Ctrl+Z undo");
 
   const penPath = () => {
     if (!pen || !pen.nodes.length) return "";

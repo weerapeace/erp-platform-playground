@@ -38,7 +38,13 @@ function handleAttaches(A: AssemblyOk, f: HandleForm, stamp: string): Attach[] {
   return A.back === A.front ? [one("front", 0)] : [one("front", 0), one("back", 1)];
 }
 
-export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange, pieceStiff }: {
+export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAttachesChange, pieceStiff, compact = false, height, view }: {
+  /** ใช้ในช่องแคบข้างกระดาน (จอเดียว 3D คู่กับกระดาน): เรียงลงมาแถวเดียว ไม่แบ่ง 2 คอลัมน์ · ซ่อนกล่องคำอธิบายยาว */
+  compact?: boolean;
+  /** ความสูงของภาพ (ค่าเริ่ม 560) */
+  height?: number;
+  /** ให้ข้างนอกเลือกวิธีดู (ปุ่มบนหัวช่อง 3D): whole = ทั้งใบ + แยกชิ้นดู · steps = เย็บทีละขั้น · sim = ทิ้งตัว — ส่งมา = ซ่อนปุ่มสลับข้างใน */
+  view?: "whole" | "steps" | "sim";
   /** ความอยู่ทรงของชิ้น (จากวัสดุ / แผ่นเสริม / ตั้งให้แข็ง) — fallback = ค่ากลางจากแถบเลื่อน · ไม่ส่ง = ใช้ค่ากลางทุกชิ้น */
   pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null;
   /** แก้จุดติด (ติดหู / ปิดหลังช่อง / เอาออก) — ไม่ส่ง = ดูอย่างเดียว */
@@ -81,6 +87,8 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   }, [sim]);
   const [stepMode, setStepMode] = useState(false);
   const [done, setDone] = useState(0);                       // เย็บไปแล้วกี่ขั้น (โหมดเย็บทีละขั้น)
+  useEffect(() => { if (!view) return; setStepMode(view === "steps"); setSimOn(view === "sim"); if (view === "steps") setDone(0); }, [view]);
+  const wrapCls = compact ? "space-y-3" : "grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]", H = height ?? 560;
   const [pick, setPick] = useState<string | null>(null);
   const [body, setBody] = useState(COLORS[0][0]);
   const [handle, setHandle] = useState(COLORS[1][0]);
@@ -97,9 +105,9 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   if (!A.ok && scene.joined > 0) {
     // ยังไม่เห็นโครงตัวกระเป๋า แต่มีชิ้นที่เย็บติดกัน (เช่น ตัวหน้า + สายหู) → แสดงเท่าที่เย็บแล้ว
     return (
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className={wrapCls} data-asm-view>
         <div className="min-w-0 space-y-2">
-          <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={560} />
+          <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={H} />
           <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             {t("แยกชิ้นดู", "Pull pieces apart")}
             <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-56 max-w-full accent-blue-600" />
@@ -129,12 +137,12 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   }
   if (!A.ok) {
     const msg = A.reason === "no-pieces"
-      ? [t("ยังไม่มีชิ้นบนกระดาน", "No pieces on the board yet"), t("ไปที่แท็บวาดชิ้น แล้ววาดชิ้นหรือกด สร้างจากแม่แบบทรง", "Go to the Draw tab and draw pieces, or use Create from a bag template")]
+      ? [t("ยังไม่มีชิ้นบนกระดาน", "No pieces on the board yet"), t("วาดชิ้นบนกระดาน หรือกด สร้างจากแม่แบบทรง", "Draw pieces on the board, or use Create from a bag template")]
       : A.reason === "no-seams"
-        ? [t("ยังไม่ได้บอกว่าขอบไหนเย็บติดกัน", "No seams have been set yet"), t("ระบบประกอบจากตะเข็บ ไปที่แท็บเย็บแล้วจับคู่ขอบที่ต้องเย็บติดกันก่อน (ชิ้นจากแม่แบบทรงมีตะเข็บมาให้แล้ว)", "The bag is assembled from seams. Go to the Sew tab and pair the edges first (pieces from a bag template already have seams).")]
+        ? [t("ยังไม่ได้บอกว่าขอบไหนเย็บติดกัน", "No seams have been set yet"), t("ระบบประกอบจากตะเข็บ ใช้เครื่องมือเย็บ (N) บนกระดาน จับคู่ขอบที่ต้องเย็บติดกันก่อน (ชิ้นจากแม่แบบทรงมีตะเข็บมาให้แล้ว)", "The bag is assembled from seams. Use the Sew tool (N) on the board to pair the edges first (pieces from a bag template already have seams).")]
         : [t("ยังประกอบเป็นกระเป๋าไม่ได้", "Cannot assemble this yet"), t("ระบบเข้าใจโครงสร้าง 2 แบบ: (1) ตัวหน้า + ตัวหลัง ที่มีชิ้นคั่นกลาง 4 ขอบ เย็บขอบตรงข้ามกันเข้ากับตัวหน้าและตัวหลัง (2) ซองแบน สองแผ่นเย็บขอบติดกัน ลองตรวจตะเข็บในแท็บเย็บว่าตรงกับแบบใดแบบหนึ่ง", "Two structures are understood: (1) front + back panels joined by a four-edged piece sewn on opposite edges, (2) a flat pouch of two panels sewn edge to edge. Check your seams in the Sew tab.")];
     return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+      <div className={`rounded-xl border border-dashed border-slate-300 bg-white px-6 text-center ${compact ? "py-8" : "py-12"}`} data-asm-view>
         <div className="text-base font-medium text-slate-700">{msg[0]}</div>
         <p className="mx-auto mt-1.5 max-w-xl text-sm text-slate-500">{msg[1]}</p>
         <div className="mt-4 flex justify-center gap-2">
@@ -177,15 +185,15 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const used = [...new Set([A.front, A.back, ...A.bridges, ...A.handles.map((h) => h.pid), ...A.behind.map((b) => b.pid), ...extras, ...liningPids])];
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div className={wrapCls} data-asm-view>
       <div className="min-w-0 space-y-2">
         {simOn && sim
-          ? <Pattern3D mode="sim" sim={sim} simWake={simWake} colors={colors} height={560} />
+          ? <Pattern3D mode="sim" sim={sim} simWake={simWake} colors={colors} height={H} />
           : extras.length || LA
-            ? <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />
-            : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={560} />}
+            ? <Pattern3D mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />
+            : <Pattern3D mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />}
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+          <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`${view ? "hidden" : "inline-flex"} h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
             <Icon value="i:wind" className="text-sm" />{simOn ? t("กลับไปภาพประกอบ", "Back to the assembled view") : t("จำลองวัสดุทิ้งตัว (ทดลอง)", "Simulate material drape (experimental)")}
           </button>
           {simOn && sim && <button type="button" onClick={() => { sim.reset(); setSimWake((n) => n + 1); }} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50">{t("เริ่มใหม่", "Restart")}</button>}
@@ -199,7 +207,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
             {stiffRows.length > 0 && (
               <ul className="space-y-0.5 rounded-md bg-slate-50 p-2 text-[11px] text-slate-600 sm:col-span-2">
                 {stiffRows.map((x) => <li key={x.pid} className="flex justify-between gap-2"><span className="min-w-0 truncate">{nameOf(x.pid)}{x.why ? <span className="text-slate-400"> · {x.why}</span> : null}</span><b className="tabular-nums">{x.s.toFixed(2)}</b></li>)}
-                <li className="text-slate-400">{t("ตั้งค่าได้ที่แท็บวาดชิ้น: กดชิ้น → ปุ่มตั้งค่าบนป้ายวัสดุ / หัวข้อ ข้อมูลชิ้นและการอยู่ทรง", "Set these in the Draw tab: select a piece → the settings button on a material chip / Piece details and stiffness")}</li>
+                <li className="text-slate-400">{t("ตั้งค่าได้บนกระดาน: กดชิ้น → ปุ่มตั้งค่าบนป้ายวัสดุ / หัวข้อ ข้อมูลชิ้นและการอยู่ทรง", "Set these in the Draw tab: select a piece → the settings button on a material chip / Piece details and stiffness")}</li>
               </ul>
             )}
             <p className="text-[11px] text-slate-500 sm:col-span-2">{t("นี่คือการประมาณเพื่อให้เห็นภาพว่าวัสดุแข็งกับนิ่มต่างกันยังไง ไม่ใช่การคำนวณจากค่าวัสดุจริง (ไม่รู้น้ำหนัก ความหนา หรือตัวเสริมข้างใน) · ไม่แสดงหู ชิ้นเสริมที่เย็บบางช่วง ซับใน แผ่นใส · ชิ้นข้างอาจทะลุกันได้เมื่อวัสดุนิ่มมาก · ค่านี้ไม่ถูกบันทึก", "An approximation to show how firm and soft materials differ — not computed from real material data (weight, thickness or stiffeners are unknown). Handles, lining and clear panels are not shown; sides may pass through each other when very soft. These values are not saved.")}</p>
@@ -223,7 +231,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
         <p className="text-[11px] text-slate-400">{t("ภาพนี้ประกอบจากรูปชิ้นและตะเข็บจริงตามกติกาของโครงสร้าง ยังไม่ได้จำลองวัสดุทิ้งตัวหรือย่น · ภาพใช้ขนาดสำเร็จ (เส้นเย็บ) ของชิ้น ส่วนเผื่อเย็บและพับปากไม่แสดง", "Assembled from the real piece shapes and seams by structural rules. Material drape is not simulated · the view uses finished (sew-line) sizes; allowances and hems are not shown.")}</p>
       </div>
 
-      <aside className="min-w-0 space-y-3 text-sm">
+      <aside className={`min-w-0 text-sm ${compact ? "flex flex-col gap-3" : "space-y-3"}`}>
         <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-3">
           <div className="text-xs font-medium text-slate-500">{t("โครงสร้างที่ระบบอ่านได้", "Structure found")}</div>
           <div className="font-medium text-slate-800">{A.kind === "wrap" ? t("ตัวหน้า + ตัวหลัง มีชิ้นคั่นกลางพันรอบ", "Front + back panels joined by a gusset") : t("ซองแบน: สองแผ่นเย็บขอบติดกัน", "Flat pouch: two panels sewn edge to edge")}</div>
@@ -242,7 +250,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
           </ul>
           {looseLeft.length > 0 && (
             <div className="space-y-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-              <div>{t("ยังไม่ได้ประกอบ — ชิ้นเหล่านี้ยังไม่ได้เย็บกับแผ่นหน้า/แผ่นหลัง (เย็บบางช่วงในแท็บวาดชิ้นได้ หรือใช้ปุ่มด้านล่าง)", "Not assembled — these pieces are not sewn to the front/back panel yet (sew part of an edge in the Draw tab, or use the buttons below)")}</div>
+              <div>{t("ยังไม่ได้ประกอบ — ชิ้นเหล่านี้ยังไม่ได้เย็บกับแผ่นหน้า/แผ่นหลัง (เย็บบางช่วงบนกระดานได้ หรือใช้ปุ่มด้านล่าง)", "Not assembled — these pieces are not sewn to the front/back panel yet (sew part of an edge in the Draw tab, or use the buttons below)")}</div>
               {looseLeft.map((pid) => (
                 <div key={pid} className="flex flex-wrap items-center gap-1.5">
                   <span className="min-w-0 flex-1 truncate font-medium">{nameOf(pid)}</span>
@@ -281,8 +289,8 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
           {A.notes.includes("same-back") && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800">{t("แผ่นหน้าตั้งจำนวนตัดไว้ 1 ชิ้น ระบบใช้รูปเดียวกันเป็นแผ่นหลังให้ ถ้าใช้แผ่นเดียวกันจริงให้ตั้งจำนวนตัดเป็น 2", "The front panel has a cut count of 1; the same shape is used for the back. Set the count to 2 if that is intended.")}</p>}
         </div>
 
-        <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
-          <div className="flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("วิธีดู", "View mode")}>
+        <div className={`space-y-2 rounded-lg border border-slate-200 bg-white p-3 ${compact && stepMode ? "order-first" : ""}`} data-asm-steps>
+          <div className={`${view ? "hidden" : "flex"} rounded-lg border border-slate-200 bg-white p-0.5`} role="group" aria-label={t("วิธีดู", "View mode")}>
             <button type="button" className={seg(!stepMode)} onClick={() => setStepMode(false)}>{t("ดูทั้งใบ", "Whole bag")}</button>
             <button type="button" className={seg(stepMode)} onClick={() => { setStepMode(true); setDone(0); }}>{t("เย็บทีละขั้น", "Sew step by step")}</button>
           </div>
@@ -306,11 +314,11 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
           {swatches(handle, setHandle, t("หู", "Handles"))}
         </div>
 
-        <div className="space-y-1.5 rounded-lg bg-blue-50 px-3 py-2.5 text-xs leading-relaxed text-slate-700">
+        <div className={`${compact ? "hidden " : ""}space-y-1.5 rounded-lg bg-blue-50 px-3 py-2.5 text-xs leading-relaxed text-slate-700`}>
           <div className="flex items-center gap-1.5 font-medium text-blue-800"><Icon value="i:bulb" className="text-sm" />{t("ช่างคิดยังไง", "How a pattern maker thinks")}</div>
           <p>{t("กระเป๋าที่มีความลึก เกิดจากชิ้นคั่นกลางที่เย็บขอบหนึ่งกับแผ่นหน้า อีกขอบกับแผ่นหลัง ความกว้างของชิ้นคั่นกลางจึงกลายเป็นความลึกของกระเป๋า", "Depth comes from the gusset: one edge is sewn to the front, the opposite edge to the back, so the gusset width becomes the bag depth.")}</p>
           <p>{t("ขอบของแผ่นหน้าที่ไม่ได้เย็บกับอะไร คือปากกระเป๋า ระบบจึงหมุนให้ขอบนั้นหันขึ้นเอง", "The panel edge that is not sewn to anything is the opening, so the view turns it upward.")}</p>
-          <p className="text-slate-500">{t("ลองกลับไปแท็บวาดชิ้น เปลี่ยนความกว้างของชิ้นข้าง แล้วกลับมาดูว่ากระเป๋าลึกขึ้นหรือตื้นลง", "Try changing the gusset width in the Draw tab, then come back and see the bag get deeper or shallower.")}</p>
+          <p className="text-slate-500">{t("ลองเปลี่ยนบนกระดาน: เปลี่ยนความกว้างของชิ้นข้าง แล้วกลับมาดูว่ากระเป๋าลึกขึ้นหรือตื้นลง", "Try changing the gusset width in the Draw tab, then come back and see the bag get deeper or shallower.")}</p>
         </div>
       </aside>
     </div>

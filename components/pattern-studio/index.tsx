@@ -38,8 +38,24 @@ const PocketModal = dynamic(() => import("./pocket-modal").then((m) => m.PocketM
 const DxfModal = dynamic(() => import("./dxf-modal").then((m) => m.DxfModal), { ssr: false });                              // โหลดเมื่อกดนำเข้า DXF
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
+const AssemblyView = dynamic(() => import("./assembly-view").then((m) => m.AssemblyView), { ssr: false });                  // โหลดเมื่อเลือก แยกชิ้น / ทีละขั้น / ทิ้งตัว
+
 const SHOW3D_KEY = "pattern-studio-3d";
+const SHOW3D_SPLIT_KEY = "pattern-studio-3d-split";   // หน้าที่มีเครื่องมือเย็บ: ภาพ 3D คู่กับกระดาน เปิดเป็นค่าเริ่ม (กุญแจแยก — ค่าที่เคยปิดไว้ของปุ่มเดิมไม่ตามมา)
+const SIDE3D_KEY = "pattern-studio-3d-side";
+const PCT3D_KEY = "pattern-studio-3d-pct";
+const PCT3D_DEFAULT = 38;
+const clampPct = (v: number) => Math.max(22, Math.min(60, Math.round(v * 10) / 10));
 const VIEW3D_KEY = "pattern-studio-3d-view";
+/** แบบของภาพ 3D ในจอเดียว: เย็บติดแล้ว (ตามกระดานทันที) · แยกชิ้น / ทีละขั้น / ทิ้งตัว (ของแท็บ "ประกอบ 3D" เดิม = AssemblyView) · ชิ้นแบน */
+type View3D = "sewn" | "explode" | "steps" | "sim" | "flat";
+const VIEWS_3D: { key: View3D; th: string; en: string; hintTh: string; hintEn: string }[] = [
+  { key: "sewn", th: "เย็บติดแล้ว", en: "Sewn", hintTh: "ภาพตอนเย็บติดแล้ว เปลี่ยนตามกระดานทันที", hintEn: "The sewn result, following the board live" },
+  { key: "explode", th: "แยกชิ้น", en: "Pull apart", hintTh: "กระเป๋าที่ประกอบแล้ว ดึงชิ้นแยกออกดู · ติดหู / ปิดหลังช่อง", hintEn: "The assembled bag with pieces pulled apart · attach handles" },
+  { key: "steps", th: "ทีละขั้น", en: "Step by step", hintTh: "ลำดับการเย็บทีละขั้น", hintEn: "The sewing order, one step at a time" },
+  { key: "sim", th: "ทิ้งตัว", en: "Drape", hintTh: "จำลองวัสดุทิ้งตัว (ทดลอง)", hintEn: "Material drape simulation (experimental)" },
+  { key: "flat", th: "ชิ้นแบน", en: "Flat", hintTh: "ชิ้นแบนวางบนโต๊ะ ยังไม่ประกอบ", hintEn: "Flat pieces on the table, not assembled" },
+];
 const WIDE_PX = 1180;
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
@@ -47,7 +63,9 @@ type EditorProps = ComponentProps<typeof ShapeEditor>;
 export type TemplateInsertInfo = { pidByKey: Partial<Record<BagPieceKey, string>>; seams: BagSeamRef[]; attach: BagAttachRef[]; params: BagParams };
 
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
-export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
+export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean;
+  /** แก้จุดติด (ติดหู / ปิดหลังช่อง) จากภาพ 3D แบบ แยกชิ้น — ไม่ส่ง = ดูอย่างเดียว */ onAttachesChange?: (next: Attach[]) => void;
+  /** ความอยู่ทรงของชิ้น (ภาพ ทิ้งตัว) */ pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
 
 export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks"> & {
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
@@ -58,11 +76,19 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
   const t = useT();
   const { readonly = false } = props;
   const [show3d, setShow3dState] = useState(false);
-  useEffect(() => { try { setShow3dState(localStorage.getItem(SHOW3D_KEY) === "1"); } catch { /* อ่านไม่ได้ = ปิดไว้ */ } }, []);
-  const setShow3d = (v: boolean) => { setShow3dState(v); try { localStorage.setItem(SHOW3D_KEY, v ? "1" : "0"); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
-  const [view3d, setView3dState] = useState<"sewn" | "flat">("sewn");   // ภาพ 3D ของหน้าที่มีเครื่องมือเย็บ: เย็บติดแล้ว / ชิ้นแบน (จำในเครื่อง)
+  const show3dKey = sew ? SHOW3D_SPLIT_KEY : SHOW3D_KEY;   // หน้าที่มีเครื่องมือเย็บ = เปิดคู่กับกระดานเป็นค่าเริ่ม · ใบงานออกแบบ = ปิดไว้จนกดปุ่ม (เหมือนเดิม)
+  useEffect(() => { try { const v = localStorage.getItem(show3dKey); setShow3dState(v == null ? !!sew : v === "1"); } catch { setShow3dState(!!sew); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const setShow3d = (v: boolean) => { setShow3dState(v); try { localStorage.setItem(show3dKey, v ? "1" : "0"); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const [view3d, setView3dState] = useState<View3D>("sewn");   // แบบของภาพ 3D (จำในเครื่องเฉพาะ เย็บติดแล้ว / ชิ้นแบน — แบบอื่นเป็นการดูชั่วคราว)
   useEffect(() => { try { if (localStorage.getItem(VIEW3D_KEY) === "flat") setView3dState("flat"); } catch { /* อ่านไม่ได้ = เย็บติดแล้ว */ } }, []);
-  const setView3d = (v: "sewn" | "flat") => { setView3dState(v); try { localStorage.setItem(VIEW3D_KEY, v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const setView3d = (v: View3D) => { setView3dState(v); if (v === "sewn" || v === "flat") try { localStorage.setItem(VIEW3D_KEY, v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  // ฝั่งของภาพ 3D (ซ้ายแบบ CLO เป็นค่าเริ่ม) + ความกว้างเป็น % ของจอ (ลากเส้นแบ่ง · ดับเบิลคลิก = ค่าเริ่ม) — จำในเครื่อง
+  const [side3d, setSide3dState] = useState<"left" | "right">("left");
+  const [pct3d, setPct3dState] = useState(PCT3D_DEFAULT);
+  useEffect(() => { try { if (localStorage.getItem(SIDE3D_KEY) === "right") setSide3dState("right"); const p = Number(localStorage.getItem(PCT3D_KEY)); if (p > 0) setPct3dState(clampPct(p)); } catch { /* อ่านไม่ได้ = ค่าเริ่ม */ } }, []);
+  const setSide3d = (v: "left" | "right") => { setSide3dState(v); try { localStorage.setItem(SIDE3D_KEY, v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const setPct3d = (v: number) => { const c = clampPct(v); setPct3dState(c); try { localStorage.setItem(PCT3D_KEY, String(c)); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const splitRef = useRef<HTMLDivElement | null>(null), splitDrag = useRef(false);
   const [wizard, setWizard] = useState(false);
   const [photo, setPhoto] = useState(false);
   const [draft, setDraft] = useState<{ params: BagParams; notice: string } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
@@ -185,35 +211,31 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
             {(["all", "outer", "lining"] as const).map((k) => <button key={k} type="button" onClick={() => setLayer(k)} aria-pressed={layer === k} className={`h-7 rounded-md px-2.5 text-xs ${layer === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "all" ? t("ทุกชั้น", "All layers") : k === "outer" ? t("ชั้นนอก", "Outer") : t("ซับใน", "Lining")}</button>)}
           </div>
         )}
+        {!sew && <>
         <button type="button" onClick={() => setShow3d(!show3d)} aria-pressed={show3d} className={`${btn} ${show3d ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
           <Icon value={show3d ? "i:eye-off" : "i:box"} className="text-sm" />{show3d ? t("ซ่อนภาพ 3D", "Hide 3D") : t("ดูภาพ 3D", "Show 3D")}
         </button>
-        {show3d && sew && (
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("แบบของภาพ 3D", "3D view type")}>
-            {(["sewn", "flat"] as const).map((k) => <button key={k} type="button" onClick={() => setView3d(k)} aria-pressed={view3d === k} className={`h-7 rounded-md px-2.5 text-xs ${view3d === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "sewn" ? t("เย็บติดแล้ว", "Sewn") : t("ชิ้นแบน", "Flat pieces")}</button>)}
-          </div>
+        {show3d && !sew && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ภาพนี้คือชิ้นแบน การประกอบเป็นกระเป๋าอยู่ในแอปสตูดิโอแพทเทิร์น (ภาพ 3D ข้างกระดาน)", "The pieces on the table are the ones on the board. Select on either side and the other lights up · this view shows flat pieces; assembling into a bag is in the Pattern studio app, Assemble 3D tab")}</span>}
+        </>}
+        {sew && !show3d && (
+          <button type="button" onClick={() => setShow3d(true)} data-open-3d className={`${btn} border-slate-800 bg-slate-800 text-white hover:bg-slate-900`}>
+            <Icon value="i:box" className="text-sm" />{t("เปิดภาพ 3D", "Show 3D")}
+          </button>
         )}
-        {show3d && !sew && <span className="text-[11px] text-slate-500">{t("ชิ้นบนโต๊ะคือชิ้นเดียวกับบนกระดาน เลือกฝั่งไหนอีกฝั่งสว่างตาม · ภาพนี้คือชิ้นแบน การประกอบเป็นกระเป๋าอยู่ในแอปสตูดิโอแพทเทิร์น แท็บ ประกอบ 3D", "The pieces on the table are the ones on the board. Select on either side and the other lights up · this view shows flat pieces; assembling into a bag is in the Pattern studio app, Assemble 3D tab")}</span>}
-        {show3d && sew && sewnOn && sewnScene && (sewnScene.asm || sewnScene.lining) && (
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ผ่าดูข้างใน", "Cut-away view")}>
-            {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}
-          </div>
-        )}
-        {show3d && sew && <span className="text-[11px] text-slate-500">{t("ภาพเปลี่ยนตามกระดานทันที เลือกชิ้นฝั่งไหนอีกฝั่งสว่างตาม", "The view follows the board live. Select on either side and the other lights up")}</span>}
       </div>
 
       {notice && <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><span className="min-w-0 flex-1">{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label={t("ปิดข้อความ", "Dismiss")} className="shrink-0 text-amber-700 hover:text-amber-900"><Icon value="i:x" /></button></p>}
 
-      <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>
-        <div className="min-w-0">
+      {(() => {
+        const boardEl = (
           <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
-            seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids} />
-        </div>
-        {show3d && (
-          <div className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2" : ""}`}>
+          seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids} />
+        );
+        const h3 = wide ? 520 : 340;
+        const viewEl = (<>
             {sewnOn && sewnScene
-              ? <Pattern3D mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />
-              : <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={wide ? 520 : 380} />}
+              ? <Pattern3D mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />
+              : <Pattern3D mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />}
             {sewnOn && sewnScene ? (
               <div className="space-y-1 text-[11px] text-slate-500">
                 <p>{t(`เย็บติดแล้ว ${sewnScene.joined} จาก ${flat.length} ชิ้น · ลากเส้นตะเข็บบนกระดาน ภาพนี้ขยับตาม · เป็นการวางตามสูตร ไม่ใช่การจำลองผ้า (ตำแหน่งถูก การทิ้งตัวเป็นค่าประมาณ)`, `${sewnScene.joined} of ${flat.length} pieces sewn · drag a seam on the board and this view follows · placed by rules, not a cloth simulation (positions are right, drape is approximate)`)}</p>
@@ -226,9 +248,59 @@ export function PatternStudio({ onTemplateInsert, sew, ...props }: Omit<EditorPr
                 ? (wantSewn ? t("ยังไม่มีชิ้นที่เย็บติดกัน ภาพนี้จึงเป็นชิ้นแบน — ใช้เครื่องมือเย็บ (N) หรือเย็บบางช่วง (J) แล้วภาพจะเปลี่ยนเป็นตอนเย็บติดแล้ว", "Nothing is sewn together yet, so this shows flat pieces — use Sew (N) or Sew part (J) and the view switches to the sewn result") : t(`${flat.length} ชิ้นบนโต๊ะ · ความหนาในภาพเป็นค่าสมมติ · เส้นประ = เส้นเย็บ`, `${flat.length} pieces on the table · thickness is illustrative · dashed = sew line`))
                 : t("ยังไม่มีชิ้นบนกระดาน — วาดชิ้น หรือกด สร้างจากแม่แบบทรง", "No pieces yet — draw one, or use Create from a bag template")}</p>
             )}
+        </>);
+        // ใบงานออกแบบ (ไม่มีเครื่องมือเย็บ): หน้าตาเดิม — กระดานซ้าย ภาพ 3D ขวา เปิดเมื่อกดปุ่ม
+        if (!sew) return (
+          <div className={show3d && wide ? "grid grid-cols-[minmax(0,1fr)_minmax(340px,36%)] items-start gap-3" : "space-y-3"}>
+            <div className="min-w-0">{boardEl}</div>
+            {show3d && <div className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2" : ""}`}>{viewEl}</div>}
           </div>
-        )}
-      </div>
+        );
+        // แอปสตูดิโอแพทเทิร์น (เจ้าของสั่ง 2026-11-11 "3D กับวาดเย็บชิ้นต้องเปิดคู่กัน"): จอเดียว ภาพ 3D คู่กับกระดาน — ลากเส้นแบ่งปรับความกว้าง · สลับฝั่ง · ซ่อนได้
+        const seg3 = (on: boolean) => `h-7 rounded-md px-2.5 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
+        const ib3 = "inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100";
+        const asmMode = view3d === "explode" || view3d === "steps" || view3d === "sim";
+        const pane = show3d ? (
+          <div data-pane-3d className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2 shrink-0" : ""}`} style={wide ? { width: `${pct3d}%` } : undefined}>
+            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+              <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("แบบของภาพ 3D", "3D view type")}>
+                {VIEWS_3D.map((v) => <button key={v.key} type="button" data-view3d={v.key} onClick={() => setView3d(v.key)} aria-pressed={view3d === v.key} title={t(v.hintTh, v.hintEn)} className={seg3(view3d === v.key)}>{t(v.th, v.en)}</button>)}
+              </div>
+              <span className="ml-auto inline-flex gap-1">
+                {wide && <button type="button" data-swap-3d onClick={() => setSide3d(side3d === "left" ? "right" : "left")} title={t("สลับฝั่ง: ภาพ 3D ซ้าย / ขวา", "Swap sides: 3D left / right")} aria-label={t("สลับฝั่งภาพ 3D", "Swap the 3D side")} className={ib3}><Icon value="i:arrows-exchange" className="text-sm" /></button>}
+                <button type="button" data-hide-3d onClick={() => setShow3d(false)} title={t("ซ่อนภาพ 3D (กระดานเต็มจอ)", "Hide 3D (full-width board)")} aria-label={t("ซ่อนภาพ 3D", "Hide 3D")} className={ib3}><Icon value="i:eye-off" className="text-sm" /></button>
+              </span>
+            </div>
+            {!asmMode && sewnOn && sewnScene && (sewnScene.asm || sewnScene.lining) && (
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ผ่าดูข้างใน", "Cut-away view")}>
+              {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}
+              </div>
+            )}
+            {asmMode
+              ? <AssemblyView compact height={Math.max(300, h3 - 60)} view={view3d === "explode" ? "whole" : view3d} pieces={asmLive} seams={sew.seams} attaches={sew.attaches ?? []} onAttachesChange={readonly ? undefined : sew.onAttachesChange} pieceStiff={sew.pieceStiff} />
+              : viewEl}
+          </div>
+        ) : null;
+        if (!pane) return <div className="min-w-0">{boardEl}</div>;
+        if (!wide) return <div className="space-y-3">{pane}<div className="min-w-0">{boardEl}</div></div>;
+        const divider = (
+          <div role="separator" aria-orientation="vertical" data-split-3d title={t("ลากเพื่อปรับความกว้างของภาพ 3D", "Drag to resize the 3D view")}
+            onPointerDown={(e) => { e.preventDefault(); splitDrag.current = true; try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์จับเมาส์ไม่ได้ — ยังลากได้ขณะเมาส์อยู่บนเส้นแบ่ง */ } }}
+            onPointerMove={(e) => { const box = splitRef.current?.getBoundingClientRect(); if (!splitDrag.current || !box || !box.width) return; const x = side3d === "left" ? e.clientX - box.left : box.right - e.clientX; setPct3dState(clampPct((x / box.width) * 100)); }}
+            onPointerUp={() => { if (splitDrag.current) { splitDrag.current = false; setPct3d(pct3d); } }} onPointerCancel={() => { splitDrag.current = false; }}
+            onDoubleClick={() => setPct3d(PCT3D_DEFAULT)}
+            className="group mx-1 flex w-2.5 shrink-0 cursor-col-resize touch-none items-center justify-center self-stretch rounded-full hover:bg-blue-100" style={{ minHeight: 240 }}>
+            <span className="h-12 w-1 rounded-full bg-slate-300 group-hover:bg-blue-500" />
+          </div>
+        );
+        return (
+          <div ref={splitRef} className="flex items-start">
+            {side3d === "left" && <>{pane}{divider}</>}
+            <div className="min-w-0 flex-1">{boardEl}</div>
+            {side3d === "right" && <>{divider}{pane}</>}
+          </div>
+        );
+      })()}
 
       {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} />}
       {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}

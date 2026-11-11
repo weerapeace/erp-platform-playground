@@ -5,7 +5,7 @@
  *   หัว: ชื่อ · รหัสรุ่น · สถานะ · สรุป (ชิ้น / พื้นที่ / ตะเข็บ)
  *   แท็บ "วาดชิ้น + เย็บ" = PatternStudio (กระดานวาดเดิม + แม่แบบทรง + ภาพ 3D) · เครื่องมือเย็บ (N) + แก้ตะเข็บ (B) เป็นเครื่องมือของกระดานเอง เย็บบนกระดานเดิมแบบ CLO ไม่เปลี่ยนหน้า (เจ้าของสั่ง 2026-11-10)
  *   รหัสรุ่น = เลือกจากรุ่นสินค้า (ParentSkuPicker) หรือ SKU (SkuPicker) ของกลาง — เก็บเป็นรหัส
- *   แท็บ "ประกอบ 3D" = AssemblyView (ประกอบชิ้นเป็นกระเป๋าจากตะเข็บ + เย็บทีละขั้น)
+ *   จอเดียว (เจ้าของสั่ง 2026-11-11): ภาพ 3D คู่กับกระดาน ไม่มีแท็บแยกแล้ว — "ประกอบ 3D" เดิม (AssemblyView) ย้ายไปเป็นปุ่ม แยกชิ้น / ทีละขั้น / ทิ้งตัว บนหัวช่องภาพ 3D ของ PatternStudio
  *   จุดติดหู/แผ่นหลังช่อง (จากแม่แบบ) เก็บในช่อง template: { params, attach }
  *   สร้างจากแม่แบบทรง → ได้ชิ้น + ตะเข็บตั้งต้นครบ
  *   วัสดุของชิ้น = รายชื่อวัสดุตีราคา (/api/pattern-projects/materials) · ปุ่ม "ส่งไปตีราคา" = SendCostingModal (ต้องมีสิทธิ์ดูต้นทุน)
@@ -33,10 +33,8 @@ import { ParentSkuPicker, SkuPicker } from "@/components/pickers";
 const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });
 const SendCostingModal = dynamic(() => import("@/components/pattern-studio/send-costing-modal").then((m) => m.SendCostingModal), { ssr: false });
 const TrimsModal = dynamic(() => import("@/components/pattern-studio/trims-modal").then((m) => m.TrimsModal), { ssr: false });
-const AssemblyView = dynamic(() => import("@/components/pattern-studio/assembly-view").then((m) => m.AssemblyView), { ssr: false });
 
 const SQFT = 929.03;
-type Tab = "draw" | "asm";
 
 export function PatternProjectEditor({ id }: { id: string }) {
   const t = useT();
@@ -58,8 +56,6 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const [template, setTemplate] = useState<Record<string, unknown> | null>(null);   // { params: ค่าแม่แบบล่าสุด, attach: จุดติด }
   const [attaches, setAttaches] = useState<Attach[]>([]);
   const [matProps, setMatProps] = useState<Record<string, MatProps>>({});   // ค่าของวัสดุในแพทเทิร์นใบนี้ (เก็บใน template.matProps)
-  const [tab, setTab] = useState<Tab>("draw");
-  const [sewStart, setSewStart] = useState(false);        // เปิดกระดานมาถือเครื่องมือเย็บเลย (มาจากปุ่ม "ไปเย็บ" ของแท็บประกอบ 3D)
   const [skuKind, setSkuKind] = useState<"parent" | "sku">("parent");
   const [boardNonce, setBoardNonce] = useState(0);        // เปลี่ยน = เปิดกระดานใหม่จากชิ้นล่าสุด (โหลดเสร็จ / กลับจากแท็บเย็บ / ละทิ้ง)
   const [dirty, setDirty] = useState(false);
@@ -124,11 +120,12 @@ export function PatternProjectEditor({ id }: { id: string }) {
     setAttaches((prev) => { const next = [...prev, ...att]; setTemplate({ params: info.params, attach: next }); return next; });
   }, []);
   const onSeams = (next: Seam[]) => { setSeams(next); setDirty(true); };
-  const switchTab = (next: Tab) => { if (next === tab) return; if (next === "draw") setBoardNonce((n) => n + 1); setTab(next); };
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
-  const asmPieces = useMemo(() => pieces.map((p) => ({ pid: p.pid, name: p.name, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) })), [pieces]);
+  // จุดติดหู / ปิดหลังช่อง + ความอยู่ทรงของชิ้น — ใช้ในภาพ 3D แบบ แยกชิ้น / ทิ้งตัว (อยู่ในช่องภาพ 3D ข้างกระดาน)
+  const onAttaches = useCallback((next: Attach[]) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); }, []);
+  const pieceStiff = useCallback((pid: string, fallback: number) => { const p = pieces.find((x) => x.pid === pid); return p ? pieceStiffness(p, matProps, fallback) : null; }, [pieces, matProps]);
   const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes]);
 
   const save = async () => {
@@ -162,11 +159,6 @@ export function PatternProjectEditor({ id }: { id: string }) {
   if (err) return <div className="p-4"><ErrorState hint={err} onRetry={() => void load()} /><div className="mt-3 text-center"><button type="button" onClick={() => router.push("/pattern-studio")} className="text-sm text-blue-700 hover:underline">{t("กลับไปหน้ารวมแพทเทิร์น", "Back to all patterns")}</button></div></div>;
 
   const st = PATTERN_STATUS_LABEL[status];
-  const tabBtn = (k: Tab, icon: string, label: string, badge?: number) => (
-    <button type="button" onClick={() => switchTab(k)} aria-pressed={tab === k} className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm ${tab === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-      <Icon value={icon} className="text-base" />{label}{badge ? <span className="rounded-full bg-red-500 px-1.5 text-[11px] font-medium text-white">{badge}</span> : null}
-    </button>
-  );
   return (
     <div className="mx-auto max-w-[1700px] space-y-3 p-4 pb-24">
       <div className="flex flex-wrap items-center gap-2">
@@ -205,10 +197,6 @@ export function PatternProjectEditor({ id }: { id: string }) {
             </select>
           ) : <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${st.tone}`}>{t(st.th, st.en)}</span>}
         </label>
-        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ขั้นตอน", "Step")}>
-          {tabBtn("draw", "i:vector-bezier", t("วาดชิ้น + เย็บ", "Draw and sew"), badSeams)}
-          {tabBtn("asm", "i:box", t("ประกอบ 3D", "Assemble 3D"))}
-        </div>
         <button type="button" disabled={dirty || !pieces.length} onClick={() => window.open(`/print/pattern-project/${id}`, "_blank", "noopener")}
           title={dirty ? t("บันทึกก่อน แล้วค่อยพิมพ์ (หน้าพิมพ์ใช้ข้อมูลที่บันทึกแล้ว)", "Save first — the print page uses the saved pattern") : t("พิมพ์ขนาดจริง A4 / ดาวน์โหลดไฟล์เครื่องตัด DXF / SVG", "Print at real size on A4 / download DXF or SVG cut files")}
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
@@ -235,15 +223,10 @@ export function PatternProjectEditor({ id }: { id: string }) {
         )}
       </div>
 
-      {tab === "draw" ? (
-        <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
-          sew={{ seams, onChange: onSeams, start: sewStart, attaches }} pieceInfoFields matProps={matProps}
-          onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
-          footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
-      ) : (
-        <AssemblyView pieces={asmPieces} seams={seams} attaches={attaches} onGoSew={() => { setSewStart(true); switchTab("draw"); }} pieceStiff={(pid, fallback) => { const p = pieces.find((x) => x.pid === pid); return p ? pieceStiffness(p, matProps, fallback) : null; }} onGoDraw={() => switchTab("draw")}
-          onAttachesChange={canEdit ? (next) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); } : undefined} />
-      )}
+      <PatternStudio key={`board-${boardNonce}`} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
+        sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff }} pieceInfoFields matProps={matProps}
+        onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
+        footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
 
       {(() => { const c = (template as { costing?: CostingTarget } | null)?.costing; return c?.code ? (
         <p className="text-xs text-slate-500">{t(`ส่งตีราคาล่าสุด: ${c.code} ${c.name ?? ""}${c.parent_code ? ` · แท็บ ${c.parent_code}` : ""}`, `Last sent to costing: ${c.code} ${c.name ?? ""}${c.parent_code ? ` · tab ${c.parent_code}` : ""}`)} · <a className="text-blue-700 hover:underline" href={`/master/design-sheets?open=${c.sheet_id}`} target="_blank" rel="noopener">{t("เปิดใบงาน", "Open sheet")}</a></p>
