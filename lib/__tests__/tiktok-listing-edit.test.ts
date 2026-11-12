@@ -3,6 +3,7 @@ import {
   tiktokListingView, tiktokStatusBadge, tiktokIsOpen, planTiktokDisplay, planTiktokTitle, ttsTitleLength, tiktokDisplayErrors, keepSkuStatus,
   TTS_TITLE_MIN, TTS_TITLE_MAX, TTS_PRICE_MIN, TTS_PRICE_MAX, planTiktokPrices, applyTiktokBulkPrice, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, type TiktokPriceRow,
   tiktokErpPriceCheck, applyTiktokErpFull,
+  tiktokImagesOf, tiktokPkgOf, tiktokMediaBase, tiktokRefsForSend, tiktokUriOfRef, tiktokR2KeyOfRef, tiktokImageRef, planTiktokMedia, tiktokPkgFields, samePkg, TTS_MAX_IMAGES,
 } from "@/lib/tiktok-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
 
@@ -257,5 +258,89 @@ describe("ราคาในระบบเทียบราคาบน TikTok
     expect(all.rows.map((r) => r.price)).toEqual([1090, 1090, 500]);
     expect(applyTiktokErpFull(rows, erp, ["b"]).changed).toBe(0);
     expect(applyTiktokErpFull(rows, () => null).changed).toBe(0);
+  });
+});
+
+
+describe("เฟส C: รูป + กล่องพัสดุ", () => {
+  const det = {
+    id: "p1", title: "x",
+    main_images: [{ uri: "tos-a/1", urls: ["https://img/1~tplv.jpg?t=1"] }, { uri: "tos-a/2", urls: ["https://img/2~tplv.jpg?t=1"] }, { uri: "tos-a/3", thumb_urls: ["https://img/3s.jpg"] }, { uri: "tos-a/4" }],
+    package_weight: { value: "0.35", unit: "KILOGRAM" },
+    package_dimensions: { length: "20", width: "15", height: "5", unit: "CENTIMETER" },
+  };
+  test("อ่านรูป (url + uri) และกล่อง จาก Get Product", () => {
+    expect(tiktokImagesOf(det)).toEqual([
+      { url: "https://img/1~tplv.jpg?t=1", uri: "tos-a/1" }, { url: "https://img/2~tplv.jpg?t=1", uri: "tos-a/2" }, { url: "https://img/3s.jpg", uri: "tos-a/3" },
+    ]);
+    expect(tiktokPkgOf(det)).toEqual({ weight: 0.35, length: 20, width: 15, height: 5 });
+    expect(tiktokPkgOf({ package_weight: { value: "350", unit: "GRAM" } })).toEqual({ weight: 0.35, length: null, width: null, height: null });
+    expect(tiktokPkgOf({})).toEqual({ weight: null, length: null, width: null, height: null });
+  });
+  test("มุมมองมี imageUris + กล่อง · ฉบับรอตรวจที่รูป/กล่องต่าง = pending", () => {
+    const v = tiktokListingView(det)!;
+    expect(v.imageUris).toEqual(["tos-a/1", "tos-a/2", "tos-a/3"]);
+    expect(v.pkg.weight).toBe(0.35);
+    expect(v.pendingImages).toBeNull();
+    const rv = { ...det, main_images: [{ uri: "tos-a/9", urls: ["https://img/9.jpg"] }], package_weight: { value: "0.5", unit: "KILOGRAM" } };
+    const v2 = tiktokListingView(det, rv)!;
+    expect(v2.pendingImages).toEqual([{ url: "https://img/9.jpg", uri: "tos-a/9" }]);
+    expect(v2.pendingPkg?.weight).toBe(0.5);
+    expect(tiktokMediaBase(v2).images[0].uri).toBe("tos-a/9");
+    expect(tiktokMediaBase(v).images.map((x) => x.uri)).toEqual(["tos-a/1", "tos-a/2", "tos-a/3"]);
+  });
+  test("ฟอร์ม → ref ที่ส่ง (รูปเดิม tts:uri · รูปใหม่ r2:key · ลิงก์แปลก = null)", () => {
+    const base = tiktokImagesOf(det);
+    expect(tiktokRefsForSend(["https://img/2~tplv.jpg?t=1", "r2:prod/a.jpg"], base)).toEqual(["tts:tos-a/2", "r2:prod/a.jpg"]);
+    expect(tiktokRefsForSend(["https://other/x.jpg"], base)).toBeNull();
+    expect(tiktokUriOfRef("tts:tos-a/2")).toBe("tos-a/2");
+    expect(tiktokR2KeyOfRef("r2:prod/a.jpg")).toBe("prod/a.jpg");
+  });
+  const pkg0 = { weight: 0.35, length: 20, width: 15, height: 5 };
+  const uris = ["tos-a/1", "tos-a/2", "tos-a/3"];
+  test("ไม่แก้ = ไม่มีอะไรเปลี่ยน", () => {
+    const p = planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), pkg0);
+    expect(p).toMatchObject({ imagesChanged: false, weightChanged: false, boxChanged: false, errors: [], changes: [] });
+  });
+  test("เพิ่มรูปใหม่ + เปลี่ยนปก = เตือนพื้นขาว + บอกจำนวน", () => {
+    const p = planTiktokMedia(uris, pkg0, ["r2:k1", "tts:tos-a/1", "tts:tos-a/2"], pkg0);
+    expect(p.imagesChanged).toBe(true);
+    expect(p.newImages).toBe(1);
+    expect(p.changes[0]).toEqual({ label: "รูปสินค้า", before: "3 รูป", after: "3 รูป (ใหม่ 1 · เอาออก 1 · เปลี่ยนปก)" });
+    expect(p.warnings.join(" ")).toContain("พื้นขาว");
+  });
+  test("สลับลำดับอย่างเดียว", () => {
+    const p = planTiktokMedia(uris, pkg0, ["tts:tos-a/1", "tts:tos-a/3", "tts:tos-a/2"], pkg0);
+    expect(p.changes[0].after).toBe("3 รูป (สลับลำดับ)");
+  });
+  test("กฎรูป: อย่างน้อย 1 · ไม่เกิน 9 · ห้ามซ้ำ · ref แปลก", () => {
+    expect(planTiktokMedia(uris, pkg0, [], pkg0).errors[0]).toContain("อย่างน้อย 1");
+    expect(planTiktokMedia(uris, pkg0, Array.from({ length: 10 }, (_, i) => `r2:k${i}`), pkg0).errors[0]).toContain(`${TTS_MAX_IMAGES}`);
+    expect(planTiktokMedia(uris, pkg0, ["tts:tos-a/1", "tts:tos-a/1"], pkg0).errors.join(" ")).toContain("ซ้ำ");
+    expect(planTiktokMedia(uris, pkg0, ["https://x"], pkg0).errors.join(" ")).toContain("ไม่รู้จัก");
+  });
+  test("กล่อง: แก้น้ำหนัก/ขนาด → ส่งเฉพาะที่เปลี่ยน (ปัดน้ำหนัก 3 ตำแหน่ง)", () => {
+    const p = planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), { ...pkg0, weight: 0.4567 });
+    expect(p).toMatchObject({ weightChanged: true, boxChanged: false });
+    expect(p.pkg.weight).toBe(0.457);
+    expect(tiktokPkgFields(p)).toEqual({ package_weight: { value: "0.457", unit: "KILOGRAM" } });
+    const q = planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), { ...pkg0, length: 25 });
+    expect(tiktokPkgFields(q)).toEqual({ package_dimensions: { length: "25", width: "15", height: "5", unit: "CENTIMETER" } });
+    expect(q.changes).toEqual([{ label: "ขนาดกล่อง", before: "20×15×5 ซม.", after: "25×15×5 ซม." }]);
+  });
+  test("กฎกล่อง: ต้องครบ 3 ช่อง · จำนวนเต็ม · ลบค่าที่เคยตั้งไม่ได้ · เตือนหน่วย", () => {
+    const empty = { weight: null, length: null, width: null, height: null };
+    expect(planTiktokMedia(uris, empty, uris.map(tiktokImageRef), { ...empty, length: 10 }).errors.join(" ")).toContain("ครบ");
+    expect(planTiktokMedia(uris, empty, uris.map(tiktokImageRef), { weight: 1, length: 10.5, width: 2, height: 3 }).errors.join(" ")).toContain("จำนวนเต็ม");
+    expect(planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), { ...pkg0, weight: null }).errors.join(" ")).toContain("ลบน้ำหนัก");
+    expect(planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), { ...pkg0, length: null, width: null, height: null }).errors.join(" ")).toContain("ลบขนาด");
+    expect(planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), { ...pkg0, weight: 0 }).errors.join(" ")).toContain("มากกว่า 0");
+    expect(planTiktokMedia(uris, pkg0, uris.map(tiktokImageRef), { ...pkg0, weight: 350 }).warnings.join(" ")).toContain("กิโลกรัม");
+    const first = planTiktokMedia(uris, empty, uris.map(tiktokImageRef), { weight: 0.3, length: 20, width: 10, height: 5 });
+    expect(first).toMatchObject({ weightChanged: true, boxChanged: true, errors: [] });
+  });
+  test("samePkg", () => {
+    expect(samePkg(pkg0, { ...pkg0 })).toBe(true);
+    expect(samePkg(pkg0, { ...pkg0, height: 6 })).toBe(false);
   });
 });

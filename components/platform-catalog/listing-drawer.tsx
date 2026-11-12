@@ -202,7 +202,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const line = detail?.line ?? null;
   const lazView = isLazada ? laz.view : null;
   const ttView = isTiktok ? tt.view : null;
-  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? ttView.images.length : null;
+  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? (ttEdit.images ?? ttView.images).length : null;
   const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
@@ -473,7 +473,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} />)
+                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -499,7 +499,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {isTiktok && ttEdit.dialog}
       {isTiktok && ttDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
-      {!line && ttView && <ImageLightbox images={ttView.images.map((u) => ({ url: u }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+      {!line && ttView && <ImageLightbox images={(ttEdit.images ?? ttView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && lazView && <ImageLightbox images={(lazEdit.form?.images ?? lazView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
 
       {/* เลือกรูป: เพิ่มรูปสินค้าจากคลังรูปในระบบ / เลือกรูปให้ตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ) */}

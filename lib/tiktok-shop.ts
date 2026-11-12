@@ -180,11 +180,33 @@ const PRODUCT_WRITE_SCOPE = "Product Write (seller.product.write)";
  * ⚠️ แก้แล้ว TikTok ส่งไปตรวจใหม่ (ฉบับเดิมขายต่อจนผ่าน) · ราคา/สต๊อก = มีผลทันที (ยังไม่เปิดให้แก้)
  * category_version: เอกสารบอก "ร้าน SEA ต้องส่ง v2 เมื่อใช้ API นี้" (ไทย = SEA)
  */
-export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string }): Promise<Record<string, unknown>> {
+export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown }): Promise<Record<string, unknown>> {
   return ttsApi("POST", `/product/202509/products/${encodeURIComponent(productId)}/partial_edit`, accessToken, {
     query: { shop_cipher: shopCipher }, body: { ...fields, category_version: "v2" }, scope: PRODUCT_WRITE_SCOPE,
   });
 }
+/**
+ * ฝากรูปกับ TikTok (Upload Product Image 202309 · multipart/form-data · ไม่ต้องมี shop_cipher) → { uri, url, width, height }
+ * เฟส C: use_case=MAIN_IMAGE (300–4000 px · ≤ 10MB · jpg/png/webp) · เซ็นคำขอแบบไม่รวม body (กติกาของ multipart)
+ */
+export async function ttsUploadImage(accessToken: string, bytes: ArrayBuffer, fileName: string, contentType: string, useCase = "MAIN_IMAGE"): Promise<{ uri: string; url: string | null; width: number | null; height: number | null }> {
+  const path = "/product/202309/images/upload";
+  const query: Record<string, string> = { app_key: APP_KEY(), timestamp: String(Math.floor(Date.now() / 1000)) };
+  query.sign = await ttsSign(path, query, "", APP_SECRET());
+  const fd = new FormData();
+  fd.append("data", new Blob([bytes], { type: contentType }), fileName);
+  fd.append("use_case", useCase);
+  const res = await fetch(`${TTS_API_BASE}${path}?${new URLSearchParams(query).toString()}`, {
+    method: "POST", cache: "no-store", headers: { "x-tts-access-token": accessToken }, body: fd,   // content-type + boundary ให้ fetch ใส่เอง
+  });
+  const j = await res.json().catch(() => null) as { code?: number; message?: string; request_id?: string; data?: Record<string, unknown> } | null;
+  if (!j) throw new TtsApiError(`TikTok ตอบกลับไม่ถูกต้อง (HTTP ${res.status})`, String(res.status));
+  if (j.code !== 0) throw new TtsApiError(j.message || "ฝากรูปกับ TikTok ไม่สำเร็จ", String(j.code ?? res.status), j.request_id ?? null, PRODUCT_WRITE_SCOPE);
+  const uri = str(j.data?.uri);
+  if (!uri) throw new TtsApiError("TikTok ไม่ส่งรหัสรูป (uri) กลับมา", "no_uri", j.request_id ?? null);
+  return { uri, url: str(j.data?.url), width: numOrNull(j.data?.width), height: numOrNull(j.data?.height) };
+}
+
 /**
  * แก้ราคาต่อตัวเลือก (Update Price 202309) — มีผลทันที ไม่ต้องรอตรวจ · ทุก SKU ต้องอยู่สินค้าเดียวกัน · สินค้าต้อง ACTIVATE และไม่อยู่ในโปรโมชัน
  * price.amount = ราคาแสดงก่อนส่วนลด (ร้านไทย) · ไทย 30–260,000 ทศนิยม 2 (planTiktokPrices ตรวจก่อนแล้ว) · data ตอบว่างเสมอ

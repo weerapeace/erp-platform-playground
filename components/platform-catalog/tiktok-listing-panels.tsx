@@ -12,7 +12,8 @@
  * ส่งขึ้นร้านจริง (ถามก่อนเสมอ · มีประวัติ): POST /api/tiktok-shop/listing-edit · /api/tiktok-shop/listing-display
  * กฎ: lib/tiktok-listing-edit (pure + เทสต์ — หน้าเว็บกับ API ใช้ตัวเดียวกัน) · แผนเฟส: docs/tiktok-shop-connector.md
  * เฟส B: ราคาต่อตัวเลือก (แท็บตัวเลือก & ราคา → POST /api/tiktok-shop/listing-prices · มีผลทันที) — ปุ่มบันทึกเดียวกับชื่อ
- * ยังไม่ทำ: รายละเอียด · รูป · สต๊อก (BigSeller ยังซิงค์สต๊อกอยู่) — ดูอย่างเดียว
+ * เฟส C: รูปสินค้า (แท็บรูป · ของกลาง ./listing-images) + กล่องพัสดุ (แท็บข้อมูล) → ส่งพร้อมชื่อใน listing-edit (Partial Edit ครั้งเดียว · TikTok ตรวจใหม่)
+ * ยังไม่ทำ: รายละเอียด · รูปตัวเลือก · สต๊อก (BigSeller ยังซิงค์สต๊อกอยู่) — ดูอย่างเดียว
  * ของกลางที่ใช้: MiniTable · MoneyInput · ConfirmDialog · ToggleSwitch · state-views · Icon · sanitizeRichHtml
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -26,11 +27,13 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { MoneyInput } from "@/components/money-input";
 import {
-  applyTiktokBulkPrice, applyTiktokErpFull, tiktokErpPriceCheck, planTiktokDisplay, planTiktokPrices, planTiktokTitle, tiktokIsOpen, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, tiktokStatusBadge, ttsTitleLength,
+  applyTiktokBulkPrice, applyTiktokErpFull, tiktokErpPriceCheck, planTiktokDisplay,
+  planTiktokMedia, samePkg, tiktokMediaBase, tiktokRefsForSend, TTS_MAX_IMAGES, type TiktokMediaPlan, type TiktokPkg, planTiktokPrices, planTiktokTitle, tiktokIsOpen, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, tiktokStatusBadge, ttsTitleLength,
   TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN,
   type TiktokErpPrice, type TiktokListingDetailResponse, type TiktokListingView, type TiktokPricePlan, type TiktokPriceRow, type TiktokSkuView, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import type { VariantMatchRow } from "@/lib/platform-variant-match";
+import { ListingImageGrid, ListingImagePicker, useSystemImages } from "./listing-images";
 
 export type TiktokListingState = {
   listingId: string | null;
@@ -109,7 +112,17 @@ export type TiktokEditApi = {
   /** แก้ราคาไม่ได้เพราะอะไร (สินค้าไม่ได้เปิดขาย) · null = แก้ได้ */
   priceBlock: string | null;
   pricePlan: TiktokPricePlan | null;
-  /** จำนวนรายการที่แก้ (ชื่อ + ราคาแต่ละตัว) */
+  /** เฟส C: รูปสินค้า (ลิงก์รูปเดิม / "r2:<key>" รูปใหม่จากระบบ) + กล่องพัสดุ · null = ยังไม่มีข้อมูล */
+  images: string[] | null;
+  setImages: (next: string[]) => void;
+  pkg: TiktokPkg | null;
+  setPkg: (patch: Partial<TiktokPkg>) => void;
+  /** ฐานรูป/กล่อง (ฉบับรอตรวจถ้ามี ไม่งั้นฉบับขาย) */
+  mediaBase: ReturnType<typeof tiktokMediaBase> | null;
+  mediaPlan: TiktokMediaPlan | null;
+  /** แก้รูป/กล่องไม่ได้เพราะอะไร · null = แก้ได้ */
+  mediaBlock: string | null;
+  /** จำนวนรายการที่แก้ (ชื่อ + ราคาแต่ละตัว + รูป/กล่อง) */
   changeCount: number;
   errors: string[];
   dirty: boolean;
@@ -124,29 +137,44 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   const baseTitle = state.view ? (state.view.pendingTitle ?? state.view.title) : null;
   const priceBase = useMemo(() => (state.view ? tiktokPriceRowsFromView(state.view) : null), [state.view]);
   const priceBlock = state.view ? tiktokPriceBlock(state.view) : null;
+  const mediaBase = useMemo(() => (state.view ? tiktokMediaBase(state.view) : null), [state.view]);
+  const mediaBlock = !state.view ? null : state.view.productStatus === "FREEZE" || state.view.productStatus === "DELETED" ? "สินค้าที่ถูกระงับ/ลบแล้ว แก้รูป/กล่องไม่ได้" : null;
   const [title, setTitle] = useState<string | null>(null);
   const [prices, setPricesState] = useState<TiktokPriceRow[] | null>(null);
+  const [images, setImagesState] = useState<string[] | null>(null);
+  const [pkg, setPkgState] = useState<TiktokPkg | null>(null);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวใหม่ / ดึงใหม่ / ส่งสำเร็จ) → ฟอร์มเริ่มจากของล่าสุด
   useEffect(() => { setTitle(baseTitle); }, [baseTitle]);
   useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
+  useEffect(() => { setImagesState(mediaBase ? mediaBase.images.map((x) => x.url) : null); setPkgState(mediaBase ? { ...mediaBase.pkg } : null); }, [mediaBase]);
   const plan = useMemo(() => (baseTitle != null && title != null ? planTiktokTitle(baseTitle, title) : null), [baseTitle, title]);
   const pricePlan = useMemo(() => (priceBase && prices ? planTiktokPrices(priceBase, prices) : null), [priceBase, prices]);
+  // รูป/กล่อง: แตะแล้วเท่านั้นถึงตรวจกฎ (สินค้าที่ไม่มีรูปบนร้าน ไม่ควรบล็อกการแก้ชื่อ/ราคา)
+  const mediaTouched = !!mediaBase && !!images && !!pkg && (images.join("\n") !== mediaBase.images.map((x) => x.url).join("\n") || !samePkg(pkg, mediaBase.pkg));
+  const mediaRefs = useMemo(() => (mediaBase && images ? tiktokRefsForSend(images, mediaBase.images) : null), [mediaBase, images]);
+  const mediaPlan = useMemo(() => (mediaBase && pkg && mediaRefs ? planTiktokMedia(mediaBase.images.map((x) => x.uri), mediaBase.pkg, mediaRefs, pkg) : null), [mediaBase, pkg, mediaRefs]);
   const titleDirty = !!plan?.changed;
   const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
-  const dirty = titleDirty || priceDirty;
-  const changeCount = (titleDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0);
-  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? [])];
+  const mediaDirty = mediaTouched && !mediaBlock && !!mediaPlan && (mediaPlan.imagesChanged || mediaPlan.weightChanged || mediaPlan.boxChanged);
+  const dirty = titleDirty || priceDirty || mediaDirty || (mediaTouched && !!mediaPlan?.errors.length);
+  const changeCount = (titleDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0) + (mediaDirty ? mediaPlan!.changes.length : 0);
+  const errors = [
+    ...(plan?.errors ?? []), ...(pricePlan?.errors ?? []),
+    ...(mediaTouched && !mediaRefs ? ["รูปบนร้านเปลี่ยนไปแล้ว — กดยกเลิกที่แก้ แล้วลองใหม่"] : []),
+    ...(mediaTouched ? mediaPlan?.errors ?? [] : []),
+  ];
 
   const post = async (url: string, payload: unknown) => {
     const r = await apiFetch(url, { method: "POST", body: JSON.stringify(payload) });
     const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as TiktokWriteResponse;
     return { r, j };
   };
-  // ส่งทีละส่วน: ราคา (มีผลทันที) → ชื่อ (ส่งตรวจ) · ส่วนแรกพลาด = ไม่ส่งต่อ
+  // ส่งทีละส่วน: ราคา (มีผลทันที) → ชื่อ + รูป/กล่อง (Partial Edit ครั้งเดียว · ส่งตรวจ) · ส่วนแรกพลาด = ไม่ส่งต่อ
   const save = async () => {
     if (!state.listingId || baseTitle == null || !priceBase || !prices) return;
+    const editDirty = titleDirty || mediaDirty;
     setSaving(true);
     const done: string[] = [];
     let saved = false;
@@ -155,7 +183,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
       if (priceDirty) {
         const { r, j } = await post("/api/tiktok-shop/listing-prices", { listing_id: state.listingId, before: priceBase, edit: prices });
         if (!j.ok) {
-          toast.error(r.status === 401 ? NO_AUTH : `ราคา: ${j.error ?? `HTTP ${r.status}`}${titleDirty ? " (ยังไม่ได้ส่งชื่อ)" : ""}`);
+          toast.error(r.status === 401 ? NO_AUTH : `ราคา: ${j.error ?? `HTTP ${r.status}`}${editDirty ? " (ยังไม่ได้ส่งชื่อ/รูป/กล่อง)" : ""}`);
           if (r.status === 409 && j.view) { setAsking(false); state.apply(j.view); }
           return;
         }
@@ -163,10 +191,15 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
         (j.warnings ?? []).forEach((w) => toast.warning(w));
         if (j.view) lastView = j.view;
       }
-      if (titleDirty && plan) {
-        const { r, j } = await post("/api/tiktok-shop/listing-edit", { listing_id: state.listingId, before_title: baseTitle, title: plan.title });
+      if (editDirty) {
+        const payload = {
+          listing_id: state.listingId,
+          ...(titleDirty && plan ? { before_title: baseTitle, title: plan.title } : {}),
+          ...(mediaDirty && mediaBase && mediaPlan ? { media: { before_uris: mediaBase.images.map((x) => x.uri), before_pkg: mediaBase.pkg, images: mediaPlan.images, pkg: mediaPlan.pkg } } : {}),
+        };
+        const { r, j } = await post("/api/tiktok-shop/listing-edit", payload);
         if (!j.ok) {
-          toast.error(r.status === 401 ? NO_AUTH : `ชื่อ: ${j.error ?? `HTTP ${r.status}`}`);
+          toast.error(r.status === 401 ? NO_AUTH : `${titleDirty && !mediaDirty ? "ชื่อ" : "แก้สินค้า"}: ${j.error ?? `HTTP ${r.status}`}`);
           if (j.view) lastView = j.view;
           if (r.status === 409) setAsking(false);
           if (!saved) { if (lastView) state.apply(lastView); return; }
@@ -183,15 +216,18 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     finally { setSaving(false); if (saved) onSaved?.(plan?.title ?? baseTitle); }
   };
 
-  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : [])];
+  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : []), ...(mediaDirty ? mediaPlan?.warnings ?? [] : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
       title={`ส่งการแก้ไข ${changeCount.toLocaleString()} รายการขึ้นร้าน TikTok?`} confirmText="ส่งขึ้น TikTok"
       message={(
         <div className="space-y-2 text-sm">
-          <p>ระบบจะแก้สินค้าบนร้าน TikTok จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · ไม่แตะสต๊อก/รูป/สถานะเปิดปิด) · มีประวัติว่าใครแก้อะไร</p>
+          <p>ระบบจะแก้สินค้าบนร้าน TikTok จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · ไม่แตะสต๊อก/สถานะเปิดปิด) · มีประวัติว่าใครแก้อะไร</p>
           <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
             {titleDirty && plan && <li><span className="font-medium text-slate-700">ชื่อสินค้า:</span> <span className="text-slate-400 line-through">{baseTitle}</span> → <span className="text-slate-800">{plan.title}</span></li>}
+            {mediaDirty && (mediaPlan?.changes ?? []).map((c) => (
+              <li key={c.label}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
+            ))}
             {(pricePlan?.changes ?? []).map((c) => (
               <li key={c.skuId}><span className="font-medium text-slate-700">ราคา {c.label}:</span> <span className="text-slate-800">{tiktokPriceChangeText(c)}</span></li>
             ))}
@@ -202,10 +238,16 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   );
   return {
     canEdit, baseTitle, title, prices, priceBlock, pricePlan, changeCount, errors, dirty, saving, dialog,
+    images, pkg, mediaBase, mediaPlan, mediaBlock,
     setTitle: (v) => setTitle(v),
     setPrice: (skuId, price) => setPricesState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, price } : r)) : rows)),
     setPrices: (rows) => setPricesState(rows),
-    reset: () => { setTitle(baseTitle); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); },
+    setImages: (next) => setImagesState(next),
+    setPkg: (patch) => setPkgState((p) => (p ? { ...p, ...patch } : p)),
+    reset: () => {
+      setTitle(baseTitle); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r })));
+      if (mediaBase) { setImagesState(mediaBase.images.map((x) => x.url)); setPkgState({ ...mediaBase.pkg }); }
+    },
     ask: () => setAsking(true),
   };
 }
@@ -338,7 +380,7 @@ export function TiktokInfoPanel({ state, edit }: { state: TiktokListingState; ed
     <div className="space-y-3 text-sm">
       <p className="flex items-start gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
         <Icon name="info" className="mt-0.5 shrink-0" />
-        {can ? "ข้อมูลสดจากร้าน TikTok · แก้ชื่อแล้วกด “บันทึกขึ้น TikTok” ด้านล่าง (ถามก่อนส่ง) · TikTok จะตรวจชื่อใหม่ก่อน ระหว่างตรวจร้านยังขายชื่อเดิม · ราคาแก้ที่แท็บตัวเลือก & ราคา (มีผลทันที) · รายละเอียด/รูป ยังแก้จากที่นี่ไม่ได้" : "ดูอย่างเดียว — ข้อมูลสดจากร้าน TikTok"}
+        {can ? "ข้อมูลสดจากร้าน TikTok · แก้ชื่อ/กล่องพัสดุแล้วกด “บันทึกขึ้น TikTok” ด้านล่าง (ถามก่อนส่ง) · TikTok จะตรวจของใหม่ก่อน ระหว่างตรวจร้านยังใช้ของเดิม · รูปแก้ที่แท็บรูป · ราคาแก้ที่แท็บตัวเลือก & ราคา (มีผลทันที) · รายละเอียดยังแก้จากที่นี่ไม่ได้" : "ดูอย่างเดียว — ข้อมูลสดจากร้าน TikTok"}
       </p>
       {v.rejectReasons.length > 0 && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -364,6 +406,7 @@ export function TiktokInfoPanel({ state, edit }: { state: TiktokListingState; ed
         <Field label="แบรนด์">{v.brand ?? "—"}</Field>
         <Field label="หมวดบน TikTok">{v.category ?? "—"}</Field>
       </div>
+      <TiktokPackageBox v={v} edit={edit} />
       <div>
         <span className="mb-1 block text-xs text-slate-500">รายละเอียดสินค้า (ดูอย่างเดียว)</span>
         <div className="tiptap-content max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm [&_img]:max-w-full [&_img]:rounded"
@@ -373,22 +416,64 @@ export function TiktokInfoPanel({ state, edit }: { state: TiktokListingState; ed
   );
 }
 
-/** แท็บรูป — ดูอย่างเดียว (แก้รูปเป็นเฟสถัดไป) */
-export function TiktokImagesPanel({ state, onOpen }: { state: TiktokListingState; onOpen: (index: number) => void }) {
+const TIKTOK_IMG_NOTE = "ลากเรียง · รูปแรก = ปก (ควรพื้นขาว) · รูปจากระบบจะถูกทำเป็น JPG จัตุรัสพื้นขาวแล้วฝากกับ TikTok ตอนกดบันทึก · TikTok จะตรวจรูปใหม่ก่อน ระหว่างตรวจร้านยังใช้รูปเดิม";
+
+/** แท็บรูป — เฟส C: เพิ่มจากคลังรูปในระบบ / ลากเรียง / ตั้งปก / ลบ (ของกลาง ./listing-images) · ไม่มีสิทธิ์ = ดูอย่างเดียว */
+export function TiktokImagesPanel({ state, onOpen, edit, matchedParent, matchedCode }: {
+  state: TiktokListingState; onOpen: (index: number) => void; edit?: TiktokEditApi | null; matchedParent?: string | null; matchedCode?: string | null;
+}) {
+  const sys = useSystemImages(matchedParent ?? null);
+  const [picking, setPicking] = useState(false);
   const g = gate(state); if (g) return g;
   const v = state.view!;
-  if (!v.images.length) return <p className="text-xs text-slate-500">สินค้านี้ไม่มีรูปบน TikTok</p>;
+  const can = !!edit?.canEdit && !!edit.images && !edit.mediaBlock;
+  const images = can ? edit!.images! : (v.pendingImages ? v.pendingImages.map((x) => x.url) : v.images);
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-slate-500">รูปบนร้าน TikTok {v.images.length.toLocaleString()} รูป (ดูอย่างเดียว · TikTok รับสูงสุด 9 รูป)</p>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-        {v.images.map((u, i) => (
-          <button key={`${u}-${i}`} type="button" onClick={() => onOpen(i)} className="relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-            <img src={u} alt="" loading="lazy" className="h-full w-full object-cover" />
-            {i === 0 && <span className="absolute left-1 top-1 rounded bg-slate-900/70 px-1.5 text-[10px] text-white">ปก</span>}
-          </button>
-        ))}
+    <div className="space-y-3">
+      {v.pendingImages && (
+        <p className="flex items-start gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <Icon name="info" className="mt-0.5 shrink-0" />รูปชุดนี้รอ TikTok ตรวจ — ระหว่างนี้ร้านยังใช้รูปเดิม {v.images.length.toLocaleString()} รูป
+        </p>
+      )}
+      {edit?.canEdit && edit.mediaBlock && <p className="text-xs text-amber-700">{edit.mediaBlock}</p>}
+      {!can && images.length === 0
+        ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">สินค้านี้ไม่มีรูปบน TikTok</p>
+        : <ListingImageGrid images={images} onChange={(next) => edit?.setImages(next)} canEdit={can} max={TTS_MAX_IMAGES} platformName="TikTok" dragGroup="tiktok-listing-images"
+            onOpen={onOpen} onAdd={() => { setPicking(true); sys.load(); }} canAdd={!!matchedParent} note={can ? TIKTOK_IMG_NOTE : "ดูอย่างเดียว"} />}
+      {can && !matchedParent && <p className="text-[11px] text-slate-400">เพิ่มรูปจากระบบได้เมื่อจับคู่สินค้านี้กับ Parent SKU แล้ว (แท็บจับคู่)</p>}
+      {can && (
+        <ListingImagePicker open={picking} onClose={() => setPicking(false)} mode="product" storageKey="tiktok-image-picker"
+          title="เพิ่มรูปสินค้าจากคลังรูปในระบบ" description={`เลือกได้อีก ${Math.max(0, TTS_MAX_IMAGES - images.length)} รูป (TikTok รับไม่เกิน ${TTS_MAX_IMAGES}) · ส่งขึ้นร้านตอนกดบันทึก`}
+          matchedParent={matchedParent ?? null} matchedCode={matchedCode} sysImages={sys.images}
+          isUsed={(ref) => images.includes(ref)} full={images.length >= TTS_MAX_IMAGES}
+          onPick={(ref) => edit!.setImages([...images, ref])} />
+      )}
+    </div>
+  );
+}
+
+/** กล่องพัสดุ (เฟส C) — น้ำหนัก กก. + ยาว×กว้าง×สูง ซม. · ใช้คิดค่าส่ง · ไทยไม่บังคับขนาดกล่อง */
+function TiktokPackageBox({ v, edit }: { v: TiktokListingView; edit: TiktokEditApi }) {
+  const can = edit.canEdit && !!edit.pkg && !edit.mediaBlock;
+  const base = edit.mediaBase?.pkg ?? v.pkg;
+  const p = can ? edit.pkg! : base;
+  const cls = (k: keyof TiktokPkg) => `h-9 w-full rounded-lg border px-2 text-right text-sm ${can && p[k] !== base[k] ? "border-violet-400 bg-violet-50" : "border-slate-200"}`;
+  const input = (k: keyof TiktokPkg, step: string, ph: string) => can
+    ? <input type="number" min="0" step={step} inputMode="decimal" value={p[k] ?? ""} placeholder={ph} onChange={(e) => edit.setPkg({ [k]: numOrNull(e.target.value) } as Partial<TiktokPkg>)} className={cls(k)} />
+    : <div className="flex h-9 items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-2 text-sm">{p[k] ?? "—"}</div>;
+  return (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
+        กล่องพัสดุ
+        {v.pendingPkg && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-normal text-amber-700">ค่าใหม่รอ TikTok ตรวจ</span>}
       </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <label className="block text-xs text-slate-500">น้ำหนัก (กก.){input("weight", "0.001", "0.5")}</label>
+        <label className="block text-xs text-slate-500">ยาว (ซม.){input("length", "1", "—")}</label>
+        <label className="block text-xs text-slate-500">กว้าง (ซม.){input("width", "1", "—")}</label>
+        <label className="block text-xs text-slate-500">สูง (ซม.){input("height", "1", "—")}</label>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-400">วัดหลังแพ็กแล้ว · ใช้คิดค่าส่ง (ใส่ผิดอาจโดนเก็บค่าส่งเพิ่ม) · น้ำหนักทศนิยมได้ 3 ตำแหน่ง · ขนาดเป็นจำนวนเต็ม ใส่ครบ 3 ช่อง{can ? " · ส่งพร้อมปุ่มบันทึกขึ้น TikTok (TikTok ตรวจใหม่)" : ""}</p>
     </div>
   );
 }

@@ -34,12 +34,24 @@ export type TiktokListingView = {
   brand: string | null;
   category: string | null;
   images: string[];
+  /** uri ของรูปแต่ละรูป (ลำดับเดียวกับ images) — ใช้ส่งกลับตอนแก้รูป (เฟส C) */
+  imageUris: string[];
+  /** กล่องพัสดุ (กก. / ซม.) ของฉบับที่ขายอยู่ */
+  pkg: TiktokPkg;
+  /** รูป/กล่องที่ส่งให้ TikTok ตรวจอยู่ (ต่างจากฉบับขาย) · null = ไม่มี */
+  pendingImages: TiktokImage[] | null;
+  pendingPkg: TiktokPkg | null;
   description: string;
   skus: TiktokSkuView[];
   /** เหตุผลที่ TikTok ตีกลับ (ถ้ามี) */
   rejectReasons: string[];
   updateTime: number | null;
 };
+
+/** รูปบน TikTok: url ไว้แสดง · uri ไว้ส่งกลับตอนแก้ (Upload Product Image คืน uri) */
+export type TiktokImage = { url: string; uri: string };
+/** กล่องพัสดุ: น้ำหนัก กก. (ทศนิยม ≤ 3) · กว้าง/ยาว/สูง ซม. (จำนวนเต็ม) · null = ไม่ได้ตั้ง */
+export type TiktokPkg = { weight: number | null; length: number | null; width: number | null; height: number | null };
 
 /** คำตอบ GET/POST /api/tiktok-shop/listing-detail */
 export type TiktokListingDetailResponse = { view: TiktokListingView | null; fetched_at: string | null; saved?: boolean; error: string | null };
@@ -79,7 +91,14 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
   const chain = arrOf(d.category_chains);
   const leaf = chain.find((c) => c.is_leaf === true) ?? chain[chain.length - 1];
   const rv = obj(underReview);
-  const reviewTitle = rv && str(rv.id) === id ? str(rv.title) : null;
+  const sameRv = !!rv && str(rv.id) === id;
+  const reviewTitle = sameRv ? str(rv!.title) : null;
+  const imgs = tiktokImagesOf(d);
+  const pkg = tiktokPkgOf(d);
+  const rvImgs = sameRv ? tiktokImagesOf(rv!) : [];
+  const rvPkg = sameRv ? tiktokPkgOf(rv!) : null;
+  const pendingImages = rvImgs.length && rvImgs.map((x) => x.uri).join("\n") !== imgs.map((x) => x.uri).join("\n") ? rvImgs : null;
+  const pendingPkg = rvPkg && !samePkg(rvPkg, pkg) && (rvPkg.weight != null || rvPkg.length != null) ? rvPkg : null;
   return {
     productId: id,
     title,
@@ -90,7 +109,9 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
     pendingTitle: reviewTitle && reviewTitle !== title ? reviewTitle : null,
     brand: str(obj(d.brand)?.name),
     category: str(leaf?.local_name),
-    images: arrOf(d.main_images).map((m) => (Array.isArray(m.urls) ? str(m.urls[0]) : null) ?? (Array.isArray(m.thumb_urls) ? str(m.thumb_urls[0]) : null)).filter((u): u is string => !!u),
+    images: imgs.map((x) => x.url),
+    imageUris: imgs.map((x) => x.uri),
+    pkg, pendingImages, pendingPkg,
     description: typeof d.description === "string" ? d.description : "",
     skus,
     rejectReasons: reasons,
@@ -295,4 +316,121 @@ export function applyTiktokErpFull(rows: TiktokPriceRow[], erpOf: (skuId: string
     return { ...r, price: next };
   });
   return { rows: out, changed };
+}
+
+// ───────────── เฟส C: รูปสินค้า + กล่องพัสดุ (Partial Edit 202509 · TikTok ส่งตรวจใหม่) ─────────────
+// เอกสารทางการ (อ่าน 2026-11-12): main_images[{ uri }] สูงสุด 9 รูป เรียงตามที่ส่ง · ขนาด 300–4000 px · รูปแรกควรพื้นขาว
+//   uri ได้จาก Upload Product Image 202309 (use_case=MAIN_IMAGE · ≤ 10MB · jpg/png/webp)
+//   package_weight{ value (KILOGRAM ทศนิยม ≤ 3), unit } · package_dimensions{ length,width,height (จำนวนเต็มบวก), unit: CENTIMETER } — ไทยไม่บังคับขนาดกล่อง
+//   ส่งเฉพาะช่องบนสุดที่แก้ (ช่องที่ไม่ส่ง = คงเดิม)
+
+export const TTS_MAX_IMAGES = 9;
+/** รูปเดิมบนร้านในฟอร์มส่ง = "tts:<uri>" · รูปใหม่จากคลังรูปในระบบ = "r2:<key>" (systemImageRef ใน lib/line-listing-edit) */
+export const tiktokImageRef = (uri: string): string => `tts:${uri}`;
+export const tiktokUriOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("tts:") ? ref.slice(4) || null : null);
+export const tiktokR2KeyOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) || null : null);
+
+/** รูปจาก Get Product (main_images[{ uri, urls[], thumb_urls[] }]) — ตัดรูปที่ไม่มีลิงก์ */
+export function tiktokImagesOf(detail: unknown): TiktokImage[] {
+  return arrOf(obj(detail)?.main_images).map((m) => ({
+    url: (Array.isArray(m.urls) ? str(m.urls[0]) : null) ?? (Array.isArray(m.thumb_urls) ? str(m.thumb_urls[0]) : null) ?? "",
+    uri: str(m.uri) ?? "",
+  })).filter((x) => x.url);
+}
+/** กล่องพัสดุจาก Get Product (package_weight / package_dimensions เป็นข้อความ) → กก. / ซม. */
+export function tiktokPkgOf(detail: unknown): TiktokPkg {
+  const d = obj(detail) ?? {};
+  const w = obj(d.package_weight); const dim = obj(d.package_dimensions);
+  const wUnit = up(w?.unit); const dUnit = up(dim?.unit);
+  const kg = (v: unknown) => { const n = num(v); return n == null ? null : wUnit === "GRAM" ? n / 1000 : wUnit === "POUND" ? Math.round(n * 0.45359237 * 1000) / 1000 : n; };
+  const cm = (v: unknown) => { const n = num(v); return n == null ? null : dUnit === "INCH" ? Math.round(n * 2.54) : n; };
+  return { weight: kg(w?.value), length: cm(dim?.length), width: cm(dim?.width), height: cm(dim?.height) };
+}
+export function samePkg(a: TiktokPkg, b: TiktokPkg): boolean {
+  return a.weight === b.weight && a.length === b.length && a.width === b.width && a.height === b.height;
+}
+
+/** ฐานที่ใช้แก้รูป/กล่อง = ฉบับที่รอตรวจ (ถ้ามี — คือของที่ส่งล่าสุด) ไม่งั้นฉบับขาย */
+export function tiktokMediaBase(v: Pick<TiktokListingView, "images" | "imageUris" | "pkg" | "pendingImages" | "pendingPkg">): { images: TiktokImage[]; pkg: TiktokPkg; pendingImages: boolean; pendingPkg: boolean } {
+  const live = v.images.map((url, i) => ({ url, uri: v.imageUris[i] ?? "" }));
+  return { images: v.pendingImages ?? live, pkg: v.pendingPkg ?? v.pkg, pendingImages: !!v.pendingImages, pendingPkg: !!v.pendingPkg };
+}
+
+/** ฟอร์มหน้าเว็บ (ลิงก์รูปเดิม / "r2:<key>") → ref ที่ส่ง API ("tts:<uri>" / "r2:<key>") · ลิงก์ที่ไม่รู้จัก = null (ให้ผู้ใช้โหลดใหม่) */
+export function tiktokRefsForSend(formImages: string[], base: TiktokImage[]): string[] | null {
+  const uriOf = new Map(base.map((x) => [x.url, x.uri]));
+  const out: string[] = [];
+  for (const ref of formImages) {
+    if (tiktokR2KeyOfRef(ref)) { out.push(ref); continue; }
+    const uri = uriOf.get(ref);
+    if (!uri) return null;
+    out.push(tiktokImageRef(uri));
+  }
+  return out;
+}
+
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+const fmtKg = (n: number | null) => (n == null ? "ไม่ได้ตั้ง" : `${n.toLocaleString("en-US", { maximumFractionDigits: 3 })} กก.`);
+const fmtBox = (p: TiktokPkg) => (p.length == null || p.width == null || p.height == null ? "ไม่ได้ตั้ง" : `${p.length}×${p.width}×${p.height} ซม.`);
+
+export type TiktokMediaPlan = {
+  imagesChanged: boolean; weightChanged: boolean; boxChanged: boolean;
+  /** ref ที่จะส่ง ("tts:<uri>" / "r2:<key>") เรียงตามลำดับใหม่ */
+  images: string[];
+  pkg: TiktokPkg;
+  newImages: number;
+  changes: { label: string; before: string; after: string }[];
+  errors: string[]; warnings: string[];
+};
+
+/**
+ * เทียบรูป/กล่อง ฐาน (uri เดิม + กล่องเดิม) กับที่แก้ → ส่งอะไรบ้าง · กฎเดียวกันทั้งหน้าเว็บและ API
+ * รูป 1–9 รูป ไม่ซ้ำ · น้ำหนัก > 0 (ปัด 3 ตำแหน่ง) · กล่อง ยาว/กว้าง/สูง จำนวนเต็มบวก ใส่ครบ 3 ช่องหรือไม่ใส่เลย · ลบค่าที่เคยตั้งไม่ได้ (TikTok ไม่มีให้ล้าง)
+ */
+export function planTiktokMedia(baseUris: string[], basePkg: TiktokPkg, refs: string[], pkgIn: TiktokPkg): TiktokMediaPlan {
+  const errors: string[] = []; const warnings: string[] = []; const changes: TiktokMediaPlan["changes"] = [];
+  const baseRefs = baseUris.map(tiktokImageRef);
+  const images = refs.filter(Boolean);
+  if (images.length === 0) errors.push("ต้องมีรูปสินค้าอย่างน้อย 1 รูป");
+  if (images.length > TTS_MAX_IMAGES) errors.push(`TikTok รับรูปสินค้าได้สูงสุด ${TTS_MAX_IMAGES} รูป (ตอนนี้ ${images.length} รูป)`);
+  if (new Set(images).size !== images.length) errors.push("มีรูปซ้ำกัน — เอารูปที่ซ้ำออกก่อน");
+  if (images.some((r) => !tiktokUriOfRef(r) && !tiktokR2KeyOfRef(r))) errors.push("มีรูปที่ระบบไม่รู้จัก — ปิดแล้วเปิดลิ้นชักใหม่");
+  const newImages = images.filter((r) => tiktokR2KeyOfRef(r)).length;
+  const imagesChanged = images.join("\n") !== baseRefs.join("\n");
+  if (imagesChanged) {
+    const removed = baseRefs.filter((r) => !images.includes(r)).length;
+    const coverChanged = images[0] !== baseRefs[0];
+    const bits = [newImages ? `ใหม่ ${newImages}` : "", removed ? `เอาออก ${removed}` : "", coverChanged ? "เปลี่ยนปก" : "", !newImages && !removed && !coverChanged ? "สลับลำดับ" : ""].filter(Boolean);
+    changes.push({ label: "รูปสินค้า", before: `${baseRefs.length} รูป`, after: `${images.length} รูป${bits.length ? ` (${bits.join(" · ")})` : ""}` });
+    if (coverChanged) warnings.push("รูปแรก (ปก) ควรเป็นสินค้าบนพื้นขาว — TikTok แนะนำ และรูปไม่เหมาะอาจทำให้ตรวจไม่ผ่าน");
+    if (newImages) warnings.push(`รูปใหม่ ${newImages} รูปจะถูกทำเป็นจัตุรัสพื้นขาว 1500px แล้วฝากกับ TikTok ตอนกดบันทึก`);
+  }
+
+  // กล่องพัสดุ
+  const w = pkgIn.weight == null ? null : r3(pkgIn.weight);
+  const dims = [pkgIn.length, pkgIn.width, pkgIn.height];
+  const pkg: TiktokPkg = { weight: w, length: pkgIn.length, width: pkgIn.width, height: pkgIn.height };
+  if (w != null && !(w > 0)) errors.push("น้ำหนักกล่องต้องมากกว่า 0 กก.");
+  if (w == null && basePkg.weight != null) errors.push("ลบน้ำหนักกล่องออกไม่ได้ (TikTok ไม่มีให้ล้าง) — ใส่น้ำหนักใหม่แทน");
+  if (w != null && w > 30) warnings.push(`น้ำหนัก ${fmtKg(w)} — ตรวจว่าใส่เป็นกิโลกรัม (ไม่ใช่กรัม) · น้ำหนักมีผลกับค่าส่ง`);
+  const filled = dims.filter((x) => x != null).length;
+  if (filled > 0 && filled < 3) errors.push("ขนาดกล่องต้องใส่ครบ ยาว × กว้าง × สูง");
+  if (dims.some((x) => x != null && (!(x > 0) || !Number.isInteger(x)))) errors.push("ขนาดกล่องต้องเป็นจำนวนเต็มบวก (เซนติเมตร)");
+  if (filled === 0 && basePkg.length != null) errors.push("ลบขนาดกล่องออกไม่ได้ (TikTok ไม่มีให้ล้าง) — ใส่ขนาดใหม่แทน");
+  if (dims.some((x) => x != null && x > 200)) warnings.push("ขนาดกล่องเกิน 200 ซม. — ตรวจว่าใส่เป็นเซนติเมตร");
+  const weightChanged = w != null && w !== basePkg.weight;
+  const boxChanged = filled === 3 && (pkg.length !== basePkg.length || pkg.width !== basePkg.width || pkg.height !== basePkg.height);
+  if (weightChanged) changes.push({ label: "น้ำหนักกล่อง", before: fmtKg(basePkg.weight), after: fmtKg(w) });
+  if (boxChanged) changes.push({ label: "ขนาดกล่อง", before: fmtBox(basePkg), after: fmtBox(pkg) });
+  if (weightChanged || boxChanged) warnings.push("น้ำหนัก/ขนาดกล่องใช้คิดค่าส่ง — ใส่ตามของจริงหลังแพ็ก");
+
+  return { imagesChanged, weightChanged, boxChanged, images, pkg, newImages, changes, errors, warnings };
+}
+
+/** ช่อง package_* ที่ส่ง Partial Edit (เฉพาะที่เปลี่ยน) */
+export function tiktokPkgFields(plan: Pick<TiktokMediaPlan, "weightChanged" | "boxChanged" | "pkg">): Record<string, unknown> {
+  const f: Record<string, unknown> = {};
+  if (plan.weightChanged && plan.pkg.weight != null) f.package_weight = { value: String(plan.pkg.weight), unit: "KILOGRAM" };
+  if (plan.boxChanged) f.package_dimensions = { length: String(plan.pkg.length), width: String(plan.pkg.width), height: String(plan.pkg.height), unit: "CENTIMETER" };
+  return f;
 }
