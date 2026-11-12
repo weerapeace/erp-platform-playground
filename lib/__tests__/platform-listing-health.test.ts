@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   effectivePrice, discountPct, priceFlags,
-  summarizeListing, shopStateOf, duplicateCounts, duplicateKey, inShopTab, inShopQueue, notListedTrustworthy,
+  summarizeListing, shopStateOf, duplicateCounts, duplicateKey, countsAsDuplicate, inShopTab, inShopQueue, notListedTrustworthy,
   LOW_STOCK_MAX, LISTING_GONE_STATUS, isUnmatched, type ShopItem,
 } from "@/lib/platform-listing-health";
 
@@ -96,6 +96,28 @@ describe("ชื่อ+รหัสซ้ำ", () => {
       { id: "7", title: null, sku_code: "X" },
     ]);
     expect([...m.entries()].sort()).toEqual([["3", 3], ["4", 3], ["5", 3]]);
+  });
+  it("ตัวที่ลบแล้ว / ฉบับร่าง / ไม่อยู่บนร้านแล้ว ไม่นับเป็นตัวซ้ำ (TikTok PANTM001: ขายอยู่ 1 + ลบแล้ว 1 = ไม่ซ้ำ)", () => {
+    const m = duplicateCounts([
+      { id: "a", title: "PANTM001", sku_code: "PANTM001-01S", status: "activate" },
+      { id: "b", title: "PANTM001", sku_code: "PANTM001-01S", status: "deleted" },
+      { id: "c", title: "PIX15", sku_code: "PIX15-01", status: "activate" },
+      { id: "d", title: "PIX15", sku_code: "PIX15-01", status: "DRAFT" },
+      { id: "e", title: "PIX15", sku_code: "PIX15-01", status: "removed" },
+    ]);
+    expect(m.size).toBe(0);
+  });
+  it("ตัวที่ปิดขายยังนับ (ยังอยู่ในร้าน) · ไม่มีสถานะ (LINE) ยังนับ", () => {
+    const m = duplicateCounts([
+      { id: "1", title: "WHB20", sku_code: "WHB20-01", status: "activate" },
+      { id: "2", title: "WHB20", sku_code: "WHB20-01", status: "seller_deactivated" },
+      { id: "3", title: "JEAN08", sku_code: "JEAN08", status: null },
+      { id: "4", title: "JEAN08", sku_code: "JEAN08" },
+    ]);
+    expect([...m.entries()].sort()).toEqual([["1", 2], ["2", 2], ["3", 2], ["4", 2]]);
+    expect(countsAsDuplicate("deleted")).toBe(false);
+    expect(countsAsDuplicate("activate")).toBe(true);
+    expect(countsAsDuplicate(null)).toBe(true);
   });
 });
 

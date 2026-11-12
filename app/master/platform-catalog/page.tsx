@@ -37,7 +37,7 @@ import { FloatingDropdown } from "@/components/floating-dropdown";
 import type { AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
 import {
-  duplicateCounts, duplicateKey, discountPct, effectivePrice, priceFlags, isGoneStatus, shopStateOf, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
+  duplicateCounts, duplicateKey, countsAsDuplicate, discountPct, effectivePrice, priceFlags, isGoneStatus, shopStateOf, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
   type ListingCardSummary, type ListingSummariesResponse, type ShopBrandSummary, type ShopState,
 } from "@/lib/platform-listing-health";
 
@@ -906,8 +906,8 @@ export default function PlatformCatalogPage() {
       : <button key={o.title} type="button" disabled={o.disabled} className={cls} onClick={() => { setToolsOpen(false); o.onClick?.(); }}>{inner}</button>;
   };
   // ป๊อปรายละเอียด: ชิ้นที่ชื่อ+รหัสเหมือนตัวที่เปิดอยู่ (รวมตัวเอง) → เก็บไว้ตัวเดียว ที่เหลือตั้งไม่ต้องจับคู่
-  const openDupKey = openListing && !openListing.match_ignored ? duplicateKey(openListing.title, openListing.sku_code) : null;
-  const openSiblings = openDupKey ? activeListings.filter((l) => duplicateKey(l.title, l.sku_code) === openDupKey) : [];
+  const openDupKey = openListing && !openListing.match_ignored && countsAsDuplicate(openListing.status) ? duplicateKey(openListing.title, openListing.sku_code) : null;
+  const openSiblings = openDupKey ? activeListings.filter((l) => countsAsDuplicate(l.status) && duplicateKey(l.title, l.sku_code) === openDupKey) : [];
   const dupOthers = openListing ? openSiblings.filter((l) => l.id !== openListing.id && !l.matched_parent_sku_id) : [];
   const dupMatchedOther = openListing ? openSiblings.find((l) => l.id !== openListing.id && l.matched_parent_sku_id) ?? null : null;
   // ตัวอื่นจับคู่อยู่ แต่ตัวที่เปิดยังไม่จับคู่ → ให้ไปเก็บตัวที่จับคู่แทน (ไม่ทิ้งคู่ที่ทำไว้แล้ว)

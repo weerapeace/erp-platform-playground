@@ -208,10 +208,22 @@ export function duplicateKey(title: string | null | undefined, sku: string | nul
   return `${t}|${(sku ?? "").trim().toLowerCase()}`;
 }
 
-/** id → จำนวนรายการในกลุ่มที่ชื่อ+รหัสเหมือนกัน (เฉพาะกลุ่มที่มี ≥2) */
-export function duplicateCounts<T extends { id: string; title: string | null; sku_code: string | null }>(rows: T[]): Map<string, number> {
+/**
+ * สถานะ (platform_catalog_listings.status) ที่ลูกค้ามองไม่เห็นบนร้าน → ไม่นับเป็นตัวซ้ำ
+ * TikTok: deleted = ลบใน Seller Center แล้ว (TikTok ยังส่งกลับมา) · draft = ฉบับร่าง ยังไม่ลงขาย
+ * (เจอจริง 2026-11-12: ป้าย "ซ้ำ" 6 กลุ่ม 18 ชิ้นบน TikTok ทุกกลุ่มมีตัวขายอยู่ 1 + ตัวที่ลบแล้ว/ฉบับร่าง = ไม่ซ้ำจริง)
+ * ตัวที่ปิดขาย (seller_deactivated / LINE ซ่อน) ยังนับ — ยังอยู่ในร้าน เปิดกลับได้
+ */
+export const NOT_ON_SHOP_STATUSES = ["deleted", "draft"] as const;
+/** รายการนี้นับเป็นตัวซ้ำได้ไหม (ไม่อยู่บนร้านแล้ว / ลบแล้ว / ฉบับร่าง = ไม่นับ) */
+export const countsAsDuplicate = (status: string | null | undefined): boolean =>
+  !isGoneStatus(status) && !(NOT_ON_SHOP_STATUSES as readonly string[]).includes((status ?? "").toLowerCase());
+
+/** id → จำนวนรายการในกลุ่มที่ชื่อ+รหัสเหมือนกัน (เฉพาะกลุ่มที่มี ≥2 · ข้ามตัวที่ countsAsDuplicate = false) */
+export function duplicateCounts<T extends { id: string; title: string | null; sku_code: string | null; status?: string | null }>(rows: T[]): Map<string, number> {
   const groups = new Map<string, string[]>();
   for (const r of rows) {
+    if (!countsAsDuplicate(r.status)) continue;
     const k = duplicateKey(r.title, r.sku_code);
     if (!k) continue;
     const g = groups.get(k);
