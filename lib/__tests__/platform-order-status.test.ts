@@ -1,7 +1,39 @@
 import { describe, it, expect } from "vitest";
 import {
-  allowedNext, bangkokDayRange, checkTransition, isReportOnly, needsAction, platformStatusWarning, shipDue, shopeeToInternal,
+  allowedNext, bangkokDayRange, checkTransition, isReportOnly, isShopManaged, needsAction, platformStatusLabel, platformStatusWarning, shipDue, shopeeToInternal, tiktokToInternal,
 } from "../platform-order-status";
+
+/** 🎵 ออเดอร์ TikTok (API · 2026-11-12) — สถานะตามร้าน ดูอย่างเดียว */
+describe("🎵 ออเดอร์ TikTok", () => {
+  it("แปลงสถานะ TikTok → สถานะในระบบ", () => {
+    expect(tiktokToInternal("UNPAID")).toBe("new");
+    expect(tiktokToInternal("ON_HOLD")).toBe("new");
+    expect(tiktokToInternal("AWAITING_SHIPMENT")).toBe("new");
+    expect(tiktokToInternal("AWAITING_COLLECTION")).toBe("packed");
+    expect(tiktokToInternal("PARTIALLY_SHIPPING")).toBe("packed");
+    expect(tiktokToInternal("IN_TRANSIT")).toBe("shipped");
+    expect(tiktokToInternal("DELIVERED")).toBe("shipped");
+    expect(tiktokToInternal("COMPLETED")).toBe("shipped");
+    expect(tiktokToInternal("CANCELLED")).toBe("cancelled");
+    expect(tiktokToInternal("WHATEVER")).toBeNull();
+  });
+  it("source tiktok_api = เปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ แต่ยังนับเป็นงานต้องจัดส่ง", () => {
+    expect(isShopManaged("tiktok_api")).toBe(true);
+    expect(isShopManaged("api")).toBe(false);
+    const r = checkTransition({ status: "new", source: "tiktok_api" }, "confirmed");
+    expect(r.ok).toBe(false);
+    expect(needsAction({ status: "new", source: "tiktok_api", platform_status: "AWAITING_SHIPMENT" })).toBe(true);
+  });
+  it("ON_HOLD (ผู้ซื้อยังยกเลิกได้) ยังไม่นับงาน + มีป้ายเตือน", () => {
+    expect(needsAction({ status: "new", source: "tiktok_api", platform_status: "ON_HOLD" })).toBe(false);
+    expect(platformStatusWarning("ON_HOLD")).toContain("ยกเลิก");
+  });
+  it("ชื่อสถานะบนร้านภาษาไทย ทั้ง Shopee และ TikTok", () => {
+    expect(platformStatusLabel("READY_TO_SHIP")).toBe("ที่ต้องจัดส่ง");
+    expect(platformStatusLabel("AWAITING_COLLECTION")).toBe("รอขนส่งมารับ");
+    expect(platformStatusLabel("XYZ")).toBe("XYZ");
+  });
+});
 
 /** 📦 กติกากลางออเดอร์จากแพลตฟอร์ม (ศูนย์ออเดอร์ เฟส A · 2026-11-10) */
 describe("📦 สถานะออเดอร์แพลตฟอร์ม", () => {

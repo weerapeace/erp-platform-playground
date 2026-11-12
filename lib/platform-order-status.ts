@@ -7,6 +7,8 @@
  *
  *   ⚠️ ออเดอร์ที่อ่านมาจากอีเมล (source = "email") = ยอดขายที่ร้านส่งของไปแล้วผ่าน Seller Centre (ระบบ 📧 ดึงออเดอร์จากเมล)
  *      → ไม่ใช่งานที่ต้องจัดส่ง · ห้ามเปลี่ยนสถานะ/ตัดสต๊อกจากหน้าศูนย์ออเดอร์ (เคยกดยืนยันแล้วตัดสต๊อกคลังออนไลน์ติดลบได้)
+ *   ⚠️ ออเดอร์ที่ดึงจาก TikTok Shop API (source = "tiktok_api") = สถานะตามร้าน TikTok (แปลงด้วย tiktokToInternal ทุกครั้งที่ดึง)
+ *      → ยังจัดส่งผ่าน TikTok Seller Center / BigSeller · นับเป็นงาน "ต้องจัดส่ง" ให้เห็นภาพรวม แต่เปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (isShopManaged)
  *
  * ใช้ที่: app/api/platform-orders (ตรวจก่อนบันทึก) · app/master/platform-orders (ป้าย/ตัวกรอง) · lib/platform-order-demo
  * ทะเบียน workflow: lib/workflow-registry.ts key "platform-order"
@@ -51,6 +53,12 @@ export function isReportOnly(source: string | null | undefined): boolean {
   return (REPORT_ONLY_SOURCES as readonly string[]).includes(String(source ?? ""));
 }
 
+/** ที่มาของออเดอร์ที่ "สถานะตามร้าน" (ดึงจาก API ของแพลตฟอร์ม แล้วจัดการ/จัดส่งบนร้าน) — นับเป็นงาน แต่เปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ */
+export const SHOP_MANAGED_SOURCES = ["tiktok_api"] as const;
+export function isShopManaged(source: string | null | undefined): boolean {
+  return (SHOP_MANAGED_SOURCES as readonly string[]).includes(String(source ?? ""));
+}
+
 /** เปลี่ยนจากสถานะไหนไปไหนได้ (ทุกร้านใช้ชุดเดียวกัน) */
 const NEXT: Record<PlatformOrderStatus, PlatformOrderStatus[]> = {
   new: ["confirmed", "packed", "cancelled"],
@@ -66,6 +74,7 @@ export function allowedNext(from: string): PlatformOrderStatus[] {
 /** ตรวจก่อนเปลี่ยนสถานะ — ok=false → เหตุผลภาษาคน (ส่งกลับให้ผู้ใช้ได้เลย) */
 export function checkTransition(order: { status: string; source?: string | null }, to: string): { ok: true } | { ok: false; reason: string } {
   if (isReportOnly(order.source)) return { ok: false, reason: "ออเดอร์นี้มาจากอีเมลแจ้งยอดขาย (ร้านส่งของไปแล้ว) — เปลี่ยนสถานะหรือตัดสต๊อกจากที่นี่ไม่ได้" };
+  if (isShopManaged(order.source)) return { ok: false, reason: "ออเดอร์ TikTok — สถานะตามร้าน TikTok (จัดส่งใน TikTok Seller Center / BigSeller) ระบบดึงมาให้ดูอย่างเดียว เปลี่ยนสถานะหรือตัดสต๊อกที่นี่ไม่ได้" };
   if (!isPlatformOrderStatus(to)) return { ok: false, reason: "สถานะไม่ถูกต้อง" };
   if (order.status === to) return { ok: true };
   if (!allowedNext(order.status).includes(to)) {
@@ -113,10 +122,51 @@ export function shopeeToInternal(code: string | null | undefined): PlatformOrder
   }
 }
 
+// ---- สถานะบนร้าน TikTok Shop (/order/202309/orders/search · status) ----
+export const TIKTOK_STATUS_LABEL: Record<string, string> = {
+  UNPAID: "ยังไม่ชำระเงิน",
+  ON_HOLD: "รอยืนยัน (ผู้ซื้อยังยกเลิกได้)",
+  AWAITING_SHIPMENT: "ที่ต้องจัดส่ง",
+  PARTIALLY_SHIPPING: "ส่งแล้วบางส่วน",
+  AWAITING_COLLECTION: "รอขนส่งมารับ",
+  IN_TRANSIT: "กำลังจัดส่ง",
+  DELIVERED: "ส่งถึงแล้ว",
+  COMPLETED: "สำเร็จ",
+  CANCELLED: "ยกเลิกแล้ว",
+};
+
+/** สถานะ TikTok → สถานะในระบบ · ไม่รู้จัก = null (เก็บค่าดิบใน platform_status) */
+export function tiktokToInternal(code: string | null | undefined): PlatformOrderStatus | null {
+  switch (String(code ?? "").toUpperCase()) {
+    case "UNPAID":
+    case "ON_HOLD":
+    case "AWAITING_SHIPMENT":
+      return "new";
+    case "PARTIALLY_SHIPPING":
+    case "AWAITING_COLLECTION":
+      return "packed";
+    case "IN_TRANSIT":
+    case "DELIVERED":
+    case "COMPLETED":
+      return "shipped";
+    case "CANCELLED":
+      return "cancelled";
+    default:
+      return null;
+  }
+}
+
+/** ชื่อสถานะบนร้านภาษาไทย (Shopee / TikTok) · ไม่รู้จัก = ค่าดิบ */
+export function platformStatusLabel(code: string | null | undefined): string {
+  const c = String(code ?? "");
+  return SHOPEE_STATUS_LABEL[c] ?? TIKTOK_STATUS_LABEL[c] ?? c;
+}
+
 /** ป้ายเตือนจากสถานะบนร้าน (ยังไม่จ่าย / ผู้ซื้อขอยกเลิก / คืนสินค้า) — ไม่มี = null */
 export function platformStatusWarning(code: string | null | undefined): string | null {
   const c = String(code ?? "").toUpperCase();
   if (c === "UNPAID") return "ผู้ซื้อยังไม่ชำระเงิน — ยังไม่ต้องส่ง";
+  if (c === "ON_HOLD") return "ผู้ซื้อยังยกเลิกได้ — รอให้ขึ้น ที่ต้องจัดส่ง ก่อนแพ็ก";
   if (c === "IN_CANCEL") return "ผู้ซื้อขอยกเลิก — ตอบรับ/ปฏิเสธบนร้านก่อนแพ็ก";
   if (c === "TO_RETURN") return "มีคำขอคืนสินค้า/คืนเงิน";
   return null;
@@ -125,7 +175,8 @@ export function platformStatusWarning(code: string | null | undefined): string |
 /** ต้องลงมือทำไหม (นับในการ์ด "ต้องจัดส่ง") — ไม่นับออเดอร์จากเมล · ไม่นับที่ผู้ซื้อยังไม่จ่าย */
 export function needsAction(o: { status: string; source?: string | null; platform_status?: string | null }): boolean {
   if (isReportOnly(o.source)) return false;
-  if (String(o.platform_status ?? "").toUpperCase() === "UNPAID") return false;
+  const ps = String(o.platform_status ?? "").toUpperCase();
+  if (ps === "UNPAID" || ps === "ON_HOLD") return false;
   return o.status === "new" || o.status === "confirmed" || o.status === "packed";
 }
 

@@ -59,8 +59,8 @@ function applyFilters(q: any, p: ListParams) {
   if (p.view === "history") q = q.eq("source", "email");
   else if (p.view !== "all") q = q.or("source.is.null,source.neq.email");
   if (p.status && isPlatformOrderStatus(p.status)) q = q.eq("status", p.status);
-  // ต้องลงมือ = ยังไม่ส่ง/ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ตรงกับ needsAction)
-  if (p.active) q = q.in("status", OPEN_STATUSES).or("platform_status.is.null,platform_status.neq.UNPAID");
+  // ต้องลงมือ = ยังไม่ส่ง/ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ตรงกับ needsAction · TikTok ON_HOLD = ผู้ซื้อยังยกเลิกได้ ยังไม่นับ)
+  if (p.active) q = q.in("status", OPEN_STATUSES).or("platform_status.is.null,platform_status.not.in.(UNPAID,ON_HOLD)");
   const s = cleanQ(p.q);
   if (s) q = q.or(`order_no.ilike.*${s}*,external_order_id.ilike.*${s}*,customer_name.ilike.*${s}*`);
   if (p.due === "late") q = q.lt("ship_by_at", new Date().toISOString()).in("status", OPEN_STATUSES);

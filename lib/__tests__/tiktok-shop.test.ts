@@ -2,6 +2,45 @@ import { describe, expect, test, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { ttsSignInput, ttsSign, ttsExpiryMs, ttsShopsFromApi, ttsAuthUrl, ttsConfigured, ttsErrorText, ttsBrandMismatch, TtsApiError, ttsProductToCatalogItem, ttsDetailExtras, ttsIsRateLimit } from "@/lib/tiktok-shop";
 import { summarizeListing } from "@/lib/platform-listing-health";
+import { ttsOrderToPlatformOrder } from "@/lib/tiktok-shop";
+import { tiktokToInternal } from "@/lib/platform-order-status";
+
+describe("TikTok Shop — แปลงออเดอร์เป็นหัว+รายการ ศูนย์ออเดอร์", () => {
+  const ORDER = {
+    id: "576461413038785752", status: "AWAITING_SHIPMENT", create_time: 1762900000, rts_sla_time: 1763100000, update_time: 1762950000,
+    payment: { currency: "THB", total_amount: "1170", sub_total: "1180", shipping_fee: "0", seller_discount: "10", platform_discount: "0" },
+    is_cod: true, shipping_provider: "J&T Express", tracking_number: "", packages: [{ id: "pkg1" }],
+    recipient_address: { name: "ส*****ย", phone_number: "(+66)08*****12", full_address: "ไม่ควรเก็บ" },
+    line_items: [
+      { id: "l1", sku_id: "s1", seller_sku: "LM-W001-BK", product_name: "กระเป๋าสตางค์", sku_name: "ดำ", sale_price: "590" },
+      { id: "l2", sku_id: "s1", seller_sku: "LM-W001-BK", product_name: "กระเป๋าสตางค์", sku_name: "ดำ", sale_price: "590" },
+      { id: "l3", sku_id: "s9", seller_sku: "GIFT-1", product_name: "ของแถม", sale_price: "0", is_gift: true },
+    ],
+  };
+  test("หัวออเดอร์: สถานะในระบบ + บนร้าน + ยอด + กำหนดส่ง + COD", () => {
+    const m = ttsOrderToPlatformOrder(ORDER, tiktokToInternal)!;
+    expect(m.external_order_id).toBe("576461413038785752");
+    expect(m.head).toMatchObject({ status: "new", platform_status: "AWAITING_SHIPMENT", total: 1170, currency: "THB", carrier: "J&T Express", tracking_no: null, package_no: "pkg1", cod_amount: 1170, customer_name: "ส*****ย" });
+    expect(m.head.ordered_at).toBe(new Date(1762900000 * 1000).toISOString());
+    expect(m.head.ship_by_at).toBe(new Date(1763100000 * 1000).toISOString());
+  });
+  test("1 แถว = 1 ชิ้น → รวมตาม SKU · ของแถมราคา 0", () => {
+    const m = ttsOrderToPlatformOrder(ORDER, tiktokToInternal)!;
+    expect(m.items).toEqual([
+      { sku_id: "s1", sku_code: "LM-W001-BK", name: "กระเป๋าสตางค์", variant: "ดำ", qty: 2, price: 590 },
+      { sku_id: "s9", sku_code: "GIFT-1", name: "ของแถม", variant: null, qty: 1, price: 0 },
+    ]);
+  });
+  test("ไม่เก็บที่อยู่/เบอร์ผู้รับ", () => {
+    const s = JSON.stringify(ttsOrderToPlatformOrder(ORDER, tiktokToInternal));
+    expect(s).not.toContain("ไม่ควรเก็บ");
+    expect(s).not.toContain("08*****12");
+  });
+  test("สถานะไม่รู้จัก = new (ให้คนดู) · ไม่มี id = ข้าม", () => {
+    expect(ttsOrderToPlatformOrder({ ...ORDER, status: "NEW_THING" }, tiktokToInternal)!.head.status).toBe("new");
+    expect(ttsOrderToPlatformOrder({ status: "UNPAID" }, tiktokToInternal)).toBeNull();
+  });
+});
 
 // รูปตามเอกสาร api_meta (search-products-202502 / get-product-202309)
 const SEARCH_PRODUCT = {

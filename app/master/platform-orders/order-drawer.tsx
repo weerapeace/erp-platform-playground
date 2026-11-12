@@ -10,7 +10,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 import {
-  SHOPEE_STATUS_LABEL, SHIP_DUE_LABEL, allowedNext, isPlatformOrderStatus, isReportOnly, platformStatusWarning, shipDue,
+  SHIP_DUE_LABEL, allowedNext, isPlatformOrderStatus, isReportOnly, isShopManaged, platformStatusLabel, platformStatusWarning, shipDue,
   type PlatformOrderItemRow, type PlatformOrderStatus,
 } from "@/lib/platform-order-status";
 import { EMPTY_SHIP_TO, canShipViaShippop, isMarketplace, isShippingActive, manualChannelLabel, nextSimStatus, shipToText, type OrderShipping, type ShipTo } from "@/lib/order-shipping";
@@ -77,11 +77,14 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
   const status = String(order?.status ?? "new");
   const source = (order?.source as string | null) ?? null;
   const reportOnly = isReportOnly(source);
+  // ออเดอร์ TikTok (API) = สถานะตามร้าน — ซ่อนปุ่มเปลี่ยนสถานะ/ขนส่ง เหมือนออเดอร์จากเมล (ออกใบกำกับได้)
+  const shopManaged = isShopManaged(source);
+  const readOnly = reportOnly || shopManaged;
   const pStatus = (order?.platform_status as string | null) ?? null;
   const warn = platformStatusWarning(pStatus);
   const due = order ? shipDue({ status, ship_by_at: (order.ship_by_at as string | null) ?? null }) : "none";
-  const next = reportOnly ? [] : allowedNext(status).filter((s) => s !== "cancelled");
-  const canCancel = !reportOnly && allowedNext(status).includes("cancelled");
+  const next = readOnly ? [] : allowedNext(status).filter((s) => s !== "cancelled");
+  const canCancel = !readOnly && allowedNext(status).includes("cancelled");
   const unmatched = items.filter((i) => !i.matched_sku_id).length;
   const invoiced = !!order?.invoice_so_id;
   const askedInvoice = order?.tax_invoice_request != null;
@@ -90,7 +93,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
   const shipping = (order?.shipping as OrderShipping | null) ?? null;
   const booked = isShippingActive(shipping);
   const shipChk = order ? canShipViaShippop({ source, platform_code: pCode, status, shipping }) : { ok: false as const, reason: "" };
-  const ownChannel = !reportOnly && !isMarketplace(pCode) && source !== "demo";
+  const ownChannel = !readOnly && !isMarketplace(pCode) && source !== "demo";
   const shipTo = (order?.ship_to as ShipTo | null) ?? null;
   const demoRecipient = (order?.recipient as { name: string; phone: string; address: string } | undefined) ?? null;
   const channelLabel = source === "manual" ? manualChannelLabel((order?.raw as { channel?: string } | null)?.channel) : "";
@@ -105,7 +108,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
               <button key={s} onClick={() => void patch(s === "shipped" ? { status: s, tracking_no: tracking, carrier } : { status: s })} disabled={busy}
                 className="h-9 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">{ACTION_LABEL[s] ?? s}</button>
             ))}
-            {status === "shipped" && !reportOnly && <button onClick={() => void patch({ tracking_no: tracking, carrier })} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">บันทึกเลขพัสดุ</button>}
+            {status === "shipped" && !readOnly && <button onClick={() => void patch({ tracking_no: tracking, carrier })} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">บันทึกเลขพัสดุ</button>}
             <div className="flex-1" />
             {canCancel && <button onClick={() => setAskCancel(true)} disabled={busy} className="h-9 rounded-lg border border-rose-200 px-3 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50">ยกเลิก</button>}
           </div>
@@ -114,12 +117,13 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
           <div className="space-y-5 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <StatusChip s={status} />
-              {pStatus && <span className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-slate-600">บนร้าน: {SHOPEE_STATUS_LABEL[pStatus] ?? pStatus}</span>}
+              {pStatus && <span className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-slate-600">บนร้าน: {platformStatusLabel(pStatus)}</span>}
               {due !== "none" && due !== "later" && <span className={`rounded-full px-2 py-0.5 text-xs ${due === "late" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-800"}`}>{SHIP_DUE_LABEL[due]}</span>}
               {source === "demo" && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800">ตัวอย่าง</span>}
               {channelLabel && <span className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-slate-600">สั่งทาง {channelLabel}</span>}
             </div>
             {reportOnly && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:mail" className="mr-1" />ออเดอร์นี้มาจากอีเมลแจ้งยอดขาย — ร้านส่งของไปแล้วผ่าน Seller Centre จึงเปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (ออกใบกำกับภาษีได้)</p>}
+            {shopManaged && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:refresh" className="mr-1" />ออเดอร์ TikTok — สถานะตามร้าน TikTok (กด ดึงออเดอร์ TikTok เพื่ออัปเดต) · จัดส่งใน TikTok Seller Center / BigSeller จึงเปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (ออกใบกำกับภาษีได้)</p>}
             {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="warning" className="mr-1" />{warn}</p>}
 
             <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5">
@@ -168,7 +172,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
             )}
 
             {/* ขนส่ง — SHIPPOP (ช่องทางของเรา) · ออเดอร์แพลตฟอร์มบอกเหตุผล */}
-            {!reportOnly && (
+            {!readOnly && (
               <div className="space-y-2 rounded-xl border border-slate-200 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-slate-700"><Icon value="i:truck" className="mr-1" />ขนส่ง</p>
@@ -192,7 +196,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
               </div>
             )}
 
-            {!reportOnly && (status === "packed" || status === "shipped") && !booked && (
+            {!readOnly && (status === "packed" || status === "shipped") && !booked && (
               <div className="space-y-1.5">
                 <p className="text-xs text-slate-400">เลขพัสดุ / ขนส่ง</p>
                 <div className="flex gap-1.5">

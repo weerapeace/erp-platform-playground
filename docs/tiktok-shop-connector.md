@@ -46,7 +46,15 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - สถานะ ACTIVATE = เปิดขาย · SELLER_DEACTIVATED / PLATFORM_DEACTIVATED / FREEZE / DELETED = ปิด · DRAFT / PENDING / FAILED = รอตรวจ
 - ⚠️ ตัวแปลงเขียนจากเอกสาร (api_meta) — หลังดึงครั้งแรกให้เทียบกับ `audit_logs.metadata.sample` ของจริง
 
+## ออเดอร์ (ขั้น 3 · อ่านอย่างเดียว · 2026-11-12)
+- `/api/tiktok-shop/sync-orders` POST `{ brand_id?, days? (30, ≤90), page_token? }` (`platform_orders.manage`) — `/order/202309/orders/search` ทีละ 50 ใหม่สุดก่อน
+- หัว: upsert `platform_orders` (unique platform×external_order_id) `source = "tiktok_api"` · สถานะในระบบ `tiktokToInternal` · บนร้าน `platform_status` · ยอด `payment.total_amount` · กำหนดส่ง `rts_sla_time` · COD → `cod_amount`
+- รายการ: เฉพาะใบใหม่ · 1 line_item = 1 ชิ้น → รวมตาม sku_id · จับคู่ `seller_sku` = รหัส SKU ลูก (`skus_v2.code`) · ของแถมราคา 0
+- **ไม่เก็บที่อยู่/เบอร์ผู้รับ** (ยังจัดส่งบนร้าน) · ชื่อผู้รับที่ TikTok ปิดบังบางส่วนเก็บเป็น `customer_name`
+- `isShopManaged("tiktok_api")` → นับในการ์ด "ต้องจัดส่ง" แต่เปลี่ยนสถานะ/ตัดสต๊อก/จองขนส่ง SHIPPOP ไม่ได้ (ยังจัดส่งผ่าน TikTok Seller Center / BigSeller) · ON_HOLD ยังไม่นับงาน
+- ปุ่ม "ดึงออเดอร์ TikTok" หน้า `/master/platform-orders` (ไม่เลือกแบรนด์ = แบรนด์เดียวที่เชื่อม TikTok) · audit `platform_orders` source `tiktok_api` (ครั้งแรกเก็บ `sample` ไม่มีที่อยู่)
+
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ดึงหมวดหมู่ TikTok (`/product/202309/categories`) เติมการจับคู่หมวด
-3. ดึงออเดอร์เข้า `platform_orders` (ศูนย์ออเดอร์)
 4. แก้สินค้า/ราคา/สต๊อก — ทีละเฟสตามที่เจ้าของอนุมัติ
+5. ดึงออเดอร์อัตโนมัติ (cron/webhook) แทนการกดเอง

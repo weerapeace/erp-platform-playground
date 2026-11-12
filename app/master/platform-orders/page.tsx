@@ -16,13 +16,13 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Pager } from "@/components/pager";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { StatFilterCards, type StatFilterCard } from "@/components/stat-filter-cards";
-import { PlatformBadge } from "@/components/platform-icon";
+import { PlatformBadge, PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { ErrorState } from "@/components/state-views";
 import { formatDateTime } from "@/lib/date";
 import { isSellingPlatform } from "@/lib/selling-platforms";
-import { SHOPEE_STATUS_LABEL, SHIP_DUE_LABEL, platformStatusWarning, shipDue, type PlatformOrderRow } from "@/lib/platform-order-status";
+import { SHIP_DUE_LABEL, platformStatusLabel, platformStatusWarning, shipDue, type PlatformOrderRow } from "@/lib/platform-order-status";
 import { courierLabel, shippopStatusLabel } from "@/lib/shippop";
 import { manualChannelLabel } from "@/lib/order-shipping";
 import { StatusChip } from "./status-chip";
@@ -82,6 +82,7 @@ function PlatformOrdersInner() {
   const [showProfile, setShowProfile] = useState(false);
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [ttsSyncing, setTtsSyncing] = useState(false);
   const reqSeq = useRef(0);   // กันคำตอบเก่ามาทับ (สลับร้าน/การ์ดเร็ว ๆ)
 
   useEffect(() => { (async () => {
@@ -169,7 +170,7 @@ function PlatformOrdersInner() {
       return (
         <div className="flex flex-col items-start gap-0.5">
           <StatusChip s={o.status} />
-          {o.platform_status && <span className={`text-[11px] ${w ? "text-amber-700" : "text-slate-400"}`} title={w ?? undefined}>{w ? <Icon name="warning" className="mr-0.5" /> : null}บนร้าน: {SHOPEE_STATUS_LABEL[o.platform_status] ?? o.platform_status}</span>}
+          {o.platform_status && <span className={`text-[11px] ${w ? "text-amber-700" : "text-slate-400"}`} title={w ?? undefined}>{w ? <Icon name="warning" className="mr-0.5" /> : null}บนร้าน: {platformStatusLabel(o.platform_status)}</span>}
         </div>
       );
     } },
@@ -225,6 +226,26 @@ function PlatformOrdersInner() {
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
+  // ดึงออเดอร์ TikTok 30 วันล่าสุด (อ่านอย่างเดียว · สถานะตามร้าน) — เรียกต่อเองจนครบด้วย page_token
+  const syncTiktokOrders = async () => {
+    setTtsSyncing(true);
+    let token = "", sum = { fetched: 0, created: 0, updated: 0, items_matched: 0, items_created: 0 }, total = 0;
+    try {
+      for (let round = 0; round < 40; round++) {
+        type R = { error?: string | null; api_total?: number; fetched?: number; created?: number; updated?: number; items_matched?: number; items_created?: number; next_page_token?: string | null; done?: boolean; stop_reason?: string | null };
+        const j = await apiFetch("/api/tiktok-shop/sync-orders", { method: "POST", body: JSON.stringify({ brand_id: brandId || undefined, days: 30, page_token: token || undefined }) })
+          .then((r) => r.json()).catch(() => ({ error: "ระบบตอบผิดพลาด กรุณาลองใหม่" })) as R;
+        if (j.error) { toast.error(j.error); break; }
+        if (j.api_total) total = j.api_total;
+        sum = { fetched: sum.fetched + (j.fetched ?? 0), created: sum.created + (j.created ?? 0), updated: sum.updated + (j.updated ?? 0), items_matched: sum.items_matched + (j.items_matched ?? 0), items_created: sum.items_created + (j.items_created ?? 0) };
+        if (j.done) { toast.success(`ดึงออเดอร์ TikTok 30 วันครบแล้ว (${total.toLocaleString("th-TH")} ใบ) · ใหม่ ${sum.created} · อัปเดตสถานะ ${sum.updated} · จับคู่สินค้า ${sum.items_matched}/${sum.items_created}${j.stop_reason ? ` · ⚠️ ${j.stop_reason}` : ""}`); break; }
+        if (j.stop_reason || !j.next_page_token) { toast.warning(`ดึงได้ ${sum.fetched} ใบแล้วหยุด: ${j.stop_reason ?? "ไม่มีหน้าถัดไป"} — กดดึงอีกครั้งได้ (ใบที่ได้แล้วไม่ซ้ำ)`); break; }
+        token = j.next_page_token;
+      }
+      await load();
+    } finally { setTtsSyncing(false); }
+  };
+
   const viewTab = (k: "todo" | "history", label: string, n: number | undefined) => (
     <button type="button" onClick={() => { setView(k); setCard(k === "todo" ? "todo" : "all"); }}
       className={`h-9 rounded-lg border px-3 text-sm ${view === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -240,6 +261,12 @@ function PlatformOrdersInner() {
           <p className="mt-0.5 text-sm text-slate-500">ออเดอร์จากทุกร้านในที่เดียว · เลือกหลายใบแล้วพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า · ออกใบกำกับภาษีได้จากออเดอร์</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canManage && !demo && (
+            <button type="button" onClick={() => void syncTiktokOrders()} disabled={ttsSyncing} title="ดึงออเดอร์ 30 วันล่าสุดจาก TikTok Shop (อ่านอย่างเดียว · สถานะตามร้าน)"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <PlatformIcon code="tiktok" size={16} />{ttsSyncing ? "กำลังดึง…" : "ดึงออเดอร์ TikTok"}
+            </button>
+          )}
           {canManage && !demo && <button type="button" onClick={() => setShowManual(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"><Icon value="i:plus" />สร้างออเดอร์</button>}
           <button type="button" onClick={() => setShowProfile(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:settings" />ตั้งค่าการส่ง</button>
           <button type="button" onClick={toggleDemo} aria-pressed={demo}

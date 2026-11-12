@@ -227,6 +227,90 @@ export function ttsProductToCatalogItem(p: Record<string, unknown>, extras?: { i
   };
 }
 
+// ───────── ออเดอร์ (อ่านอย่างเดียว) ─────────
+// รูปคำตอบจากเอกสารทางการ (api_meta ของ get-order-list-202309 · อ่าน 2026-11-12):
+//  data.{ total_count, next_page_token, orders[{ id, status, create_time, paid_time, update_time, rts_sla_time, tracking_number, shipping_provider,
+//         payment{ currency, total_amount, sub_total, shipping_fee, seller_discount, platform_discount }, is_cod, payment_method_name,
+//         delivery_option_name, packages[{ id }], cancel_reason, buyer_message, recipient_address{ name, … } (ไม่มีตอน UNPAID/ON_HOLD),
+//         line_items[{ id, sku_id, seller_sku, product_name, sku_name, sale_price, original_price, product_id, package_id, display_status }] }] }
+//  1 line_item = 1 ชิ้น (ไม่มีช่องจำนวน) → รวมตาม sku_id
+const ORDER_SCOPE = "Order Information (seller.order.info)";
+
+export type TtsOrderPage = { orders: Record<string, unknown>[]; total: number; nextPageToken: string | null };
+/** ค้นหาออเดอร์ที่สร้างตั้งแต่ createTimeGe (unix วินาที) ทีละหน้า · ใหม่สุดก่อน · page_size ≤ 100 */
+export async function ttsSearchOrders(accessToken: string, shopCipher: string, opts: { createTimeGe: number; pageToken?: string | null; pageSize?: number }): Promise<TtsOrderPage> {
+  const query: Record<string, string> = { shop_cipher: shopCipher, page_size: String(Math.max(1, Math.min(100, opts.pageSize ?? 50))), sort_field: "create_time", sort_order: "DESC" };
+  if (opts.pageToken) query.page_token = opts.pageToken;
+  const d = await ttsApi("POST", "/order/202309/orders/search", accessToken, { query, body: { create_time_ge: Math.floor(opts.createTimeGe) }, scope: ORDER_SCOPE });
+  const orders = Array.isArray(d.orders) ? d.orders as Record<string, unknown>[] : [];
+  return { orders, total: Number(d.total_count) || 0, nextPageToken: str(d.next_page_token) };
+}
+
+export type TtsOrderItem = { sku_id: string | null; sku_code: string | null; name: string | null; variant: string | null; qty: number; price: number | null };
+export type TtsOrderMapped = {
+  external_order_id: string;
+  head: {
+    order_no: string; customer_name: string | null; status: string; platform_status: string | null;
+    total: number | null; currency: string; ordered_at: string | null; ship_by_at: string | null;
+    tracking_no: string | null; carrier: string | null; package_no: string | null; cod_amount: number | null;
+    raw: { tiktok: Record<string, unknown> };
+  };
+  items: TtsOrderItem[];
+};
+const isoFromUnix = (v: unknown): string | null => { const n = numOrNull(v); return n && n > 0 ? new Date(n * 1000).toISOString() : null; };
+
+/**
+ * ออเดอร์ TikTok 1 ใบ → หัวออเดอร์ + รายการ (สำหรับ platform_orders / platform_order_items)
+ * สถานะในระบบ = tiktokToInternal (ไม่รู้จัก = "new" ให้คนดู) · ไม่เก็บที่อยู่/เบอร์ผู้รับ (ระบบยังไม่ได้ใช้ — จัดส่งบนร้าน)
+ */
+export function ttsOrderToPlatformOrder(o: Record<string, unknown>, toInternal: (code: string | null) => string | null): TtsOrderMapped | null {
+  const id = str(o.id);
+  if (!id) return null;
+  const pay = (o.payment && typeof o.payment === "object") ? o.payment as Record<string, unknown> : {};
+  const addr = (o.recipient_address && typeof o.recipient_address === "object") ? o.recipient_address as Record<string, unknown> : {};
+  const status = str(o.status);
+  const total = numOrNull(pay.total_amount);
+  const isCod = o.is_cod === true;
+  const pkgs = arrOf(o.packages);
+  // รวมรายการตาม sku_id (1 แถว = 1 ชิ้น) · ของแถม (is_gift) แยกแถว ราคา 0
+  const byKey = new Map<string, TtsOrderItem>();
+  for (const li of arrOf(o.line_items)) {
+    const gift = li.is_gift === true;
+    const key = `${str(li.sku_id) ?? str(li.seller_sku) ?? str(li.product_name) ?? "?"}${gift ? ":gift" : ""}`;
+    const prev = byKey.get(key);
+    if (prev) { prev.qty += 1; continue; }
+    byKey.set(key, {
+      sku_id: str(li.sku_id), sku_code: str(li.seller_sku), name: str(li.product_name) ?? str(li.sku_name),
+      variant: str(li.sku_name), qty: 1, price: gift ? 0 : numOrNull(li.sale_price) ?? numOrNull(li.original_price),
+    });
+  }
+  return {
+    external_order_id: id,
+    head: {
+      order_no: id,
+      customer_name: str(addr.name) ?? ([str(addr.first_name), str(addr.last_name)].filter(Boolean).join(" ") || null),
+      status: toInternal(status) ?? "new",
+      platform_status: status,
+      total, currency: str(pay.currency) ?? "THB",
+      ordered_at: isoFromUnix(o.create_time),
+      ship_by_at: isoFromUnix(o.rts_sla_time),
+      tracking_no: str(o.tracking_number),
+      carrier: str(o.shipping_provider),
+      package_no: pkgs.length ? str(pkgs[0].id) : null,
+      cod_amount: isCod ? total : null,
+      raw: {
+        tiktok: {
+          status, update_time: numOrNull(o.update_time), paid_time: numOrNull(o.paid_time), rts_sla_time: numOrNull(o.rts_sla_time),
+          payment: { currency: str(pay.currency), total_amount: total, sub_total: numOrNull(pay.sub_total), shipping_fee: numOrNull(pay.shipping_fee), seller_discount: numOrNull(pay.seller_discount), platform_discount: numOrNull(pay.platform_discount) },
+          is_cod: isCod, payment_method_name: str(o.payment_method_name), delivery_option_name: str(o.delivery_option_name), shipping_type: str(o.shipping_type),
+          cancel_reason: str(o.cancel_reason), buyer_message: str(o.buyer_message), packages: pkgs.map((p) => str(p.id)).filter(Boolean),
+        },
+      },
+    },
+    items: [...byKey.values()],
+  };
+}
+
 export async function ttsGetAuthorizedShops(accessToken: string): Promise<TtsShop[]> {
   return ttsShopsFromApi(await ttsApi("GET", "/authorization/202309/shops", accessToken, { scope: "Shop Authorized Information (seller.authorization.info)" }));
 }
