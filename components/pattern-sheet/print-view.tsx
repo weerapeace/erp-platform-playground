@@ -3,7 +3,7 @@
 /**
  * ✂ PatternPrintView — หน้าพิมพ์/ส่งออกแพทเทิร์น (ของกลาง · ย้ายมาจาก /print/design-sheet/[id]/pattern 2026-11-10 เพื่อใช้ร่วมกับแอปสตูดิโอแพทเทิร์น)
  *   ภาพรวม: รายการชิ้น (P1, P2, …) + ภาพชิ้นทั้งหมด + วางบนผ้า (ตัววางผ้าตัวเดียวกับเครื่องคิดเลขผ้า)
- *   ขนาดจริง (A4): หน้าแรก = วิธีต่อ + กรอบทดสอบ 5 ซม. + แผนผังหน้า · หน้าถัดไป = ชิ้นขนาดจริง 1:1 แบ่งหน้า A4 ทับกัน 1 ซม.
+ *   ขนาดจริง (A4): หน้าแรก = วิธีต่อ + กรอบสอบเทียบ 100 × 100 มม. (Bag CAD รอบ B · เดิม 5 ซม.) + แผนผังหน้า · draft = ลายน้ำ "แบบร่าง" ทุกหน้า (ยังไม่ผ่านด่านตรวจ) · หน้าถัดไป = ชิ้นขนาดจริง 1:1 แบ่งหน้า A4 ทับกัน 1 ซม.
  *   ดาวน์โหลด DXF (เครื่องตัด · หน่วยมม.) / SVG (Illustrator)
  *
  *   หน้าที่เรียกเตรียม "บรรทัด" (PatternLineInput — บรรทัดตีราคา หรือ ชิ้นของแพทเทิร์น) + หัวกระดาษ + ชื่อไฟล์ แล้วส่งเข้ามา
@@ -40,7 +40,18 @@ const download = (name: string, text: string, type: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า" }: {
+/** ลายน้ำ "แบบร่าง" — ทับทุกหน้าที่พิมพ์ (ไม่บังเส้นตัด เพราะโปร่ง + ไม่รับคลิก) */
+function DraftMark() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" data-draft-mark>
+      <span className="-rotate-[30deg] whitespace-nowrap text-[34pt] font-bold tracking-wider text-red-600/20">แบบร่าง · ยังไม่พร้อมผลิต</span>
+    </div>
+  );
+}
+
+export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า", draft = false }: {
+  /** แบบร่าง (ยังไม่ผ่านด่านตรวจก่อนผลิต) — ลายน้ำทุกหน้า กันเอาไปตัดจริง */
+  draft?: boolean;
   /** เนื้อหาเพิ่มเหนือตารางชิ้นในหน้าภาพรวม (เช่น ภาพ 3 มิติของใบสเปก) */
   beforeTable?: ReactNode;
   /** ป้ายของแท็บภาพรวม (สตูดิโอแพทเทิร์น = "ใบสเปก + วางบนผ้า") */
@@ -182,26 +193,29 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
       ) : (
         <div className="mx-auto my-4 w-fit space-y-4 print:my-0 print:space-y-0">
           {/* หน้าแรก: วิธีใช้ + กรอบทดสอบ + แผนผังหน้า */}
-          <section className="pattern-page box-border space-y-3 bg-white p-[6mm] shadow-sm print:p-0 print:shadow-none" style={{ width: "190mm", minHeight: "277mm" }}>
+          <section className="pattern-page relative box-border space-y-3 overflow-hidden bg-white p-[6mm] shadow-sm print:p-0 print:shadow-none" style={{ width: "190mm", minHeight: "277mm" }}>
+            {draft && <DraftMark />}
             {head}
             <div className="flex gap-4">
               <div className="flex-1 space-y-1 text-[12px] text-slate-700">
                 <div className="font-semibold">วิธีพิมพ์และต่อแพทเทิร์น</div>
                 <ol className="list-decimal space-y-0.5 pl-4">
                   <li>ตั้งพิมพ์กระดาษ A4 แนวตั้ง ขนาด <b>100% (ไม่ย่อ/ไม่พอดีหน้า)</b></li>
-                  <li>วัดกรอบทดสอบด้านขวา ต้องได้ <b>5 × 5 ซม.</b> พอดี — ถ้าไม่ได้ ให้แก้การตั้งค่าพิมพ์ก่อน</li>
+                  <li>วัดกรอบสอบเทียบด้านขวา ต้องได้ <b>100 × 100 มม.</b> พอดี — ถ้าไม่ได้ ให้แก้การตั้งค่าพิมพ์ก่อน (เลือก Actual size / ขนาดจริง)</li>
                   <li>ต่อกระดาษตามแผนผังด้านล่าง (แถว-คอลัมน์) ขอบแต่ละหน้าทับกัน {OVERLAP} ซม.</li>
                   <li>ตัดตามเส้นประ · ชิ้นไหนต้องตัดกี่ชิ้นดูที่ป้าย “ตัด ×”</li>
                 </ol>
               </div>
-              <div className="shrink-0 text-center text-[10px] text-slate-500">
-                <div className="border-2 border-slate-900" style={{ width: "50mm", height: "50mm" }} />กรอบทดสอบ 5 × 5 ซม.
+              <div className="shrink-0 text-center text-[10px] text-slate-500" data-calib-square>
+                <div className="relative border-2 border-slate-900" style={{ width: "100mm", height: "100mm", boxSizing: "border-box" }}>
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] text-slate-600">100 × 100 มม.</span>
+                </div>กรอบสอบเทียบ 100 × 100 มม.
               </div>
             </div>
             {pieceTable}
             <div>
               <div className="mb-1 text-[11px] text-slate-500">แผนผังหน้า (พิมพ์ {pages.length} หน้า{allPages.length > pages.length ? ` · ข้ามหน้าว่าง ${allPages.length - pages.length} หน้า` : ""} · {rows} แถว × {cols} คอลัมน์)</div>
-              <div className="relative rounded border border-slate-300" style={{ width: "100%", aspectRatio: `${layout.width} / ${layout.height}`, maxHeight: "90mm" }}>
+              <div className="relative rounded border border-slate-300" style={{ width: "100%", aspectRatio: `${layout.width} / ${layout.height}`, maxHeight: "70mm" }}>
                 <PatternPiecesSvg layout={layout} mono={mono} style={{ position: "absolute", inset: 0, height: "100%" }} />
                 <svg viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" height="100%" className="absolute inset-0" preserveAspectRatio="xMinYMin meet">
                   {pages.map((p) => (
@@ -215,7 +229,8 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
             </div>
           </section>
           {pages.map((p) => (
-            <section key={`${p.row}-${p.col}`} className="pattern-page box-border bg-white shadow-sm print:shadow-none" style={{ width: "190mm", height: "277mm" }}>
+            <section key={`${p.row}-${p.col}`} className="pattern-page relative box-border overflow-hidden bg-white shadow-sm print:shadow-none" style={{ width: "190mm", height: "277mm" }}>
+              {draft && <DraftMark />}
               <div className="flex items-center justify-between px-[1mm] text-[9pt] text-slate-600" style={{ height: "7mm" }}>
                 <b>แผ่น {p.row}-{p.col}</b><span>{footCode} · แถว {p.row}/{rows} คอลัมน์ {p.col}/{cols} · ขนาดจริง 1:1</span>
               </div>

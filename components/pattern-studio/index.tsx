@@ -11,6 +11,8 @@
  *     5) หน้าที่มีเครื่องมือเย็บ: งานข้างในกระเป๋า (2026-11-11) — ปุ่ม "สร้างซับใน" (คัดลอกตัวกระเป๋าเป็นชั้นซับใน) · "เพิ่มช่อง" (ช่องใส่ของ / ช่องซิป → PocketModal)
  *        · สลับดูชั้น ทั้งหมด / ชั้นนอก / ซับใน บนกระดาน · ภาพ 3D ผ่าดูข้างใน (ผ่าหน้า / ผ่าหลัง) · เครื่องมือเส้นในชิ้น (L) ในกระดาน
  *     4) หน้าที่มีเครื่องมือเย็บ (ส่ง sew): ภาพ 3D สลับได้ 2 แบบ — "เย็บติดแล้ว" (lib/pattern-sewn · ค่าเริ่ม) / "ชิ้นแบน" · ลากตะเข็บบนกระดาน ภาพเปลี่ยนตามทันที
+ *     6) Bag CAD รอบ A+B (2026-11-12 · หน้าที่ส่ง sew): หน่วยแสดง มม./ซม./นิ้ว (จำในเครื่อง) · รายการชิ้น ล็อก/ซ่อน/แยกดู ตามกลุ่มชั้น
+ *        · แผง "ตรวจแบบ" (lib/pattern-check — กดแถวไปที่ชิ้น/ขอบ · ตั้งขอบเปิดตั้งใจได้จากแผง) · ป้ายระดับภาพ 3D (ดูชิ้น / ประกอบตามกติกา / ฟิสิกส์ทดลอง)
  *   จอกว้าง ≥ 1180px = กระดานซ้าย 3D ขวา · แคบกว่า = 3D อยู่ใต้กระดาน
  *   (ไม่ใช้ SplitPanes: ตัวนั้นขยายฝั่งที่ถูกคลิก — กระดานวาดต้องคลิกตลอด จะดันไปมาทุกครั้ง)
  *
@@ -19,7 +21,7 @@
  * ใบงานออกแบบ (ไม่ส่ง sew): ภาพ 3D = ชิ้นแบนอย่างเดียวเหมือนเดิม · เย็บทีละขั้น / จำลองวัสดุ = AssemblyView (แท็บ "ประกอบ 3D" ของแอปสตูดิโอแพทเทิร์น)
  * ใช้ที่: แท็บตีราคา (แบบวาด) ใบงานออกแบบ · คู่มือ: docs/pattern-studio.md
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import dynamic from "next/dynamic";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
@@ -32,6 +34,9 @@ import { liningPlan, pocketPlan, type PocketOpts } from "@/lib/pattern-lining";
 import { shapeBox } from "@/lib/pattern-shape";
 import type { BagParams } from "@/lib/bag-templates";
 import type { BagKit, BagStyle, KitAttach, KitSeam } from "@/lib/bag-kits";
+import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
+import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summarize, type CheckIssue } from "@/lib/pattern-check";
+import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
@@ -50,6 +55,15 @@ const clampPct = (v: number) => Math.max(22, Math.min(60, Math.round(v * 10) / 1
 const VIEW3D_KEY = "pattern-studio-3d-view";
 /** แบบของภาพ 3D ในจอเดียว: เย็บติดแล้ว (ตามกระดานทันที) · แยกชิ้น / ทีละขั้น / ทิ้งตัว (ของแท็บ "ประกอบ 3D" เดิม = AssemblyView) · ชิ้นแบน */
 type View3D = "sewn" | "explode" | "steps" | "sim" | "flat";
+/** ระดับความสามารถของภาพ 3D (สเปก Bag CAD §7.2) — บอกผู้ใช้ว่าภาพนี้ยืนยันอะไรได้ และอะไรยังสรุปไม่ได้ */
+const LEVEL_3D: Record<View3D, { th: string; en: string; okTh: string; okEn: string; noTh: string; noEn: string; tone: string }> = {
+  flat: { th: "ดูชิ้น (Preview)", en: "Preview", okTh: "รูปชิ้นจากแพทเทิร์นจริง", okEn: "piece shapes from the pattern", noTh: "ยังไม่ยืนยันว่าเย็บประกอบได้", noEn: "not yet proof that it assembles", tone: "bg-slate-100 text-slate-700" },
+  sewn: { th: "ประกอบตามกติกา (Assembly)", en: "Assembly", okTh: "ทรงจากตะเข็บจริง", okEn: "the shape from the real seams", noTh: "การย้วย/ยับตามวัสดุจริง", noEn: "real sag or wrinkles of the material", tone: "bg-blue-50 text-blue-800" },
+  explode: { th: "ประกอบตามกติกา (Assembly)", en: "Assembly", okTh: "ทรงจากตะเข็บจริง", okEn: "the shape from the real seams", noTh: "การย้วย/ยับตามวัสดุจริง", noEn: "real sag or wrinkles of the material", tone: "bg-blue-50 text-blue-800" },
+  steps: { th: "ประกอบตามกติกา (Assembly)", en: "Assembly", okTh: "ลำดับเย็บตามตะเข็บจริง", okEn: "the order of the real seams", noTh: "ขั้นตอนโรงงานจริงทั้งหมด", noEn: "the full factory process", tone: "bg-blue-50 text-blue-800" },
+  sim: { th: "ฟิสิกส์ (ทดลอง)", en: "Physics (experimental)", okTh: "แนวโน้มแข็ง/นิ่มต่างกัน", okEn: "the trend of stiff vs soft", noTh: "ตรงตัวอย่างจริง — ค่าวัสดุยังเป็นค่าประมาณ ไม่ได้สอบเทียบ", noEn: "a match to the real sample — material values are estimates, not calibrated", tone: "bg-amber-50 text-amber-800" },
+};
+const UNIT_KEY = "pattern-studio-unit";
 const VIEWS_3D: { key: View3D; th: string; en: string; hintTh: string; hintEn: string }[] = [
   { key: "sewn", th: "เย็บติดแล้ว", en: "Sewn", hintTh: "ภาพตอนเย็บติดแล้ว เปลี่ยนตามกระดานทันที", hintEn: "The sewn result, following the board live" },
   { key: "explode", th: "แยกชิ้น", en: "Pull apart", hintTh: "กระเป๋าที่ประกอบแล้ว ดึงชิ้นแยกออกดู · ติดหู / ปิดหลังช่อง", hintEn: "The assembled bag with pieces pulled apart · attach handles" },
@@ -67,9 +81,13 @@ export type TemplateInsertInfo = { pidByKey: Record<string, string>; seams: KitS
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
 export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean;
   /** แก้จุดติด (ติดหู / ปิดหลังช่อง) จากภาพ 3D แบบ แยกชิ้น — ไม่ส่ง = ดูอย่างเดียว */ onAttachesChange?: (next: Attach[]) => void;
-  /** ความอยู่ทรงของชิ้น (ภาพ ทิ้งตัว) */ pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[] };
+  /** ความอยู่ทรงของชิ้น (ภาพ ทิ้งตัว) */ pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[];
+  /** ค่าคลาดตะเข็บ (ซม.) ของแพทเทิร์นนี้ + เปลี่ยนค่า (ไม่ส่ง onTolChange = ดูอย่างเดียว) */ tol?: number; onTolChange?: (v: number) => void;
+  /** ชิ้นที่ล็อก/ซ่อน (เก็บกับแพทเทิร์น) + เปลี่ยน */ view?: PieceView; onViewChange?: (next: PieceView) => void };
+/** ชิ้นที่ล็อก (แก้/ลากไม่ได้) และซ่อน (จาง กดไม่ได้ แต่ยังถูกตรวจ) */
+export type PieceView = { lock: string[]; hide: string[] };
 
-export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks"> & {
+export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks" | "unit" | "seamTol" | "lockPids" | "flagged" | "focusEdge"> & {
   /** ชื่อไฟล์ของปุ่ม "บันทึกรูป" บนภาพ 3 มิติ (เช่น เลขที่ + ชื่อแพทเทิร์น) */
   imageName?: string;
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
@@ -105,6 +123,18 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [live, setLive] = useState<ResultPiece[]>([]);
   const [selPid, setSelPid] = useState<string | null>(null);
   const [selectReq, setSelectReq] = useState<{ nonce: number; pid: string | null } | null>(null);
+  // ── Bag CAD รอบ A+B (เฉพาะหน้าที่ส่ง sew) ──
+  const [unit, setUnitState] = useState<LengthUnit>("mm");
+  useEffect(() => { try { const v = localStorage.getItem(UNIT_KEY); if (isLengthUnit(v)) setUnitState(v); } catch { /* อ่านไม่ได้ = มม. */ } }, []);
+  const setUnit = (u: LengthUnit) => { setUnitState(u); try { localStorage.setItem(UNIT_KEY, u); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const [pv, setPv] = useState<PieceView>(() => ({ lock: sew?.view?.lock ?? [], hide: sew?.view?.hide ?? [] }));
+  const changeView = (next: PieceView) => { setPv(next); sew?.onViewChange?.(next); };
+  const [iso, setIso] = useState<string | null>(null);   // แยกดูชิ้นเดียว (ชั่วคราว ไม่บันทึก)
+  const [panel, setPanel] = useState<null | "pieces" | "check">(null);
+  const [flagId, setFlagId] = useState<string | null>(null);
+  const [focusReq, setFocusReq] = useState<{ nonce: number; pid: string; edge?: number } | null>(null);
+  const tol = sew?.tol ?? DEFAULT_SEAM_TOL;
+  const L = useCallback((cm: number) => formatLength(cm, unit, { label: t("th", "en") as "th" | "en" }), [unit, t]);
 
   // กว้างพอ = ซ้ายขวา · แคบ = บนล่าง (วัดกล่องแม่ ไม่ใช่จอ)
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -134,7 +164,22 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const asmLive: AsmPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) })), [live]);
   const sewnScene = useMemo(() => (wantSewn && sew ? buildSewn(asmLive, sew.seams, sew.attaches ?? []) : null), [wantSewn, asmLive, sew?.seams, sew?.attaches]);   // eslint-disable-line react-hooks/exhaustive-deps
   const liningPids = useMemo(() => new Set(live.filter((p) => p.info?.role === "lining").map((p) => p.pid)), [live]);
-  const hidePids = useMemo(() => (layer === "all" ? null : new Set(live.filter((p) => liningPids.has(p.pid) !== (layer === "lining")).map((p) => p.pid))), [layer, live, liningPids]);
+  const hidePids = useMemo(() => {
+    const out = new Set<string>();
+    if (layer !== "all") for (const p of live) if (liningPids.has(p.pid) !== (layer === "lining")) out.add(p.pid);
+    if (sew) { for (const id of pv.hide) out.add(id); if (iso) for (const p of live) if (p.pid !== iso) out.add(p.pid); }
+    return out.size ? out : null;
+  }, [layer, live, liningPids, sew, pv.hide, iso]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const lockPids = useMemo(() => (sew && pv.lock.length ? new Set(pv.lock) : null), [sew, pv.lock]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // ตรวจแบบ (คิดจากชิ้นสด แต่หน่วงตามหลังการลาก ไม่ให้กระดานกระตุก)
+  const liveLazy = useDeferredValue(live);
+  const issues: CheckIssue[] = useMemo(() => (sew ? checkPattern(liveLazy.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, inner: p.inner, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, mats: p.mats })), sew.seams, { tol }) : []), [liveLazy, sew?.seams, tol]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const sum = summarize(issues);
+  const flagged = useMemo(() => { const x = issues.find((i) => i.id === flagId); return x ? [{ pid: x.pids[0], edges: x.edges }] : null; }, [issues, flagId]);
+  const goIssue = (x: CheckIssue) => { setFlagId(x.id); setFocusReq({ nonce: Date.now(), pid: x.pids[0], ...(x.edges?.length && (x.code === "edge-open" || x.code.startsWith("seam")) ? { edge: x.edges[0] } : {}) }); };
+  const openEdges = (x: CheckIssue) => { if (!x.edges?.length) return; setInject({ nonce: Date.now(), pieces: [], edgeOpen: [{ pid: x.pids[0], edges: x.edges }] }); setFlagId(null); };
+  const roleOf = (p: ResultPiece): PieceRole => (p.info?.role ?? "body");
+  const toggleIn = (list: string[], ids: string[], on: boolean) => (on ? [...new Set([...list, ...ids])] : list.filter((x) => !ids.includes(x)));
   /** สร้างซับใน: คัดลอกชิ้นตัวกระเป๋า (แผ่นหน้า/หลัง + ชิ้นคั่นกลาง ที่ระบบประกอบได้) เป็นชิ้นชั้นซับใน วางใต้ชิ้นทั้งหมด พร้อมตะเข็บชุดเดียวกัน */
   const makeLining = () => {
     if (!sew) return;
@@ -224,6 +269,23 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
             <Icon value="i:square-plus" className="text-sm" />{t("เพิ่มช่อง", "Add pocket")}
           </button>
         </>}
+        {sew && <>
+          <button type="button" data-studio-pieces onClick={() => setPanel(panel === "pieces" ? null : "pieces")} aria-pressed={panel === "pieces"} title={t("รายการชิ้น: ล็อก / ซ่อน / แยกดู ตามกลุ่ม", "Piece list: lock / hide / isolate by group")}
+            className={`${btn} ${panel === "pieces" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
+            <Icon value="i:list" className="text-sm" />{t("รายการชิ้น", "Pieces")}
+            {(pv.lock.length > 0 || pv.hide.length > 0 || iso) && <span className={`rounded-full px-1.5 text-[11px] ${panel === "pieces" ? "bg-white/20" : "bg-slate-100 text-slate-600"}`}>{t(`ล็อก ${pv.lock.length} · ซ่อน ${pv.hide.length}${iso ? " · แยกดู" : ""}`, `${pv.lock.length} locked · ${pv.hide.length} hidden${iso ? " · isolated" : ""}`)}</span>}
+          </button>
+          <button type="button" data-studio-check onClick={() => setPanel(panel === "check" ? null : "check")} aria-pressed={panel === "check"} title={t("ตรวจแบบก่อนผลิต: ตะเข็บ ขอบที่ยังไม่ได้เย็บ รูปชิ้น วัสดุ", "Check before production: seams, unsewn edges, piece shapes, materials")}
+            className={`${btn} ${panel === "check" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
+            <Icon value="i:list-check" className="text-sm" />{t("ตรวจแบบ", "Check")}
+            {sum.errors > 0 && <span className="rounded-full bg-red-600 px-1.5 text-[11px] text-white" title={t("ต้องแก้", "Must fix")}>{sum.errors}</span>}
+            {sum.warns > 0 && <span className="rounded-full bg-amber-400 px-1.5 text-[11px] text-amber-950" title={t("ควรดู", "Worth a look")}>{sum.warns}</span>}
+            {!sum.errors && !sum.warns && live.length > 0 && <Icon value="i:circle-check" className="text-sm text-emerald-500" />}
+          </button>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("หน่วยที่แสดง", "Display unit")} title={t("หน่วยที่แสดง — เปลี่ยนแล้วขนาดจริงไม่เปลี่ยน", "Display unit — switching doesn't change real sizes")}>
+            {LENGTH_UNITS.map((u) => <button key={u.key} type="button" data-unit={u.key} onClick={() => setUnit(u.key)} aria-pressed={unit === u.key} className={`h-7 rounded-md px-2 text-xs ${unit === u.key ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{t(u.th, u.en)}</button>)}
+          </div>
+        </>}
         {sew && liningPids.size > 0 && (
           <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ชั้นที่ดูบนกระดาน", "Layer shown on the board")}>
             {(["all", "outer", "lining"] as const).map((k) => <button key={k} type="button" onClick={() => setLayer(k)} aria-pressed={layer === k} className={`h-7 rounded-md px-2.5 text-xs ${layer === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "all" ? t("ทุกชั้น", "All layers") : k === "outer" ? t("ชั้นนอก", "Outer") : t("ซับใน", "Lining")}</button>)}
@@ -244,10 +306,83 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
 
       {notice && <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><span className="min-w-0 flex-1">{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label={t("ปิดข้อความ", "Dismiss")} className="shrink-0 text-amber-700 hover:text-amber-900"><Icon value="i:x" /></button></p>}
 
+      {sew && panel === "pieces" && (
+        <section data-pieces-panel className="rounded-lg border border-slate-200 bg-white p-2.5 text-xs" aria-label={t("รายการชิ้น", "Piece list")}>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="font-medium text-slate-700">{t("รายการชิ้น", "Pieces")} · {live.length}</span>
+            <span className="text-[11px] text-slate-500">{t("ล็อก = เห็นปกติแต่แก้/ลากไม่ได้ · ซ่อน = จางและกดไม่ได้ (ยังถูกตรวจ) · แยกดู = ดูชิ้นเดียว · ไม่เปลี่ยนรูปชิ้น", "Lock = visible but can't be edited · Hide = faded, still checked · Isolate = view one piece · shapes never change")}</span>
+            {iso && <button type="button" onClick={() => setIso(null)} className="ml-auto h-7 rounded-md border border-blue-200 bg-blue-50 px-2 text-blue-700 hover:bg-blue-100">{t("เลิกแยกดู", "Stop isolating")}</button>}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {PIECE_ROLES.map((r) => {
+              const list = live.filter((p) => roleOf(p) === r.key);
+              if (!list.length) return null;
+              const ids = list.map((p) => p.pid), allLock = ids.every((id) => pv.lock.includes(id)), allHide = ids.every((id) => pv.hide.includes(id));
+              return (
+                <div key={r.key} className="rounded-md border border-slate-200" data-piece-group={r.key}>
+                  <div className="flex items-center gap-1 border-b border-slate-100 bg-slate-50 px-2 py-1">
+                    <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{t(r.th, r.en)} · {list.length}</span>
+                    <button type="button" onClick={() => changeView({ ...pv, lock: toggleIn(pv.lock, ids, !allLock) })} aria-pressed={allLock} title={allLock ? t("ปลดล็อกทั้งกลุ่ม", "Unlock the group") : t("ล็อกทั้งกลุ่ม", "Lock the group")} aria-label={t("ล็อกทั้งกลุ่ม", "Lock the group")} className={`inline-flex h-6 w-6 items-center justify-center rounded ${allLock ? "text-blue-700" : "text-slate-400 hover:text-slate-700"}`}><Icon value={allLock ? "i:lock" : "i:lock-open"} /></button>
+                    <button type="button" onClick={() => changeView({ ...pv, hide: toggleIn(pv.hide, ids, !allHide) })} aria-pressed={allHide} title={allHide ? t("แสดงทั้งกลุ่ม", "Show the group") : t("ซ่อนทั้งกลุ่ม", "Hide the group")} aria-label={t("ซ่อนทั้งกลุ่ม", "Hide the group")} className={`inline-flex h-6 w-6 items-center justify-center rounded ${allHide ? "text-blue-700" : "text-slate-400 hover:text-slate-700"}`}><Icon value={allHide ? "i:eye-off" : "i:eye"} /></button>
+                  </div>
+                  <ul className="divide-y divide-slate-50">
+                    {list.map((p) => {
+                      const lk = pv.lock.includes(p.pid), hd = pv.hide.includes(p.pid), no = live.indexOf(p) + 1;
+                      return (
+                        <li key={p.pid} className={`flex items-center gap-1 px-2 py-0.5 ${selPid === p.pid ? "bg-blue-50" : ""}`} data-piece-row={p.pid}>
+                          <button type="button" onClick={() => { if (!lk) setSelectReq({ nonce: Date.now(), pid: p.pid }); }} title={lk ? t("ชิ้นนี้ล็อกอยู่", "This piece is locked") : t("เลือกชิ้นนี้บนกระดาน", "Select on the board")} className={`min-w-0 flex-1 truncate text-left ${hd ? "text-slate-400" : "text-slate-700 hover:text-blue-700"}`}>{p.name || `P${no}`}</button>
+                          <button type="button" onClick={() => changeView({ ...pv, lock: toggleIn(pv.lock, [p.pid], !lk) })} aria-pressed={lk} aria-label={t(`ล็อก ${p.name || `P${no}`}`, `Lock ${p.name || `P${no}`}`)} title={lk ? t("ปลดล็อก", "Unlock") : t("ล็อก (แก้/ลากไม่ได้)", "Lock (no editing)")} className={`inline-flex h-6 w-6 items-center justify-center rounded ${lk ? "text-blue-700" : "text-slate-300 hover:text-slate-600"}`}><Icon value={lk ? "i:lock" : "i:lock-open"} /></button>
+                          <button type="button" onClick={() => changeView({ ...pv, hide: toggleIn(pv.hide, [p.pid], !hd) })} aria-pressed={hd} aria-label={t(`ซ่อน ${p.name || `P${no}`}`, `Hide ${p.name || `P${no}`}`)} title={hd ? t("แสดง", "Show") : t("ซ่อน (จาง กดไม่ได้)", "Hide (faded)")} className={`inline-flex h-6 w-6 items-center justify-center rounded ${hd ? "text-blue-700" : "text-slate-300 hover:text-slate-600"}`}><Icon value={hd ? "i:eye-off" : "i:eye"} /></button>
+                          <button type="button" onClick={() => setIso(iso === p.pid ? null : p.pid)} aria-pressed={iso === p.pid} aria-label={t(`แยกดู ${p.name || `P${no}`}`, `Isolate ${p.name || `P${no}`}`)} title={t("แยกดูชิ้นเดียว", "View only this piece")} className={`inline-flex h-6 w-6 items-center justify-center rounded ${iso === p.pid ? "text-blue-700" : "text-slate-300 hover:text-slate-600"}`}><Icon value="i:target" /></button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+          {!live.length && <p className="text-slate-400">{t("ยังไม่มีชิ้น", "No pieces yet")}</p>}
+        </section>
+      )}
+
+      {sew && panel === "check" && (
+        <section data-check-panel className="rounded-lg border border-slate-200 bg-white p-2.5 text-xs" aria-label={t("ตรวจแบบ", "Pattern check")}>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="font-medium text-slate-700">{t("ตรวจแบบ", "Pattern check")}</span>
+            {issues.length ? <>
+              <span className="text-red-700">{t(`${sum.errors} ต้องแก้`, `${sum.errors} must fix`)}</span>
+              <span className="text-amber-700">{t(`${sum.warns} ควรดู`, `${sum.warns} worth a look`)}</span>
+              {sum.infos > 0 && <span className="text-slate-500">{t(`${sum.infos} รับทราบ`, `${sum.infos} for info`)}</span>}
+            </> : <span className="text-emerald-700"><Icon value="i:circle-check" className="mr-0.5 inline" />{t("ผ่านทุกข้อ", "All clear")}</span>}
+            <label className="ml-auto inline-flex items-center gap-1 text-slate-500">{t("ค่าคลาดตะเข็บ", "Seam tolerance")}
+              <select value={String(tol)} disabled={!sew.onTolChange} onChange={(e) => sew.onTolChange?.(Number(e.target.value))} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs disabled:bg-slate-50" data-check-tol>
+                {[...new Set([...SEAM_TOL_CHOICES, tol])].sort((a, b) => a - b).map((v) => <option key={v} value={String(v)}>{L(v)}{v === DEFAULT_SEAM_TOL ? t(" (เริ่มต้น)", " (default)") : ""}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="mb-1 text-[11px] text-slate-400">{t("ตรวจจากรูปชิ้นและตะเข็บจริง · กดแถวเพื่อไปที่ชิ้น/ขอบ · ชิ้นที่ซ่อนก็ยังถูกตรวจ · ค่าคลาดเป็นค่าทดลอง ไม่ใช่มาตรฐานโรงงาน", "Checked from the real pieces and seams · click a row to go there · hidden pieces are still checked · the tolerance is a starting value, not a factory standard")}</p>
+          <ul className="max-h-64 space-y-0.5 overflow-auto">
+            {issues.map((x) => {
+              const d = describeIssue(x, L), on = flagId === x.id;
+              const ic = x.level === "error" ? { v: "i:circle-x", c: "text-red-600", w: t("ต้องแก้", "Must fix") } : x.level === "warn" ? { v: "i:alert-triangle", c: "text-amber-600", w: t("ควรดู", "Worth a look") } : { v: "i:info-circle", c: "text-blue-600", w: t("รับทราบ", "For info") };
+              return (
+                <li key={x.id} data-issue={x.code} className={`flex items-start gap-2 rounded-md px-1.5 py-1 ${on ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                  <span className={`mt-0.5 shrink-0 ${ic.c}`} title={ic.w}><Icon value={ic.v} /><span className="sr-only">{ic.w}</span></span>
+                  <button type="button" onClick={() => (on ? setFlagId(null) : goIssue(x))} className="min-w-0 flex-1 text-left text-slate-700">{t(d.th, d.en)}</button>
+                  {x.code === "edge-open" && !props.readonly && <button type="button" onClick={() => openEdges(x)} className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50" title={t("ตั้งขอบเหล่านี้เป็นขอบเปิดตั้งใจ (ย้อนกลับได้ด้วย Ctrl+Z)", "Mark these edges as intended openings (Ctrl+Z to undo)")}>{t("ตั้งเป็นขอบเปิด", "Mark as opening")}</button>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       {(() => {
         const boardEl = (
           <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
-          seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids} />
+          seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids}
+          {...(sew ? { unit, seamTol: tol, lockPids, flagged, focusEdge: focusReq } : {})} />
         );
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
@@ -289,6 +424,12 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
                 <button type="button" data-hide-3d onClick={() => setShow3d(false)} title={t("ซ่อนภาพ 3D (กระดานเต็มจอ)", "Hide 3D (full-width board)")} aria-label={t("ซ่อนภาพ 3D", "Hide 3D")} className={ib3}><Icon value="i:eye-off" className="text-sm" /></button>
               </span>
             </div>
+            {(() => { const lv = LEVEL_3D[view3d === "sewn" && !sewnOn ? "flat" : view3d]; return (
+              <p data-level-3d className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
+                <span className={`rounded px-1.5 py-0.5 font-medium ${lv.tone}`}>{t(lv.th, lv.en)}</span>
+                <span>{t(`ยืนยันได้: ${lv.okTh} · ยังสรุปไม่ได้: ${lv.noTh}`, `Shows: ${lv.okEn} · Can't tell yet: ${lv.noEn}`)}</span>
+              </p>
+            ); })()}
             {!asmMode && sewnOn && sewnScene && (sewnScene.asm || sewnScene.lining) && (
               <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ผ่าดูข้างใน", "Cut-away view")}>
               {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}

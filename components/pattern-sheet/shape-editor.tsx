@@ -18,7 +18,7 @@
  *   <ShapeEditor open onClose initial={[{ shape, holes, count, allow, name, mats }]} materials={[{ id, name }]} onSave={(r) => …} />
  * สูตร: lib/pattern-shape · ใช้ที่: แท็บตีราคา ใบงานออกแบบ (components/design-sheet-detail) · คู่มือ docs/pattern-sheet.md
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
@@ -33,6 +33,8 @@ import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, e
 import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
 import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
+import { formatLength, parseLength, unitLabel, type LengthUnit } from "@/lib/length-units";
+import { edgePlan, migrateSeams, remapEdgeMeta, remapEdgeValues, type EdgePlan } from "@/lib/pattern-edge-map";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
@@ -119,11 +121,46 @@ const ticks = (from: number, len: number, step: number) => {
 const isMajor = (v: number, major: number) => Math.abs(v / major - Math.round(v / major)) < 1e-6;
 const hasH = (n: PNode | undefined, w: "i" | "o") => !!n && (w === "i" ? !!(n.ix || n.iy) : !!(n.ox || n.oy));
 
-/** ช่องตัวเลขที่พิมพ์ได้ลื่น (ไม่เด้งค่ากลับระหว่างพิมพ์) — เปลี่ยนค่าจากข้างนอกเมื่อไม่ได้โฟกัส */
-function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w-20", disabled = false }: { value: number; onCommit: (v: number) => void; min?: number; max?: number; label: string; step?: number; className?: string; disabled?: boolean }) {
-  const [txt, setTxt] = useState(r2s(value));
+/** หน่วยความยาวที่แสดงในกระดาน (Bag CAD รอบ A) — ช่องตัวเลขแบบ len อ่านจากที่นี่ */
+const LenUnitCtx = createContext<{ unit: LengthUnit; digits?: number }>({ unit: "cm" });
+
+/** ช่องตัวเลขที่พิมพ์ได้ลื่น (ไม่เด้งค่ากลับระหว่างพิมพ์) — เปลี่ยนค่าจากข้างนอกเมื่อไม่ได้โฟกัส
+ *  len = ช่องความยาว: ค่าเป็น ซม. เสมอ แต่แสดง/พิมพ์ในหน่วยที่เลือก · รับ "7 mm" · "0.7 cm" · "1 in" · "260/2" (lib/length-units ไม่ใช้ eval)
+ *        Enter / Tab / ออกจากช่อง = ยืนยัน · Esc = ยกเลิก · ลูกศรขึ้น/ลง = เพิ่ม/ลดทีละ step · ผิดรูปแบบ = ขอบแดง + บอกเหตุผล */
+function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w-20", disabled = false, len = false }: { value: number; onCommit: (v: number) => void; min?: number; max?: number; label: string; step?: number; className?: string; disabled?: boolean; len?: boolean }) {
+  const t = useT();
+  const { unit, digits } = useContext(LenUnitCtx);
+  const show = (v: number) => (len ? formatLength(v, unit, { label: false, digits: digits != null ? Math.max(digits, 2) : undefined }) : r2s(v));
+  const [txt, setTxt] = useState(show(value));
   const [focus, setFocus] = useState(false);
-  useEffect(() => { if (!focus) setTxt(r2s(value)); }, [value, focus]);
+  const [bad, setBad] = useState<string | null>(null);
+  useEffect(() => { if (!focus) setTxt(show(value)); }, [value, focus, unit]);   // eslint-disable-line react-hooks/exhaustive-deps
+  if (len) {
+    const inRange = (cm: number) => (min == null || cm >= min - 1e-9) && (max == null || cm <= max + 1e-9);
+    const put = (cm: number) => { setBad(null); if (Math.abs(cm - value) > 1e-9) onCommit(cm); setTxt(show(cm)); };
+    const commitTxt = (): boolean => {
+      const r = parseLength(txt, unit);
+      if (!r.ok) { setBad(t(r.th, r.en)); return false; }
+      if (!inRange(r.cm)) { const lo = min != null ? formatLength(min, unit) : "", hi = max != null ? formatLength(max, unit) : ""; setBad(t(`ต้องอยู่ระหว่าง ${lo || "…"} ถึง ${hi || "…"}`, `Must be between ${lo || "…"} and ${hi || "…"}`)); return false; }
+      put(r.cm); return true;
+    };
+    return (
+      <span className="relative inline-block">
+        <input type="text" inputMode="decimal" value={txt} aria-label={label.includes(unitLabel(unit, "th")) || label.includes(unitLabel(unit, "en")) ? label : `${label} (${unitLabel(unit)})`} aria-invalid={!!bad} disabled={disabled} data-len-field
+          title={bad ?? t("พิมพ์ได้ เช่น 7 mm · 0.7 cm · 1 in · 260/2 — Enter ยืนยัน · Esc ยกเลิก", "Type e.g. 7 mm · 0.7 cm · 1 in · 260/2 — Enter to apply · Esc to cancel")}
+          onFocus={(e) => { setFocus(true); setBad(null); e.currentTarget.select(); }}
+          onBlur={() => { if (!commitTxt()) setTxt(show(value)); setFocus(false); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); if (commitTxt()) (e.currentTarget as HTMLInputElement).select(); }
+            else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setBad(null); setTxt(show(value)); (e.currentTarget as HTMLInputElement).blur(); }
+            else if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); const nv = Math.round((value + (e.key === "ArrowUp" ? step : -step) * (e.shiftKey ? 10 : 1)) * 1e4) / 1e4; if (inRange(nv)) put(nv); }
+          }}
+          onChange={(e) => { setTxt(e.target.value); if (bad) setBad(null); }}
+          className={`h-8 rounded-md border px-1.5 text-right text-sm tabular-nums disabled:bg-slate-100 disabled:text-slate-400 ${bad ? "border-red-400 bg-red-50" : "border-slate-200"} ${className}`} />
+        {bad && <span role="alert" className="absolute right-0 top-full z-20 mt-0.5 w-max max-w-[220px] rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[11px] text-red-700 shadow-sm">{bad}</span>}
+      </span>
+    );
+  }
   return (
     <input type="number" step={step} min={min} max={max} value={txt} aria-label={label} disabled={disabled}
       onFocus={() => setFocus(true)} onBlur={() => { setFocus(false); setTxt(r2s(value)); }}
@@ -133,7 +170,17 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null }: {
+  /** หน่วยที่แสดง (มม./ซม./นิ้ว · Bag CAD รอบ A) — ข้อมูลยังเป็น ซม. เสมอ · ไม่ส่ง = ซม. ทศนิยม 1 ตำแหน่งแบบเดิม (ใบงานออกแบบ) */
+  unit?: LengthUnit;
+  /** ค่าคลาดของตะเข็บ (ซม.) ที่ใช้ตัดสินสี "ยาวไม่เท่า" — ไม่ส่ง = SEAM_TOL เดิม (1 มม.) */
+  seamTol?: number;
+  /** ชิ้นที่ล็อกไว้: เห็นปกติแต่กด/ลาก/แก้ไม่ได้ (ปลดล็อกจากรายการชิ้นของสตูดิโอ) */
+  lockPids?: Set<string> | null;
+  /** ไฮไลต์จุดที่มีปัญหาจากแผงตรวจแบบ (ขอบ หรือทั้งชิ้นถ้าไม่ระบุขอบ) */
+  flagged?: { pid: string; edges?: number[] }[] | null;
+  /** สั่งไปที่ชิ้น/ขอบจากภายนอก (แผงตรวจแบบ) — nonce เปลี่ยน = ไป 1 ครั้ง · ระบุ edge + มีตะเข็บ = เปิดค่าของขอบนั้น (เครื่องมือแก้ตะเข็บ) */
+  focusEdge?: { nonce: number; pid: string; edge?: number } | null;
   /** เปิดงาน "ชิ้นคู่ผูกกัน" (lib/pattern-link): ชิ้นตามเปลี่ยนรูปตามชิ้นต้นแบบ + ส่วนผูก/เลิกผูกในแผงชิ้น (แอปสตูดิโอแพทเทิร์น · ใบงานออกแบบไม่ส่ง = ไม่มี) */
   pieceLinks?: boolean;
   /** เปิดงาน "เส้นในชิ้น": เครื่องมือวาดเส้นใน (L) + รายการเส้นในของชิ้นในแผงขวา + เย็บกับเส้นในได้ (แอปสตูดิโอแพทเทิร์น · ใบงานออกแบบไม่ส่ง = ไม่มี) */
@@ -143,7 +190,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   /** ชิ้นบนกระดานแบบสด (ตอนเปิด + ทุกครั้งที่เปลี่ยน รวมระหว่างลาก) — ไว้วาดภาพ 3D ตาม */
   onLive?: (pieces: ResultPiece[]) => void;
   /** เพิ่มชิ้นเข้ากระดานจากภายนอก (เช่น ตัวสร้างจากแม่แบบทรง) — nonce เปลี่ยน = เพิ่ม 1 ครั้ง · ชิ้นที่มี at วางเป็นกลุ่มต่อจากขวาสุดของกระดาน · ย้อนกลับได้ */
-  inject?: { nonce: number; pieces: EditorPiece[]; /** at ของชิ้น = ตำแหน่งบนกระดานตรง ๆ (ไม่งั้น x นับต่อจากขวาสุดของชิ้นเดิม) */ abs?: boolean; /** เพิ่มเส้นในให้ชิ้นที่มีอยู่แล้ว (ย้อนกลับได้พร้อมชิ้นใหม่ในครั้งเดียว) */ inner?: { pid: string; lines: InnerLine[] }[] } | null;
+  inject?: { nonce: number; pieces: EditorPiece[]; /** ตั้ง "ขอบเปิดตั้งใจ" ให้ขอบของชิ้นที่มีอยู่ (จากแผงตรวจแบบ) */ edgeOpen?: { pid: string; edges: number[] }[]; /** at ของชิ้น = ตำแหน่งบนกระดานตรง ๆ (ไม่งั้น x นับต่อจากขวาสุดของชิ้นเดิม) */ abs?: boolean; /** เพิ่มเส้นในให้ชิ้นที่มีอยู่แล้ว (ย้อนกลับได้พร้อมชิ้นใหม่ในครั้งเดียว) */ inner?: { pid: string; lines: InnerLine[] }[] } | null;
   /** ชิ้นที่เลือกเปลี่ยน → ส่ง pid กลับ (null = ไม่ได้เลือก) — ใช้ให้ภาพ 3D สว่างตาม */
   onSelChange?: (pid: string | null) => void;
   /** สั่งเลือกชิ้นจากภายนอก (เช่น คลิกชิ้นในภาพ 3D) — nonce เปลี่ยน = เลือก 1 ครั้ง */
@@ -183,6 +230,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   defaultMats?: PieceMat[];
 }) {
   const t = useT();
+  const unit: LengthUnit = unitProp ?? "cm";
+  const lenDigits = unitProp ? undefined : 1;   // ไม่ส่งหน่วย (ใบงานออกแบบ) = ซม. ทศนิยม 1 ตำแหน่งเหมือนเดิม
+  const uL = t(unitLabel(unit, "th"), unitLabel(unit, "en"));
+  const fmtN = (cm: number) => Number(formatLength(cm, unit, { label: false, digits: lenDigits })).toLocaleString("th-TH", { maximumFractionDigits: lenDigits ?? (unit === "mm" ? 1 : unit === "cm" ? 2 : 3) });
+  const fmtL = (cm: number) => `${fmtN(cm)} ${uL}`;
+  const blocked = (pid: string) => !!hidePids?.has(pid) || !!lockPids?.has(pid);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);   // ป๊อปวาดลูกทีหลัง → ผูกตัววัดขนาด/ล้อเมาส์ตอนพื้นที่วาดโผล่จริง
   const bindSvg = useCallback((el: SVGSVGElement | null) => { svgRef.current = el; setSvgEl(el); }, []);
@@ -202,7 +255,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   });
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
   // ชิ้นคู่ผูกกัน: ทุกครั้งที่ชิ้นเปลี่ยน (รวมระหว่างลาก) ให้ชิ้นตามมีรูปตรงกับต้นแบบ — ไม่บันทึกเป็นขั้นย้อนกลับแยก (ย้อนการแก้ต้นแบบ = ชิ้นตามย้อนด้วย)
-  useEffect(() => { if (!pieceLinks) return; const next = applyLinks(pieces); if (next !== pieces) setPieces(next); }, [pieces, pieceLinks]);
+  useEffect(() => { if (!pieceLinks) return; const next = applyLinks(pieces); if (next === pieces) return; const f = followEdges(pieces, next); setPieces(f.pieces); if (f.seams) emitSeams(f.seams); }, [pieces, pieceLinks]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [sel, setSel] = useState<string | null>(null);
   const [multi, setMulti] = useState<Set<string>>(() => new Set());   // เลือกหลายชิ้น (≥2) — sel = ชิ้นหลักในกลุ่ม
   const [marquee, setMarquee] = useState<{ a: XY; b: XY } | null>(null);
@@ -223,7 +276,6 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [notchAt, setNotchAt] = useState(5);                      // วางรอยบากที่ระยะจากต้นขอบ (ซม.)
   const [sewHover, setSewHover] = useState<string | null>(null);  // ขอบที่ชี้อยู่ "pid:i:n"
   const lastSeam = useRef<string | null>(null);                   // ตะเข็บที่เพิ่งเย็บ (Shift+คลิก = ต่อด้านที่ 2 ให้ยาวขึ้น)
-  const seamHist = useRef<Seam[][]>([]);                          // ย้อนกลับของตะเข็บ (Ctrl+Z ตอนถือเครื่องมือเย็บ)
   const [innerSel, setInnerSel] = useState<{ id: string; line: string } | null>(null);   // เส้นในที่เลือก (ชิ้น + เส้น) — ลากบนกระดาน / พิมพ์ระยะในแผงชิ้น
   const [innerA, setInnerA] = useState<{ id: string; p: XY } | null>(null);   // เครื่องมือเส้นใน: จุดแรก (รอกดจุดที่สอง)
   const [sewP, setSewP] = useState<{ pid: string; i: number; n: number; at: number } | null>(null);   // เย็บบางช่วง: จุดเริ่มของช่วงแรก (รอกดจุดจบบนขอบเดียวกัน)
@@ -279,24 +331,61 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [scaleIn, setScaleIn] = useState("110"); // Transform: ย่อ/ขยายกี่ %
 
   // ── ย้อนกลับ / ทำซ้ำ ──
-  const hist = useRef<Piece[][]>([]);
-  const fut = useRef<Piece[][]>([]);
+  /** ประวัติย้อนกลับรวม (Bag CAD รอบ A · 2026-11-12): 1 ขั้น = ชิ้นทั้งกระดาน + ตะเข็บ ณ ตอนนั้น → Ctrl+Z ครั้งเดียวย้อนได้ทั้งการแก้ชิ้นและการเย็บ (เดิมตะเข็บมีประวัติแยก ย้อนได้เฉพาะตอนถือเครื่องมือเย็บ) */
+  type Snap = { p: Piece[]; s: Seam[] | null };
+  const hist = useRef<Snap[]>([]);
+  const fut = useRef<Snap[]>([]);
+  const seamsRef = useRef<Seam[] | null>(seams ?? null); seamsRef.current = seams ?? null;
+  const onSeamsRef = useRef(onSeamsChange); onSeamsRef.current = onSeamsChange;
+  /** ส่งตะเข็บชุดใหม่ออกไป (อัปเดตตัวจำทันที กันตัวอื่นอ่านค่าเก่าก่อนหน้าแม่ส่งกลับมา) */
+  const emitSeams = (next: Seam[]) => { seamsRef.current = next; onSeamsRef.current?.(next); };
   const lastPush = useRef<{ key: string; at: number } | null>(null);
   const [, setHv] = useState(0);
   /** จดสภาพก่อนเปลี่ยน (key เดียวกันติดกันภายใน 1.2 วิ = รวมเป็นครั้งเดียว เช่น พิมพ์ตัวเลขทีละตัว) */
-  const record = useCallback((prev: Piece[], key?: string) => {
+  const record = useCallback((prev: Piece[], key?: string, prevSeams?: Seam[] | null) => {
     const now = Date.now();
     if (key && lastPush.current?.key === key && now - lastPush.current.at < 1200) { lastPush.current.at = now; return; }
-    hist.current.push(prev);
+    hist.current.push({ p: prev, s: prevSeams === undefined ? seamsRef.current : prevSeams });
     if (hist.current.length > 100) hist.current.shift();
     fut.current = [];
     lastPush.current = key ? { key, at: now } : null;
     setHv((v) => v + 1);
   }, []);
-  const commit = useCallback((next: Piece[], key?: string) => { record(piecesRef.current, key); setPieces(next); setDirty(true); }, [record]);
-  const restore = (to: Piece[]) => { setPieces(to); setDirty(true); lastPush.current = null; setSelNode(-1); setSel((s) => (s && to.some((p) => p.id === s) ? s : null)); setEditId((e) => (e && to.some((p) => p.id === e) ? e : null)); setHv((v) => v + 1); };
-  const undo = useCallback(() => { const h = hist.current.pop(); if (!h) return; fut.current.push(piecesRef.current); restore(h); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
-  const redo = useCallback(() => { const f = fut.current.pop(); if (!f) return; hist.current.push(piecesRef.current); restore(f); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** จดขั้นของการแก้ตะเข็บ (ชิ้นไม่เปลี่ยน) ลงประวัติเดียวกับชิ้น */
+  const pushSeamHist = (prevSeams: Seam[]) => record(piecesRef.current, undefined, prevSeams);
+  /** ชิ้นที่จำนวนขอบเปลี่ยน (แบ่งขอบ · เพิ่ม/ลบจุด · ชิ้นตามต้นแบบ) → ค่ารายขอบตามไปถูกขอบ + ตะเข็บย้ายตาม (lib/pattern-edge-map) — ไม่มีอะไรเปลี่ยน = คืนรายการเดิม */
+  const followEdges = (prev: Piece[], next: Piece[]): { pieces: Piece[]; seams: Seam[] | null; lost: number } => {
+    const before = new Map(prev.map((p) => [p.id, p]));
+    const plans = new Map<string, EdgePlan>();
+    let lost = 0;
+    const out = next.map((p) => {
+      const o = before.get(p.id);
+      if (!o || o.shape === p.shape) return p;
+      const plan = edgePlan(o.shape, p.shape);
+      if (!plan || plan.oldN === plan.newN) return p;
+      plans.set(p.pid, plan);
+      const fix: Partial<Piece> = {};
+      if (p.allowEdges && p.allowEdges.length === plan.oldN) fix.allowEdges = remapEdgeValues(p.allowEdges, plan);
+      if (p.foldEdges && p.foldEdges.length === plan.oldN) fix.foldEdges = remapEdgeValues(p.foldEdges, plan);
+      if (p.edgeMeta && p.edgeMeta.length === plan.oldN) { const r = remapEdgeMeta(p.edgeMeta, plan); fix.edgeMeta = r.meta; lost += r.lost; }
+      return { ...p, ...fix };
+    });
+    if (!plans.size) return { pieces: next, seams: null, lost };
+    const cur = seamsRef.current;
+    const m = cur?.length ? migrateSeams(cur, plans) : null;
+    return { pieces: out, seams: m?.changed ? m.seams : null, lost: lost + (m?.lost ?? 0) };
+  };
+  const lostMsg = (n: number) => setMsg({ tone: "err", text: t(`มี ${n} จุด (ตะเข็บ / ซิป / กุ๊น) ตามขอบใหม่ไม่ได้ เพราะขอบถูกรวม — ดูที่แผงตรวจแบบแล้วเลือกขอบใหม่ หรือกด Ctrl+Z`, `${n} item(s) (seams / zips / binding) couldn't follow the new edges because edges were merged — check the review panel and reselect, or press Ctrl+Z`) });
+  const commit = useCallback((next: Piece[], key?: string) => {
+    const prev = piecesRef.current, f = followEdges(prev, next);
+    record(prev, key);
+    setPieces(f.pieces); setDirty(true);
+    if (f.seams) emitSeams(f.seams);
+    if (f.lost) lostMsg(f.lost);
+  }, [record]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const restore = (to: Snap) => { setPieces(to.p); if (to.s && to.s !== seamsRef.current) emitSeams(to.s); setDirty(true); lastPush.current = null; setSelNode(-1); setSel((s) => (s && to.p.some((p) => p.id === s) ? s : null)); setEditId((e) => (e && to.p.some((p) => p.id === e) ? e : null)); setHv((v) => v + 1); };
+  const undo = useCallback(() => { const h = hist.current.pop(); if (!h) return; fut.current.push({ p: piecesRef.current, s: seamsRef.current }); restore(h); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const redo = useCallback(() => { const f = fut.current.pop(); if (!f) return; hist.current.push({ p: piecesRef.current, s: seamsRef.current }); restore(f); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setSnapState(readNum(SNAP_KEY, SNAP_STEPS, 1)); setLastAllow(readNum(ALLOW_KEY, null, 0)); setPieceFadeState(readNum(FADE_KEY, null, initialRefs.length ? 0.3 : 0.6)); setCanvasH(readNum(CANVAS_H_KEY, null, CANVAS_H_DEFAULT)); setPanelOpenState(readNum(PANEL_KEY, [0, 1], 1) === 1); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const setSnap = (v: number) => { setSnapState(v); saveNum(SNAP_KEY, v); };
@@ -374,7 +463,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   useEffect(() => {
     if (!inject || injectSeen.current === inject.nonce) return;
     injectSeen.current = inject.nonce;
-    if (readonly || (!inject.pieces.length && !inject.inner?.length)) return;
+    if (readonly || (!inject.pieces.length && !inject.inner?.length && !inject.edgeOpen?.length)) return;
     const x0 = inject.abs ? 0 : rightEdge();
     let x = x0;
     const list: Piece[] = inject.pieces.map((p) => {
@@ -386,11 +475,17 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     });
     const cur = piecesRef.current;
     const base = inject.inner?.length ? cur.map((q) => { const more = (inject.inner ?? []).filter((x) => x.pid === q.pid).flatMap((x) => x.lines); return more.length ? { ...q, inner: [...(q.inner ?? []), ...more] } : q; }) : cur;
-    if (base.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return; }
-    const next = [...base, ...list];
+    const opened = inject.edgeOpen?.length ? base.map((q) => {
+      const e = (inject.edgeOpen ?? []).find((x) => x.pid === q.pid);
+      if (!e) return q;
+      const E = pieceEdges(q.shape), cur0 = cleanEdgeMeta(q.shape, q.edgeMeta) ?? E.map(() => ({}) as EdgeMeta);
+      return { ...q, edgeMeta: cur0.map((m, i) => (e.edges.includes(i) ? { ...m, open: true } : m)) };
+    }) : base;
+    if (opened.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return; }
+    const next = [...opened, ...list];
     commit(next);
     if (list[0]) { setSel(list[0].id); setMulti(new Set()); }
-    changeTool("move"); fitView(next);
+    if (list.length || inject.inner?.length) { changeTool("move"); fitView(next); }
   }, [inject]);   // eslint-disable-line react-hooks/exhaustive-deps
   const onSelRef = useRef(onSelChange); onSelRef.current = onSelChange;
   const selPid = pieces.find((p) => p.id === sel)?.pid ?? null;
@@ -398,9 +493,31 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   useEffect(() => {
     if (!selectPid) return;
     const hit = selectPid.pid ? piecesRef.current.find((p) => p.pid === selectPid.pid) : undefined;
+    if (hit && lockPids?.has(hit.pid)) return;   // ชิ้นที่ล็อก = เลือกจากภาพ 3D ไม่ได้ (ปลดล็อกที่รายการชิ้นก่อน)
     setMulti(new Set()); setEditId(null); setSel(hit ? hit.id : null);
     if (hit) setTool("move");
   }, [selectPid]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // ล็อกชิ้นที่เลือกอยู่ = เลิกเลือก (กันแก้ด้วยแป้นพิมพ์/แผงขวาต่อ)
+  useEffect(() => {
+    if (!lockPids?.size) return;
+    const isLocked = (id: string | null) => { const p = id ? piecesRef.current.find((x) => x.id === id) : null; return !!p && lockPids.has(p.pid); };
+    setSel((cur) => (isLocked(cur) ? null : cur));
+    setEditId((cur) => (isLocked(cur) ? null : cur));
+    setMulti((m) => { const ids = [...m].filter((id) => !isLocked(id)); return ids.length === m.size ? m : new Set(ids.length > 1 ? ids : []); });
+  }, [lockPids]);
+  // ไปที่ชิ้น/ขอบจากแผงตรวจแบบ: เลื่อนกระดานให้ชิ้นอยู่กลาง · ระบุขอบ = เปิดค่าของขอบ (เครื่องมือแก้ตะเข็บ)
+  const focusSeen = useRef<number | null>(focusEdge?.nonce ?? null);
+  useEffect(() => {
+    if (!focusEdge || focusSeen.current === focusEdge.nonce) return;
+    focusSeen.current = focusEdge.nonce;
+    const p = piecesRef.current.find((x) => x.pid === focusEdge.pid);
+    if (!p) return;
+    const b = pieceGeometry(p).cutBox, cw = sizeRef.current.cw, ch = sizeRef.current.ch;
+    setView((v) => { const vh = cw > 0 ? (v.w * ch) / cw : v.w; return { ...v, x: b.x + b.w / 2 - v.w / 2, y: b.y + b.h / 2 - vh / 2 }; });
+    if (focusEdge.edge != null && seams) { changeTool("sewedit"); setEdgeSel({ pid: p.pid, i: focusEdge.edge, n: pieceEdges(p.shape).length }); setSewSel(null); }
+    else if (!lockPids?.has(p.pid)) { if (sewTool) changeTool("move"); setSel(p.id); setMulti(new Set()); setEditId(null); }
+    if (!panelOpen) setPanelOpen(true);
+  }, [focusEdge]);   // eslint-disable-line react-hooks/exhaustive-deps
   const patchPiece =(id: string, f: (p: Piece) => Piece, key?: string) => commit(piecesRef.current.map((p) => (p.id === id ? f(p) : p)), key);
 
   const commitPen = () => {
@@ -441,7 +558,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         return;
       }
       if (!innerA) {
-        const hit = [...piecesRef.current].reverse().find((pc) => !hidePids?.has(pc.pid) && pointInPolygon([p.x, p.y], flattenShape(pc.shape)));
+        const hit = [...piecesRef.current].reverse().find((pc) => !blocked(pc.pid) && pointInPolygon([p.x, p.y], flattenShape(pc.shape)));
         if (!hit) { startPan(); return; }   // กดนอกชิ้น = ลากเลื่อนกระดาน (ไม่เปลี่ยนเครื่องมือ) — เส้นในเริ่มได้เฉพาะข้างในชิ้น
         setInnerA({ id: hit.id, p }); setInnerSel(null); setSel(hit.id); setMulti(new Set()); return;
       }
@@ -755,7 +872,6 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         if ((e.key === "Escape" || e.key === "Enter") && manyA) { e.stopPropagation(); e.preventDefault(); setManyA(null); return; }
         if (e.key === "Escape" && (sewA || sewP || sewSel || edgeSel)) { e.stopPropagation(); e.preventDefault(); setSewA(null); setSewP(null); setSewSel(null); setEdgeSel(null); return; }
         if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); if (sewSel) removeSeam(sewSel); return; }
-        if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey && seamHist.current.length) { e.preventDefault(); const prev = seamHist.current.pop(); if (prev) onSeamsChange?.(prev); setSewA(null); setSewSel(null); return; }
       }
       if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); redo(); return; }
@@ -764,7 +880,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         if (pen || box) { setPen(null); setBox(null); } else if (notchMode) setNotchMode(false); else if (editId) { setEditId(null); setSelNode(-1); } else { setSel(null); setMulti(new Set()); }
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && k === "a") { e.preventDefault(); selectIds(piecesRef.current.map((p) => p.id)); return; }
+      if ((e.ctrlKey || e.metaKey) && k === "a") { e.preventDefault(); selectIds(piecesRef.current.filter((p) => !blocked(p.pid)).map((p) => p.id)); return; }
       if ((e.ctrlKey || e.metaKey) && k === "d") { e.preventDefault(); duplicateSel(); return; }
       if (e.key === "Enter" && pen) { e.preventDefault(); commitPen(); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && pen) { e.preventDefault(); setPen(pen.nodes.length > 1 ? { ...pen, nodes: pen.nodes.slice(0, -1) } : null); return; }
@@ -928,7 +1044,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const sewLikeMaster = (pid: string, list: Piece[] = piecesRef.current, lead = "") => {
     if (!seams || !onSeamsChange || readonly) { if (lead) setMsg({ tone: "ok", text: lead }); return; }
     const cur = seams, { add, skipped } = followerSeams(list, cur, pid, Date.now().toString(36));
-    if (add.length) { seamHist.current.push(cur); if (seamHist.current.length > 60) seamHist.current.shift(); onSeamsChange([...cur, ...add]); }
+    if (add.length) { pushSeamHist(cur); emitSeams([...cur, ...add]); }
     const body = add.length || skipped
       ? t(`เย็บตามชิ้นต้นแบบให้ ${add.length} แนว${skipped ? ` · ข้าม ${skipped} แนว (หาขอบคู่ไม่เจอ หรือขอบนั้นเย็บไปแล้ว — เย็บเองด้วยเครื่องมือเย็บ)` : ""}`, `${add.length} seams copied from the master${skipped ? ` · ${skipped} skipped (no matching edge, or it is already sewn — sew those yourself)` : ""}`)
       : t("ชิ้นต้นแบบยังไม่มีตะเข็บให้คัดลอก (หรือมีครบแล้ว)", "The master has no seams to copy (or they are all there already)");
@@ -1083,7 +1199,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   };
 
   // ── ไม้บรรทัด ──
-  const fmtLen = (n: number) => `${(Math.round(n * 10) / 10).toLocaleString("th-TH", { maximumFractionDigits: 1 })} ${t("ซม.", "cm")}`;
+  const fmtLen = (n: number) => fmtL(n);
   const addMeasure = (m: Omit<Measure, "id">) => {
     setMeasures((ms) => [...ms.slice(-29), { ...m, id: newId() }]);
     setMsg({ tone: "ok", text: m.kind === "edge" ? t(`ตามขอบ ${fmtLen(m.len)} (อ้อมอีกทาง ${fmtLen(m.alt ?? 0)})`, `Along edge ${fmtLen(m.len)} (other way ${fmtLen(m.alt ?? 0)})`) : t(`วัดได้ ${fmtLen(m.len)}`, `Measured ${fmtLen(m.len)}`) });
@@ -1138,11 +1254,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   // ── เครื่องมือเย็บ (แบบ CLO: เย็บบนกระดานเดิม · คู่เดียวกันสีเดียวกัน · ขีดบอกจุดเริ่ม) ──
   const seamList = seams ?? [];
   const byPidShape = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }])), [pieces]);
-  const seamChecks = useMemo(() => seamList.map((x) => checkSeam(byPidShape, x)), [seamList, byPidShape]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const seamChecks = useMemo(() => seamList.map((x) => checkSeam(byPidShape, x, seamTol)), [seamList, byPidShape, seamTol]);   // eslint-disable-line react-hooks/exhaustive-deps
   const seamBad = seamChecks.some((c, i) => c.status === "broken" || (c.status === "mismatch" && !seamList[i]?.ease));
   const canSew = !readonly && !!onSeamsChange;
   const seamAt = (pid: string, i: number, n: number) => seamList.find((x) => (x.a.pid === pid && x.a.n === n && sideHasEdge(x.a, i)) || (x.b.pid === pid && x.b.n === n && sideHasEdge(x.b, i)));
-  const commitSeams = (next: Seam[]) => { seamHist.current.push(seamList); if (seamHist.current.length > 60) seamHist.current.shift(); onSeamsChange?.(next); };
+  const commitSeams = (next: Seam[]) => { if (!onSeamsChange) return; pushSeamHist(seamList); emitSeams(next); };
   const patchSeam = (id: string, f: (x: Seam) => Seam) => { if (!canSew) return; commitSeams(seamList.map((x) => (x.id === id ? f(x) : x))); };
   const removeSeam = (id: string) => { if (!canSew) return; commitSeams(seamList.filter((x) => x.id !== id)); setSewSel(null); };
   const reverseSeam = (id: string) => { if (!canSew) return; commitSeams(seamList.map((x) => (x.id === id ? (x.rev ? { id: x.id, a: x.a, b: x.b } : { ...x, rev: true }) : x))); };
@@ -1190,7 +1306,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (!pa || EA.length !== manyA.n || !EA[manyA.i]) { setManyA(null); return; }
     const LA = EA[manyA.i].len, t0 = manyA.dir > 0 ? manyA.at : manyA.at - L, t1 = t0 + L, room = manyA.dir > 0 ? LA - manyA.at : manyA.at;
     if (seamList.filter((x) => [x.a, x.b].some((q) => q.pid === pid && q.n === n && sideHasEdge(q, i))).length >= Math.max(1, pc.count)) { setMsg({ tone: "err", text: t("ขอบนี้เย็บไปแล้ว — ใช้เครื่องมือแก้ตะเข็บ (B) ลบของเดิมก่อน", "This edge is already sewn — delete the old seam with Edit sewing (B) first") }); return; }
-    if (L > room + 0.1) { setMsg({ tone: "err", text: t(`ขอบหลักเหลือ ${r1(room)} ซม. แต่ขอบนี้ยาว ${r1(L)} ซม. — ยาวเกิน ปรับความยาวของชิ้นก่อน หรือกด Esc เพื่อจบ`, `The main edge has ${r1(room)} cm left but this edge is ${r1(L)} cm — too long. Adjust the piece, or press Esc to finish`) }); return; }
+    if (L > room + 0.1) { setMsg({ tone: "err", text: t(`ขอบหลักเหลือ ${fmtL(room)} แต่ขอบนี้ยาว ${fmtL(L)} — ยาวเกิน ปรับความยาวของชิ้นก่อน หรือกด Esc เพื่อจบ`, `The main edge has ${fmtL(room)} left but this edge is ${fmtL(L)} — too long. Adjust the piece, or press Esc to finish`) }); return; }
     const start = Math.max(0, t0), end = Math.min(t1, LA);
     if (!rangeFree(edgeBusy(seamList, manyA.pid, manyA.i, manyA.n, LA), start, end, pa.count)) { setMsg({ tone: "err", text: t("ช่วงถัดไปของขอบหลักเย็บไปแล้ว — กด Esc แล้วเริ่มใหม่จากตำแหน่งที่ยังว่าง", "The next stretch of the main edge is already sewn — press Esc and start from a free position") }); return; }
     const id = `s${Date.now().toString(36)}${seamList.length}`;
@@ -1217,7 +1333,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (isInnerSide(x)) { const l = pieces.find((q) => q.pid === x.pid)?.inner?.find((q) => q.id === x.inner); return `${pieceNo(x.pid)} · ${t("เส้นใน", "inner line")}${l?.name ? ` ${l.name}` : ""}`; }
     const base = `${pieceNo(x.pid)} · ${x.count > 1 ? t(`${x.count} ขอบติดกัน`, `${x.count} joined edges`) : t(`ขอบ ${x.from + 1}`, `edge ${x.from + 1}`)}`;
     const S = isPartialSide(x) ? byPidShape.get(x.pid) : null, r = S ? sideRange(S, x) : null;
-    return r ? `${base} ${t(`ช่วง ${r1(r.t0)}–${r1(r.t1)}`, `range ${r1(r.t0)}–${r1(r.t1)}`)}` : base;
+    return r ? `${base} ${t(`ช่วง ${fmtN(r.t0)}–${fmtL(r.t1)}`, `range ${fmtN(r.t0)}–${fmtL(r.t1)}`)}` : base;
   };
   // ── เย็บบางช่วงของขอบ + ย้าย/ปรับช่วงหลังเย็บ (2026-11-11) ──
   /** ระยะตามขอบที่ใช้วางจุด: ลงล็อกทีละ 0.5 ซม. (หรือละเอียดกว่าตามค่าลงล็อกของกระดาน) · ใกล้ปลายขอบ = ดูดเข้าปลาย */
@@ -1260,7 +1376,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const g = seamEdge(id, which);
     if (!g || !canSew) return false;
     const L = g.ed.len, a = Math.round(t0 * 100) / 100, b = Math.round(t1 * 100) / 100;
-    if (a < -1e-6 || b > L + 0.005 || b - a < SEAM_MIN_LEN - 1e-6) { setMsg({ tone: "err", text: t(`ช่วงนี้เกินขอบ (ขอบยาว ${r1(L)} ซม.) หรือสั้นกว่า ${SEAM_MIN_LEN} ซม.`, `That range runs past the edge (${r1(L)} cm long) or is shorter than ${SEAM_MIN_LEN} cm`) }); return false; }
+    if (a < -1e-6 || b > L + 0.005 || b - a < SEAM_MIN_LEN - 1e-6) { setMsg({ tone: "err", text: t(`ช่วงนี้เกินขอบ (ขอบยาว ${fmtL(L)}) หรือสั้นกว่า ${fmtL(SEAM_MIN_LEN)}`, `That range runs past the edge (${fmtL(L)} long) or is shorter than ${fmtL(SEAM_MIN_LEN)}`) }); return false; }
     if (!rangeFree(edgeBusy(seamList, g.side.pid, g.side.from, g.side.n, L, { id, which }), a, b, g.cap)) { setMsg({ tone: "err", text: t("ช่วงนี้ทับกับตะเข็บอื่นบนขอบเดียวกัน", "That range overlaps another seam on the same edge") }); return false; }
     const side = rangedSide(g.side.pid, g.side.from, g.side.n, Math.max(0, a), Math.min(L, b), L);
     commitSeams(seamList.map((q) => (q.id === id ? (which === "a" ? { ...q, a: side } : { ...q, b: side }) : q)));
@@ -1272,9 +1388,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (!g) return;
     const o = g.x[target === "a" ? "b" : "a"], S = byPidShape.get(o.pid), want = S ? sideLength(S, o) : null;
     if (want == null) return;
-    if (want > g.ed.len + 0.005) { setMsg({ tone: "err", text: t(`${sideTxt(g.side)} ยาวแค่ ${r1(g.ed.len)} ซม. ยาวไม่พอ — ให้ปรับอีกด้านแทน`, `${sideTxt(g.side)} is only ${r1(g.ed.len)} cm long — adjust the other side instead`) }); return; }
+    if (want > g.ed.len + 0.005) { setMsg({ tone: "err", text: t(`${sideTxt(g.side)} ยาวแค่ ${fmtL(g.ed.len)} ยาวไม่พอ — ให้ปรับอีกด้านแทน`, `${sideTxt(g.side)} is only ${fmtL(g.ed.len)} long — adjust the other side instead`) }); return; }
     const t0 = Math.max(0, Math.min(g.t0, g.ed.len - want));
-    if (setSeamRange(id, target, t0, t0 + want)) setMsg({ tone: "ok", text: t(`ปรับแล้ว ทั้งสองด้านยาว ${r1(want)} ซม.`, `Done — both sides are ${r1(want)} cm`) });
+    if (setSeamRange(id, target, t0, t0 + want)) setMsg({ tone: "ok", text: t(`ปรับแล้ว ทั้งสองด้านยาว ${fmtL(want)}`, `Done — both sides are ${fmtL(want)}`) });
   };
   /** เครื่องมือเย็บบางช่วง: กดจุดเริ่ม → จุดจบบนขอบเดียวกัน → จุดเริ่มบนขอบของอีกชิ้น (ระบบวางให้ยาวเท่าช่วงแรก) */
   const sewPartClick = (key: string, raw: XY) => {
@@ -1288,7 +1404,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         setSewP({ pid, i, n, at: pos }); setSewSel(null); return;
       }
       const a = Math.min(sewP.at, pos), b = Math.max(sewP.at, pos);
-      if (b - a < SEAM_MIN_LEN) { setMsg({ tone: "err", text: t(`ช่วงสั้นเกินไป (อย่างน้อย ${SEAM_MIN_LEN} ซม.) — กดจุดจบให้ห่างจากจุดเริ่ม`, `Too short (at least ${SEAM_MIN_LEN} cm) — click the end further from the start`) }); return; }
+      if (b - a < SEAM_MIN_LEN) { setMsg({ tone: "err", text: t(`ช่วงสั้นเกินไป (อย่างน้อย ${fmtL(SEAM_MIN_LEN)}) — กดจุดจบให้ห่างจากจุดเริ่ม`, `Too short (at least ${fmtL(SEAM_MIN_LEN)}) — click the end further from the start`) }); return; }
       if (!rangeFree(busy, a, b)) { setMsg({ tone: "err", text: t("ช่วงนี้ทับกับตะเข็บเดิมบนขอบนี้", "That range overlaps a seam already on this edge") }); return; }
       setSewA(rangedSide(pid, i, n, a, b, L)); setSewP(null); return;
     }
@@ -1298,13 +1414,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const id = `s${Date.now().toString(36)}${seamList.length}`;
     commitSeams([...seamList, { id, a: sewA, b: rangedSide(pid, i, n, t0, t0 + w, L) }]);
     lastSeam.current = null; setSewA(null); setSewSel(id); setEdgeSel(null);
-    if (want > L + 0.1) setMsg({ tone: "err", text: t(`ขอบนี้ยาวแค่ ${r1(L)} ซม. สั้นกว่าช่วงแรก (${r1(want)} ซม.) — เย็บเต็มขอบให้แล้ว ปรับให้เท่ากันได้ในแผงขวา`, `This edge is only ${r1(L)} cm, shorter than the first range (${r1(want)} cm) — sewn along the whole edge; make them equal in the panel on the right`) });
+    if (want > L + 0.1) setMsg({ tone: "err", text: t(`ขอบนี้ยาวแค่ ${fmtL(L)} สั้นกว่าช่วงแรก (${fmtL(want)}) — เย็บเต็มขอบให้แล้ว ปรับให้เท่ากันได้ในแผงขวา`, `This edge is only ${fmtL(L)}, shorter than the first range (${fmtL(want)}) — sewn along the whole edge; make them equal in the panel on the right`) });
   };
   const midOf = (P: Pt[]): Pt => { let L = 0; for (let k = 1; k < P.length; k++) L += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); let d = L / 2; for (let k = 1; k < P.length; k++) { const l = Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); if (d <= l && l > 0) return [P[k - 1][0] + ((P[k][0] - P[k - 1][0]) * d) / l, P[k - 1][1] + ((P[k][1] - P[k - 1][1]) * d) / l]; d -= l; } return P[P.length - 1]; };
   const lineD = (P: Pt[]) => "M" + P.map((q) => `${q[0]} ${q[1]}`).join("L");
   const polyLen = (P: Pt[]) => { let L = 0; for (let k = 1; k < P.length; k++) L += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); return L; };
   /** เลขความยาวข้างเส้นที่เย็บ (แบบ CLO) — ตัวหนังสือขนาดคงที่บนจอ มีขอบขาวให้อ่านออกบนชิ้น */
-  const lenLabel = (P: Pt[], col: string) => { if (!(ppc > 0)) return null; const m = midOf(P); return <text x={m[0]} y={m[1] - 7 / ppc} fontSize={11 / ppc} textAnchor="middle" fill={col} stroke="#fff" strokeWidth={3 / ppc} paintOrder="stroke" style={{ fontVariantNumeric: "tabular-nums" }}>{r1(polyLen(P))}</text>; };
+  const lenLabel = (P: Pt[], col: string) => { if (!(ppc > 0)) return null; const m = midOf(P); return <text x={m[0]} y={m[1] - 7 / ppc} fontSize={11 / ppc} textAnchor="middle" fill={col} stroke="#fff" strokeWidth={3 / ppc} paintOrder="stroke" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtN(polyLen(P))}</text>; };
   const edgePiece = edgeSel ? pieces.find((p) => p.pid === edgeSel.pid) ?? null : null;
   const edgeList = edgePiece ? pieceEdges(edgePiece.shape) : [];
   const selEdge = edgePiece && edgeSel && edgeList.length === edgeSel.n ? edgeList[edgeSel.i] ?? null : null;
@@ -1328,6 +1444,19 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             ); })}
           </g>
         );
+      })}
+    </g>
+  ) : null;
+  /** จุดที่แผงตรวจแบบชี้ (ขอบ หรือทั้งชิ้น) — เส้นประแดงหนา */
+  const flagLayer = flagged?.length ? (
+    <g style={{ pointerEvents: "none" }} data-flagged>
+      {flagged.map((f, k) => {
+        const p = pieces.find((x) => x.pid === f.pid);
+        if (!p || hidePids?.has(p.pid)) return null;
+        const E = pieceEdges(p.shape), list = f.edges?.length ? f.edges.map((i) => E[i]).filter(Boolean) : null;
+        return list
+          ? list.map((e) => <path key={`${k}-${e.i}`} d={lineD(e.pts)} fill="none" stroke="#dc2626" strokeOpacity={0.55} strokeWidth={8} strokeDasharray="4 5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />)
+          : <path key={k} d={shapePathD(p.shape)} fill="none" stroke="#dc2626" strokeOpacity={0.55} strokeWidth={6} strokeDasharray="4 5" vectorEffect="non-scaling-stroke" />;
       })}
     </g>
   ) : null;
@@ -1408,7 +1537,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             })() : <path d={d} fill="none" stroke={st.col} strokeWidth={st.w} strokeDasharray={st.dash} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
             {grab && <path data-innerline={`${p.id}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "move" }}><title>{t("กด = เลือก · ลาก = ย้ายเส้นใน", "Click to select · drag to move the inner line")}</title></path>}
             {grab && picked && l.pts.map((q, qi) => <circle key={qi} data-innerpt={`${p.id}:${l.id}:${qi}`} cx={q[0]} cy={q[1]} r={ppc > 0 ? 6 / ppc : 0} fill="#fff" stroke={st.col} strokeWidth={2.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />)}
-            {seams && sewTool && l.kind !== "hw" && tool !== "sewpart" && tool !== "sewmany" && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}><title>{`${pieceNo(p.pid)} · ${t("เส้นใน", "inner line")}${l.name ? ` ${l.name}` : ""} · ${r1(lenOfPts(l.pts))} ${t("ซม.", "cm")}${sewn ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}`}</title></path>}
+            {seams && sewTool && l.kind !== "hw" && tool !== "sewpart" && tool !== "sewmany" && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}><title>{`${pieceNo(p.pid)} · ${t("เส้นใน", "inner line")}${l.name ? ` ${l.name}` : ""} · ${fmtL(lenOfPts(l.pts))}${sewn ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}`}</title></path>}
             {seams && tool === "sewpart" && sewA && l.kind !== "hw" && <path data-inner={`${p.pid}:${l.id}`} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />}
           </g>
         );
@@ -1420,14 +1549,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   /** ขอบที่กดได้ (เฉพาะตอนถือเครื่องมือเย็บ / แก้ตะเข็บ) — วางทับชิ้น */
   const edgeHits = seams && sewTool ? (
     <g>
-      {pieces.filter((p) => !hidePids?.has(p.pid)).map((p) => { const E = pieceEdges(p.shape); return E.map((ed) => {
+      {pieces.filter((p) => !blocked(p.pid)).map((p) => { const E = pieceEdges(p.shape); return E.map((ed) => {
         const key = `${p.pid}:${ed.i}:${E.length}`, hov = sewHover === key && !seamAt(p.pid, ed.i, E.length);
         return (
           <g key={key}>
             {hov && tool === "sew" && <path d={lineD(ed.pts)} fill="none" stroke="#94a3b8" strokeWidth={5} strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
             <path data-edge={key} d={lineD(ed.pts)} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}
               onPointerEnter={() => setSewHover(key)} onPointerLeave={() => setSewHover((h) => (h === key ? null : h))}>
-              <title>{`${pieceNo(p.pid)} · ${t("ขอบ", "edge")} ${ed.i + 1} · ${r1(ed.len)} ${t("ซม.", "cm")}`}</title>
+              <title>{`${pieceNo(p.pid)} · ${t("ขอบ", "edge")} ${ed.i + 1} · ${fmtL(ed.len)}`}</title>
             </path>
           </g>
         );
@@ -1447,7 +1576,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       <div className="flex items-center gap-2"><Icon value="i:needle-thread" className="text-[16px] text-slate-500" /><span className="text-sm font-semibold text-slate-700">{t(`ตะเข็บ ${seamList.length} แนว`, `${seamList.length} seams`)}</span></div>
       {tool === "sew" && canSew && (
         <div className="rounded-md border border-slate-200 bg-white p-2 text-slate-600">
-          {sewA ? <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{sideTxt(sewA)} · <b className="tabular-nums">{r1(sideLength(byPidShape.get(sewA.pid)!, sewA) ?? 0)}</b> {t("ซม.", "cm")}<div className="mt-1 text-slate-400">{t("กดขอบของอีกชิ้นเพื่อเย็บ", "Click the other edge to sew")}</div></>
+          {sewA ? <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{sideTxt(sewA)} · <b className="tabular-nums">{fmtN(sideLength(byPidShape.get(sewA.pid)!, sewA) ?? 0)}</b> {uL}<div className="mt-1 text-slate-400">{t("กดขอบของอีกชิ้นเพื่อเย็บ", "Click the other edge to sew")}</div></>
             : t("กดขอบแรกบนกระดาน", "Click the first edge on the board")}
         </div>
       )}
@@ -1455,15 +1584,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         <div className="rounded-md border border-slate-200 bg-white p-2 text-slate-600">
           {manyA ? (() => {
             const pc = pieces.find((p) => p.pid === manyA.pid), ed = pc ? pieceEdges(pc.shape)[manyA.i] : null, L = ed?.len ?? 0;
-            return <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{t("ขอบหลัก", "Main edge")}: {pieceNo(manyA.pid)} · {t(`ขอบ ${manyA.i + 1}`, `edge ${manyA.i + 1}`)} · <b className="tabular-nums">{r1(L)}</b> {t("ซม.", "cm")}
-              <div className="mt-1 tabular-nums">{t(`เย็บแล้ว ${manyA.made} ชิ้น · เหลือ ${r1(manyA.dir > 0 ? L - manyA.at : manyA.at)} ซม.`, `${manyA.made} pieces sewn · ${r1(manyA.dir > 0 ? L - manyA.at : manyA.at)} cm left`)}</div>
+            return <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{t("ขอบหลัก", "Main edge")}: {pieceNo(manyA.pid)} · {t(`ขอบ ${manyA.i + 1}`, `edge ${manyA.i + 1}`)} · <b className="tabular-nums">{fmtN(L)}</b> {uL}
+              <div className="mt-1 tabular-nums">{t(`เย็บแล้ว ${manyA.made} ชิ้น · เหลือ ${fmtL(manyA.dir > 0 ? L - manyA.at : manyA.at)}`, `${manyA.made} pieces sewn · ${fmtL(manyA.dir > 0 ? L - manyA.at : manyA.at)} left`)}</div>
               <div className="mt-1 text-slate-400">{t("กดขอบของชิ้นถัดไปที่จะมาต่อ · Enter หรือ Esc = จบ", "Click the edge of the next piece · Enter or Esc = finish")}</div></>;
           })() : t("กดขอบหลัก (ขอบยาวที่มีหลายชิ้นมาเย็บต่อกัน) ตรงจุดที่ชิ้นแรกจะเริ่ม", "Click the main edge (the long edge several pieces join) where the first piece starts")}
         </div>
       )}
       {tool === "sewpart" && canSew && (
         <div className="rounded-md border border-slate-200 bg-white p-2 text-slate-600">
-          {sewA ? <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{sideTxt(sewA)} · <b className="tabular-nums">{r1(sideLength(byPidShape.get(sewA.pid)!, sewA) ?? 0)}</b> {t("ซม.", "cm")}<div className="mt-1 text-slate-400">{t("กดจุดเริ่มบนขอบของอีกชิ้น ระบบจะวางให้ยาวเท่ากันเอง", "Click the start on the other piece's edge — the range is made the same length")}</div></>
+          {sewA ? <><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />{sideTxt(sewA)} · <b className="tabular-nums">{fmtN(sideLength(byPidShape.get(sewA.pid)!, sewA) ?? 0)}</b> {uL}<div className="mt-1 text-slate-400">{t("กดจุดเริ่มบนขอบของอีกชิ้น ระบบจะวางให้ยาวเท่ากันเอง", "Click the start on the other piece's edge — the range is made the same length")}</div></>
             : sewP ? t("กดจุดจบของช่วงบนขอบเดียวกัน", "Click the end of the range on the same edge")
             : t("กดจุดเริ่มของช่วงบนขอบ · หรือกดเส้นตะเข็บเดิมแล้วลากเพื่อย้าย", "Click where the range starts on an edge · or click a seam and drag to move it")}
         </div>
@@ -1477,7 +1606,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             <div className="flex items-center gap-1.5 font-semibold text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: SEAM_COLORS[selSeamIdx % SEAM_COLORS.length] }} />{t(`ตะเข็บ ${seamLabel(selSeamIdx)}`, `Seam ${seamLabel(selSeamIdx)}`)}</div>
             <div className="text-slate-600">{sideTxt(x.a)} <span className="text-slate-400">{t("กับ", "to")}</span> {sideTxt(x.b)}</div>
             <div className={`tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" && !x.ease ? "text-red-600" : "text-amber-700"}`}>
-              {c.status === "broken" ? t("ชิ้นถูกแก้จนขอบเปลี่ยน ต้องเย็บใหม่", "The piece changed — sew this again") : `${r1(c.la ?? 0)} ${t("กับ", "and")} ${r1(c.lb ?? 0)} ${t("ซม.", "cm")} · ${c.status === "ok" ? t("ยาวเท่ากัน", "same length") : x.ease ? t(`ตั้งใจให้ย่น ${r1(c.diff)} ซม.`, `eased by ${r1(c.diff)} cm on purpose`) : t(`ต่างกัน ${r1(c.diff)} ซม.`, `differ by ${r1(c.diff)} cm`)}`}
+              {c.status === "broken" ? t("ชิ้นถูกแก้จนขอบเปลี่ยน ต้องเย็บใหม่", "The piece changed — sew this again") : `${fmtN(c.la ?? 0)} ${t("กับ", "and")} ${fmtL(c.lb ?? 0)} · ${c.status === "ok" ? t("ยาวเท่ากัน", "same length") : x.ease ? t(`ตั้งใจให้ย่น ${fmtL(c.diff)}`, `eased by ${fmtL(c.diff)} on purpose`) : t(`ต่างกัน ${fmtL(c.diff)}`, `differ by ${fmtL(c.diff)}`)}`}
             </div>
             {(["a", "b"] as const).map((which, k) => {
               const g = seamEdge(x.id, which);
@@ -1485,14 +1614,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               const len = Math.round((g.t1 - g.t0) * 100) / 100, start = Math.round(g.t0 * 100) / 100;
               return (
                 <div key={which} className="space-y-1 rounded-md bg-slate-50 p-1.5">
-                  <div className="text-slate-500">{t(`ด้านที่ ${k + 1}`, `Side ${k + 1}`)} · {pieceNo(g.side.pid)} · {t(`ขอบ ${g.side.from + 1}`, `edge ${g.side.from + 1}`)} <span className="text-slate-400">({t(`ขอบยาว ${r1(g.ed.len)}`, `edge ${r1(g.ed.len)}`)})</span></div>
+                  <div className="text-slate-500">{t(`ด้านที่ ${k + 1}`, `Side ${k + 1}`)} · {pieceNo(g.side.pid)} · {t(`ขอบ ${g.side.from + 1}`, `edge ${g.side.from + 1}`)} <span className="text-slate-400">({t(`ขอบยาว ${fmtL(g.ed.len)}`, `edge ${fmtL(g.ed.len)}`)})</span></div>
                   {canSew ? (
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span>{t("เริ่มที่", "Start")}</span><NumField value={start} min={0} max={500} step={0.5} label={t(`ด้านที่ ${k + 1} เริ่มที่ ซม.`, `Side ${k + 1} start cm`)} onCommit={(v) => setSeamRange(x.id, which, v, v + len)} className="w-16" />
-                      <span>{t("ยาว", "Length")}</span><NumField value={len} min={SEAM_MIN_LEN} max={500} step={0.5} label={t(`ด้านที่ ${k + 1} ยาว ซม.`, `Side ${k + 1} length cm`)} onCommit={(v) => setSeamRange(x.id, which, start, start + v)} className="w-16" />
+                      <span>{t("เริ่มที่", "Start")}</span><NumField len value={start} min={0} max={500} step={0.5} label={t(`ด้านที่ ${k + 1} เริ่มที่ ${uL}`, `Side ${k + 1} start ${uL}`)} onCommit={(v) => setSeamRange(x.id, which, v, v + len)} className="w-16" />
+                      <span>{t("ยาว", "Length")}</span><NumField len value={len} min={SEAM_MIN_LEN} max={500} step={0.5} label={t(`ด้านที่ ${k + 1} ยาว ${uL}`, `Side ${k + 1} length ${uL}`)} onCommit={(v) => setSeamRange(x.id, which, start, start + v)} className="w-16" />
                       {isPartialSide(g.side) && <button type="button" onClick={() => setSeamRange(x.id, which, 0, g.ed.len)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("เต็มขอบ", "Whole edge")}</button>}
                     </div>
-                  ) : <div className="tabular-nums">{r1(g.t0)}–{r1(g.t1)} {t("ซม.", "cm")}</div>}
+                  ) : <div className="tabular-nums">{fmtN(g.t0)}–{fmtL(g.t1)}</div>}
                 </div>
               );
             })}
@@ -1544,11 +1673,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           const put = (na: number, nb: number) => setEdgeMeta((m) => withFinishRange(m, kind, [na, nb], L));
           return (
             <div className="space-y-1.5 pl-5" data-finish-range={kind}>
-              <div className={row}><span className="text-slate-500">{t(`ยาวของ${what}บนขอบ (ซม.)`, `Length of the ${what} on this edge (cm)`)}</span>
-                {ed ? <NumField value={Math.round(span * 100) / 100} min={SEAM_MIN_LEN} max={Math.round(L * 100) / 100} label={t(`ยาวของ${what}บนขอบ ซม.`, `Length of the ${what} cm`)} onCommit={(v) => { const s = Math.min(L, Math.max(SEAM_MIN_LEN, v)), na = Math.max(0, Math.min(a, L - s)); put(na, na + s); }} className="w-16" /> : <b className="tabular-nums">{r1(span)}</b>}</div>
+              <div className={row}><span className="text-slate-500">{t(`ยาวของ${what}บนขอบ (${uL})`, `Length of the ${what} on this edge (${uL})`)}</span>
+                {ed ? <NumField len value={Math.round(span * 100) / 100} min={SEAM_MIN_LEN} max={Math.round(L * 100) / 100} label={t(`ยาวของ${what}บนขอบ ${uL}`, `Length of the ${what} ${uL}`)} onCommit={(v) => { const s = Math.min(L, Math.max(SEAM_MIN_LEN, v)), na = Math.max(0, Math.min(a, L - s)); put(na, na + s); }} className="w-16" /> : <b className="tabular-nums">{fmtN(span)}</b>}</div>
               {part ? (<>
-                <div className={row}><span className="text-slate-500">{t("ห่างจากต้นขอบ (ซม.)", "From the start of the edge (cm)")}</span>
-                  {ed ? <NumField value={Math.round(a * 100) / 100} min={0} max={Math.round((L - span) * 100) / 100} label={t(`${what}ห่างจากต้นขอบ ซม.`, `${what} offset cm`)} onCommit={(v) => { const na = Math.max(0, Math.min(L - span, v)); put(na, na + span); }} className="w-16" /> : <b className="tabular-nums">{r1(a)}</b>}</div>
+                <div className={row}><span className="text-slate-500">{t(`ห่างจากต้นขอบ (${uL})`, `From the start of the edge (${uL})`)}</span>
+                  {ed ? <NumField len value={Math.round(a * 100) / 100} min={0} max={Math.round((L - span) * 100) / 100} label={t(`${what}ห่างจากต้นขอบ ${uL}`, `${what} offset ${uL}`)} onCommit={(v) => { const na = Math.max(0, Math.min(L - span, v)); put(na, na + span); }} className="w-16" /> : <b className="tabular-nums">{fmtN(a)}</b>}</div>
                 {ed && <div className="flex gap-1.5">
                   <button type="button" onClick={() => put((L - span) / 2, (L + span) / 2)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("กึ่งกลางขอบ", "Centre")}</button>
                   <button type="button" onClick={() => put(L - b, L - a)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("สลับไปอีกปลาย", "Other end")}</button>
@@ -1561,17 +1690,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         return (
           <section className="space-y-2 rounded-md border border-slate-300 bg-white p-2.5" aria-label={t("ค่าของขอบ", "Edge values")}>
             <div className="font-semibold text-slate-700">{t(`ขอบ ${selEdge.i + 1}`, `Edge ${selEdge.i + 1}`)} <span className="font-normal text-slate-500">· {pieceNo(edgePiece.pid)}</span></div>
-            <div className={row}><span className="text-slate-500">{t("ความยาวขอบ (ซม.)", "Edge length (cm)")}</span>
-              {ed && canLen ? <NumField value={Math.round(selEdge.len * 100) / 100} min={0.2} max={500} label={t("ความยาวขอบ ซม.", "Edge length cm")} onCommit={(v) => { const next = setEdgeLength(edgePiece.shape, selEdge.i, v); if (next) patchPiece(edgePiece.id, (p) => ({ ...p, shape: next })); }} className="w-20" /> : <b className="tabular-nums">{r1(selEdge.len)}</b>}</div>
+            <div className={row}><span className="text-slate-500">{t(`ความยาวขอบ (${uL})`, `Edge length (${uL})`)}</span>
+              {ed && canLen ? <NumField len value={Math.round(selEdge.len * 100) / 100} min={0.2} max={500} label={t(`ความยาวขอบ ${uL}`, `Edge length ${uL}`)} onCommit={(v) => { const next = setEdgeLength(edgePiece.shape, selEdge.i, v); if (next) patchPiece(edgePiece.id, (p) => ({ ...p, shape: next })); }} className="w-20" /> : <b className="tabular-nums">{fmtN(selEdge.len)}</b>}</div>
             {ed && !canLen && <div className="text-[11px] text-slate-400">{t("ขอบโค้ง แก้ความยาวด้วยการลากจุด (เครื่องมือย้าย → แก้จุด)", "Curved edge — change its length by dragging points (Move → Edit points)")}</div>}
-            <div className={row}><span className="text-slate-500">{t("เผื่อของขอบนี้ (ซม.)", "Allowance of this edge (cm)")}</span>
-              {ed ? <NumField value={edgeAllow} min={0} max={20} label={t("เผื่อของขอบ ซม.", "Edge allowance cm")} onCommit={(v) => patchPiece(edgePiece.id, (p) => { const cur = edgeAllowances(p.shape, p.allowEdges, p.allow) ?? edgeList.map(() => p.allow); return { ...p, allowEdges: cur.map((a, k) => (k === selEdge.i ? cleanAllow(v) : a)) }; })} className="w-16" /> : <b className="tabular-nums">{edgeAllow}</b>}</div>
+            <div className={row}><span className="text-slate-500">{t(`เผื่อของขอบนี้ (${uL})`, `Allowance of this edge (${uL})`)}</span>
+              {ed ? <NumField len value={edgeAllow} min={0} max={20} label={t(`เผื่อของขอบ ${uL}`, `Edge allowance ${uL}`)} onCommit={(v) => patchPiece(edgePiece.id, (p) => { const cur = edgeAllowances(p.shape, p.allowEdges, p.allow) ?? edgeList.map(() => p.allow); return { ...p, allowEdges: cur.map((a, k) => (k === selEdge.i ? cleanAllow(v) : a)) }; })} className="w-16" /> : <b className="tabular-nums">{edgeAllow}</b>}</div>
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeFold} disabled={!ed} onChange={() => patchPiece(edgePiece.id, (p) => { const next = (cleanFoldEdges(p.shape, p.foldEdges) ?? edgeList.map(() => 0)).map((v, k) => (k === selEdge.i ? (v ? 0 : 1) : v)); return { ...p, foldEdges: next.some(Boolean) ? next : null }; })} className="h-3.5 w-3.5 accent-violet-600" />{t("พับเข้าใน", "Folds inward")}</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={!!edgeMetaNow.bind} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { bind: _b, bindR: _r, ...rest } = m; void _b; void _r; return e.target.checked ? { ...rest, bind: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("กุ้นขอบ", "Bound edge")}</label>
             {edgeMetaNow.bind && finishRows("bind")}
             <label className="flex items-center gap-2"><input type="checkbox" data-edge-zip checked={!!edgeMetaNow.zip} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { zip: _z, zipR: _r, ...rest } = m; void _z; void _r; return e.target.checked ? { ...rest, zip: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ติดซิปตามขอบนี้", "Zip along this edge")}</label>
             {edgeMetaNow.zip && finishRows("zip")}
             {(edgeMetaNow.zip || edgeMetaNow.bind) && <div className="pl-5 text-[11px] text-slate-400">{t("เลือกซิป / เทปกุ๊น ได้ที่ปุ่ม ซิป / อะไหล่ — ความยาวคิดจากขอบนี้ให้เอง", "Choose the zip / binding tape under Zips / hardware — the length comes from this edge")}</div>}
+            <label className="flex items-center gap-2" title={t("ขอบที่ตั้งใจไม่เย็บ เช่น ปากกระเป๋า ช่องล้วง — แผงตรวจแบบจะไม่เตือนว่าลืมเย็บ", "An edge left unsewn on purpose, e.g. the bag mouth — the review panel won't flag it as forgotten")}><input type="checkbox" data-edge-open checked={!!edgeMetaNow.open} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { open: _o, ...rest } = m; void _o; return e.target.checked ? { ...rest, open: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ขอบเปิดตั้งใจ (ปากกระเป๋า / ช่องล้วง)", "Intended opening (bag mouth / access)")}</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeMetaNow.top != null} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { top: _t, ...rest } = m; void _t; return e.target.checked ? { ...rest, top: 3 } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("เดินด้ายทับ", "Topstitch")}</label>
             {edgeMetaNow.top != null && <div className={`${row} pl-5`}><span className="text-slate-500">{t("ห่างจากขอบ (มม.)", "Distance from edge (mm)")}</span><NumField value={edgeMetaNow.top} min={0.5} max={30} step={0.5} label={t("ห่างจากขอบ มม.", "Distance from edge mm")} onCommit={(v) => setEdgeMeta((m) => ({ ...m, top: v }))} className="w-16" /></div>}
             {ed && (
@@ -1579,7 +1709,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <div className="text-slate-500">{t("รอยบากบนขอบนี้", "Notches on this edge")}</div>
                 <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("แบ่งเท่ากันเป็น (ช่วง)", "Split evenly into")}</span><NumField value={divN} min={2} max={12} step={1} label={t("จำนวนช่วง", "Number of parts")} onCommit={(v) => setDivN(Math.round(v))} className="w-14" />
                   <button type="button" onClick={() => addNotches(Array.from({ length: Math.max(1, divN - 1) }, (_, k) => (selEdge.len * (k + 1)) / divN))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("วาง", "Place")}</button></div>
-                <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("ที่ระยะจากต้นขอบ (ซม.)", "At distance from start (cm)")}</span><NumField value={notchAt} min={0} max={500} label={t("ระยะ ซม.", "Distance cm")} onCommit={setNotchAt} className="w-14" />
+                <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t(`ที่ระยะจากต้นขอบ (${uL})`, `At distance from start (${uL})`)}</span><NumField len value={notchAt} min={0} max={500} label={t(`ระยะ ${uL}`, `Distance ${uL}`)} onCommit={setNotchAt} className="w-14" />
                   <button type="button" disabled={!(notchAt >= 0 && notchAt <= selEdge.len)} onClick={() => addNotches([notchAt])} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50 disabled:opacity-40">{t("วาง", "Place")}</button></div>
                 <div className="text-[11px] text-slate-400">{t("ระยะวัดจากปลายด้านหนึ่งของขอบ ถ้ารอยบากไปอยู่ผิดปลาย ให้ใส่ระยะที่วัดจากอีกปลายแทน · ลบรอยบากได้ในแผงของชิ้น (โหมดรอยบาก)", "Distance is measured from one end of the edge; if the notch lands at the wrong end, enter the distance from the other end · remove notches in the piece panel (notch mode)")}</div>
               </div>
@@ -1598,7 +1728,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               <div className="flex items-start gap-1.5"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SEAM_COLORS[si % SEAM_COLORS.length] }} />
                 <span className="min-w-0 flex-1"><b>{seamLabel(si)}</b>{x.name ? ` ${x.name}` : ""} <span className="text-slate-500">· {sideTxt(x.a)} {t("กับ", "to")} {sideTxt(x.b)}</span></span></div>
               <div className={`mt-0.5 tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" && !x.ease ? "text-red-600" : "text-amber-700"}`}>
-                {c.status === "broken" ? t("ต้องเย็บใหม่", "Needs redoing") : `${r1(c.la ?? 0)} ${t("กับ", "and")} ${r1(c.lb ?? 0)} ${t("ซม.", "cm")} · ${c.status === "ok" ? t("เท่ากัน", "same") : x.ease ? t(`ตั้งใจให้ย่น ${r1(c.diff)}`, `eased ${r1(c.diff)}`) : t(`ต่าง ${r1(c.diff)}`, `differ ${r1(c.diff)}`)}`}
+                {c.status === "broken" ? t("ต้องเย็บใหม่", "Needs redoing") : `${fmtN(c.la ?? 0)} ${t("กับ", "and")} ${fmtL(c.lb ?? 0)} · ${c.status === "ok" ? t("เท่ากัน", "same") : x.ease ? t(`ตั้งใจให้ย่น ${fmtL(c.diff)}`, `eased ${fmtL(c.diff)}`) : t(`ต่าง ${r1(c.diff)}`, `differ ${r1(c.diff)}`)}`}
                 {kind ? <span className="text-slate-500"> · {t(kind.th, kind.en)}</span> : null}{x.top ? <span className="text-slate-500"> · {t("เดินด้ายทับ", "topstitch")}</span> : null}{x.rev ? <span className="text-slate-500"> · {t("กลับทิศ", "reversed")}</span> : null}{x.group ? <span className="text-slate-500"> · {t("ชุด 1 ต่อหลายชิ้น", "1-to-many set")}</span> : null}
               </div>
             </div>
@@ -1719,7 +1849,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <div className="px-2 py-1 text-[11px] text-slate-400">{t("ดูดเข้าทุก", "Snap every")}</div>
                 {SNAP_STEPS.map((s) => (
                   <button key={s} type="button" onClick={() => { setSnap(s); setMenu(null); }} className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left ${snap === s ? "bg-blue-50 font-medium text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
-                    {s === 0 ? t("ไม่ดูด", "Off") : `${s} ${t("ซม.", "cm")}`}
+                    {s === 0 ? t("ไม่ดูด", "Off") : fmtL(s)}
                   </button>
                 ))}
               </div>
@@ -1753,7 +1883,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         )}
         {cal && (
           <div className={`${fbar} flex-wrap gap-2 bg-amber-50/95 px-3 py-1.5 text-xs text-amber-800`}>
-            <span>{!cal.a ? t("ตั้งขนาดจริง: คลิกจุดที่ 1 บนรูป (เช่น มุมซ้ายของตัวกระเป๋า)", "Set real size: click point 1 on the image (e.g. the bag's left corner)") : !cal.b ? t("คลิกจุดที่ 2 (เช่น มุมขวาของตัวกระเป๋า)", "Click point 2 (e.g. the bag's right corner)") : t(`ตอนนี้ห่าง ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} ซม. — ของจริงยาว`, `Now ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} cm apart — real length`)}</span>
+            <span>{!cal.a ? t("ตั้งขนาดจริง: คลิกจุดที่ 1 บนรูป (เช่น มุมซ้ายของตัวกระเป๋า)", "Set real size: click point 1 on the image (e.g. the bag's left corner)") : !cal.b ? t("คลิกจุดที่ 2 (เช่น มุมขวาของตัวกระเป๋า)", "Click point 2 (e.g. the bag's right corner)") : t(`ตอนนี้ห่าง ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} ${t("ซม.", "cm")} — ของจริงยาว`, `Now ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} ${t("ซม.", "cm")} apart — real length`)}</span>
             {cal.a && cal.b && <>
               <input type="number" step="0.1" min={0.1} value={cal.cm} onChange={(e) => setCal({ ...cal, cm: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") applyCal(); }} autoFocus aria-label={t("ระยะจริง ซม.", "Real length cm")} className="h-7 w-20 rounded border border-amber-300 bg-white px-1.5 text-right" />
               <span>{t("ซม.", "cm")}</span>
@@ -1793,7 +1923,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.lock} onChange={(e) => patchRef(activeRefObj.id, { lock: e.target.checked })} className="h-3.5 w-3.5" />{t("ล็อก", "Lock")}</label>
                 <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.show} onChange={(e) => patchRef(activeRefObj.id, { show: e.target.checked })} className="h-3.5 w-3.5" />{t("แสดง", "Show")}</label>
-                <span className="text-slate-400">{t("กว้าง", "W")} {r1(activeRefObj.w)} {t("ซม.", "cm")}</span>
+                <span className="text-slate-400">{t("กว้าง", "W")} {fmtL(activeRefObj.w)}</span>
               </div>
               {!readonly && <div className="flex flex-wrap gap-1">
                 <button type="button" onClick={() => { setMenu(null); setActiveRef(activeRefObj.id); patchRef(activeRefObj.id, { lock: true, show: true }); setCal({ cm: "30" }); }} className={btnCls(!!cal)}><Icon value="i:ruler-measure" className="text-[14px]" />{t("ตั้งขนาดจริง", "Set real size")}</button>
@@ -1862,9 +1992,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   const on = p.id === sel || multi.has(p.id), single = p.id === sel && multi.size < 2, b = g.finished, cb = g.cutBox;
                   const cutD = p.allow > 0 || g.segAllow ? polyD(g.cut) + g.holesCut.map((h) => polyD(h)).join("") : shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("");
                   return (
-                    <g key={p.id} style={hidePids?.has(p.pid) ? { opacity: 0.12, pointerEvents: "none" } : undefined}>
+                    <g key={p.id} data-locked={lockPids?.has(p.pid) ? "1" : undefined} style={hidePids?.has(p.pid) ? { opacity: 0.12, pointerEvents: "none" } : lockPids?.has(p.pid) ? { pointerEvents: "none" } : undefined}>
                       <path d={cutD} fillRule="evenodd" data-piece={p.id} fill={COLORS.fill} fillOpacity={on ? Math.min(1, pieceFade + 0.15) : pieceFade} stroke={on ? COLORS.sel : COLORS.stroke} strokeWidth={on ? 2.5 : 1.5} vectorEffect="non-scaling-stroke" style={{ cursor: editId === p.id ? "copy" : "move" }} />
                       {(p.allow > 0 || !!g.segAllow) && <path d={shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("")} fill="none" stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+                      {lockPids?.has(p.pid) && <text x={g.finished.x + fs * 0.4} y={g.finished.y + fs * 1.1} fontSize={fs * 0.85} fill="#475569" style={{ pointerEvents: "none" }}>{t("ล็อก", "Locked")}</text>}
                       {foldSegments(p.shape, cleanFoldEdges(p.shape, p.foldEdges)).map((L, fi) => (   // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน)
                         <path key={`f${fi}`} d={"M" + L.map((q) => `${q[0]} ${q[1]}`).join("L")} fill="none" stroke="#7c3aed" strokeWidth={2} strokeDasharray="10 3 2 3" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                       ))}
@@ -1884,8 +2015,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                       <text x={b.x + b.w / 2} y={b.y + b.h / 2} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fill={COLORS.text} style={{ pointerEvents: "none" }}>P{i + 1}{p.name ? ` ${p.name}` : ""}{p.count > 1 ? ` ×${p.count}` : ""}</text>
                       {single && editId !== p.id && <>
                         <rect x={cb.x} y={cb.y} width={cb.w} height={cb.h} fill="none" stroke={COLORS.sel} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
-                        <text x={cb.x + cb.w / 2} y={cb.y + cb.h + fs * 1.1} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{p.allow > 0 || g.segAllow ? t("ตัด ", "cut ") : ""}{r1(cb.w)} {t("ซม.", "cm")}</text>
-                        <text x={cb.x + cb.w + fs * 0.6} y={cb.y + cb.h / 2} fontSize={fs * 0.9} dominantBaseline="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{r1(cb.h)} {t("ซม.", "cm")}</text>
+                        <text x={cb.x + cb.w / 2} y={cb.y + cb.h + fs * 1.1} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{p.allow > 0 || g.segAllow ? t("ตัด ", "cut ") : ""}{fmtL(cb.w)}</text>
+                        <text x={cb.x + cb.w + fs * 0.6} y={cb.y + cb.h / 2} fontSize={fs * 0.9} dominantBaseline="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{fmtL(cb.h)}</text>
                         {!readonly && tool !== "measure" && !pen && (() => {
                           const hs = fs * 0.22, cx = cb.x + cb.w / 2, ry = cb.y - fs * 1.8;
                           return <g>
@@ -1905,6 +2036,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 })}
                 {finishLayer}
                 {seamLayer}
+                {flagLayer}
                 {edgeHits}
                 {seamGrips}
                 {innerLayer}
@@ -1927,14 +2059,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   return <g style={{ pointerEvents: "none" }}>
                     {box.k === "rect" ? <rect x={x} y={y} width={w} height={h} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
                       : <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
-                    <text x={x + w / 2} y={y - fs * 0.5} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel}>{r1(w)} × {r1(h)} {t("ซม.", "cm")}</text>
+                    <text x={x + w / 2} y={y - fs * 0.5} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel}>{fmtN(w)} × {fmtN(h)} {uL}</text>
                   </g>;
                 })()}
                 {pen && <g style={{ pointerEvents: "none" }}>
                   <path d={penPath()} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
                   {pen.hover && lastNode && <>
                     <line x1={lastNode.x} y1={lastNode.y} x2={pen.hover.x} y2={pen.hover.y} stroke={COLORS.sel} strokeDasharray="3 3" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                    <text x={(lastNode.x + pen.hover.x) / 2} y={(lastNode.y + pen.hover.y) / 2 - fs * 0.4} fontSize={fs * 0.85} textAnchor="middle" fill={COLORS.sel}>{r1(Math.hypot(pen.hover.x - lastNode.x, pen.hover.y - lastNode.y))} {t("ซม.", "cm")}</text>
+                    <text x={(lastNode.x + pen.hover.x) / 2} y={(lastNode.y + pen.hover.y) / 2 - fs * 0.4} fontSize={fs * 0.85} textAnchor="middle" fill={COLORS.sel}>{fmtL(Math.hypot(pen.hover.x - lastNode.x, pen.hover.y - lastNode.y))}</text>
                   </>}
                   {lastNode && (lastNode.ox || lastNode.oy) ? <>
                     <line x1={lastNode.x + (lastNode.ix ?? 0)} y1={lastNode.y + (lastNode.iy ?? 0)} x2={lastNode.x + (lastNode.ox ?? 0)} y2={lastNode.y + (lastNode.oy ?? 0)} stroke="#94a3b8" strokeWidth={1} vectorEffect="non-scaling-stroke" />
@@ -2152,10 +2284,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               })()}
 
               <div>
-                <div className="mb-1 font-medium text-slate-600">{t("เผื่อพับ / เผื่อเย็บ (ซม.)", "Fold / seam allowance (cm)")}</div>
+                <div className="mb-1 font-medium text-slate-600">{t(`เผื่อพับ / เผื่อเย็บ (${uL})`, `Fold / seam allowance (${uL})`)}</div>
                 <div className="flex flex-wrap items-center gap-1">
                   {ALLOW_STEPS.map((a) => <button key={a} type="button" onClick={() => setAllow(a)} className={`h-7 rounded-md border px-2 ${selPiece.allow === a ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{a}</button>)}
-                  <NumField value={selPiece.allow} min={0} max={20} label={t("เผื่อพับ ซม.", "Allowance cm")} onCommit={setAllow} className="w-16" />
+                  <NumField len value={selPiece.allow} min={0} max={20} label={t(`เผื่อพับ ${uL}`, `Allowance ${uL}`)} onCommit={setAllow} className="w-16" />
                 </div>
                 <div className="mt-1 text-slate-400">{t("เส้นประ = แนวเย็บ · เส้นทึบ = แนวตัด (รวมเผื่อ) · รูเจาะหดเข้าตามเผื่อ", "Dashed = sewing line · solid = cutting line · holes shrink by the allowance")}</div>
                 {(() => {   // เผื่อรายขอบ: ขอบปากพับ 3 ซม. ขอบอื่น 1 ซม. ฯลฯ — แก้ขอบไหน ขอบนั้นสว่างบนกระดาน · กดค่าเดียวด้านบน = ล้างรายขอบ
@@ -2179,9 +2311,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                         <div className="mt-1 space-y-1" onPointerLeave={() => setEdgeHover(null)}>
                           {E.map((ed) => (
                             <div key={ed.i} className="flex items-center gap-1.5" onPointerEnter={() => setEdgeHover({ id: selPiece.id, i: ed.i })}>
-                              <span className="w-28 shrink-0 tabular-nums text-slate-600">{t(`ขอบ ${ed.i + 1}`, `Edge ${ed.i + 1}`)} · {r1(ed.len)} {t("ซม.", "cm")}</span>
+                              <span className="w-28 shrink-0 tabular-nums text-slate-600">{t(`ขอบ ${ed.i + 1}`, `Edge ${ed.i + 1}`)} · {fmtL(ed.len)}</span>
                               {readonly ? <span className="tabular-nums">{per ? per[ed.i] : selPiece.allow}</span>
-                                : <NumField value={per ? per[ed.i] : selPiece.allow} min={0} max={20} label={t(`เผื่อของขอบ ${ed.i + 1} ซม.`, `Allowance of edge ${ed.i + 1} cm`)} onCommit={(v) => setEdge(ed.i, v)} className="w-16" />}
+                                : <NumField len value={per ? per[ed.i] : selPiece.allow} min={0} max={20} label={t(`เผื่อของขอบ ${ed.i + 1} ${uL}`, `Allowance of edge ${ed.i + 1} ${uL}`)} onCommit={(v) => setEdge(ed.i, v)} className="w-16" />}
                               <label className="inline-flex items-center gap-1 text-slate-500"><input type="checkbox" disabled={readonly} checked={!!fold?.[ed.i]} onChange={() => toggleFold(ed.i)} className="h-3.5 w-3.5 accent-violet-600" />{t("พับ", "Fold")}</label>
                             </div>
                           ))}
@@ -2198,10 +2330,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <div className="mb-1 font-medium text-slate-600">{t("ขนาดสำเร็จ (เส้นประ)", "Finished size (dashed)")}</div>
                 {selPiece.link && <div className="mb-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800" data-link-note>{t(`ชิ้นนี้ผูกรูปกับ ${pieceNo(selPiece.link.to)} — ขนาด รูปทรง หมุน ย่อขยาย ต้องแก้ที่ชิ้นต้นแบบ (แก้ที่ชิ้นนี้ค่าจะกลับตามต้นแบบ) · ถ้าต้องการให้ต่างกัน กด เลิกผูก ที่หัวข้อ ชิ้นคู่ผูกกัน`, `This piece follows ${pieceNo(selPiece.link.to)} — change size, shape, rotation or scale on the master piece (changes here snap back) · to make it different, press Unlink under Linked pieces`)}</div>}
                 <div className="grid grid-cols-[auto_auto_auto_auto] items-center gap-x-2 gap-y-1.5 text-slate-500">
-                  <span>{t("กว้าง", "W")}</span><NumField value={selGeo.finished.w} min={0.1} label={t("กว้าง ซม.", "Width cm")} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ w: v }, `w-${selPiece.id}`)} className="w-16" />
-                  <span>{t("สูง", "H")}</span><NumField value={selGeo.finished.h} min={0.1} label={t("สูง ซม.", "Height cm")} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ h: v }, `h-${selPiece.id}`)} className="w-16" />
-                  <span>X</span><NumField value={selGeo.finished.x} label="X" onCommit={(v) => setSelBox({ x: v }, `x-${selPiece.id}`)} className="w-16" />
-                  <span>Y</span><NumField value={selGeo.finished.y} label="Y" onCommit={(v) => setSelBox({ y: v }, `y-${selPiece.id}`)} className="w-16" />
+                  <span>{t("กว้าง", "W")}</span><NumField len value={selGeo.finished.w} min={0.1} label={t(`กว้าง ${uL}`, `Width ${uL}`)} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ w: v }, `w-${selPiece.id}`)} className="w-16" />
+                  <span>{t("สูง", "H")}</span><NumField len value={selGeo.finished.h} min={0.1} label={t(`สูง ${uL}`, `Height ${uL}`)} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ h: v }, `h-${selPiece.id}`)} className="w-16" />
+                  <span>X</span><NumField len value={selGeo.finished.x} label="X" onCommit={(v) => setSelBox({ x: v }, `x-${selPiece.id}`)} className="w-16" />
+                  <span>Y</span><NumField len value={selGeo.finished.y} label="Y" onCommit={(v) => setSelBox({ y: v }, `y-${selPiece.id}`)} className="w-16" />
                 </div>
                 <label className="mt-1.5 flex items-center gap-1.5 text-slate-500"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} className="h-3.5 w-3.5" />{t("ล็อกสัดส่วน (ใช้กับจุดจับมุมด้วย)", "Lock ratio (corner handles too)")}</label>
                 {/* Transform: หมุน/ย่อขยายด้วยตัวเลข (บนกระดาน = ลากจุดจับรอบชิ้น · จุดกลมด้านบน = หมุน) */}
@@ -2221,8 +2353,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   <div className="mt-1 text-[11px] text-slate-400">{t("บนกระดาน: ลากจุดจับ 8 จุด = ย่อขยาย (Shift = คงสัดส่วน) · ลากจุดกลมด้านบน = หมุน (Shift = ทีละ 15°)", "On the board: drag the 8 handles to resize (Shift = keep ratio) · drag the top circle to rotate (Shift = 15° steps)")}</div>
                 </div>
                 <div className="mt-1.5 rounded-md bg-white px-2 py-1.5 text-slate-600">
-                  {t("ขนาดตัด", "Cut size")} <b className="tabular-nums">{r1(selGeo.cutBox.w)} × {r1(selGeo.cutBox.h)}</b> {t("ซม.", "cm")}
-                  <span className="text-slate-400"> · {t("พื้นที่ตัด", "cut area")} {Math.round(selGeo.cutArea).toLocaleString("th-TH")} {t("ตร.ซม.", "cm²")} · {t("รอบรูป", "perimeter")} {r1(selGeo.perimeter)} {t("ซม.", "cm")}</span>
+                  {t("ขนาดตัด", "Cut size")} <b className="tabular-nums">{fmtN(selGeo.cutBox.w)} × {fmtN(selGeo.cutBox.h)}</b> {uL}
+                  <span className="text-slate-400"> · {t("พื้นที่ตัด", "cut area")} {Math.round(selGeo.cutArea).toLocaleString("th-TH")} {t("ตร.ซม.", "cm²")} · {t("รอบรูป", "perimeter")} {fmtL(selGeo.perimeter)}</span>
                 </div>
               </div>
 
@@ -2336,14 +2468,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                           {l.kind === "hw" && <select value={hwKind(l.hw)} disabled={readonly} aria-label={t("ชนิดอะไหล่", "Hardware type")} onChange={(e) => setLine((q) => ({ ...q, hw: e.target.value as HwKind }))} className="h-7 min-w-0 rounded-md border border-slate-200 bg-white px-1 text-xs">
                             {HW_KINDS.map((k) => <option key={k.key} value={k.key}>{t(k.th, k.en)}</option>)}
                           </select>}
-                          <span className="shrink-0 tabular-nums text-slate-500" title={l.name}>{r1(lenOfPts(l.pts))} {t("ซม.", "cm")}{used ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}</span>
+                          <span className="shrink-0 tabular-nums text-slate-500" title={l.name}>{fmtL(lenOfPts(l.pts))}{used ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}</span>
                           {!readonly && <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, inner: (p.inner ?? []).filter((q) => q.id !== l.id) }))} title={used ? t("ลบเส้นนี้ (ตะเข็บที่เย็บกับเส้นนี้จะขึ้นว่าต้องเย็บใหม่)", "Delete this line (its seam will need redoing)") : t("ลบเส้นนี้", "Delete this line")} aria-label={t("ลบเส้นใน", "Delete inner line")} className="shrink-0 text-slate-400 hover:text-red-600"><Icon value="i:x" /></button>}
                         </div>
-                        {picked && (readonly ? <div className="tabular-nums text-slate-500">{t(`ห่างจากขอบบน ${r1(off.top)} · ขอบซ้าย ${r1(off.left)} ซม.`, `${r1(off.top)} cm from the top · ${r1(off.left)} cm from the left`)}</div> : (
+                        {picked && (readonly ? <div className="tabular-nums text-slate-500">{t(`ห่างจากขอบบน ${fmtL(off.top)} · ขอบซ้าย ${fmtL(off.left)}`, `${fmtL(off.top)} from the top · ${fmtL(off.left)} from the left`)}</div> : (
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                            <span>{t("ห่างจากขอบบน", "From top")}</span><NumField value={Math.round(off.top * 100) / 100} min={-500} max={500} step={0.5} label={t("เส้นในห่างจากขอบบนของชิ้น ซม.", "Inner line distance from the piece's top cm")} onCommit={(v) => setLine((q) => placeInner(q, pb, { top: v }))} className="w-16" />
-                            <span>{t("ขอบซ้าย", "From left")}</span><NumField value={Math.round(off.left * 100) / 100} min={-500} max={500} step={0.5} label={t("เส้นในห่างจากขอบซ้ายของชิ้น ซม.", "Inner line distance from the piece's left cm")} onCommit={(v) => setLine((q) => placeInner(q, pb, { left: v }))} className="w-16" />
-                            {l.pts.length === 2 && <><span>{t("ยาว", "Length")}</span><NumField value={Math.round(lenOfPts(l.pts) * 100) / 100} min={0.2} max={500} step={0.5} label={t("ความยาวเส้นใน ซม.", "Inner line length cm")} onCommit={(v) => setLine((q) => setInnerLength(q, v))} className="w-16" /></>}
+                            <span>{t("ห่างจากขอบบน", "From top")}</span><NumField len value={Math.round(off.top * 100) / 100} min={-500} max={500} step={0.5} label={t(`เส้นในห่างจากขอบบนของชิ้น ${uL}`, `Inner line distance from the piece's top ${uL}`)} onCommit={(v) => setLine((q) => placeInner(q, pb, { top: v }))} className="w-16" />
+                            <span>{t("ขอบซ้าย", "From left")}</span><NumField len value={Math.round(off.left * 100) / 100} min={-500} max={500} step={0.5} label={t(`เส้นในห่างจากขอบซ้ายของชิ้น ${uL}`, `Inner line distance from the piece's left ${uL}`)} onCommit={(v) => setLine((q) => placeInner(q, pb, { left: v }))} className="w-16" />
+                            {l.pts.length === 2 && <><span>{t("ยาว", "Length")}</span><NumField len value={Math.round(lenOfPts(l.pts) * 100) / 100} min={0.2} max={500} step={0.5} label={t(`ความยาวเส้นใน ${uL}`, `Inner line length ${uL}`)} onCommit={(v) => setLine((q) => setInnerLength(q, v))} className="w-16" /></>}
                             <button type="button" onClick={() => setLine((q) => placeInner(q, pb, { center: true }))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50" title={t("จัดเส้นนี้ให้อยู่กึ่งกลางซ้ายขวาของชิ้น", "Centre this line left-right on the piece")}>{t("กึ่งกลางซ้ายขวา", "Centre")}</button>
                           </div>
                         ))}
@@ -2369,7 +2501,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   <div className="mt-2 space-y-1">
                     {selPiece.holes.map((h, hi) => { const hb = shapeBox(h); return (
                       <div key={hi} className="flex items-center gap-1.5 rounded-md bg-white px-2 py-1">
-                        <span className="text-slate-600">{t(`รู ${hi + 1}`, `Hole ${hi + 1}`)} · {r1(hb.w)}×{r1(hb.h)}</span>
+                        <span className="text-slate-600">{t(`รู ${hi + 1}`, `Hole ${hi + 1}`)} · {fmtN(hb.w)}×{fmtN(hb.h)} {uL}</span>
                         <button type="button" onClick={() => holeToPiece(selPiece, hi)} className="ml-auto text-blue-600 hover:underline">{t("แยกเป็นชิ้น", "Make piece")}</button>
                         <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, holes: p.holes.filter((_, i) => i !== hi) }))} className="text-rose-600 hover:underline">{t("ลบรู", "Remove")}</button>
                       </div>
@@ -2414,32 +2546,34 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   {rows.map(({ p, i, g }) => (
                     <tr key={p.id} onClick={() => setSel(p.id)} className={`cursor-pointer border-t border-slate-100 ${p.id === sel ? "bg-amber-50" : "hover:bg-slate-50"}`}>
                       <td className="truncate py-1.5"><b className="font-medium text-slate-700">P{i + 1}</b>{p.name ? ` ${p.name}` : ""}<span className={p.mats.length ? "text-slate-400" : "text-amber-600"}> · {p.mats.length ? p.mats.map((m) => m.name).join(", ") : t("ยังไม่เลือกวัสดุ", "no material")}</span></td>
-                      <td className="py-1.5 text-right tabular-nums">{r1(g.cutBox.w)}×{r1(g.cutBox.h)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{fmtN(g.cutBox.w)}×{fmtN(g.cutBox.h)}</td>
                       <td className="py-1.5 text-right tabular-nums">{Math.round(g.cutArea).toLocaleString("th-TH")}</td>
-                      <td className="py-1.5 text-right tabular-nums text-slate-500">{p.allow}{p.holes.length ? t(` · ${p.holes.length} รู`, ` · ${p.holes.length} holes`) : ""}</td>
+                      <td className="py-1.5 text-right tabular-nums text-slate-500">{fmtN(p.allow)}{p.holes.length ? t(` · ${p.holes.length} รู`, ` · ${p.holes.length} holes`) : ""}</td>
                       <td className="py-1.5 text-right tabular-nums">{p.count}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
-            <div className="mt-2 text-[11px] text-slate-400">{t("หน่วย: ซม. / ตร.ซม. · ขนาดตัด = รวมเผื่อพับ (ลงตารางตีราคาเป็นกว้าง×ยาว)", "Units: cm / cm² · cut size includes the allowance (goes to the costing table as width×length)")}</div>
+            <div className="mt-2 text-[11px] text-slate-400">{t(`หน่วย: ${uL} (พื้นที่ ตร.ซม.) · ขนาดตัด = รวมเผื่อพับ (ลงตารางตีราคาเป็นกว้าง×ยาว)`, `Units: ${uL} (area cm²) · cut size includes the allowance (goes to the costing table as width×length)`)}</div>
           </div>
         </div>
       </div>
   );
   if (embedded) return (
+    <LenUnitCtx.Provider value={{ unit, digits: lenDigits }}>
     <div ref={rootRef} className="space-y-3">
       {bodyEl}
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-2">{footerEl}</div>
     </div>
+    </LenUnitCtx.Provider>
   );
   return (
     <ERPModal open={open} onClose={() => onClose?.()} size="xl" hasUnsavedChanges={dirty}
       title={title ?? t("วาดชิ้นวัสดุ", "Draw material pieces")}
       description={t("ขนาดจริงหน่วย ซม. · กดชิ้นเพื่อใส่วัสดุ เผื่อพับ เจาะรู พับครึ่ง แก้จุด · Ctrl+Z ย้อนกลับ", "Real size in cm · click a piece for materials, allowance, holes, fold, points · Ctrl+Z to undo")}
       footer={footerEl}>
-      <div ref={rootRef}>{bodyEl}</div>
+      <LenUnitCtx.Provider value={{ unit, digits: lenDigits }}><div ref={rootRef}>{bodyEl}</div></LenUnitCtx.Provider>
     </ERPModal>
   );
 }

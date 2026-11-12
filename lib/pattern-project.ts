@@ -206,6 +206,22 @@ export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area
   });
 }
 
+/** รุ่นของรูปแบบข้อมูลแพทเทิร์น (template.schema) — 2 = Bag CAD รอบ A+B (2026-11-12): template.settings.seamTol · template.view {lock, hide} · template.rev (นับครั้งที่บันทึก) */
+export const PATTERN_SCHEMA = 2;
+/** อ่านรุ่นข้อมูลของแพทเทิร์นที่โหลดมา — ของเก่า (ไม่มี schema) = รุ่น 1 · v1 → v2 ไม่มีโครงสร้างเปลี่ยน (ค่าใหม่ทุกตัวมีค่าเริ่มต้น) จึงไม่แตะข้อมูลเดิม แค่ติดเลขรุ่นตอนบันทึกครั้งถัดไป
+ *  ถ้าวันหน้ามีการเปลี่ยนโครงสร้าง ให้แปลงที่นี่ที่เดียว (หน้าแก้ + หน้าพิมพ์ เรียกตัวนี้) */
+export function templateSchema(raw: Record<string, unknown> | null): number {
+  const v = Number(raw?.schema);
+  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 1;
+}
+/** ชิ้นที่ล็อก/ซ่อนไว้ (เก็บใน template.view) — กรองเฉพาะรหัสชิ้นที่ยังมีอยู่ */
+export type PieceViewState = { lock: string[]; hide: string[] };
+export function cleanPieceView(raw: unknown, pids: Set<string>): PieceViewState {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const ids = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && pids.has(x)))].slice(0, MAX_PROJECT_PIECES) : []);
+  return { lock: ids(r.lock), hide: ids(r.hide) };
+}
+
 /** ขนาดสูงสุดของช่อง template (ตัวอักษร JSON) */
 export const TEMPLATE_MAX_CHARS = 30000;
 export type ProjectPatch = Partial<{ name: string; status: PatternProjectStatus; note: string; sku_code: string | null; pieces: ProjectPiece[]; seams: Seam[]; basis: "box" | "area"; template: Record<string, unknown> | null }>;

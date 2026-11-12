@@ -27,6 +27,8 @@ export default function PrintPatternProjectPage() {
   const [project, setProject] = useState<PatternProject | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState(false);   // ?draft=1 = พิมพ์แบบร่างจากด่านตรวจ (ยังมีข้อต้องแก้) → ลายน้ำทุกหน้า
+  useEffect(() => { try { setDraft(new URLSearchParams(window.location.search).get("draft") === "1"); } catch { /* อ่านไม่ได้ = ปกติ */ } }, []);
 
   useEffect(() => {
     let alive = true;
@@ -201,7 +203,7 @@ export default function PrintPatternProjectPage() {
 
   return (
     <PatternPrintView lines={lines} afterTable={tables} beforeTable={spec} overviewLabel="ใบสเปก + วางบนผ้า" fileName={docFileName("แพทเทิร์น", code || String(id))}
-      eyebrow={`สตูดิโอแพทเทิร์น${project?.sku_code ? ` · ${project.sku_code}` : ""}`} title={`${code} ${project?.name ?? ""}`} footCode={code || (project?.name ?? "")}
+      eyebrow={`สตูดิโอแพทเทิร์น${project?.sku_code ? ` · ${project.sku_code}` : ""}`} title={`${code} ${project?.name ?? ""}`} footCode={`${code || (project?.name ?? "")}${(project?.template as { rev?: number } | null)?.rev ? ` · rev ${(project?.template as { rev?: number }).rev}` : ""}${draft ? " · แบบร่าง" : ""}`} draft={draft}
       emptyText="แพทเทิร์นนี้ยังไม่มีชิ้น — วาดชิ้นหรือสร้างจากแม่แบบทรงในสตูดิโอ กดบันทึก แล้วเปิดหน้านี้ใหม่" />
   );
 }

@@ -2,7 +2,7 @@
  * /api/pattern-projects/[id] — แพทเทิร์น 1 ใบ
  *
  * GET    → { data: แพทเทิร์นเต็ม (ชิ้น + ตะเข็บ), me: { can_edit, can_delete, can_cost }, error }   (pattern_studio.view)
- * PATCH  { name?, status?, note?, sku_code?, basis?, template?, pieces?, seams? }  → บันทึก (pattern_studio.edit)
+ * PATCH  { name?, status?, note?, sku_code?, basis?, template?, pieces?, seams?, autosave? }  → บันทึก (pattern_studio.edit) · autosave = จากตัวจับเวลา (จดประวัติแก้รูปชิ้นไม่เกิน 1 ครั้ง/10 นาที)
  *        ส่งชิ้นมา = คิดช่องสรุป (จำนวนชิ้น · พื้นที่ · ภาพย่อ) ใหม่ · ประวัติจดช่องที่เปลี่ยน (ชิ้น/ตะเข็บจดเป็นจำนวน ไม่จดทั้งก้อน)
  * DELETE → ซ่อนจากรายการ (is_active = false · กู้คืนได้ในฐานข้อมูล)   (pattern_studio.delete)
  */
@@ -74,10 +74,18 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const after: Record<string, unknown> = { ...plain, ...("piece_count" in derived ? { piece_count: derived.piece_count, seam_count: derived.seam_count, area_cm2: derived.area_cm2 } : {}) };
   const changes = auditDiff(cur as Record<string, unknown>, after);
   const shapeEdited = !!patch.pieces && JSON.stringify(cur.pieces) !== JSON.stringify(patch.pieces);
-  if (changes.length || shapeEdited) {
+  // บันทึกอัตโนมัติ (Bag CAD รอบ A · ทุก ~4 วิหลังหยุดแก้): แก้รูปชิ้นอย่างเดียว จดประวัติไม่เกิน 1 ครั้งต่อ 10 นาที (กันประวัติท่วม) · เปลี่ยนชื่อ/สถานะ/จำนวนชิ้น = จดทุกครั้งเหมือนเดิม
+  const isAuto = body.autosave === true;
+  let skipAudit = false;
+  if (isAuto && !changes.length && shapeEdited) {
+    const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: recent } = await admin.from("audit_logs").select("id").eq("entity_type", PROJECT_TABLE).eq("entity_id", id).gte("created_at", since).limit(1);
+    skipAudit = !!recent?.length;
+  }
+  if ((changes.length || shapeEdited) && !skipAudit) {
     await writeAudit(admin, {
       action: "update", entityType: PROJECT_TABLE, entityId: id, actorId: actor.userId, actorName: actor.name,
-      metadata: { pattern_no: cur.pattern_no, name: patch.name ?? cur.name, changes, ...(shapeEdited ? { pieces_edited: true } : {}) },
+      metadata: { pattern_no: cur.pattern_no, name: patch.name ?? cur.name, changes, ...(shapeEdited ? { pieces_edited: true } : {}), ...(isAuto ? { autosave: true } : {}) },
     });
   }
   return NextResponse.json({ data: { id, updated_at: now, ...derived }, error: null });

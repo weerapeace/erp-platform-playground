@@ -51,6 +51,8 @@ export type EdgeMeta = {
   bind?: boolean; zip?: boolean; top?: number;
   /** ซิป / กุ๊น เฉพาะบางช่วงของขอบ (2026-11-11): [เริ่ม, จบ] ซม. วัดจากต้นขอบ — ไม่มี = ทั้งขอบ */
   zipR?: [number, number]; bindR?: [number, number];
+  /** ขอบเปิดตั้งใจ (ปากกระเป๋า / ช่องล้วง) — ไม่นับเป็น "ลืมเย็บ" ในแผงตรวจแบบ (lib/pattern-check · 2026-11-12) */
+  open?: boolean;
 };
 export type EdgeFinish = "zip" | "bind";
 const FIN_R = { zip: "zipR", bind: "bindR" } as const;
@@ -84,7 +86,7 @@ export function withFinishRange(m: EdgeMeta, kind: EdgeFinish, range: [number, n
   return r ? { ...rest, [FIN_R[kind]]: r } : rest;
 }
 /** ขอบนี้มีค่าที่ตั้งไว้ไหม (ใช้ตัดสินว่าต้องเก็บรายการค่ารายขอบของชิ้นหรือไม่) */
-export const edgeMetaSet = (m: EdgeMeta | null | undefined): boolean => !!m && (!!m.bind || !!m.zip || m.top != null);
+export const edgeMetaSet = (m: EdgeMeta | null | undefined): boolean => !!m && (!!m.bind || !!m.zip || m.top != null || !!m.open);
 export type SeamStatus = "ok" | "mismatch" | "broken";
 export type SeamCheck = { status: SeamStatus; la: number | null; lb: number | null; diff: number };
 
@@ -264,6 +266,7 @@ export function cleanEdgeMeta(shape: Shape, raw: unknown): EdgeMeta[] | null {
     if (r.bind === true) { m.bind = true; const rg = cleanFinishRange(r.bindR, E[i].len); if (rg) m.bindR = rg; }
     if (r.zip === true) { m.zip = true; const rg = cleanFinishRange(r.zipR, E[i].len); if (rg) m.zipR = rg; }
     if (top != null && top >= 0.5 && top <= 30) m.top = Math.round(top * 10) / 10;
+    if (r.open === true) m.open = true;
     return m;
   });
   return out.some(edgeMetaSet) ? out : null;

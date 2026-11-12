@@ -10,7 +10,10 @@
  *   สร้างจากแม่แบบทรง → ได้ชิ้น + ตะเข็บตั้งต้นครบ
  *   วัสดุของชิ้น = รายชื่อวัสดุตีราคา (/api/pattern-projects/materials) · ปุ่ม "ส่งไปตีราคา" = SendCostingModal (ต้องมีสิทธิ์ดูต้นทุน)
  *   ปุ่ม "ซิป / อะไหล่" = TrimsModal — รายการของที่ไม่ใช่ชิ้นตัด เก็บใน template.trims ไปตีราคาพร้อมชิ้น (lib/pattern-trims)
- *   บันทึกด้วยแถบบันทึกกลาง (SaveBar) → PATCH /api/pattern-projects/<id> · ไม่มีสิทธิ์แก้ = ดูอย่างเดียว
+ *   บันทึกอัตโนมัติ (Bag CAD รอบ A · 2026-11-12): หยุดแก้ 4 วินาที → PATCH /api/pattern-projects/<id> (SaveBar mode auto: กำลังบันทึก / บันทึกแล้ว / ไม่สำเร็จ + ลองใหม่ + ดาวน์โหลดสำรอง)
+ *     ระหว่างแก้เก็บสำเนาในเครื่อง (localStorage pattern-draft:<id>) → เปิดใหม่แล้วเจอสำเนาที่ยังไม่ได้บันทึก = แถบ "กู้คืน / ทิ้ง" · บันทึกสำเร็จ = ลบสำเนา
+ *     template.rev = นับครั้งที่บันทึก (หน้าพิมพ์โชว์ rev) · template.schema = รุ่นข้อมูล (lib/pattern-project PATTERN_SCHEMA) · template.settings.seamTol = ค่าคลาดตะเข็บ · template.view = ชิ้นที่ล็อก/ซ่อน
+ *   ปุ่มพิมพ์ = ด่านตรวจก่อนพิมพ์ (PreflightModal · lib/pattern-check) — มีข้อสีแดงพิมพ์ได้แค่แบบร่าง (ลายน้ำ) · ไม่มีสิทธิ์แก้ = ดูอย่างเดียว
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
@@ -23,9 +26,11 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { TemplateInsertInfo } from "@/components/pattern-studio";
-import { PATTERN_PROJECT_STATUSES, PATTERN_STATUS_LABEL, cleanMatProps, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type ProjectPiece } from "@/lib/pattern-project";
+import { PATTERN_PROJECT_STATUSES, PATTERN_SCHEMA, PATTERN_STATUS_LABEL, cleanMatProps, cleanPieceView, cleanProjectPieces, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type PieceViewState, type ProjectPiece } from "@/lib/pattern-project";
 import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
-import { checkSeam, type Seam } from "@/lib/pattern-seams";
+import { checkSeam, cleanSeams, type Seam } from "@/lib/pattern-seams";
+import { cleanSeamTol } from "@/lib/pattern-check";
+import type { SaveState } from "@/components/pattern-studio/preflight-modal";
 import { cleanAttaches, type Attach } from "@/lib/pattern-assembly";
 import { cleanTrims, openTrims, pruneTrims, type ProjectTrim } from "@/lib/pattern-trims";
 import { ParentSkuPicker, SkuPicker } from "@/components/pickers";
@@ -33,6 +38,9 @@ import { ParentSkuPicker, SkuPicker } from "@/components/pickers";
 const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });
 const SendCostingModal = dynamic(() => import("@/components/pattern-studio/send-costing-modal").then((m) => m.SendCostingModal), { ssr: false });
 const TrimsModal = dynamic(() => import("@/components/pattern-studio/trims-modal").then((m) => m.TrimsModal), { ssr: false });
+const PreflightModal = dynamic(() => import("@/components/pattern-studio/preflight-modal").then((m) => m.PreflightModal), { ssr: false });
+const AUTOSAVE_MS = 4000;
+type DraftRec = { at: number; newer: boolean; data: Record<string, unknown> };
 
 const SQFT = 929.03;
 
@@ -65,6 +73,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const [ask, setAsk] = useState<null | "leave" | "delete">(null);
   const [deleting, setDeleting] = useState(false);
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
+  const [serverAt, setServerAt] = useState<string | null>(null);   // updated_at ล่าสุดของฉบับในระบบ
+  const [draftFound, setDraftFound] = useState<DraftRec | null>(null);   // สำเนาในเครื่องที่ยังไม่ได้บันทึก (เปิดใหม่แล้วเจอ)
+  const [preOpen, setPreOpen] = useState(false);   // ด่านตรวจก่อนพิมพ์
+  const savingRef = useRef(false);
+  const draftKey = `pattern-draft:${id}`;
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -78,7 +91,17 @@ export function PatternProjectEditor({ id }: { id: string }) {
       setAttaches(cleanAttaches((p.template as { attach?: unknown } | null)?.attach, new Set((p.pieces ?? []).map((x) => x.pid))));
       setMatProps(cleanMatProps((p.template as { matProps?: unknown } | null)?.matProps));
       setTrims(cleanTrims((p.template as { trims?: unknown } | null)?.trims));
-      setDirty(false); setSaveErr(null); setBoardNonce((n) => n + 1);
+      setDirty(false); setSaveErr(null); setBoardNonce((n) => n + 1); setServerAt(p.updated_at ?? null);
+      // สำเนาในเครื่องจากครั้งก่อน (ปิดหน้า/ล่มก่อนบันทึก) — เหมือนฉบับในระบบ = ลบทิ้งเงียบ ๆ · ต่างกัน = ถามกู้คืน
+      try {
+        const raw = localStorage.getItem(`pattern-draft:${id}`);
+        const d = raw ? JSON.parse(raw) as { at?: number; data?: Record<string, unknown> } : null;
+        if (d?.data && typeof d.at === "number") {
+          const same = JSON.stringify(d.data.pieces ?? []) === JSON.stringify(p.pieces ?? []) && JSON.stringify(d.data.seams ?? []) === JSON.stringify(p.seams ?? []) && d.data.name === p.name;
+          if (same) localStorage.removeItem(`pattern-draft:${id}`);
+          else setDraftFound({ at: d.at, newer: Date.parse(p.updated_at) > d.at, data: d.data });
+        }
+      } catch { /* อ่านสำเนาไม่ได้ = ข้าม */ }
     } catch (e) { setErr((e as Error).message); }
     finally { setLoading(false); }
   }, [id]);
@@ -128,24 +151,78 @@ export function PatternProjectEditor({ id }: { id: string }) {
   // จุดติดหู / ปิดหลังช่อง + ความอยู่ทรงของชิ้น — ใช้ในภาพ 3D แบบ แยกชิ้น / ทิ้งตัว (อยู่ในช่องภาพ 3D ข้างกระดาน)
   const onAttaches = useCallback((next: Attach[]) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); }, []);
   const pieceStiff = useCallback((pid: string, fallback: number) => { const p = pieces.find((x) => x.pid === pid); return p ? pieceStiffness(p, matProps, fallback) : null; }, [pieces, matProps]);
-  const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes]);
+  const seamTol = useMemo(() => cleanSeamTol((template as { settings?: { seamTol?: unknown } } | null)?.settings?.seamTol), [template]);
+  const pieceView: PieceViewState = useMemo(() => cleanPieceView((template as { view?: unknown } | null)?.view, new Set(pieces.map((x) => x.pid))), [template, pieces]);
+  const rev = Number((template as { rev?: unknown } | null)?.rev) || null;
+  const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s, seamTol).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes, seamTol]);
+  const saveState: SaveState = saving ? "saving" : saveErr ? "failed" : dirty ? "pending" : "saved";
 
-  const save = async () => {
-    if (!name.trim()) { setSaveErr(t("ใส่ชื่อแพทเทิร์นก่อน", "Enter a pattern name first")); return; }
-    setSaving(true); setSaveErr(null);
+  // ข้อมูลล่าสุด (อ่านตอนบันทึก / เก็บสำเนา โดยไม่ต้องพึ่ง closure ของ render เก่า)
+  const latest = useRef({ name, sku, status, basis, template, seams, attaches, trims });
+  latest.current = { name, sku, status, basis, template, seams, attaches, trims };
+  /** ก้อนที่จะบันทึก: ตัดตะเข็บ/จุดติด/ซิปของชิ้นที่ลบไปแล้ว · กรองชิ้นที่ล็อก/ซ่อนให้เหลือชิ้นที่มีอยู่ */
+  const buildPayload = () => {
+    const L = latest.current, pieces0 = piecesRef.current, pids = new Set(pieces0.map((p) => p.pid));
+    const keep = L.seams.filter((s) => pids.has(s.a.pid) && pids.has(s.b.pid));   // ตะเข็บของชิ้นที่ลบไปแล้ว = ทิ้ง
+    const keepAtt = L.attaches.filter((a) => pids.has(a.pid) && pids.has(a.on));
+    const keepTrims = pruneTrims(L.trims, pieces0, keep);   // ซิปของช่องที่ลบ / ขอบที่เลิกติดซิป / กุ๊นที่ไม่เหลือขอบ = ทิ้ง
+    const view = cleanPieceView((L.template as { view?: unknown } | null)?.view, pids);
+    const tpl: Record<string, unknown> = { ...(L.template ?? {}), attach: keepAtt, trims: keepTrims, view };
+    return { keep, keepAtt, keepTrims, tpl, body: { name: L.name.trim(), sku_code: L.sku.trim(), status: L.status, basis: L.basis, template: tpl, pieces: pieces0, seams: keep } };
+  };
+  const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch { /* ไม่เป็นไร */ } };
+  /** บันทึก (auto = จากตัวจับเวลา) — ระหว่างส่งมีการแก้เพิ่ม = ยังถือว่ามีของค้าง รอบถัดไปบันทึกต่อ */
+  const save = async (auto = false) => {
+    if (savingRef.current) return;
+    const P = buildPayload();
+    if (!P.body.name) { if (!auto) setSaveErr(t("ใส่ชื่อแพทเทิร์นก่อน", "Enter a pattern name first")); return; }
+    const rev = (Number((P.tpl as { rev?: unknown }).rev) || 0) + 1;
+    const tplOut = { ...P.tpl, rev, schema: PATTERN_SCHEMA };
+    const sent = JSON.stringify(P.body);
+    savingRef.current = true; setSaving(true); setSaveErr(null);
     try {
-      const pids = new Set(piecesRef.current.map((p) => p.pid));
-      const keep = seams.filter((s) => pids.has(s.a.pid) && pids.has(s.b.pid));   // ตะเข็บของชิ้นที่ลบไปแล้ว = ทิ้ง
-      const keepAtt = attaches.filter((a) => pids.has(a.pid) && pids.has(a.on));
-      const keepTrims = pruneTrims(trims, piecesRef.current, keep);   // ซิปของช่องที่ลบ / ขอบที่เลิกติดซิป / กุ๊นที่ไม่เหลือขอบ = ทิ้ง
-      const tpl = template || keepAtt.length || keepTrims.length ? { ...(template ?? {}), attach: keepAtt, trims: keepTrims } : null;
       const res = await apiFetch(`/api/pattern-projects/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), sku_code: sku.trim(), status, basis, template: tpl, pieces: piecesRef.current, seams: keep }) });
-      const j = await res.json();
+        body: JSON.stringify({ ...P.body, template: tplOut, ...(auto ? { autosave: true } : {}) }) });
+      const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      setSeams(keep); setAttaches(keepAtt); setTrims(keepTrims); setTemplate(tpl); setDirty(false); setSavedAt(new Date());
-    } catch (e) { setSaveErr((e as Error).message); }
-    finally { setSaving(false); }
+      if (JSON.stringify(buildPayload().body) === sent) { setSeams(P.keep); setAttaches(P.keepAtt); setTrims(P.keepTrims); setTemplate(tplOut); setDirty(false); clearDraft(); }
+      else setTemplate((tp) => ({ ...(tp ?? {}), rev, schema: PATTERN_SCHEMA }));
+      setSavedAt(new Date()); if (j?.data?.updated_at) setServerAt(j.data.updated_at);
+    } catch (e) { setSaveErr((e as Error).message || t("บันทึกไม่สำเร็จ", "Save failed")); }
+    finally { savingRef.current = false; setSaving(false); }
+  };
+  const saveRef = useRef(save); saveRef.current = save;
+  // บันทึกอัตโนมัติ: หยุดแก้ AUTOSAVE_MS → บันทึก · บันทึกไม่สำเร็จ = ลองเองอีกครั้งใน 20 วินาที (หรือกดลองใหม่)
+  useEffect(() => {
+    if (!canEdit || !dirty || loading) return;
+    const tm = setTimeout(() => { void saveRef.current(true); }, saveErr ? 20000 : AUTOSAVE_MS);
+    return () => clearTimeout(tm);
+  }, [canEdit, dirty, loading, saveErr, name, sku, status, basis, template, pieces, seams, attaches, trims]);
+  // สำเนาในเครื่องระหว่างแก้ (กันปิดหน้า/ล่ม/เน็ตหลุด) — เต็มหรือเบราว์เซอร์ปิดไว้ = ข้าม
+  useEffect(() => {
+    if (!canEdit || !dirty || loading) return;
+    const tm = setTimeout(() => { try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), base: serverAt, data: buildPayload().body })); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } }, 800);
+    return () => clearTimeout(tm);
+  }, [canEdit, dirty, loading, name, sku, status, basis, template, pieces, seams, attaches, trims]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** กู้คืนสำเนาในเครื่อง → ทุกอย่างกลับเป็นตอนก่อนปิด แล้วบันทึกอัตโนมัติตามปกติ */
+  const recoverDraft = () => {
+    const d = draftFound?.data; if (!d) return;
+    const pcs = cleanProjectPieces(d.pieces), pids = new Set(pcs.map((x) => x.pid));
+    const tpl = d.template && typeof d.template === "object" && !Array.isArray(d.template) ? d.template as Record<string, unknown> : null;
+    if (typeof d.name === "string") setName(d.name);
+    setSku(typeof d.sku_code === "string" ? d.sku_code : "");
+    if (PATTERN_PROJECT_STATUSES.includes(d.status as PatternProjectStatus)) setStatus(d.status as PatternProjectStatus);
+    setBasis(d.basis === "area" ? "area" : "box");
+    setPieces(pcs); piecesRef.current = pcs; setSeams(cleanSeams(d.seams, pids)); setTemplate(tpl);
+    setAttaches(cleanAttaches(tpl?.attach, pids)); setMatProps(cleanMatProps(tpl?.matProps)); setTrims(cleanTrims(tpl?.trims));
+    setDirty(true); setBoardNonce((n) => n + 1); setDraftFound(null);
+  };
+  const discardDraft = () => { clearDraft(); setDraftFound(null); };
+  const downloadBackup = () => {
+    const blob = new Blob([JSON.stringify({ kind: "pattern-project-backup", id, pattern_no: patternNo, at: new Date().toISOString(), ...buildPayload().body }, null, 1)], { type: "application/json" });
+    const url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = `${patternNo || "pattern"}-backup.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const remove = async () => {
     setDeleting(true);
@@ -199,8 +276,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
             </select>
           ) : <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${st.tone}`}>{t(st.th, st.en)}</span>}
         </label>
-        <button type="button" disabled={dirty || !pieces.length} onClick={() => window.open(`/print/pattern-project/${id}`, "_blank", "noopener")}
-          title={dirty ? t("บันทึกก่อน แล้วค่อยพิมพ์ (หน้าพิมพ์ใช้ข้อมูลที่บันทึกแล้ว)", "Save first — the print page uses the saved pattern") : t("พิมพ์ขนาดจริง A4 / ดาวน์โหลดไฟล์เครื่องตัด DXF / SVG", "Print at real size on A4 / download DXF or SVG cut files")}
+        <button type="button" data-open-preflight disabled={!pieces.length} onClick={() => setPreOpen(true)}
+          title={t("ตรวจแบบก่อน แล้วพิมพ์ขนาดจริง A4 / ดาวน์โหลดไฟล์เครื่องตัด DXF / SVG", "Check first, then print at real size on A4 / download DXF or SVG cut files")}
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
           <Icon value="i:printer" className="text-sm" />{t("ใบสเปก / พิมพ์ / ไฟล์ตัด", "Spec sheet / print / cut files")}
         </button>
@@ -225,10 +302,20 @@ export function PatternProjectEditor({ id }: { id: string }) {
         )}
       </div>
 
+      {draftFound && canEdit && (
+        <div data-draft-banner className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <Icon value="i:history" className="text-sm" />
+          <span className="min-w-0 flex-1">{t(`พบงานที่ยังไม่ได้บันทึกจากครั้งก่อน (${new Date(draftFound.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })})${draftFound.newer ? " — ฉบับในระบบถูกบันทึกทีหลังสำเนานี้ ถ้ากู้คืน ฉบับในระบบจะถูกแทนด้วยสำเนา" : ""}`, `Found unsaved work from last time (${new Date(draftFound.at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })})${draftFound.newer ? " — the saved version is newer than this copy; recovering replaces it" : ""}`)}</span>
+          <button type="button" data-draft-recover onClick={recoverDraft} className="h-7 rounded-md border border-amber-300 bg-white px-2.5 text-amber-900 hover:bg-amber-100">{t("กู้คืน", "Recover")}</button>
+          <button type="button" data-draft-discard onClick={discardDraft} className="h-7 rounded-md px-2.5 text-amber-800 hover:bg-amber-100">{t("ทิ้ง", "Discard")}</button>
+        </div>
+      )}
       <PatternStudio key={`board-${boardNonce}`} imageName={`${patternNo ?? ""} ${name}`.trim() || undefined} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
-        sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff }} pieceInfoFields matProps={matProps}
+        sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff,
+          tol: seamTol, onTolChange: canEdit ? (v) => { setTemplate((tp) => ({ ...(tp ?? {}), settings: { ...((tp?.settings as Record<string, unknown> | undefined) ?? {}), seamTol: v } })); setDirty(true); } : undefined,
+          view: pieceView, onViewChange: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), view: next })); setDirty(true); } : undefined }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
-        footerNote={<span className="text-slate-400">{canEdit ? t("แก้แล้วกด บันทึก ที่แถบด้านล่าง", "Press Save in the bar below to keep your changes") : ""}</span>} />
+        footerNote={<span className="text-slate-400">{canEdit ? t("บันทึกอัตโนมัติหลังหยุดแก้ 4 วินาที · Ctrl+Z ย้อนได้ทั้งชิ้นและตะเข็บ", "Saves automatically 4 seconds after you stop · Ctrl+Z undoes pieces and seams") : ""}</span>} />
 
       {(() => { const c = (template as { costing?: CostingTarget } | null)?.costing; return c?.code ? (
         <p className="text-xs text-slate-500">{t(`ส่งตีราคาล่าสุด: ${c.code} ${c.name ?? ""}${c.parent_code ? ` · แท็บ ${c.parent_code}` : ""}`, `Last sent to costing: ${c.code} ${c.name ?? ""}${c.parent_code ? ` · tab ${c.parent_code}` : ""}`)} · <a className="text-blue-700 hover:underline" href={`/master/design-sheets?open=${c.sheet_id}`} target="_blank" rel="noopener">{t("เปิดใบงาน", "Open sheet")}</a></p>
@@ -237,7 +324,10 @@ export function PatternProjectEditor({ id }: { id: string }) {
         onChange={(next) => { setTrims(next); setTemplate((tp) => ({ ...(tp ?? {}), trims: next })); setDirty(true); }} />}
       {costOpen && <SendCostingModal open onClose={() => setCostOpen(false)} projectId={id} last={(template as { costing?: CostingTarget } | null)?.costing ?? null} onSent={(tpl) => setTemplate(tpl)} />}
 
-      {canEdit && <SaveBar dirty={dirty} saving={saving} error={saveErr} savedAt={savedAt} onSave={save} onDiscard={() => void load()} />}
+      {canEdit && <SaveBar mode="auto" dirty={dirty} saving={saving} error={saveErr} savedAt={savedAt} onSave={() => save(false)} note={rev ? `rev ${rev}` : undefined}
+        extra={saveErr ? <button type="button" data-backup onClick={downloadBackup} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">{t("ดาวน์โหลดสำรอง", "Download a backup")}</button> : undefined} />}
+      {preOpen && <PreflightModal open onClose={() => setPreOpen(false)} pieces={pieces} seams={seams} tol={seamTol} saveState={saveState} rev={rev} onSaveNow={() => void save(false)}
+        onPrint={(draft) => { setPreOpen(false); window.open(`/print/pattern-project/${id}${draft ? "?draft=1" : ""}`, "_blank", "noopener"); }} />}
 
       <ConfirmDialog open={ask === "leave"} onClose={() => setAsk(null)} onConfirm={() => router.push("/pattern-studio")}
         title={t("ยังไม่ได้บันทึก", "Unsaved changes")} message={t("คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?", "You have unsaved changes. Leave without saving?")}
