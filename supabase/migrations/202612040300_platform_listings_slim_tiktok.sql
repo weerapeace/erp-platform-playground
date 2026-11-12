@@ -4,7 +4,9 @@
 -- ทำไม: ดึงสินค้าจาก TikTok แล้ว (raw.tiktok = ข้อมูลย่อ: สถานะ/SKU/ราคา/สต๊อก/รูปแรก/หมวด · lib/tiktok-shop)
 --   หน้า "สินค้าบนแพลตฟอร์ม" (การ์ดสถานะ/สต๊อก/รูป + มุมมองหน้าร้าน) อ่านผ่านฟังก์ชันนี้ ซึ่งเดิมคืนแค่ line + lazada
 --   → TikTok ขึ้น "ไม่รู้สถานะ" ทุกตัว
--- แก้: เพิ่มคอลัมน์คืนค่า tiktok = raw->'tiktok' (แกะครั้งเดียวต่อแถวเหมือน line/lazada) · ส่วนอื่นเหมือนเดิมทุกตัวอักษร
+-- แก้: เพิ่มคอลัมน์คืนค่า tiktok = raw->'tiktok' (แกะครั้งเดียวต่อแถวเหมือน line/lazada) · ส่วนอื่นเหมือนฉบับล่าสุดทุกตัวอักษร
+--   ⚠️ ฐาน = 202611290100_platform_listings_slim_gift (line มี giftOption — กอง "ยังไม่เปิดของขวัญ" ใช้) ไม่ใช่ 202611280100
+--   ตรวจกับ pg_get_functiondef ของจริง 2026-11-12 ตรงกันแล้ว (ต่างแค่คอลัมน์ tiktok)
 --   เปลี่ยนชนิดผลลัพธ์ของฟังก์ชัน → ต้อง drop แล้ว create ใหม่ (create or replace เปลี่ยนคอลัมน์ผลลัพธ์ไม่ได้)
 -- อ่านอย่างเดียว · ไม่แตะข้อมูล · เรียกได้เฉพาะ service_role เหมือนเดิม
 -- ใช้ที่: lib/platform-shop-view-server.ts → loadListings() (โค้ดเก่าที่ยังไม่อ่านคอลัมน์ tiktok ใช้ได้ตามปกติ — แค่ไม่สนคอลัมน์เพิ่ม)
@@ -38,7 +40,7 @@ as $$
   select p.id, p.external_product_id, p.title, p.sku_code, p.matched_parent_sku_id, p.price, p.match_ignored, p.last_imported_at, p.status,
          case when y.ln is not null then jsonb_build_object(
            'id', y.ln->'id', 'isDisplay', y.ln->'isDisplay', 'variants', y.ln->'variants',
-           'imageUrls', y.ln->'imageUrls', 'category', y.ln->'category') end,
+           'imageUrls', y.ln->'imageUrls', 'category', y.ln->'category', 'giftOption', y.ln->'giftOption') end,
          y.lz,
          y.tt
     from (
