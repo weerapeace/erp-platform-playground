@@ -14,6 +14,10 @@ import { useT } from "@/components/i18n";
 import { RangeInput } from "@/components/range-input";
 import { Pattern3D } from "@/components/pattern-3d";
 import { BAG_STYLES, KIT_LIMITS, KIT_OPTS_DEFAULT, bagKit, bagStyle, kitParams, toteKit, type BagKit, type BagStyle, type KitKey, type KitOpts, type KitParams } from "@/lib/bag-kits";
+import { alignTo, templateUpdatePlan, type TplNow, type TplUpdatePlan } from "@/lib/pattern-bagparts";
+import type { Pt, Shape } from "@/lib/pattern-shape";
+/** ผลอัปเดตชุดเดิม (รอบ F2) — สตูดิโอเอาไปใส่กระดาน */
+export type TplUpdate = { kit: BagKit; patch: { pid: string; shape: Shape; holes: Shape[]; notches: Pt[]; grain: [Pt, Pt] | null; allow: number; allowEdges: number[] | null; foldEdges: number[] | null }[]; add: BagKit["pieces"]; plan: TplUpdatePlan; overwrite: boolean };
 import { flattenShape, shapeBox } from "@/lib/pattern-shape";
 import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow, type BagWinType } from "@/lib/bag-templates";
 
@@ -21,7 +25,10 @@ const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
 const COLORS: [string, string, string][] = [["#9a6a45", "น้ำตาลแทน", "Tan"], ["#4a3023", "น้ำตาลเข้ม", "Dark brown"], ["#26272b", "ดำ", "Black"], ["#d9cdb4", "ครีมแคนวาส", "Canvas cream"], ["#5d6b45", "เขียวมะกอก", "Olive"], ["#6f2531", "แดงเบอร์กันดี", "Burgundy"], ["#27364f", "กรมท่า", "Navy"]];
 
-export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, pocket: canPocket = true }: {
+export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, pocket: canPocket = true, current = null, now = [], onUpdate }: {
+  /** ชุดแม่แบบที่วางไว้แล้วในแพทเทิร์นนี้ (รอบ F2) — เปิดมาพร้อมค่าเดิม + ปุ่มอัปเดตชุดเดิม */ current?: { style: BagStyle; params?: Partial<BagParams>; kparams?: Partial<KitParams>; opts?: KitOpts } | null;
+  /** ชิ้นของชุดเดิมบนกระดานตอนนี้ (จับคู่ด้วยรหัสชิ้นของแม่แบบ) */ now?: TplNow[];
+  /** อัปเดตชุดเดิม: ชิ้นที่ต้องแก้ (ย้ายรูปให้ตรงตำแหน่งเดิมแล้ว) + ชิ้นใหม่ — ไม่ทับชิ้นที่แก้มือ เว้นแต่ติ๊กทับ */ onUpdate?: (u: TplUpdate) => void;
   /** หน้านี้วางช่องใส่ของในซับในได้ไหม (ต้องมีเส้นในชิ้น + เครื่องมือเย็บ) — ใบงานออกแบบ = ไม่ได้ จึงไม่โชว์ตัวเลือก */
   pocket?: boolean;
   open: boolean;
@@ -34,7 +41,7 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
   onInsert: (kit: BagKit) => void;
 }) {
   const t = useT();
-  const [params, setParams] = useState<BagParams>(() => ({ ...BAG_DEFAULT, ...initial }));
+  const [params, setParams] = useState<BagParams>(() => ({ ...BAG_DEFAULT, ...(current?.params ?? {}), ...initial }));
   const [explode, setExplode] = useState(0);
   const [pick, setPick] = useState<string | null>(null);
   const [body, setBody] = useState(COLORS[0][0]);
@@ -45,11 +52,24 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
   const set = (k: BagNumKey, v: number) => setParams((old) => ({ ...old, [k]: v }));
   const colors = useMemo(() => ({ body, handle }), [body, handle]);
   // ทรงที่เลือก + ค่าของทรง 2–6 (จำแยกรายทรงระหว่างสลับ) + ตัวเลือกซับใน/ช่องใส่ของ
-  const [style, setStyle] = useState<BagStyle>("tote");
-  const [kp, setKp] = useState<Partial<Record<BagStyle, Partial<KitParams>>>>({});
-  const [opts, setOpts] = useState<KitOpts>(KIT_OPTS_DEFAULT);
+  const [style, setStyle] = useState<BagStyle>(() => (current && !initial ? current.style : "tote"));
+  const [kp, setKp] = useState<Partial<Record<BagStyle, Partial<KitParams>>>>(() => (current?.kparams && current.style !== "tote" ? { [current.style]: current.kparams } : {}));
+  const [opts, setOpts] = useState<KitOpts>(() => ({ ...KIT_OPTS_DEFAULT, ...(current?.opts ?? {}) }));
+  const [overwrite, setOverwrite] = useState(false);
   const kit = useMemo(() => (style === "tote" ? toteKit(params, { ...opts, pocket: canPocket && opts.pocket }) : bagKit(style, kp[style] ?? {}, { ...opts, pocket: canPocket && opts.pocket })), [style, params, kp, opts, canPocket]);
   const kitTotal = kit.pieces.reduce((n, q) => n + q.count, 0);
+  // อัปเดตชุดเดิม (ทรงเดียวกันเท่านั้น): สร้างชุดเดิมซ้ำจากค่าที่จำไว้ → เทียบว่าชิ้นไหนยังไม่แก้มือ
+  const upd = useMemo(() => {
+    if (!current || !onUpdate || !now.length || current.style !== style) return null;
+    const old = current.style === "tote" ? toteKit(current.params ?? {}, current.opts ?? KIT_OPTS_DEFAULT) : bagKit(current.style, current.kparams ?? {}, current.opts ?? KIT_OPTS_DEFAULT);
+    return templateUpdatePlan(now, old.pieces, kit.pieces);
+  }, [current, onUpdate, now, style, kit]);
+  const doUpdate = () => {
+    if (!upd || !onUpdate) return;
+    const targets = [...upd.update, ...(overwrite ? upd.edited : [])], byPid = new Map(now.map((x) => [x.pid, x]));
+    const patch = targets.flatMap(({ pid, piece }) => { const cur = byPid.get(pid); if (!cur) return []; const a = alignTo(piece, cur.shape); return [{ pid, ...a, allow: piece.allow, allowEdges: piece.allowEdges, foldEdges: piece.foldEdges }]; });
+    onUpdate({ kit, patch, add: upd.add, plan: upd, overwrite });
+  };
 
   const area = pieces.reduce((s, q) => s + q.cut.w * q.cut.h * q.count, 0);
   const total = pieces.reduce((s, q) => s + q.count, 0);
@@ -61,7 +81,7 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
   );
   const seg = (on: boolean) => `h-8 flex-1 rounded-md px-2 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
   const winTypes: [BagWinType | "none", string, string][] = [["none", "ไม่มี", "None"], ["window", "หน้าต่างโชว์", "Display window"], ["zip", "ช่องซิป", "Zip opening"], ["slot", "ช่องสอด", "Slot"]];
-  const wins: [BagWindow, string, string][] = [["none", "ไม่มี", "None"], ["rect", "เหลี่ยมมน", "Rounded"], ["heart", "หัวใจ", "Heart"], ["circle", "วงกลม", "Circle"]];
+  const wins: [BagWindow, string, string][] = [["none", "ไม่มี", "None"], ["rect", "เหลี่ยมมน", "Rounded"], ["heart", "หัวใจ", "Heart"], ["circle", "วงกลม", "Circle"], ["cloud", "เมฆ", "Cloud"], ["cat", "แมว", "Cat"], ["bear", "หมี", "Bear"]];
   const swatches = (value: string, onPick: (c: string) => void, label: string) => (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="w-full text-xs text-slate-600">{label}</span>
@@ -78,9 +98,23 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
       description={t("ใส่ขนาดกระเป๋าตอนเสร็จ ระบบคิดชิ้นแพทเทิร์นให้ครบ แล้ววางลงกระดานเป็นชิ้นที่แก้ต่อได้", "Enter the finished bag size. The pieces are worked out for you and placed on the board, ready to edit.")}
       footer={<>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" data-kit-insert onClick={() => onInsert(kit)} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`วางชิ้นลงกระดาน (${kit.pieces.length} แบบ ${kitTotal} ชิ้น)`, `Place on the board (${kit.pieces.length} patterns, ${kitTotal} pcs)`)}</button>
+        {upd && onUpdate && <button type="button" data-kit-update onClick={doUpdate} disabled={!upd.update.length && !upd.add.length && !(overwrite && upd.edited.length)} className="h-9 rounded-lg bg-emerald-600 px-4 text-sm text-white hover:bg-emerald-700 disabled:opacity-40">{t("อัปเดตชุดเดิม", "Update the existing set")}</button>}
+        <button type="button" data-kit-insert onClick={() => onInsert(kit)} className={upd ? "h-9 rounded-lg border border-blue-200 bg-white px-4 text-sm text-blue-700 hover:bg-blue-50" : "h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700"}>{t(`วางชิ้นลงกระดาน (${kit.pieces.length} แบบ ${kitTotal} ชิ้น)`, `Place on the board (${kit.pieces.length} patterns, ${kitTotal} pcs)`)}</button>
       </>}>
       {notice && <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><Icon value="i:sparkles" className="mt-0.5 text-sm" /><span>{notice}</span></div>}
+      {upd && (   // รอบ F2: เปลี่ยนค่าแล้วอัปเดตชุดเดิม โดยไม่ทับชิ้นที่แก้มือ
+        <div className="mb-3 space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900" data-kit-update-plan>
+          <div className="font-medium">{t("แพทเทิร์นนี้มีชุดจากแม่แบบอยู่แล้ว — เปลี่ยนค่าแล้วกด 'อัปเดตชุดเดิม' ได้", "This pattern already has a set from the template — change values and press 'Update the existing set'")}</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+            <span>{t(`เปลี่ยนตามค่าใหม่ ${upd.update.length} ชิ้น`, `${upd.update.length} change`)}</span>
+            <span className={upd.edited.length ? "font-medium text-amber-800" : ""}>{t(`แก้มือไว้ ${upd.edited.length} ชิ้น${upd.edited.length ? " (ไม่ทับ)" : ""}`, `${upd.edited.length} hand-edited${upd.edited.length ? " (kept)" : ""}`)}</span>
+            <span>{t(`เพิ่มใหม่ ${upd.add.length}`, `${upd.add.length} new`)}</span>
+            <span>{t(`ไม่มีในค่าใหม่ ${upd.gone.length} (ไม่ลบให้)`, `${upd.gone.length} no longer used (not deleted)`)}</span>
+          </div>
+          {upd.edited.length > 0 && <label className="flex items-center gap-2"><input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} className="h-3.5 w-3.5 accent-amber-600" />{t(`ทับชิ้นที่แก้มือด้วย (${upd.edited.map((x) => x.piece.name).join(", ")})`, `Also overwrite hand-edited pieces (${upd.edited.map((x) => x.piece.nameEn).join(", ")})`)}</label>}
+          <div className="text-[11px] text-emerald-800/80">{t("ปุ่ม 'วางชิ้นลงกระดาน' = สร้างเป็นชุดใหม่อีกชุด (สำเนา) · ยกเลิก = ไม่เปลี่ยนอะไร", "'Place pieces' = make another new set (a copy) · Cancel = change nothing")}</div>
+        </div>
+      )}
       {/* ── เลือกทรง + ซับใน ── */}
       <div className="mb-3 space-y-2">
         <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6" role="group" aria-label={t("ทรงกระเป๋า", "Bag style")}>
@@ -130,9 +164,14 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
                 onClick={() => setParams((o) => (k === "none" ? { ...o, win: "none" } : { ...o, winType: k, win: o.win === "none" || k !== "window" ? "rect" : o.win }))}>{t(th, en)}</button>)}
             </div>
             {G.win?.type === "window" && (
-              <div className="flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("รูปช่องโชว์", "Window shape")}>
-                {wins.filter(([k]) => k !== "none").map(([k, th, en]) => <button key={k} type="button" className={seg(p.win === k)} onClick={() => setParams((o) => ({ ...o, win: k }))}>{t(th, en)}</button>)}
-              </div>
+              <>
+                <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("รูปช่องโชว์", "Window shape")} data-win-shapes>
+                  {wins.filter(([k]) => k !== "none").map(([k, th, en]) => <button key={k} type="button" data-win-shape={k} className={seg(p.win === k)} onClick={() => setParams((o) => ({ ...o, win: k }))}>{t(th, en)}</button>)}
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-700" data-win-divider title={t("ช่องโชว์หน้า + ช่องหลักหลัง: แผ่นกั้นเย็บประกบตัวหน้า (ข้าง+ก้น) แล้วเข้าชิ้นข้างพร้อมกัน — ได้ 2 ช่องพอดี", "Front display + main back compartment: the divider is sewn to the front (sides + bottom), then into the gusset together — exactly 2 compartments")}>
+                  <input type="checkbox" checked={p.div} onChange={(e) => setParams((o) => ({ ...o, div: e.target.checked }))} className="h-4 w-4 accent-blue-600" />{t("มีแผ่นกั้น (ช่องโชว์หน้า + ช่องหลักหลัง)", "Add a divider (front display + main compartment)")}
+                </label>
+              </>
             )}
             {G.win && <>
               {field("ws", G.win.type === "window" ? "กว้างช่อง" : "ยาวช่อง", G.win.type === "window" ? "Window width" : "Opening length", { max: G.win.wsMax })}

@@ -25,7 +25,7 @@ import { SaveBar } from "@/components/save-bar";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
-import type { TemplateInsertInfo } from "@/components/pattern-studio";
+import type { StudioTpl, TemplateInsertInfo } from "@/components/pattern-studio";
 import { PATTERN_PROJECT_STATUSES, PATTERN_SCHEMA, PATTERN_STATUS_LABEL, cleanMatProps, cleanPieceView, cleanProjectPieces, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type PieceViewState, type ProjectPiece } from "@/lib/pattern-project";
 import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
 import { checkSeam, cleanSeams, type Seam } from "@/lib/pattern-seams";
@@ -144,9 +144,16 @@ export function PatternProjectEditor({ id }: { id: string }) {
     });
     setSeams((prev) => [...prev, ...made]); setDirty(true);
     // เก็บค่าแม่แบบ + จุดติด โดยไม่ทับค่าอื่นของ template (ค่าวัสดุ · ซิป/อะไหล่ · เป้าหมายตีราคา) — เดิมทับทั้งก้อน
-    setAttaches((prev) => { const next = [...prev, ...att]; setTemplate((tp) => ({ ...(tp ?? {}), ...(info.params ? { params: info.params } : {}), style: info.style, attach: next })); return next; });
+    setAttaches((prev) => { const next = [...prev, ...att]; setTemplate((tp) => ({ ...(tp ?? {}), ...(info.params ? { params: info.params } : {}), style: info.style, attach: next, keys: info.pidByKey, kparams: info.kparams ?? null, opts: info.opts ?? null })); return next; });   // keys/kparams/opts = อัปเดตชุดเดิมได้ (รอบ F2)
   }, []);
   const onSeams = (next: Seam[]) => { setSeams(next); setDirty(true); };
+  /** ชุดแม่แบบล่าสุด (รหัสชิ้นของแม่แบบ → ชิ้นบนกระดาน) — ปุ่ม "อัปเดตชุดเดิม" ในตัวสร้างจากแม่แบบ (รอบ F2) */
+  const studioTpl = useMemo<StudioTpl | null>(() => {
+    const tp = template as { style?: unknown; params?: unknown; kparams?: unknown; opts?: unknown; keys?: unknown } | null;
+    if (!tp || typeof tp.style !== "string" || !tp.keys || typeof tp.keys !== "object") return null;
+    const keys = Object.fromEntries(Object.entries(tp.keys as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"));
+    return { style: tp.style as StudioTpl["style"], keys, ...(tp.params && typeof tp.params === "object" ? { params: tp.params as StudioTpl["params"] } : {}), ...(tp.kparams && typeof tp.kparams === "object" ? { kparams: tp.kparams as StudioTpl["kparams"] } : {}), ...(tp.opts && typeof tp.opts === "object" ? { opts: tp.opts as StudioTpl["opts"] } : {}) };
+  }, [template]);
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner, meta: p.edgeMeta ?? null }])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
@@ -325,7 +332,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
         sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff,
           tol: seamTol, onTolChange: canEdit ? (v) => { setTemplate((tp) => ({ ...(tp ?? {}), settings: { ...((tp?.settings as Record<string, unknown> | undefined) ?? {}), seamTol: v } })); setDirty(true); } : undefined,
           view: pieceView, onViewChange: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), view: next })); setDirty(true); } : undefined,
-          lesson: lessonRef, lessonName: `${patternNo ?? ""} ${name}`.trim(), onLessonReset: canEdit ? resetLesson : undefined, copySource: lessonRef ? undefined : copySource, canLearn: canEdit }} pieceInfoFields matProps={matProps}
+          lesson: lessonRef, lessonName: `${patternNo ?? ""} ${name}`.trim(), onLessonReset: canEdit ? resetLesson : undefined, copySource: lessonRef ? undefined : copySource, canLearn: canEdit,
+          tpl: studioTpl, onTplUpdate: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), ...next })); setDirty(true); } : undefined }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
         footerNote={<span className="text-slate-400">{canEdit ? t("บันทึกอัตโนมัติหลังหยุดแก้ 4 วินาที · Ctrl+Z ย้อนได้ทั้งชิ้นและตะเข็บ", "Saves automatically 4 seconds after you stop · Ctrl+Z undoes pieces and seams") : ""}</span>} />
 

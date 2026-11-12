@@ -199,7 +199,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   /** ชิ้นบนกระดานแบบสด (ตอนเปิด + ทุกครั้งที่เปลี่ยน รวมระหว่างลาก) — ไว้วาดภาพ 3D ตาม */
   onLive?: (pieces: ResultPiece[]) => void;
   /** เพิ่มชิ้นเข้ากระดานจากภายนอก (เช่น ตัวสร้างจากแม่แบบทรง) — nonce เปลี่ยน = เพิ่ม 1 ครั้ง · ชิ้นที่มี at วางเป็นกลุ่มต่อจากขวาสุดของกระดาน · ย้อนกลับได้ */
-  inject?: { nonce: number; pieces: EditorPiece[]; /** แก้ชิ้นที่มีอยู่ (รูป / เผื่อเย็บ) — ย้อนได้ */ patch?: { pid: string; shape?: Shape; allow?: number; allowEdges?: number[] | null }[]; /** แทนชุดตะเข็บทั้งชุด — ย้อนได้ */ seams?: Seam[]; /** ตั้ง "ขอบเปิดตั้งใจ" ให้ขอบของชิ้นที่มีอยู่ (จากแผงตรวจแบบ) */ edgeOpen?: { pid: string; edges: number[] }[]; /** at ของชิ้น = ตำแหน่งบนกระดานตรง ๆ (ไม่งั้น x นับต่อจากขวาสุดของชิ้นเดิม) */ abs?: boolean; /** เพิ่มเส้นในให้ชิ้นที่มีอยู่แล้ว (ย้อนกลับได้พร้อมชิ้นใหม่ในครั้งเดียว) */ inner?: { pid: string; lines: InnerLine[] }[] } | null;
+  inject?: { nonce: number; pieces: EditorPiece[]; /** แก้ชิ้นที่มีอยู่ (รูป / เผื่อเย็บ) — ย้อนได้ */ patch?: { pid: string; shape?: Shape; allow?: number; allowEdges?: number[] | null; holes?: Shape[]; foldEdges?: number[] | null; notches?: Pt[]; grain?: Pt[] | null }[]; /** แทนชุดตะเข็บทั้งชุด — ย้อนได้ */ seams?: Seam[]; /** ตั้ง "ขอบเปิดตั้งใจ" ให้ขอบของชิ้นที่มีอยู่ (จากแผงตรวจแบบ) */ edgeOpen?: { pid: string; edges: number[] }[]; /** at ของชิ้น = ตำแหน่งบนกระดานตรง ๆ (ไม่งั้น x นับต่อจากขวาสุดของชิ้นเดิม) */ abs?: boolean; /** เพิ่มเส้นในให้ชิ้นที่มีอยู่แล้ว (ย้อนกลับได้พร้อมชิ้นใหม่ในครั้งเดียว) */ inner?: { pid: string; lines: InnerLine[] }[] } | null;
   /** ชิ้นที่เลือกเปลี่ยน → ส่ง pid กลับ (null = ไม่ได้เลือก) — ใช้ให้ภาพ 3D สว่างตาม */
   onSelChange?: (pid: string | null) => void;
   /** สั่งเลือกชิ้นจากภายนอก (เช่น คลิกชิ้นในภาพ 3D) — nonce เปลี่ยน = เลือก 1 ครั้ง */
@@ -519,7 +519,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const patched = inject.patch?.length ? opened.map((q) => {
       const x = (inject.patch ?? []).find((y) => y.pid === q.pid);
       if (!x) return q;
-      return { ...q, ...(x.shape ? { shape: x.shape, ...(pieceEdges(x.shape).length !== pieceEdges(q.shape).length ? { allowEdges: null, foldEdges: null, edgeMeta: null } : {}) } : {}), ...(x.allow != null ? { allow: cleanAllow(x.allow) } : {}), ...("allowEdges" in x ? { allowEdges: x.allowEdges ?? null } : {}) };
+      return { ...q, ...(x.shape ? { shape: x.shape, ...(pieceEdges(x.shape).length !== pieceEdges(q.shape).length ? { allowEdges: null, foldEdges: null, edgeMeta: null } : {}) } : {}), ...(x.allow != null ? { allow: cleanAllow(x.allow) } : {}), ...("allowEdges" in x ? { allowEdges: x.allowEdges ?? null } : {}), ...(x.holes ? { holes: x.holes } : {}), ...("foldEdges" in x ? { foldEdges: x.foldEdges ?? null } : {}), ...(x.notches ? { notches: x.notches } : {}), ...("grain" in x ? { grain: x.grain ?? null } : {}) };
     }) : opened;
     if (patched.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return; }
     const next = [...patched, ...list];

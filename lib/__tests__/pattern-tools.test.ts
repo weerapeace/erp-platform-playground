@@ -47,5 +47,9 @@ describe("ค้นหาเครื่องมือ", () => {
     expect(ids("gusset")[0]).toBe("gusset"); expect(ids("ทากาว")[0]).toBe("band"); expect(ids("รูด")[0]).toBe("gather");
     expect(ids("slash")[0]).toBe("spread"); expect(ids("ความหนา")[0]).toBe("fold-comp");
   });
+  it("รอบ F2: ตัวสร้างชิ้นกระเป๋าค้นเจอ", () => {
+    expect(ids("หูหิ้ว")[0]).toBe("strap"); expect(ids("แถบกุ๊น")[0]).toBe("bind-pieces"); expect(ids("ช่องโชว์")[0]).toBe("window");
+    expect(ids("แมว")).toContain("window"); expect(ids("เก็บงานแก้มือ")[0]).toBe("tpl-update");
+  });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });

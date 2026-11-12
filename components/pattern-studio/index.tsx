@@ -31,13 +31,17 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SEAM_COLORS, ShapeEditor, type EditorPiece, type ResultPiece } from "@/components/pattern-sheet/shape-editor";
 import type { Flat3DPiece, Flat3DThread, Pattern3DCut } from "@/components/pattern-3d";
-import { sidePoints, type Seam } from "@/lib/pattern-seams";
+import { pieceEdges, sidePoints, type Seam } from "@/lib/pattern-seams";
 import { buildSewn } from "@/lib/pattern-sewn";
 import { assemble, type AsmPiece, type Attach } from "@/lib/pattern-assembly";
 import { liningPlan, pocketPlan, type PocketOpts } from "@/lib/pattern-lining";
 import { shapeBox } from "@/lib/pattern-shape";
 import type { BagParams } from "@/lib/bag-templates";
-import type { BagKit, BagStyle, KitAttach, KitSeam } from "@/lib/bag-kits";
+import type { BagKit, BagStyle, KitAttach, KitOpts, KitParams, KitPiece, KitSeam } from "@/lib/bag-kits";
+import type { TplUpdate } from "./template-wizard";
+import type { BagPartsResult } from "./bag-parts-modal";
+import type { PlanPiece } from "@/lib/pattern-bagparts";
+import type { ProjectPiece } from "@/lib/pattern-project";
 import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
 import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summarize, type CheckIssue } from "@/lib/pattern-check";
 import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
@@ -51,6 +55,7 @@ const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModa
 const PocketModal = dynamic(() => import("./pocket-modal").then((m) => m.PocketModal), { ssr: false });                     // โหลดเมื่อกดเพิ่มช่อง
 const DxfModal = dynamic(() => import("./dxf-modal").then((m) => m.DxfModal), { ssr: false });                              // โหลดเมื่อกดนำเข้า DXF
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
+const BagPartsModal = dynamic(() => import("./bag-parts-modal").then((m) => m.BagPartsModal), { ssr: false });             // โหลดเมื่อกดชิ้นกระเป๋า (รอบ F2)
 
 const AssemblyView = dynamic(() => import("./assembly-view").then((m) => m.AssemblyView), { ssr: false });
 const LearnCard = dynamic(() => import("./learn-panel").then((m) => m.LearnCard), { ssr: false });            // โหลดเมื่อมีบทเรียน
@@ -87,7 +92,9 @@ const SPLIT_PX = 860;   // หน้าที่มีเครื่องม�
 type EditorProps = ComponentProps<typeof ShapeEditor>;
 
 /** ชิ้นจากแม่แบบถูกวางลงกระดานแล้ว: รหัสชิ้น (pid) ของแต่ละชนิดชิ้น + คู่ขอบที่ต้องเย็บติดกัน + จุดติดหู/แผ่นหลังช่อง + ค่าแม่แบบที่ใช้ */
-export type TemplateInsertInfo = { pidByKey: Record<string, string>; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ทรงอื่นไม่มี) */ params?: BagParams; style: BagStyle };
+export type TemplateInsertInfo = { pidByKey: Record<string, string>; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ทรงอื่นไม่มี) */ params?: BagParams; style: BagStyle; /** ค่าทรงอื่น + ตัวเลือกซับใน/ช่อง (รอบ F2) */ kparams?: KitParams; opts?: KitOpts };
+/** ชุดแม่แบบล่าสุดที่วางในแพทเทิร์น (เก็บใน template) — ใช้ "อัปเดตชุดเดิม" โดยเก็บงานแก้มือ (รอบ F2) */
+export type StudioTpl = { style: BagStyle; params?: BagParams; kparams?: KitParams; opts?: KitOpts; keys?: Record<string, string> };
 
 /** ตะเข็บของแพทเทิร์น (แอปสตูดิโอแพทเทิร์น) — ส่ง = กระดานมีเครื่องมือเย็บ/แก้ตะเข็บในตัว (แบบ CLO: เย็บบนกระดานเดิม ไม่เปลี่ยนหน้า) · start = เปิดกระดานมาถือเครื่องมือเย็บเลย */
 export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start?: boolean;
@@ -98,7 +105,8 @@ export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start
   /** บทเรียนของแพทเทิร์นนี้ (template.lesson) + ชื่อแบบฝึก/สำเนา */ lesson?: LessonRef | null; lessonName?: string;
   /** เริ่มบทใหม่ = คืนชิ้นตั้งต้นของบท (เฉพาะแบบฝึก) */ onLessonReset?: () => void;
   /** งานที่เปิดอยู่ (ให้สารบัญสร้าง "สำเนาเพื่อเรียน") */ copySource?: () => CopySource | null;
-  /** สร้างแบบฝึก/สำเนาได้ (สิทธิ์แก้) */ canLearn?: boolean };
+  /** สร้างแบบฝึก/สำเนาได้ (สิทธิ์แก้) */ canLearn?: boolean;
+  /** ชุดแม่แบบล่าสุด + เปลี่ยน (อัปเดตชุดเดิม · รอบ F2) */ tpl?: StudioTpl | null; onTplUpdate?: (next: StudioTpl) => void };
 /** ชิ้นที่ล็อก (แก้/ลากไม่ได้) และซ่อน (จาง กดไม่ได้ แต่ยังถูกตรวจ) */
 export type PieceView = { lock: string[]; hide: string[] };
 
@@ -133,6 +141,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [layer, setLayer] = useState<"all" | "outer" | "lining">("all");   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
   const [cut, setCut] = useState<Pattern3DCut>("none");                     // ผ่าดูข้างในของภาพ 3D
   const [pocket, setPocket] = useState(false);
+  const [bagParts, setBagParts] = useState(false);   // ชิ้นกระเป๋า: สาย/หู · กุ๊น · ช่องโชว์ (รอบ F2)
   const [dxf, setDxf] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [live, setLive] = useState<ResultPiece[]>([]);
@@ -246,6 +255,59 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       ? t(`เพิ่มช่องซิปแล้ว: ซิปยาว ${opts.w} ซม. 1 เส้น (เลือกซิปของช่องนี้ได้ที่ปุ่ม ซิป / อะไหล่ แล้วไปตีราคาพร้อมชิ้น)`, `Zip pocket added: one ${opts.w} cm zip (choose its zip under Zips / hardware — it goes to costing with the pieces)`)
       : t("เพิ่มช่องใส่ของแล้ว", "Pocket added"));
   };
+  /** ชิ้นจากตัวสร้าง → ชิ้นบนกระดาน */
+  const planToEditor = (pc: PlanPiece, pid: string, stamp: string, extra: Partial<EditorPiece> = {}): EditorPiece => ({
+    pid, shape: pc.shape, holes: pc.holes ?? [], count: pc.count, allow: pc.allow, foldEdges: pc.foldEdges ?? null, grain: pc.grain ?? null, notches: pc.notches ?? [], name: t(pc.name, pc.nameEn),
+    ...(sew && pc.inner?.length ? { inner: pc.inner.map((l) => ({ ...l, id: `${l.id}${stamp}` })) } : {}), ...(pc.edgeMeta ? { edgeMeta: pc.edgeMeta } : {}), ...extra,
+  });
+  /** ชิ้นกระเป๋า (รอบ F2): สาย/หู · แถบกุ๊น = ชิ้นใหม่ · ช่องโชว์ = เจาะรูชิ้นเดิม + PVC + กรอบ + แผ่นกั้น (+ ตะเข็บแผ่นกั้น) */
+  const addBagPart = (r: BagPartsResult) => {
+    setBagParts(false);
+    const stamp = Date.now().toString(36);
+    if (r.kind !== "window") {
+      const pid = `bp${stamp}`;
+      setInject({ nonce: Date.now(), pieces: [planToEditor(r.piece, pid, stamp)] });
+      if (sew && r.piece.selfSeams?.length) { const n = pieceEdges(r.piece.shape).length; sew.onChange([...sew.seams, ...r.piece.selfSeams.map((x, i): Seam => ({ id: `s${stamp}b${i}`, a: { pid, from: x.a, count: 1, n }, b: { pid, from: x.b, count: 1, n }, ...(x.rev ? { rev: true } : {}), self: true, name: t("เย็บสาย", "Strap seam") }))]); }
+      setNotice(r.kind === "strap" ? t(`เพิ่มสาย/หูแล้ว: ${r.piece.name} · ตัด ${r.piece.count} ชิ้น`, `Strap added: ${r.piece.nameEn} · cut ${r.piece.count}`) : t(`เพิ่มแถบกุ๊นแล้ว: ตัด ${r.piece.count} เส้น`, `Binding added: cut ${r.piece.count} strip(s)`));
+      return;
+    }
+    const host = live.find((p) => p.pid === r.hostPid);
+    if (!host) return;
+    const plan = r.plan, divPid = `dv${stamp}`, pieces: EditorPiece[] = [planToEditor(plan.pvc, `pv${stamp}`, stamp)];
+    if (plan.frame) pieces.push(planToEditor(plan.frame, `fr${stamp}`, stamp));
+    if (plan.divider) pieces.push(planToEditor(plan.divider, divPid, stamp, { ...(sew ? { link: { to: host.pid } } : {}), ...(host.info?.role ? { info: { role: host.info.role } } : {}), mats: host.mats }));
+    setInject({ nonce: Date.now(), pieces, patch: [{ pid: host.pid, holes: [...host.holes, plan.hole] }] });
+    if (sew && plan.divider && plan.dividerSide) sew.onChange([...sew.seams, { id: `s${stamp}w`, a: { pid: host.pid, ...plan.dividerSide }, b: { pid: divPid, ...plan.dividerSide }, kind: "lapped", name: t("แผ่นกั้นช่องโชว์", "Window divider") }]);
+    setShow3d(true);
+    setNotice(plan.divider ? t(`เจาะช่องโชว์บน ${host.name || "ชิ้น"} แล้ว + แผ่น PVC${plan.frame ? " + กรอบ" : ""} + ${plan.divider.name} (เย็บประกบตัวนี้ ได้ช่องโชว์ 1 ช่อง)`, `Window cut in ${host.name || "the piece"} + PVC${plan.frame ? " + frame" : ""} + ${plan.divider.nameEn} (sewn to it: 1 display compartment)`)
+      : t(`เจาะช่องโชว์บน ${host.name || "ชิ้น"} แล้ว + แผ่น PVC${plan.frame ? " + กรอบ" : ""}`, `Window cut in ${host.name || "the piece"} + PVC${plan.frame ? " + frame" : ""}`));
+  };
+  /** ชิ้นแม่แบบ → ชิ้นบนกระดาน (เหมือนตอนวาง) */
+  const kitToEditor = (q: KitPiece, pid: string, keys: Record<string, string>): EditorPiece => ({
+    pid, shape: q.shape, holes: q.holes, count: q.count, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, name: q.name, grain: q.grain, notches: q.notches,
+    ...(q.edgeMeta ? { edgeMeta: q.edgeMeta } : {}), ...(q.lining ? { mats: [] } : {}),
+    ...(sew && q.inner ? { inner: q.inner } : {}), ...(sew && q.lining ? { info: { role: "lining" as const } } : {}), ...(sew && q.linkTo && keys[q.linkTo] ? { link: { to: keys[q.linkTo] } } : {}),
+  });
+  const tpl = sew?.tpl ?? null;
+  const tplNow = useMemo(() => (tpl?.keys ? Object.entries(tpl.keys).flatMap(([key, pid]) => { const p = live.find((x) => x.pid === pid); return p ? [{ key, pid, shape: p.shape, holes: p.holes, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, notches: p.notches ?? [] }] : []; }) : []), [tpl, live]);
+  /** อัปเดตชุดแม่แบบเดิม (รอบ F2): แก้ชิ้นที่ไม่ได้แก้มือ · เพิ่มชิ้นใหม่ · ตะเข็บระหว่างชิ้นที่ตรงแม่แบบสร้างใหม่ · ตะเข็บอื่นคงไว้ */
+  const applyTplUpdate = (u: TplUpdate) => {
+    setWizard(false); setDraft(null);
+    if (!sew || !tpl?.keys) return;
+    const stamp = Date.now().toString(36), keys = { ...tpl.keys };
+    const add = u.add.filter((q) => sew || q.key !== "lpocket");
+    add.forEach((q, i) => { keys[q.key] = `pc${stamp}u${i}`; });
+    const fresh = new Set([...u.plan.update, ...(u.overwrite ? u.plan.edited : []), ...u.plan.same].map((x) => x.pid).concat(add.map((q) => keys[q.key])));
+    const side = (pid: string, x: KitSeam["a"]) => ({ pid, from: x.from, count: x.count, n: x.n, ...(x.t0 != null && x.t1 != null ? { t0: x.t0, t1: x.t1 } : {}), ...(x.inner ? { inner: x.inner } : {}) });
+    const keep = sew.seams.filter((x) => !(fresh.has(x.a.pid) && fresh.has(x.b.pid)));
+    const made: Seam[] = u.kit.seams.flatMap((r, i) => { const a = keys[r.a.piece], b = keys[r.b.piece]; return a && b && fresh.has(a) && fresh.has(b) ? [{ id: `s${stamp}u${i}`, a: side(a, r.a), b: side(b, r.b), ...(r.kind ? { kind: r.kind } : {}) }] : []; });
+    setInject({ nonce: Date.now(), pieces: add.map((q) => kitToEditor(q, keys[q.key], keys)), patch: u.patch.map((x) => ({ pid: x.pid, shape: x.shape, holes: x.holes, notches: x.notches, grain: x.grain, allow: x.allow, allowEdges: x.allowEdges, foldEdges: x.foldEdges })), seams: [...keep, ...made] });
+    sew.onTplUpdate?.({ style: u.kit.style, ...(u.kit.params ? { params: u.kit.params } : {}), ...(u.kit.kparams ? { kparams: u.kit.kparams } : {}), ...(u.kit.opts ? { opts: u.kit.opts } : {}), keys });
+    setShow3d(true);
+    const kept = u.overwrite ? 0 : u.plan.edited.length;
+    setNotice(t(`อัปเดตชุดเดิมแล้ว: เปลี่ยน ${u.patch.length} ชิ้น · เพิ่ม ${add.length}${kept ? ` · เก็บชิ้นที่แก้มือไว้ ${kept} ชิ้น (${u.plan.edited.map((x) => x.piece.name).join(", ")})` : ""}${u.plan.gone.length ? ` · ชิ้นที่ไม่มีในค่าใหม่ ${u.plan.gone.length} ชิ้นยังอยู่ (ลบเองถ้าไม่ใช้)` : ""}`,
+      `Set updated: ${u.patch.length} changed · ${add.length} added${kept ? ` · ${kept} hand-edited kept` : ""}${u.plan.gone.length ? ` · ${u.plan.gone.length} unused piece(s) left in place` : ""}`));
+  };
   const pieceColors = useMemo(() => { const out: Record<string, string> = {}; for (const p of live) { const c = p.mats.map((m) => props.matProps?.[m.id]?.color).find(Boolean); if (c) out[p.pid] = c; } return out; }, [live, props.matProps]);
   const sewnOn = !!sewnScene && sewnScene.joined > 0;
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
@@ -266,7 +328,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       ...(sew && q.inner ? { inner: q.inner } : {}), ...(sew && q.lining ? { info: { role: "lining" as const } } : {}), ...(sew && q.linkTo && pidByKey[q.linkTo] ? { link: { to: pidByKey[q.linkTo] } } : {}),
     })) });
     setShow3d(true);
-    onTemplateInsert?.({ pidByKey, seams: kit.seams.filter((x) => pidByKey[x.a.piece] && pidByKey[x.b.piece]), attach: kit.attach, params: kit.params, style: kit.style });
+    onTemplateInsert?.({ pidByKey, seams: kit.seams.filter((x) => pidByKey[x.a.piece] && pidByKey[x.b.piece]), attach: kit.attach, params: kit.params, style: kit.style, kparams: kit.kparams, opts: kit.opts });
     const nl = list.filter((q) => q.lining).length, had = (sew?.seams.length ?? 0) > 0;
     if (nl && sew) setLayer("outer");   // ชิ้นเยอะ: เริ่มที่ชั้นนอกก่อน (ซับในจางไว้) — สลับดูได้ที่ปุ่ม ทุกชั้น / ชั้นนอก / ซับใน
     if (had) setNotice(t(`วางแล้ว ${list.length} แบบ — แพทเทิร์นนี้มีกระเป๋าที่เย็บไว้อยู่แล้ว ภาพ 3 มิติประกอบได้ทีละ 1 ใบ (อีกใบจะขึ้นว่ายังประกอบไม่ได้) · แนะนำให้สร้างแพทเทิร์นใหม่สำหรับทรงใหม่`, `Placed ${list.length} patterns — this pattern already has a sewn bag and the 3D view assembles one bag at a time (the other shows as not assembled) · create a new pattern for a new style`));
@@ -322,6 +384,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       else if (id === "template" && !readonly) { setDraft(null); setWizard(true); }
       else if (id === "photo" && !readonly) setPhoto(true);
       else if (id === "dxf" && !readonly) setDxf(true);
+      else if (id === "bagparts" && !readonly) setBagParts(true);
       else later(id === "print" ? "[data-open-preflight]" : id === "trims" ? "[data-trims-open]" : id === "unit" ? "[data-unit]" : `[data-studio-${id}]`);
     }
   };
@@ -399,6 +462,9 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           </button>
           <button type="button" data-studio-pocket onClick={() => setPocket(true)} disabled={!live.length} title={t("ช่องใส่ของ หรือ ช่องซิป บนชิ้นที่เลือก", "A patch pocket or a zip pocket on a piece")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-40`}>
             <Icon value="i:square-plus" className="text-sm" />{t("เพิ่มช่อง", "Add pocket")}
+          </button>
+          <button type="button" data-studio-bagparts onClick={() => setBagParts(true)} title={t("สาย/หู · แถบกุ๊นที่ต้องตัด · ช่องโชว์ (หัวใจ เมฆ แมว หมี SVG) บนชิ้น", "Straps · binding strips · display windows (heart, cloud, cat, bear, SVG) on a piece")} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
+            <Icon value="i:shopping-bag" className="text-sm" />{t("ชิ้นกระเป๋า", "Bag parts")}
           </button>
         </>}
         {sew && <>
@@ -608,7 +674,11 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           onCatalog={() => setCatalog(true)} onClose={() => setLearnOpen(false)} />
       )}
       {sew && catalog && <LessonCatalog open onClose={() => setCatalog(false)} canStart={!!sew.canLearn} copySource={sew.copySource} currentId={sew.lesson?.id ?? null} />}
-      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} pocket={!!sew} />}
+      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} pocket={!!sew}
+        current={!draft && tpl && tplNow.length ? tpl : null} now={tplNow} onUpdate={sew && !readonly ? applyTplUpdate : undefined} />}
+      {bagParts && <BagPartsModal open onClose={() => setBagParts(false)} onInsert={addBagPart} defaultPid={selPid}
+        hosts={live.filter((p) => p.info?.role !== "lining").map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, shape: p.shape, holes: p.holes, allow: p.allow, foldEdges: p.foldEdges }))}
+        bindPieces={live as unknown as ProjectPiece[]} bindSeams={sew?.seams ?? []} />}
       {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}
         hosts={live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, box: shapeBox(p.shape), lining: liningPids.has(p.pid) }))} />}
       {dxf && <DxfModal open onClose={() => setDxf(false)} onInsert={(list) => {

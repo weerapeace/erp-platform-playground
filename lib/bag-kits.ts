@@ -48,7 +48,8 @@ export type KitPiece = {
 export type KitSide = { piece: string; from: number; count: number; n: number; t0?: number; t1?: number; inner?: string };
 export type KitSeam = { a: KitSide; b: KitSide; kind?: SeamKind };
 export type KitAttach = { kind: "handle" | "behind"; piece: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number; /** สายพาดข้างถึงข้าง (โคนอยู่ที่ชิ้นข้าง) */ across?: boolean };
-export type BagKit = { style: BagStyle; pieces: KitPiece[]; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ไว้จำในแพทเทิร์น) */ params?: BagParams };
+export type BagKit = { style: BagStyle; pieces: KitPiece[]; seams: KitSeam[]; attach: KitAttach[]; /** ค่าแม่แบบ Tote (ไว้จำในแพทเทิร์น) */ params?: BagParams;
+  /** ค่าของทรงอื่น + ตัวเลือกซับใน/ช่อง ที่ใช้สร้าง (รอบ F2: จำไว้สร้างชุดเดิมซ้ำ เพื่ออัปเดตโดยเก็บงานแก้มือ) */ kparams?: KitParams; opts?: KitOpts };
 export type KitOpts = { lining: boolean; pocket: boolean };
 export const KIT_OPTS_DEFAULT: KitOpts = { lining: true, pocket: true };
 
@@ -270,7 +271,7 @@ function layout(list: Raw[]): KitPiece[] {
 
 /** เติมซับใน + ช่องใส่ของ ให้ชุดตัวนอกที่วางตำแหน่งแล้ว */
 function finish(style: BagStyle, outer: KitPiece[], d: Omit<Draft, "pieces">, o: KitOpts, params?: BagParams): BagKit {
-  const kit: BagKit = { style, pieces: [...outer], seams: [...d.seams], attach: d.attach, ...(params ? { params } : {}) };
+  const kit: BagKit = { style, pieces: [...outer], seams: [...d.seams], attach: d.attach, ...(params ? { params } : {}), opts: { lining: o.lining, pocket: o.pocket } };
   if (!o.lining) return kit;
   const bottom = Math.max(0, ...outer.map((q) => { const c = cutOf(q); return q.at[1] - c.oy + c.h; }));
   const dy = r1(bottom + LINING_GAP), L = (key: string) => `L:${key}`;
@@ -302,15 +303,15 @@ function finish(style: BagStyle, outer: KitPiece[], d: Omit<Draft, "pieces">, o:
 
 /** ชุดชิ้นของทรง 2–6 */
 export function bagKit(style: Exclude<BagStyle, "tote">, raw: Partial<KitParams>, o: KitOpts = KIT_OPTS_DEFAULT): BagKit {
-  const d = draft(style, kitParams(style, raw));
-  return finish(style, layout(d.pieces), d, o);
+  const kp = kitParams(style, raw), d = draft(style, kp);
+  return { ...finish(style, layout(d.pieces), d, o), kparams: kp };
 }
 /** ชุดชิ้นของ Tote (สูตรเดิม) + ซับใน — ซับใน = หน้า หลัง ข้าง ก้น (แผ่นใส / ถุงช่องซิป / หู ไม่มีซับใน) */
 export function toteKit(raw: Partial<BagParams>, o: KitOpts = KIT_OPTS_DEFAULT): BagKit {
   const G = bagGeometry(raw);
   const outer: KitPiece[] = bagPieces(G).map((q) => ({ key: q.key, name: q.name, nameEn: q.nameEn, count: q.count, shape: q.shape, holes: q.holes, allow: q.allow, allowEdges: q.allowEdges, foldEdges: q.foldEdges, grain: q.grain, notches: q.notches, at: q.at }));
   return finish("tote", outer, {
-    seams: bagSeamRefs(G).map((s) => ({ a: s.a, b: s.b })), attach: bagAttachRefs(G),
+    seams: bagSeamRefs(G).map((s) => ({ a: s.a, b: s.b, ...(s.kind ? { kind: s.kind } : {}) })), attach: bagAttachRefs(G),
     body: ["front", "back", "strip", "side", "bottom"], faced: [], pocketOn: G.win ? "back" : "front",
   }, o, G.p);
 }

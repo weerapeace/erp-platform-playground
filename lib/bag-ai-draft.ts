@@ -29,7 +29,7 @@ export const BAG_DRAFT_SYSTEM = [
   '  "handle_gap": number|null,           // distance between the two ends of one handle / base width',
   '  "handle_width": number|null,         // handle strap width / base width',
   '  "opening": "none"|"window"|"zip"|"slot",   // a clear window, a zip opening or a slot on the FRONT panel',
-  '  "window_shape": "rect"|"heart"|"circle"|null,',
+  '  "window_shape": "rect"|"heart"|"circle"|"cloud"|"cat"|"bear"|null,',
   '  "opening_width": number|null,        // opening width / base width',
   '  "opening_center_height": number|null,// height of the opening centre above the base / body height (0..1)',
   '  "confidence": number,                // 0..1',
@@ -66,7 +66,7 @@ export function bagParamsFromAiDraft(raw: unknown, widthCm: number): BagDraft {
   const opening = o.opening === "window" || o.opening === "zip" || o.opening === "slot" ? o.opening : "none";
   if (opening !== "none") {
     p.winType = opening;
-    p.win = opening === "window" && (o.window_shape === "heart" || o.window_shape === "circle") ? o.window_shape : "rect";
+    p.win = opening === "window" && (o.window_shape === "heart" || o.window_shape === "circle" || o.window_shape === "cloud" || o.window_shape === "cat" || o.window_shape === "bear") ? o.window_shape : "rect";
     set("ws", by("opening_width", 0.1, 0.9));
     const cy = num(o.opening_center_height, 0, 1);
     if (cy != null) p.wy = half(cy * (p.H ?? BAG_DEFAULT.H));

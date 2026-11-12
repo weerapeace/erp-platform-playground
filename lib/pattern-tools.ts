@@ -20,7 +20,7 @@ type Txt = { th: string; en: string };
 export type ToolTarget =
   | { kind: "tool"; tool: string }
   | { kind: "guide"; el: string; select?: boolean }
-  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" }
+  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" }
   | { kind: "view3d"; view: "sewn" | "explode" | "steps" | "sim" | "flat" };
 /** ภาพเคลื่อนไหวตัวอย่างที่มี (components/pattern-studio/tool-demo) */
 export type DemoId = "move" | "rect" | "pen" | "measure" | "sew" | "sewpart" | "allow" | "round";
@@ -161,6 +161,18 @@ export const PATTERN_TOOLS: ToolDef[] = [
   { id: "dxf", icon: "file-import", th: "นำเข้า DXF", en: "Import DXF", level: 2, group: "studio", words: "dxf นำเข้า import clo cad ไฟล์", desc: T("นำแพทเทิร์นจากไฟล์ DXF เช่น ที่ส่งออกจาก CLO3D", "Bring in a DXF pattern, e.g. exported from CLO3D"), steps: [T("กด 'นำเข้า DXF'", "Press 'Import DXF'")], target: { kind: "studio", id: "dxf" } },
   { id: "lining", icon: "layers-subtract", th: "สร้างซับใน", en: "Create lining", level: 2, group: "studio", words: "ซับใน lining ชั้นใน", desc: T("คัดลอกตัวกระเป๋าเป็นชั้นซับในพร้อมตะเข็บ", "Copies the body into a lining layer with seams"), steps: [T("กด 'สร้างซับใน'", "Press 'Create lining'")], target: { kind: "studio", id: "lining" } },
   { id: "pocket", icon: "square-plus", th: "เพิ่มช่อง (ช่องใส่ของ / ช่องซิป)", en: "Add pocket", level: 2, group: "studio", words: "ช่อง กระเป๋าปะ ช่องซิป pocket zip pocket patch", desc: T("เพิ่มช่องใส่ของหรือช่องซิปบนชิ้นที่เลือก", "Adds a patch or zip pocket to a piece"), steps: [T("กด 'เพิ่มช่อง'", "Press 'Add pocket'")], target: { kind: "studio", id: "pocket" } },
+  { id: "strap", icon: "shopping-bag", th: "สาย / หูหิ้ว", en: "Strap / handle builder", level: 2, group: "studio", words: "สาย หู หูหิ้ว สายสะพาย strap handle พับครึ่ง 4ทบ ประกบ",
+    desc: T("ใส่กว้างสำเร็จ ยาวที่โผล่ โคนเย็บทับ และวิธีพับ (พับครึ่ง · 4 ทบ · พับขอบ · ไม่พับ) ได้ชิ้นสายพร้อมเส้นพับและรอยบากโคน · ประกบ 2 ชั้นได้", "Set finished width, visible length, overlap and fold method (half · 4 layers · edge fold · flat) to get a strap with fold lines and overlap notches · 2 layers optional"),
+    steps: [T("กด 'ชิ้นกระเป๋า' แท็บ สาย/หู", "Press 'Bag parts', tab Strap"), T("ตั้งค่า แล้วกด เพิ่มลงกระดาน", "Set values and press Add to the board")], target: { kind: "studio", id: "bagparts" } },
+  { id: "bind-pieces", icon: "line-dashed", th: "ชิ้นกุ๊นที่ต้องตัด", en: "Binding strips", level: 2, group: "studio", words: "กุ๊น แถบกุ๊น bias binding ตัดเฉียง หุ้มขอบ แถบ",
+    desc: T("รวมความยาวขอบที่ติ๊กกุ๊น + ตะเข็บหุ้มขอบ แล้วแบ่งเป็นแถบที่ต้องตัด (ไม่เกิน 140 ซม./เส้น เผื่อต่อ 2 ซม.) · ผ้าตัดเฉียง 45°", "Totals the edges ticked for binding + bound seams and splits them into strips to cut (≤ 140 cm each, 2 cm per join) · fabric cut on the bias"),
+    steps: [T("ติ๊ก 'กุ๊น' ที่ขอบ (B + คลิกขอบ)", "Tick 'Binding' on edges (B + click)"), T("กด 'ชิ้นกระเป๋า' แท็บ กุ๊น แล้วเพิ่มลงกระดาน", "Press 'Bag parts', tab Binding, add to the board")], target: { kind: "studio", id: "bagparts" } },
+  { id: "window", icon: "heart", th: "ช่องโชว์บนชิ้น", en: "Display window", level: 2, group: "studio", words: "ช่องโชว์ หน้าต่าง window pvc เมฆ แมว หมี หัวใจ svg แผ่นกั้น divider itabag อิตะแบ็ก",
+    desc: T("เจาะรูจริงบนชิ้นที่มีอยู่ (หัวใจ เมฆ แมว หมี วงรี เหลี่ยม SVG เอง) + แผ่น PVC + กรอบ + แผ่นกั้น ตามโครงสร้าง 4 แบบ (PVC ตายตัว · ล้วงด้านบน · ซิป · แยกช่องหลัก)", "Cut a real hole in an existing piece (heart, cloud, cat, bear, oval, rounded, own SVG) + PVC + frame + divider for 4 structures (fixed PVC · slip-in · zip · separate main compartment)"),
+    steps: [T("กด 'ชิ้นกระเป๋า' แท็บ ช่องโชว์", "Press 'Bag parts', tab Display window"), T("เลือกชิ้น รูป ขนาด โครงสร้าง แล้วเพิ่มลงกระดาน", "Pick piece, shape, size, structure, then add")], target: { kind: "studio", id: "bagparts" } },
+  { id: "tpl-update", icon: "refresh", th: "อัปเดตชุดจากแม่แบบ", en: "Update template set", level: 2, group: "studio", words: "อัปเดต แม่แบบ เปลี่ยนค่า เก็บงานแก้มือ update regenerate ชุดเดิม",
+    desc: T("เปิด 'สร้างจากแม่แบบทรง' อีกครั้ง เปลี่ยนค่า แล้วกด 'อัปเดตชุดเดิม' — ชิ้นที่ไม่ได้แก้มือเปลี่ยนตาม ชิ้นที่แก้มือไม่ถูกทับ (ติ๊กทับได้) · หรือวางเป็นชุดใหม่", "Open 'Bag template' again, change values, press 'Update the existing set' — untouched pieces follow, hand-edited ones are kept (or tick overwrite) · or place a new set"),
+    steps: [T("กด 'สร้างจากแม่แบบทรง'", "Press 'Bag template'"), T("เปลี่ยนค่า ดูรายการที่จะเปลี่ยน แล้วกด อัปเดตชุดเดิม", "Change values, check the list, press Update the existing set")], target: { kind: "studio", id: "template" } },
   // ── ภาพ 3D ──
   { id: "v-sewn", icon: "box", th: "ภาพเย็บติดแล้ว", en: "Sewn view", level: 1, group: "view", words: "3d สามมิติ เย็บติด sewn ภาพ", desc: T("กระเป๋าตอนเย็บติดแล้ว ตามกระดานทันที", "The sewn bag, following the board live"), steps: [T("หัวช่อง 3D → 'เย็บติดแล้ว'", "3D header → 'Sewn'")], target: { kind: "view3d", view: "sewn" } },
   { id: "v-explode", icon: "maximize", th: "แยกชิ้น / ติดหู", en: "Pull apart / attach handles", level: 2, group: "view", words: "แยกชิ้น explode ติดหู handle attach", desc: T("ดึงชิ้นแยกดู · ติดหู / ปิดหลังช่อง", "Pull pieces apart · attach handles"), steps: [T("หัวช่อง 3D → 'แยกชิ้น'", "3D header → 'Pull apart'")], target: { kind: "view3d", view: "explode" } },
