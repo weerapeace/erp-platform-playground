@@ -10,6 +10,8 @@
  * ใช้แล้วที่: ใบงานออกแบบ "⏳ รออะไรอยู่" (lib/design-sheet-waiting) · แผนงานทีม "เช็กลิสต์ในงาน" (lib/team-plan TEAM_PLAN_CHECK) · doc: docs/record-tasks.md
  * แม่แบบหลายข้อ (templateType · 2026-11-12) = ค่ากลาง erp_lookups name = ชื่อแม่แบบ · metadata.items = ข้อ → "ใส่จากแม่แบบ" / "บันทึกเป็นแม่แบบ"
  * ป้ายบนการ์ด variant="progress" = "เสร็จ 2/4" + แถบความคืบหน้า (กดแล้วเด้งกล่องติ๊ก) · ค่าเริ่ม "waiting" = แถวสิ่งที่รอแบบเดิม
+ *   <ChecklistPresetsEditor .../> = ป๊อปตั้งค่าค่าที่ใช้บ่อย (ตัวเดียวกับ ⚙️) เปิดจากที่อื่นได้ เช่น เมนูตั้งค่า Design Dashboard → Checklist งานใหม่
+ *   <ChecklistSeedPicker .../>    = เลือกข้อที่จะใส่ "ตอนสร้าง" (ยังไม่มีเลขเรคคอร์ด) — ตั้งต้น = ข้อที่เปิดสวิตช์ "ใบใหม่" · ส่งไปกับการสร้าง → seedChecklistOnCreate(..., explicit)
  */
 import { useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 import { FloatingDropdown } from "@/components/floating-dropdown";
@@ -19,7 +21,7 @@ import { UserPicker, useRecentUsers } from "@/components/pickers";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { checklistProgress, isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, PRESET_AUTO_NEW, summarizeTasks, taskTitleWithLinks, taskWithWho, TEMPLATE_MAX_ITEMS, templateItems, templateTitlesToAdd, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
+import { checklistProgress, isAutoNewPreset, isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, PRESET_AUTO_NEW, summarizeTasks, taskTitleWithLinks, taskWithWho, TEMPLATE_MAX_ITEMS, templateItems, templateTitlesToAdd, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
 import { TaskLinkList, TaskLinksButton } from "./task-links";
@@ -460,6 +462,67 @@ function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange, variant
           className="mt-1.5 h-8 w-full rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       )}
       <div className="mt-1.5 px-1 text-[10px] text-slate-400">{prog ? "เปิดงานเพื่อแก้/ลบ หรือใช้แม่แบบ" : "เปิดใบงานเพื่อแก้/ลบ หรือดูข้อที่เสร็จแล้ว"}</div>
+    </div>
+  );
+}
+
+/** ป๊อปตั้งค่า "ค่าที่ใช้บ่อย" ของเช็กลิสต์ — ตัวเดียวกับปุ่ม ⚙️ ในเช็กลิสต์ แต่เปิดจากที่อื่นได้ (เช่น เมนูตั้งค่า Design Dashboard)
+ *  autoNew = โชว์สวิตช์ "ใบใหม่" (ใส่ข้อนี้ให้เองตอนสร้างใบใหม่) */
+export function ChecklistPresetsEditor({ presetType, open, onClose, title = "ค่าที่ใช้บ่อย", autoNew = true }: {
+  presetType: string; open: boolean; onClose: () => void; title?: string; autoNew?: boolean;
+}) {
+  return (
+    <LookupValuesEditor lookupType={presetType} open={open} onClose={onClose} title={title}
+      flags={autoNew ? [...PRESET_FLAGS, AUTO_NEW_FLAG] : PRESET_FLAGS}
+      description={`เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · 🔗 = กดแล้วเปิดช่องวางลิงก์ให้เลย${autoNew ? " · ใบใหม่ = ใส่ข้อนี้ให้เองตอนสร้างใบใหม่" : ""} · ใช้ร่วมกันทั้งทีม`} />
+  );
+}
+
+/** เลือกเช็กลิสต์ที่จะใส่ให้ "ตอนสร้าง" (ยังไม่มีเลขเรคคอร์ด จึงยังบันทึกทีละข้อไม่ได้)
+ *  value null = ยังไม่แตะ → ใช้ข้อที่เปิดสวิตช์ "ใบใหม่" · กดชิป = เอาออก/ใส่ · พิมพ์เพิ่มเฉพาะงานนี้ได้ · ⚙️ = แก้ค่าตั้งต้นของทุกงาน
+ *  หน้าที่สร้าง ส่ง value (ถ้าไม่ใช่ null) ไปกับการสร้าง → server เรียก seedChecklistOnCreate(..., value) */
+export function ChecklistSeedPicker({ presetType, value, onChange, disabled = false, label = null, settingsTitle = "Checklist งานใหม่" }: {
+  presetType: string; value: string[] | null; onChange: (v: string[]) => void; disabled?: boolean; label?: ReactNode; settingsTitle?: string;
+}) {
+  const rows = useLookupRows(presetType);
+  const [text, setText] = useState("");
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const names = rows.map((r) => r.name.trim()).filter(Boolean);
+  const sel = value ?? rows.filter((r) => isAutoNewPreset(r.metadata)).map((r) => r.name.trim()).filter(Boolean);
+  const all = [...names, ...sel.filter((s) => !names.includes(s))];
+  const toggle = (n: string) => onChange(sel.includes(n) ? sel.filter((x) => x !== n) : [...sel, n].slice(0, 10));
+  const addText = () => {
+    const v = text.trim().slice(0, 300);
+    if (!v) return;
+    if (!sel.includes(v)) onChange([...sel, v].slice(0, 10));
+    setText("");
+  };
+  return (
+    <div>
+      {label && <div className="text-[11px] text-slate-500">{label}</div>}
+      <div className="mt-0.5 flex flex-wrap items-center gap-1">
+        {all.map((n) => {
+          const on = sel.includes(n);
+          return (
+            <button key={n} type="button" disabled={disabled} onClick={() => toggle(n)} aria-pressed={on}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] disabled:opacity-60 ${on ? "border-blue-300 bg-blue-50 text-blue-700" : "border-dashed border-slate-300 text-slate-500 hover:border-blue-300 hover:text-blue-700"}`}>
+              <Icon value={on ? "i:check" : "i:plus"} className="text-[11px]" />{n}
+            </button>
+          );
+        })}
+        {!disabled && (
+          <input value={text} maxLength={300} onChange={(e) => setText(e.target.value)} aria-label="เพิ่มข้อเฉพาะงานนี้"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addText(); } }}
+            placeholder="＋ เพิ่มเฉพาะงานนี้ (Enter)"
+            className="h-6 w-40 rounded-full border border-slate-200 px-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        )}
+        {!disabled && (
+          <button type="button" onClick={() => setCfgOpen(true)} title="แก้ข้อที่ใส่ให้ทุกงานใหม่ (ใช้ร่วมกันทั้งทีม)"
+            className="ml-auto inline-flex items-center gap-0.5 rounded px-1 text-[11px] text-slate-400 hover:text-blue-600"><Icon name="settings" /> ตั้งค่า</button>
+        )}
+      </div>
+      <p className="mt-0.5 text-[11px] text-slate-400">{sel.length ? `จะใส่ให้ ${sel.length} ข้อตอนกดบันทึก` : "ไม่ใส่เช็กลิสต์ให้งานนี้"}</p>
+      <ChecklistPresetsEditor presetType={presetType} open={cfgOpen} onClose={() => setCfgOpen(false)} title={settingsTitle} />
     </div>
   );
 }

@@ -20,7 +20,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate, todayBangkok, addDaysYmd } from "@/lib/date";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
-import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
+import { ChecklistSeedPicker, RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
 import { SplitPanes, type SplitSize } from "@/components/split-panes";
 import { DateCards } from "@/components/date-cards";
 import { ParentSkuBox } from "./parent-sku-box";
@@ -916,6 +916,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   // ---- รูปก่อนบันทึก (ตอนสร้างใหม่): พักไว้ในเครื่อง → อัปโหลดอัตโนมัติตอนกดบันทึก ----
   const [pendImgs, setPendImgs] = useState<Array<{ file: File; url: string }>>([]);
+  // ⏳ รออะไรอยู่ ที่จะใส่ให้ "ตอนสร้าง" (ยังไม่มีเลขใบ) — null = ยังไม่แตะ ใช้ค่าตั้งต้น "ใบใหม่" (เจ้าของขอ 2026-11-12: ปรับได้ตอนสร้าง)
+  const [seedChecklist, setSeedChecklist] = useState<string[] | null>(null);
   const [pendDragging, setPendDragging] = useState(false);
   const pendFileRef = useRef<HTMLInputElement>(null);
 
@@ -1396,7 +1398,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   }, []);
 
-  const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": defaultCostExtra() }); };
+  const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setSeedChecklist(null); setCostParent(""); setCostExtraMap({ "": defaultCostExtra() }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "spec" | "comments" | "cost" | "quotes" | "notice" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
@@ -1505,6 +1507,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       parent_sku_codes: parentCodes,
       parent_sku_drafts: form.parent_sku_drafts,
       ...(!form.id && prefill?.lineInboxId ? { line_inbox_id: prefill.lineInboxId } : {}),   // เปิดจากกล่องงานจากไลน์
+      ...(!form.id && seedChecklist ? { checklist: seedChecklist } : {}),                     // ⏳ ที่เลือกเองตอนสร้าง (ไม่แตะ = ค่าตั้งต้น)
     };
     try {
       const res = form.id
@@ -1962,6 +1965,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     waiting: form.id ? (
       <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={form.id} canEdit={canEdit}
         presetType={DESIGN_WAITING.presetType} autoNew label={t("⏳ รออะไรอยู่", "⏳ Waiting on")} emptyText={t("ไม่มีอะไรรอ", "Nothing pending")} />
+    ) : canEdit ? (
+      // ยังไม่บันทึก: เลือกข้อที่จะใส่ให้ตอนสร้าง (ตั้งต้น = ข้อที่เปิดสวิตช์ "ใบใหม่" ใน Checklist งานใหม่)
+      <ChecklistSeedPicker presetType={DESIGN_WAITING.presetType} value={seedChecklist} onChange={setSeedChecklist}
+        label={t("⏳ รออะไรอยู่ (ใส่ให้ตอนสร้าง · กดชิปเพื่อเอาออก/ใส่)", "⏳ Waiting on (added on create)")} />
     ) : null,
     drive: (
       <div className="block">
@@ -2033,6 +2040,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {fld.brand}
       {fld.deadline}
       {fld.detail}
+      {fld.waiting}
       <div>
         <button type="button" onClick={() => setCreateMore((v) => !v)} aria-expanded={createOpenMore}
           className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800">
@@ -2049,7 +2057,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           </div>
         )}
       </div>
-      <p className="text-[11px] text-slate-400">{t("บันทึกแล้วจะเพิ่ม ⏳ รออะไรอยู่ · Comment ลูกค้า · ตีราคา · เสนอราคา ได้", "After saving you can add ⏳ Waiting on · Customer comments · Costing · Quotes")}</p>
+      <p className="text-[11px] text-slate-400">{t("บันทึกแล้วจะเพิ่ม Comment ลูกค้า · ตีราคา · เสนอราคา ได้", "After saving you can add customer comments · costing · quotes")}</p>
     </div>
   );
 

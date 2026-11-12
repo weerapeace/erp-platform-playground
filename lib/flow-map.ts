@@ -139,7 +139,7 @@ export const FLOW_NODES: Record<string, FlowNode> = {
     statuses: "ร่าง → ออกแล้ว · ยกเลิก", metrics: ["cn_issued"],
     gaps: ["ออกใบลดหนี้แล้ว ยอดค้าง สต็อก รายงานขาย ไม่เปลี่ยน — หักเฉพาะตอนดูในจอใบวางบิล"] },
   // ── ผลิต ──
-  ds: { label: "ใบงานออกแบบ", sub: "Design Dashboard", area: "make", href: "/master/design-dashboard", pages: "/master/design-dashboard (+ กล่องงานจากไลน์)", tables: "design_sheets ← design_sheet_line_inbox (ร่างจากกลุ่มไลน์)",
+  ds: { label: "ใบงานออกแบบ", sub: "Design Dashboard", area: "make", href: "/master/design-dashboard", pages: "/master/design-dashboard (+ กล่องงานจากไลน์ · มุมมองไอเดีย)", tables: "design_sheets ← design_sheet_line_inbox (ร่างจากกลุ่มไลน์) · design_ideas (ไอเดีย → เริ่มทำงานจริง)",
     statuses: "ตั้งในระบบ: ออกแบบ · เสนอราคา · ส่งลูกค้า · แก้ไข · อนุมัติ · สร้าง SKU แล้ว · ยกเลิก", metrics: ["ds_active"],
     gaps: ["ไม่เห็นว่าแบบนี้ผลิตถึงไหนแล้ว (Dashboard ไม่อ่านใบสั่งผลิต)", "BOM ที่สร้างจากตารางต้นทุน บรรทัดไม่มีรหัสวัตถุดิบ ซื้อไม่ได้"] },
   sku: { label: "SKU + สูตร BOM", sub: "/master/bom", area: "make", href: "/master/bom", pages: "/master/skus · /master/bom", tables: "skus_v2 · bom_headers · bom_lines",

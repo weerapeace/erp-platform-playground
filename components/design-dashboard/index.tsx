@@ -16,7 +16,8 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
 import { SummaryListMenu } from "@/components/design-sheet-summary/list-menu";
-import { RecordTasksButton } from "@/components/record-tasks";
+import { ChecklistPresetsEditor, RecordTasksButton } from "@/components/record-tasks";
+import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import type { ChecklistSummary } from "@/lib/record-tasks";
 import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
 import { BrandSlot } from "@/components/brand-theme/slots";
@@ -44,6 +45,8 @@ const WorkflowStatusManager = dynamic(
 );
 // popup รายละเอียดงาน = ของกลาง design-sheet-detail โหมด "เฉพาะ popup" (โหลดเฉพาะตอนเปิดการ์ด ไม่ถ่วงบอร์ด)
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
+// 💡 หน้าไอเดีย (Drafted) — โหลดเมื่อเปิดมุมมองนี้เท่านั้น (./ideas-view · เจ้าของขอ 2026-11-12)
+const IdeasView = dynamic(() => import("./ideas-view").then((m) => m.IdeasView), { ssr: false });
 // แผงลอย "📄 ใบนำเสนอ A4" — mount ที่ระดับบอร์ด (ปิดป๊อปอัปใบงานแล้วแผงยังอยู่ ดูบอร์ดไปจัดใบไป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 // ป๊อป "📋 สรุปงาน" (ของกลาง design-sheet-summary) — โหลดเฉพาะตอนเปิด
@@ -66,6 +69,7 @@ export function DesignDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMgr, setStatusMgr] = useState(false);
+  const [checklistCfg, setChecklistCfg] = useState(false);   // ⚙️ ตั้งค่า → Checklist งานใหม่ (ข้อที่ใส่ให้ทุกงานใหม่ · เจ้าของขอ 2026-11-12)
   const [draggingSheetId, setDraggingSheetId] = useState<string | null>(null);
   const [dropTargetStatus, setDropTargetStatus] = useState<string | null>(null);
   const [movingSheetId, setMovingSheetId] = useState<string | null>(null);
@@ -96,7 +100,7 @@ export function DesignDashboard() {
     id: s.id, code: s.code, name: s.name, brand_name: s.brand_name, cover_url: s.cover_url, updated_at: s.updated_at,
   })), [sheets]);
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
-  const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
+  const [viewMode, setViewMode] = useState<"board" | "gallery" | "ideas">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี) / ไอเดีย (ยังไม่ใช่งานจริง)
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
   // ── รูปแบบจอ (ของกลาง device-view): จอคอม / แท็บเล็ต / มือถือ — อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) ──
   // `layout` = สิ่งที่ต้องเรนเดอร์จริง · เลือกดูแบบมือถือบนจอคอม → DevicePreviewFrame ครอบเป็นกรอบเครื่อง + QR ให้สแกนเปิดบนเครื่องจริง
@@ -150,7 +154,7 @@ export function DesignDashboard() {
   // จำมุมมองที่เลือกไว้รายคน (บอร์ด/การ์ดรูปใหญ่)
   useEffect(() => {
     apiFetch("/api/user-prefs?key=design_dashboard_view_mode").then((r) => r.json())
-      .then((j) => { const v = j?.value; if (v === "board" || v === "gallery") setViewMode(v); })
+      .then((j) => { const v = j?.value; if (v === "board" || v === "gallery" || v === "ideas") setViewMode(v); })
       .catch(() => {});
   }, []);
   // คอลัมน์สถานะที่ซ่อนบนบอร์ด — จำรายคน (user_ui_prefs) · ยังไม่เคยตั้ง = ค่าเริ่มต้น DEFAULT_HIDDEN_COLS
@@ -206,7 +210,7 @@ export function DesignDashboard() {
   // 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ของกลาง components/hover-card) — ตั้งค่าต่อคน
   const hoverPref = useSheetHoverPref();
   const hoverOn = hoverPref.on && hoverPref.fields.length > 0;
-  const changeViewMode = (mode: "board" | "gallery") => {
+  const changeViewMode = (mode: "board" | "gallery" | "ideas") => {
     setViewMode(mode);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_view_mode", value: mode }) }).catch(() => {});
   };
@@ -580,6 +584,7 @@ export function DesignDashboard() {
       items: [
         { type: "radio", key: "v-board", icon: "layout-kanban", label: t("บอร์ดตามสถานะ", "Board by status"), checked: viewMode === "board", onSelect: () => changeViewMode("board") },
         { type: "radio", key: "v-gallery", icon: "photo", label: t("การ์ดรูปใหญ่", "Large image cards"), checked: viewMode === "gallery", onSelect: () => changeViewMode("gallery") },
+        { type: "radio", key: "v-ideas", icon: "bulb", label: t("ไอเดีย (ยังไม่ใช่งานจริง)", "Ideas (not real jobs yet)"), checked: viewMode === "ideas", onSelect: () => changeViewMode("ideas") },
         { type: "divider", key: "d1" },
         ...(viewMode === "board" ? [
           { type: "section", key: "s-size", label: t("ขนาดการ์ด", "Card size") },
@@ -622,6 +627,8 @@ export function DesignDashboard() {
         ...(isDesktop ? [{ type: "submenu", key: "hover", icon: "eye", label: t("ชี้การ์ดแล้วโชว์", "Card hover preview"), hint: hoverPref.on ? t("เปิด", "On") : t("ปิด", "Off"), width: 300,
           render: () => <SheetHoverSettingsPanel pref={hoverPref} /> }] : []),
         { key: "status", icon: "arrows-shuffle", label: t("จัดการสถานะ", "Manage statuses"), onSelect: () => setStatusMgr(true) },
+        ...(canEdit ? [{ key: "checklist", icon: "list-check", label: t("Checklist งานใหม่", "New job checklist"), onSelect: () => setChecklistCfg(true),
+          title: t("ข้อ ⏳ รออะไรอยู่ ที่ใส่ให้ทุกงานใหม่ (ตอนสร้างงานยังติ๊กออก/เพิ่มเฉพาะงานได้)", "Checklist items added to every new job") }] : []),
         { key: "brands", icon: "tag", label: t("ตั้งค่าแบรนด์", "Brand settings"), onSelect: () => setBrandSettingsOpen(true) },
       ] as MenuItem[],
     },
@@ -769,14 +776,14 @@ export function DesignDashboard() {
                     <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("🔍 ค้นหารหัส / ชื่องาน...", "🔍 Search code / job name...")}
                       className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                     <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
-                      {([["board", "🗂️", t("บอร์ดตามสถานะ", "Board by status")], ["gallery", "🖼️", t("การ์ดรูปใหญ่", "Large image cards")]] as const).map(([key, icon, label]) => (
+                      {([["board", "i:layout-kanban", t("บอร์ดตามสถานะ", "Board by status")], ["gallery", "i:photo", t("การ์ดรูปใหญ่", "Large image cards")], ["ideas", "i:bulb", t("ไอเดีย", "Ideas")]] as const).map(([key, icon, label]) => (
                         <button key={key} type="button" onClick={() => changeViewMode(key)} title={label} aria-label={label}
-                          className={`h-8 w-9 rounded text-sm transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600"}`}>{icon}</button>
+                          className={`inline-flex h-8 w-9 items-center justify-center rounded text-sm transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600"}`}><Icon value={icon} className="text-[16px]" /></button>
                       ))}
                     </div>
                   </div>
-                  {/* ตัวเลขสรุป 3 ช่อง (เจ้าของเลือกแบบ widget 2026-11-10) — แตะ = กรองเฉพาะกลุ่มนั้น · แตะซ้ำ = เลิกกรอง · นับตามแบรนด์ที่เลือก */}
-                  <div className="grid grid-cols-3 gap-2">
+                  {/* ตัวเลขสรุป 3 ช่อง (เจ้าของเลือกแบบ widget 2026-11-10) — แตะ = กรองเฉพาะกลุ่มนั้น · แตะซ้ำ = เลิกกรอง · นับตามแบรนด์ที่เลือก · หน้าไอเดียไม่ใช้ */}
+                  {viewMode !== "ideas" && <div className="grid grid-cols-3 gap-2">
                     {([
                       { key: "overdue", label: t("เกินกำหนด", "Overdue"), on: "border-rose-500 bg-rose-500 text-white", off: "border-rose-200 bg-rose-50 text-rose-700" },
                       { key: "due2", label: t("ส่งใน 2 วัน", "Due in 2 days"), on: "border-amber-500 bg-amber-500 text-white", off: "border-amber-200 bg-amber-50 text-amber-800" },
@@ -791,9 +798,9 @@ export function DesignDashboard() {
                         </button>
                       );
                     })}
-                  </div>
+                  </div>}
                   {/* งานที่ยังไม่ตั้ง Deadline = ตัวเลขข้างบนนับไม่ได้ → บอกให้รู้ + แตะดูรายการไปตั้งทีละใบ */}
-                  {(filterCounts.nodl > 0 || quickFilter !== "all") && (
+                  {viewMode !== "ideas" && (filterCounts.nodl > 0 || quickFilter !== "all") && (
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                       {filterCounts.nodl > 0 && (
                         <button type="button" onClick={() => setQuickFilter(quickFilter === "nodl" ? "all" : "nodl")}
@@ -828,7 +835,11 @@ export function DesignDashboard() {
               </div>
               )}
 
-              {loading ? (
+              {viewMode === "ideas" ? (
+                /* ── 💡 ไอเดีย (ยังไม่ใช่งานจริง) — ใช้ช่องค้นหา + แบรนด์ที่เลือกในแถบซ้ายร่วมกัน · เริ่มงานจริงแล้วเปิดใบงานใหม่ให้ ── */
+                <IdeasView canEdit={canEdit} search={search} brandId={selectedBrand ? selectedBrand.key : null}
+                  onPromoted={(id) => { refreshDashboard(); openDetail(id); }} />
+              ) : loading ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   {[0, 1, 2, 3, 4].map((item) => <LoadingCard key={item} />)}
                 </div>
@@ -846,7 +857,7 @@ export function DesignDashboard() {
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
                 <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} foldedCols={foldedSet} onToggleFold={toggleFoldCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
               )}
-              {isPhone && viewMode !== "gallery" && filteredSheets.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">{t("ปัดซ้าย-ขวาตรงรายการ = ดูสถานะถัดไป", "Swipe the list left/right to see the next status")}{onCardLongPress ? t(" · กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว", " · Press and hold a card to change its status") : ""}</p>}
+              {isPhone && viewMode === "board" && filteredSheets.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">{t("ปัดซ้าย-ขวาตรงรายการ = ดูสถานะถัดไป", "Swipe the list left/right to see the next status")}{onCardLongPress ? t(" · กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว", " · Press and hold a card to change its status") : ""}</p>}
             </section>
             )}
 
@@ -931,6 +942,9 @@ export function DesignDashboard() {
         <DesignSheetSummaryBuilder open summaryId={summaryBuilder.id} initialSheetIds={summaryBuilder.sheetIds}
           onClose={() => setSummaryBuilder(null)} onChanged={() => setSummaryReload((k) => k + 1)} />
       )}
+
+      {/* ⚙️ ตั้งค่า → Checklist งานใหม่ = ค่าใช้บ่อยของ ⏳ รออะไรอยู่ (ตัวเดียวกับ ⚙️ ในใบงาน) · สวิตช์ "ใบใหม่" = ใส่ให้ทุกงานใหม่ */}
+      {checklistCfg && <ChecklistPresetsEditor presetType={DESIGN_WAITING.presetType} open onClose={() => setChecklistCfg(false)} title={t("Checklist งานใหม่", "New job checklist")} />}
 
       {statusMgr && (
         <WorkflowStatusManager

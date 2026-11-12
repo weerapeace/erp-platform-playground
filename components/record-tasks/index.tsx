@@ -15,7 +15,7 @@ import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
 
 export { useRecordTasks } from "./use-record-tasks";
-export { RecordChecklist, RecordChecklistChip } from "./checklist";
+export { RecordChecklist, RecordChecklistChip, ChecklistPresetsEditor, ChecklistSeedPicker } from "./checklist";
 
 export function RecordTasksButton({ moduleKey, recordId = null, label = "📝 รายการงาน", title = "📝 รายการงาน / โน้ต", canEdit = true }: {
   moduleKey: string; recordId?: string | null; label?: string; title?: string; canEdit?: boolean;

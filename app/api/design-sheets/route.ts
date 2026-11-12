@@ -6,6 +6,8 @@
  * POST /api/design-sheets → สร้างใบงาน (เลขรันอัตโนมัติ DS-{YYYY}-{0000})
  *      + line_inbox_id = เปิดใบงานจากร่างใน "กล่องงานจากไลน์" (จองร่างก่อน → สร้างใบ → แนบรูปจากไลน์ + ผูกร่าง)
  *      + ⏳ รออะไรอยู่ ตั้งต้นให้เอง (seedChecklistOnCreate · ค่าใช้บ่อยที่เปิด "ใส่ให้เองตอนสร้างใบใหม่")
+ *        checklist = รายการที่เลือกเองในฟอร์มสร้าง (ChecklistSeedPicker) — ส่งมา = ใช้ตามนี้แทนค่าตั้งต้น ([] = ไม่ใส่)
+ *      + idea_id = "เริ่มทำงานจริง" จากหน้าไอเดีย (จองไอเดียก่อน → สร้างใบ → แนบรูปไอเดีย + ปิดไอเดีย · lib/design-ideas-server)
  *
  * ของกลาง: guardApi (products.view/products.edit) + writeAudit → audit_logs
  */
@@ -22,6 +24,7 @@ import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import type { ChecklistSummary } from "@/lib/record-tasks";
 import { requestActor } from "@/lib/request-actor";
 import { claimInboxForSheet, finishInboxConvert, releaseInboxClaim } from "@/lib/design-line-inbox";
+import { claimIdeaForSheet, finishIdeaPromote, releaseIdeaClaim } from "@/lib/design-ideas-server";
 import { sheetQuoteBadges, type SheetQuoteBadge } from "@/lib/design-sheet-quotations-db";
 
 export const dynamic = "force-dynamic";
@@ -202,6 +205,8 @@ type CreateBody = {
   parent_sku_codes?: string[];            // ใหม่ — หลายรหัส
   parent_sku_drafts?: string[];           // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
   line_inbox_id?: string | null;          // เปิดจากร่างในกล่องงานจากไลน์
+  checklist?: string[];                   // ⏳ รออะไรอยู่ ที่เลือกในฟอร์มสร้าง (ไม่ส่ง = ค่าตั้งต้น "ใบใหม่")
+  idea_id?: string | null;                // เริ่มทำงานจริงจากหน้าไอเดีย
 };
 
 // รวม/ปรับรหัส Parent SKU จาก payload (รองรับทั้งฟิลด์เดี่ยวเดิม + array ใหม่) → uppercase, ตัดช่องว่าง, ตัดซ้ำ
@@ -256,6 +261,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!claim.ok) return NextResponse.json({ error: claim.error }, { status: 409 });
     inboxRow = claim.row;
   }
+  // เริ่มทำงานจริงจากหน้าไอเดีย — จองไอเดียก่อนออกเลข (กดซ้ำ/สองคนกดพร้อมกัน ไม่ได้ใบงานซ้ำ)
+  const ideaId = String(body.idea_id ?? "").trim();
+  let ideaRow: Record<string, unknown> | null = null;
+  if (ideaId) {
+    if (inboxRow) { await releaseInboxClaim(admin, inboxId); return NextResponse.json({ error: "เลือกได้ทีละที่มา (ไลน์ หรือ ไอเดีย)" }, { status: 400 }); }
+    if (!/^[0-9a-f-]{36}$/i.test(ideaId)) return NextResponse.json({ error: "idea_id ไม่ถูกต้อง" }, { status: 400 });
+    const claim = await claimIdeaForSheet(admin, ideaId);
+    if (!claim.ok) return NextResponse.json({ error: claim.error }, { status: 409 });
+    ideaRow = claim.row;
+  }
 
   const code = await nextDsNo(admin);
   const { data: row, error } = await admin.from("design_sheets").insert({
@@ -270,18 +285,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }).select("id, code").single();
   if (error) {
     if (inboxRow) await releaseInboxClaim(admin, inboxId);   // คืนร่างกลับเข้ากล่อง
+    if (ideaRow) await releaseIdeaClaim(admin, ideaRow);     // คืนไอเดียเป็นสถานะเดิม
     return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   }
 
   await writeAudit(admin, {
     action: "create", entityType: "design_sheet", entityId: row.id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: inboxRow ? { code, name, from_line_inbox: inboxId } : { code, name },
+    metadata: inboxRow ? { code, name, from_line_inbox: inboxId } : ideaRow ? { code, name, from_idea: ideaId } : { code, name },
   });
   // ⏳ รออะไรอยู่ ตั้งต้น = ค่าที่ใช้บ่อยที่เปิดสวิตช์ "ใส่ให้เองตอนสร้างใบใหม่" (ตั้งที่ ⚙️ ข้างปุ่มใช้บ่อย) · พลาด = ใบงานยังสร้างได้ปกติ
-  const waitingSeeded = await seedChecklistOnCreate(admin, DESIGN_WAITING.moduleKey, String(row.id), { id: actor.id ?? user?.id ?? null, name: actor.name ?? user?.email ?? "system" });
+  const waitingSeeded = await seedChecklistOnCreate(admin, DESIGN_WAITING.moduleKey, String(row.id), { id: actor.id ?? user?.id ?? null, name: actor.name ?? user?.email ?? "system" },
+    Array.isArray(body.checklist) ? body.checklist : null);
   const lineImages = inboxRow
     ? await finishInboxConvert(admin, inboxRow, { id: String(row.id), code }, { id: actor?.id ?? null, name: actor?.name ?? null })
     : 0;
-  return NextResponse.json({ id: row.id, code, line_images: lineImages, waiting_seeded: waitingSeeded.length, error: null });
+  const ideaImages = ideaRow
+    ? await finishIdeaPromote(admin, ideaRow, { id: String(row.id), code }, { id: actor?.id ?? null, name: actor?.name ?? null })
+    : 0;
+  return NextResponse.json({ id: row.id, code, line_images: lineImages, idea_images: ideaImages, waiting_seeded: waitingSeeded.length, error: null });
 }

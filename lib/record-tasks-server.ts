@@ -96,14 +96,21 @@ export async function loadChecklistPresets(admin: Admin, moduleKey: string, limi
 /** ใส่ข้อตั้งต้นให้เรคคอร์ดที่เพิ่งสร้าง = ค่าที่ใช้บ่อยที่เปิดสวิตช์ "ใส่ให้เองตอนสร้างใหม่" (metadata.auto_new)
  *  เรียงตามลำดับในค่ากลาง (created_at ห่างกันทีละ 1 ms เพราะรายการเรียงตามเวลาที่เพิ่ม) · ประวัติทีละข้อ
  *  คืนชื่อข้อที่ใส่ · ไม่มีค่าที่เปิดสวิตช์ / พลาด = [] — ไม่ขวางการสร้างเรคคอร์ด */
-export async function seedChecklistOnCreate(admin: Admin, moduleKey: string, recordId: string, actor: { id: string | null; name: string }): Promise<string[]> {
+/** explicit = รายการที่คนสร้างเลือกเองในฟอร์ม (ChecklistSeedPicker) · ไม่ส่ง/null = ใช้ค่าใช้บ่อยที่เปิดสวิตช์ "ใบใหม่" · [] = ไม่ใส่เลย */
+export async function seedChecklistOnCreate(admin: Admin, moduleKey: string, recordId: string, actor: { id: string | null; name: string }, explicit?: unknown): Promise<string[]> {
   const t = TARGETS[moduleKey];
-  if (!t?.presetType || !isUuid(recordId)) return [];
+  if (!t || !isUuid(recordId)) return [];
   try {
-    const { data } = await admin.from("erp_lookups").select("name, metadata").eq("lookup_type", t.presetType).eq("is_active", true)
-      .order("sort_order", { ascending: true }).order("name", { ascending: true }).limit(50);
-    const titles = [...new Set(((data ?? []) as { name: string | null; metadata: unknown }[])
-      .filter((r) => isAutoNewPreset(r.metadata)).map((r) => (r.name ?? "").trim().slice(0, 300)).filter(Boolean))].slice(0, 10);
+    let titles: string[];
+    if (Array.isArray(explicit)) {
+      titles = [...new Set(explicit.map((s) => String(s ?? "").trim().slice(0, 300)).filter(Boolean))].slice(0, 10);
+    } else {
+      if (!t.presetType) return [];
+      const { data } = await admin.from("erp_lookups").select("name, metadata").eq("lookup_type", t.presetType).eq("is_active", true)
+        .order("sort_order", { ascending: true }).order("name", { ascending: true }).limit(50);
+      titles = [...new Set(((data ?? []) as { name: string | null; metadata: unknown }[])
+        .filter((r) => isAutoNewPreset(r.metadata)).map((r) => (r.name ?? "").trim().slice(0, 300)).filter(Boolean))].slice(0, 10);
+    }
     if (!titles.length) return [];
     const base = Date.now();
     const { data: rows, error } = await admin.from("erp_record_tasks").insert(titles.map((title, i) => ({
@@ -113,7 +120,7 @@ export async function seedChecklistOnCreate(admin: Admin, moduleKey: string, rec
     if (error) return [];
     for (const r of (rows ?? []) as { id: string; title: string }[]) {
       await writeAudit(admin, { action: "create", entityType: "record_task", entityId: r.id, actorId: actor.id, actorName: actor.name,
-        metadata: { module_key: moduleKey, record_id: recordId, title: r.title, via: "auto_new" } });
+        metadata: { module_key: moduleKey, record_id: recordId, title: r.title, via: Array.isArray(explicit) ? "picked_on_create" : "auto_new" } });
     }
     return titles;
   } catch { return []; }

@@ -1266,7 +1266,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "record-tasks", label: "เช็กลิสต์งานของรายการ", code: "RecordTasksButton", category: "feature",
     source: { path: "components/record-tasks" },
-    what: "ปุ่ม + ลิ้นชักเช็กลิสต์งาน/โน้ต ผูกกับรายการไหนก็ได้ · ฝังในฟอร์ม (RecordChecklist + แม่แบบหลายข้อ) · ป้ายบนการ์ด (แถวสิ่งที่รอ / เสร็จ 2/4)",
+    what: "ปุ่ม + ลิ้นชักเช็กลิสต์งาน/โน้ต ผูกกับรายการไหนก็ได้ · ฝังในฟอร์ม (RecordChecklist + แม่แบบหลายข้อ) · ป้ายบนการ์ด (แถวสิ่งที่รอ / เสร็จ 2/4) · เลือกข้อตอนสร้าง (ChecklistSeedPicker) · ป๊อปตั้งค่าค่าใช้บ่อยเปิดจากที่อื่น (ChecklistPresetsEditor)",
     doc: "record-tasks.md",
   },
   {
