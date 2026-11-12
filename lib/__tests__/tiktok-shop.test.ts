@@ -57,5 +57,18 @@ describe("TikTok Shop — ลิงก์อนุญาต / ค่าตั้
 
 describe("TikTok Shop — ข้อความ error ภาษาคน", () => {
   test("timestamp ผิด", () => { expect(ttsErrorText(new TtsApiError("Invalid timestamp", "36009004"))).toContain("เวลา"); });
+  test("36009004 ที่ไม่ใช่เรื่องเวลา ไม่ถูกตีเป็นเวลา (รหัสใช้ซ้ำหลายสาเหตุ)", () => {
+    expect(ttsErrorText(new TtsApiError("Invalid credentials. Invalid app_key query parameter.", "36009004"))).toContain("App Key");
+    expect(ttsErrorText(new TtsApiError("Invalid credentials. The x-tts-access-token header is invalid.", "36009004"))).toContain("เชื่อมต่อ TikTok Shop ใหม่");
+  });
+  test("105005 สิทธิ์ไม่พอ → บอกชื่อสิทธิ์ + ที่เปิด + ให้เชื่อมใหม่ (ข้อความจริงที่เจอ 2026-11-12)", () => {
+    const t = ttsErrorText(new TtsApiError("Access denied. This app has not been granted any access scope required by this endpoint. Add a required scope to the app, reauthorize it, and retry with a new access token.", "105005", null, "Shop Authorized Information (seller.authorization.info)"));
+    expect(t).toContain("Shop Authorized Information");
+    expect(t).toContain("จัดการ API");
+    expect(t).toContain("เผยแพร่การเปลี่ยนแปลง");
+    expect(t).toContain("เชื่อมต่อใหม่");
+  });
+  test("ลายเซ็นผิด 106001", () => { expect(ttsErrorText(new TtsApiError("Invalid credentials. The sign query parameter is invalid.", "106001"))).toContain("ลายเซ็น"); });
+  test("กุญแจหมดอายุ 105002", () => { expect(ttsErrorText(new TtsApiError("Expired credentials.", "105002"))).toContain("หมดอายุ"); });
   test("อื่น ๆ แนบรหัส", () => { expect(ttsErrorText(new TtsApiError("boom", "123"))).toBe("boom (รหัส 123)"); });
 });

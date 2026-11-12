@@ -58,17 +58,29 @@ export function ttsExpiryMs(v: unknown, now = Date.now()): number {
 // ───────── error ─────────
 export class TtsApiError extends Error {
   code: string; requestId: string | null;
-  constructor(message: string, code: string, requestId: string | null = null) { super(message); this.name = "TtsApiError"; this.code = code; this.requestId = requestId; }
+  scopeHint: string | null;   // ชื่อสิทธิ์ (API scope) ที่คำสั่งนี้ต้องใช้ — ใช้บอกเจ้าของว่าต้องไปเปิดสิทธิ์ไหน
+  constructor(message: string, code: string, requestId: string | null = null, scopeHint: string | null = null) {
+    super(message); this.name = "TtsApiError"; this.code = code; this.requestId = requestId; this.scopeHint = scopeHint;
+  }
 }
 
-/** ข้อความภาษาคนจาก error ของ TikTok (ไม่โชว์ข้อความดิบอย่างเดียว) */
+/**
+ * ข้อความภาษาคนจาก error ของ TikTok (ตาราง common-errors ทางการ)
+ * ⚠️ รหัส 36009004 ใช้ซ้ำหลายสาเหตุ (ไม่มี sign / กุญแจผิด / app_key ผิด / เวลาเพี้ยน) → แยกด้วยข้อความ ไม่ใช่รหัส
+ */
 export function ttsErrorText(e: unknown): string {
   const code = String((e as { code?: unknown })?.code ?? "");
   const msg = String((e as Error)?.message ?? e ?? "");
-  if (code === "36009004" || /timestamp/i.test(msg)) return "เวลาในคำขอคลาดเคลื่อน ลองใหม่อีกครั้ง";
-  if (/sign/i.test(msg) && /invalid|incorrect|wrong/i.test(msg)) return `ลายเซ็นคำขอไม่ผ่าน — ตรวจว่า TIKTOK_SHOP_APP_KEY / APP_SECRET ใน Vercel ตรงกับหน้าแอป (${msg})`;
-  if (/access.?token|token.+(expired|invalid)/i.test(msg)) return `กุญแจของร้านใช้ไม่ได้แล้ว — กดเชื่อมต่อ TikTok Shop ใหม่ (${msg})`;
-  if (/scope|permission/i.test(msg)) return `แอปยังไม่มีสิทธิ์ใช้คำสั่งนี้ — ตรวจสิทธิ์ (API scope) ในหน้าแอปของ Partner Center (${msg})`;
+  const scope = (e as { scopeHint?: string | null })?.scopeHint ?? null;
+  if (code === "105005" || /access scope/i.test(msg)) {
+    // เจอจริง 2026-11-12: กุญแจได้สิทธิ์ครบ แต่ตัวแอปใน Partner Center ยังไม่ได้เปิดสิทธิ์ → TikTok ปฏิเสธ
+    return `แอปใน TikTok Partner Center ยังไม่ได้เปิดสิทธิ์${scope ? ` "${scope}"` : ""} ที่คำสั่งนี้ต้องใช้ — เปิดที่ Partner Center › App & Service › แอปของเรา › จัดการ API แล้วกด "เผยแพร่การเปลี่ยนแปลง" จากนั้นในระบบกด ตัดการเชื่อมต่อ แล้วเชื่อมต่อใหม่ (รหัส ${code || "105005"})`;
+  }
+  if (code === "106001" || (/\bsign\b/i.test(msg) && /invalid|missing/i.test(msg))) return `ลายเซ็นคำขอไม่ผ่าน — ตรวจว่า TIKTOK_SHOP_APP_SECRET ใน Vercel ตรงกับหน้าแอป (${msg})`;
+  if (code === "105002" || /expired/i.test(msg)) return `กุญแจของร้านหมดอายุ — กดเชื่อมต่อ TikTok Shop ใหม่ (${msg})`;
+  if (/timestamp/i.test(msg)) return "เวลาในคำขอคลาดเคลื่อน ลองใหม่อีกครั้ง";
+  if (/app_key/i.test(msg)) return `App Key ไม่ถูกต้อง — ตรวจ TIKTOK_SHOP_APP_KEY ใน Vercel (${msg})`;
+  if (/access.?token/i.test(msg)) return `กุญแจของร้านใช้ไม่ได้ — กดเชื่อมต่อ TikTok Shop ใหม่ (${msg})`;
   return code ? `${msg} (รหัส ${code})` : msg;
 }
 
@@ -92,7 +104,7 @@ export const ttsRefreshToken = (refreshToken: string) => tokenCall("/api/v2/toke
 
 // ───────── เรียก API ─────────
 /** เรียก TikTok Shop API (เซ็นให้เอง) → คืน data · code ≠ 0 = โยน TtsApiError */
-export async function ttsApi(method: "GET" | "POST" | "PUT" | "DELETE", path: string, accessToken: string, opts: { query?: Record<string, string>; body?: unknown } = {}): Promise<Record<string, unknown>> {
+export async function ttsApi(method: "GET" | "POST" | "PUT" | "DELETE", path: string, accessToken: string, opts: { query?: Record<string, string>; body?: unknown; scope?: string } = {}): Promise<Record<string, unknown>> {
   const query: Record<string, string> = { ...(opts.query ?? {}), app_key: APP_KEY(), timestamp: String(Math.floor(Date.now() / 1000)) };
   const body = opts.body === undefined ? "" : JSON.stringify(opts.body);
   query.sign = await ttsSign(path, query, body, APP_SECRET());
@@ -103,7 +115,7 @@ export async function ttsApi(method: "GET" | "POST" | "PUT" | "DELETE", path: st
   });
   const j = await res.json().catch(() => null) as { code?: number; message?: string; request_id?: string; data?: Record<string, unknown> } | null;
   if (!j) throw new TtsApiError(`TikTok ตอบกลับไม่ถูกต้อง (HTTP ${res.status})`, String(res.status));
-  if (j.code !== 0) throw new TtsApiError(j.message || "เรียก TikTok ไม่สำเร็จ", String(j.code ?? res.status), j.request_id ?? null);
+  if (j.code !== 0) throw new TtsApiError(j.message || "เรียก TikTok ไม่สำเร็จ", String(j.code ?? res.status), j.request_id ?? null, opts.scope ?? null);
   return j.data ?? {};
 }
 
@@ -126,5 +138,5 @@ export function ttsShopsFromApi(data: Record<string, unknown> | null | undefined
   return out;
 }
 export async function ttsGetAuthorizedShops(accessToken: string): Promise<TtsShop[]> {
-  return ttsShopsFromApi(await ttsApi("GET", "/authorization/202309/shops", accessToken));
+  return ttsShopsFromApi(await ttsApi("GET", "/authorization/202309/shops", accessToken, { scope: "Shop Authorized Information (seller.authorization.info)" }));
 }
