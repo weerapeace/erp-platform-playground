@@ -23,6 +23,11 @@
 // 2026-11-01: opts.onDropTarget — ลากไปวางนอกลิสต์ตัวเอง (เช่น ย้ายรูปไปแถวสีอื่น) · ที่วางใส่ data-reorder-drop="<key>"
 //   ปล่อยบนที่วาง (ไม่ใช่แถวในลิสต์ตัวเอง) = เรียก onDropTarget(from, key) · ที่วางที่กำลังชี้ได้ data-drop-over="true" (ไว้ไฮไลต์)
 //   (ไม่ใส่ = ทำงานแบบเดิมทุกอย่าง)
+//
+// 2026-11-12: holdProps(i) — "กดค้างที่ตัวมันเองแล้วลาก" (เช่น การ์ดรูป) ไม่ต้องจับที่หูจับ · เจ้าของขอ "กดที่รูปค้างแล้วเลื่อนได้"
+//   นิ้ว (มือถือ) = กดค้าง ~0.35 วิ แล้วค่อยลาก (ปัดเร็ว ๆ = เลื่อนหน้าเหมือนเดิม) · เมาส์ = กดแล้วลากได้เลย
+//   คลิกเฉย ๆ ยังทำงาน (เช่น เปิดรูปใหญ่) · ลากเสร็จ = กันคลิกที่ตามมา · ใส่ draggable={false} ที่ <img> กันเบราว์เซอร์ลากรูปเอง
+//   ใช้ร่วมกับ handleProps ได้ (หูจับยังใช้ได้ตามเดิม)
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -57,14 +62,15 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
     "data-drag-over": overIdx === i && dragIdx !== i ? "true" : undefined,
   });
 
-  // props ของ "หูจับ" = ตัวเริ่มลาก
-  const handleProps = (i: number) => ({
-    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      const sx = e.clientX;
-      const sy = e.clientY;
+  /**
+   * เริ่มติดตามการลากของแถว i จากจุดกด (sx, sy)
+   *   mode "move" = ขยับเกิน 4px ค่อยเริ่มลาก (หูจับ / เมาส์บนตัวแถว)
+   *   mode "hold" = ต้องกดค้าง holdMs ก่อน · ขยับเกิน 8px ก่อนครบเวลา = ยกเลิก (ปล่อยให้เลื่อนหน้า) · ครบเวลา = เริ่มลากทันที (นิ้วบนมือถือ)
+   */
+  const track = (i: number, sx: number, sy: number, mode: "move" | "hold", holdMs = 350) => {
       let active = false;
+      let cancelled = false;
+      let holdTimer: ReturnType<typeof setTimeout> | null = null;
       overRef.current = null;
       let dropEl: HTMLElement | null = null;
       const setDropEl = (el: HTMLElement | null) => {
@@ -82,13 +88,31 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
         return Number.isFinite(n) ? n : null;
       };
 
+      const activate = () => {
+        if (active || cancelled) return;
+        active = true;
+        setDragIdx(i);
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "grabbing";
+        if (mode === "hold") { try { navigator.vibrate?.(10); } catch { /* บางเครื่องไม่มี */ } }
+      };
+      // ระหว่างลากด้วยนิ้ว: กันหน้าเลื่อนตาม (touchmove ต้องไม่ passive ถึงกันได้)
+      const blockScroll = (ev: TouchEvent) => { if (active) ev.preventDefault(); };
+      const blockMenu = (ev: Event) => { if (active || (mode === "hold" && !cancelled)) ev.preventDefault(); };
+      if (mode === "hold") {
+        holdTimer = setTimeout(activate, holdMs);
+        window.addEventListener("touchmove", blockScroll, { passive: false });
+        window.addEventListener("contextmenu", blockMenu);
+      }
       const move = (ev: PointerEvent) => {
         if (!active) {
-          if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
-          active = true;
-          setDragIdx(i);
-          document.body.style.userSelect = "none";
-          document.body.style.cursor = "grabbing";
+          const d = Math.hypot(ev.clientX - sx, ev.clientY - sy);
+          if (mode === "hold") {
+            if (d > 8) { cancelled = true; if (holdTimer) clearTimeout(holdTimer); up(); }   // ปัด = เลื่อนหน้า ไม่ใช่ลาก
+            return;
+          }
+          if (d < 4) return;
+          activate();
         }
         const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
         const over = rowAt(el);
@@ -99,32 +123,62 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
         // ไม่ได้ชี้แถวในลิสต์ตัวเอง → ที่วางนอกลิสต์ (ถ้าเปิดใช้)
         setDropEl(over === null && onDropTargetRef.current ? ((el?.closest?.(`[${DROP_ATTR}]`) as HTMLElement | null) ?? null) : null);
       };
-      const up = () => {
+      function up() {
+        if (holdTimer) clearTimeout(holdTimer);
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
         window.removeEventListener("pointercancel", up);
+        window.removeEventListener("touchmove", blockScroll);
+        // เมนูกดค้างของรูป (บันทึกรูป ฯลฯ) มาหลังปล่อยนิ้วได้ — ถอดตัวกันทีหลังนิดหนึ่ง
+        setTimeout(() => window.removeEventListener("contextmenu", blockMenu), 400);
         document.body.style.userSelect = "";
         document.body.style.cursor = "";
         const to = overRef.current;
         const dropKey = dropEl?.getAttribute(DROP_ATTR) ?? null;
         setDropEl(null);
+        if (active) {
+          // ลากแล้ว = กันคลิกที่ตามมา (ไม่ให้เปิดรูป/กดปุ่มใต้นิ้วโดยไม่ตั้งใจ)
+          const eat = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); };
+          window.addEventListener("click", eat, { capture: true, once: true });
+          setTimeout(() => window.removeEventListener("click", eat, { capture: true }), 0);
+        }
         if (active && to !== null && to !== i) onReorderRef.current(i, to);
         else if (active && to === null && dropKey) onDropTargetRef.current?.(i, dropKey);
+        cancelled = true;
+        active = false;
         setDragIdx(null);
         setOverIdx(null);
         overRef.current = null;
-      };
+      }
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
       window.addEventListener("pointercancel", up);
+  };
+
+  // props ของ "หูจับ" = ตัวเริ่มลาก (ขยับเกิน 4px)
+  const handleProps = (i: number) => ({
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      track(i, e.clientX, e.clientY, "move");
     },
     style: { touchAction: "none" } as const,
+  });
+
+  // props ของ "ตัวแถวทั้งตัว" (เช่น การ์ดรูป) = กดค้างแล้วลาก — นิ้ว: ค้าง holdMs ก่อน · เมาส์: ลากได้เลย · คลิกเฉย ๆ ยังทำงาน
+  const holdProps = (i: number, holdMs = 350) => ({
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return;
+      if ((e.target as HTMLElement | null)?.closest?.("[data-no-hold-drag]")) return;   // ปุ่มย่อยในการ์ด (ลบ/ตั้งปก) ไม่เริ่มลาก
+      track(i, e.clientX, e.clientY, e.pointerType === "mouse" ? "move" : "hold", holdMs);
+    },
+    style: { WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" } as const,
   });
 
   /** คลาสไฮไลต์แถว (กำลังลาก / กำลังจะวางตรงนี้) — ต่อท้าย className ของแถว */
   const rowCls = (i: number) => `${dragIdx === i ? "opacity-40" : ""} ${overIdx === i && dragIdx !== i ? "ring-2 ring-violet-300" : ""}`;
 
-  return { rowProps, handleProps, rowCls, dragIdx, overIdx };
+  return { rowProps, handleProps, holdProps, rowCls, dragIdx, overIdx };
 }
 
 /** หูจับสำหรับลาก (วางไว้หัวแถว) — กระจาย props จาก handleProps(i) */

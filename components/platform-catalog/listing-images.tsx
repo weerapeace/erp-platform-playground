@@ -8,7 +8,7 @@
  *
  * รูปในฟอร์ม: ลิงก์ของร้าน หรือ "r2:<key>" = รูปจากคลังรูปในระบบ (systemImageRef) → API ของแต่ละร้านแปลง/ฝากรูปก่อนส่ง
  *   LINE: ลิงก์สาธารณะ /api/r2-image · Lazada: ฝากรูปกับ Lazada (/image/migrate) ได้ลิงก์ slatic.net
- * ลากเรียง = ของกลาง SortableList (useDragReorder) · ตั้งปก = ย้ายไปแรก · ลบ (เหลือ ≥ 1)
+ * ลากเรียง = ของกลาง SortableList (useDragReorder · กดค้างที่รูป holdProps หรือหูจับ) · ตั้งปก = ย้ายไปแรก · ลบ (เหลือ ≥ 1)
  * ของกลางที่ใช้: ERPModal · LoadingState · Icon · SortableList
  */
 import { useCallback, useState } from "react";
@@ -66,7 +66,7 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
           return (
             <div key={`${ref}-${i}`} {...(canEdit ? drag.rowProps(i) : {})}
               className={`relative aspect-square overflow-hidden rounded-lg border bg-slate-50 ${isNew ? "border-violet-300" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
-              <button type="button" onClick={() => onOpen(i)} className="h-full w-full"><img src={listingImgSrc(ref)} alt="" loading="lazy" className="h-full w-full object-cover" /></button>
+              <button type="button" onClick={() => onOpen(i)} {...(canEdit ? drag.holdProps(i) : {})} title={canEdit ? "แตะ = ดูรูปใหญ่ · กดค้างแล้วลาก = เรียงลำดับ" : undefined} className="h-full w-full"><img src={listingImgSrc(ref)} alt="" loading="lazy" draggable={false} className="pointer-events-none h-full w-full object-cover" /></button>
               {i === 0 && <span className="absolute left-1 top-1 rounded-full bg-white/90 px-1.5 text-[10px] text-violet-700">ปก</span>}
               {isNew && <span className="absolute right-1 top-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">ใหม่</span>}
               {canEdit && (
@@ -88,7 +88,7 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
           </button>
         )}
       </div>
-      <p className="text-[11px] text-slate-400">{platformName} รับ 1–{max} รูป · รูปแรก = ปก · ลากที่หูจับเพื่อเรียง · รูปป้าย “ใหม่” = จากคลังรูปในระบบ (ส่งตอนกดบันทึก){note ? ` · ${note}` : ""}</p>
+      <p className="text-[11px] text-slate-400">{platformName} รับ 1–{max} รูป · รูปแรก = ปก · กดค้างที่รูปแล้วลากเพื่อเรียง (หรือลากที่หูจับ) · รูปป้าย “ใหม่” = จากคลังรูปในระบบ (ส่งตอนกดบันทึก){note ? ` · ${note}` : ""}</p>
     </div>
   );
 }

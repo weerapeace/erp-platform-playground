@@ -899,8 +899,8 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sortable-list", label: "ลากจัดลำดับรายการ", code: "SortableList", category: "table",
     source: { path: "components/sortable-list" },
-    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ)",
-    when: "ทุกที่ที่ให้คนเรียงลำดับเอง",
+    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ) · ลากที่หูจับ (handleProps) หรือกดค้างที่ตัวการ์ดแล้วลาก (holdProps — นิ้วค้าง ~0.35 วิ · เมาส์ลากได้เลย · คลิกเฉย ๆ ยังทำงาน)",
+    when: "ทุกที่ที่ให้คนเรียงลำดับเอง · การ์ดรูป/ไทล์ที่ควรกดค้างลากได้ทั้งใบ = holdProps",
   },
   {
     key: "line-item-columns", label: "จัดคอลัมน์ตารางบรรทัดเอกสาร", code: "LineColumnsManager", category: "table",
