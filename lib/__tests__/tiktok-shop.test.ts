@@ -2,8 +2,28 @@ import { describe, expect, test, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { ttsSignInput, ttsSign, ttsExpiryMs, ttsShopsFromApi, ttsAuthUrl, ttsConfigured, ttsErrorText, ttsBrandMismatch, TtsApiError, ttsProductToCatalogItem, ttsDetailExtras, ttsIsRateLimit } from "@/lib/tiktok-shop";
 import { summarizeListing } from "@/lib/platform-listing-health";
-import { ttsOrderToPlatformOrder } from "@/lib/tiktok-shop";
+import { ttsOrderToPlatformOrder, ttsCategoryLeafPaths } from "@/lib/tiktok-shop";
 import { tiktokToInternal } from "@/lib/platform-order-status";
+
+describe("TikTok Shop — หมวดหมู่ (ชื่อเต็ม ราก > … > ใบ)", () => {
+  // รูปจากเอกสาร get-categories-202309 + ชื่อจริงจาก category_chains ของสินค้า Louis Montini
+  const CATS = [
+    { id: "824584", parent_id: "0", local_name: "กระเป๋าและกระเป๋าเดินทาง", is_leaf: false },
+    { id: "902920", parent_id: "824584", local_name: "อุปกรณ์เสริมสำหรับกระเป๋า", is_leaf: false },
+    { id: "904584", parent_id: "902920", local_name: "สายสะพายและโซ่กระเป๋า", is_leaf: true, permission_statuses: ["AVAILABLE"] },
+    { id: "905000", parent_id: "824584", local_name: "กระเป๋าถือ", is_leaf: true, permission_statuses: ["INVITE_ONLY"] },
+  ];
+  test("เก็บเฉพาะใบสุด + ชื่อเต็มคั่น ' > ' + สถานะสิทธิ์", () => {
+    expect(ttsCategoryLeafPaths(CATS)).toEqual([
+      { id: "905000", path: "กระเป๋าและกระเป๋าเดินทาง > กระเป๋าถือ", permission: "INVITE_ONLY" },
+      { id: "904584", path: "กระเป๋าและกระเป๋าเดินทาง > อุปกรณ์เสริมสำหรับกระเป๋า > สายสะพายและโซ่กระเป๋า", permission: "AVAILABLE" },
+    ]);
+  });
+  test("พ่อหาย/วนซ้ำ ไม่ค้าง", () => {
+    expect(ttsCategoryLeafPaths([{ id: "1", parent_id: "9", local_name: "ลอย", is_leaf: true }])[0].path).toBe("ลอย");
+    expect(ttsCategoryLeafPaths([{ id: "1", parent_id: "2", local_name: "A", is_leaf: true }, { id: "2", parent_id: "1", local_name: "B", is_leaf: false }])[0].path).toBe("B > A");
+  });
+});
 
 describe("TikTok Shop — แปลงออเดอร์เป็นหัว+รายการ ศูนย์ออเดอร์", () => {
   const ORDER = {

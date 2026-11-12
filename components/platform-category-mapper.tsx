@@ -197,6 +197,17 @@ export function PlatformCategoryMapper() {
       toast.success("ดึงหมวดจาก Google แล้ว");
     } catch (e) { setImportMsg("ผิดพลาด: " + (e instanceof Error ? e.message : "")); } finally { setImporting(false); }
   };
+  // ดึงหมวดจาก TikTok Shop API (ต้องเชื่อมร้าน TikTok ไว้ที่บัญชีแพลตฟอร์มก่อน) — /api/tiktok-shop/categories/sync
+  const importTiktok = async () => {
+    setImporting(true); setImportMsg("กำลังดึงหมวดหมู่จาก TikTok…");
+    try {
+      const res = await apiFetch("/api/tiktok-shop/categories/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "ดึงไม่สำเร็จ");
+      setImportMsg(`ดึงจาก TikTok แล้ว ${Number(j.imported).toLocaleString("th-TH")} หมวด (หมวดใบสุด ชื่อไทย+อังกฤษ · ร้านลงได้ ${Number(j.available).toLocaleString("th-TH")} หมวด)`);
+      toast.success("ดึงหมวดจาก TikTok แล้ว");
+      void load();
+    } catch (e) { setImportMsg("ผิดพลาด: " + (e instanceof Error ? e.message : "")); } finally { setImporting(false); }
+  };
   const importPfCode = platforms.find((p) => p.id === importPf)?.code ?? "";
 
   // ล้างหมวดที่นำเข้าของร้าน (นำเข้าผิดไฟล์/ผิดร้าน) — การจับคู่ที่ทำไว้ไม่ถูกลบ
@@ -326,6 +337,16 @@ export function PlatformCategoryMapper() {
                 className="w-full h-10 text-sm font-medium border-2 border-dashed border-indigo-200 rounded-lg text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
                 {importing ? "กำลังนำเข้า…" : "⬆️ เลือกไฟล์หมวดหมู่"}
               </button>
+              {importPfCode === "tiktok" && (
+                <>
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400"><span className="flex-1 border-t border-slate-100" />หรือ<span className="flex-1 border-t border-slate-100" /></div>
+                  <button type="button" onClick={importTiktok} disabled={importing}
+                    className="w-full h-10 text-sm font-medium border-2 border-slate-300 rounded-lg text-slate-800 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+                    <PlatformIcon code="tiktok" size={16} />ดึงจาก TikTok อัตโนมัติ (ผ่านร้านที่เชื่อมไว้)
+                  </button>
+                  <p className="text-[10px] text-slate-400">ดึงหมวดหมู่ของ TikTok Shop ไทยจากร้านที่เชื่อมไว้ (อ่านอย่างเดียว) — กดซ้ำได้ หมวดเดิมจะอัปเดตชื่อ การจับคู่ที่ทำไว้ไม่หาย</p>
+                </>
+              )}
               {GOOGLE_TAXONOMY_CODES.includes(importPfCode) && (
                 <>
                   <div className="flex items-center gap-2 text-[11px] text-slate-400"><span className="flex-1 border-t border-slate-100" />หรือ<span className="flex-1 border-t border-slate-100" /></div>

@@ -319,6 +319,41 @@ export function ttsOrderToPlatformOrder(o: Record<string, unknown>, toInternal: 
   };
 }
 
+// ───────── หมวดหมู่ (อ่านอย่างเดียว) ─────────
+// GET /product/202309/categories?shop_cipher&locale → data.categories[{ id, parent_id ("0" = ราก), local_name, is_leaf, permission_statuses[] }]
+// ไม่ส่ง category_version = ใช้ต้นไม้ค่าเริ่มของร้าน (ตรงกับ category_chains ของสินค้าที่ดึงมา)
+export async function ttsGetCategories(accessToken: string, shopCipher: string, locale: string): Promise<Record<string, unknown>[]> {
+  const d = await ttsApi("GET", "/product/202309/categories", accessToken, { query: { shop_cipher: shopCipher, locale }, scope: PRODUCT_SCOPE });
+  return Array.isArray(d.categories) ? d.categories as Record<string, unknown>[] : [];
+}
+
+export type TtsCategoryLeaf = { id: string; path: string; permission: string | null };
+/** หมวดใบสุด + ชื่อเต็ม "ราก > … > ใบ" (คั่น " > " แบบเดียวกับ Shopee/Lazada ในระบบ) · permission = สถานะสิทธิ์ของร้าน (AVAILABLE = ลงได้) */
+export function ttsCategoryLeafPaths(cats: Record<string, unknown>[]): TtsCategoryLeaf[] {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const c of cats) { const id = str(c.id); if (id) byId.set(id, c); }
+  const nameOf = (id: string): string => {
+    const parts: string[] = [];
+    const seen = new Set<string>();
+    let cur: string | null = id;
+    while (cur && cur !== "0" && !seen.has(cur)) {
+      seen.add(cur);
+      const n = byId.get(cur);
+      if (!n) break;
+      parts.unshift(str(n.local_name) ?? cur);
+      cur = str(n.parent_id);
+    }
+    return parts.join(" > ");
+  };
+  const out: TtsCategoryLeaf[] = [];
+  for (const [id, c] of byId) {
+    if (c.is_leaf !== true) continue;
+    const perms = Array.isArray(c.permission_statuses) ? (c.permission_statuses as unknown[]).map((x) => String(x)) : [];
+    out.push({ id, path: nameOf(id), permission: perms.length ? perms.join(",") : null });
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path, "th"));
+}
+
 export async function ttsGetAuthorizedShops(accessToken: string): Promise<TtsShop[]> {
   return ttsShopsFromApi(await ttsApi("GET", "/authorization/202309/shops", accessToken, { scope: "Shop Authorized Information (seller.authorization.info)" }));
 }
