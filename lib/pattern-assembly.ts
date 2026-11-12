@@ -49,6 +49,16 @@ export type AssemblyOk = {
   fromBoard: { front: (p: Pt) => Pt; back: (p: Pt) => Pt };
 };
 export type Assembly = AssemblyOk | { ok: false; reason: "no-pieces" | "no-seams" | "no-structure"; loose: string[] };
+/**
+ * ความจุโดยประมาณ (ลิตร · รอบ G): ทรงมีชิ้นคั่นกลาง = พื้นที่แผ่นหน้า × ความลึก · ซองแบน = ตอนใส่ของพอง (พื้นที่ × ด้านสั้น × 0.3)
+ *   เป็นค่าประมาณจากรูปทรงที่ประกอบ ไม่หักความหนาวัสดุ/ซับใน
+ */
+export function bagVolumeLiters(A: AssemblyOk): number {
+  const P = A.panels.find((x) => x.pid === A.front)?.outline ?? A.panels[0]?.outline ?? [];
+  let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; }
+  const area = Math.abs(a) / 2, deep = A.kind === "wrap" ? A.depth : Math.min(A.width, A.height) * 0.3;
+  return Math.round(((area * deep) / 1000) * 10) / 10;
+}
 
 const POUCH_DEPTH = 1.5;
 const unit = (x: number, y: number): Pt => { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };

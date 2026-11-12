@@ -19,7 +19,7 @@ import type { Pt, Shape } from "@/lib/pattern-shape";
 /** ผลอัปเดตชุดเดิม (รอบ F2) — สตูดิโอเอาไปใส่กระดาน */
 export type TplUpdate = { kit: BagKit; patch: { pid: string; shape: Shape; holes: Shape[]; notches: Pt[]; grain: [Pt, Pt] | null; allow: number; allowEdges: number[] | null; foldEdges: number[] | null }[]; add: BagKit["pieces"]; plan: TplUpdatePlan; overwrite: boolean };
 import { flattenShape, shapeBox } from "@/lib/pattern-shape";
-import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow, type BagWinType } from "@/lib/bag-templates";
+import { BAG_DEFAULT, BAG_LIMITS, BAG_PRESETS, BAG_PVC_MARGIN, bagGeometry, bagPieces, bagTemplateLiters, type BagGeometry, type BagNumKey, type BagParams, type BagPiece, type BagWindow, type BagWinType } from "@/lib/bag-templates";
 
 const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
@@ -198,7 +198,7 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
 
         {/* ── ขวา: ภาพ 3D + ชิ้นที่จะได้ + คำอธิบาย ── */}
         <div className="min-w-0 space-y-3">
-          <Pattern3D mode="bag" bag={G} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={340} />
+          <Pattern3D mode="bag" bag={G} colors={colors} explode={explode} selected={pick} onSelect={setPick} height={340} volume={style === "tote" ? bagTemplateLiters(G) : null} />
           <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             {t("แยกชิ้นดู", "Pull pieces apart")}
             <input type="range" min={0} max={1} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="w-48 max-w-full accent-blue-600" />

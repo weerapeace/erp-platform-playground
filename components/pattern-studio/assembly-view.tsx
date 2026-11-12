@@ -12,16 +12,16 @@
  *   <AssemblyView pieces={[{ pid, name, count, shape, holes }]} seams={seams} attaches={attaches} onGoSew={() => …} />
  * ใช้ที่: app/pattern-studio/[id] · คู่มือ: docs/pattern-studio.md
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { Pattern3D, type Pattern3DCut } from "@/components/pattern-3d";
 import { RangeInput } from "@/components/range-input";
 import { SEAM_COLORS } from "@/components/pattern-sheet/shape-editor";
-import { assemble, type AsmPiece, type AsmStepKey, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
+import { assemble, bagVolumeLiters, type AsmPiece, type AsmStepKey, type AssemblyOk, type Attach } from "@/lib/pattern-assembly";
 import { buildSewn, isSewnExtra } from "@/lib/pattern-sewn";
 import { shapeBox } from "@/lib/pattern-shape";
-import { buildSimMesh, createBagSim } from "@/lib/pattern-sim";
+import { buildSimMesh, createBagSim, simCell } from "@/lib/pattern-sim";
 import type { Seam } from "@/lib/pattern-seams";
 
 const f1 = (x: number) => x.toFixed(1);
@@ -79,10 +79,15 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   const [fill, setFill] = useState(0);
   const [simWake, setSimWake] = useState(0);
   const [simInfo, setSimInfo] = useState<{ h: number; done: boolean } | null>(null);
-  const sim = useMemo(() => { if (!simOn || !A0.ok) return null; try { return createBagSim(buildSimMesh(A0), { stiffness: 0.5, fill: 0 }); } catch { return null; } }, [simOn, A0]);
+  const [simRes, setSimRes] = useState<"coarse" | "normal" | "fine">("normal");   // ความละเอียดตาข่าย (รอบ G)
+  const [frozen, setFrozen] = useState(false);
+  const [pinTop, setPinTop] = useState(false);
+  const [pinSel, setPinSel] = useState(false);
+  const sim = useMemo(() => { if (!simOn || !A0.ok) return null; try { return createBagSim(buildSimMesh(A0, simCell(A0) * (simRes === "coarse" ? 1.6 : simRes === "fine" ? 0.65 : 1)), { stiffness: 0.5, fill: 0 }); } catch { return null; } }, [simOn, A0, simRes]);
   const stiffRows = useMemo(() => (sim ? sim.mesh.pids.map((pid) => ({ pid, ...(pieceStiff?.(pid, stiff) ?? { s: stiff, why: "" }) })) : []), [sim, pieceStiff, stiff]);
   const stiffKey = stiffRows.map((x) => `${x.pid}:${x.s}`).join("|");
-  useEffect(() => { if (!sim) return; sim.setParams({ stiffness: stiff, fill, perPiece: Object.fromEntries(stiffRows.map((x) => [x.pid, x.s])) }); setSimWake((n) => n + 1); }, [sim, stiff, fill, stiffKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!sim) return; sim.setParams({ stiffness: stiff, fill, perPiece: Object.fromEntries(stiffRows.map((x) => [x.pid, x.s])), pin: { top: pinTop, pids: pinSel && pickRef.current ? [pickRef.current] : [] } }); setSimWake((n) => n + 1); }, [sim, stiff, fill, stiffKey, pinTop, pinSel]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!sim) return; sim.setFrozen(frozen); setSimWake((n) => n + 1); }, [sim, frozen]);
   useEffect(() => {
     if (!sim) { setSimInfo(null); return; }
     const id = window.setInterval(() => setSimInfo({ h: sim.height(), done: sim.settled() }), 400);
@@ -93,6 +98,7 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
   useEffect(() => { if (!view) return; setStepMode(view === "steps"); setSimOn(view === "sim"); if (view === "steps") setDone(0); }, [view]);
   const wrapCls = compact ? "space-y-3" : "grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]", H = height ?? 560;
   const [pick, setPick] = useState<string | null>(null);
+  const pickRef = useRef<string | null>(null); pickRef.current = pick;
   const [body, setBody] = useState(COLORS[0][0]);
   const [handle, setHandle] = useState(COLORS[1][0]);
   const colors = useMemo(() => ({ body, handle }), [body, handle]);
@@ -195,10 +201,10 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
     <div className={wrapCls} data-asm-view>
       <div className="min-w-0 space-y-2">
         {simOn && sim
-          ? <Pattern3D saveName={saveName} mode="sim" sim={sim} simWake={simWake} colors={colors} height={H} />
+          ? <Pattern3D saveName={saveName} mode="sim" sim={sim} simWake={simWake} colors={colors} height={H} volume={bagVolumeLiters(A)} />
           : extras.length || LA
-            ? <Pattern3D saveName={saveName} mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />
-            : <Pattern3D saveName={saveName} mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} />}
+            ? <Pattern3D saveName={saveName} mode="sewn" sewn={scene} cut={cut} seamColors={SEAM_COLORS} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} volume={bagVolumeLiters(A)} />
+            : <Pattern3D saveName={saveName} mode="assembly" assembly={A} colors={colors} explode={explode} joined={joined} selected={pick} onSelect={setPick} height={H} volume={bagVolumeLiters(A)} />}
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setSimOn(!simOn)} aria-pressed={simOn} className={`${view ? "hidden" : "inline-flex"} h-8 items-center gap-1.5 rounded-lg border px-3 text-xs ${simOn ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
             <Icon value="i:wind" className="text-sm" />{simOn ? t("กลับไปภาพประกอบ", "Back to the assembled view") : t("จำลองวัสดุทิ้งตัว (ทดลอง)", "Simulate material drape (experimental)")}
@@ -214,6 +220,17 @@ export function AssemblyView({ pieces, seams, attaches, onGoSew, onGoDraw, onAtt
           <div className="grid gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs sm:grid-cols-2">
             <RangeInput label={t("ความอยู่ทรงกลาง — ใช้กับชิ้นที่ยังไม่ได้ตั้งค่าวัสดุ (0 = ผ้านิ่ม · 1 = แข็ง)", "Default stiffness — for pieces without material values (0 = soft · 1 = rigid)")} min={0} max={1} step={0.05} value={stiff} onChange={setStiff} />
             <RangeInput label={t("ของข้างใน (0 = เปล่า · 1 = เต็มใบ)", "Contents (0 = empty · 1 = full)")} min={0} max={1} step={0.05} value={fill} onChange={setFill} />
+            <div className="flex flex-wrap items-center gap-1.5 sm:col-span-2" data-sim-controls>   {/* รอบ G: ความละเอียด · หยุดนิ่ง · ตรึงจุด */}
+              <span className="text-slate-500">{t("ความละเอียดตาข่าย", "Mesh detail")}</span>
+              {([["coarse", "หยาบ (เร็ว)", "Coarse (fast)"], ["normal", "ปกติ", "Normal"], ["fine", "ละเอียด", "Fine"]] as const).map(([k, th, en]) => <button key={k} type="button" data-sim-res={k} onClick={() => setSimRes(k)} aria-pressed={simRes === k} className={`h-7 rounded-md px-2 ${simRes === k ? "bg-slate-800 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{t(th, en)}</button>)}
+              <span className="text-slate-400">· {t(`${sim.mesh.n} จุด`, `${sim.mesh.n} points`)}</span>
+              <button type="button" data-sim-freeze onClick={() => setFrozen(!frozen)} aria-pressed={frozen} className={`ml-auto h-7 rounded-md px-2 ${frozen ? "bg-sky-700 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{frozen ? t("ปลดหยุดนิ่ง", "Unfreeze") : t("หยุดนิ่ง (Freeze)", "Freeze")}</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:col-span-2" data-sim-pin>
+              <label className="flex items-center gap-1.5"><input type="checkbox" checked={pinTop} onChange={(e) => setPinTop(e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />{t("ตรึงปากกระเป๋า (แขวนดู)", "Pin the mouth (hang it)")}</label>
+              <label className="flex items-center gap-1.5" title={t("คลิกชิ้นในภาพประกอบก่อน แล้วติ๊ก — ชิ้นนั้นจะอยู่ที่เดิมไม่ทรุด", "Click a piece in the assembled view first, then tick — that piece stays put")}><input type="checkbox" checked={pinSel} disabled={!pick} onChange={(e) => setPinSel(e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />{t(pick ? `ตรึงชิ้นที่เลือก (${nameOf(pick)})` : "ตรึงชิ้นที่เลือก (เลือกชิ้นก่อน)", pick ? `Pin the selected piece (${nameOf(pick)})` : "Pin the selected piece (select one first)")}</label>
+              {sim.pinned() > 0 && <span className="text-slate-400">{t(`ตรึง ${sim.pinned()} จุด`, `${sim.pinned()} points pinned`)}</span>}
+            </div>
             {stiffRows.length > 0 && (
               <ul className="space-y-0.5 rounded-md bg-slate-50 p-2 text-[11px] text-slate-600 sm:col-span-2">
                 {stiffRows.map((x) => <li key={x.pid} className="flex justify-between gap-2"><span className="min-w-0 truncate">{nameOf(x.pid)}{x.why ? <span className="text-slate-400"> · {x.why}</span> : null}</span><b className="tabular-nums">{x.s.toFixed(2)}</b></li>)}

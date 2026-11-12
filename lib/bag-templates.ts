@@ -93,6 +93,11 @@ export type BagGeometry = {
   hemLen: number;             // รอบปาก
 };
 
+/** ความจุโดยประมาณของแม่แบบ Tote (ลิตร · รอบ G) = พื้นที่ตัวหน้า (คางหมู หักมุมโค้ง) × หนา */
+export function bagTemplateLiters(G: BagGeometry): number {
+  const { W, H, D, r } = G.p, area = ((W + G.Wt) / 2) * H - (r > 0 ? 2 * (r * r - (Math.PI * r * r) / 4) : 0);
+  return Math.round(((area * D) / 1000) * 10) / 10;
+}
 /** ปรับค่าให้อยู่ในขอบเขต + คิดเรขาคณิตของกระเป๋าที่เย็บแล้ว */
 export function bagGeometry(raw: Partial<BagParams>): BagGeometry {
   const p: BagParams = { ...BAG_DEFAULT, ...raw };

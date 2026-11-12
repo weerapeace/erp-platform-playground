@@ -51,5 +51,9 @@ describe("ค้นหาเครื่องมือ", () => {
     expect(ids("หูหิ้ว")[0]).toBe("strap"); expect(ids("แถบกุ๊น")[0]).toBe("bind-pieces"); expect(ids("ช่องโชว์")[0]).toBe("window");
     expect(ids("แมว")).toContain("window"); expect(ids("เก็บงานแก้มือ")[0]).toBe("tpl-update");
   });
+  it("รอบ G1: เครื่องมือภาพ 3D ค้นเจอ", () => {
+    expect(ids("ortho")[0]).toBe("v-camera"); expect(ids("wireframe")[0]).toBe("v-display"); expect(ids("glb")[0]).toBe("v-glb");
+    expect(ids("ลิตร")[0]).toBe("v-ref"); expect(ids("freeze")[0]).toBe("v-simctl"); expect(ids("ย้ายชิ้น")[0]).toBe("v-move");
+  });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });

@@ -33,7 +33,7 @@ import { SEAM_COLORS, ShapeEditor, type EditorPiece, type ResultPiece } from "@/
 import type { Flat3DPiece, Flat3DThread, Pattern3DCut } from "@/components/pattern-3d";
 import { pieceEdges, sidePoints, type Seam } from "@/lib/pattern-seams";
 import { buildSewn } from "@/lib/pattern-sewn";
-import { assemble, type AsmPiece, type Attach } from "@/lib/pattern-assembly";
+import { assemble, bagVolumeLiters, type AsmPiece, type Attach } from "@/lib/pattern-assembly";
 import { liningPlan, pocketPlan, type PocketOpts } from "@/lib/pattern-lining";
 import { shapeBox } from "@/lib/pattern-shape";
 import type { BagParams } from "@/lib/bag-templates";
@@ -594,7 +594,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
             {sewnOn && sewnScene
-              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />
+              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} volume={sewnScene?.asm ? bagVolumeLiters(sewnScene.asm) : null} />
               : <Pattern3D saveName={imageName} mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />}
             {sewnOn && sewnScene ? (
               <div className="space-y-1 text-[11px] text-slate-500">
