@@ -71,3 +71,16 @@ export function checkNewMenuLink(
   if (pendingHrefs.some((h) => hrefKey(h) === hrefKey(href))) return { ok: false, field: "href", error: "เพิ่มลิงก์นี้ไว้แล้ว (ยังไม่บันทึก)" };
   return { ok: true, label, href };
 }
+
+// ── 🗑 ถังขยะ (หน้ารวมทุกแอป /admin/app-manager) ──
+/** อยู่ในถังขยะเพราะอะไร — "off" ปิดทั้งระบบ · "no_app" ไม่อยู่แอปไหนเลย · null = ยังใช้งานอยู่ (ไม่อยู่ในถังขยะ) */
+export type MenuTrashReason = "off" | "no_app";
+export function trashReason(m: { is_active?: boolean | null; app_keys?: string[] | null }): MenuTrashReason | null {
+  if (m.is_active === false) return "off";
+  if (!keysOf(m).length) return "no_app";
+  return null;
+}
+/** ลบถาวรได้เฉพาะเมนูในถังขยะ (ปิดแล้ว หรือไม่อยู่แอปไหน) — เมนูที่ยังใช้อยู่ต้องย้ายไปถังขยะก่อน · ใช้ทั้งหน้าเว็บและ DELETE /api/menu */
+export function canHardDelete(m: { is_active?: boolean | null; app_keys?: string[] | null }): boolean {
+  return trashReason(m) !== null;
+}

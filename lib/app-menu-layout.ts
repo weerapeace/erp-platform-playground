@@ -56,6 +56,11 @@ export function applyAppOverrides<T extends MenuLike>(items: T[], appKey: string
     .sort((a, b) => a.sort_order - b.sort_order);
 }
 
+/** เมนูของแอปนี้ (เปิดอยู่ + โชว์ในเมนู + มี appKey) เรียง/ตั้งชื่อตามที่แอปนี้ตั้งไว้ — กฎเดียวกับแถบแอปเดี่ยว /app/<key> · ใช้ที่แอปเดี่ยว + หน้ารวมทุกแอป (/admin/app-manager) */
+export function appMenuRows<T extends MenuLike & { is_active?: boolean | null; show_in_sidebar?: boolean | null; app_keys?: string[] | null }>(rows: T[], appKey: string): T[] {
+  return applyAppOverrides(rows.filter((m) => !!m.is_active && !!m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)), appKey);
+}
+
 /** รวมค่าใหม่ของแอปนี้เข้า app_overrides เดิม — ไม่ทับค่าของแอปอื่น / ช่อง section,label เดิม · คืน {} ถ้าว่างหมด */
 export function mergeAppOverride(raw: unknown, appKey: string, set: AppMenuOverrideSet): AppOverrides {
   const all: AppOverrides = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as AppOverrides) } : {};

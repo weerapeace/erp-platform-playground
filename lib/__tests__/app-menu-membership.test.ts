@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { addToAppPatch, removeFromAppPatch, otherAppsOf, isInAppBar, checkNewMenuLink, type MembershipMenu } from "@/lib/app-menu-membership";
+import { addToAppPatch, removeFromAppPatch, otherAppsOf, isInAppBar, checkNewMenuLink, trashReason, canHardDelete, type MembershipMenu } from "@/lib/app-menu-membership";
+import { appMenuRows } from "@/lib/app-menu-layout";
 
 const sku: MembershipMenu = { id: "1", label: "SKUs", href: "/master/skus", app_keys: ["master", "purchasing", "tasks"], is_active: true, show_in_sidebar: true };
 
@@ -53,5 +54,41 @@ describe("ตรวจลิงก์ใหม่", () => {
     const r = checkNewMenuLink({ label: "สินค้า", href: "/Master/SKUs/" }, [sku]);
     expect(r).toMatchObject({ ok: false, field: "href", existing: { id: "1" } });
     expect(checkNewMenuLink({ label: "ก", href: "/tasks/daily" }, [], ["/tasks/daily"])).toMatchObject({ ok: false, field: "href" });
+  });
+});
+
+
+describe("ถังขยะ + ลบถาวร", () => {
+  it("ปิดทั้งระบบ / ไม่อยู่แอปไหน = อยู่ในถังขยะ ลบถาวรได้ · ยังใช้อยู่ = ลบถาวรไม่ได้", () => {
+    expect(trashReason({ ...sku, is_active: false })).toBe("off");
+    expect(trashReason({ ...sku, app_keys: [] })).toBe("no_app");
+    expect(trashReason({ ...sku, app_keys: null })).toBe("no_app");
+    expect(trashReason(sku)).toBeNull();
+    expect(canHardDelete(sku)).toBe(false);
+    expect(canHardDelete({ ...sku, is_active: false })).toBe(true);
+  });
+  it("เอาออกจากทุกแอป หรือปิดทั้งระบบ แล้วถึงลบถาวรได้", () => {
+    let m: MembershipMenu = { ...sku };
+    for (const app of ["master", "purchasing"]) m = { ...m, ...removeFromAppPatch(m, app, "app") };
+    expect(canHardDelete(m)).toBe(false);   // ยังอยู่ tasks
+    m = { ...m, ...removeFromAppPatch(m, "tasks", "app") };
+    expect(canHardDelete(m)).toBe(true);
+    expect(canHardDelete({ ...sku, ...removeFromAppPatch(sku, "tasks", "off") })).toBe(true);
+  });
+  it("กู้คืนจากถังขยะเข้าแอปไหนก็ได้ → ไม่อยู่ในถังขยะแล้ว", () => {
+    for (const m of [{ ...sku, is_active: false }, { ...sku, app_keys: [] }]) expect(trashReason({ ...m, ...addToAppPatch(m, "sales") })).toBeNull();
+  });
+});
+
+describe("เมนูของแอป (กฎเดียวกับแถบแอปเดี่ยว)", () => {
+  it("เอาเฉพาะเปิดอยู่ + โชว์ในเมนู + มีแอปนี้ แล้วเรียงตามลำดับของแอป", () => {
+    const rows = [
+      { id: "a", label: "A", sort_order: 30, is_active: true, show_in_sidebar: true, app_keys: ["tasks"] },
+      { id: "b", label: "B", sort_order: 10, is_active: true, show_in_sidebar: true, app_keys: ["tasks"], app_overrides: { tasks: { sort: 40, label: "B2" } } },
+      { id: "c", label: "C", sort_order: 20, is_active: false, show_in_sidebar: true, app_keys: ["tasks"] },
+      { id: "d", label: "D", sort_order: 5, is_active: true, show_in_sidebar: false, app_keys: ["tasks"] },
+      { id: "e", label: "E", sort_order: 1, is_active: true, show_in_sidebar: true, app_keys: ["master"] },
+    ];
+    expect(appMenuRows(rows, "tasks").map((r) => `${r.id}:${r.label}`)).toEqual(["a:A", "b:B2"]);
   });
 });

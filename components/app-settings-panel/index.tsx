@@ -38,7 +38,7 @@ export const APP_SETTINGS_PAGES: Record<string, AppSettingsPage[]> = {
   payroll: [{ href: "/payroll/settings", label: "ตั้งค่าเงินเดือน" }],
 };
 
-export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHref, items, onSaved }: {
+export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHref, items, onSaved, inHub }: {
   appKey: string; appLabel: string;
   /** erp_app_groups.id / menu_more_label / default_href — ใช้ในแท็บจัดเรียง/ซ่อนเมนู */
   appId?: string | null; moreLabel?: string | null; defaultHref?: string | null;
@@ -46,6 +46,8 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
   items: AppSettingsMenuItem[];
   /** บันทึกแล้ว — ให้แถบเมนูโหลดใหม่ */
   onSaved: () => void;
+  /** เปิดอยู่ในหน้ารวมทุกแอป (/admin/app-manager) — ซ่อนลิงก์ "ทุกแอป" */
+  inHub?: boolean;
 }) {
   const { can } = useAuth();
   const pages = (APP_SETTINGS_PAGES[appKey] ?? []).filter((p) => !p.perm || can(p.perm));
@@ -66,6 +68,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
             <button key={p.href} type="button" onClick={() => setTab(p.href)} className={tabCls(tab === p.href)}>{p.icon ?? "🔧"} {p.label}</button>
           ))}
           <div className="ml-auto flex items-center gap-3 pb-2 text-xs">
+            {!inHub && <a href={`/admin/app-manager?app=${encodeURIComponent(appKey)}`} target="_blank" rel="noopener" className="text-blue-600 hover:underline" title="จัดการทุกแอปจากหน้าเดียว + ถังขยะเมนู">ทุกแอป / ถังขยะ ↗</a>}
             <a href={`/admin/menu`} target="_blank" rel="noopener" className="text-blue-600 hover:underline">จัดการเมนู/ไอคอน/ลำดับ ↗</a>
             <a href="/admin/role-board" target="_blank" rel="noopener" className="text-blue-600 hover:underline">สิทธิ์ตามตำแหน่ง ↗</a>
           </div>

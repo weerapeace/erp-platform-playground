@@ -110,9 +110,18 @@ export default function MiscPortalPage() {
       body: JSON.stringify({ id: m.id, patch: { is_active: !m.is_active } }) });
     load();
   };
+  // ลบ = 2 ขั้นแบบถังขยะ (เซิร์ฟเวอร์ลบถาวรได้เฉพาะเมนูที่ปิดแล้ว — lib/app-menu-membership canHardDelete)
+  //   ยังเปิดอยู่ → ปิด (ย้ายไปถังขยะ · เปิดกลับได้ด้วยปุ่มซ่อน/แสดง) · ปิดอยู่แล้ว → ลบถาวร
   const removeItem = async (m: MenuItem) => {
-    if (!confirm(`ลบแอป "${m.label}" ออกจากพอร์ทัล?\n(ลบเฉพาะไอคอน/ลิงก์ ไม่ลบข้อมูลในแอป)`)) return;
-    await apiFetch(`/api/menu?id=${m.id}`, { method: "DELETE" });
+    if (m.is_active) {
+      if (!confirm(`ย้ายแอป "${m.label}" ไปถังขยะ?\n(ซ่อนจากพอร์ทัล · กู้คืนได้ · กดลบอีกครั้งเพื่อลบถาวร)`)) return;
+      await apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: m.id, patch: { is_active: false } }) });
+      load();
+      return;
+    }
+    if (!confirm(`ลบแอป "${m.label}" ถาวร?\n(ลบเฉพาะไอคอน/ลิงก์ ไม่ลบข้อมูลในแอป · ย้อนกลับไม่ได้)`)) return;
+    const j = await apiFetch(`/api/menu?id=${m.id}`, { method: "DELETE" }).then((r) => r.json()).catch(() => ({ error: "ลบไม่สำเร็จ" }));
+    if (j?.error) alert(j.error);
     load();
   };
 

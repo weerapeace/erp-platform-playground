@@ -6,7 +6,8 @@
  * POST {item}    → เพิ่มเมนูเดียว
  * PATCH {id,patch}→ แก้เมนู (มีประวัติใน audit_logs · patch.audience = ใครเห็นเมนูนี้ — lib/menu-audience)
  *   + app_override {app_key, set:{sort?,place?}} = จัดเรียง/ซ่อนเมนูเฉพาะแอปนั้น (รวมเข้า app_overrides ฝั่งเซิร์ฟเวอร์ — lib/app-menu-layout)
- * DELETE ?id=    → ลบเมนูถาวร (ทุกแอป · มีประวัติ menu.delete) — หน้า ⚙️ ตั้งค่าแอปไม่ใช้ ใช้ "เอาออกจากแอป / ปิดทั้งระบบ" แทน (lib/app-menu-membership)
+ * DELETE ?id=    → ลบเมนูถาวร (ทุกแอป · มีประวัติ menu.delete) — **เฉพาะเมนูในถังขยะ** (ปิดแล้ว หรือไม่อยู่แอปไหน · canHardDelete)
+ *                  เมนูที่ยังใช้อยู่ → 409 ให้ย้ายไปถังขยะก่อน · หน้า ⚙️ ตั้งค่าแอปใช้ "เอาออกจากแอป / ปิดทั้งระบบ" (lib/app-menu-membership)
  * POST มีประวัติ menu.create / menu.seed
  *
  * อ่านได้ทุก user (authenticated) — เขียนต้องมีสิทธิ์ admin.users
@@ -18,6 +19,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { cleanAudience } from "@/lib/menu-audience";
 import { mergeAppOverride, type AppMenuOverrideSet } from "@/lib/app-menu-layout";
+import { canHardDelete } from "@/lib/app-menu-membership";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -113,6 +115,12 @@ export async function DELETE(request: NextRequest) {
   const admin = supabaseAdmin();
   // จดก่อนลบ — ลบถาวรแล้วย้อนไม่ได้ ประวัติต้องบอกได้ว่าลบเมนูอะไร อยู่แอปไหน
   const { data: before } = await admin.from("erp_menu_items").select("id, label, href, icon, app_keys, is_active, permission_key, audience").eq("id", id).maybeSingle();
+  if (!before) return NextResponse.json({ error: "ไม่พบเมนูนี้ (อาจถูกลบไปแล้ว)" }, { status: 404 });
+  // ลบถาวรได้เฉพาะเมนูในถังขยะ — กันลบเมนูที่ยังใช้อยู่โดยไม่ตั้งใจ (ทุกหน้าที่เรียก DELETE ต้องผ่านด่านนี้)
+  if (!canHardDelete(before as { is_active?: boolean | null; app_keys?: string[] | null })) {
+    const n = ((before as { app_keys?: string[] | null }).app_keys ?? []).length;
+    return NextResponse.json({ error: `เมนูนี้ยังใช้อยู่ใน ${n} แอป — ปิดเมนู หรือเอาออกจากทุกแอปก่อน (ย้ายไปถังขยะ) แล้วค่อยลบถาวรที่หน้า จัดการแอป → ถังขยะ`, code: "menu_in_use" }, { status: 409 });
+  }
   const { error } = await admin.from("erp_menu_items").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const b = (before ?? {}) as { label?: string | null; href?: string | null };

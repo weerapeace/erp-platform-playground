@@ -17,6 +17,7 @@ import { appHeaderStyle } from "@/lib/app-header-theme";
 import type { MenuSection } from "@/app/api/menu/sections/route";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 import { ConfirmDialog } from "@/components/modal";
+import { canHardDelete } from "@/lib/app-menu-membership";
 
 type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null; default_href?: string | null };
 const ALL = "__all__";
@@ -215,7 +216,8 @@ export default function MenuManagerPage() {
   // ---------- Menu items ----------
   // แก้ฟิลด์เมนู = เก็บลงร่าง (ยังไม่บันทึกจนกว่าจะกดปุ่ม "บันทึก")
   const patch = (id: string, p: Partial<MenuRow>) => stageEdit(id, p);
-  // ลบถาวร (ทุกแอป · ย้อนไม่ได้) — ถามก่อนด้วยกล่องยืนยันกลาง + พิมพ์ชื่อเมนู · แนะนำทางที่กู้คืนได้ (เอาออกจากแอป / ปิด 👁) · มีประวัติ menu.delete
+  // ลบถาวร (ทุกแอป · ย้อนไม่ได้) — เฉพาะเมนูในถังขยะ (ปิดแล้ว / ไม่อยู่แอปไหน · เซิร์ฟเวอร์ก็กันไว้) → กล่องยืนยันกลาง + พิมพ์ชื่อเมนู · มีประวัติ menu.delete
+  //   เมนูที่ยังใช้อยู่ → เสนอ "ปิดเมนู (ย้ายไปถังขยะ)" แทน (ร่าง รอกดบันทึก) แล้วลบถาวรได้ที่ /admin/app-manager → ถังขยะ
   const [delAsk, setDelAsk] = useState<MenuRow | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const del = (it: MenuRow) => setDelAsk(it);
@@ -461,6 +463,7 @@ export default function MenuManagerPage() {
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-2xl font-semibold text-slate-800">จัดการเมนู</h1>
           <div className="flex items-center gap-2">
+            <a href="/admin/app-manager" className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-violet-200 bg-violet-50 rounded-lg text-violet-700 hover:bg-violet-100" title="จัดการทุกแอปจากหน้าเดียว: เพิ่ม/เอาออกเมนู · ใครเห็น · ดูแบบคนนี้ · ถังขยะเมนู">จัดการแอป · ถังขยะ</a>
             <a href="/admin/icons" className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50" title="เปลี่ยนอีโมจิเป็นไอคอน / เปลี่ยนไอคอนทั้งระบบ">🔣 ไอคอนทั้งระบบ</a>
             {msg && <span className="text-xs text-emerald-600">✓ {msg}</span>}
             {rows.length === 0 && !loading && (
@@ -923,7 +926,17 @@ export default function MenuManagerPage() {
         </div>
       )}
 
-      {delAsk && (
+      {delAsk && !canHardDelete(delAsk) && (
+        <ConfirmDialog open onClose={() => setDelAsk(null)} variant="danger"
+          onConfirm={() => { patch(delAsk.id!, { is_active: false }); setDelAsk(null); flash("ปิดเมนูแล้ว (ยังไม่บันทึก) — กดบันทึกด้านล่าง · ลบถาวรได้ที่ จัดการแอป → ถังขยะ"); }}
+          title={`ย้าย “${delAsk.label}” ไปถังขยะ`} confirmText="ปิดเมนู (ย้ายไปถังขยะ)"
+          message={<div className="space-y-2 text-sm">
+            <p>เมนูนี้ยังใช้อยู่ใน <b>{(delAsk.app_keys ?? []).map((k) => apps.find((a) => a.key === k)?.label ?? k).join(", ")}</b> — ลบถาวรได้เฉพาะเมนูที่อยู่ในถังขยะ (ปิดแล้ว หรือไม่อยู่แอปไหน) กันลบของที่ยังใช้โดยไม่ตั้งใจ</p>
+            <p className="text-slate-600">กดยืนยัน = <b>ปิดเมนูนี้ทั้งระบบ</b> (หายจากทุกแอป · กู้คืนได้) แล้วกด <b>บันทึก</b> ด้านล่าง · ถ้าแค่ไม่อยากให้แอปนี้เห็น ใช้ <b>“เอาออกจากแอปนี้”</b> แทน</p>
+            <p className="text-xs text-slate-500">ลบถาวรภายหลังได้ที่ <a href="/admin/app-manager?view=trash" className="text-blue-600 hover:underline">จัดการแอป → ถังขยะ</a></p>
+          </div>} />
+      )}
+      {delAsk && canHardDelete(delAsk) && (
         <ConfirmDialog open onClose={() => !delBusy && setDelAsk(null)} onConfirm={() => void doDel()} loading={delBusy} variant="danger"
           title={`ลบเมนู “${delAsk.label}” ถาวร`} confirmText="ลบถาวร" requireTyped={delAsk.label}
           message={<div className="space-y-2 text-sm">

@@ -25,7 +25,7 @@ import { getSearchScope } from "@/lib/search-scopes";
 import { useSearchHotkey } from "@/lib/search-hotkey";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
 import { menuVisibleTo } from "@/lib/menu-audience";
-import { applyAppOverrides, menuPlace, moreLabelOf } from "@/lib/app-menu-layout";
+import { menuPlace, moreLabelOf, appMenuRows } from "@/lib/app-menu-layout";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { useAppGo } from "@/lib/app-go";
 import { useEmbeddedPageBar } from "@/lib/app-shell-bar";
@@ -127,7 +127,7 @@ export default function StandaloneApp() {
       const ag = (aj.data ?? []).find((x: AppGroup) => x.key === appKey) ?? null;
       setApp(ag);
       // เมนูของแอปนี้ เรียง/ตั้งชื่อตามที่แอปนี้ตั้งไว้ (↕️ จัดเรียง/ซ่อนเมนู — lib/app-menu-layout)
-      const appRows = applyAppOverrides(((mj.data ?? []) as MenuItem[]).filter((m) => m.is_active && m.show_in_sidebar && (m.app_keys ?? []).includes(appKey)), appKey);
+      const appRows = appMenuRows((mj.data ?? []) as MenuItem[], appKey);
       setAllItems(appRows);
       // ซ่อนในแอปนี้ → ตัดออก (เมนูย่อยของเมนูที่ซ่อนหายตาม)
       const hiddenIds = new Set(appRows.filter((m) => menuPlace(m, appKey) === "hidden").map((m) => m.id));
