@@ -1,6 +1,7 @@
 "use client";
 /**
  * ⚙️ ตั้งค่าแอปเดี่ยว (ของกลาง) — เปิดจากแถบบนของ /app/<key> (แอดมิน)
+ *   แท็บ เมนูและคนเห็น (แท็บแรก/ค่าเริ่มต้น): เรียง · ที่อยู่ · ใครเห็น ในรายการเดียว + แผง "ดูแบบคนนี้" (./menus-tab · กฎ lib/menu-visibility)
  *   แท็บ 👁 ใครเห็นเมนูไหน: ติ๊กตำแหน่งต่อเมนู (ไม่ติ๊ก = ทุกคน) + 👤 รายคน (ให้เห็นเพิ่ม / ซ่อนจาก) + ดูแทนตำแหน่ง
  *   แท็บ 👤 ตามพนักงาน: มุมกลับของแท็บบน — เลือกคน → ติ๊กเมนูที่คนนี้เห็น (./by-user · ข้อมูลชุดเดียวกัน)
  *     เก็บที่ erp_menu_items.audience (กฎ lib/menu-audience) · บันทึกแบบร่าง → 💾 · PATCH /api/menu (admin.users + ประวัติ)
@@ -19,11 +20,12 @@ import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
 import { MenuLayoutTab } from "./menu-layout";
 import { MenuByUserTab } from "./by-user";
+import { MenusAudienceTab } from "./menus-tab";
 import { saveMenuAudiences, sameAudience as same } from "./audience-save";
 import { MenuPermissionMatrix } from "@/components/menu-permissions";
 import { Icon } from "@/components/icon";
 
-export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown; sort_order: number; app_overrides?: unknown };
+export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown; sort_order: number; app_overrides?: unknown; app_keys?: string[] | null };
 type Role = { key: string; label: string; active?: boolean };
 
 /** หน้าตั้งค่าเฉพาะของแต่ละแอป (ฝังเป็นแท็บ · หน้าต้องรองรับ ?embed=1 — PlaygroundShell ทำให้เอง) — เพิ่มแอปอื่นที่นี่ที่เดียว
@@ -47,7 +49,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
 }) {
   const { can } = useAuth();
   const pages = (APP_SETTINGS_PAGES[appKey] ?? []).filter((p) => !p.perm || can(p.perm));
-  const [tab, setTab] = useState<"who" | "person" | "layout" | "perm" | string>("who");   // "who" / "person" / "layout" / "perm" หรือ href ของหน้าที่ฝัง
+  const [tab, setTab] = useState<"menus" | "who" | "person" | "layout" | "perm" | string>("menus");   // "menus" / "who" / "person" / "layout" / "perm" หรือ href ของหน้าที่ฝัง
   const page = pages.find((p) => p.href === tab) ?? null;
   const tabCls = (on: boolean) => `-mb-px border-b-2 px-3 py-2 text-sm whitespace-nowrap ${on ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`;
   return (
@@ -55,6 +57,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
       <div className="flex-shrink-0 border-b border-slate-200 bg-white px-4 pt-3">
         <h1 className="text-lg font-semibold text-slate-800">⚙️ ตั้งค่า {appLabel}</h1>
         <div className="mt-2 flex flex-wrap items-end gap-1">
+          <button type="button" onClick={() => setTab("menus")} className={tabCls(tab === "menus")}><Icon name="list" /> เมนูและคนเห็น</button>
           <button type="button" onClick={() => setTab("who")} className={tabCls(tab === "who")}>👁 ใครเห็นเมนูไหน</button>
           <button type="button" onClick={() => setTab("person")} className={tabCls(tab === "person")}><Icon name="user" /> ตามพนักงาน</button>
           <button type="button" onClick={() => setTab("layout")} className={tabCls(tab === "layout")}>↕️ จัดเรียง / ซ่อนเมนู</button>
@@ -70,6 +73,8 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
       </div>
       {page
         ? <iframe key={page.href} src={`${page.href}?embed=1`} title={page.label} className="flex-1 w-full border-0 bg-white" />
+        : tab === "menus"
+          ? <MenusAudienceTab appKey={appKey} appId={appId} moreLabel={moreLabel} defaultHref={defaultHref} items={items} onSaved={onSaved} />
         : tab === "person"
           ? <MenuByUserTab appKey={appKey} items={items} onSaved={onSaved} />
         : tab === "layout"
