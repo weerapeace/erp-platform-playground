@@ -34,9 +34,13 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
+import dynamic from "next/dynamic";
 
-type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive" | "ai_prompt";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive", "ai_prompt"];
+// ประวัติไฟล์ = ตัวเดียวกับมุมมอง "ประวัติไฟล์" ใน Task Manager (โหลดเมื่อเปิดแท็บ — ไม่ถ่วงหน้าตั้งค่า) · เจ้าของขอ 2026-11-12 ให้หาง่ายจากปุ่มตั้งค่า
+const FileHistoryView = dynamic(() => import("../file-history-view").then((m) => m.FileHistoryView), { ssr: false, loading: () => <LoadingState /> });
+
+type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive" | "ai_prompt" | "file_history";
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive", "ai_prompt", "file_history"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -85,6 +89,9 @@ export default function TaskSettingsPage() {
       { key: "brand_drive", icon: "🏷️", label: t("โฟลเดอร์ต่อแบรนด์", "Brand folders"), desc: t("Drive แยกตามแบรนด์", "Drive folders per brand") },
       { key: "ai_prompt", icon: "✨", label: t("Prompt แคปชั่น AI", "AI caption prompt"), desc: t("คำสั่งให้ AI เขียนแคปชั่น", "Instructions for AI-written captions") },
     ] },
+    { label: t("ประวัติ", "History"), items: [
+      { key: "file_history", icon: "📂", label: t("ประวัติไฟล์", "File history"), desc: t("ตัวแยกไฟล์ลงรูป / ย้ายโฟลเดอร์อะไรไปแล้วบ้าง", "What the file sorter uploaded or moved") },
+    ] },
   ];
 
   return (
@@ -132,6 +139,7 @@ export default function TaskSettingsPage() {
             </div>
           )
           : tab === "brand_drive" ? <BrandDriveFolders />
+          : tab === "file_history" ? <FileHistoryView />
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : tab === "campaign_category" ? t("หมวดแคมเปญ", "Campaign categories") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
         </SettingsNavLayout>
         )}
