@@ -268,6 +268,7 @@ export type CardConfig = {
   badges?:   string[];      // badge สี
   metrics?:  string[];      // ตัวเลขเด่น
   lines?:    string[];      // ข้อมูลอื่น
+  active?:   string;        // ฟิลด์เปิด/ปิด (boolean) → ป้าย "● เปิด" / "● ปิดอยู่" (แทน ✓/— ที่อ่านยาก)
   // ---- ลุค (ปรับได้) ----
   layout?:       "vertical" | "horizontal" | "compact" | "detailed";
   imageHeight?:  "sm" | "md" | "lg" | "xl";
@@ -632,7 +633,9 @@ export function DataTable<T extends Record<string, unknown>>({
         }
       }
       setDensity(layout.default_density);
-      setViewMode(layout.default_view_mode);
+      // 📱 มือถือ (< 768px) คงโหมดการ์ดไว้ — ค่า "ตาราง" ที่แอดมินตั้งไว้สำหรับจอคอม ไม่ทับบนมือถือ (กดสลับเองได้)
+      //   เดิมทับ → หน้า SKU/Parent ในมือถือเด้งกลับเป็นตารางกว้างทั้งที่ตั้งใจให้เป็นการ์ด (เจอ 2026-11-12)
+      if (layout.default_view_mode && !(isNarrow && showCardToggle)) setViewMode(layout.default_view_mode);
       setPendingDefaultPageSize(layout.default_page_size);
       // ค่าเริ่มต้นแบบขยายได้: เรียง / เรียงรอง / จัดกลุ่ม (ตั้งเฉพาะตอนยังไม่มีค่าเดิม → Saved View override ได้)
       const s = layout.settings ?? null;
@@ -1136,7 +1139,7 @@ export function DataTable<T extends Record<string, unknown>>({
     if (view.columnPinning) setColumnPinning(view.columnPinning);
     if (view.sorting) setSorting(view.sorting);
     if (view.density) setDensity(view.density);
-    if (view.viewMode) setViewMode(view.viewMode);
+    if (view.viewMode && !(isNarrow && showCardToggle && view.viewMode === "table")) setViewMode(view.viewMode);   // มือถือ: มุมมองที่บันทึกจากจอคอมเป็น "ตาราง" ไม่ทับการ์ด
     if (view.pageSize) setPendingDefaultPageSize(view.pageSize);
     setViewRowColorRules(view.rowColorRules ?? null);   // มีกฎสีของมุมมอง → ใช้ทับ · ไม่มี → กลับไปใช้ค่าระดับตาราง
     setRowSelection({});
@@ -3112,6 +3115,7 @@ function CardsView<T extends Record<string, unknown>>({
   const badges   = (config.badges  ?? []).map(get).filter(Boolean) as ColMeta[];
   const metrics  = (config.metrics ?? []).map(get).filter(Boolean) as ColMeta[];
   const lines    = (config.lines   ?? []).map(get).filter(Boolean) as ColMeta[];
+  const active   = get(config.active);
 
   const layout   = config.layout      ?? "vertical";
   const showImg  = layout !== "compact" && !!image;
@@ -3125,8 +3129,11 @@ function CardsView<T extends Record<string, unknown>>({
 
   const renderContent = (v: (k: string) => unknown) => (
     <div className={`${isCompact ? "p-2 space-y-1" : "p-3 space-y-2"} flex-1 min-w-0`}>
-      {badges.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+      {(badges.length > 0 || active) && (
+        <div className="flex flex-wrap items-center gap-1">
+          {active && (v(active.id)
+            ? <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิด</span>
+            : <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>)}
           {badges.map(b => {
             const val = v(b.id);
             if (val == null || val === "") return null;

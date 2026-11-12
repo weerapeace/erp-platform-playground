@@ -15,7 +15,7 @@ import { Icon } from "@/components/icon";
 import { formHiddenTabsKey, parseHiddenTabs, toggleHiddenTab, visibleTabKeys } from "@/lib/form-tab-prefs";
 import { ParentSkuPicker, SkuPicker } from "@/components/pickers";   // เลือกต้นทางในป๊อป "คัดลอกจากรุ่นอื่น" (ของกลาง)
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
-import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
+import { DataTable, StatusModuleContext, type CardConfig, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
 import { FooterSaveProvider, FooterSaveButton, FooterSaveRegistrar, useFooterSaveHost } from "@/components/footer-save";
@@ -53,6 +53,10 @@ import { formatAmount, currencyLabel } from "@/lib/money";
 import { MoneyInput } from "@/components/money-input";
 import { computedTextValue, textComputeDescribe, textComputeConfigKind } from "@/lib/computed-text";
 import { ScrollTabs } from "@/components/scroll-tabs";   // แถบแท็บยาวเกิน: กดแล้วเลื่อนให้อยู่กลาง + ปุ่ม ‹ ›
+import { useViewportLayout } from "@/components/device-view";   // 📱 จอมือถือ → ลิ้นชักจัดแบบมือถือ
+import { useSwipeNav } from "@/lib/use-swipe-nav";             // 📱 ปัดซ้าย-ขวาเปลี่ยนแท็บ (ของกลาง)
+import { ScanInput } from "@/components/scan-input";             // 📷 ปุ่มสแกนเปิดระเบียน (ของกลาง: กล้อง/เครื่องยิง/พิมพ์)
+import type { ScanHit } from "@/app/api/scan/resolve/route";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 // 🧩 ทะเบียนหน้าดูเฉพาะโมดูล (config.detailView ตาม moduleKey) — ตัวหน้าโหลดเฉพาะตอนเปิดโมดูลนั้น
@@ -642,6 +646,17 @@ export type MasterCRUDConfig = {
    */
   copyFromRecordToolbar?: boolean;
   /**
+   * หน้าตาการ์ดในโหมดการ์ด (มือถือเปิดเป็นการ์ดเอง) — ทับค่าตั้งต้น { รูปปก · ชื่อ · รหัส }
+   *   เช่น SKU: layout "horizontal" + ป้ายสี + ราคา + สถานะ (เจ้าของขอ 2026-11-12 "phone responsive")
+   *   ใส่ได้เฉพาะช่องที่เป็นคอลัมน์ของตาราง (ช่องลับที่ผู้ใช้ไม่มีสิทธิ์ = ไม่โชว์เอง)
+   */
+  cardConfig?: Partial<CardConfig>;
+  /**
+   * 📷 ปุ่ม "สแกน" บนหัวหน้ารายการ (กล้องมือถือ / เครื่องยิงบาร์โค้ด / พิมพ์รหัส) → หาผ่าน /api/scan/resolve (ของกลาง) แล้วเปิดลิ้นชักเลย
+   *   resolve(hit) คืน id ของระเบียนในโมดูลนี้ · คืน null = ของที่สแกนไม่ได้อยู่หน้านี้ (โชว์ลิงก์ไปหน้าของมันแทน)
+   */
+  scanOpen?: { resolve: (hit: ScanHit) => string | null };
+  /**
    * ของเสริมท้ายแถบเครื่องมือของลิ้นชัก (ชิดขวา) เช่น ป้าย "ต้องแก้ N อย่าง" ของ Parent SKU
    *   goto({ tab }) = ไปแท็บพิเศษ · goto({ field }) = ไปแท็บที่มีช่องนี้ (หาจาก layout) · คืน false = หาแท็บไม่เจอ
    *   version = updated_at ของระเบียน (เปลี่ยนเมื่อบันทึก → ของเสริมโหลดใหม่ได้)
@@ -1209,6 +1224,14 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [modeSaving, setModeSaving] = useState(false);
   const [modeScanning, setModeScanning] = useState(false);
   const [galleryCount, setGalleryCount] = useState<number | null>(null);   // จำนวนรูปในแกลเลอรี (เงื่อนไข "อย่างน้อย N รูป")
+  // 📱 มือถือ (≤639px) — ลิ้นชักจัดแบบมือถือ: หัวสั้น · เครื่องมือพับ · รูปพับ · ปัดเปลี่ยนแท็บ · แถบล่างปุ่มใหญ่ (เจ้าของขอ 2026-11-12)
+  const isPhone = useViewportLayout() === "phone";
+  const [phoneToolsOpen, setPhoneToolsOpen] = useState(false);
+  const [phoneMediaOpen, setPhoneMediaOpen] = useState(false);
+  // 📷 สแกนเปิดระเบียน (config.scanOpen)
+  const [scanModal, setScanModal] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanMiss, setScanMiss] = useState<{ msg: string; href?: string; title?: string } | null>(null);
   const [modeBadgeKey] = useState<string | null>(() => (config.moduleKey ? lastEntryMode(config.moduleKey) : null));
   const canEditModes = !!config.moduleKey && can("admin.module_layout.edit");
   const allEntryModes = useMemo(() => resolveEntryModes(config.moduleKey, entryModesRaw), [config.moduleKey, entryModesRaw]);
@@ -1514,6 +1537,20 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     const em = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("entry_mode") : null;
     if (em) setActiveModeKey(em);
   });
+  // 📷 สแกนแล้วเปิดลิ้นชัก — ถามของกลาง /api/scan/resolve (POST: รหัสมี # ได้) แล้วให้โมดูลบอกว่าเปิด id ไหน
+  const onScanned = async (code: string) => {
+    if (!config.scanOpen) return;
+    setScanBusy(true); setScanMiss(null);
+    try {
+      const res = await apiFetch("/api/scan/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+      const json = await res.json() as { data: ScanHit | null; error: string | null };
+      if (!json.data) { setScanMiss({ msg: json.error || tr(`ไม่พบรหัส "${code}"`, `Code "${code}" not found`) }); return; }
+      const id = config.scanOpen.resolve(json.data);
+      if (!id) { setScanMiss({ msg: tr(`"${json.data.code}" ไม่ได้อยู่ในหน้านี้`, `"${json.data.code}" is not on this page`), href: json.data.href, title: json.data.title }); return; }
+      setScanModal(false); setDrawerMode("view"); openEdit({ id } as Row);
+    } catch { setScanMiss({ msg: tr("เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง", "Couldn't connect — please try again") }); }
+    finally { setScanBusy(false); }
+  };
 
   // โหมด embedded (drawer-only): เปิด record/สร้างใหม่ทันทีหลัง registry พร้อม + ป้อนรายการ nav
   const embeddedOpenedRef = useRef(false);
@@ -2936,22 +2973,30 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     <TabPrefScope.Provider value={config.moduleKey ?? config.tableId ?? null}>
     <Wrap>
       {!embedded && (
-      <div className="w-full px-6 py-6" style={{ "--dt-sticky-top": `${headerH}px` } as React.CSSProperties}>
-        <div ref={headerRef} className="sticky top-0 z-40 bg-white pb-3 mb-3 border-b border-slate-100 flex items-start justify-between gap-4 flex-wrap">
+      <div className="w-full px-3 py-3 sm:px-6 sm:py-6" style={{ "--dt-sticky-top": `${headerH}px` } as React.CSSProperties}>
+        {/* 📱 มือถือ: หัวเตี้ย (ชื่อเล็กลง ซ่อนคำอธิบาย) · ปุ่มงานโต๊ะทำงาน (ปรับแต่ง/นำเข้า/เพิ่มหลายรายการ) ซ่อน — ปุ่มไม่ล้นจอ */}
+        <div ref={headerRef} className="sticky top-0 z-40 bg-white pb-2 mb-2 sm:pb-3 sm:mb-3 border-b border-slate-100 flex items-start justify-between gap-2 sm:gap-4 flex-wrap">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-slate-800">
+            <h1 className="text-lg sm:text-2xl font-semibold text-slate-800">
               {config.icon && <span className="mr-2">{config.icon}</span>}{config.title}
             </h1>
-            {config.description && <p className="text-sm text-slate-500 mt-0.5">{config.description}</p>}
+            {config.description && <p className="hidden sm:block text-sm text-slate-500 mt-0.5">{config.description}</p>}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-wrap min-w-0 sm:flex-shrink-0">
             {config.headerActions?.()}
+            {config.scanOpen && (
+              <button onClick={() => { setScanMiss(null); setScanModal(true); }}
+                title={tr("สแกนบาร์โค้ด / QR หรือพิมพ์รหัส แล้วเปิดรายการนั้นเลย", "Scan a barcode / QR or type a code to open that record")}
+                className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
+                <Icon name="camera" size={16} />{tr("สแกน", "Scan")}
+              </button>
+            )}
             {/* 📝 ทั้งระบบเหลือกี่ตัวที่ยังไม่ครบแต่ละโหมด + กรองตาราง + รายงาน/พิมพ์ (โมดูลที่มีโหมดลงรายละเอียด) */}
             {config.moduleKey && allEntryModes.some((m) => modeVisibleTo(m, user?.role)) && (
               <EntryModeStatusButton moduleKey={config.moduleKey} activeFilter={modeFilter} onFilter={applyModeFilter} />
             )}
             {/* เมนู "ปรับแต่ง" — ยุบปุ่ม admin (ออกแบบหน้า / Layout / เพิ่ม Field) ให้สะอาด */}
-            {config.moduleKey && canEdit && (
+            {config.moduleKey && canEdit && !isPhone && (
               <div className="relative">
                 <button onClick={() => setToolsOpen((o) => !o)}
                   className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -2975,7 +3020,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
               </div>
             )}
-            {config.moduleKey && canCreate && registryFields && registryFields.length > 0 && (
+            {config.moduleKey && canCreate && registryFields && registryFields.length > 0 && !isPhone && (
               <button onClick={() => setImportOpen(true)}
                 title={tr("นำเข้าข้อมูลจาก CSV / Excel", "Import from CSV / Excel")}
                 className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -2983,7 +3028,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               </button>
             )}
             {/* เพิ่มหลายรายการรวดเดียว (ของกลาง) — ปิดต่อโมดูลได้ด้วย config.inlineCreate = false */}
-            {config.moduleKey && canCreate && config.inlineCreate !== false && registryFields && registryFields.length > 0 && (
+            {config.moduleKey && canCreate && config.inlineCreate !== false && registryFields && registryFields.length > 0 && !isPhone && (
               <button onClick={() => setInlineCreateOpen(true)}
                 title={tr("กรอกหลายแถวรวดเดียว / วางจาก Excel", "Fill many rows at once / paste from Excel")}
                 className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -3103,6 +3148,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             image:    "cover_image_r2_key",
             primary:  primaryField ?? effectiveSearchKeys[0] ?? "name_th",
             subtitle: "code",
+            ...config.cardConfig,
           }}
           // ของกลาง: ป้ายระบุแถวใน bulk edit ใช้ฟิลด์ปัก 🎯 → ชื่อ → รหัส (ไม่โชว์ UUID)
           bulkRowLabel={(r) => { const rec = r as Record<string, unknown>; return pickRowLabel(rec) || String(rec.id ?? ""); }}
@@ -3115,20 +3161,40 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       </div>
       )}
 
+      {/* 📷 สแกนเปิดระเบียน (config.scanOpen) — ช่องรับรหัสของกลาง ScanInput */}
+      {config.scanOpen && (
+        <ERPModal open={scanModal} onClose={() => setScanModal(false)} size="sm" title={tr(`สแกนเปิด ${config.title}`, `Scan to open ${config.title}`)}>
+          <div className="space-y-3">
+            <ScanInput paused={!scanModal || scanBusy} onScan={(c) => void onScanned(c)} />
+            {scanBusy && <div className="text-sm text-slate-500">{tr("กำลังค้นหา…", "Searching…")}</div>}
+            {scanMiss && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div>{scanMiss.msg}</div>
+                {scanMiss.href && (
+                  <a href={scanMiss.href} className="mt-1 inline-flex items-center gap-1 font-medium text-blue-700 hover:underline">
+                    {tr("เปิดหน้าของรายการนี้", "Open this item's page")}{scanMiss.title ? ` — ${scanMiss.title}` : ""} ↗
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+        </ERPModal>
+      )}
+
       {/* F11: Drawer (slide จากขวา) — สลับ view/edit */}
       <Drawer
         open={modalOpen}
         onClose={discard}
         size="lg"
         hasUnsavedChanges={(drawerMode === "edit" && dirty) || footerSave.anyDirty}
-        headerActions={config.moduleKey && canEdit && drawerMode === "view" ? () => (
+        headerActions={config.moduleKey && canEdit && drawerMode === "view" && !isPhone ? () => (
           <button type="button" onClick={() => setStudioOpen(true)}
             title={tr("ออกแบบฟิลด์/ฟอร์มของโมดูลนี้ (เพิ่ม/แก้/ซ่อนฟิลด์ · แอดมิน)", "Design this module's fields/form (add/edit/hide · admin)")}
             className="h-8 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-600 hover:bg-orange-50 inline-flex items-center gap-1 whitespace-nowrap">{tr("🎨 ออกแบบฟิลด์", "🎨 Field designer")}</button>
         ) : undefined}
         title={
           drawerMode === "view"
-            ? (editingId ? `${config.title}` : tr(`เพิ่ม ${config.title}`, `Add ${config.title}`))
+            ? (editingId ? (isPhone && detailCode ? `${config.title} · ${detailCode}` : `${config.title}`) : tr(`เพิ่ม ${config.title}`, `Add ${config.title}`))
             : (editingId ? tr(`แก้ไข ${config.title}`, `Edit ${config.title}`) : tr(`เพิ่ม ${config.title}ใหม่`, `Add new ${config.title}`))
         }
         footer={
@@ -3141,16 +3207,44 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 const go = (dir: 1 | -1) => { const nxt = list[idx + dir]; if (!nxt) return; if (footerSave.anyDirty) setPendingNav(nxt); else openEdit(nxt); };
                 return (
                   <div className="mr-auto flex items-center gap-1">
-                    <button onClick={() => go(-1)} disabled={idx <= 0}
-                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title={tr("รายการก่อนหน้า", "Previous record")}>{tr("◀ ก่อนหน้า", "◀ Previous")}</button>
-                    <button onClick={() => go(1)} disabled={idx < 0 || idx >= list.length - 1}
-                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title={tr("รายการถัดไป", "Next record")}>{tr("ถัดไป ▶", "Next ▶")}</button>
+                    {/* 📱 มือถือ: ปุ่มลูกศรสี่เหลี่ยม 44px กดง่าย (ไม่มีคำ) */}
+                    <button onClick={() => go(-1)} disabled={idx <= 0} aria-label={tr("รายการก่อนหน้า", "Previous record")}
+                      className={`${isPhone ? "h-11 w-11 justify-center" : "h-9 px-3"} inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40`} title={tr("รายการก่อนหน้า", "Previous record")}>{isPhone ? "◀" : tr("◀ ก่อนหน้า", "◀ Previous")}</button>
+                    <button onClick={() => go(1)} disabled={idx < 0 || idx >= list.length - 1} aria-label={tr("รายการถัดไป", "Next record")}
+                      className={`${isPhone ? "h-11 w-11 justify-center" : "h-9 px-3"} inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40`} title={tr("รายการถัดไป", "Next record")}>{isPhone ? "▶" : tr("ถัดไป ▶", "Next ▶")}</button>
                     {idx >= 0 && <span className="text-xs text-slate-400 ml-1">{idx + 1}/{list.length}</span>}
                   </div>
                 );
               })()}
-              {/* ปุ่มรายแถวเพิ่มเติม (เช่น คัดลอก) — โชว์ตอนดูรายการที่บันทึกแล้ว */}
-              {editingId && (config.extraRowActions ?? [])
+              {/* ปุ่มรายแถวเพิ่มเติม (เช่น คัดลอก) — โชว์ตอนดูรายการที่บันทึกแล้ว · 📱 มือถือ = รวมกับ "ลบ" ไว้ในปุ่ม ⋯ (แถบล่างไม่ล้นเป็นหลายแถว) */}
+              {editingId && isPhone && (() => {
+                const extras = (config.extraRowActions ?? []).filter((a) => !a.show || a.show({ ...form, id: editingId }));
+                const canDel = canEdit && !config.hideActiveStatus;
+                if (extras.length === 0 && !canDel) return null;
+                return (
+                  <Popover align="left" panelClassName="w-56 p-1"
+                    trigger={(toggle, open) => (
+                      <button type="button" onClick={toggle} aria-label={tr("คำสั่งเพิ่มเติม", "More actions")} title={tr("คำสั่งเพิ่มเติม", "More actions")}
+                        className={`h-11 w-11 inline-flex items-center justify-center rounded-lg border border-slate-200 text-lg leading-none text-slate-600 ${open ? "bg-slate-100" : "hover:bg-slate-50"}`}>⋯</button>
+                    )}>
+                    {(close) => (
+                      <div className="text-sm">
+                        {extras.map((a, i) => (
+                          <button key={i} type="button" onClick={async () => { close(); await a.onClick({ ...form, id: editingId }); await refreshData(); }}
+                            className={`w-full text-left px-3 py-2.5 rounded-md ${a.variant === "danger" ? "text-rose-600 hover:bg-rose-50" : "text-slate-700 hover:bg-slate-50"}`}>
+                            {a.icon ? `${a.icon} ` : ""}{a.label}
+                          </button>
+                        ))}
+                        {canDel && (
+                          <button type="button" onClick={() => { close(); openDelete({ ...form, id: editingId }); }}
+                            className="w-full text-left px-3 py-2.5 rounded-md text-rose-600 hover:bg-rose-50">{tr("🗑 ลบ (กู้คืนได้)", "🗑 Delete (restorable)")}</button>
+                        )}
+                      </div>
+                    )}
+                  </Popover>
+                );
+              })()}
+              {editingId && !isPhone && (config.extraRowActions ?? [])
                 .filter((a) => !a.show || a.show({ ...form, id: editingId }))
                 .map((a, i) => (
                   <button key={i} onClick={async () => { await a.onClick({ ...form, id: editingId }); await refreshData(); }}
@@ -3158,18 +3252,21 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     {a.icon ? `${a.icon} ` : ""}{a.label}
                   </button>
                 ))}
-              {editingId && canEdit && !config.hideActiveStatus && (
+              {editingId && canEdit && !config.hideActiveStatus && !isPhone && (
                 <button onClick={() => openDelete({ ...form, id: editingId })} title={tr("ลบ (เก็บในถังขยะ · กู้คืนได้)", "Delete (goes to trash · restorable)")}
                   className="h-9 px-3 text-sm border border-rose-300 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5">{tr("🗑 ลบ", "🗑 Delete")}</button>
               )}
+              {/* 📱 มือถือ: ไม่มีปุ่ม "ปิด" (ใช้ ✕ มุมบน) · ปุ่มแก้ไขกว้างเต็มที่เหลือ สูง 44px */}
+              {!isPhone && (
               <button onClick={() => (footerSave.anyDirty ? setConfirmDiscard(true) : setModalOpen(false))}
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">{tr("ปิด", "Close")}</button>
+              )}
               {canEdit && (
                 <button onClick={switchToEdit}
-                  className={footerSave.has
-                    ? "h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5"
-                    : "h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5"}>
-                  ✎ แก้ไข
+                  className={`${isPhone ? "h-11 flex-1 justify-center" : "h-9"} px-4 text-sm rounded-lg inline-flex items-center gap-1.5 ${footerSave.has
+                    ? "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                    : "bg-blue-600 text-white hover:bg-blue-700"}`}>
+                  ✎ {tr("แก้ไข", "Edit")}
                 </button>
               )}
               {/* 💾 บันทึกของแท็บที่เปิดอยู่ (เช่น 🛍 เว็บไซต์) — ปุ่มหลักตัวขวาสุดเมื่อมี */}
@@ -3180,11 +3277,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <button
                 onClick={() => { if (editingId) { setDrawerMode("view"); setDirty(false); } else tryClose(); }}
                 disabled={saving}
-                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                className={`${isPhone ? "h-11 flex-1" : "h-9"} px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50`}>
                 {editingId ? tr("ยกเลิก", "Cancel") : tr("ปิด", "Close")}
               </button>
               <button onClick={async () => { await footerSave.saveDirty(); await save(); }} disabled={saving || footerSave.saving}
-                className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                className={`${isPhone ? "h-11 flex-[2]" : "h-9"} px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50`}>
                 {saving ? tr("กำลังบันทึก...", "Saving...") : tr("บันทึก", "Save")}
               </button>
             </>
@@ -3233,6 +3330,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           //   ภาษา (คราม) · เนื้อหา = โหมดลงรายละเอียด + AI + คัดลอกจากรุ่นอื่น (ม่วง) · แปล (ฟ้า) — ปุ่มในกลุ่มเป็นแบบโปร่ง ไม่มีพื้นสี
           //   ห้ามใส่ overflow-hidden ที่กล่องกลุ่ม — เมนูโหมดลงรายละเอียดเป็น dropdown ลอยออกนอกกล่อง
           const contentGroup = modeBtn || aiBtn || copyAllBtn;
+          // 📱 มือถือ: กลุ่มเนื้อหา + แปล พับไว้ใต้ปุ่ม "เครื่องมือ" (กดแล้วกางเป็นแถวใหม่ในหน้า — ไม่ลอย เมนูโหมด/ป๊อปคัดลอกยังทำงานปกติ)
+          //   ภาษา + ป้ายสุขภาพ (extraEl) เห็นตลอด · อยู่ในโหมดลงรายละเอียด = กางให้เอง จะได้เห็นโหมดที่ใช้อยู่
+          const toolGroups = (contentGroup ? 1 : 0) + (canTranslate && canEdit ? 1 : 0);
+          const showTools = !isPhone || phoneToolsOpen || !!activeMode;
           return (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               {pairFields.length > 0 && (
@@ -3246,7 +3347,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 ))}
               </div>
               )}
-              {contentGroup && (
+              {isPhone && toolGroups > 0 && (
+                <button type="button" onClick={() => setPhoneToolsOpen((o) => !o)} aria-expanded={showTools}
+                  className={`h-8 px-2.5 rounded-lg border text-[12.5px] font-medium inline-flex items-center gap-1 ${showTools ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600"}`}>
+                  <Icon name="settings" size={14} />{tr("เครื่องมือ", "Tools")}<span className="text-[10px]">{showTools ? "▴" : "▾"}</span>
+                </button>
+              )}
+              {isPhone && extraEl && <span className="ml-auto">{extraEl}</span>}
+              {isPhone && showTools && toolGroups > 0 && <div className="basis-full h-0" aria-hidden="true" />}
+              {contentGroup && showTools && (
               <div className="inline-flex items-center gap-0.5 rounded-lg border border-violet-300 bg-white p-0.5" role="group" aria-label={tr("เครื่องมือเนื้อหา", "Content tools")}>
                 {/* 📝 โหมดลงรายละเอียด — โชว์เฉพาะช่องที่งานนั้นต้องลง + เตือนช่องที่ขาด */}
                 {modeBtn && (
@@ -3280,7 +3389,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 )}
               </div>
               )}
-              {canTranslate && canEdit && (
+              {canTranslate && canEdit && showTools && (
                 <div className="inline-flex items-center gap-0.5 rounded-lg border border-sky-300 bg-white p-0.5" role="group" aria-label={tr("แปลภาษา", "Translate")}>
                   <button type="button" onClick={() => void translateAll()} disabled={translating}
                     title={tr("แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)", "Translate Thai → empty English fields (filled ones are kept)")}
@@ -3296,7 +3405,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 </div>
               )}
               {pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
-              {extraEl && <span className="ml-auto">{extraEl}</span>}
+              {!isPhone && extraEl && <span className="ml-auto">{extraEl}</span>}
             </div>
           );
         })()}
@@ -3395,6 +3504,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           ) : null;
           // layout=gallery (เช่น Parent SKU) → ย้าย "รูปสินค้า" + Description ขึ้นคอลัมน์ซ้ายให้เห็นเด่น (ไม่ต้องเลื่อนหา)
           const galleryLeft = config.mediaGallery?.layout === "gallery";
+          // 📱 มือถือ + ดูระเบียนที่บันทึกแล้ว → พับรูปเป็นแถบเล็ก (โหมดแก้/สร้างใหม่ = โชว์เต็มเหมือนเดิม เพราะต้องอัปรูปปก)
+          const mediaFold = isPhone && drawerMode === "view" && !!editingId && hasCover;
+          const mediaHidden = mediaFold && !phoneMediaOpen;
+          const imgTotal = galleryCount ? galleryCount + (!galleryLeft && coverKey ? 1 : 0) : null;   // 0/ยังไม่รู้ = "ดูรูป" (กันขึ้น 0 ทั้งที่มีรูปปก)
           // 🕘 ประวัติเวอร์ชัน — เฉพาะสินค้า (Parent/SKU) ที่บันทึกแล้ว · โหมดดู (โหมดแก้มีค่าที่ยังไม่บันทึกค้าง ย้อนแล้วจะสับสน)
           const versionEntity = config.mediaGallery?.entityType && VERSIONED_ENTITIES.has(config.mediaGallery.entityType) ? config.mediaGallery.entityType : null;
           const versionsEl = versionEntity && editingId && drawerMode === "view" ? (
@@ -3480,9 +3593,37 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           }
 
           return (
-            <div className="flex flex-col md:flex-row md:flex-wrap gap-5">
+            <div className={`flex flex-col md:flex-row md:flex-wrap ${mediaFold ? "gap-3" : "gap-5"}`}>
               {/* ซ้าย: รูป + core */}
               <div className={`md:flex-shrink-0 md:order-1 space-y-4 ${galleryLeft ? "md:w-96" : "md:w-72"}`}>
+                {/* 📱 มือถือ (ดูระเบียน): รูปพับเป็นแถบเล็ก = รูปย่อ + รหัส + สถานะ + "รูปทั้งหมด N · จัดการรูป" → ช่องข้อมูลขึ้นมาให้เห็นทันที ไม่ต้องเลื่อนผ่านรูป */}
+                {mediaFold && (
+                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2">
+                    <button type="button" onClick={() => setPhoneMediaOpen((o) => !o)} aria-label={tr("ดูรูป", "Show images")}
+                      className="shrink-0 w-16 h-16 rounded-lg overflow-hidden bg-slate-50 border border-slate-100 flex items-center justify-center">
+                      {coverKey
+                        ? <ImageCell r2Key={coverKey} size={64} />
+                        : parentFallbackImg
+                          ? <img src={parentFallbackImg} alt="" className="w-full h-full object-cover" />
+                          : <span className="text-[10px] text-slate-300">{tr("ไม่มีรูป", "No image")}</span>}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      {detailCode && <code className="inline-block max-w-full truncate text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">{detailCode}</code>}
+                      <div className="mt-0.5">
+                        {form[activeField]
+                          ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{tr("เปิดอยู่", "On")}</span>
+                          : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />{tr("ปิดอยู่", "Off")}</span>}
+                      </div>
+                      <button type="button" onClick={() => setPhoneMediaOpen((o) => !o)} aria-expanded={phoneMediaOpen}
+                        className="mt-1 text-xs font-medium text-orange-600 inline-flex items-center gap-1">
+                        {phoneMediaOpen
+                          ? tr("ซ่อนรูป ▴", "Hide images ▴")
+                          : imgTotal != null ? tr(`รูปทั้งหมด ${imgTotal} · จัดการรูป ▾`, `All images ${imgTotal} · Manage ▾`) : tr("ดูรูป · จัดการรูป ▾", "Images · Manage ▾")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className={mediaHidden ? "hidden" : "space-y-4"}>
                 {/* รูปหลัก: layout=gallery → "รูปสินค้า" (แกลเลอรีจริง รูปหลักใหญ่+รูปย่อย+อัป แบบ Design Sheet) แทนรูปปก · ไม่งั้น = รูปปกเดิม */}
                 {galleryLeft && config.mediaGallery && editingId ? (
                   // quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์)
@@ -3536,8 +3677,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </div>
                 ))}
 
-                {/* code + status — บอกว่ากำลังดูใบไหน (ข้อมูลหลักย้ายไปเป็นแท็บทางขวา) */}
-                <div>
+                {/* code + status — บอกว่ากำลังดูใบไหน (ข้อมูลหลักย้ายไปเป็นแท็บทางขวา) · มือถือพับรูป = อยู่ในแถบเล็กด้านบนแล้ว */}
+                <div className={mediaFold ? "hidden" : ""}>
                   {detailCode && <code className="inline-block text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 mb-1">{detailCode}</code>}
                   <div>
                     {form[activeField]
@@ -3556,11 +3697,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
                 {/* 🕘 ประวัติเวอร์ชัน (ชื่อ/คำอธิบาย · รูปปก · รูปที่ถูกลบ) — ใต้รูป เห็นคู่กับของที่เปลี่ยน */}
                 {galleryLeft && !versionsInSystemTab && versionsEl}
+                </div>
               </div>
 
               {/* ขวา: tabs (หมวดที่เหลือ) — gallery/description ปกติ (โมดูลที่ไม่ใช่ gallery layout) */}
               {config.mediaGallery && !galleryLeft && (
-                <div className="w-full md:order-3 rounded-xl border border-slate-200 bg-white p-3">
+                <div className={`w-full md:order-3 rounded-xl border border-slate-200 bg-white p-3 ${mediaHidden ? "hidden" : ""}`}>
                   {editingId ? (
                     <ImageManager
                       key={`gallery-${mediaRev}`}
@@ -3588,15 +3730,15 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
               {/* section พิเศษต่อโมดูล (โมดูลที่ไม่ใช่ gallery layout — gallery layout ย้ายไปคอลัมน์ซ้ายแล้ว) */}
               {config.extraFormSection && !galleryLeft && (
-                <div key={`extra-${mediaRev}`} className="w-full md:order-4 rounded-xl border border-slate-200 bg-white p-3">
+                <div key={`extra-${mediaRev}`} className={`w-full md:order-4 rounded-xl border border-slate-200 bg-white p-3 ${mediaHidden ? "hidden" : ""}`}>
                   {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
                 </div>
               )}
-              {!galleryLeft && !versionsInSystemTab && versionsEl && <div className="w-full md:order-4">{versionsEl}</div>}
+              {!galleryLeft && !versionsInSystemTab && versionsEl && <div className={`w-full md:order-4 ${mediaHidden ? "hidden" : ""}`}>{versionsEl}</div>}
 
               {/* ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage, ลบ record ถาวร=ลบไฟล์ตาม */}
               {config.fileAttachments && (
-                <div className="w-full md:order-5 rounded-xl border border-slate-200 bg-white p-3">
+                <div className={`w-full md:order-5 rounded-xl border border-slate-200 bg-white p-3 ${mediaFold ? "order-2" : ""}`}>
                   {editingId ? (
                     <RecordFilesField
                       entityType={config.fileAttachments.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
@@ -4279,6 +4421,24 @@ function LayoutTabs({
   useEffect(() => {
     if (orderedKeys.length > 0 && !orderedKeys.includes(active)) setActive(orderedKeys[0]);
   }, [orderedKeys.join("|"), active]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 📱 มือถือ: ปัดซ้าย-ขวาตรงเนื้อหา = ไปแท็บถัดไป/ก่อนหน้า (ของกลาง useSwipeNav) · แถบแท็บติดหนึบด้านบนตอนเลื่อน
+  const isPhoneTabs = useViewportLayout() === "phone";
+  const activeIdx = orderedKeys.indexOf(active);
+  // เปลี่ยนแท็บตอนเลื่อนลงไปลึก (แถบแท็บติดหนึบอยู่) → พากลับไปต้นแท็บใหม่ ไม่ค้างกลางหน้า
+  const tabsRootRef = useRef<HTMLDivElement>(null);
+  const tabsBarRef = useRef<HTMLDivElement>(null);
+  const pickTab = (k: string) => {
+    setActive(k);
+    const root = tabsRootRef.current, bar = tabsBarRef.current;
+    if (root && bar && bar.getBoundingClientRect().top - root.getBoundingClientRect().top > 2) root.scrollIntoView({ block: "start" });
+  };
+  const swipe = useSwipeNav({
+    enabled: isPhoneTabs && orderedKeys.length > 1,
+    canNext: activeIdx >= 0 && activeIdx < orderedKeys.length - 1,
+    canPrev: activeIdx > 0,
+    onNext: () => { const k = orderedKeys[activeIdx + 1]; if (k) pickTab(k); },
+    onPrev: () => { const k = orderedKeys[activeIdx - 1]; if (k) pickTab(k); },
+  });
 
   const assigned = new Set<string>();
   tabs.forEach((t) => t.sections.forEach((s) => assigned.add(s.key)));
@@ -4294,12 +4454,12 @@ function LayoutTabs({
   const hiddenCount = ordered.length - shownOrdered.length;
 
   return (
-    <div>
+    <div ref={tabsRootRef}>
       {ordered.length > 1 && (
-        <div className="flex items-end border-b border-slate-200">
+        <div ref={tabsBarRef} className="flex items-end border-b border-slate-200 max-sm:sticky max-sm:-top-3 max-sm:z-20 max-sm:bg-white">
         <ScrollTabs activeKey={active} className="flex-1 min-w-0">
           {shownOrdered.map((o) => (
-            <button key={o.t.key} data-tab-key={o.t.key} type="button" onClick={() => setActive(o.t.key)}
+            <button key={o.t.key} data-tab-key={o.t.key} type="button" onClick={() => pickTab(o.t.key)}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 o.t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
@@ -4342,6 +4502,7 @@ function LayoutTabs({
         )}
         </div>
       )}
+      <div ref={swipe.ref} {...(isPhoneTabs ? swipe.bind : {})} style={isPhoneTabs ? swipe.style : undefined}>
       {activeExtra ? (
         <div className="pt-3">{activeExtra.node}</div>
       ) : (
@@ -4374,6 +4535,7 @@ function LayoutTabs({
         ))}
       </div>
       )}
+      </div>
     </div>
   );
 }
@@ -4421,7 +4583,7 @@ function FormSections({
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
     return <LayoutTabs layout={layout} byGroup={byGroup} extraTabs={extraTabs} sectionAction={sectionAction} renderGrid={(fs, cols) => (
-      <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
+      <div className="grid grid-cols-12 gap-3 max-sm:[&>*]:![grid-column:1/-1]">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
 
@@ -4438,7 +4600,7 @@ function FormSections({
                 <span className="text-sm font-semibold text-slate-700">{cfg.label}</span>
                 <span className="ml-auto">{sectionAction?.(groupKey, cfg.label, groupFields)}</span>
               </div>
-              <div className="grid grid-cols-12 gap-3">
+              <div className="grid grid-cols-12 gap-3 max-sm:[&>*]:![grid-column:1/-1]">
                 {groupFields.map((f) => renderField(f, 2))}
               </div>
             </section>
@@ -4455,7 +4617,7 @@ function FormSections({
     <div>
       {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
       {current && (
-        <div className="grid grid-cols-12 gap-3 pt-3">
+        <div className="grid grid-cols-12 gap-3 pt-3 max-sm:[&>*]:![grid-column:1/-1]">
           {current[1].map((f) => renderField(f, 2))}
         </div>
       )}
@@ -4573,7 +4735,7 @@ function DetailSections({
 
   // dl grid ตามจำนวน column
   const renderDl = (fs: FieldDef[], cols: number) => (
-    <dl className="grid grid-cols-12 gap-x-4 gap-y-3">
+    <dl className="grid grid-cols-12 gap-x-4 gap-y-3 max-sm:[&>*]:![grid-column:1/-1]">
       {fs.map((f) => {
         const us = (f.uiStyle ?? {}) as Record<string, unknown>;
         const labelCss = fieldStyleCss(f.uiStyle, "label_size");

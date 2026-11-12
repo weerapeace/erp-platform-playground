@@ -11,7 +11,7 @@
  * กันปัดพลาด:
  *   - ต้องปัดแนวนอนชัด ๆ (แนวนอนมากกว่าแนวตั้ง) และเกิน threshold (60px) — เลื่อนจอขึ้นลงไม่นับ
  *   - เริ่มปัดจากขอบจอ (20px) ไม่นับ — iPhone ใช้ปัดขอบซ้ายเป็น "ย้อนกลับ"
- *   - เริ่มบนช่องพิมพ์ / [data-no-swipe] (เช่น แถวที่เลื่อนแนวนอนเองได้ รูปที่ปัดดูทีละรูป) ไม่นับ
+ *   - เริ่มบนช่องพิมพ์ / [data-no-swipe] (เช่น แถวที่เลื่อนแนวนอนเองได้ รูปที่ปัดดูทีละรูป) ไม่นับ · เริ่มบนของที่เลื่อนแนวนอนได้จริง (ตารางกว้าง) ก็ไม่นับ — ให้มันเลื่อนเอง
  *   - ปัดแล้วไม่เปิดการ์ดที่นิ้ววางอยู่ (กันคลิกที่ตามมา) · กดค้างการ์ด (useLongPress) ยกเลิกเองเมื่อขยับเกิน 10px
  * ระหว่างปัด รายการเลื่อนตามนิ้ว (สุดทางแล้วหนืด) · เปลี่ยนแท็บแล้วรายการใหม่เลื่อนเข้ามาจากด้านที่ปัด
  */
@@ -35,6 +35,16 @@ export function swipeOffset(dx: number, canNext = true, canPrev = true): number 
 }
 
 const NO_SWIPE = "input, textarea, select, [contenteditable='true'], [data-no-swipe]";
+/** นิ้ววางบนของที่เลื่อนแนวนอนเองได้ (ตารางกว้าง แถบชิป) → ให้มันเลื่อนเอง ไม่นับเป็นปัดเปลี่ยนแท็บ */
+function insideHScroll(el: HTMLElement | null, root: HTMLElement): boolean {
+  for (let n = el; n && n !== root; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 1) {
+      const ox = getComputedStyle(n).overflowX;
+      if (ox === "auto" || ox === "scroll") return true;
+    }
+  }
+  return false;
+}
 
 export function useSwipeNav({ onNext, onPrev, canNext = true, canPrev = true, enabled = true, threshold = 60, edge = 20 }: {
   onNext: () => void;
@@ -57,6 +67,7 @@ export function useSwipeNav({ onNext, onPrev, canNext = true, canPrev = true, en
   const onPointerDown = useCallback((e: PointerEvent<HTMLDivElement>) => {
     if (!enabled || e.button > 0) return;
     if ((e.target as HTMLElement).closest?.(NO_SWIPE)) return;
+    if (insideHScroll(e.target as HTMLElement, e.currentTarget)) return;
     const vw = typeof window !== "undefined" ? window.innerWidth : 0;
     if (e.clientX < edge || (vw && e.clientX > vw - edge)) return;
     st.current = { x: e.clientX, y: e.clientY, id: e.pointerId, axis: null, dx: 0 };

@@ -94,6 +94,10 @@ const CONFIG: MasterCRUDConfig = {
   // server mode — โหลดทีละหน้า (smooth + กัน 1102) เหมือนหน้า SKU; card view เปิดได้ใน server mode แล้ว
   serverMode:  true,
   pageLimit:   200,
+  // 📱 การ์ดในมือถือ: รูปซ้าย + ชื่อ/รหัส + สถานะ (ช่องที่ตารางโหลดมาจริง — ไม่ใส่ช่องผูกที่เป็นเลข id)
+  cardConfig: { layout: "horizontal", imageAspect: "square", columns: "2", primary: "name_th", subtitle: "code", active: "is_active" },
+  // 📷 สแกนบาร์โค้ด SKU ลูก หรือรหัส Parent → เปิด Parent นั้นเลย (SKU ที่ไม่มีแม่/เอกสารอื่น = โชว์ลิงก์ไปหน้าของมัน)
+  scanOpen: { resolve: (h) => (h.kind !== "sku" ? null : h.entity === "parent" ? h.id : (h.parentId ?? null)) },
   exportEntityType: "parent_skus_v2",
   // กล่องลบ: โชว์สิ่งที่ผูก (ลูก/รูป/แท็ก/ลงขาย) + ติ๊กลบรูป/ตัวลูกพ่วง
   deleteExtras: {

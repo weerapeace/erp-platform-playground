@@ -46,6 +46,10 @@ const CONFIG: MasterCRUDConfig = {
   icon:        "🏷️",
   activeField: "is_active",
   serverMode:  true,   // F19: server-side pagination (12,609 rows) — กัน Worker 1102
+  // 📱 การ์ดในมือถือ: รูปซ้าย + ชื่อ/รหัส + ป้ายสี + สถานะ + ราคา (ราคาเป็นช่องลับ — ไม่มีสิทธิ์ = ไม่โชว์เอง) · หาด้วยบาร์โค้ด = ปุ่มสแกน
+  cardConfig: { layout: "horizontal", imageAspect: "square", columns: "2", primary: "name_th", subtitle: "code", badges: ["color"], active: "is_active", metrics: ["list_price"] },
+  // 📷 สแกนบาร์โค้ด/รหัส → เปิด SKU นั้นเลย (สแกนได้ Parent/เอกสารอื่น = โชว์ลิงก์ไปหน้าของมัน)
+  scanOpen: { resolve: (h) => (h.kind === "sku" && h.entity !== "parent" ? h.id : null) },
   exportEntityType: "skus_v2",
   // รูปสินค้า SKU — แกลเลอรี (รูปหลักใหญ่ + รูปย่อย + อัป ≤9) แบบเดียวกับ Parent → ไปโผล่ใน album
   mediaGallery: {

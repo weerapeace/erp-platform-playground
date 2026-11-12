@@ -1542,7 +1542,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = (title || gearBtn || addBtn || viewToggle || routerBtn) ? (
-    <div className="flex items-center gap-1.5 mb-1.5">
+    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">{/* flex-wrap: จอมือถือปุ่มเยอะ → ขึ้นบรรทัดใหม่ ไม่ดันลิ้นชักล้นจอ */}
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />

@@ -27,6 +27,10 @@ export type ScanHit = {
   /** หน้าที่ควรเปิด */
   href: string;
   status: string | null;
+  /** สินค้า: "sku" = SKU ลูก · "parent" = สินค้าหลัก (Parent) — ให้หน้า Parent เปิดแม่ของ SKU ที่สแกนได้ */
+  entity?: "sku" | "parent";
+  /** SKU ลูก: id ของ Parent (ถ้ามี) */
+  parentId?: string | null;
 };
 
 type Row = Record<string, unknown>;
@@ -92,7 +96,7 @@ async function findDoc(kind: ScanKind, code: string, byId: boolean): Promise<Sca
 /** สินค้า: ลอง SKU ลูก (barcode → code) แล้วค่อย Parent */
 async function findSku(code: string, byId: boolean): Promise<ScanHit | null> {
   const admin = supabaseAdmin();
-  const sel = "id, code, barcode, name_th, name_en, is_active";
+  const sel = "id, code, barcode, name_th, name_en, is_active, parent_sku_id";
 
   if (byId) {
     const { data } = await admin.from("skus_v2").select(sel).eq("id", code).maybeSingle();
@@ -115,6 +119,7 @@ async function findSku(code: string, byId: boolean): Promise<ScanHit | null> {
 
 const skuHit = (r: Row): ScanHit => ({
   kind: "sku", id: str(r.id), code: str(r.code), status: r.is_active === false ? "inactive" : null,
+  entity: "sku", parentId: str(r.parent_sku_id) || null,
   title: str(r.name_th) || str(r.name_en) || str(r.code),
   subtitle: `รหัส ${str(r.code)}`,
   href: `/master/skus?open=${encodeURIComponent(str(r.id))}`,
@@ -122,6 +127,7 @@ const skuHit = (r: Row): ScanHit => ({
 
 const parentHit = (r: Row): ScanHit => ({
   kind: "sku", id: str(r.id), code: str(r.code), status: r.is_active === false ? "inactive" : null,
+  entity: "parent",
   title: str(r.name_th) || str(r.sku_name) || str(r.code),
   subtitle: `สินค้าหลัก · รหัส ${str(r.code)}`,
   href: `/master/parent-skus?open=${encodeURIComponent(str(r.id))}`,

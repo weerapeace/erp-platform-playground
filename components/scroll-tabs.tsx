@@ -56,8 +56,9 @@ export function ScrollTabs({ activeKey, className = "", children }: { activeKey?
   };
 
   const arrow = "absolute top-0 bottom-px z-10 flex w-9 items-center text-lg leading-none text-slate-400 hover:text-slate-800";
+  // กรอบนอก min-w-0: อยู่ในแถว flex (เช่นแถบแท็บของลิ้นชัก) แล้วหดตามจอได้ — เดิมกว้างเท่าแท็บทั้งหมด ดันทั้งลิ้นชักล้นจอมือถือ (เจอ 2026-11-12)
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <div ref={ref} onScroll={update} className={`flex items-center gap-1 overflow-x-auto scrollbar-hide ${className}`}>
         {children}
       </div>
