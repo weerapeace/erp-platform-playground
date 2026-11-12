@@ -19,6 +19,7 @@ import { useT } from "@/components/i18n";
 import { askText } from "@/components/modal/ask-dialog";
 import { usePushToast } from "@/components/toast";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
+import { BrandFilterChip, useBrandParam } from "@/components/brand-hub/brand-filter";
 import { StatusBadge } from "./content-ui";
 import { AiCaptionModal } from "./caption-card";
 import { ContentDrawer } from "./content-drawer";
@@ -56,12 +57,15 @@ export function ContentPageView() {
   const templatesSWR = useSWRLite("creative:content-templates", () => listContentTemplates());
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
-  const items = itemsSWR.data ?? [];
+  // ลิงก์จากหน้าแบรนด์ (/brand-hub): ?brand=<id> → รายการ/ตาราง/ปฏิทิน เห็นเฉพาะคอนเทนต์ของแบรนด์นั้น (ชิปกด "ดูทุกแบรนด์" ได้)
+  const [brandOnly, clearBrandOnly] = useBrandParam();
+  const allItems = useMemo(() => itemsSWR.data ?? [], [itemsSWR.data]);
+  const items = useMemo(() => (brandOnly ? allItems.filter((c) => c.brand_id === brandOnly) : allItems), [allItems, brandOnly]);
   const templates = templatesSWR.data ?? [];
   const brands = brandsSWR.data ?? [];
   const campaigns = campaignsSWR.data ?? [];
   const loading = itemsSWR.loading;
-  const loadError = !!itemsSWR.error && items.length === 0;   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด (ไม่ใช่ "ว่าง")
+  const loadError = !!itemsSWR.error && allItems.length === 0;   // โหลดพลาด + ไม่มีข้อมูลเก่า → โชว์หน้าผิดพลาด (ไม่ใช่ "ว่าง")
   const load = useCallback(async () => { await itemsSWR.revalidate(true); }, [itemsSWR]);
   const reloadTemplates = useCallback(async () => { await templatesSWR.revalidate(true); }, [templatesSWR]);
   // เปิด drawer คอนเทนต์อัตโนมัติจากลิงก์ /tasks/content?content=<id> (กดมาจากการ์ดบน Canvas)
@@ -138,6 +142,7 @@ export function ContentPageView() {
           <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🗓️ {t("ปฏิทิน", "Calendar")}</button>
           <button onClick={() => setView("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🧩 {t("แม่แบบ", "Templates")}</button>
         </div>
+        {brandOnly && <div className="mt-3"><BrandFilterChip brandId={brandOnly} brands={brands} onClear={clearBrandOnly} count={items.length} /></div>}
       </div>
 
       <div className="px-4 sm:px-8 py-6">

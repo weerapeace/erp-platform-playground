@@ -51,6 +51,7 @@ import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses
 import { usePushToast } from "@/components/toast";
 import { subStatusDot, subStatusLabel } from "./subtask-status";
 import { EmptyState } from "@/components/state-views";
+import { BrandFilterChip, useBrandParam } from "@/components/brand-hub/brand-filter";
 import {
   PRIORITY_RANK, PRIORITY_META, priorityLabel, isOverdue,
   listTasks, deleteTask, updateTask,
@@ -154,7 +155,10 @@ export default function TasksPage() {
   const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks(), { refreshMs: 45000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
-  const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
+  // ลิงก์จากหน้าแบรนด์ (/brand-hub): ?brand=<id> → ทุกมุมมองเห็นเฉพาะงานของแบรนด์นั้น (ชิปด้านบนกด "ดูทุกแบรนด์" ได้)
+  const [brandOnly, clearBrandOnly] = useBrandParam();
+  const allTasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
+  const tasks = useMemo(() => (brandOnly ? allTasks.filter((tk) => tk.brand_id === brandOnly) : allTasks), [allTasks, brandOnly]);
   const mySubs = useMemo(() => subsSWR.data ?? [], [subsSWR.data]);
   // "งานของฉัน" คำนวณจากข้อมูลที่โหลดมาแล้ว (งานที่ฉันเป็นผู้รับผิดชอบ ∪ งานที่มีงานย่อยของฉัน)
   // — ตัด query mine ที่ยิงซ้ำทุก 20 วิ ออก (นิยามเดียวกับ server taskIdsForUser)
@@ -167,7 +171,7 @@ export default function TasksPage() {
   const brands = useMemo(() => brandsSWR.data ?? [], [brandsSWR.data]);
   const campaigns = useMemo(() => campaignsSWR.data ?? [], [campaignsSWR.data]);
   const loading = tasksSWR.loading; // โชว์ skeleton เฉพาะตอนยังไม่เคยมีข้อมูลจริง
-  const loadFailed = !!tasksSWR.error && tasks.length === 0; // โหลดพลาด + ยังไม่เคยมีข้อมูล → โชว์หน้า "เชื่อมต่อไม่ได้"
+  const loadFailed = !!tasksSWR.error && allTasks.length === 0; // โหลดพลาด + ยังไม่เคยมีข้อมูล → โชว์หน้า "เชื่อมต่อไม่ได้"
 
   // เปิด drawer งานอัตโนมัติจากลิงก์ /tasks?task=<id> (เช่นกดมาจากการ์ดบน Canvas)
   // และรองรับ /tasks?view=table|queue|kanban|canvas|overview (เช่นลิงก์ "งานทั้งหมด" จากหน้าแคมเปญ)
@@ -283,6 +287,7 @@ export default function TasksPage() {
       <div className="px-8 py-6 space-y-5">
         {/* เมนูมุมมอง — บนภาพรวมย้ายเข้า Hero แล้ว (ส่งเป็น viewSwitcher) · มุมมองอื่นโชว์ตรงนี้ */}
         {view !== "overview" && <ViewSwitcher view={view} setView={setView} t={t} />}
+        <BrandFilterChip brandId={brandOnly} brands={brands} onClear={clearBrandOnly} count={tasks.length} />
 
         {loadFailed ? (
           <ConnectionError onRetry={() => void reload()} retrying={loading} />

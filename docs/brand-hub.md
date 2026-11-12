@@ -47,3 +47,13 @@
 
 - กฎสิทธิ์: `lib/menu-permissions.ts` `/brand-hub` → `products.platforms.view`
 - รายการเมนูอยู่ในฐานข้อมูล — เจ้าของเพิ่มเองได้ที่ ⚙️ ตั้งค่าแอป › เมนูและคนเห็น › ＋ เพิ่มเมนู (ลิงก์ `/brand-hub`)
+
+## เฟส 2 (2026-11-12)
+
+- **การ์ดงานเพิ่ม:** ขาดน้ำหนัก (`weight_g` ว่าง/0) · ขาดขนาดกล่อง (`parcel_size_id` ว่าง — กฎเดียวกับตัวลงสินค้า) · ตัวเลือกไม่มีรูป (SKU เปิดใช้ไม่มี `cover_image_r2_key` · นับด้วย inner join ~12ms)
+  - ข้อมูลจริง: Louis Montini ขาดน้ำหนัก 157 · ขาดกล่อง 175 · ตัวเลือกไม่มีรูป 1,384 · IG 138 / 120 / 201
+- **หน้าที่รับแบรนด์จากลิงก์เพิ่ม** (`brandAware` ใน sections.ts):
+  - Parent SKU → `parentSkusOfBrandHref` = `/master/parent-skus?flt={"brand_id":{"type":"text","value":<id>}}` (ตัวกรองลิงก์ของตารางกลางที่มีอยู่แล้ว ไม่ต้องแก้หน้า)
+  - คอนเทนต์ `/tasks/content?brand=` · งานครีเอทีฟ `/tasks?brand=` → `useBrandParam` + `BrandFilterChip` (`components/brand-hub/brand-filter.tsx`) กรองทุกมุมมอง + ชิป "ดูทุกแบรนด์"
+  - Design Sheets `/master/design-sheets?brand=` → ตั้งช่องกรองแบรนด์เดิมของหน้า (เฉพาะโหมดเต็มหน้า)
+- ยังไม่รับแบรนด์: `/master/skus` (skus_v2 ไม่มี brand_id ตรง) · ปฏิทินคอนเทนต์ · หน้าแพลตฟอร์มอื่น ๆ

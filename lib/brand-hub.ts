@@ -54,19 +54,33 @@ export type HubCounts = {
   no_cover: number;
   /** สินค้าในระบบที่ยังไม่ตั้งหมวดกลาง (ลงร้านต้องใช้) */
   no_category: number;
+  /** สินค้าในระบบที่ยังไม่มีน้ำหนัก (weight_g ว่าง/0) — ลงร้าน/คิดค่าส่งต้องใช้ */
+  no_weight: number;
+  /** สินค้าในระบบที่ยังไม่เลือกขนาดกล่อง (parcel_size_id ว่าง) — กฎเดียวกับตัวลงสินค้า lib/product-listing-context */
+  no_box: number;
+  /** ตัวเลือก (SKU เปิดใช้) ที่ไม่มีรูป — ร้านโชว์รูปต่อสี/ตัวเลือก */
+  sku_no_image: number;
 };
 
-export type HubTodo = { key: keyof HubCounts; label: string; hint: string; count: number; href: string; perm: string; tone: "danger" | "warning" | "info" | "neutral" };
+/** ลิงก์ตาราง Parent SKU กรองแบรนด์ (ตารางกลางรับ ?flt= — รูปแบบตัวกรองคอลัมน์ {type:"text"} = เท่ากับ ถ้าเป็นรหัส) */
+export const parentSkusOfBrandHref = (brandId: string): string =>
+  `/master/parent-skus?flt=${encodeURIComponent(JSON.stringify({ brand_id: { type: "text", value: brandId } }))}`;
+
+export type HubTodo = { key: keyof HubCounts; label: string; hint: string; count: number; href: string; perm: string | null; tone: "danger" | "warning" | "info" | "neutral" };
 
 /** การ์ด "งานที่ต้องทำ" — เฉพาะที่มีงานจริง (count > 0) · เรียงจากด่วนสุด */
 export function buildHubTodos(brandId: string, c: HubCounts): HubTodo[] {
   const b = encodeURIComponent(brandId);
+  const parents = parentSkusOfBrandHref(brandId);
   const all: HubTodo[] = [
     { key: "orders_to_ship", label: "ออเดอร์รอจัดส่ง", hint: "ลูกค้าจ่ายแล้ว รอแพ็ก/ส่ง", count: c.orders_to_ship, href: `/master/platform-orders?brand=${b}`, perm: "platform_orders.view", tone: "danger" },
     { key: "unmatched", label: "ยังไม่จับคู่", hint: "สินค้าบนร้านที่ยังไม่รู้ว่าเป็นตัวไหนในระบบ", count: c.unmatched, href: `/master/platform-catalog?brand=${b}`, perm: "products.platforms.view", tone: "warning" },
     { key: "not_listed", label: "ยังไม่ลงร้านไหนเลย", hint: "สินค้าในระบบที่ยังไม่มีบนร้าน", count: c.not_listed, href: `/master/platform-catalog?brand=${b}&view=shop`, perm: "products.platforms.view", tone: "info" },
     { key: "no_cover", label: "ไม่มีรูปปก", hint: "ลงร้านไม่ได้จนกว่าจะมีรูป", count: c.no_cover, href: `/master/platform-catalog?brand=${b}&view=shop`, perm: "products.platforms.view", tone: "warning" },
     { key: "no_category", label: "ยังไม่ตั้งหมวดกลาง", hint: "ลงร้านต้องรู้หมวด", count: c.no_category, href: "/master/platform-categories", perm: "products.platforms.view", tone: "info" },
+    { key: "no_weight", label: "ขาดน้ำหนัก", hint: "ลงร้าน/คิดค่าส่งต้องใช้", count: c.no_weight, href: parents, perm: null, tone: "warning" },
+    { key: "no_box", label: "ขาดขนาดกล่อง", hint: "เลือกขนาดกล่องพัสดุในหน้าสินค้า", count: c.no_box, href: parents, perm: null, tone: "warning" },
+    { key: "sku_no_image", label: "ตัวเลือกไม่มีรูป", hint: "สี/ตัวเลือก (SKU) ที่ยังไม่มีรูป", count: c.sku_no_image, href: "/master/skus", perm: null, tone: "info" },
     { key: "gone", label: "ไม่อยู่บนร้านแล้ว", hint: "ร้านลบไปแล้ว — กดล้างได้", count: c.gone, href: `/master/platform-catalog?brand=${b}`, perm: "products.platforms.view", tone: "neutral" },
   ];
   return all.filter((t) => t.count > 0);

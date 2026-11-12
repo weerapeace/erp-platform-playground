@@ -4,6 +4,8 @@
  * perm = สิทธิ์ที่ต้องมี (null = ใครเข้าแอปได้ก็เห็น — ตรงกับ permission_key ของเมนูหน้านั้น) · ไม่มีสิทธิ์ = ไม่โชว์ลิงก์
  * เพิ่มหน้าที่รับแบรนด์ได้แล้ว → เปลี่ยน href ให้ส่ง brand + ตั้ง brandAware: true
  */
+import { parentSkusOfBrandHref } from "@/lib/brand-hub";
+
 export type HubLink = { label: string; href: (brandId: string) => string; perm: string | null; brandAware?: boolean };
 export type HubToolGroup = { key: string; label: string; icon: string; links: HubLink[] };
 
@@ -27,7 +29,7 @@ export const HUB_TOOL_GROUPS: HubToolGroup[] = [
   },
   {
     key: "products", label: "สินค้า", icon: "package", links: [
-      { label: "Parent SKU (รุ่นสินค้า)", href: () => "/master/parent-skus", perm: null },
+      { label: "Parent SKU (รุ่นสินค้า)", href: (id) => parentSkusOfBrandHref(id), perm: null, brandAware: true },
       { label: "SKU (สี / ตัวเลือก)", href: () => "/master/skus", perm: null },
       { label: "หมวดกลาง + จับคู่หมวดร้าน", href: () => "/master/platform-categories", perm: "products.platforms.view" },
       { label: "คลังรูป / ไฟล์", href: () => "/master/assets", perm: "assets.view" },
@@ -35,7 +37,7 @@ export const HUB_TOOL_GROUPS: HubToolGroup[] = [
   },
   {
     key: "content", label: "คอนเทนต์ + การตลาด", icon: "campaign", links: [
-      { label: "คอนเทนต์ + คิวโพสต์", href: () => "/tasks/content", perm: null },
+      { label: "คอนเทนต์ + คิวโพสต์", href: (id) => `/tasks/content?brand=${q(id)}`, perm: null, brandAware: true },
       { label: "ปฏิทินคอนเทนต์", href: () => "/tasks/content-calendar", perm: null },
       { label: "วางแผนคอนเทนต์", href: () => "/marketing/content-plan", perm: "tasks.view" },
       { label: "แดชบอร์ดการตลาด", href: () => "/marketing/dashboard", perm: "marketing.dashboard.view" },
@@ -44,8 +46,8 @@ export const HUB_TOOL_GROUPS: HubToolGroup[] = [
   {
     key: "design", label: "ออกแบบ + ผลิต", icon: "design", links: [
       { label: "Design Dashboard", href: () => "/master/design-dashboard", perm: null },
-      { label: "ใบงานออกแบบ (Design Sheets)", href: () => "/master/design-sheets", perm: null },
-      { label: "งานทั้งหมด (ทีมครีเอทีฟ)", href: () => "/tasks", perm: null },
+      { label: "ใบงานออกแบบ (Design Sheets)", href: (id) => `/master/design-sheets?brand=${q(id)}`, perm: null, brandAware: true },
+      { label: "งานทั้งหมด (ทีมครีเอทีฟ)", href: (id) => `/tasks?brand=${q(id)}`, perm: null, brandAware: true },
       { label: "ใบสั่งผลิต", href: () => "/master/manufacturing-orders", perm: null },
     ],
   },
@@ -60,6 +62,6 @@ export const HUB_TOOL_GROUPS: HubToolGroup[] = [
 /** ลิงก์ของชิปช่องทาง: เชื่อมแล้ว (ร้านขาย) = หน้าร้านของร้านนั้น · Facebook = คอนเทนต์ · ยังไม่เชื่อม/หมดอายุ = หน้าเชื่อมต่อ */
 export function channelHref(brandId: string, code: string, connected: boolean, selling: boolean): string {
   if (!connected) return `/admin/platform-accounts?brand=${q(brandId)}`;
-  if (!selling) return "/tasks/content";
+  if (!selling) return `/tasks/content?brand=${q(brandId)}`;
   return `/master/platform-catalog?brand=${q(brandId)}&platform=${q(code)}&view=shop`;
 }

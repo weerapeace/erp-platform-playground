@@ -418,6 +418,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [brands, setBrands] = useState<Brand[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
+  // ลิงก์จากหน้าแบรนด์ (/brand-hub): ?brand=<id> → ตั้งช่องกรองแบรนด์ให้เลย (เฉพาะโหมดเต็มหน้า · อ่านครั้งเดียวหลังโหลด)
+  useEffect(() => {
+    if (detailOnly || typeof window === "undefined") return;
+    const b = new URLSearchParams(window.location.search).get("brand");
+    if (b) setBrandFilter(b);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showArchived, setShowArchived] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [saving, setSaving] = useState(false);
