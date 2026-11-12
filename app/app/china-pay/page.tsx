@@ -117,6 +117,8 @@ const VAT_RATE = 0.07;   // ภาษี 7%
 
 const num = (v: unknown) => { const n = Number(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
 const fmt = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 4 });
+// ยอด "โอนจริง" — ฿0 = รอบที่จ่ายจากยอดคงเหลือบัญชีจีนล้วน (ไม่มีเงินไทยโอนเข้า) → บอกให้ชัด ไม่ให้ดูเหมือนลืมกรอก
+const fmtTransferred = (v: unknown) => num(v) > 0 ? `฿${fmt(num(v))}` : "฿0 (ใช้ยอดคงเหลือจีน)";
 // วันที่ "วันนี้" อิงเวลาเครื่อง (ไทย) — ห้ามใช้ toISOString (UTC) เพราะช่วงเช้าไทยจะกลายเป็นเมื่อวาน
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
@@ -2865,7 +2867,7 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
   const bd = t.breakdown as Record<string, unknown> | undefined;
   let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
   if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
-  text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
+  text += `โอนจริง: ${fmtTransferred(t.transferred)}`;
   if (bd) {
     if (num(bd.thb) > 0) text += `\nหัก ค่าส่ง/VAT: −฿${fmt(num(bd.thb))}`;
     text += `\nคงเหลือ: ฿${fmt(num(bd.chinaRemainThb))}`;
@@ -3010,7 +3012,9 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
                 <div className="text-[11px] text-slate-400 mt-0.5">บิลจีน {cn} · CTW {cw}</div>
               </div>
               <div className="text-right flex-shrink-0">
-                <div className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</div>
+                {num(r.amount_transferred_thb) > 0
+                  ? <div className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</div>
+                  : <div className="font-bold text-orange-600">¥{fmt(+ls.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_rmb), 0).toFixed(2))}<div className="text-[10px] font-medium">จ่ายจากยอดคงเหลือ</div></div>}
                 <div className="text-[11px] text-slate-400 mt-1">แตะดูใบสรุป ›</div>
               </div>
             </button>
@@ -3056,6 +3060,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [amount, setAmount] = useState("");
   const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
   const [rate, setRate] = useState("");
+  // เรทล่าสุดที่มี (วันที่โอนหรือก่อนหน้า) — ใช้คิดมูลค่าบาทตอน "จ่ายจากยอดคงเหลือล้วน" ที่วันนี้ยังไม่ได้ใส่เรท
+  const [latestRate, setLatestRate] = useState<{ rate: number; date: string } | null>(null);
+  const [noThb, setNoThb] = useState(true);   // ติ๊ก "ไม่ต้องโอนเงินไทย" (โผล่เฉพาะตอนยอดคงเหลือพอจ่ายครบ)
   const [transferDate, setTransferDate] = useState(today());
   const [txSlips, setTxSlips] = useState<TxSlip[]>([]);
   const slipKeys = txSlips.map(s => s.key).filter(Boolean);   // เฉพาะที่มีไฟล์จริง (รายการกรอกมือ key ว่าง)
@@ -3133,11 +3140,16 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // โหลดเรท R1 ตาม "วันที่โอน" (ถ้าไม่มีเรทวันนั้น → ว่าง = รอเรทเงิน)
   useEffect(() => {
-    if (!transferDate) { setRate(""); return; }
+    if (!transferDate) { setRate(""); setLatestRate(null); return; }
     apiFetch("/api/master-v2/daily-rates?limit=90&sort_by=rate_date&sort_dir=desc")
       .then(r => r.json()).then(j => {
-        const row = (j.data ?? []).find((x: Record<string, unknown>) => String(x.rate_date) === transferDate);
+        const rows = (j.data ?? []) as Record<string, unknown>[];
+        const row = rows.find(x => String(x.rate_date) === transferDate);
         setRate(row ? String(num(row.rate)) : "");
+        // เรียงใหม่เองกันลำดับจาก API เพี้ยน → เอาวันล่าสุดที่ไม่เกินวันที่โอน และเรท > 0
+        const prev = rows.filter(x => String(x.rate_date ?? "") <= transferDate && num(x.rate) > 0)
+          .sort((a, b) => String(b.rate_date).localeCompare(String(a.rate_date)))[0];
+        setLatestRate(prev ? { rate: num(prev.rate), date: String(prev.rate_date) } : null);
       }).catch(() => {});
   }, [transferDate]);
 
@@ -3207,6 +3219,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const belowMin = hasRate && (selectedRmb > 0 || thbSelTotal > 0) && transferred < minTransfer - 0.001;
   // โอนได้ไหม: คงเหลือต้องไม่ติดลบ + ต้องไม่น้อยกว่าขั้นต่ำ
   const invalid = chinaRemainThb < -0.001 || belowMin;
+
+  // ===== จ่ายจากยอดคงเหลือล้วน (ไม่ต้องโอนเงินไทย / ไม่ต้องแนบสลิป) =====
+  // ติ๊กโผล่เมื่อ: มีบิลจีน · ไม่มีบิลค่าส่ง/VAT (ต้องจ่ายเป็นบาท) · เปิดใช้ยอดคงเหลือ · ยอดคงเหลือที่ใช้ครอบบิลจีนครบ
+  const balanceCoversAll = sel.size > 0 && thbSel.size === 0 && useBalance && selectedRmb > 0 && chinaCoverRmb >= selectedRmb - 0.001;
+  const noThbMode = balanceCoversAll && noThb;
+  // ไม่ได้ซื้อหยวนรอบนี้ → เรทใช้แค่คิด "มูลค่าบาท" ของบิลลงบันทึก · วันนี้ไม่มีเรท = ใช้เรทล่าสุดที่มี (ไม่ต้องรอขอเรท)
+  const noThbRate = r1 > 0 ? r1 : (latestRate?.rate ?? 0);
+  const noThbRateDate = r1 > 0 ? transferDate : (latestRate?.date ?? "");
 
   // ===== ประมาณการเรท (หน้าเลือกบิลเท่านั้น) =====
   // คิดชั้นเรทจาก "ยอดหลังหักยอดคงเหลือจีน" (บิลจีน − คงเหลือ) เพื่อโชว์ยอดที่ต้องโอนโดยประมาณ
@@ -3361,7 +3381,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
     let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
     if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
-    text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
+    text += `โอนจริง: ${fmtTransferred(t.transferred)}`;
     if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
       const sp = (l.sup ?? {}) as Record<string, unknown>;
       const acc = sp.account_number ? `\n   บัญชี ${String(sp.account_number)}` : "";
@@ -3384,18 +3404,32 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   // ปุ่มเดียว: ตัดบิลจีน + ตัดบิล CTW พร้อมกัน (+ เก็บประวัติ lines/เลขโอน)
   const save = async () => {
     if (sel.size === 0 && ctwSelDerived.length === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
-    if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
-    if (chinaRemainThb < -0.001) { toast.error("ยอดโอนจริงต้องไม่น้อยกว่าค่าส่ง/VAT"); return; }
-    if (belowMin) { toast.error(`ยอดโอนต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
+    if (noThbMode) {
+      if (noThbRate <= 0) { toast.error("ยังไม่มีเรทในระบบเลย — ใส่เรทก่อน"); return; }
+    } else {
+      if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
+      if (chinaRemainThb < -0.001) { toast.error("ยอดโอนจริงต้องไม่น้อยกว่าค่าส่ง/VAT"); return; }
+      if (belowMin) { toast.error(`ยอดโอนต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
+    }
+    // ค่าที่บันทึก — โหมดไม่ต้องโอนเงินไทย: โอนจริง ฿0 · ไม่มีสลิป · ไม่ตัดบิล CTW · ยอดคงเหลือลดเท่ายอดบิลจีน
+    const sTransferred = noThbMode ? 0 : transferred;
+    const sRate = noThbMode ? noThbRate : effRate;
+    const sLeftoverRmb = noThbMode ? -selectedRmb : leftoverRmb;
+    const sLeftoverThb = noThbMode ? sLeftoverRmb * sRate : leftover;
+    const sBillsThb = noThbMode ? selectedRmb * sRate : selectedSum;
+    const sTxSlips = noThbMode ? [] : txSlips;
+    const sSlipKeys = noThbMode ? [] : slipKeys;
+    const NO_THB_NOTE = "จ่ายจากยอดคงเหลือบัญชีจีน (ไม่มีโอนเงินไทย)";   // กันซ้ำตอนแก้ไขรายการเดิมแล้วบันทึกใหม่
+    const sNote = noThbMode && !note.includes(NO_THB_NOTE) ? [note.trim(), NO_THB_NOTE].filter(Boolean).join(" · ") : note;
     setSaving(true);
     try {
-      const chinaIds = [...sel], ctwIds = ctwSelDerived, thbIds = [...thbSel];
+      const chinaIds = [...sel], ctwIds = noThbMode ? [] : ctwSelDerived, thbIds = [...thbSel];
       // รายการย่อย (เก็บว่าการโอนนี้ตัดบิลอะไร จำนวนเท่าไหร่)
       const lines = [
         ...chinaIds.map(id => {
           const b = pending.find(p => String(p.id) === id);
           const paidRmb = num(pay[id]);
-          return { kind: "china", bill_id: id, label: String(b?.supplier_label ?? b?.supplier_id ?? ""), paid_rmb: paidRmb, paid_thb: +(paidRmb * effRate).toFixed(2) };
+          return { kind: "china", bill_id: id, label: String(b?.supplier_label ?? b?.supplier_id ?? ""), paid_rmb: paidRmb, paid_thb: +(paidRmb * sRate).toFixed(2) };
         }),
         ...thbIds.map(id => {
           const b = pending.find(p => String(p.id) === id);
@@ -3410,12 +3444,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       const res = await apiFetch("/api/master-v2/china-transfers", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transfer_date: transferDate || today(), bill_ids: chinaIds, bills_total_thb: +selectedSum.toFixed(2),
-          amount_transferred_thb: +transferred.toFixed(2),
-          rate: sel.size > 0 ? effRate : null,
-          leftover_thb: sel.size > 0 ? +leftover.toFixed(2) : 0,
-          leftover_rmb: sel.size > 0 ? +leftoverRmb.toFixed(2) : 0,
-          ref_no: refNo || null, lines, attachments: slipKeys, tx_slips: txSlips, note: note || null, actor: "china-app",
+          transfer_date: transferDate || today(), bill_ids: chinaIds, bills_total_thb: +sBillsThb.toFixed(2),
+          amount_transferred_thb: +sTransferred.toFixed(2),
+          rate: sel.size > 0 ? sRate : null,
+          leftover_thb: sel.size > 0 ? +sLeftoverThb.toFixed(2) : 0,
+          leftover_rmb: sel.size > 0 ? +sLeftoverRmb.toFixed(2) : 0,
+          ref_no: refNo || null, lines, attachments: sSlipKeys, tx_slips: sTxSlips, note: sNote || null, actor: "china-app",
         }),
       });
       const j = await res.json();
@@ -3428,7 +3462,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         const done = newPaid >= total - 0.001;
         return apiFetch(`/api/master-v2/china-bills/${id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paid_rmb: newPaid, status: done ? "โอนแล้ว" : "รอโอน", rate: effRate, transfer_date: transferDate || today(), actor: "china-app" }),
+          body: JSON.stringify({ paid_rmb: newPaid, status: done ? "โอนแล้ว" : "รอโอน", rate: sRate, transfer_date: transferDate || today(), actor: "china-app" }),
         });
       }));
       // ตัดบิล CTW → สะสม cleared_amount
@@ -3462,11 +3496,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       setSavedTransfer({
         transfer_id: String(j.data?.id ?? ""), transfer_no: String(j.data?.transfer_no ?? ""),
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
-        lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slipKeys,
+        lines: enrichedLines, rate: sRate, selectedRmb, transferred: sTransferred,
+        chinaIn: noThbMode ? 0 : chinaIn, chinaInRmb: noThbMode ? 0 : chinaInRmb, chinaThbSum, ctwThbSum, attachments: sSlipKeys,
         // สรุปการคำนวณ (ย้ายมาจากหน้ายืนยัน → โชว์ในใบพิมพ์)
-        breakdown: { thb: thbSelTotal, chinaRemainThb, billsThb: selectedSum, tier: activeTier, chinaYuanBought, shortfallRmb, surplusRmb },
+        breakdown: noThbMode
+          ? { thb: 0, chinaRemainThb: 0, billsThb: sBillsThb, tier: TIER_NAMES[0], chinaYuanBought: 0, shortfallRmb: selectedRmb, surplusRmb: 0 }
+          : { thb: thbSelTotal, chinaRemainThb, billsThb: selectedSum, tier: activeTier, chinaYuanBought, shortfallRmb, surplusRmb },
       });
-      setSel(new Set()); setPay({}); setThbSel(new Set()); setUseBalance(true); setBalanceUse(""); setBalanceEdit(false);
+      setSel(new Set()); setPay({}); setThbSel(new Set()); setUseBalance(true); setBalanceUse(""); setBalanceEdit(false); setNoThb(true);
       setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
       try { localStorage.removeItem("china-tx-draft"); } catch { /* noop */ }
       loadAll();
@@ -3522,9 +3559,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
           <div className="flex justify-between items-baseline mt-1 gap-2">
             <span className="text-xs text-slate-500 flex-shrink-0">บิลจีน ({sel.size}){thbSel.size > 0 ? ` + ค่าส่ง/VAT (${thbSel.size})` : ""}</span>
-            <span className="text-3xl font-extrabold text-red-600">{previewMinTransfer > 0 ? `฿${fmt(+previewMinTransfer.toFixed(2))}` : (hasRate ? "รอเลือกบิล" : "รอเรท")}</span>
+            {balanceCoversAll
+              ? <span className="text-3xl font-extrabold text-emerald-600">฿0</span>
+              : <span className="text-3xl font-extrabold text-red-600">{previewMinTransfer > 0 ? `฿${fmt(+previewMinTransfer.toFixed(2))}` : (hasRate ? "รอเลือกบิล" : "รอเรท")}</span>}
           </div>
-          {hasRate && previewMinTransfer > 0 && <div className="text-right text-[11px] text-slate-400 -mt-0.5">ยอดประมาณ — กรอกยอดโอนจริงในขั้นถัดไป</div>}
+          {balanceCoversAll && <div className="text-right text-[11px] text-emerald-600 font-medium -mt-0.5">ยอดคงเหลือพอจ่าย — ไม่ต้องโอนเงินไทย</div>}
+          {!balanceCoversAll && hasRate && previewMinTransfer > 0 && <div className="text-right text-[11px] text-slate-400 -mt-0.5">ยอดประมาณ — กรอกยอดโอนจริงในขั้นถัดไป</div>}
         </button>
         {showBills && (sel.size > 0 || thbSel.size > 0) && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-sm">
@@ -3672,13 +3712,38 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={() => setStep(2)} disabled={(sel.size === 0 && thbSel.size === 0) || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
-          {(sel.size === 0 && thbSel.size === 0) ? "เลือกบิลอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: แนบสลิป →"}
+          {(sel.size === 0 && thbSel.size === 0) ? "เลือกบิลอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : balanceCoversAll ? "ถัดไป: ยืนยัน →" : "ถัดไป: แนบสลิป →"}
         </button>
       </div>
       </>)}
 
       {/* STEP 2: กรอกจำนวน + สลิป (ยอด/บัญชี/ยอดคงเหลือ อยู่การ์ดบนแล้ว) */}
       {step === 2 && (<>
+      {/* ติ๊ก "ไม่ต้องโอนเงินไทย" — โผล่เฉพาะตอนยอดคงเหลือบัญชีจีนพอจ่ายบิลจีนครบ (ติ๊กไว้ให้เลย) */}
+      {balanceCoversAll && (
+        <label className="flex items-start gap-3 rounded-xl bg-emerald-50 border border-emerald-300 px-4 py-3 cursor-pointer">
+          <input type="checkbox" checked={noThb} onChange={e => setNoThb(e.target.checked)} className="mt-0.5 w-5 h-5 flex-shrink-0 accent-emerald-600" />
+          <span className="min-w-0">
+            <span className="block font-semibold text-emerald-800">ไม่ต้องโอนเงินไทย</span>
+            <span className="block text-xs text-emerald-700">ยอดคงเหลือจีน ¥{fmt(balance.rmb)} พอจ่ายบิล ¥{fmt(selectedRmb)} · ไม่ต้องแนบสลิป</span>
+          </span>
+        </label>
+      )}
+      {noThbMode && (
+        <Card>
+          <Label>💰 จ่ายจากยอดคงเหลือบัญชีจีน</Label>
+          <div className="mt-1 space-y-1 text-sm">
+            <div className="flex justify-between gap-2"><span className="text-slate-500">จ่ายจากยอดคงเหลือ</span><span className="font-bold text-slate-800">¥{fmt(+selectedRmb.toFixed(2))}</span></div>
+            <div className="flex justify-between gap-2"><span className="text-slate-500">คงเหลือหลังจ่าย</span><span className="font-bold text-emerald-700">¥{fmt(+Math.max(0, balance.rmb - selectedRmb).toFixed(2))}</span></div>
+            <div className="flex justify-between gap-2"><span className="text-slate-500">โอนเงินไทย</span><span className="font-medium text-slate-700">฿0</span></div>
+            {noThbRate > 0
+              ? <div className="flex justify-between gap-2 text-xs"><span className="text-slate-400">เรทที่ใช้คิดมูลค่าบาท</span><span className="text-slate-500">{fmt(noThbRate)} ({r1 > 0 ? "เรทวันนี้" : `เรทล่าสุด ${noThbRateDate}`}) ≈ ฿{fmt(+(selectedRmb * noThbRate).toFixed(2))}</span></div>
+              : <div className="text-xs text-amber-600">* ยังไม่มีเรทในระบบเลย — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
+          </div>
+          {txSlips.length > 0 && <div className="mt-2 text-[11px] text-amber-600">* สลิปที่เพิ่มไว้ {txSlips.length} รายการจะไม่ถูกบันทึก — เอาติ๊กออกถ้าจะใช้สลิป</div>}
+        </Card>
+      )}
+      {!noThbMode && (
       <Card>
         <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="hidden"
           onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
@@ -3749,11 +3814,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         )}
         {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
       </Card>
+      )}
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
-        <button onClick={save} disabled={saving || (sel.size > 0 && !hasRate) || ((selectedRmb > 0 || thbSelTotal > 0) && num(amount) <= 0) || invalid}
+        <button onClick={save} disabled={noThbMode ? (saving || noThbRate <= 0) : (saving || (sel.size > 0 && !hasRate) || ((selectedRmb > 0 || thbSelTotal > 0) && num(amount) <= 0) || invalid)}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {saving ? "กำลังบันทึก…"
+            : noThbMode ? (noThbRate > 0 ? "บันทึก + ตัดบิลจากยอดคงเหลือ" : "ยังไม่มีเรทเลย — ใส่เรทก่อน")
             : (sel.size > 0 && !hasRate) ? "ยังไม่มีเรทวันนี้ — ใส่เรทก่อน"
             : ((selectedRmb > 0 || thbSelTotal > 0) && num(amount) <= 0) ? "ใส่จำนวนเงินที่โอนจริง"
             : belowMin ? `ต้องโอน ≥ ฿${fmt(minTransfer)}`
@@ -3843,7 +3910,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-3xl mb-1">✅</div>
             <div className="text-lg font-semibold text-slate-800">โอนสำเร็จ</div>
-            <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · โอนจริง ฿{fmt(num(savedTransfer.transferred))}</div>
+            <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · โอนจริง {fmtTransferred(savedTransfer.transferred)}</div>
             <div className="mt-4 space-y-2">
               <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedTransfer(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
@@ -4076,7 +4143,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
     const bd = t.breakdown as Record<string, unknown> | undefined;
     return [
       ...(t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as ReceiptRow] : []),
-      { t: "kv", l: "โอนจริง", r: "฿" + fmt(num(t.transferred)), bold: true },
+      { t: "kv", l: "โอนจริง", r: fmtTransferred(t.transferred), bold: true },
       ...(bd ? [
         ...(num(bd.thb) > 0 ? [{ t: "kv", l: "หัก ค่าส่ง/VAT", r: "−฿" + fmt(num(bd.thb)), color: "#e11d48" } as ReceiptRow] : []),
         { t: "kv", l: "คงเหลือ", r: "฿" + fmt(num(bd.chinaRemainThb)) } as ReceiptRow,
@@ -4205,7 +4272,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
       const base = String(cfg.share_base ?? "").replace(/\/$/, "");
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
-      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\nเรท: ${fmt(num(t.rate))} · โอนจริง ฿${fmt(num(t.transferred))}`;
+      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\nเรท: ${fmt(num(t.rate))} · โอนจริง ${fmtTransferred(t.transferred)}`;
       if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label || "—")} ¥${fmt(num(l.paid_rmb))}`).join("\n");
       if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label || "—")}${l.doc_number ? ` (${String(l.doc_number)})` : ""} ฿${fmt(num(l.paid_thb))}`).join("\n");
       const toPublic = async (du: string, name: string) => {
@@ -4259,7 +4326,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
           </div>
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
           {/* แถวค่าเงิน — ค่าชิดขวาเสมอ (ml-auto text-right) + ห้ามตัดบรรทัด (กันตอนพิมพ์) */}
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">฿{fmt(num(t.transferred))}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">{fmtTransferred(t.transferred)}</span></div>
           {(() => { const bd = t.breakdown as Record<string, unknown> | undefined; if (!bd) return <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">{fmt(num(t.rate))}</span></div>; return (
             <>
               {num(bd.thb) > 0 && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">หัก ค่าส่ง/VAT</span><span className="text-rose-600 whitespace-nowrap ml-auto text-right">−฿{fmt(num(bd.thb))}</span></div>}
