@@ -1,0 +1,40 @@
+/** ทะเบียนเครื่องมือ + ค้นหาด้วยไทย/อังกฤษ/คำใกล้เคียง (Bag CAD รอบ D) */
+import { describe, expect, it } from "vitest";
+import { LEVEL_NUM, PATTERN_TOOLS, searchTools, toolById, toolOfBoard, toolTitle, visibleAt } from "@/lib/pattern-tools";
+
+const ids = (q: string) => searchTools(q).map((d) => d.id);
+
+describe("ทะเบียนเครื่องมือ", () => {
+  it("รหัสไม่ซ้ำ · มีชื่อสองภาษา คำอธิบาย ขั้นตอน", () => {
+    expect(new Set(PATTERN_TOOLS.map((d) => d.id)).size).toBe(PATTERN_TOOLS.length);
+    for (const d of PATTERN_TOOLS) { expect(d.th && d.en && d.desc.th && d.desc.en).toBeTruthy(); expect(d.steps.length).toBeGreaterThan(0); expect([1, 2, 3]).toContain(d.level); }
+  });
+  it("เครื่องมือบนกระดานทุกตัวมีในทะเบียน", () => {
+    for (const t of ["move", "rect", "ellipse", "pen", "hand", "measure", "inner", "sew", "sewpart", "sewmany", "sewedit"]) expect(toolOfBoard(t)?.target).toEqual({ kind: "tool", tool: t });
+  });
+  it("ชื่อเมื่อชี้ปุ่ม = ไทย · อังกฤษ + ปุ่มลัด + คำอธิบาย", () => {
+    expect(toolTitle(toolById("sew")!, "th")).toMatch(/^เย็บขอบกับขอบ · Segment sewing \(N\)\n/);
+  });
+  it("โหมด: เริ่มต้นเห็นเครื่องมือหลัก · ขั้นสูงเห็นทั้งหมด", () => {
+    const at = (l: 1 | 2 | 3) => PATTERN_TOOLS.filter((d) => visibleAt(d, l)).map((d) => d.id);
+    expect(at(1)).toContain("sew"); expect(at(1)).not.toContain("sewpart"); expect(at(2)).not.toContain("v-sim");
+    expect(at(3)).toHaveLength(PATTERN_TOOLS.length);
+    expect(LEVEL_NUM.std).toBe(2);
+  });
+});
+
+describe("ค้นหาเครื่องมือ", () => {
+  it("ไทย / อังกฤษ / คำใกล้เคียง ได้ตัวเดียวกัน", () => {
+    expect(ids("เผื่อเย็บ")[0]).toBe("allow");
+    expect(ids("seam allowance")[0]).toBe("allow");
+    expect(ids("offset")).toContain("allow");
+    expect(ids("ตะเข็บ")).toEqual(expect.arrayContaining(["sew", "allow"]));
+    expect(ids("วัด")[0]).toBe("measure");
+    expect(ids("ruler")[0]).toBe("measure");
+    expect(ids("มุมมน")[0]).toBe("round");
+    expect(ids("dxf")).toEqual(expect.arrayContaining(["dxf", "print"]));
+  });
+  it("ปุ่มลัดตัวเดียว = เครื่องมือนั้นขึ้นก่อน", () => { expect(ids("n")[0]).toBe("sew"); expect(ids("b")[0]).toBe("sewedit"); });
+  it("ว่าง = ไม่มีผล · ไม่เจอ = ว่าง", () => { expect(ids("")).toEqual([]); expect(ids("zzzqqq")).toEqual([]); });
+  it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
+});

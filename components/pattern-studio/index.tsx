@@ -15,6 +15,8 @@
  *        · แผง "ตรวจแบบ" (lib/pattern-check — กดแถวไปที่ชิ้น/ขอบ · ตั้งขอบเปิดตั้งใจได้จากแผง) · ป้ายระดับภาพ 3D (ดูชิ้น / ประกอบตามกติกา / ฟิสิกส์ทดลอง)
  *     7) Bag CAD รอบ C (2026-11-12): เรียนไปทำไป — ปุ่ม "เรียน" (สารบัญ LessonCatalog) + การ์ดบทเรียนลอย LearnCard (learn-panel) · ตัวตรวจ lib/pattern-lessons อ่านชิ้นสด
  *        · พาไปที่เครื่องมือ = ไฮไลต์ปุ่ม/ส่วนของแผงจริง (data-tool / data-guide) · ทำให้ดู = inject (add / patch / seams) ย้อนได้ · เหตุการณ์ที่ผู้ใช้ทำ (เลือกชิ้น / คลิก 3D / เปิดเครื่องมือ / เปิดแผง) นับในหน่วยความจำ
+ *     8) Bag CAD รอบ D (2026-11-12): โหมด เริ่มต้น / มาตรฐาน / ขั้นสูง (จำต่อคน useUserPref "pattern_studio_level" · ShapeEditor level) · ช่องค้นหาเครื่องมือ (Ctrl+K หรือ /)
+ *        ค้นไทย/อังกฤษ/คำใกล้เคียงจากทะเบียน lib/pattern-tools · กดผล = ถือเครื่องมือ / ไฮไลต์ / เปิดแผง · เครื่องมือโหมดสูงกว่า = สลับโหมดให้แล้วบอก · ดูตัวอย่าง = ToolDemo
  *   จอกว้าง ≥ 1180px = กระดานซ้าย 3D ขวา · แคบกว่า = 3D อยู่ใต้กระดาน
  *   (ไม่ใช้ SplitPanes: ตัวนั้นขยายฝั่งที่ถูกคลิก — กระดานวาดต้องคลิกตลอด จะดันไปมาทุกครั้ง)
  *
@@ -41,6 +43,8 @@ import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summar
 import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
 import type { Guide, LessonCtx, LessonDemo } from "@/lib/pattern-lessons";
 import type { CopySource, LessonRef } from "./learn-panel";
+import { LEVEL_NUM, PATTERN_TOOLS, STUDIO_LEVELS, TOOL_GROUPS, isStudioLevel, searchTools, visibleAt, type StudioLevel, type ToolDef } from "@/lib/pattern-tools";
+import { useUserPref } from "@/lib/use-user-pref";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
@@ -50,7 +54,8 @@ const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => 
 
 const AssemblyView = dynamic(() => import("./assembly-view").then((m) => m.AssemblyView), { ssr: false });
 const LearnCard = dynamic(() => import("./learn-panel").then((m) => m.LearnCard), { ssr: false });            // โหลดเมื่อมีบทเรียน
-const LessonCatalog = dynamic(() => import("./learn-panel").then((m) => m.LessonCatalog), { ssr: false });    // โหลดเมื่อกด เรียน                  // โหลดเมื่อเลือก แยกชิ้น / ทีละขั้น / ทิ้งตัว
+const LessonCatalog = dynamic(() => import("./learn-panel").then((m) => m.LessonCatalog), { ssr: false });    // โหลดเมื่อกด เรียน
+const ToolDemo = dynamic(() => import("./tool-demo").then((m) => m.ToolDemo), { ssr: false });                // โหลดเมื่อกด ดูตัวอย่าง                  // โหลดเมื่อเลือก แยกชิ้น / ทีละขั้น / ทิ้งตัว
 
 const SHOW3D_KEY = "pattern-studio-3d";
 const SHOW3D_SPLIT_KEY = "pattern-studio-3d-split";   // หน้าที่มีเครื่องมือเย็บ: ภาพ 3D คู่กับกระดาน เปิดเป็นค่าเริ่ม (กุญแจแยก — ค่าที่เคยปิดไว้ของปุ่มเดิมไม่ตามมา)
@@ -151,6 +156,15 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [events, setEvents] = useState<Set<string>>(() => new Set());   // สิ่งที่ผู้ใช้ทำแล้ว (บทเรียนบท 1 นับจากตรงนี้)
   const addEvent = useCallback((k: string) => setEvents((x) => (x.has(k) ? x : new Set(x).add(k))), []);
   const openPanel = (p: null | "pieces" | "check") => { setPanel(p); if (p) addEvent(`panel:${p}`); };
+  // ── โหมด + ค้นหาเครื่องมือ (รอบ D) ──
+  const [levelKey, setLevelKey] = useUserPref<StudioLevel>("pattern_studio_level", "std", (v) => (isStudioLevel(v) ? v : null));
+  const lvNum = sew ? LEVEL_NUM[levelKey] : 3;
+  const [toolReq, setToolReq] = useState<{ nonce: number; tool: EditorProps["initialTool"] & string } | null>(null);
+  const [tq, setTq] = useState("");
+  const [tOpen, setTOpen] = useState(false);
+  const [tSel, setTSel] = useState(0);
+  const [tMore, setTMore] = useState<string | null>(null);   // ผลที่กางดูรายละเอียด / ตัวอย่าง
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
   // กว้างพอ = ซ้ายขวา · แคบ = บนล่าง (วัดกล่องแม่ ไม่ใช่จอ)
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -279,31 +293,111 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const demo = (d: LessonDemo) => {
     setInject({ nonce: Date.now(), pieces: (d.add ?? []).map((a) => ({ shape: a.shape, count: 1, allow: a.allow ?? 0, name: a.name, mats: [] })), ...(d.patch?.length ? { patch: d.patch } : {}), ...(d.seams ? { seams: d.seams } : {}) });
   };
+  /** เปลี่ยนโหมด = เปลี่ยนแค่สิ่งที่โชว์ (ข้อมูล/ชิ้นที่เลือกอยู่ครบ) */
+  const setLevel = (k: StudioLevel) => { setLevelKey(k); if (LEVEL_NUM[k] < 3 && view3d === "sim") setView3d("sewn"); };
+  useEffect(() => { if (lvNum < 3 && view3d === "sim") setView3d("sewn"); }, [lvNum]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Ctrl+K หรือ / (นอกช่องพิมพ์) = ไปที่ช่องค้นหาเครื่องมือ
+  useEffect(() => {
+    if (!sew) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null, inField = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") || (e.key === "/" && !inField && !e.ctrlKey && !e.metaKey)) { e.preventDefault(); searchRef.current?.focus(); setTOpen(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sew]);
+  const tResults: ToolDef[] = useMemo(() => (tq.trim() ? searchTools(tq) : PATTERN_TOOLS.filter((d) => visibleAt(d, lvNum))).slice(0, tq.trim() ? 12 : 60), [tq, lvNum]);
+  /** ใช้เครื่องมือจากผลค้นหา: ถือเครื่องมือ / ไฮไลต์ส่วนของแผง / เปิดแผง — อยู่โหมดสูงกว่า = สลับโหมดให้แล้วบอก */
+  const runTool = (d: ToolDef) => {
+    setTOpen(false); setTq(""); setTMore(null); searchRef.current?.blur();
+    if (d.level > lvNum) { const k = d.level === 3 ? "adv" : "std"; setLevel(k); setNotice(t(`"${d.th}" อยู่ในโหมด${d.level === 3 ? "ขั้นสูง" : "มาตรฐาน"} — สลับโหมดให้แล้ว (ข้อมูลไม่เปลี่ยน · กลับได้ที่ปุ่มโหมด)`, `"${d.en}" is in ${d.level === 3 ? "Advanced" : "Standard"} mode — switched for you (your data is unchanged · switch back with the mode buttons)`)); }
+    const tg = d.target, later = (sel: string) => setTimeout(() => flash(boxRef.current?.querySelector(sel) ?? document.querySelector(sel)), 380);
+    if (tg.kind === "tool") { setToolReq({ nonce: Date.now(), tool: tg.tool as EditorProps["initialTool"] & string }); later(`[data-tool="${tg.tool}"]`); }
+    else if (tg.kind === "guide") guide({ el: tg.el, select: tg.select }, selPid ?? live[0]?.pid ?? null);
+    else if (tg.kind === "view3d") { setShow3d(true); setView3d(tg.view); later(`[data-view3d="${tg.view}"]`); }
+    else {
+      const id = tg.id;
+      if (id === "check" || id === "pieces") { openPanel(id); later(`[data-studio-${id}]`); }
+      else if (id === "learn") { if (sew?.lesson) setLearnOpen(true); else setCatalog(true); }
+      else if (id === "template" && !readonly) { setDraft(null); setWizard(true); }
+      else if (id === "photo" && !readonly) setPhoto(true);
+      else if (id === "dxf" && !readonly) setDxf(true);
+      else later(id === "print" ? "[data-open-preflight]" : id === "trims" ? "[data-trims-open]" : id === "unit" ? "[data-unit]" : `[data-studio-${id}]`);
+    }
+  };
+  const toolSearch = sew ? (
+    <div className="relative" data-tool-search>
+      <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"><Icon value="i:search" className="text-sm" /></span>
+      <input ref={searchRef} value={tq} onChange={(e) => { setTq(e.target.value); setTSel(0); setTOpen(true); setTMore(null); }} onFocus={() => setTOpen(true)}
+        onBlur={(e) => { const next = e.relatedTarget as HTMLElement | null; if (!next || !next.closest("[data-tool-search]")) setTimeout(() => setTOpen(false), 120); }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") { e.preventDefault(); setTSel((i) => Math.min(tResults.length - 1, i + 1)); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setTSel((i) => Math.max(0, i - 1)); }
+          else if (e.key === "Enter") { e.preventDefault(); const d = tResults[tSel]; if (d) runTool(d); }
+          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setTOpen(false); setTq(""); (e.currentTarget as HTMLInputElement).blur(); }
+        }}
+        placeholder={t("ค้นหาเครื่องมือ เช่น เผื่อเย็บ  (Ctrl+K)", "Find a tool, e.g. allowance  (Ctrl+K)")} aria-label={t("ค้นหาเครื่องมือ", "Find a tool")} role="combobox" aria-expanded={tOpen} aria-controls="pattern-tool-results"
+        className="h-8 w-60 rounded-lg border border-slate-200 bg-white pl-7 pr-2 text-xs focus:border-blue-400 focus:outline-none" />
+      {tOpen && (
+        <div id="pattern-tool-results" role="listbox" className="absolute right-0 top-9 z-40 max-h-[70vh] w-[min(440px,90vw)] overflow-auto rounded-xl border border-slate-200 bg-white p-1.5 text-xs shadow-xl">
+          {!tq.trim() && <p className="px-2 py-1 text-[11px] text-slate-500">{t(`คู่มือเครื่องมือ · โหมด${STUDIO_LEVELS.find((m) => m.key === levelKey)?.th} · พิมพ์ไทยหรืออังกฤษก็ได้ เช่น ตะเข็บ, offset, มุมมน`, `Tool guide · ${STUDIO_LEVELS.find((m) => m.key === levelKey)?.en} mode · type Thai or English, e.g. seam, offset, round`)}</p>}
+          {tq.trim() && !tResults.length && <p className="px-2 py-2 text-slate-500">{t("ไม่พบ — ลองคำอื่น เช่น เย็บ, วัด, ซิป, dxf", "Nothing found — try another word, e.g. sew, measure, zip, dxf")}</p>}
+          {tResults.map((d, i) => {
+            const prev = tResults[i - 1], head = !tq.trim() && (!prev || prev.group !== d.group), more = tMore === d.id;
+            return (
+              <div key={d.id}>
+                {head && <div className="mt-1 px-2 pb-0.5 pt-1 text-[11px] font-medium text-slate-400">{t(TOOL_GROUPS[d.group].th, TOOL_GROUPS[d.group].en)}</div>}
+                <div role="option" aria-selected={i === tSel} data-tool-result={d.id} className={`rounded-lg ${i === tSel ? "bg-blue-50" : "hover:bg-slate-50"}`} onMouseEnter={() => setTSel(i)}>
+                  <div className="flex items-center gap-2 px-2 py-1.5">
+                    <Icon value={`i:${d.icon}`} className="shrink-0 text-sm text-slate-500" />
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => runTool(d)} className="min-w-0 flex-1 text-left">
+                      <span className="font-medium text-slate-800">{d.th}</span><span className="text-slate-400"> · {d.en}</span>
+                      {d.level > lvNum && <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-800">{d.level === 3 ? t("ขั้นสูง", "Advanced") : t("มาตรฐาน", "Standard")}</span>}
+                    </button>
+                    {d.key && <kbd className="rounded border border-slate-200 bg-slate-50 px-1 text-[10px] text-slate-500">{d.key}</kbd>}
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setTMore(more ? null : d.id)} aria-expanded={more} aria-label={t(`วิธีใช้ ${d.th}`, `How to use ${d.en}`)} title={t("วิธีใช้ / ดูตัวอย่าง", "How to / see an example")} className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"><Icon value={more ? "i:chevron-up" : "i:chevron-down"} /></button>
+                  </div>
+                  {more && (
+                    <div className="space-y-1.5 border-t border-slate-100 px-3 pb-2 pt-1.5" data-tool-more>
+                      <p className="text-slate-600">{t(d.desc.th, d.desc.en)}</p>
+                      <ol className="list-decimal space-y-0.5 pl-4 text-slate-600">{d.steps.map((x, k) => <li key={k}>{t(x.th, x.en)}</li>)}</ol>
+                      {d.demo && <ToolDemo id={d.demo} label={t(`ตัวอย่าง: ${d.th}`, `Example: ${d.en}`)} />}
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => runTool(d)} className="inline-flex h-7 items-center gap-1 rounded-md bg-blue-600 px-2.5 text-white hover:bg-blue-700"><Icon value="i:pointer" />{t("ใช้เครื่องมือนี้", "Use this tool")}</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  ) : null;
   const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs";
   return (
     <div ref={boxRef} className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700"><Icon value="i:shopping-bag" className="text-sm" />{t("สตูดิโอแพทเทิร์น", "Pattern studio")}</span>
         {!readonly && (
-          <button type="button" onClick={() => { setDraft(null); setWizard(true); }} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+          <button type="button" data-studio-template onClick={() => { setDraft(null); setWizard(true); }} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:wand" className="text-sm" />{t("สร้างจากแม่แบบทรง", "Create from a bag template")}
           </button>
         )}
-        {!readonly && (
-          <button type="button" onClick={() => setPhoto(true)} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+        {!readonly && lvNum >= 2 && (
+          <button type="button" data-studio-photo onClick={() => setPhoto(true)} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:photo" className="text-sm" />{t("แกะจากรูป", "Start from a photo")}
           </button>
         )}
-        {!readonly && (
-          <button type="button" onClick={() => setDxf(true)} title={t("นำเข้าแพทเทิร์นจากไฟล์ DXF เช่น ที่ส่งออกจาก CLO3D", "Import a pattern from a DXF file, e.g. exported from CLO3D")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+        {!readonly && lvNum >= 2 && (
+          <button type="button" data-studio-dxf onClick={() => setDxf(true)} title={t("นำเข้าแพทเทิร์นจากไฟล์ DXF เช่น ที่ส่งออกจาก CLO3D", "Import a pattern from a DXF file, e.g. exported from CLO3D")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:file-import" className="text-sm" />{t("นำเข้า DXF", "Import DXF")}
           </button>
         )}
-        {!readonly && sew && <>
-          <button type="button" onClick={makeLining} title={t("คัดลอกชิ้นตัวกระเป๋าเป็นชั้นซับใน พร้อมตะเข็บ", "Copy the body pieces into a lining layer, with their seams")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
+        {!readonly && sew && lvNum >= 2 && <>
+          <button type="button" data-studio-lining onClick={makeLining} title={t("คัดลอกชิ้นตัวกระเป๋าเป็นชั้นซับใน พร้อมตะเข็บ", "Copy the body pieces into a lining layer, with their seams")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50`}>
             <Icon value="i:layers-subtract" className="text-sm" />{t("สร้างซับใน", "Create lining")}
           </button>
-          <button type="button" onClick={() => setPocket(true)} disabled={!live.length} title={t("ช่องใส่ของ หรือ ช่องซิป บนชิ้นที่เลือก", "A patch pocket or a zip pocket on a piece")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-40`}>
+          <button type="button" data-studio-pocket onClick={() => setPocket(true)} disabled={!live.length} title={t("ช่องใส่ของ หรือ ช่องซิป บนชิ้นที่เลือก", "A patch pocket or a zip pocket on a piece")} className={`${btn} border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-40`}>
             <Icon value="i:square-plus" className="text-sm" />{t("เพิ่มช่อง", "Add pocket")}
           </button>
         </>}
@@ -328,6 +422,10 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("หน่วยที่แสดง", "Display unit")} title={t("หน่วยที่แสดง — เปลี่ยนแล้วขนาดจริงไม่เปลี่ยน", "Display unit — switching doesn't change real sizes")}>
             {LENGTH_UNITS.map((u) => <button key={u.key} type="button" data-unit={u.key} onClick={() => setUnit(u.key)} aria-pressed={unit === u.key} className={`h-7 rounded-md px-2 text-xs ${unit === u.key ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{t(u.th, u.en)}</button>)}
           </div>
+          <div className="ml-auto inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("โหมด", "Mode")}>
+            {STUDIO_LEVELS.map((m) => <button key={m.key} type="button" data-level={m.key} onClick={() => setLevel(m.key)} aria-pressed={levelKey === m.key} title={t(m.descTh, m.descEn)} className={`h-7 rounded-md px-2 text-xs ${levelKey === m.key ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{t(m.th, m.en)}</button>)}
+          </div>
+          {toolSearch}
         </>}
         {sew && liningPids.size > 0 && (
           <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ชั้นที่ดูบนกระดาน", "Layer shown on the board")}>
@@ -425,7 +523,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
         const boardEl = (
           <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
           seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids}
-          {...(sew ? { unit, seamTol: tol, lockPids, flagged, focusEdge: focusReq, onToolChange: (tl: string) => addEvent(`tool:${tl}`) } : {})} />
+          {...(sew ? { unit, seamTol: tol, lockPids, flagged, focusEdge: focusReq, onToolChange: (tl: string) => addEvent(`tool:${tl}`), level: lvNum as 1 | 2 | 3, toolReq, onMatPropsChange: lvNum >= 3 ? props.onMatPropsChange : undefined } : {})} />
         );
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
@@ -460,7 +558,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           <div data-pane-3d className={`min-w-0 space-y-1.5 ${wide ? "sticky top-2 shrink-0" : ""}`} style={wide ? { width: `${roomy ? pct3d : Math.min(pct3d, 33)}%` } : undefined}>
             <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
               <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("แบบของภาพ 3D", "3D view type")}>
-                {VIEWS_3D.map((v) => <button key={v.key} type="button" data-view3d={v.key} onClick={() => setView3d(v.key)} aria-pressed={view3d === v.key} title={t(v.hintTh, v.hintEn)} className={seg3(view3d === v.key)}>{t(v.th, v.en)}</button>)}
+                {VIEWS_3D.filter((v) => v.key !== "sim" || lvNum >= 3).map((v) => <button key={v.key} type="button" data-view3d={v.key} onClick={() => setView3d(v.key)} aria-pressed={view3d === v.key} title={t(v.hintTh, v.hintEn)} className={seg3(view3d === v.key)}>{t(v.th, v.en)}</button>)}
               </div>
               <span className="ml-auto inline-flex gap-1">
                 {wide && <button type="button" data-swap-3d onClick={() => setSide3d(side3d === "left" ? "right" : "left")} title={t("สลับฝั่ง: ภาพ 3D ซ้าย / ขวา", "Swap sides: 3D left / right")} aria-label={t("สลับฝั่งภาพ 3D", "Swap the 3D side")} className={ib3}><Icon value="i:arrows-exchange" className="text-sm" /></button>}

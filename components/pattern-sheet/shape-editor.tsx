@@ -35,6 +35,7 @@ import { ColorInput } from "@/components/color-picker";
 import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
 import { formatLength, parseLength, unitLabel, type LengthUnit } from "@/lib/length-units";
 import { edgePlan, migrateSeams, remapEdgeMeta, remapEdgeValues, type EdgePlan } from "@/lib/pattern-edge-map";
+import { toolOfBoard, toolTitle } from "@/lib/pattern-tools";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
@@ -170,7 +171,11 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange, level = 3, toolReq = null }: {
+  /** โหมดของสตูดิโอ (Bag CAD รอบ D): 1 เริ่มต้น = เครื่องมือหลัก + ชื่อบนปุ่ม + แผงขวาแบบย่อ · 2 มาตรฐาน · 3 ขั้นสูง (ค่าเริ่ม = ทุกอย่างแบบเดิม) — เปลี่ยนแค่สิ่งที่โชว์ ข้อมูลไม่เปลี่ยน */
+  level?: 1 | 2 | 3;
+  /** สั่งถือเครื่องมือจากภายนอก (ช่องค้นหาเครื่องมือ) — nonce เปลี่ยน = 1 ครั้ง */
+  toolReq?: { nonce: number; tool: Tool } | null;
   /** แจ้งเมื่อเปลี่ยนเครื่องมือ (บทเรียนนับว่าเปิดไม้บรรทัดแล้ว ฯลฯ) */
   onToolChange?: (tool: Tool) => void;
   /** หน่วยที่แสดง (มม./ซม./นิ้ว · Bag CAD รอบ A) — ข้อมูลยังเป็น ซม. เสมอ · ไม่ส่ง = ซม. ทศนิยม 1 ตำแหน่งแบบเดิม (ใบงานออกแบบ) */
@@ -529,6 +534,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     else if (!lockPids?.has(p.pid)) { if (sewTool) changeTool("move"); setSel(p.id); setMulti(new Set()); setEditId(null); }
     if (!panelOpen) setPanelOpen(true);
   }, [focusEdge]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const toolSeen = useRef<number | null>(toolReq?.nonce ?? null);
+  useEffect(() => { if (!toolReq || toolSeen.current === toolReq.nonce) return; toolSeen.current = toolReq.nonce; changeTool(toolReq.tool); }, [toolReq]);   // eslint-disable-line react-hooks/exhaustive-deps
   const patchPiece =(id: string, f: (p: Piece) => Piece, key?: string) => commit(piecesRef.current.map((p) => (p.id === id ? f(p) : p)), key);
 
   const commitPen = () => {
@@ -1494,6 +1501,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             {pb && B && pb.length > 1 && tick(pb, B.shape, !!x.rev)}
             {pa && lenLabel(pa, col)}
             {pb && lenLabel(pb, col)}
+            {pa && pb && (() => { const m1 = midOf(pa), m2 = midOf(pb); return <text data-seam-letter x={(m1[0] + m2[0]) / 2} y={(m1[1] + m2[1]) / 2} fontSize={fs * 1.05} fontWeight={700} textAnchor="middle" dominantBaseline="middle" fill={col} stroke="#fff" strokeWidth={fs * 0.28} paintOrder="stroke" style={{ pointerEvents: "none" }}>{x.name?.trim() || seamLabel(si)}</text>; })()}
           </g>
         );
       })}
@@ -1770,6 +1778,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     : tool === "move" ? t("ย้าย: กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · กดที่ว่าง = เลื่อนดู · Shift+ลากที่ว่าง = กรอบเลือก · Ctrl+Z ย้อนกลับ", "Move: click a piece to move it and open its panel · drag the handles to resize · the round handle rotates · click empty space to pan · Shift+drag empty space = selection box · Ctrl+Z undo")
     : t("กดลากที่ว่างเพื่อวาด (Shift = จัตุรัส/วงกลม) · คลิกที่ว่างเฉย ๆ = เลื่อนดู · กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · Ctrl+Z ย้อนกลับ", "Drag on empty space to draw (Shift = square/circle) · click a piece = move + details · drag the handles = resize · top circle = rotate · Ctrl+Z undo");
 
+  /** ป้ายขั้นตอนบนกระดานตอนถือเครื่องมือหลายจังหวะ (Bag CAD รอบ D): "ขั้น 1/2 คลิกขอบชิ้นแรก" → "ขั้น 2/2 คลิกขอบที่จะเย็บคู่" */
+  const stepBadge: { n: number; of: number; text: string } | null = readonly ? null
+    : tool === "sew" ? (sewA ? { n: 2, of: 2, text: t("คลิกขอบที่จะเย็บคู่ — ชี้ดูความยาวก่อนกด", "Click the edge to join — hover to compare lengths first") } : { n: 1, of: 2, text: t("คลิกขอบชิ้นแรก", "Click the first edge") })
+    : tool === "sewpart" ? (sewA ? { n: 3, of: 3, text: t("คลิกจุดเริ่มบนขอบของอีกชิ้น", "Click the start point on the other piece's edge") } : sewP ? { n: 2, of: 3, text: t("คลิกจุดจบบนขอบเดียวกัน", "Click the end point on the same edge") } : { n: 1, of: 3, text: t("คลิกจุดเริ่มบนขอบแรก", "Click the start point on the first edge") })
+    : tool === "sewmany" ? (manyA ? { n: 2, of: 2, text: t(`คลิกขอบของชิ้นถัดไป · เย็บแล้ว ${manyA.made} ชิ้น · Enter = จบ`, `Click the next piece's edge · ${manyA.made} sewn · Enter to finish`) } : { n: 1, of: 2, text: t("คลิกขอบหลัก (ขอบยาว)", "Click the main (long) edge") })
+    : tool === "inner" ? (innerA ? { n: 2, of: 2, text: t("คลิกจุดที่สอง", "Click the second point") } : { n: 1, of: 2, text: t("คลิกจุดแรกข้างในชิ้น", "Click the first point inside a piece") })
+    : null;
   const penPath = () => {
     if (!pen || !pen.nodes.length) return "";
     const N = pen.nodes; const f = (v: number) => Math.round(v * 1000) / 1000;
@@ -1809,15 +1824,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   // ── เครื่องมือลอยบนแคนวาส (แทนแถบ 3 แถวด้านบน — พื้นที่วาดได้เต็ม) ──
   const fbar = "pointer-events-auto flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm";
   const ibCls = (on: boolean) => `relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded-lg px-1.5 text-xs disabled:opacity-35 ${on ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"}`;
+  /** ชื่อเมื่อชี้ปุ่ม = ไทย · อังกฤษ + ปุ่มลัด + คำอธิบาย (ทะเบียน lib/pattern-tools) · โหมดเริ่มต้น = ชื่อไทยใต้ไอคอน */
+  const toolTip = (tl: Tool, label: string, key: string) => { const d = toolOfBoard(tl); return d ? toolTitle(d, t("th", "en") as "th" | "en") : `${label} (${key})`; };
   const toolIcon = (tl: Tool, icon: string, label: string, key: string) => (
-    <button key={tl} type="button" data-tool={tl} onClick={() => changeTool(tl)} title={`${label} (${key})`} aria-label={label} aria-pressed={tool === tl} className={ibCls(tool === tl)}>
-      <Icon value={`i:${icon}`} className="text-[16px]" />
+    <button key={tl} type="button" data-tool={tl} onClick={() => changeTool(tl)} title={toolTip(tl, label, key)} aria-label={label} aria-pressed={tool === tl} className={level === 1 ? `${ibCls(tool === tl)} h-auto w-14 flex-col py-1` : ibCls(tool === tl)}>
+      <Icon value={`i:${icon}`} className="text-[16px]" />{level === 1 && <span className="text-[10px] leading-tight">{label}</span>}
     </button>
   );
   const sep = <span className="mx-0.5 h-5 w-px bg-slate-200" />;
   const overlayEl = (
     <div className="pointer-events-none absolute inset-0" data-float-ui>
       <input ref={fileRef} type="file" accept=".svg,image/svg+xml" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
+      {stepBadge && <div data-step-badge className="pointer-events-none absolute left-1/2 top-14 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white shadow">{t(`ขั้น ${stepBadge.n}/${stepBadge.of}`, `Step ${stepBadge.n}/${stepBadge.of}`)} · {stepBadge.text} <span className="text-slate-300">· Esc = {t("ยกเลิก", "cancel")}</span></div>}
       {/* ซ้าย: เครื่องมือวาด */}
       <div className={`${fbar} absolute left-2 top-14 flex-col`} aria-label={t("เครื่องมือวาด", "Drawing tools")}>
         {toolIcon("move", "pointer", readonly ? t("เลือก", "Select") : t("ย้าย", "Move"), "V")}
@@ -1828,15 +1846,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         {toolIcon("measure", "ruler-measure", t("ไม้บรรทัด", "Measure"), "M")}
         {seams && <>
           <span className="my-0.5 h-px w-5 self-center bg-slate-200" />
-          <button type="button" onClick={() => changeTool("sew")} title={`${t("เย็บขอบกับขอบ", "Sew edge to edge")} (N)`} aria-label={t("เย็บขอบกับขอบ", "Sew edge to edge")} aria-pressed={tool === "sew"} className={ibCls(tool === "sew")}>
-            <Icon value="i:needle-thread" className="text-[16px]" />
+          <button type="button" data-tool="sew" onClick={() => changeTool("sew")} title={toolTip("sew", t("เย็บขอบกับขอบ", "Sew edge to edge"), "N")} aria-label={t("เย็บขอบกับขอบ", "Sew edge to edge")} aria-pressed={tool === "sew"} className={level === 1 ? `${ibCls(tool === "sew")} h-auto w-14 flex-col py-1` : ibCls(tool === "sew")}>
+            <Icon value="i:needle-thread" className="text-[16px]" />{level === 1 && <span className="text-[10px] leading-tight">{t("เย็บ", "Sew")}</span>}
             {seams.length > 0 && <span className={`absolute -right-1 -top-1 rounded-full px-1 text-[10px] leading-4 text-white ${seamBad ? "bg-red-500" : "bg-slate-500"}`}>{seams.length}</span>}
           </button>
-          {toolIcon("sewpart", "line-dashed", t("เย็บบางช่วงของขอบ", "Sew part of an edge"), "J")}
-          {toolIcon("sewmany", "arrows-split-2", t("เย็บ 1 ขอบกับหลายชิ้น", "Sew one edge to many pieces"), "K")}
+          {level >= 2 && toolIcon("sewpart", "line-dashed", t("เย็บบางช่วงของขอบ", "Sew part of an edge"), "J")}
+          {level >= 2 && toolIcon("sewmany", "arrows-split-2", t("เย็บ 1 ขอบกับหลายชิ้น", "Sew one edge to many pieces"), "K")}
           {toolIcon("sewedit", "needle", t("แก้ตะเข็บ", "Edit sewing"), "B")}
         </>}
-        {innerLines && !readonly && toolIcon("inner", "line", t("เส้นในชิ้น", "Inner line"), "L")}
+        {innerLines && !readonly && level >= 2 && toolIcon("inner", "line", t("เส้นในชิ้น", "Inner line"), "L")}
         {refPicker && <button type="button" onClick={() => setRefPickOpen((v) => !v)} title={t("ใส่รูปสินค้าเป็นภาพอ้างอิงใต้กระดาน (วาดลอกตาม)", "Put a product photo under the board as a tracing reference")} aria-label={t("รูปอ้างอิง", "Reference")} className={ibCls(refPickOpen)}><Icon value="i:photo" className="text-[16px]" /></button>}
       </div>
       {/* บนซ้าย: คำสั่ง */}
@@ -2172,7 +2190,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     <button type="button" disabled={multi.size < 3} onClick={() => distributeSel("y")} className={`${btnCls(false)} disabled:opacity-40`} title={t("ระยะห่างแนวตั้งเท่ากัน (≥3 ชิ้น)", "Equal vertical gaps (3+ pieces)")}>{t("เว้นเท่ากัน ↕", "Distribute ↕")}</button>
                   </div>
                 </div>
-                <div>
+                <div className={level < 2 ? "hidden" : undefined} data-guide="boolean">
                   <div className="mb-1 font-medium text-slate-600">{t("รวมรูป", "Combine shapes")}</div>
                   <div className="grid grid-cols-3 gap-1">
                     <button type="button" onClick={() => booleanSel("union")} className={btnCls(false)} title={t("รวมทุกชิ้นที่เลือกเป็นรูปเดียว", "Merge all selected into one shape")}>{t("รวม", "Union")}</button>
@@ -2228,7 +2246,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <button type="button" onClick={() => { setSel(null); setEditId(null); }} aria-label={t("ปิดแผง", "Close panel")} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100">✕</button>
               </div>
 
-              <div>
+              <div data-guide="mats">
                 <div className="mb-1 font-medium text-slate-600">{t("วัสดุ", "Materials")} <span className="font-normal text-slate-400">{t("· 1 วัสดุ = 1 บรรทัดในตีราคา", "· 1 material = 1 costing line")}</span></div>
                 <div className="mb-1.5 flex flex-wrap gap-1">
                   {selPiece.mats.length ? selPiece.mats.map((m) => (
@@ -2265,13 +2283,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   );
                 })()}
               </div>
-              {pieceInfoFields && (() => {
+              {pieceInfoFields && level >= 3 && (() => {
                 const inf = selPiece.info ?? {};
                 const setInfo = (f: (x: PieceInfo) => PieceInfo, key?: string) => patchPiece(selPiece.id, (p) => { const next = f(p.info ?? {}); return { ...p, info: Object.keys(next).length ? next : null }; }, key);
                 const drop = <K extends keyof PieceInfo>(x: PieceInfo, k: K): PieceInfo => { const { [k]: _d, ...rest } = x; void _d; return rest; };
                 return (
                   <div className="space-y-1.5">
-                    <div className="font-medium text-slate-600">{t("ข้อมูลชิ้นและการอยู่ทรง", "Piece details and stiffness")}</div>
+                    <div data-guide="info" className="font-medium text-slate-600">{t("ข้อมูลชิ้นและการอยู่ทรง", "Piece details and stiffness")}</div>
                     <div className="grid grid-cols-2 gap-1.5">
                       <label className="space-y-0.5"><span className="text-slate-500">{t("รหัสชิ้น", "Piece code")}</span>
                         <input key={`${selPiece.id}:${inf.code ?? ""}`} defaultValue={inf.code ?? ""} disabled={readonly} maxLength={30} placeholder="FR-01" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (inf.code ?? "")) setInfo((x) => (v ? { ...x, code: v } : drop(x, "code"))); }} className="h-8 w-full rounded-md border border-slate-200 px-2 disabled:bg-slate-50" /></label>
@@ -2348,7 +2366,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 </div>
                 <label className="mt-1.5 flex items-center gap-1.5 text-slate-500"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} className="h-3.5 w-3.5" />{t("ล็อกสัดส่วน (ใช้กับจุดจับมุมด้วย)", "Lock ratio (corner handles too)")}</label>
                 {/* Transform: หมุน/ย่อขยายด้วยตัวเลข (บนกระดาน = ลากจุดจับรอบชิ้น · จุดกลมด้านบน = หมุน) */}
-                <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+                <div className={`mt-2 rounded-md border border-slate-200 bg-white p-2 ${level < 2 ? "hidden" : ""}`} data-guide="transform">
                   <div className="mb-1 font-medium text-slate-600">{t("Transform", "Transform")}</div>
                   <div className="flex flex-wrap items-center gap-1 text-slate-500">
                     <span className="w-14">{t("หมุน", "Rotate")}</span>
@@ -2373,7 +2391,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <NumField value={selPiece.count} min={1} step={1} label={t("จำนวนชิ้น", "Piece count")} onCommit={(v) => patchPiece(selPiece.id, (p) => ({ ...p, count: Math.max(1, Math.round(v)) }), `count-${selPiece.id}`)} className="w-16" />
               </label>
 
-              <div>
+              <div data-guide="tools">
                 <div className="mb-1 font-medium text-slate-600">{t("เครื่องมือ", "Tools")}</div>
                 <div className="flex flex-wrap gap-1">
                   <button type="button" onClick={() => startEdit(selPiece)} className={btnCls(editId === selPiece.id)}>{editId === selPiece.id ? t("เสร็จแก้จุด", "Done editing") : selPiece.shape.k === "path" ? t("แก้จุด", "Edit points") : t("แปลงเป็นจุด + แก้", "Convert + edit")}</button>
@@ -2421,11 +2439,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   </div>
                   {notchMode && <div className="text-[11px] text-rose-600">{t("โหมดรอยบาก: คลิกบนขอบชิ้นเพื่อเพิ่ม · คลิกที่รอยเดิมเพื่อลบ · Esc = เสร็จ", "Notch mode: click the edge to add · click a notch to remove · Esc = done")}</div>}
                 </div>
-                {pieceLinks && (() => {
+                {pieceLinks && level >= 2 && (() => {
                   const master = selPiece.link ? pieces.find((p) => p.pid === selPiece.link?.to) ?? null : null;
                   const followers = pieces.filter((p) => p.link?.to === selPiece.pid), targets = linkTargets(pieces, selPiece.pid);
                   return (
-                    <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
+                    <div data-guide="link" className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
                       <div className="flex items-center gap-1.5 font-medium text-slate-600"><Icon value="i:link" className="text-[14px]" />{t("ชิ้นคู่ผูกกัน", "Linked pieces")}</div>
                       {master ? (
                         <>
@@ -2461,7 +2479,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                       className="inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50"><Icon value="i:needle" className="text-[13px]" />{t("ตั้งค่าขอบ: ติดซิป · กุ๊น · พับ · เผื่อรายขอบ", "Edge settings: zip · binding · fold · allowance")}</button>
                   </div>
                 )}
-                {innerLines && (
+                {innerLines && level >= 2 && (
                   <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
                     <div className="flex items-center gap-1.5"><span className="font-medium text-slate-600">{t(`เส้นในชิ้น (${(selPiece.inner ?? []).length})`, `Inner lines (${(selPiece.inner ?? []).length})`)}</span>
                       {!readonly && <button type="button" onClick={() => changeTool("inner")} className={`ml-auto h-7 rounded-md border px-2 ${tool === "inner" ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 hover:bg-slate-50"}`} title={t("กด 2 จุดข้างในชิ้น = เส้นตรง 1 เส้น (L)", "Click 2 points inside the piece = one straight line (L)")}>{t("+ วาดเส้นใน", "+ Draw a line")}</button>}</div>
