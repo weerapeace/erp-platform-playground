@@ -150,6 +150,83 @@ export function ttsShopsFromApi(data: Record<string, unknown> | null | undefined
   }
   return out;
 }
+// ───────── สินค้า (อ่านอย่างเดียว) ─────────
+// รูปคำตอบจากเอกสารทางการ (api_meta ของ search-products-202502 / get-product-202309 · อ่าน 2026-11-12):
+//  ค้นหา: data.{ total_count, next_page_token, products[{ id, title, status, skus[{ id, seller_sku, price{ tax_exclusive_price, sale_price, currency },
+//          inventory[{ warehouse_id, quantity }], status_info{ status } }], update_time, … }] } — ไม่มีรูป/หมวด
+//  รายตัว: data.{ main_images[{ urls[], thumb_urls[] }], category_chains[{ id, local_name, is_leaf, parent_id }], skus[{ id, sales_attributes[{ name, value_name }] }], description(HTML — ไม่เก็บ) }
+const PRODUCT_SCOPE = "Product Basic (seller.product.basic)";
+
+export type TtsProductPage = { products: Record<string, unknown>[]; total: number; nextPageToken: string | null };
+/** ค้นหาสินค้าทั้งร้าน (status=ALL) ทีละหน้า · page_size ≤ 100 */
+export async function ttsSearchProducts(accessToken: string, shopCipher: string, opts: { pageToken?: string | null; pageSize?: number } = {}): Promise<TtsProductPage> {
+  const query: Record<string, string> = { shop_cipher: shopCipher, page_size: String(Math.max(1, Math.min(100, opts.pageSize ?? 50))) };
+  if (opts.pageToken) query.page_token = opts.pageToken;
+  const d = await ttsApi("POST", "/product/202502/products/search", accessToken, { query, body: { status: "ALL" }, scope: PRODUCT_SCOPE });
+  const products = Array.isArray(d.products) ? d.products as Record<string, unknown>[] : [];
+  return { products, total: Number(d.total_count) || 0, nextPageToken: str(d.next_page_token) };
+}
+/** รายละเอียดสินค้า 1 ตัว (เอาแค่รูปแรก/หมวด/ชื่อตัวเลือก ไปใช้) */
+export async function ttsGetProduct(accessToken: string, shopCipher: string, productId: string): Promise<Record<string, unknown>> {
+  return ttsApi("GET", `/product/202309/products/${encodeURIComponent(productId)}`, accessToken, { query: { shop_cipher: shopCipher }, scope: PRODUCT_SCOPE });
+}
+
+/** โดน TikTok จำกัดความถี่ไหม (ลองใหม่ได้) */
+export const ttsIsRateLimit = (e: unknown): boolean => String((e as { code?: unknown })?.code ?? "") === "36009002" || String((e as { code?: unknown })?.code ?? "") === "429" || /too many requests/i.test(String((e as Error)?.message ?? ""));
+
+export type TtsSkuSlim = { id: string | null; seller_sku: string | null; price: number | null; stock: number | null; status: string | null; label?: string };
+export type TtsSlim = { id: string; title: string | null; status: string | null; skus: TtsSkuSlim[]; image: string | null; category: string | null; update_time: number | null };
+export type TtsCatalogItem = { external_product_id: string; title: string | null; skus: string[]; price: number | null; status: string | null; raw: { tiktok: TtsSlim } };
+
+const numOrNull = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+const arrOf = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") as Record<string, unknown>[] : []);
+
+/** รูปแรก + หมวด (ปลายสุด) + ชื่อตัวเลือกต่อ SKU จากรายละเอียดสินค้า */
+export function ttsDetailExtras(detail: Record<string, unknown> | null | undefined): { image: string | null; category: string | null; labels: Map<string, string> } {
+  const img = arrOf(detail?.main_images)[0];
+  const first = (v: unknown): string | null => (Array.isArray(v) ? str(v[0]) : null);
+  const image = img ? (first(img.urls) ?? first(img.thumb_urls)) : null;
+  const chain = arrOf(detail?.category_chains);
+  const leaf = chain.find((c) => c.is_leaf === true) ?? chain[chain.length - 1];
+  const labels = new Map<string, string>();
+  for (const s of arrOf(detail?.skus)) {
+    const id = str(s.id); if (!id) continue;
+    const label = arrOf(s.sales_attributes).map((a) => [str(a.name), str(a.value_name)].filter(Boolean).join(": ")).filter(Boolean).join(" · ");
+    if (label) labels.set(id, label);
+  }
+  return { image, category: str(leaf?.local_name), labels };
+}
+
+/** สินค้า 1 ตัวจากผลค้นหา (+ รายละเอียดถ้ามี) → แถวสินค้าบนแพลตฟอร์ม · เก็บเฉพาะช่องที่ใช้ (ไม่เก็บคำบรรยาย) */
+export function ttsProductToCatalogItem(p: Record<string, unknown>, extras?: { image: string | null; category: string | null; labels?: Map<string, string> } | null): TtsCatalogItem | null {
+  const id = str(p.id);
+  if (!id) return null;
+  const skus: TtsSkuSlim[] = arrOf(p.skus).map((s) => {
+    const price = (s.price && typeof s.price === "object") ? s.price as Record<string, unknown> : {};
+    const inv = arrOf(s.inventory);
+    const skuId = str(s.id);
+    const label = skuId ? extras?.labels?.get(skuId) : undefined;
+    return {
+      id: skuId, seller_sku: str(s.seller_sku),
+      // ร้านไทย (local) ใช้ tax_exclusive_price = ราคาแสดงก่อนส่วนลด · ร้านข้ามแดนใช้ sale_price
+      price: numOrNull(price.tax_exclusive_price) ?? numOrNull(price.sale_price),
+      stock: inv.length ? inv.reduce((a, w) => a + Math.max(0, numOrNull(w.quantity) ?? 0), 0) : null,
+      status: str((s.status_info as Record<string, unknown> | undefined)?.status),
+      ...(label ? { label } : {}),
+    };
+  });
+  const prices = skus.map((s) => s.price).filter((n): n is number => n != null && n > 0);
+  const status = str(p.status);
+  return {
+    external_product_id: id,
+    title: str(p.title),
+    skus: [...new Set(skus.map((s) => s.seller_sku).filter((x): x is string => !!x))],
+    price: prices.length ? Math.min(...prices) : null,
+    status: status ? status.toLowerCase() : null,
+    raw: { tiktok: { id, title: str(p.title), status, skus, image: extras?.image ?? null, category: extras?.category ?? null, update_time: numOrNull(p.update_time) } },
+  };
+}
+
 export async function ttsGetAuthorizedShops(accessToken: string): Promise<TtsShop[]> {
   return ttsShopsFromApi(await ttsApi("GET", "/authorization/202309/shops", accessToken, { scope: "Shop Authorized Information (seller.authorization.info)" }));
 }

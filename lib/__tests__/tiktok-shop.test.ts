@@ -1,6 +1,74 @@
 import { describe, expect, test, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
-import { ttsSignInput, ttsSign, ttsExpiryMs, ttsShopsFromApi, ttsAuthUrl, ttsConfigured, ttsErrorText, ttsBrandMismatch, TtsApiError } from "@/lib/tiktok-shop";
+import { ttsSignInput, ttsSign, ttsExpiryMs, ttsShopsFromApi, ttsAuthUrl, ttsConfigured, ttsErrorText, ttsBrandMismatch, TtsApiError, ttsProductToCatalogItem, ttsDetailExtras, ttsIsRateLimit } from "@/lib/tiktok-shop";
+import { summarizeListing } from "@/lib/platform-listing-health";
+
+// รูปตามเอกสาร api_meta (search-products-202502 / get-product-202309)
+const SEARCH_PRODUCT = {
+  id: "1729592969712207008", title: "กระเป๋าสตางค์หนังแท้ Louis Montini", status: "ACTIVATE", update_time: 1762900000, create_time: 1750000000,
+  skus: [
+    { id: "s1", seller_sku: "LM-W001-BK", price: { tax_exclusive_price: "590.00", currency: "THB" }, inventory: [{ warehouse_id: "w1", quantity: 5 }, { warehouse_id: "w2", quantity: 2 }], status_info: { status: "NORMAL" } },
+    { id: "s2", seller_sku: "LM-W001-BR", price: { tax_exclusive_price: "550", currency: "THB" }, inventory: [{ warehouse_id: "w1", quantity: 0 }], status_info: { status: "NORMAL" } },
+    { id: "s3", seller_sku: "LM-W001-BK", price: { sale_price: "590", currency: "THB" }, inventory: [] },
+  ],
+  description: "<p>ยาวมาก</p>",
+};
+const DETAIL = {
+  main_images: [{ uri: "tos-x", urls: ["https://p16.tiktokcdn.com/a.jpg"], thumb_urls: ["https://p16.tiktokcdn.com/a_t.jpg"] }],
+  category_chains: [{ id: "1", local_name: "กระเป๋า", is_leaf: false, parent_id: "0" }, { id: "2", local_name: "กระเป๋าสตางค์ผู้ชาย", is_leaf: true, parent_id: "1" }],
+  skus: [{ id: "s1", sales_attributes: [{ name: "สี", value_name: "ดำ" }] }, { id: "s2", sales_attributes: [{ name: "สี", value_name: "น้ำตาล" }] }],
+  description: "<p>HTML</p>",
+};
+
+describe("TikTok Shop — แปลงสินค้าเป็นแถวสินค้าบนแพลตฟอร์ม", () => {
+  test("รหัส SKU ไม่ซ้ำ · ราคาต่ำสุด (tax_exclusive_price → sale_price) · สถานะตัวเล็ก · สต๊อกรวมทุกคลัง", () => {
+    const it = ttsProductToCatalogItem(SEARCH_PRODUCT, ttsDetailExtras(DETAIL))!;
+    expect(it.external_product_id).toBe("1729592969712207008");
+    expect(it.skus).toEqual(["LM-W001-BK", "LM-W001-BR"]);
+    expect(it.price).toBe(550);
+    expect(it.status).toBe("activate");
+    const tt = it.raw.tiktok;
+    expect(tt.skus[0]).toMatchObject({ id: "s1", seller_sku: "LM-W001-BK", price: 590, stock: 7, status: "NORMAL", label: "สี: ดำ" });
+    expect(tt.skus[2]).toMatchObject({ price: 590, stock: null });
+    expect(tt.image).toBe("https://p16.tiktokcdn.com/a.jpg");
+    expect(tt.category).toBe("กระเป๋าสตางค์ผู้ชาย");
+    expect(tt.update_time).toBe(1762900000);
+  });
+  test("ไม่เก็บคำบรรยาย (HTML) ลงฐานข้อมูล", () => {
+    const it = ttsProductToCatalogItem(SEARCH_PRODUCT, ttsDetailExtras(DETAIL))!;
+    expect(JSON.stringify(it.raw)).not.toContain("<p>");
+  });
+  test("ไม่มีรายละเอียด = รูป/หมวดว่าง ยังได้แถว · ไม่มี id = ข้าม", () => {
+    const it = ttsProductToCatalogItem(SEARCH_PRODUCT)!;
+    expect(it.raw.tiktok.image).toBeNull();
+    expect(ttsProductToCatalogItem({ title: "x" })).toBeNull();
+  });
+  test("รูปจาก thumb_urls เมื่อไม่มี urls · หมวดใช้ตัวท้ายเมื่อไม่มี is_leaf", () => {
+    const ex = ttsDetailExtras({ main_images: [{ thumb_urls: ["t.jpg"] }], category_chains: [{ local_name: "A" }, { local_name: "B" }] });
+    expect(ex.image).toBe("t.jpg"); expect(ex.category).toBe("B");
+  });
+  test("รู้ว่าโดนจำกัดความถี่", () => {
+    expect(ttsIsRateLimit(new TtsApiError("Too many requests", "36009002"))).toBe(true);
+    expect(ttsIsRateLimit(new TtsApiError("Access denied", "105005"))).toBe(false);
+  });
+});
+
+describe("TikTok Shop — สรุปสถานะบนร้าน (summarizeListing)", () => {
+  test("เปิดขาย + สต๊อกรวม + รูป + หมวด", () => {
+    const it = ttsProductToCatalogItem(SEARCH_PRODUCT, ttsDetailExtras(DETAIL))!;
+    const s = summarizeListing("tiktok", it.raw, null, it.status);
+    expect(s).toMatchObject({ display: true, stock: 7, price: 550, salePrice: null, variants: 3, image: "https://p16.tiktokcdn.com/a.jpg", imageKnown: true, category: "กระเป๋าสตางค์ผู้ชาย", state: "selling" });
+  });
+  test("ปิดโดยผู้ขาย = ปิดขาย · ฉบับร่าง/รอตรวจ = รอตรวจ · สต๊อก 0 = หมด", () => {
+    const base = ttsProductToCatalogItem(SEARCH_PRODUCT)!.raw.tiktok;
+    expect(summarizeListing("tiktok", { tiktok: { ...base, status: "SELLER_DEACTIVATED" } }).state).toBe("hidden");
+    expect(summarizeListing("tiktok", { tiktok: { ...base, status: "PENDING" } }).state).toBe("review");
+    expect(summarizeListing("tiktok", { tiktok: { ...base, skus: [{ price: 10, stock: 0 }] } }).state).toBe("out");
+  });
+  test("ป้าย 'ไม่อยู่บนร้านแล้ว' ชนะทุกสถานะ", () => {
+    expect(summarizeListing("tiktok", ttsProductToCatalogItem(SEARCH_PRODUCT)!.raw, null, "removed").state).toBe("gone");
+  });
+});
 
 describe("TikTok Shop — ชื่อร้านไม่ตรงแบรนด์ (เตือน)", () => {
   test("ร้าน Louis Montini ไปติดแบรนด์ IG International = ไม่ตรง (เคสจริง 2026-11-12)", () => { expect(ttsBrandMismatch("Louis Montini", "IG International")).toBe(true); });

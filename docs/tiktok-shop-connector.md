@@ -1,6 +1,7 @@
 # ตัวเชื่อม TikTok Shop (ร้านของเราเอง)
 
-> สถานะ 2026-11-11: **ขั้น 1 = เชื่อมต่อ/ถือกุญแจเท่านั้น** ยังไม่ดึงหรือแก้อะไรบนร้าน · ร้านที่ต่อ = Louis Montini (แอป "Louis Montini ERP")
+> สถานะ 2026-11-12: เชื่อมร้าน Louis Montini แล้ว (แอป "Louis Montini ERP" · shop THLCLMWWSC) · **ขั้น 2 = ดึงสินค้าเข้าหน้าสินค้าบนแพลตฟอร์ม (อ่านอย่างเดียว)** · ยังไม่แก้อะไรบนร้าน
+> ร้านเดียวผูกได้แบรนด์เดียว (callback บล็อก open_id ซ้ำ) · ชื่อร้านไม่ตรงแบรนด์ = เตือนแดง
 
 ## ใช้ทำอะไร
 - ให้ ERP คุยกับร้าน TikTok Shop ผ่าน Open API ทางการ (แอปแบบ Seller Developer / Custom App: 1 แอป = 1 ร้าน)
@@ -16,6 +17,9 @@
 | `/api/tiktok-shop/status` | สถานะ (ไม่คืนกุญแจ/cipher) · `&check=1` = ลองกับ TikTok จริง |
 | `/api/tiktok-shop/disconnect` | ลบกุญแจ + audit |
 | หน้า `/admin/platform-accounts` › TikTok | ปุ่มเชื่อมต่อ / ตรวจการเชื่อมต่อ / ตัดการเชื่อมต่อ |
+| `/api/tiktok-shop/sync-products` | ดึงสินค้าทั้งร้าน (`/product/202502/products/search` status=ALL ทีละ 50 · `page_token`) + รายละเอียดเฉพาะตัวใหม่/แก้ไข (`/product/202309/products/{id}` → รูปแรก/หมวด/ชื่อตัวเลือก) → `upsertCatalogListings` · จบครบ = ติดป้ายตัวที่ร้านลบ · audit `tiktok_api` (ครั้งแรกเก็บตัวอย่างคำตอบ `sample`) |
+| หน้า `/master/platform-catalog` › TikTok › ตั้งค่า | ปุ่ม "ดึงสินค้าจาก TikTok" (เรียกต่อเองจนครบ · ค้างแล้วกดอีกครั้ง = ต่อจากหน้าที่ค้าง ภายใน 25 นาที) |
+| `raw.tiktok` | ข้อมูลย่อ `{ id, title, status, skus[{ id, seller_sku, price, stock, status, label }], image, category, update_time }` — ไม่เก็บคำบรรยาย · สรุปสถานะด้วย `summarizeListing("tiktok")` · อ่านผ่านฟังก์ชัน DB `platform_listings_slim` (คอลัมน์ `tiktok` — migration 202612040300 **ยังไม่ได้ลงฐานข้อมูลจริง รอเจ้าของอนุญาต** · ก่อนลง: ดึงสินค้า/จับคู่ได้ แต่การ์ดสถานะ/สต๊อก/รูปของ TikTok ขึ้น "ไม่รู้สถานะ") |
 
 ## ค่าตั้ง (Vercel env — เจ้าของใส่เองแล้ว 2026-11-11)
 `TIKTOK_SHOP_APP_KEY` · `TIKTOK_SHOP_APP_SECRET` · `TIKTOK_SHOP_SERVICE_ID` (= ตัวเลข "ID:" ใต้ชื่อแอปใน Partner Center)
@@ -37,8 +41,12 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - ห้ามส่งสต๊อกขึ้น TikTok ขณะที่ BigSeller ยังซิงค์สต๊อกร้านเดียวกัน
 - ทุกคำสั่งที่เขียนลงร้าน (ขั้น 2+) ต้องขออนุญาตเจ้าของทีละเฟส + ทดสอบ 1 สินค้าก่อน + เขียน audit
 
+## ข้อควรรู้เรื่องราคา/สถานะ
+- ราคา = `price.tax_exclusive_price` (ร้านไทย local = ราคาแสดงก่อนส่วนลด) · ร้านข้ามแดนใช้ `sale_price` · **ไม่มีราคาลด** ใน API สินค้า (โปร/แฟลชเซลอยู่ Promotion API)
+- สถานะ ACTIVATE = เปิดขาย · SELLER_DEACTIVATED / PLATFORM_DEACTIVATED / FREEZE / DELETED = ปิด · DRAFT / PENDING / FAILED = รอตรวจ
+- ⚠️ ตัวแปลงเขียนจากเอกสาร (api_meta) — หลังดึงครั้งแรกให้เทียบกับ `audit_logs.metadata.sample` ของจริง
+
 ## ขั้นต่อไป (ยังไม่ทำ)
-1. ดึงสินค้าทั้งร้าน → `lib/platform-catalog-sync` (หน้าสินค้าบนแพลตฟอร์ม) — ต้องเห็นคำตอบจริงก่อนเขียนตัวแปลง
 2. ดึงหมวดหมู่ TikTok (`/product/202309/categories`) เติมการจับคู่หมวด
 3. ดึงออเดอร์เข้า `platform_orders` (ศูนย์ออเดอร์)
 4. แก้สินค้า/ราคา/สต๊อก — ทีละเฟสตามที่เจ้าของอนุมัติ

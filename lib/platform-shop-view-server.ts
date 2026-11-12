@@ -27,6 +27,8 @@ type ListingRow = {
   /** ข้อมูลดิบ LINE เฉพาะช่องที่ใช้ { id, isDisplay, variants, imageUrls, category, giftOption } · ไม่มี = null */
   line: { id?: unknown; isDisplay?: unknown; variants?: unknown; imageUrls?: unknown; category?: unknown; giftOption?: unknown } | null;
   lazada: unknown;
+  /** ข้อมูลย่อ TikTok Shop (raw.tiktok — lib/tiktok-shop) · ฟังก์ชัน DB รุ่นเก่ายังไม่มีช่องนี้ = undefined */
+  tiktok?: unknown;
 };
 type LegacyListingRow = Omit<ListingRow, "line"> & { line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown; line_gift: unknown };
 
@@ -61,7 +63,7 @@ async function loadListings(admin: Admin, platformId: string, brandId: string): 
 async function loadListingsLegacy(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
   const rows = await fetchAllPages<LegacyListingRow>((from, to) => {
     let q = admin.from("platform_catalog_listings")
-      .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, status, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, line_gift:raw->line->giftOption, lazada:raw->lazada")
+      .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, status, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, line_gift:raw->line->giftOption, lazada:raw->lazada, tiktok:raw->tiktok")
       .eq("platform_id", platformId);
     if (brandId) q = q.eq("brand_id", brandId);
     return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: LegacyListingRow[] | null; error: unknown }>;
@@ -77,6 +79,7 @@ function rawSlice(r: ListingRow): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (r.line && (r.line.id != null || r.line.variants != null)) out.line = r.line;
   if (r.lazada != null) out.lazada = r.lazada;
+  if (r.tiktok != null) out.tiktok = r.tiktok;
   return out;
 }
 

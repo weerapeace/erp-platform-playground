@@ -646,6 +646,59 @@ export default function PlatformCatalogPage() {
     finally { setImporting(false); }
   };
 
+  // TikTok Shop (ต่อ API · OAuth ผูกกับแบรนด์) — สถานะการเชื่อม + ดึงสินค้าที่ลงไว้บนร้าน (อ่านอย่างเดียว) · แบบเดียวกับ Lazada แต่ TikTok ใช้ page_token
+  type TtsStatus = { connected: boolean; health: "none" | "connected" | "expiring" | "expired"; days_left: number | null; shops: { name: string }[]; configured: boolean };
+  const [ttsStatus, setTtsStatus] = useState<TtsStatus | null>(null);
+  const ttsSeq = useRef(0);
+  useEffect(() => {
+    const my = ++ttsSeq.current;
+    setTtsStatus(null);
+    if (platformCode !== "tiktok" || !brandId) return;
+    apiFetch(`/api/tiktok-shop/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())
+      .then((j) => { if (my === ttsSeq.current && !j.error) setTtsStatus(j as TtsStatus); })
+      .catch(() => { /* โชว์ปุ่มไม่ได้ก็ไม่เป็นไร */ });
+  }, [platformCode, brandId]);
+  const ttsResume = useRef<{ brandId: string; token: string; run: string; fetched: number; at: number } | null>(null);
+  const syncTiktok = async () => {
+    if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (การเชื่อม TikTok Shop ผูกกับแบรนด์)"); return; }
+    const resume = ttsResume.current && ttsResume.current.brandId === brandId && Date.now() - ttsResume.current.at < 25 * 60_000 ? ttsResume.current : null;
+    let token = resume?.token ?? "", run = resume?.run ?? "", apiTotal = 0, retried = false, got = resume?.fetched ?? 0;
+    const sum = { fetched: 0, created: 0, updated: 0, newly_matched: 0 };
+    type TtsSyncRes = { error?: string | null; api_total?: number; fetched?: number; created?: number; updated?: number; newly_matched?: number; next_page_token?: string | null; done?: boolean; complete?: boolean; run_started_at?: string; stop_reason?: string | null; removed?: number; restored?: number; removed_skipped?: number };
+    setImporting(true);
+    try {
+      for (let round = 0; round < 80; round++) {
+        setNote(`กำลังดึงสินค้าจาก TikTok... ${got.toLocaleString()}${apiTotal ? ` / ${apiTotal.toLocaleString()}` : ""} ตัว`);
+        const r = await apiFetch("/api/tiktok-shop/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId, page_token: token || undefined, run_started_at: run || undefined }) });
+        const j = (await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }))) as TtsSyncRes;
+        const stop = j.error || j.stop_reason;
+        if (j.run_started_at) run = j.run_started_at;
+        if (j.api_total) apiTotal = j.api_total;
+        sum.fetched += j.fetched ?? 0; sum.created += j.created ?? 0; sum.updated += j.updated ?? 0; sum.newly_matched += j.newly_matched ?? 0;
+        got += j.fetched ?? 0;
+        if (typeof j.next_page_token === "string" && j.next_page_token) token = j.next_page_token;
+        if (j.done) {
+          ttsResume.current = null;
+          const totalNote = apiTotal ? ` (TikTok รายงาน ${apiTotal.toLocaleString()})` : "";
+          setNote(`ดึงจาก TikTok ครบแล้ว${totalNote} · รอบนี้ได้ ${sum.fetched.toLocaleString()} ตัว · เพิ่มใหม่ ${sum.created} · อัปเดต ${sum.updated} · จับคู่รหัสตรงอัตโนมัติ ${sum.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${goneNote(j)}${j.stop_reason ? ` · ⚠️ ${j.stop_reason}` : ""}`);
+          break;
+        }
+        if (stop) {
+          if (!retried) { retried = true; await new Promise((res) => setTimeout(res, 4000)); continue; }
+          ttsResume.current = token ? { brandId, token, run, fetched: got, at: Date.now() } : null;
+          setNote(`⚠️ ดึงจาก TikTok ได้ ${got.toLocaleString()}${apiTotal ? ` จาก ${apiTotal.toLocaleString()}` : ""} ตัวแล้ว TikTok ตอบผิดพลาด: ${stop}${token ? ` — กด "ดึงสินค้าจาก TikTok" อีกครั้งเพื่อดึงต่อ` : ""} (ยังไม่เช็กว่าตัวไหนร้านลบ จนกว่าจะดึงครบ)`);
+          break;
+        }
+        retried = false;
+      }
+      await reloadCurrent();
+    } catch (e) {
+      ttsResume.current = token ? { brandId, token, run, fetched: got, at: Date.now() } : null;
+      setNote(`ผิดพลาด: ${(e as Error).message}${token ? " — กดดึงอีกครั้งเพื่อดึงต่อ" : ""}`);
+    }
+    finally { setImporting(false); }
+  };
+
   // ดึงสินค้าจาก LINE SHOPPING (ต่อ API จริง) → catalog + จับคู่ ERP
   const syncLine = async () => {
     if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (คีย์ LINE ผูกกับแบรนด์)"); return; }
@@ -822,7 +875,8 @@ export default function PlatformCatalogPage() {
   // มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน (เจ้าของขอ 2026-11-08) — ยังไม่เลือก = หน้าเลือกแบรนด์
   const gate = viewReady && view === "shop" && !brandId;
   // เมนูตั้งค่าร้าน — จุดเตือนบนปุ่ม (Lazada ใกล้หมดอายุ/หมดแล้ว/ยังไม่เชื่อม) · วันที่ดึงข้อมูลล่าสุด · ราคาไม่ตรงระบบ (มีเมื่อโหลดสรุปแล้ว)
-  const toolsAlert = platformCode === "lazada" && !!brandId && !!lazStatus && (!lazStatus.connected || lazStatus.health === "expiring" || lazStatus.health === "expired");
+  const toolsAlert = (platformCode === "lazada" && !!brandId && !!lazStatus && (!lazStatus.connected || lazStatus.health === "expiring" || lazStatus.health === "expired"))
+    || (platformCode === "tiktok" && !!brandId && !!ttsStatus && (!ttsStatus.connected || ttsStatus.health === "expiring" || ttsStatus.health === "expired"));
   const lastImported = listings.reduce<string | null>((m, l) => (l.last_imported_at && (!m || l.last_imported_at > m) ? l.last_imported_at : m), null);
   const priceMismatchN = summList.filter((s) => (s.erpPriceDiff ?? 0) > 0).length;
   const toolItem = (o: { icon: string; tone: keyof typeof TOOL_TONE; title: string; sub?: string; disabled?: boolean; warn?: boolean; onClick?: () => void; href?: string }) => {
@@ -941,7 +995,7 @@ export default function PlatformCatalogPage() {
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-slate-800">{activePf?.name_th ?? "ร้าน"}{activeBrand ? ` · ${activeBrand.name}` : ""}</div>
               <div className="truncate text-[11px] text-slate-400">
-                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
+                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : platformCode === "tiktok" ? "เชื่อมด้วย TikTok Shop (อ่านอย่างเดียว)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
                 {lastImported ? ` · ข้อมูลจากร้านล่าสุด ${new Date(lastImported).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}` : ""}
               </div>
             </div>
@@ -950,14 +1004,24 @@ export default function PlatformCatalogPage() {
                 ? <span className={`shrink-0 text-[11px] ${lazStatus.health === "expiring" ? "text-amber-700" : "text-emerald-600"}`}>{lazStatus.health === "expiring" ? `อีก ${lazStatus.days_left ?? 0} วันต้องเชื่อมใหม่` : "● เชื่อมอยู่"}</span>
                 : <span className="shrink-0 text-[11px] text-amber-700">{lazStatus.health === "expired" ? "หมดอายุ" : "ยังไม่เชื่อม"}</span>
             )}
+            {platformCode === "tiktok" && brandId && ttsStatus && (
+              ttsStatus.connected
+                ? <span className={`shrink-0 text-[11px] ${ttsStatus.health === "expiring" ? "text-amber-700" : "text-emerald-600"}`}>{ttsStatus.health === "expiring" ? `อีก ${ttsStatus.days_left ?? 0} วันต้องเชื่อมใหม่` : "● เชื่อมอยู่"}</span>
+                : <span className="shrink-0 text-[11px] text-amber-700">{ttsStatus.health === "expired" ? "หมดอายุ" : "ยังไม่เชื่อม"}</span>
+            )}
           </div>
-          {(platformCode === "line_shopping" || platformCode === "lazada") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
+          {(platformCode === "line_shopping" || platformCode === "lazada" || platformCode === "tiktok") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
           {platformCode === "line_shopping" && toolItem({ icon: "refresh", tone: "emerald", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก LINE", sub: brandId ? "อัปเดตชื่อ ราคา สต๊อก รูป จากร้าน" : "เลือกแบรนด์ก่อน", disabled: !canEdit || importing || !brandId, onClick: () => void syncLine() })}
           {platformCode === "line_shopping" && toolItem({ icon: "folder", tone: "amber", title: "นำเข้าหมวดหมู่ LINE", sub: "จากไฟล์ template (ชีตตัวเลือกหมวด) · ใช้ครั้งเดียว", disabled: !canEdit || importing, onClick: () => catFileRef.current?.click() })}
           {platformCode === "lazada" && toolItem({
             icon: "refresh", tone: "indigo", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก Lazada",
             sub: !brandId ? "เลือกแบรนด์ก่อน — การเชื่อม Lazada ผูกกับแบรนด์" : lazStatus?.connected ? "อ่านรายการที่ลงไว้บนร้าน (ไม่แก้อะไรบนร้าน)" : "ต้องเชื่อม Lazada ก่อน (ดูบัญชีร้านด้านล่าง)",
             disabled: !canEdit || importing || !brandId || !lazStatus?.connected, onClick: () => void syncLazada(),
+          })}
+          {platformCode === "tiktok" && toolItem({
+            icon: "refresh", tone: "indigo", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก TikTok",
+            sub: !brandId ? "เลือกแบรนด์ก่อน — การเชื่อม TikTok Shop ผูกกับแบรนด์" : ttsStatus?.connected ? "อ่านรายการที่ลงไว้บนร้าน ชื่อ ราคา สต๊อก รูป (ไม่แก้อะไรบนร้าน)" : "ต้องเชื่อม TikTok Shop ก่อน (ดูบัญชีร้านด้านล่าง)",
+            disabled: !canEdit || importing || !brandId || !ttsStatus?.connected, onClick: () => void syncTiktok(),
           })}
           {platformCode === "line_shopping" && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ส่งขึ้นร้าน (ร้านจริง)</div>}
           {platformCode === "line_shopping" && toolItem({
@@ -967,7 +1031,7 @@ export default function PlatformCatalogPage() {
           })}
           <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ตั้งค่า</div>
           {toolItem({ icon: "settings", tone: "violet", title: "จัดการชนิดไฟล์นำเข้า", sub: "เพิ่ม/แก้คอลัมน์ของไฟล์ export แต่ละร้าน", disabled: !canEdit || !platformId, onClick: () => setShowManager(true) })}
-          {toolItem({ icon: "link", tone: "slate", title: platformCode === "lazada" ? "บัญชีร้าน / เชื่อม Lazada" : "บัญชีร้าน / API Key", sub: "ไปหน้าจัดการร้าน/บัญชีแพลตฟอร์ม", href: "/admin/platform-accounts", warn: !!toolsAlert })}
+          {toolItem({ icon: "link", tone: "slate", title: platformCode === "lazada" ? "บัญชีร้าน / เชื่อม Lazada" : platformCode === "tiktok" ? "บัญชีร้าน / เชื่อม TikTok Shop" : "บัญชีร้าน / API Key", sub: "ไปหน้าจัดการร้าน/บัญชีแพลตฟอร์ม", href: "/admin/platform-accounts", warn: !!toolsAlert })}
         </div>
       </FloatingDropdown>
       <ConfirmDialog open={pushAllAsk} onClose={() => { if (!importing) setPushAllAsk(false); }} variant="danger" requireTyped="ยืนยัน"
@@ -1041,8 +1105,10 @@ export default function PlatformCatalogPage() {
             <EmptyState icon="🛒" title={`ยังไม่มีสินค้าจาก ${where}`}
               hint={platformCode === "line_shopping" ? "กดปุ่ม “ตั้งค่า” ด้านบน → ดึงสินค้าจาก LINE แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "lazada" ? "กด ดึงสินค้าจาก Lazada ด้านบน (ต้องเชื่อมร้านก่อน) หรือนำเข้าไฟล์ export แล้วระบบจะช่วยจับคู่ให้"
+                : platformCode === "tiktok" ? "กด ดึงสินค้าจาก TikTok (ต้องเชื่อมร้านก่อนที่หน้าบัญชีแพลตฟอร์ม) แล้วระบบจะช่วยจับคู่ให้"
                 : "นำเข้าไฟล์ export จาก Seller Center เข้ามาก่อน แล้วระบบจะช่วยจับคู่ให้"}
               action={canEdit && platformCode === "lazada" && lazStatus?.connected ? { label: "ดึงสินค้าจาก Lazada", onClick: () => void syncLazada() }
+                : canEdit && platformCode === "tiktok" && ttsStatus?.connected ? { label: "ดึงสินค้าจาก TikTok", onClick: () => void syncTiktok() }
                 : canEdit && platformCode !== "line_shopping" ? { label: `⬆️ นำเข้าสินค้าจาก ${activePf?.name_th ?? "ร้าน"}`, onClick: () => fileRef.current?.click() } : undefined} />
           ) : (
             <div className="space-y-3">

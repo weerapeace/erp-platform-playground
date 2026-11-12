@@ -12,6 +12,7 @@
  * ข้อมูลที่แต่ละร้านให้มา (ณ 2026-11):
  *   LINE SHOPPING (raw.line จาก API) = ครบ: isDisplay · variants[].availableNumber/price/discountedPrice · imageUrls · category
  *   Lazada (raw.lazada จาก API)      = สถานะ + สต๊อก/ราคาต่อ SKU · ไม่เก็บรูป (กันข้อมูลบวม — lib/lazada)
+ *   TikTok Shop (raw.tiktok จาก API) = สถานะ + สต๊อก/ราคาต่อ SKU + รูปแรก + หมวด · ไม่มีราคาลด (โปรของ TikTok อยู่คนละ API — lib/tiktok-shop)
  *   Shopee (raw.basic_info จากไฟล์ export) = ชื่อ/รหัสเท่านั้น → สถานะ "ไม่รู้" จนกว่าจะเชื่อม API
  * ห้าม import "@/..." ในไฟล์นี้ (ใช้ทั้ง server/client/เทสต์)
  */
@@ -162,8 +163,27 @@ function summarizeLazada(raw: Obj, fallbackPrice: number | null): ListingShopSum
 }
 
 /**
+ * TikTok Shop: raw.tiktok (lib/tiktok-shop ttsProductToCatalogItem)
+ * สถานะ: ACTIVATE = เปิดขาย · SELLER_DEACTIVATED / PLATFORM_DEACTIVATED / FREEZE / DELETED = ปิด · DRAFT / PENDING / FAILED = ยังไม่ขึ้นร้าน (รอตรวจ)
+ */
+function summarizeTiktok(raw: Obj, fallbackPrice: number | null): ListingShopSummary {
+  const tt = obj(raw.tiktok) ?? {};
+  const skus = arr(tt.skus).map(obj).filter((v): v is Obj => !!v);
+  const st = (str(tt.status) ?? "").toUpperCase();
+  const display = st === "ACTIVATE" ? true : ["SELLER_DEACTIVATED", "PLATFORM_DEACTIVATED", "FREEZE", "DELETED"].includes(st) ? false : null;
+  const stocks = skus.map((v) => num(v.stock));
+  const stock = stocks.some((n) => n != null) ? stocks.reduce<number>((s, n) => s + Math.max(0, n ?? 0), 0) : null;
+  return {
+    image: str(tt.image), imageKnown: "image" in tt, stock, display,
+    price: minPositive(skus.map((v) => num(v.price))) ?? fallbackPrice, salePrice: null,
+    variants: skus.length, category: str(tt.category),
+    state: shopStateOf(display, stock, true),
+  };
+}
+
+/**
  * สรุปสินค้า 1 รายการบนร้าน
- * @param platformCode code ใน erp_platforms (line_shopping / lazada / shopee / …)
+ * @param platformCode code ใน erp_platforms (line_shopping / lazada / tiktok / shopee / …)
  * @param raw          platform_catalog_listings.raw (หรือชิ้นส่วนที่ select มาเฉพาะช่องที่ใช้)
  * @param fallbackPrice platform_catalog_listings.price (ใช้เมื่อ raw ไม่มีราคา)
  * @param status       platform_catalog_listings.status — "removed" = ไม่อยู่บนร้านแล้ว (ชนะทุกสถานะ · รูป/ราคาเดิมยังโชว์ไว้ดูอ้างอิง)
@@ -175,6 +195,7 @@ export function summarizeListing(platformCode: string, raw: unknown, fallbackPri
 function summarizeRaw(platformCode: string, r: Obj, fallbackPrice: number | null): ListingShopSummary {
   if (platformCode === "line_shopping") return summarizeLine(r, fallbackPrice);
   if (platformCode === "lazada" && obj(r.lazada)) return summarizeLazada(r, fallbackPrice);
+  if (platformCode === "tiktok" && obj(r.tiktok)) return summarizeTiktok(r, fallbackPrice);
   return { image: null, imageKnown: false, stock: null, display: null, price: fallbackPrice, salePrice: null, variants: 0, category: null, state: "nodata" };
 }
 
