@@ -66,6 +66,8 @@ const erpPrice = (p: Pick<ParentRow, "final_price" | "sale_price">) =>
 
 const PARENT_COLS =
   "id, code, name_th, name_platform, description, platform_description, sale_price, final_price, cover_image_r2_key";
+/** id ต่อคำขอ (ที่อยู่คำขอ ~5KB · ร้าน 390 ตัว = 3 คำขอพร้อมกัน) */
+const PARENT_CHUNK = 130;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardWebsite(request, "view");
@@ -155,20 +157,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const thumb = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}&w=96`;
 
   if (parentIds.length) {
-    // SKU ลูกทั้งร้านเกิน 1,000 ได้ (Louis Montini ~1,800) → ไล่ดึงทีละหน้า ไม่งั้นบางรุ่นสีหาย
-    const [{ data: parents, error: parentsErr }, { data: mapParents, error: mapParentsErr }, children] = await Promise.all([
-      sb.from("parent_skus_v2").select(PARENT_COLS).in("id", parentIds),
-      sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
+    // ⚡ แบ่ง id เป็นชุดละ PARENT_CHUNK แล้วยิงพร้อมกัน (2026-11-12)
+    //   - เดิมใส่ id ทั้งร้านในคำขอเดียว: Louis Montini 390 ตัว = ที่อยู่ยาว ~15KB เกือบชนเพดาน (ลองจากไทย 390 ตัวพัง · 380 ผ่าน)
+    //   - SKU ลูกทั้งร้านเกิน 1,000 ได้ (Louis ~2,500) → แต่ละชุดยังไล่ดึงทีละหน้า (ไม่งั้นบางรุ่นสีหาย) แต่ชุดต่าง ๆ วิ่งพร้อมกัน ไม่ต่อคิว
+    //   - เดิมดึง parent 2 รอบ (PARENT_COLS เป็นส่วนหนึ่งของ PARENT_SELECT) → เหลือรอบเดียว ใช้ทั้ง parentById + mapParentById
+    const groups: string[][] = [];
+    for (let i = 0; i < parentIds.length; i += PARENT_CHUNK) groups.push(parentIds.slice(i, i + PARENT_CHUNK));
+    const [parentRes, childRes] = await Promise.all([
+      Promise.all(groups.map((ids) => sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", ids))),
       // strict: ดึง SKU ลูกไม่ครบ = ราคา/สี/ป้ายเตือนผิดทั้งร้าน → ลองซ้ำแล้วยังไม่ได้ให้ตอบ "โหลดไม่ครบ"
-      fetchAllPages<ChildSku & { parent_sku_id: string }>((from, to) =>
-        sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true).order("code").order("id").range(from, to),
-        { strict: true })
-        .catch((e) => (e instanceof FetchAllError ? null : Promise.reject(e))),
+      Promise.all(groups.map((ids) =>
+        fetchAllPages<ChildSku & { parent_sku_id: string }>((from, to) =>
+          sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", ids).eq("is_active", true).order("code").order("id").range(from, to),
+          { strict: true })
+          .catch((e) => (e instanceof FetchAllError ? null : Promise.reject(e))),
+      )),
     ]);
-    if (parentsErr || mapParentsErr || !children) return dbBusy(!children ? "skus_v2" : "parent_skus_v2", { ...busyShop, categories: fieldMap.categories });
-    for (const p of (parents ?? []) as ParentRow[]) parentById.set(p.id, p);
-    if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (mapParents ?? []) as MapParentRow[]);
-    for (const p of (mapParents ?? []) as MapParentRow[]) mapParentById.set(p.id, p);
+    const mapParentsErr = parentRes.some((r) => r.error);
+    const children = childRes.some((c) => !c) ? null : (childRes as (ChildSku & { parent_sku_id: string })[][]).flat();
+    if (mapParentsErr || !children) return dbBusy(!children ? "skus_v2" : "parent_skus_v2", { ...busyShop, categories: fieldMap.categories });
+    const mapParents = parentRes.flatMap((r) => (r.data ?? []) as unknown as MapParentRow[]);
+    for (const p of mapParents as unknown as ParentRow[]) parentById.set(p.id, p);
+    if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, mapParents);
+    for (const p of mapParents) mapParentById.set(p.id, p);
     for (const k of children) {
       const arr = kidsByParent.get(k.parent_sku_id) ?? [];
       arr.push(k);

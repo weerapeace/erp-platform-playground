@@ -12,33 +12,14 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { loadWebListings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
-import { ErrorState } from "@/components/state-views";
-import { WebsiteFieldMapPanel } from "@/components/website-field-map-panel";
-import { WebsiteCategoriesPanel } from "@/components/website-categories-panel";
-import { WebsiteCollectionsPanel } from "@/components/website-collections-panel";
-import { WebsiteNewDropsPanel } from "@/components/website-new-drops-panel";
-import { WebsiteSizeGuidesPanel } from "@/components/website-size-guides-panel";
-import { WebsiteThemePanel } from "@/components/website-theme-panel";
-import { WebsiteLayoutPanel } from "@/components/website-layout-panel";
-import { WebsitePagesPanel } from "@/components/website-pages-panel";
-import { WebsiteInfoPanel } from "@/components/website-info-panel";
-import { WebsiteOrdersPanel } from "@/components/website-orders-panel";
-import { WebsiteShippingPanel } from "@/components/website-shipping-panel";
-import { WebsiteCouponsPanel } from "@/components/website-coupons-panel";
-import { WebsiteMembersPanel } from "@/components/website-members-panel";
-import { WebsiteReviewsPanel } from "@/components/website-reviews-panel";
-import { WebsiteStatsPanel } from "@/components/website-stats-panel";
-import { WebsiteReturnsPanel } from "@/components/website-returns-panel";
-import { WebsiteImageSetsPanel } from "@/components/website-image-sets-panel";
-import { WebsiteSiteImagesPanel } from "@/components/website-site-images-panel";
+import { ErrorState, LoadingState } from "@/components/state-views";
 import { ImageSetsProvider } from "@/components/website-image-sets-context";
-import { WebsitePromotionsPanel } from "@/components/website-promotions-panel";
-import { WebsiteTranslationCenter } from "@/components/website-translation-center";
 import { WebsiteOpenToggle } from "@/components/website-open-toggle";
-import { WebsiteListingsPanel, type Listing, type CategoryDef, type ShopInfo } from "@/components/website-listings-panel";
+import type { Listing, CategoryDef, ShopInfo } from "@/components/website-listings-panel";
 import { WheelSelect } from "@/components/wheel-select";
 import { useViewPref } from "@/lib/use-view-pref";
 import { ConfirmDialog } from "@/components/modal";
@@ -47,6 +28,32 @@ import { AccessDenied, useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { designAccess, designTabTopicOf, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS, type WebsiteGroup } from "@/lib/website-access";
 import { WebsiteManagerMenu } from "@/components/website-manager-menu";
+
+// ⚡ โค้ดของแต่ละแท็บโหลดตอนเปิดแท็บนั้น (2026-11-12) — เดิมโหลดครบ 21 แท็บตั้งแต่เปิดหน้า = โค้ด 920KB หนักสุดในระบบ
+//    แท็บยังไม่มา = ข้อความกำลังเปิด (state-views กลาง) · ssr:false เพราะทุกแผงต้องรู้ตัวผู้ใช้/ร้านก่อนอยู่แล้ว
+const tabLoading = () => <LoadingState label="กำลังเปิดแท็บ…" />;
+const lazyTab = { ssr: false, loading: tabLoading } as const;
+const WebsiteListingsPanel = dynamic(() => import("@/components/website-listings-panel").then((m) => m.WebsiteListingsPanel), lazyTab);
+const WebsiteFieldMapPanel = dynamic(() => import("@/components/website-field-map-panel").then((m) => m.WebsiteFieldMapPanel), lazyTab);
+const WebsiteCategoriesPanel = dynamic(() => import("@/components/website-categories-panel").then((m) => m.WebsiteCategoriesPanel), lazyTab);
+const WebsiteCollectionsPanel = dynamic(() => import("@/components/website-collections-panel").then((m) => m.WebsiteCollectionsPanel), lazyTab);
+const WebsiteNewDropsPanel = dynamic(() => import("@/components/website-new-drops-panel").then((m) => m.WebsiteNewDropsPanel), lazyTab);
+const WebsiteSizeGuidesPanel = dynamic(() => import("@/components/website-size-guides-panel").then((m) => m.WebsiteSizeGuidesPanel), lazyTab);
+const WebsiteThemePanel = dynamic(() => import("@/components/website-theme-panel").then((m) => m.WebsiteThemePanel), lazyTab);
+const WebsiteLayoutPanel = dynamic(() => import("@/components/website-layout-panel").then((m) => m.WebsiteLayoutPanel), lazyTab);
+const WebsitePagesPanel = dynamic(() => import("@/components/website-pages-panel").then((m) => m.WebsitePagesPanel), lazyTab);
+const WebsiteInfoPanel = dynamic(() => import("@/components/website-info-panel").then((m) => m.WebsiteInfoPanel), lazyTab);
+const WebsiteOrdersPanel = dynamic(() => import("@/components/website-orders-panel").then((m) => m.WebsiteOrdersPanel), lazyTab);
+const WebsiteShippingPanel = dynamic(() => import("@/components/website-shipping-panel").then((m) => m.WebsiteShippingPanel), lazyTab);
+const WebsiteCouponsPanel = dynamic(() => import("@/components/website-coupons-panel").then((m) => m.WebsiteCouponsPanel), lazyTab);
+const WebsiteMembersPanel = dynamic(() => import("@/components/website-members-panel").then((m) => m.WebsiteMembersPanel), lazyTab);
+const WebsiteReviewsPanel = dynamic(() => import("@/components/website-reviews-panel").then((m) => m.WebsiteReviewsPanel), lazyTab);
+const WebsiteStatsPanel = dynamic(() => import("@/components/website-stats-panel").then((m) => m.WebsiteStatsPanel), lazyTab);
+const WebsiteReturnsPanel = dynamic(() => import("@/components/website-returns-panel").then((m) => m.WebsiteReturnsPanel), lazyTab);
+const WebsiteImageSetsPanel = dynamic(() => import("@/components/website-image-sets-panel").then((m) => m.WebsiteImageSetsPanel), lazyTab);
+const WebsiteSiteImagesPanel = dynamic(() => import("@/components/website-site-images-panel").then((m) => m.WebsiteSiteImagesPanel), lazyTab);
+const WebsitePromotionsPanel = dynamic(() => import("@/components/website-promotions-panel").then((m) => m.WebsitePromotionsPanel), lazyTab);
+const WebsiteTranslationCenter = dynamic(() => import("@/components/website-translation-center").then((m) => m.WebsiteTranslationCenter), lazyTab);
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
@@ -59,7 +66,11 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [shop, setShop] = useState<ShopInfo | null>(null);
   const { view: pageWidth, setView: setPageWidth, saveDefault: savePageWidth } = useViewPref<PageWidth>("website_manager_width", PAGE_WIDTHS, "wide");
   const [listings, setListings] = useState<Listing[]>([]);
-  const [loading, setLoading] = useState(true);
+  // loading = รายการสินค้ากำลังโหลด · shopLoading = ข้อมูลร้าน (เบา) กำลังโหลด · listingsFor = ร้านที่ขอรายการสินค้าไปแล้ว
+  const [loading, setLoading] = useState(false);
+  const [shopLoading, setShopLoading] = useState(true);
+  const [listingsFor, setListingsFor] = useState<string | null>(null);
+  const [tabReady, setTabReady] = useState(false);
   const [notFound, setNotFound] = useState(false);
   // ⚠️ โหลดสินค้าไม่ครบ (ฐานข้อมูลตอบช้า) — เก็บข้อมูลเดิมไว้ ไม่แสดงของครึ่ง ๆ กลาง ๆ + ปุ่มลองใหม่
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -99,6 +110,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
     const t = new URLSearchParams(window.location.search).get("tab");
     const ok = ["listings", "categories", "collections", "fieldmap", "design", "layout", "pages", "info", "shipping", "i18n", "orders", "coupons", "members", "reviews", "promotions", "stats", "returns", "imagesets", "webimages"] as const;
     if (t && (ok as readonly string[]).includes(t)) setTab(t as (typeof ok)[number]);
+    setTabReady(true);
   }, []);
 
   const load = useCallback(
@@ -142,11 +154,49 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
     try { await load(shopSlug); } finally { setRetrying(false); }
   };
 
+  // ⚡ เปิดหน้า = โหลดข้อมูลร้านแบบเบาก่อน (2026-11-12) → หัวหน้า/เมนู/แท็บอื่นขึ้นทันที
+  //    เดิมรอรายการสินค้าทั้งร้านก่อน (Louis Montini 390 ตัว ~5MB) ทุกแท็บจึงค้าง "กำลังโหลด" ถึงจะไม่ได้เปิดแท็บสินค้า
+  //    อ่านรายชื่อร้านไม่ได้ (เครือข่าย/สิทธิ์) → ใช้ทางเดิม: ข้อมูลร้านมากับรายการสินค้า
   useEffect(() => {
-    setLoading(true);
-    void load(shopSlug);
+    let off = false;
+    setShopLoading(true);
+    setShop(null);
+    setNotFound(false);
+    setListings([]);
+    setCategories([]);
+    setLoadError(null);
+    void (async () => {
+      const s = await apiFetch("/api/website/shops").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (off) return;
+      const all = Array.isArray(s?.shops) ? (s.shops as (ShopInfo & { siteUrl?: string | null })[]) : null;
+      if (!all) {
+        setListingsFor(shopSlug);
+        await load(shopSlug);
+        if (!off) setShopLoading(false);
+        return;
+      }
+      const found = all.find((x) => x.slug === shopSlug) ?? all.find((x) => x.slug.toLowerCase() === shopSlug.toLowerCase()) ?? null;
+      if (found) {
+        const info: ShopInfo = { id: found.id, name: found.name, slug: found.slug, isDefault: Boolean(found.isDefault), siteUrl: found.siteUrl ?? null };
+        setShop((cur) => (cur && cur.id === info.id ? cur : info));
+      }
+      setNotFound(!found);
+      setShopLoading(false);
+    })();
+    return () => {
+      off = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shopSlug]);
+
+  // 🛍 รายการสินค้าโหลดตอนเปิดแท็บสินค้าครั้งแรก (ของร้านนี้) แล้วเก็บไว้ — แท็บอื่นไม่ต้องรอ/ไม่แย่งเครื่อง
+  //    รอ tabReady = อ่าน ?tab= จากลิงก์แล้ว (กันโหลดสินค้าทิ้งตอนลิงก์พาไปแท็บอื่น)
+  useEffect(() => {
+    if (!tabReady || tab !== "listings" || listingsFor === shopSlug) return;
+    setListingsFor(shopSlug);
+    setLoading(true);
+    void load(shopSlug);
+  }, [tab, tabReady, shopSlug, listingsFor, load]);
 
   // แท็บที่เปิดอยู่ไม่มีสิทธิ์ดู (สิทธิ์โหลดเสร็จ / เปิดจากลิงก์ ?tab=) → ไปแท็บแรกที่ดูได้
   const tabKeys = WEBSITE_GROUPS.flatMap((g) => g.tabs) as TabKey[];
@@ -180,7 +230,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const viewOnlyTab = (k: string) => levelOfTab(k) === "view" && !(k === "design" && designTopics) && !tabTopicOn(k);
 
   // ไม่มีเว็บร้านชื่อนี้ — บอกให้ชัด ดีกว่าพาไปร้านอื่นแบบเงียบ ๆ
-  if (notFound && !loading)
+  if (notFound && !shopLoading && !loading)
     return (
       <PlaygroundShell>
         <div className="max-w-6xl mx-auto px-5 py-6">
@@ -308,7 +358,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             listings={listings}
             setListings={setListings}
             categories={categories}
-            loading={loading}
+            loading={loading || listingsFor !== shopSlug}
             reload={() => load(shop.slug)}
           />
         )}
