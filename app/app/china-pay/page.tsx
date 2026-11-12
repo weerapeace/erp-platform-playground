@@ -21,6 +21,15 @@ import {
 } from "@/lib/china-pay";
 import { CHINA_BILLS_PRINT_PICK_KEY } from "@/lib/china-bills-print";
 import { BillPoPicker, BillLinkedPos, type BillPoSummary } from "./bill-po-picker";
+import { useViewportLayout } from "@/components/device-view";
+import { MiniTable, type MiniColumn } from "@/components/mini-table";
+
+// ---------------- จอคอม vs มือถือ ----------------
+// จอคอม = กว้าง ≥1024px (useViewportLayout ของกลาง) + เปิดในเบราว์เซอร์ (ไม่ใช่แอปที่ติดตั้ง/PWA)
+// → เมนูข้าง + ตาราง + หน้าโอนจอเดียว · นอกนั้น (มือถือ / iPad แนวตั้ง / แอปที่ติดตั้ง) = หน้าตามือถือเดิม 100%
+const DeskCtx = createContext(false);
+const useDesk = () => useContext(DeskCtx);
+type DRow = Record<string, unknown>;
 
 const SUPPLIER_CFG: RelationConfig = {
   target_table: "partners_v2", target_module_key: "partners-v2",
@@ -333,6 +342,9 @@ export default function ChinaPayApp() {
   const [fromVoucher, setFromVoucher] = useState<string | null>(null);   // ?from_voucher=id → หน้าลงบิลเติมจากใบสำคัญรับ
   const [rateMissing, setRateMissing] = useState(false);   // วันนี้ยังไม่มีเรท → โชว์ badge เตือน
   const [inApp, setInApp] = useState(false);   // true = เปิดจากไอคอนแอปที่ติดตั้ง (PWA) → ไม่ต้องมีทางออกไป ERP
+  const [envReady, setEnvReady] = useState(false);   // รู้ขนาดจอ/โหมดแอปแล้ว (ก่อนรู้ = หน้าตามือถือ → มือถือไม่กระพริบ)
+  const viewport = useViewportLayout();
+  const desk = envReady && viewport === "desktop" && !inApp;
 
   // เปิดในเบราว์เซอร์ (ไม่ใช่แอปที่ติดตั้ง) → โชว์ทางออกกลับ ERP ในเมนู ☰ (กันเปิดบนคอมแล้วออกไปแอปอื่นไม่ได้)
   useEffect(() => {
@@ -341,6 +353,7 @@ export default function ChinaPayApp() {
         || (window.navigator as unknown as { standalone?: boolean }).standalone === true;
       setInApp(standalone);
     } catch { /* noop */ }
+    setEnvReady(true);
   }, []);
 
   // เช็คว่าวันนี้มีเรทหรือยัง (badge เตือนบนเมนูเรท)
@@ -411,7 +424,98 @@ export default function ChinaPayApp() {
   const hasMore = navMenu.length > bottomItems.length;
   const cols = bottomItems.length + (hasMore ? 1 : 0);
 
+  // เนื้อหาแท็บ — ใช้ร่วมกันทั้งหน้าตามือถือและจอคอม
+  const rateBanner = rateMissing && renderTab !== "rate" && (
+    <button onClick={() => go("rate")}
+      className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-sm text-left animate-pulse">
+      <span className="text-lg">⚠️</span>
+      <span className="flex-1">วันนี้ยังไม่ได้ใส่เรท — แตะเพื่อใส่เรทก่อนโอน</span>
+      <span className="text-xs font-semibold">ใส่เรท →</span>
+    </button>
+  );
+  const tabBody = (<>
+    {renderTab === "dashboard" && <Dashboard onGo={go} />}
+    {renderTab === "bill" && <BillForm prefillVoucherId={fromVoucher} onPrefillUsed={() => setFromVoucher(null)} />}
+    {renderTab === "all" && <AllList canDelete={canManage} />}
+    {renderTab === "rate" && <RateTab />}
+    {renderTab === "ctw" && <CtwList canDelete={canManage} />}
+    {renderTab === "suppliers" && <SupplierList canManage={canManage} />}
+    {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
+    {renderTab === "transfers" && <TransferList canDelete={canManage} onGo={go} />}
+    {renderTab === "automation" && <AutomationPage />}
+    {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
+  </>);
+
+  // จอคอม: ความกว้างเนื้อหาตามชนิดหน้า — ฟอร์มแคบอ่านง่าย · ตาราง/หน้าโอนใช้เต็มจอ
+  const deskWidth = (["bill", "rate", "automation", "menusettings"] as Tab[]).includes(renderTab) ? "max-w-2xl"
+    : (["ctw", "suppliers"] as Tab[]).includes(renderTab) ? "max-w-5xl" : "max-w-[1440px]";
+
+  // ---- หน้าตาจอคอม: เมนูข้างซ้าย (แทนแถบล่าง + ☰) + หัวส้มแบบบาง + เนื้อหากว้าง ----
+  const deskShell = (
+    <div className="flex min-h-screen">
+      <aside className="w-60 flex-shrink-0 h-screen sticky top-0 bg-white border-r border-slate-200 flex flex-col z-30">
+        <div className="px-4 py-4 flex items-center gap-3 border-b border-slate-100">
+          <span className="w-10 h-10 flex-shrink-0 rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 text-white flex items-center justify-center text-xl shadow-md shadow-orange-500/30">💸</span>
+          <div className="min-w-0">
+            <div className="font-bold text-slate-800 leading-tight">โอนเงินจีน</div>
+            <div className="text-xs text-slate-400 truncate">{user.name} · {roleLabel(user.role)}</div>
+          </div>
+        </div>
+        <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
+          {navMenu.map(m => {
+            const on = renderTab === m.k;
+            return (
+              <button key={m.k} onClick={() => go(m.k)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-sm transition ${on ? "bg-orange-50 text-orange-700 font-semibold" : "text-slate-600 hover:bg-slate-50"}`}>
+                <span className="text-lg w-6 text-center">{m.icon}</span>
+                <span className="flex-1 truncate">{m.label}</span>
+                {m.k === "rate" && rateMissing && (
+                  <span className="flex-shrink-0 text-[10px] font-bold text-white bg-red-500 rounded-full px-2 py-0.5 animate-pulse">ยังไม่ใส่</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="border-t border-slate-100 p-2 space-y-0.5">
+          <Link href="/m/china-dashboard" className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-sm text-slate-500 hover:bg-slate-50">
+            <span className="text-lg w-6 text-center">🖥️</span><span className="flex-1">Dashboard กราฟ</span>
+          </Link>
+          <Link href="/apps" className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-sm text-slate-500 hover:bg-slate-50">
+            <span className="text-lg w-6 text-center">↩︎</span><span className="flex-1">กลับหน้ารวมแอป ERP</span>
+          </Link>
+        </div>
+      </aside>
+
+      <div className="flex-1 min-w-0 flex flex-col">
+        <header className="sticky top-0 z-20 h-14 flex-shrink-0 bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 flex items-center gap-3 shadow-md shadow-orange-500/20">
+          <div className="font-bold text-lg flex-1 truncate">{current ? `${current.icon} ${current.label}` : "💸 โอนเงินจีน"}</div>
+          <button onClick={() => setSearchOpen(true)} title="ค้นหาในแอป — กด / หรือ Ctrl+K"
+            className="h-9 w-72 flex items-center gap-2 px-3 rounded-xl bg-white/20 hover:bg-white/30 text-sm text-white/90 transition">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+            <span className="flex-1 text-left">ค้นหาในแอป…</span>
+            <kbd className="text-[10px] bg-white/20 rounded px-1.5 py-0.5">Ctrl K</kbd>
+          </button>
+          <button onClick={() => setAcctOpen(true)}
+            className="flex items-center gap-2 bg-white/20 hover:bg-white/30 transition rounded-full pl-1 pr-3 py-1 text-sm">
+            <span className="w-7 h-7 rounded-full bg-white text-orange-600 flex items-center justify-center font-bold">{(user.name || "?").slice(0, 1).toUpperCase()}</span>
+            <span className="truncate max-w-[140px]">{user.name}</span>
+          </button>
+        </header>
+
+        <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope="china-pay" />
+
+        <main id="cp-main" key={renderTab} className="cp-anim flex-1 p-6">
+          <div className={`${deskWidth} mx-auto`}>
+            {rateBanner}
+            {tabBody}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+
   return (
+    <DeskCtx.Provider value={desk}>
     <CelebrateProvider>
     <div className="min-h-screen bg-slate-100">
       <style>{`
@@ -436,6 +540,9 @@ export default function ChinaPayApp() {
         @keyframes cpokDraw{to{stroke-dashoffset:0}}
         @keyframes cpokFall{0%{transform:translateY(-12vh) rotate(0);opacity:1}100%{transform:translateY(112vh) rotate(560deg);opacity:.85}}
         .cpok-confetti{position:absolute;top:0;width:9px;height:14px;border-radius:2px;animation-name:cpokFall;animation-timing-function:linear;animation-fill-mode:forwards}
+        /* จอคอม: รายละเอียดเลื่อนเข้าจากขวา (แผงขวา) */
+        @keyframes cpSlideIn{from{transform:translateX(32px);opacity:.4}to{transform:none;opacity:1}}
+        .cp-drawer{animation:cpSlideIn .22s cubic-bezier(.2,.8,.3,1) both}
         @media print {
           body * { visibility:hidden !important }
           #tx-receipt, #tx-receipt * { visibility:visible !important }
@@ -444,6 +551,7 @@ export default function ChinaPayApp() {
           @page { margin:10mm; }
         }
       `}</style>
+      {desk ? deskShell : (
       <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm relative overflow-hidden">
         <div className="cp-bg" aria-hidden><i className="b1"></i><i className="b2"></i><i className="b3"></i></div>
         {/* Top bar */}
@@ -470,24 +578,8 @@ export default function ChinaPayApp() {
 
         {/* Content */}
         <main id="cp-main" key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">
-          {rateMissing && renderTab !== "rate" && (
-            <button onClick={() => go("rate")}
-              className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-sm text-left animate-pulse">
-              <span className="text-lg">⚠️</span>
-              <span className="flex-1">วันนี้ยังไม่ได้ใส่เรท — แตะเพื่อใส่เรทก่อนโอน</span>
-              <span className="text-xs font-semibold">ใส่เรท →</span>
-            </button>
-          )}
-          {renderTab === "dashboard" && <Dashboard onGo={go} />}
-          {renderTab === "bill" && <BillForm prefillVoucherId={fromVoucher} onPrefillUsed={() => setFromVoucher(null)} />}
-          {renderTab === "all" && <AllList canDelete={canManage} />}
-          {renderTab === "rate" && <RateTab />}
-          {renderTab === "ctw" && <CtwList canDelete={canManage} />}
-          {renderTab === "suppliers" && <SupplierList canManage={canManage} />}
-          {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
-          {renderTab === "transfers" && <TransferList canDelete={canManage} onGo={go} />}
-          {renderTab === "automation" && <AutomationPage />}
-          {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
+          {rateBanner}
+          {tabBody}
         </main>
 
         {/* แถบเมนูล่าง — ซ่อนตอนอยู่หน้าโอน (ใช้ ☰ สลับแทน) เพื่อให้ปุ่มบันทึกติดล่างสุดไม่ซ้อน */}
@@ -512,6 +604,7 @@ export default function ChinaPayApp() {
           </nav>
         )}
       </div>
+      )}
 
       {/* เมนูทั้งหมด (เด้งจากปุ่ม ☰) */}
       {menuOpen && (
@@ -579,6 +672,7 @@ export default function ChinaPayApp() {
       {deepTransfer && <TransferReceiptPopup t={deepTransfer} onClose={() => setDeepTransfer(null)} />}
     </div>
     </CelebrateProvider>
+    </DeskCtx.Provider>
   );
 }
 
@@ -994,11 +1088,14 @@ function ChinaBalanceCard() {
 }
 
 function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
+  const desk = useDesk();
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [doneMonth, setDoneMonth] = useState<{ count: number; thb: number }>({ count: 0, thb: 0 });
   const [rate, setRate] = useState<Record<string, unknown> | null>(null);
   const [ctwCount, setCtwCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<DRow | null>(null);   // จอคอม: กดบิลในรายการรอโอน → เปิดรายละเอียด
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const ym = today().slice(0, 7); // YYYY-MM
@@ -1019,12 +1116,81 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
       setRate((rt.data ?? [])[0] ?? null);
       setCtwCount((c.data ?? []).length);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [reloadKey]);
 
   const pendingRmb = pending.reduce((a, r) => a + num(r.amount_rmb) + num(r.fee_rmb), 0);
   const r1 = num(rate?.rate);
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+
+  // ---- จอคอม: ตัวเลขสำคัญแถวเดียว + บิลรอโอน (เก่าสุดก่อน) + ทางลัด ----
+  if (desk) {
+    const dateOf = (r: DRow) => String(r.transfer_date ?? r.bill_date ?? "");
+    const oldest = [...pending].sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+    const SHOW = 10;
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 xl:grid-cols-[1.25fr_1.25fr_1fr_1fr] gap-4">
+          <button onClick={() => onGo("all")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-orange-500 to-orange-500 text-white p-4 shadow-sm hover:brightness-105 transition">
+            <div className="text-sm opacity-90">บิลจีนรอโอน</div>
+            <div className="flex items-end justify-between mt-1 gap-2">
+              <div className="text-3xl font-bold">{pending.length} <span className="text-base font-normal opacity-90">บิล</span></div>
+              <div className="text-xl font-semibold">¥{fmt(pendingRmb)}</div>
+            </div>
+          </button>
+          <ChinaBalanceCard />
+          <StatCard label="โอนแล้วเดือนนี้" main={`${doneMonth.count} บิล`} sub={`฿${fmt(doneMonth.thb)}`} onClick={() => onGo("transfers")} />
+          <StatCard label="เรทล่าสุด (R1)" main={r1 ? fmt(r1) : "—"} sub={r1 ? `R4 ${fmt(+(r1 - RATE_OFFSET.r4).toFixed(4))}` : "ยังไม่ตั้ง"} onClick={() => onGo("rate")} />
+        </div>
+
+        <div className="grid grid-cols-[minmax(0,1.8fr)_minmax(260px,1fr)] gap-5 items-start">
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
+              <div>
+                <div className="font-semibold text-slate-800">บิลรอโอน · เก่าสุดก่อน</div>
+                <div className="text-xs text-slate-400">{pending.length} บิล · กดบิลเพื่อดูรายละเอียด</div>
+              </div>
+              <button onClick={() => onGo("transfer")} disabled={pending.length === 0}
+                className="h-10 px-4 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-40">💰 โอนเข้าจีน →</button>
+            </div>
+            {oldest.length === 0 ? (
+              <div className="text-center text-slate-300 py-10">— ไม่มีบิลรอโอน —</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {oldest.slice(0, SHOW).map(r => (
+                  <button key={String(r.id)} onClick={() => setDetail(r)}
+                    className="w-full grid grid-cols-[minmax(0,1fr)_7rem_8rem] items-center gap-3 px-4 py-2.5 text-left hover:bg-orange-50/60 transition">
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      {isThbBill(r) && <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${r.is_shipping ? "bg-purple-100 text-purple-700" : "bg-rose-100 text-rose-700"}`}>{billTypeLabel(r)}</span>}
+                      <span className="truncate text-sm font-medium text-slate-800">{billDisplayName(r)}</span>
+                    </span>
+                    <span className="text-xs text-slate-400">{dateOf(r) || "—"}</span>
+                    <span className="text-right font-bold text-orange-600">{isThbBill(r) ? `฿${fmt(num(r.amount_thb))}` : `¥${fmt(billRemainRmb(r))}`}</span>
+                  </button>
+                ))}
+                {oldest.length > SHOW && (
+                  <button onClick={() => onGo("all")} className="w-full px-4 py-2.5 text-sm text-orange-600 font-medium hover:bg-orange-50/60 text-center">ดูทั้งหมด {oldest.length} บิล →</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4">
+              <div className="font-semibold text-slate-800 mb-3">ทางลัด</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => onGo("bill")} className="h-11 bg-orange-600 text-white rounded-xl font-semibold hover:bg-orange-700 transition">+ ลงบิล</button>
+                <button onClick={() => onGo("ctw")} className="h-11 border border-slate-300 text-slate-700 rounded-xl font-semibold hover:bg-slate-50 transition">+ บิล CTW</button>
+                <button onClick={() => onGo("transfers")} className="col-span-2 h-11 border border-slate-300 text-slate-700 rounded-xl font-semibold hover:bg-slate-50 transition">🧾 รายการโอนย้อนหลัง</button>
+              </div>
+            </div>
+            <StatCard label="บิลจาก CTW" main={`${ctwCount} บิล`} sub="ดูรายการ ›" onClick={() => onGo("ctw")} wide />
+          </div>
+        </div>
+        {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onChanged={() => setReloadKey(k => k + 1)} />}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -1328,6 +1494,7 @@ function BillForm({ prefillVoucherId, onPrefillUsed }: { prefillVoucherId?: stri
 
 // ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
 function AllList({ canDelete }: { canDelete: boolean }) {
+  const desk = useDesk();
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1379,6 +1546,113 @@ function AllList({ canDelete }: { canDelete: boolean }) {
     const url = `/app/china-pay/print?filter=${encodeURIComponent(filter)}${sel.size ? "&picked=1" : ""}`;
     if (!window.open(url, "_blank")) window.location.href = url;
   };
+
+  // ป๊อปอัป/แผงรายละเอียด — ใช้ร่วมกันทั้งมือถือและจอคอม
+  const overlays = (<>
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} canDelete={canDelete} />}
+      {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
+      {wizardOpen && <SlipWizard openBills={openBills} onClose={() => setWizardOpen(false)} onDone={() => { setWizardOpen(false); load(); }} />}
+
+      {/* popup เลือกบิลเพื่อแนบสลิป (แมนนวล) */}
+      {attachOpen && (
+        <Portal><div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setAttachOpen(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+              <div className="font-semibold text-slate-800">เลือกบิลที่จะแนบสลิป</div>
+              <button onClick={() => setAttachOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+            </div>
+            <div className="p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] space-y-2">
+              <div className="text-xs text-slate-400 px-1">แสดงเฉพาะบิลที่สลิปจ่ายร้านยังไม่ครบยอด (รวมบิลที่ตัดโอนแล้ว)</div>
+              {openBills.length === 0 ? <div className="text-center text-slate-300 py-8">— ไม่มีบิลค้าง —</div>
+                : openBills.map((r) => {
+                  const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r));
+                  return (
+                    <button key={String(r.id)} onClick={() => { setAttachOpen(false); setDetail(r); }}
+                      className="w-full flex justify-between items-center gap-2 text-left rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
+                        <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")} · {billStatus3(r)}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0"><div className="font-bold text-orange-600">¥{fmt(rem)}</div><div className="text-[10px] text-slate-400">สลิปยังขาด</div></div>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div></Portal>
+      )}
+  </>);
+
+  // ---- จอคอม: ตาราง (ตารางเล็กกลาง MiniTable — ค้นหา/เรียง/จัดกลุ่มตามร้าน/ติ๊กหลายบิล) + รายละเอียดเป็นแผงขวา ----
+  if (desk) {
+    const dateOf = (r: DRow) => String(r.transfer_date ?? r.bill_date ?? "");
+    const remainOf = (r: DRow) => isThbBill(r) ? num(r.amount_thb) : billRemainRmb(r);
+    const thbOf = (r: DRow) => isThbBill(r) ? num(r.amount_thb) : (num(r.rate) > 0 ? billRemainRmb(r) * num(r.rate) : 0);
+    const cols: MiniColumn<DRow>[] = [
+      { key: "date", header: "วันที่", width: "6.5rem", sortValue: dateOf, cell: r => <span className="text-slate-500">{dateOf(r) || "—"}</span> },
+      { key: "shop", header: "ร้าน / รายการ", width: "minmax(10rem,2fr)", sortValue: r => billDisplayName(r), cell: r => (
+        <span className="flex items-center gap-1.5 min-w-0">
+          {isThbBill(r) && <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${r.is_shipping ? "bg-purple-100 text-purple-700" : "bg-rose-100 text-rose-700"}`}>{billTypeLabel(r)}</span>}
+          <span className="truncate font-medium text-slate-800">{billDisplayName(r)}</span>
+          {r.printed_at ? <span className="flex-shrink-0"><PrintedBadge /></span> : null}
+        </span>
+      ) },
+      { key: "full", header: "ยอดเต็ม", width: "7rem", align: "right", sortValue: r => isThbBill(r) ? num(r.amount_thb) : billTotalRmb(r),
+        cell: r => <span className="text-slate-600">{isThbBill(r) ? `฿${fmt(num(r.amount_thb))}` : `¥${fmt(billTotalRmb(r))}`}</span> },
+      { key: "remain", header: "ค้าง", width: "7rem", align: "right", sortValue: remainOf,
+        cell: r => <span className="font-bold text-orange-600">{isThbBill(r) ? `฿${fmt(num(r.amount_thb))}` : `¥${fmt(billRemainRmb(r))}`}</span> },
+      { key: "thb", header: "≈ บาท", width: "7.5rem", align: "right", sortValue: thbOf,
+        cell: r => <span className="text-slate-500">{thbOf(r) > 0 ? `฿${fmt(+thbOf(r).toFixed(2))}` : "—"}</span> },
+      { key: "status", header: "สถานะ", width: "8.5rem", sortValue: r => billStatus3(r), cell: r => {
+        const s3 = billStatus3(r);
+        return <span className={`inline-block text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[s3] ?? "bg-slate-100 text-slate-500"}`}>{s3}</span>;
+      } },
+    ];
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          {ALL_FILTERS.map((f) => (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`h-9 px-3.5 rounded-full text-sm border transition ${filter === f ? "bg-orange-600 text-white border-orange-600 font-medium" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}>
+              {f}
+            </button>
+          ))}
+          <div className="flex-1" />
+          <button onClick={() => setWizardOpen(true)} className="h-9 px-3.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition">🤖 แนบสลิป (AI จับคู่)</button>
+          <button onClick={() => setAttachOpen(true)} className="h-9 px-3.5 border border-emerald-600 text-emerald-700 rounded-xl text-sm font-semibold hover:bg-emerald-50 transition">📎 เลือกบิลเอง</button>
+          {sel.size === 0 && <button onClick={openPrint} className="h-9 px-3.5 border border-slate-300 bg-white text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-50 transition">🖨️ พิมพ์</button>}
+        </div>
+
+        {sel.size > 0 && (
+          <div className="sticky top-16 z-10 rounded-xl bg-emerald-600 text-white px-3 py-2 flex items-center justify-between gap-2 shadow">
+            <span className="text-sm font-medium pl-1">เลือก {sel.size} บิล · ค้างรวม ¥{fmt(+selRows.reduce((a, r) => a + (isThbBill(r) ? 0 : billRemainRmb(r)), 0).toFixed(2))}</span>
+            <div className="flex gap-2">
+              <button onClick={openPrint} className="h-9 px-3 bg-white text-emerald-700 rounded-lg text-sm font-medium">🖨️ พิมพ์</button>
+              <button onClick={sendCombined} disabled={sendingCombined} className="h-9 px-3 bg-white text-emerald-700 rounded-lg text-sm font-medium disabled:opacity-50">{sendingCombined ? "กำลังส่ง…" : "📩 ส่งไลน์รวม"}</button>
+              <button onClick={() => setSel(new Set())} className="h-9 px-3 bg-emerald-700/40 rounded-lg text-sm">ล้าง</button>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-200 p-3">
+            <MiniTable rows={shown} columns={cols} rowKey={r => String(r.id)}
+              searchText={r => `${billDisplayName(r)} ${String(r.supplier_label ?? "")} ${String(r.note ?? "")} ${dateOf(r)}`}
+              searchPlaceholder="ค้นหาร้าน / วันที่ / หมายเหตุ…"
+              groupBy={r => billDisplayName(r)} groupLabel="จัดกลุ่มตามร้าน" defaultGrouped={false}
+              selectable selected={sel} onSelectedChange={setSel}
+              onRowClick={r => setDetail(r)}
+              countUnit="บิล"
+              title={<span className="text-sm text-slate-600">{filter} · <b className="text-orange-600">¥{fmt(total)}</b></span>}
+              emptyText="— ไม่มีรายการ —" />
+          </div>
+        )}
+        {overlays}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -1465,38 +1739,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
           );
         })
       )}
-      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} canDelete={canDelete} />}
-      {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
-      {wizardOpen && <SlipWizard openBills={openBills} onClose={() => setWizardOpen(false)} onDone={() => { setWizardOpen(false); load(); }} />}
-
-      {/* popup เลือกบิลเพื่อแนบสลิป (แมนนวล) */}
-      {attachOpen && (
-        <Portal><div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setAttachOpen(false)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
-              <div className="font-semibold text-slate-800">เลือกบิลที่จะแนบสลิป</div>
-              <button onClick={() => setAttachOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
-            </div>
-            <div className="p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] space-y-2">
-              <div className="text-xs text-slate-400 px-1">แสดงเฉพาะบิลที่สลิปจ่ายร้านยังไม่ครบยอด (รวมบิลที่ตัดโอนแล้ว)</div>
-              {openBills.length === 0 ? <div className="text-center text-slate-300 py-8">— ไม่มีบิลค้าง —</div>
-                : openBills.map((r) => {
-                  const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r));
-                  return (
-                    <button key={String(r.id)} onClick={() => { setAttachOpen(false); setDetail(r); }}
-                      className="w-full flex justify-between items-center gap-2 text-left rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
-                      <div className="min-w-0">
-                        <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
-                        <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")} · {billStatus3(r)}</div>
-                      </div>
-                      <div className="text-right flex-shrink-0"><div className="font-bold text-orange-600">¥{fmt(rem)}</div><div className="text-[10px] text-slate-400">สลิปยังขาด</div></div>
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        </div></Portal>
-      )}
+      {overlays}
     </div>
   );
 }
@@ -2010,6 +2253,7 @@ function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, u
 // ---------------- รายละเอียดบิล ----------------
 function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void; canDelete?: boolean }) {
   useScrollLock(true);
+  const desk = useDesk();   // จอคอม = แผงขวา (ตารางยังเห็นด้านหลัง) · มือถือ = แผ่นล่างเหมือนเดิม
   const toast = useToast();
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState(false);
@@ -2107,8 +2351,8 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
 
   return (
     <Portal>
-    <div className={`fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center ${poOpen ? "invisible" : ""}`} onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className={`fixed inset-x-0 top-0 h-[100svh] z-[200] flex ${desk ? "bg-black/20 justify-end" : "bg-black/40 items-end sm:items-center justify-center"} ${poOpen ? "invisible" : ""}`} onClick={onClose}>
+      <div className={desk ? "cp-drawer bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl" : "bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto"} onClick={e => e.stopPropagation()}>
         {/* header */}
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">รายละเอียดบิล</div>
@@ -2417,7 +2661,13 @@ const shopFromRow = (r: Record<string, unknown>): ShopForm => ({
 });
 const SHOP_SEARCH_FIELDS = ["name_th", "name_en", "account_number", "bank_account_name", "bank_name_brief", "phone"];
 
+// จอคอม: การ์ดเรียงเป็นกริด 2–3 คอลัมน์ · มือถือ: คืนรายการเดิม (เรียงต่อกันในกล่อง space-y เหมือนเดิม)
+function deskGrid(desk: boolean, items: React.ReactNode[]): React.ReactNode {
+  return desk ? <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">{items}</div> : items;
+}
+
 function SupplierList({ canManage }: { canManage?: boolean }) {
+  const desk = useDesk();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -2467,7 +2717,7 @@ function SupplierList({ canManage }: { canManage?: boolean }) {
 
       {loading ? <Card><div className="text-center text-slate-400 py-6">กำลังโหลด…</div></Card>
         : shown.length === 0 ? <Card><div className="text-center text-slate-400 py-6">{kw ? "ไม่พบร้านที่ค้นหา" : "ยังไม่มีร้านจีน — กด ➕ เพิ่มร้าน"}</div></Card>
-        : shown.map(r => {
+        : deskGrid(desk, shown.map(r => {
           const acct = String(r.account_number ?? "").trim();
           const off = r.is_active === false;
           return (
@@ -2486,7 +2736,7 @@ function SupplierList({ canManage }: { canManage?: boolean }) {
               </button>
             </Card>
           );
-        })}
+        }))}
     </div>
   );
 }
@@ -2596,6 +2846,7 @@ function SupplierForm({ shop, canManage, onCancel, onSaved }:
 }
 
 function CtwList({ canDelete }: { canDelete?: boolean }) {
+  const desk = useDesk();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<"list" | "form">("list");
@@ -2643,7 +2894,7 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
       ) : tabRows.length === 0 ? (
         <div className="text-center text-slate-300 py-10">— ยังไม่มีบิล CTW ในกลุ่มนี้ —</div>
       ) : (
-        tabRows.map((r) => {
+        deskGrid(desk, tabRows.map((r) => {
           const paid = num(r.cleared_amount), cleared = !!r.cleared_at;
           return (
           <Card key={String(r.id)}>
@@ -2661,7 +2912,7 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
             </button>
           </Card>
           );
-        })
+        }))
       )}
       {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onChanged={load} canDelete={canDelete}
         onEdit={() => { setEditBill(detail); setDetail(null); setMode("form"); }}
@@ -2766,6 +3017,7 @@ function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSave
 
 function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void; onEdit?: () => void; canDelete?: boolean }) {
   useScrollLock(true);
+  const desk = useDesk();   // จอคอม = แผงขวา
   const toast = useToast();
   const [del, setDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2786,8 +3038,8 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: {
 
   return (
     <Portal>
-    <div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className={`fixed inset-x-0 top-0 h-[100svh] z-[200] flex ${desk ? "bg-black/20 justify-end" : "bg-black/40 items-end sm:items-center justify-center"}`} onClick={onClose}>
+      <div className={desk ? "cp-drawer bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl" : "bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto"} onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">บิลจาก CTW</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
@@ -2939,6 +3191,7 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
 
 // ---------------- รายการที่โอนแล้ว (ประวัติการโอน) ----------------
 function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: Tab) => void }) {
+  const desk = useDesk();
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});
@@ -3033,6 +3286,54 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
   if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ยังไม่มีรายการโอน —</div>;
+
+  // ใบสรุป + ป๊อปอัปจัดการ (ใช้ร่วม มือถือ/จอคอม)
+  const overlays = (<>
+      {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
+        onLinkSlips={() => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setLinkTarget(raw); setReceipt(null); } }}
+        onEdit={onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
+        onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
+      {linkTarget && <LinkSlipsPopup transfer={linkTarget} onClose={() => setLinkTarget(null)} onSaved={() => { setLinkTarget(null); loadList(); }} />}
+      {delTarget && (
+        <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
+          confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
+      )}
+      {editTarget && (
+        <ConfirmPopup title="แก้ไขรายการโอนนี้?" message={`เลขโอน ${String(editTarget.transfer_no ?? "—")} · ฿${fmt(num(editTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลกลับ แล้วเปิดหน้าโอนพร้อมข้อมูลเดิมให้แก้ต่อ`}
+          confirmText="แก้ไข (คืนยอด+เริ่มใหม่)" onCancel={() => setEditTarget(null)} onConfirm={() => removeTransfer(editTarget, true)} />
+      )}
+  </>);
+
+  // ---- จอคอม: ตาราง (MiniTable) — กดแถวเปิดใบสรุป ----
+  if (desk) {
+    const linesOf = (r: DRow) => Array.isArray(r.lines) ? (r.lines as DRow[]) : [];
+    const cnRmb = (r: DRow) => +linesOf(r).filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_rmb), 0).toFixed(2);
+    const cols: MiniColumn<DRow>[] = [
+      { key: "no", header: "เลขโอน", width: "9rem", sortValue: r => String(r.transfer_no ?? ""), cell: r => <span className="font-semibold text-slate-800">{String(r.transfer_no ?? "—")}</span> },
+      { key: "date", header: "วันที่โอน", width: "7.5rem", sortValue: r => String(r.transfer_date ?? ""), cell: r => <span className="text-slate-500">{String(r.transfer_date ?? "—")}</span> },
+      { key: "ref", header: "เลขอ้างอิง", width: "minmax(8rem,1fr)", sortValue: r => String(r.ref_no ?? ""), cell: r => <span className="block truncate text-slate-500">{String(r.ref_no ?? "") || "—"}</span> },
+      { key: "cn", header: "บิลจีน", width: "5rem", align: "right", sortValue: r => linesOf(r).filter(l => l.kind === "china").length, cell: r => linesOf(r).filter(l => l.kind === "china").length },
+      { key: "cw", header: "CTW", width: "4.5rem", align: "right", sortValue: r => linesOf(r).filter(l => l.kind === "ctw").length, cell: r => linesOf(r).filter(l => l.kind === "ctw").length },
+      { key: "rmb", header: "บิลจีน ¥", width: "8rem", align: "right", sortValue: cnRmb, cell: r => <span className="text-slate-600">¥{fmt(cnRmb(r))}</span> },
+      { key: "thb", header: "โอนจริง", width: "9rem", align: "right", sortValue: r => num(r.amount_transferred_thb), cell: r => num(r.amount_transferred_thb) > 0
+        ? <span className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</span>
+        : <span className="text-[11px] font-medium text-orange-600">จ่ายจากยอดคงเหลือ</span> },
+    ];
+    return (
+      <div className="space-y-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-3">
+          <MiniTable rows={rows} columns={cols} rowKey={r => String(r.id)}
+            searchText={r => `${String(r.transfer_no ?? "")} ${String(r.ref_no ?? "")} ${String(r.transfer_date ?? "")} ${linesOf(r).map(l => String(l.label ?? "")).join(" ")}`}
+            searchPlaceholder="ค้นหาเลขโอน / เลขอ้างอิง / ชื่อร้าน…"
+            onRowClick={r => setReceipt(buildTransferReceipt(r, pmap))}
+            countUnit="รายการ"
+            title={<span className="text-sm text-slate-600">กดแถวเพื่อดูใบสรุป</span>} />
+        </div>
+        {overlays}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {rows.map((r) => {
@@ -3057,19 +3358,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
           </Card>
         );
       })}
-      {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
-        onLinkSlips={() => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setLinkTarget(raw); setReceipt(null); } }}
-        onEdit={onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
-        onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
-      {linkTarget && <LinkSlipsPopup transfer={linkTarget} onClose={() => setLinkTarget(null)} onSaved={() => { setLinkTarget(null); loadList(); }} />}
-      {delTarget && (
-        <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
-          confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
-      )}
-      {editTarget && (
-        <ConfirmPopup title="แก้ไขรายการโอนนี้?" message={`เลขโอน ${String(editTarget.transfer_no ?? "—")} · ฿${fmt(num(editTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลกลับ แล้วเปิดหน้าโอนพร้อมข้อมูลเดิมให้แก้ต่อ`}
-          confirmText="แก้ไข (คืนยอด+เริ่มใหม่)" onCancel={() => setEditTarget(null)} onConfirm={() => removeTransfer(editTarget, true)} />
-      )}
+      {overlays}
     </div>
   );
 }
@@ -3078,6 +3367,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
 function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: string[]; onConsumePreselect?: () => void }) {
   const toast = useToast();
   const celebrate = useCelebrate();
+  const desk = useDesk();   // จอคอม = 2 คอลัมน์จบในจอเดียว (ไม่ใช้ step) · มือถือ = 2 ขั้นเหมือนเดิม
   const [step, setStep] = useState(1);   // 1=เลือกบิลจีน · 2=แนบสลิป+เลือกบิล CTW ที่ตัด+บันทึก (จบในขั้นนี้)
   const [ocrBusy, setOcrBusy] = useState(false);   // กำลังอ่านยอดจากสลิป
   const slipInputRef = useRef<HTMLInputElement>(null);
@@ -3564,9 +3854,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     </div>
   ) : null;
 
-  return (
-    <div className="space-y-4 pb-[150px]">
-      {/* มุมขวาบน: เรทวันนี้ + ปุ่มขอเรท */}
+  // ---- ชิ้นส่วนหน้าจอ (ใช้ร่วม มือถือ 2 ขั้น / จอคอม 2 คอลัมน์) ----
+  // มุมขวาบน: เรทวันนี้ + ปุ่มขอเรท
+  const rateRow = (
       <div className="flex justify-end items-center gap-2">
         <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasRate ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
           {hasRate ? `เรทวันนี้ ${fmt(r1)}` : "ยังไม่มีเรทวันนี้"}
@@ -3574,10 +3864,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         {/* ซ่อนปุ่มขอเรท ถ้าวันนี้มีเรทแล้ว */}
         {!hasRate && <RateRequestButton />}
       </div>
+  );
 
-      {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — sticky ตรึงบน · โชว์ step 1 เท่านั้น */}
-      {step === 1 && (
-      <div className="rounded-2xl bg-white/95 backdrop-blur border border-slate-200 p-4 shadow-lg shadow-slate-400/30 sticky top-2 z-30">
+  // ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — มือถือ: sticky ตรึงบน โชว์ step 1 · จอคอม: คอลัมน์ขวา
+  const summaryCard = (
+      <div className={desk ? "rounded-2xl bg-white border border-slate-200 p-4 shadow-sm" : "rounded-2xl bg-white/95 backdrop-blur border border-slate-200 p-4 shadow-lg shadow-slate-400/30 sticky top-2 z-30"}>
         <button type="button" onClick={() => setShowBills(v => !v)} className="w-full text-left">
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500">💸 ยอดที่ต้องโอนรอบนี้</span>
@@ -3590,7 +3881,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               : <span className="text-3xl font-extrabold text-red-600">{previewMinTransfer > 0 ? `฿${fmt(+previewMinTransfer.toFixed(2))}` : (hasRate ? "รอเลือกบิล" : "รอเรท")}</span>}
           </div>
           {balanceCoversAll && <div className="text-right text-[11px] text-emerald-600 font-medium -mt-0.5">ยอดคงเหลือพอจ่าย — ไม่ต้องโอนเงินไทย</div>}
-          {!balanceCoversAll && hasRate && previewMinTransfer > 0 && <div className="text-right text-[11px] text-slate-400 -mt-0.5">ยอดประมาณ — กรอกยอดโอนจริงในขั้นถัดไป</div>}
+          {!balanceCoversAll && hasRate && previewMinTransfer > 0 && <div className="text-right text-[11px] text-slate-400 -mt-0.5">{desk ? "ยอดประมาณ — กรอกยอดโอนจริงด้านล่าง" : "ยอดประมาณ — กรอกยอดโอนจริงในขั้นถัดไป"}</div>}
         </button>
         {showBills && (sel.size > 0 || thbSel.size > 0) && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-sm">
@@ -3626,10 +3917,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </div>
-      )}
+  );
 
-      {/* ยอดคงเหลือในบัญชีจีน — การ์ดเล็ก + toggle (default เปิด) · โชว์ step 1 เท่านั้น */}
-      {step === 1 && (
+  // ยอดคงเหลือในบัญชีจีน — การ์ดเล็ก + toggle (default เปิด) · มือถือโชว์ step 1 เท่านั้น
+  const balanceCard = (
         <div className={`rounded-xl border px-4 py-2.5 ${needBalance ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-emerald-700">💰 ยอดคงเหลือในบัญชีจีน</span>
@@ -3662,13 +3953,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             </div>
           )}
         </div>
-      )}
+  );
 
-      {/* STEP 1: เลือกบิลจีน */}
-      {step === 1 && (<>
-      {accountCard}
-      {/* บิลค่าส่ง / VAT (บาท) — โชว์บนสุด กรอบคนละสี */}
-      {pendingThb.length > 0 && (
+  // บิลค่าส่ง / VAT (บาท) — โชว์บนสุด กรอบคนละสี
+  const thbCard = pendingThb.length > 0 && (
         <Card>
           <div className="flex items-center justify-between mb-2">
             <span className="font-semibold text-slate-800">บิลค่าส่ง / VAT (บาท)</span>
@@ -3696,8 +3984,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             })}
           </div>
         </Card>
-      )}
+  );
 
+  // เลือกบิลจีนที่จะตัด (รอโอน) + ช่องยอดจ่ายรอบนี้ต่อบิล
+  const chinaCard = (
       <Card>
         <div className="flex items-center justify-between mb-2">
           <span className="font-semibold text-slate-800">เลือกบิลที่จะตัด (รอโอน)</span>
@@ -3735,16 +4025,18 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
+  );
+
+  // ปุ่ม "ถัดไป" (มือถือ step 1)
+  const nextBtn = (
         <button onClick={() => setStep(2)} disabled={(sel.size === 0 && thbSel.size === 0) || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {(sel.size === 0 && thbSel.size === 0) ? "เลือกบิลอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : balanceCoversAll ? "ถัดไป: ยืนยัน →" : "ถัดไป: แนบสลิป →"}
         </button>
-      </div>
-      </>)}
+  );
 
-      {/* STEP 2: กรอกจำนวน + สลิป (ยอด/บัญชี/ยอดคงเหลือ อยู่การ์ดบนแล้ว) */}
-      {step === 2 && (<>
+  // STEP 2 (มือถือ) / ล่างคอลัมน์ขวา (จอคอม): กรอกจำนวน + สลิป (ยอด/บัญชี/ยอดคงเหลือ อยู่การ์ดบนแล้ว)
+  const step2Body = (<>
       {/* ติ๊ก "ไม่ต้องโอนเงินไทย" — โผล่เฉพาะตอนยอดคงเหลือบัญชีจีนพอจ่ายบิลจีนครบ (ติ๊กไว้ให้เลย) */}
       {balanceCoversAll && (
         <label className="flex items-start gap-3 rounded-xl bg-emerald-50 border border-emerald-300 px-4 py-3 cursor-pointer">
@@ -3838,10 +4130,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
       </Card>
       )}
-      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
-        <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
+  </>);
+
+  // ปุ่มบันทึก (มือถือ step 2 ข้างปุ่มกลับ · จอคอม ติดล่างคอลัมน์ขวา)
+  const saveBtn = (
         <button onClick={save} disabled={noThbMode ? saving : (saving || (sel.size > 0 && !hasRate) || ((selectedRmb > 0 || thbSelTotal > 0) && num(amount) <= 0) || invalid)}
-          className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
+          className={`${desk ? "w-full" : "flex-1"} h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30`}>
           {saving ? "กำลังบันทึก…"
             : noThbMode ? "บันทึก + ตัดบิลจากยอดคงเหลือ"
             : (sel.size > 0 && !hasRate) ? "ยังไม่มีเรทวันนี้ — ใส่เรทก่อน"
@@ -3849,9 +4143,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             : belowMin ? `ต้องโอน ≥ ฿${fmt(minTransfer)}`
             : "บันทึกการโอน + ตัดบิล"}
         </button>
-      </div>
-      </>)}
+  );
 
+  const popups = (<>
       {/* popup เลือกบิล CTW ที่รายการโอนนี้ตัด (เลือกหลายบิลได้ + แก้ยอดตัดต่อบิล) */}
       {slipLinkIdx !== null && txSlips[slipLinkIdx] && (() => {
         const i = slipLinkIdx; const s = txSlips[i];
@@ -3941,6 +4235,64 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         </div></Portal>
       )}
+  </>);
+
+  // ---- จอคอม: ซ้ายติ๊กบิล · ขวา ยอดที่ต้องโอน + ยอดคงเหลือ + บัญชีปลายทาง + สลิป + ปุ่มบันทึก (จบในจอเดียว) ----
+  if (desk) {
+    const anySel = sel.size > 0 || thbSel.size > 0;
+    return (
+      <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)] gap-5 items-start">
+        <div className="space-y-4 min-w-0">
+          {thbCard}
+          {chinaCard}
+        </div>
+        {/* คอลัมน์ขวาตรึงไว้ — ยาวเกินจอเลื่อนในตัว · ปุ่มบันทึกติดล่างเสมอ */}
+        <div className="sticky top-20 max-h-[calc(100vh-6.5rem)] overflow-y-auto overscroll-contain space-y-3 pr-1">
+          {rateRow}
+          {summaryCard}
+          {balanceCard}
+          {accountCard}
+          {anySel ? (<>
+            {step2Body}
+            <div className="sticky bottom-0 z-10 bg-slate-100 pt-2 pb-1">
+              {anyChinaOver
+                ? <div className="w-full h-12 rounded-xl bg-red-50 border border-red-200 text-red-600 font-semibold flex items-center justify-center">มีบิลที่ใส่ยอดเกิน — แก้ยอดทางซ้ายก่อน</div>
+                : saveBtn}
+            </div>
+          </>) : (
+            <div className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 text-sm text-center py-6 px-4">
+              ← ติ๊กบิลทางซ้าย แล้วแนบสลิป + บันทึกการโอนตรงนี้
+            </div>
+          )}
+        </div>
+        {popups}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 pb-[150px]">
+      {rateRow}
+      {step === 1 && summaryCard}
+      {step === 1 && balanceCard}
+      {/* STEP 1: เลือกบิลจีน */}
+      {step === 1 && (<>
+      {accountCard}
+      {thbCard}
+      {chinaCard}
+      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
+        {nextBtn}
+      </div>
+      </>)}
+      {/* STEP 2: กรอกจำนวน + สลิป */}
+      {step === 2 && (<>
+      {step2Body}
+      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
+        <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
+        {saveBtn}
+      </div>
+      </>)}
+      {popups}
     </div>
   );
 }
