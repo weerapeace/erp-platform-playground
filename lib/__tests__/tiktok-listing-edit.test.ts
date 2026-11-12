@@ -155,6 +155,9 @@ describe("ประวัติในลิ้นชัก (listingHistoryText)"
   test("แก้ชื่อ / รอตรวจ / ไม่สำเร็จ", () => {
     expect(listingHistoryText({ source: "tiktok_listing_edit", ok: true, audit_status: "AUDITING", changes: [{ label: "ชื่อสินค้า" }] })).toBe("แก้บน TikTok: ชื่อสินค้า (TikTok ส่งไปรอตรวจ)");
     expect(listingHistoryText({ source: "tiktok_listing_edit", ok: false, error: "x", changes: [{ label: "ชื่อสินค้า" }] })).toBe("แก้บน TikTok: ชื่อสินค้า — ไม่สำเร็จ: x");
+    // รายการจริงแรก: audit_status ผิดเป็น APPROVED แต่สรุปว่ารอตรวจ → ยังต้องขึ้นว่ารอตรวจ
+    expect(listingHistoryText({ source: "tiktok_listing_edit", ok: true, audit_status: "APPROVED", summary: "ส่งชื่อใหม่แล้ว — รอ TikTok ตรวจ (ระหว่างนี้ร้านยังใช้ชื่อเดิม)", changes: [{ label: "ชื่อสินค้า" }] })).toBe("แก้บน TikTok: ชื่อสินค้า (TikTok ส่งไปรอตรวจ)");
+    expect(listingHistoryText({ source: "tiktok_listing_edit", ok: true, audit_status: "APPROVED", summary: "แก้ชื่อแล้ว — ขึ้นร้านแล้ว", changes: [{ label: "ชื่อสินค้า" }] })).toBe("แก้บน TikTok: ชื่อสินค้า");
   });
   test("เปิด/ปิดขาย", () => {
     expect(listingHistoryText({ source: "tiktok_listing_display", open: false, ok: true, summary: "ปิดขายทั้งสินค้า" })).toBe("ปิดขายบน TikTok");

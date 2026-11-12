@@ -69,7 +69,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let freshDetail: Record<string, unknown> | null = null;
   try { freshDetail = await ttsGetProductRetry(live.accessToken, live.cipher, live.productId); } catch { /* ดึงกลับไม่ได้ = เตือนด้านล่าง */ }
   const freshView = freshDetail ? await ttsViewWithReview(live.accessToken, live.cipher, freshDetail) : null;
-  const auditStatus = String((resp.audit as { status?: unknown } | undefined)?.status ?? freshView?.auditStatus ?? "");
+  // สถานะตรวจ: เชื่อของที่ดึงกลับก่อน — คำตอบของ Partial Edit บอก APPROVED (ของฉบับที่ขายอยู่) ทั้งที่ชื่อใหม่รอตรวจ (เจอจริง 2026-11-12)
+  const respAudit = String((resp.audit as { status?: unknown } | undefined)?.status ?? "");
+  const auditStatus = freshView?.auditStatus ?? respAudit;
   let summary = "แก้ชื่อแล้ว";
   if (!freshView) warnings.push("TikTok ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก TikTok” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
   else if (freshView.title === plan.title) summary = "แก้ชื่อแล้ว — ขึ้นร้านแล้ว";
@@ -79,6 +81,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const err = await saveTtsSlimCopy(admin, live.row, freshDetail);
     if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`);
   }
-  await audit({ ok: true, audit_status: auditStatus || null, summary, warnings, refreshed: !!freshView });
+  await audit({ ok: true, audit_status: auditStatus || null, edit_resp_audit: respAudit || null, pending: !!freshView?.pendingTitle, summary, warnings, refreshed: !!freshView });
   return reply({ ok: true, view: freshView ?? tiktokListingView(live.detail, { id: live.productId, title: plan.title }), summary, warnings, error: null });
 }

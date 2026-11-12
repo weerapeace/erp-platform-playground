@@ -272,7 +272,9 @@ export function listingHistoryText(meta: unknown): string {
   // TikTok Shop (app/api/tiktok-shop/listing-edit · listing-display)
   if (src === "tiktok_listing_edit") {
     const parts = [...new Set(arr(m.changes).map(obj).filter((c): c is Obj => !!c).map((c) => str(c.label)))];
-    return `แก้บน TikTok: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.audit_status) === "AUDITING" ? " (TikTok ส่งไปรอตรวจ)" : ""}`;
+    // รอตรวจ = สถานะ AUDITING หรือสรุปว่ารอตรวจ (รายการแรก 2026-11-12 จด audit_status ผิดเป็น APPROVED แต่สรุปถูก)
+    const pending = str(m.audit_status) === "AUDITING" || m.pending === true || str(m.summary).includes("รอ");
+    return `แก้บน TikTok: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : pending ? " (TikTok ส่งไปรอตรวจ)" : ""}`;
   }
   if (src === "tiktok_listing_display") return `${m.open ? "เปิดขาย" : "ปิดขาย"}บน TikTok${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.summary).includes("รอ") ? " (รอ TikTok ตรวจ)" : ""}`;
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
