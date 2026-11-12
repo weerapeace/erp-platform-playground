@@ -33,7 +33,9 @@ const fmt = (n: number) => (Math.round((n || 0) * 100) / 100).toLocaleString("th
 export default function CostCalculatorPage() {
   const canView = usePermission("products.view");
   const canEdit = usePermission("products.edit");
-  const { user } = useAuth();
+  const { user, permsReady } = useAuth();
+  // เครื่องคิดต้นทุน = สิทธิ์ "ดูต้นทุน" (ตั้งที่ปุ่ม ใครเห็น ในแท็บราคา Parent SKU) · API ก็กันแล้ว · เจ้าของสั่ง 2026-11-12
+  const canSeeCost = usePermission("products.cost.view");
   const toast = useToast();
 
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
@@ -238,6 +240,7 @@ export default function CostCalculatorPage() {
   );
 
   if (!canView) return <AccessDenied />;
+  if (permsReady && !canSeeCost) return <AccessDenied message="คุณไม่มีสิทธิ์ดูต้นทุน — ให้แอดมินเปิดที่ปุ่ม “ใครเห็น” (แท็บราคาของสินค้า) หรือหน้าสิทธิ์" />;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">

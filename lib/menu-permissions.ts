@@ -35,6 +35,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/work-logs", sameAs: "/master/piecework-dispatch" },
   // ออฟฟิศทีม AI — ดูสถานะผู้ช่วยอัตโนมัติ (lib/ai-office.ts AI_OFFICE_PERM · ตอนนี้ = แอดมิน)
   { href: "/master/ai-office", keys: ["ai_office.view", "ai_office.edit"] },
+  { href: "/master/cost-calculator", keys: ["products.view", "products.edit", "products.cost.view"] },   // เครื่องคิดต้นทุน — ต้องมี "ดูต้นทุน" (2026-11-12)
   // ตั๋วงานช่าง Pattern — ดู / เปิดตั๋ว (ฝ่ายออกแบบ) / รับทำ (ช่าง) / จัดการทั้งหมด
   { href: "/design/pattern-tickets", prefixes: ["pattern."] },
   // สตูดิโอแพทเทิร์น (แอปหลัก) — ดู / สร้าง-แก้ / ลบแพทเทิร์น

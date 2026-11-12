@@ -12,7 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM, costRestricted } from "@/lib/cost-access";
 import { writeAudit } from "@/lib/audit";
 import type { MoCostMaterial } from "@/app/api/mo/[id]/cost/route";
 import { bomMaterialCost } from "@/lib/cost-inputs";
@@ -43,6 +44,8 @@ export type RecentCosting = {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  // เครื่องคิดต้นทุน = สิทธิ์ "ดูต้นทุน" (lib/cost-access) — ไม่มีสิทธิ์ได้ข้อมูลว่าง + restricted · เจ้าของสั่ง 2026-11-12
+  if (!(await apiCan(request, COST_PERM))) return costRestricted({ inputs: null, saved: null });
   const sp = new URL(request.url).searchParams;
 
   // ?recent=1 → รายการที่คิด/แก้ล่าสุด (ไว้กดกลับเข้าไปดูต่อ)
@@ -163,6 +166,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const costDenied = await guardApi(request, COST_PERM); if (costDenied) return costDenied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const body = await request.json().catch(() => ({}));
   const targetType = body.target_type === "sku" ? "sku" : "parent";
@@ -191,6 +195,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const costDenied = await guardApi(request, COST_PERM); if (costDenied) return costDenied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const sp = new URL(request.url).searchParams;
   const targetType = sp.get("target_type") === "sku" ? "sku" : "parent";

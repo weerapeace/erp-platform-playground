@@ -8,7 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { COST_PERM, costRestricted } from "@/lib/cost-access";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 
@@ -74,6 +75,8 @@ export type MoCost = {
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  // ต้นทุน = สิทธิ์ "ดูต้นทุน" (lib/cost-access) — ไม่มีสิทธิ์ได้ข้อมูลว่าง + restricted (หน้าจอซ่อนแท็บ/กล่องต้นทุน) · เจ้าของสั่ง 2026-11-12
+  if (!(await apiCan(request, COST_PERM))) return costRestricted({ data: null });
   const { id } = await params;
   const admin = supabaseAdmin();
 
@@ -141,6 +144,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 // บันทึกค่าทดลองคำนวณต้นทุน (cost_scenario) ต่อใบ — เรื่องเงิน ต้องตามรอยได้
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const costDenied = await guardApi(request, COST_PERM); if (costDenied) return costDenied;   // แก้ทดลองคิดต้นทุน = ต้องเห็นต้นทุน
   const { id } = await params;
   let body: { scenario?: CostScenario | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }

@@ -348,7 +348,7 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
               <span className="text-[11px] text-slate-400">ต่อชิ้น · สูตรเดียวกับเครื่องคิดต้นทุน</span>
               {/* 👁 ใครเห็นต้นทุน/กำไร (สิทธิ์ products.cost.view — ตำแหน่ง + รายคน) · เฉพาะคนจัดการตำแหน่งได้ */}
               <PermissionAudienceButton permissionKey="products.cost.view" label="ดูต้นทุน / กำไร"
-                note="ติ๊กแล้วบันทึกทันที · เป็นสิทธิ์ “ดูต้นทุน” ตัวเดียวกับ ตีราคาใบออกแบบ · ราคาซื้อจากร้าน · ใบสำคัญจ่าย · ประวัติซื้อขาย SKU — เปลี่ยนที่นี่ = เปลี่ยนทุกที่" />
+                note="ติ๊กแล้วบันทึกทันที · เป็นสิทธิ์ “ดูต้นทุน” ตัวเดียวกับ เครื่องคิดต้นทุน · แท็บต้นทุนใบสั่งผลิต · ตีราคาใบออกแบบ · ราคาซื้อจากร้าน · ใบสำคัญจ่าย · ประวัติซื้อขาย — เปลี่ยนที่นี่ = เปลี่ยนทุกที่" />
               <span className="ml-auto flex flex-wrap gap-1">
                 {COST_COLUMNS.map((c) => {
                   const on = !hidden.has(c.key);

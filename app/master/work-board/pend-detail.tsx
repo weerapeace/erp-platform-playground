@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
+import { usePermission } from "@/components/auth";
 import { formatDate, formatDateTime, todayBangkok, addDaysYmd } from "@/lib/date";
 import { HoverImage } from "@/components/hover-image";
 import { MoShortMaterials } from "@/components/mo-material-progress";
@@ -292,7 +293,7 @@ function CostBox({ moId, qty, canSeeMoney }: { moId: string; qty: number; canSee
   useEffect(() => {
     let cancel = false;
     apiFetch(`/api/mo/${encodeURIComponent(moId)}/cost`).then((r) => r.json())
-      .then((j) => { if (!cancel) setC((j?.data ?? null) as MoCost | null); }).catch(() => { if (!cancel) setC(null); });
+      .then((j) => { if (!cancel) setC((j?.restricted ? null : (j?.data ?? null)) as MoCost | null); }).catch(() => { if (!cancel) setC(null); });
     return () => { cancel = true; };
   }, [moId]);
   if (c === undefined) return <Box title="💰 ต้นทุน / ชิ้น"><p className="text-[11px] text-slate-400">กำลังโหลด…</p></Box>;
@@ -537,6 +538,7 @@ export function PendDetail(p: {
   onDelPlan: (id: string) => Promise<void>;
 }) {
   const { m, pane, touch, canEdit, prog } = p;
+  const canSeeCost = usePermission("products.cost.view");   // กล่องต้นทุน = สิทธิ์ "ดูต้นทุน" · เจ้าของสั่ง 2026-11-12
   const [prefsOpen, setPrefsOpen] = useState(false);
   const myWos = p.wos.filter((w) => w.is_active !== false);
   const btnOn = (k: string) => !p.prefs.hideBtns.includes(k);
@@ -573,7 +575,7 @@ export function PendDetail(p: {
             </div>
             {secs.length > 0 && (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {secOn("cost") && <CostBox moId={m.id} qty={m.qty} canSeeMoney={p.canSeeMoney} />}
+                {secOn("cost") && canSeeCost && <CostBox moId={m.id} qty={m.qty} canSeeMoney={p.canSeeMoney} />}
                 {secOn("issue") && <IssuesBox moNo={m.mo_no} canEdit={canEdit} />}
                 {secOn("steps") && <StepsBox moId={m.id} sku={m.product_sku} productName={m.product_name} canEdit={canEdit} onChanged={p.onChanged} />}
               </div>

@@ -294,6 +294,7 @@ export default function WorkBoardPage() {
 function WorkBoardPageInner() {
   const canView = usePermission("products.view");
   const canEdit = usePermission("products.edit");
+  const canSeeCost = usePermission("products.cost.view");   // แท็บต้นทุน = สิทธิ์ "ดูต้นทุน" (ตั้งที่ปุ่ม ใครเห็น ในแท็บราคา) · เจ้าของสั่ง 2026-11-12
   // สิทธิ์ "จ่ายงานเข้าแผนก" แยกต่างหาก — ตั้งค่ารายตำแหน่งได้ที่ /admin/roles-permissions
   const canDispatch = usePermission("work_board.dispatch");
   // 🔄 โหมดอัปเดตงาน: ใช้ได้ = คนจ่ายงาน หรือมีสิทธิ์ catch_up · บันทึกเลย / ต้องรอหัวหน้ายืนยัน / ยืนยันคำขอของคนอื่น (ตั้งตามตำแหน่ง + รายคน)
@@ -1130,9 +1131,9 @@ function WorkBoardPageInner() {
     const moNo = checklistMO.mo_no; let cancel = false;
     if (clTab === "purch" && clPurch === null) void (async () => { try { const r = await apiFetch(`/api/mo/purchase-status?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClPurch((j?.data ?? []) as PurchaseStatusRow[]); } catch { if (!cancel) setClPurch([]); } })();
     if (clTab === "hist" && clHist === null) void (async () => { try { const r = await apiFetch(`/api/mo/dispatch-history?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClHist((j?.data ?? []) as DispatchHistRow[]); } catch { if (!cancel) setClHist([]); } })();
-    if (clTab === "cost" && clCost === null && checklistMO) void (async () => { try { const r = await apiFetch(`/api/mo/${encodeURIComponent(checklistMO.id)}/cost`); const j = await r.json(); if (!cancel) setClCost((j?.data ?? null) as MoCost | null); } catch { /* ignore */ } })();
+    if (clTab === "cost" && canSeeCost && clCost === null && checklistMO) void (async () => { try { const r = await apiFetch(`/api/mo/${encodeURIComponent(checklistMO.id)}/cost`); const j = await r.json(); if (!cancel) setClCost((j?.data ?? null) as MoCost | null); } catch { /* ignore */ } })();
     return () => { cancel = true; };
-  }, [clTab, checklistMO, clPurch, clHist, clCost]);
+  }, [clTab, checklistMO, clPurch, clHist, clCost, canSeeCost]);
 
   // ติ๊กเตรียม/ตัด รายวัตถุดิบในป๊อปอัป (optimistic + audit)
   const toggleMat = useCallback(async (rowId: string, field: "is_ready" | "cut_done") => {
@@ -2424,7 +2425,7 @@ function WorkBoardPageInner() {
                       {tabBtn("prep", `📋 วัตถุดิบ · เตรียม ${prepDone}/${prepTotal} · ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
                       {tabBtn("disp", `🧰 จ่ายงาน ${board.workOrders.filter((w) => w.mo_no === checklistMO.mo_no && w.status !== "cancelled").length}`)}
-                      {tabBtn("cost", "💰 ต้นทุน")}
+                      {canSeeCost && tabBtn("cost", "💰 ต้นทุน")}
                       {tabBtn("purch", "📦 ของซื้อ")}
                       {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
                       {tabBtn("hist", "🕑 ประวัติ")}
@@ -2782,7 +2783,7 @@ function WorkBoardPageInner() {
                         );
                       })()
                     ) : clTab === "cost" ? (
-                      <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} bomCode={checklistMO.bom_code ?? null} departments={board.departments} deptWages={deptWages} craftsmen={craftsmen} canEdit={canEdit} onReloadCost={() => setClCost(null)} />
+                      !canSeeCost ? <p className="py-6 text-center text-sm text-slate-500">🔒 คุณไม่มีสิทธิ์ดูต้นทุน — ให้แอดมินเปิดที่ปุ่ม “ใครเห็น” (แท็บราคาของสินค้า)</p> : <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} bomCode={checklistMO.bom_code ?? null} departments={board.departments} deptWages={deptWages} craftsmen={craftsmen} canEdit={canEdit} onReloadCost={() => setClCost(null)} />
                     ) : clTab === "purch" ? (
                       <PurchTab rows={clPurch} />
                     ) : clTab === "issue" ? (
