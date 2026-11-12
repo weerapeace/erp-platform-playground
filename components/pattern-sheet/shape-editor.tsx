@@ -30,12 +30,13 @@ import {
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, edgeMetaSet, extendSide, finishPts, finishRange, withFinishRange, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
-import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
+import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, matFoldComp, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
 import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
 import { formatLength, parseLength, unitLabel, type LengthUnit } from "@/lib/length-units";
 import { edgePlan, migrateSeams, remapEdgeMeta, remapEdgeValues, type EdgePlan } from "@/lib/pattern-edge-map";
 import { toolOfBoard, toolTitle } from "@/lib/pattern-tools";
+import { boxCorner, dartOnEdge, edgeBandLine, gussetFromEdges, gussetRun, pleatPiece, pleatTake, slashSpread, withTakes, type ShapingResult } from "@/lib/pattern-shaping";
 import { NOTCH_STYLES, bendEdge, chamferCorner, cornerAngle, edgeRadius, filletCorner, joinEdgeWithNext, moveEdge, notchStyleSegs, objectSnap, polygonInBox, splitEdgeAt, splitEdgeEven } from "@/lib/pattern-edit";
 export type { RefImage };
 
@@ -48,7 +49,7 @@ export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs
 type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null; link?: PieceLink | null };
 export type Tool = "rect" | "ellipse" | "polygon" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner";
 /** สีของเส้นในชิ้นตามชนิด (กระดาน) */
-const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 }, hw: { col: "#a16207", w: 2 }, dim: { col: "#0f766e", w: 1.5 } };
+const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 }, hw: { col: "#a16207", w: 2 }, dim: { col: "#0f766e", w: 1.5 }, glue: { col: "#ea580c", dash: "8 3", w: 2 }, skive: { col: "#92400e", dash: "1 3", w: 2.5 } };
 export const SEAM_COLORS = ["#c2410c", "#2563eb", "#059669", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#4b5563"];
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
@@ -286,6 +287,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [sagD, setSagD] = useState(1);            // ดัดโค้ง: ระยะโก่ง (ซม.)
   const [cornerR, setCornerR] = useState(1);      // มุมโค้งเฉพาะจุด (ซม.)
   const [chamD, setChamD] = useState(1);          // ตัดมุมเฉพาะจุด (ซม.)
+  // ── Bag CAD รอบ F: เครื่องมือทรงกระเป๋า ──
+  const [dart, setDart] = useState({ at: 0, w: 2, d: 6, open: false });            // เกล็ดบนขอบ (at 0 = กึ่งกลางขอบ)
+  const [bandW, setBandW] = useState(1);                                           // แนวทากาว / ปาดบาง กว้าง (ซม.)
+  const [gus, setGus] = useState<{ count: number; depth: number; pair: string }>({ count: 0, depth: 8, pair: "" });   // ชิ้นข้างจากขอบ (count 0 = หาให้เอง)
+  const [boxC, setBoxC] = useState(4);                                             // มุมกล่อง (ซม.)
+  const [pleat, setPleat] = useState<{ axis: "v" | "h"; n: number; d: number; kind: "knife" | "box" }>({ axis: "v", n: 2, d: 2, kind: "knife" });
+  const [spread, setSpread] = useState<{ axis: "v" | "h"; at: number; amt: number; mode: "parallel" | "pivot"; hinge: "min" | "max" }>({ axis: "v", at: 50, amt: 3, mode: "parallel", hinge: "max" });
   const [tool, setTool] = useState<Tool>(initialTool ?? "rect");
   // ── เย็บ (ตะเข็บอยู่กับหน้าที่เรียก · กระดานแค่วาดและส่งการแก้กลับ) ──
   const [sewA, setSewA] = useState<SeamSide | null>(null);        // ด้านแรกที่เลือกไว้ รอคลิกขอบคู่
@@ -1238,6 +1246,24 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
   // ── ไม้บรรทัด ──
   const fmtLen = (n: number) => fmtL(n);
+  /**
+   * ใช้ผลเครื่องมือทรง (รอบ F) กับชิ้น: รูปใหม่ + take รายขอบ + เส้นใน/รอยบาก + ตะเข็บในชิ้น (ขาเกล็ดเปิด / มุมกล่อง) — ย้อนได้ทีเดียว
+   *   ค่ารายขอบเดิม/ตะเข็บเดิมตามขอบใหม่ (followEdges) · รูปที่จุดเดิมย้ายที่ (ผ่าแล้วกาง/จีบ) ตะเข็บที่อ้างจุดนั้นต้องเย็บใหม่
+   */
+  const applyShaping = (pc: Piece, r: ShapingResult | null, fail: string, ok: string, seamName?: string): boolean => {
+    if (readonly) return false;
+    if (pc.link) { setMsg({ tone: "err", text: t("ชิ้นนี้ผูกรูปกับชิ้นต้นแบบ — แก้ที่ชิ้นต้นแบบ", "This piece follows its source — edit the source piece") }); return false; }
+    if (!r) { setMsg({ tone: "err", text: fail }); return false; }
+    const plan = edgePlan(pc.shape, r.shape), n = pieceEdges(r.shape).length;
+    const meta = withTakes(plan ? remapEdgeMeta(pc.edgeMeta, plan).meta : null, n, r.take);
+    const before = seamsRef.current ?? [];
+    commit(piecesRef.current.map((p) => (p.id === pc.id ? { ...p, shape: r.shape, edgeMeta: meta, inner: r.inner?.length ? [...(p.inner ?? []), ...r.inner] : p.inner, notches: r.notches?.length ? [...(p.notches ?? []), ...r.notches] : p.notches } : p)));
+    const stamp = Date.now().toString(36);
+    if (r.legs?.length && onSeamsChange) emitSeams([...(seamsRef.current ?? []), ...r.legs.map(([a, b], k): Seam => ({ id: `s${stamp}${k}`, a: { pid: pc.pid, from: a, count: 1, n }, b: { pid: pc.pid, from: b, count: 1, n }, rev: true, self: true, ...(seamName ? { name: seamName } : {}) }))]);
+    const lostSeams = !plan && before.some((x) => x.a.pid === pc.pid || x.b.pid === pc.pid);
+    setMsg({ tone: lostSeams ? "err" : "ok", text: lostSeams ? `${ok} · ${t("ตะเข็บเดิมของชิ้นนี้ต้องเย็บใหม่ (จุดยอดย้ายที่)", "this piece's old seams need redoing (corners moved)")}` : ok });
+    return true;
+  };
   /** ปักการวัดเส้นตรงเป็นเส้นบอกขนาดถาวรบนชิ้นที่กลางเส้นอยู่ (รอบ E) — ไปกับชิ้น บันทึก ออกใบพิมพ์/DXF ชั้น DIM */
   const pinMeasure = (m: Measure) => {
     if (m.kind !== "line" || m.nodes.length < 2) return;
@@ -1301,7 +1327,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const editPiece = editId ? pieces.find((p) => p.id === editId) ?? null : null;
   // ── เครื่องมือเย็บ (แบบ CLO: เย็บบนกระดานเดิม · คู่เดียวกันสีเดียวกัน · ขีดบอกจุดเริ่ม) ──
   const seamList = seams ?? [];
-  const byPidShape = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }])), [pieces]);
+  const byPidShape = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner, meta: p.edgeMeta ?? null }])), [pieces]);
   const seamChecks = useMemo(() => seamList.map((x) => checkSeam(byPidShape, x, seamTol)), [seamList, byPidShape, seamTol]);   // eslint-disable-line react-hooks/exhaustive-deps
   const seamBad = seamChecks.some((c, i) => c.status === "broken" || (c.status === "mismatch" && !seamList[i]?.ease));
   const canSew = !readonly && !!onSeamsChange;
@@ -1657,7 +1683,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             <div className="flex items-center gap-1.5 font-semibold text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: SEAM_COLORS[selSeamIdx % SEAM_COLORS.length] }} />{t(`ตะเข็บ ${seamLabel(selSeamIdx)}`, `Seam ${seamLabel(selSeamIdx)}`)}</div>
             <div className="text-slate-600">{sideTxt(x.a)} <span className="text-slate-400">{t("กับ", "to")}</span> {sideTxt(x.b)}</div>
             <div className={`tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" && !x.ease ? "text-red-600" : "text-amber-700"}`}>
-              {c.status === "broken" ? t("ชิ้นถูกแก้จนขอบเปลี่ยน ต้องเย็บใหม่", "The piece changed — sew this again") : `${fmtN(c.la ?? 0)} ${t("กับ", "and")} ${fmtL(c.lb ?? 0)} · ${c.status === "ok" ? t("ยาวเท่ากัน", "same length") : x.ease ? t(`ตั้งใจให้ย่น ${fmtL(c.diff)}`, `eased by ${fmtL(c.diff)} on purpose`) : t(`ต่างกัน ${fmtL(c.diff)}`, `differ by ${fmtL(c.diff)}`)}`}
+              {c.status === "broken" ? t("ชิ้นถูกแก้จนขอบเปลี่ยน ต้องเย็บใหม่", "The piece changed — sew this again") : `${fmtN(c.la ?? 0)} ${t("กับ", "and")} ${fmtL(c.lb ?? 0)} · ${x.ease && x.ratio ? t(`รูด ${c.ratio ?? 0} เท่า (ตั้งไว้ ${x.ratio})${c.status === "ok" ? " ✓" : ""}`, `gathered ${c.ratio ?? 0}× (set ${x.ratio}×)${c.status === "ok" ? " ✓" : ""}`) : c.status === "ok" ? t("ยาวเท่ากัน", "same length") : x.ease ? t(`ตั้งใจให้ย่น ${fmtL(c.diff)}`, `eased by ${fmtL(c.diff)} on purpose`) : t(`ต่างกัน ${fmtL(c.diff)}`, `differ by ${fmtL(c.diff)}`)}`}
             </div>
             {(["a", "b"] as const).map((which, k) => {
               const g = seamEdge(x.id, which);
@@ -1683,6 +1709,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   {seamEdge(x.id, "a") && <button type="button" onClick={() => fitSeam(x.id, "a")} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ให้ด้านที่ 1 ยาวเท่าด้านที่ 2", "Make side 1 match side 2")}</button>}
                 </div>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={!!x.ease} onChange={(e) => patchSeam(x.id, (q) => { const { ease: _e, ...rest } = q; void _e; return e.target.checked ? { ...rest, ease: true } : rest; })} className="h-3.5 w-3.5 accent-amber-600" />{t("ตั้งใจให้ต่างกัน (รูด / ย่น)", "Different on purpose (gather / ease)")}</label>
+                {x.ease && <div className="flex flex-wrap items-center gap-1.5 pl-5" data-gather>
+                  <span className="text-slate-500">{t("อัตรารูด (เท่า)", "Gather ratio (×)")}</span>
+                  <NumField value={x.ratio ?? 0} min={0} max={4} label={t("อัตรารูด", "Gather ratio")} onCommit={(v) => patchSeam(x.id, (q) => { const { ratio: _r, ...rest } = q; void _r; return v >= 1.05 ? { ...rest, ratio: Math.round(v * 100) / 100 } : rest; })} className="w-14" />
+                  <span className={`tabular-nums ${x.ratio && c.status === "mismatch" ? "text-red-600" : "text-slate-500"}`}>{c.la && c.lb ? t(`ได้จริง ${(Math.max(c.la, c.lb) / Math.max(0.01, Math.min(c.la, c.lb))).toFixed(2)} เท่า`, `actual ${(Math.max(c.la, c.lb) / Math.max(0.01, Math.min(c.la, c.lb))).toFixed(2)}×`) : ""}</span>
+                  <span className="w-full text-[11px] text-slate-400">{t("0 = ไม่กำหนด · เช่น 1.5 = ด้านยาวยาวกว่า 1.5 เท่า — ตรวจแบบเตือนถ้าคลาดเกิน 2%", "0 = not set · e.g. 1.5 = the long side is 1.5× — the check warns beyond 2%")}</span>
+                </div>}
               </div>
             )}
             <label className="block space-y-1"><span className="text-slate-500">{t("ชื่อตะเข็บ", "Seam name")}</span>
@@ -1790,6 +1822,71 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 </div>
               );
             })()}
+            {edgeMetaNow.take ? <div className="flex items-center gap-1.5 text-[11px] text-amber-700" data-edge-take>{t(`เนื้อที่หายตอนเย็บ (เกล็ด/จีบ/มุมกล่อง) ${fmtL(edgeMetaNow.take)} — ไม่นับในความยาวตะเข็บ`, `Taken up when sewn (dart/pleat/box corner) ${fmtL(edgeMetaNow.take)} — not counted in seam length`)}
+              {ed && <button type="button" onClick={() => setEdgeMeta((m) => { const { take: _t, ...rest } = m; void _t; return rest; })} className="ml-auto text-slate-400 hover:text-rose-600">{t("ล้าง", "Clear")}</button>}</div> : null}
+            {ed && level >= 2 && (() => {   // ทรงกระเป๋าบนขอบนี้ (รอบ F): เกล็ด · แนวทากาว/ปาดบาง · ชิ้นข้างจากขอบ
+              const at = dart.at > 0 ? Math.min(dart.at, selEdge.len) : selEdge.len / 2;
+              const run = gus.count > 0 ? Math.min(gus.count, edgeList.length) : gussetRun(edgePiece.shape, selEdge.i, edgePiece.foldEdges, edgePiece.edgeMeta);
+              const plan = gussetFromEdges(edgePiece.shape, selEdge.i, run, gus.depth, edgePiece.edgeMeta);
+              const pairs = pieces.filter((q) => q.pid !== edgePiece.pid && pieceEdges(q.shape).length === edgeList.length && !blocked(q.pid));
+              const makeGusset = () => {
+                if (!plan) { setMsg({ tone: "err", text: t("สร้างชิ้นข้างไม่ได้ (ขอบสั้นเกิน หรือกว้างไม่ถูก)", "Can't make a gusset (edges too short or width out of range)") }); return; }
+                const side = { pid: edgePiece.pid, ...plan.side };
+                const busy = (seamsRef.current ?? []).some((x) => !x.self && [x.a, x.b].some((sd) => sd.pid === edgePiece.pid && Array.from({ length: run }, (_, k) => (selEdge.i + k) % edgeList.length).some((i) => sideHasEdge(sd, i))));
+                const b = shapeBox(edgePiece.shape), x0 = rightEdge() + (edgePiece.allow || 0);
+                const pc: Piece = { ...newPiece({ k: "rect", x: x0, y: b.y, w: plan.length, h: gus.depth }), name: t("ชิ้นข้าง", "Gusset"), allow: edgePiece.allow, mats: edgePiece.mats.length ? [...edgePiece.mats] : [...defaultMats],
+                  notches: plan.notches.map(([x, y]) => [x + x0, y + b.y] as Pt), grain: [[plan.grain[0][0] + x0, plan.grain[0][1] + b.y], [plan.grain[1][0] + x0, plan.grain[1][1] + b.y]] };
+                if (!addPieces([pc])) return;
+                if (!busy && onSeamsChange) {
+                  const st = Date.now().toString(36), more: Seam[] = [{ id: `s${st}a`, a: side, b: { pid: pc.pid, from: 2, count: 1, n: 4 }, name: t("ชิ้นข้าง", "Gusset") }];
+                  const two = pairs.find((q) => q.pid === gus.pair);
+                  if (two) more.push({ id: `s${st}b`, a: { pid: two.pid, ...plan.side }, b: { pid: pc.pid, from: 0, count: 1, n: 4 }, name: t("ชิ้นข้าง", "Gusset") });
+                  emitSeams([...(seamsRef.current ?? []), ...more]);
+                }
+                setMsg({ tone: busy ? "err" : "ok", text: busy ? t(`สร้างชิ้นข้างยาว ${fmtL(plan.length)} แล้ว — ขอบเหล่านี้เย็บอยู่แล้ว เลยไม่ได้ต่อตะเข็บให้`, `Gusset ${fmtL(plan.length)} made — these edges are already sewn, so no seam was added`) : t(`สร้างชิ้นข้างยาว ${fmtL(plan.length)} กว้าง ${fmtL(gus.depth)} พร้อมตะเข็บแล้ว`, `Gusset ${fmtL(plan.length)} × ${fmtL(gus.depth)} made with seams`) });
+              };
+              const band = (kind: "glue" | "skive") => {
+                const pts = edgeBandLine(edgePiece.shape, selEdge.i, bandW);
+                if (!pts) { setMsg({ tone: "err", text: t("วางแนวบนขอบนี้ไม่ได้", "Can't place a line on this edge") }); return; }
+                patchPiece(edgePiece.id, (p) => ({ ...p, inner: [...(p.inner ?? []), { id: `${kind[0]}${Date.now().toString(36)}`, kind, name: kind === "glue" ? t("ทากาว", "Glue") : t("ปาดบาง", "Skive"), pts }] }));
+                setMsg({ tone: "ok", text: kind === "glue" ? t(`วางแนวทากาวกว้าง ${fmtL(bandW)} แล้ว (ใบพิมพ์ / DXF ชั้น GLUE)`, `Glue line ${fmtL(bandW)} added (print / DXF layer GLUE)`) : t(`วางแนวปาดบางกว้าง ${fmtL(bandW)} แล้ว (ใบพิมพ์ / DXF ชั้น SKIVE)`, `Skive line ${fmtL(bandW)} added (print / DXF layer SKIVE)`) });
+              };
+              return (
+                <div className="space-y-1.5 border-t border-slate-100 pt-2" data-guide="bag-edge" data-bag-edge>
+                  <div className="text-slate-500">{t("ทรงกระเป๋าบนขอบนี้", "Bag shaping on this edge")}</div>
+                  <div className="flex flex-wrap items-center gap-1.5" data-dart>
+                    <span className="w-full text-slate-600">{t("เกล็ด: กลางห่างต้นขอบ · ปากกว้าง · ลึก", "Dart: centre from edge start · width · depth")}</span>
+                    <NumField len value={Math.round(at * 100) / 100} min={0.2} max={500} label={t("กลางเกล็ด", "Dart centre")} onCommit={(v) => setDart((x) => ({ ...x, at: v }))} className="w-16" />
+                    <NumField len value={dart.w} min={0.2} max={50} label={t("ปากกว้าง", "Width")} onCommit={(v) => setDart((x) => ({ ...x, w: v }))} className="w-14" />
+                    <NumField len value={dart.d} min={0.2} max={100} label={t("ลึก", "Depth")} onCommit={(v) => setDart((x) => ({ ...x, d: v }))} className="w-14" />
+                    <label className="flex items-center gap-1" title={t("ติ๊ก = ตัดเนื้อเกล็ดออกเป็นตัว V (หนัง/PU) · ไม่ติ๊ก = ขีดเส้นเกล็ดไว้ พับเย็บ (ผ้า)", "Ticked = cut the V out (leather/PU) · unticked = mark the dart, fold and sew (fabric)")}><input type="checkbox" checked={dart.open} onChange={(e) => setDart((x) => ({ ...x, open: e.target.checked }))} className="h-3.5 w-3.5 accent-blue-600" />{t("ตัดเปิด", "Cut open")}</label>
+                    <button type="button" data-dart-add onClick={() => applyShaping(edgePiece, dartOnEdge(edgePiece.shape, selEdge.i, { at, width: dart.w, depth: dart.d, open: dart.open }, `dt${Date.now().toString(36)}`), t("ทำเกล็ดไม่ได้ (ปากกว้างเกินขอบ / ลึกน้อยไป / วงรี)", "Can't make the dart (wider than the edge / too shallow / ellipse)"), dart.open ? t("ตัดเกล็ดเปิดแล้ว — ขาเกล็ดเย็บเข้าหากัน (ตะเข็บในชิ้น)", "Open dart cut — its legs are sewn together (in-piece seam)") : t("ขีดเกล็ดแล้ว — ปากเกล็ดไม่นับในความยาวตะเข็บ", "Dart marked — its opening isn't counted in seam length"), t("เกล็ด", "Dart"))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำเกล็ด", "Add dart")}</button>
+                  </div>
+                  {innerLines && <div className="flex flex-wrap items-center gap-1.5" data-band>
+                    <span className="text-slate-600">{t("แนวกว้าง", "Band width")}</span>
+                    <NumField len value={bandW} min={0.1} max={20} label={t("กว้าง", "Width")} onCommit={setBandW} className="w-14" />
+                    <button type="button" data-band-glue onClick={() => band("glue")} className="h-7 rounded-md border border-orange-200 bg-white px-2 text-orange-700 hover:bg-orange-50">{t("ทากาว", "Glue")}</button>
+                    <button type="button" data-band-skive onClick={() => band("skive")} className="h-7 rounded-md border border-amber-200 bg-white px-2 text-amber-800 hover:bg-amber-50">{t("ปาดบาง", "Skive")}</button>
+                  </div>}
+                  {seams && <div className="space-y-1 rounded-md bg-slate-50 p-1.5" data-gusset>
+                    <div className="text-slate-600">{t("สร้างชิ้นข้างจากขอบ (ยาวตามเส้นจริง)", "Gusset from edges (true curve length)")}</div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-slate-500">{t("ต่อกัน", "Edges")}</span>
+                      <NumField value={run} min={1} max={Math.max(1, edgeList.length - 1)} step={1} label={t("จำนวนขอบ", "Edge count")} onCommit={(v) => setGus((x) => ({ ...x, count: Math.round(v) }))} className="w-12" />
+                      <span className="text-slate-500">{t("กว้าง", "Width")}</span>
+                      <NumField len value={gus.depth} min={0.5} max={60} label={t("กว้างชิ้นข้าง", "Gusset width")} onCommit={(v) => setGus((x) => ({ ...x, depth: v }))} className="w-14" />
+                      <b className="tabular-nums text-slate-700">{plan ? t(`ยาว ${fmtL(plan.length)}`, `length ${fmtL(plan.length)}`) : "—"}</b>
+                    </div>
+                    {pairs.length > 0 && <label className="flex items-center gap-1.5 text-slate-600">{t("อีกฝั่งเย็บกับ", "Other side sews to")}
+                      <select value={gus.pair} onChange={(e) => setGus((x) => ({ ...x, pair: e.target.value }))} className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1 text-xs">
+                        <option value="">{t("— ไม่ต่อ —", "— none —")}</option>
+                        {pairs.map((q) => <option key={q.pid} value={q.pid}>{q.name || `P${pieces.indexOf(q) + 1}`}</option>)}
+                      </select></label>}
+                    <button type="button" data-gusset-add onClick={makeGusset} disabled={!plan} className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 font-medium hover:bg-slate-50 disabled:opacity-50">{t("สร้างชิ้นข้าง + ตะเข็บ", "Make gusset + seams")}</button>
+                  </div>}
+                </div>
+              );
+            })()}
             {ed && (
               <div className="space-y-1.5 border-t border-slate-100 pt-2">
                 <div className="text-slate-500">{t("รอยบากบนขอบนี้", "Notches on this edge")}</div>
@@ -1814,7 +1911,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               <div className="flex items-start gap-1.5"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SEAM_COLORS[si % SEAM_COLORS.length] }} />
                 <span className="min-w-0 flex-1"><b>{seamLabel(si)}</b>{x.name ? ` ${x.name}` : ""} <span className="text-slate-500">· {sideTxt(x.a)} {t("กับ", "to")} {sideTxt(x.b)}</span></span></div>
               <div className={`mt-0.5 tabular-nums ${c.status === "ok" ? "text-emerald-700" : c.status === "mismatch" && !x.ease ? "text-red-600" : "text-amber-700"}`}>
-                {c.status === "broken" ? t("ต้องเย็บใหม่", "Needs redoing") : `${fmtN(c.la ?? 0)} ${t("กับ", "and")} ${fmtL(c.lb ?? 0)} · ${c.status === "ok" ? t("เท่ากัน", "same") : x.ease ? t(`ตั้งใจให้ย่น ${fmtL(c.diff)}`, `eased ${fmtL(c.diff)}`) : t(`ต่าง ${r1(c.diff)}`, `differ ${r1(c.diff)}`)}`}
+                {c.status === "broken" ? t("ต้องเย็บใหม่", "Needs redoing") : `${fmtN(c.la ?? 0)} ${t("กับ", "and")} ${fmtL(c.lb ?? 0)} · ${x.ease && x.ratio ? t(`รูด ${c.ratio ?? 0}/${x.ratio} เท่า`, `gather ${c.ratio ?? 0}/${x.ratio}×`) : c.status === "ok" ? t("เท่ากัน", "same") : x.ease ? t(`ตั้งใจให้ย่น ${fmtL(c.diff)}`, `eased ${fmtL(c.diff)}`) : t(`ต่าง ${r1(c.diff)}`, `differ ${r1(c.diff)}`)}`}
                 {kind ? <span className="text-slate-500"> · {t(kind.th, kind.en)}</span> : null}{x.top ? <span className="text-slate-500"> · {t("เดินด้ายทับ", "topstitch")}</span> : null}{x.rev ? <span className="text-slate-500"> · {t("กลับทิศ", "reversed")}</span> : null}{x.group ? <span className="text-slate-500"> · {t("ชุด 1 ต่อหลายชิ้น", "1-to-many set")}</span> : null}
               </div>
             </div>
@@ -2404,6 +2501,17 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     </select>
                   </div>
                 )}
+                {pieceInfoFields && level >= 2 && !readonly && (selPiece.foldEdges ?? []).some(Boolean) && (() => {   // ชดเชยความหนาของขอบพับ (รอบ F)
+                  const fromMat = selPiece.mats.map((m) => matProps?.[m.id]).find(Boolean) ?? null, matC = matFoldComp(fromMat);
+                  const setComp = (cm: number) => patchPiece(selPiece.id, (p) => ({ ...p, info: cleanPieceInfo({ ...(p.info ?? {}), comp: cm > 0 ? cm : undefined }) }), "comp");
+                  return (
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5" data-guide="fold-comp" title={t("ขอบที่พับ: เผื่อเพิ่ม = ค่านี้ × จำนวนทบ (วัสดุหนาพับแล้วกินระยะ) — ตั้งตามที่ลองพับวัสดุจริง", "Folded edges get extra allowance = this × folds (thick material eats length when folded) — set it from a real fold test")}>
+                      <span className="text-slate-500">{t("ชดเชยความหนาต่อทบ", "Thickness per fold")}</span>
+                      <NumField len value={selPiece.info?.comp ?? 0} min={0} max={1} label={t("ชดเชยต่อทบ", "Per fold")} onCommit={setComp} className="w-16" />
+                      {fromMat && <button type="button" data-fold-comp-mat onClick={() => setComp(matC)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t(`ตามวัสดุ (${fmtL(matC)})`, `From material (${fmtL(matC)})`)}</button>}
+                    </div>
+                  );
+                })()}
                 <div className="flex flex-wrap items-center gap-1">
                   {ALLOW_STEPS.map((a) => <button key={a} type="button" onClick={() => setAllow(a)} className={`h-7 rounded-md border px-2 ${selPiece.allow === a ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{a}</button>)}
                   <NumField len value={selPiece.allow} min={0} max={20} label={t(`เผื่อพับ ${uL}`, `Allowance ${uL}`)} onCommit={setAllow} className="w-16" />
@@ -2493,6 +2601,40 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                         <button type="button" data-corner-fillet onClick={() => applyCorner((sh) => filletCorner(sh, selNode, cornerR))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำ", "Apply")}</button></div>
                       <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("ตัดมุมเฉพาะจุดนี้", "Chamfer this corner")}</span><NumField len value={chamD} min={0.01} max={100} label={t("ระยะตัดมุม", "Chamfer distance")} onCommit={setChamD} className="w-16" />
                         <button type="button" data-corner-chamfer onClick={() => applyCorner((sh) => chamferCorner(sh, selNode, chamD))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำ", "Apply")}</button></div>
+                      <div className="flex items-center gap-1.5" data-box-corner title={t("ตัดเหลี่ยมมุมออก ขาสองข้างเย็บเข้าหากันเป็นก้นกล่อง — ก้นลึกประมาณ 2 เท่าของขนาด", "Cut a square out of the corner; its two legs are sewn together into a box bottom — depth ≈ 2 × size")}><span className="min-w-0 flex-1">{t("มุมกล่อง (ตัดเหลี่ยม)", "Box corner (cut square)")}</span><NumField len value={boxC} min={0.3} max={60} label={t("ขนาดเหลี่ยม", "Square size")} onCommit={setBoxC} className="w-16" />
+                        <button type="button" data-box-corner-add onClick={() => { if (applyShaping(selPiece, boxCorner(selPiece.shape, selNode, boxC), t("ทำมุมกล่องไม่ได้ (มุมโค้ง/มุมเว้า หรือขอบสั้นกว่าขนาด)", "Can't make a box corner (curved/concave corner, or edges shorter than the size)"), t(`ตัดมุมกล่อง ${fmtL(boxC)} แล้ว — ขาสองข้างเย็บเข้าหากัน · ก้นลึก ≈ ${fmtL(boxC * 2)}`, `Box corner ${fmtL(boxC)} cut — legs sewn together · depth ≈ ${fmtL(boxC * 2)}`), t("มุมกล่อง", "Box corner"))) setSelNode(-1); }} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำ", "Apply")}</button></div>
+                    </div>
+                  );
+                })()}
+                {level >= 2 && !readonly && selPiece.shape.k !== "ellipse" && (() => {   // จีบ · ผ่าแล้วกาง (รอบ F)
+                  const b = shapeBox(selPiece.shape), span = spread.axis === "v" ? b.w : b.h, at = (spread.axis === "v" ? b.x : b.y) + (span * spread.at) / 100;
+                  const seg2 = (on: boolean) => `h-6 rounded px-1.5 ${on ? "bg-slate-800 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
+                  return (
+                    <div className="mb-1.5 space-y-1.5 rounded-md border border-slate-200 bg-slate-50/70 p-2" data-guide="bag-shape">
+                      <div className="flex flex-wrap items-center gap-1.5" data-pleat>
+                        <span className="w-full font-medium text-slate-600">{t("จีบ (เพิ่มเนื้อผ้าให้เอง)", "Pleats (adds the fabric)")}</span>
+                        <button type="button" onClick={() => setPleat((x) => ({ ...x, axis: "v" }))} className={seg2(pleat.axis === "v")}>{t("แนวตั้ง", "Vertical")}</button>
+                        <button type="button" onClick={() => setPleat((x) => ({ ...x, axis: "h" }))} className={seg2(pleat.axis === "h")}>{t("แนวนอน", "Horizontal")}</button>
+                        <button type="button" onClick={() => setPleat((x) => ({ ...x, kind: "knife" }))} className={seg2(pleat.kind === "knife")}>{t("จีบทบ", "Knife")}</button>
+                        <button type="button" onClick={() => setPleat((x) => ({ ...x, kind: "box" }))} className={seg2(pleat.kind === "box")}>{t("จีบกล่อง", "Box")}</button>
+                        <span className="text-slate-500">{t("จำนวน", "Count")}</span><NumField value={pleat.n} min={1} max={12} step={1} label={t("จำนวนจีบ", "Pleat count")} onCommit={(v) => setPleat((x) => ({ ...x, n: Math.round(v) }))} className="w-12" />
+                        <span className="text-slate-500">{t("ลึก", "Depth")}</span><NumField len value={pleat.d} min={0.2} max={20} label={t("ลึกจีบ", "Pleat depth")} onCommit={(v) => setPleat((x) => ({ ...x, d: v }))} className="w-14" />
+                        <button type="button" data-pleat-add onClick={() => applyShaping(selPiece, pleatPiece(selPiece.shape, { axis: pleat.axis, n: pleat.n, depth: pleat.d, kind: pleat.kind }, `pl${Date.now().toString(36)}`), t("ทำจีบไม่ได้ (รูปนี้เส้นผ่าตัดขอบไม่ครบ 2 จุด)", "Can't add pleats (a pleat line doesn't cross this shape cleanly)"), t(`เพิ่มจีบ ${pleat.n} จีบ (กินผ้าจีบละ ${fmtL(pleatTake(pleat.d, pleat.kind))}) — ขอบที่เย็บนับความยาวหลังพับจีบ`, `${pleat.n} pleats added (${fmtL(pleatTake(pleat.d, pleat.kind))} each) — seams count the folded length`))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำจีบ", "Add pleats")}</button>
+                      </div>
+                      {level >= 3 && <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 pt-1.5" data-spread>
+                        <span className="w-full font-medium text-slate-600">{t("ผ่าแล้วกาง", "Slash & spread")}</span>
+                        <button type="button" onClick={() => setSpread((x) => ({ ...x, axis: "v" }))} className={seg2(spread.axis === "v")}>{t("ผ่าแนวตั้ง", "Vertical cut")}</button>
+                        <button type="button" onClick={() => setSpread((x) => ({ ...x, axis: "h" }))} className={seg2(spread.axis === "h")}>{t("ผ่าแนวนอน", "Horizontal cut")}</button>
+                        <button type="button" onClick={() => setSpread((x) => ({ ...x, mode: "parallel" }))} className={seg2(spread.mode === "parallel")}>{t("กางขนาน", "Parallel")}</button>
+                        <button type="button" onClick={() => setSpread((x) => ({ ...x, mode: "pivot" }))} className={seg2(spread.mode === "pivot")}>{t("หมุนกาง (บาน)", "Pivot (flare)")}</button>
+                        {spread.mode === "pivot" && <select value={spread.hinge} onChange={(e) => setSpread((x) => ({ ...x, hinge: e.target.value === "min" ? "min" : "max" }))} className="h-6 rounded border border-slate-200 bg-white px-1 text-xs">
+                          <option value="max">{spread.axis === "v" ? t("หมุนที่ปลายล่าง", "Hinge at bottom") : t("หมุนที่ปลายขวา", "Hinge at right")}</option>
+                          <option value="min">{spread.axis === "v" ? t("หมุนที่ปลายบน", "Hinge at top") : t("หมุนที่ปลายซ้าย", "Hinge at left")}</option>
+                        </select>}
+                        <span className="text-slate-500">{t("ตำแหน่ง %", "Position %")}</span><NumField value={spread.at} min={5} max={95} step={1} label={t("ตำแหน่งที่ผ่า (%)", "Cut position (%)")} onCommit={(v) => setSpread((x) => ({ ...x, at: v }))} className="w-12" />
+                        <span className="text-slate-500">{t("กาง", "Spread")}</span><NumField len value={spread.amt} min={0.1} max={100} label={t("ระยะกาง", "Spread amount")} onCommit={(v) => setSpread((x) => ({ ...x, amt: v }))} className="w-14" />
+                        <button type="button" data-spread-add onClick={() => { const r = slashSpread(selPiece.shape, { axis: spread.axis, at, amount: spread.amt, mode: spread.mode, hinge: spread.hinge }); applyShaping(selPiece, r ? { shape: r.shape, take: {} } : null, t("ผ่าไม่ได้ (เส้นผ่าต้องตัดขอบชิ้น 2 จุดพอดี · หมุนกางกว้างเกิน)", "Can't spread (the cut must cross the outline exactly twice · pivot too wide)"), t(`ผ่าแล้วกาง ${fmtL(spread.amt)} แล้ว`, `Spread ${fmtL(spread.amt)} done`)); }} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ผ่าแล้วกาง", "Spread")}</button>
+                      </div>}
                     </div>
                   );
                 })()}

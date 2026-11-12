@@ -56,7 +56,8 @@ export const BOND_KINDS: { key: BondKind; th: string; en: string; add: number; m
 ];
 export type PieceInfo = { code?: string; role?: PieceRole; bond?: BondKind; skive?: number; solid?: boolean;
   /** Bag CAD รอบ E: มุมเส้นตัด (ไม่มี = มุมแหลม) · แบบรอยบาก (ไม่มี = เดี่ยว) · ทางผ้าทางเดียว · วางคว่ำหน้า · ตัดเป็นคู่ซ้าย-ขวา (กลับด้าน) */
-  corner?: "bevel" | "round"; notch?: "double" | "v"; nap?: boolean; face?: "down"; pair?: boolean };
+  corner?: "bevel" | "round"; notch?: "double" | "v"; nap?: boolean; face?: "down"; pair?: boolean;
+  /** Bag CAD รอบ F: ชดเชยความหนาต่อการพับ 1 ทบ (ซม.) — บวกเข้าเผื่อของขอบพับ · ค่าตั้งต้นจากวัสดุ (MatProps.fold) */ comp?: number };
 export function cleanPieceInfo(raw: unknown): PieceInfo | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>, out: PieceInfo = {};
@@ -72,11 +73,14 @@ export function cleanPieceInfo(raw: unknown): PieceInfo | null {
   if (r.nap === true) out.nap = true;
   if (r.face === "down") out.face = "down";
   if (r.pair === true) out.pair = true;
+  if (typeof r.comp === "number" && Number.isFinite(r.comp) && r.comp > 0 && r.comp <= 1) out.comp = Math.round(r.comp * 1000) / 1000;
   return Object.keys(out).length ? out : null;
 }
 
 /** ค่าของวัสดุในแพทเทิร์นใบนี้ (แบบ Fabric ของ CLO แต่ย่อ): ความอยู่ทรง 0–1 · ความหนา มม. · สีในภาพ 3D — เก็บใน template.matProps (ไม่แตะข้อมูลวัสดุกลาง) */
-export type MatProps = { preset?: string; stiff: number; thick: number; color?: string };
+export type MatProps = { preset?: string; stiff: number; thick: number; color?: string; /** ชดเชยต่อการพับ 1 ทบ (มม.) ที่ช่างสอบเทียบเอง — ไม่ตั้ง = ใช้ความหนา (รอบ F) */ fold?: number };
+/** ค่าชดเชยต่อทบ (ซม.) ของวัสดุ: ค่าที่ช่างตั้ง หรือความหนา */
+export const matFoldComp = (m: MatProps | null | undefined): number => (m ? Math.round(((m.fold ?? m.thick) / 10) * 1000) / 1000 : 0);
 /** ชุดค่าสำเร็จ — ค่าประมาณจากลักษณะวัสดุทั่วไป ให้ช่างปรับตามของจริง */
 export const MAT_PRESETS: { key: string; th: string; en: string; stiff: number; thick: number }[] = [
   { key: "pu", th: "หนัง PU / หนังเทียม", en: "PU leather", stiff: 0.7, thick: 1.2 },
@@ -96,6 +100,8 @@ export function cleanMatProps(raw: unknown): Record<string, MatProps> {
     const m: MatProps = { stiff: Math.min(1, Math.max(0, Math.round(stiff * 100) / 100)), thick: Math.min(20, Math.max(0.1, Math.round(thick * 10) / 10)) };
     if (typeof r.preset === "string" && MAT_PRESETS.some((x) => x.key === r.preset)) m.preset = r.preset;
     if (typeof r.color === "string" && /^#[0-9a-fA-F]{6}$/.test(r.color)) m.color = r.color.toLowerCase();
+    const fold = fin(r.fold);
+    if (fold != null && fold >= 0 && fold <= 10) m.fold = Math.round(fold * 10) / 10;
     out[id] = m;
   }
   return out;
@@ -206,7 +212,7 @@ export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area
       v: 1, shape: n.shape, basis, ...(withName ? { name: pieceName } : {}),
       ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}),
       ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}), ...(n.inner?.length ? { inner: n.inner } : {}),
-      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}),
+      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}), ...(p.info?.comp ? { comp: p.info.comp } : {}),
     });
     // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
     const note = p.info?.code || null;   // รหัสชิ้นออกในช่องหมายเหตุของตารางชิ้น
@@ -273,7 +279,7 @@ const sideTitle = (pieces: ProjectPiece[], x: SeamSide) => {
   return r ? `${base} ช่วง ${f1(r.t0)}–${f1(r.t1)} ซม.` : base;
 };
 export function projectSeamRows(pieces: ProjectPiece[], seams: Seam[]): SeamRow[] {
-  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
+  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner, meta: p.edgeMeta ?? null }]));
   return seams.map((x, i) => {
     const c = checkSeam(shapes, x);
     return {

@@ -50,7 +50,8 @@ export type PatternPiece = {
   grainSegs?: [Pt, Pt][] | null;   // เส้นทางผ้า: ก้าน + หัวลูกศร 2 ข้าง (DXF layer GRAIN)
   notchSegs?: [Pt, Pt][] | null;   // รอยบาก: ขีดจากเส้นตัดเข้าในชิ้น (DXF layer NOTCH)
   marksD?: string | null;          // เส้นทางผ้า + รอยบาก รวมเป็น SVG path (วาดเส้นทึบบาง)
-  dims?: { a: Pt; b: Pt; label: string }[] | null;   // เส้นวัดถาวร (รอบ E) — DXF layer DIM + ตัวเลข
+  dims?: { a: Pt; b: Pt; label: string }[] | null;
+  bands?: { kind: "glue" | "skive"; pts: Pt[] }[] | null;   // แนวทากาว / ปาดบาง (รอบ F) — DXF layer GLUE / SKIVE   // เส้นวัดถาวร (รอบ E) — DXF layer DIM + ตัวเลข
   foldSegs?: Pt[][] | null;        // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน) — DXF layer FOLD
   foldD?: string | null;           // เส้นพับเป็น SVG path (วาดเส้นประยาว-สั้น)
   innerSegs?: Pt[][] | null;       // เส้นในชิ้น (แนวเย็บ / ช่องเจาะ / แนวพับ / ตำแหน่ง) — DXF layer INNER
@@ -99,7 +100,9 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
     const grainSegs = ls?.grain ? grainArrowSegs(...(sh(ls.grain) as [Pt, Pt]), !!ls.nap) : [];
     const perAllow = ls ? edgeAllowances(ls.shape, ls.allowEdges, allow) ?? Array.from({ length: shapeEdgeCount(ls.shape) }, () => allow) : [];
     const foldSegs = ls?.foldEdges ? [...foldSegments(ls.shape, ls.foldEdges), ...foldSecondLines(ls.shape, ls.foldEdges, perAllow)].map(sh) : [];   // พับสองทบ = เส้นพับที่สองนอกเส้นเย็บครึ่งเผื่อ
-    const innerSegs = (ls?.inner ?? []).filter((x) => x.pts.length >= 2 && x.kind !== "hw" && x.kind !== "dim").map((x) => sh(x.pts));
+    const innerSegs = (ls?.inner ?? []).filter((x) => x.pts.length >= 2 && x.kind !== "hw" && x.kind !== "dim" && x.kind !== "glue" && x.kind !== "skive").map((x) => sh(x.pts));
+    // แนวทากาว / แนวปาดบาง (รอบ F): เส้นบอกงานบนชิ้น — ใบพิมพ์ + DXF ชั้น GLUE / SKIVE (ไม่ใช่เส้นตัด)
+    const bands = (ls?.inner ?? []).filter((x) => (x.kind === "glue" || x.kind === "skive") && x.pts.length >= 2).map((x) => ({ kind: x.kind as "glue" | "skive", pts: sh(x.pts) }));
     // เส้นวัดถาวร (รอบ E): เส้นบาง + ตัวเลขความยาว — ใบพิมพ์ + DXF ชั้น DIM (ไม่ใช่เส้นตัด)
     const dims = (ls?.inner ?? []).filter((x) => x.kind === "dim" && x.pts.length >= 2).map((x) => { const [a, b] = sh([x.pts[0], x.pts[x.pts.length - 1]]); return { a, b, label: `${r1(Math.hypot(b[0] - a[0], b[1] - a[1]))} cm` }; });
     // อะไหล่ที่วางบนชิ้น: วงกลมขนาดจริง + กากบาทกึ่งกลาง (ใบพิมพ์) · วงกลมในชั้น HW (ไฟล์ตัด) — ไม่ใช่เส้นสั้นในชั้น INNER
@@ -124,6 +127,7 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
       ...(innerSegs.length || hwMarks.length ? { ...(innerSegs.length ? { innerSegs } : {}), innerD: innerSegs.map((L) => "M" + L.map(([x, y]) => `${r2(x)} ${r2(y)}`).join("L")).join("") + hwD } : {}),
       ...(hwMarks.length ? { hwMarks } : {}),
       ...(dims.length ? { dims } : {}),
+      ...(bands.length ? { bands } : {}),
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
@@ -204,6 +208,7 @@ export function buildPatternDxf(layout: PatternLayout): string {
       segs(p.notchSegs, "NOTCH");
       for (const L of p.foldSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "FOLD");
       for (const m of p.hwMarks ?? []) out.push("0", "CIRCLE", "8", "HW", "10", String(mm(p.x + m.c[0])), "20", String(H - mm(p.y + m.c[1])), "30", "0", "40", String(mm(m.r)));   // อะไหล่ = วงกลมในชั้น HW (ตำแหน่งเจาะ/ติด)
+      for (const bd of p.bands ?? []) for (let i = 0; i + 1 < bd.pts.length; i++) line(mm(p.x + bd.pts[i][0]), H - mm(p.y + bd.pts[i][1]), mm(p.x + bd.pts[i + 1][0]), H - mm(p.y + bd.pts[i + 1][1]), bd.kind === "glue" ? "GLUE" : "SKIVE");
       for (const dm of p.dims ?? []) {   // เส้นวัด: เส้น + ตัวเลข ชั้น DIM (เครื่องตัดไม่ตัดชั้นนี้)
         line(mm(p.x + dm.a[0]), H - mm(p.y + dm.a[1]), mm(p.x + dm.b[0]), H - mm(p.y + dm.b[1]), "DIM");
         out.push("0", "TEXT", "8", "DIM", "10", String(mm(p.x + (dm.a[0] + dm.b[0]) / 2)), "20", String(H - mm(p.y + (dm.a[1] + dm.b[1]) / 2) + 2), "30", "0", "40", "3", "1", dm.label);

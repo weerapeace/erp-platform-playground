@@ -87,9 +87,12 @@ const clipRange = (r: [number, number] | undefined, a: number, b: number): [numb
 export function remapEdgeMeta(meta: EdgeMeta[] | null | undefined, plan: EdgePlan): { meta: EdgeMeta[] | null; lost: number } {
   if (!meta || meta.length !== plan.oldN) return { meta: null, lost: 0 };
   let lost = 0;
+  const parts = new Map<number, number>();
+  for (const o of plan.own) parts.set(o.k, (parts.get(o.k) ?? 0) + 1);
   const out = plan.own.map((o) => {
     const m = meta[o.k] ?? {}, x: EdgeMeta = {};
     if (m.top != null) x.top = m.top;
+    if (m.take && !o.merged && parts.get(o.k) === 1) x.take = m.take;   // take ตามไปเฉพาะขอบที่ไม่ถูกแบ่ง/รวม
     if (m.open) x.open = true;
     for (const [flag, key] of [["zip", "zipR"], ["bind", "bindR"]] as const) {
       if (!m[flag]) continue;

@@ -148,7 +148,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
   }, []);
   const onSeams = (next: Seam[]) => { setSeams(next); setDirty(true); };
 
-  const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }])), [pieces]);
+  const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner, meta: p.edgeMeta ?? null }])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
   // จุดติดหู / ปิดหลังช่อง + ความอยู่ทรงของชิ้น — ใช้ในภาพ 3D แบบ แยกชิ้น / ทิ้งตัว (อยู่ในช่องภาพ 3D ข้างกระดาน)
   const onAttaches = useCallback((next: Attach[]) => { setAttaches(next); setTemplate((tp) => ({ ...(tp ?? {}), attach: next })); setDirty(true); }, []);

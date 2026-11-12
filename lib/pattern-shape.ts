@@ -44,14 +44,14 @@ export const isNotchStyle = (v: unknown): v is NotchStyle => v === "single" || v
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; /** มุมของเส้นตัด (ไม่มี = miter) */ corner?: AllowCorner; /** แบบรอยบาก (ไม่มี = เดี่ยว) */ notchStyle?: NotchStyle; /** ทางผ้าทางเดียว (ผ้ามีขน/ลายทิศเดียว) */ nap?: boolean; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; /** มุมของเส้นตัด (ไม่มี = miter) */ corner?: AllowCorner; /** แบบรอยบาก (ไม่มี = เดี่ยว) */ notchStyle?: NotchStyle; /** ทางผ้าทางเดียว (ผ้ามีขน/ลายทิศเดียว) */ nap?: boolean; /** ชดเชยความหนาต่อการพับ 1 ทบ (ซม.) บวกเข้าเผื่อของขอบพับ (รอบ F) */ comp?: number; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
 /** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
 /**
  * เส้นในชิ้น (2026-11-11) — เส้นที่อยู่ "ข้างใน" ชิ้น ไม่ใช่เส้นตัด: บอกตำแหน่งให้ช่าง และเป็นที่ให้ชิ้นอื่นมาเย็บ
  *   sew = แนวเย็บ (เช่น แนวเย็บช่องใส่ของ 3 ด้าน) · slit = ช่องเจาะ (ช่องซิป) · fold = แนวพับ · mark = ตำแหน่ง/เครื่องหมาย
  *   pts = จุดของเส้น (พิกัดเดียวกับรูปชิ้น) — ย้าย/ย่อขยาย/หมุน/กลับด้านชิ้น เส้นในไปตามชิ้น
  */
-export type InnerKind = "sew" | "slit" | "fold" | "mark" | "hw" | "dim";
+export type InnerKind = "sew" | "slit" | "fold" | "mark" | "hw" | "dim" | "glue" | "skive";
 /**
  * อะไหล่ที่วางบนชิ้น (2026-11-11 · เจ้าของเลือกทำต่อ "วางอะไหล่ให้เห็นตำแหน่งบนชิ้นและในภาพ 3 มิติ"):
  *   เก็บเป็นเส้นในชนิด "hw" ยาว = ขนาดของอะไหล่ จุดกึ่งกลางเส้น = ตำแหน่ง → ย้าย/หมุน/กลับด้านตามชิ้น · ลากย้าย · พิมพ์ระยะจากขอบ ได้ด้วยของเดิมทั้งหมด
@@ -76,6 +76,7 @@ export const INNER_KINDS: { key: InnerKind; th: string; en: string }[] = [
   { key: "sew", th: "แนวเย็บ", en: "Sewing line" }, { key: "slit", th: "ช่องเจาะ (ซิป)", en: "Slit (zip)" },
   { key: "fold", th: "แนวพับ", en: "Fold line" }, { key: "mark", th: "ตำแหน่ง", en: "Position mark" }, { key: "hw", th: "อะไหล่", en: "Hardware" },
   { key: "dim", th: "เส้นวัด (บอกขนาด)", en: "Dimension" },
+  { key: "glue", th: "แนวทากาว", en: "Glue line" }, { key: "skive", th: "แนวปาดบาง (สกีฟ)", en: "Skive line" },
 ];
 export type InnerLine = { id: string; kind: InnerKind; pts: Pt[]; name?: string; /** ชนิดอะไหล่ (เฉพาะ kind = "hw") */ hw?: HwKind };
 export const MAX_INNER_LINES = 40;
@@ -126,7 +127,9 @@ export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null; inner?: I
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
 export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };
 /** ชิ้นงาน 1 ชิ้น = เส้นรอบนอก + รูเจาะ + เผื่อพับ */
-export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number; allowEdges?: number[] | null; /** มุมเส้นตัด (รอบ E) — หรืออ่านจาก info.corner ของชิ้น */ corner?: AllowCorner | null; info?: { corner?: AllowCorner } | null };
+export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number; allowEdges?: number[] | null; /** มุมเส้นตัด (รอบ E) — หรืออ่านจาก info.corner ของชิ้น */ corner?: AllowCorner | null;
+  /** ขอบพับ (1 = พับ · 2 = พับสองทบ) + ชดเชยความหนาต่อทบ (ซม. · รอบ F) — หรืออ่านจาก info.comp — เผื่อของขอบพับ += comp × จำนวนทบ */ foldEdges?: number[] | null; comp?: number | null;
+  info?: { corner?: AllowCorner; comp?: number } | null };
 export type Box = { x: number; y: number; w: number; h: number };
 export type ShapeStats = { w: number; h: number; area: number; perimeter: number; fill: number };
 
@@ -319,6 +322,8 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   if (isAllowCorner(o.corner) && o.corner !== "miter") out.corner = o.corner;
   if (isNotchStyle(o.notchStyle) && o.notchStyle !== "single") out.notchStyle = o.notchStyle;
   if (o.nap === true) out.nap = true;
+  const comp = fin(o.comp);
+  if (comp != null && comp > 0 && comp <= 1) out.comp = Math.round(comp * 1000) / 1000;
   return out;
 }
 
@@ -806,7 +811,10 @@ export type PieceGeometry = {
 /** คิดทุกอย่างของชิ้น: เส้นเย็บ · เส้นตัด · รู · กรอบ · พื้นที่ · รอบรูป */
 export function pieceGeometry(g: PieceGeom): PieceGeometry {
   const a = cleanAllow(g.allow);
-  const per = edgeAllowances(g.shape, g.allowEdges, a);   // เผื่อรายขอบ (ครบทุกขอบและต่างจากค่ารวม) — ไม่มี = ค่าเดียวทั้งชิ้นแบบเดิม
+  const per0 = edgeAllowances(g.shape, g.allowEdges, a);   // เผื่อรายขอบ (ค่าเดิม)
+  const comp = g.comp ?? g.info?.comp ?? 0, fold = comp > 0 ? cleanFoldEdges(g.shape, g.foldEdges) : null;
+  const per = fold ? (per0 ?? fold.map(() => a)).map((v, i) => r3(v + comp * (fold[i] ?? 0))) : per0;   // ชดเชยความหนาของขอบพับ (รอบ F)
+  // เผื่อรายขอบ (ครบทุกขอบและต่างจากค่ารวม) — ไม่มี = ค่าเดียวทั้งชิ้นแบบเดิม
   const fe = per ? flattenWithEdges(g.shape) : null;
   const sew = fe ? fe.pts : flattenShape(g.shape);
   const segAllow = fe && per ? fe.edge.map((e) => per[e]) : null;

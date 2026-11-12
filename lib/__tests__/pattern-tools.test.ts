@@ -42,5 +42,10 @@ describe("ค้นหาเครื่องมือ", () => {
     expect(ids("พับสองทบ")[0]).toBe("edge-fold2"); expect(ids("dimension")[0]).toBe("dim-pin");
     expect(ids("snap")).toContain("objsnap"); expect(ids("nap")).toContain("cut-marks");
   });
+  it("รอบ F: เครื่องมือทรงกระเป๋าค้นเจอ", () => {
+    expect(ids("เกล็ด")[0]).toBe("dart"); expect(ids("มุมกล่อง")[0]).toBe("box-corner"); expect(ids("จีบ")[0]).toBe("pleat");
+    expect(ids("gusset")[0]).toBe("gusset"); expect(ids("ทากาว")[0]).toBe("band"); expect(ids("รูด")[0]).toBe("gather");
+    expect(ids("slash")[0]).toBe("spread"); expect(ids("ความหนา")[0]).toBe("fold-comp");
+  });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });

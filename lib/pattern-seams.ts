@@ -26,8 +26,9 @@ import { flattenShape, type InnerLine, type Pt, type Shape } from "@/lib/pattern
 export type PieceEdge = { i: number; pts: Pt[]; len: number };
 export type SeamSide = { pid: string; from: number; count: number; n: number; t0?: number; t1?: number; inner?: string };
 /** รูปชิ้นสำหรับงานตะเข็บ: รูปอย่างเดียว หรือรูป + เส้นในชิ้น */
-export type SeamPiece = Shape | { shape: Shape; inner?: InnerLine[] | null };
+export type SeamPiece = Shape | { shape: Shape; inner?: InnerLine[] | null; /** ค่ารายขอบ — ใช้หัก take (เนื้อที่หายตอนเย็บ: ขาเกล็ด · เนื้อจีบ · ขามุมกล่อง) */ meta?: EdgeMeta[] | null };
 const shapeOf = (p: SeamPiece): Shape => ("k" in p ? p : p.shape);
+const metaOf = (p: SeamPiece): EdgeMeta[] | null => ("k" in p ? null : p.meta ?? null);
 const innerOf = (p: SeamPiece, id: string): InnerLine | null => ("k" in p ? null : (p.inner ?? []).find((l) => l.id === id) ?? null);
 /** ด้านที่อยู่บนเส้นในชิ้น (ไม่ใช่ขอบ) */
 export const isInnerSide = (side: SeamSide): boolean => typeof side.inner === "string" && side.inner.length > 0;
@@ -45,12 +46,16 @@ export const SEAM_KINDS: { key: SeamKind; th: string; en: string; hintTh: string
 export type SeamTop = { off: number; rows: 1 | 2; spi: number };
 export const SEAM_TOP_DEFAULT: SeamTop = { off: 2, rows: 1, spi: 8 };
 /** rev = ด้าน b เย็บกลับทิศ (จุดเริ่มของ b ไปชนจุดจบของ a) — ตอนนี้ใช้แสดงขีดบอกทิศบนกระดาน ยังไม่มีผลกับการประกอบ 3D */
-export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean; name?: string; kind?: SeamKind; top?: SeamTop; ease?: boolean; /** รหัสชุด "1 ขอบกับหลายชิ้น" — ตะเข็บที่ group เดียวกันแบ่งขอบเดียวกันเป็นช่วงต่อกัน */ group?: string };
+export type Seam = { id: string; a: SeamSide; b: SeamSide; rev?: boolean; name?: string; kind?: SeamKind; top?: SeamTop; ease?: boolean;
+  /** อัตรารูด (รอบ F): ด้านยาวเป็นกี่เท่าของด้านสั้น เช่น 1.5 — ใช้คู่กับ ease */ ratio?: number;
+  /** เย็บในชิ้นเดียวกัน (ขาเกล็ด / มุมกล่อง · รอบ F) — ประกอบ 3D ไม่นับ */ self?: boolean; /** รหัสชุด "1 ขอบกับหลายชิ้น" — ตะเข็บที่ group เดียวกันแบ่งขอบเดียวกันเป็นช่วงต่อกัน */ group?: string };
 /** ค่ารายขอบที่ไม่ใช่เผื่อเย็บ: กุ้นขอบ · ติดซิปตามขอบ · เดินด้ายทับห่างจากขอบ (มม.) — เก็บเป็นรายการ 1 ค่าต่อขอบ (ครบทุกขอบ) */
 export type EdgeMeta = {
   bind?: boolean; zip?: boolean; top?: number;
   /** ซิป / กุ๊น เฉพาะบางช่วงของขอบ (2026-11-11): [เริ่ม, จบ] ซม. วัดจากต้นขอบ — ไม่มี = ทั้งขอบ */
   zipR?: [number, number]; bindR?: [number, number];
+  /** เนื้อที่หายไปตอนเย็บบนขอบนี้ (ซม.) — ขาเกล็ด · เนื้อจีบ · ขามุมกล่อง (รอบ F) · ความยาวตะเข็บ = ยาวขอบ − take */
+  take?: number;
   /** ขอบเปิดตั้งใจ (ปากกระเป๋า / ช่องล้วง) — ไม่นับเป็น "ลืมเย็บ" ในแผงตรวจแบบ (lib/pattern-check · 2026-11-12) */
   open?: boolean;
 };
@@ -86,9 +91,9 @@ export function withFinishRange(m: EdgeMeta, kind: EdgeFinish, range: [number, n
   return r ? { ...rest, [FIN_R[kind]]: r } : rest;
 }
 /** ขอบนี้มีค่าที่ตั้งไว้ไหม (ใช้ตัดสินว่าต้องเก็บรายการค่ารายขอบของชิ้นหรือไม่) */
-export const edgeMetaSet = (m: EdgeMeta | null | undefined): boolean => !!m && (!!m.bind || !!m.zip || m.top != null || !!m.open);
+export const edgeMetaSet = (m: EdgeMeta | null | undefined): boolean => !!m && (!!m.bind || !!m.zip || m.top != null || !!m.open || !!m.take);
 export type SeamStatus = "ok" | "mismatch" | "broken";
-export type SeamCheck = { status: SeamStatus; la: number | null; lb: number | null; diff: number };
+export type SeamCheck = { status: SeamStatus; la: number | null; lb: number | null; diff: number; /** อัตรารูดจริง (ด้านยาว ÷ ด้านสั้น) — เฉพาะตะเข็บที่ตั้งอัตรารูด */ ratio?: number };
 
 export const SEAM_TOL = 0.1;      // ซม. — ต่างกันไม่เกินนี้ถือว่าเท่ากัน
 export const SEAM_MIN_LEN = 0.5;  // ซม. — ช่วงเย็บสั้นสุดที่ยอมให้สร้าง/ปรับ
@@ -200,7 +205,18 @@ export function rangedSide(pid: string, i: number, n: number, a: number, b: numb
   const t0 = Math.round(Math.max(0, a) * 100) / 100, t1 = Math.round(Math.min(len, b) * 100) / 100;
   return t0 <= 0.005 && t1 >= len - 0.005 ? { pid, from: i, count: 1, n } : { pid, from: i, count: 1, n, t0, t1 };
 }
-export function sideLength(shape: SeamPiece, side: SeamSide): number | null { const P = sidePoints(shape, side); return P ? lenOf(P) : null; }
+/** ความยาวที่เย็บจริงของด้าน = ความยาวตามเส้น − take ของขอบในด้าน (เฉพาะด้านเต็มขอบ) */
+export function sideLength(shape: SeamPiece, side: SeamSide): number | null { const P = sidePoints(shape, side); return P ? Math.max(0, lenOf(P) - sideTake(shape, side)) : null; }
+/** take รวมของขอบในด้าน (ซม.) — ด้านบนเส้นใน / เย็บบางช่วง = 0 */
+export function sideTake(shape: SeamPiece, side: SeamSide): number {
+  const M = metaOf(shape);
+  if (!M || isInnerSide(side) || hasRange(side) || M.length !== side.n) return 0;
+  const E = pieceEdges(shapeOf(shape));
+  if (E.length !== side.n) return 0;
+  let t = 0;
+  for (let k = 0; k < side.count; k++) { const i = (side.from + k) % side.n; t += Math.min(M[i]?.take ?? 0, E[i].len); }
+  return t;
+}
 
 /** ขอบลำดับ i อยู่ในด้านนี้ไหม */
 export function sideHasEdge(side: SeamSide, i: number): boolean {
@@ -226,6 +242,10 @@ export function checkSeam(shapes: Map<string, SeamPiece> | Record<string, SeamPi
   const sa = get(seam.a.pid), sb = get(seam.b.pid);
   const la = sa ? sideLength(sa, seam.a) : null, lb = sb ? sideLength(sb, seam.b) : null;
   if (la == null || lb == null) return { status: "broken", la, lb, diff: 0 };
+  if (seam.ease && seam.ratio && seam.ratio > 1) {   // รูดตามอัตรา: ด้านยาวควร = ด้านสั้น × อัตรา (คลาดได้ 2% หรือค่าคลาด)
+    const lo = Math.min(la, lb), hi = Math.max(la, lb), d = Math.abs(hi - lo * seam.ratio);
+    return { status: d > Math.max(tol, hi * 0.02) ? "mismatch" : "ok", la, lb, diff: d, ratio: lo > 0 ? Math.round((hi / lo) * 100) / 100 : 0 };
+  }
   const diff = Math.abs(la - lb);
   return { status: diff > tol ? "mismatch" : "ok", la, lb, diff };
 }
@@ -267,6 +287,8 @@ export function cleanEdgeMeta(shape: Shape, raw: unknown): EdgeMeta[] | null {
     if (r.zip === true) { m.zip = true; const rg = cleanFinishRange(r.zipR, E[i].len); if (rg) m.zipR = rg; }
     if (top != null && top >= 0.5 && top <= 30) m.top = Math.round(top * 10) / 10;
     if (r.open === true) m.open = true;
+    const take = fin(r.take);
+    if (take != null && take > 0.01 && take <= E[i].len + 0.01) m.take = Math.round(Math.min(take, E[i].len) * 1000) / 1000;
     return m;
   });
   return out.some(edgeMetaSet) ? out : null;
@@ -313,6 +335,9 @@ export function cleanSeams(raw: unknown, pids: Set<string>): Seam[] {
     const seam: Seam = { id, a, b };
     if (r.rev === true) seam.rev = true;
     if (r.ease === true) seam.ease = true;
+    const ratio = typeof r.ratio === "number" && Number.isFinite(r.ratio) ? r.ratio : null;
+    if (ratio != null && ratio >= 1.05 && ratio <= 4) seam.ratio = Math.round(ratio * 100) / 100;
+    if (r.self === true) seam.self = true;
     if (typeof r.group === "string" && /^[\w-]{1,40}$/.test(r.group)) seam.group = r.group;
     const name = typeof r.name === "string" ? r.name.trim().slice(0, 60) : "";
     if (name) seam.name = name;

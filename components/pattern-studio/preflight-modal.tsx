@@ -17,7 +17,7 @@ import type { Seam } from "@/lib/pattern-seams";
 export type SaveState = "saved" | "pending" | "saving" | "failed";
 const GROUPS: { key: string; th: string; en: string; codes: CheckCode[] }[] = [
   { key: "shape", th: "เส้นตัดปิด ไม่ตัดกันเอง ไม่มีจุดซ้ำ", en: "Closed cut lines, no self-crossing, no duplicate points", codes: ["self-cross", "cut-cross", "short-edge"] },
-  { key: "seam", th: "ตะเข็บครบ ยาวเท่ากัน หรือระบุว่าตั้งใจรูด", en: "Seams complete and equal, or marked as eased", codes: ["seam-broken", "seam-mismatch", "seam-eased", "notch-mismatch"] },
+  { key: "seam", th: "ตะเข็บครบ ยาวเท่ากัน หรือระบุว่าตั้งใจรูด", en: "Seams complete and equal, or marked as eased", codes: ["seam-broken", "seam-mismatch", "seam-eased", "gather-off", "notch-mismatch"] },
   { key: "open", th: "ขอบที่ไม่ได้เย็บ ระบุว่าเปิดตั้งใจแล้ว", en: "Unsewn edges marked as intended openings", codes: ["edge-open"] },
   { key: "hole", th: "รู / ช่องเจาะ ไม่หลุดหรือชิดเส้นเย็บ", en: "Holes not outside or too close to the sew line", codes: ["hole-out", "hole-near"] },
   { key: "info", th: "ชื่อชิ้นและวัสดุครบ", en: "Piece names and materials filled in", codes: ["no-material", "no-name"] },

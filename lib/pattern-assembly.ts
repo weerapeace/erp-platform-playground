@@ -95,7 +95,7 @@ export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Atta
   const pieces = allPieces.filter((p) => (p.layer === "lining") === (layer === "lining"));
   if (!pieces.length) return { ok: false, reason: "no-pieces", loose: [] };
   const inLayer = new Set(pieces.map((p) => p.pid));
-  const structural = (s: Seam) => !isPartialSeam(s) || (!!s.group && !isInnerSide(s.a) && !isInnerSide(s.b));   // เต็มขอบ หรือ ชุด 1 ขอบกับหลายชิ้น
+  const structural = (s: Seam) => !s.self && (!isPartialSeam(s) || (!!s.group && !isInnerSide(s.a) && !isInnerSide(s.b)));   // เย็บในชิ้นเดียวกัน (เกล็ด/มุมกล่อง) ไม่ใช่โครงกระเป๋า   // เต็มขอบ หรือ ชุด 1 ขอบกับหลายชิ้น
   const seams = allSeams.filter((s) => structural(s) && inLayer.has(s.a.pid) && inLayer.has(s.b.pid));
   const byPid = new Map(pieces.map((p) => [p.pid, p]));
   const shapes = new Map(pieces.map((p) => [p.pid, p.shape]));

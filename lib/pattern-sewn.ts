@@ -159,10 +159,10 @@ function loopCurve(F1: V3, T1: V3, W1: V3, F2: V3, T2: V3, W2: V3, L: number): {
 /** สร้างฉากภาพเย็บติดจากชิ้น + ตะเข็บ (+ จุดติดหูของแม่แบบ) */
 export function buildSewn(pieces: AsmPiece[], seams: Seam[], attaches: Attach[] = []): SewnScene {
   const byPid = new Map(pieces.map((p) => [p.pid, p]));
-  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner }]));
+  const shapes = new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner, meta: p.edgeMeta ?? null }]));
   const idxOf = new Map(seams.map((s, i) => [s.id, i]));
   const checks = new Map(seams.map((s) => [s.id, checkSeam(shapes, s)]));
-  const usable = seams.filter((s) => checks.get(s.id)?.status !== "broken" && byPid.has(s.a.pid) && byPid.has(s.b.pid));
+  const usable = seams.filter((s) => !s.self && checks.get(s.id)?.status !== "broken" && byPid.has(s.a.pid) && byPid.has(s.b.pid));
   const parts: SewnPart[] = [], lines: SewnLine[] = [], notes: SewnNote[] = [], marks: SewnMark[] = [], finishes: SewnFinish[] = [];
   /** ขอบที่ติดซิป / กุ๊น ของชิ้น → เส้นในภาพ (f = วางจุดของชิ้นลงในฉาก · n = ทิศออกจากผิว) */
   const finishOf = (p: AsmPiece, f: (q: Pt) => V3, n: V3, on?: string) => {
