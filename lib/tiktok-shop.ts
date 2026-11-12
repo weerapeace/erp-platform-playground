@@ -186,6 +186,17 @@ export async function ttsPartialEdit(accessToken: string, shopCipher: string, pr
   });
 }
 /**
+ * แก้ราคาต่อตัวเลือก (Update Price 202309) — มีผลทันที ไม่ต้องรอตรวจ · ทุก SKU ต้องอยู่สินค้าเดียวกัน · สินค้าต้อง ACTIVATE และไม่อยู่ในโปรโมชัน
+ * price.amount = ราคาแสดงก่อนส่วนลด (ร้านไทย) · ไทย 30–260,000 ทศนิยม 2 (planTiktokPrices ตรวจก่อนแล้ว) · data ตอบว่างเสมอ
+ */
+export async function ttsUpdatePrices(accessToken: string, shopCipher: string, productId: string, skus: { id: string; amount: number }[], currency = "THB"): Promise<Record<string, unknown>> {
+  return ttsApi("POST", `/product/202309/products/${encodeURIComponent(productId)}/prices/update`, accessToken, {
+    query: { shop_cipher: shopCipher },
+    body: { skus: skus.map((s) => ({ id: s.id, price: { amount: s.amount.toFixed(2), currency } })) },
+    scope: PRODUCT_WRITE_SCOPE,
+  });
+}
+/**
  * เปิดขาย (activate — TikTok ส่งตรวจก่อน สถานะเป็น PENDING) / ปิดขาย (deactivate — ซ่อนทันที) · สูงสุด 20 ตัวต่อครั้ง
  * คืน data ดิบ — ต้องเช็ก data.errors[] แม้ code = 0 (tiktokDisplayErrors ใน lib/tiktok-listing-edit)
  */

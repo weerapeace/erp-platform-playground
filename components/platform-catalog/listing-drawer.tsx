@@ -12,7 +12,7 @@
  *   เฟส 2: แก้ชื่อ/รายละเอียด/จุดเด่น (useLazadaEdit → /api/lazada/listing-edit) + เปิด/ปิดขาย ทั้งสินค้า/ทีละตัวเลือก (useLazadaDisplay → /listing-display)
  *   หัว/แท็บจับคู่/ประวัติ ใช้ร่วมกับ LINE · แผนเปิดให้แก้ขึ้น Lazada ทีละเฟส: docs/lazada-connector.md
  * TikTok Shop: แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก TikTok → ./tiktok-listing-panels (GET /api/tiktok-shop/listing-detail)
- *   เฟส A: แก้ชื่อ (useTiktokEdit → /api/tiktok-shop/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useTiktokDisplay → /listing-display) · ที่เหลือดูอย่างเดียว
+ *   เฟส A: แก้ชื่อ (useTiktokEdit → /api/tiktok-shop/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useTiktokDisplay → /listing-display) · เฟส B: ราคาต่อตัวเลือก (→ /listing-prices) · ที่เหลือดูอย่างเดียว
  *   แผนเฟส + กติกา TikTok: docs/tiktok-shop-connector.md
  *
  * ข้อมูล: GET /api/platform-catalog?view=listing (รายละเอียด+ประวัติ) + ?view=variants (ตัวเลือก↔SKU + ราคาที่ระบบจะส่ง)
@@ -473,7 +473,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} /> : <TiktokOptionsPanel state={tt} />)
+                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}

@@ -183,3 +183,80 @@ export function keepSkuStatus<T extends { id: string | null; status: string | nu
   const old = new Map(arrOf(obj(prev)?.skus).map((s) => [str(s.id), str(s.status)]));
   return next.map((s) => (s.status == null && s.id && old.get(s.id) ? { ...s, status: old.get(s.id) ?? null } : s));
 }
+
+// ───────────────────────── เฟส B: ราคาต่อตัวเลือก (2026-11-12 เจ้าของสั่ง "ทำเฟส B แก้ราคา") ─────────────────────────
+// Update Price 202309: มีผลทันที (ไม่ต้องรอตรวจ) · เฉพาะสินค้าสถานะ ACTIVATE และไม่อยู่ในโปรโมชันที่กำลังวิ่ง
+// ราคา = ราคาแสดงก่อนส่วนลด · ไทย 30–260,000 บาท ทศนิยม 2 ตำแหน่ง (เอกสาร Product pricing)
+export const TTS_PRICE_MIN = 30;
+export const TTS_PRICE_MAX = 260_000;
+
+export type TiktokPriceRow = { skuId: string; label: string; sellerSku: string | null; price: number | null };
+export type TiktokPriceChange = { skuId: string; label: string; before: number | null; after: number };
+export type TiktokPricePlan = { changes: TiktokPriceChange[]; errors: string[]; warnings: string[] };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const bahtText = (n: number | null) => (n == null ? "—" : `${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}฿`);
+
+/** แถวราคาตั้งต้นจากมุมมองในลิ้นชัก */
+export const tiktokPriceRowsFromView = (v: Pick<TiktokListingView, "skus">): TiktokPriceRow[] =>
+  v.skus.map((s) => ({ skuId: s.skuId, label: s.label, sellerSku: s.sellerSku, price: s.price }));
+
+/** แก้ราคาได้ไหม (สินค้าต้องเปิดขายอยู่) — null = ได้ · ข้อความ = เหตุผล */
+export function tiktokPriceBlock(v: Pick<TiktokListingView, "productStatus" | "status">): string | null {
+  return (v.productStatus ?? v.status) === "ACTIVATE" ? null : "TikTok ให้แก้ราคาได้เฉพาะสินค้าที่เปิดขายอยู่ — สินค้าที่ปิดขาย/ร่าง/ถูกระงับ ต้องแก้ใน Seller Center";
+}
+
+/** เทียบราคาเดิม → ที่แก้ (หน้าเว็บกับ API ใช้ตัวเดียวกัน) · ส่งเฉพาะตัวที่เปลี่ยน */
+export function planTiktokPrices(base: TiktokPriceRow[], edit: TiktokPriceRow[]): TiktokPricePlan {
+  const byId = new Map(base.map((r) => [r.skuId, r]));
+  const changes: TiktokPriceChange[] = [];
+  const errors: string[] = [];
+  let bigDrop = 0, bigRise = 0;
+  for (const e of edit) {
+    const b = byId.get(e.skuId);
+    if (!b) { errors.push(`ไม่พบตัวเลือก ${e.label} บนร้าน — กดดึงตัวนี้จาก TikTok ใหม่`); continue; }
+    if (e.price == null) { if (b.price != null) errors.push(`${b.label}: ราคาว่างไม่ได้`); continue; }
+    const after = round2(e.price);
+    if (b.price != null && Math.abs(after - b.price) < 0.005) continue;
+    if (!Number.isFinite(after) || after < TTS_PRICE_MIN || after > TTS_PRICE_MAX) {
+      errors.push(`${b.label}: ราคาต้องอยู่ระหว่าง ${TTS_PRICE_MIN.toLocaleString()}–${TTS_PRICE_MAX.toLocaleString()} บาท (TikTok ไทย)`);
+      continue;
+    }
+    if (b.price != null && b.price > 0) {
+      if (after <= b.price * 0.5) bigDrop++;
+      else if (after >= b.price * 2) bigRise++;
+    }
+    changes.push({ skuId: b.skuId, label: b.label, before: b.price, after });
+  }
+  const warnings: string[] = [];
+  if (changes.length) warnings.push("ราคาบน TikTok เปลี่ยนทันทีที่กดส่ง (ไม่ต้องรอตรวจ) — สินค้าที่อยู่ในโปรโมชัน TikTok จะไม่ยอมให้แก้");
+  if (bigDrop) warnings.push(`ลดราคาลงครึ่งหนึ่งหรือมากกว่า ${bigDrop} ตัวเลือก — ตรวจตัวเลขอีกครั้ง`);
+  if (bigRise) warnings.push(`ขึ้นราคาเป็น 2 เท่าหรือมากกว่า ${bigRise} ตัวเลือก — ตรวจตัวเลขอีกครั้ง`);
+  return { changes, errors, warnings };
+}
+
+/** ข้อความแสดงการเปลี่ยน (ยืนยัน/ประวัติ) */
+export const tiktokPriceChangeText = (c: Pick<TiktokPriceChange, "before" | "after">): string => `${bahtText(c.before)} → ${bahtText(c.after)}`;
+
+/**
+ * แก้ราคาหลายตัวเลือกพร้อมกัน (ติ๊กบางตัว = เฉพาะที่ติ๊ก · ไม่ติ๊ก = ทุกตัว) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง
+ * price = ตั้งราคาเดียวกัน · pct = ปรับตาม % จากราคาเดิม (−10 = ลด 10% · ปัดเป็นบาทเต็ม)
+ */
+export function applyTiktokBulkPrice(rows: TiktokPriceRow[], selected: Set<string>, opt: { price?: number | null; pct?: number | null }): { rows: TiktokPriceRow[]; changed: number; error: string | null } {
+  const hasPrice = opt.price != null && Number.isFinite(opt.price);
+  const hasPct = opt.pct != null && Number.isFinite(opt.pct) && opt.pct !== 0;
+  if (!hasPrice && !hasPct) return { rows, changed: 0, error: "ใส่ราคา หรือ % ที่จะปรับก่อน" };
+  if (hasPrice && hasPct) return { rows, changed: 0, error: "เลือกอย่างใดอย่างหนึ่ง: ตั้งราคา หรือ ปรับ %" };
+  if (hasPct && (opt.pct! <= -100 || opt.pct! > 500)) return { rows, changed: 0, error: "ปรับ % ได้ระหว่าง −99 ถึง +500" };
+  let changed = 0;
+  const out = rows.map((r) => {
+    if (selected.size && !selected.has(r.skuId)) return r;
+    let next: number | null = r.price;
+    if (hasPrice) next = round2(opt.price!);
+    else if (r.price != null) next = Math.round(r.price * (1 + opt.pct! / 100));
+    if (next === r.price) return r;
+    changed++;
+    return { ...r, price: next };
+  });
+  return { rows: out, changed, error: null };
+}

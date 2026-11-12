@@ -11,8 +11,9 @@
  * ข้อมูล: GET /api/tiktok-shop/listing-detail (ดึงสด ไม่บันทึก) · ปุ่ม "ดึงตัวนี้จาก TikTok" = POST (อัปเดตสำเนาย่อในระบบด้วย)
  * ส่งขึ้นร้านจริง (ถามก่อนเสมอ · มีประวัติ): POST /api/tiktok-shop/listing-edit · /api/tiktok-shop/listing-display
  * กฎ: lib/tiktok-listing-edit (pure + เทสต์ — หน้าเว็บกับ API ใช้ตัวเดียวกัน) · แผนเฟส: docs/tiktok-shop-connector.md
- * ยังไม่ทำ: รายละเอียด · รูป · ราคา · สต๊อก (BigSeller ยังซิงค์สต๊อกอยู่) — ดูอย่างเดียว
- * ของกลางที่ใช้: MiniTable · ConfirmDialog · ToggleSwitch · state-views · Icon · sanitizeRichHtml
+ * เฟส B: ราคาต่อตัวเลือก (แท็บตัวเลือก & ราคา → POST /api/tiktok-shop/listing-prices · มีผลทันที) — ปุ่มบันทึกเดียวกับชื่อ
+ * ยังไม่ทำ: รายละเอียด · รูป · สต๊อก (BigSeller ยังซิงค์สต๊อกอยู่) — ดูอย่างเดียว
+ * ของกลางที่ใช้: MiniTable · MoneyInput · ConfirmDialog · ToggleSwitch · state-views · Icon · sanitizeRichHtml
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
@@ -23,9 +24,11 @@ import { ToggleSwitch } from "@/components/toggle-switch";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
+import { MoneyInput } from "@/components/money-input";
 import {
-  planTiktokDisplay, planTiktokTitle, tiktokIsOpen, tiktokStatusBadge, ttsTitleLength, TTS_TITLE_MAX, TTS_TITLE_MIN,
-  type TiktokListingDetailResponse, type TiktokListingView, type TiktokSkuView, type TiktokWriteResponse,
+  applyTiktokBulkPrice, planTiktokDisplay, planTiktokPrices, planTiktokTitle, tiktokIsOpen, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, tiktokStatusBadge, ttsTitleLength,
+  TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN,
+  type TiktokListingDetailResponse, type TiktokListingView, type TiktokPricePlan, type TiktokPriceRow, type TiktokSkuView, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 
 export type TiktokListingState = {
@@ -91,13 +94,22 @@ export function useTiktokListing(listingId: string | null, onSaved?: () => void)
   return { listingId, view, error, loading, fetchedAt, reload: () => setN((x) => x + 1), refresh, refreshing, apply };
 }
 
-// ───────────────────────── เฟส A: แก้ชื่อ ─────────────────────────
+// ───────────────────────── เฟส A: แก้ชื่อ + เฟส B: ราคา (ปุ่มบันทึกเดียว) ─────────────────────────
 export type TiktokEditApi = {
   canEdit: boolean;
   /** ชื่อตั้งต้น = ชื่อที่รอตรวจ (ถ้ามี) ไม่งั้นชื่อบนร้าน */
   baseTitle: string | null;
   title: string | null;
   setTitle: (v: string) => void;
+  /** เฟส B: ราคาต่อตัวเลือก (null = ยังไม่มีข้อมูล) */
+  prices: TiktokPriceRow[] | null;
+  setPrice: (skuId: string, price: number | null) => void;
+  setPrices: (rows: TiktokPriceRow[]) => void;
+  /** แก้ราคาไม่ได้เพราะอะไร (สินค้าไม่ได้เปิดขาย) · null = แก้ได้ */
+  priceBlock: string | null;
+  pricePlan: TiktokPricePlan | null;
+  /** จำนวนรายการที่แก้ (ชื่อ + ราคาแต่ละตัว) */
+  changeCount: number;
   errors: string[];
   dirty: boolean;
   reset: () => void;
@@ -109,63 +121,103 @@ export type TiktokEditApi = {
 export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSaved?: (title: string) => void): TiktokEditApi {
   const toast = useToast();
   const baseTitle = state.view ? (state.view.pendingTitle ?? state.view.title) : null;
+  const priceBase = useMemo(() => (state.view ? tiktokPriceRowsFromView(state.view) : null), [state.view]);
+  const priceBlock = state.view ? tiktokPriceBlock(state.view) : null;
   const [title, setTitle] = useState<string | null>(null);
+  const [prices, setPricesState] = useState<TiktokPriceRow[] | null>(null);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
+  // ข้อมูลจากร้านเปลี่ยน (เปิดตัวใหม่ / ดึงใหม่ / ส่งสำเร็จ) → ฟอร์มเริ่มจากของล่าสุด
   useEffect(() => { setTitle(baseTitle); }, [baseTitle]);
+  useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
   const plan = useMemo(() => (baseTitle != null && title != null ? planTiktokTitle(baseTitle, title) : null), [baseTitle, title]);
-  const dirty = !!plan?.changed;
+  const pricePlan = useMemo(() => (priceBase && prices ? planTiktokPrices(priceBase, prices) : null), [priceBase, prices]);
+  const titleDirty = !!plan?.changed;
+  const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
+  const dirty = titleDirty || priceDirty;
+  const changeCount = (titleDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0);
+  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? [])];
 
+  const post = async (url: string, payload: unknown) => {
+    const r = await apiFetch(url, { method: "POST", body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as TiktokWriteResponse;
+    return { r, j };
+  };
+  // ส่งทีละส่วน: ราคา (มีผลทันที) → ชื่อ (ส่งตรวจ) · ส่วนแรกพลาด = ไม่ส่งต่อ
   const save = async () => {
-    if (!state.listingId || !plan || baseTitle == null) return;
+    if (!state.listingId || baseTitle == null || !priceBase || !prices) return;
     setSaving(true);
+    const done: string[] = [];
+    let saved = false;
+    let lastView: TiktokListingView | null = null;
     try {
-      const r = await apiFetch("/api/tiktok-shop/listing-edit", { method: "POST", body: JSON.stringify({ listing_id: state.listingId, before_title: baseTitle, title: plan.title }) });
-      const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as TiktokWriteResponse;
-      if (!j.ok) {
-        toast.error(r.status === 401 ? NO_AUTH : (j.error ?? `HTTP ${r.status}`));
-        if (r.status === 409 && j.view) { setAsking(false); state.apply(j.view); }
-        return;
+      if (priceDirty) {
+        const { r, j } = await post("/api/tiktok-shop/listing-prices", { listing_id: state.listingId, before: priceBase, edit: prices });
+        if (!j.ok) {
+          toast.error(r.status === 401 ? NO_AUTH : `ราคา: ${j.error ?? `HTTP ${r.status}`}${titleDirty ? " (ยังไม่ได้ส่งชื่อ)" : ""}`);
+          if (r.status === 409 && j.view) { setAsking(false); state.apply(j.view); }
+          return;
+        }
+        saved = true; done.push(j.summary ?? "ราคา");
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        if (j.view) lastView = j.view;
       }
-      toast.success(`${j.summary ?? "แก้ชื่อแล้ว"} — บันทึกประวัติแล้ว`);
-      (j.warnings ?? []).forEach((w) => toast.warning(w));
+      if (titleDirty && plan) {
+        const { r, j } = await post("/api/tiktok-shop/listing-edit", { listing_id: state.listingId, before_title: baseTitle, title: plan.title });
+        if (!j.ok) {
+          toast.error(r.status === 401 ? NO_AUTH : `ชื่อ: ${j.error ?? `HTTP ${r.status}`}`);
+          if (j.view) lastView = j.view;
+          if (r.status === 409) setAsking(false);
+          if (!saved) { if (lastView) state.apply(lastView); return; }
+        } else {
+          saved = true; done.push(j.summary ?? "แก้ชื่อแล้ว");
+          (j.warnings ?? []).forEach((w) => toast.warning(w));
+          if (j.view) lastView = j.view;
+        }
+      }
+      if (done.length) toast.success(`ส่งขึ้น TikTok แล้ว: ${done.join(" · ")} — บันทึกประวัติแล้ว`);
       setAsking(false);
-      if (j.view) state.apply(j.view);
-      onSaved?.(plan.title);
+      if (lastView) state.apply(lastView);
     } catch (e) { toast.error(`ส่งขึ้น TikTok ไม่สำเร็จ: ${(e as Error).message}`); }
-    finally { setSaving(false); }
+    finally { setSaving(false); if (saved) onSaved?.(plan?.title ?? baseTitle); }
   };
 
+  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
-      title="ส่งชื่อใหม่ขึ้นร้าน TikTok?" confirmText="ส่งขึ้น TikTok"
-      message={plan ? (
+      title={`ส่งการแก้ไข ${changeCount.toLocaleString()} รายการขึ้นร้าน TikTok?`} confirmText="ส่งขึ้น TikTok"
+      message={(
         <div className="space-y-2 text-sm">
-          <p>ระบบจะแก้ชื่อสินค้าบนร้าน TikTok จริง (ส่งเฉพาะชื่อ · ไม่แตะราคา/สต๊อก/รูป) · มีประวัติว่าใครแก้อะไร</p>
-          <ul className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
-            <li><span className="font-medium text-slate-700">ชื่อเดิม:</span> <span className="text-slate-400 line-through">{baseTitle}</span></li>
-            <li><span className="font-medium text-slate-700">ชื่อใหม่:</span> <span className="text-slate-800">{plan.title}</span></li>
+          <p>ระบบจะแก้สินค้าบนร้าน TikTok จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · ไม่แตะสต๊อก/รูป/สถานะเปิดปิด) · มีประวัติว่าใครแก้อะไร</p>
+          <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
+            {titleDirty && plan && <li><span className="font-medium text-slate-700">ชื่อสินค้า:</span> <span className="text-slate-400 line-through">{baseTitle}</span> → <span className="text-slate-800">{plan.title}</span></li>}
+            {(pricePlan?.changes ?? []).map((c) => (
+              <li key={c.skuId}><span className="font-medium text-slate-700">ราคา {c.label}:</span> <span className="text-slate-800">{tiktokPriceChangeText(c)}</span></li>
+            ))}
           </ul>
-          {plan.warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
+          {warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
         </div>
-      ) : ""} />
+      )} />
   );
   return {
-    canEdit, baseTitle, title, errors: plan?.errors ?? [], dirty, saving, dialog,
+    canEdit, baseTitle, title, prices, priceBlock, pricePlan, changeCount, errors, dirty, saving, dialog,
     setTitle: (v) => setTitle(v),
-    reset: () => setTitle(baseTitle),
+    setPrice: (skuId, price) => setPricesState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, price } : r)) : rows)),
+    setPrices: (rows) => setPricesState(rows),
+    reset: () => { setTitle(baseTitle); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); },
     ask: () => setAsking(true),
   };
 }
 
-/** แถบท้ายลิ้นชัก (TikTok) — สถานะการแก้ + ยกเลิก + บันทึกขึ้น TikTok */
+/** แถบท้ายลิ้นชัก (TikTok) — สถานะการแก้ + ยกเลิก + บันทึกขึ้น TikTok (ชื่อ + ราคา ปุ่มเดียว) */
 export function TiktokEditFooter({ edit, state }: { edit: TiktokEditApi; state: TiktokListingState }) {
   if (!edit.canEdit) return <span className="text-xs text-slate-400">TikTok: ดูอย่างเดียว — ไม่มีสิทธิ์ส่งขึ้นร้าน</span>;
   if (!state.view) return <span className="text-xs text-slate-400">กำลังดึงข้อมูลจาก TikTok…</span>;
   return (
     <div className="flex w-full flex-wrap items-center gap-2">
       <span className="min-w-0 flex-1 text-xs text-slate-500">
-        {edit.errors.length ? <span className="text-rose-600">{edit.errors[0]}</span> : edit.dirty ? "แก้ชื่อแล้ว — ยังไม่ได้ส่งขึ้น TikTok" : "ยังไม่ได้แก้อะไร"}
+        {edit.errors.length ? <span className="text-rose-600">{edit.errors[0]}{edit.errors.length > 1 ? ` (และอีก ${edit.errors.length - 1})` : ""}</span>
+          : edit.dirty ? `แก้แล้ว ${edit.changeCount.toLocaleString()} รายการ — ยังไม่ได้ส่งขึ้น TikTok` : "ยังไม่ได้แก้อะไร"}
       </span>
       {edit.dirty && <button type="button" onClick={edit.reset} disabled={edit.saving} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">ยกเลิกที่แก้</button>}
       <button type="button" disabled={!edit.dirty || edit.errors.length > 0 || edit.saving} onClick={edit.ask}
@@ -285,7 +337,7 @@ export function TiktokInfoPanel({ state, edit }: { state: TiktokListingState; ed
     <div className="space-y-3 text-sm">
       <p className="flex items-start gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
         <Icon name="info" className="mt-0.5 shrink-0" />
-        {can ? "ข้อมูลสดจากร้าน TikTok · แก้ชื่อแล้วกด “บันทึกขึ้น TikTok” ด้านล่าง (ถามก่อนส่ง) · TikTok จะตรวจชื่อใหม่ก่อน ระหว่างตรวจร้านยังขายชื่อเดิม · รายละเอียด/รูป/ราคา ยังแก้จากที่นี่ไม่ได้" : "ดูอย่างเดียว — ข้อมูลสดจากร้าน TikTok"}
+        {can ? "ข้อมูลสดจากร้าน TikTok · แก้ชื่อแล้วกด “บันทึกขึ้น TikTok” ด้านล่าง (ถามก่อนส่ง) · TikTok จะตรวจชื่อใหม่ก่อน ระหว่างตรวจร้านยังขายชื่อเดิม · ราคาแก้ที่แท็บตัวเลือก & ราคา (มีผลทันที) · รายละเอียด/รูป ยังแก้จากที่นี่ไม่ได้" : "ดูอย่างเดียว — ข้อมูลสดจากร้าน TikTok"}
       </p>
       {v.rejectReasons.length > 0 && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -340,20 +392,69 @@ export function TiktokImagesPanel({ state, onOpen }: { state: TiktokListingState
   );
 }
 
-/** แท็บตัวเลือก & ราคา — ดูอย่างเดียว (ราคา/สต๊อก ยังไม่เปิดให้แก้) */
-export function TiktokOptionsPanel({ state }: { state: TiktokListingState }) {
+const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() === "" || !Number.isFinite(n) ? null : n; };
+
+/** แก้ราคาหลายตัวเลือกพร้อมกัน — เติมฟอร์มอย่างเดียว ยังไม่ส่ง (applyTiktokBulkPrice) */
+function TiktokBulkPriceBar({ edit, selected }: { edit: TiktokEditApi; selected: Set<string> }) {
+  const [price, setPrice] = useState("");
+  const [pct, setPct] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const apply = () => {
+    if (!edit.prices) return;
+    const r = applyTiktokBulkPrice(edit.prices, selected, { price: numOrNull(price), pct: numOrNull(pct) });
+    setErr(r.error ?? (r.changed === 0 ? "ราคาเท่าเดิมทุกตัว — ไม่มีอะไรเปลี่ยน" : null));
+    if (!r.error) edit.setPrices(r.rows);
+  };
+  const n = selected.size || (edit.prices?.length ?? 0);
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-2 text-xs text-violet-900">
+      <span className="font-medium">แก้{selected.size ? `ตัวที่ติ๊ก (${selected.size})` : `ทุกตัวเลือก (${n})`}พร้อมกัน:</span>
+      <label className="inline-flex items-center gap-1">ตั้งราคา<MoneyInput value={price} onChange={(raw) => { setPrice(raw); setErr(null); }} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
+      <label className="inline-flex items-center gap-1">หรือ ปรับ<input type="number" min="-99" max="500" value={pct} onChange={(e) => { setPct(e.target.value); setErr(null); }} placeholder="-10" className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-right" />%</label>
+      <button type="button" onClick={apply} className="h-8 rounded-md bg-violet-600 px-2.5 text-white hover:bg-violet-700">ใช้กับ{selected.size ? `ที่ติ๊ก ${selected.size} ตัว` : "ทุกตัว"}</button>
+      {err && <span className="w-full text-rose-600">{err}</span>}
+      <span className="w-full text-[11px] text-violet-700/80">ปรับ % คิดจากราคาตอนนี้ ปัดเป็นบาทเต็ม (−10 = ลด 10%) · กดแล้วยังไม่ส่ง — ต้องกด “บันทึกขึ้น TikTok” (โชว์ก่อน → หลัง ให้ตรวจ)</span>
+    </div>
+  );
+}
+
+/** แท็บตัวเลือก & ราคา — เฟส B แก้ราคาได้เมื่อมีสิทธิ์และสินค้าเปิดขายอยู่ · สต๊อกดูอย่างเดียว */
+export function TiktokOptionsPanel({ state, edit }: { state: TiktokListingState; edit?: TiktokEditApi | null }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const g = gate(state); if (g) return g;
   const v = state.view!;
+  const canPrice = !!edit?.canEdit && !!edit.prices && !edit.priceBlock;
+  const rowOf = new Map((edit?.prices ?? []).map((r) => [r.skuId, r]));
   const cols: MiniColumn<TiktokSkuView>[] = [
     { key: "opt", header: "ตัวเลือก", width: "1.6fr", cell: (s) => <div className="min-w-0"><div className="truncate" title={s.label}>{s.label}</div><div className="truncate font-mono text-[11px] text-slate-400">{s.sellerSku ?? "ไม่มีรหัส"}</div></div> },
-    { key: "price", header: "ราคา", width: "6rem", align: "right", cell: (s) => <span>{baht(s.price)}</span> },
+    canPrice
+      ? {
+        key: "price", header: "ราคา (บาท)", width: "7.5rem", align: "right",
+        cell: (s) => {
+          const r = rowOf.get(s.skuId);
+          const changed = r != null && r.price !== s.price;
+          return (
+            <span className="block leading-tight">
+              <MoneyInput value={r?.price ?? null} onChange={(raw) => edit!.setPrice(s.skuId, numOrNull(raw))}
+                className={`h-8 w-full rounded-md border px-2 text-right text-sm ${changed ? "border-violet-400 bg-violet-50" : "border-slate-200"}`} />
+              {changed && <span className="block text-right text-[11px] text-slate-400 line-through">{baht(s.price)}</span>}
+            </span>
+          );
+        },
+      }
+      : { key: "price", header: "ราคา", width: "6rem", align: "right", cell: (s) => <span>{baht(s.price)}</span> },
     { key: "stock", header: "สต๊อก", width: "4.5rem", align: "right", cell: (s) => (s.stock == null ? <span className="text-slate-300">—</span> : <span className={s.stock === 0 ? "text-rose-600" : ""}>{s.stock.toLocaleString()}</span>) },
     { key: "st", header: "สถานะ", width: "5.5rem", cell: (s) => (s.status === "DEACTIVATED" ? <span className="text-slate-500">ปิด</span> : s.status === "NORMAL" ? <span className="text-emerald-700">ปกติ</span> : <span className="text-slate-300">—</span>) },
   ];
   return (
     <div className="space-y-2">
-      <MiniTable rows={v.skus} columns={cols} rowKey={(s) => s.skuId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-tiktok-options" />
-      <p className="text-[11px] text-slate-400">ราคาและสต๊อกดูอย่างเดียว — สต๊อกยังซิงค์ผ่าน BigSeller · แก้ราคาเป็นเฟสถัดไป</p>
+      {canPrice && <TiktokBulkPriceBar edit={edit!} selected={selected} />}
+      {edit?.canEdit && edit.priceBlock && <p className="flex items-start gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="info" className="mt-0.5 shrink-0" />{edit.priceBlock}</p>}
+      <MiniTable rows={v.skus} columns={cols} rowKey={(s) => s.skuId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-tiktok-options"
+        selectable={canPrice} selected={selected} onSelectedChange={setSelected} />
+      <p className="text-[11px] text-slate-400">
+        {canPrice ? `ราคา = ราคาที่ลูกค้าเห็นก่อนส่วนลด · TikTok ไทยรับ ${TTS_PRICE_MIN.toLocaleString()}–${TTS_PRICE_MAX.toLocaleString()} บาท · มีผลทันทีเมื่อกดบันทึก (ส่วนลด/โปรโมชันแก้ใน Seller Center) · ` : ""}สต๊อกดูอย่างเดียว — ยังซิงค์ผ่าน BigSeller
+      </p>
     </div>
   );
 }

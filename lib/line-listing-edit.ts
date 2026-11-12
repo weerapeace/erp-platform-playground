@@ -277,6 +277,11 @@ export function listingHistoryText(meta: unknown): string {
     return `แก้บน TikTok: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : pending ? " (TikTok ส่งไปรอตรวจ)" : ""}`;
   }
   if (src === "tiktok_listing_display") return `${m.open ? "เปิดขาย" : "ปิดขาย"}บน TikTok${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.summary).includes("รอ") ? " (รอ TikTok ตรวจ)" : ""}`;
+  if (src === "tiktok_listing_prices") {
+    const ch = arr(m.changes).map(obj).filter((c): c is Obj => !!c);
+    const detail = ch.length === 1 ? ` (${str(ch[0].text)})` : "";
+    return `แก้ราคาบน TikTok ${ch.length} ตัวเลือก${detail}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
+  }
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
   if (ig) return ig.to ? `ตั้งไม่ต้องจับคู่${m.reason ? ` · ${str(m.reason)}` : ""}` : "เลิกข้าม (กลับไปรอจับคู่)";

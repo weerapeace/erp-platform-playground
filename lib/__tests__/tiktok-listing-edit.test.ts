@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   tiktokListingView, tiktokStatusBadge, tiktokIsOpen, planTiktokDisplay, planTiktokTitle, ttsTitleLength, tiktokDisplayErrors, keepSkuStatus,
-  TTS_TITLE_MIN, TTS_TITLE_MAX,
+  TTS_TITLE_MIN, TTS_TITLE_MAX, TTS_PRICE_MIN, TTS_PRICE_MAX, planTiktokPrices, applyTiktokBulkPrice, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, type TiktokPriceRow,
 } from "@/lib/tiktok-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
 
@@ -162,5 +162,64 @@ describe("ประวัติในลิ้นชัก (listingHistoryText)"
   test("เปิด/ปิดขาย", () => {
     expect(listingHistoryText({ source: "tiktok_listing_display", open: false, ok: true, summary: "ปิดขายทั้งสินค้า" })).toBe("ปิดขายบน TikTok");
     expect(listingHistoryText({ source: "tiktok_listing_display", open: true, ok: true, summary: "ส่งเปิดขายแล้ว — รอ TikTok ตรวจ" })).toBe("เปิดขายบน TikTok (รอ TikTok ตรวจ)");
+  });
+});
+
+describe("เฟส B ราคา — planTiktokPrices / applyTiktokBulkPrice / tiktokPriceBlock", () => {
+  const base: TiktokPriceRow[] = [
+    { skuId: "a", label: "ดำ", sellerSku: "X-01", price: 590 },
+    { skuId: "b", label: "น้ำตาล", sellerSku: "X-02", price: 650 },
+  ];
+  test("ไม่แก้ = ไม่มีอะไรส่ง ไม่มีคำเตือน", () => {
+    expect(planTiktokPrices(base, base.map((r) => ({ ...r })))).toEqual({ changes: [], errors: [], warnings: [] });
+  });
+  test("ส่งเฉพาะตัวที่เปลี่ยน + ปัด 2 ตำแหน่ง + เตือนว่ามีผลทันที", () => {
+    const p = planTiktokPrices(base, [{ ...base[0], price: 499.999 }, base[1]]);
+    expect(p.changes).toEqual([{ skuId: "a", label: "ดำ", before: 590, after: 500 }]);
+    expect(p.errors).toEqual([]);
+    expect(p.warnings[0]).toContain("ทันที");
+    expect(tiktokPriceChangeText(p.changes[0])).toBe("590฿ → 500฿");
+  });
+  test("นอกช่วง 30–260,000 / ว่าง = error", () => {
+    expect(planTiktokPrices(base, [{ ...base[0], price: 29 }]).errors[0]).toContain("30");
+    expect(planTiktokPrices(base, [{ ...base[0], price: 260_001 }]).errors[0]).toContain("260,000");
+    expect(planTiktokPrices(base, [{ ...base[0], price: null }]).errors[0]).toContain("ว่าง");
+    expect(TTS_PRICE_MIN).toBe(30);
+    expect(TTS_PRICE_MAX).toBe(260_000);
+  });
+  test("ตัวเลือกที่ไม่มีบนร้าน = error", () => {
+    expect(planTiktokPrices(base, [{ skuId: "zz", label: "?", sellerSku: null, price: 100 }]).errors[0]).toContain("ไม่พบตัวเลือก");
+  });
+  test("เปลี่ยนแรง (ลดครึ่ง / ขึ้น 2 เท่า) = เตือนให้ตรวจ", () => {
+    expect(planTiktokPrices(base, [{ ...base[0], price: 295 }]).warnings.join(" ")).toContain("ครึ่ง");
+    expect(planTiktokPrices(base, [{ ...base[0], price: 1180 }]).warnings.join(" ")).toContain("2 เท่า");
+  });
+  test("ตั้งราคาเดียวกัน — ไม่ติ๊ก = ทุกตัว · ติ๊ก = เฉพาะที่ติ๊ก", () => {
+    expect(applyTiktokBulkPrice(base, new Set(), { price: 450 }).rows.map((r) => r.price)).toEqual([450, 450]);
+    const r = applyTiktokBulkPrice(base, new Set(["b"]), { price: 450 });
+    expect(r.rows.map((x) => x.price)).toEqual([590, 450]);
+    expect(r.changed).toBe(1);
+  });
+  test("ปรับ % ปัดเป็นบาทเต็ม", () => {
+    expect(applyTiktokBulkPrice(base, new Set(), { pct: -10 }).rows.map((r) => r.price)).toEqual([531, 585]);
+  });
+  test("ใส่ไม่ครบ / ใส่ทั้งคู่ / % เกินช่วง = error", () => {
+    expect(applyTiktokBulkPrice(base, new Set(), {}).error).toBeTruthy();
+    expect(applyTiktokBulkPrice(base, new Set(), { price: 100, pct: 10 }).error).toBeTruthy();
+    expect(applyTiktokBulkPrice(base, new Set(), { pct: -100 }).error).toBeTruthy();
+  });
+  test("แก้ราคาได้เฉพาะสินค้าเปิดขาย", () => {
+    expect(tiktokPriceBlock({ productStatus: "ACTIVATE", status: "PENDING" })).toBeNull();
+    expect(tiktokPriceBlock({ productStatus: "SELLER_DEACTIVATED", status: "SELLER_DEACTIVATED" })).toContain("เปิดขาย");
+  });
+  test("แถวราคาจากมุมมอง", () => {
+    expect(tiktokPriceRowsFromView(tiktokListingView(detail)!)).toEqual([
+      { skuId: "s1", label: "สี: ดำ", sellerSku: "MPU12-04", price: 590 },
+      { skuId: "s2", label: "MPU12-05", sellerSku: "MPU12-05", price: 650 },
+    ]);
+  });
+  test("ข้อความประวัติ", () => {
+    expect(listingHistoryText({ source: "tiktok_listing_prices", ok: true, changes: [{ label: "ราคา ดำ", text: "590฿ → 500฿" }] })).toBe("แก้ราคาบน TikTok 1 ตัวเลือก (590฿ → 500฿)");
+    expect(listingHistoryText({ source: "tiktok_listing_prices", ok: false, error: "อยู่ในโปรโมชัน", changes: [{}, {}] })).toBe("แก้ราคาบน TikTok 2 ตัวเลือก — ไม่สำเร็จ: อยู่ในโปรโมชัน");
   });
 });
