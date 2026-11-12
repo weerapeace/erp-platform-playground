@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { ScrollTabs } from "@/components/scroll-tabs";
@@ -158,7 +159,7 @@ export function ParentProductionTab({ parentId }: { parentId: string | null }) {
       {sku && (
         <div className="rounded-xl border border-slate-200 bg-white">
           <div className="flex items-end gap-2 px-3 pt-2 border-b border-slate-200">
-            <span className="text-sm font-medium text-slate-800 pb-2 shrink-0">🧾 สูตรผลิต</span>
+            <span className="text-sm font-medium text-slate-800 pb-2 shrink-0"><Icon value="🧾" size={16} className="inline-block align-[-3px] mr-1" />สูตรผลิต</span>
             {versions.length > 0 && (
               <ScrollTabs activeKey={bom?.bom_code ?? null} className="flex-1 min-w-0">
                 {versions.map((b, i) => (
@@ -236,7 +237,7 @@ export function ParentProductionTab({ parentId }: { parentId: string | null }) {
       {/* 4) ประวัติการผลิต */}
       <div className="rounded-xl border border-slate-200 bg-white p-3">
         <MiniTable rows={mos} columns={moCols} rowKey={(m) => m.id} hideSearch dense countUnit="ใบ"
-          title={<span className="text-sm font-medium text-slate-800">🏭 ประวัติการผลิต</span>}
+          title={<span className="text-sm font-medium text-slate-800"><Icon value="🏭" size={16} className="inline-block align-[-3px] mr-1" />ประวัติการผลิต</span>}
           actions={
             <span className="flex items-center gap-3 text-xs text-slate-500">
               {mos.length > 0 && <span className="tabular-nums">สั่งผลิต {fmt(totalQty, 0)} ชิ้น · ส่งแล้ว {fmt(totalRecv, 0)}</span>}

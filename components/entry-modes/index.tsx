@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { cachedJson } from "@/lib/client-cache";
 import { IMAGES_KEY, resolveEntryModes, type EntryMode, type EntryModeLevel, type EntryModeProgress, type EntryModeStat } from "@/lib/entry-modes";
 
@@ -105,10 +106,10 @@ export function EntryModeMenu({
           : ghost ? "border-transparent text-violet-700 bg-transparent hover:bg-violet-50"
           : "border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"}`}>
         {active ? <>
-          {active.icon || "📝"} {active.label}
+          <Icon value={active.icon || "📝"} size={15} /> {active.label}
           {bp && bp.total > 0 && <span className="tabular-nums opacity-90">· {bp.reqTotal ? `${bp.reqDone}/${bp.reqTotal}` : `${bp.done}/${bp.total}`}{bp.done >= bp.total ? " ✓" : ""}</span>}
         </> : <>
-          📝 {tr("โหมดลงรายละเอียด", "Entry mode")}
+          <Icon value="📝" size={15} /> {tr("โหมดลงรายละเอียด", "Entry mode")}
           {bp && bp.total > 0 && (reqMissing > 0
             ? <span className="text-[10.5px] px-1.5 rounded-full bg-rose-100 text-rose-700">{tr(`ขาด ${reqMissing}`, `${reqMissing} missing`)}</span>
             : bp.done >= bp.total ? <span className="text-[10.5px] px-1.5 rounded-full bg-emerald-100 text-emerald-700">✓ {tr("ครบ", "done")}</span> : null)}
@@ -144,7 +145,7 @@ export function EntryModeMenu({
             {modes.map((m) => (
               <button key={m.key} type="button" onClick={() => { setOpen(false); onPick(m.key); }}
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm ${m.key === activeKey ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-slate-50"}`}>
-                <span className="w-5 text-center">{m.icon || "📝"}</span>
+                <span className="w-5 inline-flex justify-center"><Icon value={m.icon || "📝"} size={15} /></span>
                 <span className="flex-1 min-w-0 truncate">{m.label}</span>
                 <CountChip p={progressOf(m)} />
               </button>

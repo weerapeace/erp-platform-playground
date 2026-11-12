@@ -14,6 +14,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
+import { PermissionAudienceButton } from "@/components/permission-audience";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -316,7 +318,7 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
       {/* ราคาขาย */}
       <div className="rounded-xl border border-slate-200 bg-white p-3">
         <MiniTable rows={skus} columns={saleCols} rowKey={(s) => s.id} hideSearch dense countUnit="SKU"
-          title={<span className="text-sm font-medium text-slate-800">🏷 ราคาขาย</span>}
+          title={<span className="text-sm font-medium text-slate-800"><Icon value="🏷️" size={16} className="inline-block align-[-3px] mr-1" />ราคาขาย</span>}
           groupBy={(s) => s.color || "ไม่ระบุสี"} groupLabel="สี" defaultGrouped={groupByColor} />
         {(data.shops.length > 0 || data.web.length > 0) && (
           <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
@@ -342,8 +344,11 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
         ) : (
           <>
             <div className="flex items-center gap-2 flex-wrap mb-2">
-              <span className="text-sm font-medium text-slate-800">📦 ต้นทุน / กำไร</span>
+              <span className="text-sm font-medium text-slate-800"><Icon value="📦" size={16} className="inline-block align-[-3px] mr-1" />ต้นทุน / กำไร</span>
               <span className="text-[11px] text-slate-400">ต่อชิ้น · สูตรเดียวกับเครื่องคิดต้นทุน</span>
+              {/* 👁 ใครเห็นต้นทุน/กำไร (สิทธิ์ products.cost.view — ตำแหน่ง + รายคน) · เฉพาะคนจัดการตำแหน่งได้ */}
+              <PermissionAudienceButton permissionKey="products.cost.view" label="ดูต้นทุน / กำไร"
+                note="ติ๊กแล้วบันทึกทันที · เป็นสิทธิ์ “ดูต้นทุน” ตัวเดียวกับ ตีราคาใบออกแบบ · ราคาซื้อจากร้าน · ใบสำคัญจ่าย · ประวัติซื้อขาย SKU — เปลี่ยนที่นี่ = เปลี่ยนทุกที่" />
               <span className="ml-auto flex flex-wrap gap-1">
                 {COST_COLUMNS.map((c) => {
                   const on = !hidden.has(c.key);
@@ -364,7 +369,7 @@ export function ParentPriceTab({ parentId }: { parentId: string | null }) {
             {netCols.length > 0 && netRows.length > 0 && (
               <div className="mt-4 pt-3 border-t border-slate-100">
                 <MiniTable rows={netRows} columns={netTableCols} rowKey={(r) => r.sku.id} hideSearch dense countUnit="SKU"
-                  title={<span className="text-sm font-medium text-slate-800">💵 กำไรจริงต่อร้าน <span className="text-[11px] font-normal text-slate-400">หลังหักค่าธรรมเนียม · ต่อชิ้น</span></span>}
+                  title={<span className="text-sm font-medium text-slate-800"><Icon value="💵" size={16} className="inline-block align-[-3px] mr-1" />กำไรจริงต่อร้าน <span className="text-[11px] font-normal text-slate-400">หลังหักค่าธรรมเนียม · ต่อชิ้น</span></span>}
                   actions={canEdit ? (
                     <button type="button" onClick={() => setFeeDraft(Object.fromEntries(feePlatforms.map((p) => [p.code, { pct: String(fees[p.code]?.pct ?? ""), fixed: String(fees[p.code]?.fixed ?? "") }])))}
                       className="h-7 px-2.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">⚙ ค่าธรรมเนียมร้าน</button>

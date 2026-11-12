@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { Popover } from "@/components/popover";
 import type { HealthItem, HealthLevel } from "@/lib/parent-health";
 
@@ -38,7 +39,7 @@ export function ParentHealthBadge({ parentId, version, goto }: {
       trigger={(toggle) => (
         <button type="button" onClick={toggle} title="สิ่งที่ยังขาดของสินค้านี้ — กดดูแล้วพาไปแก้"
           className={`h-7 px-2.5 rounded-md text-[12.5px] font-medium inline-flex items-center gap-1 border ${red ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"}`}>
-          ⚠ ต้องแก้ {items.length} อย่าง
+          <Icon value="⚠️" size={15} /> ต้องแก้ {items.length} อย่าง
         </button>
       )}>
       {(close) => (

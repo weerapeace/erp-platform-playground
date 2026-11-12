@@ -3241,7 +3241,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <button key={m} type="button" onClick={() => { setLangMode(m); setLangField({}); }}
                     title={m === "th" ? tr("สลับทุกช่องเป็นภาษาไทย (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to Thai (or switch one field with the TH/EN button by its label)") : tr("สลับทุกช่องเป็นภาษาอังกฤษ (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to English (or switch one field with the TH/EN button by its label)")}
                     className={`h-7 px-2.5 rounded-md text-[12.5px] font-semibold ${pairFields.every((f) => (langField[f.key] ?? langMode) === m) ? "bg-indigo-100 text-indigo-800" : "text-slate-500 hover:bg-indigo-50"}`}>
-                    {m === "th" ? `🇹🇭 ${tr("ไทย", "TH")}` : "🇬🇧 EN"}
+                    {m === "th" ? tr("ไทย", "TH") : "EN"}
                   </button>
                 ))}
               </div>
@@ -3262,7 +3262,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <button type="button" onClick={() => setAiDetailOpen(true)}
                     title={tr("ให้ AI ดูรูปสินค้าแล้วเขียนชื่อสินค้า / Introduction / Description ให้ทั้งไทยและอังกฤษ (ไม่แตะช่องขนาด)", "Let AI look at the product images and write name / introduction / description in Thai and English (never touches size fields)")}
                     className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-fuchsia-700 hover:bg-fuchsia-50">
-                    ✨ {tr("ให้ AI คิดรายละเอียด", "Let AI draft details")}
+                    <Icon value="✨" size={15} className="inline-block align-[-2px] mr-1" />{tr("ให้ AI คิดรายละเอียด", "Let AI draft details")}
                   </button>
                 )}
                 {copyAllBtn && (
@@ -3285,13 +3285,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <button type="button" onClick={() => void translateAll()} disabled={translating}
                     title={tr("แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)", "Translate Thai → empty English fields (filled ones are kept)")}
                     className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
-                    {translating ? tr("กำลังแปล…", "Translating…") : `🌐 ${tr("แปลทั้งหมด", "Translate all")}`}
+                    {translating ? tr("กำลังแปล…", "Translating…") : <><Icon value="🌐" size={15} className="inline-block align-[-2px] mr-1" />{tr("แปลทั้งหมด", "Translate all")}</>}
                   </button>
                   <span className="h-4 w-px bg-sky-200" aria-hidden="true" />
                   <button type="button" onClick={() => void translateAll({ overwrite: true })} disabled={translating}
                     title={tr("แปลใหม่ทับของเดิมทุกช่อง", "Re-translate and overwrite every field")}
                     className="h-7 px-2.5 rounded-md text-[12px] text-slate-500 hover:bg-sky-50 disabled:opacity-50">
-                    ↻ {tr("แปลทับ", "Overwrite")}
+                    <Icon name="refresh" size={14} className="inline-block align-[-2px] mr-1" />{tr("แปลทับ", "Overwrite")}
                   </button>
                 </div>
               )}
@@ -4198,7 +4198,8 @@ function LangPill({ mode, enFilled, onChange }: { mode: "th" | "en"; enFilled: b
 function sectionIconNode(icon?: string | null): React.ReactNode {
   if (!icon) return null;
   if (icon.startsWith("r2:")) return <img src={`/api/r2-image?key=${encodeURIComponent(icon.slice(3))}`} alt="" className="w-4 h-4 object-contain inline-block align-[-2px]" />;
-  return <span>{icon}</span>;
+  // ไอคอนกลาง (components/icon): อีโมจิเดิม → ไอคอนเส้น/มีสี ตามโหมดที่แอดมินตั้ง (เจ้าของขอ 2026-11-12 "icon แบบเส้น")
+  return <Icon value={icon} size={16} className="shrink-0" />;
 }
 
 // ปุ่มคัดลอกค่า field (เปิดผ่าน ui_style.copyable ใน Studio)
@@ -4302,7 +4303,7 @@ function LayoutTabs({
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 o.t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
-              {o.kind === "field" ? sectionIconNode(o.t.icon) : (o.t.icon && <span>{o.t.icon}</span>)}<span>{o.t.label}</span>
+              {sectionIconNode(o.t.icon)}<span>{o.t.label}</span>
             </button>
           ))}
         </ScrollTabs>
@@ -4367,7 +4368,7 @@ function LayoutTabs({
         {/* section พิเศษที่ฝังในแท็บนี้ (inTab) */}
         {inlineExtras.map((t) => (
           <div key={t.key} className="pt-1">
-            {t.label && <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{t.icon ? `${t.icon} ` : ""}{t.label}</h4>}
+            {t.label && <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2"><span className="inline-flex items-center gap-1">{sectionIconNode(t.icon)}{t.label}</span></h4>}
             {t.node}
           </div>
         ))}
@@ -4433,7 +4434,7 @@ function FormSections({
           return (
             <section key={groupKey}>
               <div className="flex items-center gap-1.5 pb-2 mb-3 border-b border-slate-100">
-                <span>{cfg.icon}</span>
+                {sectionIconNode(cfg.icon)}
                 <span className="text-sm font-semibold text-slate-700">{cfg.label}</span>
                 <span className="ml-auto">{sectionAction?.(groupKey, cfg.label, groupFields)}</span>
               </div>
@@ -4490,7 +4491,7 @@ function SectionTabBar({
                 : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
-            <span>{cfg.icon}</span>
+            {sectionIconNode(cfg.icon)}
             <span>{cfg.label}</span>
             <span className={`text-[10px] ${isActive ? "text-orange-400" : "text-slate-400"}`}>{groupFields.length}</span>
           </button>
@@ -4612,7 +4613,7 @@ function DetailSections({
             return (
               <section key={groupKey}>
                 <div className="flex items-center gap-1.5 pb-2 mb-3 border-b border-slate-100">
-                  <span>{cfg.icon}</span>
+                  {sectionIconNode(cfg.icon)}
                   <span className="text-sm font-semibold text-slate-700">{cfg.label}</span>
                 </div>
                 {renderDl(groupFields, 2)}

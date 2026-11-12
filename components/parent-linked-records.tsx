@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { HoverImage } from "@/components/hover-image";
@@ -86,7 +87,7 @@ export function ParentLinkedRecords({ parentId }: { parentId: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="flex items-center gap-2 flex-wrap px-3 pt-3 pb-2 border-b border-slate-100">
-        <span className="text-sm font-medium text-slate-800">🔗 รายการที่เชื่อมกับสินค้านี้</span>
+        <span className="text-sm font-medium text-slate-800"><Icon value="🔗" size={16} className="inline-block align-[-3px] mr-1" />รายการที่เชื่อมกับสินค้านี้</span>
         <span className="text-xs text-slate-400 tabular-nums">{total} รายการ</span>
         <span className="ml-auto flex flex-wrap gap-1">
           {[{ key: "all", label: "ทั้งหมด", icon: "" }, ...groups].map((g) => {
@@ -108,14 +109,14 @@ export function ParentLinkedRecords({ parentId }: { parentId: string }) {
         <div className="p-3 space-y-4">
           {groups.filter((g) => filter === "all" || filter === g.key).map((g) => (
             <section key={g.key} className="space-y-2.5">
-              {filter === "all" && <div className="text-[11.5px] font-semibold text-slate-500">{g.icon} {g.label}</div>}
+              {filter === "all" && <div className="text-[11.5px] font-semibold text-slate-500"><Icon value={g.icon} size={14} className="inline-block align-[-2px] mr-1" />{g.label}</div>}
               {withItems.filter((s) => s.group === g.key).map((src) => {
                 const open = expanded.has(src.key);
                 const items = open ? src.items : src.items.slice(0, SHOW);
                 return (
                   <div key={src.key}>
                     <div className="flex items-center gap-2 mb-1.5 text-xs">
-                      <span className="text-slate-700 font-medium">{src.icon} {src.label}</span>
+                      <span className="text-slate-700 font-medium"><Icon value={src.icon} size={14} className="inline-block align-[-2px] mr-1" />{src.label}</span>
                       <span className="text-slate-400 tabular-nums">{src.total}{src.more ? "+" : ""}</span>
                       {src.hint && <span className="text-[11px] text-slate-400">· {src.hint}</span>}
                       {src.listHref && <a href={src.listHref} target="_blank" rel="noopener noreferrer" className="ml-auto text-[11px] text-violet-700 hover:underline">ไปหน้ารายการ ↗</a>}

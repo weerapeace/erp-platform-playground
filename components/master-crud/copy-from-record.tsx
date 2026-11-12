@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
 import { buildCopyRows, defaultCopySelection, type CopyRow } from "@/lib/copy-record-diff";
@@ -155,13 +156,13 @@ export function CopyFromRecordButton({
         <button type="button" onClick={() => setOpen(true)}
           title={t("เลือกสินค้ารุ่นอื่น แล้วเลือกว่าจะคัดลอกช่องไหน (เทียบให้ดูก่อน)", "Pick another record, then choose which fields to copy (side-by-side preview)")}
           className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-violet-700 hover:bg-violet-50">
-          📋 {t("คัดลอกจากรุ่นอื่น", "Copy from another")}
+          <Icon value="📋" size={15} className="inline-block align-[-2px] mr-1" />{t("คัดลอกจากรุ่นอื่น", "Copy from another")}
         </button>
       ) : (
         <button type="button" onClick={() => setOpen(true)}
           title={t(`คัดลอกค่าในกลุ่ม “${sectionLabel}” จากระเบียนอื่น`, `Copy the “${sectionLabel}” section from another record`)}
           className="h-6 px-2 text-[11px] rounded-full border border-slate-200 text-slate-500 bg-white hover:bg-slate-50 hover:text-slate-700">
-          📋 {t("คัดลอกจากตัวอื่น", "Copy from another")}
+          <Icon value="📋" size={12} className="inline-block align-[-1px] mr-1" />{t("คัดลอกจากตัวอื่น", "Copy from another")}
         </button>
       )}
 

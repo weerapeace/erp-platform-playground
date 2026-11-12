@@ -258,7 +258,7 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
     toItem: (r) => ({ id: s(r.id), title: s(r.name) || "ลูกค้า", status: s(r.status) || null, date: day(r.created_at) }),
   },
   {
-    key: "store_wishlists", group: "web", label: "ลูกค้ากดถูกใจ", icon: "❤️",
+    key: "store_wishlists", group: "web", label: "ลูกค้ากดถูกใจ", icon: "⭐",
     table: "store_wishlists", select: "id, created_at",
     match: [{ by: "parent_id", column: "parent_sku_id" }],
     toItem: (r) => ({ id: s(r.id), title: "ถูกใจ", date: day(r.created_at) }),
