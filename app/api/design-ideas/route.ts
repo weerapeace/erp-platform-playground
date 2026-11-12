@@ -3,6 +3,7 @@
  *
  * GET  /api/design-ideas            → ไอเดียทั้งหมดที่ยังไม่เริ่มงานจริง (รอคัดจากไลน์ · เปิด · พักไว้ · เก็บแล้ว) ใหม่สุดก่อน · ≤500
  * GET  /api/design-ideas?setup=1    → แถบตั้งกลุ่มไลน์ "ส่งไอเดีย" (แอดมิน · ของกลาง loadLineGroupSetup)
+ * GET  /api/design-ideas?count=1    → { inbox } จำนวนชุดรอคัดจากไลน์ (ตัวเลขบนปุ่ม "ไอเดีย" ของ Dashboard · นับเบา ๆ)
  * POST /api/design-ideas            → จดไอเดียใหม่ { name, brand_id?, points?, links?, image_keys? }
  * เริ่มทำงานจริง = POST /api/design-sheets { idea_id } (ออกเลข DS + ย้ายรูป) · แก้/พัก/เก็บ = PATCH /api/design-ideas/[id]
  *
@@ -29,6 +30,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (new URL(request.url).searchParams.has("setup")) {
     const deniedAdmin = await guardApi(request, "admin.users"); if (deniedAdmin) return deniedAdmin;
     return NextResponse.json({ ...(await loadLineGroupSetup(admin, DESIGN_IDEA_SLOT, "any")), error: null });
+  }
+  if (new URL(request.url).searchParams.has("count")) {
+    const deniedCount = await guardApi(request, "products.view"); if (deniedCount) return deniedCount;
+    const { count } = await admin.from(IDEA_TABLE).select("id", { count: "exact", head: true }).eq("status", "inbox");
+    return NextResponse.json({ inbox: count ?? 0, error: null }, { headers: { "Cache-Control": "no-store" } });
   }
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await admin.from(IDEA_TABLE).select(IDEA_SELECT)

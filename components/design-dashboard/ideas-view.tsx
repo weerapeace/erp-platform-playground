@@ -44,7 +44,7 @@ const fmtIdeaDate = (iso: string) => {
   return d.toLocaleDateString(tr("th-TH", "en-GB"), { day: "numeric", month: "short" });
 };
 
-export function IdeasView({ canEdit, isAdmin = false, initialView = "all", search, brandId, onPromoted }: {
+export function IdeasView({ canEdit, isAdmin = false, initialView = "all", search, brandId, onPromoted, onInboxCount }: {
   canEdit: boolean;
   /** แอดมิน = เห็นแถบตั้งกลุ่มไลน์ "ส่งไอเดีย" ในกล่องรอคัด */
   isAdmin?: boolean;
@@ -56,6 +56,8 @@ export function IdeasView({ canEdit, isAdmin = false, initialView = "all", searc
   brandId: string | null;
   /** เริ่มทำงานจริงแล้ว → หน้าแม่เปิดใบงานใหม่ + รีเฟรชบอร์ด */
   onPromoted: (sheetId: string) => void;
+  /** จำนวนชุดรอคัดจากไลน์ (ทั้งหมด ไม่ขึ้นกับคำค้น) — หน้าแม่ใช้เป็นตัวเลขบนปุ่ม "ไอเดีย" */
+  onInboxCount?: (n: number) => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -83,6 +85,8 @@ export function IdeasView({ canEdit, isAdmin = false, initialView = "all", searc
     } catch (e) { setErr(e instanceof Error ? e.message : tr("โหลดไอเดียไม่สำเร็จ", "Failed to load ideas")); setItems((x) => x ?? []); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  const inboxTotal = items ? items.filter((it) => it.status === "inbox").length : null;
+  useEffect(() => { if (inboxTotal !== null) onInboxCount?.(inboxTotal); }, [inboxTotal, onInboxCount]);
   useEffect(() => {
     apiFetch("/api/brands").then((r) => r.json()).then((j) => setBrands(((j.data ?? []) as { id: string; name: string }[]).map((b) => ({ id: b.id, name: b.name })))).catch(() => {});
     apiFetch(`/api/user-prefs?key=${FIT_PREF}`).then((r) => r.json()).then((j) => { if (j?.value === "contain" || j?.value === "cover") setFit(j.value); }).catch(() => {});

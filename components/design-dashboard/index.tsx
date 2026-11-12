@@ -158,6 +158,12 @@ export function DesignDashboard() {
       .then((j) => { const v = j?.value; if (!ideasLinkRef.current && (v === "board" || v === "gallery" || v === "ideas")) setViewMode(v); })
       .catch(() => {});
   }, []);
+  // 💡 ตัวเลขบนปุ่ม "ไอเดีย" = ชุดรอคัดจากกลุ่มไลน์ส่งไอเดีย (นับเบา ๆ ครั้งเดียวตอนเปิดหน้า · หน้าไอเดียอัปเดตเองเมื่อคัด)
+  const [ideaInbox, setIdeaInbox] = useState(0);
+  useEffect(() => {
+    apiFetch("/api/design-ideas?count=1").then((r) => (r.ok ? r.json() : null))
+      .then((j: { inbox?: unknown } | null) => { if (typeof j?.inbox === "number") setIdeaInbox(j.inbox); }).catch(() => {});
+  }, []);
   // คอลัมน์สถานะที่ซ่อนบนบอร์ด — จำรายคน (user_ui_prefs) · ยังไม่เคยตั้ง = ค่าเริ่มต้น DEFAULT_HIDDEN_COLS
   const [hiddenCols, setHiddenCols] = useState<string[]>(DEFAULT_HIDDEN_COLS);
   useEffect(() => {
@@ -562,6 +568,12 @@ export function DesignDashboard() {
   ] as const;
   const activeFilter = FILTER_DEFS.find((f) => f.key === quickFilter) ?? FILTER_DEFS[0];
   const allFolded = boardColumns.length > 0 && boardColumns.every((c) => foldedSet.has(c.key));
+  // ปุ่มสลับมุมมองที่เห็นตลอด (จอคอม = มีชื่อ · มือถือ = ไอคอน) — เจ้าของหา "ไอเดีย" ในเมนูมุมมองไม่เจอ (2026-11-12)
+  const VIEW_TABS = [
+    ["board", "i:layout-kanban", t("บอร์ด", "Board"), t("บอร์ดตามสถานะ", "Board by status")],
+    ["gallery", "i:photo", t("การ์ดรูป", "Cards"), t("การ์ดรูปใหญ่", "Large image cards")],
+    ["ideas", "i:bulb", t("ไอเดีย", "Ideas"), t("ไอเดีย (ยังไม่ใช่งานจริง) + รอคัดจากไลน์", "Ideas (not real jobs yet) + from LINE")],
+  ] as const;
   const toolbarMenus: MenuDef[] = ([
     {
       key: "filter", icon: "filter", width: 230,
@@ -586,8 +598,8 @@ export function DesignDashboard() {
       items: [
         { type: "radio", key: "v-board", icon: "layout-kanban", label: t("บอร์ดตามสถานะ", "Board by status"), checked: viewMode === "board", onSelect: () => changeViewMode("board") },
         { type: "radio", key: "v-gallery", icon: "photo", label: t("การ์ดรูปใหญ่", "Large image cards"), checked: viewMode === "gallery", onSelect: () => changeViewMode("gallery") },
-        { type: "radio", key: "v-ideas", icon: "bulb", label: t("ไอเดีย (ยังไม่ใช่งานจริง)", "Ideas (not real jobs yet)"), checked: viewMode === "ideas", onSelect: () => changeViewMode("ideas") },
-        { type: "divider", key: "d1" },
+        { type: "radio", key: "v-ideas", icon: "bulb", label: t("ไอเดีย (ยังไม่ใช่งานจริง)", "Ideas (not real jobs yet)"), checked: viewMode === "ideas", onSelect: () => changeViewMode("ideas"), hint: ideaInbox > 0 ? ideaInbox : undefined },
+        ...(viewMode !== "ideas" ? [{ type: "divider", key: "d1" }] : []),
         ...(viewMode === "board" ? [
           { type: "section", key: "s-size", label: t("ขนาดการ์ด", "Card size") },
           { type: "radio", key: "c-compact", icon: "layout-grid", label: t("การ์ดเล็ก (มีรูป)", "Small cards (with image)"), checked: cardSize === "compact", onSelect: () => changeCardSize("compact") },
@@ -614,10 +626,10 @@ export function DesignDashboard() {
             ) },
           ...(allFolded ? [] : [{ key: "fold-all", icon: "minus", label: t("พับทุกคอลัมน์", "Fold all columns"), onSelect: () => saveFoldedCols(boardColumns.map((c) => c.key)) }]),
           ...(foldedCols.length > 0 ? [{ key: "unfold-all", icon: "maximize", label: t("กางทุกคอลัมน์", "Expand all columns"), hint: foldedCols.length, onSelect: () => saveFoldedCols([]) }] : []),
-        ] : [
+        ] : viewMode === "gallery" ? [
           { type: "submenu", key: "gcols", icon: "layout-grid", label: t("การ์ดต่อแถว", "Cards per row"), hint: galleryCols, width: 220,
             render: () => <div className="p-2"><GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} /></div> },
-        ]),
+        ] : []),
         { type: "divider", key: "d3" },
         { type: "toggle", key: "strip", icon: "color-swatch", label: t("แถบสีแบรนด์", "Brand strip"), on: brandStrip, onSelect: toggleBrandStrip,
           title: t("แถบสีแบรนด์ด้านซ้ายการ์ด (จำค่าของคุณ) — เปลี่ยนสีแบรนด์ได้ที่เมนูแบรนด์", "Brand color strip on the left of each card (remembered for you)") },
@@ -778,9 +790,12 @@ export function DesignDashboard() {
                     <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("🔍 ค้นหารหัส / ชื่องาน...", "🔍 Search code / job name...")}
                       className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                     <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
-                      {([["board", "i:layout-kanban", t("บอร์ดตามสถานะ", "Board by status")], ["gallery", "i:photo", t("การ์ดรูปใหญ่", "Large image cards")], ["ideas", "i:bulb", t("ไอเดีย", "Ideas")]] as const).map(([key, icon, label]) => (
+                      {VIEW_TABS.map(([key, icon, , label]) => (
                         <button key={key} type="button" onClick={() => changeViewMode(key)} title={label} aria-label={label}
-                          className={`inline-flex h-8 w-9 items-center justify-center rounded text-sm transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600"}`}><Icon value={icon} className="text-[16px]" /></button>
+                          className={`relative inline-flex h-8 w-9 items-center justify-center rounded text-sm transition ${viewMode === key ? (key === "ideas" ? "bg-amber-500 text-white" : "bg-slate-900 text-white") : "text-slate-600"}`}>
+                          <Icon value={icon} className="text-[16px]" />
+                          {key === "ideas" && ideaInbox > 0 && <span className="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-emerald-500 px-1 text-center text-[10px] font-semibold leading-4 text-white tabular-nums">{ideaInbox}</span>}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -825,6 +840,19 @@ export function DesignDashboard() {
                   <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("ค้นหารหัส / ชื่องาน / แบรนด์...", "Search code / job name / brand...")}
                     className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                 </div>
+                {/* สลับมุมมองเห็นตลอด — ตัวเลขเขียวบน "ไอเดีย" = ชุดรอคัดจากกลุ่มไลน์ */}
+                <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
+                  {VIEW_TABS.map(([key, icon, label, title]) => (
+                    <button key={key} type="button" onClick={() => changeViewMode(key)} aria-pressed={viewMode === key} title={title}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm transition ${viewMode === key ? (key === "ideas" ? "bg-amber-500 text-white" : "bg-slate-900 text-white") : "text-slate-600 hover:bg-slate-100"}`}>
+                      <Icon value={icon} className="text-[15px]" />{label}
+                      {key === "ideas" && ideaInbox > 0 && (
+                        <span title={t(`ไอเดียจากไลน์รอคัด ${ideaInbox} ชุด`, `${ideaInbox} LINE ideas waiting`)}
+                          className={`min-w-[18px] rounded-full px-1 text-center text-[11px] font-semibold leading-[18px] tabular-nums ${viewMode === key ? "bg-white text-amber-600" : "bg-emerald-500 text-white"}`}>{ideaInbox}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
                 {/* แถบเมนู (ของกลาง components/menu-bar): ชี้แล้วเมนูโผล่ — ตัวกรอง · ทำงาน · มุมมอง · ตั้งค่า (เจ้าของขอ 2026-11-07 ให้แถบไม่รก) */}
                 <MenuBar menus={toolbarMenus} />
                 {pickMode && (
@@ -840,7 +868,7 @@ export function DesignDashboard() {
               {viewMode === "ideas" ? (
                 /* ── 💡 ไอเดีย (ยังไม่ใช่งานจริง) — ใช้ช่องค้นหา + แบรนด์ที่เลือกในแถบซ้ายร่วมกัน · เริ่มงานจริงแล้วเปิดใบงานใหม่ให้ ── */
                 <IdeasView canEdit={canEdit} isAdmin={isAdmin} initialView={ideasLinkRef.current ? "inbox" : "all"} search={search} brandId={selectedBrand ? selectedBrand.key : null}
-                  onPromoted={(id) => { refreshDashboard(); openDetail(id); }} />
+                  onPromoted={(id) => { refreshDashboard(); openDetail(id); }} onInboxCount={setIdeaInbox} />
               ) : loading ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   {[0, 1, 2, 3, 4].map((item) => <LoadingCard key={item} />)}
