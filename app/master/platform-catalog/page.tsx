@@ -658,34 +658,36 @@ export default function PlatformCatalogPage() {
       .then((j) => { if (my === ttsSeq.current && !j.error) setTtsStatus(j as TtsStatus); })
       .catch(() => { /* โชว์ปุ่มไม่ได้ก็ไม่เป็นไร */ });
   }, [platformCode, brandId]);
-  const ttsResume = useRef<{ brandId: string; token: string; run: string; fetched: number; at: number } | null>(null);
+  // skipped = สินค้าที่ร้านลบแล้ว (TikTok ส่งมาแต่ไม่บันทึก) — ส่งกลับไปทุกครั้งให้ server เทียบยอด "ครบทั้งร้าน"
+  const ttsResume = useRef<{ brandId: string; token: string; run: string; fetched: number; skipped: number; at: number } | null>(null);
   const syncTiktok = async () => {
     if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (การเชื่อม TikTok Shop ผูกกับแบรนด์)"); return; }
     const resume = ttsResume.current && ttsResume.current.brandId === brandId && Date.now() - ttsResume.current.at < 25 * 60_000 ? ttsResume.current : null;
-    let token = resume?.token ?? "", run = resume?.run ?? "", apiTotal = 0, retried = false, got = resume?.fetched ?? 0;
+    let token = resume?.token ?? "", run = resume?.run ?? "", apiTotal = 0, retried = false, got = resume?.fetched ?? 0, skipped = resume?.skipped ?? 0;
     const sum = { fetched: 0, created: 0, updated: 0, newly_matched: 0 };
-    type TtsSyncRes = { error?: string | null; api_total?: number; fetched?: number; created?: number; updated?: number; newly_matched?: number; next_page_token?: string | null; done?: boolean; complete?: boolean; run_started_at?: string; stop_reason?: string | null; removed?: number; restored?: number; removed_skipped?: number };
+    type TtsSyncRes = { error?: string | null; api_total?: number; fetched?: number; created?: number; updated?: number; newly_matched?: number; next_page_token?: string | null; done?: boolean; complete?: boolean; run_started_at?: string; stop_reason?: string | null; removed?: number; restored?: number; removed_skipped?: number; skipped_so_far?: number };
     setImporting(true);
     try {
       for (let round = 0; round < 80; round++) {
-        setNote(`กำลังดึงสินค้าจาก TikTok... ${got.toLocaleString()}${apiTotal ? ` / ${apiTotal.toLocaleString()}` : ""} ตัว`);
-        const r = await apiFetch("/api/tiktok-shop/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId, page_token: token || undefined, run_started_at: run || undefined }) });
+        setNote(`กำลังดึงสินค้าจาก TikTok... ${(got + skipped).toLocaleString()}${apiTotal ? ` / ${apiTotal.toLocaleString()}` : ""} ตัว`);
+        const r = await apiFetch("/api/tiktok-shop/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId, page_token: token || undefined, run_started_at: run || undefined, skipped_so_far: token ? skipped : undefined }) });
         const j = (await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }))) as TtsSyncRes;
         const stop = j.error || j.stop_reason;
         if (j.run_started_at) run = j.run_started_at;
         if (j.api_total) apiTotal = j.api_total;
+        if (typeof j.skipped_so_far === "number") skipped = j.skipped_so_far;
         sum.fetched += j.fetched ?? 0; sum.created += j.created ?? 0; sum.updated += j.updated ?? 0; sum.newly_matched += j.newly_matched ?? 0;
         got += j.fetched ?? 0;
         if (typeof j.next_page_token === "string" && j.next_page_token) token = j.next_page_token;
         if (j.done) {
           ttsResume.current = null;
-          const totalNote = apiTotal ? ` (TikTok รายงาน ${apiTotal.toLocaleString()})` : "";
+          const totalNote = apiTotal ? ` (TikTok รายงาน ${apiTotal.toLocaleString()}${skipped ? ` รวมที่ร้านลบแล้ว ${skipped.toLocaleString()}` : ""})` : "";
           setNote(`ดึงจาก TikTok ครบแล้ว${totalNote} · รอบนี้ได้ ${sum.fetched.toLocaleString()} ตัว · เพิ่มใหม่ ${sum.created} · อัปเดต ${sum.updated} · จับคู่รหัสตรงอัตโนมัติ ${sum.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${goneNote(j)}${j.stop_reason ? ` · ⚠️ ${j.stop_reason}` : ""}`);
           break;
         }
         if (stop) {
           if (!retried) { retried = true; await new Promise((res) => setTimeout(res, 4000)); continue; }
-          ttsResume.current = token ? { brandId, token, run, fetched: got, at: Date.now() } : null;
+          ttsResume.current = token ? { brandId, token, run, fetched: got, skipped, at: Date.now() } : null;
           setNote(`⚠️ ดึงจาก TikTok ได้ ${got.toLocaleString()}${apiTotal ? ` จาก ${apiTotal.toLocaleString()}` : ""} ตัวแล้ว TikTok ตอบผิดพลาด: ${stop}${token ? ` — กด "ดึงสินค้าจาก TikTok" อีกครั้งเพื่อดึงต่อ` : ""} (ยังไม่เช็กว่าตัวไหนร้านลบ จนกว่าจะดึงครบ)`);
           break;
         }
@@ -693,7 +695,7 @@ export default function PlatformCatalogPage() {
       }
       await reloadCurrent();
     } catch (e) {
-      ttsResume.current = token ? { brandId, token, run, fetched: got, at: Date.now() } : null;
+      ttsResume.current = token ? { brandId, token, run, fetched: got, skipped, at: Date.now() } : null;
       setNote(`ผิดพลาด: ${(e as Error).message}${token ? " — กดดึงอีกครั้งเพื่อดึงต่อ" : ""}`);
     }
     finally { setImporting(false); }

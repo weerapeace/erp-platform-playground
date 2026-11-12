@@ -8,7 +8,8 @@
  *
  * ดึงหลายครั้งต่อกัน (หน้าเว็บเรียกต่อเองจนครบ) แบบเดียวกับ Lazada — TikTok ใช้ page_token แทน offset
  *   ครั้งแรกไม่ส่ง page_token → เริ่มรอบใหม่ · ครั้งต่อไปส่ง next_page_token + run_started_at เดิมกลับมา
- *   จบครบ + จำนวนที่บันทึกตั้งแต่เริ่มรอบ ≥ total_count → ตัวเดิมที่ไม่มาในรอบนี้ = ติดป้าย "ไม่อยู่บนร้านแล้ว"
+ *   สินค้าที่ร้านลบแล้ว (DELETED — status=ALL ส่งมาด้วย) ไม่บันทึก แต่นับไว้ (skipped_so_far ส่งต่อข้ามครั้ง)
+ *   จบครบ + บันทึกตั้งแต่เริ่มรอบ + ตัวที่ข้าม ≥ total_count → ตัวเดิมที่ไม่มาในรอบนี้ (รวมตัวที่ร้านลบ) = ติดป้าย "ไม่อยู่บนร้านแล้ว"
  * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -43,7 +44,7 @@ type Prev = { update_time: number | null; image: string | null; category: string
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { brand_id?: string; page_token?: string | null; run_started_at?: string };
+  let body: { brand_id?: string; page_token?: string | null; run_started_at?: string; skipped_so_far?: number };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const brandId = (body.brand_id ?? "").trim();
   if (!brandId) return NextResponse.json({ error: "เลือกแบรนด์/ร้านก่อน (การเชื่อม TikTok Shop ผูกกับแบรนด์)" }, { status: 400 });
@@ -52,6 +53,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const runOk = !!startToken && Number.isFinite(prevRun) && prevRun <= Date.now() && Date.now() - prevRun < RUN_MAX_AGE_MS;
   const runStartedAt = runOk ? new Date(prevRun).toISOString() : new Date().toISOString();
   const firstCall = !startToken;
+  // สินค้าที่ร้านลบแล้ว (status DELETED) ไม่บันทึก — นับไว้เทียบยอด "ครบทั้งร้าน" (ยอดของ TikTok รวมตัวที่ลบด้วย) · ส่งต่อกันข้ามครั้ง
+  const skippedPrev = startToken ? Math.max(0, Math.floor(Number(body.skipped_so_far) || 0)) : 0;
+  let skippedDeleted = 0;
 
   const admin = supabaseAdmin();
   const ttId = await getPlatformId(admin, "tiktok");
@@ -72,9 +76,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try { page = await withRetry(() => ttsSearchProducts(tok.accessToken, shop.cipher, { pageToken: token, pageSize: PAGE })); }
     catch (e) { stopReason = ttsErrorText(e); break; }
     if (page.total > 0) apiTotal = page.total;
+    // status=ALL ของ TikTok รวม "ลบแล้ว" มาด้วย (เจอจริง 2026-11-12: 71/898) → ข้าม · ตัวเดิมในระบบจะติดป้าย "ไม่อยู่บนร้านแล้ว" ตอนจบรอบครบ (เหมือน Lazada)
+    const live = page.products.filter((p) => String(p.status ?? "").toUpperCase() !== "DELETED");
+    skippedDeleted += page.products.length - live.length;
 
     // รูป/หมวด/ชื่อตัวเลือกเดิม (ตัวที่ไม่ได้แก้ตั้งแต่ครั้งก่อน ไม่ต้องขอรายละเอียดซ้ำ)
-    const ids = page.products.map((p) => String(p.id ?? "")).filter(Boolean);
+    const ids = live.map((p) => String(p.id ?? "")).filter(Boolean);
     const prev = new Map<string, Prev>();
     if (ids.length) {
       const { data } = await admin.from("platform_catalog_listings").select("external_product_id, tt:raw->tiktok")
@@ -87,7 +94,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    const need = page.products.filter((p) => {
+    const need = live.filter((p) => {
       const old = prev.get(String(p.id ?? ""));
       return !old || !old.image || old.update_time == null || Number(p.update_time) !== old.update_time;
     });
@@ -100,7 +107,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }));
     }
 
-    for (const p of page.products) {
+    for (const p of live) {
       const id = String(p.id ?? "");
       const d = details.get(id);
       const old = prev.get(id);
@@ -132,7 +139,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (done) {
     try {
       seen = await seenSince(admin, { platformId: ttId, brandId, since: runStartedAt });
-      complete = apiTotal > 0 && seen >= apiTotal;
+      complete = apiTotal > 0 && seen + skippedPrev + skippedDeleted >= apiTotal;
       if (complete) gone = await markMissingSince(admin, { platformId: ttId, brandId, since: runStartedAt });
     } catch (e) { stopReason = `เช็กสินค้าที่ร้านลบไม่สำเร็จ: ${(e as Error).message}`; }
   }
@@ -141,6 +148,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     api_total: apiTotal, fetched: items.length, next_page_token: done ? null : token,
     done, complete, seen_in_run: seen, run_started_at: runStartedAt, stop_reason: stopReason,
     details_fetched: detailsFetched, details_reused: detailsReused, details_failed: detailsFailed,
+    skipped_deleted: skippedDeleted, skipped_so_far: skippedPrev + skippedDeleted,
     ...saved, ...gone,
   };
   await writeAudit(admin, {
