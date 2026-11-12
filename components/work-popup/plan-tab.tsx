@@ -146,6 +146,6 @@ export function PlanItemEditor({ item, me, onClose, onDone }: { item: PlanItem; 
   const { can } = useAuth();
   return (
     <PlanEditModal item={item} me={me} canEdit={can("tasks.edit" as Parameters<typeof can>[0])}
-      onClose={onClose} onSaved={() => { onDone(); onClose(); }} onDeleted={() => { onDone(); onClose(); }} onChecklist={() => onDone()} />
+      onClose={onClose} onSaved={() => { onDone(); onClose(); }} onDeleted={() => { onDone(); onClose(); }} onChecklist={() => onDone()} onDuplicated={() => { onDone(); onClose(); }} />
   );
 }

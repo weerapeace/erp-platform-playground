@@ -26,11 +26,12 @@ import { ScheduleBoard } from "@/components/schedule-board";
 import { useViewportLayout } from "@/components/device-view";
 import {
   dueLabel, dueOnDate, dueYmd, isOverdue, isPlanDone, isStarredToday, MAX_STARS, PRIORITIES, PRIORITY_META, QUADRANT_META, quadrantOf, quadrantPatch,
-  REMIND_LABEL, REPEAT_LABEL, sortPlanItems, TEAM_PLAN_CHECK, waitingDays,
+  REMIND_LABEL, REPEAT_LABEL, sortPlanItems, TEAM_PLAN_CHECK, waitingDays, estimateLabel, planTagCounts, myDayLoad, DAY_CAPACITY_MIN,
   type PlanItem, type Priority, type Quadrant,
 } from "@/lib/team-plan";
 import { createPlanItem, listPlanItems, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
 import { PlanEditModal } from "./edit-modal";
+import { PlanTagChip } from "./tag-input";
 import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 import { AiSplitModal } from "./ai-split-modal";
 
@@ -57,6 +58,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const view = forcedView ?? viewPref.view, scope = scopePref.view;
   const pickView = (v: PlanView) => { setForcedView(null); viewPref.setView(v); void viewPref.saveDefault(v); };
   const [filter, setFilter] = useState<Filter>("");
+  const [tagFilter, setTagFilter] = useState("");   // 🏷 กรองตามแท็ก (ว่าง = ทุกงาน)
   const [editing, setEditing] = useState<PlanItem | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -100,8 +102,13 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const inScope = (t: PlanItem) => scope === "all" || mine(t);
   const all = items ?? [];
   const open = sortPlanItems(all.filter((t) => !isPlanDone(t) && inScope(t)));
+  const tagCounts = planTagCounts(open);
+  const tagOn = tagFilter && tagCounts.some((x) => x.tag.toLowerCase() === tagFilter.toLowerCase()) ? tagFilter : "";   // แท็กที่เลือกหายไปแล้ว = ไม่กรอง
   const shown = open.filter((t) =>
-    filter === "star" ? isStarredToday(t.plan) : filter === "waiting" ? !!t.plan.waiting : filter === "overdue" ? isOverdue(t.due_at) : true);
+    (filter === "star" ? isStarredToday(t.plan) : filter === "waiting" ? !!t.plan.waiting : filter === "overdue" ? isOverdue(t.due_at) : true)
+    && (!tagOn || t.plan.tags.some((g) => g.toLowerCase() === tagOn.toLowerCase())));
+  const load2 = myDayLoad(all, me);
+  const sumEst = (list: PlanItem[]) => list.reduce((s, t) => s + (t.plan.estimate_min ?? 0), 0);
   const done = all.filter((t) => isPlanDone(t) && inScope(t)).sort((a, b) => Date.parse(b.resolved_at ?? b.updated_at) - Date.parse(a.resolved_at ?? a.updated_at));
   const myStars = sortPlanItems(all.filter((t) => !isPlanDone(t) && mine(t) && isStarredToday(t.plan)));
 
@@ -124,14 +131,15 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   };
   const dragging = dragId ? all.find((t) => t.id === dragId) ?? null : null;
 
-  const cardProps = { me, canEdit, onOpen: setEditing, onUpdate: update, onChecklist: setChecklist };
+  const cardProps = { me, canEdit, onOpen: setEditing, onUpdate: update, onChecklist: setChecklist, onTag: (g: string) => setTagFilter((cur) => (cur.toLowerCase() === g.toLowerCase() ? "" : g)) };
   const columns: { id: string; title: ReactNode; hint?: string; list: PlanItem[] }[] = view === "priority"
     ? PRIORITIES.map((p) => ({
         id: `p:${p}`, list: shown.filter((t) => t.priority === p),
-        title: <><span className="h-2.5 w-2.5 rounded-full" style={{ background: PRIORITY_META[p].color }} />{PRIORITY_META[p].label}</>,
+        title: <><span className="h-2.5 w-2.5 rounded-full" style={{ background: PRIORITY_META[p].color }} />{PRIORITY_META[p].label}{estTag(shown.filter((t) => t.priority === p))}</>,
       }))
-    : QUADRANTS.map((q) => ({ id: `q:${q}`, title: QUADRANT_META[q].label, hint: QUADRANT_META[q].hint, list: shown.filter((t) => quadrantOf(t.priority, t.plan.important) === q) }));
+    : QUADRANTS.map((q) => { const list = shown.filter((t) => quadrantOf(t.priority, t.plan.important) === q); return { id: `q:${q}`, title: <>{QUADRANT_META[q].label}{estTag(list)}</>, hint: QUADRANT_META[q].hint, list }; });
 
+  function estTag(list: PlanItem[]) { const m = sumEst(list); return m ? <span className="ml-1 text-[11px] font-normal text-slate-400" title="รวมเวลาที่คาดว่าใช้ของงานในช่องนี้">~{estimateLabel(m)}</span> : null; }
   const seg = (on: boolean) => `h-8 px-3 text-xs ${on ? "bg-violet-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`;
   const filterChip = (f: Filter, label: ReactNode, n: number) => (
     <button type="button" onClick={() => setFilter(filter === f ? "" : f)}
@@ -158,6 +166,19 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         {filterChip("overdue", <><Icon name="warning" /> เกินกำหนด</>, open.filter((t) => isOverdue(t.due_at)).length)}
         <button type="button" onClick={() => void load()} title="โหลดใหม่" className="ml-auto h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50"><Icon name="refresh" /></button>
       </div>
+      {/* 🏷 กรองตามแท็ก (โชว์เมื่อมีงานที่ใส่แท็ก) */}
+      {tagCounts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-slate-500"><Icon name="tag" /> แท็ก:</span>
+          {tagCounts.slice(0, 20).map(({ tag, n }) => (
+            <span key={tag} className="inline-flex items-center gap-0.5">
+              <PlanTagChip tag={tag} active={tagOn.toLowerCase() === tag.toLowerCase()} onClick={() => setTagFilter(tagOn.toLowerCase() === tag.toLowerCase() ? "" : tag)} />
+              <span className="text-[11px] text-slate-400">{n}</span>
+            </span>
+          ))}
+          {tagOn && <button type="button" onClick={() => setTagFilter("")} className="text-xs text-violet-700 hover:underline">ล้างตัวกรองแท็ก</button>}
+        </div>
+      )}
 
       {/* ⭐ งานหลักวันนี้ของฉัน */}
       {items && (
@@ -165,6 +186,12 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-medium text-amber-800"><Icon name="star" /> งานหลักวันนี้ของฉัน</span>
             <span className="text-xs text-amber-700/80">{myStars.length}/{MAX_STARS} · {myStars.length < MAX_STARS ? `กด ☆ บนการ์ดเพื่อเลือกอีก ${MAX_STARS - myStars.length} งาน` : "ครบแล้ว — โฟกัส 3 งานนี้ก่อน"}</span>
+            {load2.count > 0 && (
+              <span className={`ml-auto text-xs ${load2.minutes > DAY_CAPACITY_MIN ? "font-medium text-rose-600" : "text-amber-700/80"}`}
+                title="งานของฉันที่ครบกำหนดวันนี้หรือเลยแล้ว + งานหลักวันนี้ · รวมเวลาที่คาดว่าใช้">
+                <Icon name="clock" /> วันนี้ของฉัน {load2.count} งาน{load2.minutes ? ` · ~${estimateLabel(load2.minutes)}` : ""}{load2.unestimated ? ` (ยังไม่ประเมิน ${load2.unestimated})` : ""}{load2.minutes > DAY_CAPACITY_MIN ? " — เกิน 8 ชม. ลองเลื่อนบางงาน" : ""}
+              </span>
+            )}
           </div>
           {myStars.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -246,7 +273,8 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
           onClose={() => setEditing(null)}
           onSaved={(list) => upsert(list)}
           onDeleted={(id) => { setItems((cur) => (cur ?? []).filter((t) => t.id !== id)); setEditing(null); }}
-          onChecklist={setChecklist} />
+          onChecklist={setChecklist} tagSuggestions={planTagCounts(all).map((x) => x.tag)}
+          onDuplicated={(copy) => { upsert([copy]); setEditing(copy); }} />
       )}
     </div>
   );
@@ -266,7 +294,7 @@ function Column({ id, title, hint, count, children }: { id: string; title: React
   );
 }
 
-type CardProps = { t: PlanItem; me: string; canEdit: boolean; onOpen: (t: PlanItem) => void; onUpdate: (t: PlanItem, p: PlanPatch, o?: Partial<PlanItem>) => Promise<PlanItem | null>; onChecklist?: (id: string, s: ChecklistSummary) => void };
+type CardProps = { t: PlanItem; me: string; canEdit: boolean; onOpen: (t: PlanItem) => void; onUpdate: (t: PlanItem, p: PlanPatch, o?: Partial<PlanItem>) => Promise<PlanItem | null>; onChecklist?: (id: string, s: ChecklistSummary) => void; onTag?: (tag: string) => void };
 
 function PlanCard(props: CardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: props.t.id, disabled: !props.canEdit });
@@ -278,7 +306,7 @@ function PlanCard(props: CardProps) {
 }
 
 /** หน้าตาการ์ด (ใช้ทั้งในช่องและตอนกำลังลาก) */
-function PlanCardView({ t, canEdit, onOpen, onUpdate, onChecklist }: CardProps) {
+function PlanCardView({ t, canEdit, onOpen, onUpdate, onChecklist, onTag }: CardProps) {
   const overdue = isOverdue(t.due_at);
   const starred = isStarredToday(t.plan);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();   // ปุ่มบนการ์ดไม่ให้เริ่มลาก/เปิดป๊อป
@@ -300,6 +328,9 @@ function PlanCardView({ t, canEdit, onOpen, onUpdate, onChecklist }: CardProps) 
         {t.plan.repeat && <span className={`${chip} bg-slate-100 text-slate-600`}><Icon name="repeat" /> {REPEAT_LABEL(t.plan.repeat)}</span>}
         {t.plan.remind !== "none" && t.due_at && <span className={`${chip} bg-slate-100 text-slate-500`} title={`เตือน ${REMIND_LABEL[t.plan.remind]}`}><Icon name="notify" /></span>}
         {t.plan.source && <a href={t.plan.source.href} onPointerDown={stop} onClick={stop} className={`${chip} bg-blue-50 text-blue-700 hover:underline`}><Icon name="link" /> {t.plan.source.label}</a>}
+        {t.plan.estimate_min && <span className={`${chip} bg-slate-100 text-slate-600`} title="เวลาที่คาดว่าใช้"><Icon name="clock" /> ~{estimateLabel(t.plan.estimate_min)}</span>}
+        {t.plan.watchers.length > 0 && <span className={`${chip} bg-slate-100 text-slate-500`} title={`คนติดตาม: ${t.plan.watchers.map((w) => w.name).join(", ")}`}><Icon name="view" /> {t.plan.watchers.length}</span>}
+        {t.plan.tags.map((g) => <span key={g} onPointerDown={stop} onClick={stop}><PlanTagChip tag={g} onClick={onTag ? () => onTag(g) : undefined} /></span>)}
         {t.checklist && <RecordChecklistChip variant="progress" moduleKey={TEAM_PLAN_CHECK.moduleKey} recordType={TEAM_PLAN_CHECK.recordType} recordId={t.id}
           canEdit={canEdit} summary={t.checklist} onChange={(s) => onChecklist?.(t.id, s)} />}
         {t.note && <span className={`${chip} bg-slate-100 text-slate-500`} title={noteToText(t.note)}><Icon name="note" /></span>}

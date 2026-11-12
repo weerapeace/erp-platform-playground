@@ -93,5 +93,16 @@
   - GET /api/team-plan คืน `checklist` (สรุปทุกงานในครั้งเดียว — `loadChecklistSummaries`) · กระดิ่งตอนมอบข้อให้คนอื่น → ลิงก์ /tasks/plan?item=<id>
   - สิทธิ์ตาม API เช็กลิสต์กลาง (products.view/edit — ทุกบทบาทที่แก้แผนงานได้มีครบ ตรวจ 2026-11-12)
 
+## ไฟล์แนบ · คอมเมนต์ · ประวัติ · แท็ก · คนติดตาม · เวลาที่คาด · ทำสำเนา — 2026-11-12
+เจ้าของสั่ง "ทำหมดเลย" (6 ข้อที่แนะนำต่อจากเช็กลิสต์) — ทุกข้อใช้ของกลาง ไม่มีตาราง/คอลัมน์ใหม่ (ข้อมูลเสริมอยู่ใน metadata.plan)
+- **รูป/ไฟล์แนบ** = `RecordFilesField` entityType `team_plan` (`TEAM_PLAN_FILES`) · สิทธิ์ `RECORD_FILE_PERMS.team_plan` = tasks.view / tasks.edit · ที่เก็บ = record-files (Supabase เดิม) · ลบงาน = ลบไฟล์ตาม
+- **คอมเมนต์** = `CommentThread` entityType `team_plan` (สิทธิ์ comments.view/create — ⚠️ บทบาท PR_manager ยังไม่มี ต้องให้เจ้าของเปิดเองที่หน้าสิทธิ์)
+- **ประวัติ** = `RecordHistoryInline` (ของกลาง activity-feed) อ่าน audit_logs entity `record_task` ของงานนี้ · กดเปิดในป๊อป
+- **แท็ก/โปรเจกต์** = `plan.tags` (สูงสุด 8 · `cleanPlanTags`) · ช่องพิมพ์ `PlanTagInput` (components/team-plan/tag-input — เฉพาะโมดูล) แนะนำแท็กที่ทีมใช้ · กระดาน: แถบกรองตามแท็ก + กดแท็กบนการ์ด = กรอง
+- **คนติดตาม** = `plan.watchers` [{id,name}] (สูงสุด 10) · งานเสร็จ (เว็บ + ปุ่มบนมือถือ) → กระดิ่ง `team_plan.done` (`notifyPlanWatchers` · ลงแผนผังแจ้งเตือน lib/flow-map-notify) · ไม่บอกคนที่กดเสร็จเอง
+- **เวลาที่คาดว่าใช้** = `plan.estimate_min` (15 นาที – 1 วัน) · การ์ดโชว์ "~2 ชม." · หัวช่องรวมเวลา · แถบงานหลักวันนี้โชว์ "วันนี้ของฉัน N งาน · ~X ชม." (`myDayLoad` = ครบวันนี้/เลยกำหนด + ดาววันนี้) เกิน 8 ชม. = ตัวแดงเตือน
+- **ทำสำเนา** = POST /api/team-plan/[id]/duplicate → "… (สำเนา)" คัดลอกทุกช่อง + เช็กลิสต์ชุดเดิมแบบยังไม่ติ๊ก (`copyPlanChecklist` ตัวเดียวกับงานทำซ้ำ) · ไม่คัดลอกดาว/รอคนอื่น/ไฟล์แนบ/คอมเมนต์ · ต้องบันทึกการแก้ไขก่อน
+- เทสต์: lib/__tests__/team-plan-extras.test.ts
+
 ## ยังไม่ทำ
 - ป๊อปตอนเข้า ERP สำหรับสรุปรายสัปดาห์ · แผนทีมแบบหัวหน้าดูภาระงานรายคน (มีแถบ "แยกตามคน" ในอีเมลแล้ว)

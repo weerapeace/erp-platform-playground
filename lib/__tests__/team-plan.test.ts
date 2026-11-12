@@ -10,7 +10,7 @@ const meta = (p: Partial<PlanMeta> = {}): PlanMeta => ({ ...normalizePlanMeta({}
 
 describe("แผนงานทีม — กฎกลาง", () => {
   it("ล้างค่า metadata: ค่าเริ่มต้น · ค่าแปลกทิ้ง · ลิงก์นอกเว็บไม่รับ", () => {
-    expect(normalizePlanMeta(null, NOW)).toEqual({ important: true, star_date: null, waiting: null, repeat: null, remind: "none", source: null, created_by_id: null });
+    expect(normalizePlanMeta(null, NOW)).toEqual({ important: true, star_date: null, waiting: null, repeat: null, remind: "none", source: null, created_by_id: null, tags: [], watchers: [], estimate_min: null });
     const m = normalizePlanMeta({ important: false, star_date: "x", repeat: { every: "week", n: 99 }, remind: "boom", source: { href: "https://evil", label: "x" }, waiting: { note: "รอลูกค้า" } }, NOW);
     expect(m.important).toBe(false);
     expect(m.star_date).toBeNull();

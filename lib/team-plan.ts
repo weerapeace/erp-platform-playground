@@ -15,6 +15,8 @@ export const TEAM_PLAN_MODULE = "team_plan";
 /** ✅ เช็กลิสต์ในงาน (เจ้าของขอ 2026-11-12) — ข้อละ 1 แถวใน erp_record_tasks (ของกลาง RecordChecklist)
  *  ข้อที่ใช้บ่อย = erp_lookups ชนิด presetType · แม่แบบหลายข้อ = erp_lookups ชนิด templateType (metadata.items) */
 export const TEAM_PLAN_CHECK = { moduleKey: "team_plan_check", recordType: "team_plan", presetType: "team_plan_check", templateType: "team_plan_check_tpl" } as const;
+/** 📎 ไฟล์แนบ/คอมเมนต์ของงาน — ชนิดรายการในไฟล์แนบกลาง (erp_record_files) และคอมเมนต์กลาง (CommentThread) */
+export const TEAM_PLAN_FILES = "team_plan";
 /** โน้ตยาวสุด (เก็บเป็น HTML จากกล่องพิมพ์จัดรูปแบบ — มีแท็กปน จึงเผื่อจากข้อความ 4,000 ตัว) */
 export const PLAN_NOTE_MAX = 12000;
 
@@ -49,7 +51,75 @@ export type PlanMeta = {
   remind: RemindMode;
   source: { label: string; href: string } | null;   // มาจากเรื่องไหน (ใบงาน/SKU/โพสต์) → กดเปิดเรื่องเดิม
   created_by_id: string | null;                     // user id คนสร้าง (created_by เดิมเก็บแค่ชื่อ)
+  tags: string[];                                   // 🏷 แท็ก/โปรเจกต์ เช่น "เว็บ ISG" (กรองบนกระดาน) — 2026-11-12
+  watchers: PlanWatcher[];                          // 👀 คนติดตาม — กระดิ่งบอกตอนงานเสร็จ
+  estimate_min: number | null;                      // ⏱ เวลาที่คาดว่าใช้ (นาที) — รวมเป็นภาระงานต่อวัน
 };
+export type PlanWatcher = { id: string; name: string };
+export const PLAN_TAG_MAX = 8;
+export const PLAN_WATCHERS_MAX = 10;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** แท็ก: ตัดช่องว่างซ้ำ · ยาวสุด 30 · ไม่ซ้ำ (ไม่สนตัวพิมพ์) · สูงสุด PLAN_TAG_MAX */
+export function cleanPlanTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    const t = typeof v === "string" ? v.replace(/\s+/g, " ").trim().replace(/^#/, "").slice(0, 30) : "";
+    if (t && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+    if (out.length >= PLAN_TAG_MAX) break;
+  }
+  return out;
+}
+/** คนติดตาม: id ต้องเป็น uuid · ไม่ซ้ำ · สูงสุด PLAN_WATCHERS_MAX */
+export function cleanPlanWatchers(raw: unknown): PlanWatcher[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PlanWatcher[] = [];
+  for (const v of raw) {
+    const o = (v ?? {}) as { id?: unknown; name?: unknown };
+    if (typeof o.id !== "string" || !UUID_RE.test(o.id) || out.some((w) => w.id === o.id)) continue;
+    out.push({ id: o.id, name: typeof o.name === "string" && o.name.trim() ? o.name.trim().slice(0, 60) : "ผู้ใช้" });
+    if (out.length >= PLAN_WATCHERS_MAX) break;
+  }
+  return out;
+}
+/** เวลาที่คาดว่าใช้ → นาที (5 นาที – 5 วันทำงาน) · ไม่ระบุ/ผิด = null */
+export function cleanEstimate(raw: unknown): number | null {
+  const n = Math.round(Number(raw));
+  return raw === null || raw === undefined || raw === "" || !Number.isFinite(n) || n < 5 ? null : Math.min(n, 40 * 60);
+}
+/** ตัวเลือกเวลาที่คาดว่าใช้ (นาที) */
+export const ESTIMATE_OPTIONS = [15, 30, 60, 120, 240, 480] as const;
+/** 90 → "1.5 ชม." · 30 → "30 นาที" · 480 → "1 วัน" */
+export function estimateLabel(min: number | null | undefined): string {
+  if (!min) return "";
+  if (min < 60) return `${min} นาที`;
+  if (min === 480) return "1 วัน";
+  if (min === 240) return "ครึ่งวัน";
+  const h = Math.round((min / 60) * 10) / 10;
+  return `${h} ชม.`;
+}
+/** สีของแท็ก (คงที่ต่อชื่อ) */
+const TAG_COLORS = ["#7F77DD", "#1D9E75", "#D85A30", "#378ADD", "#D4537E", "#639922", "#BA7517", "#888780"];
+export const tagColor = (tag: string) => TAG_COLORS[[...tag.toLowerCase()].reduce((n, c) => n + c.charCodeAt(0), 0) % TAG_COLORS.length];
+/** แท็กทั้งหมดที่ใช้อยู่ เรียงตามจำนวนงาน (มากก่อน) — ตัวเลือกกรอง/แนะนำตอนพิมพ์ */
+export function planTagCounts(items: { plan: PlanMeta }[]): { tag: string; n: number }[] {
+  const m = new Map<string, { tag: string; n: number }>();
+  for (const t of items) for (const tag of t.plan.tags) { const k = tag.toLowerCase(); const e = m.get(k); if (e) e.n++; else m.set(k, { tag, n: 1 }); }
+  return [...m.values()].sort((a, b) => b.n - a.n || a.tag.localeCompare(b.tag, "th"));
+}
+/** ภาระงานวันนี้ของฉัน = งานที่ยังไม่เสร็จ ครบกำหนดวันนี้หรือเลยแล้ว + งานหลักวันนี้ (ดาว) · รวมเวลาที่ประเมิน + จำนวนที่ยังไม่ประเมิน */
+export const DAY_CAPACITY_MIN = 8 * 60;
+export function myDayLoad(items: { status: string; due_at: string | null; assigned_to: string | null; plan: PlanMeta }[], me: string, now: Date = new Date()): { count: number; minutes: number; unestimated: number } {
+  const today = todayBangkok(now);
+  const list = items.filter((t) => t.status !== "resolved" && (t.assigned_to ?? t.plan.created_by_id) === me
+    && ((t.due_at && bkkYmd(t.due_at) <= today) || t.plan.star_date === today));
+  return {
+    count: list.length,
+    minutes: list.reduce((s, t) => s + (t.plan.estimate_min ?? 0), 0),
+    unestimated: list.filter((t) => !t.plan.estimate_min).length,
+  };
+}
 
 /** 1 งานที่ API ส่งให้หน้าเว็บ (/api/team-plan) */
 export type PlanItem = {
@@ -85,6 +155,9 @@ export function normalizePlanMeta(raw: unknown, now: Date = new Date()): PlanMet
     // ลิงก์ภายในเว็บเท่านั้น (/…) — กันลิงก์แปลกจากภายนอก
     source: href.startsWith("/") && !href.startsWith("//") ? { label: str(src?.label, 120) || href, href } : null,
     created_by_id: typeof r.created_by_id === "string" ? r.created_by_id : null,
+    tags: cleanPlanTags(r.tags),
+    watchers: cleanPlanWatchers(r.watchers),
+    estimate_min: cleanEstimate(r.estimate_min),
   };
 }
 

@@ -10,7 +10,7 @@ import { writeAudit } from "@/lib/audit";
 import { addDaysYmd, todayBangkok } from "@/lib/date";
 import { userNames } from "@/lib/record-tasks-server";
 import { normalizePlanMeta, normalizePlanSent, TEAM_PLAN_MODULE } from "@/lib/team-plan";
-import { createNextRepeat, PLAN_COLS, verifyPlanAction, type PlanRow } from "@/lib/team-plan-server";
+import { createNextRepeat, notifyPlanWatchers, PLAN_COLS, verifyPlanAction, type PlanRow } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,6 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await writeAudit(admin, { action: "update", entityType: "record_task", entityId: row.id, actorId: who.userId, actorName: `${actorName} (มือถือ)`,
       metadata: { module_key: TEAM_PLAN_MODULE, title: row.title, status: "resolved", via: "push" } });
+    await notifyPlanWatchers(admin, upd as PlanRow, { id: who.userId, name: actorName });   // 👀 บอกคนติดตาม
     const next = await createNextRepeat(admin, upd as PlanRow, { id: who.userId, name: actorName }, now);
     return NextResponse.json({ ok: true, done: true, next_due: next?.due_at ?? null, error: null });
   }

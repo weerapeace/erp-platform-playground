@@ -3,7 +3,7 @@
  * ผิดพลาด = throw Error ข้อความภาษาคนจาก API
  */
 import { apiFetch } from "@/lib/api";
-import type { PlanItem, Priority, RemindMode, RepeatRule } from "@/lib/team-plan";
+import type { PlanItem, PlanWatcher, Priority, RemindMode, RepeatRule } from "@/lib/team-plan";
 
 export type PlanDraft = {
   title: string; note?: string | null; priority?: Priority; due_at?: string | null; assigned_to?: string | null;
@@ -14,6 +14,7 @@ export type PlanPatch = Partial<{
   title: string; note: string | null; priority: Priority; due_at: string | null; assigned_to: string | null;
   status: "open" | "resolved"; important: boolean; star: boolean; waiting: { note: string } | null;
   repeat: RepeatRule | null; remind: RemindMode;
+  tags: string[]; watchers: PlanWatcher[]; estimate_min: number | null;
   /** เตือนอีกครั้ง (กำหนดส่งไม่เปลี่ยน): "1h" = อีก 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 */
   snooze: "1h" | "tomorrow";
 }>;
@@ -32,4 +33,6 @@ export const listMyPlanItems = () => call<{ data: PlanItem[] }>("/api/team-plan?
 export const createPlanItem = (d: PlanDraft) => call<{ data: PlanItem }>("/api/team-plan", json("POST", d)).then((j) => j.data);
 export const patchPlanItem = (id: string, p: PlanPatch) =>
   call<{ data: PlanItem; next: PlanItem | null }>(`/api/team-plan/${encodeURIComponent(id)}`, json("PATCH", p)).then((j) => ({ item: j.data, next: j.next }));
+/** ทำสำเนางาน (เช็กลิสต์ชุดเดิมแบบยังไม่ติ๊ก · ไม่รวมไฟล์แนบ/คอมเมนต์) → งานใหม่ */
+export const duplicatePlanItem = (id: string) => call<{ data: PlanItem }>(`/api/team-plan/${encodeURIComponent(id)}/duplicate`, { method: "POST" }).then((j) => j.data);
 export const deletePlanItem = (id: string) => call<{ ok: boolean }>(`/api/team-plan/${encodeURIComponent(id)}`, { method: "DELETE" });

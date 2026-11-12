@@ -3,6 +3,7 @@
  * ป๊อปแก้ 1 งานในแผนงานทีม — ชื่อ · โน้ต · ความด่วน · สำคัญ · กำหนด · ผู้รับผิดชอบ · เตือน · ทำซ้ำ · รอคนอื่น · ลบ
  * โน้ต = กล่องพิมพ์จัดรูปแบบกลาง (RichTextEditor แบบย่อ: bullet / ลำดับเลข / หนา / เอียง · พิมพ์ "- " = bullet) เก็บ HTML · โน้ตเก่าที่เป็นข้อความแปลงด้วย lib/rich-note
  * เช็กลิสต์ในงาน = ของกลาง RecordChecklist (lib/team-plan TEAM_PLAN_CHECK) + แม่แบบหลายข้อ · ติ๊กครบ = ถาม "ปิดงานนี้เลยไหม?" (เจ้าของขอ 2026-11-12)
+ * + แท็ก · คนติดตาม (กระดิ่งตอนเสร็จ) · เวลาที่คาดว่าใช้ · รูป/ไฟล์แนบ (RecordFilesField) · คอมเมนต์ (CommentThread) · ประวัติ (RecordHistoryInline) · ทำสำเนา
  * + ใส่แผนส่วนตัวของฉัน (วันนี้/พรุ่งนี้/สัปดาห์นี้ — ของกลาง lib/planner-client · ใช้แทนการลากบนมือถือ)
  * บันทึกเฉพาะช่องที่เปลี่ยน (PATCH /api/team-plan/[id]) · ปิดตอนยังไม่บันทึก = ถามก่อน (ERPModal กลาง)
  */
@@ -14,10 +15,14 @@ import { Icon } from "@/components/icon";
 import { RecordChecklist, WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
 import { ERPDateTime24 } from "@/components/form";
 import {
-  dueLabel, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, waitingDays,
-  type PlanItem, type Priority, type RemindMode, type RepeatRule,
+  dueLabel, ESTIMATE_OPTIONS, estimateLabel, PLAN_WATCHERS_MAX, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, waitingDays,
+  type PlanItem, type PlanWatcher, type Priority, type RemindMode, type RepeatRule,
 } from "@/lib/team-plan";
-import { deletePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
+import { deletePlanItem, duplicatePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
+import { RecordFilesField } from "@/components/record-files";
+import { CommentThread } from "@/components/comment-thread";
+import { RecordHistoryInline } from "@/components/activity-feed/record-history-drawer";
+import { PlanTagInput } from "./tag-input";
 import { addToPlan } from "@/lib/planner-client";
 import { bucketLabel, type PlanBucket } from "@/lib/planner";
 import { noteToHtml, noteToText } from "@/lib/rich-note";
@@ -32,17 +37,26 @@ const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) =
 const toLocal = (iso: string | null) => (iso ? new Date(Date.parse(iso) + 7 * 3600e3).toISOString().slice(0, 16) : "");
 const fromLocal = (v: string) => (v ? new Date(`${v}:00+07:00`).toISOString() : null);
 
-export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, onChecklist }: {
+export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, onChecklist, tagSuggestions = [], onDuplicated }: {
   item: PlanItem; canEdit: boolean; me: string;
   onClose: () => void; onSaved: (list: PlanItem[]) => void; onDeleted: (id: string) => void;
   /** เช็กลิสต์เปลี่ยน (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึก) → การ์ดบนกระดานอัปเดตป้าย "2/4" */
   onChecklist?: (id: string, s: ChecklistSummary) => void;
+  /** แท็กที่ทีมใช้อยู่ (แนะนำตอนพิมพ์) */
+  tagSuggestions?: string[];
+  /** ทำสำเนาแล้ว → หน้าแม่ใส่งานใหม่ + เปิดงานใหม่ */
+  onDuplicated?: (copy: PlanItem) => void;
 }) {
   const toast = useToast();
   const [title, setTitle] = useState(item.title);
   const [initNote] = useState(() => noteToHtml(item.note));   // โน้ตเก่าแบบข้อความ → HTML (บรรทัด "- " = bullet)
   const [note, setNote] = useState(initNote);
   const [check, setCheck] = useState<ChecklistSummary | null>(item.checklist ?? null);
+  const [tags, setTags] = useState<string[]>(item.plan.tags);
+  const [watchers, setWatchers] = useState<PlanWatcher[]>(item.plan.watchers);
+  const [pickWatcher, setPickWatcher] = useState(false);
+  const [estimate, setEstimate] = useState<number | null>(item.plan.estimate_min);
+  const [showHistory, setShowHistory] = useState(false);
   const [priority, setPriority] = useState<Priority>(item.priority);
   const [important, setImportant] = useState(item.plan.important);
   const [due, setDue] = useState(toLocal(item.due_at));
@@ -73,8 +87,11 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
     if (JSON.stringify(rep) !== JSON.stringify(item.plan.repeat)) p.repeat = rep;
     const wait = waitingOn ? { note: waitingNote.trim() } : null;
     if (JSON.stringify(wait) !== JSON.stringify(item.plan.waiting ? { note: item.plan.waiting.note } : null)) p.waiting = wait;
+    if (JSON.stringify(tags) !== JSON.stringify(item.plan.tags)) p.tags = tags;
+    if (JSON.stringify(watchers.map((w) => w.id)) !== JSON.stringify(item.plan.watchers.map((w) => w.id))) p.watchers = watchers;
+    if (estimate !== item.plan.estimate_min) p.estimate_min = estimate;
     return p;
-  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, waitingOn, waitingNote, item]);
+  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, waitingOn, waitingNote, tags, watchers, estimate, item]);
   const dirty = Object.keys(patch).length > 0;
 
   const save = async (extra: PlanPatch = {}) => {
@@ -90,6 +107,16 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
       else toast.success(extra.status === "resolved" ? "ติ๊กเสร็จแล้ว" : "บันทึกแล้ว");
       onClose();
     } catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  const duplicate = async () => {
+    if (dirty) { setErr("บันทึกการแก้ไขก่อน แล้วค่อยทำสำเนา"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const copy = await duplicatePlanItem(item.id);
+      toast.success(`ทำสำเนาแล้ว — "${copy.title}"${copy.checklist ? " (เช็กลิสต์ชุดเดิม ยังไม่ติ๊ก)" : ""}`);
+      onDuplicated?.(copy);
+    } catch (e) { setErr(e instanceof Error ? e.message : "ทำสำเนาไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
   const remove = async () => {
@@ -110,6 +137,8 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
         {canEdit && (item.plan.created_by_id === me) && (
           <button type="button" onClick={() => setAskDelete(true)} disabled={busy} className="mr-auto h-9 rounded-lg px-3 text-sm text-rose-600 hover:bg-rose-50"><Icon name="delete" /> ลบ</button>
         )}
+        {canEdit && <button type="button" onClick={() => void duplicate()} disabled={busy} title="สร้างงานใหม่ที่เหมือนงานนี้ (เช็กลิสต์ชุดเดิมแบบยังไม่ติ๊ก · ไม่รวมไฟล์แนบ/คอมเมนต์)"
+          className={`h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50 ${canEdit && item.plan.created_by_id === me ? "" : "mr-auto"}`}><Icon name="documents" /> ทำสำเนา</button>}
         <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ปิด</button>
         {canEdit && !done && <button type="button" onClick={() => void save({ status: "resolved" })} disabled={busy} className="h-9 rounded-lg border border-emerald-300 bg-emerald-50 px-4 text-sm text-emerald-700 hover:bg-emerald-100"><Icon name="done" /> เสร็จแล้ว</button>}
         {canEdit && <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="h-9 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : <><Icon name="save" /> บันทึก</>}</button>}
@@ -153,6 +182,37 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
           <label className={lbl}>ผู้รับผิดชอบ</label>
           <WhoChip name={who?.name} onClick={canEdit ? () => setPicking((p) => !p) : undefined} />
           {picking && <WhoPicker allowNone={!!who} onCancel={() => setPicking(false)} onPick={(u) => { setWho(u); setPicking(false); }} />}
+        </div>
+        <div>
+          <label className={lbl}><Icon name="view" /> คนติดตาม <span className="font-normal text-slate-400">· ได้แจ้งเตือนตอนงานเสร็จ</span></label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {watchers.map((w) => (
+              <span key={w.id} className="inline-flex items-center gap-1">
+                <WhoChip name={w.name} compact />
+                {canEdit && <button type="button" onClick={() => setWatchers((l) => l.filter((x) => x.id !== w.id))} aria-label={`เอา ${w.name} ออกจากคนติดตาม`} className="text-xs text-slate-300 hover:text-rose-500">×</button>}
+              </span>
+            ))}
+            {canEdit && watchers.length < PLAN_WATCHERS_MAX && (
+              <button type="button" onClick={() => setPickWatcher((p) => !p)} className="h-7 rounded-full border border-dashed border-slate-300 px-2.5 text-xs text-slate-500 hover:border-violet-300 hover:text-violet-700">＋ เพิ่มคนติดตาม</button>
+            )}
+            {!watchers.length && !canEdit && <span className="text-xs text-slate-400">ไม่มี</span>}
+          </div>
+          {pickWatcher && <WhoPicker allowNone={false} onCancel={() => setPickWatcher(false)}
+            onPick={(u) => { if (u && !watchers.some((w) => w.id === u.id)) setWatchers((l) => [...l, { id: u.id, name: u.name }]); setPickWatcher(false); }} />}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <div>
+            <label className={lbl}>แท็ก / โปรเจกต์</label>
+            <PlanTagInput value={tags} onChange={setTags} suggestions={tagSuggestions} disabled={!canEdit} />
+          </div>
+          <div>
+            <label className={lbl}><Icon name="clock" /> เวลาที่คาดว่าใช้</label>
+            <select value={estimate ?? ""} disabled={!canEdit} onChange={(e) => setEstimate(e.target.value ? Number(e.target.value) : null)} className={`${field} sm:w-40`}>
+              <option value="">ไม่ระบุ</option>
+              {estimate && !(ESTIMATE_OPTIONS as readonly number[]).includes(estimate) && <option value={estimate}>{estimateLabel(estimate)}</option>}
+              {ESTIMATE_OPTIONS.map((m) => <option key={m} value={m}>{m === 240 ? "ครึ่งวัน (4 ชม.)" : m === 480 ? "1 วัน (8 ชม.)" : estimateLabel(m)}</option>)}
+            </select>
+          </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
@@ -202,6 +262,17 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
                 className="h-8 rounded-lg border border-emerald-300 bg-white px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">ปิดงาน</button>
             </div>
           )}
+        </div>
+        <RecordFilesField entityType={TEAM_PLAN_FILES} entityId={item.id} readonly={!canEdit} title="รูป / ไฟล์แนบ"
+          description="ลากไฟล์มาวาง หรือกดเลือก — เช่น แคปหน้าเว็บที่ต้องแก้ ใบเสนอราคา" />
+        <div className="rounded-lg border border-slate-200 p-2">
+          <CommentThread entityType={TEAM_PLAN_FILES} entityId={item.id} title="คอมเมนต์" maxHeight={240} />
+        </div>
+        <div>
+          <button type="button" onClick={() => setShowHistory((s) => !s)} className="text-xs text-slate-500 hover:text-slate-800">
+            {showHistory ? "▾" : "▸"} <Icon name="history" /> ประวัติของงานนี้ (ใครแก้ ใครเลื่อนกำหนด ใครติ๊ก)
+          </button>
+          {showHistory && <div className="mt-1.5 max-h-72 overflow-y-auto rounded-lg border border-slate-200 p-2"><RecordHistoryInline entityType="record_task" entityId={item.id} emptyMessage="ยังไม่มีประวัติของงานนี้" /></div>}
         </div>
         {!done && <PersonalPlanRow item={item} />}
         {item.plan.source && (

@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+import { cleanEstimate, cleanPlanTags, cleanPlanWatchers, estimateLabel, myDayLoad, normalizePlanMeta, planTagCounts, PLAN_TAG_MAX } from "@/lib/team-plan";
+
+// แผนงานทีม: แท็ก · คนติดตาม · เวลาที่คาด · ภาระงานวันนี้ (2026-11-12)
+const U1 = "11111111-1111-4111-8111-111111111111";
+const U2 = "22222222-2222-4222-8222-222222222222";
+const NOW = new Date("2026-11-12T05:00:00Z");   // 12:00 เวลาไทย
+
+describe("แท็ก", () => {
+  it("ตัดช่องว่าง/# · ไม่ซ้ำไม่สนตัวพิมพ์ · ยาวสุด 30 · สูงสุด 8", () => {
+    expect(cleanPlanTags([" เว็บ  ISG ", "#เว็บ isg", "Pixie", "", 3])).toEqual(["เว็บ ISG", "Pixie"]);
+    expect(cleanPlanTags(["x".repeat(50)])[0]).toHaveLength(30);
+    expect(cleanPlanTags(Array.from({ length: 12 }, (_, i) => `t${i}`))).toHaveLength(PLAN_TAG_MAX);
+    expect(cleanPlanTags("เว็บ")).toEqual([]);
+  });
+  it("นับแท็กที่ใช้ เรียงมากก่อน", () => {
+    const m = (tags: string[]) => ({ plan: normalizePlanMeta({ tags }) });
+    expect(planTagCounts([m(["เว็บ", "ด่วนลูกค้า"]), m(["เว็บ"]), m([])])).toEqual([{ tag: "เว็บ", n: 2 }, { tag: "ด่วนลูกค้า", n: 1 }]);
+  });
+});
+
+describe("คนติดตาม", () => {
+  it("เฉพาะ uuid · ไม่ซ้ำ · ชื่อว่าง = ผู้ใช้", () => {
+    expect(cleanPlanWatchers([{ id: U1, name: " ฝน " }, { id: U1, name: "ซ้ำ" }, { id: "bad", name: "x" }, { id: U2 }]))
+      .toEqual([{ id: U1, name: "ฝน" }, { id: U2, name: "ผู้ใช้" }]);
+  });
+});
+
+describe("เวลาที่คาด", () => {
+  it("น้อยกว่า 5 นาที/ว่าง = ไม่ระบุ · สูงสุด 40 ชม. · ป้ายอ่านง่าย", () => {
+    expect(cleanEstimate(null)).toBeNull();
+    expect(cleanEstimate("")).toBeNull();
+    expect(cleanEstimate(2)).toBeNull();
+    expect(cleanEstimate("90")).toBe(90);
+    expect(cleanEstimate(99999)).toBe(2400);
+    expect([30, 60, 90, 240, 480].map(estimateLabel)).toEqual(["30 นาที", "1 ชม.", "1.5 ชม.", "ครึ่งวัน", "1 วัน"]);
+  });
+  it("งานเก่าไม่มีช่องใหม่ = ค่าว่าง", () => {
+    const p = normalizePlanMeta({ important: true });
+    expect([p.tags, p.watchers, p.estimate_min]).toEqual([[], [], null]);
+  });
+});
+
+describe("ภาระงานวันนี้ของฉัน", () => {
+  it("นับงานครบวันนี้/เลยกำหนด + ดาววันนี้ ของฉัน · ไม่นับงานเสร็จ/ของคนอื่น/งานอนาคต", () => {
+    const it2 = (o: { status?: string; due_at?: string | null; assigned_to?: string | null; est?: number | null; star?: string | null }) => ({
+      status: o.status ?? "open", due_at: o.due_at ?? null, assigned_to: o.assigned_to ?? U1,
+      plan: normalizePlanMeta({ estimate_min: o.est ?? null, star_date: o.star ?? null }),
+    });
+    const load = myDayLoad([
+      it2({ due_at: "2026-11-12T11:00:00Z", est: 120 }),          // วันนี้ 18:00
+      it2({ due_at: "2026-11-10T11:00:00Z", est: 60 }),           // เลยกำหนด
+      it2({ star: "2026-11-12" }),                                 // ดาววันนี้ ไม่ประเมิน
+      it2({ due_at: "2026-11-15T11:00:00Z", est: 480 }),          // อนาคต
+      it2({ due_at: "2026-11-12T11:00:00Z", status: "resolved", est: 60 }),
+      it2({ due_at: "2026-11-12T11:00:00Z", assigned_to: U2, est: 60 }),
+    ], U1, NOW);
+    expect(load).toEqual({ count: 3, minutes: 180, unestimated: 1 });
+  });
+});

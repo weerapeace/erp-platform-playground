@@ -1138,7 +1138,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "activity-feed", label: "ไทม์ไลน์ประวัติ", code: "ActivityFeed", category: "system",
     source: { path: "components/activity-feed" },
-    what: "โชว์ประวัติว่าใครทำอะไร เปลี่ยนจากอะไรเป็นอะไร แบบไทม์ไลน์",
+    what: "โชว์ประวัติว่าใครทำอะไร เปลี่ยนจากอะไรเป็นอะไร แบบไทม์ไลน์ · ลิ้นชักประวัติรายการ (RecordHistoryDrawer) · ฝังในป๊อป (RecordHistoryInline)",
     when: "กล่องประวัติของรายการ หรือหน้าประวัติทั้งระบบ",
     doc: "audit-log.md",
   },

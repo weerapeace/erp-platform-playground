@@ -63,6 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     important: body.important, remind: body.remind, repeat: body.repeat, source: body.source,
     waiting: typeof body.waiting_note === "string" && body.waiting_note.trim() ? { note: body.waiting_note } : null,
     created_by_id: user.id,
+    tags: body.tags, watchers: body.watchers, estimate_min: body.estimate_min,
   });
   const links = normalizeTaskLinks(body.links);
   const note = typeof body.note === "string" ? body.note.trim().slice(0, PLAN_NOTE_MAX) || null : null;

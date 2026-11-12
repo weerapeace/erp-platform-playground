@@ -15,7 +15,7 @@ import { todayBangkok } from "@/lib/date";
 import { linksOf } from "@/lib/record-tasks";
 import { isUuid } from "@/lib/record-tasks-server";
 import {
-  asPriority, isSummaryWindow, nextDue, normalizePlanMeta, normalizePlanSent, planMorningSummary, planReminders, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE,
+  asPriority, isSummaryWindow, nextDue, normalizePlanMeta, normalizePlanSent, planMorningSummary, planReminders, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, TEAM_PLAN_MODULE,
   type PlanItem, type ReminderNote,
 } from "@/lib/team-plan";
 
@@ -61,6 +61,40 @@ export async function notifyPlanAssignee(admin: Admin, item: { id: string; title
   } catch (e) { console.error("[team-plan] notify assignee", e); }   // แจ้งไม่ได้ ไม่ทำให้บันทึกพลาด
 }
 
+/** 👀 งานเสร็จ → กระดิ่งบอกคนติดตาม (ไม่บอกคนที่กดเสร็จเอง) */
+export async function notifyPlanWatchers(admin: Admin, row: PlanRow, actor: { id: string | null; name: string | null }) {
+  const plan = normalizePlanMeta(row.metadata?.plan);
+  const ids = plan.watchers.map((w) => w.id).filter((id) => id !== actor.id);
+  if (!ids.length) return;
+  if (!(await bellAllowed(admin, "team_plan.done"))) return;
+  try {
+    await admin.rpc("erp_notify", {
+      p_user_ids: ids, p_event_type: "team_plan.done",
+      p_title: `งานที่คุณติดตามเสร็จแล้ว: ${row.title}`.slice(0, 200),
+      p_body: `ติ๊กเสร็จโดย ${actor.name || "ผู้ใช้"}`,
+      p_link_url: planLink(row.id), p_entity_type: "team_plan", p_entity_id: row.id, p_priority: "normal",
+    });
+  } catch (e) { console.error("[team-plan] notify watchers", e); }
+}
+
+/** ✅ คัดลอกเช็กลิสต์ของงานหนึ่งไปอีกงาน (ยังไม่ติ๊กทุกข้อ · ผู้รับผิดชอบรายข้อ + ลิงก์เดิม) — ใช้กับงานทำซ้ำ + ทำสำเนา · พลาดไม่ขวาง */
+export async function copyPlanChecklist(admin: Admin, fromId: string, toId: string, actorName: string): Promise<number> {
+  try {
+    const { data: checks } = await admin.from("erp_record_tasks").select("title, assigned_to, metadata, created_at")
+      .eq("module_key", TEAM_PLAN_CHECK.moduleKey).eq("record_id", fromId).order("created_at", { ascending: true }).limit(100);
+    const list = (checks ?? []) as { title: string; assigned_to: string | null; metadata: unknown }[];
+    if (!list.length) return 0;
+    const base = Date.now();
+    const { error } = await admin.from("erp_record_tasks").insert(list.map((c, i) => ({
+      module_key: TEAM_PLAN_CHECK.moduleKey, record_id: toId, record_type: TEAM_PLAN_CHECK.recordType,
+      title: c.title, status: "open", assigned_to: c.assigned_to, created_by: actorName,
+      created_at: new Date(base + i).toISOString(),
+      ...(linksOf(c.metadata).length ? { metadata: { links: linksOf(c.metadata) } } : {}),
+    })));
+    return error ? 0 : list.length;
+  } catch { return 0; }
+}
+
 // ── งานทำซ้ำ: สร้างรอบถัดไป (ใช้ทั้งติ๊กเสร็จในหน้าเว็บ และปุ่ม "เสร็จแล้ว" บนแจ้งเตือนมือถือ) ──
 export async function createNextRepeat(admin: Admin, row: PlanRow, actor: { id: string | null; name: string }, now: Date = new Date()): Promise<PlanRow | null> {
   const plan = normalizePlanMeta(row.metadata?.plan, now);
@@ -75,20 +109,7 @@ export async function createNextRepeat(admin: Admin, row: PlanRow, actor: { id: 
   }).select(PLAN_COLS).single();
   const next = (data as PlanRow | null) ?? null;
   // ✅ รอบใหม่ได้เช็กลิสต์ชุดเดิม (ยังไม่ติ๊กทุกข้อ · ผู้รับผิดชอบรายข้อเดิม) — พลาดไม่ขวางการสร้างรอบใหม่
-  if (next) {
-    const { data: checks } = await admin.from("erp_record_tasks").select("title, assigned_to, metadata, created_at")
-      .eq("module_key", TEAM_PLAN_CHECK.moduleKey).eq("record_id", row.id).order("created_at", { ascending: true }).limit(100);
-    const list = (checks ?? []) as { title: string; assigned_to: string | null; metadata: unknown }[];
-    if (list.length) {
-      const base = Date.now();
-      await admin.from("erp_record_tasks").insert(list.map((c, i) => ({
-        module_key: TEAM_PLAN_CHECK.moduleKey, record_id: next.id, record_type: TEAM_PLAN_CHECK.recordType,
-        title: c.title, status: "open", assigned_to: c.assigned_to, created_by: actor.name,
-        created_at: new Date(base + i).toISOString(),
-        ...(linksOf(c.metadata).length ? { metadata: { links: linksOf(c.metadata) } } : {}),
-      })));
-    }
-  }
+  if (next) await copyPlanChecklist(admin, row.id, next.id, actor.name);
   if (next) await writeAudit(admin, { action: "create", entityType: "record_task", entityId: next.id, actorId: actor.id, actorName: actor.name,
     metadata: { module_key: TEAM_PLAN_MODULE, title: next.title, due_at: next.due_at, repeat_from: row.id } });
   return next;

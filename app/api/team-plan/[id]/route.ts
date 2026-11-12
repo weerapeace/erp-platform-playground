@@ -3,7 +3,8 @@
  * PATCH /api/team-plan/[id] body (ส่งเฉพาะที่เปลี่ยน):
  *   { title?, note?, priority?, due_at? (null = ไม่กำหนด), assigned_to? (null = ไม่ระบุ), status? ("open"|"resolved"),
  *     important?, star? (true = ⭐ งานหลักวันนี้ · สูงสุด 3 ต่อคนต่อวัน), waiting? (null | { note }), repeat? (null | { every, n }), remind?, links?,
- *     snooze? ("1h" = เตือนอีกครั้งใน 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 — กำหนดส่งไม่เปลี่ยน · ตัวตั้งเวลาเตือนตอนถึงเวลา) }
+ *     snooze? ("1h" = เตือนอีกครั้งใน 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 — กำหนดส่งไม่เปลี่ยน · ตัวตั้งเวลาเตือนตอนถึงเวลา),
+ *     tags? (string[]) · watchers? ([{id,name}] — กระดิ่งบอกตอนเสร็จ) · estimate_min? (นาที | null) }
  *   ติ๊กเสร็จงานทำซ้ำ → สร้างรอบถัดไปให้ (คืน next) · มอบให้คนใหม่ → กระดิ่งบอกคนนั้น
  * DELETE /api/team-plan/[id]  — คนสร้าง หรือคนที่มีสิทธิ์ tasks.delete
  * สิทธิ์แก้ tasks.edit · ทุกครั้งเขียนประวัติ (audit_logs entity record_task)
@@ -16,8 +17,9 @@ import { writeAudit } from "@/lib/audit";
 import { isUuid, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
 import { addDaysYmd, todayBangkok } from "@/lib/date";
-import { asPriority, dueLabel, MAX_STARS, normalizePlanMeta, PLAN_NOTE_MAX, starCountFor, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE } from "@/lib/team-plan";
-import { createNextRepeat, notifyPlanAssignee, PLAN_COLS, snoozeMetadata, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
+import { asPriority, cleanEstimate, cleanPlanTags, cleanPlanWatchers, dueLabel, MAX_STARS, normalizePlanMeta, PLAN_NOTE_MAX, starCountFor, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, TEAM_PLAN_MODULE } from "@/lib/team-plan";
+import { createNextRepeat, notifyPlanAssignee, notifyPlanWatchers, PLAN_COLS, snoozeMetadata, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
+import { deleteRecordFilesFor } from "@/lib/record-files";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -82,6 +84,9 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     plan.waiting = w ? { note: String(w.note ?? "").trim().slice(0, 120), since: plan.waiting?.since ?? now.toISOString() } : null;
     planChanged = true;
   }
+  if (body.tags !== undefined) { plan.tags = cleanPlanTags(body.tags); planChanged = true; }
+  if (body.watchers !== undefined) { plan.watchers = cleanPlanWatchers(body.watchers); planChanged = true; }
+  if (body.estimate_min !== undefined) { plan.estimate_min = cleanEstimate(body.estimate_min); planChanged = true; }
   if (body.star !== undefined) {
     if (body.star) {
       // ⭐ สูงสุด 3 งานต่อคนต่อวัน (นับตามผู้รับผิดชอบ · ไม่มี = คนสร้าง)
@@ -127,8 +132,10 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     await notifyPlanAssignee(admin, { id, title: row.title, assigned_to: row.assigned_to, due_label: dueLabel(row.due_at, now) }, { id: user.id, name: actorName });
   }
 
-  // งานทำซ้ำเพิ่งติ๊กเสร็จ → สร้างรอบถัดไป (ผู้รับผิดชอบ/ความด่วน/เตือนเดิม · ไม่มีดาว/รอ)
-  const next = patch.status === "resolved" && before.status !== "resolved" ? await createNextRepeat(admin, row, { id: user.id, name: actorName }, now) : null;
+  // งานทำซ้ำเพิ่งติ๊กเสร็จ → สร้างรอบถัดไป (ผู้รับผิดชอบ/ความด่วน/เตือนเดิม · ไม่มีดาว/รอ) · 👀 บอกคนติดตาม
+  const justDone = patch.status === "resolved" && before.status !== "resolved";
+  if (justDone) await notifyPlanWatchers(admin, row, { id: user.id, name: actorName });
+  const next = justDone ? await createNextRepeat(admin, row, { id: user.id, name: actorName }, now) : null;
 
   const names = await userNames(admin, [row.assigned_to, next?.assigned_to]);
   return NextResponse.json({ data: toPlanItem(row, names), next: next ? toPlanItem(next, names) : null, error: null });
@@ -150,10 +157,11 @@ export async function DELETE(request: NextRequest, { params }: Ctx): Promise<Nex
   }
   const { error } = await admin.from("erp_record_tasks").delete().eq("id", id).eq("module_key", TEAM_PLAN_MODULE);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const filesRemoved = await deleteRecordFilesFor(admin, TEAM_PLAN_FILES, id).catch(() => 0);   // 📎 ไฟล์แนบลบตาม (ไม่ค้างในที่เก็บ)
   // เช็กลิสต์ในงานไปด้วย (ไม่ทิ้งข้อกำพร้า) · ข้อมูลข้อยังอยู่ในประวัติของงานนี้ (metadata ด้านล่าง)
   const { data: checks } = await admin.from("erp_record_tasks").delete().eq("module_key", TEAM_PLAN_CHECK.moduleKey).eq("record_id", id).select("title, status");
   await writeAudit(admin, { action: "delete", entityType: "record_task", entityId: id, actorId: user.id, actorName: user.email ?? "ผู้ใช้",
     metadata: { module_key: TEAM_PLAN_MODULE, title: before.title, priority: before.priority, assigned_to: before.assigned_to, due_at: before.due_at, metadata: before.metadata,
-      ...(checks?.length ? { checklist: checks } : {}) } });
+      ...(checks?.length ? { checklist: checks } : {}), ...(filesRemoved ? { files_removed: filesRemoved } : {}) } });
   return NextResponse.json({ ok: true, error: null });
 }

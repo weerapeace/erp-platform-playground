@@ -4,8 +4,9 @@
  * ลิ้นชัก "ประวัติของรายการนี้" (ของกลาง) — กดชื่อรายการในหน้าประวัติ แล้วเห็นทุกอย่างที่เคยเกิดกับรายการนั้น เรียงตามเวลา
  * ใช้ได้ทุกหน้า: <RecordHistoryDrawer target={{ entityType, entityId, title, href }} onClose={...} />
  * ข้อมูลจาก /api/audit-logs?entity_type&entity_id (ค่าอ่อนไหวซ่อนตามสิทธิ์ที่ API แล้ว)
+ * ฝังในฟอร์ม/ป๊อป (ไม่เปิดลิ้นชักซ้อน): <RecordHistoryInline entityType entityId /> · โหลดเอง: useRecordHistory(target) — ตัวโหลดเดียวกัน
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Drawer } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { ErrorState } from "@/components/state-views";
@@ -24,7 +25,8 @@ export type RecordHistoryTarget = {
   href?: string | null;
 };
 
-export function RecordHistoryDrawer({ target, onClose }: { target: RecordHistoryTarget | null; onClose: () => void }) {
+/** โหลดประวัติของรายการเดียว (ใช้ร่วม: ลิ้นชัก + แบบฝัง) · target = null = ไม่โหลด */
+export function useRecordHistory(target: { entityType: string; entityId: string } | null) {
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +48,19 @@ export function RecordHistoryDrawer({ target, onClose }: { target: RecordHistory
   }, [target]);
 
   useEffect(() => { if (target) { setEntries([]); void load(); } }, [target, load]);
+  return { entries, loading, error, reload: load };
+}
+
+/** ประวัติแบบฝังในป๊อป/ฟอร์ม (ไม่มีลิ้นชัก) — ใหม่สุดอยู่บน */
+export function RecordHistoryInline({ entityType, entityId, emptyMessage = "ยังไม่มีประวัติ" }: { entityType: string; entityId: string; emptyMessage?: string }) {
+  const target = useMemo(() => ({ entityType, entityId }), [entityType, entityId]);
+  const { entries, loading, error, reload } = useRecordHistory(target);
+  return error ? <ErrorState hint={error} onRetry={reload} retrying={loading} />
+    : <ActivityFeed entries={entries} loading={loading} hideRecord compact emptyMessage={emptyMessage} />;
+}
+
+export function RecordHistoryDrawer({ target, onClose }: { target: RecordHistoryTarget | null; onClose: () => void }) {
+  const { entries, loading, error, reload: load } = useRecordHistory(target);
 
   return (
     <Drawer open={!!target} onClose={onClose} size="lg" storageKey="audit-record-history"

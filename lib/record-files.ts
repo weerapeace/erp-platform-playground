@@ -21,6 +21,7 @@ export const RECORD_FILE_PERMS: Record<string, { view: string[]; edit: string[] 
   "payroll-employees": { view: ["app.payroll", "employees.view"], edit: ["app.payroll", "employees.edit"] },
   erp_playground_quote: { view: ["qt.view"], edit: ["qt.create"] },      // ใบเสนอราคา
   erp_playground_so: { view: ["so.view"], edit: ["so.create"] },          // ใบสั่งขาย
+  team_plan: { view: ["tasks.view"], edit: ["tasks.edit"] },               // แผนงานทีม (รูป/ไฟล์แนบในงาน · lib/team-plan TEAM_PLAN_FILES)
 };
 
 export function recordFilePerms(entityType: string, mode: "view" | "edit"): string[] {
