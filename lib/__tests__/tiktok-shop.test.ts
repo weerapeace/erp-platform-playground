@@ -40,6 +40,10 @@ describe("TikTok Shop — แปลงออเดอร์เป็นหัว
     expect(ttsOrderToPlatformOrder({ ...ORDER, status: "NEW_THING" }, tiktokToInternal)!.head.status).toBe("new");
     expect(ttsOrderToPlatformOrder({ status: "UNPAID" }, tiktokToInternal)).toBeNull();
   });
+  test("ไม่ใช่เก็บเงินปลายทาง = cod_amount 0 ไม่ใช่ว่าง (ช่องในฐานข้อมูลห้ามว่าง — เจอจริง 2026-11-12)", () => {
+    expect(ttsOrderToPlatformOrder({ ...ORDER, is_cod: false }, tiktokToInternal)!.head.cod_amount).toBe(0);
+    expect(ttsOrderToPlatformOrder({ ...ORDER, is_cod: true, payment: {} }, tiktokToInternal)!.head.cod_amount).toBe(0);
+  });
 });
 
 // รูปตามเอกสาร api_meta (search-products-202502 / get-product-202309)

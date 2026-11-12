@@ -80,7 +80,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const mapped = page.orders.map((o) => ttsOrderToPlatformOrder(o, tiktokToInternal)).filter((m): m is TtsOrderMapped => !!m);
-    fetched += mapped.length;
     if (mapped.length) {
       const ids = mapped.map((m) => m.external_order_id);
       const { data: exist, error: exErr } = await admin.from("platform_orders").select("external_order_id").eq("platform_id", ttId).in("external_order_id", ids);
@@ -91,6 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const rows = mapped.map((m) => ({ platform_id: ttId, brand_id: brandId, source: SOURCE, external_order_id: m.external_order_id, ...m.head, updated_at: now }));
       const { data: up, error: upErr } = await admin.from("platform_orders").upsert(rows, { onConflict: "platform_id,external_order_id" }).select("id, external_order_id");
       if (upErr) { stopReason = `บันทึกออเดอร์ไม่สำเร็จ: ${upErr.message}`; break; }
+      fetched += mapped.length;   // นับเฉพาะที่บันทึกได้จริง (เดิมนับก่อนบันทึก → ข้อความบอก "ได้ 50 ใบ" ทั้งที่ไม่ได้บันทึก)
       const idOf = new Map(((up ?? []) as { id: string; external_order_id: string }[]).map((r) => [r.external_order_id, r.id]));
       const fresh = mapped.filter((m) => !had.has(m.external_order_id));
       created += fresh.length; updated += mapped.length - fresh.length;

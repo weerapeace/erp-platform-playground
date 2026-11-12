@@ -252,7 +252,7 @@ export type TtsOrderMapped = {
   head: {
     order_no: string; customer_name: string | null; status: string; platform_status: string | null;
     total: number | null; currency: string; ordered_at: string | null; ship_by_at: string | null;
-    tracking_no: string | null; carrier: string | null; package_no: string | null; cod_amount: number | null;
+    tracking_no: string | null; carrier: string | null; package_no: string | null; cod_amount: number;
     raw: { tiktok: Record<string, unknown> };
   };
   items: TtsOrderItem[];
@@ -297,7 +297,8 @@ export function ttsOrderToPlatformOrder(o: Record<string, unknown>, toInternal: 
       tracking_no: str(o.tracking_number),
       carrier: str(o.shipping_provider),
       package_no: pkgs.length ? str(pkgs[0].id) : null,
-      cod_amount: isCod ? total : null,
+      // ช่องนี้ในฐานข้อมูลห้ามว่าง (ค่าเริ่ม 0) — ไม่ใช่เก็บเงินปลายทาง = 0 (เจอจริง 2026-11-12: ส่ง null แล้วบันทึกไม่ผ่านทั้งหน้า)
+      cod_amount: isCod ? (total ?? 0) : 0,
       raw: {
         tiktok: {
           status, update_time: numOrNull(o.update_time), paid_time: numOrNull(o.paid_time), rts_sla_time: numOrNull(o.rts_sla_time),
