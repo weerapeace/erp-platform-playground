@@ -98,6 +98,12 @@ const LAST_KEY = "platform-catalog:last";
 function readLast(): { platformId?: string; brandId?: string } {
   try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? "{}") as { platformId?: string; brandId?: string }; } catch { return {}; }
 }
+/** ลิงก์จากหน้าแบรนด์ (/brand-hub): ?brand=<id>&platform=<code> — ชนะค่าที่จำไว้ (เปิดมาเห็นแบรนด์/ร้านนั้นเลย) */
+function readUrlPick(): { brandId?: string; platformCode?: string } {
+  if (typeof window === "undefined") return {};
+  const sp = new URLSearchParams(window.location.search);
+  return { brandId: sp.get("brand") || undefined, platformCode: sp.get("platform") || undefined };
+}
 
 export default function PlatformCatalogPage() {
   const { can } = useAuth();
@@ -218,9 +224,12 @@ export default function PlatformCatalogPage() {
       const pfs = ((j.platforms ?? []) as Platform[]).filter((p) => isSellingPlatform(p.code));
       const brs = (j.brands ?? []) as Brand[];
       const last = readLast();
+      const url = readUrlPick();
+      const wantBrand = url.brandId ?? last.brandId;
+      const urlPf = url.platformCode ? pfs.find((p) => p.code === url.platformCode)?.id : undefined;
       setPlatforms(pfs); setBrands(brs);
-      setBrandId(last.brandId && brs.some((b) => b.id === last.brandId) ? last.brandId : "");
-      setPlatformId(last.platformId && pfs.some((p) => p.id === last.platformId) ? last.platformId : (pfs[0]?.id ?? ""));
+      setBrandId(wantBrand && brs.some((b) => b.id === wantBrand) ? wantBrand : "");
+      setPlatformId(urlPf ?? (last.platformId && pfs.some((p) => p.id === last.platformId) ? last.platformId : (pfs[0]?.id ?? "")));
       setBootError(null);
     } catch (e) { setBootError((e as Error).message); }
   })(); }, []);

@@ -820,6 +820,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "block-layout.md",
   },
   {
+    key: "carousel", label: "การ์ดเลื่อนแนวนอน (การ์ดกลางขยาย)", code: "Carousel", category: "layout",
+    source: { path: "components/carousel", names: ["Carousel"] },
+    what: "การ์ดเรียงแนวนอน การ์ดกลางขยาย ข้าง ๆ หดและจาง · ลูกศร · จุดบอกตำแหน่ง · ปัดนิ้ว · คีย์ ←→/Enter · CSS ล้วน (ไม่มีโปรแกรมแอนิเมชันเสริม)",
+    when: "หน้าเลือก 1 อย่างจากไม่กี่สิบอย่างแบบมีภาพ เช่น เลือกแบรนด์ (/brand-hub)",
+    notWhen: "รายการยาวที่ต้องค้นหา/กรอง (ตารางกลาง/การ์ดกริด) · ดูรูปทีละรูป (ตัวดูรูปกลาง)",
+    doc: "brand-hub.md",
+  },
+  {
     key: "swipe-nav", label: "ปัดซ้าย-ขวาเปลี่ยนแท็บ (มือถือ)", code: "useSwipeNav", category: "layout",
     source: { path: "lib/use-swipe-nav", names: ["useSwipeNav"] },
     what: "ปัดตรงรายการเพื่อไปแท็บถัดไป/ก่อนหน้า (ปัดซ้าย = ถัดไป แบบ LINE/IG) · เลื่อนตามนิ้ว · กันปัดพลาด (ต้องแนวนอนชัด เกิน 60px · ขอบจอไม่นับ · ปัดแล้วไม่เปิดการ์ด)",

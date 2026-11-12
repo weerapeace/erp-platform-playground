@@ -62,7 +62,8 @@ function PlatformOrdersInner() {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
-  const [brandId, setBrandId] = useState("");
+  // ลิงก์จากหน้าแบรนด์ (/brand-hub): ?brand=<id> → เปิดมาเห็นออเดอร์ของแบรนด์นั้นเลย
+  const [brandId, setBrandId] = useState(() => sp.get("brand") ?? "");
   const [view, setView] = useState<"todo" | "history">("todo");
   const [card, setCard] = useState<CardKey>("todo");
   const [qInput, setQInput] = useState("");

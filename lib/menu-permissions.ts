@@ -38,6 +38,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/cost-calculator", keys: ["products.view", "products.edit", "products.cost.view"] },   // เครื่องคิดต้นทุน — ต้องมี "ดูต้นทุน" (2026-11-12)
   // ตั๋วงานช่าง Pattern — ดู / เปิดตั๋ว (ฝ่ายออกแบบ) / รับทำ (ช่าง) / จัดการทั้งหมด
   { href: "/design/pattern-tickets", prefixes: ["pattern."] },
+  // หน้าแบรนด์ (เลือกแบรนด์ → หน้าจัดการรวมทุกอย่างของแบรนด์) — ตัวเลขใช้สิทธิ์ดูสินค้าบนแพลตฟอร์ม · ลิงก์ข้างในกรองตามสิทธิ์ของแต่ละหน้า
+  { href: "/brand-hub", keys: ["products.platforms.view"] },
   // สตูดิโอแพทเทิร์น (แอปหลัก) — ดู / สร้าง-แก้ / ลบแพทเทิร์น
   { href: "/pattern-studio", prefixes: ["pattern_studio."] },
 ];
