@@ -19,7 +19,7 @@
 | หน้า `/admin/platform-accounts` › TikTok | ปุ่มเชื่อมต่อ / ตรวจการเชื่อมต่อ / ตัดการเชื่อมต่อ |
 | `/api/tiktok-shop/sync-products` | ดึงสินค้าทั้งร้าน (`/product/202502/products/search` status=ALL ทีละ 50 · `page_token`) + รายละเอียดเฉพาะตัวใหม่/แก้ไข (`/product/202309/products/{id}` → รูปแรก/หมวด/ชื่อตัวเลือก) → `upsertCatalogListings` · จบครบ = ติดป้ายตัวที่ร้านลบ · audit `tiktok_api` (ครั้งแรกเก็บตัวอย่างคำตอบ `sample`) |
 | หน้า `/master/platform-catalog` › TikTok › ตั้งค่า | ปุ่ม "ดึงสินค้าจาก TikTok" (เรียกต่อเองจนครบ · ค้างแล้วกดอีกครั้ง = ต่อจากหน้าที่ค้าง ภายใน 25 นาที) |
-| `raw.tiktok` | ข้อมูลย่อ `{ id, title, status, skus[{ id, seller_sku, price, stock, status, label }], image, category, update_time }` — ไม่เก็บคำบรรยาย · สรุปสถานะด้วย `summarizeListing("tiktok")` · อ่านผ่านฟังก์ชัน DB `platform_listings_slim` (คอลัมน์ `tiktok` — migration 202612040300 **ยังไม่ได้ลงฐานข้อมูลจริง รอเจ้าของอนุญาต** · ก่อนลง: ดึงสินค้า/จับคู่ได้ แต่การ์ดสถานะ/สต๊อก/รูปของ TikTok ขึ้น "ไม่รู้สถานะ") |
+| `raw.tiktok` | ข้อมูลย่อ `{ id, title, status, skus[{ id, seller_sku, price, stock, status, label }], image, category, update_time }` — ไม่เก็บคำบรรยาย · สรุปสถานะด้วย `summarizeListing("tiktok")` · อ่านผ่านฟังก์ชัน DB `platform_listings_slim` (คอลัมน์ `tiktok` — migration 202612040300 ลงฐานข้อมูลจริงแล้ว 2026-11-12) |
 
 ## ค่าตั้ง (Vercel env — เจ้าของใส่เองแล้ว 2026-11-11)
 `TIKTOK_SHOP_APP_KEY` · `TIKTOK_SHOP_APP_SECRET` · `TIKTOK_SHOP_SERVICE_ID` (= ตัวเลข "ID:" ใต้ชื่อแอปใน Partner Center)
