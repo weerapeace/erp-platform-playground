@@ -41,7 +41,8 @@ import type { BagKit, BagStyle, KitAttach, KitOpts, KitParams, KitPiece, KitSeam
 import type { TplUpdate } from "./template-wizard";
 import type { BagPartsResult } from "./bag-parts-modal";
 import type { PlanPiece } from "@/lib/pattern-bagparts";
-import type { ProjectPiece } from "@/lib/pattern-project";
+import type { Colorway, ProjectPiece } from "@/lib/pattern-project";
+import { ColorwayBar } from "./colorway-bar";
 import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
 import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summarize, type CheckIssue } from "@/lib/pattern-check";
 import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
@@ -106,7 +107,8 @@ export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start
   /** เริ่มบทใหม่ = คืนชิ้นตั้งต้นของบท (เฉพาะแบบฝึก) */ onLessonReset?: () => void;
   /** งานที่เปิดอยู่ (ให้สารบัญสร้าง "สำเนาเพื่อเรียน") */ copySource?: () => CopySource | null;
   /** สร้างแบบฝึก/สำเนาได้ (สิทธิ์แก้) */ canLearn?: boolean;
-  /** ชุดแม่แบบล่าสุด + เปลี่ยน (อัปเดตชุดเดิม · รอบ F2) */ tpl?: StudioTpl | null; onTplUpdate?: (next: StudioTpl) => void };
+  /** ชุดแม่แบบล่าสุด + เปลี่ยน (อัปเดตชุดเดิม · รอบ F2) */ tpl?: StudioTpl | null; onTplUpdate?: (next: StudioTpl) => void;
+  /** ชุดสี + ชุดที่เลือก (รอบ G2) */ colorways?: Colorway[]; colorway?: string | null; onColorways?: (list: Colorway[], active: string | null) => void };
 /** ชิ้นที่ล็อก (แก้/ลากไม่ได้) และซ่อน (จาง กดไม่ได้ แต่ยังถูกตรวจ) */
 export type PieceView = { lock: string[]; hide: string[] };
 
@@ -138,7 +140,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [photo, setPhoto] = useState(false);
   const [draft, setDraft] = useState<{ params: BagParams; notice: string } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
   const [inject, setInject] = useState<EditorProps["inject"]>(null);
-  const [layer, setLayer] = useState<"all" | "outer" | "lining">("all");   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
+  const [layer, setLayer] = useState<"all" | "outer" | "lining" | "inner">("all");   // inner = โฟม / ตัวเสริม (รอบ G2)   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
   const [cut, setCut] = useState<Pattern3DCut>("none");                     // ผ่าดูข้างในของภาพ 3D
   const [pocket, setPocket] = useState(false);
   const [bagParts, setBagParts] = useState(false);   // ชิ้นกระเป๋า: สาย/หู · กุ๊น · ช่องโชว์ (รอบ F2)
@@ -203,12 +205,14 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const asmLive: AsmPiece[] = useMemo(() => live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) })), [live]);
   const sewnScene = useMemo(() => (wantSewn && sew ? buildSewn(asmLive, sew.seams, sew.attaches ?? []) : null), [wantSewn, asmLive, sew?.seams, sew?.attaches]);   // eslint-disable-line react-hooks/exhaustive-deps
   const liningPids = useMemo(() => new Set(live.filter((p) => p.info?.role === "lining").map((p) => p.pid)), [live]);
+  const innerPids = useMemo(() => new Set(live.filter((p) => p.info?.role === "foam" || p.info?.role === "reinforce").map((p) => p.pid)), [live]);   // ชั้นโฟม / ตัวเสริม
+  const layerOf = (pid: string) => (liningPids.has(pid) ? "lining" : innerPids.has(pid) ? "inner" : "outer");
   const hidePids = useMemo(() => {
     const out = new Set<string>();
-    if (layer !== "all") for (const p of live) if (liningPids.has(p.pid) !== (layer === "lining")) out.add(p.pid);
+    if (layer !== "all") for (const p of live) if (layerOf(p.pid) !== layer) out.add(p.pid);
     if (sew) { for (const id of pv.hide) out.add(id); if (iso) for (const p of live) if (p.pid !== iso) out.add(p.pid); }
     return out.size ? out : null;
-  }, [layer, live, liningPids, sew, pv.hide, iso]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layer, live, liningPids, innerPids, sew, pv.hide, iso]);   // eslint-disable-line react-hooks/exhaustive-deps
   const lockPids = useMemo(() => (sew && pv.lock.length ? new Set(pv.lock) : null), [sew, pv.lock]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ตรวจแบบ (คิดจากชิ้นสด แต่หน่วงตามหลังการลาก ไม่ให้กระดานกระตุก)
   const liveLazy = useDeferredValue(live);
@@ -308,7 +312,11 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
     setNotice(t(`อัปเดตชุดเดิมแล้ว: เปลี่ยน ${u.patch.length} ชิ้น · เพิ่ม ${add.length}${kept ? ` · เก็บชิ้นที่แก้มือไว้ ${kept} ชิ้น (${u.plan.edited.map((x) => x.piece.name).join(", ")})` : ""}${u.plan.gone.length ? ` · ชิ้นที่ไม่มีในค่าใหม่ ${u.plan.gone.length} ชิ้นยังอยู่ (ลบเองถ้าไม่ใช้)` : ""}`,
       `Set updated: ${u.patch.length} changed · ${add.length} added${kept ? ` · ${kept} hand-edited kept` : ""}${u.plan.gone.length ? ` · ${u.plan.gone.length} unused piece(s) left in place` : ""}`));
   };
-  const pieceColors = useMemo(() => { const out: Record<string, string> = {}; for (const p of live) { const c = p.mats.map((m) => props.matProps?.[m.id]?.color).find(Boolean); if (c) out[p.pid] = c; } return out; }, [live, props.matProps]);
+  // สีของชิ้นในภาพ 3D: ชุดสีที่เลือก (รอบ G2) → สีของวัสดุ · ลายผ้าขนาดจริงจากค่าของวัสดุ
+  const colorway = sew?.colorways?.find((c) => c.id === sew?.colorway) ?? null;
+  const pieceColors = useMemo(() => { const out: Record<string, string> = {}; for (const p of live) { const c = p.mats.map((m) => colorway?.colors[m.id] ?? props.matProps?.[m.id]?.color).find(Boolean); if (c) out[p.pid] = c; } return out; }, [live, props.matProps, colorway]);
+  const pieceTex = useMemo(() => { const out: Record<string, { kind: string; size: number; color2?: string }> = {}; for (const p of live) { const x = p.mats.map((m) => props.matProps?.[m.id]?.tex).find(Boolean); if (x) out[p.pid] = x; } return out; }, [live, props.matProps]);
+  const cwMats = useMemo(() => { const seen = new Map<string, { id: string; name: string; color: string }>(); for (const p of live) for (const m of p.mats) if (!seen.has(m.id)) seen.set(m.id, { id: m.id, name: m.name, color: props.matProps?.[m.id]?.color ?? "#d8c08c" }); return [...seen.values()]; }, [live, props.matProps]);
   const sewnOn = !!sewnScene && sewnScene.joined > 0;
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
@@ -493,9 +501,9 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           </div>
           {toolSearch}
         </>}
-        {sew && liningPids.size > 0 && (
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ชั้นที่ดูบนกระดาน", "Layer shown on the board")}>
-            {(["all", "outer", "lining"] as const).map((k) => <button key={k} type="button" onClick={() => setLayer(k)} aria-pressed={layer === k} className={`h-7 rounded-md px-2.5 text-xs ${layer === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "all" ? t("ทุกชั้น", "All layers") : k === "outer" ? t("ชั้นนอก", "Outer") : t("ซับใน", "Lining")}</button>)}
+        {sew && (liningPids.size > 0 || innerPids.size > 0) && (
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ชั้นที่ดูบนกระดาน", "Layer shown on the board")} data-layer-filter>
+            {(["all", "outer", ...(liningPids.size ? ["lining"] as const : []), ...(innerPids.size ? ["inner"] as const : [])] as ("all" | "outer" | "lining" | "inner")[]).map((k) => k === "inner" ? <button key={k} type="button" onClick={() => setLayer(k)} aria-pressed={layer === k} className={`h-7 rounded-md px-2.5 text-xs ${layer === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{t("โฟม / เสริม", "Foam / reinforcement")}</button> : <button key={k} type="button" onClick={() => setLayer(k)} aria-pressed={layer === k} className={`h-7 rounded-md px-2.5 text-xs ${layer === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "all" ? t("ทุกชั้น", "All layers") : k === "outer" ? t("ชั้นนอก", "Outer") : t("ซับใน", "Lining")}</button>)}
           </div>
         )}
         {!sew && <>
@@ -594,7 +602,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
             {sewnOn && sewnScene
-              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} volume={sewnScene?.asm ? bagVolumeLiters(sewnScene.asm) : null} />
+              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} pieceTex={pieceTex} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} volume={sewnScene?.asm ? bagVolumeLiters(sewnScene.asm) : null} />
               : <Pattern3D saveName={imageName} mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />}
             {sewnOn && sewnScene ? (
               <div className="space-y-1 text-[11px] text-slate-500">
@@ -642,6 +650,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
               {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}
               </div>
             )}
+            {!asmMode && sewnOn && sew && cwMats.length > 0 && <ColorwayBar mats={cwMats} list={sew.colorways ?? []} active={sew.colorway ?? null} onChange={readonly ? undefined : sew.onColorways} readonly={readonly} />}
             {asmMode
               ? <AssemblyView saveName={imageName} compact height={Math.max(300, h3 - 60)} view={view3d === "explode" ? "whole" : view3d} pieces={asmLive} seams={sew.seams} attaches={sew.attaches ?? []} onAttachesChange={readonly ? undefined : sew.onAttachesChange} pieceStiff={sew.pieceStiff} />
               : viewEl}

@@ -26,7 +26,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { StudioTpl, TemplateInsertInfo } from "@/components/pattern-studio";
-import { PATTERN_PROJECT_STATUSES, PATTERN_SCHEMA, PATTERN_STATUS_LABEL, cleanMatProps, cleanPieceView, cleanProjectPieces, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type PieceViewState, type ProjectPiece } from "@/lib/pattern-project";
+import { PATTERN_PROJECT_STATUSES, PATTERN_SCHEMA, PATTERN_STATUS_LABEL, cleanColorways, cleanMatProps, cleanPieceView, cleanProjectPieces, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type PieceViewState, type ProjectPiece } from "@/lib/pattern-project";
 import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
 import { checkSeam, cleanSeams, type Seam } from "@/lib/pattern-seams";
 import { cleanSeamTol } from "@/lib/pattern-check";
@@ -154,6 +154,9 @@ export function PatternProjectEditor({ id }: { id: string }) {
     const keys = Object.fromEntries(Object.entries(tp.keys as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"));
     return { style: tp.style as StudioTpl["style"], keys, ...(tp.params && typeof tp.params === "object" ? { params: tp.params as StudioTpl["params"] } : {}), ...(tp.kparams && typeof tp.kparams === "object" ? { kparams: tp.kparams as StudioTpl["kparams"] } : {}), ...(tp.opts && typeof tp.opts === "object" ? { opts: tp.opts as StudioTpl["opts"] } : {}) };
   }, [template]);
+  /** ชุดสี (รอบ G2) — เก็บใน template.colorways + template.colorway */
+  const colorways = useMemo(() => cleanColorways((template as { colorways?: unknown } | null)?.colorways), [template]);
+  const colorwayId = typeof (template as { colorway?: unknown } | null)?.colorway === "string" ? (template as { colorway: string }).colorway : null;
 
   const shapes = useMemo(() => new Map(pieces.map((p) => [p.pid, { shape: p.shape, inner: p.inner, meta: p.edgeMeta ?? null }])), [pieces]);
   const summary = useMemo(() => projectSummary(pieces, basis), [pieces, basis]);
@@ -333,7 +336,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
           tol: seamTol, onTolChange: canEdit ? (v) => { setTemplate((tp) => ({ ...(tp ?? {}), settings: { ...((tp?.settings as Record<string, unknown> | undefined) ?? {}), seamTol: v } })); setDirty(true); } : undefined,
           view: pieceView, onViewChange: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), view: next })); setDirty(true); } : undefined,
           lesson: lessonRef, lessonName: `${patternNo ?? ""} ${name}`.trim(), onLessonReset: canEdit ? resetLesson : undefined, copySource: lessonRef ? undefined : copySource, canLearn: canEdit,
-          tpl: studioTpl, onTplUpdate: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), ...next })); setDirty(true); } : undefined }} pieceInfoFields matProps={matProps}
+          tpl: studioTpl, onTplUpdate: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), ...next })); setDirty(true); } : undefined,
+          colorways, colorway: colorwayId, onColorways: canEdit ? (list, active) => { setTemplate((tp) => ({ ...(tp ?? {}), colorways: list, colorway: active })); setDirty(true); } : undefined }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
         footerNote={<span className="text-slate-400">{canEdit ? t("บันทึกอัตโนมัติหลังหยุดแก้ 4 วินาที · Ctrl+Z ย้อนได้ทั้งชิ้นและตะเข็บ", "Saves automatically 4 seconds after you stop · Ctrl+Z undoes pieces and seams") : ""}</span>} />
 

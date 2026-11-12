@@ -30,7 +30,7 @@ import {
 } from "@/lib/pattern-shape";
 import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 import { SEAM_KINDS, SEAM_MIN_LEN, SEAM_TOP_DEFAULT, checkSeam, cleanEdgeMeta, edgeBusy, edgeMetaSet, extendSide, finishPts, finishRange, withFinishRange, isInnerSide, isPartialSide, pieceEdges, pointAlong, posOnLine, rangeFree, rangedSide, seamLabel, setEdgeLength, sideHasEdge, sideLength, sidePoints, sideRange, subLine, type EdgeMeta, type Seam, type SeamKind, type SeamSide } from "@/lib/pattern-seams";
-import { BOND_KINDS, MAT_PRESETS, PIECE_ROLES, cleanPieceInfo, matFoldComp, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
+import { BOND_KINDS, MAT_PRESETS, MAT_TEXTURES, PIECE_ROLES, cleanPieceInfo, matFoldComp, topstitchLines, type BondKind, type MatProps, type PieceInfo, type PieceRole } from "@/lib/pattern-project";
 import { ColorInput } from "@/components/color-picker";
 import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } from "@/lib/pattern-link";
 import { formatLength, parseLength, unitLabel, type LengthUnit } from "@/lib/length-units";
@@ -2204,6 +2204,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                       {[...foldSegments(p.shape, cleanFoldEdges(p.shape, p.foldEdges)), ...foldSecondLines(p.shape, cleanFoldEdges(p.shape, p.foldEdges), edgeAllowances(p.shape, p.allowEdges, p.allow) ?? pieceEdges(p.shape).map(() => p.allow))].map((L, fi) => (   // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน)
                         <path key={`f${fi}`} d={"M" + L.map((q) => `${q[0]} ${q[1]}`).join("L")} fill="none" stroke="#7c3aed" strokeWidth={2} strokeDasharray="10 3 2 3" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                       ))}
+                      {topstitchLines(p.shape, p.pid, p.edgeMeta, seamList).map((L, si) => (   // เดินด้ายทับ (รอบ G2): ขอบที่ตั้ง + ตะเข็บที่ตั้ง
+                        <path key={`st${si}`} data-stitch d={"M" + L.map((q) => `${q[0]} ${q[1]}`).join("L")} fill="none" stroke="#9a3412" strokeWidth={1.2} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                      ))}
                       {edgeHover && edgeHover.id === p.id && (() => {   // ขอบที่ชี้อยู่ในรายการเผื่อรายขอบ
                         const ed = pieceEdges(p.shape)[edgeHover.i];
                         return ed ? <path d={"M" + ed.pts.map((q) => `${q[0]} ${q[1]}`).join("L")} fill="none" stroke={COLORS.sel} strokeWidth={5} strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} /> : null;
@@ -2447,6 +2450,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   return (
                     <div className="mt-2 space-y-1.5 rounded-md border border-blue-200 bg-white p-2">
                       <div className="font-medium text-slate-700">{t(`ค่าของวัสดุ: ${m.name}`, `Material values: ${m.name}`)}</div>
+                      <div className="space-y-1 rounded-md bg-slate-50 p-1.5" data-mat-look>   {/* รอบ G2: หน้าตา — เปลี่ยนแล้วไม่กระทบฟิสิกส์ */}
+                        <div className="text-[11px] font-medium text-slate-500">{t("หน้าตา (สี · ลาย ขนาดจริง)", "Appearance (colour · real-size pattern)")}</div>
+                        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("สีในภาพ 3D", "Colour in 3D")}</span><ColorInput value={val.color ?? "#d8c08c"} allowText={false} onChange={(c) => put({ ...val, color: c })} /></div>
+                        <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1 text-slate-500">{t("ลาย", "Pattern")}</span>
+                          <select value={val.tex?.kind ?? "plain"} disabled={readonly} data-mat-tex onChange={(e) => { const k = e.target.value as NonNullable<MatProps["tex"]>["kind"]; const { tex: _x, ...rest } = val; void _x; put(k === "plain" ? rest : { ...rest, tex: { kind: k, size: val.tex?.size ?? 2, ...(val.tex?.color2 ? { color2: val.tex.color2 } : {}) } }); }} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs">
+                            {MAT_TEXTURES.map((x) => <option key={x.key} value={x.key}>{t(x.th, x.en)}</option>)}
+                          </select></div>
+                        {val.tex && <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1 text-slate-500">{t("ลาย 1 ซ้ำ (ซม.)", "Repeat (cm)")}</span><NumField value={val.tex.size} min={0.2} max={100} label={t("ขนาดลาย", "Repeat size")} onCommit={(v) => put({ ...val, tex: { ...val.tex!, size: v } })} className="w-14" /><ColorInput value={val.tex.color2 ?? "#ffffff"} allowText={false} onChange={(c) => put({ ...val, tex: { ...val.tex!, color2: c } })} /></div>}
+                      </div>
+                      <div className="space-y-1 rounded-md bg-slate-50 p-1.5" data-mat-physics>   {/* ฟิสิกส์ — ใช้กับภาพทิ้งตัว */}
+                        <div className="flex items-center justify-between text-[11px] font-medium text-slate-500">{t("ฟิสิกส์ (ความอยู่ทรง · ความหนา)", "Physics (stiffness · thickness)")}
+                          <button type="button" data-mat-cal disabled={readonly} onClick={() => { const { cal: _c, ...rest } = val; void _c; put(val.cal ? rest : { ...rest, cal: true }); }} className={`rounded-full px-1.5 py-0.5 text-[10px] ${val.cal ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`} title={t("กดสลับ: ประมาณการ ↔ สอบเทียบแล้ว (วัด/ลองกับวัสดุจริงแล้ว)", "Toggle: estimated ↔ calibrated (measured/tested on the real material)")}>{val.cal ? t("สอบเทียบแล้ว", "Calibrated") : t("ประมาณการ", "Estimated")}</button></div>
                       <label className="block space-y-1"><span className="text-slate-500">{t("ชุดค่าสำเร็จ", "Preset")}</span>
                         <select value={val.preset ?? ""} disabled={readonly} onChange={(e) => { const pz = MAT_PRESETS.find((x) => x.key === e.target.value); if (pz) put({ ...val, preset: pz.key, stiff: pz.stiff, thick: pz.thick }); else { const { preset: _p, ...rest } = val; void _p; put(rest); } }} className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5">
                           <option value="">{t("ตั้งเอง", "Custom")}</option>
@@ -2455,7 +2470,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                       <label className="block space-y-0.5"><span className="flex justify-between text-slate-500"><span>{t("ความอยู่ทรง (0 นิ่ม – 1 แข็ง)", "Holds its shape (0 soft – 1 rigid)")}</span><b className="tabular-nums text-slate-700">{val.stiff.toFixed(2)}</b></span>
                         <input type="range" min={0} max={1} step={0.05} value={val.stiff} disabled={readonly} onChange={(e) => { const { preset: _p, ...rest } = val; void _p; put({ ...rest, stiff: Number(e.target.value) }); }} className="w-full accent-blue-600" /></label>
                       <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("ความหนา (มม.)", "Thickness (mm)")}</span><NumField value={val.thick} min={0.1} max={20} label={t("ความหนา มม.", "Thickness mm")} onCommit={(v) => { const { preset: _p, ...rest } = val; void _p; put({ ...rest, thick: v }); }} className="w-16" /></div>
-                      <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("สีในภาพ 3D", "Colour in 3D")}</span><ColorInput value={val.color ?? "#d8c08c"} allowText={false} onChange={(c) => put({ ...val, color: c })} /></div>
+                      </div>
+                      <div className="space-y-1 rounded-md bg-slate-50 p-1.5" data-mat-production>   {/* ผลิต — หน้าผ้า น้ำหนัก ชดเชยพับ */}
+                        <div className="text-[11px] font-medium text-slate-500">{t("ผลิต (หน้าผ้า · น้ำหนัก · ชดเชยพับ)", "Production (roll width · weight · fold allowance)")}</div>
+                        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("หน้าผ้า (ซม.)", "Roll width (cm)")}</span><NumField value={val.roll ?? 0} min={0} max={400} step={1} label={t("หน้าผ้า", "Roll width")} onCommit={(v) => { const { roll: _r, ...rest } = val; void _r; put(v >= 10 ? { ...rest, roll: Math.round(v) } : rest); }} className="w-16" /></div>
+                        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("น้ำหนัก (g/m²)", "Weight (g/m²)")}</span><NumField value={val.gsm ?? 0} min={0} max={3000} step={1} label={t("น้ำหนัก", "Weight")} onCommit={(v) => { const { gsm: _g, ...rest } = val; void _g; put(v >= 10 ? { ...rest, gsm: Math.round(v) } : rest); }} className="w-16" /></div>
+                        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{t("ชดเชยต่อทบ (มม.)", "Per-fold allowance (mm)")}</span><NumField value={val.fold ?? val.thick} min={0} max={10} label={t("ชดเชยต่อทบ", "Per fold")} onCommit={(v) => put({ ...val, fold: v })} className="w-16" /></div>
+                        <input type="text" value={val.note ?? ""} disabled={readonly} maxLength={120} placeholder={t("หมายเหตุการผลิต (เช่น ด้านมันออก)", "Production note (e.g. glossy side out)")} onChange={(e) => { const { note: _n, ...rest } = val; void _n; put(e.target.value ? { ...rest, note: e.target.value } : rest); }} className="h-7 w-full rounded-md border border-slate-200 px-1.5 text-xs" />
+                      </div>
                       <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400"><span>{t("ค่านี้ใช้ทั้งแพทเทิร์นใบนี้ (ทุกชิ้นที่ใช้วัสดุนี้) · เป็นค่าประมาณ ไม่ใช่ค่าวัดจริง", "Applies to every piece using this material in this pattern · estimates, not measured values")}</span>
                         {cur && !readonly && <button type="button" onClick={() => { const next = { ...(matProps ?? {}) }; delete next[m.id]; onMatPropsChange(next); }} className="shrink-0 text-blue-700 hover:underline">{t("ล้างค่า", "Clear")}</button>}</div>
                     </div>

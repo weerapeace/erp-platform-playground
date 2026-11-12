@@ -61,6 +61,7 @@ export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, 
                 {p.innerD && <path d={p.innerD} fill="none" stroke={mono ? "#000" : "#2563eb"} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} strokeDasharray={printMm ? "0.25 0.15" : "0.6 0.4"} />}
                 {p.foldD && <path d={p.foldD} fill="none" stroke={mono ? "#000" : "#7c3aed"} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} strokeDasharray={printMm ? "0.5 0.15 0.1 0.15" : "1.2 0.4 0.3 0.4"} />}
                 {p.marksD && <path d={p.marksD} fill="none" stroke={mono ? "#000" : c.stroke} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} />}
+                {(p.stitchSegs ?? []).map((L, k) => <path key={`st${k}`} data-stitch d={"M" + L.map(([x, y]) => `${x} ${y}`).join("L")} fill="none" stroke={mono ? "#000" : "#7c2d12"} strokeWidth={printMm ? 0.025 : Math.max(0.05, v.w / 900)} strokeDasharray={printMm ? "0.18 0.12" : "0.3 0.2"} />)}
                 {(p.bands ?? []).map((bd, k) => (   // แนวทากาว (ส้ม เส้นประยาว) / ปาดบาง (น้ำตาล จุด) — รอบ F
                   <path key={`bd${k}`} data-band={bd.kind} d={"M" + bd.pts.map(([x, y]) => `${x} ${y}`).join("L")} fill="none" stroke={mono ? "#000" : bd.kind === "glue" ? "#ea580c" : "#92400e"} strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={bd.kind === "glue" ? (printMm ? "0.4 0.15" : "0.6 0.25") : (printMm ? "0.08 0.12" : "0.12 0.2")} />
                 ))}

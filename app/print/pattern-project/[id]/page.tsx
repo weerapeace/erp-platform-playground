@@ -41,7 +41,7 @@ export default function PrintPatternProjectPage() {
     return () => { alive = false; };
   }, [id]);
 
-  const lines = useMemo(() => (project ? projectPatternLines(project.pieces ?? [], project.basis === "area" ? "area" : "box") : []), [project]);
+  const lines = useMemo(() => (project ? projectPatternLines(project.pieces ?? [], project.basis === "area" ? "area" : "box", undefined, { seams: project.seams ?? [] }) : []), [project]);
   const seamRows = useMemo(() => (project ? projectSeamRows(project.pieces ?? [], project.seams ?? []) : []), [project]);
   const edgeRows = useMemo(() => (project ? projectEdgeRows(project.pieces ?? []) : []), [project]);
   const pieceRows = useMemo(() => (project ? projectPieceRows(project.pieces ?? []) : []), [project]);

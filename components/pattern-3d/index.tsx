@@ -32,6 +32,8 @@ export type Flat3DPiece = { pid: string; name: string; cut: Pt[]; sew: Pt[]; hol
 export type Flat3DThread = { a: Pt[]; b: Pt[]; color: string };
 export type Pattern3DView = "iso" | "front" | "side" | "top";
 export type BagColors = { body: string; handle: string };
+/** ลายผ้าขนาดจริงของชิ้น (รอบ G2): ชนิด + ขนาดลาย 1 ซ้ำ (ซม.) + สีที่สอง */
+export type PieceTex = { kind: string; size: number; color2?: string };
 
 const VIEWS: Record<Pattern3DView, [number, number]> = { iso: [0.62, 1.22], front: [0, 1.5], side: [Math.PI / 2, 1.5], top: [0, 0.1] };
 const FLAT_VIEW: [number, number] = [0.25, 0.62];
@@ -62,7 +64,7 @@ type Stage = {
   setSelected: (id: string | null) => void;
   setAssembly: (A: AssemblyOk, colors: BagColors) => void;
   /** ภาพเย็บติดของกระดานวาด — เรียกซ้ำได้ทุกครั้งที่ชิ้น/ตะเข็บเปลี่ยน (มุมกล้องไม่กระโดด) */
-  setSewn: (sc: SewnScene, colors: BagColors, opt: { pieceColors?: Record<string, string>; seamColors?: string[] }) => void;
+  setSewn: (sc: SewnScene, colors: BagColors, opt: { pieceColors?: Record<string, string>; seamColors?: string[]; pieceTex?: Record<string, PieceTex> }) => void;
   /** โหมดจำลองวัสดุทิ้งตัว: วาดตาข่ายของตัวจำลอง แล้วเดินหน้าทุกเฟรมจนนิ่ง */
   setSim: (sim: BagSim, colors: BagColors) => void;
   /** ปลุกให้วาดต่อ (หลังเปลี่ยนค่าตัวจำลอง / กดเริ่มใหม่) */
@@ -154,8 +156,24 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
     s.scale.set((h * w) / 68, h, 1); s.renderOrder = 10; return s;
   };
+  /** ลายผ้า 1 ซ้ำ บนผืนผ้าใบ 128 px → ทำซ้ำตามขนาดจริง (UV ของชิ้น = ซม.) */
+  const fabricTex = (kind: string, c1: string, c2: string, size: number) => {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const x = c.getContext("2d")!; x.fillStyle = c1; x.fillRect(0, 0, 128, 128); x.fillStyle = c2; x.strokeStyle = c2;
+    if (kind === "stripe") x.fillRect(0, 0, 64, 128);
+    else if (kind === "check") { x.globalAlpha = 0.5; x.fillRect(0, 0, 64, 128); x.fillRect(0, 0, 128, 64); }
+    else if (kind === "dot") { for (const [cx, cy] of [[32, 32], [96, 96]]) { x.beginPath(); x.arc(cx, cy, 15, 0, 7); x.fill(); } }
+    else if (kind === "weave") { x.globalAlpha = 0.35; x.lineWidth = 3; for (let i = 4; i < 128; i += 8) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); } }
+    else if (kind === "grain") { x.globalAlpha = 0.22; for (let i = 0; i < 520; i++) { x.beginPath(); x.arc(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 3, 0, 7); x.fill(); } }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1 / Math.max(0.2, size), 1 / Math.max(0.2, size)); return t;
+  };
+  /** สี/ลายของวัสดุบนชิ้น (ถ้ามี) — ลายผ้าใส่ map แล้วตั้งสีขาว (ลายมีสีอยู่แล้ว) */
+  const dress = (m: any, color: string, tex?: PieceTex | null) => {
+    if (!tex || tex.kind === "plain") return m;
+    m.map = fabricTex(tex.kind, color, tex.color2 ?? "#ffffff", tex.size); m.userData.ownMap = true; m.color.set("#ffffff"); m.needsUpdate = true; return m;
+  };
   const clear = () => {
-    S.root.traverse((o: any) => { o.geometry?.dispose(); if (o.material) { if (o.isSprite) o.material.map?.dispose(); o.material.dispose(); } });
+    S.root.traverse((o: any) => { o.geometry?.dispose(); if (o.material) { if (o.isSprite || o.material.userData?.ownMap) o.material.map?.dispose(); o.material.dispose(); } });
     scene.remove(S.root); S.root = new THREE.Group(); scene.add(S.root); S.parts = []; S.byKey = {}; S.pick = []; simTick = null;
     renderer.clippingPlanes = []; S.depth = 0;                 // ผ่าดูข้างในใช้ได้เฉพาะโหมดเย็บติด (setSewn ตั้งใหม่เอง)
   };
@@ -384,7 +402,8 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   };
 
   // ── กระเป๋าที่ประกอบจากชิ้นจริง + ตะเข็บ (lib/pattern-assembly) ──
-  const buildAsm = (A: AssemblyOk, colors: BagColors, L?: { k: number; lift: number }): number => {
+  const buildAsm = (A: AssemblyOk, colors: BagColors, L?: { k: number; lift: number }, look?: { colors?: Record<string, string>; tex?: Record<string, PieceTex> }): number => {
+    const colOf = (pid: string) => look?.colors?.[pid] || colors.body;   // สีวัสดุของชิ้น (รอบ G2) — ไม่ตั้ง = สีตัวกระเป๋า
     const D = A.depth, H = Math.max(A.height, 1), zOut = 5 + D * 0.5;
     if (L) {
       // ซับใน: ถุงอีกใบสีซับใน (เห็นทั้งสองหน้า) ย่อเล็กน้อยซ้อนอยู่ข้างในตัวนอก · ขั้น "lining" = ยังไม่ใส่ = ลอยขึ้นทั้งใบ
@@ -418,7 +437,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       if (pn.outline.length < 3) continue;
       const grp = new THREE.Group(), shape = new THREE.Shape(V2(pn.outline));
       pn.holes.forEach((h) => { if (h.length >= 3) shape.holes.push(new THREE.Path(V2(h))); });
-      const geo = shade(new THREE.ShapeGeometry(shape)), m = outer(colors.body), mesh = new THREE.Mesh(geo, m);
+      const geo = shade(new THREE.ShapeGeometry(shape)), m = dress(outer(colOf(pn.pid)), colOf(pn.pid), look?.tex?.[pn.pid]), mesh = new THREE.Mesh(geo, m);
       mesh.userData.piece = pn.pid; S.pick.push(mesh); grp.add(mesh, new THREE.Mesh(geo, lining()));
       const inset = offsetPolygon(pn.outline, -0.45); if (inset.length >= 3) grp.add(loop(inset, thread));
       pn.holes.forEach((h) => { const st = offsetPolygon(h, 0.5); if (st.length >= 3) grp.add(loop(st, thread)); });
@@ -427,7 +446,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     }
     A.sweeps.forEach((sw, i) => {
       if (sw.pts.length < 2) return;
-      const grp = new THREE.Group(), geo = gussetGeo(sw.pts, D, H), m = outer(colors.body), mesh = new THREE.Mesh(geo, m);
+      const grp = new THREE.Group(), geo = gussetGeo(sw.pts, D, H), m = dress(outer(colOf(sw.pid)), colOf(sw.pid), look?.tex?.[sw.pid]), mesh = new THREE.Mesh(geo, m);
       mesh.userData.piece = sw.pid; S.pick.push(mesh); grp.add(mesh, new THREE.Mesh(geo, lining()));
       const n = sw.pts.length, nv = sw.pts.map((_, k) => { const a = sw.pts[Math.max(0, k - 1)], b = sw.pts[Math.min(n - 1, k + 1)], t = norm(b[0] - a[0], b[1] - a[1]); return [t[1], -t[0]] as Pt; });
       if (D > 1.6) [D / 2 - 0.45, -(D / 2 - 0.45)].forEach((z) => grp.add(dashed(sw.pts.map((q, k) => [q[0] + nv[k][0] * 0.05, q[1] + nv[k][1] * 0.05, z] as V3), thread)));
@@ -467,9 +486,9 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
     S.dirty = true;
   };
   // ── ภาพเย็บติดของกระดานวาด (lib/pattern-sewn): ตัวกระเป๋าจากตะเข็บเต็มขอบ + ชิ้นที่เย็บติด + ชิ้นที่ยังไม่เย็บ ──
-  const setSewn = (sc: SewnScene, colors: BagColors, opt: { pieceColors?: Record<string, string>; seamColors?: string[] }) => {
+  const setSewn = (sc: SewnScene, colors: BagColors, opt: { pieceColors?: Record<string, string>; seamColors?: string[]; pieceTex?: Record<string, PieceTex> }) => {
     const was = S.mode; S.mode = "sewn"; clear(); lights(false);
-    const asmTop = sc.asm ? buildAsm(sc.asm, colors) : 0;   // สูงสุดของตัวกระเป๋ารวมหูจากจุดติด
+    const asmTop = sc.asm ? buildAsm(sc.asm, colors, undefined, { colors: opt.pieceColors, tex: opt.pieceTex }) : 0;   // สูงสุดของตัวกระเป๋ารวมหูจากจุดติด
     if (sc.lining) buildAsm(sc.lining.asm, colors, sc.lining);
     S.depth = sc.asm?.depth ?? sc.lining?.asm.depth ?? 0;
     const tone: Record<string, string> = { base: colors.body, flap: colors.body, hang: colors.handle, loop: colors.handle, patch: colors.body, loose: PAPER };
@@ -489,7 +508,8 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(p.pos, 3)); geo.setIndex(p.tri); geo.computeVertexNormals();
       const lin = p.layer === "lining" && p.kind !== "loose";
-      const m = new THREE.MeshStandardMaterial({ color: opt.pieceColors?.[p.pid] || (lin ? (p.kind === "base" ? LINING : LINING_PATCH) : tone[p.kind]), roughness: lin ? 0.95 : 0.84, metalness: 0, side: THREE.DoubleSide });
+      const pcol = opt.pieceColors?.[p.pid] || (lin ? (p.kind === "base" ? LINING : LINING_PATCH) : tone[p.kind]);
+      const m = dress(new THREE.MeshStandardMaterial({ color: pcol, roughness: lin ? 0.95 : 0.84, metalness: 0, side: THREE.DoubleSide }), pcol, opt.pieceTex?.[p.pid]);
       const mesh = new THREE.Mesh(geo, m); mesh.userData.piece = p.pid; S.pick.push(mesh);
       const grp = new THREE.Group(); grp.add(mesh);
       if (p.name && (p.kind !== "base" || !sc.asm)) { const tag = label(p.name, lh); tag.position.set(p.label[0], p.label[1] + (p.kind === "loose" ? 1.5 : 0), p.label[2]); grp.add(tag); }
@@ -753,7 +773,7 @@ function createStage(THREE: Three, host: HTMLElement, onPick: (id: string | null
   };
 }
 
-export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pieceColors, seamColors, cut = "none", simWake = 0, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "", saveName, onReady, volume = null }: {
+export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pieceColors, pieceTex, seamColors, cut = "none", simWake = 0, joined = null, colors, selected = null, onSelect, explode = 0, height = 420, className = "", saveName, onReady, volume = null }: {
   /** ความจุโดยประมาณ (ลิตร · รอบ G) — แสดงมุมล่างขวา · ไม่ส่ง = ไม่แสดง */
   volume?: number | null;
   /** ชื่อไฟล์ของปุ่ม "บันทึกรูป" (ไม่ต้องมีนามสกุล) — ไม่ส่ง = "ภาพ 3 มิติ" */
@@ -765,6 +785,8 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
   sewn?: SewnScene | null;
   /** mode="sewn": สีของชิ้น (รหัสชิ้น → สี) ทับสีตั้งต้น · seamColors = สีของตะเข็บตามลำดับ (ชุดเดียวกับบนกระดาน) */
   pieceColors?: Record<string, string>;
+  /** mode="sewn": ลายผ้าขนาดจริงของชิ้น (รหัสชิ้น → ลาย · รอบ G2) */
+  pieceTex?: Record<string, PieceTex>;
   seamColors?: string[];
   /** mode="sewn": ผ่าดูข้างใน — ตัดฝั่งหน้าหรือฝั่งหลังของกระเป๋าออกจากภาพ (เห็นซับใน ช่องใส่ของ ช่องซิป) */
   cut?: Pattern3DCut;
@@ -835,13 +857,13 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
   const col = colors ?? DEFAULT_COLORS;
   useEffect(() => {
     const s = stage.current; if (state !== "ready" || !s) return;
-    if (mode === "sewn" && sewn) s.setSewn(sewn, col, { pieceColors, seamColors });
+    if (mode === "sewn" && sewn) s.setSewn(sewn, col, { pieceColors, seamColors, pieceTex });
     else if (mode === "sim" && sim) s.setSim(sim, col);
     else if (mode === "assembly" && assembly) s.setAssembly(assembly, col);
     else if (mode === "bag" && bag) s.setBag(bag, col);
     else s.setFlat(pieces ?? [], threads ?? []);
     onReadyRef.current?.({ snapshot: (v) => stage.current?.snapshot(v) ?? null });
-  }, [state, mode, bag, pieces, threads, assembly, sim, sewn, pieceColors, seamColors, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state, mode, bag, pieces, threads, assembly, sim, sewn, pieceColors, pieceTex, seamColors, col.body, col.handle]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state === "ready") stage.current?.setCut(mode === "sewn" ? cut : "none"); }, [state, cut, mode]);
   useEffect(() => { if (state === "ready") stage.current?.wake(); }, [state, simWake]);
   useEffect(() => { if (state === "ready") stage.current?.setSelected(selected); }, [state, selected, mode, bag, pieces, assembly, sewn]);

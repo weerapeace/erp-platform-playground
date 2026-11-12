@@ -12,6 +12,7 @@
 import { cleanAllow, cleanFoldEdges, cleanInnerLines, cleanShape, edgeAllowances, normalizePiece, pieceGeometry, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
 import type { PatternLineInput } from "@/lib/pattern-sheet";
 import { cleanPieceLink, type PieceLink } from "@/lib/pattern-link";
+import { edgeBandLine } from "@/lib/pattern-shaping";
 import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, isPartialSide, pieceEdges, seamLabel, sideRange, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 export const PATTERN_PROJECT_STATUSES = ["draft", "ready", "archived"] as const;
@@ -42,10 +43,10 @@ export type ProjectPiece = {
   link?: PieceLink;
 };
 /** ชนิดชิ้น */
-export type PieceRole = "body" | "lining" | "reinforce" | "part";
+export type PieceRole = "body" | "lining" | "reinforce" | "foam" | "part";
 export const PIECE_ROLES: { key: PieceRole; th: string; en: string }[] = [
   { key: "body", th: "ตัวกระเป๋า", en: "Body" }, { key: "lining", th: "ซับใน", en: "Lining" },
-  { key: "reinforce", th: "ตัวเสริม", en: "Reinforcement" }, { key: "part", th: "อะไหล่ / ชิ้นประกอบ", en: "Trim / part" },
+  { key: "reinforce", th: "ตัวเสริม", en: "Reinforcement" }, { key: "foam", th: "โฟม / ฟองน้ำ", en: "Foam" }, { key: "part", th: "อะไหล่ / ชิ้นประกอบ", en: "Trim / part" },
 ];
 /** แผ่นเสริมที่ติดกับชิ้น — add = ความอยู่ทรงที่เพิ่ม · min = อยู่ทรงอย่างน้อยเท่านี้ (ค่าประมาณให้เห็นภาพ ไม่ใช่ค่าวัดจริง) */
 export type BondKind = "fusible" | "foam" | "board";
@@ -78,7 +79,37 @@ export function cleanPieceInfo(raw: unknown): PieceInfo | null {
 }
 
 /** ค่าของวัสดุในแพทเทิร์นใบนี้ (แบบ Fabric ของ CLO แต่ย่อ): ความอยู่ทรง 0–1 · ความหนา มม. · สีในภาพ 3D — เก็บใน template.matProps (ไม่แตะข้อมูลวัสดุกลาง) */
-export type MatProps = { preset?: string; stiff: number; thick: number; color?: string; /** ชดเชยต่อการพับ 1 ทบ (มม.) ที่ช่างสอบเทียบเอง — ไม่ตั้ง = ใช้ความหนา (รอบ F) */ fold?: number };
+/** ลายผ้าขนาดจริง (รอบ G2): ชนิด + ขนาดลาย 1 ซ้ำ (ซม.) + สีที่สอง */
+export type MatTexKind = "plain" | "stripe" | "check" | "dot" | "weave" | "grain";
+export type MatTex = { kind: MatTexKind; size: number; color2?: string };
+export const MAT_TEXTURES: { key: MatTexKind; th: string; en: string }[] = [
+  { key: "plain", th: "เรียบ", en: "Plain" }, { key: "stripe", th: "ลายทาง", en: "Stripes" }, { key: "check", th: "ลายสก็อต", en: "Check" },
+  { key: "dot", th: "ลายจุด", en: "Dots" }, { key: "weave", th: "ผ้าทอ/แคนวาส", en: "Weave / canvas" }, { key: "grain", th: "ผิวหนัง", en: "Leather grain" },
+];
+/**
+ * ค่าของวัสดุ แยก 3 ส่วน (รอบ G2 · เก็บแบนในก้อนเดียวเพื่อเข้ากับข้อมูลเดิม):
+ *   หน้าตา = color · tex (เปลี่ยนแล้วไม่กระทบฟิสิกส์)
+ *   ฟิสิกส์ = preset · stiff · thick · cal (ป้าย "สอบเทียบแล้ว" — ไม่ติ๊ก = ประมาณการ)
+ *   ผลิต = roll (หน้าผ้า ซม.) · gsm (น้ำหนัก g/m²) · fold (ชดเชยต่อทบ มม. · รอบ F) · note
+ */
+export type MatProps = { preset?: string; stiff: number; thick: number; color?: string; /** ชดเชยต่อการพับ 1 ทบ (มม.) ที่ช่างสอบเทียบเอง — ไม่ตั้ง = ใช้ความหนา (รอบ F) */ fold?: number;
+  cal?: boolean; tex?: MatTex; roll?: number; gsm?: number; note?: string };
+/** ชุดสี (Colorway · รอบ G2): ชื่อ + สีต่อรหัสวัสดุ — สลับดูในภาพ 3D ได้ ไม่เปลี่ยนค่าวัสดุ */
+export type Colorway = { id: string; name: string; colors: Record<string, string> };
+const HEX = /^#[0-9a-fA-F]{6}$/;
+export function cleanColorways(raw: unknown): Colorway[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Colorway[] = [], seen = new Set<string>();
+  for (const x of raw.slice(0, 20)) {
+    if (!x || typeof x !== "object") continue;
+    const r = x as Record<string, unknown>, id = typeof r.id === "string" && /^[\w-]{1,40}$/.test(r.id) ? r.id : "", name = typeof r.name === "string" ? r.name.trim().slice(0, 40) : "";
+    if (!id || !name || seen.has(id)) continue;
+    const colors: Record<string, string> = {};
+    if (r.colors && typeof r.colors === "object") for (const [k, v] of Object.entries(r.colors as Record<string, unknown>).slice(0, 60)) if (k.length <= 80 && typeof v === "string" && HEX.test(v)) colors[k] = v.toLowerCase();
+    seen.add(id); out.push({ id, name, colors });
+  }
+  return out;
+}
 /** ค่าชดเชยต่อทบ (ซม.) ของวัสดุ: ค่าที่ช่างตั้ง หรือความหนา */
 export const matFoldComp = (m: MatProps | null | undefined): number => (m ? Math.round(((m.fold ?? m.thick) / 10) * 1000) / 1000 : 0);
 /** ชุดค่าสำเร็จ — ค่าประมาณจากลักษณะวัสดุทั่วไป ให้ช่างปรับตามของจริง */
@@ -102,6 +133,15 @@ export function cleanMatProps(raw: unknown): Record<string, MatProps> {
     if (typeof r.color === "string" && /^#[0-9a-fA-F]{6}$/.test(r.color)) m.color = r.color.toLowerCase();
     const fold = fin(r.fold);
     if (fold != null && fold >= 0 && fold <= 10) m.fold = Math.round(fold * 10) / 10;
+    if (r.cal === true) m.cal = true;
+    if (r.tex && typeof r.tex === "object") {
+      const tx = r.tex as Record<string, unknown>, size = fin(tx.size);
+      if (MAT_TEXTURES.some((k) => k.key === tx.kind) && tx.kind !== "plain" && size != null && size >= 0.2 && size <= 100) m.tex = { kind: tx.kind as MatTexKind, size: Math.round(size * 10) / 10, ...(typeof tx.color2 === "string" && HEX.test(tx.color2) ? { color2: tx.color2.toLowerCase() } : {}) };
+    }
+    const roll = fin(r.roll), gsm = fin(r.gsm);
+    if (roll != null && roll >= 10 && roll <= 400) m.roll = Math.round(roll);
+    if (gsm != null && gsm >= 10 && gsm <= 3000) m.gsm = Math.round(gsm);
+    if (typeof r.note === "string" && r.note.trim()) m.note = r.note.trim().slice(0, 120);
     out[id] = m;
   }
   return out;
@@ -204,15 +244,16 @@ export function projectThumb(pieces: ProjectPiece[]): string | null {
 }
 
 /** ชิ้นของแพทเทิร์น → "บรรทัด" ของตัวพิมพ์/ส่งออกกลาง (lib/pattern-sheet · PatternPrintView) — ชื่อชิ้นไปอยู่ช่องชื่อ · ตัดกี่ชิ้น = จำนวนของชิ้น */
-export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area" = "box", group = "ชิ้นแพทเทิร์น"): PatternLineInput[] {
+export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area" = "box", group = "ชิ้นแพทเทิร์น", opts: { seams?: Seam[] } = {}): PatternLineInput[] {
   return pieces.flatMap((p, i) => {
     const n = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches, inner: p.inner });
+    const stitch = topstitchLines(n.shape, p.pid, p.edgeMeta, opts.seams);   // เดินด้ายทับ (รอบ G2) — ใบพิมพ์ + DXF ชั้น STITCH
     const pieceName = p.name || `ชิ้น ${i + 1}`;
     const shape = (withName: boolean) => ({
       v: 1, shape: n.shape, basis, ...(withName ? { name: pieceName } : {}),
       ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}),
       ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}), ...(n.inner?.length ? { inner: n.inner } : {}),
-      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}), ...(p.info?.comp ? { comp: p.info.comp } : {}),
+      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}), ...(p.info?.comp ? { comp: p.info.comp } : {}), ...(stitch.length ? { stitch } : {}),
     });
     // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
     const note = p.info?.code || null;   // รหัสชิ้นออกในช่องหมายเหตุของตารางชิ้น
@@ -300,6 +341,27 @@ export function projectEdgeRows(pieces: ProjectPiece[]): EdgeRow[] {
       if (!fold && !m?.bind && !m?.zip && m?.top == null) continue;
       out.push({ piece: p.name || `ชิ้น ${k + 1}`, edge: e.i + 1, len: Math.round(e.len * 10) / 10, allow: p.allowEdges?.[e.i] ?? p.allow, fold, bind: !!m?.bind, zip: !!m?.zip, top: m?.top ?? null,
         ...(m?.zip && m.zipR ? { zipLen: Math.round((m.zipR[1] - m.zipR[0]) * 10) / 10 } : {}), ...(m?.bind && m.bindR ? { bindLen: Math.round((m.bindR[1] - m.bindR[0]) * 10) / 10 } : {}) });
+    }
+  }
+  return out;
+}
+
+/**
+ * เส้นเดินด้ายทับบนชิ้น (รอบ G2): ขอบที่ตั้ง "เดินด้ายทับ" (EdgeMeta.top มม.) + ตะเข็บที่ตั้งเดินด้ายทับ (Seam.top · 2 แถว = แถวที่สองห่างอีก 6 มม.)
+ *   คืนเส้นขนานขอบเข้าในชิ้น (พิกัดเดียวกับรูปที่ส่ง) — กระดาน/ใบพิมพ์/DXF วาดเป็นเส้นประบาง
+ */
+export function topstitchLines(shape: Shape, pid: string, edgeMeta?: EdgeMeta[] | null, seams?: Seam[] | null): Pt[][] {
+  const E = pieceEdges(shape), n = E.length, out: Pt[][] = [];
+  const meta = cleanEdgeMeta(shape, edgeMeta);
+  meta?.forEach((m, i) => { if (m.top) { const L = edgeBandLine(shape, i, m.top / 10); if (L) out.push(L); } });
+  for (const x of seams ?? []) {
+    if (!x.top) continue;
+    for (const sd of [x.a, x.b]) {
+      if (sd.pid !== pid || sd.inner || sd.t0 != null || sd.n !== n) continue;
+      for (let k = 0; k < sd.count; k++) {
+        const i = (sd.from + k) % n;
+        for (let r = 0; r < (x.top.rows === 2 ? 2 : 1); r++) { const L = edgeBandLine(shape, i, x.top.off / 10 + r * 0.6); if (L) out.push(L); }
+      }
     }
   }
   return out;
