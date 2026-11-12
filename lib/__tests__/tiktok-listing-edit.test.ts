@@ -4,6 +4,7 @@ import {
   TTS_TITLE_MIN, TTS_TITLE_MAX, TTS_PRICE_MIN, TTS_PRICE_MAX, planTiktokPrices, applyTiktokBulkPrice, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, type TiktokPriceRow,
   tiktokErpPriceCheck, applyTiktokErpFull,
   tiktokImagesOf, tiktokPkgOf, tiktokMediaBase, tiktokRefsForSend, tiktokUriOfRef, tiktokR2KeyOfRef, tiktokImageRef, planTiktokMedia, tiktokPkgFields, samePkg, TTS_MAX_IMAGES,
+  isTiktokImageUrl, fixTiktokDescriptionImages, tiktokDescImageSrc, planTiktokDescription, tiktokDescText, TTS_DESC_MAX,
 } from "@/lib/tiktok-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
 
@@ -342,5 +343,48 @@ describe("เฟส C: รูป + กล่องพัสดุ", () => {
   test("samePkg", () => {
     expect(samePkg(pkg0, { ...pkg0 })).toBe(true);
     expect(samePkg(pkg0, { ...pkg0, height: 6 })).toBe(false);
+  });
+});
+
+
+describe("รายละเอียดสินค้า TikTok", () => {
+  const IMG = "https://p16-oec-sg.ibyteimg.com/tos-alisg-i-x/abc~tplv-origin.jpeg?t=1&x=2";
+  const base = `<p>กระเป๋าหนังแท้</p><img src="${IMG.replace(/&/g, "&amp;")}" width="800" height="600">`;
+  test("ลิงก์รูปของ TikTok เท่านั้น", () => {
+    expect(isTiktokImageUrl(IMG)).toBe(true);
+    expect(isTiktokImageUrl("https://p19-oec-va.tiktokcdn.com/a.jpg")).toBe(true);
+    expect(isTiktokImageUrl("https://erp.example.com/api/r2-image?key=a")).toBe(false);
+    expect(isTiktokImageUrl("http://p16-oec-sg.ibyteimg.com/a.jpg")).toBe(false);
+  });
+  test("กล่องแก้ข้อความทิ้ง width/height → เติมกลับจากของเดิม", () => {
+    const edited = `<p>กระเป๋าหนังแท้ สีดำ</p><img src="${IMG.replace(/&/g, "&amp;")}" style="width:50%">`;
+    const r = fixTiktokDescriptionImages(edited, base);
+    expect(r.errors).toEqual([]);
+    expect(r.html).toBe(`<p>กระเป๋าหนังแท้ สีดำ</p><img src="${IMG.replace(/&/g, "&amp;")}" width="800" height="600">`);
+  });
+  test("รูปอัปโหลดใหม่ (#tts-w/h) → ใส่ขนาด + ตัด fragment", () => {
+    const src = tiktokDescImageSrc("https://p16-oec-sg.ibyteimg.com/new.jpg", 1600, 1200.4);
+    expect(src).toBe("https://p16-oec-sg.ibyteimg.com/new.jpg#tts-w=1600&tts-h=1200");
+    const r = fixTiktokDescriptionImages(`<p>x</p><img src="${src}">`, base);
+    expect(r.html).toBe(`<p>x</p><img src="https://p16-oec-sg.ibyteimg.com/new.jpg" width="1600" height="1200">`);
+  });
+  test("รูปจากที่อื่น / ไม่รู้ขนาด = error", () => {
+    expect(fixTiktokDescriptionImages(`<img src="https://other.com/a.jpg">`, base).errors.join(" ")).toContain("ปุ่มแทรกรูป");
+    expect(fixTiktokDescriptionImages(`<img src="https://p16-oec-sg.ibyteimg.com/zzz.jpg">`, base).errors.join(" ")).toContain("ไม่รู้ขนาด");
+  });
+  test("แผน: ไม่แก้ = ไม่ส่ง · แก้ = บอกจำนวนตัวอักษร/รูป · ว่าง/ยาวเกิน = error", () => {
+    expect(planTiktokDescription(base, base).changed).toBe(false);
+    const p = planTiktokDescription(base, `<p>ใหม่</p>`);
+    expect(p.changed).toBe(true);
+    expect(p.change).toEqual({ label: "รายละเอียดสินค้า", before: "14 ตัวอักษร · รูป 1", after: "4 ตัวอักษร · รูป 0" });
+    expect(p.warnings.join(" ")).toContain("300");
+    expect(planTiktokDescription(base, "<p> </p>").errors.join(" ")).toContain("ว่าง");
+    expect(planTiktokDescription(base, `<p>${"ก".repeat(TTS_DESC_MAX + 1)}</p>`).errors.join(" ")).toContain("10,000");
+    expect(tiktokDescText("<p>a&nbsp;<b>b</b></p><style>.x{}</style>")).toBe("a b");
+  });
+  test("มุมมองมีรายละเอียดรอตรวจเมื่อต่างจากฉบับขาย", () => {
+    const d = { id: "p1", title: "t", description: "<p>a</p>" };
+    expect(tiktokListingView(d, { id: "p1", title: "t", description: "<p>b</p>" })!.pendingDescription).toBe("<p>b</p>");
+    expect(tiktokListingView(d, { id: "p1", title: "t", description: "<p>a</p>" })!.pendingDescription).toBeNull();
   });
 });

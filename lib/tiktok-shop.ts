@@ -180,7 +180,7 @@ const PRODUCT_WRITE_SCOPE = "Product Write (seller.product.write)";
  * ⚠️ แก้แล้ว TikTok ส่งไปตรวจใหม่ (ฉบับเดิมขายต่อจนผ่าน) · ราคา/สต๊อก = มีผลทันที (ยังไม่เปิดให้แก้)
  * category_version: เอกสารบอก "ร้าน SEA ต้องส่ง v2 เมื่อใช้ API นี้" (ไทย = SEA)
  */
-export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown }): Promise<Record<string, unknown>> {
+export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown }): Promise<Record<string, unknown>> {
   return ttsApi("POST", `/product/202509/products/${encodeURIComponent(productId)}/partial_edit`, accessToken, {
     query: { shop_cipher: shopCipher }, body: { ...fields, category_version: "v2" }, scope: PRODUCT_WRITE_SCOPE,
   });

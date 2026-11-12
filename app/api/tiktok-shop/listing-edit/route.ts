@@ -1,7 +1,7 @@
 /**
  * แก้สินค้าบน TikTok Shop — ลิ้นชักสินค้าบนร้าน (แก้ร้านจริง · หน้าเว็บถามก่อนเสมอ)
- *  POST { listing_id, before_title?, title?, media?: { before_uris, before_pkg, images, pkg } }   (products.platforms.publish)
- *   เฟส A: ชื่อสินค้า · เฟส C: รูปสินค้า (images = "tts:<uri>" รูปเดิม / "r2:<key>" รูปใหม่จากคลังรูปในระบบ) + กล่องพัสดุ (กก./ซม.)
+ *  POST { listing_id, before_title?, title?, before_description?, description?, media?: { before_uris, before_pkg, images, pkg } }   (products.platforms.publish)
+ *   เฟส A: ชื่อสินค้า · รายละเอียด (HTML · รูปต้องฝากกับ TikTok แล้ว — /api/tiktok-shop/upload-image) · เฟส C: รูปสินค้า (images = "tts:<uri>" รูปเดิม / "r2:<key>" รูปใหม่จากคลังรูปในระบบ) + กล่องพัสดุ (กก./ซม.)
  *
  *   1) ดึงสดจาก TikTok (ฉบับขาย + ฉบับรอตรวจ) → ชื่อ/รูป/กล่องบนร้านต่างจากที่หน้าเว็บเห็น = 409 ไม่ส่งทับ (คืนข้อมูลล่าสุดให้ฟอร์มเริ่มใหม่)
  *   2) planTiktokTitle / planTiktokMedia — กฎเดียวกับหน้าเว็บ
@@ -9,7 +9,7 @@
  *   4) Partial Edit 202509 ส่งเฉพาะช่องที่เปลี่ยน (ครั้งเดียว) → TikTok ส่งไปตรวจใหม่ (ระหว่างตรวจ ร้านยังใช้ของเดิม)
  *   5) ดึงกลับตรวจว่าไปถึง → สำเนาย่อ → ประวัติ (audit tiktok_listing_edit) ทั้งสำเร็จ/ไม่สำเร็จ
  *  → TiktokWriteResponse
- * ไม่แตะราคา (listing-prices) / สต๊อก / รายละเอียด / รูปตัวเลือก
+ * ไม่แตะราคา (listing-prices) / สต๊อก / รูปตัวเลือก (ต้องส่งตัวเลือกทั้งชุดพร้อมสต๊อก — ไม่ทำตราบใดที่ BigSeller ซิงค์สต๊อก)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -19,7 +19,7 @@ import { writeAudit } from "@/lib/audit";
 import { ttsErrorText, ttsPartialEdit, ttsUploadImage } from "@/lib/tiktok-shop";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import {
-  planTiktokMedia, planTiktokTitle, samePkg, tiktokListingView, tiktokMediaBase, tiktokPkgFields, tiktokR2KeyOfRef, tiktokUriOfRef,
+  planTiktokDescription, planTiktokMedia, planTiktokTitle, samePkg, tiktokListingView, tiktokMediaBase, tiktokPkgFields, tiktokR2KeyOfRef, tiktokUriOfRef,
   type TiktokPkg, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
@@ -45,14 +45,15 @@ const MAX_BYTES = 10 * 1024 * 1024;
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { listing_id?: string; before_title?: unknown; title?: unknown; media?: unknown };
+  let body: { listing_id?: string; before_title?: unknown; title?: unknown; before_description?: unknown; description?: unknown; media?: unknown };
   try { body = await request.json(); } catch { return reply({ ok: false, view: null, error: "invalid JSON" }, 400); }
   const listingId = String(body.listing_id ?? "").trim();
   const wantTitle = typeof body.title === "string" && typeof body.before_title === "string";
+  const wantDesc = typeof body.description === "string" && typeof body.before_description === "string";
   const m = body.media && typeof body.media === "object" ? body.media as Record<string, unknown> : null;
   const media = m ? { beforeUris: strList(m.before_uris), beforePkg: pkgOf(m.before_pkg), images: strList(m.images), pkg: pkgOf(m.pkg) } : null;
   if (media && (!media.beforeUris || !media.beforePkg || !media.images || !media.pkg)) return reply({ ok: false, view: null, error: "ข้อมูลรูป/กล่องไม่ครบ" }, 400);
-  if (!listingId || (!wantTitle && !media)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ หรือ รูป/กล่อง)" }, 400);
+  if (!listingId || (!wantTitle && !wantDesc && !media)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ / รายละเอียด / รูป/กล่อง)" }, 400);
 
   const admin = supabaseAdmin();
   const live = await loadTtsListingLive(admin, listingId, user?.id ?? null);
@@ -68,6 +69,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const shown = String(body.before_title).trim();
     if (shown !== view.title.trim() && shown !== (view.pendingTitle ?? "").trim()) return reply({ ok: false, view, error: `ชื่อ${conflict}` }, 409);
   }
+  const baseDesc = view.pendingDescription ?? view.description;
+  if (wantDesc && String(body.before_description).trim() !== baseDesc.trim()) return reply({ ok: false, view, error: `รายละเอียด${conflict}` }, 409);
   const base = tiktokMediaBase(view);
   if (media) {
     if (media.beforeUris!.join("\n") !== base.images.map((x) => x.uri).join("\n")) return reply({ ok: false, view, error: `รูป${conflict}` }, 409);
@@ -76,14 +79,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const titlePlan = wantTitle ? planTiktokTitle(view.pendingTitle ?? view.title, String(body.title)) : null;
   const mediaPlan = media ? planTiktokMedia(base.images.map((x) => x.uri), base.pkg, media.images!, media.pkg!) : null;
-  const errors = [...(titlePlan?.errors ?? []), ...(mediaPlan?.errors ?? [])];
+  const descPlan = wantDesc ? planTiktokDescription(baseDesc, String(body.description)) : null;
+  const descChanged = !!descPlan?.changed;
+  const errors = [...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? [])];
   if (errors.length) return reply({ ok: false, view, error: errors.join(" · ") }, 400);
   const titleChanged = !!titlePlan?.changed;
   const mediaChanged = !!mediaPlan && (mediaPlan.imagesChanged || mediaPlan.weightChanged || mediaPlan.boxChanged);
-  if (!titleChanged && !mediaChanged) return reply({ ok: true, view, summary: "เหมือนเดิม — ไม่มีอะไรต้องส่ง", error: null });
+  if (!titleChanged && !descChanged && !mediaChanged) return reply({ ok: true, view, summary: "เหมือนเดิม — ไม่มีอะไรต้องส่ง", error: null });
 
   const changes = [
     ...(titleChanged ? [{ label: "ชื่อสินค้า", before: view.pendingTitle ?? view.title, after: titlePlan!.title }] : []),
+    ...(descChanged && descPlan!.change ? [descPlan!.change] : []),
     ...(mediaPlan?.changes ?? []),
   ];
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
@@ -116,6 +122,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const fields: Parameters<typeof ttsPartialEdit>[3] = {
     ...(titleChanged ? { title: titlePlan!.title } : {}),
+    ...(descChanged ? { description: descPlan!.html } : {}),
     ...(mediaPlan?.imagesChanged ? { main_images: mediaPlan.images.map((r) => ({ uri: tiktokUriOfRef(r) ?? uploaded.get(r)! })) } : {}),
     ...(mediaPlan ? tiktokPkgFields(mediaPlan) : {}),
   };
@@ -137,7 +144,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // สถานะตรวจ: เชื่อของที่ดึงกลับก่อน — คำตอบของ Partial Edit บอก APPROVED (ของฉบับที่ขายอยู่) ทั้งที่ของใหม่รอตรวจ (เจอจริง 2026-11-12)
   const respAudit = String((resp.audit as { status?: unknown } | undefined)?.status ?? "");
   const auditStatus = freshView?.auditStatus ?? respAudit;
-  const what = [titleChanged ? "ชื่อ" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : ""].filter(Boolean).join("/");
+  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : ""].filter(Boolean).join("/");
   let summary = `แก้${what}แล้ว`;
   let pending = false;
   if (!freshView) warnings.push("TikTok ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก TikTok” อีกครั้งในอีกสักครู่เพื่อยืนยัน");

@@ -42,6 +42,8 @@ export type TiktokListingView = {
   pendingImages: TiktokImage[] | null;
   pendingPkg: TiktokPkg | null;
   description: string;
+  /** รายละเอียดที่ส่งให้ TikTok ตรวจอยู่ (ต่างจากฉบับขาย) · null = ไม่มี */
+  pendingDescription: string | null;
   skus: TiktokSkuView[];
   /** เหตุผลที่ TikTok ตีกลับ (ถ้ามี) */
   rejectReasons: string[];
@@ -113,6 +115,7 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
     imageUris: imgs.map((x) => x.uri),
     pkg, pendingImages, pendingPkg,
     description: typeof d.description === "string" ? d.description : "",
+    pendingDescription: sameRv && typeof rv!.description === "string" && rv!.description !== d.description ? rv!.description : null,
     skus,
     rejectReasons: reasons,
     updateTime: num(d.update_time),
@@ -433,4 +436,90 @@ export function tiktokPkgFields(plan: Pick<TiktokMediaPlan, "weightChanged" | "b
   if (plan.weightChanged && plan.pkg.weight != null) f.package_weight = { value: String(plan.pkg.weight), unit: "KILOGRAM" };
   if (plan.boxChanged) f.package_dimensions = { length: String(plan.pkg.length), width: String(plan.pkg.width), height: String(plan.pkg.height), unit: "CENTIMETER" };
   return f;
+}
+
+// ───────────── รายละเอียดสินค้า (Partial Edit 202509 ช่อง description · TikTok ตรวจใหม่) ─────────────
+// เอกสารทางการ (อ่าน 2026-11-12): HTML ≤ 10,000 ตัวอักษร · รูป ≤ 30 · <img> ต้องเป็นลิงก์รูปของ TikTok (Upload Product Image → url)
+//   และต้องมี src + width + height ทุกรูป · description เป็นช่องบนสุดเดี่ยว ๆ แก้ได้อิสระ (ไม่แตะราคา/สต๊อก)
+// กล่องแก้ข้อความกลาง (RichTextEditor) เก็บความกว้างเป็น style และทิ้ง height → ก่อนส่ง เติม width/height กลับจากรายละเอียดเดิม
+//   รูปที่อัปโหลดใหม่: ลิงก์ที่ /api/tiktok-shop/upload-image คืนมี "#tts-w=…&tts-h=…" ต่อท้าย (บอกขนาด) → ตัดออกตอนส่ง
+
+export const TTS_DESC_MAX = 10_000;
+export const TTS_DESC_MAX_IMAGES = 30;
+/** ลิงก์รูปที่ TikTok รับในรายละเอียด (โดเมนเก็บรูปของ TikTok) */
+export function isTiktokImageUrl(src: string): boolean {
+  try {
+    const u = new URL(src);
+    return u.protocol === "https:" && /(^|\.)(ibyteimg|byteimg|tiktokcdn|tiktokcdn-us|tiktokcdn-eu|ttwstatic|tiktokshopcdn)\.com$/i.test(u.hostname);
+  } catch { return false; }
+}
+/** ลิงก์รูปที่อัปโหลดใหม่ + ขนาด (ต่อท้ายเป็น fragment ให้ตอนส่งรู้ขนาด) */
+export const tiktokDescImageSrc = (url: string, width: number | null, height: number | null): string =>
+  width && height ? `${url.split("#")[0]}#tts-w=${Math.round(width)}&tts-h=${Math.round(height)}` : url.split("#")[0];
+
+const attrOf = (tag: string, name: string): string | null => {
+  const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag);
+  return m ? (m[2] ?? m[3] ?? m[4] ?? "") : null;
+};
+const decodeAmp = (s: string) => s.replace(/&amp;/g, "&");
+const encAttr = (s: string) => s.replace(/&(?!amp;)/g, "&amp;").replace(/"/g, "&quot;");
+const IMG_RE = /<img\b[^>]*>/gi;
+
+/** รูปในรายละเอียด → [{ src (ไม่มี fragment), width, height }] */
+export function tiktokDescImages(html: string): { src: string; width: number | null; height: number | null }[] {
+  return (html.match(IMG_RE) ?? []).map((tag) => {
+    const raw = decodeAmp(attrOf(tag, "src") ?? "");
+    const [src, frag] = raw.split("#");
+    const fw = frag ? Number(/tts-w=(\d+)/.exec(frag)?.[1]) : NaN;
+    const fh = frag ? Number(/tts-h=(\d+)/.exec(frag)?.[1]) : NaN;
+    const w = Number(attrOf(tag, "width")); const h = Number(attrOf(tag, "height"));
+    return { src, width: Number.isFinite(fw) && fw > 0 ? fw : Number.isFinite(w) && w > 0 ? w : null, height: Number.isFinite(fh) && fh > 0 ? fh : Number.isFinite(h) && h > 0 ? h : null };
+  });
+}
+
+/**
+ * เตรียมรายละเอียดก่อนส่ง: ทุก <img> = src ลิงก์ TikTok + width + height (ขนาดจาก fragment ของรูปใหม่ หรือจากรายละเอียดเดิม)
+ * คืน html ที่จะส่ง + errors ภาษาคน (รูปไม่ใช่ของ TikTok / ไม่รู้ขนาด)
+ */
+export function fixTiktokDescriptionImages(html: string, baseHtml: string): { html: string; errors: string[] } {
+  const known = new Map<string, { width: number; height: number }>();
+  for (const im of tiktokDescImages(baseHtml)) {
+    if (!im.width || !im.height) continue;
+    known.set(im.src, { width: im.width, height: im.height });
+    known.set(im.src.split("?")[0], { width: im.width, height: im.height });
+  }
+  const errors = new Set<string>();
+  const out = html.replace(IMG_RE, (tag) => {
+    const [im] = tiktokDescImages(tag);
+    if (!im?.src) { errors.add("มีรูปที่ไม่มีลิงก์ในรายละเอียด — ลบรูปนั้นออก"); return ""; }
+    if (!isTiktokImageUrl(im.src)) { errors.add("รูปในรายละเอียดต้องเป็นรูปที่แทรกผ่านปุ่มแทรกรูป (ฝากกับ TikTok แล้ว) — ลบรูปที่วางลิงก์จากที่อื่นออก"); return tag; }
+    const k = known.get(im.src) ?? known.get(im.src.split("?")[0]);
+    const width = im.width ?? k?.width ?? null; const height = im.height ?? k?.height ?? null;
+    if (!width || !height) { errors.add("ไม่รู้ขนาดรูปบางรูปในรายละเอียด — ลบรูปนั้นแล้วแทรกใหม่"); return tag; }
+    const alt = attrOf(tag, "alt");
+    return `<img src="${encAttr(im.src)}" width="${width}" height="${height}"${alt ? ` alt="${encAttr(decodeAmp(alt))}"` : ""}>`;
+  });
+  return { html: out, errors: [...errors] };
+}
+
+/** ตัวหนังสือล้วนของ HTML (นับ/เช็กว่าว่างไหม) */
+export const tiktokDescText = (html: string): string => html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+
+export type TiktokDescPlan = { changed: boolean; html: string; errors: string[]; warnings: string[]; change: { label: string; before: string; after: string } | null };
+
+/** เทียบรายละเอียดเดิมกับที่แก้ → ส่งไหม + กฎ (ตัวอักษร ≤ 10,000 · รูป ≤ 30 · มีเนื้อหา · รูปของ TikTok + ขนาดครบ) */
+export function planTiktokDescription(base: string, after: string): TiktokDescPlan {
+  const fixed = fixTiktokDescriptionImages(after, base);
+  const errors = [...fixed.errors];
+  const warnings: string[] = [];
+  const text = tiktokDescText(fixed.html);
+  const imgs = tiktokDescImages(fixed.html).length;
+  if (!text && imgs === 0) errors.push("รายละเอียดว่างไม่ได้");
+  if (fixed.html.length > TTS_DESC_MAX) errors.push(`รายละเอียดยาว ${fixed.html.length.toLocaleString()} ตัวอักษร (รวมโค้ดจัดรูปแบบ) — TikTok รับไม่เกิน ${TTS_DESC_MAX.toLocaleString()}`);
+  if (imgs > TTS_DESC_MAX_IMAGES) errors.push(`รูปในรายละเอียด ${imgs} รูป — TikTok รับไม่เกิน ${TTS_DESC_MAX_IMAGES}`);
+  const changed = after.trim() !== base.trim();
+  if (changed && text.length < 300) warnings.push("TikTok แนะนำรายละเอียดอย่างน้อย 300 ตัวอักษร (ตอนนี้ " + text.length.toLocaleString() + ")");
+  const baseText = tiktokDescText(base);
+  const change = changed ? { label: "รายละเอียดสินค้า", before: `${baseText.length.toLocaleString()} ตัวอักษร · รูป ${tiktokDescImages(base).length}`, after: `${text.length.toLocaleString()} ตัวอักษร · รูป ${imgs}` } : null;
+  return { changed, html: fixed.html, errors, warnings, change };
 }
