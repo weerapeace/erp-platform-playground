@@ -2034,7 +2034,24 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
   const atts = Array.isArray(bill.attachments) ? (bill.attachments as unknown[]).map(String) : [];
   const legacy = [bill.bill_image, bill.wechat_image].filter(Boolean).map(String);
   const allFiles = [...atts, ...legacy.filter((k) => !atts.includes(k))];
-  const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
+  // ไฟล์แนบในหน้ารายละเอียด — แนบเพิ่มได้ทันที (บันทึกเลย) · ถือเป็น state เพราะ bill เป็นค่าที่ส่งมาตอนเปิด ไม่อัปเดตเอง
+  // ลบไฟล์ทำที่ "แก้ไขบิล" (กันลบพลาดเพราะที่นี่บันทึกทันที)
+  const [files, setFiles] = useState<string[]>(allFiles);
+  const [savingFiles, setSavingFiles] = useState(false);
+  const saveFiles = async (keys: string[]) => {
+    const prev = files;
+    setFiles(keys); setSavingFiles(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attachments: keys, actor: "china-app" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setFiles(prev); toast.error(j.error ?? "บันทึกไฟล์แนบไม่สำเร็จ"); return; }
+      toast.success(`แนบไฟล์แล้ว (${keys.length} ไฟล์)`); onChanged?.();
+    } catch (e) { setFiles(prev); toast.error(String((e as Error).message ?? e)); }
+    finally { setSavingFiles(false); }
+  };
   const canPrint = rate > 0;                       // พิมพ์ได้เมื่อมีเรทแล้ว
   const paidFromBalance = rate <= 0 && st === "โอนแล้ว";   // จ่ายจากยอดคงเหลือจีนล้วน (ไม่ใช้เรท) — ไม่ใช่ "รอเรท"
   const canCancel = st !== "ยกเลิก" && st !== "โอนแล้ว";
@@ -2179,29 +2196,12 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
               className="h-11 border border-[#06C755] text-[#06C755] rounded-lg text-sm font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
           </div>
 
-          {/* แนบไฟล์ — กดดูเต็มจอ (กดอีกครั้งปิด) */}
-          {allFiles.length > 0 && (
-            <div>
-              <Label>ไฟล์แนบ ({allFiles.length})</Label>
-              <div className="grid grid-cols-3 gap-2">
-                {allFiles.map((k) => (
-                  isPdf(k) ? (
-                    <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer"
-                      className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50 flex flex-col items-center justify-center h-24 text-slate-600">
-                      <span className="text-3xl">📄</span>
-                      <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
-                    </a>
-                  ) : (
-                    <button key={k} type="button" onClick={() => setLightbox(r2Url(k))}
-                      className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img loading="lazy" src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
-                    </button>
-                  )
-                ))}
-              </div>
-            </div>
-          )}
+          {/* แนบไฟล์ — กดรูปดูเต็มจอ · ปุ่ม "เพิ่มไฟล์" แนบเพิ่มได้ทันที (ของกลาง FileMultiInput · ลบไฟล์ที่ "แก้ไขบิล") */}
+          <div>
+            <Label>ไฟล์แนบ ({files.length}){savingFiles ? " · กำลังบันทึก…" : ""}</Label>
+            <FileMultiInput value={files} onChange={saveFiles} folder="china-bills" removable={false}
+              disabled={savingFiles} onPreview={(k) => setLightbox(r2Url(k))} />
+          </div>
 
           {/* ยกเลิกบิล */}
           {canCancel && (

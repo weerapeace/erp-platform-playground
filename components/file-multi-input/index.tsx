@@ -7,6 +7,9 @@
  * - PDF → โชว์ไอคอน 📄
  * - กดเพิ่มได้หลายไฟล์ (เลือกทีละ/หลายไฟล์พร้อมกัน), ลบทีละไฟล์
  * ใช้แนบเอกสาร เช่น ใบรับของ, บิล/ใบเสร็จ, สลิป WeChat, สัญญา ฯลฯ
+ * ตัวเลือกเสริม (ไม่ใส่ = พฤติกรรมเดิม):
+ * - removable={false} → ซ่อนปุ่ม ✕ (เพิ่มได้อย่างเดียว เช่น หน้าดูรายละเอียดที่บันทึกทันทีเมื่อแนบ — กันลบพลาด)
+ * - onPreview={(key) => …} → กดรูปแล้วเรียกฟังก์ชันนี้ (เช่น เปิด lightbox ของหน้า) แทนเปิดแท็บใหม่
  */
 import { useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -16,7 +19,7 @@ const isPdfKey = (k: string) => k.toLowerCase().endsWith(".pdf");
 const urlOf = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
 
 export function FileMultiInput({
-  value, onChange, folder = "uploads", disabled, label, max = 20,
+  value, onChange, folder = "uploads", disabled, label, max = 20, removable = true, onPreview,
 }: {
   value: string[];
   onChange: (keys: string[]) => void;
@@ -24,6 +27,8 @@ export function FileMultiInput({
   disabled?: boolean;
   label?: string;
   max?: number;
+  removable?: boolean;
+  onPreview?: (key: string) => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -65,13 +70,18 @@ export function FileMultiInput({
                 <span className="text-3xl">📄</span>
                 <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
               </a>
+            ) : onPreview ? (
+              <button type="button" onClick={() => onPreview(k)} className="block w-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img loading="lazy" src={urlOf(k)} alt="" className="w-full h-24 object-cover" />
+              </button>
             ) : (
               <a href={urlOf(k)} target="_blank" rel="noopener noreferrer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={urlOf(k)} alt="" className="w-full h-24 object-cover" />
               </a>
             )}
-            {!disabled && (
+            {!disabled && removable && (
               <button type="button" onClick={() => removeAt(i)}
                 className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center bg-white/90 border border-slate-200 text-red-600 rounded-full shadow text-xs">✕</button>
             )}
