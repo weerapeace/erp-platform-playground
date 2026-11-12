@@ -22,6 +22,8 @@ import { woRatePerPiece, roundWage, laborBomTarget } from "@/lib/wo-labor";
 import { RecvWageHint } from "./recv-wage-hint";
 import { MoProgressCell } from "@/components/mo-material-progress";
 import { MyNoteCell, useMyNotes } from "@/components/my-note";
+import { useUpdateNotes, UpdateNoteCell, UpdateNoteEditor } from "./update-note-cell";
+import { unLast, UN_ORDER } from "./update-note";
 import { CELL_PANE, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail-prefs";
 import { useUserPref } from "@/lib/use-user-pref";
 import type { MoSkipped } from "@/lib/mo-skip";
@@ -3580,6 +3582,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [cuList, setCuList] = useState<string[]>([]);      // ลำดับใบของแท็บที่เปิดอยู่ (ตอนกดอัปเดต) — ไว้ไป "ใบถัดไป"
   const [cuEditMo, setCuEditMo] = useState<string | null>(null);   // ใบที่เปิดป๊อป "แก้ไข" (แก้สิ่งที่บันทึกแล้ว / ลดจำนวน)
   const [cuInitTarget, setCuInitTarget] = useState<CuTargetKey | null>(null);   // เปิดป๊อปอัปเดตมาที่ขั้นนี้เลย (ปุ่ม "บันทึกส่งคืนเพิ่ม")
+  // ร่าง "งานถึงไหนแล้ว" (ทั้งทีมเห็น) — ประกาศก่อน cuBtn/คอลัมน์ที่ใช้ (กัน TDZ)
+  const un = useUpdateNotes(true);
+  const [unMo, setUnMo] = useState<{ mo_no: string; mo_id: string | null; product_sku: string | null; qty: number } | null>(null);
   const openCu = (moNo: string) => {
     const rows = tab === "all" ? allShown.map((r) => r.mo_no)
       : tab === "pend" ? pendShown.filter((m) => hit(pendText(m))).map((m) => m.mo_no)
@@ -3633,6 +3638,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             className={`inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 text-[11px] ${t.status === "processing" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-800"}`}>
             <Icon name="waiting" />{t.status === "processing" ? "กำลังบันทึก" : t.mine ? "รอยืนยัน" : `รอยืนยัน · ${t.requested_name ?? ""}`}
           </span>
+        )}
+        {!t && un.pending(moNo) && (
+          <span title="มีร่าง &quot;งานถึงไหนแล้ว&quot; — กดอัปเดต ระบบดึงร่างไปกรอกให้" className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 text-[11px] text-amber-800"><Icon name="note" />มีร่าง</span>
         )}
         {(() => {
           const a = cuAllMap.get(moNo);
@@ -4241,6 +4249,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const noteHeader = <span className="inline-flex items-center gap-1"><Icon name="notes" /> โน้ตของฉัน</span>;
   const noteCell = (moNo: string | null | undefined) => moNo
     ? <MyNoteCell note={myNotes.notes[moNo]} onSave={(t) => myNotes.setNote(moNo, t)} /> : <span className="text-slate-300">—</span>;
+  // ร่าง "งานถึงไหนแล้ว" (ทั้งทีมเห็น · ./update-note-cell) — ผูกเลขใบสั่งผลิต · ปุ่มอัปเดตดึงร่างไปกรอก
+  const deskNameOf = (id: string) => departments.find((d) => d.id === id)?.name ?? null;
+  const unHeader = <span className="inline-flex items-center gap-1"><Icon name="note" /> อัปเดตถึงไหน (ร่าง)</span>;
+  const unSort = (moNo: string | null | undefined) => { const n = moNo ? un.notes[moNo] : undefined; const l = n ? unLast(n.steps) : null; return l ? `${n?.applied_at ? "1" : "0"}${UN_ORDER.indexOf(l)}` : "~"; };
+  const unCell = (moNo: string | null | undefined, moId: string | null, sku: string | null, qty: number) => moNo
+    ? <UpdateNoteCell note={un.notes[moNo]} deskName={deskNameOf} canEdit={canEdit} onOpen={() => setUnMo({ mo_no: moNo, mo_id: moId, product_sku: sku, qty })} />
+    : <span className="text-slate-300">—</span>;
   const noteSum = (moNos: (string | null | undefined)[]) => {
     const n = new Set(moNos.filter((k) => !!myNotes.text(k))).size;
     return n ? <span className="text-[11px] text-amber-700 whitespace-nowrap">{fmt(n)} โน้ต</span> : <span className="text-slate-300">—</span>;
@@ -4349,6 +4364,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     { key: "group", header: "กลุ่ม", group: "อื่น ๆ", defaultHidden: hid("group"), width: "minmax(6rem,0.8fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
     { key: "mynote", header: noteHeader, label: "โน้ตของฉัน (เห็นคนเดียว)", group: "อื่น ๆ", isNew: true, defaultHidden: hid("mynote"), width: "minmax(9rem,1fr)",
       sortValue: (m) => myNotes.text(m.mo_no) || "~", sortLabel: "โน้ตของฉัน", cell: (m) => noteCell(m.mo_no) },
+    { key: "upnote", header: unHeader, label: "อัปเดตถึงไหน (ร่าง · ทั้งทีมเห็น)", group: "อื่น ๆ", isNew: true, defaultHidden: hid("upnote"), width: "minmax(10rem,1fr)",
+      sortValue: (m) => unSort(m.mo_no), sortLabel: "อัปเดตถึงไหน (ร่าง)", cell: (m) => unCell(m.mo_no, m.id, m.product_sku, m.qty) },
   ];
   // จำคอลัมน์ที่เลือก "ต่อคน" แยกจอคอม / iPad (การ์ดแนวตั้งหน้าตาตายตัว ไม่ใช้ตัวเลือกคอลัมน์)
   const pendColPrefs = useColumnPrefs(touch ? "wb_table_cols_ipad" : "wb_table_cols_pc", pendCols);
@@ -4563,6 +4580,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 whitespace-nowrap">ยังไม่ใส่</span> },
     { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (w) => (WO_STATUS[w.status]?.label ?? w.status), sortLabel: "สถานะ", cell: (w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return <span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span>; } },
     { key: "mynote", header: noteHeader, label: "โน้ตของฉัน (เห็นคนเดียว)", width: "minmax(9rem,1fr)", sortValue: (w) => myNotes.text(w.mo_no) || "~", sortLabel: "โน้ตของฉัน", cell: (w) => noteCell(w.mo_no) },
+    { key: "upnote", header: unHeader, label: "อัปเดตถึงไหน (ร่าง · ทั้งทีมเห็น)", width: "minmax(10rem,1fr)", sortValue: (w) => unSort(w.mo_no), sortLabel: "อัปเดตถึงไหน (ร่าง)", cell: (w) => unCell(w.mo_no, w.mo_id ?? null, w.product_sku, w.qty || 0) },
   ];
 
   // ── ตาราง "รอ QC รับเข้า" (คอลัมน์) · ทุกแท็บเลือกคอลัมน์ได้ จำต่อคน แยกคอม/iPad
@@ -4578,6 +4596,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     { key: "recv", header: "วันที่ช่างส่ง", width: "minmax(8rem,1fr)", sortValue: (q) => q.received_at ?? "9999", sortLabel: "วันที่ช่างส่ง", cell: (q) => <span className="text-[12px] text-slate-500">{q.received_at ? dueDateText(q.received_at) : "—"}</span> },
     { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (q) => q.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (q) => <DueCell d={q.due_date} /> },
     { key: "mynote", header: noteHeader, label: "โน้ตของฉัน (เห็นคนเดียว)", width: "minmax(9rem,1fr)", sortValue: (q) => myNotes.text(q.mo_no) || "~", sortLabel: "โน้ตของฉัน", cell: (q) => noteCell(q.mo_no) },
+    { key: "upnote", header: unHeader, label: "อัปเดตถึงไหน (ร่าง · ทั้งทีมเห็น)", width: "minmax(10rem,1fr)", sortValue: (q) => unSort(q.mo_no), sortLabel: "อัปเดตถึงไหน (ร่าง)", cell: (q) => unCell(q.mo_no, null, q.sku, q.remaining) },
   ];
   const withMeta = <R,>(cols: MiniColumn<R>[], ipadHidden: string[]) =>
     cols.map((c) => ({ ...c, locked: c.key === "prod", defaultHidden: touch && ipadHidden.includes(c.key) }));
@@ -5137,17 +5156,24 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
           </div>
         )}
-        <CatchUpModal moNo={cuMo} initialTarget={cuInitTarget} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } if (cuSalesOpen) setCuSalesRefresh((n) => n + 1); setCuMo(null); setCuInitTarget(null); }}
+        <CatchUpModal moNo={cuMo} initialTarget={cuInitTarget} fromNote={un.pending(cuMo)} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } if (cuSalesOpen) setCuSalesRefresh((n) => n + 1); setCuMo(null); setCuInitTarget(null); }}
           onDone={() => {
             // ⚠️ คิว "รอ QC รับเข้า" โหลดแยก — เดิมไม่โหลดใหม่หลังอัปเดต ใบที่ช่างเพิ่งส่งคืนเลยหายจากทุกแท็บจนกด F5
             onReload?.(); void loadQcQueue(); void loadCuAll();
             if (cuMo) setCuRecent((rs) => [cuMo, ...rs.filter((x) => x !== cuMo)].slice(0, 8));
+            if (cuMo) void un.markApplied(cuMo);   // ร่างของใบนี้ → "อัปเดตแล้ว"
           }}
           onLocate={(no, sku) => { setCuMo(null); setCuSalesOpen(false); setCuAll(true); setTableSearch(sku ?? no); void loadCuAll(); }}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
           canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()}
           onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null}
           mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()} />
+        {/* จดร่าง "งานถึงไหนแล้ว" (ทั้งทีมเห็น) → ปุ่ม "อัปเดตจริงเลย" เปิดป๊อปอัปเดตงานพร้อมดึงร่าง */}
+        <UpdateNoteEditor mo={unMo} note={unMo ? un.notes[unMo.mo_no] : undefined} departments={departments} craftsmen={craftsmen}
+          onClose={() => setUnMo(null)}
+          onSave={(st, t) => (unMo ? un.save(unMo.mo_no, unMo.mo_id, st, t) : Promise.resolve(false))}
+          onDelete={() => (unMo ? un.remove(unMo.mo_no) : Promise.resolve(false))}
+          onUpdateNow={canEdit ? () => { const mo = unMo?.mo_no; setUnMo(null); if (mo) { setCuList([]); setCuInitTarget(null); setCuMo(mo); } } : undefined} />
         {/* 🧾 อัปเดตงานจากใบขาย → ผูกแล้วส่งใบเหล่านั้นเข้า "อัปเดตเป็นชุด" (ตั้งขั้นส่งออกที่นั่น) · "อัปเดต" รายแถว = ป๊อปทีละใบเดิม (ซ้อนบนหน้าต่าง) */}
         <SalesUpdate open={cuSalesOpen} onClose={() => setCuSalesOpen(false)} canLink={cuMode === "direct" || cuApprove}
           onOpenBatch={(mos, pick) => { setCuBatch(mos); setCuBatchPick(pick ?? null); }}

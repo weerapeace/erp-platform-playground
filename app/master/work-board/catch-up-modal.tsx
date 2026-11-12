@@ -28,6 +28,7 @@ import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
   CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, cuOutstanding, CU_LATE_DAYS, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem, cuReduceSnap, type CuReduce,
 } from "./catch-up";
+import { unTarget, UN_SHORT, unLast, type UpdateNote } from "./update-note";
 import { ReducePanel } from "./catch-up-reduce";
 import { CuStepList } from "./catch-up-step-line";
 import { cuCentralRate, cuRateFor, cuRetSources, cuRateOfRef, cuRetEffective, cuAutoReturns, cuBomCandidate, cuReadLast as readLast, cuWriteLast as writeLast, type CuDispRow } from "./catch-up-lines";
@@ -47,7 +48,7 @@ const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
 const phases = [...new Set(flow.map((t) => t.group))];
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
-export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged, onLocate, initialTarget = null }: {
+export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged, onLocate, initialTarget = null, fromNote = null }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
   moNo: string | null;
   onClose: () => void;
@@ -71,6 +72,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   onLocate?: (moNo: string, sku: string | null) => void;
   /** เปิดมาที่ขั้นนี้เลย (เช่น ปุ่ม "บันทึกส่งคืนเพิ่ม" ในป๊อปแก้ไข → "return") — ข้ามหน้าเลือกขั้นไปหน้าเติมข้อมูล */
   initialTarget?: CuTargetKey | null;
+  /** ร่าง "งานถึงไหนแล้ว" ที่ทีมจดไว้ (./update-note) — เปิดมาแล้วเลือกขั้น + กรอกตัวเลขจากร่างให้ (ไม่มีคำขอค้าง/ขั้นที่ระบุ) · กด "ไม่ใช้ร่าง" ได้ */
+  fromNote?: UpdateNote | null;
 }) {
   const toast = useToast();
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
@@ -184,6 +187,29 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moNo, f, initialTarget, target, req]);
   useEffect(() => { if (!moNo) autoPicked.current = null; }, [moNo]);
+  // ── ร่าง "งานถึงไหนแล้ว" → เลือกขั้น + กรอกจากร่าง (ครั้งเดียวต่อการเปิด · ใบที่มีคำขอค้าง/เปิดมาพร้อมขั้น = ไม่ใช้ร่าง)
+  const notePicked = useRef<string | null>(null);
+  const [noteUsed, setNoteUsed] = useState<UpdateNote | null>(null);
+  useEffect(() => {
+    if (!moNo || !f || !fromNote || fromNote.mo_no !== moNo || target || req || initialTarget || notePicked.current === moNo) return;
+    notePicked.current = moNo;
+    const n = fromNote.steps, t = unTarget(n, f.dispatched);
+    if (!t || cuTargetBlocked(f, t)) return;
+    pick(t);
+    const q = cuDefaultQty(f, t);
+    if (n.prep?.date) setDates((d) => ({ ...d, ready: n.prep!.date }));
+    if (n.disp && (n.disp.deptId || n.disp.qty > 0)) {
+      const d = n.disp.deptId ? departments.find((x) => x.id === n.disp!.deptId) ?? null : null;
+      const crew = d ? n.disp.crewIds.filter((id) => craftsmen.some((c) => c.id === id)) : [];
+      setDisp([{ key: nk("d"), deptId: d?.id ?? "", crewIds: crew, qty: n.disp.qty > 0 ? n.disp.qty : q.dispatchQty, date: null, rate: crew.length ? rateFor(crew) : centralRate }]);
+    }
+    if (t === "return_part" && n.ret) { setRet([{ key: nk("r"), ref: "", qty: n.ret.qty, date: null, wage: null }]); setRetSet(true); }
+    if ((t === "qc_in" || t === "ship") && (n.qc || n.ret?.bad)) { setQc({ good: n.qc?.good ?? q.qcGood, bad: n.ret?.bad ?? 0 }); setQcSet(true); }
+    setNoteUsed(fromNote); setPage(2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moNo, f, fromNote, target, req, initialTarget]);
+  useEffect(() => { if (!moNo) { notePicked.current = null; setNoteUsed(null); } }, [moNo]);
+  const dropNote = () => { setNoteUsed(null); setTarget(null); setTicks({}); setDisp([]); setRet([]); setRetSet(false); setQcSet(false); setDates(CU_NO_DATES); setPage(1); };
   /** ใส่ข้อมูลจากคำขอ (ที่พนักงานกรอกไว้) กลับเข้าป๊อป */
   const hydrate = (d: CuDraft) => {
     seq.current = Math.max(seq.current, 1000);   // กันคีย์แถวใหม่ซ้ำกับแถวในคำขอ
@@ -482,8 +508,15 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       <Icon name="waiting" className="mt-0.5" />
       <span>{req!.status === "processing" ? `${req!.reviewed_name ?? "หัวหน้า"} กำลังบันทึกอัปเดตของใบนี้อยู่` : `ใบนี้มีอัปเดตรอหัวหน้ายืนยันอยู่ (ส่งโดย ${req!.requested_name ?? "คนอื่น"} · ${cuWhen(req!.requested_at)})`} — รอให้จบก่อน แล้วค่อยอัปเดตใหม่</span>
     </div>
-  ) : (rejected || asRequest) ? (
+  ) : (rejected || asRequest || noteUsed) ? (
     <>
+      {noteUsed && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          <Icon name="note" />
+          <span className="min-w-0 flex-1">ดึงจากร่างของ <b className="font-medium">{noteUsed.updated_name ?? "—"}</b> ({cuWhen(noteUsed.updated_at)}) · ถึง <b className="font-medium">{(() => { const l = unLast(noteUsed.steps); return l ? UN_SHORT[l] : "—"; })()}</b> — ตรวจตัวเลขแล้วกดบันทึกจริง{noteUsed.note ? <span className="opacity-80"> · &ldquo;{noteUsed.note}&rdquo;</span> : null}</span>
+          <button type="button" onClick={dropNote} className="h-8 shrink-0 rounded-lg border border-amber-200 bg-white px-3 text-[12px] hover:bg-amber-100">ไม่ใช้ร่าง</button>
+        </div>
+      )}
       {rejected && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-900">
           <Icon name="back" />
