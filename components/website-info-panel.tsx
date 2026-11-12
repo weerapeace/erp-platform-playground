@@ -22,6 +22,7 @@ import { BilingualText, ContentLangProvider, TranslationBar } from "@/components
 import { coverageOf, needsTranslation, readMeta, translationPatch, translationStatus } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
 import { webForm } from "@/lib/website-form-styles";
+import { FeedCheckCard } from "@/components/website-feed-check";
 
 type FieldDef = {
   key: string;
@@ -267,6 +268,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
                 </div>
               )}
               {g.key === "tracking" && <FeedLinks siteUrl={siteUrl} />}
+              {g.key === "tracking" && siteUrl && <FeedCheckCard siteUrl={siteUrl} />}
               {g.key === "search" && <SearchTermsBox shopId={shopId} />}
               {g.key === "order" && (
                 <p className="text-[11px] text-slate-500 mt-3 rounded-lg bg-slate-50 px-3 py-2">
