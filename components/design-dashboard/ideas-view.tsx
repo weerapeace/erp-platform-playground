@@ -6,8 +6,9 @@
  *   ตัวกรอง: ทั้งหมด · ของฉัน · พักไว้ · เก็บแล้ว + ค้นหา (ช่องค้นหาของ Dashboard) + แบรนด์ (แถบแบรนด์ซ้ายมือ)
  *   การ์ดต่อแถว (ของกลาง GalleryColumns · จำรายคน) · รูป เต็มกรอบ/เห็นทั้งรูป (จำรายคน) · กดรูป = ดูเต็มจอ (ImageLightbox)
  *   พักไว้ / เก็บ (กู้คืนได้ ไม่มีลบทิ้งจริง) · เริ่มทำงานจริง = ป๊อปยืนยัน (เลือกเช็กลิสต์ได้) → POST /api/design-sheets { idea_id } → เปิดใบงานใหม่
+ *   รอคัด = ชุดที่ส่งมาในกลุ่มไลน์ "ส่งไอเดีย" (lib/design-idea-line) → เพิ่มเป็นไอเดีย / รวมกับไอเดียที่มี / ไม่เอา · แอดมินตั้งกลุ่มได้ที่แถบบนกล่อง (LineGroupSetup)
  * ข้อมูล: /api/design-ideas · ค่ากลาง lib/design-ideas · doc: docs/design-ideas.md
- * ของกลาง: ERPModal · ImageAttachKeys · ImageLightbox · BrandSelect · GalleryColumns · ChecklistSeedPicker · TaskLinkList · state-views · useToast
+ * ของกลาง: ERPModal · ImageAttachKeys · ImageLightbox · BrandSelect · GalleryColumns · ChecklistSeedPicker · TaskLinkList · LineGroupSetup · LineConsole · state-views · useToast
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { apiFetch } from "@/lib/api";
@@ -24,11 +25,13 @@ import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-c
 import { ChecklistSeedPicker } from "@/components/record-tasks";
 import { TaskLinkList } from "@/components/record-tasks/task-links";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
+import { LineGroupSetup } from "@/components/line-group-setup";
+import { LineConsole } from "@/components/line-console";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { MAX_TASK_LINKS, parseTaskLinkUrl, type TaskLink } from "@/lib/record-tasks";
-import { ideaDetailHtml, ideaImageUrl, linkHost, IDEA_IMAGE_FOLDER, IDEA_PROMOTABLE, MAX_IDEA_POINTS, type DesignIdea } from "@/lib/design-ideas";
+import { ideaDetailHtml, ideaImageUrl, IDEA_IMAGE_FOLDER, IDEA_PROMOTABLE, MAX_IDEA_POINTS, type DesignIdea } from "@/lib/design-ideas";
 
-type View = "all" | "mine" | "paused" | "archived";
+type View = "inbox" | "all" | "mine" | "paused" | "archived";
 type Fit = "cover" | "contain";
 const FIT_PREF = "design_ideas_fit";
 const NO_BRAND = "__no_brand__";
@@ -41,8 +44,12 @@ const fmtIdeaDate = (iso: string) => {
   return d.toLocaleDateString(tr("th-TH", "en-GB"), { day: "numeric", month: "short" });
 };
 
-export function IdeasView({ canEdit, search, brandId, onPromoted }: {
+export function IdeasView({ canEdit, isAdmin = false, initialView = "all", search, brandId, onPromoted }: {
   canEdit: boolean;
+  /** แอดมิน = เห็นแถบตั้งกลุ่มไลน์ "ส่งไอเดีย" ในกล่องรอคัด */
+  isAdmin?: boolean;
+  /** เปิดมาที่มุมมองไหน (ลิงก์จากบอทไลน์ ?ideas=1 = กล่องรอคัด) */
+  initialView?: View;
   /** คำค้นจากช่องค้นหาของ Dashboard */
   search: string;
   /** แบรนด์ที่เลือกในแถบซ้าย (null = ทั้งหมด · "__no_brand__" = ไม่มีแบรนด์) */
@@ -55,7 +62,10 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
   const { user } = useAuth();
   const [items, setItems] = useState<DesignIdea[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [view, setView] = useState<View>("all");
+  const [view, setView] = useState<View>(initialView);
+  const [merge, setMerge] = useState<DesignIdea | null>(null);
+  const [setupKey, setSetupKey] = useState(0);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const [fit, setFit] = useState<Fit>("cover");
   const [brands, setBrands] = useState<BrandSelectOption[]>([]);
   const [form, setForm] = useState<DesignIdea | "new" | null>(null);
@@ -91,14 +101,20 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
       return [it.name, it.brand_name ?? "", it.created_by_name ?? "", it.sender_name ?? "", ...it.points, ...it.links.map((l) => `${l.url} ${l.label ?? ""}`)].join(" ").toLowerCase().includes(q);
     });
   }, [items, search, brandId]);
-  const live = scoped.filter((it) => it.status !== "archived");
+  // รอคัดจากไลน์ยังไม่มีแบรนด์ → ไม่กรองตามแบรนด์ (กรองแค่คำค้น)
+  const inbox = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (items ?? []).filter((it) => it.status === "inbox" && (!q || [it.name, it.sender_name ?? "", it.text_body ?? "", ...it.links.map((l) => l.url)].join(" ").toLowerCase().includes(q)));
+  }, [items, search]);
+  const live = scoped.filter((it) => it.status === "open" || it.status === "paused" || it.status === "promoting");
   const counts = {
+    inbox: inbox.length,
     all: live.length,
     mine: live.filter((it) => user?.id && it.created_by === user.id).length,
     paused: live.filter((it) => it.status === "paused").length,
     archived: scoped.filter((it) => it.status === "archived").length,
   };
-  const shown = view === "archived" ? scoped.filter((it) => it.status === "archived")
+  const shown = view === "inbox" ? inbox : view === "archived" ? scoped.filter((it) => it.status === "archived")
     : view === "paused" ? live.filter((it) => it.status === "paused")
     : view === "mine" ? live.filter((it) => user?.id && it.created_by === user.id)
     : live;
@@ -109,7 +125,8 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
       const j = await apiFetch(`/api/design-ideas/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       setItems((l) => (l ?? []).map((x) => (x.id === it.id ? (j.data as DesignIdea) : x)));
-      toast.success(status === "archived" ? t(`เก็บ "${it.name}" แล้ว — กู้คืนได้ที่ "เก็บแล้ว"`, `Archived "${it.name}"`)
+      toast.success(status === "archived" && it.status === "inbox" ? t(`ไม่เอา "${it.name}" — ย้ายไป "เก็บแล้ว" (กู้คืนได้)`, `Moved "${it.name}" to archived`)
+        : status === "archived" ? t(`เก็บ "${it.name}" แล้ว — กู้คืนได้ที่ "เก็บแล้ว"`, `Archived "${it.name}"`)
         : status === "paused" ? t(`พัก "${it.name}" ไว้ก่อน`, `Paused "${it.name}"`)
         : it.status === "archived" ? t(`กู้คืน "${it.name}" แล้ว`, `Restored "${it.name}"`) : t(`เอา "${it.name}" กลับมาแล้ว`, `Resumed "${it.name}"`));
     } catch (e) { toast.error(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); }
@@ -127,6 +144,7 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5">
+          {seg("inbox", t("รอคัดจากไลน์", "From LINE"), counts.inbox)}
           {seg("all", t("ทั้งหมด", "All"), counts.all)}
           {seg("mine", t("ของฉัน", "Mine"), counts.mine)}
           {seg("paused", t("พักไว้", "Paused"), counts.paused)}
@@ -151,13 +169,41 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
         )}
       </div>
 
+      {view === "all" && counts.inbox > 0 && (
+        <button type="button" onClick={() => setView("inbox")}
+          className="mb-3 flex w-full items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-left text-sm text-emerald-800 hover:bg-emerald-100">
+          <Icon value="i:brand-line" className="text-[16px]" />
+          <span className="flex-1">{t(`มีไอเดียจากไลน์รอคัด ${counts.inbox} ชุด`, `${counts.inbox} LINE ideas waiting to be sorted`)}</span>
+          <span className="text-xs font-medium">{t("ไปคัด", "Sort now")} ›</span>
+        </button>
+      )}
+      {view === "inbox" && isAdmin && (
+        <div className="mb-3">
+          <LineGroupSetup slot="design_idea" setupUrl="/api/design-ideas?setup=1" reloadKey={setupKey} onOpenConsole={() => setConsoleOpen(true)}
+            text={{
+              purpose: "ส่งไอเดีย",
+              readyNote: "ใครในกลุ่มก็ส่งรูป ลิงก์ หรือข้อความได้ ของคนเดิมภายใน 5 นาทีรวมเป็นชุดเดียว บอทตอบครั้งเดียวหลังส่งครบ (ไม่เสียโควตา) · ไอเดียถัดไปทันที พิมพ์ \"ไอเดียใหม่\" นำหน้า",
+              pickHint: "แนะนำกลุ่มที่ใช้ส่งไอเดียอย่างเดียว — ทุกข้อความและรูปในกลุ่มที่เลือกจะเข้ากล่องรอคัด",
+              busyWarn: "กลุ่มนี้ใช้กับระบบอื่นอยู่ — ข้อความ/รูปเรื่องอื่นจะเข้ากล่องรอคัดด้วย",
+            }} />
+        </div>
+      )}
+
       {items === null ? <LoadingState label={t("กำลังโหลดไอเดีย...", "Loading ideas...")} className="py-10" />
         : err && !items.length ? <ErrorState title={t("โหลดไอเดียไม่สำเร็จ", "Failed to load ideas")} hint={err} onRetry={() => void load()} />
         : shown.length === 0 ? (
-          <EmptyState icon={<Icon value="i:bulb" className="text-slate-300" />}
-            title={view === "archived" ? t("ยังไม่มีไอเดียที่เก็บไว้", "No archived ideas") : search.trim() ? t("ไม่พบไอเดียที่ตรงกับคำค้น", "No ideas match your search") : t("ยังไม่มีไอเดียในมุมมองนี้", "No ideas here yet")}
-            hint={view === "archived" ? undefined : search.trim() ? t("ลองเปลี่ยนคำค้น หรือเลือกแบรนด์อื่น", "Try another search or brand") : t("จดไอเดียไว้ก่อนได้เลย ยังไม่ต้องเป็นงานจริง — พร้อมเมื่อไหร่ค่อยกด \"เริ่มทำงานจริง\"", "Jot ideas down first — start a real job when ready")}
-            action={canEdit && view !== "archived" && !search.trim() ? { label: t("จดไอเดีย", "New idea"), onClick: () => setForm("new") } : undefined} />
+          <EmptyState icon={<Icon value={view === "inbox" ? "i:inbox" : "i:bulb"} className="text-slate-300" />}
+            title={view === "inbox" ? t("ไม่มีไอเดียจากไลน์รอคัด", "Nothing from LINE to sort") : view === "archived" ? t("ยังไม่มีไอเดียที่เก็บไว้", "No archived ideas") : search.trim() ? t("ไม่พบไอเดียที่ตรงกับคำค้น", "No ideas match your search") : t("ยังไม่มีไอเดียในมุมมองนี้", "No ideas here yet")}
+            hint={view === "inbox" ? t("ส่งรูป ลิงก์ หรือข้อความในกลุ่มไลน์ \"ส่งไอเดีย\" แล้วจะมาพักที่นี่ให้คัด", "Send images, links or text in the LINE ideas group") : view === "archived" ? undefined : search.trim() ? t("ลองเปลี่ยนคำค้น หรือเลือกแบรนด์อื่น", "Try another search or brand") : t("จดไอเดียไว้ก่อนได้เลย ยังไม่ต้องเป็นงานจริง — พร้อมเมื่อไหร่ค่อยกด \"เริ่มทำงานจริง\"", "Jot ideas down first — start a real job when ready")}
+            action={canEdit && view !== "archived" && view !== "inbox" && !search.trim() ? { label: t("จดไอเดีย", "New idea"), onClick: () => setForm("new") } : undefined} />
+        ) : view === "inbox" ? (
+          <div className="space-y-2">
+            {shown.map((it) => (
+              <InboxCard key={it.id} it={it} canEdit={canEdit} busy={busy === it.id}
+                onOpenImages={(i) => setLb({ keys: it.image_keys, i })}
+                onAccept={() => setForm(it)} onMerge={() => setMerge(it)} onReject={() => void setStatus(it, "archived")} />
+            ))}
+          </div>
         ) : (
           <div style={gridStyle}>
             {shown.map((it) => (
@@ -172,10 +218,11 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
         <IdeaFormModal key={form === "new" ? "new" : form.id} idea={form === "new" ? null : form} brands={brands} defaultBrandId={brandId && brandId !== NO_BRAND ? brandId : null}
           onClose={() => setForm(null)}
           onSaved={(saved, created) => {
+            const accepted = form !== "new" && form.status === "inbox";
             setItems((l) => (created ? [saved, ...(l ?? [])] : (l ?? []).map((x) => (x.id === saved.id ? saved : x))));
             setForm(null);
             if (created) setView("all");
-            toast.success(created ? t("บันทึกไอเดียแล้ว", "Idea saved") : t("บันทึกแล้ว", "Saved"));
+            toast.success(created ? t("บันทึกไอเดียแล้ว", "Idea saved") : accepted ? t(`เพิ่ม "${saved.name}" เป็นไอเดียแล้ว`, `Added "${saved.name}" as an idea`) : t("บันทึกแล้ว", "Saved"));
           }} />
       )}
       {promote && (
@@ -188,6 +235,17 @@ export function IdeasView({ canEdit, search, brandId, onPromoted }: {
           }}
           onStale={() => { setPromote(null); void load(); }} />
       )}
+      {merge && (
+        <MergeModal source={merge} targets={(items ?? []).filter((x) => x.id !== merge.id && (x.status === "open" || x.status === "paused"))}
+          onClose={() => setMerge(null)}
+          onDone={(target) => {
+            setItems((l) => (l ?? []).filter((x) => x.id !== merge.id).map((x) => (x.id === target.id ? target : x)));
+            setMerge(null);
+            toast.success(t(`รวมเข้า "${target.name}" แล้ว`, `Merged into "${target.name}"`));
+          }}
+          onStale={() => { setMerge(null); void load(); }} />
+      )}
+      {isAdmin && consoleOpen && <LineConsole open={consoleOpen} onClose={() => { setConsoleOpen(false); setSetupKey((k) => k + 1); }} />}
       <ImageLightbox images={(lb?.keys ?? []).map((k) => ({ url: ideaImageUrl(k, 1600) }))} index={lb ? lb.i : -1}
         onClose={() => setLb(null)} onIndex={(i) => setLb((x) => (x ? { ...x, i } : x))} thumbnails />
     </div>
@@ -276,6 +334,7 @@ function IdeaFormModal({ idea, brands, defaultBrandId, onClose, onSaved }: {
 }) {
   const t = useT();
   const toast = useToast();
+  const accept = idea?.status === "inbox";   // รอคัดจากไลน์ → "เพิ่มเป็นไอเดีย" (บันทึกพร้อมเปลี่ยนเป็นไอเดียที่เปิดอยู่)
   const init = useRef({
     name: idea?.name ?? "", brand_id: idea?.brand_id ?? defaultBrandId ?? "",
     points: idea?.points.length ? idea.points : [""], links: idea?.links ?? [], image_keys: idea?.image_keys ?? [],
@@ -295,7 +354,7 @@ function IdeaFormModal({ idea, brands, defaultBrandId, onClose, onSaved }: {
     if (!name.trim()) { setNameErr(true); return; }
     setSaving(true);
     try {
-      const body = { name: name.trim(), brand_id: brandId || null, points: clean(points), links, image_keys: keys };
+      const body = { name: name.trim(), brand_id: brandId || null, points: clean(points), links, image_keys: keys, ...(accept ? { status: "open" } : {}) };
       const res = idea
         ? await apiFetch(`/api/design-ideas/${idea.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
         : await apiFetch("/api/design-ideas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -308,17 +367,24 @@ function IdeaFormModal({ idea, brands, defaultBrandId, onClose, onSaved }: {
 
   return (
     <ERPModal open onClose={onClose} size="md" hasUnsavedChanges={dirty && !saving}
-      title={idea ? t("แก้ไอเดีย", "Edit idea") : t("จดไอเดีย", "New idea")}
+      title={accept ? t("เพิ่มเป็นไอเดีย", "Add as an idea") : idea ? t("แก้ไอเดีย", "Edit idea") : t("จดไอเดีย", "New idea")}
       description={idea
         ? t(`จดโดย ${idea.sender_name || idea.created_by_name || "—"} · ${fmtIdeaDate(idea.created_at)}`, `By ${idea.sender_name || idea.created_by_name || "—"}`)
         : t("ยังไม่ใช่งานจริง — ไม่ได้เลข DS จนกว่าจะกด \"เริ่มทำงานจริง\" · ระบบจดชื่อคนจดกับวันที่ให้เอง", "Not a real job yet — no DS number until you start it")}
       footer={<>
         <button type="button" onClick={onClose} disabled={saving} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button type="button" onClick={() => void save()} disabled={saving} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-          {saving ? t("กำลังบันทึก…", "Saving…") : idea ? t("บันทึก", "Save") : t("บันทึกไอเดีย", "Save idea")}
+          {saving ? t("กำลังบันทึก…", "Saving…") : accept ? t("เพิ่มเป็นไอเดีย", "Add as an idea") : idea ? t("บันทึก", "Save") : t("บันทึกไอเดีย", "Save idea")}
         </button>
       </>}>
       <div className="space-y-3">
+        {accept && idea?.text_body && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+            <div className="mb-0.5 font-medium"><Icon value="i:brand-line" className="text-[12px]" /> {t(`ข้อความจากไลน์ (${idea.sender_name ?? "—"})`, "LINE message")}</div>
+            <div className="whitespace-pre-wrap break-words text-emerald-800">{idea.text_body}</div>
+            <div className="mt-1 text-[11px] text-emerald-700">{t("แตกเป็นข้อ ๆ และลิงก์ให้ด้านล่างแล้ว — แก้ได้ก่อนกดเพิ่ม", "Already split into points and links below — edit before adding")}</div>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[2fr_1fr]">
           <label className="block">
             <span className="text-[11px] text-slate-500">{t("ชื่อไอเดีย", "Idea name")} <span className="text-rose-500">*</span></span>
@@ -397,7 +463,7 @@ function LinksEditor({ value, onChange }: { value: TaskLink[]; onChange: (v: Tas
         <button type="button" onClick={add} className="h-8 shrink-0 rounded-md border border-slate-300 px-2.5 text-xs text-slate-700 hover:bg-slate-50">＋ {t("เพิ่มลิงก์", "Add link")}</button>
       </div>
       {err && <p className="pt-1 text-xs text-rose-600">{err}</p>}
-      <TaskLinkList links={value.map((l) => ({ ...l, label: l.label || linkHost(l.url) }))} onRemove={(u) => onChange(value.filter((l) => l.url !== u))} className="mt-1.5" />
+      <TaskLinkList links={value} onRemove={(u) => onChange(value.filter((l) => l.url !== u))} className="mt-1.5" />
     </div>
   );
 }
@@ -446,6 +512,109 @@ function PromoteModal({ idea, onClose, onDone, onStale }: {
           </div>
         </div>
       </div>
+    </ERPModal>
+  );
+}
+
+/** แถวในกล่องรอคัด (ส่งมาจากกลุ่มไลน์) — คนส่ง · เวลา · รูป · ลิงก์ · ข้อความ · ปุ่มคัด */
+function InboxCard({ it, canEdit, busy, onOpenImages, onAccept, onMerge, onReject }: {
+  it: DesignIdea; canEdit: boolean; busy: boolean; onOpenImages: (i: number) => void; onAccept: () => void; onMerge: () => void; onReject: () => void;
+}) {
+  const t = useT();
+  const when = new Date(it.created_at);
+  const timeTxt = Number.isNaN(when.getTime()) ? "" : `${fmtIdeaDate(it.created_at)} ${when.toLocaleTimeString(tr("th-TH", "en-GB"), { hour: "2-digit", minute: "2-digit" })}`;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-medium text-emerald-700">{(it.sender_name || "?").slice(0, 1)}</span>
+        <span className="text-sm font-medium text-slate-800">{it.sender_name || t("ไม่ทราบชื่อ", "Unknown")}</span>
+        <span className="text-[11px] text-slate-400">{timeTxt}</span>
+        <span className="ml-auto truncate text-xs text-slate-500" title={it.name}>{it.name}</span>
+      </div>
+      {it.image_keys.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {it.image_keys.map((k, i) => (
+            <button key={k} type="button" onClick={() => onOpenImages(i)} className="cursor-zoom-in" title={t("กดเพื่อดูรูปเต็มจอ", "Open full screen")}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={ideaImageUrl(k, 240)} alt="" loading="lazy" className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+      {it.links.length > 0 && <TaskLinkList links={it.links} className="mb-1.5" />}
+      {it.text_body && <p className="mb-2 line-clamp-3 whitespace-pre-wrap break-words text-xs text-slate-600">{it.text_body}</p>}
+      {canEdit && (
+        <div className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={onAccept} disabled={busy}
+            className="inline-flex h-8 items-center gap-1 rounded-md bg-amber-500 px-2.5 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50">
+            <Icon value="i:bulb" className="text-[13px]" /> {t("เพิ่มเป็นไอเดีย", "Add as idea")}
+          </button>
+          <button type="button" onClick={onMerge} disabled={busy}
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <Icon value="i:link" className="text-[13px]" /> {t("รวมกับไอเดียที่มี", "Merge into idea")}
+          </button>
+          <button type="button" onClick={onReject} disabled={busy}
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2.5 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+            <Icon value="i:x" className="text-[13px]" /> {t("ไม่เอา", "Discard")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** รวมชุดรอคัด (หรือไอเดีย) เข้าไอเดียที่มีอยู่ — รูป/ลิงก์/ข้อ ๆ ต่อท้ายปลายทาง */
+function MergeModal({ source, targets, onClose, onDone, onStale }: {
+  source: DesignIdea; targets: DesignIdea[]; onClose: () => void; onDone: (target: DesignIdea) => void; onStale: () => void;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const [q, setQ] = useState("");
+  const [pick, setPick] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const list = targets.filter((x) => !q.trim() || `${x.name} ${x.brand_name ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const go = async () => {
+    if (!pick) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/design-ideas/${source.id}/merge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ into: pick }) });
+      const j = await res.json();
+      if (j.error) { if (res.status === 409) { toast.error(j.error); onStale(); return; } throw new Error(j.error); }
+      onDone(j.data as DesignIdea);
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("รวมไม่สำเร็จ", "Merge failed")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("รวมกับไอเดียที่มี", "Merge into an existing idea")}
+      description={t(`รูป ${source.image_keys.length} · ลิงก์ ${source.links.length} · ข้อ ${source.points.length} จาก "${source.name}" จะต่อท้ายไอเดียที่เลือก`, "Images, links and points are appended to the chosen idea")}
+      footer={<>
+        <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+        <button type="button" onClick={() => void go()} disabled={busy || !pick} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          {busy ? t("กำลังรวม…", "Merging…") : t("รวม", "Merge")}
+        </button>
+      </>}>
+      {targets.length === 0 ? (
+        <p className="py-6 text-center text-sm text-slate-500">{t("ยังไม่มีไอเดียที่เปิดอยู่ให้รวม — กด \"เพิ่มเป็นไอเดีย\" แทน", "No open ideas to merge into — add it as a new idea instead")}</p>
+      ) : (
+        <div className="space-y-2">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นชื่อไอเดีย", "Search ideas")} aria-label={t("ค้นชื่อไอเดีย", "Search ideas")}
+            className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="max-h-[50vh] space-y-1 overflow-y-auto">
+            {list.map((x) => (
+              <label key={x.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-sm ${pick === x.id ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                <input type="radio" name="merge-into" checked={pick === x.id} onChange={() => setPick(x.id)} className="h-4 w-4" />
+                {x.image_keys[0]
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={ideaImageUrl(x.image_keys[0], 120)} alt="" className="h-9 w-9 rounded object-cover" />
+                  : <span className="flex h-9 w-9 items-center justify-center rounded bg-slate-100 text-slate-300"><Icon value="i:photo" /></span>}
+                <span className="min-w-0 flex-1 truncate">{x.name}</span>
+                <span className="shrink-0 text-[11px] text-slate-400">{x.brand_name ?? t("ไม่มีแบรนด์", "No brand")}</span>
+              </label>
+            ))}
+            {list.length === 0 && <p className="py-4 text-center text-xs text-slate-400">{t("ไม่พบไอเดียที่ตรงกับคำค้น", "No matching ideas")}</p>}
+          </div>
+        </div>
+      )}
     </ERPModal>
   );
 }

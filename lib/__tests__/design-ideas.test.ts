@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanIdeaImageKeys, cleanIdeaLinks, cleanIdeaName, cleanIdeaPoints, ideaDetailHtml, linkHost, MAX_IDEA_POINTS } from "@/lib/design-ideas";
+import { cleanIdeaImageKeys, cleanIdeaLinks, cleanIdeaName, cleanIdeaPoints, ideaDetailHtml, ideaNameFromParts, ideaPartsFromText, linkHost, MAX_IDEA_POINTS } from "@/lib/design-ideas";
 
 describe("design ideas — ทำความสะอาดข้อมูล", () => {
   it("ชื่อ: ตัดช่องว่างซ้ำ · ยาวสุด 200", () => {
@@ -33,5 +33,19 @@ describe("design ideas — ทำความสะอาดข้อมูล",
   it("ชื่อเว็บของลิงก์", () => {
     expect(linkHost("https://www.tiktok.com/@a/video/1")).toBe("tiktok.com");
     expect(linkHost("ไม่ใช่ลิงก์")).toBe("ไม่ใช่ลิงก์");
+  });
+
+  it("ข้อความจากไลน์ → ลิงก์ + ข้อ ๆ", () => {
+    const r = ideaPartsFromText(["ลูกค้าชอบทรงนี้ https://www.pinterest.com/pin/1,", "- ขอสีดำ", "https://www.tiktok.com/@a/video/2", "", ""].join("\n"));
+    expect(r.links).toEqual([{ url: "https://www.pinterest.com/pin/1" }, { url: "https://www.tiktok.com/@a/video/2" }]);
+    expect(r.points).toEqual(["ลูกค้าชอบทรงนี้", "ขอสีดำ"]);
+    expect(ideaPartsFromText(null)).toEqual({ points: [], links: [] });
+  });
+
+  it("ชื่อตั้งต้นของไอเดียจากไลน์", () => {
+    expect(ideaNameFromParts(["กระเป๋าคาดอก"], [], "แอน")).toBe("กระเป๋าคาดอก");
+    expect(ideaNameFromParts([], [{ url: "https://www.pinterest.com/pin/1" }], "แอน")).toBe("ไอเดียจาก pinterest.com");
+    expect(ideaNameFromParts([], [], "แอน")).toBe("ไอเดียจาก แอน");
+    expect(ideaNameFromParts([], [], null)).toBe("ไอเดียจาก ไลน์");
   });
 });

@@ -12,7 +12,7 @@ type Rec = Record<string, unknown>;
 type Actor = { id: string | null; name: string | null };
 
 export const IDEA_TABLE = "design_ideas";
-export const IDEA_SELECT = "id, name, brand_id, points, links, image_keys, status, source, sender_name, created_by, created_by_name, created_at, updated_at, promoted_sheet_id, brand:brands!brand_id(name, color)";
+export const IDEA_SELECT = "id, name, brand_id, points, links, image_keys, status, source, sender_name, text_body, created_by, created_by_name, created_at, updated_at, promoted_sheet_id, brand:brands!brand_id(name, color)";
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
 
@@ -23,7 +23,7 @@ export function toDesignIdea(r: Rec): DesignIdea {
     brand_name: b?.name ?? null, brand_color: b?.color ?? null,
     points: cleanIdeaPoints(r.points), links: cleanIdeaLinks(r.links), image_keys: cleanIdeaImageKeys(r.image_keys),
     status: isIdeaStatus(r.status) ? r.status : "open", source: r.source === "line" ? "line" : "manual",
-    sender_name: str(r.sender_name), created_by: str(r.created_by), created_by_name: str(r.created_by_name),
+    sender_name: str(r.sender_name), text_body: str(r.text_body), created_by: str(r.created_by), created_by_name: str(r.created_by_name),
     created_at: String(r.created_at ?? ""), updated_at: String(r.updated_at ?? ""), promoted_sheet_id: str(r.promoted_sheet_id),
   };
 }

@@ -101,6 +101,7 @@ export function DesignDashboard() {
   })), [sheets]);
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery" | "ideas">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี) / ไอเดีย (ยังไม่ใช่งานจริง)
+  const ideasLinkRef = useRef(false);   // เปิดด้วยลิงก์จากบอทไลน์ ?ideas=1 → มุมมองไอเดีย กล่องรอคัด (ไม่ทับค่าที่จำไว้)
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
   // ── รูปแบบจอ (ของกลาง device-view): จอคอม / แท็บเล็ต / มือถือ — อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) ──
   // `layout` = สิ่งที่ต้องเรนเดอร์จริง · เลือกดูแบบมือถือบนจอคอม → DevicePreviewFrame ครอบเป็นกรอบเครื่อง + QR ให้สแกนเปิดบนเครื่องจริง
@@ -154,7 +155,7 @@ export function DesignDashboard() {
   // จำมุมมองที่เลือกไว้รายคน (บอร์ด/การ์ดรูปใหญ่)
   useEffect(() => {
     apiFetch("/api/user-prefs?key=design_dashboard_view_mode").then((r) => r.json())
-      .then((j) => { const v = j?.value; if (v === "board" || v === "gallery" || v === "ideas") setViewMode(v); })
+      .then((j) => { const v = j?.value; if (!ideasLinkRef.current && (v === "board" || v === "gallery" || v === "ideas")) setViewMode(v); })
       .catch(() => {});
   }, []);
   // คอลัมน์สถานะที่ซ่อนบนบอร์ด — จำรายคน (user_ui_prefs) · ยังไม่เคยตั้ง = ค่าเริ่มต้น DEFAULT_HIDDEN_COLS
@@ -220,6 +221,7 @@ export function DesignDashboard() {
     const id = sp.get("open");
     if (id) setOpenSheetId(id);   // เปิดด้วยลิงก์ ?open=ID (refresh/copy link แล้วยังเปิดงานเดิม)
     if (sp.get("inbox") === "1") setInboxOpen(true);   // ลิงก์จากบอทไลน์ "ดูในระบบ" → เปิดกล่องงานจากไลน์
+    if (sp.get("ideas") === "1") { ideasLinkRef.current = true; setViewMode("ideas"); }   // ลิงก์จากบอทกลุ่มส่งไอเดีย → กล่องรอคัด
     // ?convert=ID (แท็บ LINE ในศูนย์แจ้งเตือน "เปิดใบงาน") → เปิดฟอร์มสร้างใบงานจากร่างนั้นเลย · ไม่เจอ/เปิดไปแล้ว = ค้างที่กล่องจากไลน์
     const convertId = sp.get("convert");
     if (convertId) {
@@ -837,7 +839,7 @@ export function DesignDashboard() {
 
               {viewMode === "ideas" ? (
                 /* ── 💡 ไอเดีย (ยังไม่ใช่งานจริง) — ใช้ช่องค้นหา + แบรนด์ที่เลือกในแถบซ้ายร่วมกัน · เริ่มงานจริงแล้วเปิดใบงานใหม่ให้ ── */
-                <IdeasView canEdit={canEdit} search={search} brandId={selectedBrand ? selectedBrand.key : null}
+                <IdeasView canEdit={canEdit} isAdmin={isAdmin} initialView={ideasLinkRef.current ? "inbox" : "all"} search={search} brandId={selectedBrand ? selectedBrand.key : null}
                   onPromoted={(id) => { refreshDashboard(); openDetail(id); }} />
               ) : loading ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

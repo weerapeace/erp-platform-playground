@@ -10,6 +10,15 @@
 - พักไว้ / เก็บ (กู้คืนได้ — **ไม่มีลบทิ้งจริง**)
 - เริ่มทำงานจริง = ป๊อปยืนยัน (บอกว่าระบบจะทำอะไร + เลือกเช็กลิสต์ ⏳ ได้ ตั้งต้น = Checklist งานใหม่) → ได้เลข DS → เปิดใบงานใหม่ให้
 
+## ไอเดียจากกลุ่มไลน์ "ส่งไอเดีย" (กล่องรอคัด)
+- กลุ่มไลน์ใหม่ (slot `design_idea` · ลงทะเบียนใน `lib/line-registry.ts` ระบบครีเอทีฟ) — ใครในกลุ่มก็ส่งรูป / ลิงก์ / ข้อความได้
+- ของคนเดิมภายใน 5 นาที = ชุดเดียว (RPC `design_idea_line_ingest` · advisory lock · กันไลน์ส่งซ้ำ) · ขึ้นต้น "ไอเดียใหม่" = เปิดชุดใหม่
+- จบชุด (เงียบ 6 วิ) → แตกข้อความเป็นลิงก์ + ข้อ ๆ (`ideaPartsFromText`) · ชื่อ = ข้อแรก / ชื่อเว็บของลิงก์แรก / AI อ่านรูปแรก (เฉพาะชุดที่มีแต่รูป · บริการ `ai.design_idea` ในศูนย์บริการที่เสียเงิน) → บอทตอบครั้งเดียว (reply ไม่กินโควตา) · ส่งเพิ่ม = ตอบอัปเดตเมื่อรูป+ลิงก์เพิ่ม
+- กันของปลอม: รูปต้องดึงจากไลน์ได้ · ข้อความต้องเป็นสมาชิกกลุ่มจริง
+- หน้าไอเดีย → ตัวกรอง "รอคัดจากไลน์" (ลิงก์จากบอท `?ideas=1` เปิดตรงนี้) · ปุ่มต่อชุด: **เพิ่มเป็นไอเดีย** (ป๊อปเดิม แก้ชื่อ/แบรนด์/ข้อ/ลิงก์/รูปก่อน → status open) · **รวมกับไอเดียที่มี** (`POST /api/design-ideas/[id]/merge` รูป/ลิงก์/ข้อต่อท้าย · ต้นทาง merged) · **ไม่เอา** (archived กู้คืนได้)
+- แอดมินตั้งกลุ่มได้ที่แถบบนกล่องรอคัด (ของกลาง LineGroupSetup → ศูนย์จัดการ LINE) · ⚠️ ต้องสร้างกลุ่มไลน์ + เชิญบอทเข้ากลุ่มเอง แล้วพิมพ์ในกลุ่ม 1 ครั้ง ก่อนกด "ใช้กลุ่มนี้"
+- ไฟล์: `lib/design-idea-line.ts` · webhook กลาง `app/api/china-pay/line-webhook` (งานที่ 4) · migration `202611121500_design_ideas_line.sql`
+
 ## เข้าตรงไหน
 Design Dashboard → เมนู "มุมมอง" → "ไอเดีย (ยังไม่ใช่งานจริง)" · มือถือ = ปุ่มรูปหลอดไฟข้างช่องค้นหา (จำมุมมองรายคน `design_dashboard_view_mode`)
 
@@ -24,12 +33,12 @@ Design Dashboard → เมนู "มุมมอง" → "ไอเดีย (
 ## ไฟล์
 - ตาราง `design_ideas` (migration `202611121400_design_ideas.sql` · RLS เปิด ไม่มี policy — อ่าน/เขียนผ่าน API เท่านั้น)
 - ค่ากลาง/ตัวทำความสะอาด `lib/design-ideas.ts` (เทสต์ `lib/__tests__/design-ideas.test.ts`) · ฝั่งเซิร์ฟเวอร์ `lib/design-ideas-server.ts`
-- API `/api/design-ideas` (GET รายการ · POST จด) · `/api/design-ideas/[id]` (PATCH แก้ / พัก / เก็บ / กู้คืน)
+- API `/api/design-ideas` (GET รายการ · POST จด · ?setup=1 แถบตั้งกลุ่มไลน์) · `/api/design-ideas/[id]` (PATCH แก้ / พัก / เก็บ / กู้คืน / เพิ่มเป็นไอเดียจากรอคัด) · `/api/design-ideas/[id]/merge`
 - หน้าจอ `components/design-dashboard/ideas-view.tsx` (โหลดเมื่อเปิดมุมมองนี้)
 
 ## สิทธิ์ / ประวัติ
 - ดู = `products.view` · จด/แก้/พัก/เก็บ/เริ่มงาน = `products.edit`
-- ประวัติ (audit_logs) entity `design_idea`: create · update · pause · archive · restore · promote (มี changes จากอะไรเป็นอะไร)
+- ประวัติ (audit_logs) entity `design_idea`: create · update · pause · archive · restore · accept (จากรอคัด) · reject (ไม่เอา) · merge / merge_in · promote (มี changes จากอะไรเป็นอะไร)
 
 ## ข้อจำกัด
 - รูปที่อัปแล้วเอาออกจากไอเดีย ไฟล์ยังอยู่ใน R2 (ไม่ลบทิ้ง — เหมือนช่องแนบรูปอื่นที่ใช้ ImageAttachKeys)

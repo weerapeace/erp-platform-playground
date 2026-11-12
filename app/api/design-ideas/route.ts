@@ -1,7 +1,8 @@
 /**
  * ไอเดียงานออกแบบ (หน้า "ไอเดีย" ใน Design Dashboard)
  *
- * GET  /api/design-ideas            → ไอเดียทั้งหมดที่ยังไม่เริ่มงานจริง (เปิด · พักไว้ · เก็บแล้ว) ใหม่สุดก่อน · ≤500
+ * GET  /api/design-ideas            → ไอเดียทั้งหมดที่ยังไม่เริ่มงานจริง (รอคัดจากไลน์ · เปิด · พักไว้ · เก็บแล้ว) ใหม่สุดก่อน · ≤500
+ * GET  /api/design-ideas?setup=1    → แถบตั้งกลุ่มไลน์ "ส่งไอเดีย" (แอดมิน · ของกลาง loadLineGroupSetup)
  * POST /api/design-ideas            → จดไอเดียใหม่ { name, brand_id?, points?, links?, image_keys? }
  * เริ่มทำงานจริง = POST /api/design-sheets { idea_id } (ออกเลข DS + ย้ายรูป) · แก้/พัก/เก็บ = PATCH /api/design-ideas/[id]
  *
@@ -15,6 +16,8 @@ import { writeAudit } from "@/lib/audit";
 import { requestActor } from "@/lib/request-actor";
 import { cleanIdeaImageKeys, cleanIdeaLinks, cleanIdeaName, cleanIdeaPoints, type DesignIdea } from "@/lib/design-ideas";
 import { IDEA_SELECT, IDEA_TABLE, toDesignIdea } from "@/lib/design-ideas-server";
+import { loadLineGroupSetup } from "@/lib/line-intake";
+import { DESIGN_IDEA_SLOT } from "@/lib/design-idea-line";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,10 +25,14 @@ export const revalidate = 0;
 const UUID = /^[0-9a-f-]{36}$/i;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
+  if (new URL(request.url).searchParams.has("setup")) {
+    const deniedAdmin = await guardApi(request, "admin.users"); if (deniedAdmin) return deniedAdmin;
+    return NextResponse.json({ ...(await loadLineGroupSetup(admin, DESIGN_IDEA_SLOT, "any")), error: null });
+  }
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await admin.from(IDEA_TABLE).select(IDEA_SELECT)
-    .in("status", ["open", "paused", "archived", "promoting"])
+    .in("status", ["inbox", "open", "paused", "archived", "promoting"])
     .order("created_at", { ascending: false }).limit(500);
   if (error) return NextResponse.json({ data: [], error: "โหลดไอเดียไม่สำเร็จ ลองใหม่อีกครั้ง" }, { status: 500 });
   const items: DesignIdea[] = ((data ?? []) as Record<string, unknown>[]).map(toDesignIdea);

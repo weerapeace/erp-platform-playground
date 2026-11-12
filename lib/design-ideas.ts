@@ -4,14 +4,22 @@
  *
  * ตาราง design_ideas (migration 202611121400) · API /api/design-ideas · server lib/design-ideas-server.ts
  * เริ่มทำงานจริง = POST /api/design-sheets { idea_id, detail: ideaDetailHtml(...) } → ได้เลข DS + รูปย้ายไปแกลเลอรีใบงาน
+ * จากไลน์ (กลุ่ม "ส่งไอเดีย" slot design_idea · lib/design-idea-line.ts) = status inbox (รอคัด) → เพิ่มเป็นไอเดีย (open) / รวม (merged) / ไม่เอา (archived)
  * doc: docs/design-ideas.md
  */
-import { normalizeTaskLinks, type TaskLink } from "@/lib/record-tasks";
+import { linkHost, normalizeTaskLinks, type TaskLink } from "@/lib/record-tasks";
 
-export const IDEA_STATUSES = ["open", "paused", "archived", "promoting", "promoted"] as const;
+/** ชื่อเว็บของลิงก์ — ใช้ตัวกลางของเช็กลิสต์ (lib/record-tasks) */
+export { linkHost };
+
+export const IDEA_STATUSES = ["inbox", "open", "paused", "archived", "promoting", "promoted", "merged"] as const;
 export type IdeaStatus = (typeof IDEA_STATUSES)[number];
 /** สถานะที่คนตั้งเองได้ (promoting/promoted = ระบบตั้งตอนเริ่มงานจริง) */
 export const IDEA_SETTABLE: readonly IdeaStatus[] = ["open", "paused", "archived"];
+/** แก้ได้ (รวมรอคัดจากไลน์) — promoting/promoted/merged แก้ไม่ได้ */
+export const IDEA_EDITABLE: readonly IdeaStatus[] = ["inbox", "open", "paused", "archived"];
+/** รวมเข้าได้ (ปลายทาง) */
+export const IDEA_MERGE_TARGET: readonly IdeaStatus[] = ["open", "paused"];
 /** เริ่มทำงานจริงได้เฉพาะไอเดียที่ยังเปิด/พักไว้ (เก็บแล้วต้องกู้คืนก่อน) */
 export const IDEA_PROMOTABLE: readonly IdeaStatus[] = ["open", "paused"];
 
@@ -34,6 +42,8 @@ export type DesignIdea = {
   status: IdeaStatus;
   source: "manual" | "line";
   sender_name: string | null;
+  /** ข้อความดิบจากไลน์ (รอคัด) */
+  text_body: string | null;
   created_by: string | null;
   created_by_name: string | null;
   created_at: string;
@@ -88,7 +98,20 @@ export function ideaDetailHtml(points: string[], links: TaskLink[]): string {
   return parts.join("");
 }
 
-/** ชื่อเว็บสั้น ๆ ของลิงก์ (ใช้บนชิป) */
-export function linkHost(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
+const URL_RE = /https?:\/\/[^\s<>"']+/gi;
+
+/** ข้อความจากไลน์ → ลิงก์ (ทุก URL) + ข้อ ๆ (แต่ละบรรทัดที่เหลือหลังตัดลิงก์ออก) */
+export function ideaPartsFromText(text: string | null | undefined): { points: string[]; links: TaskLink[] } {
+  const raw = String(text ?? "");
+  const links = cleanIdeaLinks((raw.match(URL_RE) ?? []).map((u) => u.replace(/[),.;!?]+$/, "")));
+  const points = cleanIdeaPoints(raw.split(/\r?\n/).map((l) => l.replace(URL_RE, "").replace(/^[\s•\-*·]+/, "").trim()));
+  return { points, links };
 }
+
+/** ชื่อตั้งต้นของไอเดียจากไลน์ (ก่อน AI ตั้ง/คนแก้): ข้อแรก → ชื่อเว็บของลิงก์แรก → "ไอเดียจาก <คนส่ง>" */
+export function ideaNameFromParts(points: string[], links: TaskLink[], sender: string | null | undefined): string {
+  if (points[0]) return cleanIdeaName(points[0].slice(0, 60));
+  if (links[0]) return cleanIdeaName(`ไอเดียจาก ${linkHost(links[0].url)}`);
+  return cleanIdeaName(`ไอเดียจาก ${String(sender ?? "").trim() || "ไลน์"}`);
+}
+

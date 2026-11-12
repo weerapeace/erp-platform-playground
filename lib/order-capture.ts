@@ -766,7 +766,7 @@ export async function confirmCapture(admin: Admin, cap: CaptureRow, input: Confi
 // ---------------------------------------------------------------- ตั้งกลุ่มไลน์ (หน้าแอดมิน)
 
 /** กลุ่มที่ปกติมีรูปอื่นเยอะ — ถ้าใช้รับรูปคำสั่งซื้อ AI จะอ่านทุกรูป (เตือนในหน้าตั้งค่า) */
-const IMAGE_HEAVY_SLOTS = ["bills", "transfers", "creative", "qc", "production", "design_intake"];
+const IMAGE_HEAVY_SLOTS = ["bills", "transfers", "creative", "qc", "production", "design_intake", "design_idea"];
 
 /** กลุ่มไลน์ที่ระบบรู้จัก (ของกลาง lib/line-intake) — มุมของ slot ส่งรูปคำสั่งซื้อ */
 export function loadLineGroupSetup(admin: Admin) {

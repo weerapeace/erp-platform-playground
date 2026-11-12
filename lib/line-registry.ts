@@ -15,7 +15,7 @@
 export type LineSlotKey =
   | "production" | "qc"
   | "purchase_request" | "purchase_order" | "goods_receipt" | "purchase_capture"
-  | "creative" | "design_intake" | "bills" | "transfers" | "webshop";
+  | "creative" | "design_intake" | "design_idea" | "bills" | "transfers" | "webshop";
 
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
 
@@ -39,6 +39,7 @@ export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   purchase_capture: { key: "purchase_capture", label: "กลุ่มส่งรูปคำสั่งซื้อ (AI อ่าน)", icon: "💬" },
   creative:        { key: "creative",         label: "กลุ่มครีเอทีฟ",            icon: "🎨" },
   design_intake:    { key: "design_intake",    label: "กลุ่มส่งงานออกแบบ (เข้ากล่อง Design Dashboard)", icon: "📐" },
+  design_idea:      { key: "design_idea",      label: "กลุ่มส่งไอเดีย (เข้ากล่องรอคัด หน้าไอเดีย)", icon: "💡" },
   bills:            { key: "bills",            label: "กลุ่มบิลจีน",              icon: "🧾" },
   transfers:        { key: "transfers",        label: "กลุ่มโอนเงิน/เรต",         icon: "💱" },
   webshop:          { key: "webshop",          label: "กลุ่มเว็บร้าน (ออเดอร์ออนไลน์)", icon: "🛍" },
@@ -73,7 +74,7 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
     ],
   },
   {
-    key: "creative", label: "ครีเอทีฟ", icon: "🎨", slots: ["creative", "design_intake"],
+    key: "creative", label: "ครีเอทีฟ", icon: "🎨", slots: ["creative", "design_intake", "design_idea"],
     // ส่งรูปจากกระดาน = "กดส่งเอง" (ไม่มีสวิตช์) · design_intake = กลุ่มรับงานออกแบบเข้าระบบ
     // key = แม่แบบข้อความเดียวกับ pushTasksLineTpl (lib/creative-tasks-server) · ยังไม่ตั้งกลุ่มครีเอทีฟ = ส่งกลุ่มหลัก
     events: [

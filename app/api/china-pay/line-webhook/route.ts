@@ -9,6 +9,7 @@
  * งานที่ 2 "คำสั่งซื้อจากไลน์": รูปที่ส่งในกลุ่ม slot purchase_capture → ของกลาง lib/order-capture
  *  (เก็บรูป → AI อ่าน → กล่องพักรอคนยืนยัน → ตอบกลับในกลุ่ม) · ทำใน after() เพื่อตอบ 200 ให้ LINE ทันที
  *
+ * งานที่ 4 "ไอเดียจากไลน์": รูป/ลิงก์/ข้อความในกลุ่ม slot design_idea → กล่องรอคัดในหน้าไอเดีย (lib/design-idea-line)
  * งานที่ 3 "งานออกแบบจากไลน์": ข้อความ+รูปในกลุ่ม slot design_intake → ของกลาง lib/design-line-inbox
  *  (ของคนเดิมใน 5 นาที = ร่างเดียว → AI เดาชื่อ/แบรนด์/วันส่ง → กล่อง "จากไลน์" บน Design Dashboard → ตอบกลับในกลุ่ม)
  *
@@ -28,6 +29,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { handleOrderImageEvents, pickOrderImageEvents, type LineEvent } from "@/lib/order-capture";
 import { handleDesignEvents, pickDesignEvents } from "@/lib/design-line-inbox";
+import { DESIGN_IDEA_SLOT, handleIdeaEvents, pickIdeaEvents } from "@/lib/design-idea-line";
 import { MAIN_BOT, isLineBotKey, lineBot, lineBotKeyFor, lineConfigForBot, type LineBotView, type LineConfig } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
@@ -106,6 +108,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const designEvents = lineBotKeyFor(cur, "design_intake") === bot.key ? pickDesignEvents(botCfg, events) : [];
     if (designEvents.length > 0) {
       after(() => handleDesignEvents(admin, botCfg, designEvents).catch((e) => console.error("[line-webhook] design inbox", e)));
+    }
+
+    // งานที่ 4 "ไอเดียจากไลน์": กลุ่ม slot design_idea → กล่องรอคัดในหน้าไอเดีย (lib/design-idea-line)
+    const ideaEvents = lineBotKeyFor(cur, DESIGN_IDEA_SLOT) === bot.key ? pickIdeaEvents(botCfg, events) : [];
+    if (ideaEvents.length > 0) {
+      after(() => handleIdeaEvents(admin, botCfg, ideaEvents).catch((e) => console.error("[line-webhook] idea inbox", e)));
     }
   } catch { /* best-effort */ }
 

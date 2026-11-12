@@ -1,7 +1,8 @@
 /**
  * PATCH /api/design-ideas/[id] → แก้ไอเดีย { name?, brand_id?, points?, links?, image_keys?, status? }
  *   status: open (เอากลับมา/กู้คืน) · paused (พักไว้) · archived (เก็บ — กู้คืนได้ ไม่มีการลบทิ้งจริง)
- *   ไอเดียที่เริ่มทำงานจริงแล้ว (promoting/promoted) แก้ไม่ได้
+ *   รอคัดจากไลน์ (inbox) → status open = "เพิ่มเป็นไอเดีย" · archived = "ไม่เอา"
+ *   ไอเดียที่เริ่มทำงานจริงแล้ว / รวมไปแล้ว (promoting/promoted/merged) แก้ไม่ได้
  * ของกลาง: guardApi (products.edit) · writeAudit + auditDiff (จากอะไรเป็นอะไร)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { requestActor } from "@/lib/request-actor";
-import { cleanIdeaImageKeys, cleanIdeaLinks, cleanIdeaName, cleanIdeaPoints, IDEA_SETTABLE } from "@/lib/design-ideas";
+import { cleanIdeaImageKeys, cleanIdeaLinks, cleanIdeaName, cleanIdeaPoints, IDEA_EDITABLE, IDEA_SETTABLE } from "@/lib/design-ideas";
 import { IDEA_SELECT, IDEA_TABLE, toDesignIdea } from "@/lib/design-ideas-server";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { data: cur } = await admin.from(IDEA_TABLE).select("id, name, brand_id, points, links, image_keys, status").eq("id", id).maybeSingle();
   if (!cur) return NextResponse.json({ error: "ไม่พบไอเดีย" }, { status: 404 });
   const before = cur as Record<string, unknown>;
-  if (!(IDEA_SETTABLE as readonly unknown[]).includes(before.status)) return NextResponse.json({ error: "ไอเดียนี้เริ่มทำงานจริงไปแล้ว แก้ไม่ได้" }, { status: 409 });
+  if (!(IDEA_EDITABLE as readonly unknown[]).includes(before.status)) return NextResponse.json({ error: "ไอเดียนี้เริ่มทำงานจริงหรือถูกรวมไปแล้ว แก้ไม่ได้" }, { status: 409 });
 
   const actor = await requestActor(supabaseFromRequest(request));
   const patch: Record<string, unknown> = {};
@@ -59,9 +60,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ data: data ? toDesignIdea(data as Record<string, unknown>) : null, error: null });
   }
   patch.updated_at = new Date().toISOString();
-  const { data, error } = await admin.from(IDEA_TABLE).update(patch).eq("id", id).in("status", IDEA_SETTABLE as unknown as string[]).select(IDEA_SELECT).maybeSingle();
+  const { data, error } = await admin.from(IDEA_TABLE).update(patch).eq("id", id).in("status", IDEA_EDITABLE as unknown as string[]).select(IDEA_SELECT).maybeSingle();
   if (error || !data) return NextResponse.json({ error: "บันทึกไม่สำเร็จ ลองโหลดใหม่อีกครั้ง" }, { status: 409 });
-  const action = "status" in patch ? (patch.status === "archived" ? "archive" : before.status === "archived" ? "restore" : patch.status === "paused" ? "pause" : "update") : "update";
+  const action = "status" in patch
+    ? (patch.status === "archived" ? (before.status === "inbox" ? "reject" : "archive") : before.status === "inbox" ? "accept" : before.status === "archived" ? "restore" : patch.status === "paused" ? "pause" : "update")
+    : "update";
   await writeAudit(admin, { action, entityType: "design_idea", entityId: id, actorId: actor.id, actorName: actor.name, metadata: { name: patch.name ?? before.name, changes } });
   return NextResponse.json({ data: toDesignIdea(data as Record<string, unknown>), error: null });
 }
