@@ -7,16 +7,19 @@
  * ค่าที่ใช้บ่อย = ค่ากลาง erp_lookups ชนิด presetType (⚙️ ข้างปุ่มลัด เปิดป๊อปแก้/ลากเรียง)
  * ผู้รับผิดชอบ = ของกลาง UserPicker (เฉพาะคนที่ยังทำงานอยู่) · ใส่ชื่อแล้วกระดิ่งเด้งบอกคนนั้น + เห็นใน "งานของคุณ" ของป๊อปตอนเข้า ERP
  * ลิงก์ต่อข้อ (🔗 · หลายลิงก์ + ชื่อกำกับไม่บังคับ) — ค่าที่ใช้บ่อยที่เปิดสวิตช์ 🔗 ไว้ (เช่น "ซื้อของ") กดแล้วเปิดช่องวางลิงก์ให้เลย
- * ใช้แล้วที่: ใบงานออกแบบ "⏳ รออะไรอยู่" (lib/design-sheet-waiting) · doc: docs/record-tasks.md
+ * ใช้แล้วที่: ใบงานออกแบบ "⏳ รออะไรอยู่" (lib/design-sheet-waiting) · แผนงานทีม "เช็กลิสต์ในงาน" (lib/team-plan TEAM_PLAN_CHECK) · doc: docs/record-tasks.md
+ * แม่แบบหลายข้อ (templateType · 2026-11-12) = ค่ากลาง erp_lookups name = ชื่อแม่แบบ · metadata.items = ข้อ → "ใส่จากแม่แบบ" / "บันทึกเป็นแม่แบบ"
+ * ป้ายบนการ์ด variant="progress" = "เสร็จ 2/4" + แถบความคืบหน้า (กดแล้วเด้งกล่องติ๊ก) · ค่าเริ่ม "waiting" = แถวสิ่งที่รอแบบเดิม
  */
 import { useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 import { FloatingDropdown } from "@/components/floating-dropdown";
-import { LookupValuesEditor, useLookupRows, type LookupFlag } from "@/components/lookup-values-editor";
+import { LookupValuesEditor, refreshLookup, useLookupRows, type LookupFlag, type LookupRow } from "@/components/lookup-values-editor";
+import { Icon } from "@/components/icon";
 import { UserPicker, useRecentUsers } from "@/components/pickers";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, PRESET_AUTO_NEW, summarizeTasks, taskTitleWithLinks, taskWithWho, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
+import { checklistProgress, isTaskDone, MAX_TASK_LINKS, parseTaskLinkUrl, PRESET_AUTO_NEW, summarizeTasks, taskTitleWithLinks, taskWithWho, TEMPLATE_MAX_ITEMS, templateItems, templateTitlesToAdd, type ChecklistSummary, type TaskLink } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { relTime, useRecordTasks } from "./use-record-tasks";
 import { TaskLinkList, TaskLinksButton } from "./task-links";
@@ -112,7 +115,9 @@ function LinkAdder({ existing, onAdd, onClose }: { existing: TaskLink[]; onAdd: 
 }
 
 export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdit, onChange, presetType = null, label = null,
-  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true, autoNew = false }: Common & {
+  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true, autoNew = false, templateType = null }: Common & {
+  /** ชนิดค่ากลางของ "แม่แบบหลายข้อ" (null = ไม่มีแถบแม่แบบ) — name = ชื่อแม่แบบ · metadata.items = ข้อในแม่แบบ */
+  templateType?: string | null;
   /** ชนิดค่ากลางของปุ่มลัด (null = ไม่มีปุ่มลัด) */
   presetType?: string | null;
   /** ป๊อปตั้งค่าปุ่มลัดมีสวิตช์ "ใส่ให้เองตอนสร้างใหม่" — ใส่เฉพาะเรคคอร์ดที่ API สร้างเรียก seedChecklistOnCreate แล้ว */
@@ -135,6 +140,39 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  // แม่แบบหลายข้อ
+  const tplRows = useLookupRows(templateType);
+  const [tplName, setTplName] = useState<string | null>(null);   // null = ไม่ได้กำลังตั้งชื่อแม่แบบ
+  const [tplOpen, setTplOpen] = useState(false);
+  const toastT = useToast();
+  const applyTemplate = async (r: LookupRow) => {
+    const todo = templateTitlesToAdd(items.map((i) => i.title), templateItems(r.metadata));
+    if (!todo.length) { toastT.info(`ข้อในแม่แบบ "${r.name}" มีครบแล้ว`); return; }
+    setBusy(true);
+    let n = 0;
+    for (const t of todo) { if (await add(t)) n++; }   // ทีละข้อ = ลำดับตามแม่แบบ
+    setBusy(false);
+    if (n) toastT.success(`ใส่จากแม่แบบ "${r.name}" แล้ว ${n} ข้อ`);
+  };
+  const saveTemplate = async () => {
+    const name = (tplName ?? "").trim().slice(0, 80);
+    if (!name || !templateType) { toastT.error("ตั้งชื่อแม่แบบก่อน"); return; }
+    const list = items.map((i) => i.title.trim()).filter(Boolean).slice(0, TEMPLATE_MAX_ITEMS);
+    if (!list.length) { toastT.error("ยังไม่มีข้อให้บันทึกเป็นแม่แบบ"); return; }
+    const same = tplRows.find((r) => r.name.trim() === name);
+    setBusy(true);
+    try {
+      const res = same
+        ? await apiFetch(`/api/lookups/${same.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ metadata: { ...same.metadata, items: list } }) })
+        : await apiFetch("/api/lookups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lookup_type: templateType, name, metadata: { items: list }, sort_order: tplRows.length }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกแม่แบบไม่สำเร็จ");
+      refreshLookup(templateType);
+      setTplName(null);
+      toastT.success(same ? `อัปเดตแม่แบบ "${name}" แล้ว (${list.length} ข้อ)` : `บันทึกแม่แบบ "${name}" แล้ว (${list.length} ข้อ)`);
+    } catch (e) { toastT.error(e instanceof Error ? e.message : "บันทึกแม่แบบไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
   const [showDone, setShowDone] = useState(false);
   const [presetOpen, setPresetOpen] = useState(false);
   const [pickFor, setPickFor] = useState<string | null>(null);   // id ข้อที่กำลังเลือกคน · "new" = ข้อที่กำลังจะเพิ่ม
@@ -230,6 +268,30 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
               className="ml-auto rounded px-1 text-[11px] text-slate-400 hover:text-blue-600">⚙️ ตั้งค่า</button>
           </div>
         )}
+        {canEdit && templateType && (
+          <div className="flex flex-wrap items-center gap-1.5 px-1 pb-0.5 pt-1.5">
+            <span className="text-[11px] text-slate-400"><Icon name="documents" /> แม่แบบ:</span>
+            <select value="" disabled={busy || tplRows.length === 0} aria-label="ใส่จากแม่แบบ"
+              onChange={(e) => { const r = tplRows.find((x) => x.id === e.target.value); if (r) void applyTemplate(r); }}
+              className="h-7 max-w-[14rem] rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 disabled:opacity-60">
+              <option value="">{tplRows.length ? "ใส่จากแม่แบบ…" : "ยังไม่มีแม่แบบ"}</option>
+              {tplRows.map((r) => <option key={r.id} value={r.id}>{r.name} ({templateItems(r.metadata).length} ข้อ)</option>)}
+            </select>
+            {items.length > 0 && (tplName === null
+              ? <button type="button" onClick={() => setTplName("")} disabled={busy} title="เก็บข้อทั้งหมดในเช็กลิสต์นี้ไว้ใช้กับงานอื่น (ชื่อซ้ำ = บันทึกทับ)"
+                  className="h-7 rounded-md border border-dashed border-slate-300 px-2 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700"><Icon name="save" /> บันทึกเป็นแม่แบบ</button>
+              : <span className="flex items-center gap-1">
+                  <input autoFocus value={tplName} maxLength={80} placeholder="ชื่อแม่แบบ เช่น ลงรูปเว็บไซต์" aria-label="ชื่อแม่แบบ"
+                    onChange={(e) => setTplName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveTemplate(); } if (e.key === "Escape") setTplName(null); }}
+                    className="h-7 w-44 rounded-md border border-blue-300 px-1.5 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  <button type="button" onClick={() => void saveTemplate()} disabled={busy} className="h-7 rounded-md bg-blue-600 px-2 text-[11px] text-white hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+                  <button type="button" onClick={() => setTplName(null)} className="h-7 px-1 text-[11px] text-slate-400 hover:text-slate-700">ยกเลิก</button>
+                </span>)}
+            {tplRows.length > 0 && <button type="button" onClick={() => setTplOpen(true)} title="เปลี่ยนชื่อ · ลากเรียง · เอาแม่แบบที่ไม่ใช้ออก"
+              className="ml-auto rounded px-1 text-[11px] text-slate-400 hover:text-blue-600"><Icon name="settings" /> จัดการแม่แบบ</button>}
+          </div>
+        )}
         {doneItems.length > 0 && (
           <div className="mt-1 border-t border-slate-100 pt-0.5">
             <button type="button" onClick={() => setShowDone((s) => !s)} className="px-1.5 py-0.5 text-[11px] text-slate-500 hover:text-slate-800">
@@ -239,6 +301,8 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
           </div>
         )}
       </div>
+      {templateType && <LookupValuesEditor lookupType={templateType} open={tplOpen} onClose={() => setTplOpen(false)} title="แม่แบบเช็กลิสต์"
+        description="กดชื่อเพื่อเปลี่ยนชื่อ · ลากเรียง · เอาออก = ไม่โชว์ในรายการ (เรียกคืนได้ที่หน้าค่ากลาง) · แก้ข้อในแม่แบบ = ทำเช็กลิสต์ในงานใหม่แล้วกด บันทึกเป็นแม่แบบ ด้วยชื่อเดิม" />}
       {presetType && <LookupValuesEditor lookupType={presetType} open={presetOpen} onClose={() => setPresetOpen(false)} title={presetTitle}
         flags={autoNew ? [...PRESET_FLAGS, AUTO_NEW_FLAG] : PRESET_FLAGS}
         description={`เพิ่ม · กดชื่อเพื่อแก้ · ลากเรียงลำดับ · 🔗 = กดแล้วเปิดช่องวางลิงก์ให้เลย${autoNew ? " · ใบใหม่ = ใส่ข้อนี้ให้เองตอนสร้างใบใหม่" : ""} · ใช้ร่วมกันทั้งทีม`} />}
@@ -251,9 +315,11 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
  *  ติ๊กได้ = canEdit หรือเป็นผู้รับผิดชอบข้อนั้น (กฎเดียวกับ PATCH /api/record-tasks/[id]) */
 const CHIP_ROWS = 3;
 type ChipRow = { id: string; title: string; who: string | null; aid: string | null; links: TaskLink[] };
-export function RecordChecklistChip({ moduleKey, recordType = null, recordId, canEdit, onChange, summary }: Common & {
+export function RecordChecklistChip({ moduleKey, recordType = null, recordId, canEdit, onChange, summary, variant = "waiting" }: Common & {
   /** สรุปจาก API รายการ (ไม่ต้องยิงทีละการ์ด) */
   summary: ChecklistSummary | null | undefined;
+  /** "waiting" (ค่าเริ่ม) = แถวสิ่งที่รอ ติ๊กบนการ์ดได้ · "progress" = ป้ายเล็ก "เสร็จ 2/4" + แถบความคืบหน้า กดแล้วเด้งกล่องติ๊ก (การ์ดสั้นเท่าเดิม) */
+  variant?: "waiting" | "progress";
 }) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -264,6 +330,25 @@ export function RecordChecklistChip({ moduleKey, recordType = null, recordId, ca
   if (!summary || (summary.open.length === 0 && summary.done === 0 && !open && doneLocal.length === 0)) return null;
   // กันคลิก/พิมพ์ในแถบและกล่อง (portal) ไหลไปเปิดการ์ด / ลากการ์ด
   const stop = (e: SyntheticEvent) => e.stopPropagation();
+
+  // ── ป้ายความคืบหน้า (แผนงานทีม) ──
+  if (variant === "progress") {
+    const p = checklistProgress(summary);
+    const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+    return (
+      <span className="inline-flex" onClick={stop} onKeyDown={stop} onMouseDown={stop} onPointerDown={stop}>
+        <button ref={anchorRef} type="button" onClick={() => setOpen((o) => !o)} draggable={false} onDragStart={(e) => e.preventDefault()}
+          title={p.allDone ? "เช็กลิสต์ครบทุกข้อแล้ว — กดเพื่อดู" : `เช็กลิสต์เสร็จ ${p.done} จาก ${p.total} ข้อ — กดเพื่อติ๊ก${canEdit ? " / เพิ่ม" : ""}`}
+          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap ${p.allDone ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"} hover:ring-1 hover:ring-slate-300`}>
+          <Icon name="done" /> {p.done}/{p.total}
+          <span className="h-1 w-8 overflow-hidden rounded-full bg-white/80" aria-hidden><span className={`block h-1 rounded-full ${p.allDone ? "bg-emerald-500" : "bg-emerald-400"}`} style={{ width: `${pct}%` }} /></span>
+        </button>
+        <FloatingDropdown anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} minWidth={240} maxWidth={320}>
+          {open && <ChipPanel moduleKey={moduleKey} recordType={recordType} recordId={recordId} canEdit={canEdit} onChange={onChange} variant="progress" />}
+        </FloatingDropdown>
+      </span>
+    );
+  }
   const rows: ChipRow[] | null = summary.ids && summary.ids.length === summary.open.length
     ? summary.open.map((title, i) => ({ id: summary.ids![i], title, who: summary.who?.[i] ?? null, aid: summary.aids?.[i] ?? null, links: summary.links?.[i] ?? [] }))
     : null;
@@ -340,7 +425,8 @@ export function RecordChecklistChip({ moduleKey, recordType = null, recordId, ca
   );
 }
 
-function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange }: Common) {
+function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange, variant = "waiting" }: Common & { variant?: "waiting" | "progress" }) {
+  const prog = variant === "progress";
   const { items, loading, loaded, add, toggle } = useRecordTasks({
     moduleKey, recordId, recordType, onChange: onChange ? (list) => onChange(summarizeTasks(list)) : undefined,
   });
@@ -350,10 +436,10 @@ function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange }: Commo
   const openCount = items.filter((t) => !isTaskDone(t.status)).length;
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-2xl">
-      <div className="mb-1 px-1 text-[11px] text-slate-500">⏳ รออะไรอยู่{items.length > 0 && ` · เหลือ ${openCount}/${items.length}`}</div>
+      <div className="mb-1 px-1 text-[11px] text-slate-500">{prog ? <><Icon name="done" /> เช็กลิสต์{items.length > 0 && ` · เสร็จ ${items.length - openCount}/${items.length}`}</> : <>⏳ รออะไรอยู่{items.length > 0 && ` · เหลือ ${openCount}/${items.length}`}</>}</div>
       {!loaded && loading ? <div className="px-1 py-2 text-xs text-slate-400">กำลังโหลด…</div> : (
         <div className="max-h-64 space-y-0.5 overflow-y-auto">
-          {shown.length === 0 && <div className="px-1 py-1 text-xs text-slate-400">ไม่มีอะไรรอแล้ว</div>}
+          {shown.length === 0 && <div className="px-1 py-1 text-xs text-slate-400">{prog ? "เสร็จครบทุกข้อแล้ว" : "ไม่มีอะไรรอแล้ว"}</div>}
           {shown.map((it) => {
             const done = isTaskDone(it.status);
             return (
@@ -368,12 +454,12 @@ function ChipPanel({ moduleKey, recordType, recordId, canEdit, onChange }: Commo
         </div>
       )}
       {canEdit && (
-        <input value={text} maxLength={300} placeholder="＋ เพิ่ม… (Enter)" aria-label="เพิ่มสิ่งที่รอ"
+        <input value={text} maxLength={300} placeholder={prog ? "＋ เพิ่มข้อ… (Enter)" : "＋ เพิ่ม… (Enter)"} aria-label={prog ? "เพิ่มข้อในเช็กลิสต์" : "เพิ่มสิ่งที่รอ"}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { e.preventDefault(); const t = text; void add(t).then((ok) => { if (ok) setText(""); }); } }}
           className="mt-1.5 h-8 w-full rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       )}
-      <div className="mt-1.5 px-1 text-[10px] text-slate-400">เปิดใบงานเพื่อแก้/ลบ หรือดูข้อที่เสร็จแล้ว</div>
+      <div className="mt-1.5 px-1 text-[10px] text-slate-400">{prog ? "เปิดงานเพื่อแก้/ลบ หรือใช้แม่แบบ" : "เปิดใบงานเพื่อแก้/ลบ หรือดูข้อที่เสร็จแล้ว"}</div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { PlanEditModal } from "@/components/team-plan/edit-modal";
 import { dueLabel, isOverdue, isStarredToday, MAX_STARS, PRIORITY_META, waitingDays, type PlanItem } from "@/lib/team-plan";
 import { createPlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
 import { groupMyPlan, PLAN_GROUPS, shiftToTomorrow, type PlanGroupKey } from "@/lib/team-plan-pet";
+import { checklistProgress } from "@/lib/record-tasks";
 
 const FOLDED: PlanGroupKey[] = ["later", "done"];
 
@@ -41,6 +42,7 @@ function Row({ t, group, canEdit, busy, onPatch, onOpen }: {
           {snoozed ? <span className="inline-flex items-center gap-0.5"><Icon name="notify" />เตือนอีกครั้ง {snoozed}</span>
             : t.plan.remind !== "none" && t.due_at && !done && !isOverdue(t.due_at) && <span className="inline-flex items-center gap-0.5"><Icon name="notify" />{{ before_1h: "ก่อน 1 ชม.", before_1d: "ก่อน 1 วัน", morning: "เช้าวันนั้น" }[t.plan.remind as "before_1h" | "before_1d" | "morning"]}</span>}
           {t.plan.waiting && <span className="text-amber-700">รอ{t.plan.waiting.note ? `: ${t.plan.waiting.note}` : ""} · {waitingDays(t.plan.waiting.since)} วัน</span>}
+          {(() => { const p = checklistProgress(t.checklist); return p.total ? <span className={`inline-flex items-center gap-0.5 ${p.allDone ? "text-emerald-600" : ""}`} title="เช็กลิสต์ในงาน"><Icon name="done" />{p.done}/{p.total}</span> : null; })()}
         </div>
         {!done && canEdit && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -144,6 +146,6 @@ export function PlanItemEditor({ item, me, onClose, onDone }: { item: PlanItem; 
   const { can } = useAuth();
   return (
     <PlanEditModal item={item} me={me} canEdit={can("tasks.edit" as Parameters<typeof can>[0])}
-      onClose={onClose} onSaved={() => { onDone(); onClose(); }} onDeleted={() => { onDone(); onClose(); }} />
+      onClose={onClose} onSaved={() => { onDone(); onClose(); }} onDeleted={() => { onDone(); onClose(); }} onChecklist={() => onDone()} />
   );
 }

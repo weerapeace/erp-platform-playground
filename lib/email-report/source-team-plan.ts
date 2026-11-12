@@ -7,6 +7,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { absoluteUrl } from "@/lib/app-url";
 import { userNames } from "@/lib/record-tasks-server";
+import { noteToText } from "@/lib/rich-note";
 import { dueLabel, isOverdue, isPlanDone, PRIORITIES, PRIORITY_META, TEAM_PLAN_MODULE, waitingDays, WAITING_FOLLOW_DAYS, type PlanItem } from "@/lib/team-plan";
 import { PLAN_COLS, planLink, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 import type { EmailReportFilters, ResolvedReportOptions } from "@/lib/email-report/shared";
@@ -96,7 +97,7 @@ export async function teamPlanWeekly(admin: Admin, _filters: EmailReportFilters,
       else if (k === "priority" && !e.done) parts.push({ kind: "meta", text: PRIORITY_META[e.t.priority].label });
       else if (k === "due" && e.t.due_at && !e.done) parts.push({ kind: "meta", text: `กำหนด ${dueLabel(e.t.due_at, now)}` });
       else if (k === "waiting" && e.waiting) parts.push({ kind: "tag", text: `รอ${e.t.plan.waiting!.note ? `: ${e.t.plan.waiting!.note}` : "คนอื่น"} · ${waitingDays(e.t.plan.waiting!.since, now)} วัน` });
-      else if (k === "note" && e.t.note) parts.push({ kind: "note", text: e.t.note.length > 140 ? `${e.t.note.slice(0, 140)}…` : e.t.note });
+      else if (k === "note" && e.t.note) { const n = noteToText(e.t.note); if (n) parts.push({ kind: "note", text: n.length > 140 ? `${n.slice(0, 140)}…` : n }); }
       else if (k === "source" && e.t.plan.source) parts.push({ kind: "small", text: `มาจาก ${e.t.plan.source.label}` });
     }
     return {

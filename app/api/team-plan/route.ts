@@ -1,7 +1,7 @@
 /**
  * 📋 แผนงานทีม (Todo ตามความด่วน) — /api/team-plan
  *
- * GET  → { data: PlanItem[] } งานที่ยังไม่เสร็จทั้งหมด + งานที่เสร็จใน 7 วันล่าสุด (ทั้งทีม · หน้าเว็บกรอง "ของฉัน" เอง)
+ * GET  → { data: PlanItem[] } งานที่ยังไม่เสร็จทั้งหมด + งานที่เสร็จใน 7 วันล่าสุด (ทั้งทีม · หน้าเว็บกรอง "ของฉัน" เอง) · checklist = สรุปเช็กลิสต์ในงาน
  *      ?mine=1 = เฉพาะงานของฉัน (แท็บแผนงานในศูนย์แจ้งเตือน)
  * POST body { title, note?, priority?, due_at?, assigned_to?, important?, remind?, repeat?, waiting_note?, source?, links? } → สร้าง 1 งาน
  *      มอบให้คนอื่น → กระดิ่งเด้งบอกคนนั้น (+ มือถือ ถ้าเปิดรับ)
@@ -14,9 +14,9 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { isUuid, userNames } from "@/lib/record-tasks-server";
+import { isUuid, loadChecklistSummaries, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
-import { asPriority, dueLabel, normalizePlanMeta, TEAM_PLAN_MODULE } from "@/lib/team-plan";
+import { asPriority, dueLabel, normalizePlanMeta, PLAN_NOTE_MAX, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE } from "@/lib/team-plan";
 import { notifyPlanAssignee, PLAN_COLS, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +38,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const all = (data ?? []) as PlanRow[];
   const rows = me ? all.filter((r) => (r.assigned_to ?? normalizePlanMeta(r.metadata?.plan).created_by_id) === me) : all;
   const names = await userNames(admin, rows.map((r) => r.assigned_to));
-  return NextResponse.json({ data: rows.map((r) => toPlanItem(r, names)), error: null });
+  // ✅ สรุปเช็กลิสต์ในงาน (ครั้งเดียวทุกงาน) — พลาด = การ์ดไม่โชว์ป้าย แต่รายการยังมา
+  const checks = await loadChecklistSummaries(admin, TEAM_PLAN_CHECK.moduleKey, rows.map((r) => r.id)).catch(() => new Map());
+  return NextResponse.json({ data: rows.map((r) => ({ ...toPlanItem(r, names), checklist: checks.get(r.id) ?? null })), error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     created_by_id: user.id,
   });
   const links = normalizeTaskLinks(body.links);
-  const note = typeof body.note === "string" ? body.note.trim().slice(0, 4000) || null : null;
+  const note = typeof body.note === "string" ? body.note.trim().slice(0, PLAN_NOTE_MAX) || null : null;
 
   const { data, error } = await admin.from("erp_record_tasks").insert({
     module_key: TEAM_PLAN_MODULE, record_id: "", record_type: "",

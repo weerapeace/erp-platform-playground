@@ -69,6 +69,36 @@ export function summarizeTasks(items: { id?: string; title: string; status: stri
   };
 }
 
+/** สรุป → เสร็จกี่ข้อจากทั้งหมด (ป้าย "2/4" บนการ์ด) · allDone = มีข้อและเสร็จครบ */
+export function checklistProgress(s: ChecklistSummary | null | undefined): { done: number; total: number; allDone: boolean } {
+  const done = s?.done ?? 0;
+  const total = done + (s?.open.length ?? 0);
+  return { done, total, allDone: total > 0 && done === total };
+}
+
+/** แม่แบบเช็กลิสต์ = ค่ากลาง erp_lookups (ชนิด templateType) · name = ชื่อแม่แบบ · metadata.items = ข้อในแม่แบบ */
+export const TEMPLATE_MAX_ITEMS = 30;
+/** อ่านข้อในแม่แบบ — ตัดว่าง/ซ้ำ · ยาวสุด 300 ตัวอักษร · สูงสุด TEMPLATE_MAX_ITEMS ข้อ */
+export function templateItems(metadata: unknown): string[] {
+  const raw = (metadata as { items?: unknown } | null)?.items;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    const t = typeof v === "string" ? v.trim().slice(0, 300) : "";
+    if (t && !out.includes(t)) out.push(t);
+    if (out.length >= TEMPLATE_MAX_ITEMS) break;
+  }
+  return out;
+}
+const sameTitle = (a: string) => a.trim().replace(/\s+/g, " ").toLowerCase();
+/** ข้อในแม่แบบที่ยังไม่มีในเช็กลิสต์ (เทียบชื่อแบบไม่สนช่องว่าง/ตัวพิมพ์) — กดใช้แม่แบบซ้ำไม่เพิ่มข้อซ้ำ */
+export function templateTitlesToAdd(existing: string[], items: string[]): string[] {
+  const have = new Set(existing.map(sameTitle));
+  const out: string[] = [];
+  for (const t of items) { const k = sameTitle(t); if (k && !have.has(k)) { have.add(k); out.push(t.trim()); } }
+  return out;
+}
+
 /** "รอหาผ้า · ฝน" — ข้อความ + ชื่อผู้รับผิดชอบ (ถ้ามี) */
 export const taskWithWho = (title: string, who: string | null | undefined, sep = " · ") => (who ? `${title}${sep}${who}` : title);
 

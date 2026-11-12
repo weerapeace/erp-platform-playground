@@ -15,7 +15,7 @@ import { todayBangkok } from "@/lib/date";
 import { linksOf } from "@/lib/record-tasks";
 import { isUuid } from "@/lib/record-tasks-server";
 import {
-  asPriority, isSummaryWindow, nextDue, normalizePlanMeta, normalizePlanSent, planMorningSummary, planReminders, TEAM_PLAN_MODULE,
+  asPriority, isSummaryWindow, nextDue, normalizePlanMeta, normalizePlanSent, planMorningSummary, planReminders, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE,
   type PlanItem, type ReminderNote,
 } from "@/lib/team-plan";
 
@@ -74,6 +74,21 @@ export async function createNextRepeat(admin: Admin, row: PlanRow, actor: { id: 
     metadata: { ...meta, plan: { ...plan, star_date: null, waiting: null } },
   }).select(PLAN_COLS).single();
   const next = (data as PlanRow | null) ?? null;
+  // ✅ รอบใหม่ได้เช็กลิสต์ชุดเดิม (ยังไม่ติ๊กทุกข้อ · ผู้รับผิดชอบรายข้อเดิม) — พลาดไม่ขวางการสร้างรอบใหม่
+  if (next) {
+    const { data: checks } = await admin.from("erp_record_tasks").select("title, assigned_to, metadata, created_at")
+      .eq("module_key", TEAM_PLAN_CHECK.moduleKey).eq("record_id", row.id).order("created_at", { ascending: true }).limit(100);
+    const list = (checks ?? []) as { title: string; assigned_to: string | null; metadata: unknown }[];
+    if (list.length) {
+      const base = Date.now();
+      await admin.from("erp_record_tasks").insert(list.map((c, i) => ({
+        module_key: TEAM_PLAN_CHECK.moduleKey, record_id: next.id, record_type: TEAM_PLAN_CHECK.recordType,
+        title: c.title, status: "open", assigned_to: c.assigned_to, created_by: actor.name,
+        created_at: new Date(base + i).toISOString(),
+        ...(linksOf(c.metadata).length ? { metadata: { links: linksOf(c.metadata) } } : {}),
+      })));
+    }
+  }
   if (next) await writeAudit(admin, { action: "create", entityType: "record_task", entityId: next.id, actorId: actor.id, actorName: actor.name,
     metadata: { module_key: TEAM_PLAN_MODULE, title: next.title, due_at: next.due_at, repeat_from: row.id } });
   return next;

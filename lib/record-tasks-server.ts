@@ -11,6 +11,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { isAutoNewPreset, linksOf, summarizeTasks, type ChecklistSummary } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
+import { TEAM_PLAN_CHECK } from "@/lib/team-plan";
 import { writeAudit } from "@/lib/audit";
 import { bellAllowed } from "@/lib/bell-switch";
 
@@ -67,6 +68,15 @@ const TARGETS: Record<string, { entity: string; presetType: string | null; link:
       const { data } = await admin.from("design_sheets").select("code, name").eq("id", id).maybeSingle();
       const d = data as { code: string; name: string } | null;
       return d ? `${d.code} ${d.name}` : null;
+    },
+  },
+  // ✅ เช็กลิสต์ในงานของแผนงานทีม — กดกระดิ่งแล้วเปิดงานนั้นบนกระดาน
+  [TEAM_PLAN_CHECK.moduleKey]: {
+    entity: TEAM_PLAN_CHECK.recordType, presetType: TEAM_PLAN_CHECK.presetType,
+    link: (id) => `/tasks/plan?item=${encodeURIComponent(id)}`,
+    label: async (admin, id) => {
+      const { data } = await admin.from("erp_record_tasks").select("title").eq("id", id).maybeSingle();
+      return (data as { title: string } | null)?.title ?? null;
     },
   },
 };

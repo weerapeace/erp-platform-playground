@@ -16,7 +16,7 @@ import { writeAudit } from "@/lib/audit";
 import { isUuid, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
 import { addDaysYmd, todayBangkok } from "@/lib/date";
-import { asPriority, dueLabel, MAX_STARS, normalizePlanMeta, starCountFor, TEAM_PLAN_MODULE } from "@/lib/team-plan";
+import { asPriority, dueLabel, MAX_STARS, normalizePlanMeta, PLAN_NOTE_MAX, starCountFor, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE } from "@/lib/team-plan";
 import { createNextRepeat, notifyPlanAssignee, PLAN_COLS, snoozeMetadata, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     if (!t) return NextResponse.json({ error: "ชื่องานว่างไม่ได้" }, { status: 400 });
     patch.title = t;
   }
-  if (body.note !== undefined) patch.description = typeof body.note === "string" ? body.note.trim().slice(0, 4000) || null : null;
+  if (body.note !== undefined) patch.description = typeof body.note === "string" ? body.note.trim().slice(0, PLAN_NOTE_MAX) || null : null;
   if (body.priority !== undefined) patch.priority = asPriority(body.priority);
   if (body.due_at !== undefined) {
     const d = body.due_at == null || body.due_at === "" ? null : String(body.due_at);
@@ -150,7 +150,10 @@ export async function DELETE(request: NextRequest, { params }: Ctx): Promise<Nex
   }
   const { error } = await admin.from("erp_record_tasks").delete().eq("id", id).eq("module_key", TEAM_PLAN_MODULE);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // เช็กลิสต์ในงานไปด้วย (ไม่ทิ้งข้อกำพร้า) · ข้อมูลข้อยังอยู่ในประวัติของงานนี้ (metadata ด้านล่าง)
+  const { data: checks } = await admin.from("erp_record_tasks").delete().eq("module_key", TEAM_PLAN_CHECK.moduleKey).eq("record_id", id).select("title, status");
   await writeAudit(admin, { action: "delete", entityType: "record_task", entityId: id, actorId: user.id, actorName: user.email ?? "ผู้ใช้",
-    metadata: { module_key: TEAM_PLAN_MODULE, title: before.title, priority: before.priority, assigned_to: before.assigned_to, due_at: before.due_at, metadata: before.metadata } });
+    metadata: { module_key: TEAM_PLAN_MODULE, title: before.title, priority: before.priority, assigned_to: before.assigned_to, due_at: before.due_at, metadata: before.metadata,
+      ...(checks?.length ? { checklist: checks } : {}) } });
   return NextResponse.json({ ok: true, error: null });
 }

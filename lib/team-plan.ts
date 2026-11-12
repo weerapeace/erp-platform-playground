@@ -9,9 +9,14 @@
  * เวลาไทย +07:00 คงที่ (ไม่มีเวลาออมแสง) → แปลงวันที่ด้วย todayBangkok
  */
 import { addDaysYmd, todayBangkok } from "@/lib/date";
-import type { TaskLink } from "@/lib/record-tasks";
+import type { ChecklistSummary, TaskLink } from "@/lib/record-tasks";
 
 export const TEAM_PLAN_MODULE = "team_plan";
+/** ✅ เช็กลิสต์ในงาน (เจ้าของขอ 2026-11-12) — ข้อละ 1 แถวใน erp_record_tasks (ของกลาง RecordChecklist)
+ *  ข้อที่ใช้บ่อย = erp_lookups ชนิด presetType · แม่แบบหลายข้อ = erp_lookups ชนิด templateType (metadata.items) */
+export const TEAM_PLAN_CHECK = { moduleKey: "team_plan_check", recordType: "team_plan", presetType: "team_plan_check", templateType: "team_plan_check_tpl" } as const;
+/** โน้ตยาวสุด (เก็บเป็น HTML จากกล่องพิมพ์จัดรูปแบบ — มีแท็กปน จึงเผื่อจากข้อความ 4,000 ตัว) */
+export const PLAN_NOTE_MAX = 12000;
 
 export const PRIORITIES = ["urgent", "high", "normal", "low"] as const;
 export type Priority = (typeof PRIORITIES)[number];
@@ -55,6 +60,8 @@ export type PlanItem = {
   links: TaskLink[]; plan: PlanMeta;
   /** กด "เตือนอีกครั้ง" ไว้ถึงเมื่อไหร่ (metadata.plan_sent.snooze_until) — ตัว Pet ใช้พูดเตือนตอนถึงเวลา */
   snooze_until?: string | null;
+  /** สรุปเช็กลิสต์ในงาน (GET /api/team-plan ใส่ให้ · ไม่มีข้อ = null · คำตอบ PATCH ไม่มีช่องนี้ = ใช้ค่าเดิมบนจอ) */
+  checklist?: ChecklistSummary | null;
 };
 export const isPlanDone = (t: { status: string }) => t.status === "resolved";
 

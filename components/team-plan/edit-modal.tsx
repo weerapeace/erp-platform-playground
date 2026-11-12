@@ -1,34 +1,48 @@
 "use client";
 /**
  * ป๊อปแก้ 1 งานในแผนงานทีม — ชื่อ · โน้ต · ความด่วน · สำคัญ · กำหนด · ผู้รับผิดชอบ · เตือน · ทำซ้ำ · รอคนอื่น · ลบ
+ * โน้ต = กล่องพิมพ์จัดรูปแบบกลาง (RichTextEditor แบบย่อ: bullet / ลำดับเลข / หนา / เอียง · พิมพ์ "- " = bullet) เก็บ HTML · โน้ตเก่าที่เป็นข้อความแปลงด้วย lib/rich-note
+ * เช็กลิสต์ในงาน = ของกลาง RecordChecklist (lib/team-plan TEAM_PLAN_CHECK) + แม่แบบหลายข้อ · ติ๊กครบ = ถาม "ปิดงานนี้เลยไหม?" (เจ้าของขอ 2026-11-12)
  * + ใส่แผนส่วนตัวของฉัน (วันนี้/พรุ่งนี้/สัปดาห์นี้ — ของกลาง lib/planner-client · ใช้แทนการลากบนมือถือ)
  * บันทึกเฉพาะช่องที่เปลี่ยน (PATCH /api/team-plan/[id]) · ปิดตอนยังไม่บันทึก = ถามก่อน (ERPModal กลาง)
  */
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
-import { WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
+import { RecordChecklist, WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
 import { ERPDateTime24 } from "@/components/form";
 import {
-  dueLabel, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, waitingDays,
+  dueLabel, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, waitingDays,
   type PlanItem, type Priority, type RemindMode, type RepeatRule,
 } from "@/lib/team-plan";
 import { deletePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
 import { addToPlan } from "@/lib/planner-client";
 import { bucketLabel, type PlanBucket } from "@/lib/planner";
+import { noteToHtml, noteToText } from "@/lib/rich-note";
+import { checklistProgress, type ChecklistSummary } from "@/lib/record-tasks";
+
+// กล่องพิมพ์จัดรูปแบบหนัก (Tiptap) → โหลดตอนเปิดป๊อปเท่านั้น ไม่ถ่วงหน้ากระดาน
+const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), {
+  ssr: false, loading: () => <div className="h-[96px] animate-pulse rounded-lg border border-slate-200 bg-slate-50" />,
+});
 
 /** ISO → "YYYY-MM-DDTHH:mm" เวลาไทย (ค่าของช่อง ERPDateTime24) */
 const toLocal = (iso: string | null) => (iso ? new Date(Date.parse(iso) + 7 * 3600e3).toISOString().slice(0, 16) : "");
 const fromLocal = (v: string) => (v ? new Date(`${v}:00+07:00`).toISOString() : null);
 
-export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }: {
+export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, onChecklist }: {
   item: PlanItem; canEdit: boolean; me: string;
   onClose: () => void; onSaved: (list: PlanItem[]) => void; onDeleted: (id: string) => void;
+  /** เช็กลิสต์เปลี่ยน (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึก) → การ์ดบนกระดานอัปเดตป้าย "2/4" */
+  onChecklist?: (id: string, s: ChecklistSummary) => void;
 }) {
   const toast = useToast();
   const [title, setTitle] = useState(item.title);
-  const [note, setNote] = useState(item.note ?? "");
+  const [initNote] = useState(() => noteToHtml(item.note));   // โน้ตเก่าแบบข้อความ → HTML (บรรทัด "- " = bullet)
+  const [note, setNote] = useState(initNote);
+  const [check, setCheck] = useState<ChecklistSummary | null>(item.checklist ?? null);
   const [priority, setPriority] = useState<Priority>(item.priority);
   const [important, setImportant] = useState(item.plan.important);
   const [due, setDue] = useState(toLocal(item.due_at));
@@ -47,7 +61,8 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }
   const patch = useMemo<PlanPatch>(() => {
     const p: PlanPatch = {};
     if (title.trim() !== item.title) p.title = title.trim();
-    if ((note.trim() || null) !== (item.note || null)) p.note = note.trim() || null;
+    const noteOut = noteToText(note).trim() ? note : null;   // กล่องว่าง (เหลือแท็กเปล่า) = ไม่มีโน้ต
+    if (noteOut !== (initNote || null)) p.note = noteOut;
     if (priority !== item.priority) p.priority = priority;
     if (important !== item.plan.important) p.important = important;
     const dueIso = fromLocal(due);
@@ -59,7 +74,7 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }
     const wait = waitingOn ? { note: waitingNote.trim() } : null;
     if (JSON.stringify(wait) !== JSON.stringify(item.plan.waiting ? { note: item.plan.waiting.note } : null)) p.waiting = wait;
     return p;
-  }, [title, note, priority, important, due, who, remind, repeatEvery, repeatN, waitingOn, waitingNote, item]);
+  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, waitingOn, waitingNote, item]);
   const dirty = Object.keys(patch).length > 0;
 
   const save = async (extra: PlanPatch = {}) => {
@@ -85,6 +100,7 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }
   };
 
   const done = item.status === "resolved";
+  const prog = checklistProgress(check);
   const lbl = "mb-1 block text-xs font-medium text-slate-600";
   const field = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50";
 
@@ -163,9 +179,29 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }
           </div>
         </div>
         <div>
-          <label className={lbl}>โน้ต</label>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={4000} disabled={!canEdit}
-            className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50" />
+          <label className={lbl}>โน้ต <span className="font-normal text-slate-400">· กดปุ่ม bullet หรือพิมพ์ "- " ขึ้นต้นบรรทัด</span></label>
+          <RichTextEditor toolbar="basic" value={note} onChange={setNote} editable={canEdit} minHeight={72} placeholder="รายละเอียดเพิ่มเติม…" />
+        </div>
+        <div>
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-600"><Icon name="done" /> เช็กลิสต์</span>
+            {prog.total > 0 && <>
+              <span className={`text-xs tabular-nums ${prog.allDone ? "text-emerald-700" : "text-slate-500"}`}>เสร็จ {prog.done}/{prog.total}</span>
+              <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100" aria-hidden><span className="block h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.round((prog.done / prog.total) * 100)}%` }} /></span>
+            </>}
+            <span className="ml-auto text-[11px] text-slate-400">ติ๊ก/เพิ่มแล้วบันทึกทันที</span>
+          </div>
+          <RecordChecklist moduleKey={TEAM_PLAN_CHECK.moduleKey} recordType={TEAM_PLAN_CHECK.recordType} recordId={item.id} canEdit={canEdit}
+            presetType={TEAM_PLAN_CHECK.presetType} templateType={TEAM_PLAN_CHECK.templateType} presetTitle="ข้อที่ใช้บ่อย"
+            emptyText="ยังไม่มีข้อ — พิมพ์เพิ่มด้านล่าง หรือใส่จากแม่แบบ" placeholder="＋ เพิ่มข้อ… (Enter)"
+            onChange={(s) => { setCheck(s); onChecklist?.(item.id, s); }} />
+          {canEdit && !done && prog.allDone && (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              <span><Icon name="done" /> เช็กลิสต์ครบทุกข้อแล้ว — ปิดงานนี้เลยไหม?</span>
+              <button type="button" onClick={() => void save({ status: "resolved" })} disabled={busy}
+                className="h-8 rounded-lg border border-emerald-300 bg-white px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">ปิดงาน</button>
+            </div>
+          )}
         </div>
         {!done && <PersonalPlanRow item={item} />}
         {item.plan.source && (

@@ -50,6 +50,12 @@
 - แก้ได้จากหน้างานเลย: `LookupValuesEditor` (`components/lookup-values-editor`) — เพิ่ม / กดชื่อแก้ / ✕ เอาออก (ปิดใช้ เรียกคืนได้ที่ ตั้งค่า → ค่ากลาง) / ลากเรียง · ใช้ได้กับค่ากลางชนิดไหนก็ได้
 - `useLookupNames(type)` = ชื่อที่เปิดใช้ (แคชร่วมทั้งหน้า แก้แล้วทุกช่องอัปเดตเอง)
 
+## แม่แบบหลายข้อ + ป้ายความคืบหน้า (เพิ่ม 2026-11-12 · ใช้ครั้งแรกที่แผนงานทีม)
+- `<RecordChecklist templateType="..."/>` = แถบ "แม่แบบ": ใส่จากแม่แบบ… (เพิ่มเฉพาะข้อที่ยังไม่มี · ตามลำดับแม่แบบ) · บันทึกเป็นแม่แบบ (ชื่อซ้ำ = บันทึกทับ) · จัดการแม่แบบ (LookupValuesEditor: เปลี่ยนชื่อ/ลากเรียง/เอาออก)
+  - เก็บที่ erp_lookups ชนิด templateType · name = ชื่อแม่แบบ · metadata.items = ข้อ (สูงสุด 30) · กฎ pure `templateItems` / `templateTitlesToAdd` (lib/record-tasks · เทสต์ record-tasks-templates)
+- `<RecordChecklistChip variant="progress"/>` = ป้ายเล็ก "เสร็จ 2/4" + แถบ (การ์ดสั้นเท่าเดิม) กดแล้วเด้งกล่องติ๊ก/เพิ่ม · ค่าเริ่ม "waiting" = แถวสิ่งที่รอแบบเดิม (ใบงานออกแบบไม่เปลี่ยน) · `checklistProgress(summary)` = เสร็จ/ทั้งหมด/ครบ
+- ไม่ใส่ templateType / variant = หน้าตาเดิมทุกอย่าง
+
 ## ข้อมูล
 - `erp_record_tasks`: `module_key` (ชนิดเช็กลิสต์) · `record_type` · `record_id` (ข้อความ · ส่วนกลางของหน้า = `""` เพราะ NOT NULL) · `title` (≤300) · `status` · `created_by` / `resolved_by` (ชื่อคน) · `resolved_at`
 - `assigned_to` = ผู้รับผิดชอบ (มีหน้าจอแล้ว) · `due_at` / `priority` รองรับอยู่แล้ว (ยังไม่มีหน้าจอ — ถ้าจะเพิ่ม "ภายในวันไหน" ต่อยอดได้เลย)

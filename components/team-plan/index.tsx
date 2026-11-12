@@ -18,13 +18,15 @@ import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
-import { WhoChip } from "@/components/record-tasks/checklist";
+import { RecordChecklistChip, WhoChip } from "@/components/record-tasks/checklist";
+import { noteToText } from "@/lib/rich-note";
+import type { ChecklistSummary } from "@/lib/record-tasks";
 import { useViewPref } from "@/lib/use-view-pref";
 import { ScheduleBoard } from "@/components/schedule-board";
 import { useViewportLayout } from "@/components/device-view";
 import {
   dueLabel, dueOnDate, dueYmd, isOverdue, isPlanDone, isStarredToday, MAX_STARS, PRIORITIES, PRIORITY_META, QUADRANT_META, quadrantOf, quadrantPatch,
-  REMIND_LABEL, REPEAT_LABEL, sortPlanItems, waitingDays,
+  REMIND_LABEL, REPEAT_LABEL, sortPlanItems, TEAM_PLAN_CHECK, waitingDays,
   type PlanItem, type Priority, type Quadrant,
 } from "@/lib/team-plan";
 import { createPlanItem, listPlanItems, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
@@ -73,9 +75,12 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
 
   const upsert = (list: PlanItem[]) => setItems((cur) => {
     const map = new Map((cur ?? []).map((t) => [t.id, t]));
-    for (const t of list) map.set(t.id, t);
+    // คำตอบ PATCH ไม่มีสรุปเช็กลิสต์ (checklist = undefined) → ใช้ค่าเดิมบนจอ
+    for (const t of list) { const prev = map.get(t.id); map.set(t.id, t.checklist === undefined && prev ? { ...t, checklist: prev.checklist } : t); }
     return [...map.values()];
   });
+  /** เช็กลิสต์ในงานเปลี่ยน (จากป๊อป/ป้ายบนการ์ด) → อัปเดตป้าย "2/4" */
+  const setChecklist = (id: string, s: ChecklistSummary) => setItems((cur) => (cur ?? []).map((t) => (t.id === id ? { ...t, checklist: s } : t)));
   /** แก้ 1 งาน — เปลี่ยนบนจอทันที (optimistic) แล้วค่อยบันทึก · ไม่ผ่าน = คืนค่าเดิม */
   const update = async (t: PlanItem, p: PlanPatch, optimistic?: Partial<PlanItem>) => {
     if (optimistic) upsert([{ ...t, ...optimistic, plan: { ...t.plan, ...(optimistic.plan ?? {}) } }]);
@@ -119,7 +124,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   };
   const dragging = dragId ? all.find((t) => t.id === dragId) ?? null : null;
 
-  const cardProps = { me, canEdit, onOpen: setEditing, onUpdate: update };
+  const cardProps = { me, canEdit, onOpen: setEditing, onUpdate: update, onChecklist: setChecklist };
   const columns: { id: string; title: ReactNode; hint?: string; list: PlanItem[] }[] = view === "priority"
     ? PRIORITIES.map((p) => ({
         id: `p:${p}`, list: shown.filter((t) => t.priority === p),
@@ -240,7 +245,8 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         <PlanEditModal item={all.find((t) => t.id === editing.id) ?? editing} canEdit={canEdit} me={me}
           onClose={() => setEditing(null)}
           onSaved={(list) => upsert(list)}
-          onDeleted={(id) => { setItems((cur) => (cur ?? []).filter((t) => t.id !== id)); setEditing(null); }} />
+          onDeleted={(id) => { setItems((cur) => (cur ?? []).filter((t) => t.id !== id)); setEditing(null); }}
+          onChecklist={setChecklist} />
       )}
     </div>
   );
@@ -260,7 +266,7 @@ function Column({ id, title, hint, count, children }: { id: string; title: React
   );
 }
 
-type CardProps = { t: PlanItem; me: string; canEdit: boolean; onOpen: (t: PlanItem) => void; onUpdate: (t: PlanItem, p: PlanPatch, o?: Partial<PlanItem>) => Promise<PlanItem | null> };
+type CardProps = { t: PlanItem; me: string; canEdit: boolean; onOpen: (t: PlanItem) => void; onUpdate: (t: PlanItem, p: PlanPatch, o?: Partial<PlanItem>) => Promise<PlanItem | null>; onChecklist?: (id: string, s: ChecklistSummary) => void };
 
 function PlanCard(props: CardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: props.t.id, disabled: !props.canEdit });
@@ -272,7 +278,7 @@ function PlanCard(props: CardProps) {
 }
 
 /** หน้าตาการ์ด (ใช้ทั้งในช่องและตอนกำลังลาก) */
-function PlanCardView({ t, canEdit, onOpen, onUpdate }: CardProps) {
+function PlanCardView({ t, canEdit, onOpen, onUpdate, onChecklist }: CardProps) {
   const overdue = isOverdue(t.due_at);
   const starred = isStarredToday(t.plan);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();   // ปุ่มบนการ์ดไม่ให้เริ่มลาก/เปิดป๊อป
@@ -294,7 +300,9 @@ function PlanCardView({ t, canEdit, onOpen, onUpdate }: CardProps) {
         {t.plan.repeat && <span className={`${chip} bg-slate-100 text-slate-600`}><Icon name="repeat" /> {REPEAT_LABEL(t.plan.repeat)}</span>}
         {t.plan.remind !== "none" && t.due_at && <span className={`${chip} bg-slate-100 text-slate-500`} title={`เตือน ${REMIND_LABEL[t.plan.remind]}`}><Icon name="notify" /></span>}
         {t.plan.source && <a href={t.plan.source.href} onPointerDown={stop} onClick={stop} className={`${chip} bg-blue-50 text-blue-700 hover:underline`}><Icon name="link" /> {t.plan.source.label}</a>}
-        {t.note && <span className={`${chip} bg-slate-100 text-slate-500`} title={t.note}><Icon name="note" /></span>}
+        {t.checklist && <RecordChecklistChip variant="progress" moduleKey={TEAM_PLAN_CHECK.moduleKey} recordType={TEAM_PLAN_CHECK.recordType} recordId={t.id}
+          canEdit={canEdit} summary={t.checklist} onChange={(s) => onChecklist?.(t.id, s)} />}
+        {t.note && <span className={`${chip} bg-slate-100 text-slate-500`} title={noteToText(t.note)}><Icon name="note" /></span>}
       </div>
     </div>
   );
