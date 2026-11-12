@@ -16,6 +16,7 @@ import { AppAccessModal } from "./app-access-modal";
 import { appHeaderStyle } from "@/lib/app-header-theme";
 import type { MenuSection } from "@/app/api/menu/sections/route";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
+import { ConfirmDialog } from "@/components/modal";
 
 type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null; default_href?: string | null };
 const ALL = "__all__";
@@ -214,12 +215,21 @@ export default function MenuManagerPage() {
   // ---------- Menu items ----------
   // แก้ฟิลด์เมนู = เก็บลงร่าง (ยังไม่บันทึกจนกว่าจะกดปุ่ม "บันทึก")
   const patch = (id: string, p: Partial<MenuRow>) => stageEdit(id, p);
-  const del = async (id: string, label: string) => {
-    if (!confirm(`ลบเมนู "${label}" ออกจากทุกแอป?`)) return;
-    const j = await apiFetch(`/api/menu?id=${id}`, { method: "DELETE" }).then((r) => r.json());
-    if (j.error) { setErr(j.error); return; }
-    setRows((rs) => rs.filter((r) => r.id !== id));
-    if (pending.current.delete(id)) setDirtyCount(pending.current.size);
+  // ลบถาวร (ทุกแอป · ย้อนไม่ได้) — ถามก่อนด้วยกล่องยืนยันกลาง + พิมพ์ชื่อเมนู · แนะนำทางที่กู้คืนได้ (เอาออกจากแอป / ปิด 👁) · มีประวัติ menu.delete
+  const [delAsk, setDelAsk] = useState<MenuRow | null>(null);
+  const [delBusy, setDelBusy] = useState(false);
+  const del = (it: MenuRow) => setDelAsk(it);
+  const doDel = async () => {
+    const it = delAsk;
+    if (!it?.id || delBusy) return;
+    setDelBusy(true);
+    try {
+      const j = await apiFetch(`/api/menu?id=${it.id}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) { setErr(j.error); return; }
+      setRows((rs) => rs.filter((r) => r.id !== it.id));
+      if (pending.current.delete(it.id)) setDirtyCount(pending.current.size);
+      setDelAsk(null); flash("ลบเมนูแล้ว");
+    } finally { setDelBusy(false); }
   };
   const toggleItemApp = (it: MenuRow, appKey: string) => {
     const cur = it.app_keys ?? [];
@@ -781,7 +791,7 @@ export default function MenuManagerPage() {
                               <input defaultValue={it.href} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.href) patch(it.id!, { href: v }); }} className="w-44 h-7 px-2 font-mono border border-slate-200 rounded" /></label>
                             <div className="ml-auto flex items-center gap-2">
                               {sel !== ALL && <button onClick={() => toggleItemApp(it, sel)} className="h-7 px-2.5 text-amber-700 border border-amber-200 bg-amber-50 rounded hover:bg-amber-100">เอาออกจากแอปนี้</button>}
-                              <button onClick={() => del(it.id!, it.label)} className="h-7 px-2.5 text-rose-600 border border-rose-200 rounded hover:bg-rose-50">🗑 ลบเมนู</button>
+                              <button onClick={() => del(it)} className="h-7 px-2.5 text-rose-600 border border-rose-200 rounded hover:bg-rose-50">🗑 ลบเมนู</button>
                             </div>
                           </div>
                         )}
@@ -911,6 +921,16 @@ export default function MenuManagerPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {delAsk && (
+        <ConfirmDialog open onClose={() => !delBusy && setDelAsk(null)} onConfirm={() => void doDel()} loading={delBusy} variant="danger"
+          title={`ลบเมนู “${delAsk.label}” ถาวร`} confirmText="ลบถาวร" requireTyped={delAsk.label}
+          message={<div className="space-y-2 text-sm">
+            <p>เมนูนี้จะ<b>หายจากทุกแอป</b>{(delAsk.app_keys ?? []).length ? <> ({(delAsk.app_keys ?? []).map((k) => apps.find((a) => a.key === k)?.label ?? k).join(", ")})</> : null} และ<b>ย้อนกลับไม่ได้</b> — การตั้งค่า “ใครเห็น” / ลำดับของเมนูนี้หายด้วย</p>
+            <p className="text-slate-600">ถ้าแค่ไม่อยากให้เห็น แนะนำ <b>“เอาออกจากแอปนี้”</b> หรือปิด <b>👁</b> แทน (กู้คืนได้) — หรือใช้ ⚙️ ตั้งค่า ในแอปเดี่ยว → แท็บ “เมนูและคนเห็น”</p>
+            <p className="text-xs text-slate-500">มีบันทึกประวัติว่าใครลบ · พิมพ์ชื่อเมนูด้านล่างเพื่อยืนยัน</p>
+          </div>} />
       )}
     </PlaygroundShell>
   );

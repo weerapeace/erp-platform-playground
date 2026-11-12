@@ -6,7 +6,8 @@
  * POST {item}    → เพิ่มเมนูเดียว
  * PATCH {id,patch}→ แก้เมนู (มีประวัติใน audit_logs · patch.audience = ใครเห็นเมนูนี้ — lib/menu-audience)
  *   + app_override {app_key, set:{sort?,place?}} = จัดเรียง/ซ่อนเมนูเฉพาะแอปนั้น (รวมเข้า app_overrides ฝั่งเซิร์ฟเวอร์ — lib/app-menu-layout)
- * DELETE ?id=    → ลบเมนู
+ * DELETE ?id=    → ลบเมนูถาวร (ทุกแอป · มีประวัติ menu.delete) — หน้า ⚙️ ตั้งค่าแอปไม่ใช้ ใช้ "เอาออกจากแอป / ปิดทั้งระบบ" แทน (lib/app-menu-membership)
+ * POST มีประวัติ menu.create / menu.seed
  *
  * อ่านได้ทุก user (authenticated) — เขียนต้องมีสิทธิ์ admin.users
  */
@@ -14,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { authCacheHeaders } from "@/lib/auth-cache-headers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { cleanAudience } from "@/lib/menu-audience";
 import { mergeAppOverride, type AppMenuOverrideSet } from "@/lib/app-menu-layout";
 
@@ -61,11 +62,14 @@ export async function POST(request: NextRequest) {
     if (rows.length === 0) return NextResponse.json({ ok: true, inserted: 0, error: null });
     const { error, count } = await admin.from("erp_menu_items").upsert(rows, { onConflict: "href", ignoreDuplicates: true, count: "exact" });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await writeAuditFor(request, admin, { action: "menu.seed", entityType: "erp_menu_items", metadata: { inserted: count ?? rows.length, sent: rows.length } });
     return NextResponse.json({ ok: true, inserted: count ?? rows.length, error: null });
   }
   if (body.item) {
     const { data, error } = await admin.from("erp_menu_items").insert(body.item).select("*").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const row = (data ?? {}) as { id?: string; label?: string; href?: string; app_keys?: string[] | null };
+    await writeAuditFor(request, admin, { action: "menu.create", entityType: "erp_menu_items", entityId: row.id ?? null, metadata: { label: row.label ?? null, href: row.href ?? null, app_keys: row.app_keys ?? [] } });
     return NextResponse.json({ data, error: null });
   }
   return NextResponse.json({ error: "ไม่มีข้อมูล" }, { status: 400 });
@@ -106,7 +110,12 @@ export async function DELETE(request: NextRequest) {
   if (err) return NextResponse.json({ error: err }, { status: 403 });
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "ต้องมี id" }, { status: 400 });
-  const { error } = await supabaseAdmin().from("erp_menu_items").delete().eq("id", id);
+  const admin = supabaseAdmin();
+  // จดก่อนลบ — ลบถาวรแล้วย้อนไม่ได้ ประวัติต้องบอกได้ว่าลบเมนูอะไร อยู่แอปไหน
+  const { data: before } = await admin.from("erp_menu_items").select("id, label, href, icon, app_keys, is_active, permission_key, audience").eq("id", id).maybeSingle();
+  const { error } = await admin.from("erp_menu_items").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const b = (before ?? {}) as { label?: string | null; href?: string | null };
+  await writeAuditFor(request, admin, { action: "menu.delete", entityType: "erp_menu_items", entityId: id, metadata: { label: b.label ?? null, href: b.href ?? null, before: before ?? null } });
   return NextResponse.json({ ok: true, error: null });
 }
