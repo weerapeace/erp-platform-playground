@@ -64,6 +64,12 @@ export type SpecPrintData = { pages: (SpecPrintPage & { pins: SpecPinLike[] })[]
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const EXACT = "-webkit-print-color-adjust:exact;print-color-adjust:exact;";
 const MAX_W = 180, MAX_H = 120;   // กล่องรูปบนกระดาษ A4 (มม.)
+const COL_GAP = 4;                 // ระยะห่างระหว่างรูปในแถวเดียวกัน (มม.)
+/** กรอบรูป 1 ใบเมื่อพิมพ์ n รูป/แถว (เจ้าของขอ 2026-11-12 "2 รูปใน 1 แถว, 3 รูปใน 1 แถว") · k = ย่อหมุด/ป้ายชื่อตามขนาดรูป */
+function specFigureBox(cols: number): { maxW: number; maxH: number; k: number } {
+  const n = cols === 2 || cols === 3 ? cols : 1;
+  return { maxW: (MAX_W - COL_GAP * (n - 1)) / n, maxH: n === 1 ? MAX_H : n === 2 ? 95 : 70, k: n === 1 ? 1 : n === 2 ? 0.9 : 0.8 };
+}
 
 const PX_MM = 0.3;   // ความหนาเส้นบนจอ (px) → มม. บนกระดาษ (ประมาณ)
 
@@ -85,9 +91,10 @@ function shapeSvg(s: MarkupShape, w: number, h: number): string {
 }
 
 /** รูป 1 หน้า + สิ่งที่วาด + หมุด (ขนาดกล่องเป็น มม. ตามสัดส่วนรูป → ตำแหน่งตรงกับบนจอ) */
-function pageFigureHtml(p: SpecPrintData["pages"][number], abs: (u: string) => string, keyUrl: (key: string, w: number) => string): string {
+function pageFigureHtml(p: SpecPrintData["pages"][number], abs: (u: string) => string, keyUrl: (key: string, w: number) => string, box = specFigureBox(1)): string {
   const aspect = p.image_w && p.image_h ? p.image_w / p.image_h : 4 / 3;
-  const w = Math.min(MAX_W, MAX_H * aspect), h = w / aspect;
+  const w = Math.min(box.maxW, box.maxH * aspect), h = w / aspect;
+  const k = box.k, mm = (v: number) => `${(v * k).toFixed(2)}mm`, pt = (v: number) => `${(v * k).toFixed(2)}pt`;
   // เส้นโยงป้ายชื่อหมุด (ใต้สิ่งที่วาด)
   const off = (x: SpecPinLike) => ({ dx: x.label_dx ?? MARKUP_PIN_LABEL_OFFSET.ldx, dy: x.label_dy ?? MARKUP_PIN_LABEL_OFFSET.ldy });
   const leaders = p.pins.map((x) => { const o = off(x); return `<line x1="${((x.x / 100) * w).toFixed(2)}" y1="${((x.y / 100) * h).toFixed(2)}" x2="${(((x.x + o.dx) / 100) * w).toFixed(2)}" y2="${(((x.y + o.dy) / 100) * h).toFixed(2)}" stroke="#7c3aed" stroke-width="0.35"/>`; }).join("");
@@ -97,12 +104,12 @@ function pageFigureHtml(p: SpecPrintData["pages"][number], abs: (u: string) => s
   // ป้ายชื่อข้างหมุด: รูปเล็ก + "เลข · ส่วนประกอบ" + ชื่อวัตถุดิบ
   const labels = p.pins.map((x) => {
     const o = off(x);
-    const img = x.sku_image_key ? `<img src="${esc(abs(keyUrl(x.sku_image_key, 96)))}" style="width:5mm;height:5mm;object-fit:cover;border-radius:0.8mm;flex:none;" />` : "";
-    return `<div style="position:absolute;left:${x.x + o.dx}%;top:${x.y + o.dy}%;transform:translate(${o.dx < 0 ? "-100%" : "0"},-50%);display:flex;align-items:center;gap:1mm;max-width:48mm;padding:0.6mm 1.5mm 0.6mm 0.8mm;background:#fff;border:0.3mm solid #c4b5fd;border-radius:1.2mm;${EXACT}">${img}<div style="line-height:1.15;min-width:0;"><div style="font-size:7pt;font-weight:700;color:#6d28d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.no} · ${esc(x.part_name || "—")}</div><div style="font-size:6.5pt;color:${x.sku_id ? "#334155" : "#b45309"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(x.sku_name || "ยังไม่เลือก SKU")}</div></div></div>`;
+    const img = x.sku_image_key ? `<img src="${esc(abs(keyUrl(x.sku_image_key, 96)))}" style="width:${mm(5)};height:${mm(5)};object-fit:cover;border-radius:0.8mm;flex:none;" />` : "";
+    return `<div style="position:absolute;left:${x.x + o.dx}%;top:${x.y + o.dy}%;transform:translate(${o.dx < 0 ? "-100%" : "0"},-50%);display:flex;align-items:center;gap:1mm;max-width:${mm(48)};padding:0.6mm 1.5mm 0.6mm 0.8mm;background:#fff;border:0.3mm solid #c4b5fd;border-radius:1.2mm;${EXACT}">${img}<div style="line-height:1.15;min-width:0;"><div style="font-size:${pt(7)};font-weight:700;color:#6d28d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.no} · ${esc(x.part_name || "—")}</div><div style="font-size:${pt(6.5)};color:${x.sku_id ? "#334155" : "#b45309"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(x.sku_name || "ยังไม่เลือก SKU")}</div></div></div>`;
   }).join("");
   const pins = p.pins.map((x) =>
-    `<div style="position:absolute;left:${x.x}%;top:${x.y}%;transform:translate(-50%,-50%);width:5.5mm;height:5.5mm;border-radius:50%;background:${x.sku_id ? "#7c3aed" : "#f59e0b"};border:0.5mm solid #fff;color:#fff;font:700 8pt/5.5mm sans-serif;text-align:center;${EXACT}">${x.no}</div>`).join("");
-  return `<div style="margin:2px 0 8px;break-inside:avoid;">
+    `<div style="position:absolute;left:${x.x}%;top:${x.y}%;transform:translate(-50%,-50%);width:${mm(5.5)};height:${mm(5.5)};border-radius:50%;background:${x.sku_id ? "#7c3aed" : "#f59e0b"};border:0.5mm solid #fff;color:#fff;font:700 8pt/5.5mm sans-serif;text-align:center;${EXACT}">${x.no}</div>`).join("");
+  return `<div style="margin:2px 0 8px;break-inside:avoid;width:${w.toFixed(1)}mm;">
 ${p.title ? `<div style="font-size:11px;font-weight:600;color:#334155;margin-bottom:3px;">${esc(p.title)}</div>` : ""}
 <div style="position:relative;width:${w.toFixed(1)}mm;height:${h.toFixed(1)}mm;border:1px solid #e2e8f0;border-radius:4px;overflow:visible;">
 <img src="${esc(abs(p.image_url))}" style="display:block;width:100%;height:100%;object-fit:fill;border-radius:4px;" />${svg}${texts}${labels}${pins}</div></div>`;
@@ -125,9 +132,12 @@ const TH = "text-align:left;font-weight:600;color:#475569;padding:4px 6px;border
 const TD = "padding:4px 6px;border-bottom:1px solid #e2e8f0;vertical-align:middle;";
 
 /** เนื้อกลางโหมด "📐 รายละเอียดงาน": รูป+หมุด → ตารางหมุด → สรุปวัตถุดิบ → ตารางสี */
-export function buildSpecPrintHtml(spec: SpecPrintData, abs: (u: string) => string, keyUrl: (key: string, w: number) => string): string {
+export function buildSpecPrintHtml(spec: SpecPrintData, abs: (u: string) => string, keyUrl: (key: string, w: number) => string, opts: { cols?: number } = {}): string {
   const pins = spec.pages.flatMap((p) => p.pins);
-  const figs = spec.pages.map((p) => pageFigureHtml(p, abs, keyUrl)).join("");
+  const box = specFigureBox(opts.cols ?? 1);
+  const figList = spec.pages.map((p) => pageFigureHtml(p, abs, keyUrl, box)).join("");
+  // หลายรูป/แถว = เรียงซ้าย→ขวา ครบแถวขึ้นแถวใหม่ (รูปไม่ถูกตัดครึ่งข้ามหน้า)
+  const figs = figList && box.k < 1 ? `<div style="display:flex;flex-wrap:wrap;align-items:flex-start;column-gap:${COL_GAP}mm;">${figList}</div>` : figList;
 
   const pinRows = pins.map((x) => `<tr>
 <td style="${TD}width:8mm;text-align:center;font-weight:700;color:${x.sku_id ? "#6d28d9" : "#b45309"};">${x.no}</td>

@@ -200,6 +200,12 @@ const MODE_OPTIONS = [
   { v: "comments", label: "💬 เน้น Comment ลูกค้า" },
   { v: "spec", label: "📐 รายละเอียดงาน" },
 ] as const;
+// 📐 รายละเอียดงาน: กี่รูปต่อแถว (จำต่อคน · เจ้าของขอ 2026-11-12)
+const SPEC_COLS_OPTIONS = [
+  { v: "1", label: "1 รูป/แถว" },
+  { v: "2", label: "2 รูป/แถว" },
+  { v: "3", label: "3 รูป/แถว" },
+] as const;
 const COLS_OPTIONS = [
   { v: "1", label: "ใหญ่ (1 รูป/แถว)" },
   { v: "2", label: "กลาง (2 รูป/แถว)" },
@@ -303,6 +309,9 @@ export default function PrintDesignSheetPage() {
   const cols = colsPref.view;
   const changeMode = (v: DsPrintMode) => { modePref.setView(v); void modePref.saveDefault(v); };
   const changeCols = (v: DsCommentCols) => { colsPref.setView(v); void colsPref.saveDefault(v); };
+  const specColsPref = useViewPref<DsCommentCols>("ds_print_spec_cols", DS_COMMENT_COLS, "1");
+  const specCols = specColsPref.view;
+  const changeSpecCols = (v: DsCommentCols) => { specColsPref.setView(v); void specColsPref.saveDefault(v); };
 
   // เฉพาะไฟล์รูป (เอาไปให้เลือกพิมพ์)
   const imageAtts = useMemo(
@@ -405,7 +414,7 @@ export default function PrintDesignSheetPage() {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     if (mode === "spec") {
       const abs = (u: string) => absUrl(u, origin);
-      const specHtml = spec ? buildSpecPrintHtml(spec, abs, (key, w) => abs(r2ImageUrl(key, w) ?? "")) : "";
+      const specHtml = spec ? buildSpecPrintHtml(spec, abs, (key, w) => abs(r2ImageUrl(key, w) ?? ""), { cols: Number(specCols) }) : "";
       return buildReportHtml(
         { paper_size: template.paper_size, orientation: template.orientation,
           header_html: template.header_html, body_html: DS_SPEC_BODY,
@@ -421,7 +430,7 @@ export default function PrintDesignSheetPage() {
         footer_html: tpl.footer_html, custom_css: tpl.custom_css },
       buildData(sheet, comments, selectedImages, origin, statusMeta, canvasUrl, focus),
     );
-  }, [sheet, comments, selectedImages, template, focusTemplate, statusMeta, canvasUrl, focus, mode, spec]);
+  }, [sheet, comments, selectedImages, template, focusTemplate, statusMeta, canvasUrl, focus, mode, spec, specCols]);
 
   const fileName = docFileName("ใบสั่งตัวอย่าง", sheet ? String(sheet.code ?? "") : null);
 
@@ -444,6 +453,12 @@ export default function PrintDesignSheetPage() {
                 <span className="text-xs text-slate-500">รูปแบบใบ</span>
                 <Seg value={mode} options={MODE_OPTIONS} onChange={changeMode} />
               </div>
+              {mode === "spec" && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">รูปต่อแถว</span>
+                  <Seg value={specCols} options={SPEC_COLS_OPTIONS} onChange={changeSpecCols} />
+                </div>
+              )}
               {mode === "comments" && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">ขนาดรูปใน Comment</span>
