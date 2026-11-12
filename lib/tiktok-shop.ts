@@ -166,9 +166,33 @@ export async function ttsSearchProducts(accessToken: string, shopCipher: string,
   const products = Array.isArray(d.products) ? d.products as Record<string, unknown>[] : [];
   return { products, total: Number(d.total_count) || 0, nextPageToken: str(d.next_page_token) };
 }
-/** รายละเอียดสินค้า 1 ตัว (เอาแค่รูปแรก/หมวด/ชื่อตัวเลือก ไปใช้) */
-export async function ttsGetProduct(accessToken: string, shopCipher: string, productId: string): Promise<Record<string, unknown>> {
-  return ttsApi("GET", `/product/202309/products/${encodeURIComponent(productId)}`, accessToken, { query: { shop_cipher: shopCipher }, scope: PRODUCT_SCOPE });
+/** รายละเอียดสินค้า 1 ตัว · underReview = ฉบับที่ส่งให้ TikTok ตรวจอยู่ (หลังแก้ชื่อ — ค่าเริ่มต้นได้ฉบับที่ขายอยู่) */
+export async function ttsGetProduct(accessToken: string, shopCipher: string, productId: string, opts: { underReview?: boolean } = {}): Promise<Record<string, unknown>> {
+  const query: Record<string, string> = { shop_cipher: shopCipher };
+  if (opts.underReview) query.return_under_review_version = "true";
+  return ttsApi("GET", `/product/202309/products/${encodeURIComponent(productId)}`, accessToken, { query, scope: PRODUCT_SCOPE });
+}
+
+// ───────── แก้สินค้าบนร้านจริง (เฟส A: ชื่อ + เปิด/ปิดขาย) — route ต้องถามผู้ใช้ก่อน + เขียนประวัติทุกครั้ง ─────────
+const PRODUCT_WRITE_SCOPE = "Product Write (seller.product.write)";
+/**
+ * แก้บางช่องของสินค้า (Partial Edit 202509) · ส่งเฉพาะช่องบนสุดที่ต้องการแก้ (ช่องที่ไม่ส่ง = คงเดิม)
+ * ⚠️ แก้แล้ว TikTok ส่งไปตรวจใหม่ (ฉบับเดิมขายต่อจนผ่าน) · ราคา/สต๊อก = มีผลทันที (ยังไม่เปิดให้แก้)
+ * category_version: เอกสารบอก "ร้าน SEA ต้องส่ง v2 เมื่อใช้ API นี้" (ไทย = SEA)
+ */
+export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string }): Promise<Record<string, unknown>> {
+  return ttsApi("POST", `/product/202509/products/${encodeURIComponent(productId)}/partial_edit`, accessToken, {
+    query: { shop_cipher: shopCipher }, body: { ...fields, category_version: "v2" }, scope: PRODUCT_WRITE_SCOPE,
+  });
+}
+/**
+ * เปิดขาย (activate — TikTok ส่งตรวจก่อน สถานะเป็น PENDING) / ปิดขาย (deactivate — ซ่อนทันที) · สูงสุด 20 ตัวต่อครั้ง
+ * คืน data ดิบ — ต้องเช็ก data.errors[] แม้ code = 0 (tiktokDisplayErrors ใน lib/tiktok-listing-edit)
+ */
+export async function ttsSetProductsActive(accessToken: string, shopCipher: string, productIds: string[], open: boolean): Promise<Record<string, unknown>> {
+  return ttsApi("POST", `/product/202309/products/${open ? "activate" : "deactivate"}`, accessToken, {
+    query: { shop_cipher: shopCipher }, body: { product_ids: productIds.slice(0, 20) }, scope: PRODUCT_WRITE_SCOPE,
+  });
 }
 
 /** โดน TikTok จำกัดความถี่ไหม (ลองใหม่ได้) */

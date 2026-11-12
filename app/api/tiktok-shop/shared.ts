@@ -3,7 +3,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import { lazConnHealth } from "@/lib/lazada";
-import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { keepSkuStatus, tiktokListingView, type TiktokListingView } from "@/lib/tiktok-listing-edit";
+import { isGoneStatus } from "@/lib/platform-listing-health";
 export { baseUrl, buildState, parseState, getPlatformId } from "../lazada/shared";
 
 export type TtsConnMeta = {
@@ -85,4 +87,71 @@ export async function ttsTokenOrReason(admin: SupabaseClient, brandId: string, p
   } catch (e) {
     return { ok: false, reason: `ต่ออายุการเชื่อมต่อ TikTok Shop ไม่สำเร็จ (${ttsErrorText(e)}) — ${TTS_RECONNECT_HINT}` };
   }
+}
+
+// ───────── สินค้า 1 ตัวในลิ้นชัก (ดึงสด / แก้ชื่อ / เปิดปิดขาย) — ตัวเดียวกันทุก route ─────────
+export type TtsListingRow = { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; price: number | null; status: string | null; raw: Record<string, unknown> | null };
+
+/** ดึงสินค้าซ้ำแบบรอแล้วลองใหม่ถ้า TikTok จำกัดความถี่ (0.8 วิ · 2 วิ) */
+export async function ttsGetProductRetry(accessToken: string, cipher: string, productId: string, opts: { underReview?: boolean } = {}): Promise<Record<string, unknown>> {
+  let last: unknown = null;
+  for (const wait of [800, 2000, 0]) {
+    try { return await ttsGetProduct(accessToken, cipher, productId, opts); }
+    catch (e) { last = e; if (!ttsIsRateLimit(e) || !wait) break; await new Promise((r) => setTimeout(r, wait)); }
+  }
+  throw last;
+}
+
+/**
+ * โหลดรายการในระบบ + ดึงสินค้าตัวนี้ "สด" จาก TikTok (Get Product) + กุญแจ/ร้านที่ใช้ได้
+ * ok=false → error ภาษาคน + HTTP status ตอบผู้ใช้ได้เลย
+ */
+export async function loadTtsListingLive(admin: SupabaseClient, listingId: string, userId: string | null): Promise<
+  { ok: true; row: TtsListingRow; detail: Record<string, unknown>; productId: string; accessToken: string; cipher: string } | { ok: false; error: string; status: number }
+> {
+  const { data: l } = await admin.from("platform_catalog_listings")
+    .select("id, platform_id, brand_id, external_product_id, title, price, status, raw").eq("id", listingId).maybeSingle();
+  const row = l as TtsListingRow | null;
+  if (!row) return { ok: false, error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)", status: 404 };
+  const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
+  if ((pf as { code?: string } | null)?.code !== "tiktok") return { ok: false, error: "ใช้ได้เฉพาะสินค้าบน TikTok Shop", status: 400 };
+  const productId = String(row.external_product_id ?? "").trim();
+  if (!productId || !row.brand_id) return { ok: false, error: "รายการนี้ไม่มีรหัสสินค้าบน TikTok", status: 400 };
+  const tok = await ttsTokenOrReason(admin, row.brand_id, row.platform_id, userId);
+  if (!tok.ok) return { ok: false, error: tok.reason, status: 400 };
+  const cipher = tok.meta.shops?.[0]?.cipher;
+  if (!cipher) return { ok: false, error: "ยังไม่รู้รหัสร้าน TikTok — กด ตรวจการเชื่อมต่อ ที่บัญชีแพลตฟอร์มก่อน", status: 400 };
+  try {
+    const detail = await ttsGetProductRetry(tok.accessToken, cipher, productId);
+    if (!detail || !detail.id) return { ok: false, error: `ไม่พบสินค้า #${productId} บน TikTok (อาจถูกลบไปแล้ว)`, status: 404 };
+    return { ok: true, row, detail, productId, accessToken: tok.accessToken, cipher };
+  } catch (e) {
+    console.warn(`[tiktok] ดึงสินค้า #${productId} ไม่สำเร็จ: ${(e as Error).message}`);
+    return { ok: false, error: ttsErrorText(e), status: 502 };
+  }
+}
+
+/**
+ * อัปเดตสำเนาย่อในระบบจากรายละเอียดที่เพิ่งดึง — ตัวแปลงเดียวกับดึงทั้งร้าน (ttsProductToCatalogItem)
+ * เจอบนร้าน = ล้างป้าย "ไม่อยู่บนร้านแล้ว" · ไม่แตะคู่ที่จับไว้ · คืน error หรือ null
+ */
+export async function saveTtsSlimCopy(admin: SupabaseClient, row: TtsListingRow, detail: Record<string, unknown>): Promise<string | null> {
+  const slim = ttsProductToCatalogItem(detail, ttsDetailExtras(detail));
+  if (!slim) return "ข้อมูลจาก TikTok ไม่ครบ";
+  slim.raw.tiktok.skus = keepSkuStatus(slim.raw.tiktok.skus, row.raw?.tiktok);
+  const now = new Date().toISOString();
+  const { error } = await admin.from("platform_catalog_listings").update({
+    raw: { ...(row.raw ?? {}), ...slim.raw },
+    title: slim.title ?? row.title, price: slim.price ?? row.price, status: slim.status ?? (isGoneStatus(row.status) ? null : row.status),
+    sku_code: slim.skus[0] ?? null, last_imported_at: now, updated_at: now,
+  }).eq("id", row.id);
+  return error ? error.message : null;
+}
+
+/** มุมมองในลิ้นชัก + ถ้ากำลังตรวจอยู่ ดึงฉบับที่ส่งตรวจมาด้วย (โชว์ "ชื่อใหม่รอ TikTok ตรวจ") — ดึงฉบับตรวจไม่ได้ = โชว์ฉบับขายอยู่ */
+export async function ttsViewWithReview(accessToken: string, cipher: string, detail: Record<string, unknown>): Promise<TiktokListingView | null> {
+  const v = tiktokListingView(detail);
+  if (!v || !(v.auditStatus === "AUDITING" || v.status === "PENDING")) return v;
+  try { return tiktokListingView(detail, await ttsGetProduct(accessToken, cipher, v.productId, { underReview: true })); }
+  catch { return v; }
 }

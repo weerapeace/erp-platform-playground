@@ -63,6 +63,17 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - ผลรอบ = `recordWorkerRun("tiktok-orders")` · audit เฉพาะรอบที่มีออเดอร์ใหม่/มีปัญหา (actor `tiktok_orders_cron`)
 - ⚠️ ยังไม่อยู่ในออฟฟิศทีม AI (`lib/ai-office`) — ฉากพิกเซลโต๊ะเต็ม 20/20 ต้องตัดสินใจขยายก่อน
 
+## แก้บนร้าน เฟส A: ชื่อ + เปิด/ปิดขาย (2026-11-12 · เจ้าของเลือก "เฟส A ชื่อ/เปิดปิด")
+- ที่ไหน: หน้าสินค้าบนแพลตฟอร์ม › กดสินค้า TikTok › ลิ้นชัก (`components/platform-catalog/tiktok-listing-panels.tsx` เสียบใน `listing-drawer`) — ข้อมูลสดจาก TikTok ทุกครั้งที่เปิด
+- กฎกลาง `lib/tiktok-listing-edit.ts` (pure + เทสต์ `lib/__tests__/tiktok-listing-edit.test.ts` · **ห้าม import lib/tiktok-shop** เพราะมีโค้ดเซ็น): `tiktokListingView` · `planTiktokTitle` (ไทย 25–255 ตัวอักษร) · `planTiktokDisplay` · `tiktokDisplayErrors`
+- `GET/POST /api/tiktok-shop/listing-detail` — ดึงสด (POST = อัปเดตสำเนาย่อด้วย) · กำลังตรวจอยู่ → ดึงฉบับรอตรวจ (`return_under_review_version=true`) มาโชว์ "ชื่อใหม่รอ TikTok ตรวจ"
+- `POST /api/tiktok-shop/listing-edit {listing_id, before_title, title}` (products.platforms.publish) — ดึงสดก่อน ชื่อบนร้านเปลี่ยน = **409 ไม่ส่งทับ** → Partial Edit 202509 ส่งแค่ `title` (+ `category_version: v2` ตามเอกสาร SEA) → ดึงกลับ → สำเนาย่อ → audit `tiktok_listing_edit`
+  - ⚠️ แก้ชื่อ = TikTok ส่งไปตรวจใหม่ ระหว่างตรวจร้านยังขายชื่อเดิม · ตรวจไม่ผ่าน = ชื่อเดิมอยู่ต่อ · อาจมีโควตาส่งตรวจต่อวัน
+- `POST /api/tiktok-shop/listing-display {listing_id, open}` (products.platforms.publish) — ทั้งสินค้า (TikTok ไม่มีทีละตัวเลือกใน API นี้) · ปิด = Deactivate ซ่อนทันที · เปิด = Activate → **PENDING รอตรวจ** แล้วค่อยกลับมาเปิด · เช็ก `data.errors[]` แม้ code 0 · audit `tiktok_listing_display`
+- เปิด/ปิดได้เฉพาะ `product_status` ACTIVATE / SELLER_DEACTIVATED / PLATFORM_DEACTIVATED (สถานะอื่นบอกให้ไปจัดการใน Seller Center)
+- ยังดูอย่างเดียว: รายละเอียด (HTML มีรูปที่ฝากกับ TikTok) · รูป · ราคา · สต๊อก (BigSeller ยังซิงค์สต๊อก)
+- ใช้ scope `seller.product.write` (ร้าน Louis Montini ได้แล้ว)
+
 ## ขั้นต่อไป (ยังไม่ทำ)
-2. ดึงหมวดหมู่ TikTok (`/product/202309/categories`) เติมการจับคู่หมวด
-4. แก้สินค้า/ราคา/สต๊อก — ทีละเฟสตามที่เจ้าของอนุมัติ
+2. ~~ดึงหมวดหมู่ TikTok~~ (ทำแล้ว c51b1adf — รอเจ้าของกดดึง แล้วร่างจับคู่ 10 หมวดกลาง)
+4. เฟส B ราคา · C รูป/กล่อง · D ลงสินค้าใหม่ (ต้องมีหมวด) · E สต๊อก (หลังเลิกซิงค์ BigSeller) — ทีละเฟสตามที่เจ้าของอนุมัติ

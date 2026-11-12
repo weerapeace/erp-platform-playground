@@ -11,6 +11,9 @@
  * Lazada: แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก Lazada → ./lazada-listing-panels (GET /api/lazada/listing-detail)
  *   เฟส 2: แก้ชื่อ/รายละเอียด/จุดเด่น (useLazadaEdit → /api/lazada/listing-edit) + เปิด/ปิดขาย ทั้งสินค้า/ทีละตัวเลือก (useLazadaDisplay → /listing-display)
  *   หัว/แท็บจับคู่/ประวัติ ใช้ร่วมกับ LINE · แผนเปิดให้แก้ขึ้น Lazada ทีละเฟส: docs/lazada-connector.md
+ * TikTok Shop: แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก TikTok → ./tiktok-listing-panels (GET /api/tiktok-shop/listing-detail)
+ *   เฟส A: แก้ชื่อ (useTiktokEdit → /api/tiktok-shop/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useTiktokDisplay → /listing-display) · ที่เหลือดูอย่างเดียว
+ *   แผนเฟส + กติกา TikTok: docs/tiktok-shop-connector.md
  *
  * ข้อมูล: GET /api/platform-catalog?view=listing (รายละเอียด+ประวัติ) + ?view=variants (ตัวเลือก↔SKU + ราคาที่ระบบจะส่ง)
  * ส่ง: POST /api/line-shopping/listing-edit · กฎกลาง lib/line-listing-edit (planLineEdit — หน้าเว็บกับ API ใช้ตัวเดียวกัน)
@@ -38,6 +41,7 @@ import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
 import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
+import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing } from "./tiktok-listing-panels";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
@@ -105,7 +109,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       setDetail(d.detail);
       setVariants(v && !v.error ? v : null);
       setForm(d.detail.line ? structuredClone(d.detail.line.edit) : null);
-      if (fresh) setTab(d.detail.line || d.detail.platform_code === "lazada" ? "info" : "match");
+      if (fresh) setTab(d.detail.line || d.detail.platform_code === "lazada" || d.detail.platform_code === "tiktok" ? "info" : "match");
     }).catch(() => { if (alive) setError("โหลดรายละเอียดไม่สำเร็จ ลองใหม่อีกครั้ง"); });
     return () => { alive = false; };
   }, [listingId, reload]);
@@ -125,6 +129,13 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const lazDefs = useLazadaAttrDefs(isLazada ? detail?.brand_id ?? null : null, isLazada ? laz.view?.categoryId ?? null : null);
   const lazEdit = useLazadaEdit(laz, lazCanEdit, useCallback((name: string) => { if (listingId) onChanged?.(listingId, { title: name }); setReload((n) => n + 1); }, [listingId, onChanged]), lazDefs.defs);
   const lazDisp = useLazadaDisplay(laz, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
+
+  // TikTok Shop: ดึงสดเหมือน Lazada · เฟส A แก้ชื่อ + เปิด/ปิดขาย (ถามก่อนเสมอ · สิทธิ์ products.platforms.publish)
+  const isTiktok = detail?.platform_code === "tiktok" && detail.id === listingId;
+  const tt = useTiktokListing(isTiktok ? listingId : null, useCallback(() => setReload((n) => n + 1), []));
+  const ttCanEdit = canPublish && isTiktok && detail?.status !== "removed";
+  const ttEdit = useTiktokEdit(tt, ttCanEdit, useCallback((title: string) => { if (listingId) onChanged?.(listingId, { title }); setReload((n) => n + 1); }, [listingId, onChanged]));
+  const ttDisp = useTiktokDisplay(tt, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
 
   const disp = useLineDisplay((results) => {
     const r = results.find((x) => x.listing_id === listingId);
@@ -190,8 +201,9 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
 
   const line = detail?.line ?? null;
   const lazView = isLazada ? laz.view : null;
-  const imgCount = line ? line.images.length : lazView ? lazView.images.length : null;
-  const optCount = form ? form.variants.length : lazView ? lazView.skus.length : null;
+  const ttView = isTiktok ? tt.view : null;
+  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? ttView.images.length : null;
+  const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
     ...(isLazada ? [{ key: "attrs" as Tab, label: "ข้อมูลเฉพาะ" }] : []),
@@ -248,14 +260,14 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const priceDiffN = form ? form.variants.filter((v) => { const r = rowByKey.get(v.id); return r?.erp_pay != null && v.pay != null && Math.abs(v.pay - r.erp_pay) >= 1; }).length : 0;
 
   // ---------- หัวลิ้นชัก ----------
-  const cover = line?.images[0] ?? lazView?.images[0] ?? null;
+  const cover = line?.images[0] ?? lazView?.images[0] ?? ttView?.images[0] ?? null;
   const header = detail && (
     <div className="flex items-start gap-3 border-b border-slate-100 pb-3">
       {cover
         ? <button type="button" onClick={() => setLightbox(0)} className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-50"><img src={cover} alt="" className="h-full w-full object-cover" /></button>
         : <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-300"><Icon name="image" /></div>}
       <div className="min-w-0 flex-1">
-        <div className="line-clamp-2 text-sm font-medium text-slate-800" title={detail.title ?? ""}>{form?.name || lazView?.name || detail.title || "—"}</div>
+        <div className="line-clamp-2 text-sm font-medium text-slate-800" title={detail.title ?? ""}>{form?.name || lazView?.name || ttView?.title || detail.title || "—"}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
           <span className="font-mono">#{detail.external_product_id ?? "—"}</span>
           {detail.matched_code ? <span className="font-mono text-emerald-700">จับคู่ {detail.matched_code}</span> : <span className="text-amber-700">ยังไม่จับคู่</span>}
@@ -277,6 +289,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         </div>
       )}
       {isLazada && detail.status !== "removed" && <LazadaHeaderStatus state={laz} disp={lazCanEdit ? lazDisp : null} dirty={lazEdit.dirty} />}
+      {isTiktok && detail.status !== "removed" && <TiktokHeaderStatus state={tt} disp={ttCanEdit ? ttDisp : null} dirty={ttEdit.dirty} />}
     </div>
   );
 
@@ -439,11 +452,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700 disabled:opacity-40"><Icon name="upload" />บันทึกขึ้น LINE</button>
     </div>
   ) : detail?.line && !canPublish ? <span className="text-xs text-slate-400">ดูอย่างเดียว — ไม่มีสิทธิ์ส่งขึ้นร้าน</span>
-    : isLazada ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน Lazada แล้ว — แก้ไม่ได้</span> : <LazadaEditFooter edit={lazEdit} state={laz} />) : undefined;
+    : isLazada ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน Lazada แล้ว — แก้ไม่ได้</span> : <LazadaEditFooter edit={lazEdit} state={laz} />)
+    : isTiktok ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน TikTok แล้ว — แก้ไม่ได้</span> : <TiktokEditFooter edit={ttEdit} state={tt} />) : undefined;
 
   return (
     <>
-      <Drawer open={!!listingId} onClose={onClose} title="สินค้าบนร้าน" size="xl" storageKey="platform-listing-drawer" hasUnsavedChanges={dirty || (isLazada && lazEdit.dirty)} footer={footer}>
+      <Drawer open={!!listingId} onClose={onClose} title="สินค้าบนร้าน" size="xl" storageKey="platform-listing-drawer" hasUnsavedChanges={dirty || (isLazada && lazEdit.dirty) || (isTiktok && ttEdit.dirty)} footer={footer}>
         {error ? <ErrorState title={error} onRetry={() => setReload((n) => n + 1)} />
           : !detail ? <LoadingState label="กำลังโหลดสินค้าจากร้าน…" />
           : (
@@ -459,6 +473,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
+                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} /> : <TiktokOptionsPanel state={tt} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -481,7 +496,10 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {disp.dialog}
       {isLazada && lazEdit.dialog}
       {isLazada && lazDisp.dialog}
+      {isTiktok && ttEdit.dialog}
+      {isTiktok && ttDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+      {!line && ttView && <ImageLightbox images={ttView.images.map((u) => ({ url: u }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && lazView && <ImageLightbox images={(lazEdit.form?.images ?? lazView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
 
       {/* เลือกรูป: เพิ่มรูปสินค้าจากคลังรูปในระบบ / เลือกรูปให้ตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ) */}

@@ -269,6 +269,12 @@ export function listingHistoryText(meta: unknown): string {
     return `แก้ราคาบน Lazada ${n} ตัวเลือก${m.ok === false ? ` — ${Number(m.sent) > 0 ? "บางส่วน" : ""}ไม่สำเร็จ: ${str(m.error)}` : ""}`;
   }
   if (src === "lazada_listing_display") return `${str(m.summary) || (m.open ? "เปิดขาย" : "ปิดขาย")} บน Lazada${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
+  // TikTok Shop (app/api/tiktok-shop/listing-edit · listing-display)
+  if (src === "tiktok_listing_edit") {
+    const parts = [...new Set(arr(m.changes).map(obj).filter((c): c is Obj => !!c).map((c) => str(c.label)))];
+    return `แก้บน TikTok: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.audit_status) === "AUDITING" ? " (TikTok ส่งไปรอตรวจ)" : ""}`;
+  }
+  if (src === "tiktok_listing_display") return `${m.open ? "เปิดขาย" : "ปิดขาย"}บน TikTok${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.summary).includes("รอ") ? " (รอ TikTok ตรวจ)" : ""}`;
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
   if (ig) return ig.to ? `ตั้งไม่ต้องจับคู่${m.reason ? ` · ${str(m.reason)}` : ""}` : "เลิกข้าม (กลับไปรอจับคู่)";
