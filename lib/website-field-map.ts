@@ -138,9 +138,8 @@ export interface FieldMap {
   /** rules = ชื่อหมวด ERP → หมวดเว็บ · tagRules = 🏷️ รหัสแท็ก → หมวดเว็บ (มาก่อน rules · lib/website-tag-categories) */
   /**
    * centralRules = หมวดกลางสำหรับลงขาย (platform_central_categories.id) → หมวดเว็บของร้านนี้ (ตั้งที่หน้าจับคู่หมวดกลาง · มาก่อน rules)
-   * hidden = รุ่น (parent id) ที่ซ่อนจากกระดานจัดหมวด (ไม่ต้องจัด) — ไม่กระทบหน้าเว็บ (ปิดขาย = is_published แยกกัน)
    */
-  category: { default: WebCategory; rules: Record<string, WebCategory>; tagRules: Record<string, WebCategory>; centralRules: Record<string, WebCategory>; hidden: string[] };
+  category: { default: WebCategory; rules: Record<string, WebCategory>; tagRules: Record<string, WebCategory>; centralRules: Record<string, WebCategory> };
   /** รายการหมวดของร้านนี้ — เจ้าของเพิ่ม/แก้/ลบเองได้ในแท็บจับคู่ฟิลด์ */
   categories: WebCategoryDef[];
   image: { useCover: boolean; source: ImageSource };
@@ -155,7 +154,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   unit: { default: "ชิ้น" },
   options: { source: "sku_color", label: "แบบ/สี" },
   options2: { source: "none", label: "ตัวเลือกที่ 2" },
-  category: { default: "hardware", rules: {}, tagRules: {}, centralRules: {}, hidden: [] },
+  category: { default: "hardware", rules: {}, tagRules: {}, centralRules: {} },
   categories: DEFAULT_WEB_CATEGORIES,
   image: { useCover: true, source: "parent" },
   collections: [],
@@ -183,19 +182,6 @@ export function cleanCentralRules(raw: unknown, catKeys: string[]): Record<strin
     if (id.trim() && k && catKeys.includes(k)) out[id.trim()] = k;
   }
   return out;
-}
-
-/** 🙈 รุ่นที่ซ่อนจากกระดานจัดหมวด — id ไม่ซ้ำ · สูงสุด 5,000 */
-export function cleanHiddenIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out = new Set<string>();
-  for (const v of raw) {
-    if (typeof v !== "string") continue;
-    const id = v.trim().slice(0, 64);
-    if (id) out.add(id);
-    if (out.size >= 5000) break;
-  }
-  return [...out];
 }
 
 /**
@@ -279,13 +265,12 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
       label: str(g("options2").label, d.options2.label).slice(0, 60),
     },
     // 🏷️ กฎแท็ก → หมวด: ต้องผ่าน normalize ด้วย ไม่งั้นบันทึกหน้าอื่นแล้วกฎหาย (normalize เก็บเฉพาะช่องที่รู้จัก)
-    // กฎหมวดกลาง + รายการซ่อนจากกระดาน ก็เหมือนกัน (ช่องที่ normalize ไม่รู้จักจะหายตอนบันทึกหน้าอื่น)
+    // กฎหมวดกลาง ก็เหมือนกัน (ช่องที่ normalize ไม่รู้จักจะหายตอนบันทึกหน้าอื่น)
     category: {
       default: defaultCat,
       rules,
       tagRules: cleanTagRules(g("category").tagRules, catKeys),
       centralRules: cleanCentralRules(g("category").centralRules, catKeys),
-      hidden: cleanHiddenIds(g("category").hidden),
     },
     categories: cats,
     collections: normalizeWebCollections(r.collections),

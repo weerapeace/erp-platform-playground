@@ -8,7 +8,7 @@
  *      คลิก = เลือก · Shift+คลิก = เลือกเป็นช่วง · ดับเบิลคลิก = เปิดตั้งค่าเว็บของสินค้า (drawer เดิมของหน้า)
  *      ชิป "ย้าย N ตัวไป" (ปุ่มลัด 1–9) · ลากไปวางบนหมวดทางซ้าย · ✕ เอาออกจากหมวดนี้ · ↩ ย้อน (Ctrl+Z) · + เพิ่มหมวด/หมวดย่อย
  *      ↪ ย้าย… / ＋ เพิ่มไปหมวด… = ป๊อปติ๊กหลายหมวด (กางหมวดหลักดูหมวดย่อย) แล้วกดทีเดียว · กองยังไม่ได้จัด = ตั้งเป็นชุดที่ติ๊ก (lib applyTargets)
- *      🙈 ซ่อน = ไม่ต้องจัด (ไม่ปิดขาย) → กอง "ที่ซ่อนไว้" กดเอากลับได้ · ย้อนได้ (field_map.category.hidden · action "sortHide")
+ *      👁 ตัวที่ปิดขาย (ป้าย "ซ่อน"): แสดง / ไม่แสดง = มุมมองเท่านั้น (ต่อคน · useUserPref website_sorter_show_unpublished) — ไม่เปลี่ยนสถานะขาย
  *      → POST listings action "setCategories" (บันทึกทันที + audit · null = กลับเป็นยังไม่ได้จัด) · "addCategory" (เพิ่มหมวด)
  * กติกาการย้าย = lib/website-category-sort (pure + เทสต์) · ต้นไม้หมวด = lib/website-category-tree · ป๊อปเพิ่มหมวด = ตัวเดียวกับแท็บ 📂 หมวดหมู่
  */
@@ -51,12 +51,11 @@ import {
   lacksSub,
   shortcutTargets,
   applyTargets,
-  toggleHidden,
-  HIDDEN,
 } from "@/lib/website-category-sort";
 import { useUserPref } from "@/lib/use-user-pref";
 import { SearchPick } from "@/components/search-pick";
 import { Popover } from "@/components/popover";
+import { Icon } from "@/components/icon";
 import type {
   CategoryDef,
   Listing,
@@ -85,8 +84,7 @@ type Snap = {
   webCategories: string[] | null;
   categories: string[];
 };
-/** hide = ขั้นที่เป็นการซ่อน/เอากลับ (ย้อน = ทำกลับด้าน) */
-type UndoStep = { label: string; items: Snap[]; hide?: { ids: string[]; hidden: boolean } };
+type UndoStep = { label: string; items: Snap[] };
 type Row = {
   node: string;
   label: string;
@@ -244,15 +242,6 @@ export function WebsiteCategorySorter({
     if (!step || busy) return;
     setBusy(true);
     try {
-      if (step.hide) {
-        const back = !step.hide.hidden;
-        const ids = step.hide.ids;
-        const j = await post({ action: "sortHide", parentIds: ids, hidden: back });
-        setHiddenIds((h) => (Array.isArray(j.hidden) ? (j.hidden as string[]) : toggleHidden(h, ids, back)));
-        setUndo((u) => u.slice(0, -1));
-        toast.success(`ย้อนแล้ว: ${step.label}`);
-        return;
-      }
       await saveCats(
         step.items.map((s) => ({
           parentId: s.parentId,
@@ -272,11 +261,11 @@ export function WebsiteCategorySorter({
 
   /* ───────── ขั้น 1 ⚡ ใส่หมวดหลักจากหมวด ERP ───────── */
   const [rules, setRules] = useState<Record<string, string> | null>(null);
-  // 🙈 รุ่นที่ซ่อนจากกระดาน (ไม่ต้องจัด) — โหลดพร้อมกฎหมวดจาก field-map · ไม่กระทบหน้าเว็บ
-  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
-  const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
-  const boardListings = useMemo(() => listings.filter((l) => !hiddenSet.has(l.parentId)), [listings, hiddenSet]);
-  const hiddenListings = useMemo(() => listings.filter((l) => hiddenSet.has(l.parentId)), [listings, hiddenSet]);
+  // 👁 มุมมอง: ตัวที่ปิดขาย (ป้าย "ซ่อน") แสดง / ไม่แสดง บนกระดาน — ต่อคน · ไม่เปลี่ยนข้อมูล (สินค้ายังปิดขายเหมือนเดิม)
+  //    ขั้น 1 ⚡ ยังนับ/ใส่หมวดให้ตัวที่ปิดขายด้วย (เปิดขายทีหลังหมวดจะครบ) — บอกจำนวนไว้ที่หัวขั้น 1
+  const [showOff, setShowOff] = useUserPref<boolean>("website_sorter_show_unpublished", true, (v) => (typeof v === "boolean" ? v : null));
+  const offCount = useMemo(() => listings.filter((l) => !l.published).length, [listings]);
+  const boardListings = useMemo(() => (showOff ? listings : listings.filter((l) => l.published)), [listings, showOff]);
   const [defCat, setDefCat] = useState("");
   useEffect(() => {
     let off = false;
@@ -291,7 +280,6 @@ export function WebsiteCategorySorter({
             : {},
         );
         setDefCat(typeof c.default === "string" ? c.default : "");
-        setHiddenIds(Array.isArray(c.hidden) ? (c.hidden as unknown[]).filter((x): x is string => typeof x === "string") : []);
       })
       .catch(() => {
         if (!off) setRules({});
@@ -301,7 +289,8 @@ export function WebsiteCategorySorter({
     };
   }, [shop.slug]);
 
-  const unsorted = useMemo(() => boardListings.filter(isUnsorted), [boardListings]);
+  const unsorted = useMemo(() => listings.filter(isUnsorted), [listings]);
+  const offUnsorted = useMemo(() => unsorted.filter((l) => !l.published).length, [unsorted]);
   const groups = useMemo(() => groupByErp(unsorted), [unsorted]);
   const [picks, setPicks] = useState<Record<string, string>>({});
   const ruleOf = (name: string) =>
@@ -395,9 +384,8 @@ export function WebsiteCategorySorter({
       for (const r of rows)
         if (inNode(list, r.node, cats)) m.set(r.node, (m.get(r.node) ?? 0) + 1);
     }
-    m.set(HIDDEN, hiddenListings.length);
     return m;
-  }, [rows, boardListings, hiddenListings, listOf, cats]);
+  }, [rows, boardListings, listOf, cats]);
 
   const [node, setNode] = useState<string>(NONE);
   // เปิดครั้งแรก: ไม่มีกองยังไม่ได้จัด = ไปกอง "ยังไม่มีหมวดย่อย" กองแรกที่มีของ
@@ -413,7 +401,7 @@ export function WebsiteCategorySorter({
   }, [nodeInit, listings.length, counts, rows]);
   // หมวดที่เปิดอยู่ถูกลบ → กลับกองยังไม่ได้จัด
   useEffect(() => {
-    if (node !== HIDDEN && !rows.some((r) => r.node === node)) setNode(NONE);
+    if (!rows.some((r) => r.node === node)) setNode(NONE);
   }, [rows, node]);
 
   const [q, setQ] = useState("");
@@ -422,13 +410,12 @@ export function WebsiteCategorySorter({
   const items = useMemo(() => {
     const t = q.trim().toLowerCase();
     const hit = (l: Listing) => !t || `${nameOf(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(t);
-    if (node === HIDDEN) return hiddenListings.filter(hit);
     const list = boardListings.filter((l) => inNode(listOf.get(l.parentId) ?? [], node, cats) && hit(l));
     const main = node === NONE || nodeMain(node) ? null : mainOf(cats, node);
     if (sortMode !== "nosub" || !main || !childCategories(cats, main).length) return list;
     const lacks = (l: Listing) => (lacksSub(listOf.get(l.parentId) ?? [], main, cats) ? 0 : 1);
     return [...list].sort((a, b) => lacks(a) - lacks(b));
-  }, [boardListings, hiddenListings, listOf, node, cats, q, sortMode]);
+  }, [boardListings, listOf, node, cats, q, sortMode]);
 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [last, setLast] = useState<number | null>(null);
@@ -458,9 +445,9 @@ export function WebsiteCategorySorter({
     setLast(i);
   };
 
-  const curMain = node === NONE || node === HIDDEN ? null : (nodeMain(node) ?? mainOf(cats, node));
-  const isSub = node !== NONE && node !== HIDDEN && !nodeMain(node) && mainOf(cats, node) !== node;
-  const targets = useMemo(() => (node === HIDDEN ? [] : quickTargets(node, cats)), [node, cats]);
+  const curMain = node === NONE ? null : (nodeMain(node) ?? mainOf(cats, node));
+  const isSub = node !== NONE && !nodeMain(node) && mainOf(cats, node) !== node;
+  const targets = useMemo(() => quickTargets(node, cats), [node, cats]);
   // ⭐ หมวดโปรด (ต่อคน ต่อร้าน) — ปุ่มบนแถบต่อจากปลายทางปกติ (ปุ่มลัดเลขต่อกัน) · ปัก/ถอนจากช่องค้นหาหมวดอื่น
   const [favRaw, setFavs] = useUserPref<string[]>(`website_sorter_favs_${shop.id}`, [], (v) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null));
   const favs = useMemo(() => favRaw.filter((k) => cats.some((c) => c.key === k)), [favRaw, cats]);
@@ -481,7 +468,7 @@ export function WebsiteCategorySorter({
     );
   };
   const move = (ids: string[], target: string) => {
-    if (!ids.length || busy || target === node || node === HIDDEN) return;
+    if (!ids.length || busy || target === node) return;
     // มาจากกองยังไม่ได้จัด / ไปกองพิเศษ = ย้ายอย่างเดียว · ไม่งั้นถาม (หรือใช้คำตอบที่จำไว้)
     if (canAddTo(node, target)) {
       if (pickMode === "add") return addTo(ids, target);
@@ -532,7 +519,7 @@ export function WebsiteCategorySorter({
 
   // ↪ ย้าย… / ＋ เพิ่มไปหมวด… — ติ๊กหลายหมวดในป๊อปแล้วกดทีเดียว (กติกา lib applyTargets)
   const applyMany = (ids: string[], picks: string[], how: "move" | "add") => {
-    if (!ids.length || busy || !picks.length || node === HIDDEN) return;
+    if (!ids.length || busy || !picks.length) return;
     const from = node;
     const names = picks.map(labelOf).join(" + ");
     void change(
@@ -541,27 +528,6 @@ export function WebsiteCategorySorter({
       how === "add" ? `เพิ่ม {n} ตัวเข้า ${names}` : `ย้าย {n} ตัวไป ${names}`,
       picks.join(","),
     );
-  };
-
-  // 🙈 ซ่อน / 👁 เอากลับ (optimistic · พลาด = คืนค่า · ย้อนได้)
-  const hideNow = async (ids: string[], hide: boolean) => {
-    if (!ids.length || busy) return;
-    const before = hiddenIds;
-    const label = hide ? `ซ่อน ${ids.length} ตัว` : `เอากลับ ${ids.length} ตัว`;
-    setHiddenIds(toggleHidden(before, ids, hide));
-    setSel(new Set());
-    setBusy(true);
-    try {
-      const j = await post({ action: "sortHide", parentIds: ids, hidden: hide });
-      if (Array.isArray(j.hidden)) setHiddenIds(j.hidden as string[]);
-      setUndo((u) => [...u.slice(-19), { label, items: [], hide: { ids, hidden: hide } }]);
-      toast.success(hide ? `${label}แล้ว — ดู/เอากลับได้ที่กอง "ที่ซ่อนไว้" (หน้าเว็บไม่เปลี่ยน)` : `${label}แล้ว`);
-    } catch {
-      setHiddenIds(before);
-      toast.error(hide ? "ซ่อนไม่สำเร็จ — คืนค่าเดิมแล้ว" : "เอากลับไม่สำเร็จ — คืนค่าเดิมแล้ว");
-    } finally {
-      setBusy(false);
-    }
   };
 
   // ⌨️ เลข 1–9 = ย้ายไปชิปนั้น · Esc = ยกเลิกเลือก · Ctrl+Z = ย้อน (ไม่ทำงานตอนพิมพ์ในช่อง/มีหน้าต่างเปิดทับ)
@@ -640,8 +606,7 @@ export function WebsiteCategorySorter({
         const ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME) || "[]");
         if (!Array.isArray(ids)) return;
         const list = ids.filter((x): x is string => typeof x === "string");
-        if (target === HIDDEN) void hideNow(list, true);
-        else move(list, target);
+        move(list, target);
       } catch {
         /* ไม่ใช่ของเรา */
       }
@@ -688,6 +653,7 @@ export function WebsiteCategorySorter({
               </span>{" "}
               <span className="text-xs text-amber-800">
                 ยังไม่ได้จัด {unsorted.length} ตัว
+                {!showOff && offUnsorted > 0 && ` (รวมตัวที่ปิดขาย ${offUnsorted} ตัว ที่ซ่อนจากกระดานอยู่)`}
               </span>
             </span>
             <span className="text-xs text-slate-500">
@@ -791,6 +757,19 @@ export function WebsiteCategorySorter({
               · ลากไปวางบนหมวดทางซ้ายก็ได้ · ดับเบิลคลิก = เปิดตั้งค่าสินค้า
             </p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {offCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowOff(!showOff)}
+              aria-pressed={!showOff}
+              title={showOff ? "กดเพื่อไม่แสดงตัวที่ปิดขาย (ป้าย ซ่อน) บนกระดาน — แค่มุมมอง สถานะขายไม่เปลี่ยน" : "กดเพื่อแสดงตัวที่ปิดขายกลับมา"}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${showOff ? "border-slate-200 text-slate-700 hover:border-slate-400" : "border-slate-800 bg-slate-800 text-white hover:bg-slate-700"}`}
+            >
+              <Icon value={showOff ? "i:eye" : "i:eye-off"} />
+              ตัวที่ปิดขาย: {showOff ? "แสดง" : "ไม่แสดง"} ({offCount})
+            </button>
+          )}
           <button
             type="button"
             disabled={!undo.length || busy}
@@ -804,6 +783,7 @@ export function WebsiteCategorySorter({
           >
             ↩ ย้อน{undo.length ? ` (${undo.length})` : ""}
           </button>
+          </div>
         </header>
 
         <div className="grid md:grid-cols-[15rem_minmax(0,1fr)]">
@@ -841,25 +821,6 @@ export function WebsiteCategorySorter({
                 </button>
               );
             })}
-            {((counts.get(HIDDEN) ?? 0) > 0 || node === HIDDEN) && (
-              <button
-                type="button"
-                onClick={() => setNode(HIDDEN)}
-                {...dropProps(HIDDEN)}
-                title="สินค้าที่ซ่อนจากกระดาน (ไม่ต้องจัด) — หน้าเว็บไม่เปลี่ยน · ลากรูปมาวางที่นี่ = ซ่อน"
-                className={`mt-1 w-full flex items-center gap-1.5 rounded-lg border-t border-slate-100 py-1.5 pl-2 pr-2 text-left text-sm transition ${
-                  node === HIDDEN
-                    ? "bg-slate-900 text-white"
-                    : dropNode === HIDDEN
-                      ? "bg-blue-50 ring-2 ring-blue-400 text-blue-800"
-                      : "text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                <span>🙈</span>
-                <span className="flex-1 truncate">ที่ซ่อนไว้</span>
-                <span className={`text-xs tabular-nums ${node === HIDDEN ? "text-white/80" : "text-slate-400"}`}>{counts.get(HIDDEN) ?? 0}</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setNewCat({ parent: null })}
@@ -875,8 +836,6 @@ export function WebsiteCategorySorter({
               <p className="text-sm font-medium text-slate-800 mr-auto">
                 {node === NONE
                   ? "⚠️ ยังไม่ได้จัด"
-                  : node === HIDDEN
-                    ? "🙈 ที่ซ่อนไว้"
                   : curMain && curMain !== node
                     ? `${labelOf(curMain)} › ${nodeMain(node) ? "ยังไม่มีหมวดย่อย" : labelOf(node)}`
                     : labelOf(node)}{" "}
@@ -929,21 +888,6 @@ export function WebsiteCategorySorter({
             <div
               className={`sticky top-0 z-10 -mx-3 mb-2 border-y px-3 py-2 ${picked.length ? "bg-blue-50 border-blue-100" : "bg-slate-50 border-slate-100"}`}
             >
-              {node === HIDDEN ? (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={!picked.length || busy}
-                    onClick={() => void hideNow(picked, false)}
-                    className={`${chipCls} border-emerald-300 bg-white text-emerald-700 enabled:hover:border-emerald-500`}
-                  >
-                    👁 เอากลับ{picked.length ? ` ${picked.length} ตัว` : ""}
-                  </button>
-                  <span className="text-xs text-slate-500">
-                    {picked.length ? "กลับไปอยู่กองเดิมบนกระดาน" : "เลือกสินค้าแล้วกดเอากลับ"} · ซ่อนแค่จากกระดานจัดหมวด หน้าเว็บไม่เปลี่ยน
-                  </span>
-                </div>
-              ) : (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="mr-1 text-xs text-slate-600">
                   {picked.length ? (
@@ -1025,15 +969,6 @@ export function WebsiteCategorySorter({
                     onApply={(picks) => applyMany(picked, picks, "add")}
                   />
                 )}
-                <button
-                  type="button"
-                  disabled={!picked.length || busy}
-                  onClick={() => void hideNow(picked, true)}
-                  title="ไม่ต้องจัดหมวดตัวนี้ — ซ่อนจากกระดาน (หน้าเว็บไม่เปลี่ยน · ดู/เอากลับได้ที่กอง ที่ซ่อนไว้)"
-                  className={`${chipCls} border-slate-300 bg-white text-slate-600 enabled:hover:border-slate-500`}
-                >
-                  🙈 ซ่อน
-                </button>
                 <SearchPick
                   className="w-44"
                   placeholder="หมวดอื่น… พิมพ์ค้นหา"
@@ -1079,7 +1014,6 @@ export function WebsiteCategorySorter({
                   </button>
                 )}
               </div>
-              )}
             </div>
 
             {items.length === 0 ? (
@@ -1087,9 +1021,9 @@ export function WebsiteCategorySorter({
                 {q.trim()
                   ? "ไม่พบสินค้าที่ค้นหาในกองนี้"
                   : node === NONE
-                    ? "🎉 จัดหมวดครบทุกตัวแล้ว"
-                    : node === HIDDEN
-                      ? "ยังไม่มีสินค้าที่ซ่อนไว้"
+                    ? !showOff && offUnsorted > 0
+                      ? `ตัวที่ขายอยู่จัดหมวดครบแล้ว · ยังมีตัวที่ปิดขาย ${offUnsorted} ตัวที่ไม่ได้แสดง (กด “ตัวที่ปิดขาย: ไม่แสดง” เพื่อดู)`
+                      : "🎉 จัดหมวดครบทุกตัวแล้ว"
                     : "ยังไม่มีสินค้าในกองนี้ — ลากรูปมาวางที่หมวดนี้ทางซ้ายได้"}
               </div>
             ) : (
@@ -1103,7 +1037,7 @@ export function WebsiteCategorySorter({
                     <button
                       key={l.parentId}
                       type="button"
-                      draggable={node !== HIDDEN}
+                      draggable
                       onDragStart={(e) => dragStart(e, l.parentId)}
                       onClick={(e) => clickItem(e, i, l.parentId)}
                       onDoubleClick={() => onOpen(l.parentId)}
@@ -1142,7 +1076,7 @@ export function WebsiteCategorySorter({
                         <p className="min-h-[1.75rem] text-[11px] leading-tight text-slate-700 line-clamp-2">
                           {nameOf(l)}
                         </p>
-                        {node === NONE || node === HIDDEN ? (
+                        {node === NONE ? (
                           <p className="mt-0.5 truncate text-[10px] text-slate-400">
                             ERP: {l.erpCategory || "—"}
                           </p>

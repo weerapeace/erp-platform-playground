@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoCategory, cleanCentralRules, cleanHiddenIds, normalizeFieldMap, resolveProduct, type ParentRow } from "@/lib/website-field-map";
+import { autoCategory, cleanCentralRules, normalizeFieldMap, resolveProduct, type ParentRow } from "@/lib/website-field-map";
 import { renameKeyInFieldMap } from "@/lib/website-category-rename";
 
 /** ร้านแบบ Louis (ย่อ) — หมวดหลัก + หมวดย่อย */
@@ -14,26 +14,22 @@ const RAW = {
     default: "gifts",
     rules: { กระเป๋า: "bags" },
     centralRules: { "c-handbag": "bags-handbags", "c-gone": "no-such-cat", "": "bags" },
-    hidden: ["p1", "p1", " p2 ", 3, ""],
   },
 };
 
 const parent = (o: Partial<ParentRow>): ParentRow =>
   ({ id: "p9", code: "LM09", name_th: "กระเป๋า", name_en: "", sku_name: null, name_platform: null, introduction: null, description: null, platform_description: null, english_description: "", sale_price: 100, final_price: null, fake_price: null, cover_image_r2_key: null, category_id: null, ...o }) as ParentRow;
 
-describe("field_map.category.centralRules / hidden — ล้างค่าที่ใช้ไม่ได้", () => {
-  it("normalize เก็บเฉพาะกฎที่ชี้หมวดที่ร้านยังมี + id ซ่อนไม่ซ้ำ", () => {
+describe("field_map.category.centralRules — ล้างค่าที่ใช้ไม่ได้", () => {
+  it("normalize เก็บเฉพาะกฎที่ชี้หมวดที่ร้านยังมี", () => {
     const fm = normalizeFieldMap(RAW);
     expect(fm.category.centralRules).toEqual({ "c-handbag": "bags-handbags" });
-    expect(fm.category.hidden).toEqual(["p1", "p2"]);
     // ร้านเก่าที่ยังไม่มีช่องนี้ = ว่าง (ไม่พัง)
     expect(normalizeFieldMap({}).category.centralRules).toEqual({});
-    expect(normalizeFieldMap({}).category.hidden).toEqual([]);
   });
   it("ตัวล้างรับค่าเพี้ยนได้", () => {
     expect(cleanCentralRules(null, ["a"])).toEqual({});
     expect(cleanCentralRules(["a"], ["a"])).toEqual({});
-    expect(cleanHiddenIds("x")).toEqual([]);
   });
 });
 

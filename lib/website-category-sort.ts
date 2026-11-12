@@ -224,15 +224,3 @@ export function applyTargets(list: string[], from: string, targets: string[], ho
   const picked = build([]);
   return wasMain ? [...picked, ...rest.filter((k) => !picked.includes(k))] : [...rest, ...picked.filter((k) => !rest.includes(k))];
 }
-
-/* ───────── 🙈 ซ่อนจากกระดาน (field_map.category.hidden · ไม่กระทบหน้าเว็บ) ───────── */
-
-/** กองพิเศษ "ที่ซ่อนไว้" บนกระดาน */
-export const HIDDEN = "__hidden";
-
-/** ซ่อน / เอากลับ หลายรุ่น — คืนรายการใหม่ (ไม่ซ้ำ · คงลำดับเดิม) */
-export function toggleHidden(current: string[], ids: string[], hide: boolean): string[] {
-  const set = new Set(ids);
-  if (!hide) return current.filter((id) => !set.has(id));
-  return [...current, ...ids.filter((id, i) => id && !current.includes(id) && ids.indexOf(id) === i)];
-}

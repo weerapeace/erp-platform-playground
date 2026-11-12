@@ -102,9 +102,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const curMap = normalizeFieldMap(cur?.field_map);
   const keys = fieldMap.categories.map((c) => c.key);
   fieldMap.category.tagRules = cleanTagRules(curMap.category.tagRules, keys);
-  // 🗂 กฎหมวดกลาง (หน้าจับคู่หมวดกลาง) + 🙈 รายการซ่อนจากกระดานจัดหมวด — แก้ที่หน้าของมันเท่านั้น ที่นี่คงค่าจาก DB ไว้เหมือนกฎแท็ก
+  // 🗂 กฎหมวดกลาง แก้ที่หน้าจับคู่หมวดกลางเท่านั้น — ที่นี่คงค่าจาก DB ไว้เหมือนกฎแท็ก
   fieldMap.category.centralRules = cleanCentralRules(curMap.category.centralRules, keys);
-  fieldMap.category.hidden = curMap.category.hidden;
 
   const { error } = await sb.from("shops").update({ field_map: fieldMap }).eq("id", body.shopId);
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCat, addToTarget, canAddTo, crossFamily, lacksSub, moveOut, shortcutTargets, groupByErp, guessWebCategory, inNode, isUnsorted, mainOf, moveToTarget, NONE, nosubNode, quickTargets, removeFromNode, sortedCats, withMain, withSub, withoutSubs, applyTargets, toggleHidden, HIDDEN, type SortCat } from "@/lib/website-category-sort";
+import { addCat, addToTarget, canAddTo, crossFamily, lacksSub, moveOut, shortcutTargets, groupByErp, guessWebCategory, inNode, isUnsorted, mainOf, moveToTarget, NONE, nosubNode, quickTargets, removeFromNode, sortedCats, withMain, withSub, withoutSubs, applyTargets, type SortCat } from "@/lib/website-category-sort";
 
 /** หมวดจริงของ Louis (ย่อ) */
 const CATS: SortCat[] = [
@@ -190,17 +190,5 @@ describe("applyTargets — ป๊อปติ๊กหลายหมวด (↪
   it("ไม่ได้ติ๊ก / รหัสที่ไม่มีในร้าน / กองพิเศษ = ไม่เปลี่ยน", () => {
     expect(applyTargets(["bags"], "bags", [], "move", CATS)).toEqual(["bags"]);
     expect(applyTargets(["bags"], "bags", ["nope", NONE, nosubNode("bags")], "add", CATS)).toEqual(["bags"]);
-  });
-});
-
-describe("toggleHidden — 🙈 ซ่อนจากกระดาน", () => {
-  it("ซ่อนเพิ่ม (ไม่ซ้ำ · คงลำดับ) / เอากลับ", () => {
-    expect(toggleHidden(["a"], ["b", "a", "b"], true)).toEqual(["a", "b"]);
-    expect(toggleHidden(["a", "b", "c"], ["b"], false)).toEqual(["a", "c"]);
-    expect(toggleHidden([], [""], true)).toEqual([]);
-  });
-  it("กองที่ซ่อนไม่ชนกับรหัสหมวด/กองพิเศษ", () => {
-    expect(HIDDEN).not.toBe(NONE);
-    expect(inNode(["bags"], HIDDEN, CATS)).toBe(false);
   });
 });
