@@ -119,6 +119,19 @@ export async function ttsApi(method: "GET" | "POST" | "PUT" | "DELETE", path: st
   return j.data ?? {};
 }
 
+// ───────── กันเชื่อมร้านผิดแบรนด์ ─────────
+/**
+ * ชื่อร้านจาก TikTok ไม่ตรงชื่อแบรนด์ที่เลือก? (ตัดช่องว่าง/ตัวพิมพ์/สัญลักษณ์ แล้วดูว่าชื่อหนึ่งอยู่ในอีกชื่อไหม)
+ * ใช้ "เตือน" เท่านั้น (ชื่อร้านอาจต่างจากชื่อแบรนด์ได้จริง) · ร้านเดียวกันซ้ำแบรนด์ = บล็อกที่ callback ด้วย open_id
+ * เจอจริง 2026-11-12: ร้าน Louis Montini ถูกเชื่อมเข้าแบรนด์ IG International เพราะเลือกแบรนด์ค้างไว้
+ */
+export function ttsBrandMismatch(sellerName: string | null | undefined, brandName: string | null | undefined): boolean {
+  const norm = (s: string | null | undefined) => String(s ?? "").toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "");
+  const a = norm(sellerName), b = norm(brandName);
+  if (!a || !b) return false;
+  return !(a.includes(b) || b.includes(a));
+}
+
 // ───────── ร้านที่อนุญาต ─────────
 /** ร้านที่ผูกกับกุญแจ — cipher ต้องใช้กับคำสั่งระดับร้าน (สินค้า/ออเดอร์) */
 export type TtsShop = { id: string; name: string; region: string | null; code: string | null; cipher: string; seller_type: string | null };

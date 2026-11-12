@@ -1,6 +1,16 @@
 import { describe, expect, test, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
-import { ttsSignInput, ttsSign, ttsExpiryMs, ttsShopsFromApi, ttsAuthUrl, ttsConfigured, ttsErrorText, TtsApiError } from "@/lib/tiktok-shop";
+import { ttsSignInput, ttsSign, ttsExpiryMs, ttsShopsFromApi, ttsAuthUrl, ttsConfigured, ttsErrorText, ttsBrandMismatch, TtsApiError } from "@/lib/tiktok-shop";
+
+describe("TikTok Shop — ชื่อร้านไม่ตรงแบรนด์ (เตือน)", () => {
+  test("ร้าน Louis Montini ไปติดแบรนด์ IG International = ไม่ตรง (เคสจริง 2026-11-12)", () => { expect(ttsBrandMismatch("Louis Montini", "IG International")).toBe(true); });
+  test("ชื่อเดียวกัน / ต่างแค่ตัวพิมพ์ ช่องว่าง สัญลักษณ์ = ตรง", () => {
+    expect(ttsBrandMismatch("Louis Montini", "Louis Montini")).toBe(false);
+    expect(ttsBrandMismatch("LOUIS-MONTINI", "louis montini")).toBe(false);
+  });
+  test("ชื่อร้านมีคำต่อท้าย เช่น Official = ยังนับว่าตรง", () => { expect(ttsBrandMismatch("Louis Montini Official", "Louis Montini")).toBe(false); });
+  test("ไม่มีชื่อฝั่งใดฝั่งหนึ่ง = ไม่เตือน", () => { expect(ttsBrandMismatch(null, "IG International")).toBe(false); expect(ttsBrandMismatch("x", "")).toBe(false); });
+});
 
 describe("TikTok Shop — เซ็นคำขอ (ตามเอกสาร sign-your-api-request)", () => {
   test("เรียง query ตามตัวอักษร ไม่รวม sign/access_token แล้วต่อ path ไว้หน้า body ไว้ท้าย", () => {

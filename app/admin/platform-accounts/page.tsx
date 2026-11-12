@@ -270,7 +270,7 @@ export default function PlatformAccountsPage() {
   const [laz, setLaz] = useState<LazStatus>({ connected: false, seller_id: null, short_code: null, country: null, configured: true });
   const [lazSyncing, setLazSyncing] = useState(false);
   // สถานะเชื่อมต่อ TikTok Shop ต่อแบรนด์ (/api/tiktok-shop/status) — problem = ผลจากการกด "ตรวจการเชื่อมต่อ" (ลองกับ TikTok จริง)
-  type TtsStatus = { configured: boolean; connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_name: string | null; region: string | null; shops: { name: string; region: string | null; code: string | null }[]; checked?: boolean; problem?: string | null };
+  type TtsStatus = { configured: boolean; connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_name: string | null; region: string | null; shops: { name: string; region: string | null; code: string | null }[]; checked?: boolean; problem?: string | null; brand_mismatch?: { seller_name: string; brand_name: string } | null };
   const [tts, setTts] = useState<TtsStatus>({ configured: true, connected: false, seller_name: null, region: null, shops: [] });
   const [ttsChecking, setTtsChecking] = useState(false);
   const brandChosen = useRef(false);   // มีการเลือกแบรนด์แล้ว (จาก query/ผู้ใช้) — กัน auto-select ทับ
@@ -490,6 +490,7 @@ export default function PlatformAccountsPage() {
       if (laz.health === "expired") return { tone: "bad", label: "หมดอายุ" };
     }
     if (p.code === "tiktok") {
+      if (tts.connected && tts.brand_mismatch) return { tone: "bad", label: "ร้านไม่ตรงแบรนด์" };
       if (tts.connected) return tts.problem ? { tone: "bad", label: "ต้องเชื่อมใหม่" } : tts.health === "expiring" ? { tone: "warn", label: `อีก ${tts.days_left ?? 0} วันหมดอายุ` } : { tone: "ok", label: "เชื่อมแล้ว" };
       if (tts.health === "expired") return { tone: "bad", label: "หมดอายุ" };
     }
@@ -586,7 +587,8 @@ export default function PlatformAccountsPage() {
       if (!tts.configured) return <Note>ยังไม่ได้ตั้ง TIKTOK_SHOP_APP_KEY / TIKTOK_SHOP_APP_SECRET / TIKTOK_SHOP_SERVICE_ID ในโฮสต์ (Vercel)</Note>;
       if (tts.connected) return (
         <div className="space-y-3">
-          <StatusBar tone={tts.problem ? "bad" : tts.health === "expiring" ? "warn" : "ok"} actions={canManage && <><button onClick={connectTts} className="text-xs text-slate-600 hover:underline">เชื่อมใหม่</button><button onClick={() => setConfirmDisc("tiktok")} className={LINK_DANGER}>ตัดการเชื่อมต่อ</button></>}>
+          {tts.brand_mismatch && <Note tone="bad">ร้านที่เชื่อมอยู่ชื่อ “{tts.brand_mismatch.seller_name}” แต่แบรนด์ที่เลือกคือ “{tts.brand_mismatch.brand_name}” — ถ้าเชื่อมผิดแบรนด์ ให้กด <b>ตัดการเชื่อมต่อ</b> แล้วเลือกแบรนด์ที่ถูกด้านบนก่อนกดเชื่อมต่อใหม่</Note>}
+          <StatusBar tone={tts.problem || tts.brand_mismatch ? "bad" : tts.health === "expiring" ? "warn" : "ok"} actions={canManage && <><button onClick={connectTts} className="text-xs text-slate-600 hover:underline">เชื่อมใหม่</button><button onClick={() => setConfirmDisc("tiktok")} className={LINK_DANGER}>ตัดการเชื่อมต่อ</button></>}>
             ร้าน <b className="font-medium text-slate-900">{tts.shops.map((s) => s.name).join(", ") || tts.seller_name || "-"}</b>{tts.region ? ` (${tts.region})` : ""}
             {tts.health === "expiring" && <span className="text-amber-700"> · อีก {tts.days_left ?? 0} วันสิทธิ์หมด ต้องกดเชื่อมใหม่</span>}
           </StatusBar>

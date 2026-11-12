@@ -43,6 +43,20 @@ export async function saveTtsConn(admin: SupabaseClient, brandId: string, platfo
   if (error) throw new Error(`บันทึกการเชื่อมต่อไม่สำเร็จ: ${error.message}`);
 }
 
+/** ชื่อแบรนด์ (ใช้เทียบกับชื่อร้านจาก TikTok) */
+export async function brandNameOf(admin: SupabaseClient, brandId: string): Promise<string | null> {
+  const { data } = await admin.from("brands").select("name").eq("id", brandId).maybeSingle();
+  return (data as { name?: string } | null)?.name ?? null;
+}
+
+/** ร้าน TikTok เดียวกัน (open_id) ต่ออยู่กับแบรนด์อื่นแล้วไหม → คืนชื่อแบรนด์นั้น (กันร้านเดียวผูก 2 แบรนด์) */
+export async function ttsShopConnectedElsewhere(admin: SupabaseClient, platformId: string, brandId: string, openId: string): Promise<string | null> {
+  const { data } = await admin.from("platform_credentials").select("brand_id, meta").eq("platform_id", platformId).neq("brand_id", brandId);
+  const hit = ((data ?? []) as { brand_id: string; meta: TtsConnMeta | null }[]).find((r) => r.meta?.stage === "connected" && r.meta?.open_id === openId);
+  if (!hit) return null;
+  return (await brandNameOf(admin, hit.brand_id)) ?? "อื่น";
+}
+
 /** สถานะกุญแจ (none / connected / expiring ≤7 วัน / expired) — ใช้กติกาเดียวกับ Lazada */
 export const ttsConnHealth = lazConnHealth;
 

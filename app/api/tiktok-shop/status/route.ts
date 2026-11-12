@@ -6,9 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { ttsConfigured, ttsGetAuthorizedShops, ttsErrorText, type TtsShop } from "@/lib/tiktok-shop";
+import { ttsConfigured, ttsGetAuthorizedShops, ttsErrorText, ttsBrandMismatch, type TtsShop } from "@/lib/tiktok-shop";
 import type { LazHealthState } from "@/lib/lazada";
-import { getPlatformId, loadTtsConn, saveTtsConn, ttsConnHealth, ttsTokenOrReason } from "../shared";
+import { getPlatformId, loadTtsConn, saveTtsConn, ttsConnHealth, ttsTokenOrReason, brandNameOf } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,10 +22,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const brandId = (sp.get("brand_id") ?? "").trim();
   const out: {
     configured: boolean; connected: boolean; health: LazHealthState; refresh_expires_at: number | null; days_left: number | null;
-    seller_name: string | null; region: string | null; shops: ShopOut[]; checked: boolean; problem: string | null; error: null;
+    seller_name: string | null; region: string | null; shops: ShopOut[]; checked: boolean; problem: string | null;
+    brand_mismatch: { seller_name: string; brand_name: string } | null; error: null;
   } = {
     configured: ttsConfigured(), connected: false, health: "none", refresh_expires_at: null, days_left: null,
-    seller_name: null, region: null, shops: [], checked: false, problem: null, error: null,
+    seller_name: null, region: null, shops: [], checked: false, problem: null, brand_mismatch: null, error: null,
   };
   if (!brandId) return NextResponse.json(out);
   const admin = supabaseAdmin();
@@ -38,6 +39,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   out.health = h.state; out.refresh_expires_at = h.refresh_expires_at; out.days_left = h.days_left;
   out.connected = h.state === "connected" || h.state === "expiring";
   out.seller_name = conn.meta.seller_name ?? null; out.region = conn.meta.seller_base_region ?? null;
+  const brandName = await brandNameOf(admin, brandId);
+  if (ttsBrandMismatch(out.seller_name, brandName)) out.brand_mismatch = { seller_name: out.seller_name ?? "", brand_name: brandName ?? "" };
   out.shops = shopOut(conn.meta.shops);
 
   if (sp.get("check") === "1" && out.connected) {
