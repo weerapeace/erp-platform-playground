@@ -10,7 +10,7 @@
  *   ข้อความมีตัวเลขความยาว → ส่งตัวแปลงหน่วยมาที่ describeIssue (แสดงตามหน่วยที่ผู้ใช้เลือก)
  * ใช้ที่: components/pattern-studio (แผงตรวจแบบ) · app/pattern-studio/[id]/editor (ด่านก่อนพิมพ์) · เทสต์ lib/__tests__/pattern-check.test.ts
  */
-import { checkSeam, isInnerSide, pieceEdges, seamLabel, type EdgeMeta, type Seam } from "./pattern-seams";
+import { checkSeam, isInnerSide, pieceEdges, seamLabel, sidePoints, type EdgeMeta, type Seam } from "./pattern-seams";
 import { flattenShape, pieceGeometry, pointInPolygon, type InnerLine, type Pt, type Shape } from "./pattern-shape";
 
 /** ค่าคลาดตะเข็บตั้งต้น (ซม.) = 0.5 มม. — ค่าทดลอง ไม่ใช่มาตรฐานโรงงาน ปรับต่อแพทเทิร์นได้ */
@@ -20,6 +20,25 @@ export const SEAM_TOL_CHOICES = [0.05, 0.1, 0.2, 0.5] as const;
 export const MIN_EDGE = 0.2;
 /** รูควรห่างเส้นเย็บอย่างน้อยเท่านี้ (ซม.) ไม่งั้นจักรเย็บ/เดินด้ายทับชนรู */
 export const HOLE_CLEAR = 0.5;
+/** รอยบากคู่ของตะเข็บคลาดกันได้ไม่เกินนี้ (ซม.) */
+export const NOTCH_TOL = 0.2;
+const polyLen = (P: Pt[]) => P.reduce((m, p, k) => (k ? m + Math.hypot(p[0] - P[k - 1][0], p[1] - P[k - 1][1]) : 0), 0);
+/** ระยะของรอยบากตามแนวด้านของตะเข็บ (นับจากต้นด้าน) — เฉพาะรอยบากที่อยู่บนด้านนี้ (ห่างไม่เกิน 0.3 ซม.) */
+function notchPositions(P: Pt[], notches: Pt[]): number[] {
+  const out: number[] = [];
+  for (const q of notches) {
+    let best = Infinity, at = 0, acc = 0;
+    for (let k = 1; k < P.length; k++) {
+      const a = P[k - 1], b = P[k], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, L = Math.sqrt(L2);
+      const t = L2 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2)) : 0;
+      const d = Math.hypot(a[0] + dx * t - q[0], a[1] + dy * t - q[1]);
+      if (d < best) { best = d; at = acc + L * t; }
+      acc += L;
+    }
+    if (best <= 0.3) out.push(at);
+  }
+  return out.sort((x, y) => x - y);
+}
 /** ขอบที่ยังไม่ได้เย็บยาวไม่ถึงนี้ (ซม.) = ไม่นับ (เศษปลายตะเข็บ) */
 const OPEN_MIN = 0.3;
 
@@ -31,9 +50,10 @@ export function cleanSeamTol(raw: unknown): number {
 export type CheckPiece = {
   pid: string; name: string; count?: number; shape: Shape; holes?: Shape[]; inner?: InnerLine[] | null;
   allow?: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; mats?: { id: string }[];
+  /** รอยบาก (จุดบนเส้นเย็บ) — ใช้ตรวจรอยบากคู่ของตะเข็บ (รอบ E) */ notches?: Pt[] | null;
 };
 export type CheckLevel = "error" | "warn" | "info";
-export type CheckCode = "seam-broken" | "seam-mismatch" | "seam-eased" | "edge-open" | "self-cross" | "cut-cross" | "hole-out" | "hole-near" | "short-edge" | "no-material" | "no-name";
+export type CheckCode = "seam-broken" | "seam-mismatch" | "seam-eased" | "notch-mismatch" | "edge-open" | "self-cross" | "cut-cross" | "hole-out" | "hole-near" | "short-edge" | "no-material" | "no-name";
 export type CheckIssue = {
   id: string; level: CheckLevel; code: CheckCode;
   /** ชิ้นที่เกี่ยว (ตัวแรก = ชิ้นหลักที่ควรเลือกให้ดู) */ pids: string[];
@@ -143,6 +163,17 @@ export function checkPattern(pieces: CheckPiece[], seams: Seam[], opts: { tol?: 
     const edges = isInnerSide(s.a) ? undefined : Array.from({ length: Math.min(s.a.count, s.a.n) }, (_, k) => (s.a.from + k) % Math.max(1, s.a.n));
     if (c.status === "broken") out.push({ id: `sb:${s.id}`, level: "error", code: "seam-broken", pids: [s.a.pid, s.b.pid], seamId: s.id, data: names });
     else if (c.status === "mismatch") out.push({ id: `sm:${s.id}`, level: s.ease ? "info" : "error", code: s.ease ? "seam-eased" : "seam-mismatch", pids: [s.a.pid, s.b.pid], edges, seamId: s.id, data: { ...names, la: c.la ?? 0, lb: c.lb ?? 0, diff: c.diff, tol } });
+    // เดินตะเข็บ (Walk seam): รอยบากสองด้านต้องมีจำนวนเท่ากันและอยู่ระยะเดียวกันตามแนวเย็บ (ด้านที่กลับทิศ = นับจากปลาย)
+    if (c.status !== "broken" && !isInnerSide(s.a) && !isInnerSide(s.b) && (pa.notches?.length || pb.notches?.length)) {
+      const PA = sidePoints(pa.shape, s.a), PB = sidePoints(pb.shape, s.b);
+      if (PA && PB) {
+        const na = notchPositions(PA, pa.notches ?? []), nbRaw = notchPositions(PB, pb.notches ?? []), Lb = polyLen(PB);
+        const nb = (s.rev ? nbRaw.map((v) => Lb - v) : nbRaw).sort((x, y) => x - y);
+        const lim = Math.max(tol, NOTCH_TOL);
+        if (na.length !== nb.length) out.push({ id: `nt:${s.id}`, level: "warn", code: "notch-mismatch", pids: [s.a.pid, s.b.pid], edges, seamId: s.id, data: { ...names, na: na.length, nb: nb.length, d: 0 } });
+        else { const worst = na.reduce((m, v, k) => Math.max(m, Math.abs(v - nb[k])), 0); if (worst > lim) out.push({ id: `nt:${s.id}`, level: "warn", code: "notch-mismatch", pids: [s.a.pid, s.b.pid], edges, seamId: s.id, data: { ...names, na: na.length, nb: nb.length, d: worst } }); }
+      }
+    }
   });
   // ขอบที่ยังไม่ได้เย็บ (เฉพาะชิ้นที่มีตะเข็บบนขอบแล้ว)
   pieces.forEach((p, pi) => {
@@ -177,6 +208,9 @@ export function describeIssue(x: CheckIssue, L: (cm: number) => string): { th: s
   switch (x.code) {
     case "seam-broken": return { th: `ตะเข็บ ${s("label")} (${s("a")} ↔ ${s("b")}) อ้างขอบที่เปลี่ยนไปแล้ว — ต้องเลือกขอบใหม่`, en: `Seam ${s("label")} (${s("a")} ↔ ${s("b")}) points at edges that changed — reselect the edges` };
     case "seam-mismatch": return { th: `ตะเข็บ ${s("label")}: ${s("a")} ${L(n("la"))} กับ ${s("b")} ${L(n("lb"))} ต่างกัน ${L(n("diff"))} (เกินค่าคลาด ${L(n("tol"))}) — แก้ความยาว หรือติ๊ก "ตั้งใจให้ย่น" ถ้าตั้งใจรูด`, en: `Seam ${s("label")}: ${s("a")} ${L(n("la"))} vs ${s("b")} ${L(n("lb"))}, ${L(n("diff"))} apart (tolerance ${L(n("tol"))}) — fix the length, or mark it eased if the gather is intended` };
+    case "notch-mismatch": return n("na") !== n("nb")
+      ? { th: `ตะเข็บ ${s("label")}: รอยบาก ${s("a")} ${n("na")} จุด แต่ ${s("b")} ${n("nb")} จุด — ตอนเย็บจะจับคู่ไม่ได้`, en: `Seam ${s("label")}: ${s("a")} has ${n("na")} notch(es), ${s("b")} has ${n("nb")} — they won't line up when sewing` }
+      : { th: `ตะเข็บ ${s("label")}: รอยบากสองด้านห่างกัน ${L(n("d"))} ตามแนวเย็บ — ย้ายให้ตรงกัน`, en: `Seam ${s("label")}: the notches are ${L(n("d"))} apart along the seam — move them to match` };
     case "seam-eased": return { th: `ตะเข็บ ${s("label")}: ตั้งใจรูด ${L(n("diff"))}`, en: `Seam ${s("label")}: eased by ${L(n("diff"))} on purpose` };
     case "edge-open": return { th: `${s("piece")}: ขอบ ${s("list")} ยังไม่ได้เย็บ — ถ้าเป็นปากกระเป๋า/ช่องล้วง ให้ตั้งเป็น "ขอบเปิดตั้งใจ"`, en: `${s("piece")}: edge ${s("list")} not sewn — if it's a bag mouth or opening, mark it as an intended opening` };
     case "self-cross": return { th: `${s("piece")}: เส้นเย็บตัดกันเอง — แก้จุดที่ไขว้กันก่อนเป็นไฟล์ผลิต`, en: `${s("piece")}: the sew line crosses itself — fix the crossing points before production` };

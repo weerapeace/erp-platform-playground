@@ -61,6 +61,12 @@ export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, 
                 {p.innerD && <path d={p.innerD} fill="none" stroke={mono ? "#000" : "#2563eb"} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} strokeDasharray={printMm ? "0.25 0.15" : "0.6 0.4"} />}
                 {p.foldD && <path d={p.foldD} fill="none" stroke={mono ? "#000" : "#7c3aed"} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} strokeDasharray={printMm ? "0.5 0.15 0.1 0.15" : "1.2 0.4 0.3 0.4"} />}
                 {p.marksD && <path d={p.marksD} fill="none" stroke={mono ? "#000" : c.stroke} strokeWidth={printMm ? 0.035 : Math.max(0.07, v.w / 700)} />}
+                {(p.dims ?? []).map((dm, k) => (   // เส้นวัดถาวร: เส้นบาง + ตัวเลข (รอบ E)
+                  <g key={`dim${k}`} data-dim>
+                    <line x1={dm.a[0]} y1={dm.a[1]} x2={dm.b[0]} y2={dm.b[1]} stroke={mono ? "#000" : "#0f766e"} strokeWidth={printMm ? 0.03 : Math.max(0.06, v.w / 800)} />
+                    <text x={(dm.a[0] + dm.b[0]) / 2} y={(dm.a[1] + dm.b[1]) / 2 - 0.25} fontSize={printMm ? 0.35 : Math.max(0.5, fs * 0.45)} textAnchor="middle" fill={mono ? "#000" : "#0f766e"}>{dm.label}</text>
+                  </g>
+                ))}
               </g>
             ) : (
               <rect x={p.x} y={p.y} width={p.w} height={p.h} fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}

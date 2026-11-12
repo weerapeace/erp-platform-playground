@@ -203,7 +203,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const lockPids = useMemo(() => (sew && pv.lock.length ? new Set(pv.lock) : null), [sew, pv.lock]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ตรวจแบบ (คิดจากชิ้นสด แต่หน่วงตามหลังการลาก ไม่ให้กระดานกระตุก)
   const liveLazy = useDeferredValue(live);
-  const issues: CheckIssue[] = useMemo(() => (sew ? checkPattern(liveLazy.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, inner: p.inner, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, mats: p.mats })), sew.seams, { tol }) : []), [liveLazy, sew?.seams, tol]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const issues: CheckIssue[] = useMemo(() => (sew ? checkPattern(liveLazy.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, inner: p.inner, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, mats: p.mats, notches: p.notches })), sew.seams, { tol }) : []), [liveLazy, sew?.seams, tol]);   // eslint-disable-line react-hooks/exhaustive-deps
   const sum = summarize(issues);
   const flagged = useMemo(() => { const x = issues.find((i) => i.id === flagId); return x ? [{ pid: x.pids[0], edges: x.edges }] : null; }, [issues, flagId]);
   const goIssue = (x: CheckIssue) => { setFlagId(x.id); setFocusReq({ nonce: Date.now(), pid: x.pids[0], ...(x.edges?.length && (x.code === "edge-open" || x.code.startsWith("seam")) ? { edge: x.edges[0] } : {}) }); };

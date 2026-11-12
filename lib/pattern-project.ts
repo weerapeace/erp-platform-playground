@@ -54,7 +54,9 @@ export const BOND_KINDS: { key: BondKind; th: string; en: string; add: number; m
   { key: "foam", th: "โฟม / ฟองน้ำ", en: "Foam", add: 0.15, min: 0.5 },
   { key: "board", th: "กระดาษแข็ง / แผ่นรอง", en: "Board", add: 0, min: 0.9 },
 ];
-export type PieceInfo = { code?: string; role?: PieceRole; bond?: BondKind; skive?: number; solid?: boolean };
+export type PieceInfo = { code?: string; role?: PieceRole; bond?: BondKind; skive?: number; solid?: boolean;
+  /** Bag CAD รอบ E: มุมเส้นตัด (ไม่มี = มุมแหลม) · แบบรอยบาก (ไม่มี = เดี่ยว) · ทางผ้าทางเดียว · วางคว่ำหน้า · ตัดเป็นคู่ซ้าย-ขวา (กลับด้าน) */
+  corner?: "bevel" | "round"; notch?: "double" | "v"; nap?: boolean; face?: "down"; pair?: boolean };
 export function cleanPieceInfo(raw: unknown): PieceInfo | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>, out: PieceInfo = {};
@@ -65,6 +67,11 @@ export function cleanPieceInfo(raw: unknown): PieceInfo | null {
   const sk = fin(r.skive);
   if (sk != null && sk >= 1 && sk <= 50) out.skive = Math.round(sk * 10) / 10;
   if (r.solid === true) out.solid = true;
+  if (r.corner === "bevel" || r.corner === "round") out.corner = r.corner;
+  if (r.notch === "double" || r.notch === "v") out.notch = r.notch;
+  if (r.nap === true) out.nap = true;
+  if (r.face === "down") out.face = "down";
+  if (r.pair === true) out.pair = true;
   return Object.keys(out).length ? out : null;
 }
 
@@ -106,11 +113,12 @@ export function pieceStiffness(p: ProjectPiece, matProps: Record<string, MatProp
   return { s: Math.round(Math.min(1, Math.max(0, s)) * 100) / 100, why };
 }
 /** แถวของ "รายละเอียดชิ้น" ในใบพิมพ์ (เฉพาะชิ้นที่ตั้งค่าอะไรไว้) */
-export type PieceRow = { piece: string; code: string; role: string; bond: string; skive: number | null; solid: boolean };
+export type PieceRow = { piece: string; code: string; role: string; bond: string; skive: number | null; solid: boolean; /** วิธีวางตัด: คว่ำหน้า · คู่ซ้ายขวา · ทางผ้าทางเดียว (รอบ E) */ cut: string };
 export function projectPieceRows(pieces: ProjectPiece[]): PieceRow[] {
   return pieces.flatMap((p, k) => (p.info ? [{
     piece: p.name || `ชิ้น ${k + 1}`, code: p.info.code ?? "", role: PIECE_ROLES.find((x) => x.key === p.info?.role)?.th ?? "",
     bond: BOND_KINDS.find((x) => x.key === p.info?.bond)?.th ?? "", skive: p.info.skive ?? null, solid: !!p.info.solid,
+    cut: [p.info.face === "down" ? "วางคว่ำหน้า" : "", p.info.pair ? "ตัดคู่ซ้าย-ขวา" : "", p.info.nap ? "ทางผ้าทางเดียว" : ""].filter(Boolean).join(" · "),
   }] : []));
 }
 export type PieceMaterial = { id: string; name: string; group?: string };
@@ -198,6 +206,7 @@ export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area
       v: 1, shape: n.shape, basis, ...(withName ? { name: pieceName } : {}),
       ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}),
       ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}), ...(n.inner?.length ? { inner: n.inner } : {}),
+      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}),
     });
     // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
     const note = p.info?.code || null;   // รหัสชิ้นออกในช่องหมายเหตุของตารางชิ้น

@@ -24,7 +24,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
-  SNAP_STEPS, cleanAllow, defaultGrain, cleanFoldEdges, edgeAllowances, foldSegments, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
+  SNAP_STEPS, ALLOW_CORNERS, foldSecondLines, cleanAllow, defaultGrain, cleanFoldEdges, edgeAllowances, foldSegments, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth, pointInPolygon, INNER_KINDS, HW_KINDS, hwKind, hwLine, hwSpot, innerOffset, placeInner, setInnerLength,
   type Box, type HwKind, type InnerKind, type InnerLine, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
@@ -36,6 +36,7 @@ import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } f
 import { formatLength, parseLength, unitLabel, type LengthUnit } from "@/lib/length-units";
 import { edgePlan, migrateSeams, remapEdgeMeta, remapEdgeValues, type EdgePlan } from "@/lib/pattern-edge-map";
 import { toolOfBoard, toolTitle } from "@/lib/pattern-tools";
+import { NOTCH_STYLES, bendEdge, chamferCorner, cornerAngle, edgeRadius, filletCorner, joinEdgeWithNext, moveEdge, notchStyleSegs, objectSnap, polygonInBox, splitEdgeAt, splitEdgeEven } from "@/lib/pattern-edit";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
@@ -45,19 +46,19 @@ export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: 
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
 type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null; link?: PieceLink | null };
-export type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner";
+export type Tool = "rect" | "ellipse" | "polygon" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner";
 /** สีของเส้นในชิ้นตามชนิด (กระดาน) */
-const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 }, hw: { col: "#a16207", w: 2 } };
+const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 }, hw: { col: "#a16207", w: 2 }, dim: { col: "#0f766e", w: 1.5 } };
 export const SEAM_COLORS = ["#c2410c", "#2563eb", "#059669", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#4b5563"];
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
 type MDraft = { kind: "line"; a: XY; b: XY } | { kind: "curve"; nodes: PNode[]; hover: XY | null } | { kind: "edge"; pieceId: string; a: Pt; hover: XY | null; pos: number; travel: number; last: number };
 type Ref = RefImage & { id: string; lock: boolean; show: boolean };
-type DrawTool = "rect" | "ellipse" | "pen";
+type DrawTool = "rect" | "ellipse" | "polygon" | "pen";
 type View = { x: number; y: number; w: number };
 type XY = { x: number; y: number };
 type PenDraft = { nodes: PNode[]; hover: XY | null };
-type BoxDraft = { k: "rect" | "ellipse"; a: XY; b: XY };
+type BoxDraft = { k: "rect" | "ellipse" | "polygon"; a: XY; b: XY };
 type Drag =
   | { k: "pan"; sx: number; sy: number; v: View }
   | { k: "move"; ids: string[]; start: XY; orig: Piece[]; before: Piece[]; moved: boolean }
@@ -273,6 +274,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [edgeOpen, setEdgeOpen] = useState(false);
   const [roundR, setRoundR] = useState(() => (unitProp === "mm" ? "10" : unitProp === "in" ? "0.4" : "1"));   // ในหน่วยที่แสดง (รับ "10 mm" ได้)
   const [offD, setOffD] = useState(() => (unitProp === "mm" ? "10" : unitProp === "in" ? "0.4" : "1"));
+  // ── Bag CAD รอบ E ──
+  const [polyN, setPolyNState] = useState(6);   // จำนวนด้านของเครื่องมือหลายเหลี่ยม (จำในเครื่อง)
+  const setPolyN = (v: number) => { const n = Math.max(3, Math.min(24, Math.round(v))); setPolyNState(n); saveNum("pattern-shape-polyn", n); };
+  const [objSnap, setObjSnapState] = useState(true);   // ดูดเข้าจุดปลาย/กึ่งกลางขอบ (จำในเครื่อง)
+  const setObjSnap = (v: boolean) => { setObjSnapState(v); saveNum("pattern-shape-objsnap", v ? 1 : 0); };
+  const [snapHit, setSnapHit] = useState<{ at: Pt; kind: "end" | "mid" } | null>(null);
+  const [splitAt, setSplitAt] = useState(5);      // แบ่งขอบที่ระยะ (ซม.)
+  const [splitN, setSplitN] = useState(2);        // แบ่งเท่ากันกี่ส่วน
+  const [moveD, setMoveD] = useState(1);          // เลื่อนขอบ (ซม.)
+  const [sagD, setSagD] = useState(1);            // ดัดโค้ง: ระยะโก่ง (ซม.)
+  const [cornerR, setCornerR] = useState(1);      // มุมโค้งเฉพาะจุด (ซม.)
+  const [chamD, setChamD] = useState(1);          // ตัดมุมเฉพาะจุด (ซม.)
   const [tool, setTool] = useState<Tool>(initialTool ?? "rect");
   // ── เย็บ (ตะเข็บอยู่กับหน้าที่เรียก · กระดานแค่วาดและส่งการแก้กลับ) ──
   const [sewA, setSewA] = useState<SeamSide | null>(null);        // ด้านแรกที่เลือกไว้ รอคลิกขอบคู่
@@ -395,6 +408,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const redo = useCallback(() => { const f = fut.current.pop(); if (!f) return; hist.current.push({ p: piecesRef.current, s: seamsRef.current }); restore(f); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setSnapState(readNum(SNAP_KEY, SNAP_STEPS, 1)); setLastAllow(readNum(ALLOW_KEY, null, 0)); setPieceFadeState(readNum(FADE_KEY, null, initialRefs.length ? 0.3 : 0.6)); setCanvasH(readNum(CANVAS_H_KEY, null, CANVAS_H_DEFAULT)); setPanelOpenState(readNum(PANEL_KEY, [0, 1], 1) === 1); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPolyNState(readNum("pattern-shape-polyn", null, 6)); setObjSnapState(readNum("pattern-shape-objsnap", [0, 1], 1) === 1); }, []);
   const setSnap = (v: number) => { setSnapState(v); saveNum(SNAP_KEY, v); };
 
   const vh = view.w * (size.ch / Math.max(1, size.cw));
@@ -436,7 +450,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const r = svgRef.current!.getBoundingClientRect();
     return { x: view.x + ((e.clientX - r.left) / r.width) * view.w, y: view.y + ((e.clientY - r.top) / r.height) * vh };
   };
-  const snapPt = (p: XY): XY => ({ x: snapTo(p.x, snap), y: snapTo(p.y, snap) });
+  /** ดูดจุด: เครื่องมือวาด / วัด / เส้นใน ดูดเข้าจุดยอดและกึ่งกลางขอบของชิ้น (ใกล้ไม่เกิน 8 px) ก่อนดูดเข้าตาราง (รอบ E) */
+  const snapPt = (p: XY): XY => {
+    const useObj = objSnap && !editId && (tool === "rect" || tool === "ellipse" || tool === "polygon" || tool === "pen" || tool === "measure" || tool === "inner") && ppc > 0;
+    const hit = useObj ? objectSnap(piecesRef.current.filter((q) => !hidePids?.has(q.pid)).map((q) => q.shape), [p.x, p.y], 8 / ppc) : null;
+    if ((hit?.at[0] ?? null) !== (snapHit?.at[0] ?? null) || (hit?.at[1] ?? null) !== (snapHit?.at[1] ?? null)) setSnapHit(hit);
+    return hit ? { x: hit.at[0], y: hit.at[1] } : { x: snapTo(p.x, snap), y: snapTo(p.y, snap) };
+  };
   const pxDist = (a: XY, b: XY) => Math.hypot(a.x - b.x, a.y - b.y) * ppc;
   const constrain45 = (from: XY, p: XY): XY => {
     const dx = p.x - from.x, dy = p.y - from.y, len = Math.hypot(dx, dy);
@@ -444,7 +464,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     return { x: snapTo(from.x + Math.cos(a) * len, snap), y: snapTo(from.y + Math.sin(a) * len, snap) };
   };
   const changeTool = (tl: Tool) => {
-    if (readonly && (tl === "rect" || tl === "ellipse" || tl === "pen")) return;
+    if (readonly && (tl === "rect" || tl === "ellipse" || tl === "polygon" || tl === "pen")) return;
     if ((tl === "sew" || tl === "sewpart" || tl === "sewmany" || tl === "sewedit") && !seams) return;
     if (tl === "inner" && (!innerLines || readonly)) return;
     setInnerA(null);
@@ -805,7 +825,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (d.k === "box" && box) {
       const x = Math.min(box.a.x, box.b.x), y = Math.min(box.a.y, box.b.y), w = Math.abs(box.a.x - box.b.x), h = Math.abs(box.a.y - box.b.y);
       setBox(null);
-      if (w > 0 && h > 0) addPieces([newPiece({ k: box.k, x, y, w, h })]);
+      if (w > 0 && h > 0) addPieces([newPiece(box.k === "polygon" ? polygonInBox(x, y, w, h, polyN) : { k: box.k, x, y, w, h })]);
       else setTool("hand");   // คลิกที่ว่างเฉย ๆ ไม่ได้ลาก = เปลี่ยนเป็น "เลื่อนดู" (ปากกาไม่เข้าข้อนี้ เพราะคลิก = วางจุด)
     }
   };
@@ -920,7 +940,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if (e.key === " ") { spaceDown.current = true; e.preventDefault(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", p: "pen", v: "move", h: "hand", m: "measure", ...(seams ? { n: "sew", j: "sewpart", k: "sewmany", b: "sewedit" } : {}), ...(innerLines ? { l: "inner" } : {}) };
+      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", g: "polygon", p: "pen", v: "move", h: "hand", m: "measure", ...(seams ? { n: "sew", j: "sewpart", k: "sewmany", b: "sewedit" } : {}), ...(innerLines ? { l: "inner" } : {}) };
       if (map[k]) { e.preventDefault(); changeTool(map[k]); }
     };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === " ") spaceDown.current = false; };
@@ -1218,6 +1238,16 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
   // ── ไม้บรรทัด ──
   const fmtLen = (n: number) => fmtL(n);
+  /** ปักการวัดเส้นตรงเป็นเส้นบอกขนาดถาวรบนชิ้นที่กลางเส้นอยู่ (รอบ E) — ไปกับชิ้น บันทึก ออกใบพิมพ์/DXF ชั้น DIM */
+  const pinMeasure = (m: Measure) => {
+    if (m.kind !== "line" || m.nodes.length < 2) return;
+    const a: Pt = [m.nodes[0].x, m.nodes[0].y], b: Pt = [m.nodes[m.nodes.length - 1].x, m.nodes[m.nodes.length - 1].y], mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const host = [...piecesRef.current].reverse().find((q) => !blocked(q.pid) && pointInPolygon(mid, flattenShape(q.shape)));
+    if (!host) { setMsg({ tone: "err", text: t("เส้นวัดต้องอยู่บนชิ้น (กลางเส้นอยู่ในชิ้น)", "The measurement must sit on a piece (its middle inside a piece)") }); return; }
+    patchPiece(host.id, (p) => ({ ...p, inner: [...(p.inner ?? []), { id: `dm${Date.now().toString(36)}`, kind: "dim" as InnerKind, pts: [a, b] }] }));
+    setMeasures((ms) => ms.filter((x) => x.id !== m.id));
+    setMsg({ tone: "ok", text: t("ปักเป็นเส้นบอกขนาดบนชิ้นแล้ว — ไปกับชิ้น บันทึก และออกใบพิมพ์/DXF (ชั้น DIM)", "Pinned as a dimension on the piece — it moves with the piece, is saved, and prints (DXF layer DIM)") });
+  };
   const addMeasure = (m: Omit<Measure, "id">) => {
     setMeasures((ms) => [...ms.slice(-29), { ...m, id: newId() }]);
     setMsg({ tone: "ok", text: m.kind === "edge" ? t(`ตามขอบ ${fmtLen(m.len)} (อ้อมอีกทาง ${fmtLen(m.alt ?? 0)})`, `Along edge ${fmtLen(m.len)} (other way ${fmtLen(m.alt ?? 0)})`) : t(`วัดได้ ${fmtLen(m.len)}`, `Measured ${fmtLen(m.len)}`) });
@@ -1542,6 +1572,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         return (
           <g key={`${p.id}:${l.id}`}>
             {picked && <path d={d} fill="none" stroke={COLORS.sel} strokeWidth={st.w + 5} strokeOpacity={0.35} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+            {l.kind === "dim" && l.pts.length >= 2 && (() => { const a = l.pts[0], b = l.pts[l.pts.length - 1]; return <text data-dim-label x={(a[0] + b[0]) / 2} y={(a[1] + b[1]) / 2 - fs * 0.35} fontSize={fs * 0.85} textAnchor="middle" fill="#0f766e" stroke="#fff" strokeWidth={fs * 0.2} paintOrder="stroke" style={{ pointerEvents: "none" }}>{fmtL(Math.hypot(b[0] - a[0], b[1] - a[1]))}</text>; })()}
             {l.kind === "hw" ? (() => {
               // อะไหล่: สัญลักษณ์ตามชนิด ขนาดจริง (ห่วง = วงแหวน · หมุดย้ำ = จุดทึบ · ตัวล็อก = แผ่นเหลี่ยม · แม่เหล็ก = วงกลมมีกากบาท · ตาไก่ = วงซ้อน)
               const { c, size } = hwSpot(l), r = Math.max(size / 2, 0.15), k = hwKind(l.hw), sw = { stroke: st.col, strokeWidth: 2, vectorEffect: "non-scaling-stroke" as const, style: { pointerEvents: "none" as const } };
@@ -1586,7 +1617,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const row = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2";
   const selSeam = sewSel ? seamList.find((x) => x.id === sewSel) ?? null : null, selSeamIdx = selSeam ? seamList.indexOf(selSeam) : -1;
   const edgeAllow = edgePiece && selEdge ? (edgeAllowances(edgePiece.shape, edgePiece.allowEdges, edgePiece.allow)?.[selEdge.i] ?? edgePiece.allow) : 0;
-  const edgeFold = !!(edgePiece && selEdge && cleanFoldEdges(edgePiece.shape, edgePiece.foldEdges)?.[selEdge.i]);
+  const edgeFoldN = edgePiece && selEdge ? cleanFoldEdges(edgePiece.shape, edgePiece.foldEdges)?.[selEdge.i] ?? 0 : 0;
+  const edgeFold = edgeFoldN > 0;
   const edgeMetaNow: EdgeMeta = (edgePiece && selEdge && cleanEdgeMeta(edgePiece.shape, edgePiece.edgeMeta)?.[selEdge.i]) || {};
   const setEdgeMeta = (f: (m: EdgeMeta) => EdgeMeta) => { if (!edgePiece || !selEdge) return; const k = selEdge.i, n = edgeList.length; patchPiece(edgePiece.id, (p) => { const cur = cleanEdgeMeta(p.shape, p.edgeMeta) ?? Array.from({ length: n }, () => ({} as EdgeMeta)); const next = cur.map((m, q) => (q === k ? f(m) : m)); return { ...p, edgeMeta: next.some(edgeMetaSet) ? next : null }; }); };
   const addNotches = (ds: number[]) => { if (!edgePiece || !selEdge) return; const pts = ds.map((d) => pointAlong(selEdge.pts, d)).filter((q): q is Pt => !!q); if (pts.length) patchPiece(edgePiece.id, (p) => ({ ...p, notches: [...(p.notches ?? []), ...pts] })); };
@@ -1714,7 +1746,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             {ed && !canLen && <div className="text-[11px] text-slate-400">{t("ขอบโค้ง แก้ความยาวด้วยการลากจุด (เครื่องมือย้าย → แก้จุด)", "Curved edge — change its length by dragging points (Move → Edit points)")}</div>}
             <div className={row}><span className="text-slate-500">{t(`เผื่อของขอบนี้ (${uL})`, `Allowance of this edge (${uL})`)}</span>
               {ed ? <NumField len value={edgeAllow} min={0} max={20} label={t(`เผื่อของขอบ ${uL}`, `Edge allowance ${uL}`)} onCommit={(v) => patchPiece(edgePiece.id, (p) => { const cur = edgeAllowances(p.shape, p.allowEdges, p.allow) ?? edgeList.map(() => p.allow); return { ...p, allowEdges: cur.map((a, k) => (k === selEdge.i ? cleanAllow(v) : a)) }; })} className="w-16" /> : <b className="tabular-nums">{edgeAllow}</b>}</div>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={edgeFold} disabled={!ed} onChange={() => patchPiece(edgePiece.id, (p) => { const next = (cleanFoldEdges(p.shape, p.foldEdges) ?? edgeList.map(() => 0)).map((v, k) => (k === selEdge.i ? (v ? 0 : 1) : v)); return { ...p, foldEdges: next.some(Boolean) ? next : null }; })} className="h-3.5 w-3.5 accent-violet-600" />{t("พับเข้าใน", "Folds inward")}</label>
+            <label className="flex items-center gap-2" data-edge-fold><span className="text-slate-600">{t("พับขอบ", "Fold")}</span>
+              <select value={edgeFoldN} disabled={!ed} onChange={(e) => { const v = Number(e.target.value); patchPiece(edgePiece.id, (p) => { const next = (cleanFoldEdges(p.shape, p.foldEdges) ?? edgeList.map(() => 0)).map((x, k) => (k === selEdge.i ? v : x)); return { ...p, foldEdges: next.some(Boolean) ? next : null }; }); }} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs">
+                <option value={0}>{t("ไม่พับ", "None")}</option><option value={1}>{t("พับเข้าใน", "Fold in")}</option><option value={2}>{t("พับสองทบ", "Double fold")}</option>
+              </select>
+              {edgeFoldN === 2 && <span className="text-[11px] text-slate-400">{t(`พับแรกที่ ${fmtL(edgeAllow / 2)} · พับสองที่เส้นเย็บ`, `1st fold at ${fmtL(edgeAllow / 2)} · 2nd at the sew line`)}</span>}
+            </label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={!!edgeMetaNow.bind} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { bind: _b, bindR: _r, ...rest } = m; void _b; void _r; return e.target.checked ? { ...rest, bind: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("กุ้นขอบ", "Bound edge")}</label>
             {edgeMetaNow.bind && finishRows("bind")}
             <label className="flex items-center gap-2"><input type="checkbox" data-edge-zip checked={!!edgeMetaNow.zip} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { zip: _z, zipR: _r, ...rest } = m; void _z; void _r; return e.target.checked ? { ...rest, zip: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ติดซิปตามขอบนี้", "Zip along this edge")}</label>
@@ -1723,6 +1760,36 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             <label className="flex items-center gap-2" title={t("ขอบที่ตั้งใจไม่เย็บ เช่น ปากกระเป๋า ช่องล้วง — แผงตรวจแบบจะไม่เตือนว่าลืมเย็บ", "An edge left unsewn on purpose, e.g. the bag mouth — the review panel won't flag it as forgotten")}><input type="checkbox" data-edge-open checked={!!edgeMetaNow.open} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { open: _o, ...rest } = m; void _o; return e.target.checked ? { ...rest, open: true } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("ขอบเปิดตั้งใจ (ปากกระเป๋า / ช่องล้วง)", "Intended opening (bag mouth / access)")}</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={edgeMetaNow.top != null} disabled={!ed} onChange={(e) => setEdgeMeta((m) => { const { top: _t, ...rest } = m; void _t; return e.target.checked ? { ...rest, top: 3 } : rest; })} className="h-3.5 w-3.5 accent-blue-600" />{t("เดินด้ายทับ", "Topstitch")}</label>
             {edgeMetaNow.top != null && <div className={`${row} pl-5`}><span className="text-slate-500">{t("ห่างจากขอบ (มม.)", "Distance from edge (mm)")}</span><NumField value={edgeMetaNow.top} min={0.5} max={30} step={0.5} label={t("ห่างจากขอบ มม.", "Distance from edge mm")} onCommit={(v) => setEdgeMeta((m) => ({ ...m, top: v }))} className="w-16" /></div>}
+            {ed && (() => {   // แก้ขอบ (รอบ E): แบ่ง · รวม · เลื่อน (ยืด/หด) · ดัดโค้ง — ตะเข็บ/ค่ารายขอบตามเอง
+              const applyEdge = (f: (sh: Shape) => Shape | null) => {
+                if (edgePiece.link) { setMsg({ tone: "err", text: t("ชิ้นนี้ผูกรูปกับชิ้นต้นแบบ — แก้ที่ชิ้นต้นแบบ", "This piece follows its source — edit the source piece") }); return; }
+                const next = f(edgePiece.shape);
+                if (!next) { setMsg({ tone: "err", text: t("ทำกับขอบนี้ไม่ได้ (สั้นเกิน · รูปจะพัง · วงรี)", "Can't do that on this edge (too short · would break the shape · ellipse)") }); return; }
+                patchPiece(edgePiece.id, (p) => ({ ...p, shape: next }));
+                const n = pieceEdges(next).length; setEdgeSel({ pid: edgePiece.pid, i: Math.min(selEdge.i, n - 1), n });
+              };
+              const rad = edgeRadius(selEdge.pts), straight = selEdge.pts.length === 2;
+              return (
+                <div className="space-y-1.5 border-t border-slate-100 pt-2" data-edge-tools>
+                  <div className="text-slate-500">{t("แก้ขอบนี้", "Edit this edge")}{rad ? <span className="ml-1 text-slate-400">· {t(`โค้ง รัศมี ≈ ${fmtL(rad)}`, `curve, radius ≈ ${fmtL(rad)}`)}</span> : null}</div>
+                  <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("แบ่งที่ระยะจากต้นขอบ", "Split at distance")}</span><NumField len value={Math.min(splitAt, Math.round(selEdge.len * 100) / 100)} min={0.1} max={500} label={t("ระยะที่แบ่ง", "Split distance")} onCommit={setSplitAt} className="w-16" />
+                    <button type="button" data-edge-split onClick={() => applyEdge((sh) => splitEdgeAt(sh, selEdge.i, Math.min(splitAt, selEdge.len)))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("แบ่ง", "Split")}</button></div>
+                  <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("แบ่งเท่ากัน (ส่วน)", "Split evenly into")}</span><NumField value={splitN} min={2} max={20} step={1} label={t("จำนวนส่วน", "Parts")} onCommit={(v) => setSplitN(Math.round(v))} className="w-14" />
+                    <button type="button" data-edge-split-even onClick={() => applyEdge((sh) => splitEdgeEven(sh, selEdge.i, splitN))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("แบ่ง", "Split")}</button></div>
+                  <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("เลื่อนขอบ (ยืด / หด)", "Move edge (extend / trim)")}</span><NumField len value={moveD} min={0.01} max={200} label={t("ระยะเลื่อน", "Move distance")} onCommit={setMoveD} className="w-16" />
+                    <button type="button" data-edge-move-out onClick={() => applyEdge((sh) => moveEdge(sh, selEdge.i, moveD))} title={t("ดันออกนอกชิ้น (ยืด)", "Push outward (extend)")} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ออก", "Out")}</button>
+                    <button type="button" data-edge-move-in onClick={() => applyEdge((sh) => moveEdge(sh, selEdge.i, -moveD))} title={t("ดึงเข้าในชิ้น (หด)", "Pull inward (trim)")} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("เข้า", "In")}</button></div>
+                  <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("ดัดเป็นโค้ง (ระยะโก่ง)", "Bend into an arc (bulge)")}</span><NumField len value={sagD} min={0.01} max={200} label={t("ระยะโก่ง", "Bulge")} onCommit={setSagD} className="w-16" />
+                    <button type="button" data-edge-bend onClick={() => applyEdge((sh) => bendEdge(sh, selEdge.i, sagD))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("โก่งออก", "Out")}</button>
+                    <button type="button" onClick={() => applyEdge((sh) => bendEdge(sh, selEdge.i, -sagD))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("โก่งเข้า", "In")}</button></div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {!straight && <button type="button" onClick={() => applyEdge((sh) => bendEdge(sh, selEdge.i, 0))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำเป็นเส้นตรง", "Make straight")}</button>}
+                    <button type="button" data-edge-join onClick={() => applyEdge((sh) => joinEdgeWithNext(sh, selEdge.i))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("รวมกับขอบถัดไป", "Join with next edge")}</button>
+                  </div>
+                  <div className="text-[11px] text-slate-400">{t("ตะเข็บ เผื่อรายขอบ ซิป/กุ๊น ตามขอบใหม่ให้เอง · ย้อนได้ด้วย Ctrl+Z", "Seams, per-edge allowance and zips follow the new edges · Ctrl+Z to undo")}</div>
+                </div>
+              );
+            })()}
             {ed && (
               <div className="space-y-1.5 border-t border-slate-100 pt-2">
                 <div className="text-slate-500">{t("รอยบากบนขอบนี้", "Notches on this edge")}</div>
@@ -1836,11 +1903,19 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     <div className="pointer-events-none absolute inset-0" data-float-ui>
       <input ref={fileRef} type="file" accept=".svg,image/svg+xml" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
       {stepBadge && <div data-step-badge className="pointer-events-none absolute left-1/2 top-14 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-slate-900/85 px-3 py-1 text-xs text-white shadow">{t(`ขั้น ${stepBadge.n}/${stepBadge.of}`, `Step ${stepBadge.n}/${stepBadge.of}`)} · {stepBadge.text} <span className="text-slate-300">· Esc = {t("ยกเลิก", "cancel")}</span></div>}
+      {tool === "polygon" && !readonly && <div data-poly-sides className="pointer-events-auto absolute left-1/2 top-14 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-slate-200 bg-white/95 px-3 py-1 text-xs text-slate-700 shadow">
+        {t("หลายเหลี่ยม: จำนวนด้าน", "Polygon sides")}
+        <button type="button" onClick={() => setPolyN(polyN - 1)} className="h-6 w-6 rounded-full border border-slate-200 hover:bg-slate-50" aria-label={t("ลดด้าน", "Fewer sides")}>−</button>
+        <b className="w-5 text-center tabular-nums">{polyN}</b>
+        <button type="button" onClick={() => setPolyN(polyN + 1)} className="h-6 w-6 rounded-full border border-slate-200 hover:bg-slate-50" aria-label={t("เพิ่มด้าน", "More sides")}>+</button>
+        <span className="text-slate-400">· {t("ลากบนกระดาน", "drag on the board")}</span>
+      </div>}
       {/* ซ้าย: เครื่องมือวาด */}
       <div className={`${fbar} absolute left-2 top-14 flex-col`} aria-label={t("เครื่องมือวาด", "Drawing tools")}>
         {toolIcon("move", "pointer", readonly ? t("เลือก", "Select") : t("ย้าย", "Move"), "V")}
         {!readonly && toolIcon("rect", "square", t("สี่เหลี่ยม", "Rectangle"), "R")}
         {!readonly && toolIcon("ellipse", "circle", t("วงกลม", "Circle"), "O")}
+        {!readonly && level >= 2 && toolIcon("polygon", "diamond", t("หลายเหลี่ยม", "Polygon"), "G")}
         {!readonly && toolIcon("pen", "vector-bezier", t("ปากกา", "Pen"), "P")}
         {toolIcon("hand", "hand-stop", t("เลื่อนดู", "Pan"), "H")}
         {toolIcon("measure", "ruler-measure", t("ไม้บรรทัด", "Measure"), "M")}
@@ -1876,6 +1951,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             {menu === "snap" && (
               <div className="absolute left-0 top-9 z-30 w-40 rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-lg">
                 <div className="px-2 py-1 text-[11px] text-slate-400">{t("ดูดเข้าทุก", "Snap every")}</div>
+                <label className="flex items-center gap-2 border-b border-slate-100 px-2 pb-1.5 pt-0.5" title={t("วาด/วัด/เส้นใน ดูดเข้าจุดยอดและกึ่งกลางขอบของชิ้น", "Drawing, measuring and inner lines snap to corners and edge midpoints")} data-guide="objsnap">
+                  <input type="checkbox" checked={objSnap} onChange={(e) => setObjSnap(e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />{t("ดูดเข้าจุด / กึ่งกลางขอบ", "Snap to points / midpoints")}
+                </label>
                 {SNAP_STEPS.map((s) => (
                   <button key={s} type="button" onClick={() => { setSnap(s); setMenu(null); }} className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left ${snap === s ? "bg-blue-50 font-medium text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
                     {s === 0 ? t("ไม่ดูด", "Off") : fmtL(s)}
@@ -1907,6 +1985,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             {([["line", t("วัดตรง", "Straight")], ["curve", t("วัดโค้ง", "Curve")], ["edge", t("ตามขอบชิ้น", "Along edge")]] as [MeasureMode, string][]).map(([m, l]) => (
               <button key={m} type="button" onClick={() => { setMeasureMode(m); setMDraft(null); }} className={`h-7 rounded-md border px-2 ${measureMode === m ? "border-violet-400 bg-white font-medium text-violet-700" : "border-transparent text-violet-700 hover:bg-white/60"}`}>{l}</button>
             ))}
+            {(() => { const last = [...measures].reverse().find((x) => x.kind === "line"); return last && innerLines && !readonly ? <button type="button" data-pin-last onClick={() => pinMeasure(last)} title={t("ปักเส้นวัดตรงอันล่าสุดเป็นเส้นบอกขนาดถาวรบนชิ้น", "Pin the latest straight measurement as a permanent dimension")} className="h-7 rounded-md border border-teal-300 bg-white px-2 text-teal-700 hover:bg-teal-50">{t(`ปักบนชิ้น (${fmtLen(last.len)})`, `Pin (${fmtLen(last.len)})`)}</button> : null; })()}
             {measures.length > 0 && <button type="button" onClick={() => setMeasures([])} className="h-7 rounded-md px-2 text-violet-700 hover:bg-white/60">{t(`ล้าง (${measures.length})`, `Clear (${measures.length})`)}</button>}
           </div>
         )}
@@ -2025,7 +2104,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                       <path d={cutD} fillRule="evenodd" data-piece={p.id} fill={COLORS.fill} fillOpacity={on ? Math.min(1, pieceFade + 0.15) : pieceFade} stroke={on ? COLORS.sel : COLORS.stroke} strokeWidth={on ? 2.5 : 1.5} vectorEffect="non-scaling-stroke" style={{ cursor: editId === p.id ? "copy" : "move" }} />
                       {(p.allow > 0 || !!g.segAllow) && <path d={shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("")} fill="none" stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
                       {lockPids?.has(p.pid) && <text x={g.finished.x + fs * 0.4} y={g.finished.y + fs * 1.1} fontSize={fs * 0.85} fill="#475569" style={{ pointerEvents: "none" }}>{t("ล็อก", "Locked")}</text>}
-                      {foldSegments(p.shape, cleanFoldEdges(p.shape, p.foldEdges)).map((L, fi) => (   // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน)
+                      {[...foldSegments(p.shape, cleanFoldEdges(p.shape, p.foldEdges)), ...foldSecondLines(p.shape, cleanFoldEdges(p.shape, p.foldEdges), edgeAllowances(p.shape, p.allowEdges, p.allow) ?? pieceEdges(p.shape).map(() => p.allow))].map((L, fi) => (   // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน)
                         <path key={`f${fi}`} d={"M" + L.map((q) => `${q[0]} ${q[1]}`).join("L")} fill="none" stroke="#7c3aed" strokeWidth={2} strokeDasharray="10 3 2 3" vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                       ))}
                       {edgeHover && edgeHover.id === p.id && (() => {   // ขอบที่ชี้อยู่ในรายการเผื่อรายขอบ
@@ -2035,9 +2114,9 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                       {p.grain && p.grain.length === 2 && (() => {   // เส้นทางผ้า: ลูกศร 2 หัว
                         const [[x1, y1], [x2, y2]] = p.grain; const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L, hs = fs * 0.45;
                         const head = (x: number, y: number, s: number) => `M${x + s * ux * hs - uy * hs * 0.6} ${y + s * uy * hs + ux * hs * 0.6}L${x} ${y}L${x + s * ux * hs + uy * hs * 0.6} ${y + s * uy * hs - ux * hs * 0.6}`;
-                        return <path d={`M${x1} ${y1}L${x2} ${y2}${head(x1, y1, 1)}${head(x2, y2, -1)}`} fill="none" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />;
+                        return <path d={`M${x1} ${y1}L${x2} ${y2}${p.info?.nap ? "" : head(x1, y1, 1)}${head(x2, y2, -1)}`} fill="none" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />;
                       })()}
-                      {(p.notches ?? []).length > 0 && notchSegments(g.sew, p.notches ?? [], p.allow, Math.max(0.5, fs * 0.45), g.segAllow).map(([a, c], ni) => (
+                      {(p.notches ?? []).length > 0 && notchSegments(g.sew, p.notches ?? [], p.allow, Math.max(0.5, fs * 0.45), g.segAllow).flatMap((sg) => notchStyleSegs(sg, p.info?.notch, Math.max(0.25, fs * 0.28))).map(([a, c], ni) => (
                         <line key={ni} x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke={MARK_COLOR} strokeWidth={2} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                       ))}
                       {notchMode && p.id === sel && (p.notches ?? []).map((n, ni) => <circle key={`n${ni}`} cx={n[0]} cy={n[1]} r={fs * 0.22} fill="#fff" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />)}
@@ -2066,6 +2145,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 {finishLayer}
                 {seamLayer}
                 {flagLayer}
+                {snapHit && (tool === "rect" || tool === "ellipse" || tool === "polygon" || tool === "pen" || tool === "measure" || tool === "inner") && <g data-snap-hit style={{ pointerEvents: "none" }}>{snapHit.kind === "end" ? <rect x={snapHit.at[0] - fs * 0.28} y={snapHit.at[1] - fs * 0.28} width={fs * 0.56} height={fs * 0.56} fill="none" stroke="#db2777" strokeWidth={2} vectorEffect="non-scaling-stroke" /> : <path d={`M${snapHit.at[0]} ${snapHit.at[1] - fs * 0.32}L${snapHit.at[0] + fs * 0.32} ${snapHit.at[1] + fs * 0.24}L${snapHit.at[0] - fs * 0.32} ${snapHit.at[1] + fs * 0.24}Z`} fill="none" stroke="#db2777" strokeWidth={2} vectorEffect="non-scaling-stroke" />}</g>}
                 {edgeHits}
                 {seamGrips}
                 {innerLayer}
@@ -2086,7 +2166,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 {box && (() => {
                   const x = Math.min(box.a.x, box.b.x), y = Math.min(box.a.y, box.b.y), w = Math.abs(box.a.x - box.b.x), h = Math.abs(box.a.y - box.b.y);
                   return <g style={{ pointerEvents: "none" }}>
-                    {box.k === "rect" ? <rect x={x} y={y} width={w} height={h} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                    {box.k === "polygon" ? <path d={shapePathD(polygonInBox(x, y, Math.max(w, 0.01), Math.max(h, 0.01), polyN))} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                      : box.k === "rect" ? <rect x={x} y={y} width={w} height={h} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
                       : <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill="none" stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
                     <text x={x + w / 2} y={y - fs * 0.5} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel}>{fmtN(w)} × {fmtN(h)} {uL}</text>
                   </g>;
@@ -2228,11 +2309,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                         <span className="text-violet-700">{i + 1}. {m.kind === "line" ? t("ตรง", "Straight") : m.kind === "curve" ? t("โค้ง", "Curve") : t("ตามขอบ", "Edge")}</span>
                         <b className="tabular-nums text-slate-700">{fmtLen(m.len)}</b>
                         {m.kind === "edge" && <span className="text-slate-400">{t(`(อีกทาง ${fmtLen(m.alt ?? 0)})`, `(other ${fmtLen(m.alt ?? 0)})`)}</span>}
+                        {m.kind === "line" && innerLines && !readonly && <button type="button" data-pin-dim onClick={() => pinMeasure(m)} title={t("ปักเป็นเส้นวัดถาวรบนชิ้น", "Pin as a permanent dimension on the piece")} className="text-[11px] text-teal-700 hover:underline">{t("ปักบนชิ้น", "Pin")}</button>}
                         <button type="button" onClick={() => setMeasures((ms) => ms.filter((x) => x.id !== m.id))} className="ml-auto text-slate-300 hover:text-rose-600" aria-label={t("ลบการวัดนี้", "Remove measurement")}>✕</button>
                       </li>
                     ))}
                   </ul>
-                  <div className="mt-1 text-[11px] text-slate-400">{t("การวัดไว้ดูชั่วคราว ไม่ได้บันทึก", "Measurements are temporary (not saved)")}</div>
+                  <div className="mt-1 text-[11px] text-slate-400">{innerLines ? t("การวัดไว้ดูชั่วคราว — กด 'ปักบนชิ้น' เพื่อเก็บเป็นเส้นวัดถาวร", "Measurements are temporary — press 'Pin' to keep one as a dimension") : t("การวัดไว้ดูชั่วคราว ไม่ได้บันทึก", "Measurements are temporary (not saved)")}</div>
                 </div>
               )}
             </aside>
@@ -2314,6 +2396,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
               <div data-guide="allow">
                 <div className="mb-1 font-medium text-slate-600">{t(`เผื่อพับ / เผื่อเย็บ (${uL})`, `Fold / seam allowance (${uL})`)}</div>
+                {pieceInfoFields && level >= 2 && !readonly && (
+                  <div className="mb-1 flex items-center gap-1.5" data-guide="allow-corner">
+                    <span className="text-slate-500">{t("มุมของเส้นตัด", "Cut-line corners")}</span>
+                    <select value={selPiece.info?.corner ?? "miter"} onChange={(e) => { const v = e.target.value; patchPiece(selPiece.id, (p) => ({ ...p, info: cleanPieceInfo({ ...(p.info ?? {}), corner: v === "miter" ? undefined : v }) })); }} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs">
+                      {ALLOW_CORNERS.map((c) => <option key={c.key} value={c.key}>{t(c.th, c.en)}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-1">
                   {ALLOW_STEPS.map((a) => <button key={a} type="button" onClick={() => setAllow(a)} className={`h-7 rounded-md border px-2 ${selPiece.allow === a ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{a}</button>)}
                   <NumField len value={selPiece.allow} min={0} max={20} label={t(`เผื่อพับ ${uL}`, `Allowance ${uL}`)} onCommit={setAllow} className="w-16" />
@@ -2393,6 +2483,27 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
               <div data-guide="tools">
                 <div className="mb-1 font-medium text-slate-600">{t("เครื่องมือ", "Tools")}</div>
+                {editId === selPiece.id && selNode >= 0 && selPiece.shape.k === "path" && !readonly && (() => {   // จุดที่เลือก (รอบ E): มุมภายใน · มุมโค้ง/ตัดมุมเฉพาะจุดนี้
+                  const ang = cornerAngle(selPiece.shape, selNode);
+                  const applyCorner = (f: (sh: Shape) => Shape | null) => { const next = f(selPiece.shape); if (!next) { setMsg({ tone: "err", text: t("ทำกับจุดนี้ไม่ได้ (จุดโค้งอยู่แล้ว หรือเป็นเส้นตรง)", "Can't do that on this point (already curved, or not a corner)") }); return; } patchPiece(selPiece.id, (p) => ({ ...p, shape: next })); setSelNode(-1); };
+                  return (
+                    <div className="mb-1.5 space-y-1 rounded-md border border-violet-200 bg-violet-50/60 p-2" data-guide="corner" data-corner-tools>
+                      <div className="text-slate-700">{t(`จุดที่ ${selNode + 1}`, `Point ${selNode + 1}`)}{ang != null && <span className="ml-1 text-slate-500">· {t(`มุม ${ang}°`, `angle ${ang}°`)}</span>}</div>
+                      <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("มุมโค้งเฉพาะจุดนี้", "Round this corner")}</span><NumField len value={cornerR} min={0.01} max={100} label={t("รัศมี", "Radius")} onCommit={setCornerR} className="w-16" />
+                        <button type="button" data-corner-fillet onClick={() => applyCorner((sh) => filletCorner(sh, selNode, cornerR))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำ", "Apply")}</button></div>
+                      <div className="flex items-center gap-1.5"><span className="min-w-0 flex-1">{t("ตัดมุมเฉพาะจุดนี้", "Chamfer this corner")}</span><NumField len value={chamD} min={0.01} max={100} label={t("ระยะตัดมุม", "Chamfer distance")} onCommit={setChamD} className="w-16" />
+                        <button type="button" data-corner-chamfer onClick={() => applyCorner((sh) => chamferCorner(sh, selNode, chamD))} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("ทำ", "Apply")}</button></div>
+                    </div>
+                  );
+                })()}
+                {pieceInfoFields && level >= 2 && !readonly && (
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5" data-guide="notch-style">
+                    <span className="text-slate-500">{t("แบบรอยบาก", "Notch style")}</span>
+                    <select value={selPiece.info?.notch ?? "single"} onChange={(e) => { const v = e.target.value; patchPiece(selPiece.id, (p) => ({ ...p, info: cleanPieceInfo({ ...(p.info ?? {}), notch: v === "single" ? undefined : v }) })); }} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs">
+                      {NOTCH_STYLES.map((n) => <option key={n.key} value={n.key}>{t(n.th, n.en)}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-1">
                   <button type="button" onClick={() => startEdit(selPiece)} className={btnCls(editId === selPiece.id)}>{editId === selPiece.id ? t("เสร็จแก้จุด", "Done editing") : selPiece.shape.k === "path" ? t("แก้จุด", "Edit points") : t("แปลงเป็นจุด + แก้", "Convert + edit")}</button>
                   <button type="button" onClick={() => doFold(selPiece, "x")} className={btnCls(false)} title={t("วาดครึ่งซ้าย แล้วต่อสมมาตรด้านขวา (ต้องมีเส้นตรงแนบขอบขวา)", "Draw the left half, then mirror to the right (needs a straight right edge)")}>{t("พับครึ่ง →", "Fold →")}</button>
@@ -2422,6 +2533,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     <span className="w-16">{t("เส้นทางผ้า", "Grain")}</span>
                     <button type="button" onClick={toggleGrain} className={`h-7 rounded-md border px-2 ${selPiece.grain ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 hover:bg-slate-50"}`}>{selPiece.grain ? t("ซ่อน", "Hide") : t("แสดง", "Show")}</button>
                     {selPiece.grain && <button type="button" onClick={turnGrain} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50">{t("หมุน 90°", "Turn 90°")}</button>}
+                    {pieceInfoFields && level >= 2 && !readonly && (
+                      <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 pt-1" data-guide="cut-marks">
+                        {([["nap", t("ทางผ้าทางเดียว", "One-way grain")], ["face", t("วางคว่ำหน้า", "Face down")], ["pair", t("ตัดคู่ซ้าย-ขวา", "Cut a mirrored pair")]] as const).map(([k, label]) => {
+                          const on = k === "face" ? selPiece.info?.face === "down" : !!selPiece.info?.[k];
+                          return <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={on} onChange={(e) => patchPiece(selPiece.id, (p) => ({ ...p, info: cleanPieceInfo({ ...(p.info ?? {}), [k]: e.target.checked ? (k === "face" ? "down" : true) : undefined }) }))} className="h-3.5 w-3.5 accent-blue-600" />{label}</label>;
+                        })}
+                      </div>
+                    )}
                     {pieceInfoFields && selPiece.grain && selPiece.grain.length === 2 && (() => {   // ทิศทางผ้าเป็นองศา: 0 = แนวตั้ง · บวก = เอียงตามเข็ม
                       const [[x1, y1], [x2, y2]] = selPiece.grain, deg = Math.round(((Math.atan2(x2 - x1, -(y2 - y1)) * 180) / Math.PI + 360) % 180);
                       return <><NumField value={deg} min={0} max={179} step={1} label={t("ทิศทางผ้า องศา", "Grain angle degrees")} className="w-14" onCommit={(v) => patchPiece(selPiece.id, (p) => {
@@ -2511,6 +2630,17 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                         </div>
                       );
                     })}
+                    {!readonly && (
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5" data-center-add>
+                        <span className="text-slate-500">{t("＋ เส้นกลาง:", "＋ Centre line:")}</span>
+                        {(["v", "h"] as const).map((ax) => (
+                          <button key={ax} type="button" data-center-line={ax} onClick={() => { const b = shapeBox(selPiece.shape), id = `cl${Date.now().toString(36)}${ax}`;
+                            const pts: Pt[] = ax === "v" ? [[b.x + b.w / 2, b.y], [b.x + b.w / 2, b.y + b.h]] : [[b.x, b.y + b.h / 2], [b.x + b.w, b.y + b.h / 2]];
+                            patchPiece(selPiece.id, (p) => ({ ...p, inner: [...(p.inner ?? []), { id, kind: "mark" as InnerKind, name: ax === "v" ? t("กลางแนวตั้ง", "Vertical centre") : t("กลางแนวนอน", "Horizontal centre"), pts }] })); }}
+                            className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{ax === "v" ? t("แนวตั้ง", "Vertical") : t("แนวนอน", "Horizontal")}</button>
+                        ))}
+                      </div>
+                    )}
                     {!readonly && (
                       <div className="flex flex-wrap items-center gap-1 pt-0.5" data-hw-add>
                         <span className="text-slate-500">{t("＋ วางอะไหล่:", "＋ Place hardware:")}</span>

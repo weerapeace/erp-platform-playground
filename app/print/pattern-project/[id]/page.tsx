@@ -142,13 +142,13 @@ export default function PrintPatternProjectPage() {
           <div className="mb-1 text-[11px] font-medium text-slate-600">รายละเอียดชิ้น</div>
           <table className="w-full border-collapse text-[12px]">
             <thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500">
-              <th className={th}>ชิ้น</th><th className={th}>รหัส</th><th className={th}>ชนิด</th><th className={th}>แผ่นเสริม</th><th className={th}>ปาดขอบ</th><th className="py-1">อยู่ทรง</th>
+              <th className={th}>ชิ้น</th><th className={th}>รหัส</th><th className={th}>ชนิด</th><th className={th}>แผ่นเสริม</th><th className={th}>ปาดขอบ</th><th className={th}>วิธีวางตัด</th><th className="py-1">อยู่ทรง</th>
             </tr></thead>
             <tbody>
               {pieceRows.map((r, i) => (
                 <tr key={i} className="border-b border-slate-100">
                   <td className={th}>{r.piece}</td><td className={th}>{r.code || "—"}</td><td className={th}>{r.role || "—"}</td><td className={th}>{r.bond || "—"}</td>
-                  <td className={th}>{r.skive != null ? `${r.skive} มม.` : "—"}</td><td className="py-1">{r.solid ? "แข็งอยู่ทรง" : "—"}</td>
+                  <td className={th}>{r.skive != null ? `${r.skive} มม.` : "—"}</td><td className={th}>{r.cut || "—"}</td><td className="py-1">{r.solid ? "แข็งอยู่ทรง" : "—"}</td>
                 </tr>
               ))}
             </tbody>

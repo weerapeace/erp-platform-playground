@@ -22,7 +22,7 @@ describe("ค่าของชิ้น (รหัส · ชนิด · แผ
     expect(pieces[0].info).toEqual({ code: "FR-01", role: "body", bond: "board", skive: 8, solid: true });
     expect(pieces[1].info).toBeUndefined();
     expect(patternPieces(projectPatternLines(pieces)).map((p) => p.note)).toEqual(["FR-01", null]);
-    expect(projectPieceRows(pieces)).toEqual([{ piece: "ตัวหน้า", code: "FR-01", role: "ตัวกระเป๋า", bond: "กระดาษแข็ง / แผ่นรอง", skive: 8, solid: true }]);
+    expect(projectPieceRows(pieces)).toEqual([{ piece: "ตัวหน้า", code: "FR-01", role: "ตัวกระเป๋า", bond: "กระดาษแข็ง / แผ่นรอง", skive: 8, solid: true, cut: "" }]);
   });
 });
 

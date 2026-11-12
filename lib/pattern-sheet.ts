@@ -11,7 +11,8 @@
  * คู่มือ: docs/pattern-sheet.md · หน้าจอ: components/pattern-sheet · หน้าพิมพ์: app/print/design-sheet/[id]/pattern
  */
 
-import { cleanLineShape, foldSegments, notchSegments, pieceGeometry, polyD, shapePathD, type Pt } from "@/lib/pattern-shape";
+import { cleanLineShape, foldSegments, notchSegments, pieceGeometry, polyD, shapePathD, type Pt, foldSecondLines, edgeAllowances, shapeEdgeCount } from "@/lib/pattern-shape";
+import { notchStyleSegs } from "@/lib/pattern-edit";
 
 export type PatternLineInput = {
   key?: string | null;
@@ -49,6 +50,7 @@ export type PatternPiece = {
   grainSegs?: [Pt, Pt][] | null;   // เส้นทางผ้า: ก้าน + หัวลูกศร 2 ข้าง (DXF layer GRAIN)
   notchSegs?: [Pt, Pt][] | null;   // รอยบาก: ขีดจากเส้นตัดเข้าในชิ้น (DXF layer NOTCH)
   marksD?: string | null;          // เส้นทางผ้า + รอยบาก รวมเป็น SVG path (วาดเส้นทึบบาง)
+  dims?: { a: Pt; b: Pt; label: string }[] | null;   // เส้นวัดถาวร (รอบ E) — DXF layer DIM + ตัวเลข
   foldSegs?: Pt[][] | null;        // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน) — DXF layer FOLD
   foldD?: string | null;           // เส้นพับเป็น SVG path (วาดเส้นประยาว-สั้น)
   innerSegs?: Pt[][] | null;       // เส้นในชิ้น (แนวเย็บ / ช่องเจาะ / แนวพับ / ตำแหน่ง) — DXF layer INNER
@@ -57,7 +59,7 @@ export type PatternPiece = {
 };
 
 /** ลูกศรเส้นทางผ้า 2 หัว → ชุดเส้นตรง (ก้าน + หัว 4 เส้น) */
-export function grainArrowSegs(a: Pt, b: Pt): [Pt, Pt][] {
+export function grainArrowSegs(a: Pt, b: Pt, oneWay = false): [Pt, Pt][] {
   const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
   if (!(L > 0)) return [];
   const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, hs = Math.min(1, L * 0.15), hw = hs * 0.55;
@@ -65,7 +67,7 @@ export function grainArrowSegs(a: Pt, b: Pt): [Pt, Pt][] {
     [p, [p[0] + s * ux * hs - uy * hw, p[1] + s * uy * hs + ux * hw]],
     [p, [p[0] + s * ux * hs + uy * hw, p[1] + s * uy * hs - ux * hw]],
   ];
-  return [[a, b], ...head(a, 1), ...head(b, -1)];
+  return oneWay ? [[a, b], ...head(b, -1)] : [[a, b], ...head(a, 1), ...head(b, -1)];   // ทางเดียว (ผ้ามีขน/ลาย) = หัวลูกศรเดียว
 }
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const segsD = (S: [Pt, Pt][]) => S.map(([a, b]) => `M${r2(a[0])} ${r2(a[1])}L${r2(b[0])} ${r2(b[1])}`).join("");
@@ -94,13 +96,16 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
     const allow = ls?.allow ?? 0;
     const hasAllow = allow > 0 || !!g?.segAllow;   // มีเส้นตัดแยกจากเส้นเย็บ (ค่าเดียวทั้งชิ้น หรือ เผื่อรายขอบ)
     if (!(w > 0) || !(h > 0)) continue;
-    const grainSegs = ls?.grain ? grainArrowSegs(...(sh(ls.grain) as [Pt, Pt])) : [];
-    const foldSegs = ls?.foldEdges ? foldSegments(ls.shape, ls.foldEdges).map(sh) : [];
-    const innerSegs = (ls?.inner ?? []).filter((x) => x.pts.length >= 2 && x.kind !== "hw").map((x) => sh(x.pts));
+    const grainSegs = ls?.grain ? grainArrowSegs(...(sh(ls.grain) as [Pt, Pt]), !!ls.nap) : [];
+    const perAllow = ls ? edgeAllowances(ls.shape, ls.allowEdges, allow) ?? Array.from({ length: shapeEdgeCount(ls.shape) }, () => allow) : [];
+    const foldSegs = ls?.foldEdges ? [...foldSegments(ls.shape, ls.foldEdges), ...foldSecondLines(ls.shape, ls.foldEdges, perAllow)].map(sh) : [];   // พับสองทบ = เส้นพับที่สองนอกเส้นเย็บครึ่งเผื่อ
+    const innerSegs = (ls?.inner ?? []).filter((x) => x.pts.length >= 2 && x.kind !== "hw" && x.kind !== "dim").map((x) => sh(x.pts));
+    // เส้นวัดถาวร (รอบ E): เส้นบาง + ตัวเลขความยาว — ใบพิมพ์ + DXF ชั้น DIM (ไม่ใช่เส้นตัด)
+    const dims = (ls?.inner ?? []).filter((x) => x.kind === "dim" && x.pts.length >= 2).map((x) => { const [a, b] = sh([x.pts[0], x.pts[x.pts.length - 1]]); return { a, b, label: `${r1(Math.hypot(b[0] - a[0], b[1] - a[1]))} cm` }; });
     // อะไหล่ที่วางบนชิ้น: วงกลมขนาดจริง + กากบาทกึ่งกลาง (ใบพิมพ์) · วงกลมในชั้น HW (ไฟล์ตัด) — ไม่ใช่เส้นสั้นในชั้น INNER
     const hwMarks = (ls?.inner ?? []).filter((x) => x.kind === "hw" && x.pts.length >= 2).map((x) => { const [a, b] = sh([x.pts[0], x.pts[x.pts.length - 1]]); return { c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Pt, r: Math.max(0.15, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2) }; });
     const hwD = hwMarks.map(({ c, r }) => `M${r2(c[0] - r)} ${r2(c[1])}a${r2(r)} ${r2(r)} 0 1 0 ${r2(2 * r)} 0a${r2(r)} ${r2(r)} 0 1 0 ${r2(-2 * r)} 0M${r2(c[0] - r / 2)} ${r2(c[1])}h${r2(r)}M${r2(c[0])} ${r2(c[1] - r / 2)}v${r2(r)}`).join("");
-    const notchSegs = g && ls?.notches?.length ? notchSegments(g.sew, ls.notches, allow, 0.5, g.segAllow).map((s) => sh(s) as [Pt, Pt]) : [];
+    const notchSegs = g && ls?.notches?.length ? notchSegments(g.sew, ls.notches, allow, 0.5, g.segAllow).flatMap((x) => notchStyleSegs(x, ls.notchStyle)).map((x) => sh(x) as [Pt, Pt]) : [];   // แบบรอยบาก: เดี่ยว / คู่ / V
     out.push({
       id: `P${out.length + 1}`,
       name: [(l.item_name ?? "").trim() || "ไม่ระบุวัสดุ", ls?.name].filter(Boolean).join(" · "),
@@ -118,6 +123,7 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
       ...(foldSegs.length ? { foldSegs, foldD: foldSegs.map((L) => "M" + L.map(([x, y]) => `${r2(x)} ${r2(y)}`).join("L")).join("") } : {}),
       ...(innerSegs.length || hwMarks.length ? { ...(innerSegs.length ? { innerSegs } : {}), innerD: innerSegs.map((L) => "M" + L.map(([x, y]) => `${r2(x)} ${r2(y)}`).join("L")).join("") + hwD } : {}),
       ...(hwMarks.length ? { hwMarks } : {}),
+      ...(dims.length ? { dims } : {}),
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
@@ -198,6 +204,10 @@ export function buildPatternDxf(layout: PatternLayout): string {
       segs(p.notchSegs, "NOTCH");
       for (const L of p.foldSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "FOLD");
       for (const m of p.hwMarks ?? []) out.push("0", "CIRCLE", "8", "HW", "10", String(mm(p.x + m.c[0])), "20", String(H - mm(p.y + m.c[1])), "30", "0", "40", String(mm(m.r)));   // อะไหล่ = วงกลมในชั้น HW (ตำแหน่งเจาะ/ติด)
+      for (const dm of p.dims ?? []) {   // เส้นวัด: เส้น + ตัวเลข ชั้น DIM (เครื่องตัดไม่ตัดชั้นนี้)
+        line(mm(p.x + dm.a[0]), H - mm(p.y + dm.a[1]), mm(p.x + dm.b[0]), H - mm(p.y + dm.b[1]), "DIM");
+        out.push("0", "TEXT", "8", "DIM", "10", String(mm(p.x + (dm.a[0] + dm.b[0]) / 2)), "20", String(H - mm(p.y + (dm.a[1] + dm.b[1]) / 2) + 2), "30", "0", "40", "3", "1", dm.label);
+      }
       for (const L of p.innerSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "INNER");   // เส้นในชิ้น: วาดตำแหน่ง ไม่ใช่เส้นตัด
     } else { line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot); }
     const textH = Math.max(3, Math.min(8, mm(Math.min(p.w, p.h)) / 8));

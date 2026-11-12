@@ -27,6 +27,15 @@ export type Shape =
   | { k: "ellipse"; x: number; y: number; w: number; h: number }
   | { k: "path"; nodes: PNode[] };
 export type ShapeBasis = "box" | "area";
+/** มุมของเส้นตัด (เผื่อเย็บ) ที่มุมนูน (Bag CAD รอบ E): miter = ต่อตรงเป็นมุมแหลม (เดิม) · bevel = ตัดมุม · round = มุมมน */
+export type AllowCorner = "miter" | "bevel" | "round";
+export const ALLOW_CORNERS: { key: AllowCorner; th: string; en: string }[] = [
+  { key: "miter", th: "มุมแหลม (ต่อตรง)", en: "Miter" }, { key: "bevel", th: "มุมตัด", en: "Bevel" }, { key: "round", th: "มุมมน", en: "Round" },
+];
+export const isAllowCorner = (v: unknown): v is AllowCorner => v === "miter" || v === "bevel" || v === "round";
+/** แบบรอยบาก (Bag CAD รอบ E): เดี่ยว · คู่ (มักใช้ชิ้นหลัง) · รูปตัว V */
+export type NotchStyle = "single" | "double" | "v";
+export const isNotchStyle = (v: unknown): v is NotchStyle => v === "single" || v === "double" || v === "v";
 /**
  * รูปทรงของบรรทัดตีราคา (design_sheet_cost_lines.shape) — shape/holes = เส้นเย็บ (ขนาดสำเร็จ) เริ่มที่ 0,0
  *   allow = เผื่อพับ/เผื่อเย็บ (ซม.) → เส้นตัด = ขยายออก allow · รูเจาะหดเข้า allow · กว้าง×ยาวในบรรทัด = กรอบของเส้นตัด
@@ -35,14 +44,14 @@ export type ShapeBasis = "box" | "area";
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; /** มุมของเส้นตัด (ไม่มี = miter) */ corner?: AllowCorner; /** แบบรอยบาก (ไม่มี = เดี่ยว) */ notchStyle?: NotchStyle; /** ทางผ้าทางเดียว (ผ้ามีขน/ลายทิศเดียว) */ nap?: boolean; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
 /** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
 /**
  * เส้นในชิ้น (2026-11-11) — เส้นที่อยู่ "ข้างใน" ชิ้น ไม่ใช่เส้นตัด: บอกตำแหน่งให้ช่าง และเป็นที่ให้ชิ้นอื่นมาเย็บ
  *   sew = แนวเย็บ (เช่น แนวเย็บช่องใส่ของ 3 ด้าน) · slit = ช่องเจาะ (ช่องซิป) · fold = แนวพับ · mark = ตำแหน่ง/เครื่องหมาย
  *   pts = จุดของเส้น (พิกัดเดียวกับรูปชิ้น) — ย้าย/ย่อขยาย/หมุน/กลับด้านชิ้น เส้นในไปตามชิ้น
  */
-export type InnerKind = "sew" | "slit" | "fold" | "mark" | "hw";
+export type InnerKind = "sew" | "slit" | "fold" | "mark" | "hw" | "dim";
 /**
  * อะไหล่ที่วางบนชิ้น (2026-11-11 · เจ้าของเลือกทำต่อ "วางอะไหล่ให้เห็นตำแหน่งบนชิ้นและในภาพ 3 มิติ"):
  *   เก็บเป็นเส้นในชนิด "hw" ยาว = ขนาดของอะไหล่ จุดกึ่งกลางเส้น = ตำแหน่ง → ย้าย/หมุน/กลับด้านตามชิ้น · ลากย้าย · พิมพ์ระยะจากขอบ ได้ด้วยของเดิมทั้งหมด
@@ -66,6 +75,7 @@ export function hwSpot(l: InnerLine): { c: Pt; size: number } {
 export const INNER_KINDS: { key: InnerKind; th: string; en: string }[] = [
   { key: "sew", th: "แนวเย็บ", en: "Sewing line" }, { key: "slit", th: "ช่องเจาะ (ซิป)", en: "Slit (zip)" },
   { key: "fold", th: "แนวพับ", en: "Fold line" }, { key: "mark", th: "ตำแหน่ง", en: "Position mark" }, { key: "hw", th: "อะไหล่", en: "Hardware" },
+  { key: "dim", th: "เส้นวัด (บอกขนาด)", en: "Dimension" },
 ];
 export type InnerLine = { id: string; kind: InnerKind; pts: Pt[]; name?: string; /** ชนิดอะไหล่ (เฉพาะ kind = "hw") */ hw?: HwKind };
 export const MAX_INNER_LINES = 40;
@@ -116,7 +126,7 @@ export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null; inner?: I
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
 export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };
 /** ชิ้นงาน 1 ชิ้น = เส้นรอบนอก + รูเจาะ + เผื่อพับ */
-export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number; allowEdges?: number[] | null };
+export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number; allowEdges?: number[] | null; /** มุมเส้นตัด (รอบ E) — หรืออ่านจาก info.corner ของชิ้น */ corner?: AllowCorner | null; info?: { corner?: AllowCorner } | null };
 export type Box = { x: number; y: number; w: number; h: number };
 export type ShapeStats = { w: number; h: number; area: number; perimeter: number; fill: number };
 
@@ -306,6 +316,9 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   if (typeof o.name === "string" && o.name.trim()) out.name = o.name.trim().slice(0, 60);
   if (Array.isArray(o.at) && o.at.length === 2) { const x = fin(o.at[0]), y = fin(o.at[1]); if (x != null && y != null && Math.abs(x) < 1e5 && Math.abs(y) < 1e5) out.at = [r3(x), r3(y)]; }
   if (Array.isArray(o.refs)) { const refs = o.refs.slice(0, 4).map(cleanRefImage).filter((r): r is RefImage => !!r); if (refs.length) out.refs = refs; }
+  if (isAllowCorner(o.corner) && o.corner !== "miter") out.corner = o.corner;
+  if (isNotchStyle(o.notchStyle) && o.notchStyle !== "single") out.notchStyle = o.notchStyle;
+  if (o.nap === true) out.nap = true;
   return out;
 }
 
@@ -633,7 +646,7 @@ export function polyD(P: Pt[], ox = 0, oy = 0): string {
  * ขยาย (d > 0) / หด (d < 0) รูปหลายเหลี่ยมออกเท่ากันทุกด้าน — ใช้ทำเส้นตัดจากเส้นเย็บ (เผื่อพับ)
  * มุมแหลมมาก (ยื่นเกิน 4 เท่าของ d) ตัดมุมเป็น 2 จุดแทน กันมุมพุ่งยาว
  */
-export function offsetPolygon(P: Pt[], d: number): Pt[] {
+export function offsetPolygon(P: Pt[], d: number, join: AllowCorner = "miter"): Pt[] {
   if (!d || P.length < 3) return P;
   const pts = P.filter((p, i) => { const q = P[(i + 1) % P.length]; return Math.hypot(q[0] - p[0], q[1] - p[1]) > 1e-9; });
   const n = pts.length;
@@ -654,7 +667,10 @@ export function offsetPolygon(P: Pt[], d: number): Pt[] {
     const t = ((l2.p[0] - l1.p[0]) * l2.v[1] - (l2.p[1] - l1.p[1]) * l2.v[0]) / den;
     const q: Pt = [l1.p[0] + l1.v[0] * t, l1.p[1] + l1.v[1] * t];
     const v = pts[i];
-    if (Math.hypot(q[0] - v[0], q[1] - v[1]) > Math.abs(d) * 4) out.push([v[0] + l1.n[0] * d, v[1] + l1.n[1] * d], [v[0] + l2.n[0] * d, v[1] + l2.n[1] * d]);
+    const e1: Pt = [v[0] + l1.n[0] * d, v[1] + l1.n[1] * d], e2: Pt = [v[0] + l2.n[0] * d, v[1] + l2.n[1] * d];
+    const convex = (l1.v[0] * l2.v[1] - l1.v[1] * l2.v[0]) * s * Math.sign(d) > 0;
+    if (Math.hypot(q[0] - v[0], q[1] - v[1]) > Math.abs(d) * 4) out.push(e1, e2);
+    else if (convex && join !== "miter") cornerJoin(out, v, e1, e2, q, d, join);
     else out.push(q);
   }
   return out;
@@ -693,7 +709,7 @@ export function edgeAllowances(s: Shape, raw: unknown, base = 0): number[] | nul
 /** ขอบที่ "พับเข้าใน" (เช่น ขอบปากพับ) — 1 ค่าต่อขอบ (1 = พับ · 0 = เย็บปกติ) ต้องครบทุกขอบและมีอย่างน้อย 1 ขอบที่พับ ไม่งั้น = ไม่มี */
 export function cleanFoldEdges(s: Shape, raw: unknown): number[] | null {
   if (!Array.isArray(raw) || raw.length !== shapeEdgeCount(s)) return null;
-  const out = raw.map((v) => (v === 1 || v === true ? 1 : 0));
+  const out = raw.map((v) => (v === 2 ? 2 : v === 1 || v === true ? 1 : 0));   // 1 = พับ · 2 = พับสองทบ (รอบ E)
   return out.some(Boolean) ? out : null;
 }
 /** เส้นพับ = เส้นเย็บของขอบที่ตั้งว่าพับ (แต่ละขอบ = เส้นต่อเนื่อง 1 เส้น) — ใช้วาดเส้นพับบนกระดาน / หน้าพิมพ์ / ชั้น FOLD ของไฟล์ตัด */
@@ -709,11 +725,42 @@ export function foldSegments(s: Shape, fold: number[] | null | undefined): Pt[][
   return out;
 }
 
+/** พับสองทบ (foldEdges = 2): เส้นพับที่สองอยู่นอกเส้นเย็บครึ่งหนึ่งของเผื่อขอบนั้น (พับแรกที่ครึ่ง · พับสองที่เส้นเย็บ) */
+export function foldSecondLines(s: Shape, fold: number[] | null | undefined, allowPer: number[]): Pt[][] {
+  if (!fold?.some((v) => v === 2)) return [];
+  const flat = flattenWithEdges(s), sg = signedArea(flat.pts) > 0 ? 1 : -1, out: Pt[][] = [];
+  const lines = foldSegments(s, fold.map((v) => (v === 2 ? 1 : 0)));
+  let li = 0;
+  for (let e = 0; e < fold.length; e++) {
+    if (fold[e] !== 2) continue;
+    const L = lines[li++]; const d = (allowPer[e] ?? 0) / 2;
+    if (!L || !(d > 0)) continue;
+    out.push(L.map((p, k) => {
+      const a = L[Math.max(0, k - 1)], b = L[Math.min(L.length - 1, k + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+      return [r3(p[0] + (sg * dy / l) * d), r3(p[1] + (-sg * dx / l) * d)] as Pt;
+    }));
+  }
+  return out;
+}
+
+/** มุมนูนของเส้นขนาน: ต่อตรง (miter · เดิม) / ตัดมุม (bevel) / มุมมน (round) — e1/e2 = ปลายเส้นขนานของสองขอบ v = จุดมุมเดิม */
+function cornerJoin(out: Pt[], v: Pt, e1: Pt, e2: Pt, q: Pt, d: number, join: AllowCorner) {
+  if (join === "bevel") { out.push(e1, e2); return; }
+  if (join === "round") {
+    const a1 = Math.atan2(e1[1] - v[1], e1[0] - v[0]); let a2 = Math.atan2(e2[1] - v[1], e2[0] - v[0]);
+    let da = a2 - a1; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI; a2 = a1 + da;
+    const n = Math.max(2, Math.ceil(Math.abs(da) / (Math.PI / 12)));
+    for (let k = 0; k <= n; k++) { const a = a1 + (da * k) / n; out.push([v[0] + Math.cos(a) * Math.abs(d), v[1] + Math.sin(a) * Math.abs(d)]); }
+    return;
+  }
+  out.push(q);
+}
+
 /**
  * ขยายรูปหลายเหลี่ยมออกด้วยระยะต่างกันในแต่ละช่วง (d[i] = ระยะของช่วงจากจุด i ไปจุดถัดไป) — เส้นตัดของชิ้นที่เผื่อเย็บรายขอบ
  * มุมที่สองขอบเผื่อไม่เท่ากัน = ต่อเส้นขนานของสองขอบให้ชนกัน · ขอบแนวเดียวกันแต่เผื่อต่างกัน = หักเป็นขั้น · มุมแหลมมาก = ตัดมุมเป็น 2 จุด
  */
-export function offsetPolygonBy(P: Pt[], d: number[]): Pt[] {
+export function offsetPolygonBy(P: Pt[], d: number[], join: AllowCorner = "miter"): Pt[] {
   if (P.length < 3) return P;
   const idx: number[] = [];
   for (let i = 0; i < P.length; i++) { const q = P[(i + 1) % P.length]; if (Math.hypot(q[0] - P[i][0], q[1] - P[i][1]) > 1e-9) idx.push(i); }
@@ -736,7 +783,10 @@ export function offsetPolygonBy(P: Pt[], d: number[]): Pt[] {
     if (Math.abs(den) < 1e-9) { if (Math.hypot(e1[0] - e2[0], e1[1] - e2[1]) > 1e-9) out.push(e1, e2); else out.push(e2); continue; }
     const t = ((l2.p[0] - l1.p[0]) * l2.v[1] - (l2.p[1] - l1.p[1]) * l2.v[0]) / den;
     const q: Pt = [l1.p[0] + l1.v[0] * t, l1.p[1] + l1.v[1] * t];
+    const convex = (l1.v[0] * l2.v[1] - l1.v[1] * l2.v[0]) * s > 0;
     if (Math.hypot(q[0] - v[0], q[1] - v[1]) > Math.max(Math.abs(l1.d), Math.abs(l2.d), 0.01) * 4) out.push(e1, e2);
+    else if (convex && join !== "miter" && Math.abs(l1.d - l2.d) < 1e-9 && l1.d > 0) cornerJoin(out, v, e1, e2, q, l1.d, join);
+    else if (convex && join === "bevel" && (l1.d > 0 || l2.d > 0)) out.push(e1, e2);
     else out.push(q);
   }
   return out;
@@ -760,7 +810,8 @@ export function pieceGeometry(g: PieceGeom): PieceGeometry {
   const fe = per ? flattenWithEdges(g.shape) : null;
   const sew = fe ? fe.pts : flattenShape(g.shape);
   const segAllow = fe && per ? fe.edge.map((e) => per[e]) : null;
-  const cut = segAllow ? offsetPolygonBy(sew, segAllow) : a ? offsetPolygon(sew, a) : sew;
+  const join: AllowCorner = g.corner ?? g.info?.corner ?? "miter";
+  const cut = segAllow ? offsetPolygonBy(sew, segAllow, join) : a ? offsetPolygon(sew, a, join) : sew;
   const holesSew = (g.holes ?? []).map((h) => flattenShape(h));
   const holesCut = holesSew.map((h) => {
     if (!a) return h;

@@ -17,7 +17,7 @@ import type { Seam } from "@/lib/pattern-seams";
 export type SaveState = "saved" | "pending" | "saving" | "failed";
 const GROUPS: { key: string; th: string; en: string; codes: CheckCode[] }[] = [
   { key: "shape", th: "เส้นตัดปิด ไม่ตัดกันเอง ไม่มีจุดซ้ำ", en: "Closed cut lines, no self-crossing, no duplicate points", codes: ["self-cross", "cut-cross", "short-edge"] },
-  { key: "seam", th: "ตะเข็บครบ ยาวเท่ากัน หรือระบุว่าตั้งใจรูด", en: "Seams complete and equal, or marked as eased", codes: ["seam-broken", "seam-mismatch", "seam-eased"] },
+  { key: "seam", th: "ตะเข็บครบ ยาวเท่ากัน หรือระบุว่าตั้งใจรูด", en: "Seams complete and equal, or marked as eased", codes: ["seam-broken", "seam-mismatch", "seam-eased", "notch-mismatch"] },
   { key: "open", th: "ขอบที่ไม่ได้เย็บ ระบุว่าเปิดตั้งใจแล้ว", en: "Unsewn edges marked as intended openings", codes: ["edge-open"] },
   { key: "hole", th: "รู / ช่องเจาะ ไม่หลุดหรือชิดเส้นเย็บ", en: "Holes not outside or too close to the sew line", codes: ["hole-out", "hole-near"] },
   { key: "info", th: "ชื่อชิ้นและวัสดุครบ", en: "Piece names and materials filled in", codes: ["no-material", "no-name"] },
@@ -41,7 +41,7 @@ export function PreflightModal({ open, onClose, pieces, seams, tol, saveState, r
   const t = useT();
   const unit: LengthUnit = useMemo(() => { try { const v = localStorage.getItem("pattern-studio-unit"); return isLengthUnit(v) ? v : "mm"; } catch { return "mm"; } }, []);
   const L = (cm: number) => formatLength(cm, unit, { label: t("th", "en") as "th" | "en" });
-  const issues = useMemo(() => (open ? checkPattern(pieces.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, inner: p.inner, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, mats: p.mats ?? [] })), seams, { tol }) : []), [open, pieces, seams, tol]);
+  const issues = useMemo(() => (open ? checkPattern(pieces.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, inner: p.inner, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, edgeMeta: p.edgeMeta, mats: p.mats ?? [], notches: p.notches })), seams, { tol }) : []), [open, pieces, seams, tol]);
   const rows = GROUPS.map((g) => {
     const list = issues.filter((x) => g.codes.includes(x.code));
     const lv = list.reduce<CheckLevel | "ok">((m, x) => (RANK[x.level] > RANK[m] ? x.level : m), "ok");

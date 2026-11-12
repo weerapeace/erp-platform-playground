@@ -10,7 +10,7 @@ describe("ทะเบียนเครื่องมือ", () => {
     for (const d of PATTERN_TOOLS) { expect(d.th && d.en && d.desc.th && d.desc.en).toBeTruthy(); expect(d.steps.length).toBeGreaterThan(0); expect([1, 2, 3]).toContain(d.level); }
   });
   it("เครื่องมือบนกระดานทุกตัวมีในทะเบียน", () => {
-    for (const t of ["move", "rect", "ellipse", "pen", "hand", "measure", "inner", "sew", "sewpart", "sewmany", "sewedit"]) expect(toolOfBoard(t)?.target).toEqual({ kind: "tool", tool: t });
+    for (const t of ["move", "rect", "ellipse", "polygon", "pen", "hand", "measure", "inner", "sew", "sewpart", "sewmany", "sewedit"]) expect(toolOfBoard(t)?.target).toEqual({ kind: "tool", tool: t });
   });
   it("ชื่อเมื่อชี้ปุ่ม = ไทย · อังกฤษ + ปุ่มลัด + คำอธิบาย", () => {
     expect(toolTitle(toolById("sew")!, "th")).toMatch(/^เย็บขอบกับขอบ · Segment sewing \(N\)\n/);
@@ -36,5 +36,11 @@ describe("ค้นหาเครื่องมือ", () => {
   });
   it("ปุ่มลัดตัวเดียว = เครื่องมือนั้นขึ้นก่อน", () => { expect(ids("n")[0]).toBe("sew"); expect(ids("b")[0]).toBe("sewedit"); });
   it("ว่าง = ไม่มีผล · ไม่เจอ = ว่าง", () => { expect(ids("")).toEqual([]); expect(ids("zzzqqq")).toEqual([]); });
+  it("รอบ E: เครื่องมือใหม่ค้นเจอ", () => {
+    expect(ids("หลายเหลี่ยม")[0]).toBe("polygon"); expect(ids("g")[0]).toBe("polygon");
+    expect(ids("chamfer")[0]).toBe("corner"); expect(ids("แบ่งขอบ")[0]).toBe("edge-split");
+    expect(ids("พับสองทบ")[0]).toBe("edge-fold2"); expect(ids("dimension")[0]).toBe("dim-pin");
+    expect(ids("snap")).toContain("objsnap"); expect(ids("nap")).toContain("cut-marks");
+  });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });
