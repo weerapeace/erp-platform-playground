@@ -283,9 +283,9 @@ export default function PlatformCatalogPage() {
       return;
     } finally { if (my === reqSeq.current) setLoading(false); }
 
-    // รูป/สต๊อก/สถานะบนร้าน — โหลดคู่กับตัวเดา ไม่บังตาราง · เฉพาะร้านที่ส่งข้อมูลพวกนี้มา (LINE/Lazada — ไฟล์ export ของ Shopee ไม่มี)
+    // รูป/สต๊อก/สถานะบนร้าน — โหลดคู่กับตัวเดา ไม่บังตาราง · เฉพาะร้านที่ส่งข้อมูลพวกนี้มา (LINE/Lazada/TikTok — ไฟล์ export ของ Shopee ไม่มี · ลืม TikTok = การ์ดขึ้น "ไม่มีรูป" ทุกใบ เจอ 2026-11-12)
     const pfCode = platforms.find((p) => p.id === platformId)?.code ?? "";
-    if (pfCode === "line_shopping" || pfCode === "lazada") {
+    if (pfCode === "line_shopping" || pfCode === "lazada" || pfCode === "tiktok") {
     setSummLoading(true);
     const smq = new URLSearchParams({ platform_id: platformId, view: "summary" }); if (brandId) smq.set("brand_id", brandId);
     void apiFetch(`/api/platform-catalog?${smq}`).then((r) => r.json())
@@ -1006,7 +1006,7 @@ export default function PlatformCatalogPage() {
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-slate-800">{activePf?.name_th ?? "ร้าน"}{activeBrand ? ` · ${activeBrand.name}` : ""}</div>
               <div className="truncate text-[11px] text-slate-400">
-                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : platformCode === "tiktok" ? "เชื่อมด้วย TikTok Shop (อ่านอย่างเดียว)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
+                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : platformCode === "tiktok" ? "เชื่อมด้วย TikTok Shop (แก้ชื่อ/ราคา/เปิดปิดขาย ได้ในลิ้นชักสินค้า)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
                 {lastImported ? ` · ข้อมูลจากร้านล่าสุด ${new Date(lastImported).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}` : ""}
               </div>
             </div>
