@@ -29,6 +29,9 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - คำสั่งระดับร้าน (สินค้า/ออเดอร์) ต้องส่ง `shop_cipher` จาก `/authorization/202309/shops`
 - แอปที่ยังเป็น **ฉบับร่าง** ร้านจริงกดอนุญาตไม่ได้ → ต้องผ่าน "การตรวจสอบการลงทะเบียนพาร์ทเนอร์" แล้วกด **เผยแพร่** ก่อน (ทดสอบก่อนได้ด้วย Development Shop ใน Partner Center)
 - ร้านยกเลิกสิทธิ์เองได้ที่ Seller Center › App Store › My apps
+- **สิทธิ์ต้องเปิดที่ "ตัวแอป" ด้วย** (เจอจริง 2026-11-12): กุญแจของร้านได้ `granted_scopes` ครบ 132 ตัว แต่แอปยังไม่ได้เปิดสิทธิ์ → ทุกคำสั่งตอบ `105005 Access denied ... access scope` → เปิดที่ Partner Center › App & Service › แอป › จัดการ API → กด "เผยแพร่การเปลี่ยนแปลง" → ตัดการเชื่อมต่อแล้วเชื่อมใหม่ (ได้กุญแจใหม่)
+  - ใช้ตอนนี้: Shop Authorized Information (`seller.authorization.info`) · ขั้นอ่านถัดไป: Product Basic · Order Information · Logistics Basic (+Finance Information ถ้าจะกระทบยอด)
+  - `ttsApi(…, { scope })` ใส่ชื่อสิทธิ์ไว้ → `ttsErrorText` บอกเจ้าของว่าต้องเปิดตัวไหน · รหัส 36009004 ใช้ซ้ำหลายสาเหตุ แยกด้วยข้อความ
 
 ## ห้ามใช้เมื่อไหร่ / ข้อควรระวัง
 - ห้ามส่งสต๊อกขึ้น TikTok ขณะที่ BigSeller ยังซิงค์สต๊อกร้านเดียวกัน
