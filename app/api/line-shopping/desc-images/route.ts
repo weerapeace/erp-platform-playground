@@ -1,7 +1,7 @@
 /**
- * ทดสอบ: ใส่รูปจากระบบลงในรายละเอียดสินค้าบน LINE — /api/line-shopping/desc-images
+ * ใส่รูปจากระบบลงในรายละเอียดสินค้าบน LINE — /api/line-shopping/desc-images (ทดสอบผ่านแล้ว 2026-11-10/12)
  *  POST { listing_id, image_keys: string[] (คีย์รูปในคลัง ≤ 15) }  (products.platforms.publish — แตะร้านจริง)
- *   ช่วงทดสอบ: เฉพาะสินค้าที่ "ปิดขาย" (ลูกค้าไม่เห็นแกลเลอรีที่สลับชั่วคราว)
+ *   เฉพาะสินค้าที่ "ปิดขาย" (ลูกค้าไม่เห็นแกลเลอรีที่สลับชั่วคราว)
  *   1) ฝากรูปผ่านแกลเลอรีชั่วคราว → ได้ลิงก์ LINE → คืนแกลเลอรีเดิม (lib/line-desc-images)
  *   2) ต่อรูปท้ายรายละเอียด → PATCH /products/{id}
  *   3) ดึงสินค้ากลับ → สำเนาในระบบตรงร้าน + นับว่ารูปอยู่ในรายละเอียดจริงกี่รูป
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const productId = String(row.external_product_id ?? "").trim();
   const line = (row.raw?.line && typeof row.raw.line === "object" ? row.raw.line : null) as Record<string, unknown> | null;
   if (!productId || !line) return NextResponse.json({ error: "ยังไม่มีข้อมูลสินค้านี้จาก LINE — กด “ดึงสินค้าจาก LINE” ก่อน" }, { status: 400 });
-  if (line.isDisplay !== false) return NextResponse.json({ error: "ช่วงทดสอบ: ใส่รูปในรายละเอียดได้เฉพาะสินค้าที่ปิดขาย — ปิดขายก่อน" }, { status: 400 });
+  if (line.isDisplay !== false) return NextResponse.json({ error: "ใส่รูปในรายละเอียดได้เฉพาะสินค้าที่ปิดขาย (ระหว่างใส่ต้องสลับรูปสินค้าชั่วคราว) — ปิดขายก่อน" }, { status: 400 });
 
   const key = await lineApiKey(admin, row.brand_id, row.platform_id);
   if (!key.apiKey) return NextResponse.json({ error: key.error }, { status: 400 });

@@ -3,7 +3,7 @@
  *  GET  ?parent_sku_id=  (products.platforms.view) → ดูก่อนส่ง: ทุกช่องที่จะส่ง + มาจากไหน + ช่องที่ขาด (ตัวช่วยลงสินค้า ขั้น "ดูและแก้")
  *  POST { parent_sku_id, display?: "onsale"|"hide" (ค่าเริ่ม hide) }  (products.platforms.edit) → สร้างจริงบน LINE (POST /products)
  *   → เก็บ platform_product_id ในร่าง + สร้าง catalog listing (จับคู่ parent)
- *   → หลังสร้าง (พลาดไม่ทำให้ลงไม่สำเร็จ): รูปในรายละเอียด (ทดลอง) · เปิด/ปิดขายตามที่เลือก · ของขวัญ = เตือนให้ตั้งเอง (LINE ไม่รับผ่าน API)
+ *   → หลังสร้าง (พลาดไม่ทำให้ลงไม่สำเร็จ): รูปในรายละเอียด · เปิด/ปิดขายตามที่เลือก · ของขวัญ = เตือนให้ตั้งเอง (LINE ไม่รับผ่าน API)
  *   → ดึงสินค้าที่เพิ่งลงกลับมาเก็บ raw.line (ลิ้นชักเห็นข้อมูลทันที)
  * ประกอบข้อมูลด้วยของกลางตัวเดียว lib/line-create-payload (ดูก่อนส่ง = ส่งจริง ตรงกันเสมอ)
  * หมายเหตุ: เขียนสร้างสินค้าจริงบนร้าน LINE — payload อาจต้องปรับตาม error จาก API (ทดสอบทีละตัว)
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   // รูปในรายละเอียดต้องสลับรูปสินค้าชั่วคราว → ปิดขายก่อน (ลูกค้าไม่เห็น) แล้วค่อยเปิดตามที่เลือกตอนท้าย
   if (productId && descImageKeys.length) await lineSetDisplay(apiKey, productId, "hide");
-  // รูปในรายละเอียด (ทดลอง — ทดสอบผ่าน 2026-11-10 LMTS05/WL53): ฝากรูปผ่านแกลเลอรี → ต่อท้ายรายละเอียด
+  // รูปในรายละเอียด (ทดสอบผ่าน 2026-11-10 LMTS05/WL53 · รูปไม่หายหลัง 2 วัน): ฝากรูปผ่านแกลเลอรี → ต่อท้ายรายละเอียด
   //   พลาด = สินค้าลงแล้ว แค่ไม่มีรูปในรายละเอียด (ไม่ถือว่าลงไม่สำเร็จ)
   let descImages: { ok: boolean; present: number; total: number; hosted: string[]; error: string | null } | null = null;
   if (productId && descImageKeys.length) {

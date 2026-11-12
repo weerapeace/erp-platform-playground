@@ -327,7 +327,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
           : <div className="tiptap-content max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm [&_img]:max-w-full [&_img]:rounded"
               dangerouslySetInnerHTML={{ __html: form.description || "<p class=\"text-slate-400\">(ไม่มีรายละเอียด)</p>" }} />}
       </div>
-      {/* ทดสอบใส่รูปจากระบบลงในรายละเอียด (ช่วงทดสอบ · เฉพาะสินค้าปิดขาย) */}
+      {/* ใส่รูปจากระบบลงในรายละเอียด (เฉพาะสินค้าปิดขาย) */}
       {line.gift && <LineGiftSection current={line.gift} />}
       {canEdit && listingId && (
         <DescImagesTest listingId={listingId} matchedParent={matchedParent} display={line.display}

@@ -51,7 +51,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
   const [val, setVal] = useState("");
   const [saving, setSaving] = useState(false);
   const [sel, setSel] = useState<string[] | null>(null);            // รูปที่ติ๊กเลือก (null = ตามที่จะส่งตอนนี้)
-  const [dsel, setDsel] = useState<string[] | null>(null);          // รูปในรายละเอียด (ทดลอง) ที่ติ๊ก (null = ตามร่าง)
+  const [dsel, setDsel] = useState<string[] | null>(null);          // รูปในรายละเอียด ที่ติ๊ก (null = ตามร่าง)
   const [gsel, setGsel] = useState<GiftSetting | null>(null);       // ของขวัญที่กำลังแก้ (null = ตามร่าง/ค่าเริ่ม)
   const [dpick, setDpick] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
@@ -104,7 +104,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
     if (cur.includes(key)) return cur.filter((k) => k !== key);
     return cur.length < LINE_CREATE_MAX_IMAGES ? [...cur, key] : cur;
   });
-  // รูปในรายละเอียด (ทดลอง): ต่อท้ายข้อความหลังลงร้าน (ฝากรูปผ่านแกลเลอรี) · บันทึก = ร่าง extra.line_desc_images
+  // รูปในรายละเอียด: ต่อท้ายข้อความหลังลงร้าน (ฝากรูปผ่านแกลเลอรี) · บันทึก = ร่าง extra.line_desc_images
   const curDesc = dsel ?? pv?.desc_images ?? [];
   const descDirty = !!dsel && !!pv && dsel.join("|") !== pv.desc_images.join("|");
   const dragDesc = useDragReorder((from, to) => setDsel((xs) => moveItem(xs ?? curDesc, from, to)), { group: "line-create-desc-images" });
@@ -302,9 +302,9 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
             <button type="button" onClick={() => setDescOpen((o) => !o)} className="mt-1 text-xs text-violet-700 hover:underline">{descOpen ? "ย่อ" : "ดูทั้งหมด"}</button>
           </div>
         ) : "(ไม่มีรายละเอียด)", `${pv.description.src} · จัดย่อหน้าให้แบบเดียวกับบน LINE · รูปต่อท้ายเลือกได้ที่ช่อง "รูปในรายละเอียด" ด้านล่าง`, pv.description.value, !pv.description.value)}
-        {/* รูปในรายละเอียด (ทดลอง) */}
+        {/* รูปในรายละเอียด — ทดสอบผ่านแล้ว 2026-11-10/12 (LINE รับ · รูปไม่หายหลัง 2 วัน) */}
         <div className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-start gap-2 border-t border-slate-100 py-2 text-sm">
-          <span className="pt-0.5 text-slate-500">รูปในรายละเอียด<br /><span className="rounded bg-amber-100 px-1 text-[10px] text-amber-800">ทดลอง</span></span>
+          <span className="pt-0.5 text-slate-500">รูปในรายละเอียด</span>
           <div className="min-w-0">
             {curDesc.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -364,7 +364,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
             </div>
           )}
         </div>
-        {/* ส่งเป็นของขวัญ (ทดลอง) — ร่าง extra.gift_status / gift_categories (คีย์เดียวกับ ProductPlatformManager) */}
+        {/* ส่งเป็นของขวัญ (LINE ไม่รับผ่าน API = เตือนให้ตั้งเอง) — ร่าง extra.gift_status / gift_categories (คีย์เดียวกับ ProductPlatformManager) */}
         {(() => {
           const g = gsel ?? pv.gift;
           const gDirty = !!gsel && !sameGift(gsel, pv.gift);

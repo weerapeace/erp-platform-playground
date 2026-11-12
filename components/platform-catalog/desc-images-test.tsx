@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * ปุ่มทดสอบ "ใส่รูปในรายละเอียด" บน LINE — อยู่ในลิ้นชักสินค้าบนร้าน แท็บข้อมูล (เจ้าของอนุมัติ 2026-11-10)
- * ช่วงทดสอบ: เฉพาะสินค้าที่ปิดขาย · เลือกรูปจากคลังรูปของสินค้าที่จับคู่ (≤15) → POST /api/line-shopping/desc-images
+ * ใส่รูปจากระบบลงในรายละเอียดสินค้าบน LINE — อยู่ในลิ้นชักสินค้าบนร้าน แท็บข้อมูล
+ * ทดสอบผ่านแล้ว (2026-11-10 LINE รับ · 2026-11-12 รูปยังอยู่หลัง 2 วัน) → เจ้าของให้เอาป้าย "ทดสอบ" ออก 2026-11-12
+ * เฉพาะสินค้าที่ปิดขาย (ระหว่างใส่รูป ระบบสลับรูปสินค้าชั่วคราว) · เลือกรูปจากคลังรูปของสินค้าที่จับคู่ (≤15) → POST /api/line-shopping/desc-images
  * วิธี: ฝากรูปผ่านแกลเลอรีชั่วคราว → ได้ลิงก์ของ LINE → คืนแกลเลอรีเดิม → ต่อรูปท้ายรายละเอียด (lib/line-desc-images)
  * ของกลางที่ใช้: ConfirmDialog · Icon · r2ImageUrl
  */
@@ -35,7 +36,7 @@ export function DescImagesTest({ listingId, matchedParent, display, blocked, onD
   const [result, setResult] = useState<Result | null>(null);
 
   const reason = !matchedParent ? "จับคู่สินค้าในระบบก่อน (ใช้รูปจากคลังรูปของสินค้านั้น)"
-    : display !== false ? "ช่วงทดสอบใช้ได้เฉพาะสินค้าที่ปิดขาย — ปิดขายก่อน (สวิตช์ด้านบน)"
+    : display !== false ? "ใช้ได้เฉพาะสินค้าที่ปิดขาย (ระหว่างใส่รูป ระบบต้องสลับรูปสินค้าชั่วคราว) — ปิดขายก่อน แล้วค่อยเปิด (สวิตช์ด้านบน)"
     : blocked;
 
   const openPicker = async () => {
@@ -65,20 +66,20 @@ export function DescImagesTest({ listingId, matchedParent, display, blocked, onD
   };
 
   return (
-    <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/40 px-3 py-2">
+    <div className="rounded-lg border border-slate-200 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-xs font-medium text-amber-800"><Icon name="image" /> ทดสอบ: ใส่รูปจากระบบลงในรายละเอียด</div>
-          <div className="text-[11px] text-slate-500">ฝากรูปผ่านรูปสินค้าชั่วคราว (ไม่กี่วินาที) แล้วคืนรูปสินค้าเดิม → รูปต่อท้ายรายละเอียด · ใช้ได้เฉพาะสินค้าที่ปิดขาย</div>
+          <div className="text-xs font-medium text-slate-700"><Icon name="image" /> ใส่รูปจากระบบลงในรายละเอียด</div>
+          <div className="text-[11px] text-slate-500">รูปต่อท้ายข้อความรายละเอียด · ระหว่างใส่ ระบบสลับรูปสินค้าชั่วคราว (ไม่กี่วินาที) แล้วคืนรูปเดิม · ใช้ได้เฉพาะสินค้าที่ปิดขาย</div>
         </div>
-        {!open && <button type="button" disabled={!!reason} title={reason ?? ""} onClick={() => void openPicker()} className="h-7 shrink-0 rounded-md border border-amber-300 bg-white px-2 text-xs text-amber-800 hover:bg-amber-50 disabled:opacity-40">เลือกรูปทดสอบ</button>}
+        {!open && <button type="button" disabled={!!reason} title={reason ?? ""} onClick={() => void openPicker()} className="h-7 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">เลือกรูป</button>}
       </div>
       {reason && !open && <p className="mt-1 text-[11px] text-amber-700">{reason}</p>}
 
       {result && (
         <div className={`mt-2 rounded-md px-2 py-1.5 text-xs ${result.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`}>
           {result.ok
-            ? <>สำเร็จ: รูปอยู่ในรายละเอียดบน LINE แล้ว {result.present} รูป · คืนรูปสินค้าเดิมแล้ว — รอ 1–2 วัน แล้วเปิดดูว่ารูปยังอยู่ไหม</>
+            ? <>สำเร็จ: รูปอยู่ในรายละเอียดบน LINE แล้ว {result.present} รูป · คืนรูปสินค้าเดิมแล้ว</>
             : <>ไม่สำเร็จ: {result.error}{!result.restored && <> · <Icon name="warning" /> รูปสินค้าอาจยังไม่ถูกคืน — เข้าไปตรวจใน LINE</>}</>}
           {result.hosted.length > 0 && <div className="mt-1 text-[10px] text-slate-500">ลิงก์รูปบน LINE: {result.hosted.length} ลิงก์ (บันทึกในประวัติแล้ว)</div>}
         </div>
@@ -95,10 +96,10 @@ export function DescImagesTest({ listingId, matchedParent, display, blocked, onD
                   const full = idx < 0 && sel.length >= LINE_DESC_IMAGES_MAX;
                   return (
                     <button key={im.key} type="button" disabled={full} onClick={() => toggle(im.key)} title={im.source}
-                      className={`min-w-0 rounded-md border p-0.5 text-left ${idx >= 0 ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300" : "border-slate-200 bg-white hover:bg-slate-50"} disabled:opacity-40`}>
+                      className={`min-w-0 rounded-md border p-0.5 text-left ${idx >= 0 ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 bg-white hover:bg-slate-50"} disabled:opacity-40`}>
                       <div className="relative aspect-square overflow-hidden rounded bg-slate-50">
                         <img src={r2ImageUrl(im.key, 160) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
-                        {idx >= 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-600 px-1 text-[10px] text-white">{idx + 1}</span>}
+                        {idx >= 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-600 px-1 text-[10px] text-white">{idx + 1}</span>}
                       </div>
                       <div className="truncate text-[10px] text-slate-500">{im.source}</div>
                     </button>
@@ -109,15 +110,15 @@ export function DescImagesTest({ listingId, matchedParent, display, blocked, onD
           )}
           <div className="flex justify-end gap-1.5">
             <button type="button" onClick={() => { setOpen(false); setSel([]); }} className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs hover:bg-slate-50">ปิด</button>
-            <button type="button" disabled={!sel.length || !!reason || busy} onClick={() => setAsk(true)} className="h-7 rounded-md bg-amber-600 px-2 text-xs text-white hover:bg-amber-700 disabled:opacity-40">ส่งทดสอบขึ้น LINE ({sel.length} รูป)</button>
+            <button type="button" disabled={!sel.length || !!reason || busy} onClick={() => setAsk(true)} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-40">ส่งขึ้น LINE ({sel.length} รูป)</button>
           </div>
         </div>
       )}
 
       <ConfirmDialog open={ask} onClose={() => { if (!busy) setAsk(false); }} onConfirm={() => void send()} loading={busy}
-        title="ทดสอบใส่รูปในรายละเอียดบน LINE (ร้านจริง)"
+        title="ใส่รูปในรายละเอียดบน LINE (ร้านจริง)"
         message={`ระบบจะสลับรูปสินค้าบน LINE ชั่วคราวเพื่อฝากรูป ${sel.length} รูป แล้วคืนรูปสินค้าเดิม จากนั้นต่อรูปท้ายรายละเอียด · สินค้าปิดขายอยู่ ลูกค้าไม่เห็นระหว่างทำ · ใช้เวลาประมาณ 10–30 วินาที`}
-        confirmText="ส่งทดสอบ" />
+        confirmText="ส่งขึ้น LINE" />
     </div>
   );
 }

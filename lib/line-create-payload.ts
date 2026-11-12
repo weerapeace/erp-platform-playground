@@ -58,9 +58,9 @@ export type LineCreatePreview = {
   brand: LineCreateField<string>;
   weight: { kg: number; src: string };
   images: { keys: string[]; src: string; custom: boolean };
-  /** รูปในรายละเอียด (ทดลอง · ร่าง extra.line_desc_images) — ต่อท้ายข้อความหลังสร้างสินค้า ด้วยวิธีฝากรูปผ่านแกลเลอรี (lib/line-desc-images) */
+  /** รูปในรายละเอียด (ร่าง extra.line_desc_images) — ต่อท้ายข้อความหลังสร้างสินค้า ด้วยวิธีฝากรูปผ่านแกลเลอรี (lib/line-desc-images) */
   desc_images: string[];
-  /** ส่งเป็นของขวัญ (ทดลอง · ร่าง extra.gift_status / gift_categories · ยังไม่ตั้ง = ค่าเริ่มของร้าน) — ตั้งหลังสร้างสินค้า (lib/line-gift-server) */
+  /** ส่งเป็นของขวัญ (LINE ไม่รับผ่าน API — เก็บไว้เตือน · ร่าง extra.gift_status / gift_categories · ยังไม่ตั้ง = ค่าเริ่มของร้าน) — ตั้งหลังสร้างสินค้า (lib/line-gift-server) */
   gift: GiftSetting & { isDefault: boolean };
   option_names: string[];
   variants: LineCreateVariantRow[];
@@ -225,7 +225,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   }
   // รูปในระบบ = R2 key → ลิงก์สาธารณะของเรา · รูปจากร้านต้นทาง (คัดลอกมา) = ลิงก์ http ของร้านนั้น ส่งตรง
   const imageUrls = galleryKeys.map((k) => (/^https?:\/\//i.test(k) ? k : `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`));
-  // รูปในรายละเอียด (ทดลอง) — ไม่อยู่ใน payload สร้างสินค้า (LINE ไม่รับลิงก์นอก) · route ใส่ให้หลังสร้างเสร็จ
+  // รูปในรายละเอียด — ไม่อยู่ใน payload สร้างสินค้า (LINE ไม่รับลิงก์นอก) · route ใส่ให้หลังสร้างเสร็จ
   const descImageKeys = Array.isArray(extra.line_desc_images) ? [...new Set((extra.line_desc_images as unknown[]).map(str).filter(Boolean))].slice(0, MAX_LINE_DESC_IMAGES) : [];
 
   // ---------- ตรวจครบ ----------
