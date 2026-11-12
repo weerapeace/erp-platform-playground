@@ -43,6 +43,12 @@ export async function saveTtsConn(admin: SupabaseClient, brandId: string, platfo
   if (error) throw new Error(`บันทึกการเชื่อมต่อไม่สำเร็จ: ${error.message}`);
 }
 
+/** แบรนด์ที่เชื่อม TikTok อยู่ (stage connected) — ปุ่มดึงที่ไม่เลือกแบรนด์ + ตัวดึงอัตโนมัติ */
+export async function ttsConnectedBrandIds(admin: SupabaseClient, platformId: string): Promise<string[]> {
+  const { data } = await admin.from("platform_credentials").select("brand_id, meta").eq("platform_id", platformId);
+  return ((data ?? []) as { brand_id: string; meta: TtsConnMeta | null }[]).filter((r) => r.meta?.stage === "connected").map((r) => r.brand_id);
+}
+
 /** ชื่อแบรนด์ (ใช้เทียบกับชื่อร้านจาก TikTok) */
 export async function brandNameOf(admin: SupabaseClient, brandId: string): Promise<string | null> {
   const { data } = await admin.from("brands").select("name").eq("id", brandId).maybeSingle();

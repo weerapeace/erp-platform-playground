@@ -165,7 +165,7 @@ export const WORKFLOWS: WorkflowDef[] = [
     label: "ออเดอร์จากแพลตฟอร์ม (ศูนย์ออเดอร์ออนไลน์ Shopee/Lazada/…)",
     flow: "ต้องจัดส่ง → ยืนยัน (ตัดสต๊อก) → แพ็กแล้ว → ส่งแล้ว / ยกเลิก (คืนสต๊อก) · ออเดอร์จากเมล = ยอดขายส่งแล้ว ดูอย่างเดียว · ออเดอร์ TikTok (API) = สถานะตามร้าน ดูอย่างเดียว (tiktokToInternal) · ใบกำกับภาษีออกผ่านใบขาย (ไม่ตัดสต๊อกซ้ำ) · จัดส่ง SHIPPOP (ช่องทางของเรา): จองแล้ว → แพ็กแล้ว · ขนส่งรับ/ส่งถึง → ส่งแล้ว",
     ruleFiles: ["lib/platform-order-status.ts", "lib/order-shipping.ts"],
-    gates: ["app/api/platform-orders/route.ts", "app/api/platform-orders/invoice/route.ts", "app/api/platform-orders/ship/route.ts", "app/api/lazada/sync-orders/route.ts", "app/api/tiktok-shop/sync-orders/route.ts", "app/api/platform-orders/import/route.ts"],
+    gates: ["app/api/platform-orders/route.ts", "app/api/platform-orders/invoice/route.ts", "app/api/platform-orders/ship/route.ts", "app/api/lazada/sync-orders/route.ts", "app/api/tiktok-shop/sync-orders/route.ts", "app/api/cron/tiktok-orders/route.ts", "app/api/platform-orders/import/route.ts"],
     tables: ["platform_orders", "platform_order_items", "shipping_profiles"],
     signals: ["stock_deducted", "platform_status", "ship_by_at", "shipping"],
     feeds: ["sales-order"],

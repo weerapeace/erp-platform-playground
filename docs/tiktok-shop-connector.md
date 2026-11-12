@@ -53,8 +53,16 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - **ไม่เก็บที่อยู่/เบอร์ผู้รับ** (ยังจัดส่งบนร้าน) · ชื่อผู้รับที่ TikTok ปิดบังบางส่วนเก็บเป็น `customer_name`
 - `isShopManaged("tiktok_api")` → นับในการ์ด "ต้องจัดส่ง" แต่เปลี่ยนสถานะ/ตัดสต๊อก/จองขนส่ง SHIPPOP ไม่ได้ (ยังจัดส่งผ่าน TikTok Seller Center / BigSeller) · ON_HOLD ยังไม่นับงาน
 - ปุ่ม "ดึงออเดอร์ TikTok" หน้า `/master/platform-orders` (ไม่เลือกแบรนด์ = แบรนด์เดียวที่เชื่อม TikTok) · audit `platform_orders` source `tiktok_api` (ครั้งแรกเก็บ `sample` ไม่มีที่อยู่)
+- ตัวบันทึกกลาง `app/api/tiktok-shop/orders-sync.ts` (`syncTiktokOrders`) — ปุ่ม + ตัวดึงอัตโนมัติใช้ตัวเดียวกัน
+- `cod_amount` ในฐานข้อมูลห้ามว่าง → ไม่ใช่ COD = 0 (เคยพังตอนกดครั้งแรก)
+
+## ดึงออเดอร์อัตโนมัติ (2026-11-12)
+- `/api/cron/tiktok-orders` — ทุกแบรนด์ที่เชื่อม TikTok · ดึงออเดอร์ที่ **เปลี่ยนสถานะ** ใน 3 ชม.ล่าสุด (`update_time_ge` · เรียงตาม update_time) · รอบละ 30 นาที ซ้อนกันได้ (upsert ไม่ซ้ำใบ)
+- เข้าได้ด้วย x-cron-token (Vault `tiktok_orders_cron` ผ่าน `erp_cron_token_ok`) / Bearer CRON_SECRET / คนมีสิทธิ์ = โหมดดู
+- ตั้งเวลา: migration `202612050100_tiktok_orders_cron.sql` (pg_cron `tiktok-orders-every-30min` — เรียกเว็บเฉพาะตอนมีแบรนด์เชื่อม TikTok) · ยกเลิก `select cron.unschedule('tiktok-orders-every-30min')`
+- ผลรอบ = `recordWorkerRun("tiktok-orders")` · audit เฉพาะรอบที่มีออเดอร์ใหม่/มีปัญหา (actor `tiktok_orders_cron`)
+- ⚠️ ยังไม่อยู่ในออฟฟิศทีม AI (`lib/ai-office`) — ฉากพิกเซลโต๊ะเต็ม 20/20 ต้องตัดสินใจขยายก่อน
 
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ดึงหมวดหมู่ TikTok (`/product/202309/categories`) เติมการจับคู่หมวด
 4. แก้สินค้า/ราคา/สต๊อก — ทีละเฟสตามที่เจ้าของอนุมัติ
-5. ดึงออเดอร์อัตโนมัติ (cron/webhook) แทนการกดเอง

@@ -237,11 +237,18 @@ export function ttsProductToCatalogItem(p: Record<string, unknown>, extras?: { i
 const ORDER_SCOPE = "Order Information (seller.order.info)";
 
 export type TtsOrderPage = { orders: Record<string, unknown>[]; total: number; nextPageToken: string | null };
-/** ค้นหาออเดอร์ที่สร้างตั้งแต่ createTimeGe (unix วินาที) ทีละหน้า · ใหม่สุดก่อน · page_size ≤ 100 */
-export async function ttsSearchOrders(accessToken: string, shopCipher: string, opts: { createTimeGe: number; pageToken?: string | null; pageSize?: number }): Promise<TtsOrderPage> {
-  const query: Record<string, string> = { shop_cipher: shopCipher, page_size: String(Math.max(1, Math.min(100, opts.pageSize ?? 50))), sort_field: "create_time", sort_order: "DESC" };
+/**
+ * ค้นหาออเดอร์ทีละหน้า (unix วินาที) · page_size ≤ 100
+ *  createTimeGe = สร้างตั้งแต่ (ปุ่มดึง 30 วัน · เรียงใหม่สุดก่อน) · updateTimeGe = เปลี่ยนสถานะตั้งแต่ (ตัวดึงอัตโนมัติ · ได้เฉพาะใบที่ขยับ)
+ */
+export async function ttsSearchOrders(accessToken: string, shopCipher: string, opts: { createTimeGe?: number; updateTimeGe?: number; pageToken?: string | null; pageSize?: number }): Promise<TtsOrderPage> {
+  const byUpdate = opts.updateTimeGe != null;
+  const query: Record<string, string> = { shop_cipher: shopCipher, page_size: String(Math.max(1, Math.min(100, opts.pageSize ?? 50))), sort_field: byUpdate ? "update_time" : "create_time", sort_order: "DESC" };
   if (opts.pageToken) query.page_token = opts.pageToken;
-  const d = await ttsApi("POST", "/order/202309/orders/search", accessToken, { query, body: { create_time_ge: Math.floor(opts.createTimeGe) }, scope: ORDER_SCOPE });
+  const body: Record<string, number> = {};
+  if (opts.createTimeGe != null) body.create_time_ge = Math.floor(opts.createTimeGe);
+  if (byUpdate) body.update_time_ge = Math.floor(opts.updateTimeGe as number);
+  const d = await ttsApi("POST", "/order/202309/orders/search", accessToken, { query, body, scope: ORDER_SCOPE });
   const orders = Array.isArray(d.orders) ? d.orders as Record<string, unknown>[] : [];
   return { orders, total: Number(d.total_count) || 0, nextPageToken: str(d.next_page_token) };
 }
