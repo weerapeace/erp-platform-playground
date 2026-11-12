@@ -63,6 +63,7 @@ export function ActivityFeed({
   compact = false,
   hideRecord = false,
   onOpenRecord,
+  renderDetail,
 }: {
   entries: ActivityEntry[];
   loading?: boolean;
@@ -76,6 +77,8 @@ export function ActivityFeed({
   hideRecord?: boolean;
   /** กดชื่อรายการ → เปิดประวัติของรายการนั้น (ไม่ส่ง = เป็นข้อความเฉย ๆ) */
   onOpenRecord?: (entry: ActivityEntry, view: AuditView) => void;
+  /** ส่วนเสริมใต้แถว (หน้าที่ใช้ใส่เองได้ เช่น ประวัติไฟล์ = กล่อง "ลงระบบ ERP" + รูปย่อ) · คืน null = ไม่มี */
+  renderDetail?: (entry: ActivityEntry, view: AuditView) => React.ReactNode;
 }) {
   if (loading) {
     return (
@@ -101,15 +104,16 @@ export function ActivityFeed({
     <ol className="relative">
       {entries.map((entry, idx) => (
         <FeedRow key={entry.id} entry={entry} isLast={idx === entries.length - 1}
-          showEntityName={showEntityName} showWhere={showWhere} compact={compact} hideRecord={hideRecord} onOpenRecord={onOpenRecord} />
+          showEntityName={showEntityName} showWhere={showWhere} compact={compact} hideRecord={hideRecord} onOpenRecord={onOpenRecord} renderDetail={renderDetail} />
       ))}
     </ol>
   );
 }
 
-function FeedRow({ entry, isLast, showEntityName, showWhere, compact, hideRecord, onOpenRecord }: {
+function FeedRow({ entry, isLast, showEntityName, showWhere, compact, hideRecord, onOpenRecord, renderDetail }: {
   entry: ActivityEntry; isLast: boolean; showEntityName: boolean; showWhere: boolean; compact: boolean; hideRecord: boolean;
   onOpenRecord?: (entry: ActivityEntry, view: AuditView) => void;
+  renderDetail?: (entry: ActivityEntry, view: AuditView) => React.ReactNode;
 }) {
   const v = entry.view ?? describeAudit(entry);
   const g = ACTION_GROUP_BY_KEY[v.group];
@@ -204,6 +208,8 @@ function FeedRow({ entry, isLast, showEntityName, showWhere, compact, hideRecord
             ))}
           </p>
         )}
+
+        {renderDetail?.(entry, v)}
 
         {!showWhere && <p className="text-xs text-slate-400 mt-0.5">โดย {entry.actor_name}</p>}
       </div>

@@ -56,7 +56,7 @@ export type ProductFileAction = {
   group: string;
   /** ทำไมไม่ลงระบบ / หมายเหตุ */
   note?: string;
-  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope" | "png" | "same";
+  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope" | "png" | "same" | "excluded";
 };
 export type ProductPlanSlot = {
   key: string;
@@ -80,6 +80,8 @@ export type ProductPlanSlot = {
   existingItems: { id: string; key: string | null; primary: boolean }[];
   /** รูปใหม่ที่ข้ามเพราะหน้าตาเหมือนรูปในระบบ (โปรแกรมเทียบรูปเองแล้วส่ง skip มา) — ไม่อัป ไม่นับเพดาน */
   skipped: string[];
+  /** รูปใหม่ที่คนเลือกเองว่า "ไม่ลงรูปนี้" (กดรูปในโปรแกรม · exclude) — ไม่อัป ไม่นับเพดาน ปกคิดใหม่จากรูปที่เหลือ */
+  excluded: string[];
   /** เพิ่มสี/แก้สี (scopeAsk): ช่องที่ชนิดงานไม่แตะ (Parent · Description · PNG · สีที่มีรูปแล้ว) → โปรแกรมตั้งไว้ "ไม่ลงช่องนี้" เลือกลงเองได้ */
   defaultOff: boolean;
   /** ลำดับรูปใหม่ทั้งหมดของช่องนี้ตามแม่แบบ (ปกหน้าสุด · รวมที่ข้าม) — โปรแกรมใช้จัดลำดับแกลเลอรีหลังทำ */
@@ -92,9 +94,9 @@ export type ProductPlanSlot = {
 export type SlotFileMode = "replace" | "append" | "pick";
 /**
  * โหมดรายช่องที่โปรแกรมส่งมา (key = ProductPlanSlot.key) · pick + remove = id รูปเดิมที่จะเอาออก (แกลเลอรี = attachment id · Description = asset id)
- * skip = rel รูปใหม่ที่หน้าตาเหมือนรูปในระบบ (ไม่อัปซ้ำ) · keep = id รูปเดิมที่ตรงกับรูปใหม่ (แทนที่ทั้งหมด/เลือกแทนบางรูปก็ไม่เอาออก)
+ * skip = rel รูปใหม่ที่หน้าตาเหมือนรูปในระบบ (ไม่อัปซ้ำ) · exclude = rel รูปใหม่ที่คนเลือกไม่ลงเอง (รูปยังอยู่บน Z:) · keep = id รูปเดิมที่ตรงกับรูปใหม่ (แทนที่ทั้งหมด/เลือกแทนบางรูปก็ไม่เอาออก)
  */
-export type SlotModeInput = Record<string, { mode: SlotFileMode; remove?: string[]; skip?: string[]; keep?: string[] }>;
+export type SlotModeInput = Record<string, { mode: SlotFileMode; remove?: string[]; skip?: string[]; exclude?: string[]; keep?: string[] }>;
 export type ProductPlanGroup = { label: string; role: GroupRole | null; code: string | null; count: number; note?: string };
 export type ProductPlan = {
   files: ProductFileAction[];
@@ -228,10 +230,12 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   const slotModeOf = (key: string): SlotFileMode => { const m = opts.slotModes?.[key]?.mode; return isMode(m) ? m : mode; };
   // รูปใหม่ที่หน้าตาเหมือนรูปในระบบ (โปรแกรมเทียบเอง → skip) · รูปเดิมที่ตรงกับรูปใหม่ (keep = ไม่เอาออก)
   const skipSlot = new Map<string, string>();   // rel (ตัวเล็ก) → key ช่อง
+  const excludeSlot = new Map<string, string>();   // rel (ตัวเล็ก) → key ช่อง · คนเลือกไม่ลงเอง (ชนะ skip)
   const keepOf = new Map<string, Set<string>>();
   for (const [key, v] of Object.entries(opts.slotModes ?? {})) {
     if (!v) continue;
     for (const r of Array.isArray(v.skip) ? v.skip : []) if (r) skipSlot.set(String(r).toLowerCase(), key);
+    for (const r of Array.isArray(v.exclude) ? v.exclude : []) if (r) excludeSlot.set(String(r).toLowerCase(), key);
     const ids = new Set(existingOf(key).map((x) => x.id));
     const kp = new Set((Array.isArray(v.keep) ? v.keep : []).map(String).filter((id) => ids.has(id)));
     if (kp.size) keepOf.set(key, kp);
@@ -239,12 +243,18 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   const relOfId = (id: string) => byId.get(id)!.rel;
   // ลำดับรูปใหม่ตามแม่แบบของแต่ละช่อง (รวมรูปที่จะข้าม · ปกหน้าสุด) — คิดด้วยตัวจัดช่องตัวเดิมก่อนตัดรูปที่ข้ามออก
   const naturalOrder = new Map<string, string[]>();
-  if (skipSlot.size) {
+  if (skipSlot.size || excludeSlot.size) {
     for (const s of planRoute(planGroups, parents, { shopIds: [], mode: "replace" }).slots) naturalOrder.set(s.key, s.ids.map(relOfId));
+    // รูปที่เลือกไม่ลงต้องอยู่ในช่องนั้นจริง (กันชื่อไฟล์ส่งมาผิดช่อง) — ช่องตามแม่แบบก่อนตัด
+    const slotOfRel = new Map<string, string>();
+    for (const [key, rels] of naturalOrder) for (const r of rels) slotOfRel.set(r.toLowerCase(), key);
     for (const g of planGroups) {
       g.images = g.images.filter((im) => {
         const a = byId.get(im.id)!;
-        const key = skipSlot.get(a.rel.toLowerCase());
+        const lc = a.rel.toLowerCase();
+        const ex = excludeSlot.get(lc);
+        if (ex && slotOfRel.get(lc) === ex) { Object.assign(a, { why: "excluded", slotKey: ex, note: "ไม่ลง — เลือกเอง (รูปยังอยู่บน Z:)" }); return false; }
+        const key = skipSlot.get(lc);
         if (!key) return true;
         Object.assign(a, { why: "same", slotKey: key, note: "หน้าตาเหมือนรูปในระบบ — ข้าม ไม่อัปซ้ำ" });
         return false;
@@ -285,6 +295,7 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   const pById = new Map(parents.map((p) => [p.parentId, p]));
   const relOf = relOfId;
   const skippedOf = (key: string) => out.filter((a) => a.why === "same" && a.slotKey === key).map((a) => a.rel);
+  const excludedOf = (key: string) => out.filter((a) => a.why === "excluded" && a.slotKey === key).map((a) => a.rel);
   const buildSlot = (s: { key: string; kind: SlotKind; parentId: string; skuId: string | null; ids: string[]; coverId?: string; existing: number; total: number; limit: number | null; replaces: boolean }): ProductPlanSlot => {
     const p = pById.get(s.parentId)!;
     const sku = s.skuId ? p.skus.find((x) => x.id === s.skuId) : undefined;
@@ -303,7 +314,8 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     // เอารูปปกเดิมออก (เลือกเอง / แทนที่แต่เก็บบางรูป) + ไม่มีรูปปกใหม่ → รูปแรกที่ลงเป็นปก (กันแกลเลอรีไม่มีปก)
     const coverRel = s.coverId ? relOf(s.coverId) : (sm === "pick" || kp.size > 0) && primaryId && drop.has(primaryId) && rels.length ? rels[0] : undefined;
     const skipped = skippedOf(s.key);
-    const defaultOff = [...rels, ...skipped].some((r) => offRels.has(r));
+    const excluded = excludedOf(s.key);
+    const defaultOff = [...rels, ...skipped, ...excluded].some((r) => offRels.has(r));
     return {
       defaultOff,
       key: s.key, kind: s.kind, parentId: s.parentId, skuId: s.skuId, code: sku?.code ?? p.code,
@@ -311,7 +323,7 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
       existing: s.existing, total: s.total, limit: s.limit,
       replaces: s.kind === "png" ? s.replaces : remove.attachments.length + remove.desc.length > 0, remove,
       mode: sm, existingItems: exist.map((x) => ({ id: x.id, key: x.key, primary: x.primary })),
-      skipped, order: naturalOrder.get(s.key) ?? [...rels],
+      skipped, excluded, order: naturalOrder.get(s.key) ?? [...rels],
       entity: s.kind === "skuGallery" && s.skuId ? { type: "skus_v2", id: s.skuId } : { type: "parent_skus_v2", id: s.parentId },
       prev: {
         primaryId: s.kind === "skuGallery" || s.kind === "parentGallery" ? primaryId : null,
@@ -320,12 +332,12 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     };
   };
   const slots: ProductPlanSlot[] = plan.slots.map(buildSlot);
-  // ช่องที่รูปใหม่ "มีแล้วทุกรูป" (ข้ามหมด) ยังต้องมีช่องไว้: โชว์ในโปรแกรม + แทนที่ทั้งหมดยังเอารูปเดิมที่ไม่ตรงออก
-  for (const key of new Set(skipSlot.values())) {
+  // ช่องที่รูปใหม่ "มีแล้วทุกรูป" / "เลือกไม่ลงทุกรูป" ยังต้องมีช่องไว้: โชว์ในโปรแกรม (กดเอากลับมาลงได้) + แทนที่ทั้งหมดยังเอารูปเดิมที่ไม่ตรงออก
+  for (const key of new Set([...skipSlot.values(), ...excludeSlot.values()])) {
     if (slots.some((x) => x.key === key)) continue;
     const [pid, kind, sid] = key.split("|");
     if (!pById.has(pid) || !(kind === "parentGallery" || kind === "skuGallery" || kind === "desc")) continue;
-    if (!skippedOf(key).length) continue;
+    if (!skippedOf(key).length && !excludedOf(key).length) continue;
     const skuId = kind === "skuGallery" ? sid : null;
     if (kind === "skuGallery" && !pById.get(pid)!.skus.some((x) => x.id === skuId)) continue;
     const cur = existingOf(key).length;

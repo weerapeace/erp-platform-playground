@@ -6,7 +6,9 @@
  *        mode: "move"|"copy" (artwork) | "replace"|"append" (product) · content ไม่แตะต้นฉบับเสมอ,
  *        counts?: { nas?, drive?, erp?, album?, moved?, removed?, skipped?, already?, failed? }, moves?: [{ what, from, to, how, files }] (ย้าย Rawfiles/Images · เก็บเข้า Collection),
  *        run_id? (รหัสครั้งที่ใช้ — ผูกกับการย้ายกลับ), model? (รหัสรุ่น/ชื่องาน), parent_ids? (สินค้าที่ลงรูป — กล่องประวัติในหน้างานหาด้วยตัวนี้),
- *        status?: "done"|"partial"|"failed", errors?: string[], source_folder?, app_version? }
+ *        status?: "done"|"partial"|"failed", errors?: string[], source_folder?, app_version?,
+ *        erp?: [{ kind, code, entity_type, entity_id, mode, state, up, removed, same, excluded, reordered, keys[], fails[{file,why}] }] (ลงระบบ ERP รายช่อง · v1.13+),
+ *        erp_off?: true (เลือก "ไม่ลง ERP" ทั้งงาน) }
  *   event: "undo" = กด "ย้ายกลับที่เดิม" ในโปรแกรม → body { event:"undo", run_id, name, model?, parent_ids?, profile?, variant?, undone:[{ what, from, to, files }], errors? }
  * → เขียน audit_logs action = file_sort.upload | file_sort.undo (ใครทำ · เมื่อไหร่ · งานไหน · ย้ายอะไรไปไหน · พลาดอะไร)
  *   ดูได้ที่ Task Manager › ประวัติไฟล์ (/api/file-sort/history) + หน้าประวัติการใช้งานรวม
@@ -16,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAuditFor } from "@/lib/audit";
+import { cleanErpSlots } from "@/lib/file-sort-history";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -73,6 +76,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // ย้ายโฟลเดอร์ (งานสินค้า) — what: raw/images = Rawfiles/Images · collection = ทั้งโฟลเดอร์เข้า Collection
       //   how: rename = ย้ายบน Z: · merge = รวมเข้ารุ่นที่มีใน Collection แล้ว (ไม่ทับ) · copy = ก๊อปจากเครื่อง · copy+trash = ก๊อปแล้วต้นฉบับลงถังขยะ
       moves: moveList(b.moves),
+      // ลงระบบ ERP รายช่อง (ช่องไหน ลง/เอาออก/ข้ามกี่รูป · รูปย่อ · พลาดเพราะอะไร) — หน้าประวัติไฟล์โชว์เป็นกล่อง "ลงระบบ ERP"
+      erp: cleanErpSlots(b.erp),
+      erp_off: b.erp_off === true,
       errors,
       app_version: str(b.app_version, 40),
     },

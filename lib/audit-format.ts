@@ -423,6 +423,7 @@ function describeFileSort(row: AuditRowLike, m: Record<string, unknown>, info: R
     if (n("album")) extras.push({ label: "ลงอัลบั้ม", value: `${n("album")} ไฟล์` });
     if (n("drive")) extras.push({ label: "ขึ้น Drive", value: `${n("drive")} ไฟล์` });
     if (n("nas")) extras.push({ label: "ก๊อปลง Z:", value: `${n("nas")} ไฟล์` });
+    if (m.erp_off === true) extras.push({ label: "ลงระบบ", value: "ไม่ลง (ตามที่เลือก)" });
     if (n("failed")) extras.push({ label: "พลาด", value: String(n("failed")) });
     const st = FS_STATUS[str(m.status) ?? ""];
     if (st) extras.push({ label: "ผล", value: st });

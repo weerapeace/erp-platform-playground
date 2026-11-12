@@ -3,15 +3,20 @@
  * 📂 ประวัติไฟล์ — ทุกครั้งที่ใช้โปรแกรม "ตัวแยกไฟล์ ERP": ลงรูปอะไร ย้ายอะไรไปไหน ใครทำ เมื่อไหร่ · ย้ายกลับแล้วก็บอก
  *   FileHistoryView = Task Manager › มุมมอง "ประวัติไฟล์" (ค้นรหัสรุ่น · กรองชนิดงาน / คน / ช่วงวัน · โหลดเพิ่ม) — ?view=files&q=PIX39 เปิดตรงได้
  *   FileHistoryBox  = กล่องเล็กในหน้างาน: ประวัติของสินค้าที่ผูกกับงาน (Parent SKU)
+ *   FileSortErpBlock = กล่อง "ลงระบบ ERP" ใต้แต่ละครั้ง (โปรแกรม v1.13+): ช่องไหน ลง/เอาออก/ข้ามกี่รูป · รูปย่อ · ลิงก์หน้าสินค้า · พลาดเพราะอะไร
  * ข้อมูล: GET /api/file-sort/history (อ่านประวัติกลาง audit_logs — ไม่มีตารางของตัวเอง)
- * ของกลาง: ActivityFeed (ไทม์ไลน์ประวัติ · คำแปล lib/audit-format) · ErrorState · Icon · useT
+ * ของกลาง: ActivityFeed (ไทม์ไลน์ประวัติ · คำแปล lib/audit-format · renderDetail) · HoverImage · ErrorState · Icon · useT
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ActivityFeed, type ActivityEntry } from "@/components/activity-feed";
 import { ErrorState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
-import { useT } from "@/components/i18n";
+import { HoverImage } from "@/components/hover-image";
+import { useLang, useT } from "@/components/i18n";
+import { auditEntityInfo } from "@/lib/audit-entities";
+import { r2ImageUrl } from "@/lib/r2-image";
+import { cleanErpSlots, erpSlotText, type FsErpSlot } from "@/lib/file-sort-history";
 
 type Actor = { id: string; name: string };
 type HistoryResp = { entries?: ActivityEntry[]; has_more?: boolean; actors?: Actor[]; error?: string | null };
@@ -24,6 +29,57 @@ async function fetchHistory(params: URLSearchParams): Promise<HistoryResp> {
 }
 
 const selCls = "h-9 px-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-400";
+
+const SLOT_TONE: Record<FsErpSlot["state"], string> = {
+  done: "text-emerald-700", partial: "text-amber-700", failed: "text-red-700", already: "text-slate-500", off: "text-slate-400",
+};
+
+/** กล่อง "ลงระบบ ERP" ของ 1 ครั้งที่ใช้ — ประวัติเก่า (ไม่มี metadata.erp) = ไม่มีกล่อง */
+export function FileSortErpBlock({ entry, compact = false }: { entry: ActivityEntry; compact?: boolean }) {
+  const t = useT();
+  const { lang } = useLang();
+  if (entry.action !== "file_sort.upload") return null;
+  const slots = cleanErpSlots(entry.metadata?.erp);
+  if (!slots.length) return null;
+  return (
+    <div className="mt-1.5 rounded-lg border border-emerald-200 bg-emerald-50/40 px-2.5 py-2">
+      <p className="text-xs font-semibold text-emerald-800 mb-1 flex items-center gap-1">
+        <Icon name="upload" size={13} /> {t("ลงระบบ ERP", "Uploaded to ERP")}
+      </p>
+      <ul className="space-y-1.5">
+        {slots.map((s, i) => {
+          const { title, result } = erpSlotText(s, lang === "en");
+          const href = s.entity_type && s.entity_id ? auditEntityInfo(s.entity_type).href?.(s.entity_id) ?? null : null;
+          return (
+            <li key={`${s.kind}-${s.code}-${i}`} className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                <span className="font-medium text-slate-700">{title}</span>
+                <span className={SLOT_TONE[s.state]}>{result}</span>
+                {href && s.state !== "off" && (
+                  <a href={href} target="_blank" rel="noreferrer" className="text-violet-700 hover:underline inline-flex items-center gap-0.5">
+                    {t("เปิดหน้าสินค้า", "Open product")} <Icon name="open" size={11} />
+                  </a>
+                )}
+              </div>
+              {s.keys.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {s.keys.slice(0, compact ? 6 : 12).map((k) => <HoverImage key={k} url={r2ImageUrl(k)} size={compact ? 28 : 36} previewSize={240} />)}
+                  {s.up > s.keys.length && <span className="text-[11px] text-slate-400 self-center">+{s.up - s.keys.length}</span>}
+                </div>
+              )}
+              {s.fails.length > 0 && (
+                <div className="mt-0.5 text-xs text-red-700">
+                  {t(`พลาด ${s.fails.length}`, `${s.fails.length} failed`)}: {s.fails.slice(0, 5).map((f) => [f.file, f.why].filter(Boolean).join(" — ")).join(" · ")}
+                  {s.fails.length > 5 && " …"}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 export function FileHistoryView() {
   const t = useT();
@@ -120,7 +176,7 @@ export function FileHistoryView() {
       {err && !rows.length ? (
         <ErrorState hint={err} onRetry={() => void load()} retrying={loading} />
       ) : (
-        <ActivityFeed entries={rows} loading={loading} showWhere
+        <ActivityFeed entries={rows} loading={loading} showWhere renderDetail={(e) => <FileSortErpBlock entry={e} />}
           emptyMessage={term || profile || actor
             ? t("ไม่พบประวัติที่ตรงกับตัวกรอง ลองเปลี่ยนคำค้นหรือช่วงวัน", "No history matches — try another search or period")
             : t("ยังไม่มีประวัติ — จะขึ้นหลังมีคนใช้โปรแกรมตัวแยกไฟล์ (เวอร์ชัน 1.5.2 ขึ้นไปจดครบ)", "No history yet — it appears once someone runs the File Sorter (v1.5.2+)")} />
@@ -163,7 +219,7 @@ export function FileHistoryBox({ parents }: { parents: { id: string; code?: stri
   return (
     <div>
       {err ? <ErrorState hint={err} onRetry={() => void load()} retrying={loading} className="py-4" />
-        : <ActivityFeed entries={rows} loading={loading} compact showWhere
+        : <ActivityFeed entries={rows} loading={loading} compact showWhere renderDetail={(e) => <FileSortErpBlock entry={e} compact />}
             emptyMessage={t("ยังไม่เคยใช้ตัวแยกไฟล์กับรุ่นนี้", "The File Sorter hasn't been used for this model yet")} />}
       {!loading && !err && rows.length > 0 && (
         <a href={`/tasks?view=files${first ? `&q=${encodeURIComponent(first)}` : ""}`} className="inline-block mt-2 text-xs text-violet-700 hover:underline">

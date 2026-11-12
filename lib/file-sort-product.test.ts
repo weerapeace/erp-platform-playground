@@ -392,6 +392,34 @@ describe("planProductSort — เลือกรายช่อง: แทนท
     const keys2 = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { [KEY]: { mode: "replace", skip: all, keep: ["o1"] } } }).slots.map((x) => x.key);
     expect(keys2).toEqual(keys);
   });
+  it("เลือกไม่ลงรูปนี้ (exclude): ไม่อัป · ไม่นับเพดาน · ปกคิดใหม่จากรูปที่เหลือ · ชนะ skip", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", mode: "replace",
+      slotModes: { [KEY]: { mode: "replace", exclude: ["ZZ1-01/1.jpg", "zz1-01/3.JPG"], skip: ["ZZ1-01/3.jpg"] } } });
+    const s = p.slots.find((x) => x.key === KEY)!;
+    expect(s.rels).toEqual(["ZZ1-01/2.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg"]);
+    expect([...s.excluded].sort()).toEqual(["ZZ1-01/1.jpg", "ZZ1-01/3.jpg"]);
+    expect(s.skipped).toEqual([]);   // เลือกไม่ลงเอง ชนะ "หน้าตาเหมือน"
+    expect(s.coverRel === undefined || s.rels.includes(s.coverRel)).toBe(true);
+    expect(s.coverRel).not.toBe("ZZ1-01/1.jpg");
+    expect(s.order).toEqual(["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg"]);
+    expect(p.files.find((f) => f.rel === "ZZ1-01/1.jpg")).toMatchObject({ erp: false, why: "excluded", slotKey: KEY });
+    // ต่อท้าย (ที่ว่าง 2): เลือกไม่ลง 3 รูป → อีก 2 รูปลงได้ ไม่เกินเพดาน
+    const a = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1",
+      slotModes: { [KEY]: { mode: "append", exclude: ["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg"] } } });
+    expect(a.slots.find((x) => x.key === KEY)!.rels).toEqual(["ZZ1-01/4.jpg", "ZZ1-01/5.jpg"]);
+    expect(a.files.filter((f) => f.why === "over").length).toBe(0);
+  });
+  it("เลือกไม่ลงทุกรูป → ยังมีช่องไว้ (กดเอากลับมาได้) · ชื่อรูปของช่องอื่นไม่นับ", () => {
+    const all = ["ZZ1-01/1.jpg", "ZZ1-01/2.jpg", "ZZ1-01/3.jpg", "ZZ1-01/4.jpg", "ZZ1-01/5.jpg"];
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { [KEY]: { mode: "append", exclude: all } } });
+    const s = p.slots.find((x) => x.key === KEY)!;
+    expect(s).toMatchObject({ rels: [], replaces: false });
+    expect(s.excluded.length).toBe(5);
+    expect(p.slots.map((x) => x.key)).toEqual(planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1" }).slots.map((x) => x.key));
+    // ส่งชื่อรูป SKU มาใต้ช่อง Description = ไม่นับ (รูปยังลงช่องเดิม)
+    const wrong = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1", slotModes: { "PZ|desc|-": { mode: "replace", exclude: ["ZZ1-01/1.jpg"] } } });
+    expect(wrong.files.find((f) => f.rel === "ZZ1-01/1.jpg")).toMatchObject({ erp: true });
+  });
   it("เลือกแทนบางรูป + keep: รูปที่ตรงกับรูปใหม่ไม่ถูกเอาออกแม้เลือกไว้", () => {
     const s = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "ZZ1",
       slotModes: { [KEY]: { mode: "pick", remove: ["o1", "o2"], keep: ["o2"] } } }).slots.find((x) => x.key === KEY)!;

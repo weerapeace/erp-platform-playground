@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanHistoryTerm, mergeFileSortUndo } from "@/lib/file-sort-history";
+import { cleanErpSlots, cleanHistoryTerm, erpSlotText, mergeFileSortUndo } from "@/lib/file-sort-history";
 import { describeAudit, fileSortKindLabel } from "@/lib/audit-format";
 
 const up = (id: string, run: string, at: string, extra: Record<string, unknown> = {}) => ({
@@ -51,5 +51,39 @@ describe("ประวัติตัวแยกไฟล์ (Task Manager › 
   it("คำค้นตัดเครื่องหมายพิเศษ (กันตัวกรองฐานข้อมูลพัง)", () => {
     expect(cleanHistoryTerm(" PIX39,(x)*% ")).toBe("PIX39 x");
     expect(cleanHistoryTerm("กระเป๋า BSD-15")).toBe("กระเป๋า BSD-15");
+  });
+});
+
+describe("ลงระบบ ERP รายช่อง (metadata.erp · โปรแกรม v1.13+)", () => {
+  const PID = "11111111-2222-3333-4444-555555555555";
+  it("ตัดของแปลก: ชนิดช่องผิด/ id ไม่ใช่ uuid / key อันตราย · ตัวเลขติดลบ = 0 · ซ้ำตัดทิ้ง", () => {
+    const s = cleanErpSlots([
+      { kind: "skuGallery", code: "TML10-01", entity_type: "skus_v2", entity_id: PID.toUpperCase(), mode: "replace", state: "partial", up: 5, removed: 9, same: 2, excluded: -3,
+        keys: ["skus/a.jpg", "skus/a.jpg", "../x.jpg", "/abs.jpg", "a//b.jpg", "ok/<script>.jpg", "parent-skus/png/b.png"], fails: [{ file: "TML10-03/4.jpg", why: "ไฟล์ใหญ่เกิน" }, {}] },
+      { kind: "hack", up: 1 },
+      { kind: "desc", entity_type: "skus_v2", entity_id: "nope", state: "weird" },
+      "x",
+    ]);
+    expect(s.length).toBe(2);
+    expect(s[0]).toMatchObject({ entity_id: PID, mode: "replace", state: "partial", up: 5, removed: 9, same: 2, excluded: 0 });
+    expect(s[0].keys).toEqual(["skus/a.jpg", "parent-skus/png/b.png"]);
+    expect(s[0].fails).toEqual([{ file: "TML10-03/4.jpg", why: "ไฟล์ใหญ่เกิน" }]);
+    expect(s[1]).toMatchObject({ kind: "desc", entity_type: null, entity_id: null, state: "done", keys: [] });
+    expect(cleanErpSlots(undefined)).toEqual([]);
+  });
+  it("ข้อความภาษาคน: ลง · เอารูปเดิมออก · ข้าม (มีแล้ว) · ไม่ลง (ตามที่เลือก) · ภาษาอังกฤษ", () => {
+    const [a, off, same] = cleanErpSlots([
+      { kind: "skuGallery", code: "TML10-01", up: 5, removed: 9, same: 2, excluded: 1 },
+      { kind: "parentGallery", code: "TML10", state: "off" },
+      { kind: "desc", code: "TML10", state: "already" },
+    ]);
+    expect(erpSlotText(a)).toEqual({ title: "แกลเลอรี SKU TML10-01", result: "ลง 5 · เอารูปเดิมออก 9 · ข้าม 2 (มีแล้ว) · ไม่ลง 1 (เลือกเอง)" });
+    expect(erpSlotText(off).result).toBe("ไม่ลง (ตามที่เลือก)");
+    expect(erpSlotText(same).result).toBe("ตรงกับโฟลเดอร์แล้ว ไม่ต้องลงซ้ำ");
+    expect(erpSlotText(a, true)).toEqual({ title: "SKU gallery TML10-01", result: "uploaded 5 · removed 9 old · skipped 2 (already there) · left out 1 (chosen)" });
+  });
+  it("เลือกไม่ลง ERP ทั้งงาน → บรรทัดสรุปบอก", () => {
+    const v = describeAudit(up("a", "r1", "2026-11-12T01:00:00Z", { erp_off: true, counts: { erp: 0 } }));
+    expect(v.extras).toContainEqual({ label: "ลงระบบ", value: "ไม่ลง (ตามที่เลือก)" });
   });
 });

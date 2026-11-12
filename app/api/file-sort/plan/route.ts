@@ -16,9 +16,10 @@
  *     pngs[] { rel, name } + png { mode, folder, gallery } = ก๊อป PNG ไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่น (ชื่อตามรหัสสี) · body png_gallery = ให้ PNG ลงแกลเลอรีด้วย
  *     content_candidates[] = JPEG ในโฟลเดอร์ Images ที่ติ๊กส่งไปหน้า Contents ได้ (โปรแกรมขอแผน profile=content ของรูปที่ติ๊กตอนส่ง)
  *     slots[].mode / existingItems = โหมดรายช่อง (replace แทนที่ทั้งหมด · pick เลือกแทนบางรูป · append ต่อท้าย) + รูปเดิมในระบบ (R2 key ไว้ทำรูปย่อ)
- *     body slot_modes { "<slot key>": { mode, remove?: [id], skip?: [rel], keep?: [id] } } = โปรแกรมเลือกรายช่อง · collection.whenExists = มีรุ่นนี้ใน Collection แล้วทำยังไง
+ *     body slot_modes { "<slot key>": { mode, remove?: [id], skip?: [rel], exclude?: [rel], keep?: [id] } } = โปรแกรมเลือกรายช่อง · collection.whenExists = มีรุ่นนี้ใน Collection แล้วทำยังไง
  *       skip = รูปใหม่ที่โปรแกรมเทียบแล้วหน้าตาเหมือนรูปในระบบ (ไม่อัปซ้ำ · files[].why = same) · keep = รูปเดิมที่ตรงกับรูปใหม่ (ไม่เอาออก)
- *       → slots[].skipped (รูปที่ข้าม) + slots[].order (ลำดับรูปใหม่ทั้งหมดตามแม่แบบ ไว้จัดลำดับแกลเลอรีหลังทำ)
+ *       exclude = รูปใหม่ที่คนกดเลือกไม่ลงเอง (files[].why = excluded · รูปยังอยู่บน Z: · เพดาน 9 รูป/ปกคิดใหม่จากรูปที่เหลือ)
+ *       → slots[].skipped (รูปที่ข้าม) + slots[].excluded (รูปที่เลือกไม่ลง) + slots[].order (ลำดับรูปใหม่ทั้งหมดตามแม่แบบ ไว้จัดลำดับแกลเลอรีหลังทำ)
  *     files[]  = ไฟล์ละ { rel, erp, dest, slotKey, width, nas, why, note }
  *     slots[]  = ช่องรูปของสินค้า { kind, parentId, skuId, rels (ปกหน้าสุด), coverRel, replaces, remove{attachments,desc}, entity }
  *
@@ -120,6 +121,8 @@ function cleanSlotModes(raw: unknown): SlotModeInput | undefined {
       mode: o.mode, remove: ids(o.remove), keep: ids(o.keep),
       // รูปใหม่ที่โปรแกรมเทียบแล้วหน้าตาเหมือนรูปในระบบ (rel ในโฟลเดอร์รุ่น)
       skip: (Array.isArray(o.skip) ? o.skip : []).map((x) => String(x ?? "").slice(0, 500)).filter(Boolean).slice(0, 60),
+      // รูปใหม่ที่คนกดเลือก "ไม่ลงรูปนี้" ในโปรแกรม (v1.13+) — รูปยังอยู่บน Z: · เพดาน/ปกคิดใหม่จากรูปที่เหลือ
+      exclude: (Array.isArray(o.exclude) ? o.exclude : []).map((x) => String(x ?? "").slice(0, 500)).filter(Boolean).slice(0, 60),
     };
   }
   return Object.keys(out).length ? out : undefined;
