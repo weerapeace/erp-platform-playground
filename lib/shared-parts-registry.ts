@@ -1029,6 +1029,7 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "central-category-picker", label: "เลือกหมวดกลางสำหรับลงขาย", code: "CentralCategoryPicker", category: "pick",
     source: { path: "components/central-category-picker" },
     what: "ค้นหาหมวดลงขาย + ปุ่มเพิ่มหมวดใหม่ในตัว",
+    note: "ใส่ webParentId (Parent SKU) → ใต้ช่องมีกล่อง 🌐 หมวดบนเว็บ แก้หมวดเว็บแต่ละร้านได้ (components/parent-web-categories) · ใช้ในฟอร์ม/หน้าดู Parent SKU + แท็บแพลตฟอร์ม",
   },
   {
     key: "company-filter", label: "เลือกดูทีละบริษัท", code: "CompanyFilter", category: "pick",

@@ -136,7 +136,11 @@ export interface FieldMap {
   /** เว้น source เป็น "none" = สินค้านั้นมีตัวเลือกชั้นเดียว (ค่าเริ่มต้น ไม่กระทบของเดิม) */
   options2: { source: Option2Source; label: string };
   /** rules = ชื่อหมวด ERP → หมวดเว็บ · tagRules = 🏷️ รหัสแท็ก → หมวดเว็บ (มาก่อน rules · lib/website-tag-categories) */
-  category: { default: WebCategory; rules: Record<string, WebCategory>; tagRules: Record<string, WebCategory> };
+  /**
+   * centralRules = หมวดกลางสำหรับลงขาย (platform_central_categories.id) → หมวดเว็บของร้านนี้ (ตั้งที่หน้าจับคู่หมวดกลาง · มาก่อน rules)
+   * hidden = รุ่น (parent id) ที่ซ่อนจากกระดานจัดหมวด (ไม่ต้องจัด) — ไม่กระทบหน้าเว็บ (ปิดขาย = is_published แยกกัน)
+   */
+  category: { default: WebCategory; rules: Record<string, WebCategory>; tagRules: Record<string, WebCategory>; centralRules: Record<string, WebCategory>; hidden: string[] };
   /** รายการหมวดของร้านนี้ — เจ้าของเพิ่ม/แก้/ลบเองได้ในแท็บจับคู่ฟิลด์ */
   categories: WebCategoryDef[];
   image: { useCover: boolean; source: ImageSource };
@@ -151,7 +155,7 @@ export const DEFAULT_FIELD_MAP: FieldMap = {
   unit: { default: "ชิ้น" },
   options: { source: "sku_color", label: "แบบ/สี" },
   options2: { source: "none", label: "ตัวเลือกที่ 2" },
-  category: { default: "hardware", rules: {}, tagRules: {} },
+  category: { default: "hardware", rules: {}, tagRules: {}, centralRules: {}, hidden: [] },
   categories: DEFAULT_WEB_CATEGORIES,
   image: { useCover: true, source: "parent" },
   collections: [],
@@ -170,6 +174,46 @@ export const cleanCategoryKey = (v: unknown): string =>
     .slice(0, 40);
 
 /** อ่านค่าที่เก็บใน DB ให้เป็น FieldMap ที่ครบถ้วนเสมอ (กันข้อมูลเก่า/ไม่ครบ) */
+/** 🗂 กฎหมวดกลาง → หมวดเว็บ: เก็บเฉพาะที่ชี้ไปหมวดที่ร้านยังมีอยู่ (ลบหมวดแล้วกฎหลุด) */
+export function cleanCentralRules(raw: unknown, catKeys: string[]): Record<string, WebCategory> {
+  const out: Record<string, WebCategory> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>).slice(0, 300)) {
+    const k = cleanCategoryKey(v);
+    if (id.trim() && k && catKeys.includes(k)) out[id.trim()] = k;
+  }
+  return out;
+}
+
+/** 🙈 รุ่นที่ซ่อนจากกระดานจัดหมวด — id ไม่ซ้ำ · สูงสุด 5,000 */
+export function cleanHiddenIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Set<string>();
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const id = v.trim().slice(0, 64);
+    if (id) out.add(id);
+    if (out.size >= 5000) break;
+  }
+  return [...out];
+}
+
+/**
+ * หมวดที่เว็บใส่ให้เองเมื่อสินค้ายังไม่ได้จัดหมวด (ไม่รวมกฎแท็ก — ต้องรู้แท็กของรุ่น)
+ *   ลำดับ: หมวดกลางสำหรับลงขาย (centralRules) → หมวด ERP (rules) → หมวดตั้งต้นของร้าน
+ */
+export function autoCategory(
+  map: Pick<FieldMap, "category">,
+  categoryName: string | null | undefined,
+  centralCategoryId: string | null | undefined,
+): { key: WebCategory; source: "central" | "erp" | "default" } {
+  const central = centralCategoryId ? map.category.centralRules?.[centralCategoryId] : undefined;
+  if (central) return { key: central, source: "central" };
+  const rule = categoryName ? map.category.rules[categoryName] : undefined;
+  if (rule) return { key: rule, source: "erp" };
+  return { key: map.category.default, source: "default" };
+}
+
 export function normalizeFieldMap(raw: unknown): FieldMap {
   const r = (raw ?? {}) as Record<string, unknown>;
   const d = DEFAULT_FIELD_MAP;
@@ -235,7 +279,14 @@ export function normalizeFieldMap(raw: unknown): FieldMap {
       label: str(g("options2").label, d.options2.label).slice(0, 60),
     },
     // 🏷️ กฎแท็ก → หมวด: ต้องผ่าน normalize ด้วย ไม่งั้นบันทึกหน้าอื่นแล้วกฎหาย (normalize เก็บเฉพาะช่องที่รู้จัก)
-    category: { default: defaultCat, rules, tagRules: cleanTagRules(g("category").tagRules, catKeys) },
+    // กฎหมวดกลาง + รายการซ่อนจากกระดาน ก็เหมือนกัน (ช่องที่ normalize ไม่รู้จักจะหายตอนบันทึกหน้าอื่น)
+    category: {
+      default: defaultCat,
+      rules,
+      tagRules: cleanTagRules(g("category").tagRules, catKeys),
+      centralRules: cleanCentralRules(g("category").centralRules, catKeys),
+      hidden: cleanHiddenIds(g("category").hidden),
+    },
     categories: cats,
     collections: normalizeWebCollections(r.collections),
     image: {
@@ -274,6 +325,8 @@ export interface ParentRow {
   fake_price: number | string | null;
   cover_image_r2_key: string | null;
   category_id: string | null;
+  /** หมวดกลางสำหรับลงขาย (ใช้กฎ centralRules ของร้าน) — บางที่ select ไม่ครบ */
+  platform_category_id?: string | null;
   /** คอลเลกชัน (ใช้จับกลุ่ม "คุณอาจชอบ: คอลเลกชันเดียวกัน") */
   collection_id?: string | null;
   brand_id?: string | null;
@@ -337,7 +390,7 @@ export interface ListingRow {
 // ⚠️ ต้องเป็น string literal ก้อนเดียว (ห้าม + ต่อ) ไม่งั้น type ของ supabase .select() พัง (GenericStringError)
 // ท้ายรายการ = ฟิลด์สเปกสำหรับ "ชุดรายละเอียดสินค้า" บนเว็บ (lib/website-theme.ts PRODUCT_SPEC_FIELDS) — ไม่มีต้นทุน/ข้อมูลภายใน
 export const PARENT_SELECT =
-  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, introduction_en, sale_price, final_price, fake_price, cover_image_r2_key, category_id, collection_id, brand_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty, compartments";
+  "id, code, name_th, name_en, sku_name, name_platform, introduction, description, platform_description, english_description, introduction_en, sale_price, final_price, fake_price, cover_image_r2_key, category_id, platform_category_id, collection_id, brand_id, materials, size_summary, custom_size, size_length_cm, size_height_cm, size_thickness_cm, weight_g, lining, strap, zipper, spares, logo, thread, warranty, compartments";
 
 /** ค่าฟิลด์สเปกของ Parent SKU ที่ไม่ว่าง (key → ข้อความพร้อมหน่วย) ส่งให้เว็บร้านโชว์ในหัวข้อ "ฟิลด์จาก Parent SKU" */
 export function productSpecAttrs(p: ParentRow): Record<string, string> {
@@ -718,7 +771,7 @@ export interface ResolvedProduct {
  * ค่าที่จะแสดงบนเว็บจริง — listing ที่กรอกทับชนะเสมอ ที่เหลือคำนวณจาก field_map
  * @param categoryName ชื่อหมวดใน ERP (จาก product_categories) ใช้จับคู่เป็นหมวดเว็บ
  * @param tagCategories 🏷️ หมวดจากกฎแท็กของสินค้านี้ (tagRuleCategories · ไม่ส่ง = ไม่ใช้กฎแท็ก เหมือนเดิม)
- *   ลำดับหมวด: จัดเอง (web_categories/web_category) → กฎแท็ก → กฎหมวด ERP → หมวดตั้งต้นของร้าน
+ *   ลำดับหมวด: จัดเอง (web_categories/web_category) → กฎแท็ก → กฎหมวดกลาง (centralRules) → กฎหมวด ERP → หมวดตั้งต้นของร้าน
  */
 export function resolveProduct(
   map: FieldMap,
@@ -758,12 +811,12 @@ export function resolveProduct(
     options2 = resolveOptions2(map, sorted, grid, mappedOptions ? new Map(mappedOptions.items.map((i) => [i.label, i.id])) : null);
   }
 
-  const rule = categoryName ? map.category.rules[categoryName] : undefined;
+  const auto = autoCategory(map, categoryName, parent.platform_category_id);
   const catKeys = new Set(map.categories.map((c) => c.key));
   const fromTags = (tagCategories ?? []).filter((k) => catKeys.has(k));
   const categories = !hasManualCategories(l) && fromTags.length
     ? fromTags
-    : resolveCategories(map, l.web_categories, clean(l.web_category) || rule || map.category.default);
+    : resolveCategories(map, l.web_categories, clean(l.web_category) || auto.key);
 
   // 💰 ราคา: กรอกราคาเว็บทับ = ราคานั้นทุกตัวเลือก · ไม่งั้นคิดตาม SKU ที่เลือก → ราคาที่โชว์ = ต่ำสุดของตัวเลือกที่ซื้อได้จริง
   const modelPrice = l.web_price != null && num(l.web_price) > 0 ? num(l.web_price) : resolvePrice(map, parent, kids);

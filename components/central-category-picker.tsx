@@ -5,6 +5,7 @@
  *   • dropdown ค้นหาได้ + ปุ่ม "➕ เพิ่มหมวดใหม่" ในตัว (สร้างแล้วเลือกให้เลย ไม่ต้องออกไปหน้าอื่น)
  *   • โหลดรายการหมวดเอง (แคชในตัว) · onChange คืน id (หรือ null เมื่อล้าง)
  * ใช้: แท็บแพลตฟอร์มของสินค้า + หน้าข้อมูลหลัก (คู่กับ Category Id)
+ *   • webParentId (Parent SKU) → ใต้ช่องมีกล่อง "🌐 หมวดบนเว็บ" (กดแล้วโชว์ · แก้หมวด/หมวดย่อยบนเว็บแต่ละร้านได้ · components/parent-web-categories)
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -13,6 +14,8 @@ import { apiFetch } from "@/lib/api";
 
 // หน้าจับคู่หมวด (ของกลาง) — โหลดเฉพาะตอนเปิด popup กัน bundle หนัก
 const PlatformCategoryMapper = dynamic(() => import("@/components/platform-category-mapper").then((m) => m.PlatformCategoryMapper), { ssr: false });
+// 🌐 หมวดบนเว็บของ Parent SKU — โหลดเมื่อมี webParentId เท่านั้น
+const ParentWebCategories = dynamic(() => import("@/components/parent-web-categories").then((m) => m.ParentWebCategories), { ssr: false });
 
 type Cat = { id: string; name: string };
 
@@ -34,11 +37,11 @@ export function InlineCentralCategoryPicker({
       });
     } catch { /* เงียบ — ผู้ใช้ลองใหม่ได้ */ }
   };
-  return <CentralCategoryPicker value={val} onChange={save} className="max-w-md" />;
+  return <CentralCategoryPicker value={val} onChange={save} className="max-w-md" webParentId={apiPath === "parent-skus" ? recordId : null} />;
 }
 
 export function CentralCategoryPicker({
-  value, onChange, disabled, placeholder = "— เลือกหมวดกลาง —", className = "", showMap = true,
+  value, onChange, disabled, placeholder = "— เลือกหมวดกลาง —", className = "", showMap = true, webParentId = null,
 }: {
   value: string | null;
   onChange: (id: string | null) => void;
@@ -46,6 +49,8 @@ export function CentralCategoryPicker({
   placeholder?: string;
   className?: string;
   showMap?: boolean;   // แสดงปุ่ม "จับคู่หมวด" (เปิด popup หน้าจับคู่)
+  /** Parent SKU id → โชว์กล่อง "🌐 หมวดบนเว็บ" ใต้ช่อง (null = ไม่โชว์ เช่น SKU / ตอนสร้างใหม่) */
+  webParentId?: string | null;
 }) {
   const [cats, setCats] = useState<Cat[]>([]);
   const [open, setOpen] = useState(false);
@@ -88,8 +93,8 @@ export function CentralCategoryPicker({
     } catch { /* เงียบ — ปล่อยให้ผู้ใช้ลองใหม่ */ } finally { setAdding(false); }
   };
 
-  return (
-    <div className={`flex items-center gap-1.5 ${className}`}>
+  const row = (
+    <div className={`flex items-center gap-1.5 ${webParentId ? "" : className}`}>
     <div className="relative flex-1 min-w-0" ref={ref}>
       <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
         className="w-full h-9 px-3 text-sm text-left border border-slate-200 rounded-lg bg-white hover:border-indigo-300 flex items-center justify-between gap-2 disabled:opacity-50">
@@ -140,6 +145,13 @@ export function CentralCategoryPicker({
       </div>,
       document.body,
     )}
+    </div>
+  );
+  if (!webParentId) return row;
+  return (
+    <div className={`space-y-1 ${className}`}>
+      {row}
+      <ParentWebCategories parentId={webParentId} centralId={value} />
     </div>
   );
 }

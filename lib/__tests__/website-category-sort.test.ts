@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCat, addToTarget, canAddTo, crossFamily, lacksSub, moveOut, shortcutTargets, groupByErp, guessWebCategory, inNode, isUnsorted, mainOf, moveToTarget, NONE, nosubNode, quickTargets, removeFromNode, sortedCats, withMain, withSub, withoutSubs, type SortCat } from "@/lib/website-category-sort";
+import { addCat, addToTarget, canAddTo, crossFamily, lacksSub, moveOut, shortcutTargets, groupByErp, guessWebCategory, inNode, isUnsorted, mainOf, moveToTarget, NONE, nosubNode, quickTargets, removeFromNode, sortedCats, withMain, withSub, withoutSubs, applyTargets, toggleHidden, HIDDEN, type SortCat } from "@/lib/website-category-sort";
 
 /** หมวดจริงของ Louis (ย่อ) */
 const CATS: SortCat[] = [
@@ -165,5 +165,42 @@ describe("moveOut — ย้ายที่ผู้ใช้เลือกเ�
   it("กองยังไม่ได้จัด / ไปกองพิเศษ = กติกาเดิม", () => {
     expect(moveOut([], NONE, "men", CATS)).toEqual(moveToTarget([], NONE, "men", CATS));
     expect(moveOut(["belts", "belts-automatic-belts"], "belts-automatic-belts", nosubNode("belts"), CATS)).toEqual(["belts"]);
+  });
+});
+
+describe("applyTargets — ป๊อปติ๊กหลายหมวด (↪ ย้าย… / ＋ เพิ่มไปหมวด…)", () => {
+  it("กองยังไม่ได้จัด: ตั้งเป็นชุดที่ติ๊ก (หมวดย่อยใส่แม่ให้ · ตัวแรก = หมวดหลัก)", () => {
+    expect(applyTargets([], NONE, ["accessories-keychains", "gifts", "men"], "move", CATS)).toEqual(["accessories", "accessories-keychains", "gifts", "men"]);
+    expect(applyTargets([], NONE, ["gifts", "bags"], "move", CATS)).toEqual(["gifts", "bags"]);
+    // ติ๊กแม่ + ลูก = ไม่ซ้ำ
+    expect(applyTargets([], NONE, ["bags", "bags-tote-bags"], "move", CATS)).toEqual(["bags", "bags-tote-bags"]);
+  });
+  it("ย้าย (แทนหมวดเดิม): ออกจากทั้งตระกูลของกองนี้ · หมวดหลักเดิม → ที่ติ๊กขึ้นหัว · ป้ายอื่นคงไว้", () => {
+    const cur = ["bags", "bags-tote-bags", "men"];
+    expect(applyTargets(cur, "bags-tote-bags", ["wallets-bifold-wallets"], "move", CATS)).toEqual(["wallets", "wallets-bifold-wallets", "men"]);
+    expect(applyTargets(cur, "bags", ["wallets", "gifts"], "move", CATS)).toEqual(["wallets", "gifts", "men"]);
+    // ในตระกูลเดียวกัน = เปลี่ยนหมวดย่อย
+    expect(applyTargets(cur, "bags-tote-bags", ["bags-crossbody-bags"], "move", CATS)).toEqual(["bags", "bags-crossbody-bags", "men"]);
+    // ตระกูลเดิมไม่ใช่หมวดหลัก → ต่อท้าย (หมวดหลักเดิมคงไว้)
+    expect(applyTargets(["wallets", "gifts"], "gifts", ["men"], "move", CATS)).toEqual(["wallets", "men"]);
+  });
+  it("เพิ่ม (เก็บหมวดเดิม): ต่อท้ายตามกติกา addToTarget", () => {
+    expect(applyTargets(["bags", "bags-tote-bags"], "bags-tote-bags", ["gifts", "wallets-bifold-wallets"], "add", CATS)).toEqual(["bags", "bags-tote-bags", "gifts", "wallets", "wallets-bifold-wallets"]);
+  });
+  it("ไม่ได้ติ๊ก / รหัสที่ไม่มีในร้าน / กองพิเศษ = ไม่เปลี่ยน", () => {
+    expect(applyTargets(["bags"], "bags", [], "move", CATS)).toEqual(["bags"]);
+    expect(applyTargets(["bags"], "bags", ["nope", NONE, nosubNode("bags")], "add", CATS)).toEqual(["bags"]);
+  });
+});
+
+describe("toggleHidden — 🙈 ซ่อนจากกระดาน", () => {
+  it("ซ่อนเพิ่ม (ไม่ซ้ำ · คงลำดับ) / เอากลับ", () => {
+    expect(toggleHidden(["a"], ["b", "a", "b"], true)).toEqual(["a", "b"]);
+    expect(toggleHidden(["a", "b", "c"], ["b"], false)).toEqual(["a", "c"]);
+    expect(toggleHidden([], [""], true)).toEqual([]);
+  });
+  it("กองที่ซ่อนไม่ชนกับรหัสหมวด/กองพิเศษ", () => {
+    expect(HIDDEN).not.toBe(NONE);
+    expect(inNode(["bags"], HIDDEN, CATS)).toBe(false);
   });
 });

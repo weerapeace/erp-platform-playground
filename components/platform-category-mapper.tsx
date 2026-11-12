@@ -4,6 +4,8 @@
  * PlatformCategoryMapper (ของกลาง) — จับคู่หมวดหมู่แพลตฟอร์ม
  * ซ้าย = "หมวดกลาง" (platform_central_categories) · ขวา = แต่ละร้านเลือกจาก dropdown
  * ใช้ได้ทั้ง: หน้าเต็ม /master/platform-categories และ Popup (เปิดจาก CentralCategoryPicker)
+ * 🌐 แถว Website แยกรายร้าน (Louis / Pixiedustie หมวดไม่เหมือนกัน) — ตัวเลือก = หมวดของร้านนั้น (หลัก/ย่อย)
+ *    เก็บที่ shops.field_map.category.centralRules ผ่าน POST /api/platform-category-map { web } · ใช้กับสินค้าที่ยังไม่ได้จัดหมวดเว็บเอง
  */
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
@@ -16,6 +18,7 @@ type Platform = { id: string; code: string; name_th: string; icon_key: string | 
 type Mapping = { central_category_id: string; platform_id: string; platform_category_path: string | null };
 type Opt = { external_id: string; name_en: string; name_th: string };
 type PfRow = { id: string; code: string; name_th: string; icon_key: string | null; is_active: boolean; sort_order: number };
+type WebShop = { id: string; name: string; slug: string; categories: { key: string; label: string; path: string; parent: string | null }[]; centralRules: Record<string, string> };
 
 const key = (c: string, p: string) => `${c}:${p}`;
 // แพลตฟอร์มที่ยึดหมวดของ Google (Merchant Center) → ดึงจาก Google Product Taxonomy อัตโนมัติได้
@@ -44,6 +47,9 @@ export function PlatformCategoryMapper() {
   const [pfBusy, setPfBusy] = useState(false);
   const [optsByPf, setOptsByPf] = useState<Record<string, SelectOption[]>>({});   // หมวดของแต่ละร้าน (สำหรับ dropdown ของกลาง)
   const optsLoaded = useRef(false);
+  // 🌐 ร้านเว็บ (แยกรายร้าน) + ค่าที่กำลังเลือก (shopId → รหัสหมวดเว็บ)
+  const [webShops, setWebShops] = useState<WebShop[]>([]);
+  const [webDraft, setWebDraft] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +57,7 @@ export function PlatformCategoryMapper() {
       const j = await apiFetch("/api/platform-category-map").then((r) => r.json());
       setCats((j.categories ?? []) as Cat[]);
       setPlatforms((j.platforms ?? []) as Platform[]);
+      setWebShops((j.webShops ?? []) as WebShop[]);
       const m: Record<string, string> = {};
       for (const row of (j.mappings ?? []) as Mapping[]) if (row.platform_category_path) m[key(row.central_category_id, row.platform_id)] = row.platform_category_path;
       setMap(m);
@@ -79,8 +86,32 @@ export function PlatformCategoryMapper() {
     })();
   }, [platforms]);
 
-  const pick = (catId: string) => { setSel(catId); const d: Record<string, string> = {}; for (const p of platforms) d[p.id] = map[key(catId, p.id)] ?? ""; setDraft(d); };
-  const mappedCount = useCallback((catId: string) => platforms.reduce((n, p) => n + (map[key(catId, p.id)] ? 1 : 0), 0), [platforms, map]);
+  // แถว "Website" แตกเป็นรายร้านเมื่อมีร้านเว็บที่ตั้งหมวดเองแล้ว
+  const isWebRow = useCallback((p: Platform) => p.code === "website" && webShops.length > 0, [webShops]);
+  const pick = (catId: string) => {
+    setSel(catId);
+    const d: Record<string, string> = {};
+    for (const p of platforms) d[p.id] = map[key(catId, p.id)] ?? "";
+    setDraft(d);
+    setWebDraft(Object.fromEntries(webShops.map((s) => [s.id, s.centralRules[catId] ?? ""])));
+  };
+  const totalSlots = platforms.filter((p) => !isWebRow(p)).length + (platforms.some(isWebRow) ? webShops.length : 0);
+  const mappedCount = useCallback(
+    (catId: string) =>
+      platforms.reduce((n, p) => n + (!isWebRow(p) && map[key(catId, p.id)] ? 1 : 0), 0) +
+      (platforms.some(isWebRow) ? webShops.filter((s) => s.centralRules[catId]).length : 0),
+    [platforms, map, webShops, isWebRow],
+  );
+  const webOpts = useMemo(
+    () =>
+      Object.fromEntries(
+        webShops.map((s) => [
+          s.id,
+          [{ value: "", label: "— ไม่จับคู่ร้านนี้ —" } as SelectOption, ...s.categories.map((c) => ({ value: c.key, label: c.path, searchText: c.key }) as SelectOption)],
+        ]),
+      ) as Record<string, SelectOption[]>,
+    [webShops],
+  );
   const filtered = useMemo(() => { const s = q.trim().toLowerCase(); return s ? cats.filter((c) => c.name.toLowerCase().includes(s)) : cats; }, [cats, q]);
 
   // ── ตั้งค่าร้านที่แสดง (erp_platforms) ────────────────────────────
@@ -136,10 +167,18 @@ export function PlatformCategoryMapper() {
   const save = async () => {
     if (!sel) return; setSaving(true);
     try {
-      const entries = platforms.map((p) => ({ platform_id: p.id, path: (draft[p.id] ?? "").trim() }));
-      const res = await apiFetch("/api/platform-category-map", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ central_category_id: sel, entries }) });
+      const entries = platforms.filter((p) => !isWebRow(p)).map((p) => ({ platform_id: p.id, path: (draft[p.id] ?? "").trim() }));
+      const web = platforms.some(isWebRow) ? webShops.map((s) => ({ shop_id: s.id, key: webDraft[s.id] ?? "" })) : [];
+      const res = await apiFetch("/api/platform-category-map", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ central_category_id: sel, entries, web }) });
       const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      setMap((prev) => { const n = { ...prev }; for (const p of platforms) { const v = (draft[p.id] ?? "").trim(); if (v) n[key(sel, p.id)] = v; else delete n[key(sel, p.id)]; } return n; });
+      setMap((prev) => { const n = { ...prev }; for (const p of platforms) { if (isWebRow(p)) continue; const v = (draft[p.id] ?? "").trim(); if (v) n[key(sel, p.id)] = v; else delete n[key(sel, p.id)]; } return n; });
+      if (web.length)
+        setWebShops((list) => list.map((s) => {
+          const rules = { ...s.centralRules };
+          const v = webDraft[s.id] ?? "";
+          if (v) rules[sel] = v; else delete rules[sel];
+          return { ...s, centralRules: rules };
+        }));
       toast.success("บันทึกการจับคู่แล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setSaving(false); }
   };
@@ -274,7 +313,7 @@ export function PlatformCategoryMapper() {
                       <span className={`flex-1 text-sm truncate ${active ? "text-indigo-700 font-medium" : "text-slate-700"}`}>{c.name}</span>
                     )}
                     {n > 0
-                      ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">{n}/{platforms.length}</span>
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">{n}/{totalSlots}</span>
                       : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 whitespace-nowrap">ยังไม่จับ</span>}
                     <button type="button" onClick={(e) => { e.stopPropagation(); setRenaming({ id: c.id, name: c.name }); }} title="เปลี่ยนชื่อหมวดกลาง"
                       className="w-5 h-5 rounded text-slate-300 hover:text-indigo-600 opacity-0 group-hover:opacity-100">✎</button>
@@ -297,7 +336,19 @@ export function PlatformCategoryMapper() {
                   <div className="text-[11px] text-slate-400 mt-0.5">เลือกหมวดของแต่ละร้านจาก dropdown (เว้นว่าง = ไม่จับคู่ร้านนั้น)</div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                  {platforms.map((p) => (
+                  {platforms.map((p) => isWebRow(p) ? (
+                    // 🌐 Website แยกรายร้าน — เลือกหมวดของร้านนั้น (หมวดหลักหรือหมวดย่อย)
+                    <div key={p.id} className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-2 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-sm text-slate-700"><PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /> {p.name_th} <span className="text-[11px] text-slate-400">· แยกรายร้าน</span></div>
+                      {webShops.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3">
+                          <span className="w-[7.25rem] flex-shrink-0 pl-5 text-sm text-slate-700 truncate" title={s.name}>{s.name}</span>
+                          <SearchableSelect className="flex-1 min-w-0" value={webDraft[s.id] ?? ""} options={webOpts[s.id] ?? []} onChange={(k) => setWebDraft((d) => ({ ...d, [s.id]: k }))} placeholder="— เลือกหมวดบนเว็บร้านนี้ —" />
+                        </div>
+                      ))}
+                      <p className="pl-5 text-[11px] text-slate-500">ใช้เติมหมวดให้สินค้าที่ยังไม่ได้จัดหมวดเว็บเอง — ตัวที่จัดเองแล้วไม่ถูกทับ (ลำดับ: จัดเอง → หมวดกลาง → หมวด ERP)</p>
+                    </div>
+                  ) : (
                     <div key={p.id} className="flex items-center gap-3">
                       <span className="w-32 flex-shrink-0 text-sm text-slate-700 truncate inline-flex items-center gap-1.5"><PlatformIcon code={p.code} iconKey={p.icon_key} size={16} /> {p.name_th}</span>
                       <SearchableSelect className="flex-1 min-w-0" value={draft[p.id] ?? ""} options={optsByPf[p.id] ?? []} onChange={(path) => setDraft((d) => ({ ...d, [p.id]: path }))} placeholder="— เลือกหมวดของร้านนี้ —" />

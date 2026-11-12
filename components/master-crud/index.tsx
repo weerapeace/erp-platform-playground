@@ -4114,8 +4114,10 @@ export function MasterRecordDrawer({
       // ถ้าไม่ตั้ง ปุ่ม "+ เพิ่มใหม่" จะเปิดฟอร์มดิบที่ต้องกรอกรหัสหมวดของแต่ละแพลตฟอร์มเอง (ไม่มีใครรู้รหัส)
       formRenderers: productEntity
         ? {
-            platform_category_id: ({ value, onChange, disabled }) => (
-              <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder={tr("— เลือกหมวดกลาง —", "— select central category —")} />
+            // Parent SKU (มี id แล้ว) → ใต้ช่องมีกล่อง 🌐 หมวดบนเว็บ (แก้หมวดเว็บแต่ละร้านได้ตรงนี้)
+            platform_category_id: ({ value, onChange, disabled, recordId }) => (
+              <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder={tr("— เลือกหมวดกลาง —", "— select central category —")}
+                webParentId={moduleKey === "parent-skus-v2" ? recordId : null} />
             ),
             ...(moduleKey === "parent-skus-v2"
               ? {

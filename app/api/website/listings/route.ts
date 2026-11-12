@@ -8,6 +8,7 @@
  * POST { shopId, parentIds:[], action:"addMany", publish? } → เพิ่มหลายรุ่นพร้อมกัน (ป๊อปเพิ่มสินค้าเข้าเว็บ · ค่าเริ่มต้น = ซ่อนไว้ก่อน)
  * POST { shopId, action:"applyErpMap", map:{ ชื่อหมวด ERP: รหัสหมวดเว็บ | "" } } → 🗂 จำกฎ (field_map.category.rules) + ใส่หมวดให้สินค้าที่ยังไม่ได้จัดหมวดเอง
  * POST { shopId, action:"addCategory", newCategory:{ key, label, parent? } } → 🗂 เพิ่มหมวด (ต่อท้ายกลุ่มแม่ใน field_map.categories · ไม่ทับช่องอื่น)
+ * POST { shopId, action:"sortHide", parentIds:[], hidden?: boolean } → 🙈 ซ่อน/เอากลับ จากกระดานจัดหมวด (field_map.category.hidden · ไม่กระทบหน้าเว็บ)
  * POST { shopId, parentId, patch:{...} }            → แก้ข้อมูลเวอร์ชันเว็บ (store_listings)
  *
  * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + supabaseAdmin (store_* อยู่ DB เดียวกัน) + writeAudit
@@ -22,6 +23,7 @@ import { writeAudit } from "@/lib/audit";
 import {
   normalizeFieldMap,
   cleanCategoryKey,
+  cleanHiddenIds,
   resolveCategories,
   resolveProduct,
   attachNameRefs,
@@ -41,6 +43,7 @@ import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { readFitCheckShops } from "@/lib/website-site-info";
 import { fetchAllPages, FetchAllError } from "@/lib/fetch-all";
 import { syncStoreListingUsages } from "@/lib/store-listing-usage";
+import { toggleHidden } from "@/lib/website-category-sort";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -280,7 +283,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabaseFromRequest(request).auth.getUser();
 
-  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown; publish?: unknown; map?: unknown; newCategory?: unknown };
+  let b: { shopId?: string; parentId?: string; action?: string; patch?: Patch; items?: { parentId?: string; categories?: unknown }[]; category?: string; parentIds?: unknown; order?: unknown; publish?: unknown; map?: unknown; newCategory?: unknown; hidden?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -364,6 +367,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, count: ok });
   }
 
+  // 🙈 ซ่อน / เอากลับ จากกระดานจัดหมวด (ไม่ต้องจัด) — field_map.category.hidden · อ่าน-แก้-เขียนที่นี่ (ไม่ทับช่องอื่น)
+  //    ไม่กระทบหน้าเว็บ (ขึ้น/ปิดขาย = is_published แยกกัน) → ไม่ต้องล้างแคชเว็บร้าน
+  if (b.action === "sortHide") {
+    const ids = Array.isArray(b.parentIds) ? [...new Set((b.parentIds as unknown[]).filter((x): x is string => typeof x === "string" && !!x.trim()))].slice(0, 1000) : [];
+    if (!b.shopId || !ids.length) return NextResponse.json({ error: "ต้องระบุ shopId + parentIds" }, { status: 400 });
+    const hide = b.hidden !== false;
+    const { data: shopRow } = await sb.from("shops").select("id, field_map").eq("id", b.shopId).maybeSingle();
+    if (!shopRow) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
+    const raw = (shopRow.field_map && typeof shopRow.field_map === "object" ? shopRow.field_map : {}) as Record<string, unknown>;
+    const rawCat = (raw.category && typeof raw.category === "object" ? raw.category : {}) as Record<string, unknown>;
+    const before = cleanHiddenIds(rawCat.hidden);
+    const hidden = cleanHiddenIds(toggleHidden(before, ids, hide));
+    const { error } = await sb.from("shops").update({ field_map: { ...raw, category: { ...rawCat, hidden } } }).eq("id", b.shopId);
+    if (error) return NextResponse.json({ error: hide ? "ซ่อนไม่สำเร็จ" : "เอากลับไม่สำเร็จ" }, { status: 500 });
+    await writeAudit(sb, {
+      action: "update",
+      entityType: "shop_field_map",
+      entityId: b.shopId,
+      ...actor,
+      metadata: { kind: hide ? "web_sort_hide" : "web_sort_unhide", parentIds: ids, countBefore: before.length, countAfter: hidden.length },
+    });
+    return NextResponse.json({ ok: true, hidden });
+  }
+
   // 🗂 เพิ่มหมวดจากหน้าจัดหมวด — อ่าน-แก้-เขียน field_map.categories ที่นี่ (ไม่ส่ง field_map ทั้งก้อนจากหน้าจอ กันทับของคนอื่น)
   //    หมวดย่อยต่อท้ายกลุ่มแม่ (ลำดับใน array = ลำดับบนเว็บ) · รหัสซ้ำ/แม่ไม่ใช่หมวดชั้นบน = ไม่รับ
   if (b.action === "addCategory") {
@@ -416,11 +443,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { error: fmErr } = await sb.from("shops").update({ field_map: { ...raw, category: { ...rawCat, rules } } }).eq("id", b.shopId);
     if (fmErr) return NextResponse.json({ error: "บันทึกกฎหมวดไม่สำเร็จ" }, { status: 500 });
 
-    // สินค้าที่ยังไม่ได้จัดหมวดเอง + หมวด ERP ของรุ่น
+    // สินค้าที่ยังไม่ได้จัดหมวดเอง + หมวด ERP ของรุ่น (🙈 ตัวที่ซ่อนจากกระดาน = ไม่ต้องจัด → ข้าม)
     const want = new Map(changes.filter(([, key]) => key));
+    const hiddenSet = new Set(fm.category.hidden);
     const { data: rowsL } = await sb.from("store_listings").select("parent_sku_id, web_categories, web_category").eq("shop_id", b.shopId).limit(5000);
     const unsorted = ((rowsL ?? []) as { parent_sku_id: string; web_categories: string[] | null; web_category: string | null }[]).filter(
-      (r) => !(Array.isArray(r.web_categories) && r.web_categories.length) && !String(r.web_category ?? "").trim(),
+      (r) => !hiddenSet.has(r.parent_sku_id) && !(Array.isArray(r.web_categories) && r.web_categories.length) && !String(r.web_category ?? "").trim(),
     );
     const pids = unsorted.map((r) => r.parent_sku_id);
     const byKey = new Map<string, string[]>();

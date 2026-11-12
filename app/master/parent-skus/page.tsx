@@ -199,8 +199,9 @@ export default function ParentSKUsV2Page() {
     // ช่อง "หมวดกลางสำหรับลงขาย" (platform_category_id) — picker ค้นหา+เพิ่มในตัว บนแท็บข้อมูลหลัก
     formRenderers: {
       ...(CONFIG.formRenderers ?? {}),
-      platform_category_id: ({ value, onChange, disabled }) => (
-        <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" />
+      // มี id แล้ว → ใต้ช่องมีกล่อง 🌐 หมวดบนเว็บ (แก้หมวดเว็บแต่ละร้านได้ตรงนี้ · ต้องตั้งคู่กับ master-crud)
+      platform_category_id: ({ value, onChange, disabled, recordId }) => (
+        <CentralCategoryPicker value={(value as string) || null} onChange={(id) => onChange(id)} disabled={disabled} placeholder="— เลือกหมวดกลาง —" webParentId={recordId} />
       ),
       // "ใส่อะไรได้บ้าง" — ชิปจากรายการกลาง (ต้องตั้งคู่กับ MasterRecordDrawer ใน master-crud ด้วย)
       fits: ({ value, onChange, disabled }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,

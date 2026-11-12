@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
-import { normalizeFieldMap, DEFAULT_FIELD_MAP } from "@/lib/website-field-map";
+import { normalizeFieldMap, DEFAULT_FIELD_MAP, cleanCentralRules } from "@/lib/website-field-map";
 import { cleanTagRules } from "@/lib/website-tag-categories";
 
 export const dynamic = "force-dynamic";
@@ -99,7 +99,12 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   // 🏷️ กฎแท็ก → หมวด แก้ผ่าน /api/website/tag-categories เท่านั้น — ที่นี่คงค่าจาก DB ไว้
   //    (หน้าจับคู่ฟิลด์ที่เปิดค้างอยู่ถือค่าเก่า → บันทึกแล้วจะไม่ทับกฎที่เพิ่งตั้งจากป๊อปแท็ก) · หมวดที่ถูกลบ = กฎนั้นหลุดด้วย
   const { data: cur } = await sb.from("shops").select("field_map").eq("id", body.shopId).maybeSingle();
-  fieldMap.category.tagRules = cleanTagRules(normalizeFieldMap(cur?.field_map).category.tagRules, fieldMap.categories.map((c) => c.key));
+  const curMap = normalizeFieldMap(cur?.field_map);
+  const keys = fieldMap.categories.map((c) => c.key);
+  fieldMap.category.tagRules = cleanTagRules(curMap.category.tagRules, keys);
+  // 🗂 กฎหมวดกลาง (หน้าจับคู่หมวดกลาง) + 🙈 รายการซ่อนจากกระดานจัดหมวด — แก้ที่หน้าของมันเท่านั้น ที่นี่คงค่าจาก DB ไว้เหมือนกฎแท็ก
+  fieldMap.category.centralRules = cleanCentralRules(curMap.category.centralRules, keys);
+  fieldMap.category.hidden = curMap.category.hidden;
 
   const { error } = await sb.from("shops").update({ field_map: fieldMap }).eq("id", body.shopId);
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });

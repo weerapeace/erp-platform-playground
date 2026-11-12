@@ -94,7 +94,7 @@ export function renameCategoryRefs<T>(value: T, from: string, to: string): { val
   return { value: hits ? next : value, hits };
 }
 
-/** field_map ของร้าน: รหัสหมวด · แม่ของหมวดย่อย · กฎจับคู่หมวด ERP/แท็ก · หมวดตั้งต้น (ช่องอื่นคงเดิม) */
+/** field_map ของร้าน: รหัสหมวด · แม่ของหมวดย่อย · กฎจับคู่หมวด ERP/แท็ก/หมวดกลาง · หมวดตั้งต้น (ช่องอื่นคงเดิม) */
 export function renameKeyInFieldMap(raw: Record<string, unknown>, cats: { key: string; parent?: string | null }[], from: string, to: string): Record<string, unknown> {
   const list = (Array.isArray(raw.categories) ? raw.categories : cats) as Record<string, unknown>[];
   const categories = list.map((c) => {
@@ -107,7 +107,14 @@ export function renameKeyInFieldMap(raw: Record<string, unknown>, cats: { key: s
   const cat = (raw.category && typeof raw.category === "object" ? raw.category : {}) as Record<string, unknown>;
   const swapValues = (m: unknown) =>
     m && typeof m === "object" && !Array.isArray(m) ? Object.fromEntries(Object.entries(m as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) : m;
-  const category = { ...cat, rules: swapValues(cat.rules), tagRules: swapValues(cat.tagRules), ...(cat.default === from ? { default: to } : {}) };
+  // กฎหมวดกลาง (centralRules) ชี้รหัสหมวดเว็บเหมือนกัน — มีเมื่อไหร่ก็เปลี่ยนตาม
+  const category = {
+    ...cat,
+    rules: swapValues(cat.rules),
+    tagRules: swapValues(cat.tagRules),
+    ...(cat.centralRules ? { centralRules: swapValues(cat.centralRules) } : {}),
+    ...(cat.default === from ? { default: to } : {}),
+  };
   return { ...raw, categories, category };
 }
 

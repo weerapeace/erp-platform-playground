@@ -199,3 +199,40 @@ export function moveOut(list: string[], from: string, target: string, cats: Sort
 /** ย้ายข้ามตระกูลไหม (ป๊อปบอกว่าจะออกจากหมวดไหน) */
 export const crossFamily = (from: string, target: string, cats: SortCat[]): boolean =>
   from !== NONE && (nodeMain(from) ?? mainOf(cats, from)) !== mainOf(cats, target);
+
+/* ───────── ป๊อปติ๊กหลายหมวด (↪ ย้าย… / ＋ เพิ่มไปหมวด…) ───────── */
+
+/**
+ * ใส่หลายหมวดทีเดียว — targets เรียงตามที่ติ๊ก (ตัวแรกที่ขึ้นหัว = หมวดหลัก)
+ *   กองยังไม่ได้จัด = ตั้งเป็นชุดที่ติ๊ก
+ *   "add" = คงหมวดเดิมทั้งหมด แล้วเพิ่มที่ติ๊ก (กติกาเดียวกับ addToTarget)
+ *   "move" = แทนหมวดเดิม: ออกจากทั้งตระกูลของกองที่เปิดอยู่ (แม่ + หมวดย่อย) แล้วเข้าที่ติ๊ก
+ *     ตระกูลเดิมเป็นหมวดหลัก (ตัวแรก) → ที่ติ๊กขึ้นเป็นหมวดหลักแทน · ไม่ใช่ → ต่อท้าย · หมวดอื่น (เช่น ป้าย Women) คงไว้
+ *   หมวดย่อยที่ติ๊ก = ใส่แม่ให้ด้วย · กองพิเศษ/รหัสที่ไม่มีในร้าน = ข้าม
+ */
+export function applyTargets(list: string[], from: string, targets: string[], how: "move" | "add", cats: SortCat[]): string[] {
+  const keys = new Set(cats.map((c) => c.key));
+  const ts = [...new Set(targets)].filter((k) => keys.has(k));
+  if (!ts.length) return list;
+  const build = (base: string[]) => ts.reduce((acc, t) => addToTarget(acc, t, cats), base);
+  if (from === NONE || !list.length) return build([]);
+  if (how === "add") return build(list);
+  const fromMain = nodeMain(from) ?? mainOf(cats, from);
+  const drop = new Set(familyKeys(cats, fromMain));
+  const wasMain = !!list[0] && drop.has(list[0]);
+  const rest = list.filter((k) => !drop.has(k));
+  const picked = build([]);
+  return wasMain ? [...picked, ...rest.filter((k) => !picked.includes(k))] : [...rest, ...picked.filter((k) => !rest.includes(k))];
+}
+
+/* ───────── 🙈 ซ่อนจากกระดาน (field_map.category.hidden · ไม่กระทบหน้าเว็บ) ───────── */
+
+/** กองพิเศษ "ที่ซ่อนไว้" บนกระดาน */
+export const HIDDEN = "__hidden";
+
+/** ซ่อน / เอากลับ หลายรุ่น — คืนรายการใหม่ (ไม่ซ้ำ · คงลำดับเดิม) */
+export function toggleHidden(current: string[], ids: string[], hide: boolean): string[] {
+  const set = new Set(ids);
+  if (!hide) return current.filter((id) => !set.has(id));
+  return [...current, ...ids.filter((id, i) => id && !current.includes(id) && ids.indexOf(id) === i)];
+}
