@@ -57,9 +57,9 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - `cod_amount` ในฐานข้อมูลห้ามว่าง → ไม่ใช่ COD = 0 (เคยพังตอนกดครั้งแรก)
 
 ## ดึงออเดอร์อัตโนมัติ (2026-11-12)
-- `/api/cron/tiktok-orders` — ทุกแบรนด์ที่เชื่อม TikTok · ดึงออเดอร์ที่ **เปลี่ยนสถานะ** ใน 3 ชม.ล่าสุด (`update_time_ge` · เรียงตาม update_time) · รอบละ 30 นาที ซ้อนกันได้ (upsert ไม่ซ้ำใบ)
+- `/api/cron/tiktok-orders` — ทุกแบรนด์ที่เชื่อม TikTok · ดึงออเดอร์ที่ **เปลี่ยนสถานะ** ใน 1 ชม.ล่าสุด (`update_time_ge` · เรียงตาม update_time) · รอบละ 15 นาที (เจ้าของเลือก) ซ้อนกันได้ (upsert ไม่ซ้ำใบ)
 - เข้าได้ด้วย x-cron-token (Vault `tiktok_orders_cron` ผ่าน `erp_cron_token_ok`) / Bearer CRON_SECRET / คนมีสิทธิ์ = โหมดดู
-- ตั้งเวลา: migration `202612050100_tiktok_orders_cron.sql` (pg_cron `tiktok-orders-every-30min` — เรียกเว็บเฉพาะตอนมีแบรนด์เชื่อม TikTok) · ยกเลิก `select cron.unschedule('tiktok-orders-every-30min')`
+- ตั้งเวลา: migration `202612050100_tiktok_orders_cron.sql` (pg_cron `tiktok-orders-every-15min` (ลงแล้ว 2026-11-12 · jobid 5) — เรียกเว็บเฉพาะตอนมีแบรนด์เชื่อม TikTok) · ยกเลิก `select cron.unschedule('tiktok-orders-every-15min')`
 - ผลรอบ = `recordWorkerRun("tiktok-orders")` · audit เฉพาะรอบที่มีออเดอร์ใหม่/มีปัญหา (actor `tiktok_orders_cron`)
 - ⚠️ ยังไม่อยู่ในออฟฟิศทีม AI (`lib/ai-office`) — ฉากพิกเซลโต๊ะเต็ม 20/20 ต้องตัดสินใจขยายก่อน
 

@@ -1,6 +1,6 @@
 /**
- * /api/cron/tiktok-orders — ตัวดึงออเดอร์ TikTok อัตโนมัติ (pg_cron เรียกทุก 30 นาที)
- *   ทุกแบรนด์ที่เชื่อม TikTok ไว้ → ดึงออเดอร์ที่ "เปลี่ยนสถานะ" ใน 3 ชม.ล่าสุด (ซ้อนกันได้ บันทึกซ้ำไม่ซ้ำใบ) → platform_orders
+ * /api/cron/tiktok-orders — ตัวดึงออเดอร์ TikTok อัตโนมัติ (pg_cron เรียกทุก 15 นาที · เจ้าของเลือก 2026-11-12)
+ *   ทุกแบรนด์ที่เชื่อม TikTok ไว้ → ดึงออเดอร์ที่ "เปลี่ยนสถานะ" ใน 1 ชม.ล่าสุด (ซ้อนกันได้ บันทึกซ้ำไม่ซ้ำใบ) → platform_orders
  *   ใช้ตัวกลางเดียวกับปุ่ม (../../tiktok-shop/orders-sync) · บันทึกผลรอบด้วย recordWorkerRun "tiktok-orders"
  *   ⚠️ ยังไม่ได้ลงทะเบียนใน lib/ai-office (OFFICE_WORKERS) เพราะออฟฟิศพิกเซลโต๊ะเต็ม 20/20 (SCENE_DESKS) — ต้องให้เจ้าของตัดสินใจขยายฉากก่อน
  * เข้าได้ 3 ทาง:
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 120;
 
-const WINDOW_SEC = 3 * 3600;   // รอบละ 30 นาที แต่ย้อน 3 ชม. — รอบไหนล้มรอบถัดไปยังเก็บตก
+const WINDOW_SEC = 3600;   // รอบละ 15 นาที แต่ย้อน 1 ชม. — รอบไหนล้มรอบถัดไปยังเก็บตก
 
 async function authorized(request: NextRequest): Promise<"cron" | "dry" | null> {
   const admin = supabaseAdmin();
