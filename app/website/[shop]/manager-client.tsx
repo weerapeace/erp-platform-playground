@@ -31,29 +31,27 @@ import { WebsiteManagerMenu } from "@/components/website-manager-menu";
 
 // ⚡ โค้ดของแต่ละแท็บโหลดตอนเปิดแท็บนั้น (2026-11-12) — เดิมโหลดครบ 21 แท็บตั้งแต่เปิดหน้า = โค้ด 920KB หนักสุดในระบบ
 //    แท็บยังไม่มา = ข้อความกำลังเปิด (state-views กลาง) · ssr:false เพราะทุกแผงต้องรู้ตัวผู้ใช้/ร้านก่อนอยู่แล้ว
-const tabLoading = () => <LoadingState label="กำลังเปิดแท็บ…" />;
-const lazyTab = { ssr: false, loading: tabLoading } as const;
-const WebsiteListingsPanel = dynamic(() => import("@/components/website-listings-panel").then((m) => m.WebsiteListingsPanel), lazyTab);
-const WebsiteFieldMapPanel = dynamic(() => import("@/components/website-field-map-panel").then((m) => m.WebsiteFieldMapPanel), lazyTab);
-const WebsiteCategoriesPanel = dynamic(() => import("@/components/website-categories-panel").then((m) => m.WebsiteCategoriesPanel), lazyTab);
-const WebsiteCollectionsPanel = dynamic(() => import("@/components/website-collections-panel").then((m) => m.WebsiteCollectionsPanel), lazyTab);
-const WebsiteNewDropsPanel = dynamic(() => import("@/components/website-new-drops-panel").then((m) => m.WebsiteNewDropsPanel), lazyTab);
-const WebsiteSizeGuidesPanel = dynamic(() => import("@/components/website-size-guides-panel").then((m) => m.WebsiteSizeGuidesPanel), lazyTab);
-const WebsiteThemePanel = dynamic(() => import("@/components/website-theme-panel").then((m) => m.WebsiteThemePanel), lazyTab);
-const WebsiteLayoutPanel = dynamic(() => import("@/components/website-layout-panel").then((m) => m.WebsiteLayoutPanel), lazyTab);
-const WebsitePagesPanel = dynamic(() => import("@/components/website-pages-panel").then((m) => m.WebsitePagesPanel), lazyTab);
-const WebsiteInfoPanel = dynamic(() => import("@/components/website-info-panel").then((m) => m.WebsiteInfoPanel), lazyTab);
-const WebsiteOrdersPanel = dynamic(() => import("@/components/website-orders-panel").then((m) => m.WebsiteOrdersPanel), lazyTab);
-const WebsiteShippingPanel = dynamic(() => import("@/components/website-shipping-panel").then((m) => m.WebsiteShippingPanel), lazyTab);
-const WebsiteCouponsPanel = dynamic(() => import("@/components/website-coupons-panel").then((m) => m.WebsiteCouponsPanel), lazyTab);
-const WebsiteMembersPanel = dynamic(() => import("@/components/website-members-panel").then((m) => m.WebsiteMembersPanel), lazyTab);
-const WebsiteReviewsPanel = dynamic(() => import("@/components/website-reviews-panel").then((m) => m.WebsiteReviewsPanel), lazyTab);
-const WebsiteStatsPanel = dynamic(() => import("@/components/website-stats-panel").then((m) => m.WebsiteStatsPanel), lazyTab);
-const WebsiteReturnsPanel = dynamic(() => import("@/components/website-returns-panel").then((m) => m.WebsiteReturnsPanel), lazyTab);
-const WebsiteImageSetsPanel = dynamic(() => import("@/components/website-image-sets-panel").then((m) => m.WebsiteImageSetsPanel), lazyTab);
-const WebsiteSiteImagesPanel = dynamic(() => import("@/components/website-site-images-panel").then((m) => m.WebsiteSiteImagesPanel), lazyTab);
-const WebsitePromotionsPanel = dynamic(() => import("@/components/website-promotions-panel").then((m) => m.WebsitePromotionsPanel), lazyTab);
-const WebsiteTranslationCenter = dynamic(() => import("@/components/website-translation-center").then((m) => m.WebsiteTranslationCenter), lazyTab);
+const WebsiteListingsPanel = dynamic(() => import("@/components/website-listings-panel").then((m) => m.WebsiteListingsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteFieldMapPanel = dynamic(() => import("@/components/website-field-map-panel").then((m) => m.WebsiteFieldMapPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteCategoriesPanel = dynamic(() => import("@/components/website-categories-panel").then((m) => m.WebsiteCategoriesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteCollectionsPanel = dynamic(() => import("@/components/website-collections-panel").then((m) => m.WebsiteCollectionsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteNewDropsPanel = dynamic(() => import("@/components/website-new-drops-panel").then((m) => m.WebsiteNewDropsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteSizeGuidesPanel = dynamic(() => import("@/components/website-size-guides-panel").then((m) => m.WebsiteSizeGuidesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteThemePanel = dynamic(() => import("@/components/website-theme-panel").then((m) => m.WebsiteThemePanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteLayoutPanel = dynamic(() => import("@/components/website-layout-panel").then((m) => m.WebsiteLayoutPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsitePagesPanel = dynamic(() => import("@/components/website-pages-panel").then((m) => m.WebsitePagesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteInfoPanel = dynamic(() => import("@/components/website-info-panel").then((m) => m.WebsiteInfoPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteOrdersPanel = dynamic(() => import("@/components/website-orders-panel").then((m) => m.WebsiteOrdersPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteShippingPanel = dynamic(() => import("@/components/website-shipping-panel").then((m) => m.WebsiteShippingPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteCouponsPanel = dynamic(() => import("@/components/website-coupons-panel").then((m) => m.WebsiteCouponsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteMembersPanel = dynamic(() => import("@/components/website-members-panel").then((m) => m.WebsiteMembersPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteReviewsPanel = dynamic(() => import("@/components/website-reviews-panel").then((m) => m.WebsiteReviewsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteStatsPanel = dynamic(() => import("@/components/website-stats-panel").then((m) => m.WebsiteStatsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteReturnsPanel = dynamic(() => import("@/components/website-returns-panel").then((m) => m.WebsiteReturnsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteImageSetsPanel = dynamic(() => import("@/components/website-image-sets-panel").then((m) => m.WebsiteImageSetsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteSiteImagesPanel = dynamic(() => import("@/components/website-site-images-panel").then((m) => m.WebsiteSiteImagesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsitePromotionsPanel = dynamic(() => import("@/components/website-promotions-panel").then((m) => m.WebsitePromotionsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteTranslationCenter = dynamic(() => import("@/components/website-translation-center").then((m) => m.WebsiteTranslationCenter), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
