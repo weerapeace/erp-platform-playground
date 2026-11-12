@@ -21,6 +21,7 @@ import { ComponentPicker } from "@/components/material-picker";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SheetImagePicker } from "./sheet-image-picker";
 import { Icon } from "@/components/icon";
+import { useStickyHeader } from "@/components/sticky-header";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
@@ -137,6 +138,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
     setCur((c) => Math.min(c, Math.max(0, prev.length - 1)));
   };
   const page = pages[cur] ?? null;
+  // 📌 แถบเครื่องมือวาด 2 แถว ลอยติดขอบบนตอนเลื่อนลงไปวาดล่างรูป (ของกลาง useStickyHeader · ในป๊อปอัปติดขอบบนป๊อป · เจ้าของขอ 2026-11-12)
+  const toolBar = useStickyHeader({ watch: `${loading ? 1 : 0}${page && canEdit ? 1 : 0}` });
   const patchPage = (patch: Partial<Page>) => change(pages.map((p, i) => (i === cur ? { ...p, ...patch } : p)));
   const patchPin = (pageIdx: number, key: string, patch: Partial<Pin>) =>
     change(pages.map((p, i) => (i !== pageIdx ? p : { ...p, pins: p.pins.map((x) => (x.key === key ? { ...x, ...patch } : x)) })));
@@ -318,6 +321,10 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
             )}
           </div>
 
+          {/* 📌 2 แถวเครื่องมือ (+ ข้อความปักหมุด) ลอยติดขอบบนตอนเลื่อนดูรูป · แถบเลือกรูปด้านบนไม่ลอย (เจ้าของเลือก 2026-11-12) */}
+          {((page && canEdit) || pendingPart) && (
+          <div ref={toolBar.headerRef} style={toolBar.style}
+            className={`relative z-40 -mx-1 space-y-2 bg-white px-1 py-1 ${toolBar.stuck ? "rounded-b-lg border-b border-slate-200 shadow-[0_8px_16px_-12px_rgba(15,23,42,0.35)]" : ""}`}>
           {page && canEdit && (
             <div className="flex items-center gap-2 flex-wrap">
               <input value={page.title ?? ""} onChange={(e) => patchPage({ title: e.target.value })} placeholder={t("ชื่อรูป เช่น ด้านหน้า", "Image name, e.g. Front")}
@@ -340,6 +347,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
               <Icon name="pin" /> {t(`กดบนรูปตรง "${pendingPart.name}" เพื่อปักหมุด`, `Click the image where "${pendingPart.name}" is`)}
               <button type="button" onClick={() => { setPendingPart(null); setTool("select"); }} className="ml-auto underline">{t("ยกเลิก", "Cancel")}</button>
             </div>
+          )}
+          </div>
           )}
 
           {page && (

@@ -49,14 +49,18 @@ export function useStickyHeader({ gap = 8, enabled = true, watch }: { gap?: numb
     const header = headerRef.current;
     if (!header || !enabled) { setM(null); return; }
     const parent = scrollParentOf(header);
-    const offset = parent ? 0 : measureShellTop();
+    // กรอบเลื่อนเองที่มี padding บน (เช่น ตัวป๊อปอัป ERPModal py-5) — sticky จะติดใต้ padding (มีเนื้อหาโผล่เหนือแถบ)
+    //   → ดึงขึ้นเท่า padding ให้ชิดขอบบนที่มองเห็น · เลื่อนทั้งหน้า = ใต้แถบบนของแอปตามเดิม
+    const pcs = parent ? getComputedStyle(parent) : null;
+    const pad = pcs ? parseFloat(pcs.paddingTop) || 0 : 0;
+    const offset = parent ? -Math.round(pad) : measureShellTop();
     const hr = header.getBoundingClientRect();
     const keep = keepRef.current;
     // ส่วนที่ต้องเห็นตลอด = จากขอบบนของ keep (เผื่อ gap) ถึงขอบล่างหัว · ไม่มี keep = ทั้งก้อน
     const keepFrom = keep ? Math.max(0, keep.getBoundingClientRect().top - hr.top - gap) : 0;
     const visible = Math.round(header.offsetHeight - keepFrom);
     const top = offset - Math.round(keepFrom);
-    const rootTop = parent ? parent.getBoundingClientRect().top : 0;
+    const rootTop = parent && pcs ? parent.getBoundingClientRect().top + (parseFloat(pcs.borderTopWidth) || 0) + Math.round(pad) : 0;
     const stuck = (parent ? parent.scrollTop : window.scrollY) > 0 && hr.top - rootTop <= top + 0.5;
     setM((prev) => (prev && prev.top === top && prev.below === offset + visible && prev.stuck === stuck ? prev : { top, below: offset + visible, stuck }));
   }, [gap, enabled]);
