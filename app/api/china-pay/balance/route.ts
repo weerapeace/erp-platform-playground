@@ -1,5 +1,6 @@
 /**
  * GET  /api/china-pay/balance — ยอดเงินคงเหลือที่จีน (¥/฿) + ประวัติปรับยอดล่าสุด
+ *   ?transfer=<id> → แถม as_of { before_rmb, after_rmb } = ยอดก่อน/หลังรายการโอนนั้น (ใบสรุปรอบจ่ายจากยอดคงเหลือ)
  * POST /api/china-pay/balance — บันทึกการปรับยอด (set/topup/adjust)
  *   body: { kind: 'set'|'topup'|'adjust', amount_rmb: number, amount_thb?: number, note?: string, actor?: string }
  *   หมายเหตุ: 'set' ฝั่ง client คำนวณ delta = ยอดที่ตั้ง − ยอดปัจจุบัน มาแล้ว
@@ -29,6 +30,34 @@ async function canManage(request: NextRequest): Promise<{ ok: boolean; userId: s
   return { ok: p?.active !== false && (role === "admin" || role === "manager"), userId: user.id, email: user.email ?? null };
 }
 
+const num = (v: unknown) => { const n = Number(v ?? 0); return isFinite(n) ? n : 0; };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ROW_CAP = 1000;   // PostgREST ตัดที่ 1,000 แถวเงียบ ๆ → ถ้าชนเพดาน ไม่ตอบตัวเลข (กันยอดผิด)
+
+/**
+ * ยอดคงเหลือบัญชีจีน (¥) "ณ ตอนบันทึกรายการโอนนั้น" — ใช้ในใบสรุปรอบที่จ่ายจากยอดคงเหลือล้วน
+ * (ยอดตั้งต้น − บิลจีน = ยอดหลังจ่าย) ให้ตัวเลขใบเก่าไม่เปลี่ยนตามการโอนรอบหลัง
+ * สูตรเดียวกับ china_balance_current() แต่นับเฉพาะรายการที่สร้างไม่เกินเวลาของรายการโอนนั้น
+ */
+async function balanceAsOfTransfer(id: string): Promise<{ transfer_id: string; before_rmb: number; after_rmb: number } | null> {
+  const admin = supabaseAdmin();
+  const { data: t } = await admin.from("china_transfers").select("id, created_at, leftover_rmb, is_active").eq("id", id).maybeSingle();
+  if (!t?.created_at) return null;
+  const ts = String(t.created_at);
+  const [tr, adj] = await Promise.all([
+    admin.from("china_transfers").select("leftover_rmb, is_active").lte("created_at", ts).range(0, ROW_CAP - 1),
+    admin.from("china_balance_adjustments").select("amount_rmb").lte("created_at", ts).range(0, ROW_CAP - 1),
+  ]);
+  if (tr.error || adj.error) return null;
+  const trs = (tr.data ?? []) as { leftover_rmb: unknown; is_active: boolean | null }[];
+  const adjs = (adj.data ?? []) as { amount_rmb: unknown }[];
+  if (trs.length >= ROW_CAP || adjs.length >= ROW_CAP) return null;
+  const after = trs.filter((x) => x.is_active !== false).reduce((a, x) => a + num(x.leftover_rmb), 0)
+    + adjs.reduce((a, x) => a + num(x.amount_rmb), 0);
+  const before = after - (t.is_active === false ? 0 : num(t.leftover_rmb));
+  return { transfer_id: id, before_rmb: +before.toFixed(2), after_rmb: +after.toFixed(2) };
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const client = supabaseFromRequest(request);
   const { data: { user } } = await client.auth.getUser();
@@ -36,6 +65,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data, error } = await client.rpc("china_balance_current");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ?transfer=<id> → แถมยอดก่อน/หลังรายการโอนนั้น (ใบสรุปรอบจ่ายจากยอดคงเหลือ)
+  const transferId = request.nextUrl.searchParams.get("transfer") ?? "";
+  const as_of = UUID_RE.test(transferId) ? await balanceAsOfTransfer(transferId) : null;
 
   // ประวัติล่าสุด (อ่านผ่าน service role — ตารางถูกล็อก RLS)
   const { data: hist } = await supabaseAdmin()
@@ -45,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .limit(20);
 
   const bal = (data ?? { rmb: 0, thb: 0 }) as { rmb: number; thb: number };
-  return NextResponse.json({ ...bal, adjustments: hist ?? [], error: null });
+  return NextResponse.json({ ...bal, adjustments: hist ?? [], as_of, error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

@@ -124,6 +124,26 @@ const txChinaRmb = (t: Record<string, unknown>) => num(t.selectedRmb) || (Array.
   ? (t.lines as Record<string, unknown>[]).filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_rmb), 0) : 0);
 // รอบที่จ่ายจากยอดคงเหลือจีนล้วน (โอนจริง ฿0) → ไม่ใช้เรท · ใบสรุปไม่โชว์แถว คงเหลือ/เรท/เป็นเงินจีน/เข้าบัญชีจีน
 const isBalanceOnly = (t: Record<string, unknown>) => num(t.transferred) <= 0 && txChinaRmb(t) > 0;
+// ยอดคงเหลือสำหรับใบสรุป — รอบจ่ายจากยอดคงเหลือ: ขอยอด "ณ ตอนบันทึกใบนั้น" (ก่อน/หลังจ่าย) ไม่ใช่ยอดวันนี้
+type ReceiptBalance = { rmb: number; beforeRmb: number | null; afterRmb: number | null };
+async function fetchReceiptBalance(t: Record<string, unknown>): Promise<ReceiptBalance> {
+  const id = isBalanceOnly(t) && t.transfer_id ? String(t.transfer_id) : "";
+  const j = await apiFetch(`/api/china-pay/balance${id ? `?transfer=${encodeURIComponent(id)}` : ""}`).then(r => r.json()).catch(() => ({}));
+  const ao = (j?.as_of ?? null) as Record<string, unknown> | null;
+  return { rmb: num(j?.rmb), beforeRmb: ao ? num(ao.before_rmb) : null, afterRmb: ao ? num(ao.after_rmb) : null };
+}
+// แถวใบสรุปรอบจ่ายจากยอดคงเหลือ: ตั้งต้น − บิลจีน = หลังจ่าย (ใช้ร่วม ใบในแอป / รูป / ข้อความ LINE)
+const BALANCE_ONLY_TAG = "จ่ายจากยอดคงเหลือ · ไม่มีโอนเงินไทย";
+function balanceOnlyRows(t: Record<string, unknown>, bal: ReceiptBalance | null): { l: string; r: string; tone: "start" | "minus" | "end" }[] {
+  const cnRmb = +txChinaRmb(t).toFixed(2);
+  const n = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]).filter(l => l.kind === "china").length : 0;
+  const yuan = (v: number | null | undefined) => v === null || v === undefined ? "—" : "¥" + fmt(+v.toFixed(2));
+  return [
+    { l: "ยอดคงเหลือตั้งต้น", r: yuan(bal?.beforeRmb), tone: "start" },
+    { l: `หัก บิลจีน${n ? ` (${n} บิล)` : ""}`, r: "−¥" + fmt(cnRmb), tone: "minus" },
+    { l: "ยอดคงเหลือหลังจ่าย", r: yuan(bal?.afterRmb), tone: "end" },
+  ];
+}
 // วันที่ "วันนี้" อิงเวลาเครื่อง (ไทย) — ห้ามใช้ toISOString (UTC) เพราะช่วงเช้าไทยจะกลายเป็นเมื่อวาน
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
@@ -2861,26 +2881,28 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
   // ดึงข้อมูลเพิ่ม (ยอดคงเหลือ + ค่าโอนบิลจีน + วันที่บิล CTW) ให้ข้อความครบเหมือนใบสรุป
-  let balanceRmb = 0; const feeByBill: Record<string, number> = {}; const ctwDateByBill: Record<string, string> = {};
+  let balanceRmb = 0; let recBal: ReceiptBalance | null = null; const feeByBill: Record<string, number> = {}; const ctwDateByBill: Record<string, string> = {};
   try {
     const [bal, cb, cbw] = await Promise.all([
-      apiFetch("/api/china-pay/balance").then(r => r.json()).catch(() => ({ rmb: 0 })),
+      fetchReceiptBalance(t),
       apiFetch("/api/master-v2/china-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch("/api/master-v2/ctw-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
     ]);
-    balanceRmb = num(bal.rmb);
+    balanceRmb = bal.rmb; recBal = bal;
     (cb.data ?? []).forEach((b: Record<string, unknown>) => { feeByBill[String(b.id)] = num(b.fee_rmb); });
     (cbw.data ?? []).forEach((b: Record<string, unknown>) => { ctwDateByBill[String(b.id)] = String(b.doc_date ?? ""); });
   } catch { /* best-effort */ }
   const bd = t.breakdown as Record<string, unknown> | undefined;
   let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
   if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
-  text += `โอนจริง: ${fmtTransferred(t.transferred)}`;
   const balOnly = isBalanceOnly(t);
-  if (balOnly) {   // จ่ายจากยอดคงเหลือล้วน — ไม่มีเรท/การซื้อหยวน
-    text += `\nหัก ยอดคงเหลือจีน: ¥${fmt(+txChinaRmb(t).toFixed(2))}`;
-    text += `\nรวมยอด (บิลจีน): ¥${fmt(+txChinaRmb(t).toFixed(2))}`;
-  } else if (bd) {
+  if (balOnly) {   // จ่ายจากยอดคงเหลือล้วน — ตั้งต้น − บิลจีน = หลังจ่าย (ยอด ณ ตอนบันทึก) · ไม่มีเรท
+    text += BALANCE_ONLY_TAG;
+    for (const r of balanceOnlyRows(t, recBal)) text += `\n${r.l}: ${r.r}`;
+  } else {
+    text += `โอนจริง: ${fmtTransferred(t.transferred)}`;
+  }
+  if (!balOnly && bd) {
     if (num(bd.thb) > 0) text += `\nหัก ค่าส่ง/VAT: −฿${fmt(num(bd.thb))}`;
     text += `\nคงเหลือ: ฿${fmt(num(bd.chinaRemainThb))}`;
     text += `\nเรท (ชั้น ${String(bd.tier ?? "")}): ${fmt(num(t.rate))}`;
@@ -2888,8 +2910,10 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
     if (num(bd.shortfallRmb) > 0) text += `\nหัก ยอดคงเหลือจีน: ¥${fmt(+num(bd.shortfallRmb).toFixed(2))}`;
     text += `\nรวมยอด (บิลจีน): ¥${fmt(num(t.selectedRmb))}`;
   }
-  if (!balOnly) text += `\nเข้าบัญชีจีน (ส่วนต่าง): ¥${fmt(+num(t.chinaInRmb).toFixed(2))}`;
-  text += `\nยอดคงเหลือบัญชีจีน: ¥${fmt(+balanceRmb.toFixed(2))}`;
+  if (!balOnly) {
+    text += `\nเข้าบัญชีจีน (ส่วนต่าง): ¥${fmt(+num(t.chinaInRmb).toFixed(2))}`;
+    text += `\nยอดคงเหลือบัญชีจีน: ¥${fmt(+balanceRmb.toFixed(2))}`;
+  }
   if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
     const sp = (l.sup ?? {}) as Record<string, unknown>;
     const fee = feeByBill[String(l.bill_id)] ?? 0; const base = num(l.paid_rmb) - fee;
@@ -3384,7 +3408,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
     let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
     if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
-    text += `โอนจริง: ${fmtTransferred(t.transferred)}`;
+    text += isBalanceOnly(t) ? `จ่ายจากยอดคงเหลือจีน: ¥${fmt(+txChinaRmb(t).toFixed(2))} (ไม่มีโอนเงินไทย)` : `โอนจริง: ${fmtTransferred(t.transferred)}`;
     if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
       const sp = (l.sup ?? {}) as Record<string, unknown>;
       const acc = sp.account_number ? `\n   บัญชี ${String(sp.account_number)}` : "";
@@ -3909,7 +3933,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-3xl mb-1">✅</div>
             <div className="text-lg font-semibold text-slate-800">โอนสำเร็จ</div>
-            <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · โอนจริง {fmtTransferred(savedTransfer.transferred)}</div>
+            <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · {isBalanceOnly(savedTransfer) ? `จ่ายจากยอดคงเหลือ ¥${fmt(+txChinaRmb(savedTransfer).toFixed(2))}` : `โอนจริง ${fmtTransferred(savedTransfer.transferred)}`}</div>
             <div className="mt-4 space-y-2">
               <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedTransfer(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
@@ -4118,19 +4142,19 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
   const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
   // ดึงข้อมูลเพิ่ม: ยอดคงเหลือบัญชีจีน + ค่าโอน(fee)บิลจีน + วันที่บิล CTW (ใช้ได้ทั้งรายการเก่า/ใหม่)
-  const [extras, setExtras] = useState<{ balanceRmb: number; feeByBill: Record<string, number>; ctwDateByBill: Record<string, string> } | null>(null);
+  const [extras, setExtras] = useState<{ balanceRmb: number; bal: ReceiptBalance; feeByBill: Record<string, number>; ctwDateByBill: Record<string, string> } | null>(null);
   useEffect(() => {
     let cancel = false;
     (async () => {
       const [bal, cb, cbw] = await Promise.all([
-        apiFetch("/api/china-pay/balance").then(r => r.json()).catch(() => ({ rmb: 0 })),
+        fetchReceiptBalance(t),   // รอบจ่ายจากยอดคงเหลือ → ได้ยอดก่อน/หลัง ณ ตอนบันทึกใบนี้ด้วย
         apiFetch("/api/master-v2/china-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
         apiFetch("/api/master-v2/ctw-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
       ]);
       if (cancel) return;
       const feeByBill: Record<string, number> = {}; (cb.data ?? []).forEach((b: Record<string, unknown>) => { feeByBill[String(b.id)] = num(b.fee_rmb); });
       const ctwDateByBill: Record<string, string> = {}; (cbw.data ?? []).forEach((b: Record<string, unknown>) => { ctwDateByBill[String(b.id)] = String(b.doc_date ?? ""); });
-      setExtras({ balanceRmb: num(bal.rmb), feeByBill, ctwDateByBill });
+      setExtras({ balanceRmb: bal.rmb, bal, feeByBill, ctwDateByBill });
     })();
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4140,15 +4164,18 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
   // ---- แถวข้อมูลของใบสรุป (ใช้ร่วมกันทั้ง "รวมบิล" และ "แยกบิล") ----
   const summaryRows = (): ReceiptRow[] => {
     const bd = t.breakdown as Record<string, unknown> | undefined;
-    const balOnly = isBalanceOnly(t);   // จ่ายจากยอดคงเหลือล้วน → ไม่มีแถวเรท/คงเหลือ/เป็นเงินจีน/เข้าบัญชีจีน
-    const cnRmb = +txChinaRmb(t).toFixed(2);
+    const refRow = t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as ReceiptRow] : [];
+    // จ่ายจากยอดคงเหลือล้วน → ตั้งต้น − บิลจีน = หลังจ่าย (ยอด ณ ตอนบันทึกใบนี้) · ไม่มีแถวเรท/โอนจริง
+    if (isBalanceOnly(t)) return [
+      ...refRow,
+      { t: "sub", l: BALANCE_ONLY_TAG },
+      ...balanceOnlyRows(t, extras?.bal ?? null).map(r => ({ t: "kv", l: r.l, r: r.r,
+        bold: r.tone !== "minus", color: r.tone === "minus" ? "#ea580c" : r.tone === "end" ? "#059669" : undefined } as ReceiptRow)),
+    ];
     return [
-      ...(t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as ReceiptRow] : []),
+      ...refRow,
       { t: "kv", l: "โอนจริง", r: fmtTransferred(t.transferred), bold: true },
-      ...(balOnly ? [
-        { t: "kv", l: "หัก ยอดคงเหลือจีน", r: "¥" + fmt(cnRmb), color: "#ea580c" } as ReceiptRow,
-        { t: "kv", l: "รวมยอด (บิลจีน)", r: "¥" + fmt(cnRmb), bold: true } as ReceiptRow,
-      ] : bd ? [
+      ...(bd ? [
         ...(num(bd.thb) > 0 ? [{ t: "kv", l: "หัก ค่าส่ง/VAT", r: "−฿" + fmt(num(bd.thb)), color: "#e11d48" } as ReceiptRow] : []),
         { t: "kv", l: "คงเหลือ", r: "฿" + fmt(num(bd.chinaRemainThb)) } as ReceiptRow,
         { t: "kv", l: `เรทที่ใช้ (ชั้น ${String(bd.tier ?? "")})`, r: fmt(num(t.rate)) } as ReceiptRow,
@@ -4156,7 +4183,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
         ...(num(bd.shortfallRmb) > 0 ? [{ t: "kv", l: "หัก ยอดคงเหลือจีน", r: "¥" + fmt(+num(bd.shortfallRmb).toFixed(2)), color: "#ea580c" } as ReceiptRow] : []),
         { t: "kv", l: "รวมยอด (บิลจีน)", r: "¥" + fmt(num(t.selectedRmb)), bold: true } as ReceiptRow,
       ] : [{ t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) } as ReceiptRow]),
-      ...(balOnly ? [] : [{ t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(+num(t.chinaInRmb).toFixed(2)), color: "#059669" } as ReceiptRow]),
+      { t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(+num(t.chinaInRmb).toFixed(2)), color: "#059669" },
       ...(extras ? [{ t: "kv", l: "ยอดคงเหลือบัญชีจีน", r: "¥" + fmt(+extras.balanceRmb.toFixed(2)), bold: true, color: "#059669" } as ReceiptRow] : []),
     ];
   };
@@ -4276,7 +4303,9 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
       const base = String(cfg.share_base ?? "").replace(/\/$/, "");
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
-      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\n${isBalanceOnly(t) ? "" : `เรท: ${fmt(num(t.rate))} · `}โอนจริง ${fmtTransferred(t.transferred)}`;
+      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\n${isBalanceOnly(t)
+        ? balanceOnlyRows(t, extras?.bal ?? null).map(r => `${r.l} ${r.r}`).join(" · ")
+        : `เรท: ${fmt(num(t.rate))} · โอนจริง ${fmtTransferred(t.transferred)}`}`;
       if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label || "—")} ¥${fmt(num(l.paid_rmb))}`).join("\n");
       if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label || "—")}${l.doc_number ? ` (${String(l.doc_number)})` : ""} ฿${fmt(num(l.paid_thb))}`).join("\n");
       const toPublic = async (du: string, name: string) => {
@@ -4330,15 +4359,20 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
           </div>
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
           {/* แถวค่าเงิน — ค่าชิดขวาเสมอ (ml-auto text-right) + ห้ามตัดบรรทัด (กันตอนพิมพ์) */}
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">{fmtTransferred(t.transferred)}</span></div>
+          {!isBalanceOnly(t) && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">{fmtTransferred(t.transferred)}</span></div>}
           {(() => { const bd = t.breakdown as Record<string, unknown> | undefined;
-            // จ่ายจากยอดคงเหลือล้วน → ไม่มีเรท: โชว์แค่ หักยอดคงเหลือ + รวมยอด
-            if (isBalanceOnly(t)) { const cnRmb = +txChinaRmb(t).toFixed(2); return (
+            // จ่ายจากยอดคงเหลือล้วน → ตั้งต้น − บิลจีน = หลังจ่าย (ยอด ณ ตอนบันทึกใบนี้) · ไม่มีเรท/โอนจริง
+            if (isBalanceOnly(t)) return (
               <>
-                <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">หัก ยอดคงเหลือจีน</span><span className="text-orange-600 whitespace-nowrap ml-auto text-right">¥{fmt(cnRmb)}</span></div>
-                <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">รวมยอด (บิลจีน)</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">¥{fmt(cnRmb)}</span></div>
+                <div className="text-xs font-medium text-emerald-700 mb-0.5">{BALANCE_ONLY_TAG}</div>
+                {balanceOnlyRows(t, extras?.bal ?? null).map(r => (
+                  <div key={r.l} className={`flex justify-between gap-3 ${r.tone === "end" ? "border-t border-slate-100 pt-1 mt-1" : ""}`}>
+                    <span className="text-slate-500 flex-shrink-0">{r.l}</span>
+                    <span className={`whitespace-nowrap ml-auto text-right ${r.tone === "minus" ? "text-orange-600" : r.tone === "end" ? "font-bold text-emerald-700" : "font-bold text-slate-900"}`}>{r.r}</span>
+                  </div>
+                ))}
               </>
-            ); }
+            );
             if (!bd) return <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">{fmt(num(t.rate))}</span></div>; return (
             <>
               {num(bd.thb) > 0 && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">หัก ค่าส่ง/VAT</span><span className="text-rose-600 whitespace-nowrap ml-auto text-right">−฿{fmt(num(bd.thb))}</span></div>}
@@ -4350,7 +4384,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
             </>
           ); })()}
           {!isBalanceOnly(t) && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+num(t.chinaInRmb).toFixed(2))}</span></div>}
-          {extras && <div className="flex justify-between gap-3 border-t border-slate-100 pt-1 mt-1"><span className="text-slate-500 flex-shrink-0">ยอดคงเหลือบัญชีจีน</span><span className="font-bold text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+extras.balanceRmb.toFixed(2))}</span></div>}
+          {extras && !isBalanceOnly(t) && <div className="flex justify-between gap-3 border-t border-slate-100 pt-1 mt-1"><span className="text-slate-500 flex-shrink-0">ยอดคงเหลือบัญชีจีน</span><span className="font-bold text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+extras.balanceRmb.toFixed(2))}</span></div>}
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>
