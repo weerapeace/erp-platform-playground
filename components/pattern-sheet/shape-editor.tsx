@@ -170,7 +170,9 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange }: {
+  /** แจ้งเมื่อเปลี่ยนเครื่องมือ (บทเรียนนับว่าเปิดไม้บรรทัดแล้ว ฯลฯ) */
+  onToolChange?: (tool: Tool) => void;
   /** หน่วยที่แสดง (มม./ซม./นิ้ว · Bag CAD รอบ A) — ข้อมูลยังเป็น ซม. เสมอ · ไม่ส่ง = ซม. ทศนิยม 1 ตำแหน่งแบบเดิม (ใบงานออกแบบ) */
   unit?: LengthUnit;
   /** ค่าคลาดของตะเข็บ (ซม.) ที่ใช้ตัดสินสี "ยาวไม่เท่า" — ไม่ส่ง = SEAM_TOL เดิม (1 มม.) */
@@ -180,7 +182,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   /** ไฮไลต์จุดที่มีปัญหาจากแผงตรวจแบบ (ขอบ หรือทั้งชิ้นถ้าไม่ระบุขอบ) */
   flagged?: { pid: string; edges?: number[] }[] | null;
   /** สั่งไปที่ชิ้น/ขอบจากภายนอก (แผงตรวจแบบ) — nonce เปลี่ยน = ไป 1 ครั้ง · ระบุ edge + มีตะเข็บ = เปิดค่าของขอบนั้น (เครื่องมือแก้ตะเข็บ) */
-  focusEdge?: { nonce: number; pid: string; edge?: number } | null;
+  focusEdge?: { nonce: number; pid: string; edge?: number; /** เปิดการ์ดของตะเข็บนี้ (เครื่องมือแก้ตะเข็บ) */ seam?: string } | null;
   /** เปิดงาน "ชิ้นคู่ผูกกัน" (lib/pattern-link): ชิ้นตามเปลี่ยนรูปตามชิ้นต้นแบบ + ส่วนผูก/เลิกผูกในแผงชิ้น (แอปสตูดิโอแพทเทิร์น · ใบงานออกแบบไม่ส่ง = ไม่มี) */
   pieceLinks?: boolean;
   /** เปิดงาน "เส้นในชิ้น": เครื่องมือวาดเส้นใน (L) + รายการเส้นในของชิ้นในแผงขวา + เย็บกับเส้นในได้ (แอปสตูดิโอแพทเทิร์น · ใบงานออกแบบไม่ส่ง = ไม่มี) */
@@ -190,7 +192,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   /** ชิ้นบนกระดานแบบสด (ตอนเปิด + ทุกครั้งที่เปลี่ยน รวมระหว่างลาก) — ไว้วาดภาพ 3D ตาม */
   onLive?: (pieces: ResultPiece[]) => void;
   /** เพิ่มชิ้นเข้ากระดานจากภายนอก (เช่น ตัวสร้างจากแม่แบบทรง) — nonce เปลี่ยน = เพิ่ม 1 ครั้ง · ชิ้นที่มี at วางเป็นกลุ่มต่อจากขวาสุดของกระดาน · ย้อนกลับได้ */
-  inject?: { nonce: number; pieces: EditorPiece[]; /** ตั้ง "ขอบเปิดตั้งใจ" ให้ขอบของชิ้นที่มีอยู่ (จากแผงตรวจแบบ) */ edgeOpen?: { pid: string; edges: number[] }[]; /** at ของชิ้น = ตำแหน่งบนกระดานตรง ๆ (ไม่งั้น x นับต่อจากขวาสุดของชิ้นเดิม) */ abs?: boolean; /** เพิ่มเส้นในให้ชิ้นที่มีอยู่แล้ว (ย้อนกลับได้พร้อมชิ้นใหม่ในครั้งเดียว) */ inner?: { pid: string; lines: InnerLine[] }[] } | null;
+  inject?: { nonce: number; pieces: EditorPiece[]; /** แก้ชิ้นที่มีอยู่ (รูป / เผื่อเย็บ) — ย้อนได้ */ patch?: { pid: string; shape?: Shape; allow?: number; allowEdges?: number[] | null }[]; /** แทนชุดตะเข็บทั้งชุด — ย้อนได้ */ seams?: Seam[]; /** ตั้ง "ขอบเปิดตั้งใจ" ให้ขอบของชิ้นที่มีอยู่ (จากแผงตรวจแบบ) */ edgeOpen?: { pid: string; edges: number[] }[]; /** at ของชิ้น = ตำแหน่งบนกระดานตรง ๆ (ไม่งั้น x นับต่อจากขวาสุดของชิ้นเดิม) */ abs?: boolean; /** เพิ่มเส้นในให้ชิ้นที่มีอยู่แล้ว (ย้อนกลับได้พร้อมชิ้นใหม่ในครั้งเดียว) */ inner?: { pid: string; lines: InnerLine[] }[] } | null;
   /** ชิ้นที่เลือกเปลี่ยน → ส่ง pid กลับ (null = ไม่ได้เลือก) — ใช้ให้ภาพ 3D สว่างตาม */
   onSelChange?: (pid: string | null) => void;
   /** สั่งเลือกชิ้นจากภายนอก (เช่น คลิกชิ้นในภาพ 3D) — nonce เปลี่ยน = เลือก 1 ครั้ง */
@@ -264,8 +266,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [notchMode, setNotchMode] = useState(false);
   const [edgeHover, setEdgeHover] = useState<{ id: string; i: number } | null>(null);   // ขอบที่ชี้อยู่ในรายการเผื่อรายขอบ (ไฮไลต์บนกระดาน)
   const [edgeOpen, setEdgeOpen] = useState(false);
-  const [roundR, setRoundR] = useState("1");
-  const [offD, setOffD] = useState("1");
+  const [roundR, setRoundR] = useState(() => (unitProp === "mm" ? "10" : unitProp === "in" ? "0.4" : "1"));   // ในหน่วยที่แสดง (รับ "10 mm" ได้)
+  const [offD, setOffD] = useState(() => (unitProp === "mm" ? "10" : unitProp === "in" ? "0.4" : "1"));
   const [tool, setTool] = useState<Tool>(initialTool ?? "rect");
   // ── เย็บ (ตะเข็บอยู่กับหน้าที่เรียก · กระดานแค่วาดและส่งการแก้กลับ) ──
   const [sewA, setSewA] = useState<SeamSide | null>(null);        // ด้านแรกที่เลือกไว้ รอคลิกขอบคู่
@@ -463,7 +465,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   useEffect(() => {
     if (!inject || injectSeen.current === inject.nonce) return;
     injectSeen.current = inject.nonce;
-    if (readonly || (!inject.pieces.length && !inject.inner?.length && !inject.edgeOpen?.length)) return;
+    if (readonly || (!inject.pieces.length && !inject.inner?.length && !inject.edgeOpen?.length && !inject.patch?.length && !inject.seams)) return;
     const x0 = inject.abs ? 0 : rightEdge();
     let x = x0;
     const list: Piece[] = inject.pieces.map((p) => {
@@ -481,13 +483,21 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       const E = pieceEdges(q.shape), cur0 = cleanEdgeMeta(q.shape, q.edgeMeta) ?? E.map(() => ({}) as EdgeMeta);
       return { ...q, edgeMeta: cur0.map((m, i) => (e.edges.includes(i) ? { ...m, open: true } : m)) };
     }) : base;
-    if (opened.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return; }
-    const next = [...opened, ...list];
+    const patched = inject.patch?.length ? opened.map((q) => {
+      const x = (inject.patch ?? []).find((y) => y.pid === q.pid);
+      if (!x) return q;
+      return { ...q, ...(x.shape ? { shape: x.shape, ...(pieceEdges(x.shape).length !== pieceEdges(q.shape).length ? { allowEdges: null, foldEdges: null, edgeMeta: null } : {}) } : {}), ...(x.allow != null ? { allow: cleanAllow(x.allow) } : {}), ...("allowEdges" in x ? { allowEdges: x.allowEdges ?? null } : {}) };
+    }) : opened;
+    if (patched.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return; }
+    const next = [...patched, ...list];
     commit(next);
+    if (inject.seams && onSeamsChange) emitSeams(inject.seams);
     if (list[0]) { setSel(list[0].id); setMulti(new Set()); }
     if (list.length || inject.inner?.length) { changeTool("move"); fitView(next); }
   }, [inject]);   // eslint-disable-line react-hooks/exhaustive-deps
   const onSelRef = useRef(onSelChange); onSelRef.current = onSelChange;
+  const onToolRef = useRef(onToolChange); onToolRef.current = onToolChange;
+  useEffect(() => { onToolRef.current?.(tool); }, [tool]);
   const selPid = pieces.find((p) => p.id === sel)?.pid ?? null;
   useEffect(() => { onSelRef.current?.(selPid); }, [selPid]);
   useEffect(() => {
@@ -495,7 +505,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const hit = selectPid.pid ? piecesRef.current.find((p) => p.pid === selectPid.pid) : undefined;
     if (hit && lockPids?.has(hit.pid)) return;   // ชิ้นที่ล็อก = เลือกจากภาพ 3D ไม่ได้ (ปลดล็อกที่รายการชิ้นก่อน)
     setMulti(new Set()); setEditId(null); setSel(hit ? hit.id : null);
-    if (hit) setTool("move");
+    if (hit) { setTool("move"); if (!panelOpen) setPanelOpen(true); }
   }, [selectPid]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ล็อกชิ้นที่เลือกอยู่ = เลิกเลือก (กันแก้ด้วยแป้นพิมพ์/แผงขวาต่อ)
   useEffect(() => {
@@ -514,7 +524,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (!p) return;
     const b = pieceGeometry(p).cutBox, cw = sizeRef.current.cw, ch = sizeRef.current.ch;
     setView((v) => { const vh = cw > 0 ? (v.w * ch) / cw : v.w; return { ...v, x: b.x + b.w / 2 - v.w / 2, y: b.y + b.h / 2 - vh / 2 }; });
-    if (focusEdge.edge != null && seams) { changeTool("sewedit"); setEdgeSel({ pid: p.pid, i: focusEdge.edge, n: pieceEdges(p.shape).length }); setSewSel(null); }
+    if (focusEdge.seam && seams?.some((x) => x.id === focusEdge.seam)) { changeTool("sewedit"); setEdgeSel(null); setSewSel(focusEdge.seam); }
+    else if (focusEdge.edge != null && seams) { changeTool("sewedit"); setEdgeSel({ pid: p.pid, i: focusEdge.edge, n: pieceEdges(p.shape).length }); setSewSel(null); }
     else if (!lockPids?.has(p.pid)) { if (sewTool) changeTool("move"); setSel(p.id); setMulti(new Set()); setEditId(null); }
     if (!panelOpen) setPanelOpen(true);
   }, [focusEdge]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -1024,8 +1035,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     commit(piecesRef.current.map((p) => moved.get(p.id) ?? p));
   };
   const applyRound = () => {
-    const r = Number(roundR);
-    if (!selPiece || !(r > 0)) { setMsg({ tone: "err", text: t("ใส่รัศมีมุมโค้ง เช่น 1 ซม.", "Enter a corner radius, e.g. 1 cm") }); return; }
+    const pr = parseLength(roundR, unit), r = pr.ok ? pr.cm : NaN;
+    if (!selPiece || !(r > 0)) { setMsg({ tone: "err", text: t(`ใส่รัศมีมุมโค้ง เช่น ${fmtL(1)}`, `Enter a corner radius, e.g. ${fmtL(1)}`) }); return; }
     if (selPiece.shape.k === "ellipse") { setMsg({ tone: "err", text: t("วงกลมไม่มีมุมให้ลบ", "Circles have no corners") }); return; }
     patchPiece(selPiece.id, (p) => ({ ...p, shape: roundCorners(p.shape, r) }));
   };
@@ -1058,11 +1069,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (addPieces([np])) setTool("move");
   };
   const offsetCopy = (sign: 1 | -1) => {
-    const d = Number(offD);
-    if (!selPiece || !(d > 0)) { setMsg({ tone: "err", text: t("ใส่ระยะ เช่น 1 ซม.", "Enter a distance, e.g. 1 cm") }); return; }
+    const pd = parseLength(offD, unit), d = pd.ok ? pd.cm : NaN;
+    if (!selPiece || !(d > 0)) { setMsg({ tone: "err", text: t(`ใส่ระยะ เช่น ${fmtL(1)}`, `Enter a distance, e.g. ${fmtL(1)}`) }); return; }
     const sh = offsetShape(selPiece.shape, sign * d);
     if (!sh) { setMsg({ tone: "err", text: t("ชิ้นเล็กเกินจะหดเข้าเท่านี้", "The piece is too small to shrink that much") }); return; }
-    const label = sign < 0 ? t(`ด้านใน ${d} ซม.`, `inner ${d} cm`) : t(`ด้านนอก ${d} ซม.`, `outer ${d} cm`);
+    const label = sign < 0 ? t(`ด้านใน ${fmtL(d)}`, `inner ${fmtL(d)}`) : t(`ด้านนอก ${fmtL(d)}`, `outer ${fmtL(d)}`);
     const np: Piece = { id: newId(), shape: sh, holes: [], count: selPiece.count, allow: 0, name: `${selPiece.name || `P${pieces.indexOf(selPiece) + 1}`} (${label})`, mats: [], pid: newPid(), src: [] };
     if (addPieces([np])) { setTool("move"); setMsg({ tone: "ok", text: t("สร้างชิ้นเส้นขนานแล้ว (ซ้อนอยู่ตำแหน่งเดิม · ยังไม่เลือกวัสดุ เช่น ผ้ากาว/ซับใน)", "Offset piece created (on top of the original · pick a material, e.g. interfacing)") }); }
   };
@@ -1657,7 +1668,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             </div>
             {canSew && (
               <div className="flex gap-1.5 border-t border-slate-100 pt-2">
-                <button type="button" onClick={() => reverseSeam(x.id)} aria-pressed={!!x.rev} className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 ${x.rev ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white hover:bg-slate-50"}`}><Icon value="i:arrows-exchange" className="text-[14px]" />{t("กลับทิศ", "Reverse")}</button>
+                <button type="button" data-guide="seam-rev" onClick={() => reverseSeam(x.id)} aria-pressed={!!x.rev} className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 ${x.rev ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white hover:bg-slate-50"}`}><Icon value="i:arrows-exchange" className="text-[14px]" />{t("กลับทิศ", "Reverse")}</button>
                 <button type="button" onClick={() => removeSeam(x.id)} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-red-600 hover:bg-red-50"><Icon value="i:trash" className="text-[14px]" />{t("ลบตะเข็บ", "Delete seam")}</button>
               </div>
             )}
@@ -1799,7 +1810,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const fbar = "pointer-events-auto flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm";
   const ibCls = (on: boolean) => `relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded-lg px-1.5 text-xs disabled:opacity-35 ${on ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"}`;
   const toolIcon = (tl: Tool, icon: string, label: string, key: string) => (
-    <button key={tl} type="button" onClick={() => changeTool(tl)} title={`${label} (${key})`} aria-label={label} aria-pressed={tool === tl} className={ibCls(tool === tl)}>
+    <button key={tl} type="button" data-tool={tl} onClick={() => changeTool(tl)} title={`${label} (${key})`} aria-label={label} aria-pressed={tool === tl} className={ibCls(tool === tl)}>
       <Icon value={`i:${icon}`} className="text-[16px]" />
     </button>
   );
@@ -2283,7 +2294,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 );
               })()}
 
-              <div>
+              <div data-guide="allow">
                 <div className="mb-1 font-medium text-slate-600">{t(`เผื่อพับ / เผื่อเย็บ (${uL})`, `Fold / seam allowance (${uL})`)}</div>
                 <div className="flex flex-wrap items-center gap-1">
                   {ALLOW_STEPS.map((a) => <button key={a} type="button" onClick={() => setAllow(a)} className={`h-7 rounded-md border px-2 ${selPiece.allow === a ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{a}</button>)}
@@ -2329,7 +2340,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               <div>
                 <div className="mb-1 font-medium text-slate-600">{t("ขนาดสำเร็จ (เส้นประ)", "Finished size (dashed)")}</div>
                 {selPiece.link && <div className="mb-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800" data-link-note>{t(`ชิ้นนี้ผูกรูปกับ ${pieceNo(selPiece.link.to)} — ขนาด รูปทรง หมุน ย่อขยาย ต้องแก้ที่ชิ้นต้นแบบ (แก้ที่ชิ้นนี้ค่าจะกลับตามต้นแบบ) · ถ้าต้องการให้ต่างกัน กด เลิกผูก ที่หัวข้อ ชิ้นคู่ผูกกัน`, `This piece follows ${pieceNo(selPiece.link.to)} — change size, shape, rotation or scale on the master piece (changes here snap back) · to make it different, press Unlink under Linked pieces`)}</div>}
-                <div className="grid grid-cols-[auto_auto_auto_auto] items-center gap-x-2 gap-y-1.5 text-slate-500">
+                <div data-guide="size" className="grid grid-cols-[auto_auto_auto_auto] items-center gap-x-2 gap-y-1.5 text-slate-500">
                   <span>{t("กว้าง", "W")}</span><NumField len value={selGeo.finished.w} min={0.1} label={t(`กว้าง ${uL}`, `Width ${uL}`)} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ w: v }, `w-${selPiece.id}`)} className="w-16" />
                   <span>{t("สูง", "H")}</span><NumField len value={selGeo.finished.h} min={0.1} label={t(`สูง ${uL}`, `Height ${uL}`)} disabled={!!selPiece.link} onCommit={(v) => setSelBox({ h: v }, `h-${selPiece.id}`)} className="w-16" />
                   <span>X</span><NumField len value={selGeo.finished.x} label="X" onCommit={(v) => setSelBox({ x: v }, `x-${selPiece.id}`)} className="w-16" />
@@ -2378,14 +2389,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 </div>
                 {/* เครื่องมือ vector ของชิ้นนี้ */}
                 <div className="mt-2 space-y-1.5 rounded-md border border-slate-200 bg-white p-2 text-slate-500">
-                  <div className="flex flex-wrap items-center gap-1">
+                  <div data-guide="round" className="flex flex-wrap items-center gap-1">
                     <span className="w-16">{t("มุมโค้ง", "Round")}</span>
-                    <input type="number" step={0.1} min={0.1} value={roundR} onChange={(e) => setRoundR(e.target.value)} aria-label={t("รัศมีมุมโค้ง ซม.", "Corner radius cm")} className="h-7 w-14 rounded border border-slate-200 px-1 text-right" />{t("ซม.", "cm")}
+                    <input type="text" inputMode="decimal" value={roundR} onChange={(e) => setRoundR(e.target.value)} aria-label={t(`รัศมีมุมโค้ง ${uL}`, `Corner radius ${uL}`)} title={t("พิมพ์ได้ เช่น 10 mm · 1 cm", "Type e.g. 10 mm · 1 cm")} className="h-7 w-14 rounded border border-slate-200 px-1 text-right" />{uL}
                     <button type="button" onClick={applyRound} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ลบมุมทุกมุมให้มน", "Round every corner")}>{t("ลบมุม", "Apply")}</button>
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <span className="w-16">{t("เส้นขนาน", "Offset")}</span>
-                    <input type="number" step={0.1} min={0.1} value={offD} onChange={(e) => setOffD(e.target.value)} aria-label={t("ระยะเส้นขนาน ซม.", "Offset distance cm")} className="h-7 w-14 rounded border border-slate-200 px-1 text-right" />{t("ซม.", "cm")}
+                    <input type="text" inputMode="decimal" value={offD} onChange={(e) => setOffD(e.target.value)} aria-label={t(`ระยะเส้นขนาน ${uL}`, `Offset distance ${uL}`)} title={t("พิมพ์ได้ เช่น 10 mm · 1 cm", "Type e.g. 10 mm · 1 cm")} className="h-7 w-14 rounded border border-slate-200 px-1 text-right" />{uL}
                     <button type="button" onClick={() => offsetCopy(-1)} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ชิ้นใหม่เล็กลงรอบด้าน เช่น ผ้ากาว/ซับใน", "New smaller piece, e.g. interfacing")}>{t("ด้านใน", "Inner")}</button>
                     <button type="button" onClick={() => offsetCopy(1)} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ชิ้นใหม่ใหญ่ขึ้นรอบด้าน", "New larger piece")}>{t("ด้านนอก", "Outer")}</button>
                   </div>

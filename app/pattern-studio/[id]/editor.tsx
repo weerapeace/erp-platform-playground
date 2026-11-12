@@ -31,6 +31,8 @@ import type { CostingTarget } from "@/components/pattern-studio/send-costing-mod
 import { checkSeam, cleanSeams, type Seam } from "@/lib/pattern-seams";
 import { cleanSeamTol } from "@/lib/pattern-check";
 import type { SaveState } from "@/components/pattern-studio/preflight-modal";
+import { cleanLessonRef, type CopySource } from "@/components/pattern-studio/learn-panel";
+import { lessonById } from "@/lib/pattern-lessons";
 import { cleanAttaches, type Attach } from "@/lib/pattern-assembly";
 import { cleanTrims, openTrims, pruneTrims, type ProjectTrim } from "@/lib/pattern-trims";
 import { ParentSkuPicker, SkuPicker } from "@/components/pickers";
@@ -156,6 +158,15 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const rev = Number((template as { rev?: unknown } | null)?.rev) || null;
   const badSeams = useMemo(() => seams.filter((s) => { const c = checkSeam(shapes, s, seamTol).status; return c === "broken" || (c === "mismatch" && !s.ease); }).length, [seams, shapes, seamTol]);
   const saveState: SaveState = saving ? "saving" : saveErr ? "failed" : dirty ? "pending" : "saved";
+  // บทเรียน (รอบ C): แพทเทิร์นนี้เป็นแบบฝึก/สำเนาของบทไหน (template.lesson) · เริ่มบทใหม่ = คืนชิ้นตั้งต้น · สำเนาเพื่อเรียน = งานที่เปิดอยู่
+  const lessonRef = useMemo(() => cleanLessonRef((template as { lesson?: unknown } | null)?.lesson), [template]);
+  const resetLesson = () => {
+    const seed = lessonRef ? lessonById(lessonRef.id)?.seed?.() : null;
+    if (!seed) return;
+    setPieces(seed.pieces); piecesRef.current = seed.pieces; setSeams(seed.seams); setAttaches([]);
+    setTemplate((tp) => ({ ...(tp ?? {}), attach: [], view: { lock: [], hide: [] } })); setDirty(true); setBoardNonce((n) => n + 1);
+  };
+  const copySource = (): CopySource | null => (piecesRef.current.length ? { name: name.trim() || patternNo || "", pieces: piecesRef.current, seams, template } : null);
 
   // ข้อมูลล่าสุด (อ่านตอนบันทึก / เก็บสำเนา โดยไม่ต้องพึ่ง closure ของ render เก่า)
   const latest = useRef({ name, sku, status, basis, template, seams, attaches, trims });
@@ -313,7 +324,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
       <PatternStudio key={`board-${boardNonce}`} imageName={`${patternNo ?? ""} ${name}`.trim() || undefined} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
         sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff,
           tol: seamTol, onTolChange: canEdit ? (v) => { setTemplate((tp) => ({ ...(tp ?? {}), settings: { ...((tp?.settings as Record<string, unknown> | undefined) ?? {}), seamTol: v } })); setDirty(true); } : undefined,
-          view: pieceView, onViewChange: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), view: next })); setDirty(true); } : undefined }} pieceInfoFields matProps={matProps}
+          view: pieceView, onViewChange: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), view: next })); setDirty(true); } : undefined,
+          lesson: lessonRef, lessonName: `${patternNo ?? ""} ${name}`.trim(), onLessonReset: canEdit ? resetLesson : undefined, copySource: lessonRef ? undefined : copySource, canLearn: canEdit }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
         footerNote={<span className="text-slate-400">{canEdit ? t("บันทึกอัตโนมัติหลังหยุดแก้ 4 วินาที · Ctrl+Z ย้อนได้ทั้งชิ้นและตะเข็บ", "Saves automatically 4 seconds after you stop · Ctrl+Z undoes pieces and seams") : ""}</span>} />
 

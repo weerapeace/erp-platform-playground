@@ -13,6 +13,8 @@
  *     4) หน้าที่มีเครื่องมือเย็บ (ส่ง sew): ภาพ 3D สลับได้ 2 แบบ — "เย็บติดแล้ว" (lib/pattern-sewn · ค่าเริ่ม) / "ชิ้นแบน" · ลากตะเข็บบนกระดาน ภาพเปลี่ยนตามทันที
  *     6) Bag CAD รอบ A+B (2026-11-12 · หน้าที่ส่ง sew): หน่วยแสดง มม./ซม./นิ้ว (จำในเครื่อง) · รายการชิ้น ล็อก/ซ่อน/แยกดู ตามกลุ่มชั้น
  *        · แผง "ตรวจแบบ" (lib/pattern-check — กดแถวไปที่ชิ้น/ขอบ · ตั้งขอบเปิดตั้งใจได้จากแผง) · ป้ายระดับภาพ 3D (ดูชิ้น / ประกอบตามกติกา / ฟิสิกส์ทดลอง)
+ *     7) Bag CAD รอบ C (2026-11-12): เรียนไปทำไป — ปุ่ม "เรียน" (สารบัญ LessonCatalog) + การ์ดบทเรียนลอย LearnCard (learn-panel) · ตัวตรวจ lib/pattern-lessons อ่านชิ้นสด
+ *        · พาไปที่เครื่องมือ = ไฮไลต์ปุ่ม/ส่วนของแผงจริง (data-tool / data-guide) · ทำให้ดู = inject (add / patch / seams) ย้อนได้ · เหตุการณ์ที่ผู้ใช้ทำ (เลือกชิ้น / คลิก 3D / เปิดเครื่องมือ / เปิดแผง) นับในหน่วยความจำ
  *   จอกว้าง ≥ 1180px = กระดานซ้าย 3D ขวา · แคบกว่า = 3D อยู่ใต้กระดาน
  *   (ไม่ใช้ SplitPanes: ตัวนั้นขยายฝั่งที่ถูกคลิก — กระดานวาดต้องคลิกตลอด จะดันไปมาทุกครั้ง)
  *
@@ -37,6 +39,8 @@ import type { BagKit, BagStyle, KitAttach, KitSeam } from "@/lib/bag-kits";
 import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
 import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summarize, type CheckIssue } from "@/lib/pattern-check";
 import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
+import type { Guide, LessonCtx, LessonDemo } from "@/lib/pattern-lessons";
+import type { CopySource, LessonRef } from "./learn-panel";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });               // โหลดเมื่อเปิดดู 3D
 const PhotoModal = dynamic(() => import("./photo-modal").then((m) => m.PhotoModal), { ssr: false });                        // โหลดเมื่อกดแกะจากรูป
@@ -44,7 +48,9 @@ const PocketModal = dynamic(() => import("./pocket-modal").then((m) => m.PocketM
 const DxfModal = dynamic(() => import("./dxf-modal").then((m) => m.DxfModal), { ssr: false });                              // โหลดเมื่อกดนำเข้า DXF
 const BagTemplateWizard = dynamic(() => import("./template-wizard").then((m) => m.BagTemplateWizard), { ssr: false });      // โหลดเมื่อกดสร้างจากแม่แบบ
 
-const AssemblyView = dynamic(() => import("./assembly-view").then((m) => m.AssemblyView), { ssr: false });                  // โหลดเมื่อเลือก แยกชิ้น / ทีละขั้น / ทิ้งตัว
+const AssemblyView = dynamic(() => import("./assembly-view").then((m) => m.AssemblyView), { ssr: false });
+const LearnCard = dynamic(() => import("./learn-panel").then((m) => m.LearnCard), { ssr: false });            // โหลดเมื่อมีบทเรียน
+const LessonCatalog = dynamic(() => import("./learn-panel").then((m) => m.LessonCatalog), { ssr: false });    // โหลดเมื่อกด เรียน                  // โหลดเมื่อเลือก แยกชิ้น / ทีละขั้น / ทิ้งตัว
 
 const SHOW3D_KEY = "pattern-studio-3d";
 const SHOW3D_SPLIT_KEY = "pattern-studio-3d-split";   // หน้าที่มีเครื่องมือเย็บ: ภาพ 3D คู่กับกระดาน เปิดเป็นค่าเริ่ม (กุญแจแยก — ค่าที่เคยปิดไว้ของปุ่มเดิมไม่ตามมา)
@@ -83,7 +89,11 @@ export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start
   /** แก้จุดติด (ติดหู / ปิดหลังช่อง) จากภาพ 3D แบบ แยกชิ้น — ไม่ส่ง = ดูอย่างเดียว */ onAttachesChange?: (next: Attach[]) => void;
   /** ความอยู่ทรงของชิ้น (ภาพ ทิ้งตัว) */ pieceStiff?: (pid: string, fallback: number) => { s: number; why: string } | null; /** จุดติดหู/แผ่นหลังช่องจากแม่แบบ — ให้ภาพเย็บติดมีหูของแม่แบบด้วย */ attaches?: Attach[];
   /** ค่าคลาดตะเข็บ (ซม.) ของแพทเทิร์นนี้ + เปลี่ยนค่า (ไม่ส่ง onTolChange = ดูอย่างเดียว) */ tol?: number; onTolChange?: (v: number) => void;
-  /** ชิ้นที่ล็อก/ซ่อน (เก็บกับแพทเทิร์น) + เปลี่ยน */ view?: PieceView; onViewChange?: (next: PieceView) => void };
+  /** ชิ้นที่ล็อก/ซ่อน (เก็บกับแพทเทิร์น) + เปลี่ยน */ view?: PieceView; onViewChange?: (next: PieceView) => void;
+  /** บทเรียนของแพทเทิร์นนี้ (template.lesson) + ชื่อแบบฝึก/สำเนา */ lesson?: LessonRef | null; lessonName?: string;
+  /** เริ่มบทใหม่ = คืนชิ้นตั้งต้นของบท (เฉพาะแบบฝึก) */ onLessonReset?: () => void;
+  /** งานที่เปิดอยู่ (ให้สารบัญสร้าง "สำเนาเพื่อเรียน") */ copySource?: () => CopySource | null;
+  /** สร้างแบบฝึก/สำเนาได้ (สิทธิ์แก้) */ canLearn?: boolean };
 /** ชิ้นที่ล็อก (แก้/ลากไม่ได้) และซ่อน (จาง กดไม่ได้ แต่ยังถูกตรวจ) */
 export type PieceView = { lock: string[]; hide: string[] };
 
@@ -132,9 +142,15 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [iso, setIso] = useState<string | null>(null);   // แยกดูชิ้นเดียว (ชั่วคราว ไม่บันทึก)
   const [panel, setPanel] = useState<null | "pieces" | "check">(null);
   const [flagId, setFlagId] = useState<string | null>(null);
-  const [focusReq, setFocusReq] = useState<{ nonce: number; pid: string; edge?: number } | null>(null);
+  const [focusReq, setFocusReq] = useState<{ nonce: number; pid: string; edge?: number; seam?: string } | null>(null);
   const tol = sew?.tol ?? DEFAULT_SEAM_TOL;
   const L = useCallback((cm: number) => formatLength(cm, unit, { label: t("th", "en") as "th" | "en" }), [unit, t]);
+  // ── เรียนไปทำไป (รอบ C) ──
+  const [learnOpen, setLearnOpen] = useState(!!sew?.lesson);
+  const [catalog, setCatalog] = useState(false);
+  const [events, setEvents] = useState<Set<string>>(() => new Set());   // สิ่งที่ผู้ใช้ทำแล้ว (บทเรียนบท 1 นับจากตรงนี้)
+  const addEvent = useCallback((k: string) => setEvents((x) => (x.has(k) ? x : new Set(x).add(k))), []);
+  const openPanel = (p: null | "pieces" | "check") => { setPanel(p); if (p) addEvent(`panel:${p}`); };
 
   // กว้างพอ = ซ้ายขวา · แคบ = บนล่าง (วัดกล่องแม่ ไม่ใช่จอ)
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -220,7 +236,9 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const sewnOn = !!sewnScene && sewnScene.joined > 0;
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
-  const pick3d = useCallback((pid: string | null) => setSelectReq({ nonce: Date.now(), pid }), []);
+  const pick3d = useCallback((pid: string | null) => { setSelectReq({ nonce: Date.now(), pid }); if (pid) addEvent("pick-3d"); }, [addEvent]);
+  useEffect(() => { if (selPid) addEvent("sel"); }, [selPid, addEvent]);
+  useEffect(() => { addEvent(`unit:${unit}`); }, [unit, addEvent]);
   /** วางชุดแม่แบบ (lib/bag-kits) ลงกระดาน: ชิ้นตัวนอก + ซับใน + ช่องใส่ของ — รหัสชิ้นกำหนดที่นี่ → ตะเข็บตั้งต้น/การผูกรูปอ้างถึงได้ */
   const insert = (kit: BagKit) => {
     setWizard(false); setDraft(null);
@@ -241,6 +259,26 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
     else if (nl) setNotice(t(`วางแล้ว ${list.length} แบบ รวมซับใน ${nl} แบบ (วางไว้ใต้ชุดตัวนอก${sew ? " ผูกรูปกับตัวนอก: แก้ตัวนอกแล้วซับในเปลี่ยนตาม · ตอนนี้กระดานโชว์ชั้นนอก สลับดูซับในได้ที่ปุ่ม ทุกชั้น / ชั้นนอก / ซับใน" : ""}) — เลือกวัสดุซับในให้ชิ้นเหล่านั้นด้วย`, `Placed ${list.length} patterns including ${nl} lining patterns (below the outer set) — pick a lining material for them`));
   };
 
+  const lessonCtx: LessonCtx = useMemo(() => ({ pieces: liveLazy.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, shape: p.shape, holes: p.holes, allow: p.allow, allowEdges: p.allowEdges })), seams: sew?.seams ?? [], selPid, events, tol }), [liveLazy, sew?.seams, selPid, events, tol]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** ไฮไลต์ของจริงบนจอ (ปุ่มเครื่องมือ / ส่วนของแผง) — ตั้งค่าไม่ให้ขยับ = ขอบน้ำเงินค้าง 2.5 วิ แทนการกะพริบ */
+  const flash = (el: Element | null) => {
+    if (!el) { setNotice(t("ไม่เจอส่วนนี้บนจอ — เลือกชิ้นก่อน หรือกางแผงขวาของกระดาน แล้วลองอีกครั้ง", "Couldn't find that on screen — select a piece or open the board's right panel, then try again")); return; }
+    const h = el as HTMLElement, still = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    h.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+    if (still || !h.animate) { const o = h.style.outline; h.style.outline = "3px solid #2563eb"; setTimeout(() => { h.style.outline = o; }, 2500); }
+    else h.animate([{ boxShadow: "0 0 0 0 rgba(37,99,235,0)" }, { boxShadow: "0 0 0 5px rgba(37,99,235,.6)" }, { boxShadow: "0 0 0 0 rgba(37,99,235,0)" }], { duration: 900, iterations: 3 });
+  };
+  const guide = (g: Guide, pid: string | null) => {
+    if (g.view3d && !show3d) setShow3d(true);
+    if (g.select && pid && !lockPids?.has(pid)) setSelectReq({ nonce: Date.now(), pid });
+    if (g.seam && sew) { const sm = [...sew.seams].reverse().find((x) => x.a.pid !== x.b.pid && !x.a.inner && !x.b.inner); if (sm) setFocusReq({ nonce: Date.now(), pid: sm.a.pid, seam: sm.id }); }
+    const sel = g.el ? `[data-guide="${g.el}"]` : g.tool ? `[data-tool="${g.tool}"]` : g.panel === "check" ? "[data-studio-check]" : g.panel === "pieces" ? "[data-studio-pieces]" : g.view3d ? "[data-pane-3d]" : null;
+    if (sel) setTimeout(() => flash(boxRef.current?.querySelector(sel) ?? document.querySelector(sel)), 350);
+  };
+  /** ทำให้ดู: ส่งเข้ากระดานด้วยคำสั่งเดียวกับงานปกติ (ย้อนกลับได้ด้วย Ctrl+Z) */
+  const demo = (d: LessonDemo) => {
+    setInject({ nonce: Date.now(), pieces: (d.add ?? []).map((a) => ({ shape: a.shape, count: 1, allow: a.allow ?? 0, name: a.name, mats: [] })), ...(d.patch?.length ? { patch: d.patch } : {}), ...(d.seams ? { seams: d.seams } : {}) });
+  };
   const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs";
   return (
     <div ref={boxRef} className="space-y-3">
@@ -270,12 +308,17 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           </button>
         </>}
         {sew && <>
-          <button type="button" data-studio-pieces onClick={() => setPanel(panel === "pieces" ? null : "pieces")} aria-pressed={panel === "pieces"} title={t("รายการชิ้น: ล็อก / ซ่อน / แยกดู ตามกลุ่ม", "Piece list: lock / hide / isolate by group")}
+          <button type="button" data-studio-learn onClick={() => { if (sew.lesson && !learnOpen) setLearnOpen(true); else setCatalog(true); }} aria-pressed={!!sew.lesson && learnOpen}
+            title={t("เรียนไปทำไป: บทเรียนทำแพทเทิร์นที่ตรวจจากงานจริง", "Learn by doing: pattern lessons checked from your real work")}
+            className={`${btn} ${sew.lesson ? "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
+            <Icon value="i:book" className="text-sm" />{sew.lesson ? t(`บทเรียน ${sew.lesson.id}`, `Lesson ${sew.lesson.id}`) : t("เรียน", "Learn")}
+          </button>
+          <button type="button" data-studio-pieces onClick={() => openPanel(panel === "pieces" ? null : "pieces")} aria-pressed={panel === "pieces"} title={t("รายการชิ้น: ล็อก / ซ่อน / แยกดู ตามกลุ่ม", "Piece list: lock / hide / isolate by group")}
             className={`${btn} ${panel === "pieces" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
             <Icon value="i:list" className="text-sm" />{t("รายการชิ้น", "Pieces")}
             {(pv.lock.length > 0 || pv.hide.length > 0 || iso) && <span className={`rounded-full px-1.5 text-[11px] ${panel === "pieces" ? "bg-white/20" : "bg-slate-100 text-slate-600"}`}>{t(`ล็อก ${pv.lock.length} · ซ่อน ${pv.hide.length}${iso ? " · แยกดู" : ""}`, `${pv.lock.length} locked · ${pv.hide.length} hidden${iso ? " · isolated" : ""}`)}</span>}
           </button>
-          <button type="button" data-studio-check onClick={() => setPanel(panel === "check" ? null : "check")} aria-pressed={panel === "check"} title={t("ตรวจแบบก่อนผลิต: ตะเข็บ ขอบที่ยังไม่ได้เย็บ รูปชิ้น วัสดุ", "Check before production: seams, unsewn edges, piece shapes, materials")}
+          <button type="button" data-studio-check onClick={() => openPanel(panel === "check" ? null : "check")} aria-pressed={panel === "check"} title={t("ตรวจแบบก่อนผลิต: ตะเข็บ ขอบที่ยังไม่ได้เย็บ รูปชิ้น วัสดุ", "Check before production: seams, unsewn edges, piece shapes, materials")}
             className={`${btn} ${panel === "check" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
             <Icon value="i:list-check" className="text-sm" />{t("ตรวจแบบ", "Check")}
             {sum.errors > 0 && <span className="rounded-full bg-red-600 px-1.5 text-[11px] text-white" title={t("ต้องแก้", "Must fix")}>{sum.errors}</span>}
@@ -382,7 +425,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
         const boardEl = (
           <ShapeEditor {...props} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
           seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids}
-          {...(sew ? { unit, seamTol: tol, lockPids, flagged, focusEdge: focusReq } : {})} />
+          {...(sew ? { unit, seamTol: tol, lockPids, flagged, focusEdge: focusReq, onToolChange: (tl: string) => addEvent(`tool:${tl}`) } : {})} />
         );
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
@@ -461,6 +504,12 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
         );
       })()}
 
+      {sew?.lesson && learnOpen && (
+        <LearnCard lesson={sew.lesson} projectName={sew.lessonName ?? ""} ctx={lessonCtx} L={L} readonly={readonly}
+          onGuide={guide} onDemo={demo} onReset={sew.lesson.mode === "practice" && !readonly ? sew.onLessonReset : undefined}
+          onCatalog={() => setCatalog(true)} onClose={() => setLearnOpen(false)} />
+      )}
+      {sew && catalog && <LessonCatalog open onClose={() => setCatalog(false)} canStart={!!sew.canLearn} copySource={sew.copySource} currentId={sew.lesson?.id ?? null} />}
       {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} pocket={!!sew} />}
       {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}
         hosts={live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, box: shapeBox(p.shape), lining: liningPids.has(p.pid) }))} />}

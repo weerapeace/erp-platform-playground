@@ -7,6 +7,7 @@
  * ข้อมูลผ่าน /api/pattern-projects เท่านั้น · สูตร lib/pattern-project
  */
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
@@ -14,6 +15,8 @@ import { ERPModal } from "@/components/modal";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import { PATTERN_STATUS_LABEL, type PatternProjectRow, type PatternProjectStatus } from "@/lib/pattern-project";
+
+const LessonCatalog = dynamic(() => import("@/components/pattern-studio/learn-panel").then((m) => m.LessonCatalog), { ssr: false });   // บทเรียนเรียนไปทำไป (Bag CAD รอบ C)
 
 const SQFT = 929.03;
 type Filter = "open" | PatternProjectStatus | "all";
@@ -28,6 +31,7 @@ export function PatternStudioList() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("open");
   const [creating, setCreating] = useState(false);
+  const [learn, setLearn] = useState(false);
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [busy, setBusy] = useState(false);
@@ -69,6 +73,11 @@ export function PatternStudioList() {
           <h1 className="flex items-center gap-2 text-xl font-semibold text-slate-800"><Icon value="i:shopping-bag" className="text-2xl" />{t("สตูดิโอแพทเทิร์น", "Pattern studio")}</h1>
           <p className="mt-0.5 max-w-2xl text-sm text-slate-500">{t("ทำแพทเทิร์นกระเป๋า: วาดชิ้นหรือเริ่มจากแม่แบบทรง กำหนดว่าขอบไหนเย็บติดกัน แล้วดูเป็นภาพ 3D", "Make bag patterns: draw pieces or start from a bag template, say which edges are sewn together, and view it in 3D")}</p>
         </div>
+        <button type="button" data-open-lessons onClick={() => setLearn(true)} title={t("บทเรียนทำแพทเทิร์นกระเป๋า ทำบนแบบฝึก ตรวจจากงานจริง", "Bag pattern lessons on practice files, checked from your real work")}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 text-sm text-blue-700 hover:bg-blue-50">
+          <Icon value="i:book" className="text-base" />{t("เรียนทำแพทเทิร์น", "Learn pattern making")}
+        </button>
+        {learn && <LessonCatalog open onClose={() => setLearn(false)} canStart={!!me?.can_edit} />}
         {me?.can_edit && (
           <button type="button" onClick={() => { setName(""); setSku(""); setFormErr(null); setCreating(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">
             <Icon value="i:plus" className="text-base" />{t("แพทเทิร์นใหม่", "New pattern")}
