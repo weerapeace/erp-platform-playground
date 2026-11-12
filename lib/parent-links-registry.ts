@@ -55,7 +55,7 @@ export type ParentLinkSource = {
   thumbnails?: boolean;
   /**
    * ค้นช้า (ตารางใหญ่ไม่มีดัชนี) → ไม่โหลดตอนเปิดแท็บ · หน้าจอโชว์ปุ่ม "ค้น…" ให้กดโหลดเอง (API ?only=<key>)
-   * assets: ยังไม่มีดัชนีบน parent_sku_codes (migration 202612030300 รอเจ้าของอนุมัติ) — ใส่ดัชนีแล้วเอา lazy ออกได้
+   * (assets เคยเป็น lazy — ใส่ดัชนี idx_assets_parent_sku_codes แล้ว 2026-11-12 ค้น ~10ms จึงโหลดปกติ)
    */
   lazy?: boolean;
   /** บอกผู้ใช้ว่าดู/แก้ที่ไหน เมื่อแถวไม่มีลิงก์ของตัวเอง เช่น "ดูในแท็บผลิต" */
@@ -108,7 +108,7 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
       image: { key: s(r._cover_key) || null }, href: `/master/assets?source=contents&album=${encodeURIComponent(s(r.id))}` }),
   },
   {
-    key: "assets", group: "creative", label: "ไฟล์ในคลังรูป", icon: "🗃", thumbnails: true, lazy: true,
+    key: "assets", group: "creative", label: "ไฟล์ในคลังรูป", icon: "🗃", thumbnails: true,
     table: "assets", select: "id, title, file_name, r2_key, status, created_at",
     match: [{ by: "parent_codes", column: "parent_sku_codes" }],
     order: { column: "created_at", ascending: false },

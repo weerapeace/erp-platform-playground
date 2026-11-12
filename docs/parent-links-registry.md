@@ -19,6 +19,6 @@
 - ตารางเก่าที่ไม่ได้สร้างผ่าน migration (เช่น skus_v2, store_listings) เทสต์จับไม่ได้ ต้องเพิ่มเอง
 
 ## แหล่งค้นช้า (lazy) + เวลาสูงสุด (เพิ่ม 2026-11-11)
-- `lazy: true` = ไม่โหลดตอนเปิดแท็บ หน้าจอโชว์ปุ่ม "🔍 ค้น…" → `GET /links?only=<key>` · ตอนนี้ = `assets` (ตาราง ~19,500 แถว ไม่มีดัชนีบน `parent_sku_codes` → ค้น 10–26 วิ)
+- `lazy: true` = ไม่โหลดตอนเปิดแท็บ หน้าจอโชว์ปุ่ม "🔍 ค้น…" → `GET /links?only=<key>` · ตอนนี้ไม่มีแหล่งไหนเป็น lazy (assets เคยเป็น — ใส่ดัชนีแล้ว 2026-11-12)
 - ทุกแหล่งมีเวลาสูงสุด 8 วิ (`PARENT_LINK_TIMEOUT_MS`) — เกิน = "ค้นช้าเกินไป" แหล่งอื่นไม่ต้องรอ
-- ทำให้เร็วถาวร (รอเจ้าของอนุมัติแก้ฐานข้อมูล): `create index if not exists idx_assets_parent_sku_codes on public.assets using gin (parent_sku_codes jsonb_path_ops);` แล้วเอา `lazy` ของ assets ออก
+- ดัชนี `idx_assets_parent_sku_codes` (gin jsonb_path_ops · migration 202612030300) ใส่แล้ว 2026-11-12 (เจ้าของอนุมัติ) → ค้นคลังรูป ~10ms จาก 10–26 วิ · แหล่งใหม่ที่ค้นคอลัมน์ jsonb ในตารางใหญ่ = ใส่ดัชนีแบบเดียวกัน
