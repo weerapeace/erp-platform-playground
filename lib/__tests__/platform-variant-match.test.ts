@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shopVariantsOf, variantLookupCodes, matchVariantSku, matchShopVariants, expectedLinePrice, linePriceDiff, type SkuLite } from "@/lib/platform-variant-match";
+import { shopVariantsOf, variantLookupCodes, matchVariantSku, matchShopVariants, expectedLinePrice, linePriceDiff, erpSkuPrices, type SkuLite } from "@/lib/platform-variant-match";
 
 // ข้อมูลจริงย่อจาก LINE (Louis Montini FFB16) + Lazada (lib/lazada → raw.skus)
 const lineRaw = { line: { variants: [
@@ -95,5 +95,35 @@ describe("ราคาที่ระบบจะส่งขึ้น LINE (ก
     expect(rows[1]).toMatchObject({ erp_price: 690, erp_pay: 490, price_diff: "pay" });   // บนร้าน 690 ไม่ลด แต่ระบบลดเหลือ 490
     expect(rows[0].price_diff).toBeNull();
     expect(counts.price_diff).toBe(1);
+  });
+});
+
+describe("TikTok + ราคาในระบบ", () => {
+  const ttRaw = { tiktok: { skus: [
+    { id: "1734440548458923130", seller_sku: "KR64-01", label: "สี: เชอร์รี่ | 01", price: 249, stock: 0, status: "NORMAL" },
+    { id: "s2", seller_sku: "MGN402-03M", price: 1390, stock: 5 },
+    { id: "s3", price: 100 },
+  ] } };
+  it("อ่านตัวเลือก TikTok จากสำเนาย่อ (ไม่มีราคาหลังลด — โปรอยู่ที่ TikTok)", () => {
+    const vs = shopVariantsOf("tiktok", ttRaw);
+    expect(vs[0]).toEqual({ key: "1734440548458923130", sku: "KR64-01", label: "สี: เชอร์รี่ | 01", price: 249, sale_price: null, stock: 0, image: null });
+    expect(vs[1].label).toBe("MGN402-03M");
+    expect(vs[2]).toMatchObject({ key: "s3", sku: null, label: "ตัวเลือก 3" });
+    expect(shopVariantsOf("tiktok", {})).toEqual([]);
+  });
+  it("ราคาในระบบ: รหัสตัวเอง → รหัสสี", () => {
+    const fake = new Map([["MGN402-03", 1390]]); const sale = new Map([["KR64-01", 159], ["MGN402-03", 690]]);
+    expect(erpSkuPrices("KR64-01", fake, sale)).toEqual({ sale: 159, full: null });
+    expect(erpSkuPrices("MGN402-03M", fake, sale)).toEqual({ sale: 690, full: 1390 });
+    expect(erpSkuPrices(null, fake, sale)).toEqual({ sale: null, full: null });
+  });
+  it("แถวจับคู่มีราคาในระบบ (เฉพาะตัวที่เจอ SKU) · ไม่เทียบราคาแบบ LINE", () => {
+    const fake = new Map<string, number>(); const sale = new Map([["KR64-01", 159], ["MGN402-03", 690]]);
+    const codes = new Map<string, SkuLite>([sku("KR64-01", "P-KR64"), sku("MGN402-03", "P-MGN402")]);
+    const { rows, counts } = matchShopVariants(shopVariantsOf("tiktok", ttRaw), codes, "P-KR64", () => null, undefined, (s) => erpSkuPrices(s, fake, sale));
+    expect(rows[0]).toMatchObject({ kind: "exact", erp_sale: 159, erp_full: null, price_diff: null, erp_pay: null });
+    expect(rows[1]).toMatchObject({ kind: "base", erp_sale: 690, other_parent: true });
+    expect(rows[2]).toMatchObject({ kind: "nosku", erp_sale: null, erp_full: null });
+    expect(counts.price_diff).toBe(0);
   });
 });

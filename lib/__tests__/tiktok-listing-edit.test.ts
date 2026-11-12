@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   tiktokListingView, tiktokStatusBadge, tiktokIsOpen, planTiktokDisplay, planTiktokTitle, ttsTitleLength, tiktokDisplayErrors, keepSkuStatus,
   TTS_TITLE_MIN, TTS_TITLE_MAX, TTS_PRICE_MIN, TTS_PRICE_MAX, planTiktokPrices, applyTiktokBulkPrice, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, type TiktokPriceRow,
+  tiktokErpPriceCheck, applyTiktokErpFull,
 } from "@/lib/tiktok-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
 
@@ -221,5 +222,40 @@ describe("เฟส B ราคา — planTiktokPrices / applyTiktokBulkPrice /
   test("ข้อความประวัติ", () => {
     expect(listingHistoryText({ source: "tiktok_listing_prices", ok: true, changes: [{ label: "ราคา ดำ", text: "590฿ → 500฿" }] })).toBe("แก้ราคาบน TikTok 1 ตัวเลือก (590฿ → 500฿)");
     expect(listingHistoryText({ source: "tiktok_listing_prices", ok: false, error: "อยู่ในโปรโมชัน", changes: [{}, {}] })).toBe("แก้ราคาบน TikTok 2 ตัวเลือก — ไม่สำเร็จ: อยู่ในโปรโมชัน");
+  });
+});
+
+describe("ราคาในระบบเทียบราคาบน TikTok", () => {
+  test("ราคาบน TikTok ~2 เท่าของราคาขาย = ปกติ (ร้านลดด้วยโปร) · โชว์กี่เท่า", () => {
+    expect(tiktokErpPriceCheck(1390, { sale: 689, full: null })).toEqual({ flag: null, ratio: 2 });       // BCG10 ข้อมูลจริง
+    expect(tiktokErpPriceCheck(249, { sale: 159, full: null })).toEqual({ flag: null, ratio: 1.6 });      // KR64-01
+  });
+  test("ต่ำกว่าราคาขายในระบบ = เตือนแดง (ต่างตั้งแต่ 1 บาท)", () => {
+    expect(tiktokErpPriceCheck(290, { sale: 450, full: null })).toEqual({ flag: "below_sale", ratio: 0.6 });   // CVRS008
+    expect(tiktokErpPriceCheck(449.5, { sale: 450, full: null }).flag).toBeNull();
+    expect(tiktokErpPriceCheck(100, { sale: 450, full: 900 }).flag).toBe("below_sale");                     // ต่ำกว่าขายสำคัญกว่าราคาเต็ม
+  });
+  test("ไม่ตรงราคาเต็มที่ตั้งไว้ = เตือนเหลือง · ไม่มีราคาเต็ม = ไม่เทียบ", () => {
+    expect(tiktokErpPriceCheck(990, { sale: 590, full: 1090 }).flag).toBe("full_diff");                       // PIX39
+    expect(tiktokErpPriceCheck(1690, { sale: 890, full: 1690 }).flag).toBeNull();                              // JEAN08 ตรง
+    expect(tiktokErpPriceCheck(990, { sale: 590, full: null }).flag).toBeNull();
+  });
+  test("ไม่รู้ราคา = ไม่เตือน", () => {
+    expect(tiktokErpPriceCheck(null, { sale: 590, full: 1090 })).toEqual({ flag: null, ratio: null });
+    expect(tiktokErpPriceCheck(590, null)).toEqual({ flag: null, ratio: null });
+    expect(tiktokErpPriceCheck(590, { sale: null, full: null })).toEqual({ flag: null, ratio: null });
+  });
+  test("ใช้ราคาเต็มในระบบ — เฉพาะตัวที่มีราคาเต็ม/ต่างจากเดิม · เลือกเฉพาะบางตัวได้", () => {
+    const rows: TiktokPriceRow[] = [
+      { skuId: "a", label: "A", sellerSku: "PIX39-01", price: 990 },
+      { skuId: "b", label: "B", sellerSku: "PIX39-02", price: 1090 },
+      { skuId: "c", label: "C", sellerSku: "X", price: 500 },
+    ];
+    const erp = (id: string) => (id === "c" ? { sale: 300, full: null } : { sale: 590, full: 1090 });
+    const all = applyTiktokErpFull(rows, erp);
+    expect(all.changed).toBe(1);
+    expect(all.rows.map((r) => r.price)).toEqual([1090, 1090, 500]);
+    expect(applyTiktokErpFull(rows, erp, ["b"]).changed).toBe(0);
+    expect(applyTiktokErpFull(rows, () => null).changed).toBe(0);
   });
 });

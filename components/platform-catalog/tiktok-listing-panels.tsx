@@ -26,10 +26,11 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { MoneyInput } from "@/components/money-input";
 import {
-  applyTiktokBulkPrice, planTiktokDisplay, planTiktokPrices, planTiktokTitle, tiktokIsOpen, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, tiktokStatusBadge, ttsTitleLength,
+  applyTiktokBulkPrice, applyTiktokErpFull, tiktokErpPriceCheck, planTiktokDisplay, planTiktokPrices, planTiktokTitle, tiktokIsOpen, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, tiktokStatusBadge, ttsTitleLength,
   TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN,
-  type TiktokListingDetailResponse, type TiktokListingView, type TiktokPricePlan, type TiktokPriceRow, type TiktokSkuView, type TiktokWriteResponse,
+  type TiktokErpPrice, type TiktokListingDetailResponse, type TiktokListingView, type TiktokPricePlan, type TiktokPriceRow, type TiktokSkuView, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
+import type { VariantMatchRow } from "@/lib/platform-variant-match";
 
 export type TiktokListingState = {
   listingId: string | null;
@@ -418,13 +419,52 @@ function TiktokBulkPriceBar({ edit, selected }: { edit: TiktokEditApi; selected:
   );
 }
 
-/** แท็บตัวเลือก & ราคา — เฟส B แก้ราคาได้เมื่อมีสิทธิ์และสินค้าเปิดขายอยู่ · สต๊อกดูอย่างเดียว */
-export function TiktokOptionsPanel({ state, edit }: { state: TiktokListingState; edit?: TiktokEditApi | null }) {
+/** ราคาในระบบต่อตัวเลือก (จาก GET /api/platform-catalog?view=variants — key = id ตัวเลือกบน TikTok) */
+export type TiktokErpRow = Pick<VariantMatchRow, "erp_code" | "erp_sale" | "erp_full">;
+
+/**
+ * แท็บตัวเลือก & ราคา — เฟส B แก้ราคาได้เมื่อมีสิทธิ์และสินค้าเปิดขายอยู่ · สต๊อกดูอย่างเดียว
+ * erpRows = ราคาในระบบ (ราคาขาย/ราคาเต็ม ของ SKU ที่รหัสตรงกัน) โชว์เทียบ · null = ยังโหลดไม่เสร็จ/โหลดไม่ได้ (ซ่อนคอลัมน์)
+ */
+export function TiktokOptionsPanel({ state, edit, erpRows }: { state: TiktokListingState; edit?: TiktokEditApi | null; erpRows?: Map<string, TiktokErpRow> | null }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const g = gate(state); if (g) return g;
   const v = state.view!;
   const canPrice = !!edit?.canEdit && !!edit.prices && !edit.priceBlock;
   const rowOf = new Map((edit?.prices ?? []).map((r) => [r.skuId, r]));
+  // ราคาที่ใช้เทียบ = ราคาที่กำลังแก้ (ถ้าแก้ได้) ไม่งั้นราคาบนร้าน
+  const curPrice = (s: TiktokSkuView) => (canPrice ? rowOf.get(s.skuId)?.price ?? null : s.price);
+  const erpOf = (skuId: string): TiktokErpPrice | null => { const r = erpRows?.get(skuId); return r?.erp_code ? { sale: r.erp_sale, full: r.erp_full } : null; };
+  const checks = new Map(v.skus.map((s) => [s.skuId, tiktokErpPriceCheck(curPrice(s), erpOf(s.skuId))]));
+  const belowN = [...checks.values()].filter((c) => c.flag === "below_sale").length;
+  const fullDiffIds = v.skus.filter((s) => checks.get(s.skuId)?.flag === "full_diff").map((s) => s.skuId);
+  const notFoundN = erpRows ? v.skus.filter((s) => !erpRows.get(s.skuId)?.erp_code).length : 0;
+  const fillErpFull = (ids?: string[]) => {
+    if (!edit?.prices) return;
+    const r = applyTiktokErpFull(edit.prices, erpOf, ids);
+    if (r.changed) edit.setPrices(r.rows);
+  };
+  const erpCol: MiniColumn<TiktokSkuView> = {
+    key: "erp", header: "ราคาในระบบ", width: "7.5rem", align: "right",
+    cell: (s) => {
+      const r = erpRows?.get(s.skuId);
+      if (!r?.erp_code) return <span className="text-[11px] text-slate-400" title="ไม่มี SKU ในระบบที่รหัสตรงกับตัวเลือกนี้ (เทียบรหัสตรง → รหัสสี)">ไม่เจอ SKU</span>;
+      if (r.erp_sale == null && r.erp_full == null) return <span className="text-[11px] text-slate-400" title={`SKU ${r.erp_code} ยังไม่ได้ตั้งราคาในระบบ`}>ยังไม่ตั้งราคา</span>;
+      const c = checks.get(s.skuId) ?? { flag: null, ratio: null };
+      return (
+        <span className="block leading-tight" title={`SKU ในระบบ ${r.erp_code}`}>
+          <span className={`block ${c.flag === "below_sale" ? "font-medium text-rose-600" : "text-slate-600"}`} title="ราคาขายในระบบ (list price)">ขาย {baht(r.erp_sale)}</span>
+          {r.erp_full != null && <span className={`block text-[11px] ${c.flag === "full_diff" ? "text-amber-700" : "text-slate-400"}`} title="ราคาเต็มในระบบ (fake price)">เต็ม {baht(r.erp_full)}</span>}
+          {c.flag === "below_sale"
+            ? <span className="block text-[11px] text-rose-600" title="ราคาบน TikTok ต่ำกว่าราคาขายในระบบ — ถ้ามีโปรโมชันลดอีก จะยิ่งต่ำ">ต่ำกว่าราคาขาย</span>
+            : c.ratio != null ? <span className="block text-[11px] text-slate-400" title="ราคาบน TikTok เป็นกี่เท่าของราคาขายในระบบ">×{c.ratio}</span> : null}
+          {canPrice && c.flag === "full_diff" && r.erp_full != null && (
+            <button type="button" onClick={() => fillErpFull([s.skuId])} className="text-[11px] text-violet-700 hover:underline" title="เติมราคาเต็มในระบบลงช่องราคา (ยังไม่ส่ง)">ใช้ราคาเต็ม</button>
+          )}
+        </span>
+      );
+    },
+  };
   const cols: MiniColumn<TiktokSkuView>[] = [
     { key: "opt", header: "ตัวเลือก", width: "1.6fr", cell: (s) => <div className="min-w-0"><div className="truncate" title={s.label}>{s.label}</div><div className="truncate font-mono text-[11px] text-slate-400">{s.sellerSku ?? "ไม่มีรหัส"}</div></div> },
     canPrice
@@ -443,6 +483,7 @@ export function TiktokOptionsPanel({ state, edit }: { state: TiktokListingState;
         },
       }
       : { key: "price", header: "ราคา", width: "6rem", align: "right", cell: (s) => <span>{baht(s.price)}</span> },
+    ...(erpRows ? [erpCol] : []),
     { key: "stock", header: "สต๊อก", width: "4.5rem", align: "right", cell: (s) => (s.stock == null ? <span className="text-slate-300">—</span> : <span className={s.stock === 0 ? "text-rose-600" : ""}>{s.stock.toLocaleString()}</span>) },
     { key: "st", header: "สถานะ", width: "5.5rem", cell: (s) => (s.status === "DEACTIVATED" ? <span className="text-slate-500">ปิด</span> : s.status === "NORMAL" ? <span className="text-emerald-700">ปกติ</span> : <span className="text-slate-300">—</span>) },
   ];
@@ -450,8 +491,23 @@ export function TiktokOptionsPanel({ state, edit }: { state: TiktokListingState;
     <div className="space-y-2">
       {canPrice && <TiktokBulkPriceBar edit={edit!} selected={selected} />}
       {edit?.canEdit && edit.priceBlock && <p className="flex items-start gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="info" className="mt-0.5 shrink-0" />{edit.priceBlock}</p>}
+      {erpRows && (belowN > 0 || (canPrice && fullDiffIds.length > 0)) && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {belowN > 0 && <span className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-rose-700">ต่ำกว่าราคาขายในระบบ {belowN.toLocaleString()} ตัวเลือก</span>}
+          {canPrice && fullDiffIds.length > 0 && (
+            <button type="button" onClick={() => fillErpFull(fullDiffIds)} className="rounded-md border border-violet-200 px-2 py-1 text-violet-700 hover:bg-violet-50"
+              title="เติมราคาเต็มในระบบลงช่องราคา เฉพาะตัวที่ในระบบมีราคาเต็ม (ยังไม่ส่ง — ต้องกดบันทึก)">ใช้ราคาเต็มในระบบ ({fullDiffIds.length.toLocaleString()} ตัว)</button>
+          )}
+        </div>
+      )}
       <MiniTable rows={v.skus} columns={cols} rowKey={(s) => s.skuId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-tiktok-options"
         selectable={canPrice} selected={selected} onSelectedChange={setSelected} />
+      {erpRows && (
+        <p className="text-[11px] text-slate-400">
+          ราคาในระบบ = ราคาขาย / ราคาเต็ม ของ SKU ที่รหัสตรงกับตัวเลือก (ไม่เจอ → ใช้รหัสสี) · ปกติราคาบน TikTok สูงกว่าราคาขาย เพราะร้านลดด้วยโปรโมชัน TikTok — เตือนแดงเมื่อต่ำกว่าราคาขาย · เหลืองเมื่อไม่ตรงราคาเต็มที่ตั้งไว้
+          {notFoundN > 0 ? ` · ไม่เจอ SKU ${notFoundN.toLocaleString()} ตัว (รหัสบนร้านไม่ตรงกับในระบบ)` : ""}
+        </p>
+      )}
       <p className="text-[11px] text-slate-400">
         {canPrice ? `ราคา = ราคาที่ลูกค้าเห็นก่อนส่วนลด · TikTok ไทยรับ ${TTS_PRICE_MIN.toLocaleString()}–${TTS_PRICE_MAX.toLocaleString()} บาท · มีผลทันทีเมื่อกดบันทึก (ส่วนลด/โปรโมชันแก้ใน Seller Center) · ` : ""}สต๊อกดูอย่างเดียว — ยังซิงค์ผ่าน BigSeller
       </p>

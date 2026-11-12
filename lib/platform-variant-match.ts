@@ -28,9 +28,17 @@ export type ShopVariant = {
   image: string | null;
 };
 
-/** อ่านตัวเลือกจาก raw — LINE (raw.line.variants) · Lazada (raw.lazada.skus) · Shopee ไฟล์ราคา/สต๊อก (raw.sales_info.variations) · อื่น ๆ = [] */
+/** อ่านตัวเลือกจาก raw — LINE (raw.line.variants) · Lazada (raw.lazada.skus) · Shopee ไฟล์ราคา/สต๊อก (raw.sales_info.variations) · TikTok (raw.tiktok.skus) · อื่น ๆ = [] */
 export function shopVariantsOf(platformCode: string, raw: unknown): ShopVariant[] {
   const r = obj(raw) ?? {};
+  if (platformCode === "tiktok") {
+    // สำเนาย่อจาก ttsProductToCatalogItem (lib/tiktok-shop): id · seller_sku · label · price (ก่อนส่วนลด) · stock · status
+    //   ราคาโปร/ส่วนลดอยู่ในโปรโมชันของ TikTok (ไม่อยู่ในสินค้า) → ไม่มี sale_price
+    return arr(obj(r.tiktok)?.skus).map(obj).filter((v): v is Obj => !!v).map((v, i) => {
+      const sku = str(v.seller_sku);
+      return { key: str(v.id) ?? `#${i + 1}`, sku, label: str(v.label) ?? sku ?? `ตัวเลือก ${i + 1}`, price: num(v.price), sale_price: null, stock: num(v.stock), image: null };
+    });
+  }
   if (platformCode === "line_shopping") {
     return arr(obj(r.line)?.variants).map(obj).filter((v): v is Obj => !!v).map((v, i) => {
       const opts = arr(v.options).map(obj).filter((o): o is Obj => !!o)
@@ -84,12 +92,22 @@ export function variantLookupCodes(skus: (string | null)[]): string[] {
  */
 export function expectedLinePrice(sku: string | null, fakeOf: Map<string, number>, saleOf: Map<string, number>): { price: number; discount: number } | null {
   if (!sku) return null;
+  const p = erpSkuPrices(sku, fakeOf, saleOf);
+  return linePrice(p.full, p.sale);
+}
+
+/**
+ * ราคาในระบบของตัวเลือก 1 ตัว — ราคาขาย (list_price) + ราคาเต็ม (fake_price) ของรหัสตัวเอง ไม่มี → ของรหัสสี (ฐาน)
+ * ใช้โชว์ "ราคาในระบบ" เทียบข้างราคาบนร้าน (เช่น TikTok) · ไม่มี = null
+ */
+export function erpSkuPrices(sku: string | null, fakeOf: Map<string, number>, saleOf: Map<string, number>): { sale: number | null; full: number | null } {
+  if (!sku) return { sale: null, full: null };
   const pick = (m: Map<string, number>): number | null => {
     const own = m.get(sku); if (own != null) return own;
     const b = baseOfCode(sku); const mv = b ? m.get(b) : undefined;
     return mv ?? null;
   };
-  return linePrice(pick(fakeOf), pick(saleOf));
+  return { sale: pick(saleOf), full: pick(fakeOf) };
 }
 
 /**
@@ -133,6 +151,9 @@ export type VariantMatchRow = ShopVariant & {
   erp_pay: number | null;
   /** ราคาบนร้านเทียบที่ระบบจะส่ง: "pay" ราคาจ่ายไม่ตรง · "full" แค่ราคาเต็มไม่ตรง · null ตรง/ไม่รู้ */
   price_diff: LinePriceDiff;
+  /** ราคาในระบบของ SKU ที่จับได้ (erpSkuPrices) — ราคาขาย (list_price) · ราคาเต็ม (fake_price) · null = ไม่มี/ไม่ได้ส่ง erpOf */
+  erp_sale: number | null;
+  erp_full: number | null;
 };
 export type VariantMatchCounts = { total: number; exact: number; base: number; none: number; nosku: number; other_parent: number; price_diff: number; full_diff: number };
 
@@ -141,6 +162,8 @@ export function matchShopVariants(
   variants: ShopVariant[], byCode: Map<string, SkuLite>, matchedParentId: string | null, parentCodeOf: (id: string) => string | null,
   /** ราคาที่ระบบจะส่ง (LINE: expectedLinePrice) — ไม่ส่ง = ไม่เทียบราคา */
   priceOf?: (sku: string | null) => { price: number; discount: number } | null,
+  /** ราคาในระบบ (erpSkuPrices) — ไม่ส่ง = erp_sale/erp_full เป็น null */
+  erpOf?: (sku: string | null) => { sale: number | null; full: number | null },
 ): { rows: VariantMatchRow[]; counts: VariantMatchCounts } {
   const counts: VariantMatchCounts = { total: variants.length, exact: 0, base: 0, none: 0, nosku: 0, other_parent: 0, price_diff: 0, full_diff: 0 };
   const rows = variants.map((v): VariantMatchRow => {
@@ -152,7 +175,9 @@ export function matchShopVariants(
     const exp = priceOf ? priceOf(v.sku) : null;
     const diff = linePriceDiff(v, exp);
     if (diff === "pay") counts.price_diff++; else if (diff === "full") counts.full_diff++;
+    const erp = erpOf && m.erp ? erpOf(v.sku) : null;
     return {
+      erp_sale: erp?.sale ?? null, erp_full: erp?.full ?? null,
       ...v, kind: m.kind, erp_code: m.erp?.code ?? null, erp_name: m.erp?.name ?? null,
       erp_parent_code: pid ? parentCodeOf(pid) : null, other_parent: other,
       erp_price: exp?.price ?? null, erp_pay: exp ? exp.price - exp.discount : null, price_diff: diff,

@@ -260,3 +260,39 @@ export function applyTiktokBulkPrice(rows: TiktokPriceRow[], selected: Set<strin
   });
   return { rows: out, changed, error: null };
 }
+
+// ───────────── ราคาในระบบ (เทียบข้างราคาบน TikTok · ดูอย่างเดียว + ปุ่มเติมฟอร์ม) ─────────────
+// ข้อมูลจริง 2026-11-12: ราคาบน TikTok ≈ 2 เท่าของราคาขายในระบบเกือบทุกตัว (ร้านตั้งราคาสูงแล้วลดด้วยโปรโมชัน TikTok)
+//   → "ไม่เท่ากับราคาขาย" ไม่ใช่ความผิด · เตือนแค่ 2 กรณี: ต่ำกว่าราคาขาย (ลดโปรแล้วยิ่งต่ำ) · ไม่ตรงราคาเต็ม (เมื่อในระบบตั้งราคาเต็มไว้)
+
+/** ราคาในระบบของตัวเลือก 1 ตัว: ราคาขาย (list_price) · ราคาเต็ม (fake_price) */
+export type TiktokErpPrice = { sale: number | null; full: number | null };
+/** "below_sale" ราคาบน TikTok ต่ำกว่าราคาขายในระบบ · "full_diff" ไม่ตรงราคาเต็มในระบบ · null ไม่มีอะไรต้องเตือน/ไม่รู้ */
+export type TiktokErpFlag = "below_sale" | "full_diff" | null;
+
+/** เทียบราคาบน TikTok (หรือราคาที่กำลังแก้) กับราคาในระบบ — ต่างกันตั้งแต่ 1 บาทถึงนับ · ratio = กี่เท่าของราคาขาย (ทศนิยม 1) */
+export function tiktokErpPriceCheck(price: number | null, erp: TiktokErpPrice | null): { flag: TiktokErpFlag; ratio: number | null } {
+  if (price == null || !erp) return { flag: null, ratio: null };
+  const ratio = erp.sale != null && erp.sale > 0 ? Math.round((price / erp.sale) * 10) / 10 : null;
+  if (erp.sale != null && erp.sale > 0 && erp.sale - price >= 1) return { flag: "below_sale", ratio };
+  if (erp.full != null && erp.full > 0 && Math.abs(price - erp.full) >= 1) return { flag: "full_diff", ratio };
+  return { flag: null, ratio };
+}
+
+/**
+ * ใช้ราคาเต็มในระบบเป็นราคาบน TikTok (เติมฟอร์มอย่างเดียว ยังไม่ส่ง) — เฉพาะตัวที่ในระบบมีราคาเต็ม
+ * ids = เฉพาะตัวเหล่านี้ (ไม่ส่ง = ทุกตัว) · ตัวที่ไม่มีราคาเต็ม/เท่าเดิม = ข้าม
+ */
+export function applyTiktokErpFull(rows: TiktokPriceRow[], erpOf: (skuId: string) => TiktokErpPrice | null, ids?: string[]): { rows: TiktokPriceRow[]; changed: number } {
+  let changed = 0;
+  const out = rows.map((r) => {
+    if (ids && !ids.includes(r.skuId)) return r;
+    const full = erpOf(r.skuId)?.full ?? null;
+    if (full == null || !(full > 0)) return r;
+    const next = round2(full);
+    if (r.price != null && Math.abs(r.price - next) < 0.005) return r;
+    changed++;
+    return { ...r, price: next };
+  });
+  return { rows: out, changed };
+}
