@@ -100,6 +100,16 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - **รูปตัวเลือก (สี) ไม่ทำ:** เอกสาร partial edit บอก "แก้ช่องในอ็อบเจกต์ต้องส่งทุกช่องย่อย ไม่ส่ง = ล้างเป็นว่าง" → แก้ sku_img ต้องส่ง skus ทั้งชุดพร้อม price + inventory = ส่งสต๊อก (ขัดกฎ "ไม่ส่งสต๊อกขณะ BigSeller ซิงค์") → รอเลิก BigSeller
 - เตือนกลับไปดูเฟส C: package_weight / package_dimensions เป็นอ็อบเจกต์ → ส่งครบทุกช่องย่อยแล้ว (value+unit · length/width/height+unit) ✓
 
+## เฟส D: ลงสินค้าใหม่บน TikTok เป็น "ฉบับร่าง" (2026-11-12 · เจ้าของเลือก "ลงเป็นร่าง")
+- ทางเข้า = ตัวช่วยลงสินค้า/ลงทุกร้านตัวเดิม (AddToPlatformWizard) · ทะเบียน `lib/platform-create-registry` แถว `tiktok` (live: true · mode: "draft" · note)
+- กฎประกอบ `lib/tiktok-create-plan` (pure + เทสต์) · `/api/tiktok-shop/create-product` GET ดูก่อนส่ง / POST สร้าง (load.ts ตัวเดียวกัน) · หน้าดูก่อนส่ง `components/platform-listing/tiktok-create-preview`
+- **save_mode=AS_DRAFT เสมอ · ไม่ส่ง inventory** — เหตุผล: Create Product บังคับ quantity 1–99,999 ตอนลงขาย = ส่งสต๊อก (ขัดกฎ BigSeller) → เจ้าของตรวจ/กรอกช่องบังคับของหมวด/ใส่สต๊อก แล้วกดเผยแพร่ใน Seller Center
+- ราคา = ราคาเต็ม (ไม่มี = ราคาขาย) · ส่วนลดใช้โปรโมชัน TikTok · ชั้นตัวเลือก = ชื่อกำหนดเอง (สี / ตัวเลือก / แบบ) ≤ 20 ตัว · ค่า ≤ 50 · SKU เดียว = ไม่มีชั้น
+- รูป = extra.tiktok_images → image_keys → อัตโนมัติ (≤ 9) → `ttsUploadRef` (shared — ใช้ร่วมกับลิ้นชัก) · รายละเอียดตัดรูปที่ไม่ใช่ของ TikTok · น้ำหนัก = extra.tiktok_weight → weight_g · กล่องปัดขึ้นเป็นจำนวนเต็ม (ไม่มีก็ได้)
+- แบรนด์ = ค้นชื่อแบรนด์ในระบบด้วย Get Brands (หมวดเดียวกัน) ไม่เจอ/ไม่ได้รับอนุญาต = ไม่ใส่ · ช่องบังคับของหมวด (Get Attributes · `is_requried`) = แสดงให้รู้ ไม่บล็อก · แคช 10 นาที
+- หลังสร้าง: ร่าง platform_product_id + status published (กันซ้ำ) · รายการบนร้านสถานะ draft จับคู่ Parent SKU · audit `tiktok_create` (draft: true)
+- ⚠️ ยังไม่เคยสร้างจริง — ตัวแรกให้เจ้าของกดเอง แล้วตรวจว่า TikTok รับร่างที่ไม่มี inventory ไหม (ถ้าไม่รับ ต้องหา warehouse_id + ใส่สต๊อก 1 ในร่าง)
+
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ~~ดึงหมวดหมู่ TikTok~~ (ทำแล้ว c51b1adf · เจ้าของกดดึงแล้ว 2026-11-12: 1,950 หมวดใบ ใช้ได้ 1,849 — ร่างจับคู่ 10 หมวดกลาง รอเจ้าของอนุมัติ)
-4. ~~เฟส B ราคา~~ · ~~C รูป/กล่อง~~ (ทำแล้ว) · D ลงสินค้าใหม่ (ต้องมีหมวด) · E สต๊อก (หลังเลิกซิงค์ BigSeller) — ทีละเฟสตามที่เจ้าของอนุมัติ
+4. ~~เฟส B ราคา~~ · ~~C รูป/กล่อง~~ (ทำแล้ว) · ~~D ลงสินค้าใหม่~~ (ทำแล้ว — ลงเป็นฉบับร่าง) · E สต๊อก (หลังเลิกซิงค์ BigSeller) — ทีละเฟสตามที่เจ้าของอนุมัติ

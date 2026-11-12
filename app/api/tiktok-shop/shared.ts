@@ -3,7 +3,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import { lazConnHealth } from "@/lib/lazada";
-import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { publicImageUrl } from "@/lib/line-shopping-server";
 import { keepSkuStatus, tiktokListingView, type TiktokListingView } from "@/lib/tiktok-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 export { baseUrl, buildState, parseState, getPlatformId } from "../lazada/shared";
@@ -154,4 +155,24 @@ export async function ttsViewWithReview(accessToken: string, cipher: string, det
   if (!v || !(v.auditStatus === "AUDITING" || v.status === "PENDING")) return v;
   try { return tiktokListingView(detail, await ttsGetProduct(accessToken, cipher, v.productId, { underReview: true })); }
   catch { return v; }
+}
+
+/**
+ * ฝากรูป 1 รูปกับ TikTok → uri (รูปสินค้า MAIN_IMAGE) — ใช้ร่วม: แก้รูปในลิ้นชัก (listing-edit) + สร้างฉบับร่าง (create-product)
+ *   "r2:<key>" = รูปในระบบ → JPG จัตุรัสพื้นขาว 1500px (/api/r2-image &sq=1) · http(s) = โหลดลิงก์นั้น · ≤ 10MB
+ * โยน Error ข้อความภาษาคน (ผู้เรียกบันทึกประวัติ/หยุดเอง)
+ */
+export async function ttsUploadRef(accessToken: string, ref: string): Promise<string> {
+  const key = ref.startsWith("r2:") ? ref.slice(3) : null;
+  const src = key ? `${publicImageUrl(key)}&w=1500&sq=1` : ref;
+  if (!/^https?:\/\//i.test(src)) throw new Error("รูปไม่ใช่รูปในระบบหรือลิงก์");
+  const res = await fetch(src, { cache: "no-store" });
+  const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim();
+  if (!res.ok || !ct.startsWith("image/")) throw new Error(`โหลดรูปไม่ได้ (HTTP ${res.status})`);
+  const bytes = await res.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > 10 * 1024 * 1024) throw new Error(`ขนาดรูป ${(bytes.byteLength / 1048576).toFixed(1)}MB ไม่อยู่ในช่วงที่ TikTok รับ (≤ 10MB)`);
+  const base = (key ?? new URL(src).pathname).split("/").pop()?.replace(/\.[a-z0-9]+$/i, "") || "image";
+  const name = `${base}.${ct === "image/png" ? "png" : ct === "image/webp" ? "webp" : "jpg"}`;
+  try { return (await ttsUploadImage(accessToken, bytes, name, ct)).uri; }
+  catch (e) { throw new Error(ttsErrorText(e)); }
 }

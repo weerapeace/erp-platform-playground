@@ -16,6 +16,10 @@ export type PlatformCreator = {
   live: boolean;
   /** ทำไมยังไม่เปิดลงจริง (โชว์ในตัวช่วย) */
   notLiveReason?: string;
+  /** "draft" = ลงเป็นฉบับร่างบนร้าน (ยังไม่ขึ้นขาย — เจ้าของกดเผยแพร่เองในหลังร้าน) · ไม่ใส่ = ลงขายตามปกติ */
+  mode?: "draft";
+  /** อธิบายสั้น ๆ ใต้ชื่อร้านในตัวช่วย */
+  note?: string;
 };
 
 /**
@@ -29,6 +33,12 @@ export const PLATFORM_CREATORS: Record<string, PlatformCreator> = {
   lazada: {
     code: "lazada", label: "Lazada", endpoint: "/api/lazada/create-product", live: LAZADA_CREATE_LIVE,
     notLiveReason: "ดูก่อนส่ง + บันทึกร่างได้ · ลงจริงเปิดเมื่อ Lazada ให้สร้างสินค้าอีกครั้ง (ปิดช่วงแคมเปญ)",
+  },
+  // TikTok Shop (เฟส D 2026-11-12 · เจ้าของเลือก "ลงเป็นร่าง"): lib/tiktok-create-plan + /api/tiktok-shop/create-product
+  //   ลงเป็นฉบับร่างเสมอ — TikTok บังคับสต๊อก ≥ 1 ตอนลงขาย (ขัดกฎไม่ส่งสต๊อกขณะ BigSeller ซิงค์)
+  tiktok: {
+    code: "tiktok", label: "TikTok Shop", endpoint: "/api/tiktok-shop/create-product", live: true, mode: "draft",
+    note: "ลงเป็นฉบับร่างใน Seller Center (ยังไม่ขึ้นขาย · ไม่ส่งสต๊อก) — ตรวจ กรอกช่องที่เหลือ ใส่สต๊อก แล้วกดเผยแพร่เอง",
   },
 };
 

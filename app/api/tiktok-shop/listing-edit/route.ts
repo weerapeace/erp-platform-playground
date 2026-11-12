@@ -16,14 +16,13 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { ttsErrorText, ttsPartialEdit, ttsUploadImage } from "@/lib/tiktok-shop";
-import { publicImageUrl } from "@/lib/line-shopping-server";
+import { ttsErrorText, ttsPartialEdit } from "@/lib/tiktok-shop";
 import {
   planTiktokDescription, planTiktokMedia, planTiktokTitle, samePkg, tiktokListingView, tiktokMediaBase, tiktokPkgFields, tiktokR2KeyOfRef, tiktokUriOfRef,
   type TiktokPkg, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadTtsListingLive, saveTtsSlimCopy, ttsGetProductRetry, ttsViewWithReview } from "../shared";
+import { loadTtsListingLive, saveTtsSlimCopy, ttsGetProductRetry, ttsUploadRef, ttsViewWithReview } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -38,9 +37,6 @@ const pkgOf = (v: unknown): TiktokPkg | null => {
   return { weight: numOrNull(o.weight), length: numOrNull(o.length), width: numOrNull(o.width), height: numOrNull(o.height) };
 };
 const strList = (v: unknown): string[] | null => (Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean) : null);
-/** รูปในระบบ → JPG จัตุรัสพื้นขาว 1500px (TikTok ปก: แนะนำพื้นขาว · 300–4000 px) */
-const uploadSource = (key: string) => `${publicImageUrl(key)}&w=1500&sq=1`;
-const MAX_BYTES = 10 * 1024 * 1024;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
@@ -102,18 +98,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (mediaPlan?.imagesChanged) {
     const toUpload = mediaPlan.images.filter((r) => tiktokR2KeyOfRef(r));
     for (const ref of toUpload) {
-      const key = tiktokR2KeyOfRef(ref)!;
       try {
-        const res = await fetch(uploadSource(key), { cache: "no-store" });
-        const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim();
-        if (!res.ok || !ct.startsWith("image/")) throw new Error(`โหลดรูปจากระบบไม่ได้ (HTTP ${res.status})`);
-        const bytes = await res.arrayBuffer();
-        if (!bytes.byteLength || bytes.byteLength > MAX_BYTES) throw new Error(`ขนาดรูป ${(bytes.byteLength / 1048576).toFixed(1)}MB ไม่อยู่ในช่วงที่ TikTok รับ (≤ 10MB)`);
-        const name = `${key.split("/").pop()?.replace(/\.[a-z0-9]+$/i, "") || "image"}.${ct === "image/png" ? "png" : ct === "image/webp" ? "webp" : "jpg"}`;
-        const r = await ttsUploadImage(live.accessToken, bytes, name, ct);
-        uploaded.set(ref, r.uri);
+        uploaded.set(ref, await ttsUploadRef(live.accessToken, ref));
       } catch (e) {
-        const error = `ฝากรูปกับ TikTok ไม่สำเร็จ (${uploaded.size + 1}/${toUpload.length}): ${ttsErrorText(e)} — ยังไม่ได้แก้สินค้า`;
+        const error = `ฝากรูปกับ TikTok ไม่สำเร็จ (${uploaded.size + 1}/${toUpload.length}): ${(e as Error).message} — ยังไม่ได้แก้สินค้า`;
         await audit({ ok: false, error, raw_error: (e as Error).message, uploaded: uploaded.size });
         return reply({ ok: false, view, error }, 502);
       }

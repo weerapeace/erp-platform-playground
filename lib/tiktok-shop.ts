@@ -208,6 +208,36 @@ export async function ttsUploadImage(accessToken: string, bytes: ArrayBuffer, fi
 }
 
 /**
+ * สร้างสินค้าใหม่ (Create Product 202309) — เฟส D ใช้ save_mode=AS_DRAFT เสมอ (ไปอยู่ฉบับร่างใน Seller Center ยังไม่ขึ้นขาย)
+ * body ประกอบที่ lib/tiktok-create-plan (รูปต้องเป็น uri ที่ฝากแล้ว) → { product_id, skus[{ id, seller_sku }], warnings[] }
+ */
+export async function ttsCreateProduct(accessToken: string, shopCipher: string, body: Record<string, unknown>): Promise<{ productId: string; skus: { id: string | null; seller_sku: string | null }[]; warnings: string[] }> {
+  const d = await ttsApi("POST", "/product/202309/products", accessToken, { query: { shop_cipher: shopCipher }, body, scope: PRODUCT_WRITE_SCOPE });
+  const productId = str(d.product_id);
+  if (!productId) throw new TtsApiError("TikTok ไม่ส่งรหัสสินค้ากลับมา", "no_product_id");
+  const skus = (Array.isArray(d.skus) ? d.skus as Record<string, unknown>[] : []).map((s) => ({ id: str(s.id), seller_sku: str(s.seller_sku) }));
+  const warnings = (Array.isArray(d.warnings) ? d.warnings as Record<string, unknown>[] : []).map((w) => str(w.message)).filter((x): x is string => !!x);
+  return { productId, skus, warnings };
+}
+/** ช่องของหมวด (Get Attributes 202309) — ช่องขาย (SALES_PROPERTY) + ช่องสินค้า (PRODUCT_PROPERTY · is_requried สะกดตามเอกสาร) */
+export async function ttsGetCategoryAttributes(accessToken: string, shopCipher: string, categoryId: string): Promise<Record<string, unknown>[]> {
+  const d = await ttsApi("GET", `/product/202309/categories/${encodeURIComponent(categoryId)}/attributes`, accessToken, {
+    query: { shop_cipher: shopCipher, category_version: "v2", locale: "th-TH" }, scope: PRODUCT_SCOPE,
+  });
+  return Array.isArray(d.attributes) ? d.attributes as Record<string, unknown>[] : [];
+}
+/** แบรนด์ที่ร้านใช้ได้ (Get Brands 202309) ค้นด้วยชื่อขึ้นต้น · ระบุหมวด = บอกว่าใช้ในหมวดนั้นได้ไหม */
+export async function ttsGetBrands(accessToken: string, shopCipher: string, opts: { brandName?: string; categoryId?: string | null }): Promise<{ id: string; name: string; authorized: string | null; available: string | null }[]> {
+  const query: Record<string, string> = { shop_cipher: shopCipher, page_size: "100", category_version: "v2" };
+  if (opts.brandName) query.brand_name = opts.brandName;
+  if (opts.categoryId) query.category_id = opts.categoryId;
+  const d = await ttsApi("GET", "/product/202309/brands", accessToken, { query, scope: PRODUCT_SCOPE });
+  return (Array.isArray(d.brands) ? d.brands as Record<string, unknown>[] : [])
+    .map((b) => ({ id: str(b.id) ?? "", name: str(b.name) ?? "", authorized: str(b.authorized_status), available: str(b.brand_status) }))
+    .filter((b) => b.id && b.name);
+}
+
+/**
  * แก้ราคาต่อตัวเลือก (Update Price 202309) — มีผลทันที ไม่ต้องรอตรวจ · ทุก SKU ต้องอยู่สินค้าเดียวกัน · สินค้าต้อง ACTIVATE และไม่อยู่ในโปรโมชัน
  * price.amount = ราคาแสดงก่อนส่วนลด (ร้านไทย) · ไทย 30–260,000 ทศนิยม 2 (planTiktokPrices ตรวจก่อนแล้ว) · data ตอบว่างเสมอ
  */

@@ -115,8 +115,8 @@ export function lazDescriptionHtml(raw: string): string {
 const SIZE_NAME = /^(size|ไซส์|ไซซ์|ขนาด)/i;
 const COLOR_NAME = /color/i;
 
-/** ตัวสี (master) / ตัวขาย — กติกาเดียวกับ LINE (lib/line-create-payload) */
-function splitSkus(rows: LazCreateSku[]) {
+/** ตัวสี (master) / ตัวขาย — กติกาเดียวกับ LINE (lib/line-create-payload) · ใช้ร่วมกับตัวสร้าง TikTok (lib/tiktok-create-plan) */
+export function splitSkus<T extends Pick<LazCreateSku, "code" | "is_active" | "sale_ok">>(rows: T[]) {
   const act = rows.filter((s) => s.is_active);
   const byCode = new Map(act.map((s) => [s.code, s]));
   const baseOf = (code: string): string | null => { const m = code.match(/^(.*\d)[A-Za-z]+$/); return m ? m[1] : null; };

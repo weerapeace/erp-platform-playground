@@ -19,7 +19,7 @@
  *   ไม่ให้เลือกร้านต้นทางเป็นปลายทาง · เข้าขั้น 2 = คัดลอกข้อมูลจากร้านต้นทางลงร่าง LINE (ค่าเริ่ม) ทีละตัว
  *   → ตารางจับคู่ CopyMappingTable (เปลี่ยนแหล่งรายช่อง / เติมราคาที่ว่าง) อยู่เหนือหน้าดูก่อนส่ง · ลงจริงใช้ create-product เดิม (อ่านร่าง)
  * ลงทุกร้านในครั้งเดียว (เจ้าของอนุมัติ 2026-11-10 เฟส A+B): ร้านที่ลงจริงได้/ดูก่อนส่งได้ มาจากทะเบียนกลาง lib/platform-create-registry
- *   ขั้น 2 = แท็บต่อร้าน (LINE: LineCreatePreviewEditor · Lazada: LazadaCreatePreviewEditor) · ขั้น 3 ลงทุกร้านในรอบเดียว + ผลแยกร้าน
+ *   ขั้น 2 = แท็บต่อร้าน (LINE: LineCreatePreviewEditor · Lazada: LazadaCreatePreviewEditor · TikTok: TiktokCreatePreviewEditor — ลงเป็นฉบับร่าง) · ขั้น 3 ลงทุกร้านในรอบเดียว + ผลแยกร้าน
  *   Lazada ยังไม่เปิดลงจริง (LAZADA_CREATE_LIVE) → ดูก่อนส่ง + บันทึกร่าง · ร้านใหม่ = เพิ่มแถวในทะเบียน + หน้าดูก่อนส่งของร้านนั้น
  * กันซ้ำ: ข้ามตัวที่มีบนร้านแล้ว (on_shop / ร่างมีรหัส) · ลงจริงทีละตัว · server ล็อกระหว่างสร้าง · ลงจริง > 20 ต้องพิมพ์ยืนยัน
  * สิทธิ์: บันทึกร่าง = products.platforms.edit · ลงจริง = products.platforms.publish · สร้างงาน = tasks.create
@@ -37,6 +37,7 @@ import { LineCreatePreviewEditor } from "./line-create-preview";
 import { LineStorefrontPreview } from "./line-storefront-preview";
 import type { LineCreatePreview } from "@/lib/line-create-payload";
 import type { LazCreatePreview } from "@/lib/lazada-create-plan";
+import type { TtsCreatePreview } from "@/lib/tiktok-create-plan";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
 import { creatorOf, hasCreatePreview, liveCreateEndpoint } from "@/lib/platform-create-registry";
@@ -52,6 +53,8 @@ const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").th
 const CopyMappingTable = dynamic(() => import("./copy-mapping-table").then((m) => m.CopyMappingTable), { ssr: false });
 // หน้าดูก่อนส่งของ Lazada — โหลดเมื่อเลือก Lazada เท่านั้น
 const LazadaCreatePreviewEditor = dynamic(() => import("./lazada-create-preview").then((m) => m.LazadaCreatePreviewEditor), { ssr: false });
+// หน้าดูก่อนส่งของ TikTok (ลงเป็นฉบับร่าง) — โหลดเมื่อเลือก TikTok เท่านั้น
+const TiktokCreatePreviewEditor = dynamic(() => import("./tiktok-create-preview").then((m) => m.TiktokCreatePreviewEditor), { ssr: false });
 
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
@@ -256,6 +259,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const onLazLoaded = useCallback((pv: LazCreatePreview, blockers: string[]) => {
     setPvState((s) => ({ ...s, [`lazada:${pv.parent_id}`]: pv.missing.length + blockers.filter((b) => !b.startsWith("มีบน Lazada")).length }));
   }, []);
+  const onTtLoaded = useCallback((pv: TtsCreatePreview, blockers: string[]) => {
+    setPvState((s) => ({ ...s, [`tiktok:${pv.parent_id}`]: pv.missing.length + blockers.filter((b) => !b.startsWith("มีบน TikTok")).length }));
+  }, []);
   const onPvLoaded = useCallback((pv: LineCreatePreview) => {
     setPvState((s) => ({ ...s, [`line_shopping:${pv.parent_id}`]: pv.missing.length + pv.blockers.filter((b) => !b.startsWith("มีบน LINE")).length }));
   }, []);
@@ -313,7 +319,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             const gfText = gf?.manual && gf.want ? ` · ของขวัญ: ไปติ๊กเองใน LINE (${gf.want.status === "gift_only" ? "เฉพาะของขวัญ" : "เปิด"}${gf.want.categories.length ? ` · ${gf.want.categories.join(", ")}` : ""})` : "";
             const dp = j.display as { ok: boolean; status: "onsale" | "hide" } | null | undefined;
             const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : " · ตั้งเปิด/ปิดขายไม่สำเร็จ") : "";
-            res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
+            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/ใส่สต๊อก แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
+            else res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
           }
         } catch (e) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${(e as Error).message}` }); }
         setProgress({ done: i + 1, total: toCreate.length, label: "กำลังลงบนร้าน" });
@@ -401,17 +408,18 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                       <label className="flex min-w-[10rem] flex-1 cursor-pointer items-center gap-2">
                         <input type="checkbox" checked={on} onChange={() => togglePick(p.code)} />
                         <PlatformIcon code={p.code} iconKey={p.icon_key} size={20} /><span className="text-sm font-medium">{p.name_th}</span>
-                        <span className="text-[11px] text-emerald-700">ลงบนร้านจริงได้</span>
+                        <span className="text-[11px] text-emerald-700">{creatorOf(p.code)?.mode === "draft" ? "ลงเป็นฉบับร่างบนร้านได้" : "ลงบนร้านจริงได้"}</span>
                       </label>
                       {canPublish ? (
                         <select value={real.has(p.code) ? "real" : "draft"} disabled={!on}
                           onChange={(e) => setReal((s) => { const n = new Set(s); if (e.target.value === "real") n.add(p.code); else n.delete(p.code); return n; })}
                           className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs disabled:opacity-50">
-                          <option value="real">ลงบนร้านจริง</option>
+                          <option value="real">{creatorOf(p.code)?.mode === "draft" ? "ลงเป็นฉบับร่างบนร้าน" : "ลงบนร้านจริง"}</option>
                           <option value="draft">บันทึกร่างอย่างเดียว</option>
                         </select>
                       ) : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">บันทึกร่าง · ลงจริงต้องมีสิทธิ์ลงขาย</span>}
                     </div>
+                    {creatorOf(p.code)?.note && <p className="mt-1 pl-6 text-[11px] text-sky-700">{creatorOf(p.code)!.note}</p>}
                     {on && realOn(p) && <p className="mt-1 pl-6 text-[11px] text-slate-500">ขั้นถัดไปจะเห็นทุกอย่างที่จะส่งขึ้นร้าน (รูป ชื่อ หมวด รายละเอียด ราคา สต๊อก) ว่ามาจากไหน และแก้ได้ก่อนลง</p>}
                   </div>
                 );
@@ -524,6 +532,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                         ? <p className="py-3 text-center text-xs text-slate-500">ข้ามตัวนี้ — จะไม่ลงร้าน</p>
                         : activePf.code === "lazada" ? (
                           <LazadaCreatePreviewEditor key={`laz:${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} onLoaded={onLazLoaded} />
+                        ) : activePf.code === "tiktok" ? (
+                          <TiktokCreatePreviewEditor key={`tts:${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} onLoaded={onTtLoaded} />
                         ) : (
                           <>
                             {/* ลงร้านอื่น: ตารางจับคู่ช่อง (ร้านต้นทาง / ข้อมูลในระบบ) — ใช้แล้วหน้าดูก่อนส่งด้านล่างโหลดใหม่ */}
