@@ -3,7 +3,7 @@
 // ============================================================
 // FlowchartBoard — กระดาน flowchart กลาง (ของกลาง · ใช้ React Flow / @xyflow/react)
 //
-// กล่อง 7 ชนิด (เริ่ม/จบ · ขั้นตอน · คำถาม ใช่/ไม่ใช่ · ที่เก็บ · ไฟล์ (ไอคอนประเภทไฟล์กลาง) · โฟลเดอร์ · โน้ต) + เส้นต่อหักมุมอัตโนมัติ
+// กล่อง 9 ชนิด (เริ่ม/จบ · ขั้นตอน · คำถาม ใช่/ไม่ใช่ · ที่เก็บ · ไฟล์ (ไอคอนประเภทไฟล์กลาง) · โฟลเดอร์ · หน้าใน ERP (เลือกจากเมนูจริง) · โน้ต · กรอบโซน) + เส้นต่อหักมุมอัตโนมัติ
 // เส้นติดกล่องเสมอ · กล่องเข้าแถวตามตาราง · ย่อขยายกล่องได้ · เปลี่ยนสีได้ · ย้อนกลับ/ทำซ้ำ (Ctrl+Z / Ctrl+Y)
 // คัดลอก/ตัด/วาง (Ctrl+C / X / V · วางข้ามหน้า/ข้ามแท็บได้ · วางข้อความจากที่อื่น = กล่องใหม่) · ทำซ้ำ Ctrl+D · เลือกทั้งหมด Ctrl+A
 // เลือกหลายกล่อง: Shift/Ctrl+คลิก หรือ Shift+ลากคลุม → แถบเครื่องมือกลุ่ม (สี · คัดลอก · ทำซ้ำ · ลบ)
@@ -30,6 +30,8 @@ import { LoadingState, ErrorState, EmptyState } from "@/components/state-views";
 import { askText } from "@/components/modal/ask-dialog";
 import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
 import { FileTypePickerModal } from "@/components/file-type-icon";
+import { MenuPagePickerModal, useMenuPages } from "@/components/menu-page-picker";
+import { findMenuPage } from "@/lib/menu-pages";
 import { guessPlace, storagePlaceOf } from "@/lib/storage-places";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { StoragePlaceModal } from "./place-modal";
@@ -37,7 +39,7 @@ import { apiFetch } from "@/lib/api";
 import { htmlToPngBlob, fitImageScale, imageFileName } from "@/lib/html-to-png";
 import { downloadBlob } from "@/lib/image-clipboard";
 import {
-  EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText,
+  EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText, splitFlowLabel,
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
   flowIconScale, iconBoxBaseSize, nextIconScale, nodesInsideZone, refitIconBox, resizeIconBox, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
 } from "@/lib/flowchart";
@@ -122,6 +124,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [folderOpen, setFolderOpen] = useState(false);
   const [filePick, setFilePick] = useState<{ id: string | null } | null>(null);
   const [placePick, setPlacePick] = useState<{ id: string | null } | null>(null);   // ป๊อปเลือกที่เก็บ (id = เปลี่ยนกล่องเดิม · null = เพิ่มใหม่)   // ป๊อปเลือกประเภทไฟล์ (id = แก้กล่องเดิม · null = เพิ่มใหม่)
+  const [pagePick, setPagePick] = useState<{ id: string | null } | null>(null);     // ป๊อปเลือกหน้าใน ERP (id = เปลี่ยนกล่องเดิม · null = เพิ่มใหม่)
   const [exporting, setExporting] = useState(false);
   const [, setHistTick] = useState(0);
   const [clipReady, setClipReady] = useState(false);          // มีกล่องที่คัดลอกไว้ (โชว์ปุ่ม "วาง")
@@ -461,10 +464,20 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // กล่องที่เลือก — คงตัวเดิมไว้ถ้าการเลือกไม่เปลี่ยน (ลากกล่องอยู่ ไม่ต้องวาดทุกกล่องใหม่)
   const selKey = nodes.filter((n) => n.selected).map((n) => n.id).join("|");
   const selectedIds = useMemo(() => (selKey ? selKey.split("|") : []), [selKey]);
+  // กล่อง "หน้าใน ERP": โหลดเมนูจริงเฉพาะตอนกระดานมีกล่องนี้ (แคชเดียวกับแถบเมนู) → ชื่อแอปล่าสุด + เตือนถ้าหน้าหลุดจากเมนู
+  const hasPage = nodes.some((n) => n.type === "page");
+  const menu = useMenuPages(hasPage);
   const actions = useMemo<FlowBoardActions>(() => ({
     readOnly, t, openFolder, selectedIds,
     editFileTypes: (id) => setFilePick({ id }),
     editPlace: (id) => setPlacePick({ id }),
+    editPage: (id) => setPagePick({ id }),
+    openPage: (href) => { window.open(href, "_blank", "noopener"); },
+    pageInfo: (href, app) => {
+      if (menu.status !== "ready") return null;
+      const p = findMenuPage(menu.menus, menu.apps, href, app);
+      return p ? { appName: p.app ? p.appName : "", appIcon: p.appIcon, missing: false } : { appName: "", appIcon: null, missing: true };
+    },
     copyNodes: (ids) => opsRef.current.copyNodes(ids),
     duplicateNodes: (ids) => opsRef.current.duplicateNodes(ids),
     removeNodes: (ids) => opsRef.current.removeNodes(ids),
@@ -493,7 +506,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps]);
 
   // ── บันทึกเป็นรูป (ตัวแปลงกลาง lib/html-to-png) ──
   const exportImage = async () => {
@@ -517,6 +530,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
 
   const filePickNode = filePick?.id ? nodes.find((n) => n.id === filePick.id) ?? null : null;
   const placePickNode = placePick?.id ? nodes.find((n) => n.id === placePick.id) ?? null : null;
+  const pagePickNode = pagePick?.id ? nodes.find((n) => n.id === pagePick.id) ?? null : null;
   const tb = "inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[12px] text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent";
   const dirty = canEdit && sig !== savedSigRef.current;
 
@@ -529,7 +543,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             const m = FLOW_KIND_META[k];
             return (
               <button key={k} type="button" className={tb} title={t(m.hintTh, m.hintEn)}
-                onClick={() => (k === "folder" ? setFolderOpen(true) : k === "file" ? setFilePick({ id: null }) : k === "storage" ? setPlacePick({ id: null }) : addNode(k))}>
+                onClick={() => (k === "folder" ? setFolderOpen(true) : k === "file" ? setFilePick({ id: null }) : k === "storage" ? setPlacePick({ id: null }) : k === "page" ? setPagePick({ id: null }) : addNode(k))}>
                 <Icon value={m.icon} />{t(m.th, m.en)}
               </button>
             );
@@ -630,6 +644,25 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             if (next) data.place = next.key; else delete data.place;
             if (next && (!n.data.label.trim() || defaults.includes(n.data.label))) data.label = t(next.th, next.en);   // ชื่อเดิมเป็นค่าตั้งต้น → ใช้ชื่อที่เก็บใหม่
             return { ...n, data, ...refitIconBox(boxOf(n), data) };
+          }));
+        }} />
+
+      {/* กล่อง "หน้าใน ERP": เลือกหน้าจากเมนูจริง (ของกลาง components/menu-page-picker) — ปุ่ม "หน้าใน ERP" = สร้างใหม่ · "เปลี่ยนหน้า" บนกล่อง = เปลี่ยน */}
+      <MenuPagePickerModal open={!!pagePick} onClose={() => setPagePick(null)}
+        current={pagePickNode ? { href: pagePickNode.data.href, app: pagePickNode.data.app ?? "" } : null}
+        onPick={(p) => {
+          const id = pagePick?.id;
+          setPagePick(null);
+          const page: Partial<FlowNodeData> = { href: p.href, app: p.app || undefined, appName: p.app ? p.appName : undefined, icon: p.icon || undefined };
+          if (!id) { addNode("page", { label: p.label, ...page }); return; }
+          setNodes((ns) => ns.map((n) => {
+            if (n.id !== id) return n;
+            const { sub } = splitFlowLabel(n.data.label);   // เปลี่ยนหน้า = หัวข้อเป็นชื่อหน้าใหม่ · บรรทัดคำอธิบายที่พิมพ์ไว้คงเดิม
+            const data: FlowNodeData = { ...n.data, ...page, label: sub ? `${p.label}\n${sub}` : p.label };
+            if (!data.app) delete data.app;
+            if (!data.appName) delete data.appName;
+            if (!data.icon) delete data.icon;
+            return { ...n, data };
           }));
         }} />
     </FlowBoardCtx.Provider>

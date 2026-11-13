@@ -8,8 +8,9 @@
 
 import { cleanExtList } from "./file-types";
 import { isPlaceKey, storagePlaceOf } from "./storage-places";
+import { isAppKey, isErpPageHref } from "./menu-pages";
 
-export const FLOW_KINDS = ["start", "step", "question", "storage", "file", "folder", "note", "zone"] as const;
+export const FLOW_KINDS = ["start", "step", "question", "storage", "file", "folder", "page", "note", "zone"] as const;
 export type FlowKind = (typeof FLOW_KINDS)[number];
 
 export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
@@ -34,13 +35,15 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
   storage:  { w: 180, h: 96,  color: "violet",  th: "ที่เก็บ",      en: "Storage",     hintTh: "ที่เก็บไฟล์/ข้อมูล เช่น R2 · Supabase · Drive", hintEn: "Where files/data live, e.g. R2 · Supabase · Drive", icon: "i:database" },
   file:     { w: 200, h: 120, color: "slate",   th: "ไฟล์",         en: "File",        hintTh: "ประเภทไฟล์ เช่น JPG · CR2 · PSD · AI · PDF (เลือกได้หลายชนิด)", hintEn: "File types, e.g. JPG · CR2 · PSD · AI · PDF (pick several)", icon: "i:files" },
   folder:   { w: 220, h: 64,  color: "cyan",    th: "โฟลเดอร์",     en: "Folder",      hintTh: "ทางลัด ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง", hintEn: "Shortcut — double-click opens a local folder", icon: "i:folder" },
+  page:     { w: 220, h: 80,  color: "emerald", th: "หน้าใน ERP",   en: "ERP page",    hintTh: "บอกว่าดูไฟล์ได้ที่หน้าไหนในระบบ — เลือกจากเมนูจริง · กด เปิด ↗ บนกล่อง = ไปหน้านั้น", hintEn: "Shows which ERP page has these files — picked from the real menu · click Open ↗ to go there", icon: "i:apps" },
   note:     { w: 220, h: 110, color: "amber",   th: "โน้ต",         en: "Note",        hintTh: "จดอธิบายเพิ่ม", hintEn: "Extra notes", icon: "i:notes" },
   zone:     { w: 480, h: 320, color: "blue",    th: "กรอบโซน",      en: "Zone",        hintTh: "กรอบใหญ่ครอบหลายกล่อง เช่น ในออฟฟิศ / บนคลาวด์ — ลากหัวกรอบ = ย้ายทั้งกลุ่ม", hintEn: "Big frame around boxes, e.g. Office / Cloud — drag its title to move everything inside", icon: "i:circle-dashed" },
 };
 
 /** exts = นามสกุลไฟล์ของกล่อง "ไฟล์" (เช่น ["cr2","jpg"]) — ไอคอน/สีจาก lib/file-types */
 /** place = ที่เก็บของกล่อง "ที่เก็บ" (drive · r2 · supabase · nas ...) — ไอคอน/ชื่อจาก lib/storage-places · ไม่มี = ทรงกระบอกเดิม */
-export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string };
+/** href/app/appName/icon = กล่อง "หน้าใน ERP": ลิงก์หน้าในระบบ (ขึ้นต้น "/") · รหัสแอป · ชื่อแอปตอนเลือก · ไอคอนเมนู — เลือกจากเมนูจริง (lib/menu-pages) */
+export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string };
 export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[] };
@@ -83,6 +86,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     const exts = cleanExtList(d.exts);
     if (exts.length) data.exts = exts;
     if (isPlaceKey(d.place)) data.place = d.place;
+    if (o.type === "page") Object.assign(data, cleanPageData(d));
     nodes.push({ id, type: o.type, position: { x: num(pos.x, 0), y: num(pos.y, 0) }, width: Math.max(40, num(o.width, meta.w)), height: Math.max(30, num(o.height, meta.h)), data });
     ids.add(id);
   }
@@ -96,6 +100,16 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     eids.add(id);
   }
   return { kind: "flowchart", v: 1, nodes, edges };
+}
+
+/** ช่องของกล่อง "หน้าใน ERP" ที่ผ่านการตรวจ (ลิงก์ต้องเป็นหน้าในระบบเท่านั้น — กันลิงก์แปลก/javascript:) */
+function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | "app" | "appName" | "icon"> {
+  const out: Pick<FlowNodeData, "href" | "app" | "appName" | "icon"> = {};
+  if (isErpPageHref(d.href)) out.href = d.href;
+  if (isAppKey(d.app)) out.app = d.app;
+  if (typeof d.appName === "string" && d.appName.trim()) out.appName = d.appName.trim().slice(0, 80);
+  if (typeof d.icon === "string" && d.icon.trim() && d.icon.length <= 120) out.icon = d.icon.trim();
+  return out;
 }
 
 /** โหนด/เส้นของ React Flow (มีค่าระหว่างใช้งาน เช่น selected/dragging/measured) → FlowScene สำหรับบันทึก */
@@ -224,7 +238,10 @@ export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (t
     id: newFlowId("n"), type: kind,
     position: { x: snap(at.x - w / 2), y: snap(at.y - h / 2) },
     width: w, height: h,
-    data: { label: data?.label ?? defLabel, ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}), ...(exts.length ? { exts } : {}), ...(place ? { place } : {}) },
+    data: {
+      label: data?.label ?? defLabel, ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}), ...(exts.length ? { exts } : {}), ...(place ? { place } : {}),
+      ...(kind === "page" && data ? cleanPageData(data as Record<string, unknown>) : {}),
+    },
   };
 }
 
@@ -323,8 +340,8 @@ export function flowClipText(clip: FlowClip): string {
   return [...clip.nodes]
     .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
     .map((n) => [
-      n.data.label.split("\n").map((s) => s.trim()).filter(Boolean).join(" · ") + (n.data.exts?.length ? ` (${n.data.exts.map((e) => e.toUpperCase()).join(", ")})` : ""),
-      n.data.path,
+      n.data.label.split("\n").map((s) => s.trim()).filter(Boolean).join(" · ") + (n.data.exts?.length ? ` (${n.data.exts.map((e) => e.toUpperCase()).join(", ")})` : "") + (n.data.appName ? ` (${n.data.appName})` : ""),
+      n.data.path, n.data.href,
     ].filter(Boolean).join(" — "))
     .filter(Boolean)
     .join("\n");

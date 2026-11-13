@@ -12,7 +12,20 @@ import type { FlowScene } from "@/lib/flowchart";
 
 const KEY = "flowchart-board-preview";
 
-/** ดัก fetch เฉพาะ /api/canvas-sketch (ของหน้าทดลองนี้เท่านั้น) */
+/** เมนูตัวอย่าง (ป๊อปเลือก "หน้าใน ERP") — ของจริงมาจาก /api/menu + /api/menu/apps */
+const MOCK_APPS = [
+  { key: "tasks", label: "จัดการงาน", icon: "✅", sort_order: 1 },
+  { key: "master", label: "Master Data", icon: "📦", sort_order: 2 },
+  { key: "design", label: "ออกแบบ", icon: "🎨", sort_order: 9 },
+];
+const MOCK_MENUS = [
+  { href: "/master/design-dashboard", label: "Design Dashboard", icon: "📋", app_keys: ["design", "tasks"], is_active: true, sort_order: 1 },
+  { href: "/master/assets", label: "คลังไฟล์กลาง", icon: "🗂️", app_keys: ["master"], is_active: true, sort_order: 1 },
+  { href: "/master/skus", label: "SKUs", icon: "🏷️", app_keys: ["master"], is_active: true, sort_order: 2 },
+  { href: "/tasks", label: "งานทั้งหมด", icon: "✅", app_keys: ["tasks"], is_active: true, sort_order: 2 },
+];
+
+/** ดัก fetch เฉพาะ /api/canvas-sketch + /api/menu (ของหน้าทดลองนี้เท่านั้น) */
 function installMock(viewer: boolean) {
   const w = window as unknown as { __fcMock?: boolean };
   if (w.__fcMock) return;
@@ -20,8 +33,11 @@ function installMock(viewer: boolean) {
   const orig = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (!url.includes("/api/canvas-sketch")) return orig(input, init);
     const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { "Content-Type": "application/json" } });
+    const path = url.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
+    if (path === "/api/menu") return json({ data: MOCK_MENUS, error: null });
+    if (path === "/api/menu/apps") return json({ data: MOCK_APPS, error: null });
+    if (!url.includes("/api/canvas-sketch")) return orig(input, init);
     let st: { scene: unknown; rev: number } = { scene: null, rev: 0 };
     try { st = JSON.parse(localStorage.getItem(KEY) ?? "") ?? st; } catch { /* ว่าง */ }
     if ((init?.method ?? "GET").toUpperCase() === "PUT") {
@@ -43,12 +59,14 @@ const sample = (t: (th: string, en: string) => string): FlowScene => ({
     { id: "a", type: "step", position: { x: 520, y: 20 }, width: 180, height: 64, data: { label: t("แพ็กของ\nภายในวันนี้", "Pack\ntoday") } },
     { id: "b", type: "step", position: { x: 520, y: 220 }, width: 180, height: 64, data: { label: t("เปิดใบขอซื้อ", "Open purchase request"), color: "rose" } },
     { id: "d", type: "storage", position: { x: 780, y: 10 }, width: 180, height: 90, data: { label: t("Supabase\nเก็บใบส่งของ", "Supabase\ndelivery notes"), color: "emerald" } },
+    { id: "p", type: "page", position: { x: 1040, y: 14 }, width: 220, height: 80, data: { label: "Design Dashboard", href: "/master/design-dashboard", app: "design", appName: "ออกแบบ", icon: "📋" } },
   ],
   edges: [
     { id: "e1", source: "s", target: "q", sourceHandle: "r", targetHandle: "l", label: "" },
     { id: "e2", source: "q", target: "a", sourceHandle: "t", targetHandle: "l", label: t("ใช่", "Yes") },
     { id: "e3", source: "q", target: "b", sourceHandle: "b", targetHandle: "l", label: t("ไม่ใช่", "No") },
     { id: "e4", source: "a", target: "d", sourceHandle: "r", targetHandle: "l", label: "" },
+    { id: "e5", source: "d", target: "p", sourceHandle: "r", targetHandle: "l", label: "" },
   ],
 });
 

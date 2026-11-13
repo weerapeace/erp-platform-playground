@@ -33,6 +33,12 @@ export type FlowBoardActions = {
   editFileTypes: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปเลือกไอคอนที่เก็บ (Google Drive · R2 · NAS ...) */
   editPlace: (id: string) => void;
+  /** กล่อง "หน้าใน ERP": เปิดป๊อปเลือกหน้าจากเมนูจริง (components/menu-page-picker) */
+  editPage: (id: string) => void;
+  /** เปิดหน้าใน ERP (แท็บใหม่ — แผนผังยังเปิดค้างไว้) */
+  openPage: (href: string) => void;
+  /** ชื่อแอปล่าสุด + หน้ายังอยู่ในเมนูไหม (จากเมนูจริง) · null = ยังโหลดเมนูไม่เสร็จ (ใช้ค่าที่จำไว้ในกล่อง) */
+  pageInfo: (href: string, app?: string) => { appName: string; appIcon: string | null; missing: boolean } | null;
   /** กล่องที่เลือกอยู่ (ไว้ซ่อนแถบเครื่องมือรายกล่องตอนเลือกหลายกล่อง — ใช้แถบกลุ่มแทน) */
   selectedIds: string[];
   setColor: (ids: string[], color: FlowColor) => void;
@@ -100,7 +106,7 @@ function InlineEditor({ initial, onDone, folder, zone }: { initial: FlowNodeData
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, iconScaleOf, stepIconScale } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale } = useBoard();
   const cur = single ? nodeColor(single.kind, single.data) : null;
   const iconScale = iconScaleOf(ids);
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
@@ -120,6 +126,9 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
           <button type="button" className={btn} onClick={() => editFileTypes(ids[0])} title={t("ใส่ไอคอนประเภทไฟล์ที่เก็บที่นี่", "Show which file types live here")}><Icon value="i:files" />{t("ไฟล์", "Files")}</button>
         </>
       )}
+      {single?.kind === "page" && (
+        <button type="button" className={btn} onClick={() => editPage(ids[0])} title={t("เลือกหน้าอื่นจากเมนู", "Pick another page from the menu")}><Icon value="i:arrows-exchange" />{t("เปลี่ยนหน้า", "Change page")}</button>
+      )}
       {iconScale !== null && (
         <>
           <span className="mx-1 h-5 w-px bg-slate-200" />
@@ -135,6 +144,7 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
       <button type="button" className={btn} onClick={() => copyNodes(ids)} title={t("คัดลอก (Ctrl+C) แล้วไปวางที่อื่นด้วย Ctrl+V — วางในกระดานหน้าอื่นได้", "Copy (Ctrl+C), then paste elsewhere with Ctrl+V")}><Icon value="i:copy" />{t("คัดลอก", "Copy")}</button>
       <button type="button" className={btn} onClick={() => duplicateNodes(ids)} title={t("ทำซ้ำข้าง ๆ ทันที (Ctrl+D)", "Duplicate right here (Ctrl+D)")}><Icon value="i:stack-2" />{t("ทำซ้ำ", "Duplicate")}</button>
       {single?.kind === "folder" && single.data.path && <button type="button" className={btn} onClick={() => openFolder(single.data.path!)}><Icon value="i:folder-open" />{t("เปิด", "Open")}</button>}
+      {single?.kind === "page" && single.data.href && <button type="button" className={btn} onClick={() => openPage(single.data.href!)} title={t("เปิดหน้านี้ในแท็บใหม่", "Open this page in a new tab")}><Icon value="i:external-link" />{t("เปิด", "Open")}</button>}
       <button type="button" className={`${btn} hover:bg-rose-50 hover:text-rose-600`} onClick={() => removeNodes(ids)} title={t("ลบ (หรือกด Delete)", "Delete (or press Delete)")}><Icon value="i:trash" /></button>
     </div>
   );
@@ -160,14 +170,15 @@ function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
-  const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes } = useBoard();
+  const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
   const pal = FLOW_PALETTE[color];
   const [editing, setEditing] = useState(false);
   const meta = FLOW_KIND_META[kind];
-  const startEdit = () => (kind === "file" ? editFileTypes(id) : setEditing(true));   // กล่องไฟล์ = ป๊อปเลือกประเภท
+  // กล่องไฟล์ = ป๊อปเลือกประเภท · กล่องหน้าใน ERP ที่ยังไม่ได้เลือกหน้า = ป๊อปเลือกหน้า (เลือกแล้ว = แก้ข้อความ)
+  const startEdit = () => (kind === "file" ? editFileTypes(id) : kind === "page" && !data.href ? editPage(id) : setEditing(true));
 
   const place = kind === "storage" ? storagePlaceOf(data.place) : null;
 
@@ -235,6 +246,34 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         </div>
       </div>
     );
+  } else if (kind === "page") {
+    // หน้าใน ERP: แถวบน = แอป + ปุ่ม "เปิด ↗" · ล่าง = ไอคอนเมนู + ชื่อหน้า (ชื่อแอปล่าสุดจากเมนูจริง · ยังโหลดไม่เสร็จ = ชื่อที่จำไว้)
+    const info = data.href ? pageInfo(data.href, data.app) : null;
+    const appName = (info && !info.missing ? info.appName : data.appName) || "";
+    content = (
+      <div className="pointer-events-none flex w-full min-w-0 flex-col gap-1 text-left">
+        <div className="flex min-w-0 items-center gap-1 text-[10.5px] font-medium" style={{ color: pal.sub }}>
+          <span className="shrink-0">{info?.appIcon ? <Icon value={info.appIcon} /> : <Icon value="i:apps" />}</span>
+          <span className="min-w-0 flex-1 truncate">{appName ? t(`แอป ${appName}`, `App: ${appName}`) : t("หน้าใน ERP", "ERP page")}</span>
+          {data.href && (
+            <a href={data.href} target="_blank" rel="noopener noreferrer"
+              className="nodrag nopan pointer-events-auto inline-flex h-5 shrink-0 items-center gap-0.5 rounded-full border bg-white px-1.5 text-[10.5px] font-medium hover:shadow-sm"
+              style={{ borderColor: pal.stroke, color: pal.text }}
+              title={t(`เปิด ${data.href} ในแท็บใหม่`, `Open ${data.href} in a new tab`)}
+              onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+              {t("เปิด", "Open")}<Icon value="i:external-link" />
+            </a>
+          )}
+        </div>
+        <div className="flex min-w-0 items-start gap-1.5">
+          {data.icon && <span className="shrink-0 text-[15px] leading-[1.25]"><Icon value={data.icon} /></span>}
+          <div className="min-w-0 flex-1"><LabelText label={data.label} color={color} align="left" /></div>
+        </div>
+        {!data.href
+          ? <div className="text-[10.5px] text-amber-700"><Icon value="i:alert-triangle" /> {t("ยังไม่ได้เลือกหน้า — กด \"เปลี่ยนหน้า\"", "No page chosen — click \"Change page\"")}</div>
+          : info?.missing && <div className="text-[10.5px] text-amber-700" title={data.href}><Icon value="i:alert-triangle" /> {t("หน้านี้ไม่อยู่ในเมนูแล้ว", "This page is no longer in the menu")}</div>}
+      </div>
+    );
   } else if (kind === "file") {
     const exts = data.exts?.length ? data.exts : [""];
     const size = icons.file;
@@ -262,9 +301,10 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
       <div
         className={`fc-node relative flex h-full w-full justify-center ${kind === "note" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
         style={{ ...boxStyle, padding: pad }}
-        title={kind === "folder" ? t(meta.hintTh, meta.hintEn) : undefined}
+        title={kind === "folder" ? t(meta.hintTh, meta.hintEn) : kind === "page" && data.href ? t(`ดับเบิลคลิก = เปิดหน้า ${data.href}`, `Double-click to open ${data.href}`) : undefined}
         onDoubleClick={(e) => {
           if (kind === "folder") { if (data.path) openFolder(data.path); return; }   // โฟลเดอร์: ดับเบิลคลิก = เปิด (แก้ผ่านปุ่ม "แก้")
+          if (kind === "page" && data.href) { e.stopPropagation(); openPage(data.href); return; }   // หน้าใน ERP: ดับเบิลคลิก = เปิดหน้า (แก้ผ่านปุ่มบนแถบ)
           if (readOnly) return;
           e.stopPropagation(); startEdit();
         }}

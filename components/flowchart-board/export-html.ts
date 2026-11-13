@@ -34,7 +34,7 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
   const x = n.position.x - ox, y = n.position.y - oy, w = n.width, h = n.height;
   const { title, sub } = splitFlowLabel(n.data.label);
   const frameless = n.type === "file" || !!place;
-  const labelHtml = `<div style="width:100%;text-align:${n.type === "note" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
+  const labelHtml = `<div style="width:100%;text-align:${n.type === "note" || n.type === "page" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
   const col = (inner: string, gap = 4) => `<div style="display:flex;flex-direction:column;align-items:center;gap:${gap}px;width:100%">${inner}</div>`;
   const icons = flowIconSizes(n);   // ไอคอนโตตามกล่อง — สูตรเดียวกับบนจอ
   let text: string;
@@ -45,6 +45,14 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
     text = col(`<div style="line-height:0">${storagePlaceSvg(place.key, icons.place)}</div>${labelHtml}${extRow(n.data.exts, icons.ext)}`);
   } else if (n.type === "storage" && n.data.exts?.length) {
     text = col(`${labelHtml}${extRow(n.data.exts, icons.ext)}`);
+  } else if (n.type === "page") {
+    // หน้าใน ERP: แอป · ไอคอนเมนู (อีโมจิเท่านั้น — ไอคอนเส้น "i:" วาดในรูปไม่ได้) + ชื่อหน้า · ลิงก์หน้า (คนดูรูปรู้ว่าไปหน้าไหน)
+    const icon = n.data.icon && !/^(i|c|img):/.test(n.data.icon) ? `<span style="font-size:15px;line-height:1.25">${esc(n.data.icon)}</span>` : "";
+    text = `<div style="display:flex;flex-direction:column;gap:3px;width:100%;min-width:0;text-align:left">`
+      + `<div style="font-size:10.5px;font-weight:600;color:${p.sub};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(n.data.appName ? `แอป ${n.data.appName}` : "หน้าใน ERP")}</div>`
+      + `<div style="display:flex;gap:6px;align-items:flex-start">${icon}<div style="min-width:0;flex:1">${labelHtml}</div></div>`
+      + (n.data.href ? `<div style="font-size:10px;color:${p.sub};font-family:monospace;word-break:break-all">${esc(n.data.href)}</div>` : "")
+      + `</div>`;
   } else if (n.type === "folder") {
     text = `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`;
   } else {

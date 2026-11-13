@@ -291,3 +291,36 @@ describe("ขนาดไอคอนโตตามกล่อง", () => {
     expect(refitIconBox({ type: "storage", data: { label: "x" }, width: 160, height: 90 }, { label: "x", place: "nas" })).toEqual({ width: 180, height: 120 });
   });
 });
+
+describe("กล่องหน้าใน ERP", () => {
+  it("โหลด: เก็บลิงก์หน้าในระบบ + แอป + ชื่อแอป + ไอคอน · ลิงก์นอกระบบ/javascript:/รหัสแอปแปลก = ตัดทิ้ง", () => {
+    const s = parseFlowScene({ kind: "flowchart", nodes: [
+      { id: "a", type: "page", position: { x: 0, y: 0 }, width: 220, height: 80, data: { label: "Design Dashboard", href: "/master/design-dashboard", app: "design", appName: "ออกแบบ", icon: "📋" } },
+      { id: "b", type: "page", position: { x: 0, y: 0 }, data: { label: "x", href: "javascript:alert(1)", app: "Bad Key!", appName: "  ", icon: 5 } },
+      { id: "c", type: "page", position: { x: 0, y: 0 }, data: { label: "y", href: "//evil.example/x" } },
+      { id: "d", type: "page", position: { x: 0, y: 0 }, data: { label: "z", href: "https://evil.example/x" } },
+      { id: "e", type: "step", position: { x: 0, y: 0 }, data: { label: "s", href: "/master/x", app: "design" } },
+    ], edges: [] })!;
+    expect(s.nodes[0].data).toEqual({ label: "Design Dashboard", href: "/master/design-dashboard", app: "design", appName: "ออกแบบ", icon: "📋" });
+    expect(s.nodes[1].data).toEqual({ label: "x" });
+    expect(s.nodes[2].data).toEqual({ label: "y" });
+    expect(s.nodes[3].data).toEqual({ label: "z" });
+    expect(s.nodes[4].data).toEqual({ label: "s" });   // กล่องชนิดอื่นไม่เก็บช่องของหน้า
+    expect(s.nodes[1].width).toBe(220);                // ขนาดตั้งต้นของชนิด page
+  });
+  it("สร้างกล่อง: สีเขียวตั้งต้น · ชื่อ = ชื่อหน้า · ไม่ได้เลือกหน้า = ชื่อชนิด", () => {
+    const n = makeFlowNode("page", { x: 0, y: 0 }, th, { label: "Design Dashboard", href: "/master/design-dashboard", app: "design", appName: "ออกแบบ" });
+    expect(n.data).toEqual({ label: "Design Dashboard", href: "/master/design-dashboard", app: "design", appName: "ออกแบบ" });
+    expect(nodeColor("page", n.data)).toBe("emerald");
+    expect(makeFlowNode("page", { x: 0, y: 0 }, th).data).toEqual({ label: "หน้าใน ERP" });
+    expect(makeFlowNode("page", { x: 0, y: 0 }, th, { label: "x", href: "https://evil.example" }).data).toEqual({ label: "x" });
+  });
+  it("คัดลอกเป็นข้อความ: ชื่อหน้า (แอป) — ลิงก์ · คัดลอก/วางแล้วช่องหน้ายังอยู่", () => {
+    const page: FlowSceneNode = { id: "p", type: "page", position: { x: 0, y: 0 }, width: 220, height: 80, data: { label: "Design Dashboard", href: "/master/design-dashboard", app: "design", appName: "ออกแบบ" } };
+    const clip = copyFlowSelection(S([page]), ["p"])!;
+    expect(flowClipText(clip)).toBe("Design Dashboard (ออกแบบ) — /master/design-dashboard");
+    const back = parseFlowClip(serializeFlowClip(clip))!;
+    expect(back.nodes[0].data.href).toBe("/master/design-dashboard");
+    expect(back.nodes[0].data.app).toBe("design");
+  });
+});
