@@ -70,7 +70,7 @@
 - สำเนาย่อ `raw.shopee` (`lib/shopee` `shopeeItemToCatalogItem`): `{ item_id, status, update_time, image, image_count, category_id, item_sku, brand, has_model, price, original_price, stock, weight, tiers[{name, options}], models[{model_id, sku, label "สี: ดำ · ขนาด: M", price, original_price, stock, image, status}] }` — **ไม่เก็บคำอธิบาย**
   - `status` ในตาราง = ตัวเล็ก (`normal` / `unlist` / `reviewing` / `banned`) · `price` = ราคาตั้งต่ำสุด · `sku_code` = รหัสสินค้าหลัก (item_sku) ก่อน แล้วรหัสตัวเลือก
 - การ์ดสถานะ/รูป/สต๊อก: `summarizeShopee` ใน `lib/platform-listing-health` (NORMAL = ขายอยู่ · UNLIST/BANNED = ปิด · REVIEWING = รอตรวจ · ราคาลด = current_price ต่ำกว่าราคาตั้ง) — ตัวจากไฟล์ export (ไม่มี raw.shopee) ยัง "ไม่รู้สถานะ" เหมือนเดิม และหน้าไม่ใส่การ์ดให้
-  - อ่านผ่านฟังก์ชัน DB `platform_listings_slim` คอลัมน์ `shopee` (migration `202612080100` — ต้องให้เจ้าของอนุญาตก่อนลง · ก่อนลง การ์ด Shopee จาก API ขึ้น "ไม่รู้สถานะ" แต่รายการ/ราคา/จับคู่ใช้ได้)
+  - อ่านผ่านฟังก์ชัน DB `platform_listings_slim` คอลัมน์ `shopee` (migration `202612080100` — ลงฐานข้อมูลจริงแล้ว 2026-11-13)
 - ⚠️ ยอดสต๊อกจาก Shopee เก็บไว้ดูเทียบเท่านั้น **ห้ามใช้เป็นยอดตั้งต้น**
 - ยังไม่ทำ: มุมมองตัวเลือกเทียบราคาระบบ (`view=variants` ยังอ่านแค่ไฟล์ `raw.sales_info`) · ลิ้นชักสินค้า Shopee (ดูสด/แก้) · ชื่อหมวด (เก็บแค่ category_id)
 
