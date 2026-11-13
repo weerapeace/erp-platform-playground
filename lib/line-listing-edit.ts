@@ -276,6 +276,10 @@ export function listingHistoryText(meta: unknown): string {
     const pending = str(m.audit_status) === "AUDITING" || m.pending === true || str(m.summary).includes("รอ");
     return `แก้บน TikTok: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : pending ? " (TikTok ส่งไปรอตรวจ)" : ""}`;
   }
+  if (src === "tiktok_listing_publish") {
+    const n = arr(m.changes).length;
+    return `เผยแพร่ฉบับร่างบน TikTok (ตั้งสต๊อก ${n} ตัวเลือก)${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.summary).includes("รอ") ? " (รอ TikTok ตรวจ)" : ""}`;
+  }
   if (src === "tiktok_listing_display") return `${m.open ? "เปิดขาย" : "ปิดขาย"}บน TikTok${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : str(m.summary).includes("รอ") ? " (รอ TikTok ตรวจ)" : ""}`;
   if (src === "tiktok_listing_prices") {
     const ch = arr(m.changes).map(obj).filter((c): c is Obj => !!c);

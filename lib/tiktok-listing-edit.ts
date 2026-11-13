@@ -545,3 +545,35 @@ function sizeChartOf(v: unknown): TiktokImage | null {
   const url = (Array.isArray(img?.urls) ? str((img!.urls as unknown[])[0]) : null) ?? (Array.isArray(img?.thumb_urls) ? str((img!.thumb_urls as unknown[])[0]) : null);
   return uri && url ? { uri, url } : null;
 }
+
+// ───────────── เผยแพร่ฉบับร่าง (เจ้าของเลือก 2026-11-13 "ตามแนะนำเลย") ─────────────
+// ปุ่ม "เผยแพร่" ในลิ้นชัก (เฉพาะสินค้าที่เป็น DRAFT): ตั้งสต๊อกจริงครั้งเดียว (Update Inventory · 1–99,999) → Partial Edit save_mode=LISTING (ส่งตรวจ)
+// TikTok ตรวจก่อนขึ้นขาย · สต๊อกนี้ใส่ครั้งเดียวตอนเปิดตัว ไม่ใช่ซิงค์ต่อเนื่อง
+
+export const TTS_STOCK_MIN = 1;
+export const TTS_STOCK_MAX = 99_999;
+export type TiktokPublishRow = { skuId: string; label: string; sellerSku: string | null; qty: number };
+
+/** ตรวจก่อนเผยแพร่: เป็นร่าง · ชื่อ/รูป/ราคาครบ · ช่องบังคับของหมวด (null = ตรวจไม่ได้ → เตือน) · สต๊อกทุกตัวเลือก 1–99,999 */
+export function planTiktokPublish(v: Pick<TiktokListingView, "status" | "productStatus" | "title" | "images" | "skus">, input: { stock: Record<string, number | null>; requiredMissing: string[] | null }): { rows: TiktokPublishRow[]; errors: string[]; warnings: string[] } {
+  const errors: string[] = []; const warnings: string[] = [];
+  if ((v.status ?? v.productStatus) !== "DRAFT") errors.push("สินค้านี้ไม่ได้เป็นฉบับร่าง — เผยแพร่จากที่นี่ได้เฉพาะฉบับร่าง");
+  const n = ttsTitleLength(v.title.replace(/\s+/g, " ").trim());
+  if (n < TTS_TITLE_MIN || n > TTS_TITLE_MAX) errors.push(`ชื่อสินค้า ${n} ตัวอักษร — TikTok ไทยต้อง ${TTS_TITLE_MIN}–${TTS_TITLE_MAX}`);
+  if (!v.images.length) errors.push("ยังไม่มีรูปสินค้า");
+  const noPrice = v.skus.filter((s) => s.price == null || s.price < TTS_PRICE_MIN).length;
+  if (noPrice) errors.push(`ราคายังไม่ครบ ${noPrice} ตัวเลือก (ต่ำสุด ${TTS_PRICE_MIN} บาท)`);
+  if (input.requiredMissing == null) warnings.push("ตรวจช่องบังคับของหมวดไม่ได้ — ถ้าขาด TikTok จะไม่รับ");
+  else if (input.requiredMissing.length) errors.push(`ช่องบังคับของหมวดยังว่าง ${input.requiredMissing.length} ช่อง (${input.requiredMissing.slice(0, 3).join(", ")}${input.requiredMissing.length > 3 ? " …" : ""}) — กรอกที่แท็บข้อมูลสินค้าก่อน`);
+  const rows: TiktokPublishRow[] = [];
+  let badStock = 0;
+  for (const s of v.skus) {
+    const q = input.stock[s.skuId];
+    if (q == null || !Number.isInteger(q) || q < TTS_STOCK_MIN || q > TTS_STOCK_MAX) { badStock++; continue; }
+    rows.push({ skuId: s.skuId, label: s.label, sellerSku: s.sellerSku, qty: q });
+  }
+  if (badStock) errors.push(`ใส่สต๊อกให้ครบทุกตัวเลือก — จำนวนเต็ม ${TTS_STOCK_MIN}–${TTS_STOCK_MAX.toLocaleString()} (ยังขาด/ผิด ${badStock} ตัวเลือก)`);
+  warnings.push("กดแล้ว TikTok ตรวจก่อนขึ้นขาย (สถานะ \"รอตรวจ\") — ผ่านแล้วขายได้ทันทีตามสต๊อกที่ใส่");
+  warnings.push("สต๊อกนี้ใส่ครั้งเดียวตอนเปิดตัว — ถ้า BigSeller ซิงค์ร้านนี้อยู่ BigSeller จะปรับต่อเองเมื่อผูกรหัส SKU");
+  return { rows, errors, warnings };
+}

@@ -7,6 +7,8 @@
  *   1. pg_cron + pg_net: header x-cron-token = โทเคนใน Supabase Vault (ชื่อ tiktok_orders_cron) — ตรวจผ่าน RPC erp_cron_token_ok
  *   2. Authorization: Bearer CRON_SECRET (เรียกทดสอบ)
  *   3. คนที่มีสิทธิ์ platform_orders.manage = โหมดดู (ไม่ดึง บอกแค่จะดึงแบรนด์ไหน)
+ * + 2026-11-13 (เจ้าของ "ตามแนะนำเลย"): ต่อท้ายด้วยดึงสินค้า "เฉพาะตัวที่เปลี่ยน" ใน 1 ชม.ล่าสุด (../../tiktok-shop/products-sync)
+ *   → เปิดขาย/เผยแพร่/ปิดขายใน Seller Center แล้ว สถานะใน ERP ตามเองภายใน ~15 นาที (ใช้ตัวตั้งเวลาเดิม ไม่ต้องเพิ่มใน DB)
  * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -16,6 +18,7 @@ import { writeAudit } from "@/lib/audit";
 import { recordWorkerRun } from "@/lib/ai-office-runs";
 import { getPlatformId, ttsTokenOrReason, ttsConnectedBrandIds } from "../../tiktok-shop/shared";
 import { syncTiktokOrders, TTS_ORDER_SOURCE } from "../../tiktok-shop/orders-sync";
+import { syncTiktokProductsChanged } from "../../tiktok-shop/products-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,14 +49,17 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   if (mode === "dry") return NextResponse.json({ ok: true, dry: true, brands: brands.length });
 
   const updateTimeGe = Math.floor(Date.now() / 1000) - WINDOW_SEC;
-  const results: { brand_id: string; ok: boolean; created?: number; updated?: number; error?: string }[] = [];
+  const results: { brand_id: string; ok: boolean; created?: number; updated?: number; products?: number; error?: string }[] = [];
   for (const brandId of brands) {
     const tok = await ttsTokenOrReason(admin, brandId, ttId, null);
     if (!tok.ok) { results.push({ brand_id: brandId, ok: false, error: tok.reason }); continue; }
     const shop = tok.meta.shops?.[0];
     if (!shop?.cipher) { results.push({ brand_id: brandId, ok: false, error: "ยังไม่รู้รหัสร้าน (กด ตรวจการเชื่อมต่อ)" }); continue; }
     const r = await syncTiktokOrders(admin, { platformId: ttId, brandId, accessToken: tok.accessToken, shop, window: { updateTimeGe }, timeBudgetMs: 45_000 });
-    results.push({ brand_id: brandId, ok: !r.stop_reason, created: r.created, updated: r.updated, ...(r.stop_reason ? { error: r.stop_reason } : {}) });
+    // สินค้าที่เปลี่ยนใน 1 ชม.ล่าสุด (สถานะ/ราคา/ชื่อ) — พลาดไม่ทำให้รอบออเดอร์ล้ม (บอกใน error)
+    const ps = await syncTiktokProductsChanged(admin, { platformId: ttId, brandId, accessToken: tok.accessToken, cipher: shop.cipher, updateTimeGe, timeBudgetMs: 25_000 });
+    const errs = [r.stop_reason, ps.stop_reason ? `สินค้า: ${ps.stop_reason}` : null].filter(Boolean).join(" · ");
+    results.push({ brand_id: brandId, ok: !errs, created: r.created, updated: r.updated, products: ps.saved, ...(errs ? { error: errs } : {}) });
     // บันทึกประวัติเฉพาะรอบที่มีออเดอร์ใหม่หรือมีปัญหา (รอบปกติ ~48 ครั้ง/วัน ไม่ต้องรก audit)
     if (r.created > 0 || r.stop_reason) {
       const { sample: _sample, ...counts } = r;
@@ -68,7 +74,7 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const updated = results.reduce((a, x) => a + (x.updated ?? 0), 0);
   await recordWorkerRun(admin, "tiktok-orders", {
     ok: failed.length === 0,
-    summary: brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated}`,
+    summary: brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`,
     ...(failed.length ? { error: failed.map((f) => f.error).join(" · ").slice(0, 300) } : {}),
   });
   return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results });

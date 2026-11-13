@@ -122,6 +122,11 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - แก้: listing-edit ส่ง `save_mode: "AS_DRAFT"` เมื่อสินค้าเป็น DRAFT · สรุปบอก "บันทึกลงฉบับร่างแล้ว — ยังไม่ส่งตรวจ" · หน้าต่างยืนยันบอกว่าเป็นร่าง
 - ข้อจำกัด TikTok: บันทึกเป็นร่างไม่ได้เมื่อสถานะ PENDING/FREEZE/DELETED (ตัวที่ส่งตรวจไปแล้วย้อนกลับเป็นร่างผ่าน API ไม่ได้)
 
+## เผยแพร่ฉบับร่าง + สถานะตามเองทุก 15 นาที (2026-11-13 · เจ้าของ "ตามแนะนำเลย")
+- **ปุ่ม "เผยแพร่"** ที่หัวลิ้นชัก (เฉพาะสถานะ DRAFT · สิทธิ์ products.platforms.publish): เช็กลิสต์ `planTiktokPublish` (ชื่อ/รูป/ราคา · ช่องบังคับของหมวดครบ · สต๊อกทุกตัวเลือก 1–99,999) → `POST /api/tiktok-shop/listing-publish`
+  1) Update Inventory (`ttsUpdateInventory` · คลังเดิมของร่าง) — สต๊อกตั้งต้นครั้งเดียว (เจ้าของอนุมัติ) ไม่ใช่ซิงค์ 2) Partial Edit `save_mode=LISTING` (ส่งชื่อเดิม) → PENDING · audit `tiktok_listing_publish` + steps
+- **สถานะตามเอง:** cron `/api/cron/tiktok-orders` (pg_cron ทุก 15 นาทีเดิม — ไม่เพิ่มตัวตั้งเวลาใน DB) ต่อท้ายด้วย `syncTiktokProductsChanged` (app/api/tiktok-shop/products-sync · Search Products `update_time_ge` 1 ชม. · รายละเอียดสูงสุด 40 ตัว/รอบ · ข้ามตัวที่ลบ · ไม่ติดป้ายหาย) → เปิด/ปิดขาย/เผยแพร่ใน Seller Center แล้ว ERP ตามภายใน ~15 นาที
+
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ~~ดึงหมวดหมู่ TikTok~~ (ทำแล้ว c51b1adf · เจ้าของกดดึงแล้ว 2026-11-12: 1,950 หมวดใบ ใช้ได้ 1,849 — ร่างจับคู่ 10 หมวดกลาง รอเจ้าของอนุมัติ)
 4. ~~เฟส B ราคา~~ · ~~C รูป/กล่อง~~ (ทำแล้ว) · ~~D ลงสินค้าใหม่~~ (ทำแล้ว — ลงเป็นฉบับร่าง) · E สต๊อก (หลังเลิกซิงค์ BigSeller) — ทีละเฟสตามที่เจ้าของอนุมัติ

@@ -4,7 +4,7 @@ import {
   TTS_TITLE_MIN, TTS_TITLE_MAX, TTS_PRICE_MIN, TTS_PRICE_MAX, planTiktokPrices, applyTiktokBulkPrice, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, type TiktokPriceRow,
   tiktokErpPriceCheck, applyTiktokErpFull,
   tiktokImagesOf, tiktokPkgOf, tiktokMediaBase, tiktokRefsForSend, tiktokUriOfRef, tiktokR2KeyOfRef, tiktokImageRef, planTiktokMedia, tiktokPkgFields, samePkg, TTS_MAX_IMAGES,
-  isTiktokImageUrl, fixTiktokDescriptionImages, tiktokDescImageSrc, planTiktokDescription, tiktokDescText, TTS_DESC_MAX,
+  isTiktokImageUrl, fixTiktokDescriptionImages, planTiktokPublish, tiktokDescImageSrc, planTiktokDescription, tiktokDescText, TTS_DESC_MAX,
 } from "@/lib/tiktok-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
 
@@ -386,5 +386,27 @@ describe("รายละเอียดสินค้า TikTok", () => {
     const d = { id: "p1", title: "t", description: "<p>a</p>" };
     expect(tiktokListingView(d, { id: "p1", title: "t", description: "<p>b</p>" })!.pendingDescription).toBe("<p>b</p>");
     expect(tiktokListingView(d, { id: "p1", title: "t", description: "<p>a</p>" })!.pendingDescription).toBeNull();
+  });
+});
+
+describe("เผยแพร่ฉบับร่าง", () => {
+  const v = { status: "DRAFT", productStatus: "DRAFT", title: "Louis Montini กระเป๋าเอกสาร กระเป๋าใส่โน๊ตบุ๊ค BBM02", images: ["https://img/1.jpg"],
+    skus: [{ skuId: "s1", sellerSku: "BBM02-01", label: "สี: น้ำตาล", price: 890, stock: 1, status: "NORMAL" }, { skuId: "s2", sellerSku: "BBM02-02", label: "สี: ดำ", price: 890, stock: 1, status: "NORMAL" }] };
+  test("ครบ = ผ่าน · ได้แถวสต๊อกทุกตัวเลือก + เตือนว่าผ่านตรวจแล้วขายทันที", () => {
+    const p = planTiktokPublish(v, { stock: { s1: 5, s2: 2 }, requiredMissing: [] });
+    expect(p.errors).toEqual([]);
+    expect(p.rows).toEqual([{ skuId: "s1", label: "สี: น้ำตาล", sellerSku: "BBM02-01", qty: 5 }, { skuId: "s2", label: "สี: ดำ", sellerSku: "BBM02-02", qty: 2 }]);
+    expect(p.warnings.join(" ")).toContain("ขายได้ทันที");
+  });
+  test("ไม่ใช่ร่าง / ช่องบังคับขาด / สต๊อกขาดหรือ 0 = error", () => {
+    expect(planTiktokPublish({ ...v, status: "PENDING", productStatus: "PENDING" }, { stock: { s1: 1, s2: 1 }, requiredMissing: [] }).errors.join(" ")).toContain("ไม่ได้เป็นฉบับร่าง");
+    expect(planTiktokPublish(v, { stock: { s1: 1, s2: 1 }, requiredMissing: ["ประเภทของกระเป๋า"] }).errors.join(" ")).toContain("ช่องบังคับ");
+    const p = planTiktokPublish(v, { stock: { s1: 0, s2: null }, requiredMissing: [] });
+    expect(p.errors.join(" ")).toContain("ใส่สต๊อกให้ครบ");
+    expect(p.rows).toEqual([]);
+    expect(planTiktokPublish(v, { stock: { s1: 1, s2: 1 }, requiredMissing: null }).warnings.join(" ")).toContain("ตรวจช่องบังคับของหมวดไม่ได้");
+  });
+  test("ข้อความประวัติ", () => {
+    expect(listingHistoryText({ source: "tiktok_listing_publish", ok: true, summary: "ส่งเผยแพร่แล้ว — รอ TikTok ตรวจ", changes: [{}, {}] })).toBe("เผยแพร่ฉบับร่างบน TikTok (ตั้งสต๊อก 2 ตัวเลือก) (รอ TikTok ตรวจ)");
   });
 });

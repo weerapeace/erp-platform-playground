@@ -29,13 +29,14 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { MoneyInput } from "@/components/money-input";
 import {
-  applyTiktokBulkPrice, applyTiktokErpFull, tiktokErpPriceCheck, planTiktokDisplay,
+  applyTiktokBulkPrice, applyTiktokErpFull, tiktokErpPriceCheck, planTiktokDisplay, planTiktokPublish, TTS_STOCK_MIN, TTS_STOCK_MAX,
   planTiktokMedia, samePkg, tiktokMediaBase, tiktokRefsForSend, TTS_MAX_IMAGES, type TiktokMediaPlan, type TiktokPkg,
   planTiktokDescription, tiktokDescText, TTS_DESC_MAX, type TiktokDescPlan, planTiktokPrices, planTiktokTitle, tiktokIsOpen, tiktokPriceBlock, tiktokPriceChangeText, tiktokPriceRowsFromView, tiktokStatusBadge, ttsTitleLength,
   TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN,
   type TiktokErpPrice, type TiktokListingDetailResponse, type TiktokListingView, type TiktokPricePlan, type TiktokPriceRow, type TiktokSkuView, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import type { VariantMatchRow } from "@/lib/platform-variant-match";
+import type { CreateStep } from "@/lib/platform-create-registry";
 import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "./listing-images";
 import { LazadaAttrField } from "./lazada-listing-panels";
 import { useWeightUnit } from "./weight-unit";
@@ -397,7 +398,7 @@ const TONE_CLS: Record<string, string> = {
 };
 
 /** ป้ายสถานะ + สวิตช์เปิด/ปิดขายทั้งสินค้า + ปุ่มดึงตัวนี้ (หัวลิ้นชัก) */
-export function TiktokHeaderStatus({ state, disp, dirty }: { state: TiktokListingState; disp: TiktokDisplayApi | null; dirty?: boolean }) {
+export function TiktokHeaderStatus({ state, disp, dirty, pub }: { state: TiktokListingState; disp: TiktokDisplayApi | null; dirty?: boolean; pub?: TiktokPublishApi | null }) {
   const v = state.view;
   const b = v ? tiktokStatusBadge(v.status) : null;
   const open = !!v && tiktokIsOpen(v);
@@ -407,6 +408,11 @@ export function TiktokHeaderStatus({ state, disp, dirty }: { state: TiktokListin
     <div className="flex shrink-0 flex-col items-end gap-1">
       <div className="flex items-center gap-2">
         {b && <span className={`rounded-full px-2 py-0.5 text-[11px] ${TONE_CLS[b.tone]}`}>{b.label}</span>}
+        {/* ฉบับร่าง: ปุ่มเผยแพร่ (เช็กลิสต์ + สต๊อกจริง → ส่งตรวจ) */}
+        {v && pub && (v.status ?? v.productStatus) === "DRAFT" && (
+          <button type="button" disabled={pub.busy || !!dirty} onClick={pub.request} title={dirty ? "มีที่แก้ค้างอยู่ — บันทึกหรือยกเลิกก่อน" : "ตั้งสต๊อกจริงแล้วส่งให้ TikTok ตรวจเพื่อขึ้นขาย (ถามก่อน)"}
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-40"><Icon name="upload" />เผยแพร่</button>
+        )}
         {v && disp && toggleable && (
           <ToggleSwitch on={open} disabled={disp.busy} size="sm" label={<span className="text-xs text-slate-600">{open ? "เปิดขาย" : "ปิดขาย"}</span>}
             title="เปิด/ปิดขายทั้งสินค้าบน TikTok (ถามก่อน) — เปิดขาย = TikTok ตรวจก่อน"
@@ -812,4 +818,68 @@ function TiktokCodSizeBox({ v, edit, can, matchedParent, matchedCode }: { v: Tik
       </div>
     </div>
   );
+}
+
+
+// ───────────────────────── เผยแพร่ฉบับร่าง (เจ้าของเลือก 2026-11-13) ─────────────────────────
+export type TiktokPublishApi = { request: () => void; busy: boolean; dialog: ReactNode };
+
+/** ปุ่มเผยแพร่ (เฉพาะร่าง): เช็กลิสต์ + ใส่สต๊อกจริงทุกตัวเลือก → POST /api/tiktok-shop/listing-publish (ตั้งสต๊อก → ส่งตรวจ) */
+export function useTiktokPublish(state: TiktokListingState, meta: TiktokEditApi["meta"], onDone?: () => void): TiktokPublishApi {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [stock, setStock] = useState<Record<string, string>>({});
+  const v = state.view;
+  const requiredMissing = v && meta.fields ? meta.fields.filter((f) => f.required && !(v.attrs[f.id] ?? []).length).map((f) => f.name) : null;
+  const parsed: Record<string, number | null> = {};
+  for (const [k, x] of Object.entries(stock)) { const n = Number(x); parsed[k] = x.trim() === "" || !Number.isFinite(n) ? null : n; }
+  const plan = v ? planTiktokPublish(v, { stock: parsed, requiredMissing }) : null;
+
+  const run = async () => {
+    if (!state.listingId || !plan) return;
+    if (plan.errors.length) { toast.error(plan.errors[0]); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/tiktok-shop/listing-publish", { method: "POST", body: JSON.stringify({ listing_id: state.listingId, stock: plan.rows.map((x) => ({ sku_id: x.skuId, qty: x.qty })) }) });
+      const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as TiktokWriteResponse & { steps?: CreateStep[] };
+      if (j.ok) {
+        toast.success(`${j.summary ?? "ส่งเผยแพร่แล้ว"} — บันทึกประวัติแล้ว`);
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        setOpen(false); setStock({});
+        if (j.view) state.apply(j.view);
+        onDone?.();
+      } else {
+        const failed = j.steps?.find((s) => s.state === "fail");
+        toast.error(r.status === 401 ? NO_AUTH : failed ? `ติดที่ "${failed.label}": ${failed.detail ?? j.error}` : (j.error ?? `HTTP ${r.status}`));
+        if (j.view) state.apply(j.view);
+      }
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const dialog = (
+    <ConfirmDialog open={open && !!v} onClose={() => { if (!busy) setOpen(false); }} onConfirm={() => void run()} loading={busy}
+      title="เผยแพร่สินค้านี้บน TikTok?" confirmText="ตั้งสต๊อก + ส่งเผยแพร่"
+      message={v && plan ? (
+        <div className="space-y-2 text-sm">
+          <p>ระบบจะตั้งสต๊อกตามที่ใส่ แล้วส่งให้ TikTok ตรวจ — ผ่านแล้ว<b>ขายได้ทันที</b> · มีประวัติว่าใครกด</p>
+          <div className="rounded-lg border border-slate-200">
+            <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2 border-b border-slate-100 bg-slate-50 px-2 py-1 text-[11px] text-slate-500"><span>ตัวเลือก</span><span className="text-right">สต๊อกจริง (ชิ้น)</span></div>
+            <div className="max-h-56 divide-y divide-slate-100 overflow-auto">
+              {v.skus.map((s) => (
+                <label key={s.skuId} className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-2 px-2 py-1.5 text-xs">
+                  <span className="min-w-0"><span className="block truncate">{s.label}</span><span className="block truncate font-mono text-[11px] text-slate-400">{s.sellerSku ?? "ไม่มีรหัส"} · ราคา {s.price != null ? `${s.price.toLocaleString("th-TH")}฿` : "—"}</span></span>
+                  <input type="number" min={TTS_STOCK_MIN} max={TTS_STOCK_MAX} step="1" inputMode="numeric" value={stock[s.skuId] ?? ""} placeholder="เช่น 5"
+                    onChange={(e) => setStock((m) => ({ ...m, [s.skuId]: e.target.value }))} className="h-8 w-full rounded-md border border-slate-200 px-2 text-right text-sm" />
+                </label>
+              ))}
+            </div>
+          </div>
+          {plan.errors.length > 0 && <ul className="space-y-0.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{plan.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
+          {plan.warnings.map((w) => <p key={w} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
+        </div>
+      ) : ""} />
+  );
+  return { request: () => setOpen(true), busy, dialog };
 }

@@ -159,10 +159,11 @@ const PRODUCT_SCOPE = "Product Basic (seller.product.basic)";
 
 export type TtsProductPage = { products: Record<string, unknown>[]; total: number; nextPageToken: string | null };
 /** ค้นหาสินค้าทั้งร้าน (status=ALL) ทีละหน้า · page_size ≤ 100 */
-export async function ttsSearchProducts(accessToken: string, shopCipher: string, opts: { pageToken?: string | null; pageSize?: number } = {}): Promise<TtsProductPage> {
+export async function ttsSearchProducts(accessToken: string, shopCipher: string, opts: { pageToken?: string | null; pageSize?: number; updateTimeGe?: number } = {}): Promise<TtsProductPage> {
   const query: Record<string, string> = { shop_cipher: shopCipher, page_size: String(Math.max(1, Math.min(100, opts.pageSize ?? 50))) };
   if (opts.pageToken) query.page_token = opts.pageToken;
-  const d = await ttsApi("POST", "/product/202502/products/search", accessToken, { query, body: { status: "ALL" }, scope: PRODUCT_SCOPE });
+  // updateTimeGe = เฉพาะตัวที่แก้หลังเวลานี้ (unix วินาที) — ใช้ดึงอัตโนมัติเป็นรอบ (products-sync)
+  const d = await ttsApi("POST", "/product/202502/products/search", accessToken, { query, body: { status: "ALL", ...(opts.updateTimeGe ? { update_time_ge: opts.updateTimeGe } : {}) }, scope: PRODUCT_SCOPE });
   const products = Array.isArray(d.products) ? d.products as Record<string, unknown>[] : [];
   return { products, total: Number(d.total_count) || 0, nextPageToken: str(d.next_page_token) };
 }
@@ -261,6 +262,17 @@ export async function ttsGetBrands(accessToken: string, shopCipher: string, opts
     .filter((b) => b.id && b.name);
 }
 
+/**
+ * ตั้งสต๊อกต่อตัวเลือก (Update Inventory 202309) — สินค้าต้องเป็น DRAFT / PENDING / FAILED / ACTIVATE / SELLER_DEACTIVATED · จำนวน 1–99,999 (เอกสาร)
+ * ⚠️ ใช้เฉพาะตอน "เผยแพร่ฉบับร่าง" (เจ้าของใส่สต๊อกตั้งต้นเองครั้งเดียว · อนุมัติ 2026-11-13) — ห้ามใช้ซิงค์สต๊อกตราบใดที่ BigSeller ยังซิงค์ร้านนี้
+ */
+export async function ttsUpdateInventory(accessToken: string, shopCipher: string, productId: string, skus: { id: string; warehouseId: string; quantity: number }[]): Promise<Record<string, unknown>> {
+  return ttsApi("POST", `/product/202309/products/${encodeURIComponent(productId)}/inventory/update`, accessToken, {
+    query: { shop_cipher: shopCipher },
+    body: { skus: skus.map((s) => ({ id: s.id, inventory: [{ warehouse_id: s.warehouseId, quantity: Math.round(s.quantity) }] })) },
+    scope: PRODUCT_WRITE_SCOPE,
+  });
+}
 /**
  * แก้ราคาต่อตัวเลือก (Update Price 202309) — มีผลทันที ไม่ต้องรอตรวจ · ทุก SKU ต้องอยู่สินค้าเดียวกัน · สินค้าต้อง ACTIVATE และไม่อยู่ในโปรโมชัน
  * price.amount = ราคาแสดงก่อนส่วนลด (ร้านไทย) · ไทย 30–260,000 ทศนิยม 2 (planTiktokPrices ตรวจก่อนแล้ว) · data ตอบว่างเสมอ

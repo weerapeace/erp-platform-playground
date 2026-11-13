@@ -41,7 +41,7 @@ import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
 import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
-import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing } from "./tiktok-listing-panels";
+import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing, useTiktokPublish } from "./tiktok-listing-panels";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
@@ -136,6 +136,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const ttCanEdit = canPublish && isTiktok && detail?.status !== "removed";
   const ttEdit = useTiktokEdit(tt, ttCanEdit, useCallback((title: string) => { if (listingId) onChanged?.(listingId, { title }); setReload((n) => n + 1); }, [listingId, onChanged]));
   const ttDisp = useTiktokDisplay(tt, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
+  // ฉบับร่าง: ปุ่มเผยแพร่ (ตั้งสต๊อกจริง → ส่งตรวจ)
+  const ttPub = useTiktokPublish(tt, ttEdit.meta, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
 
   const disp = useLineDisplay((results) => {
     const r = results.find((x) => x.listing_id === listingId);
@@ -289,7 +291,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         </div>
       )}
       {isLazada && detail.status !== "removed" && <LazadaHeaderStatus state={laz} disp={lazCanEdit ? lazDisp : null} dirty={lazEdit.dirty} />}
-      {isTiktok && detail.status !== "removed" && <TiktokHeaderStatus state={tt} disp={ttCanEdit ? ttDisp : null} dirty={ttEdit.dirty} />}
+      {isTiktok && detail.status !== "removed" && <TiktokHeaderStatus state={tt} disp={ttCanEdit ? ttDisp : null} pub={ttCanEdit ? ttPub : null} dirty={ttEdit.dirty} />}
     </div>
   );
 
@@ -498,6 +500,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {isLazada && lazDisp.dialog}
       {isTiktok && ttEdit.dialog}
       {isTiktok && ttDisp.dialog}
+      {isTiktok && ttPub.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && ttView && <ImageLightbox images={(ttEdit.images ?? ttView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && lazView && <ImageLightbox images={(lazEdit.form?.images ?? lazView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
