@@ -28,7 +28,8 @@ import { SubscriptionsCalendar } from "./subscriptions-calendar";
 import { WishlistView } from "./wishlist-view";
 import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
-import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
+import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, BOARD_PREF_DEFAULT, parseBoardPref, type BoardGroupBy } from "./subscriptions-board";
+import { useUserPref } from "@/lib/use-user-pref";
 import { SubNameCell } from "./sub-name-cell";
 import { ChromeProfilesModal } from "./chrome-profiles-modal";
 import { CHROME_PROFILES_API, type ChromeProfile } from "@/lib/chrome-profiles";
@@ -53,6 +54,10 @@ export default function SubscriptionsPage() {
   const [testingNotify, setTestingNotify] = useState(false);
   const [boardGroupBy, setBoardGroupBy] = useState<BoardGroupBy>("status");
   const [boardType, setBoardType] = useState<"all" | "work">("all");
+  // โหมดบอร์ด (จำต่อคน ทุกเครื่อง): ทุกสถานะ (เดิม) / ใช้งาน · ตามหมวด + ยอดรวม
+  const [boardPref, setBoardPref] = useUserPref("subs_board_mode", BOARD_PREF_DEFAULT, parseBoardPref);
+  const boardActive = boardPref.mode === "active";
+  const boardGroupEff: BoardGroupBy = boardActive ? "category" : boardGroupBy;
 
   // ฟอร์มเพิ่ม/แก้
   const [formOpen, setFormOpen] = useState(false);
@@ -179,7 +184,7 @@ export default function SubscriptionsPage() {
 
   // ลากการ์ดในบอร์ดข้ามคอลัมน์ → เปลี่ยนค่า (สถานะ/หมวด/ประเภท/รอบบิล) แบบ optimistic
   const boardMove = useCallback(async (sub: Subscription, toKey: string) => {
-    const patch = boardPatchFor(boardGroupBy, toKey);
+    const patch = boardPatchFor(boardGroupEff, toKey);
     if (!Object.keys(patch).length) return;
     setRows((prev) => prev.map((r) => (r.id === sub.id ? { ...r, ...patch } : r)));
     try {
@@ -193,7 +198,7 @@ export default function SubscriptionsPage() {
       toast.error(e instanceof Error ? e.message : "ย้ายการ์ดไม่สำเร็จ");
       await fetchList();   // rollback ด้วยข้อมูลจริง
     }
-  }, [boardGroupBy, user?.name, toast, fetchList]);
+  }, [boardGroupEff, user?.name, toast, fetchList]);
 
   // เปิด-ปิดใช้งานรายคนในการ์ดกลุ่ม (สวิตช์) — เปลี่ยนสถานะ active จริง แบบ optimistic
   const boardToggleActive = useCallback(async (sub: Subscription, active: boolean) => {
@@ -498,19 +503,41 @@ export default function SubscriptionsPage() {
                       className={`px-3 py-1.5 rounded-md transition ${boardType === k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
                   ))}
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 ml-1">
-                  <span>จัดกลุ่มตาม:</span>
-                  <select value={boardGroupBy} onChange={(e) => setBoardGroupBy(e.target.value as BoardGroupBy)}
-                    className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-700">
-                    {GROUP_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
+                <div className="inline-flex bg-slate-100 rounded-lg p-1 text-xs" role="radiogroup" aria-label="โหมดบอร์ด">
+                  {([["all", "ทุกสถานะ"], ["active", "✓ ใช้งาน · ตามหมวด"]] as const).map(([k, l]) => (
+                    <button key={k} role="radio" aria-checked={boardPref.mode === k} onClick={() => setBoardPref({ ...boardPref, mode: k })}
+                      className={`px-3 py-1.5 rounded-md transition ${boardPref.mode === k ? "bg-white shadow-sm text-indigo-700 font-medium" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
+                  ))}
                 </div>
-                {canEdit && <span className="text-[11px] text-slate-400 ml-auto hidden sm:inline">ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยน{GROUP_OPTIONS.find((o) => o.key === boardGroupBy)?.label} · คลิกการ์ดเพื่อแก้</span>}
+                {boardActive ? (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-slate-600 ml-1 cursor-pointer select-none">
+                      <input type="checkbox" checked={boardPref.includePending} onChange={(e) => setBoardPref({ ...boardPref, includePending: e.target.checked })}
+                        className="w-4 h-4 rounded border-slate-300 text-indigo-600" />
+                      รวม “กำลังยกเลิก” (ยังจ่ายอยู่)
+                    </label>
+                    <select value={boardPref.sort} onChange={(e) => setBoardPref({ ...boardPref, sort: e.target.value === "name" ? "name" : "cost" })}
+                      aria-label="เรียงการ์ด" className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700">
+                      <option value="cost">เรียง: แพงสุดก่อน</option>
+                      <option value="name">เรียง: ชื่อ A–Z</option>
+                    </select>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500 ml-1">
+                    <span>จัดกลุ่มตาม:</span>
+                    <select value={boardGroupBy} onChange={(e) => setBoardGroupBy(e.target.value as BoardGroupBy)}
+                      className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-700">
+                      {GROUP_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                {canEdit && <span className="text-[11px] text-slate-400 ml-auto hidden sm:inline">ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยน{GROUP_OPTIONS.find((o) => o.key === boardGroupEff)?.label} · คลิกการ์ดเพื่อแก้</span>}
               </div>
               <SubscriptionsBoard
                 rows={boardType === "all" ? boardRows : boardRows.filter((r) => r.type === boardType)}
                 settings={settings}
-                groupBy={boardGroupBy}
+                groupBy={boardGroupEff}
+                activeOnly={boardActive ? boardPref : null}
                 onEdit={canEdit ? openEdit : openInvoices}
                 onMove={canEdit ? boardMove : () => {}}
                 onToggleActive={canEdit ? boardToggleActive : undefined}
