@@ -118,6 +118,10 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "สตูดิโอแพทเทิร์น → แกะจากรูป → รูปกระเป๋าสำเร็จ (AI ประมาณสัดส่วน)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่มนี้ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ใส่ขนาดเองในตัวสร้างจากแม่แบบได้ตามปกติ · ลอกเส้นจากรูปแพทเทิร์นกระดาษไม่ใช้ AI ใช้ได้ต่อ", costHint: GPT_COST,
     files: ["app/api/pattern-projects/ai-draft/route.ts"] },
+  { key: "ai.pattern_coach", th: "โค้ช AI แพทเทิร์นกระเป๋า", en: "Bag pattern AI coach", group: "ผลิต / งานทีม",
+    usedAt: "สตูดิโอแพทเทิร์น → โค้ช → ถามโค้ช AI (ผู้ใช้เห็นข้อความก่อนส่ง · ไม่มีรูป)", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่มถาม AI ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · โค้ชในเครื่อง (ฟรี) ยังใช้ได้ตามปกติ", costHint: GPT_COST,
+    files: ["app/api/pattern-projects/ai-coach/route.ts"] },
   { key: "ai.team_split", th: "แบ่งงานทีมด้วย AI", en: "Team plan AI split", group: "ผลิต / งานทีม",
     usedAt: "แผนทีม", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/team-plan/ai-split/route.ts"] },
   // ── การเงิน

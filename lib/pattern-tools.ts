@@ -20,7 +20,7 @@ type Txt = { th: string; en: string };
 export type ToolTarget =
   | { kind: "tool"; tool: string }
   | { kind: "guide"; el: string; select?: boolean }
-  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" | "export" | "compare" | "grading" }
+  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" | "export" | "compare" | "grading" | "coach" }
   | { kind: "view3d"; view: "sewn" | "explode" | "steps" | "sim" | "flat" };
 /** ภาพเคลื่อนไหวตัวอย่างที่มี (components/pattern-studio/tool-demo) */
 export type DemoId = "move" | "rect" | "pen" | "measure" | "sew" | "sewpart" | "allow" | "round";
@@ -215,6 +215,9 @@ export const PATTERN_TOOLS: ToolDef[] = [
   { id: "nesting", icon: "layout-grid", th: "วางชิ้นตามรูปจริงบนผ้า", en: "True-shape nesting", level: 3, group: "check", words: "วางผ้า nesting marker ประหยัดผ้า วางตามรูปจริง true shape ใช้ผ้า หลา จัดวาง",
     desc: T("วางชิ้นตามเส้นตัดจริง (ชิ้นโค้ง/เว้าซ้อนเข้าหากัน) บนหน้าผ้าที่ตั้ง · หมุนตามทางผ้า / ทุก 90° / ห้ามหมุน · คำนวณเบื้องหลังมีปุ่มยกเลิก · เทียบกับวางตามกรอบ", "Place pieces by their real cut outline (curves/concave nest together) on the set fabric width · along the grain / any 90° / no rotation · runs in the background with a cancel button · compared with the box layout"),
     steps: [T("กด 'ใบสเปก / พิมพ์ / ไฟล์ตัด'", "Press 'Spec sheet / print / cut files'"), T("แท็บภาพรวม → วางบนผ้า → 'วางตามรูปจริง'", "Overview tab → Fabric layout → 'Run true-shape layout'")], target: { kind: "studio", id: "print" } },
+  { id: "coach", icon: "sparkles", th: "โค้ชแนะนำ (+ ถาม AI)", en: "Coach (+ ask AI)", level: 1, group: "studio", words: "โค้ช coach ai แนะนำ ทำอะไรต่อ ช่วย สอน ถาม ปรึกษา next step",
+    desc: T("ดูแบบตอนนี้แล้วบอกว่าควรทำอะไรต่อ เรียงตามลำดับงานช่าง พร้อมเหตุผล + ปุ่มพาไปเครื่องมือ (ฟรี ไม่ส่งข้อมูลออก) · ถามโค้ช AI ได้ (เสียเงิน) — ต้องดูข้อความที่จะส่งก่อนทุกครั้ง ไม่มีรูป/ราคา", "Looks at the pattern and says what to do next in a pattern maker's order, with reasons + a button to the tool (free, nothing sent) · ask the AI coach (paid) — you always see the exact text first, no photos/prices"),
+    steps: [T("กด 'โค้ช' แถวบน", "Press 'Coach' at the top"), T("ทำตามข้อ 'ต้องแก้' ก่อน แล้ว 'ขั้นถัดไป'", "Do 'Must fix' first, then 'Next'"), T("ถาม AI: พิมพ์คำถาม → ดูข้อความที่จะส่ง → ส่ง", "Ask AI: type a question → see what will be sent → send")], target: { kind: "studio", id: "coach" } },
   // ── ภาพ 3D ──
   { id: "v-sewn", icon: "box", th: "ภาพเย็บติดแล้ว", en: "Sewn view", level: 1, group: "view", words: "3d สามมิติ เย็บติด sewn ภาพ", desc: T("กระเป๋าตอนเย็บติดแล้ว ตามกระดานทันที", "The sewn bag, following the board live"), steps: [T("หัวช่อง 3D → 'เย็บติดแล้ว'", "3D header → 'Sewn'")], target: { kind: "view3d", view: "sewn" } },
   { id: "v-explode", icon: "maximize", th: "แยกชิ้น / ติดหู", en: "Pull apart / attach handles", level: 2, group: "view", words: "แยกชิ้น explode ติดหู handle attach", desc: T("ดึงชิ้นแยกดู · ติดหู / ปิดหลังช่อง", "Pull pieces apart · attach handles"), steps: [T("หัวช่อง 3D → 'แยกชิ้น'", "3D header → 'Pull apart'")], target: { kind: "view3d", view: "explode" } },

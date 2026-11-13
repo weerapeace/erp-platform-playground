@@ -45,7 +45,9 @@ import type { Colorway, ProjectPiece } from "@/lib/pattern-project";
 import { ColorwayBar } from "./colorway-bar";
 import { ComparePanel, type CompareRef } from "./compare-panel";
 import { GradingPanel, type GradeGhost } from "./grading-panel";
-import type { GradeSpec } from "@/lib/pattern-grading";
+import { CoachPanel } from "./coach-panel";
+import { gradeSeamReport, type GradeSpec } from "@/lib/pattern-grading";
+import type { CoachInput } from "@/lib/pattern-coach";
 import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
 import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summarize, type CheckIssue } from "@/lib/pattern-check";
 import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
@@ -143,7 +145,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const splitRef = useRef<HTMLDivElement | null>(null), splitDrag = useRef(false);
   const [wizard, setWizard] = useState(false);
   const [photo, setPhoto] = useState(false);
-  const [draft, setDraft] = useState<{ params: BagParams; notice: string } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
+  const [draft, setDraft] = useState<{ params: BagParams; notice: string; sources?: Record<string, "seen" | "estimated"> } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
   const [inject, setInject] = useState<EditorProps["inject"]>(null);
   const [layer, setLayer] = useState<"all" | "outer" | "lining" | "inner">("all");   // inner = โฟม / ตัวเสริม (รอบ G2)   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
   const [cut, setCut] = useState<Pattern3DCut>("none");                     // ผ่าดูข้างในของภาพ 3D
@@ -152,6 +154,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [cmpOpen, setCmpOpen] = useState(false);                     // เทียบรุ่น (รอบ H)
   const [gradeOpen, setGradeOpen] = useState(false);                 // ขยายไซซ์ (รอบ I2)
   const [gradeGhosts, setGradeGhosts] = useState<GradeGhost[] | null>(null);
+  const [coachOpen, setCoachOpen] = useState(false);                 // โค้ช (รอบ I3)
   const [overlay, setOverlay] = useState<CompareRef | null>(null);   // ชิ้นกระเป๋า: สาย/หู · กุ๊น · ช่องโชว์ (รอบ F2)
   const [dxf, setDxf] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -313,6 +316,12 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       return { shape: mv(o.shape), holes: (o.holes ?? []).map(mv) };
     });
   }, [overlay, live]);
+  /** ข้อมูลให้โค้ช (รอบ I3) — คิดเฉพาะตอนเปิดแผงโค้ช */
+  const coachInput = useMemo((): CoachInput | null => {
+    if (!coachOpen || !sew) return null;
+    const g = sew.grading ? gradeSeamReport(live, sew.seams, sew.grading, tol).filter((r) => r.bad.length).map((r) => ({ size: r.size, n: r.bad.length })) : null;
+    return { pieces: live.map((p) => ({ pid: p.pid, name: p.name, shape: p.shape, holes: p.holes, allow: p.allow ?? 0, allowEdges: p.allowEdges, notches: p.notches, mats: p.mats, count: p.count, role: p.info?.role ?? null })), seams: sew.seams, issues, gradeBad: g, sizes: sew.grading?.sizes ?? null };
+  }, [coachOpen, sew, live, issues, tol]);   // eslint-disable-line react-hooks/exhaustive-deps
   const ghosts = useMemo(() => (cmpGhosts || gradeGhosts ? [...(cmpGhosts ?? []), ...(gradeGhosts ?? [])] : null), [cmpGhosts, gradeGhosts]);
   const tplNow = useMemo(() => (tpl?.keys ? Object.entries(tpl.keys).flatMap(([key, pid]) => { const p = live.find((x) => x.pid === pid); return p ? [{ key, pid, shape: p.shape, holes: p.holes, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, notches: p.notches ?? [] }] : []; }) : []), [tpl, live]);
   /** อัปเดตชุดแม่แบบเดิม (รอบ F2): แก้ชิ้นที่ไม่ได้แก้มือ · เพิ่มชิ้นใหม่ · ตะเข็บระหว่างชิ้นที่ตรงแม่แบบสร้างใหม่ · ตะเข็บอื่นคงไว้ */
@@ -416,6 +425,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       else if (id === "bagparts" && !readonly) setBagParts(true);
       else if (id === "compare") { setCmpOpen(true); later("[data-studio-compare]"); }
       else if (id === "grading") { setGradeOpen(true); later("[data-studio-grading]"); }
+      else if (id === "coach") { setCoachOpen(true); later("[data-studio-coach]"); }
       else later(id === "print" ? "[data-open-preflight]" : id === "export" ? "[data-export-project]" : id === "trims" ? "[data-trims-open]" : id === "unit" ? "[data-unit]" : `[data-studio-${id}]`);
     }
   };
@@ -509,6 +519,10 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
             title={t("เรียนไปทำไป: บทเรียนทำแพทเทิร์นที่ตรวจจากงานจริง", "Learn by doing: pattern lessons checked from your real work")}
             className={`${btn} ${sew.lesson ? "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
             <Icon value="i:book" className="text-sm" />{sew.lesson ? t(`บทเรียน ${sew.lesson.id}`, `Lesson ${sew.lesson.id}`) : t("เรียน", "Learn")}
+          </button>
+          <button type="button" data-studio-coach onClick={() => setCoachOpen(!coachOpen)} aria-pressed={coachOpen} title={t("โค้ชแนะนำว่าควรทำอะไรต่อ (ฟรี ดูจากแบบตอนนี้) + ถามโค้ช AI ได้", "Coach: what to do next (free, from the current pattern) + ask the AI coach")}
+            className={`${btn} ${coachOpen ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
+            <Icon value="i:sparkles" className="text-sm" />{t("โค้ช", "Coach")}
           </button>
           <button type="button" data-studio-pieces onClick={() => openPanel(panel === "pieces" ? null : "pieces")} aria-pressed={panel === "pieces"} title={t("รายการชิ้น: ล็อก / ซ่อน / แยกดู ตามกลุ่ม", "Piece list: lock / hide / isolate by group")}
             className={`${btn} ${panel === "pieces" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>
@@ -624,6 +638,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
 
       {(() => {
         const boardEl = (<>
+          {coachOpen && sew && coachInput && <CoachPanel input={coachInput} ai={!readonly && !!sew.onGrading} onTool={(id) => { const d = PATTERN_TOOLS.find((x) => x.id === id); if (d) runTool(d); }} />}
           {gradeOpen && sew && <GradingPanel live={live} seams={sew.seams} spec={sew.grading ?? null} onSpec={readonly || !sew.onGrading ? undefined : (g) => { const err = sew.onGrading?.(g); if (err) setNotice(err); }} onGhosts={setGradeGhosts} readonly={readonly} fileBase={sew.fileBase} tol={tol} />}
           {cmpOpen && sew && <ComparePanel live={live as unknown as ProjectPiece[]} saved={sew.compareRef ?? null} onSaveRef={readonly ? undefined : sew.onSaveCompare} onClearRef={readonly ? undefined : () => { sew.onClearCompare?.(); setOverlay(null); }} overlay={overlay} onOverlay={setOverlay} readonly={readonly} />}
           <ShapeEditor {...props} ghosts={ghosts} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
@@ -714,7 +729,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           onCatalog={() => setCatalog(true)} onClose={() => setLearnOpen(false)} />
       )}
       {sew && catalog && <LessonCatalog open onClose={() => setCatalog(false)} canStart={!!sew.canLearn} copySource={sew.copySource} currentId={sew.lesson?.id ?? null} />}
-      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} pocket={!!sew}
+      {wizard && <BagTemplateWizard key={draft ? "draft" : "plain"} open onClose={() => { setWizard(false); setDraft(null); }} onInsert={insert} initial={draft?.params} notice={draft?.notice} sources={draft?.sources} pocket={!!sew}
         current={!draft && tpl && tplNow.length ? tpl : null} now={tplNow} onUpdate={sew && !readonly ? applyTplUpdate : undefined} />}
       {bagParts && <BagPartsModal open onClose={() => setBagParts(false)} onInsert={addBagPart} defaultPid={selPid}
         hosts={live.filter((p) => p.info?.role !== "lining").map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, shape: p.shape, holes: p.holes, allow: p.allow, foldEdges: p.foldEdges }))}
@@ -742,7 +757,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
             t(`ค่าด้านล่างเป็นค่าที่ AI ประมาณจากรูป${info.style ? ` (${info.style})` : ""} · ความมั่นใจ ${Math.round(info.confidence * 100)}% — ตรวจและแก้ให้ตรงของจริงก่อนวาง`, `The values below were estimated by AI from the photo${info.style ? ` (${info.style})` : ""} · confidence ${Math.round(info.confidence * 100)}% — check and adjust before placing`),
             info.fits ? "" : t("AI บอกว่ากระเป๋าในรูปไม่ตรงกับแม่แบบ Tote นัก ค่านี้เป็นทรงที่ใกล้ที่สุดเท่านั้น", "The AI says this bag does not match the tote template well; this is only the nearest shape"),
             info.notes,
-          ].filter(Boolean).join(" · ") });
+          ].filter(Boolean).join(" · "), sources: info.sources });
           setWizard(true);
         }} />}
     </div>

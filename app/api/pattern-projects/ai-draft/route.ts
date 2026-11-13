@@ -34,7 +34,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const raw = await aiChat("ai.bag_draft", BAG_DRAFT_SYSTEM, [{ type: "text", text: BAG_DRAFT_ASK }, { type: "image_url", image_url: { url: image, detail: "high" } }], 600, "gpt-4.1-mini", { request });
     const d = bagParamsFromAiDraft(raw, width);
-    return NextResponse.json({ data: { params: d.params, is_bag: d.isBag, fits: d.fits, confidence: d.confidence, style: d.style, notes: d.notes }, error: null });
+    return NextResponse.json({ data: { params: d.params, is_bag: d.isBag, fits: d.fits, confidence: d.confidence, style: d.style, notes: d.notes, sources: d.sources }, error: null });
   } catch (e) {
     if (e instanceof ServiceOffError || e instanceof BudgetExceededError) return NextResponse.json({ error: e.message }, { status: 409 });
     return NextResponse.json({ error: "AI อ่านรูปไม่สำเร็จ กรุณาลองใหม่ หรือใส่ขนาดเองในตัวสร้างจากแม่แบบ" }, { status: 502 });

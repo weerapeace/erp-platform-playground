@@ -32,13 +32,17 @@ export const BAG_DRAFT_SYSTEM = [
   '  "window_shape": "rect"|"heart"|"circle"|"cloud"|"cat"|"bear"|null,',
   '  "opening_width": number|null,        // opening width / base width',
   '  "opening_center_height": number|null,// height of the opening centre above the base / body height (0..1)',
+  '  "seen": string[],                    // keys above you could actually measure in the photo (e.g. ["height","handle_drop"]); every other number is an estimate',
   '  "confidence": number,                // 0..1',
   '  "notes_th": string                   // Thai, max 200 chars: what you could not see or what does not fit the template',
   "}",
 ].join("\n");
 export const BAG_DRAFT_ASK = "ดูรูปกระเป๋าใบนี้ แล้วประมาณสัดส่วนตามโครง JSON ที่กำหนด";
 
-export type BagDraft = { params: BagParams; isBag: boolean; fits: boolean; confidence: number; style: string; notes: string };
+export type DraftSource = "seen" | "estimated";
+export type BagDraft = { params: BagParams; isBag: boolean; fits: boolean; confidence: number; style: string; notes: string; /** ค่าไหน AI เห็นจากภาพ / ประมาณ (รอบ I3) — คีย์ = ชื่อค่าแม่แบบ (H D flare r wh g Lh ws wy) */ sources: Record<string, DraftSource> };
+/** ชื่อในคำตอบ AI → ชื่อค่าแม่แบบ */
+export const AI_DRAFT_KEYS: Record<string, string> = { height: "H", depth: "D", flare: "flare", corner_radius: "r", handle_width: "wh", handle_gap: "g", handle_drop: "Lh", opening_width: "ws", opening_center_height: "wy" };
 
 const num = (v: unknown, lo: number, hi: number): number | null => {
   const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
@@ -52,6 +56,7 @@ export function bagParamsFromAiDraft(raw: unknown, widthCm: number): BagDraft {
   const W = Number.isFinite(widthCm) && widthCm > 0 ? widthCm : BAG_DEFAULT.W;
   const by = (key: string, lo: number, hi: number): number | undefined => { const r = num(o[key], lo, hi); return r == null ? undefined : half(r * W); };
   const p: Partial<BagParams> = { W: half(W) };
+  const seen = new Set(Array.isArray(o.seen) ? o.seen.filter((x): x is string => typeof x === "string") : []);
   const set = <K extends keyof BagParams>(k: K, v: BagParams[K] | undefined) => { if (v !== undefined) p[k] = v; };
   set("H", by("height", 0.2, 3));
   set("D", by("depth", 0.05, 1.2));
@@ -78,5 +83,6 @@ export function bagParamsFromAiDraft(raw: unknown, widthCm: number): BagDraft {
     confidence: num(o.confidence, 0, 1) ?? 0,
     style: String(o.style_th ?? "").trim().slice(0, 80),
     notes: String(o.notes_th ?? "").trim().slice(0, 300),
+    sources: Object.fromEntries(Object.entries(AI_DRAFT_KEYS).filter(([ai]) => ai !== "opening_width" && ai !== "opening_center_height" ? true : opening !== "none").map(([ai, k]) => [k, seen.has(ai) && o[ai] != null ? "seen" : "estimated"])) as Record<string, DraftSource>,
   };
 }

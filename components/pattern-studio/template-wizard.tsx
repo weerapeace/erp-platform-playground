@@ -25,7 +25,7 @@ const f1 = (x: number) => x.toFixed(1);
 const SQFT = 929.03;
 const COLORS: [string, string, string][] = [["#9a6a45", "น้ำตาลแทน", "Tan"], ["#4a3023", "น้ำตาลเข้ม", "Dark brown"], ["#26272b", "ดำ", "Black"], ["#d9cdb4", "ครีมแคนวาส", "Canvas cream"], ["#5d6b45", "เขียวมะกอก", "Olive"], ["#6f2531", "แดงเบอร์กันดี", "Burgundy"], ["#27364f", "กรมท่า", "Navy"]];
 
-export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, pocket: canPocket = true, current = null, now = [], onUpdate }: {
+export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, sources, pocket: canPocket = true, current = null, now = [], onUpdate }: {
   /** ชุดแม่แบบที่วางไว้แล้วในแพทเทิร์นนี้ (รอบ F2) — เปิดมาพร้อมค่าเดิม + ปุ่มอัปเดตชุดเดิม */ current?: { style: BagStyle; params?: Partial<BagParams>; kparams?: Partial<KitParams>; opts?: KitOpts } | null;
   /** ชิ้นของชุดเดิมบนกระดานตอนนี้ (จับคู่ด้วยรหัสชิ้นของแม่แบบ) */ now?: TplNow[];
   /** อัปเดตชุดเดิม: ชิ้นที่ต้องแก้ (ย้ายรูปให้ตรงตำแหน่งเดิมแล้ว) + ชิ้นใหม่ — ไม่ทับชิ้นที่แก้มือ เว้นแต่ติ๊กทับ */ onUpdate?: (u: TplUpdate) => void;
@@ -37,6 +37,8 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
   initial?: Partial<BagParams>;
   /** ข้อความแจ้งเหนือฟอร์ม (เช่น "ค่าจาก AI ตรวจก่อนวาง") */
   notice?: string;
+  /** ค่าที่ AI ร่าง: เห็นจากภาพ / ประมาณ (รอบ I3) — แสดงป้ายข้างช่อง · แก้ค่าหรือกดป้าย = ยืนยันแล้ว */
+  sources?: Record<string, "seen" | "estimated">;
   /** ผู้ใช้กดวางชิ้นลงกระดาน */
   onInsert: (kit: BagKit) => void;
 }) {
@@ -49,7 +51,11 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
   const G = useMemo(() => bagGeometry(params), [params]);
   const pieces = useMemo(() => bagPieces(G), [G]);
   const p = G.p;
-  const set = (k: BagNumKey, v: number) => setParams((old) => ({ ...old, [k]: v }));
+  const [confirmed, setConfirmed] = useState<Set<string>>(() => new Set(sources ? ["W"] : []));   // ค่าที่ผู้ใช้ยืนยันแล้ว (กว้างก้น = ผู้ใช้พิมพ์เอง)
+  const confirm = (k: string) => setConfirmed((s) => (s.has(k) ? s : new Set([...s, k])));
+  const set = (k: BagNumKey, v: number) => { setParams((old) => ({ ...old, [k]: v })); if (sources) confirm(k); };
+  const srcKeys = sources ? ["W", ...Object.keys(sources)] : [];
+  const unconfirmed = srcKeys.filter((k) => !confirmed.has(k));
   const colors = useMemo(() => ({ body, handle }), [body, handle]);
   // ทรงที่เลือก + ค่าของทรง 2–6 (จำแยกรายทรงระหว่างสลับ) + ตัวเลือกซับใน/ช่องใส่ของ
   const [style, setStyle] = useState<BagStyle>(() => (current && !initial ? current.style : "tote"));
@@ -75,9 +81,18 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
   const total = pieces.reduce((s, q) => s + q.count, 0);
   const partName = (k: string) => (k === "side" ? t("ข้าง", "side") : k === "corner" ? t("โค้ง", "corner") : t("ก้น", "bottom"));
 
+  const srcBadge = (k: string) => {
+    if (!sources || !(k === "W" || k in sources)) return null;
+    const st = confirmed.has(k) ? "ok" : sources[k] === "seen" ? "seen" : "est";
+    const lab = st === "ok" ? t("ยืนยันแล้ว", "Confirmed") : st === "seen" ? t("AI เห็นจากภาพ · กดยืนยัน", "AI saw it · tap to confirm") : t("AI ประมาณ · กดยืนยัน", "AI estimate · tap to confirm");
+    return <button type="button" data-ai-src={st} onClick={() => confirm(k)} disabled={st === "ok"} className={`mt-0.5 rounded-full px-1.5 py-0.5 text-[10px] ${st === "ok" ? "bg-emerald-100 text-emerald-800" : st === "seen" ? "bg-sky-100 text-sky-800 hover:bg-sky-200" : "bg-amber-100 text-amber-800 hover:bg-amber-200"}`}>{lab}</button>;
+  };
   const field = (k: BagNumKey, th: string, en: string, lim?: { min?: number; max?: number }) => (
-    <RangeInput key={k} label={t(th, en)} ariaLabel={t(th, en)} unit={t("ซม.", "cm")} value={p[k]} step={BAG_LIMITS[k].step}
-      min={lim?.min ?? BAG_LIMITS[k].min} max={lim?.max ?? BAG_LIMITS[k].max} onChange={(v) => set(k, v)} />
+    <div key={k}>
+      <RangeInput label={t(th, en)} ariaLabel={t(th, en)} unit={t("ซม.", "cm")} value={p[k]} step={BAG_LIMITS[k].step}
+        min={lim?.min ?? BAG_LIMITS[k].min} max={lim?.max ?? BAG_LIMITS[k].max} onChange={(v) => set(k, v)} />
+      {srcBadge(k)}
+    </div>
   );
   const seg = (on: boolean) => `h-8 flex-1 rounded-md px-2 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
   const winTypes: [BagWinType | "none", string, string][] = [["none", "ไม่มี", "None"], ["window", "หน้าต่างโชว์", "Display window"], ["zip", "ช่องซิป", "Zip opening"], ["slot", "ช่องสอด", "Slot"]];
@@ -101,7 +116,7 @@ export function BagTemplateWizard({ open, onClose, onInsert, initial, notice, po
         {upd && onUpdate && <button type="button" data-kit-update onClick={doUpdate} disabled={!upd.update.length && !upd.add.length && !(overwrite && upd.edited.length)} className="h-9 rounded-lg bg-emerald-600 px-4 text-sm text-white hover:bg-emerald-700 disabled:opacity-40">{t("อัปเดตชุดเดิม", "Update the existing set")}</button>}
         <button type="button" data-kit-insert onClick={() => onInsert(kit)} className={upd ? "h-9 rounded-lg border border-blue-200 bg-white px-4 text-sm text-blue-700 hover:bg-blue-50" : "h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700"}>{t(`วางชิ้นลงกระดาน (${kit.pieces.length} แบบ ${kitTotal} ชิ้น)`, `Place on the board (${kit.pieces.length} patterns, ${kitTotal} pcs)`)}</button>
       </>}>
-      {notice && <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><Icon value="i:sparkles" className="mt-0.5 text-sm" /><span>{notice}</span></div>}
+      {notice && <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><Icon value="i:sparkles" className="mt-0.5 text-sm" /><span>{notice}{sources && <span className="mt-1 block" data-ai-src-sum>{unconfirmed.length ? t(`ป้ายข้างช่อง: ฟ้า = AI เห็นจากภาพ · เหลือง = AI ประมาณ · เขียว = ยืนยันแล้ว — ยังไม่ยืนยัน ${unconfirmed.length} ค่า (วัดของจริงแล้วแก้ค่า หรือกดป้าย)`, `Labels: blue = AI saw it · amber = AI estimate · green = confirmed — ${unconfirmed.length} not confirmed yet (measure, then edit or tap the label)`) : t("ยืนยันครบทุกค่าแล้ว", "All values confirmed")}</span>}</span></div>}
       {upd && (   // รอบ F2: เปลี่ยนค่าแล้วอัปเดตชุดเดิม โดยไม่ทับชิ้นที่แก้มือ
         <div className="mb-3 space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900" data-kit-update-plan>
           <div className="font-medium">{t("แพทเทิร์นนี้มีชุดจากแม่แบบอยู่แล้ว — เปลี่ยนค่าแล้วกด 'อัปเดตชุดเดิม' ได้", "This pattern already has a set from the template — change values and press 'Update the existing set'")}</div>

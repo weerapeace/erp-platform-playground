@@ -17,12 +17,23 @@ import { RangeInput } from "@/components/range-input";
 import { apiFetch } from "@/lib/api";
 import type { BagParams } from "@/lib/bag-templates";
 import { contourShape, traceGray } from "@/lib/pattern-trace";
+import { checkScale, rectifyGray, traceTolMm, type CheckPair, type PPt } from "@/lib/pattern-photo";
 import { AI_PATTERN_PROMPT, parseAiPattern, type AiImport, type AiSeam } from "@/lib/bag-ai-import";
 import { shapePathD } from "@/lib/pattern-shape";
 import type { EditorPiece } from "@/components/pattern-sheet/shape-editor";
 
 type Loaded = { url: string; w: number; h: number; gray: Uint8Array };
-export type AiDraftInfo = { style: string; notes: string; confidence: number; fits: boolean };
+export type AiDraftInfo = { style: string; notes: string; confidence: number; fits: boolean; /** ค่าไหน AI เห็นจากภาพ / ประมาณ (รอบ I3) */ sources?: Record<string, "seen" | "estimated"> };
+
+/** ภาพเทา → รูป (data URL) ให้แสดงหลังแก้มุมเอียง */
+function grayUrl(gray: Uint8Array, w: number, h: number): string {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"); if (!g) return "";
+  const d = g.createImageData(w, h);
+  for (let i = 0; i < gray.length; i++) { d.data[i * 4] = d.data[i * 4 + 1] = d.data[i * 4 + 2] = gray[i]; d.data[i * 4 + 3] = 255; }
+  g.putImageData(d, 0, 0);
+  return c.toDataURL("image/jpeg", 0.85);
+}
 
 /** อ่านไฟล์รูป → ย่อให้ด้านยาวไม่เกิน max จุดภาพ → ผืนผ้าใบ */
 async function toCanvas(file: File, max: number): Promise<HTMLCanvasElement> {
@@ -134,6 +145,16 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
   const [eps, setEps] = useState(2);
   const [off, setOff] = useState<Set<number>>(new Set());
   const [realW, setRealW] = useState(30);
+  // ── รอบ I3: แก้มุมเอียง (4 มุมของกรอบที่รู้ขนาด) · จุดตรวจระยะ (2 จุด + ระยะจริง หลายคู่) · ค่าคลาดที่ยอมได้
+  const [clickMode, setClickMode] = useState<null | "quad" | "check">(null);
+  const [quad, setQuad] = useState<PPt[]>([]);
+  const [refW, setRefW] = useState(29.7);
+  const [refH, setRefH] = useState(21);
+  const [ext, setExt] = useState(0);
+  const [orig, setOrig] = useState<Loaded | null>(null);
+  const [fixedScale, setFixedScale] = useState<number | null>(null);
+  const [checks, setChecks] = useState<{ a: PPt; b?: PPt; real: number }[]>([]);
+  const [tolCm, setTolCm] = useState(0.3);
   // ── AI จากรูปกระเป๋า
   const [bag, setBag] = useState<{ url: string; w: number; h: number } | null>(null);
   const [bagW, setBagW] = useState(32);
@@ -147,6 +168,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
       const gray = new Uint8Array(c.width * c.height);
       for (let i = 0; i < gray.length; i++) gray[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
       setImg({ url: c.toDataURL("image/jpeg", 0.8), w: c.width, h: c.height, gray }); setOff(new Set());
+      setOrig(null); setFixedScale(null); setQuad([]); setChecks([]); setClickMode(null);
     } catch (e) { setErr((e as Error).message); }
   };
   const pickBag = async (f: File | undefined) => {
@@ -158,7 +180,27 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
   const traced = useMemo(() => (img ? traceGray(img.gray, img.w, img.h, { bias, pieces: mode, eps }) : null), [img, bias, mode, eps]);
   const chosen = useMemo(() => (traced?.contours ?? []).map((c, i) => ({ c, i })).filter((x) => !off.has(x.i)), [traced, off]);
   const widest = chosen.reduce((m, x) => Math.max(m, x.c.box.w), 0);
-  const cmPerPx = widest > 0 && realW > 0 ? realW / widest : 0;
+  const pairs: CheckPair[] = checks.flatMap((c) => (c.b ? [{ a: c.a, b: c.b, real: c.real }] : []));
+  const chk = useMemo(() => checkScale(pairs, tolCm, fixedScale), [JSON.stringify(pairs), tolCm, fixedScale]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const scaleFrom: "rect" | "checks" | "widest" = fixedScale ? "rect" : chk ? "checks" : "widest";
+  const cmPerPx = fixedScale ?? chk?.cmPerPx ?? (widest > 0 && realW > 0 ? realW / widest : 0);
+  /** คลิกบนรูป (โหมดเลือกมุม / จุดตรวจ) → พิกัดจุดภาพ */
+  const onImgClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!clickMode || !img) return;
+    const svg = e.currentTarget, m = svg.getScreenCTM(); if (!m) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(m.inverse()), p: PPt = [Math.round(q.x * 10) / 10, Math.round(q.y * 10) / 10];
+    if (clickMode === "quad") setQuad((old) => { const n = [...old, p].slice(-4); if (n.length === 4) setClickMode(null); return n; });
+    else setChecks((old) => { const last = old[old.length - 1]; if (last && !last.b) { setClickMode(null); return [...old.slice(0, -1), { ...last, b: p }]; } return [...old, { a: p, real: 10 }]; });
+  };
+  const rectify = () => {
+    if (!img || quad.length !== 4) return;
+    const r = rectifyGray(img.gray, img.w, img.h, quad, refW, refH, { extend: ext, maxSide: 900 });
+    if (!r) { setErr(t("4 จุดต้องเป็นมุมของสี่เหลี่ยม ไม่ไขว้กัน — ลองคลิกใหม่", "The 4 points must be corners of a quadrilateral without crossing — try again")); return; }
+    setOrig(orig ?? img); setImg({ url: grayUrl(r.gray, r.w, r.h), w: r.w, h: r.h, gray: r.gray }); setFixedScale(r.cmPerPx);
+    setQuad([]); setChecks([]); setOff(new Set()); setErr(null);
+  };
+  const undoRectify = () => { if (!orig) return; setImg(orig); setOrig(null); setFixedScale(null); setChecks([]); setOff(new Set()); };
   const toggle = (i: number) => setOff((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; });
 
   const place = () => {
@@ -176,9 +218,9 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
       const res = await apiFetch("/api/pattern-projects/ai-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: bag.url, width_cm: bagW }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      const d = j.data as { params: BagParams; is_bag: boolean; fits: boolean; confidence: number; style: string; notes: string };
+      const d = j.data as { params: BagParams; is_bag: boolean; fits: boolean; confidence: number; style: string; notes: string; sources?: Record<string, "seen" | "estimated"> };
       if (!d.is_bag) throw new Error(t("AI ดูแล้วไม่เห็นว่าเป็นรูปกระเป๋า ลองรูปที่เห็นกระเป๋าทั้งใบชัด ๆ", "The AI could not see a bag in this photo. Try one that shows the whole bag clearly."));
-      onDraft(d.params, { style: d.style, notes: d.notes, confidence: d.confidence, fits: d.fits });
+      onDraft(d.params, { style: d.style, notes: d.notes, confidence: d.confidence, fits: d.fits, sources: d.sources });
     } catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -226,11 +268,20 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
                 <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img.url} alt="" className="block w-full" />
-                  <svg viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full">
+                  <svg viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full" onClick={onImgClick} style={clickMode ? { cursor: "crosshair" } : undefined} data-photo-svg>
                     {(traced?.contours ?? []).map((c, i) => (
-                      <polygon key={i} points={c.pts.map((p) => p.join(",")).join(" ")} onClick={() => toggle(i)} style={{ cursor: "pointer" }}
+                      <polygon key={i} points={c.pts.map((p) => p.join(",")).join(" ")} onClick={() => { if (!clickMode) toggle(i); }} style={{ cursor: clickMode ? "crosshair" : "pointer", pointerEvents: clickMode ? "none" : undefined }}
                         fill={off.has(i) ? "rgba(148,163,184,0.15)" : "rgba(37,99,235,0.22)"} stroke={off.has(i) ? "#94a3b8" : "#2563eb"} strokeWidth={Math.max(1.5, img.w / 400)} strokeDasharray={off.has(i) ? "6 4" : undefined} />
                     ))}
+                    {quad.length > 0 && <g data-photo-quad style={{ pointerEvents: "none" }}>
+                      {quad.length > 1 && <polyline points={[...quad, ...(quad.length === 4 ? [quad[0]] : [])].map((p) => p.join(",")).join(" ")} fill="none" stroke="#f59e0b" strokeWidth={Math.max(1.5, img.w / 350)} />}
+                      {quad.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={Math.max(4, img.w / 120)} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />)}
+                    </g>}
+                    {checks.map((c, i) => <g key={`c${i}`} style={{ pointerEvents: "none" }} data-photo-check>
+                      {c.b && <line x1={c.a[0]} y1={c.a[1]} x2={c.b[0]} y2={c.b[1]} stroke={chk?.rows[checks.slice(0, i).filter((x) => x.b).length]?.ok === false ? "#dc2626" : "#059669"} strokeWidth={Math.max(1.5, img.w / 350)} />}
+                      {[c.a, ...(c.b ? [c.b] : [])].map((p, k) => <circle key={k} cx={p[0]} cy={p[1]} r={Math.max(3.5, img.w / 140)} fill="#059669" stroke="#fff" strokeWidth={1.2} />)}
+                      <text x={c.a[0] + 6} y={c.a[1] - 6} fontSize={Math.max(10, img.w / 55)} fill="#047857" stroke="#fff" strokeWidth={3} paintOrder="stroke">{i + 1}</text>
+                    </g>)}
                   </svg>
                 </div>
               ) : (
@@ -247,7 +298,44 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
               </div>
               <RangeInput label={t("ความไวแยกชิ้นจากพื้น", "Piece/background sensitivity")} min={-80} max={80} step={2} value={bias} onChange={setBias} />
               <RangeInput label={t("ความละเอียดของเส้น (น้อย = ตามรูปมาก จุดเยอะ)", "Outline detail (lower = more points)")} min={0.5} max={10} step={0.5} value={eps} onChange={setEps} />
-              <RangeInput label={t("ความกว้างจริงของชิ้นที่กว้างที่สุด", "Real width of the widest piece")} unit={t("ซม.", "cm")} min={2} max={150} step={0.5} value={realW} onChange={setRealW} />
+              {img && cmPerPx > 0 && <p className="-mt-2 text-[11px] text-slate-500" data-trace-tol>{t(`เส้นที่ลอกห่างขอบในรูปได้ไม่เกิน ≈ ${traceTolMm(eps, cmPerPx)} มม. · 1 จุดภาพ = ${Math.round(cmPerPx * 100) / 10} มม.`, `Traced line stays within ≈ ${traceTolMm(eps, cmPerPx)} mm of the photo edge · 1 px = ${Math.round(cmPerPx * 100) / 10} mm`)}</p>}
+              {img && (
+                <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50/60 p-2" data-photo-rectify>
+                  <div className="font-medium text-slate-700">{t("แก้มุมเอียงของรูป", "Fix photo perspective")}</div>
+                  {orig ? <div className="flex items-center gap-1.5 text-emerald-700">{t("แก้แล้ว · มาตราส่วนจากกรอบอ้างอิง", "Fixed · scale from the reference")}<button type="button" onClick={undoRectify} className="ml-auto h-7 rounded-md border border-slate-200 bg-white px-2 text-slate-600 hover:bg-slate-50">{t("กลับรูปเดิม", "Undo")}</button></div> : <>
+                    <p className="text-[11px] text-slate-500">{t("วางของที่รู้ขนาดในรูป (กระดาษ A4 29.7×21 · แผ่นรองตัด) แล้วคลิก 4 มุมของมัน", "Put something of known size in the photo (A4 paper 29.7×21, a cutting mat) and click its 4 corners")}</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button type="button" data-photo-quad-pick onClick={() => { setQuad([]); setClickMode(clickMode === "quad" ? null : "quad"); }} aria-pressed={clickMode === "quad"} className={`h-7 rounded-md border px-2 ${clickMode === "quad" ? "border-amber-400 bg-amber-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}>{clickMode === "quad" ? t(`คลิกมุมที่ ${quad.length + 1}/4`, `Click corner ${quad.length + 1}/4`) : t("คลิก 4 มุม", "Click 4 corners")}</button>
+                      <span>{t("กว้าง", "W")}</span><input type="number" min={1} step={0.1} value={refW} onChange={(e) => setRefW(Math.max(0, Number(e.target.value) || 0))} className="h-7 w-16 rounded-md border border-slate-200 px-1 text-right" aria-label={t("กว้างจริงของกรอบ (ซม.)", "Reference width (cm)")} />
+                      <span>{t("สูง", "H")}</span><input type="number" min={1} step={0.1} value={refH} onChange={(e) => setRefH(Math.max(0, Number(e.target.value) || 0))} className="h-7 w-16 rounded-md border border-slate-200 px-1 text-right" aria-label={t("สูงจริงของกรอบ (ซม.)", "Reference height (cm)")} />{t("ซม.", "cm")}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <select value={ext} onChange={(e) => setExt(Number(e.target.value))} className="h-7 rounded-md border border-slate-200 bg-white px-1" aria-label={t("พื้นที่ที่เก็บ", "Area kept")}>
+                        <option value={0}>{t("เก็บเฉพาะในกรอบ", "Inside the reference only")}</option><option value={0.5}>{t("เก็บรอบกรอบครึ่งเท่า", "Half a reference around it")}</option><option value={1}>{t("เก็บรอบกรอบ 1 เท่า", "One reference around it")}</option>
+                      </select>
+                      <button type="button" data-photo-rectify-apply disabled={quad.length !== 4 || !(refW > 0 && refH > 0)} onClick={rectify} className="h-7 rounded-md bg-amber-500 px-2 text-white hover:bg-amber-600 disabled:opacity-40">{t("แก้มุมเอียง", "Fix perspective")}</button>
+                    </div>
+                  </>}
+                </div>
+              )}
+              {img && (
+                <div className="space-y-1.5 rounded-md border border-emerald-200 bg-emerald-50/50 p-2" data-photo-checks>
+                  <div className="flex items-center gap-1.5 font-medium text-slate-700">{t("จุดตรวจระยะ", "Check distances")}
+                    <span className="ml-auto inline-flex items-center gap-1 font-normal text-slate-500">{t("คลาดได้ ±", "Tolerance ±")}<input type="number" min={0.05} step={0.05} value={tolCm} onChange={(e) => setTolCm(Math.max(0.05, Number(e.target.value) || 0.3))} className="h-6 w-14 rounded border border-slate-200 px-1 text-right" aria-label={t("ค่าคลาดที่ยอมได้ (ซม.)", "Tolerance (cm)")} />{t("ซม.", "cm")}</span></div>
+                  <p className="text-[11px] text-slate-500">{t("คลิก 2 จุดที่รู้ระยะจริง (เช่น ขอบชิ้นที่วัดแล้ว ไม้บรรทัดในรูป) แล้วพิมพ์ระยะ — หลายคู่ = ระบบตรวจว่าทั้งรูปตรงไหม", "Click 2 points with a known real distance (a measured edge, a ruler in the photo) and type it — several pairs show whether the whole photo is true")}</p>
+                  {checks.map((c, i) => { const k = checks.slice(0, i).filter((x) => x.b).length, row = c.b ? chk?.rows[k] : undefined; return (
+                    <div key={i} className="flex flex-wrap items-center gap-1.5" data-photo-check-row>
+                      <span className="text-slate-500">#{i + 1}</span>{t("จริง", "Real")}
+                      <input type="number" min={0.1} step={0.1} value={c.real} onChange={(e) => setChecks((old) => old.map((x, j) => (j === i ? { ...x, real: Math.max(0, Number(e.target.value) || 0) } : x)))} className="h-6 w-16 rounded border border-slate-200 px-1 text-right" aria-label={t("ระยะจริง (ซม.)", "Real distance (cm)")} />{t("ซม.", "cm")}
+                      {!c.b ? <span className="text-amber-700">{t("คลิกจุดที่ 2", "Click the 2nd point")}</span> : row ? <span className={row.ok ? "text-emerald-700" : "text-rose-700"}>{t(`วัดได้ ${row.got} · คลาด ${row.err > 0 ? "+" : ""}${row.err} (${row.pct}%)`, `measured ${row.got} · off ${row.err > 0 ? "+" : ""}${row.err} (${row.pct}%)`)}{row.ok ? " ✓" : " ✗"}</span> : null}
+                      <button type="button" onClick={() => setChecks((old) => old.filter((_, j) => j !== i))} className="ml-auto text-slate-300 hover:text-rose-600" aria-label={t("ลบจุดตรวจ", "Remove check")}>✕</button>
+                    </div>); })}
+                  <button type="button" data-photo-check-add onClick={() => setClickMode(clickMode === "check" ? null : "check")} aria-pressed={clickMode === "check"} className={`h-7 rounded-md border px-2 ${clickMode === "check" ? "border-emerald-400 bg-emerald-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}>{clickMode === "check" ? t("คลิก 2 จุดบนรูป…", "Click 2 points on the photo…") : t("+ จุดตรวจ", "+ Check")}</button>
+                  {chk && <p className={`text-[11px] ${chk.ok ? "text-emerald-700" : "text-rose-700"}`} data-photo-check-sum>{chk.ok ? t(`ผ่านทุกจุด (คลาดมากสุด ${chk.worst} ซม.)`, `All checks pass (worst ${chk.worst} cm)`) : (fixedScale ? t(`คลาดเกิน ±${tolCm} ซม. (มากสุด ${chk.worst}) — ตรวจว่าวัดของจริงถูก คลิกตรงจุด และชิ้นวางราบกับกระดาษ`, `Off by more than ±${tolCm} cm (worst ${chk.worst}) — check the real measurement, the clicked points, and that pieces lie flat`) : t(`คลาดเกิน ±${tolCm} ซม. (มากสุด ${chk.worst}) — รูปอาจถ่ายเอียง ลอง "แก้มุมเอียง" ก่อน`, `Off by more than ±${tolCm} cm (worst ${chk.worst}) — the photo may be tilted, try "Fix perspective" first`))}</p>}
+                </div>
+              )}
+              {scaleFrom === "widest" ? <RangeInput label={t("ความกว้างจริงของชิ้นที่กว้างที่สุด", "Real width of the widest piece")} unit={t("ซม.", "cm")} min={2} max={150} step={0.5} value={realW} onChange={setRealW} />
+                : <p className="text-[11px] text-slate-600" data-scale-from>{scaleFrom === "rect" ? t("มาตราส่วนจากกรอบอ้างอิงที่แก้มุมเอียง", "Scale from the perspective reference") : t("มาตราส่วนจากจุดตรวจระยะ (เข้ากับทุกคู่มากที่สุด)", "Scale from the check distances (best fit to all pairs)")}</p>}
               {chosen.length > 0 && cmPerPx > 0 && (
                 <ul className="space-y-0.5 rounded-md bg-slate-50 p-2 tabular-nums text-slate-600">
                   {chosen.map(({ c, i }, k) => <li key={i}>{t(`ชิ้น ${k + 1}`, `Piece ${k + 1}`)} · {(c.box.w * cmPerPx).toFixed(1)} × {(c.box.h * cmPerPx).toFixed(1)} {t("ซม.", "cm")} · {c.pts.length} {t("จุด", "pts")}</li>)}
