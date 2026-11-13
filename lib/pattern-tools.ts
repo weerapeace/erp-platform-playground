@@ -20,7 +20,7 @@ type Txt = { th: string; en: string };
 export type ToolTarget =
   | { kind: "tool"; tool: string }
   | { kind: "guide"; el: string; select?: boolean }
-  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" }
+  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" | "export" | "compare" }
   | { kind: "view3d"; view: "sewn" | "explode" | "steps" | "sim" | "flat" };
 /** ภาพเคลื่อนไหวตัวอย่างที่มี (components/pattern-studio/tool-demo) */
 export type DemoId = "move" | "rect" | "pen" | "measure" | "sew" | "sewpart" | "allow" | "round";
@@ -185,6 +185,24 @@ export const PATTERN_TOOLS: ToolDef[] = [
   { id: "tpl-update", icon: "refresh", th: "อัปเดตชุดจากแม่แบบ", en: "Update template set", level: 2, group: "studio", words: "อัปเดต แม่แบบ เปลี่ยนค่า เก็บงานแก้มือ update regenerate ชุดเดิม",
     desc: T("เปิด 'สร้างจากแม่แบบทรง' อีกครั้ง เปลี่ยนค่า แล้วกด 'อัปเดตชุดเดิม' — ชิ้นที่ไม่ได้แก้มือเปลี่ยนตาม ชิ้นที่แก้มือไม่ถูกทับ (ติ๊กทับได้) · หรือวางเป็นชุดใหม่", "Open 'Bag template' again, change values, press 'Update the existing set' — untouched pieces follow, hand-edited ones are kept (or tick overwrite) · or place a new set"),
     steps: [T("กด 'สร้างจากแม่แบบทรง'", "Press 'Bag template'"), T("เปลี่ยนค่า ดูรายการที่จะเปลี่ยน แล้วกด อัปเดตชุดเดิม", "Change values, check the list, press Update the existing set")], target: { kind: "studio", id: "template" } },
+  { id: "csv-export", icon: "file-spreadsheet", th: "CSV รายการตัด / วัสดุ", en: "CSV cut list / BOM", level: 2, group: "studio", words: "csv excel รายการตัด bom วัสดุ สรุปวัสดุ ตาราง",
+    desc: T("ดาวน์โหลดตารางรายการตัด (รหัสชิ้น วัสดุ ขนาดตัด จำนวน พื้นที่ รุ่น) และสรุปวัสดุต่อใบ/ตามจำนวนผลิต เปิดใน Excel ได้", "Download the cut list (piece code, material, cut size, count, area, version) and the material summary per bag / per order, opens in Excel"),
+    steps: [T("กด 'ใบสเปก / พิมพ์ / ไฟล์ตัด'", "Press 'Spec sheet / print / cut files'"), T("กด CSV รายการตัด หรือ CSV วัสดุ", "Press CSV cut list or CSV materials")], target: { kind: "studio", id: "print" } },
+  { id: "dxf-profile", icon: "file-export", th: "DXF แบบ AAMA / ASTM", en: "DXF AAMA / ASTM profile", level: 3, group: "studio", words: "aama astm dxf profile โปรไฟล์ cad ชั้นเลข block",
+    desc: T("เลือกรูปแบบ DXF: ทั่วไป (ชั้นตามชื่อ เครื่องเลเซอร์) หรือ AAMA/ASTM (ชั้นเลข 1 ชิ้น = 1 บล็อก) · ระบบอ่านไฟล์กลับเพื่อตรวจทุกครั้ง — ยังต้องลองกับโปรแกรมปลายทาง", "Pick the DXF style: general (named layers, laser) or AAMA/ASTM (numbered layers, 1 piece = 1 block) · the file is read back to check each time — still test with the target software"),
+    steps: [T("หน้าพิมพ์ → เลือก 'DXF: …'", "Print page → pick 'DXF: …'"), T("กดดาวน์โหลด DXF แล้วดูผลตรวจใต้ปุ่ม", "Download DXF and read the check under the buttons")], target: { kind: "studio", id: "print" } },
+  { id: "paper", icon: "printer", th: "กระดาษ A3 / กำหนดเอง", en: "A3 / custom paper", level: 2, group: "studio", words: "a3 a4 กระดาษ กำหนดเอง paper แนวนอน พิมพ์ขนาดจริง plotter",
+    desc: T("พิมพ์ขนาดจริงบน A4 / A3 / กระดาษขนาดที่กำหนด (มม.) แนวตั้งหรือนอน — ระบบแบ่งหน้าและกรอบสอบเทียบ 100 มม. ให้", "Print at real size on A4 / A3 / custom paper (mm), portrait or landscape — pages and the 100 mm calibration square are laid out for you"),
+    steps: [T("หน้าพิมพ์ → พิมพ์ขนาดจริง", "Print page → Real size"), T("เลือกกระดาษ / แนวนอน", "Pick the paper / landscape")], target: { kind: "studio", id: "print" } },
+  { id: "project-file", icon: "file-import", th: "ไฟล์โปรเจกต์ (ส่งออก / นำเข้า)", en: "Project file (export / import)", level: 2, group: "studio", words: "ไฟล์โปรเจกต์ json ส่งออก นำเข้า project file backup สำรอง",
+    desc: T("ส่งออกทั้งแพทเทิร์น (ชิ้น ตะเข็บ วัสดุ ชุดสี แม่แบบ) เป็น .json · นำเข้าที่หน้ารายการได้แพทเทิร์นใหม่ (ไม่ทับของเดิม) · ใช้เทียบรุ่นได้", "Export the whole pattern (pieces, seams, materials, colourways, template) as .json · import on the list page for a new pattern (no overwrite) · use it to compare versions"),
+    steps: [T("กดปุ่ม 'ไฟล์โปรเจกต์' แถวบน", "Press 'Project file' at the top"), T("นำเข้า: หน้ารายการ → นำเข้าไฟล์โปรเจกต์", "Import: list page → Import project file")], target: { kind: "studio", id: "export" } },
+  { id: "compare", icon: "layers-subtract", th: "เทียบรุ่น", en: "Compare versions", level: 2, group: "studio", words: "เทียบรุ่น revision เปรียบเทียบ ซ้อน compare overlay รุ่นเก่า",
+    desc: T("ตั้งรุ่นปัจจุบันเป็นตัวเทียบ หรือเลือกไฟล์โปรเจกต์รุ่นเก่า → ตารางชิ้นที่เปลี่ยน/เพิ่ม/หาย + ซ้อนเส้นประชมพูบนกระดาน", "Set the current version as the reference, or pick an older project file → table of changed/added/removed pieces + pink dashed overlay on the board"),
+    steps: [T("กด 'เทียบรุ่น'", "Press 'Compare'"), T("ตั้งตัวเทียบก่อนแก้ แล้วติ๊กซ้อนบนกระดาน", "Set the reference before editing, then tick overlay")], target: { kind: "studio", id: "compare" } },
+  { id: "tech-pack", icon: "file-text", th: "ใบสเปก (Tech pack)", en: "Tech pack", level: 2, group: "studio", words: "ใบสเปก tech pack ลำดับประกอบ หมายเหตุการผลิต spec sheet ภาพ 3d",
+    desc: T("หน้าพิมพ์มีภาพ 3D 5 มุม (รวมภายใน) ขนาดเป้าหมาย ลำดับประกอบจากตะเข็บ หมายเหตุการผลิต (วัสดุ PVC ชั้นเสริม ชดเชยพับ ทากาว) สรุปวัสดุ และป้ายรุ่น/วันที่บนทุกชิ้น", "The print page has 5 3D views (incl. inside), target size, assembly order from seams, production notes (materials, PVC, reinforcement, fold allowance, glue), material summary and version/date on every piece"),
+    steps: [T("กด 'ใบสเปก / พิมพ์ / ไฟล์ตัด'", "Press 'Spec sheet / print / cut files'"), T("แท็บ ใบสเปก + วางบนผ้า", "Tab Spec sheet + fabric layout")], target: { kind: "studio", id: "print" } },
   // ── ภาพ 3D ──
   { id: "v-sewn", icon: "box", th: "ภาพเย็บติดแล้ว", en: "Sewn view", level: 1, group: "view", words: "3d สามมิติ เย็บติด sewn ภาพ", desc: T("กระเป๋าตอนเย็บติดแล้ว ตามกระดานทันที", "The sewn bag, following the board live"), steps: [T("หัวช่อง 3D → 'เย็บติดแล้ว'", "3D header → 'Sewn'")], target: { kind: "view3d", view: "sewn" } },
   { id: "v-explode", icon: "maximize", th: "แยกชิ้น / ติดหู", en: "Pull apart / attach handles", level: 2, group: "view", words: "แยกชิ้น explode ติดหู handle attach", desc: T("ดึงชิ้นแยกดู · ติดหู / ปิดหลังช่อง", "Pull pieces apart · attach handles"), steps: [T("หัวช่อง 3D → 'แยกชิ้น'", "3D header → 'Pull apart'")], target: { kind: "view3d", view: "explode" } },

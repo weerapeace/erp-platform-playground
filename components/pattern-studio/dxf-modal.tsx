@@ -13,7 +13,7 @@ import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { FileDropHint, useFileDrop } from "@/components/file-drop";
-import { parseDxfPattern, type DxfNote, type DxfPiece, type DxfUnit } from "@/lib/pattern-dxf-import";
+import { applyCutOnly, parseDxfPattern, type DxfNote, type DxfPiece, type DxfUnit } from "@/lib/pattern-dxf-import";
 import { shapePathD } from "@/lib/pattern-shape";
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -31,6 +31,11 @@ export function DxfModal({ open, onClose, onInsert }: {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const imp = useMemo(() => (file ? parseDxfPattern(file.text, unit ?? undefined) : null), [file, unit]);
+  // รอบ H: ไฟล์มีแต่เส้นตัด → ต้องรู้ก่อนว่าเส้นคืออะไร + เผื่อเท่าไหร่ (ไม่เดาให้เงียบ ๆ)
+  const cutOnly = imp?.pieces.filter((p) => p.cutOnly).length ?? 0;
+  const [coMode, setCoMode] = useState<"cut" | "sew" | "none">("cut");
+  const [coMm, setCoMm] = useState(7);
+  const ready = useMemo(() => (imp ? applyCutOnly(imp.pieces, coMode, coMm / 10) : null), [imp, coMode, coMm]);
 
   const load = async (f: File | undefined) => {
     if (!f) return;
@@ -74,7 +79,7 @@ export function DxfModal({ open, onClose, onInsert }: {
       description={t("ใช้ย้ายแพทเทิร์นที่ทำไว้ในโปรแกรมอื่น (เช่น CLO3D) เข้ามา — ระบบอ่านไฟล์ในเครื่องนี้ ไม่อัปโหลดไปไหน และยังไม่วางอะไรจนกว่าจะกดปุ่มวาง", "Bring in patterns made in other software (such as CLO3D) — the file is read on this device, nothing is uploaded, and nothing is placed until you press the button")}
       footer={<>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" disabled={!imp} onClick={() => { if (imp) onInsert(imp.pieces); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700 disabled:opacity-40">
+        <button type="button" disabled={!imp} onClick={() => { if (ready) onInsert(ready.pieces); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700 disabled:opacity-40">
           <Icon value="i:plus" className="text-sm" />{imp ? t(`วางลงกระดาน ${imp.pieces.length} ชิ้น`, `Place ${imp.pieces.length} pieces`) : t("วางลงกระดาน", "Place on the board")}
         </button>
       </>}>
@@ -95,6 +100,16 @@ export function DxfModal({ open, onClose, onInsert }: {
               <div className="rounded-lg border border-slate-200 bg-white p-2">{preview}</div>
               <p className="text-[11px] text-slate-500">{t("เส้นสีน้ำเงิน = เส้นเย็บของชิ้น · เส้นประ = เส้นใน · จุดแดง = รอยบาก · เลขในชิ้นตรงกับรายการทางขวา", "Blue = sew line · dashed = inner lines · red dots = notches · numbers match the list on the right")}</p>
               {imp.notes.map((n) => <p key={n} className="rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-800">{noteText(n)}</p>)}
+              {cutOnly > 0 && (
+                <div className="space-y-1.5 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900" data-dxf-cutonly>
+                  <div className="font-medium">{t(`${cutOnly} ชิ้นมีแต่เส้นตัด (ไม่มีเส้นเย็บในไฟล์) — เส้นนี้คืออะไร?`, `${cutOnly} piece(s) have cut lines only (no sew line in the file) — what are these lines?`)}</div>
+                  {([["cut", "เส้นตัด (รวมเผื่อเย็บแล้ว) → หดเข้าเป็นเส้นเย็บ ขนาดตัดเท่าเดิม", "Cut lines (allowance included) → shrink to the sew line, cut size unchanged"], ["sew", "เส้นเย็บ → เพิ่มเผื่อออกนอก ชิ้นตัดใหญ่ขึ้น", "Sew lines → add allowance outside, cut pieces get bigger"], ["none", "ไม่ใส่เผื่อ ใช้เส้นนี้ตามเดิม", "No allowance, use the lines as they are"]] as const).map(([k, th, en]) => (
+                    <label key={k} className="flex items-start gap-2"><input type="radio" name="dxf-cutonly" checked={coMode === k} onChange={() => setCoMode(k)} className="mt-0.5" data-dxf-cutonly-mode={k} />{t(th, en)}</label>
+                  ))}
+                  {coMode !== "none" && <label className="flex items-center gap-2">{t("ระยะเผื่อเย็บ", "Seam allowance")}<input type="number" min={1} max={50} step={0.5} value={coMm} onChange={(e) => setCoMm(Math.max(1, Math.min(50, Number(e.target.value) || 7)))} className="h-7 w-16 rounded-md border border-amber-300 bg-white px-1.5 text-right" data-dxf-cutonly-mm />{t("มม.", "mm")}</label>}
+                  {ready && ready.skipped > 0 && <p className="text-rose-700">{t(`${ready.skipped} ชิ้นเล็ก/แคบเกินกว่าจะหดเข้า — วางตามเดิม (ตรวจชิ้นนี้อีกครั้ง)`, `${ready.skipped} piece(s) are too small/narrow to shrink — placed as they are (check them)`)}</p>}
+                </div>
+              )}
             </div>
             <div className="min-w-0 space-y-3 text-xs">
               <div className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-3">

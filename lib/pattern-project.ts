@@ -253,7 +253,7 @@ export function projectPatternLines(pieces: ProjectPiece[], basis: "box" | "area
       v: 1, shape: n.shape, basis, ...(withName ? { name: pieceName } : {}),
       ...(n.holes.length ? { holes: n.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.allowEdges ? { allowEdges: p.allowEdges } : {}), ...(p.foldEdges ? { foldEdges: p.foldEdges } : {}),
       ...(n.grain && n.grain.length === 2 ? { grain: n.grain } : {}), ...(n.notches?.length ? { notches: n.notches } : {}), ...(n.inner?.length ? { inner: n.inner } : {}),
-      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}), ...(p.info?.comp ? { comp: p.info.comp } : {}), ...(stitch.length ? { stitch } : {}),
+      ...(p.info?.corner ? { corner: p.info.corner } : {}), ...(p.info?.notch ? { notchStyle: p.info.notch } : {}), ...(p.info?.nap ? { nap: true } : {}), ...(p.info?.comp ? { comp: p.info.comp } : {}), ...(stitch.length ? { stitch } : {}), ...(cutTag(p.info) ? { tag: cutTag(p.info) } : {}),
     });
     // 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ตัดจากวัสดุนั้น) · ยังไม่เลือกวัสดุ = บรรทัดเดียว ชื่อชิ้นเป็นชื่อบรรทัด
     const note = p.info?.code || null;   // รหัสชิ้นออกในช่องหมายเหตุของตารางชิ้น
@@ -365,4 +365,10 @@ export function topstitchLines(shape: Shape, pid: string, edgeMeta?: EdgeMeta[] 
     }
   }
   return out;
+}
+
+/** ป้ายวิธีวางตัดบนชิ้น (รอบ H): คู่ซ้าย-ขวา · คว่ำหน้า · ทางผ้าทางเดียว — ไม่มี = "" */
+export function cutTag(info?: PieceInfo | null): string {
+  if (!info) return "";
+  return [info.pair ? "คู่ ซ้าย-ขวา" : "", info.face === "down" ? "คว่ำหน้า" : "", info.nap ? "ทางเดียว" : ""].filter(Boolean).join(" · ");
 }

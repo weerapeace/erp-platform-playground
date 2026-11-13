@@ -13,7 +13,7 @@ import { usePrintLog } from "@/components/report/use-print-log";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { PatternPrintView } from "@/components/pattern-sheet/print-view";
-import { projectEdgeRows, projectPatternLines, projectPieceRows, projectSeamRows, type PatternProject } from "@/lib/pattern-project";
+import { PIECE_ROLES, cleanMatProps, projectEdgeRows, projectPatternLines, projectPieceRows, projectSeamRows, type PatternProject } from "@/lib/pattern-project";
 import { cleanTrims, trimRows } from "@/lib/pattern-trims";
 import { buildSewn } from "@/lib/pattern-sewn";
 import { cleanAttaches, type AsmPiece } from "@/lib/pattern-assembly";
@@ -59,22 +59,62 @@ export default function PrintPatternProjectPage() {
     return sc.joined > 0 ? sc : null;
   }, [project]);
   const [shots, setShots] = useState<{ url: string; label: string }[] | null>(null);
-  const shotFor = useRef<unknown>(null);
+  const [inner, setInner] = useState<{ url: string; label: string } | null>(null);   // ภาพภายใน (ผ่าด้านหน้า · รอบ H)
+  const shotFor = useRef<unknown>(null), innerFor = useRef<unknown>(null);
   const onReady3d = (api: Pattern3DApi) => {
     if (!scene || shotFor.current === scene) return;
     shotFor.current = scene;
-    window.setTimeout(() => {   // รอ 1 จังหวะให้ขนาดผืนวาดนิ่ง แล้วถ่าย
-      const a = api.snapshot("iso"), b = api.snapshot("back");
-      setShots([...(a ? [{ url: a, label: "มุมเฉียงด้านหน้า" }] : []), ...(b ? [{ url: b, label: "มุมเฉียงด้านหลัง" }] : [])]);
+    window.setTimeout(() => {   // รอ 1 จังหวะให้ขนาดผืนวาดนิ่ง แล้วถ่าย — ใบสเปก (รอบ H): หน้า/หลัง เฉียง + ตรงหน้า + ข้าง
+      const v: [Parameters<Pattern3DApi["snapshot"]>[0], string][] = [["iso", "มุมเฉียงด้านหน้า"], ["back", "มุมเฉียงด้านหลัง"], ["front", "ด้านหน้า"], ["side", "ด้านข้าง"]];
+      setShots(v.flatMap(([k, label]) => { const u = api.snapshot(k); return u ? [{ url: u, label }] : []; }));
     }, 350);
   };
+  const onReadyInner = (api: Pattern3DApi) => {
+    if (!scene || innerFor.current === scene) return;
+    innerFor.current = scene;
+    window.setTimeout(() => { const u = api.snapshot("iso"); setInner(u ? { url: u, label: "ภายใน (ผ่าด้านหน้า)" } : null); }, 450);
+  };
   const body = scene?.asm ?? null;
+  // ── ใบสเปก (Tech pack · รอบ H): ขนาดเป้าหมาย · ลำดับประกอบ · หมายเหตุการผลิต ──
+  const tplObj = (project?.template ?? null) as { params?: { W?: number; flare?: number; H?: number; D?: number }; rev?: number } | null;
+  const STEP_TH: Record<string, string> = { behind: "ติดแผ่นหลังช่อง / PVC ด้านหลังตัวหน้า", handle: "ติดหู / สาย", extra: "ติดชิ้นที่เย็บติด (ช่อง แถบ สาย)", gusset: "เย็บชิ้นข้าง/ก้นกับตัวหน้า", back: "เย็บตัวหลังปิด", lining: "ใส่ซับใน" };
+  const pname = (pid: string) => { const i = (project?.pieces ?? []).findIndex((p) => p.pid === pid); return i >= 0 ? project!.pieces[i].name || `ชิ้น ${i + 1}` : pid; };
+  const notes = useMemo(() => {
+    if (!project) return [] as string[];
+    const out: string[] = [], mp = cleanMatProps((project.template as { matProps?: unknown } | null)?.matProps), names = new Map<string, string>();
+    for (const p of project.pieces ?? []) for (const m of p.mats ?? []) names.set(m.id, m.name);
+    for (const [id, m] of Object.entries(mp)) {
+      const nm = names.get(id) ?? id, bits = [m.note, m.roll ? `หน้าผ้า ${m.roll} ซม.` : "", m.gsm ? `${m.gsm} g/m²` : "", `หนา ${m.thick} มม.`, m.cal ? "ค่าสอบเทียบแล้ว" : "ค่าประมาณการ"].filter(Boolean);
+      out.push(`${nm}: ${bits.join(" · ")}`);
+    }
+    const pvc = (project.pieces ?? []).filter((p) => /pvc/i.test(p.name ?? "") || (p.mats ?? []).some((m) => /pvc/i.test(m.name)));
+    if (pvc.length) out.push(`แผ่นใส/PVC: ${pvc.map((p) => p.name).join(", ")} — ห้ามรีดร้อน · เข็มเบอร์ใหญ่ ฝีเข็มห่าง ไม่ย้อนเข็มซ้ำรู`);
+    const roles = (project.pieces ?? []).filter((p) => p.info?.role === "reinforce" || p.info?.role === "foam");
+    if (roles.length) out.push(`ชั้นเสริม/โฟม: ${roles.map((p) => `${p.name} (${PIECE_ROLES.find((r) => r.key === p.info?.role)?.th ?? ""})`).join(", ")}`);
+    const comp = (project.pieces ?? []).filter((p) => p.info?.comp);
+    if (comp.length) out.push(`ชดเชยความหนาที่ขอบพับ: ${comp.map((p) => `${p.name} ${Math.round((p.info?.comp ?? 0) * 100) / 10} มม./ทบ`).join(", ")}`);
+    const glue = (project.pieces ?? []).flatMap((p) => (p.inner ?? []).filter((l) => l.kind === "glue" || l.kind === "skive").map((l) => `${p.name}: ${l.kind === "glue" ? "ทากาว" : "ปาดบาง"}`));
+    if (glue.length) out.push(`แนวทากาว/ปาดบาง: ${glue.join(", ")}`);
+    const tops = edgeRows.filter((r) => r.top), binds = edgeRows.filter((r) => r.bind);
+    if (tops.length || binds.length) out.push([tops.length ? `เดินด้ายทับ ${tops.length} ขอบ` : "", binds.length ? `กุ๊น/หุ้มขอบ ${binds.length} ขอบ` : ""].filter(Boolean).join(" · "));
+    return out;
+  }, [project, edgeRows]);
+  const techPack = (
+    <div className="mt-3 grid gap-3 text-[12px] text-slate-700 sm:grid-cols-2" data-tech-pack>
+      {tplObj?.params?.W ? <div className="break-inside-avoid"><div className="mb-1 text-[11px] font-medium text-slate-600">ขนาดเป้าหมาย (จากแม่แบบ)</div>
+        ก้นกว้าง {tplObj.params.W} · ปากกว้าง {Math.round((tplObj.params.W + 2 * (tplObj.params.flare ?? 0)) * 10) / 10} · สูง {tplObj.params.H} · หนา {tplObj.params.D} ซม.</div> : null}
+      {body?.steps?.length ? <div className="break-inside-avoid" data-assembly-order><div className="mb-1 text-[11px] font-medium text-slate-600">ลำดับประกอบ (จากตะเข็บ)</div>
+        <ol className="list-decimal space-y-0.5 pl-4">{body.steps.map((st, i) => <li key={i}>{STEP_TH[st.key] ?? st.key}: {st.pids.map(pname).join(", ")}</li>)}</ol></div> : null}
+      {notes.length ? <div className="break-inside-avoid sm:col-span-2" data-prod-notes><div className="mb-1 text-[11px] font-medium text-slate-600">หมายเหตุการผลิต</div>
+        <ul className="list-disc space-y-0.5 pl-4">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul></div> : null}
+    </div>
+  );
   const spec = scene ? (
     <div className="break-inside-avoid" data-spec-3d>
       <div className="mb-1 text-[11px] font-medium text-slate-600">ภาพ 3 มิติ (ประกอบจากชิ้นและตะเข็บของแพทเทิร์นตามกติกา ไม่ใช่การจำลองผ้า)</div>
       {shots ? (shots.length ? (
         <div className="grid grid-cols-2 gap-2">
-          {shots.map((s) => (
+          {[...shots, ...(inner ? [inner] : [])].map((s) => (
             <figure key={s.label} className="overflow-hidden rounded-lg border border-slate-200">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={s.url} alt={s.label} className="block w-full" />
@@ -93,6 +133,12 @@ export default function PrintPatternProjectPage() {
           <Pattern3D mode="sewn" sewn={scene} height={540} onReady={onReady3d} />
         </div>
       )}
+      {!inner && (scene.asm || scene.lining) && (
+        <div aria-hidden className="no-print pointer-events-none fixed" style={{ left: -4000, top: 600, width: 720, height: 540 }}>
+          <Pattern3D mode="sewn" sewn={scene} cut="front" height={540} onReady={onReadyInner} />
+        </div>
+      )}
+      {techPack}
     </div>
   ) : null;
   const f1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
@@ -202,7 +248,8 @@ export default function PrintPatternProjectPage() {
   if (err) return <div className="p-10 text-center text-sm text-rose-600">{err}</div>;
 
   return (
-    <PatternPrintView lines={lines} afterTable={tables} beforeTable={spec} overviewLabel="ใบสเปก + วางบนผ้า" fileName={docFileName("แพทเทิร์น", code || String(id))}
+    <PatternPrintView lines={lines} afterTable={tables} beforeTable={spec} rev={tplObj?.rev ?? null}
+      stamp={[tplObj?.rev ? `rev ${tplObj.rev}` : "", project?.updated_at ? new Date(project.updated_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : ""].filter(Boolean).join(" · ") || undefined} overviewLabel="ใบสเปก + วางบนผ้า" fileName={docFileName("แพทเทิร์น", code || String(id))}
       eyebrow={`สตูดิโอแพทเทิร์น${project?.sku_code ? ` · ${project.sku_code}` : ""}`} title={`${code} ${project?.name ?? ""}`} footCode={`${code || (project?.name ?? "")}${(project?.template as { rev?: number } | null)?.rev ? ` · rev ${(project?.template as { rev?: number }).rev}` : ""}${draft ? " · แบบร่าง" : ""}`} draft={draft}
       emptyText="แพทเทิร์นนี้ยังไม่มีชิ้น — วาดชิ้นหรือสร้างจากแม่แบบทรงในสตูดิโอ กดบันทึก แล้วเปิดหน้านี้ใหม่" />
   );

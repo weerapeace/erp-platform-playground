@@ -13,15 +13,20 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { PrintToolbar } from "@/components/report";
 import {
-  A4_PRINTABLE, buildPatternDxf, buildPatternSvg, pagesWithPieces, patternPieces, patternSheetWidth, shelfLayout, tilePages, type PatternLineInput, type PatternPiece,
+  DXF_PROFILES, buildPatternDxf, buildPatternSvg, pagesWithPieces, patternPieces, patternSheetWidth, shelfLayout, tilePages, type DxfProfile, type PatternLineInput, type PatternPiece,
 } from "@/lib/pattern-sheet";
+import { bomCsv, bomRows, checkDxf, cutListCsv } from "@/lib/pattern-export";
+/** ขนาดกระดาษพิมพ์ขนาดจริง (รอบ H): A4 · A3 · กำหนดเอง — ขอบกระดาษ 10 มม. ทุกด้าน */
+type Paper = { key: "a4" | "a3" | "custom"; w: number; h: number };   // มม. แนวตั้ง
+const PAPERS: Record<"a4" | "a3", { w: number; h: number; th: string }> = { a4: { w: 210, h: 297, th: "A4" }, a3: { w: 297, h: 420, th: "A3" } };
 import { PatternPiecesSvg, groupColors } from "@/components/pattern-sheet";
 import { packFabric, YARD_CM } from "@/lib/fabric-calc";
 import { FabricLayoutPreview } from "@/components/design-sheet-detail/fabric-layout-preview";
 
 const OVERLAP = 1;                                   // ซม. ที่หน้า A4 ทับกัน (ไว้ต่อกระดาษ)
 const OVERVIEW_W = 160;                              // ซม. ความกว้างแผ่นภาพรวม / ไฟล์ส่งเครื่องตัด
-const TILE_H = 26.5;                                 // ซม. ส่วนที่วาดชิ้นต่อหน้า (เหลือที่หัวหน้า)
+const MARGIN = 10;                                   // มม. ขอบกระดาษ (@page margin)
+const HEAD_MM = 7;                                   // มม. หัวหน้าแต่ละแผ่น
 
 function Seg<T extends string>({ value, options, onChange }: { value: T; options: { v: T; label: string }[]; onChange: (v: T) => void }) {
   return (
@@ -49,7 +54,11 @@ function DraftMark() {
   );
 }
 
-export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า", draft = false }: {
+export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า", draft = false, stamp, rev = null }: {
+  /** บรรทัดใต้ป้ายชิ้นทุกชิ้น + ไฟล์ DXF เช่น "rev 7 · 13/11/2026" (รอบ H) */
+  stamp?: string;
+  /** รุ่นของแพทเทิร์น (ใส่ใน CSV) */
+  rev?: number | null;
   /** แบบร่าง (ยังไม่ผ่านด่านตรวจก่อนผลิต) — ลายน้ำทุกหน้า กันเอาไปตัดจริง */
   draft?: boolean;
   /** เนื้อหาเพิ่มเหนือตารางชิ้นในหน้าภาพรวม (เช่น ภาพ 3 มิติของใบสเปก) */
@@ -74,17 +83,25 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
 }) {
   const [mode, setMode] = useState<"overview" | "tiles">("overview");
   const [mono, setMono] = useState(false);
+  // รอบ H: กระดาษ · โปรไฟล์ DXF · ผลตรวจไฟล์
+  const [paper, setPaper] = useState<Paper>({ key: "a4", w: 210, h: 297 });
+  const [land, setLand] = useState(false);
+  const [profile, setProfile] = useState<DxfProfile>("named");
+  const [dxfMsg, setDxfMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const pw = land ? paper.h : paper.w, ph = land ? paper.w : paper.h;                  // มม. ตามแนวที่เลือก
+  const PAGE = { w: (pw - 2 * MARGIN) / 10, h: (ph - 2 * MARGIN) / 10 };              // ซม. พื้นที่พิมพ์
+  const TILE_H = Math.round((PAGE.h - HEAD_MM / 10 - 0.5) * 10) / 10;                 // ซม. ส่วนที่วาดชิ้นต่อหน้า
   const [orderQty, setOrderQty] = useState(1);
   const [faceW, setFaceW] = useState<Record<string, number>>({});
 
   const pieces = useMemo(() => patternPieces(lines), [lines]);
   const skipped = lines.length - pieces.length;   // บรรทัดที่ไม่มีกว้าง×ยาว (อะไหล่/ชิ้นสำเร็จ)
-  const sheetW = useMemo(() => patternSheetWidth(pieces, A4_PRINTABLE.w, OVERLAP, 2), [pieces]);
+  const sheetW = useMemo(() => patternSheetWidth(pieces, PAGE.w, OVERLAP, 2), [pieces, PAGE.w]);
   const layout = useMemo(() => shelfLayout(pieces, sheetW, 2), [pieces, sheetW]);   // แผ่นสำหรับพิมพ์ A4 (กว้างลงตัวกับหน้า)
   // ภาพรวม + ไฟล์ DXF/SVG = วางบนแผ่นกว้าง ~160 ซม. (ขนาดโต๊ะตัด/หน้าผ้าทั่วไป) ชิ้นเรียงข้างกัน ดูง่ายกว่า
   const overviewW = Math.max(OVERVIEW_W, pieces.reduce((m, p) => Math.max(m, p.w), 0));
   const overview = useMemo(() => shelfLayout(pieces, overviewW, 2), [pieces, overviewW]);
-  const allPages = useMemo(() => tilePages(layout.width, layout.height, A4_PRINTABLE.w, TILE_H, OVERLAP), [layout]);
+  const allPages = useMemo(() => tilePages(layout.width, layout.height, PAGE.w, TILE_H, OVERLAP), [layout, PAGE.w, TILE_H]);
   const pages = useMemo(() => pagesWithPieces(allPages, layout), [allPages, layout]);   // หน้าว่างไม่พิมพ์
   const colors = groupColors(layout);
   const cols = allPages.reduce((m, p) => Math.max(m, p.col), 0), rows = allPages.reduce((m, p) => Math.max(m, p.row), 0);
@@ -115,7 +132,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
   const pieceTable = (
     <table className="w-full border-collapse text-[12px]">
       <thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500">
-        <th className="py-1 pr-2">ชิ้น</th><th className="py-1 pr-2">วัสดุ</th><th className="py-1 pr-2">ชนิด</th><th className="py-1 pr-2 text-right">กว้าง × ยาว (ซม.)</th><th className="py-1 pr-2 text-right">ตัด / ใบ</th><th className="py-1">หมายเหตุ</th>
+        <th className="py-1 pr-2">ชิ้น</th><th className="py-1 pr-2">วัสดุ</th><th className="py-1 pr-2">ชนิด</th><th className="py-1 pr-2 text-right">สำเร็จ (ซม.)</th><th className="py-1 pr-2 text-right">ตัด กว้าง × ยาว (ซม.)</th><th className="py-1 pr-2 text-right">พื้นที่ตัด (ตร.ซม.)</th><th className="py-1 pr-2 text-right">ตัด / ใบ</th><th className="py-1">หมายเหตุ</th>
       </tr></thead>
       <tbody>{pieces.map((p) => {
         const c = colors.get(p.group);
@@ -123,8 +140,10 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
           <tr key={p.id} className="border-b border-slate-100">
             <td className="py-1 pr-2 font-semibold"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: c?.fill, border: `1px solid ${c?.stroke}` }} />{p.id}</td>
             <td className="py-1 pr-2">{p.name}</td><td className="py-1 pr-2 text-slate-500">{p.group}</td>
-            <td className="py-1 pr-2 text-right tabular-nums">{p.w} × {p.h}</td><td className="py-1 pr-2 text-right tabular-nums">{p.count}</td>
-            <td className="py-1 text-slate-500">{p.note ?? ""}</td>
+            <td className="py-1 pr-2 text-right tabular-nums text-slate-500">{p.fin ? `${p.fin.w} × ${p.fin.h}` : "—"}</td>
+            <td className="py-1 pr-2 text-right tabular-nums">{p.w} × {p.h}</td>
+            <td className="py-1 pr-2 text-right tabular-nums text-slate-500">{p.area ?? "—"}</td><td className="py-1 pr-2 text-right tabular-nums">{p.count}</td>
+            <td className="py-1 text-slate-500">{[p.note, p.tag].filter(Boolean).join(" · ")}</td>
           </tr>
         );
       })}</tbody>
@@ -133,23 +152,42 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
 
   return (
     <div className="min-h-screen bg-slate-100 print:bg-white">
-      <style>{`@page { size: A4 portrait; margin: 10mm; } @media print { .pattern-page { break-after: page; page-break-after: always; } .pattern-page:last-child { break-after: auto; page-break-after: auto; } }`}</style>
+      <style>{`@page { size: ${pw}mm ${ph}mm; margin: ${MARGIN}mm; } @media print { .pattern-page { break-after: page; page-break-after: always; } .pattern-page:last-child { break-after: auto; page-break-after: auto; } }`}</style>
       <PrintToolbar fileName={fileName} />
       {/* แผงตั้งค่า (ไม่พิมพ์) */}
       <div className="no-print mx-auto flex max-w-[860px] flex-wrap items-center gap-2 px-4 pt-4">
         {controls}
-        <Seg value={mode} onChange={setMode} options={[{ v: "overview", label: overviewLabel }, { v: "tiles", label: "พิมพ์ขนาดจริง (A4)" }]} />
+        <Seg value={mode} onChange={setMode} options={[{ v: "overview", label: overviewLabel }, { v: "tiles", label: `พิมพ์ขนาดจริง (${paper.key === "custom" ? `${pw}×${ph} มม.` : PAPERS[paper.key].th})` }]} />
+        {mode === "tiles" && (
+          <span className="inline-flex items-center gap-1 text-xs text-slate-600" data-paper>
+            กระดาษ
+            <select value={paper.key} onChange={(e) => { const k = e.target.value as Paper["key"]; setPaper(k === "custom" ? { key: "custom", w: paper.w, h: paper.h } : { key: k, ...PAPERS[k] }); }} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs" data-paper-size>
+              <option value="a4">A4</option><option value="a3">A3</option><option value="custom">กำหนดเอง</option>
+            </select>
+            {paper.key === "custom" && <>
+              <input type="number" min={100} max={1200} value={paper.w} onChange={(e) => setPaper((p) => ({ ...p, w: Math.max(100, Math.min(1200, Number(e.target.value) || 210)) }))} className="h-7 w-16 rounded-md border border-slate-200 px-1 text-right text-xs" aria-label="กว้างกระดาษ มม." />×
+              <input type="number" min={100} max={3000} value={paper.h} onChange={(e) => setPaper((p) => ({ ...p, h: Math.max(100, Math.min(3000, Number(e.target.value) || 297)) }))} className="h-7 w-16 rounded-md border border-slate-200 px-1 text-right text-xs" aria-label="สูงกระดาษ มม." />มม.
+            </>}
+            <label className="inline-flex items-center gap-1"><input type="checkbox" checked={land} onChange={(e) => setLand(e.target.checked)} className="h-3.5 w-3.5" />แนวนอน</label>
+          </span>
+        )}
         {mode === "tiles" && (
           <label className="inline-flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={mono} onChange={(e) => setMono(e.target.checked)} className="h-3.5 w-3.5" /> ขาวดำ (ประหยัดหมึก)</label>
         )}
-        <div className="ml-auto flex gap-1.5">
-          <button type="button" disabled={!pieces.length} onClick={() => download(`${fileName}.dxf`, buildPatternDxf(overview), "application/dxf")}
+        <div className="ml-auto flex flex-wrap gap-1.5">
+          <select value={profile} onChange={(e) => setProfile(e.target.value as DxfProfile)} title="รูปแบบไฟล์ DXF — ทดสอบกับโปรแกรม/เครื่องตัดปลายทางก่อนใช้จริง" className="h-8 rounded-lg border border-slate-200 bg-white px-1 text-xs" data-dxf-profile>
+            {DXF_PROFILES.map((x) => <option key={x.key} value={x.key}>DXF: {x.th}</option>)}
+          </select>
+          <button type="button" disabled={!pieces.length} data-dxf-download onClick={() => { const txt = buildPatternDxf(overview, { profile, stamp }); const c = checkDxf(txt, overview.placed.length); setDxfMsg({ ok: c.ok, text: c.ok ? `ตรวจไฟล์แล้ว: อ่านกลับได้ครบ ${c.pieces} ชิ้น · ชั้น ${c.layers.join(", ")}` : `ตรวจไฟล์: อ่านกลับได้ ${c.pieces} จาก ${overview.placed.length} ชิ้น — ลองโปรไฟล์อื่น หรือแจ้งทีม` }); download(`${fileName}${profile === "aama" ? "-aama" : ""}.dxf`, txt, "application/dxf"); }}
             title="ไฟล์สำหรับเครื่องตัดเลเซอร์ / โปรแกรม CAD (หน่วยมิลลิเมตร · ป้ายชื่อเป็นรหัสชิ้นภาษาอังกฤษ)"
             className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">ดาวน์โหลด DXF</button>
           <button type="button" disabled={!pieces.length} onClick={() => download(`${fileName}.svg`, buildPatternSvg(overview), "image/svg+xml")}
             title="ไฟล์ภาพเวกเตอร์ขนาดจริง (เปิดใน Illustrator ได้)"
             className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">ดาวน์โหลด SVG</button>
+          <button type="button" disabled={!pieces.length} data-csv-cut onClick={() => download(`${fileName}-รายการตัด.csv`, cutListCsv(pieces, { rev, code: footCode }), "text/csv;charset=utf-8")} title="ตารางรายการตัด (เปิดใน Excel)" className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">CSV รายการตัด</button>
+          <button type="button" disabled={!pieces.length} data-csv-bom onClick={() => download(`${fileName}-วัสดุ.csv`, bomCsv(pieces, { rev, code: footCode, qty: orderQty }), "text/csv;charset=utf-8")} title="สรุปวัสดุต่อใบ + ตามจำนวนผลิต (เปิดใน Excel)" className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">CSV วัสดุ (BOM)</button>
         </div>
+        {dxfMsg && <p className={`w-full text-right text-[11px] ${dxfMsg.ok ? "text-emerald-700" : "text-amber-700"}`} data-dxf-check>{dxfMsg.text} · ยังต้องลองกับโปรแกรม/เครื่องตัดปลายทางก่อนใช้จริง</p>}
       </div>
 
       {pieces.length === 0 ? (
@@ -159,11 +197,17 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
           {head}
           {beforeTable}
           {pieceTable}
+          {(() => { const b = bomRows(pieces); return b.length ? (   // รอบ H: สรุปวัสดุต่อใบ (พื้นที่ตัดรวม — ยังไม่รวมเผื่อเสียจากการวาง)
+            <div className="break-inside-avoid" data-bom>
+              <div className="mb-1 text-[11px] font-medium text-slate-600">สรุปวัสดุต่อใบ (พื้นที่ตัดรวม ยังไม่รวมเผื่อเสียจากการวาง — ดูการใช้ผ้าจริงที่ "วางบนผ้า")</div>
+              <table className="w-full border-collapse text-[12px]"><thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500"><th className="py-1 pr-2">วัสดุ</th><th className="py-1 pr-2 text-right">ชิ้นที่ตัด</th><th className="py-1 pr-2 text-right">ตร.ซม.</th><th className="py-1 text-right">ตร.ม.</th></tr></thead>
+                <tbody>{b.map((x) => <tr key={x.material} className="border-b border-slate-100"><td className="py-1 pr-2">{x.material}</td><td className="py-1 pr-2 text-right tabular-nums">{x.pieces}</td><td className="py-1 pr-2 text-right tabular-nums">{x.area}</td><td className="py-1 text-right tabular-nums">{(x.area / 10000).toFixed(3)}</td></tr>)}</tbody></table>
+            </div>) : null; })()}
           {afterTable}
           {skipped > 0 && <p className="text-[11px] text-slate-500">ไม่ได้วาด {skipped} บรรทัด (ไม่ได้คิดแบบกว้าง × ยาว เช่น อะไหล่ / สาย-เทปคิดตามยาว / ชิ้นสำเร็จ)</p>}
           <div>
             <div className="mb-1 text-[11px] text-slate-500">ภาพชิ้นทั้งหมด (ย่อให้พอดีหน้า · วางบนแผ่นกว้าง {overview.width} × {overview.height} ซม. เหมือนในไฟล์ DXF/SVG)</div>
-            <div className="rounded-lg border border-slate-200 p-2"><PatternPiecesSvg layout={overview} style={{ maxHeight: 520 }} /></div>
+            <div className="rounded-lg border border-slate-200 p-2"><PatternPiecesSvg layout={overview} style={{ maxHeight: 520 }} stamp={stamp} /></div>
           </div>
           <div className="break-inside-avoid space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -193,14 +237,14 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
       ) : (
         <div className="mx-auto my-4 w-fit space-y-4 print:my-0 print:space-y-0">
           {/* หน้าแรก: วิธีใช้ + กรอบทดสอบ + แผนผังหน้า */}
-          <section className="pattern-page relative box-border space-y-3 overflow-hidden bg-white p-[6mm] shadow-sm print:p-0 print:shadow-none" style={{ width: "190mm", minHeight: "277mm" }}>
+          <section className="pattern-page relative box-border space-y-3 overflow-hidden bg-white p-[6mm] shadow-sm print:p-0 print:shadow-none" style={{ width: `${pw - 2 * MARGIN}mm`, minHeight: `${ph - 2 * MARGIN}mm` }}>
             {draft && <DraftMark />}
             {head}
             <div className="flex gap-4">
               <div className="flex-1 space-y-1 text-[12px] text-slate-700">
                 <div className="font-semibold">วิธีพิมพ์และต่อแพทเทิร์น</div>
                 <ol className="list-decimal space-y-0.5 pl-4">
-                  <li>ตั้งพิมพ์กระดาษ A4 แนวตั้ง ขนาด <b>100% (ไม่ย่อ/ไม่พอดีหน้า)</b></li>
+                  <li>ตั้งพิมพ์กระดาษ {paper.key === "custom" ? `${pw} × ${ph} มม.` : PAPERS[paper.key].th} {land ? "แนวนอน" : "แนวตั้ง"} ขนาด <b>100% (ไม่ย่อ/ไม่พอดีหน้า)</b></li>
                   <li>วัดกรอบสอบเทียบด้านขวา ต้องได้ <b>100 × 100 มม.</b> พอดี — ถ้าไม่ได้ ให้แก้การตั้งค่าพิมพ์ก่อน (เลือก Actual size / ขนาดจริง)</li>
                   <li>ต่อกระดาษตามแผนผังด้านล่าง (แถว-คอลัมน์) ขอบแต่ละหน้าทับกัน {OVERLAP} ซม.</li>
                   <li>ตัดตามเส้นประ · ชิ้นไหนต้องตัดกี่ชิ้นดูที่ป้าย “ตัด ×”</li>
@@ -229,13 +273,13 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
             </div>
           </section>
           {pages.map((p) => (
-            <section key={`${p.row}-${p.col}`} className="pattern-page relative box-border overflow-hidden bg-white shadow-sm print:shadow-none" style={{ width: "190mm", height: "277mm" }}>
+            <section key={`${p.row}-${p.col}`} className="pattern-page relative box-border overflow-hidden bg-white shadow-sm print:shadow-none" style={{ width: `${pw - 2 * MARGIN}mm`, height: `${ph - 2 * MARGIN}mm` }}>
               {draft && <DraftMark />}
-              <div className="flex items-center justify-between px-[1mm] text-[9pt] text-slate-600" style={{ height: "7mm" }}>
+              <div className="flex items-center justify-between px-[1mm] text-[9pt] text-slate-600" style={{ height: `${HEAD_MM}mm` }}>
                 <b>แผ่น {p.row}-{p.col}</b><span>{footCode} · แถว {p.row}/{rows} คอลัมน์ {p.col}/{cols} · ขนาดจริง 1:1</span>
               </div>
-              <div className="border border-slate-300" style={{ width: "190mm", height: `${TILE_H * 10}mm`, boxSizing: "border-box" }}>
-                <PatternPiecesSvg layout={layout} view={{ x: p.x, y: p.y, w: A4_PRINTABLE.w, h: TILE_H }} printMm mono={mono} />
+              <div className="border border-slate-300" style={{ width: `${PAGE.w * 10}mm`, height: `${TILE_H * 10}mm`, boxSizing: "border-box" }}>
+                <PatternPiecesSvg layout={layout} view={{ x: p.x, y: p.y, w: PAGE.w, h: TILE_H }} printMm mono={mono} stamp={stamp} />
               </div>
             </section>
           ))}

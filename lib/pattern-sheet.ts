@@ -52,7 +52,9 @@ export type PatternPiece = {
   marksD?: string | null;          // เส้นทางผ้า + รอยบาก รวมเป็น SVG path (วาดเส้นทึบบาง)
   dims?: { a: Pt; b: Pt; label: string }[] | null;
   bands?: { kind: "glue" | "skive"; pts: Pt[] }[] | null;
-  stitchSegs?: Pt[][] | null;      // เดินด้ายทับ (รอบ G2) — DXF layer STITCH   // แนวทากาว / ปาดบาง (รอบ F) — DXF layer GLUE / SKIVE   // เส้นวัดถาวร (รอบ E) — DXF layer DIM + ตัวเลข
+  stitchSegs?: Pt[][] | null;      // เดินด้ายทับ (รอบ G2) — DXF layer STITCH
+  /** รอบ H: พื้นที่ตัด 1 ชิ้น (ตร.ซม.) · ขนาดสำเร็จ (เส้นเย็บ) · ป้ายวิธีวางตัด (คู่ซ้าย-ขวา / คว่ำหน้า / ทางเดียว) */
+  area?: number; fin?: { w: number; h: number } | null; tag?: string | null;   // แนวทากาว / ปาดบาง (รอบ F) — DXF layer GLUE / SKIVE   // เส้นวัดถาวร (รอบ E) — DXF layer DIM + ตัวเลข
   foldSegs?: Pt[][] | null;        // เส้นพับ (ขอบที่ตั้งว่าพับเข้าใน) — DXF layer FOLD
   foldD?: string | null;           // เส้นพับเป็น SVG path (วาดเส้นประยาว-สั้น)
   innerSegs?: Pt[][] | null;       // เส้นในชิ้น (แนวเย็บ / ช่องเจาะ / แนวพับ / ตำแหน่ง) — DXF layer INNER
@@ -134,6 +136,7 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
+      area: r1(g ? g.cutArea : w * h), fin: g ? { w: r1(g.finished.w), h: r1(g.finished.h) } : null, tag: ls?.tag ?? null,
     });
   }
   return out;
@@ -176,7 +179,7 @@ export function pagesWithPieces(pages: PatternPage[], layout: PatternLayout): Pa
 export const A4_PRINTABLE = { w: 19, h: 27.7 } as const;
 
 /** หน้ากว้างแผ่นที่ใช้วาง (ซม.) — ให้พอดีจำนวนหน้า A4 เต็ม ๆ และไม่แคบกว่าชิ้นที่กว้างที่สุด */
-export function patternSheetWidth(pieces: PatternPiece[], pageW = A4_PRINTABLE.w, overlap = 1, minCols = 2): number {
+export function patternSheetWidth(pieces: PatternPiece[], pageW: number = A4_PRINTABLE.w, overlap = 1, minCols = 2): number {
   const widest = pieces.reduce((m, p) => Math.max(m, p.w), 0);
   const step = pageW - overlap;
   const cols = Math.max(minCols, Math.ceil((widest + overlap) / step));
@@ -189,13 +192,26 @@ export function patternSheetWidth(pieces: PatternPiece[], pageW = A4_PRINTABLE.w
 export const dxfLabel = (p: PatternPiece) => `${p.id} ${p.w}x${p.h}cm x${p.count}`;
 
 /** DXF (R12) หน่วยมิลลิเมตร — เส้นตัดรอบชิ้น layer CUT · รูเจาะ/ช่องในชิ้น HOLE · เส้นเย็บ SEW · เส้นพับ FOLD · เส้นทางผ้า GRAIN · รอยบาก NOTCH · ป้าย LABEL · แกน Y กลับด้าน (DXF นับจากล่างขึ้นบน) */
-export function buildPatternDxf(layout: PatternLayout): string {
+/** โปรไฟล์ไฟล์ DXF (รอบ H): named = ชั้นตามชื่อ (CUT SEW …) · aama = ชั้นเลขแบบ AAMA/ASTM D6673 + 1 ชิ้น = 1 บล็อก (ยังไม่ได้ทดสอบกับโปรแกรมปลายทางจริง) */
+export type DxfProfile = "named" | "aama";
+export const DXF_PROFILES: { key: DxfProfile; th: string; en: string }[] = [
+  { key: "named", th: "ทั่วไป (ชั้นตามชื่อ · เครื่องเลเซอร์)", en: "General (named layers · laser)" },
+  { key: "aama", th: "AAMA / ASTM (ชั้นเลข · 1 ชิ้น = 1 บล็อก)", en: "AAMA / ASTM (numbered layers · 1 piece = 1 block)" },
+];
+/** ชั้น AAMA/ASTM: 1 เส้นตัด · 4 รอยบาก · 7 ทางผ้า · 8 เส้นใน · 11 รูเจาะ · 13 จุดเจาะ/อะไหล่ · 14 เส้นเย็บ · 15 ข้อความ */
+const AAMA_LAYER: Record<string, string> = { CUT: "1", NOTCH: "4", GRAIN: "7", FOLD: "8", INNER: "8", STITCH: "8", GLUE: "8", SKIVE: "8", HOLE: "11", HW: "13", SEW: "14", DIM: "15", LABEL: "15" };
+export function buildPatternDxf(layout: PatternLayout, opts: { profile?: DxfProfile; stamp?: string } = {}): string {
   const mm = (cm: number) => Math.round(cm * 100) / 10;   // ซม. → มม. (ทศนิยม 1)
-  const H = mm(layout.height);
-  const out: string[] = ["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", "4", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];
+  const H = mm(layout.height), aama = opts.profile === "aama";
+  const lay = (l: string) => (aama ? AAMA_LAYER[l] ?? "8" : l);
+  const head = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "9", "$INSUNITS", "70", "4", "0", "ENDSEC"];
+  let out: string[] = [];
+  const blocks: { name: string; ents: string[] }[] = [];
   const line = (x1: number, y1: number, x2: number, y2: number, layer = "CUT") =>
-    out.push("0", "LINE", "8", layer, "10", String(x1), "20", String(y1), "30", "0", "11", String(x2), "21", String(y2), "31", "0");
+    out.push("0", "LINE", "8", lay(layer), "10", String(x1), "20", String(y1), "30", "0", "11", String(x2), "21", String(y2), "31", "0");
+  const all: string[] = [];
   for (const p of layout.placed) {
+    out = [];
     const x0 = mm(p.x), x1 = mm(p.x + p.w);
     const yTop = H - mm(p.y), yBot = H - mm(p.y + p.h);
     if (p.outline && p.outline.length >= 3) {   // รูปทรงจริง → เส้นตัดรอบรูป + รูเจาะ (CUT) · เส้นเย็บ (SEW)
@@ -210,21 +226,30 @@ export function buildPatternDxf(layout: PatternLayout): string {
       segs(p.grainSegs, "GRAIN");
       segs(p.notchSegs, "NOTCH");
       for (const L of p.foldSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "FOLD");
-      for (const m of p.hwMarks ?? []) out.push("0", "CIRCLE", "8", "HW", "10", String(mm(p.x + m.c[0])), "20", String(H - mm(p.y + m.c[1])), "30", "0", "40", String(mm(m.r)));   // อะไหล่ = วงกลมในชั้น HW (ตำแหน่งเจาะ/ติด)
+      for (const m of p.hwMarks ?? []) out.push("0", "CIRCLE", "8", lay("HW"), "10", String(mm(p.x + m.c[0])), "20", String(H - mm(p.y + m.c[1])), "30", "0", "40", String(mm(m.r)));   // อะไหล่ = วงกลมในชั้น HW (ตำแหน่งเจาะ/ติด)
       for (const L of p.stitchSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "STITCH");
       for (const bd of p.bands ?? []) for (let i = 0; i + 1 < bd.pts.length; i++) line(mm(p.x + bd.pts[i][0]), H - mm(p.y + bd.pts[i][1]), mm(p.x + bd.pts[i + 1][0]), H - mm(p.y + bd.pts[i + 1][1]), bd.kind === "glue" ? "GLUE" : "SKIVE");
       for (const dm of p.dims ?? []) {   // เส้นวัด: เส้น + ตัวเลข ชั้น DIM (เครื่องตัดไม่ตัดชั้นนี้)
         line(mm(p.x + dm.a[0]), H - mm(p.y + dm.a[1]), mm(p.x + dm.b[0]), H - mm(p.y + dm.b[1]), "DIM");
-        out.push("0", "TEXT", "8", "DIM", "10", String(mm(p.x + (dm.a[0] + dm.b[0]) / 2)), "20", String(H - mm(p.y + (dm.a[1] + dm.b[1]) / 2) + 2), "30", "0", "40", "3", "1", dm.label);
+        out.push("0", "TEXT", "8", lay("DIM"), "10", String(mm(p.x + (dm.a[0] + dm.b[0]) / 2)), "20", String(H - mm(p.y + (dm.a[1] + dm.b[1]) / 2) + 2), "30", "0", "40", "3", "1", dm.label);
       }
       for (const L of p.innerSegs ?? []) for (let i = 0; i + 1 < L.length; i++) line(mm(p.x + L[i][0]), H - mm(p.y + L[i][1]), mm(p.x + L[i + 1][0]), H - mm(p.y + L[i + 1][1]), "INNER");   // เส้นในชิ้น: วาดตำแหน่ง ไม่ใช่เส้นตัด
     } else { line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot); }
     const textH = Math.max(3, Math.min(8, mm(Math.min(p.w, p.h)) / 8));
-    out.push("0", "TEXT", "8", "LABEL", "10", String(Math.round((x0 + 2) * 10) / 10), "20", String(Math.round((yTop - textH - 2) * 10) / 10), "30", "0",
-      "40", String(Math.round(textH * 10) / 10), "1", dxfLabel(p));
+    const txt = (s: string, k: number) => out.push("0", "TEXT", "8", lay("LABEL"), "10", String(Math.round((x0 + 2) * 10) / 10), "20", String(Math.round((yTop - textH * (k + 1) - 2 * (k + 1)) * 10) / 10), "30", "0", "40", String(Math.round(textH * (k ? 0.7 : 1) * 10) / 10), "1", s);
+    txt(dxfLabel(p), 0);
+    if (aama) { txt(`Piece Name: ${dxfAscii(p.id)}`, 1); txt(`Quantity: ${p.count}`, 2); if (opts.stamp) txt(dxfAscii(opts.stamp), 3); }   // ข้อความประจำชิ้นแบบ AAMA (อักษรอังกฤษ)
+    else if (opts.stamp) txt(dxfAscii(opts.stamp), 1);
+    if (aama) blocks.push({ name: `P_${dxfAscii(p.id).replace(/[^A-Za-z0-9_-]/g, "_")}_${blocks.length + 1}`, ents: out }); else all.push(...out);
   }
-  out.push("0", "ENDSEC", "0", "EOF");
-  return out.join("\n") + "\n";
+  if (!aama) return [...head, "0", "SECTION", "2", "ENTITIES", ...all, "0", "ENDSEC", "0", "EOF"].join("\n") + "\n";
+  const bl: string[] = ["0", "SECTION", "2", "BLOCKS"];
+  for (const b of blocks) bl.push("0", "BLOCK", "8", "0", "2", b.name, "70", "0", "10", "0", "20", "0", "30", "0", "3", b.name, ...b.ents, "0", "ENDBLK", "8", "0");
+  bl.push("0", "ENDSEC");
+  const ins: string[] = ["0", "SECTION", "2", "ENTITIES"];
+  for (const b of blocks) ins.push("0", "INSERT", "8", "1", "2", b.name, "10", "0", "20", "0", "30", "0");
+  ins.push("0", "ENDSEC", "0", "EOF");
+  return [...head, ...bl, ...ins].join("\n") + "\n";
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c] as string));
@@ -241,3 +266,6 @@ export function buildPatternSvg(layout: PatternLayout): string {
   }).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${W}cm" height="${H}cm" viewBox="0 0 ${W} ${H}">${body}</svg>\n`;
 }
+
+/** ข้อความสำหรับ DXF R12: เหลือเฉพาะอักษรอังกฤษ/ตัวเลข/เครื่องหมายพื้นฐาน (ภาษาไทยในไฟล์ R12 มักเพี้ยนในเครื่องตัด) */
+export function dxfAscii(s: string): string { return s.replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "-"; }

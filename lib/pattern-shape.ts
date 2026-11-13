@@ -44,7 +44,7 @@ export const isNotchStyle = (v: unknown): v is NotchStyle => v === "single" || v
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; /** มุมของเส้นตัด (ไม่มี = miter) */ corner?: AllowCorner; /** แบบรอยบาก (ไม่มี = เดี่ยว) */ notchStyle?: NotchStyle; /** ทางผ้าทางเดียว (ผ้ามีขน/ลายทิศเดียว) */ nap?: boolean; /** ชดเชยความหนาต่อการพับ 1 ทบ (ซม.) บวกเข้าเผื่อของขอบพับ (รอบ F) */ comp?: number; /** เส้นเดินด้ายทับ (รอบ G2) — ใบพิมพ์ + DXF ชั้น STITCH */ stitch?: Pt[][]; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; /** มุมของเส้นตัด (ไม่มี = miter) */ corner?: AllowCorner; /** แบบรอยบาก (ไม่มี = เดี่ยว) */ notchStyle?: NotchStyle; /** ทางผ้าทางเดียว (ผ้ามีขน/ลายทิศเดียว) */ nap?: boolean; /** ชดเชยความหนาต่อการพับ 1 ทบ (ซม.) บวกเข้าเผื่อของขอบพับ (รอบ F) */ comp?: number; /** เส้นเดินด้ายทับ (รอบ G2) — ใบพิมพ์ + DXF ชั้น STITCH */ stitch?: Pt[][]; /** ป้ายวิธีวางตัดบนชิ้น (รอบ H) เช่น "คู่ ซ้าย-ขวา · คว่ำหน้า" */ tag?: string; holes?: Shape[]; allow?: number; allowEdges?: number[]; foldEdges?: number[]; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[]; /** เส้นในชิ้น — ตอนนี้ส่งมาจากแอปสตูดิโอแพทเทิร์นเท่านั้น (ใบงานออกแบบยังไม่เก็บ) */ inner?: InnerLine[] };
 /** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
 /**
  * เส้นในชิ้น (2026-11-11) — เส้นที่อยู่ "ข้างใน" ชิ้น ไม่ใช่เส้นตัด: บอกตำแหน่งให้ช่าง และเป็นที่ให้ชิ้นอื่นมาเย็บ
@@ -324,6 +324,7 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   if (o.nap === true) out.nap = true;
   const comp = fin(o.comp);
   if (comp != null && comp > 0 && comp <= 1) out.comp = Math.round(comp * 1000) / 1000;
+  if (typeof o.tag === "string" && o.tag.trim()) out.tag = o.tag.trim().slice(0, 80);
   if (Array.isArray(o.stitch)) { const st = o.stitch.slice(0, 200).map((L) => (Array.isArray(L) ? L.slice(0, 400).map(pt).filter((q): q is Pt => !!q) : [])).filter((L) => L.length >= 2); if (st.length) out.stitch = st; }
   return out;
 }

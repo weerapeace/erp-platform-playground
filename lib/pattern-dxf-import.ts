@@ -13,7 +13,7 @@
  *
  * ใช้ที่: components/pattern-studio/dxf-modal · เทสต์ lib/__tests__/pattern-dxf-import.test.ts · คู่มือ: docs/pattern-studio.md
  */
-import { MAX_ALLOW, pointInPolygon, polyBox, projectOnOutline, type InnerLine, type PNode, type Pt, type Shape } from "@/lib/pattern-shape";
+import { MAX_ALLOW, flattenShape, offsetShape, pointInPolygon, polyBox, projectOnOutline, shapeBox, type InnerLine, type PNode, type Pt, type Shape } from "@/lib/pattern-shape";
 
 export type DxfUnit = "mm" | "cm" | "inch";
 export const DXF_UNIT_CM: Record<DxfUnit, number> = { mm: 0.1, cm: 1, inch: 2.54 };
@@ -22,6 +22,7 @@ export type DxfPiece = {
   inner: InnerLine[]; notches: Pt[]; grain: [Pt, Pt] | null;
   /** มุมซ้ายบนของกรอบเส้นเย็บ ในพื้นที่ของไฟล์ (ซม. · y ลง · ชิ้นซ้ายบนสุดเริ่มที่ 0,0) + ขนาดสำเร็จ */
   at: [number, number]; w: number; h: number; edges: number;
+  /** ชิ้นนี้มีแต่เส้นตัด (ไม่มีเส้นเย็บในไฟล์) — หน้าจอถามระยะเผื่อก่อนวาง (รอบ H) */ cutOnly?: boolean;
 };
 /** spline = มีเส้นแบบ SPLINE (ใช้จุดควบคุมแทน) · uneven = เผื่อเย็บไม่เท่ากันทุกด้าน (ใช้ค่าน้อยสุด) · open = มีเส้นที่ต่อไม่ครบวง (ข้ามไป) · nocut = ไม่มีเส้นตัด ใช้เส้นเย็บเป็นรูปชิ้น */
 export type DxfNote = "spline" | "uneven" | "open" | "nocut";
@@ -145,6 +146,9 @@ const roleOf = (layer: string): Role => {
   if (L === "FOLD" || L === "6") return "fold";
   if (L === "NOTCH" || L === "4") return "notch";
   if (L === "GRAIN" || L === "7") return "grain";
+  if (L === "STITCH" || L === "GLUE" || L === "SKIVE") return "inner";   // เส้นบอกงาน (รอบ F/G2) — อ่านกลับเป็นเส้นใน ไม่ใช่เส้นตัด
+  if (L === "DIM") return "skip";
+  if (L === "11") return "hole";
   if (L === "HW") return "skip";   // ตำแหน่งอะไหล่ในไฟล์ที่ระบบนี้ส่งออก — ไม่ใช่เส้นตัด
   if (L === "LABEL" || L === "15" || L === "2" || L === "3" || L === "5" || L === "13") return "skip";
   return "cut";
@@ -345,6 +349,7 @@ export function parseDxfPattern(text: string, unit?: DxfUnit): DxfImport | null 
       grain: g && g.length >= 2 ? [sh(g[0]), sh(g[g.length - 1])] : null,
       at: [r3(sb.x - x0), r3(sb.y - y0)], w: Math.round(sb.w * 10) / 10, h: Math.round(sb.h * 10) / 10,
       edges: shape.k === "rect" ? 4 : shape.k === "ellipse" ? 1 : shape.nodes.length,
+      ...(!f.sew && !notes.has("nocut") ? { cutOnly: true } : {}),
     });
     width = Math.max(width, cb.x - x0 + cb.w); height = Math.max(height, cb.y - y0 + cb.h);
     n++;
@@ -352,4 +357,26 @@ export function parseDxfPattern(text: string, unit?: DxfUnit): DxfImport | null 
   if (!pieces.length) return null;
   pieces.sort((a, b) => a.at[1] - b.at[1] || a.at[0] - b.at[0]);
   return { pieces, unit: use, detected, notes: [...notes], width: Math.round(width * 10) / 10, height: Math.round(height * 10) / 10 };
+}
+
+/**
+ * ชิ้นที่มีแต่เส้นตัด (รอบ H): ผู้ใช้บอกว่าเส้นในไฟล์คืออะไร
+ *   "cut"  = เส้นตัด (รวมเผื่อเย็บแล้ว) → หดเข้า a ซม. เป็นเส้นเย็บ + ตั้งเผื่อ a (ขนาดตัดเท่าเดิม)
+ *   "sew"  = เส้นเย็บ → ตั้งเผื่อ a ออกนอก (ชิ้นตัดใหญ่ขึ้น)
+ *   "none" = ใช้ตามเดิม ไม่มีเผื่อ
+ *   ชิ้นที่หดไม่ได้ (เล็ก/แคบเกิน) คงเดิม และนับไว้ใน skipped
+ */
+export function applyCutOnly(pieces: DxfPiece[], mode: "cut" | "sew" | "none", a: number): { pieces: DxfPiece[]; skipped: number } {
+  if (mode === "none" || !(a > 0)) return { pieces, skipped: 0 };
+  let skipped = 0;
+  const out = pieces.map((p) => {
+    if (!p.cutOnly) return p;
+    if (mode === "sew") return { ...p, allow: Math.min(MAX_ALLOW, r3(a)), cutOnly: false };
+    const inner = offsetShape(p.shape, -a);
+    if (!inner) { skipped++; return p; }
+    const b = shapeBox(inner), outline = flattenShape(inner);
+    return { ...p, shape: inner, allow: Math.min(MAX_ALLOW, r3(a)), at: [r3(p.at[0] + a), r3(p.at[1] + a)] as [number, number], w: Math.round(b.w * 10) / 10, h: Math.round(b.h * 10) / 10,
+      notches: p.notches.map((q) => projectOnOutline(outline, q).at), edges: inner.k === "rect" ? 4 : inner.k === "ellipse" ? 1 : inner.nodes.length, cutOnly: false };
+  });
+  return { pieces: out, skipped };
 }

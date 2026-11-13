@@ -6,7 +6,7 @@
  *   ＋ แพทเทิร์นใหม่ (คนที่มีสิทธิ์แก้) → ตั้งชื่อ → เปิดสตูดิโอ
  * ข้อมูลผ่าน /api/pattern-projects เท่านั้น · สูตร lib/pattern-project
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useT } from "@/components/i18n";
@@ -15,6 +15,7 @@ import { ERPModal } from "@/components/modal";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import { PATTERN_STATUS_LABEL, type PatternProjectRow, type PatternProjectStatus } from "@/lib/pattern-project";
+import { parseProjectFile } from "@/lib/pattern-export";
 
 const LessonCatalog = dynamic(() => import("@/components/pattern-studio/learn-panel").then((m) => m.LessonCatalog), { ssr: false });   // บทเรียนเรียนไปทำไป (Bag CAD รอบ C)
 
@@ -35,6 +36,23 @@ export function PatternStudioList() {
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [busy, setBusy] = useState(false);
+  // นำเข้าไฟล์โปรเจกต์ (.json · Bag CAD รอบ H) → สร้างแพทเทิร์นใหม่ (ไม่ทับของเดิม)
+  const importRef = useRef<HTMLInputElement | null>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const importFile = async (f?: File) => {
+    if (!f) return;
+    setImportMsg(null);
+    if (f.size > 8 * 1024 * 1024) { setImportMsg(t("ไฟล์ใหญ่เกิน 8 MB", "The file is over 8 MB")); return; }
+    const p = parseProjectFile(await f.text().catch(() => ""));
+    if (!p) { setImportMsg(t("อ่านไฟล์นี้ไม่ได้ — ต้องเป็นไฟล์โปรเจกต์ (.json) ที่ส่งออกจากสตูดิโอแพทเทิร์น", "Can't read this file — it must be a project file (.json) exported from the pattern studio")); return; }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/pattern-projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `${p.name || f.name.replace(/\.json$/i, "")} (นำเข้า)`.slice(0, 120), sku_code: p.sku_code ?? "", note: p.note, basis: p.basis, pieces: p.pieces, seams: p.seams, template: p.template }) });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      router.push(`/pattern-studio/${j.data.id}`);
+    } catch (e) { setImportMsg((e as Error).message); setBusy(false); }
+  };
   const [formErr, setFormErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -79,12 +97,20 @@ export function PatternStudioList() {
         </button>
         {learn && <LessonCatalog open onClose={() => setLearn(false)} canStart={!!me?.can_edit} />}
         {me?.can_edit && (
+          <button type="button" data-import-project disabled={busy} onClick={() => importRef.current?.click()} title={t("สร้างแพทเทิร์นใหม่จากไฟล์โปรเจกต์ (.json) ที่ส่งออกไว้", "Create a new pattern from an exported project file (.json)")}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <Icon value="i:upload" className="text-base" />{t("นำเข้าไฟล์โปรเจกต์", "Import project file")}
+          </button>
+        )}
+        <input ref={importRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => { void importFile(e.target.files?.[0]); e.target.value = ""; }} />
+        {me?.can_edit && (
           <button type="button" onClick={() => { setName(""); setSku(""); setFormErr(null); setCreating(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">
             <Icon value="i:plus" className="text-base" />{t("แพทเทิร์นใหม่", "New pattern")}
           </button>
         )}
       </div>
 
+      {importMsg && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700" data-import-msg>{importMsg}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาชื่อ เลขแพทเทิร์น รหัสรุ่น", "Search name, pattern no., model code")} aria-label={t("ค้นหาแพทเทิร์น", "Search patterns")}
           className="h-9 w-72 max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" />

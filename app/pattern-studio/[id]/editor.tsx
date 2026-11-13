@@ -26,6 +26,8 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { StudioTpl, TemplateInsertInfo } from "@/components/pattern-studio";
+import { buildProjectFile } from "@/lib/pattern-export";
+import type { Shape } from "@/lib/pattern-shape";
 import { PATTERN_PROJECT_STATUSES, PATTERN_SCHEMA, PATTERN_STATUS_LABEL, cleanColorways, cleanMatProps, cleanPieceView, cleanProjectPieces, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type PieceViewState, type ProjectPiece } from "@/lib/pattern-project";
 import type { CostingTarget } from "@/components/pattern-studio/send-costing-modal";
 import { checkSeam, cleanSeams, type Seam } from "@/lib/pattern-seams";
@@ -239,6 +241,31 @@ export function PatternProjectEditor({ id }: { id: string }) {
     setDirty(true); setBoardNonce((n) => n + 1); setDraftFound(null);
   };
   const discardDraft = () => { clearDraft(); setDraftFound(null); };
+  /** ไฟล์โปรเจกต์ (.json · รอบ H): ชิ้น ตะเข็บ ค่าแม่แบบ/วัสดุ/ชุดสี ครบ — นำเข้าที่หน้ารายการแพทเทิร์นได้แพทเทิร์นใหม่ */
+  const exportProjectFile = () => {
+    const b = buildPayload().body;
+    const txt = buildProjectFile({ pattern_no: patternNo, name: b.name, sku_code: b.sku_code || null, basis: b.basis === "area" ? "area" : "box", pieces: b.pieces, seams: b.seams, template: b.template });
+    const url = URL.createObjectURL(new Blob([txt], { type: "application/json" })), a = document.createElement("a");
+    a.href = url; a.download = `${patternNo || "pattern"}${rev ? `-rev${rev}` : ""}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  /** รุ่นเทียบ (รอบ H): เก็บรูปชิ้นแบบย่อใน template.compareRef (จำกัดขนาด — ใหญ่เกิน = แนะนำไฟล์โปรเจกต์) */
+  const compareRef = useMemo(() => {
+    const c = (template as { compareRef?: { label?: unknown; pieces?: unknown } } | null)?.compareRef;
+    const ps = c ? cleanProjectPieces(c.pieces) : [];
+    return ps.length ? { label: typeof c?.label === "string" ? c.label : "รุ่นเทียบ", pieces: ps } : null;
+  }, [template]);
+  const saveCompare = (): string | null => {
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const slim = (s: Shape): Shape => (s.k === "path" ? { k: "path", nodes: s.nodes.map((n) => Object.fromEntries(Object.entries(n).map(([k, v]) => [k, typeof v === "number" ? r2(v) : v])) as typeof n) } : { ...s, x: r2(s.x), y: r2(s.y), w: r2(s.w), h: r2(s.h) });
+    const pieces0 = piecesRef.current.map((p) => ({ pid: p.pid, name: p.name, count: p.count, allow: 0, shape: slim(p.shape), holes: (p.holes ?? []).map(slim), grain: null, notches: [], at: p.at }));
+    const ref = { label: `rev ${rev ?? "-"} · ${new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}`, pieces: pieces0 };
+    const others = JSON.stringify({ ...(template ?? {}), compareRef: undefined }).length;
+    if (JSON.stringify(ref).length + others > 28000) return t("รูปชิ้นใหญ่เกินกว่าจะเก็บไว้ในแพทเทิร์น — ใช้ปุ่ม 'ไฟล์โปรเจกต์' ส่งออกรุ่นนี้เก็บไว้ แล้วเลือกไฟล์นั้นมาเทียบแทน", "The pieces are too big to keep inside the pattern — export this version with 'Project file' and compare with that file instead");
+    setTemplate((tp) => ({ ...(tp ?? {}), compareRef: ref })); setDirty(true);
+    return null;
+  };
+  const clearCompare = () => { setTemplate((tp) => { const { compareRef: _c, ...rest } = tp ?? {}; void _c; return rest; }); setDirty(true); };
   const downloadBackup = () => {
     const blob = new Blob([JSON.stringify({ kind: "pattern-project-backup", id, pattern_no: patternNo, at: new Date().toISOString(), ...buildPayload().body }, null, 1)], { type: "application/json" });
     const url = URL.createObjectURL(blob), a = document.createElement("a");
@@ -302,6 +329,11 @@ export function PatternProjectEditor({ id }: { id: string }) {
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
           <Icon value="i:printer" className="text-sm" />{t("ใบสเปก / พิมพ์ / ไฟล์ตัด", "Spec sheet / print / cut files")}
         </button>
+        <button type="button" data-export-project onClick={exportProjectFile} disabled={!pieces.length}
+          title={t("ส่งออกไฟล์โปรเจกต์ (.json) — ชิ้น ตะเข็บ ค่าวัสดุ ชุดสี ครบ · นำเข้าที่หน้ารายการได้แพทเทิร์นใหม่ / ใช้เทียบรุ่น", "Export the project file (.json) — pieces, seams, materials, colourways · import on the list page for a new pattern / use to compare versions")}
+          className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+          <Icon value="i:download" className="text-sm" />{t("ไฟล์โปรเจกต์", "Project file")}
+        </button>
         <button type="button" onClick={() => setTrimsOpen(true)} data-trims-open
           title={t("ซิป กุ๊น สาย/เทป ห่วง ล็อก หมุด — ของที่ไม่ใช่ชิ้นตัด ใส่จำนวนต่อกระเป๋า 1 ใบ แล้วไปตีราคาพร้อมชิ้น", "Zips, tapes, rings, locks, rivets — enter the amount per bag; they go to costing with the pieces")}
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50">
@@ -337,7 +369,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
           view: pieceView, onViewChange: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), view: next })); setDirty(true); } : undefined,
           lesson: lessonRef, lessonName: `${patternNo ?? ""} ${name}`.trim(), onLessonReset: canEdit ? resetLesson : undefined, copySource: lessonRef ? undefined : copySource, canLearn: canEdit,
           tpl: studioTpl, onTplUpdate: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), ...next })); setDirty(true); } : undefined,
-          colorways, colorway: colorwayId, onColorways: canEdit ? (list, active) => { setTemplate((tp) => ({ ...(tp ?? {}), colorways: list, colorway: active })); setDirty(true); } : undefined }} pieceInfoFields matProps={matProps}
+          colorways, colorway: colorwayId, onColorways: canEdit ? (list, active) => { setTemplate((tp) => ({ ...(tp ?? {}), colorways: list, colorway: active })); setDirty(true); } : undefined,
+          compareRef, onSaveCompare: canEdit ? saveCompare : undefined, onClearCompare: canEdit ? clearCompare : undefined }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
         footerNote={<span className="text-slate-400">{canEdit ? t("บันทึกอัตโนมัติหลังหยุดแก้ 4 วินาที · Ctrl+Z ย้อนได้ทั้งชิ้นและตะเข็บ", "Saves automatically 4 seconds after you stop · Ctrl+Z undoes pieces and seams") : ""}</span>} />
 

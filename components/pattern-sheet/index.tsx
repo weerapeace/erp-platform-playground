@@ -29,7 +29,9 @@ export function groupColors(layout: PatternLayout): Map<string, (typeof PATTERN_
   return m;
 }
 
-export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, className, style }: {
+export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, className, style, stamp }: {
+  /** บรรทัดเล็กใต้ป้ายชิ้น เช่น "rev 7 · 13/11/2026" (รอบ H) */
+  stamp?: string;
   layout: PatternLayout;
   /** ส่วนของแผ่นที่จะวาด (ซม.) — ไม่ใส่ = ทั้งแผ่น */
   view?: { x: number; y: number; w: number; h: number };
@@ -82,6 +84,11 @@ export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, 
             {showSub && (
               <text x={cx} y={cy + fs * 0.75} fontSize={fs * 0.78} textAnchor="middle" dominantBaseline="middle" fill={mono ? "#333" : c.stroke}>
                 {p.w}×{p.h} ซม. · ตัด ×{p.count}
+              </text>
+            )}
+            {showSub && (p.tag || stamp) && (   // รอบ H: วิธีวางตัด (คู่ ซ้าย-ขวา / คว่ำหน้า / ทางเดียว) + รุ่น/วันที่
+              <text x={cx} y={cy + fs * 1.7} fontSize={fs * 0.66} textAnchor="middle" dominantBaseline="middle" fill={mono ? "#333" : c.stroke} data-piece-tag>
+                {[p.tag, stamp].filter(Boolean).join(" · ")}
               </text>
             )}
           </g>

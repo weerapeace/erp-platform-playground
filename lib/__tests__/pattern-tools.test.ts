@@ -59,5 +59,9 @@ describe("ค้นหาเครื่องมือ", () => {
     expect(ids("ชุดสี")[0]).toBe("v-colorway"); expect(ids("ลายผ้า")[0]).toBe("fabric-tex"); expect(ids("สอบเทียบ")[0]).toBe("mat-groups");
     expect(ids("โฟม")[0]).toBe("layer-foam"); expect(ids("เดินด้ายทับ")[0]).toBe("topstitch");
   });
+  it("รอบ H: ส่งออก/เอกสารค้นเจอ", () => {
+    expect(ids("csv")[0]).toBe("csv-export"); expect(ids("aama")[0]).toBe("dxf-profile"); expect(ids("a3")[0]).toBe("paper");
+    expect(ids("ไฟล์โปรเจกต์")[0]).toBe("project-file"); expect(ids("เทียบรุ่น")[0]).toBe("compare"); expect(ids("tech pack")[0]).toBe("tech-pack");
+  });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });
