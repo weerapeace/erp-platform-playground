@@ -13,6 +13,8 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { FileMultiInput } from "@/components/file-multi-input";
+import { useFileRefResolver, fetchFileRefBlob } from "@/components/file-ref";
+import { FileUploadError, uploadFileByRule } from "@/lib/file-upload";
 import { GlobalSearch } from "@/components/global-search";
 import { useSearchHotkey } from "@/lib/search-hotkey";
 import {
@@ -45,6 +47,15 @@ const CTW_PARTNER_CFG: RelationConfig = {
 } as RelationConfig;
 
 // ---------------- Portal (ของกลาง) — แปะ popup ที่ body ให้ลอยกลางจอเสมอ (พ้น transform ของหน้า) ----------------
+/** หมวดไฟล์ของแอปนี้ในกฎที่เก็บไฟล์ (/master/storage-rules) — สลิป/รูปบิล/บิล CTW → Supabase ส่วนตัว (เปิดดูผ่าน components/file-ref) */
+const CHINA_PAY_FILES = "china_pay";
+
+/** อัปไฟล์ของแอปตามกฎที่เก็บไฟล์ → { r2_key: ref } (ชื่อเดิมให้โค้ดที่ใช้ต่อไม่ต้องแก้ · ค่าอาจเป็น "sb:erp-files/…") · ไม่สำเร็จ = r2_key ว่าง + error */
+async function uploadChinaPayFile(file: File, r2Folder: string): Promise<{ r2_key: string; error: string }> {
+  try { return { r2_key: await uploadFileByRule({ category: CHINA_PAY_FILES, file, r2Folder }), error: "" }; }
+  catch (e) { return { r2_key: "", error: e instanceof FileUploadError && e.aborted ? "" : String((e as Error).message ?? e) }; }
+}
+
 function Portal({ children }: { children: React.ReactNode }) {
   const [el] = useState<HTMLDivElement | null>(() => (typeof document !== "undefined" ? document.createElement("div") : null));
   useEffect(() => {
@@ -1458,7 +1469,7 @@ function BillForm({ prefillVoucherId, onPrefillUsed }: { prefillVoucherId?: stri
       </Card>
 
       <Card>
-        <FileMultiInput label="📎 ไฟล์แนบ (ใบรับ/บิล, สลิป WeChat ฯลฯ)" value={files} onChange={setFiles} folder="china-bills" />
+        <FileMultiInput label="📎 ไฟล์แนบ (ใบรับ/บิล, สลิป WeChat ฯลฯ)" value={files} onChange={setFiles} folder="china-bills" category={CHINA_PAY_FILES} />
         <div className="mt-3"><Label>หมายเหตุ</Label>
           <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="เช่น รายละเอียดเพิ่มเติม / ออเดอร์"
             className="w-full px-3 py-2 text-base border border-slate-200 rounded-lg resize-none" /></div>
@@ -1753,7 +1764,7 @@ function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, 
   const [working, setWorking] = useState(false);
   const [rows, setRows] = useState<WizRow[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
 
   useEffect(() => {
     apiFetch("/api/master-v2/partners?limit=500").then(r => r.json())
@@ -1786,8 +1797,7 @@ function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, 
     try {
       const next: WizRow[] = [];
       for (const f of Array.from(files)) {
-        const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-slips");
-        const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then(r => r.json()).catch(() => ({}));
+        const up = await uploadChinaPayFile(f, "china-slips");
         if (!up.r2_key) { if (up.error) toast.error(up.error); continue; }
         const ex = await apiFetch("/api/china-pay/ocr-slip-extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: up.r2_key }) }).then(r => r.json()).catch(() => ({ amount: null, account: "", name: "" }));
         const exObj = { amount: ex.amount ?? null, account: String(ex.account ?? ""), name: String(ex.name ?? "") };
@@ -1897,7 +1907,7 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
   const [editVal, setEditVal] = useState("");
   const [delId, setDelId] = useState<string | null>(null);     // tid ที่กำลังยืนยันลบ
   const [viewId, setViewId] = useState<string | null>(null);   // tid ที่กำลังกางดู (สลิป)
-  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
 
   const load = useCallback(() => {
@@ -2072,7 +2082,7 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [editIdx, setEditIdx] = useState<number | null>(null);   // สลิปที่กำลังแก้ยอด
   const fileRef = useRef<HTMLInputElement>(null);
-  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
 
   const sum = slips.reduce((a, s) => a + num(s.amount_rmb), 0);
@@ -2085,9 +2095,7 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
     try {
       const added: Slip[] = [];
       for (const f of Array.from(files)) {
-        const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-slips");
-        const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-        const j = await r.json().catch(() => ({}));
+        const j = await uploadChinaPayFile(f, "china-slips");
         if (j.r2_key) added.push({ key: j.r2_key, amount_rmb: 0, at: new Date().toISOString() });
         else if (j.error) toast.error(j.error);
       }
@@ -2131,7 +2139,7 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
               <div key={s.key + i} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg p-2">
                 {isPdf(s.key)
                   ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
-                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
+                  : <button type="button" onClick={() => setLightbox(r2Url(s.key) ?? null)} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img loading="lazy" src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
                 <div className="flex-1 min-w-0">
@@ -2273,7 +2281,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
   const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
   const thb = totalRmb * rate;
   const st = String(bill.status ?? "—");
-  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   // ไฟล์แนบใหม่ (array) + รวมไฟล์เก่า bill_image/wechat_image ของบิลเดิม
   const atts = Array.isArray(bill.attachments) ? (bill.attachments as unknown[]).map(String) : [];
   const legacy = [bill.bill_image, bill.wechat_image].filter(Boolean).map(String);
@@ -2443,8 +2451,8 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
           {/* แนบไฟล์ — กดรูปดูเต็มจอ · ปุ่ม "เพิ่มไฟล์" แนบเพิ่มได้ทันที (ของกลาง FileMultiInput · ลบไฟล์ที่ "แก้ไขบิล") */}
           <div>
             <Label>ไฟล์แนบ ({files.length}){savingFiles ? " · กำลังบันทึก…" : ""}</Label>
-            <FileMultiInput value={files} onChange={saveFiles} folder="china-bills" removable={false}
-              disabled={savingFiles} onPreview={(k) => setLightbox(r2Url(k))} />
+            <FileMultiInput value={files} onChange={saveFiles} folder="china-bills" category={CHINA_PAY_FILES} removable={false}
+              disabled={savingFiles} onPreview={(_k, u) => setLightbox(u ?? null)} />
           </div>
 
           {/* ยกเลิกบิล */}
@@ -3004,7 +3012,7 @@ function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSave
       </Card>
 
       <Card>
-        <FileMultiInput label="📎 ไฟล์แนบ (PDF บิล ฯลฯ)" value={files} onChange={setFiles} folder="ctw-bills" />
+        <FileMultiInput label="📎 ไฟล์แนบ (PDF บิล ฯลฯ)" value={files} onChange={setFiles} folder="ctw-bills" category={CHINA_PAY_FILES} />
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
@@ -3021,7 +3029,7 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: {
   const toast = useToast();
   const [del, setDel] = useState(false);
   const [busy, setBusy] = useState(false);
-  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   const atts = Array.isArray(bill.attachments) ? (bill.attachments as unknown[]).map(String) : [];
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
 
@@ -3395,7 +3403,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [slipProgress, setSlipProgress] = useState<{ done: number; total: number } | null>(null);   // ความคืบหน้าอ่านสลิป
   const [slipLinkIdx, setSlipLinkIdx] = useState<number | null>(null);   // index รายการโอนที่กำลังเลือกบิล CTW ให้ตัด
   const [linkTab, setLinkTab] = useState<"ISG" | "IG">("ISG");           // แท็บกลุ่มบริษัทในป๊อปอัปจับคู่
-  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [balance, setBalance] = useState<{ thb: number; rmb: number }>({ thb: 0, rmb: 0 });
@@ -3575,10 +3583,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       for (let idx = 0; idx < fileArr.length; idx++) {
         setSlipProgress({ done: idx, total: fileArr.length });
         const f = fileArr[idx];
-        const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-transfers");
-        const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-        const j = await res.json().catch(() => ({}));
-        if (!j.r2_key) continue;
+        const j = await uploadChinaPayFile(f, "china-transfers");
+        if (!j.r2_key) { if (j.error) toast.error(j.error); continue; }
         const slip: TxSlip = { key: j.r2_key, bank: "", amount: 0, at: "" };
         // AI อ่าน (เฉพาะรูป ไม่ใช่ PDF)
         if (!String(j.r2_key).toLowerCase().endsWith(".pdf")) {
@@ -3667,10 +3673,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const uploadSlipImageFor = async (i: number, file: File) => {
     setSlipUploading(true);
     try {
-      const fd = new FormData(); fd.append("file", file); fd.append("folder", "china-transfers");
-      const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-      const j = await res.json().catch(() => ({}));
-      if (!j.r2_key) { toast.error("อัปโหลดรูปไม่สำเร็จ"); return; }
+      const j = await uploadChinaPayFile(file, "china-transfers");
+      if (!j.r2_key) { toast.error(j.error || "อัปโหลดรูปไม่สำเร็จ"); return; }
       setSlipField(i, { key: j.r2_key });
       if (!String(j.r2_key).toLowerCase().endsWith(".pdf")) {
         setOcrBusy(true);
@@ -4096,7 +4100,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                         onChange={e => { const f = e.target.files?.[0]; if (f) uploadSlipImageFor(i, f); e.target.value = ""; }} /></label>
                   : s.key.toLowerCase().endsWith(".pdf")
                   ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
-                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
+                  : <button type="button" onClick={() => setLightbox(r2Url(s.key) ?? null)} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img loading="lazy" src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
                 <input value={s.bank} onChange={e => setSlipField(i, { bank: e.target.value })} placeholder="ธนาคาร"
@@ -4301,7 +4305,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 function LinkSlipsPopup({ transfer, onClose, onSaved }: { transfer: Record<string, unknown>; onClose: () => void; onSaved: () => void }) {
   useScrollLock(true);
   const toast = useToast();
-  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"ISG" | "IG">("ISG");
@@ -4491,7 +4495,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
   const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
   const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
   const atts = Array.isArray(t.attachments) ? (t.attachments as unknown[]).map(String) : [];
-  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const r2Url = useFileRefResolver();   // ref → ลิงก์ (R2 เดิม / Supabase ส่วนตัว — components/file-ref)
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
   // ดึงข้อมูลเพิ่ม: ยอดคงเหลือบัญชีจีน + ค่าโอน(fee)บิลจีน + วันที่บิล CTW (ใช้ได้ทั้งรายการเก่า/ใหม่)
   const [extras, setExtras] = useState<{ balanceRmb: number; bal: ReceiptBalance; feeByBill: Record<string, number>; ctwDateByBill: Record<string, string> } | null>(null);
@@ -4665,7 +4669,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
         return up.key ? `${base}/${up.key}` : "";
       };
       const keyToDataUrl = async (key: string) => {
-        try { const r = await apiFetch(`/api/r2-image?key=${encodeURIComponent(key)}`); const blob = await r.blob();
+        try { const blob = await fetchFileRefBlob(key); if (!blob) return "";
           return await new Promise<string>((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = () => res(""); fr.readAsDataURL(blob); });
         } catch { return ""; }
       };
@@ -4793,7 +4797,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
                       <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
                     </a>
                   ) : (
-                    <button key={k} type="button" onClick={() => setLightbox(r2Url(k))}
+                    <button key={k} type="button" onClick={() => setLightbox(r2Url(k) ?? null)}
                       className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img loading="lazy" src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
@@ -5098,7 +5102,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
         return up.key ? `${base}/${up.key}` : "";
       };
       const keyToDataUrl = async (key: string) => {
-        try { const r = await apiFetch(`/api/r2-image?key=${encodeURIComponent(key)}`); const blob = await r.blob();
+        try { const blob = await fetchFileRefBlob(key); if (!blob) return "";
           return await new Promise<string>((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = () => res(""); fr.readAsDataURL(blob); });
         } catch { return ""; }
       };

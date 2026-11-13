@@ -94,17 +94,27 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
   customer_print_uploads: "supabase", // bucket print-uploads
   customer_review_return: "r2",  // lib/website-reviews-server + website-returns-server
   work_logs: "rule",             // รูปใบจดผลงาน /master/work-logs → ตัวอัปกลาง lib/file-upload
+  china_pay: "rule",             // สลิปโอน/รูปบิลจีน/บิล CTW ในแอปโอนเงินจีน /app/china-pay → ตัวอัปกลาง lib/file-upload
 };
 
 /**
  * สิทธิ์ของหมวดที่ใช้ตัวอัปกลาง (lib/file-upload) — อัปได้ / เปิดดูไฟล์ส่วนตัว (Supabase) ได้
  * หมวดที่ไม่อยู่ในนี้ = ตัวอัปกลางไม่รับ (กันเปิดช่องอัปโดยไม่ได้ตั้งสิทธิ์)
  * ตั้งให้ตรงกับสิทธิ์ของหน้าที่ใช้ช่องอัปนั้น (เช่น บิล = ดูใบรับสินค้า products.view / บันทึกรับของ products.edit)
+ * view เป็นรายการได้ = มีสิทธิ์ตัวใดตัวหนึ่งก็เปิดดูได้
  */
-export const STORAGE_CATEGORY_PERMISSIONS: Record<string, { upload: string; view: string }> = {
+export const STORAGE_CATEGORY_PERMISSIONS: Record<string, { upload: string; view: string | string[] }> = {
   supplier_bills: { upload: "products.edit", view: "products.view" },
   work_logs: { upload: "products.edit", view: "products.view" },   // เหมือนบอร์ดจ่ายงาน
+  // แอปโอนเงินจีน · รูปบิลถูกแนบต่อไปใบสำคัญจ่าย (purchase_delivery_bills) → ฝั่งจัดซื้อ (products.view) เปิดดูได้ด้วย
+  china_pay: { upload: "app.china_pay", view: ["app.china_pay", "products.view"] },
 };
+
+/** สิทธิ์ดูของหมวด เป็นรายการเสมอ (มีตัวใดตัวหนึ่ง = ดูได้) · หมวดไม่รู้จัก = [] */
+export function categoryViewPermissions(category: string | null | undefined): string[] {
+  const v = category ? STORAGE_CATEGORY_PERMISSIONS[category]?.view : undefined;
+  return !v ? [] : Array.isArray(v) ? v : [v];
+}
 
 /** ไฟล์นี้เข้าหมวดได้ไหม (ชนิด + ขนาด) — ได้ = null · ไม่ได้ = ข้อความภาษาคน */
 export function fileRuleProblem(rule: Pick<StorageRule, "file_types" | "max_bytes">, file: { name: string; size: number }, fallbackMaxBytes: number): string | null {

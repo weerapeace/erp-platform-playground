@@ -2,7 +2,7 @@
  * POST /api/files/sign — ขอลิงก์เปิดดูไฟล์จาก ref หลายตัวในครั้งเดียว · body { refs: string[] } (≤ 50)
  *   → { data: { [ref]: url | null } }
  *   R2 key   → /api/r2-image?key=… (ทางเดิม)
- *   Supabase → ลิงก์ชั่วคราว 10 นาที เฉพาะหมวดที่ผู้ใช้มีสิทธิ์ดู (STORAGE_CATEGORY_PERMISSIONS[หมวด].view) · ไม่มีสิทธิ์ = null
+ *   Supabase → ลิงก์ชั่วคราว 10 นาที เฉพาะหมวดที่ผู้ใช้มีสิทธิ์ดู (STORAGE_CATEGORY_PERMISSIONS[หมวด].view · มีตัวใดตัวหนึ่งพอ) · ไม่มีสิทธิ์ = null
  * หน้าจอเรียกผ่าน components/file-ref (useFileRefUrls) — <img src> ส่ง token เองไม่ได้ จึงต้องขอลิงก์ก่อน
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +10,7 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { parseFileRef } from "@/lib/file-ref";
 import { r2ViewUrl, signSupabaseRefs } from "@/lib/file-ref-server";
-import { STORAGE_CATEGORY_PERMISSIONS } from "@/lib/storage-policy";
+import { categoryViewPermissions } from "@/lib/storage-policy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,10 +29,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const p = parseFileRef(ref);
     if (!p) { out[ref] = null; continue; }
     if (p.provider === "r2") { out[ref] = r2ViewUrl(p.key); continue; }
-    const perm = p.category ? STORAGE_CATEGORY_PERMISSIONS[p.category]?.view : undefined;
-    if (!perm) { out[ref] = null; continue; }
-    if (!canCache.has(perm)) canCache.set(perm, await apiCan(request, perm));
-    if (canCache.get(perm)) allowed.push(ref); else out[ref] = null;
+    const perms = categoryViewPermissions(p.category);   // มีสิทธิ์ตัวใดตัวหนึ่ง = ดูได้
+    let ok = false;
+    for (const perm of perms) {
+      if (!canCache.has(perm)) canCache.set(perm, await apiCan(request, perm));
+      if (canCache.get(perm)) { ok = true; break; }
+    }
+    if (ok) allowed.push(ref); else out[ref] = null;
   }
 
   if (allowed.length) {

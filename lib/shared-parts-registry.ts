@@ -454,7 +454,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "file-multi-input", label: "ช่องไฟล์แนบหลายไฟล์", code: "FileMultiInput", category: "file",
     source: { path: "components/file-multi-input" },
-    what: "อัปโหลดไฟล์แนบหลายไฟล์ (รูปและ PDF) เก็บ R2 อย่างเดียว",
+    what: "อัปโหลดไฟล์แนบหลายไฟล์ (รูปและ PDF) · ส่ง category = เก็บตามกฎที่เก็บไฟล์ (เช่น Supabase ส่วนตัว) · ไม่ส่ง = R2 ทางเดิม",
     sameJob: "file-field",
   },
   {
@@ -1129,7 +1129,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "file-ref", label: "เปิดดูไฟล์จากที่อยู่กลาง", code: "FileRefLink", category: "file",
     source: { path: "components/file-ref" },
-    what: "เปิดไฟล์ที่เก็บไว้ไม่ว่าอยู่ R2 หรือ Google Drive ด้วยรูปแบบที่อยู่เดียว",
+    what: "เปิดไฟล์ที่เก็บไว้ไม่ว่าอยู่ R2 หรือ Supabase ส่วนตัว ด้วยรูปแบบที่อยู่เดียว (useFileRefUrls · useFileRefResolver · fetchFileRefBlob)",
   },
   {
     key: "upload-permission", label: "เช็กสิทธิ์อัปโหลดไฟล์", code: "useFileUploadAccess", category: "file",

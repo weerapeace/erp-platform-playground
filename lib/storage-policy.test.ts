@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isRuleLocked, ruleStatus, validateRulePatch, maxBytesLabel, fileTypesLabel, fileRuleProblem, STORAGE_WIRING, STORAGE_CATEGORY_PERMISSIONS, type StorageRule } from "./storage-policy";
+import { isRuleLocked, ruleStatus, validateRulePatch, maxBytesLabel, fileTypesLabel, fileRuleProblem, STORAGE_WIRING, STORAGE_CATEGORY_PERMISSIONS, categoryViewPermissions, type StorageRule } from "./storage-policy";
 
 const rule = (over: Partial<StorageRule> = {}): StorageRule => ({
   id: "x", rule_key: "record_files", label: "ไฟล์แนบ", label_en: null, description: null, file_types: [],
@@ -48,6 +48,15 @@ describe("storage-policy · กฎที่เก็บไฟล์กลาง"
     expect(STORAGE_WIRING.supplier_bills).toBe("rule");
     expect(ruleStatus({ rule_key: "supplier_bills", provider: "supabase" }).kind).toBe("follows");
     expect(STORAGE_CATEGORY_PERMISSIONS.supplier_bills).toEqual({ upload: "products.edit", view: "products.view" });
+  });
+
+  it("ไฟล์แอปโอนเงินจีนทำตามกฎ + ฝั่งจัดซื้อเปิดดูรูปบิลที่ส่งต่อไปใบสำคัญได้", () => {
+    expect(STORAGE_WIRING.china_pay).toBe("rule");
+    expect(STORAGE_CATEGORY_PERMISSIONS.china_pay.upload).toBe("app.china_pay");
+    expect(categoryViewPermissions("china_pay")).toEqual(["app.china_pay", "products.view"]);
+    expect(categoryViewPermissions("supplier_bills")).toEqual(["products.view"]);
+    expect(categoryViewPermissions("ไม่มีหมวดนี้")).toEqual([]);
+    expect(categoryViewPermissions(null)).toEqual([]);
   });
 
   it("ตรวจไฟล์ตามกฎ: ชนิด + ขนาด (ไม่ตั้งขนาด = ใช้ค่าสำรอง)", () => {

@@ -82,12 +82,17 @@
 
 - ระบบ login เก็บ token ใน localStorage → `<img src>` ส่งสิทธิ์เองไม่ได้ จึงต้องขอลิงก์ก่อน: `POST /api/files/sign { refs }`
 - R2 → `/api/r2-image` ทันที · Supabase → ลิงก์ชั่วคราว 10 นาที เฉพาะคนที่มีสิทธิ์ดูของหมวด · ไม่มีสิทธิ์ = null
+- ref อยู่ลึกในข้อมูล (เช่น สลิปในรายการโอน) → `const fileUrl = useFileRefResolver()` แล้วเรียก `fileUrl(ref)` ตอน render ได้เลย (รวมขอลิงก์ให้ครั้งเดียวหลัง render)
+- นอก render (เช่น ดึงไฟล์ไปแปลงก่อนส่ง LINE) → `getFileRefUrl(ref)` / `fetchFileRefBlob(ref)`
 
 ### สิทธิ์ของหมวด — `STORAGE_CATEGORY_PERMISSIONS` (`lib/storage-policy.ts`)
 
 | หมวด | อัปได้ | ดูได้ |
 |---|---|---|
 | `supplier_bills` | `products.edit` (เท่ากับสิทธิ์บันทึกรับของ) | `products.view` (เท่ากับสิทธิ์ดูใบรับสินค้า) |
+| `china_pay` | `app.china_pay` | `app.china_pay` **หรือ** `products.view` (รูปบิลจีนถูกแนบต่อไปใบสำคัญจ่ายฝั่งจัดซื้อ) |
+
+`view` ใส่เป็นรายการได้ = มีสิทธิ์ตัวใดตัวหนึ่งก็ดูได้ (`categoryViewPermissions(หมวด)`)
 
 หมวดที่ไม่อยู่ในตารางนี้ = ตัวอัปกลางไม่รับ
 
@@ -95,6 +100,7 @@
 
 | หมวด | ช่องอัป | ที่อ่านไฟล์ |
 |---|---|---|
+| `china_pay` (2026-11-13) | แอปโอนเงินจีน `/app/china-pay`: สลิปตอนโอน (2) · สลิปในบิล · ตัวจับคู่สลิป · `FileMultiInput category="china_pay"` รูปบิลจีน (2) / บิล CTW — ผ่าน `uploadChinaPayFile` ในหน้า | รูปในแอป (`useFileRefResolver`) · AI อ่านสลิป `/api/china-pay/ocr-slip(-extract)` (`readFileRef` + เช็กสิทธิ์หมวด) · ส่ง LINE (`fetchFileRefBlob` → ก๊อปไป bucket แชร์เหมือนเดิม) · ใบสำคัญจากบิลจีน (`purchase_delivery_bills.r2_key`) |
 | `supplier_bills` | `FileInput category="supplier_bills"` ใน `receive-line-modal` (2) · `receive-cart` (2) · `gr-detail-modal` (2) · `delivery-bill-panel` (1) | `gr-detail-modal` · `delivery-bill-panel` (`useFileRefUrls`) · AI อ่านใบส่งของ `parseDeliveryBillImage(ref, admin)` · บันทึกตรวจ `isRefForCategory` ที่ `/api/purchasing/receive` · `goods-receipt/[id]` PATCH · `vouchers/[id]/bills` POST |
 
 **เพิ่มหมวดใหม่:** ใส่สิทธิ์ใน `STORAGE_CATEGORY_PERMISSIONS` → ส่ง `category` ที่ช่องอัป → เปลี่ยนจุดแสดงไฟล์เป็น `useFileRefUrls` → ตรวจ `isRefForCategory` ตอนบันทึก → ตั้ง `STORAGE_WIRING[หมวด] = "rule"`

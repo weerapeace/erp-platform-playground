@@ -7,7 +7,7 @@
  * R2 key → ลิงก์ /api/r2-image ทันที (ไม่ต้องรอ) · Supabase → ขอลิงก์ชั่วคราวจาก /api/files/sign (ตรวจสิทธิ์ตามหมวด)
  * จำลิงก์ไว้ในหน้า (ใช้ซ้ำจนใกล้หมดอายุ) และรวมคำขอหลายไฟล์เป็นครั้งเดียว
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { parseFileRef } from "@/lib/file-ref";
 
@@ -64,4 +64,50 @@ export function useFileRefUrls(refs: (string | null | undefined)[]): Record<stri
 export function useFileRefUrl(ref: string | null | undefined): string | null | undefined {
   const s = String(ref ?? "").trim();
   return useFileRefUrls([s])[s];
+}
+
+/**
+ * ตัวแปลง ref → ลิงก์ แบบเรียกตอน render ได้เลย (ไม่ต้องรวบรวมรายการ ref ล่วงหน้า) — เหมาะกับหน้าที่ ref อยู่ลึกในข้อมูล
+ *   const fileUrl = useFileRefResolver();
+ *   <img src={fileUrl(k)} />   // R2 = ลิงก์ทันที · Supabase = undefined ระหว่างขอลิงก์ แล้ว render ใหม่เอง · เปิดไม่ได้ = undefined
+ * ref ที่เรียกระหว่าง render ถูกรวมขอลิงก์ครั้งเดียวหลัง render (ใช้ความจำ/คำขอร่วมกับ useFileRefUrls)
+ */
+export function useFileRefResolver(): (ref: string | null | undefined) => string | undefined {
+  const [, bump] = useState(0);
+  const seen = useRef<Set<string>>(new Set());
+  seen.current = new Set();   // เก็บใหม่ทุก render
+  useEffect(() => {
+    const need = [...seen.current].filter((r) => knownUrl(r) === undefined);
+    if (!need.length) return;
+    let alive = true;
+    void signRefs(need).then(() => { if (alive) bump((n) => n + 1); });
+    return () => { alive = false; };
+  });
+  return (ref) => {
+    const s = String(ref ?? "").trim();
+    if (!s) return undefined;
+    const u = knownUrl(s);
+    if (u === undefined) seen.current.add(s);
+    return u ?? undefined;
+  };
+}
+
+/** ขอลิงก์แบบ async (ใช้นอก render เช่น ดึงไฟล์ไปแปลงก่อนส่ง LINE) · เปิดไม่ได้ = null */
+export async function getFileRefUrl(ref: string | null | undefined): Promise<string | null> {
+  const s = String(ref ?? "").trim();
+  if (!s) return null;
+  const k = knownUrl(s);
+  if (k !== undefined) return k;
+  await signRefs([s]);
+  return knownUrl(s) ?? null;
+}
+
+/** ดึงไฟล์จาก ref มาเป็น Blob (R2 ผ่าน /api/r2-image · Supabase ผ่านลิงก์ชั่วคราว) · ไม่ได้ = null */
+export async function fetchFileRefBlob(ref: string | null | undefined): Promise<Blob | null> {
+  const url = await getFileRefUrl(ref);
+  if (!url) return null;
+  try {
+    const r = parseFileRef(String(ref))?.provider === "r2" ? await apiFetch(url) : await fetch(url);
+    return r.ok ? await r.blob() : null;
+  } catch { return null; }
 }

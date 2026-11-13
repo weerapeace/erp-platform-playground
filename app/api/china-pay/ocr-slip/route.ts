@@ -1,7 +1,7 @@
 /**
  * POST /api/china-pay/ocr-slip — อ่าน "ยอดเงินที่โอน" จากรูปสลิป ด้วย Cloudflare Workers AI
  *
- * body: { key: string }   // R2 key ของสลิปที่อัปโหลดไว้แล้ว
+ * body: { key: string }   // ที่อยู่ไฟล์สลิป (ref · lib/file-ref): R2 key เดิม หรือ "sb:erp-files/china_pay/…" (ต้องมีสิทธิ์ดูหมวด)
  * คืน:  { amount: number | null, raw: string }
  *
  * - ใช้ binding AI (ตั้งใน wrangler.jsonc → "ai") · มีโควตาฟรีรายวัน
@@ -9,7 +9,12 @@
  * - เป็นตัวช่วยกรอกเท่านั้น: ผู้ใช้ต้องตรวจ/แก้ตัวเลขก่อนบันทึกเสมอ
  */
 import { NextRequest, NextResponse } from "next/server";
-import { isSafeR2Key, r2GetObject } from "@/lib/r2";
+import { isSafeR2Key } from "@/lib/r2";
+import { apiCan } from "@/lib/api-auth";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { isRefForCategory, isSupabaseRef } from "@/lib/file-ref";
+import { readFileRef } from "@/lib/file-ref-server";
+import { categoryViewPermissions } from "@/lib/storage-policy";
 import { readImageText, visionAvailable } from "@/lib/paid-services-server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
@@ -36,20 +41,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: { key?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const key = String(body.key ?? "");
-  if (!key || !SAFE_KEY.test(key) || !isSafeR2Key(key)) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
+  const sb = isSupabaseRef(key);
+  if (!key || (sb ? !isRefForCategory(key, "china_pay") : !SAFE_KEY.test(key) || !isSafeR2Key(key))) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
+  // ไฟล์ส่วนตัว (Supabase) — ต้องมีสิทธิ์ดูหมวดเหมือนตอนเปิดดูรูป (/api/files/sign)
+  if (sb) {
+    let ok = false;
+    for (const p of categoryViewPermissions("china_pay")) if (await apiCan(request, p)) { ok = true; break; }
+    if (!ok) return NextResponse.json({ error: "ไม่มีสิทธิ์อ่านไฟล์นี้" }, { status: 403 });
+  }
   if (key.toLowerCase().endsWith(".pdf")) return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — กรอกยอดเอง" }, { status: 400 });
 
   // ด่านกลาง: ปิดในศูนย์ AI/API หรือไม่มีผู้ให้บริการที่ตั้งรหัสแล้ว = กรอกเอง
   if (!(await visionAvailable("cf.slip_ocr", { request }))) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ AI (binding)" }, { status: 503 });
 
   try {
-    const obj = await r2GetObject(key);
+    const obj = await readFileRef(supabaseAdmin(), key);
     if (!obj) return NextResponse.json({ error: "ไม่พบไฟล์สลิป" }, { status: 404 });
-    const buf = await new Response(obj.body).arrayBuffer();
 
     const prompt = "นี่คือสลิปโอนเงินจากธนาคาร อ่านเฉพาะ 'จำนวนเงินที่โอน' (ยอดเงินหลัก) แล้วตอบกลับเป็นตัวเลขล้วนอย่างเดียว ไม่ต้องมีสกุลเงินหรือคำอื่น เช่น 20000.00";
     // AI อ่านรูป (ของกลาง) — ผู้ให้บริการตามที่เลือกในศูนย์ AI/API (GPT / Cloudflare) · ผลเป็นข้อความเหมือนเดิม
-    const raw = (await readImageText("cf.slip_ocr", { bytes: new Uint8Array(buf), mime: obj.httpMetadata?.contentType, prompt, maxTokens: 64, cfModel: MODEL }, { request })) ?? "";
+    const raw = (await readImageText("cf.slip_ocr", { bytes: obj.bytes, mime: obj.contentType, prompt, maxTokens: 64, cfModel: MODEL }, { request })) ?? "";
     const amount = parseAmount(raw);
 
     return NextResponse.json({ amount, raw });
