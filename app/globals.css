@@ -63,6 +63,18 @@ body {
 @keyframes gifPokeDrop { 0% { opacity: 0; transform: translateY(-46px) scale(.5) rotate(-8deg); } 55% { opacity: 1; transform: translateY(8px) scale(1.12) rotate(3deg); } 78% { transform: translateY(-3px) scale(.97) rotate(-2deg); } 100% { transform: translateY(0) scale(1) rotate(0); } }
 .gif-poke-drop { animation: gifPokeDrop .7s cubic-bezier(.22,1,.36,1) both; }
 
+/* ---- ResultBurst (components/result-burst) — ผลสำเร็จ/ไม่สำเร็จ: เด้ง + ขีดเครื่องหมาย + จุดกระจาย / สั่น ---- */
+@keyframes rbPop { 0% { opacity: 0; transform: scale(.3); } 60% { opacity: 1; transform: scale(1.12); } 80% { transform: scale(.96); } 100% { transform: scale(1); } }
+@keyframes rbDraw { from { stroke-dashoffset: 48; } to { stroke-dashoffset: 0; } }
+@keyframes rbShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+@keyframes rbDot { 0% { opacity: 0; transform: rotate(var(--rb-a)) translateY(0) scale(.4); } 30% { opacity: 1; } 100% { opacity: 0; transform: rotate(var(--rb-a)) translateY(-34px) scale(1); } }
+.rb-pop { animation: rbPop .55s cubic-bezier(.22,1,.36,1) both; transform-origin: center; transform-box: fill-box; }
+.rb-draw { stroke-dasharray: 48; animation: rbDraw .4s ease-out .35s both; }
+.rb-shake { animation: rbShake .45s ease-in-out .5s both; }
+.rb-dot { animation: rbDot .8s ease-out .3s both; transform-origin: 32px 32px; }
+.rb-row { animation: ovBubblePop .35s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .rb-pop, .rb-draw, .rb-shake, .rb-dot, .rb-row { animation: none; } .rb-dot { display: none; } }
+
 /* ---- Focus ring มาตรฐาน ---- */
 :focus-visible {
   outline: 2px solid #3b82f6;

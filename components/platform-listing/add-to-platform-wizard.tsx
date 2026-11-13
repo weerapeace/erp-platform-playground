@@ -41,6 +41,7 @@ import type { TtsCreatePreview } from "@/lib/tiktok-create-plan";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
 import { creatorOf, hasCreatePreview, liveCreateEndpoint, type CreateStep } from "@/lib/platform-create-registry";
+import { ResultBurst, resultTone } from "@/components/result-burst";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
   ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, decideAdd, isOnShop, missingList, needsTypedConfirm, summarizePlan,
@@ -378,6 +379,10 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
 
         {outcomes ? (
           <div className="space-y-2">
+            {/* แอนิเมชันบอกผล (ของกลาง ResultBurst) — สำเร็จหมด / ไม่สำเร็จหมด / บางส่วน */}
+            <ResultBurst key={`rb-${outcomes.length}-${fails.length}`} tone={resultTone(outcomes.length - fails.length, fails.length)}
+              title={fails.length === 0 ? "ลงสำเร็จทั้งหมด" : fails.length === outcomes.length ? "ลงไม่สำเร็จ" : `สำเร็จ ${(outcomes.length - fails.length).toLocaleString()} · ไม่สำเร็จ ${fails.length.toLocaleString()}`}
+              detail={fails.length > 0 ? "ดูเหตุผลของแต่ละตัวด้านล่าง" : undefined} />
             <div className="flex flex-wrap gap-3 text-sm">
               <span className="text-emerald-700">สำเร็จ {(outcomes.length - fails.length).toLocaleString()}</span>
               {fails.length > 0 && <span className="text-rose-700">ไม่สำเร็จ {fails.length.toLocaleString()}</span>}
@@ -387,7 +392,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             )}
             <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[50vh] overflow-auto">
               {outcomes.map((o, i) => (
-                <div key={`${o.parent_id}-${o.platform}-${i}`} className="flex items-start gap-2 px-3 py-2 text-sm">
+                <div key={`${o.parent_id}-${o.platform}-${i}`} className="rb-row flex items-start gap-2 px-3 py-2 text-sm" style={{ animationDelay: `${Math.min(i, 12) * 50}ms` }}>
                   <span className={o.ok ? "text-emerald-600" : "text-rose-600"}><Icon name={o.ok ? "done" : "warning"} /></span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate">{nameOf(o.parent_id)}</div>

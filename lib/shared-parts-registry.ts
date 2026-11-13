@@ -874,6 +874,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "เรียกผ่าน Icon กลาง (ค่า img:*.json) ไม่ต้องเรียกตรง",
   },
   {
+    key: "result-burst", label: "แอนิเมชันบอกผล สำเร็จ/ไม่สำเร็จ", code: "ResultBurst", category: "layout",
+    source: { path: "components/result-burst" },
+    what: "วงกลมเด้ง + ขีดถูก/กากบาท/! + จุดกระจาย (สำเร็จ) / สั่น (ไม่สำเร็จ) ตอนโชว์หน้าผลลัพธ์ · resultTone(สำเร็จ, ไม่สำเร็จ) เลือกสีให้",
+    when: "จบงานที่ส่งข้อมูลออกนอกระบบหรือทำหลายตัว (ลงสินค้า · ส่งขึ้นร้าน · นำเข้า) แล้วโชว์หน้าสรุปผล",
+    notWhen: "แจ้งผลสั้น ๆ ทั่วไป (ใช้ toast) · ไอคอนเมนู/ปุ่ม (ใช้ Icon / AnimatedIcon)",
+  },
+  {
     key: "install-app", label: "ป๊อปติดตั้งแอป", code: "InstallApp", category: "layout",
     source: { path: "components/install-app" },
     what: "ป๊อปวิธีติดตั้งแอปลงเครื่อง เปิดจากเมนู ⋯ ของหน้าไหนก็ได้ (ข้างในใช้ปุ่มติดตั้งแอป)",
