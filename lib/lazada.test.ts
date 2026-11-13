@@ -1,5 +1,81 @@
-import { describe, expect, it } from "vitest";
-import { LazApiError, lazConnHealth, lazErrorText, lazProductToCatalogItem, lazShopConflict, type LazCredRow } from "./lazada";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  LazApiError, lazConnHealth, lazErrorText, lazProductToCatalogItem, lazShopConflict, type LazCredRow,
+  LazTarget, lazTarget, lazApiGet, lazAuthUrl, lazConfigured, lazAppLocked, planLazAppSave, planLazAppClear,
+} from "./lazada";
+
+// แอป Lazada ต่อแบรนด์ — แอปกลาง (env) vs แอปของแบรนด์เอง (Louis Montini สมัครแยก)
+describe("แอป Lazada ของแบรนด์", () => {
+  const LM_APP = { key: "778899", secret: "lm-secret-abcdefgh" };
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("ไม่มีแอปของแบรนด์ → ได้ URL เฉย ๆ (ทำงานแบบเดิมทุกอย่าง)", () => {
+    expect(lazTarget("https://api.lazada.co.th/rest", null)).toBe("https://api.lazada.co.th/rest");
+    expect(lazTarget("https://api.lazada.co.th/rest", undefined)).toBe("https://api.lazada.co.th/rest");
+  });
+  it("LazTarget ไม่ทำ App Secret หลุด — JSON / ต่อสตริง ได้แค่ URL", () => {
+    const t = lazTarget("https://api.lazada.co.th/rest", LM_APP);
+    expect(t).toBeInstanceOf(LazTarget);
+    expect(JSON.stringify({ gateway: t })).toBe('{"gateway":"https://api.lazada.co.th/rest"}');
+    expect(`${t}`).toBe("https://api.lazada.co.th/rest");
+    expect(JSON.stringify(t)).not.toContain(LM_APP.secret);
+  });
+  it("เรียก API ด้วยแอปของแบรนด์ = app_key ของแบรนด์ · แอปกลาง = app_key จาก env · ลายเซ็นต่างกัน", async () => {
+    vi.stubEnv("LAZADA_APP_KEY", "111111"); vi.stubEnv("LAZADA_APP_SECRET", "central-secret-xyz");
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (u: string) => { urls.push(u); return { ok: true, status: 200, json: async () => ({ code: "0", data: {} }) }; }));
+    await lazApiGet("https://api.lazada.co.th/rest", "/seller/get", "tok");
+    await lazApiGet(lazTarget("https://api.lazada.co.th/rest", LM_APP), "/seller/get", "tok");
+    const [a, b] = urls.map((u) => new URL(u));
+    expect(a.origin + a.pathname).toBe("https://api.lazada.co.th/rest/seller/get");
+    expect(b.origin + b.pathname).toBe("https://api.lazada.co.th/rest/seller/get");
+    expect(a.searchParams.get("app_key")).toBe("111111");
+    expect(b.searchParams.get("app_key")).toBe("778899");
+    expect(a.searchParams.get("sign")).toMatch(/^[0-9A-F]{64}$/);
+    expect(b.searchParams.get("sign")).toMatch(/^[0-9A-F]{64}$/);
+  });
+  it("หน้าอนุญาตใช้ App Key ของแบรนด์ · มีแอปพร้อมใช้ไหม", () => {
+    vi.stubEnv("LAZADA_APP_KEY", "111111"); vi.stubEnv("LAZADA_APP_SECRET", "central-secret-xyz");
+    expect(new URL(lazAuthUrl("https://x/cb", "st", LM_APP)).searchParams.get("client_id")).toBe("778899");
+    expect(new URL(lazAuthUrl("https://x/cb", "st")).searchParams.get("client_id")).toBe("111111");
+    expect(lazConfigured(LM_APP)).toBe(true);
+    expect(lazConfigured({ key: "778899", secret: "" })).toBe(false);   // ถอดรหัส secret ไม่ได้ → ไม่พร้อม (ไม่แอบใช้แอปกลาง)
+    expect(lazConfigured()).toBe(true);
+  });
+  it("เชื่อมร้านอยู่ (แม้หมดอายุ) = ล็อกแอป", () => {
+    expect(lazAppLocked({ stage: "connected" })).toBe(true);
+    expect(lazAppLocked({ stage: "disconnected" })).toBe(false);
+    expect(lazAppLocked({})).toBe(false);
+    expect(lazAppLocked(null)).toBe(false);
+  });
+  it("planLazAppSave: แบรนด์ใหม่ต้องกรอกครบ · ค่าผิดรูปแบบถูกปฏิเสธ", () => {
+    expect(planLazAppSave({ app_key: " 778899 ", app_secret: " lm-secret-abcdefgh " }, null, false)).toEqual({ ok: true, app_key: "778899", app_secret: "lm-secret-abcdefgh", unchanged: false });
+    expect(planLazAppSave({ app_key: "", app_secret: "x" }, null, false).ok).toBe(false);
+    expect(planLazAppSave({ app_key: "778 899", app_secret: "lm-secret-abcdefgh" }, null, false).ok).toBe(false);
+    expect(planLazAppSave({ app_key: "778899", app_secret: "" }, null, false).ok).toBe(false);
+    expect(planLazAppSave({ app_key: "778899", app_secret: "short" }, null, false).ok).toBe(false);
+    expect(planLazAppSave({ app_key: "778899", app_secret: "has space inside" }, null, false).ok).toBe(false);
+  });
+  it("planLazAppSave: App Secret ว่าง = ใช้ของเดิม (เฉพาะ App Key เดิม) · เปลี่ยน App Key ต้องกรอก secret ใหม่", () => {
+    const cur = { app_key: "778899", has_secret: true };
+    expect(planLazAppSave({ app_key: "778899", app_secret: "" }, cur, false)).toEqual({ ok: true, app_key: "778899", app_secret: null, unchanged: true });
+    expect(planLazAppSave({ app_key: "990011", app_secret: "" }, cur, false).ok).toBe(false);
+    expect(planLazAppSave({ app_key: "778899", app_secret: "" }, { app_key: "778899", has_secret: false }, false).ok).toBe(false);
+  });
+  it("planLazAppSave: เชื่อมร้านอยู่ → แก้ได้แค่ secret ของแอปเดิม · เปลี่ยนแอป/ย้ายจากแอปกลางไม่ได้", () => {
+    const cur = { app_key: "778899", has_secret: true };
+    expect(planLazAppSave({ app_key: "778899", app_secret: "new-secret-12345" }, cur, true)).toMatchObject({ ok: true, app_secret: "new-secret-12345" });
+    const changeKey = planLazAppSave({ app_key: "990011", app_secret: "new-secret-12345" }, cur, true);
+    expect(changeKey.ok).toBe(false);
+    if (!changeKey.ok) expect(changeKey.error).toContain("ตัดการเชื่อมต่อ");
+    expect(planLazAppSave({ app_key: "778899", app_secret: "lm-secret-abcdefgh" }, null, true).ok).toBe(false);   // IG เชื่อมผ่านแอปกลางอยู่ → ห้ามใส่แอปทับ
+  });
+  it("planLazAppClear: ต้องมีแอปของแบรนด์ + ไม่ได้เชื่อมอยู่", () => {
+    expect(planLazAppClear({ app_key: "778899", has_secret: true }, false)).toEqual({ ok: true });
+    expect(planLazAppClear(null, false).ok).toBe(false);
+    expect(planLazAppClear({ app_key: "778899", has_secret: true }, true).ok).toBe(false);
+  });
+});
 
 // ด่าน 1 ร้าน = 1 แบรนด์ — ข้อมูลจริง: IG = seller 100179222188 / TH1JHEBLW3 · LM ยังไม่เชื่อม
 describe("lazShopConflict", () => {

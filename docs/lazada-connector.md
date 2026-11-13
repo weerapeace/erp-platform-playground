@@ -25,7 +25,19 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
   - `shop_connected_to_other_brand` — เลือกแบรนด์ A แต่ล็อกอินร้านที่เชื่อมอยู่กับแบรนด์ B (เช่น เลือก Louis Montini แต่ล็อกอินบัญชี IG)
   - `brand_has_other_shop` — แบรนด์นี้เชื่อมร้านอื่นอยู่ แต่ล็อกอินอีกร้าน (เช่น ต่ออายุ IG แต่เผลอล็อกอินร้าน LM) · ตั้งใจเปลี่ยนร้าน = กด ตัดการเชื่อมต่อ ก่อน
   - เชื่อมไม่สำเร็จก็จด audit (`failed`) แล้ว — ดูย้อนหลังได้ว่าเคยลองแล้วติดอะไร (actor `lazada_oauth`)
-  - ⚠️ ระบบรองรับแอป Lazada ได้ตัวเดียว (env `LAZADA_APP_KEY`/`SECRET`) — ถ้า Lazada ไม่ให้แอป IG เชื่อมร้าน Louis Montini ต้องทำ "กุญแจแอปแยกตามแบรนด์" ก่อน
+
+## แอป Lazada ต่อแบรนด์ (2026-11-13)
+
+เหตุ: แอปกลาง "IG International ERP" เป็น **Seller In-house APP** → Lazada รับเฉพาะร้านที่อยู่ใน whitelist ของแอป (เจอจริง: Louis Montini ล็อกอินถูกบัญชีแล้วได้ "The specified seller short code is invalid. Please add the seller code into your app's whitelist on the App Management -> Auth Management page") → Louis Montini สมัครแอปของตัวเอง
+
+- **เก็บ:** `platform_credentials.app_key` / `app_secret` (migration `202612070100` · secret เข้ารหัส secret-box · ตาราง RLS ไม่มี policy = service role อ่านได้อย่างเดียว) · แยกจาก `meta` เพราะ meta ถูกเขียนทับทั้งก้อนตอนเชื่อม/ต่ออายุ/ตัดการเชื่อมต่อ
+- **ว่าง = แอปกลาง (env)** ทำงานแบบเดิมทุกอย่าง (IG ไม่ต้องทำอะไร)
+- **ใช้แอปไหน:** `lib/lazada.ts` — `LazApp {key, secret}` · `LazGateway = string | LazTarget` (ฟังก์ชันเรียก Lazada ทุกตัวรับ gateway แบบนี้) · `lazTarget(url, app)` · `LazTarget` เก็บแอปใน private field + `toJSON`/`toString` คืนแค่ URL (กัน secret หลุดทาง JSON) · `lazAuthUrl` / `lazExchangeToken` / `lazRefreshToken` รับ `app`
+- **shared:** `loadLazApp` · `loadLazConn` คืน `app` ด้วย · `lazConnTarget(conn)` · `lazTokenOrReason`/`ensureLazToken`/`loadLazListingLive` คืน gateway ที่พกแอปแล้ว → route เดิมไม่ต้องแก้ · ถอดรหัส secret ไม่ได้ = `LAZ_APP_BROKEN` (ไม่แอบใช้แอปกลางแทน)
+- **จุดที่ใช้แอปของแบรนด์:** oauth/start (client_id) · callback (แลก token) · ต่ออายุ (cron + ตอนเรียก API) · sync-orders · ทุก route ที่ผ่าน `lazTokenOrReason`
+- **ตั้งค่า:** หน้า `/admin/platform-accounts` › Lazada › กล่อง "แอป Lazada ที่ใช้" (`app/admin/platform-accounts/lazada-app-panel.tsx`) → `PUT/DELETE /api/lazada/app` (สิทธิ์ `products.platforms.manage_accounts` · audit `own_app` set/cleared + changes ไม่จดค่า secret) · `/api/lazada/status` คืน `own_app {app_key, secret_ok}` / `default_app_ready` / `app_locked` (ไม่คืน secret)
+- **กติกา (pure · test):** `planLazAppSave` / `planLazAppClear` / `lazAppLocked` — เชื่อมร้านอยู่ (stage=connected แม้หมดอายุ) = เปลี่ยน/ล้างแอปไม่ได้ (token ผูกกับแอป) แก้ได้แค่ secret ของแอปเดิม · App Secret ว่าง = ใช้ของเดิม (App Key เดิมเท่านั้น)
+- **ขั้นตอนเจ้าของ (แอปของแบรนด์):** open.lazada.com (บัญชีนักพัฒนาของแบรนด์) › Apply หมวด Seller In-house APP → รออนุมัติ → Create App · Callback `https://erp-platform-playground.vercel.app/api/lazada/callback` → คัดลอก App Key + App Secret ใส่ในกล่องด้านบน (ห้ามส่งทางแชท) → กด เชื่อมต่อ Lazada → ล็อกอินบัญชีผู้ขายของแบรนด์
 
 ## ดึงสินค้าบนร้าน (ขั้น 1)
 

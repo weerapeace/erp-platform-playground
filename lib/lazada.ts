@@ -10,9 +10,33 @@ import { lazSkuLabel, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 
 export const LAZADA_AUTH_BASE = "https://auth.lazada.com/rest";
 
-const APP_KEY = () => (process.env.LAZADA_APP_KEY ?? "").trim();
-const APP_SECRET = () => (process.env.LAZADA_APP_SECRET ?? "").trim();
-export function lazConfigured(): boolean { return !!(APP_KEY() && APP_SECRET()); }
+// ---- แอป Lazada (App Key + App Secret) ----
+// แอปกลาง = env LAZADA_APP_KEY/SECRET (แอป "IG International ERP") · แบรนด์ที่สมัครแอปของตัวเองได้ (เช่น Louis Montini)
+// เก็บแยกต่อแบรนด์ใน platform_credentials.app_key / app_secret (เข้ารหัส) → ทุกคำขอของแบรนด์นั้นเซ็นด้วยแอปของแบรนด์
+export type LazApp = { key: string; secret: string };
+const envApp = (): LazApp => ({ key: (process.env.LAZADA_APP_KEY ?? "").trim(), secret: (process.env.LAZADA_APP_SECRET ?? "").trim() });
+/** มีแอปพร้อมใช้ไหม — ส่ง app ของแบรนด์มา = เช็กแอปนั้น · ไม่ส่ง/null = เช็กแอปกลาง */
+export function lazConfigured(app?: LazApp | null): boolean { const a = app ?? envApp(); return !!(a.key && a.secret); }
+
+/**
+ * ปลายทางเรียก API ของร้าน 1 ร้าน = gateway ของประเทศ + แอปที่ใช้เซ็น
+ * เก็บแอปไว้ใน private field + toJSON/toString คืนแค่ URL → เผลอส่งออกทาง JSON / ต่อสตริง ก็ไม่หลุด App Secret
+ */
+export class LazTarget {
+  readonly url: string;
+  readonly #app: LazApp;
+  constructor(url: string, app: LazApp) { this.url = url; this.#app = app; }
+  get app(): LazApp { return this.#app; }
+  toJSON(): string { return this.url; }
+  toString(): string { return this.url; }
+}
+/** ที่ฟังก์ชันเรียก Lazada รับ: URL เฉย ๆ (ใช้แอปกลาง) หรือ LazTarget (แอปของแบรนด์) */
+export type LazGateway = string | LazTarget;
+/** สร้างปลายทาง — แบรนด์ไม่มีแอปของตัวเอง (app = null) = URL เฉย ๆ เหมือนเดิมทุกอย่าง */
+export function lazTarget(url: string, app: LazApp | null | undefined): LazGateway { return app ? new LazTarget(url, app) : url; }
+function resolveTarget(g: LazGateway): { url: string; app: LazApp } {
+  return typeof g === "string" ? { url: g, app: envApp() } : { url: g.url, app: g.app };
+}
 
 // gateway ตามประเทศ (ไทยเป็นค่าเริ่มต้น)
 export function lazGateway(country?: string): string {
@@ -34,8 +58,8 @@ async function sign(apiPath: string, params: Record<string, string>, appSecret: 
 }
 
 // URL หน้าอนุญาต (ให้ร้าน Lazada กดยอมรับ)
-export function lazAuthUrl(redirectUri: string, state: string): string {
-  const q = new URLSearchParams({ response_type: "code", force_auth: "true", redirect_uri: redirectUri, client_id: APP_KEY(), state });
+export function lazAuthUrl(redirectUri: string, state: string, app?: LazApp | null): string {
+  const q = new URLSearchParams({ response_type: "code", force_auth: "true", redirect_uri: redirectUri, client_id: (app ?? envApp()).key, state });
   return `https://auth.lazada.com/oauth/authorize?${q.toString()}`;
 }
 
@@ -45,16 +69,19 @@ export type LazToken = {
 };
 
 // เรียก auth endpoint (token/create, token/refresh) — เซ็นด้วย app_secret
-async function authCall(apiPath: string, extra: Record<string, string>): Promise<LazToken> {
-  const params: Record<string, string> = { app_key: APP_KEY(), sign_method: "sha256", timestamp: String(Date.now()), ...extra };
-  params.sign = await sign(apiPath, params, APP_SECRET());
+async function authCall(apiPath: string, extra: Record<string, string>, appIn?: LazApp | null): Promise<LazToken> {
+  const app = appIn ?? envApp();
+  const params: Record<string, string> = { app_key: app.key, sign_method: "sha256", timestamp: String(Date.now()), ...extra };
+  params.sign = await sign(apiPath, params, app.secret);
   const r = await fetch(`${LAZADA_AUTH_BASE}${apiPath}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params) });
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
   if (String(j.code ?? "0") !== "0") throw new Error(String(j.message || j.code || `HTTP ${r.status}`));
   return j as unknown as LazToken;
 }
-export const lazExchangeToken = (code: string) => authCall("/auth/token/create", { code });
-export const lazRefreshToken = (refreshToken: string) => authCall("/auth/token/refresh", { refresh_token: refreshToken });
+/** แลก code → token · app = แอปของแบรนด์ (ต้องเป็นแอปเดียวกับที่ใช้เปิดหน้าอนุญาต) · ไม่ส่ง = แอปกลาง */
+export const lazExchangeToken = (code: string, app?: LazApp | null) => authCall("/auth/token/create", { code }, app);
+/** ต่ออายุ — ต้องใช้แอปเดียวกับตอนเชื่อม (token ผูกกับแอป) */
+export const lazRefreshToken = (refreshToken: string, app?: LazApp | null) => authCall("/auth/token/refresh", { refresh_token: refreshToken }, app);
 
 /** Lazada ตอบ error — message เหมือนเดิม (ผู้เรียกเก่าใช้ได้) + code ไว้แปลเป็นภาษาคน (lazErrorText) */
 export class LazApiError extends Error {
@@ -63,10 +90,11 @@ export class LazApiError extends Error {
 }
 
 // เรียก API ทั่วไป (GET, เซ็นคำขอ + แนบ access_token)
-export async function lazApiGet(gateway: string, apiPath: string, accessToken: string, biz: Record<string, string> = {}): Promise<Record<string, unknown>> {
-  const params: Record<string, string> = { app_key: APP_KEY(), access_token: accessToken, sign_method: "sha256", timestamp: String(Date.now()), ...biz };
-  params.sign = await sign(apiPath, params, APP_SECRET());
-  const r = await fetch(`${gateway}${apiPath}?${new URLSearchParams(params).toString()}`);
+export async function lazApiGet(gateway: LazGateway, apiPath: string, accessToken: string, biz: Record<string, string> = {}): Promise<Record<string, unknown>> {
+  const { url, app } = resolveTarget(gateway);
+  const params: Record<string, string> = { app_key: app.key, access_token: accessToken, sign_method: "sha256", timestamp: String(Date.now()), ...biz };
+  params.sign = await sign(apiPath, params, app.secret);
+  const r = await fetch(`${url}${apiPath}?${new URLSearchParams(params).toString()}`);
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
   const code = String(j.code ?? "0");
   if (code !== "0") throw new LazApiError(String(j.message || j.code || `HTTP ${r.status}`), code);
@@ -78,10 +106,11 @@ export async function lazApiGet(gateway: string, apiPath: string, accessToken: s
  * ลายเซ็นคิดจากทุกพารามิเตอร์ (ระบบ + งาน) · error = LazApiError (รวมรายละเอียดรายช่องจาก detail[] ถ้ามี)
  * ⚠️ แก้ของบนร้านจริง — เรียกจาก route ที่ผ่านสิทธิ์ products.platforms.publish + มี audit เท่านั้น
  */
-export async function lazApiPost(gateway: string, apiPath: string, accessToken: string, biz: Record<string, string>): Promise<Record<string, unknown>> {
-  const sys: Record<string, string> = { app_key: APP_KEY(), access_token: accessToken, sign_method: "sha256", timestamp: String(Date.now()) };
-  const s = await sign(apiPath, { ...sys, ...biz }, APP_SECRET());
-  const r = await fetch(`${gateway}${apiPath}?${new URLSearchParams({ ...sys, sign: s }).toString()}`, {
+export async function lazApiPost(gateway: LazGateway, apiPath: string, accessToken: string, biz: Record<string, string>): Promise<Record<string, unknown>> {
+  const { url, app } = resolveTarget(gateway);
+  const sys: Record<string, string> = { app_key: app.key, access_token: accessToken, sign_method: "sha256", timestamp: String(Date.now()) };
+  const s = await sign(apiPath, { ...sys, ...biz }, app.secret);
+  const r = await fetch(`${url}${apiPath}?${new URLSearchParams({ ...sys, sign: s }).toString()}`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" }, body: new URLSearchParams(biz),
   });
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
@@ -115,7 +144,7 @@ export function lazErrorText(e: unknown): string {
 }
 
 // ดึงออเดอร์ (สร้างหลังเวลา createdAfter — ISO8601 มี timezone เช่น 2026-06-01T00:00:00+07:00)
-export async function lazGetOrders(gateway: string, accessToken: string, opts: { createdAfter: string; limit?: number; offset?: number }): Promise<{ orders: Record<string, unknown>[]; total: number }> {
+export async function lazGetOrders(gateway: LazGateway, accessToken: string, opts: { createdAfter: string; limit?: number; offset?: number }): Promise<{ orders: Record<string, unknown>[]; total: number }> {
   const j = await lazApiGet(gateway, "/orders/get", accessToken, {
     created_after: opts.createdAfter, sort_by: "created_at", sort_direction: "DESC",
     limit: String(opts.limit ?? 50), offset: String(opts.offset ?? 0),
@@ -125,7 +154,7 @@ export async function lazGetOrders(gateway: string, accessToken: string, opts: {
 }
 
 // ดึงรายการสินค้าของหลายออเดอร์ทีเดียว → map order_id → items[]
-export async function lazGetOrderItems(gateway: string, accessToken: string, orderIds: (string | number)[]): Promise<Record<string, Record<string, unknown>[]>> {
+export async function lazGetOrderItems(gateway: LazGateway, accessToken: string, orderIds: (string | number)[]): Promise<Record<string, Record<string, unknown>[]>> {
   if (orderIds.length === 0) return {};
   const j = await lazApiGet(gateway, "/orders/items/get", accessToken, { order_ids: JSON.stringify(orderIds.map((x) => Number(x))) });
   const rows = (j.data as { order_id: string | number; order_items?: Record<string, unknown>[] }[]) ?? [];
@@ -137,7 +166,7 @@ export async function lazGetOrderItems(gateway: string, accessToken: string, ord
 // ---- หมวดหมู่ + คุณสมบัติสินค้า (ใช้ทำระบบลงสินค้า) ----
 export type LazCategoryNode = { category_id: number | string; name: string; leaf: boolean; children?: LazCategoryNode[] };
 // ต้นไม้หมวดหมู่ทั้งหมด (คำเดียวได้ทั้งต้น)
-export async function lazGetCategoryTree(gateway: string, accessToken: string): Promise<LazCategoryNode[]> {
+export async function lazGetCategoryTree(gateway: LazGateway, accessToken: string): Promise<LazCategoryNode[]> {
   const j = await lazApiGet(gateway, "/category/tree/get", accessToken, {});
   return (j.data as LazCategoryNode[]) ?? [];
 }
@@ -163,7 +192,7 @@ export function lazAttributeFromApi(a: Record<string, unknown>): LazAttribute {
   };
 }
 // คุณสมบัติที่หมวดนี้ต้องการ (name/label/บังคับ/ชนิด input/ตัวเลือก + en_name/KEY/ระดับ)
-export async function lazGetCategoryAttributes(gateway: string, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
+export async function lazGetCategoryAttributes(gateway: LazGateway, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
   const j = await lazApiGet(gateway, "/category/attributes/get", accessToken, { primary_category_id: String(categoryId) });
   const rows = (j.data as Record<string, unknown>[]) ?? [];
   return rows.map(lazAttributeFromApi);
@@ -218,9 +247,46 @@ export function lazShopConflict(rows: LazCredRow[], brandId: string, shop: LazSh
   return null;
 }
 
+// ---- ตั้ง/ล้าง "แอป Lazada ของแบรนด์" (กติกา pure · มี test · route /api/lazada/app ใช้) ----
+/** เชื่อมร้านค้างอยู่ (stage = connected แม้หมดอายุ) → ห้ามเปลี่ยน/ล้างแอป เพราะ token ผูกกับแอปเดิม (ต่ออายุจะพัง) */
+export function lazAppLocked(meta: { stage?: string } | null | undefined): boolean { return meta?.stage === "connected"; }
+
+const LOCKED_MSG = "แบรนด์นี้เชื่อมร้าน Lazada อยู่ — กด ตัดการเชื่อมต่อ ก่อน แล้วค่อยเปลี่ยนแอป (กุญแจร้านผูกกับแอปเดิม)";
+export type LazAppCurrent = { app_key: string; has_secret: boolean } | null;
+export type LazAppSavePlan =
+  | { ok: true; app_key: string; app_secret: string | null; unchanged: boolean }   // app_secret null = ใช้ secret เดิม
+  | { ok: false; error: string };
+
+/**
+ * ตรวจค่าที่กรอก (App Key + App Secret) ก่อนบันทึก
+ * - เชื่อมร้านอยู่: แก้ได้แค่ App Secret ของแอปเดิม (กรณีกุญแจอ่านไม่ได้) — เปลี่ยน App Key ไม่ได้
+ * - App Secret ว่าง = ใช้ของเดิม (เฉพาะ App Key เดิมที่มี secret อยู่แล้ว)
+ */
+export function planLazAppSave(input: { app_key?: unknown; app_secret?: unknown }, current: LazAppCurrent, locked: boolean): LazAppSavePlan {
+  const key = String(input.app_key ?? "").trim();
+  const secret = String(input.app_secret ?? "").trim();
+  if (!key) return { ok: false, error: "กรอก App Key ก่อน (ตัวเลขในหน้า App Management ของ Lazada)" };
+  if (!/^[0-9A-Za-z_-]{3,64}$/.test(key)) return { ok: false, error: "App Key ไม่ถูกต้อง — คัดลอกจากช่อง App Key ในหน้า App Management (ไม่มีเว้นวรรค)" };
+  const sameKey = !!current && current.app_key === key;
+  if (locked && !sameKey) return { ok: false, error: LOCKED_MSG };
+  if (secret) {
+    if (/\s/.test(secret) || secret.length < 8 || secret.length > 256) return { ok: false, error: "App Secret ไม่ถูกต้อง — คัดลอกจากหน้า App Management ทั้งช่อง (ไม่มีเว้นวรรค)" };
+    return { ok: true, app_key: key, app_secret: secret, unchanged: false };
+  }
+  if (sameKey && current!.has_secret) return { ok: true, app_key: key, app_secret: null, unchanged: true };
+  return { ok: false, error: "กรอก App Secret ด้วย (กดดูในหน้า App Management ของ Lazada)" };
+}
+
+/** ล้างแอปของแบรนด์ (กลับไปใช้แอปกลาง) */
+export function planLazAppClear(current: LazAppCurrent, locked: boolean): { ok: true } | { ok: false; error: string } {
+  if (!current) return { ok: false, error: "แบรนด์นี้ใช้แอปกลางอยู่แล้ว" };
+  if (locked) return { ok: false, error: LOCKED_MSG };
+  return { ok: true };
+}
+
 // ---- สินค้าบนร้าน (อ่านอย่างเดียว · ดึงเข้าหน้า "สินค้าบนแพลตฟอร์ม") ----
 // GET /products/get · filter=all (ไม่รวมที่ลบแล้ว) · ได้ครั้งละไม่เกิน 50 ตัว
-export async function lazGetProducts(gateway: string, accessToken: string, opts: { offset?: number; limit?: number; filter?: string } = {}): Promise<{ products: Record<string, unknown>[]; total: number }> {
+export async function lazGetProducts(gateway: LazGateway, accessToken: string, opts: { offset?: number; limit?: number; filter?: string } = {}): Promise<{ products: Record<string, unknown>[]; total: number }> {
   const j = await lazApiGet(gateway, "/products/get", accessToken, {
     filter: opts.filter ?? "all", offset: String(opts.offset ?? 0), limit: String(Math.min(50, opts.limit ?? 50)),
   });
@@ -229,25 +295,25 @@ export async function lazGetProducts(gateway: string, accessToken: string, opts:
 }
 
 /** สินค้า 1 ตัวแบบเต็ม (รูป · รายละเอียด HTML · ชื่อตัวเลือก · ราคาลด+วัน · ขนาดกล่อง) — GET /product/item/get · อ่านอย่างเดียว */
-export async function lazGetItem(gateway: string, accessToken: string, itemId: string): Promise<Record<string, unknown> | null> {
+export async function lazGetItem(gateway: LazGateway, accessToken: string, itemId: string): Promise<Record<string, unknown> | null> {
   const j = await lazApiGet(gateway, "/product/item/get", accessToken, { item_id: String(itemId) });
   const d = j.data;
   return d && typeof d === "object" && !Array.isArray(d) ? d as Record<string, unknown> : null;
 }
 
 /** แก้สินค้า (ชื่อ/รายละเอียด/จุดเด่น/สถานะ SKU) — payload จาก lazUpdateProductXml (lib/lazada-listing-edit) · แก้ร้านจริง */
-export async function lazUpdateProduct(gateway: string, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
+export async function lazUpdateProduct(gateway: LazGateway, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/update", accessToken, { payload: payloadXml });
 }
 /** ราคา/ราคาลด ≤ 50 SKU ต่อครั้ง (แนะนำ 20) — payload จาก lazPriceQuantityXml (ไม่มี Quantity) · แก้ร้านจริง */
-export async function lazUpdatePriceQuantity(gateway: string, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
+export async function lazUpdatePriceQuantity(gateway: LazGateway, accessToken: string, payloadXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/price_quantity/update", accessToken, { payload: payloadXml });
 }
 /**
  * ฝากรูปจากลิงก์ภายนอกให้ Lazada (/image/migrate) → ลิงก์ของ Lazada (slatic.net) · payload จาก lazMigrateImageXml
  * กติกา: jpg/png · ≤ 3MB · ด้านละ 330–5000px · Lazada ดาวน์โหลดภายใน 5 วิ · ไม่ได้ = LazApiError (เช่น 303 รูปเกินขนาด)
  */
-export async function lazMigrateImage(gateway: string, accessToken: string, payloadXml: string): Promise<string> {
+export async function lazMigrateImage(gateway: LazGateway, accessToken: string, payloadXml: string): Promise<string> {
   const j = await lazApiPost(gateway, "/image/migrate", accessToken, { payload: payloadXml });
   const d = (j.data && typeof j.data === "object" ? j.data : {}) as Record<string, unknown>;
   const img = (d.image && typeof d.image === "object" ? d.image : {}) as Record<string, unknown>;
@@ -256,14 +322,14 @@ export async function lazMigrateImage(gateway: string, accessToken: string, payl
   return url;
 }
 /** ปิดขาย ทั้งสินค้า/บาง SKU — body จาก lazDeactivateXml · แก้ร้านจริง */
-export async function lazDeactivateProduct(gateway: string, accessToken: string, bodyXml: string): Promise<Record<string, unknown>> {
+export async function lazDeactivateProduct(gateway: LazGateway, accessToken: string, bodyXml: string): Promise<Record<string, unknown>> {
   return lazApiPost(gateway, "/product/deactivate", accessToken, { apiRequestBody: bodyXml });
 }
 /**
  * สร้างสินค้าใหม่ (/product/create) — payload JSON จาก lib/lazada-create-plan (planLazadaCreate · รูปฝากเข้า Lazada แล้ว) · สร้างบนร้านจริง
  * คืน { item_id, sku_list[{ seller_sku, sku_id, shop_sku }] }
  */
-export async function lazCreateProduct(gateway: string, accessToken: string, payloadJson: string): Promise<{ itemId: string; skus: { seller_sku: string; sku_id: string }[]; raw: Record<string, unknown> }> {
+export async function lazCreateProduct(gateway: LazGateway, accessToken: string, payloadJson: string): Promise<{ itemId: string; skus: { seller_sku: string; sku_id: string }[]; raw: Record<string, unknown> }> {
   const j = await lazApiPost(gateway, "/product/create", accessToken, { payload: payloadJson });
   const d = (j.data && typeof j.data === "object" ? j.data : {}) as Record<string, unknown>;
   const itemId = s0(d.item_id);

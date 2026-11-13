@@ -18,6 +18,7 @@ import { capsOf } from "@/lib/social-publish/capabilities";
 import { BackButton } from "@/components/back-button";
 import { formatDateTime } from "@/lib/date";
 import { platformShopUrl } from "@/lib/platform-links";
+import { LazadaAppPanel } from "./lazada-app-panel";
 
 type Platform ={ id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null };
@@ -270,7 +271,8 @@ export default function PlatformAccountsPage() {
   const [pickPage, setPickPage] = useState("");   // เพจที่เลือก (กรณีมีหลายเพจ)
   // สถานะเชื่อมต่อ Lazada ต่อแบรนด์
   // health: expired = หมดอายุแล้วต้องเชื่อมใหม่ · expiring = เหลือ ≤ 7 วัน (ตัวต่ออายุอัตโนมัติรายวัน /api/cron/lazada-token)
-  type LazStatus = { connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_id: string | null; short_code: string | null; country: string | null; configured: boolean };
+  // own_app = แอป Lazada ที่แบรนด์สมัครเอง (null = แอปกลาง) · app_locked = เชื่อมร้านอยู่ เปลี่ยนแอปไม่ได้
+  type LazStatus = { connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_id: string | null; short_code: string | null; country: string | null; configured: boolean; own_app?: { app_key: string; secret_ok: boolean } | null; default_app_ready?: boolean; app_locked?: boolean };
   const [laz, setLaz] = useState<LazStatus>({ connected: false, seller_id: null, short_code: null, country: null, configured: true });
   const [lazSyncing, setLazSyncing] = useState(false);
   // สถานะเชื่อมต่อ TikTok Shop ต่อแบรนด์ (/api/tiktok-shop/status) — problem = ผลจากการกด "ตรวจการเชื่อมต่อ" (ลองกับ TikTok จริง)
@@ -608,7 +610,17 @@ export default function PlatformAccountsPage() {
       );
     }
     if (p.code === "lazada") {
-      if (!laz.configured) return <Note>ยังไม่ได้ตั้ง LAZADA_APP_KEY / LAZADA_APP_SECRET ในโฮสต์ (Vercel)</Note>;
+      // แอป Lazada ที่แบรนด์ใช้ (แอปกลาง / แอปของแบรนด์เอง) — แสดงทุกสถานะ
+      const appPanel = brandId && (canManage || laz.own_app) ? (
+        <LazadaAppPanel brandId={brandId} brandName={brand?.name ?? "แบรนด์นี้"} ownApp={laz.own_app ?? null} defaultReady={laz.default_app_ready !== false}
+          locked={!!laz.app_locked} canManage={canManage} onChanged={() => load(brandId)} say={say} />
+      ) : null;
+      if (!laz.configured) return (
+        <div className="space-y-3">
+          <Note>{laz.own_app ? "อ่าน App Secret ของแอปแบรนด์นี้ไม่ได้ — กด แก้ไข ด้านล่างแล้วกรอก App Secret ใหม่" : "ยังไม่ได้ตั้ง LAZADA_APP_KEY / LAZADA_APP_SECRET ในโฮสต์ (Vercel) — หรือใส่กุญแจแอปของแบรนด์เองด้านล่าง"}</Note>
+          {appPanel}
+        </div>
+      );
       if (laz.connected) return (
         <div className="space-y-3">
           <StatusBar tone={laz.health === "expiring" ? "warn" : "ok"} actions={canManage && <><button onClick={connectLaz} className="text-xs text-slate-600 hover:underline">เชื่อมใหม่</button><button onClick={() => setConfirmDisc("lazada")} className={LINK_DANGER}>ตัดการเชื่อมต่อ</button></>}>
@@ -616,6 +628,7 @@ export default function PlatformAccountsPage() {
             {laz.health === "expiring" && <span className="text-amber-700"> · อีก {laz.days_left ?? 0} วันต้องกดเชื่อมใหม่ (Lazada ให้สิทธิ์ทีละ ~30 วัน)</span>}
           </StatusBar>
           {canManage && <button onClick={syncLazOrders} disabled={lazSyncing} className={BTN_LINE}><Icon name="download" />{lazSyncing ? "กำลังดึง..." : "ดึงออเดอร์ 30 วันล่าสุด"}</button>}
+          {appPanel}
         </div>
       );
       return (
@@ -627,6 +640,7 @@ export default function PlatformAccountsPage() {
               <span className="text-xs text-slate-500">เข้าสู่ระบบ Lazada Seller แล้วอนุญาต → ดึงออเดอร์/สินค้าเข้าระบบได้</span>
             </div>
           ) : <p className="text-sm text-slate-500">ยังไม่ได้เชื่อมต่อ</p>}
+          {appPanel}
         </div>
       );
     }

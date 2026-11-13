@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { lazExchangeToken, lazGateway, lazShopConflict } from "@/lib/lazada";
-import { baseUrl, parseState, getPlatformId, saveLazConn, listLazCredRows, lazBrandName, type LazConnMeta } from "../shared";
+import { baseUrl, parseState, getPlatformId, saveLazConn, listLazCredRows, lazBrandName, loadLazApp, LAZ_APP_BROKEN, type LazConnMeta } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,7 +31,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const lazId = await getPlatformId(admin, "lazada");
     if (!lazId) return err("ไม่พบแพลตฟอร์ม lazada ในระบบ", brandId);
-    const tok = await lazExchangeToken(code);
+    // แอปเดียวกับที่ใช้เปิดหน้าอนุญาต (oauth/start) — แบรนด์มีแอปของตัวเอง = ใช้แอปนั้น · ไม่มี = แอปกลาง
+    const app = await loadLazApp(admin, brandId, lazId);
+    if (app && !app.secret) return err(LAZ_APP_BROKEN, brandId);
+    const tok = await lazExchangeToken(code, app);
     const info = tok.country_user_info?.[0];
     const shop = { seller_id: info?.seller_id ?? null, short_code: info?.short_code ?? null };
 
@@ -58,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       connected_at: new Date().toISOString(),
     };
     await saveLazConn(admin, brandId, lazId, tok.access_token, tok.refresh_token, meta, null);
-    await audit({ seller_id: info?.seller_id ?? null, short_code: info?.short_code ?? null });
+    await audit({ seller_id: info?.seller_id ?? null, short_code: info?.short_code ?? null, own_app_key: app?.key ?? null });
     return done(`laz_connected=1&brand=${encodeURIComponent(brandId)}`);
   } catch (e) {
     const msg = (e as Error).message;

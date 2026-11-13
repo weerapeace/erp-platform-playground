@@ -9,8 +9,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lazGetOrders, lazGetOrderItems, lazRefreshToken, lazGateway } from "@/lib/lazada";
-import { getPlatformId, loadLazConn, saveLazConn } from "../shared";
+import { lazGetOrders, lazGetOrderItems, lazRefreshToken } from "@/lib/lazada";
+import { getPlatformId, loadLazConn, saveLazConn, lazConnTarget, LAZ_APP_BROKEN } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,11 +49,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ต่ออายุ token ถ้าใกล้หมด (< 60 วินาที)
+  if (conn.app && !conn.app.secret) return NextResponse.json({ error: LAZ_APP_BROKEN }, { status: 400 });
   let accessToken = conn.accessToken;
-  const gateway = conn.meta.gateway || lazGateway(conn.meta.country);
+  const gateway = lazConnTarget(conn);   // gateway ของประเทศ + แอปของแบรนด์ (ไม่มี = แอปกลาง)
   try {
     if ((conn.meta.expires_at ?? 0) < Date.now() + 60000 && conn.refreshToken) {
-      const t = await lazRefreshToken(conn.refreshToken);
+      const t = await lazRefreshToken(conn.refreshToken, conn.app);
       accessToken = t.access_token;
       await saveLazConn(admin, brandId, lazId, t.access_token, t.refresh_token, {
         ...conn.meta, expires_at: Date.now() + num(t.expires_in) * 1000, refresh_expires_at: Date.now() + num(t.refresh_expires_in) * 1000,

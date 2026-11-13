@@ -10,6 +10,7 @@
  *   - เหลือ ≤ 7 วัน → นับ expiring (หน้าตั้งค่า/หน้าสินค้าบนแพลตฟอร์มเตือนให้เชื่อมใหม่ก่อนหลุด)
  * + 2026-11-13: ต่ออายุกุญแจ Shopee ด้วย (ตัวต่ออายุของ Shopee อยู่ได้ 30 วันและใช้ได้ครั้งเดียว — ไม่มีใครต่อ = ร้านหลุด)
  *   รวมไว้ที่ตัวนี้ตัวเดียว (ออฟฟิศ AI โต๊ะเต็ม 20/20 · ไม่เพิ่มตัวตั้งเวลา) → app/api/shopee/shared.ts refreshAllShopee
+ * + 2026-11-13: Lazada ต่ออายุด้วยแอปของแต่ละแบรนด์ (แบรนด์ที่ใส่แอปของตัวเอง เช่น Louis Montini · ไม่ใส่ = แอปกลาง env)
  *
  * เรียกได้ 2 ทาง (ล้อ /api/cron/wo-due-soon):
  *   1. Vercel Cron (vercel.json) — ตรวจด้วย lib/cron-auth
@@ -47,10 +48,10 @@ async function run(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const actorName = cron ? "cron: lazada-token" : "manual: lazada-token";
 
-  // ── Lazada ──
+  // ── Lazada ── แอปกลางไม่ได้ตั้งก็ยังทำต่อ — แบรนด์ที่มีแอปของตัวเองต่ออายุได้ · ร้านที่ไม่มีแอปให้ใช้ = failed พร้อมเหตุผล
   const results: Result[] = [];
-  const lazNote = lazConfigured() ? null : "ยังไม่ได้ตั้ง LAZADA_APP_KEY/SECRET";
-  const lazId = lazNote ? null : await getPlatformId(admin, "lazada");
+  const lazNote = lazConfigured() ? null : "ยังไม่ได้ตั้ง LAZADA_APP_KEY/SECRET (แอปกลาง) — ต่ออายุได้เฉพาะแบรนด์ที่ใส่แอปของตัวเอง";
+  const lazId = await getPlatformId(admin, "lazada");
   if (lazId) {
     const { data: rows } = await admin.from("platform_credentials").select("brand_id").eq("platform_id", lazId);
     for (const r of (rows ?? []) as { brand_id: string }[]) {
@@ -58,9 +59,13 @@ async function run(request: NextRequest): Promise<NextResponse> {
       if (!conn || conn.meta.stage !== "connected") continue;
       const h = lazConnHealth(conn.meta);
       if (h.state === "expired" || !conn.refreshToken) { results.push({ brand_id: r.brand_id, result: "expired", days_left: 0 }); continue; }
+      if (!lazConfigured(conn.app)) {
+        results.push({ brand_id: r.brand_id, result: "failed", days_left: h.days_left, error: conn.app ? "อ่านกุญแจแอปของแบรนด์ไม่ได้ (กรอก App Secret ใหม่)" : "ยังไม่ได้ตั้ง LAZADA_APP_KEY/SECRET" });
+        continue;
+      }
       if (dry) { results.push({ brand_id: r.brand_id, result: "skipped", days_left: h.days_left }); continue; }
       try {
-        await refreshLazConn(admin, r.brand_id, lazId, { meta: conn.meta, refreshToken: conn.refreshToken }, null);
+        await refreshLazConn(admin, r.brand_id, lazId, { meta: conn.meta, refreshToken: conn.refreshToken, app: conn.app }, null);
         const after = await loadLazConn(admin, r.brand_id, lazId);
         results.push({ brand_id: r.brand_id, result: "refreshed", days_left: lazConnHealth(after?.meta).days_left });
       } catch (e) {

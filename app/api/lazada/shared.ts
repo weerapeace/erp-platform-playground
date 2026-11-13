@@ -1,7 +1,7 @@
 // ของใช้ร่วมของ Lazada API (แยกจาก route.ts — route ต้อง export แค่ handler)
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
-import { lazRefreshToken, lazGateway, lazConnHealth, lazErrorText, lazGetCategoryAttributes, lazGetItem, lazProductToCatalogItem, type LazAttribute, type LazCredRow } from "@/lib/lazada";
+import { lazRefreshToken, lazGateway, lazTarget, lazConnHealth, lazErrorText, lazGetCategoryAttributes, lazGetItem, lazProductToCatalogItem, type LazAttribute, type LazCredRow, type LazApp, type LazGateway } from "@/lib/lazada";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export function baseUrl(): string {
@@ -32,15 +32,33 @@ export type LazConnMeta = {
   expires_at?: number; refresh_expires_at?: number; connected_at?: string;
 };
 
-// อ่าน connection (แบรนด์ × lazada) → meta + access token (ถอดรหัส) + refresh token (ถอดรหัส)
-export async function loadLazConn(admin: SupabaseClient, brandId: string, platformId: string): Promise<{ meta: LazConnMeta; accessToken: string | null; refreshToken: string | null } | null> {
-  const { data } = await admin.from("platform_credentials").select("api_key, meta").eq("brand_id", brandId).eq("platform_id", platformId).maybeSingle();
+// แอป Lazada ของแบรนด์ (คอลัมน์ app_key / app_secret · secret เข้ารหัส) → LazApp · ไม่ได้ตั้ง = null (ใช้แอปกลาง)
+// ถอดรหัส secret ไม่ได้ = คืน secret ว่าง (lazConfigured(app) = false → บอกให้กรอกใหม่ · ไม่แอบไปใช้แอปกลางแทน)
+async function appFromRow(row: { app_key?: string | null; app_secret?: string | null } | null): Promise<LazApp | null> {
+  const key = String(row?.app_key ?? "").trim();
+  if (!key) return null;
+  const secret = row?.app_secret ? await decryptSecret(row.app_secret).catch(() => "") : "";
+  return { key, secret: secret.trim() };
+}
+export async function loadLazApp(admin: SupabaseClient, brandId: string, platformId: string): Promise<LazApp | null> {
+  const { data } = await admin.from("platform_credentials").select("app_key, app_secret").eq("brand_id", brandId).eq("platform_id", platformId).maybeSingle();
+  return appFromRow(data as { app_key: string | null; app_secret: string | null } | null);
+}
+
+// อ่าน connection (แบรนด์ × lazada) → meta + access token (ถอดรหัส) + refresh token (ถอดรหัส) + แอปของแบรนด์ (null = แอปกลาง)
+export async function loadLazConn(admin: SupabaseClient, brandId: string, platformId: string): Promise<{ meta: LazConnMeta; accessToken: string | null; refreshToken: string | null; app: LazApp | null } | null> {
+  const { data } = await admin.from("platform_credentials").select("api_key, meta, app_key, app_secret").eq("brand_id", brandId).eq("platform_id", platformId).maybeSingle();
   if (!data) return null;
-  const row = data as { api_key: string | null; meta: LazConnMeta | null };
+  const row = data as { api_key: string | null; meta: LazConnMeta | null; app_key: string | null; app_secret: string | null };
   const meta = row.meta ?? {};
   const accessToken = row.api_key ? await decryptSecret(row.api_key).catch(() => null) : null;
   const refreshToken = meta.refresh_token ? await decryptSecret(meta.refresh_token).catch(() => null) : null;
-  return { meta, accessToken, refreshToken };
+  return { meta, accessToken, refreshToken, app: await appFromRow(row) };
+}
+
+/** ปลายทางเรียก API ของร้านที่เชื่อมไว้ (gateway ของประเทศ + แอปของแบรนด์) */
+export function lazConnTarget(conn: { meta: LazConnMeta; app: LazApp | null }): LazGateway {
+  return lazTarget(conn.meta.gateway || lazGateway(conn.meta.country), conn.app);
 }
 
 /** การเชื่อม Lazada ของทุกแบรนด์ (brand_id + meta · ไม่อ่าน token) — ใช้ตรวจ "1 ร้าน = 1 แบรนด์" ตอน callback */
@@ -56,7 +74,7 @@ export async function lazBrandName(admin: SupabaseClient, brandId: string): Prom
   return (data as { name?: string } | null)?.name ?? null;
 }
 
-// เก็บ connection (token เข้ารหัสทั้งคู่)
+// เก็บ connection (token เข้ารหัสทั้งคู่) · ไม่แตะคอลัมน์ app_key/app_secret (upsert เขียนเฉพาะช่องที่ส่ง → แอปของแบรนด์อยู่ครบ)
 export async function saveLazConn(admin: SupabaseClient, brandId: string, platformId: string, accessToken: string | null, refreshToken: string | null, meta: LazConnMeta, userId: string | null): Promise<void> {
   const api_key = accessToken ? await encryptSecret(accessToken) : null;
   const metaOut: LazConnMeta = { ...meta };
@@ -68,8 +86,9 @@ export async function saveLazConn(admin: SupabaseClient, brandId: string, platfo
 }
 
 // ต่ออายุกุญแจ 1 ร้าน แล้วเก็บ (ใช้ทั้งตอนเรียก API และตัวต่ออายุอัตโนมัติรายวัน)
-export async function refreshLazConn(admin: SupabaseClient, brandId: string, platformId: string, conn: { meta: LazConnMeta; refreshToken: string }, userId: string | null): Promise<string> {
-  const t = await lazRefreshToken(conn.refreshToken);
+// conn.app = แอปของแบรนด์ (ต้องเป็นแอปเดียวกับตอนเชื่อม) · null = แอปกลาง
+export async function refreshLazConn(admin: SupabaseClient, brandId: string, platformId: string, conn: { meta: LazConnMeta; refreshToken: string; app: LazApp | null }, userId: string | null): Promise<string> {
+  const t = await lazRefreshToken(conn.refreshToken, conn.app);
   await saveLazConn(admin, brandId, platformId, t.access_token, t.refresh_token, {
     ...conn.meta, expires_at: Date.now() + (Number(t.expires_in) || 0) * 1000, refresh_expires_at: Date.now() + (Number(t.refresh_expires_in) || 0) * 1000,
   }, userId);
@@ -77,19 +96,21 @@ export async function refreshLazConn(admin: SupabaseClient, brandId: string, pla
 }
 
 export const LAZ_RECONNECT_HINT = "ไปที่ 🏪 จัดการร้าน/บัญชีแพลตฟอร์ม แล้วกด เชื่อมต่อ Lazada ใหม่";
+export const LAZ_APP_BROKEN = "อ่านกุญแจแอป Lazada ของแบรนด์นี้ไม่ได้ — ไปที่ จัดการร้าน/บัญชีแพลตฟอร์ม › Lazada › แอป Lazada ที่ใช้ แล้วกรอก App Secret ใหม่";
 
 /**
  * โหลด access token ที่ใช้งานได้ (ต่ออายุอัตโนมัติถ้าใกล้หมด) + gateway ของร้าน
  * ok=false → reason เป็นภาษาคน (ยังไม่เชื่อม / หมดอายุ / ต่ออายุไม่สำเร็จ) ใช้ตอบผู้ใช้ได้เลย
  */
-export async function lazTokenOrReason(admin: SupabaseClient, brandId: string, platformId: string, userId: string | null): Promise<{ ok: true; accessToken: string; gateway: string } | { ok: false; reason: string }> {
+export async function lazTokenOrReason(admin: SupabaseClient, brandId: string, platformId: string, userId: string | null): Promise<{ ok: true; accessToken: string; gateway: LazGateway } | { ok: false; reason: string }> {
   const conn = await loadLazConn(admin, brandId, platformId);
   if (!conn?.accessToken || conn.meta.stage !== "connected") return { ok: false, reason: `แบรนด์นี้ยังไม่ได้เชื่อมต่อ Lazada — ${LAZ_RECONNECT_HINT}` };
-  const gateway = conn.meta.gateway || lazGateway(conn.meta.country);
+  if (conn.app && !conn.app.secret) return { ok: false, reason: LAZ_APP_BROKEN };
+  const gateway = lazConnTarget(conn);
   if ((conn.meta.expires_at ?? 0) > Date.now() + 60000) return { ok: true, accessToken: conn.accessToken, gateway };
   if (lazConnHealth(conn.meta).state === "expired" || !conn.refreshToken) return { ok: false, reason: `การเชื่อมต่อ Lazada หมดอายุแล้ว — ${LAZ_RECONNECT_HINT}` };
   try {
-    const accessToken = await refreshLazConn(admin, brandId, platformId, { meta: conn.meta, refreshToken: conn.refreshToken }, userId);
+    const accessToken = await refreshLazConn(admin, brandId, platformId, { meta: conn.meta, refreshToken: conn.refreshToken, app: conn.app }, userId);
     return { ok: true, accessToken, gateway };
   } catch (e) {
     return { ok: false, reason: `ต่ออายุการเชื่อมต่อ Lazada ไม่สำเร็จ (${(e as Error).message}) — ${LAZ_RECONNECT_HINT}` };
@@ -113,7 +134,7 @@ export async function lazWithRetry<T>(fn: () => Promise<T>, label: string): Prom
 
 /** ช่องคุณสมบัติของหมวด (แคช 10 นาทีต่อเครื่อง — ตัวเลือกของหมวดไม่ค่อยเปลี่ยน · ลดการเรียกซ้ำตอนเปิดแท็บ+บันทึก) */
 const catAttrCache = new Map<string, { at: number; defs: LazAttribute[] }>();
-export async function lazCategoryAttrsCached(gateway: string, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
+export async function lazCategoryAttrsCached(gateway: LazGateway, accessToken: string, categoryId: string): Promise<LazAttribute[]> {
   const hit = catAttrCache.get(categoryId);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.defs;
   const defs = await lazWithRetry(() => lazGetCategoryAttributes(gateway, accessToken, categoryId), `ช่องของหมวด ${categoryId}`);
@@ -130,7 +151,7 @@ export type LazListingRow = { id: string; platform_id: string; brand_id: string 
  * ใช้ก่อนแก้ทุกครั้ง → เทียบกับของจริงล่าสุด (ไม่เชื่อสำเนาในระบบ) · ไม่ผ่าน = error ภาษาคน + HTTP status
  */
 export async function loadLazListingLive(admin: SupabaseClient, listingId: string, userId: string | null): Promise<
-  { ok: true; row: LazListingRow; item: Record<string, unknown>; itemId: string; gateway: string; accessToken: string } | { ok: false; error: string; status: number }
+  { ok: true; row: LazListingRow; item: Record<string, unknown>; itemId: string; gateway: LazGateway; accessToken: string } | { ok: false; error: string; status: number }
 > {
   const { data: l } = await admin.from("platform_catalog_listings")
     .select("id, platform_id, brand_id, external_product_id, title, price, status, raw").eq("id", listingId).maybeSingle();
@@ -172,7 +193,7 @@ export async function saveLazSlimCopy(admin: SupabaseClient, row: LazListingRow,
  * ดึงสินค้ากลับมาเช็กหลังส่งขึ้นร้าน — Lazada มักจำกัดความถี่ถ้าเรียกติดกัน (เจอจริง 2026-11-10: ปิด→เปิดห่างกัน 5 วิ แล้วดึงกลับไม่ได้)
  * → รอแล้วลองซ้ำ (0.8 วิ · 2 วิ) · ไม่ได้ทั้งหมด = null (route ต้องเตือนให้กด "ดึงตัวนี้จาก Lazada" ยืนยันเอง)
  */
-export async function refetchLazItem(gateway: string, accessToken: string, itemId: string): Promise<Record<string, unknown> | null> {
+export async function refetchLazItem(gateway: LazGateway, accessToken: string, itemId: string): Promise<Record<string, unknown> | null> {
   for (const wait of [800, 2000, 0]) {
     try { const it = await lazGetItem(gateway, accessToken, itemId); if (it) return it; }
     catch (e) { console.warn(`[lazada] ดึงสินค้า #${itemId} กลับมาเช็กไม่ได้: ${lazErrorText(e)} (${(e as Error).message})`); }
@@ -182,7 +203,7 @@ export async function refetchLazItem(gateway: string, accessToken: string, itemI
 }
 
 // แบบเดิม (คืน null แทนเหตุผล) — route เก่าใช้อยู่
-export async function ensureLazToken(admin: SupabaseClient, brandId: string, platformId: string, userId: string | null): Promise<{ accessToken: string; gateway: string } | null> {
+export async function ensureLazToken(admin: SupabaseClient, brandId: string, platformId: string, userId: string | null): Promise<{ accessToken: string; gateway: LazGateway } | null> {
   const r = await lazTokenOrReason(admin, brandId, platformId, userId);
   return r.ok ? { accessToken: r.accessToken, gateway: r.gateway } : null;
 }

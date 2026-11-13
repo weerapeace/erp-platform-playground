@@ -5,7 +5,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
-import { lazErrorText } from "@/lib/lazada";
+import { lazErrorText, type LazGateway } from "@/lib/lazada";
 import { lazAttrDefsWithExtras } from "@/lib/lazada-listing-edit";
 import { planLazadaCreate, lazCategoryIdOf, type LazCreatePreview, type LazCreateSku } from "@/lib/lazada-create-plan";
 import { getPlatformId, lazCategoryAttrsCached, lazTokenOrReason } from "../shared";
@@ -17,7 +17,7 @@ export type LazCreateLoad =
   | { ok: false; status: number; error: string }
   | {
       ok: true; preview: LazCreatePreview; payload: Record<string, unknown>; blockers: string[];
-      platformId: string; brandId: string | null; token: { accessToken: string; gateway: string } | null; draftExists: boolean;
+      platformId: string; brandId: string | null; token: { accessToken: string; gateway: LazGateway } | null; draftExists: boolean;
     };
 
 export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, userId: string | null): Promise<LazCreateLoad> {
@@ -46,7 +46,7 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
 
   // ช่องของหมวด — ดึงสดจาก Lazada (ต้องมีกุญแจของแบรนด์)
   const blockers: string[] = [];
-  let token: { accessToken: string; gateway: string } | null = null;
+  let token: { accessToken: string; gateway: LazGateway } | null = null;
   let attrDefs = null as ReturnType<typeof lazAttrDefsWithExtras> | null;
   if (!brandId) blockers.push("สินค้ายังไม่มีแบรนด์ (กุญแจ Lazada ผูกกับแบรนด์)");
   else {
