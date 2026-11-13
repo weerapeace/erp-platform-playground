@@ -126,8 +126,10 @@ function OwnAiTab({ onPlace }: { onPlace: (r: Extract<AiImport, { ok: true }>) =
   );
 }
 
-export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
+export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceOnly = false }: {
   open: boolean; onClose: () => void;
+  /** true = มีแค่แท็บ "รูปแพทเทิร์นกระดาษ (ลอกเส้น)" (ไม่มีทาง AI) — หน้าคิดผ้าก่อนซื้อใช้ */
+  traceOnly?: boolean;
   /** ชิ้นที่ลอกจากรูปแพทเทิร์น / ที่ AI ของผู้ใช้ร่างให้ → วางลงกระดาน · seams = ตะเข็บตั้งต้น (อ้างลำดับชิ้นในรายการ) */
   onPieces: (pieces: EditorPiece[], seams?: AiSeam[]) => void;
   /** วัสดุที่เลือกได้ในหน้านี้ — ชื่อวัสดุที่ AI ตอบมาตรงกับชื่อในรายการ = ใส่วัสดุให้ชิ้นเลย */
@@ -249,11 +251,11 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials }: {
         </div>
       )}>
       <div className="space-y-3 text-sm">
-        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group">
+        {!traceOnly && <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group">
           <button type="button" className={seg(tab === "trace")} onClick={() => setTab("trace")}>{t("รูปแพทเทิร์นกระดาษ (ลอกเส้น)", "Paper pattern photo (trace)")}</button>
           <button type="button" className={seg(tab === "own")} onClick={() => setTab("own")}>{t("ใช้ AI ของคุณเอง (ฟรี)", "Use your own AI (free)")}</button>
           <button type="button" className={seg(tab === "ai")} onClick={() => setTab("ai")}>{t("AI ในระบบ (เสียเงิน)", "Built-in AI (paid)")}</button>
-        </div>
+        </div>}
 
         {tab === "own" ? (
           <OwnAiTab onPlace={(r) => onPieces(r.pieces.map((p) => {

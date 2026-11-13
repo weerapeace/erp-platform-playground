@@ -8,9 +8,10 @@
  *   บันทึก/เปิดกลับ/แชร์ลิงก์: saved-calcs.tsx (ตาราง fabric_buy_calcs)
  *   รอบ 3 (2026-11-13): ปุ่มแก้สูตร BOM (BomEditorModal) · ป้าย คาดการณ์/วัดจริงแล้ว (cut-check.tsx · ตาราง fabric_cut_checks) · ราคาผ้าชัด ๆ
  *     · ใบพิมพ์วิธีตัด (lib/fabric-cut-sheet) · เลขชิ้นในผัง · ชิ้นทรงพิเศษ: วาดเอง (ShapeEditor) + วางตามรูปจริง (NestPanel → buyFromLength)
+ *   รอบ 4: ปรับทรงรายแถว (กดรูปทรงหลังชื่อ / ปุ่มปรับทรง) · ถ่ายรูปแบบกระดาษ (PhotoModal traceOnly → ตรวจในตัววาด) · กล่องวิธีใช้ · ชื่อชิ้นจาก BOM (piece_name)
  * ของกลาง: calcFabricBuy/compareWidths/piecesFromMoBlocks (lib/fabric-buy → packFabric) · FabricLayoutPreview · ComponentPicker · SkuPicker · MoMultiPickerModal · MiniTable · addToPrCart · renderFabricBuyHtml + printReportHtmlInNewWindow · useToast
  */
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -41,6 +42,23 @@ import { CutStatusBadge, MeasureModal, useCutChecks, type MeasureTarget } from "
 
 // ตัววาดชิ้นขนาดจริง (ของกลาง · หนัก) — โหลดเมื่อกดเปิดเท่านั้น
 const ShapeEditor = dynamic(() => import("@/components/pattern-sheet/shape-editor").then((m) => m.ShapeEditor), { ssr: false });
+// ลอกเส้นจากรูปแบบกระดาษ (ของสตูดิโอแพทเทิร์น · ในเครื่อง ไม่ใช้ AI) — โหลดเมื่อกด
+const PhotoModal = dynamic(() => import("@/components/pattern-studio/photo-modal").then((m) => m.PhotoModal), { ssr: false });
+
+/** ชิ้นสี่เหลี่ยมในตาราง → ชิ้นของตัววาด (ไว้ปรับทรงรายแถว) */
+const rectEditorPiece = (p: BuyPiece): EditorPiece => ({ shape: { k: "rect", x: 0, y: 0, w: p.width_cm || 10, h: p.length_cm || 10 }, count: Math.max(1, Math.round(p.per_unit || 1)), allow: 0, name: p.label || "" });
+
+/** รูปทรงเล็ก ๆ หลังชื่อชิ้น (เส้นรอบจริง หรือสี่เหลี่ยมตามสัดส่วน) */
+function ShapeThumb({ p }: { p: BuyPiece }) {
+  const w = p.width_cm > 0 ? p.width_cm : 1, h = p.length_cm > 0 ? p.length_cm : 1;
+  const k = Math.min(26 / w, 20 / h);
+  const pts = p.outline && p.outline.length >= 3 ? p.outline.map(([x, y]) => `${(x * k + 1).toFixed(1)},${(y * k + 1).toFixed(1)}`).join(" ") : null;
+  return (
+    <svg width={28} height={22} viewBox="0 0 28 22" className="shrink-0" aria-hidden>
+      {pts ? <polygon points={pts} fill="#ddd6fe" stroke="#7c3aed" strokeWidth={1} /> : <rect x={1} y={1} width={Math.max(1, w * k)} height={Math.max(1, h * k)} fill="#e0e7ff" stroke="#6366f1" strokeWidth={1} />}
+    </svg>
+  );
+}
 
 let _k = 0;
 const newPiece = (p?: Partial<BuyPiece>): BuyPiece => ({ label: "", width_cm: 0, length_cm: 0, per_unit: 1, no_rotate: false, ...p, total: undefined, key: `p${_k++}` });   // key ใหม่เสมอ (ก๊อปชิ้น = แถวใหม่) · ไม่พกยอดรวมจากโหมดตระกูล
@@ -69,6 +87,10 @@ export function FabricBuyCalc() {
   const [bomEdit, setBomEdit] = useState<string | null>(null);       // รหัสสินค้าที่เปิดตัวทำสูตรอยู่
   const [origin, setOrigin] = useState<Origin | null>(null);         // สินค้า + ผ้า ของชิ้นชุดนี้ (ไว้ผูกผลวัดจริง)
   const [shapeOpen, setShapeOpen] = useState(false);
+  const [shapeInit, setShapeInit] = useState<EditorPiece[] | null>(null);   // ชิ้นตั้งต้นของตัววาด (จากรูปถ่าย / แถวที่กดปรับทรง) · null = ชิ้นทรงพิเศษที่มีอยู่
+  const [rowEdit, setRowEdit] = useState<string | null>(null);             // แถวที่กำลังปรับทรง
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [help, setHelp] = useState(false);
   const [nestRes, setNestRes] = useState<NestResult | null>(null);
   const [useNest, setUseNest] = useState(true);
   const [measure, setMeasure] = useState<MeasureTarget | null>(null);
@@ -299,16 +321,46 @@ export function FabricBuyCalc() {
     if (shaped) toast.success("ชิ้นทรงพิเศษในใบวิธีตัดวาดเป็นกรอบสี่เหลี่ยม — ผังรูปจริงดูบนจอ");
   };
   // ── ชิ้นทรงพิเศษ (วาดเอง) → ชิ้นที่มีเส้นรอบรูป ──
-  const applyShapes = (r: ShapeEditorResult) => {
-    const made: BuyPiece[] = r.pieces.map((p) => {
-      const b = p.geo.cutBox;
-      const outline = p.geo.cut.map(([x, y]) => [Math.round((x - b.x) * 100) / 100, Math.round((y - b.y) * 100) / 100] as [number, number]);
-      return newPiece({ label: p.name || "ชิ้นทรงพิเศษ", width_cm: Math.round(b.w * 10) / 10, length_cm: Math.round(b.h * 10) / 10, per_unit: Math.max(1, Math.round(p.count || 1)), outline,
-        shape: { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, name: p.name, pid: p.pid } });
+  // ชิ้นจากตัววาด → แถวในตาราง (สี่เหลี่ยมล้วนไม่มีรู = แถวธรรมดา · ทรงอื่น = ทรงพิเศษมีเส้นรอบจริง)
+  const fromEditor = (p: ShapeEditorResult["pieces"][number], base?: BuyPiece): BuyPiece => {
+    const b = p.geo.cutBox;
+    const plainRect = p.shape.k === "rect" && !(p.holes?.length) && !(p.allow > 0);
+    const outline = plainRect ? null : p.geo.cut.map(([x, y]) => [Math.round((x - b.x) * 100) / 100, Math.round((y - b.y) * 100) / 100] as [number, number]);
+    return newPiece({
+      ...(base ? { no_rotate: base.no_rotate, match: base.match } : {}),
+      label: p.name || base?.label || (plainRect ? "" : "ชิ้นทรงพิเศษ"), width_cm: Math.round(b.w * 10) / 10, length_cm: Math.round(b.h * 10) / 10,
+      per_unit: Math.max(1, Math.round(p.count || 1)), outline,
+      shape: { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, allowEdges: p.allowEdges, name: p.name, pid: p.pid },
     });
-    setPieces((prev) => { const keep = prev.filter((x) => !x.outline && (x.width_cm > 0 || x.length_cm > 0 || x.label)); const n = [...keep, ...made]; return n.length ? n : [newPiece()]; });
-    setShapeOpen(false);
-    toast.success(`ได้ชิ้นทรงพิเศษ ${made.length} ชิ้น — กด “วางตามรูปจริง” ในผลคำนวณ`);
+  };
+  const closeEditor = () => { setShapeOpen(false); setShapeInit(null); setRowEdit(null); };
+  const applyShapes = (r: ShapeEditorResult) => {
+    if (rowEdit) {   // ปรับทรงแถวเดียว → แทนแถวนั้น (วาดเพิ่มหลายชิ้น = แทรกต่อท้ายแถว)
+      const key = rowEdit;
+      setPieces((prev) => {
+        const i = prev.findIndex((x) => x.key === key);
+        if (i < 0 || !r.pieces.length) return prev;
+        const made = r.pieces.map((p, j) => fromEditor(p, j === 0 ? prev[i] : undefined));
+        const n = [...prev]; n.splice(i, 1, ...made); return n;
+      });
+      closeEditor();
+      toast.success("ปรับทรงแล้ว");
+      return;
+    }
+    const made: BuyPiece[] = r.pieces.map((p) => fromEditor(p));
+    setPieces((prev) => { const keep = prev.filter((x) => !x.shape && (x.width_cm > 0 || x.length_cm > 0 || x.label)); const n = [...keep, ...made]; return n.length ? n : [newPiece()]; });
+    closeEditor();
+    toast.success(`ได้ชิ้นจากตัววาด ${made.length} ชิ้น${made.some((m) => m.outline) ? " — มีทรงพิเศษ กด “วางตามรูปจริง” ในผลคำนวณได้" : ""}`);
+  };
+  const openRowShape = (p: BuyPiece) => { setRowEdit(p.key); setShapeInit([p.shape ? (p.shape as EditorPiece) : rectEditorPiece(p)]); setShapeOpen(true); };
+  // รูปถ่ายแบบกระดาษ → ชิ้นที่ลอกได้ → เปิดตัววาดให้ตรวจขนาด/เกลาเส้นก่อนใช้
+  const fromPhoto = (ps: EditorPiece[]) => {
+    setPhotoOpen(false);
+    if (!ps.length) return;
+    setRowEdit(null);
+    setShapeInit([...pieces.filter((p) => p.shape).map((p) => p.shape as EditorPiece), ...ps]);
+    setShapeOpen(true);
+    toast.success(`ลอกได้ ${ps.length} ชิ้น — ตรวจขนาดกับของจริง เกลาเส้น ตั้งจำนวนต่อใบ แล้วกด “ใช้ขนาดนี้”`);
   };
 
   // ── บันทึก / เปิดกลับ ──
@@ -348,7 +400,15 @@ export function FabricBuyCalc() {
   // ── ตารางชิ้นตัด (แก้ในตาราง) ──
   const pieceCols: MiniColumn<BuyPiece>[] = [
     { key: "no", header: "เลข", width: "2.6rem", align: "center", cell: (p) => nums[p.key] != null ? <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-indigo-300 bg-white text-[12px] font-bold text-indigo-700">{nums[p.key]}</span> : <span className="text-slate-300">—</span> },
-    { key: "label", header: "ชื่อชิ้น", width: "1.6fr", cell: (p) => <span className="flex items-center gap-1">{p.outline && <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10.5px] text-violet-700" title="ชิ้นทรงพิเศษ (วาดไว้) — กว้าง×ยาว = กรอบของรูป">ทรงพิเศษ</span>}<input value={p.label} placeholder="เช่น ตัวหน้า" onChange={(e) => patch(p.key, { label: e.target.value })} className={textCls} /></span> },
+    { key: "label", header: "ชื่อชิ้น · รูปทรง", width: "2.2fr", cell: (p) => (
+      <span className="flex items-center gap-1.5">
+        {p.outline && <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10.5px] text-violet-700" title="ชิ้นทรงพิเศษ — กว้าง×ยาว = กรอบของรูป">ทรงพิเศษ</span>}
+        <input value={p.label} placeholder="เช่น ตัวหน้า" onChange={(e) => patch(p.key, { label: e.target.value })} className={textCls} />
+        <button type="button" onClick={() => openRowShape(p)} title="ปรับทรงชิ้นนี้ (โค้ง/ตัดมุม/วงกลม/เจาะรู)" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-violet-200 bg-white px-1.5 py-1 text-[11px] text-violet-700 hover:bg-violet-50">
+          <ShapeThumb p={p} /> ปรับทรง
+        </button>
+      </span>
+    ) },
     { key: "w", header: "กว้าง (ซม.)", width: "1fr", align: "right", cell: (p) => p.outline ? <span className="text-[12.5px] text-slate-600">{fmt(p.width_cm, 1)}</span> : <Num value={p.width_cm} onChange={(v) => patch(p.key, { width_cm: v })} /> },
     { key: "l", header: "ยาว (ซม.)", width: "1fr", align: "right", cell: (p) => p.outline ? <span className="text-[12.5px] text-slate-600">{fmt(p.length_cm, 1)}</span> : <Num value={p.length_cm} onChange={(v) => patch(p.key, { length_cm: v })} /> },
     { key: "n", header: "ชิ้น/ใบ", width: "0.8fr", align: "right", cell: (p) => <Num value={p.per_unit} onChange={(v) => patch(p.key, { per_unit: v })} /> },
@@ -433,9 +493,12 @@ export function FabricBuyCalc() {
           <button type="button" onClick={() => { setSrcPanel((s) => (s === "bom" ? "" : "bom")); setSrcFabrics(null); }} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "bom" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="measure" /> ดึงจากสูตร BOM</button>
           <button type="button" onClick={() => setMoPick(true)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "mo" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="repeat" /> ก๊อปจากใบสั่งผลิตเก่า</button>
           <button type="button" onClick={() => setShapeOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon name="edit" /> วาดชิ้นทรงพิเศษ{shaped ? ` (${pieces.filter((p) => p.outline).length})` : ""}</button>
+          <button type="button" onClick={() => setPhotoOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50" title="ถ่ายรูปแพทเทิร์นกระดาษ → ลอกเส้นรอบชิ้นให้ (ในเครื่อง ไม่ใช้ AI)"><Icon name="camera" /> ถ่ายรูปแบบกระดาษ</button>
+          <button type="button" onClick={() => setHelp((v) => !v)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${help ? "border-slate-400 bg-slate-100 text-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}><Icon name="help" /> วิธีใช้</button>
           {curBom?.product_sku && <button type="button" onClick={() => setBomEdit(curBom.product_sku)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 text-[12px] text-amber-800 hover:bg-amber-100" title="ขนาดชิ้นในสูตรไม่ตรง → แก้ที่สูตรเลย (บันทึกแล้วดึงชิ้นใหม่ให้)"><Icon name="edit" /> แก้สูตร BOM นี้</button>}
           <span className="text-[12px] text-slate-400">หรือพิมพ์ขนาดชิ้นเองในตารางด้านล่าง</span>
         </div>
+        {help && <HowTo onClose={() => setHelp(false)} />}
         {srcPanel !== "" && (
           <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
             {srcPanel === "bom" && <>
@@ -577,11 +640,35 @@ export function FabricBuyCalc() {
       </>}
 
       {bomEdit && <BomEditorModal sku={bomEdit} onClose={(changed) => void afterBomEdit(changed)} />}
-      {shapeOpen && <ShapeEditor open onClose={() => setShapeOpen(false)} onSave={applyShapes} title="วาดชิ้นทรงพิเศษ (ขนาดจริง ซม.)"
-        initial={pieces.filter((p) => p.shape).map((p) => p.shape as EditorPiece)} />}
+      {shapeOpen && <ShapeEditor open onClose={closeEditor} onSave={applyShapes} title={rowEdit ? "ปรับทรงชิ้นนี้ (ขนาดจริง ซม.)" : "วาดชิ้นทรงพิเศษ (ขนาดจริง ซม.)"}
+        initial={shapeInit ?? pieces.filter((p) => p.shape).map((p) => p.shape as EditorPiece)} />}
+      {photoOpen && <PhotoModal open traceOnly onClose={() => setPhotoOpen(false)} onPieces={(ps) => fromPhoto(ps)} onDraft={() => { /* ไม่ใช้ทาง AI ในหน้านี้ */ }} />}
       <MeasureModal target={measure} current={pairKey ? checks[pairKey] ?? null : null} onClose={() => setMeasure(null)} onSaved={reloadChecks} />
       <MoMultiPickerModal open={moPick} onClose={() => setMoPick(false)} single scope="history" title="เลือกใบสั่งผลิตเก่าที่จะก๊อปชิ้นตัด" confirmLabel="ใช้ใบนี้"
         onConfirm={(rows) => { setMoPick(false); if (rows[0]) void loadMo(rows[0].mo_no); }} />
+    </div>
+  );
+}
+
+/** วิธีใช้ส่วน "ชิ้นตัด" (เจ้าของขอ 2026-11-13 "ทำเลยมีวิธีใช้ด้วยนะ") */
+function HowTo({ onClose }: { onClose: () => void }) {
+  const Step = ({ n, t, children }: { n: number; t: string; children: ReactNode }) => (
+    <li className="flex gap-2"><span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">{n}</span><div><b className="text-slate-800">{t}</b><div className="text-slate-600">{children}</div></div></li>
+  );
+  return (
+    <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-[12.5px] leading-relaxed">
+      <div className="mb-2 flex items-center gap-2"><Icon name="guide" /><b className="text-slate-800">วิธีใส่ชิ้นตัด</b><button type="button" onClick={onClose} className="ml-auto text-[12px] text-slate-500 hover:underline">ปิด</button></div>
+      <ol className="grid gap-2.5 md:grid-cols-2">
+        <Step n={1} t="พิมพ์เอง">ใส่ชื่อชิ้น · กว้าง × ยาว (ซม.) · ชิ้นต่อใบ ในตาราง · กด “เพิ่มชิ้น” ได้เรื่อย ๆ · ก๊อปแถวด้วยปุ่มข้างหลัง</Step>
+        <Step n={2} t="ดึงจากสูตร BOM">เลือกสินค้า → เลือกผ้าในสูตร → ได้ชิ้นตัดพร้อมเลือกผ้าให้ · ขนาดไม่ตรง กด “แก้สูตร BOM นี้” แก้แล้วบันทึก ระบบดึงใหม่ให้ · ตั้ง “ชื่อชิ้น” ในสูตรได้ (ช่องใหม่) จะโชว์ในผังและใบวิธีตัด</Step>
+        <Step n={3} t="ก๊อปจากใบสั่งผลิตเก่า">เลือกใบที่เคยผลิต (รวมใบที่ปิดแล้ว) → เลือกผ้า → ได้ชิ้นต่อใบจากผังที่ระบบเคยวางไว้</Step>
+        <Step n={4} t="ปรับทรงรายแถว">กดปุ่ม “ปรับทรง” (รูปเล็กหลังชื่อ) → ตัววาดเปิดพร้อมชิ้นนั้น → ทำมุมโค้ง ตัดมุม เปลี่ยนเป็นวงกลม เจาะรู แก้จุดด้วยปากกา → “ใช้ขนาดนี้” · รูปเล็กหลังชื่อจะเปลี่ยนตามทรงจริง</Step>
+        <Step n={5} t="วาดชิ้นทรงพิเศษ">วาดชิ้นใหม่ทั้งหมด (สี่เหลี่ยม วงกลม ปากกาโค้ง วางจาก Illustrator) · ตั้งชื่อและจำนวนต่อใบในแผงด้านขวาของชิ้น</Step>
+        <Step n={6} t="ถ่ายรูปแบบกระดาษ">วางแพทเทิร์นกระดาษบน <b>พื้นสีตัดกัน</b> ถ่าย <b>ตรงจากด้านบน</b> ไม่มีเงาพาด · ใส่ A4 ไว้ในรูป → คลิก 4 มุม A4 แก้รูปเอียง (หรือบอกความกว้างจริงของชิ้นที่กว้างสุด) → ติ๊กชิ้นที่เอา → ระบบเปิดตัววาดให้ <b>ตรวจขนาด/เกลาเส้น/ตั้งเผื่อเย็บ</b> ก่อนใช้ · ลอกในเครื่อง ไม่ใช้ AI ไม่เสียเงิน</Step>
+        <Step n={7} t="ห้ามหมุน · ตรงลาย">ผ้าลาย/มีขน ติ๊ก “ห้ามหมุน” รายชิ้น · ผ้าที่ต้องตรงลาย ใส่ “ลายซ้ำ (ซม.)” แล้วติ๊ก “ตรงลาย” ที่ชิ้น</Step>
+        <Step n={8} t="วัดจริงแล้ว = พิสูจน์แล้ว">ตัดจริงแล้วกด “บันทึกผลวัดจริง” (ใส่ใบสั่งผลิต · ตัดกี่ใบ · ใช้ผ้าจริงเท่าไร) → ป้ายเปลี่ยนเป็นเขียว และใบวิธีตัดขึ้นตรา “พิสูจน์แล้ว”</Step>
+      </ol>
+      <p className="mt-2 text-[11.5px] text-slate-500">ชิ้นทรงพิเศษ: ผังด้านล่างวางเป็นกรอบสี่เหลี่ยม · กด “วางตามรูปจริง” ในผลคำนวณ ระบบใช้ตัวเลขรูปจริงเฉพาะตอนที่ประหยัดกว่า</p>
     </div>
   );
 }
