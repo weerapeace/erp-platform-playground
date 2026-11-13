@@ -20,6 +20,8 @@ export type BuyPiece = {
   length_cm: number;
   per_unit: number;      // ชิ้นต่อ 1 ใบ (ตัว)
   no_rotate?: boolean;   // ชิ้นนี้ห้ามหมุน (ตามลาย/เกรน)
+  match?: boolean;       // ต้องตรงลาย (ใช้กับ repeat_cm) → ความยาวปัดขึ้นเป็นรอบลาย + ห้ามหมุน
+  total?: number;        // จำนวนชิ้นทั้งงาน (ถ้าใส่ = ใช้แทน per_unit × qty — โหมดทั้งตระกูลที่แต่ละสีจำนวนไม่เท่ากัน)
 };
 
 export type BuyUnit = "yd" | "m";
@@ -36,7 +38,8 @@ export type BuyInput = {
   gap_cm?: number;                 // เว้นระหว่างชิ้น
   waste_pct?: number;              // เผื่อเสีย %
   shrink_pct?: number;             // ผ้าหดตัว %
-  unit?: BuyUnit;                  // ซื้อเป็น หลา/เมตร (ผ้าม้วน)
+  repeat_cm?: number;              // ลายซ้ำ (ซม. ตามความยาวผ้า) — ชิ้นที่ match ต้องยาวเป็นจำนวนเท่าของรอบลาย
+  unit?: BuyUnit;                 // ซื้อเป็น หลา/เมตร (ผ้าม้วน)
   round?: BuyRound;                // ปัดขึ้น
   roll_length?: number | null;     // 1 ม้วนยาวกี่ "หน่วยซื้อ"
   price?: number | null;           // ราคาต่อหน่วยซื้อ (บาท)
@@ -118,14 +121,21 @@ export function calcFabricBuy(i: BuyInput): BuyResult {
   if (usable <= 0) return empty("หักริมมากกว่าหน้ากว้างผ้า");
   if (sheet && sheetLen <= 0) return empty("ผ้าผืน: ใส่ความยาวต่อผืนก่อน");
 
-  // ชิ้นที่ต้องตัดทั้งหมด (ขยายตามหดตัว)
+  // ชิ้นที่ต้องตัดทั้งหมด (ขยายตามหดตัว · ชิ้นตรงลาย = ยาวปัดขึ้นเป็นรอบลาย + ห้ามหมุน)
+  const repeat = Math.max(0, Number(i.repeat_cm) || 0);
   const pieces: FabricPiece[] = i.pieces
-    .filter((p) => Number(p.width_cm) > 0 && Number(p.length_cm) > 0 && Number(p.per_unit) > 0)
-    .map((p) => ({
-      key: p.key, label: p.label || `${p.width_cm}×${p.length_cm}`,
-      width_cm: r2(Number(p.width_cm) * shrinkK), length_cm: r2(Number(p.length_cm) * shrinkK),
-      qty: Math.round(Number(p.per_unit) * qty), noRotate: !!p.no_rotate,
-    }));
+    .filter((p) => Number(p.width_cm) > 0 && Number(p.length_cm) > 0 && (Number(p.total) > 0 || Number(p.per_unit) > 0))
+    .map((p) => {
+      const matched = repeat > 0 && !!p.match;
+      const len = Number(p.length_cm) * shrinkK;
+      return {
+        key: p.key, label: p.label || `${p.width_cm}×${p.length_cm}`,
+        width_cm: r2(Number(p.width_cm) * shrinkK),
+        length_cm: matched ? Math.ceil(len / repeat - EPS) * repeat : r2(len),
+        qty: Math.round(Number(p.total) > 0 ? Number(p.total) : Number(p.per_unit) * qty),
+        noRotate: !!p.no_rotate || matched,
+      };
+    });
   if (pieces.length === 0) return empty("ใส่ชิ้นตัด (กว้าง × ยาว × ชิ้นต่อใบ) อย่างน้อย 1 ชิ้น");
 
   const res = packFabric({
@@ -185,4 +195,52 @@ export function compareWidths(base: BuyInput, options: WidthOption[]): WidthComp
   const min = Math.min(...ok.map(score));
   for (const r of ok) if (Math.abs(score(r) - min) < EPS) { r.best = true; break; }
   return rows;
+}
+
+// ── ทั้งตระกูล แบ่งตามสี (เฟส 2) ──────────────────────────────────────────────
+/** บรรทัดชิ้นตัด 1 บรรทัดของสูตร (BOM) ของสีหนึ่ง */
+export type FamilyLine = { component_sku: string; component_name: string | null; label: string; width_cm: number; length_cm: number; per_unit: number; no_rotate?: boolean };
+/** สี (SKU ลูก) 1 ตัว: จำนวนที่จะผลิต + ชิ้นตัดจากสูตรของสีนั้น */
+export type FamilyColor = { sku: string; color: string | null; qty: number; lines: FamilyLine[] };
+/** ผ้า 1 ตัวหลังรวมทุกสี — qty = จำนวนใบที่ใช้ผ้านี้ · pieces มี total (ชิ้นทั้งงาน) */
+export type FamilyFabric = { sku: string; name: string | null; qty: number; colors: string[]; pieces: BuyPiece[] };
+
+/**
+ * รวมชิ้นตัดของทุกสีตามผ้า — ผ้าตัวเดียวกันที่หลายสีใช้ (ซับใน/เทป) รวมยอดเป็นแถวเดียว · ผ้าคนละสีแยกแถว
+ * ชิ้นขนาด+ชื่อ+ห้ามหมุนเหมือนกัน รวมจำนวน · สีที่จำนวน 0 หรือไม่มีบรรทัด = ข้าม
+ */
+export function mergeFamilyFabrics(colors: FamilyColor[]): FamilyFabric[] {
+  const out = new Map<string, FamilyFabric & { _p: Map<string, BuyPiece> }>();
+  for (const c of colors) {
+    const q = Math.max(0, Math.floor(Number(c.qty) || 0));
+    if (q <= 0) continue;
+    const used = new Set<string>();
+    for (const l of c.lines) {
+      if (!(l.width_cm > 0 && l.length_cm > 0 && l.per_unit > 0)) continue;
+      const sku = l.component_sku || "(ไม่ระบุรหัส)";
+      const f = out.get(sku) ?? out.set(sku, { sku, name: l.component_name, qty: 0, colors: [], pieces: [], _p: new Map() }).get(sku)!;
+      if (!used.has(sku)) { used.add(sku); f.qty += q; f.colors.push(c.color || c.sku); }
+      const k = `${l.label}|${l.width_cm}|${l.length_cm}|${l.no_rotate ? 1 : 0}`;
+      const p = f._p.get(k) ?? f._p.set(k, { key: `${sku}:${f._p.size}`, label: l.label, width_cm: l.width_cm, length_cm: l.length_cm, per_unit: 0, no_rotate: !!l.no_rotate, total: 0 }).get(k)!;
+      p.total = (p.total ?? 0) + l.per_unit * q;
+    }
+  }
+  return [...out.values()].map(({ _p, ...f }) => ({
+    ...f,
+    pieces: [..._p.values()].map((p) => ({ ...p, per_unit: f.qty > 0 ? Math.round(((p.total ?? 0) / f.qty) * 10000) / 10000 : 0 })),
+  })).sort((a, b) => b.qty - a.qty || a.sku.localeCompare(b.sku));
+}
+
+/** ชิ้นตัดจากผังของใบสั่งผลิตเก่า (บล็อก = ชิ้นทั้งใบ) → ชิ้นต่อ 1 ใบ (หารจำนวนในใบ · ชิ้นขนาดเดียวกันรวมกัน) */
+export function piecesFromMoBlocks(blocks: { label: string; width_cm: number; length_cm: number; total_pieces: number; no_rotate?: boolean }[], moQty: number): Omit<BuyPiece, "key">[] {
+  const q = Number(moQty) || 0;
+  if (q <= 0) return [];
+  const m = new Map<string, Omit<BuyPiece, "key">>();
+  for (const b of blocks) {
+    if (!(b.width_cm > 0 && b.length_cm > 0 && b.total_pieces > 0)) continue;
+    const k = `${b.width_cm}|${b.length_cm}|${b.no_rotate ? 1 : 0}`;
+    const p = m.get(k) ?? m.set(k, { label: b.label || `${b.width_cm}×${b.length_cm}`, width_cm: b.width_cm, length_cm: b.length_cm, per_unit: 0, no_rotate: !!b.no_rotate }).get(k)!;
+    p.per_unit += b.total_pieces;
+  }
+  return [...m.values()].map((p) => ({ ...p, per_unit: Math.round((p.per_unit / q) * 10000) / 10000 }));
 }

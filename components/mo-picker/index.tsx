@@ -4,7 +4,7 @@
  * ของกลาง — ตัวเลือกใบงาน (ใบสั่งผลิต) หลายใบ: MoMultiPickerModal
  *   ป๊อปมีรูป · ค้นรหัสสินค้า / เลขใบ / ชื่อ / ที่อยู่ (สแกนเลขใบเข้าช่องค้นได้) · กรองตามขั้น (รอจ่าย / อยู่ที่ช่าง)
  *   จัดกลุ่มตามสินค้าแม่ / ที่อยู่ + ติ๊กทั้งกลุ่ม · "เคยเลือกล่าสุด" · ใบที่อยู่ในตารางแล้ว = ติ๊กค้าง (exclude)
- * ข้อมูล: GET /api/pickers/mos (scope=not_in_qc ค่าตั้งต้น · open = รวมที่เข้า QC ครบแล้ว)
+ * ข้อมูล: GET /api/pickers/mos (scope=not_in_qc ค่าตั้งต้น · open = รวมที่เข้า QC ครบแล้ว · history = รวมใบที่ปิดแล้ว ล่าสุด 1,500 ใบ — ก๊อปชิ้นจากใบเก่า /fabric-calc)
  * ใช้: <MoMultiPickerModal open onClose onConfirm={(rows) => …} exclude={['MO-…']} />
  * ใช้แล้วที่: จ่ายงานเหมา (app/master/work-board/piecework-dispatch.tsx) · ใบสั่งขาย "ดึงจากใบสั่งผลิต" + "ผูกใบสั่งผลิต" ต่อรายการ (single)
  * โหมดใบเดียว: single + initialQuery (รหัสสินค้า) + confirmLabel · ใบที่ผูกใบสั่งขายอื่นแล้วมีป้าย "ผูก SO… แล้ว"
@@ -33,7 +33,7 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
   onConfirm: (rows: MoPickRow[]) => void;
   /** เลขใบที่อยู่ในตารางแล้ว (ติ๊กค้าง เลือกซ้ำไม่ได้) */
   exclude?: string[];
-  scope?: "not_in_qc" | "open";
+  scope?: "not_in_qc" | "open" | "history";   // history = รวมใบที่ปิดแล้ว (ก๊อปจากใบเก่า)
   title?: string;
   /** เลือกได้ใบเดียว (เช่น ผูกใบสั่งผลิตให้รายการในใบสั่งขาย) — ติ๊กใบใหม่ = แทนใบเดิม */
   single?: boolean;
@@ -95,7 +95,7 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
 
   return (
     <ERPModal open={open} onClose={onClose} size="lg" title={title} storageKey="mo-multi-picker"
-      description={description ?? (single ? "เลือก 1 ใบ" : scope === "not_in_qc" ? "เฉพาะใบที่ยังไม่ส่งเข้า QC ครบ — ติ๊กได้หลายใบ แล้วกดเพิ่ม" : "ใบที่ยังไม่ปิด — ติ๊กได้หลายใบ แล้วกดเพิ่ม")}
+      description={description ?? (single ? "เลือก 1 ใบ" : scope === "not_in_qc" ? "เฉพาะใบที่ยังไม่ส่งเข้า QC ครบ — ติ๊กได้หลายใบ แล้วกดเพิ่ม" : scope === "history" ? "รวมใบที่ปิดแล้ว (ล่าสุด 1,500 ใบ)" : "ใบที่ยังไม่ปิด — ติ๊กได้หลายใบ แล้วกดเพิ่ม")}
       footer={
         <>
           <span className="mr-auto text-sm text-slate-600">เลือก <b className="text-violet-700">{picked.size}</b> ใบ</span>

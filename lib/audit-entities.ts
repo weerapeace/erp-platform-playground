@@ -78,6 +78,7 @@ export const ENTITY_INFO: Record<string, AuditEntityInfo> = {
   purchase_requests_v2:          E("purchasing", "ใบขอซื้อ"),
   design_sheet:                  E("design", "ใบออกแบบ", (id) => `/master/design-sheets?open=${id}`),
   mo:                            E("production", "ใบสั่งผลิต (MO)", (id) => `/master/work-board?mo=${id}`),
+  fabric_buy_calc:               E("production", "คิดผ้าก่อนซื้อ (บันทึกผล)", (id) => `/fabric-calc?calc=${id}`),
   brand:                         E("products", "แบรนด์"),
   supplier_items:                E("purchasing", "ราคาซัพพลายเออร์", (id) => `/master/supplier-items?open=${id}`),
   asset:                         E("files", "คลังรูป"),

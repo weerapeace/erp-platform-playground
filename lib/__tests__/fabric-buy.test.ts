@@ -102,3 +102,47 @@ describe("ใบสรุปพิมพ์ (fabric-buy-print)", () => {
     expect(html).toContain("<svg");
   });
 });
+
+describe("เฟส 2 — ลายซ้ำ · ทั้งตระกูล · ใบสั่งผลิตเก่า", () => {
+  it("ชิ้นตรงลาย: ยาว 50 ลายซ้ำ 64 → ปัดเป็น 64 · ชิ้นไม่ติ๊กไม่เปลี่ยน", () => {
+    const plain = calcFabricBuy({ ...base, repeat_cm: 64 });
+    expect(plain.need).toBeCloseTo(5, 5);
+    const m = calcFabricBuy({ ...base, repeat_cm: 64, pieces: [{ ...base.pieces[0], match: true }] });
+    expect(m.need).toBeCloseTo(6.4, 5);   // 10 แถว × 64 ซม.
+  });
+
+  it("total แทน per_unit × qty", () => {
+    const r = calcFabricBuy({ ...base, pieces: [{ ...base.pieces[0], per_unit: 0, total: 40 }] });
+    expect(r.need).toBeCloseTo(10, 5);   // 40 ชิ้น = 20 แถว × 50
+  });
+
+  it("รวมผ้าข้ามสี: ซับในใช้ร่วม รวมยอด · ผ้าตัวนอกแยกตามสี · สีจำนวน 0 ข้าม", async () => {
+    const { mergeFamilyFabrics } = await import("../fabric-buy");
+    const line = (sku: string, w: number, l: number, n: number) => ({ component_sku: sku, component_name: sku, label: `${w}×${l}`, width_cm: w, length_cm: l, per_unit: n });
+    const fs = mergeFamilyFabrics([
+      { sku: "T-BK", color: "ดำ", qty: 300, lines: [line("CANVAS-BK", 40, 35, 2), line("LINING", 38, 33, 2)] },
+      { sku: "T-CR", color: "ครีม", qty: 200, lines: [line("CANVAS-CR", 40, 35, 2), line("LINING", 38, 33, 2)] },
+      { sku: "T-RD", color: "แดง", qty: 0, lines: [line("CANVAS-RD", 40, 35, 2)] },
+    ]);
+    expect(fs.map((f) => f.sku)).toEqual(["LINING", "CANVAS-BK", "CANVAS-CR"]);
+    const lining = fs[0];
+    expect(lining.qty).toBe(500);
+    expect(lining.colors).toEqual(["ดำ", "ครีม"]);
+    expect(lining.pieces).toHaveLength(1);
+    expect(lining.pieces[0].total).toBe(1000);
+    expect(lining.pieces[0].per_unit).toBe(2);
+  });
+
+  it("ชิ้นจากใบสั่งผลิตเก่า: หารจำนวนในใบ · ขนาดเดียวกันรวมกัน", async () => {
+    const { piecesFromMoBlocks } = await import("../fabric-buy");
+    const p = piecesFromMoBlocks([
+      { label: "40×35", width_cm: 40, length_cm: 35, total_pieces: 100 },
+      { label: "40×35", width_cm: 40, length_cm: 35, total_pieces: 100 },
+      { label: "6×60", width_cm: 6, length_cm: 60, total_pieces: 200, no_rotate: true },
+    ], 100);
+    expect(p).toHaveLength(2);
+    expect(p[0].per_unit).toBe(2);
+    expect(p[1]).toMatchObject({ per_unit: 2, no_rotate: true });
+    expect(piecesFromMoBlocks([{ label: "x", width_cm: 1, length_cm: 1, total_pieces: 5 }], 0)).toEqual([]);
+  });
+});

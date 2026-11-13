@@ -2,6 +2,7 @@
  * รายการใบสั่งผลิต (ใบงาน) ให้ตัวเลือกใบงานกลาง — GET /api/pickers/mos   (components/mo-picker · MoMultiPickerModal)
  *   ?scope=not_in_qc (ค่าตั้งต้น) = ยังไม่ปิด/ยกเลิก และยังไม่ส่งเข้า QC ครบ (รอจ่าย + อยู่ที่ช่าง)
  *   ?scope=open                    = ทุกใบที่ยังไม่ปิด/ยกเลิก (รวมที่เข้า QC ครบแล้ว)
+ *   ?scope=history                 = รวมใบที่ปิดแล้ว (ไม่รวมยกเลิก) ล่าสุด 1,500 ใบ — ก๊อปชิ้นตัดจากใบเก่า (/fabric-calc)
  * คืน: เลขใบ · SKU · ชื่อ · จำนวน · รูป (ปก SKU → ปกสินค้าแม่) · อยู่ที่ไหน (โต๊ะ · คน) · ขั้น · สินค้าแม่ (จัดกลุ่ม) · วันกำหนด
  * ของกลาง: guardApi(products.view) · fetchAllPages (ข้อมูลเกิน 1,000 แถว)
  */
@@ -27,12 +28,18 @@ export type MoPickRow = {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const scope = new URL(request.url).searchParams.get("scope") === "open" ? "open" : "not_in_qc";
+  const sp = new URL(request.url).searchParams.get("scope");
+  const scope = sp === "open" ? "open" : sp === "history" ? "history" : "not_in_qc";
   const admin = supabaseAdmin();
 
-  const mos = await fetchAllPages<Row>((from, to) => admin.from("manufacturing_orders").select("id, mo_no, qty, status, product_sku, product_name, due_date, internal_due_date, so_order_no")
-    .eq("is_active", true).not("status", "in", "(done,cancelled,closed)").order("mo_no").range(from, to));
-  const moNos = mos.map((m) => String(m.mo_no));
+  const MO_COLS = "id, mo_no, qty, status, product_sku, product_name, due_date, internal_due_date, so_order_no";
+  const mos = scope === "history"
+    ? (((await admin.from("manufacturing_orders").select(MO_COLS).eq("is_active", true).neq("status", "cancelled")
+      .order("created_at", { ascending: false }).limit(1500)).data ?? []) as Row[])
+    : await fetchAllPages<Row>((from, to) => admin.from("manufacturing_orders").select(MO_COLS)
+      .eq("is_active", true).not("status", "in", "(done,cancelled,closed)").order("mo_no").range(from, to));
+  const closed = (m: Row) => m.status === "done" || m.status === "closed";
+  const moNos = mos.filter((m) => !closed(m)).map((m) => String(m.mo_no));   // ใบที่ปิดแล้วไม่ต้องดูว่าอยู่ที่ช่างไหน
   const wos: Row[] = [];
   for (let i = 0; i < moNos.length; i += 300) {
     wos.push(...await fetchAllPages<Row>((from, to) => admin.from("mo_work_orders").select("id, mo_no, assignee_name, department_id, qty, qc_pulled_qty, status")
@@ -60,9 +67,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const m of mos) {
     const moNo = String(m.mo_no), ws = byMo.get(moNo) ?? [];
     const open = ws.filter((w) => num(w.qc_pulled_qty) < num(w.qty));
-    const stage: MoPickStage = !ws.length ? "waiting" : open.length ? "at_craftsman" : "in_qc";
+    const stage: MoPickStage = closed(m) ? "in_qc" : !ws.length ? "waiting" : open.length ? "at_craftsman" : "in_qc";
     if (scope === "not_in_qc" && stage === "in_qc") continue;
-    const where = stage === "waiting" ? "รอจ่าย" : stage === "in_qc" ? "เข้า QC ครบแล้ว"
+    const where = closed(m) ? "ปิดแล้ว" : stage === "waiting" ? "รอจ่าย" : stage === "in_qc" ? "เข้า QC ครบแล้ว"
       : [...new Set(open.map((w) => [w.department_id ? deptName.get(String(w.department_id)) : null, w.assignee_name].filter(Boolean).join(" · ") || "อยู่ที่ช่าง"))].join(", ");
     const sku = (m.product_sku as string) ?? null, inf = sku ? info.get(sku) : undefined;
     out.push({ id: moNo, mo_no: moNo, mo_id: String(m.id), sku, name: (m.product_name as string) ?? null, qty: num(m.qty), status: String(m.status ?? ""),

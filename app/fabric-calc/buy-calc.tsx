@@ -1,80 +1,89 @@
 "use client";
 
 /**
- * คิดผ้าก่อนซื้อ — แท็บแรกของหน้า /fabric-calc (เจ้าของสั่ง 2026-11-13 · เลือกแบบจาก widget)
- *   ชิ้นตัด (พิมพ์เอง / ดึงจากสูตร BOM ของ SKU) × จำนวนผลิต → วางชิ้นบนผ้าจริง → ต้องใช้กี่หลา/เมตร/ผืน
- *   ตั้งค่าผ้า: หน้ากว้าง · หักริม · ม้วน/ผืน · ทางผ้า · หดตัว · เว้นระหว่างชิ้น · เผื่อเสีย · หน่วยซื้อ · ปัดขึ้น (หน่วย/ม้วน) · ราคา
- *   ผล: ต้องใช้ · ควรซื้อ · สต็อกมี · ต้องซื้อเพิ่ม · งบ · ผังการวาง · ทำไมเหลือเศษ · เทียบหลายหน้ากว้าง → ใส่ตะกร้าขอซื้อ · พิมพ์
- *   ไม่บันทึก (เฟส 2)
- * ของกลาง: calcFabricBuy/compareWidths (lib/fabric-buy → packFabric) · FabricLayoutPreview · ComponentPicker · SkuPicker · MiniTable · addToPrCart · renderFabricBuyHtml + printReportHtmlInNewWindow · useToast
+ * คิดผ้าก่อนซื้อ — แท็บแรกของหน้า /fabric-calc (เฟส 1 2026-11-13 · เฟส 2 วันเดียวกัน · เลือกแบบจาก widget ทั้งสองรอบ)
+ *   โหมด "ผ้าเดียว": ชิ้นตัด (พิมพ์เอง / สูตร BOM ของ SKU / ก๊อปจากใบสั่งผลิตเก่า) × จำนวน → วางชิ้นบนผ้าจริง → ต้องใช้/ควรซื้อ/ต้องซื้อเพิ่ม/งบ
+ *   โหมด "ทั้งตระกูล แบ่งสี": family-calc.tsx (Parent SKU → จำนวนต่อสี → รวมผ้าทุกสี)
+ *   ค่าตั้ง (ริม ทางผ้า หดตัว ลายซ้ำ เว้น เผื่อเสีย หน่วยซื้อ ปัดขึ้น ความยาวม้วน) ใช้ชุดเดียวกันทั้งสองโหมด
+ *   บันทึก/เปิดกลับ/แชร์ลิงก์: saved-calcs.tsx (ตาราง fabric_buy_calcs)
+ * ของกลาง: calcFabricBuy/compareWidths/piecesFromMoBlocks (lib/fabric-buy → packFabric) · FabricLayoutPreview · ComponentPicker · SkuPicker · MoMultiPickerModal · MiniTable · addToPrCart · renderFabricBuyHtml + printReportHtmlInNewWindow · useToast
  */
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ComponentPicker, type BomComponent } from "@/components/material-picker";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { MoMultiPickerModal } from "@/components/mo-picker";
 import { FabricLayoutPreview } from "@/components/design-sheet-detail/fabric-layout-preview";
 import { printReportHtmlInNewWindow } from "@/components/report";
 import { addToPrCart } from "@/lib/pr-cart";
-import { calcFabricBuy, compareWidths, convertLength, unitFromUomName, type BuyInput, type BuyPiece, type BuyRound, type BuyUnit, type WidthCompareRow } from "@/lib/fabric-buy";
+import { calcFabricBuy, compareWidths, convertLength, piecesFromMoBlocks, unitFromUomName, type BuyInput, type BuyPiece, type BuyRound, type BuyUnit, type WidthCompareRow } from "@/lib/fabric-buy";
 import { renderFabricBuyHtml } from "@/lib/fabric-buy-print";
 import { YARD_CM } from "@/lib/fabric-calc";
+import type { PlanGroupInput } from "@/lib/fabric-plan";
+import type { FabricPlanMo } from "@/app/api/mo/fabric-plan/route";
+import type { FabricBuyCalcRow } from "@/app/api/fabric-buy-calcs/route";
+import { Card, Field, Metric, Num, fmt, inputCls, textCls, unitComparable, type FabricSettings } from "./buy-ui";
+import { FamilyCalc, emptyFamily, type FamilyState, type FamilySummary, type OpenSingleArgs } from "./family-calc";
+import { SavedCalcsBar, type SavePack } from "./saved-calcs";
 
-const fmt = (n: number, d = 2) => (Math.round(n * 10 ** d) / 10 ** d).toLocaleString("th-TH", { maximumFractionDigits: d });
 let _k = 0;
-const newPiece = (p?: Partial<BuyPiece>): BuyPiece => ({ label: "", width_cm: 0, length_cm: 0, per_unit: 1, no_rotate: false, ...p, key: `p${_k++}` });   // key ใหม่เสมอ (ก๊อปชิ้น = แถวใหม่)
+const newPiece = (p?: Partial<BuyPiece>): BuyPiece => ({ label: "", width_cm: 0, length_cm: 0, per_unit: 1, no_rotate: false, ...p, total: undefined, key: `p${_k++}` });   // key ใหม่เสมอ (ก๊อปชิ้น = แถวใหม่) · ไม่พกยอดรวมจากโหมดตระกูล
 const QUICK_WIDTHS = [110, 137, 147, 150, 160];   // หน้ากว้างที่พบบ่อย (ซม.) — 137 ≈ 54" · 147 ≈ 58"
 
 type BomHead = { id: string; bom_code: string; product_sku: string | null; product_name: string | null; version: string | number | null };
 type BomLine = { component_sku?: string | null; component_name?: string | null; material_type?: string | null; cut_block_code?: string | null; cut_width?: number | null; cut_length?: number | null; pieces?: number | null; no_rotate?: boolean | null; face_width_cm?: number | null; size_variant?: boolean | null };
-type BomFabric = { sku: string; name: string; type: string | null; lines: BomLine[] };
-
-const boxCls = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-indigo-400";
-/** หน่วยของวัตถุดิบเทียบกับหน่วยซื้อได้ไหม — ม้วน: ต้องเป็นหลา/เมตร · ผืน: ไม่ใช่หน่วยพื้นที่/น้ำหนัก · ไม่มีหน่วย = ถือว่าได้ */
-function unitComparable(uomName: string | null | undefined, form: "roll" | "sheet"): boolean {
-  if (!uomName) return true;
-  return form === "roll" ? unitFromUomName(uomName) != null : !/cm|m²|m2|ft|kg|ตร\./i.test(uomName);
-}
-const inputCls = `${boxCls} text-right`;   // ช่องตัวเลข
-const textCls = `${boxCls} text-left`;     // ช่องข้อความ / ตัวเลือก
+/** ผ้าให้เลือก (จากสูตร หรือจากใบสั่งผลิตเก่า) → กดแล้วได้ชิ้นตัด */
+type SrcFabric = { sku: string; name: string; note: string; pieces: Omit<BuyPiece, "key">[]; sized?: boolean };
+type Mode = "single" | "family";
 
 export function FabricBuyCalc() {
   const toast = useToast();
+  const [mode, setMode] = useState<Mode>("single");
   // ── ชิ้นตัด ──
   const [pieces, setPieces] = useState<BuyPiece[]>([newPiece()]);
   const [source, setSource] = useState<string | null>(null);        // "สูตร BOM-XXX" — โชว์/พิมพ์ว่าชิ้นมาจากไหน
+  const [srcPanel, setSrcPanel] = useState<"" | "bom" | "mo">("");
   const [bomSku, setBomSku] = useState<SkuPickerValue | null>(null);
   const [boms, setBoms] = useState<BomHead[] | null>(null);
-  const [bomFabrics, setBomFabrics] = useState<BomFabric[] | null>(null);
-  const [bomBusy, setBomBusy] = useState(false);
-  const [showBom, setShowBom] = useState(false);
+  const [srcFabrics, setSrcFabrics] = useState<SrcFabric[] | null>(null);
+  const [srcBusy, setSrcBusy] = useState(false);
+  const [moPick, setMoPick] = useState(false);
   // ── จำนวน + ผ้า ──
   const [qty, setQty] = useState(100);
   const [fabric, setFabric] = useState<BomComponent | null>(null);
   const [face, setFace] = useState(150);
-  const [trim, setTrim] = useState(3);
   const [form, setForm] = useState<"roll" | "sheet">("roll");
   const [sheetLen, setSheetLen] = useState(0);
+  const [price, setPrice] = useState(0);
+  // ── ค่าตั้งที่ใช้ทั้งสองโหมด ──
+  const [trim, setTrim] = useState(3);
   const [rotate, setRotate] = useState(true);
   const [shrink, setShrink] = useState(0);
-  // ── เผื่อ + หน่วยซื้อ ──
+  const [repeat, setRepeat] = useState(0);
   const [gap, setGap] = useState(0);
   const [waste, setWaste] = useState(3);
   const [unit, setUnit] = useState<BuyUnit>("yd");
   const [round, setRound] = useState<BuyRound>("unit");
   const [rollLen, setRollLen] = useState(50);
-  const [price, setPrice] = useState(0);
   // ── สต็อก (หน่วยของ SKU) ──
   const [stockRaw, setStockRaw] = useState<number | null>(null);
   const [stockErr, setStockErr] = useState("");
   // ── เทียบหน้ากว้าง ──
   const [widths, setWidths] = useState<{ key: string; face: number; price: number }[]>([]);
+  // ── โหมดทั้งตระกูล (เก็บไว้ที่นี่เพื่อบันทึก) ──
+  const famRef = useRef<FamilyState>(emptyFamily());
+  const famSumRef = useRef<FamilySummary>({ fabrics: 0, qty: 0, cost_buy: 0, short: 0 });
+  const [famInit, setFamInit] = useState<FamilyState>(emptyFamily());
+  const [famKey, setFamKey] = useState(0);
+  const onFamState = useCallback((s: FamilyState) => { famRef.current = s; }, []);
+  const onFamSummary = useCallback((s: FamilySummary) => { famSumRef.current = s; }, []);
 
-  // สต็อกในหน่วยที่เลือก (หลา ↔ เมตร แปลงให้ · ผืน/หน่วยอื่นใช้ตัวเลขตรง ๆ)
+  const settings: FabricSettings = useMemo(() => ({ trim, rotate, shrink, repeat, gap, waste, unit, round, rollLen }), [trim, rotate, shrink, repeat, gap, waste, unit, round, rollLen]);
+
   const stockUnit = unitFromUomName(fabric?.uom_name);
-  // หน่วยของ SKU เทียบกับหน่วยซื้อได้ไหม (ข้อมูลจริง 2026-11-13: วัตถุดิบตัดชิ้น 96 ตัวนับเป็น cm² · บางตัว kg) — เทียบไม่ได้ = ไม่หักสต็อก
   const unitOk = unitComparable(fabric?.uom_name, form);
   const stock = stockRaw == null || !unitOk ? 0 : form === "roll" && stockUnit ? convertLength(stockRaw, stockUnit, unit) : stockRaw;
 
@@ -101,6 +110,14 @@ export function FabricBuyCalc() {
     if (Number(c.standard_price) > 0 && unitComparable(c.uom_name, sheetForm ? "sheet" : "roll")) setPrice(Number(c.standard_price));
     else setPrice(0);
   };
+  const pickFabricByCode = async (code: string) => {
+    if (!code || code.startsWith("(")) return;
+    try {
+      const j = await apiFetch(`/api/bom/components?search=${encodeURIComponent(code)}&limit=5`).then((r) => r.json());
+      const hit = ((j.data ?? []) as BomComponent[]).find((c) => c.code === code);
+      if (hit) pickFabric(hit);
+    } catch { /* ไม่เจอผ้า = ผู้ใช้เลือกเอง */ }
+  };
 
   // เปลี่ยนหน่วยซื้อ → แปลงราคา/ความยาวม้วนตาม (ราคาต่อหลา ↔ ต่อเมตร)
   const changeUnit = (u: BuyUnit) => {
@@ -113,59 +130,74 @@ export function FabricBuyCalc() {
 
   // ── ดึงจากสูตร BOM: เลือก SKU → หาสูตรของ SKU นั้น → เลือกผ้าในสูตร → ชิ้นตัดของผ้านั้น ──
   const pickBomSku = async (v: SkuPickerValue | null) => {
-    setBomSku(v); setBoms(null); setBomFabrics(null);
+    setBomSku(v); setBoms(null); setSrcFabrics(null);
     if (!v) return;
-    setBomBusy(true);
+    setSrcBusy(true);
     try {
       const j = await apiFetch(`/api/bom?search=${encodeURIComponent(v.code)}&limit=50`).then((r) => r.json());
       const list = ((j.data ?? []) as BomHead[]).filter((b) => b.product_sku === v.code);
       setBoms(list);
       if (list.length === 1) await loadBom(list[0]);
     } catch { toast.error("โหลดสูตรไม่สำเร็จ ลองใหม่อีกครั้ง"); }
-    finally { setBomBusy(false); }
+    finally { setSrcBusy(false); }
   };
   const loadBom = async (b: BomHead) => {
-    setBomBusy(true); setBomFabrics(null);
+    setSrcBusy(true); setSrcFabrics(null);
     try {
       const j = await apiFetch(`/api/bom/${encodeURIComponent(b.id)}`).then((r) => r.json());
       const lines = ((j.data?.lines ?? []) as BomLine[]).filter((l) => Number(l.cut_width) > 0 && Number(l.cut_length) > 0);
-      const m = new Map<string, BomFabric>();
+      const m = new Map<string, SrcFabric>();
       for (const l of lines) {
         const sku = String(l.component_sku ?? "") || "(ไม่ระบุรหัส)";
-        const f = m.get(sku) ?? { sku, name: String(l.component_name ?? sku), type: l.material_type ?? null, lines: [] };
-        f.lines.push(l); m.set(sku, f);
+        const f = m.get(sku) ?? { sku, name: String(l.component_name ?? sku), note: l.material_type ?? "", pieces: [], sized: false };
+        f.pieces.push({ label: String(l.cut_block_code ?? "") || `${l.cut_width}×${l.cut_length}`, width_cm: Number(l.cut_width) || 0, length_cm: Number(l.cut_length) || 0, per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate });
+        if (l.size_variant) f.sized = true;
+        m.set(sku, f);
       }
-      setBomFabrics([...m.values()]);
-      setShowBom(true);
+      setSrcFabrics([...m.values()]);
       setSource(`สูตร ${b.bom_code}${b.version != null ? ` v${b.version}` : ""} (${b.product_sku ?? ""})`);
     } catch { toast.error("โหลดสูตรไม่สำเร็จ ลองใหม่อีกครั้ง"); }
-    finally { setBomBusy(false); }
+    finally { setSrcBusy(false); }
   };
-  const useBomFabric = async (f: BomFabric) => {
-    setPieces(f.lines.map((l) => newPiece({
-      label: String(l.cut_block_code ?? "") || `${l.cut_width}×${l.cut_length}`,
-      width_cm: Number(l.cut_width) || 0, length_cm: Number(l.cut_length) || 0,
-      per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate,
-    })));
+  // ── ก๊อปจากใบสั่งผลิตเก่า: ผังที่ระบบเคยวางไว้ของใบนั้น (lay_layout) ÷ จำนวนในใบ = ชิ้นต่อใบ ──
+  const loadMo = async (moNo: string) => {
+    setSrcBusy(true); setSrcFabrics(null); setSrcPanel("mo");
+    try {
+      const j = await apiFetch(`/api/mo/fabric-plan?mo_nos=${encodeURIComponent(moNo)}`).then((r) => r.json());
+      if (j.error) { toast.error(j.error); return; }
+      const groups = (j.data?.groups ?? []) as PlanGroupInput[];
+      const mo = (j.data?.mos ?? {})[moNo] as FabricPlanMo | undefined;
+      const moQty = Number(mo?.qty) || 0;
+      setSrcFabrics(groups.map((g) => ({
+        sku: g.sku, name: g.name ?? g.sku, note: `หน้า ${fmt(g.face_width_cm, 1)} ซม.${g.sheet_length_cm ? ` · ผืนยาว ${fmt(g.sheet_length_cm, 1)}` : ""}`,
+        pieces: piecesFromMoBlocks(g.blocks, moQty),
+      })).filter((f) => f.pieces.length > 0));
+      setSource(`ใบสั่งผลิต ${moNo}${mo?.product_sku ? ` (${mo.product_sku} · ${fmt(moQty, 0)} ใบ)` : ""}`);
+      if (moQty <= 0) toast.error("ใบนี้ไม่มีจำนวนสั่ง — คิดชิ้นต่อใบไม่ได้");
+    } catch { toast.error("โหลดใบสั่งผลิตไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setSrcBusy(false); }
+  };
+  const useSrcFabric = (f: SrcFabric) => {
+    setPieces(f.pieces.map((p) => newPiece(p)));
     setSource((s) => `${s ?? "สูตร BOM"} · ${f.name}`);
-    setShowBom(false);
-    // ผ้าในสูตร → เลือกผ้าให้ด้วย (ได้หน้ากว้าง ราคา สต็อก) ผ่านตัวค้นวัตถุดิบกลางตัวเดียวกับ ComponentPicker
-    if (f.sku && !f.sku.startsWith("(")) {
-      try {
-        const j = await apiFetch(`/api/bom/components?search=${encodeURIComponent(f.sku)}&limit=5`).then((r) => r.json());
-        const hit = ((j.data ?? []) as BomComponent[]).find((c) => c.code === f.sku);
-        if (hit) pickFabric(hit);
-      } catch { /* ไม่เจอผ้า = ผู้ใช้เลือกเอง */ }
-    }
-    const sized = f.lines.some((l) => l.size_variant);
-    toast.success(`ดึงชิ้นตัด ${f.lines.length} แบบจากสูตรแล้ว${sized ? " (บางชิ้นแยกไซส์ — ใช้ขนาดตั้งต้น)" : ""}`);
+    setSrcPanel("");
+    void pickFabricByCode(f.sku);   // ผ้าในสูตร/ใบ → เลือกผ้าให้ด้วย (ได้หน้ากว้าง ราคา สต็อก)
+    toast.success(`ดึงชิ้นตัด ${f.pieces.length} แบบแล้ว${f.sized ? " (บางชิ้นแยกไซส์ — ใช้ขนาดตั้งต้น)" : ""}`);
+  };
+
+  // ── เปิดผ้าจากโหมดทั้งตระกูลมาแก้ละเอียด ──
+  const openSingle = (a: OpenSingleArgs) => {
+    setPieces(a.pieces.map((p) => newPiece({ ...p, per_unit: p.per_unit })));
+    setQty(a.qty); setFabric(a.fabric); setFace(a.face); setForm(a.form); setSheetLen(a.sheetLen); setPrice(a.price); setSource(a.source);
+    setMode("single");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // ── คำนวณ (เลื่อนผลเล็กน้อยตอนพิมพ์รัว ๆ ไม่ให้หน้าค้าง) ──
   const input: BuyInput = useMemo(() => ({
     pieces, qty, face_width_cm: face, trim_cm: trim, form, sheet_length_cm: sheetLen, allow_rotate: rotate,
-    gap_cm: gap, waste_pct: waste, shrink_pct: shrink, unit, round, roll_length: rollLen, price, stock,
-  }), [pieces, qty, face, trim, form, sheetLen, rotate, gap, waste, shrink, unit, round, rollLen, price, stock]);
+    gap_cm: gap, waste_pct: waste, shrink_pct: shrink, repeat_cm: repeat, unit, round, roll_length: rollLen, price, stock,
+  }), [pieces, qty, face, trim, form, sheetLen, rotate, gap, waste, shrink, repeat, unit, round, rollLen, price, stock]);
   const dIn = useDeferredValue(input);
   const res = useMemo(() => calcFabricBuy(dIn), [dIn]);
   const dWidths = useDeferredValue(widths);
@@ -196,6 +228,40 @@ export function FabricBuyCalc() {
     printReportHtmlInNewWindow(renderFabricBuyHtml(input, res, cmp, { title: `คิดผ้าก่อนซื้อ ${fabric?.code ?? ""}`.trim(), date, fabric_name: fabricLabel, source_label: source }));
   };
 
+  // ── บันทึก / เปิดกลับ ──
+  const pack = (): SavePack => {
+    const s = { trim, rotate, shrink, repeat, gap, waste, unit, round, rollLen };
+    if (mode === "family") {
+      const f = famRef.current, sm = famSumRef.current;
+      return { mode, payload: { v: 1, settings: s, family: f }, summary: { fabrics: sm.fabrics, qty: sm.qty, cost_buy: sm.cost_buy }, suggestName: f.parent ? `${f.parent.code} ทั้งตระกูล` : "" };
+    }
+    return {
+      mode, payload: { v: 1, settings: s, single: { pieces: pieces.map(({ key: _key, ...p }) => p), qty, fabric, face, form, sheetLen, price, widths: widths.map((w) => ({ face: w.face, price: w.price })), source } },
+      summary: res.ok ? { need: res.need, to_buy: res.to_buy, cost_buy: res.cost_buy, unit: res.unit_label, qty } : { qty },
+      suggestName: fabric?.code ? `${fabric.code} × ${qty}` : (source ?? ""),
+    };
+  };
+  const onLoad = (row: FabricBuyCalcRow) => {
+    const p = (row.payload ?? {}) as Record<string, unknown>;
+    const s = (p.settings ?? {}) as Partial<FabricSettings>;
+    const n = (v: unknown, d: number) => (typeof v === "number" && isFinite(v) ? v : d);
+    setTrim(n(s.trim, 3)); setRotate(s.rotate !== false); setShrink(n(s.shrink, 0)); setRepeat(n(s.repeat, 0)); setGap(n(s.gap, 0)); setWaste(n(s.waste, 3));
+    setUnit(s.unit === "m" ? "m" : "yd"); setRound(s.round === "roll" || s.round === "none" ? s.round : "unit"); setRollLen(n(s.rollLen, 50));
+    if (row.mode === "family") {
+      const f = (p.family ?? emptyFamily()) as FamilyState;
+      const init: FamilyState = { parent: f.parent ?? null, qty: f.qty ?? {}, over: f.over ?? {} };
+      famRef.current = init; setFamInit(init); setFamKey((k) => k + 1); setMode("family");
+      return;
+    }
+    const g = (p.single ?? {}) as Record<string, unknown>;
+    const ps = Array.isArray(g.pieces) ? (g.pieces as Partial<BuyPiece>[]) : [];
+    setPieces(ps.length ? ps.map((x) => newPiece(x)) : [newPiece()]);
+    setQty(n(g.qty, 100)); setFabric((g.fabric as BomComponent | null) ?? null); setFace(n(g.face, 150)); setForm(g.form === "sheet" ? "sheet" : "roll");
+    setSheetLen(n(g.sheetLen, 0)); setPrice(n(g.price, 0)); setSource((g.source as string | null) ?? null);
+    setWidths(Array.isArray(g.widths) ? (g.widths as { face: number; price: number }[]).map((w) => ({ key: `w${_k++}`, face: n(w.face, 0), price: n(w.price, 0) })) : []);
+    setMode("single");
+  };
+
   // ── ตารางชิ้นตัด (แก้ในตาราง) ──
   const pieceCols: MiniColumn<BuyPiece>[] = [
     { key: "label", header: "ชื่อชิ้น", width: "1.6fr", cell: (p) => <input value={p.label} placeholder="เช่น ตัวหน้า" onChange={(e) => patch(p.key, { label: e.target.value })} className={textCls} /> },
@@ -204,6 +270,7 @@ export function FabricBuyCalc() {
     { key: "n", header: "ชิ้น/ใบ", width: "0.8fr", align: "right", cell: (p) => <Num value={p.per_unit} onChange={(v) => patch(p.key, { per_unit: v })} /> },
     { key: "tot", header: "รวมทั้งงาน", width: "0.9fr", align: "right", cell: (p) => <span className="text-[12px] text-slate-500">{fmt(p.per_unit * qty, 0)}</span> },
     { key: "nr", header: "ห้ามหมุน", width: "0.7fr", align: "center", cell: (p) => <input type="checkbox" checked={!!p.no_rotate} onChange={(e) => patch(p.key, { no_rotate: e.target.checked })} title="ชิ้นนี้ต้องตามลาย/เกรน ห้ามหมุน" /> },
+    ...(repeat > 0 ? [{ key: "m", header: "ตรงลาย", width: "0.7fr", align: "center" as const, cell: (p: BuyPiece) => <input type="checkbox" checked={!!p.match} onChange={(e) => patch(p.key, { match: e.target.checked })} title={`ความยาวปัดขึ้นเป็นรอบลาย ${repeat} ซม. + ห้ามหมุน`} /> }] : []),
     { key: "x", header: "", width: "4.5rem", align: "right", cell: (p) => (
       <span className="inline-flex gap-1">
         <button type="button" title="ก๊อปชิ้นนี้" onClick={() => setPieces((prev) => { const i = prev.findIndex((x) => x.key === p.key); const n = [...prev]; n.splice(i + 1, 0, newPiece(p)); return n; })} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"><Icon name="list" /></button>
@@ -222,34 +289,89 @@ export function FabricBuyCalc() {
   ];
 
   const hints = (res.layout?.fitHints ?? []).filter((h) => h.leftoverCm >= 3).slice(0, 2);
+  const family = mode === "family";
+
+  // ค่าตั้งผ้าทั่วไป (ใช้ทั้งสองโหมด)
+  const generalFields = (
+    <>
+      <Field label="หักริม รวม 2 ข้าง (ซม.)" hint={family ? "ผ้าม้วน · ผ้าผืนไม่หักริม" : "ริมผ้าตัดใช้ไม่ได้ · ปกติ 2-4 ซม."}><Num value={trim} onChange={setTrim} /></Field>
+      <Field label="ทางผ้า">
+        <select value={rotate ? "1" : "0"} onChange={(e) => setRotate(e.target.value === "1")} className={textCls}><option value="1">หมุนชิ้นได้ (ผ้าเรียบ)</option><option value="0">ห้ามหมุน (ลาย/ขน/เงา)</option></select>
+      </Field>
+      <Field label="ผ้าหดตัว %" hint="ขยายชิ้นตัดเผื่อหด · ไม่หด = 0"><Num value={shrink} onChange={setShrink} /></Field>
+      <Field label="ลายซ้ำ (ซม.)" hint={repeat > 0 ? (family ? "ติ๊ก “ตรงลาย” ที่ผ้าแต่ละตัว" : "ติ๊ก “ตรงลาย” ที่ชิ้นในตาราง") : "ผ้าลายที่ต้องตรงลาย · ไม่มี = 0"}><Num value={repeat} onChange={setRepeat} /></Field>
+    </>
+  );
+  const buyCard = (
+    <Card title={family ? "3. เผื่อ + หน่วยซื้อ (ใช้กับทุกผ้า)" : "3. เผื่อ + หน่วยซื้อ"} tag="rec">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <Field label="เว้นระหว่างชิ้น (ซม.)" hint="ปกติ 0 (ตรงกับใบสั่งผลิต)"><Num value={gap} onChange={setGap} /></Field>
+        <Field label="เผื่อเสีย %" hint="หัว-ท้ายม้วน/ตำหนิ · แนะนำ 3"><Num value={waste} onChange={setWaste} /></Field>
+        {(family || form === "roll") && (
+          <Field label="ซื้อเป็น (ผ้าม้วน)">
+            <select value={unit} onChange={(e) => changeUnit(e.target.value as BuyUnit)} className={textCls}><option value="yd">หลา</option><option value="m">เมตร</option></select>
+          </Field>
+        )}
+        {(family || form === "roll") && (
+          <Field label="ปัดขึ้น">
+            <select value={round} onChange={(e) => setRound(e.target.value as BuyRound)} className={textCls}><option value="unit">{unit === "m" ? "เมตร" : "หลา"}เต็ม</option><option value="roll">ม้วนเต็ม</option><option value="none">ไม่ปัด</option></select>
+          </Field>
+        )}
+        {(family || form === "roll") && <Field label={`1 ม้วนยาว (${unit === "m" ? "เมตร" : "หลา"})`}><Num value={rollLen} onChange={setRollLen} /></Field>}
+        {!family && <Field label={`ราคา / ${u} (บาท)`} hint={!fabric?.standard_price ? undefined : unitOk ? "ดึงต้นทุนจากรหัสผ้า แก้ได้" : `ต้นทุนในระบบเป็นต่อ ${fabric.uom_name} — กรอกราคาต่อ${u}เอง`}><Num value={price} onChange={setPrice} /></Field>}
+      </div>
+    </Card>
+  );
 
   return (
     <div className="space-y-4">
+      <SavedCalcsBar pack={pack} onLoad={onLoad} />
+
+      <div className="inline-flex rounded-xl border border-indigo-200 bg-white p-1 text-sm">
+        {([["single", "ผ้าเดียว"], ["family", "ทั้งตระกูล (แบ่งตามสี)"]] as [Mode, string][]).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setMode(k)} className={`rounded-lg px-4 py-1.5 font-medium ${mode === k ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-indigo-50"}`}>{label}</button>
+        ))}
+      </div>
+
+      {/* ทั้งตระกูล (คงไว้ใน DOM ตอนสลับไปผ้าเดียว เพื่อไม่ต้องโหลดใหม่) */}
+      <div className={family ? "space-y-4" : "hidden"}>
+        <FamilyCalc key={famKey} settings={settings} initial={famInit} onState={onFamState} onSummary={onFamSummary} onOpenSingle={openSingle} />
+        <Card title="2. ค่าตั้งผ้า (ใช้กับทุกผ้า)" tag="rec">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{generalFields}</div>
+        </Card>
+        {buyCard}
+      </div>
+
+      {!family && <>
       {/* 1. ชิ้นตัด */}
       <Card title="1. ชิ้นตัด" tag="need" right={source && <span className="truncate text-[12px] text-slate-500">จาก {source}</span>}>
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => setShowBom((s) => !s)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-[12px] text-indigo-700 hover:bg-indigo-50"><Icon name="measure" /> ดึงจากสูตร BOM</button>
+          <button type="button" onClick={() => { setSrcPanel((s) => (s === "bom" ? "" : "bom")); setSrcFabrics(null); }} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "bom" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="measure" /> ดึงจากสูตร BOM</button>
+          <button type="button" onClick={() => setMoPick(true)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "mo" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="repeat" /> ก๊อปจากใบสั่งผลิตเก่า</button>
           <span className="text-[12px] text-slate-400">หรือพิมพ์ขนาดชิ้นเองในตารางด้านล่าง</span>
         </div>
-        {showBom && (
+        {srcPanel !== "" && (
           <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
-            <div className="mb-1 text-[12px] text-slate-600">เลือกสินค้า (SKU) ที่มีสูตรแล้ว → เลือกผ้าในสูตร</div>
-            <div className="max-w-md"><SkuPicker value={bomSku} onChange={(v) => void pickBomSku(v)} placeholder="ค้นรหัส / ชื่อสินค้า..." /></div>
-            {bomBusy && <div className="mt-2 text-[12px] text-slate-500">กำลังโหลดสูตร…</div>}
-            {boms && boms.length === 0 && !bomBusy && <div className="mt-2 text-[12px] text-amber-700">สินค้านี้ยังไม่มีสูตร (BOM) — พิมพ์ชิ้นเองได้</div>}
-            {boms && boms.length > 1 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <span className="text-[12px] text-slate-500">มี {boms.length} สูตร:</span>
-                {boms.map((b) => <button key={b.id} type="button" onClick={() => void loadBom(b)} className="h-7 rounded-full border border-slate-200 bg-white px-2.5 text-[12px] hover:border-indigo-300">{b.bom_code}{b.version != null ? ` v${b.version}` : ""}</button>)}
-              </div>
-            )}
-            {bomFabrics && (bomFabrics.length === 0
-              ? <div className="mt-2 text-[12px] text-amber-700">สูตรนี้ยังไม่มีบรรทัดที่ใส่ขนาดชิ้นตัด (กว้าง × ยาว)</div>
+            {srcPanel === "bom" && <>
+              <div className="mb-1 text-[12px] text-slate-600">เลือกสินค้า (SKU) ที่มีสูตรแล้ว → เลือกผ้าในสูตร</div>
+              <div className="max-w-md"><SkuPicker value={bomSku} onChange={(v) => void pickBomSku(v)} placeholder="ค้นรหัส / ชื่อสินค้า..." /></div>
+              {boms && boms.length === 0 && !srcBusy && <div className="mt-2 text-[12px] text-amber-700">สินค้านี้ยังไม่มีสูตร (BOM) — พิมพ์ชิ้นเองได้</div>}
+              {boms && boms.length > 1 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="text-[12px] text-slate-500">มี {boms.length} สูตร:</span>
+                  {boms.map((b) => <button key={b.id} type="button" onClick={() => void loadBom(b)} className="h-7 rounded-full border border-slate-200 bg-white px-2.5 text-[12px] hover:border-indigo-300">{b.bom_code}{b.version != null ? ` v${b.version}` : ""}</button>)}
+                </div>
+              )}
+            </>}
+            {srcPanel === "mo" && <div className="mb-1 text-[12px] text-slate-600">ผ้าในใบที่เลือก (ชิ้นต่อใบ = ชิ้นที่ระบบวางไว้ ÷ จำนวนในใบ) → เลือกผ้า <button type="button" onClick={() => setMoPick(true)} className="ml-1 text-indigo-600 underline">เลือกใบอื่น</button></div>}
+            {srcBusy && <div className="mt-2 text-[12px] text-slate-500">กำลังโหลด…</div>}
+            {srcFabrics && (srcFabrics.length === 0
+              ? <div className="mt-2 text-[12px] text-amber-700">{srcPanel === "mo" ? "ใบนี้ยังไม่มีผังชิ้นตัด (ยังไม่ได้กด “อัพเดตวัตถุดิบตาม BOM” หรือไม่มีผ้าที่ใส่ขนาดชิ้น)" : "สูตรนี้ยังไม่มีบรรทัดที่ใส่ขนาดชิ้นตัด (กว้าง × ยาว)"}</div>
               : <div className="mt-2 flex flex-wrap gap-1.5">
-                  {bomFabrics.map((f) => (
-                    <button key={f.sku} type="button" onClick={() => void useBomFabric(f)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[12px] hover:border-indigo-400">
+                  {srcFabrics.map((f) => (
+                    <button key={f.sku} type="button" onClick={() => useSrcFabric(f)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-[12px] hover:border-indigo-400">
                       <div className="font-medium text-slate-700">{f.name}</div>
-                      <div className="text-slate-400">{f.sku}{f.type ? ` · ${f.type}` : ""} · {f.lines.length} แบบชิ้น</div>
+                      <div className="text-slate-400">{f.sku}{f.note ? ` · ${f.note}` : ""} · {f.pieces.length} แบบชิ้น</div>
                     </button>
                   ))}
                 </div>)}
@@ -260,7 +382,6 @@ export function FabricBuyCalc() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* 2. จำนวน + 3. ผ้า */}
         <Card title="2. จำนวนผลิต + ผ้าที่จะซื้อ" tag="need">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Field label="จำนวนผลิต (ใบ)"><Num value={qty} onChange={setQty} big /></Field>
@@ -272,34 +393,11 @@ export function FabricBuyCalc() {
             </Field>
             <Field label={form === "sheet" ? "ผืนกว้าง (ซม.)" : "หน้ากว้างเต็ม (ซม.)"}><Num value={face} onChange={setFace} /></Field>
             {form === "sheet" && <Field label="ผืนยาว (ซม.)"><Num value={sheetLen} onChange={setSheetLen} /></Field>}
-            <Field label="หักริม รวม 2 ข้าง (ซม.)" hint="ริมผ้าตัดใช้ไม่ได้ · ปกติ 2-4 ซม."><Num value={trim} onChange={setTrim} /></Field>
-            <Field label="ทางผ้า">
-              <select value={rotate ? "1" : "0"} onChange={(e) => setRotate(e.target.value === "1")} className={textCls}><option value="1">หมุนชิ้นได้ (ผ้าเรียบ)</option><option value="0">ห้ามหมุน (ลาย/ขน/เงา)</option></select>
-            </Field>
-            <Field label="ผ้าหดตัว %" hint="ขยายชิ้นตัดเผื่อหด · ไม่หด = 0"><Num value={shrink} onChange={setShrink} /></Field>
+            {generalFields}
           </div>
           <div className="mt-2 text-[12px] text-slate-500">หน้าใช้ได้จริง <b className="text-slate-700">{fmt(face - trim, 1)} ซม.</b></div>
         </Card>
-
-        {/* 4. เผื่อ + หน่วยซื้อ */}
-        <Card title="3. เผื่อ + หน่วยซื้อ" tag="rec">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <Field label="เว้นระหว่างชิ้น (ซม.)" hint="ปกติ 0 (ตรงกับใบสั่งผลิต)"><Num value={gap} onChange={setGap} /></Field>
-            <Field label="เผื่อเสีย %" hint="หัว-ท้ายม้วน/ตำหนิ · แนะนำ 3"><Num value={waste} onChange={setWaste} /></Field>
-            {form === "roll" && (
-              <Field label="ซื้อเป็น">
-                <select value={unit} onChange={(e) => changeUnit(e.target.value as BuyUnit)} className={textCls}><option value="yd">หลา</option><option value="m">เมตร</option></select>
-              </Field>
-            )}
-            {form === "roll" && (
-              <Field label="ปัดขึ้น">
-                <select value={round} onChange={(e) => setRound(e.target.value as BuyRound)} className={textCls}><option value="unit">{u}เต็ม</option><option value="roll">ม้วนเต็ม</option><option value="none">ไม่ปัด</option></select>
-              </Field>
-            )}
-            {form === "roll" && <Field label={`1 ม้วนยาว (${u})`}><Num value={rollLen} onChange={setRollLen} /></Field>}
-            <Field label={`ราคา / ${u} (บาท)`} hint={!fabric?.standard_price ? undefined : unitOk ? "ดึงต้นทุนจากรหัสผ้า แก้ได้" : `ต้นทุนในระบบเป็นต่อ ${fabric.uom_name} — กรอกราคาต่อ${u}เอง`}><Num value={price} onChange={setPrice} /></Field>
-          </div>
-        </Card>
+        {buyCard}
       </div>
 
       {/* ผล */}
@@ -326,6 +424,7 @@ export function FabricBuyCalc() {
             <div className="mt-2 text-[12px] text-slate-500">
               {form === "sheet" ? <>วางจริง {fmt(res.layout?.sheetsUsed ?? 0, 0)} ผืน (ก่อนเผื่อเสีย)</> : <>วางชิ้นจริงยาว {fmt(res.used_length_cm / 100)} ม. (ก่อนเผื่อเสีย)</>} · ใช้ผ้าคุ้ม <b className="text-slate-700">{fmt(res.efficiency_pct, 1)}%</b>
               {form === "roll" && res.naive > 0 && <> · ถ้าคิดแบบเดิม (พื้นที่ ÷ หน้ากว้าง) = {fmt(res.naive)} {u}</>}
+              {repeat > 0 && pieces.some((p) => p.match) && <> · ชิ้นตรงลายปัดความยาวเป็นรอบลาย {fmt(repeat, 1)} ซม.</>}
               {res.layout?.sampledFrom && <> · งานล็อตใหญ่: จำลอง {fmt(res.layout.sampledFrom.simulated, 0)} จาก {fmt(res.layout.sampledFrom.total, 0)} ชิ้น แล้วขยายผล</>}
             </div>
             {hints.length > 0 && (
@@ -357,9 +456,9 @@ export function FabricBuyCalc() {
             {widths.map((w) => (
               <div key={w.key} className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[12px]">
                 <span className="text-slate-500">หน้า</span>
-                <input type="number" min={0} value={w.face || ""} onChange={(e) => setWidths((p) => p.map((x) => x.key === w.key ? { ...x, face: Number(e.target.value) || 0 } : x))} className="h-7 w-16 rounded border border-slate-200 px-1 text-right" />
+                <input type="number" min={0} value={w.face || ""} onChange={(e) => setWidths((p) => p.map((x) => x.key === w.key ? { ...x, face: Number(e.target.value) || 0 } : x))} className={`${inputCls} !h-7 !w-16 !px-1`} />
                 <span className="text-slate-500">ซม. ราคา</span>
-                <input type="number" min={0} value={w.price || ""} onChange={(e) => setWidths((p) => p.map((x) => x.key === w.key ? { ...x, price: Number(e.target.value) || 0 } : x))} className="h-7 w-16 rounded border border-slate-200 px-1 text-right" />
+                <input type="number" min={0} value={w.price || ""} onChange={(e) => setWidths((p) => p.map((x) => x.key === w.key ? { ...x, price: Number(e.target.value) || 0 } : x))} className={`${inputCls} !h-7 !w-16 !px-1`} />
                 <button type="button" title="เอาออก" onClick={() => setWidths((p) => p.filter((x) => x.key !== w.key))} className="rounded p-0.5 text-slate-400 hover:text-rose-600"><Icon name="delete" /></button>
               </div>
             ))}
@@ -369,50 +468,10 @@ export function FabricBuyCalc() {
           ? <MiniTable rows={cmp} columns={cmpCols} rowKey={(r) => `${r.face_width_cm}-${r.price ?? ""}`} hideToolbar dense />
           : <div className="text-[12px] text-slate-400">ยังไม่ได้เพิ่มหน้ากว้างที่จะเทียบ — ค่าตั้งอื่น (ริม เผื่อเสีย ปัดขึ้น) ใช้เหมือนด้านบน</div>}
       </Card>
-    </div>
-  );
-}
+      </>}
 
-function Card({ title, tag, right, children }: { title: string; tag?: "need" | "rec"; right?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
-      <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
-        {tag === "need" && <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] text-rose-700">จำเป็น</span>}
-        {tag === "rec" && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] text-indigo-700">แนะนำ</span>}
-        {right && <span className="ml-auto min-w-0">{right}</span>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block min-w-0">
-      <span className="mb-0.5 block truncate text-[11px] font-medium text-slate-500" title={hint ? `${label} — ${hint}` : label}>{label}</span>
-      {children}
-      {hint && <span className="mt-0.5 block truncate text-[10.5px] text-slate-400">{hint}</span>}
-    </label>
-  );
-}
-
-function Num({ value, onChange, big }: { value: number; onChange: (v: number) => void; big?: boolean }) {
-  return (
-    <input type="number" min={0} step="any" value={value === 0 ? "" : value} placeholder="0"
-      onFocus={(e) => e.currentTarget.select()}
-      onChange={(e) => onChange(e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0))}
-      className={`${inputCls} ${big ? "text-base font-semibold" : ""}`} />
-  );
-}
-
-function Metric({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "danger" | "success" }) {
-  const c = tone === "danger" ? "text-rose-700" : tone === "success" ? "text-emerald-700" : "text-slate-800";
-  return (
-    <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-      <div className="text-[11.5px] text-slate-500">{label}</div>
-      <div className={`text-xl font-bold ${c}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-slate-400">{sub}</div>}
+      <MoMultiPickerModal open={moPick} onClose={() => setMoPick(false)} single scope="history" title="เลือกใบสั่งผลิตเก่าที่จะก๊อปชิ้นตัด" confirmLabel="ใช้ใบนี้"
+        onConfirm={(rows) => { setMoPick(false); if (rows[0]) void loadMo(rows[0].mo_no); }} />
     </div>
   );
 }
