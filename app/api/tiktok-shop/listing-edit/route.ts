@@ -168,7 +168,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const sentUris = fields.main_images?.map((x) => x.uri) ?? null;
 
   let resp: Record<string, unknown>;
-  try { resp = await ttsPartialEdit(live.accessToken, live.cipher, live.productId, fields); }
+  // ฉบับร่าง = บันทึกเป็นร่างต่อ (ไม่ส่งตรวจ/ไม่เผยแพร่) — เผยแพร่ทำแยก (ใน Seller Center)
+  const isDraft = (view.status ?? view.productStatus) === "DRAFT";
+  try { resp = await ttsPartialEdit(live.accessToken, live.cipher, live.productId, fields, isDraft ? { saveMode: "AS_DRAFT" } : {}); }
   catch (e) {
     const error = ttsErrorText(e);
     await audit({ ok: false, error, raw_error: (e as Error).message, uploaded: uploaded.size });
@@ -198,6 +200,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     else if ((titleSeen && imgsSeen) || auditStatus === "AUDITING") summary = `ส่ง${what}ใหม่แล้ว — รอ TikTok ตรวจ (ระหว่างนี้ร้านยังใช้ของเดิม)`;
     else warnings.push("TikTok ตอบรับแล้ว แต่ยังไม่เห็นของใหม่ (อาจใช้เวลาสักครู่) — กดดึงตัวนี้อีกครั้งภายหลัง");
     if (sentUris && imgsSeen && fb.images.length !== sentUris.length) warnings.push(`ส่งรูป ${sentUris.length} รูป แต่ TikTok เห็น ${fb.images.length} รูป — ตรวจในแท็บรูป`);
+  }
+  // ฉบับร่าง: บันทึกเป็นร่างต่อ (ไม่ส่งตรวจ) — ถ้าดึงกลับแล้วไม่ใช่ร่าง = เตือนชัด ๆ
+  if (isDraft) {
+    pending = false;
+    const nowStatus = freshView ? (freshView.status ?? freshView.productStatus) : "DRAFT";
+    summary = nowStatus === "DRAFT" ? `บันทึก${what}ลงฉบับร่างแล้ว — ยังไม่ส่งตรวจ (เผยแพร่ใน Seller Center)` : `แก้${what}แล้ว`;
+    if (nowStatus !== "DRAFT") warnings.push(`สินค้านี้ไม่ได้เป็นฉบับร่างแล้ว (สถานะ ${nowStatus}) — ตรวจใน Seller Center`);
   }
   if (freshDetail) {
     const err = await saveTtsSlimCopy(admin, live.row, freshDetail);

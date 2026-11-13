@@ -276,6 +276,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
       message={(
         <div className="space-y-2 text-sm">
           <p>ระบบจะแก้สินค้าบนร้าน TikTok จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · ไม่แตะสต๊อก/สถานะเปิดปิด) · มีประวัติว่าใครแก้อะไร</p>
+          {(state.view?.status ?? state.view?.productStatus) === "DRAFT" && <p className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-xs text-sky-800">สินค้านี้เป็นฉบับร่าง — บันทึกลงร่างอย่างเดียว ไม่ส่งตรวจ ไม่ขึ้นขาย (กดเผยแพร่ใน Seller Center เมื่อพร้อม)</p>}
           <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
             {titleDirty && plan && <li><span className="font-medium text-slate-700">ชื่อสินค้า:</span> <span className="text-slate-400 line-through">{baseTitle}</span> → <span className="text-slate-800">{plan.title}</span></li>}
             {attrDirty && attrPlan!.changes.map((c) => <li key={`a-${c.label}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>)}
