@@ -226,6 +226,23 @@ export async function ttsGetCategoryAttributes(accessToken: string, shopCipher: 
   });
   return Array.isArray(d.attributes) ? d.attributes as Record<string, unknown>[] : [];
 }
+/**
+ * คลังสินค้าของร้าน (warehouse_id) สำหรับช่อง inventory ตอนสร้างสินค้า — TikTok บังคับแม้เป็นฉบับร่าง (เจอจริง 2026-11-13
+ * "Inventory of Skus[0] is a required field") · อ่านจากสินค้าที่มีอยู่ในร้าน (ค้นหา 1 ตัว · skus[].inventory[].warehouse_id)
+ * ใช้สิทธิ์ Product Basic ที่มีอยู่แล้ว (ไม่ต้องขอสิทธิ์ Logistics) · ไม่เจอ = null
+ */
+export async function ttsShopWarehouseId(accessToken: string, shopCipher: string): Promise<string | null> {
+  const page = await ttsSearchProducts(accessToken, shopCipher, { pageSize: 20 });
+  for (const p of page.products) {
+    for (const s of (Array.isArray(p.skus) ? p.skus as Record<string, unknown>[] : [])) {
+      for (const inv of (Array.isArray(s.inventory) ? s.inventory as Record<string, unknown>[] : [])) {
+        const id = str(inv.warehouse_id);
+        if (id) return id;
+      }
+    }
+  }
+  return null;
+}
 /** แบรนด์ที่ร้านใช้ได้ (Get Brands 202309) ค้นด้วยชื่อขึ้นต้น · ระบุหมวด = บอกว่าใช้ในหมวดนั้นได้ไหม */
 export async function ttsGetBrands(accessToken: string, shopCipher: string, opts: { brandName?: string; categoryId?: string | null }): Promise<{ id: string; name: string; authorized: string | null; available: string | null }[]> {
   const query: Record<string, string> = { shop_cipher: shopCipher, page_size: "100", category_version: "v2" };

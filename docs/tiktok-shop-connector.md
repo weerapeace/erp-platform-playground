@@ -103,12 +103,12 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 ## เฟส D: ลงสินค้าใหม่บน TikTok เป็น "ฉบับร่าง" (2026-11-12 · เจ้าของเลือก "ลงเป็นร่าง")
 - ทางเข้า = ตัวช่วยลงสินค้า/ลงทุกร้านตัวเดิม (AddToPlatformWizard) · ทะเบียน `lib/platform-create-registry` แถว `tiktok` (live: true · mode: "draft" · note)
 - กฎประกอบ `lib/tiktok-create-plan` (pure + เทสต์) · `/api/tiktok-shop/create-product` GET ดูก่อนส่ง / POST สร้าง (load.ts ตัวเดียวกัน) · หน้าดูก่อนส่ง `components/platform-listing/tiktok-create-preview`
-- **save_mode=AS_DRAFT เสมอ · ไม่ส่ง inventory** — เหตุผล: Create Product บังคับ quantity 1–99,999 ตอนลงขาย = ส่งสต๊อก (ขัดกฎ BigSeller) → เจ้าของตรวจ/กรอกช่องบังคับของหมวด/ใส่สต๊อก แล้วกดเผยแพร่ใน Seller Center
+- **save_mode=AS_DRAFT เสมอ** (ไม่ขึ้นขาย) · สต๊อกในร่าง 1 ชิ้นต่อตัวเลือก (TikTok บังคับ 1–99,999 แม้เป็นร่าง) → เจ้าของตรวจ/กรอกช่องบังคับของหมวด/แก้สต๊อกจริง แล้วกดเผยแพร่ใน Seller Center
 - ราคา = ราคาเต็ม (ไม่มี = ราคาขาย) · ส่วนลดใช้โปรโมชัน TikTok · ชั้นตัวเลือก = ชื่อกำหนดเอง (สี / ตัวเลือก / แบบ) ≤ 20 ตัว · ค่า ≤ 50 · SKU เดียว = ไม่มีชั้น
 - รูป = extra.tiktok_images → image_keys → อัตโนมัติ (≤ 9) → `ttsUploadRef` (shared — ใช้ร่วมกับลิ้นชัก) · รายละเอียดตัดรูปที่ไม่ใช่ของ TikTok · น้ำหนัก = extra.tiktok_weight → weight_g · กล่องปัดขึ้นเป็นจำนวนเต็ม (ไม่มีก็ได้)
 - แบรนด์ = ค้นชื่อแบรนด์ในระบบด้วย Get Brands (หมวดเดียวกัน) ไม่เจอ/ไม่ได้รับอนุญาต = ไม่ใส่ · ช่องบังคับของหมวด (Get Attributes · `is_requried`) = แสดงให้รู้ ไม่บล็อก · แคช 10 นาที
 - หลังสร้าง: ร่าง platform_product_id + status published (กันซ้ำ) · รายการบนร้านสถานะ draft จับคู่ Parent SKU · audit `tiktok_create` (draft: true)
-- ⚠️ ยังไม่เคยสร้างจริง — ตัวแรกให้เจ้าของกดเอง แล้วตรวจว่า TikTok รับร่างที่ไม่มี inventory ไหม (ถ้าไม่รับ ต้องหา warehouse_id + ใส่สต๊อก 1 ในร่าง)
+- **เจอจริง 2026-11-13 (เจ้าของกดตัวแรก):** TikTok ไม่รับร่างที่ไม่มีสต๊อก — "Inventory of Skus[0] is a required field" (36009004) → แก้: ใส่ `inventory[{ warehouse_id, quantity: 1 }]` (TTS_DRAFT_QTY) · คลัง = `ttsShopWarehouseId` (อ่าน skus[].inventory[].warehouse_id จากสินค้าที่มีในร้าน — ใช้สิทธิ์ Product Basic ไม่ต้องขอ Logistics) · ร่างไม่ขาย สต๊อกนี้ไม่มีผลจนกดเผยแพร่ — หน้าดูก่อนส่ง/ผลลัพธ์บอกให้แก้สต๊อกจริงก่อนเผยแพร่
 
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ~~ดึงหมวดหมู่ TikTok~~ (ทำแล้ว c51b1adf · เจ้าของกดดึงแล้ว 2026-11-12: 1,950 หมวดใบ ใช้ได้ 1,849 — ร่างจับคู่ 10 หมวดกลาง รอเจ้าของอนุมัติ)

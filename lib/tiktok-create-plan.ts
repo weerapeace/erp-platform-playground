@@ -1,8 +1,11 @@
 /**
  * สร้างสินค้าใหม่บน TikTok Shop (เฟส D) — ตัวประกอบข้อมูล (ของกลาง · pure · เทสต์ lib/__tests__/tiktok-create-plan.test.ts)
  * --------------------------------------------------------------------------
- * เจ้าของเลือก (2026-11-12): **ลงเป็นฉบับร่าง** (save_mode=AS_DRAFT) — ไม่ขึ้นขาย · ไม่ส่งสต๊อก (TikTok บังคับสต๊อก ≥ 1 ตอนลงขาย ขัดกฎ BigSeller)
- *   → สินค้าไปอยู่ "ฉบับร่าง" ใน Seller Center · เจ้าของตรวจ/กรอกช่องที่เหลือ/ใส่สต๊อก แล้วกดเผยแพร่เอง
+ * เจ้าของเลือก (2026-11-12): **ลงเป็นฉบับร่าง** (save_mode=AS_DRAFT) — ไม่ขึ้นขาย · ไม่แตะสต๊อกสินค้าที่ขายอยู่
+ *   → สินค้าไปอยู่ "ฉบับร่าง" ใน Seller Center · เจ้าของตรวจ/กรอกช่องที่เหลือ/ใส่สต๊อกจริง แล้วกดเผยแพร่เอง
+ *   ⚠️ เจอจริง 2026-11-13: TikTok บังคับ inventory แม้เป็นฉบับร่าง ("Inventory of Skus[0] is a required field")
+ *      → ใส่สต๊อกตั้งต้นในร่าง TTS_DRAFT_QTY (1 ชิ้น · ช่วงที่ TikTok รับคือ 1–99,999) + คลังของร้าน (ttsShopWarehouseId)
+ *      ร่างยังไม่ขาย สต๊อกนี้ไม่มีผลจนกดเผยแพร่ — ต้องแก้เป็นจำนวนจริงก่อนเผยแพร่ (หน้าดูก่อนส่ง/ผลลัพธ์บอกชัด)
  * ใช้ 2 ที่ — ต้องตรงกันเสมอ (แบบเดียวกับ lib/lazada-create-plan):
  *   1) GET  /api/tiktok-shop/create-product?parent_sku_id=  → ตัวช่วยลงสินค้า "ดูก่อนส่ง"
  *   2) POST /api/tiktok-shop/create-product                  → สร้างฉบับร่างบน TikTok (รูปต้องฝากก่อน — route ทำ)
@@ -25,6 +28,8 @@ import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { isTiktokImageUrl, TTS_DESC_MAX, TTS_MAX_IMAGES, TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN, ttsTitleLength } from "@/lib/tiktok-listing-edit";
 
+/** สต๊อกตั้งต้นต่อตัวเลือกในฉบับร่าง (TikTok บังคับ 1–99,999 แม้เป็นร่าง) — แก้เป็นจำนวนจริงใน Seller Center ก่อนเผยแพร่ */
+export const TTS_DRAFT_QTY = 1;
 const ATTR_NAME_MAX = 20;
 const ATTR_VALUE_MAX = 50;
 const SELLER_SKU_MAX = 50;
@@ -66,6 +71,8 @@ export type TtsCreatePreview = {
   variants: TtsCreateVariantRow[];
   /** ช่องบังคับของหมวด (ฉบับร่างยังไม่บังคับ — ต้องกรอกใน Seller Center ก่อนเผยแพร่) · loaded=false = ดึงไม่ได้/ยังไม่เลือกหมวด */
   attrs: { required: string[]; loaded: boolean };
+  /** สต๊อกตั้งต้นในร่าง (ต่อตัวเลือก) + คลังของร้าน (null = หาไม่เจอ) */
+  stock: { qty: number; warehouseId: string | null };
   missing: string[];
   warnings: string[];
   on_shop: string | null;
@@ -109,6 +116,8 @@ export function planTiktokCreate(input: {
   parent: TtsCreateParent; skus: TtsCreateSku[]; draft: TtsCreateDraft;
   mappedCategory: string | null; galleryKeys: string[]; attrDefs: TtsAttrDef[] | null;
   brand: { id: string; name: string } | null; brandNote?: string | null; onShop: string | null;
+  /** คลังสินค้าของร้าน (ttsShopWarehouseId) — undefined = ยังไม่รู้ (ไม่มีกุญแจ) · null = หาไม่เจอ */
+  warehouseId?: string | null;
 }): { preview: TtsCreatePreview; payload: Record<string, unknown> } {
   const { parent: p, draft: d } = input;
   const extra = (d?.extra && typeof d.extra === "object" ? d.extra : {}) as Record<string, unknown>;
@@ -213,7 +222,12 @@ export function planTiktokCreate(input: {
 
   if (input.onShop || str(d?.platform_product_id)) warnings.push(`มีบน TikTok แล้ว (#${input.onShop ?? str(d?.platform_product_id)}) — ไม่สร้างซ้ำ`);
 
-  // ---------- payload (ฉบับร่าง · ไม่มีสต๊อก) ----------
+  // ---------- สต๊อกตั้งต้นในร่าง (TikTok บังคับ) ----------
+  const warehouseId = input.warehouseId ?? null;
+  if (input.warehouseId === null) missing.push("ไม่รู้คลังสินค้าของร้าน TikTok (ใช้ใส่สต๊อกในร่าง) — กดดึงสินค้าจาก TikTok แล้วลองใหม่");
+  if (variants.length) warnings.push(`สต๊อกในร่างใส่ ${TTS_DRAFT_QTY} ชิ้นต่อตัวเลือก (TikTok บังคับแม้เป็นร่าง) — แก้เป็นจำนวนจริงใน Seller Center ก่อนกดเผยแพร่`);
+
+  // ---------- payload (ฉบับร่าง · สต๊อกตั้งต้น) ----------
   const payload: Record<string, unknown> = {
     save_mode: "AS_DRAFT",
     title: name,
@@ -227,6 +241,7 @@ export function planTiktokCreate(input: {
     skus: variants.map((v) => ({
       seller_sku: v.code,
       price: { amount: v.price != null ? v.price.toFixed(2) : "", currency: "THB" },
+      inventory: [{ warehouse_id: warehouseId ?? "", quantity: TTS_DRAFT_QTY }],
       ...(dims.length ? { sales_attributes: dims.map((dm) => ({ name: dm.name, value_name: v.attrs[dm.name] })) } : {}),
     })),
   };
@@ -243,6 +258,7 @@ export function planTiktokCreate(input: {
       package: { weight, ...box, src: pkgSrc },
       dims, variants,
       attrs: { required, loaded: !!input.attrDefs },
+      stock: { qty: TTS_DRAFT_QTY, warehouseId },
       missing, warnings,
       on_shop: input.onShop ?? (str(d?.platform_product_id) || null),
       draft_extra: extra,

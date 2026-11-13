@@ -319,7 +319,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             const gfText = gf?.manual && gf.want ? ` · ของขวัญ: ไปติ๊กเองใน LINE (${gf.want.status === "gift_only" ? "เฉพาะของขวัญ" : "เปิด"}${gf.want.categories.length ? ` · ${gf.want.categories.join(", ")}` : ""})` : "";
             const dp = j.display as { ok: boolean; status: "onsale" | "hide" } | null | undefined;
             const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : " · ตั้งเปิด/ปิดขายไม่สำเร็จ") : "";
-            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/ใส่สต๊อก แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
+            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/แก้สต๊อกเป็นจำนวนจริง (ร่างใส่ไว้ 1 ชิ้น) แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
             else res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
           }
         } catch (e) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${(e as Error).message}` }); }

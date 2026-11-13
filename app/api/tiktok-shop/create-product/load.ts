@@ -5,7 +5,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
-import { ttsErrorText, ttsGetBrands, ttsGetCategoryAttributes } from "@/lib/tiktok-shop";
+import { ttsErrorText, ttsGetBrands, ttsGetCategoryAttributes, ttsShopWarehouseId } from "@/lib/tiktok-shop";
 import { planTiktokCreate, ttsAttrDefsOf, ttsCategoryIdOf, type TtsAttrDef, type TtsCreatePreview, type TtsCreateSku } from "@/lib/tiktok-create-plan";
 import { getPlatformId, ttsTokenOrReason } from "../shared";
 
@@ -62,6 +62,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
   let attrDefs: TtsAttrDef[] | null = null;
   let brand: { id: string; name: string } | null = null;
   let brandNote: string | null = null;
+  let warehouseId: string | null | undefined = undefined;
   if (!brandId) blockers.push("สินค้ายังไม่มีแบรนด์ (กุญแจ TikTok ผูกกับแบรนด์)");
   else {
     const tok = await ttsTokenOrReason(admin, brandId, platformId, userId);
@@ -70,6 +71,9 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
     else {
       token = { accessToken: tok.accessToken, cipher: tok.meta.shops[0].cipher };
       const t = token;
+      // คลังของร้าน (TikTok บังคับ inventory แม้เป็นร่าง) — อ่านจากสินค้าที่มีอยู่ · แคช 10 นาที
+      try { warehouseId = await cached(`wh:${t.cipher}`, () => ttsShopWarehouseId(t.accessToken, t.cipher)); }
+      catch (e) { warehouseId = null; console.warn(`[tiktok create] หาคลังของร้านไม่ได้: ${ttsErrorText(e)}`); }
       if (categoryId) {
         try { attrDefs = ttsAttrDefsOf(await cached(`attrs:${categoryId}`, () => ttsGetCategoryAttributes(t.accessToken, t.cipher, categoryId))); }
         catch (e) { attrDefs = null; console.warn(`[tiktok create] ดึงช่องของหมวด ${categoryId} ไม่ได้: ${ttsErrorText(e)}`); }
@@ -100,7 +104,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
     draft, mappedCategory: it.platformCategory || null,
-    galleryKeys: it.images.map((x) => x.key), attrDefs, brand, brandNote,
+    galleryKeys: it.images.map((x) => x.key), attrDefs, brand, brandNote, warehouseId,
     onShop: exOnShop ? str(exOnShop.external_product_id) : null,
   });
   if (preview.on_shop) blockers.push(`มีบน TikTok แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);

@@ -35,10 +35,10 @@ export const PLATFORM_CREATORS: Record<string, PlatformCreator> = {
     notLiveReason: "ดูก่อนส่ง + บันทึกร่างได้ · ลงจริงเปิดเมื่อ Lazada ให้สร้างสินค้าอีกครั้ง (ปิดช่วงแคมเปญ)",
   },
   // TikTok Shop (เฟส D 2026-11-12 · เจ้าของเลือก "ลงเป็นร่าง"): lib/tiktok-create-plan + /api/tiktok-shop/create-product
-  //   ลงเป็นฉบับร่างเสมอ — TikTok บังคับสต๊อก ≥ 1 ตอนลงขาย (ขัดกฎไม่ส่งสต๊อกขณะ BigSeller ซิงค์)
+  //   ลงเป็นฉบับร่างเสมอ (ไม่ขึ้นขาย) · TikTok บังคับสต๊อก ≥ 1 แม้เป็นร่าง (เจอจริง 2026-11-13) → ร่างใส่ 1 ชิ้น แก้ก่อนเผยแพร่
   tiktok: {
     code: "tiktok", label: "TikTok Shop", endpoint: "/api/tiktok-shop/create-product", live: true, mode: "draft",
-    note: "ลงเป็นฉบับร่างใน Seller Center (ยังไม่ขึ้นขาย · ไม่ส่งสต๊อก) — ตรวจ กรอกช่องที่เหลือ ใส่สต๊อก แล้วกดเผยแพร่เอง",
+    note: "ลงเป็นฉบับร่างใน Seller Center (ยังไม่ขึ้นขาย · สต๊อกตั้งต้นในร่าง 1 ชิ้น เพราะ TikTok บังคับ) — ตรวจ กรอกช่องที่เหลือ แก้สต๊อกเป็นจำนวนจริง แล้วกดเผยแพร่เอง",
   },
 };
 

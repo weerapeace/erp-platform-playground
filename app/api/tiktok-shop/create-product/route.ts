@@ -2,10 +2,10 @@
  * สร้างสินค้าใหม่บน TikTok Shop เป็น "ฉบับร่าง" (เฟส D) — /api/tiktok-shop/create-product
  *
  *  GET  ?parent_sku_id=   (products.platforms.view) → { preview, blockers, live, mode: "draft" } ตัวช่วยลงสินค้า ขั้น "ดูก่อนส่ง" (ไม่ส่งอะไรขึ้นร้าน)
- *  POST { parent_sku_id }  (products.platforms.publish) → สร้างฉบับร่างบน TikTok (save_mode=AS_DRAFT · ไม่ขึ้นขาย · ไม่ส่งสต๊อก)
+ *  POST { parent_sku_id }  (products.platforms.publish) → สร้างฉบับร่างบน TikTok (save_mode=AS_DRAFT · ไม่ขึ้นขาย · สต๊อกตั้งต้นในร่าง 1 ชิ้น — TikTok บังคับ)
  *        ลำดับ: กันซ้ำ (มีบนร้าน/ร่างมีรหัส) → ล็อก 3 นาที → ฝากรูปกับ TikTok (MAIN_IMAGE) → Create Product
  *               → เก็บรหัสในร่าง + รายการบนร้าน (สถานะร่าง · จับคู่สินค้านี้) → ประวัติ (audit tiktok_create)
- *        เจ้าของตรวจ + กรอกช่องบังคับของหมวด + ใส่สต๊อก แล้วกดเผยแพร่เองใน Seller Center
+ *        เจ้าของตรวจ + กรอกช่องบังคับของหมวด + แก้สต๊อกเป็นจำนวนจริง แล้วกดเผยแพร่เองใน Seller Center
  *
  * ตัวประกอบข้อมูลตัวเดียว = lib/tiktok-create-plan (GET กับ POST ใช้ ./load ตัวเดียวกัน — ห้ามประกอบแยก)
  */

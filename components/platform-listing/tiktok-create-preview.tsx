@@ -6,7 +6,7 @@
  * ข้อมูล = GET /api/tiktok-shop/create-product?parent_sku_id= (ตัวประกอบเดียวกับตอนสร้างจริง — lib/tiktok-create-plan)
  * แก้แล้วเขียนลง "ร่าง TikTok" (PATCH /api/product-platforms) — ไม่แก้ข้อมูลสินค้าในระบบ:
  *   ชื่อ / รายละเอียด / หมวด → ร่าง · รูป → extra.tiktok_images · น้ำหนัก (แทนของสินค้า) → extra.tiktok_weight
- * ลงเป็นฉบับร่างเสมอ (ไม่ขึ้นขาย · ไม่ส่งสต๊อก) — ช่องบังคับของหมวด/สต๊อก กรอกใน Seller Center ก่อนกดเผยแพร่
+ * ลงเป็นฉบับร่างเสมอ (ไม่ขึ้นขาย · สต๊อกตั้งต้นในร่าง 1 ชิ้น เพราะ TikTok บังคับ) — ช่องบังคับของหมวด/สต๊อกจริง กรอกใน Seller Center ก่อนกดเผยแพร่
  * ของกลางที่ใช้: ListingImageGrid/ListingImagePicker (รูป) · PlatformCategoryPicker (หมวด) · state-views · Icon
  * ห้ามใช้: แก้สินค้าที่มีบน TikTok แล้ว (ใช้ลิ้นชักสินค้าบนร้าน)
  */
@@ -100,7 +100,7 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   return (
     <div className="space-y-3">
       <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-        <Icon name="info" /> ลงเป็น <b>ฉบับร่าง</b> ใน Seller Center — ยังไม่ขึ้นขาย · ไม่ส่งสต๊อก · หลังสร้างให้เข้า Seller Center › สินค้า › ฉบับร่าง ตรวจ/กรอกช่องที่เหลือ/ใส่สต๊อก แล้วกดเผยแพร่เอง
+        <Icon name="info" /> ลงเป็น <b>ฉบับร่าง</b> ใน Seller Center — ยังไม่ขึ้นขาย · ใส่สต๊อกตั้งต้นในร่าง {pv.stock.qty} ชิ้นต่อตัวเลือก (TikTok บังคับแม้เป็นร่าง) · หลังสร้างให้เข้า Seller Center › สินค้า › ฉบับร่าง ตรวจ/กรอกช่องที่เหลือ/<b>แก้สต๊อกเป็นจำนวนจริง</b> แล้วกดเผยแพร่เอง
       </p>
       {(pv.missing.length > 0 || blockers.length > 0) && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
@@ -168,7 +168,7 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
       {/* ตัวเลือก + ราคา */}
       <div className="rounded-xl border border-slate-200 p-3 text-sm">
         <div className="mb-2 text-xs font-medium text-slate-600">
-          ตัวเลือก & ราคา ({pv.variants.length.toLocaleString()} SKU{pv.dims.length ? ` · ชั้น: ${pv.dims.map((d) => `${d.name} (${d.values.length})`).join(" · ")}` : " · ตัวเลือกเดียว"} · ไม่ส่งสต๊อก)
+          ตัวเลือก & ราคา ({pv.variants.length.toLocaleString()} SKU{pv.dims.length ? ` · ชั้น: ${pv.dims.map((d) => `${d.name} (${d.values.length})`).join(" · ")}` : " · ตัวเลือกเดียว"} · สต๊อกในร่าง {pv.stock.qty} ชิ้น/ตัวเลือก)
         </div>
         <div className="max-h-64 divide-y divide-slate-100 overflow-auto rounded-lg border border-slate-100">
           {pv.variants.map((v) => (

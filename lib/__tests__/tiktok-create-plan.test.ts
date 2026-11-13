@@ -9,7 +9,7 @@ const parent = {
   id: "p1", code: "BCG10", name_th: "กระเป๋าคาดอก Belt bag ผ้าไนล่อน กันน้ำ ใช้ได้ทั้งชายหญิง", name_platform: null,
   description: "กระเป๋าคาดอก\nผ้าไนล่อนกันน้ำ", platform_description: null, weight_g: 350, box: { l: 25.2, w: 15, h: 5 },
 };
-const base = { parent, draft: null, mappedCategory: "903560 · กระเป๋าและกระเป๋าเดินทาง > กระเป๋าผู้ชาย > กระเป๋าคาดเอว", galleryKeys: ["g/1.jpg"], attrDefs: [], brand: { id: "b1", name: "Louis Montini" }, onShop: null };
+const base = { parent, draft: null, mappedCategory: "903560 · กระเป๋าและกระเป๋าเดินทาง > กระเป๋าผู้ชาย > กระเป๋าคาดเอว", galleryKeys: ["g/1.jpg"], attrDefs: [], brand: { id: "b1", name: "Louis Montini" }, onShop: null, warehouseId: "7198734530407614213" as string | null };
 
 describe("สร้างฉบับร่างบน TikTok", () => {
   test("ข้อมูลครบ → ไม่มีข้อขาด · payload เป็นฉบับร่าง ไม่มีสต๊อก", () => {
@@ -18,14 +18,15 @@ describe("สร้างฉบับร่างบน TikTok", () => {
     expect(payload).toMatchObject({ save_mode: "AS_DRAFT", category_id: "903560", category_version: "v2", brand_id: "b1", package_weight: { value: "0.35", unit: "KILOGRAM" } });
     expect(payload.package_dimensions).toEqual({ length: "26", width: "15", height: "5", unit: "CENTIMETER" });
     const skus = payload.skus as Record<string, unknown>[];
-    expect(skus[0]).toEqual({ seller_sku: "BCG10-01", price: { amount: "1390.00", currency: "THB" }, sales_attributes: [{ name: "สี", value_name: "น้ำเงิน" }] });
-    expect(JSON.stringify(payload)).not.toContain("inventory");
+    expect(skus[0]).toEqual({ seller_sku: "BCG10-01", price: { amount: "1390.00", currency: "THB" }, inventory: [{ warehouse_id: "7198734530407614213", quantity: 1 }], sales_attributes: [{ name: "สี", value_name: "น้ำเงิน" }] });
+    expect(preview.stock).toEqual({ qty: 1, warehouseId: "7198734530407614213" });
+    expect(preview.warnings.join(" ")).toContain("แก้เป็นจำนวนจริง");
     expect(preview.warnings.join(" ")).toContain("โปรโมชัน");   // ราคาเต็ม ≠ ราคาขาย
   });
   test("SKU เดียว = ไม่มีชั้นตัวเลือก · ไม่มีราคาเต็ม = ใช้ราคาขาย", () => {
     const { preview, payload } = planTiktokCreate({ ...base, skus: [sku("KR64-01", { fake_price: null, list_price: 159 })] });
     expect(preview.dims).toEqual([]);
-    expect((payload.skus as Record<string, unknown>[])[0]).toEqual({ seller_sku: "KR64-01", price: { amount: "159.00", currency: "THB" } });
+    expect((payload.skus as Record<string, unknown>[])[0]).toEqual({ seller_sku: "KR64-01", price: { amount: "159.00", currency: "THB" }, inventory: [{ warehouse_id: "7198734530407614213", quantity: 1 }] });
   });
   test("ตัวสี (master) ไม่ลง · ตัวขายใช้ราคา/รูปของตัวสีถ้าไม่มี", () => {
     const { preview } = planTiktokCreate({ ...base, skus: [sku("MGN402-03", { color_th: "น้ำตาล", fake_price: 1690 }), sku("MGN402-03M", { color_th: "น้ำตาล", fake_price: null, list_price: null, cover_image_r2_key: null, attribute_values: { variant_option: { name: "ไซซ์", value: "M" } } }), sku("MGN402-03L", { color_th: "น้ำตาล", fake_price: null, list_price: null, cover_image_r2_key: null, attribute_values: { variant_option: { name: "ไซซ์", value: "L" } } })] });
@@ -77,5 +78,10 @@ describe("สร้างฉบับร่างบน TikTok", () => {
     expect(r.html).not.toContain("r2-image");
     expect(ttsCategoryIdOf("903560 · x")).toBe("903560");
     expect(ttsCategoryIdOf("")).toBeNull();
+  });
+  test("ไม่รู้คลังของร้าน = ขาด (TikTok บังคับสต๊อกแม้เป็นร่าง — เจอจริง 2026-11-13)", () => {
+    const { preview } = planTiktokCreate({ ...base, warehouseId: null, skus: [sku("X1")] });
+    expect(preview.missing.join(" ")).toContain("คลังสินค้า");
+    expect(planTiktokCreate({ ...base, warehouseId: undefined, skus: [sku("X1")] }).preview.missing.join(" ")).not.toContain("คลังสินค้า");
   });
 });
