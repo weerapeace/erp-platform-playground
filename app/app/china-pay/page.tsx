@@ -142,8 +142,58 @@ const fmtTransferred = (v: unknown) => num(v) > 0 ? `฿${fmt(num(v))}` : "฿0 
 // ยอดบิลจีน (¥) ของรายการโอน — ใบสรุปบางทาง (เปิดจากลิงก์) ไม่มี selectedRmb → รวมจาก lines
 const txChinaRmb = (t: Record<string, unknown>) => num(t.selectedRmb) || (Array.isArray(t.lines)
   ? (t.lines as Record<string, unknown>[]).filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_rmb), 0) : 0);
+// ช่องทางจ่ายของรายการโอน (china_transfers.pay_method): bank=โอนผ่านธนาคาร · balance=จ่ายจากยอดคงเหลือจีน · wechat=โอนตรง WeChat
+// รายการ/ใบสรุปเก่าที่ไม่มี pay_method → เดาจากยอด (โอนจริง ฿0 + มีบิลจีน = balance)
+type PayMethod = "bank" | "balance" | "wechat";
+const payMethodOf = (t: Record<string, unknown>): PayMethod => {
+  const m = String(t.pay_method ?? "");
+  if (m === "bank" || m === "balance" || m === "wechat") return m;
+  return num(t.transferred ?? t.amount_transferred_thb) <= 0 && txChinaRmb(t) > 0 ? "balance" : "bank";
+};
 // รอบที่จ่ายจากยอดคงเหลือจีนล้วน (โอนจริง ฿0) → ไม่ใช้เรท · ใบสรุปไม่โชว์แถว คงเหลือ/เรท/เป็นเงินจีน/เข้าบัญชีจีน
-const isBalanceOnly = (t: Record<string, unknown>) => num(t.transferred) <= 0 && txChinaRmb(t) > 0;
+const isBalanceOnly = (t: Record<string, unknown>) => payMethodOf(t) === "balance";
+// โอนตรงผ่าน WeChat — ไม่หักยอดคงเหลือ · ไม่ตัด CTW · ไม่ต้องใส่เรท (เรท = ยอดบาท ÷ ยอดหยวน คิดเองเมื่อกรอกยอดบาท)
+const isWechat = (t: Record<string, unknown>) => payMethodOf(t) === "wechat";
+// WeChat ที่ยังไม่ได้กรอกยอดบาท (ยอดบาทอยู่ใน LINE ต้องกรอกมือ) → ป้าย "รอกรอกยอดบาท"
+const isWxPending = (t: Record<string, unknown>) => isWechat(t) && !(num(t.transferred ?? t.amount_transferred_thb) > 0);
+const WECHAT_TAG = "โอนตรงผ่าน WeChat · ไม่หักยอดคงเหลือจีน";
+// แถวใบสรุปรอบ WeChat (ใช้ร่วม ใบในแอป / รูป / ข้อความ LINE)
+function wechatRows(t: Record<string, unknown>): { l: string; r: string; tone: "main" | "pending" | "muted" }[] {
+  const cnRmb = +txChinaRmb(t).toFixed(2), thb = num(t.transferred ?? t.amount_transferred_thb);
+  return [
+    { l: "ยอดจ่าย (WeChat)", r: "¥" + fmt(cnRmb), tone: "main" },
+    thb > 0 ? { l: "ยอดบาท", r: "฿" + fmt(thb), tone: "main" } : { l: "ยอดบาท", r: "รอกรอกยอดบาท", tone: "pending" },
+    { l: "เรท (฿ ÷ ¥)", r: thb > 0 && cnRmb > 0 ? (thb / cnRmb).toFixed(4) : "—", tone: "muted" },
+  ];
+}
+/**
+ * กรอกยอดบาทให้รายการ WeChat ทีหลัง (ยอดอยู่ใน LINE) → คิดเรท = ฿ ÷ ¥ แล้วอัปเดต
+ * รายการโอน (ยอดบาท/เรท/มูลค่าบาทต่อบิลใน lines) + เรทของบิลจีนที่ตัดในรอบนั้น (ให้มูลค่าบาทของบิลขึ้น)
+ * row = แถวดิบจาก china_transfers (ไม่ใช่ object ใบสรุปที่เติมข้อมูลร้านแล้ว)
+ */
+async function fillWechatThb(row: Record<string, unknown>, thb: number): Promise<{ ok: true; rate: number } | { ok: false; error: string }> {
+  const lines = (Array.isArray(row.lines) ? row.lines : []) as Record<string, unknown>[];
+  const cnRmb = lines.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_rmb), 0);
+  if (!(thb > 0)) return { ok: false, error: "ใส่ยอดบาทก่อน" };
+  if (!(cnRmb > 0)) return { ok: false, error: "รายการนี้ไม่มียอดหยวน" };
+  const rate = +(thb / cnRmb).toFixed(4);
+  const newLines = lines.map(l => {
+    const { sup: _sup, ...rest } = l;   // กันข้อมูลร้านที่ใบสรุปเติมไว้หลุดลงฐานข้อมูล
+    void _sup;
+    return rest.kind === "china" ? { ...rest, paid_thb: +(num(rest.paid_rmb) * rate).toFixed(2) } : rest;
+  });
+  const res = await apiFetch(`/api/master-v2/china-transfers/${String(row.id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amount_transferred_thb: +thb.toFixed(2), bills_total_thb: +thb.toFixed(2), rate, lines: newLines, actor: "china-app" }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) return { ok: false, error: String(j.error ?? "บันทึกยอดบาทไม่สำเร็จ") };
+  const billIds = [...new Set(lines.filter(l => l.kind === "china").map(l => String(l.bill_id)).filter(Boolean))];
+  await Promise.all(billIds.map(id => apiFetch(`/api/master-v2/china-bills/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rate, actor: "china-app" }),
+  }).catch(() => null)));
+  return { ok: true, rate };
+}
 // ยอดคงเหลือสำหรับใบสรุป — รอบจ่ายจากยอดคงเหลือ: ขอยอด "ณ ตอนบันทึกใบนั้น" (ก่อน/หลังจ่าย) ไม่ใช่ยอดวันนี้
 type ReceiptBalance = { rmb: number; beforeRmb: number | null; afterRmb: number | null };
 async function fetchReceiptBalance(t: Record<string, unknown>): Promise<ReceiptBalance> {
@@ -183,7 +233,7 @@ function feeFor(amt: number): number {
 }
 // ชั้นเรท R1–R4 (นับเป็นหยวน) + สถานะบิล = สูตรกลาง lib/china-pay (ใช้ร่วมกับหน้าพิมพ์สรุปบิล)
 
-type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "suppliers" | "automation" | "menusettings";
+type Tab = "dashboard" | "bill" | "transfer" | "wechat" | "transfers" | "all" | "rate" | "ctw" | "suppliers" | "automation" | "menusettings";
 
 // บันทึกรูปลงเครื่อง — บน iPhone ใช้ share sheet (Save Image เข้า Photos, ไม่เปิดแท็บใหม่)
 // บน desktop ใช้ <a download> ปกติ (โหลดไฟล์ลงเครื่อง ไม่เปิดแท็บใหม่)
@@ -320,6 +370,8 @@ const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "bill", icon: "💴", label: "ลงบิล" },
   { k: "transfer", icon: "💰", label: "โอนเงิน" },
   { k: "transfers", icon: "🧾", label: "รายการโอน" },
+  // หลัง "รายการโอน" — แถบล่างมือถือโชว์ 4 เมนูแรก ไม่ให้ดันรายการโอนตกแถบ (role ที่ตั้งเมนูไว้ต้องติ๊กเพิ่มเอง)
+  { k: "wechat", icon: "💬", label: "โอนตรง WeChat" },
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
   { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
@@ -406,7 +458,7 @@ export default function ChinaPayApp() {
           return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
         });
         const lo = Number(String(row.leftover_rmb ?? "0").replace(/,/g, "")) || 0;
-        setDeepTransfer({ transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, lo), lines, attachments: Array.isArray(row.attachments) ? row.attachments.map(String) : [] });
+        setDeepTransfer({ transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, lo), lines, attachments: Array.isArray(row.attachments) ? row.attachments.map(String) : [], pay_method: row.pay_method });
       }).catch(() => {});
     }
     if (billId || txId || pvId) window.history.replaceState({}, "", "/app/china-pay");
@@ -452,6 +504,7 @@ export default function ChinaPayApp() {
     {renderTab === "ctw" && <CtwList canDelete={canManage} />}
     {renderTab === "suppliers" && <SupplierList canManage={canManage} />}
     {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
+    {renderTab === "wechat" && <TransferPage mode="wechat" />}
     {renderTab === "transfers" && <TransferList canDelete={canManage} onGo={go} />}
     {renderTab === "automation" && <AutomationPage />}
     {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
@@ -1107,6 +1160,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<DRow | null>(null);   // จอคอม: กดบิลในรายการรอโอน → เปิดรายละเอียด
   const [reloadKey, setReloadKey] = useState(0);
+  const [wxPending, setWxPending] = useState(0);   // โอนตรง WeChat ที่ยังไม่ได้กรอกยอดบาท
 
   useEffect(() => {
     const ym = today().slice(0, 7); // YYYY-MM
@@ -1117,8 +1171,10 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
       apiFetch(`/api/master-v2/china-bills?limit=500&filters=${fDone}`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/ctw-bills?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
-    ]).then(([p, d, rt, c]) => {
+      apiFetch(`/api/master-v2/china-transfers?limit=200&sort_by=transfer_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
+    ]).then(([p, d, rt, c, tf]) => {
       setPending(p.data ?? []);
+      setWxPending((tf.data ?? []).filter((r: Record<string, unknown>) => r.is_active !== false && isWxPending(r)).length);
       const doneRows = (d.data ?? []).filter((r: Record<string, unknown>) => String(r.transfer_date ?? "").slice(0, 7) === ym);
       setDoneMonth({
         count: doneRows.length,
@@ -1131,6 +1187,17 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
 
   const pendingRmb = pending.reduce((a, r) => a + num(r.amount_rmb) + num(r.fee_rmb), 0);
   const r1 = num(rate?.rate);
+  // แจ้งเตือน WeChat รอกรอกยอดบาท → กดแล้วเปิดรายการโอนที่กรองไว้ให้
+  const wxPendingCard = wxPending > 0 && (
+    <button onClick={() => { try { sessionStorage.setItem("china-transfers-filter", "wx-pending"); } catch { /* noop */ } onGo("transfers"); }}
+      className="block w-full text-left rounded-2xl bg-amber-50 border border-amber-300 px-4 py-3 active:scale-[0.99] transition">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-amber-800">💬 WeChat รอกรอกยอดบาท</span>
+        <span className="text-xl font-bold text-amber-700">{wxPending} <span className="text-sm font-normal">รายการ</span></span>
+      </div>
+      <div className="text-[11px] text-amber-700 mt-0.5">ยอดบาทอยู่ใน LINE — แตะเพื่อกรอก ระบบคิดเรทให้เอง</div>
+    </button>
+  );
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
 
@@ -1141,6 +1208,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
     const SHOW = 10;
     return (
       <div className="space-y-5">
+        {wxPendingCard}
         <div className="grid grid-cols-2 xl:grid-cols-[1.25fr_1.25fr_1fr_1fr] gap-4">
           <button onClick={() => onGo("all")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-orange-500 to-orange-500 text-white p-4 shadow-sm hover:brightness-105 transition">
             <div className="text-sm opacity-90">บิลจีนรอโอน</div>
@@ -1213,6 +1281,8 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
           <div className="text-xl font-semibold">¥{fmt(pendingRmb)}</div>
         </div>
       </button>
+
+      {wxPendingCard}
 
       {/* ยอดเงินคงเหลือที่จีน (จัดการ/ปรับยอดได้) */}
       <ChinaBalanceCard />
@@ -3131,7 +3201,7 @@ function buildTransferReceipt(row: Record<string, unknown>, pmap: Record<string,
     thb: thbSum, chinaRemainThb, billsThb: selectedRmb * rate, tier, chinaYuanBought,
     shortfallRmb: Math.max(0, selectedRmb - chinaYuanBought), surplusRmb: Math.max(0, chinaYuanBought - selectedRmb),
   } : undefined;
-  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), selectedRmb, lines, attachments, breakdown };
+  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), selectedRmb, lines, attachments, breakdown: row.pay_method === "wechat" ? undefined : breakdown, pay_method: row.pay_method };
 }
 
 // ส่งสรุปการโอนเข้า LINE (Flex + ปุ่มเปิดใบสรุป) — ใช้ร่วม TransferPage + TransferList
@@ -3155,14 +3225,17 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
   const bd = t.breakdown as Record<string, unknown> | undefined;
   let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
   if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
-  const balOnly = isBalanceOnly(t);
-  if (balOnly) {   // จ่ายจากยอดคงเหลือล้วน — ตั้งต้น − บิลจีน = หลังจ่าย (ยอด ณ ตอนบันทึก) · ไม่มีเรท
+  const balOnly = isBalanceOnly(t), wxOnly = isWechat(t);
+  if (wxOnly) {   // โอนตรง WeChat — ยอดหยวน · ยอดบาท (หรือรอกรอก) · เรท ฿÷¥ · ไม่แตะยอดคงเหลือ
+    text += WECHAT_TAG;
+    for (const r of wechatRows(t)) text += `\n${r.l}: ${r.r}`;
+  } else if (balOnly) {   // จ่ายจากยอดคงเหลือล้วน — ตั้งต้น − บิลจีน = หลังจ่าย (ยอด ณ ตอนบันทึก) · ไม่มีเรท
     text += BALANCE_ONLY_TAG;
     for (const r of balanceOnlyRows(t, recBal)) text += `\n${r.l}: ${r.r}`;
   } else {
     text += `โอนจริง: ${fmtTransferred(t.transferred)}`;
   }
-  if (!balOnly && bd) {
+  if (!balOnly && !wxOnly && bd) {
     if (num(bd.thb) > 0) text += `\nหัก ค่าส่ง/VAT: −฿${fmt(num(bd.thb))}`;
     text += `\nคงเหลือ: ฿${fmt(num(bd.chinaRemainThb))}`;
     text += `\nเรท (ชั้น ${String(bd.tier ?? "")}): ${fmt(num(t.rate))}`;
@@ -3170,7 +3243,7 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
     if (num(bd.shortfallRmb) > 0) text += `\nหัก ยอดคงเหลือจีน: ¥${fmt(+num(bd.shortfallRmb).toFixed(2))}`;
     text += `\nรวมยอด (บิลจีน): ¥${fmt(num(t.selectedRmb))}`;
   }
-  if (!balOnly) {
+  if (!balOnly && !wxOnly) {
     text += `\nเข้าบัญชีจีน (ส่วนต่าง): ¥${fmt(+num(t.chinaInRmb).toFixed(2))}`;
     text += `\nยอดคงเหลือบัญชีจีน: ¥${fmt(+balanceRmb.toFixed(2))}`;
   }
@@ -3209,6 +3282,10 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
   const [editTarget, setEditTarget] = useState<Record<string, unknown> | null>(null); // การโอนที่กำลังยืนยันแก้ไข (ลบ+เริ่มใหม่)
   const [linkTarget, setLinkTarget] = useState<Record<string, unknown> | null>(null); // การโอนที่กำลังจับคู่สลิป↔บิล CTW
   const [busy, setBusy] = useState(false);
+  // ตัวกรอง "WeChat รอกรอกยอดบาท" — มาจากการ์ดแจ้งเตือนหน้า Dashboard → เปิดแบบกรองไว้ให้ (ใช้ครั้งเดียว)
+  const [onlyWxPending, setOnlyWxPending] = useState(() => {
+    try { const v = sessionStorage.getItem("china-transfers-filter") === "wx-pending"; sessionStorage.removeItem("china-transfers-filter"); return v; } catch { return false; }
+  });
 
   // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
   // redo=true → หลังคืนยอด เติม draft กลับหน้าโอนให้แก้ต่อ
@@ -3242,7 +3319,21 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
       }
 
       setRows(p => p.filter(x => String(x.id) !== id));
-      if (redo) {
+      if (redo && isWechat(target)) {
+        // WeChat → เติม draft ของเมนู "โอนตรง WeChat" (บิล/ยอด/สลิป/ยอดบาท) แล้วเปิดเมนูนั้น
+        const china = tl.filter(l => l.kind === "china");
+        const draft = {
+          sel: china.map(l => String(l.bill_id)),
+          pay: Object.fromEntries(china.map(l => [String(l.bill_id), String(num(l.paid_rmb))])),
+          thbSel: [], amount: "", refNo: String(target.ref_no ?? ""), note: String(target.note ?? ""),
+          useBalance: true, txSlips: [], step: 2,
+          wxThb: num(target.amount_transferred_thb) > 0 ? String(num(target.amount_transferred_thb)) : "",
+          wxFiles: Array.isArray(target.attachments) ? (target.attachments as unknown[]).map(String) : [],
+        };
+        try { localStorage.setItem("china-wx-draft", JSON.stringify(draft)); } catch { /* noop */ }
+        toast.success("คืนยอดบิลแล้ว — เปิดหน้าโอนตรง WeChat ให้แก้ต่อ");
+        onGo?.("wechat");
+      } else if (redo) {
         // เติม draft จากรายการเดิม → เปิดหน้าโอนให้แก้ต่อ
         const china = tl.filter(l => l.kind === "china"), thb = tl.filter(l => l.kind === "thb");
         const ctwLines = tl.filter(l => l.kind === "ctw" && num(l.paid_thb) > 0);
@@ -3292,12 +3383,48 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
   }, []);
   useEffect(() => { loadList(); }, [loadList]);
 
+  // WeChat: กรอกยอดบาททีหลัง (จากใบสรุป) → คิดเรท ฿÷¥ + อัปเดตรายการโอน/บิล แล้วเปิดใบสรุปใหม่ด้วยข้อมูลล่าสุด
+  const fillThb = async (thb: number): Promise<boolean> => {
+    const raw = receipt ? rows.find(x => String(x.id) === String(receipt.transfer_id)) : undefined;
+    if (!raw) { toast.error("ไม่พบรายการโอนนี้ — ลองรีเฟรช"); return false; }
+    const r = await fillWechatThb(raw, thb);
+    if (!r.ok) { toast.error(r.error); return false; }
+    toast.success(`บันทึกยอดบาทแล้ว · เรท ${fmt(r.rate)}`);
+    const updated = { ...raw, amount_transferred_thb: +thb.toFixed(2), bills_total_thb: +thb.toFixed(2), rate: r.rate,
+      lines: (Array.isArray(raw.lines) ? raw.lines as Record<string, unknown>[] : []).map(l => l.kind === "china" ? { ...l, paid_thb: +(num(l.paid_rmb) * r.rate).toFixed(2) } : l) };
+    setRows(p => p.map(x => String(x.id) === String(raw.id) ? updated : x));
+    setReceipt(buildTransferReceipt(updated, pmap));
+    return true;
+  };
+
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
   if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ยังไม่มีรายการโอน —</div>;
+
+  // ตัวกรอง "WeChat รอกรอกยอดบาท" (โชว์เมื่อมีรายการค้าง)
+  const wxPendingCount = rows.filter(r => isWxPending(r)).length;
+  const shownRows = onlyWxPending ? rows.filter(r => isWxPending(r)) : rows;
+  const wxFilterBar = (wxPendingCount > 0 || onlyWxPending) && (
+    <div className="flex items-center gap-2 flex-wrap">
+      <button onClick={() => setOnlyWxPending(false)}
+        className={`h-8 px-3 rounded-full border text-xs font-medium ${!onlyWxPending ? "border-orange-400 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 bg-white"}`}>ทั้งหมด ({rows.length})</button>
+      <button onClick={() => setOnlyWxPending(true)}
+        className={`h-8 px-3 rounded-full border text-xs font-medium ${onlyWxPending ? "border-amber-400 bg-amber-50 text-amber-700" : "border-slate-200 text-slate-500 bg-white"}`}>💬 WeChat รอกรอกยอดบาท ({wxPendingCount})</button>
+    </div>
+  );
+  // ช่อง "ยอด" ของแต่ละแถว: WeChat (รอกรอก/฿) · จ่ายจากยอดคงเหลือ (¥) · โอนธนาคาร (฿)
+  const amountCell = (r: Record<string, unknown>) => {
+    const cn = +txChinaRmb(r).toFixed(2);
+    if (isWechat(r)) return isWxPending(r)
+      ? <span className="inline-flex flex-col items-end"><span className="font-bold text-slate-700">¥{fmt(cn)}</span><span className="text-[10px] font-medium rounded-full px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700">💬 รอกรอกยอดบาท</span></span>
+      : <span className="inline-flex flex-col items-end"><span className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</span><span className="text-[10px] font-medium text-emerald-700">💬 WeChat ¥{fmt(cn)}</span></span>;
+    if (isBalanceOnly(r)) return <span className="inline-flex flex-col items-end"><span className="font-bold text-orange-600">¥{fmt(cn)}</span><span className="text-[10px] font-medium text-orange-600">จ่ายจากยอดคงเหลือ</span></span>;
+    return <span className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</span>;
+  };
 
   // ใบสรุป + ป๊อปอัปจัดการ (ใช้ร่วม มือถือ/จอคอม)
   const overlays = (<>
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
+        onFillThb={isWxPending(receipt) ? fillThb : undefined}
         onLinkSlips={() => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setLinkTarget(raw); setReceipt(null); } }}
         onEdit={onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
         onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
@@ -3323,14 +3450,13 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
       { key: "cn", header: "บิลจีน", width: "5rem", align: "right", sortValue: r => linesOf(r).filter(l => l.kind === "china").length, cell: r => linesOf(r).filter(l => l.kind === "china").length },
       { key: "cw", header: "CTW", width: "4.5rem", align: "right", sortValue: r => linesOf(r).filter(l => l.kind === "ctw").length, cell: r => linesOf(r).filter(l => l.kind === "ctw").length },
       { key: "rmb", header: "บิลจีน ¥", width: "8rem", align: "right", sortValue: cnRmb, cell: r => <span className="text-slate-600">¥{fmt(cnRmb(r))}</span> },
-      { key: "thb", header: "โอนจริง", width: "9rem", align: "right", sortValue: r => num(r.amount_transferred_thb), cell: r => num(r.amount_transferred_thb) > 0
-        ? <span className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</span>
-        : <span className="text-[11px] font-medium text-orange-600">จ่ายจากยอดคงเหลือ</span> },
+      { key: "thb", header: "โอนจริง", width: "10rem", align: "right", sortValue: r => num(r.amount_transferred_thb), cell: r => amountCell(r) },
     ];
     return (
       <div className="space-y-4">
+        {wxFilterBar}
         <div className="bg-white rounded-2xl border border-slate-200 p-3">
-          <MiniTable rows={rows} columns={cols} rowKey={r => String(r.id)}
+          <MiniTable rows={shownRows} columns={cols} rowKey={r => String(r.id)}
             searchText={r => `${String(r.transfer_no ?? "")} ${String(r.ref_no ?? "")} ${String(r.transfer_date ?? "")} ${linesOf(r).map(l => String(l.label ?? "")).join(" ")}`}
             searchPlaceholder="ค้นหาเลขโอน / เลขอ้างอิง / ชื่อร้าน…"
             onRowClick={r => setReceipt(buildTransferReceipt(r, pmap))}
@@ -3344,7 +3470,8 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
 
   return (
     <div className="space-y-3">
-      {rows.map((r) => {
+      {wxFilterBar}
+      {shownRows.map((r) => {
         const ls = Array.isArray(r.lines) ? (r.lines as Record<string, unknown>[]) : [];
         const cn = ls.filter(l => l.kind === "china").length, cw = ls.filter(l => l.kind === "ctw").length;
         const id = String(r.id);
@@ -3357,9 +3484,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
                 <div className="text-[11px] text-slate-400 mt-0.5">บิลจีน {cn} · CTW {cw}</div>
               </div>
               <div className="text-right flex-shrink-0">
-                {num(r.amount_transferred_thb) > 0
-                  ? <div className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</div>
-                  : <div className="font-bold text-orange-600">¥{fmt(+ls.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_rmb), 0).toFixed(2))}<div className="text-[10px] font-medium">จ่ายจากยอดคงเหลือ</div></div>}
+                {amountCell(r)}
                 <div className="text-[11px] text-slate-400 mt-1">แตะดูใบสรุป ›</div>
               </div>
             </button>
@@ -3372,7 +3497,13 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
 }
 
 // ---------------- โอนเข้าบัญชีจีน ----------------
-function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: string[]; onConsumePreselect?: () => void }) {
+// mode="wechat" = เมนู "โอนตรง WeChat" — ใช้หน้าเดียวกัน (เลือกบิล/draft/บันทึก ชุดเดียว) แต่:
+//   ไม่มีเรท/ยอดคงเหลือ/บัญชี CTW/บิลค่าส่ง-VAT · แนบสลิป WeChat · ยอดหยวน = บิลที่เลือก · ยอดบาทกรอกทีหลังได้ (ป้าย "รอกรอกยอดบาท")
+function TransferPage({ preselect = [], onConsumePreselect, mode = "bank" }: { preselect?: string[]; onConsumePreselect?: () => void; mode?: "bank" | "wechat" }) {
+  const wx = mode === "wechat";
+  const draftKey = wx ? "china-wx-draft" : "china-tx-draft";   // แยก draft กันสองเมนูทับกัน
+  const [wxThb, setWxThb] = useState("");                 // WeChat: ยอดบาทจาก LINE (เว้นว่าง = รอกรอก)
+  const [wxFiles, setWxFiles] = useState<string[]>([]);   // WeChat: สลิป/หลักฐาน (ไฟล์ส่วนตัว china_pay)
   const toast = useToast();
   const celebrate = useCelebrate();
   const desk = useDesk();   // จอคอม = 2 คอลัมน์จบในจอเดียว (ไม่ใช้ step) · มือถือ = 2 ขั้นเหมือนเดิม
@@ -3442,9 +3573,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     draftRestored.current = true;
     if (preselect.length) return;   // มาจาก deep-link "กดโอน" → ไม่ต้องคืน draft
     try {
-      const raw = localStorage.getItem("china-tx-draft");
+      const raw = localStorage.getItem(draftKey);
       if (!raw) return;
       const d = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof d.wxThb === "string") setWxThb(d.wxThb);
+      if (Array.isArray(d.wxFiles)) setWxFiles(d.wxFiles.map(String));
       if (Array.isArray(d.sel) && d.sel.length) setSel(new Set(d.sel.map(String)));
       if (d.pay && typeof d.pay === "object") setPay(d.pay as Record<string, string>);
       if (Array.isArray(d.thbSel) && d.thbSel.length) setThbSel(new Set(d.thbSel.map(String)));
@@ -3460,15 +3593,16 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    const hasData = sel.size > 0 || thbSel.size > 0 || txSlips.length > 0 || num(amount) > 0;
+    const hasData = sel.size > 0 || thbSel.size > 0 || txSlips.length > 0 || num(amount) > 0 || wxFiles.length > 0 || num(wxThb) > 0;
     try {
-      if (hasData) localStorage.setItem("china-tx-draft", JSON.stringify({
+      if (hasData) localStorage.setItem(draftKey, JSON.stringify({
         sel: [...sel], pay, thbSel: [...thbSel],
         amount, refNo, note, useBalance, balanceUse, txSlips, step,
+        ...(wx ? { wxThb, wxFiles } : {}),
       }));
-      else localStorage.removeItem("china-tx-draft");
+      else localStorage.removeItem(draftKey);
     } catch { /* noop */ }
-  }, [sel, pay, thbSel, amount, refNo, note, useBalance, balanceUse, txSlips, step]);
+  }, [sel, pay, thbSel, amount, refNo, note, useBalance, balanceUse, txSlips, step, wx, wxThb, wxFiles, draftKey]);
 
   // โหลดเรท R1 ตาม "วันที่โอน" (ถ้าไม่มีเรทวันนั้น → ว่าง = รอเรทเงิน)
   useEffect(() => {
@@ -3549,9 +3683,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // ===== จ่ายจากยอดคงเหลือล้วน (ไม่ต้องโอนเงินไทย / ไม่ต้องแนบสลิป) =====
   // ติ๊กโผล่เมื่อ: มีบิลจีน · ไม่มีบิลค่าส่ง/VAT (ต้องจ่ายเป็นบาท) · เปิดใช้ยอดคงเหลือ · ยอดคงเหลือที่ใช้ครอบบิลจีนครบ
-  const balanceCoversAll = sel.size > 0 && thbSel.size === 0 && useBalance && selectedRmb > 0 && chinaCoverRmb >= selectedRmb - 0.001;
+  const balanceCoversAll = !wx && sel.size > 0 && thbSel.size === 0 && useBalance && selectedRmb > 0 && chinaCoverRmb >= selectedRmb - 0.001;
   // ไม่ได้ซื้อหยวนรอบนี้ → ไม่ใช้เรทเลย (ไม่ต้องมีเรท · ไม่บันทึกเรท · ใบสรุปไม่โชว์แถวเรท) — เจ้าของสั่ง 2026-11-12
   const noThbMode = balanceCoversAll && noThb;
+  // ===== โอนตรง WeChat: ยอดบาทจาก LINE (เว้นว่าง = รอกรอก) → เรท = ฿ ÷ ¥ (ไม่ใช้เรทรายวัน/ชั้นเรท) =====
+  const wxThbNum = wx ? num(wxThb) : 0;
+  const wxRate = wxThbNum > 0 && selectedRmb > 0 ? +(wxThbNum / selectedRmb).toFixed(4) : 0;
 
   // ===== ประมาณการเรท (หน้าเลือกบิลเท่านั้น) =====
   // คิดชั้นเรทจาก "ยอดหลังหักยอดคงเหลือจีน" (บิลจีน − คงเหลือ) เพื่อโชว์ยอดที่ต้องโอนโดยประมาณ
@@ -3702,7 +3839,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
     let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
     if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
-    text += isBalanceOnly(t) ? `จ่ายจากยอดคงเหลือจีน: ¥${fmt(+txChinaRmb(t).toFixed(2))} (ไม่มีโอนเงินไทย)` : `โอนจริง: ${fmtTransferred(t.transferred)}`;
+    text += isWechat(t) ? `${WECHAT_TAG}\n` + wechatRows(t).map(r => `${r.l}: ${r.r}`).join("\n")
+      : isBalanceOnly(t) ? `จ่ายจากยอดคงเหลือจีน: ¥${fmt(+txChinaRmb(t).toFixed(2))} (ไม่มีโอนเงินไทย)` : `โอนจริง: ${fmtTransferred(t.transferred)}`;
     if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
       const sp = (l.sup ?? {}) as Record<string, unknown>;
       const acc = sp.account_number ? `\n   บัญชี ${String(sp.account_number)}` : "";
@@ -3724,25 +3862,33 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // ปุ่มเดียว: ตัดบิลจีน + ตัดบิล CTW พร้อมกัน (+ เก็บประวัติ lines/เลขโอน)
   const save = async () => {
-    if (sel.size === 0 && ctwSelDerived.length === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
-    if (!noThbMode) {   // โหมดจ่ายจากยอดคงเหลือล้วน ไม่ต้องมีเรท / ไม่มียอดโอนให้ตรวจ
-      if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
-      if (chinaRemainThb < -0.001) { toast.error("ยอดโอนจริงต้องไม่น้อยกว่าค่าส่ง/VAT"); return; }
-      if (belowMin) { toast.error(`ยอดโอนต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
+    if (wx) {   // โอนตรง WeChat: ต้องมีบิลจีน · ไม่ต้องมีเรท · ยอดบาทเว้นได้ (กรอกทีหลัง)
+      if (sel.size === 0) { toast.error("เลือกบิลจีนที่จ่ายผ่าน WeChat ก่อน"); return; }
+      if (anyChinaOver) { toast.error("มีบิลที่ใส่ยอดเกิน"); return; }
+    } else {
+      if (sel.size === 0 && ctwSelDerived.length === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
+      if (!noThbMode) {   // โหมดจ่ายจากยอดคงเหลือล้วน ไม่ต้องมีเรท / ไม่มียอดโอนให้ตรวจ
+        if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
+        if (chinaRemainThb < -0.001) { toast.error("ยอดโอนจริงต้องไม่น้อยกว่าค่าส่ง/VAT"); return; }
+        if (belowMin) { toast.error(`ยอดโอนต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
+      }
     }
-    // ค่าที่บันทึก — โหมดไม่ต้องโอนเงินไทย: โอนจริง ฿0 · ไม่มีเรท · ไม่มีสลิป · ไม่ตัดบิล CTW · ยอดคงเหลือ (¥) ลดเท่ายอดบิลจีน
-    const sTransferred = noThbMode ? 0 : transferred;
-    const sRate = noThbMode ? 0 : effRate;
-    const sLeftoverRmb = noThbMode ? -selectedRmb : leftoverRmb;
-    const sLeftoverThb = noThbMode ? 0 : leftover;
-    const sBillsThb = noThbMode ? 0 : selectedSum;
-    const sTxSlips = noThbMode ? [] : txSlips;
-    const sSlipKeys = noThbMode ? [] : slipKeys;
+    // ค่าที่บันทึก
+    //  · ไม่ต้องโอนเงินไทย (balance): โอนจริง ฿0 · ไม่มีเรท · ไม่มีสลิป · ไม่ตัดบิล CTW · ยอดคงเหลือ (¥) ลดเท่ายอดบิลจีน
+    //  · WeChat: ยอดบาท = ที่กรอก (0 = รอกรอก) · เรท = ฿ ÷ ¥ · ไม่แตะยอดคงเหลือ (leftover 0) · ไม่ตัด CTW/ค่าส่ง-VAT
+    const payMethod: PayMethod = wx ? "wechat" : noThbMode ? "balance" : "bank";
+    const sTransferred = wx ? wxThbNum : noThbMode ? 0 : transferred;
+    const sRate = wx ? wxRate : noThbMode ? 0 : effRate;
+    const sLeftoverRmb = wx ? 0 : noThbMode ? -selectedRmb : leftoverRmb;
+    const sLeftoverThb = wx || noThbMode ? 0 : leftover;
+    const sBillsThb = wx ? wxThbNum : noThbMode ? 0 : selectedSum;
+    const sTxSlips = wx || noThbMode ? [] : txSlips;
+    const sSlipKeys = wx ? wxFiles : noThbMode ? [] : slipKeys;
     const NO_THB_NOTE = "จ่ายจากยอดคงเหลือบัญชีจีน (ไม่มีโอนเงินไทย)";   // กันซ้ำตอนแก้ไขรายการเดิมแล้วบันทึกใหม่
     const sNote = noThbMode && !note.includes(NO_THB_NOTE) ? [note.trim(), NO_THB_NOTE].filter(Boolean).join(" · ") : note;
     setSaving(true);
     try {
-      const chinaIds = [...sel], ctwIds = noThbMode ? [] : ctwSelDerived, thbIds = [...thbSel];
+      const chinaIds = [...sel], ctwIds = wx || noThbMode ? [] : ctwSelDerived, thbIds = wx ? [] : [...thbSel];
       // รายการย่อย (เก็บว่าการโอนนี้ตัดบิลอะไร จำนวนเท่าไหร่)
       const lines = [
         ...chinaIds.map(id => {
@@ -3768,7 +3914,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           rate: sel.size > 0 && sRate > 0 ? sRate : null,
           leftover_thb: sel.size > 0 ? +sLeftoverThb.toFixed(2) : 0,
           leftover_rmb: sel.size > 0 ? +sLeftoverRmb.toFixed(2) : 0,
-          ref_no: refNo || null, lines, attachments: sSlipKeys, tx_slips: sTxSlips, note: sNote || null, actor: "china-app",
+          ref_no: refNo || null, lines, attachments: sSlipKeys, tx_slips: sTxSlips, note: sNote || null, pay_method: payMethod, actor: "china-app",
         }),
       });
       const j = await res.json();
@@ -3781,8 +3927,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         const done = newPaid >= total - 0.001;
         return apiFetch(`/api/master-v2/china-bills/${id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
-          // จ่ายจากยอดคงเหลือล้วน → ไม่แตะเรทของบิล (ไม่ได้ซื้อหยวนรอบนี้)
-          body: JSON.stringify({ paid_rmb: newPaid, status: done ? "โอนแล้ว" : "รอโอน", ...(noThbMode ? {} : { rate: sRate }), transfer_date: transferDate || today(), actor: "china-app" }),
+          // จ่ายจากยอดคงเหลือล้วน / WeChat ที่ยังไม่มียอดบาท → ไม่แตะเรทของบิล (WeChat ได้เรทตอนกรอกยอดบาททีหลัง)
+          body: JSON.stringify({ paid_rmb: newPaid, status: done ? "โอนแล้ว" : "รอโอน", ...(sRate > 0 ? { rate: sRate } : {}), transfer_date: transferDate || today(), actor: "china-app" }),
         });
       }));
       // ตัดบิล CTW → สะสม cleared_amount
@@ -3803,7 +3949,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           body: JSON.stringify({ status: "โอนแล้ว", transfer_date: transferDate || today(), actor: "china-app" }),
         })
       ));
-      celebrate("โอนสำเร็จ 🎉", { confetti: true });
+      celebrate(wx ? (sTransferred > 0 ? "บันทึกโอนตรง WeChat แล้ว 🎉" : "บันทึกแล้ว — รอกรอกยอดบาท") : "โอนสำเร็จ 🎉", { confetti: true });
       // เก็บสรุปการโอนไว้ทำ popup พิมพ์/ส่งไลน์
       const chinaThbSum = lines.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_thb), 0);
       const ctwThbSum = lines.filter(l => l.kind === "ctw").reduce((a, l) => a + num(l.paid_thb), 0);
@@ -3816,16 +3962,16 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       setSavedTransfer({
         transfer_id: String(j.data?.id ?? ""), transfer_no: String(j.data?.transfer_no ?? ""),
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
-        lines: enrichedLines, rate: sRate, selectedRmb, transferred: sTransferred,
-        chinaIn: noThbMode ? 0 : chinaIn, chinaInRmb: noThbMode ? 0 : chinaInRmb, chinaThbSum, ctwThbSum, attachments: sSlipKeys,
-        // สรุปการคำนวณ (ย้ายมาจากหน้ายืนยัน → โชว์ในใบพิมพ์)
-        breakdown: noThbMode
+        lines: enrichedLines, rate: sRate, selectedRmb, transferred: sTransferred, pay_method: payMethod,
+        chinaIn: wx || noThbMode ? 0 : chinaIn, chinaInRmb: wx || noThbMode ? 0 : chinaInRmb, chinaThbSum, ctwThbSum, attachments: sSlipKeys,
+        // สรุปการคำนวณ (ย้ายมาจากหน้ายืนยัน → โชว์ในใบพิมพ์) · WeChat ไม่มี (ใบสรุปใช้ wechatRows)
+        breakdown: wx ? undefined : noThbMode
           ? { thb: 0, chinaRemainThb: 0, billsThb: sBillsThb, tier: TIER_NAMES[0], chinaYuanBought: 0, shortfallRmb: selectedRmb, surplusRmb: 0 }
           : { thb: thbSelTotal, chinaRemainThb, billsThb: selectedSum, tier: activeTier, chinaYuanBought, shortfallRmb, surplusRmb },
       });
       setSel(new Set()); setPay({}); setThbSel(new Set()); setUseBalance(true); setBalanceUse(""); setBalanceEdit(false); setNoThb(true);
-      setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
-      try { localStorage.removeItem("china-tx-draft"); } catch { /* noop */ }
+      setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1); setWxThb(""); setWxFiles([]);
+      try { localStorage.removeItem(draftKey); } catch { /* noop */ }
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -3995,7 +4141,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       <Card>
         <div className="flex items-center justify-between mb-2">
           <span className="font-semibold text-slate-800">เลือกบิลที่จะตัด (รอโอน)</span>
-          {sel.size > 0 && <span className="text-xs font-bold text-slate-700">{sel.size} บิล · ¥{fmt(selectedRmb)}{hasRate ? ` ≈ ฿${fmt(selectedSum)}` : ""}</span>}
+          {sel.size > 0 && <span className="text-xs font-bold text-slate-700">{sel.size} บิล · ¥{fmt(selectedRmb)}{!wx && hasRate ? ` ≈ ฿${fmt(selectedSum)}` : ""}</span>}
         </div>
         {pendingChina.length === 0 ? (
           <div className="text-center text-slate-300 py-6 text-sm">— ไม่มีบิลจีนรอโอน —</div>
@@ -4012,7 +4158,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                       <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
-                        <span className="block text-[10px] text-slate-400 truncate">{hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · {String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">{wx ? "" : `${hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · `}{String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
                       </span>
                     </button>
                     {on
@@ -4035,7 +4181,64 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const nextBtn = (
         <button onClick={() => setStep(2)} disabled={(sel.size === 0 && thbSel.size === 0) || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
-          {(sel.size === 0 && thbSel.size === 0) ? "เลือกบิลอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : balanceCoversAll ? "ถัดไป: ยืนยัน →" : "ถัดไป: แนบสลิป →"}
+          {(sel.size === 0 && thbSel.size === 0) ? "เลือกบิลอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : wx ? "ถัดไป: แนบสลิป WeChat →" : balanceCoversAll ? "ถัดไป: ยืนยัน →" : "ถัดไป: แนบสลิป →"}
+        </button>
+  );
+
+  // ===== โอนตรง WeChat: การ์ดยอด + ฟอร์ม (สลิป WeChat · ยอดบาทจาก LINE เว้นได้ · เรทคิดให้เอง) =====
+  const wxSummaryCard = (
+      <div className={desk ? "rounded-2xl bg-white border border-slate-200 p-4 shadow-sm" : "rounded-2xl bg-white/95 backdrop-blur border border-slate-200 p-4 shadow-lg shadow-slate-400/30 sticky top-2 z-30"}>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-500">💬 ยอดจ่ายผ่าน WeChat</span>
+          <span className="text-[11px] text-slate-400">ไม่หักยอดคงเหลือจีน · ไม่ต้องใส่เรท</span>
+        </div>
+        <div className="flex justify-between items-baseline mt-1 gap-2">
+          <span className="text-xs text-slate-500 flex-shrink-0">บิลจีน ({sel.size})</span>
+          <span className={`text-3xl font-extrabold ${sel.size > 0 ? "text-emerald-600" : "text-slate-300"}`}>{sel.size > 0 ? `¥${fmt(+selectedRmb.toFixed(2))}` : "รอเลือกบิล"}</span>
+        </div>
+        {sel.size > 0 && (
+          <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-sm">
+            {[...sel].map(id => { const b = pending.find(p => String(p.id) === id); return (
+              <div key={id} className="flex justify-between gap-2 items-baseline">
+                <span className="text-slate-500 truncate">{String(b?.supplier_label ?? b?.supplier_id ?? "—")}</span>
+                <span className="text-slate-700 flex-shrink-0">¥{fmt(num(pay[id]))}</span>
+              </div>
+            ); })}
+          </div>
+        )}
+      </div>
+  );
+  const wxBody = (
+      <Card>
+        <Label>📎 สลิป WeChat / หลักฐาน</Label>
+        <FileMultiInput value={wxFiles} onChange={setWxFiles} folder="china-transfers" category={CHINA_PAY_FILES}
+          onPreview={(_k, url) => { if (url) setLightbox(url); }} />
+        <div className="mt-3 space-y-2 text-sm">
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-slate-500">ยอดหยวน (จากบิลที่เลือก)</span>
+            <span className="font-bold text-slate-800">¥{fmt(+selectedRmb.toFixed(2))}</span>
+          </div>
+          <div className="flex justify-between items-center gap-2">
+            <span className="text-slate-500 flex-shrink-0">ยอดบาท (จาก LINE)</span>
+            <Money value={wxThb} onChange={setWxThb} placeholder="กรอกทีหลังได้"
+              className="w-36 h-10 px-2 text-base text-right font-bold border border-slate-300 rounded-lg" />
+          </div>
+          <div className="flex justify-between items-center gap-2 text-xs">
+            <span className="text-slate-400">เรท (คิดให้เอง = ฿ ÷ ¥)</span>
+            <span className="text-slate-500">{wxRate > 0 ? fmt(wxRate) : "—"}</span>
+          </div>
+          {wxThbNum > 0
+            ? <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-3 py-2">ครบแล้ว — บันทึกแล้วบิลเป็น “โอนแล้ว” พร้อมมูลค่าบาท</div>
+            : <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs px-3 py-2">ยังไม่มียอดบาท — บันทึกได้เลย บิลเป็น “โอนแล้ว” · รายการโอนติดป้าย “รอกรอกยอดบาท” ไว้กรอกทีหลัง</div>}
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="หมายเหตุ (ถ้ามี)"
+            className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg" />
+        </div>
+      </Card>
+  );
+  const wxSaveBtn = (
+        <button onClick={save} disabled={saving || sel.size === 0 || anyChinaOver}
+          className={`${desk ? "w-full" : "flex-1"} h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30`}>
+          {saving ? "กำลังบันทึก…" : sel.size === 0 ? "เลือกบิลอย่างน้อย 1 บิล" : wxThbNum > 0 ? "บันทึกโอนตรง WeChat + ตัดบิล" : "บันทึก (รอกรอกยอดบาท) + ตัดบิล"}
         </button>
   );
 
@@ -4231,7 +4434,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-3xl mb-1">✅</div>
             <div className="text-lg font-semibold text-slate-800">โอนสำเร็จ</div>
-            <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · {isBalanceOnly(savedTransfer) ? `จ่ายจากยอดคงเหลือ ¥${fmt(+txChinaRmb(savedTransfer).toFixed(2))}` : `โอนจริง ${fmtTransferred(savedTransfer.transferred)}`}</div>
+            <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · {isWechat(savedTransfer)
+              ? `จ่ายผ่าน WeChat ¥${fmt(+txChinaRmb(savedTransfer).toFixed(2))} · ${isWxPending(savedTransfer) ? "รอกรอกยอดบาท" : `฿${fmt(num(savedTransfer.transferred))}`}`
+              : isBalanceOnly(savedTransfer) ? `จ่ายจากยอดคงเหลือ ¥${fmt(+txChinaRmb(savedTransfer).toFixed(2))}` : `โอนจริง ${fmtTransferred(savedTransfer.transferred)}`}</div>
             <div className="mt-4 space-y-2">
               <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedTransfer(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
@@ -4242,6 +4447,49 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   </>);
 
   // ---- จอคอม: ซ้ายติ๊กบิล · ขวา ยอดที่ต้องโอน + ยอดคงเหลือ + บัญชีปลายทาง + สลิป + ปุ่มบันทึก (จบในจอเดียว) ----
+  // ---- โอนตรง WeChat: ใช้ตัวเลือกบิลเดียวกัน (chinaCard) · ไม่มีเรท/ยอดคงเหลือ/บัญชี CTW/ค่าส่ง-VAT ----
+  if (wx && desk) return (
+      <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)] gap-5 items-start">
+        <div className="space-y-4 min-w-0">{chinaCard}</div>
+        <div className="sticky top-20 max-h-[calc(100vh-6.5rem)] overflow-y-auto overscroll-contain space-y-3 pr-1">
+          {wxSummaryCard}
+          {sel.size > 0 ? (<>
+            {wxBody}
+            <div className="sticky bottom-0 z-10 bg-slate-100 pt-2 pb-1">
+              {anyChinaOver
+                ? <div className="w-full h-12 rounded-xl bg-red-50 border border-red-200 text-red-600 font-semibold flex items-center justify-center">มีบิลที่ใส่ยอดเกิน — แก้ยอดทางซ้ายก่อน</div>
+                : wxSaveBtn}
+            </div>
+          </>) : (
+            <div className="rounded-xl border-2 border-dashed border-slate-300 text-slate-400 text-sm text-center py-6 px-4">
+              ← ติ๊กบิลที่จ่ายผ่าน WeChat ทางซ้าย แล้วแนบสลิป + บันทึกตรงนี้
+            </div>
+          )}
+        </div>
+        {popups}
+      </div>
+  );
+  if (wx) return (
+    <div className="space-y-4 pb-[150px]">
+      {step === 1 && (<>
+        {wxSummaryCard}
+        {chinaCard}
+        <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
+          {nextBtn}
+        </div>
+      </>)}
+      {step === 2 && (<>
+        {wxSummaryCard}
+        {wxBody}
+        <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
+          <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
+          {wxSaveBtn}
+        </div>
+      </>)}
+      {popups}
+    </div>
+  );
+
   if (desk) {
     const anySel = sel.size > 0 || thbSel.size > 0;
     return (
@@ -4476,9 +4724,19 @@ function LinkSlipsPopup({ transfer, onClose, onSaved }: { transfer: Record<strin
 }
 
 // ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
-function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLinkSlips }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void; onEdit?: () => void; onLinkSlips?: () => void }) {
+function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLinkSlips, onFillThb }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void; onEdit?: () => void; onLinkSlips?: () => void; onFillThb?: (thb: number) => Promise<boolean> }) {
   useScrollLock(true);
   const toast = useToast();
+  // WeChat ที่ยังไม่มียอดบาท → ช่องกรอกยอดบาทในใบสรุป (ยอดอยู่ใน LINE)
+  const [fillThb, setFillThb] = useState("");
+  const [filling, setFilling] = useState(false);
+  const submitFill = async () => {
+    const n = num(fillThb);
+    if (!(n > 0)) { toast.error("ใส่ยอดบาทก่อน"); return; }
+    if (!onFillThb) return;
+    setFilling(true);
+    try { if (await onFillThb(n)) setFillThb(""); } finally { setFilling(false); }
+  };
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
@@ -4527,6 +4785,13 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
       { t: "sub", l: BALANCE_ONLY_TAG },
       ...balanceOnlyRows(t, extras?.bal ?? null).map(r => ({ t: "kv", l: r.l, r: r.r,
         bold: r.tone !== "minus", color: r.tone === "minus" ? "#ea580c" : r.tone === "end" ? "#059669" : undefined } as ReceiptRow)),
+    ];
+    // โอนตรง WeChat → ยอดหยวน · ยอดบาท (หรือ รอกรอกยอดบาท) · เรท ฿÷¥ · ไม่มีแถวยอดคงเหลือ
+    if (isWechat(t)) return [
+      ...refRow,
+      { t: "sub", l: WECHAT_TAG },
+      ...wechatRows(t).map(r => ({ t: "kv", l: r.l, r: r.r,
+        bold: r.tone === "main", color: r.tone === "pending" ? "#d97706" : undefined } as ReceiptRow)),
     ];
     return [
       ...refRow,
@@ -4659,7 +4924,9 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
       const base = String(cfg.share_base ?? "").replace(/\/$/, "");
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
-      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\n${isBalanceOnly(t)
+      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\n${isWechat(t)
+        ? `💬 WeChat · ` + wechatRows(t).map(r => `${r.l} ${r.r}`).join(" · ")
+        : isBalanceOnly(t)
         ? balanceOnlyRows(t, extras?.bal ?? null).map(r => `${r.l} ${r.r}`).join(" · ")
         : `เรท: ${fmt(num(t.rate))} · โอนจริง ${fmtTransferred(t.transferred)}`}`;
       if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label || "—")} ¥${fmt(num(l.paid_rmb))}`).join("\n");
@@ -4715,8 +4982,34 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
           </div>
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
           {/* แถวค่าเงิน — ค่าชิดขวาเสมอ (ml-auto text-right) + ห้ามตัดบรรทัด (กันตอนพิมพ์) */}
-          {!isBalanceOnly(t) && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">{fmtTransferred(t.transferred)}</span></div>}
+          {!isBalanceOnly(t) && !isWechat(t) && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">{fmtTransferred(t.transferred)}</span></div>}
           {(() => { const bd = t.breakdown as Record<string, unknown> | undefined;
+            // โอนตรง WeChat → ยอดหยวน · ยอดบาท (หรือป้ายรอกรอก + ช่องกรอก) · เรท ฿÷¥
+            if (isWechat(t)) return (
+              <>
+                <div className="text-xs font-medium text-emerald-700 mb-0.5">💬 {WECHAT_TAG}</div>
+                {wechatRows(t).map(r => (
+                  <div key={r.l} className="flex justify-between gap-3">
+                    <span className="text-slate-500 flex-shrink-0">{r.l}</span>
+                    {r.tone === "pending"
+                      ? <span className="text-xs font-medium rounded-full px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 ml-auto">{r.r}</span>
+                      : <span className={`whitespace-nowrap ml-auto text-right ${r.tone === "main" ? "font-bold text-slate-900" : "text-slate-500"}`}>{r.r}</span>}
+                  </div>
+                ))}
+                {onFillThb && isWxPending(t) && (
+                  <div className="mt-2 rounded-xl bg-amber-50 border border-amber-200 p-2.5 print:hidden">
+                    <div className="text-xs text-amber-800 mb-1.5">กรอกยอดบาทจาก LINE — ระบบคิดเรทให้เอง (฿ ÷ ¥)</div>
+                    <div className="flex gap-2">
+                      <Money value={fillThb} onChange={setFillThb} placeholder="ยอดบาท"
+                        className="flex-1 min-w-0 h-10 px-2 text-base text-right font-bold border border-amber-300 rounded-lg bg-white" />
+                      <button onClick={submitFill} disabled={filling}
+                        className="flex-shrink-0 h-10 px-4 rounded-lg bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50">{filling ? "กำลังบันทึก…" : "บันทึก"}</button>
+                    </div>
+                    {num(fillThb) > 0 && txChinaRmb(t) > 0 && <div className="mt-1 text-[11px] text-amber-700 text-right">เรท ≈ {(num(fillThb) / txChinaRmb(t)).toFixed(4)}</div>}
+                  </div>
+                )}
+              </>
+            );
             // จ่ายจากยอดคงเหลือล้วน → ตั้งต้น − บิลจีน = หลังจ่าย (ยอด ณ ตอนบันทึกใบนี้) · ไม่มีเรท/โอนจริง
             if (isBalanceOnly(t)) return (
               <>
@@ -4739,8 +5032,8 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
               <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">รวมยอด (บิลจีน)</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">¥{fmt(num(t.selectedRmb))}</span></div>
             </>
           ); })()}
-          {!isBalanceOnly(t) && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+num(t.chinaInRmb).toFixed(2))}</span></div>}
-          {extras && !isBalanceOnly(t) && <div className="flex justify-between gap-3 border-t border-slate-100 pt-1 mt-1"><span className="text-slate-500 flex-shrink-0">ยอดคงเหลือบัญชีจีน</span><span className="font-bold text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+extras.balanceRmb.toFixed(2))}</span></div>}
+          {!isBalanceOnly(t) && !isWechat(t) && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+num(t.chinaInRmb).toFixed(2))}</span></div>}
+          {extras && !isBalanceOnly(t) && !isWechat(t) && <div className="flex justify-between gap-3 border-t border-slate-100 pt-1 mt-1"><span className="text-slate-500 flex-shrink-0">ยอดคงเหลือบัญชีจีน</span><span className="font-bold text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+extras.balanceRmb.toFixed(2))}</span></div>}
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>

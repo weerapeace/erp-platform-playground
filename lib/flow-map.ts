@@ -232,7 +232,7 @@ export const FLOW_NODES: Record<string, FlowNode> = {
     gaps: ["ร้านแทบไม่มีใครตั้งเครดิต + PO ไม่มีวันครบกำหนดจ่าย → วันจ่ายในกระแสเงินสดระบบเดา"] },
   credit: { label: "ตั้งเครดิต", sub: "หลายรายพร้อมกัน", area: "fin", href: "/cashflow/credit-terms", pages: "/cashflow/credit-terms", tables: "partners_v2", statuses: "—" },
   china: { label: "บิลจีน", sub: "China Pay", area: "fin", href: "/app/china-pay", pages: "/app/china-pay · หน้าลงบิลเลือกใบสั่งซื้อ · ปุ่มส่งไปโอนเงินจีนในใบสำคัญรับ", cashflow: true,
-    tables: "china_bills + china_bill_po_links (บิล ↔ PO หลายใบ/บางส่วน · trigger ตั้ง purchase_orders_v2.china_bill_id / payment_status)", statuses: "รอโอน → โอนแล้ว · ยกเลิก", metrics: ["fin_china_wait"],
+    tables: "china_bills + china_bill_po_links (บิล ↔ PO หลายใบ/บางส่วน · trigger ตั้ง purchase_orders_v2.china_bill_id / payment_status) · china_transfers.pay_method = bank (โอนธนาคาร) / balance (จ่ายจากยอดคงเหลือจีน) / wechat (โอนตรง WeChat ไม่หักยอดคงเหลือ · ยอดบาท 0 = รอกรอก)", statuses: "รอโอน → โอนแล้ว · ยกเลิก", metrics: ["fin_china_wait"],
     gaps: ["ร้านจีนลงไว้ 2 ชื่อ ~5 คู่ — ใบสั่งซื้อค้างไปอยู่อีกชื่อ (หน้าลงบิลเสนอร้านชื่อคล้ายให้กดดู)", "9 ร้านมีใบสั่งซื้อหยวนแต่ไม่ได้ติ๊กร้านจีน → เลือกในหน้าลงบิลไม่ได้", "กระแสเงินสดนับ PO ค้างจ่าย + บิลจีนรอโอน แยกกัน → ใบที่ผูกบิลแล้วนับซ้ำ"] },
   payrun: { label: "จ่ายเงินเดือน", sub: "/payroll/payments", area: "hr", href: "/payroll/payments", pages: "/payroll/payments", cashflow: true,
     tables: "payment_batches (ผูกงวด payroll_periods)", statuses: "ร่าง → อนุมัติ → จ่ายแล้ว · ยกเลิก", metrics: ["fin_payrun_unmarked"],
