@@ -175,7 +175,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     }
     for (const g of groups.values()) {
       const blocks: LayBlock[] = g.rows.map((m, i) => ({
-        key: `b${i}`, label: `${m.cut_width}×${m.cut_length}`,
+        key: `b${i}`, label: (m.cut_block_code as string) || `${m.cut_width}×${m.cut_length}`,   // รหัสบล็อกตัดก่อน (ป้ายในผัง · เจ้าของขอ 2026-11-13) ไม่มีก็ขนาด
         width_cm: Number(m.cut_width) || 0, length_cm: Number(m.cut_length) || 0,
         total_pieces: (Number(m.pieces) || 1) * (m.__lay?.rowQty ?? 0),
         no_rotate: !!m.__lay?.no_rotate,

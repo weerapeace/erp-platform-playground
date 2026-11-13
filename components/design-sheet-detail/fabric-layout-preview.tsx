@@ -6,6 +6,8 @@
 //   ผ้าม้วน: ผ้ายาวต่อเนื่อง · ผ้าผืน: แยกทีละผืน
 //   ผ้ายาวมาก (หลายสิบเมตร) → "ตัดเป็นหน้า ๆ" ช่วงละ ~2-3 เมตร กด ‹ › ดูทีละหน้า (เจ้าของขอ 2026-09-04)
 //   ชิ้นเดียวกัน (ขนาดเดียวกัน) = สีเดียวกัน · ชี้เมาส์ดูขนาด · ↻ = ชิ้นที่หมุน 90°
+//   ป้ายในกล่อง (เจ้าของขอ 2026-11-13): เลขชิ้นในวงกลม + ชื่อชิ้น + ขนาด · ตัวหนังสือย่อตามกล่อง ไม่ล้น · ชิ้นสูงแคบเขียนแนวตั้ง · เล็กมาก = เลขอย่างเดียว
+//     numbers = เลขชิ้นจากผู้เรียก (ให้ตรงกับตาราง/ใบวิธีตัด — lib/fabric-cut-sheet pieceNumbers) · ไม่ส่ง = เรียงตามที่เจอในผัง
 //
 //   ⚠️ วาดด้วยหน่วย "ซม." ตรง ๆ ใน viewBox (ไม่คูณ scale เอง) — ภาพจึงไม่ถูกบีบเมื่อผ้ายาว
 //      (เวอร์ชันก่อนจำกัดสูง 900px แล้ว preserveAspectRatio ย่อทั้งภาพ → ดูเหมือนเศษเทาเยอะทั้งที่คุ้ม 97%)
@@ -33,11 +35,15 @@ const MAX_SHEETS = 10;    // ผ้าผืน: วาดไม่เกิน�
 
 type Page = { stripLabel: string; stripIndex: number; from: number; to: number; rows: FabricRow[]; stripLen: number };
 
-export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }: {
+const SIZE_ONLY = /^s*d+(.d+)?s*[×x]s*d+(.d+)?s*$/;
+
+export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode, numbers }: {
   result: FabricResult;
   faceWidthCm: number;
   sheetLengthCm?: number | null;
   mode: "roll" | "sheet";
+  /** เลขชิ้น { key: เลข } ให้ตรงกับตารางชิ้น/ใบวิธีตัด · ไม่ส่ง = เรียงตามที่เจอในผัง */
+  numbers?: Record<string, number>;
 }) {
   const t = useT();
   const [page, setPage] = useState(0);
@@ -50,6 +56,12 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
     keys.forEach((k, i) => m.set(k, PALETTE[i % PALETTE.length]));
     return (k: string) => m.get(k) ?? PALETTE[0];
   }, [result.rows]);
+  const numOf = useMemo(() => {
+    if (numbers) return (k: string) => numbers[k];
+    const keys = [...new Set(result.rows.flatMap((r) => r.items.map((i) => i.key)))];
+    const m = new Map(keys.map((k, i) => [k, i + 1]));
+    return (k: string) => m.get(k);
+  }, [numbers, result.rows]);
 
   const scale = faceWidthCm > 0 ? W / faceWidthCm : 1;          // px ต่อ ซม.
   const segCm = Math.max(faceWidthCm, Math.round(PAGE_PX / scale)); // ความยาวผ้าต่อหน้า (ซม.)
@@ -111,17 +123,40 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
           })}
           {pg.rows.flatMap((r) => r.items.map((it, ii) => {
             const c = colorOf(it.key);
-            const showText = it.w * scale > 34 && it.h * scale > 14;
+            const no = numOf(it.key);
+            const wPx = it.w * scale, hPx = it.h * scale;
+            const vert = hPx > wPx * 1.6 && wPx < 70;          // ชิ้นสูงแคบ → เขียนแนวตั้ง
+            const L = vert ? hPx : wPx, T = vert ? wPx : hPx;   // ความยาว/ความหนาของแนวตัวหนังสือ (px)
+            const size = `${Math.round(it.w * 10) / 10}×${Math.round(it.h * 10) / 10}`;
+            const named = !!it.label && !SIZE_ONLY.test(it.label);
+            const main = `${it.rotated ? "↻ " : ""}${named ? it.label : size}`;
+            const badge = no != null && Math.min(wPx, hPx) >= 12;
+            const br = Math.min(7, Math.min(wPx, hPx) * 0.3);
+            const room = L - (badge && !vert ? br * 2 + 4 : 0) - 4;
+            const fs = Math.min(11, room / (main.length * 0.62 + 0.5), T * 0.42);   // ย่อให้พอดีกล่อง
+            const showMain = fs >= 6;
+            const subFs = Math.min(fs * 0.85, room / (size.length * 0.6 + 0.5));
+            const showSub = showMain && named && T >= fs * 2.7 && subFs >= 5.5;
+            const cx = it.x + it.w / 2, cy = it.y + it.h / 2;
+            const off = showSub ? (fs * 0.55) / scale : 0;
+            const rot = vert ? `rotate(-90 ${cx} ${cy})` : undefined;
             return (
               <g key={`${r.y}-${ii}`}>
                 <rect x={it.x} y={it.y} width={it.w} height={it.h} fill={c.fill} stroke={c.stroke} strokeWidth={0.8 / scale} rx={1.5 / scale}>
-                  <title>{t(`${it.w}×${it.h} ซม.${it.rotated ? " (หมุน 90°)" : ""} · ตำแหน่ง ${fmt(it.y)} ซม.`, `${it.w}×${it.h} cm${it.rotated ? " (rotated 90°)" : ""} · position ${fmt(it.y)} cm`)}</title>
+                  <title>{`${no != null ? `${no}. ` : ""}${named ? `${it.label} · ` : ""}`}{t(`${it.w}×${it.h} ซม.${it.rotated ? " (หมุน 90°)" : ""} · ตำแหน่ง ${fmt(it.y)} ซม.`, `${it.w}×${it.h} cm${it.rotated ? " (rotated 90°)" : ""} · position ${fmt(it.y)} cm`)}</title>
                 </rect>
-                {showText && (
-                  <text x={it.x + it.w / 2} y={it.y + it.h / 2} textAnchor="middle" dominantBaseline="middle"
-                    fontSize={Math.min(9, it.h * scale * 0.5) / scale} fill={c.text}>
-                    {it.rotated ? "↻ " : ""}{Math.round(it.w)}×{Math.round(it.h)}
-                  </text>
+                {badge && (() => {
+                  const bx = vert ? cx : it.x + (br + 2) / scale, by = it.y + (br + 2) / scale;
+                  return <g>
+                    <circle cx={bx} cy={by} r={br / scale} fill="#fff" stroke={c.stroke} strokeWidth={0.7 / scale} />
+                    <text x={bx} y={by} textAnchor="middle" dominantBaseline="central" fontSize={(br * 1.2) / scale} fontWeight={700} fill={c.text}>{no}</text>
+                  </g>;
+                })()}
+                {showMain && (
+                  <text x={cx} y={cy - off} textAnchor="middle" dominantBaseline="middle" fontSize={fs / scale} fill={c.text} transform={rot}>{main}</text>
+                )}
+                {showSub && (
+                  <text x={cx} y={cy + off} textAnchor="middle" dominantBaseline="middle" fontSize={subFs / scale} fill={c.text} opacity={0.8} transform={rot}>{size}</text>
                 )}
               </g>
             );
