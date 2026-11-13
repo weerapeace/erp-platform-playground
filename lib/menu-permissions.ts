@@ -34,6 +34,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/piecework-dispatch", keys: ["products.view", "products.edit", "production.piecework"] },
   { href: "/master/piecework-jobs", sameAs: "/master/piecework-dispatch" },
   { href: "/master/work-logs", sameAs: "/master/piecework-dispatch" },
+  // ผลิต → วางแผนตัดผ้า (อ่านอย่างเดียว · API /api/mo/fabric-plan ใช้ products.view)
+  { href: "/master/fabric-plan", keys: ["products.view"] },
   // ออฟฟิศทีม AI — ดูสถานะผู้ช่วยอัตโนมัติ (lib/ai-office.ts AI_OFFICE_PERM · ตอนนี้ = แอดมิน)
   { href: "/master/ai-office", keys: ["ai_office.view", "ai_office.edit"] },
   { href: "/master/cost-calculator", keys: ["products.view", "products.edit", "products.cost.view"] },   // เครื่องคิดต้นทุน — ต้องมี "ดูต้นทุน" (2026-11-12)
