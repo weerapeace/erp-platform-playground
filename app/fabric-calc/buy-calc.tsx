@@ -32,6 +32,11 @@ type BomLine = { component_sku?: string | null; component_name?: string | null; 
 type BomFabric = { sku: string; name: string; type: string | null; lines: BomLine[] };
 
 const boxCls = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-indigo-400";
+/** หน่วยของวัตถุดิบเทียบกับหน่วยซื้อได้ไหม — ม้วน: ต้องเป็นหลา/เมตร · ผืน: ไม่ใช่หน่วยพื้นที่/น้ำหนัก · ไม่มีหน่วย = ถือว่าได้ */
+function unitComparable(uomName: string | null | undefined, form: "roll" | "sheet"): boolean {
+  if (!uomName) return true;
+  return form === "roll" ? unitFromUomName(uomName) != null : !/cm|m²|m2|ft|kg|ตร\./i.test(uomName);
+}
 const inputCls = `${boxCls} text-right`;   // ช่องตัวเลข
 const textCls = `${boxCls} text-left`;     // ช่องข้อความ / ตัวเลือก
 
@@ -69,7 +74,9 @@ export function FabricBuyCalc() {
 
   // สต็อกในหน่วยที่เลือก (หลา ↔ เมตร แปลงให้ · ผืน/หน่วยอื่นใช้ตัวเลขตรง ๆ)
   const stockUnit = unitFromUomName(fabric?.uom_name);
-  const stock = stockRaw == null ? 0 : form === "roll" && stockUnit ? convertLength(stockRaw, stockUnit, unit) : stockRaw;
+  // หน่วยของ SKU เทียบกับหน่วยซื้อได้ไหม (ข้อมูลจริง 2026-11-13: วัตถุดิบตัดชิ้น 96 ตัวนับเป็น cm² · บางตัว kg) — เทียบไม่ได้ = ไม่หักสต็อก
+  const unitOk = unitComparable(fabric?.uom_name, form);
+  const stock = stockRaw == null || !unitOk ? 0 : form === "roll" && stockUnit ? convertLength(stockRaw, stockUnit, unit) : stockRaw;
 
   // โหลดสต็อกเมื่อเลือกผ้า
   useEffect(() => {
@@ -90,7 +97,9 @@ export function FabricBuyCalc() {
     else { setForm("roll"); if (Number(c.fabric_width_cm) > 0) setFace(Number(c.fabric_width_cm)); }
     const u = unitFromUomName(c.uom_name);
     if (u) setUnit(u);
-    if (Number(c.standard_price) > 0) setPrice(Number(c.standard_price));
+    // ราคาต้นทุนของ SKU เป็นราคาต่อหน่วยของ SKU — เติมให้เฉพาะเมื่อหน่วยตรงกับหน่วยซื้อ (cm²/kg = ไม่เติม ให้กรอกเอง)
+    if (Number(c.standard_price) > 0 && unitComparable(c.uom_name, sheetForm ? "sheet" : "roll")) setPrice(Number(c.standard_price));
+    else setPrice(0);
   };
 
   // เปลี่ยนหน่วยซื้อ → แปลงราคา/ความยาวม้วนตาม (ราคาต่อหลา ↔ ต่อเมตร)
@@ -288,7 +297,7 @@ export function FabricBuyCalc() {
               </Field>
             )}
             {form === "roll" && <Field label={`1 ม้วนยาว (${u})`}><Num value={rollLen} onChange={setRollLen} /></Field>}
-            <Field label={`ราคา / ${u} (บาท)`} hint={fabric?.standard_price ? "ดึงต้นทุนจากรหัสผ้า แก้ได้" : undefined}><Num value={price} onChange={setPrice} /></Field>
+            <Field label={`ราคา / ${u} (บาท)`} hint={!fabric?.standard_price ? undefined : unitOk ? "ดึงต้นทุนจากรหัสผ้า แก้ได้" : `ต้นทุนในระบบเป็นต่อ ${fabric.uom_name} — กรอกราคาต่อ${u}เอง`}><Num value={price} onChange={setPrice} /></Field>
           </div>
         </Card>
       </div>
@@ -311,7 +320,7 @@ export function FabricBuyCalc() {
               <Metric label="ต้องใช้จริง (รวมเผื่อเสีย)" value={`${fmt(res.need)} ${u}`} sub={form === "sheet" ? `ใช้ต่อใบ ${fmt(res.per_unit, 3)} ผืน` : `ใช้ต่อใบ ${fmt(res.per_unit_cm, 1)} ซม. (${fmt(res.per_unit, 3)} ${u})`} />
               <Metric label="ควรซื้อ (ปัดแล้ว)" value={`${fmt(res.need_rounded)} ${u}`} sub={res.rolls ? `${res.rolls} ม้วน (ม้วนละ ${fmt(rollLen)} ${u})` : undefined} />
               <Metric label="ต้องซื้อเพิ่ม (หักสต็อก)" value={`${fmt(res.to_buy)} ${u}`} tone={res.to_buy > 0 ? "danger" : "success"}
-                sub={!fabric ? "ยังไม่ได้เลือกผ้า = ไม่หักสต็อก" : stockErr ? stockErr : stockRaw == null ? "กำลังโหลดสต็อก…" : `สต็อกมี ${fmt(stock)} ${u}${form === "roll" && !stockUnit && fabric.uom_name ? ` (หน่วยสต็อก: ${fabric.uom_name})` : ""}`} />
+                sub={!fabric ? "ยังไม่ได้เลือกผ้า = ไม่หักสต็อก" : stockErr ? stockErr : stockRaw == null ? "กำลังโหลดสต็อก…" : !unitOk ? `สต็อกนับเป็น ${fabric.uom_name} (${fmt(stockRaw)}) เทียบกับ${u}ไม่ได้ — ไม่หักสต็อก` : `สต็อกมี ${fmt(stock)} ${u}`} />
               <Metric label="งบซื้อเพิ่ม" value={res.cost_buy != null ? `฿${fmt(res.cost_buy, 0)}` : "—"} sub={res.cost_per_unit != null ? `ค่าผ้าต่อใบ ฿${fmt(res.cost_per_unit)}` : "ใส่ราคาเพื่อดูงบ"} />
             </div>
             <div className="mt-2 text-[12px] text-slate-500">
