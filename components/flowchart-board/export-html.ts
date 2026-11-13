@@ -1,12 +1,13 @@
 // แปลงกระดาน flowchart → HTML ที่ใส่ style ในบรรทัดล้วน (ไม่พึ่ง class/Tailwind)
 // เพื่อส่งเข้าตัวแปลงรูปกลาง lib/html-to-png (htmlToPngBlob) → ปุ่ม "บันทึกเป็นรูป"
-// สี/รูปทรงอ่านจาก lib/flowchart ชุดเดียวกับบนจอ · เส้นใช้สูตรหักมุมเดียวกับ React Flow (getSmoothStepPath)
+// สี/รูปทรงอ่านจาก lib/flowchart ชุดเดียวกับบนจอ · เส้นใช้สูตรเดียวกับบนจอ (./edge-path — หักมุม · ตรง · โค้ง)
 // ลำดับวาด: กรอบโซน (หลังสุด) → เส้น → กล่อง → ป้ายบนเส้น · ไอคอนไฟล์/ที่เก็บ = SVG ตัวเดียวกับบนจอ
 
-import { Position, getSmoothStepPath } from "@xyflow/react";
+import { Position } from "@xyflow/react";
+import { flowEdgePath } from "./edge-path";
 import { fileTypeSvg } from "@/lib/file-types";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
-import { FLOW_PALETTE, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
+import { FLOW_PALETTE, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const SIDE: Record<string, Position> = { t: Position.Top, r: Position.Right, b: Position.Bottom, l: Position.Left };
@@ -82,9 +83,9 @@ export function flowSceneToHtml(s: FlowScene): { html: string; width: number; he
     const a = byId.get(e.source), z = byId.get(e.target);
     if (!a || !z) continue;
     const sp = handlePoint(a, e.sourceHandle), tp = handlePoint(z, e.targetHandle ?? "l");
-    const [d, lx, ly] = getSmoothStepPath({
+    const [d, lx, ly] = flowEdgePath(edgeShapeOf(e), {   // แบบลูกศร (หักมุม · ตรง · โค้ง) — สูตรเดียวกับบนจอ
       sourceX: sp.x - b.x, sourceY: sp.y - b.y, sourcePosition: SIDE[sp.side],
-      targetX: tp.x - b.x, targetY: tp.y - b.y, targetPosition: SIDE[tp.side], borderRadius: 10,
+      targetX: tp.x - b.x, targetY: tp.y - b.y, targetPosition: SIDE[tp.side],
     });
     paths.push(`<path d="${d}" fill="none" stroke="#64748b" stroke-width="1.75" marker-end="url(#fc-arrow)"/>`);
     if (e.label) labels.push(`<div style="position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600;color:#475569;white-space:nowrap">${esc(e.label)}</div>`);

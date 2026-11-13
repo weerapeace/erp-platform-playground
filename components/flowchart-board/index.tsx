@@ -3,7 +3,7 @@
 // ============================================================
 // FlowchartBoard — กระดาน flowchart กลาง (ของกลาง · ใช้ React Flow / @xyflow/react)
 //
-// กล่อง 9 ชนิด (เริ่ม/จบ · ขั้นตอน · คำถาม ใช่/ไม่ใช่ · ที่เก็บ · ไฟล์ (ไอคอนประเภทไฟล์กลาง) · โฟลเดอร์ · หน้าใน ERP (เลือกจากเมนูจริง) · โน้ต · กรอบโซน) + เส้นต่อหักมุมอัตโนมัติ
+// กล่อง 9 ชนิด (เริ่ม/จบ · ขั้นตอน · คำถาม ใช่/ไม่ใช่ · ที่เก็บ · ไฟล์ (ไอคอนประเภทไฟล์กลาง) · โฟลเดอร์ · หน้าใน ERP (เลือกจากเมนูจริง) · โน้ต · กรอบโซน) + เส้นต่อ 3 แบบ (หักมุม · ตรง · โค้ง — ./edge-path)
 // เส้นติดกล่องเสมอ · กล่องเข้าแถวตามตาราง · ย่อขยายกล่องได้ · เปลี่ยนสีได้ · ย้อนกลับ/ทำซ้ำ (Ctrl+Z / Ctrl+Y)
 // คัดลอก/ตัด/วาง (Ctrl+C / X / V · วางข้ามหน้า/ข้ามแท็บได้ · วางข้อความจากที่อื่น = กล่องใหม่) · ทำซ้ำ Ctrl+D · เลือกทั้งหมด Ctrl+A
 // เลือกหลายกล่อง: Shift/Ctrl+คลิก หรือ Shift+ลากคลุม → แถบเครื่องมือกลุ่ม (สี · คัดลอก · ทำซ้ำ · ลบ)
@@ -42,8 +42,10 @@ import {
   EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText, splitFlowLabel,
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
   flowIconScale, iconBoxBaseSize, nextIconScale, nodesInsideZone, refitIconBox, resizeIconBox, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
+  FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, edgeShapeOf, isEdgeShape, type FlowEdgeShape,
 } from "@/lib/flowchart";
-import { FlowBoardCtx, FlowEdgeView, FlowNodeView, FlowTools, type FlowBoardActions, type FlowRFNode } from "./nodes";
+import { EdgeShapeIcon, FlowBoardCtx, FlowEdgeView, FlowNodeView, FlowTools, type FlowBoardActions, type FlowRFNode } from "./nodes";
+import { CONNECTION_LINE } from "./edge-path";
 import { flowSceneToHtml } from "./export-html";
 
 /** กล่องบนกระดาน → ชนิด/ข้อมูล/ตำแหน่ง/ขนาด (ไว้คิดขนาดไอคอน) */
@@ -84,7 +86,20 @@ const toRFNodes = (s: FlowScene, selected?: Set<string>): FlowRFNode[] =>
     ...(n.type === "zone" ? { zIndex: -1, dragHandle: ".fc-zone-handle" } : {}),
   }));
 const toRFEdges = (s: FlowScene): Edge[] =>
-  s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, label: e.label, type: "flow", markerEnd: MARKER }));
+  s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, label: e.label, type: "flow", markerEnd: MARKER, ...(e.shape ? { data: { shape: e.shape } } : {}) }));
+
+/** เส้น → แบบลูกศรใหม่ (หักมุม = เอา data.shape ออก ให้เหมือนเส้นเดิม) */
+const withShape = (e: Edge, shape: FlowEdgeShape): Edge => {
+  const data = { ...(e.data ?? {}) } as Record<string, unknown>;
+  if (shape === "step") delete data.shape; else data.shape = shape;
+  return { ...e, data };
+};
+// แบบลูกศรตั้งต้นของเส้นใหม่ — จำต่อเครื่อง (ความสะดวกส่วนตัว ไม่ใช่ข้อมูลกระดาน)
+const SHAPE_KEY = "erp-flowchart-edge-shape";
+function loadDefaultShape(): FlowEdgeShape {
+  try { const v = localStorage.getItem(SHAPE_KEY); if (isEdgeShape(v)) return v; } catch { /* โหมดส่วนตัว — ใช้ค่าเริ่มต้น */ }
+  return "step";
+}
 
 export type FlowchartBoardProps = {
   entityType: string;
@@ -133,6 +148,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const pointerRef = useRef<{ x: number; y: number } | null>(null);   // เมาส์ล่าสุดบนกระดาน (วางตรงนั้น)
   const lastPasteRef = useRef<{ x: number; y: number; count: number } | null>(null);
   useEffect(() => { setClipReady(!!recallClip()); }, []);
+  const [edgeShape, setEdgeShapeDefault] = useState<FlowEdgeShape>("step");   // แบบลูกศรของเส้นใหม่
+  const edgeShapeRef = useRef(edgeShape); edgeShapeRef.current = edgeShape;
+  useEffect(() => { setEdgeShapeDefault(loadDefaultShape()); }, []);
 
   // ── ข้อมูลล่าสุด (ref ไว้ใช้ใน callback/timer ไม่ให้ค้างค่าเก่า) ──
   const scene = useMemo(() => toFlowScene(nodes, edges), [nodes, edges]);
@@ -435,7 +453,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     setEdges((es) => {
       const srcKind = nodesRef.current.find((n) => n.id === c.source)?.type as FlowKind | undefined;
       const label = autoEdgeLabel(srcKind, es.filter((e) => e.source === c.source).map((e) => String(e.label ?? "")), t);
-      return addEdge({ ...c, id: newFlowId("e"), type: "flow", markerEnd: MARKER, label }, es);
+      const shape = edgeShapeRef.current;
+      return addEdge({ ...c, id: newFlowId("e"), type: "flow", markerEnd: MARKER, label, ...(shape !== "step" ? { data: { shape } } : {}) }, es);
     });
   }, [t]);
 
@@ -500,6 +519,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     },
     updateData: (id, patch) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))),
     setEdgeLabel: (id, label) => setEdges((es) => es.map((e) => (e.id === id ? { ...e, label } : e))),
+    setEdgeShape: (ids, shape) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withShape(e, shape) : e))); },
     editEdgeLabel: (id) => {
       const cur = String(edges.find((e) => e.id === id)?.label ?? "");
       void askText({ title: t("ป้ายบนเส้น", "Line label"), initial: cur, placeholder: t("เช่น ใช่ / ไม่ใช่ / ถ้าเป็นรูปสินค้า", "e.g. Yes / No / If product image"), confirmText: t("ใช้ป้ายนี้", "Use label") })
@@ -533,6 +553,15 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const pagePickNode = pagePick?.id ? nodes.find((n) => n.id === pagePick.id) ?? null : null;
   const tb = "inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[12px] text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent";
   const dirty = canEdit && sig !== savedSigRef.current;
+  // ปุ่ม "ลูกศร" บนแถบ: เลือกแบบของเส้นใหม่ · มีเส้นที่เลือกอยู่ = เปลี่ยนเส้นพวกนั้นด้วย
+  const selEdges = edges.filter((e) => e.selected);
+  const selShapes = new Set(selEdges.map((e) => edgeShapeOf(e.data as { shape?: unknown } | undefined)));
+  const shownShape: FlowEdgeShape = selEdges.length && selShapes.size === 1 ? [...selShapes][0] : edgeShape;
+  const pickShape = (s: FlowEdgeShape) => {
+    setEdgeShapeDefault(s);
+    try { localStorage.setItem(SHAPE_KEY, s); } catch { /* จำไม่ได้ก็ไม่เป็นไร */ }
+    if (selEdges.length) actions.setEdgeShape(selEdges.map((e) => e.id), s);
+  };
 
   return (
     <FlowBoardCtx.Provider value={actions}>
@@ -550,6 +579,19 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
           })}
           {!readOnly && starter && <button type="button" className={tb} onClick={insertStarter} title={t("วางแม่แบบอีกชุดทางขวาของของเดิม", "Insert the starter template to the right")}><Icon value="i:sitemap" />{t("วางแม่แบบ", "Starter")}</button>}
           {!readOnly && clipReady && <button type="button" className={tb} onClick={pasteRemembered} title={t("วางกล่องที่คัดลอกไว้ (หรือชี้ที่กระดานแล้วกด Ctrl+V)", "Paste copied boxes (or point at the board and press Ctrl+V)")}><Icon value="i:clipboard" />{t("วาง", "Paste")}</button>}
+          {!readOnly && (
+            <span className="ml-1 inline-flex items-center gap-0.5 rounded-lg border border-slate-200 p-0.5">
+              <span className="px-1 text-[11px] text-slate-500">{t("ลูกศร", "Arrow")}</span>
+              {FLOW_EDGE_SHAPES.map((s) => (
+                <button key={s} type="button" onClick={() => pickShape(s)} aria-pressed={shownShape === s}
+                  title={t(`ลูกศรแบบ${FLOW_EDGE_SHAPE_META[s].th}${selEdges.length ? ` — เปลี่ยน ${selEdges.length} เส้นที่เลือกด้วย` : " — ใช้กับเส้นที่ลากใหม่ (คลิกเส้นเดิมแล้วกด = เปลี่ยนเส้นนั้น)"}`,
+                    `${FLOW_EDGE_SHAPE_META[s].en} arrow${selEdges.length ? ` — also changes ${selEdges.length} selected line(s)` : " — for new lines (select a line first to change it)"}`)}
+                  className={`inline-flex h-7 w-8 items-center justify-center rounded-md ${shownShape === s ? "bg-violet-100 text-violet-700" : "text-slate-600 hover:bg-slate-100"}`}>
+                  <EdgeShapeIcon shape={s} />
+                </button>
+              ))}
+            </span>
+          )}
           {readOnly && <span className="px-2 text-[12px] text-slate-500"><Icon value="i:lock" /> {canEdit ? t("โหมดดูอย่างเดียว", "View-only mode") : t("ดูอย่างเดียว (ไม่มีสิทธิ์แก้)", "View only (no edit permission)")}</span>}
           <span className="flex-1" />
           {!readOnly && (
@@ -583,6 +625,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{ type: "flow", markerEnd: MARKER }}
             connectionLineStyle={{ stroke: "#7c3aed", strokeWidth: 2 }}
+            connectionLineType={CONNECTION_LINE[edgeShape]}
             snapToGrid snapGrid={[GRID, GRID]}
             nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable
             multiSelectionKeyCode={["Shift", "Control", "Meta"]}

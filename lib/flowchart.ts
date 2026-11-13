@@ -45,7 +45,20 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** href/app/appName/icon = กล่อง "หน้าใน ERP": ลิงก์หน้าในระบบ (ขึ้นต้น "/") · รหัสแอป · ชื่อแอปตอนเลือก · ไอคอนเมนู — เลือกจากเมนูจริง (lib/menu-pages) */
 export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
-export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string };
+/** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
+export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
+
+/** แบบลูกศร (หักมุม = แบบเดิม) · svg = ไอคอนเล็ก 16×16 บนปุ่ม */
+export const FLOW_EDGE_SHAPES = ["step", "straight", "curve"] as const;
+export type FlowEdgeShape = (typeof FLOW_EDGE_SHAPES)[number];
+export const FLOW_EDGE_SHAPE_META: Record<FlowEdgeShape, { th: string; en: string; svg: string; head: string }> = {
+  step:     { th: "หักมุม", en: "Elbow",    svg: "M2 13 H8 V3 H14",      head: "M11.5 0.8 L14 3 L11.5 5.2" },
+  straight: { th: "ตรง",    en: "Straight", svg: "M2 13 L14 3",          head: "M10.6 3.6 L14 3 L12.8 6.3" },
+  curve:    { th: "โค้ง",    en: "Curved",   svg: "M2 13 C9 13 7 3 14 3", head: "M11.5 0.8 L14 3 L11.5 5.2" },
+};
+export const isEdgeShape = (v: unknown): v is FlowEdgeShape => typeof v === "string" && (FLOW_EDGE_SHAPES as readonly string[]).includes(v);
+/** แบบลูกศรของเส้น (ไม่ได้ตั้ง = หักมุม) */
+export const edgeShapeOf = (e: { shape?: unknown } | null | undefined): FlowEdgeShape => (isEdgeShape(e?.shape) ? e!.shape as FlowEdgeShape : "step");
 export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[] };
 
 export const EMPTY_FLOW_SCENE: FlowScene = { kind: "flowchart", v: 1, nodes: [], edges: [] };
@@ -96,7 +109,8 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     const o = (e ?? {}) as Record<string, unknown>;
     const id = str(o.id); const source = str(o.source); const target = str(o.target);
     if (!id || eids.has(id) || !ids.has(source) || !ids.has(target)) continue;
-    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label) });
+    const shape = edgeShapeOf(o);
+    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}) });
     eids.add(id);
   }
   return { kind: "flowchart", v: 1, nodes, edges };
@@ -114,7 +128,8 @@ function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | 
 
 /** โหนด/เส้นของ React Flow (มีค่าระหว่างใช้งาน เช่น selected/dragging/measured) → FlowScene สำหรับบันทึก */
 type NodeLike = { id: string; type?: string; position: { x: number; y: number }; width?: number | null; height?: number | null; measured?: { width?: number; height?: number }; data?: unknown };
-type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown };
+/** แบบลูกศรของเส้นบนกระดานเก็บใน data.shape (React Flow) */
+type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown; data?: unknown };
 export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[]): FlowScene {
   return parseFlowScene({
     kind: "flowchart",
@@ -124,7 +139,7 @@ export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[]): FlowScene {
       height: Math.round(n.height ?? n.measured?.height ?? 0) || undefined,
       data: n.data,
     })),
-    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "" })),
+    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "", shape: (e.data as { shape?: unknown } | undefined)?.shape })),
   }) ?? EMPTY_FLOW_SCENE;
 }
 

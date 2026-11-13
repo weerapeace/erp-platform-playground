@@ -3,7 +3,7 @@ import {
   parseFlowScene, toFlowScene, autoEdgeLabel, mergeFlowScenes, cloneFlowSceneAt, handlePoint, flowSceneBounds,
   splitFlowLabel, makeFlowNode, nodeColor, snap, copyFlowSelection, flowClipText, serializeFlowClip, parseFlowClip,
   placeFlowClip, textToFlowNode, nodesInsideZone, storageNodeSize, STORAGE_ICON_SIZE, fileNodeSize, iconBoxBaseSize, flowIconScale, flowIconSizes,
-  nextIconScale, resizeIconBox, refitIconBox, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
+  nextIconScale, resizeIconBox, refitIconBox, edgeShapeOf, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
 } from "../flowchart";
 
 const th = (a: string) => a;
@@ -322,5 +322,32 @@ describe("กล่องหน้าใน ERP", () => {
     const back = parseFlowClip(serializeFlowClip(clip))!;
     expect(back.nodes[0].data.href).toBe("/master/design-dashboard");
     expect(back.nodes[0].data.app).toBe("design");
+  });
+});
+
+describe("แบบลูกศร (หักมุม / ตรง / โค้ง)", () => {
+  const two = [N("a"), N("b", 300)];
+  it("โหลด: เก็บแบบตรง/โค้ง · หักมุมหรือค่าแปลก = ไม่เก็บ (กระดานเดิมหน้าตา/ลายเซ็นไม่เปลี่ยน)", () => {
+    const s = parseFlowScene({ kind: "flowchart", nodes: two, edges: [
+      { ...E("e1", "a", "b"), shape: "straight" },
+      { ...E("e2", "a", "b"), shape: "curve" },
+      { ...E("e3", "a", "b"), shape: "step" },
+      { ...E("e4", "a", "b"), shape: "zigzag" },
+      E("e5", "a", "b"),
+    ] })!;
+    expect(s.edges.map((e) => e.shape)).toEqual(["straight", "curve", undefined, undefined, undefined]);
+    expect("shape" in s.edges[2]).toBe(false);
+    expect(s.edges.map((e) => edgeShapeOf(e))).toEqual(["straight", "curve", "step", "step", "step"]);
+  });
+  it("จากกระดาน (data.shape ของ React Flow) → บันทึก", () => {
+    const s = toFlowScene(two, [{ ...E("e1", "a", "b"), data: { shape: "curve" } }, { ...E("e2", "a", "b"), data: { shape: "step" } }, E("e3", "a", "b")]);
+    expect(s.edges.map((e) => e.shape)).toEqual(["curve", undefined, undefined]);
+  });
+  it("คัดลอก/วาง + รวมงานเก็บแบบลูกศรไว้", () => {
+    const scene = S(two, [{ ...E("e1", "a", "b"), shape: "straight" }]);
+    const pasted = placeFlowClip(parseFlowClip(serializeFlowClip(copyFlowSelection(scene, ["a", "b"])!))!, null, 0);
+    expect(pasted.edges[0].shape).toBe("straight");
+    const mine = S(two, [{ ...E("e1", "a", "b"), shape: "curve" }]);
+    expect(mergeFlowScenes(scene, mine, scene).edges[0].shape).toBe("curve");   // เราเปลี่ยนแบบ = เอาของเรา
   });
 });

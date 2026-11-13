@@ -4,10 +4,11 @@
 // สี/ขนาด/ชนิด อ่านจาก lib/flowchart (FLOW_PALETTE / FLOW_KIND_META) — ที่เดียวกับตอนบันทึกเป็นรูป
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, getSmoothStepPath, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { flowEdgePath } from "./edge-path";
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
-import { FLOW_COLORS, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, type FlowColor, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
+import { FLOW_COLORS, FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, edgeShapeOf, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, type FlowColor, type FlowEdgeShape, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
@@ -51,6 +52,8 @@ export type FlowBoardActions = {
   removeNodes: (ids: string[]) => void;
   openFolder: (path: string) => void;
   setEdgeLabel: (id: string, label: string) => void;
+  /** เปลี่ยนแบบลูกศร (หักมุม · ตรง · โค้ง) */
+  setEdgeShape: (ids: string[], shape: FlowEdgeShape) => void;
   editEdgeLabel: (id: string) => void;
   removeEdge: (id: string) => void;
 };
@@ -323,10 +326,21 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
   );
 }
 
-/** เส้นต่อ (หักมุมอัตโนมัติ) + ป้าย · เลือกเส้นแล้วมีปุ่มลัด ใช่ / ไม่ใช่ / แก้ / ลบ */
-export function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, label, selected }: EdgeProps) {
-  const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge } = useBoard();
-  const [path, lx, ly] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 10 });
+/** ไอคอนแบบลูกศร (เส้นเล็ก 16×16 — รูปเส้นจาก FLOW_EDGE_SHAPE_META) */
+export function EdgeShapeIcon({ shape, size = 16 }: { shape: FlowEdgeShape; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={FLOW_EDGE_SHAPE_META[shape].svg} />
+      <path d={FLOW_EDGE_SHAPE_META[shape].head} />
+    </svg>
+  );
+}
+
+/** เส้นต่อ (หักมุม / ตรง / โค้ง ตาม data.shape) + ป้าย · เลือกเส้นแล้วมีปุ่มลัด แบบเส้น / ใช่ / ไม่ใช่ / แก้ / ลบ */
+export function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, label, selected, data }: EdgeProps) {
+  const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge, setEdgeShape } = useBoard();
+  const shape = edgeShapeOf(data as { shape?: unknown } | undefined);
+  const [path, lx, ly] = flowEdgePath(shape, { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const text = typeof label === "string" ? label : "";
   const chip = "h-6 rounded-md px-1.5 text-[11px] hover:bg-slate-100";
   return (
@@ -335,10 +349,18 @@ export function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
         style={{ stroke: selected ? "#7c3aed" : "#64748b", strokeWidth: selected ? 2.5 : 1.75 }} />
       {(text || (selected && !readOnly)) && (
         <EdgeLabelRenderer>
-          <div className="nodrag nopan absolute flex flex-col items-center gap-1" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all" }}>
+          <div className="nodrag nopan absolute flex flex-col items-center gap-1" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all", ...(selected ? { zIndex: 1100 } : {}) /* เลือกเส้นอยู่ = ปุ่มลัดลอยเหนือกล่อง (เส้นสั้นกล่องเคยบังปุ่ม) */ }}>
             {text && <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${selected ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-600"}`}>{text}</span>}
             {selected && !readOnly && (
               <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 text-slate-600 shadow-md">
+                {FLOW_EDGE_SHAPES.map((s) => (
+                  <button key={s} type="button" onClick={() => setEdgeShape([id], s)} aria-pressed={shape === s}
+                    title={t(`ลูกศรแบบ${FLOW_EDGE_SHAPE_META[s].th}`, `${FLOW_EDGE_SHAPE_META[s].en} arrow`)}
+                    className={`inline-flex h-6 w-7 items-center justify-center rounded-md ${shape === s ? "bg-violet-100 text-violet-700" : "hover:bg-slate-100"}`}>
+                    <EdgeShapeIcon shape={s} />
+                  </button>
+                ))}
+                <span className="mx-0.5 h-4 w-px bg-slate-200" />
                 <button type="button" className={chip} onClick={() => setEdgeLabel(id, t("ใช่", "Yes"))}>{t("ใช่", "Yes")}</button>
                 <button type="button" className={chip} onClick={() => setEdgeLabel(id, t("ไม่ใช่", "No"))}>{t("ไม่ใช่", "No")}</button>
                 <button type="button" className={chip} onClick={() => editEdgeLabel(id)} title={t("พิมพ์ป้ายเอง", "Type a label")}><Icon value="i:pencil" /></button>
