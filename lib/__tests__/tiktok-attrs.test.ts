@@ -69,8 +69,8 @@ describe("กติกาหมวด · COD · ตารางขนาด · �
   });
   test("ตารางขนาด: รูปใหม่ = เปลี่ยน · ลบไม่ได้ · หมวดไม่รองรับ = error", () => {
     expect(planTiktokSizeChart(null, "r2:sz.jpg", null)).toMatchObject({ changed: true, errors: [], change: { label: "ตารางขนาด", before: "ไม่มี", after: "รูปใหม่" } });
-    expect(planTiktokSizeChart("tos/1", "tts:tos/1", null).changed).toBe(false);
-    expect(planTiktokSizeChart("tos/1", null, null).errors[0]).toContain("ลบตารางขนาดไม่ได้");
+    expect(planTiktokSizeChart("tts:tos/1", "tts:tos/1", null).changed).toBe(false);
+    expect(planTiktokSizeChart("tts:tos/1", null, null).errors[0]).toContain("ลบตารางขนาดไม่ได้");
     expect(planTiktokSizeChart(null, "r2:x", { codSupported: null, sizeChartSupported: false, sizeChartRequired: null }).errors[0]).toContain("ไม่รองรับ");
   });
   test("หน่วยน้ำหนัก กรัม ↔ กิโลกรัม (เก็บเป็นกิโลกรัม)", () => {

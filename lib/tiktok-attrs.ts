@@ -13,6 +13,7 @@
  * ช่องกรอกในหน้าเว็บ = ของกลาง LazadaAttrField (แปลงช่อง TikTok เป็นรูปแบบเดียวกันด้วย ttsAttrDef) — ไม่สร้างช่องกรอกชุดที่ 2
  */
 import type { LazadaAttrDef } from "@/lib/lazada-listing-edit";
+import { ttsSizeMetaOf, type TtsSizeMeta } from "@/lib/tiktok-size-chart";
 
 export type TtsAttrOpt = { id: string; name: string };
 /** ช่องคุณลักษณะ 1 ช่องของหมวด */
@@ -22,7 +23,7 @@ export type TtsAttrVal = { id?: string; name?: string };
 /** ค่าทั้งหมด: รหัสช่อง → ค่าที่เลือก */
 export type TtsAttrState = Record<string, TtsAttrVal[]>;
 /** กติกาของหมวด (null = ไม่รู้ / ดึงไม่ได้) */
-export type TtsCategoryRules = { codSupported: boolean | null; sizeChartSupported: boolean | null; sizeChartRequired: boolean | null };
+export type TtsCategoryRules = { codSupported: boolean | null; sizeChartSupported: boolean | null; sizeChartRequired: boolean | null; /** แบบวัด/คอลัมน์มาตรฐานของตารางขนาด (มีเฉพาะหมวดที่ TikTok ส่งมา) */ size?: TtsSizeMeta };
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : null);
@@ -49,7 +50,8 @@ export function ttsAttrFieldsOf(raw: unknown): TtsAttrField[] {
 /** กติกาของหมวดจาก Get Category Rules */
 export function ttsCategoryRulesOf(raw: unknown): TtsCategoryRules {
   const r = obj(raw) ?? {};
-  return { codSupported: bool(obj(r.cod)?.is_supported), sizeChartSupported: bool(obj(r.size_chart)?.is_supported), sizeChartRequired: bool(obj(r.size_chart)?.is_required) };
+  const size = ttsSizeMetaOf(r);
+  return { codSupported: bool(obj(r.cod)?.is_supported), sizeChartSupported: bool(obj(r.size_chart)?.is_supported), sizeChartRequired: bool(obj(r.size_chart)?.is_required), ...(size ? { size } : {}) };
 }
 
 /** ค่าคุณลักษณะจาก Get Product (product_attributes) */
@@ -150,16 +152,22 @@ export function planTiktokCod(base: boolean | null, next: boolean | null, suppor
   return { changed, errors, change: changed ? { label: "เก็บเงินปลายทาง (COD)", before: txt(base), after: txt(next) } : null };
 }
 
-/** ตารางขนาด (รูป): ref ในฟอร์ม = "tts:<uri>" (รูปเดิม) / "r2:<key>" (รูปใหม่จากระบบ) / null */
-export function planTiktokSizeChart(baseUri: string | null, next: string | null, rules: TtsCategoryRules | null): { changed: boolean; errors: string[]; warnings: string[]; change: { label: string; before: string; after: string } | null } {
-  const baseRef = baseUri ? `tts:${baseUri}` : null;
+/**
+ * ตารางขนาด: ref ในฟอร์ม = "tts:<uri>" (รูปเดิม) / "r2:<key>" (รูปใหม่จากระบบ) / "tpl:<id>" (แม่แบบบน TikTok · lib/tiktok-size-chart) / null
+ * baseRef = ของเดิมบนร้านในรูปแบบเดียวกัน (tiktokSizeChartRef ใน lib/tiktok-listing-edit) · templateName = ชื่อแม่แบบใหม่ (ไว้โชว์)
+ */
+export function planTiktokSizeChart(baseRef: string | null, next: string | null, rules: TtsCategoryRules | null, templateName?: string | null): { changed: boolean; errors: string[]; warnings: string[]; change: { label: string; before: string; after: string } | null } {
   const changed = next !== baseRef;
   const errors: string[] = []; const warnings: string[] = [];
-  if (changed && !next && baseRef) errors.push("ลบตารางขนาดไม่ได้ (TikTok ไม่มีให้ล้าง) — เปลี่ยนเป็นรูปใหม่แทน");
+  if (changed && !next && baseRef) errors.push("ลบตารางขนาดไม่ได้ (TikTok ไม่มีให้ล้าง) — เปลี่ยนเป็นรูปหรือแม่แบบอื่นแทน");
   if (changed && next && rules?.sizeChartSupported === false) errors.push("หมวดนี้ TikTok ไม่รองรับตารางขนาด");
+  if (changed && next && !/^(tts|r2|tpl):./.test(next)) errors.push("ตารางขนาดที่เลือกระบบไม่รู้จัก — เลือกใหม่");
   if (changed && next?.startsWith("r2:")) warnings.push("รูปตารางขนาดจะถูกทำเป็น JPG จัตุรัสพื้นขาว 1500px แล้วฝากกับ TikTok (ด้านสั้นต้อง ≥ 1,024px) · TikTok ตรวจใหม่");
+  if (changed && next?.startsWith("tpl:")) warnings.push("ใช้แม่แบบตารางขนาดบน TikTok (แทนรูปเดิมถ้ามี) · TikTok ตรวจใหม่");
   if (!next && rules?.sizeChartRequired) warnings.push("หมวดนี้ TikTok บังคับตารางขนาด");
-  return { changed, errors, warnings, change: changed && next ? { label: "ตารางขนาด", before: baseRef ? "มีรูปเดิม" : "ไม่มี", after: "รูปใหม่" } : null };
+  const kind = (r: string | null) => (!r ? "ไม่มี" : r.startsWith("tpl:") ? "แม่แบบตาราง" : r.startsWith("r2:") ? "รูปใหม่" : "รูปเดิม");
+  const after = next?.startsWith("tpl:") ? `แม่แบบ${templateName ? ` "${templateName}"` : ` #${next.slice(4)}`}` : kind(next);
+  return { changed, errors, warnings, change: changed && next ? { label: "ตารางขนาด", before: kind(baseRef), after } : null };
 }
 
 /** น้ำหนัก: แปลงหน่วยที่โชว์ในช่องกรอก (เก็บเป็นกิโลกรัมเสมอ) */

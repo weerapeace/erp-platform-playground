@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { planTiktokCreate, ttsAttrDefsOf, ttsCategoryIdOf, ttsCreateDescriptionHtml, ttsCreateImageRefs, ttsCreateResolveImages, type TtsCreateSku } from "@/lib/tiktok-create-plan";
+import { planTiktokCreate, ttsAttrDefsOf, ttsCategoryIdOf, ttsCreateDescriptionHtml, ttsCreateImageRefs, ttsCreateResolveImages, ttsCreateResolveSkuImages, ttsCreateSkuImageRefs, type TtsCreateSku } from "@/lib/tiktok-create-plan";
 
 const sku = (code: string, over: Partial<TtsCreateSku> = {}): TtsCreateSku => ({
   id: `id-${code}`, code, color_th: null, color: null, list_price: 690, fake_price: 1390, cover_image_r2_key: `img/${code}.jpg`,
@@ -18,7 +18,13 @@ describe("สร้างฉบับร่างบน TikTok", () => {
     expect(payload).toMatchObject({ save_mode: "AS_DRAFT", category_id: "903560", category_version: "v2", brand_id: "b1", package_weight: { value: "0.35", unit: "KILOGRAM" } });
     expect(payload.package_dimensions).toEqual({ length: "26", width: "15", height: "5", unit: "CENTIMETER" });
     const skus = payload.skus as Record<string, unknown>[];
-    expect(skus[0]).toEqual({ seller_sku: "BCG10-01", price: { amount: "1390.00", currency: "THB" }, inventory: [{ warehouse_id: "7198734530407614213", quantity: 1 }], sales_attributes: [{ name: "สี", value_name: "น้ำเงิน" }] });
+    expect(skus[0]).toEqual({ seller_sku: "BCG10-01", price: { amount: "1390.00", currency: "THB" }, inventory: [{ warehouse_id: "7198734530407614213", quantity: 1 }], sales_attributes: [{ name: "สี", value_name: "น้ำเงิน", sku_img_ref: "r2:img/BCG10-01.jpg" }] });
+    // รูปตัวเลือก: ทุกสีมีรูป → ฝากแล้วแทนเป็น sku_img{ uri } · ขาดสีใดสีหนึ่ง = ตัดทั้งชุด
+    expect(ttsCreateSkuImageRefs(payload)).toEqual(["r2:img/BCG10-01.jpg", "r2:img/BCG10-02.jpg"]);
+    const full = ttsCreateResolveSkuImages(payload, new Map([["r2:img/BCG10-01.jpg", "u1"], ["r2:img/BCG10-02.jpg", "u2"]]));
+    expect((full.skus as { sales_attributes: unknown[] }[])[1].sales_attributes).toEqual([{ name: "สี", value_name: "ชมพู", sku_img: { uri: "u2" } }]);
+    const half = ttsCreateResolveSkuImages(payload, new Map([["r2:img/BCG10-01.jpg", "u1"]]));
+    expect((half.skus as { sales_attributes: unknown[] }[])[0].sales_attributes).toEqual([{ name: "สี", value_name: "น้ำเงิน" }]);
     expect(preview.stock).toEqual({ qty: 1, warehouseId: "7198734530407614213" });
     expect(preview.warnings.join(" ")).toContain("แก้เป็นจำนวนจริง");
     expect(preview.warnings.join(" ")).toContain("โปรโมชัน");   // ราคาเต็ม ≠ ราคาขาย

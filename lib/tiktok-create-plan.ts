@@ -27,6 +27,7 @@
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { ttsAttrPayload, type TtsAttrField, type TtsAttrState, type TtsAttrVal, type TtsCategoryRules } from "@/lib/tiktok-attrs";
+import type { TtsSizeMeta } from "@/lib/tiktok-size-chart";
 import { isTiktokImageUrl, TTS_DESC_MAX, TTS_MAX_IMAGES, TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN, ttsTitleLength } from "@/lib/tiktok-listing-edit";
 
 /** สต๊อกตั้งต้นต่อตัวเลือกในฉบับร่าง (TikTok บังคับ 1–99,999 แม้เป็นร่าง) — แก้เป็นจำนวนจริงใน Seller Center ก่อนเผยแพร่ */
@@ -76,7 +77,8 @@ export type TtsCreatePreview = {
   /** เก็บเงินปลายทาง (extra.tiktok_cod) + หมวดรองรับไหม */
   cod: { value: boolean | null; supported: boolean | null };
   /** รูปตารางขนาด (extra.tiktok_size_chart · ref r2:) + หมวดรองรับ/บังคับไหม */
-  sizeChart: { ref: string | null; supported: boolean | null; required: boolean | null };
+  /** ref: "r2:<key>" รูปจากระบบ · "tpl:<id>" แม่แบบตารางบน TikTok · size = แบบวัด/คอลัมน์มาตรฐานของหมวด (ไว้สร้างแม่แบบ) */
+  sizeChart: { ref: string | null; supported: boolean | null; required: boolean | null; size: TtsSizeMeta | null };
   /** สต๊อกตั้งต้นในร่าง (ต่อตัวเลือก) + คลังของร้าน (null = หาไม่เจอ) */
   stock: { qty: number; warehouseId: string | null };
   missing: string[];
@@ -200,6 +202,10 @@ export function planTiktokCreate(input: {
   }
   const badSku = variants.filter((v) => /\s/.test(v.code) || v.code.length > SELLER_SKU_MAX);
   if (badSku.length) missing.push(`รหัส SKU มีช่องว่างหรือยาวเกิน ${SELLER_SKU_MAX} ตัว ${badSku.length} ตัว (เช่น "${badSku[0].code}")`);
+  // รูปตัวเลือก (sku_img): ชั้นแรกเป็น "สี" และทุกสีมีรูป → ใส่รูปให้ทุกค่า (TikTok บังคับครบทุกค่าของชั้นนั้น) · ไม่ครบ = ไม่ใส่ (เตือน)
+  const colorDim = dims[0]?.key === "color" ? dims[0] : null;
+  const skuImgOn = !!colorDim && variants.length > 0 && variants.every((v) => !!v.image_ref);
+  if (colorDim && !skuImgOn) warnings.push(`บางสียังไม่มีรูป — ไม่ใส่รูปตัวเลือก (TikTok ต้องมีรูปครบทุกสี) · ตั้งปกของ SKU ในระบบ แล้วกดลงใหม่`);
   if (variants.some((v) => v.fake && v.sale && v.sale < v.fake)) warnings.push("ราคาบน TikTok = ราคาเต็มในระบบ — ส่วนลดให้ตั้งโปรโมชันใน Seller Center (ราคาขายในระบบไม่ได้ส่ง)");
 
   // ---------- รูปสินค้า ----------
@@ -234,7 +240,7 @@ export function planTiktokCreate(input: {
   if (codVal === true && input.rules?.codSupported === false) missing.push("หมวดนี้ TikTok ไม่รองรับเก็บเงินปลายทาง — ปิด COD");
   const sizeRef = typeof extra.tiktok_size_chart === "string" && extra.tiktok_size_chart ? extra.tiktok_size_chart : null;
   if (sizeRef && input.rules?.sizeChartSupported === false) warnings.push("หมวดนี้ TikTok ไม่รองรับตารางขนาด — ไม่ส่งรูปตารางขนาด");
-  if (!sizeRef && input.rules?.sizeChartRequired) warnings.push("หมวดนี้ TikTok บังคับตารางขนาด — เลือกรูปตารางขนาด หรือกรอกใน Seller Center ก่อนเผยแพร่");
+  if (!sizeRef && input.rules?.sizeChartRequired) warnings.push("หมวดนี้ TikTok บังคับตารางขนาด — เลือกรูปหรือแม่แบบตารางขนาด ก่อนเผยแพร่");
   if (required.length) warnings.push(`ช่องบังคับของหมวดยังว่าง ${required.length} ช่อง (${required.slice(0, 3).join(", ")}${required.length > 3 ? " …" : ""}) — ฉบับร่างยังไม่บังคับ แต่ต้องกรอก (ที่นี่หรือใน Seller Center) ก่อนกดเผยแพร่`);
   if (!fields && !input.attrDefs && categoryId) warnings.push("ดึงช่องของหมวดจาก TikTok ไม่ได้ — ตรวจช่องบังคับใน Seller Center");
 
@@ -263,7 +269,7 @@ export function planTiktokCreate(input: {
       seller_sku: v.code,
       price: { amount: v.price != null ? v.price.toFixed(2) : "", currency: "THB" },
       inventory: [{ warehouse_id: warehouseId ?? "", quantity: TTS_DRAFT_QTY }],
-      ...(dims.length ? { sales_attributes: dims.map((dm) => ({ name: dm.name, value_name: v.attrs[dm.name] })) } : {}),
+      ...(dims.length ? { sales_attributes: dims.map((dm, i) => ({ name: dm.name, value_name: v.attrs[dm.name], ...(i === 0 && skuImgOn && v.image_ref ? { sku_img_ref: v.image_ref } : {}) })) } : {}),
     })),
   };
 
@@ -280,7 +286,7 @@ export function planTiktokCreate(input: {
       dims, variants,
       attrs: { required, loaded: !!(fields ?? input.attrDefs), fields: fields ?? [], values: attrVals },
       cod: { value: codVal, supported: input.rules?.codSupported ?? null },
-      sizeChart: { ref: sizeRef, supported: input.rules?.sizeChartSupported ?? null, required: input.rules?.sizeChartRequired ?? null },
+      sizeChart: { ref: sizeRef, supported: input.rules?.sizeChartSupported ?? null, required: input.rules?.sizeChartRequired ?? null, size: input.rules?.size ?? null },
       stock: { qty: TTS_DRAFT_QTY, warehouseId },
       missing, warnings,
       on_shop: input.onShop ?? (str(d?.platform_product_id) || null),
@@ -296,6 +302,28 @@ export const ttsCreateImageRefs = (payload: Record<string, unknown>): string[] =
 export function ttsCreateResolveImages(payload: Record<string, unknown>, uriOf: Map<string, string>): Record<string, unknown> {
   const copy = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
   copy.main_images = ttsCreateImageRefs(payload).map((r) => ({ uri: uriOf.get(r) ?? r }));
+  return copy;
+}
+
+/** รูปตัวเลือกที่ต้องฝาก (ATTRIBUTE_IMAGE) — sales_attributes[].sku_img_ref */
+export function ttsCreateSkuImageRefs(payload: Record<string, unknown>): string[] {
+  const out = new Set<string>();
+  for (const sku of Array.isArray(payload.skus) ? payload.skus as Record<string, unknown>[] : []) {
+    for (const a of Array.isArray(sku.sales_attributes) ? sku.sales_attributes as Record<string, unknown>[] : []) { const r = str(a.sku_img_ref); if (r) out.add(r); }
+  }
+  return [...out];
+}
+/** แทน sku_img_ref ด้วย sku_img{ uri } ที่ฝากแล้ว (ฝากไม่ได้ = ตัดรูปตัวเลือกทั้งชุด เพราะ TikTok ต้องครบทุกค่า) */
+export function ttsCreateResolveSkuImages(payload: Record<string, unknown>, uriOf: Map<string, string>): Record<string, unknown> {
+  const copy = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+  const all = ttsCreateSkuImageRefs(copy);
+  const ok = all.every((r) => uriOf.has(r));
+  for (const sku of Array.isArray(copy.skus) ? copy.skus as Record<string, unknown>[] : []) {
+    for (const a of Array.isArray(sku.sales_attributes) ? sku.sales_attributes as Record<string, unknown>[] : []) {
+      const r = str(a.sku_img_ref); delete a.sku_img_ref;
+      if (r && ok) a.sku_img = { uri: uriOf.get(r)! };
+    }
+  }
   return copy;
 }
 

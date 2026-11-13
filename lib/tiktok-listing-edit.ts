@@ -21,7 +21,9 @@ import { ttsAttrNamesOf, ttsAttrStateOf, type TtsAttrState } from "@/lib/tiktok-
 export const TTS_TITLE_MIN = 25;
 export const TTS_TITLE_MAX = 255;
 
-export type TiktokSkuView = { skuId: string; sellerSku: string | null; label: string; price: number | null; stock: number | null; status: string | null };
+/** ค่าตัวเลือก 1 ชั้นของ SKU (sales_attributes) — รูปตัวเลือก (sku_img) อยู่ที่ชั้นหลักชั้นเดียว */
+export type TiktokSkuAttr = { id: string | null; name: string | null; valueId: string | null; valueName: string | null; img: TiktokImage | null };
+export type TiktokSkuView = { skuId: string; sellerSku: string | null; label: string; price: number | null; stock: number | null; status: string | null; attrs: TiktokSkuAttr[] };
 export type TiktokListingView = {
   productId: string;
   title: string;
@@ -53,6 +55,8 @@ export type TiktokListingView = {
   attrNames: Record<string, string>;
   cod: boolean | null;
   sizeChart: TiktokImage | null;
+  /** แม่แบบตารางขนาดบน TikTok (size_chart.template.id) · null = ไม่มี (อาจเป็นรูปแทน) */
+  sizeChartTemplateId: string | null;
   skus: TiktokSkuView[];
   /** เหตุผลที่ TikTok ตีกลับ (ถ้ามี) */
   rejectReasons: string[];
@@ -93,6 +97,7 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
       price: num(price.tax_exclusive_price) ?? num(price.sale_price),
       stock: inv.length ? inv.reduce((a, w) => a + Math.max(0, num(w.quantity) ?? 0), 0) : null,
       status: up(obj(s.status_info)?.status),
+      attrs: arrOf(s.sales_attributes).map((a) => ({ id: str(a.id), name: str(a.name), valueId: str(a.value_id), valueName: str(a.value_name), img: imageOf(a.sku_img) })),
     };
   }).filter((s) => s.skuId);
   const reasons: string[] = [];
@@ -130,6 +135,7 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
     attrNames: ttsAttrNamesOf((sameRv ? rv! : d).product_attributes),
     cod: (sameRv ? rv! : d).is_cod_allowed === true ? true : (sameRv ? rv! : d).is_cod_allowed === false ? false : null,
     sizeChart: sizeChartOf((sameRv ? rv! : d).size_chart),
+    sizeChartTemplateId: str(obj(obj((sameRv ? rv! : d).size_chart)?.template)?.id),
     skus,
     rejectReasons: reasons,
     updateTime: num(d.update_time),
@@ -538,13 +544,19 @@ export function planTiktokDescription(base: string, after: string): TiktokDescPl
   return { changed, html: fixed.html, errors, warnings, change };
 }
 
-/** รูปตารางขนาดจาก Get Product (size_chart.image{ uri, urls[] }) · แบบเทมเพลต = null (แก้ใน Seller Center) */
-function sizeChartOf(v: unknown): TiktokImage | null {
-  const img = obj(obj(v)?.image);
+/** รูปจากคำตอบ TikTok ({ uri, urls[], thumb_urls[] }) → { url, uri } · ไม่ครบ = null */
+function imageOf(v: unknown): TiktokImage | null {
+  const img = obj(v);
   const uri = str(img?.uri);
   const url = (Array.isArray(img?.urls) ? str((img!.urls as unknown[])[0]) : null) ?? (Array.isArray(img?.thumb_urls) ? str((img!.thumb_urls as unknown[])[0]) : null);
   return uri && url ? { uri, url } : null;
 }
+/** รูปตารางขนาดจาก Get Product (size_chart.image{ uri, urls[] }) · แบบแม่แบบ = sizeChartTemplateId */
+const sizeChartOf = (v: unknown): TiktokImage | null => imageOf(obj(v)?.image);
+
+/** ตารางขนาดบนร้านในรูปแบบ ref เดียวกับฟอร์ม: แม่แบบ "tpl:<id>" มาก่อน · รูป "tts:<uri>" · ไม่มี = null */
+export const tiktokSizeChartRef = (v: Pick<TiktokListingView, "sizeChart" | "sizeChartTemplateId">): string | null =>
+  v.sizeChartTemplateId ? `tpl:${v.sizeChartTemplateId}` : v.sizeChart ? `tts:${v.sizeChart.uri}` : null;
 
 // ───────────── เผยแพร่ฉบับร่าง (เจ้าของเลือก 2026-11-13 "ตามแนะนำเลย") ─────────────
 // ปุ่ม "เผยแพร่" ในลิ้นชัก (เฉพาะสินค้าที่เป็น DRAFT): ตั้งสต๊อกจริงครั้งเดียว (Update Inventory · 1–99,999) → Partial Edit save_mode=LISTING (ส่งตรวจ)

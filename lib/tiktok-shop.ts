@@ -181,7 +181,7 @@ const PRODUCT_WRITE_SCOPE = "Product Write (seller.product.write)";
  * ⚠️ แก้แล้ว TikTok ส่งไปตรวจใหม่ (ฉบับเดิมขายต่อจนผ่าน) · ราคา/สต๊อก = มีผลทันที (ยังไม่เปิดให้แก้)
  * category_version: เอกสารบอก "ร้าน SEA ต้องส่ง v2 เมื่อใช้ API นี้" (ไทย = SEA)
  */
-export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown; product_attributes?: unknown[]; is_cod_allowed?: boolean; size_chart?: unknown }, opts: { saveMode?: "AS_DRAFT" | "LISTING" } = {}): Promise<Record<string, unknown>> {
+export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown; product_attributes?: unknown[]; is_cod_allowed?: boolean; size_chart?: unknown; skus?: unknown[] }, opts: { saveMode?: "AS_DRAFT" | "LISTING" } = {}): Promise<Record<string, unknown>> {
   // save_mode ค่าเริ่มของ TikTok = LISTING (ส่งตรวจ/เผยแพร่) — สินค้าที่เป็นฉบับร่างต้องส่ง AS_DRAFT ไม่งั้นร่างถูกส่งตรวจ (เจอจริง 2026-11-13 BBM02 กลายเป็น PENDING)
   return ttsApi("POST", `/product/202509/products/${encodeURIComponent(productId)}/partial_edit`, accessToken, {
     query: { shop_cipher: shopCipher }, body: { ...fields, category_version: "v2", ...(opts.saveMode ? { save_mode: opts.saveMode } : {}) }, scope: PRODUCT_WRITE_SCOPE,
@@ -292,6 +292,38 @@ export async function ttsSetProductsActive(accessToken: string, shopCipher: stri
   return ttsApi("POST", `/product/202309/products/${open ? "activate" : "deactivate"}`, accessToken, {
     query: { shop_cipher: shopCipher }, body: { product_ids: productIds.slice(0, 20) }, scope: PRODUCT_WRITE_SCOPE,
   });
+}
+
+// ───────── ตารางขนาดแบบแม่แบบ (lib/tiktok-size-chart แปลงคำตอบ) ─────────
+/** แม่แบบตารางขนาดของร้าน (Search Size Charts 202407 · REUSABLE_TEMPLATE) → data ดิบ */
+export async function ttsSearchSizeCharts(accessToken: string, shopCipher: string, opts: { pageToken?: string | null; pageSize?: number; keyword?: string; ids?: string[] } = {}): Promise<Record<string, unknown>> {
+  const query: Record<string, string> = { shop_cipher: shopCipher, page_size: String(Math.min(100, Math.max(1, opts.pageSize ?? 100))), locales: "th-TH" };
+  if (opts.pageToken) query.page_token = opts.pageToken;
+  return ttsApi("POST", "/product/202407/sizecharts/search", accessToken, {
+    query, body: { size_chart_mode: "REUSABLE_TEMPLATE", ...(opts.keyword ? { keyword: opts.keyword } : {}), ...(opts.ids?.length ? { ids: opts.ids.slice(0, 50) } : {}) }, scope: PRODUCT_SCOPE,
+  });
+}
+/** สร้างแม่แบบตารางขนาด (Create Size Chart V2 202610 · body จาก planTiktokSizeTable) → id แม่แบบ (ใช้เป็น size_chart.template.id) */
+export async function ttsCreateSizeChart(accessToken: string, shopCipher: string, body: Record<string, unknown>): Promise<string> {
+  const d = await ttsApi("POST", "/product/202610/size_charts", accessToken, { query: { shop_cipher: shopCipher }, body, scope: PRODUCT_SCOPE });
+  const id = str(d.size_chart_id);
+  if (!id) throw new TtsApiError("TikTok ไม่ส่งรหัสแม่แบบตารางขนาดกลับมา", "no_size_chart_id");
+  return id;
+}
+
+// ───────── โปรโมชัน (อ่านอย่างเดียว · lib/tiktok-promotions แปลงคำตอบ) ─────────
+const PROMO_SCOPE = "Promotion Information (seller.promotion.info)";
+/** ค้นโปรของร้าน (Search Promotion Activities 202309) → data ดิบ { activities[], next_page_token, total_count } */
+export async function ttsSearchPromotions(accessToken: string, shopCipher: string, opts: { status?: string; pageToken?: string | null; pageSize?: number } = {}): Promise<Record<string, unknown>> {
+  return ttsApi("POST", "/promotion/202309/activities/search", accessToken, {
+    query: { shop_cipher: shopCipher },
+    body: { page_size: Math.min(100, Math.max(1, opts.pageSize ?? 100)), page_token: opts.pageToken ?? "", ...(opts.status ? { status: opts.status } : {}) },
+    scope: PROMO_SCOPE,
+  });
+}
+/** รายละเอียดโปร 1 รายการ + สินค้าในโปร (Get Activity 202309) → data ดิบ */
+export async function ttsGetPromotion(accessToken: string, shopCipher: string, activityId: string): Promise<Record<string, unknown>> {
+  return ttsApi("GET", `/promotion/202309/activities/${encodeURIComponent(activityId)}`, accessToken, { query: { shop_cipher: shopCipher }, scope: PROMO_SCOPE });
 }
 
 /** โดน TikTok จำกัดความถี่ไหม (ลองใหม่ได้) */

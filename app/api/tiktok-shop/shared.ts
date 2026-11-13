@@ -3,7 +3,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import { lazConnHealth } from "@/lib/lazada";
-import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, ttsGetCategoryAttributes, ttsGetCategoryRules, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, ttsGetCategoryAttributes, ttsGetCategoryRules, ttsSearchSizeCharts, ttsSearchPromotions, ttsGetPromotion, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsSizeTemplatesOf, type TtsSizeTemplate } from "@/lib/tiktok-size-chart";
+import { ttsPromosOf, ttsPromoWithDetail, type TtsPromo } from "@/lib/tiktok-promotions";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { ttsAttrFieldsOf, ttsCategoryRulesOf, type TtsAttrField, type TtsCategoryRules } from "@/lib/tiktok-attrs";
 import { keepSkuStatus, tiktokListingView, type TiktokListingView } from "@/lib/tiktok-listing-edit";
@@ -194,4 +196,90 @@ export async function ttsCategoryMeta(accessToken: string, cipher: string, categ
   };
   if (val.fields) metaCache.set(key, { at: Date.now(), val });
   return val;
+}
+
+
+// ───────── ร้านของรายการ/แบรนด์ (route อ่านอย่างเดียวที่ไม่ต้องดึงสินค้า เช่น แม่แบบตารางขนาด / โปรโมชัน) ─────────
+/** กุญแจ + ร้าน จาก listing_id (ลิ้นชัก) หรือ brand_id (หน้าลงฉบับร่าง) · ok=false → error ภาษาคน + HTTP status */
+export async function ttsShopFor(admin: SupabaseClient, by: { listingId?: string | null; brandId?: string | null }, userId: string | null): Promise<
+  { ok: true; accessToken: string; cipher: string; brandId: string; platformId: string } | { ok: false; error: string; status: number }
+> {
+  let brandId = (by.brandId ?? "").trim() || null;
+  let platformId: string | null = null;
+  if (by.listingId) {
+    const { data: l } = await admin.from("platform_catalog_listings").select("platform_id, brand_id").eq("id", by.listingId).maybeSingle();
+    const row = l as { platform_id: string; brand_id: string | null } | null;
+    if (!row?.brand_id) return { ok: false, error: "ไม่พบสินค้านี้", status: 404 };
+    brandId = row.brand_id; platformId = row.platform_id;
+  }
+  if (!brandId) return { ok: false, error: "ต้องระบุ listing_id หรือ brand_id", status: 400 };
+  if (!platformId) {
+    const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", "tiktok").maybeSingle();
+    platformId = (pf as { id?: string } | null)?.id ?? null;
+    if (!platformId) return { ok: false, error: "ไม่พบแพลตฟอร์ม TikTok ในระบบ", status: 500 };
+  }
+  const tok = await ttsTokenOrReason(admin, brandId, platformId, userId);
+  if (!tok.ok) return { ok: false, error: tok.reason, status: 400 };
+  const cipher = tok.meta.shops?.[0]?.cipher;
+  if (!cipher) return { ok: false, error: "ยังไม่รู้รหัสร้าน TikTok — กด ตรวจการเชื่อมต่อ ที่บัญชีแพลตฟอร์มก่อน", status: 400 };
+  return { ok: true, accessToken: tok.accessToken, cipher, brandId, platformId };
+}
+
+// ───────── แม่แบบตารางขนาดของร้าน (แคช 10 นาที · สร้างใหม่แล้วล้างแคช) ─────────
+const sizeTplCache = new Map<string, { at: number; list: TtsSizeTemplate[] }>();
+/** แม่แบบตารางขนาดทั้งร้าน (สูงสุด 3 หน้า × 100) · fresh = ข้ามแคช */
+export async function ttsSizeTemplates(accessToken: string, cipher: string, fresh = false): Promise<{ list: TtsSizeTemplate[]; truncated: boolean }> {
+  const hit = sizeTplCache.get(cipher);
+  if (!fresh && hit && Date.now() - hit.at < META_TTL) return { list: hit.list, truncated: false };
+  const list: TtsSizeTemplate[] = [];
+  let token: string | null = null; let truncated = false;
+  for (let page = 0; page < 3; page++) {
+    const d = await ttsSearchSizeCharts(accessToken, cipher, { pageToken: token, pageSize: 100 });
+    list.push(...ttsSizeTemplatesOf(d));
+    token = typeof d.next_page_token === "string" && d.next_page_token ? d.next_page_token : null;
+    if (!token) break;
+    if (page === 2) truncated = true;
+  }
+  sizeTplCache.set(cipher, { at: Date.now(), list });
+  return { list, truncated };
+}
+export const forgetSizeTemplates = (cipher: string) => { sizeTplCache.delete(cipher); };
+
+// ───────── โปรโมชันของร้าน (อ่านอย่างเดียว · แคช 10 นาที) ─────────
+const promoCache = new Map<string, { at: number; val: { promos: TtsPromo[]; truncated: boolean } }>();
+const PROMO_DETAIL_MAX = 40;
+/**
+ * โปรที่กำลังใช้ + ยังไม่เริ่ม ของทั้งร้าน พร้อมสินค้าในโปร (Get Activity ทีละตัว · สูงสุด 40 รายการ)
+ * ไม่มีสิทธิ์ Promotion = โยน error (ttsErrorText บอกให้เปิดสิทธิ์)
+ */
+export async function ttsShopPromotions(accessToken: string, cipher: string, fresh = false): Promise<{ promos: TtsPromo[]; truncated: boolean; cachedAt: number }> {
+  const hit = promoCache.get(cipher);
+  if (!fresh && hit && Date.now() - hit.at < META_TTL) return { ...hit.val, cachedAt: hit.at };
+  const list: TtsPromo[] = [];
+  let truncated = false;
+  for (const status of ["ONGOING", "NOT_START"]) {
+    let token: string | null = null;
+    for (let page = 0; page < 3; page++) {
+      const d = await ttsSearchPromotions(accessToken, cipher, { status, pageToken: token, pageSize: 100 });
+      list.push(...ttsPromosOf(d));
+      token = typeof d.next_page_token === "string" && d.next_page_token ? d.next_page_token : null;
+      if (!token) break;
+      if (page === 2) truncated = true;
+    }
+  }
+  const out: TtsPromo[] = [];
+  const need = list.filter((p) => p.productLevel !== "SHOP");
+  if (need.length > PROMO_DETAIL_MAX) truncated = true;
+  const detailOf = new Map<string, TtsPromo>();
+  const todo = need.slice(0, PROMO_DETAIL_MAX);
+  for (let i = 0; i < todo.length; i += 4) {
+    await Promise.all(todo.slice(i, i + 4).map(async (p) => {
+      try { detailOf.set(p.id, ttsPromoWithDetail(p, await ttsGetPromotion(accessToken, cipher, p.id))); } catch { /* ใช้ตัวที่ไม่มีสินค้า */ }
+    }));
+  }
+  for (const p of list) out.push(detailOf.get(p.id) ?? p);
+  const val = { promos: out, truncated };
+  const at = Date.now();
+  promoCache.set(cipher, { at, val });
+  return { ...val, cachedAt: at };
 }

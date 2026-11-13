@@ -15,7 +15,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { ttsCreateProduct, ttsDetailExtras, ttsErrorText, ttsProductToCatalogItem } from "@/lib/tiktok-shop";
-import { ttsCreateImageRefs, ttsCreateResolveImages, ttsCreateSizeChartRef, type TtsCreatePreview } from "@/lib/tiktok-create-plan";
+import { ttsCreateImageRefs, ttsCreateResolveImages, ttsCreateResolveSkuImages, ttsCreateSizeChartRef, ttsCreateSkuImageRefs, type TtsCreatePreview } from "@/lib/tiktok-create-plan";
+import { tiktokTemplateIdOfRef } from "@/lib/tiktok-size-chart";
 import { upsertCatalogListings } from "@/lib/platform-catalog-sync";
 import { creatorOf, type CreateStep } from "@/lib/platform-create-registry";
 import { loadTiktokCreate, type TtsLastAttempt } from "./load";
@@ -92,11 +93,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
   done("images", `ฝากรูป ${uriOf.size}/${refs.length}`);
-  const payload = ttsCreateResolveImages(r.payload, uriOf);
+  // รูปตัวเลือก (สี) → ฝากแบบ ATTRIBUTE_IMAGE · ไม่ผ่าน = ไม่ใส่รูปตัวเลือก (ยังสร้างร่างต่อ — เติมทีหลังในลิ้นชักได้)
+  const skuRefs = ttsCreateSkuImageRefs(r.payload);
+  const skuUri = new Map<string, string>();
+  if (skuRefs.length) {
+    let skuErr: string | null = null;
+    for (const ref of skuRefs) {
+      try { skuUri.set(ref, await ttsUploadRef(token.accessToken, ref, "ATTRIBUTE_IMAGE")); }
+      catch (e) { skuErr = (e as Error).message; break; }
+    }
+    if (skuErr) steps.push({ key: "sku_images", label: "ฝากรูปตัวเลือก", state: "skip", detail: `ไม่ใส่รูปตัวเลือก (${skuErr}) — เติมทีหลังในลิ้นชักได้` });
+    else done("sku_images", `ฝากรูปตัวเลือก ${skuUri.size}/${skuRefs.length}`);
+  }
+  const payload = ttsCreateResolveSkuImages(ttsCreateResolveImages(r.payload, uriOf), skuUri);
   // รูปตารางขนาด (ถ้าเลือกไว้) → ฝากแบบ SIZE_CHART_IMAGE
   const sizeRef = ttsCreateSizeChartRef(payload);
   delete payload.size_chart_ref;
-  if (sizeRef) {
+  const sizeTpl = tiktokTemplateIdOfRef(sizeRef);
+  if (sizeTpl) { payload.size_chart = { template: { id: sizeTpl } }; done("size_chart", "ใช้แม่แบบตารางขนาด"); }
+  else if (sizeRef) {
     try { payload.size_chart = { image: { uri: await ttsUploadRef(token.accessToken, sizeRef, "SIZE_CHART_IMAGE") } }; done("size_chart", "ฝากรูปตารางขนาด"); }
     catch (e) { bad("size_chart", "ฝากรูปตารางขนาด", (e as Error).message); return fail(`ฝากรูปตารางขนาดกับ TikTok ไม่สำเร็จ: ${(e as Error).message}`); }
   }

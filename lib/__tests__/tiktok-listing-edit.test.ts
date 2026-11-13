@@ -39,8 +39,8 @@ describe("tiktokListingView — รายละเอียดสินค้า
     expect(v.category).toBe("กระเป๋าสตางค์");
     expect(v.images).toEqual(["https://p16.example/a.jpg", "https://p16.example/b-t.jpg"]);
     expect(v.skus).toEqual([
-      { skuId: "s1", sellerSku: "MPU12-04", label: "สี: ดำ", price: 590, stock: 5, status: "NORMAL" },
-      { skuId: "s2", sellerSku: "MPU12-05", label: "MPU12-05", price: 650, stock: null, status: "DEACTIVATED" },
+      { skuId: "s1", sellerSku: "MPU12-04", label: "สี: ดำ", price: 590, stock: 5, status: "NORMAL", attrs: [{ id: null, name: "สี", valueId: null, valueName: "ดำ", img: null }] },
+      { skuId: "s2", sellerSku: "MPU12-05", label: "MPU12-05", price: 650, stock: null, status: "DEACTIVATED", attrs: [] },
     ]);
     expect(v.rejectReasons).toEqual(["รูปไม่ชัด", "ถ่ายใหม่"]);   // ไม่ซ้ำ
     expect(v.pendingTitle).toBeNull();
@@ -391,7 +391,7 @@ describe("รายละเอียดสินค้า TikTok", () => {
 
 describe("เผยแพร่ฉบับร่าง", () => {
   const v = { status: "DRAFT", productStatus: "DRAFT", title: "Louis Montini กระเป๋าเอกสาร กระเป๋าใส่โน๊ตบุ๊ค BBM02", images: ["https://img/1.jpg"],
-    skus: [{ skuId: "s1", sellerSku: "BBM02-01", label: "สี: น้ำตาล", price: 890, stock: 1, status: "NORMAL" }, { skuId: "s2", sellerSku: "BBM02-02", label: "สี: ดำ", price: 890, stock: 1, status: "NORMAL" }] };
+    skus: [{ skuId: "s1", sellerSku: "BBM02-01", label: "สี: น้ำตาล", price: 890, stock: 1, status: "NORMAL", attrs: [] }, { skuId: "s2", sellerSku: "BBM02-02", label: "สี: ดำ", price: 890, stock: 1, status: "NORMAL", attrs: [] }] };
   test("ครบ = ผ่าน · ได้แถวสต๊อกทุกตัวเลือก + เตือนว่าผ่านตรวจแล้วขายทันที", () => {
     const p = planTiktokPublish(v, { stock: { s1: 5, s2: 2 }, requiredMissing: [] });
     expect(p.errors).toEqual([]);

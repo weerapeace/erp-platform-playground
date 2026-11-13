@@ -127,6 +127,22 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
   1) Update Inventory (`ttsUpdateInventory` · คลังเดิมของร่าง) — สต๊อกตั้งต้นครั้งเดียว (เจ้าของอนุมัติ) ไม่ใช่ซิงค์ 2) Partial Edit `save_mode=LISTING` (ส่งชื่อเดิม) → PENDING · audit `tiktok_listing_publish` + steps
 - **สถานะตามเอง:** cron `/api/cron/tiktok-orders` (pg_cron ทุก 15 นาทีเดิม — ไม่เพิ่มตัวตั้งเวลาใน DB) ต่อท้ายด้วย `syncTiktokProductsChanged` (app/api/tiktok-shop/products-sync · Search Products `update_time_ge` 1 ชม. · รายละเอียดสูงสุด 40 ตัว/รอบ · ข้ามตัวที่ลบ · ไม่ติดป้ายหาย) → เปิด/ปิดขาย/เผยแพร่ใน Seller Center แล้ว ERP ตามภายใน ~15 นาที
 
+## รูปตัวเลือก + ชื่อตัวเลือก · ตารางขนาดแบบแม่แบบ · โปรโมชัน (2026-11-13 · เจ้าของสั่ง "ทำ 1,2,4")
+- **รูป/ชื่อตัวเลือก** (แท็บตัวเลือก & ราคา › กล่อง "รูปและชื่อตัวเลือก" · `components/platform-catalog/tiktok-option-editor` · กฎ `lib/tiktok-sku-edit` 10 เทสต์)
+  - Partial Edit ช่อง `skus` = ต้องส่ง **ทุก SKU + ทุกช่องย่อยที่มีค่า** (SKU ที่ไม่ส่ง = ถูกลบ · ช่องที่ไม่ส่ง = ถูกล้าง) → `buildTiktokSkusPayload` คัดลอกจาก Get Product (seller_sku/ราคา/identifier_code/น้ำหนัก ฯลฯ) เปลี่ยนแค่ `value_name` + `sku_img`
+  - sku_img ใส่ได้ชั้นเดียว (ชั้นหลัก) และต้องครบทุกค่า · รูปใหม่ฝากแบบ `ATTRIBUTE_IMAGE` · ชื่อค่า ≤ 50 ห้ามซ้ำในชั้น
+  - ⚠️ **สต๊อก:** สินค้าที่ขายอยู่ → บันทึก skus แบบ `AS_DRAFT` ก่อน (เอกสาร: post-live draft ไม่เก็บ inventory · ร่างใช้สต๊อกของฉบับขายเสมอ) แล้วค่อย Partial Edit ปกติ (LISTING) ส่งตรวจ → ไม่ส่งสต๊อกเลย · ฉบับร่าง = AS_DRAFT ครั้งเดียว ส่งสต๊อกเดิมของร่างกลับ
+  - หลังส่ง เทียบสต๊อกก่อน/หลัง → ต่าง = เตือน · ตัวเลือกหาย = เตือน · รอตรวจ (PENDING) = แก้ไม่ได้ (TikTok ไม่ให้บันทึกร่าง)
+  - ลงฉบับร่างใหม่: ชั้นแรกเป็น "สี" และทุกสีมีปก → ใส่รูปตัวเลือกให้เอง (`sku_img_ref` → route ฝาก ATTRIBUTE_IMAGE · ฝากไม่ได้ = ไม่ใส่ ยังสร้างร่างต่อ)
+- **ตารางขนาดแบบแม่แบบ** (`components/platform-catalog/tiktok-size-chart-picker` ใช้ทั้งลิ้นชัก + หน้าลงฉบับร่าง · กฎ `lib/tiktok-size-chart` 8 เทสต์)
+  - `GET /api/tiktok-shop/size-charts` = Search Size Charts 202407 (REUSABLE_TEMPLATE · แคช 10 นาที · หมวดตรงขึ้นก่อน) · `POST` = Create Size Chart V2 202610 (ถามก่อน · audit `tiktok_size_chart_create`)
+  - ตาราง: หัว 1–20 ≤ 32 ตัวอักษร · แถว 1–45 · คอลัมน์ไซซ์ `size_chart_size_system_size` · คอลัมน์วัดมาตรฐานใช้ id จาก Get Category Rules (`rules.size`) · วางจาก Excel ได้ (`lib/paste-table`)
+  - ref ในฟอร์ม `tpl:<id>` → สินค้าได้ `size_chart{ template{ id } }` (listing-edit + create-product)
+- **โปรโมชัน (อ่านอย่างเดียว)** (`components/platform-catalog/tiktok-promotions` · กฎ `lib/tiktok-promotions` 2 เทสต์)
+  - `GET /api/tiktok-shop/promotions` = Search Promotion Activities (ONGOING + NOT_START) + Get Activity ทีละโปร (สูงสุด 40) · แคช 10 นาทีต่อร้าน
+  - ⚠️ ต้องเปิดสิทธิ์ **Promotion Information (seller.promotion.info)** ในแอปที่ Partner Center + เชื่อมต่อใหม่ — ณ 2026-11-13 กุญแจมี 8 สิทธิ์ ยังไม่มีอันนี้ → กล่องบอกวิธีเปิด (`need_scope`)
+  - โชว์โปรที่สินค้านี้อยู่ + ราคาหลังโปรต่อตัวเลือก + โปรทั้งร้าน (ส่วนลดค่าส่ง ฯลฯ) · เตือนว่าแก้ราคาไม่ได้ระหว่างโปร
+
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ~~ดึงหมวดหมู่ TikTok~~ (ทำแล้ว c51b1adf · เจ้าของกดดึงแล้ว 2026-11-12: 1,950 หมวดใบ ใช้ได้ 1,849 — ร่างจับคู่ 10 หมวดกลาง รอเจ้าของอนุมัติ)
 4. ~~เฟส B ราคา~~ · ~~C รูป/กล่อง~~ (ทำแล้ว) · ~~D ลงสินค้าใหม่~~ (ทำแล้ว — ลงเป็นฉบับร่าง) · E สต๊อก (หลังเลิกซิงค์ BigSeller) — ทีละเฟสตามที่เจ้าของอนุมัติ

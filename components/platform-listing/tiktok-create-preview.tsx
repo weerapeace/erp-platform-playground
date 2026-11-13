@@ -24,6 +24,7 @@ import { kgToUnit, sameAttrState, ttsAttrDef, ttsAttrFromText, ttsAttrToText, un
 import { LazadaAttrField } from "@/components/platform-catalog/lazada-listing-panels";
 import { useWeightUnit } from "@/components/platform-catalog/weight-unit";
 import { ToggleSwitch } from "@/components/toggle-switch";
+import { TiktokSizeChartBox } from "@/components/platform-catalog/tiktok-size-chart-picker";
 
 type LastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
 type Resp = { preview: TtsCreatePreview | null; blockers?: string[]; live?: boolean; mode?: "draft"; platform_id?: string; brand_id?: string | null; last_attempt?: LastAttempt | null; error: string | null };
@@ -47,7 +48,6 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const [picker, setPicker] = useState(false);
   const [attrs, setAttrs] = useState<TtsAttrState | null>(null);
   const [moreAttrs, setMoreAttrs] = useState(false);
-  const [sizePick, setSizePick] = useState(false);
   const [unit, setUnit] = useWeightUnit();
   const sys = useSystemImages(parentId);
 
@@ -250,27 +250,13 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-600">
             ตารางขนาด {pv.sizeChart.required && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-normal text-rose-700">หมวดนี้บังคับ</span>}
           </div>
-          {pv.sizeChart.supported === false ? <p className="text-xs text-slate-500">หมวดนี้ TikTok ไม่รองรับตารางขนาด</p> : (
-            <div className="flex items-start gap-3">
-              <div className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white ${pv.sizeChart.ref ? "border-slate-200" : "border-dashed text-slate-300"}`}>
-                {pv.sizeChart.ref ? <img src={listingImgSrc(pv.sizeChart.ref, 200)} alt="" className="h-full w-full object-contain" /> : <Icon name="image" />}
-              </div>
-              <div className="min-w-0 text-xs">
-                <div className="text-slate-600">{pv.sizeChart.ref ? "เลือกไว้แล้ว (ส่งตอนสร้าง)" : "ยังไม่มี (ไม่บังคับ)"}</div>
-                {canEdit && (
-                  <div className="mt-1 flex gap-2">
-                    <button type="button" onClick={() => { setSizePick(true); sys.load(); }} className="text-violet-700 hover:underline">{pv.sizeChart.ref ? "เปลี่ยนรูป" : "เลือกรูปจากระบบ"}</button>
-                    {pv.sizeChart.ref && <button type="button" disabled={saving} onClick={() => { const ex = { ...pv.draft_extra }; delete ex.tiktok_size_chart; void patch({ extra: ex }, "เอารูปตารางขนาดออกแล้ว"); }} className="text-rose-600 hover:underline">เอาออก</button>}
-                  </div>
-                )}
-                <p className="mt-1 text-[11px] text-slate-400">ด้านสั้น ≥ 1,024px · ทำเป็นจัตุรัสพื้นขาวแล้วฝากกับ TikTok</p>
-              </div>
-            </div>
-          )}
-          <ListingImagePicker open={sizePick} onClose={() => setSizePick(false)} mode="variant" storageKey="tiktok-create-size-chart-picker"
-            title="เลือกรูปตารางขนาด" description="เลือกรูปตารางขนาดจากคลังรูปของสินค้า (ตารางชัด ๆ ด้านสั้นอย่างน้อย 1,024px)"
-            matchedParent={parentId} matchedCode={pv.parent_code} sysImages={sys.images}
-            onPick={(ref) => { setSizePick(false); void patchExtra({ tiktok_size_chart: ref }, "บันทึกรูปตารางขนาดแล้ว"); }} />
+          {/* รูป หรือ แม่แบบตาราง (กรอกเป็นแถว) — ตัวเดียวกับลิ้นชัก · เลือกแล้วเก็บในร่าง (ส่งตอนสร้าง) */}
+          <TiktokSizeChartBox by={{ brandId: data.brand_id ?? null }} categoryId={pv.category.id}
+            rules={{ codSupported: pv.cod.supported, sizeChartSupported: pv.sizeChart.supported, sizeChartRequired: pv.sizeChart.required, ...(pv.sizeChart.size ? { size: pv.sizeChart.size } : {}) }}
+            value={pv.sizeChart.ref} baseRef={pv.sizeChart.ref} can={canEdit && !saving}
+            onChange={(ref) => { if (ref === pv.sizeChart.ref) return; void patchExtra({ tiktok_size_chart: ref }, ref?.startsWith("tpl:") ? "บันทึกแม่แบบตารางขนาดในร่างแล้ว" : "บันทึกรูปตารางขนาดแล้ว"); }}
+            matchedParent={parentId} matchedCode={pv.parent_code}
+            extraActions={pv.sizeChart.ref ? <button type="button" disabled={saving} onClick={() => { const ex = { ...pv.draft_extra }; delete ex.tiktok_size_chart; void patch({ extra: ex }, "เอาตารางขนาดออกแล้ว"); }} className="text-rose-600 hover:underline">เอาออก</button> : null} />
         </div>
       </div>
     </div>
