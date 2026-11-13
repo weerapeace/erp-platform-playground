@@ -345,7 +345,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "design-sheet-picker", label: "เลือกใบงานออกแบบ (มีรูป ค้นได้)", code: "DesignSheetPickerModal", category: "pick",
     source: { path: "components/design-sheet-picker" },
-    what: "ป๊อปเลือกใบงานออกแบบ 1 ใบ (ใบงานใน Design Dashboard): ค้นรหัส/ชื่องาน/แบรนด์ (ไฮไลต์คำที่ตรง) · รูปปกทุกใบ · สลับการ์ดรูป ↔ รายการ (จำต่อคน) · กรองแบรนด์ · ซ่อนงานปิดแล้ว · ใช้ล่าสุด · เลือกแล้วกดยืนยัน",
+    what: "ป๊อปเลือกใบงานออกแบบ 1 ใบ (ใบงานใน Design Dashboard): ค้นรหัส/ชื่องาน/แบรนด์ (ไฮไลต์คำที่ตรง) · รูปปกทุกใบ · สลับการ์ดรูป ↔ รายการ (จำต่อคน) · กรองแบรนด์ · ซ่อนงานปิดแล้ว · ใช้ล่าสุด · เปิดมากรองแบรนด์ได้ (initialBrand) · เลือกแล้วกดยืนยัน",
     when: "ต้องให้ผู้ใช้ชี้ใบงานออกแบบใบเดียว เช่น หน้า SAMPLE Images ย้ายรูปตัวอย่างเข้าใบงาน",
     notWhen: "เลือกหลายใบพร้อมกัน → SearchMultiPick (ตัวเลือกใบงานบนกระดานแคมเปญ app/tasks/campaigns/[id]/multi-picks.tsx — ทำงานคนละแบบ: ติ๊กหลายใบ) · เปิดดู/แก้ใบงาน → DesignSheetsDetail",
     doc: "design-sheet-picker.md",

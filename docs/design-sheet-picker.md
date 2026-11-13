@@ -27,6 +27,7 @@ import { DesignSheetPickerModal } from "@/components/design-sheet-picker";
   title="ย้าย 3 รูปไปใบงานไหน?"
   confirmText="ย้าย 3 รูป"
   head={<รูปย่อของที่จะย้าย />}          // ไม่ส่งก็ได้
+  initialBrand="Good Goods"               // เปิดมากรองแบรนด์นี้ไว้ (ชื่อแบรนด์ตามใบงาน) · ไม่มีใบงานแบรนด์นี้ = ดูทุกแบรนด์เอง
   onConfirm={async (sheet) => { /* sheet = { id, code, name, brand_name, cover_url } */ }}
 />
 ```

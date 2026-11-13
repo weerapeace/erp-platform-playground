@@ -49,7 +49,7 @@ function Cover({ url, w, className }: { url: string | null; w: number; className
     : <div className={`flex items-center justify-center bg-slate-100 text-slate-300 ${className}`}><Icon value="i:photo" /></div>;
 }
 
-export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confirmText, head }: {
+export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confirmText, head, initialBrand }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (sheet: PickedDesignSheet) => void | Promise<void>;
@@ -57,6 +57,8 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
   confirmText?: string;
   /** ของที่โชว์ใต้หัว เช่น รูปย่อของรูปที่จะย้าย */
   head?: ReactNode;
+  /** เปิดมาให้กรองแบรนด์นี้ไว้ก่อน (ชื่อแบรนด์ตามใบงาน) — ผู้ใช้กด "ทุกแบรนด์" ได้ */
+  initialBrand?: string | null;
 }) {
   const t = useT();
   const [rows, setRows] = useState<DesignSheetListItem[] | null>(null);
@@ -75,7 +77,7 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
 
   useEffect(() => {
     if (!open) return;
-    setQ(""); setBrand(""); setPicked(null); setNeedPick(false); setBusy(false);
+    setQ(""); setBrand(initialBrand ?? ""); setPicked(null); setNeedPick(false); setBusy(false);
     let alive = true;
     setErr(null);
     Promise.all([
@@ -88,7 +90,9 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
       setStatusRows(Array.isArray(st?.data) ? st.data : []);
     }).catch((e) => { if (alive) setErr((e as Error)?.message || t("โหลดใบงานไม่สำเร็จ", "Could not load design sheets")); });
     return () => { alive = false; };
-  }, [open, reload, t]);
+  }, [open, reload, t, initialBrand]);
+  // แบรนด์ที่ให้กรองไว้ไม่มีใบงานเลย → ดูทุกแบรนด์ (ไม่ค้างหน้าว่าง)
+  useEffect(() => { if (rows && brand && !rows.some((r) => r.brand_name === brand)) setBrand(""); }, [rows]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const meta = useMemo(() => buildStatusMeta(statusRows), [statusRows]);
   const brands = useMemo(() => [...new Set((rows ?? []).map((r) => r.brand_name).filter((b): b is string => !!b))].sort((a, b) => a.localeCompare(b, "th")), [rows]);

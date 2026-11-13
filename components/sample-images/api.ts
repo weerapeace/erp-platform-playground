@@ -3,7 +3,7 @@
 //   ลบ (ถังขยะ) / เอากลับ = /api/assets/[id]
 import { apiFetch } from "@/lib/api";
 import { prepareResizedImage } from "@/components/image-attach";
-import { SAMPLE_MAX_PX, SAMPLE_SOURCE, type SampleAlbum, type SamplePhoto } from "@/lib/sample-images";
+import { SAMPLE_MAX_PX, SAMPLE_SOURCE, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 
 const JSON_HDR = { "Content-Type": "application/json" };
 
@@ -13,20 +13,28 @@ async function json<T>(res: Response, fallback: string): Promise<T> {
   return j as T;
 }
 
-export async function loadSamples(albumId: string | null): Promise<{ albums: SampleAlbum[]; photos: SamplePhoto[] | null }> {
+export type SampleData = { brands: SampleBrand[]; albums: SampleAlbum[]; photos: SamplePhoto[] | null };
+
+export async function loadSamples(albumId: string | null): Promise<SampleData> {
   const q = albumId ? `?album=${encodeURIComponent(albumId)}` : "";
-  const j = await json<{ data: { albums: SampleAlbum[]; photos: SamplePhoto[] | null } }>(await apiFetch(`/api/sample-images${q}`), "โหลดรูปตัวอย่างไม่สำเร็จ");
+  const j = await json<{ data: SampleData }>(await apiFetch(`/api/sample-images${q}`), "โหลดรูปตัวอย่างไม่สำเร็จ");
   return j.data;
 }
 
-/** หา/สร้างอัลบั้มของวันนี้ (ชื่อตามวันที่ลง) */
-export async function ensureTodayAlbum(): Promise<{ id: string; name: string }> {
-  const j = await json<{ data: { id: string; name: string } }>(await apiFetch("/api/sample-images", { method: "POST", headers: JSON_HDR, body: JSON.stringify({ action: "album" }) }), "สร้างอัลบั้มของวันนี้ไม่สำเร็จ");
+/** หา/สร้างอัลบั้มของแบรนด์ + วันนี้ (ชื่อ "SAMPLE <แบรนด์> <วันที่>") · brandId null = ไม่ระบุแบรนด์ */
+export async function ensureTodayAlbum(brandId: string | null): Promise<{ id: string; name: string }> {
+  const j = await json<{ data: { id: string; name: string } }>(await apiFetch("/api/sample-images", { method: "POST", headers: JSON_HDR, body: JSON.stringify({ action: "album", brand_id: brandId }) }), "สร้างอัลบั้มของวันนี้ไม่สำเร็จ");
+  return j.data;
+}
+
+/** ย้ายอัลบั้มที่ยังไม่ระบุแบรนด์เข้าแบรนด์ (มีอัลบั้มแบรนด์+วันเดียวกันแล้ว = รวม) → id อัลบั้มที่รูปอยู่ตอนนี้ */
+export async function setAlbumBrand(albumId: string, brandId: string): Promise<{ id: string; name: string; merged: boolean }> {
+  const j = await json<{ data: { id: string; name: string; merged: boolean } }>(await apiFetch("/api/sample-images", { method: "POST", headers: JSON_HDR, body: JSON.stringify({ action: "set_brand", album_id: albumId, brand_id: brandId }) }), "ย้ายอัลบั้มเข้าแบรนด์ไม่สำเร็จ");
   return j.data;
 }
 
 /** ย่อ + แปลงเป็น JPEG แล้วลงคลังไฟล์กลาง (เข้าอัลบั้ม) → duplicate = รูปนี้เคยลงแล้ว ใช้แถวเดิม ไม่อัปซ้ำ */
-export async function uploadSample(file: File, albumId: string, actor: string | null, onStep?: (step: "prepare" | "upload") => void): Promise<{ duplicate: boolean }> {
+export async function uploadSample(file: File, albumId: string, brandId: string | null, actor: string | null, onStep?: (step: "prepare" | "upload") => void): Promise<{ duplicate: boolean }> {
   onStep?.("prepare");
   const jpg = await prepareResizedImage(file, SAMPLE_MAX_PX, { jpeg: true });
   let width = 0, height = 0;
@@ -37,6 +45,7 @@ export async function uploadSample(file: File, albumId: string, actor: string | 
   fd.append("title", file.name.replace(/\.[^.]+$/, ""));
   fd.append("source", SAMPLE_SOURCE);
   fd.append("collection_id", albumId);
+  if (brandId) fd.append("brand_id", brandId);
   if (width && height) { fd.append("width", String(width)); fd.append("height", String(height)); }
   if (actor) fd.append("actor", actor);
   const res = await apiFetch("/api/assets", { method: "POST", body: fd });
