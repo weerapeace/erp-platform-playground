@@ -6,10 +6,10 @@
 import { useMemo, useState } from "react";
 import { WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
 import { ERPDateTime24 } from "@/components/form";
-import { PRIORITIES, PRIORITY_META, quickDue, REMIND_LABEL, REMIND_MODES, type Priority, type RemindMode } from "@/lib/team-plan";
+import { NTH_WED_KINDS, nthWedLabel, PRIORITIES, PRIORITY_META, quickDue, REMIND_LABEL, REMIND_MODES, type Priority, type QuickDueKind, type RemindMode } from "@/lib/team-plan";
 import type { PlanDraft } from "@/lib/team-plan-client";
 
-type DueKind = "today" | "tomorrow" | "friday" | "pick" | "none";
+type DueKind = QuickDueKind | "pick";
 export type PlanDraftState = {
   priority: Priority; dueKind: DueKind; dueCustom: string; who: { id: string; name: string } | null; remind: RemindMode; important: boolean;
 };
@@ -46,6 +46,9 @@ export function PlanDraftFields({ draft, meName }: { draft: ReturnType<typeof us
         <span className="flex items-center gap-1">กำหนด
           <select value={s.dueKind} onChange={(e) => set({ dueKind: e.target.value as DueKind })} className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs">
             <option value="today">วันนี้</option><option value="tomorrow">พรุ่งนี้</option><option value="friday">ศุกร์นี้</option>
+            <optgroup label="พุธของเดือน">
+              {NTH_WED_KINDS.map((k) => <option key={k} value={k}>{nthWedLabel(k)}</option>)}
+            </optgroup>
             <option value="pick">เลือกวัน…</option><option value="none">ไม่กำหนด</option>
           </select>
           {s.dueKind === "pick" && <ERPDateTime24 value={s.dueCustom} onChange={(v) => set({ dueCustom: v })} defaultTime="18:00" />}

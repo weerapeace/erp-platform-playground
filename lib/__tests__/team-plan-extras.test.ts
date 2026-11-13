@@ -58,3 +58,15 @@ describe("ภาระงานวันนี้ของฉัน", () => {
     expect(load).toEqual({ count: 3, minutes: 180, unestimated: 1 });
   });
 });
+
+describe("พุธที่ 1–4 ของเดือน (2026-11-13)", () => {
+  it("ของเดือนนี้ผ่านแล้ว = เดือนหน้า · ยังไม่ถึง = เดือนนี้ · วันนี้เป็นพุธนั้นพอดี = วันนี้", async () => {
+    const { nthWeekdayYmd, quickDue, nthWedLabel } = await import("@/lib/team-plan");
+    const fri = new Date("2026-11-13T05:00:00Z");                   // ศุกร์ 13 พ.ย. (พุธของ พ.ย. = 4, 11, 18, 25)
+    expect([1, 2, 3, 4].map((n) => nthWeekdayYmd(3, n, fri))).toEqual(["2026-12-02", "2026-12-09", "2026-11-18", "2026-11-25"]);
+    expect(nthWeekdayYmd(3, 3, new Date("2026-11-18T03:00:00Z"))).toBe("2026-11-18");   // พุธที่ 3 พอดี
+    expect(nthWeekdayYmd(3, 4, new Date("2026-12-28T03:00:00Z"))).toBe("2027-01-27");   // ข้ามปี
+    expect(quickDue("wed4", fri)).toBe("2026-11-25T11:00:00.000Z");                      // 18:00 เวลาไทย
+    expect(nthWedLabel("wed1", fri)).toBe("พุธที่ 1 ของเดือน · พ. 2 ธ.ค.");
+  });
+});

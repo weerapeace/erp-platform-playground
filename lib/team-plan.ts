@@ -189,15 +189,39 @@ export function dueLabel(dueAt: string | null, now: Date = new Date()): string {
 /** รอมากี่วันแล้ว (ปัดลง) */
 export const waitingDays = (since: string, now: Date = new Date()) => Math.max(0, Math.floor((now.getTime() - Date.parse(since)) / 86400e3));
 
-/** ตัวเลือกกำหนดด่วน → ISO (เวลาไทย) · "today"/"tomorrow" = 18:00 ของวันนั้น · "friday" = ศุกร์นี้ (วันนี้ศุกร์ = วันนี้) */
-export function quickDue(kind: "today" | "tomorrow" | "friday" | "none", now: Date = new Date()): string | null {
+/** ตัวเลือกกำหนดด่วน · "wed1"–"wed4" = พุธที่ 1–4 ของเดือน (เจ้าของขอ 2026-11-13) */
+export type QuickDueKind = "today" | "tomorrow" | "friday" | "wed1" | "wed2" | "wed3" | "wed4" | "none";
+export const NTH_WED_KINDS = ["wed1", "wed2", "wed3", "wed4"] as const;
+
+/** "วัน dow ที่ n ของเดือน" ครั้งถัดไป (YYYY-MM-DD เวลาไทย · วันนี้นับด้วย) — ของเดือนนี้ผ่านไปแล้ว = ของเดือนหน้า · n = 1–4 (อยู่ในเดือนเสมอ) */
+export function nthWeekdayYmd(dow: number, n: number, now: Date = new Date()): string {
+  const today = todayBangkok(now);
+  const [y, m] = today.split("-").map(Number);
+  const inMonth = (yy: number, mm: number) => {   // mm = 1–12
+    const first = new Date(Date.UTC(yy, mm - 1, 1)).getUTCDay();
+    const day = 1 + ((dow - first + 7) % 7) + (Math.min(4, Math.max(1, n)) - 1) * 7;
+    return `${yy}-${String(mm).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+  const cur = inMonth(y, m);
+  return cur >= today ? cur : m === 12 ? inMonth(y + 1, 1) : inMonth(y, m + 1);
+}
+
+/** ตัวเลือกกำหนดด่วน → ISO (เวลาไทย) · "today"/"tomorrow" = 18:00 ของวันนั้น · "friday" = ศุกร์นี้ (วันนี้ศุกร์ = วันนี้) · "wedN" = พุธที่ N ของเดือนครั้งถัดไป */
+export function quickDue(kind: QuickDueKind, now: Date = new Date()): string | null {
   const today = todayBangkok(now);
   let day: string;
   if (kind === "none") return null;
   if (kind === "today") day = today;
   else if (kind === "tomorrow") day = addDaysYmd(today, 1);
+  else if (kind.startsWith("wed")) day = nthWeekdayYmd(3, Number(kind.slice(3)), now);
   else { const dow = new Date(`${today}T00:00:00Z`).getUTCDay(); day = addDaysYmd(today, (5 - dow + 7) % 7); }
   return new Date(`${day}T18:00:00+07:00`).toISOString();
+}
+
+/** ป้ายตัวเลือก "พุธที่ 2 ของเดือน · พ. 9 ธ.ค." (บอกวันจริงให้เห็นว่าเดือนนี้หรือเดือนหน้า) */
+export function nthWedLabel(kind: (typeof NTH_WED_KINDS)[number], now: Date = new Date()): string {
+  const d = dueLabel(quickDue(kind, now), now).replace(/ 18:00$/, "");
+  return `พุธที่ ${kind.slice(3)} ของเดือน · ${d}`;
 }
 
 /** วันที่ (เวลาไทย YYYY-MM-DD) ของกำหนด — ใช้วางงานลงช่องวันในปฏิทิน · ไม่มีกำหนด = null */
