@@ -47,7 +47,7 @@ export const MODULE_RULES: { module: Exclude<AuditModuleKey, "other">; re: strin
   { module: "sales",      re: "(^erp_playground_(so|quote|billing|delivery|credit|sales)|^so_|sales_order|offer_sheet|platform_order|store_order|store_customer)" },
   { module: "stock",      re: "(stock|warehouse|stock_location|freight)" },
   { module: "production", re: "(^mo$|^mo_|manufacturing_order|^bom|work_order|^wo_|work_board|piecework|cutting|^qc_|defect|carton|^belt|pattern_ticket|nesting|material_slot|routing|production)" },
-  { module: "design",     re: "(design_sheet|design_price|canvas_sketch|canvassketch|configurator)" },
+  { module: "design",     re: "(design_sheet|design_price|design_library|canvas_sketch|canvassketch|configurator)" },
   { module: "creative",   re: "(creative|^content_|caption|subtask|record_task|hashtag)" },
   { module: "marketing",  re: "(marketing)" },
   { module: "website",    re: "(^store_|shop|storefront|website|platform|listing|^collections$|brand_theme|special_descriptions|marketplace)" },

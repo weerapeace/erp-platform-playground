@@ -14,6 +14,8 @@
  * API: /api/sku-swatches (GET/POST/PATCH/DELETE) · สิทธิ์ตั้งค่า = products.edit · ดู = products.view
  * โหมดเลือกใส่ตะกร้า (2026-11-05 หน้าขอซื้อ แท็บ "แผงผ้า"): ส่ง onPickSkus → "ขอซื้อ" / แถบเลือกหลายรายการ
  *   ส่งรายการให้หน้าแม่ใส่ตะกร้าเอง (ไม่เปิดฟอร์มสร้างใบขอซื้อของตัวเอง)
+ * โหมดเลือก 1 ชิ้น (2026-11-13 Design Library): ส่ง onPickSpot → เมนูเล็กบนชิ้นมี "✓ เลือกชิ้นนี้" บนสุด
+ *   คืนรูปแผ่น + กรอบของชิ้น (% ของรูป) + SKU ให้หน้าแม่ (ตัดรูปชิ้นจากแผงไปโชว์เองได้) แล้วปิดแผง
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -60,7 +62,16 @@ async function uploadSwatchImage(file: File, dup: DuplicateCheckOptions) {
   return { image_key: key, image_w: size.w, image_h: size.h };
 }
 
-export function SwatchBrowser({ openId, focusSpotId, onPickSkus }: {
+/** ชิ้นที่เลือกจากแผง (โหมด onPickSpot) — x/y/w/h = % ของรูปแผ่น */
+export type SwatchSpotPick = {
+  swatch_id: string; swatch_name: string; image_key: string | null; image_w: number | null; image_h: number | null;
+  spot_id: string; x: number; y: number; w: number; h: number; label: string | null;
+  sku: SwatchSpot["sku"];
+};
+
+export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot }: {
+  /** โหมดเลือก 1 ชิ้น — มีค่า = เมนูบนชิ้นมี "✓ เลือกชิ้นนี้" แล้วปิดแผง */
+  onPickSpot?: (pick: SwatchSpotPick) => void;
   /** เปิดแผ่นนี้ทันที (มาจากลิงก์ในหน้า SKU) */
   openId?: string | null;
   /** โหมดเลือกใส่ตะกร้า (หน้าขอซื้อ) — มีค่า = ปุ่มขอซื้อส่งรายการให้หน้าแม่แทนการเปิดฟอร์มเอง */
@@ -174,7 +185,7 @@ export function SwatchBrowser({ openId, focusSpotId, onPickSkus }: {
 
       {createOpen && <CreateSwatchModal onClose={() => setCreateOpen(false)} onCreated={(id) => { setCreateOpen(false); void load(false); setOpen({ id, edit: true }); }} />}
       {open && (
-        <SwatchViewer key={open.id} id={open.id} startEdit={open.edit} canEdit={canEdit} focusSpotId={open.spotId ?? null} onPickSkus={onPickSkus}
+        <SwatchViewer key={open.id} id={open.id} startEdit={open.edit} canEdit={canEdit} focusSpotId={open.spotId ?? null} onPickSkus={onPickSkus} onPickSpot={onPickSpot}
           onClose={() => setOpen(null)} onChanged={() => void load(false)} onDeleted={() => { setOpen(null); void load(false); }} />
       )}
     </div>
@@ -260,7 +271,8 @@ function CreateSwatchModal({ onClose, onCreated }: { onClose: () => void; onCrea
 type EditSpot = SwatchSpot;
 let tempSeq = 0;
 
-function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted, onPickSkus }: {
+function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted, onPickSkus, onPickSpot }: {
+  onPickSpot?: (pick: SwatchSpotPick) => void;
   id: string; startEdit: boolean; canEdit: boolean; focusSpotId?: string | null; onClose: () => void; onChanged: () => void; onDeleted: () => void;
   onPickSkus?: (items: PrCreateItem[], sourceNote: string) => void;
 }) {
@@ -450,6 +462,13 @@ function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged,
                           <div className="font-mono text-[11px] text-slate-500 truncate">{r.sku.code}{r.label ? ` · ${r.label}` : ""}</div>
                           <div className="text-[12.5px] text-slate-800 truncate" title={r.sku.name}>{r.sku.name || "—"}</div>
                         </div>
+                        {onPickSpot && data && (
+                          <button type="button" role="menuitem"
+                            onClick={() => { close(); onPickSpot({ swatch_id: data.id, swatch_name: titleOf(data), image_key: data.image_key, image_w: data.image_w, image_h: data.image_h, spot_id: r.id, x: r.x, y: r.y, w: r.w, h: r.h, label: r.label, sku: r.sku }); onClose(); }}
+                            className="w-full px-3 py-2 flex items-center gap-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100">
+                            <span>✓</span><span className="flex-1">เลือกชิ้นนี้</span>
+                          </button>
+                        )}
                         <button type="button" role="menuitem" disabled={!canPr}
                           title={canPr ? "สร้างใบขอซื้อของชิ้นนี้" : "คุณไม่มีสิทธิ์สร้างใบขอซื้อ"}
                           onClick={() => { close(); requestItems(toPrItems([r])); }}

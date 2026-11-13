@@ -38,6 +38,7 @@ export const COMMANDS: SearchCommand[] = [
   { id: "new-task",     icon: "🎨", label: "สร้างงาน Creative ใหม่",          aliases: ["งาน", "task", "งานใหม่", "creative"],                          href: "/tasks?new=1",                      perm: "tasks.create" },
   { id: "go-receive",   icon: "📥", label: "ไปหน้ารับสินค้าเข้า",              aliases: ["รับของ", "รับสินค้า", "ของเข้า", "receive"],                   href: "/purchasing/receive" },
   { id: "go-scan",      icon: "📷", label: "เปิดสถานีสแกน",                   aliases: ["สแกน", "scan", "qr", "ยิงบาร์โค้ด"],                          href: "/scan" },
+  { id: "go-design-library", icon: "📚", label: "เปิด Design Library (คลังแม่แบบกระเป๋า → ใบสรุป + prompt GPT)", aliases: ["design library", "คลังแบบ", "แม่แบบกระเป๋า", "สูตรกระเป๋า", "prompt", "gpt", "ใบสรุปแบบ", "design brief"], href: "/master/design-library", perm: "design_library.view" },
   { id: "go-configurator", icon: "👜", label: "เปิดตัวประกอบสินค้า (ลูกค้าออกแบบกระเป๋าเอง)", aliases: ["ตัวประกอบ", "ออกแบบกระเป๋า", "configurator", "bag builder", "ประกอบกระเป๋า", "ชั้นรูป", "แม่แบบถ่ายรูป", "ig international"], href: "/admin/product-configurator", perm: "configurator.view" },
   { id: "go-belt",      icon: "🧵", label: "เปิดสตูดิโอออกแบบเข็มขัด (Belt Builder)", aliases: ["เข็มขัด", "belt", "belt builder", "สตูดิโอเข็มขัด", "ชิ้นส่วนเข็มขัด", "สายหนัง", "หัวเข็มขัด", "louis montini"], href: "/admin/belt-builder", perm: "belt_builder.view" },
   // ---- 💰 Payroll (scope "payroll") — หน้า MasterCRUD รับ ?new=1 อยู่แล้ว ----

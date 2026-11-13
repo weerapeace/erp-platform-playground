@@ -1401,6 +1401,13 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "sku-swatch-browser", label: "แผงผ้า (Swatch) — ดู / ขอซื้อ / เลือกชิ้น", code: "SwatchBrowser", category: "feature",
+    source: { path: "components/sku-swatch-browser" },
+    what: "รูปแผงตัวอย่างจริง (ผ้า/ด้าย/อะไหล่) กดชิ้นบนรูปแล้วเปิด SKU · โหมด onPickSkus = ส่งรายการใส่ตะกร้าขอซื้อ · โหมด onPickSpot = เลือก 1 ชิ้นคืนรูปแผง+กรอบชิ้น+SKU (ตัดรูปชิ้นไปโชว์เองได้)",
+    when: "ทุกที่ที่ต้องเลือกวัสดุ \"จากแผง\" (เห็นรูปผ้าจริง) เช่น Design Library · ขอซื้อจากแผง",
+    notWhen: "เลือก SKU ทั่วไปจากรายการ ใช้ SkuPicker · เลือกวัตถุดิบใน BOM ใช้ ComponentPicker",
+  },
+  {
     key: "color-swatch-manager", label: "ทะเบียนสีกลาง", code: "ColorSwatchManager", category: "feature",
     source: { path: "components/color-swatch-manager" },
     what: "ตั้งหน้าตาจุดสีของแต่ละชื่อสี",
