@@ -79,6 +79,7 @@ export const ENTITY_INFO: Record<string, AuditEntityInfo> = {
   design_sheet:                  E("design", "ใบออกแบบ", (id) => `/master/design-sheets?open=${id}`),
   mo:                            E("production", "ใบสั่งผลิต (MO)", (id) => `/master/work-board?mo=${id}`),
   fabric_buy_calc:               E("production", "คิดผ้าก่อนซื้อ (บันทึกผล)", (id) => `/fabric-calc?calc=${id}`),
+  fabric_cut_check:              E("production", "ผลวัดจริงแบบตัดผ้า"),
   brand:                         E("products", "แบรนด์"),
   supplier_items:                E("purchasing", "ราคาซัพพลายเออร์", (id) => `/master/supplier-items?open=${id}`),
   asset:                         E("files", "คลังรูป"),

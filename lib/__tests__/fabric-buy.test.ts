@@ -146,3 +146,33 @@ describe("เฟส 2 — ลายซ้ำ · ทั้งตระกูล �
     expect(piecesFromMoBlocks([{ label: "x", width_cm: 1, length_cm: 1, total_pieces: 5 }], 0)).toEqual([]);
   });
 });
+
+describe("สถานะวัดจริง", () => {
+  it("ลายนิ้วมือ: ลำดับชิ้นไม่มีผล · ขนาดเปลี่ยน = ไม่ตรง", async () => {
+    const { piecesFingerprint } = await import("../fabric-buy");
+    const a = piecesFingerprint([{ width_cm: 40, length_cm: 35, per_unit: 2 }, { width_cm: 6, length_cm: 60, per_unit: 2, no_rotate: true }]);
+    const b = piecesFingerprint([{ width_cm: 6, length_cm: 60, per_unit: 2, no_rotate: true }, { width_cm: 40, length_cm: 35, per_unit: 2 }]);
+    expect(a).toBe(b);
+    expect(piecesFingerprint([{ width_cm: 41, length_cm: 35, per_unit: 2 }])).not.toBe(piecesFingerprint([{ width_cm: 40, length_cm: 35, per_unit: 2 }]));
+  });
+  it("วัดแล้ว / ชิ้นเปลี่ยน / ยังไม่วัด", async () => {
+    const { cutCheckState } = await import("../fabric-buy");
+    const c = { id: "1", product_sku: "S", component_sku: "F", pieces_fp: "fp1", unit: "หลา", est_per_unit: 0.3, actual_per_unit: 0.31, actual_total: 31, actual_qty: 100, variance_pct: 3.3, mo_no: null, note: null, measured_by_name: "ก", measured_at: "2026-11-13T00:00:00Z" };
+    expect(cutCheckState(c, "fp1").state).toBe("measured");
+    expect(cutCheckState(c, "fp2").state).toBe("stale");
+    expect(cutCheckState(null, "fp1").state).toBe("none");
+    expect(cutCheckState(c, "fp1").detail).toContain("+3.3%");
+  });
+});
+
+describe("ซื้อจากความยาววางรูปจริง", () => {
+  it("เผื่อเสีย · ปัด · สต็อก · ราคา เหมือนกติกาเดิม", async () => {
+    const { buyFromLength } = await import("../fabric-buy");
+    const b = buyFromLength({ ...base, qty: 10, waste_pct: 10, unit: "m", round: "unit", price: 100, stock: 2 }, 500);
+    expect(b.need).toBeCloseTo(5.5, 5);
+    expect(b.need_rounded).toBe(6);
+    expect(b.to_buy).toBe(4);
+    expect(b.cost_buy).toBe(400);
+    expect(b.per_unit_cm).toBeCloseTo(55, 5);
+  });
+});

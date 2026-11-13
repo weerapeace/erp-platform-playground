@@ -5,7 +5,8 @@
  *   เลือก Parent SKU → SKU ลูก (สี) + สูตรของแต่ละสี (/api/parent-skus/[id]/production) → ใส่จำนวนต่อสี
  *   → ดึงชิ้นตัดของแต่ละสูตร (/api/bom/[id]) → รวมผ้าตัวเดียวกันข้ามสี (mergeFamilyFabrics) → คิดทีละผ้า (calcFabricBuy · ค่าตั้งชุดเดียวกับโหมดผ้าเดียว)
  *   สรุปตารางทุกผ้า · กดแถว = แก้หน้ากว้าง/ราคา/ตรงลาย + ผังการวาง + เปิดแก้ละเอียดในโหมดผ้าเดียว · ใส่ตะกร้าทุกผ้าที่ขาด · พิมพ์ทุกผ้า
- * ของกลาง: ParentSkuPicker · MiniTable · FabricLayoutPreview · addToPrCart · renderFabricBuyFamilyHtml · lib/fabric-buy
+ *   รอบ 3: ราคา/ค่าผ้าทั้งงานในตาราง · ป้ายวัดจริงรายสี (cut-check) · ปุ่มแก้สูตรรายสี (BomEditorModal → โหลดใหม่) · พิมพ์วิธีตัดรายผ้า/ทุกผ้า (lib/fabric-cut-sheet)
+ * ของกลาง: ParentSkuPicker · MiniTable · FabricLayoutPreview · BomEditorModal · addToPrCart · renderFabricBuyFamilyHtml · lib/fabric-buy · lib/fabric-cut-sheet
  */
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -15,11 +16,14 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { FabricLayoutPreview } from "@/components/design-sheet-detail/fabric-layout-preview";
 import { printReportHtmlInNewWindow } from "@/components/report";
+import { BomEditorModal } from "@/components/bom-editor-modal";
+import { pieceLegend, pieceNumbers, planCutMarkers, renderCutSheetHtml, type CutSheetInput } from "@/lib/fabric-cut-sheet";
 import { addToPrCart } from "@/lib/pr-cart";
 import type { BomComponent } from "@/components/material-picker";
-import { calcFabricBuy, convertLength, mergeFamilyFabrics, unitFromUomName, type BuyInput, type BuyPiece, type BuyResult, type FamilyColor, type FamilyFabric, type FamilyLine } from "@/lib/fabric-buy";
+import { adjustedPieces, calcFabricBuy, convertLength, cutCheckState, mergeFamilyFabrics, piecesFingerprint, unitFromUomName, type BuyInput, type BuyPiece, type BuyResult, type FamilyColor, type FamilyFabric, type FamilyLine } from "@/lib/fabric-buy";
 import { renderFabricBuyFamilyHtml } from "@/lib/fabric-buy-print";
 import { Card, Num, fmt, unitComparable, type FabricSettings } from "./buy-ui";
+import { CutStatusBadge, MeasureModal, useCutChecks, type MeasureTarget } from "./cut-check";
 
 /** สิ่งที่บันทึก/เปิดกลับได้ของโหมดนี้ */
 export type FamilyState = {
@@ -30,7 +34,9 @@ export type FamilyState = {
 export const emptyFamily = (): FamilyState => ({ parent: null, qty: {}, over: {} });
 
 /** ส่งผ้า 1 ตัวไปแก้ละเอียดในโหมดผ้าเดียว */
-export type OpenSingleArgs = { fabric: BomComponent | null; pieces: BuyPiece[]; qty: number; face: number; form: "roll" | "sheet"; sheetLen: number; price: number; source: string };
+export type OpenSingleArgs = { fabric: BomComponent | null; pieces: BuyPiece[]; qty: number; face: number; form: "roll" | "sheet"; sheetLen: number; price: number; source: string;
+  /** ผ้านี้ใช้สีเดียว → ส่งสินค้า+ผ้าไปด้วย (ไว้ผูกผลวัดจริงในโหมดผ้าเดียว) */
+  origin?: { product_sku: string; component_sku: string } | null };
 /** ตัวเลขสรุปไว้บันทึก */
 export type FamilySummary = { fabrics: number; qty: number; cost_buy: number; short: number };
 
@@ -61,6 +67,9 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   const [busy, setBusy] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [allQty, setAllQty] = useState(0);
+  const [bomEdit, setBomEdit] = useState<string | null>(null);   // รหัสสีที่เปิดตัวทำสูตรอยู่
+  const [reloadKey, setReloadKey] = useState(0);                 // บันทึกสูตรแล้ว → โหลดสูตรทุกสีใหม่ (จำนวนต่อสีคงเดิม)
+  const [measure, setMeasure] = useState<MeasureTarget | null>(null);
 
   useEffect(() => { onState({ parent, qty, over }); }, [parent, qty, over, onState]);
 
@@ -124,7 +133,7 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
       } finally { if (alive()) setBusy(""); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parent?.id]);   // toast ไม่ใส่ (กันโหลดซ้ำถ้าตัวแจ้งเตือนเปลี่ยนตัว)
+  }, [parent?.id, reloadKey]);   // toast ไม่ใส่ (กันโหลดซ้ำถ้าตัวแจ้งเตือนเปลี่ยนตัว)
 
   // ── คำนวณ ──
   const dQty = useDeferredValue(qty), dOver = useDeferredValue(over), dSet = useDeferredValue(settings);
@@ -162,6 +171,27 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   useEffect(() => { onSummary({ fabrics: rows.length - noFace.length, qty: totalQty, cost_buy: Math.round(totalBuy), short: shorts.length }); }, [rows.length, noFace.length, totalQty, totalBuy, shorts.length, onSummary]);
 
   const setOv = (sku: string, p: Partial<{ face: number; price: number; match: boolean }>) => setOver((prev) => ({ ...prev, [sku]: { ...prev[sku], ...p } }));
+  const totalCost = rows.reduce((s, r) => s + (r.res.cost_total ?? 0), 0);
+
+  // ── สถานะวัดจริง: ต่อ "สี + ผ้า" (ชิ้นของสีนั้นตอนนี้ เทียบลายนิ้วมือ) ──
+  const colorFabric = useMemo(() => {
+    const out: Record<string, { code: string; color: string; fp: string }[]> = {};
+    for (const c of colors ?? []) {
+      if (!((qty[c.code] ?? 0) > 0)) continue;
+      const bySku = new Map<string, FamilyLine[]>();
+      for (const l of c.lines ?? []) bySku.set(l.component_sku, [...(bySku.get(l.component_sku) ?? []), l]);
+      for (const [sku, ls] of bySku) (out[sku] ??= []).push({ code: c.code, color: c.color || c.code, fp: piecesFingerprint(ls) });
+    }
+    return out;
+  }, [colors, qty]);
+  const pairs = useMemo(() => Object.entries(colorFabric).flatMap(([sku, cs]) => cs.map((c) => `${c.code}|${sku}`)), [colorFabric]);
+  const { checks, reload: reloadChecks } = useCutChecks(pairs);
+  const fabricState = (sku: string) => {
+    const cs = colorFabric[sku] ?? [];
+    const each = cs.map((c) => ({ ...c, st: cutCheckState(checks[`${c.code}|${sku}`], c.fp) }));
+    const done = each.filter((e) => e.st.state === "measured").length;
+    return { each, done, total: each.length, all: each.length > 0 && done === each.length };
+  };
   const parentLabel = parent ? `[${parent.code}] ${parent.name}` : "";
 
   const addAllCart = () => {
@@ -176,6 +206,29 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
     })));
     toast.success(`ใส่ตะกร้าขอซื้อแล้ว ${shorts.length} ผ้า (ตะกร้ามี ${n} รายการ) — ไปกดยืนยันที่หน้า “ขอซื้อ”`);
   };
+  // ใบวิธีตัด (ทีละผ้า หรือทุกผ้าในไฟล์เดียว)
+  const cutSection = (r: Row, date: string): CutSheetInput => {
+    const adj = adjustedPieces(r.input);
+    const usable = r.res.usable_width_cm;
+    const st = fabricState(r.f.sku);
+    return {
+      title: "ใบวิธีตัด", date, fabric_name: r.label, product_label: `${parentLabel} · สี ${r.f.colors.join(", ")}`,
+      face_full_cm: r.input.face_width_cm, usable_cm: usable, sheet_length_cm: r.input.form === "sheet" ? Number(r.input.sheet_length_cm) || null : null,
+      qty: r.f.qty, legend: pieceLegend(adj, r.f.qty),
+      plan: planCutMarkers({ pieces: adj, qty: r.f.qty, faceWidthCm: usable, sheetLengthCm: r.input.form === "sheet" ? Number(r.input.sheet_length_cm) || null : null, allowRotate: settings.rotate, gapCm: settings.gap }),
+      waste_pct: settings.waste, unit_label: r.res.unit_label,
+      status: { measured: st.all, text: st.all ? (st.total > 1 ? `วัดจริงครบ ${st.total} สี` : st.each[0]?.st.detail ?? "") : st.done > 0 ? `วัดแล้ว ${st.done}/${st.total} สี` : "" },
+    };
+  };
+  const printCut = (only?: Row) => {
+    const list = only ? [only] : rows.filter((r) => r.res.ok && r.input.face_width_cm > 0);
+    if (!list.length) { toast.error("ยังไม่มีผ้าให้พิมพ์ — ใส่จำนวนต่อสีก่อน"); return; }
+    const date = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+    printReportHtmlInNewWindow(renderCutSheetHtml(`วิธีตัด ${parent?.code ?? ""}`.trim(), list.map((r) => cutSection(r, date))));
+  };
+  const unitCm = settings.unit === "m" ? 100 : 91.44;
+  const estPerUnit = (r: Row) => r.input.form === "sheet" ? (r.res.layout?.sheetsUsed ?? 0) / Math.max(1, r.f.qty) : r.res.used_length_cm / Math.max(1, r.f.qty) / unitCm;
+
   const printAll = () => {
     if (!rows.length) { toast.error("ยังไม่มีผ้าให้พิมพ์ — ใส่จำนวนต่อสีก่อน"); return; }
     const date = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
@@ -192,6 +245,9 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
       : c.lines === null ? <span className="text-[11px] text-slate-400">กำลังโหลด…</span>
       : c.lines.length === 0 ? <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">{c.bom.bom_code} · ไม่มีขนาดชิ้นตัด</span>
       : <span className="text-[12px] text-emerald-700">{c.bom.bom_code} · {new Set(c.lines.map((l) => l.component_sku)).size} ผ้า</span> },
+    { key: "e", header: "", width: "5.5rem", align: "right", cell: (c) => c.bom
+      ? <button type="button" onClick={() => setBomEdit(c.code)} className="h-7 rounded-lg border border-amber-300 bg-amber-50 px-2 text-[11.5px] text-amber-800 hover:bg-amber-100" title="ขนาดชิ้นไม่ตรง → แก้สูตรของสีนี้ (บันทึกแล้วโหลดใหม่ให้)">แก้สูตร</button>
+      : <button type="button" onClick={() => setBomEdit(c.code)} className="h-7 rounded-lg border border-slate-200 px-2 text-[11.5px] text-slate-600 hover:bg-slate-50" title="สร้างสูตรให้สีนี้">สร้างสูตร</button> },
     { key: "q", header: "จำนวน (ใบ)", width: "8rem", align: "right", cell: (c) => (c.lines?.length ?? 0) > 0
       ? <Num small value={qty[c.code] ?? 0} onChange={(v) => setQty((p) => ({ ...p, [c.code]: Math.floor(v) }))} />
       : <span className="text-[11px] text-slate-300">—</span> },
@@ -206,7 +262,9 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
     { key: "r", header: "ควรซื้อ", width: "1fr", align: "right", cell: (r) => r.res.ok ? `${fmt(r.res.need_rounded)}${r.res.rolls ? ` (${r.res.rolls} ม้วน)` : ""}` : "" },
     { key: "s", header: "สต็อก", width: "0.8fr", align: "right", cell: (r) => r.res.ok ? fmt(r.res.stock) : "" },
     { key: "b", header: "ต้องซื้อเพิ่ม", width: "1fr", align: "right", cell: (r) => !r.res.ok ? "" : r.res.to_buy > 0 ? <b className="text-rose-700">{fmt(r.res.to_buy)} {r.res.unit_label}</b> : <span className="text-emerald-700">พอ</span> },
-    { key: "$", header: "งบ", width: "0.9fr", align: "right", cell: (r) => r.res.cost_buy != null ? `฿${fmt(r.res.cost_buy, 0)}` : <span className="text-slate-300">ใส่ราคา</span> },
+    { key: "p", header: "ราคา", width: "0.9fr", align: "right", cell: (r) => Number(r.input.price) > 0 ? <span title={`ค่าผ้าทั้งงาน ฿${fmt(r.res.cost_total ?? 0, 0)}`}>฿{fmt(Number(r.input.price))}<span className="text-[10.5px] text-slate-400">/{r.res.unit_label}</span></span> : <span className="text-slate-300">ใส่ราคา</span> },
+    { key: "$", header: "งบซื้อเพิ่ม", width: "0.9fr", align: "right", cell: (r) => r.res.cost_buy != null ? `฿${fmt(r.res.cost_buy, 0)}` : <span className="text-slate-300">—</span> },
+    { key: "st", header: "สถานะ", width: "1.1fr", cell: (r) => { const st = fabricState(r.f.sku); return st.total === 0 ? null : <CutStatusBadge size="sm" st={st.all ? { state: "measured", label: "", detail: "", check: null } : { state: "none", label: "", detail: "", check: null }} hint={st.all ? undefined : `วัดแล้ว ${st.done}/${st.total} สี`} />; } },
   ];
 
   const expanded = (r: Row) => {
@@ -218,11 +276,24 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
           <label className="block"><span className="mb-0.5 block text-[11px] text-slate-500">ราคา / {r.res.unit_label} (บาท)</span><Num small value={Number(r.input.price) || 0} onChange={(v) => setOv(r.f.sku, { price: v })} /></label>
           {settings.repeat > 0 && <label className="inline-flex h-8 items-center gap-1.5"><input type="checkbox" checked={!!o.match} onChange={(e) => setOv(r.f.sku, { match: e.target.checked })} /> ทุกชิ้นของผ้านี้ต้องตรงลาย ({fmt(settings.repeat, 1)} ซม.)</label>}
           {(o.face != null || o.price != null || o.match) && <button type="button" onClick={() => setOver((p) => { const n = { ...p }; delete n[r.f.sku]; return n; })} className="h-8 rounded-lg px-2 text-slate-500 hover:bg-slate-100">คืนค่าจากระบบ</button>}
-          <button type="button" onClick={() => onOpenSingle({ fabric: r.comp, pieces: r.input.pieces, qty: r.f.qty, face: r.input.face_width_cm, form: r.input.form ?? "roll", sheetLen: Number(r.input.sheet_length_cm) || 0, price: Number(r.input.price) || 0, source: `ทั้งตระกูล ${parentLabel} · ${r.f.colors.join(", ")}` })}
-            className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-indigo-700 hover:bg-indigo-50"><Icon name="open" /> เปิดแก้ละเอียด (โหมดผ้าเดียว)</button>
+          <button type="button" onClick={() => printCut(r)} className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-indigo-700 hover:bg-indigo-50"><Icon name="cut" /> พิมพ์วิธีตัดผ้านี้</button>
+          <button type="button" onClick={() => { const cs = colorFabric[r.f.sku] ?? []; onOpenSingle({ fabric: r.comp, pieces: r.input.pieces, qty: r.f.qty, face: r.input.face_width_cm, form: r.input.form ?? "roll", sheetLen: Number(r.input.sheet_length_cm) || 0, price: Number(r.input.price) || 0, source: `ทั้งตระกูล ${parentLabel} · ${r.f.colors.join(", ")}`, origin: cs.length === 1 && !r.f.sku.startsWith("(") ? { product_sku: cs[0].code, component_sku: r.f.sku } : null }); }}
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-indigo-700 hover:bg-indigo-50"><Icon name="open" /> เปิดแก้ละเอียด (โหมดผ้าเดียว)</button>
         </div>
         <div className="text-[12px] text-slate-500">ชิ้นตัด: {r.f.pieces.map((p) => `${p.label} ${fmt(p.width_cm, 1)}×${fmt(p.length_cm, 1)} ×${fmt(p.total ?? 0, 0)}`).join(" · ")}</div>
-        {r.res.ok && r.res.layout && <FabricLayoutPreview result={r.res.layout} faceWidthCm={r.res.usable_width_cm} sheetLengthCm={r.input.form === "sheet" ? Number(r.input.sheet_length_cm) || null : null} mode={r.input.form ?? "roll"} />}
+        {!r.f.sku.startsWith("(") && (fabricState(r.f.sku).each.length > 0) && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-[12px]">
+            <span className="text-slate-500">ผลวัดจริงรายสี:</span>
+            {fabricState(r.f.sku).each.map((e) => (
+              <span key={e.code} className="inline-flex items-center gap-1">
+                <b className="font-medium text-slate-700">{e.color}</b> <CutStatusBadge size="sm" st={e.st} />
+                <button type="button" onClick={() => setMeasure({ product_sku: e.code, component_sku: r.f.sku, label: `${e.code} (${e.color}) · ${r.label}`, fp: e.fp, unit: r.res.unit_label, est_per_unit: estPerUnit(r), qty: qty[e.code] ?? 0 })}
+                  className="rounded px-1.5 py-0.5 text-emerald-700 underline hover:bg-emerald-50">{e.st.state === "measured" ? "วัดใหม่" : "บันทึกผลวัด"}</button>
+              </span>
+            ))}
+          </div>
+        )}
+        {r.res.ok && r.res.layout && <FabricLayoutPreview result={r.res.layout} faceWidthCm={r.res.usable_width_cm} sheetLengthCm={r.input.form === "sheet" ? Number(r.input.sheet_length_cm) || null : null} mode={r.input.form ?? "roll"} numbers={pieceNumbers(adjustedPieces(r.input))} />}
       </div>
     );
   };
@@ -250,10 +321,11 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
       <section className="rounded-2xl border-2 border-indigo-300 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h2 className="flex items-center gap-2 text-base font-bold text-indigo-700"><Icon name="calc" /> ผ้าที่ต้องซื้อทั้งตระกูล</h2>
-          {rows.length > 0 && <span className="text-[12px] text-slate-500">{rows.length - noFace.length} ผ้า · ขาด {shorts.length} ผ้า · งบซื้อเพิ่มรวม <b className="text-slate-700">฿{fmt(totalBuy, 0)}</b></span>}
+          {rows.length > 0 && <span className="text-[12px] text-slate-500">{rows.length - noFace.length} ผ้า · ขาด {shorts.length} ผ้า · ค่าผ้าทั้งงาน ฿{fmt(totalCost, 0)} · งบซื้อเพิ่มรวม <b className="text-slate-700">฿{fmt(totalBuy, 0)}</b></span>}
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" onClick={addAllCart} className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 text-[12px] text-rose-700 hover:bg-rose-50"><Icon name="cart" /> ใส่ตะกร้าทุกผ้าที่ขาด{shorts.length ? ` (${shorts.length})` : ""}</button>
-            <button type="button" onClick={printAll} className="inline-flex h-8 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-700"><Icon name="print" /> พิมพ์ทุกผ้า</button>
+            <button type="button" onClick={printAll} className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-[12px] text-indigo-700 hover:bg-indigo-50"><Icon name="print" /> พิมพ์สรุปทุกผ้า</button>
+            <button type="button" onClick={() => printCut()} className="inline-flex h-8 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-700"><Icon name="cut" /> พิมพ์วิธีตัดทุกผ้า</button>
           </span>
         </div>
         {rows.length === 0
@@ -269,6 +341,8 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
         )}
         <div className="mt-2 text-[11.5px] text-slate-400">กดแถว = แก้หน้ากว้าง/ราคา · ดูผังการวาง · เปิดแก้ละเอียด · ค่าตั้ง (ริม เผื่อเสีย หน่วย ปัดขึ้น ลายซ้ำ) ใช้ชุดด้านล่างกับทุกผ้า · ผ้าผืนไม่หักริม</div>
       </section>
+      {bomEdit && <BomEditorModal sku={bomEdit} onClose={(changed) => { setBomEdit(null); if (changed) { setReloadKey((k) => k + 1); toast.success("บันทึกสูตรแล้ว — โหลดชิ้นตัดใหม่"); } }} />}
+      <MeasureModal target={measure} current={measure ? checks[`${measure.product_sku}|${measure.component_sku}`] ?? null : null} onClose={() => setMeasure(null)} onSaved={reloadChecks} />
     </div>
   );
 }

@@ -6,6 +6,7 @@
  *   สูตร: lib/pattern-nest · ตัวทำงาน: components/pattern-sheet/nest.worker.ts
  *
  *   <NestPanel pieces={patternPieces} faceWidth={150} qty={1} boxLength={usedLengthCm} />
+ *   onResult (ไม่บังคับ) = ส่งผลล่าสุดกลับให้ผู้เรียก (null = ยังไม่มี / ค่าเปลี่ยนแล้วผลเก่าใช้ไม่ได้) — หน้าคิดผ้าก่อนซื้อใช้คิดยอดซื้อ (ใช้ useCallback)
  * ใช้ที่: components/pattern-sheet/print-view · คู่มือ: docs/pattern-studio.md (รอบ I2)
  */
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +17,7 @@ import type { NestItem, NestResult, NestRot } from "@/lib/pattern-nest";
 const YARD = 91.44;
 const COLORS = ["#2563eb", "#db2777", "#059669", "#d97706", "#7c3aed", "#0891b2", "#dc2626", "#65a30d", "#c026d3", "#0d9488"];
 
-export function NestPanel({ pieces, faceWidth, qty, boxLength }: { pieces: PatternPiece[]; faceWidth: number; qty: number; boxLength?: number | null }) {
+export function NestPanel({ pieces, faceWidth, qty, boxLength, onResult }: { pieces: PatternPiece[]; faceWidth: number; qty: number; boxLength?: number | null; onResult?: (r: NestResult | null) => void }) {
   const t = useT();
   const [rot, setRot] = useState<NestRot>("grain");
   const [gap, setGap] = useState(0.5);
@@ -27,6 +28,7 @@ export function NestPanel({ pieces, faceWidth, qty, boxLength }: { pieces: Patte
   const sig = `${faceWidth}|${qty}|${rot}|${gap}|${pieces.map((p) => `${p.id}:${p.count}:${p.w}x${p.h}`).join(",")}`;
   const [resSig, setResSig] = useState("");
   useEffect(() => () => { wk.current?.terminate(); wk.current = null; }, []);
+  useEffect(() => { onResult?.(res && resSig === sig ? res : null); }, [res, resSig, sig, onResult]);
 
   const start = () => {
     wk.current?.terminate();

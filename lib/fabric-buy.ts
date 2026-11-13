@@ -21,6 +21,8 @@ export type BuyPiece = {
   per_unit: number;      // ชิ้นต่อ 1 ใบ (ตัว)
   no_rotate?: boolean;   // ชิ้นนี้ห้ามหมุน (ตามลาย/เกรน)
   match?: boolean;       // ต้องตรงลาย (ใช้กับ repeat_cm) → ความยาวปัดขึ้นเป็นรอบลาย + ห้ามหมุน
+  outline?: [number, number][] | null;   // ชิ้นทรงพิเศษ: จุดรอบเส้นตัด (ซม. เริ่ม 0,0) — กว้าง/ยาว = กรอบของรูป · วางตามรูปจริงด้วย lib/pattern-nest
+  shape?: unknown;       // ข้อมูลชิ้นของตัววาด (ShapeEditor EditorPiece) ไว้เปิดแก้ต่อ
   total?: number;        // จำนวนชิ้นทั้งงาน (ถ้าใส่ = ใช้แทน per_unit × qty — โหมดทั้งตระกูลที่แต่ละสีจำนวนไม่เท่ากัน)
 };
 
@@ -243,4 +245,71 @@ export function piecesFromMoBlocks(blocks: { label: string; width_cm: number; le
     p.per_unit += b.total_pieces;
   }
   return [...m.values()].map((p) => ({ ...p, per_unit: Math.round((p.per_unit / q) * 10000) / 10000 }));
+}
+
+// ── สถานะ "คาดการณ์ / วัดจริงแล้ว" (ตาราง fabric_cut_checks · เจ้าของขอ 2026-11-13) ─────────────
+/** ลายนิ้วมือขนาดชิ้น (กว้าง×ยาว×ชิ้นต่อใบ×ห้ามหมุน · เรียงแล้ว) — ชิ้นเปลี่ยน = ไม่ตรง = ผลวัดเก่าใช้ไม่ได้ */
+export function piecesFingerprint(pieces: { width_cm: number; length_cm: number; per_unit: number; no_rotate?: boolean }[]): string {
+  const r1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
+  const r4 = (n: number) => Math.round((Number(n) || 0) * 10000) / 10000;
+  return pieces.filter((p) => p.width_cm > 0 && p.length_cm > 0 && p.per_unit > 0)
+    .map((p) => `${r1(p.width_cm)}x${r1(p.length_cm)}x${r4(p.per_unit)}${p.no_rotate ? "n" : ""}`).sort().join("|");
+}
+
+export type CutCheck = {
+  id: string; product_sku: string; component_sku: string; pieces_fp: string; unit: string | null;
+  est_per_unit: number | null; actual_per_unit: number; actual_total: number | null; actual_qty: number | null;
+  variance_pct: number | null; mo_no: string | null; note: string | null; measured_by_name: string | null; measured_at: string;
+};
+export type CutCheckState = { state: "measured" | "stale" | "none"; label: string; detail: string; check: CutCheck | null };
+
+/** สถานะของแบบตัดตอนนี้ — measured = วัดแล้วและชิ้นยังตรง · stale = เคยวัดแต่ชิ้นเปลี่ยน · none = ยังไม่เคยวัด */
+export function cutCheckState(check: CutCheck | null | undefined, currentFp: string): CutCheckState {
+  if (!check) return { state: "none", label: "คาดการณ์", detail: "ยังไม่ได้วางจริง", check: null };
+  const when = new Date(check.measured_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+  const v = check.variance_pct != null ? ` · ต่างจากคาด ${check.variance_pct > 0 ? "+" : ""}${Math.round(check.variance_pct * 10) / 10}%` : "";
+  const base = `วัดจริง ${when}${check.measured_by_name ? ` โดย ${check.measured_by_name}` : ""} · ใช้จริง ${Math.round(check.actual_per_unit * 1000) / 1000} ${check.unit ?? ""}/ใบ${v}`;
+  if (check.pieces_fp !== currentFp) return { state: "stale", label: "คาดการณ์", detail: `ขนาดชิ้นเปลี่ยนหลังวัด — ต้องวัดใหม่ (เคย${base})`, check };
+  return { state: "measured", label: "วัดจริงแล้ว", detail: base, check };
+}
+
+// ── วางตามรูปจริง (ชิ้นทรงพิเศษ) → ตัวเลขซื้อ ──────────────────────────────────
+export type LengthBuy = Pick<BuyResult, "need" | "need_rounded" | "rolls" | "to_buy" | "cost_total" | "cost_buy" | "cost_per_unit" | "per_unit" | "per_unit_cm" | "unit_label">;
+/** ผ้าม้วนที่รู้ความยาววางแล้ว (เช่นจาก nestShapes) → ต้องใช้/ควรซื้อ/ต้องซื้อเพิ่ม/งบ ด้วยกติกาเดียวกับ calcFabricBuy (เผื่อเสีย · หน่วย · ปัดขึ้น · สต็อก · ราคา) */
+export function buyFromLength(i: BuyInput, usedLengthCm: number): LengthBuy {
+  const unit: BuyUnit = i.unit === "m" ? "m" : "yd";
+  const unitCm = unit === "m" ? 100 : YARD_CM;
+  const qty = Math.max(1, Math.floor(Number(i.qty) || 0));
+  const round: BuyRound = i.round ?? "unit";
+  const rollLen = Number(i.roll_length) > 0 ? Number(i.roll_length) : null;
+  const price = Number(i.price) > 0 ? Number(i.price) : null;
+  const stock = Math.max(0, Number(i.stock) || 0);
+  const cm = Math.max(0, usedLengthCm) * (1 + Math.max(0, Number(i.waste_pct) || 0) / 100);
+  const need = cm / unitCm;
+  const toBuy = roundBuy(Math.max(0, need - stock), round, rollLen);
+  return {
+    unit_label: unit === "m" ? "เมตร" : "หลา",
+    need: r2(need), need_rounded: roundBuy(need, round, rollLen), rolls: rollLen ? Math.ceil(need / rollLen - EPS) : null,
+    to_buy: toBuy, per_unit: need / qty, per_unit_cm: cm / qty,
+    cost_total: price != null ? r2(need * price) : null, cost_buy: price != null ? r2(toBuy * price) : null, cost_per_unit: price != null ? r2((need / qty) * price) : null,
+  };
+}
+
+/** ขนาดชิ้นที่ "ตัดจริง" ชุดเดียวกับ calcFabricBuy (เผื่อหด · ตรงลาย → ปัดรอบลาย+ห้ามหมุน · total → ชิ้นต่อใบเฉลี่ย) — ใบวิธีตัด (lib/fabric-cut-sheet) ใช้ */
+export function adjustedPieces(i: BuyInput): { key: string; label: string; width_cm: number; length_cm: number; per_unit: number; no_rotate: boolean }[] {
+  const qty = Math.max(1, Math.floor(Number(i.qty) || 0));
+  const shrinkK = 1 + Math.max(0, Number(i.shrink_pct) || 0) / 100;
+  const repeat = Math.max(0, Number(i.repeat_cm) || 0);
+  return i.pieces
+    .filter((p) => Number(p.width_cm) > 0 && Number(p.length_cm) > 0 && (Number(p.total) > 0 || Number(p.per_unit) > 0))
+    .map((p) => {
+      const matched = repeat > 0 && !!p.match;
+      const len = Number(p.length_cm) * shrinkK;
+      return {
+        key: p.key, label: p.label || `${p.width_cm}×${p.length_cm}`,
+        width_cm: r2(Number(p.width_cm) * shrinkK), length_cm: matched ? Math.ceil(len / repeat - EPS) * repeat : r2(len),
+        per_unit: Number(p.total) > 0 ? Math.round((Number(p.total) / qty) * 10000) / 10000 : Number(p.per_unit),
+        no_rotate: !!p.no_rotate || matched || i.allow_rotate === false,
+      };
+    });
 }

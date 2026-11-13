@@ -556,6 +556,14 @@ export const SHARED_PARTS: SharedPart[] = [
 
   // ───────── พิมพ์ ─────────
   {
+    key: "fabric-cut-sheet", label: "ใบวิธีตัดผ้า", code: "lib/fabric-cut-sheet", category: "print",
+    source: { path: "lib/fabric-cut-sheet" },
+    what: "หาแบบตัดที่วางซ้ำได้ (ได้ N ใบ × M รอบ + แบบเศษ) แล้วพิมพ์ใบวิธีตัด: เลขชิ้นในผังตรงกับตารางชิ้น · ม้วนยาวตัดช่วงละ 90 ซม. มี “ต่อ” · ตรา คาดการณ์/พิสูจน์แล้ว · ช่องกรอกผ้าที่ใช้จริง",
+    when: "ทุกปุ่มพิมพ์วิธีตัด/ใบตัดผ้าที่มีชิ้นตัด (คิดผ้าก่อนซื้อ · ป๊อปคำนวณผ้าในใบออกแบบ) · เลขชิ้นบนจอ = pieceNumbers ส่งให้ FabricLayoutPreview",
+    notWhen: "ใบตัดผ้าที่รวมหลายใบสั่งผลิต (แบ่งผ้าคืนต่อใบ) ใช้ lib/fabric-plan-print · คิดตัวเลขซื้อผ้าใช้ lib/fabric-buy",
+    doc: "fabric-buy.md",
+  },
+  {
     key: "print-panels", label: "พิมพ์เอกสาร / พิมพ์ตาราง", code: "DocPrintPanel · ListPrintPanel · usePrintLog", category: "print",
     source: { path: "components/report" },
     what: "แผงตั้งค่าพิมพ์ เลือกคอลัมน์ บันทึกประวัติการพิมพ์ บันทึกเป็นรูป",

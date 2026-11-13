@@ -10,6 +10,8 @@ import { useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { packFabric, YARD_CM, type FabricPiece } from "@/lib/fabric-calc";
 import { FabricLayoutPreview } from "./fabric-layout-preview";
+import { printReportHtmlInNewWindow } from "@/components/report";
+import { pieceLegend, pieceNumbers, planCutMarkers, renderCutSheetHtml, type CutPiece } from "@/lib/fabric-cut-sheet";
 import { useT } from "@/components/i18n";
 
 export type CalcLine = {
@@ -68,12 +70,29 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
   }), [pieces, faceWidth, rotate, waste, gap, mode, sheetLength]);
 
   const piecePerUnit = (cur?.lines ?? []).reduce((s, l) => s + Math.max(0, n(l.pieces)), 0);
+  // ใบวิธีตัด (ของกลาง lib/fabric-cut-sheet · เจ้าของขอ 2026-11-13) — เลขชิ้นในผังตรงกับตารางในใบพิมพ์
+  const cutPieces: CutPiece[] = useMemo(() => (cur?.lines ?? []).map((l, i) => ({
+    key: l.key || `p${i}`, label: `${n(l.width_cm)}×${n(l.length_cm)}`, width_cm: n(l.width_cm), length_cm: n(l.length_cm), per_unit: Math.max(0, n(l.pieces) || 0), no_rotate: !rotate,
+  })).filter((p) => p.width_cm > 0 && p.length_cm > 0 && p.per_unit > 0), [cur, rotate]);
+  const nums = useMemo(() => pieceNumbers(cutPieces), [cutPieces]);
+  const printCut = () => {
+    if (!cutPieces.length || !(faceWidth > 0)) return;
+    const date = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+    const plan = planCutMarkers({ pieces: cutPieces, qty: Math.max(1, orderQty), faceWidthCm: faceWidth, sheetLengthCm: mode === "sheet" ? sheetLength : null, allowRotate: rotate, gapCm: gap });
+    printReportHtmlInNewWindow(renderCutSheetHtml(`วิธีตัด ${cur?.name ?? ""}`.trim(), [{
+      title: "ใบวิธีตัด", date, fabric_name: cur?.name ?? "-", face_full_cm: faceWidth, usable_cm: faceWidth, sheet_length_cm: mode === "sheet" ? sheetLength : null,
+      qty: Math.max(1, orderQty), legend: pieceLegend(cutPieces, Math.max(1, orderQty)), plan, waste_pct: waste, unit_label: mode === "sheet" ? "ผืน" : "หลา", status: null,
+    }]));
+  };
   const inCls = "h-9 w-full px-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   return (
     <ERPModal open onClose={onClose} title={t("🧮 คำนวณจำนวนผ้า", "🧮 Fabric calculator")} size="lg"
       description={t("จำลองการวางชิ้นจริงบนหน้าผ้า แล้วบอกว่าต้องใช้ผ้าเท่าไหร่ (แม่นกว่าเอาพื้นที่มาหาร)", "Simulates laying the real pieces on the fabric width, then tells you how much fabric you need (more accurate than dividing by area)")}
-      footer={<button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200">{t("ปิด", "Close")}</button>}>
+      footer={<div className="flex w-full items-center gap-2">
+        {materials.length > 0 && <button onClick={printCut} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("พิมพ์วิธีตัด", "Print cutting plan")}</button>}
+        <button onClick={onClose} className="ml-auto h-9 px-4 text-sm font-medium bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200">{t("ปิด", "Close")}</button>
+      </div>}>
       {materials.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">{t("ยังไม่มีบรรทัดที่กรอก กว้าง×ยาว — กรอกขนาดชิ้นในตารางตีราคาก่อน", "No lines with width×length yet — enter piece sizes in the costing table first")}</p>
       ) : (
@@ -192,7 +211,7 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
                 <span>{t("🖼️ ดูผังการวางบนหน้าผ้า", "🖼️ View layout on fabric")}</span>
                 <span className="text-[11px] text-slate-400">{showLayout ? t("▲ ซ่อน", "▲ Hide") : t("▼ แสดง", "▼ Show")}</span>
               </button>
-              {showLayout && <div className="mt-3"><FabricLayoutPreview result={result} faceWidthCm={faceWidth} sheetLengthCm={mode === "sheet" ? sheetLength : null} mode={mode} /></div>}
+              {showLayout && <div className="mt-3"><FabricLayoutPreview result={result} faceWidthCm={faceWidth} sheetLengthCm={mode === "sheet" ? sheetLength : null} mode={mode} numbers={nums} /></div>}
             </div>
           )}
 
