@@ -20,7 +20,8 @@ export function PocketEditor({ spec, choices, readOnly, onChange }: {
   const [drag, setDrag] = useState<Drag | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const types = choices.filter((c) => c.list_key === "pocket_type");
-  const { w: W, h: H } = spec.size;
+  // ระหว่างพิมพ์ขนาดใหม่ค่าอาจเป็น 0 ชั่วคราว → กันหารศูนย์ (ตอนบันทึก cleanSpec บีบกล่องให้พอดีขนาดจริงเอง)
+  const W = Math.max(1, spec.size.w), H = Math.max(1, spec.size.h);
   const s = Math.min(320 / W, 340 / H), ox = (360 - W * s) / 2, oy = 24;
   const boxes = spec.pockets[panel];
   const selBox = boxes.find((b) => b.id === sel) ?? null;

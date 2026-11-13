@@ -137,7 +137,7 @@ export function RecipeEditor({ id }: { id: string }) {
           <div className="grid grid-cols-4 gap-2">
             {(["w", "h", "d", "strap"] as const).map((k) => (
               <label key={k} className="text-[12px] text-slate-500">{{ w: "กว้าง", h: "สูง", d: "หนา", strap: "สายยาว (0 = ไม่มี)" }[k]}
-                <input type="number" min={0} step={0.5} disabled={readOnly} value={spec.size[k]} onChange={(e) => update((s) => cleanSpec({ ...s, size: { ...s.size, [k]: Number(e.target.value) } }))}
+                <input type="number" min={0} step={0.5} disabled={readOnly} value={spec.size[k]} onChange={(e) => update((s) => ({ ...s, size: { ...s.size, [k]: Math.max(0, Number(e.target.value) || 0) } }))}
                   className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
               </label>
             ))}

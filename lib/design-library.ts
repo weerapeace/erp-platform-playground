@@ -311,7 +311,7 @@ export function calloutSvg(b: BriefInput): string {
 
 /** รูปช่องของ 1 ฝั่ง (กรอบกระเป๋า + กล่องช่องทุกกล่อง + ขนาด) */
 export function pocketPanelSvg(spec: Spec, panel: PanelKey, choices: Choice[]): string {
-  const { w: W, h: H } = spec.size;
+  const W = Math.max(1, spec.size.w), H = Math.max(1, spec.size.h);
   const s = Math.min(200 / W, 220 / H), ox = (240 - W * s) / 2, oy = 22;
   let g = `<svg viewBox="0 0 240 ${oy + H * s + 10}" width="100%" xmlns="http://www.w3.org/2000/svg"><rect x="${ox}" y="${oy}" width="${W * s}" height="${H * s}" fill="#f4efe4" stroke="#999"/>`;
   g += `<text x="120" y="14" text-anchor="middle" font-size="11" fill="#555">${esc(PANELS.find((p) => p.key === panel)?.label ?? panel)} · ${W}×${H} ซม.</text>`;
