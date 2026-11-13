@@ -24,7 +24,7 @@ const SHOP_URL: Record<string, (h: string) => string> = {
   pinterest: (h) => `https://www.pinterest.com/${h}`,
   x: (h) => `https://x.com/${h}`,
   twitter: (h) => `https://x.com/${h}`,
-  shopee: (h) => `https://shopee.co.th/${h}`,
+  shopee: (h) => (/^\d+$/.test(h) ? `https://shopee.co.th/shop/${h}` : `https://shopee.co.th/${h}`),   // รหัสร้านตัวเลข (ระบบเติมให้ตอนเชื่อม Shopee) = /shop/{id}
   lazada: (h) => `https://www.lazada.co.th/shop/${h}`,
   line_oa: (h) => `https://line.me/R/ti/p/@${h}`,
 };

@@ -111,12 +111,12 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
   },
   {
     id: "lazada-token", zone: "sales", kind: "auto", icon: "🔑",
-    title: "ผู้ต่ออายุกุญแจ Lazada", titleEn: "Lazada key renewer",
-    does: "ต่ออายุกุญแจเชื่อมร้าน Lazada ทุกวัน กันร้านหลุดเงียบ",
+    title: "ผู้ต่ออายุกุญแจ Lazada + Shopee", titleEn: "Lazada + Shopee key renewer",
+    does: "ต่ออายุกุญแจเชื่อมร้าน Lazada และ Shopee ทุกวัน กันร้านหลุดเงียบ (ตัวต่ออายุ Shopee ใช้ได้ครั้งเดียว อยู่ได้ 30 วัน)",
     trigger: `${DAILY} 07:30 หรือกดเองที่หน้าบัญชีแพลตฟอร์ม`, cron: "/api/cron/lazada-token", everyHours: 24,
-    can: ["ขอกุญแจใหม่จาก Lazada"], cannot: ["ส่งข้อมูลขึ้นร้าน", "เชื่อมร้านที่หลุดแล้วแทนคน"],
+    can: ["ขอกุญแจใหม่จาก Lazada / Shopee"], cannot: ["ส่งข้อมูลขึ้นร้าน", "เชื่อมร้านที่หลุดแล้วแทนคน"],
     source: "สถานะกุญแจแต่ละร้าน + บันทึกรอบล่าสุด", href: "/admin/platform-accounts",
-    files: ["app/api/cron/lazada-token/route.ts", "lib/lazada.ts"],
+    files: ["app/api/cron/lazada-token/route.ts", "lib/lazada.ts", "app/api/shopee/shared.ts", "lib/shopee.ts"],
   },
 
   // ── จัดซื้อ & คลัง ──

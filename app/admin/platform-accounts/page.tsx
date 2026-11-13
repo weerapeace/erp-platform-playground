@@ -29,7 +29,7 @@ const INVOICE_CODES = ["shopee", "lazada", "line_shopping", "tiktok"];
 type PostStat = { posted30: number; queued: number; failed: number; next_run_at: string | null; last_posted_at: string | null };
 
 // แพลตฟอร์มที่ระบบเชื่อมบัญชีได้จริง (OAuth / API Key) — ขึ้นกลุ่มบนสุด
-const AUTO_CODES = ["facebook", "instagram", "lazada", "tiktok", "line_shopping"];
+const AUTO_CODES = ["facebook", "instagram", "lazada", "tiktok", "shopee", "line_shopping"];
 
 // ลิงก์หน้าร้านจากค่าที่กรอก (ลิงก์เต็ม / @handle) — ของกลาง lib/platform-links (ลิงก์สินค้า/หลังร้านของลิ้นชักสินค้าบนร้านใช้ตัวเดียวกัน)
 const shopUrlOf = platformShopUrl;
@@ -89,10 +89,14 @@ const GUIDE: Record<string, Guide> = {
     steps: [
       EDIT_FIRST,
       <>เปิดหน้าร้านของแบรนด์บนแอป Shopee › กด <b>แชร์</b> › <b>คัดลอกลิงก์</b> (หรือเปิดร้านบนเว็บ shopee.co.th แล้วก๊อปลิงก์จากช่องที่อยู่)</>,
-      <>วางในช่อง “Shop ID / ลิงก์ร้าน” — ใส่แค่ชื่อผู้ใช้ร้านก็ได้ เช่น <C>louismontini</C></>,
+      <>วางในช่อง “Shop ID / ลิงก์ร้าน” — ใส่แค่ชื่อผู้ใช้ร้านก็ได้ เช่น <C>louismontini</C> (เชื่อมต่อแล้วระบบเติมรหัสร้านตัวเลขให้เองถ้าช่องว่าง)</>,
       SAVE_ON,
+      <>เชื่อมร้านกับระบบ: กด <b>เชื่อมต่อ Shopee</b> ในส่วน “การเชื่อมต่อ” ด้านล่าง → เข้าสู่ระบบด้วย<b>บัญชีหลักของร้าน</b> (ไม่ใช่บัญชีย่อย) + รหัส OTP → เลือกอายุสิทธิ์ <b>365 วัน</b> → Confirm Authorization</>,
     ],
-    notes: [<>Shopee ยังเชื่อมอัตโนมัติไม่ได้ (Shopee เปิด API ให้เฉพาะร้าน Mall / Managed Seller) — ตอนนี้ใช้ระบุร้านของแบรนด์และทำลิงก์</>],
+    notes: [
+      <>ก่อนกดเชื่อม แอปใน Shopee Open Platform ต้อง <b>Go Live ผ่านแล้ว</b> และใส่ <C>SHOPEE_PARTNER_ID</C> / <C>SHOPEE_PARTNER_KEY</C> / <C>SHOPEE_ENV=live</C> ใน Vercel (Shopee เปิด API ให้เฉพาะร้าน Mall / Managed Seller — ร้าน IG ยังไม่ผ่าน)</>,
+      <>กุญแจ Shopee อยู่ได้ 4 ชม. ระบบต่ออายุให้เองตอนใช้งาน + ทุกเช้า 07:30 (ตัวต่ออายุอยู่ได้ 30 วัน) · สิทธิ์ที่ร้านให้อยู่ได้ไม่เกิน 365 วัน ครบแล้วต้องกดเชื่อมใหม่</>,
+    ],
     shopPh: "ลิงก์ร้าน หรือ ชื่อผู้ใช้ร้าน",
   },
   tiktok: {
@@ -254,7 +258,7 @@ export default function PlatformAccountsPage() {
   const [editPlat, setEditPlat] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังแก้ (ชื่อร้าน/Shop ID) — กันเผลอพิมพ์
   const [editKey, setEditKey] = useState<string | null>(null);      // แพลตฟอร์มที่กำลังแก้ API Key (มีคีย์แล้ว = อ่านอย่างเดียวจนกดแก้)
   const [clearKeyFor, setClearKeyFor] = useState<string | null>(null);  // แพลตฟอร์มที่กำลังยืนยัน "ล้างคีย์"
-  const [confirmDisc, setConfirmDisc] = useState<"facebook" | "lazada" | "tiktok" | null>(null);   // ยืนยันตัดการเชื่อมต่อ
+  const [confirmDisc, setConfirmDisc] = useState<"facebook" | "lazada" | "tiktok" | "shopee" | null>(null);   // ยืนยันตัดการเชื่อมต่อ
   const [sel, setSel] = useState<string | null>(null);   // แพลตฟอร์มที่เลือกดูรายละเอียด (platform id)
   const [mobileDetail, setMobileDetail] = useState(false);   // จอแคบ: อยู่หน้ารายละเอียดไหม
   const wantCode = useRef<string | null>(null);   // กลับจาก OAuth → เปิดแพลตฟอร์มนั้นให้เลย
@@ -273,6 +277,10 @@ export default function PlatformAccountsPage() {
   type TtsStatus = { configured: boolean; connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_name: string | null; region: string | null; shops: { name: string; region: string | null; code: string | null }[]; checked?: boolean; problem?: string | null; brand_mismatch?: { seller_name: string; brand_name: string } | null };
   const [tts, setTts] = useState<TtsStatus>({ configured: true, connected: false, seller_name: null, region: null, shops: [] });
   const [ttsChecking, setTtsChecking] = useState(false);
+  // สถานะเชื่อมต่อ Shopee ต่อแบรนด์ (/api/shopee/status) — days_left = วันที่ต้องเชื่อมใหม่ (ตัวต่ออายุ 30 วัน หรือสิทธิ์ร้าน ≤365 วัน ตัวไหนหมดก่อน)
+  type ShpStatus = { configured: boolean; env?: "live" | "sandbox"; connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; auth_days_left?: number | null; shop_id: string | null; shop_name: string | null; region: string | null; checked?: boolean; problem?: string | null; brand_mismatch?: { shop_name: string; brand_name: string } | null };
+  const [shp, setShp] = useState<ShpStatus>({ configured: true, connected: false, shop_id: null, shop_name: null, region: null });
+  const [shpChecking, setShpChecking] = useState(false);
   const brandChosen = useRef(false);   // มีการเลือกแบรนด์แล้ว (จาก query/ผู้ใช้) — กัน auto-select ทับ
   const say = (text: string, bad = false) => setMsg({ text, bad });
   const flash = (text: string) => { setMsg({ text }); setTimeout(() => setMsg(null), 1800); };
@@ -280,13 +288,14 @@ export default function PlatformAccountsPage() {
   const load = useCallback(async (bid: string) => {
     setLoading(true);
     try {
-      const [j, kj, mj, lj, sj, tj] = await Promise.all([
+      const [j, kj, mj, lj, sj, tj, pj] = await Promise.all([
         apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
         bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
         bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}&check=1`).then((r) => r.json()) : Promise.resolve(null),   // check=1 = ลองกับ Meta จริงว่ายังใช้ได้
         bid ? apiFetch(`/api/lazada/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
         bid ? apiFetch(`/api/social-publish/stats?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()).catch(() => null) : Promise.resolve(null),   // ภาพรวมโหลดไม่ได้ ไม่ให้ทั้งหน้าพัง
         bid ? apiFetch(`/api/tiktok-shop/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()).catch(() => null) : Promise.resolve(null),
+        bid ? apiFetch(`/api/shopee/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()).catch(() => null) : Promise.resolve(null),
       ]);
       setStats(((sj as { stats?: Record<string, PostStat> } | null)?.stats ?? {}));
       setPlatforms((j.platforms ?? []) as Platform[]);
@@ -296,6 +305,7 @@ export default function PlatformAccountsPage() {
       if (mj) { setFb((mj.facebook ?? { connected: false, stage: "none", page_name: null, pages: [] }) as FbStatus); setFbHasIg(!!mj.instagram?.connected); setMetaCfg(mj.configured !== false); setPickPage(""); }
       if (lj) setLaz(lj as LazStatus);
       if (tj && !tj.error) setTts(tj as TtsStatus);
+      if (pj && !pj.error) setShp(pj as ShpStatus);
       setTestMsg(null);
       setLoadedFor(bid);
       if (!bid && !brandChosen.current && j.brands?.[0]) setBrandId(j.brands[0].id);
@@ -327,6 +337,7 @@ export default function PlatformAccountsPage() {
     const err = sp.get("meta_error"), ok = sp.get("meta_connected"), pick = sp.get("meta_pick"), brand = sp.get("brand");
     const lazErr = sp.get("laz_error"), lazOk = sp.get("laz_connected");
     const ttsErr = sp.get("tts_error"), ttsOk = sp.get("tts_connected"), ttsWarn = sp.get("tts_warn");
+    const shpErr = sp.get("shp_error"), shpOk = sp.get("shp_connected"), shpWarn = sp.get("shp_warn");
     if (brand) { brandChosen.current = true; setBrandId(brand); }
     if (err) say(err, true);
     else if (ok) say("เชื่อมต่อ Facebook สำเร็จ");
@@ -335,10 +346,13 @@ export default function PlatformAccountsPage() {
     else if (lazOk) say("เชื่อมต่อ Lazada สำเร็จ");
     else if (ttsErr) say(ttsErr, true);
     else if (ttsOk) say(ttsWarn || "เชื่อมต่อ TikTok Shop สำเร็จ", !!ttsWarn);
+    else if (shpErr) say(shpErr, true);
+    else if (shpOk) say(shpWarn || "เชื่อมต่อ Shopee สำเร็จ", !!shpWarn);
     if (err || ok || pick) wantCode.current = "facebook";
     if (lazErr || lazOk) wantCode.current = "lazada";
     if (ttsErr || ttsOk) wantCode.current = "tiktok";
-    if (err || ok || pick || brand || lazErr || lazOk || ttsErr || ttsOk) window.history.replaceState({}, "", window.location.pathname);
+    if (shpErr || shpOk) wantCode.current = "shopee";
+    if (err || ok || pick || brand || lazErr || lazOk || ttsErr || ttsOk || shpErr || shpOk) window.history.replaceState({}, "", window.location.pathname);
   }, []);
   // เลือกแพลตฟอร์มแรก (หรือที่เพิ่งเชื่อมกลับมา) เมื่อโหลดรายการแล้ว
   useEffect(() => {
@@ -446,6 +460,34 @@ export default function PlatformAccountsPage() {
     finally { setTtsChecking(false); }
   };
 
+  // ---- Shopee ----
+  const connectShp = async () => {
+    if (!brandId) return;
+    try {
+      const r = await apiFetch(`/api/shopee/oauth/start?brand_id=${encodeURIComponent(brandId)}`);
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      if (j.auth_url) window.location.href = j.auth_url as string;
+    } catch (e) { say((e as Error).message, true); }
+  };
+  const disconnectShp = async () => {
+    try {
+      const r = await apiFetch("/api/shopee/disconnect", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      say("ตัดการเชื่อมต่อ Shopee แล้ว"); await load(brandId);
+    } catch (e) { say((e as Error).message, true); }
+  };
+  // ลองกับ Shopee จริง: ต่ออายุกุญแจถ้าจำเป็น + ดึงข้อมูลร้านใหม่ (อ่านอย่างเดียว ไม่แก้อะไรบนร้าน)
+  const checkShp = async () => {
+    setShpChecking(true);
+    try {
+      const r = await apiFetch(`/api/shopee/status?brand_id=${encodeURIComponent(brandId)}&check=1`);
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setShp(j as ShpStatus);
+      if (j.problem) say(j.problem as string, true); else say(`การเชื่อมต่อ Shopee ใช้งานได้ — ร้าน ${(j.shop_name as string | null) ?? j.shop_id ?? "-"}`);
+    } catch (e) { say((e as Error).message, true); }
+    finally { setShpChecking(false); }
+  };
+
   const save = async (platform_id: string, patch: Partial<Account>) => {
     setAccounts((a) => { const prev = a[platform_id] ?? { label: null, external_shop_id: null, is_active: true }; return { ...a, [platform_id]: { ...prev, ...patch } }; });
     try {
@@ -493,6 +535,11 @@ export default function PlatformAccountsPage() {
       if (tts.connected && tts.brand_mismatch) return { tone: "bad", label: "ร้านไม่ตรงแบรนด์" };
       if (tts.connected) return tts.problem ? { tone: "bad", label: "ต้องเชื่อมใหม่" } : tts.health === "expiring" ? { tone: "warn", label: `อีก ${tts.days_left ?? 0} วันหมดอายุ` } : { tone: "ok", label: "เชื่อมแล้ว" };
       if (tts.health === "expired") return { tone: "bad", label: "หมดอายุ" };
+    }
+    if (p.code === "shopee") {
+      if (shp.connected && shp.brand_mismatch) return { tone: "bad", label: "ร้านไม่ตรงแบรนด์" };
+      if (shp.connected) return shp.problem ? { tone: "bad", label: "ต้องเชื่อมใหม่" } : shp.health === "expiring" ? { tone: "warn", label: `อีก ${shp.days_left ?? 0} วันหมดอายุ` } : { tone: "ok", label: "เชื่อมแล้ว" };
+      if (shp.health === "expired") return { tone: "bad", label: "หมดอายุ" };
     }
     if (p.code === "line_shopping" && keys[p.id]) return { tone: "ok", label: "ตั้งคีย์แล้ว" };
     if (acc.is_active && hasShop) return { tone: "on", label: "ใช้งาน" };
@@ -607,6 +654,35 @@ export default function PlatformAccountsPage() {
             </div>
           ) : <p className="text-sm text-slate-500">ยังไม่ได้เชื่อมต่อ</p>}
           <p className="text-xs text-slate-500">แอปใน Partner Center ต้องผ่านการตรวจและกด “เผยแพร่” ก่อน ร้านจริงถึงกดอนุญาตได้</p>
+        </div>
+      );
+    }
+    if (p.code === "shopee") {
+      if (!shp.configured) return <Note>ยังไม่ได้ตั้ง SHOPEE_PARTNER_ID / SHOPEE_PARTNER_KEY / SHOPEE_ENV ในโฮสต์ (Vercel) — ใส่ Live Partner ID / Live Key จากหน้าแอปใน Shopee Open Platform หลัง Go Live ผ่าน</Note>;
+      if (shp.connected) return (
+        <div className="space-y-3">
+          {shp.brand_mismatch && <Note tone="bad">ร้านที่เชื่อมอยู่ชื่อ “{shp.brand_mismatch.shop_name}” แต่แบรนด์ที่เลือกคือ “{shp.brand_mismatch.brand_name}” — ถ้าเชื่อมผิดแบรนด์ ให้กด <b>ตัดการเชื่อมต่อ</b> แล้วเลือกแบรนด์ที่ถูกด้านบนก่อนกดเชื่อมต่อใหม่</Note>}
+          <StatusBar tone={shp.problem || shp.brand_mismatch ? "bad" : shp.health === "expiring" ? "warn" : "ok"} actions={canManage && <><button onClick={connectShp} className="text-xs text-slate-600 hover:underline">เชื่อมใหม่</button><button onClick={() => setConfirmDisc("shopee")} className={LINK_DANGER}>ตัดการเชื่อมต่อ</button></>}>
+            ร้าน <b className="font-medium text-slate-900">{shp.shop_name || "-"}</b>{shp.shop_id ? ` · รหัสร้าน ${shp.shop_id}` : ""}{shp.region ? ` (${shp.region})` : ""}
+            {shp.env === "sandbox" && <span className="text-amber-700"> · โหมดทดลอง (sandbox)</span>}
+            {shp.health === "expiring" && <span className="text-amber-700"> · อีก {shp.days_left ?? 0} วันต้องกดเชื่อมใหม่</span>}
+            {shp.health !== "expiring" && shp.auth_days_left != null && <span className="text-slate-500"> · สิทธิ์ร้านเหลือ {shp.auth_days_left} วัน</span>}
+          </StatusBar>
+          {shp.problem && <Note>{shp.problem}</Note>}
+          {canManage && <button onClick={checkShp} disabled={shpChecking} className={BTN_LINE}><Icon name="refresh" />{shpChecking ? "กำลังตรวจ..." : "ตรวจการเชื่อมต่อ"}</button>}
+          <p className="text-xs text-slate-500">ตอนนี้ระบบแค่ถือกุญแจไว้ ยังไม่ดึงหรือแก้อะไรบนร้าน — ดึงสินค้า/ออเดอร์จะเปิดในขั้นถัดไป</p>
+        </div>
+      );
+      return (
+        <div className="space-y-3">
+          {shp.health === "expired" && <Note>การเชื่อมต่อเดิมหมดอายุแล้ว — กดเชื่อมใหม่ (ระบบต่ออายุกุญแจให้เองทุกวันหลังจากนี้)</Note>}
+          {canManage ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={connectShp} disabled={!brandId} className={BTN_DARK}><PlatformIcon code="shopee" size={16} />{shp.health === "expired" ? "เชื่อมต่อ Shopee ใหม่" : "เชื่อมต่อ Shopee"}</button>
+              <span className="text-xs text-slate-500">เข้าสู่ระบบด้วยบัญชีหลักของร้าน + OTP แล้วเลือกอายุสิทธิ์ 365 วัน</span>
+            </div>
+          ) : <p className="text-sm text-slate-500">ยังไม่ได้เชื่อมต่อ</p>}
+          <p className="text-xs text-slate-500">แอปใน Shopee Open Platform ต้อง Go Live ผ่านก่อน ร้านจริงถึงกดอนุญาตได้ (กุญแจชุด Test ใช้ได้แค่ร้านทดลอง)</p>
         </div>
       );
     }
@@ -853,7 +929,7 @@ export default function PlatformAccountsPage() {
 
                   {conn && (
                     <Section title={cur.code === "line_shopping" ? "API Key" : "การเชื่อมต่อ"}
-                      desc={cur.code === "facebook" || cur.code === "instagram" ? "ให้ระบบโพสต์คอนเทนต์ขึ้นเพจให้อัตโนมัติ" : cur.code === "lazada" ? "ดึงออเดอร์และสินค้าเข้าระบบอัตโนมัติ" : cur.code === "tiktok" ? "เชื่อมร้าน TikTok Shop กับระบบผ่าน Open API" : "เชื่อมร้านกับระบบผ่าน Open API ของ LINE SHOPPING"}>
+                      desc={cur.code === "facebook" || cur.code === "instagram" ? "ให้ระบบโพสต์คอนเทนต์ขึ้นเพจให้อัตโนมัติ" : cur.code === "lazada" ? "ดึงออเดอร์และสินค้าเข้าระบบอัตโนมัติ" : cur.code === "tiktok" ? "เชื่อมร้าน TikTok Shop กับระบบผ่าน Open API" : cur.code === "shopee" ? "เชื่อมร้าน Shopee กับระบบผ่าน Shopee Open Platform" : "เชื่อมร้านกับระบบผ่าน Open API ของ LINE SHOPPING"}>
                       {conn}
                     </Section>
                   )}
@@ -886,13 +962,15 @@ export default function PlatformAccountsPage() {
 
       {/* ยืนยันก่อนตัดการเชื่อมต่อ Facebook / Lazada */}
       <ConfirmDialog open={!!confirmDisc} onClose={() => setConfirmDisc(null)} variant="danger"
-        title={confirmDisc === "lazada" ? "ตัดการเชื่อมต่อ Lazada?" : confirmDisc === "tiktok" ? "ตัดการเชื่อมต่อ TikTok Shop?" : "ตัดการเชื่อมต่อ Facebook?"} confirmText="ตัดการเชื่อมต่อ"
+        title={confirmDisc === "lazada" ? "ตัดการเชื่อมต่อ Lazada?" : confirmDisc === "tiktok" ? "ตัดการเชื่อมต่อ TikTok Shop?" : confirmDisc === "shopee" ? "ตัดการเชื่อมต่อ Shopee?" : "ตัดการเชื่อมต่อ Facebook?"} confirmText="ตัดการเชื่อมต่อ"
         message={confirmDisc === "lazada"
           ? `${brand?.name ?? "แบรนด์นี้"} จะหยุดดึงออเดอร์จาก Lazada จนกว่าจะเชื่อมใหม่`
           : confirmDisc === "tiktok"
             ? `ระบบจะลบกุญแจ TikTok Shop ของ ${brand?.name ?? "แบรนด์นี้"} — ต้องกดเชื่อมต่อใหม่ถึงจะใช้ได้อีก (ยกเลิกสิทธิ์ฝั่งร้านได้ที่ Seller Center › App Store › My apps)`
-            : `${brand?.name ?? "แบรนด์นี้"} จะโพสต์ Facebook/Instagram อัตโนมัติไม่ได้ (คิวโพสต์ที่รออยู่จะล้ม) จนกว่าจะเชื่อมใหม่`}
-        onConfirm={() => { const d = confirmDisc; setConfirmDisc(null); if (d === "lazada") void disconnectLaz(); else if (d === "tiktok") void disconnectTts(); else void disconnectFb(); }} />
+            : confirmDisc === "shopee"
+              ? `ระบบจะลบกุญแจ Shopee ของ ${brand?.name ?? "แบรนด์นี้"} — ไม่แตะอะไรบนร้าน · ต้องกดเชื่อมต่อใหม่ (เข้าสู่ระบบร้าน + OTP) ถึงจะใช้ได้อีก`
+              : `${brand?.name ?? "แบรนด์นี้"} จะโพสต์ Facebook/Instagram อัตโนมัติไม่ได้ (คิวโพสต์ที่รออยู่จะล้ม) จนกว่าจะเชื่อมใหม่`}
+        onConfirm={() => { const d = confirmDisc; setConfirmDisc(null); if (d === "lazada") void disconnectLaz(); else if (d === "tiktok") void disconnectTts(); else if (d === "shopee") void disconnectShp(); else void disconnectFb(); }} />
     </div>
     </AppAccessGate>
   );

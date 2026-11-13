@@ -10,6 +10,10 @@ describe("platformShopUrl (ย้ายมาจากหน้าบัญช�
     expect(platformShopUrl("shopee", " ")).toBeNull();
     expect(platformShopUrl("unknown", "x")).toBeNull();
   });
+  it("Shopee: ชื่อผู้ใช้ร้าน = /{ชื่อ} · รหัสร้านตัวเลข (เติมตอนเชื่อม API) = /shop/{รหัส}", () => {
+    expect(platformShopUrl("shopee", "louismontini")).toBe("https://shopee.co.th/louismontini");
+    expect(platformShopUrl("shopee", "123456789")).toBe("https://shopee.co.th/shop/123456789");
+  });
 });
 
 describe("listingLinks", () => {
