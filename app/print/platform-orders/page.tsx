@@ -61,7 +61,7 @@ function Inner() {
       setOrders(list);
       if (j.demo) { setShop("Shopee · ร้านตัวอย่าง"); return; }
       const pName = new Map(((a.platforms ?? []) as { id: string; name_th: string }[]).map((p) => [p.id, p.name_th]));
-      const bName = new Map(((a.brands ?? []) as { id: string; name: string }[]).map((b) => [b.id, b.name]));
+      const bName = new Map(((a.brands_all ?? a.brands ?? []) as { id: string; name: string }[]).map((b) => [b.id, b.name]));   // ทุกแบรนด์ (รวมที่ซ่อนในช่องทางขาย)
       const shops = [...new Set(list.map((o) => [o.platform_id && pName.get(o.platform_id), o.brand_id && bName.get(o.brand_id)].filter(Boolean).join(" · ")).filter(Boolean))];
       if (shops.length) setShop(shops.join(", "));
     }).catch(() => live && setErr("โหลดออเดอร์ไม่สำเร็จ กรุณาลองใหม่"));

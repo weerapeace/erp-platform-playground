@@ -7,6 +7,8 @@
  *   ใช้ที่ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์: รายเดียว = เติมให้ · หลายราย = มีปุ่มให้กดเลือกสาขา (lib/mo-so-rule.ts)
  * - ช่างเหมา: ย้ายไปติ๊กที่หน้าพนักงาน (/payroll/employees/<id> ปุ่ม "ช่างเหมา" · employees.is_subcontract) — เดิมเป็นแท็บในหน้านี้
  *   ลูกค้าเยอะ (เช่น 30 สาขา) → โชว์ 3 รายแรก + "+N ดูทั้งหมด" · กางแล้วจัดกลุ่มตามบริษัท (เจ้าของขอ 2026-11-11)
+ * - 🛒 ซ่อนในช่องทางขาย (2026-11-13): ไม่โชว์ในตัวเลือกแบรนด์ของแอปช่องทางขาย (/api/platform-accounts · /api/platform-dashboard) — ข้อมูลร้าน/ออเดอร์ไม่หาย
+ *   เปิด "งานลูกค้า" = เปิดสวิตช์นี้ให้ด้วย (พฤติกรรมเดิม · ปิดเองได้) · แบรนด์ที่มีร้านผูกอยู่ = ถามก่อนซ่อน
  * ของกลาง: ToggleSwitch · ImageInput · CustomerPicker · FloatingDropdown · askConfirm · useToast · Icon · ChipOverflow · lib/company-branch
  */
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -25,8 +27,8 @@ import { BRAND_CUSTOMER_MAX, type BrandCustomer } from "@/lib/brand-customers";
 import { ChipOverflow } from "@/components/chip-overflow";
 import { groupByCompany } from "@/lib/company-branch";
 
-// คอลัมน์ตาราง: แบรนด์ | งานลูกค้า | OEM | ซ่อนใน Artwork | ⋯
-const GRID = "grid grid-cols-[minmax(0,1fr)_76px_64px_88px_36px] items-center gap-2";
+// คอลัมน์ตาราง: แบรนด์ | งานลูกค้า | OEM | ซ่อนใน Artwork | ซ่อนในช่องทางขาย | ⋯
+const GRID = "grid grid-cols-[minmax(0,1fr)_76px_64px_88px_96px_36px] items-center gap-2";
 
 export default function BrandsPage() {
   const canView = usePermission("products.view");
@@ -79,7 +81,7 @@ export default function BrandsPage() {
       <div className="mb-4">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-800"><Icon value="🎨" /> แบรนด์</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          สีประจำแบรนด์ · งานลูกค้า · OEM · ซ่อนใน Artwork — ใช้แสดงสี/ป้ายบนโกดัง QC และบอร์ดจ่ายงาน
+          สีประจำแบรนด์ · งานลูกค้า · OEM · ซ่อนใน Artwork · ซ่อนในช่องทางขาย — ใช้แสดงสี/ป้ายบนโกดัง QC และบอร์ดจ่ายงาน
           <span className="text-slate-400"> · ช่างเหมาตั้งที่ </span>
           <Link href="/payroll/employees" className="text-indigo-600 hover:underline">หน้าพนักงาน</Link>
         </p>
@@ -96,6 +98,7 @@ export default function BrandsPage() {
           <span className="text-center" title="งานรับทำให้ลูกค้า → ป้าย “งานลูกค้า” บนโกดัง QC/บอร์ด · ตั้งลูกค้าประจำได้">งานลูกค้า</span>
           <span className="text-center" title="รับจ้างผลิต ราคาคิดต่อออเดอร์ — หน้าแผนผู้บริหารไม่เตือนว่า “ยังไม่ตั้งราคาขาย”">OEM</span>
           <span className="text-center" title="ไม่โชว์แบรนด์นี้ในตัวเลือกของคลัง Artwork">ซ่อนใน Artwork</span>
+          <span className="text-center" title="ไม่โชว์แบรนด์นี้ในตัวเลือกแบรนด์ของแอปช่องทางขาย (แดชบอร์ดแพลตฟอร์ม · ลงสินค้า · สินค้าบนแพลตฟอร์ม · ออเดอร์ ฯลฯ) — ข้อมูลร้าน/ออเดอร์เดิมไม่หาย">ซ่อนในช่องทางขาย</span>
           <span />
         </div>
         <div className="divide-y divide-slate-100">
@@ -128,9 +131,25 @@ export default function BrandsPage() {
                   )}
                 </div>
               </div>
-              <div className="flex justify-center"><ToggleSwitch size="sm" on={!!b.is_customer_job} onChange={(v) => patchBrand(b.id, { is_customer_job: v })} title={`${b.name}: งานลูกค้า`} /></div>
+              <div className="flex justify-center"><ToggleSwitch size="sm" on={!!b.is_customer_job} onChange={(v) => {
+                // เปิดงานลูกค้า = ซ่อนในช่องทางขายให้ด้วย (พฤติกรรมเดิม) · ปิดเองได้ที่สวิตช์ข้าง ๆ
+                if (v && !b.hide_in_sales_channels) { void patchBrand(b.id, { is_customer_job: true, hide_in_sales_channels: true }); toast.info(`ซ่อน ${b.name} ในช่องทางขายให้ด้วย — ถ้าขายออนไลน์ ปิดสวิตช์ "ซ่อนในช่องทางขาย" ได้`); }
+                else void patchBrand(b.id, { is_customer_job: v });
+              }} title={`${b.name}: งานลูกค้า`} /></div>
               <div className="flex justify-center"><ToggleSwitch size="sm" on={b.pricing_mode === "oem"} onChange={(v) => patchBrand(b.id, { pricing_mode: v ? "oem" : "own" })} title={`${b.name}: OEM (ไม่มีราคาขาย)`} /></div>
               <div className="flex justify-center"><ToggleSwitch size="sm" on={!!b.hide_in_artwork} onChange={(v) => patchBrand(b.id, { hide_in_artwork: v })} title={`${b.name}: ซ่อนใน Artwork`} /></div>
+              <div className="flex flex-col items-center">
+                <ToggleSwitch size="sm" on={!!b.hide_in_sales_channels} title={`${b.name}: ซ่อนในช่องทางขาย${b.shop_count ? ` (มีร้านผูกอยู่ ${b.shop_count} ร้าน)` : ""}`}
+                  onChange={async (v) => {
+                    if (v && (b.shop_count ?? 0) > 0) {
+                      const ok = await askConfirm({ title: `ซ่อน ${b.name} ในช่องทางขาย?`, confirmText: "ซ่อน",
+                        message: `แบรนด์นี้มีร้าน/บัญชีแพลตฟอร์มผูกอยู่ ${b.shop_count} ร้าน — ซ่อนแล้วจะไม่เห็นในตัวเลือกแบรนด์ของหน้าแพลตฟอร์ม (ลงสินค้า · จับคู่ · ออเดอร์) แต่ร้าน ออเดอร์ และสินค้าเดิมยังอยู่ครบ · ตั้งค่าร้านยังทำได้ที่หน้า "ร้าน/บัญชีแพลตฟอร์ม"` });
+                      if (!ok) return;
+                    }
+                    void patchBrand(b.id, { hide_in_sales_channels: v });
+                  }} />
+                {(b.shop_count ?? 0) > 0 && <span className="mt-0.5 text-[10px] text-slate-400">{b.shop_count} ร้าน</span>}
+              </div>
               <RowMenu onRename={() => { setEditingId(b.id); setEditName(b.name); }} onDelete={() => void deleteBrand(b.id, b.name)} />
             </div>
           ))}

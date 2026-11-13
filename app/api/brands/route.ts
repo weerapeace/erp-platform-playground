@@ -22,6 +22,8 @@ export const revalidate = 0;
 // หมายเหตุ: logo_url เก็บ "R2 key" ของรูปโลโก้ (แสดงผ่าน /api/r2-image?key=...) ไม่ใช่ URL เต็ม
 // pricing_mode: own = แบรนด์เราเอง มีราคาขายในระบบ · oem = รับจ้างผลิต ราคาคิดต่อออเดอร์ (ใช้ในหน้าแผนผู้บริหาร)
 export type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: "own" | "oem";
+  /** 🛒 ซ่อนในแอปช่องทางขาย (ตัวเลือกแบรนด์ของหน้าแพลตฟอร์ม) · shop_count = จำนวนร้าน/บัญชีแพลตฟอร์มที่ผูกแบรนด์นี้ (เตือนก่อนซ่อน) */
+  hide_in_sales_channels?: boolean; shop_count?: number;
   /** ลูกค้าประจำแบรนด์ (งานลูกค้า · หลายสาขาได้ เรียงตามที่ตั้ง) — ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์ ใช้กรองและให้เลือก */
   default_customer_ids?: string[]; default_customers?: BrandCustomer[];
   /** รายแรกของรายการ (ของเดิมที่ใช้ลูกค้ารายเดียว) */
@@ -31,9 +33,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ data: [], error: "ต้อง login" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data, error } = await admin.from("brands").select("id, name, color, is_customer_job, logo_url, hide_in_artwork, pricing_mode, default_customer_id, default_customer_ids").eq("is_active", true).order("name", { ascending: true });
+  const { data, error } = await admin.from("brands").select("id, name, color, is_customer_job, logo_url, hide_in_artwork, hide_in_sales_channels, pricing_mode, default_customer_id, default_customer_ids").eq("is_active", true).order("name", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   const rows = (data ?? []) as Brand[];
+  // จำนวนร้าน/บัญชีแพลตฟอร์มต่อแบรนด์ (ตารางเล็ก ดึงทั้งหมดครั้งเดียว) — หน้าแบรนด์ใช้เตือนก่อน "ซ่อนในช่องทางขาย"
+  const { data: accts } = await admin.from("platform_accounts").select("brand_id");
+  const shops = new Map<string, number>();
+  for (const a of (accts ?? []) as { brand_id: string | null }[]) if (a.brand_id) shops.set(a.brand_id, (shops.get(a.brand_id) ?? 0) + 1);
   const idsOf = new Map(rows.map((b) => [b.id, brandCustomerIds(b)]));
   const custIds = [...new Set([...idsOf.values()].flat())];
   const cust = new Map<string, BrandCustomer>();
@@ -43,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   return NextResponse.json({ data: rows.map((b) => {
     const list = orderCustomers(idsOf.get(b.id) ?? [], cust);
-    return { ...b, default_customer_ids: list.map((c) => c.id), default_customers: list, default_customer: list[0] ?? null };
+    return { ...b, shop_count: shops.get(b.id) ?? 0, default_customer_ids: list.map((c) => c.id), default_customers: list, default_customer: list[0] ?? null };
   }), error: null });
 }
 
@@ -75,7 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
-  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: string;
+  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; hide_in_sales_channels?: boolean; pricing_mode?: string;
     default_customer_id?: string | null; default_customer_ids?: unknown; add_default_customer_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ไม่พบแบรนด์" }, { status: 400 });
@@ -85,6 +91,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("color" in body) patch.color = body.color && /^#[0-9a-fA-F]{6}$/.test(body.color) ? body.color : null;
   if ("is_customer_job" in body) patch.is_customer_job = !!body.is_customer_job;
   if ("hide_in_artwork" in body) patch.hide_in_artwork = !!body.hide_in_artwork;
+  if ("hide_in_sales_channels" in body) patch.hide_in_sales_channels = !!body.hide_in_sales_channels;
   // แบรนด์เราเอง (มีราคาขาย) หรือ OEM (ราคาคิดต่อออเดอร์) — ค่าอื่นถือว่า own
   if ("pricing_mode" in body) patch.pricing_mode = body.pricing_mode === "oem" ? "oem" : "own";
   if ("logo_url" in body) patch.logo_url = body.logo_url || null;   // R2 key ของโลโก้ (หรือ null = เอาออก)

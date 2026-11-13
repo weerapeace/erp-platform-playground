@@ -286,7 +286,7 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
  */
 export async function loadBrandSummaries(admin: Admin, sellingCodes: readonly string[]): Promise<{ brands: ShopBrandSummary[]; platforms: { code: string; name_th: string }[] }> {
   const [{ data: brands }, { data: pfs }, parents, listings, { data: accounts }] = await Promise.all([
-    admin.from("brands").select("id, name, logo_url, color").eq("is_active", true).not("is_customer_job", "is", true).order("name", { ascending: true }),   // แบรนด์งานลูกค้าไม่ขายบนร้านเรา (เหมือน /api/platform-accounts)
+    admin.from("brands").select("id, name, logo_url, color").eq("is_active", true).not("hide_in_sales_channels", "is", true).order("name", { ascending: true }),   // 🛒 ไม่เอาที่ตั้ง "ซ่อนในช่องทางขาย" (เดิม = แบรนด์งานลูกค้า) · แบรนด์งานลูกค้าไม่ขายบนร้านเรา (เหมือน /api/platform-accounts)
     admin.from("erp_platforms").select("id, code, name_th, sort_order").in("code", [...sellingCodes]).order("sort_order", { ascending: true }),
     fetchAllPages<{ id: string; brand_id: string | null; platform_category_id: string | null }>((from, to) =>
       admin.from("parent_skus_v2").select("id, brand_id, platform_category_id").eq("is_active", true).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { id: string; brand_id: string | null; platform_category_id: string | null }[] | null; error: unknown }>),

@@ -21,7 +21,7 @@ import { platformShopUrl } from "@/lib/platform-links";
 import { LazadaAppPanel } from "./lazada-app-panel";
 
 type Platform ={ id: string; code: string; name_th: string; icon_key: string | null };
-type Brand = { id: string; name: string; color: string | null };
+type Brand = { id: string; name: string; color: string | null; hidden?: boolean; shop_count?: number };
 type Account = { label: string | null; external_shop_id: string | null; is_active: boolean; tax_invoice_company_id?: string | null };
 type Company = { id: string; name: string; company_code: string | null };
 type Msg = { text: string; bad?: boolean } | null;
@@ -301,7 +301,9 @@ export default function PlatformAccountsPage() {
       ]);
       setStats(((sj as { stats?: Record<string, PostStat> } | null)?.stats ?? {}));
       setPlatforms((j.platforms ?? []) as Platform[]);
-      setBrands((j.brands ?? []) as Brand[]);
+      // 🛒 แบรนด์ที่ "ซ่อนในช่องทางขาย" แต่มีร้านผูกอยู่ ยังต้องตั้งค่าร้านได้ → ใช้รายการเต็มแล้วกรองเอง (ไม่มีร้าน = ไม่ต้องโชว์)
+      const allBrands = (j.brands_all ?? null) as Brand[] | null;
+      setBrands(allBrands ? allBrands.filter((b) => !b.hidden || (b.shop_count ?? 0) > 0) : ((j.brands ?? []) as Brand[]));
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setKeys((kj.keys ?? {}) as Record<string, boolean>);
       if (mj) { setFb((mj.facebook ?? { connected: false, stage: "none", page_name: null, pages: [] }) as FbStatus); setFbHasIg(!!mj.instagram?.connected); setMetaCfg(mj.configured !== false); setPickPage(""); }
@@ -839,14 +841,14 @@ export default function PlatformAccountsPage() {
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={`/api/r2-image?key=${encodeURIComponent(logo)}&w=48`} alt="" className="h-6 w-6 rounded-md object-contain bg-white" />
                   : <span className="h-6 w-6 rounded-md flex items-center justify-center text-white text-[10px] font-semibold" style={{ background: b.color || "#94a3b8" }}>{(b.name || "?").slice(0, 1)}</span>}
-                {b.name}
+                {b.name}{b.hidden && <span className="rounded bg-slate-200 px-1 text-[10px] text-slate-500" title="ตั้ง ซ่อนในช่องทางขาย ไว้ที่หน้าแบรนด์ — ไม่โชว์ในตัวเลือกของหน้าแพลตฟอร์ม แต่ตั้งค่าร้านได้">ซ่อนอยู่</span>}
               </button>
             );
           })}
         </div>
         <select value={brandId} onChange={(e) => { brandChosen.current = true; setBrandId(e.target.value); }} className="sm:hidden h-10 w-full border border-slate-200 rounded-lg px-3 text-sm bg-white">
           {brands.length === 0 && <option value="">—</option>}
-          {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          {brands.map((b) => <option key={b.id} value={b.id}>{b.name}{b.hidden ? " (ซ่อนอยู่)" : ""}</option>)}
         </select>
       </div>
 

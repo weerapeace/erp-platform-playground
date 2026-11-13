@@ -102,12 +102,14 @@ export async function loadPlatformSales(admin: Admin, opts: { range: SalesRange;
   const { from, to } = opts.range;
   const [{ data: pf }, { data: br }] = await Promise.all([
     admin.from("erp_platforms").select("id, code, name_th").in("code", ["shopee", "lazada", "tiktok", "line_shopping", "website"]).order("sort_order"),
-    admin.from("brands").select("id, name").order("name"),
+    admin.from("brands").select("id, name, hide_in_sales_channels").order("name"),
   ]);
   const platforms = (pf ?? []) as { id: string; code: string; name_th: string }[];
-  const brands = (br ?? []) as { id: string; name: string }[];
+  const brandRows = (br ?? []) as { id: string; name: string; hide_in_sales_channels: boolean | null }[];
+  // ชื่อแบรนด์ของออเดอร์ = ทุกแบรนด์ · ตัวเลือกกรอง = ไม่เอาที่ตั้ง "ซ่อนในช่องทางขาย" (หน้าแบรนด์)
+  const brands = brandRows.filter((b) => b.hide_in_sales_channels !== true).map(({ id, name }) => ({ id, name }));
   const pfName = new Map(platforms.map((p) => [p.id, p.name_th]));
-  const brandName = new Map(brands.map((b) => [b.id, b.name]));
+  const brandName = new Map(brandRows.map((b) => [b.id, b.name]));
 
   const orders = await fetchAllPages<OrderRow>((a, b) => {
     let q = admin.from("platform_orders").select("id, platform_id, brand_id, status, source, ordered_at").gte("ordered_at", from).lt("ordered_at", to).order("id").range(a, b);

@@ -20,18 +20,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const [{ data: pf }, { data: br }] = await Promise.all([
     admin.from("erp_platforms").select("id, code, name_th, icon_key, capabilities").eq("is_active", true).order("sort_order", { ascending: true }),
-    admin.from("brands").select("id, name, color").eq("is_active", true).not("is_customer_job", "is", true).order("name", { ascending: true }),
+    admin.from("brands").select("id, name, color, hide_in_sales_channels").eq("is_active", true).order("name", { ascending: true }),
   ]);
+  // 🛒 brands = ตัวเลือกแบรนด์ของแอปช่องทางขาย (ไม่เอาที่ตั้ง "ซ่อนในช่องทางขาย" ที่หน้าแบรนด์ · เดิมผูกกับงานลูกค้า)
+  //    brands_all = ทุกแบรนด์ + hidden + shop_count — ใช้หาชื่อแบรนด์ของออเดอร์ (ใบพิมพ์) และหน้าตั้งค่าร้าน (แบรนด์ที่ซ่อนแต่มีร้าน ยังตั้งค่าได้)
+  const { data: allAccts } = await admin.from("platform_accounts").select("brand_id");
+  const shopCount = new Map<string, number>();
+  for (const a of (allAccts ?? []) as { brand_id: string | null }[]) if (a.brand_id) shopCount.set(a.brand_id, (shopCount.get(a.brand_id) ?? 0) + 1);
   // can_publish = มีตัวเชื่อมลงสินค้าจริง (capabilities.api) — ตัวช่วยลงสินค้าใช้บอกว่าร้านไหน "ลงจริงได้" / "เตรียมร่างได้อย่างเดียว"
   const platforms = ((pf ?? []) as Record<string, unknown>[]).map((p) => ({ id: String(p.id), code: String(p.code ?? ""), name_th: String(p.name_th ?? p.code ?? ""), icon_key: (p.icon_key as string) ?? null,
     can_publish: (p.capabilities as Record<string, unknown> | null)?.api === true }));
-  const brands = ((br ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? ""), color: (b.color as string) ?? null }));
+  const brandsAll = ((br ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? ""), color: (b.color as string) ?? null,
+    hidden: b.hide_in_sales_channels === true, shop_count: shopCount.get(String(b.id)) ?? 0 }));
+  const brands = brandsAll.filter((b) => !b.hidden).map(({ id, name, color }) => ({ id, name, color }));
   const accounts: Record<string, { label: string | null; external_shop_id: string | null; is_active: boolean; tax_invoice_company_id: string | null }> = {};
   if (brandId) {
     const { data: accts } = await admin.from("platform_accounts").select("platform_id, label, external_shop_id, is_active, tax_invoice_company_id").eq("brand_id", brandId);
     for (const a of ((accts ?? []) as Record<string, unknown>[])) accounts[String(a.platform_id)] = { label: (a.label as string) ?? null, external_shop_id: (a.external_shop_id as string) ?? null, is_active: a.is_active !== false, tax_invoice_company_id: (a.tax_invoice_company_id as string) ?? null };
   }
-  return NextResponse.json({ platforms, brands, accounts, error: null });
+  return NextResponse.json({ platforms, brands, brands_all: brandsAll, accounts, error: null });
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {

@@ -26,10 +26,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const to = (sp.get("to") ?? "").trim();
   const admin = supabaseAdmin();
 
-  // ตัวเลือกฟิลเตอร์: แพลตฟอร์มที่เปิด + แบรนด์ (ไม่เอาแบรนด์ลูกค้า)
+  // ตัวเลือกฟิลเตอร์: แพลตฟอร์มที่เปิด + แบรนด์ (ไม่เอาที่ตั้ง "ซ่อนในช่องทางขาย" ที่หน้าแบรนด์ · เดิม = แบรนด์ลูกค้า)
   const [{ data: pf }, { data: br }] = await Promise.all([
     admin.from("erp_platforms").select("id, code, name_th, icon_key").eq("is_active", true).order("sort_order", { ascending: true }),
-    admin.from("brands").select("id, name").eq("is_active", true).not("is_customer_job", "is", true).order("name", { ascending: true }),
+    admin.from("brands").select("id, name").eq("is_active", true).not("hide_in_sales_channels", "is", true).order("name", { ascending: true }),
   ]);
   const platforms = ((pf ?? []) as Record<string, unknown>[]).map((p) => ({ id: String(p.id), code: String(p.code ?? ""), name_th: String(p.name_th ?? p.code ?? ""), icon_key: (p.icon_key as string) ?? null }));
   const brands = ((br ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? "") }));
