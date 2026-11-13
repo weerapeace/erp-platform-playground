@@ -40,7 +40,7 @@ import type { LazCreatePreview } from "@/lib/lazada-create-plan";
 import type { TtsCreatePreview } from "@/lib/tiktok-create-plan";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
-import { creatorOf, hasCreatePreview, liveCreateEndpoint } from "@/lib/platform-create-registry";
+import { creatorOf, hasCreatePreview, liveCreateEndpoint, type CreateStep } from "@/lib/platform-create-registry";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
   ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, decideAdd, isOnShop, missingList, needsTypedConfirm, summarizePlan,
@@ -60,7 +60,7 @@ type Pf = { id: string; code: string; name_th: string; icon_key: string | null; 
 export type AddWizardParent = { id: string; code: string; name: string | null };
 /** รายการบนร้านต้นทางที่ใช้เป็นต้นแบบ (ลงร้านอื่นจากรายการนี้) */
 export type CopySourceRef = { listing_id: string; platform_code: string; platform_name?: string | null };
-type Outcome = { parent_id: string; platform: string; ok: boolean; text: string };
+type Outcome = { parent_id: string; platform: string; ok: boolean; text: string; steps?: CreateStep[] };
 const STEPS = ["เลือกร้าน", "ดูและแก้รายละเอียด", "ยืนยัน"];
 
 export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, initialPlatformCodes = [], sources }: {
@@ -97,7 +97,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [skipped, setSkipped] = useState<Set<string>>(new Set());       // parent id ที่ผู้ใช้กดข้าม
   const [typed, setTyped] = useState("");
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0, label: "" });
+  const [progress, setProgress] = useState<{ done: number; total: number; label: string; current?: string; hint?: string }>({ done: 0, total: 0, label: "" });
   const [outcomes, setOutcomes] = useState<Outcome[] | null>(null);
   const [fixFor, setFixFor] = useState<{ parentId: string; platformId: string } | null>(null);
   const [taskFor, setTaskFor] = useState<ParentSkuPickerValue[] | null>(null);
@@ -306,10 +306,13 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         if (stopRef.current) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: "หยุดก่อนลง (บันทึกร่างไว้แล้ว)" }); continue; }
         const endpoint = liveCreateEndpoint(pf.code);
         if (!endpoint) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: "บันทึกร่างแล้ว · ร้านนี้ยังไม่เปิดลงจริง" }); continue; }
+        // กำลังทำตัวไหน (โชว์ระหว่างรอ) — TikTok ฝากรูป + สร้างฉบับร่าง ใช้เวลาหลายวินาที
+        setProgress({ done: i, total: toCreate.length, label: "กำลังลงบนร้าน", current: `${nameOf(id)} → ${pf.name_th}`, hint: creatorOf(pf.code)?.mode === "draft" ? "ตรวจข้อมูล → ฝากรูป → สร้างฉบับร่าง → บันทึกในระบบ (ประมาณ 10–20 วินาทีต่อสินค้า)" : undefined });
         try {
           const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: afterDisplay }) });
           const j = await r.json();
-          if (j.error || j.ok === false) res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${j.error ?? "ไม่ทราบสาเหตุ"}` });
+          const steps = Array.isArray(j.steps) ? (j.steps as CreateStep[]) : undefined;
+          if (j.error || j.ok === false) res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${j.error ?? "ไม่ทราบสาเหตุ"}`, steps });
           else {
             // รูปในรายละเอียด (ทดลอง) — พลาดไม่ทำให้ลงไม่สำเร็จ แค่บอกให้รู้
             const di = j.desc_images as { ok: boolean; present: number; total: number; error: string | null } | null | undefined;
@@ -319,8 +322,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             const gfText = gf?.manual && gf.want ? ` · ของขวัญ: ไปติ๊กเองใน LINE (${gf.want.status === "gift_only" ? "เฉพาะของขวัญ" : "เปิด"}${gf.want.categories.length ? ` · ${gf.want.categories.join(", ")}` : ""})` : "";
             const dp = j.display as { ok: boolean; status: "onsale" | "hide" } | null | undefined;
             const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : " · ตั้งเปิด/ปิดขายไม่สำเร็จ") : "";
-            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/แก้สต๊อกเป็นจำนวนจริง (ร่างใส่ไว้ 1 ชิ้น) แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
-            else res.push({ parent_id: id, platform: pf.name_th, ok: true, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
+            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/แก้สต๊อกเป็นจำนวนจริง (ร่างใส่ไว้ 1 ชิ้น) แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
+            else res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
           }
         } catch (e) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${(e as Error).message}` }); }
         setProgress({ done: i + 1, total: toCreate.length, label: "กำลังลงบนร้าน" });
@@ -386,7 +389,11 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
               {outcomes.map((o, i) => (
                 <div key={`${o.parent_id}-${o.platform}-${i}`} className="flex items-start gap-2 px-3 py-2 text-sm">
                   <span className={o.ok ? "text-emerald-600" : "text-rose-600"}><Icon name={o.ok ? "done" : "warning"} /></span>
-                  <div className="min-w-0 flex-1"><div className="truncate">{nameOf(o.parent_id)}</div><div className="text-xs text-slate-500">{o.platform} · {o.text}</div></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{nameOf(o.parent_id)}</div>
+                    <div className="text-xs text-slate-500">{o.platform} · {o.text}</div>
+                    {o.steps && o.steps.length > 0 && <CreateStepsLine steps={o.steps} />}
+                  </div>
                 </div>
               ))}
             </div>
@@ -612,6 +619,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             {running ? (
               <div className="space-y-2 py-4">
                 <div className="text-slate-600">{progress.label} {progress.done.toLocaleString()}/{progress.total.toLocaleString()}</div>
+                {progress.current && <div className="flex items-center gap-1.5 text-xs text-slate-700"><Icon name="refresh" className="animate-spin" />กำลังทำ: {progress.current}</div>}
+                {progress.hint && <div className="text-[11px] text-slate-400">{progress.hint}</div>}
                 <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-violet-500 transition-all" style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} /></div>
                 <p className="text-xs text-slate-400">ห้ามปิดหน้าระหว่างลง · กด &quot;หยุด&quot; ได้ (ตัวที่ยังไม่ลงจะบันทึกร่างไว้)</p>
               </div>
@@ -707,5 +716,24 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
           presetProducts={{ brandId: brandId || null, parents: taskFor, platforms: pickedPfs.map((p) => p.code) }} />
       )}
     </>
+  );
+}
+
+/** สถานะทีละขั้นของการลง 1 ตัว (ตัวสร้างส่งกลับ — lib/platform-create-registry CreateStep) · ผ่าน / ไม่ผ่าน (เหตุผล) / ข้าม */
+function CreateStepsLine({ steps }: { steps: CreateStep[] }) {
+  const failed = steps.find((x) => x.state === "fail");
+  return (
+    <div className="mt-1 space-y-0.5">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
+        {steps.map((x, i) => (
+          <span key={`${x.key}-${i}`} className={`inline-flex items-center gap-0.5 ${x.state === "ok" ? "text-emerald-700" : x.state === "fail" ? "font-medium text-rose-700" : "text-slate-400"}`} title={x.detail}>
+            {i > 0 && <span className="mr-1 text-slate-300">›</span>}
+            <Icon name={x.state === "ok" ? "done" : x.state === "fail" ? "warning" : "info"} />{x.label}
+          </span>
+        ))}
+      </div>
+      {failed?.detail && <div className="text-[11px] text-rose-700">ติดที่ "{failed.label}": {failed.detail}</div>}
+      {steps.filter((x) => x.state !== "fail" && x.detail).map((x) => <div key={`d-${x.key}`} className="text-[11px] text-slate-400">{x.label}: {x.detail}</div>)}
+    </div>
   );
 }

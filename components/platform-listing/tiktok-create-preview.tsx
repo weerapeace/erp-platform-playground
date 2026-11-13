@@ -21,7 +21,9 @@ import { noteToText } from "@/lib/rich-note";
 import { TTS_MAX_IMAGES } from "@/lib/tiktok-listing-edit";
 import type { TtsCreatePreview } from "@/lib/tiktok-create-plan";
 
-type Resp = { preview: TtsCreatePreview | null; blockers?: string[]; live?: boolean; mode?: "draft"; platform_id?: string; brand_id?: string | null; error: string | null };
+type LastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
+type Resp = { preview: TtsCreatePreview | null; blockers?: string[]; live?: boolean; mode?: "draft"; platform_id?: string; brand_id?: string | null; last_attempt?: LastAttempt | null; error: string | null };
+const thDateTime = (iso: string | null) => { if (!iso) return ""; const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); };
 type EditKey = "name" | "desc" | "weight" | null;
 const baht = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH"));
 
@@ -102,6 +104,7 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
       <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
         <Icon name="info" /> ลงเป็น <b>ฉบับร่าง</b> ใน Seller Center — ยังไม่ขึ้นขาย · ใส่สต๊อกตั้งต้นในร่าง {pv.stock.qty} ชิ้นต่อตัวเลือก (TikTok บังคับแม้เป็นร่าง) · หลังสร้างให้เข้า Seller Center › สินค้า › ฉบับร่าง ตรวจ/กรอกช่องที่เหลือ/<b>แก้สต๊อกเป็นจำนวนจริง</b> แล้วกดเผยแพร่เอง
       </p>
+      {data.last_attempt && <LastAttemptBox a={data.last_attempt} />}
       {(pv.missing.length > 0 || blockers.length > 0) && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
           {pv.missing.length > 0 && <div><Icon name="warning" /> ยังขาด: {pv.missing.join(" · ")}</div>}
@@ -195,4 +198,29 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
       </div>
     </div>
   );
+}
+
+/** ครั้งล่าสุดที่กดลงบน TikTok (จากร่าง) — สร้างแล้ว / ไม่สำเร็จ (เหตุผล) / กำลังสร้าง */
+function LastAttemptBox({ a }: { a: LastAttempt }) {
+  const when = thDateTime(a.at);
+  if (a.product_id) {
+    return (
+      <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <Icon name="done" /> สร้างฉบับร่างบน TikTok แล้ว #{a.product_id}{when ? ` (${when})` : ""} — ไปที่ Seller Center › สินค้า › ฉบับร่าง เพื่อตรวจ กรอกช่องที่เหลือ แก้สต๊อก แล้วกดเผยแพร่
+      </p>
+    );
+  }
+  if (a.status === "failed") {
+    return (
+      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+        <div className="font-medium"><Icon name="warning" /> ครั้งล่าสุดที่กดลง{when ? ` (${when})` : ""}: ไม่สำเร็จ</div>
+        {a.error && <div className="mt-0.5">{a.error}</div>}
+        <div className="mt-0.5 text-rose-700/80">ยังไม่ได้สร้างอะไรบน TikTok — แก้ตามเหตุผลแล้วกดลงใหม่ได้</div>
+      </div>
+    );
+  }
+  if (a.status === "creating") {
+    return <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="refresh" /> กำลังสร้างบน TikTok{when ? ` (เริ่ม ${when})` : ""} — ถ้าค้างเกิน 3 นาที ให้ดูฉบับร่างใน Seller Center ก่อนกดใหม่</p>;
+  }
+  return null;
 }

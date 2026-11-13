@@ -42,6 +42,12 @@ export const PLATFORM_CREATORS: Record<string, PlatformCreator> = {
   },
 };
 
+/**
+ * สถานะทีละขั้นของการลงสินค้า 1 ตัว (ตัวสร้างส่งกลับใน POST ทั้งสำเร็จ/ไม่สำเร็จ) — ตัวช่วยลงสินค้าโชว์ให้เห็นว่าผ่าน/ติดขั้นไหน
+ * ok = ผ่าน · fail = ไม่ผ่าน (หยุดที่ขั้นนี้) · skip = ข้าม/ทำไม่ได้แต่ไม่ทำให้ล้ม
+ */
+export type CreateStep = { key: string; label: string; state: "ok" | "fail" | "skip"; detail?: string };
+
 export const creatorOf = (code: string | null | undefined): PlatformCreator | null => PLATFORM_CREATORS[String(code ?? "")] ?? null;
 /** ปลายทางลงจริง (null = ร้านนี้ยังลงจริงไม่ได้) */
 export const liveCreateEndpoint = (code: string | null | undefined): string | null => { const c = creatorOf(code); return c?.live ? c.endpoint : null; };

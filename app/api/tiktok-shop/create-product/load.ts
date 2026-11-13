@@ -23,10 +23,14 @@ async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return val;
 }
 
+export type TtsLastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
+
 export type TtsCreateLoad =
   | { ok: false; status: number; error: string }
   | {
       ok: true; preview: TtsCreatePreview; payload: Record<string, unknown>; blockers: string[];
+      /** ครั้งล่าสุดที่กดลง (จากร่าง) — โชว์ในหน้าดูก่อนส่ง ว่าเกิดอะไรขึ้น */
+      lastAttempt: TtsLastAttempt | null;
       platformId: string; brandId: string | null; token: { accessToken: string; cipher: string } | null;
     };
 
@@ -108,5 +112,8 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
     onShop: exOnShop ? str(exOnShop.external_product_id) : null,
   });
   if (preview.on_shop) blockers.push(`มีบน TikTok แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);
-  return { ok: true, preview, payload, blockers, platformId, brandId, token };
+  const lastAttempt: TtsLastAttempt | null = d && (d.last_sync_status || d.platform_product_id)
+    ? { status: str(d.last_sync_status) || null, at: str(d.last_synced_at) || null, error: str(d.last_error) || null, product_id: str(d.platform_product_id) || null }
+    : null;
+  return { ok: true, preview, payload, blockers, platformId, brandId, token, lastAttempt };
 }
