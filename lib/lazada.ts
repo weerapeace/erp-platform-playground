@@ -186,6 +186,38 @@ export function lazConnHealth(meta: { stage?: string; refresh_expires_at?: numbe
   return { state: daysLeft <= EXPIRING_DAYS ? "expiring" : "connected", refresh_expires_at: rx, days_left: daysLeft };
 }
 
+// ---- ด่านกันร้านผิดแบรนด์ตอนเชื่อมต่อ (1 ร้าน = 1 แบรนด์) ----
+// เหตุ: callback เดิมบันทึกทับเงียบ ๆ → ถ้าล็อกอินบัญชี IG ตอนเลือกแบรนด์ Louis Montini ร้าน IG จะไปอยู่ใต้ LM
+// (สินค้าโผล่ซ้ำ + แก้สินค้าในชื่อ LM = แก้ร้าน IG จริง) · TikTok เจอจริงแล้ว 2026-11-12 จึงทำด่านเดียวกัน
+export type LazShopRef = { seller_id?: string | number | null; short_code?: string | null };
+export type LazCredRow = { brand_id: string; meta: ({ stage?: string } & LazShopRef) | null };
+export type LazShopConflict =
+  | { kind: "other_brand"; brand_id: string }                          // ร้านนี้เชื่อมอยู่กับแบรนด์อื่นแล้ว
+  | { kind: "brand_has_other_shop"; current_short_code: string | null } // แบรนด์นี้เชื่อมกับอีกร้านอยู่ (ล็อกอินผิดบัญชีตอนเชื่อมใหม่)
+  | null;
+
+function lazSameShop(a: LazShopRef, b: LazShopRef): boolean {
+  const sa = String(a.seller_id ?? "").trim(), sb = String(b.seller_id ?? "").trim();
+  if (sa && sb) return sa === sb;
+  const ca = String(a.short_code ?? "").trim().toUpperCase(), cb = String(b.short_code ?? "").trim().toUpperCase();
+  return !!ca && ca === cb;
+}
+const lazHasShopId = (s: LazShopRef) => !!(String(s.seller_id ?? "").trim() || String(s.short_code ?? "").trim());
+
+/**
+ * ร้านที่เพิ่งล็อกอิน (shop) ชนกับการเชื่อมที่มีอยู่ไหม — rows = platform_credentials ของ lazada ทุกแบรนด์
+ * ดูเฉพาะแถวที่ stage = connected (กดตัดการเชื่อมต่อแล้ว = ว่าง ย้ายร้านได้) · Lazada ไม่ส่งรหัสร้านมา = ตัดสินไม่ได้ → ปล่อยผ่านแบบเดิม
+ */
+export function lazShopConflict(rows: LazCredRow[], brandId: string, shop: LazShopRef): LazShopConflict {
+  if (!lazHasShopId(shop)) return null;
+  const live = rows.filter((r) => r.meta?.stage === "connected" && lazHasShopId(r.meta));
+  const other = live.find((r) => r.brand_id !== brandId && lazSameShop(r.meta!, shop));
+  if (other) return { kind: "other_brand", brand_id: other.brand_id };
+  const mine = live.find((r) => r.brand_id === brandId);
+  if (mine && !lazSameShop(mine.meta!, shop)) return { kind: "brand_has_other_shop", current_short_code: mine.meta?.short_code ?? null };
+  return null;
+}
+
 // ---- สินค้าบนร้าน (อ่านอย่างเดียว · ดึงเข้าหน้า "สินค้าบนแพลตฟอร์ม") ----
 // GET /products/get · filter=all (ไม่รวมที่ลบแล้ว) · ได้ครั้งละไม่เกิน 50 ตัว
 export async function lazGetProducts(gateway: string, accessToken: string, opts: { offset?: number; limit?: number; filter?: string } = {}): Promise<{ products: Record<string, unknown>[]; total: number }> {

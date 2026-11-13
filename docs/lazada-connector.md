@@ -20,7 +20,12 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 - `app/api/lazada/shared.ts`: `lazTokenOrReason` (ต่ออายุถ้าใกล้หมด · คืนเหตุผลภาษาคนเมื่อใช้ไม่ได้) · `refreshLazConn` · `ensureLazToken` (แบบเดิม คืน null)
 - ตัวต่ออายุ `/api/cron/lazada-token` — Vercel Cron วันละครั้ง (`30 0 * * *` = 07:30 ไทย · vercel.json) · ต่ออายุทุกร้านที่ยังไม่หมด · บันทึกผลใน `audit_logs` (entity_type `platform_credentials`) · คนมีสิทธิ์ `products.platforms.edit` เรียกเองได้ (`?dry=1` = ดูอย่างเดียว)
 - `/api/lazada/status` คืน `health` + `days_left` · `connected` = ใช้ได้จริงเท่านั้น (เดิมขึ้น "เชื่อมต่อแล้ว" ทั้งที่หมดอายุ)
-- ⚠️ ยังไม่รู้ว่าการต่ออายุยืดอายุ refresh_token ด้วยไหม — ถ้าไม่ยืด เจ้าของต้องกดเชื่อมใหม่ทุก ~30 วัน (หน้าตั้งค่า/หน้าสินค้าบนแพลตฟอร์มเตือนล่วงหน้า 7 วัน) · ดูจาก `days_left` หลังตัวต่ออายุทำงาน
+- ⚠️ **การต่ออายุไม่ยืดอายุ refresh_token** (วัดจริง 2026-11-13: ตัวต่ออายุทำงานทุกเช้า แต่ IG `refresh_expires_at` ค้างที่ 10 ธ.ค. · days_left 29→28→27) → เจ้าของต้องกดเชื่อมใหม่ทุก ~30 วัน (หน้าตั้งค่า/หน้าสินค้าบนแพลตฟอร์มเตือนล่วงหน้า 7 วัน)
+- **ด่าน 1 ร้าน = 1 แบรนด์ ตอนเชื่อมต่อ** (2026-11-13 · `lazShopConflict` ใน `lib/lazada.ts` + `/api/lazada/callback`) — เทียบ seller_id (ไม่มี = short_code) กับแถว `stage=connected` ทุกแบรนด์ · บล็อก 2 แบบ ไม่บันทึก token ใด ๆ + จด audit `blocked`:
+  - `shop_connected_to_other_brand` — เลือกแบรนด์ A แต่ล็อกอินร้านที่เชื่อมอยู่กับแบรนด์ B (เช่น เลือก Louis Montini แต่ล็อกอินบัญชี IG)
+  - `brand_has_other_shop` — แบรนด์นี้เชื่อมร้านอื่นอยู่ แต่ล็อกอินอีกร้าน (เช่น ต่ออายุ IG แต่เผลอล็อกอินร้าน LM) · ตั้งใจเปลี่ยนร้าน = กด ตัดการเชื่อมต่อ ก่อน
+  - เชื่อมไม่สำเร็จก็จด audit (`failed`) แล้ว — ดูย้อนหลังได้ว่าเคยลองแล้วติดอะไร (actor `lazada_oauth`)
+  - ⚠️ ระบบรองรับแอป Lazada ได้ตัวเดียว (env `LAZADA_APP_KEY`/`SECRET`) — ถ้า Lazada ไม่ให้แอป IG เชื่อมร้าน Louis Montini ต้องทำ "กุญแจแอปแยกตามแบรนด์" ก่อน
 
 ## ดึงสินค้าบนร้าน (ขั้น 1)
 

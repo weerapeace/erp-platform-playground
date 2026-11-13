@@ -1,7 +1,7 @@
 // ของใช้ร่วมของ Lazada API (แยกจาก route.ts — route ต้อง export แค่ handler)
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
-import { lazRefreshToken, lazGateway, lazConnHealth, lazErrorText, lazGetCategoryAttributes, lazGetItem, lazProductToCatalogItem, type LazAttribute } from "@/lib/lazada";
+import { lazRefreshToken, lazGateway, lazConnHealth, lazErrorText, lazGetCategoryAttributes, lazGetItem, lazProductToCatalogItem, type LazAttribute, type LazCredRow } from "@/lib/lazada";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export function baseUrl(): string {
@@ -41,6 +41,19 @@ export async function loadLazConn(admin: SupabaseClient, brandId: string, platfo
   const accessToken = row.api_key ? await decryptSecret(row.api_key).catch(() => null) : null;
   const refreshToken = meta.refresh_token ? await decryptSecret(meta.refresh_token).catch(() => null) : null;
   return { meta, accessToken, refreshToken };
+}
+
+/** การเชื่อม Lazada ของทุกแบรนด์ (brand_id + meta · ไม่อ่าน token) — ใช้ตรวจ "1 ร้าน = 1 แบรนด์" ตอน callback */
+export async function listLazCredRows(admin: SupabaseClient, platformId: string): Promise<LazCredRow[]> {
+  const { data, error } = await admin.from("platform_credentials").select("brand_id, meta").eq("platform_id", platformId);
+  if (error) throw new Error(`อ่านรายการร้านที่เชื่อมไว้ไม่ได้ (${error.message})`);
+  return ((data ?? []) as { brand_id: string; meta: LazConnMeta | null }[]).map((r) => ({ brand_id: r.brand_id, meta: r.meta }));
+}
+
+/** ชื่อแบรนด์ (ใช้ในข้อความแจ้งผู้ใช้) */
+export async function lazBrandName(admin: SupabaseClient, brandId: string): Promise<string | null> {
+  const { data } = await admin.from("brands").select("name").eq("id", brandId).maybeSingle();
+  return (data as { name?: string } | null)?.name ?? null;
 }
 
 // เก็บ connection (token เข้ารหัสทั้งคู่)

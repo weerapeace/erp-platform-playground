@@ -1,5 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { LazApiError, lazConnHealth, lazErrorText, lazProductToCatalogItem } from "./lazada";
+import { LazApiError, lazConnHealth, lazErrorText, lazProductToCatalogItem, lazShopConflict, type LazCredRow } from "./lazada";
+
+// ด่าน 1 ร้าน = 1 แบรนด์ — ข้อมูลจริง: IG = seller 100179222188 / TH1JHEBLW3 · LM ยังไม่เชื่อม
+describe("lazShopConflict", () => {
+  const IG = "brand-ig", LM = "brand-lm";
+  const igRow: LazCredRow = { brand_id: IG, meta: { stage: "connected", seller_id: "100179222188", short_code: "TH1JHEBLW3" } };
+  const igShop = { seller_id: "100179222188", short_code: "TH1JHEBLW3" };
+  const lmShop = { seller_id: "100200300400", short_code: "TH1LMSHOP1" };
+
+  it("เลือกแบรนด์ LM แต่ล็อกอินบัญชี IG → บล็อก (ร้านเชื่อมอยู่กับแบรนด์อื่น)", () => {
+    expect(lazShopConflict([igRow], LM, igShop)).toEqual({ kind: "other_brand", brand_id: IG });
+  });
+  it("เลือกแบรนด์ LM แล้วล็อกอินบัญชี LM จริง → ผ่าน", () => {
+    expect(lazShopConflict([igRow], LM, lmShop)).toBeNull();
+  });
+  it("IG เชื่อมใหม่ (ต่ออายุ) ด้วยร้านเดิม → ผ่าน · seller_id เป็นตัวเลขก็เทียบได้", () => {
+    expect(lazShopConflict([igRow], IG, igShop)).toBeNull();
+    expect(lazShopConflict([igRow], IG, { seller_id: 100179222188 as unknown as string })).toBeNull();
+  });
+  it("IG เชื่อมใหม่แต่เผลอล็อกอินร้านอื่น → บล็อก (แบรนด์นี้มีร้านอยู่แล้ว)", () => {
+    expect(lazShopConflict([igRow], IG, lmShop)).toEqual({ kind: "brand_has_other_shop", current_short_code: "TH1JHEBLW3" });
+  });
+  it("แถวที่กดตัดการเชื่อมต่อแล้ว (meta เหลือแค่ stage) ไม่นับ → ย้ายร้านได้", () => {
+    const off: LazCredRow = { brand_id: IG, meta: { stage: "disconnected" } };
+    expect(lazShopConflict([off], LM, igShop)).toBeNull();
+    expect(lazShopConflict([off], IG, lmShop)).toBeNull();
+    expect(lazShopConflict([{ brand_id: IG, meta: { ...igShop, stage: "disconnected" } }], LM, igShop)).toBeNull();
+  });
+  it("ไม่มี seller_id → เทียบ short_code (ไม่สนตัวพิมพ์)", () => {
+    const row: LazCredRow = { brand_id: IG, meta: { stage: "connected", short_code: "TH1JHEBLW3" } };
+    expect(lazShopConflict([row], LM, { short_code: "th1jheblw3" })).toEqual({ kind: "other_brand", brand_id: IG });
+  });
+  it("Lazada ไม่ส่งรหัสร้านมา → ตัดสินไม่ได้ ปล่อยผ่านแบบเดิม · ยังไม่มีใครเชื่อม → ผ่าน", () => {
+    expect(lazShopConflict([igRow], LM, {})).toBeNull();
+    expect(lazShopConflict([igRow], LM, { seller_id: null, short_code: "" })).toBeNull();
+    expect(lazShopConflict([], LM, lmShop)).toBeNull();
+    expect(lazShopConflict([{ brand_id: LM, meta: null }], LM, lmShop)).toBeNull();
+  });
+});
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 9, 28);
