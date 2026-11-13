@@ -133,6 +133,11 @@ export const PAID_SERVICES: PaidService[] = [
   { key: "ai.book_library", th: "หาปก / อ่านอีเมลหนังสือ", en: "Book library helper", group: "อื่น ๆ",
     usedAt: "ห้องสมุดหนังสือ", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,
     files: ["app/api/book-library/find-cover/route.ts", "app/api/book-library/parse-email/route.ts"] },
+  { key: "ai.subscription_lookup", th: "หาแพ็กเกจ / ราคาแอปจากเว็บ (AI ค้นเว็บ)", en: "App plan lookup (web search)", group: "อื่น ๆ",
+    usedAt: "App Subscription — พิมพ์ชื่อแอปแล้วกด \"หาข้อมูลจากเว็บ\"", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่มหาจากเว็บขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · เลือกจากคลังแพ็กเกจ / กรอกเองได้ตามปกติ",
+    costHint: "~0.5 บาท/ครั้ง (ค่าค้นเว็บ ~0.36 บาท + คำ) · ค้นแอปละครั้ง ครั้งต่อไปใช้คลังฟรี",
+    files: ["lib/subscription-catalog-server.ts"] },
   // ── เว็บร้าน / แจ้งเตือน (บริการคิดต่อครั้ง)
   { key: "easyslip.verify", th: "ตรวจสลิปลูกค้าอัตโนมัติ", en: "Customer slip check", group: "เว็บร้าน",
     usedAt: "ชำระเงินเว็บร้าน (เมื่อร้านติ๊ก \"ตรวจสลิปอัตโนมัติ\")", provider: "easyslip", kind: "per_call",
@@ -171,6 +176,9 @@ export const canPickModel = (s: PaidService) => s.kind === "ai_chat";
 /** โมเดลที่เลือกได้ (ใช้ชุดเดียวกับหน้ารายละเอียดสินค้า) · "" = ค่าเดิมของระบบ */
 export const PAID_MODEL_CHOICES = AI_MODEL_CHOICES;
 export const isValidModel = (m: string) => !m || PAID_MODEL_CHOICES.some((x) => x.id === m);
+
+/** ค่าค้นเว็บต่อครั้ง (บาท) ของ aiWebSearch — OpenAI คิด $10 / 1,000 ครั้ง (ราคา ณ 2026-11 · อัตรา ~36 บาท/ดอลลาร์ เท่าตารางโมเดล) */
+export const WEB_SEARCH_CALL_THB = 0.36;
 
 /** ค่าใช้จ่ายประมาณ (บาท) จากจำนวน token · โมเดลไม่อยู่ในรายการ = ใช้ราคา gpt-4o-mini */
 export function estimateCostThb(model: string | null | undefined, tokensIn: number, tokensOut: number): number {

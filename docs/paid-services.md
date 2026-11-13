@@ -11,7 +11,7 @@
 | ไฟล์ | หน้าที่ |
 |---|---|
 | `lib/paid-services.ts` | **ทะเบียนกลาง** (pure) — ทุกจุดที่ใช้บริการเสียเงิน: key · ชื่อ · ใช้ที่หน้าไหน · ถ้าปิดเกิดอะไร · ไฟล์ที่เรียก |
-| `lib/paid-services-server.ts` | **ด่านกลาง** — `aiChat(key, …)` (GPT) · `getAiFor(key)` (Cloudflare AI) · `serviceOn(key)` + `logServiceUse(key, …)` (บริการอื่น) |
+| `lib/paid-services-server.ts` | **ด่านกลาง** — `aiChat(key, …)` (GPT) · `aiWebSearch(key, …)` (GPT ค้นเว็บก่อนตอบ) · `getAiFor(key)` (Cloudflare AI) · `serviceOn(key)` + `logServiceUse(key, …)` (บริการอื่น) |
 | `lib/ai-caption-models.ts` | โมเดล GPT ที่เลือกได้ + ราคา (ใช้ร่วมหน้ารายละเอียดสินค้า) |
 | ตาราง `paid_service_settings` | ค่าที่แอดมินเปลี่ยน (ไม่มีแถว = เปิด · โมเดลเดิม) — แคช 30 วิ |
 | ตาราง `paid_service_usage` | บันทึกการใช้ทุกครั้ง (โมเดล · token · เงินประมาณ · สำเร็จไหม) |
@@ -21,6 +21,7 @@
 1. เพิ่มแถวใน `PAID_SERVICES` (`lib/paid-services.ts`) — key ไม่ซ้ำ · `files` = ไฟล์ที่เรียกจริง
 2. เรียกผ่านด่านกลางด้วย key นั้น
    - GPT: `await aiChat("ai.xxx", system, content, maxTokens, model?)` (ห้ามยิง OpenAI ตรง)
+   - GPT ค้นเว็บ: `const { text, citations } = await aiWebSearch("ai.xxx", system, prompt, maxTokens, model?, ctx)` — ข้อมูลสด (ราคา/แพ็กเกจ) · คืนข้อความ (แกะ JSON เอง) + ลิงก์อ้างอิง · ค่าใช้จ่าย = คำ + `WEB_SEARCH_CALL_THB` ต่อครั้ง · ตัวอย่าง `lib/subscription-catalog-server.ts`
    - Cloudflare AI: `const ai = await getAiFor("cf.xxx")` (null = ปิด/ยังไม่ตั้งค่า)
    - อื่น ๆ: `if (!(await serviceOn("xxx"))) …` แล้ว `await logServiceUse("xxx", { ok })`
 3. รันเทสต์ `paid-services-guard` — เรียกตรง / key ไม่ลงทะเบียน / ไฟล์ในทะเบียนไม่ตรง = ไม่ผ่าน

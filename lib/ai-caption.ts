@@ -118,6 +118,54 @@ export async function openAiChatRaw(system: string, userContent: unknown[], maxT
   catch { throw new Error("AI ตอบกลับไม่เป็นรูปแบบที่อ่านได้ — ลองกดอีกครั้ง"); }
 }
 
+export type WebCitation = { url: string; title: string };
+
+/**
+ * เรียก OpenAI แบบ "ค้นเว็บก่อนตอบ" (Responses API + เครื่องมือ web_search) · คืนข้อความ + ลิงก์ที่อ้างอิง
+ * ⚠️ ห้ามเรียกตรงจากฟีเจอร์ — ใช้ aiWebSearch("<key>", …) ใน lib/paid-services-server (เทสต์ paid-services-guard บังคับไว้)
+ * - ขอผลแบบประเทศไทย (user_location TH) · search_context_size low = ถูก/เร็วพอสำหรับหาราคา
+ * - บัญชี/โมเดลที่ยังไม่รองรับ "web_search" → ลองตัวเก่า "web_search_preview" อีกครั้งเดียว
+ * - ไม่บังคับรูปแบบ JSON (โหมดค้นเว็บไม่รับประกัน) → ผู้เรียกแกะ JSON จากข้อความเอง
+ */
+export async function openAiWebSearchRaw(system: string, prompt: string, maxTokens: number, model?: string, opts?: { country?: string }): Promise<{ text: string; citations: WebCitation[]; model: string; tokensIn: number; tokensOut: number }> {
+  const useModel = model || "gpt-4.1-mini";
+  const key = openAiKey();
+  const call = (toolType: string) => fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: useModel,
+      instructions: system,
+      input: prompt,
+      max_output_tokens: maxTokens,
+      tools: [{ type: toolType, search_context_size: "low", user_location: { type: "approximate", country: opts?.country ?? "TH" } }],
+    }),
+  });
+  let res = await call("web_search");
+  let j = await res.json().catch(() => ({}));
+  if (!res.ok && res.status === 400 && /web_search/i.test(String(j?.error?.message ?? ""))) {
+    res = await call("web_search_preview");
+    j = await res.json().catch(() => ({}));
+  }
+  if (!res.ok) throw new Error(`AI ค้นเว็บไม่สำเร็จ: ${(j?.error?.message as string) || `HTTP ${res.status}`}`);
+  const texts: string[] = [];
+  const cites = new Map<string, string>();
+  for (const item of (Array.isArray(j?.output) ? j.output : []) as Record<string, unknown>[]) {
+    if (item?.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const c of item.content as Record<string, unknown>[]) {
+      if (c?.type !== "output_text") continue;
+      texts.push(String(c.text ?? ""));
+      for (const a of (Array.isArray(c.annotations) ? c.annotations : []) as Record<string, unknown>[]) {
+        if (a?.type === "url_citation" && typeof a.url === "string" && !cites.has(a.url)) cites.set(a.url, String(a.title ?? ""));
+      }
+    }
+  }
+  const text = texts.join("\n").trim() || String(j?.output_text ?? "").trim();
+  if (!text) throw new Error("AI ค้นเว็บแล้วไม่ได้คำตอบ — ลองกดอีกครั้ง");
+  const tokensIn = Number(j?.usage?.input_tokens ?? 0) || 0, tokensOut = Number(j?.usage?.output_tokens ?? 0) || 0;
+  return { text, citations: [...cites].map(([url, title]) => ({ url, title })).slice(0, 8), model: useModel, tokensIn, tokensOut };
+}
+
 export function normalizeHashtags(x: unknown, max = 12): string[] {
   if (!Array.isArray(x)) return [];
   const cleaned = x.map((v) => String(v).trim()).filter(Boolean).map((v) => (v.startsWith("#") ? v : `#${v}`));

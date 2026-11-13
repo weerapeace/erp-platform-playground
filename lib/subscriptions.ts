@@ -38,6 +38,7 @@ export type Subscription = {
   members: SubMember[];     // ผู้ใช้หลายคนในแพ็กเดียว (บิลเดียว) — [] = ผู้ใช้คนเดียว ใช้ช่อง account_email/chrome_* บนแถว
   price_mode: PriceMode;    // วิธีคิดราคาเมื่อมีหลายผู้ใช้
   logo_url: string;         // โลโก้แอป: URL เต็ม (ไอคอนจากเว็บ) หรือ R2 key (อัปเอง) — "" = ใช้ตัวอักษรแรกแทน (แสดงผ่าน AppLogo)
+  plan_name: string;        // แพ็กเกจที่เลือก (ชื่อตามคลังแพ็กเกจ lib/subscription-catalog) — "" = ไม่ได้เลือก
   created_at?: string;
   updated_at?: string;
 };
@@ -327,6 +328,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.streaming !== undefined) row.streaming = Array.isArray(input.streaming) ? input.streaming.filter(Boolean) : [];
   if (input.group_name !== undefined) row.group_name = (input.group_name ?? "").trim();
   if (input.logo_url !== undefined) row.logo_url = (input.logo_url ?? "").trim();
+  if (input.plan_name !== undefined) row.plan_name = (input.plan_name ?? "").trim();
   if (input.price_mode !== undefined) row.price_mode = input.price_mode === "per_member" ? "per_member" : "total";
   if (input.members !== undefined) {
     const members = normalizeMembers(input.members);

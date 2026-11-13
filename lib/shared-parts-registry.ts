@@ -390,6 +390,13 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "ช่องรูปเดี่ยว เช่น โลโก้ รูปปก",
   },
   {
+    key: "logo-picker", label: "โลโก้แอป/บริการ + ตัวหาโลโก้", code: "AppLogo · LogoPicker", category: "file",
+    source: { path: "components/logo-picker", names: ["AppLogo", "LogoPicker"] },
+    what: "AppLogo โชว์โลโก้ (ลิงก์รูป หรือรูปที่อัปขึ้นคลัง) ไม่มีก็เป็นตัวอักษรแรกบนพื้นสี · LogoPicker เดาเว็บจากลิงก์/ชื่อ แล้วให้เลือกไอคอนจากเว็บ วาง/ลาก/อัปรูปเอง หรือค้น Google รูป",
+    when: "อะไรที่มีชื่อ + เว็บ แล้วอยากมีโลโก้ เช่น แอป subscription ร้านค้า แพลตฟอร์ม",
+    notWhen: "รูปสินค้า/รูปงานหลายรูป ให้ใช้ ImageAttach หรือ ImageManager",
+  },
+  {
     key: "image-attach", label: "แนบรูปหลายรูป", code: "ImageAttach", category: "file",
     source: { path: "components/image-attach" },
     what: "แนบรูปหลายรูป: ลากวาง วาง (Ctrl+V) หรือเลือกไฟล์ ย่อขนาดให้",

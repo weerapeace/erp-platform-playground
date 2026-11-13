@@ -9,9 +9,13 @@
  *   3) ผู้ใช้ในแพ็กนี้
  *   4) รายละเอียดเพิ่มเติม (พับไว้): กลุ่ม บัตร ชื่อในบิลบัตร ลิงก์บิล หมายเหตุ
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { AppLogo, LogoPicker } from "@/components/logo-picker";
+import { FloatingDropdown } from "@/components/floating-dropdown";
+import { findCatalogApp, searchCatalog, type CatalogApp, type CatalogPlan } from "@/lib/subscription-catalog";
+import { useSubscriptionCatalog } from "./use-subscription-catalog";
+import { PlanPicker, planPrice, type LookupState } from "./plan-picker";
 import {
   CYCLE_LABEL, TYPE_LABEL, PRICE_MODE_LABEL, CURRENCY_SYMBOL, SUB_STATUSES, SUB_STATUS_BADGE,
   validateSubInput, subStatusLabel, nextRenewal, daysUntil,
@@ -31,7 +35,7 @@ const EMPTY: SubInput = {
   billing_date: null, chrome_profile: "", chrome_profile_url: "", chrome_profile_dir: "", invoice_url: "",
   notes: "", active: true, type: "work", account_email: "", card_last4: "", card_statement_name: "",
   pending_cancel: false, want_to_buy: false, owner_id: null, streaming: [], group_name: "",
-  members: [], price_mode: "total", logo_url: "",
+  members: [], price_mode: "total", logo_url: "", plan_name: "",
 };
 
 function fromSub(s: Subscription): SubInput {
@@ -94,6 +98,11 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   const [profStart, setProfStart] = useState<ChromeProfilesStart>(null); // ป๊อปทะเบียนโปรไฟล์ (null = ปิด)
   const [profOpen, setProfOpen] = useState(false);
   const [profForUser, setProfForUser] = useState<string | null>(null);   // ผู้ใช้ที่กด "เพิ่มโปรไฟล์ใหม่" → ผูกให้หลังบันทึก
+  // ── คลังแพ็กเกจ: พิมพ์ชื่อ → แนะนำแอปในคลัง / ให้ AI ค้นเว็บ ──
+  const { catalog, saveApp, lookup: lookupApp } = useSubscriptionCatalog(open);
+  const nameBoxRef = useRef<HTMLDivElement>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [lookup, setLookup] = useState<LookupState>({ busy: false, error: null, info: null });
   const multi = users.length >= 2;
   const perMember = multi && form.price_mode === "per_member";
   const activeUsers = users.filter((u) => u.active).length;
@@ -169,6 +178,38 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
     }
     set("price_mode", mode);
   };
+  /** เลือกแพ็กเกจ → ราคา/สกุลเงิน/รอบบิลตามแพ็กเกจ (แยกรายคน = ราคาต่อคนของทุกคนที่ใช้งาน) · โลโก้/หมวดว่างอยู่ → เติมจากคลัง */
+  const pickPlan = (plan: CatalogPlan, app: CatalogApp) => {
+    setForm((f) => ({
+      ...f, plan_name: plan.name, currency: plan.currency, billing_cycle: plan.billing_cycle,
+      cost: perMember ? f.cost : plan.cost,
+      logo_url: f.logo_url || app.logo_url, category: f.category || app.category,
+    }));
+    if (perMember) setUsers((us) => us.map((u) => (u.active ? { ...u, price: plan.cost } : u)));
+    setDirty(true);
+  };
+  /** เลือกแอปจากรายการแนะนำ → ชื่อตามคลัง + โลโก้/หมวด (ถ้าว่าง) · มีแพ็กเกจเดียว = เลือกให้เลย */
+  const applyApp = (app: CatalogApp) => {
+    setForm((f) => ({ ...f, name: app.name, logo_url: f.logo_url || app.logo_url, category: f.category || app.category }));
+    setDirty(true);
+    setSuggestOpen(false);
+    if (app.plans.length === 1) pickPlan(app.plans[0], app);
+  };
+  /** ให้ AI ค้นเว็บ (เสียค่า AI ต่อครั้ง) → บันทึกเข้าคลัง แล้วเลือกแอปนั้นให้ */
+  const runLookup = async () => {
+    const q = form.name.trim();
+    if (q.length < 2 || lookup.busy) return;
+    setSuggestOpen(false);
+    setLookup({ busy: true, error: null, info: null });
+    try {
+      const res = await lookupApp(q);
+      setLookup({ busy: false, error: null, info: res });
+      if (res.app) applyApp(res.app);
+    } catch (e) {
+      setLookup({ busy: false, error: e instanceof Error ? e.message : "ค้นข้อมูลไม่สำเร็จ", info: null });
+    }
+  };
+
   /** ปุ่มสถานะ → ตั้ง active/pending_cancel/want_to_buy พร้อมกัน (ชุดเดียวกับคอลัมน์บอร์ด) */
   const setStatus = (key: string) => {
     const s = SUB_STATUSES.find((x) => x.key === key);
@@ -202,6 +243,7 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
       const us = usersFromInput(f);
       setForm(f); setUsers(us); setOpenUsers(new Set(us.length === 1 ? [us[0].id] : [])); setFocusUserId(null);
       setShowLogo(false); setShowMore(false); setProfOpen(false); setProfForUser(null);
+      setSuggestOpen(false); setLookup({ busy: false, error: null, info: null });
       setDirty(false); setErr(null); setNewStreaming("");
     }
   }, [open, editing, defaults]);
@@ -232,6 +274,11 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   const totalCost = perMember ? membersTotal(users) : Number(form.cost) || 0;
   const perMonth = form.billing_cycle === "monthly" ? totalCost : form.billing_cycle === "yearly" ? totalCost / 12 : null;
   const moreFilled = [form.group_name, form.card_last4, form.card_statement_name, form.invoice_url, form.notes].filter((v) => String(v ?? "").trim()).length;
+  const catalogApp = findCatalogApp(catalog, form.name);
+  const nameQuery = form.name.trim();
+  const suggestions = searchCatalog(catalog, nameQuery);
+  const firstActive = users.find((u) => u.active) ?? users[0];
+  const planCurrent = { cost: perMember ? Number(firstActive?.price) || 0 : Number(form.cost) || 0, currency: form.currency, billing_cycle: form.billing_cycle };
 
   return (
     <>
@@ -262,9 +309,41 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
             </button>
           </div>
           <div className="flex-1 min-w-0 space-y-2">
-            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="ชื่อรายการ เช่น Claude MAX, Adobe Photoshop" aria-label="ชื่อรายการ"
-              className="w-full h-11 px-2 text-lg font-semibold text-slate-800 border border-transparent hover:border-slate-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 rounded-lg outline-none bg-white"
-              autoFocus />
+            <div ref={nameBoxRef}>
+              <input value={form.name} onChange={(e) => { set("name", e.target.value); setSuggestOpen(true); setLookup((l) => (l.info || l.error ? { busy: l.busy, error: null, info: null } : l)); }}
+                onKeyDown={(e) => { if (e.key === "Escape" && suggestOpen) { e.stopPropagation(); setSuggestOpen(false); } }}
+                placeholder="พิมพ์ชื่อแอป เช่น CapCut, ChatGPT, Adobe Photoshop" aria-label="ชื่อรายการ" autoComplete="off"
+                className="w-full h-11 px-2 text-lg font-semibold text-slate-800 border border-transparent hover:border-slate-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 rounded-lg outline-none bg-white"
+                autoFocus />
+            </div>
+            <FloatingDropdown anchorRef={nameBoxRef} open={suggestOpen && nameQuery.length >= 2 && !lookup.busy} onClose={() => setSuggestOpen(false)} minWidth={320}>
+              <div className="bg-white border border-slate-200 rounded-lg shadow-lg overflow-y-auto" style={{ maxHeight: "min(360px, var(--fd-max-h, 360px))" }}>
+                {suggestions.map((a) => (
+                  <button key={a.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyApp(a)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50 border-b border-slate-100">
+                    <AppLogo src={a.logo_url} name={a.name} size={28} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-medium text-slate-800 truncate">{a.name}</span>
+                      <span className="block text-[11px] text-slate-400 truncate">
+                        {a.plans.length ? a.plans.map((p) => `${p.name} ${planPrice(p)}`).join(" · ") : "ยังไม่มีแพ็กเกจ"}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">มีในคลัง</span>
+                  </button>
+                ))}
+                {!catalogApp && (
+                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void runLookup()}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-indigo-50">
+                    <span className="w-7 h-7 shrink-0 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center"><Icon value="i:sparkles" /></span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-slate-800 truncate">หาข้อมูล “{nameQuery}” จากเว็บ</span>
+                      <span className="block text-[11px] text-slate-400">AI ค้นแพ็กเกจ ราคา สกุลเงิน รอบบิล โลโก้ · ~5–15 วินาที</span>
+                    </span>
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">ใช้ AI ~0.5 บาท</span>
+                  </button>
+                )}
+              </div>
+            </FloatingDropdown>
             <div className="flex flex-wrap items-center gap-1.5 px-1">
               <input value={form.category} onChange={(e) => set("category", e.target.value)} list="subs-cat-list" placeholder="หมวดหมู่" aria-label="หมวดหมู่"
                 className={`${INP_SM} w-32`} />
@@ -292,6 +371,10 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
           <LogoPicker value={form.logo_url} name={form.name} url={form.invoice_url}
             onChange={(logo) => set("logo_url", logo)} />
         )}
+
+        {/* ── แพ็กเกจ (คลังแพ็กเกจ + AI ค้นเว็บ) ── */}
+        <PlanPicker appName={form.name} app={catalogApp} planName={form.plan_name} current={planCurrent} perPerson={perMember}
+          lookup={lookup} onLookup={() => void runLookup()} onPick={pickPlan} onClear={() => set("plan_name", "")} saveApp={saveApp} />
 
         {/* ── 2) ค่าใช้จ่าย (เด่นรองจากหัว) ── */}
         <div className="rounded-xl border border-slate-300 p-3.5 space-y-3">

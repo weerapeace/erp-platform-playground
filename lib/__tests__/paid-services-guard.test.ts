@@ -30,6 +30,7 @@ const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'
 const RAW_RULES: { what: string; re: RegExp; allowed: string[] }[] = [
   { what: "ยิง OpenAI ตรง (api.openai.com)", re: /api\.openai\.com/, allowed: ["lib/ai-caption.ts"] },
   { what: "เรียก openAiChatRaw ตรง — ใช้ aiChat(\"<key>\", …)", re: /\bopenAiChatRaw\(/, allowed: ["lib/ai-caption.ts", "lib/paid-services-server.ts"] },
+  { what: "เรียก openAiWebSearchRaw ตรง — ใช้ aiWebSearch(\"<key>\", …)", re: /\bopenAiWebSearchRaw\(/, allowed: ["lib/ai-caption.ts", "lib/paid-services-server.ts"] },
   { what: "เรียก chatJson (ของเดิม) — ใช้ aiChat(\"<key>\", …)", re: /\bchatJson\(/, allowed: [] },
   { what: "เรียก Cloudflare AI ตรง (getAi) — ใช้ getAiFor(\"<key>\")", re: /\bgetAi\(\)/, allowed: ["lib/ai.ts", "lib/paid-services-server.ts"] },
   { what: "ยิง EasySlip ตรง", re: /api\.easyslip\.com/, allowed: ["lib/website-payments-server.ts"] },
@@ -66,7 +67,7 @@ describe("ศูนย์ AI / API ที่เสียเงิน — กั�
 
   it("ทุก key ที่โค้ดใช้กับด่านกลาง ต้องอยู่ในทะเบียน", () => {
     const bad: string[] = [];
-    const re = /\b(aiChat|aiAvailable|getAiFor|serviceOn|logServiceUse|serviceOffMessage)\(\s*"([^"]+)"/g;
+    const re = /\b(aiChat|aiWebSearch|aiAvailable|getAiFor|serviceOn|logServiceUse|serviceOffMessage)\(\s*"([^"]+)"/g;
     for (const f of FILES) for (const m of code(f.src).matchAll(re)) if (!paidService(m[2])) bad.push(`${f.file}: ${m[1]}("${m[2]}")`);
     expect(bad, "เพิ่ม key ใน PAID_SERVICES (lib/paid-services.ts)").toEqual([]);
   });

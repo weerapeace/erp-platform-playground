@@ -16,6 +16,7 @@ import {
 } from "@/lib/subscriptions";
 import { AppLogo } from "@/components/logo-picker";
 import { MembersChip } from "./members-chip";
+import { PlanBadge } from "./sub-name-cell";
 
 export type BoardGroupBy = "status" | "category" | "type" | "cycle";
 export const GROUP_OPTIONS: { key: BoardGroupBy; label: string }[] = [
@@ -90,7 +91,10 @@ function SubCardBody({ sub, settings, dragging }: { sub: Subscription; settings:
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <span className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{sub.name}</span>
-            {sub.type === "personal" && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-pink-50 text-pink-600">ส่วนตัว</span>}
+            <span className="flex shrink-0 items-center gap-1">
+              <PlanBadge plan={sub.plan_name} />
+              {sub.type === "personal" && <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-50 text-pink-600">ส่วนตัว</span>}
+            </span>
           </div>
           {sub.members?.length >= 2 ? (
             <div className="mt-0.5 flex min-w-0"><MembersChip sub={sub} /></div>
