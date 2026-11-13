@@ -62,3 +62,12 @@ describe("ใครลบไฟล์แนบได้", () => {
     expect(canDeleteAttachment(can(["products.images.delete"]), null)).toBe(false);
   });
 });
+
+describe("SAMPLE Images (/tasks/samples)", () => {
+  it("ใช้สิทธิ์คลังไฟล์ + แนบไฟล์ ไม่ใช่สิทธิ์งาน (tasks.*) ของหน้า /tasks", () => {
+    const r = findMenuPermRule("/tasks/samples");
+    expect(r?.href).toBe("/tasks/samples");
+    expect(r?.prefixes).toEqual(["assets."]);
+    expect(r?.keys).toEqual(["attachments.upload"]);
+  });
+});

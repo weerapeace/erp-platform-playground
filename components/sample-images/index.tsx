@@ -51,6 +51,7 @@ export function SampleImagesPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const { cols, setCols, gridStyle } = useGalleryColumns("sample-images", 6);
   const canView = can("assets.view"), canUpload = can("assets.upload"), canDelete = can("assets.delete"), canRestore = can("assets.edit");
+  const canMove = can("attachments.upload");   // ย้ายเข้าใบงาน = แนบไฟล์ (ด่านเดียวกับใน DB) — ไม่มีสิทธิ์ = ไม่โชว์ปุ่ม
 
   const reload = useCallback(async (want?: string | null) => {
     try {
@@ -268,7 +269,8 @@ export function SampleImagesPage() {
       <BulkActionBar count={selected.length} unit={t("รูป", "images")} onClear={() => setSel(new Set())}>
         {tab === "wait" && (
           <>
-            <button type="button" onClick={() => setPicking(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:arrow-right" />{t("ย้ายไป Design Dashboard", "Move to Design Dashboard")}</button>
+            {canMove && <button type="button" onClick={() => setPicking(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:arrow-right" />{t("ย้ายไป Design Dashboard", "Move to Design Dashboard")}</button>}
+            {!canMove && !canDelete && <span className="text-[12px] text-slate-500">{t("คุณดูได้อย่างเดียว — ย้าย/ลบต้องมีสิทธิ์เพิ่ม", "View only — moving/deleting needs more access")}</span>}
             {canDelete && <button type="button" onClick={() => setAskDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-sm text-rose-600 hover:bg-rose-50"><Icon value="i:trash" />{t("ลบ (ไปถังขยะ)", "Delete (to trash)")}</button>}
           </>
         )}
