@@ -26,6 +26,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { StudioTpl, TemplateInsertInfo } from "@/components/pattern-studio";
+import { cleanGrading, type GradeSpec } from "@/lib/pattern-grading";
 import { buildProjectFile } from "@/lib/pattern-export";
 import type { Shape } from "@/lib/pattern-shape";
 import { PATTERN_PROJECT_STATUSES, PATTERN_SCHEMA, PATTERN_STATUS_LABEL, cleanColorways, cleanMatProps, cleanPieceView, cleanProjectPieces, pieceStiffness, projectSummary, type MatProps, type PatternProject, type PatternProjectStatus, type PieceViewState, type ProjectPiece } from "@/lib/pattern-project";
@@ -265,6 +266,13 @@ export function PatternProjectEditor({ id }: { id: string }) {
     setTemplate((tp) => ({ ...(tp ?? {}), compareRef: ref })); setDirty(true);
     return null;
   };
+  /** ขยายไซซ์ (รอบ I2): template.grading */
+  const grading = useMemo(() => cleanGrading((template as { grading?: unknown } | null)?.grading), [template]);
+  const saveGrading = (g: GradeSpec | null): string | null => {
+    if (g && JSON.stringify({ ...(template ?? {}), grading: g }).length >= 29000) return t("กฎไซซ์ใหญ่เกินกว่าจะเก็บในแพทเทิร์น — ลดกฎรายจุดหรือกฎเฉพาะชิ้นลง", "The grading rules are too large to store — reduce point or piece rules");
+    setTemplate((tp) => { const { grading: _g, ...rest } = tp ?? {}; void _g; return g ? { ...rest, grading: g } : rest; }); setDirty(true);
+    return null;
+  };
   const clearCompare = () => { setTemplate((tp) => { const { compareRef: _c, ...rest } = tp ?? {}; void _c; return rest; }); setDirty(true); };
   const downloadBackup = () => {
     const blob = new Blob([JSON.stringify({ kind: "pattern-project-backup", id, pattern_no: patternNo, at: new Date().toISOString(), ...buildPayload().body }, null, 1)], { type: "application/json" });
@@ -370,7 +378,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
           lesson: lessonRef, lessonName: `${patternNo ?? ""} ${name}`.trim(), onLessonReset: canEdit ? resetLesson : undefined, copySource: lessonRef ? undefined : copySource, canLearn: canEdit,
           tpl: studioTpl, onTplUpdate: canEdit ? (next) => { setTemplate((tp) => ({ ...(tp ?? {}), ...next })); setDirty(true); } : undefined,
           colorways, colorway: colorwayId, onColorways: canEdit ? (list, active) => { setTemplate((tp) => ({ ...(tp ?? {}), colorways: list, colorway: active })); setDirty(true); } : undefined,
-          compareRef, onSaveCompare: canEdit ? saveCompare : undefined, onClearCompare: canEdit ? clearCompare : undefined }} pieceInfoFields matProps={matProps}
+          compareRef, onSaveCompare: canEdit ? saveCompare : undefined, onClearCompare: canEdit ? clearCompare : undefined,
+          grading, onGrading: canEdit ? saveGrading : undefined, fileBase: patternNo || "pattern" }} pieceInfoFields matProps={matProps}
         onMatPropsChange={canEdit ? (next) => { setMatProps(next); setTemplate((tp) => ({ ...(tp ?? {}), matProps: next })); setDirty(true); } : undefined}
         footerNote={<span className="text-slate-400">{canEdit ? t("บันทึกอัตโนมัติหลังหยุดแก้ 4 วินาที · Ctrl+Z ย้อนได้ทั้งชิ้นและตะเข็บ", "Saves automatically 4 seconds after you stop · Ctrl+Z undoes pieces and seams") : ""}</span>} />
 

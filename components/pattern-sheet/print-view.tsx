@@ -10,6 +10,7 @@
  *   <PatternPrintView lines={lines} eyebrow="แพทเทิร์นจากตีราคา · ทั่วไป" title="DS-001 Tote" footCode="DS-001 · ทั่วไป" fileName={…} emptyText={…} />
  * ของกลาง: lib/pattern-sheet · PatternPiecesSvg · PrintToolbar · packFabric + FabricLayoutPreview · บันทึกประวัติพิมพ์ = หน้าที่เรียกใช้ usePrintLog เอง
  */
+import { NestPanel } from "./nest-panel";
 import { useMemo, useState, type ReactNode } from "react";
 import { PrintToolbar } from "@/components/report";
 import {
@@ -230,6 +231,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
                   ) : <span className="ml-auto text-rose-600">{f.result.error ?? "วางไม่ได้"}</span>}
                 </div>
                 {f.result.ok && <FabricLayoutPreview result={f.result} faceWidthCm={f.fw} mode="roll" />}
+                <NestPanel pieces={f.pieces} faceWidth={f.fw} qty={orderQty} boxLength={f.result.ok ? f.result.usedLengthCm : null} />
               </div>
             ))}
           </div>

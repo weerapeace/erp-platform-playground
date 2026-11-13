@@ -44,6 +44,8 @@ import type { PlanPiece } from "@/lib/pattern-bagparts";
 import type { Colorway, ProjectPiece } from "@/lib/pattern-project";
 import { ColorwayBar } from "./colorway-bar";
 import { ComparePanel, type CompareRef } from "./compare-panel";
+import { GradingPanel, type GradeGhost } from "./grading-panel";
+import type { GradeSpec } from "@/lib/pattern-grading";
 import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
 import { DEFAULT_SEAM_TOL, SEAM_TOL_CHOICES, checkPattern, describeIssue, summarize, type CheckIssue } from "@/lib/pattern-check";
 import { PIECE_ROLES, type PieceRole } from "@/lib/pattern-project";
@@ -110,7 +112,8 @@ export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start
   /** สร้างแบบฝึก/สำเนาได้ (สิทธิ์แก้) */ canLearn?: boolean;
   /** ชุดแม่แบบล่าสุด + เปลี่ยน (อัปเดตชุดเดิม · รอบ F2) */ tpl?: StudioTpl | null; onTplUpdate?: (next: StudioTpl) => void;
   /** ชุดสี + ชุดที่เลือก (รอบ G2) */ colorways?: Colorway[]; colorway?: string | null; onColorways?: (list: Colorway[], active: string | null) => void;
-  /** รุ่นเทียบที่ตั้งไว้ (template.compareRef · รอบ H) + ตั้ง/ล้าง */ compareRef?: CompareRef | null; onSaveCompare?: () => string | null; onClearCompare?: () => void };
+  /** รุ่นเทียบที่ตั้งไว้ (template.compareRef · รอบ H) + ตั้ง/ล้าง */ compareRef?: CompareRef | null; onSaveCompare?: () => string | null; onClearCompare?: () => void;
+  /** ขยายไซซ์ (template.grading · รอบ I2) + เปลี่ยน (คืนข้อความเมื่อเก็บไม่ได้) */ grading?: GradeSpec | null; onGrading?: (g: GradeSpec | null) => string | null; fileBase?: string };
 /** ชิ้นที่ล็อก (แก้/ลากไม่ได้) และซ่อน (จาง กดไม่ได้ แต่ยังถูกตรวจ) */
 export type PieceView = { lock: string[]; hide: string[] };
 
@@ -147,6 +150,8 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [pocket, setPocket] = useState(false);
   const [bagParts, setBagParts] = useState(false);
   const [cmpOpen, setCmpOpen] = useState(false);                     // เทียบรุ่น (รอบ H)
+  const [gradeOpen, setGradeOpen] = useState(false);                 // ขยายไซซ์ (รอบ I2)
+  const [gradeGhosts, setGradeGhosts] = useState<GradeGhost[] | null>(null);
   const [overlay, setOverlay] = useState<CompareRef | null>(null);   // ชิ้นกระเป๋า: สาย/หู · กุ๊น · ช่องโชว์ (รอบ F2)
   const [dxf, setDxf] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -298,7 +303,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   });
   const tpl = sew?.tpl ?? null;
   // รุ่นเทียบซ้อนบนกระดาน: ชิ้นที่ยังมีอยู่ วางรูปรุ่นเก่าตรงมุมซ้ายบนของชิ้นปัจจุบัน (เห็นขนาดที่ต่าง) · ชิ้นที่หายไปอยู่ที่เดิม
-  const ghosts = useMemo(() => {
+  const cmpGhosts = useMemo(() => {
     if (!overlay) return null;
     return overlay.pieces.map((o) => {
       const cur = live.find((p) => p.pid === o.pid);
@@ -308,6 +313,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       return { shape: mv(o.shape), holes: (o.holes ?? []).map(mv) };
     });
   }, [overlay, live]);
+  const ghosts = useMemo(() => (cmpGhosts || gradeGhosts ? [...(cmpGhosts ?? []), ...(gradeGhosts ?? [])] : null), [cmpGhosts, gradeGhosts]);
   const tplNow = useMemo(() => (tpl?.keys ? Object.entries(tpl.keys).flatMap(([key, pid]) => { const p = live.find((x) => x.pid === pid); return p ? [{ key, pid, shape: p.shape, holes: p.holes, allow: p.allow, allowEdges: p.allowEdges, foldEdges: p.foldEdges, notches: p.notches ?? [] }] : []; }) : []), [tpl, live]);
   /** อัปเดตชุดแม่แบบเดิม (รอบ F2): แก้ชิ้นที่ไม่ได้แก้มือ · เพิ่มชิ้นใหม่ · ตะเข็บระหว่างชิ้นที่ตรงแม่แบบสร้างใหม่ · ตะเข็บอื่นคงไว้ */
   const applyTplUpdate = (u: TplUpdate) => {
@@ -409,6 +415,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
       else if (id === "dxf" && !readonly) setDxf(true);
       else if (id === "bagparts" && !readonly) setBagParts(true);
       else if (id === "compare") { setCmpOpen(true); later("[data-studio-compare]"); }
+      else if (id === "grading") { setGradeOpen(true); later("[data-studio-grading]"); }
       else later(id === "print" ? "[data-open-preflight]" : id === "export" ? "[data-export-project]" : id === "trims" ? "[data-trims-open]" : id === "unit" ? "[data-unit]" : `[data-studio-${id}]`);
     }
   };
@@ -490,6 +497,9 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
           <button type="button" data-studio-compare onClick={() => setCmpOpen(!cmpOpen)} aria-pressed={cmpOpen} title={t("เทียบกับรุ่นที่ตั้งไว้ หรือไฟล์โปรเจกต์รุ่นเก่า — ชิ้นไหนเปลี่ยน + ซ้อนบนกระดาน", "Compare with a saved reference or an older project file — what changed + overlay on the board")} className={`${btn} ${cmpOpen ? "border-pink-300 bg-pink-50 text-pink-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
             <Icon value="i:layers-subtract" className="text-sm" />{t("เทียบรุ่น", "Compare")}{overlay ? " ●" : ""}
           </button>
+          {(lvNum >= 3 || gradeOpen || !!sew?.grading) && <button type="button" data-studio-grading onClick={() => setGradeOpen(!gradeOpen)} aria-pressed={gradeOpen} title={t("ขยายไซซ์: ตั้งกฎ แล้วดูทุกไซซ์ซ้อนกัน + ตรวจตะเข็บทุกไซซ์ + ไฟล์ทุกไซซ์", "Size grading: set rules, overlay every size, check seams in every size, all-sizes file")} className={`${btn} ${gradeOpen ? "border-sky-300 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+            <Icon value="i:ruler-measure" className="text-sm" />{t("ขยายไซซ์", "Grading")}{sew?.grading ? ` (${sew.grading.sizes.length})` : ""}
+          </button>}
           <button type="button" data-studio-bagparts onClick={() => setBagParts(true)} title={t("สาย/หู · แถบกุ๊นที่ต้องตัด · ช่องโชว์ (หัวใจ เมฆ แมว หมี SVG) บนชิ้น", "Straps · binding strips · display windows (heart, cloud, cat, bear, SVG) on a piece")} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
             <Icon value="i:shopping-bag" className="text-sm" />{t("ชิ้นกระเป๋า", "Bag parts")}
           </button>
@@ -614,6 +624,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
 
       {(() => {
         const boardEl = (<>
+          {gradeOpen && sew && <GradingPanel live={live} seams={sew.seams} spec={sew.grading ?? null} onSpec={readonly || !sew.onGrading ? undefined : (g) => { const err = sew.onGrading?.(g); if (err) setNotice(err); }} onGhosts={setGradeGhosts} readonly={readonly} fileBase={sew.fileBase} tol={tol} />}
           {cmpOpen && sew && <ComparePanel live={live as unknown as ProjectPiece[]} saved={sew.compareRef ?? null} onSaveRef={readonly ? undefined : sew.onSaveCompare} onClearRef={readonly ? undefined : () => { sew.onClearCompare?.(); setOverlay(null); }} overlay={overlay} onOverlay={setOverlay} readonly={readonly} />}
           <ShapeEditor {...props} ghosts={ghosts} open embedded inject={inject} onSelChange={onSel} selectPid={selectReq} onLive={onLive}
           seams={sew?.seams} onSeamsChange={sew && !readonly ? sew.onChange : undefined} initialTool={sew?.start ? "sew" : undefined} innerLines={!!sew} pieceLinks={!!sew} hidePids={hidePids}

@@ -20,7 +20,7 @@ type Txt = { th: string; en: string };
 export type ToolTarget =
   | { kind: "tool"; tool: string }
   | { kind: "guide"; el: string; select?: boolean }
-  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" | "export" | "compare" }
+  | { kind: "studio"; id: "check" | "pieces" | "learn" | "template" | "photo" | "dxf" | "lining" | "pocket" | "print" | "trims" | "unit" | "bagparts" | "export" | "compare" | "grading" }
   | { kind: "view3d"; view: "sewn" | "explode" | "steps" | "sim" | "flat" };
 /** ภาพเคลื่อนไหวตัวอย่างที่มี (components/pattern-studio/tool-demo) */
 export type DemoId = "move" | "rect" | "pen" | "measure" | "sew" | "sewpart" | "allow" | "round";
@@ -209,6 +209,12 @@ export const PATTERN_TOOLS: ToolDef[] = [
   { id: "tech-pack", icon: "file-text", th: "ใบสเปก (Tech pack)", en: "Tech pack", level: 2, group: "studio", words: "ใบสเปก tech pack ลำดับประกอบ หมายเหตุการผลิต spec sheet ภาพ 3d",
     desc: T("หน้าพิมพ์มีภาพ 3D 5 มุม (รวมภายใน) ขนาดเป้าหมาย ลำดับประกอบจากตะเข็บ หมายเหตุการผลิต (วัสดุ PVC ชั้นเสริม ชดเชยพับ ทากาว) สรุปวัสดุ และป้ายรุ่น/วันที่บนทุกชิ้น", "The print page has 5 3D views (incl. inside), target size, assembly order from seams, production notes (materials, PVC, reinforcement, fold allowance, glue), material summary and version/date on every piece"),
     steps: [T("กด 'ใบสเปก / พิมพ์ / ไฟล์ตัด'", "Press 'Spec sheet / print / cut files'"), T("แท็บ ใบสเปก + วางบนผ้า", "Tab Spec sheet + fabric layout")], target: { kind: "studio", id: "print" } },
+  { id: "grading", icon: "ruler-measure", th: "ขยายไซซ์ (Grading)", en: "Size grading", level: 3, group: "studio", words: "ขยายไซซ์ ไซซ์ grading grade size เกรด ขยายแบบ ลดไซซ์ s m l xl ตารางขนาด",
+    desc: T("แบบบนกระดาน = ไซซ์ตั้งต้น · ตั้งกฎกลาง (กว้าง/สูงเพิ่มต่อไซซ์ + จุดยึด) กฎเฉพาะชิ้น กฎรายจุด → ซ้อนดูทุกไซซ์ (เส้นประสีต่อไซซ์) · ตรวจตะเข็บทุกไซซ์ · ตารางขนาด · ไฟล์ทุกไซซ์", "The board = the base size · default rule (width/height per size + anchor), piece rules, point rules → overlay every size (a colour per size) · seams checked in every size · size table · all-sizes file"),
+    steps: [T("กด 'ขยายไซซ์' (โหมดขั้นสูง)", "Press 'Grading' (Advanced mode)"), T("ตั้งชื่อไซซ์ + ไซซ์ตั้งต้น + กฎกลาง", "Set the sizes, the base size and the default rule"), T("ดูแถบ 'ตรวจตะเข็บทุกไซซ์' แล้วตั้งกฎเฉพาะชิ้นที่เย็บคู่กันให้ขยายเท่ากัน", "Check 'Seams in every size' and give paired pieces matching rules")], target: { kind: "studio", id: "grading" } },
+  { id: "nesting", icon: "layout-grid", th: "วางชิ้นตามรูปจริงบนผ้า", en: "True-shape nesting", level: 3, group: "check", words: "วางผ้า nesting marker ประหยัดผ้า วางตามรูปจริง true shape ใช้ผ้า หลา จัดวาง",
+    desc: T("วางชิ้นตามเส้นตัดจริง (ชิ้นโค้ง/เว้าซ้อนเข้าหากัน) บนหน้าผ้าที่ตั้ง · หมุนตามทางผ้า / ทุก 90° / ห้ามหมุน · คำนวณเบื้องหลังมีปุ่มยกเลิก · เทียบกับวางตามกรอบ", "Place pieces by their real cut outline (curves/concave nest together) on the set fabric width · along the grain / any 90° / no rotation · runs in the background with a cancel button · compared with the box layout"),
+    steps: [T("กด 'ใบสเปก / พิมพ์ / ไฟล์ตัด'", "Press 'Spec sheet / print / cut files'"), T("แท็บภาพรวม → วางบนผ้า → 'วางตามรูปจริง'", "Overview tab → Fabric layout → 'Run true-shape layout'")], target: { kind: "studio", id: "print" } },
   // ── ภาพ 3D ──
   { id: "v-sewn", icon: "box", th: "ภาพเย็บติดแล้ว", en: "Sewn view", level: 1, group: "view", words: "3d สามมิติ เย็บติด sewn ภาพ", desc: T("กระเป๋าตอนเย็บติดแล้ว ตามกระดานทันที", "The sewn bag, following the board live"), steps: [T("หัวช่อง 3D → 'เย็บติดแล้ว'", "3D header → 'Sewn'")], target: { kind: "view3d", view: "sewn" } },
   { id: "v-explode", icon: "maximize", th: "แยกชิ้น / ติดหู", en: "Pull apart / attach handles", level: 2, group: "view", words: "แยกชิ้น explode ติดหู handle attach", desc: T("ดึงชิ้นแยกดู · ติดหู / ปิดหลังช่อง", "Pull pieces apart · attach handles"), steps: [T("หัวช่อง 3D → 'แยกชิ้น'", "3D header → 'Pull apart'")], target: { kind: "view3d", view: "explode" } },

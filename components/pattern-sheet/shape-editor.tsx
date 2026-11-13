@@ -176,7 +176,7 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
   embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange, level = 3, toolReq = null, ghosts = null }: {
   /** รูปชิ้นของรุ่นเทียบ (Bag CAD รอบ H) — วาดเส้นประชมพูใต้ชิ้น กดไม่ได้ · null = ไม่วาด */
-  ghosts?: { shape: Shape; holes?: Shape[] }[] | null;
+  ghosts?: { shape: Shape; holes?: Shape[]; color?: string }[] | null;
   /** โหมดของสตูดิโอ (Bag CAD รอบ D): 1 เริ่มต้น = เครื่องมือหลัก + ชื่อบนปุ่ม + แผงขวาแบบย่อ · 2 มาตรฐาน · 3 ขั้นสูง (ค่าเริ่ม = ทุกอย่างแบบเดิม) — เปลี่ยนแค่สิ่งที่โชว์ ข้อมูลไม่เปลี่ยน */
   level?: 1 | 2 | 3;
   /** สั่งถือเครื่องมือจากภายนอก (ช่องค้นหาเครื่องมือ) — nonce เปลี่ยน = 1 ครั้ง */
@@ -2199,7 +2199,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 ))}
                 {ticks(view.x, view.w, gridStep).map((x) => <line key={`gx${x}`} x1={x} x2={x} y1={view.y} y2={view.y + vh} stroke={isMajor(x, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
                 {ticks(view.y, vh, gridStep).map((y) => <line key={`gy${y}`} y1={y} y2={y} x1={view.x} x2={view.x + view.w} stroke={isMajor(y, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
-                {ghosts && ghosts.length > 0 && <g data-ghosts style={{ pointerEvents: "none" }}>{ghosts.map((gh, gi) => <path key={`gh${gi}`} d={shapePathD(gh.shape) + (gh.holes ?? []).map((h) => shapePathD(h)).join("")} fill="none" stroke="#db2777" strokeWidth={1.6} strokeDasharray="7 4" vectorEffect="non-scaling-stroke" />)}</g>}
+                {ghosts && ghosts.length > 0 && <g data-ghosts style={{ pointerEvents: "none" }}>{ghosts.map((gh, gi) => <path key={`gh${gi}`} d={shapePathD(gh.shape) + (gh.holes ?? []).map((h) => shapePathD(h)).join("")} fill="none" stroke={gh.color ?? "#db2777"} strokeWidth={1.6} strokeDasharray="7 4" vectorEffect="non-scaling-stroke" />)}</g>}
                 {rows.map(({ p, i, g }) => {
                   const on = p.id === sel || multi.has(p.id), single = p.id === sel && multi.size < 2, b = g.finished, cb = g.cutBox;
                   const cutD = p.allow > 0 || g.segAllow ? polyD(g.cut) + g.holesCut.map((h) => polyD(h)).join("") : shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("");
