@@ -38,10 +38,20 @@ export const REMIND_LABEL: Record<RemindMode, string> = {
   before_1h: "ก่อน 1 ชม.", before_1d: "ก่อน 1 วัน", morning: "เช้าวันนั้น 9:00", none: "ไม่เตือน",
 };
 
-/** งานทำซ้ำ — ทุก n วัน/สัปดาห์/เดือน (ติ๊กเสร็จแล้วสร้างรอบถัดไปให้) */
-export type RepeatRule = { every: "day" | "week" | "month"; n: number };
+/** งานทำซ้ำ — ทุก n วัน/สัปดาห์/เดือน (ติ๊กเสร็จแล้วสร้างรอบถัดไปให้)
+ *  รายเดือนแบบ "วันในสัปดาห์ที่ N" (เจ้าของขอ 2026-11-13 เช่น พุธที่ 2 ของทุกเดือน) = every "month" + nth (1–4) + wd (0=อา. … 3=พ. … 6=ส.)
+ *  ไม่มี nth = วันที่เดิมของเดือน (แบบเดิม) */
+export type RepeatRule = { every: "day" | "week" | "month"; n: number; nth?: number; wd?: number };
+export const WEEKDAY_TH = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์"];
 export const REPEAT_LABEL = (r: RepeatRule | null) =>
-  !r ? "ไม่ทำซ้ำ" : `ทุก ${r.n > 1 ? `${r.n} ` : ""}${{ day: "วัน", week: "สัปดาห์", month: "เดือน" }[r.every]}`;
+  !r ? "ไม่ทำซ้ำ"
+    : r.every === "month" && r.nth && r.wd !== undefined ? `ทุก${r.n > 1 ? ` ${r.n} ` : ""}เดือน · ${WEEKDAY_TH[r.wd]}ที่ ${r.nth}`
+    : `ทุก ${r.n > 1 ? `${r.n} ` : ""}${{ day: "วัน", week: "สัปดาห์", month: "เดือน" }[r.every]}`;
+/** วันที่ (เวลาไทย) → "วันในสัปดาห์ที่ N ของเดือน" (N สูงสุด 4) — ตั้งค่าเริ่มของทำซ้ำแบบรายเดือนจากวันกำหนด */
+export function nthWeekdayOf(ymd: string): { nth: number; wd: number } {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return { nth: Math.min(4, Math.ceil(d.getUTCDate() / 7)), wd: d.getUTCDay() };
+}
 
 export type PlanMeta = {
   important: boolean;                               // ตาราง 4 ช่อง: สำคัญ × ด่วน
@@ -142,7 +152,7 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 export function normalizePlanMeta(raw: unknown, now: Date = new Date()): PlanMeta {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const w = r.waiting as { note?: unknown; since?: unknown } | null | undefined;
-  const rep = r.repeat as { every?: unknown; n?: unknown } | null | undefined;
+  const rep = r.repeat as { every?: unknown; n?: unknown; nth?: unknown; wd?: unknown } | null | undefined;
   const src = r.source as { label?: unknown; href?: unknown } | null | undefined;
   const every = rep && ["day", "week", "month"].includes(String(rep.every)) ? (rep.every as RepeatRule["every"]) : null;
   const href = str(src?.href, 500);
@@ -150,7 +160,7 @@ export function normalizePlanMeta(raw: unknown, now: Date = new Date()): PlanMet
     important: r.important !== false,
     star_date: typeof r.star_date === "string" && YMD.test(r.star_date) ? r.star_date : null,
     waiting: w && typeof w === "object" ? { note: str(w.note, 120), since: typeof w.since === "string" && !Number.isNaN(Date.parse(w.since)) ? w.since : now.toISOString() } : null,
-    repeat: every ? { every, n: Math.min(30, Math.max(1, Math.round(Number(rep!.n) || 1))) } : null,
+    repeat: every ? cleanRepeat(every, rep!) : null,
     remind: (REMIND_MODES as readonly string[]).includes(String(r.remind)) ? (r.remind as RemindMode) : "none",
     // ลิงก์ภายในเว็บเท่านั้น (/…) — กันลิงก์แปลกจากภายนอก
     source: href.startsWith("/") && !href.startsWith("//") ? { label: str(src?.label, 120) || href, href } : null,
@@ -159,6 +169,13 @@ export function normalizePlanMeta(raw: unknown, now: Date = new Date()): PlanMet
     watchers: cleanPlanWatchers(r.watchers),
     estimate_min: cleanEstimate(r.estimate_min),
   };
+}
+
+/** ทำซ้ำ: n 1–30 · รายเดือนแบบวันในสัปดาห์ = nth 1–4 + wd 0–6 (ค่าผิด = รายเดือนวันที่เดิม) */
+function cleanRepeat(every: RepeatRule["every"], rep: { n?: unknown; nth?: unknown; wd?: unknown }): RepeatRule {
+  const n = Math.min(30, Math.max(1, Math.round(Number(rep.n) || 1)));
+  const nth = Math.round(Number(rep.nth)), wd = Math.round(Number(rep.wd));
+  return every === "month" && nth >= 1 && nth <= 4 && wd >= 0 && wd <= 6 ? { every, n, nth, wd } : { every, n };
 }
 
 // ── วันที่ / กำหนด ──
@@ -243,6 +260,14 @@ export function nextDue(dueAt: string | null, rule: RepeatRule, now: Date = new 
   const step = (d: Date) => {
     if (rule.every === "day") return new Date(d.getTime() + rule.n * 86400e3);
     if (rule.every === "week") return new Date(d.getTime() + rule.n * 7 * 86400e3);
+    if (rule.nth && rule.wd !== undefined) {   // รายเดือนแบบ "พุธที่ 2" — เลื่อน n เดือนแล้วหาวันนั้นของเดือน (คงเวลาเดิม)
+      const b = new Date(d.getTime() + 7 * 3600e3);
+      const y = b.getUTCFullYear(), m = b.getUTCMonth() + rule.n;
+      const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
+      const day = 1 + ((rule.wd - first + 7) % 7) + (rule.nth - 1) * 7;
+      const t = new Date(Date.UTC(y, m, day, b.getUTCHours(), b.getUTCMinutes()));
+      return new Date(t.getTime() - 7 * 3600e3);
+    }
     const b = new Date(d.getTime() + 7 * 3600e3);   // คิดเดือนตามปฏิทินไทย
     const y = b.getUTCFullYear(), m = b.getUTCMonth() + rule.n, dd = b.getUTCDate();
     const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();

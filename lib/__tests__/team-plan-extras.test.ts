@@ -70,3 +70,21 @@ describe("พุธที่ 1–4 ของเดือน (2026-11-13)", () =>
     expect(nthWedLabel("wed1", fri)).toBe("พุธที่ 1 ของเดือน · พ. 2 ธ.ค.");
   });
 });
+
+describe("ทำซ้ำ: พุธที่ N ของทุกเดือน (2026-11-13)", () => {
+  it("รอบหน้า = พุธที่ N ของเดือนถัดไป · คงเวลาเดิม · ข้ามปี · ทุก 2 เดือน", async () => {
+    const { nextDue, REPEAT_LABEL, normalizePlanMeta, nthWeekdayOf } = await import("@/lib/team-plan");
+    const r = { every: "month" as const, n: 1, nth: 2, wd: 3 };
+    const now = new Date("2026-11-11T12:00:00Z");                                       // หลังกำหนด 11 พ.ย. 18:00 (พุธที่ 2)
+    expect(nextDue("2026-11-11T11:00:00Z", r, now)).toBe("2026-12-09T11:00:00.000Z");     // พุธที่ 2 ธ.ค. 18:00
+    expect(nextDue("2026-12-09T11:00:00Z", r, new Date("2026-12-10T00:00:00Z"))).toBe("2027-01-13T11:00:00.000Z");
+    expect(nextDue("2026-11-25T03:00:00Z", { every: "month", n: 2, nth: 4, wd: 3 }, new Date("2026-11-26T00:00:00Z"))).toBe("2027-01-27T03:00:00.000Z");
+    expect(REPEAT_LABEL(r)).toBe("ทุกเดือน · พุธที่ 2");
+    expect(REPEAT_LABEL({ every: "month", n: 1 })).toBe("ทุก เดือน");                    // แบบเดิมไม่เปลี่ยน
+    expect(normalizePlanMeta({ repeat: { every: "month", n: 1, nth: 9, wd: 3 } }).repeat).toEqual({ every: "month", n: 1 });   // nth ผิด = วันที่เดิม
+    expect(normalizePlanMeta({ repeat: { every: "week", n: 1, nth: 2, wd: 3 } }).repeat).toEqual({ every: "week", n: 1 });
+    expect(normalizePlanMeta({ repeat: r }).repeat).toEqual(r);
+    expect(nthWeekdayOf("2026-11-25")).toEqual({ nth: 4, wd: 3 });
+    expect(nthWeekdayOf("2026-12-30")).toEqual({ nth: 4, wd: 3 });                       // สัปดาห์ที่ 5 → นับเป็น 4
+  });
+});

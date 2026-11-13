@@ -12,6 +12,8 @@ import type { PlanDraft } from "@/lib/team-plan-client";
 type DueKind = QuickDueKind | "pick";
 export type PlanDraftState = {
   priority: Priority; dueKind: DueKind; dueCustom: string; who: { id: string; name: string } | null; remind: RemindMode; important: boolean;
+  /** เลือก "พุธที่ N ของเดือน" แล้วติ๊กทำซ้ำทุกเดือน (พุธที่ N ของทุกเดือน) */
+  repeatMonthly?: boolean;
 };
 
 export function usePlanDraft(init: Partial<PlanDraftState> = {}) {
@@ -23,7 +25,9 @@ export function usePlanDraft(init: Partial<PlanDraftState> = {}) {
   /** ค่าที่ส่ง API (ไม่เลือกคน = ตัวเอง) */
   const toDraft = (title: string, me: string | null, extra: Partial<PlanDraft> = {}): PlanDraft => ({
     title, priority: s.priority, due_at: dueIso, assigned_to: s.who?.id ?? (me || null),
-    remind: dueIso ? s.remind : "none", important: s.important, ...extra,
+    remind: dueIso ? s.remind : "none", important: s.important,
+    ...(s.repeatMonthly && s.dueKind.startsWith("wed") ? { repeat: { every: "month" as const, n: 1, nth: Number(s.dueKind.slice(3)), wd: 3 } } : {}),
+    ...extra,
   });
   return { s, set, dueIso, problem, toDraft };
 }
@@ -52,6 +56,11 @@ export function PlanDraftFields({ draft, meName }: { draft: ReturnType<typeof us
             <option value="pick">เลือกวัน…</option><option value="none">ไม่กำหนด</option>
           </select>
           {s.dueKind === "pick" && <ERPDateTime24 value={s.dueCustom} onChange={(v) => set({ dueCustom: v })} defaultTime="18:00" />}
+          {s.dueKind.startsWith("wed") && (
+            <label className="ml-1 flex cursor-pointer items-center gap-1" title={`ติ๊กเสร็จแล้วสร้างงานรอบใหม่ให้ = พุธที่ ${s.dueKind.slice(3)} ของเดือนถัดไป`}>
+              <input type="checkbox" checked={!!s.repeatMonthly} onChange={(e) => set({ repeatMonthly: e.target.checked })} className="h-3.5 w-3.5 accent-violet-600" /> ทำซ้ำทุกเดือน
+            </label>
+          )}
         </span>
         <span className="flex items-center gap-1">ใคร
           <WhoChip name={s.who?.name ?? (meName ? `${meName} (ฉัน)` : null)} onClick={() => setPicking((p) => !p)} title="เลือกผู้รับผิดชอบ" />

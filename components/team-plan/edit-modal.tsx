@@ -15,7 +15,7 @@ import { Icon } from "@/components/icon";
 import { RecordChecklist, WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
 import { ERPDateTime24 } from "@/components/form";
 import {
-  dueLabel, ESTIMATE_OPTIONS, estimateLabel, PLAN_WATCHERS_MAX, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, waitingDays,
+  dueLabel, nthWeekdayOf, WEEKDAY_TH, ESTIMATE_OPTIONS, estimateLabel, PLAN_WATCHERS_MAX, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, waitingDays,
   type PlanItem, type PlanWatcher, type Priority, type RemindMode, type RepeatRule,
 } from "@/lib/team-plan";
 import { deletePlanItem, duplicatePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
@@ -63,8 +63,11 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
   const [who, setWho] = useState<{ id: string; name: string } | null>(item.assigned_to ? { id: item.assigned_to, name: item.assigned_name ?? "ผู้ใช้" } : null);
   const [picking, setPicking] = useState(false);
   const [remind, setRemind] = useState<RemindMode>(item.plan.remind);
-  const [repeatEvery, setRepeatEvery] = useState<RepeatRule["every"] | "">(item.plan.repeat?.every ?? "");
+  // ทำซ้ำ: "month_nth" = รายเดือนแบบวันในสัปดาห์ที่ N (เช่น พุธที่ 2 ของทุกเดือน)
+  const [repeatEvery, setRepeatEvery] = useState<RepeatRule["every"] | "month_nth" | "">(item.plan.repeat ? (item.plan.repeat.nth ? "month_nth" : item.plan.repeat.every) : "");
   const [repeatN, setRepeatN] = useState(item.plan.repeat?.n ?? 1);
+  const [repeatNth, setRepeatNth] = useState(item.plan.repeat?.nth ?? 1);
+  const [repeatWd, setRepeatWd] = useState(item.plan.repeat?.wd ?? 3);
   const [waitingOn, setWaitingOn] = useState(!!item.plan.waiting);
   const [waitingNote, setWaitingNote] = useState(item.plan.waiting?.note ?? "");
   const [busy, setBusy] = useState(false);
@@ -83,7 +86,8 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
     if ((dueIso ?? null) !== (item.due_at ? new Date(item.due_at).toISOString() : null)) p.due_at = dueIso;
     if ((who?.id ?? null) !== item.assigned_to) p.assigned_to = who?.id ?? null;
     if (remind !== item.plan.remind) p.remind = remind;
-    const rep: RepeatRule | null = repeatEvery ? { every: repeatEvery, n: Math.max(1, Math.min(30, Math.round(repeatN) || 1)) } : null;
+    const rn = Math.max(1, Math.min(30, Math.round(repeatN) || 1));
+    const rep: RepeatRule | null = !repeatEvery ? null : repeatEvery === "month_nth" ? { every: "month", n: rn, nth: repeatNth, wd: repeatWd } : { every: repeatEvery, n: rn };
     if (JSON.stringify(rep) !== JSON.stringify(item.plan.repeat)) p.repeat = rep;
     const wait = waitingOn ? { note: waitingNote.trim() } : null;
     if (JSON.stringify(wait) !== JSON.stringify(item.plan.waiting ? { note: item.plan.waiting.note } : null)) p.waiting = wait;
@@ -91,7 +95,7 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
     if (JSON.stringify(watchers.map((w) => w.id)) !== JSON.stringify(item.plan.watchers.map((w) => w.id))) p.watchers = watchers;
     if (estimate !== item.plan.estimate_min) p.estimate_min = estimate;
     return p;
-  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, waitingOn, waitingNote, tags, watchers, estimate, item]);
+  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, repeatNth, repeatWd, waitingOn, waitingNote, tags, watchers, estimate, item]);
   const dirty = Object.keys(patch).length > 0;
 
   const save = async (extra: PlanPatch = {}) => {
@@ -218,15 +222,34 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
           <div>
             <label className={lbl}><Icon name="repeat" /> ทำซ้ำ</label>
             <div className="flex items-center gap-1.5">
-              <select value={repeatEvery} disabled={!canEdit} onChange={(e) => setRepeatEvery(e.target.value as RepeatRule["every"] | "")} className={field}>
-                <option value="">ไม่ทำซ้ำ</option><option value="day">ทุกวัน</option><option value="week">ทุกสัปดาห์</option><option value="month">ทุกเดือน</option>
+              <select value={repeatEvery} disabled={!canEdit} className={field}
+                onChange={(e) => {
+                  const v = e.target.value as RepeatRule["every"] | "month_nth" | "";
+                  // เลือกแบบวันในสัปดาห์ → ตั้งค่าเริ่มจากวันกำหนด (เช่น กำหนดพุธที่ 2 → พุธที่ 2 ของทุกเดือน)
+                  if (v === "month_nth" && due) { const x = nthWeekdayOf(due.slice(0, 10)); setRepeatNth(x.nth); setRepeatWd(x.wd); }
+                  setRepeatEvery(v);
+                }}>
+                <option value="">ไม่ทำซ้ำ</option><option value="day">ทุกวัน</option><option value="week">ทุกสัปดาห์</option>
+                <option value="month">ทุกเดือน (วันที่เดิม)</option><option value="month_nth">ทุกเดือน (เช่น พุธที่ 2)</option>
               </select>
               {repeatEvery && <>
                 <span className="text-xs text-slate-500">ทุก</span>
                 <input type="number" min={1} max={30} value={repeatN} disabled={!canEdit} onChange={(e) => setRepeatN(Number(e.target.value))} className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-sm" aria-label="ทุกกี่รอบ" />
               </>}
             </div>
-            {repeatEvery && <p className="mt-1 text-[11px] text-slate-400">ติ๊กเสร็จแล้วระบบสร้างรอบถัดไปให้เอง</p>}
+            {repeatEvery === "month_nth" && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                <select value={repeatWd} disabled={!canEdit} onChange={(e) => setRepeatWd(Number(e.target.value))} aria-label="วันในสัปดาห์" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                  {WEEKDAY_TH.map((w, i) => <option key={w} value={i}>{w}</option>)}
+                </select>
+                <span>ที่</span>
+                <select value={repeatNth} disabled={!canEdit} onChange={(e) => setRepeatNth(Number(e.target.value))} aria-label="สัปดาห์ที่" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                  {[1, 2, 3, 4].map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+                <span>ของเดือน</span>
+              </div>
+            )}
+            {repeatEvery && <p className="mt-1 text-[11px] text-slate-400">ติ๊กเสร็จแล้วระบบสร้างรอบถัดไปให้เอง{repeatEvery === "month_nth" ? ` — รอบหน้า = ${WEEKDAY_TH[repeatWd]}ที่ ${repeatNth} ของเดือนถัดไป` : ""}</p>}
           </div>
           <div>
             <label className="mb-1 flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
