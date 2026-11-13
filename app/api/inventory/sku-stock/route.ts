@@ -2,11 +2,12 @@
  * GET /api/inventory/sku-stock
  * ยอดคงเหลือต่อ SKU จริง (คลังรวม นับจำนวน) — ของกลาง lib/sku-stock (ledger กลางก่อน · ตารางเก่าเป็นสำรอง)
  * + join ชื่อ/รหัสจาก skus_v2 · ใครล็อกอินแล้วอ่านได้ (เท่าเดิม — หน้าขอซื้อใช้โชว์ยอดในป๊อปเพิ่มรายการ)
+ * ?ids=a,b = เฉพาะ SKU ที่ระบุ (หน้าคิดผ้าก่อนซื้อ /fabric-calc)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { listSkuStock } from "@/lib/sku-stock";
+import { listSkuStock, loadSkuStock } from "@/lib/sku-stock";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,9 +27,13 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "500", 10)));
   const admin = supabaseAdmin();
+  // ?ids=a,b (ไม่เกิน 200) = ถามเฉพาะ SKU ที่ระบุ (ไม่มีความเคลื่อนไหว = 0) — หน้าคิดผ้าก่อนซื้อ (/fabric-calc) ใช้เช็กสต็อกผ้าที่เลือก
+  const onlyIds = (searchParams.get("ids") ?? "").split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 200);
 
   try {
-    const list = await listSkuStock(admin, limit);
+    const list = onlyIds.length > 0
+      ? await loadSkuStock(admin, onlyIds).then((m) => onlyIds.map((skuId) => ({ skuId, stock: m.get(skuId) ?? { onHand: 0, reserved: 0, lastMovementAt: null } })))
+      : await listSkuStock(admin, limit);
     const names = new Map<string, { code: string | null; name_th: string | null }>();
     const ids = list.map((r) => r.skuId);
     for (let i = 0; i < ids.length; i += 300) {

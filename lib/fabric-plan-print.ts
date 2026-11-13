@@ -14,7 +14,7 @@ const MAX_SEGS = 6;
 export type PrintMo = { mo_no: string; product_sku: string | null; product_name: string | null; qty: number };
 
 /** ผังเป็น SVG แถบละ SEG_CM ซม. (ผ้าม้วน) หรือผืนละแถบ (ผ้าผืน) — ยาวเกิน MAX_SEGS แถบ = บอกว่าที่เหลือวางแบบเดียวกัน */
-function layoutSvg(res: FabricResult, face: number, sheetL: number | null): string {
+export function layoutSvg(res: FabricResult, face: number, sheetL: number | null): string {   // ใช้ซ้ำ: lib/fabric-buy-print
   const keys = [...new Set(res.rows.flatMap((r) => r.items.map((i) => i.key)))];
   const color = (k: string) => COLORS[Math.max(0, keys.indexOf(k)) % COLORS.length];
   type Seg = { label: string; from: number; len: number; items: { x: number; y: number; w: number; h: number; key: string; label: string }[] };
