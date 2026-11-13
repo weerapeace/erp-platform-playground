@@ -110,6 +110,13 @@ Redirect URL ในแอป: `https://erp-platform-playground.vercel.app/api/ti
 - หลังสร้าง: ร่าง platform_product_id + status published (กันซ้ำ) · รายการบนร้านสถานะ draft จับคู่ Parent SKU · audit `tiktok_create` (draft: true)
 - **เจอจริง 2026-11-13 (เจ้าของกดตัวแรก):** TikTok ไม่รับร่างที่ไม่มีสต๊อก — "Inventory of Skus[0] is a required field" (36009004) → แก้: ใส่ `inventory[{ warehouse_id, quantity: 1 }]` (TTS_DRAFT_QTY) · คลัง = `ttsShopWarehouseId` (อ่าน skus[].inventory[].warehouse_id จากสินค้าที่มีในร้าน — ใช้สิทธิ์ Product Basic ไม่ต้องขอ Logistics) · ร่างไม่ขาย สต๊อกนี้ไม่มีผลจนกดเผยแพร่ — หน้าดูก่อนส่ง/ผลลัพธ์บอกให้แก้สต๊อกจริงก่อนเผยแพร่
 
+## คุณลักษณะของหมวด · COD · ตารางขนาด · หน่วยกรัม (2026-11-13 · เจ้าของสั่ง "ทำทั้ง 4 อย่าง")
+- กฎกลาง `lib/tiktok-attrs` (pure + เทสต์): ttsAttrFieldsOf (Get Attributes · เฉพาะ PRODUCT_PROPERTY · `is_requried`) · ttsCategoryRulesOf (Get Category Rules: cod / size_chart) · planTiktokAttrs (ส่งทั้งชุด — product_attributes เป็นอาร์เรย์บนสุด TikTok แทนที่ทั้งชุด) · planTiktokCod · planTiktokSizeChart · kgToUnit/unitToKg
+- ช่องกรอก = ของกลาง `LazadaAttrField` (แปลงด้วย ttsAttrDef — ไม่สร้างช่องกรอกชุดที่ 2) · ช่อง/กติกาของหมวด `ttsCategoryMeta` ใน app/api/tiktok-shop/shared (แคช 10 นาที) · ลิ้นชักโหลดผ่าน `GET /api/tiktok-shop/category-meta?listing_id=&category_id=`
+- ลิ้นชัก (แท็บข้อมูล): กล่องคุณลักษณะ · สวิตช์ COD (หมวดไม่รองรับ = ซ่อน) · รูปตารางขนาด (เลือกจากคลังรูป → SIZE_CHART_IMAGE) · น้ำหนักเลือกกรัม/กิโลกรัม (จำในเครื่อง — components/platform-catalog/weight-unit) → ส่งพร้อมปุ่มบันทึก (listing-edit body `extra{ before_attrs, attrs, before_cod, cod, before_size_chart, size_chart }` · 409 ถ้าบนร้านเปลี่ยน)
+- หน้าลงฉบับร่าง: กรอกเก็บในร่าง `extra.tiktok_attrs` / `tiktok_cod` / `tiktok_size_chart` → payload product_attributes / is_cod_allowed / size_chart (route ฝากรูปตารางขนาดก่อนสร้าง · ขั้น "ฝากรูปตารางขนาด")
+- ไม่ทำ: ตารางขนาดแบบเทมเพลต (กรอกเป็นแถว) · ตัวเลือกการจัดส่งกำหนดเอง (ต้องสิทธิ์ Logistics) · ส่วนลด (API โปรโมชัน) · สต๊อก/ตัวเลือก/รหัส SKU (ติดกฎ BigSeller)
+
 ## ขั้นต่อไป (ยังไม่ทำ)
 2. ~~ดึงหมวดหมู่ TikTok~~ (ทำแล้ว c51b1adf · เจ้าของกดดึงแล้ว 2026-11-12: 1,950 หมวดใบ ใช้ได้ 1,849 — ร่างจับคู่ 10 หมวดกลาง รอเจ้าของอนุมัติ)
 4. ~~เฟส B ราคา~~ · ~~C รูป/กล่อง~~ (ทำแล้ว) · ~~D ลงสินค้าใหม่~~ (ทำแล้ว — ลงเป็นฉบับร่าง) · E สต๊อก (หลังเลิกซิงค์ BigSeller) — ทีละเฟสตามที่เจ้าของอนุมัติ

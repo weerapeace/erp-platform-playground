@@ -22,7 +22,8 @@ import {
   type TiktokPkg, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadTtsListingLive, saveTtsSlimCopy, ttsGetProductRetry, ttsUploadRef, ttsViewWithReview } from "../shared";
+import { loadTtsListingLive, saveTtsSlimCopy, ttsCategoryMeta, ttsGetProductRetry, ttsUploadRef, ttsViewWithReview } from "../shared";
+import { planTiktokAttrs, planTiktokCod, planTiktokSizeChart, sameAttrState, type TtsAttrState, type TtsAttrVal } from "@/lib/tiktok-attrs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,11 +38,22 @@ const pkgOf = (v: unknown): TiktokPkg | null => {
   return { weight: numOrNull(o.weight), length: numOrNull(o.length), width: numOrNull(o.width), height: numOrNull(o.height) };
 };
 const strList = (v: unknown): string[] | null => (Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean) : null);
+/** ค่าคุณลักษณะจาก body (กันค่าแปลก) */
+const attrStateOf = (v: unknown): TtsAttrState | null => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const out: TtsAttrState = {};
+  for (const [k, vals] of Object.entries(v as Record<string, unknown>)) {
+    if (!Array.isArray(vals)) continue;
+    const list = vals.map((x): TtsAttrVal => { const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>; const id = String(o.id ?? "").trim(); const name = String(o.name ?? "").trim(); return { ...(id ? { id } : {}), ...(name ? { name } : {}) }; }).filter((x) => x.id || x.name);
+    if (list.length) out[String(k)] = list;
+  }
+  return out;
+};
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { listing_id?: string; before_title?: unknown; title?: unknown; before_description?: unknown; description?: unknown; media?: unknown };
+  let body: { listing_id?: string; before_title?: unknown; title?: unknown; before_description?: unknown; description?: unknown; media?: unknown; extra?: unknown };
   try { body = await request.json(); } catch { return reply({ ok: false, view: null, error: "invalid JSON" }, 400); }
   const listingId = String(body.listing_id ?? "").trim();
   const wantTitle = typeof body.title === "string" && typeof body.before_title === "string";
@@ -49,7 +61,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const m = body.media && typeof body.media === "object" ? body.media as Record<string, unknown> : null;
   const media = m ? { beforeUris: strList(m.before_uris), beforePkg: pkgOf(m.before_pkg), images: strList(m.images), pkg: pkgOf(m.pkg) } : null;
   if (media && (!media.beforeUris || !media.beforePkg || !media.images || !media.pkg)) return reply({ ok: false, view: null, error: "ข้อมูลรูป/กล่องไม่ครบ" }, 400);
-  if (!listingId || (!wantTitle && !wantDesc && !media)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ / รายละเอียด / รูป/กล่อง)" }, 400);
+  // คุณลักษณะ / COD / ตารางขนาด (ส่งมาเฉพาะที่แก้ — before_* ใช้กันส่งทับ)
+  const x = body.extra && typeof body.extra === "object" ? body.extra as Record<string, unknown> : null;
+  const ex = {
+    attrs: x && "attrs" in x ? { before: attrStateOf(x.before_attrs) ?? {}, next: attrStateOf(x.attrs) ?? {} } : null,
+    cod: x && typeof x.cod === "boolean" ? { before: typeof x.before_cod === "boolean" ? x.before_cod : null, next: x.cod } : null,
+    size: x && "size_chart" in x ? { before: typeof x.before_size_chart === "string" && x.before_size_chart ? x.before_size_chart : null, next: typeof x.size_chart === "string" && x.size_chart ? x.size_chart : null } : null,
+  };
+  const wantExtra = !!(ex.attrs || ex.cod || ex.size);
+  if (!listingId || (!wantTitle && !wantDesc && !media && !wantExtra)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ / รายละเอียด / รูป/กล่อง / คุณลักษณะ)" }, 400);
 
   const admin = supabaseAdmin();
   const live = await loadTtsListingLive(admin, listingId, user?.id ?? null);
@@ -73,20 +93,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!samePkg(media.beforePkg!, base.pkg)) return reply({ ok: false, view, error: `กล่องพัสดุ${conflict}` }, 409);
   }
 
+  if (ex.attrs && !sameAttrState(ex.attrs.before, view.attrs)) return reply({ ok: false, view, error: `คุณลักษณะ${conflict}` }, 409);
+  if (ex.cod && ex.cod.before !== view.cod) return reply({ ok: false, view, error: `การเก็บเงินปลายทาง${conflict}` }, 409);
+  if (ex.size && ex.size.before !== (view.sizeChart?.uri ?? null)) return reply({ ok: false, view, error: `ตารางขนาด${conflict}` }, 409);
+  // ช่อง/กติกาของหมวด (แคช 10 นาที) — ใช้ตรวจค่าก่อนส่ง
+  const meta = wantExtra && view.categoryId ? await ttsCategoryMeta(live.accessToken, live.cipher, view.categoryId) : null;
+  if (ex.attrs && !meta?.fields) return reply({ ok: false, view, error: meta?.error ?? "ไม่รู้หมวดของสินค้านี้ — ดึงตัวนี้จาก TikTok แล้วลองใหม่" }, 502);
+  const attrPlan = ex.attrs && meta?.fields ? planTiktokAttrs(meta.fields, view.attrs, ex.attrs.next, { strictRequired: true, names: view.attrNames }) : null;
+  const codPlan = ex.cod ? planTiktokCod(view.cod, ex.cod.next, meta?.rules?.codSupported ?? null) : null;
+  const sizePlan = ex.size ? planTiktokSizeChart(view.sizeChart?.uri ?? null, ex.size.next, meta?.rules ?? null) : null;
   const titlePlan = wantTitle ? planTiktokTitle(view.pendingTitle ?? view.title, String(body.title)) : null;
   const mediaPlan = media ? planTiktokMedia(base.images.map((x) => x.uri), base.pkg, media.images!, media.pkg!) : null;
   const descPlan = wantDesc ? planTiktokDescription(baseDesc, String(body.description)) : null;
   const descChanged = !!descPlan?.changed;
-  const errors = [...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? [])];
+  const errors = [...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(codPlan?.errors ?? []), ...(sizePlan?.errors ?? [])];
   if (errors.length) return reply({ ok: false, view, error: errors.join(" · ") }, 400);
   const titleChanged = !!titlePlan?.changed;
   const mediaChanged = !!mediaPlan && (mediaPlan.imagesChanged || mediaPlan.weightChanged || mediaPlan.boxChanged);
-  if (!titleChanged && !descChanged && !mediaChanged) return reply({ ok: true, view, summary: "เหมือนเดิม — ไม่มีอะไรต้องส่ง", error: null });
+  const attrChanged = !!attrPlan?.changed; const codChanged = !!codPlan?.changed; const sizeChanged = !!sizePlan?.changed && !!ex.size?.next;
+  if (!titleChanged && !descChanged && !mediaChanged && !attrChanged && !codChanged && !sizeChanged) return reply({ ok: true, view, summary: "เหมือนเดิม — ไม่มีอะไรต้องส่ง", error: null });
 
   const changes = [
     ...(titleChanged ? [{ label: "ชื่อสินค้า", before: view.pendingTitle ?? view.title, after: titlePlan!.title }] : []),
     ...(descChanged && descPlan!.change ? [descPlan!.change] : []),
     ...(mediaPlan?.changes ?? []),
+    ...(attrChanged ? attrPlan!.changes : []),
+    ...(codChanged && codPlan!.change ? [codPlan!.change] : []),
+    ...(sizeChanged && sizePlan!.change ? [sizePlan!.change] : []),
   ];
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
     action: "update", entityType: "platform_catalog", entityId: live.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
@@ -108,11 +141,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // รูปตารางขนาดใหม่จากระบบ → ฝากแบบ SIZE_CHART_IMAGE
+  let sizeUri: string | null = null;
+  if (sizeChanged) {
+    const ref = ex.size!.next!;
+    if (ref.startsWith("tts:")) sizeUri = ref.slice(4);
+    else {
+      try { sizeUri = await ttsUploadRef(live.accessToken, ref, "SIZE_CHART_IMAGE"); }
+      catch (e) {
+        const error = `ฝากรูปตารางขนาดกับ TikTok ไม่สำเร็จ: ${(e as Error).message} — ยังไม่ได้แก้สินค้า`;
+        await audit({ ok: false, error, raw_error: (e as Error).message });
+        return reply({ ok: false, view, error }, 502);
+      }
+    }
+  }
+
   const fields: Parameters<typeof ttsPartialEdit>[3] = {
     ...(titleChanged ? { title: titlePlan!.title } : {}),
     ...(descChanged ? { description: descPlan!.html } : {}),
     ...(mediaPlan?.imagesChanged ? { main_images: mediaPlan.images.map((r) => ({ uri: tiktokUriOfRef(r) ?? uploaded.get(r)! })) } : {}),
     ...(mediaPlan ? tiktokPkgFields(mediaPlan) : {}),
+    ...(attrChanged ? { product_attributes: attrPlan!.payload } : {}),
+    ...(codChanged ? { is_cod_allowed: ex.cod!.next } : {}),
+    ...(sizeChanged && sizeUri ? { size_chart: { image: { uri: sizeUri } } } : {}),
   };
   const sentUris = fields.main_images?.map((x) => x.uri) ?? null;
 
@@ -132,7 +183,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // สถานะตรวจ: เชื่อของที่ดึงกลับก่อน — คำตอบของ Partial Edit บอก APPROVED (ของฉบับที่ขายอยู่) ทั้งที่ของใหม่รอตรวจ (เจอจริง 2026-11-12)
   const respAudit = String((resp.audit as { status?: unknown } | undefined)?.status ?? "");
   const auditStatus = freshView?.auditStatus ?? respAudit;
-  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : ""].filter(Boolean).join("/");
+  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", attrChanged ? "คุณลักษณะ" : "", codChanged ? "COD" : "", sizeChanged ? "ตารางขนาด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : ""].filter(Boolean).join("/");
   let summary = `แก้${what}แล้ว`;
   let pending = false;
   if (!freshView) warnings.push("TikTok ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก TikTok” อีกครั้งในอีกสักครู่เพื่อยืนยัน");

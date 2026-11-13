@@ -3,8 +3,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import { lazConnHealth } from "@/lib/lazada";
-import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, ttsGetCategoryAttributes, ttsGetCategoryRules, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
 import { publicImageUrl } from "@/lib/line-shopping-server";
+import { ttsAttrFieldsOf, ttsCategoryRulesOf, type TtsAttrField, type TtsCategoryRules } from "@/lib/tiktok-attrs";
 import { keepSkuStatus, tiktokListingView, type TiktokListingView } from "@/lib/tiktok-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 export { baseUrl, buildState, parseState, getPlatformId } from "../lazada/shared";
@@ -158,11 +159,11 @@ export async function ttsViewWithReview(accessToken: string, cipher: string, det
 }
 
 /**
- * ฝากรูป 1 รูปกับ TikTok → uri (รูปสินค้า MAIN_IMAGE) — ใช้ร่วม: แก้รูปในลิ้นชัก (listing-edit) + สร้างฉบับร่าง (create-product)
+ * ฝากรูป 1 รูปกับ TikTok → uri (ค่าเริ่ม รูปสินค้า MAIN_IMAGE · ตารางขนาด = SIZE_CHART_IMAGE) — ใช้ร่วม: แก้รูปในลิ้นชัก (listing-edit) + สร้างฉบับร่าง (create-product)
  *   "r2:<key>" = รูปในระบบ → JPG จัตุรัสพื้นขาว 1500px (/api/r2-image &sq=1) · http(s) = โหลดลิงก์นั้น · ≤ 10MB
  * โยน Error ข้อความภาษาคน (ผู้เรียกบันทึกประวัติ/หยุดเอง)
  */
-export async function ttsUploadRef(accessToken: string, ref: string): Promise<string> {
+export async function ttsUploadRef(accessToken: string, ref: string, useCase = "MAIN_IMAGE"): Promise<string> {
   const key = ref.startsWith("r2:") ? ref.slice(3) : null;
   const src = key ? `${publicImageUrl(key)}&w=1500&sq=1` : ref;
   if (!/^https?:\/\//i.test(src)) throw new Error("รูปไม่ใช่รูปในระบบหรือลิงก์");
@@ -173,6 +174,24 @@ export async function ttsUploadRef(accessToken: string, ref: string): Promise<st
   if (!bytes.byteLength || bytes.byteLength > 10 * 1024 * 1024) throw new Error(`ขนาดรูป ${(bytes.byteLength / 1048576).toFixed(1)}MB ไม่อยู่ในช่วงที่ TikTok รับ (≤ 10MB)`);
   const base = (key ?? new URL(src).pathname).split("/").pop()?.replace(/\.[a-z0-9]+$/i, "") || "image";
   const name = `${base}.${ct === "image/png" ? "png" : ct === "image/webp" ? "webp" : "jpg"}`;
-  try { return (await ttsUploadImage(accessToken, bytes, name, ct)).uri; }
+  try { return (await ttsUploadImage(accessToken, bytes, name, ct, useCase)).uri; }
   catch (e) { throw new Error(ttsErrorText(e)); }
+}
+
+// ───────── ช่องคุณลักษณะ + กติกาของหมวด (แคชในเครื่อง 10 นาที · ใช้ร่วม ลิ้นชัก + หน้าลงฉบับร่าง) ─────────
+const META_TTL = 10 * 60 * 1000;
+const metaCache = new Map<string, { at: number; val: { fields: TtsAttrField[] | null; rules: TtsCategoryRules | null; error: string | null } }>();
+/** ช่องคุณลักษณะ (Get Attributes) + กติกา (Get Category Rules) ของหมวด · ดึงไม่ได้ = null + error ภาษาคน (ไม่โยน) */
+export async function ttsCategoryMeta(accessToken: string, cipher: string, categoryId: string): Promise<{ fields: TtsAttrField[] | null; rules: TtsCategoryRules | null; error: string | null }> {
+  const key = `${cipher}:${categoryId}`;
+  const hit = metaCache.get(key);
+  if (hit && Date.now() - hit.at < META_TTL) return hit.val;
+  const [a, r] = await Promise.allSettled([ttsGetCategoryAttributes(accessToken, cipher, categoryId), ttsGetCategoryRules(accessToken, cipher, categoryId)]);
+  const val = {
+    fields: a.status === "fulfilled" ? ttsAttrFieldsOf(a.value) : null,
+    rules: r.status === "fulfilled" ? ttsCategoryRulesOf(r.value) : null,
+    error: a.status === "rejected" ? `ดึงช่องของหมวดจาก TikTok ไม่ได้: ${ttsErrorText(a.reason)}` : null,
+  };
+  if (val.fields) metaCache.set(key, { at: Date.now(), val });
+  return val;
 }

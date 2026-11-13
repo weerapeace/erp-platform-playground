@@ -26,6 +26,7 @@
  */
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
+import { ttsAttrPayload, type TtsAttrField, type TtsAttrState, type TtsAttrVal, type TtsCategoryRules } from "@/lib/tiktok-attrs";
 import { isTiktokImageUrl, TTS_DESC_MAX, TTS_MAX_IMAGES, TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN, ttsTitleLength } from "@/lib/tiktok-listing-edit";
 
 /** สต๊อกตั้งต้นต่อตัวเลือกในฉบับร่าง (TikTok บังคับ 1–99,999 แม้เป็นร่าง) — แก้เป็นจำนวนจริงใน Seller Center ก่อนเผยแพร่ */
@@ -70,7 +71,12 @@ export type TtsCreatePreview = {
   dims: TtsCreateDim[];
   variants: TtsCreateVariantRow[];
   /** ช่องบังคับของหมวด (ฉบับร่างยังไม่บังคับ — ต้องกรอกใน Seller Center ก่อนเผยแพร่) · loaded=false = ดึงไม่ได้/ยังไม่เลือกหมวด */
-  attrs: { required: string[]; loaded: boolean };
+  /** ช่องคุณลักษณะของหมวด: required = ช่องบังคับที่ยังว่าง · fields/values = ช่อง + ค่าที่กรอกในร่าง (extra.tiktok_attrs) */
+  attrs: { required: string[]; loaded: boolean; fields: TtsAttrField[]; values: TtsAttrState };
+  /** เก็บเงินปลายทาง (extra.tiktok_cod) + หมวดรองรับไหม */
+  cod: { value: boolean | null; supported: boolean | null };
+  /** รูปตารางขนาด (extra.tiktok_size_chart · ref r2:) + หมวดรองรับ/บังคับไหม */
+  sizeChart: { ref: string | null; supported: boolean | null; required: boolean | null };
   /** สต๊อกตั้งต้นในร่าง (ต่อตัวเลือก) + คลังของร้าน (null = หาไม่เจอ) */
   stock: { qty: number; warehouseId: string | null };
   missing: string[];
@@ -115,6 +121,8 @@ export function ttsAttrDefsOf(raw: Record<string, unknown>[]): TtsAttrDef[] {
 export function planTiktokCreate(input: {
   parent: TtsCreateParent; skus: TtsCreateSku[]; draft: TtsCreateDraft;
   mappedCategory: string | null; galleryKeys: string[]; attrDefs: TtsAttrDef[] | null;
+  /** ช่องคุณลักษณะเต็ม (มีตัวเลือก) + กติกาของหมวด — ttsCategoryMeta · ไม่ส่ง = ใช้ attrDefs (นับช่องบังคับอย่างเดียว) */
+  attrFields?: TtsAttrField[] | null; rules?: TtsCategoryRules | null;
   brand: { id: string; name: string } | null; brandNote?: string | null; onShop: string | null;
   /** คลังสินค้าของร้าน (ttsShopWarehouseId) — undefined = ยังไม่รู้ (ไม่มีกุญแจ) · null = หาไม่เจอ */
   warehouseId?: string | null;
@@ -216,9 +224,19 @@ export function planTiktokCreate(input: {
 
   // ---------- แบรนด์ + ช่องของหมวด ----------
   const brandSrc = input.brand ? "แบรนด์ในระบบ (ร้านมีสิทธิ์ใช้บน TikTok)" : (input.brandNote || "ไม่ใส่แบรนด์ — ตั้งใน Seller Center ได้");
-  const required = (input.attrDefs ?? []).filter((a) => a.type === "PRODUCT_PROPERTY" && a.required).map((a) => a.name);
-  if (required.length) warnings.push(`หมวดนี้มีช่องบังคับ ${required.length} ช่อง (${required.slice(0, 3).join(", ")}${required.length > 3 ? " …" : ""}) — ฉบับร่างยังไม่ต้องกรอก แต่ต้องกรอกใน Seller Center ก่อนกดเผยแพร่`);
-  if (!input.attrDefs && categoryId) warnings.push("ดึงช่องของหมวดจาก TikTok ไม่ได้ — ตรวจช่องบังคับใน Seller Center");
+  const attrVals = attrStateFromExtra(extra.tiktok_attrs);
+  const fields = input.attrFields ?? null;
+  const required = fields
+    ? fields.filter((f) => f.required && !(attrVals[f.id] ?? []).length).map((f) => f.name)
+    : (input.attrDefs ?? []).filter((a) => a.type === "PRODUCT_PROPERTY" && a.required).map((a) => a.name);
+  if (fields) for (const f of fields) if (!f.customizable && f.options.length && (attrVals[f.id] ?? []).some((v) => !v.id)) missing.push(`"${f.name}" ต้องเลือกจากรายการของ TikTok`);
+  const codVal = extra.tiktok_cod === true ? true : extra.tiktok_cod === false ? false : null;
+  if (codVal === true && input.rules?.codSupported === false) missing.push("หมวดนี้ TikTok ไม่รองรับเก็บเงินปลายทาง — ปิด COD");
+  const sizeRef = typeof extra.tiktok_size_chart === "string" && extra.tiktok_size_chart ? extra.tiktok_size_chart : null;
+  if (sizeRef && input.rules?.sizeChartSupported === false) warnings.push("หมวดนี้ TikTok ไม่รองรับตารางขนาด — ไม่ส่งรูปตารางขนาด");
+  if (!sizeRef && input.rules?.sizeChartRequired) warnings.push("หมวดนี้ TikTok บังคับตารางขนาด — เลือกรูปตารางขนาด หรือกรอกใน Seller Center ก่อนเผยแพร่");
+  if (required.length) warnings.push(`ช่องบังคับของหมวดยังว่าง ${required.length} ช่อง (${required.slice(0, 3).join(", ")}${required.length > 3 ? " …" : ""}) — ฉบับร่างยังไม่บังคับ แต่ต้องกรอก (ที่นี่หรือใน Seller Center) ก่อนกดเผยแพร่`);
+  if (!fields && !input.attrDefs && categoryId) warnings.push("ดึงช่องของหมวดจาก TikTok ไม่ได้ — ตรวจช่องบังคับใน Seller Center");
 
   if (input.onShop || str(d?.platform_product_id)) warnings.push(`มีบน TikTok แล้ว (#${input.onShop ?? str(d?.platform_product_id)}) — ไม่สร้างซ้ำ`);
 
@@ -237,6 +255,9 @@ export function planTiktokCreate(input: {
     main_images: refs,
     ...(input.brand ? { brand_id: input.brand.id } : {}),
     package_weight: { value: weight != null ? String(weight) : "", unit: "KILOGRAM" },
+    ...(Object.keys(attrVals).length ? { product_attributes: ttsAttrPayload(attrVals) } : {}),
+    ...(codVal != null && !(codVal && input.rules?.codSupported === false) ? { is_cod_allowed: codVal } : {}),
+    ...(sizeRef && input.rules?.sizeChartSupported !== false ? { size_chart_ref: sizeRef } : {}),
     ...(hasBox ? { package_dimensions: { length: String(box.l), width: String(box.w), height: String(box.h), unit: "CENTIMETER" } } : {}),
     skus: variants.map((v) => ({
       seller_sku: v.code,
@@ -257,7 +278,9 @@ export function planTiktokCreate(input: {
       images: { refs, src: imgSrc, custom: picked.length > 0 },
       package: { weight, ...box, src: pkgSrc },
       dims, variants,
-      attrs: { required, loaded: !!input.attrDefs },
+      attrs: { required, loaded: !!(fields ?? input.attrDefs), fields: fields ?? [], values: attrVals },
+      cod: { value: codVal, supported: input.rules?.codSupported ?? null },
+      sizeChart: { ref: sizeRef, supported: input.rules?.sizeChartSupported ?? null, required: input.rules?.sizeChartRequired ?? null },
       stock: { qty: TTS_DRAFT_QTY, warehouseId },
       missing, warnings,
       on_shop: input.onShop ?? (str(d?.platform_product_id) || null),
@@ -275,3 +298,17 @@ export function ttsCreateResolveImages(payload: Record<string, unknown>, uriOf: 
   copy.main_images = ttsCreateImageRefs(payload).map((r) => ({ uri: uriOf.get(r) ?? r }));
   return copy;
 }
+
+/** ค่าคุณลักษณะในร่าง (extra.tiktok_attrs) → state (กันค่าแปลก) */
+function attrStateFromExtra(v: unknown): TtsAttrState {
+  const out: TtsAttrState = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, vals] of Object.entries(v as Record<string, unknown>)) {
+    if (!Array.isArray(vals)) continue;
+    const list = vals.map((x): TtsAttrVal => { const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>; const id = str(o.id); const name = str(o.name); return { ...(id ? { id } : {}), ...(name ? { name } : {}) }; }).filter((x) => x.id || x.name);
+    if (list.length) out[k] = list;
+  }
+  return out;
+}
+/** รูปตารางขนาดที่ต้องฝาก (route แทนด้วย size_chart{ image{ uri } }) */
+export const ttsCreateSizeChartRef = (payload: Record<string, unknown>): string | null => (typeof payload.size_chart_ref === "string" && payload.size_chart_ref ? payload.size_chart_ref : null);

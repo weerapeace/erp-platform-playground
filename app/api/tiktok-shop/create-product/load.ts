@@ -5,9 +5,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
-import { ttsErrorText, ttsGetBrands, ttsGetCategoryAttributes, ttsShopWarehouseId } from "@/lib/tiktok-shop";
-import { planTiktokCreate, ttsAttrDefsOf, ttsCategoryIdOf, type TtsAttrDef, type TtsCreatePreview, type TtsCreateSku } from "@/lib/tiktok-create-plan";
-import { getPlatformId, ttsTokenOrReason } from "../shared";
+import { ttsErrorText, ttsGetBrands, ttsShopWarehouseId } from "@/lib/tiktok-shop";
+import { planTiktokCreate, ttsCategoryIdOf, type TtsAttrDef, type TtsCreatePreview, type TtsCreateSku } from "@/lib/tiktok-create-plan";
+import type { TtsAttrField, TtsCategoryRules } from "@/lib/tiktok-attrs";
+import { getPlatformId, ttsCategoryMeta, ttsTokenOrReason } from "../shared";
 
 type Row = Record<string, unknown>;
 const str = (v: unknown) => (v == null ? "" : String(v)).trim();
@@ -64,6 +65,8 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
   const blockers: string[] = [];
   let token: { accessToken: string; cipher: string } | null = null;
   let attrDefs: TtsAttrDef[] | null = null;
+  let attrFields: TtsAttrField[] | null = null;
+  let rules: TtsCategoryRules | null = null;
   let brand: { id: string; name: string } | null = null;
   let brandNote: string | null = null;
   let warehouseId: string | null | undefined = undefined;
@@ -79,8 +82,11 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
       try { warehouseId = await cached(`wh:${t.cipher}`, () => ttsShopWarehouseId(t.accessToken, t.cipher)); }
       catch (e) { warehouseId = null; console.warn(`[tiktok create] หาคลังของร้านไม่ได้: ${ttsErrorText(e)}`); }
       if (categoryId) {
-        try { attrDefs = ttsAttrDefsOf(await cached(`attrs:${categoryId}`, () => ttsGetCategoryAttributes(t.accessToken, t.cipher, categoryId))); }
-        catch (e) { attrDefs = null; console.warn(`[tiktok create] ดึงช่องของหมวด ${categoryId} ไม่ได้: ${ttsErrorText(e)}`); }
+        // ช่องคุณลักษณะ (มีตัวเลือก) + กติกาของหมวด — ของกลางใน ../shared (แคช 10 นาที · ใช้ร่วมกับลิ้นชัก)
+        const meta = await ttsCategoryMeta(t.accessToken, t.cipher, categoryId);
+        attrFields = meta.fields; rules = meta.rules;
+        attrDefs = meta.fields ? meta.fields.map((f) => ({ id: f.id, name: f.name, type: "PRODUCT_PROPERTY", required: f.required })) : null;
+        if (meta.error) console.warn(`[tiktok create] ${meta.error}`);
       }
       if (brandName) {
         try {
@@ -108,7 +114,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
     draft, mappedCategory: it.platformCategory || null,
-    galleryKeys: it.images.map((x) => x.key), attrDefs, brand, brandNote, warehouseId,
+    galleryKeys: it.images.map((x) => x.key), attrDefs, attrFields, rules, brand, brandNote, warehouseId,
     onShop: exOnShop ? str(exOnShop.external_product_id) : null,
   });
   if (preview.on_shop) blockers.push(`มีบน TikTok แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);

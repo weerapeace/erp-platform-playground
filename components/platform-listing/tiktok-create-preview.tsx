@@ -20,6 +20,10 @@ import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } 
 import { noteToText } from "@/lib/rich-note";
 import { TTS_MAX_IMAGES } from "@/lib/tiktok-listing-edit";
 import type { TtsCreatePreview } from "@/lib/tiktok-create-plan";
+import { kgToUnit, sameAttrState, ttsAttrDef, ttsAttrFromText, ttsAttrToText, unitToKg, type TtsAttrState, type WeightUnit } from "@/lib/tiktok-attrs";
+import { LazadaAttrField } from "@/components/platform-catalog/lazada-listing-panels";
+import { useWeightUnit } from "@/components/platform-catalog/weight-unit";
+import { ToggleSwitch } from "@/components/toggle-switch";
 
 type LastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
 type Resp = { preview: TtsCreatePreview | null; blockers?: string[]; live?: boolean; mode?: "draft"; platform_id?: string; brand_id?: string | null; last_attempt?: LastAttempt | null; error: string | null };
@@ -41,6 +45,10 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const [val, setVal] = useState("");
   const [imgs, setImgs] = useState<string[] | null>(null);
   const [picker, setPicker] = useState(false);
+  const [attrs, setAttrs] = useState<TtsAttrState | null>(null);
+  const [moreAttrs, setMoreAttrs] = useState(false);
+  const [sizePick, setSizePick] = useState(false);
+  const [unit, setUnit] = useWeightUnit();
   const sys = useSystemImages(parentId);
 
   const load = useCallback(async () => {
@@ -48,7 +56,7 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
     try {
       const j = await apiFetch(`/api/tiktok-shop/create-product?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json()) as Resp;
       if (j.error || !j.preview) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setData(j); setImgs(null); onLoaded?.(j.preview, j.blockers ?? []);
+      setData(j); setImgs(null); setAttrs(null); onLoaded?.(j.preview, j.blockers ?? []);
     } catch (e) { setErr((e as Error).message || "โหลดไม่สำเร็จ"); }
   }, [parentId, onLoaded]);
   useEffect(() => { setData(null); void load(); }, [load]);
@@ -155,13 +163,15 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
         <div className="flex flex-wrap gap-x-5 gap-y-1">
           <span className={pv.package.weight ? "" : "text-rose-600"}>น้ำหนัก {pv.package.weight ? `${pv.package.weight} กก.` : "— ยังไม่มี"}</span>
           <span className={pv.package.l && pv.package.w && pv.package.h ? "" : "text-slate-400"}>กล่อง {pv.package.l && pv.package.w && pv.package.h ? `${pv.package.l}×${pv.package.w}×${pv.package.h} ซม.` : "— ไม่มี (ไม่ส่ง)"}</span>
-          {canEdit && edit !== "weight" && <button type="button" onClick={() => { setEdit("weight"); setVal(pv.package.weight ? String(pv.package.weight) : ""); }} className="text-xs text-violet-700 hover:underline">ใส่น้ำหนักสำหรับ TikTok</button>}
+          {canEdit && edit !== "weight" && <button type="button" onClick={() => { setEdit("weight"); setVal(pv.package.weight ? String(kgToUnit(pv.package.weight, unit)) : ""); }} className="text-xs text-violet-700 hover:underline">ใส่น้ำหนักสำหรับ TikTok</button>}
         </div>
         {edit === "weight" && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <input value={val} onChange={(e) => setVal(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="h-8 w-24 rounded-md border border-slate-200 px-2 text-sm" aria-label="น้ำหนัก กิโลกรัม" />
-            <span className="text-xs text-slate-500">กก.</span>
-            <button type="button" disabled={saving} onClick={() => void patchExtra({ tiktok_weight: Number(val) > 0 ? Number(val) : null }, "บันทึกน้ำหนักแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>
+            <input value={val} onChange={(e) => setVal(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" className="h-8 w-24 rounded-md border border-slate-200 px-2 text-sm" aria-label="น้ำหนัก" />
+            <select value={unit} onChange={(e) => { const u = e.target.value as WeightUnit; const kg = unitToKg(Number(val) > 0 ? Number(val) : null, unit); setUnit(u); setVal(kg != null ? String(kgToUnit(kg, u)) : ""); }} className="h-8 rounded-md border border-slate-200 bg-white px-1 text-xs" aria-label="หน่วยน้ำหนัก">
+              <option value="kg">กิโลกรัม</option><option value="g">กรัม</option>
+            </select>
+            <button type="button" disabled={saving} onClick={() => void patchExtra({ tiktok_weight: unitToKg(Number(val) > 0 ? Number(val) : null, unit) }, "บันทึกน้ำหนักแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>
             <button type="button" onClick={() => setEdit(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
           </div>
         )}
@@ -188,13 +198,80 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
         <div className="mt-1 text-[11px] text-slate-400">ราคาบน TikTok = ราคาเต็มในระบบ (ไม่มี = ราคาขาย) · ส่วนลดตั้งโปรโมชันใน Seller Center · แก้ราคาที่หน้า SKU</div>
       </div>
 
-      {/* ช่องบังคับของหมวด */}
-      <div className="rounded-xl border border-slate-200 p-3 text-xs">
-        <div className="mb-1 font-medium text-slate-600">ช่องบังคับของหมวด (กรอกใน Seller Center ก่อนกดเผยแพร่)</div>
-        {!pv.category.id ? <p className="text-slate-500">เลือกหมวด TikTok ก่อน</p>
-          : !pv.attrs.loaded ? <p className="text-slate-500">ดึงช่องของหมวดจาก TikTok ไม่ได้ — ตรวจใน Seller Center</p>
-          : pv.attrs.required.length === 0 ? <p className="text-emerald-700">หมวดนี้ไม่มีช่องบังคับเพิ่ม</p>
-          : <div className="flex flex-wrap gap-1">{pv.attrs.required.map((n) => <span key={n} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">{n}</span>)}</div>}
+      {/* คุณลักษณะของหมวด (กรอกในร่าง → ส่งพร้อมตอนสร้าง) — ช่องกรอกกลาง LazadaAttrField */}
+      {(() => {
+        const fields = pv.attrs.fields;
+        const vals = attrs ?? pv.attrs.values;
+        const dirty = !!attrs && !sameAttrState(attrs, pv.attrs.values);
+        const filled = (id: string) => (vals[id] ?? []).length > 0;
+        const main = fields.filter((f) => f.required || filled(f.id));
+        const rest = fields.filter((f) => !main.includes(f));
+        return (
+          <div className="rounded-xl border border-slate-200 p-3 text-sm">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-medium text-slate-600">คุณลักษณะของหมวด {pv.attrs.required.length ? <span className="text-rose-600">· ช่องบังคับยังว่าง {pv.attrs.required.length}</span> : null}</span>
+              {canEdit && dirty && (
+                <div className="flex gap-1.5">
+                  <button type="button" disabled={saving} onClick={() => void patchExtra({ tiktok_attrs: attrs }, "บันทึกคุณลักษณะแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง TikTok</button>
+                  <button type="button" onClick={() => setAttrs(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+                </div>
+              )}
+            </div>
+            {!pv.category.id ? <p className="text-xs text-slate-500">เลือกหมวด TikTok ก่อน แล้วช่องของหมวดจะขึ้นที่นี่</p>
+              : !pv.attrs.loaded ? <p className="text-xs text-slate-500">ดึงช่องของหมวดจาก TikTok ไม่ได้ — กรอกใน Seller Center</p>
+              : fields.length === 0 ? <p className="text-xs text-emerald-700">หมวดนี้ไม่มีช่องคุณลักษณะ</p>
+              : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(moreAttrs ? fields : main).map((f) => (
+                      <LazadaAttrField key={f.id} def={ttsAttrDef(f)} value={ttsAttrToText(vals[f.id])} base={ttsAttrToText(pv.attrs.values[f.id])} can={canEdit}
+                        onChange={(text) => setAttrs((a) => { const n = { ...(a ?? pv.attrs.values) }; const v = ttsAttrFromText(f, text); if (v.length) n[f.id] = v; else delete n[f.id]; return n; })} />
+                    ))}
+                  </div>
+                  {rest.length > 0 && <button type="button" onClick={() => setMoreAttrs((x) => !x)} className="mt-2 text-xs text-violet-700 hover:underline">{moreAttrs ? "ซ่อนช่องเพิ่มเติม" : `แสดงเพิ่มเติม (${rest.length} ช่อง)`}</button>}
+                  <p className="mt-2 text-[11px] text-slate-400">ตัวเลือกมาจาก TikTok ตามหมวด · ช่อง * = บังคับ (ฉบับร่างยังไม่บังคับ แต่ต้องครบก่อนเผยแพร่) · กรอกที่นี่แล้วไม่ต้องไปกรอกใน Seller Center</p>
+                </>
+              )}
+          </div>
+        );
+      })()}
+
+      {/* เก็บเงินปลายทาง + ตารางขนาด */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 p-3 text-sm">
+          <div className="mb-2 text-xs font-medium text-slate-600">เก็บเงินปลายทาง (COD)</div>
+          {pv.cod.supported === false
+            ? <p className="text-xs text-slate-500">หมวดนี้ TikTok ไม่รองรับเก็บเงินปลายทาง</p>
+            : canEdit
+              ? <ToggleSwitch on={!!pv.cod.value} disabled={saving} size="sm" label={<span className="text-sm text-slate-700">{pv.cod.value ? "เปิดให้เก็บเงินปลายทาง" : pv.cod.value === false ? "ปิด" : "ใช้ค่าเริ่มต้นของร้าน"}</span>} onChange={(on) => void patchExtra({ tiktok_cod: on }, on ? "เปิด COD ในร่างแล้ว" : "ปิด COD ในร่างแล้ว")} />
+              : <span className="text-sm text-slate-700">{pv.cod.value == null ? "ค่าเริ่มต้นของร้าน" : pv.cod.value ? "เปิด" : "ปิด"}</span>}
+        </div>
+        <div className="rounded-xl border border-slate-200 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-600">
+            ตารางขนาด {pv.sizeChart.required && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-normal text-rose-700">หมวดนี้บังคับ</span>}
+          </div>
+          {pv.sizeChart.supported === false ? <p className="text-xs text-slate-500">หมวดนี้ TikTok ไม่รองรับตารางขนาด</p> : (
+            <div className="flex items-start gap-3">
+              <div className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white ${pv.sizeChart.ref ? "border-slate-200" : "border-dashed text-slate-300"}`}>
+                {pv.sizeChart.ref ? <img src={listingImgSrc(pv.sizeChart.ref, 200)} alt="" className="h-full w-full object-contain" /> : <Icon name="image" />}
+              </div>
+              <div className="min-w-0 text-xs">
+                <div className="text-slate-600">{pv.sizeChart.ref ? "เลือกไว้แล้ว (ส่งตอนสร้าง)" : "ยังไม่มี (ไม่บังคับ)"}</div>
+                {canEdit && (
+                  <div className="mt-1 flex gap-2">
+                    <button type="button" onClick={() => { setSizePick(true); sys.load(); }} className="text-violet-700 hover:underline">{pv.sizeChart.ref ? "เปลี่ยนรูป" : "เลือกรูปจากระบบ"}</button>
+                    {pv.sizeChart.ref && <button type="button" disabled={saving} onClick={() => { const ex = { ...pv.draft_extra }; delete ex.tiktok_size_chart; void patch({ extra: ex }, "เอารูปตารางขนาดออกแล้ว"); }} className="text-rose-600 hover:underline">เอาออก</button>}
+                  </div>
+                )}
+                <p className="mt-1 text-[11px] text-slate-400">ด้านสั้น ≥ 1,024px · ทำเป็นจัตุรัสพื้นขาวแล้วฝากกับ TikTok</p>
+              </div>
+            </div>
+          )}
+          <ListingImagePicker open={sizePick} onClose={() => setSizePick(false)} mode="variant" storageKey="tiktok-create-size-chart-picker"
+            title="เลือกรูปตารางขนาด" description="เลือกรูปตารางขนาดจากคลังรูปของสินค้า (ตารางชัด ๆ ด้านสั้นอย่างน้อย 1,024px)"
+            matchedParent={parentId} matchedCode={pv.parent_code} sysImages={sys.images}
+            onPick={(ref) => { setSizePick(false); void patchExtra({ tiktok_size_chart: ref }, "บันทึกรูปตารางขนาดแล้ว"); }} />
+        </div>
       </div>
     </div>
   );

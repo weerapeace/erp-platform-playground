@@ -15,6 +15,8 @@
  *   ?return_under_review_version=true → ฉบับที่ส่งตรวจอยู่ (ใช้ดูว่าชื่อใหม่รอตรวจไหม)
  */
 
+import { ttsAttrNamesOf, ttsAttrStateOf, type TtsAttrState } from "@/lib/tiktok-attrs";
+
 /** TikTok ไทย: ชื่อสินค้า 25–255 ตัวอักษร (ตลาดอื่นต่างกัน — เอกสาร partial-edit-product-202509) */
 export const TTS_TITLE_MIN = 25;
 export const TTS_TITLE_MAX = 255;
@@ -44,6 +46,13 @@ export type TiktokListingView = {
   description: string;
   /** รายละเอียดที่ส่งให้ TikTok ตรวจอยู่ (ต่างจากฉบับขาย) · null = ไม่มี */
   pendingDescription: string | null;
+  /** หมวดปลายสุด (id) — ใช้ดึงช่องคุณลักษณะ/กติกาของหมวด */
+  categoryId: string | null;
+  /** คุณลักษณะ / COD / ตารางขนาด — จากฉบับรอตรวจถ้ามี (ของที่ส่งล่าสุด) ไม่งั้นฉบับขาย */
+  attrs: TtsAttrState;
+  attrNames: Record<string, string>;
+  cod: boolean | null;
+  sizeChart: TiktokImage | null;
   skus: TiktokSkuView[];
   /** เหตุผลที่ TikTok ตีกลับ (ถ้ามี) */
   rejectReasons: string[];
@@ -111,11 +120,16 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
     pendingTitle: reviewTitle && reviewTitle !== title ? reviewTitle : null,
     brand: str(obj(d.brand)?.name),
     category: str(leaf?.local_name),
+    categoryId: str(leaf?.id),
     images: imgs.map((x) => x.url),
     imageUris: imgs.map((x) => x.uri),
     pkg, pendingImages, pendingPkg,
     description: typeof d.description === "string" ? d.description : "",
     pendingDescription: sameRv && typeof rv!.description === "string" && rv!.description !== d.description ? rv!.description : null,
+    attrs: ttsAttrStateOf((sameRv ? rv! : d).product_attributes),
+    attrNames: ttsAttrNamesOf((sameRv ? rv! : d).product_attributes),
+    cod: (sameRv ? rv! : d).is_cod_allowed === true ? true : (sameRv ? rv! : d).is_cod_allowed === false ? false : null,
+    sizeChart: sizeChartOf((sameRv ? rv! : d).size_chart),
     skus,
     rejectReasons: reasons,
     updateTime: num(d.update_time),
@@ -522,4 +536,12 @@ export function planTiktokDescription(base: string, after: string): TiktokDescPl
   const baseText = tiktokDescText(base);
   const change = changed ? { label: "รายละเอียดสินค้า", before: `${baseText.length.toLocaleString()} ตัวอักษร · รูป ${tiktokDescImages(base).length}`, after: `${text.length.toLocaleString()} ตัวอักษร · รูป ${imgs}` } : null;
   return { changed, html: fixed.html, errors, warnings, change };
+}
+
+/** รูปตารางขนาดจาก Get Product (size_chart.image{ uri, urls[] }) · แบบเทมเพลต = null (แก้ใน Seller Center) */
+function sizeChartOf(v: unknown): TiktokImage | null {
+  const img = obj(obj(v)?.image);
+  const uri = str(img?.uri);
+  const url = (Array.isArray(img?.urls) ? str((img!.urls as unknown[])[0]) : null) ?? (Array.isArray(img?.thumb_urls) ? str((img!.thumb_urls as unknown[])[0]) : null);
+  return uri && url ? { uri, url } : null;
 }

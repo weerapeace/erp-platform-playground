@@ -67,7 +67,7 @@ describe("สร้างฉบับร่างบน TikTok", () => {
   test("ช่องบังคับของหมวด = เตือน (ฉบับร่างยังไม่บังคับ)", () => {
     const defs = ttsAttrDefsOf([{ id: "1", name: "วัสดุ", type: "PRODUCT_PROPERTY", is_requried: true }, { id: "2", name: "สี", type: "SALES_PROPERTY", is_requried: true }, { id: "3", name: "รุ่น", type: "PRODUCT_PROPERTY", is_requried: false }]);
     const { preview } = planTiktokCreate({ ...base, attrDefs: defs, skus: [sku("X1")] });
-    expect(preview.attrs).toEqual({ required: ["วัสดุ"], loaded: true });
+    expect(preview.attrs).toMatchObject({ required: ["วัสดุ"], loaded: true });
     expect(preview.missing).toEqual([]);
     expect(preview.warnings.join(" ")).toContain("Seller Center");
   });
@@ -83,5 +83,27 @@ describe("สร้างฉบับร่างบน TikTok", () => {
     const { preview } = planTiktokCreate({ ...base, warehouseId: null, skus: [sku("X1")] });
     expect(preview.missing.join(" ")).toContain("คลังสินค้า");
     expect(planTiktokCreate({ ...base, warehouseId: undefined, skus: [sku("X1")] }).preview.missing.join(" ")).not.toContain("คลังสินค้า");
+  });
+  test("คุณลักษณะ / COD / ตารางขนาด จากร่าง → payload (ใช้ช่องเต็มของหมวด)", () => {
+    const attrFields = [
+      { id: "100107", name: "ประเภทของกระเป๋า", required: true, multiple: false, customizable: false, numeric: false, options: [{ id: "1", name: "กระเป๋าถือ" }] },
+      { id: "100198", name: "วัสดุ", required: false, multiple: true, customizable: true, numeric: false, options: [] },
+    ];
+    const rules = { codSupported: true, sizeChartSupported: true, sizeChartRequired: false };
+    const draft = { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra: { tiktok_attrs: { "100107": [{ id: "1", name: "กระเป๋าถือ" }], "100198": [{ name: "PVC" }] }, tiktok_cod: true, tiktok_size_chart: "r2:sz.jpg" } };
+    const { preview, payload } = planTiktokCreate({ ...base, draft, attrFields, rules, skus: [sku("X1")] });
+    expect(payload.product_attributes).toEqual([{ id: "100107", values: [{ id: "1" }] }, { id: "100198", values: [{ name: "PVC" }] }]);
+    expect(payload.is_cod_allowed).toBe(true);
+    expect(payload.size_chart_ref).toBe("r2:sz.jpg");
+    expect(preview.attrs.required).toEqual([]);
+    expect(preview.cod).toEqual({ value: true, supported: true });
+    expect(preview.sizeChart).toMatchObject({ ref: "r2:sz.jpg", supported: true });
+    // หมวดไม่รองรับ COD → ขาด · ไม่รองรับตารางขนาด → ไม่ส่ง
+    const no = planTiktokCreate({ ...base, draft, attrFields, rules: { codSupported: false, sizeChartSupported: false, sizeChartRequired: false }, skus: [sku("X1")] });
+    expect(no.preview.missing.join(" ")).toContain("COD");
+    expect(no.payload.size_chart_ref).toBeUndefined();
+    // ช่องที่ห้ามพิมพ์เอง แต่ร่างมีค่ากำหนดเอง → ขาด
+    const bad = planTiktokCreate({ ...base, draft: { ...draft, extra: { tiktok_attrs: { "100107": [{ name: "อื่น ๆ" }] } } }, attrFields, rules, skus: [sku("X1")] });
+    expect(bad.preview.missing.join(" ")).toContain("ต้องเลือกจากรายการ");
   });
 });

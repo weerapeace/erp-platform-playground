@@ -15,7 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { ttsCreateProduct, ttsDetailExtras, ttsErrorText, ttsProductToCatalogItem } from "@/lib/tiktok-shop";
-import { ttsCreateImageRefs, ttsCreateResolveImages, type TtsCreatePreview } from "@/lib/tiktok-create-plan";
+import { ttsCreateImageRefs, ttsCreateResolveImages, ttsCreateSizeChartRef, type TtsCreatePreview } from "@/lib/tiktok-create-plan";
 import { upsertCatalogListings } from "@/lib/platform-catalog-sync";
 import { creatorOf, type CreateStep } from "@/lib/platform-create-registry";
 import { loadTiktokCreate, type TtsLastAttempt } from "./load";
@@ -93,6 +93,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   done("images", `ฝากรูป ${uriOf.size}/${refs.length}`);
   const payload = ttsCreateResolveImages(r.payload, uriOf);
+  // รูปตารางขนาด (ถ้าเลือกไว้) → ฝากแบบ SIZE_CHART_IMAGE
+  const sizeRef = ttsCreateSizeChartRef(payload);
+  delete payload.size_chart_ref;
+  if (sizeRef) {
+    try { payload.size_chart = { image: { uri: await ttsUploadRef(token.accessToken, sizeRef, "SIZE_CHART_IMAGE") } }; done("size_chart", "ฝากรูปตารางขนาด"); }
+    catch (e) { bad("size_chart", "ฝากรูปตารางขนาด", (e as Error).message); return fail(`ฝากรูปตารางขนาดกับ TikTok ไม่สำเร็จ: ${(e as Error).message}`); }
+  }
 
   // 2) สร้างฉบับร่าง — ไม่ลองซ้ำอัตโนมัติ (กันสร้างซ้ำ)
   let created: Awaited<ReturnType<typeof ttsCreateProduct>>;

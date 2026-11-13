@@ -473,7 +473,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} />)
+                : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}

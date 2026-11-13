@@ -180,7 +180,7 @@ const PRODUCT_WRITE_SCOPE = "Product Write (seller.product.write)";
  * ⚠️ แก้แล้ว TikTok ส่งไปตรวจใหม่ (ฉบับเดิมขายต่อจนผ่าน) · ราคา/สต๊อก = มีผลทันที (ยังไม่เปิดให้แก้)
  * category_version: เอกสารบอก "ร้าน SEA ต้องส่ง v2 เมื่อใช้ API นี้" (ไทย = SEA)
  */
-export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown }): Promise<Record<string, unknown>> {
+export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown; product_attributes?: unknown[]; is_cod_allowed?: boolean; size_chart?: unknown }): Promise<Record<string, unknown>> {
   return ttsApi("POST", `/product/202509/products/${encodeURIComponent(productId)}/partial_edit`, accessToken, {
     query: { shop_cipher: shopCipher }, body: { ...fields, category_version: "v2" }, scope: PRODUCT_WRITE_SCOPE,
   });
@@ -242,6 +242,12 @@ export async function ttsShopWarehouseId(accessToken: string, shopCipher: string
     }
   }
   return null;
+}
+/** กติกาของหมวด (Get Category Rules 202309) — COD รองรับไหม · ตารางขนาด รองรับ/บังคับไหม · ข้อมูลดิบ (ttsCategoryRulesOf ใน lib/tiktok-attrs แปลง) */
+export async function ttsGetCategoryRules(accessToken: string, shopCipher: string, categoryId: string): Promise<Record<string, unknown>> {
+  return ttsApi("GET", `/product/202309/categories/${encodeURIComponent(categoryId)}/rules`, accessToken, {
+    query: { shop_cipher: shopCipher, category_version: "v2", locale: "th-TH" }, scope: PRODUCT_SCOPE,
+  });
 }
 /** แบรนด์ที่ร้านใช้ได้ (Get Brands 202309) ค้นด้วยชื่อขึ้นต้น · ระบุหมวด = บอกว่าใช้ในหมวดนั้นได้ไหม */
 export async function ttsGetBrands(accessToken: string, shopCipher: string, opts: { brandName?: string; categoryId?: string | null }): Promise<{ id: string; name: string; authorized: string | null; available: string | null }[]> {

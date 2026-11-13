@@ -36,7 +36,10 @@ import {
   type TiktokErpPrice, type TiktokListingDetailResponse, type TiktokListingView, type TiktokPricePlan, type TiktokPriceRow, type TiktokSkuView, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import type { VariantMatchRow } from "@/lib/platform-variant-match";
-import { ListingImageGrid, ListingImagePicker, useSystemImages } from "./listing-images";
+import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "./listing-images";
+import { LazadaAttrField } from "./lazada-listing-panels";
+import { useWeightUnit } from "./weight-unit";
+import { kgToUnit, planTiktokAttrs, planTiktokCod, planTiktokSizeChart, ttsAttrDef, ttsAttrFromText, ttsAttrToText, unitToKg, type TtsAttrField, type TtsAttrPlan, type TtsAttrState, type TtsAttrVal, type TtsCategoryRules, type WeightUnit } from "@/lib/tiktok-attrs";
 
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
 
@@ -136,6 +139,15 @@ export type TiktokEditApi = {
   descPlan: TiktokDescPlan | null;
   /** ฝากรูปที่แทรกในรายละเอียดกับ TikTok → ลิงก์ (กล่องแก้ข้อความเรียกเอง) */
   uploadDescImage: (file: File) => Promise<string>;
+  /** คุณลักษณะของหมวด / COD / ตารางขนาด — ช่องและกติกาของหมวดโหลดจาก TikTok (meta) */
+  meta: { fields: TtsAttrField[] | null; rules: TtsCategoryRules | null; error: string | null; loading: boolean };
+  attrs: TtsAttrState | null;
+  setAttr: (fieldId: string, vals: TtsAttrVal[]) => void;
+  cod: boolean | null;
+  setCod: (on: boolean) => void;
+  sizeChart: string | null;
+  setSizeChart: (ref: string | null) => void;
+  attrPlan: TtsAttrPlan | null;
   /** จำนวนรายการที่แก้ (ชื่อ + ราคาแต่ละตัว + รูป/กล่อง) */
   changeCount: number;
   errors: string[];
@@ -159,12 +171,21 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   const [pkg, setPkgState] = useState<TiktokPkg | null>(null);
   const baseDescription = state.view ? (state.view.pendingDescription ?? state.view.description) : null;
   const [description, setDescriptionState] = useState<string | null>(null);
+  // คุณลักษณะ / COD / ตารางขนาด
+  const meta = useTiktokCategoryMeta(state.listingId, state.view?.categoryId ?? null);
+  const baseAttrs = state.view?.attrs ?? null;
+  const baseCod = state.view ? state.view.cod : null;
+  const baseSizeRef = state.view?.sizeChart ? `tts:${state.view.sizeChart.uri}` : null;
+  const [attrs, setAttrsState] = useState<TtsAttrState | null>(null);
+  const [cod, setCodState] = useState<boolean | null>(null);
+  const [sizeChart, setSizeChartState] = useState<string | null>(null);
   const [descEdit, setDescEdit] = useState(false);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวใหม่ / ดึงใหม่ / ส่งสำเร็จ) → ฟอร์มเริ่มจากของล่าสุด
   useEffect(() => { setTitle(baseTitle); }, [baseTitle]);
   useEffect(() => { setDescriptionState(baseDescription); setDescEdit(false); }, [baseDescription]);
+  useEffect(() => { setAttrsState(baseAttrs ? { ...baseAttrs } : null); setCodState(baseCod); setSizeChartState(baseSizeRef); }, [baseAttrs, baseCod, baseSizeRef]);
   useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
   useEffect(() => { setImagesState(mediaBase ? mediaBase.images.map((x) => x.url) : null); setPkgState(mediaBase ? { ...mediaBase.pkg } : null); }, [mediaBase]);
   const plan = useMemo(() => (baseTitle != null && title != null ? planTiktokTitle(baseTitle, title) : null), [baseTitle, title]);
@@ -175,13 +196,19 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   const mediaPlan = useMemo(() => (mediaBase && pkg && mediaRefs ? planTiktokMedia(mediaBase.images.map((x) => x.uri), mediaBase.pkg, mediaRefs, pkg) : null), [mediaBase, pkg, mediaRefs]);
   const descPlan = useMemo(() => (descEdit && baseDescription != null && description != null ? planTiktokDescription(baseDescription, description) : null), [descEdit, baseDescription, description]);
   const descDirty = !!descPlan?.changed;
+  const attrPlan = useMemo(() => (meta.fields && baseAttrs && attrs ? planTiktokAttrs(meta.fields, baseAttrs, attrs, { strictRequired: true, names: state.view?.attrNames }) : null), [meta.fields, baseAttrs, attrs, state.view?.attrNames]);
+  const codPlan = useMemo(() => (state.view ? planTiktokCod(baseCod, cod, meta.rules?.codSupported ?? null) : null), [state.view, baseCod, cod, meta.rules]);
+  const sizePlan = useMemo(() => (state.view ? planTiktokSizeChart(state.view.sizeChart?.uri ?? null, sizeChart, meta.rules) : null), [state.view, sizeChart, meta.rules]);
+  const attrDirty = !!attrPlan?.changed; const codDirty = !!codPlan?.changed; const sizeDirty = !!sizePlan?.changed;
+  const extraDirty = attrDirty || codDirty || sizeDirty;
   const titleDirty = !!plan?.changed;
   const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
   const mediaDirty = mediaTouched && !mediaBlock && !!mediaPlan && (mediaPlan.imagesChanged || mediaPlan.weightChanged || mediaPlan.boxChanged);
-  const dirty = titleDirty || descDirty || priceDirty || mediaDirty || (mediaTouched && !!mediaPlan?.errors.length);
-  const changeCount = (titleDirty ? 1 : 0) + (descDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0) + (mediaDirty ? mediaPlan!.changes.length : 0);
+  const dirty = titleDirty || descDirty || priceDirty || mediaDirty || extraDirty || (mediaTouched && !!mediaPlan?.errors.length);
+  const changeCount = (titleDirty ? 1 : 0) + (descDirty ? 1 : 0) + (attrPlan?.changes.length ?? 0) + (codDirty ? 1 : 0) + (sizeDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0) + (mediaDirty ? mediaPlan!.changes.length : 0);
   const errors = [
     ...(plan?.errors ?? []), ...(descDirty ? descPlan!.errors : []), ...(pricePlan?.errors ?? []),
+    ...(attrDirty ? attrPlan!.errors : []), ...(codDirty ? codPlan!.errors : []), ...(sizeDirty ? sizePlan!.errors : []),
     ...(mediaTouched && !mediaRefs ? ["รูปบนร้านเปลี่ยนไปแล้ว — กดยกเลิกที่แก้ แล้วลองใหม่"] : []),
     ...(mediaTouched ? mediaPlan?.errors ?? [] : []),
   ];
@@ -194,7 +221,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   // ส่งทีละส่วน: ราคา (มีผลทันที) → ชื่อ + รูป/กล่อง (Partial Edit ครั้งเดียว · ส่งตรวจ) · ส่วนแรกพลาด = ไม่ส่งต่อ
   const save = async () => {
     if (!state.listingId || baseTitle == null || !priceBase || !prices) return;
-    const editDirty = titleDirty || descDirty || mediaDirty;
+    const editDirty = titleDirty || descDirty || mediaDirty || extraDirty;
     setSaving(true);
     const done: string[] = [];
     let saved = false;
@@ -216,6 +243,11 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
           listing_id: state.listingId,
           ...(titleDirty && plan ? { before_title: baseTitle, title: plan.title } : {}),
           ...(descDirty && description != null ? { before_description: baseDescription, description } : {}),
+          ...(extraDirty ? { extra: {
+            ...(attrDirty ? { before_attrs: baseAttrs, attrs } : {}),
+            ...(codDirty ? { before_cod: baseCod, cod } : {}),
+            ...(sizeDirty ? { before_size_chart: state.view?.sizeChart?.uri ?? null, size_chart: sizeChart } : {}),
+          } } : {}),
           ...(mediaDirty && mediaBase && mediaPlan ? { media: { before_uris: mediaBase.images.map((x) => x.uri), before_pkg: mediaBase.pkg, images: mediaPlan.images, pkg: mediaPlan.pkg } } : {}),
         };
         const { r, j } = await post("/api/tiktok-shop/listing-edit", payload);
@@ -237,7 +269,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     finally { setSaving(false); if (saved) onSaved?.(plan?.title ?? baseTitle); }
   };
 
-  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(descDirty ? descPlan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : []), ...(mediaDirty ? mediaPlan?.warnings ?? [] : [])];
+  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(descDirty ? descPlan?.warnings ?? [] : []), ...(attrDirty ? attrPlan?.warnings ?? [] : []), ...(sizeDirty ? sizePlan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : []), ...(mediaDirty ? mediaPlan?.warnings ?? [] : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
       title={`ส่งการแก้ไข ${changeCount.toLocaleString()} รายการขึ้นร้าน TikTok?`} confirmText="ส่งขึ้น TikTok"
@@ -246,6 +278,9 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
           <p>ระบบจะแก้สินค้าบนร้าน TikTok จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · ไม่แตะสต๊อก/สถานะเปิดปิด) · มีประวัติว่าใครแก้อะไร</p>
           <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
             {titleDirty && plan && <li><span className="font-medium text-slate-700">ชื่อสินค้า:</span> <span className="text-slate-400 line-through">{baseTitle}</span> → <span className="text-slate-800">{plan.title}</span></li>}
+            {attrDirty && attrPlan!.changes.map((c) => <li key={`a-${c.label}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>)}
+            {codDirty && codPlan?.change && <li><span className="font-medium text-slate-700">{codPlan.change.label}:</span> <span className="text-slate-400">{codPlan.change.before}</span> → <span className="text-slate-800">{codPlan.change.after}</span></li>}
+            {sizeDirty && sizePlan?.change && <li><span className="font-medium text-slate-700">{sizePlan.change.label}:</span> <span className="text-slate-400">{sizePlan.change.before}</span> → <span className="text-slate-800">{sizePlan.change.after}</span></li>}
             {descDirty && descPlan?.change && <li><span className="font-medium text-slate-700">{descPlan.change.label}:</span> <span className="text-slate-400">{descPlan.change.before}</span> → <span className="text-slate-800">{descPlan.change.after}</span></li>}
             {mediaDirty && (mediaPlan?.changes ?? []).map((c) => (
               <li key={c.label}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
@@ -270,6 +305,10 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     canEdit, baseTitle, title, prices, priceBlock, pricePlan, changeCount, errors, dirty, saving, dialog,
     images, pkg, mediaBase, mediaPlan, mediaBlock,
     baseDescription, description, descEdit, descPlan, uploadDescImage,
+    meta, attrs, cod, sizeChart, attrPlan,
+    setAttr: (fieldId, vals) => setAttrsState((a) => { const n = { ...(a ?? {}) }; if (vals.length) n[fieldId] = vals; else delete n[fieldId]; return n; }),
+    setCod: (on) => setCodState(on),
+    setSizeChart: (ref) => setSizeChartState(ref),
     setDescription: (html) => setDescriptionState(html),
     setDescEdit: (on) => { setDescEdit(on); if (!on) setDescriptionState(baseDescription); },
     setTitle: (v) => setTitle(v),
@@ -278,7 +317,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     setImages: (next) => setImagesState(next),
     setPkg: (patch) => setPkgState((p) => (p ? { ...p, ...patch } : p)),
     reset: () => {
-      setTitle(baseTitle); setDescriptionState(baseDescription); setDescEdit(false); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r })));
+      setTitle(baseTitle); setDescriptionState(baseDescription); setDescEdit(false); setAttrsState(baseAttrs ? { ...baseAttrs } : null); setCodState(baseCod); setSizeChartState(baseSizeRef); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r })));
       if (mediaBase) { setImagesState(mediaBase.images.map((x) => x.url)); setPkgState({ ...mediaBase.pkg }); }
     },
     ask: () => setAsking(true),
@@ -402,7 +441,7 @@ function Field({ label, children, hint }: { label: string; children: ReactNode; 
 }
 
 /** แท็บข้อมูลสินค้า — แก้ชื่อได้เมื่อมีสิทธิ์ · รายละเอียดดูอย่างเดียว (เฟสถัดไป) */
-export function TiktokInfoPanel({ state, edit }: { state: TiktokListingState; edit: TiktokEditApi }) {
+export function TiktokInfoPanel({ state, edit, matchedParent, matchedCode }: { state: TiktokListingState; edit: TiktokEditApi; matchedParent?: string | null; matchedCode?: string | null }) {
   const g = gate(state); if (g) return g;
   const v = state.view!;
   const can = edit.canEdit && edit.title != null && v.productStatus !== "FREEZE" && v.productStatus !== "DELETED";
@@ -440,6 +479,8 @@ export function TiktokInfoPanel({ state, edit }: { state: TiktokListingState; ed
         <Field label="หมวดบน TikTok">{v.category ?? "—"}</Field>
       </div>
       <TiktokPackageBox v={v} edit={edit} />
+      <TiktokAttrsBox v={v} edit={edit} can={can} />
+      <TiktokCodSizeBox v={v} edit={edit} can={can} matchedParent={matchedParent} matchedCode={matchedCode} />
       <TiktokDescriptionBox v={v} edit={edit} can={can} desc={desc} />
     </div>
   );
@@ -511,6 +552,7 @@ export function TiktokImagesPanel({ state, onOpen, edit, matchedParent, matchedC
 
 /** กล่องพัสดุ (เฟส C) — น้ำหนัก กก. + ยาว×กว้าง×สูง ซม. · ใช้คิดค่าส่ง · ไทยไม่บังคับขนาดกล่อง */
 function TiktokPackageBox({ v, edit }: { v: TiktokListingView; edit: TiktokEditApi }) {
+  const [unit, setUnit] = useWeightUnit();
   const can = edit.canEdit && !!edit.pkg && !edit.mediaBlock;
   const base = edit.mediaBase?.pkg ?? v.pkg;
   const p = can ? edit.pkg! : base;
@@ -525,12 +567,22 @@ function TiktokPackageBox({ v, edit }: { v: TiktokListingView; edit: TiktokEditA
         {v.pendingPkg && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-normal text-amber-700">ค่าใหม่รอ TikTok ตรวจ</span>}
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <label className="block text-xs text-slate-500">น้ำหนัก (กก.){input("weight", "0.001", "0.5")}</label>
+        <label className="block text-xs text-slate-500">
+          <span className="flex items-center justify-between gap-1">น้ำหนัก
+            <select value={unit} onChange={(e) => setUnit(e.target.value as WeightUnit)} className="h-6 rounded border border-slate-200 bg-white px-1 text-[11px]" aria-label="หน่วยน้ำหนัก">
+              <option value="kg">กิโลกรัม</option><option value="g">กรัม</option>
+            </select>
+          </span>
+          {can
+            ? <input type="number" min="0" step={unit === "g" ? "1" : "0.001"} inputMode="decimal" value={kgToUnit(p.weight, unit) ?? ""} placeholder={unit === "g" ? "500" : "0.5"}
+                onChange={(e) => edit.setPkg({ weight: unitToKg(numOrNull(e.target.value), unit) })} className={cls("weight")} />
+            : <div className="flex h-9 items-center justify-end rounded-lg border border-slate-200 bg-slate-50 px-2 text-sm">{kgToUnit(p.weight, unit) ?? "—"}</div>}
+        </label>
         <label className="block text-xs text-slate-500">ยาว (ซม.){input("length", "1", "—")}</label>
         <label className="block text-xs text-slate-500">กว้าง (ซม.){input("width", "1", "—")}</label>
         <label className="block text-xs text-slate-500">สูง (ซม.){input("height", "1", "—")}</label>
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">วัดหลังแพ็กแล้ว · ใช้คิดค่าส่ง (ใส่ผิดอาจโดนเก็บค่าส่งเพิ่ม) · น้ำหนักทศนิยมได้ 3 ตำแหน่ง · ขนาดเป็นจำนวนเต็ม ใส่ครบ 3 ช่อง{can ? " · ส่งพร้อมปุ่มบันทึกขึ้น TikTok (TikTok ตรวจใหม่)" : ""}</p>
+      <p className="mt-2 text-[11px] text-slate-400">วัดหลังแพ็กแล้ว · ใช้คิดค่าส่ง (ใส่ผิดอาจโดนเก็บค่าส่งเพิ่ม) · เลือกกรอกเป็นกรัมหรือกิโลกรัมได้ (ส่ง TikTok เป็นกิโลกรัม ทศนิยม 3 ตำแหน่ง) · ขนาดเป็นจำนวนเต็ม ใส่ครบ 3 ช่อง{can ? " · ส่งพร้อมปุ่มบันทึกขึ้น TikTok (TikTok ตรวจใหม่)" : ""}</p>
     </div>
   );
 }
@@ -653,6 +705,110 @@ export function TiktokOptionsPanel({ state, edit, erpRows }: { state: TiktokList
       <p className="text-[11px] text-slate-400">
         {canPrice ? `ราคา = ราคาที่ลูกค้าเห็นก่อนส่วนลด · TikTok ไทยรับ ${TTS_PRICE_MIN.toLocaleString()}–${TTS_PRICE_MAX.toLocaleString()} บาท · มีผลทันทีเมื่อกดบันทึก (ส่วนลด/โปรโมชันแก้ใน Seller Center) · ` : ""}สต๊อกดูอย่างเดียว — ยังซิงค์ผ่าน BigSeller
       </p>
+    </div>
+  );
+}
+
+
+// ───────────────────────── คุณลักษณะของหมวด · COD · ตารางขนาด (ลิ้นชัก) ─────────────────────────
+/** ช่อง/กติกาของหมวดจาก TikTok (GET /api/tiktok-shop/category-meta · แคชฝั่ง server 10 นาที) */
+function useTiktokCategoryMeta(listingId: string | null, categoryId: string | null): TiktokEditApi["meta"] {
+  const [st, setSt] = useState<{ key: string | null; fields: TtsAttrField[] | null; rules: TtsCategoryRules | null; error: string | null }>({ key: null, fields: null, rules: null, error: null });
+  const key = listingId && categoryId ? `${listingId}:${categoryId}` : null;
+  useEffect(() => {
+    if (!key || !listingId || !categoryId) return;
+    let alive = true;
+    apiFetch(`/api/tiktok-shop/category-meta?listing_id=${encodeURIComponent(listingId)}&category_id=${encodeURIComponent(categoryId)}`)
+      .then((r) => r.json())
+      .then((j: { fields: TtsAttrField[] | null; rules: TtsCategoryRules | null; error: string | null }) => { if (alive) setSt({ key, fields: j.fields ?? null, rules: j.rules ?? null, error: j.error ?? null }); })
+      .catch(() => { if (alive) setSt({ key, fields: null, rules: null, error: "โหลดช่องของหมวดไม่สำเร็จ" }); });
+    return () => { alive = false; };
+  }, [key, listingId, categoryId]);
+  const mine = st.key === key;
+  return { fields: mine ? st.fields : null, rules: mine ? st.rules : null, error: mine ? st.error : null, loading: !!key && !mine };
+}
+
+/** กล่องคุณลักษณะ — ช่องกรอกกลาง LazadaAttrField (แปลงช่อง TikTok ด้วย ttsAttrDef) · ช่องบังคับ + ที่มีค่าขึ้นก่อน */
+function TiktokAttrsBox({ v, edit, can }: { v: TiktokListingView; edit: TiktokEditApi; can: boolean }) {
+  const [more, setMore] = useState(false);
+  const fields = edit.meta.fields;
+  const cur = edit.attrs ?? v.attrs;
+  const filled = (f: TtsAttrField) => (cur[f.id] ?? []).length > 0;
+  const main = (fields ?? []).filter((f) => f.required || filled(f) || (v.attrs[f.id] ?? []).length > 0);
+  const rest = (fields ?? []).filter((f) => !main.includes(f));
+  const missing = edit.attrPlan?.missingRequired ?? [];
+  return (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+        คุณลักษณะของหมวด
+        {missing.length > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-normal text-rose-700">ช่องบังคับยังว่าง {missing.length}</span>}
+      </div>
+      {!v.categoryId ? <p className="text-xs text-slate-500">ไม่รู้หมวดของสินค้านี้ — กดดึงตัวนี้จาก TikTok</p>
+        : edit.meta.loading ? <LoadingState label="กำลังโหลดช่องของหมวดจาก TikTok…" className="py-3" />
+        : !fields ? <p className="text-xs text-rose-600">{edit.meta.error ?? "โหลดช่องของหมวดไม่สำเร็จ"}</p>
+        : fields.length === 0 ? <p className="text-xs text-slate-500">หมวดนี้ไม่มีช่องคุณลักษณะ</p>
+        : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(more ? fields : main).map((f) => {
+                const def = ttsAttrDef(f);
+                return (
+                  <LazadaAttrField key={f.id} def={def} value={ttsAttrToText(cur[f.id])} base={ttsAttrToText(v.attrs[f.id])} can={can}
+                    onChange={(text) => edit.setAttr(f.id, ttsAttrFromText(f, text))} />
+                );
+              })}
+            </div>
+            {rest.length > 0 && <button type="button" onClick={() => setMore((x) => !x)} className="mt-2 text-xs text-violet-700 hover:underline">{more ? "ซ่อนช่องเพิ่มเติม" : `แสดงเพิ่มเติม (${rest.length} ช่อง)`}</button>}
+            <p className="mt-2 text-[11px] text-slate-400">ตัวเลือกมาจาก TikTok ตามหมวด · ช่องที่มี * = บังคับ{can ? " · แก้แล้วกดบันทึกขึ้น TikTok (TikTok ตรวจใหม่)" : ""}</p>
+          </>
+        )}
+    </div>
+  );
+}
+
+/** เก็บเงินปลายทาง + ตารางขนาด (รูป) */
+function TiktokCodSizeBox({ v, edit, can, matchedParent, matchedCode }: { v: TiktokListingView; edit: TiktokEditApi; can: boolean; matchedParent?: string | null; matchedCode?: string | null }) {
+  const sys = useSystemImages(matchedParent ?? null);
+  const [picking, setPicking] = useState(false);
+  const rules = edit.meta.rules;
+  const cod = edit.cod ?? v.cod;
+  const codOff = rules?.codSupported === false;
+  const sizeRef = edit.sizeChart ?? (v.sizeChart ? `tts:${v.sizeChart.uri}` : null);
+  const sizeSrc = sizeRef?.startsWith("tts:") ? (v.sizeChart?.url ?? null) : sizeRef ? listingImgSrc(sizeRef, 400) : null;
+  const sizeNo = rules?.sizeChartSupported === false;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="rounded-xl border border-slate-200 p-3">
+        <div className="mb-2 text-xs font-semibold text-slate-600">เก็บเงินปลายทาง (COD)</div>
+        {can && !codOff
+          ? <ToggleSwitch on={!!cod} size="sm" label={<span className="text-sm text-slate-700">{cod ? "เปิดให้เก็บเงินปลายทาง" : "ปิด"}</span>} onChange={(on) => edit.setCod(on)} />
+          : <span className="text-sm text-slate-700">{cod == null ? "ไม่ได้ตั้ง" : cod ? "เปิด" : "ปิด"}</span>}
+        <p className="mt-1 text-[11px] text-slate-400">{codOff ? "หมวดนี้ TikTok ไม่รองรับเก็บเงินปลายทาง" : rules?.codSupported ? "หมวดนี้รองรับ COD" : "กดบันทึกขึ้น TikTok เพื่อส่ง"}</p>
+      </div>
+      <div className="rounded-xl border border-slate-200 p-3">
+        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
+          ตารางขนาด
+          {rules?.sizeChartRequired && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-normal text-rose-700">หมวดนี้บังคับ</span>}
+        </div>
+        {sizeNo ? <p className="text-xs text-slate-500">หมวดนี้ TikTok ไม่รองรับตารางขนาด</p> : (
+          <div className="flex items-start gap-3">
+            <div className={`flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white ${edit.sizeChart !== (v.sizeChart ? `tts:${v.sizeChart.uri}` : null) ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200"} ${sizeSrc ? "" : "border-dashed text-slate-300"}`}>
+              {sizeSrc ? <img src={sizeSrc} alt="" className="h-full w-full object-contain" /> : <Icon name="image" />}
+            </div>
+            <div className="min-w-0 text-xs">
+              <div className="text-slate-600">{sizeRef ? (sizeRef.startsWith("r2:") ? "รูปใหม่จากระบบ (ส่งตอนบันทึก)" : "มีรูปตารางขนาดบน TikTok") : "ยังไม่มี"}</div>
+              {can && <button type="button" disabled={!matchedParent} onClick={() => { setPicking(true); sys.load(); }} className="mt-1 text-violet-700 hover:underline disabled:opacity-40" title={matchedParent ? "" : "จับคู่สินค้าในระบบก่อน"}>{sizeRef ? "เปลี่ยนรูป" : "เลือกรูปจากระบบ"}</button>}
+              <p className="mt-1 text-[11px] text-slate-400">รูปตาราง ด้านสั้น ≥ 1,024px · ทำเป็นจัตุรัสพื้นขาวแล้วฝากกับ TikTok</p>
+            </div>
+          </div>
+        )}
+        {can && (
+          <ListingImagePicker open={picking} onClose={() => setPicking(false)} mode="variant" storageKey="tiktok-size-chart-picker"
+            title="เลือกรูปตารางขนาด" description="เลือกรูปตารางขนาดจากคลังรูปของสินค้า (ควรเป็นตารางชัด ๆ ด้านสั้นอย่างน้อย 1,024px)"
+            matchedParent={matchedParent ?? null} matchedCode={matchedCode} sysImages={sys.images}
+            onPick={(ref) => { edit.setSizeChart(ref); setPicking(false); }} />
+        )}
+      </div>
     </div>
   );
 }
