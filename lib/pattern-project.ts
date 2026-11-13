@@ -13,6 +13,7 @@ import { cleanAllow, cleanFoldEdges, cleanInnerLines, cleanShape, edgeAllowances
 import type { PatternLineInput } from "@/lib/pattern-sheet";
 import { cleanPieceLink, type PieceLink } from "@/lib/pattern-link";
 import { edgeBandLine } from "@/lib/pattern-shaping";
+import { cleanConstraints, type Constraint } from "@/lib/pattern-constraints";
 import { SEAM_KINDS, checkSeam, cleanEdgeMeta, cleanSeams, isPartialSide, pieceEdges, seamLabel, sideRange, type EdgeMeta, type Seam, type SeamSide } from "@/lib/pattern-seams";
 
 export const PATTERN_PROJECT_STATUSES = ["draft", "ready", "archived"] as const;
@@ -58,7 +59,8 @@ export const BOND_KINDS: { key: BondKind; th: string; en: string; add: number; m
 export type PieceInfo = { code?: string; role?: PieceRole; bond?: BondKind; skive?: number; solid?: boolean;
   /** Bag CAD รอบ E: มุมเส้นตัด (ไม่มี = มุมแหลม) · แบบรอยบาก (ไม่มี = เดี่ยว) · ทางผ้าทางเดียว · วางคว่ำหน้า · ตัดเป็นคู่ซ้าย-ขวา (กลับด้าน) */
   corner?: "bevel" | "round"; notch?: "double" | "v"; nap?: boolean; face?: "down"; pair?: boolean;
-  /** Bag CAD รอบ F: ชดเชยความหนาต่อการพับ 1 ทบ (ซม.) — บวกเข้าเผื่อของขอบพับ · ค่าตั้งต้นจากวัสดุ (MatProps.fold) */ comp?: number };
+  /** Bag CAD รอบ F: ชดเชยความหนาต่อการพับ 1 ทบ (ซม.) — บวกเข้าเผื่อของขอบพับ · ค่าตั้งต้นจากวัสดุ (MatProps.fold) */ comp?: number;
+  /** Bag CAD รอบ I: เงื่อนไขรูปชิ้น + ขนาดบังคับ (lib/pattern-constraints) */ cons?: Constraint[] };
 export function cleanPieceInfo(raw: unknown): PieceInfo | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>, out: PieceInfo = {};
@@ -75,6 +77,8 @@ export function cleanPieceInfo(raw: unknown): PieceInfo | null {
   if (r.face === "down") out.face = "down";
   if (r.pair === true) out.pair = true;
   if (typeof r.comp === "number" && Number.isFinite(r.comp) && r.comp > 0 && r.comp <= 1) out.comp = Math.round(r.comp * 1000) / 1000;
+  const cons = cleanConstraints(r.cons);
+  if (cons) out.cons = cons;
   return Object.keys(out).length ? out : null;
 }
 

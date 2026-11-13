@@ -36,6 +36,7 @@ import { applyLinks, followerSeams, linkTargets, linkedShape, type PieceLink } f
 import { formatLength, parseLength, unitLabel, type LengthUnit } from "@/lib/length-units";
 import { edgePlan, migrateSeams, remapEdgeMeta, remapEdgeValues, type EdgePlan } from "@/lib/pattern-edge-map";
 import { toolOfBoard, toolTitle } from "@/lib/pattern-tools";
+import { CONSTRAINT_KINDS, constraintNow, cutAlongLine, freedom, remapConstraints, solveConstraints, type Constraint, type ConstraintKind } from "@/lib/pattern-constraints";
 import { boxCorner, dartOnEdge, edgeBandLine, gussetFromEdges, gussetRun, pleatPiece, pleatTake, slashSpread, withTakes, type ShapingResult } from "@/lib/pattern-shaping";
 import { NOTCH_STYLES, bendEdge, chamferCorner, cornerAngle, edgeRadius, filletCorner, joinEdgeWithNext, moveEdge, notchStyleSegs, objectSnap, polygonInBox, splitEdgeAt, splitEdgeEven } from "@/lib/pattern-edit";
 export type { RefImage };
@@ -295,6 +296,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [gus, setGus] = useState<{ count: number; depth: number; pair: string }>({ count: 0, depth: 8, pair: "" });   // ชิ้นข้างจากขอบ (count 0 = หาให้เอง)
   const [boxC, setBoxC] = useState(4);                                             // มุมกล่อง (ซม.)
   const [pleat, setPleat] = useState<{ axis: "v" | "h"; n: number; d: number; kind: "knife" | "box" }>({ axis: "v", n: 2, d: 2, kind: "knife" });
+  const [conForm, setConForm] = useState<{ kind: ConstraintKind; e: number; f: number; n: number; v: number; axis: "v" | "h" }>({ kind: "length", e: 1, f: 2, n: 1, v: 20, axis: "v" });   // รอบ I: เพิ่มเงื่อนไข (เลขขอบ/จุดนับจาก 1)
+  const [conMsg, setConMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [spread, setSpread] = useState<{ axis: "v" | "h"; at: number; amt: number; mode: "parallel" | "pivot"; hinge: "min" | "max" }>({ axis: "v", at: 50, amt: 3, mode: "parallel", hinge: "max" });
   const [tool, setTool] = useState<Tool>(initialTool ?? "rect");
   // ── เย็บ (ตะเข็บอยู่กับหน้าที่เรียก · กระดานแค่วาดและส่งการแก้กลับ) ──
@@ -398,6 +401,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if (p.allowEdges && p.allowEdges.length === plan.oldN) fix.allowEdges = remapEdgeValues(p.allowEdges, plan);
       if (p.foldEdges && p.foldEdges.length === plan.oldN) fix.foldEdges = remapEdgeValues(p.foldEdges, plan);
       if (p.edgeMeta && p.edgeMeta.length === plan.oldN) { const r = remapEdgeMeta(p.edgeMeta, plan); fix.edgeMeta = r.meta; lost += r.lost; }
+      if (p.info?.cons?.length) { const cons = remapConstraints(p.info.cons, plan); fix.info = cleanPieceInfo({ ...p.info, cons: cons.length ? cons : undefined }); }   // เงื่อนไขรูปชิ้น (รอบ I) ตามขอบใหม่
       return { ...p, ...fix };
     });
     if (!plans.size) return { pieces: next, seams: null, lost };
@@ -2663,6 +2667,63 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     </div>
                   );
                 })()}
+                {pieceInfoFields && level >= 3 && selPiece.shape.k !== "ellipse" && (() => {   // เงื่อนไขรูปชิ้น + ขนาดบังคับ (รอบ I)
+                  const cons = selPiece.info?.cons ?? [], nN = pieceEdges(selPiece.shape).length, dof = freedom(nN, cons);
+                  const setCons = (next: Constraint[]) => patchPiece(selPiece.id, (p) => ({ ...p, info: cleanPieceInfo({ ...(p.info ?? {}), cons: next.length ? next : undefined }) }));
+                  const solve = (list: Constraint[], added?: string) => {
+                    if (selPiece.link) { setConMsg({ ok: false, text: t("ชิ้นนี้ผูกรูปกับชิ้นต้นแบบ — แก้ที่ชิ้นต้นแบบ", "This piece follows its source — edit the source piece") }); return; }
+                    const r = solveConstraints(selPiece.shape, list);
+                    const clash = added ? r.conflicts.filter(([a, b]) => a === added || b === added).map(([a, b]) => (a === added ? b : a)) : [];
+                    if (clash.length) {   // เงื่อนไขใหม่ชนกับข้อเดิม → ไม่เพิ่ม ไม่ขยับรูป
+                      const nos = [...new Set(clash)].map((id) => `#${cons.findIndex((c) => c.id === id) + 1}`).join(", ");
+                      setConMsg({ ok: false, text: t(`เงื่อนไขใหม่ขัดกับข้อ ${nos} — ยังไม่ได้เพิ่ม (ถ้าจะใช้ค่าใหม่ ลบข้อเดิมก่อน)`, `The new condition conflicts with ${nos} — not added (remove the old one first to use the new value)`) });
+                      return;
+                    }
+                    patchPiece(selPiece.id, (p) => ({ ...p, shape: r.shape, info: cleanPieceInfo({ ...(p.info ?? {}), cons: list.length ? list : undefined }) }));
+                    const nm = (id: string) => { const k = list.findIndex((c) => c.id === id); return k >= 0 ? `#${k + 1}` : id; };
+                    setConMsg(r.ok ? { ok: true, text: t(`จัดรูปตามเงื่อนไขครบแล้ว (จุดขยับมากสุด ${fmtL(r.moved)})`, `All conditions met (largest move ${fmtL(r.moved)})`) }
+                      : { ok: false, text: t(`ยังไม่ผ่าน ${r.status.filter((x) => !x.ok).length} ข้อ${r.conflicts.length ? ` · คู่ที่ขัดกัน: ${r.conflicts.map(([a, b]) => `${nm(a)} กับ ${nm(b)}`).join(", ")}` : ""}`, `${r.status.filter((x) => !x.ok).length} not met${r.conflicts.length ? ` · conflicting: ${r.conflicts.map(([a, b]) => `${nm(a)} & ${nm(b)}`).join(", ")}` : ""}`) });
+                  };
+                  const need = CONSTRAINT_KINDS.find((k) => k.key === conForm.kind)!.needs;
+                  const add = () => {
+                    const c: Constraint = { id: `c${Date.now().toString(36)}`, kind: conForm.kind };
+                    if (need === "e" || need === "ef") c.e = Math.max(0, Math.min(nN - 1, conForm.e - 1));
+                    if (need === "ef") c.f = Math.max(0, Math.min(nN - 1, conForm.f - 1));
+                    if (need === "n") { c.n = Math.max(0, Math.min(nN - 1, conForm.n - 1)); c.v = conForm.v; }
+                    if (conForm.kind === "length") c.v = conForm.v;
+                    if (need === "axis") c.axis = conForm.axis;
+                    if (need === "ef" && c.e === c.f) { setConMsg({ ok: false, text: t("เลือกขอบ 2 ขอบที่ต่างกัน", "Pick two different edges") }); return; }
+                    solve([...cons, c], c.id);
+                  };
+                  const label = (c: Constraint) => { const k = CONSTRAINT_KINDS.find((x) => x.key === c.kind)!; const where = c.e != null ? `${t("ขอบ", "edge")} ${c.e + 1}${c.f != null ? ` + ${c.f + 1}` : ""}` : c.n != null ? `${t("จุด", "point")} ${c.n + 1}` : c.axis === "h" ? t("บน-ล่าง", "top-bottom") : t("ซ้าย-ขวา", "left-right"); return `${t(k.th, k.en)} · ${where}${c.kind === "length" ? ` = ${fmtL(c.v ?? 0)}` : c.kind === "angle" ? ` = ${c.v}°` : ""}`; };
+                  return (
+                    <div className="mb-1.5 space-y-1.5 rounded-md border border-indigo-200 bg-indigo-50/50 p-2" data-guide="constraints" data-constraints>
+                      <div className="flex items-center justify-between font-medium text-slate-600">{t("เงื่อนไขรูปชิ้น / ขนาดบังคับ", "Shape conditions / driving dimensions")}
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${dof > 0 ? "bg-slate-100 text-slate-600" : dof === 0 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`} data-dof>{dof > 0 ? t(`ยังขยับได้ ${dof}`, `${dof} free`) : dof === 0 ? t("ครบพอดี", "Fully defined") : t(`เกิน ${-dof}`, `${-dof} over`)}</span></div>
+                      {cons.map((c, k) => { const now = constraintNow(selPiece.shape, c); return (
+                        <div key={c.id} className="flex items-center gap-1.5" data-constraint-row><span className="text-slate-400">#{k + 1}</span><span className="min-w-0 flex-1 truncate">{label(c)}</span>
+                          {now != null && (c.kind === "length" || c.kind === "angle") && <span className="tabular-nums text-slate-400">{c.kind === "angle" ? `${now}°` : fmtL(now)}</span>}
+                          {!readonly && <button type="button" onClick={() => setCons(cons.filter((x) => x.id !== c.id))} className="text-slate-300 hover:text-rose-600" aria-label={t("ลบเงื่อนไข", "Remove condition")}>✕</button>}</div>); })}
+                      {!readonly && <>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <select value={conForm.kind} onChange={(e) => setConForm((x) => ({ ...x, kind: e.target.value as ConstraintKind }))} className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1 text-xs" data-constraint-kind>
+                            {CONSTRAINT_KINDS.map((k) => <option key={k.key} value={k.key}>{t(k.th, k.en)}</option>)}
+                          </select>
+                          {(need === "e" || need === "ef") && <><span className="text-slate-500">{t("ขอบ", "Edge")}</span><NumField value={conForm.e} min={1} max={nN} step={1} label={t("เลขขอบ", "Edge no.")} onCommit={(v) => setConForm((x) => ({ ...x, e: Math.round(v) }))} className="w-12" /></>}
+                          {need === "ef" && <><span className="text-slate-500">+</span><NumField value={conForm.f} min={1} max={nN} step={1} label={t("เลขขอบที่สอง", "Second edge no.")} onCommit={(v) => setConForm((x) => ({ ...x, f: Math.round(v) }))} className="w-12" /></>}
+                          {need === "n" && <><span className="text-slate-500">{t("จุด", "Point")}</span><NumField value={conForm.n} min={1} max={nN} step={1} label={t("เลขจุด", "Point no.")} onCommit={(v) => setConForm((x) => ({ ...x, n: Math.round(v) }))} className="w-12" /></>}
+                          {conForm.kind === "length" && <NumField len value={conForm.v} min={0.2} max={500} label={t("ความยาว", "Length")} onCommit={(v) => setConForm((x) => ({ ...x, v }))} className="w-16" />}
+                          {conForm.kind === "angle" && <><NumField value={conForm.v} min={1} max={359} step={1} label={t("องศา", "Degrees")} onCommit={(v) => setConForm((x) => ({ ...x, v }))} className="w-14" />°</>}
+                          {need === "axis" && <select value={conForm.axis} onChange={(e) => setConForm((x) => ({ ...x, axis: e.target.value === "h" ? "h" : "v" }))} className="h-7 rounded-md border border-slate-200 bg-white px-1 text-xs"><option value="v">{t("ซ้าย-ขวา", "Left-right")}</option><option value="h">{t("บน-ล่าง", "Top-bottom")}</option></select>}
+                          <button type="button" data-constraint-add onClick={add} className="h-7 rounded-md border border-indigo-200 bg-white px-2 text-indigo-700 hover:bg-indigo-50">{t("เพิ่ม + จัดรูป", "Add + solve")}</button>
+                        </div>
+                        {cons.length > 0 && <button type="button" data-constraint-solve onClick={() => solve(cons)} className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">{t("จัดรูปตามเงื่อนไขอีกครั้ง", "Solve again")}</button>}
+                        <div className="text-[11px] text-slate-400">{t("เลขขอบ/จุดนับจาก 1 ตามลำดับรอบชิ้น (ดูเลขขอบได้ที่ B + คลิกขอบ) · แก้รูปด้วยมือแล้วกดจัดรูปอีกครั้ง", "Edge/point numbers count from 1 around the piece (see edge numbers with B + click) · after hand edits press Solve again")}</div>
+                      </>}
+                      {conMsg && <p className={`text-[11px] ${conMsg.ok ? "text-emerald-700" : "text-amber-700"}`} data-constraint-msg>{conMsg.text}</p>}
+                    </div>
+                  );
+                })()}
                 {pieceInfoFields && level >= 2 && !readonly && (
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5" data-guide="notch-style">
                     <span className="text-slate-500">{t("แบบรอยบาก", "Notch style")}</span>
@@ -2786,6 +2847,30 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                           <span className="shrink-0 tabular-nums text-slate-500" title={l.name}>{fmtL(lenOfPts(l.pts))}{used ? ` · ${t("เย็บแล้ว", "sewn")}` : ""}</span>
                           {!readonly && <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, inner: (p.inner ?? []).filter((q) => q.id !== l.id) }))} title={used ? t("ลบเส้นนี้ (ตะเข็บที่เย็บกับเส้นนี้จะขึ้นว่าต้องเย็บใหม่)", "Delete this line (its seam will need redoing)") : t("ลบเส้นนี้", "Delete this line")} aria-label={t("ลบเส้นใน", "Delete inner line")} className="shrink-0 text-slate-400 hover:text-red-600"><Icon value="i:x" /></button>}
                         </div>
+                        {picked && !readonly && l.kind !== "hw" && l.kind !== "dim" && l.pts.length >= 2 && level >= 3 && <button type="button" data-cut-line onClick={() => {
+                          const r = cutAlongLine(selPiece.shape, l.pts[0], l.pts[l.pts.length - 1]);
+                          if (!r || selPiece.link) { setMsg({ tone: "err", text: selPiece.link ? t("ชิ้นนี้ผูกรูปกับชิ้นต้นแบบ — แก้ที่ชิ้นต้นแบบ", "This piece follows its source — edit the source piece") : t("ตัดไม่ได้ — เส้นต้องผ่านขอบชิ้น 2 จุดพอดี (ชิ้นเว้าที่เส้นผ่านหลายครั้งตัดไม่ได้)", "Can't cut — the line must cross the outline exactly twice") }); return; }
+                          const st = Date.now().toString(36), half = (side: 1 | -1) => (q: { pts: Pt[] }) => r.side(q.pts[Math.floor(q.pts.length / 2)]) === side;
+                          const mk = (shape: Shape, side: 1 | -1, k: number): Piece => {
+                            const keepIn = (selPiece.inner ?? []).filter((q) => q.id !== l.id && half(side)(q));
+                            const holes = selPiece.holes.filter((h) => { const b = shapeBox(h); return r.side([b.x + b.w / 2, b.y + b.h / 2]) === side; });
+                            const gr = selPiece.grain && selPiece.grain.length === 2 ? selPiece.grain : null, gm: Pt | null = gr ? [(gr[0][0] + gr[1][0]) / 2, (gr[0][1] + gr[1][1]) / 2] : null;
+                            const b = shapeBox(shape), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+                            const grain = gr && gm ? (r.side(gm) === side ? gr : [[cx + (gr[0][0] - gm[0]), cy + (gr[0][1] - gm[1])], [cx + (gr[1][0] - gm[0]), cy + (gr[1][1] - gm[1])]] as Pt[]) : null;
+                            return { ...selPiece, id: newId(), pid: `${selPiece.pid.slice(0, 20)}c${st}${k}`, name: `${selPiece.name || t("ชิ้น", "Piece")} (${k})`, shape, holes, inner: keepIn.length ? keepIn : null, notches: (selPiece.notches ?? []).filter((q) => r.side(q) === side), grain, allowEdges: null, foldEdges: null, edgeMeta: null, link: null, info: selPiece.info ? cleanPieceInfo({ ...selPiece.info, cons: undefined }) : null };
+                          };
+                          const A = mk(r.left, r.sides[0], 1), a0 = l.pts[0], a1 = l.pts[l.pts.length - 1], dl = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
+                          const B0 = mk(r.right, r.sides[1], 2), nx = -(a1[1] - a0[1]) / dl * r.sides[1], ny = (a1[0] - a0[0]) / dl * r.sides[1];
+                          const boxes = [shapeBox(A.shape), ...piecesRef.current.filter((p) => p.id !== selPiece.id).map((p) => shapeBox(p.shape))];
+                          const clear = (q: Piece) => { const b = shapeBox(q.shape); return !boxes.some((o) => b.x < o.x + o.w + 2 && o.x < b.x + b.w + 2 && b.y < o.y + o.h + 2 && o.y < b.y + b.h + 2); };
+                          let B = movePiece(B0, nx * 3, ny * 3);   // ขยับชิ้นที่ 2 ออกจากรอยตัดทีละ 3 ซม. จนไม่ทับชิ้นอื่น
+                          for (let k = 2; k <= 30 && !clear(B); k++) B = movePiece(B0, nx * 3 * k, ny * 3 * k);
+                          const gone = (seamsRef.current ?? []).filter((x) => x.a.pid === selPiece.pid || x.b.pid === selPiece.pid).length;
+                          commit(piecesRef.current.flatMap((p) => (p.id === selPiece.id ? [A, B] : [p])));
+                          if (onSeamsChange) emitSeams([...(seamsRef.current ?? []).filter((x) => x.a.pid !== selPiece.pid && x.b.pid !== selPiece.pid), { id: `s${st}cut`, a: { pid: A.pid, from: r.cutEdge[0], count: 1, n: pieceEdges(A.shape).length }, b: { pid: B.pid, from: r.cutEdge[1], count: 1, n: pieceEdges(B.shape).length }, rev: true, name: t("รอยตัด", "Cut seam") }]);
+                          setSel(A.id); setInnerSel(null);
+                          setMsg({ tone: gone ? "err" : "ok", text: t(`ตัดเป็น 2 ชิ้นแล้ว + ตะเข็บเย็บกลับตามรอยตัด (ขอบตัดได้เผื่อเย็บตามชิ้น)${gone ? ` · ตะเข็บเดิมของชิ้นนี้ ${gone} แนวต้องเย็บใหม่` : ""}`, `Cut into 2 pieces + a seam along the cut (cut edges get the piece allowance)${gone ? ` · ${gone} old seam(s) of this piece need redoing` : ""}`) });
+                        }} className="h-7 w-full rounded-md border border-rose-200 bg-white px-2 text-rose-700 hover:bg-rose-50">{t("ตัดชิ้นตามเส้นนี้ + เย็บกลับ", "Cut the piece along this line + seam")}</button>}
                         {picked && (readonly ? <div className="tabular-nums text-slate-500">{t(`ห่างจากขอบบน ${fmtL(off.top)} · ขอบซ้าย ${fmtL(off.left)}`, `${fmtL(off.top)} from the top · ${fmtL(off.left)} from the left`)}</div> : (
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                             <span>{t("ห่างจากขอบบน", "From top")}</span><NumField len value={Math.round(off.top * 100) / 100} min={-500} max={500} step={0.5} label={t(`เส้นในห่างจากขอบบนของชิ้น ${uL}`, `Inner line distance from the piece's top ${uL}`)} onCommit={(v) => setLine((q) => placeInner(q, pb, { top: v }))} className="w-16" />

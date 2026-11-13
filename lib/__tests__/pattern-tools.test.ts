@@ -62,6 +62,7 @@ describe("ค้นหาเครื่องมือ", () => {
   it("รอบ H: ส่งออก/เอกสารค้นเจอ", () => {
     expect(ids("csv")[0]).toBe("csv-export"); expect(ids("aama")[0]).toBe("dxf-profile"); expect(ids("a3")[0]).toBe("paper");
     expect(ids("ไฟล์โปรเจกต์")[0]).toBe("project-file"); expect(ids("เทียบรุ่น")[0]).toBe("compare"); expect(ids("tech pack")[0]).toBe("tech-pack");
+    expect(ids("ขนาดบังคับ")[0]).toBe("constraint"); expect(ids("constraint")[0]).toBe("constraint"); expect(ids("ตัดชิ้น")[0]).toBe("cut-line");
   });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });
