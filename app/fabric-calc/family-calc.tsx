@@ -102,7 +102,7 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
               const w = Number(l.cut_width) || 0, h = Number(l.cut_length) || 0;
               if (!(w > 0 && h > 0)) continue;
               const sku = String(l.component_sku ?? "") || "(ไม่ระบุรหัส)";
-              lines.push({ component_sku: sku, component_name: (l.component_name as string) ?? null, label: String(l.cut_block_code ?? "") || `${w}×${h}`, width_cm: w, length_cm: h, per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate });
+              lines.push({ component_sku: sku, component_name: (l.component_name as string) ?? null, label: String(l.piece_name ?? "") || String(l.cut_block_code ?? "") || `${w}×${h}`, width_cm: w, length_cm: h, per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate });
               if (!fabInfo[sku]) fabInfo[sku] = { face: Number(l.face_width_cm) || 0, sheetW: Number(l.sheet_width) || 0, sheetL: Number(l.sheet_length) || 0, supply: (l.supply_form as string) ?? null, uom: (l.uom as string) ?? null };
             }
             return { ...r, lines };

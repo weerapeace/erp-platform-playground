@@ -26,6 +26,7 @@ export function lineToRow(l: BomLine, bomCode: string, idx: number): Record<stri
     calc_mode:        l.calc_mode ?? "manual",
     cut_block_id:     l.cut_block_id ?? null,
     cut_block_code:   l.cut_block_code || null,
+    piece_name:       typeof l.piece_name === "string" && l.piece_name.trim() ? l.piece_name.trim().slice(0, 80) : null,   // ชื่อชิ้นตัด (2026-11-13)
     pieces:           l.pieces != null ? Number(l.pieces) : null,
     cut_width:        l.cut_width != null ? Number(l.cut_width) : null,
     cut_length:       l.cut_length != null ? Number(l.cut_length) : null,

@@ -31,6 +31,7 @@ export type BomReqLine = {
   uom: string | null;
   waste_percent?: number | null;
   cut_block_code?: string | null;
+  piece_name?: string | null;
   slot_code?: string | null;
   sequence?: number | null;
   [key: string]: unknown;

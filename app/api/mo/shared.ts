@@ -123,7 +123,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     };
     // ข้อมูลชั่วคราวไว้วางผ้า (ลบก่อน insert): จำนวนที่คูณของแถว + ห้ามหมุน + หน้ากว้าง/ผืนของบรรทัด
     const lay = {
-      no_rotate: !!l.no_rotate, form,
+      no_rotate: !!l.no_rotate, form, piece: (l.piece_name as string) || null,
       face: Number(l.face_width_cm) || 0,
       sheetW: Number(l.sheet_width) || 0, sheetL: Number(l.sheet_length) || 0,
     };
@@ -151,7 +151,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   // ผ้า/ลายพิมพ์/PU/ตัวเสริม (คิดตามหน้ากว้าง) และผ้าผืน: เอาทุกบล็อกของผ้าตัวเดียวกันมาวางรวมกันบนหน้าผ้าจริง
   // ตามจำนวนที่สั่ง → ได้ความยาวที่ต้องใช้จริง ไม่บวกเผื่อเสีย (ทับค่าที่คิดจากสูตรต่อชุด)
   // บรรทัดที่ข้อมูลไม่พอ (ไม่มีขนาดตัด/ไม่รู้หน้ากว้าง) → คงสูตรเดิม
-  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; form: string | null; face: number; sheetW: number; sheetL: number; rowQty: number }; __layQty?: number; __classicQty?: number };
+  type LayRow = Record<string, unknown> & { __lay?: { no_rotate: boolean; form: string | null; piece?: string | null; face: number; sheetW: number; sheetL: number; rowQty: number }; __layQty?: number; __classicQty?: number };
   const layNoteOf = new Map<string, { note: string; length_cm: number; eff: number }>();   // ต่อ component_sku (ไว้ใส่แถวสรุป)
   const layLayoutOf = new Map<string, LayLayout[]>();   // ผังการวางต่อ component_sku (ป๊อป "ดูผังการวาง")
   {   // คิดแบบวางผ้า "เสมอ" เพื่อเก็บตัวเลขทั้ง 2 วิธีคู่กัน (เจ้าของขอโชว์เทียบ) · ตัวที่ใช้จริงเลือกตาม fabricMode
@@ -175,7 +175,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     }
     for (const g of groups.values()) {
       const blocks: LayBlock[] = g.rows.map((m, i) => ({
-        key: `b${i}`, label: (m.cut_block_code as string) || `${m.cut_width}×${m.cut_length}`,   // รหัสบล็อกตัดก่อน (ป้ายในผัง · เจ้าของขอ 2026-11-13) ไม่มีก็ขนาด
+        key: `b${i}`, label: m.__lay?.piece || (m.cut_block_code as string) || `${m.cut_width}×${m.cut_length}`,   // ชื่อชิ้นในสูตร → รหัสบล็อกตัด → ขนาด (ป้ายในผัง · เจ้าของขอ 2026-11-13)
         width_cm: Number(m.cut_width) || 0, length_cm: Number(m.cut_length) || 0,
         total_pieces: (Number(m.pieces) || 1) * (m.__lay?.rowQty ?? 0),
         no_rotate: !!m.__lay?.no_rotate,

@@ -47,7 +47,7 @@ const newPiece = (p?: Partial<BuyPiece>): BuyPiece => ({ label: "", width_cm: 0,
 const QUICK_WIDTHS = [110, 137, 147, 150, 160];   // หน้ากว้างที่พบบ่อย (ซม.) — 137 ≈ 54" · 147 ≈ 58"
 
 type BomHead = { id: string; bom_code: string; product_sku: string | null; product_name: string | null; version: string | number | null };
-type BomLine = { component_sku?: string | null; component_name?: string | null; material_type?: string | null; cut_block_code?: string | null; cut_width?: number | null; cut_length?: number | null; pieces?: number | null; no_rotate?: boolean | null; face_width_cm?: number | null; size_variant?: boolean | null };
+type BomLine = { component_sku?: string | null; component_name?: string | null; material_type?: string | null; cut_block_code?: string | null; piece_name?: string | null; cut_width?: number | null; cut_length?: number | null; pieces?: number | null; no_rotate?: boolean | null; face_width_cm?: number | null; size_variant?: boolean | null };
 /** ผ้าให้เลือก (จากสูตร หรือจากใบสั่งผลิตเก่า) → กดแล้วได้ชิ้นตัด */
 type SrcFabric = { sku: string; name: string; note: string; pieces: Omit<BuyPiece, "key">[]; sized?: boolean; product?: string | null; mo_no?: string | null; mo_qty?: number };
 type Origin = { product_sku: string; component_sku: string; mo_no?: string | null; mo_qty?: number };
@@ -172,7 +172,7 @@ export function FabricBuyCalc() {
       for (const l of lines) {
         const sku = String(l.component_sku ?? "") || "(ไม่ระบุรหัส)";
         const f = m.get(sku) ?? { sku, name: String(l.component_name ?? sku), note: l.material_type ?? "", pieces: [], sized: false, product: b.product_sku };
-        f.pieces.push({ label: String(l.cut_block_code ?? "") || `${l.cut_width}×${l.cut_length}`, width_cm: Number(l.cut_width) || 0, length_cm: Number(l.cut_length) || 0, per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate });
+        f.pieces.push({ label: String(l.piece_name ?? "") || String(l.cut_block_code ?? "") || `${l.cut_width}×${l.cut_length}`, width_cm: Number(l.cut_width) || 0, length_cm: Number(l.cut_length) || 0, per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate });
         if (l.size_variant) f.sized = true;
         m.set(sku, f);
       }

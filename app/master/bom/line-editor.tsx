@@ -45,6 +45,7 @@ export type EditorLine = {
   is_optional:    boolean;
   cut_block_id:   number | null;
   cut_block_code: string;
+  piece_name:     string;            // ชื่อชิ้นตัด (เช่น ตัวหน้า · สาย) — โชว์ในผังวางผ้า/ใบวิธีตัด/หน้าคิดผ้า
   pieces:         number;
   cut_width:      number;
   cut_length:     number;
@@ -76,7 +77,7 @@ export function emptyLine(): EditorLine {
   return {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
     material_group_id: null, material_type: "", qty: 0, uom: "หลา", uom_id: null, waste_percent: 0, is_optional: false,
-    cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, sheet_width: 0, sheet_length: 0, slot_code: null,
+    cut_block_id: null, cut_block_code: "", piece_name: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, sheet_width: 0, sheet_length: 0, slot_code: null,
     size_variant: false, size_dim: "cut_length", size_values: {}, no_rotate: false, supply_form: null,
   };
 }
@@ -750,6 +751,11 @@ export function BomLineEditor({
           : <span className="text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700">รอ block</span>,
     },
     {
+      key: "piece_name", header: "ชื่อชิ้น", width: 120,
+      render: (l, u, ro) => !(usesWidth(l) || usesLength(l)) ? dash : ro ? <span className="text-xs text-slate-600">{l.piece_name || "—"}</span>
+        : <input value={l.piece_name ?? ""} placeholder="เช่น ตัวหน้า" onChange={(e) => u({ piece_name: e.target.value })} className={inputCls} title="ชื่อชิ้นตัด — โชว์ในผังวางผ้า ใบวิธีตัด และหน้าคิดผ้า" />,
+    },
+    {
       key: "cut_block", header: "บล็อกตัด", width: 150,
       render: (l, u, ro) => ro ? <span className="text-xs text-slate-500">{l.cut_block_code || "—"}</span> : (
         <CutBlockPicker code={l.cut_block_code} width={l.cut_width} length={l.cut_length}
@@ -1126,6 +1132,12 @@ export function BomLineEditor({
                       )}
                     </div>
                   )}
+
+                  <div className={rowCls}>
+                    <span className={labCls}>ชื่อชิ้น:</span>
+                    {readonly ? <span className="text-slate-600">{d.piece_name || "—"}</span>
+                      : <input value={d.piece_name ?? ""} placeholder="เช่น ตัวหน้า · สาย" onChange={(e) => u({ piece_name: e.target.value })} className="h-8 min-w-0 max-w-[220px] flex-1 rounded-lg border border-slate-200 px-2 text-sm" title="ชื่อชิ้นตัด — โชว์ในผังวางผ้า ใบวิธีตัด และหน้าคิดผ้า" />}
+                  </div>
 
                   <div className={rowCls}>
                     <span className={labCls}>บล็อกตัด:</span>

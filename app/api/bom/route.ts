@@ -39,6 +39,7 @@ export type BomLine = {
   calc_mode?:      string | null;   // manual | block
   cut_block_id?:   number | null;
   cut_block_code?: string | null;
+  piece_name?:     string | null;   // ชื่อชิ้นตัด (เช่น ตัวหน้า) — โชว์ในผังวางผ้า/ใบวิธีตัด
   pieces?:         number | null;
   cut_width?:      number | null;
   cut_length?:     number | null;

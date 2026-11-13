@@ -35,7 +35,7 @@ type BomLineRow = {
   id: string; slot_code: string | null; component_sku: string | null; component_name: string | null;
   qty: number; uom: string | null; waste_percent: number | null; is_optional: boolean;
   sequence: number | null; source: string | null; odoo_bom_line_id: number | null;
-  calc_mode: string | null; cut_block_id: number | null; cut_block_code: string | null;
+  calc_mode: string | null; cut_block_id: number | null; cut_block_code: string | null; piece_name?: string | null;
   pieces: number | null; cut_width: number | null; cut_length: number | null;
   face_width_cm: number | null; sheet_width?: number | null; sheet_length?: number | null; material_type: string | null;
   sku_id: string | null; image_key: string | null; uom_id: string | null;
@@ -132,7 +132,7 @@ export default function BomWorkspacePage() {
     component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
     material_group_id: null, material_type: l.material_type ?? "",
     qty: Number(l.qty) || 0, uom: l.uom ?? "", uom_id: l.uom_id ?? null, waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
-    cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
+    cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "", piece_name: l.piece_name ?? "",
     pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
     face_width_cm: Number(l.face_width_cm) || 0,
     sheet_width: Number(l.sheet_width) || 0, sheet_length: Number(l.sheet_length) || 0,
@@ -319,7 +319,7 @@ export default function BomWorkspacePage() {
         slot_code: l.slot_code, component_sku: l.component_sku || null, component_name: l.component_name || null,
         qty: l.qty, uom: l.uom || null, waste_percent: l.waste_percent, is_optional: l.is_optional,
         sequence: i + 1, source: l.source ?? "manual", odoo_bom_line_id: l.odoo_bom_line_id ?? null,
-        calc_mode: l.cut_block_id ? "block" : "manual", cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null,
+        calc_mode: l.cut_block_id ? "block" : "manual", cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null, piece_name: l.piece_name?.trim() || null,
         pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
         face_width_cm: l.face_width_cm, sheet_width: l.sheet_width || null, sheet_length: l.sheet_length || null,
         material_type: l.material_type || null,
