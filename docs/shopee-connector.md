@@ -1,6 +1,6 @@
 # ตัวเชื่อม Shopee Open Platform (ร้าน Louis Montini)
 
-> สถานะ 2026-11-13: **เฟส 1 = เชื่อมร้าน** (ถือกุญแจ + ต่ออายุเอง + ตรวจการเชื่อมต่อ) — ยังไม่ดึงหรือแก้อะไรบนร้าน
+> สถานะ 2026-11-13: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (ปุ่มในหน้าสินค้าบนแพลตฟอร์ม) — ยังไม่แก้อะไรบนร้าน
 > แผนทั้งหมด: เฟส 1 เชื่อมร้าน → เฟส 2 ดึงสินค้า (อ่านอย่างเดียว) → เฟส 3 ดึงออเดอร์ → เฟส 4 แก้ชื่อ/ราคา/รูป (ทีละขั้น · อนุมัติทุกครั้ง)
 
 ## ใช้ทำอะไร
@@ -57,6 +57,22 @@
 - ชุดกุญแจใน Vercel (live/sandbox) ไม่ตรงกับตอนเชื่อม → ใช้ไม่ได้จนกว่าจะเชื่อมใหม่
 
 **ประวัติ (audit_logs):** `entity_type = platform_credential` actor `shopee_oauth` (เชื่อม/ถูกบล็อก) · ผู้ใช้ (ตัดการเชื่อม) · `platform_credentials` actor `cron: lazada-token` (ต่ออายุรายวัน · metadata.platform = shopee)
+
+## เฟส 2 — ดึงสินค้า (อ่านอย่างเดียว)
+หน้า **สินค้าบนแพลตฟอร์ม** (`/master/platform-catalog`) › เลือก Shopee + แบรนด์ › ปุ่ม **ตั้งค่า** › **ดึงสินค้าจาก Shopee** (สิทธิ์ `products.platforms.edit`)
+
+- `POST /api/shopee/sync-products { brand_id, cursor?, run_started_at? }` — หน้าเว็บเรียกต่อเองจนครบ (ล้อ Lazada)
+  - ทีละสถานะ `NORMAL → UNLIST → REVIEWING → BANNED` (ไม่ขอตัวที่ร้านลบแล้ว) · หน้าละ 50 ตัว · cursor = `"ลำดับสถานะ:offset"` · ครั้งละ ~28 วิ
+  - ต่อหน้า: `get_item_list` → `get_item_base_info` (50 ตัว = 1 ครั้ง) → `get_model_list` เฉพาะตัวที่มีตัวเลือก และใหม่/`update_time` เปลี่ยน (ตัวเดิมใช้ตัวเลือกที่เก็บไว้) · พร้อมกันทีละ 4 · โดน 429 รอ 1.5/3 วิ แล้วลองใหม่
+  - บันทึกทุกหน้าทันทีผ่านของกลาง `upsertCatalogListings` (จับคู่รหัสตรง ไม่ทับคู่เดิม · ไม่แตะตัวที่กด "ไม่ต้องจับคู่")
+  - จบครบ: ยอดรวมทุกสถานะจาก Shopee ≤ จำนวนที่บันทึกตั้งแต่เริ่มรอบ → `markMissingSince` ติดป้าย "ไม่อยู่บนร้านแล้ว" (กันพลาด: เกินครึ่งร้านไม่ติด)
+  - ประวัติ: audit `platform_catalog` metadata.source = `shopee_api` · ครั้งแรกของรอบเก็บ `sample` (คำตอบจริงย่อ ไม่มีคำอธิบาย) ไว้ตรวจตัวแปลง
+- สำเนาย่อ `raw.shopee` (`lib/shopee` `shopeeItemToCatalogItem`): `{ item_id, status, update_time, image, image_count, category_id, item_sku, brand, has_model, price, original_price, stock, weight, tiers[{name, options}], models[{model_id, sku, label "สี: ดำ · ขนาด: M", price, original_price, stock, image, status}] }` — **ไม่เก็บคำอธิบาย**
+  - `status` ในตาราง = ตัวเล็ก (`normal` / `unlist` / `reviewing` / `banned`) · `price` = ราคาตั้งต่ำสุด · `sku_code` = รหัสสินค้าหลัก (item_sku) ก่อน แล้วรหัสตัวเลือก
+- การ์ดสถานะ/รูป/สต๊อก: `summarizeShopee` ใน `lib/platform-listing-health` (NORMAL = ขายอยู่ · UNLIST/BANNED = ปิด · REVIEWING = รอตรวจ · ราคาลด = current_price ต่ำกว่าราคาตั้ง) — ตัวจากไฟล์ export (ไม่มี raw.shopee) ยัง "ไม่รู้สถานะ" เหมือนเดิม และหน้าไม่ใส่การ์ดให้
+  - อ่านผ่านฟังก์ชัน DB `platform_listings_slim` คอลัมน์ `shopee` (migration `202612080100` — ต้องให้เจ้าของอนุญาตก่อนลง · ก่อนลง การ์ด Shopee จาก API ขึ้น "ไม่รู้สถานะ" แต่รายการ/ราคา/จับคู่ใช้ได้)
+- ⚠️ ยอดสต๊อกจาก Shopee เก็บไว้ดูเทียบเท่านั้น **ห้ามใช้เป็นยอดตั้งต้น**
+- ยังไม่ทำ: มุมมองตัวเลือกเทียบราคาระบบ (`view=variants` ยังอ่านแค่ไฟล์ `raw.sales_info`) · ลิ้นชักสินค้า Shopee (ดูสด/แก้) · ชื่อหมวด (เก็บแค่ category_id)
 
 ## ⚠️ วันที่เปลี่ยนโดเมนเว็บ
 ลิงก์อนุญาต/ยกเลิกสิทธิ์ต้องพากลับโดเมนที่ลงทะเบียนไว้ — ร้านที่เชื่อมแล้ว**ไม่หลุด** (ดึงข้อมูล/ต่ออายุไม่ผ่านช่องนี้) แต่**กดเชื่อมใหม่จะ error** ถ้าไม่แก้ วันที่เปลี่ยน `NEXT_PUBLIC_APP_URL` ต้องแก้พร้อมกันครบ 3 เจ้า:

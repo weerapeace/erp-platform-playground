@@ -285,11 +285,16 @@ export default function PlatformCatalogPage() {
 
     // รูป/สต๊อก/สถานะบนร้าน — โหลดคู่กับตัวเดา ไม่บังตาราง · เฉพาะร้านที่ส่งข้อมูลพวกนี้มา (LINE/Lazada/TikTok — ไฟล์ export ของ Shopee ไม่มี · ลืม TikTok = การ์ดขึ้น "ไม่มีรูป" ทุกใบ เจอ 2026-11-12)
     const pfCode = platforms.find((p) => p.id === platformId)?.code ?? "";
-    if (pfCode === "line_shopping" || pfCode === "lazada" || pfCode === "tiktok") {
+    // Shopee: เฉพาะตัวที่ดึงผ่าน API (raw.shopee) มีข้อมูล — ตัวจากไฟล์ export ได้ "nodata" → ไม่ใส่ (หน้าตาเหมือนเดิมสำหรับร้านที่ใช้ไฟล์)
+    if (pfCode === "line_shopping" || pfCode === "lazada" || pfCode === "tiktok" || pfCode === "shopee") {
     setSummLoading(true);
     const smq = new URLSearchParams({ platform_id: platformId, view: "summary" }); if (brandId) smq.set("brand_id", brandId);
     void apiFetch(`/api/platform-catalog?${smq}`).then((r) => r.json())
-      .then((j: ListingSummariesResponse) => { if (my === reqSeq.current && !j.error) setSumm(j.summaries ?? {}); })
+      .then((j: ListingSummariesResponse) => {
+        if (my !== reqSeq.current || j.error) return;
+        const all = j.summaries ?? {};
+        setSumm(pfCode === "shopee" ? Object.fromEntries(Object.entries(all).filter(([, s]) => s.state !== "nodata")) : all);
+      })
       .catch(() => { /* ไม่มีรูป/สต๊อกก็ยังจับคู่ได้ */ })
       .finally(() => { if (my === reqSeq.current) setSummLoading(false); });
     }
@@ -710,6 +715,60 @@ export default function PlatformCatalogPage() {
     finally { setImporting(false); }
   };
 
+  // Shopee (ต่อ API · OAuth ผูกกับแบรนด์ · ร้าน Mall/Managed เท่านั้น) — สถานะการเชื่อม + ดึงสินค้าที่ลงไว้บนร้าน (อ่านอย่างเดียว)
+  //   แบบเดียวกับ Lazada แต่จุดค้างเป็น cursor "ลำดับสถานะ:offset" (server ดึงทีละสถานะ: ขายอยู่ → ปิดขาย → รอตรวจ → ถูกแบน)
+  type ShpStatus = { connected: boolean; health: "none" | "connected" | "expiring" | "expired"; days_left: number | null; shop_name: string | null; configured: boolean };
+  const [shpStatus, setShpStatus] = useState<ShpStatus | null>(null);
+  const shpSeq = useRef(0);
+  useEffect(() => {
+    const my = ++shpSeq.current;
+    setShpStatus(null);
+    if (platformCode !== "shopee" || !brandId) return;
+    apiFetch(`/api/shopee/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())
+      .then((j) => { if (my === shpSeq.current && !j.error) setShpStatus(j as ShpStatus); })
+      .catch(() => { /* โชว์ปุ่มไม่ได้ก็ไม่เป็นไร */ });
+  }, [platformCode, brandId]);
+  const shpResume = useRef<{ brandId: string; cursor: string; run: string; fetched: number; at: number } | null>(null);
+  const syncShopee = async () => {
+    if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (การเชื่อม Shopee ผูกกับแบรนด์)"); return; }
+    const resume = shpResume.current && shpResume.current.brandId === brandId && Date.now() - shpResume.current.at < 25 * 60_000 ? shpResume.current : null;
+    let cursor = resume?.cursor ?? "", run = resume?.run ?? "", apiTotal = 0, retried = false, got = resume?.fetched ?? 0;
+    const sum = { fetched: 0, created: 0, updated: 0, newly_matched: 0 };
+    type ShpSyncRes = { error?: string | null; api_total?: number; fetched?: number; created?: number; updated?: number; newly_matched?: number; next_cursor?: string | null; done?: boolean; complete?: boolean; run_started_at?: string; stop_reason?: string | null; removed?: number; restored?: number; removed_skipped?: number };
+    setImporting(true);
+    try {
+      for (let round = 0; round < 80; round++) {
+        setNote(`กำลังดึงสินค้าจาก Shopee... ${got.toLocaleString()}${apiTotal ? ` / ${apiTotal.toLocaleString()}` : ""} ตัว`);
+        const r = await apiFetch("/api/shopee/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId, cursor: cursor || undefined, run_started_at: run || undefined }) });
+        const j = (await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }))) as ShpSyncRes;
+        const stop = j.error || j.stop_reason;
+        if (j.run_started_at) run = j.run_started_at;
+        if (j.api_total && j.api_total > apiTotal) apiTotal = j.api_total;
+        sum.fetched += j.fetched ?? 0; sum.created += j.created ?? 0; sum.updated += j.updated ?? 0; sum.newly_matched += j.newly_matched ?? 0;
+        got += j.fetched ?? 0;
+        if (typeof j.next_cursor === "string" && j.next_cursor) cursor = j.next_cursor;
+        if (j.done) {
+          shpResume.current = null;
+          const totalNote = apiTotal ? ` (Shopee รายงาน ${apiTotal.toLocaleString()})` : "";
+          setNote(`ดึงจาก Shopee ครบแล้ว${totalNote} · รอบนี้ได้ ${sum.fetched.toLocaleString()} ตัว · เพิ่มใหม่ ${sum.created} · อัปเดต ${sum.updated} · จับคู่รหัสตรงอัตโนมัติ ${sum.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${goneNote(j)}${j.stop_reason ? ` · ⚠️ ${j.stop_reason}` : ""}`);
+          break;
+        }
+        if (stop) {
+          if (!retried) { retried = true; await new Promise((res) => setTimeout(res, 4000)); continue; }
+          shpResume.current = cursor ? { brandId, cursor, run, fetched: got, at: Date.now() } : null;
+          setNote(`⚠️ ดึงจาก Shopee ได้ ${got.toLocaleString()} ตัวแล้ว Shopee ตอบผิดพลาด: ${stop}${cursor ? ` — กด "ดึงสินค้าจาก Shopee" อีกครั้งเพื่อดึงต่อ` : ""} (ยังไม่เช็กว่าตัวไหนร้านลบ จนกว่าจะดึงครบ)`);
+          break;
+        }
+        retried = false;
+      }
+      await reloadCurrent();
+    } catch (e) {
+      shpResume.current = cursor ? { brandId, cursor, run, fetched: got, at: Date.now() } : null;
+      setNote(`ผิดพลาด: ${(e as Error).message}${cursor ? " — กดดึงอีกครั้งเพื่อดึงต่อ" : ""}`);
+    }
+    finally { setImporting(false); }
+  };
+
   // ดึงสินค้าจาก LINE SHOPPING (ต่อ API จริง) → catalog + จับคู่ ERP
   const syncLine = async () => {
     if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (คีย์ LINE ผูกกับแบรนด์)"); return; }
@@ -887,7 +946,8 @@ export default function PlatformCatalogPage() {
   const gate = viewReady && view === "shop" && !brandId;
   // เมนูตั้งค่าร้าน — จุดเตือนบนปุ่ม (Lazada ใกล้หมดอายุ/หมดแล้ว/ยังไม่เชื่อม) · วันที่ดึงข้อมูลล่าสุด · ราคาไม่ตรงระบบ (มีเมื่อโหลดสรุปแล้ว)
   const toolsAlert = (platformCode === "lazada" && !!brandId && !!lazStatus && (!lazStatus.connected || lazStatus.health === "expiring" || lazStatus.health === "expired"))
-    || (platformCode === "tiktok" && !!brandId && !!ttsStatus && (!ttsStatus.connected || ttsStatus.health === "expiring" || ttsStatus.health === "expired"));
+    || (platformCode === "tiktok" && !!brandId && !!ttsStatus && (!ttsStatus.connected || ttsStatus.health === "expiring" || ttsStatus.health === "expired"))
+    || (platformCode === "shopee" && !!brandId && !!shpStatus && shpStatus.configured && (shpStatus.health === "expiring" || shpStatus.health === "expired"));
   const lastImported = listings.reduce<string | null>((m, l) => (l.last_imported_at && (!m || l.last_imported_at > m) ? l.last_imported_at : m), null);
   const priceMismatchN = summList.filter((s) => (s.erpPriceDiff ?? 0) > 0).length;
   const toolItem = (o: { icon: string; tone: keyof typeof TOOL_TONE; title: string; sub?: string; disabled?: boolean; warn?: boolean; onClick?: () => void; href?: string }) => {
@@ -1006,7 +1066,7 @@ export default function PlatformCatalogPage() {
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-slate-800">{activePf?.name_th ?? "ร้าน"}{activeBrand ? ` · ${activeBrand.name}` : ""}</div>
               <div className="truncate text-[11px] text-slate-400">
-                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : platformCode === "tiktok" ? "เชื่อมด้วย TikTok Shop (แก้ชื่อ/ราคา/เปิดปิดขาย ได้ในลิ้นชักสินค้า)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
+                {platformCode === "line_shopping" ? "เชื่อมด้วย API Key ของแบรนด์" : platformCode === "lazada" ? "เชื่อมด้วย Lazada (อ่านอย่างเดียว)" : platformCode === "tiktok" ? "เชื่อมด้วย TikTok Shop (แก้ชื่อ/ราคา/เปิดปิดขาย ได้ในลิ้นชักสินค้า)" : platformCode === "shopee" && shpStatus?.connected ? "เชื่อมด้วย Shopee (อ่านอย่างเดียว)" : "ยังไม่ต่อ API — ใช้นำเข้าไฟล์ export"}
                 {lastImported ? ` · ข้อมูลจากร้านล่าสุด ${new Date(lastImported).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}` : ""}
               </div>
             </div>
@@ -1020,8 +1080,13 @@ export default function PlatformCatalogPage() {
                 ? <span className={`shrink-0 text-[11px] ${ttsStatus.health === "expiring" ? "text-amber-700" : "text-emerald-600"}`}>{ttsStatus.health === "expiring" ? `อีก ${ttsStatus.days_left ?? 0} วันต้องเชื่อมใหม่` : "● เชื่อมอยู่"}</span>
                 : <span className="shrink-0 text-[11px] text-amber-700">{ttsStatus.health === "expired" ? "หมดอายุ" : "ยังไม่เชื่อม"}</span>
             )}
+            {platformCode === "shopee" && brandId && shpStatus?.configured && (
+              shpStatus.connected
+                ? <span className={`shrink-0 text-[11px] ${shpStatus.health === "expiring" ? "text-amber-700" : "text-emerald-600"}`}>{shpStatus.health === "expiring" ? `อีก ${shpStatus.days_left ?? 0} วันต้องเชื่อมใหม่` : "● เชื่อมอยู่"}</span>
+                : <span className="shrink-0 text-[11px] text-slate-400">{shpStatus.health === "expired" ? "หมดอายุ" : "ยังไม่เชื่อม API"}</span>
+            )}
           </div>
-          {(platformCode === "line_shopping" || platformCode === "lazada" || platformCode === "tiktok") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
+          {(platformCode === "line_shopping" || platformCode === "lazada" || platformCode === "tiktok" || platformCode === "shopee") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
           {platformCode === "line_shopping" && toolItem({ icon: "refresh", tone: "emerald", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก LINE", sub: brandId ? "อัปเดตชื่อ ราคา สต๊อก รูป จากร้าน" : "เลือกแบรนด์ก่อน", disabled: !canEdit || importing || !brandId, onClick: () => void syncLine() })}
           {platformCode === "line_shopping" && toolItem({ icon: "folder", tone: "amber", title: "นำเข้าหมวดหมู่ LINE", sub: "จากไฟล์ template (ชีตตัวเลือกหมวด) · ใช้ครั้งเดียว", disabled: !canEdit || importing, onClick: () => catFileRef.current?.click() })}
           {platformCode === "lazada" && toolItem({
@@ -1034,6 +1099,11 @@ export default function PlatformCatalogPage() {
             sub: !brandId ? "เลือกแบรนด์ก่อน — การเชื่อม TikTok Shop ผูกกับแบรนด์" : ttsStatus?.connected ? "อ่านรายการที่ลงไว้บนร้าน ชื่อ ราคา สต๊อก รูป (ไม่แก้อะไรบนร้าน)" : "ต้องเชื่อม TikTok Shop ก่อน (ดูบัญชีร้านด้านล่าง)",
             disabled: !canEdit || importing || !brandId || !ttsStatus?.connected, onClick: () => void syncTiktok(),
           })}
+          {platformCode === "shopee" && toolItem({
+            icon: "refresh", tone: "indigo", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก Shopee",
+            sub: !brandId ? "เลือกแบรนด์ก่อน — การเชื่อม Shopee ผูกกับแบรนด์" : shpStatus?.connected ? "อ่านรายการที่ลงไว้บนร้าน ชื่อ ราคา สต๊อก รูป ตัวเลือก (ไม่แก้อะไรบนร้าน)" : "ต้องเชื่อม Shopee ก่อน (ร้าน Mall / Managed Seller · ดูบัญชีร้านด้านล่าง)",
+            disabled: !canEdit || importing || !brandId || !shpStatus?.connected, onClick: () => void syncShopee(),
+          })}
           {platformCode === "line_shopping" && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ส่งขึ้นร้าน (ร้านจริง)</div>}
           {platformCode === "line_shopping" && toolItem({
             icon: "upload", tone: "rose", title: "ส่งราคาทั้งหมดขึ้น LINE",
@@ -1042,7 +1112,7 @@ export default function PlatformCatalogPage() {
           })}
           <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ตั้งค่า</div>
           {toolItem({ icon: "settings", tone: "violet", title: "จัดการชนิดไฟล์นำเข้า", sub: "เพิ่ม/แก้คอลัมน์ของไฟล์ export แต่ละร้าน", disabled: !canEdit || !platformId, onClick: () => setShowManager(true) })}
-          {toolItem({ icon: "link", tone: "slate", title: platformCode === "lazada" ? "บัญชีร้าน / เชื่อม Lazada" : platformCode === "tiktok" ? "บัญชีร้าน / เชื่อม TikTok Shop" : "บัญชีร้าน / API Key", sub: "ไปหน้าจัดการร้าน/บัญชีแพลตฟอร์ม", href: "/admin/platform-accounts", warn: !!toolsAlert })}
+          {toolItem({ icon: "link", tone: "slate", title: platformCode === "lazada" ? "บัญชีร้าน / เชื่อม Lazada" : platformCode === "tiktok" ? "บัญชีร้าน / เชื่อม TikTok Shop" : platformCode === "shopee" ? "บัญชีร้าน / เชื่อม Shopee" : "บัญชีร้าน / API Key", sub: "ไปหน้าจัดการร้าน/บัญชีแพลตฟอร์ม", href: "/admin/platform-accounts", warn: !!toolsAlert })}
         </div>
       </FloatingDropdown>
       <ConfirmDialog open={pushAllAsk} onClose={() => { if (!importing) setPushAllAsk(false); }} variant="danger" requireTyped="ยืนยัน"
@@ -1117,9 +1187,11 @@ export default function PlatformCatalogPage() {
               hint={platformCode === "line_shopping" ? "กดปุ่ม “ตั้งค่า” ด้านบน → ดึงสินค้าจาก LINE แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "lazada" ? "กด ดึงสินค้าจาก Lazada ด้านบน (ต้องเชื่อมร้านก่อน) หรือนำเข้าไฟล์ export แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "tiktok" ? "กด ดึงสินค้าจาก TikTok (ต้องเชื่อมร้านก่อนที่หน้าบัญชีแพลตฟอร์ม) แล้วระบบจะช่วยจับคู่ให้"
+                : platformCode === "shopee" && shpStatus?.connected ? "กด ดึงสินค้าจาก Shopee แล้วระบบจะช่วยจับคู่ให้"
                 : "นำเข้าไฟล์ export จาก Seller Center เข้ามาก่อน แล้วระบบจะช่วยจับคู่ให้"}
               action={canEdit && platformCode === "lazada" && lazStatus?.connected ? { label: "ดึงสินค้าจาก Lazada", onClick: () => void syncLazada() }
                 : canEdit && platformCode === "tiktok" && ttsStatus?.connected ? { label: "ดึงสินค้าจาก TikTok", onClick: () => void syncTiktok() }
+                : canEdit && platformCode === "shopee" && shpStatus?.connected ? { label: "ดึงสินค้าจาก Shopee", onClick: () => void syncShopee() }
                 : canEdit && platformCode !== "line_shopping" ? { label: `⬆️ นำเข้าสินค้าจาก ${activePf?.name_th ?? "ร้าน"}`, onClick: () => fileRef.current?.click() } : undefined} />
           ) : (
             <div className="space-y-3">

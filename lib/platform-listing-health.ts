@@ -182,6 +182,29 @@ function summarizeTiktok(raw: Obj, fallbackPrice: number | null): ListingShopSum
 }
 
 /**
+ * Shopee (ดึงผ่าน API): raw.shopee (lib/shopee shopeeItemToCatalogItem)
+ * สถานะ: NORMAL = เปิดขาย · UNLIST / BANNED / *_DELETE = ปิด · REVIEWING = รอตรวจ
+ * ราคา: original_price = ราคาตั้ง · price (current_price) ต่ำกว่า = ราคาลด · สต๊อก = ผลรวมตัวเลือก (ไม่มีตัวเลือก = ระดับสินค้า)
+ */
+function summarizeShopee(raw: Obj, fallbackPrice: number | null): ListingShopSummary {
+  const sp = obj(raw.shopee) ?? {};
+  const models = arr(sp.models).map(obj).filter((v): v is Obj => !!v);
+  const st = (str(sp.status) ?? "").toUpperCase();
+  const display = st === "NORMAL" ? true : ["UNLIST", "BANNED", "SELLER_DELETE", "SHOPEE_DELETE"].includes(st) ? false : null;
+  const stocks = models.length ? models.map((v) => num(v.stock)) : [num(sp.stock)];
+  const stock = stocks.some((n) => n != null) ? stocks.reduce<number>((s, n) => s + Math.max(0, n ?? 0), 0) : null;
+  const list = models.length ? minPositive(models.map((v) => num(v.original_price) ?? num(v.price))) : (num(sp.original_price) ?? num(sp.price));
+  const now = models.length ? minPositive(models.map((v) => num(v.price))) : num(sp.price);
+  const price = list ?? fallbackPrice;
+  return {
+    image: str(sp.image), imageKnown: "image" in sp, stock, display, price,
+    salePrice: now != null && price != null && now < price ? now : null,
+    variants: models.length, category: null,
+    state: shopStateOf(display, stock, true),
+  };
+}
+
+/**
  * สรุปสินค้า 1 รายการบนร้าน
  * @param platformCode code ใน erp_platforms (line_shopping / lazada / tiktok / shopee / …)
  * @param raw          platform_catalog_listings.raw (หรือชิ้นส่วนที่ select มาเฉพาะช่องที่ใช้)
@@ -196,6 +219,7 @@ function summarizeRaw(platformCode: string, r: Obj, fallbackPrice: number | null
   if (platformCode === "line_shopping") return summarizeLine(r, fallbackPrice);
   if (platformCode === "lazada" && obj(r.lazada)) return summarizeLazada(r, fallbackPrice);
   if (platformCode === "tiktok" && obj(r.tiktok)) return summarizeTiktok(r, fallbackPrice);
+  if (platformCode === "shopee" && obj(r.shopee)) return summarizeShopee(r, fallbackPrice);   // เฉพาะที่ดึงผ่าน API · ไฟล์นำเข้าไม่มี raw.shopee = ไม่รู้สถานะเหมือนเดิม
   return { image: null, imageKnown: false, stock: null, display: null, price: fallbackPrice, salePrice: null, variants: 0, category: null, state: "nodata" };
 }
 

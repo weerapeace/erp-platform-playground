@@ -3,8 +3,9 @@ import { createHmac } from "node:crypto";
 import {
   shopeeSignBase, shopeeSign, shopeeAuthUrl, shopeeCallbackParams, shopeeConfigured, shopeeEnv, shopeeHost,
   shopeeErrorText, shopeeIsRateLimit, ShopeeApiError, shopeeTokenOf, shopeeTokenTimes, shopeeReconnectBy, shopeeShopInfoOf,
-  SHOPEE_HOSTS, SHOPEE_REFRESH_TTL_MS,
+  SHOPEE_HOSTS, SHOPEE_REFRESH_TTL_MS, shopeeItemListOf, shopeeModelsToSlim, shopeeItemToCatalogItem, shopeeListingStatus, SHOPEE_PULL_STATUSES,
 } from "@/lib/shopee";
+import { summarizeListing } from "@/lib/platform-listing-health";
 
 describe("Shopee — เซ็นคำขอ", () => {
   test("ข้อความที่เซ็น: ระดับแอป = partner_id+path+timestamp · ระดับร้าน ต่อ access_token+shop_id", () => {
@@ -113,5 +114,81 @@ describe("Shopee — ข้อความ error ภาษาคน", () => {
   });
   test("ไม่รู้จัก = ข้อความเดิม", () => {
     expect(shopeeErrorText(new ShopeeApiError("something odd", "error_xyz"))).toBe("something odd");
+  });
+});
+
+
+describe("Shopee — สินค้า (get_item_list / base_info / model_list → raw.shopee)", () => {
+  test("รายการ: item_id เป็นข้อความ · total / has_next / next_offset", () => {
+    const p = shopeeItemListOf({ response: { item: [{ item_id: 800123, item_status: "NORMAL", update_time: 1700 }, { item_id: null }], total_count: 120, has_next_page: true, next_offset: 50 } });
+    expect(p).toEqual({ items: [{ item_id: "800123", item_status: "NORMAL", update_time: 1700 }], total: 120, hasNext: true, nextOffset: 50 });
+    expect(shopeeItemListOf({ response: {} })).toEqual({ items: [], total: 0, hasNext: false, nextOffset: 0 });
+  });
+  test("ไม่ขอตัวที่ร้านลบแล้ว", () => {
+    expect(SHOPEE_PULL_STATUSES).not.toContain("SELLER_DELETE");
+    expect(SHOPEE_PULL_STATUSES).not.toContain("SHOPEE_DELETE");
+  });
+  const MODELS = {
+    tier_variation: [
+      { name: "สี", option_list: [{ option: "ดำ", image: { image_url: "https://cf.shopee.co.th/file/black" } }, { option: "น้ำตาล", image: { image_url: "https://cf.shopee.co.th/file/brown" } }] },
+      { name: "ขนาด", option_list: [{ option: "M" }, { option: "L" }] },
+    ],
+    model: [
+      { model_id: 1, tier_index: [0, 1], model_sku: "TTM090-01L", price_info: [{ current_price: 990, original_price: 1590 }], stock_info_v2: { summary_info: { total_available_stock: 7 } } },
+      { model_id: 2, tier_index: [1, 0], model_sku: "TTM090-02M", price_info: [{ current_price: 1090, original_price: 1690 }], stock_info: [{ current_stock: 3 }] },
+    ],
+  };
+  test("ตัวเลือก: ชื่อ 'สี: ดำ · ขนาด: L' + รูปของชั้นแรก + สต๊อก (รุ่นใหม่/รุ่นเก่า)", () => {
+    const s = shopeeModelsToSlim(MODELS);
+    expect(s.tiers).toEqual([{ name: "สี", options: ["ดำ", "น้ำตาล"] }, { name: "ขนาด", options: ["M", "L"] }]);
+    expect(s.models[0]).toEqual({ model_id: "1", sku: "TTM090-01L", label: "สี: ดำ · ขนาด: L", price: 990, original_price: 1590, stock: 7, image: "https://cf.shopee.co.th/file/black", status: null });
+    expect(s.models[1]).toMatchObject({ label: "สี: น้ำตาล · ขนาด: M", stock: 3, image: "https://cf.shopee.co.th/file/brown" });
+    expect(shopeeModelsToSlim(null)).toEqual({ tiers: [], models: [] });
+  });
+  test("สินค้ามีตัวเลือก: skus = รหัสหลักก่อน + รหัสตัวเลือก · ราคา = ราคาตั้งต่ำสุด · status ตัวเล็ก", () => {
+    const base = { item_id: 800123, item_name: "Louis Montini กระเป๋าสตางค์", item_sku: "TTM090", item_status: "NORMAL", update_time: 1700, has_model: true, category_id: 100637,
+      image: { image_url_list: ["https://cf.shopee.co.th/file/a", "https://cf.shopee.co.th/file/b"] }, brand: { original_brand_name: "Louis Montini" }, weight: 0.3, description: "ยาวมาก" };
+    const it = shopeeItemToCatalogItem(base, shopeeModelsToSlim(MODELS))!;
+    expect(it.external_product_id).toBe("800123");
+    expect(it.title).toBe("Louis Montini กระเป๋าสตางค์");
+    expect(it.skus).toEqual(["TTM090", "TTM090-01L", "TTM090-02M"]);
+    expect(it.price).toBe(1590);
+    expect(it.status).toBe("normal");
+    expect(it.raw.shopee).toMatchObject({ item_id: "800123", image: "https://cf.shopee.co.th/file/a", image_count: 2, category_id: "100637", has_model: true, price: null, stock: null, brand: "Louis Montini" });
+    expect(JSON.stringify(it.raw)).not.toContain("ยาวมาก");   // ไม่เก็บคำอธิบายยาว
+  });
+  test("สินค้าไม่มีตัวเลือก: ราคา/สต๊อกระดับสินค้า", () => {
+    const it = shopeeItemToCatalogItem({ item_id: "9", item_name: "X", item_sku: "", item_status: "UNLIST", has_model: false, price_info: [{ current_price: 199, original_price: 299 }], stock_info_v2: { summary_info: { total_available_stock: 0 } } }, null)!;
+    expect(it.skus).toEqual([]);
+    expect(it.price).toBe(299);
+    expect(it.raw.shopee).toMatchObject({ has_model: false, price: 199, original_price: 299, stock: 0, models: [] });
+    expect(shopeeListingStatus("UNLIST")).toBe("unlist");
+  });
+  test("ไม่มี item_id = ข้าม", () => {
+    expect(shopeeItemToCatalogItem({ item_name: "X" }, null)).toBeNull();
+  });
+});
+
+describe("Shopee — สรุปการ์ดในหน้าสินค้าบนแพลตฟอร์ม (summarizeListing)", () => {
+  const MODELS2 = { tier_variation: [{ name: "สี", option_list: [{ option: "ดำ", image: { image_url: "https://cf.shopee.co.th/file/k" } }, { option: "น้ำตาล" }] }],
+    model: [
+      { model_id: 1, tier_index: [0], model_sku: "A-1", price_info: [{ current_price: 990, original_price: 1590 }], stock_info_v2: { summary_info: { total_available_stock: 2 } } },
+      { model_id: 2, tier_index: [1], model_sku: "A-2", price_info: [{ current_price: 1590, original_price: 1590 }], stock_info_v2: { summary_info: { total_available_stock: 0 } } },
+    ] };
+  const base = { item_id: 1, item_name: "X", item_status: "NORMAL", has_model: true, image: { image_url_list: ["https://cf.shopee.co.th/file/c"] } };
+  test("ขายอยู่ · สต๊อกรวม 2 (ใกล้หมด) · ราคาตั้ง 1590 ราคาลด 990 · 2 ตัวเลือก · รูปแรก", () => {
+    const it = shopeeItemToCatalogItem(base, shopeeModelsToSlim(MODELS2))!;
+    const s = summarizeListing("shopee", it.raw, it.price, it.status);
+    expect(s).toMatchObject({ image: "https://cf.shopee.co.th/file/c", imageKnown: true, stock: 2, display: true, price: 1590, salePrice: 990, variants: 2, state: "low" });
+  });
+  test("ปิดขาย (UNLIST) = hidden · รอตรวจ = review · ร้านลบแล้ว (removed) = gone", () => {
+    const hid = shopeeItemToCatalogItem({ ...base, item_status: "UNLIST" }, shopeeModelsToSlim(MODELS2))!;
+    expect(summarizeListing("shopee", hid.raw).state).toBe("hidden");
+    const rev = shopeeItemToCatalogItem({ ...base, item_status: "REVIEWING" }, shopeeModelsToSlim(MODELS2))!;
+    expect(summarizeListing("shopee", rev.raw).state).toBe("review");
+    expect(summarizeListing("shopee", hid.raw, null, "removed").state).toBe("gone");
+  });
+  test("ตัวจากไฟล์ export (ไม่มี raw.shopee) = ไม่รู้สถานะ เหมือนเดิม", () => {
+    expect(summarizeListing("shopee", { basic_info: { name: "x" } }, 199).state).toBe("nodata");
   });
 });

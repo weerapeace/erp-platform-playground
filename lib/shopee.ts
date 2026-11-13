@@ -15,6 +15,8 @@
  * กติกาที่ไม่แตะเครือข่าย (เซ็น/ลิงก์/เวลา/แปลงคำตอบ/ข้อความ error) ทดสอบใน lib/__tests__/shopee.test.ts
  */
 
+import type { CatalogSyncItem } from "@/lib/platform-catalog-sync";
+
 export const SHOPEE_HOSTS = {
   live: "https://partner.shopeemobile.com",
   sandbox: "https://openplatform.sandbox.test-stable.shopee.sg",
@@ -197,4 +199,120 @@ export function shopeeShopInfoOf(j: Record<string, unknown>): ShopeeShopInfo {
 
 export async function shopeeGetShopInfo(accessToken: string, shopId: string | number): Promise<ShopeeShopInfo> {
   return shopeeShopInfoOf(await shopeeFetch("/api/v2/shop/get_shop_info", { accessToken, shopId }));
+}
+
+// ───────── สินค้า (อ่านอย่างเดียว) ─────────
+// v2.product.get_item_list (≤100/หน้า · ทีละสถานะ) → get_item_base_info (≤50/ครั้ง) → get_model_list (ทีละสินค้า · เฉพาะที่มีตัวเลือก)
+
+/** สถานะที่ดึง — ไม่เอาตัวที่ลบแล้ว (SELLER_DELETE / SHOPEE_DELETE) → รอบที่ดึงครบจะติดป้าย "ไม่อยู่บนร้านแล้ว" ให้เอง */
+export const SHOPEE_PULL_STATUSES = ["NORMAL", "UNLIST", "REVIEWING", "BANNED"] as const;
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : null);
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const num = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+const respOf = (j: Obj): Obj => obj(j.response) ?? j;
+
+export type ShopeeItemRef = { item_id: string; item_status: string | null; update_time: number | null };
+export type ShopeeItemPage = { items: ShopeeItemRef[]; total: number; hasNext: boolean; nextOffset: number };
+
+/** อ่านคำตอบ get_item_list */
+export function shopeeItemListOf(j: Obj): ShopeeItemPage {
+  const r = respOf(j);
+  const items = arr(r.item).map(obj).filter((x): x is Obj => !!x)
+    .map((x) => ({ item_id: String(x.item_id ?? "").trim(), item_status: str(x.item_status), update_time: num(x.update_time) }))
+    .filter((x) => x.item_id);
+  return { items, total: num(r.total_count) ?? 0, hasNext: r.has_next_page === true, nextOffset: num(r.next_offset) ?? 0 };
+}
+
+export async function shopeeGetItemList(accessToken: string, shopId: string | number, args: { status: string; offset: number; pageSize: number }): Promise<ShopeeItemPage> {
+  return shopeeItemListOf(await shopeeFetch("/api/v2/product/get_item_list", {
+    accessToken, shopId, query: { offset: args.offset, page_size: Math.min(100, Math.max(1, args.pageSize)), item_status: args.status },
+  }));
+}
+
+/** รายละเอียดสินค้า ≤ 50 ตัวต่อครั้ง (ชื่อ · รูป · หมวด · ราคา/สต๊อกถ้าไม่มีตัวเลือก · รหัสสินค้า) */
+export async function shopeeGetItemBaseInfo(accessToken: string, shopId: string | number, itemIds: string[]): Promise<Obj[]> {
+  if (!itemIds.length) return [];
+  if (itemIds.length > 50) throw new ShopeeApiError("ขอรายละเอียดสินค้าได้ครั้งละไม่เกิน 50 ตัว", "error_param");
+  const j = await shopeeFetch("/api/v2/product/get_item_base_info", { accessToken, shopId, query: { item_id_list: itemIds.join(",") } });
+  return arr(respOf(j).item_list).map(obj).filter((x): x is Obj => !!x);
+}
+
+export type ShopeeModelsRaw = { tier_variation: unknown[]; model: unknown[] };
+/** ตัวเลือก (สี/ไซซ์) ของสินค้า 1 ตัว */
+export async function shopeeGetModelList(accessToken: string, shopId: string | number, itemId: string): Promise<ShopeeModelsRaw> {
+  const r = respOf(await shopeeFetch("/api/v2/product/get_model_list", { accessToken, shopId, query: { item_id: itemId } }));
+  return { tier_variation: arr(r.tier_variation), model: arr(r.model) };
+}
+
+// ───────── แปลงเป็นสำเนาย่อ (raw.shopee) — เก็บเฉพาะที่ใช้ ไม่เก็บคำอธิบายยาว ─────────
+export type ShopeeSlimModel = { model_id: string; sku: string | null; label: string | null; price: number | null; original_price: number | null; stock: number | null; image: string | null; status: string | null };
+export type ShopeeSlimTier = { name: string; options: string[] };
+export type ShopeeSlim = {
+  item_id: string; status: string | null; update_time: number | null;
+  image: string | null; image_count: number; category_id: string | null; item_sku: string | null; brand: string | null;
+  has_model: boolean; price: number | null; original_price: number | null; stock: number | null; weight: number | null;
+  tiers: ShopeeSlimTier[]; models: ShopeeSlimModel[];
+};
+
+/** ราคา: price_info[0].current_price (ราคาที่ลูกค้าจ่าย) / original_price (ราคาตั้ง) */
+function priceOf(o: Obj): { price: number | null; original: number | null } {
+  const p = obj(arr(o.price_info)[0]);
+  return { price: num(p?.current_price), original: num(p?.original_price) };
+}
+/** สต๊อกพร้อมขาย: stock_info_v2.summary_info.total_available_stock (รุ่นใหม่) · รุ่นเก่า stock_info[].current_stock/normal_stock */
+function stockOf(o: Obj): number | null {
+  const v2 = num(obj(obj(o.stock_info_v2)?.summary_info)?.total_available_stock);
+  if (v2 != null) return v2;
+  const old = arr(o.stock_info).map(obj).filter((x): x is Obj => !!x).map((x) => num(x.current_stock) ?? num(x.normal_stock));
+  return old.some((n) => n != null) ? old.reduce<number>((s, n) => s + (n ?? 0), 0) : null;
+}
+
+/** ตัวเลือกจาก get_model_list → ชื่อ "สี: ดำ · ขนาด: M" + รูปของตัวเลือกชั้นแรก */
+export function shopeeModelsToSlim(raw: ShopeeModelsRaw | null): { tiers: ShopeeSlimTier[]; models: ShopeeSlimModel[] } {
+  if (!raw) return { tiers: [], models: [] };
+  const tierObjs = raw.tier_variation.map(obj).filter((x): x is Obj => !!x);
+  const tiers: ShopeeSlimTier[] = tierObjs.map((t) => ({ name: str(t.name) ?? "", options: arr(t.option_list).map(obj).map((o) => str(o?.option) ?? "") }));
+  const tierImg = (i: number): string | null => str(obj(obj(arr(tierObjs[0]?.option_list)[i])?.image)?.image_url);
+  const models = raw.model.map(obj).filter((x): x is Obj => !!x).map((m) => {
+    const idx = arr(m.tier_index).map((n) => Number(n));
+    const label = idx.map((k, i) => { const t = tiers[i]; const opt = t?.options[k]; return opt ? (t.name ? `${t.name}: ${opt}` : opt) : null; }).filter(Boolean).join(" · ") || null;
+    const pr = priceOf(m);
+    return {
+      model_id: String(m.model_id ?? ""), sku: str(m.model_sku), label, price: pr.price, original_price: pr.original,
+      stock: stockOf(m), image: Number.isFinite(idx[0]) ? tierImg(idx[0]) : null, status: str(m.model_status),
+    };
+  }).filter((m) => m.model_id);
+  return { tiers, models };
+}
+
+/** สถานะสินค้า Shopee → status ในตาราง (ตัวเล็ก เหมือน TikTok): normal / unlist / reviewing / banned */
+export const shopeeListingStatus = (s: string | null | undefined): string | null => (s ? s.trim().toLowerCase() : null);
+
+const minPos = (xs: (number | null)[]): number | null => { const ok = xs.filter((n): n is number => n != null && n > 0); return ok.length ? Math.min(...ok) : null; };
+
+/**
+ * รายละเอียด (get_item_base_info) + ตัวเลือก (shopeeModelsToSlim · null = ไม่มีตัวเลือก/ยังไม่ได้ดึง) → รายการบนร้าน 1 ตัว
+ * skus = รหัสสินค้าหลักก่อน แล้วรหัสตัวเลือก (ใช้จับคู่รหัสตรง) · price = ราคาตั้งต่ำสุด (ราคาลดอยู่ใน raw.shopee)
+ */
+export function shopeeItemToCatalogItem(base: Obj, models: { tiers: ShopeeSlimTier[]; models: ShopeeSlimModel[] } | null): CatalogSyncItem & { raw: { shopee: ShopeeSlim } } | null {
+  const itemId = String(base.item_id ?? "").trim();
+  if (!itemId) return null;
+  const pr = priceOf(base);
+  const imgs = arr(obj(base.image)?.image_url_list).map((u) => str(u)).filter((u): u is string => !!u);
+  const ms = models?.models ?? [];
+  const hasModel = base.has_model === true || ms.length > 0;
+  const itemSku = str(base.item_sku);
+  const slim: ShopeeSlim = {
+    item_id: itemId, status: str(base.item_status), update_time: num(base.update_time),
+    image: imgs[0] ?? null, image_count: imgs.length, category_id: base.category_id != null ? String(base.category_id) : null,
+    item_sku: itemSku, brand: str(obj(base.brand)?.original_brand_name),
+    has_model: hasModel, price: hasModel ? null : pr.price, original_price: hasModel ? null : pr.original,
+    stock: hasModel ? null : stockOf(base), weight: num(base.weight),
+    tiers: models?.tiers ?? [], models: ms,
+  };
+  const skus = [...new Set([itemSku, ...ms.map((m) => m.sku)].filter((s): s is string => !!s))];
+  const listPrice = hasModel ? minPos(ms.map((m) => m.original_price ?? m.price)) : (pr.original ?? pr.price);
+  return { external_product_id: itemId, title: str(base.item_name), skus, price: listPrice, status: shopeeListingStatus(slim.status), raw: { shopee: slim } };
 }
