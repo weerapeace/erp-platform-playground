@@ -135,3 +135,36 @@ describe("เดินตะเข็บ: รอยบากคู่", () => {
     expect(off?.data.d).toBeCloseTo(1, 3);
   });
 });
+
+describe("แก้จุดแบบ Illustrator (ลบหลายจุด · กรอบเลือก · มุมโค้งลาก)", () => {
+  const sq = { k: "rect" as const, x: 0, y: 0, w: 10, h: 10 };
+  it("ลบหลายจุด — เหลือน้อยกว่า 3 = ไม่ยอม", async () => {
+    const { deleteNodes } = await import("../pattern-edit");
+    const five = { k: "path" as const, nodes: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] };
+    const r = deleteNodes(five, [1]);
+    expect(r && r.k === "path" ? r.nodes.length : 0).toBe(4);
+    expect(deleteNodes(five, [0, 1, 2])).toBeNull();
+    expect(deleteNodes(sq, [0])).not.toBeNull();   // สี่เหลี่ยม → เหลือ 3 จุด
+  });
+  it("จุดในกรอบ", async () => {
+    const { nodesInBox } = await import("../pattern-edit");
+    expect(nodesInBox([{ x: 0, y: 0 }, { x: 5, y: 5 }, { x: 10, y: 10 }], 4, 4, 11, 11)).toEqual([1, 2]);
+  });
+  it("วงกลมมุม: มุมฉากชี้เข้าในชิ้น · ลากออกจากมุม = รัศมีเพิ่ม · ไม่เกินครึ่งขอบ", async () => {
+    const { cornerWidget, radiusFromDrag } = await import("../pattern-edit");
+    const w = cornerWidget(sq, 0)!;
+    expect(w.bis[0]).toBeCloseTo(Math.SQRT1_2, 4); expect(w.bis[1]).toBeCloseTo(Math.SQRT1_2, 4);
+    expect(w.maxR).toBeCloseTo(5, 4);
+    // ศูนย์กลางโค้ง r=2 อยู่ที่ (2,2) → ลากไป (2,2) ได้ r ≈ 2
+    expect(radiusFromDrag(w, [2, 2])).toBeCloseTo(2, 3);
+    expect(radiusFromDrag(w, [50, 50])).toBeCloseTo(5, 3);
+    expect(radiusFromDrag(w, [-1, -1])).toBe(0);
+  });
+  it("มุมโค้งหลายมุมพร้อมกัน · จุดที่โค้งแล้วทำซ้ำไม่ได้", async () => {
+    const { filletMany, cornerWidget } = await import("../pattern-edit");
+    const r = filletMany(sq, [0, 2], 2)!;
+    expect(r.k === "path" ? r.nodes.length : 0).toBe(6);
+    expect(cornerWidget(r, 0)).toBeNull();          // จุดโค้งแล้ว (มีหูจับ) = ไม่มีวงกลม
+    expect(filletMany(sq, [0], 0)).toBeNull();
+  });
+});

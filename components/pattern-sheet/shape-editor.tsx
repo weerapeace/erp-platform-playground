@@ -13,6 +13,9 @@
  *       เส้นช่วยจัดแนว (ลากชิ้นแล้วดูดขอบ/กึ่งกลางชิ้นอื่น) · จัดแนว/เว้นระยะเท่ากัน · ลบมุมโค้ง · สำเนากลับด้าน · เส้นขนาน · เส้นทางผ้า · รอยบาก
  *     ชิ้นที่เลือก: จุดจับ 8 จุดลากย่อขยาย (Shift/ล็อกสัดส่วน = คงสัดส่วน) · จุดจับหมุน (Shift = ทีละ 15°) · หมุน 90° · ความทึบชิ้น (เห็นรูปอ้างอิงด้านล่าง)
  *   คีย์ลัด: R สี่เหลี่ยม · O วงกลม · P ปากกา · V ย้าย · H มือ · Space ค้าง = เลื่อน · ลูกศร = ขยับ (Shift ×10)
+ *   แก้จุดแบบ Illustrator (เจ้าของขอ 2026-11-13): A ลูกศรขาว (คลิกชิ้น = ขึ้นจุด · ลากกรอบที่ว่าง = เลือกหลายจุด · Delete = ลบจุดที่เลือก · ลูกศร = ขยับจุด
+ *     · คลิกจุดมุม → ลากวงกลม ◉ เข้าด้านใน = มุมโค้ง + ป้าย R: รัศมี (Live Corner) · เลือกหลายมุม = โค้งเท่ากันทุกมุม) · + เพิ่มจุด (คลิกบนเส้น) · − ลบจุด (คลิกจุด)
+ *     · Shift+C แปลงจุด (คลิก = มุม↔โค้ง · กดจุดแล้วลาก = ดึงหูจับ) · ดับเบิลคลิกชิ้น = เริ่มแก้จุด · prop initialEdit = เปิดมาแก้จุดชิ้นแรกทันที · สูตร lib/pattern-edit
  *            Shift ระหว่างวาด = จัตุรัส/วงกลม/เส้น 45° · Enter = ปิดรูปปากกา · Esc = ยกเลิก · Delete = ลบชิ้น/จุด
  *
  *   <ShapeEditor open onClose initial={[{ shape, holes, count, allow, name, mats }]} materials={[{ id, name }]} onSave={(r) => …} />
@@ -38,7 +41,7 @@ import { edgePlan, migrateSeams, remapEdgeMeta, remapEdgeValues, type EdgePlan }
 import { toolOfBoard, toolTitle } from "@/lib/pattern-tools";
 import { CONSTRAINT_KINDS, constraintNow, cutAlongLine, freedom, remapConstraints, solveConstraints, type Constraint, type ConstraintKind } from "@/lib/pattern-constraints";
 import { boxCorner, dartOnEdge, edgeBandLine, gussetFromEdges, gussetRun, pleatPiece, pleatTake, slashSpread, withTakes, type ShapingResult } from "@/lib/pattern-shaping";
-import { NOTCH_STYLES, bendEdge, chamferCorner, cornerAngle, edgeRadius, filletCorner, joinEdgeWithNext, moveEdge, notchStyleSegs, objectSnap, polygonInBox, splitEdgeAt, splitEdgeEven } from "@/lib/pattern-edit";
+import { NOTCH_STYLES, bendEdge, chamferCorner, cornerAngle, cornerWidget, deleteNodes, edgeRadius, filletCorner, filletMany, joinEdgeWithNext, moveEdge, nodesInBox, notchStyleSegs, objectSnap, polygonInBox, radiusFromDrag, splitEdgeAt, splitEdgeEven } from "@/lib/pattern-edit";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
@@ -48,7 +51,10 @@ export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: 
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
 type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; allowEdges?: number[] | null; foldEdges?: number[] | null; edgeMeta?: EdgeMeta[] | null; info?: PieceInfo | null; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[]; inner?: InnerLine[] | null; link?: PieceLink | null };
-export type Tool = "rect" | "ellipse" | "polygon" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner";
+export type Tool = "rect" | "ellipse" | "polygon" | "pen" | "move" | "hand" | "measure" | "sew" | "sewpart" | "sewmany" | "sewedit" | "inner" | "direct" | "addpt" | "delpt" | "convert";
+/** เครื่องมือแก้จุดแบบ Illustrator — ถือเครื่องมือเหล่านี้ = ยังอยู่ในโหมดแก้จุด */
+const POINT_TOOLS = new Set<Tool>(["direct", "addpt", "delpt", "convert"]);
+type CornerW = NonNullable<ReturnType<typeof cornerWidget>>;
 /** สีของเส้นในชิ้นตามชนิด (กระดาน) */
 const INNER_STYLE: Record<InnerKind, { col: string; dash?: string; w: number }> = { sew: { col: "#2563eb", dash: "6 4", w: 2.5 }, slit: { col: "#c2410c", w: 5 }, fold: { col: "#7c3aed", dash: "10 3 2 3", w: 2 }, mark: { col: "#64748b", dash: "2 4", w: 2 }, hw: { col: "#a16207", w: 2 }, dim: { col: "#0f766e", w: 1.5 }, glue: { col: "#ea580c", dash: "8 3", w: 2 }, skive: { col: "#92400e", dash: "1 3", w: 2.5 } };
 export const SEAM_COLORS = ["#c2410c", "#2563eb", "#059669", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#4b5563"];
@@ -69,6 +75,10 @@ type Drag =
   | { k: "penHandle"; idx: number; origin: XY }
   | { k: "node"; idx: number; before: Piece[]; moved: boolean }
   | { k: "handle"; idx: number; which: "i" | "o"; before: Piece[]; moved: boolean; alt: boolean }
+  | { k: "nodes"; start: XY; idxs: number[]; orig: PNode[]; before: Piece[]; moved: boolean }
+  | { k: "nmarquee"; a: XY; add: boolean; base: number[] }
+  | { k: "corner"; idxs: number[]; w: CornerW; orig: Shape; before: Piece[]; moved: boolean }
+  | { k: "conv"; idx: number; origin: XY; before: Piece[]; moved: boolean }
   | { k: "ref"; id: string; start: XY; ox: number; oy: number }
   | { k: "refSize"; id: string; start: XY; w: number }
   | { k: "resize"; id: string; dir: string; start: Box; orig: Piece; before: Piece[]; moved: boolean }
@@ -174,11 +184,13 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
 }
 
 export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
-  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange, level = 3, toolReq = null, ghosts = null }: {
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange, level = 3, toolReq = null, ghosts = null, initialEdit = false }: {
   /** รูปชิ้นของรุ่นเทียบ (Bag CAD รอบ H) — วาดเส้นประชมพูใต้ชิ้น กดไม่ได้ · null = ไม่วาด */
   ghosts?: { shape: Shape; holes?: Shape[]; color?: string }[] | null;
   /** โหมดของสตูดิโอ (Bag CAD รอบ D): 1 เริ่มต้น = เครื่องมือหลัก + ชื่อบนปุ่ม + แผงขวาแบบย่อ · 2 มาตรฐาน · 3 ขั้นสูง (ค่าเริ่ม = ทุกอย่างแบบเดิม) — เปลี่ยนแค่สิ่งที่โชว์ ข้อมูลไม่เปลี่ยน */
   level?: 1 | 2 | 3;
+  /** เปิดมาแล้วเข้าแก้จุดชิ้นแรกทันที (ถือลูกศรขาว) — ปุ่ม "ปรับทรง" ในหน้าคิดผ้า */
+  initialEdit?: boolean;
   /** สั่งถือเครื่องมือจากภายนอก (ช่องค้นหาเครื่องมือ) — nonce เปลี่ยน = 1 ครั้ง */
   toolReq?: { nonce: number; tool: Tool } | null;
   /** แจ้งเมื่อเปลี่ยนเครื่องมือ (บทเรียนนับว่าเปิดไม้บรรทัดแล้ว ฯลฯ) */
@@ -325,6 +337,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [lock, setLock] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);   // ชิ้นที่กำลังแก้จุด
   const [selNode, setSelNode] = useState(-1);
+  const [nodeSet, setNodeSet] = useState<Set<number>>(new Set());          // จุดที่เลือก (หลายจุด · ลูกศรขาว)
+  const [cornerTip, setCornerTip] = useState<{ x: number; y: number; r: number } | null>(null);   // ป้าย R: ตอนลากวงกลมมุมโค้ง
+  useEffect(() => { if (selNode < 0) setNodeSet((x) => (x.size ? new Set() : x)); }, [selNode]);
+  useEffect(() => { setNodeSet(new Set()); setCornerTip(null); }, [editId]);
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [nk, setNk] = useState<"rect" | "ellipse">("rect");
   const [nw, setNw] = useState("30");
@@ -482,7 +498,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if ((tl === "sew" || tl === "sewpart" || tl === "sewmany" || tl === "sewedit") && !seams) return;
     if (tl === "inner" && (!innerLines || readonly)) return;
     setInnerA(null);
-    setTool(tl); setPen(null); setBox(null); setMDraft(null); if (tl !== "move") setEditId(null);
+    setTool(tl); setPen(null); setBox(null); setMDraft(null); if (!POINT_TOOLS.has(tl)) setEditId(null);
+    // ถือเครื่องมือแก้จุดตอนเลือกชิ้นไว้ = เข้าแก้จุดชิ้นนั้นเลย (แปลงสี่เหลี่ยม/วงกลมเป็นจุด)
+    if (POINT_TOOLS.has(tl) && !editId && !readonly) {
+      const pc = piecesRef.current.find((x) => x.id === sel);
+      if (pc) { if (pc.shape.k !== "path") patchPiece(pc.id, (x) => ({ ...x, shape: toPathShape(x.shape), holes: x.holes })); setEditId(pc.id); setSelNode(-1); }
+    }
     setSewA(null); setSewP(null); setManyA(null); if (tl !== "sewedit") setEdgeSel(null); if (tl !== "sewedit" && tl !== "sewpart") setSewSel(null);
     if (tl === "sew" || tl === "sewpart" || tl === "sewmany" || tl === "sewedit") { setPanelOpen(true); setNotchMode(false); }
   };
@@ -655,6 +676,50 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     }
     // ดูอย่างเดียว: กด = เลือกชิ้น · ลากที่ว่าง = เลื่อนดู
     if (readonly) { const hid = target.getAttribute?.("data-piece"); if (hid) setSel(hid); else { setSel(null); drag.current = { k: "pan", sx: e.clientX, sy: e.clientY, v: view }; capture(); } return; }
+    // เครื่องมือแก้จุดแบบ Illustrator (ลูกศรขาว A · เพิ่มจุด + · ลบจุด − · แปลงจุด Shift+C)
+    if (POINT_TOOLS.has(tool)) {
+      const nd = target.getAttribute?.("data-node"), hd = target.getAttribute?.("data-handle"), cw = target.getAttribute?.("data-corner"), hitP = target.getAttribute?.("data-piece");
+      const ep = editId ? piecesRef.current.find((x) => x.id === editId) ?? null : null;
+      if (cw != null && ep) {   // วงกลมมุมโค้ง: เลือกหลายมุมไว้ = โค้งพร้อมกันทุกมุม
+        const w = cornerWidget(ep.shape, Number(cw));
+        if (w) {
+          const idxs = (nodeSet.size ? [...nodeSet] : [Number(cw)]).filter((i) => cornerWidget(ep.shape, i));
+          drag.current = { k: "corner", idxs, w, orig: ep.shape, before: piecesRef.current, moved: false }; capture();
+        }
+        return;
+      }
+      if (hd != null && ep && selNode >= 0) { drag.current = { k: "handle", idx: selNode, which: hd === "i" ? "i" : "o", before: piecesRef.current, moved: false, alt: e.altKey }; capture(); return; }
+      if (nd != null && ep && ep.shape.k === "path") {
+        const i = Number(nd);
+        if (tool === "delpt") { removeNodes([i]); return; }
+        if (tool === "convert") { setNodeSet(new Set([i])); setSelNode(i); drag.current = { k: "conv", idx: i, origin: { x: ep.shape.nodes[i].x, y: ep.shape.nodes[i].y }, before: piecesRef.current, moved: false }; capture(); return; }
+        let set = new Set(nodeSet);
+        if (e.shiftKey) { if (set.has(i)) set.delete(i); else set.add(i); } else if (!set.has(i)) set = new Set([i]);
+        setNodeSet(set); setSelNode(set.has(i) ? i : ([...set][0] ?? -1));
+        if (set.has(i)) { drag.current = { k: "nodes", start: p, idxs: [...set], orig: ep.shape.nodes.map((n) => ({ ...n })), before: piecesRef.current, moved: false }; capture(); }
+        return;
+      }
+      if (hitP && hitP !== editId) {   // คลิกชิ้นอื่น = เข้าแก้จุดชิ้นนั้น
+        const pc = piecesRef.current.find((x) => x.id === hitP);
+        if (pc && !blocked(pc.pid)) { if (pc.shape.k !== "path") patchPiece(pc.id, (x) => ({ ...x, shape: toPathShape(x.shape), holes: x.holes })); setSel(pc.id); setMulti(new Set()); setEditId(pc.id); setSelNode(-1); }
+        return;
+      }
+      if (tool === "addpt" && ep && ep.shape.k === "path") {   // คลิกใกล้เส้นขอบ = เพิ่มจุดตรงนั้น (รูปไม่เปลี่ยน)
+        const near = nearestSegment(ep.shape.nodes, [raw.x, raw.y]);
+        if (near.dist * ppc <= 10) { patchPiece(ep.id, (x) => (x.shape.k === "path" ? { ...x, shape: { k: "path", nodes: splitSegment(x.shape.nodes, near.i, near.t) } } : x)); setNodeSet(new Set([near.i + 1])); setSelNode(near.i + 1); }
+        else if (hitP === editId) setMsg({ tone: "err", text: t("คลิกให้ใกล้เส้นขอบของชิ้น", "Click closer to the outline") });
+        else startPan();
+        return;
+      }
+      // ที่ว่าง (หรือเนื้อชิ้นที่กำลังแก้): ลากกรอบเลือกจุด · คลิกเฉย ๆ = ยกเลิกเลือก (ยังอยู่ในโหมดแก้จุด) · Shift = เลือกเพิ่ม
+      if (ep) {
+        const base = e.shiftKey ? [...nodeSet] : [];
+        if (!e.shiftKey) { setNodeSet(new Set()); setSelNode(-1); }
+        drag.current = { k: "nmarquee", a: raw, add: e.shiftKey, base }; setMarquee({ a: raw, b: raw }); capture();
+        return;
+      }
+      startPan(); return;
+    }
     // แก้จุด: ลากจุด / หูจับ
     if (editId) {
       const nd = target.getAttribute?.("data-node"), hd = target.getAttribute?.("data-handle");
@@ -699,6 +764,14 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const dt = tool as DrawTool;
     if (dt === "pen") { setPen({ nodes: [{ x: p.x, y: p.y }], hover: null }); drag.current = { k: "penHandle", idx: 0, origin: p }; capture(); return; }
     setBox({ k: dt, a: p, b: p }); drag.current = { k: "box" }; capture();
+  };
+  /** ลบจุดที่เลือก (หลายจุด) — ต้องเหลืออย่างน้อย 3 จุด */
+  const removeNodes = (idxs: number[]) => {
+    if (!editId) return;
+    const pc = piecesRef.current.find((x) => x.id === editId); if (!pc) return;
+    const next = deleteNodes(pc.shape, idxs);
+    if (!next) { setMsg({ tone: "err", text: t("รูปต้องมีอย่างน้อย 3 จุด", "A shape needs at least 3 points") }); return; }
+    patchPiece(editId, (x) => ({ ...x, shape: next })); setSelNode(-1); setNodeSet(new Set());
   };
   const setEditNodes = (f: (nodes: PNode[]) => PNode[]) => {
     if (!editId) return;
@@ -785,6 +858,31 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       setPieces((ps) => ps.map((x) => { const o = om.get(x.id); return o ? movePiece(o, dx, dy) : x; }));
       return;
     }
+    if (d.k === "nodes") {   // ลากจุดที่เลือกทั้งหมดพร้อมกัน
+      const dx = p.x - d.start.x, dy = p.y - d.start.y;
+      if (!d.moved && Math.hypot(dx, dy) * ppc < 2) return;
+      d.moved = true;
+      const set = new Set(d.idxs), r3 = (v: number) => Math.round(v * 1000) / 1000;
+      setEditNodes((ns) => ns.map((n, i) => (set.has(i) && d.orig[i] ? { ...n, x: r3(d.orig[i].x + dx), y: r3(d.orig[i].y + dy) } : n)));
+      return;
+    }
+    if (d.k === "nmarquee") { setMarquee({ a: d.a, b: raw }); return; }
+    if (d.k === "corner") {   // วงกลมมุมโค้ง: ระยะตามแนวครึ่งมุม = รัศมี (ใกล้มุมเกิน 6px = มุมแหลม)
+      const r = radiusFromDrag(d.w, [raw.x, raw.y], 6 / ppc);
+      d.moved = true;
+      const next = r > 0 ? filletMany(d.orig, d.idxs, r) : null;
+      setPieces((ps) => ps.map((x) => (x.id === editId ? { ...x, shape: next ?? d.orig } : x)));
+      const h = r > 0 ? r / Math.sin(d.w.half) : 14 / ppc;
+      setCornerTip({ x: d.w.at[0] + d.w.bis[0] * h, y: d.w.at[1] + d.w.bis[1] * h, r });
+      return;
+    }
+    if (d.k === "conv") {   // แปลงจุด: กดจุดแล้วลาก = ดึงหูจับสองข้างตามทิศที่ลาก
+      const vx = p.x - d.origin.x, vy = p.y - d.origin.y;
+      if (!d.moved && Math.hypot(vx, vy) * ppc < 3) return;
+      d.moved = true;
+      setEditNodes((ns) => ns.map((n, i) => (i === d.idx ? { x: n.x, y: n.y, ox: vx, oy: vy, ix: -vx, iy: -vy } : n)));
+      return;
+    }
     if (d.k === "node") { d.moved = true; setEditNodes((ns) => ns.map((n, i) => (i === d.idx ? { ...n, x: p.x, y: p.y } : n))); return; }
     if (d.k === "handle") {
       d.moved = true;
@@ -814,6 +912,22 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const d = drag.current; drag.current = null;
     setGuides([]);
     if (!d) return;
+    if (d.k === "nmarquee") {   // กรอบเลือกจุด
+      const m = marquee; setMarquee(null);
+      const ep = editId ? piecesRef.current.find((x) => x.id === editId) : null;
+      if (!m || !ep || ep.shape.k !== "path") return;
+      const small = Math.hypot(m.a.x - m.b.x, m.a.y - m.b.y) * ppc < 3;
+      const got = small ? [] : nodesInBox(ep.shape.nodes, m.a.x, m.a.y, m.b.x, m.b.y);
+      const set = new Set([...d.base, ...got]);
+      setNodeSet(set); setSelNode(set.size ? [...set][0] : -1);
+      return;
+    }
+    if (d.k === "conv" && !d.moved) { patchPiece(editId ?? "", (x) => (x.shape.k === "path" ? { ...x, shape: { k: "path", nodes: toggleSmooth(x.shape.nodes, d.idx) } } : x)); return; }   // คลิกเฉย ๆ = มุม ↔ โค้ง
+    if (d.k === "corner") {
+      setCornerTip(null); setSelNode(-1); setNodeSet(new Set());
+      if (d.moved) { const fl = followEdges(d.before, piecesRef.current); record(d.before); setPieces(fl.pieces); setDirty(true); if (fl.seams) emitSeams(fl.seams); if (fl.lost) lostMsg(fl.lost); }
+      return;
+    }
     if (d.k === "marquee" && marquee) {
       const x0 = Math.min(marquee.a.x, marquee.b.x), x1 = Math.max(marquee.a.x, marquee.b.x), y0 = Math.min(marquee.a.y, marquee.b.y), y1 = Math.max(marquee.a.y, marquee.b.y);
       const inside = piecesRef.current.filter((p) => { const b = pieceGeometry(p).cutBox; return b.x >= x0 && b.y >= y0 && b.x + b.w <= x1 && b.y + b.h <= y1; }).map((p) => p.id);
@@ -823,7 +937,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if (inside.length) setMsg({ tone: "ok", text: t(`เลือก ${ids.length} ชิ้น`, `Selected ${ids.length} pieces`) });
       return;
     }
-    if ((d.k === "move" || d.k === "node" || d.k === "handle" || d.k === "resize" || d.k === "rotate" || d.k === "inner") && d.moved) { record(d.before); setDirty(true); }
+    if ((d.k === "move" || d.k === "node" || d.k === "nodes" || d.k === "conv" || d.k === "handle" || d.k === "resize" || d.k === "rotate" || d.k === "inner") && d.moved) { record(d.before); setDirty(true); }
     if (d.k === "move" && !d.moved && !panelOpen) setPanelOpen(true);
     if (d.k === "rotate") {
       setRotDeg(null);
@@ -846,8 +960,12 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const onDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (mDraft?.kind === "curve") { commitCurve(); return; }
     if (pen) { commitPen(); return; }
-    if (!editId) return;
     const target = e.target as Element;
+    if (!editId) {   // ดับเบิลคลิกชิ้น = เริ่มแก้จุด (ถือลูกศรขาว)
+      const hid = target.getAttribute?.("data-piece"), pc = hid ? piecesRef.current.find((x) => x.id === hid) : null;
+      if (pc && !readonly && !blocked(pc.pid)) { setSel(pc.id); startEdit(pc); }
+      return;
+    }
     const nd = target.getAttribute?.("data-node");
     const pc = piecesRef.current.find((x) => x.id === editId);
     if (!pc || pc.shape.k !== "path") return;
@@ -927,6 +1045,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); redo(); return; }
+      if (e.key === "Escape" && editId && (nodeSet.size || selNode >= 0) && !pen && !box) { e.stopPropagation(); e.preventDefault(); setSelNode(-1); setNodeSet(new Set()); return; }   // Esc ครั้งแรก = ยกเลิกเลือกจุด · ครั้งที่สอง = เสร็จแก้จุด
       if (e.key === "Escape" && (pen || box || sel || editId || notchMode)) {
         e.stopPropagation(); e.preventDefault();
         if (pen || box) { setPen(null); setBox(null); } else if (notchMode) setNotchMode(false); else if (editId) { setEditId(null); setSelNode(-1); } else { setSel(null); setMulti(new Set()); }
@@ -936,11 +1055,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       if ((e.ctrlKey || e.metaKey) && k === "d") { e.preventDefault(); duplicateSel(); return; }
       if (e.key === "Enter" && pen) { e.preventDefault(); commitPen(); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && pen) { e.preventDefault(); setPen(pen.nodes.length > 1 ? { ...pen, nodes: pen.nodes.slice(0, -1) } : null); return; }
-      if ((e.key === "Backspace" || e.key === "Delete") && editId && selNode >= 0) {
+      if ((e.key === "Backspace" || e.key === "Delete") && editId && (nodeSet.size || selNode >= 0)) {   // ลบจุดที่เลือก (หลายจุด)
         e.preventDefault();
-        const pc = piecesRef.current.find((x) => x.id === editId);
-        if (pc?.shape.k === "path" && pc.shape.nodes.length > 3) { patchPiece(editId, (x) => (x.shape.k === "path" ? { ...x, shape: { k: "path", nodes: x.shape.nodes.filter((_, i) => i !== selNode) } } : x)); setSelNode(-1); }
-        else setMsg({ tone: "err", text: t("รูปต้องมีอย่างน้อย 3 จุด", "A shape needs at least 3 points") });
+        removeNodes(nodeSet.size ? [...nodeSet] : [selNode]);
+        return;
+      }
+      if ((e.key === "Backspace" || e.key === "Delete") && editId) { e.preventDefault(); return; }   // แก้จุดอยู่แต่ไม่ได้เลือกจุด = ไม่ลบทั้งชิ้น (กันเผลอ)
+      if (e.key.startsWith("Arrow") && editId && (nodeSet.size || selNode >= 0)) {   // ลูกศร = ขยับจุดที่เลือก (Shift ×10)
+        e.preventDefault();
+        const dd = step * (e.shiftKey ? 10 : 1);
+        const [dx, dy] = e.key === "ArrowLeft" ? [-dd, 0] : e.key === "ArrowRight" ? [dd, 0] : e.key === "ArrowUp" ? [0, -dd] : [0, dd];
+        const set = nodeSet.size ? nodeSet : new Set([selNode]), r3 = (v: number) => Math.round(v * 1000) / 1000;
+        patchPiece(editId, (x) => (x.shape.k === "path" ? { ...x, shape: { k: "path", nodes: x.shape.nodes.map((n, i) => (set.has(i) ? { ...n, x: r3(n.x + dx), y: r3(n.y + dy) } : n)) } } : x), `nudgen-${editId}`);
         return;
       }
       if ((e.key === "Backspace" || e.key === "Delete") && selIdsRef.current.length) { e.preventDefault(); deleteSel(); return; }
@@ -954,7 +1080,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if (e.key === " ") { spaceDown.current = true; e.preventDefault(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", g: "polygon", p: "pen", v: "move", h: "hand", m: "measure", ...(seams ? { n: "sew", j: "sewpart", k: "sewmany", b: "sewedit" } : {}), ...(innerLines ? { l: "inner" } : {}) };
+      if (!readonly && (e.key === "+" || e.key === "=")) { e.preventDefault(); changeTool("addpt"); return; }   // เครื่องมือแก้จุดแบบ Illustrator
+      if (!readonly && (e.key === "-" || e.key === "_")) { e.preventDefault(); changeTool("delpt"); return; }
+      if (!readonly && e.shiftKey && k === "c") { e.preventDefault(); changeTool("convert"); return; }
+      const map: Record<string, Tool> = { ...(readonly ? {} : { a: "direct" as Tool }), r: "rect", o: "ellipse", e: "ellipse", g: "polygon", p: "pen", v: "move", h: "hand", m: "measure", ...(seams ? { n: "sew", j: "sewpart", k: "sewmany", b: "sewedit" } : {}), ...(innerLines ? { l: "inner" } : {}) };
       if (map[k]) { e.preventDefault(); changeTool(map[k]); }
     };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === " ") spaceDown.current = false; };
@@ -985,7 +1114,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     window.addEventListener("copy", onCopy);
     return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onKeyUp); window.removeEventListener("paste", onPaste); window.removeEventListener("copy", onCopy); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pen, box, sel, multi, editId, selNode, step, mDraft, cal, readonly, notchMode, tool, sewA, sewP, sewSel, edgeSel, seams, innerA, innerLines, manyA, innerSel]);
+  }, [open, pen, box, sel, multi, editId, selNode, nodeSet, step, mDraft, cal, readonly, notchMode, tool, sewA, sewP, sewSel, edgeSel, seams, innerA, innerLines, manyA, innerSel]);
   useEffect(() => { setNotchMode(false); }, [sel]);   // เปลี่ยนชิ้น = ออกจากโหมดรอยบาก
 
   // ฝังในหน้า: คลิกในกระดาน = เปิดคีย์ลัด · คลิกนอกกระดาน = ปิด
@@ -1170,8 +1299,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const startEdit = (p: Piece) => {
     if (editId === p.id) { setEditId(null); setSelNode(-1); return; }
     if (p.shape.k !== "path") patchPiece(p.id, (x) => ({ ...x, shape: toPathShape(x.shape), holes: x.holes }));
-    setEditId(p.id); setSelNode(-1); setTool("move");
+    setEditId(p.id); setSelNode(-1); setTool("direct");
   };
+  // initialEdit: เปิดมาแล้วเข้าแก้จุดชิ้นแรกทันที (ปุ่ม "ปรับทรง" ในหน้าคิดผ้า)
+  const didInitEdit = useRef(false);
+  useEffect(() => {
+    if (!initialEdit || didInitEdit.current || readonly || !open) return;
+    const p0 = piecesRef.current[0]; if (!p0) return;
+    didInitEdit.current = true; setSel(p0.id); startEdit(p0);
+  }, [initialEdit, open, readonly]);   // eslint-disable-line react-hooks/exhaustive-deps
   const addByNumber = () => {
     const w = Number(nw), h = Number(nh);
     if (!(w > 0) || !(h > 0)) { setMsg({ tone: "err", text: t("ใส่กว้างและสูงเป็นตัวเลขมากกว่า 0", "Enter a width and height above 0") }); return; }
@@ -1328,7 +1464,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const rs = rulerSteps(ppc);
   const gridStep = snap > 0 && snap * ppc >= 6 ? snap : rs.minor;
   const fs = view.w / 60;
-  const cursor = tool === "hand" ? "grab" : tool === "move" ? "default" : "crosshair";
+  const cursor = tool === "hand" ? "grab" : tool === "move" || POINT_TOOLS.has(tool) ? "default" : "crosshair";
   const btnCls = (on: boolean) => `inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs ${on ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
   const editPiece = editId ? pieces.find((p) => p.id === editId) ?? null : null;
   // ── เครื่องมือเย็บ (แบบ CLO: เย็บบนกระดานเดิม · คู่เดียวกันสีเดียวกัน · ขีดบอกจุดเริ่ม) ──
@@ -1936,6 +2072,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
 
   const hint = pen
     ? t(`ปากกา: ${pen.nodes.length} จุด · กดลาก = เส้นโค้ง · กดจุดแรก/ดับเบิลคลิก/Enter = ปิดรูป · Backspace = ลบจุดล่าสุด · Esc = ยกเลิก`, `Pen: ${pen.nodes.length} points · drag = curve · click first point / double-click / Enter = close · Backspace = undo point · Esc = cancel`)
+    : editPiece && tool === "addpt" ? t("เพิ่มจุด (+): คลิกบนเส้นขอบ = เพิ่มจุดตรงนั้น (รูปไม่เปลี่ยน) · คลิกชิ้นอื่น = แก้จุดชิ้นนั้น · A = ลูกศรขาว · Esc = เสร็จ", "Add point (+): click the outline to add a point there (shape unchanged) · click another piece to edit it · A = direct selection · Esc = done")
+    : editPiece && tool === "delpt" ? t("ลบจุด (−): คลิกจุด = ลบจุดนั้น (ต้องเหลืออย่างน้อย 3 จุด) · A = ลูกศรขาว · Esc = เสร็จ", "Delete point (−): click a point to remove it (at least 3 must remain) · A = direct selection · Esc = done")
+    : editPiece && tool === "convert" ? t("แปลงจุด (Shift+C): คลิกจุด = มุมแหลม ↔ โค้ง · กดจุดแล้วลาก = ดึงหูจับให้โค้งตามทิศที่ลาก · A = ลูกศรขาว · Esc = เสร็จ", "Convert (Shift+C): click a point = corner ↔ smooth · press a point and drag = pull out handles · A = direct selection · Esc = done")
+    : editPiece && tool === "direct" ? t("ลูกศรขาว (A): ลากจุด = ย้าย · ลากกรอบที่ว่าง = เลือกหลายจุด (Shift = เพิ่ม) · Delete = ลบจุดที่เลือก · ลูกศร = ขยับ (Shift ×10) · คลิกจุดมุมแล้วลากวงกลม ◉ เข้าด้านใน = มุมโค้ง · ลากหูจับ = ดัดโค้ง (Alt = แยก) · Esc = เสร็จ", "Direct selection (A): drag a point to move · drag empty space to box-select points (Shift = add) · Delete removes them · arrows nudge (Shift ×10) · click a corner and drag the ◉ circle inward to round it · drag a handle to bend (Alt = break) · Esc = done")
+    : POINT_TOOLS.has(tool) ? t("คลิกชิ้นเพื่อเริ่มแก้จุด (หรือดับเบิลคลิกชิ้นตอนถือเครื่องมืออื่น)", "Click a piece to start editing its points (or double-click a piece with any tool)")
     : editPiece ? t("แก้จุด: ลากจุด = ย้าย · ลากหูจับ = ดัดโค้ง (Alt = แยกหูจับ) · ดับเบิลคลิกจุด = มุม↔โค้ง · ดับเบิลคลิกเส้น = เพิ่มจุด · Delete = ลบจุด · Esc = เสร็จ", "Edit points: drag a point to move · drag a handle to bend (Alt = break) · double-click a point = corner↔smooth · double-click the outline = add point · Delete = remove point · Esc = done")
     : tool === "pen" ? t("ปากกา: คลิกวางจุด (มุม) · กดค้างแล้วลาก = เส้นโค้ง · Shift = เส้น 45°", "Pen: click to place corners · press and drag for curves · Shift = 45°")
     : tool === "sew" ? (sewA ? t("เย็บ: กดขอบของอีกชิ้นที่จะเย็บติดกัน · Shift+คลิกขอบที่ติดกัน = ต่อด้านแรกให้ยาวขึ้น · Esc = ยกเลิก", "Sew: click the edge to sew it to · Shift+click a neighbouring edge to extend the first side · Esc cancels") : t("เย็บขอบกับขอบ: กดขอบแรก แล้วกดขอบที่จะเย็บติดกัน · หลังเย็บ Shift+คลิกขอบที่ติดกัน = ต่อด้านที่สอง · Ctrl+Z ย้อนตะเข็บ", "Sew edge to edge: click the first edge, then the edge it is sewn to · after sewing, Shift+click a neighbouring edge to extend the second side · Ctrl+Z undoes"))
@@ -2016,6 +2157,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       {/* ซ้าย: เครื่องมือวาด */}
       <div className={`${fbar} absolute left-2 top-14 flex-col`} aria-label={t("เครื่องมือวาด", "Drawing tools")}>
         {toolIcon("move", "pointer", readonly ? t("เลือก", "Select") : t("ย้าย", "Move"), "V")}
+        {!readonly && toolIcon("direct", "direct-select", t("ลูกศรขาว", "Direct"), "A")}
+        {!readonly && toolIcon("addpt", "anchor-add", t("เพิ่มจุด", "Add point"), "+")}
+        {!readonly && toolIcon("delpt", "anchor-delete", t("ลบจุด", "Delete point"), "−")}
+        {!readonly && toolIcon("convert", "anchor-convert", t("แปลงจุด", "Convert"), "Shift+C")}
+        {!readonly && <span className="my-0.5 h-px w-5 self-center bg-slate-200" />}
         {!readonly && toolIcon("rect", "square", t("สี่เหลี่ยม", "Rectangle"), "R")}
         {!readonly && toolIcon("ellipse", "circle", t("วงกลม", "Circle"), "O")}
         {!readonly && level >= 2 && toolIcon("polygon", "diamond", t("หลายเหลี่ยม", "Polygon"), "G")}
@@ -2267,7 +2413,18 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   return <g>
                     {sn && hasH(sn, "i") && <><line x1={sn.x} y1={sn.y} x2={sn.x + (sn.ix ?? 0)} y2={sn.y + (sn.iy ?? 0)} stroke={COLORS.node} strokeWidth={1} vectorEffect="non-scaling-stroke" /><circle cx={sn.x + (sn.ix ?? 0)} cy={sn.y + (sn.iy ?? 0)} r={hr} data-handle="i" fill="#fff" stroke={COLORS.node} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} /></>}
                     {sn && hasH(sn, "o") && <><line x1={sn.x} y1={sn.y} x2={sn.x + (sn.ox ?? 0)} y2={sn.y + (sn.oy ?? 0)} stroke={COLORS.node} strokeWidth={1} vectorEffect="non-scaling-stroke" /><circle cx={sn.x + (sn.ox ?? 0)} cy={sn.y + (sn.oy ?? 0)} r={hr} data-handle="o" fill="#fff" stroke={COLORS.node} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} /></>}
-                    {N.map((n, i) => <rect key={i} x={n.x - fs * 0.22} y={n.y - fs * 0.22} width={fs * 0.44} height={fs * 0.44} data-node={i} fill={i === selNode ? COLORS.node : "#fff"} stroke={COLORS.node} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />)}
+                    {N.map((n, i) => <rect key={i} x={n.x - fs * 0.22} y={n.y - fs * 0.22} width={fs * 0.44} height={fs * 0.44} data-node={i} fill={i === selNode || nodeSet.has(i) ? COLORS.node : "#fff"} stroke={COLORS.node} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }} />)}
+                    {/* วงกลมมุมโค้ง (Live Corner) ของจุดมุมที่เลือก — ลากเข้าด้านใน = มุมโค้ง */}
+                    {!readonly && !cornerTip && [...new Set([...nodeSet, ...(selNode >= 0 ? [selNode] : [])])].map((i) => {
+                      const w = cornerWidget(editPiece.shape, i); if (!w) return null;
+                      const cx = w.at[0] + w.bis[0] * (14 / ppc), cy = w.at[1] + w.bis[1] * (14 / ppc);
+                      return <g key={`cw${i}`}><circle cx={cx} cy={cy} r={fs * 0.26} data-corner={i} fill="#fff" stroke={COLORS.node} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ cursor: "pointer" }}><title>{t("ลากเข้าด้านใน = มุมโค้ง", "Drag inward to round the corner")}</title></circle><circle cx={cx} cy={cy} r={fs * 0.09} fill={COLORS.node} style={{ pointerEvents: "none" }} /></g>;
+                    })}
+                    {cornerTip && <g style={{ pointerEvents: "none" }}>
+                      <circle cx={cornerTip.x} cy={cornerTip.y} r={fs * 0.26} fill="#fff" stroke={COLORS.node} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                      <rect x={cornerTip.x + fs * 0.5} y={cornerTip.y + fs * 0.3} width={fs * 4.6} height={fs * 1.3} rx={fs * 0.2} fill="#d4d4d4" />
+                      <text x={cornerTip.x + fs * 0.7} y={cornerTip.y + fs * 1.25} fontSize={fs * 0.85} fill="#111827">R: {cornerTip.r > 0 ? fmtL(cornerTip.r) : t("มุมแหลม", "sharp")}</text>
+                    </g>}
                   </g>;
                 })()}
                 {box && (() => {

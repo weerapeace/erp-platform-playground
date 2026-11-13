@@ -324,7 +324,9 @@ export function FabricBuyCalc() {
   // ชิ้นจากตัววาด → แถวในตาราง (สี่เหลี่ยมล้วนไม่มีรู = แถวธรรมดา · ทรงอื่น = ทรงพิเศษมีเส้นรอบจริง)
   const fromEditor = (p: ShapeEditorResult["pieces"][number], base?: BuyPiece): BuyPiece => {
     const b = p.geo.cutBox;
-    const plainRect = p.shape.k === "rect" && !(p.holes?.length) && !(p.allow > 0);
+    // สี่เหลี่ยมล้วน (รวมกรณีเปิดแก้จุดแล้วยังเป็นสี่เหลี่ยมตั้งตรง 4 จุด ไม่มีหูจับ) = แถวธรรมดา
+    const axisRect = p.shape.k === "path" && p.shape.nodes.length === 4 && p.shape.nodes.every((n, i, a) => !(n.ix || n.iy || n.ox || n.oy) && (Math.abs(n.x - a[(i + 1) % 4].x) < 1e-6 || Math.abs(n.y - a[(i + 1) % 4].y) < 1e-6));
+    const plainRect = (p.shape.k === "rect" || axisRect) && !(p.holes?.length) && !(p.allow > 0);
     const outline = plainRect ? null : p.geo.cut.map(([x, y]) => [Math.round((x - b.x) * 100) / 100, Math.round((y - b.y) * 100) / 100] as [number, number]);
     return newPiece({
       ...(base ? { no_rotate: base.no_rotate, match: base.match } : {}),
@@ -640,7 +642,7 @@ export function FabricBuyCalc() {
       </>}
 
       {bomEdit && <BomEditorModal sku={bomEdit} onClose={(changed) => void afterBomEdit(changed)} />}
-      {shapeOpen && <ShapeEditor open onClose={closeEditor} onSave={applyShapes} title={rowEdit ? "ปรับทรงชิ้นนี้ (ขนาดจริง ซม.)" : "วาดชิ้นทรงพิเศษ (ขนาดจริง ซม.)"}
+      {shapeOpen && <ShapeEditor open onClose={closeEditor} onSave={applyShapes} initialEdit={!!rowEdit} title={rowEdit ? "ปรับทรงชิ้นนี้ (ขนาดจริง ซม.)" : "วาดชิ้นทรงพิเศษ (ขนาดจริง ซม.)"}
         initial={shapeInit ?? pieces.filter((p) => p.shape).map((p) => p.shape as EditorPiece)} />}
       {photoOpen && <PhotoModal open traceOnly onClose={() => setPhotoOpen(false)} onPieces={(ps) => fromPhoto(ps)} onDraft={() => { /* ไม่ใช้ทาง AI ในหน้านี้ */ }} />}
       <MeasureModal target={measure} current={pairKey ? checks[pairKey] ?? null : null} onClose={() => setMeasure(null)} onSaved={reloadChecks} />
@@ -662,7 +664,7 @@ function HowTo({ onClose }: { onClose: () => void }) {
         <Step n={1} t="พิมพ์เอง">ใส่ชื่อชิ้น · กว้าง × ยาว (ซม.) · ชิ้นต่อใบ ในตาราง · กด “เพิ่มชิ้น” ได้เรื่อย ๆ · ก๊อปแถวด้วยปุ่มข้างหลัง</Step>
         <Step n={2} t="ดึงจากสูตร BOM">เลือกสินค้า → เลือกผ้าในสูตร → ได้ชิ้นตัดพร้อมเลือกผ้าให้ · ขนาดไม่ตรง กด “แก้สูตร BOM นี้” แก้แล้วบันทึก ระบบดึงใหม่ให้ · ตั้ง “ชื่อชิ้น” ในสูตรได้ (ช่องใหม่) จะโชว์ในผังและใบวิธีตัด</Step>
         <Step n={3} t="ก๊อปจากใบสั่งผลิตเก่า">เลือกใบที่เคยผลิต (รวมใบที่ปิดแล้ว) → เลือกผ้า → ได้ชิ้นต่อใบจากผังที่ระบบเคยวางไว้</Step>
-        <Step n={4} t="ปรับทรงรายแถว">กดปุ่ม “ปรับทรง” (รูปเล็กหลังชื่อ) → ตัววาดเปิดพร้อมชิ้นนั้น → ทำมุมโค้ง ตัดมุม เปลี่ยนเป็นวงกลม เจาะรู แก้จุดด้วยปากกา → “ใช้ขนาดนี้” · รูปเล็กหลังชื่อจะเปลี่ยนตามทรงจริง</Step>
+        <Step n={4} t="ปรับทรงรายแถว">กดปุ่ม “ปรับทรง” (รูปเล็กหลังชื่อ) → ตัววาดเปิดพร้อมแก้จุดทันที (ลูกศรขาว A): ลากจุด · ลากกรอบที่ว่างเลือกหลายจุด · Delete ลบจุด · ลูกศรคีย์บอร์ดขยับ · คลิกจุดมุมแล้วลากวงกลม ◉ เข้าด้านใน = มุมโค้ง (บอก R:) · ปุ่ม + เพิ่มจุดบนเส้น · − ลบจุด · Shift+C แปลงมุม↔โค้ง → “ใช้ขนาดนี้” · รูปเล็กหลังชื่อเปลี่ยนตามทรงจริง</Step>
         <Step n={5} t="วาดชิ้นทรงพิเศษ">วาดชิ้นใหม่ทั้งหมด (สี่เหลี่ยม วงกลม ปากกาโค้ง วางจาก Illustrator) · ตั้งชื่อและจำนวนต่อใบในแผงด้านขวาของชิ้น</Step>
         <Step n={6} t="ถ่ายรูปแบบกระดาษ">วางแพทเทิร์นกระดาษบน <b>พื้นสีตัดกัน</b> ถ่าย <b>ตรงจากด้านบน</b> ไม่มีเงาพาด · ใส่ A4 ไว้ในรูป → คลิก 4 มุม A4 แก้รูปเอียง (หรือบอกความกว้างจริงของชิ้นที่กว้างสุด) → ติ๊กชิ้นที่เอา → ระบบเปิดตัววาดให้ <b>ตรวจขนาด/เกลาเส้น/ตั้งเผื่อเย็บ</b> ก่อนใช้ · ลอกในเครื่อง ไม่ใช้ AI ไม่เสียเงิน</Step>
         <Step n={7} t="ห้ามหมุน · ตรงลาย">ผ้าลาย/มีขน ติ๊ก “ห้ามหมุน” รายชิ้น · ผ้าที่ต้องตรงลาย ใส่ “ลายซ้ำ (ซม.)” แล้วติ๊ก “ตรงลาย” ที่ชิ้น</Step>

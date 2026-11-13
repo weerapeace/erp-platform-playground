@@ -184,3 +184,50 @@ export function notchStyleSegs(seg: [Pt, Pt], style: NotchStyle | undefined, gap
   const w = L * 0.45;
   return [[[a[0] + tx * w, a[1] + ty * w], b], [[a[0] - tx * w, a[1] - ty * w], b]];
 }
+
+// ── แก้จุดแบบ Illustrator (เจ้าของขอ 2026-11-13: ลากกรอบเลือกจุด · Delete ลบจุด · ลากวงกลมที่มุม = มุมโค้งพร้อมบอกรัศมี) ──
+/** ลบหลายจุดพร้อมกัน — ต้องเหลืออย่างน้อย 3 จุด ไม่งั้น null */
+export function deleteNodes(s: Shape, idxs: number[]): Shape | null {
+  const N = asPath(s); if (!N || s.k === "ellipse") return null;
+  const del = new Set(idxs.filter((i) => i >= 0 && i < N.length));
+  if (!del.size || N.length - del.size < 3) return null;
+  return { k: "path", nodes: N.filter((_, i) => !del.has(i)) };
+}
+/** จุดที่อยู่ในกรอบ (ซม.) → ลำดับจุด */
+export function nodesInBox(nodes: PNode[], x0: number, y0: number, x1: number, y1: number): number[] {
+  const ax = Math.min(x0, x1), bx = Math.max(x0, x1), ay = Math.min(y0, y1), by = Math.max(y0, y1);
+  return nodes.map((n, i) => (n.x >= ax && n.x <= bx && n.y >= ay && n.y <= by ? i : -1)).filter((i) => i >= 0);
+}
+/**
+ * วงกลมทำมุมโค้งของจุด i (Live Corner) — เฉพาะจุดมุมแหลม (ไม่มีหูจับ) · null = ทำไม่ได้
+ *   at = มุม · bis = ทิศครึ่งมุม (ทางที่โค้งจะกินเข้าไป) · half = ครึ่งมุม (เรเดียน) · maxR = รัศมีมากสุด (ไม่กินขอบข้างเกินครึ่ง)
+ *   ตำแหน่งวงกลมบนจอ = จุดศูนย์กลางของโค้ง: at + bis × (r ÷ sin(half))
+ */
+export function cornerWidget(s: Shape, i: number): { at: Pt; bis: Pt; half: number; maxR: number } | null {
+  const N = asPath(s); if (!N || s.k === "ellipse" || N.length < 3 || i < 0 || i >= N.length) return null;
+  const v = N[i]; if (hasIn(v) || hasOut(v)) return null;
+  const a = N[(i - 1 + N.length) % N.length], b = N[(i + 1) % N.length];
+  const ax = a.x - v.x, ay = a.y - v.y, bx = b.x - v.x, by = b.y - v.y, la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+  if (la < 1e-6 || lb < 1e-6) return null;
+  const theta = Math.acos(Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb))));
+  if (theta > Math.PI - 0.01 || theta < 0.01) return null;
+  const ux = ax / la + bx / lb, uy = ay / la + by / lb, ul = Math.hypot(ux, uy) || 1;
+  const half = theta / 2;
+  return { at: [v.x, v.y], bis: [ux / ul, uy / ul], half, maxR: r4(Math.min(la, lb) * 0.5 * Math.tan(half)) };
+}
+/** ลากวงกลมไปที่จุด p → รัศมี (ซม.) · ใกล้มุมเกิน minD = 0 (กลับเป็นมุมแหลม) · ไม่เกิน maxR */
+export function radiusFromDrag(w: { at: Pt; bis: Pt; half: number; maxR: number }, p: Pt, minD = 0): number {
+  const s = (p[0] - w.at[0]) * w.bis[0] + (p[1] - w.at[1]) * w.bis[1];
+  if (s <= minD) return 0;
+  return r4(Math.min(w.maxR, s * Math.sin(w.half)));
+}
+/** ทำมุมโค้งหลายจุดพร้อมกัน รัศมีเดียวกัน (ทำจากลำดับมากไปน้อย ลำดับจุดไม่เลื่อน) · จุดที่ทำไม่ได้ = ข้าม · ไม่ได้สักจุด = null */
+export function filletMany(s: Shape, idxs: number[], r: number): Shape | null {
+  if (!(r > 0)) return null;
+  let cur: Shape = s, done = 0;
+  for (const i of [...new Set(idxs)].sort((x, y) => y - x)) {
+    const next = filletCorner(cur, i, r);
+    if (next) { cur = next; done++; }
+  }
+  return done ? cur : null;
+}
