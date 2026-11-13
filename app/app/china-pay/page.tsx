@@ -307,7 +307,7 @@ function toDatetimeLocal(text: string): string {
 const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "dashboard", icon: "📊", label: "Dashboard" },
   { k: "bill", icon: "💴", label: "ลงบิล" },
-  { k: "transfer", icon: "💰", label: "โอนเข้าจีน" },
+  { k: "transfer", icon: "💰", label: "โอนเงิน" },
   { k: "transfers", icon: "🧾", label: "รายการโอน" },
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
@@ -1151,7 +1151,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
                 <div className="text-xs text-slate-400">{pending.length} บิล · กดบิลเพื่อดูรายละเอียด</div>
               </div>
               <button onClick={() => onGo("transfer")} disabled={pending.length === 0}
-                className="h-10 px-4 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-40">💰 โอนเข้าจีน →</button>
+                className="h-10 px-4 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-40">💰 โอนเงิน →</button>
             </div>
             {oldest.length === 0 ? (
               <div className="text-center text-slate-300 py-10">— ไม่มีบิลรอโอน —</div>
@@ -1453,7 +1453,7 @@ function BillForm({ prefillVoucherId, onPrefillUsed }: { prefillVoucherId?: stri
             : <div className="text-lg font-bold text-orange-600">¥{fmt(totalRmb)}</div>}
         </div>
         <div className="mt-1 text-[11px] text-slate-400 text-center">
-          {thbMode ? "* บิลค่าส่ง/VAT เป็นยอดบาท ไม่ใช้เรท" : "* เรท/ยอดเงินบาทจะคำนวณตอน “โอนเข้าจีน”"}
+          {thbMode ? "* บิลค่าส่ง/VAT เป็นยอดบาท ไม่ใช้เรท" : "* เรท/ยอดเงินบาทจะคำนวณตอน “โอนเงิน”"}
         </div>
       </Card>
 
