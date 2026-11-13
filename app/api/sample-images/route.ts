@@ -110,9 +110,11 @@ export async function GET(request: NextRequest) {
       const brandId = a.mark!.brandId;
       return { id: a.id, name: a.name, created_at: a.created_at, brand_id: brandId, suggested_brand_id: brandId ? null : inferAlbumBrand(ps), counts: sampleCounts(ps) };
     });
-    // แบรนด์ของเรา (ไม่รวมงานลูกค้า) + แบรนด์อื่นที่มีอัลบั้มอยู่แล้ว (อัลบั้มไม่หาย)
-    const used = new Set(albums.map((a) => a.brand_id).filter(Boolean));
-    const brands: SampleBrand[] = brandRows.filter((b) => !b.is_customer_job || used.has(b.id)).map(({ id, name, color, logo_url }) => ({ id, name, color, logo_url }));
+    // ทุกแบรนด์ที่เปิดใช้ — แบรนด์ของเราขึ้นก่อน แล้วค่อยแบรนด์ที่ติ๊กงานลูกค้า
+    //   (เดิมกรองงานลูกค้าออก → Good Goods ที่ติ๊กงานลูกค้าไว้หายจากแถบ ทั้งที่เจ้าของใช้จริง · ตรวจหลังขึ้นเว็บ 2026-11-13)
+    const brands: SampleBrand[] = [...brandRows]
+      .sort((x, y) => Number(!!x.is_customer_job) - Number(!!y.is_customer_job))
+      .map(({ id, name, color, logo_url }) => ({ id, name, color, logo_url }));
     const photos = albumId
       ? (byAlbum.get(albumId) ?? []).sort((x, y) => x.created_at.localeCompare(y.created_at) || x.file_name.localeCompare(y.file_name))
       : null;
