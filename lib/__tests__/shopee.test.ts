@@ -5,7 +5,7 @@ import {
   shopeeErrorText, shopeeIsRateLimit, ShopeeApiError, shopeeTokenOf, shopeeTokenTimes, shopeeReconnectBy, shopeeShopInfoOf,
   SHOPEE_HOSTS, SHOPEE_REFRESH_TTL_MS, shopeeItemListOf, shopeeModelsToSlim, shopeeItemToCatalogItem, shopeeListingStatus, SHOPEE_PULL_STATUSES,
 } from "@/lib/shopee";
-import { summarizeListing } from "@/lib/platform-listing-health";
+import { summarizeListing, countsAsDuplicate } from "@/lib/platform-listing-health";
 
 describe("Shopee — เซ็นคำขอ", () => {
   test("ข้อความที่เซ็น: ระดับแอป = partner_id+path+timestamp · ระดับร้าน ต่อ access_token+shop_id", () => {
@@ -190,5 +190,15 @@ describe("Shopee — สรุปการ์ดในหน้าสินค�
   });
   test("ตัวจากไฟล์ export (ไม่มี raw.shopee) = ไม่รู้สถานะ เหมือนเดิม", () => {
     expect(summarizeListing("shopee", { basic_info: { name: "x" } }, 199).state).toBe("nodata");
+  });
+});
+
+describe("Shopee — ป้าย 'ซ้ำ' (countsAsDuplicate)", () => {
+  test("banned (Shopee แบน ลูกค้าไม่เห็น) ไม่นับซ้ำ · ปิดขาย/รอตรวจ/ขายอยู่ ยังนับ · ไฟล์ export (null) นับเหมือนเดิม", () => {
+    expect(countsAsDuplicate("banned")).toBe(false);
+    expect(countsAsDuplicate("unlist")).toBe(true);
+    expect(countsAsDuplicate("reviewing")).toBe(true);
+    expect(countsAsDuplicate("normal")).toBe(true);
+    expect(countsAsDuplicate(null)).toBe(true);
   });
 });
