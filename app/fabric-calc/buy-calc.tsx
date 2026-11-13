@@ -35,9 +35,11 @@ import { YARD_CM } from "@/lib/fabric-calc";
 import type { PlanGroupInput } from "@/lib/fabric-plan";
 import type { FabricPlanMo } from "@/app/api/mo/fabric-plan/route";
 import type { FabricBuyCalcRow } from "@/app/api/fabric-buy-calcs/route";
-import { Card, Field, Metric, Num, fmt, inputCls, textCls, unitComparable, type FabricSettings } from "./buy-ui";
+import { Card, Field, Group, Metric, Num, Seg, StepBar, fmt, inputCls, textCls, unitComparable, type FabricSettings } from "./buy-ui";
+import { usePageOwnsBottomBar } from "@/lib/app-shell-bar";
 import { FamilyCalc, emptyFamily, type FamilyState, type FamilySummary, type OpenSingleArgs } from "./family-calc";
 import { SavedCalcsBar, type SavePack } from "./saved-calcs";
+import { FreeTextPicker } from "@/components/free-text-picker";
 import { CutStatusBadge, MeasureModal, useCutChecks, type MeasureTarget } from "./cut-check";
 
 // ตัววาดชิ้นขนาดจริง (ของกลาง · หนัก) — โหลดเมื่อกดเปิดเท่านั้น
@@ -94,6 +96,10 @@ export function FabricBuyCalc() {
   const [nestRes, setNestRes] = useState<NestResult | null>(null);
   const [useNest, setUseNest] = useState(true);
   const [measure, setMeasure] = useState<MeasureTarget | null>(null);
+  // ขั้นตอน ① ชิ้นตัด → ② ผ้า + ค่าตั้ง → ③ ผล + ซื้อ (เจ้าของขอ 2026-11-13 "ทำเป็น flow ขั้นตอน 1,2,3" · iPad แนวนอน)
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const stepTop = useRef<HTMLDivElement>(null);
+  const goStep = (n: 1 | 2 | 3) => { setStep(n); requestAnimationFrame(() => stepTop.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })); };
   const onNest = useCallback((r: NestResult | null) => setNestRes(r), []);
   // ── จำนวน + ผ้า ──
   const [qty, setQty] = useState(100);
@@ -396,6 +402,7 @@ export function FabricBuyCalc() {
     setQty(n(g.qty, 100)); setFabric((g.fabric as BomComponent | null) ?? null); setFace(n(g.face, 150)); setForm(g.form === "sheet" ? "sheet" : "roll");
     setSheetLen(n(g.sheetLen, 0)); setPrice(n(g.price, 0)); setSource((g.source as string | null) ?? null); setOrigin((g.origin as Origin | null) ?? null); setCurBom(null);
     setWidths(Array.isArray(g.widths) ? (g.widths as { face: number; price: number }[]).map((w) => ({ key: `w${_k++}`, face: n(w.face, 0), price: n(w.price, 0) })) : []);
+    setStep(3);   // เปิดผลที่บันทึกไว้ = ไปหน้าผลเลย
     setMode("single");
   };
 
@@ -405,7 +412,7 @@ export function FabricBuyCalc() {
     { key: "label", header: "ชื่อชิ้น · รูปทรง", width: "2.2fr", cell: (p) => (
       <span className="flex items-center gap-1.5">
         {p.outline && <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10.5px] text-violet-700" title="ชิ้นทรงพิเศษ — กว้าง×ยาว = กรอบของรูป">ทรงพิเศษ</span>}
-        <input value={p.label} placeholder="เช่น ตัวหน้า" onChange={(e) => patch(p.key, { label: e.target.value })} className={textCls} />
+        <FreeTextPicker kind="cut_piece" title="รายการชื่อชิ้นประจำ" value={p.label} onChange={(v) => patch(p.key, { label: v })} placeholder="เช่น ชิ้นหน้า" className="min-w-0 flex-1" inputClassName={`${textCls} min-w-0 flex-1`} />
         <button type="button" onClick={() => openRowShape(p)} title="ปรับทรงชิ้นนี้ (โค้ง/ตัดมุม/วงกลม/เจาะรู)" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-violet-200 bg-white px-1.5 py-1 text-[11px] text-violet-700 hover:bg-violet-50">
           <ShapeThumb p={p} /> ปรับทรง
         </button>
@@ -436,6 +443,13 @@ export function FabricBuyCalc() {
 
   const hints = (res.layout?.fitHints ?? []).filter((h) => h.leftoverCm >= 3).slice(0, 2);
   const family = mode === "family";
+  usePageOwnsBottomBar(!family);   // มีแถบสรุปล่างจอของหน้าเอง (มือถือ/iPad แนวตั้ง)
+  const okPieces = pieces.filter((p) => p.width_cm > 0 && p.length_cm > 0 && p.per_unit > 0);
+  const stepItems = [
+    { t: "ชิ้นตัด", sub: okPieces.length ? `${okPieces.length} แบบ · ${fmt(okPieces.reduce((s, p) => s + p.per_unit, 0), 0)} ชิ้น/ใบ` : "ยังไม่มีชิ้น", done: okPieces.length > 0 },
+    { t: "ผ้า + ค่าตั้ง", sub: `${fmt(qty, 0)} ใบ · หน้า ${fmt(face, 1)} ซม.${fabric ? ` · ${fabric.code}` : ""}`, done: qty > 0 && face > 0 },
+    { t: "ผล + ซื้อ", sub: res.ok ? `ซื้อ ${fmt(eff.need_rounded)} ${u}` : "ยังคิดไม่ได้", done: res.ok },
+  ];
 
   // ค่าตั้งผ้าทั่วไป (ใช้ทั้งสองโหมด)
   const generalFields = (
@@ -489,8 +503,13 @@ export function FabricBuyCalc() {
       </div>
 
       {!family && <>
-      {/* 1. ชิ้นตัด */}
-      <Card title="1. ชิ้นตัด" tag="need" right={source && <span className="truncate text-[12px] text-slate-500">จาก {source}</span>}>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+      <div className="min-w-0 space-y-4">
+      <div ref={stepTop} className="scroll-mt-3"><StepBar step={step} onStep={goStep} items={stepItems} /></div>
+
+      {/* ① ชิ้นตัด */}
+      <div className={step === 1 ? "space-y-4" : "hidden"}>
+      <Card title="ชิ้นตัด" tag="need" right={source && <span className="truncate text-[12px] text-slate-500">จาก {source}</span>}>
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => { setSrcPanel((s) => (s === "bom" ? "" : "bom")); setSrcFabrics(null); }} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "bom" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="measure" /> ดึงจากสูตร BOM</button>
           <button type="button" onClick={() => setMoPick(true)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "mo" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="repeat" /> ก๊อปจากใบสั่งผลิตเก่า</button>
@@ -539,25 +558,51 @@ export function FabricBuyCalc() {
         <MiniTable rows={pieces} columns={pieceCols} rowKey={(p) => p.key} hideToolbar dense zebra={false} />
         <button type="button" onClick={() => setPieces((p) => [...p, newPiece()])} className="mt-2 inline-flex h-8 items-center gap-1 rounded-full border-2 border-dashed border-indigo-200 px-3 text-[12px] font-medium text-indigo-600 hover:bg-indigo-50"><Icon name="add" /> เพิ่มชิ้น</button>
       </Card>
+      </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="2. จำนวนผลิต + ผ้าที่จะซื้อ" tag="need">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {/* ② ผ้า + ค่าตั้ง — 3 ระดับ: กล่องหลัก (ต้องกรอก) → กลุ่มเทา (ปรับบ้าง) → ขั้นสูง (ยุบไว้) */}
+      <div className={step === 2 ? "space-y-3" : "hidden"}>
+        <section className="rounded-2xl border-2 border-indigo-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center gap-2"><h3 className="text-sm font-bold text-slate-800">ผลิตกี่ใบ · ผ้าอะไร</h3><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] text-rose-700">จำเป็น</span></div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="จำนวนผลิต (ใบ)"><Num value={qty} onChange={setQty} big /></Field>
-            <div className="col-span-2">
+            <div className="col-span-2 md:col-span-3">
               <Field label="เลือกผ้า (ได้หน้ากว้าง ราคา สต็อก) — ไม่เลือกก็ได้"><ComponentPicker sku={fabric?.code ?? ""} name={fabric?.name ?? ""} imageKey={fabric?.image_key} placeholder="— ค้นผ้า / วัตถุดิบ —" onPick={pickFabric} /></Field>
             </div>
-            <Field label="มาเป็น">
-              <select value={form} onChange={(e) => setForm(e.target.value as "roll" | "sheet")} className={textCls}><option value="roll">ม้วน</option><option value="sheet">ผืน</option></select>
-            </Field>
-            <Field label={form === "sheet" ? "ผืนกว้าง (ซม.)" : "หน้ากว้างเต็ม (ซม.)"}><Num value={face} onChange={setFace} /></Field>
-            {form === "sheet" && <Field label="ผืนยาว (ซม.)"><Num value={sheetLen} onChange={setSheetLen} /></Field>}
-            {generalFields}
+            <Field label="ผ้ามาเป็น"><Seg value={form} onChange={setForm} options={[["roll", "ม้วน"], ["sheet", "ผืน"]]} /></Field>
+            <Field label={form === "sheet" ? "ผืนกว้าง (ซม.)" : "หน้ากว้างเต็ม (ซม.)"}><Num value={face} onChange={setFace} big /></Field>
+            {form === "sheet" && <Field label="ผืนยาว (ซม.)"><Num value={sheetLen} onChange={setSheetLen} big /></Field>}
+            <div className="col-span-2 flex items-end pb-1 text-[12px] text-slate-500 md:col-span-1">หน้าใช้ได้จริง&nbsp;<b className="text-slate-800">{fmt(face - trim, 1)} ซม.</b></div>
           </div>
-          <div className="mt-2 text-[12px] text-slate-500">หน้าใช้ได้จริง <b className="text-slate-700">{fmt(face - trim, 1)} ซม.</b></div>
-        </Card>
-        {buyCard}
+        </section>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Group title="การตัด" chips={[`หักริม ${fmt(trim, 1)} ซม.`, rotate ? "หมุนชิ้นได้" : "ห้ามหมุน"]}>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="หักริม รวม 2 ข้าง (ซม.)" hint="ริมผ้าตัดใช้ไม่ได้ · ปกติ 2-4"><Num value={trim} onChange={setTrim} /></Field>
+              <Field label="ทางผ้า" hint={rotate ? "ผ้าเรียบ" : "ผ้าลาย/ขน/เงา"}><Seg value={rotate ? "1" : "0"} onChange={(v) => setRotate(v === "1")} options={[["1", "หมุนได้"], ["0", "ห้ามหมุน"]]} /></Field>
+            </div>
+          </Group>
+          <Group title="การซื้อ" chips={[...(form === "roll" ? [unit === "m" ? "เมตร" : "หลา", round === "roll" ? "ปัดม้วนเต็ม" : round === "none" ? "ไม่ปัด" : `ปัด${u}เต็ม`] : []), price > 0 ? `฿${fmt(price)}/${u}` : "ยังไม่ใส่ราคา"]}>
+            <div className="grid grid-cols-2 gap-2">
+              {form === "roll" && <Field label="ซื้อเป็น"><Seg value={unit} onChange={changeUnit} options={[["yd", "หลา"], ["m", "เมตร"]]} /></Field>}
+              {form === "roll" && <Field label="ปัดขึ้น"><Seg value={round} onChange={setRound} options={[["unit", `${unit === "m" ? "เมตร" : "หลา"}เต็ม`], ["roll", "ม้วนเต็ม"], ["none", "ไม่ปัด"]]} /></Field>}
+              <Field label={`ราคา / ${u} (บาท)`} hint={!fabric?.standard_price ? "ใส่เพื่อดูงบ" : unitOk ? "ดึงต้นทุนจากรหัสผ้า แก้ได้" : `ต้นทุนในระบบเป็นต่อ ${fabric.uom_name} — กรอกเอง`}><Num value={price} onChange={setPrice} /></Field>
+              {form === "roll" && <Field label={`1 ม้วนยาว (${unit === "m" ? "เมตร" : "หลา"})`}><Num value={rollLen} onChange={setRollLen} /></Field>}
+            </div>
+          </Group>
+        </div>
+        <Group title="ขั้นสูง" tone="plain" defaultOpen={waste !== 3 || shrink > 0 || repeat > 0 || gap > 0} chips={[`เผื่อเสีย ${fmt(waste, 1)}%`, `หด ${fmt(shrink, 1)}%`, repeat > 0 ? `ลายซ้ำ ${fmt(repeat, 1)} ซม.` : "ไม่มีลายซ้ำ", `เว้น ${fmt(gap, 1)} ซม.`]}>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <Field label="เผื่อเสีย %" hint="หัว-ท้ายม้วน/ตำหนิ · แนะนำ 3"><Num value={waste} onChange={setWaste} /></Field>
+            <Field label="ผ้าหดตัว %" hint="ขยายชิ้นเผื่อหด · ไม่หด = 0"><Num value={shrink} onChange={setShrink} /></Field>
+            <Field label="ลายซ้ำ (ซม.)" hint={repeat > 0 ? "ติ๊ก “ตรงลาย” ที่ชิ้นในขั้น 1" : "ผ้าลายต้องตรงลาย · ไม่มี = 0"}><Num value={repeat} onChange={setRepeat} /></Field>
+            <Field label="เว้นระหว่างชิ้น (ซม.)" hint="ปกติ 0 (ตรงกับใบสั่งผลิต)"><Num value={gap} onChange={setGap} /></Field>
+          </div>
+        </Group>
       </div>
+
+      {/* ③ ผล + ซื้อ */}
+      <div className={step === 3 ? "space-y-4" : "hidden"}>
 
       {/* ผล */}
       <section className={`rounded-2xl border-2 border-indigo-300 bg-white p-4 shadow-sm transition-opacity ${stale ? "opacity-60" : ""}`}>
@@ -578,7 +623,7 @@ export function FabricBuyCalc() {
             <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
               <Metric label="ต้องใช้จริง (รวมเผื่อเสีย)" value={`${fmt(eff.need)} ${u}`} sub={form === "sheet" ? `ใช้ต่อใบ ${fmt(eff.per_unit, 3)} ผืน` : `ใช้ต่อใบ ${fmt(eff.per_unit_cm, 1)} ซม. (${fmt(eff.per_unit, 3)} ${u})`} />
               <Metric label="ควรซื้อ (ปัดแล้ว)" value={`${fmt(eff.need_rounded)} ${u}`} sub={eff.rolls ? `${eff.rolls} ม้วน (ม้วนละ ${fmt(rollLen)} ${u})` : undefined} />
-              <Metric label="ราคาผ้า" value={price > 0 ? `฿${fmt(price)}` : "—"} sub={price > 0 ? `ต่อ${u} · ค่าผ้าทั้งงาน ฿${fmt(eff.cost_total ?? 0, 0)}` : "ใส่ราคาที่ “เผื่อ + หน่วยซื้อ”"} />
+              <Metric label="ราคาผ้า" value={price > 0 ? `฿${fmt(price)}` : "—"} sub={price > 0 ? `ต่อ${u} · ค่าผ้าทั้งงาน ฿${fmt(eff.cost_total ?? 0, 0)}` : "ใส่ราคาที่ขั้น 2 (การซื้อ)"} />
               <Metric label="ต้องซื้อเพิ่ม (หักสต็อก)" value={`${fmt(eff.to_buy)} ${u}`} tone={eff.to_buy > 0 ? "danger" : "success"}
                 sub={!fabric ? "ยังไม่ได้เลือกผ้า = ไม่หักสต็อก" : stockErr ? stockErr : stockRaw == null ? "กำลังโหลดสต็อก…" : !unitOk ? `สต็อกนับเป็น ${fabric.uom_name} (${fmt(stockRaw)}) เทียบกับ${u}ไม่ได้ — ไม่หักสต็อก` : `สต็อกมี ${fmt(stock)} ${u}`} />
               <Metric label="งบซื้อเพิ่ม" value={eff.cost_buy != null ? `฿${fmt(eff.cost_buy, 0)}` : "—"} sub={eff.cost_per_unit != null ? `ค่าผ้าต่อใบ ฿${fmt(eff.cost_per_unit)}` : "ใส่ราคาเพื่อดูงบ"} />
@@ -614,7 +659,7 @@ export function FabricBuyCalc() {
       </section>
 
       {/* เทียบหน้ากว้าง */}
-      <Card title="4. เทียบหน้ากว้าง — ผ้าหน้าไหนคุ้มสุด" tag="rec">
+      <Card title="เทียบหน้ากว้าง — ผ้าหน้าไหนคุ้มสุด" tag="rec">
         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[12px]">
           <span className="text-slate-500">เพิ่มหน้าที่จะเทียบ:</span>
           {QUICK_WIDTHS.filter((w) => w !== face && !widths.some((x) => x.face === w)).map((w) => (
@@ -637,8 +682,58 @@ export function FabricBuyCalc() {
         )}
         {cmp.length > 0
           ? <MiniTable rows={cmp} columns={cmpCols} rowKey={(r) => `${r.face_width_cm}-${r.price ?? ""}`} hideToolbar dense />
-          : <div className="text-[12px] text-slate-400">ยังไม่ได้เพิ่มหน้ากว้างที่จะเทียบ — ค่าตั้งอื่น (ริม เผื่อเสีย ปัดขึ้น) ใช้เหมือนด้านบน</div>}
+          : <div className="text-[12px] text-slate-400">ยังไม่ได้เพิ่มหน้ากว้างที่จะเทียบ — ค่าตั้งอื่น (ริม เผื่อเสีย ปัดขึ้น) ใช้เหมือนขั้น 2</div>}
       </Card>
+      </div>
+
+      {/* ปุ่มย้อน / ถัดไป */}
+      <div className="flex items-center justify-between gap-2">
+        {step > 1 ? <button type="button" onClick={() => goStep((step - 1) as 1 | 2)} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">‹ ย้อน</button> : <span />}
+        {step < 3 && <button type="button" onClick={() => goStep((step + 1) as 2 | 3)} className="h-10 rounded-xl bg-indigo-600 px-5 text-sm font-medium text-white hover:bg-indigo-700">ถัดไป: {step === 1 ? "ผ้า + ค่าตั้ง" : "ผล + ซื้อ"} ›</button>}
+      </div>
+      </div>
+
+      {/* สรุปด้านขวา (จอกว้าง / iPad แนวนอน) — เห็นตลอดไม่ว่าอยู่ขั้นไหน */}
+      <aside className="hidden lg:block">
+        <div className={`sticky top-3 space-y-3 rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm transition-opacity ${stale ? "opacity-60" : ""}`} data-buy-summary>
+          <div className="text-[12px] font-semibold text-slate-500">สรุปตอนนี้</div>
+          {res.ok ? <>
+            <div>
+              <div className="text-[11.5px] text-slate-500">ควรซื้อ</div>
+              <div className="text-2xl font-bold text-indigo-700">{fmt(eff.need_rounded)} {u}</div>
+              <div className="text-[11px] text-slate-400">ต้องใช้จริง {fmt(eff.need)} {u}{eff.rolls ? ` · ${eff.rolls} ม้วน` : ""}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg bg-slate-50 px-2 py-1.5"><div className="text-[10.5px] text-slate-500">ต้องซื้อเพิ่ม</div><div className={`text-[15px] font-bold ${eff.to_buy > 0 ? "text-rose-700" : "text-emerald-700"}`}>{fmt(eff.to_buy)}</div></div>
+              <div className="rounded-lg bg-slate-50 px-2 py-1.5"><div className="text-[10.5px] text-slate-500">งบซื้อเพิ่ม</div><div className="text-[15px] font-bold text-slate-800">{eff.cost_buy != null ? `฿${fmt(eff.cost_buy, 0)}` : "—"}</div></div>
+            </div>
+            <div>
+              <div className="flex justify-between text-[11px] text-slate-500"><span>ใช้ผ้าคุ้ม</span><b className="text-slate-700">{fmt(res.efficiency_pct, 1)}%</b></div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.min(100, Math.max(0, res.efficiency_pct))}%` }} /></div>
+            </div>
+          </> : <div className="rounded-lg bg-amber-50 px-2.5 py-2 text-[12px] text-amber-800">{res.error}</div>}
+          <div className="border-t border-slate-100 pt-2 text-[12px] text-slate-600">
+            <div className="truncate">{fabricLabel}</div>
+            <div className="text-slate-400">ผลิต {fmt(qty, 0)} ใบ · ชิ้น {okPieces.length} แบบ · รวม {fmt(res.total_pieces, 0)} ชิ้น</div>
+          </div>
+          <CutStatusBadge st={cst} />
+          {step !== 3 && <button type="button" onClick={() => goStep(3)} className="h-9 w-full rounded-lg border border-indigo-200 text-[12.5px] font-medium text-indigo-700 hover:bg-indigo-50">ดูผลเต็ม + ผังวาง ›</button>}
+        </div>
+      </aside>
+      </div>
+
+      {/* แถบสรุปล่างจอ (จอแคบ / iPad แนวตั้ง) */}
+      <div className="sticky bottom-0 z-20 flex items-center gap-3 rounded-t-2xl border border-indigo-200 bg-white/95 px-4 py-2.5 shadow-[0_-4px_14px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden" data-buy-bottombar>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] text-slate-500">ควรซื้อ</div>
+          <div className="truncate text-lg font-bold text-indigo-700">{res.ok ? `${fmt(eff.need_rounded)} ${u}` : "—"}</div>
+        </div>
+        <div className="text-right text-[12px] text-slate-600">
+          {eff.ok && eff.cost_buy != null ? `งบ ฿${fmt(eff.cost_buy, 0)}` : ""}
+          <div className="text-[11px] text-slate-400">{res.ok ? `คุ้ม ${fmt(res.efficiency_pct, 1)}%` : "ยังคิดไม่ได้"}</div>
+        </div>
+        {step < 3 && <button type="button" onClick={() => goStep((step + 1) as 2 | 3)} className="h-10 shrink-0 rounded-xl bg-indigo-600 px-4 text-sm font-medium text-white">ถัดไป ›</button>}
+      </div>
       </>}
 
       {bomEdit && <BomEditorModal sku={bomEdit} onClose={(changed) => void afterBomEdit(changed)} />}

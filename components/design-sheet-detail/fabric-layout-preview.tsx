@@ -2,18 +2,19 @@
 
 // ============================================================
 // FabricLayoutPreview — ภาพผังการวางชิ้นบนหน้าผ้า (จากผล packFabric) — ของกลาง
-//   ใช้ที่: เครื่องคิดเลขผ้าในใบงานออกแบบ · ป๊อป 🧵 ผัง ในใบสั่งผลิต
+//   ใช้ที่: เครื่องคิดเลขผ้าในใบงานออกแบบ · ป๊อป ผัง ในใบสั่งผลิต · วางแผนตัดผ้า · คำนวณผ้า (/fabric-calc)
 //   ผ้าม้วน: ผ้ายาวต่อเนื่อง · ผ้าผืน: แยกทีละผืน
-//   ผ้ายาวมาก (หลายสิบเมตร) → "ตัดเป็นหน้า ๆ" ช่วงละ ~2-3 เมตร กด ‹ › ดูทีละหน้า (เจ้าของขอ 2026-09-04)
+//   แนวตั้ง เลื่อนขึ้นลง (เจ้าของขอ 2026-11-13 "ผ้าเป็นแนวตั้ง ลากขึ้นลง"): ผ้าทั้งม้วนเป็นแถบยาวเดียว อยู่ในกล่องสูงจำกัด
+//     นิ้ว = ปัดขึ้นลงตามปกติ · เมาส์ = กดลากขึ้นลงได้ (หรือล้อเมาส์) · แถบเล็กขวา = ตำแหน่งที่ดูอยู่ แตะเพื่อกระโดด · บนกล่องบอกช่วงที่เห็น (ซม.)
+//     (เดิม 2026-09-04: ตัดเป็นหน้า ๆ ช่วงละ ~2-3 ม. กด ‹ › — เลิกใช้)
 //   ชิ้นเดียวกัน (ขนาดเดียวกัน) = สีเดียวกัน · ชี้เมาส์ดูขนาด · ↻ = ชิ้นที่หมุน 90°
 //   ป้ายในกล่อง (เจ้าของขอ 2026-11-13): เลขชิ้นในวงกลม + ชื่อชิ้น + ขนาด · ตัวหนังสือย่อตามกล่อง ไม่ล้น · ชิ้นสูงแคบเขียนแนวตั้ง · เล็กมาก = เลขอย่างเดียว
 //     numbers = เลขชิ้นจากผู้เรียก (ให้ตรงกับตาราง/ใบวิธีตัด — lib/fabric-cut-sheet pieceNumbers) · ไม่ส่ง = เรียงตามที่เจอในผัง
 //
 //   ⚠️ วาดด้วยหน่วย "ซม." ตรง ๆ ใน viewBox (ไม่คูณ scale เอง) — ภาพจึงไม่ถูกบีบเมื่อผ้ายาว
-//      (เวอร์ชันก่อนจำกัดสูง 900px แล้ว preserveAspectRatio ย่อทั้งภาพ → ดูเหมือนเศษเทาเยอะทั้งที่คุ้ม 97%)
 // ============================================================
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { FabricResult, FabricRow } from "@/lib/fabric-calc";
 import { useT } from "@/components/i18n";
 
@@ -29,25 +30,30 @@ const PALETTE = [
   { fill: "#a5f3fc", stroke: "#06b6d4", text: "#155e75" },
 ];
 
-const W = 360;            // ความกว้างภาพ (px) — หน้าผ้าเต็มความกว้างนี้
-const PAGE_PX = 560;      // ความสูงภาพต่อหน้า (px) → ความยาวผ้าต่อหน้า = PAGE_PX / scale (หน้าผ้า 150 ≈ 233 ซม./หน้า)
+const W = 360;            // ความกว้างภาพตั้งต้น (px) — หน้าผ้าเต็มความกว้างนี้
 const MAX_SHEETS = 10;    // ผ้าผืน: วาดไม่เกินกี่ผืน (ผืนที่เหลือหน้าตาเหมือนกัน)
+const LABEL_H = 18;       // ความสูงป้ายเหนือแต่ละแถบ (px)
 
-type Page = { stripLabel: string; stripIndex: number; from: number; to: number; rows: FabricRow[]; stripLen: number };
+type Strip = { label: string; len: number; rows: FabricRow[] };
 
-const SIZE_ONLY = /^s*d+(.d+)?s*[×x]s*d+(.d+)?s*$/;
+/** ป้ายที่เป็นแค่ขนาด เช่น "26×55" หรือ "26 x 55 ซม." (ไม่มีชื่อชิ้น) */
+const SIZE_ONLY = /^\s*\d+(\.\d+)?\s*[×x]\s*\d+(\.\d+)?\s*(ซม\.|cm)?\s*$/;
 
-export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode, numbers }: {
+export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode, numbers, width = W, maxHeight = 520 }: {
   result: FabricResult;
   faceWidthCm: number;
   sheetLengthCm?: number | null;
   mode: "roll" | "sheet";
   /** เลขชิ้น { key: เลข } ให้ตรงกับตารางชิ้น/ใบวิธีตัด · ไม่ส่ง = เรียงตามที่เจอในผัง */
   numbers?: Record<string, number>;
+  /** ความกว้างภาพ (px) = หน้าผ้า */
+  width?: number;
+  /** ความสูงกล่องเลื่อน (px) */
+  maxHeight?: number;
 }) {
   const t = useT();
-  const [page, setPage] = useState(0);
-  const [showAll, setShowAll] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState({ top: 0, h: 0, total: 1 });
 
   // สีต่อชนิดชิ้น (ตาม key ของบรรทัด)
   const colorOf = useMemo(() => {
@@ -63,65 +69,68 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode, 
     return (k: string) => m.get(k);
   }, [numbers, result.rows]);
 
-  const scale = faceWidthCm > 0 ? W / faceWidthCm : 1;          // px ต่อ ซม.
-  const segCm = Math.max(faceWidthCm, Math.round(PAGE_PX / scale)); // ความยาวผ้าต่อหน้า (ซม.)
+  const scale = faceWidthCm > 0 ? width / faceWidthCm : 1;          // px ต่อ ซม.
 
-  // แบ่งเป็น "ผืน" (strip) — ผ้าม้วน = ผืนเดียวยาวเท่าที่ใช้ · ผ้าผืน = ทีละผืน (ไม่เกิน MAX_SHEETS)
+  // แถบผ้า: ม้วน = แถบเดียว · ผืน = ทีละผืน (ไม่เกิน MAX_SHEETS)
   const totalSheets = mode === "sheet" ? (result.sheetsUsed ?? 0) : 1;
   const drawable = mode === "sheet" ? (result.sheetsDrawn ?? result.sheetsUsed ?? 0) : 1;
   const shownSheets = Math.min(drawable, MAX_SHEETS);
-  const pages = useMemo<Page[]>(() => {
-    const strips: { label: string; height: number; rows: FabricRow[] }[] = [];
+  const strips = useMemo<Strip[]>(() => {
     if (mode === "sheet" && drawable > 0) {
-      for (let s = 0; s < shownSheets; s++) {
-        strips.push({ label: t(`ผืนที่ ${s + 1}`, `Sheet ${s + 1}`), height: Number(sheetLengthCm) || 0,
-          rows: result.rows.filter((r) => (r.sheetIndex ?? 0) === s).map((r) => ({ ...r, y: r.yInSheet ?? r.y })) });
-      }
-    } else {
-      strips.push({ label: t("ผ้าม้วน (ต่อเนื่อง)", "Roll fabric (continuous)"), height: result.usedLengthCm, rows: result.rows });
+      return Array.from({ length: shownSheets }, (_, s) => ({
+        label: t(`ผืนที่ ${s + 1}`, `Sheet ${s + 1}`), len: Number(sheetLengthCm) || 0,
+        rows: result.rows.filter((r) => (r.sheetIndex ?? 0) === s).map((r) => ({ ...r, y: r.yInSheet ?? r.y })),
+      }));
     }
-    // ตัดแต่ละผืนเป็นหน้า ๆ ช่วงละ segCm — ชิ้นที่คร่อมขอบหน้าถูกวาดต่อในหน้าถัดไปเอง (svg ตัดขอบให้)
-    const out: Page[] = [];
-    strips.forEach((st, si) => {
-      const n = Math.max(1, Math.ceil(st.height / segCm));
-      for (let p = 0; p < n; p++) {
-        const from = p * segCm, to = Math.min(st.height, (p + 1) * segCm);
-        out.push({ stripLabel: st.label, stripIndex: si, from, to, stripLen: st.height,
-          rows: st.rows.filter((r) => r.y < to && r.y + r.height > from) });
-      }
-    });
-    return out;
-  }, [mode, drawable, shownSheets, sheetLengthCm, result, segCm, t]);
+    // ล็อตใหญ่ (จำลองบางส่วน) = วาดเท่าที่จำลองจริง · ปกติ = ยาวเท่าที่ใช้
+    const drawn = result.rows.reduce((m, r) => Math.max(m, r.y + r.height), 0);
+    const len = result.sampledFrom ? drawn : Math.max(drawn, result.usedLengthCm || 0);
+    return [{ label: t("ผ้าม้วน (ต่อเนื่อง)", "Roll fabric (continuous)"), len: Math.max(1, len), rows: result.rows }];
+  }, [mode, drawable, shownSheets, sheetLengthCm, result, t]);
 
-  useEffect(() => { setPage(0); }, [result]);   // ผลใหม่ → กลับหน้าแรก
+  const sync = useCallback(() => {
+    const el = box.current; if (!el) return;
+    setView({ top: el.scrollTop, h: el.clientHeight, total: Math.max(1, el.scrollHeight) });
+  }, []);
+  useEffect(() => { if (box.current) box.current.scrollTop = 0; sync(); }, [result, sync]);   // ผลใหม่ → กลับต้นผ้า
+  useEffect(() => {   // ซ่อนอยู่แล้วโผล่ (เช่น ขั้น ③ ของหน้าคิดผ้า) / หมุนจอ → วัดขนาดใหม่
+    const el = box.current; if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => sync()); ro.observe(el);
+    return () => ro.disconnect();
+  }, [sync, result.ok]);
+
+  // เมาส์: กดลากขึ้นลง (นิ้วใช้การปัดปกติของเบราว์เซอร์ — touch-action: pan-y)
+  const drag = useRef<{ y: number; top: number } | null>(null);
+  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "mouse" || e.button !== 0 || !box.current) return;
+    drag.current = { y: e.clientY, top: box.current.scrollTop };
+    try { box.current.setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์ */ }
+  };
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => { if (drag.current && box.current) box.current.scrollTop = drag.current.top - (e.clientY - drag.current.y); };
+  const onUp = () => { drag.current = null; };
 
   if (!result.ok || result.rows.length === 0) return null;
-  const cur = pages[Math.min(page, pages.length - 1)];
   const fmt = (n: number) => Math.round(n * 10) / 10;
 
-  const renderPage = (pg: Page, key: string | number) => {
-    const h = pg.to - pg.from;
-    const gridStart = Math.ceil(pg.from / 10) * 10;
-    const gridN = Math.max(0, Math.floor((pg.to - gridStart) / 10) + 1);
+  const renderStrip = (st: Strip, key: number) => {
+    const h = st.len;
+    const gridN = Math.max(0, Math.floor(h / 10) + 1);
     return (
-      <div key={key} className="shrink-0">
-        <div className="text-[11px] text-slate-500 mb-1 text-center">
-          {pg.stripLabel} · {t(`ช่วง ${fmt(pg.from)}–${fmt(pg.to)} ซม.`, `Range ${fmt(pg.from)}–${fmt(pg.to)} cm`)}{pg.stripLen > segCm ? t(` (ยาวทั้งหมด ${fmt(pg.stripLen)} ซม.)`, ` (total length ${fmt(pg.stripLen)} cm)`) : ""}
-        </div>
-        {/* วาดในหน่วย ซม. ตรง ๆ: viewBox = [0, from, หน้าผ้า, ความยาวช่วงนี้] → ไม่ถูกบีบ ไม่ว่าผ้าจะยาวแค่ไหน */}
-        <svg width={W} height={Math.max(24, h * scale)} viewBox={`0 ${pg.from} ${faceWidthCm} ${h}`} preserveAspectRatio="none"
-          className="border-2 border-slate-300 rounded bg-slate-100 block" role="img" aria-label={t(`ผังการวาง ${pg.stripLabel} ${fmt(pg.from)}-${fmt(pg.to)} ซม.`, `Layout ${pg.stripLabel} ${fmt(pg.from)}-${fmt(pg.to)} cm`)}>
-          <rect x={0} y={pg.from} width={faceWidthCm} height={h} fill="#f1f5f9" />
+      <div key={key} className={key > 0 ? "mt-3" : ""}>
+        <div className="sticky top-0 z-[1] bg-white/90 text-center text-[11px] text-slate-500" style={{ lineHeight: `${LABEL_H}px` }}>{st.label} · {t(`ยาว ${fmt(st.len)} ซม.`, `${fmt(st.len)} cm long`)}</div>
+        <svg width={width} height={Math.max(24, h * scale)} viewBox={`0 0 ${faceWidthCm} ${h}`} preserveAspectRatio="none"
+          className="block rounded border-2 border-slate-300 bg-slate-100" role="img" aria-label={t(`ผังการวาง ${st.label}`, `Layout ${st.label}`)}>
+          <rect x={0} y={0} width={faceWidthCm} height={h} fill="#f1f5f9" />
           {Array.from({ length: gridN }, (_, i) => {
-            const y = gridStart + i * 10; const major = y % 50 === 0;
+            const y = i * 10; const major = y % 50 === 0;
             return (
               <g key={i}>
                 <line x1={0} y1={y} x2={faceWidthCm} y2={y} stroke={major ? "#cbd5e1" : "#e2e8f0"} strokeWidth={(major ? 0.8 : 0.5) / scale} />
-                {major && <text x={1.5} y={y - 1} fontSize={8 / scale} fill="#94a3b8">{y}</text>}
+                {major && y > 0 && <text x={1.5} y={y - 1} fontSize={8 / scale} fill="#94a3b8">{y}</text>}
               </g>
             );
           })}
-          {pg.rows.flatMap((r) => r.items.map((it, ii) => {
+          {st.rows.flatMap((r) => r.items.map((it, ii) => {
             const c = colorOf(it.key);
             const no = numOf(it.key);
             const wPx = it.w * scale, hPx = it.h * scale;
@@ -166,46 +175,40 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode, 
     );
   };
 
+  // ช่วงที่เห็นอยู่ (ซม.) — ผ้าม้วนแถบเดียว
+  const rollLen = mode === "roll" ? strips[0]?.len ?? 0 : 0;
+  const fromCm = Math.max(0, (view.top - LABEL_H) / scale), toCm = Math.min(rollLen, Math.max(0, (view.top + view.h - LABEL_H) / scale));
+  const scrollable = view.total > view.h + 2;
+  const thumbH = scrollable ? Math.max(8, (view.h / view.total) * 100) : 100, thumbTop = scrollable ? (view.top / view.total) * 100 : 0;
+  const jump = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = box.current; if (!el) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    el.scrollTop = ((e.clientY - r.top) / r.height) * el.scrollHeight - el.clientHeight / 2;
+  };
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-slate-500">
-          {t(`🧵 ผังการวาง — หน้าผ้า ${faceWidthCm} ซม. (แนวนอน) · ความยาวผ้าลงล่าง · ↻ = หมุนชิ้น 90° · ตัวเลขซ้าย = ระยะจากต้นผ้า (ซม.)`, `🧵 Layout — fabric width ${faceWidthCm} cm (horizontal) · fabric length runs down · ↻ = piece rotated 90° · left numbers = distance from fabric start (cm)`)}
+          {t(`ผังการวาง — หน้าผ้า ${faceWidthCm} ซม. (แนวนอน) · ความยาวผ้าลงล่าง · ↻ = หมุนชิ้น 90° · ตัวเลขซ้าย = ระยะจากต้นผ้า (ซม.)`, `Layout — fabric width ${faceWidthCm} cm (horizontal) · fabric length runs down · ↻ = piece rotated 90° · left numbers = distance from fabric start (cm)`)}
         </p>
-        <span className="text-[11px] text-slate-400">{t("พื้นที่เทาในกรอบ = เศษที่เหลือ", "Grey area in the frame = leftover scrap")}</span>
+        <span className="text-[11px] text-slate-400">{scrollable ? t("ปัด/ลากขึ้นลงเพื่อเลื่อน", "Swipe/drag up or down to scroll") : t("พื้นที่เทา = เศษที่เหลือ", "Grey = leftover scrap")}</span>
       </div>
-
-      {pages.length > 1 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          {!showAll && (
-            <>
-              <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0}
-                className="h-8 w-8 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">‹</button>
-              <span className="text-sm text-slate-700">{t("หน้า", "Page")} <b>{Math.min(page, pages.length - 1) + 1}</b> / {pages.length}</span>
-              <button type="button" onClick={() => setPage((p) => Math.min(pages.length - 1, p + 1))} disabled={page >= pages.length - 1}
-                className="h-8 w-8 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">›</button>
-              <label className="text-[11px] text-slate-500 flex items-center gap-1">{t("ไปหน้า", "Go to page")}
-                <input type="number" min={1} max={pages.length} value={Math.min(page, pages.length - 1) + 1}
-                  onChange={(e) => setPage(Math.min(pages.length - 1, Math.max(0, (Number(e.target.value) || 1) - 1)))}
-                  className="w-14 h-7 px-1 text-sm text-center border border-slate-200 rounded" />
-              </label>
-              <span className="text-[11px] text-slate-400">· {t(`หน้าละ ~${segCm} ซม.`, `~${segCm} cm per page`)}</span>
-            </>
-          )}
-          <button type="button" onClick={() => setShowAll((v) => !v)}
-            className={`ml-auto h-8 px-3 text-[12px] rounded-lg border ${showAll ? "bg-slate-800 text-white border-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-            {showAll ? t("◧ ดูทีละหน้า", "◧ One page at a time") : t("▤ เรียงทุกหน้าต่อกัน", "▤ Show all pages side by side")}
-          </button>
+      {mode === "roll" && scrollable && (
+        <div className="text-center text-[11.5px] font-medium text-indigo-600" data-layout-pos>{t(`ช่วง ${Math.round(fromCm)}–${Math.round(toCm)} ซม. จาก ${Math.round(rollLen).toLocaleString()} ซม.`, `Showing ${Math.round(fromCm)}–${Math.round(toCm)} of ${Math.round(rollLen).toLocaleString()} cm`)}</div>
+      )}
+      <div className="flex justify-center gap-1.5">
+        <div ref={box} onScroll={sync} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+          className="relative cursor-grab select-none overflow-y-auto overscroll-contain rounded-lg bg-white active:cursor-grabbing [scrollbar-width:thin]"
+          style={{ maxHeight, width: width + 4, touchAction: "pan-y" }} data-layout-scroll>
+          {strips.map((st, i) => renderStrip(st, i))}
         </div>
-      )}
-
-      {showAll
-        ? <div className="flex gap-3 overflow-x-auto pb-2">{pages.map((pg, i) => renderPage(pg, i))}</div>
-        : <div className="flex justify-center">{cur && renderPage(cur, page)}</div>}
-
-      {pages.length > 1 && !showAll && (
-        <p className="text-[11px] text-slate-400">{t("* ชิ้นที่คร่อมขอบล่างของหน้า จะวาดต่อที่ขอบบนของหน้าถัดไป", "* Pieces crossing the bottom edge of a page continue at the top of the next page")}</p>
-      )}
+        {scrollable && (
+          <div onClick={jump} className="relative w-2.5 shrink-0 cursor-pointer rounded-full bg-slate-100" style={{ height: view.h || maxHeight }} title={t("แตะเพื่อกระโดดไปช่วงนั้น", "Tap to jump there")}>
+            <div className="absolute left-0 right-0 rounded-full bg-indigo-400/70" style={{ top: `${thumbTop}%`, height: `${thumbH}%` }} />
+          </div>
+        )}
+      </div>
       {result.sampledFrom && (
         <p className="text-[11px] text-amber-600">{t(`* ล็อตใหญ่: จำลองวาง ${result.sampledFrom.simulated.toLocaleString()} จาก ${result.sampledFrom.total.toLocaleString()} ชิ้น แล้วขยายสัดส่วน — ผังที่เห็นคือช่วงต้นของผ้า ยอดที่ต้องสั่งคิดครบแล้ว`, `* Large lot: simulated ${result.sampledFrom.simulated.toLocaleString()} of ${result.sampledFrom.total.toLocaleString()} pcs and scaled up — the layout shown is the start of the fabric; the order quantity already covers everything`)}</p>
       )}

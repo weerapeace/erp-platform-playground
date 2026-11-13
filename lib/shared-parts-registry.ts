@@ -290,6 +290,13 @@ export const SHARED_PARTS: SharedPart[] = [
     sameJob: "select", primary: true,
   },
   {
+    key: "free-text-picker", label: "ช่องพิมพ์ชื่อเอง + รายการประจำ", code: "FreeTextPicker", category: "input",
+    source: { path: "components/free-text-picker" },
+    what: "ช่องพิมพ์ข้อความอิสระ กดแล้วมีรายการชื่อที่ใช้บ่อย (ใช้บ่อยขึ้นก่อน) · พิมพ์ชื่อใหม่ใช้ครั้งเดียวได้ หรือกดเพิ่มเข้ารายการ · แก้ชื่อ/ลบในรายการ (สิทธิ์ products.edit) · แยกชุดด้วย kind (ตาราง free_text_names) · เก็บเป็นข้อความ ไม่ผูก id",
+    when: "ช่องชื่อที่ยังไม่มีรหัสจริงแต่อยากให้เลือกซ้ำได้ — kind=\"bom_material\" วัตถุดิบในคำขอแก้สูตร · kind=\"cut_piece\" ชื่อชิ้นตัด (สูตร BOM · หน้าคิดผ้า /fabric-calc) · ช่องใหม่ = ตั้ง kind ใหม่ ไม่ต้องสร้างตาราง",
+    notWhen: "เลือกจากรายการตายตัวที่ห้ามพิมพ์เอง → SearchableSelect · เลือกข้อมูลหลัก (สินค้า ผ้า ร้าน) → Picker เฉพาะของมัน",
+  },
+  {
     key: "search-pick", label: "ช่องพิมพ์ค้นแล้วสั่งทำทันที (มีดาวโปรด)", code: "SearchPick", category: "input",
     source: { path: "components/search-pick" },
     what: "พิมพ์ค้น กดรายการแล้วสั่งทำทันที (ไม่ได้เก็บค่า) + ปักดาวรายการโปรด เช่น ย้ายสินค้าไปหมวดอื่น",

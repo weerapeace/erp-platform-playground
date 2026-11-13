@@ -10,21 +10,31 @@
  *  • เลือกจากรายการที่เคยใช้ (ชื่อที่ใช้บ่อยลอยขึ้นบน)
  *  • ✏️ แก้ชื่อ / 🗑 ลบ ในรายการ — เฉพาะคนมีสิทธิ์แก้ข้อมูลสินค้า (products.edit)
  * เบื้องหลัง: /api/free-text-names (ตาราง free_text_names · แยกด้วย kind)
+ *
+ * kind ที่ใช้อยู่: "bom_material" วัตถุดิบในคำขอแก้สูตร · "cut_piece" ชื่อชิ้นตัด (สูตร BOM ช่องชื่อชิ้น · หน้าคิดผ้า /fabric-calc — เจ้าของขอ 2026-11-13)
+ * 2026-11-13: รายการลอยผ่าน FloatingDropdown (ไม่โดนตาราง/ป๊อปอัปตัดขอบ) · inputClassName = แต่งช่องให้เข้ากับตาราง · title = หัวรายการ · ไอคอนเส้นแทนอีโมจิ · ลบถามด้วย ConfirmDialog
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { FloatingDropdown } from "@/components/floating-dropdown";
+import { ConfirmDialog } from "@/components/modal";
+import { Icon } from "@/components/icon";
 import { usePermission } from "@/components/auth";
 import type { FreeTextName } from "@/app/api/free-text-names/route";
 
 export function FreeTextPicker({
-  value, onChange, kind = "bom_material", placeholder = "พิมพ์ชื่อที่รู้ เช่น ผ้าแคนวาสรีไซเคิล", className = "",
+  value, onChange, kind = "bom_material", placeholder = "พิมพ์ชื่อที่รู้ เช่น ผ้าแคนวาสรีไซเคิล", className = "", inputClassName, title = "ชื่อที่เคยใช้",
 }: {
   value: string;
   onChange: (name: string) => void;
   kind?: string;
   placeholder?: string;
   className?: string;
+  /** แต่งช่องกรอกเอง (ไม่ส่ง = ช่องสีเหลืองแบบเดิม) */
+  inputClassName?: string;
+  /** หัวรายการ เช่น "รายการชื่อชิ้นประจำ" */
+  title?: string;
 }) {
   const toast = useToast();
   const canManage = usePermission("products.edit");
@@ -33,7 +43,9 @@ export function FreeTextPicker({
   const [loading, setLoading] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [typing, setTyping] = useState(false);   // พิมพ์หลังเปิดรายการแล้วค่อยกรอง — เปิดมาเฉย ๆ เห็นทุกชื่อ (ช่องมีค่าอยู่แล้วก็เลือกชื่ออื่นได้)
   const [busy, setBusy] = useState(false);
+  const [del, setDel] = useState<FreeTextName | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -47,16 +59,11 @@ export function FreeTextPicker({
 
   useEffect(() => { if (open) void load(); }, [open, load]);
 
-  // คลิกนอกช่อง = ปิดรายการ
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!wrapRef.current?.contains(e.target as Node)) { setOpen(false); setEditId(null); } };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  // คลิกนอกช่อง = ปิดรายการ (FloatingDropdown ดูแลให้ — รวมคลิกในรายการที่ลอยอยู่)
+  const close = () => { setOpen(false); setEditId(null); };
 
   const typed = value.trim();
-  const filtered = typed
+  const filtered = typed && typing
     ? items.filter((i) => i.name.toLowerCase().includes(typed.toLowerCase()))
     : items;
   const exactHit = items.find((i) => i.name.toLowerCase() === typed.toLowerCase()) ?? null;
@@ -99,7 +106,7 @@ export function FreeTextPicker({
   };
 
   const remove = async (it: FreeTextName) => {
-    if (!window.confirm(`เอา “${it.name}” ออกจากรายการ?\n(คำขอเก่าที่เคยใช้ชื่อนี้ยังอยู่เหมือนเดิม)`)) return;
+    setDel(null);
     setBusy(true);
     try {
       const j = await apiFetch(`/api/free-text-names?id=${encodeURIComponent(it.id)}`, { method: "DELETE" }).then((r) => r.json());
@@ -112,20 +119,21 @@ export function FreeTextPicker({
   return (
     <div ref={wrapRef} className={`relative ${className}`}>
       <div className="flex items-center gap-1">
-        <input value={value} onChange={(e) => onChange(e.target.value)} onFocus={() => setOpen(true)}
+        <input value={value} onChange={(e) => { onChange(e.target.value); setTyping(true); setOpen(true); }} onFocus={() => { setTyping(false); setOpen(true); }}
+          onKeyDown={(e) => { if (e.key === "Escape" || e.key === "Enter") close(); }}
           placeholder={placeholder}
-          className="flex-1 min-w-0 h-8 px-2 text-sm border border-amber-300 bg-amber-50/40 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
-        <button type="button" onClick={() => setOpen((v) => !v)} title="เลือกจากชื่อที่เคยใช้"
-          className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded">▾</button>
+          className={inputClassName ?? "flex-1 min-w-0 h-8 px-2 text-sm border border-amber-300 bg-amber-50/40 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"} />
+        <button type="button" onClick={() => { setTyping(false); setOpen((v) => !v); }} title={`เลือกจาก${title}`}
+          className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded"><Icon name="chevron-down" size={14} /></button>
       </div>
 
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-40 w-[320px] max-w-[90vw] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+      <FloatingDropdown anchorRef={wrapRef} open={open} onClose={close} minWidth={260} maxWidth={340}>
+        <div className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden" data-free-text-menu>
           <div className="px-2.5 py-1.5 text-[10px] text-slate-400 bg-slate-50 border-b border-slate-100">
-            ชื่อที่เคยใช้ {canManage && <span>· ✏️ แก้ · 🗑 ลบ ได้</span>}
+            {title} {canManage && <span>· กดดินสอ = แก้ชื่อ · ถังขยะ = เอาออก</span>}
           </div>
 
-          <div className="max-h-56 overflow-y-auto">
+          <div className="overflow-y-auto" style={{ maxHeight: "min(224px, var(--fd-max-h, 224px))" }}>
             {loading ? <div className="px-2.5 py-3 text-[11px] text-slate-400">กำลังโหลด…</div>
               : filtered.length === 0 ? <div className="px-2.5 py-3 text-[11px] text-slate-400">{typed ? "ไม่มีชื่อนี้ในรายการ — กดปุ่มด้านล่างเพื่อเพิ่ม" : "ยังไม่มีชื่อในรายการ"}</div>
               : filtered.map((it) => (
@@ -147,9 +155,9 @@ export function FreeTextPicker({
                       {canManage && (
                         <>
                           <button type="button" title="แก้ชื่อ" onClick={() => { setEditId(it.id); setEditText(it.name); }}
-                            className="shrink-0 h-6 w-6 text-[11px] text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded">✏️</button>
-                          <button type="button" title="เอาออกจากรายการ" disabled={busy} onClick={() => void remove(it)}
-                            className="shrink-0 h-6 w-6 text-[11px] text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded">🗑</button>
+                            className="shrink-0 h-6 w-6 grid place-items-center text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded"><Icon name="pencil" size={13} /></button>
+                          <button type="button" title="เอาออกจากรายการ" disabled={busy} onClick={() => setDel(it)}
+                            className="shrink-0 h-6 w-6 grid place-items-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded"><Icon name="trash" size={13} /></button>
                         </>
                       )}
                     </>
@@ -161,11 +169,13 @@ export function FreeTextPicker({
           {typed && !exactHit && (
             <button type="button" disabled={busy} onClick={() => void saveNew()}
               className="w-full px-2.5 py-2 text-left text-[12px] font-medium text-amber-800 bg-amber-50 border-t border-amber-100 hover:bg-amber-100 disabled:opacity-50">
-              ＋ เพิ่ม “{typed}” เข้ารายการ <span className="font-normal text-amber-600">(ครั้งหน้าเลือกได้เลย)</span>
+              ＋ เพิ่ม “{typed}” เข้ารายการ <span className="font-normal text-amber-600">(ครั้งหน้าเลือกได้เลย · ไม่กด = ใช้ครั้งเดียว)</span>
             </button>
           )}
         </div>
-      )}
+      </FloatingDropdown>
+      <ConfirmDialog open={!!del} onClose={() => setDel(null)} onConfirm={() => { if (del) void remove(del); }} variant="danger" confirmText="เอาออก"
+        title="เอาชื่อนี้ออกจากรายการ?" message={del ? `“${del.name}” จะหายจากรายการ · ข้อมูลเก่าที่เคยใช้ชื่อนี้ยังอยู่เหมือนเดิม` : ""} />
     </div>
   );
 }

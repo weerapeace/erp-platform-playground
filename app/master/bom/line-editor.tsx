@@ -753,7 +753,7 @@ export function BomLineEditor({
     {
       key: "piece_name", header: "ชื่อชิ้น", width: 120,
       render: (l, u, ro) => !(usesWidth(l) || usesLength(l)) ? dash : ro ? <span className="text-xs text-slate-600">{l.piece_name || "—"}</span>
-        : <input value={l.piece_name ?? ""} placeholder="เช่น ตัวหน้า" onChange={(e) => u({ piece_name: e.target.value })} className={inputCls} title="ชื่อชิ้นตัด — โชว์ในผังวางผ้า ใบวิธีตัด และหน้าคิดผ้า" />,
+        : <FreeTextPicker kind="cut_piece" title="รายการชื่อชิ้นประจำ" value={l.piece_name ?? ""} onChange={(v) => u({ piece_name: v })} placeholder="เช่น ชิ้นหน้า" inputClassName={`${inputCls} min-w-0 flex-1`} />,
     },
     {
       key: "cut_block", header: "บล็อกตัด", width: 150,
@@ -1136,7 +1136,7 @@ export function BomLineEditor({
                   <div className={rowCls}>
                     <span className={labCls}>ชื่อชิ้น:</span>
                     {readonly ? <span className="text-slate-600">{d.piece_name || "—"}</span>
-                      : <input value={d.piece_name ?? ""} placeholder="เช่น ตัวหน้า · สาย" onChange={(e) => u({ piece_name: e.target.value })} className="h-8 min-w-0 max-w-[220px] flex-1 rounded-lg border border-slate-200 px-2 text-sm" title="ชื่อชิ้นตัด — โชว์ในผังวางผ้า ใบวิธีตัด และหน้าคิดผ้า" />}
+                      : <FreeTextPicker kind="cut_piece" title="รายการชื่อชิ้นประจำ" value={d.piece_name ?? ""} onChange={(v) => u({ piece_name: v })} placeholder="เช่น ชิ้นหน้า · สาย" className="min-w-0 max-w-[240px] flex-1" inputClassName="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 text-sm" />}
                   </div>
 
                   <div className={rowCls}>
