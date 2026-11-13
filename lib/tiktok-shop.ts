@@ -181,7 +181,7 @@ const PRODUCT_WRITE_SCOPE = "Product Write (seller.product.write)";
  * ⚠️ แก้แล้ว TikTok ส่งไปตรวจใหม่ (ฉบับเดิมขายต่อจนผ่าน) · ราคา/สต๊อก = มีผลทันที (ยังไม่เปิดให้แก้)
  * category_version: เอกสารบอก "ร้าน SEA ต้องส่ง v2 เมื่อใช้ API นี้" (ไทย = SEA)
  */
-export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown; product_attributes?: unknown[]; is_cod_allowed?: boolean; size_chart?: unknown; skus?: unknown[] }, opts: { saveMode?: "AS_DRAFT" | "LISTING" } = {}): Promise<Record<string, unknown>> {
+export async function ttsPartialEdit(accessToken: string, shopCipher: string, productId: string, fields: { title?: string; description?: string; main_images?: { uri: string }[]; package_weight?: unknown; package_dimensions?: unknown; product_attributes?: unknown[]; is_cod_allowed?: boolean; size_chart?: unknown; skus?: unknown[]; delivery_option_ids?: string[] }, opts: { saveMode?: "AS_DRAFT" | "LISTING" } = {}): Promise<Record<string, unknown>> {
   // save_mode ค่าเริ่มของ TikTok = LISTING (ส่งตรวจ/เผยแพร่) — สินค้าที่เป็นฉบับร่างต้องส่ง AS_DRAFT ไม่งั้นร่างถูกส่งตรวจ (เจอจริง 2026-11-13 BBM02 กลายเป็น PENDING)
   return ttsApi("POST", `/product/202509/products/${encodeURIComponent(productId)}/partial_edit`, accessToken, {
     query: { shop_cipher: shopCipher }, body: { ...fields, category_version: "v2", ...(opts.saveMode ? { save_mode: opts.saveMode } : {}) }, scope: PRODUCT_WRITE_SCOPE,
@@ -309,6 +309,13 @@ export async function ttsCreateSizeChart(accessToken: string, shopCipher: string
   const id = str(d.size_chart_id);
   if (!id) throw new TtsApiError("TikTok ไม่ส่งรหัสแม่แบบตารางขนาดกลับมา", "no_size_chart_id");
   return id;
+}
+
+// ───────── ตัวเลือกการจัดส่ง (lib/tiktok-delivery แปลงคำตอบ) ─────────
+const LOGISTICS_SCOPE = "Logistics (seller.logistics)";
+/** แบบจัดส่งของคลัง (Get Warehouse Delivery Options 202309) · scope PRODUCT = แบบที่กำหนดให้สินค้าได้ · WAREHOUSE = แบบที่คลังใช้อยู่ (มีขีดจำกัดน้ำหนัก) → data ดิบ */
+export async function ttsGetDeliveryOptions(accessToken: string, shopCipher: string, warehouseId: string, scope: "PRODUCT" | "WAREHOUSE"): Promise<Record<string, unknown>> {
+  return ttsApi("GET", `/logistics/202309/warehouses/${encodeURIComponent(warehouseId)}/delivery_options`, accessToken, { query: { shop_cipher: shopCipher, scope }, scope: LOGISTICS_SCOPE });
 }
 
 // ───────── โปรโมชัน (อ่านอย่างเดียว · lib/tiktok-promotions แปลงคำตอบ) ─────────

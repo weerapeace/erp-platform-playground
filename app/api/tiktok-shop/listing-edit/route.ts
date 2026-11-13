@@ -27,8 +27,9 @@ import {
 } from "@/lib/tiktok-listing-edit";
 import { tiktokTemplateIdOfRef } from "@/lib/tiktok-size-chart";
 import { buildTiktokSkusPayload, planTiktokSkuEdit, tiktokOptionGroups, tiktokSkuSignature, type TiktokSkuForm } from "@/lib/tiktok-sku-edit";
+import { planTiktokDelivery, sameDelivery, tiktokDeliveryValue, type TtsDeliveryOption, type TtsDeliveryValue } from "@/lib/tiktok-delivery";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadTtsListingLive, saveTtsSlimCopy, ttsCategoryMeta, ttsGetProductRetry, ttsUploadRef, ttsViewWithReview } from "../shared";
+import { loadTtsListingLive, saveTtsSlimCopy, ttsCategoryMeta, ttsGetProductRetry, ttsShopDeliveryOptions, ttsUploadRef, ttsViewWithReview } from "../shared";
 import { planTiktokAttrs, planTiktokCod, planTiktokSizeChart, sameAttrState, type TtsAttrState, type TtsAttrVal } from "@/lib/tiktok-attrs";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     size: x && "size_chart" in x ? { before: typeof x.before_size_chart === "string" && x.before_size_chart ? x.before_size_chart : null, next: typeof x.size_chart === "string" && x.size_chart ? x.size_chart : null } : null,
   };
   const wantExtra = !!(ex.attrs || ex.cod || ex.size);
+  // ตัวเลือกการจัดส่ง: null = ใช้ค่าเริ่มต้นของร้าน · [ids] = กำหนดเอง
+  const idsOrNull = (v: unknown): TtsDeliveryValue => (Array.isArray(v) ? [...new Set(v.map((s) => String(s ?? "").trim()).filter(Boolean))] : null);
+  const dlv = x && "delivery" in x ? { before: idsOrNull(x.before_delivery), next: idsOrNull(x.delivery) } : null;
   // ตัวเลือก (รูปชั้นหลัก + ชื่อ)
   const k = body.skus && typeof body.skus === "object" ? body.skus as Record<string, unknown> : null;
   const recOf = (v: unknown): Record<string, string | null> => {
@@ -86,7 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     beforeSig: k.before_sig,
     form: { primary: typeof k.primary === "string" ? k.primary : null, images: recOf(k.images), names: Object.fromEntries(Object.entries(recOf(k.names)).map(([a, b]) => [a, b ?? ""])) },
   } : null;
-  if (!listingId || (!wantTitle && !wantDesc && !media && !wantExtra && !skuIn)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ / รายละเอียด / รูป/กล่อง / คุณลักษณะ / ตัวเลือก)" }, 400);
+  if (!listingId || (!wantTitle && !wantDesc && !media && !wantExtra && !skuIn && !dlv)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ / รายละเอียด / รูป/กล่อง / คุณลักษณะ / ตัวเลือก / การจัดส่ง)" }, 400);
 
   const admin = supabaseAdmin();
   const live = await loadTtsListingLive(admin, listingId, user?.id ?? null);
@@ -117,6 +121,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (skuIn && skuIn.beforeSig !== tiktokSkuSignature(view.skus)) return reply({ ok: false, view, error: `ตัวเลือก${conflict}` }, 409);
   const groups = skuIn ? tiktokOptionGroups(view.skus) : [];
   const skuPlan = skuIn ? planTiktokSkuEdit(groups, skuIn.form, { status: view.status ?? view.productStatus, hasDraft: view.hasDraft }) : null;
+  const baseDelivery = tiktokDeliveryValue(view.deliveryIds);
+  if (dlv && !sameDelivery(dlv.before, baseDelivery)) return reply({ ok: false, view, error: `การจัดส่ง${conflict}` }, 409);
+  let dlvShop: { options: TtsDeliveryOption[]; limits: TtsDeliveryOption[] | null } | null = null;
+  if (dlv && !sameDelivery(dlv.next, baseDelivery)) { try { dlvShop = await ttsShopDeliveryOptions(live.accessToken, live.cipher); } catch { /* ตรวจรายการไม่ได้ = เตือนในแผน */ } }
+  const dlvPlan = dlv ? planTiktokDelivery(baseDelivery, dlv.next, dlvShop?.options ?? null, { weightKg: tiktokMediaBase(view).pkg.weight, limits: dlvShop?.limits ?? null, names: view.deliveryNames }) : null;
   // ช่อง/กติกาของหมวด (แคช 10 นาที) — ใช้ตรวจค่าก่อนส่ง
   const meta = wantExtra && view.categoryId ? await ttsCategoryMeta(live.accessToken, live.cipher, view.categoryId) : null;
   if (ex.attrs && !meta?.fields) return reply({ ok: false, view, error: meta?.error ?? "ไม่รู้หมวดของสินค้านี้ — ดึงตัวนี้จาก TikTok แล้วลองใหม่" }, 502);
@@ -127,13 +136,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const mediaPlan = media ? planTiktokMedia(base.images.map((x) => x.uri), base.pkg, media.images!, media.pkg!) : null;
   const descPlan = wantDesc ? planTiktokDescription(baseDesc, String(body.description)) : null;
   const descChanged = !!descPlan?.changed;
-  const errors = [...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(codPlan?.errors ?? []), ...(sizePlan?.errors ?? []), ...(skuPlan?.changed ? skuPlan.errors : [])];
+  const errors = [...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(codPlan?.errors ?? []), ...(sizePlan?.errors ?? []), ...(skuPlan?.changed ? skuPlan.errors : []), ...(dlvPlan?.changed ? dlvPlan.errors : [])];
   if (errors.length) return reply({ ok: false, view, error: errors.join(" · ") }, 400);
+  const dlvChanged = !!dlvPlan?.changed;
   const titleChanged = !!titlePlan?.changed;
   const mediaChanged = !!mediaPlan && (mediaPlan.imagesChanged || mediaPlan.weightChanged || mediaPlan.boxChanged);
   const attrChanged = !!attrPlan?.changed; const codChanged = !!codPlan?.changed; const sizeChanged = !!sizePlan?.changed && !!ex.size?.next;
   const skuChanged = !!skuPlan?.changed;
-  if (!titleChanged && !descChanged && !mediaChanged && !attrChanged && !codChanged && !sizeChanged && !skuChanged) return reply({ ok: true, view, summary: "เหมือนเดิม — ไม่มีอะไรต้องส่ง", error: null });
+  if (!titleChanged && !descChanged && !mediaChanged && !attrChanged && !codChanged && !sizeChanged && !skuChanged && !dlvChanged) return reply({ ok: true, view, summary: "เหมือนเดิม — ไม่มีอะไรต้องส่ง", error: null });
 
   const changes = [
     ...(titleChanged ? [{ label: "ชื่อสินค้า", before: view.pendingTitle ?? view.title, after: titlePlan!.title }] : []),
@@ -143,6 +153,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...(codChanged && codPlan!.change ? [codPlan!.change] : []),
     ...(sizeChanged && sizePlan!.change ? [sizePlan!.change] : []),
     ...(skuChanged ? skuPlan!.changes : []),
+    ...(dlvChanged && dlvPlan!.change ? [dlvPlan!.change] : []),
   ];
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
     action: "update", entityType: "platform_catalog", entityId: live.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
@@ -201,6 +212,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...(attrChanged ? { product_attributes: attrPlan!.payload } : {}),
     ...(codChanged ? { is_cod_allowed: ex.cod!.next } : {}),
     ...(sizeChanged && sizeTpl ? { size_chart: { template: { id: sizeTpl } } } : sizeChanged && sizeUri ? { size_chart: { image: { uri: sizeUri } } } : {}),
+    // การจัดส่ง: ว่าง = กลับไปใช้ค่าของร้าน (ไปกับการส่งปกติ — TikTok ไม่เก็บค่านี้ในร่างของสินค้าที่ขายอยู่)
+    ...(dlvChanged ? { delivery_option_ids: dlvPlan!.ids } : {}),
   };
   const sentUris = fields.main_images?.map((x) => x.uri) ?? null;
 
@@ -240,7 +253,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // สถานะตรวจ: เชื่อของที่ดึงกลับก่อน — คำตอบของ Partial Edit บอก APPROVED (ของฉบับที่ขายอยู่) ทั้งที่ของใหม่รอตรวจ (เจอจริง 2026-11-12)
   const respAudit = String((resp.audit as { status?: unknown } | undefined)?.status ?? "");
   const auditStatus = freshView?.auditStatus ?? respAudit;
-  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", attrChanged ? "คุณลักษณะ" : "", codChanged ? "COD" : "", sizeChanged ? "ตารางขนาด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : "", skuChanged ? "ตัวเลือก" : ""].filter(Boolean).join("/");
+  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", attrChanged ? "คุณลักษณะ" : "", codChanged ? "COD" : "", sizeChanged ? "ตารางขนาด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : "", skuChanged ? "ตัวเลือก" : "", dlvChanged ? "การจัดส่ง" : ""].filter(Boolean).join("/");
   let summary = `แก้${what}แล้ว`;
   let pending = false;
   warnings.push(...skuWarnings);
@@ -256,6 +269,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     else if ((titleSeen && imgsSeen) || auditStatus === "AUDITING") summary = `ส่ง${what}ใหม่แล้ว — รอ TikTok ตรวจ (ระหว่างนี้ร้านยังใช้ของเดิม)`;
     else warnings.push("TikTok ตอบรับแล้ว แต่ยังไม่เห็นของใหม่ (อาจใช้เวลาสักครู่) — กดดึงตัวนี้อีกครั้งภายหลัง");
     if (sentUris && imgsSeen && fb.images.length !== sentUris.length) warnings.push(`ส่งรูป ${sentUris.length} รูป แต่ TikTok เห็น ${fb.images.length} รูป — ตรวจในแท็บรูป`);
+  }
+  // การจัดส่ง: ดึงกลับแล้วต้องเป็นค่าที่ส่ง (ไม่ตรง = เตือน — TikTok อาจไม่รับช่องนี้จากการแก้บางส่วน)
+  if (dlvChanged && freshView && !sameDelivery(tiktokDeliveryValue(freshView.deliveryIds), dlvPlan!.ids.length ? dlvPlan!.ids : null)) {
+    warnings.push("TikTok ตอบรับแล้ว แต่การจัดส่งที่ดึงกลับมายังไม่ตรงกับที่ตั้ง — กดดึงตัวนี้อีกครั้งในอีกสักครู่ ถ้ายังไม่ตรงให้ตั้งใน Seller Center");
   }
   // แก้ตัวเลือกแล้วสต๊อกต้องเท่าเดิม (เราไม่ได้ส่งสต๊อก) — ต่างไป = เตือนชัด ๆ (อาจมีออเดอร์/BigSeller ปรับพอดี ก็ได้)
   if (skuChanged && freshView) {

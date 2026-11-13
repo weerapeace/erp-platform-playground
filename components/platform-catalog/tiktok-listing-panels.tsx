@@ -47,6 +47,9 @@ import { planTiktokSkuEdit, tiktokOptNameKey, tiktokOptionGroups, tiktokSkuFormO
 import { TiktokOptionEditor } from "./tiktok-option-editor";
 import { TiktokSizeChartBox } from "./tiktok-size-chart-picker";
 import { TiktokPromotionsBox } from "./tiktok-promotions";
+import { TiktokDeliveryBox } from "./tiktok-delivery";
+import { suggestAttrsFromText, suggestText, type SuggestHit } from "@/lib/attr-suggest";
+import { planTiktokDelivery, type TtsDeliveryValue } from "@/lib/tiktok-delivery";
 
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
 
@@ -164,6 +167,10 @@ export type TiktokEditApi = {
   setSkuName: (groupKey: string, valueKey: string, name: string) => void;
   setSkuPrimary: (groupKey: string) => void;
   skuPlan: TiktokSkuPlan | null;
+  /** ตัวเลือกการจัดส่ง: null = ใช้ค่าเริ่มต้นของร้าน (lib/tiktok-delivery · ./tiktok-delivery) */
+  delivery: TtsDeliveryValue;
+  baseDelivery: TtsDeliveryValue;
+  setDelivery: (v: TtsDeliveryValue) => void;
   /** จำนวนรายการที่แก้ (ชื่อ + ราคาแต่ละตัว + รูป/กล่อง) */
   changeCount: number;
   errors: string[];
@@ -200,6 +207,10 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   const optGroups = useMemo(() => (state.view ? tiktokOptionGroups(state.view.skus) : []), [state.view]);
   const baseSkuForm = useMemo(() => tiktokSkuFormOf(optGroups), [optGroups]);
   const [skuForm, setSkuForm] = useState<TiktokSkuForm | null>(null);
+  // ตัวเลือกการจัดส่ง (ฉบับขาย)
+  const deliveryKey = state.view ? state.view.deliveryIds.join("|") : null;
+  const baseDelivery = useMemo<TtsDeliveryValue>(() => (deliveryKey ? deliveryKey.split("|") : null), [deliveryKey]);
+  const [delivery, setDeliveryState] = useState<TtsDeliveryValue>(null);
   const [descEdit, setDescEdit] = useState(false);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -208,6 +219,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   useEffect(() => { setDescriptionState(baseDescription); setDescEdit(false); }, [baseDescription]);
   useEffect(() => { setAttrsState(baseAttrs ? { ...baseAttrs } : null); setCodState(baseCod); setSizeChartState(baseSizeRef); setSizeChartName(null); }, [baseAttrs, baseCod, baseSizeRef]);
   useEffect(() => { setSkuForm(state.view ? { ...baseSkuForm, images: { ...baseSkuForm.images }, names: { ...baseSkuForm.names } } : null); }, [baseSkuForm, state.view]);
+  useEffect(() => { setDeliveryState(baseDelivery ? [...baseDelivery] : null); }, [baseDelivery]);
   useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
   useEffect(() => { setImagesState(mediaBase ? mediaBase.images.map((x) => x.url) : null); setPkgState(mediaBase ? { ...mediaBase.pkg } : null); }, [mediaBase]);
   const plan = useMemo(() => (baseTitle != null && title != null ? planTiktokTitle(baseTitle, title) : null), [baseTitle, title]);
@@ -224,15 +236,17 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   const skuPlan = useMemo(() => (state.view && skuForm ? planTiktokSkuEdit(optGroups, skuForm, { status: state.view.status ?? state.view.productStatus, hasDraft: state.view.hasDraft }) : null), [state.view, skuForm, optGroups]);
   const attrDirty = !!attrPlan?.changed; const codDirty = !!codPlan?.changed; const sizeDirty = !!sizePlan?.changed;
   const skuDirty = !!skuPlan?.changed;
+  const dlvPlan = useMemo(() => (state.view ? planTiktokDelivery(baseDelivery, delivery, null, { checkOptions: false, names: state.view.deliveryNames }) : null), [state.view, baseDelivery, delivery]);
+  const dlvDirty = !!dlvPlan?.changed;
   const extraDirty = attrDirty || codDirty || sizeDirty;
   const titleDirty = !!plan?.changed;
   const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
   const mediaDirty = mediaTouched && !mediaBlock && !!mediaPlan && (mediaPlan.imagesChanged || mediaPlan.weightChanged || mediaPlan.boxChanged);
-  const dirty = titleDirty || descDirty || priceDirty || mediaDirty || extraDirty || skuDirty || (mediaTouched && !!mediaPlan?.errors.length);
-  const changeCount = (titleDirty ? 1 : 0) + (descDirty ? 1 : 0) + (attrPlan?.changes.length ?? 0) + (codDirty ? 1 : 0) + (sizeDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0) + (mediaDirty ? mediaPlan!.changes.length : 0) + (skuDirty ? skuPlan!.changes.length : 0);
+  const dirty = titleDirty || descDirty || priceDirty || mediaDirty || extraDirty || skuDirty || dlvDirty || (mediaTouched && !!mediaPlan?.errors.length);
+  const changeCount = (titleDirty ? 1 : 0) + (descDirty ? 1 : 0) + (attrPlan?.changes.length ?? 0) + (codDirty ? 1 : 0) + (sizeDirty ? 1 : 0) + (pricePlan?.changes.length ?? 0) + (mediaDirty ? mediaPlan!.changes.length : 0) + (skuDirty ? skuPlan!.changes.length : 0) + (dlvDirty ? 1 : 0);
   const errors = [
     ...(plan?.errors ?? []), ...(descDirty ? descPlan!.errors : []), ...(pricePlan?.errors ?? []),
-    ...(attrDirty ? attrPlan!.errors : []), ...(codDirty ? codPlan!.errors : []), ...(sizeDirty ? sizePlan!.errors : []), ...(skuDirty ? skuPlan!.errors : []),
+    ...(attrDirty ? attrPlan!.errors : []), ...(codDirty ? codPlan!.errors : []), ...(sizeDirty ? sizePlan!.errors : []), ...(skuDirty ? skuPlan!.errors : []), ...(dlvDirty ? dlvPlan!.errors : []),
     ...(mediaTouched && !mediaRefs ? ["รูปบนร้านเปลี่ยนไปแล้ว — กดยกเลิกที่แก้ แล้วลองใหม่"] : []),
     ...(mediaTouched ? mediaPlan?.errors ?? [] : []),
   ];
@@ -245,7 +259,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
   // ส่งทีละส่วน: ราคา (มีผลทันที) → ชื่อ + รูป/กล่อง (Partial Edit ครั้งเดียว · ส่งตรวจ) · ส่วนแรกพลาด = ไม่ส่งต่อ
   const save = async () => {
     if (!state.listingId || baseTitle == null || !priceBase || !prices) return;
-    const editDirty = titleDirty || descDirty || mediaDirty || extraDirty || skuDirty;
+    const editDirty = titleDirty || descDirty || mediaDirty || extraDirty || skuDirty || dlvDirty;
     setSaving(true);
     const done: string[] = [];
     let saved = false;
@@ -267,7 +281,8 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
           listing_id: state.listingId,
           ...(titleDirty && plan ? { before_title: baseTitle, title: plan.title } : {}),
           ...(descDirty && description != null ? { before_description: baseDescription, description } : {}),
-          ...(extraDirty ? { extra: {
+          ...(extraDirty || dlvDirty ? { extra: {
+            ...(dlvDirty ? { before_delivery: baseDelivery, delivery } : {}),
             ...(attrDirty ? { before_attrs: baseAttrs, attrs } : {}),
             ...(codDirty ? { before_cod: baseCod, cod } : {}),
             ...(sizeDirty ? { before_size_chart: baseSizeRef, size_chart: sizeChart } : {}),
@@ -294,7 +309,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     finally { setSaving(false); if (saved) onSaved?.(plan?.title ?? baseTitle); }
   };
 
-  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(descDirty ? descPlan?.warnings ?? [] : []), ...(attrDirty ? attrPlan?.warnings ?? [] : []), ...(sizeDirty ? sizePlan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : []), ...(mediaDirty ? mediaPlan?.warnings ?? [] : []), ...(skuDirty ? skuPlan?.warnings ?? [] : [])];
+  const warnings = [...(titleDirty ? plan?.warnings ?? [] : []), ...(descDirty ? descPlan?.warnings ?? [] : []), ...(attrDirty ? attrPlan?.warnings ?? [] : []), ...(sizeDirty ? sizePlan?.warnings ?? [] : []), ...(priceDirty ? pricePlan?.warnings ?? [] : []), ...(mediaDirty ? mediaPlan?.warnings ?? [] : []), ...(skuDirty ? skuPlan?.warnings ?? [] : []), ...(dlvDirty ? dlvPlan?.warnings ?? [] : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
       title={`ส่งการแก้ไข ${changeCount.toLocaleString()} รายการขึ้นร้าน TikTok?`} confirmText="ส่งขึ้น TikTok"
@@ -314,6 +329,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
             {(pricePlan?.changes ?? []).map((c) => (
               <li key={c.skuId}><span className="font-medium text-slate-700">ราคา {c.label}:</span> <span className="text-slate-800">{tiktokPriceChangeText(c)}</span></li>
             ))}
+            {dlvDirty && dlvPlan?.change && <li><span className="font-medium text-slate-700">{dlvPlan.change.label}:</span> <span className="text-slate-400">{dlvPlan.change.before}</span> → <span className="text-slate-800">{dlvPlan.change.after}</span></li>}
             {skuDirty && skuPlan!.changes.map((c, i) => <li key={`k-${i}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>)}
           </ul>
           {warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
@@ -333,7 +349,8 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     images, pkg, mediaBase, mediaPlan, mediaBlock,
     baseDescription, description, descEdit, descPlan, uploadDescImage,
     meta, attrs, cod, sizeChart, sizeChartName, attrPlan,
-    optGroups, skuForm, skuPlan,
+    optGroups, skuForm, skuPlan, delivery, baseDelivery,
+    setDelivery: (v) => setDeliveryState(v),
     setSkuImage: (valueKey, ref) => setSkuForm((f) => (f ? { ...f, images: { ...f.images, [valueKey]: ref } } : f)),
     setSkuName: (groupKey, valueKey, name) => setSkuForm((f) => (f ? { ...f, names: { ...f.names, [tiktokOptNameKey(groupKey, valueKey)]: name } } : f)),
     // เปลี่ยนชั้นหลัก: ชั้นใหม่เริ่มจากไม่มีรูป (กลับมาชั้นเดิม = รูปเดิม)
@@ -357,6 +374,7 @@ export function useTiktokEdit(state: TiktokListingState, canEdit: boolean, onSav
     reset: () => {
       setTitle(baseTitle); setDescriptionState(baseDescription); setDescEdit(false); setAttrsState(baseAttrs ? { ...baseAttrs } : null); setCodState(baseCod); setSizeChartState(baseSizeRef); setSizeChartName(null); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r })));
       if (state.view) setSkuForm({ ...baseSkuForm, images: { ...baseSkuForm.images }, names: { ...baseSkuForm.names } });
+      setDeliveryState(baseDelivery ? [...baseDelivery] : null);
       if (mediaBase) { setImagesState(mediaBase.images.map((x) => x.url)); setPkgState({ ...mediaBase.pkg }); }
     },
     ask: () => setAsking(true),
@@ -523,6 +541,8 @@ export function TiktokInfoPanel({ state, edit, matchedParent, matchedCode }: { s
         <Field label="หมวดบน TikTok">{v.category ?? "—"}</Field>
       </div>
       <TiktokPackageBox v={v} edit={edit} />
+      <TiktokDeliveryBox by={{ listingId: state.listingId }} value={edit.delivery} base={edit.baseDelivery} baseNames={v.deliveryNames} can={can}
+        onChange={(d) => edit.setDelivery(d)} weightKg={edit.pkg?.weight ?? v.pkg.weight} />
       <TiktokAttrsBox v={v} edit={edit} can={can} />
       <TiktokCodSizeBox v={v} edit={edit} can={can} matchedParent={matchedParent} matchedCode={matchedCode} listingId={state.listingId} />
       <TiktokDescriptionBox v={v} edit={edit} can={can} desc={desc} />
@@ -780,15 +800,47 @@ function TiktokAttrsBox({ v, edit, can }: { v: TiktokListingView; edit: TiktokEd
   const fields = edit.meta.fields;
   const cur = edit.attrs ?? v.attrs;
   const filled = (f: TtsAttrField) => (cur[f.id] ?? []).length > 0;
-  const main = (fields ?? []).filter((f) => f.required || filled(f) || (v.attrs[f.id] ?? []).length > 0);
+  // ค่าที่ระบบแนะนำ (จับคำจากชื่อ + รายละเอียด · lib/attr-suggest) — ใส่แล้วติดป้าย "แนะนำ" จนกว่าจะเปิดลิ้นชักใหม่
+  const [hits, setHits] = useState<SuggestHit[] | null>(null);
+  const [sug, setSug] = useState<Record<string, string[]>>({});
+  const main = (fields ?? []).filter((f) => f.required || filled(f) || (v.attrs[f.id] ?? []).length > 0 || !!sug[f.id]);
   const rest = (fields ?? []).filter((f) => !main.includes(f));
   const missing = edit.attrPlan?.missingRequired ?? [];
+  const findSuggest = () => {
+    if (!fields) return;
+    const text = suggestText(v.pendingTitle ?? v.title, edit.description ?? v.pendingDescription ?? v.description);
+    setHits(suggestAttrsFromText(fields, text, { skip: (id) => (cur[id] ?? []).length > 0 }));
+  };
+  const applySuggest = () => {
+    if (!hits) return;
+    const next = { ...sug };
+    for (const h of hits) { edit.setAttr(h.fieldId, h.values.map((x) => ({ id: x.id, name: x.name }))); next[h.fieldId] = h.values.map((x) => x.id); }
+    setSug(next); setHits(null);
+  };
   return (
     <div className="rounded-xl border border-slate-200 p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
         คุณลักษณะของหมวด
         {missing.length > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-normal text-rose-700">ช่องบังคับยังว่าง {missing.length}</span>}
+        {can && !!fields?.length && (
+          <button type="button" onClick={findSuggest} className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-[11px] font-normal text-amber-800 hover:bg-amber-100"
+            title="อ่านชื่อ + รายละเอียดสินค้า แล้วหาคำที่ตรงกับตัวเลือกของ TikTok (เติมเฉพาะช่องที่ว่าง · ตรวจก่อนใส่)"><Icon name="ai" />ติ๊กอันที่แนะนำ (อ่านจากรายละเอียด)</button>
+        )}
       </div>
+      {hits && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {hits.length === 0 ? <span>ไม่เจอคำที่ตรงกับตัวเลือกในชื่อ/รายละเอียด (หรือช่องที่เจอมีค่าอยู่แล้ว)</span> : (
+            <>
+              <div className="mb-1 font-medium">เจอคำในชื่อ/รายละเอียด {hits.length} ช่อง — ตรวจก่อนใส่ (เติมเฉพาะช่องที่ว่าง)</div>
+              <ul className="space-y-0.5">{hits.map((h) => <li key={h.fieldId}><span className="text-amber-700">{h.fieldName}:</span> {h.values.map((x) => x.name).join(", ")}</li>)}</ul>
+            </>
+          )}
+          <div className="mt-1.5 flex gap-2">
+            {hits.length > 0 && <button type="button" onClick={applySuggest} className="h-7 rounded-md bg-amber-600 px-2.5 text-white hover:bg-amber-700">ใส่ทั้งหมด</button>}
+            <button type="button" onClick={() => setHits(null)} className="h-7 rounded-md border border-amber-300 px-2.5 hover:bg-amber-100">{hits.length ? "ไม่ใช้" : "ปิด"}</button>
+          </div>
+        </div>
+      )}
       {!v.categoryId ? <p className="text-xs text-slate-500">ไม่รู้หมวดของสินค้านี้ — กดดึงตัวนี้จาก TikTok</p>
         : edit.meta.loading ? <LoadingState label="กำลังโหลดช่องของหมวดจาก TikTok…" className="py-3" />
         : !fields ? <p className="text-xs text-rose-600">{edit.meta.error ?? "โหลดช่องของหมวดไม่สำเร็จ"}</p>
@@ -800,6 +852,7 @@ function TiktokAttrsBox({ v, edit, can }: { v: TiktokListingView; edit: TiktokEd
                 const def = ttsAttrDef(f);
                 return (
                   <LazadaAttrField key={f.id} def={def} value={ttsAttrToText(cur[f.id])} base={ttsAttrToText(v.attrs[f.id])} can={can}
+                    suggested={sug[f.id]?.filter((id) => (cur[f.id] ?? []).some((x) => x.id === id))}
                     onChange={(text) => edit.setAttr(f.id, ttsAttrFromText(f, text))} />
                 );
               })}

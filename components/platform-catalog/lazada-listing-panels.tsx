@@ -26,6 +26,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/searchable-select";
 import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "./listing-images";
 import {
   applyLazadaBulkPrice, lazadaEditStateFromView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazStatusBadge, planLazadaDisplay, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia, LAZADA_NAME_MAX, MAX_LAZADA_IMAGES,
@@ -747,15 +748,25 @@ export function useLazadaAttrDefs(brandId: string | null, categoryId: string | n
 
 const MULTI = new Set(["multiSelect", "multiEnumInput"]);
 
-/** ช่องกรอก 1 ช่อง ตามชนิดของ Lazada (เลือก 1 / เลือกหลาย / พิมพ์+รายการ / ข้อความ / ตัวเลข / วันที่) */
-export function LazadaAttrField({ def, value, base, can, onChange }: { def: LazadaAttrDef; value: string; base: string; can: boolean; onChange: (v: string) => void }) {
+/**
+ * ช่องกรอก 1 ช่อง ตามชนิดของ Lazada (เลือก 1 / เลือกหลาย / พิมพ์+รายการ / ข้อความ / ตัวเลข / วันที่) — ใช้ร่วม ลิ้นชัก Lazada/TikTok + หน้าลงฉบับร่าง
+ * เลือกหลายค่า = dropdown ติ๊กได้หลายตัว (SearchableMultiSelect · 2026-11-13 เจ้าของขอ "ให้กดจะได้ไม่รก") · เลือก 1 ที่รายการยาว = dropdown พิมพ์ค้นได้
+ * suggested = ค่าที่ระบบแนะนำ (ป้าย "แนะนำ") — ยังไม่ส่งจนกดบันทึก
+ */
+export function LazadaAttrField({ def, value, base, can, onChange, suggested }: { def: LazadaAttrDef; value: string; base: string; can: boolean; onChange: (v: string) => void; suggested?: string[] }) {
   const changed = lazNormAttr(def, value) !== lazNormAttr(def, base);
   const empty = !lazNormAttr(def, value);
   const ring = changed ? "border-violet-400 bg-violet-50" : def.required && empty ? "border-rose-300 bg-rose-50" : "border-slate-200";
   const norm = lazNormAttr(def, value);
   let control: ReactNode;
   if (!can) control = <div className="min-h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{lazAttrDisplay(def, value) || <span className="text-slate-400">(ว่าง)</span>}</div>;
-  else if (def.input_type === "singleSelect" && def.choices.length) {
+  else if (def.input_type === "singleSelect" && def.choices.length > 12) {
+    const known = !norm || def.choices.some((c) => c.en === norm);
+    control = (
+      <SearchableSelect value={norm} onChange={(v) => onChange(v)}
+        options={[...(!known ? [{ value: norm, label: `(ค่าเดิม: ${value})` }] : []), ...def.choices.map((c) => ({ value: c.en, label: c.name || c.en, searchText: c.en }))]} />
+    );
+  } else if (def.input_type === "singleSelect" && def.choices.length) {
     const known = !norm || def.choices.some((c) => c.en === norm);
     control = (
       <select value={norm} onChange={(e) => onChange(e.target.value)} className={`h-9 w-full rounded-lg border px-2 text-sm ${ring}`}>
@@ -764,18 +775,13 @@ export function LazadaAttrField({ def, value, base, can, onChange }: { def: Laza
         {def.choices.map((c) => <option key={c.en} value={c.en}>{c.name || c.en}</option>)}
       </select>
     );
-  } else if (MULTI.has(def.input_type) && def.choices.length && def.choices.length <= 40) {
-    const set = new Set(norm ? norm.split(",") : []);
+  } else if (MULTI.has(def.input_type) && def.choices.length) {
+    // เลือกหลายค่า = dropdown ติ๊ก (ไม่กางชิปเต็มจอ) · multiEnumInput = พิมพ์ค่าเองได้ (ห้ามมีจุลภาค เพราะใช้คั่นค่า)
+    const vals = norm ? norm.split(",").filter(Boolean) : [];
     control = (
-      <div className={`flex flex-wrap gap-1 rounded-lg border p-1.5 ${ring}`}>
-        {def.choices.map((c) => {
-          const on = set.has(c.en);
-          return (
-            <button key={c.en} type="button" onClick={() => { const next = new Set(set); if (on) next.delete(c.en); else next.add(c.en); onChange([...next].join(",")); }}
-              className={`rounded-full px-2 py-0.5 text-xs ${on ? "bg-violet-600 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"}`}>{c.name || c.en}</button>
-          );
-        })}
-      </div>
+      <SearchableMultiSelect values={vals} onChange={(next) => onChange(next.join(","))} buttonClassName={ring} highlight={suggested}
+        options={def.choices.map((c) => ({ value: c.en, label: c.name || c.en, searchText: c.en }))}
+        onCreate={def.input_type === "multiEnumInput" ? (q) => { const v = q.replace(/,/g, " ").trim(); if (v && !vals.includes(v)) onChange([...vals, v].join(",")); } : undefined} />
     );
   } else if (def.input_type === "date") {
     control = <DateInput value={value.slice(0, 10)} onChange={(iso) => onChange(iso)} className="w-full" />;
@@ -795,6 +801,7 @@ export function LazadaAttrField({ def, value, base, can, onChange }: { def: Laza
       <span className="mb-1 flex items-center gap-1 text-xs text-slate-500">
         {def.required && <span className="text-rose-500">*</span>}{def.label}
         {def.is_key_prop && <span className="rounded bg-sky-50 px-1 text-[10px] font-medium text-sky-700">KEY</span>}
+        {can && !!suggested?.length && !MULTI.has(def.input_type) && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">แนะนำ</span>}
       </span>
       {control}
       {can && changed && <span className="mt-0.5 block text-[11px] text-violet-700">เดิม: {lazAttrDisplay(def, base) || "(ว่าง)"}</span>}

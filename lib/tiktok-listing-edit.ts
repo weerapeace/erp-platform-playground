@@ -16,6 +16,7 @@
  */
 
 import { ttsAttrNamesOf, ttsAttrStateOf, type TtsAttrState } from "@/lib/tiktok-attrs";
+import { tiktokDeliveryOf } from "@/lib/tiktok-delivery";
 
 /** TikTok ไทย: ชื่อสินค้า 25–255 ตัวอักษร (ตลาดอื่นต่างกัน — เอกสาร partial-edit-product-202509) */
 export const TTS_TITLE_MIN = 25;
@@ -57,6 +58,9 @@ export type TiktokListingView = {
   sizeChart: TiktokImage | null;
   /** แม่แบบตารางขนาดบน TikTok (size_chart.template.id) · null = ไม่มี (อาจเป็นรูปแทน) */
   sizeChartTemplateId: string | null;
+  /** ตัวเลือกการจัดส่งที่กำหนดให้สินค้านี้ (ว่าง = ใช้ค่าเริ่มต้นของร้าน) + ชื่อ */
+  deliveryIds: string[];
+  deliveryNames: Record<string, string>;
   skus: TiktokSkuView[];
   /** เหตุผลที่ TikTok ตีกลับ (ถ้ามี) */
   rejectReasons: string[];
@@ -136,6 +140,9 @@ export function tiktokListingView(detail: unknown, underReview?: unknown): Tikto
     cod: (sameRv ? rv! : d).is_cod_allowed === true ? true : (sameRv ? rv! : d).is_cod_allowed === false ? false : null,
     sizeChart: sizeChartOf((sameRv ? rv! : d).size_chart),
     sizeChartTemplateId: str(obj(obj((sameRv ? rv! : d).size_chart)?.template)?.id),
+    // การจัดส่ง: ฉบับขายเสมอ (TikTok ไม่เก็บในร่าง/ฉบับรอตรวจ)
+    deliveryIds: tiktokDeliveryOf(d).ids,
+    deliveryNames: tiktokDeliveryOf(d).names,
     skus,
     rejectReasons: reasons,
     updateTime: num(d.update_time),

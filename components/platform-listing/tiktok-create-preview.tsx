@@ -25,6 +25,9 @@ import { LazadaAttrField } from "@/components/platform-catalog/lazada-listing-pa
 import { useWeightUnit } from "@/components/platform-catalog/weight-unit";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { TiktokSizeChartBox } from "@/components/platform-catalog/tiktok-size-chart-picker";
+import { TiktokDeliveryBox } from "@/components/platform-catalog/tiktok-delivery";
+import { sameDelivery, type TtsDeliveryValue } from "@/lib/tiktok-delivery";
+import { suggestAttrsFromText, suggestText, type SuggestHit } from "@/lib/attr-suggest";
 
 type LastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
 type Resp = { preview: TtsCreatePreview | null; blockers?: string[]; live?: boolean; mode?: "draft"; platform_id?: string; brand_id?: string | null; last_attempt?: LastAttempt | null; error: string | null };
@@ -48,6 +51,10 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const [picker, setPicker] = useState(false);
   const [attrs, setAttrs] = useState<TtsAttrState | null>(null);
   const [moreAttrs, setMoreAttrs] = useState(false);
+  // ค่าที่ระบบแนะนำจากชื่อ + รายละเอียด (lib/attr-suggest) · การจัดส่งที่กำลังแก้ (undefined = ยังไม่แตะ)
+  const [sugHits, setSugHits] = useState<SuggestHit[] | null>(null);
+  const [sugIds, setSugIds] = useState<Record<string, string[]>>({});
+  const [dlv, setDlv] = useState<TtsDeliveryValue | undefined>(undefined);
   const [unit, setUnit] = useWeightUnit();
   const sys = useSystemImages(parentId);
 
@@ -56,7 +63,7 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
     try {
       const j = await apiFetch(`/api/tiktok-shop/create-product?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json()) as Resp;
       if (j.error || !j.preview) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setData(j); setImgs(null); setAttrs(null); onLoaded?.(j.preview, j.blockers ?? []);
+      setData(j); setImgs(null); setAttrs(null); setDlv(undefined); setSugHits(null); onLoaded?.(j.preview, j.blockers ?? []);
     } catch (e) { setErr((e as Error).message || "โหลดไม่สำเร็จ"); }
   }, [parentId, onLoaded]);
   useEffect(() => { setData(null); void load(); }, [load]);
@@ -204,12 +211,23 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
         const vals = attrs ?? pv.attrs.values;
         const dirty = !!attrs && !sameAttrState(attrs, pv.attrs.values);
         const filled = (id: string) => (vals[id] ?? []).length > 0;
-        const main = fields.filter((f) => f.required || filled(f.id));
+        const main = fields.filter((f) => f.required || filled(f.id) || !!sugIds[f.id]);
+        const findSuggest = () => setSugHits(suggestAttrsFromText(fields, suggestText(pv.name.value, pv.description.value), { skip: (id) => filled(id) }));
+        const applySuggest = () => {
+          if (!sugHits) return;
+          const n = { ...(attrs ?? pv.attrs.values) }; const ids = { ...sugIds };
+          for (const h of sugHits) { n[h.fieldId] = h.values.map((x) => ({ id: x.id, name: x.name })); ids[h.fieldId] = h.values.map((x) => x.id); }
+          setAttrs(n); setSugIds(ids); setSugHits(null);
+        };
         const rest = fields.filter((f) => !main.includes(f));
         return (
           <div className="rounded-xl border border-slate-200 p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-medium text-slate-600">คุณลักษณะของหมวด {pv.attrs.required.length ? <span className="text-rose-600">· ช่องบังคับยังว่าง {pv.attrs.required.length}</span> : null}</span>
+              {canEdit && !!fields.length && !dirty && (
+                <button type="button" onClick={findSuggest} className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-[11px] text-amber-800 hover:bg-amber-100"
+                  title="อ่านชื่อ + รายละเอียดสินค้า แล้วหาคำที่ตรงกับตัวเลือกของ TikTok (เติมเฉพาะช่องที่ว่าง · ตรวจก่อนใส่)"><Icon name="ai" />ติ๊กอันที่แนะนำ (อ่านจากรายละเอียด)</button>
+              )}
               {canEdit && dirty && (
                 <div className="flex gap-1.5">
                   <button type="button" disabled={saving} onClick={() => void patchExtra({ tiktok_attrs: attrs }, "บันทึกคุณลักษณะแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง TikTok</button>
@@ -217,6 +235,20 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
                 </div>
               )}
             </div>
+            {sugHits && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {sugHits.length === 0 ? <span>ไม่เจอคำที่ตรงกับตัวเลือกในชื่อ/รายละเอียด (หรือช่องที่เจอมีค่าอยู่แล้ว)</span> : (
+                  <>
+                    <div className="mb-1 font-medium">เจอคำในชื่อ/รายละเอียด {sugHits.length} ช่อง — ตรวจก่อนใส่ (เติมเฉพาะช่องที่ว่าง แล้วกดบันทึกลงร่าง)</div>
+                    <ul className="space-y-0.5">{sugHits.map((h) => <li key={h.fieldId}><span className="text-amber-700">{h.fieldName}:</span> {h.values.map((x) => x.name).join(", ")}</li>)}</ul>
+                  </>
+                )}
+                <div className="mt-1.5 flex gap-2">
+                  {sugHits.length > 0 && <button type="button" onClick={applySuggest} className="h-7 rounded-md bg-amber-600 px-2.5 text-white hover:bg-amber-700">ใส่ทั้งหมด</button>}
+                  <button type="button" onClick={() => setSugHits(null)} className="h-7 rounded-md border border-amber-300 px-2.5 hover:bg-amber-100">{sugHits.length ? "ไม่ใช้" : "ปิด"}</button>
+                </div>
+              </div>
+            )}
             {!pv.category.id ? <p className="text-xs text-slate-500">เลือกหมวด TikTok ก่อน แล้วช่องของหมวดจะขึ้นที่นี่</p>
               : !pv.attrs.loaded ? <p className="text-xs text-slate-500">ดึงช่องของหมวดจาก TikTok ไม่ได้ — กรอกใน Seller Center</p>
               : fields.length === 0 ? <p className="text-xs text-emerald-700">หมวดนี้ไม่มีช่องคุณลักษณะ</p>
@@ -225,6 +257,7 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
                   <div className="grid gap-3 sm:grid-cols-2">
                     {(moreAttrs ? fields : main).map((f) => (
                       <LazadaAttrField key={f.id} def={ttsAttrDef(f)} value={ttsAttrToText(vals[f.id])} base={ttsAttrToText(pv.attrs.values[f.id])} can={canEdit}
+                        suggested={sugIds[f.id]?.filter((id) => (vals[f.id] ?? []).some((x) => x.id === id))}
                         onChange={(text) => setAttrs((a) => { const n = { ...(a ?? pv.attrs.values) }; const v = ttsAttrFromText(f, text); if (v.length) n[f.id] = v; else delete n[f.id]; return n; })} />
                     ))}
                   </div>
@@ -232,6 +265,23 @@ export function TiktokCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
                   <p className="mt-2 text-[11px] text-slate-400">ตัวเลือกมาจาก TikTok ตามหมวด · ช่อง * = บังคับ (ฉบับร่างยังไม่บังคับ แต่ต้องครบก่อนเผยแพร่) · กรอกที่นี่แล้วไม่ต้องไปกรอกใน Seller Center</p>
                 </>
               )}
+          </div>
+        );
+      })()}
+
+      {/* ตัวเลือกการจัดส่ง (ตัวเดียวกับลิ้นชัก) — แก้แล้วกดบันทึกลงร่าง · ส่งตอนสร้าง */}
+      {(() => {
+        const value = dlv === undefined ? pv.delivery.ids : dlv;
+        const dirty = !sameDelivery(value, pv.delivery.ids);
+        return (
+          <div>
+            <TiktokDeliveryBox by={{ brandId: data.brand_id ?? null }} value={value} base={pv.delivery.ids} can={canEdit && !saving} onChange={(v) => setDlv(v)} weightKg={pv.package.weight} />
+            {canEdit && dirty && (
+              <div className="mt-1.5 flex justify-end gap-1.5">
+                <button type="button" disabled={saving || (value != null && value.length === 0)} onClick={() => void patchExtra({ tiktok_delivery: value }, value == null ? "ใช้การจัดส่งค่าเริ่มต้นของร้านแล้ว" : "บันทึกตัวเลือกการจัดส่งลงร่างแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง TikTok</button>
+                <button type="button" onClick={() => setDlv(undefined)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+              </div>
+            )}
           </div>
         );
       })()}

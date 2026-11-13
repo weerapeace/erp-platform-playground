@@ -282,10 +282,10 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "หน้าเต็ม ให้ใช้ SaveBar",
   },
   {
-    key: "searchable-select", label: "ช่องเลือกแบบพิมพ์ค้นหา", code: "SearchableSelect", category: "input",
+    key: "searchable-select", label: "ช่องเลือกแบบพิมพ์ค้นหา", code: "SearchableSelect · SearchableMultiSelect", category: "input",
     source: { path: "components/searchable-select" },
-    what: "dropdown ที่พิมพ์กรองรายการได้ ใช้แทน select ธรรมดา",
-    when: "รายการตัวเลือกยาวกว่า ~10 ตัว",
+    what: "dropdown ที่พิมพ์กรองรายการได้ ใช้แทน select ธรรมดา · แบบเลือกหลายค่า (SearchableMultiSelect) = ติ๊กได้หลายตัว ชิปไม่กางเต็มจอ (+N) ป้ายค่าที่ระบบแนะนำ พิมพ์ค่าเองได้",
+    when: "รายการตัวเลือกยาวกว่า ~10 ตัว · ช่องเลือกหลายค่า เช่น คุณลักษณะของหมวดร้านค้า (LazadaAttrField ใช้อยู่)",
     notWhen: "เลือกข้อมูลหลัก (สินค้า ร้าน ลูกค้า) ให้ใช้ Picker เฉพาะของมัน",
     sameJob: "select", primary: true,
   },

@@ -79,6 +79,8 @@ export type TtsCreatePreview = {
   /** รูปตารางขนาด (extra.tiktok_size_chart · ref r2:) + หมวดรองรับ/บังคับไหม */
   /** ref: "r2:<key>" รูปจากระบบ · "tpl:<id>" แม่แบบตารางบน TikTok · size = แบบวัด/คอลัมน์มาตรฐานของหมวด (ไว้สร้างแม่แบบ) */
   sizeChart: { ref: string | null; supported: boolean | null; required: boolean | null; size: TtsSizeMeta | null };
+  /** ตัวเลือกการจัดส่ง: null = ใช้ค่าเริ่มต้นของร้าน · [ids] = กำหนดเอง (ร่าง extra.tiktok_delivery) */
+  delivery: { ids: string[] | null };
   /** สต๊อกตั้งต้นในร่าง (ต่อตัวเลือก) + คลังของร้าน (null = หาไม่เจอ) */
   stock: { qty: number; warehouseId: string | null };
   missing: string[];
@@ -239,6 +241,7 @@ export function planTiktokCreate(input: {
   const codVal = extra.tiktok_cod === true ? true : extra.tiktok_cod === false ? false : null;
   if (codVal === true && input.rules?.codSupported === false) missing.push("หมวดนี้ TikTok ไม่รองรับเก็บเงินปลายทาง — ปิด COD");
   const sizeRef = typeof extra.tiktok_size_chart === "string" && extra.tiktok_size_chart ? extra.tiktok_size_chart : null;
+  const deliveryIds = Array.isArray(extra.tiktok_delivery) ? [...new Set((extra.tiktok_delivery as unknown[]).map(str).filter(Boolean))] : null;
   if (sizeRef && input.rules?.sizeChartSupported === false) warnings.push("หมวดนี้ TikTok ไม่รองรับตารางขนาด — ไม่ส่งรูปตารางขนาด");
   if (!sizeRef && input.rules?.sizeChartRequired) warnings.push("หมวดนี้ TikTok บังคับตารางขนาด — เลือกรูปหรือแม่แบบตารางขนาด ก่อนเผยแพร่");
   if (required.length) warnings.push(`ช่องบังคับของหมวดยังว่าง ${required.length} ช่อง (${required.slice(0, 3).join(", ")}${required.length > 3 ? " …" : ""}) — ฉบับร่างยังไม่บังคับ แต่ต้องกรอก (ที่นี่หรือใน Seller Center) ก่อนกดเผยแพร่`);
@@ -264,6 +267,7 @@ export function planTiktokCreate(input: {
     ...(Object.keys(attrVals).length ? { product_attributes: ttsAttrPayload(attrVals) } : {}),
     ...(codVal != null && !(codVal && input.rules?.codSupported === false) ? { is_cod_allowed: codVal } : {}),
     ...(sizeRef && input.rules?.sizeChartSupported !== false ? { size_chart_ref: sizeRef } : {}),
+    ...(deliveryIds?.length ? { delivery_option_ids: deliveryIds } : {}),
     ...(hasBox ? { package_dimensions: { length: String(box.l), width: String(box.w), height: String(box.h), unit: "CENTIMETER" } } : {}),
     skus: variants.map((v) => ({
       seller_sku: v.code,
@@ -287,6 +291,7 @@ export function planTiktokCreate(input: {
       attrs: { required, loaded: !!(fields ?? input.attrDefs), fields: fields ?? [], values: attrVals },
       cod: { value: codVal, supported: input.rules?.codSupported ?? null },
       sizeChart: { ref: sizeRef, supported: input.rules?.sizeChartSupported ?? null, required: input.rules?.sizeChartRequired ?? null, size: input.rules?.size ?? null },
+      delivery: { ids: deliveryIds?.length ? deliveryIds : null },
       stock: { qty: TTS_DRAFT_QTY, warehouseId },
       missing, warnings,
       on_shop: input.onShop ?? (str(d?.platform_product_id) || null),

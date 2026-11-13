@@ -3,7 +3,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import { lazConnHealth } from "@/lib/lazada";
-import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, ttsGetCategoryAttributes, ttsGetCategoryRules, ttsSearchSizeCharts, ttsSearchPromotions, ttsGetPromotion, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsRefreshToken, ttsExpiryMs, ttsErrorText, ttsGetProduct, ttsIsRateLimit, ttsProductToCatalogItem, ttsDetailExtras, ttsUploadImage, ttsGetCategoryAttributes, ttsGetCategoryRules, ttsSearchSizeCharts, ttsSearchPromotions, ttsGetPromotion, ttsGetDeliveryOptions, ttsShopWarehouseId, type TtsShop, type TtsToken } from "@/lib/tiktok-shop";
+import { ttsDeliveryOptionsOf, type TtsDeliveryOption } from "@/lib/tiktok-delivery";
 import { ttsSizeTemplatesOf, type TtsSizeTemplate } from "@/lib/tiktok-size-chart";
 import { ttsPromosOf, ttsPromoWithDetail, type TtsPromo } from "@/lib/tiktok-promotions";
 import { publicImageUrl } from "@/lib/line-shopping-server";
@@ -282,4 +283,22 @@ export async function ttsShopPromotions(accessToken: string, cipher: string, fre
   const at = Date.now();
   promoCache.set(cipher, { at, val });
   return { ...val, cachedAt: at };
+}
+
+// ───────── ตัวเลือกการจัดส่งของร้าน (แคช 10 นาที · ใช้ร่วม ลิ้นชัก + หน้าลงฉบับร่าง) ─────────
+const deliveryCache = new Map<string, { at: number; val: { options: TtsDeliveryOption[]; limits: TtsDeliveryOption[] | null; warehouseId: string } }>();
+/**
+ * แบบจัดส่งที่กำหนดให้สินค้าได้ (scope PRODUCT) + แบบที่คลังใช้อยู่ตอนนี้พร้อมขีดจำกัดน้ำหนัก (scope WAREHOUSE · ดึงไม่ได้ = null)
+ * คลัง = คลังของสินค้าในร้าน (ttsShopWarehouseId) · โยน Error ภาษาคนถ้าดึงรายการหลักไม่ได้
+ */
+export async function ttsShopDeliveryOptions(accessToken: string, cipher: string, fresh = false): Promise<{ options: TtsDeliveryOption[]; limits: TtsDeliveryOption[] | null; warehouseId: string }> {
+  const hit = deliveryCache.get(cipher);
+  if (!fresh && hit && Date.now() - hit.at < META_TTL) return hit.val;
+  const warehouseId = await ttsShopWarehouseId(accessToken, cipher);
+  if (!warehouseId) throw new Error("ไม่รู้คลังสินค้าของร้าน TikTok — กดดึงสินค้าจาก TikTok แล้วลองใหม่");
+  const [p, w] = await Promise.allSettled([ttsGetDeliveryOptions(accessToken, cipher, warehouseId, "PRODUCT"), ttsGetDeliveryOptions(accessToken, cipher, warehouseId, "WAREHOUSE")]);
+  if (p.status === "rejected") throw new Error(ttsErrorText(p.reason));
+  const val = { options: ttsDeliveryOptionsOf(p.value), limits: w.status === "fulfilled" ? ttsDeliveryOptionsOf(w.value) : null, warehouseId };
+  deliveryCache.set(cipher, { at: Date.now(), val });
+  return val;
 }
