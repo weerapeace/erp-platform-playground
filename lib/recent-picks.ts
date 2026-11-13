@@ -37,6 +37,7 @@ export const RECENT_KEYS = {
   webSkus:     "erp-recent-web-skus",         // จัดการ Website › ตัวเลือก SKU ("CODE:sku-xxx")
   mos:         "erp-recent-mos",              // ตัวเลือกใบงาน (components/mo-picker) — id = เลขใบสั่งผลิต
   moGroups:    "erp-recent-mo-groups",        // ตัวเลือกชุด / กลุ่มใบสั่งงาน (components/mo-group-picker)
+  designSheets: "erp-recent-design-sheets",   // ตัวเลือกใบงานออกแบบ (components/design-sheet-picker)
 } as const;
 
 type WithId = { id: string };

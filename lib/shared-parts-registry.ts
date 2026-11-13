@@ -343,6 +343,15 @@ export const SHARED_PARTS: SharedPart[] = [
     note: "ไม่กรองตามสิทธิ์ — โชว์ทุกหน้าที่เปิดอยู่ในเมนู หน้าปลายทางตรวจสิทธิ์เองตอนเปิด · ตรรกะล้วน + เทสต์ lib/menu-pages.ts",
   },
   {
+    key: "design-sheet-picker", label: "เลือกใบงานออกแบบ (มีรูป ค้นได้)", code: "DesignSheetPickerModal", category: "pick",
+    source: { path: "components/design-sheet-picker" },
+    what: "ป๊อปเลือกใบงานออกแบบ 1 ใบ (ใบงานใน Design Dashboard): ค้นรหัส/ชื่องาน/แบรนด์ (ไฮไลต์คำที่ตรง) · รูปปกทุกใบ · สลับการ์ดรูป ↔ รายการ (จำต่อคน) · กรองแบรนด์ · ซ่อนงานปิดแล้ว · ใช้ล่าสุด · เลือกแล้วกดยืนยัน",
+    when: "ต้องให้ผู้ใช้ชี้ใบงานออกแบบใบเดียว เช่น หน้า SAMPLE Images ย้ายรูปตัวอย่างเข้าใบงาน",
+    notWhen: "เลือกหลายใบพร้อมกัน → SearchMultiPick (ตัวเลือกใบงานบนกระดานแคมเปญ app/tasks/campaigns/[id]/multi-picks.tsx — ทำงานคนละแบบ: ติ๊กหลายใบ) · เปิดดู/แก้ใบงาน → DesignSheetsDetail",
+    doc: "design-sheet-picker.md",
+    note: "ข้อมูลชุดเดียวกับ Design Dashboard (GET /api/design-sheets + /statuses · สิทธิ์ products.view) · จำนวนการ์ดต่อแถวใช้ของกลาง gallery-columns",
+  },
+  {
     key: "user-picker", label: "เลือกผู้ใช้", code: "UserPicker", category: "pick",
     source: { path: "components/pickers", names: ["UserPicker"] },
     what: "เลือกผู้ใช้ระบบ (คนรับงาน ผู้อนุมัติ) จำตัวล่าสุด",

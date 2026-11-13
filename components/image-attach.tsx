@@ -21,7 +21,7 @@ type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
 // ย่อรูปให้ด้านยาวสุด ≤ max (คงสัดส่วน) → คืน Blob
 // เปิดไม่ได้ = ImageOpenError บอกสาเหตุ (ไฟล์ว่าง/อ่านไม่ได้/TIFF/PSD/ไฟล์เสีย…) · HEIC แปลงเป็น JPG ก่อน — lib/image-decode
-async function resizeImage(original: File, max = 1600): Promise<{ blob: Blob; type: string }> {
+async function resizeImage(original: File, max = 1600, forceJpeg = false): Promise<{ blob: Blob; type: string }> {
   const file = await toDecodableImage(original);
   const url = URL.createObjectURL(file);
   try {
@@ -30,16 +30,21 @@ async function resizeImage(original: File, max = 1600): Promise<{ blob: Blob; ty
     let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
     if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
     const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d"); if (ctx) ctx.drawImage(img, 0, 0, w, h);
-    const type = file.type === "image/png" ? "image/png" : "image/jpeg";
+    const type = file.type === "image/png" && !forceJpeg ? "image/png" : "image/jpeg";
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      if (type === "image/jpeg") { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h); }   // JPEG ไม่มีพื้นใส — พื้นโปร่งของ PNG/WebP เป็นขาว (ไม่ใช่ดำ)
+      ctx.drawImage(img, 0, 0, w, h);
+    }
     const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b ?? file), type, 0.85));
     return { blob, type };
   } finally { URL.revokeObjectURL(url); }
 }
 
 // ของกลาง: ย่อรูป (≤max) → ไฟล์ที่พร้อมส่ง (ยังไม่อัป) — แยกไว้ให้ตรวจรูปซ้ำในคลังก่อนส่งได้ (components/duplicate-upload)
-export async function prepareResizedImage(file: File, max = 1600): Promise<File> {
-  const { blob, type } = await resizeImage(file, max);
+//   opts.jpeg = แปลงเป็น JPEG ทุกไฟล์ (ค่าเดิม: PNG คงเป็น PNG) — ใช้ที่หน้า SAMPLE Images
+export async function prepareResizedImage(file: File, max = 1600, opts?: { jpeg?: boolean }): Promise<File> {
+  const { blob, type } = await resizeImage(file, max, !!opts?.jpeg);
   const name = file.name.replace(/\.[^.]+$/, "") + (type === "image/png" ? ".png" : ".jpg");
   return new File([blob], name, { type });
 }

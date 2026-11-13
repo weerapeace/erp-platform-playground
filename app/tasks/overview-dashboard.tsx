@@ -285,6 +285,7 @@ export function OverviewDashboard({
               <ShortcutPill icon="🟡" label={t("คิวรอตรวจ", "Review queue")} href="/tasks/review" />
               <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
               <ShortcutPill icon="🔥" label={t("เทรนด์", "Trends")} href="/tasks/trends" />
+              <ShortcutPill icon="📸" label="SAMPLE Images" href="/tasks/samples" />
               {(canSettings ?? isAdmin) && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
             </div>
           )}
