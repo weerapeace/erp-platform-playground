@@ -16,7 +16,7 @@ import { normDate } from "@/lib/delivery-bill";
 import { loadSkuCnNames, fillSkuCnNames } from "@/lib/sku-cn-name";
 import { createManualPo } from "@/lib/po-manual";
 import {
-  groupKey, stripCode, matchAndSplit, normalizeBillLine, distributeQty, aliasKey, cnNameForSku,
+  groupKey, stripCode, matchAndSplit, normalizeBillLine, distributeQty, aliasKey, cnNameForSku, expandAllocRows, collapseAllocRows,
   type PoGroup, type PoGroupLine, type SellerBillLine, type AliasRow,
 } from "@/lib/seller-bill-match";
 import { BILL_ORDER_RULE, orderByBillPosition } from "@/lib/bill-line-order";
@@ -269,7 +269,9 @@ export type ApplyResult = { inserted: number; updated: number; expenses: number;
  *   • แถว "ย้าย PO มาร้านนี้" (move_po) — หน้าเว็บย้ายผ่าน API กลาง po-edit ก่อนเรียกฟังก์ชันนี้ (ที่นี่ถือเป็นแถว PO ร้านนี้ธรรมดา)
  */
 export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[]; fillCnName?: boolean; actorId?: string | null; billId?: string | null; backfillPo?: boolean; billNo?: string | null; billDate?: string | null }): Promise<ApplyResult> {
-  let billLines = billLinesIn.map((l) => ({ ...l }));
+  // ★ 2026-11-14 แถวเดียวลงหลาย PO (alloc) → แตกเป็นแถวย่อยชั่วคราว 1 แถว/PO แล้วรวมกลับตอนท้าย (collapseAllocRows)
+  const exp = expandAllocRows(billLinesIn);
+  let billLines = exp.parts.map((l) => ({ ...l }));
   // 1) ตรวจทุกแถวก่อนเขียน — แถว PO ต้องเป็นบรรทัดใบสั่งซื้อของร้านนี้ · แถวนอก PO ต้องเป็นสินค้าที่มีจริง
   const check = new Map((await loadShopGroups(admin, v)).map((g) => [g.key, g]));
   const outside = billLines.filter((l) => l.decision === "confirmed" && !l.is_fee && !l.match_key && l.sku_pick);
@@ -282,13 +284,13 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
     if (l.decision !== "confirmed" || l.is_fee) return;
     const label = l.name_th || l.name_cn || "—";
     if (!l.match_key && l.sku_pick) {
-      if (!skuRows.has(l.sku_pick.id)) throw new Error(`แถวที่ ${i + 1} (${label}) — สินค้าที่เลือกไม่พบในคลังแล้ว ให้เลือกใหม่`);
-      if (!(num(l.qty) > 0)) throw new Error(`แถวที่ ${i + 1} ยังไม่มีจำนวน — ใส่จำนวนก่อน`);
+      if (!skuRows.has(l.sku_pick.id)) throw new Error(`แถว #${l.no ?? i + 1} (${label}) — สินค้าที่เลือกไม่พบในคลังแล้ว ให้เลือกใหม่`);
+      if (!(num(l.qty) > 0)) throw new Error(`แถว #${l.no ?? i + 1} ยังไม่มีจำนวน — ใส่จำนวนก่อน`);
       return;
     }
-    if (!l.match_key || !check.has(l.match_key)) throw new Error(`แถวที่ ${i + 1} (${label}) — บรรทัดใบสั่งซื้อที่เลือกไม่อยู่ในใบสั่งซื้อของร้านนี้แล้ว ให้เลือกจับคู่ใหม่`);
+    if (!l.match_key || !check.has(l.match_key)) throw new Error(`แถว #${l.no ?? i + 1} (${label}) — บรรทัดใบสั่งซื้อที่เลือกไม่อยู่ในใบสั่งซื้อของร้านนี้แล้ว ให้เลือกจับคู่ใหม่`);
     const g = check.get(l.match_key)!;
-    if (!g.lines.every((x) => x.from_gr) && !(num(l.qty) > 0)) throw new Error(`แถวที่ ${i + 1} ยังไม่มีจำนวน — ใส่จำนวนก่อน`);
+    if (!g.lines.every((x) => x.from_gr) && !(num(l.qty) > 0)) throw new Error(`แถว #${l.no ?? i + 1} ยังไม่มีจำนวน — ใส่จำนวนก่อน`);
   });
   const skuLabel = (l: SellerBillLine) => { const r = skuRows.get(l.sku_pick!.id); const code = str(r?.code) || l.sku_pick!.code; const nm = str(r?.name_th) || l.sku_pick!.name; return code ? `[${code}] ${nm}` : nm; };
 
@@ -418,5 +420,5 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
     filledCn = await fillSkuCnNames(admin, items, { id: opts.actorId ?? null, name: opts.actorName }, "seller_bill", opts.billId ?? null);
   }
   await recomputeVoucher(admin, v.id);
-  return { inserted, updated, expenses, remembered, filledCn, backfilled, lines: out };
+  return { inserted, updated, expenses, remembered, filledCn, backfilled, lines: collapseAllocRows(billLinesIn, out, exp.parent) };
 }

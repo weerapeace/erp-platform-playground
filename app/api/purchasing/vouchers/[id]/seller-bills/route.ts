@@ -99,7 +99,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const actor = await actorOf(request);
   const { id } = await params;
-  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean; backfill_po?: boolean };
+  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean; backfill_po?: boolean; autosave?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const billId = str(body.bill_id);
   if (!billId) return NextResponse.json({ error: "ไม่ระบุบิล" }, { status: 400 });
@@ -119,6 +119,14 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   if (body.bill_no !== undefined) patch.bill_no = str(body.bill_no) || null;
   if (body.bill_date !== undefined) patch.bill_date = normDate(body.bill_date);
 
+  // ★ 2026-11-14 บันทึกร่างอัตโนมัติ (หน้าเว็บยิงทุก ~2 วิหลังแก้) — เก็บตามที่ส่งมา ไม่จับคู่/คิดป้ายใหม่ (เร็ว + ไม่ทับที่กำลังแก้)
+  if (body.autosave && !body.apply && !body.rematch) {
+    patch.lines = lines;
+    const { error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, saved_at: patch.updated_at, error: null });
+  }
+
   try {
     if (body.rematch) {
       lines = (await rematchLines(admin, v, lines.map((l) => (l.decision ? l : { ...l, manual: false })))).lines;
@@ -127,8 +135,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       const groups = await loadShopGroups(admin, v);
       const aliases = await loadAliases(admin, v.seller_partner_id);
       // แถวที่เลือก PO ร้านอื่น (move_po) ยังไม่ได้ย้าย = ยังไม่อยู่ในกลุ่มร้านนี้ → คงไว้ตามที่เลือก (ย้ายตอนกดใส่ลงใบ)
-      lines = lines.map((l) => { if (!l.match_key) return l; const g = groups.find((x) => x.key === l.match_key) ?? null; return !g && l.move_po ? l : applyGroupToLine(l, g, groups, aliases, l.manual); })
-        .map((l, i) => ({ ...l, decision: lines[i].decision, voucher_line_ids: lines[i].voucher_line_ids, move_po: lines[i].move_po, sku_pick: lines[i].sku_pick }));
+      // แถวที่แบ่งหลาย PO (alloc) = คงตามที่แบ่งไว้ (คิดป้ายใหม่จะล้างการแบ่ง)
+      lines = lines.map((l) => { if (!l.match_key || (l.alloc && l.alloc.length >= 2)) return l; const g = groups.find((x) => x.key === l.match_key) ?? null; return !g && l.move_po ? l : applyGroupToLine(l, g, groups, aliases, l.manual); })
+        .map((l, i) => ({ ...l, decision: lines[i].decision, voucher_line_ids: lines[i].voucher_line_ids, move_po: lines[i].move_po, sku_pick: lines[i].sku_pick, alloc: lines[i].alloc ?? null }));
     }
     let result: Awaited<ReturnType<typeof applySellerBill>> | null = null;
     if (body.apply) {

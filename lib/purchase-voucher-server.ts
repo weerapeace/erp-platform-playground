@@ -213,7 +213,9 @@ export async function prefillFromGrs(admin: Admin, grIds: string[], actorName: s
  *   ออกเลขไม่สำเร็จ = ไม่ล้มงานหลัก (ใบได้เลขตอนบันทึก/ยืนยันครั้งถัดไป) · ตอนยืนยันใช้ requireNumber = ต้องได้เลข
  */
 export async function assignVoucherNumber(admin: Admin, voucherId: string, requireNumber = false): Promise<string | null> {
-  const { data, error } = await admin.rpc("erp_pv_assign_number", { p_voucher_id: voucherId });
+  let data: unknown = null; let error: { message?: string } | null = null;
+  try { ({ data, error } = await admin.rpc("erp_pv_assign_number", { p_voucher_id: voucherId })); }
+  catch (e) { error = { message: String((e as Error).message ?? e) }; }   // ออกเลขพลาด = ไม่ล้มงานสร้างใบ (เว้นตอนยืนยัน)
   if (error || !data) {
     if (requireNumber) throw new Error("ออกเลขใบสำคัญไม่สำเร็จ: " + (error?.message ?? "ไม่ได้เลข"));
     console.warn("[pv-number]", voucherId, error?.message);

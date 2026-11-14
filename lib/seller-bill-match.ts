@@ -45,6 +45,8 @@ export type SellerBillLine = {
   no?: number | null;
   /** หน้า/ไฟล์ที่เจอแถวนี้ (บิลหลายหน้า) */
   page?: number | null;
+  /** ★ 2026-11-14 แถวเดียวลงหลาย PO (ของที่สั่ง 2 รอบแต่ส่งพร้อมกัน) — [{key, qty}] ≥ 2 รายการ · null = ลง PO เดียว (match_key) */
+  alloc?: { key: string; qty: number }[] | null;
 };
 export type SkuPick = { id: string; code: string; name: string; uom: string | null };
 
@@ -221,8 +223,8 @@ export const MATCH_OK_SCORE = 3.2;      // สูงกว่านี้ + (ร
 
 /** ใส่ผลของกลุ่มที่เลือกแล้วลงแถว (ใช้ทั้งตอนจับอัตโนมัติและตอนคนเลือกเอง) */
 export function applyGroupToLine(line: SellerBillLine, g: PoGroup | null, groups: PoGroup[], aliases: AliasRow[], manual = false): SellerBillLine {
-  if (line.is_fee) return { ...line, match_key: null, level: "fee", score: 0, reasons: [], warns: [], alias_hit: false, manual: false };
-  if (!g) return { ...line, match_key: null, level: "no", score: 0, reasons: [], warns: [], alias_hit: false, manual: false };
+  if (line.is_fee) return { ...line, match_key: null, alloc: null, level: "fee", score: 0, reasons: [], warns: [], alias_hit: false, manual: false };
+  if (!g) return { ...line, match_key: null, alloc: null, level: "no", score: 0, reasons: [], warns: [], alias_hit: false, manual: false };
   const aiGroup = line.ai_pick ? groups.find((x) => x.key === line.ai_pick) ?? null : null;
   const sc = scoreCandidate(line, g, { aliases, aiGroup });
   const others = groups.filter((x) => x.key !== g.key && sameItem(x, g) && x.remaining > 0).length;
@@ -232,7 +234,7 @@ export function applyGroupToLine(line: SellerBillLine, g: PoGroup | null, groups
   // % ต้องสอดคล้องกับป้าย: มั่นใจ ≥ 80% · ให้เช็ก ≤ 79%
   const conf = confidenceOf(sc.score);
   return {
-    ...line, match_key: g.key, level, score: manual ? 1 : round(level === "ok" ? Math.max(conf, 0.8) : Math.min(conf, 0.79), 2),
+    ...line, match_key: g.key, alloc: null, level, score: manual ? 1 : round(level === "ok" ? Math.max(conf, 0.8) : Math.min(conf, 0.79), 2),
     reasons: manual ? sc.reasons.filter((r) => r === "ราคาตรง" || r === "จำนวนตรง") : sc.reasons,   // ป้าย "เลือกเอง" อยู่ที่ LevelBadge แล้ว
     warns: [...sc.warns, ...notes], alias_hit: sc.alias, manual,
   };
@@ -304,28 +306,131 @@ export function splitAcrossRounds(qty: number, rounds: PoGroup[]): { key: string
 }
 
 /**
- * แตกแถวบิล 1 แถวลงหลายรอบ (เก่าก่อน) — ยอด ¥ แบ่งตามจำนวน แถวสุดท้ายเก็บเศษ ให้รวมเท่าเดิม
- * แถวแรกคงรหัสแถวเดิม · แถวต่อ ๆ ไปได้รหัสใหม่ "<rid>.2" … · เลขบรรทัดบนกระดาษ (no) เท่าเดิมทุกแถว
- * ใช้ทั้งปุ่ม "แบ่งหลายรอบ" (หน้าเว็บ) และแบ่งอัตโนมัติ (autoSplitRounds) · แบ่งไม่ได้ (รอบเดียว) = คืนแถวเดิม
+ * ★ 2026-11-14 (รอบ 2) เจ้าของ: "PO 2 อัน อยากให้ขึ้นที่แถวเดียวกันเลย ไม่ต้องขึ้นเป็น #2 (ของที่สั่ง 2 PO แต่ส่งพร้อมกัน)"
+ * แบ่งแถวบิล 1 แถวลงหลายรอบ (เก่าก่อน) "ในแถวเดิม" → alloc = [{key, qty}…] · match_key = รอบแรก (ไว้โชว์สินค้า/คะแนน)
+ *   ได้รอบเดียว: รอบเดิม = ไม่เปลี่ยน · รอบอื่น (รอบเดิมเต็มแล้ว) = ย้ายทั้งแถวไปรอบนั้น
+ *   ตอนใส่ลงใบ แถว alloc แตกเป็นแถวย่อยชั่วคราว (expandAllocRows) แล้วรวมกลับ (collapseAllocRows)
  */
-export function splitLineAcrossRounds(l: SellerBillLine, rounds: PoGroup[], groups: PoGroup[], aliases: AliasRow[], note = "แบ่งจากแถวเดิม"): SellerBillLine[] {
+export function allocRowAcrossRounds(l: SellerBillLine, rounds: PoGroup[], groups: PoGroup[], aliases: AliasRow[], note = "แบ่งลง"): SellerBillLine {
   const q = Number(l.qty) || 0;
   const parts = splitAcrossRounds(q, rounds);
-  // ได้รอบเดียว: รอบเดิม = ไม่เปลี่ยน · รอบอื่น (รอบเดิมเต็มแล้ว) = ย้ายทั้งแถวไปรอบนั้น
-  if (parts.length === 0 || (parts.length === 1 && parts[0].key === l.match_key)) return [l];
-  const total = l.amount ?? q * (l.unit_price ?? 0);
-  let acc = 0;
-  const qtyLabel = Number.isInteger(q) ? String(q) : q.toFixed(2);
+  if (parts.length === 0 || (parts.length === 1 && parts[0].key === l.match_key)) return l;
+  const first = groups.find((x) => x.key === parts[0].key) ?? rounds.find((x) => x.key === parts[0].key)!;
   const fromPo = groups.find((x) => x.key === l.match_key)?.po_no ?? "เดิม";
-  return parts.map((p, k) => {
-    const r = rounds.find((x) => x.key === p.key) ?? groups.find((x) => x.key === p.key)!;
-    const amt = k === parts.length - 1 ? Math.round((total - acc) * 100) / 100 : Math.round(p.qty * (l.unit_price ?? 0) * 100) / 100;
-    acc += amt;
-    const base = groups.find((x) => x.key === p.key) ?? r;
-    const row = applyGroupToLine({ ...l, qty: p.qty, amount: amt, voucher_line_ids: [], sku_pick: null, move_po: null, rid: k === 0 ? l.rid ?? null : `${l.rid ?? "x"}.${k + 1}` }, base, groups, aliases, l.manual);
-    const msg = parts.length === 1 ? `รอบ ${fromPo} ค้างไม่พอ → ย้ายไปรอบ ${base.po_no}` : `${note} ${qtyLabel} → รอบ ${base.po_no}`;
-    return { ...row, decision: l.decision, warns: [...row.warns, msg] };
+  const row = applyGroupToLine({ ...l, sku_pick: null, move_po: null }, first, groups, aliases, l.manual);
+  if (parts.length === 1) return { ...row, decision: l.decision, warns: [...row.warns, `รอบ ${fromPo} ค้างไม่พอ → ย้ายไปรอบ ${first.po_no}`] };
+  return { ...row, decision: l.decision, alloc: parts.map((p) => ({ key: p.key, qty: p.qty })), warns: [...row.warns.filter((w) => !/^เกินที่ค้าง/.test(w)), `${note} ${parts.length} PO (เก่าก่อน)`] };
+}
+
+/** สัดส่วนของแถวที่แบ่งหลาย PO: [{key, qty}] — แถวธรรมดา = [{match_key, qty}] · ไม่มีคู่ = [] */
+export function allocOf(l: Pick<SellerBillLine, "alloc" | "match_key" | "qty">): { key: string; qty: number }[] {
+  if (l.alloc && l.alloc.length >= 2) return l.alloc;
+  return l.match_key ? [{ key: l.match_key, qty: Number(l.qty) || 0 }] : [];
+}
+
+/**
+ * แถวที่แบ่งหลาย PO → แถวย่อยชั่วคราว 1 แถวต่อ PO (ไว้ใส่ลงใบ / คิดแผนแก้ PO / หาของที่ไม่อยู่ในบิล)
+ *   ยอด ¥ แบ่งตามจำนวน แถวย่อยสุดท้ายเก็บเศษ ให้รวมเท่าเดิม · parent[i] = ลำดับแถวจริงของแถวย่อย i
+ */
+export function expandAllocRows(lines: SellerBillLine[]): { parts: SellerBillLine[]; parent: number[] } {
+  const parts: SellerBillLine[] = []; const parent: number[] = [];
+  lines.forEach((l, i) => {
+    if (!l.alloc || l.alloc.length < 2) { parts.push(l); parent.push(i); return; }
+    const alloc = l.alloc.filter((a) => a.qty > 0);   // PO ที่ใส่ 0 = ไม่ลง
+    if (alloc.length < 2) { parts.push({ ...l, match_key: alloc[0]?.key ?? l.match_key, alloc: null }); parent.push(i); return; }
+    const q = Number(l.qty) || 0;
+    const total = l.amount ?? q * (l.unit_price ?? 0);
+    let acc = 0;
+    alloc.forEach((a, k) => {
+      const last = k === alloc.length - 1;
+      const amt = last ? Math.round((total - acc) * 100) / 100 : Math.round(a.qty * (l.unit_price ?? 0) * 100) / 100;
+      acc += amt;
+      parts.push({ ...l, match_key: a.key, qty: a.qty, amount: amt, alloc: null, voucher_line_ids: k === 0 ? l.voucher_line_ids : [], rid: `${l.rid ?? `L${i}`}#${k + 1}` });
+      parent.push(i);
+    });
   });
+  return { parts, parent };
+}
+
+/** รวมแถวย่อยที่ใส่ลงใบแล้วกลับเป็นแถวจริง — รหัสรายการในใบ (voucher_line_ids) รวมกัน */
+export function collapseAllocRows(original: SellerBillLine[], partsOut: SellerBillLine[], parent: number[]): SellerBillLine[] {
+  return original.map((row, i) => {
+    const mine = partsOut.filter((_, k) => parent[k] === i);
+    if (!row.alloc || row.alloc.length < 2) return mine[0] ?? row;
+    return { ...row, voucher_line_ids: [...new Set(mine.flatMap((p) => p.voucher_line_ids))], move_po: null };
+  });
+}
+
+/**
+ * แก้ PO ในแถว (ป้าย PO ในแถว): set = แก้จำนวนของ PO นั้น · add = เพิ่ม PO (จำนวน 0) · remove = เอา PO ออก
+ *   จำนวนรวมทุก PO = จำนวนในบิลเสมอ → PO สุดท้ายปรับให้เอง (แก้ PO สุดท้ายเอง = PO ก่อนหน้าปรับแทน)
+ *   เหลือ PO เดียว = กลับเป็นแถวธรรมดา (alloc = null) · คนแก้เองแล้ว = manual (แบ่งอัตโนมัติไม่ทับ)
+ */
+export function editAlloc(l: SellerBillLine, key: string, op: "set" | "add" | "remove", qty = 0): SellerBillLine {
+  const total = round(Number(l.qty) || 0);
+  let a = allocOf(l).map((x) => ({ ...x }));
+  if (op === "add") { if (!a.some((x) => x.key === key)) a.push({ key, qty: 0 }); }
+  else if (op === "remove") a = a.filter((x) => x.key !== key);
+  else {
+    const i = a.findIndex((x) => x.key === key);
+    if (i < 0) return l;
+    a[i].qty = round(Math.min(Math.max(0, qty), total));
+    if (a.length >= 2) {
+      const bal = i === a.length - 1 ? a.length - 2 : a.length - 1;
+      a[bal].qty = round(Math.max(0, total - a.filter((_, k) => k !== bal).reduce((s2, x) => s2 + x.qty, 0)));
+    }
+  }
+  if (a.length === 0) return { ...l, alloc: null, manual: true };
+  if (a.length === 1) return { ...l, match_key: a[0].key, alloc: null, manual: true };
+  return { ...l, match_key: a[0].key, alloc: a, manual: true };
+}
+
+/**
+ * ปุ่ม "+ PO" ในแถว: เพิ่มรอบ (PO) ของสินค้าเดียวกัน แล้วแบ่งจำนวนในบิลใหม่ เก่าก่อน ตามที่ค้าง
+ *   (บิลพอดีรอบแรกแล้ว = รอบที่เพิ่มได้ 0 — แก้จำนวนที่ป้ายเองได้)
+ */
+export function addAllocRound(l: SellerBillLine, key: string, groups: PoGroup[]): SellerBillLine {
+  const g = groups.find((x) => x.key === l.match_key);
+  const extra = groups.find((x) => x.key === key);
+  if (!g || !extra) return l;
+  const keys = new Set([...allocOf(l).map((a) => a.key), key]);
+  const chosen = [...groups.filter((x) => keys.has(x.key))].sort(byOldest);
+  if (chosen.length < 2) return l;
+  const parts = splitAcrossRounds(Number(l.qty) || 0, chosen);
+  const alloc = chosen.map((r) => ({ key: r.key, qty: parts.find((p) => p.key === r.key)?.qty ?? 0 }));
+  return { ...l, match_key: alloc[0].key, alloc, manual: true };
+}
+
+/** จำนวนในบิลเปลี่ยน → PO สุดท้ายในแถวปรับตาม (ให้รวมเท่าจำนวนในบิล) */
+export function rebalanceAlloc(l: SellerBillLine): SellerBillLine {
+  if (!l.alloc || l.alloc.length < 2) return l;
+  const total = round(Number(l.qty) || 0);
+  const a = l.alloc.map((x) => ({ ...x }));
+  const others = a.slice(0, -1).reduce((s2, x) => s2 + x.qty, 0);
+  a[a.length - 1].qty = round(Math.max(0, total - others));
+  return { ...l, alloc: a };
+}
+
+/**
+ * บิลที่เคยแตกเป็นหลายแถว (รอบก่อน: "#12" 2 แถว รหัส b12 / b12.2) → รวมกลับเป็นแถวเดียวที่แบ่งหลาย PO
+ *   รวมเฉพาะแถวที่ยังไม่ได้ใส่ลงใบ + ของเดียวกัน (ชื่อ/สเปก/ราคา) · ใส่ลงใบแล้ว = คงไว้แบบเดิม
+ */
+export function mergeSplitRows(lines: SellerBillLine[]): SellerBillLine[] {
+  const out: SellerBillLine[] = [];
+  for (const l of lines) {
+    const prev = out[out.length - 1];
+    const m = /^(.+)\.(\d+)$/.exec(l.rid ?? "");
+    const base = m ? m[1] : null;
+    const same = !!prev && !!base && (prev.rid === base || (prev.rid ?? "").startsWith(base + "."))
+      && !(prev.voucher_line_ids?.length) && !(l.voucher_line_ids?.length) && !!prev.match_key && !!l.match_key
+      && prev.name_cn === l.name_cn && prev.spec_cn === l.spec_cn && (prev.unit_price ?? null) === (l.unit_price ?? null);
+    if (!same) { out.push(l); continue; }
+    const alloc = [...allocOf(prev), { key: l.match_key!, qty: Number(l.qty) || 0 }];
+    const qty = round(alloc.reduce((a, x) => a + x.qty, 0));
+    const amount = prev.amount != null && l.amount != null ? Math.round((prev.amount + l.amount) * 100) / 100 : prev.amount ?? l.amount;
+    out[out.length - 1] = { ...prev, rid: base, qty, amount, alloc, warns: prev.warns.filter((w) => !/^แบ่ง/.test(w)) };
+  }
+  return out;
 }
 
 /**
@@ -346,11 +451,12 @@ export function autoSplitRounds(lines: SellerBillLine[], groups: PoGroup[], alia
     const eligible = !!g && !l.is_fee && !l.move_po && !l.sku_pick && !(l.voucher_line_ids?.length) && l.decision !== "skip" && l.decision !== "expense" && q > 0
       && (onlyForce ? !!l.rid && !!force?.has(l.rid) : !l.manual || (!!l.rid && !!force?.has(l.rid)));
     const avail = (x: PoGroup) => Math.max(0, x.remaining - (used.get(x.key) ?? 0));
-    if (!eligible || q <= avail(g!) + 1e-9) { if (g) take(g.key, q); out.push(l); continue; }
+    if (!eligible || q <= avail(g!) + 1e-9) { if (l.alloc && l.alloc.length >= 2) for (const a of l.alloc) take(a.key, a.qty); else if (g) take(g.key, q); out.push(l); continue; }
     const rounds = roundsOf(g!, groups).map((r) => ({ ...r, remaining: avail(r) }));
     if (!rounds.some((r) => r.key !== g!.key && r.remaining > 1e-9)) { take(g!.key, q); out.push(l); continue; }
-    const parts = splitLineAcrossRounds(l, rounds, groups, aliases, "แบ่งอัตโนมัติจากแถวเดิม");
-    for (const p of parts) { if (p.match_key) take(p.match_key, Number(p.qty) || 0); out.push(p); }
+    const row = allocRowAcrossRounds(l, rounds, groups, aliases, "แบ่งอัตโนมัติลง");
+    for (const a of allocOf(row)) take(a.key, a.qty);
+    out.push(row);
   }
   return out;
 }
@@ -443,7 +549,13 @@ export function normalizeBillLine(r: Record<string, unknown>, idx?: number): Sel
     move_po: movePoOf(r.move_po),
     rid: s(r.rid) || (typeof idx === "number" ? `L${idx}` : null),
     no: n(r.no), page: n(r.page),
+    alloc: allocParse(r.alloc),
   };
+}
+function allocParse(v: unknown): SellerBillLine["alloc"] {
+  if (!Array.isArray(v)) return null;
+  const a = (v as Record<string, unknown>[]).map((x) => ({ key: s(x?.key), qty: Number(x?.qty) || 0 })).filter((x) => x.key);
+  return a.length >= 2 ? a : null;
 }
 function skuPickOf(v: unknown): SkuPick | null {
   const o = v as Record<string, unknown> | null;

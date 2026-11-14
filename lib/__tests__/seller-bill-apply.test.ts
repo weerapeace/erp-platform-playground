@@ -168,3 +168,20 @@ describe("บิลร้านจีน — ใส่ลงใบสำคั�
     expect(tables.purchase_voucher_lines_v2.length).toBe(before);
   });
 });
+
+describe("บิลร้านจีน — แถวเดียวลงหลาย PO (2026-11-14)", () => {
+  it("แถว 70 ชิ้น แบ่ง PO-00284 = 50 · PO-00305 = 20 → ใส่ลงใบทั้ง 2 PO · ได้กลับมาแถวเดียว (รหัสรายการรวมกัน)", async () => {
+    tables.purchase_orders_v2.push({ id: "po5", po_no: "PO-2026-00305", order_date: "2026-11-04", currency: "RMB", seller_partner_id: P1, status: "draft", is_active: true });
+    tables.purchase_order_lines_v2.push({ id: "l5", po_id: "po5", item_sku_id: "s1", item_name: "[A069-2/9MM#N] คอหมามาเวล 9 mm. สีเงิน", qty: 40, uom: "Units", price_est: 4.5, sort_order: 0, line_status: "draft" });
+    const v = (await loadVoucherLite(db(), "V"))!;
+    const gs = await loadShopGroups(db(), v);
+    const g1 = gs.find((g) => g.po_no === "PO-2026-00284")!, g5 = gs.find((g) => g.po_no === "PO-2026-00305")!;
+    const row = L({ name_cn: "狗扣", qty: 70, unit_price: 4.4, amount: 308, match_key: g1.key, alloc: [{ key: g1.key, qty: 50 }, { key: g5.key, qty: 20 }], decision: "confirmed", rid: "b1", no: 1 });
+    const r = await applySellerBill(db(), v, [row], { remember: false, actorName: "t", previousIds: [], fillCnName: false });
+    const mine = tables.purchase_voucher_lines_v2.filter((x) => x.voucher_id === "V" && x.is_active !== false);
+    expect(mine.map((x) => [x.po_line_id, x.qty]).sort()).toEqual([["l1b", 20], ["l1c", 30], ["l5", 20]]);
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0].voucher_line_ids).toHaveLength(3);
+    expect(r.lines[0].alloc).toEqual([{ key: g1.key, qty: 50 }, { key: g5.key, qty: 20 }]);
+  });
+});

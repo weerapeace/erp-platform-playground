@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { orderByBillPosition, billLineNo } from "@/lib/bill-line-order";
 import { sanitizeAiBillLines } from "@/lib/seller-bill";
 import {
-  groupKey, normalizeBillLine, autoSplitRounds, matchAndSplit, splitLineAcrossRounds, ensureRowIds,
+  groupKey, normalizeBillLine, autoSplitRounds, matchAndSplit, allocRowAcrossRounds, ensureRowIds, allocOf, expandAllocRows, collapseAllocRows, editAlloc, rebalanceAlloc, addAllocRound, mergeSplitRows,
   type PoGroup, type SellerBillLine,
 } from "@/lib/seller-bill-match";
 
@@ -55,53 +55,97 @@ describe("ลำดับแถวตามบิลจริง", () => {
   });
 });
 
-describe("แบ่งรอบอัตโนมัติ (บิลมากกว่าที่ค้างรอบเก่า)", () => {
+describe("แถวเดียวลงหลาย PO (ของที่สั่ง 2 รอบแต่ส่งพร้อมกัน)", () => {
   const bill = () => L({ name_cn: "6成狗扣 1cm", qty: 330, unit_price: 0.6, amount: 198, match_key: r246.key, rid: "b1", no: 1 });
+  const qtys = (l: SellerBillLine) => allocOf(l).map((a) => [a.key, a.qty]);
 
-  it("330 → PO-00246 ได้ 240 · PO-00302 ได้ 90 · ยอด ¥ รวมเท่าเดิม · เลข # เดิม", () => {
+  it("330 → แถวเดียว: PO-00246 = 240 · PO-00302 = 90 (เก่าก่อน) · ไม่แตกเป็น 2 แถว", () => {
     const out = autoSplitRounds([bill()], gs, []);
-    expect(out.map((l) => [l.match_key, l.qty, l.amount])).toEqual([[r246.key, 240, 144], [r302.key, 90, 54]]);
-    expect(out.map((l) => l.no)).toEqual([1, 1]);
-    expect(out.map((l) => l.rid)).toEqual(["b1", "b1.2"]);
-    expect(out[1].warns.some((w) => w.includes("แบ่งอัตโนมัติ"))).toBe(true);
+    expect(out).toHaveLength(1);
+    expect(qtys(out[0])).toEqual([[r246.key, 240], [r302.key, 90]]);
+    expect(out[0].qty).toBe(330);
+    expect(out[0].match_key).toBe(r246.key);
+    expect(out[0].warns.some((w) => w.includes("แบ่งอัตโนมัติ"))).toBe(true);
   });
   it("ไม่เกินที่ค้าง = ไม่แบ่ง", () => {
     const l = { ...bill(), qty: 200, amount: 120 };
     expect(autoSplitRounds([l], gs, [])).toEqual([l]);
   });
-  it("หักจำนวนที่แถวก่อนหน้าจองไปแล้ว — แถวแรก 200 · แถวสอง 100 → แบ่ง 40 + 60", () => {
+  it("หักจำนวนที่แถวก่อนหน้าจองไปแล้ว — แถวแรก 200 · แถวสอง 100 → 40 + 60 ในแถวสอง", () => {
     const a = { ...bill(), qty: 200, amount: 120, rid: "b1" };
     const b = { ...bill(), qty: 100, amount: 60, rid: "b2", no: 2 };
     const out = autoSplitRounds([a, b], gs, []);
-    expect(out.map((l) => [l.rid, l.qty])).toEqual([["b1", 200], ["b2", 40], ["b2.2", 60]]);
+    expect(out).toHaveLength(2);
+    expect(qtys(out[1])).toEqual([[r246.key, 40], [r302.key, 60]]);
   });
-  it("รอบเก่าเต็มแล้ว = ย้ายทั้งแถวไปรอบที่ยังค้าง (ไม่แบ่ง)", () => {
+  it("รอบเก่าเต็มแล้ว = ย้ายทั้งแถวไปรอบที่ยังค้าง", () => {
     const a = { ...bill(), qty: 240, amount: 144, rid: "b1" };
     const b = { ...bill(), qty: 50, amount: 30, rid: "b2" };
     const out = autoSplitRounds([a, b], gs, []);
-    expect(out.map((l) => [l.rid, l.match_key, l.qty])).toEqual([["b1", r246.key, 240], ["b2", r302.key, 50]]);
+    expect(out.map((l) => [l.rid, l.match_key, l.alloc ?? null])).toEqual([["b1", r246.key, null], ["b2", r302.key, null]]);
   });
-  it("แถวที่คนเลือกรอบเอง (manual) ไม่โดนแบ่ง · เว้นแต่สั่งเฉพาะแถว (เพิ่งเลือกในป๊อป)", () => {
+  it("แถวที่คนแก้เอง (manual) ไม่โดนแบ่งทับ · เว้นแต่สั่งเฉพาะแถว (เพิ่งเลือกในป๊อป)", () => {
     const m = { ...bill(), manual: true };
-    expect(autoSplitRounds([m], gs, [])).toHaveLength(1);
-    expect(autoSplitRounds([m], gs, [], new Set(["b1"]), true)).toHaveLength(2);
+    expect(autoSplitRounds([m], gs, [])[0].alloc ?? null).toBeNull();
+    expect(qtys(autoSplitRounds([m], gs, [], new Set(["b1"]), true)[0])).toHaveLength(2);
   });
   it("ไม่แตะแถวที่ใส่ลงใบแล้ว / ข้าม / ค่าใช้จ่าย", () => {
-    expect(autoSplitRounds([{ ...bill(), voucher_line_ids: ["v1"] }], gs, [])).toHaveLength(1);
-    expect(autoSplitRounds([{ ...bill(), decision: "skip" }], gs, [])).toHaveLength(1);
-    expect(autoSplitRounds([{ ...bill(), is_fee: true }], gs, [])).toHaveLength(1);
+    for (const l of [{ ...bill(), voucher_line_ids: ["v1"] }, { ...bill(), decision: "skip" as const }, { ...bill(), is_fee: true }]) expect(autoSplitRounds([l], gs, [])[0].alloc ?? null).toBeNull();
   });
-  it("เกินที่ค้างรวมทุกรอบ = ส่วนเกินอยู่รอบสุดท้าย (เตือนเกินที่ค้างตามเดิม)", () => {
-    const out = autoSplitRounds([{ ...bill(), qty: 400, amount: 240 }], gs, []);
-    expect(out.map((l) => l.qty)).toEqual([240, 160]);
+  it("เกินที่ค้างรวมทุกรอบ = ส่วนเกินอยู่ PO สุดท้าย", () => {
+    expect(qtys(autoSplitRounds([{ ...bill(), qty: 400, amount: 240 }], gs, [])[0]).map((x) => x[1])).toEqual([240, 160]);
   });
-  it("ปุ่มแบ่งเอง (splitLineAcrossRounds) ใช้สูตรเดียวกัน", () => {
-    const out = splitLineAcrossRounds(bill(), [r246, r302], gs, []);
-    expect(out.map((l) => l.qty)).toEqual([240, 90]);
+  it("allocRowAcrossRounds (ป๊อปเลือกเอง) สูตรเดียวกัน", () => {
+    expect(qtys(allocRowAcrossRounds(bill(), [r246, r302], gs, [])).map((x) => x[1])).toEqual([240, 90]);
   });
-  it("จับคู่ + แบ่ง (matchAndSplit) — ค้นเจอรอบไหนก่อนก็แบ่งเก่าก่อน", () => {
+  it("จับคู่ + แบ่ง (matchAndSplit) — รวมทุก PO = จำนวนในบิล", () => {
     const out = matchAndSplit([L({ name_th: "คอหมาหัวใจ", qty: 330, unit_price: 0.6, amount: 198, ai_pick: r302.key, rid: "b1" })], gs, []);
-    expect(out.reduce((a, l) => a + (l.qty ?? 0), 0)).toBe(330);
-    if (out.length === 2) expect(out.map((l) => l.qty)).toEqual([240, 90]);
+    expect(out).toHaveLength(1);
+    expect(allocOf(out[0]).reduce((a, x) => a + x.qty, 0)).toBe(330);
+  });
+
+  it("ใส่ลงใบ: แตกเป็นแถวย่อย 1 แถว/PO (ยอด ¥ 144 + 54) แล้วรวมกลับ — รหัสรายการในใบรวมกัน", () => {
+    const row = autoSplitRounds([bill()], gs, [])[0];
+    const { parts, parent } = expandAllocRows([row, L({ name_cn: "x", qty: 1, match_key: r302.key, rid: "b2" })]);
+    expect(parts.map((p) => [p.match_key, p.qty, p.amount])).toEqual([[r246.key, 240, 144], [r302.key, 90, 54], [r302.key, 1, null]]);
+    expect(parent).toEqual([0, 0, 1]);
+    const outParts = parts.map((p, k) => ({ ...p, voucher_line_ids: [`v${k}`] }));
+    const back = collapseAllocRows([row, L({ name_cn: "x", qty: 1, match_key: r302.key, rid: "b2" })], outParts, parent);
+    expect(back).toHaveLength(2);
+    expect(back[0].voucher_line_ids).toEqual(["v0", "v1"]);
+    expect(qtys(back[0])).toHaveLength(2);
+  });
+  it("PO ที่ใส่ 0 = ไม่ลง (ไม่ฟ้องว่าไม่มีจำนวน)", () => {
+    const row = { ...bill(), alloc: [{ key: r246.key, qty: 330 }, { key: r302.key, qty: 0 }] };
+    const { parts } = expandAllocRows([row]);
+    expect(parts.map((p) => [p.match_key, p.qty, p.alloc ?? null])).toEqual([[r246.key, 330, null]]);
+  });
+  it("แก้จำนวนที่ป้าย PO: PO สุดท้ายปรับให้รวมเท่าบิล · แก้ PO สุดท้าย = PO ก่อนหน้าปรับ · เอาออกจนเหลือ 1 = แถวธรรมดา", () => {
+    const row = autoSplitRounds([bill()], gs, [])[0];
+    expect(qtys(editAlloc(row, r246.key, "set", 200))).toEqual([[r246.key, 200], [r302.key, 130]]);
+    expect(qtys(editAlloc(row, r302.key, "set", 100))).toEqual([[r246.key, 230], [r302.key, 100]]);
+    const one = editAlloc(row, r246.key, "remove");
+    expect([one.match_key, one.alloc ?? null, one.manual]).toEqual([r302.key, null, true]);
+  });
+  it("แก้จำนวนในบิล → PO สุดท้ายปรับตาม", () => {
+    const row = autoSplitRounds([bill()], gs, [])[0];
+    expect(qtys(rebalanceAlloc({ ...row, qty: 300 }))).toEqual([[r246.key, 240], [r302.key, 60]]);
+  });
+  it("ปุ่ม + PO: เพิ่มรอบแล้วแบ่งเก่าก่อน", () => {
+    const single = { ...bill(), qty: 300, amount: 180, match_key: r302.key };
+    expect(qtys(addAllocRound(single, r246.key, gs))).toEqual([[r246.key, 240], [r302.key, 60]]);
+  });
+  it("บิลที่เคยแตกแถว (#12 · b12 / b12.2) → รวมกลับเป็นแถวเดียว · ใส่ลงใบแล้ว = ไม่รวม", () => {
+    const a = L({ name_cn: "心形扣", qty: 240, unit_price: 0.6, amount: 144, match_key: r246.key, rid: "b12", no: 12, warns: ["แบ่งอัตโนมัติจากแถวเดิม 250 → รอบ PO-2026-00246"] });
+    const b = L({ name_cn: "心形扣", qty: 10, unit_price: 0.6, amount: 6, match_key: r302.key, rid: "b12.2", no: 12 });
+    const m = mergeSplitRows([a, b]);
+    expect(m).toHaveLength(1);
+    expect([m[0].rid, m[0].qty, m[0].amount]).toEqual(["b12", 250, 150]);
+    expect(qtys(m[0])).toEqual([[r246.key, 240], [r302.key, 10]]);
+    expect(mergeSplitRows([a, { ...b, voucher_line_ids: ["v1"] }])).toHaveLength(2);
+  });
+  it("อ่านค่า alloc จากฐานข้อมูล: น้อยกว่า 2 PO = ไม่มี", () => {
+    expect(normalizeBillLine({ alloc: [{ key: "a", qty: 1 }] }).alloc).toBeNull();
+    expect(normalizeBillLine({ alloc: [{ key: "a", qty: 1 }, { key: "b", qty: "2" }] }).alloc).toEqual([{ key: "a", qty: 1 }, { key: "b", qty: 2 }]);
   });
 });
