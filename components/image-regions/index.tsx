@@ -29,7 +29,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 export function ImageRegions<T extends Region>({
   src, alt = "", regions, mode, selectedId, onSelect, onChange, onCreate, onRegionClick, renderTooltip, regionLabel, isMuted, className = "",
-  renderMenu, selecting = false, checkedIds, onToggleCheck, pulseId,
+  renderMenu, selecting = false, checkedIds, onToggleCheck, pulseId, overlay,
 }: {
   src: string;
   alt?: string;
@@ -58,6 +58,8 @@ export function ImageRegions<T extends Region>({
   /** (edit) กรอบที่ยังไม่สมบูรณ์ (เช่น ยังไม่ผูกข้อมูล) → เส้นประสีส้ม */
   isMuted?: (region: T) => boolean;
   className?: string;
+  /** ชั้นทับรูป (ไม่รับเมาส์) เช่น พื้นมืดนอกกรอบครอป — วางในกล่องรูป ใช้ % เดียวกับกรอบ */
+  overlay?: ReactNode;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -172,6 +174,7 @@ export function ImageRegions<T extends Region>({
       onPointerDown={startDraw} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} draggable={false} className="block w-full h-auto pointer-events-none" />
+      {overlay && <div className="absolute inset-0 pointer-events-none">{overlay}</div>}
 
       {regions.map((r) => {
         const style = { left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%` };

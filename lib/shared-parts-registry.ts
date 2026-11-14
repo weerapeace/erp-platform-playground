@@ -1165,6 +1165,15 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "image-crop-box", label: "เลือกส่วนที่เห็นของรูป", code: "ImageCropBox", category: "file",
     source: { path: "components/image-crop-box" },
     what: "ลากกรอบสัดส่วนคงที่บนรูป เลือกส่วนที่จะโชว์จริง",
+    notWhen: "อยากได้ไฟล์รูปใหม่เฉพาะส่วน (ตัดทิ้งจริง) ให้ใช้ ImageCropPicker / ImageFreeCropModal",
+  },
+  {
+    key: "image-crop-picker", label: "ครอปรูปเป็นไฟล์ใหม่ (สัดส่วนคงที่ / กรอบอิสระ + หมุน)", code: "ImageCropPicker · ImageFreeCropModal", category: "file",
+    source: { path: "components/image-crop-picker", names: ["ImageCropPicker", "ImageFreeCropModal", "cropImageSource", "rotateImageSource"] },
+    what: "ImageCropPicker = เลือกรูปจากกลุ่ม (เช่น รูป SKU) แล้วตัดกรอบสัดส่วนคงที่ อัปเป็นไฟล์ใหม่ · ImageFreeCropModal = รูปเดียว (ไฟล์ในเครื่องหรือรูป r2) กรอบสัดส่วนอะไรก็ได้ + หมุน 90° คืนเป็น Blob ให้ผู้เรียกอัปเอง (บอกกรอบ/การหมุน เพื่อเลื่อนจุดบนรูปตามได้)",
+    when: "ต้องตัดรูปทิ้งจริงก่อนเก็บ เช่น ครอปรูปแผงผ้าตอนเพิ่มแผ่น Swatch · ตัดลายจากรูปสินค้าไปเป็นจุดสี",
+    notWhen: "แค่เลื่อน/ซูมการแสดงผลของรูปเดิม (ไม่สร้างไฟล์ใหม่) ให้ใช้ ImageCropBox · วาด/เขียนบนรูป ให้ใช้ ImageMarkup",
+    doc: "image-crop-picker.md",
   },
   {
     key: "video-thumb", label: "ภาพย่อวิดีโอ", code: "VideoThumb", category: "file",
@@ -1430,9 +1439,10 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sku-swatch-browser", label: "แผงผ้า (Swatch) — ดู / ขอซื้อ / เลือกชิ้น", code: "SwatchBrowser", category: "feature",
     source: { path: "components/sku-swatch-browser" },
-    what: "รูปแผงตัวอย่างจริง (ผ้า/ด้าย/อะไหล่) กดชิ้นบนรูปแล้วเปิด SKU · โหมด onPickSkus = ส่งรายการใส่ตะกร้าขอซื้อ · โหมด onPickSpot = เลือก 1 ชิ้นคืนรูปแผง+กรอบชิ้น+SKU (ตัดรูปชิ้นไปโชว์เองได้)",
+    what: "รูปแผงตัวอย่างจริง (ผ้า/ด้าย/อะไหล่) 1 แผ่นหลายรูป · ชิ้นบนรูปมีรหัสภายใน SW-0001-01 + สี + ชื่อสี (ผูก SKU ทีหลังได้) · ✨ อ่านจากรูป (AI) หาชิ้นให้ · โหมด onPickSkus = ส่งรายการใส่ตะกร้าขอซื้อ · โหมด onPickSpot = เลือก 1 ชิ้นคืนรูปที่ชิ้นอยู่+กรอบ+รหัส/สี+SKU",
     when: "ทุกที่ที่ต้องเลือกวัสดุ \"จากแผง\" (เห็นรูปผ้าจริง) เช่น Design Library · ขอซื้อจากแผง",
     notWhen: "เลือก SKU ทั่วไปจากรายการ ใช้ SkuPicker · เลือกวัตถุดิบใน BOM ใช้ ComponentPicker",
+    doc: "sku-swatch.md",
   },
   {
     key: "color-swatch-manager", label: "ทะเบียนสีกลาง", code: "ColorSwatchManager", category: "feature",

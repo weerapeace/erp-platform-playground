@@ -56,9 +56,9 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
   const setPick = (pick: Pick | null) => onChange({ ...pin, pick });
 
   const fromSwatch = (p: SwatchSpotPick) => {
-    if (!p.sku) { toast.warning("ชิ้นนี้บนแผงยังไม่ได้ผูก SKU — เลือกได้แต่จะไม่มีรหัส/สต็อก"); }
+    if (!p.sku) { toast.warning("ชิ้นนี้บนแผงยังไม่ได้ผูก SKU — ใช้รหัสภายในของแผงแทน (ไม่มีสต็อก)"); }
     setPick({ kind: "swatch", swatch_id: p.swatch_id, swatch_name: p.swatch_name, image_key: p.image_key, image_w: p.image_w, image_h: p.image_h,
-      x: p.x, y: p.y, w: p.w, h: p.h, sku_id: p.sku?.id ?? null, code: p.sku?.code ?? p.label ?? "", name: p.sku?.name ?? p.label ?? p.swatch_name });
+      x: p.x, y: p.y, w: p.w, h: p.h, sku_id: p.sku?.id ?? null, code: p.sku?.code ?? p.code ?? p.label ?? "", name: p.sku?.name ?? p.name ?? p.label ?? p.swatch_name });
   };
   const uploadLogo = async (file: File | undefined) => {
     if (!file) return;

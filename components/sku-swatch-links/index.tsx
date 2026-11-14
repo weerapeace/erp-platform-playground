@@ -53,7 +53,7 @@ export function SkuSwatchLinks({ skuId }: { skuId: string }) {
             </span>
             <span className="min-w-0 py-1">
               <span className="block text-[12.5px] text-slate-800 truncate group-hover:text-pink-700">{r.swatch_name}</span>
-              <span className="block text-[11px] text-slate-400 truncate">{r.label ? `ตำแหน่ง ${r.label} · ` : ""}เปิดแผ่น ↗</span>
+              <span className="block text-[11px] text-slate-400 truncate">{r.code ? <span className="font-mono">{r.code} · </span> : null}{r.label ? `เลขบนแผง ${r.label} · ` : ""}เปิดแผ่น ↗</span>
             </span>
           </a>
         ))}

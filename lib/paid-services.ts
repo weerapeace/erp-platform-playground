@@ -94,6 +94,10 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "การ์ดแบรนด์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/brand-profile-draft/route.ts"] },
   { key: "ai.product_detail", th: "เขียนรายละเอียดสินค้า", en: "Product description writer", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้าสินค้า (รายละเอียดสำหรับเว็บ/แพลตฟอร์ม)", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/product-detail/route.ts"] },
+  { key: "ai.swatch_read", th: "อ่านแผงผ้าจากรูป (หาชิ้นสี + ตั้งรหัส)", en: "Swatch board reader", group: "สินค้า / เว็บร้าน",
+    usedAt: "หน้า SKU → แท็บ Swatch (แผงผ้า) → ปุ่ม อ่านจากรูป (1 รูป = 1 ครั้ง)", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่ม อ่านจากรูป ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ตีกรอบชิ้นเอง / แบ่งกรอบเท่า ๆ กัน ใช้ได้ตามปกติ",
+    costHint: "ประมาณ 0.2 บาท/รูป (gpt-4.1-mini) · 0.5–0.7 บาท (gpt-5.4-mini)", files: ["app/api/sku-swatches/ai-read/route.ts"] },
   // ── จัดซื้อ / บิล
   { key: "ai.seller_bill", th: "อ่านบิลร้านจีน + จับคู่สินค้า", en: "China seller bill reader", group: "จัดซื้อ / บิล",
     usedAt: "จับคู่บิลจีน · รับบิลเข้าใบสำคัญจ่าย", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,

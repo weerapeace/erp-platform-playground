@@ -8,13 +8,153 @@
  * - "ใช้ส่วนนี้" → ตัดพิกเซลจริงบน canvas (รูปจาก /api/r2-image โดเมนเดียวกัน) → อัปผ่าน /api/admin/upload → onDone(r2Key)
  * ใช้ที่: ทะเบียนสี (รูปลายจุดสี) · ใช้ได้กับงานอื่นที่ต้อง "ตัดส่วนหนึ่งของรูปสินค้า" (ไอคอน · ป้าย · พื้นผิว)
  * ข้อจำกัด: รูปต้องเป็น r2 key (โดเมนเดียวกัน) · ผลลัพธ์เป็น webp ขนาด outSize px (ด้านกว้าง)
+ *
+ * ✂️ โหมดกรอบอิสระ — ImageFreeCropModal (เพิ่ม 2026-11-14 · แผงผ้า Swatch)
+ * - รูปเดียว (ไฟล์ในเครื่องที่ยังไม่อัป = blob URL หรือรูป r2) · กรอบสี่เหลี่ยมสัดส่วนอะไรก็ได้ (ลากกรอบ/มุม · ลากที่ว่าง = วาดกรอบใหม่)
+ * - หมุน 90° ซ้าย/ขวา ก่อนครอป · นอกกรอบมืดลง = ส่วนที่จะถูกตัดทิ้ง
+ * - ผลลัพธ์ = Blob (ยังไม่อัป ผู้เรียกอัปเอง) + rotation (จำนวนครั้งหมุนตามเข็ม) + rect (% ของรูปหลังหมุน) → เลื่อนกรอบเดิมตามได้ด้วย lib/sku-swatch
  */
 import { useEffect, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { ImageCropBox, useImageSize, type CropValue } from "@/components/image-crop-box";
+import { ImageRegions } from "@/components/image-regions";
 import { canvasBgWindow } from "@/lib/website-canvas";
+
+// ───────────────────────────── ตัวช่วยตัด/หมุนรูป (ใช้ได้ทั้งไฟล์ในเครื่องและรูป r2) ─────────────────────────────
+
+/** เปิดรูปจาก URL (blob:/data: ในเครื่อง หรือ /api/r2-image ที่ส่งต่อไป erp-img คนละโดเมน → ต้องขอ CORS ถึงตัดรูปได้) */
+export async function loadImageEl(src: string): Promise<HTMLImageElement> {
+  const img = new Image();
+  if (!/^(blob|data):/.test(src)) img.crossOrigin = "anonymous";
+  img.src = src;
+  await img.decode();
+  return img;
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob"))), type, quality));
+}
+
+/** ตัดส่วน win (สัดส่วน 0–1 ของรูป) ด้วยความละเอียดจริง แล้วย่อให้ด้านยาว ≤ maxSide → Blob (jpeg ค่าเริ่ม) */
+export async function cropImageSource(src: string, win: { x: number; y: number; w: number; h: number }, opts: { maxSide?: number; type?: "image/jpeg" | "image/webp"; quality?: number } = {}): Promise<{ blob: Blob; w: number; h: number }> {
+  const img = await loadImageEl(src);
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  const sw = Math.max(1, win.w * nw), sh = Math.max(1, win.h * nh);
+  const k = Math.min(1, (opts.maxSide ?? 2400) / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * k));
+  canvas.height = Math.max(1, Math.round(sh * k));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no canvas");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, win.x * nw, win.y * nh, sw, sh, 0, 0, canvas.width, canvas.height);
+  const blob = await canvasBlob(canvas, opts.type ?? "image/jpeg", opts.quality ?? 0.9);
+  return { blob, w: canvas.width, h: canvas.height };
+}
+
+/** หมุนรูป 90° × turns (ตามเข็ม) → blob URL ใหม่ (ผู้เรียกต้อง URL.revokeObjectURL เอง) */
+export async function rotateImageSource(src: string, turns: number): Promise<string> {
+  const t = ((turns % 4) + 4) % 4;
+  const img = await loadImageEl(src);
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = t % 2 ? nh : nw;
+  canvas.height = t % 2 ? nw : nh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no canvas");
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((t * Math.PI) / 2);
+  ctx.drawImage(img, -nw / 2, -nh / 2);
+  return URL.createObjectURL(await canvasBlob(canvas, "image/jpeg", 0.92));
+}
+
+export type FreeCropResult = { blob: Blob; w: number; h: number; rotation: number; rect: { x: number; y: number; w: number; h: number } };
+const FULL = { x: 0, y: 0, w: 100, h: 100 };
+
+/** ✂️ ครอปกรอบอิสระ + หมุน 90° (รูปเดียว) — ดูหัวไฟล์ */
+export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️ ครอปรูป", description = "ลากกรอบ = ย้าย · ลากมุม = ย่อ/ขยาย · ลากที่ว่างบนรูป = วาดกรอบใหม่ · นอกกรอบ (ส่วนมืด) จะถูกตัดทิ้ง", maxSide = 2400, initialRect }: {
+  open: boolean;
+  /** blob URL (ไฟล์ในเครื่อง) หรือ URL รูป r2 (/api/r2-image?key=…&w=3200) */
+  src: string;
+  onClose: () => void;
+  onDone: (r: FreeCropResult) => void | Promise<void>;
+  title?: string;
+  description?: string;
+  /** ด้านยาวสุดของรูปผลลัพธ์ (px) */
+  maxSide?: number;
+  /** กรอบเริ่มต้น (% ของรูป) — ไม่ส่ง = เกือบเต็มรูป */
+  initialRect?: { x: number; y: number; w: number; h: number } | null;
+}) {
+  const toast = useToast();
+  const [turns, setTurns] = useState(0);
+  const [shown, setShown] = useState(src);   // รูปที่หมุนแล้ว (blob URL) หรือรูปเดิม
+  // กรอบเริ่ม = เต็มรูป (กด "ใช้ส่วนนี้" ทันที = ไม่ตัดอะไรทิ้ง)
+  const [rect, setRect] = useState(initialRect ?? FULL);
+  const [ar, setAr] = useState(1);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setTurns(0); setShown(src); setRect(initialRect ?? FULL); } }, [open, src]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { if (shown !== src && shown.startsWith("blob:")) URL.revokeObjectURL(shown); }, [shown, src]);
+  useEffect(() => {
+    let alive = true;
+    const im = new Image();
+    im.onload = () => { if (alive) setAr((im.naturalWidth || 1) / (im.naturalHeight || 1)); };
+    im.src = shown;
+    return () => { alive = false; };
+  }, [shown]);
+
+  const rotate = async (d: 1 | -1) => {
+    const next = (((turns + d) % 4) + 4) % 4;
+    setBusy(true);
+    try {
+      setShown(next === 0 ? src : await rotateImageSource(src, next));
+      setTurns(next);
+      setRect(FULL);
+    } catch { toast.error("หมุนรูปไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setBusy(false); }
+  };
+  const use = async () => {
+    if (turns === 0 && rect.x <= 0 && rect.y <= 0 && rect.w >= 100 && rect.h >= 100) { onClose(); return; }   // ไม่ได้ครอป/หมุน = ไม่ต้องสร้างรูปใหม่
+    setBusy(true);
+    try {
+      const out = await cropImageSource(shown, { x: rect.x / 100, y: rect.y / 100, w: rect.w / 100, h: rect.h / 100 }, { maxSide });
+      await onDone({ ...out, rotation: turns, rect });
+      onClose();
+    } catch { toast.error("ครอปรูปไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setBusy(false); }
+  };
+  const dim = "absolute bg-slate-950/55";
+  return (
+    <ERPModal open={open} onClose={onClose} title={title} description={description} size="xl" loading={busy}
+      footer={
+        <div className="flex items-center justify-between w-full gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => void rotate(-1)} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50">⟲ หมุนซ้าย</button>
+            <button type="button" onClick={() => void rotate(1)} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50">⟳ หมุนขวา</button>
+            <button type="button" onClick={() => setRect(FULL)} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50">ทั้งรูป</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={onClose} className="h-9 px-3 text-sm rounded-lg text-slate-600 hover:bg-slate-100">ยกเลิก</button>
+            <button type="button" onClick={() => void use()} disabled={busy} className="h-9 px-4 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังทำ…" : "✂️ ใช้ส่วนนี้"}</button>
+          </div>
+        </div>
+      }>
+      <div className="flex justify-center bg-slate-100 rounded-lg p-3">
+        <div style={{ width: `min(100%, calc(62vh * ${ar.toFixed(4)}))` }}>
+          <ImageRegions src={shown} mode="edit" className="w-full" regions={[{ id: "crop", ...rect }]} selectedId="crop"
+            onChange={(_, r) => setRect(r)} onCreate={(r) => setRect(r)}
+            overlay={<>
+              <span className={dim} style={{ left: 0, top: 0, width: "100%", height: `${rect.y}%` }} />
+              <span className={dim} style={{ left: 0, top: `${rect.y + rect.h}%`, width: "100%", height: `${Math.max(0, 100 - rect.y - rect.h)}%` }} />
+              <span className={dim} style={{ left: 0, top: `${rect.y}%`, width: `${rect.x}%`, height: `${rect.h}%` }} />
+              <span className={dim} style={{ left: `${rect.x + rect.w}%`, top: `${rect.y}%`, width: `${Math.max(0, 100 - rect.x - rect.w)}%`, height: `${rect.h}%` }} />
+            </>} />
+        </div>
+      </div>
+    </ERPModal>
+  );
+}
 
 export interface CropSourceGroup {
   key: string;

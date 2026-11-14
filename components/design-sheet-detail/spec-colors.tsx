@@ -222,6 +222,7 @@ function SpecColorPickerModal({ title, cell, imageKeys, onClose, onPick }: {
   const [boards, setBoards] = useState<SwatchCard[] | null>(null);
   const [board, setBoard] = useState<SwatchDetail | null>(null);
   const [boardLoading, setBoardLoading] = useState(false);
+  const [boardPhoto, setBoardPhoto] = useState<string | null>(null);   // แผงหลายรูป: รูปที่ดูอยู่
   useEffect(() => {
     if (tab !== "swatch" || boards) return;
     apiFetch("/api/sku-swatches?limit=60").then((r) => r.json()).then((j) => {
@@ -233,14 +234,14 @@ function SpecColorPickerModal({ title, cell, imageKeys, onClose, onPick }: {
   }, [tab, boards]);   // eslint-disable-line react-hooks/exhaustive-deps
   const openBoard = async (id: string) => {
     setBoardLoading(true);
-    try { const j = await apiFetch(`/api/sku-swatches?id=${id}`).then((r) => r.json()); setBoard((j.swatch ?? null) as SwatchDetail | null); }
+    try { const j = await apiFetch(`/api/sku-swatches?id=${id}`).then((r) => r.json()); setBoard((j.swatch ?? null) as SwatchDetail | null); setBoardPhoto(null); }
     catch { setBoard(null); }
     finally { setBoardLoading(false); }
   };
   const pickSpot = (s: SwatchSpot) => {
     if (!board) return;
     setDraft(base("swatch", {
-      name: s.sku?.color || s.label || s.sku?.name || null, image_key: board.image_key, crop: { x: Number(s.x), y: Number(s.y), w: Number(s.w), h: Number(s.h) },
+      name: s.sku?.color || s.name || s.label || s.sku?.name || null, image_key: s.image_key ?? board.image_key, crop: { x: Number(s.x), y: Number(s.y), w: Number(s.w), h: Number(s.h) },
       sku_id: s.sku_id, sku_code: s.sku?.code ?? null, sku_name: s.sku?.name ?? null, swatch_id: board.id,
     }));
   };
@@ -318,10 +319,28 @@ function SpecColorPickerModal({ title, cell, imageKeys, onClose, onPick }: {
                     : (
                       <>
                         <p className="text-xs text-slate-500">{t("กดชิ้นผ้าบนรูปเพื่อเลือก", "Click a fabric piece on the image")}</p>
-                        <div className="rounded-lg border border-slate-200 overflow-hidden">
-                          <ImageRegions src={r2ImageUrl(board.image_key, 1600) ?? ""} regions={board.spots} mode="view" onRegionClick={pickSpot}
-                            renderTooltip={(s) => <span>{s.sku ? `${s.sku.code} · ${s.sku.name}${s.sku.color ? ` (${s.sku.color})` : ""}` : (s.label ?? t("ยังไม่ผูก SKU", "No SKU"))}</span>} />
-                        </div>
+                        {(board.images?.length ?? 0) > 1 && (
+                          <div className="flex gap-1.5 overflow-x-auto pb-1">
+                            {board.images.map((im, i) => (
+                              <button key={im.id || i} type="button" onClick={() => setBoardPhoto(im.id)}
+                                className={`shrink-0 w-16 h-11 rounded-md overflow-hidden border-2 ${(boardPhoto ?? board.images[0]?.id) === im.id ? "border-violet-500" : "border-transparent hover:border-slate-300"}`}>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={r2ImageUrl(im.image_key, 160) ?? ""} alt="" className="w-full h-full object-cover" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {(() => {
+                          const imgs = board.images ?? [];
+                          const ph = imgs.find((i) => i.id === boardPhoto) ?? imgs[0] ?? null;
+                          const spots = ph ? board.spots.filter((s) => (s.image_id || imgs[0]?.id) === ph.id) : board.spots;
+                          return (
+                            <div className="rounded-lg border border-slate-200 overflow-hidden">
+                              <ImageRegions src={r2ImageUrl(ph?.image_key ?? board.image_key, 1600) ?? ""} regions={spots} mode="view" onRegionClick={pickSpot}
+                                renderTooltip={(s) => <span>{s.sku ? `${s.sku.code} · ${s.sku.name}${s.sku.color ? ` (${s.sku.color})` : ""}` : [s.code, s.name, s.label].filter(Boolean).join(" · ") || t("ยังไม่ผูก SKU", "No SKU")}</span>} />
+                            </div>
+                          );
+                        })()}
                       </>
                     ))}
                 </>
