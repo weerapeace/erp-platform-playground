@@ -16,7 +16,7 @@ import { auditDiff, writeAudit } from "@/lib/audit";
 import { shopeeErrorText, shopeeUpdateItem } from "@/lib/shopee";
 import { planShopeeEdit, shopeeListingView, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
-import { loadShopeeListingLive, refetchShopeeLive, saveShopeeSlimCopy } from "../shared";
+import { loadShopeeListingLive, refetchShopeeLive, saveShopeeSlimCopy, shopeeWriteEcho } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,17 +55,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     action: "update", entityType: "platform_catalog", entityId: r.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { source: "shopee_listing_edit", item_id: r.itemId, shop_id: r.shopId, changes, ...meta },
   });
+  let echo: ReturnType<typeof shopeeWriteEcho>;
   try {
-    await shopeeUpdateItem(r.accessToken, r.shopId, r.itemId, plan.body);
+    echo = shopeeWriteEcho(await shopeeUpdateItem(r.accessToken, r.shopId, r.itemId, plan.body));
   } catch (e) {
     const error = shopeeErrorText(e);
     await audit({ ok: false, error, raw_error: (e as Error).message });
     return reply({ ok: false, view, error: `แก้บน Shopee ไม่สำเร็จ: ${error}` }, 502);
   }
 
-  // ดึงกลับตรวจว่าเปลี่ยนจริง
+  // ดึงกลับตรวจว่าเปลี่ยนจริง (รอจนเห็นค่าที่ส่ง ~9 วิ — ข้อมูลฝั่ง Shopee อัปเดตช้ากว่าคำตอบ)
   const warnings: string[] = [];
-  const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId);
+  if (echo.warning) warnings.push(`Shopee แจ้ง: ${echo.warning}`);
+  const landed = (l: { base: Record<string, unknown> }) => {
+    const v2 = shopeeListingView(l.base, null);
+    return !!v2 && (plan.body.item_name == null || norm(v2.name) === norm(plan.body.item_name)) && (plan.body.description == null || norm(v2.description) === norm(plan.body.description));
+  };
+  const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, landed);
   const freshView = fresh ? shopeeListingView(fresh.base, fresh.models, view.limits) : null;
   if (!freshView) warnings.push("Shopee ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก Shopee” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
   else {
@@ -75,6 +81,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (fresh) { const err = await saveShopeeSlimCopy(admin, r.row, fresh); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
   const summary = `แก้${plan.changes.map((c) => c.label).join(" + ")}บน Shopee แล้ว`;
-  await audit({ ok: true, summary, warnings, refreshed: !!freshView, status_after: freshView?.status ?? null });
+  await audit({ ok: true, summary, warnings, refreshed: !!freshView, status_after: freshView?.status ?? null, shopee_warning: echo.warning, shopee_response: echo.response });
   return reply({ ok: true, view: freshView ?? view, summary, warnings, error: null });
 }

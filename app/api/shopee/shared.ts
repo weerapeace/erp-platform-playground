@@ -228,12 +228,28 @@ export async function saveShopeeSlimCopy(admin: SupabaseClient, row: ShopeeListi
   return error ? error.message : null;
 }
 
-/** ดึงกลับมาเช็กหลังส่งขึ้นร้าน (รอแล้วลองซ้ำ 0.8 / 2 วิ) · ไม่ได้ = null (route เตือนให้กดดึงตัวนี้เอง) */
-export async function refetchShopeeLive(accessToken: string, shopId: string, itemId: string): Promise<ShopeeLive | null> {
-  for (const wait of [800, 2000, 0]) {
-    try { const l = await shopeeFetchLive(accessToken, shopId, itemId); if (l) return l; }
-    catch (e) { console.warn(`[shopee] ดึงสินค้า #${itemId} กลับมาเช็กไม่ได้: ${shopeeErrorText(e)}`); }
+/**
+ * ดึงกลับมาเช็กหลังส่งขึ้นร้าน — รอจนเห็นค่าที่ส่ง (isDone) หรือครบ ~9 วิ (รอ 1 / 2 / 3 / 3 วิ)
+ * 🐛 ลองจริงครั้งแรก 2026-11-14: Shopee ตอบรับแก้ชื่อ/เปิดขายแล้ว แต่ดึงกลับใน 1–3 วิ ยังเห็นค่าเดิม (ข้อมูลฝั่ง Shopee อัปเดตช้า) → รอนานขึ้น
+ * คืนข้อมูลล่าสุดที่ดึงได้ (อาจยังไม่ตรง — route เตือนเอง) · ดึงไม่ได้เลย = null
+ */
+export async function refetchShopeeLive(accessToken: string, shopId: string, itemId: string, isDone?: (live: ShopeeLive) => boolean): Promise<ShopeeLive | null> {
+  let last: ShopeeLive | null = null;
+  for (const wait of [1000, 2000, 3000, 3000, 0]) {
+    try {
+      const l = await shopeeFetchLive(accessToken, shopId, itemId);
+      if (l) { last = l; if (!isDone || isDone(l)) return l; }
+    } catch (e) { console.warn(`[shopee] ดึงสินค้า #${itemId} กลับมาเช็กไม่ได้: ${shopeeErrorText(e)}`); }
     if (wait) await sleepMs(wait);
   }
-  return null;
+  return last;
+}
+
+/** คำตอบของ Shopee หลังเขียน (ตัดคำอธิบายยาวออก) — เก็บในประวัติไว้ดูว่า Shopee ตอบอะไร/เตือนอะไร */
+export function shopeeWriteEcho(resp: Record<string, unknown> | null | undefined): { warning: string | null; response: unknown } {
+  const r = resp?.response && typeof resp.response === "object" ? { ...(resp.response as Record<string, unknown>) } : null;
+  if (r) { delete r.description; delete r.description_info; }
+  const w = resp ? String(resp.warning ?? "").trim() : "";
+  const json = r ? JSON.stringify(r) : "";
+  return { warning: w || null, response: json.length > 1500 ? { preview: `${json.slice(0, 1500)}…` } : r };
 }
