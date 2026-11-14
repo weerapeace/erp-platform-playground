@@ -189,6 +189,15 @@ export function needsAction(o: { status: string; source?: string | null; platfor
   return o.status === "new" || o.status === "confirmed" || o.status === "packed";
 }
 
+/**
+ * นับเป็นยอดขายไหม (รายงานยอดขายแพลตฟอร์ม lib/platform-sales) — ยกเลิก = ไม่นับ · ผู้ซื้อยังไม่จ่าย (UNPAID ของ Shopee/TikTok จาก API) = ยังไม่นับ
+ * 🐛 2026-11-14: ดึงออเดอร์ Shopee จาก API แล้วมีใบ UNPAID เข้ามา (เมลไม่เคยสร้าง — เมลมาตอนจ่ายแล้ว) → เดิมรายงานนับเป็นยอดขาย
+ */
+export function countsAsSale(o: { status: string; platform_status?: string | null }): boolean {
+  if (o.status === "cancelled") return false;
+  return String(o.platform_status ?? "").toUpperCase() !== "UNPAID";
+}
+
 // ---- กำหนดส่ง (ship_by_at) ----
 export type ShipDue = "late" | "today" | "tomorrow" | "later" | "none";
 export const SHIP_DUE_LABEL: Record<ShipDue, string> = { late: "เลยกำหนดส่ง", today: "ต้องส่งวันนี้", tomorrow: "ส่งภายในพรุ่งนี้", later: "", none: "" };

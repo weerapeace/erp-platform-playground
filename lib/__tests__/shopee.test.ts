@@ -7,7 +7,7 @@ import {
   shopeeOrderListOf, shopeeOrderToPlatformOrder, SHOPEE_ORDER_FIELDS,
 } from "@/lib/shopee";
 import { summarizeListing, countsAsDuplicate } from "@/lib/platform-listing-health";
-import { shopeeToInternal, isShopManaged, checkTransition, shopManagedName, needsAction } from "@/lib/platform-order-status";
+import { shopeeToInternal, isShopManaged, checkTransition, shopManagedName, needsAction, countsAsSale } from "@/lib/platform-order-status";
 
 describe("Shopee — เซ็นคำขอ", () => {
   test("ข้อความที่เซ็น: ระดับแอป = partner_id+path+timestamp · ระดับร้าน ต่อ access_token+shop_id", () => {
@@ -261,5 +261,15 @@ describe("Shopee — ศูนย์ออเดอร์: shopee_api = สถ�
   test("ยังนับเป็นงานต้องจัดส่ง (READY_TO_SHIP) แต่ไม่นับยังไม่ชำระ (UNPAID)", () => {
     expect(needsAction({ status: "new", source: "shopee_api", platform_status: "READY_TO_SHIP" })).toBe(true);
     expect(needsAction({ status: "new", source: "shopee_api", platform_status: "UNPAID" })).toBe(false);
+  });
+});
+
+describe("รายงานยอดขาย — นับเฉพาะออเดอร์ที่จ่ายแล้ว (countsAsSale)", () => {
+  test("UNPAID (Shopee/TikTok API) ยังไม่นับ · ยกเลิกไม่นับ · จากเมล/ส่งแล้ว/สำเร็จ นับ", () => {
+    expect(countsAsSale({ status: "new", platform_status: "UNPAID" })).toBe(false);
+    expect(countsAsSale({ status: "cancelled", platform_status: "CANCELLED" })).toBe(false);
+    expect(countsAsSale({ status: "new", platform_status: null })).toBe(true);           // ใบจากเมล (จ่ายแล้วถึงมีเมล)
+    expect(countsAsSale({ status: "new", platform_status: "READY_TO_SHIP" })).toBe(true);
+    expect(countsAsSale({ status: "shipped", platform_status: "COMPLETED" })).toBe(true);
   });
 });

@@ -11,6 +11,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { countsAsSale } from "@/lib/platform-order-status";
 import { SKU_COVER_SELECT, coverUrl, resolveSkuCover } from "@/lib/sku-cover";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -88,7 +89,7 @@ export type PlatformSales = {
   daily: DailyTotal[];
 };
 
-type OrderRow = { id: string; platform_id: string; brand_id: string | null; status: string; source: string | null; ordered_at: string | null };
+type OrderRow = { id: string; platform_id: string; brand_id: string | null; status: string; platform_status: string | null; source: string | null; ordered_at: string | null };
 type ItemRow = { order_id: string; name: string | null; qty: number | null; price: number | null; matched_sku_id: string | null; matched_parent_sku_id: string | null; raw: Record<string, unknown> | null };
 
 /** ชื่อแถวแบบเดิมของหน้ารายงาน (ตาราง SoldProductsTable) — ชื่อ · สี / — รุ่น X (ไม่แยกสี) / — ยังไม่จับคู่ */
@@ -112,12 +113,14 @@ export async function loadPlatformSales(admin: Admin, opts: { range: SalesRange;
   const brandName = new Map(brandRows.map((b) => [b.id, b.name]));
 
   const orders = await fetchAllPages<OrderRow>((a, b) => {
-    let q = admin.from("platform_orders").select("id, platform_id, brand_id, status, source, ordered_at").gte("ordered_at", from).lt("ordered_at", to).order("id").range(a, b);
+    let q = admin.from("platform_orders").select("id, platform_id, brand_id, status, platform_status, source, ordered_at").gte("ordered_at", from).lt("ordered_at", to).order("id").range(a, b);
     if (opts.platformId) q = q.eq("platform_id", opts.platformId);
     if (opts.brandId) q = q.eq("brand_id", opts.brandId);
     return q;
   });
-  const active = orders.filter((o) => o.status !== "cancelled");
+  // ยอดขาย = ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ออเดอร์ UNPAID จาก Shopee/TikTok API ยังไม่นับ — กติกากลาง countsAsSale)
+  const active = orders.filter(countsAsSale);
+  const cancelledN = orders.filter((o) => o.status === "cancelled").length;
   const orderOf = new Map(active.map((o) => [o.id, o]));
 
   const items: ItemRow[] = [];
@@ -158,7 +161,7 @@ export async function loadPlatformSales(admin: Admin, opts: { range: SalesRange;
     byDay.set(d, t);
     return t;
   };
-  for (const o of orders) { const t = day(o); if (o.status === "cancelled") t.cancelled++; else t.orders++; }
+  for (const o of orders) { const t = day(o); if (o.status === "cancelled") t.cancelled++; else if (countsAsSale(o)) t.orders++; }
   let qty = 0, amount = 0, pending = 0;
   const noPrice = new Set<string>();
   for (const it of items) {
@@ -198,7 +201,7 @@ export async function loadPlatformSales(admin: Admin, opts: { range: SalesRange;
   return {
     platforms, brands,
     summary: {
-      orders: active.length, cancelled: orders.length - active.length, qty, amount,
+      orders: active.length, cancelled: cancelledN, qty, amount,
       no_price_orders: noPrice.size, pending_items: pending, returns,
       from_email: active.filter((o) => o.source === "email").length,
     },
