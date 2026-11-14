@@ -20,6 +20,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { ImageCropBox, useImageSize, type CropValue } from "@/components/image-crop-box";
 import { ImageRegions } from "@/components/image-regions";
+import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { canvasBgWindow } from "@/lib/website-canvas";
 
 // ───────────────────────────── ตัวช่วยตัด/หมุนรูป (ใช้ได้ทั้งไฟล์ในเครื่องและรูป r2) ─────────────────────────────
@@ -94,7 +95,8 @@ export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️
   const [rect, setRect] = useState(initialRect ?? FULL);
   const [ar, setAr] = useState(1);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) { setTurns(0); setShown(src); setRect(initialRect ?? FULL); } }, [open, src]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [zoom, setZoom] = useState(1);   // Ctrl + หมุนลูกกลิ้ง = ซูม (ของกลาง ZoomBox) — ตีกรอบชิ้นเล็ก ๆ ได้แม่น
+  useEffect(() => { if (open) { setTurns(0); setShown(src); setRect(initialRect ?? FULL); setZoom(1); } }, [open, src]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (shown !== src && shown.startsWith("blob:")) URL.revokeObjectURL(shown); }, [shown, src]);
   useEffect(() => {
     let alive = true;
@@ -140,8 +142,9 @@ export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️
           </div>
         </div>
       }>
-      <div className="flex justify-center bg-slate-100 rounded-lg p-3">
-        <div style={{ width: `min(100%, calc(62vh * ${ar.toFixed(4)}))` }}>
+      <div className="flex justify-end mb-1.5"><ZoomControls zoom={zoom} onZoom={setZoom} /></div>
+      <div className="relative bg-slate-100 rounded-lg h-[60vh] min-h-[260px]">
+        <ZoomBox zoom={zoom} onZoom={setZoom} aspect={ar} padding={12} className="absolute inset-0 rounded-lg">
           <ImageRegions src={shown} mode="edit" className="w-full" regions={[{ id: "crop", ...rect }]} selectedId="crop"
             onChange={(_, r) => setRect(r)} onCreate={(r) => setRect(r)}
             overlay={<>
@@ -150,7 +153,7 @@ export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️
               <span className={dim} style={{ left: 0, top: `${rect.y}%`, width: `${rect.x}%`, height: `${rect.h}%` }} />
               <span className={dim} style={{ left: `${rect.x + rect.w}%`, top: `${rect.y}%`, width: `${Math.max(0, 100 - rect.x - rect.w)}%`, height: `${rect.h}%` }} />
             </>} />
-        </div>
+        </ZoomBox>
       </div>
     </ERPModal>
   );

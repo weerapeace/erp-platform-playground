@@ -1176,6 +1176,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "image-crop-picker.md",
   },
   {
+    key: "zoom-box", label: "กล่องซูมรูป (Ctrl + ลูกกลิ้ง)", code: "ZoomBox · ZoomControls", category: "file",
+    source: { path: "components/zoom-box", names: ["ZoomBox", "ZoomControls"] },
+    what: "กล่องดูรูป/เนื้อหาที่ซูมได้: Ctrl (⌘) + หมุนลูกกลิ้ง = ซูมตรงจุดที่ชี้ · หมุนเฉย ๆ = เลื่อน · 100% = พอดีกล่อง (ส่ง aspect ของรูป) · ปุ่ม − % + แยกวางได้ · ข้างในใช้กรอบ % (ImageRegions) ได้ตรงทุกระดับซูม",
+    when: "รูปที่ต้องดูรายละเอียด/ตีกรอบชิ้นเล็ก ๆ เช่น แผงผ้า Swatch (ป๊อปเพิ่มแผ่น · ตั้งค่า · ดู) · ครอปกรอบอิสระ",
+    notWhen: "ดูรูปเต็มจอเลื่อนรูปถัดไป ให้ใช้ ImageLightbox · วาด/เขียนบนรูป ให้ใช้ ImageMarkup (มีซูมของตัวเอง) · เลื่อน/ซูมการแสดงผลที่ต้องจำค่าไว้ ให้ใช้ ImageCropBox",
+    doc: "zoom-box.md",
+  },
+  {
     key: "video-thumb", label: "ภาพย่อวิดีโอ", code: "VideoThumb", category: "file",
     source: { path: "components/video-thumb" },
     what: "ภาพย่อของวิดีโอในคลังและช่องวิดีโอ",

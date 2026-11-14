@@ -17,6 +17,7 @@ import { usePermission } from "@/components/auth";
 import { ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { ImageRegions } from "@/components/image-regions";
+import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { PrCreateModal, type PrCreateItem } from "@/components/pr-create-modal";
 import { BundleAddModal, type BundleAddItem } from "@/components/bundle-add-modal";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
@@ -28,7 +29,6 @@ import type { SwatchSpotPick } from "./index";
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 const SkuWizard = nextDynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
 
-const ZOOMS = [1, 1.5, 2, 3];
 const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
 export const swatchTitle = (s: { name: string | null; seq: number; code?: string | null }) => s.name?.trim() || s.code || `Swatch #${s.seq}`;
 
@@ -193,13 +193,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
               </div>
             )}
           </div>
-          {mode === "view" && (
-            <div className="hidden sm:inline-flex items-center rounded-lg border border-slate-200 overflow-hidden">
-              <button onClick={() => setZoom((z) => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)])} disabled={zoom === ZOOMS[0]} className="w-8 h-8 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ซูมออก">−</button>
-              <span className="w-12 text-center text-[12px] text-slate-500 tabular-nums">{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)])} disabled={zoom === ZOOMS[ZOOMS.length - 1]} className="w-8 h-8 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ซูมเข้า">+</button>
-            </div>
-          )}
+          {mode === "view" && <ZoomControls zoom={zoom} onZoom={setZoom} className="hidden sm:inline-flex" />}
           {mode === "view" && data && linkedAll.length > 0 && (
             <button onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
               className={`h-9 px-3 text-sm rounded-lg border ${selecting ? "border-indigo-400 bg-indigo-600 text-white hover:bg-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -237,7 +231,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
           {mode === "edit" && data ? (
             <BoardEditor draft={draft} codes={codes} layout="full" onOverlay={setEditorOverlay} onCreateSku={(c) => setWizardFor(c)} />
           ) : (
-            <div className="flex-1 min-h-0 min-w-0 overflow-auto bg-slate-100 p-3 sm:p-5">
+            <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-slate-100 p-3 sm:p-5">
               {err ? (
                 <div className="text-center py-16 text-sm text-rose-600">⚠ {err} <button onClick={() => void load()} className="underline ml-1">ลองใหม่</button></div>
               ) : !data ? (
@@ -249,7 +243,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
                   {images.length > 1 && (
                     <div className="mx-auto max-w-4xl flex gap-2 overflow-x-auto pb-2 mb-1">
                       {images.map((im, i) => (
-                        <button key={im.id || i} type="button" onClick={() => setPhotoId(im.id)}
+                        <button key={im.id || i} type="button" onClick={() => { setPhotoId(im.id); setZoom(1); }}
                           className={`relative shrink-0 w-24 h-16 rounded-lg overflow-hidden border-2 bg-white ${im.id === photo?.id ? "border-indigo-500" : "border-transparent hover:border-slate-300"}`}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={r2ImageUrl(im.image_key, 240) ?? ""} alt="" className="w-full h-full object-cover" />
@@ -258,7 +252,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
                       ))}
                     </div>
                   )}
-                  <div className={zoom === 1 ? "mx-auto max-w-4xl" : ""} style={zoom === 1 ? undefined : { width: `${zoom * 100}%` }}>
+                  <ZoomBox zoom={zoom} onZoom={setZoom} aspect={photo?.image_w && photo?.image_h ? photo.image_w / photo.image_h : null} maxFitWidth={896} className="flex-1 min-h-0">
                     <ImageRegions<SwatchSpot> src={src} alt={swatchTitle(data)} className="w-full shadow-lg rounded-md overflow-visible" mode="view" regions={viewSpots}
                       regionLabel={(r) => r.sku?.code ?? r.code ?? null}
                       selecting={selecting} checkedIds={checked} pulseId={focusSpotId ?? null}
@@ -320,7 +314,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
                           </div>
                         </div>
                       )} />
-                  </div>
+                  </ZoomBox>
                 </>
               )}
             </div>

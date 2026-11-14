@@ -145,8 +145,9 @@ export function normalizeAiChips(raw: unknown): AiSwatchRead {
     maxVal = Math.max(maxVal, x + w, y + h);
     return { x, y, w, h, name: str(o.name, 40), label: str(o.label, 30), unsure: o.unsure === true || o.confidence === "low" };
   }).filter((v): v is AiChip => !!v);
-  // สเกล: ทุกค่า ≤ 1.5 = สัดส่วน 0–1 · > 100 = 0–1000 · อื่น ๆ = %
-  const k = maxVal <= 1.5 ? 100 : maxVal > 101 ? 0.1 : 1;
+  // สเกล: ทุกค่า ≤ 1.5 = สัดส่วน 0–1 · เกิน 150 = 0–1000 · อื่น ๆ = % (เกิน 100 นิดหน่อย = AI กะขอบเกิน → ตัดที่ขอบ)
+  // ⚠ บั๊กเดิม (2026-11-14): ใช้เกณฑ์ > 101 → ชิ้นริมขวา x+w = 102 ทำให้ทุกกรอบหด 10 เท่าไปกองมุมซ้ายบน + ดูดสีได้แต่พื้นหลัง
+  const k = maxVal <= 1.5 ? 100 : maxVal > 150 ? 0.1 : 1;
   for (const c of parsed) {
     let x = c.x * k, y = c.y * k, w = c.w * k, h = c.h * k;
     x = clamp(x, 0, 100); y = clamp(y, 0, 100);
@@ -158,4 +159,115 @@ export function normalizeAiChips(raw: unknown): AiSwatchRead {
     rects.push(rect);
   }
   return { header: str(obj.header, 120), chips: sortReadingOrder(rects).slice(0, 200) };
+}
+
+// ───────────────────────────── AI อ่านเลข + ชื่อสี ให้กรอบที่มีอยู่ ─────────────────────────────
+// หน้าจอวาดกรอบพร้อมเลข 1, 2, 3 … ลงบนรูปก่อนส่ง → AI ตอบว่ากรอบเลขไหนพิมพ์อะไร (อ่านตัวหนังสือ = งานที่ AI ถนัด · ตำแหน่งกรอบไม่เปลี่ยน)
+
+export type AiChipLabel = { n: number; label: string | null; name: string | null };
+
+export const SWATCH_LABEL_SYSTEM = [
+  "You look at ONE photo of a fabric / leather / thread swatch card. Someone already drew numbered frames on it:",
+  "each colour chip has a bright frame with a white number tag (1, 2, 3 …) at its top-left corner.",
+  "For EVERY numbered frame return: label = the number/code printed on or right next to THAT chip exactly as printed (\"\" if none or unreadable);",
+  "name = a short Thai colour name for the chip inside the frame (เช่น กรมท่า, แดงเลือดหมู, ครีม, เทาเข้ม, น้ำตาลทอง).",
+  "Do not invent frames. Do not move frames. Use the frame numbers exactly as drawn.",
+  "Reply JSON only: {\"items\": [{\"n\": number, \"label\": string, \"name\": string}]}",
+].join("\n");
+export const swatchLabelAsk = (count: number) => `รูปนี้มีกรอบเลข 1–${count} รวม ${count} กรอบ อ่านเลขที่พิมพ์ข้างชิ้น + ตั้งชื่อสีไทยให้ทุกกรอบ แล้วตอบ JSON ตามโครงที่กำหนด`;
+
+/** คำตอบ AI → เลข/ชื่อสีต่อกรอบ (เฉพาะเลขกรอบที่มีจริง 1..count · ซ้ำ = ใช้ตัวแรก) */
+export function normalizeAiLabels(raw: unknown, count: number): AiChipLabel[] {
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const list = Array.isArray(obj.items) ? obj.items : Array.isArray(raw) ? raw : [];
+  const seen = new Set<number>();
+  const out: AiChipLabel[] = [];
+  for (const it of list.slice(0, 500)) {
+    const o = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+    const n = Math.round(Number(o.n ?? o.no ?? o.number));
+    if (!Number.isFinite(n) || n < 1 || n > count || seen.has(n)) continue;
+    seen.add(n);
+    out.push({ n, label: str(o.label, 30), name: str(o.name, 40) });
+  }
+  return out.sort((a, b) => a.n - b.n);
+}
+
+// ───────────────────────────── คลิกที่สี = ตีกรอบให้ (ทำในเครื่อง ฟรี) ─────────────────────────────
+
+/** เบลอ 3×3 (ลดลายผ้า/ลายหนังก่อนไล่สี) — RGBA เข้า → RGBA ออก ขนาดเดิม */
+export function boxBlur3(px: ArrayLike<number>, W: number, H: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy; if (yy < 0 || yy >= H) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx; if (xx < 0 || xx >= W) continue;
+          const i = (yy * W + xx) * 4; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+        }
+      }
+      const o = (y * W + x) * 4;
+      out[o] = r / n; out[o + 1] = g / n; out[o + 2] = b / n; out[o + 3] = 255;
+    }
+  }
+  return out;
+}
+
+export type FloodFit = { ok: true; rect: PctRect; hex: string | null; frac: number } | { ok: false; reason: "too_big" | "too_small" | "outside" };
+
+/**
+ * คลิกที่จุด (sx, sy เป็นพิกเซล) → ไล่หาพื้นที่สีใกล้เคียงที่ต่อกัน (4 ทิศ) → กรอบพอดีชิ้น (% ของรูป) + สีเฉลี่ยของทั้งชิ้น
+ * - สีอ้างอิง = เฉลี่ย 5×5 รอบจุดคลิก · เทียบกับสีอ้างอิงเสมอ (ไม่ไหลตามสีข้าง ๆ ไปเรื่อย ๆ)
+ * - tol = ระยะสี RGB ที่ยอมรับ (ยิ่งมาก = กินพื้นที่กว้าง) · กรอบตัด "เส้นรั่ว" บาง ๆ ทิ้ง (แถว/คอลัมน์ที่มีพิกเซลน้อยกว่า 20% ของแถวที่หนาสุด)
+ * - กว้างเกิน maxFrac ของรูป = น่าจะเป็นพื้นหลัง/การ์ด → too_big · เล็กเกิน minFrac → too_small
+ */
+export function floodFitRect(px: ArrayLike<number>, W: number, H: number, sx: number, sy: number, opts: { tol?: number; maxFrac?: number; minFrac?: number } = {}): FloodFit {
+  const x0 = Math.floor(sx), y0 = Math.floor(sy);
+  if (x0 < 0 || y0 < 0 || x0 >= W || y0 >= H) return { ok: false, reason: "outside" };
+  const tol = clamp(opts.tol ?? 38, 4, 160), tol2 = tol * tol;
+  const maxPx = Math.floor(W * H * clamp(opts.maxFrac ?? 0.3, 0.01, 1));
+  const minPx = Math.max(4, Math.floor(W * H * (opts.minFrac ?? 0.0002)));
+  let rr = 0, rg = 0, rb = 0, rn = 0;
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    const xx = x0 + dx, yy = y0 + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+    const i = (yy * W + xx) * 4; rr += px[i]; rg += px[i + 1]; rb += px[i + 2]; rn++;
+  }
+  rr /= rn; rg /= rn; rb /= rn;
+  const seen = new Uint8Array(W * H);
+  const stack = new Int32Array(W * H);
+  let sp = 0, count = 0;
+  const colCnt = new Int32Array(W), rowCnt = new Int32Array(H);
+  const pick: number[] = [];
+  stack[sp++] = y0 * W + x0; seen[y0 * W + x0] = 1;
+  while (sp > 0) {
+    const p = stack[--sp];
+    const i = p * 4;
+    const dr = px[i] - rr, dg = px[i + 1] - rg, db = px[i + 2] - rb;
+    if (dr * dr + dg * dg + db * db > tol2) continue;
+    count++;
+    if (count > maxPx) return { ok: false, reason: "too_big" };
+    const x = p % W, y = (p - x) / W;
+    colCnt[x]++; rowCnt[y]++;
+    if ((count & 3) === 0) pick.push(px[i], px[i + 1], px[i + 2], 255);   // เก็บตัวอย่างสี (ทุก 4 พิกเซล)
+    if (x > 0 && !seen[p - 1]) { seen[p - 1] = 1; stack[sp++] = p - 1; }
+    if (x < W - 1 && !seen[p + 1]) { seen[p + 1] = 1; stack[sp++] = p + 1; }
+    if (y > 0 && !seen[p - W]) { seen[p - W] = 1; stack[sp++] = p - W; }
+    if (y < H - 1 && !seen[p + W]) { seen[p + W] = 1; stack[sp++] = p + W; }
+  }
+  if (count < minPx) return { ok: false, reason: "too_small" };
+  const span = (cnt: Int32Array) => {
+    let mx = 0; for (const c of cnt) if (c > mx) mx = c;
+    const cut = Math.max(1, mx * 0.2);
+    let a = 0, b = cnt.length - 1;
+    while (a < b && cnt[a] < cut) a++;
+    while (b > a && cnt[b] < cut) b--;
+    return [a, b + 1] as const;
+  };
+  const [cx1, cx2] = span(colCnt), [cy1, cy2] = span(rowCnt);
+  // พื้นหลัง/ขอบการ์ดมักเป็น "วงล้อม" ชิ้นอื่น → กรอบใหญ่แต่ข้างในโล่ง (ความหนาแน่นต่ำ) หรือกรอบเกือบทั้งรูป = ไม่ใช่ชิ้นสี
+  const boxPx = Math.max(1, (cx2 - cx1) * (cy2 - cy1));
+  if (count / boxPx < 0.35 || boxPx > W * H * 0.8) return { ok: false, reason: "too_big" };
+  const rect = { x: r2((cx1 / W) * 100), y: r2((cy1 / H) * 100), w: r2(((cx2 - cx1) / W) * 100), h: r2(((cy2 - cy1) / H) * 100) };
+  return { ok: true, rect, hex: averageHex(pick.length ? pick : [px[(y0 * W + x0) * 4], px[(y0 * W + x0) * 4 + 1], px[(y0 * W + x0) * 4 + 2], 255]), frac: count / (W * H) };
 }

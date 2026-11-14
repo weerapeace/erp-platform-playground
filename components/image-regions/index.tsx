@@ -29,7 +29,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 export function ImageRegions<T extends Region>({
   src, alt = "", regions, mode, selectedId, onSelect, onChange, onCreate, onRegionClick, renderTooltip, regionLabel, isMuted, className = "",
-  renderMenu, selecting = false, checkedIds, onToggleCheck, pulseId, overlay,
+  renderMenu, selecting = false, checkedIds, onToggleCheck, pulseId, overlay, onPointClick, editCursor,
 }: {
   src: string;
   alt?: string;
@@ -60,6 +60,10 @@ export function ImageRegions<T extends Region>({
   className?: string;
   /** ชั้นทับรูป (ไม่รับเมาส์) เช่น พื้นมืดนอกกรอบครอป — วางในกล่องรูป ใช้ % เดียวกับกรอบ */
   overlay?: ReactNode;
+  /** โหมด edit: คลิก (ไม่ลาก) บนรูป → จุดที่คลิก (% ของรูป) + กรอบที่คลิกโดน (ไม่โดน = null) · ใส่แล้วคลิกที่ว่างจะไม่ยกเลิกการเลือก */
+  onPointClick?: (pt: { x: number; y: number }, region: T | null) => void;
+  /** เคอร์เซอร์ตอน edit (ค่าเริ่ม crosshair) */
+  editCursor?: string;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -149,7 +153,11 @@ export function ImageRegions<T extends Region>({
       const x = Math.min(drag.sx, drag.cx), y = Math.min(drag.sy, drag.cy);
       const w = Math.abs(drag.cx - drag.sx), h = Math.abs(drag.cy - drag.sy);
       if (w >= MIN && h >= MIN) onCreate?.({ x: round(x), y: round(y), w: round(w), h: round(h) });
+      else if (onPointClick) onPointClick({ x: drag.sx, y: drag.sy }, null);   // คลิกที่ว่าง → ผู้เรียกจัดการ (เช่น คลิกที่สี = ตีกรอบ)
       else onSelect?.(null);   // แค่คลิกที่ว่าง = ยกเลิกการเลือก
+    } else if (drag.kind === "move" && !drag.moved && onPointClick) {
+      const r = regions.find((x) => x.id === drag.id) ?? null;
+      onPointClick({ x: drag.sx, y: drag.sy }, r);   // คลิกในกรอบ (ไม่ได้ลาก)
     }
     setDrag(null);
   };
@@ -169,8 +177,8 @@ export function ImageRegions<T extends Region>({
 
   return (
     <div ref={boxRef}
-      className={`relative inline-block align-top select-none ${mode === "edit" ? "cursor-crosshair" : ""} ${className}`}
-      style={mode === "edit" ? { touchAction: "none" } : undefined}
+      className={`relative inline-block align-top select-none ${mode === "edit" && !editCursor ? "cursor-crosshair" : ""} ${className}`}
+      style={mode === "edit" ? { touchAction: "none", ...(editCursor ? { cursor: editCursor } : {}) } : undefined}
       onPointerDown={startDraw} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} draggable={false} className="block w-full h-auto pointer-events-none" />
