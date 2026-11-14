@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
 import { Spinner } from "@/components/spinner";
 
@@ -64,14 +65,10 @@ type TagRow = { id: string; name: string; name_en?: string | null; group_id?: st
 
 /**
  * เลือกโมเดล AI ที่ใช้เขียน (เก็บที่ ui_config key = ai_product_model)
- * โชว์ราคาประมาณต่อสินค้า 1 ตัวให้เห็นก่อนเลือก — คิดจากงานจริง (รูป 5 ใบ ≈ 14,000 token เข้า + 1,400 ออก)
+ * รายการรุ่น + ราคา = ของกลาง lib/ai-caption-models (เพิ่มรุ่นที่นั่นที่เดียว) · ราคาต่อสินค้า 1 ตัว = productDetailCostThb
  */
-const MODEL_CHOICES: { id: string; label: string; note: string; bahtPerItem: string }[] = [
-  { id: "gpt-4o-mini",  label: "gpt-4o-mini",  note: "ถูกสุด · งานเขียนพื้น ๆ",            bahtPerItem: "~0.10" },
-  { id: "gpt-4.1-mini", label: "gpt-4.1-mini", note: "คุ้มสุด · เขียนไทยเรียบกว่า ตามคำสั่งดีกว่า", bahtPerItem: "~0.28" },
-  { id: "gpt-4o",       label: "gpt-4o",       note: "คุณภาพสูง · งานเขียนดี",              bahtPerItem: "~1.8" },
-  { id: "gpt-4.1",      label: "gpt-4.1",      note: "คุณภาพสูง รุ่นใหม่ · ตามคำสั่งเป๊ะสุด",   bahtPerItem: "~1.5" },
-];
+const fmtBaht = (n: number) => (n < 1 ? n.toFixed(2) : n.toFixed(1));
+const MODEL_CHOICES = AI_MODEL_CHOICES.map((m) => ({ ...m, perItem: productDetailCostThb(m) }));
 
 function ModelPicker() {
   const [model, setModel] = useState<string | null>(null);
@@ -110,16 +107,17 @@ function ModelPicker() {
               className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition ${on
                 ? "border-fuchsia-300 bg-fuchsia-50" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-50`}>
               <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${on ? "border-fuchsia-500 bg-fuchsia-500" : "border-slate-300"}`} />
-              <span className="text-[12.5px] font-medium text-slate-700 w-[110px] shrink-0">{m.label}</span>
-              <span className="text-[11.5px] text-slate-500 flex-1">{m.note}</span>
-              <span className="text-[11.5px] font-semibold text-slate-600 tabular-nums">{m.bahtPerItem} บาท</span>
+              <span className="text-[12.5px] font-medium text-slate-700 w-[110px] shrink-0">{m.id}</span>
+              <span className="text-[11.5px] text-slate-500 flex-1 min-w-0">{m.note}</span>
+              <span className="text-[11.5px] font-semibold text-slate-600 tabular-nums shrink-0">~{fmtBaht(m.perItem)} บาท</span>
             </button>
           );
         })}
       </div>
       {msg && <p className="mt-1.5 text-[11.5px] text-slate-500">{msg}</p>}
       <p className="mt-1 text-[11px] text-slate-400">
-        ทั้งระบบ 1,482 สินค้า: gpt-4o-mini ≈ 150 บาท · gpt-4.1-mini ≈ 410 บาท · gpt-4o ≈ 2,700 บาท
+        ทั้งระบบ 1,482 สินค้า: {MODEL_CHOICES.filter((m) => ["gpt-4.1-mini", "gpt-5.4-mini", "gpt-5.4"].includes(m.id))
+          .map((m) => `${m.id} ≈ ${Math.round(m.perItem * 1482).toLocaleString()} บาท`).join(" · ")}
       </p>
     </div>
   );

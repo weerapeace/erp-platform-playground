@@ -37,6 +37,10 @@
 ## ลำดับโมเดล GPT
 ที่แอดมินเลือกในศูนย์ → ที่ฟีเจอร์ส่งมา (เช่น ค่าในหน้ารายละเอียดสินค้า `ui_config.ai_product_model` / env `OPENAI_*_MODEL`) → `gpt-4o-mini`
 
+**รุ่น 5.x (2026-11-14 · gpt-5.4-mini / gpt-5.4)** — "คิดก่อนตอบ" เรียก API คนละแบบ: `chatLimitParams` / `responsesLimitParams` ใน `lib/ai-caption-models.ts`
+ส่ง `max_completion_tokens` (= เพดาน + 4,000 เผื่อเวลาคิด) + `reasoning_effort: low` แทน `max_tokens` (5.x ไม่รับ) · token เวลาคิดรวมอยู่ใน token ออก → ค่าใช้จ่ายประมาณถูก
+เพิ่มรุ่นใหม่ = เพิ่มแถวใน `AI_MODEL_CHOICES` ที่เดียว (ศูนย์ AI + ป๊อป AI รายละเอียดสินค้าอ่านจากรายการนี้) · เทสต์ `lib/__tests__/ai-caption-models.test.ts`
+
 ## ข้อจำกัด (เฟส 1)
 - เงินเป็นค่าประมาณจาก token × ราคาในรายการ · เริ่มนับวันที่เปิดใช้ศูนย์ (2026-11-06)
 - ยังไม่บันทึกว่า "ใคร" เป็นคนกด (user_id ว่าง) — เฟสถัดไป

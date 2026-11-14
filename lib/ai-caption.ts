@@ -8,7 +8,7 @@ import { r2GetObject } from "@/lib/r2";
 export const CAPTION_MODEL = process.env.OPENAI_CAPTION_MODEL || "gpt-4o-mini";
 
 /** โมเดลที่เลือกได้ในหน้าตั้งค่า (ui_config key = "ai_product_model") — ย้ายไป lib/ai-caption-models (ใช้ร่วมหน้าจอ) · export ซ้ำไว้ให้ที่เดิมใช้ได้ */
-import { AI_MODEL_CHOICES } from "@/lib/ai-caption-models";
+import { AI_MODEL_CHOICES, chatLimitParams, responsesLimitParams } from "@/lib/ai-caption-models";
 export { AI_MODEL_CHOICES };
 
 /** โมเดลที่ใช้เขียนรายละเอียดสินค้า — อ่านจากหน้าตั้งค่าก่อน แล้วค่อย env/ค่าเริ่มต้น */
@@ -107,13 +107,15 @@ export async function openAiChatRaw(system: string, userContent: unknown[], maxT
     body: JSON.stringify({
       model: useModel,
       response_format: { type: "json_object" },
-      max_tokens: maxTokens,
+      ...chatLimitParams(useModel, maxTokens),   // รุ่น 4.x = max_tokens · รุ่น 5.x = max_completion_tokens + คิดน้อย
       messages: [{ role: "system", content: system }, { role: "user", content: userContent }],
     }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`AI ตอบกลับไม่สำเร็จ: ${(j?.error?.message as string) || `HTTP ${res.status}`}`);
+  // token ออกของรุ่น 5.x รวมเวลาคิดแล้ว (คิดเงินเท่ากัน) → ประมาณค่าใช้จ่ายถูก
   const tokensIn = Number(j?.usage?.prompt_tokens ?? 0) || 0, tokensOut = Number(j?.usage?.completion_tokens ?? 0) || 0;
+  if (!j.choices?.[0]?.message?.content && j.choices?.[0]?.finish_reason === "length") throw new Error("AI คิดนานจนเกินเพดานคำตอบ — ลองกดอีกครั้ง หรือเปลี่ยนเป็นรุ่นที่เล็กลง");
   try { return { data: JSON.parse(j.choices?.[0]?.message?.content ?? "{}") as Record<string, unknown>, model: useModel, tokensIn, tokensOut }; }
   catch { throw new Error("AI ตอบกลับไม่เป็นรูปแบบที่อ่านได้ — ลองกดอีกครั้ง"); }
 }
@@ -137,7 +139,7 @@ export async function openAiWebSearchRaw(system: string, prompt: string, maxToke
       model: useModel,
       instructions: system,
       input: prompt,
-      max_output_tokens: maxTokens,
+      ...responsesLimitParams(useModel, maxTokens),
       tools: [{ type: toolType, search_context_size: "low", user_location: { type: "approximate", country: opts?.country ?? "TH" } }],
     }),
   });
