@@ -16,7 +16,7 @@ import { isRefForCategory } from "@/lib/file-ref";
 import { normDate } from "@/lib/delivery-bill";
 import { loadVoucherLite, loadShopGroups, loadAliases, parseSellerBill, rematchLines, applySellerBill } from "@/lib/seller-bill";
 import { loadOtherShopGroups } from "@/lib/seller-bill-intake";
-import { matchBillLines, normalizeBillLine, undecidedCount, applyGroupToLine, type SellerBillLine } from "@/lib/seller-bill-match";
+import { matchAndSplit, normalizeBillLine, ensureRowIds, undecidedCount, applyGroupToLine, type SellerBillLine } from "@/lib/seller-bill-match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     const { header, lines, raw, model } = await parseSellerBill(admin, ref, groups, { request });
     if (!header.is_bill && lines.length === 0) return NextResponse.json({ error: "ไฟล์นี้ดูไม่ใช่บิลซื้อของ — ตรวจว่าแนบรูปถูกใบ" }, { status: 400 });
     if (lines.length === 0) return NextResponse.json({ error: "AI อ่านรายการในบิลไม่ได้ — ลองถ่ายให้ชัดขึ้น / ตรงขึ้น แล้วอ่านใหม่" }, { status: 400 });
-    const matched = matchBillLines(lines, groups, aliases);
+    const matched = matchAndSplit(lines, groups, aliases);
     const { data: ins, error } = await admin.from("purchase_delivery_bills").insert({
       voucher_id: id, gr_id: body.gr_id || null, r2_key: ref, kind: "seller",
       bill_no: header.bill_no, seller_text: header.seller_text, bill_date: header.bill_date, total_amount: header.total_amount, currency: header.currency,
@@ -112,7 +112,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const prev = (Array.isArray((bill as Row).lines) ? ((bill as Row).lines as Row[]) : []).map(normalizeBillLine);
   let lines: SellerBillLine[] = Array.isArray(body.lines) ? (body.lines as Row[]).map(normalizeBillLine) : prev;
   // เก็บ id รายการที่บิลนี้เคยใส่ลงใบไว้เสมอ (ฝั่งเว็บส่งมาหรือไม่ก็ตาม)
-  lines = lines.map((l, i) => ({ ...l, voucher_line_ids: prev[i]?.voucher_line_ids ?? l.voucher_line_ids }));
+  // ★ 2026-11-14 จับคู่ด้วยรหัสแถว (rid) ไม่ใช่ลำดับ — ลากย้าย/แบ่งแถวแล้ว id ไม่ไปติดผิดแถว · แถวใหม่จากการแบ่ง = ยังไม่มี id
+  const prevByRid = new Map(prev.filter((p) => p.rid).map((p) => [p.rid as string, p]));
+  lines = ensureRowIds(lines.map((l, i) => ({ ...l, voucher_line_ids: (l.rid ? prevByRid.get(l.rid) : prev[i])?.voucher_line_ids ?? l.voucher_line_ids })));
   const patch: Row = { updated_at: new Date().toISOString() };
   if (body.bill_no !== undefined) patch.bill_no = str(body.bill_no) || null;
   if (body.bill_date !== undefined) patch.bill_date = normDate(body.bill_date);

@@ -8,7 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aiChat } from "@/lib/paid-services-server";
 import type { UseCtx } from "@/lib/paid-services-server";
-import { readFileRef } from "@/lib/file-ref-server";
+import { billFileParts } from "@/lib/bill-file-parts";
 import { isCNY } from "@/lib/landed-cost";
 import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 import { recomputeVoucher, loadSkus, parentBasis } from "@/lib/purchase-voucher-server";
@@ -16,9 +16,10 @@ import { normDate } from "@/lib/delivery-bill";
 import { loadSkuCnNames, fillSkuCnNames } from "@/lib/sku-cn-name";
 import { createManualPo } from "@/lib/po-manual";
 import {
-  groupKey, stripCode, matchBillLines, normalizeBillLine, distributeQty, aliasKey, cnNameForSku,
+  groupKey, stripCode, matchAndSplit, normalizeBillLine, distributeQty, aliasKey, cnNameForSku,
   type PoGroup, type PoGroupLine, type SellerBillLine, type AliasRow,
 } from "@/lib/seller-bill-match";
+import { BILL_ORDER_RULE, orderByBillPosition } from "@/lib/bill-line-order";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -150,7 +151,7 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
   "lines": [
     { "name_cn": "品名ตามบิล", "spec_cn": "规格/颜色/尺寸/型号 ตามบิล หรือ null", "name_th": "ชื่อแปลไทย", "spec_th": "สเปกแปลไทย หรือ null",
       "qty": ตัวเลข, "unit": "个/条/米/码/卷/包… หรือ null", "unit_price": ตัวเลข, "amount": ตัวเลข,
-      "is_fee": false, "candidate": "P12 หรือ null", "confidence": 0.0-1.0, "reason": "เหตุผลสั้น ๆ ภาษาไทย" }
+      "is_fee": false, "candidate": "P12 หรือ null", "confidence": 0.0-1.0, "reason": "เหตุผลสั้น ๆ ภาษาไทย", "page": 1, "line_no": 1 }
   ]
 }
 
@@ -165,23 +166,11 @@ export const BILL_READ_RULES = `- ตัวเลขอ่านตามบิ�
 - ค่าส่ง ค่าขนส่ง ค่ากล่อง ค่าแพ็ก ภาษี (运费 / 快递费 / 物流费 / 包装费 / 纸箱 / 税) → is_fee = true
 - คำแปล (ใช้คำแบบนี้): 狗扣/钩子=คอหมา · D扣/D字扣=ตัวดี · 日字扣=ห่วงเลขแปด · 方扣=ห่วงสี่เหลี่ยม · 圆环/O环=ห่วงกลม · 拉头/拉片=หางซิป · 拉链=ซิป · 尼龙拉链=ซิปไนล่อน · 金属拉链=ซิปฟันเหล็ก · 树脂拉链=ซิปฟันกระดูก · 链条=โซ่ · 气眼/鸡眼=ตาไก่ · 铆钉=นมหนู · 磁扣=กระดุมแม่เหล็ก · 线=ด้าย · 布=ผ้า · 织带=สายผ้า · 绳=เชือก
 - สี: 镍色/白镍=สีนิเกิ้ล · 银色=สีเงิน · 枪色/枪黑/黑镍=สีรมดำ · 金色=สีทอง · 浅金=สีทองอ่อน · 黑色=สีดำ · 白色=สีขาว · 米白/米色=สีครีม · 古铜=สีทองแดงรมดำ · 玫瑰金=สีโรสโกลด์
-- ถ้ารูปไม่ใช่บิลซื้อของ ให้ "is_bill": false และ lines = []`;
+- ถ้ารูปไม่ใช่บิลซื้อของ ให้ "is_bill": false และ lines = []${BILL_ORDER_RULE}`;
 const SYSTEM_FULL = SYSTEM + BILL_READ_RULES;
 
-/** ไฟล์บิล (รูป/PDF หลายไฟล์) → ชิ้นส่วนข้อความที่ส่งให้ AI · อ่านไฟล์ไม่ได้ = โยน Error ภาษาคน */
-export async function billFileParts(admin: Admin, refs: string[]): Promise<unknown[]> {
-  const parts: unknown[] = [];
-  for (const [i, ref] of refs.entries()) {
-    const f = await readFileRef(admin, ref);
-    if (!f) throw new Error(`อ่านไฟล์บิลที่ ${i + 1} ไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ) — ลองแนบใหม่อีกครั้ง`);
-    const isPdf = /pdf/i.test(f.contentType) || /\.pdf$/i.test(ref);
-    const b64 = Buffer.from(f.bytes).toString("base64");
-    parts.push(isPdf
-      ? { type: "file", file: { filename: `bill-${i + 1}.pdf`, file_data: `data:application/pdf;base64,${b64}` } }
-      : { type: "image_url", image_url: { url: `data:${f.contentType.startsWith("image/") ? f.contentType : "image/jpeg"};base64,${b64}`, detail: "high" } });
-  }
-  return parts;
-}
+/** ไฟล์บิล (รูป/PDF หลายไฟล์) → ชิ้นส่วนที่ส่งให้ AI — ย้ายไปของกลาง lib/bill-file-parts (ใบส่งของขนส่งใช้ด้วย) · re-export ไว้ให้ที่เรียกเดิม */
+export { billFileParts };
 
 /** รายการ PO ที่ส่งให้ AI เลือก (รหัส P1…) + ตารางแปลงรหัสกลับเป็นกลุ่ม */
 export function poCandidatePrompt(groups: PoGroup[]): { text: string; idOf: Map<string, string> } {
@@ -201,13 +190,16 @@ const numOrNull = (v: unknown): number | null => {
 };
 /** แถวจาก AI → SellerBillLine (ตัดแถวรวม/แถวว่าง · ค่าส่ง/ค่ากล่อง = is_fee) */
 export function sanitizeAiBillLines(rawLines: unknown, idOf?: Map<string, string>): SellerBillLine[] {
-  const rows = Array.isArray(rawLines) ? (rawLines as Row[]) : [];
+  // ★ 2026-11-14 เรียงตามบิลจริง (หน้า + เลขบรรทัดที่ AI ส่ง) กัน AI สลับ — lib/bill-line-order
+  const rows = orderByBillPosition(Array.isArray(rawLines) ? (rawLines as Row[]) : [], (r) => ({ page: r.page, line_no: r.line_no }));
   return rows.map((r) => {
     const key = idOf ? idOf.get(str(r.candidate).toUpperCase()) ?? null : null;
     const fee = r.is_fee === true || /运费|快递|物流|包装|纸箱|税/.test(`${str(r.name_cn)}${str(r.spec_cn)}`);
-    return normalizeBillLine({ ...r, is_fee: fee, ai_pick: fee ? null : key, ai_conf: r.confidence, decision: null, manual: false, voucher_line_ids: [] });
+    return normalizeBillLine({ ...r, is_fee: fee, ai_pick: fee ? null : key, ai_conf: r.confidence, decision: null, manual: false, voucher_line_ids: [], rid: null, no: null });
   }).filter((l) => l.name_cn || l.name_th || l.qty != null || l.amount != null)
-    .filter((l) => !/^(合计|总计|小计|大写|total)/i.test(str(l.name_cn)));
+    .filter((l) => !/^(合计|总计|小计|大写|total)/i.test(str(l.name_cn)))
+    // เลขบรรทัดบนกระดาษ (#1..n ต่อเนื่องทุกหน้า) + รหัสแถวคงที่ — ลากย้าย/แบ่งรอบแล้วยังติดแถวเดิม
+    .map((l, i) => ({ ...l, no: i + 1, rid: `b${i + 1}` }));
 }
 export const billTotalOf = (v: unknown) => numOrNull(v);
 
@@ -261,7 +253,7 @@ export async function aiPickCandidates(lines: SellerBillLine[], groups: PoGroup[
 export async function rematchLines(admin: Admin, v: VoucherLite, lines: SellerBillLine[]): Promise<{ lines: SellerBillLine[]; groups: PoGroup[] }> {
   const groups = await loadShopGroups(admin, v);
   const aliases = await loadAliases(admin, v.seller_partner_id);
-  return { lines: matchBillLines(lines, groups, aliases), groups };
+  return { lines: matchAndSplit(lines, groups, aliases), groups };
 }
 
 export type ApplyResult = { inserted: number; updated: number; expenses: number; remembered: number; filledCn: number; backfilled: { po_id: string; po_no: string } | null; lines: SellerBillLine[] };

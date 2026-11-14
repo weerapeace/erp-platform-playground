@@ -18,7 +18,7 @@ import {
   SELLER_BILL_MODEL, BILL_READ_RULES, billFileParts, sanitizeAiBillLines, billTotalOf, aiPickCandidates,
   loadVoucherLite, loadShopGroups, loadAliases,
 } from "@/lib/seller-bill";
-import { groupKey, stripCode, matchBillLines, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { groupKey, stripCode, matchAndSplit, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 import { rankShops, autoPick, voucherCurrency, accountMatch, phoneMatch, type ShopLite, type ShopCandidate } from "@/lib/seller-bill-shop";
 
 type Admin = SupabaseClient;
@@ -134,7 +134,7 @@ const SYSTEM_INTAKE = `คุณเป็นผู้ช่วยฝ่ายจ
       "shop_candidate": "S3 หรือ null", "shop_confidence": 0.0-1.0,
       "bill_no": "เลขที่บิล หรือ null", "bill_date": "YYYY-MM-DD หรือ null", "currency": "CNY หรือ THB", "total_amount": ตัวเลขยอดรวมทั้งบิล หรือ null,
       "lines": [ { "name_cn": "品名ตามบิล", "spec_cn": "规格/颜色/尺寸 หรือ null", "name_th": "ชื่อแปลไทย", "spec_th": "สเปกแปลไทย หรือ null",
-                   "qty": ตัวเลข, "unit": "个/条/米/码… หรือ null", "unit_price": ตัวเลข, "amount": ตัวเลข, "is_fee": false } ] }
+                   "qty": ตัวเลข, "unit": "个/条/米/码… หรือ null", "unit_price": ตัวเลข, "amount": ตัวเลข, "is_fee": false, "page": 1, "line_no": 1 } ] }
   ],
   "unreadable_reason": "ถ้าอ่านไม่ได้เลย บอกเหตุผลสั้น ๆ ภาษาไทย (เช่น รูปเบลอ / ไม่ใช่บิลซื้อของ) หรือ null"
 }
@@ -218,7 +218,7 @@ export async function createVoucherFromSellerBill(admin: Admin, input: CreateFro
   const groups = await loadShopGroups(admin, v);
   const aliases = await loadAliases(admin, v.seller_partner_id);
   const picked = await aiPickCandidates(input.lines ?? [], groups, { userId: actor.id });
-  const lines = matchBillLines(picked, groups, aliases);
+  const lines = matchAndSplit(picked, groups, aliases);
   const { error } = await admin.from("purchase_delivery_bills").insert({
     voucher_id: voucherId, r2_key: refs[0], kind: "seller",
     bill_no: str(input.bill_no) || null, seller_text: str(input.seller_text) || null, bill_date: billDate, total_amount: input.total_amount ?? null, currency: input.currency ?? null,

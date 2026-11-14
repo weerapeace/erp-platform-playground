@@ -13,7 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeAudit } from "@/lib/audit";
 import { createManualVoucher, recomputeVoucher, loadSkus, parentBasis } from "@/lib/purchase-voucher-server";
 import { loadVoucherLite, loadShopGroups, loadAliases, parseSellerBill } from "@/lib/seller-bill";
-import { matchBillLines, checkBillMath, type PoGroup } from "@/lib/seller-bill-match";
+import { matchAndSplit, checkBillMath, type PoGroup } from "@/lib/seller-bill-match";
 import { shopNameSimilarity } from "@/lib/partner-match";
 
 type Admin = SupabaseClient;
@@ -148,7 +148,7 @@ export async function createVoucherFromChinaBill(admin: Admin, billId: string, o
   if (mode === "ai") {
     try {
       const { header, lines, raw } = await parseSellerBill(admin, files, sorted);
-      const matched = matchBillLines(lines, sorted, await loadAliases(admin, v.seller_partner_id));
+      const matched = matchAndSplit(lines, sorted, await loadAliases(admin, v.seller_partner_id));
       await admin.from("purchase_delivery_bills").insert({
         voucher_id: voucherId, r2_key: files[0], kind: "seller", bill_no: header.bill_no, seller_text: header.seller_text, bill_date: header.bill_date ?? billDate,
         total_amount: header.total_amount, currency: header.currency, lines: matched, raw: { ...raw, files, china_bill_id: billId }, status: "parsed", created_by: opts.actor.name,

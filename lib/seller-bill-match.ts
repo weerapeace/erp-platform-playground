@@ -39,6 +39,12 @@ export type SellerBillLine = {
   sku_pick: SkuPick | null;
   /** เลือก PO ของร้านอื่น + ย้าย PO ใบนั้นมาเป็นร้านนี้ (ทำผ่าน API กลาง po-edit ก่อนใส่ลงใบ) — match_key = กลุ่มใน PO นั้น */
   move_po: { po_id: string; po_no: string; from_name: string | null } | null;
+  /** ★ 2026-11-14 รหัสแถวคงที่ — ลากย้าย/แบ่งแถวแล้วข้อมูลที่ผูกแถว (voucher_line_ids) ไม่สลับ · แถวเก่าไม่มี = "L<ลำดับที่เก็บ>" */
+  rid?: string | null;
+  /** เลขบรรทัดบนกระดาษ (โชว์ "#3") — lib/bill-line-order · แถวที่แบ่งรอบได้เลขเดียวกับแถวเดิม */
+  no?: number | null;
+  /** หน้า/ไฟล์ที่เจอแถวนี้ (บิลหลายหน้า) */
+  page?: number | null;
 };
 export type SkuPick = { id: string; code: string; name: string; uom: string | null };
 
@@ -297,6 +303,74 @@ export function splitAcrossRounds(qty: number, rounds: PoGroup[]): { key: string
   return out;
 }
 
+/**
+ * แตกแถวบิล 1 แถวลงหลายรอบ (เก่าก่อน) — ยอด ¥ แบ่งตามจำนวน แถวสุดท้ายเก็บเศษ ให้รวมเท่าเดิม
+ * แถวแรกคงรหัสแถวเดิม · แถวต่อ ๆ ไปได้รหัสใหม่ "<rid>.2" … · เลขบรรทัดบนกระดาษ (no) เท่าเดิมทุกแถว
+ * ใช้ทั้งปุ่ม "แบ่งหลายรอบ" (หน้าเว็บ) และแบ่งอัตโนมัติ (autoSplitRounds) · แบ่งไม่ได้ (รอบเดียว) = คืนแถวเดิม
+ */
+export function splitLineAcrossRounds(l: SellerBillLine, rounds: PoGroup[], groups: PoGroup[], aliases: AliasRow[], note = "แบ่งจากแถวเดิม"): SellerBillLine[] {
+  const q = Number(l.qty) || 0;
+  const parts = splitAcrossRounds(q, rounds);
+  // ได้รอบเดียว: รอบเดิม = ไม่เปลี่ยน · รอบอื่น (รอบเดิมเต็มแล้ว) = ย้ายทั้งแถวไปรอบนั้น
+  if (parts.length === 0 || (parts.length === 1 && parts[0].key === l.match_key)) return [l];
+  const total = l.amount ?? q * (l.unit_price ?? 0);
+  let acc = 0;
+  const qtyLabel = Number.isInteger(q) ? String(q) : q.toFixed(2);
+  const fromPo = groups.find((x) => x.key === l.match_key)?.po_no ?? "เดิม";
+  return parts.map((p, k) => {
+    const r = rounds.find((x) => x.key === p.key) ?? groups.find((x) => x.key === p.key)!;
+    const amt = k === parts.length - 1 ? Math.round((total - acc) * 100) / 100 : Math.round(p.qty * (l.unit_price ?? 0) * 100) / 100;
+    acc += amt;
+    const base = groups.find((x) => x.key === p.key) ?? r;
+    const row = applyGroupToLine({ ...l, qty: p.qty, amount: amt, voucher_line_ids: [], sku_pick: null, move_po: null, rid: k === 0 ? l.rid ?? null : `${l.rid ?? "x"}.${k + 1}` }, base, groups, aliases, l.manual);
+    const msg = parts.length === 1 ? `รอบ ${fromPo} ค้างไม่พอ → ย้ายไปรอบ ${base.po_no}` : `${note} ${qtyLabel} → รอบ ${base.po_no}`;
+    return { ...row, decision: l.decision, warns: [...row.warns, msg] };
+  });
+}
+
+/**
+ * ★ 2026-11-14 เจ้าของ: "ตรง PO มันมี 2 ใบอะ แต่ได้แค่อันเดียว" → บิลมากกว่าที่ค้างรอบนั้น = แตกแถวลงรอบถัดไปให้อัตโนมัติ (เก่าก่อน)
+ *   เช่น บิล 330 · PO-00246 ค้าง 240 · PO-00302 ค้าง 130 → 240 + 90
+ * นับ "ที่ค้าง" หักจำนวนที่แถวก่อนหน้าในบิลเดียวกันจองไปแล้ว · ไม่แตะแถวที่ใส่ลงใบแล้ว / ค่าใช้จ่าย / ข้าม / ย้าย PO ร้านอื่น / ผูกรหัสอย่างเดียว
+ * ไม่อยากแบ่ง → กดเลือกรอบเดียวที่ปุ่มรอบในแถว (หน้าเว็บ) ได้เหมือนเดิม — แถวที่คนเลือกเอง (manual) จึงไม่โดนแบ่งซ้ำ
+ *   ยกเว้นแถวที่ระบุใน force (รหัสแถว) = เพิ่งเลือกสินค้าเองในป๊อป → แบ่งให้ครั้งเดียวตอนนั้น
+ */
+export function autoSplitRounds(lines: SellerBillLine[], groups: PoGroup[], aliases: AliasRow[], force?: Set<string>, onlyForce = false): SellerBillLine[] {
+  const byKey = new Map(groups.map((g) => [g.key, g]));
+  const used = new Map<string, number>();
+  const take = (key: string, q: number) => used.set(key, (used.get(key) ?? 0) + q);
+  const out: SellerBillLine[] = [];
+  for (const l of lines) {
+    const g = l.match_key ? byKey.get(l.match_key) : undefined;
+    const q = Number(l.qty) || 0;
+    const eligible = !!g && !l.is_fee && !l.move_po && !l.sku_pick && !(l.voucher_line_ids?.length) && l.decision !== "skip" && l.decision !== "expense" && q > 0
+      && (onlyForce ? !!l.rid && !!force?.has(l.rid) : !l.manual || (!!l.rid && !!force?.has(l.rid)));
+    const avail = (x: PoGroup) => Math.max(0, x.remaining - (used.get(x.key) ?? 0));
+    if (!eligible || q <= avail(g!) + 1e-9) { if (g) take(g.key, q); out.push(l); continue; }
+    const rounds = roundsOf(g!, groups).map((r) => ({ ...r, remaining: avail(r) }));
+    if (!rounds.some((r) => r.key !== g!.key && r.remaining > 1e-9)) { take(g!.key, q); out.push(l); continue; }
+    const parts = splitLineAcrossRounds(l, rounds, groups, aliases, "แบ่งอัตโนมัติจากแถวเดิม");
+    for (const p of parts) { if (p.match_key) take(p.match_key, Number(p.qty) || 0); out.push(p); }
+  }
+  return out;
+}
+
+/** จับคู่ + แบ่งรอบอัตโนมัติ (ใช้ทุกที่ที่อ่านบิลเพื่อลงใบสำคัญ) */
+export function matchAndSplit(lines: SellerBillLine[], groups: PoGroup[], aliases: AliasRow[]): SellerBillLine[] {
+  return autoSplitRounds(matchBillLines(lines, groups, aliases), groups, aliases);
+}
+
+/** รหัสแถวต้องไม่ว่าง/ไม่ซ้ำ (ข้อมูลเก่า / แถวที่แบ่ง) — ซ้ำหรือว่าง = ตั้งใหม่ */
+export function ensureRowIds(lines: SellerBillLine[]): SellerBillLine[] {
+  const seen = new Set<string>();
+  return lines.map((l, i) => {
+    let rid = l.rid ?? "";
+    if (!rid || seen.has(rid)) { rid = `L${i}`; let k = 2; while (seen.has(rid)) rid = `L${i}.${k++}`; }
+    seen.add(rid);
+    return rid === l.rid ? l : { ...l, rid };
+  });
+}
+
 /** แบ่งจำนวนในบิลลงบรรทัด PO ย่อยของกลุ่ม — ใบสั่งผลิตเก่าก่อน (ตามลำดับบรรทัด) · เกินที่ค้าง = ใส่บรรทัดสุดท้าย */
 export function distributeQty(qty: number, lines: PoGroupLine[]): { id: string; qty: number }[] {
   const sorted = [...lines].sort((a, b) => a.sort_order - b.sort_order);
@@ -351,7 +425,8 @@ export function otherShopHint(line: SellerBillLine, others: PoGroup[]): PoGroup 
 }
 
 /** แปลงแถวจาก AI/DB ให้ครบช่อง (กันข้อมูลเก่าหรือ AI ตอบไม่ครบ) */
-export function normalizeBillLine(r: Record<string, unknown>): SellerBillLine {
+/** แถวจาก DB/หน้าเว็บ → SellerBillLine · idx = ลำดับที่เก็บ (ส่งมาจาก .map) ใช้ตั้งรหัสแถวให้แถวเก่าที่ยังไม่มี rid */
+export function normalizeBillLine(r: Record<string, unknown>, idx?: number): SellerBillLine {
   const n = (v: unknown): number | null => { if (v === null || v === undefined || v === "") return null; const x = Number(String(v).replace(/[,，\s¥￥]/g, "")); return Number.isFinite(x) ? x : null; };
   const t = (v: unknown) => s(v) || null;
   const dec = r.decision === "confirmed" || r.decision === "skip" || r.decision === "expense" ? r.decision : null;
@@ -366,6 +441,8 @@ export function normalizeBillLine(r: Record<string, unknown>): SellerBillLine {
     short_action: r.short_action === "reduce" ? "reduce" : r.short_action === "keep" ? "keep" : null,
     sku_pick: skuPickOf(r.sku_pick),
     move_po: movePoOf(r.move_po),
+    rid: s(r.rid) || (typeof idx === "number" ? `L${idx}` : null),
+    no: n(r.no), page: n(r.page),
   };
 }
 function skuPickOf(v: unknown): SkuPick | null {

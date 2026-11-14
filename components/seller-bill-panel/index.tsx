@@ -7,9 +7,11 @@
  * ใช้: <SellerBillPanel voucherId readonly onApplied bare? />  (bare = ไม่มีกรอบ/หัวพับในตัว ใช้ในกล่องพับของหน้า) · API /api/purchasing/vouchers/<id>/seller-bills
  * กติกาจับคู่: lib/seller-bill-match.ts · เอกสาร docs/seller-bill-match.md
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { FileInput } from "@/components/file-input";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { billLineNo } from "@/lib/bill-line-order";
 import { HoverPreview } from "@/components/hover-image";
 import { useFileRefUrls } from "@/components/file-ref";
 import { useToast } from "@/components/toast";
@@ -18,7 +20,10 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { isPdfRef } from "@/lib/file-ref";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, splitAcrossRounds, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, splitLineAcrossRounds, autoSplitRounds, ensureRowIds, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+
+/** ลากย้ายแถว: หลายบิลในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับบิล × ROW_SPAN + ลำดับแถว (ลากข้ามบิลไม่ได้) */
+const ROW_SPAN = 10000;
 
 /** งานแก้ใบสั่งซื้อจากหน้านี้ (ผ่าน API กลาง po-edit / cancel-line) — ย้าย PO ทำ "ก่อน" ใส่ลงใบ · ลด/ปิดยอด ทำ "หลัง" */
 type PoPlan = {
@@ -67,7 +72,6 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   const [cands, setCands] = useState<Candidate[]>([]);
   const [hasPartner, setHasPartner] = useState(true);
   const [draft, setDraft] = useState<Record<string, SellerBillLine[]>>({});
-  const [uploadKey, setUploadKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // "parse" | bill id
   const [remember, setRemember] = useState(true);
   const [fillCn, setFillCn] = useState(true);
@@ -92,25 +96,32 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   const otherByKey = useMemo(() => new Map((otherGroups ?? []).map((g) => [g.key, g])), [otherGroups]);
   const gAny = (key: string | null | undefined) => (key ? gByKey.get(key) ?? otherByKey.get(key) : undefined);
   // ★ 2026-11-05 เลือกรอบ (ใบสั่งซื้อ) ในแถว — สินค้าเดียวกันค้างหลายรอบ (lib/seller-bill-match roundsOf/splitAcrossRounds)
+  //   กดเลือกรอบเดียว = ตั้งใจลงรอบนั้น (manual) → ไม่โดนแบ่งอัตโนมัติซ้ำ
   const pickRound = (billId: string, idx: number, r: PoGroup) =>
     setLines(billId, (ls) => ls.map((l, i) => (i === idx ? { ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null, move_po: null }, r, groups, [], true), decision: l.decision } : l)));
-  /** แตกแถวบิลออกเป็นหลายแถว ตามรอบ (เก่าก่อน) — ยอด ¥ แบ่งตามจำนวน แถวสุดท้ายเก็บเศษ ให้รวมเท่าเดิม */
+  /** แตกแถวบิลออกเป็นหลายแถว ตามรอบ (เก่าก่อน) — ของกลาง splitLineAcrossRounds (ยอด ¥ รวมเท่าเดิม · เลขบรรทัดบิลเดิม) */
   const splitRow = (billId: string, idx: number, rounds: PoGroup[]) => setLines(billId, (ls) => {
-    const l = ls[idx]; const q = Number(l.qty) || 0;
-    const parts = splitAcrossRounds(q, rounds);
-    if (parts.length < 2) return ls;
-    const total = l.amount ?? q * (l.unit_price ?? 0);
-    let acc = 0;
-    const rows = parts.map((p, k) => {
-      const r = rounds.find((x) => x.key === p.key)!;
-      const amt = k === parts.length - 1 ? Math.round((total - acc) * 100) / 100 : Math.round(p.qty * (l.unit_price ?? 0) * 100) / 100;
-      acc += amt;
-      const row = applyGroupToLine({ ...l, qty: p.qty, amount: amt, voucher_line_ids: [], sku_pick: null, move_po: null }, r, groups, [], true);
-      return { ...row, decision: l.decision, warns: [...row.warns, `แบ่งจากแถวเดิม ${n2(q)} → รอบ ${r.po_no}`] };
-    });
-    return [...ls.slice(0, idx), ...rows, ...ls.slice(idx + 1)];
+    const rows = splitLineAcrossRounds({ ...ls[idx], manual: true }, rounds, groups, []);
+    if (rows.length < 2) return ls;
+    return ensureRowIds([...ls.slice(0, idx), ...rows, ...ls.slice(idx + 1)]);
   });
-
+  /** ★ 2026-11-14 ลากย้ายแถว (เจ้าของขอ "อยากให้เราย้ายเองได้") — จำลำดับเมื่อกดบันทึก / ใส่ลงใบ */
+  const drag = useDragReorder((from, to) => {
+    const bi = Math.floor(from / ROW_SPAN);
+    if (Math.floor(to / ROW_SPAN) !== bi) return;   // ลากข้ามบิลไม่ได้
+    const b = bills[bi]; if (!b) return;
+    setLines(b.id, (ls) => moveItem(ls, from % ROW_SPAN, to % ROW_SPAN));
+    setMsg((m) => ({ ...m, [b.id]: "ย้ายแถวแล้ว — กดบันทึก (หรือใส่ลงใบ) เพื่อจำลำดับ" }));
+  }, { group: `seller-bill-${voucherId}` });
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  /** ★ 2026-11-14 ลาก/วาง/เลือกไฟล์เสร็จ = ให้ AI อ่านต่อทันที (ไม่ต้องกดปุ่ม) · หลายไฟล์ = บิลละไฟล์ อ่านทีละใบตามคิว */
+  const readUploaded = (ref: string | null) => {
+    if (!ref) return;
+    setReading((r) => ({ done: r?.done ?? 0, total: (r?.total ?? 0) + 1 }));
+    queueRef.current = queueRef.current.then(() => parse(ref)).then(() =>
+      setReading((r) => (!r || r.done + 1 >= r.total ? null : { ...r, done: r.done + 1 })));
+  };
   const load = useCallback(async () => {
     try {
       const j = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`).then((r) => r.json());
@@ -143,7 +154,6 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
       const b = j.data as Bill;
       const ok = b.lines.filter((l) => l.level === "ok").length, mid = b.lines.filter((l) => l.level === "mid").length, no = b.lines.filter((l) => l.level === "no").length;
       toast.success(`อ่านบิลแล้ว ${b.lines.length} รายการ — มั่นใจ ${ok} · ให้เช็ก ${mid} · ไม่เจอ ${no} · ตรวจแล้วกดยืนยันทีละแถว`);
-      setUploadKey(null);
       setDraft((p) => ({ ...p, [b.id]: b.lines }));
       await load();
     } catch (e) { toast.error("อ่านบิลไม่สำเร็จ: " + String((e as Error).message ?? e)); }
@@ -260,9 +270,19 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   }, [groups, otherGroups, pickQ, pickTab]);
   const openPick = (billId: string, idx: number, tab: PickTab = "this", q = "") => { setPickFor({ billId, idx }); setPickTab(tab); setPickQ(q); setPickAsk(null); setPickSku(null); };
   const closePick = () => { setPickFor(null); setPickQ(""); setPickAsk(null); setPickSku(null); };
-  const setPicked = (fn: (l: SellerBillLine) => SellerBillLine) => { if (!pickFor) return; setLines(pickFor.billId, (ls) => ls.map((l, i) => (i === pickFor.idx ? fn(l) : l))); closePick(); };
+  /** ใส่ผลที่เลือกในป๊อปลงแถว · split = บิลมากกว่าที่ค้างรอบนั้น → แบ่งลงรอบถัดไปให้อัตโนมัติ (เฉพาะแถวนี้ · เก่าก่อน) */
+  const setPicked = (fn: (l: SellerBillLine) => SellerBillLine, split = false) => {
+    if (!pickFor) return;
+    const at = pickFor.idx;
+    setLines(pickFor.billId, (ls) => {
+      const next = ensureRowIds(ls.map((l, i) => (i === at ? fn(l) : l)));
+      const rid = next[at]?.rid;
+      return split && rid ? ensureRowIds(autoSplitRounds(next, groups, [], new Set([rid]), true)) : next;
+    });
+    closePick();
+  };
   /** ① PO ร้านนี้ */
-  const choose = (g: PoGroup) => setPicked((l) => ({ ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null, move_po: null }, g, groups, [], true), decision: "confirmed" }));
+  const choose = (g: PoGroup) => setPicked((l) => ({ ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null, move_po: null }, g, groups, [], true), decision: "confirmed" }), true);   // ★ 2026-11-14 แบ่งรอบอัตโนมัติถ้าบิลเกินที่ค้าง
   /** ② PO ร้านอื่น → ย้าย PO มาร้านนี้ (ทำตอนกดใส่ลงใบ) */
   const chooseMove = (g: PoGroup) => setPicked((l) => ({ ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null }, g, [...groups, g], [], true), move_po: { po_id: g.po_id, po_no: g.po_no, from_name: g.partner_name ?? null }, decision: "confirmed" }));
   /** ② ใช้แค่รหัสสินค้า · ③ สินค้าทั้งหมด → นอกใบสั่งซื้อ */
@@ -276,7 +296,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
           <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
             {open ? "▾" : "▸"} <Icon value="🧾" /> บิลจากร้าน (ภาษาจีน) {bills.length > 0 && <span className="font-normal text-slate-400">· {bills.length} ใบ</span>}
           </button>
-          <span className="text-[11px] text-slate-400">อัปโหลดบิล → AI อ่านจีน + แปลไทย → จับคู่กับใบสั่งซื้อของร้านนี้เท่านั้น → เช็กทีละแถว → ใส่ลงใบ (ราคา ¥ จากบิล)</span>
+          <span className="text-[11px] text-slate-400">ลากบิลมาวาง → AI อ่านจีน + แปลไทย → จับคู่กับใบสั่งซื้อของร้านนี้เท่านั้น → เช็กทีละแถว → ใส่ลงใบ (ราคา ¥ จากบิล)</span>
         </div>
       )}
       {(bare || open) && (
@@ -285,10 +305,15 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
           {groups.length === 0 && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">ร้านนี้ไม่มีใบสั่งซื้อที่ยังค้าง (สกุลเดียวกับใบนี้) — บิลร้านจับคู่ได้เฉพาะของที่อยู่ในใบสั่งซื้อ</div>}
           {!readonly && (
             <div className="flex items-end gap-3 flex-wrap">
-              <div className="w-64"><FileInput label="รูปหรือ PDF บิลร้าน" value={uploadKey} onChange={setUploadKey} folder="seller-bills" category="supplier_bills" /></div>
-              <button onClick={() => uploadKey && void parse(uploadKey)} disabled={!uploadKey || busy === "parse"} className="h-9 px-4 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 inline-flex items-center gap-1.5">
-                <Icon value="🔍" /> {busy === "parse" ? "กำลังอ่าน + จับคู่… (10-30 วิ)" : "อ่านบิล + จับคู่"}
-              </button>
+              {/* ★ 2026-11-14 ลาก/วาง Ctrl+V/เลือกไฟล์ = AI อ่านต่อเองทันที (ไม่มีปุ่ม "อ่านบิล") · หลายไฟล์ = บิลละไฟล์ */}
+              <div className="w-full max-w-md">
+                <FileInput label="รูปหรือ PDF บิลร้าน" value={null} onChange={readUploaded} folder="seller-bills" category="supplier_bills" multiple pasteFromPage
+                  hint="วางแล้ว AI อ่าน + จับคู่ให้เลย (10-30 วิ/ใบ) · หลายไฟล์ = บิลละไฟล์" />
+              </div>
+              {reading && (
+                <span className="h-9 inline-flex items-center gap-1.5 text-sm text-indigo-700"><span className="animate-pulse">⏳</span>
+                  กำลังอ่าน + จับคู่ {reading.total > 1 ? `ใบที่ ${Math.min(reading.done + 1, reading.total)}/${reading.total}` : ""}… (10-30 วิ)</span>
+              )}
               {cands.filter((c) => !bills.some((b) => b.r2_key === c.r2_key)).map((c) => (
                 <button key={`${c.gr_id}-${c.kind}`} onClick={() => void parse(c.r2_key, c.gr_id)} disabled={busy === "parse"} title="ไฟล์ที่แนบไว้ตอนรับของ — ให้ AI อ่านได้เลย ไม่ต้องอัปโหลดซ้ำ"
                   className="h-9 px-3 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-40">
@@ -299,7 +324,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
           )}
           {bills.length === 0 && <div className="text-xs text-slate-300 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีบิลร้าน —</div>}
 
-          {bills.map((b) => {
+          {bills.map((b, bi) => {
             const lines = draft[b.id] ?? b.lines;
             const math = checkBillMath(lines, b.total_amount);
             const decided = lines.length - undecidedCount(lines);
@@ -340,9 +365,14 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                     const picked = !g && l.sku_pick ? l.sku_pick : null;
                     const done = l.decision === "confirmed" || l.decision === "skip" || l.decision === "expense";
                     const bad = math.rowsBad.includes(i);
+                    const dk = bi * ROW_SPAN + i;   // ดัชนีของตัวลาก (แยกบิล)
                     return (
-                      <div key={i} className={`grid md:grid-cols-[minmax(0,1fr)_16px_minmax(0,1.2fr)_7.5rem] gap-2 px-3 py-2 items-center ${done ? "bg-emerald-50/30" : l.level === "no" ? "bg-red-50/30" : ""} ${l.decision === "skip" ? "opacity-60" : ""}`}>
-                        <div className="min-w-0">
+                      <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`grid md:grid-cols-[minmax(0,1fr)_16px_minmax(0,1.2fr)_7.5rem] gap-2 px-3 py-2 items-center ${done ? "bg-emerald-50/30" : l.level === "no" ? "bg-red-50/30" : ""} ${l.decision === "skip" ? "opacity-60" : ""} ${drag.rowCls(dk)}`}>
+                        <div className="min-w-0 flex items-start gap-1.5">
+                          {/* ★ 2026-11-14 เลขบรรทัดบนกระดาษ + หูจับลากย้ายแถว (lib/bill-line-order · components/sortable-list) */}
+                          {!ro && <DragHandle {...drag.handleProps(dk)} title="ลากเพื่อย้ายแถว" className="pt-0.5 text-base" />}
+                          <span className="shrink-0 w-7 pt-0.5 font-mono text-[11px] text-slate-400" title="บรรทัดที่เท่าไรในบิล (บนกระดาษ)">#{billLineNo(l.no, i)}</span>
+                          <div className="min-w-0 flex-1">
                           <div className="text-sm text-slate-800 truncate" title={`${l.name_cn ?? ""} ${l.spec_cn ?? ""}`}>{l.name_cn ?? "—"} {l.spec_cn && <span className="text-slate-500">{l.spec_cn}</span>}</div>
                           <div className="text-[11px] text-slate-500 truncate">{[l.name_th, l.spec_th].filter(Boolean).join(" ") || "—"}</div>
                           <div className="flex items-center gap-1 mt-1 text-xs text-slate-600">
@@ -350,6 +380,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                             <span>{l.unit ?? ""} × ¥</span>
                             <input type="number" inputMode="decimal" step="any" min={0} value={l.unit_price ?? ""} disabled={ro} onChange={(e) => { const p = e.target.value === "" ? null : Number(e.target.value); setLine(b.id, i, { unit_price: p, amount: p != null && l.qty != null ? Math.round(l.qty * p * 100) / 100 : l.amount }); }} className={`${inp} w-16 ${bad ? "border-amber-300" : ""}`} title="ราคาต่อหน่วยในบิล" />
                             <span>= <b className="font-medium text-slate-800">¥{n2(l.amount ?? (l.qty ?? 0) * (l.unit_price ?? 0))}</b></span>
+                          </div>
                           </div>
                         </div>
                         <span className="hidden md:block text-slate-300 text-center">→</span>
