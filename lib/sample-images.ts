@@ -31,7 +31,10 @@ export type SampleAlbum = {
   brand_id: string | null;
   /** อัลบั้มที่ยังไม่ระบุแบรนด์ แต่รูปถูกส่งเข้าใบงานของแบรนด์เดียวกันหมด → แบรนด์นั้น (ไว้แนะนำตอนย้ายอัลบั้มเข้าแบรนด์) */
   suggested_brand_id: string | null;
-  counts: { photos: number; trash: number };
+  /** photos = รูปที่ไม่อยู่ถังขยะ · sent = ในนั้นที่ส่งเข้าใบงานแล้ว · trash = ในถังขยะ */
+  counts: { photos: number; trash: number; sent: number };
+  /** r2_key รูปบนปกการ์ด (รูปแรก ๆ ที่ไม่อยู่ถังขยะ สูงสุด 4) — components/album-cover */
+  preview_keys: string[];
 };
 
 /** ป้ายของอัลบั้ม: ไม่มีแบรนด์ = "sample-images" · มีแบรนด์ = "sample-images:<id>" */
@@ -58,10 +61,15 @@ export function sampleAlbumName(d: Date, brandName?: string | null): string {
   return `SAMPLE ${b ? `${b} ` : ""}${thaiShortDate(d)}`;
 }
 
-export function sampleCounts(photos: readonly Pick<SamplePhoto, "trashed">[]): { photos: number; trash: number } {
-  let trash = 0;
-  for (const p of photos) if (p.trashed) trash++;
-  return { photos: photos.length - trash, trash };
+export function sampleCounts(photos: readonly Pick<SamplePhoto, "trashed" | "moved_to">[]): { photos: number; trash: number; sent: number } {
+  let trash = 0, sent = 0;
+  for (const p of photos) { if (p.trashed) trash++; else if (p.moved_to.length) sent++; }
+  return { photos: photos.length - trash, trash, sent };
+}
+
+/** รูปบนปกอัลบั้ม: รูปที่ไม่อยู่ถังขยะ เรียงตามเวลาลง (เก่าก่อน = รูปแรกของการถ่าย) สูงสุด max รูป */
+export function albumPreviewKeys(photos: readonly Pick<SamplePhoto, "trashed" | "r2_key" | "created_at">[], max = 4): string[] {
+  return photos.filter((p) => !p.trashed && p.r2_key).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(0, max).map((p) => p.r2_key);
 }
 
 /** แบรนด์ที่ควรเป็นของอัลบั้มที่ยังไม่ระบุแบรนด์: รูปที่ส่งเข้าใบงานแล้วไปอยู่ใบงานแบรนด์เดียวกันหมด → แบรนด์นั้น · ไม่มี/หลายแบรนด์ = null */

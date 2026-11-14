@@ -3,8 +3,8 @@
 // ============================================================
 // 📸 SAMPLE Images — อัลบั้มรูปตัวอย่างประจำแบรนด์ + ส่งรูปเข้าใบงานใน Design Dashboard (เจ้าของขอ 2026-11-13)
 //
-// แถบแบรนด์ด้านบน (ทุกแบรนด์ · แบรนด์ของเรา · ไม่ระบุแบรนด์) → อัลบั้มของแบรนด์นั้นเรียงตามวันที่ลง (1 แบรนด์ 1 วัน = 1 อัลบั้ม)
-// ลากรูปมาวาง (ทั้งโฟลเดอร์ก็ได้) → ย่อ ≤2400px + JPEG → คลังไฟล์กลาง → อัลบั้มของแบรนด์ + วันนี้ ทันที (ไม่มีขั้นรอ)
+// แถบแบรนด์ด้านบน → หน้าแฟ้ม = การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) เรียงวันที่ลง (1 แบรนด์ 1 วัน = 1 อัลบั้ม) → กดเปิดอัลบั้ม / ← กลับ
+// ลากรูปมาวาง (ทั้งโฟลเดอร์ก็ได้) → ย่อ ≤2400px + JPEG → คลังไฟล์กลาง → เปิดอัลบั้มอยู่ = เข้าอัลบั้มนั้น · หน้าแฟ้ม = อัลบั้มของแบรนด์ + วันนี้ (ไม่มีขั้นรอ)
 //   แท็บ "ทุกแบรนด์" = เลือกแบรนด์ที่ปุ่มในกรอบวางรูปก่อนวาง (จำแบรนด์ล่าสุด)
 // ไม่มีระบบรอย้ายแล้ว (เจ้าของสั่ง "ไม่ต้องทำเป็นรอ") — รูปอยู่ในอัลบั้มตลอด · ส่งเข้าใบงานแล้วมีป้าย → DS-xxxx
 // เลือกรูป → "ส่งไป Design Dashboard" → ตัวเลือกใบงานกลาง (กรองแบรนด์ของอัลบั้มไว้ให้) → ใบงานแนบรูปเดิมจากคลัง (ไม่ก๊อปไฟล์)
@@ -26,6 +26,7 @@ import { BulkActionBar } from "@/components/bulk-action-bar";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { GalleryColumnsControl, useGalleryColumns } from "@/components/gallery-columns";
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
+import { AlbumCover } from "@/components/album-cover";
 import { safeColor } from "@/components/design-dashboard/dashboard-helpers";
 import { withImageWidth } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
@@ -69,32 +70,29 @@ export function SampleImagesPage() {
   const canMove = can("attachments.upload");   // ส่งเข้าใบงาน = แนบไฟล์ (ด่านเดียวกับใน DB) — ไม่มีสิทธิ์ = ไม่โชว์ปุ่ม
   const brandOf = useCallback((id: string | null | undefined) => (id ? brands.find((b) => b.id === id) ?? null : null), [brands]);
 
-  /** โหลดรายการใหม่ · want = อัลบั้มที่อยากเปิด (ไม่ส่ง = ตัวเดิม ถ้ายังอยู่ในแท็บนี้) */
+  /** โหลดรายการใหม่ · want = อัลบั้มที่อยากเปิด (null = หน้าแฟ้ม · ไม่ส่ง = อัลบั้มที่เปิดอยู่ ถ้ายังอยู่ในแท็บนี้) */
   const reload = useCallback(async (want?: string | null, forTab: BrandTab = tab) => {
     try {
       setErr(null);
       const first = await loadSamples(null);
       const list = first.albums.filter((a) => inTab(a, forTab));
       const id = want !== undefined ? want : albumId;
-      const pickId = id && list.some((a) => a.id === id) ? id : list[0]?.id ?? null;
+      const pickId = id && list.some((a) => a.id === id) ? id : null;
       const d = pickId ? await loadSamples(pickId) : first;
-      setBrands(d.brands); setAlbums(d.albums); setAlbumId(pickId); setPhotos(pickId ? d.photos ?? [] : []);
+      setBrands(d.brands); setAlbums(d.albums); setAlbumId(pickId); setPhotos(pickId ? d.photos ?? [] : null);
       setSel(new Set());
     } catch (e) { setErr((e as Error).message); }
   }, [albumId, tab]);
   useEffect(() => { if (permsReady && canView) void reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [permsReady, canView]);
 
   const openAlbum = async (id: string) => {
-    if (id === albumId) return;
     setAlbumId(id); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false);
     try { const d = await loadSamples(id); setAlbums(d.albums); setBrands(d.brands); setPhotos(d.photos ?? []); }
     catch (e) { setErr((e as Error).message); }
   };
-  const switchTab = (next: BrandTab) => {
-    setTab(next); setTrashView(false); setToBrand(false); setSel(new Set());
-    const first = (albums ?? []).find((a) => inTab(a, next));
-    if (first) void openAlbum(first.id); else { setAlbumId(null); setPhotos([]); }
-  };
+  /** กลับหน้าแฟ้ม (การ์ดอัลบั้ม) */
+  const closeAlbum = () => { setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); };
+  const switchTab = (next: BrandTab) => { setTab(next); closeAlbum(); };
 
   // ── แบรนด์ที่จะลงรูป: แท็บแบรนด์ = แบรนด์นั้น · ไม่ระบุแบรนด์ = ไม่มี · ทุกแบรนด์ = ปุ่มเลือกในกรอบวางรูป (จำล่าสุด) ──
   const uploadBrandId: string | null = tab === NONE ? null : tab !== ALL ? tab : (brandOf(lastBrand)?.id ?? brands[0]?.id ?? null);
@@ -106,13 +104,15 @@ export function SampleImagesPage() {
     if (unsupported.length) pushToast("warning", t(`ข้าม ${unsupported.length} ไฟล์ (RAW/ไฟล์งาน แปลงเป็น JPEG ในเว็บไม่ได้ — ลง JPG/PNG/HEIC แทน)`, `Skipped ${unsupported.length} RAW/work files`));
     if (notImage.length) pushToast("warning", t(`ข้าม ${notImage.length} ไฟล์ที่ไม่ใช่รูป`, `Skipped ${notImage.length} non-image files`));
     if (!ok.length) return;
-    const brandId = uploadBrandId;
+    // เปิดอัลบั้มอยู่ = เพิ่มเข้าอัลบั้มนั้น (เหมือนวางของลงแฟ้ม · เจ้าของเลือก 2026-11-14) · หน้าแฟ้ม = อัลบั้มของแบรนด์ + วันนี้
+    const openNow = albums?.find((a) => a.id === albumId) ?? null;
+    const brandId = openNow ? openNow.brand_id : uploadBrandId;
     cancelRef.current = false;
     let done = 0, dup = 0;
     const fails: string[] = [];
     try {
-      setUp({ name: t(`${ok.length} รูป`, `${ok.length} images`), pct: null, label: t("กำลังเตรียมอัลบั้มของวันนี้", "Preparing today's album") });
-      const album = await ensureTodayAlbum(brandId);
+      setUp({ name: t(`${ok.length} รูป`, `${ok.length} images`), pct: null, label: openNow ? t("กำลังเตรียมลงรูปในอัลบั้มนี้", "Preparing") : t("กำลังเตรียมอัลบั้มของวันนี้", "Preparing today's album") });
+      const album = openNow ? { id: openNow.id, name: openNow.name } : await ensureTodayAlbum(brandId);
       if (brandId) setLastBrand(brandId);
       for (let i = 0; i < ok.length; i++) {
         if (cancelRef.current) break;
@@ -234,116 +234,128 @@ export function SampleImagesPage() {
               {(hasNoBrand || tab === NONE) && <button type="button" className={pill(tab === NONE)} onClick={() => switchTab(NONE)}><Icon value="i:help-circle" />{t("ไม่ระบุแบรนด์", "No brand")}<span className="text-[11px] tabular-nums text-slate-400">{brandTotals.get(NONE) ?? 0}</span></button>}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-              {/* อัลบั้มของแบรนด์ (ตามวันที่ลง) — มือถือเป็นแถวเลื่อนได้ */}
-              <div className="min-w-0">
-                <div className="mb-1.5 text-[12px] font-medium text-slate-400">
-                  {tab === ALL ? t("อัลบั้มทุกแบรนด์", "All albums") : tab === NONE ? t("อัลบั้มที่ยังไม่ระบุแบรนด์", "Albums without a brand") : t(`อัลบั้มของ ${brandOf(tab)?.name ?? ""}`, `Albums of ${brandOf(tab)?.name ?? ""}`)}
+            <div className="min-w-0 space-y-3">
+              {!album && (
+                <div className="text-[13px] text-slate-500">
+                  <b className="font-semibold text-slate-800">{tab === ALL ? t("อัลบั้มทุกแบรนด์", "All albums") : tab === NONE ? t("อัลบั้มที่ยังไม่ระบุแบรนด์", "Albums without a brand") : t(`อัลบั้มของ ${brandOf(tab)?.name ?? ""}`, `Albums of ${brandOf(tab)?.name ?? ""}`)}</b>
+                  {tabAlbums.length > 0 && <> · {t(`${tabAlbums.length} อัลบั้ม`, `${tabAlbums.length} albums`)}</>}
                 </div>
-                {!tabAlbums.length ? <div className="rounded-lg border border-dashed border-slate-200 p-3 text-[12px] text-slate-400">{t("ยังไม่มีอัลบั้ม — ลงรูปชุดแรกแล้วระบบสร้างให้เอง", "No albums yet — your first upload creates one")}</div> : (
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
-                    {tabAlbums.map((a) => (
-                      <button key={a.id} type="button" onClick={() => void openAlbum(a.id)}
-                        className={`flex shrink-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-[13px] lg:w-full ${a.id === albumId ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}>
-                        <span className="flex min-w-0 items-center gap-1.5 truncate">{tab === ALL ? dot(brandOf(a.brand_id)?.color) : <Icon value="i:photo" />}{albumLabel(a)}</span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{t(`${a.counts.photos} รูป`, `${a.counts.photos}`)}</span>
+              )}
+
+              {/* ที่วางรูป / ความคืบหน้า — เปิดอัลบั้มอยู่ = เพิ่มเข้าอัลบั้มนั้น · หน้าแฟ้ม = อัลบั้มของแบรนด์ + วันนี้ */}
+              {up ? <UploadProgress {...up} onCancel={() => { cancelRef.current = true; }} />
+                : canUpload && (
+                  <div {...drop.zone("main")} className={`rounded-xl border-2 border-dashed px-4 py-4 text-center text-sm transition ${drop.over === "main" ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
+                    <button type="button" onClick={() => fileRef.current?.click()} className="w-full">
+                      <div className="text-2xl text-slate-400"><Icon value="i:upload" /></div>
+                      {t("ลากรูปมาวางได้ทีละหลายรูป (ทั้งโฟลเดอร์ก็ได้) หรือกดเพื่อเลือก", "Drag in many photos (or a whole folder), or click to choose")}
+                      <div className="mt-0.5 text-[12px] text-slate-400">
+                        {album
+                          ? t(`เพิ่มเข้าอัลบั้มนี้ (${albumBrand ? albumBrand.name + " · " : ""}${albumLabel(album)}) · ย่อไม่เกิน 2,400px + แปลงเป็น JPEG ให้เอง`, "Adds to this album · shrunk to ≤2,400px JPEG")
+                          : t(`เข้าอัลบั้ม ${brandOf(uploadBrandId)?.name ?? "ไม่ระบุแบรนด์"} · ${thaiShortDate(new Date())} · ย่อไม่เกิน 2,400px + แปลงเป็น JPEG ให้เอง`, `Goes into ${brandOf(uploadBrandId)?.name ?? "no brand"} · today · shrunk to ≤2,400px JPEG`)}
+                      </div>
+                    </button>
+                    {!album && tab === ALL && brands.length > 0 && (
+                      <div className="mt-2 flex flex-wrap items-center justify-center gap-1">
+                        <span className="text-[12px] text-slate-500">{t("ลงเข้าแบรนด์:", "Into brand:")}</span>
+                        {brands.map((b) => (
+                          <button key={b.id} type="button" onClick={() => setLastBrand(b.id)} className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${uploadBrandId === b.id ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>{dot(b.color)}{b.name}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              {album ? (
+                <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={closeAlbum} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:arrow-left" />{t("อัลบั้มทั้งหมด", "All albums")}</button>
+                  <span className="mr-1 flex items-center gap-1.5 text-[15px] font-semibold text-slate-800">{albumBrand ? <>{dot(albumBrand.color)}{albumBrand.name} · </> : null}{albumLabel(album)}</span>
+                  {!album.brand_id && canEdit && brands.length > 0 && (
+                    <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
+                  )}
+                  <span className="flex-1" />
+                  {list.length > 0 && (
+                    <button type="button" onClick={() => setSel(allOn ? new Set() : new Set(list.map((p) => p.id)))} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50">
+                      {allOn ? t("ไม่เลือกทั้งหมด", "Clear all") : t(`เลือกทั้งหมด (${list.length})`, `Select all (${list.length})`)}
+                    </button>
+                  )}
+                  {(trashCount > 0 || trashView) && (
+                    <button type="button" onClick={() => { setTrashView((x) => !x); setSel(new Set()); }} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${trashView ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      <Icon value={trashView ? "i:arrow-left" : "i:trash"} />{trashView ? t("กลับไปที่รูป", "Back to photos") : t(`ถังขยะ (${trashCount})`, `Trash (${trashCount})`)}
+                    </button>
+                  )}
+                  <GalleryColumnsControl cols={cols} onChange={setCols} as="select" />
+                </div>
+              
+                {toBrand && !album.brand_id && (
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-violet-100 bg-violet-50/50 p-2 text-[12px]">
+                    <span className="text-slate-600">{t("อัลบั้มนี้เป็นของแบรนด์ไหน?", "Which brand is this album?")}</span>
+                    {brands.map((b) => (
+                      <button key={b.id} type="button" disabled={busy} onClick={() => void doSetBrand(b.id)}
+                        className={`relative inline-flex h-8 items-center gap-1 rounded-full border bg-white px-3 text-[12px] hover:border-violet-300 disabled:opacity-60 ${album.suggested_brand_id === b.id ? "border-violet-400 text-violet-800" : "border-slate-200 text-slate-700"}`}>
+                        {dot(b.color)}{b.name}{album.suggested_brand_id === b.id && <span className="ml-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">{t("แนะนำ", "Suggested")}</span>}
                       </button>
                     ))}
                   </div>
                 )}
-              </div>
-
-              <div className="min-w-0 space-y-3">
-                {/* ที่วางรูป / ความคืบหน้า */}
-                {up ? <UploadProgress {...up} onCancel={() => { cancelRef.current = true; }} />
-                  : canUpload && (
-                    <div {...drop.zone("main")} className={`rounded-xl border-2 border-dashed px-4 py-4 text-center text-sm transition ${drop.over === "main" ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
-                      <button type="button" onClick={() => fileRef.current?.click()} className="w-full">
-                        <div className="text-2xl text-slate-400"><Icon value="i:upload" /></div>
-                        {t("ลากรูปมาวางได้ทีละหลายรูป (ทั้งโฟลเดอร์ก็ได้) หรือกดเพื่อเลือก", "Drag in many photos (or a whole folder), or click to choose")}
-                        <div className="mt-0.5 text-[12px] text-slate-400">
-                          {t(`เข้าอัลบั้ม ${brandOf(uploadBrandId)?.name ?? "ไม่ระบุแบรนด์"} · ${thaiShortDate(new Date())} · ย่อไม่เกิน 2,400px + แปลงเป็น JPEG ให้เอง`, `Goes into ${brandOf(uploadBrandId)?.name ?? "no brand"} · today · shrunk to ≤2,400px JPEG`)}
-                        </div>
-                      </button>
-                      {tab === ALL && brands.length > 0 && (
-                        <div className="mt-2 flex flex-wrap items-center justify-center gap-1">
-                          <span className="text-[12px] text-slate-500">{t("ลงเข้าแบรนด์:", "Into brand:")}</span>
-                          {brands.map((b) => (
-                            <button key={b.id} type="button" onClick={() => setLastBrand(b.id)} className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${uploadBrandId === b.id ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>{dot(b.color)}{b.name}</button>
-                          ))}
-                        </div>
-                      )}
+              
+                {photos === null ? <LoadingState className="py-12 text-sm" />
+                  : !list.length ? <EmptyState icon={<Icon value={trashView ? "i:trash" : "i:photo"} />} className="p-8"
+                      title={trashView ? t("ถังขยะว่าง", "Trash is empty") : t("ยังไม่มีรูปในอัลบั้มนี้", "No images yet")}
+                      hint={trashView ? undefined : t("ลากรูปมาวางด้านบนได้เลย", "Drop images above")} />
+                  : (
+                    <div className="grid" style={gridStyle}>
+                      {list.map((p) => {
+                        const on = sel.has(p.id);
+                        return (
+                          <div key={p.id} className={`group relative overflow-hidden rounded-xl border bg-white ${on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
+                            <button type="button" onClick={() => toggle(p.id)} className="block w-full cursor-pointer" aria-pressed={on} title={p.file_name}>
+                              <img src={imgUrl(p.r2_key, 480)} alt={p.file_name} loading="lazy" className={`aspect-square w-full bg-slate-50 object-contain ${trashView ? "opacity-60" : ""}`} />
+                            </button>
+                            <a href={imgUrl(p.r2_key)} target="_blank" rel="noopener noreferrer" title={t("ดูรูปเต็ม", "Open full image")}
+                              className="absolute left-1.5 top-1.5 hidden h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 group-hover:inline-flex"><Icon value="i:external-link" /></a>
+                            {on && <span className="absolute right-1.5 top-1.5 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
+                            <div className="space-y-1 px-2 py-1.5">
+                              <div className="truncate text-[11px] text-slate-500">{p.file_name}</div>
+                              {p.moved_to.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {p.moved_to.map((s) => (
+                                    <a key={s.id} href={`/master/design-dashboard?open=${encodeURIComponent(s.id)}`} target="_blank" rel="noopener noreferrer" title={t(`อยู่ในใบงาน ${s.code} · ${s.name} — กดเปิด`, `In ${s.code} — open`)}
+                                      className="max-w-full truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10.5px] text-emerald-700 hover:bg-emerald-100">→ {s.code}</a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
-
-                {album && (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="mr-1 flex items-center gap-1.5 text-[15px] font-semibold text-slate-800">{albumBrand ? <>{dot(albumBrand.color)}{albumBrand.name} · </> : null}{albumLabel(album)}</span>
-                      {!album.brand_id && canEdit && brands.length > 0 && (
-                        <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
-                      )}
-                      <span className="flex-1" />
-                      {list.length > 0 && (
-                        <button type="button" onClick={() => setSel(allOn ? new Set() : new Set(list.map((p) => p.id)))} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50">
-                          {allOn ? t("ไม่เลือกทั้งหมด", "Clear all") : t(`เลือกทั้งหมด (${list.length})`, `Select all (${list.length})`)}
-                        </button>
-                      )}
-                      {(trashCount > 0 || trashView) && (
-                        <button type="button" onClick={() => { setTrashView((x) => !x); setSel(new Set()); }} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${trashView ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                          <Icon value={trashView ? "i:arrow-left" : "i:trash"} />{trashView ? t("กลับไปที่รูป", "Back to photos") : t(`ถังขยะ (${trashCount})`, `Trash (${trashCount})`)}
-                        </button>
-                      )}
-                      <GalleryColumnsControl cols={cols} onChange={setCols} as="select" />
-                    </div>
-
-                    {toBrand && !album.brand_id && (
-                      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-violet-100 bg-violet-50/50 p-2 text-[12px]">
-                        <span className="text-slate-600">{t("อัลบั้มนี้เป็นของแบรนด์ไหน?", "Which brand is this album?")}</span>
-                        {brands.map((b) => (
-                          <button key={b.id} type="button" disabled={busy} onClick={() => void doSetBrand(b.id)}
-                            className={`relative inline-flex h-8 items-center gap-1 rounded-full border bg-white px-3 text-[12px] hover:border-violet-300 disabled:opacity-60 ${album.suggested_brand_id === b.id ? "border-violet-400 text-violet-800" : "border-slate-200 text-slate-700"}`}>
-                            {dot(b.color)}{b.name}{album.suggested_brand_id === b.id && <span className="ml-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">{t("แนะนำ", "Suggested")}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {photos === null ? <LoadingState className="py-12 text-sm" />
-                      : !list.length ? <EmptyState icon={<Icon value={trashView ? "i:trash" : "i:photo"} />} className="p-8"
-                          title={trashView ? t("ถังขยะว่าง", "Trash is empty") : t("ยังไม่มีรูปในอัลบั้มนี้", "No images yet")}
-                          hint={trashView ? undefined : t("ลากรูปมาวางด้านบนได้เลย", "Drop images above")} />
-                      : (
-                        <div className="grid" style={gridStyle}>
-                          {list.map((p) => {
-                            const on = sel.has(p.id);
-                            return (
-                              <div key={p.id} className={`group relative overflow-hidden rounded-xl border bg-white ${on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
-                                <button type="button" onClick={() => toggle(p.id)} className="block w-full cursor-pointer" aria-pressed={on} title={p.file_name}>
-                                  <img src={imgUrl(p.r2_key, 480)} alt={p.file_name} loading="lazy" className={`aspect-square w-full bg-slate-50 object-contain ${trashView ? "opacity-60" : ""}`} />
-                                </button>
-                                <a href={imgUrl(p.r2_key)} target="_blank" rel="noopener noreferrer" title={t("ดูรูปเต็ม", "Open full image")}
-                                  className="absolute left-1.5 top-1.5 hidden h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 group-hover:inline-flex"><Icon value="i:external-link" /></a>
-                                {on && <span className="absolute right-1.5 top-1.5 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
-                                <div className="space-y-1 px-2 py-1.5">
-                                  <div className="truncate text-[11px] text-slate-500">{p.file_name}</div>
-                                  {p.moved_to.length > 0 && (
-                                    <div className="flex flex-wrap gap-1">
-                                      {p.moved_to.map((s) => (
-                                        <a key={s.id} href={`/master/design-dashboard?open=${encodeURIComponent(s.id)}`} target="_blank" rel="noopener noreferrer" title={t(`อยู่ในใบงาน ${s.code} · ${s.name} — กดเปิด`, `In ${s.code} — open`)}
-                                          className="max-w-full truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10.5px] text-emerald-700 hover:bg-emerald-100">→ {s.code}</a>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
+                </>
+              ) : !tabAlbums.length ? (
+                <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้ม", "No albums yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มของวันนี้ให้เอง", "Drop photos above — today's album is created for you") : undefined} />
+              ) : (
+                /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
+                <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {tabAlbums.map((a) => {
+                    const b = brandOf(a.brand_id);
+                    return (
+                      <button key={a.id} type="button" onClick={() => void openAlbum(a.id)} className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition hover:border-slate-300 hover:shadow-md">
+                        <AlbumCover keys={a.preview_keys} total={a.counts.photos} />
+                        <div className="space-y-1.5 p-3">
+                          <div className="font-medium text-slate-800">{albumLabel(a)}</div>
+                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+                            <span className="inline-flex items-center gap-1">{dot(b?.color)}{b?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
+                            <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.counts.photos}</span>
+                            {a.counts.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700">{t(`ส่งเข้าใบงาน ${a.counts.sent}`, `${a.counts.sent} in sheets`)}</span>}
+                          </div>
                         </div>
-                      )}
-                  </>
-                )}
-              </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </>
         )}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inferAlbumBrand, parseSampleMark, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+import { albumPreviewKeys, inferAlbumBrand, parseSampleMark, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
 
 describe("ชื่ออัลบั้มตามแบรนด์ + วันที่ลง (เวลาไทย)", () => {
   it("วันไทย ปี พ.ศ. · ใช้เวลาไทยไม่ใช่ UTC", () => {
@@ -22,9 +22,15 @@ describe("ชื่ออัลบั้มตามแบรนด์ + วั�
 
 describe("รูปในอัลบั้ม (ไม่มีระบบรอย้ายแล้ว)", () => {
   const sheet = (id: string, brand: string | null) => ({ id, code: id, name: id, brand_id: brand });
-  it("นับรูป / ถังขยะ", () => {
-    expect(sampleCounts([{ trashed: false }, { trashed: false }, { trashed: true }])).toEqual({ photos: 2, trash: 1 });
-    expect(sampleCounts([])).toEqual({ photos: 0, trash: 0 });
+  it("นับรูป / ส่งเข้าใบงานแล้ว / ถังขยะ (รูปในถังไม่นับว่าส่งแล้ว)", () => {
+    expect(sampleCounts([{ trashed: false, moved_to: [sheet("s1", "gg")] }, { trashed: false, moved_to: [] }, { trashed: true, moved_to: [sheet("s1", "gg")] }])).toEqual({ photos: 2, trash: 1, sent: 1 });
+    expect(sampleCounts([])).toEqual({ photos: 0, trash: 0, sent: 0 });
+  });
+  it("รูปบนปก: ไม่เอารูปในถัง · เรียงเวลาลง · สูงสุด 4", () => {
+    const p = (k: string, at: string, trashed = false) => ({ r2_key: k, created_at: at, trashed });
+    expect(albumPreviewKeys([p("c", "3"), p("a", "1"), p("x", "0", true), p("b", "2"), p("d", "4"), p("e", "5")])).toEqual(["a", "b", "c", "d"]);
+    expect(albumPreviewKeys([p("a", "1")], 4)).toEqual(["a"]);
+    expect(albumPreviewKeys([])).toEqual([]);
   });
   it("แนะนำแบรนด์ของอัลบั้มเก่า: ส่งเข้าใบงานแบรนด์เดียวกันหมด = แบรนด์นั้น · หลายแบรนด์/ยังไม่ส่ง = null · ไม่นับรูปในถังขยะ", () => {
     expect(inferAlbumBrand([{ trashed: false, moved_to: [sheet("s1", "gg")] }, { trashed: false, moved_to: [] }])).toBe("gg");

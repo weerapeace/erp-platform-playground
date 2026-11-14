@@ -17,7 +17,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { actorId } from "@/app/api/assets/shared";
 import {
-  SAMPLE_ALBUM_MARK, inferAlbumBrand, parseSampleMark, sampleAlbumMark, sampleAlbumName, sampleCounts,
+  SAMPLE_ALBUM_MARK, albumPreviewKeys, inferAlbumBrand, parseSampleMark, sampleAlbumMark, sampleAlbumName, sampleCounts,
   type SampleAlbum, type SampleBrand, type SamplePhoto, type SampleSheetRef,
 } from "@/lib/sample-images";
 
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
     const albums: SampleAlbum[] = albumsRaw.map((a) => {
       const ps = byAlbum.get(a.id) ?? [];
       const brandId = a.mark!.brandId;
-      return { id: a.id, name: a.name, created_at: a.created_at, brand_id: brandId, suggested_brand_id: brandId ? null : inferAlbumBrand(ps), counts: sampleCounts(ps) };
+      return { id: a.id, name: a.name, created_at: a.created_at, brand_id: brandId, suggested_brand_id: brandId ? null : inferAlbumBrand(ps), counts: sampleCounts(ps), preview_keys: albumPreviewKeys(ps) };
     });
     // ทุกแบรนด์ที่เปิดใช้ — แบรนด์ของเราขึ้นก่อน แล้วค่อยแบรนด์ที่ติ๊กงานลูกค้า
     //   (เดิมกรองงานลูกค้าออก → Good Goods ที่ติ๊กงานลูกค้าไว้หายจากแถบ ทั้งที่เจ้าของใช้จริง · ตรวจหลังขึ้นเว็บ 2026-11-13)

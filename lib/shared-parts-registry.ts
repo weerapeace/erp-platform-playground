@@ -350,6 +350,15 @@ export const SHARED_PARTS: SharedPart[] = [
     note: "ไม่กรองตามสิทธิ์ — โชว์ทุกหน้าที่เปิดอยู่ในเมนู หน้าปลายทางตรวจสิทธิ์เองตอนเปิด · ตรรกะล้วน + เทสต์ lib/menu-pages.ts",
   },
   {
+    key: "album-cover", label: "ปกอัลบั้ม (รูปรวมบนการ์ดแฟ้ม)", code: "AlbumCover", category: "file",
+    source: { path: "components/album-cover" },
+    what: "ปกรวมรูปบนการ์ดอัลบั้ม/แฟ้ม แบบปรับตามจำนวนรูป: 1 รูป เต็มปก · 2 ซ้ายขวา · 3 ใหญ่ 1 + เล็ก 2 · 4+ ใหญ่ 1 + เล็ก 3 ช่องสุดท้าย +N (ทรงเดียวกับการ์ดอัลบั้ม Contents แต่ไม่มีช่องว่าง)",
+    when: "การ์ดอัลบั้ม/แฟ้มรูปที่อยากเห็นรูปข้างในก่อนกดเปิด — ใช้ที่หน้า SAMPLE Images",
+    notWhen: "แกลเลอรีรูปเต็มในอัลบั้ม → กริดรูป/ImageManager · รูปเดี่ยว → img/HoverImage · หน้า Contents ยังเขียนปกของตัวเอง (ย้ายมาใช้ตัวนี้ได้ทีหลัง)",
+    doc: "album-cover.md",
+    note: "เจ้าของเลือกแบบ C จาก widget 4 แบบ (2026-11-14) · ตรรกะแบบปก + เทสต์ lib/album-cover.ts",
+  },
+  {
     key: "design-sheet-picker", label: "เลือกใบงานออกแบบ (มีรูป ค้นได้)", code: "DesignSheetPickerModal", category: "pick",
     source: { path: "components/design-sheet-picker" },
     what: "ป๊อปเลือกใบงานออกแบบ 1 ใบ (ใบงานใน Design Dashboard): ค้นรหัส/ชื่องาน/แบรนด์ (ไฮไลต์คำที่ตรง) · รูปปกทุกใบ · สลับการ์ดรูป ↔ รายการ (จำต่อคน) · กรองแบรนด์ · ซ่อนงานปิดแล้ว · ใช้ล่าสุด · เปิดมากรองแบรนด์ได้ (initialBrand) · เลือกแล้วกดยืนยัน",
