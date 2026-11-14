@@ -378,11 +378,11 @@ export async function loadListingVariants(admin: Admin, listingId: string): Prom
  */
 export async function loadListingDetail(admin: Admin, listingId: string): Promise<ListingDetailResponse> {
   const { data: l, error } = await admin.from("platform_catalog_listings")
-    .select("id, platform_id, brand_id, external_product_id, title, sku_code, status, matched_parent_sku_id, last_imported_at, line_raw:raw->line")
+    .select("id, platform_id, brand_id, external_product_id, title, sku_code, status, matched_parent_sku_id, last_imported_at, source, line_raw:raw->line")
     .eq("id", listingId).maybeSingle();
   if (error) return { detail: null, error: "โหลดสินค้าบนร้านไม่สำเร็จ ลองใหม่อีกครั้ง" };
   if (!l) return { detail: null, error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)" };
-  const r = l as { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; sku_code: string | null; status: string | null; matched_parent_sku_id: string | null; last_imported_at: string | null; line_raw: unknown };
+  const r = l as { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; sku_code: string | null; status: string | null; matched_parent_sku_id: string | null; last_imported_at: string | null; source: string | null; line_raw: unknown };
   const [{ data: pf }, parentRes, { data: logs }, accRes] = await Promise.all([
     admin.from("erp_platforms").select("code").eq("id", r.platform_id).maybeSingle(),
     r.matched_parent_sku_id ? admin.from("parent_skus_v2").select("code, name_th").eq("id", r.matched_parent_sku_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -402,6 +402,7 @@ export async function loadListingDetail(admin: Admin, listingId: string): Promis
       matched_parent_sku_id: r.matched_parent_sku_id, matched_code: parent?.code ?? null, matched_name: parent?.name_th ?? null,
       last_imported_at: r.last_imported_at,
       shop_ref: shopRef,
+      source: r.source ?? null,
       line: edit && lineObj ? {
         images: (Array.isArray(lineObj.imageUrls) ? lineObj.imageUrls : []).map((u) => String(u ?? "")).filter(Boolean),
         display: typeof lineObj.isDisplay === "boolean" ? lineObj.isDisplay : null,

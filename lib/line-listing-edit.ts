@@ -286,6 +286,12 @@ export function listingHistoryText(meta: unknown): string {
     const detail = ch.length === 1 ? ` (${str(ch[0].text)})` : "";
     return `แก้ราคาบน TikTok ${ch.length} ตัวเลือก${detail}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
   }
+  // Shopee (app/api/shopee/listing-edit · listing-display — เฟส 4A)
+  if (src === "shopee_listing_edit") {
+    const parts = [...new Set(arr(m.changes).map(obj).filter((c): c is Obj => !!c).map((c) => str(c.label)))];
+    return `แก้บน Shopee: ${parts.join(" · ") || "—"}${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
+  }
+  if (src === "shopee_listing_display") return `${m.open ? "เปิดขาย" : "ปิดขาย"}บน Shopee${m.ok === false ? ` — ไม่สำเร็จ: ${str(m.error)}` : ""}`;
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
   if (ig) return ig.to ? `ตั้งไม่ต้องจับคู่${m.reason ? ` · ${str(m.reason)}` : ""}` : "เลิกข้าม (กลับไปรอจับคู่)";
@@ -310,6 +316,8 @@ export type ListingDetail = {
   last_imported_at: string | null;
   /** ลิงก์ร้าน/Shop ID ของแบรนด์บนร้านนี้ (platform_accounts.external_shop_id — ตั้งที่ /admin/platform-accounts) · ใช้ทำลิงก์ "ดูหน้าร้าน" (lib/platform-links) */
   shop_ref?: string | null;
+  /** ที่มาของรายการ (platform_catalog_listings.source: "api" = ดึงผ่าน API · "import" = ไฟล์) — Shopee: ลิ้นชักดึงสด/แก้ได้เฉพาะ "api" */
+  source?: string | null;
   /** ข้อมูลบนร้าน LINE (null = ร้านอื่น หรือยังไม่ได้ดึงจาก LINE) */
   line: {
     images: string[];

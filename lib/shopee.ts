@@ -418,3 +418,34 @@ export function shopeeOrderToPlatformOrder(o: Obj, toInternal: (code: string | n
     items: [...byKey.values()],
   };
 }
+
+// ───────── แก้สินค้าบนร้าน (เฟส 4 · ผู้เรียกต้องถามเจ้าของก่อน + ลงประวัติ) ─────────
+/**
+ * v2.product.update_item — แก้เฉพาะช่องที่ส่ง (ช่องที่ไม่ส่งคงเดิม · เอกสาร 2026-11-14) · เฟส 4A ส่งแค่ item_name / description
+ * ⚠️ ห้ามส่ง weight/dimension เฉย ๆ — Shopee เขียนทับทุกตัวเลือก
+ */
+export async function shopeeUpdateItem(accessToken: string, shopId: string | number, itemId: string, patch: { item_name?: string; description?: string }): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = { item_id: Number(itemId) };
+  if (patch.item_name != null) body.item_name = patch.item_name;
+  if (patch.description != null) body.description = patch.description;
+  if (Object.keys(body).length < 2) throw new ShopeeApiError("ไม่มีอะไรให้แก้", "error_param");
+  return shopeeFetch("/api/v2/product/update_item", { accessToken, shopId, body });
+}
+
+/** v2.product.unlist_item — unlist=true ปิดขาย · false เปิดขาย · คืนคำตอบดิบ (ผลรายตัวอยู่ใน response.failure_list / success_list) */
+export async function shopeeUnlistItems(accessToken: string, shopId: string | number, items: { itemId: string; unlist: boolean }[]): Promise<Record<string, unknown>> {
+  if (!items.length || items.length > 50) throw new ShopeeApiError("เปิด/ปิดขายได้ครั้งละ 1–50 สินค้า", "error_param");
+  return shopeeFetch("/api/v2/product/unlist_item", { accessToken, shopId, body: { item_list: items.map((i) => ({ item_id: Number(i.itemId), unlist: i.unlist })) } });
+}
+
+/** v2.product.get_item_limit — ช่วงความยาวชื่อ/รายละเอียด/จำนวนรูปของร้าน (แคช 6 ชม.ต่อร้าน · ดึงไม่ได้ = null) */
+const limitCache = new Map<string, { at: number; val: Record<string, unknown> | null }>();
+export async function shopeeGetItemLimit(accessToken: string, shopId: string | number): Promise<Record<string, unknown> | null> {
+  const key = String(shopId);
+  const hit = limitCache.get(key);
+  if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.val;
+  let val: Record<string, unknown> | null = null;
+  try { val = await shopeeFetch("/api/v2/product/get_item_limit", { accessToken, shopId }); } catch { val = null; }
+  limitCache.set(key, { at: Date.now(), val });
+  return val;
+}

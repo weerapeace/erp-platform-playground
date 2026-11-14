@@ -1,6 +1,6 @@
 # ตัวเชื่อม Shopee Open Platform (ร้าน Louis Montini)
 
-> สถานะ 2026-11-14: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (efe2e02a) · **เฟส 3 = ออเดอร์อัตโนมัติ** (แทนเมล) — ยังไม่แก้อะไรบนร้าน · ร้านที่เชื่อม: "Louis Montini & Pixie Dustie" (shop_id 9944732)
+> สถานะ 2026-11-14: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (efe2e02a) · **เฟส 3 = ออเดอร์อัตโนมัติ** (แทนเมล) · **เฟส 4A = แก้ชื่อ/รายละเอียด + เปิด/ปิดขาย จากลิ้นชัก** (แก้ร้านจริง · ถามก่อนทุกครั้ง) · ร้านที่เชื่อม: "Louis Montini & Pixie Dustie" (shop_id 9944732)
 > แอป "Louis Montini ERP" (Seller In House System) **Go Live ผ่านแล้ว 2026-11-14** · เจ้าของใส่ SHOPEE_PARTNER_ID / SHOPEE_PARTNER_KEY / SHOPEE_ENV=live ใน Vercel แล้ว (env ใหม่มีผลหลังขึ้นเว็บรอบถัดไปเท่านั้น — ถ้าไม่มีงานรอขึ้นเว็บ ปุ่ม "ขึ้นเว็บทันที" จะไม่ build ต้องมี commit ใหม่ หรือกด Redeploy ใน Vercel)
 > แผนทั้งหมด: เฟส 1 เชื่อมร้าน → เฟส 2 ดึงสินค้า (อ่านอย่างเดียว) → เฟส 3 ดึงออเดอร์ → เฟส 4 แก้ชื่อ/ราคา/รูป (ทีละขั้น · อนุมัติทุกครั้ง)
 
@@ -88,6 +88,21 @@
 - **เมลหยุดบันทึกออเดอร์ Shopee** ของแบรนด์ที่เชื่อม Shopee อยู่ (`lib/platform-email/server.ts` → กล่องเมลขึ้น "ignored" พร้อมเหตุผล) · เมลคำขอคืนเงินยังนับตามเดิม · ตัดการเชื่อม Shopee = เมลกลับมาบันทึกเอง · Lazada ไม่กระทบ
 - ใบจากเมลที่เก่ากว่าช่วงที่ดึง = เก็บเป็นประวัติในแท็บ "ยอดขายจากเมล" · รายงานยอดขาย (lib/platform-sales) นับทุกแหล่ง → ยอดไม่เปลี่ยน
 - ประวัติ: audit `platform_orders` metadata.source = `shopee_api` (ปุ่ม: เก็บ `sample` ครั้งแรกของรอบ · อัตโนมัติ: เฉพาะรอบที่มีใบใหม่/มีปัญหา actor `shopee_orders_cron`) · ผลรอบใน recordWorkerRun "tiktok-orders" (ต่อท้าย "· Shopee ใหม่ N อัปเดต M")
+
+## เฟส 4 — แก้สินค้าบนร้านจากลิ้นชัก (แก้ร้านจริง · ทีละขั้น · เจ้าของ "เฟส 4" 2026-11-14)
+**4A (ทำแล้ว):** หน้าสินค้าบนแพลตฟอร์ม › กดสินค้า Shopee (เฉพาะที่ดึงผ่าน API — `source = "api"` · ไฟล์ export ใช้แท็บทั่วไปเหมือนเดิม)
+- ลิ้นชักดึงสดตอนเปิด `GET /api/shopee/listing-detail` (get_item_base_info + get_model_list + get_item_limit แคช 6 ชม.) · ปุ่ม "ดึงตัวนี้จาก Shopee" = POST (อัปเดตสำเนาย่อ)
+- **แก้ชื่อ + รายละเอียด (ข้อความ)** → ปุ่ม "บันทึกขึ้น Shopee" → ถามยืนยัน → `POST /api/shopee/listing-edit` → `v2.product.update_item` (ส่งเฉพาะช่องที่เปลี่ยน · เอกสารยืนยันว่าช่องที่ไม่ส่งคงเดิม)
+  - กันทับ: ดึงสดก่อนส่ง ถ้าชื่อ/รายละเอียดบนร้านไม่ตรงกับตอนเปิดลิ้นชัก = 409 (โหลดของล่าสุดให้)
+  - ช่วงความยาวตามร้าน (get_item_limit) · รายละเอียดแบบ extended (ร้าน whitelist มีรูปในรายละเอียด) = ดูอย่างเดียว
+  - หลังส่ง: ดึงกลับเช็กว่าเปลี่ยนจริง → สำเนาย่อ → audit `shopee_listing_edit` (สำเร็จ/ไม่สำเร็จ)
+- **เปิด/ปิดขายทั้งสินค้า** (สวิตช์หัวลิ้นชัก) → ถามยืนยัน → `POST /api/shopee/listing-display` → `v2.product.unlist_item`
+  - รอตรวจ/ถูกแบน/ลบ = ทำไม่ได้ · **อยู่ในโปรโมชัน = Shopee ไม่ให้ปิดขาย** (เตือนก่อน + เหตุผลจาก `failure_list`) · audit `shopee_listing_display`
+- สิทธิ์: ดู = products.platforms.view · ดึงตัวนี้ = products.platforms.edit · ส่งขึ้นร้าน = products.platforms.publish
+- ไฟล์: `lib/shopee-listing-edit.ts` (pure · client-safe · 16 เทสต์) · `components/platform-catalog/shopee-listing-panels.tsx` · `app/api/shopee/listing-{detail,edit,display}` · ของใช้ร่วม `app/api/shopee/shared.ts` (loadShopeeListingLive · saveShopeeSlimCopy · refetchShopeeLive) · ลิ้นชัก `components/platform-catalog/listing-drawer.tsx` (+ `ListingDetail.source`)
+- ประวัติในลิ้นชัก: `lib/line-listing-edit` listingHistoryText ("แก้บน Shopee: …" / "ปิดขายบน Shopee")
+- ยังไม่ทดสอบกับร้านจริง → แนะนำลองกับสินค้า 1 ตัวที่ปิดขายอยู่ก่อน
+**ถัดไป (ยังไม่ทำ):** 4B ราคา (`v2.product.update_price` · ระวังสินค้าในโปรโมชัน + ราคาตั้งของ LM เป็นราคาเต็มสูงแล้วลดผ่านโปรโมชัน) · 4C รูป (`v2.media_space.upload_image` → `update_item image.image_id_list`) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์
 
 ## ⚠️ วันที่เปลี่ยนโดเมนเว็บ
 ลิงก์อนุญาต/ยกเลิกสิทธิ์ต้องพากลับโดเมนที่ลงทะเบียนไว้ — ร้านที่เชื่อมแล้ว**ไม่หลุด** (ดึงข้อมูล/ต่ออายุไม่ผ่านช่องนี้) แต่**กดเชื่อมใหม่จะ error** ถ้าไม่แก้ วันที่เปลี่ยน `NEXT_PUBLIC_APP_URL` ต้องแก้พร้อมกันครบ 3 เจ้า:

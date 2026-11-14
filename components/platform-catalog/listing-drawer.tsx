@@ -14,6 +14,8 @@
  * TikTok Shop: แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก TikTok → ./tiktok-listing-panels (GET /api/tiktok-shop/listing-detail)
  *   เฟส A: แก้ชื่อ (useTiktokEdit → /api/tiktok-shop/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useTiktokDisplay → /listing-display) · เฟส B: ราคาต่อตัวเลือก (→ /listing-prices) · ที่เหลือดูอย่างเดียว
  *   แผนเฟส + กติกา TikTok: docs/tiktok-shop-connector.md
+ * Shopee (เฉพาะรายการที่ดึงผ่าน API · source = "api" — ไฟล์ export ใช้แท็บทั่วไปเหมือนเดิม): ดึงสด → ./shopee-listing-panels (GET /api/shopee/listing-detail)
+ *   เฟส 4A: แก้ชื่อ + รายละเอียด (useShopeeEdit → /api/shopee/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useShopeeDisplay → /listing-display) · รูป/ตัวเลือก/ราคา ดูอย่างเดียว · docs/shopee-connector.md
  *
  * ข้อมูล: GET /api/platform-catalog?view=listing (รายละเอียด+ประวัติ) + ?view=variants (ตัวเลือก↔SKU + ราคาที่ระบบจะส่ง)
  * ส่ง: POST /api/line-shopping/listing-edit · กฎกลาง lib/line-listing-edit (planLineEdit — หน้าเว็บกับ API ใช้ตัวเดียวกัน)
@@ -42,6 +44,7 @@ import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
 import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing, useTiktokPublish } from "./tiktok-listing-panels";
+import { ShopeeEditFooter, ShopeeHeaderStatus, ShopeeImagesPanel, ShopeeInfoPanel, ShopeeOptionsPanel, useShopeeDisplay, useShopeeEdit, useShopeeListing } from "./shopee-listing-panels";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
@@ -109,7 +112,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       setDetail(d.detail);
       setVariants(v && !v.error ? v : null);
       setForm(d.detail.line ? structuredClone(d.detail.line.edit) : null);
-      if (fresh) setTab(d.detail.line || d.detail.platform_code === "lazada" || d.detail.platform_code === "tiktok" ? "info" : "match");
+      if (fresh) setTab(d.detail.line || d.detail.platform_code === "lazada" || d.detail.platform_code === "tiktok" || (d.detail.platform_code === "shopee" && d.detail.source === "api") ? "info" : "match");
     }).catch(() => { if (alive) setError("โหลดรายละเอียดไม่สำเร็จ ลองใหม่อีกครั้ง"); });
     return () => { alive = false; };
   }, [listingId, reload]);
@@ -138,6 +141,13 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const ttDisp = useTiktokDisplay(tt, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
   // ฉบับร่าง: ปุ่มเผยแพร่ (ตั้งสต๊อกจริง → ส่งตรวจ)
   const ttPub = useTiktokPublish(tt, ttEdit.meta, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
+
+  // Shopee: ดึงสดเหมือน TikTok · เฉพาะรายการที่ดึงผ่าน API (ไฟล์ export = แท็บทั่วไป) · เฟส 4A แก้ชื่อ/รายละเอียด + เปิด/ปิดขาย (ถามก่อนเสมอ · สิทธิ์ products.platforms.publish)
+  const isShopee = detail?.platform_code === "shopee" && detail.source === "api" && detail.id === listingId;
+  const sp = useShopeeListing(isShopee ? listingId : null, useCallback(() => setReload((n) => n + 1), []));
+  const spCanEdit = canPublish && isShopee && detail?.status !== "removed";
+  const spEdit = useShopeeEdit(sp, spCanEdit, useCallback((name: string) => { if (listingId) onChanged?.(listingId, { title: name }); setReload((n) => n + 1); }, [listingId, onChanged]));
+  const spDisp = useShopeeDisplay(sp, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
 
   const disp = useLineDisplay((results) => {
     const r = results.find((x) => x.listing_id === listingId);
@@ -204,8 +214,9 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const line = detail?.line ?? null;
   const lazView = isLazada ? laz.view : null;
   const ttView = isTiktok ? tt.view : null;
-  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? (ttEdit.images ?? ttView.images).length : null;
-  const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : null;
+  const spView = isShopee ? sp.view : null;
+  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? (ttEdit.images ?? ttView.images).length : spView ? spView.images.length : null;
+  const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : spView ? (spView.hasModel ? spView.models.length : 1) : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
     ...(isLazada ? [{ key: "attrs" as Tab, label: "ข้อมูลเฉพาะ" }] : []),
@@ -292,6 +303,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       )}
       {isLazada && detail.status !== "removed" && <LazadaHeaderStatus state={laz} disp={lazCanEdit ? lazDisp : null} dirty={lazEdit.dirty} />}
       {isTiktok && detail.status !== "removed" && <TiktokHeaderStatus state={tt} disp={ttCanEdit ? ttDisp : null} pub={ttCanEdit ? ttPub : null} dirty={ttEdit.dirty} />}
+      {isShopee && detail.status !== "removed" && <ShopeeHeaderStatus state={sp} disp={spCanEdit ? spDisp : null} dirty={spEdit.dirty} />}
     </div>
   );
 
@@ -455,11 +467,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     </div>
   ) : detail?.line && !canPublish ? <span className="text-xs text-slate-400">ดูอย่างเดียว — ไม่มีสิทธิ์ส่งขึ้นร้าน</span>
     : isLazada ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน Lazada แล้ว — แก้ไม่ได้</span> : <LazadaEditFooter edit={lazEdit} state={laz} />)
-    : isTiktok ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน TikTok แล้ว — แก้ไม่ได้</span> : <TiktokEditFooter edit={ttEdit} state={tt} />) : undefined;
+    : isTiktok ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน TikTok แล้ว — แก้ไม่ได้</span> : <TiktokEditFooter edit={ttEdit} state={tt} />)
+    : isShopee ? (detail?.status === "removed" ? <span className="text-xs text-slate-400">ไม่อยู่บนร้าน Shopee แล้ว — แก้ไม่ได้</span> : <ShopeeEditFooter edit={spEdit} state={sp} />) : undefined;
 
   return (
     <>
-      <Drawer open={!!listingId} onClose={onClose} title="สินค้าบนร้าน" size="xl" storageKey="platform-listing-drawer" hasUnsavedChanges={dirty || (isLazada && lazEdit.dirty) || (isTiktok && ttEdit.dirty)} footer={footer}>
+      <Drawer open={!!listingId} onClose={onClose} title="สินค้าบนร้าน" size="xl" storageKey="platform-listing-drawer" hasUnsavedChanges={dirty || (isLazada && lazEdit.dirty) || (isTiktok && ttEdit.dirty) || (isShopee && spEdit.dirty)} footer={footer}>
         {error ? <ErrorState title={error} onRetry={() => setReload((n) => n + 1)} />
           : !detail ? <LoadingState label="กำลังโหลดสินค้าจากร้าน…" />
           : (
@@ -476,6 +489,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
+                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} /> : <ShopeeOptionsPanel state={sp} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -501,9 +515,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {isTiktok && ttEdit.dialog}
       {isTiktok && ttDisp.dialog}
       {isTiktok && ttPub.dialog}
+      {isShopee && spEdit.dialog}
+      {isShopee && spDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && ttView && <ImageLightbox images={(ttEdit.images ?? ttView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && lazView && <ImageLightbox images={(lazEdit.form?.images ?? lazView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+      {!line && spView && <ImageLightbox images={spView.images.map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
 
       {/* เลือกรูป: เพิ่มรูปสินค้าจากคลังรูปในระบบ / เลือกรูปให้ตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ) */}
       <ListingImagePicker open={!!picker && !!form} onClose={() => setPicker(null)} mode={picker?.mode ?? "product"}

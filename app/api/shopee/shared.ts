@@ -3,7 +3,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import { lazConnHealth } from "@/lib/lazada";
-import { shopeeConfigured, shopeeEnv, shopeeErrorText, shopeeRefreshToken, shopeeReconnectBy, shopeeTokenTimes, type ShopeeEnv, type ShopeeToken } from "@/lib/shopee";
+import {
+  shopeeConfigured, shopeeEnv, shopeeErrorText, shopeeRefreshToken, shopeeReconnectBy, shopeeTokenTimes, shopeeGetItemBaseInfo, shopeeGetModelList, shopeeModelsToSlim,
+  shopeeIsRateLimit, shopeeGetItemLimit, shopeeItemToCatalogItem, type ShopeeEnv, type ShopeeToken, type ShopeeSlimModel, type ShopeeSlimTier,
+} from "@/lib/shopee";
+import { shopeeLimitsOf, shopeeListingView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
+import { isGoneStatus } from "@/lib/platform-listing-health";
 import { baseUrl } from "../lazada/shared";
 export { baseUrl, buildState, parseState, getPlatformId } from "../lazada/shared";
 
@@ -157,4 +162,78 @@ export async function refreshAllShopee(admin: SupabaseClient, opts: { dry: boole
     }
   }
   return out;
+}
+
+// ───────── สินค้า 1 ตัวในลิ้นชัก (ดึงสด / แก้ชื่อ-รายละเอียด / เปิดปิดขาย) — ตัวเดียวกันทุก route · ล้อ ../tiktok-shop/shared ─────────
+export type ShopeeListingRow = { id: string; platform_id: string; brand_id: string | null; external_product_id: string | null; title: string | null; price: number | null; status: string | null; raw: Record<string, unknown> | null };
+export type ShopeeLive = { base: Record<string, unknown>; models: { tiers: ShopeeSlimTier[]; models: ShopeeSlimModel[] } | null };
+
+const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** ดึงสินค้าตัวนี้สด: รายละเอียด + ตัวเลือก (ถ้ามี) · โดน 429 = รอแล้วลองใหม่ */
+export async function shopeeFetchLive(accessToken: string, shopId: string, itemId: string): Promise<ShopeeLive | null> {
+  let last: unknown = null;
+  for (const wait of [800, 2000, 0]) {
+    try {
+      const [base] = await shopeeGetItemBaseInfo(accessToken, shopId, [itemId]);
+      if (!base) return null;
+      const models = base.has_model === true ? shopeeModelsToSlim(await shopeeGetModelList(accessToken, shopId, itemId)) : null;
+      return { base, models };
+    } catch (e) { last = e; if (!shopeeIsRateLimit(e) || !wait) break; await sleepMs(wait); }
+  }
+  throw last;
+}
+
+/**
+ * โหลดรายการในระบบ + ดึงสินค้าตัวนี้ "สด" จาก Shopee + กุญแจที่ใช้ได้ + ช่วงความยาวของร้าน
+ * ok=false → error ภาษาคน + HTTP status ตอบผู้ใช้ได้เลย
+ */
+export async function loadShopeeListingLive(admin: SupabaseClient, listingId: string, userId: string | null): Promise<
+  { ok: true; row: ShopeeListingRow; live: ShopeeLive; view: ShopeeListingView; itemId: string; accessToken: string; shopId: string } | { ok: false; error: string; status: number }
+> {
+  const { data: l } = await admin.from("platform_catalog_listings")
+    .select("id, platform_id, brand_id, external_product_id, title, price, status, raw").eq("id", listingId).maybeSingle();
+  const row = l as ShopeeListingRow | null;
+  if (!row) return { ok: false, error: "ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)", status: 404 };
+  const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
+  if ((pf as { code?: string } | null)?.code !== "shopee") return { ok: false, error: "ใช้ได้เฉพาะสินค้าบน Shopee", status: 400 };
+  const itemId = String(row.external_product_id ?? "").trim();
+  if (!itemId || !row.brand_id) return { ok: false, error: "รายการนี้ไม่มีรหัสสินค้าบน Shopee", status: 400 };
+  const tok = await shopeeTokenOrReason(admin, row.brand_id, row.platform_id, userId);
+  if (!tok.ok) return { ok: false, error: tok.reason, status: 400 };
+  try {
+    const [live, limitRaw] = await Promise.all([shopeeFetchLive(tok.accessToken, tok.shopId, itemId), shopeeGetItemLimit(tok.accessToken, tok.shopId)]);
+    if (!live) return { ok: false, error: `ไม่พบสินค้า #${itemId} บน Shopee (อาจถูกลบไปแล้ว)`, status: 404 };
+    const view = shopeeListingView(live.base, live.models, shopeeLimitsOf(limitRaw));
+    if (!view) return { ok: false, error: "Shopee ส่งข้อมูลสินค้ามาไม่ครบ — ลองใหม่อีกครั้ง", status: 502 };
+    return { ok: true, row, live, view, itemId, accessToken: tok.accessToken, shopId: tok.shopId };
+  } catch (e) {
+    console.warn(`[shopee] ดึงสินค้า #${itemId} ไม่สำเร็จ: ${(e as Error).message}`);
+    return { ok: false, error: shopeeErrorText(e), status: 502 };
+  }
+}
+
+/**
+ * อัปเดตสำเนาย่อในระบบจากข้อมูลที่เพิ่งดึง — ตัวแปลงเดียวกับดึงทั้งร้าน (shopeeItemToCatalogItem)
+ * เจอบนร้าน = ล้างป้าย "ไม่อยู่บนร้านแล้ว" · ไม่แตะคู่ที่จับไว้ · คืน error หรือ null
+ */
+export async function saveShopeeSlimCopy(admin: SupabaseClient, row: ShopeeListingRow, live: ShopeeLive): Promise<string | null> {
+  const slim = shopeeItemToCatalogItem(live.base, live.models);
+  if (!slim) return "ข้อมูลจาก Shopee ไม่ครบ";
+  const now = new Date().toISOString();
+  const { error } = await admin.from("platform_catalog_listings").update({
+    raw: { ...(row.raw ?? {}), ...slim.raw },
+    title: slim.title ?? row.title, price: slim.price ?? row.price, status: slim.status ?? (isGoneStatus(row.status) ? null : row.status),
+    sku_code: slim.skus[0] ?? null, last_imported_at: now, updated_at: now,
+  }).eq("id", row.id);
+  return error ? error.message : null;
+}
+
+/** ดึงกลับมาเช็กหลังส่งขึ้นร้าน (รอแล้วลองซ้ำ 0.8 / 2 วิ) · ไม่ได้ = null (route เตือนให้กดดึงตัวนี้เอง) */
+export async function refetchShopeeLive(accessToken: string, shopId: string, itemId: string): Promise<ShopeeLive | null> {
+  for (const wait of [800, 2000, 0]) {
+    try { const l = await shopeeFetchLive(accessToken, shopId, itemId); if (l) return l; }
+    catch (e) { console.warn(`[shopee] ดึงสินค้า #${itemId} กลับมาเช็กไม่ได้: ${shopeeErrorText(e)}`); }
+    if (wait) await sleepMs(wait);
+  }
+  return null;
 }
