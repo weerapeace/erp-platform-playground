@@ -79,7 +79,7 @@ export const CHOICES: CrudResource = {
 
 export const RENDERS: CrudResource = {
   table: "design_library_renders", entityType: "design_library_renders", perms: { view: VIEW_PERM, edit: EDIT_PERM },
-  columns: [{ key: "note", kind: "text" }, { key: "is_active", kind: "bool" }],
+  columns: [{ key: "note", kind: "text" }, { key: "is_active", kind: "bool" }, { key: "is_starred", kind: "bool" }],   // is_starred = รอบ 6 ติดดาว
   filterCols: ["recipe_id", "view_key"],
   orderBy: [{ col: "view_key", asc: true }, { col: "version", asc: false }],
   validate: (_b, o) => (o.partial ? { ok: true } : { ok: false, errors: ["อัปโหลดรูปจากปุ่มในหน้าสูตร"] }),

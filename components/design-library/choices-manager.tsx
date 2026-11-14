@@ -2,7 +2,8 @@
 
 /**
  * 📚 Design Library — ⚙️ จัดการตัวเลือก (เพิ่ม / แก้ / ลบ) ทุกรายการในที่เดียว
- * แท็บ: หมวด · สีอะไหล่ · สีด้าย · แบบช่อง · กฎห้ามคู่ (lib/design-library CHOICE_LISTS)
+ * แท็บ: หมวด · สีอะไหล่ · สีด้าย · แบบช่อง · กฎห้ามคู่ · Prompt (lib/design-library CHOICE_LISTS)
+ * แท็บ Prompt (รอบ 6): prompt ระบบ 5 ตัว = สวิตช์เปิด/ปิดตั้งต้นของทีม (แถว code = คีย์ระบบ) · แม่แบบ prompt ทีม = config.text + คำแทน {…}
  * แก้หลายแถวแล้วกด "บันทึกทั้งหมด" ครั้งเดียว · ลบ = ปิดไว้ (กู้คืนได้จาก "โมดูลทั้งหมด") ผ่าน ConfirmDialog กลาง
  * สิทธิ์ design_library.manage · audit ทุกแถว (handler กลาง lib/crud-resource-api)
  */
@@ -10,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { LoadingState, ErrorState } from "@/components/state-views";
-import { CATEGORY_SOURCES, CHOICE_LISTS, type Choice, type ChoiceListKey } from "@/lib/design-library";
+import { buildPrompts, CATEGORY_SOURCES, CHOICE_LISTS, cleanSpec, PROMPT_SYSTEM_KEYS, PROMPT_VARS, type Choice, type ChoiceListKey } from "@/lib/design-library";
 import { api, newId } from "./shared";
 
 type Row = Choice & { _new?: boolean; _dirty?: boolean };
@@ -38,7 +39,7 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
   const patchCfg = (r: Row, p: Record<string, unknown>) => patch(r.id, { config: { ...r.config, ...p } });
   const add = () => setRows((prev) => [...(prev ?? []), {
     id: `new-${newId()}`, list_key: tab, code: "", name: "", name_en: null, hex: tab === "hw_color" || tab === "thread_color" ? "#cccccc" : null,
-    config: tab === "category" ? { source: "sku_text" } : tab === "rule" ? { a: "", b: "", reason: "" } : {},
+    config: tab === "category" ? { source: "sku_text" } : tab === "rule" ? { a: "", b: "", reason: "" } : tab === "prompt" ? { text: "", default_on: true } : {},
     sort_order: (list.at(-1)?.sort_order ?? 0) + 10, is_active: true, _new: true,
   }]);
 
@@ -46,6 +47,8 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
     const todo = (rows ?? []).filter((r) => r._dirty || r._new);
     const bad = todo.find((r) => !r.code.trim() || !r.name.trim());
     if (bad) { setTab(bad.list_key); toast.error("ทุกแถวต้องมีรหัสและชื่อ"); return; }
+    const badPrompt = todo.find((r) => r.list_key === "prompt" && !(PROMPT_SYSTEM_KEYS as readonly string[]).includes(r.code) && !String(r.config.text ?? "").trim());
+    if (badPrompt) { setTab("prompt"); toast.error(`แม่แบบ prompt “${badPrompt.name}” ยังไม่มีข้อความ`); return; }
     setSaving(true);
     let ok = 0; const fails: string[] = [];
     for (const r of todo) {
@@ -69,6 +72,14 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
     setDel(null);
   };
 
+  /** สวิตช์ค่าเริ่มของ prompt ระบบ (ไม่มีแถว = เปิด) → สร้าง/แก้แถว code = คีย์ระบบ */
+  const sysPromptRow = (key: string) => (rows ?? []).find((r) => r.list_key === "prompt" && r.code === key && !String(r.config.text ?? "").trim());
+  const toggleSysPrompt = (key: string, title: string) => {
+    const r = sysPromptRow(key);
+    if (r) { patchCfg(r, { default_on: r.config.default_on === false }); return; }
+    setRows((prev) => [...(prev ?? []), { id: `new-${newId()}`, list_key: "prompt", code: key, name: title, name_en: null, hex: null, config: { default_on: false }, sort_order: 0, is_active: true, _new: true }]);
+  };
+  const SYS_TITLES = useMemo(() => Object.fromEntries(buildPrompts({ name: "x" }, cleanSpec({}), []).map((p) => [p.key, p.title])), []);
   const inp = "h-8 px-2 border border-slate-200 rounded-md text-[13px] text-slate-800 w-full";
   const info = CHOICE_LISTS.find((l) => l.key === tab)!;
 
@@ -91,6 +102,42 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
       {err ? <ErrorState title="โหลดตัวเลือกไม่สำเร็จ" hint={err} onRetry={() => void load()} />
         : !rows ? <LoadingState label="กำลังโหลดตัวเลือก…" />
         : (
+          tab === "prompt" ? (
+          <div className="space-y-4">
+            <div>
+              <div className="text-[13px] font-medium text-slate-700 mb-1">Prompt ของระบบ — เปิดตั้งต้นทุกสูตรไหม</div>
+              <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+                {PROMPT_SYSTEM_KEYS.map((k) => { const r = sysPromptRow(k); const on = r?.config.default_on !== false; return (
+                  <label key={k} className={`flex items-center gap-3 px-3 py-2 cursor-pointer ${r?._dirty || r?._new ? "bg-amber-50/50" : ""}`}>
+                    <input type="checkbox" checked={on} onChange={() => toggleSysPrompt(k, SYS_TITLES[k] ?? k)} />
+                    <span className="text-[13px] text-slate-800">{SYS_TITLES[k] ?? k}</span>
+                    <span className="ml-auto text-[11px] text-slate-400">{on ? "เปิดตั้งต้น" : "ปิดตั้งต้น (เปิดเองได้ในสูตร)"}</span>
+                  </label>
+                ); })}
+              </div>
+            </div>
+            <div>
+              <div className="text-[13px] font-medium text-slate-700 mb-1">แม่แบบ prompt ของทีม — โผล่ในทุกสูตร</div>
+              <p className="text-[11.5px] text-slate-500 mb-2">คำแทนที่ใช้ได้: {PROMPT_VARS.map((v) => <code key={v.key} title={v.label} className="mx-0.5 px-1 rounded bg-slate-100 text-[11px]">{`{${v.key}}`}</code>)}</p>
+              <div className="space-y-2">
+                {list.filter((r) => String(r.config.text ?? "").trim() || (r._new && !(PROMPT_SYSTEM_KEYS as readonly string[]).includes(r.code))).map((r) => (
+                  <div key={r.id} className={`rounded-lg border p-2 space-y-2 ${r._dirty || r._new ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}>
+                    <div className="grid gap-2 grid-cols-[110px_minmax(0,1fr)_auto_64px_32px] items-center">
+                      <input className={`${inp} font-mono`} value={r.code} placeholder="รหัส" onChange={(e) => patch(r.id, { code: e.target.value })} title="รหัส (ตัวอังกฤษ/ตัวเลข)" />
+                      <input className={inp} value={r.name} placeholder="ชื่อ เช่น ถ่ายบนโต๊ะไม้" onChange={(e) => patch(r.id, { name: e.target.value })} />
+                      <label className="flex items-center gap-1 text-[12px] text-slate-600 whitespace-nowrap"><input type="checkbox" checked={r.config.default_on !== false} onChange={(e) => patchCfg(r, { default_on: e.target.checked })} />เปิดตั้งต้น</label>
+                      <input type="number" className={inp} value={r.sort_order} onChange={(e) => patch(r.id, { sort_order: Number(e.target.value) || 0 })} title="ลำดับ" />
+                      <button type="button" onClick={() => setDel(r)} className="h-8 w-8 rounded-md text-rose-600 hover:bg-rose-50" aria-label="ลบ" title="ลบ">✕</button>
+                    </div>
+                    <textarea rows={3} value={String(r.config.text ?? "")} onChange={(e) => patchCfg(r, { text: e.target.value.slice(0, 4000) })} placeholder="เช่น Lifestyle photo of the {กระเป๋า} on a wooden table, soft daylight. {อ้างอิง}"
+                      className="w-full px-2 py-1.5 border border-slate-200 rounded-md text-[12px] font-mono" />
+                  </div>
+                ))}
+                <button type="button" onClick={add} className="h-9 px-4 text-sm rounded-lg border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50">+ เพิ่มแม่แบบ prompt</button>
+              </div>
+            </div>
+          </div>
+          ) : (
           <div className="space-y-2">
             {list.length === 0 && <div className="text-center text-[13px] text-slate-400 py-6">ยังไม่มีรายการ — กด “เพิ่ม” ด้านล่าง</div>}
             {list.map((r) => (
@@ -131,6 +178,7 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
             <button type="button" onClick={add} className="h-9 px-4 text-sm rounded-lg border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50">+ เพิ่ม{info.label}</button>
             {tab === "rule" && <p className="text-[11px] text-slate-400">ตัวอย่าง: ถ้ามี “ซิป : ZP-5G” คู่กับ “สีอะไหล่ : silver” → เตือนในหน้าสูตรและใบสรุป (รหัสต้องตรงกับรหัสของสิ่งที่เลือก)</p>}
           </div>
+          )
         )}
       <ConfirmDialog open={!!del} onClose={() => setDel(null)} onConfirm={() => del && void remove(del)} variant="danger"
         title="ลบตัวเลือกนี้?" message={`“${del?.name || del?.code || ""}” จะไม่โผล่ให้เลือกอีก (สูตรเดิมที่ใช้อยู่ยังเห็นชื่อเดิม)`} confirmText="ลบ" />

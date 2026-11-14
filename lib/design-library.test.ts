@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  allSkuIds, applyColorway, bagWord, bothUnits, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
+  allSkuIds, applyColorway, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
 } from "./design-library";
 
 const ch = (list_key: Choice["list_key"], code: string, name: string, extra: Partial<Choice> = {}): Choice =>
@@ -19,6 +19,7 @@ const CHOICES: Choice[] = [
 
 const SPEC: Spec = cleanSpec({
   size: { w: 30, h: 35, d: 12, strap: 110 },
+  handle: { drop: 18, w: 3, gap: 12, count: 2 },
   hw_color: "silver",
   pins: [
     { id: "p1", x: 40, y: 50, cat: "body", note: "", pick: { kind: "swatch", swatch_id: "s1", swatch_name: "แผงผ้า A", image_key: "k/panel.jpg", image_w: 2000, image_h: 1000, x: 10, y: 20, w: 5, h: 10, sku_id: "11111111-1111-1111-1111-111111111111", code: "PU-S12", name: "ซาฟเฟียโน่ มิ้นต์" } },
@@ -32,11 +33,11 @@ const SPEC: Spec = cleanSpec({
 describe("cleanSpec", () => {
   it("บีบค่าให้อยู่ในช่วง + ตัดของแปลกทิ้ง", () => {
     const s = cleanSpec({ size: { w: -5, h: 999, d: "x", strap: 20 }, pins: [{ x: 150, y: -3, cat: "body", pick: { kind: "bogus" } }, "junk"], pockets: { front: [{ x: 100, y: 0, w: 50, h: 3 }], nope: [{}] } });
-    expect(s.size).toEqual({ w: 1, h: 200, d: 12, strap: 20 });
+    expect(s.size).toEqual({ w: 0, h: 200, d: 0, strap: 20 });   // รอบ 6: ค่าแปลก/ติดลบ = 0 (ยังไม่ระบุ)
     expect(s.pins).toHaveLength(1);
     expect(s.pins[0]).toMatchObject({ x: 100, y: 0, pick: null });
     // กล่องช่องกว้างเกินกระเป๋า → บีบให้พอดี
-    expect(s.pockets.front[0]).toMatchObject({ x: 0, w: 1 });
+    expect(s.pockets.front[0]).toMatchObject({ x: 0, w: 30 });   // กว้างยังไม่ระบุ = บีบในกรอบตัวอย่าง 30
     expect(Object.keys(s.pockets).sort()).toEqual(["back", "front", "inside_back", "inside_front"]);
   });
   it("ช่องข้างในมีได้หลายกล่องทั้ง 2 ฝั่ง", () => {
@@ -71,7 +72,7 @@ describe("prompt 3 ชุด", () => {
   it("มี 4 มุมรวมรูปเดียว · ข้างใน · คนสะพาย", () => {
     expect(ps.map((p) => p.key)).toEqual(["grid4", "inside", "model", "line", "3d"]);
     expect(ps[0].text).toContain("2x2 grid");
-    expect(ps[0].text).toContain("12 cm gusset");
+    expect(ps[0].text).toContain("12 cm (4.7 in) gusset");
   });
   it("อ้างเลขจุด + สีอะไหล่ + โน้ต + ช่อง", () => {
     expect(ps[0].text).toContain("Hardware: กุญแจ เบอร์ 3 (ABC-001), silver finish - note: อยากได้แบบนี้ [ref 2]");
@@ -116,7 +117,8 @@ describe("รอบ 4: ประเภทกระเป๋า · หู · ห�
     const p = buildPrompts({ name: "X", category: "HANB" }, SPEC, [...CHOICES, ...types]);
     expect(p[0].text).toContain("handbag (X), 30 cm (11.8 in) wide");
   });
-  it("หู: ค่าเริ่มต้นเมื่อสูตรเก่าไม่มี + ความยาวรวมประมาณได้ + ใส่เองใช้ค่าที่ใส่", () => {
+  it("หู: ไม่มีในสูตร = ยังไม่ระบุ (รอบ 6) + ความยาวรวมประมาณได้ + ใส่เองใช้ค่าที่ใส่", () => {
+    expect(cleanSpec({}).handle).toEqual({ drop: 0, w: 0, gap: 0, count: -1, total: 0 });
     expect(SPEC.handle).toEqual({ drop: 18, w: 3, gap: 12, count: 2, total: 0 });
     expect(handleLength(SPEC.handle)).toBeGreaterThan(40);
     expect(handleLength({ ...SPEC.handle, total: 52 })).toBe(52);
@@ -186,5 +188,72 @@ describe("รอบ 5: ชุดสี + เทียบสูตร", () => {
     expect(row("ตัวกระเป๋า").same).toBe(false);
     expect(row("อะไหล่").b).toBe("—");           // ฝั่ง B ไม่มีหมวดนี้
     expect(row("ตัวกระเป๋า").picksB).toHaveLength(1);
+  });
+});
+
+describe("รอบ 6: ขนาด/หูไม่บังคับ", () => {
+  const EMPTY = cleanSpec({ ...SPEC, size: {}, handle: {} });
+  it("สูตร/แม่แบบใหม่ = ว่าง · ใส่ครบไหม · กรอบช่องตัวอย่าง", () => {
+    expect(cleanSpec({}).size).toEqual({ w: 0, h: 0, d: 0, strap: 0 });
+    expect(sizeKnown(SPEC.size)).toBe(true);
+    expect(sizeKnown({ w: 30, h: 35, d: 0, strap: 0 })).toBe(false);
+    expect(panelSize(EMPTY.size)).toEqual({ w: 30, h: 35, placeholder: true });
+    expect(EMPTY.pockets.front[0]).toMatchObject({ w: 16, h: 14 });                  // ช่องไม่หายเพราะยังไม่ใส่ขนาด
+    expect(pocketPanelSvg(EMPTY, "front", CHOICES)).toContain("ยังไม่ใส่ขนาด");
+  });
+  it("prompt ไม่เขียน 0 cm · ข้ามขนาด/หูที่ไม่ระบุ (บั๊กจากรูปเจ้าของ)", () => {
+    const ps = buildPrompts({ name: "X" }, EMPTY, CHOICES);
+    for (const p of ps) { expect(p.text).not.toMatch(/0 cm/); expect(p.text).not.toContain("top handle"); expect(p.text).not.toContain("Real-world scale"); }
+    expect(ps[0].text).toContain("side view.");
+    const one = buildPrompts({ name: "X" }, cleanSpec({ ...SPEC, size: { w: 24.5, h: 15.5 }, handle: { count: 1 } }), CHOICES)[0].text;
+    expect(one).toContain("24.5 cm (9.6 in) wide x 15.5 cm (6.1 in) high, 1 top handle.");
+    expect(one).not.toContain("deep");
+    expect(sizePhrase({ w: 0, h: 0, d: 0, strap: 0 })).toBe("");
+    expect(handleText({ drop: 0, w: 2, gap: 0, count: 2, total: 0 })).toBe("2 top handles, each 2 cm (0.8 in) wide");
+    expect(handleCountText(-1)).toBe("ยังไม่ระบุ");
+  });
+  it("ใบสรุป + เทียบสูตร แสดง — แทน 0", () => {
+    const html = buildBriefHtml({ template: { code: "T", name: "X", category: null, image_key: null, image_w: null, image_h: null, vector_image_key: null }, recipe: { seq: 1, name: null, note: null, created_by_name: null }, spec: EMPTY, choices: CHOICES, stock: {}, useVector: false, img: (k: string) => k, dateText: "" } as never);
+    expect(html).toContain("—×—×— ซม.");
+    expect(html).toContain("ยังไม่ระบุ");
+  });
+});
+
+describe("รอบ 6: prompt เปิด/ปิด · แก้ · เพิ่ม · แม่แบบทีม", () => {
+  const TEAM = [...CHOICES,
+    ch("prompt", "3d", "3D", { config: { default_on: false } }),
+    ch("prompt", "desk", "บนโต๊ะไม้", { config: { text: "Photo of the {กระเป๋า} on a wooden table. Size {ขนาด}. {ไม่รู้จัก}", default_on: true } }),
+    ch("prompt", "night", "กลางคืน", { config: { text: "Night shot {ประเภท}", default_on: false } }),
+  ];
+  it("ค่าเริ่มของทีม: ปิด 3D · แม่แบบทีมเติมคำแทน (คำไม่รู้จักคงไว้)", () => {
+    const t = teamPromptSettings(TEAM);
+    expect(t.defaults).toEqual({ "3d": false });
+    expect(t.templates.map((x) => x.key)).toEqual(["team:desk", "team:night"]);
+    const list = resolvePrompts({ name: "X" }, SPEC, TEAM);
+    expect(list.map((p) => [p.key, p.on])).toEqual([["grid4", true], ["inside", true], ["model", true], ["line", true], ["3d", false], ["team:desk", true], ["team:night", false]]);
+    const desk = list.find((p) => p.key === "team:desk")!;
+    expect(desk.text).toContain("30 cm (11.8 in) wide x 35 cm (13.8 in) high x 12 cm (4.7 in) deep");
+    expect(desk.text).toContain("{ไม่รู้จัก}");
+    expect(fillPromptVars("{ ชื่อแม่แบบ }", promptContext({ name: "TOTE" }, SPEC, TEAM))).toBe("TOTE");
+  });
+  it("สูตรปรับสวิตช์ทับทีม · แก้ข้อความ + เตือนเมื่อสูตรเปลี่ยน · prompt ของสูตร · ใบสรุปพิมพ์เฉพาะที่เปิด", () => {
+    const base = resolvePrompts({ name: "X" }, SPEC, TEAM).find((p) => p.key === "grid4")!;
+    const spec = cleanSpec({ ...SPEC, prompts: { on: { "3d": true, grid4: false, bogus: true }, edits: { inside: { text: "my inside", base: resolvePrompts({ name: "X" }, SPEC, TEAM)[1].generated }, "own:x": { text: "no" } }, custom: [{ id: "c1", title: "มุมบน", text: "Top view of {ประเภท}" }, { id: "c1", text: "dup" }, { text: "" }] } });
+    expect(Object.keys(spec.prompts.on)).toEqual(["3d", "grid4"]);
+    expect(Object.keys(spec.prompts.edits)).toEqual(["inside"]);
+    expect(spec.prompts.custom).toHaveLength(1);
+    const list = resolvePrompts({ name: "X" }, spec, TEAM);
+    expect(list.find((p) => p.key === "grid4")!.on).toBe(false);
+    expect(list.find((p) => p.key === "3d")!.on).toBe(true);
+    const inside = list.find((p) => p.key === "inside")!;
+    expect(inside).toMatchObject({ text: "my inside", edited: true, stale: false });
+    const changed = resolvePrompts({ name: "X" }, cleanSpec({ ...spec, size: { w: 40, h: 35, d: 12 } }), TEAM).find((p) => p.key === "inside")!;
+    expect(changed.stale).toBe(true);
+    expect(list.at(-1)).toMatchObject({ key: "own:c1", source: "recipe", on: true, text: "Top view of bag" });   // แม่แบบ {name:"X"} ไม่มีประเภท → "bag"
+    expect(base.edited).toBe(false);
+    const html = buildBriefHtml({ template: { code: "T", name: "X", category: null, image_key: null, image_w: null, image_h: null, vector_image_key: null }, recipe: { seq: 1, name: null, note: null, created_by_name: null }, spec, choices: TEAM, stock: {}, useVector: false, img: (k: string) => k, dateText: "" } as never);
+    expect(html).toContain("my inside");
+    expect(html).not.toContain("Create ONE image arranged");   // grid4 ปิด = ไม่พิมพ์
+    expect(cleanPrompts(null)).toEqual({ on: {}, edits: {}, custom: [] });
   });
 });

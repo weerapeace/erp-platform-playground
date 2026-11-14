@@ -9,7 +9,7 @@
  */
 
 // ─── ชนิดข้อมูล ──────────────────────────────────────────────────────────────
-export type ChoiceListKey = "bag_type" | "category" | "hw_color" | "thread_color" | "pocket_type" | "rule";
+export type ChoiceListKey = "bag_type" | "category" | "hw_color" | "thread_color" | "pocket_type" | "rule" | "prompt";
 export const CHOICE_LISTS: { key: ChoiceListKey; label: string; hint: string }[] = [
   { key: "bag_type",     label: "ประเภทกระเป๋า",     hint: "รหัส = ตัวนำหน้ารหัสแม่แบบ (เช่น HANB → HANB-001) · ชื่ออังกฤษใช้ใน prompt (เช่น Handbag)" },
   { key: "category",     label: "หมวดที่เปลี่ยนได้", hint: "จุดบนรูปเลือกหมวดจากรายการนี้ · แต่ละหมวดเลือกจากแหล่งต่างกัน" },
@@ -17,6 +17,7 @@ export const CHOICE_LISTS: { key: ChoiceListKey; label: string; hint: string }[]
   { key: "thread_color", label: "สีด้าย (รหัสสี)",   hint: "ใส่รหัสสีด้ายจริง เช่น TH-402" },
   { key: "pocket_type",  label: "แบบช่อง",           hint: "ใช้ตอนวาดช่องหน้า/หลัง/ข้างใน" },
   { key: "rule",         label: "กฎห้ามคู่",          hint: "ถ้าเลือก A คู่กับ B ระบบเตือน (ไม่บล็อก)" },
+  { key: "prompt",       label: "Prompt",            hint: "เปิด/ปิด prompt ของระบบตั้งต้นทั้งทีม (แต่ละสูตรปรับเองได้) · เพิ่มแม่แบบ prompt ของทีม ใส่คำแทนอย่าง {ขนาด} {วัสดุ} ให้ระบบเติมค่าของสูตรให้" },
 ];
 
 /** แหล่งที่ใช้เลือกของหมวด */
@@ -60,13 +61,23 @@ export type Handle = { drop: number; w: number; gap: number; count: number; tota
  * ชุดสีอื่นเก็บเฉพาะจุดที่ต่างจากสีหลัก (picks[pinId]) · ไม่มีใน picks = เหมือนสีหลัก · hw_color null = สีอะไหล่เหมือนสีหลัก
  */
 export type Colorway = { id: string; name: string; hw_color: string | null; picks: Record<string, Pick | null> };
-export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost };
+export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost; prompts: RecipePrompts };
 export const MAX_COLORWAYS = 8;
 export const MAIN_COLORWAY_LABEL = "สีหลัก";
 
-export const DEFAULT_SIZE: Size = { w: 30, h: 35, d: 12, strap: 0 };
-export const DEFAULT_HANDLE: Handle = { drop: 18, w: 3, gap: 12, count: 2, total: 0 };
-export const SIZE_LIMIT = { min: 1, max: 200 };
+/**
+ * รอบ 6 (เจ้าของเลือก 2026-11-14): ขนาด/หู "ไม่บังคับ" — 0 = ยังไม่ระบุ (ช่องว่าง)
+ *   prompt / ใบสรุป / ใบสั่งทำตัวอย่าง ข้ามค่าที่ไม่ระบุ · ทุนประมาณบอกให้ใส่ขนาดก่อน · ส่งเข้าสตูดิโอต้องมีขนาดครบ
+ *   หู count -1 = ยังไม่ระบุ · 0 = ไม่มีหู
+ */
+export const DEFAULT_SIZE: Size = { w: 0, h: 0, d: 0, strap: 0 };
+export const HANDLE_UNSET = -1;
+export const DEFAULT_HANDLE: Handle = { drop: 0, w: 0, gap: 0, count: HANDLE_UNSET, total: 0 };
+export const SIZE_LIMIT = { min: 0, max: 200 };
+/** กว้าง/สูง/หนา ใส่ครบไหม (คิดผ้า / ส่งสตูดิโอ ต้องครบ) */
+export const sizeKnown = (s: Size) => s.w > 0 && s.h > 0 && s.d > 0;
+/** กรอบหน้า/หลังสำหรับวาดตำแหน่งช่อง — ยังไม่ใส่ขนาด = ใช้กรอบตัวอย่าง 30×35 (placeholder = true) */
+export const panelSize = (s: Size) => ({ w: s.w > 0 ? s.w : 30, h: s.h > 0 ? s.h : 35, placeholder: !(s.w > 0 && s.h > 0) });
 export const MAX_PINS = 40;
 export const MAX_BOXES = 12;
 
@@ -103,13 +114,13 @@ const idOf = (v: unknown) => (typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.t
 export function cleanSize(v: unknown): Size {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
   const s = (k: keyof Size, d: number, lo: number) => r1(clamp(num(o[k], d), lo, SIZE_LIMIT.max));
-  return { w: s("w", DEFAULT_SIZE.w, 1), h: s("h", DEFAULT_SIZE.h, 1), d: s("d", DEFAULT_SIZE.d, 0), strap: s("strap", 0, 0) };
+  return { w: s("w", DEFAULT_SIZE.w, 0), h: s("h", DEFAULT_SIZE.h, 0), d: s("d", DEFAULT_SIZE.d, 0), strap: s("strap", 0, 0) };
 }
 
 export function cleanHandle(v: unknown): Handle {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
   const s = (k: keyof Handle, d: number) => r1(clamp(num(o[k], d), 0, SIZE_LIMIT.max));
-  return { drop: s("drop", DEFAULT_HANDLE.drop), w: s("w", DEFAULT_HANDLE.w), gap: s("gap", DEFAULT_HANDLE.gap), count: Math.round(clamp(num(o.count, DEFAULT_HANDLE.count), 0, 4)), total: s("total", 0) };
+  return { drop: s("drop", DEFAULT_HANDLE.drop), w: s("w", DEFAULT_HANDLE.w), gap: s("gap", DEFAULT_HANDLE.gap), count: Math.round(clamp(num(o.count, DEFAULT_HANDLE.count), HANDLE_UNSET, 4)), total: s("total", 0) };
 }
 
 /** ความยาวหูรวม (ซม.) — ใส่เองใช้ค่านั้น · ไม่ใส่ = ประมาณเป็นครึ่งวงรี (กว้าง = ระยะห่างโคนหู · สูง = ความสูงหู) + ส่วนเย็บติดตัว 4 ซม. × 2 */
@@ -158,8 +169,9 @@ export function cleanPick(v: unknown): Pick | null {
 export function cleanBox(v: unknown, size: Size): PocketBox | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
-  const w = r1(clamp(num(o.w, 5), 1, size.w)), h = r1(clamp(num(o.h, 5), 1, size.h));
-  return { id: idOf(o.id), x: r1(clamp(num(o.x), 0, size.w - w)), y: r1(clamp(num(o.y), 0, size.h - h)), w, h, type: str(o.type, 40), note: str(o.note, 300) };
+  const P = panelSize(size);   // ยังไม่ใส่ขนาด = บีบในกรอบตัวอย่าง (ไม่ทำให้ช่องหายเป็น 0)
+  const w = r1(clamp(num(o.w, 5), 1, P.w)), h = r1(clamp(num(o.h, 5), 1, P.h));
+  return { id: idOf(o.id), x: r1(clamp(num(o.x), 0, P.w - w)), y: r1(clamp(num(o.y), 0, P.h - h)), w, h, type: str(o.type, 40), note: str(o.note, 300) };
 }
 
 export function emptyPockets(): Record<PanelKey, PocketBox[]> { return { front: [], back: [], inside_front: [], inside_back: [] }; }
@@ -179,7 +191,7 @@ export function cleanSpec(v: unknown): Spec {
     pockets[p.key] = (Array.isArray(raw[p.key]) ? (raw[p.key] as unknown[]) : []).slice(0, MAX_BOXES)
       .map((b) => cleanBox(b, size)).filter((b): b is PocketBox => !!b);
   }
-  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost) };
+  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost), prompts: cleanPrompts(o.prompts) };
 }
 
 /** ชุดสี: ตัดจุดที่ไม่มีแล้วทิ้ง · ชื่อว่าง = "สี N" · id ซ้ำ = ทิ้งตัวหลัง */
@@ -331,7 +343,7 @@ export function compareRecipes(A: CompareSide, B: CompareSide): CompareRow[] {
   push("ทั่วไป", "สีอะไหล่ทั้งใบ", hwName(A), hwName(B));
   for (const [k, l] of [["w", "กว้าง"], ["h", "สูง"], ["d", "หนา"], ["strap", "สายยาว"]] as const) push("ขนาด", l, lenText(A.spec.size[k]), lenText(B.spec.size[k]));
   const hd = (s: Spec) => s.handle;
-  push("หู", "จำนวนหู", `${hd(A.spec).count} หู`, `${hd(B.spec).count} หู`);
+  push("หู", "จำนวนหู", handleCountText(hd(A.spec).count), handleCountText(hd(B.spec).count));
   if (hd(A.spec).count > 0 || hd(B.spec).count > 0) {
     for (const [k, l] of [["drop", "ความสูงหู"], ["w", "ความกว้างหู"], ["gap", "ระยะห่างหู"]] as const) push("หู", l, lenText(hd(A.spec)[k]), lenText(hd(B.spec)[k]));
     push("หู", "ความยาวรวมหู", lenText(handleLength(hd(A.spec))), lenText(handleLength(hd(B.spec))));
@@ -359,6 +371,27 @@ export const RENDER_VIEWS: { key: RenderView; label: string }[] = [
   { key: "line",   label: "ลายเส้น (Vector)" },
   { key: "other",  label: "อื่น ๆ" },
 ];
+
+/**
+ * รอบ 6: รูปจาก GPT = แกลเลอรีเดียว (ไม่แยกมุม) · ติดดาว = รูปที่ใช้ในใบสั่งทำตัวอย่าง / ส่งใบงาน / ปกการ์ด
+ * ต่อชุดสี: มีรูปติดดาว = ใช้รูปติดดาวทั้งหมด (ใหม่ก่อน) · ไม่มีดาว = รูปล่าสุด 1 รูป
+ * colorwayId: ส่งมา (null = สีหลัก) = เฉพาะชุดสีนั้น · ไม่ส่ง (undefined) = ทุกชุดสี (สีหลักก่อน)
+ */
+export type RenderLite = { id: string; image_key: string; colorway_id?: string | null; is_starred?: boolean | null; created_at: string };
+export function chosenRenders<T extends RenderLite>(rows: T[], colorwayId?: string | null): T[] {
+  const groups = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = r.colorway_id ?? "";
+    if (colorwayId !== undefined && k !== (colorwayId ?? "")) continue;
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+  }
+  const keys = [...groups.keys()].sort((a, b) => (a ? 1 : 0) - (b ? 1 : 0));
+  return keys.flatMap((k) => {
+    const g = [...groups.get(k)!].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const star = g.filter((r) => r.is_starred);
+    return star.length ? star : g.slice(0, 1);
+  });
+}
 
 const en = (c: Choice | undefined, fb: string) => (c?.name_en?.trim() || c?.name || fb);
 
@@ -395,32 +428,138 @@ export function bagWord(tpl: { category?: string | null }, choices: Choice[]): s
   return (t?.name_en?.trim() || t?.name || tpl.category?.trim() || "bag").toLowerCase();
 }
 
+/** จำนวนหูเป็นคำ (ยังไม่ระบุ / ไม่มีหู / N หู) */
+export const handleCountText = (n: number) => (n < 0 ? "ยังไม่ระบุ" : n === 0 ? "ไม่มีหู" : `${n} หู`);
+
+/** หูใน prompt — ยังไม่ระบุ = "" (ไม่พูดถึง) · ใส่เฉพาะค่าที่ใส่ (> 0) ไม่เขียน "0 cm" */
 export function handleText(h: Handle): string {
-  if (h.count <= 0) return "no top handles";
-  return `${h.count} top handle${h.count > 1 ? "s" : ""}, each ${bothUnits(h.w)} wide, rising ${bothUnits(h.drop)} above the bag opening, attached ${bothUnits(h.gap)} apart, total handle length about ${bothUnits(handleLength(h))}`;
+  if (h.count < 0) return "";
+  if (h.count === 0) return "no top handles";
+  const bits = [h.w > 0 ? `each ${bothUnits(h.w)} wide` : "", h.drop > 0 ? `rising ${bothUnits(h.drop)} above the bag opening` : "",
+    h.gap > 0 ? `attached ${bothUnits(h.gap)} apart` : "", handleLength(h) > 0 ? `total handle length about ${bothUnits(handleLength(h))}` : ""].filter(Boolean);
+  return `${h.count} top handle${h.count > 1 ? "s" : ""}${bits.length ? `, ${bits.join(", ")}` : ""}`;
+}
+
+/** ขนาดใน prompt — ใส่เฉพาะด้านที่ใส่ค่า เช่น "24.5 cm (9.6 in) wide x 15.5 cm (6.1 in) high" · ไม่ใส่เลย = "" */
+export function sizePhrase(s: Size): string {
+  return [s.w > 0 ? `${bothUnits(s.w)} wide` : "", s.h > 0 ? `${bothUnits(s.h)} high` : "", s.d > 0 ? `${bothUnits(s.d)} deep` : ""].filter(Boolean).join(" x ");
 }
 
 export function buildPrompts(tpl: { name: string; category?: string | null }, spec: Spec, choices: Choice[]): PromptSet[] {
-  const { w, h, d, strap } = spec.size;
-  const hw = choices.find((c) => c.list_key === "hw_color" && c.code === spec.hw_color);
-  const bag = `${bagWord(tpl, choices)} (${tpl.name}), ${bothUnits(w)} wide x ${bothUnits(h)} high x ${bothUnits(d)} deep, ${handleText(spec.handle)}${strap > 0 ? `, plus a long shoulder strap ${bothUnits(strap)}` : ""}`;
-  const parts = partsText(spec, choices);
-  const base = `${bag}. ${parts ? parts + "." : ""}${hw ? ` All metal hardware in ${en(hw, hw.name)} finish.` : ""} Outer pockets: ${pocketsText(spec, choices, false)}.`;
+  const { d, strap } = spec.size;
+  const ctx = promptContext(tpl, spec, choices);   // คำบรรยายชุดเดียวกับคำแทน {กระเป๋า} ในแม่แบบทีม
+  const sz = ctx["ขนาด"], base = ctx["กระเป๋า"];
   const ref = "Match the attached reference images exactly: numbers [ref N] match the numbered callouts in the attached PDF.";
   const extra: PromptSet[] = [
     { key: "line", title: "ลายเส้น (Vector)", hint: "อัปรูปที่ได้ที่ช่อง “ลายเส้น” แล้วกดตั้งเป็นรูป Vector ของแม่แบบ",
       text: `Clean technical line drawing of the same ${base} Front view only, same angle and proportions as the attached photo. Black outlines on a pure white background, no shading, no color, no texture, no text. Show seams, stitching lines, zipper, pockets and hardware as simple outlines.` },
     { key: "3d", title: "3D (เว็บแปลงรูปเป็นโมเดล)", hint: "ใช้กับเว็บแปลงรูปเป็น 3D (เช่น Meshy, Tripo) — ได้ทรงไว้ดู ขนาดไม่แม่น · ทำแพทเทิร์นจริงใช้ปุ่ม “ส่งเข้าสตูดิโอแพทเทิร์น”",
-      text: `Create a 3D model of this ${base} Real-world scale: ${bothUnits(w)} wide, ${bothUnits(h)} high, ${bothUnits(d)} deep. Single watertight object, handles attached, closed bottom, realistic materials matching the reference images, neutral lighting, no background, export as GLB.` },
+      text: `Create a 3D model of this ${base} ${sz ? `Real-world scale: ${sz}. ` : ""}Single watertight object, handles attached, closed bottom, realistic materials matching the reference images, neutral lighting, no background, export as GLB.` },
   ];
   return [
     { key: "grid4", title: "4 มุมรวมรูปเดียว (หน้า · หลัง · ข้าง · เอียง)",
-      text: `Create ONE image arranged as a 2x2 grid showing the SAME ${base} Top-left: front view. Top-right: back view. Bottom-left: side view showing the ${d} cm gusset. Bottom-right: three-quarter view. ${ref} Plain white background, soft studio light, photorealistic, identical color and texture in all 4 views, no text.` },
+      text: `Create ONE image arranged as a 2x2 grid showing the SAME ${base} Top-left: front view. Top-right: back view. Bottom-left: side view${d > 0 ? ` showing the ${bothUnits(d)} gusset` : ""}. Bottom-right: three-quarter view. ${ref} Plain white background, soft studio light, photorealistic, identical color and texture in all 4 views, no text.` },
     { key: "inside", title: "ข้างใน",
       text: `Photorealistic top-down photo looking inside the open ${base} Inside pockets: ${pocketsText(spec, choices, true)}. Show the lining clearly. ${ref} Plain white background, soft light, no text.` },
     { key: "model", title: "คนสะพาย",
-      text: `Lifestyle photo of a Thai female model wearing the ${base}${strap > 0 ? ` Carried with the long shoulder strap, ${bothUnits(strap)} long.` : " Carried on the shoulder by the handle."} Neutral outfit, clean minimal backdrop, natural light, the bag clearly visible and true to the reference images.` },
+      text: `Lifestyle photo of a Thai female model wearing the ${base}${strap > 0 ? ` Carried with the long shoulder strap, ${bothUnits(strap)} long.` : spec.handle.count > 0 ? " Carried on the shoulder by the handle." : " Holding the bag naturally."} Neutral outfit, clean minimal backdrop, natural light, the bag clearly visible and true to the reference images.` },
     ...extra,
+  ];
+}
+
+
+// ─── Prompt รอบ 6: เปิด/ปิด · แก้ · เพิ่ม · แม่แบบของทีม ─────────────────────────
+/**
+ * เจ้าของเลือก 2026-11-14: สวิตช์ = ค่าเริ่มของทีม + ปรับต่อสูตร · เพิ่มได้ทั้งในสูตร + แม่แบบ prompt ของทีม (ใส่คำแทน {ขนาด} ฯลฯ)
+ *   ทีม = ตัวเลือกรายการ "prompt" (⚙️ ตัวเลือก): code = คีย์ prompt ระบบ (grid4/inside/model/line/3d) + config.default_on → เปิด/ปิดตั้งต้น
+ *         หรือแม่แบบทีม config.text (+ default_on) → key "team:<code>"
+ *   สูตร = spec.prompts: on (ปรับสวิตช์ทับค่าทีม) · edits (ข้อความที่แก้เอง + base = ข้อความระบบตอนแก้ → เตือนเมื่อสูตรเปลี่ยน) · custom (prompt ของสูตร key "own:<id>")
+ *   ใบสรุป PDF พิมพ์เฉพาะที่เปิด
+ */
+export const PROMPT_SYSTEM_KEYS = ["grid4", "inside", "model", "line", "3d"] as const;
+export type RecipePrompts = { on: Record<string, boolean>; edits: Record<string, { text: string; base: string }>; custom: { id: string; title: string; text: string }[] };
+export const EMPTY_PROMPTS: RecipePrompts = { on: {}, edits: {}, custom: [] };
+const PKEY = /^(grid4|inside|model|line|3d|team:[A-Za-z0-9_-]{1,40}|own:[A-Za-z0-9_-]{1,40})$/;
+export const MAX_CUSTOM_PROMPTS = 10;
+export function cleanPrompts(v: unknown): RecipePrompts {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const on: Record<string, boolean> = {};
+  for (const [k, val] of Object.entries((o.on && typeof o.on === "object" ? o.on : {}) as Record<string, unknown>).slice(0, 60)) if (PKEY.test(k) && typeof val === "boolean") on[k] = val;
+  const edits: RecipePrompts["edits"] = {};
+  for (const [k, val] of Object.entries((o.edits && typeof o.edits === "object" ? o.edits : {}) as Record<string, unknown>).slice(0, 30)) {
+    const e = (val ?? {}) as Record<string, unknown>;
+    const text = str(e.text, 4000);
+    if (PKEY.test(k) && !k.startsWith("own:") && text) edits[k] = { text, base: typeof e.base === "string" ? e.base.slice(0, 4000) : "" };
+  }
+  const seen = new Set<string>();
+  const custom = (Array.isArray(o.custom) ? o.custom : []).slice(0, MAX_CUSTOM_PROMPTS).flatMap((c) => {
+    const q = (c ?? {}) as Record<string, unknown>;
+    const id = idOf(q.id), text = str(q.text, 4000);
+    if (!text || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, title: str(q.title, 80) || "Prompt ของสูตร", text }];
+  });
+  return { on, edits, custom };
+}
+
+/** คำแทนที่ใส่ในแม่แบบ prompt ได้ — ระบบเติมค่าของสูตร (ชุดสีที่ดูอยู่) ให้ */
+export const PROMPT_VARS: { key: string; label: string }[] = [
+  { key: "กระเป๋า", label: "คำบรรยายกระเป๋าเต็ม (ชนิด ขนาด หู วัสดุ ช่องนอก)" },
+  { key: "ประเภท", label: "ชนิดกระเป๋าภาษาอังกฤษ" }, { key: "ชื่อแม่แบบ", label: "ชื่อแม่แบบ" },
+  { key: "ขนาด", label: "ขนาดที่ใส่ไว้ (2 หน่วย)" }, { key: "หู", label: "หูกระเป๋า" },
+  { key: "วัสดุ", label: "วัสดุทุกจุด + เลข [ref N]" }, { key: "สีอะไหล่", label: "สีอะไหล่ทั้งใบ" },
+  { key: "ช่องนอก", label: "ช่องด้านนอก" }, { key: "ช่องใน", label: "ช่องข้างใน" },
+  { key: "อ้างอิง", label: "ประโยคให้ GPT ดูรูปเส้นชี้" },
+];
+export type PromptCtx = Record<string, string>;
+export function promptContext(tpl: { name: string; category?: string | null }, spec: Spec, choices: Choice[]): PromptCtx {
+  const hw = choices.find((c) => c.list_key === "hw_color" && c.code === spec.hw_color);
+  const sz = sizePhrase(spec.size), ht = handleText(spec.handle), strap = spec.size.strap;
+  const bag = [`${bagWord(tpl, choices)} (${tpl.name})`, sz, ht, strap > 0 ? `plus a long shoulder strap ${bothUnits(strap)}` : ""].filter(Boolean).join(", ");
+  const parts = partsText(spec, choices);
+  const hwText = hw ? en(hw, hw.name) : "";
+  return {
+    "กระเป๋า": `${bag}. ${parts ? parts + "." : ""}${hw ? ` All metal hardware in ${hwText} finish.` : ""} Outer pockets: ${pocketsText(spec, choices, false)}.`,
+    "ประเภท": bagWord(tpl, choices), "ชื่อแม่แบบ": tpl.name, "ขนาด": sz, "หู": ht, "วัสดุ": parts, "สีอะไหล่": hwText,
+    "ช่องนอก": pocketsText(spec, choices, false), "ช่องใน": pocketsText(spec, choices, true),
+    "อ้างอิง": "Match the attached reference images exactly: numbers [ref N] match the numbered callouts in the attached PDF.",
+  };
+}
+/** แทนคำ {ขนาด} ฯลฯ ด้วยค่าของสูตร · คำที่ไม่รู้จักคงไว้ตามเดิม */
+export const fillPromptVars = (text: string, ctx: PromptCtx) => text.replace(/\{([^{}\n]{1,20})\}/g, (m, k: string) => (k.trim() in ctx ? ctx[k.trim()] : m));
+
+/** ค่าของทีมจากตัวเลือกรายการ "prompt" */
+export function teamPromptSettings(choices: Choice[]) {
+  const rows = choices.filter((c) => c.list_key === "prompt" && c.is_active !== false).sort((a, b) => a.sort_order - b.sort_order);
+  const sys = new Set<string>(PROMPT_SYSTEM_KEYS);
+  const defaults: Record<string, boolean> = {};
+  const templates: { key: string; title: string; text: string; defaultOn: boolean }[] = [];
+  for (const r of rows) {
+    const text = typeof r.config?.text === "string" ? r.config.text.trim() : "";
+    const on = r.config?.default_on !== false;
+    if (sys.has(r.code) && !text) defaults[r.code] = on;
+    else if (text) templates.push({ key: `team:${r.code}`, title: r.name || r.code, text, defaultOn: on });
+  }
+  return { defaults, templates };
+}
+
+export type ResolvedPrompt = {
+  key: string; title: string; text: string; hint?: string; source: "system" | "team" | "recipe";
+  on: boolean; edited: boolean; stale: boolean; generated: string;
+};
+/** prompt ทั้งหมดของสูตร (ระบบ + ทีม + ของสูตร) พร้อมสวิตช์ / ข้อความที่แก้ / เตือนข้อความไม่ตรงสูตร */
+export function resolvePrompts(tpl: { name: string; category?: string | null }, spec: Spec, choices: Choice[]): ResolvedPrompt[] {
+  const ctx = promptContext(tpl, spec, choices);
+  const team = teamPromptSettings(choices);
+  const P = spec.prompts ?? EMPTY_PROMPTS;
+  const out = (key: string, title: string, generated: string, source: ResolvedPrompt["source"], defOn: boolean, hint?: string): ResolvedPrompt => {
+    const e = source === "recipe" ? undefined : P.edits[key];
+    return { key, title, hint, source, generated, text: e ? e.text : generated, edited: !!e, stale: !!e && e.base !== generated, on: P.on[key] ?? defOn };
+  };
+  return [
+    ...buildPrompts(tpl, spec, choices).map((p) => out(p.key, p.title, p.text, "system", team.defaults[p.key] ?? true, p.hint)),
+    ...team.templates.map((t) => out(t.key, t.title, fillPromptVars(t.text, ctx), "team", t.defaultOn)),
+    ...P.custom.map((c) => out(`own:${c.id}`, c.title, fillPromptVars(c.text, ctx), "recipe", true)),
   ];
 }
 
@@ -543,10 +682,10 @@ export function calloutSvg(b: BriefInput): string {
 
 /** รูปช่องของ 1 ฝั่ง (กรอบกระเป๋า + กล่องช่องทุกกล่อง + ขนาด) */
 export function pocketPanelSvg(spec: Spec, panel: PanelKey, choices: Choice[]): string {
-  const W = Math.max(1, spec.size.w), H = Math.max(1, spec.size.h);
+  const P = panelSize(spec.size), W = P.w, H = P.h;
   const s = Math.min(200 / W, 220 / H), ox = (240 - W * s) / 2, oy = 22;
   let g = `<svg viewBox="0 0 240 ${oy + H * s + 10}" width="100%" xmlns="http://www.w3.org/2000/svg"><rect x="${ox}" y="${oy}" width="${W * s}" height="${H * s}" fill="#f4efe4" stroke="#999"/>`;
-  g += `<text x="120" y="14" text-anchor="middle" font-size="11" fill="#555">${esc(PANELS.find((p) => p.key === panel)?.label ?? panel)} · ${W}×${H} ซม.</text>`;
+  g += `<text x="120" y="14" text-anchor="middle" font-size="11" fill="#555">${esc(PANELS.find((p) => p.key === panel)?.label ?? panel)} · ${P.placeholder ? "ยังไม่ใส่ขนาด (กรอบตัวอย่าง)" : `${W}×${H} ซม.`}</text>`;
   const boxes = spec.pockets[panel];
   if (!boxes.length) g += `<text x="120" y="${oy + (H * s) / 2}" text-anchor="middle" font-size="11" fill="#999">ไม่มีช่อง</text>`;
   boxes.forEach((b, i) => {
@@ -566,7 +705,7 @@ export function buildBriefHtml(b: BriefInput): string {
   const hw = b.choices.find((c) => c.list_key === "hw_color" && c.code === spec.hw_color);
   const rules = ruleHits(spec, b.choices);
   const st = stockHits(spec, b.stock);
-  const prompts = buildPrompts(t, spec, b.choices);
+  const prompts = resolvePrompts(t, spec, b.choices).filter((p) => p.on);   // รอบ 6: พิมพ์เฉพาะ prompt ที่เปิด
   const warn = [...rules.map((x) => `กฎทีม: ${x.reason}`), ...st.out.map((x) => `จุด ${x.pinIndex + 1} ${x.code} หมดสต็อก`), ...st.low.map((x) => `จุด ${x.pinIndex + 1} ${x.code} เหลือน้อย (${x.onHand})`)];
   const rows = spec.pins.map((p, i) => {
     const cat = categoryOf(b.choices, p.cat);
@@ -597,13 +736,13 @@ export function buildBriefHtml(b: BriefInput): string {
   <div class="hd"><div><div class="t">DESIGN BRIEF</div><div style="color:#666">ใบสรุปแบบสำหรับสร้างรูป</div></div>
   <div class="r">${esc(t.code)} · ${esc(t.name)} · สูตร #${r.seq}${r.name ? ` ${esc(r.name)}` : ""}${b.colorwayName ? ` · <b>${esc(b.colorwayName)}</b>` : ""}<br>${esc(b.dateText)}${r.created_by_name ? ` · ผู้ทำ: ${esc(r.created_by_name)}` : ""}</div></div>
   <div class="callout">${calloutSvg(b)}</div>
-  <div class="kv"><div>ขนาด (กว้าง×สูง×หนา)<b>${spec.size.w}×${spec.size.h}×${spec.size.d} ซม.</b><span class="in">${inch(spec.size.w)}×${inch(spec.size.h)}×${inch(spec.size.d)} นิ้ว</span></div>
+  <div class="kv"><div>ขนาด (กว้าง×สูง×หนา)<b>${[spec.size.w, spec.size.h, spec.size.d].map((v) => (v > 0 ? v : "—")).join("×")} ซม.</b><span class="in">${[spec.size.w, spec.size.h, spec.size.d].map((v) => (v > 0 ? inch(v) : "—")).join("×")} นิ้ว</span></div>
   <div>สายยาว<b>${spec.size.strap > 0 ? `${spec.size.strap} ซม.` : "ไม่มี"}</b>${spec.size.strap > 0 ? `<span class="in">${inch(spec.size.strap)} นิ้ว</span>` : ""}</div>
   <div>สีอะไหล่ทั้งใบ<b>${esc(hw?.name ?? "—")}</b></div><div>จำนวนจุด<b>${spec.pins.length} จุด</b></div></div>
-  <div class="kv" style="grid-template-columns:repeat(5,1fr)">${spec.handle.count > 0 ? [
-    ["จำนวนหู", `${spec.handle.count} หู`, ""], ["ความสูงหู", `${spec.handle.drop} ซม.`, `${inch(spec.handle.drop)} นิ้ว`], ["ความกว้างหู", `${spec.handle.w} ซม.`, `${inch(spec.handle.w)} นิ้ว`],
-    ["ระยะห่างหู", `${spec.handle.gap} ซม.`, `${inch(spec.handle.gap)} นิ้ว`], [spec.handle.total > 0 ? "ความยาวรวมหู" : "ความยาวรวมหู (ประมาณ)", `${handleLength(spec.handle)} ซม.`, `${inch(handleLength(spec.handle))} นิ้ว`],
-  ].map(([a, v, i]) => `<div>${a}<b>${v}</b>${i ? `<span class="in">${i}</span>` : ""}</div>`).join("") : `<div>หูกระเป๋า<b>ไม่มีหู</b></div>`}</div>
+  <div class="kv" style="grid-template-columns:repeat(5,1fr)">${spec.handle.count > 0 ? (() => { const cm = (v: number) => (v > 0 ? `${v} ซม.` : "—"), ic = (v: number) => (v > 0 ? `${inch(v)} นิ้ว` : ""); const L = handleLength(spec.handle); return [
+    ["จำนวนหู", `${spec.handle.count} หู`, ""], ["ความสูงหู", cm(spec.handle.drop), ic(spec.handle.drop)], ["ความกว้างหู", cm(spec.handle.w), ic(spec.handle.w)],
+    ["ระยะห่างหู", cm(spec.handle.gap), ic(spec.handle.gap)], [spec.handle.total > 0 ? "ความยาวรวมหู" : "ความยาวรวมหู (ประมาณ)", cm(L), ic(L)],
+  ].map(([a, v, i]) => `<div>${a}<b>${v}</b>${i ? `<span class="in">${i}</span>` : ""}</div>`).join(""); })() : `<div>หูกระเป๋า<b>${handleCountText(spec.handle.count)}</b></div>`}</div>
   ${warn.length ? `<div class="warn">${warn.map(esc).join("<br>")}</div>` : ""}
   ${r.note ? `<div style="margin-top:6px">หมายเหตุ: ${esc(r.note)}</div>` : ""}
   <h4>ตารางสรุป</h4><table><tr><th style="width:5%">#</th><th style="width:14%">หมวด</th><th style="width:12%">รูป</th><th>รหัส · ชื่อ</th><th style="width:24%">โน้ต</th><th style="width:11%">สต็อก</th></tr>${rows || `<tr><td colspan="6" style="color:#999">ยังไม่มีจุด</td></tr>`}</table>

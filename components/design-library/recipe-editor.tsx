@@ -23,8 +23,10 @@ import { SaveBar } from "@/components/save-bar";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
+import { useFileDrop } from "@/components/file-drop";
+import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import {
-  allSkuIds, applyColorway, bodyPickOf, buildPrompts, categoryOf, cleanSpec, colorwayLabel, pickInfo, RENDER_VIEWS, ruleHits, setColorwayPick, skuIdOf, stockHits, toStudioParams,
+  allSkuIds, applyColorway, bodyPickOf, categoryOf, chosenRenders, cleanSpec, colorwayLabel, pickInfo, RENDER_VIEWS, ruleHits, setColorwayPick, sizeKnown, skuIdOf, stockHits, toStudioParams,
   MAX_PINS, type Pin, type Spec,
 } from "@/lib/design-library";
 import { PATTERN_SCHEMA } from "@/lib/pattern-project";
@@ -38,6 +40,7 @@ import type { MaterialInfo } from "@/lib/design-library-cost";
 import { LenInput, UnitToggle, useLenUnit } from "./units";
 import { SendToSheetModal, sheetHref } from "./send-to-sheet";
 import { ToProductModal } from "./to-product";
+import { PromptsPanel } from "./prompts-panel";
 import { api, compareHref, img, newId, printHref, techpackHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
 
 export function RecipeEditor({ id }: { id: string }) {
@@ -125,6 +128,7 @@ export function RecipeEditor({ id }: { id: string }) {
   /** สร้างแพทเทิร์นใหม่ในสตูดิโอ: เก็บขนาดไว้ใน template.dl_draft → สตูดิโอเปิดตัวสร้างจากแม่แบบพร้อมค่านี้ให้ตรวจก่อนวาง */
   const sendToStudio = async () => {
     if (!b || !spec) return;
+    if (!sizeKnown(spec.size)) { toast.warning("ใส่ขนาด กว้าง สูง หนา ให้ครบก่อน — สตูดิโอแพทเทิร์นต้องใช้ขนาดจริงตัดชิ้น"); return; }
     if (dirty && !(await save())) return;
     setSending(true);
     try {
@@ -224,8 +228,8 @@ export function RecipeEditor({ id }: { id: string }) {
           <div className="flex items-center gap-2 mb-2"><span className="text-[14px] font-medium text-slate-800">ขนาดกระเป๋า</span><span className="ml-auto"><UnitToggle unit={unit.unit} set={unit.set} /></span></div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {(["w", "h", "d", "strap"] as const).map((k) => (
-              <label key={k} className="text-[12px] text-slate-500 block">{{ w: "กว้าง", h: "สูง", d: "หนา", strap: "สายยาว (0 = ไม่มี)" }[k]}
-                <LenInput cm={spec.size[k]} unit={unit.unit} disabled={readOnly} onChange={(v) => update((s) => ({ ...s, size: { ...s.size, [k]: v } }))} className="mt-1" />
+              <label key={k} className="text-[12px] text-slate-500 block">{{ w: "กว้าง", h: "สูง", d: "หนา", strap: "สายยาว (ว่าง = ไม่มี)" }[k]}
+                <LenInput optional cm={spec.size[k]} unit={unit.unit} disabled={readOnly} onChange={(v) => update((s) => ({ ...s, size: { ...s.size, [k]: v } }))} className="mt-1" />
               </label>
             ))}
           </div>
@@ -251,7 +255,8 @@ export function RecipeEditor({ id }: { id: string }) {
       )}
 
       {/* ── Prompt ── */}
-      <Prompts spec={view} b={b} dirty={dirty} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} />
+      <PromptsPanel template={b.template} spec={view} choices={b.choices} dirty={dirty} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null}
+        readOnly={readOnly} onChange={(p) => update((s) => ({ ...s, prompts: p }))} />
 
       {/* ── รูปจาก GPT ── */}
       <Renders recipeId={id} renders={b.renders.filter((r) => (r.colorway_id ?? null) === cw)} allRenders={b.renders} colorwayId={cw} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
@@ -357,48 +362,49 @@ function Warnings({ spec, b, stock }: { spec: Spec; b: RecipeBundle; stock: Reco
   );
 }
 
-function Prompts({ spec, b, dirty, colorway }: { spec: Spec; b: RecipeBundle; dirty: boolean; colorway: string | null }) {
-  const toast = useToast();
-  const prompts = useMemo(() => buildPrompts(b.template, spec, b.choices), [b.template, spec, b.choices]);
-  const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); toast.success("คัดลอก prompt แล้ว"); } catch { toast.error("คัดลอกไม่สำเร็จ — ลองเลือกข้อความแล้วกด Ctrl+C"); }
-  };
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
-      <div className="text-[14px] font-medium text-slate-800 mb-1 flex items-center gap-2"><Icon value="i:sparkles" />Prompt สำหรับ GPT{colorway && <span className="text-indigo-700 font-normal">· {colorway}</span>}</div>
-      <p className="text-[12px] text-slate-500 mb-2">แนบรูปจากใบสรุป PDF (เส้นชี้ + รูปชิ้นส่วน) ไปพร้อม prompt · เลข [ref N] = เลขจุดบนรูป{dirty ? " · ยังไม่ได้บันทึก — prompt นี้ตามที่แก้อยู่ตอนนี้" : ""}</p>
-      <div className="space-y-2">
-        {prompts.map((p) => (
-          <div key={p.key} className="rounded-lg border border-slate-200 p-2">
-            <div className="flex items-center gap-2 mb-1"><span className="text-[13px] font-medium text-slate-700">{p.title}</span>
-              <button type="button" onClick={() => void copy(p.text)} className="ml-auto h-7 px-2.5 text-[12px] rounded-md border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"><Icon value="i:copy" />คัดลอก</button></div>
-            {p.hint && <div className="text-[11.5px] text-indigo-700 mb-1">{p.hint}</div>}
-            <div className="text-[12px] font-mono text-slate-600 whitespace-pre-wrap break-words">{p.text}</div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
+/**
+ * รูปจาก GPT (รอบ 6): แกลเลอรีเดียว ไม่แยกมุม — ลากวาง / Ctrl+V / เลือกหลายรูป · แยกตามชุดสีที่ดูอยู่
+ * ⭐ ติดดาว = รูปที่ใช้ในใบสั่งทำตัวอย่าง / ส่งใบงาน / ปกการ์ด (ไม่มีดาว = รูปล่าสุด — chosenRenders) · รูปเก่าที่เคยแยกมุมยังอยู่ครบ (ป้ายมุมเดิม)
+ */
 function Renders({ recipeId, renders, allRenders, colorwayId, colorway, canEdit, canManage, vectorKey, onChanged, onVector }: {
   recipeId: string; renders: Render[]; allRenders: Render[]; colorwayId: string | null; colorway: string | null; canEdit: boolean; canManage: boolean; vectorKey: string | null;
   onChanged: (r: Render[]) => void; onVector: (key: string) => void;
 }) {
   const toast = useToast();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [open, setOpen] = useState<Record<string, string>>({});   // view → render id ที่กำลังดู
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<UploadProgressState | null>(null);
   const [del, setDel] = useState<Render | null>(null);
-  const upload = async (view: string, file: File | undefined) => {
-    if (!file) return;
-    setBusy(view);
+  const list = useMemo(() => [...renders].sort((a, c) => c.created_at.localeCompare(a.created_at)), [renders]);
+  const used = useMemo(() => new Set(chosenRenders(renders, colorwayId).map((r) => r.id)), [renders, colorwayId]);
+  const starred = list.filter((r) => r.is_starred).length;
+
+  const upload = async (files: File[]) => {
+    const imgs = files.filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length || busy) return;
+    setBusy(true);
+    let added: Render[] = [];
     try {
-      const up = await uploadImagesWithDupCheck([file], { folder: "design-library/renders", max: 2400, onError: (_, e) => toast.error(e.message) });
-      const key = up?.keys[0]; if (!key) return;
-      const r = await api<Render>(`/api/design-library/actions`, { json: { action: "add_render", recipe_id: recipeId, view_key: view, image_key: key, colorway_id: colorwayId } });
-      onChanged([r, ...allRenders]); setOpen((o) => ({ ...o, [view]: r.id })); toast.success(`เก็บรูปเวอร์ชัน ${r.version} แล้ว`);
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setBusy(null); }
+      const up = await uploadImagesWithDupCheck(imgs, { folder: "design-library/renders", max: 2400, onError: (_, e) => toast.error(e.message), onProgress: setProgress });
+      for (const key of up?.keys ?? []) {
+        const r = await api<Render>(`/api/design-library/actions`, { json: { action: "add_render", recipe_id: recipeId, view_key: "other", image_key: key, colorway_id: colorwayId } });
+        added = [r, ...added];
+      }
+      if (added.length) { onChanged([...added, ...allRenders]); toast.success(`เพิ่มรูปแล้ว ${added.length} รูป`); }
+    } catch (e) { toast.error((e as Error).message); if (added.length) onChanged([...added, ...allRenders]); }
+    finally { setBusy(false); setProgress(null); }
+  };
+  const drop = useFileDrop((files) => void upload(files), { accept: "image/", disabled: !canEdit || busy, onReject: () => toast.error("วางได้เฉพาะไฟล์รูป") });
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (!canEdit) return;
+    const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault(); void upload(files);
+  };
+  const star = async (r: Render) => {
+    const next = !r.is_starred;
+    onChanged(allRenders.map((x) => (x.id === r.id ? { ...x, is_starred: next } : x)));
+    try { await api(`/api/design-library/renders/${r.id}`, { method: "PATCH", json: { is_starred: next } }); }
+    catch (e) { toast.error((e as Error).message); onChanged(allRenders); }
   };
   const setVector = async (r: Render) => {
     try { await api(`/api/design-library/actions`, { json: { action: "set_template_vector", render_id: r.id } }); onVector(r.image_key); toast.success("ตั้งเป็นรูป Vector ของแม่แบบแล้ว — ปุ่มสลับ รูปจริง/Vector ใช้รูปนี้"); }
@@ -409,45 +415,58 @@ function Renders({ recipeId, renders, allRenders, colorwayId, colorway, canEdit,
     catch (e) { toast.error((e as Error).message); }
     setDel(null);
   };
+  const viewLabel = (k: string) => (k === "other" ? null : RENDER_VIEWS.find((v) => v.key === k)?.label ?? null);
+
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
-      <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:photo" />รูปที่ได้จาก GPT (เก็บทุกเวอร์ชัน){colorway && <span className="text-indigo-700 font-normal">· {colorway}</span>}</div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {RENDER_VIEWS.map((v) => {
-          const list = renders.filter((r) => r.view_key === v.key).sort((a, c) => c.version - a.version);
-          const cur = list.find((r) => r.id === open[v.key]) ?? list[0];
-          return (
-            <div key={v.key} className="rounded-lg border border-slate-200 p-2 flex flex-col">
-              <div className="text-[13px] font-medium text-slate-700 mb-1">{v.label}</div>
-              <div className="aspect-square rounded-md bg-slate-50 overflow-hidden flex items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {cur ? <a href={img(cur.image_key, 0)} target="_blank" rel="noopener"><img src={img(cur.image_key, 700)} alt="" className="w-full h-full object-contain" /></a> : <span className="text-[12px] text-slate-400">ยังไม่มีรูป</span>}
-              </div>
-              {cur && <div className="text-[11.5px] text-slate-500 mt-1">v{cur.version} · {cur.created_by_name ?? "—"} · {thaiDate(cur.created_at)}</div>}
-              {v.key === "line" && cur && (cur.image_key === vectorKey
-                ? <div className="text-[11.5px] text-emerald-700 mt-1">ใช้เป็นรูป Vector ของแม่แบบอยู่</div>
-                : canManage && <button type="button" onClick={() => void setVector(cur)} className="mt-1 h-7 px-2 text-[12px] rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50">ตั้งเป็นรูป Vector ของแม่แบบ</button>)}
-              {list.length > 1 && (
-                <div className="flex flex-wrap gap-1 mt-1">{list.map((r) => (
-                  <button key={r.id} type="button" onClick={() => setOpen((o) => ({ ...o, [v.key]: r.id }))} title={`${r.created_by_name ?? ""} · ${thaiDate(r.created_at)}`}
-                    className={`h-6 px-2 text-[11px] rounded-full border ${r.id === cur?.id ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-500"}`}>v{r.version}</button>
-                ))}</div>
-              )}
-              {canEdit && (
-                <div className="flex gap-1 mt-2">
-                  <label className="flex-1 h-8 text-[12px] rounded-md border border-slate-200 hover:bg-slate-50 inline-flex items-center justify-center gap-1 cursor-pointer">
-                    <Icon value="i:upload" />{busy === v.key ? "กำลังอัป…" : "อัปโหลดรูปใหม่"}
-                    <input type="file" accept="image/*" className="hidden" disabled={!!busy} onChange={(e) => { void upload(v.key, e.target.files?.[0]); e.target.value = ""; }} />
-                  </label>
-                  {cur && <button type="button" onClick={() => setDel(cur)} className="h-8 w-8 rounded-md border border-slate-200 text-rose-600 hover:bg-rose-50" aria-label="ลบรูปนี้"><Icon value="i:trash" /></button>}
-                </div>
-              )}
+    <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4" {...drop.guard}>
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <span className="text-[14px] font-medium text-slate-800 flex items-center gap-2"><Icon value="i:photo" />รูปจาก GPT{colorway && <span className="text-indigo-700 font-normal">· {colorway}</span>}</span>
+        <span className="text-[12px] text-slate-500">{list.length} รูป{starred ? ` · ติดดาว ${starred}` : ""}</span>
+        {canEdit && (
+          <label className="ml-auto h-8 px-3 text-[12.5px] rounded-lg border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1.5 cursor-pointer">
+            <Icon value="i:upload" />{busy ? "กำลังอัป…" : "เลือกรูป"}
+            <input type="file" accept="image/*" multiple className="hidden" disabled={busy} onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+          </label>
+        )}
+      </div>
+      <p className="text-[12px] text-slate-500 mb-2">ติดดาวรูปที่จะใช้ในใบสั่งทำตัวอย่าง / ส่งใบงาน / ปกการ์ด — ไม่ติดดาวเลย = ใช้รูปล่าสุด</p>
+      {progress && <UploadProgress {...progress} className="mb-2" />}
+      <div {...drop.zone("gallery")} onPaste={onPaste} tabIndex={canEdit ? 0 : -1}
+        className={`grid gap-2 grid-cols-2 sm:grid-cols-4 xl:grid-cols-6 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${drop.over === "gallery" ? "ring-2 ring-indigo-400 bg-indigo-50/40" : ""}`}>
+        {list.map((r) => (
+          <div key={r.id} className={`group relative rounded-lg border overflow-hidden bg-slate-50 ${used.has(r.id) ? "border-amber-300" : "border-slate-200"}`}>
+            <a href={img(r.image_key, 0)} target="_blank" rel="noopener" className="block aspect-square">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img(r.image_key, 500)} alt="" className="w-full h-full object-contain" loading="lazy" />
+            </a>
+            <button type="button" disabled={!canEdit} onClick={() => void star(r)} title={r.is_starred ? "เอาดาวออก" : "ติดดาว (ใช้รูปนี้ในใบ)"} aria-pressed={!!r.is_starred}
+              className={`absolute top-1 right-1 h-7 w-7 rounded-full inline-flex items-center justify-center bg-white/90 border ${r.is_starred ? "border-amber-300 text-amber-500" : "border-slate-200 text-slate-400 hover:text-amber-500"} disabled:cursor-default`}>
+              <Icon value="i:star" />
+            </button>
+            <div className="px-1.5 py-1 text-[11px] text-slate-500 flex items-center gap-1 bg-white">
+              <span className="truncate">{r.created_by_name ?? "—"} · {thaiDate(r.created_at)}</span>
+              {viewLabel(r.view_key) && <span className="shrink-0 px-1 rounded bg-slate-100 text-slate-500" title="รูปเก่าที่เคยแยกมุม">{viewLabel(r.view_key)}</span>}
             </div>
-          );
-        })}
+            {r.image_key === vectorKey && <div className="px-1.5 pb-1 text-[11px] text-emerald-700 bg-white">รูป Vector ของแม่แบบ</div>}
+            {canEdit && (
+              <div className="absolute top-1 left-1 hidden group-hover:flex group-focus-within:flex gap-1">
+                {canManage && r.image_key !== vectorKey && (
+                  <button type="button" onClick={() => void setVector(r)} title="ตั้งเป็นรูป Vector ของแม่แบบ (รูปลายเส้น)" className="h-7 w-7 rounded-full bg-white/90 border border-slate-200 text-indigo-700 inline-flex items-center justify-center"><Icon value="i:vector-bezier" /></button>
+                )}
+                <button type="button" onClick={() => setDel(r)} title="ลบรูปนี้" className="h-7 w-7 rounded-full bg-white/90 border border-slate-200 text-rose-600 inline-flex items-center justify-center"><Icon value="i:trash" /></button>
+              </div>
+            )}
+          </div>
+        ))}
+        {canEdit ? (
+          <label className="aspect-square rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:bg-slate-50 flex flex-col items-center justify-center gap-1 text-center text-[12px] cursor-pointer px-2">
+            <Icon value="i:upload" />ลากรูปมาวาง<br />หรือคลิกตรงนี้แล้วกด Ctrl+V
+            <input type="file" accept="image/*" multiple className="hidden" disabled={busy} onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+          </label>
+        ) : list.length === 0 && <div className="col-span-full text-center text-[12px] text-slate-400 py-6">ยังไม่มีรูปของชุดสีนี้</div>}
       </div>
       <ConfirmDialog open={!!del} onClose={() => setDel(null)} onConfirm={() => del && void remove(del)} variant="danger" confirmText="ลบ"
-        title={`ลบรูปเวอร์ชัน ${del?.version ?? ""}?`} message="รูปนี้จะหายจากประวัติของสูตร (เวอร์ชันอื่นยังอยู่)" />
+        title="ลบรูปนี้?" message="รูปนี้จะหายจากแกลเลอรีของสูตร (รูปอื่นยังอยู่)" />
     </section>
   );
 }

@@ -6,7 +6,7 @@
  *   new    = ออกเลข DS ใหม่ (ระบบเลขเดิม nextDsNo) + รายละเอียดงานลิงก์กลับสูตร + ⏳ ข้อตั้งต้นแบบสร้างใบปกติ
  *   attach = แนบเข้าใบที่มีอยู่ · ไม่ลบของเดิมในใบ
  *   ของที่ส่ง (แปลงด้วย lib/design-library-sheet):
- *     images = รูปผล GPT ล่าสุดทุกชุดสี → ไฟล์แนบใบงาน (key เดิม · แนบแล้วข้าม)
+ *     images = รูปติดดาวทุกชุดสี (ไม่มีดาว = รูปล่าสุด) → ไฟล์แนบใบงาน (key เดิม · แนบแล้วข้าม)
  *     spec   = หน้ารูปแม่แบบ + หมุดวัสดุ (ชุดสีที่เลือก) → แท็บรายละเอียดงาน · หน้าชื่อเดียวกัน (ส่งซ้ำ) = แทน
  *     colors = ทุกชุดสี → ตารางสีใบงาน (รวมกับของเดิม)
  *     cost   = ทุนประมาณ (ชุดสีที่เลือก) → ตารางตีราคา ต่อท้าย · ต้องมี products.cost.view (ไม่มี = ข้ามเงียบ ๆ)
@@ -22,9 +22,9 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { requestActor } from "@/lib/request-actor";
 import { writeAudit } from "@/lib/audit";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { applyColorway, allSkuIds, cleanSpec, colorwayLabel, type Choice } from "@/lib/design-library";
+import { applyColorway, allSkuIds, chosenRenders, cleanSpec, colorwayLabel, type Choice } from "@/lib/design-library";
 import { calcSettingsFrom, estimateCost } from "@/lib/design-library-cost";
-import { colorKeyPrefix, latestRenders, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, recipeTag, sheetDetailHtml, specPageTitle, type RenderRow } from "@/lib/design-library-sheet";
+import { colorKeyPrefix, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, recipeTag, sheetDetailHtml, specPageTitle, type RenderRow } from "@/lib/design-library-sheet";
 import { loadCalcRows, loadCostPrices, loadMaterials } from "@/lib/design-library-server";
 import { cleanSpecColors } from "@/lib/design-sheet-spec-colors";
 import { seedChecklistOnCreate } from "@/lib/record-tasks-server";
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const [{ data: tpl }, { data: choicesRaw }, { data: rendersRaw }, materials, calcRows, prices] = await Promise.all([
     admin.from("design_library_templates").select("id, code, name, image_key, image_w, image_h").eq("id", rec.template_id).maybeSingle(),
     admin.from("design_library_choices").select("*").eq("is_active", true),
-    admin.from("design_library_renders").select("id, view_key, version, image_key, colorway_id, created_at").eq("recipe_id", recipeId).eq("is_active", true),
+    admin.from("design_library_renders").select("id, view_key, version, image_key, colorway_id, created_at, is_starred").eq("recipe_id", recipeId).eq("is_active", true),
     loadMaterials(admin, allSkuIds(spec)).catch(() => ({})),
     loadCalcRows(admin).catch(() => []),
     canCost ? loadCostPrices(admin, allSkuIds(spec)) : Promise.resolve({}),
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ── รูปผล GPT → ไฟล์แนบ ──
   if (inc.images) {
-    const latest = latestRenders((rendersRaw ?? []) as RenderRow[]);
+    const latest = chosenRenders((rendersRaw ?? []) as RenderRow[]);   // รอบ 6: รูปติดดาวทุกชุดสี (ไม่มีดาว = รูปล่าสุดของชุดสีนั้น)
     if (latest.length) {
       const { data: had } = await admin.from("erp_playground_attachments").select("file_path, sort_order").eq("entity_type", "design_sheet").eq("entity_id", sheet.id);
       const have = new Set((had ?? []).map((a) => String(a.file_path)));
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const ext = (r.image_key.split(".").pop() || "png").toLowerCase();
         const cw = r.colorway_id ? colorwayLabel(spec, r.colorway_id) : null;
         return {
-          entity_type: "design_sheet", entity_id: sheet.id, file_name: `${tpl.code}-${rec.seq}-${r.view_key}${cw ? `-${cw}` : ""}-v${r.version}.${ext}`.slice(0, 200),
+          entity_type: "design_sheet", entity_id: sheet.id, file_name: `${tpl.code}-${rec.seq}${cw ? `-${cw}` : ""}-${r.id.slice(0, 6)}.${ext}`.slice(0, 200),
           file_path: r.image_key, public_url: r2ImageUrl(r.image_key) ?? `/api/r2-image?key=${encodeURIComponent(r.image_key)}`,
           content_type: MIME[ext] ?? "image/png", size_bytes: null, uploaded_by: actor.name ?? "design-library",
           is_primary: !had?.length && i === 0, sort_order: ++order,

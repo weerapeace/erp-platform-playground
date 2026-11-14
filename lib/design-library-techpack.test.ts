@@ -28,7 +28,7 @@ const make = (cw: string | null) => {
   return buildTechpackData({
     template: { code: "HANB-001", name: "ทรงกล่อง", category: "HANB", image_key: null, image_w: null, image_h: null, vector_image_key: null },
     recipe: { seq: 3, name: null, note: null, created_by_name: "ทีม", updated_at: "2026-11-14T00:00:00Z" },
-    spec, baseSpec: base, colorwayName: cw ? "สีแดง" : null, choices: CHOICES, lines: est.lines, renders: {}, img: (k) => k, dateText: "14 พ.ย.", bagType: "กระเป๋าถือ",
+    spec, baseSpec: base, colorwayName: cw ? "สีแดง" : null, choices: CHOICES, lines: est.lines, renders: [], img: (k) => k, dateText: "14 พ.ย.", bagType: "กระเป๋าถือ",
   });
 };
 

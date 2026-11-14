@@ -10,7 +10,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { PrintFrame, PrintToolbar } from "@/components/report";
 import { ErrorState, LoadingState } from "@/components/state-views";
-import { applyColorway, bagTypeOf, cleanSpec, colorwayLabel } from "@/lib/design-library";
+import { applyColorway, bagTypeOf, chosenRenders, cleanSpec, colorwayLabel } from "@/lib/design-library";
 import { calcSettingsFrom, estimateCost } from "@/lib/design-library-cost";
 import { buildTechpackData, DEFAULT_DL_TECHPACK_TEMPLATE, TECHPACK_ENTITY } from "@/lib/design-library-techpack";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
@@ -45,10 +45,10 @@ function TechpackInner() {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const spec = applyColorway(base, cw);
     const est = estimateCost(spec, b.choices, { materials: b.materials ?? {}, prices: {}, calc: calcSettingsFrom(b.calc ?? []), cost: { ...base.cost, price: {} } });
-    const latest = (view: string) => b.renders.filter((r) => r.view_key === view && (r.colorway_id ?? null) === cw).sort((x, y) => y.version - x.version)[0]?.image_key ?? null;
+    const picked = chosenRenders(b.renders, cw).slice(0, 6).map((r) => r.image_key);   // รูปติดดาวของชุดสีนี้ (ไม่มีดาว = รูปล่าสุด)
     const data = buildTechpackData({
       template: b.template, recipe: b.recipe, spec, baseSpec: base, colorwayName: base.colorways.length ? colorwayLabel(base, cw) : null,
-      choices: b.choices, lines: est.lines, renders: { grid4: latest("grid4"), inside: latest("inside") },
+      choices: b.choices, lines: est.lines, renders: picked,
       img: (key, w) => `${origin}${r2ImageUrl(key, w) ?? ""}`,
       dateText: new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }),
       bagType: bagTypeOf(b.choices, b.template.category)?.name ?? b.template.category ?? "—",

@@ -33,16 +33,21 @@ export function UnitToggle({ unit, set }: { unit: LenUnit; set: (u: LenUnit) => 
   );
 }
 
-/** ช่องกรอกความยาว — แสดง/พิมพ์ในหน่วยที่เลือก ส่งกลับเป็น ซม. (พิมพ์ทศนิยมได้ไม่กระโดด) */
-export function LenInput({ cm, unit, onChange, disabled, className = "" }: { cm: number; unit: LenUnit; onChange: (cm: number) => void; disabled?: boolean; className?: string }) {
-  const [text, setText] = useState(String(round(cm, unit)));
+/**
+ * ช่องกรอกความยาว — แสดง/พิมพ์ในหน่วยที่เลือก ส่งกลับเป็น ซม. (พิมพ์ทศนิยมได้ไม่กระโดด)
+ * optional = ช่องไม่บังคับ (ขนาด/หู รอบ 6): 0 โชว์เป็นช่องว่าง "—" · ลบข้อความทิ้ง = 0 (ยังไม่ระบุ)
+ */
+export function LenInput({ cm, unit, onChange, disabled, className = "", optional = false }: { cm: number; unit: LenUnit; onChange: (cm: number) => void; disabled?: boolean; className?: string; optional?: boolean }) {
+  const show = (v: number) => (optional && !(v > 0) ? "" : String(round(v, unit)));
+  const [text, setText] = useState(show(cm));
   const [focus, setFocus] = useState(false);
-  useEffect(() => { if (!focus) setText(String(round(cm, unit))); }, [cm, unit, focus]);
+  useEffect(() => { if (!focus) setText(show(cm)); }, [cm, unit, focus]);   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <span className={`flex items-center gap-1 ${className}`}>
       <input type="number" min={0} step={unit === "in" ? 0.25 : 0.5} disabled={disabled} value={text}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
-        onChange={(e) => { setText(e.target.value); const n = Number(e.target.value); if (Number.isFinite(n) && n >= 0) onChange(Math.round(fromUnit(n, unit) * 100) / 100); }}
+        placeholder={optional ? "—" : undefined}
+        onChange={(e) => { setText(e.target.value); const n = e.target.value.trim() === "" ? 0 : Number(e.target.value); if (Number.isFinite(n) && n >= 0) onChange(Math.round(fromUnit(n, unit) * 100) / 100); }}
         className="w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
       <span className="text-[11px] text-slate-400 shrink-0 w-7">{unitLabel(unit)}</span>
     </span>

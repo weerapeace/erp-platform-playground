@@ -54,7 +54,8 @@ export function CostPanel({ spec, cost, choices, materials, calcRows, skuIds, co
       </div>
       <p className="text-[12px] text-slate-500 mb-2">ประมาณจากขนาดกระเป๋า (ชิ้นตัดแบบเดียวกับสตูดิโอแพทเทิร์น) · ปริมาณ/ราคาแก้เองได้ ช่องว่าง = ใช้ค่าอัตโนมัติ · ใบงานจริงตีราคาละเอียดอีกครั้ง</p>
       {err && <div className="text-[12.5px] text-rose-700 bg-rose-50 rounded px-2 py-1 mb-2">{err}</div>}
-      {est.areas.clamped && <div className="text-[12.5px] text-amber-800 bg-amber-50 rounded px-2 py-1 mb-2">ขนาดนี้เกินช่วงของแม่แบบทรงในสตูดิโอ — พื้นที่ผ้าคิดจากขนาดที่ใกล้ที่สุด ควรแก้ปริมาณผ้าเอง</div>}
+      {est.sizeMissing && <div className="text-[12.5px] text-amber-800 bg-amber-50 rounded px-2 py-1 mb-2">ยังไม่ใส่ขนาด (กว้าง สูง หนา) ครบ — ผ้าและเทปยังคิดอัตโนมัติไม่ได้ ใส่ขนาดด้านบน หรือใส่ปริมาณเองในตาราง</div>}
+      {!est.sizeMissing && est.areas.clamped && <div className="text-[12.5px] text-amber-800 bg-amber-50 rounded px-2 py-1 mb-2">ขนาดนี้เกินช่วงของแม่แบบทรงในสตูดิโอ — พื้นที่ผ้าคิดจากขนาดที่ใกล้ที่สุด ควรแก้ปริมาณผ้าเอง</div>}
       {est.missing > 0 && <div className="text-[12.5px] text-amber-800 bg-amber-50 rounded px-2 py-1 mb-2">ขาดราคา {est.missing} รายการ — ใส่ราคาเองในช่อง “ราคา/หน่วย” (หรือไปใส่ราคาทุนที่ SKU) ยอดรวมยังไม่ครบ</div>}
       <div className="overflow-x-auto">
         <table className="w-full text-[12.5px] border-collapse min-w-[720px]">

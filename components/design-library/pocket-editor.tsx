@@ -6,7 +6,7 @@
  * รูปในใบสรุปใช้ pocketPanelSvg (lib/design-library) ชุดเดียวกัน
  */
 import { useRef, useState, type PointerEvent as RPointerEvent } from "react";
-import { MAX_BOXES, PANELS, type Choice, type PanelKey, type PocketBox, type Spec } from "@/lib/design-library";
+import { MAX_BOXES, PANELS, panelSize, type Choice, type PanelKey, type PocketBox, type Spec } from "@/lib/design-library";
 import { newId } from "./shared";
 import { fmtLen, LenInput, type LenUnit } from "./units";
 
@@ -22,8 +22,8 @@ export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }:
   const [drag, setDrag] = useState<Drag | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const types = choices.filter((c) => c.list_key === "pocket_type");
-  // ระหว่างพิมพ์ขนาดใหม่ค่าอาจเป็น 0 ชั่วคราว → กันหารศูนย์ (ตอนบันทึก cleanSpec บีบกล่องให้พอดีขนาดจริงเอง)
-  const W = Math.max(1, spec.size.w), H = Math.max(1, spec.size.h);
+  // ยังไม่ใส่ขนาด (0) → วาดในกรอบตัวอย่าง 30×35 (panelSize) · ตอนบันทึก cleanSpec บีบกล่องให้พอดีขนาดจริงเอง
+  const P = panelSize(spec.size), W = P.w, H = P.h;
   const s = Math.min(320 / W, 340 / H), ox = (360 - W * s) / 2, oy = 24;
   const boxes = spec.pockets[panel];
   const selBox = boxes.find((b) => b.id === sel) ?? null;
@@ -76,6 +76,7 @@ export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }:
   const draw = drag?.kind === "draw" ? drag : null;
   return (
     <div>
+      {P.placeholder && <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-800">ยังไม่ใส่กว้าง/สูง — วาดในกรอบตัวอย่าง 30×35 ซม. ไปก่อน ใส่ขนาดจริงแล้วตำแหน่งช่องจะถูกบีบให้พอดีกรอบจริงตอนบันทึก</div>}
       <div className="flex flex-wrap gap-1 mb-2">
         {PANELS.map((p) => (
           <button key={p.key} type="button" onClick={() => { setPanel(p.key); setSel(null); }}

@@ -7,7 +7,7 @@
  * หน้าพิมพ์: /print/design-library/[id]/techpack?cw=<ชุดสี>
  */
 import {
-  bothUnits, calloutSvg, colorwayTableHtml, handleLength, MAIN_COLORWAY_LABEL, PANELS, pickInfo, pickThumbSvg, pocketPanelSvg, usesHwColor, categoryOf, bodyPickOf,
+  bothUnits, calloutSvg, handleCountText, colorwayTableHtml, handleLength, MAIN_COLORWAY_LABEL, PANELS, pickInfo, pickThumbSvg, pocketPanelSvg, usesHwColor, categoryOf, bodyPickOf,
   type BriefInput, type Choice, type Spec,
 } from "@/lib/design-library";
 import type { CostLine } from "@/lib/design-library-cost";
@@ -15,6 +15,8 @@ import type { CostLine } from "@/lib/design-library-cost";
 export const TECHPACK_ENTITY = "dl_techpack";
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+/** ค่าที่ไม่ระบุ (0) = "—" */
+const opt = (cm: number) => (cm > 0 ? bothUnits(cm) : "—");
 const qtyText = (n: number) => (n > 0 ? n.toLocaleString("th-TH", { maximumFractionDigits: 2 }) : "");
 
 export type TechpackInput = {
@@ -24,8 +26,8 @@ export type TechpackInput = {
   choices: Choice[];
   /** บรรทัดวัสดุจาก estimateCost (ใช้แค่ ปริมาณ/หน่วย — ไม่พิมพ์ราคา) */
   lines: CostLine[];
-  /** รูปผลจาก GPT ล่าสุดของชุดสีนี้ (4 มุม / ข้างใน) */
-  renders: { grid4?: string | null; inside?: string | null };
+  /** รูปจาก GPT ของชุดสีนี้ (รอบ 6: รูปติดดาว · ไม่มีดาว = รูปล่าสุด — chosenRenders) */
+  renders: string[];
   img: (key: string, w: number) => string;
   dateText: string; bagType: string;
 };
@@ -71,15 +73,15 @@ export function buildTechpackData(t: TechpackInput): Record<string, unknown> {
     code: tp.code, template_name: tp.name, bag_type: t.bagType, recipe_no: r.seq, recipe_name: r.name ?? "",
     colorway: t.colorwayName ?? MAIN_COLORWAY_LABEL, has_colorways: t.baseSpec.colorways.length > 0,
     date_th: t.dateText, made_by: r.created_by_name ?? "", note: r.note ?? "", has_note: !!r.note,
-    size_w: bothUnits(spec.size.w), size_h: bothUnits(spec.size.h), size_d: bothUnits(spec.size.d),
+    size_w: opt(spec.size.w), size_h: opt(spec.size.h), size_d: opt(spec.size.d),
     strap: spec.size.strap > 0 ? bothUnits(spec.size.strap) : "ไม่มี",
-    handle_count: h.count > 0 ? `${h.count} หู` : "ไม่มีหู", has_handle: h.count > 0,
-    handle_drop: bothUnits(h.drop), handle_w: bothUnits(h.w), handle_gap: bothUnits(h.gap),
-    handle_total: `${bothUnits(handleLength(h))}${h.total > 0 ? "" : " (ประมาณ)"}`,
+    handle_count: handleCountText(h.count), has_handle: h.count > 0,
+    handle_drop: opt(h.drop), handle_w: opt(h.w), handle_gap: opt(h.gap),
+    handle_total: handleLength(h) > 0 ? `${bothUnits(handleLength(h))}${h.total > 0 ? "" : " (ประมาณ)"}` : "—",
     hw_color: hw?.name ?? "—",
     photo_html: imgTag(tp.image_key, "tp-photo"), vector_html: imgTag(tp.vector_image_key, "tp-photo"),
-    render_html: imgTag(t.renders.grid4, "tp-render"), inside_html: imgTag(t.renders.inside, "tp-render"),
-    has_renders: !!(t.renders.grid4 || t.renders.inside),
+    render_html: t.renders.map((k) => imgTag(k, "tp-render")).join(""), inside_html: "",   // inside_html คงไว้ให้แม่แบบเดิมไม่พัง
+    has_renders: t.renders.length > 0,
     callout_html: calloutSvg(brief),
     materials, material_count: materials.length,
     pockets_html: pocketsHtml, pocket_count: PANELS.reduce((s, p) => s + spec.pockets[p.key].length, 0),

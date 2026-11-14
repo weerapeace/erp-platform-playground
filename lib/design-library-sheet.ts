@@ -174,7 +174,7 @@ export function recipeCostRows(lines: EstLine[], choices: Choice[], tag: string)
 }
 
 // ─── รูปผล GPT ───────────────────────────────────────────────────────────────
-export type RenderRow = { id: string; view_key: string; version: number; image_key: string; colorway_id: string | null; created_at: string };
+export type RenderRow = { id: string; view_key: string; version: number; image_key: string; colorway_id: string | null; created_at: string; is_starred?: boolean | null };
 /** รูปล่าสุดต่อ (มุมมอง × ชุดสี) — เรียงสีหลักก่อน */
 export function latestRenders(rows: RenderRow[]): RenderRow[] {
   const m = new Map<string, RenderRow>();

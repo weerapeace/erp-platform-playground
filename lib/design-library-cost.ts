@@ -12,7 +12,7 @@
 import { bagGeometry, bagPieces } from "@/lib/bag-templates";
 import { bomMaterialCost } from "@/lib/cost-inputs";
 import { calcCostQty } from "@/lib/design-sheets-meta";
-import { bodyPickOf, categoryOf, EMPTY_COST, pickInfo, PANELS, skuIdOf, toStudioParams, type Choice, type Pick, type RecipeCost, type Spec } from "@/lib/design-library";
+import { bodyPickOf, categoryOf, EMPTY_COST, pickInfo, PANELS, sizeKnown, skuIdOf, toStudioParams, type Choice, type Pick, type RecipeCost, type Spec } from "@/lib/design-library";
 
 // ─── ข้อมูลประกอบ ─────────────────────────────────────────────────────────────
 /** วัสดุที่ผูก SKU (ไม่มีราคา — ใช้คิดปริมาณ) */
@@ -70,6 +70,8 @@ export type CostLine = {
 export type CostEstimate = {
   lines: CostLine[]; materials: number; labor: number; extras: number; total: number; missing: number;
   areas: FabricAreas;
+  /** ยังไม่ใส่กว้าง/สูง/หนาครบ → ผ้า/เทปคิดอัตโนมัติไม่ได้ (รอบ 6: ขนาดไม่บังคับ) */
+  sizeMissing: boolean;
 };
 
 /** หมวด → วิธีคิดปริมาณ (ตามรหัสหมวดตั้งต้น · หมวดที่ทีมเพิ่มเอง = นับชิ้น) */
@@ -105,16 +107,18 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
   const seenArea = new Map<string, CostLine>();   // หมวดผ้า → บรรทัดแรก (จุดซ้ำหมวดเดียวกันของเดียวกัน = รวม)
   let handleAsBody = spec.handle.count > 0 && !spec.pins.some((p) => p.cat === "handle" && p.pick && p.pick.kind !== "same_as_body");
 
-  /** หลา/เมตร ตามหน่วยจริงของ SKU (null = หน่วยไม่ใช่ความยาว → ใส่เอง) */
+  const sizeMissing = !sizeKnown(spec.size);
+  const NEED_SIZE = "ใส่ขนาด (กว้าง สูง หนา) ก่อนถึงคิดได้ — หรือใส่ปริมาณเอง";
+  /** หลา/เมตร ตามหน่วยจริงของ SKU (null = หน่วยไม่ใช่ความยาว / ยังไม่ใส่ขนาด → ใส่เอง) */
   const fabricQty = (area: number, setting: CalcSetting, mat: MaterialInfo | undefined): number | null => {
     const div = lengthUnitCm(mat?.uom, setting.cmPerUnit);
-    if (div == null) return null;
+    if (div == null || sizeMissing) return null;
     const face = mat?.face_width_cm;
     return area > 0 ? calcCostQty({ calc_method: "area_face", width_cm: 1, length_cm: 1, pieces: 1, area_cm2: area, face_width_cm: face && face > 0 ? face : setting.face, waste_percent: setting.loss, divisor: div }) : 0;
   };
   const areaBasis = (area: number, setting: CalcSetting, mat: MaterialInfo | undefined): CostLine["basis"] => {
     const div = lengthUnitCm(mat?.uom, setting.cmPerUnit);
-    return div == null || area <= 0 ? undefined : { area_cm2: area, face: mat?.face_width_cm && mat.face_width_cm > 0 ? mat.face_width_cm : setting.face, loss: setting.loss, div };
+    return div == null || area <= 0 || sizeMissing ? undefined : { area_cm2: area, face: mat?.face_width_cm && mat.face_width_cm > 0 ? mat.face_width_cm : setting.face, loss: setting.loss, div };
   };
   const unitNote = (mat: MaterialInfo | undefined, setting: CalcSetting) => (lengthUnitCm(mat?.uom, setting.cmPerUnit) == null ? ` · SKU ขายเป็น ${mat?.uom} คิดอัตโนมัติไม่ได้ ใส่ปริมาณเอง` : "");
 
@@ -135,7 +139,7 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
       if (!prev) {
         const a = areaKind === "body" ? areas.body + areas.pocketsOuter : areaKind === "lining" ? areas.lining + areas.pocketsInside : areas.handle;
         const line: CostLine = { ...base, key: `area:${p.cat}`, method: "area", autoQty: fabricQty(a, setting, mat), basis: areaBasis(a, setting, mat),
-          detail: `ผ้า ${fmt(a)} ตร.ซม. · หน้า ${mat?.face_width_cm || setting.face} ซม. · เผื่อเสีย ${setting.loss}%${unitNote(mat, setting)}`, qty: 0, uom: mat?.uom || setting.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 };
+          detail: sizeMissing ? NEED_SIZE : `ผ้า ${fmt(a)} ตร.ซม. · หน้า ${mat?.face_width_cm || setting.face} ซม. · เผื่อเสีย ${setting.loss}%${unitNote(mat, setting)}`, qty: 0, uom: mat?.uom || setting.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 };
         seenArea.set(p.cat, line); lines.push(line);
         return;
       }
@@ -144,9 +148,9 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
     }
     if (LENGTH_CATS.has(p.cat)) {
       const len = areas.perimeter;
-      const div = lengthUnitCm(mat?.uom, calc.outer.cmPerUnit);
+      const div = sizeMissing ? null : lengthUnitCm(mat?.uom, calc.outer.cmPerUnit);
       lines.push({ ...base, key: `pin:${p.id}`, method: "length", autoQty: div == null ? null : calcCostQty({ calc_method: "length", width_cm: null, length_cm: len, pieces: 1, face_width_cm: null, waste_percent: 10, divisor: div }),
-        detail: `รอบปากกระเป๋า ${fmt(len)} ซม. · เผื่อ 10%${unitNote(mat, calc.outer)}`, basis: div == null ? undefined : { length_cm: len, face: null, loss: 10, div }, qty: 0, uom: mat?.uom || calc.outer.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
+        detail: sizeMissing ? NEED_SIZE : `รอบปากกระเป๋า ${fmt(len)} ซม. · เผื่อ 10%${unitNote(mat, calc.outer)}`, basis: div == null ? undefined : { length_cm: len, face: null, loss: 10, div }, qty: 0, uom: mat?.uom || calc.outer.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
       return;
     }
     lines.push({ ...base, key: `pin:${p.id}`, method: "count", autoQty: 1, detail: "1 ชิ้นต่อจุด", qty: 0, uom: mat?.uom || "ชิ้น", unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
@@ -154,7 +158,7 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
 
   // หูใช้ผ้าเดียวกับตัวกระเป๋า → บวกพื้นที่หูเข้าบรรทัดผ้าตัว
   const bodyLine = seenArea.get("body");
-  if (bodyLine && handleAsBody && areas.handle > 0) {
+  if (bodyLine && handleAsBody && areas.handle > 0 && !sizeMissing) {
     const a = areas.body + areas.pocketsOuter + areas.handle;
     const mat = bodyLine.skuId ? ctx.materials[bodyLine.skuId] : undefined;
     bodyLine.autoQty = fabricQty(a, calc.outer, mat);
@@ -177,5 +181,5 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
   const missing = lines.filter((l) => l.qty > 0 && l.unitPrice <= 0).length;
   const extras = cost.extras.reduce((s, e) => s + e.amount, 0);
   const r2 = (x: number) => Math.round(x * 100) / 100;
-  return { lines, materials: r2(sum.material_cost_pp), labor: cost.labor, extras: r2(extras), total: r2(sum.material_cost_pp + cost.labor + extras), missing, areas };
+  return { lines, materials: r2(sum.material_cost_pp), labor: cost.labor, extras: r2(extras), total: r2(sum.material_cost_pp + cost.labor + extras), missing, areas, sizeMissing };
 }

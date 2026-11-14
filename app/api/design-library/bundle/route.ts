@@ -23,12 +23,15 @@ export const revalidate = 0;
 
 const UUID = /^[0-9a-f-]{36}$/i;
 const fail = (error: string, status = 500) => NextResponse.json({ data: null, error }, { status });
-type Render = { recipe_id: string; image_key: string; created_at: string };
+type Render = { recipe_id: string; image_key: string; created_at: string; colorway_id: string | null; is_starred: boolean | null };
 
-/** รูปผลล่าสุดต่อสูตร (ใช้เป็นรูปปกการ์ด) */
+/** รูปปกการ์ดต่อสูตร (รอบ 6): รูปติดดาวของสีหลัก > รูปติดดาวชุดสีอื่น > รูปล่าสุด */
 function latestByRecipe(rows: Render[]): Map<string, string> {
-  const m = new Map<string, { key: string; at: string }>();
-  for (const r of rows) { const cur = m.get(r.recipe_id); if (!cur || r.created_at > cur.at) m.set(r.recipe_id, { key: r.image_key, at: r.created_at }); }
+  const m = new Map<string, { key: string; rank: string }>();
+  for (const r of rows) {
+    const rank = `${r.is_starred ? (r.colorway_id ? 1 : 2) : 0}|${r.created_at}`;
+    const cur = m.get(r.recipe_id); if (!cur || rank > cur.rank) m.set(r.recipe_id, { key: r.image_key, rank });
+  }
   return new Map([...m].map(([k, v]) => [k, v.key]));
 }
 
@@ -58,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!tpl) return fail("ไม่พบแม่แบบ (อาจถูกลบไปแล้ว)", 404);
     if (error) return fail("โหลดสูตรไม่สำเร็จ กรุณาลองใหม่");
     const ids = (recs ?? []).map((r) => r.id as string);
-    const { data: rnd } = ids.length ? await admin.from("design_library_renders").select("recipe_id, image_key, created_at").in("recipe_id", ids).eq("is_active", true) : { data: [] };
+    const { data: rnd } = ids.length ? await admin.from("design_library_renders").select("recipe_id, image_key, created_at, colorway_id, is_starred").in("recipe_id", ids).eq("is_active", true) : { data: [] };
     const cover = latestByRecipe((rnd ?? []) as Render[]);
     const recipes = (recs ?? []).map((r) => {
       const spec = cleanSpec(r.spec);

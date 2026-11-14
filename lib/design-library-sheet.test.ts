@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { cleanSpec, type Choice } from "./design-library";
 import { estimateCost } from "./design-library-cost";
-import { colorKeyPrefix, costGroupOf, latestRenders, productReadiness, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, sheetDetailHtml, specPageTitle, type RenderRow } from "./design-library-sheet";
+import { chosenRenders } from "./design-library";
+import { colorKeyPrefix, costGroupOf, productReadiness, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, sheetDetailHtml, specPageTitle, type RenderRow } from "./design-library-sheet";
 import { cleanSpecColors } from "./design-sheet-spec-colors";
 import { recomputeCostLine } from "./design-sheet-cost-row";
 
@@ -105,10 +106,13 @@ describe("หน้ารายละเอียดงาน + ตีราค�
 });
 
 describe("อื่น ๆ", () => {
-  it("รูปล่าสุดต่อมุม × ชุดสี (สีหลักก่อน)", () => {
-    const r = (id: string, view_key: string, version: number, colorway_id: string | null): RenderRow => ({ id, view_key, version, image_key: `${id}.png`, colorway_id, created_at: `2026-11-1${version}` });
-    const out = latestRenders([r("a", "grid4", 1, null), r("b", "grid4", 2, null), r("c", "grid4", 1, "cwred"), r("d", "inside", 1, null)]);
-    expect(out.map((x) => x.id)).toEqual(["b", "d", "c"]);
+  it("รอบ 6: รูปที่ใช้ = ติดดาวต่อชุดสี (ใหม่ก่อน) · ไม่มีดาว = รูปล่าสุด · สีหลักก่อน", () => {
+    const r = (id: string, day: number, colorway_id: string | null, is_starred = false): RenderRow => ({ id, view_key: "other", version: 1, image_key: `${id}.png`, colorway_id, created_at: `2026-11-1${day}`, is_starred });
+    const rows = [r("a", 1, null, true), r("b", 3, null), r("c", 2, null, true), r("d", 1, "cwred"), r("e", 4, "cwred")];
+    expect(chosenRenders(rows).map((x) => x.id)).toEqual(["c", "a", "e"]);
+    expect(chosenRenders(rows, "cwred").map((x) => x.id)).toEqual(["e"]);
+    expect(chosenRenders(rows, null).map((x) => x.id)).toEqual(["c", "a"]);
+    expect(chosenRenders([], null)).toEqual([]);
   });
   it("ชื่อหน้า + รายละเอียดใบใหม่ (escape)", () => {
     expect(specPageTitle("TOTE-01", 3, "แดง")).toBe("Design Library · TOTE-01 สูตร #3 · แดง");

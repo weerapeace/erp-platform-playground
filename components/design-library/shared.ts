@@ -23,6 +23,7 @@ export type Recipe = {
 };
 export type Render = {
   id: string; recipe_id: string; view_key: string; version: number; image_key: string; note: string | null; colorway_id?: string | null;
+  is_starred?: boolean | null;   // รอบ 6: ติดดาว = รูปที่ใช้ในใบสั่งทำตัวอย่าง / ส่งใบงาน / ปกการ์ด
   created_by_name: string | null; created_at: string;
 };
 export type CalcRow = { material_type: string; default_face_width_cm: number | null; loss_percent: number | null; uom: string | null; cm_per_unit: number | null };
