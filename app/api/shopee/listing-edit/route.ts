@@ -72,15 +72,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return !!v2 && (plan.body.item_name == null || norm(v2.name) === norm(plan.body.item_name)) && (plan.body.description == null || norm(v2.description) === norm(plan.body.description));
   };
   const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, landed);
-  const freshView = fresh ? shopeeListingView(fresh.base, fresh.models, view.limits) : null;
-  if (!freshView) warnings.push("Shopee ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก Shopee” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
+  // ✅ ลองจริง 2026-11-14 (BCG01-03): แก้ชื่อผ่าน แต่ข้อมูลที่ดึงกลับของ Shopee ช้ากว่าคำตอบ (ชื่อใหม่ขึ้นภายในไม่กี่นาที)
+  //   → ยังไม่เห็นค่าใหม่ = แสดง/บันทึกตามที่ส่ง (optimistic) + บอกให้กดดึงตัวนี้ยืนยันภายหลัง
+  const isLanded = !!fresh && landed(fresh);
+  const shown = fresh ? (isLanded ? fresh : {
+    ...fresh,
+    base: { ...fresh.base, ...(plan.body.item_name != null ? { item_name: plan.body.item_name } : {}), ...(plan.body.description != null ? { description: plan.body.description } : {}) },
+  }) : null;
+  const freshView = shown ? shopeeListingView(shown.base, shown.models, view.limits) : null;
+  if (!fresh) warnings.push("Shopee ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก Shopee” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
   else {
-    if (plan.body.item_name != null && norm(freshView.name) !== norm(plan.body.item_name)) warnings.push(`Shopee ตอบรับแล้ว แต่ชื่อบนร้านยังเป็น “${freshView.name}” (อาจรอตรวจ/ใช้เวลาสักครู่) — กดดึงตัวนี้อีกครั้งภายหลัง`);
-    if (plan.body.description != null && norm(freshView.description) !== norm(plan.body.description)) warnings.push("Shopee ตอบรับแล้ว แต่รายละเอียดบนร้านยังไม่ตรงกับที่ส่ง (อาจใช้เวลาสักครู่) — กดดึงตัวนี้อีกครั้งภายหลัง");
-    if (freshView.status !== view.status) warnings.push(`สถานะบนร้านเปลี่ยนเป็น “${freshView.status}” หลังแก้`);
+    if (!isLanded) warnings.push("Shopee รับคำสั่งแล้ว — ข้อมูลบนร้านมักอัปเดตช้า (ไม่กี่วินาที–ไม่กี่นาที) ระบบแสดงตามที่แก้ไว้ก่อน · กด “ดึงตัวนี้จาก Shopee” ภายหลังเพื่อยืนยัน");
+    const st = String(fresh.base.item_status ?? "").toUpperCase();
+    if (st && st !== view.status) warnings.push(`สถานะบนร้านเปลี่ยนเป็น “${st}” หลังแก้`);
   }
-  if (fresh) { const err = await saveShopeeSlimCopy(admin, r.row, fresh); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
+  if (shown) { const err = await saveShopeeSlimCopy(admin, r.row, shown); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
   const summary = `แก้${plan.changes.map((c) => c.label).join(" + ")}บน Shopee แล้ว`;
-  await audit({ ok: true, summary, warnings, refreshed: !!freshView, status_after: freshView?.status ?? null, shopee_warning: echo.warning, shopee_response: echo.response });
+  await audit({ ok: true, summary, warnings, refreshed: !!fresh, optimistic: !!fresh && !isLanded, status_after: freshView?.status ?? null, shopee_warning: echo.warning, shopee_response: echo.response });
   return reply({ ok: true, view: freshView ?? view, summary, warnings, error: null });
 }

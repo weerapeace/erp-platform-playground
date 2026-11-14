@@ -69,10 +69,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (echo.warning) warnings.push(`Shopee แจ้ง: ${echo.warning}`);
   const want = open ? "NORMAL" : "UNLIST";
   const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, (l) => String(l.base.item_status ?? "").toUpperCase() === want);
-  const freshView = fresh ? shopeeListingView(fresh.base, fresh.models, view.limits) : null;
-  if (!freshView) warnings.push("Shopee ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก Shopee” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
-  else if ((freshView.status === "NORMAL") !== open) warnings.push(`Shopee ตอบรับแล้ว แต่ยังเห็นสถานะ “${shopeeStatusBadge(freshView.status).label}” (อาจใช้เวลาสักครู่) — กดดึงตัวนี้อีกครั้งภายหลัง`);
-  if (fresh) { const err = await saveShopeeSlimCopy(admin, r.row, fresh); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
-  await audit({ ok: true, summary: plan.summary, status_after: freshView?.status ?? null, warnings, refreshed: !!freshView, shopee_warning: echo.warning, shopee_response: echo.response });
+  // ✅ ลองจริง 2026-11-14 (BCG01-03): คำสั่งผ่านทุกครั้ง แต่ข้อมูลที่ดึงกลับของ Shopee ช้ากว่าคำตอบหลายวินาที–นาที
+  //   → ถ้ายังไม่เห็นค่าใหม่ ให้แสดง/บันทึกตามที่สั่ง (optimistic) + บอกให้กดดึงตัวนี้ยืนยันภายหลัง (ล้อ Lazada lazRawAfterStatus)
+  const landed = !!fresh && String(fresh.base.item_status ?? "").toUpperCase() === want;
+  const shown = fresh ? (landed ? fresh : { ...fresh, base: { ...fresh.base, item_status: want } }) : null;
+  const freshView = shown ? shopeeListingView(shown.base, shown.models, view.limits) : null;
+  if (!fresh) warnings.push("Shopee ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก Shopee” อีกครั้งในอีกสักครู่เพื่อยืนยัน");
+  else if (!landed) warnings.push(`Shopee รับคำสั่งแล้ว — ข้อมูลบนร้านมักอัปเดตช้า (ไม่กี่วินาที–ไม่กี่นาที) ระบบแสดงเป็น “${shopeeStatusBadge(want).label}” ไว้ก่อน · กด “ดึงตัวนี้จาก Shopee” ภายหลังเพื่อยืนยัน`);
+  if (shown) { const err = await saveShopeeSlimCopy(admin, r.row, shown); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
+  await audit({ ok: true, summary: plan.summary, status_after: freshView?.status ?? null, optimistic: !!fresh && !landed, warnings, refreshed: !!fresh, shopee_warning: echo.warning, shopee_response: echo.response });
   return reply({ ok: true, view: freshView ?? view, summary: plan.summary, warnings, error: null });
 }
