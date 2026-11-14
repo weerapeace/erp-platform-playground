@@ -151,7 +151,7 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
   "lines": [
     { "name_cn": "品名ตามบิล", "spec_cn": "规格/颜色/尺寸/型号 ตามบิล หรือ null", "name_th": "ชื่อแปลไทย", "spec_th": "สเปกแปลไทย หรือ null",
       "qty": ตัวเลข, "unit": "个/条/米/码/卷/包… หรือ null", "unit_price": ตัวเลข, "amount": ตัวเลข,
-      "is_fee": false, "candidate": "P12 หรือ null", "confidence": 0.0-1.0, "reason": "เหตุผลสั้น ๆ ภาษาไทย", "page": 1, "line_no": 1 }
+      "is_fee": false, "candidate": "P12 หรือ null", "confidence": 0.0-1.0, "reason": "เหตุผลสั้น ๆ ภาษาไทย", "page": 1, "line_no": 1, "discount": ส่วนลดของบรรทัด ¥ หรือ null, "discount_pct": ส่วนลด % หรือ null }
   ]
 }
 
@@ -163,6 +163,7 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
 /** กฎอ่านบิล + คำแปลศัพท์อะไหล่/สีที่ร้านเราใช้ — ใช้ร่วมทุก prompt ของบิลร้าน (แก้ที่นี่ที่เดียว) */
 export const BILL_READ_RULES = `- ตัวเลขอ่านตามบิลจริง ห้ามเดา อ่านไม่ออก = null · 1,000 → 1000 · ลายมือ: ตรวจด้วย จำนวน × ราคา = ยอด
 - แถวรวม (合计 / 总计 / 小计 / 大写) ไม่ใช่รายการ → ใส่ใน total_amount
+- ส่วนลดรายบรรทัด (优惠 / 折扣 / 减 / 让利) ที่พิมพ์ไว้ → "discount" (ยอดเงิน ¥) หรือ "discount_pct" (เช่น 9折 = 10) · amount = จำนวน × ราคา ก่อนหักส่วนลด · ไม่มีส่วนลด = null
 - ค่าส่ง ค่าขนส่ง ค่ากล่อง ค่าแพ็ก ภาษี (运费 / 快递费 / 物流费 / 包装费 / 纸箱 / 税) → is_fee = true
 - คำแปล (ใช้คำแบบนี้): 狗扣/钩子=คอหมา · D扣/D字扣=ตัวดี · 日字扣=ห่วงเลขแปด · 方扣=ห่วงสี่เหลี่ยม · 圆环/O环=ห่วงกลม · 拉头/拉片=หางซิป · 拉链=ซิป · 尼龙拉链=ซิปไนล่อน · 金属拉链=ซิปฟันเหล็ก · 树脂拉链=ซิปฟันกระดูก · 链条=โซ่ · 气眼/鸡眼=ตาไก่ · 铆钉=นมหนู · 磁扣=กระดุมแม่เหล็ก · 线=ด้าย · 布=ผ้า · 织带=สายผ้า · 绳=เชือก
 - สี: 镍色/白镍=สีนิเกิ้ล · 银色=สีเงิน · 枪色/枪黑/黑镍=สีรมดำ · 金色=สีทอง · 浅金=สีทองอ่อน · 黑色=สีดำ · 白色=สีขาว · 米白/米色=สีครีม · 古铜=สีทองแดงรมดำ · 玫瑰金=สีโรสโกลด์
@@ -335,6 +336,21 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
     : { data: [] as Row[] };
   const fullName = new Map(((poLineRows ?? []) as Row[]).map((r) => [String(r.id), str(r.item_name)]));
 
+  // ★ 2026-11-14 ส่วนลดของแถวบิล → ส่วนลดของรายการในใบ (แบบ % = % เดิม · แบบยอดเงิน = แบ่งตามจำนวน)
+  const discFor = (l: SellerBillLine, partQty: number): { discount: number | null; discount_pct: number | null } => {
+    const pct = num(l.discount_pct);
+    if (pct > 0) return { discount: null, discount_pct: pct };
+    const d = num(l.discount), q = num(l.qty);
+    if (!(d > 0) || !(q > 0)) return { discount: null, discount_pct: null };
+    return { discount: Math.round((d * partQty / q) * 100) / 100, discount_pct: null };
+  };
+  /** รายการจากใบรับ (จำนวนยึดใบรับ) → ใช้ส่วนลดเป็น % ให้สัดส่วนเท่าบิล */
+  const discPctFor = (l: SellerBillLine): number | null => {
+    const pct = num(l.discount_pct); if (pct > 0) return pct;
+    const gross = num(l.qty) * num(l.unit_price);
+    return num(l.discount) > 0 && gross > 0 ? Math.round((num(l.discount) / gross) * 100 * 1000) / 1000 : null;
+  };
+
   for (const l of billLines) {
     const ids: string[] = [];
     const price = num(l.unit_price) > 0 ? num(l.unit_price) : null;
@@ -350,7 +366,7 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
       // ใส่ราคาให้บรรทัดที่มาจากใบรับ (จำนวนยึดใบรับ)
       for (const gl of g.lines.filter((x) => x.from_gr && x.voucher_line_id)) {
         if (price != null) {
-          await admin.from("purchase_voucher_lines_v2").update({ unit_price: price, price_source: "bill", updated_at: now }).eq("id", gl.voucher_line_id!).eq("voucher_id", v.id);
+          await admin.from("purchase_voucher_lines_v2").update({ unit_price: price, price_source: "bill", discount: null, discount_pct: discPctFor(l), updated_at: now }).eq("id", gl.voucher_line_id!).eq("voucher_id", v.id);
           updated++;
         }
       }
@@ -363,7 +379,7 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
         for (const a of distributeQty(num(l.qty), open)) {
           const gl = open.find((x) => x.id === a.id)!;
           if (gl.voucher_line_id) {
-            await admin.from("purchase_voucher_lines_v2").update({ qty: a.qty, unit_price: price, price_source: price != null ? "bill" : "none", updated_at: now }).eq("id", gl.voucher_line_id).eq("voucher_id", v.id);
+            await admin.from("purchase_voucher_lines_v2").update({ qty: a.qty, unit_price: price, price_source: price != null ? "bill" : "none", ...discFor(l, a.qty), updated_at: now }).eq("id", gl.voucher_line_id).eq("voucher_id", v.id);
             ids.push(gl.voucher_line_id); updated++;
             continue;
           }
@@ -371,7 +387,7 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
             voucher_id: v.id, po_id: g.po_id, po_line_id: gl.id, po_no: g.po_no, item_sku_id: g.item_sku_id,
             item_name: fullName.get(gl.id) || (g.code ? `[${g.code}] ${g.item_name}` : g.item_name), uom: g.uom, qty: a.qty,
             unit_price: price ?? g.unit_price, price_source: price != null ? "bill" : g.unit_price != null ? "po" : "none",
-            cbm_per_unit: basis.cbm, kg_per_unit: basis.kg, sort_order: sort++,
+            cbm_per_unit: basis.cbm, kg_per_unit: basis.kg, sort_order: sort++, ...discFor(l, a.qty),
           }).select("id").single();
           if (error || !ins) throw new Error("เพิ่มรายการไม่สำเร็จ: " + (error?.message ?? ""));
           ids.push(String((ins as Row).id)); inserted++;
@@ -382,7 +398,7 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
       const basis = parentBasis(skuMap.get(l.sku_pick.id));
       const { data: ins, error } = await admin.from("purchase_voucher_lines_v2").insert({
         voucher_id: v.id, item_sku_id: l.sku_pick.id, item_name: skuLabel(l), uom: l.sku_pick.uom, qty: num(l.qty),
-        unit_price: price, price_source: price != null ? "bill" : "none", cbm_per_unit: basis.cbm, kg_per_unit: basis.kg, sort_order: sort++,
+        unit_price: price, price_source: price != null ? "bill" : "none", cbm_per_unit: basis.cbm, kg_per_unit: basis.kg, sort_order: sort++, ...discFor(l, num(l.qty)),
       }).select("id").single();
       if (error || !ins) throw new Error("เพิ่มรายการไม่สำเร็จ: " + (error?.message ?? ""));
       ids.push(String((ins as Row).id)); inserted++;

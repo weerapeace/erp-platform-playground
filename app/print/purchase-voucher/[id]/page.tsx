@@ -13,7 +13,7 @@ import { docFileName } from "@/lib/print-filename";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import { thaiBahtText } from "@/lib/quotation-print";
 import { DEFAULT_PV_TEMPLATE } from "@/lib/report-designer";
-import { fmtMoney, curSymbol, isForeignCurrency } from "@/lib/landed-cost";
+import { fmtMoney, curSymbol, isForeignCurrency, lineDiscount } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
@@ -84,7 +84,8 @@ export default function PrintPurchaseVoucherPage() {
       lines: data.lines.map((l, i) => ({
         idx: i + 1, sku: l.code, product_name: stripCode(l.item_name), gr_number: l.gr_no ?? "",
         qty: qty(l.qty), unit: l.uom ?? "",
-        unit_price: l.unit_price != null ? `${foreign ? sym : ""}${fmtMoney(l.unit_price)}` : "—",
+        // ★ 2026-11-14 มีส่วนลด → โชว์ต่อท้ายราคา (ค่าสินค้าในใบ = จำนวน × ราคา − ส่วนลด)
+        unit_price: l.unit_price != null ? `${foreign ? sym : ""}${fmtMoney(l.unit_price)}${lineDiscount(l.unit_price, l.qty, l.discount, l.discount_pct) > 0 ? ` (ลด ${foreign ? sym : ""}${fmtMoney(lineDiscount(l.unit_price, l.qty, l.discount, l.discount_pct))})` : ""}` : "—",
         unit_price_thb: l.unit_price_thb != null ? fmtMoney(l.unit_price_thb) : "—",
         line_total_thb: l.line_total_thb != null ? fmtMoney(l.line_total_thb) : "—",
         ship_alloc_thb: l.ship_alloc_thb > 0 ? fmtMoney(l.ship_alloc_thb) : "-",

@@ -102,3 +102,31 @@ describe("ใบสำคัญรับ — คิว/น้ำหนัก/ค
     expect(lines[0].landed_unit_thb).toBe(50);
   });
 });
+
+describe("ใบสำคัญรับ — ส่วนลดรายบรรทัด (2026-11-14)", () => {
+  const H = { currency: "RMB", fx_rate: 5, ship_method: "none" as const };
+  it("ยอดเงิน: 20 × ¥3.46 − ¥5 = ¥64.20 · บาท = 321 · ส่วนลดรวมอยู่ในยอดรวม", async () => {
+    const r = computeVoucher(H, [{ qty: 20, unit_price: 3.46, discount: 5 }]);
+    expect(r.lines[0].line_total_foreign).toBe(64.2);
+    expect(r.lines[0].discount_foreign).toBe(5);
+    expect(r.lines[0].line_total_thb).toBe(321);
+    expect(r.lines[0].landed_unit_thb).toBe(16.05);
+    expect([r.totals.subtotal_foreign, r.totals.discount_foreign, r.totals.discount_thb]).toEqual([64.2, 5, 25]);
+  });
+  it("%: 100 × ¥1.30 ลด 10% = ¥117 · % มาก่อนยอดเงิน", () => {
+    const r = computeVoucher(H, [{ qty: 100, unit_price: 1.3, discount_pct: 10, discount: 99 }]);
+    expect([r.lines[0].discount_foreign, r.lines[0].line_total_foreign]).toEqual([13, 117]);
+  });
+  it("ส่วนลดเกินยอด = ลดได้แค่เท่ายอด · ไม่มีส่วนลด = เหมือนเดิมทุกตัวเลข", async () => {
+    expect(computeVoucher(H, [{ qty: 2, unit_price: 1, discount: 9 }]).lines[0].line_total_foreign).toBe(0);
+    const a = computeVoucher(H, [{ qty: 3, unit_price: 2.5 }]), b = computeVoucher(H, [{ qty: 3, unit_price: 2.5, discount: null, discount_pct: null }]);
+    expect(b).toEqual(a);
+    expect(a.totals.discount_foreign).toBe(0);
+  });
+  it("lineDiscount ของกลาง", async () => {
+    const { lineDiscount } = await import("@/lib/landed-cost");
+    expect(lineDiscount(3.46, 20, 5, null)).toBe(5);
+    expect(lineDiscount(1.3, 100, null, 10)).toBe(13);
+    expect(lineDiscount(1, 2, -3, null)).toBe(0);
+  });
+});

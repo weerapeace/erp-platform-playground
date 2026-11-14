@@ -21,6 +21,7 @@ import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
 import { SellerBillPanel } from "@/components/seller-bill-panel";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { Icon } from "@/components/icon";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist } from "@/lib/purchase-voucher-checklist";
@@ -36,6 +37,15 @@ const SOURCE_BADGE: Record<string, { text: string; cls: string }> = {
   bill: { text: "จากบิลร้าน", cls: "bg-violet-50 text-violet-700 border-violet-200" },
   none: { text: "ยังไม่มีราคา", cls: "bg-amber-50 text-amber-700 border-amber-200" },
 };
+/** ค่าที่กำลังแก้ของรายการ · ★ 2026-11-14 ส่วนลด: ยอดเงิน (amt) หรือ % (pct) — เจ้าของเลือก "ได้ทั้งคู่" */
+type LineEdit = { unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight"; qty: string; discount: string; disc_mode: "amt" | "pct" };
+/** ส่วนลดของแถว → ค่าที่ส่งให้สูตรกลาง/บันทึก (โหมด % = discount_pct · ยอดเงิน = discount) */
+const discOf = (e: LineEdit | undefined): { discount: number | null; discount_pct: number | null } => {
+  const v = e?.discount ? Number(e.discount) : 0;
+  if (!(v > 0)) return { discount: null, discount_pct: null };
+  return e?.disc_mode === "pct" ? { discount: null, discount_pct: v } : { discount: v, discount_pct: null };
+};
+const SYS_SRC: Record<string, string> = { shop: "ราคาต่อร้านนี้", default_shop: "ราคาร้านหลัก", sku: "ราคาบนสินค้า" };
 
 export default function PurchaseVoucherFormPage() {
   const params = useParams();
@@ -68,11 +78,10 @@ export default function PurchaseVoucherFormPage() {
   // บิลค่าส่งจากแอปโอนเงินจีน (china_bills.is_shipping) — ไว้ผูกกับใบสำคัญตอนจ่ายค่าส่ง
   const [shipBills, setShipBills] = useState<{ id: string; label: string }[]>([]);
   const [payBusy, setPayBusy] = useState(false);
-  const [ln, setLn] = useState<Record<string, { unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight"; qty: string }>>({});
+  const [ln, setLn] = useState<Record<string, LineEdit>>({});
   // เพิ่ม/ลบรายการที่ "เพิ่มเอง" (ไม่ได้มาจากใบรับ)
   const [addSku, setAddSku] = useState<SkuPickerValue | null>(null);
   const [addName, setAddName] = useState("");
-  const [addQty, setAddQty] = useState("1");
   const [addBusy, setAddBusy] = useState(false);
   const [delLine, setDelLine] = useState<VoucherLine | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -95,7 +104,8 @@ export default function PurchaseVoucherFormPage() {
     const rateKg = hd0.ship_rate_kg ?? (hd0.ship_method === "weight" ? hd0.ship_rate : null);
     setH({ voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "" });
     const m: typeof ln = {};
-    for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "", qty: String(l.qty) };
+    for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "", qty: String(l.qty),
+      discount: l.discount_pct ? String(l.discount_pct) : l.discount ? String(l.discount) : "", disc_mode: l.discount_pct ? "pct" : "amt" };
     setLn(m); setDirty(false);
   }, []);
 
@@ -121,12 +131,12 @@ export default function PurchaseVoucherFormPage() {
     if (!data) return null;
     return computeVoucher(
       { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
-      data.lines.map((l) => { const e = ln[l.id]; return { qty: !l.gr_line_id && e?.qty ? num(e.qty) : l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null }; }),
+      data.lines.map((l) => { const e = ln[l.id]; return { qty: !l.gr_line_id && e?.qty ? num(e.qty) : l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null, ...discOf(e) }; }),
     );
   }, [data, h, ln, currency]);
 
   const setHeader = (patch: Partial<typeof h>) => { setH((p) => ({ ...p, ...patch })); setDirty(true); };
-  const setLine = (lid: string, patch: Partial<{ unit_price: string; cbm_per_unit: string; kg_per_unit: string; ship_method: "" | "cube" | "weight"; qty: string }>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
+  const setLine = (lid: string, patch: Partial<LineEdit>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
 
   const save = async (): Promise<boolean> => {
     if (!data) return false;
@@ -140,7 +150,7 @@ export default function PurchaseVoucherFormPage() {
           ship_rate: h.ship_method === "cube" ? (h.ship_rate_cube === "" ? null : num(h.ship_rate_cube)) : h.ship_method === "weight" ? (h.ship_rate_kg === "" ? null : num(h.ship_rate_kg)) : null,
           ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null, carrier_id: h.carrier_id || null, carrier_name: h.carrier_name || null,
         },
-        lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, ...(!l.gr_line_id && num(e?.qty) > 0 ? { qty: num(e?.qty) } : {}), unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit), ship_method: e?.ship_method || null }; }),
+        lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, ...(!l.gr_line_id && num(e?.qty) > 0 ? { qty: num(e?.qty) } : {}), unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit), ship_method: e?.ship_method || null, ...discOf(e) }; }),
       };
       const res = await apiFetch(`/api/purchasing/vouchers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json().catch(() => ({}));
@@ -168,21 +178,36 @@ export default function PurchaseVoucherFormPage() {
   };
 
   // ── เพิ่ม/ลบรายการที่เพิ่มเอง (ใบร่างเท่านั้น) — มีงานค้างให้บันทึกก่อน กันค่าที่พิมพ์ไว้หาย ──
-  const addLine = async () => {
-    if (!addSku && !addName.trim()) { toast.error("เลือกสินค้าจากคลัง หรือพิมพ์ชื่อรายการก่อน"); return; }
-    if (!(num(addQty) > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+  // ★ 2026-11-14 เจ้าของ: "ตอนเพิ่มรายการใส่เสร็จก็เพิ่มเลย ไม่ต้องมีปุ่มเพิ่ม" → เลือกสินค้า = เพิ่มทันที · พิมพ์ชื่อ + Enter = เพิ่ม
+  //   ได้จำนวน 1 + ราคาในระบบ (ถ้ามี) แล้วแก้จำนวน/ราคา/ส่วนลดต่อในตาราง
+  const addLine = async (sku: SkuPickerValue | null = addSku, typed: string = addName) => {
+    if (!sku && !typed.trim()) { toast.error("เลือกสินค้าจากคลัง หรือพิมพ์ชื่อรายการก่อน"); return; }
+    if (addBusy) return;
     setAddBusy(true);
     try {
       if (dirty && !(await save())) return;
       const res = await apiFetch(`/api/purchasing/vouchers/${id}/lines`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ item_sku_id: addSku?.id ?? null, item_name: addName.trim() || (addSku ? `[${addSku.code}] ${addSku.name}` : ""), qty: num(addQty), uom: addSku?.uom_name ?? null }) });
+        body: JSON.stringify({ item_sku_id: sku?.id ?? null, item_name: sku ? `[${sku.code}] ${sku.name}` : typed.trim(), qty: 1, uom: sku?.uom_name ?? null }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       applyData(j.data as Detail);
-      setAddSku(null); setAddName(""); setAddQty("1");
-      toast.success("เพิ่มรายการแล้ว");
+      setAddSku(null); setAddName("");
+      toast.success("เพิ่มรายการแล้ว — แก้จำนวน/ราคาในตารางได้เลย");
     } catch (e) { toast.error("เพิ่มไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setAddBusy(false); }
+  };
+  // ★ 2026-11-14 ปุ่มไอคอน "แทนราคาในระบบ" — บันทึกราคาในตารางเป็นราคาต่อร้านของร้านนี้ทันที (API sys-price)
+  const [sysBusy, setSysBusy] = useState<string | null>(null);
+  const replaceSysPrice = async (lineId: string, price: number) => {
+    setSysBusy(lineId);
+    try {
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/sys-price`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ line_id: lineId, price }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      setData((d) => (d ? { ...d, lines: d.lines.map((x) => (x.id === lineId ? { ...x, sys_price: price, sys_price_source: "shop" } : x)) } : d));
+      toast.success(`บันทึกเป็นราคาในระบบแล้ว (ราคาต่อร้าน ${fmtMoney(price, 4)})`);
+    } catch (e) { toast.error("แทนราคาในระบบไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setSysBusy(null); }
   };
   const removeLine = async () => {
     if (!delLine) return;
@@ -277,7 +302,7 @@ export default function PurchaseVoucherFormPage() {
     missing_price_count: t?.missing_price_count ?? 0, any_ship: anyShip, ship_total_thb: t?.ship_total_thb ?? 0,
     missing_basis_count: t?.missing_basis_count ?? 0, missing_rate_count: t?.missing_rate_count ?? 0, dirty: dirty && !readonly,
   });
-  const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0 };
+  const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0, discount_foreign: t?.discount_foreign ?? 0, discount_thb: t?.discount_thb ?? 0 };
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 
@@ -348,6 +373,7 @@ export default function PurchaseVoucherFormPage() {
                           <th className="text-right px-2 py-2 font-medium">รับจริง</th>
                           <th className="text-right px-2 py-2 font-medium">ราคา/หน่วย ({sym.trim()})</th>
                           {foreign && <th className="text-right px-2 py-2 font-medium">ราคา/หน่วย ฿</th>}
+                          <th className="text-right px-2 py-2 font-medium" title="ส่วนลดของรายการนี้ — ใส่เป็นยอดเงิน หรือ % (กดปุ่มข้างช่องสลับ) · ค่าสินค้า = จำนวน × ราคา − ส่วนลด">ส่วนลด</th>
                           <th className="text-right px-2 py-2 font-medium">ค่าสินค้า ฿</th>
                           {anyShip && <th className="text-left px-2 py-2 font-medium">คิดจาก</th>}
                           {anyShip && <th className="text-right px-2 py-2 font-medium">คิว หรือ กก. /ชิ้น</th>}
@@ -386,10 +412,34 @@ export default function PurchaseVoucherFormPage() {
                                   : l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span>
                                 {manual && !readonly && <button onClick={() => setDelLine(l)} title="ลบรายการนี้" className="ml-1 text-slate-300 hover:text-red-600 font-normal">🗑</button>}
                               </td>
-                              <td className="px-2 py-2 text-right">
+                              <td className="px-2 py-2 text-right align-top">
                                 <MoneyInput value={e.unit_price} disabled={readonly} onChange={(v) => setLine(l.id, { unit_price: v })} className={`${inputCls} w-24 text-right ${!c.has_price ? "border-amber-300" : ""}`} placeholder="0.00" />
+                                {/* ★ 2026-11-14 ราคาในระบบโชว์เล็ก ๆ + ปุ่มไอคอนเส้น (ชี้ดูว่าคืออะไร): ใช้ราคาระบบ = ดึงมาใส่ · แทนราคาในระบบ = เอาราคานี้ไปเป็นราคาต่อร้าน */}
+                                {l.item_sku_id && (l.sys_price != null || (!readonly && num(e.unit_price) > 0)) && (
+                                  <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400 whitespace-nowrap">
+                                    <span title={l.sys_price != null ? `ราคาในระบบ: ${SYS_SRC[l.sys_price_source ?? ""] ?? ""}` : "ยังไม่มีราคาในระบบ"}>ในระบบ {l.sys_price != null ? `${sym}${fmtMoney(l.sys_price, 4)}` : "—"}</span>
+                                    {!readonly && l.sys_price != null && Math.abs(num(e.unit_price) - l.sys_price) > 1e-9 && (
+                                      <button type="button" onClick={() => setLine(l.id, { unit_price: String(l.sys_price) })} title={`ใช้ราคาในระบบ — ใส่ ${sym}${fmtMoney(l.sys_price, 4)} (${SYS_SRC[l.sys_price_source ?? ""] ?? ""}) ลงช่องนี้`} aria-label="ใช้ราคาในระบบ"
+                                        className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Icon name="download" mode="line" size={13} /></button>
+                                    )}
+                                    {!readonly && num(e.unit_price) > 0 && (l.sys_price == null || Math.abs(num(e.unit_price) - l.sys_price) > 1e-9) && (
+                                      <button type="button" disabled={sysBusy === l.id} onClick={() => void replaceSysPrice(l.id, num(e.unit_price))} title={`แทนราคาในระบบ — บันทึก ${sym}${fmtMoney(num(e.unit_price), 4)} เป็นราคาต่อร้านของร้านนี้ทันที (ราคาเดิมเก็บในประวัติ)`} aria-label="แทนราคาในระบบ"
+                                        className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"><Icon name="upload" mode="line" size={13} /></button>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                               {foreign && <td className="px-2 py-2 text-right tabular-nums text-slate-600">{c.has_price ? fmtMoney(c.unit_price_thb) : "—"}</td>}
+                              <td className="px-2 py-2 text-right whitespace-nowrap align-top">
+                                {/* ★ 2026-11-14 ส่วนลด: ยอดเงิน (สกุลใบ) หรือ % — กดปุ่มข้างช่องสลับ */}
+                                <div className="flex items-center justify-end gap-1">
+                                  <input type="number" inputMode="decimal" step="any" min={0} value={e.discount ?? ""} disabled={readonly} onChange={(ev) => setLine(l.id, { discount: ev.target.value })} onFocus={(ev) => ev.target.select()}
+                                    className={`${inputCls} w-16 text-right tabular-nums ${num(e.discount) > 0 ? "border-red-200 text-red-600" : ""}`} placeholder="0" title="ส่วนลดของรายการนี้" />
+                                  <button type="button" disabled={readonly} onClick={() => setLine(l.id, { disc_mode: e.disc_mode === "pct" ? "amt" : "pct" })} title={e.disc_mode === "pct" ? "ตอนนี้: เป็น % — กดเพื่อใส่เป็นยอดเงิน" : "ตอนนี้: เป็นยอดเงิน — กดเพื่อใส่เป็น %"}
+                                    className="h-7 min-w-7 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{e.disc_mode === "pct" ? "%" : sym.trim() || "฿"}</button>
+                                </div>
+                                {e.disc_mode === "pct" && c.discount_foreign > 0 && <div className="text-[10px] text-red-400 mt-0.5">= −{sym}{fmtMoney(c.discount_foreign)}</div>}
+                              </td>
                               <td className="px-2 py-2 text-right tabular-nums text-slate-800">{c.has_price ? fmtMoney(c.line_total_thb) : "—"}</td>
                               {anyShip && (
                                 <td className="px-2 py-2 whitespace-nowrap">
@@ -433,11 +483,11 @@ export default function PurchaseVoucherFormPage() {
                   )}
                   {!readonly && (addOpen || data.lines.length === 0) && (
                     <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 flex items-end gap-2 flex-wrap">
-                      <div className="w-64"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(p); if (p) setAddName(""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" /></div>
-                      <div className="flex-1 min-w-[10rem]"><label className="block text-[11px] text-slate-500 mb-0.5">หรือพิมพ์ชื่อเอง (เช่น ค่ากล่อง, ของแถม)</label><input value={addName} onChange={(e) => setAddName(e.target.value)} className={`${inputCls} w-full`} placeholder={addSku ? `[${addSku.code}] ${addSku.name}` : "ชื่อรายการ"} /></div>
-                      <div><label className="block text-[11px] text-slate-500 mb-0.5">จำนวน</label><input type="number" inputMode="decimal" step="any" min={0} value={addQty} onChange={(e) => setAddQty(e.target.value)} onFocus={(e) => e.target.select()} onKeyDown={(e) => { if (e.key === "Enter") void addLine(); }} className={`${inputCls} w-24 text-right tabular-nums`} /></div>
-                      <button onClick={() => void addLine()} disabled={addBusy || (!addSku && !addName.trim())} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{addBusy ? "กำลังเพิ่ม…" : "＋ เพิ่ม"}</button>
-                      <span className="text-[11px] text-slate-400 basis-full">รายการจากใบรับ แก้จำนวนหรือลบต้องทำที่ใบรับ (จำนวนต้องตรงกับของที่รับจริงและสต๊อก) · รายการที่เพิ่มเองแก้จำนวนในตารางและกด 🗑 ลบได้</span>
+                      {/* ★ 2026-11-14 เลือกสินค้า = เพิ่มทันที (ไม่มีปุ่ม + เพิ่ม) · พิมพ์ชื่อเอง + Enter = เพิ่ม · จำนวน/ราคา/ส่วนลด แก้ต่อในตาราง */}
+                      <div className="w-72"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า (เลือกแล้วเพิ่มเลย)</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(null); if (p) void addLine(p, ""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" /></div>
+                      <div className="flex-1 min-w-[10rem]"><label className="block text-[11px] text-slate-500 mb-0.5">หรือพิมพ์ชื่อเอง (เช่น ค่ากล่อง, ของแถม) แล้วกด Enter</label><input value={addName} disabled={addBusy} onChange={(e) => setAddName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && addName.trim()) void addLine(null, addName); }} className={`${inputCls} w-full`} placeholder="ชื่อรายการ แล้วกด Enter" /></div>
+                      {addBusy && <span className="h-9 inline-flex items-center text-xs text-slate-500">กำลังเพิ่ม…</span>}
+                      <span className="text-[11px] text-slate-400 basis-full">ได้จำนวน 1 + ราคาในระบบ (ถ้ามี) → แก้จำนวน / ราคา / ส่วนลด ในตารางได้เลย · รายการจากใบรับ แก้จำนวนหรือลบต้องทำที่ใบรับ · รายการที่เพิ่มเองกด 🗑 ลบได้</span>
                     </div>
                   )}
                 </div>

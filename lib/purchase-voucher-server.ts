@@ -6,7 +6,7 @@
  * route ต่าง ๆ ใน app/api/purchasing/vouchers ต้องบางที่สุด — logic อยู่ที่นี่
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { computeVoucher, cbmFromCm, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
+import { computeVoucher, cbmFromCm, isForeignCurrency, isCNY, lineDiscount, type ShipMethod } from "@/lib/landed-cost";
 import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 import { loadPartnerMatcher } from "@/lib/po-line-price";
 
@@ -49,6 +49,10 @@ export type VoucherLine = {
   cbm_per_unit: number | null; kg_per_unit: number | null; ship_alloc_thb: number; landed_unit_thb: number | null;
   ship_method: ShipMethod | null;   // วิธีคิดเฉพาะบรรทัด (null = ตามใบ) — มาจากใบส่งของ (BOX=คิว, CLOTH BLOCK=กก.)
   price_source: string | null; sort_order: number;
+  /** ★ 2026-11-14 ส่วนลดบรรทัด — ยอดเงิน (สกุลใบ) / % (มีค่า = คิดจาก %) */
+  discount: number | null; discount_pct: number | null;
+  /** ราคาในระบบ (สกุลใบ) ไว้โชว์เล็ก ๆ ใต้ช่องราคา: ราคาต่อร้านนี้ → ร้านหลัก → ราคาบนสินค้า · null = ไม่มี */
+  sys_price: number | null; sys_price_source: "shop" | "default_shop" | "sku" | null;
   code: string; image_url: string | null;
   parent_cbm: number | null; parent_kg: number | null;   // ค่าจาก Parent SKU (ไว้ปุ่ม "ใช้ค่าจากตัวแม่")
 };
@@ -235,7 +239,7 @@ export async function recomputeVoucher(admin: Admin, voucherId: string): Promise
   const { data: v } = await admin.from("purchase_vouchers_v2").select("*").eq("id", voucherId).maybeSingle();
   if (!v) return;
   const h = v as Row;
-  const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("id, qty, unit_price, cbm_per_unit, kg_per_unit, ship_method").eq("voucher_id", voucherId).not("is_active", "is", false).order("sort_order");
+  const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("id, qty, unit_price, cbm_per_unit, kg_per_unit, ship_method, discount, discount_pct").eq("voucher_id", voucherId).not("is_active", "is", false).order("sort_order");
   const lines = (ls ?? []) as Row[];
   const calc = computeVoucher(
     {
@@ -247,6 +251,7 @@ export async function recomputeVoucher(admin: Admin, voucherId: string): Promise
     lines.map((l) => ({
       qty: num(l.qty), unit_price: l.unit_price == null ? null : num(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? null : num(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? null : num(l.kg_per_unit),
       ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null,
+      discount: l.discount == null ? null : num(l.discount), discount_pct: l.discount_pct == null ? null : num(l.discount_pct),
     })),
   );
   for (let i = 0; i < lines.length; i++) {
@@ -254,6 +259,7 @@ export async function recomputeVoucher(admin: Admin, voucherId: string): Promise
     await admin.from("purchase_voucher_lines_v2").update({
       unit_price_thb: c.has_price ? c.unit_price_thb : null, line_total_thb: c.has_price ? c.line_total_thb : null,
       ship_alloc_thb: c.ship_alloc_thb, landed_unit_thb: c.has_price ? c.landed_unit_thb : null, updated_at: new Date().toISOString(),
+      ...(num(lines[i].discount_pct) > 0 ? { discount: c.discount_foreign } : {}),   // ส่วนลดแบบ % → จดยอดเงินที่คิดได้ไว้ด้วย
     }).eq("id", String(lines[i].id));
   }
   const t = calc.totals;
@@ -261,6 +267,33 @@ export async function recomputeVoucher(admin: Admin, voucherId: string): Promise
     ship_total_thb: t.ship_total_thb, total_cbm: t.total_cbm, total_kg: t.total_kg,
     subtotal_foreign: t.subtotal_foreign, subtotal_thb: t.subtotal_thb, grand_total_thb: t.grand_total_thb, updated_at: new Date().toISOString(),
   }).eq("id", voucherId);
+}
+
+/**
+ * ★ 2026-11-14 ราคาในระบบของสินค้า (สกุลเดียวกับใบ) — โชว์เล็ก ๆ ใต้ช่องราคาในใบสำคัญ + ปุ่ม ใช้ราคาระบบ / แทนราคาในระบบ
+ *   ลำดับ: ราคาต่อร้านของร้านนี้ → ร้านหลัก (is_default) → ราคาบนสินค้า (หยวน = rmb_cost · บาท = standard_price)
+ */
+export async function systemPrices(admin: Admin, skuIds: string[], partnerId: string | null, currency: string): Promise<Map<string, { price: number; source: "shop" | "default_shop" | "sku" }>> {
+  const out = new Map<string, { price: number; source: "shop" | "default_shop" | "sku" }>();
+  if (!skuIds.length) return out;
+  const cny = isCNY(currency);
+  for (const c of chunk(skuIds)) {
+    const { data } = await admin.from("supplier_items").select("item_sku_id, supplier_partner_id, price, currency, is_default").in("item_sku_id", c).not("is_active", "is", false);
+    const rows = ((data ?? []) as Row[]).filter((r) => num(r.price) > 0 && isCNY(String(r.currency ?? "THB")) === cny);
+    for (const id of c) {
+      const mine = rows.filter((r) => String(r.item_sku_id) === id);
+      const shop = partnerId ? mine.find((r) => String(r.supplier_partner_id) === partnerId) : undefined;
+      const def = mine.find((r) => r.is_default);
+      if (shop) out.set(id, { price: num(shop.price), source: "shop" });
+      else if (def) out.set(id, { price: num(def.price), source: "default_shop" });
+    }
+    const left = c.filter((id) => !out.has(id));
+    if (left.length) {
+      const { data: sk } = await admin.from("skus_v2").select("id, rmb_cost, standard_price").in("id", left);
+      for (const r of (sk ?? []) as Row[]) { const p = cny ? num(r.rmb_cost) : num(r.standard_price); if (p > 0) out.set(String(r.id), { price: p, source: "sku" }); }
+    }
+  }
+  return out;
 }
 
 /** อ่านใบ + รายการ (พร้อมรหัส/รูป/ค่าจากตัวแม่) — null เมื่อไม่พบ */
@@ -271,6 +304,7 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
   const rows = (ls ?? []) as Row[];
   const skuIds = [...new Set(rows.map((l) => String(l.item_sku_id ?? "")).filter(Boolean))];
   const skuMap = await loadSkus(admin, skuIds);
+  const sys = await systemPrices(admin, skuIds, (v as Row).seller_partner_id ? String((v as Row).seller_partner_id) : null, String((v as Row).currency ?? "THB"));
   const lines: VoucherLine[] = rows.map((l) => {
     const sku = l.item_sku_id ? skuMap.get(String(l.item_sku_id)) : undefined;
     const basis = parentBasis(sku);
@@ -282,6 +316,9 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
       cbm_per_unit: nn("cbm_per_unit"), kg_per_unit: nn("kg_per_unit"), ship_alloc_thb: num(l.ship_alloc_thb), landed_unit_thb: nn("landed_unit_thb"),
       ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null,
       price_source: (l.price_source as string) ?? null, sort_order: num(l.sort_order),
+      discount: nn("discount"), discount_pct: nn("discount_pct"),
+      sys_price: l.item_sku_id ? sys.get(String(l.item_sku_id))?.price ?? null : null,
+      sys_price_source: l.item_sku_id ? sys.get(String(l.item_sku_id))?.source ?? null : null,
       code: sku ? String(sku.code ?? "") : "", image_url: coverUrl(resolveSkuCover(sku).key),
       parent_cbm: basis.cbm, parent_kg: basis.kg,
     };
@@ -302,7 +339,7 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
         china_bill_id: (p.china_bill_id as string) ?? null, paid_via: (p.paid_via as string) ?? null,
         paid_amount_thb: p.paid_amount_thb == null ? null : num(p.paid_amount_thb), grand_total: num(p.grand_total),
         goods_thb: Math.round(mine.reduce((a, l) => a + num(l.line_total_thb), 0) * 100) / 100,
-        goods_foreign: Math.round(mine.reduce((a, l) => a + num(l.unit_price) * num(l.qty), 0) * 100) / 100,
+        goods_foreign: Math.round(mine.reduce((a, l) => a + num(l.unit_price) * num(l.qty) - lineDiscount(l.unit_price, l.qty, l.discount, l.discount_pct), 0) * 100) / 100,
       });
     }
     poPayments.sort((a, b) => a.po_no.localeCompare(b.po_no));

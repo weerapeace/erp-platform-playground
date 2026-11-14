@@ -39,7 +39,21 @@ export type VoucherLineInput = {
   cbm_per_unit?: number | null;
   kg_per_unit?: number | null;
   ship_method?: ShipMethod | null; // วิธีคิดเฉพาะบรรทัด (null = ตามใบ)
+  /** ★ 2026-11-14 ส่วนลดบรรทัด (ยอดเงิน สกุลของใบ) — ใช้เมื่อไม่มี discount_pct */
+  discount?: number | null;
+  /** ส่วนลดเป็น % ของ จำนวน × ราคา (มีค่า = คิดจาก % แทนยอดเงิน) */
+  discount_pct?: number | null;
 };
+
+/**
+ * ส่วนลดของบรรทัดเป็นยอดเงิน (สกุลของใบ) — % มีค่า = จำนวน × ราคา × % ÷ 100 · ไม่งั้นใช้ยอดเงิน
+ * ไม่ติดลบ · ไม่เกินค่าสินค้าของบรรทัด
+ */
+export function lineDiscount(unit: number | null | undefined, qty: number | null | undefined, discount?: number | null, pct?: number | null): number {
+  const gross = n(unit) * n(qty);
+  const d = n(pct) > 0 ? gross * n(pct) / 100 : n(discount);
+  return r2(Math.min(Math.max(0, d), Math.max(0, gross)));
+}
 
 export type VoucherHeaderInput = {
   currency: string;                // THB | RMB | ...
@@ -54,7 +68,8 @@ export type VoucherHeaderInput = {
 
 export type VoucherLineCalc = {
   unit_price_thb: number;          // ราคา/หน่วย บาท (ไม่รวมค่าส่ง)
-  line_total_foreign: number;      // ค่าสินค้าบรรทัด สกุลใบ
+  line_total_foreign: number;      // ค่าสินค้าบรรทัด สกุลใบ (หักส่วนลดแล้ว)
+  discount_foreign: number;        // ส่วนลดของบรรทัด (ยอดเงิน สกุลใบ)
   line_total_thb: number;          // ค่าสินค้าบรรทัด บาท
   method: ShipMethod;              // วิธีคิดที่ใช้จริงกับบรรทัดนี้
   basis: number;                   // ปริมาณที่คิด (คิวรวม หรือ กก.รวม ของบรรทัด ตาม method)
@@ -65,7 +80,9 @@ export type VoucherLineCalc = {
 };
 
 export type VoucherTotals = {
-  subtotal_foreign: number;        // ค่าสินค้ารวม สกุลใบ
+  subtotal_foreign: number;        // ค่าสินค้ารวม สกุลใบ (หักส่วนลดแล้ว)
+  discount_foreign: number;        // ส่วนลดรวม สกุลใบ
+  discount_thb: number;            // ส่วนลดรวม บาท
   subtotal_thb: number;            // ค่าสินค้ารวม บาท
   total_cbm: number;               // คิวรวมทุกบรรทัด (ที่มีข้อมูล)
   total_kg: number;                // กก.รวมทุกบรรทัด (ที่มีข้อมูล)
@@ -107,7 +124,8 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
     const perUnit = method === "cube" ? n(l.cbm_per_unit) : method === "weight" ? n(l.kg_per_unit) : 0;
     const basis = r4(perUnit * qty);
     const rate = method === "cube" ? rates.cube : method === "weight" ? rates.weight : 0;
-    return { qty, hasPrice, unit, unitThb, lineForeign: r2(unit * qty), lineThb: r2(unitThb * qty), method, basis, rate, cost: r2(basis * rate) };
+    const disc = hasPrice ? lineDiscount(unit, qty, l.discount, l.discount_pct) : 0;
+    return { qty, hasPrice, unit, unitThb, disc, lineForeign: r2(unit * qty - disc), lineThb: r2(unitThb * qty - disc * fx), method, basis, rate, cost: r2(basis * rate) };
   });
 
   const totalCbm = r4(lines.reduce((a, l) => a + n(l.cbm_per_unit) * n(l.qty), 0));
@@ -144,12 +162,13 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
   const outLines: VoucherLineCalc[] = base.map((b, i) => ({
     unit_price_thb: b.unitThb,
     line_total_foreign: b.lineForeign,
+    discount_foreign: b.disc,
     line_total_thb: b.lineThb,
     method: b.method,
     basis: b.basis,
     ship_by_rate_thb: b.cost,
     ship_alloc_thb: allocs[i],
-    landed_unit_thb: b.qty > 0 ? r4(b.unitThb + allocs[i] / b.qty) : b.unitThb,
+    landed_unit_thb: b.qty > 0 ? (b.disc > 0 ? r4((b.lineThb + allocs[i]) / b.qty) : r4(b.unitThb + allocs[i] / b.qty)) : b.unitThb,
     has_price: b.hasPrice,
   }));
 
@@ -158,6 +177,8 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
   const totals: VoucherTotals = {
     subtotal_foreign: subtotalForeign,
     subtotal_thb: subtotalThb,
+    discount_foreign: r2(base.reduce((a, b) => a + b.disc, 0)),
+    discount_thb: r2(base.reduce((a, b) => a + b.disc * fx, 0)),
     total_cbm: totalCbm,
     total_kg: totalKg,
     charged_cbm: chargedCbm,

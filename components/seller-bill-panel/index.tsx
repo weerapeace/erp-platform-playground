@@ -20,7 +20,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { isPdfRef } from "@/lib/file-ref";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, autoSplitRounds, ensureRowIds, allocOf, editAlloc, addAllocRound, rebalanceAlloc, mergeSplitRows, expandAllocRows, normalizeBillLine, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, autoSplitRounds, ensureRowIds, allocOf, editAlloc, addAllocRound, rebalanceAlloc, mergeSplitRows, expandAllocRows, normalizeBillLine, billLineDiscount, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 import { SaveBar } from "@/components/save-bar";
 
 /** ลากย้ายแถว: หลายบิลในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับบิล × ROW_SPAN + ลำดับแถว (ลากข้ามบิลไม่ได้) */
@@ -92,6 +92,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   const [backfill, setBackfill] = useState(true);                       // เปิด PO ย้อนหลังให้รายการนอกใบสั่งซื้อ
   const [voucher, setVoucher] = useState<{ seller_name: string | null; seller_partner_id: string | null; currency: string } | null>(null);
   const [otherGroups, setOtherGroups] = useState<PoGroup[] | null>(null);
+  const [pctRows, setPctRows] = useState<Set<string>>(new Set());   // ★ 2026-11-14 แถวที่ใส่ส่วนลดเป็น % (ยังไม่มีค่าก็จำโหมดไว้)
   const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.flatMap((b) => [b.r2_key, ...(b.raw?.files ?? [])])]);
   const gByKey = useMemo(() => new Map(groups.map((g) => [g.key, g])), [groups]);
   const otherByKey = useMemo(() => new Map((otherGroups ?? []).map((g) => [g.key, g])), [otherGroups]);
@@ -404,7 +405,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                     <div className="text-[11px] text-slate-500 mt-0.5">ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
                     <div className="flex gap-1.5 flex-wrap mt-1.5">
                       <span className={CHIP_NEU}>อ่านได้ {lines.length} แถว</span>
-                      {math.totalOk === true && <span className={CHIP_OK}>จำนวน × ราคา = ยอดรวมบิล ¥{n2(b.total_amount)} ตรง</span>}
+                      {math.totalOk === true && <span className={CHIP_OK}>{lines.some((x) => billLineDiscount(x) > 0) ? "หลังหักส่วนลด" : "จำนวน × ราคา"} = ยอดรวมบิล ¥{n2(b.total_amount)} ตรง</span>}
+                      {lines.some((x) => billLineDiscount(x) > 0) && <span className={`${chip} bg-red-50 text-red-700 border-red-200`} title="รวมส่วนลดทุกแถวในบิลนี้">ส่วนลดรวม ¥{n2(lines.reduce((a, x) => a + billLineDiscount(x), 0))}</span>}
                       {math.totalOk === false && <span className={CHIP_WARN}>รวมรายการ ¥{n2(math.sum)} ≠ ยอดบิล ¥{n2(b.total_amount)} — เช็กตัวเลข</span>}
                       {math.totalOk === null && <span className={CHIP_NEU}>รวม ¥{n2(math.sum)} (บิลไม่มียอดรวม)</span>}
                       {math.rowsBad.length > 0 && <span className={CHIP_WARN}>{math.rowsBad.length} แถว จำนวน × ราคา ≠ ยอด</span>}
@@ -429,6 +431,9 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                     const short = g ? expandAllocRows([l]).parts.reduce((s2, p) => s2 + shortfallOf(p, gAny(p.match_key)), 0) : 0;
                     const addable = g && !l.move_po ? roundsOf(g, groups).filter((r) => !alloc.some((a) => a.key === r.key) && r.remaining > 0) : [];
                     const applied = (l.voucher_line_ids?.length ?? 0) > 0;
+                    const rk = l.rid ?? String(i);
+                    const pctMode = (l.discount_pct ?? 0) > 0 || pctRows.has(rk);
+                    const disc = billLineDiscount(l);
                     const setQty = (q: number | null) => setLines(b.id, (ls) => ls.map((x, k) => (k === i ? rebalanceAlloc({ ...x, qty: q, amount: q != null && x.unit_price != null ? Math.round(q * x.unit_price * 100) / 100 : x.amount }) : x)));
                     return (
                       <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`flex items-start gap-1.5 px-3 py-1.5 ${done ? "bg-emerald-50/30" : l.level === "no" ? "bg-red-50/30" : ""} ${l.decision === "skip" ? "opacity-60" : ""} ${drag.rowCls(dk)}`}>
@@ -451,7 +456,15 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                               <input type="number" inputMode="decimal" step="any" min={0} value={l.qty ?? ""} disabled={ro} onChange={(e) => setQty(e.target.value === "" ? null : Number(e.target.value))} className={`${inp} w-16 ${bad ? "border-amber-300" : ""}`} title="จำนวนในบิล (แก้ได้ถ้า AI อ่านผิด)" />
                               <span>{l.unit ?? ""} × ¥</span>
                               <input type="number" inputMode="decimal" step="any" min={0} value={l.unit_price ?? ""} disabled={ro} onChange={(e) => { const p = e.target.value === "" ? null : Number(e.target.value); setLine(b.id, i, { unit_price: p, amount: p != null && l.qty != null ? Math.round(l.qty * p * 100) / 100 : l.amount }); }} className={`${inp} w-16 ${bad ? "border-amber-300" : ""}`} title="ราคาต่อหน่วยในบิล" />
-                              <span>= <b className="font-medium text-slate-800">¥{n2(l.amount ?? (l.qty ?? 0) * (l.unit_price ?? 0))}</b></span>
+                              {/* ★ 2026-11-14 ส่วนลดของแถว: ยอดเงิน ¥ หรือ % (กดปุ่มข้างช่องสลับ) · ยอด = จำนวน × ราคา − ส่วนลด */}
+                              <span className="text-slate-400">− ลด</span>
+                              <input type="number" inputMode="decimal" step="any" min={0} disabled={ro} value={(pctMode ? l.discount_pct : l.discount) ?? ""} placeholder="0"
+                                onChange={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); setLine(b.id, i, pctMode ? { discount_pct: v, discount: null } : { discount: v, discount_pct: null }); }}
+                                className={`${inp} w-14 ${disc > 0 ? "border-red-200 text-red-600" : ""}`} title={pctMode ? "ส่วนลดเป็น % ของ จำนวน × ราคา" : "ส่วนลดเป็นยอดเงิน ¥"} />
+                              <button type="button" disabled={ro} onClick={() => { setPctRows((p) => { const nx = new Set(p); if (pctMode) nx.delete(rk); else nx.add(rk); return nx; }); setLine(b.id, i, { discount: null, discount_pct: null }); }}
+                                title={pctMode ? "ตอนนี้: เป็น % — กดเพื่อใส่เป็นยอดเงิน ¥" : "ตอนนี้: เป็นยอดเงิน ¥ — กดเพื่อใส่เป็น %"}
+                                className="h-7 min-w-6 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{pctMode ? "%" : "¥"}</button>
+                              <span>= <b className="font-medium text-slate-800">¥{n2((l.amount ?? (l.qty ?? 0) * (l.unit_price ?? 0)) - disc)}</b>{disc > 0 && <span className="ml-1 text-[10px] text-red-400">(ลด ¥{n2(disc)})</span>}</span>
                             </span>
                           </div>
                           {/* บรรทัด 2: จับคู่ → สินค้า + ป้าย PO */}

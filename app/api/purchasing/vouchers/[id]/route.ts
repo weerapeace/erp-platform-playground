@@ -35,7 +35,7 @@ type PatchBody = {
     shipping_bill_id?: string | null; shipping_payment_status?: string; shipping_paid_date?: string | null;
   };
   /** qty / item_name / uom แก้ได้เฉพาะรายการที่ "เพิ่มเอง" (ไม่มี gr_line_id) — รายการจากใบรับต้องแก้ที่ใบรับ */
-  lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown; ship_method?: string | null; qty?: unknown; item_name?: string; uom?: string | null }[];
+  lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown; ship_method?: string | null; qty?: unknown; item_name?: string; uom?: string | null; discount?: unknown; discount_pct?: unknown }[];
 };
 
 export async function PATCH(request: NextRequest, { params }: Params): Promise<NextResponse> {
@@ -98,6 +98,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
         const same = before != null && (before.unit_price == null ? patch.unit_price == null : patch.unit_price != null && Math.abs(Number(before.unit_price) - Number(patch.unit_price)) < 1e-9);
         patch.price_source = same && before?.price_source ? before.price_source : p != null && p > 0 ? "manual" : "none";
       }
+      // ★ 2026-11-14 ส่วนลดบรรทัด — ยอดเงิน (สกุลใบ) หรือ % (มี % = คิดจาก %) · 0/ว่าง = ไม่มีส่วนลด
+      if (l.discount !== undefined) { const d = optNum(l.discount); if (d != null && d < 0) return NextResponse.json({ error: "ส่วนลดติดลบไม่ได้" }, { status: 400 }); patch.discount = d != null && d > 0 ? d : null; }
+      if (l.discount_pct !== undefined) { const p = optNum(l.discount_pct); if (p != null && (p < 0 || p > 100)) return NextResponse.json({ error: "ส่วนลด % ต้องอยู่ระหว่าง 0-100" }, { status: 400 }); patch.discount_pct = p != null && p > 0 ? p : null; }
       if (l.cbm_per_unit !== undefined) patch.cbm_per_unit = optNum(l.cbm_per_unit);
       if (l.kg_per_unit !== undefined) patch.kg_per_unit = optNum(l.kg_per_unit);
       if (l.ship_method !== undefined) patch.ship_method = l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : null;

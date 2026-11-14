@@ -185,3 +185,14 @@ describe("บิลร้านจีน — แถวเดียวลงห�
     expect(r.lines[0].alloc).toEqual([{ key: g1.key, qty: 50 }, { key: g5.key, qty: 20 }]);
   });
 });
+
+describe("บิลร้านจีน — ส่วนลดตามไปที่ใบ (2026-11-14)", () => {
+  it("ส่วนลด ¥7 ของแถว 50 ชิ้น → แบ่งลงรายการตามจำนวน (20 → 2.8 · 30 → 4.2) · แบบ % = % เดิม", async () => {
+    const v = (await loadVoucherLite(db(), "V"))!;
+    const gs = await loadShopGroups(db(), v);
+    const g1 = gs.find((g) => g.po_no === "PO-2026-00284")!;
+    await applySellerBill(db(), v, [L({ name_cn: "狗扣", qty: 50, unit_price: 4.4, amount: 220, discount: 7, match_key: g1.key, decision: "confirmed", rid: "b1" })], { remember: false, actorName: "t", previousIds: [], fillCnName: false });
+    const mine = tables.purchase_voucher_lines_v2.filter((x) => x.voucher_id === "V" && x.is_active !== false);
+    expect(mine.map((x) => [x.po_line_id, x.qty, x.discount, x.discount_pct ?? null]).sort()).toEqual([["l1b", 20, 2.8, null], ["l1c", 30, 4.2, null]]);
+  });
+});

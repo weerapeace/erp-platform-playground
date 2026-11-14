@@ -149,3 +149,20 @@ describe("แถวเดียวลงหลาย PO (ของที่ส�
     expect(normalizeBillLine({ alloc: [{ key: "a", qty: 1 }, { key: "b", qty: "2" }] }).alloc).toEqual([{ key: "a", qty: 1 }, { key: "b", qty: 2 }]);
   });
 });
+
+describe("ส่วนลดในแถวบิล (2026-11-14)", () => {
+  it("ยอดเงิน / % · ตรวจยอดบิลใช้ยอดหลังหักส่วนลด", async () => {
+    const { billLineDiscount, checkBillMath } = await import("@/lib/seller-bill-match");
+    const a = L({ qty: 20, unit_price: 3.46, amount: 69.2, discount: 5 });
+    const b = L({ qty: 100, unit_price: 1.3, amount: 130, discount_pct: 10 });
+    expect([billLineDiscount(a), billLineDiscount(b)]).toEqual([5, 13]);
+    expect(checkBillMath([a, b], 181.2)).toMatchObject({ sum: 181.2, totalOk: true });
+  });
+  it("แถวหลาย PO: ส่วนลดยอดเงินแบ่งตามจำนวน (รวมเท่าเดิม) · แบบ % ใช้ % เดิมทุก PO", () => {
+    const row = { ...autoSplitRounds([L({ name_cn: "x", qty: 330, unit_price: 0.6, amount: 198, match_key: r246.key, rid: "b1" })], gs, [])[0], discount: 33 };
+    const parts = expandAllocRows([row]).parts;
+    expect(parts.map((p) => p.discount)).toEqual([24, 9]);
+    const pct = expandAllocRows([{ ...row, discount: null, discount_pct: 10 }]).parts;
+    expect(pct.map((p) => [p.discount ?? null, p.discount_pct])).toEqual([[null, 10], [null, 10]]);
+  });
+});

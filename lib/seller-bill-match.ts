@@ -47,7 +47,18 @@ export type SellerBillLine = {
   page?: number | null;
   /** ★ 2026-11-14 แถวเดียวลงหลาย PO (ของที่สั่ง 2 รอบแต่ส่งพร้อมกัน) — [{key, qty}] ≥ 2 รายการ · null = ลง PO เดียว (match_key) */
   alloc?: { key: string; qty: number }[] | null;
+  /** ★ 2026-11-14 ส่วนลดของแถว (เจ้าของขอ) — ยอดเงิน ¥ หรือ % (มี % = คิดจาก %) · amount = ก่อนหักส่วนลด */
+  discount?: number | null;
+  discount_pct?: number | null;
 };
+
+/** ส่วนลดของแถวบิลเป็นยอดเงิน (% มีค่า = จำนวน × ราคา × % ÷ 100) · ไม่ติดลบ ไม่เกินยอดแถว */
+export function billLineDiscount(l: Pick<SellerBillLine, "qty" | "unit_price" | "amount" | "discount" | "discount_pct">): number {
+  const gross = l.amount != null ? Number(l.amount) : (Number(l.qty) || 0) * (Number(l.unit_price) || 0);
+  const pct = Number(l.discount_pct) || 0;
+  const d = pct > 0 ? gross * pct / 100 : Number(l.discount) || 0;
+  return Math.round(Math.min(Math.max(0, d), Math.max(0, gross)) * 100) / 100;
+}
 export type SkuPick = { id: string; code: string; name: string; uom: string | null };
 
 /** บรรทัด PO ย่อย (1 สินค้าในใบ PO อาจแตกหลายบรรทัดตามใบสั่งผลิต) */
@@ -341,11 +352,14 @@ export function expandAllocRows(lines: SellerBillLine[]): { parts: SellerBillLin
     const q = Number(l.qty) || 0;
     const total = l.amount ?? q * (l.unit_price ?? 0);
     let acc = 0;
+    let discAcc = 0;
     alloc.forEach((a, k) => {
       const last = k === alloc.length - 1;
       const amt = last ? Math.round((total - acc) * 100) / 100 : Math.round(a.qty * (l.unit_price ?? 0) * 100) / 100;
       acc += amt;
-      parts.push({ ...l, match_key: a.key, qty: a.qty, amount: amt, alloc: null, voucher_line_ids: k === 0 ? l.voucher_line_ids : [], rid: `${l.rid ?? `L${i}`}#${k + 1}` });
+      const disc = !(Number(l.discount_pct) > 0) && Number(l.discount) > 0 ? (last ? Math.round((Number(l.discount) - discAcc) * 100) / 100 : Math.round(Number(l.discount) * a.qty / (q || 1) * 100) / 100) : l.discount ?? null;
+      if (typeof disc === "number" && !(Number(l.discount_pct) > 0)) discAcc += disc;
+      parts.push({ ...l, match_key: a.key, qty: a.qty, amount: amt, discount: disc, alloc: null, voucher_line_ids: k === 0 ? l.voucher_line_ids : [], rid: `${l.rid ?? `L${i}`}#${k + 1}` });
       parent.push(i);
     });
   });
@@ -503,7 +517,7 @@ export function checkBillMath(lines: SellerBillLine[], total: number | null): { 
   lines.forEach((l, i) => {
     const q = Number(l.qty ?? 0), p = Number(l.unit_price ?? 0), a = l.amount == null ? null : Number(l.amount);
     const calc = q * p;
-    sum += a ?? calc;
+    sum += (a ?? calc) - billLineDiscount(l);   // ★ 2026-11-14 ยอดบิล = หลังหักส่วนลดของแต่ละแถว
     if (a != null && q > 0 && p > 0 && Math.abs(calc - a) > Math.max(0.05, a * 0.01)) rowsBad.push(i);
   });
   sum = Math.round(sum * 100) / 100;
@@ -550,6 +564,8 @@ export function normalizeBillLine(r: Record<string, unknown>, idx?: number): Sel
     rid: s(r.rid) || (typeof idx === "number" ? `L${idx}` : null),
     no: n(r.no), page: n(r.page),
     alloc: allocParse(r.alloc),
+    discount: n(r.discount) != null && (n(r.discount) as number) > 0 ? n(r.discount) : null,
+    discount_pct: n(r.discount_pct) != null && (n(r.discount_pct) as number) > 0 ? n(r.discount_pct) : null,
   };
 }
 function allocParse(v: unknown): SellerBillLine["alloc"] {

@@ -15,7 +15,7 @@ import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { canConfirm, nextSteps, type CheckItem } from "@/lib/purchase-voucher-checklist";
 import type { PoPayment, VoucherHeader } from "@/lib/purchase-voucher-server";
 
-type Totals = { subtotal_foreign: number; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number };
+type Totals = { subtotal_foreign: number; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; discount_foreign?: number; discount_thb?: number };
 export type ConfirmResult = { pv_no: string; write_back: { po: boolean; price_list: boolean; sku: boolean; error?: string }[]; failed: number };
 
 const ICON: Record<CheckItem["level"], { mark: string; cls: string }> = {
@@ -63,7 +63,10 @@ function CheckList({ items }: { items: CheckItem[] }) {
 function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null }) {
   return (
     <dl className="text-sm space-y-1">
-      {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()})</dt><dd className="tabular-nums">{sym}{fmtMoney(t.subtotal_foreign)}</dd></div>}
+      {/* ★ 2026-11-14 ส่วนลดรวม (เจ้าของขอ "มีเขียนตรงสรุปด้วยว่าส่วนลดรวมเท่าไหร่") — ค่าสินค้าด้านล่าง = หักส่วนลดแล้ว */}
+      {(t.discount_foreign ?? 0) > 0 && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้าก่อนลด{foreign ? ` (${sym.trim()})` : ""}</dt><dd className="tabular-nums">{foreign ? sym : "฿"}{fmtMoney(t.subtotal_foreign + (t.discount_foreign ?? 0))}</dd></div>}
+      {(t.discount_foreign ?? 0) > 0 && <div className="flex justify-between text-red-600"><dt>ส่วนลดรวม</dt><dd className="tabular-nums">−{foreign ? sym : "฿"}{fmtMoney(t.discount_foreign)}{foreign && (t.discount_thb ?? 0) > 0 ? <span className="ml-1 text-[11px] text-red-400">(฿{fmtMoney(t.discount_thb)})</span> : null}</dd></div>}
+      {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()}){(t.discount_foreign ?? 0) > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums">{sym}{fmtMoney(t.subtotal_foreign)}</dd></div>}
       {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {fxRate || "—"}</dd></div>}
       <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า</dt><dd className="tabular-nums">฿{fmtMoney(t.subtotal_thb)}</dd></div>
       <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
