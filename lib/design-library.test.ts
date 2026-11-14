@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildBriefHtml, buildPrompts, cleanSpec, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, type Choice, type Spec,
+  bagWord, bothUnits, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
 } from "./design-library";
 
 const ch = (list_key: Choice["list_key"], code: string, name: string, extra: Partial<Choice> = {}): Choice =>
@@ -69,15 +69,15 @@ describe("กฎห้ามคู่ + สต็อก", () => {
 describe("prompt 3 ชุด", () => {
   const ps = buildPrompts({ name: "TOTE-01", category: "tote bag" }, SPEC, CHOICES);
   it("มี 4 มุมรวมรูปเดียว · ข้างใน · คนสะพาย", () => {
-    expect(ps.map((p) => p.key)).toEqual(["grid4", "inside", "model"]);
+    expect(ps.map((p) => p.key)).toEqual(["grid4", "inside", "model", "line", "3d"]);
     expect(ps[0].text).toContain("2x2 grid");
     expect(ps[0].text).toContain("12 cm gusset");
   });
   it("อ้างเลขจุด + สีอะไหล่ + โน้ต + ช่อง", () => {
     expect(ps[0].text).toContain("Hardware: กุญแจ เบอร์ 3 (ABC-001), silver finish - note: อยากได้แบบนี้ [ref 2]");
-    expect(ps[0].text).toContain("front outer zip pocket 16x14 cm");
-    expect(ps[1].text).toContain("inside front wall zip pocket 10x8 cm");
-    expect(ps[2].text).toContain("long shoulder strap (110 cm)");
+    expect(ps[0].text).toContain("front outer zip pocket 16 cm (6.3 in) wide x 14 cm (5.5 in) high");
+    expect(ps[1].text).toContain("inside front wall zip pocket 10 cm (3.9 in) wide");
+    expect(ps[2].text).toContain("long shoulder strap, 110 cm (43.3 in) long");
   });
 });
 
@@ -101,5 +101,33 @@ describe("ใบสรุป", () => {
   it("รูปช่องโชว์ทุกกล่อง", () => {
     const svg = pocketPanelSvg(SPEC, "inside_front", CHOICES);
     expect(svg.match(/<rect /g)?.length).toBe(3);   // กรอบกระเป๋า + 2 กล่อง
+  });
+});
+
+describe("รอบ 4: ประเภทกระเป๋า · หู · หน่วย · สตูดิโอ", () => {
+  const types: Choice[] = [ch("bag_type", "HANB", "กระเป๋าถือ", { name_en: "Handbag" })];
+  it("รหัสแม่แบบถัดไปตามตัวนำหน้า", () => {
+    expect(nextTemplateCode("HANB", ["HANB-001", "hanb-003", "TOTE-009"])).toBe("HANB-004");
+    expect(nextTemplateCode("tote", [])).toBe("TOTE-001");
+  });
+  it("ชื่ออังกฤษของประเภทใช้ใน prompt · แม่แบบเก่าที่พิมพ์ทรงเองใช้ข้อความเดิม", () => {
+    expect(bagWord({ category: "HANB" }, types)).toBe("handbag");
+    expect(bagWord({ category: "tote bag" }, types)).toBe("tote bag");
+    const p = buildPrompts({ name: "X", category: "HANB" }, SPEC, [...CHOICES, ...types]);
+    expect(p[0].text).toContain("handbag (X), 30 cm (11.8 in) wide");
+  });
+  it("หู: ค่าเริ่มต้นเมื่อสูตรเก่าไม่มี + ความยาวรวมประมาณได้ + ใส่เองใช้ค่าที่ใส่", () => {
+    expect(SPEC.handle).toEqual({ drop: 18, w: 3, gap: 12, count: 2, total: 0 });
+    expect(handleLength(SPEC.handle)).toBeGreaterThan(40);
+    expect(handleLength({ ...SPEC.handle, total: 52 })).toBe(52);
+    expect(buildPrompts({ name: "X" }, cleanSpec({ ...SPEC, handle: { count: 0 } }), CHOICES)[0].text).toContain("no top handles");
+  });
+  it("2 หน่วย", () => { expect(bothUnits(30)).toBe("30 cm (11.8 in)"); });
+  it("ส่งเข้าสตูดิโอ: ขนาด + หู + ช่องซิปหน้า (วัดกลางช่องจากก้น)", () => {
+    const p = toStudioParams(SPEC);
+    expect(p).toMatchObject({ W: 30, H: 35, D: 12, wh: 3, g: 12, win: "rect", winType: "zip", ws: 16, wy: 23 });
+    expect(dlDraftOf({ dl_draft: { params: p, notice: "n" } })).toEqual({ params: p, notice: "n" });
+    expect(dlDraftOf({ schema: 2 })).toBeNull();
+    expect(dlDraftOf(null)).toBeNull();
   });
 });

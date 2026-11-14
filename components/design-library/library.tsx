@@ -18,7 +18,15 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { TemplateFormModal } from "./template-form";
 import { ChoicesManager } from "./choices-manager";
+import { bagTypeOf, type Choice } from "@/lib/design-library";
 import { api, img, LIB_HREF, recipeHref, thaiDate, tplHref, type RecipeCard, type Template } from "./shared";
+
+/** ชื่อประเภทกระเป๋าจากรหัส (template.category) — แม่แบบเก่าที่พิมพ์ทรงเองโชว์ข้อความเดิม */
+function useBagTypes() {
+  const [types, setTypes] = useState<Choice[]>([]);
+  useEffect(() => { api<Choice[]>(`/api/design-library/choices?list_key=bag_type&limit=500`).then(setTypes).catch(() => setTypes([])); }, []);
+  return (code: string | null | undefined) => bagTypeOf(types, code)?.name ?? (code || "");
+}
 
 function Header({ title, sub, back, children }: { title: string; sub?: string; back?: string; children?: React.ReactNode }) {
   return (
@@ -42,6 +50,7 @@ export function DesignLibrary() {
   const [form, setForm] = useState<{ open: boolean; t: Template | null }>({ open: false, t: null });
   const [choicesOpen, setChoicesOpen] = useState(false);
   const router = useRouter();
+  const typeName = useBagTypes();
 
   const load = useCallback(async () => {
     setErr(null);
@@ -52,8 +61,8 @@ export function DesignLibrary() {
   const cats = useMemo(() => [...new Set((rows ?? []).map((r) => r.category?.trim()).filter(Boolean) as string[])].sort(), [rows]);
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return (rows ?? []).filter((r) => (!cat || r.category === cat) && (!s || `${r.code} ${r.name} ${r.category ?? ""} ${r.description ?? ""}`.toLowerCase().includes(s)));
-  }, [rows, q, cat]);
+    return (rows ?? []).filter((r) => (!cat || r.category === cat) && (!s || `${r.code} ${r.name} ${typeName(r.category)} ${r.description ?? ""}`.toLowerCase().includes(s)));
+  }, [rows, q, cat, typeName]);
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
@@ -69,7 +78,7 @@ export function DesignLibrary() {
         {cats.length > 0 && (
           <div className="flex flex-wrap gap-1 items-center">
             {["", ...cats].map((c) => (
-              <button key={c || "all"} type="button" onClick={() => setCat(c)} className={`h-8 px-3 text-[13px] rounded-full border ${cat === c ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{c || "ทั้งหมด"}</button>
+              <button key={c || "all"} type="button" onClick={() => setCat(c)} className={`h-8 px-3 text-[13px] rounded-full border ${cat === c ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{c ? typeName(c) : "ทั้งหมด"}</button>
             ))}
           </div>
         )}
@@ -91,7 +100,7 @@ export function DesignLibrary() {
                 <div className="p-2.5">
                   <div className="text-[11px] font-mono text-slate-400">{t.code}</div>
                   <div className="text-[14px] font-medium text-slate-800 truncate">{t.name}</div>
-                  <div className="text-[12px] text-slate-500 mt-0.5">{t.recipe_count ?? 0} สูตร{t.category ? ` · ${t.category}` : ""}</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5">{t.recipe_count ?? 0} สูตร{t.category ? ` · ${typeName(t.category)}` : ""}</div>
                 </div>
               </button>
             ))}
@@ -114,6 +123,7 @@ export function TemplateView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(false);
   const [confirm, setConfirm] = useState<null | { kind: "tpl" } | { kind: "recipe"; r: RecipeCard }>(null);
+  const typeName = useBagTypes();
 
   const load = useCallback(async () => {
     setErr(null);
@@ -142,7 +152,7 @@ export function TemplateView({ id }: { id: string }) {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
-      <Header title={`${t.code} · ${t.name}`} sub={[t.category, t.description].filter(Boolean).join(" · ") || undefined} back={LIB_HREF}>
+      <Header title={`${t.code} · ${t.name}`} sub={[typeName(t.category), t.description].filter(Boolean).join(" · ") || undefined} back={LIB_HREF}>
         {canManage && <button type="button" onClick={() => setForm(true)} className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:edit" />แก้แม่แบบ</button>}
         {canManage && <button type="button" onClick={() => setConfirm({ kind: "tpl" })} className="h-9 px-3 text-sm rounded-lg border border-rose-200 text-rose-600 bg-white hover:bg-rose-50 inline-flex items-center gap-1.5"><Icon value="i:trash" />ลบ</button>}
         {canEdit && <button type="button" disabled={busy} onClick={() => void newRecipe()} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-1.5"><Icon value="i:plus" />สร้างสูตรใหม่</button>}

@@ -3,16 +3,17 @@
  * POST { action: "new_recipe", template_id, from_recipe_id? }          → สูตรใหม่ (เลข #ถัดไปของแม่แบบ · ตั้งต้นจากแม่แบบ หรือคัดลอกสูตรเดิม)
  * POST { action: "save_recipe", id, spec, name?, note? }                → บันทึกสูตร (ทำความสะอาดด้วย cleanSpec ก่อนเสมอ)
  * POST { action: "add_render", recipe_id, view_key, image_key, note? } → เพิ่มรูปที่ได้จาก GPT (version = ล่าสุดของชุดมุมนั้น + 1)
+ * POST { action: "set_template_vector", render_id }                  → ตั้งรูปลายเส้นเป็นรูป Vector ของแม่แบบ (design_library.manage)
  * สิทธิ์ design_library.edit · audit ทุกงาน
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { requestActor } from "@/lib/request-actor";
 import { writeAudit } from "@/lib/audit";
 import { cleanSpec, RENDER_VIEWS } from "@/lib/design-library";
-import { EDIT_PERM } from "../_resources";
+import { EDIT_PERM, MANAGE_PERM } from "../_resources";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -90,6 +91,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }).select("*").single();
     if (error) return bad("บันทึกรูปไม่สำเร็จ กรุณาลองใหม่", 500);
     await audit("create", "design_library_renders", data.id, { recipe_id: recipeId, view_key: view, version });
+    return NextResponse.json({ data, error: null });
+  }
+
+  // ตั้งรูปลายเส้นที่ได้จาก GPT (ช่อง "ลายเส้น" ของสูตร) เป็นรูป Vector ของแม่แบบ — เฉพาะคนที่จัดการแม่แบบได้
+  if (body.action === "set_template_vector") {
+    if (!(await apiCan(request, MANAGE_PERM))) return bad("คุณไม่มีสิทธิ์แก้แม่แบบ (ต้องมีสิทธิ์ “จัดการแม่แบบและตัวเลือก”)", 403);
+    const renderId = String(body.render_id ?? "");
+    if (!UUID.test(renderId)) return bad("ไม่พบรูป");
+    const { data: rnd } = await admin.from("design_library_renders").select("id, image_key, recipe_id, version").eq("id", renderId).maybeSingle();
+    if (!rnd) return bad("ไม่พบรูป", 404);
+    const { data: rc } = await admin.from("design_library_recipes").select("template_id").eq("id", rnd.recipe_id).maybeSingle();
+    if (!rc) return bad("ไม่พบสูตรของรูปนี้", 404);
+    const { data: before } = await admin.from("design_library_templates").select("id, code, vector_image_key").eq("id", rc.template_id).maybeSingle();
+    if (!before) return bad("ไม่พบแม่แบบ", 404);
+    const { data, error } = await admin.from("design_library_templates").update({ vector_image_key: rnd.image_key, updated_at: new Date().toISOString() }).eq("id", before.id).select("*").single();
+    if (error) return bad("ตั้งรูปไม่สำเร็จ กรุณาลองใหม่", 500);
+    await audit("update", "design_library_templates", before.id, { code: before.code, from_render: renderId, changes: { vector_image_key: { from: before.vector_image_key, to: rnd.image_key } } });
     return NextResponse.json({ data, error: null });
   }
 

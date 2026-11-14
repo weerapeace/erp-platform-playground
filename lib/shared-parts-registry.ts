@@ -1420,6 +1420,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "media-upload-field", label: "ช่องอัปรูป/วิดีโอ 1 ไฟล์", code: "MediaUploadField", category: "file",
+    source: { path: "components/media-upload-field" },
+    what: "ช่องใส่รูป (หรือวิดีโอสั้น) 1 ไฟล์ — อัปโหลด · ลากวาง · คลิกช่องแล้ว Ctrl+V วางรูปที่คัดลอกไว้ · เลือกจากคลังรูป · ไฟล์ใหญ่มีแถบ %",
+    when: "ฟอร์มที่มีรูป 1 รูป เช่น รูปแม่แบบ Design Library · รูปบนเว็บ · New Drops",
+    notWhen: "แนบหลายรูป ใช้ ImageAttach / ImageAttachKeys · แกลเลอรีสินค้า ใช้ ImageManager",
+    doc: "file-drop.md",
+  },
+  {
     key: "sku-swatch-browser", label: "แผงผ้า (Swatch) — ดู / ขอซื้อ / เลือกชิ้น", code: "SwatchBrowser", category: "feature",
     source: { path: "components/sku-swatch-browser" },
     what: "รูปแผงตัวอย่างจริง (ผ้า/ด้าย/อะไหล่) กดชิ้นบนรูปแล้วเปิด SKU · โหมด onPickSkus = ส่งรายการใส่ตะกร้าขอซื้อ · โหมด onPickSpot = เลือก 1 ชิ้นคืนรูปแผง+กรอบชิ้น+SKU (ตัดรูปชิ้นไปโชว์เองได้)",

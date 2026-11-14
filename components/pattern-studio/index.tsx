@@ -36,7 +36,7 @@ import { buildSewn } from "@/lib/pattern-sewn";
 import { assemble, bagVolumeLiters, type AsmPiece, type Attach } from "@/lib/pattern-assembly";
 import { liningPlan, pocketPlan, type PocketOpts } from "@/lib/pattern-lining";
 import { shapeBox } from "@/lib/pattern-shape";
-import type { BagParams } from "@/lib/bag-templates";
+import { BAG_DEFAULT, type BagParams } from "@/lib/bag-templates";
 import type { BagKit, BagStyle, KitAttach, KitOpts, KitParams, KitPiece, KitSeam } from "@/lib/bag-kits";
 import type { TplUpdate } from "./template-wizard";
 import type { BagPartsResult } from "./bag-parts-modal";
@@ -119,13 +119,15 @@ export type StudioSew = { seams: Seam[]; onChange: (next: Seam[]) => void; start
 /** ชิ้นที่ล็อก (แก้/ลากไม่ได้) และซ่อน (จาง กดไม่ได้ แต่ยังถูกตรวจ) */
 export type PieceView = { lock: string[]; hide: string[] };
 
-export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks" | "unit" | "seamTol" | "lockPids" | "flagged" | "focusEdge"> & {
+export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ...props }: Omit<EditorProps, "open" | "embedded" | "inject" | "onSelChange" | "selectPid" | "onLive" | "hidePids" | "innerLines" | "pieceLinks" | "unit" | "seamTol" | "lockPids" | "flagged" | "focusEdge"> & {
   /** ชื่อไฟล์ของปุ่ม "บันทึกรูป" บนภาพ 3 มิติ (เช่น เลขที่ + ชื่อแพทเทิร์น) */
   imageName?: string;
   /** แจ้งเมื่อวางชิ้นจากแม่แบบ (ไว้สร้างตะเข็บตั้งต้น) — ไม่ส่ง = ไม่ทำอะไรเพิ่ม */
   onTemplateInsert?: (info: TemplateInsertInfo) => void;
   /** ส่ง = มีเครื่องมือเย็บ (N) + แก้ตะเข็บ (B) ในแถบเครื่องมือซ้ายของกระดาน และเห็นด้ายเย็บในภาพ 3D (ใบงานออกแบบไม่ส่ง = ไม่มี) */
   sew?: StudioSew;
+  /** เปิดตัวสร้างจากแม่แบบทันทีด้วยค่านี้ (เช่น ขนาดจากสูตรใน Design Library) — เปิดครั้งเดียวตอนเปิดกระดาน */
+  startDraft?: { params: Partial<BagParams>; notice: string } | null;
 }) {
   const t = useT();
   const { readonly = false } = props;
@@ -147,6 +149,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, ...props }: Om
   const [photo, setPhoto] = useState(false);
   const [draft, setDraft] = useState<{ params: BagParams; notice: string; sources?: Record<string, "seen" | "estimated"> } | null>(null);   // ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า (เปิดตัวสร้างจากแม่แบบด้วยค่านี้)
   const [inject, setInject] = useState<EditorProps["inject"]>(null);
+  useEffect(() => { if (startDraft && !readonly) { setDraft({ params: { ...BAG_DEFAULT, ...startDraft.params }, notice: startDraft.notice }); setWizard(true); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const [layer, setLayer] = useState<"all" | "outer" | "lining" | "inner">("all");   // inner = โฟม / ตัวเสริม (รอบ G2)   // ชั้นที่ดูบนกระดาน (ชิ้นของชั้นอื่นจางและกดไม่ได้)
   const [cut, setCut] = useState<Pattern3DCut>("none");                     // ผ่าดูข้างในของภาพ 3D
   const [pocket, setPocket] = useState(false);

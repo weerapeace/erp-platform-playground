@@ -8,13 +8,15 @@
 import { useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { MAX_BOXES, PANELS, type Choice, type PanelKey, type PocketBox, type Spec } from "@/lib/design-library";
 import { newId } from "./shared";
+import { fmtLen, LenInput, type LenUnit } from "./units";
 
 type Drag = { kind: "move" | "size"; id: string; sx: number; sy: number; start: PocketBox } | { kind: "draw"; sx: number; sy: number; cx: number; cy: number };
 const r1 = (n: number) => Math.round(n * 2) / 2;   // ปัดครึ่งเซนติเมตร
 
-export function PocketEditor({ spec, choices, readOnly, onChange }: {
-  spec: Spec; choices: Choice[]; readOnly: boolean; onChange: (pockets: Spec["pockets"]) => void;
+export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }: {
+  spec: Spec; choices: Choice[]; readOnly: boolean; unit?: LenUnit; onChange: (pockets: Spec["pockets"]) => void;
 }) {
+  const n = (cm: number) => fmtLen(cm, unit).split(" ")[0];   // ตัวเลขในหน่วยที่เลือก (ไม่มีชื่อหน่วย)
   const [panel, setPanel] = useState<PanelKey>("front");
   const [sel, setSel] = useState<string | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -87,7 +89,7 @@ export function PocketEditor({ spec, choices, readOnly, onChange }: {
           <svg ref={svgRef} viewBox={`0 0 360 ${oy + H * s + 12}`} width="100%" className="block bg-white rounded-md select-none" style={{ touchAction: "none", cursor: readOnly ? "default" : "crosshair" }}
             onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)}>
             <rect x={ox} y={oy} width={W * s} height={H * s} fill={PANELS.find((p) => p.key === panel)?.inside ? "#eef2f7" : "#f4efe4"} stroke="#999" />
-            <text x={180} y={15} textAnchor="middle" fontSize={11} fill="#555">{PANELS.find((p) => p.key === panel)?.label} · {W}×{H} ซม.</text>
+            <text x={180} y={15} textAnchor="middle" fontSize={11} fill="#555">{PANELS.find((p) => p.key === panel)?.label} · {n(W)}×{n(H)} {fmtLen(0, unit).split(" ")[1]}</text>
             {boxes.map((b, i) => {
               const x = ox + b.x * s, y = oy + b.y * s, w = b.w * s, h = b.h * s, on = b.id === sel;
               return (
@@ -95,7 +97,7 @@ export function PocketEditor({ spec, choices, readOnly, onChange }: {
                   <rect x={x} y={y} width={w} height={h} fill={on ? "rgba(55,138,221,.25)" : "rgba(55,138,221,.12)"} stroke="#185FA5" strokeWidth={on ? 2 : 1.3} />
                   {b.type === "zip" && <line x1={x + 3} y1={y + 5} x2={x + w - 3} y2={y + 5} stroke="#185FA5" strokeDasharray="3 2" />}
                   {b.type === "flap" && <path d={`M${x} ${y} L${x + w / 2} ${y + h * 0.35} L${x + w} ${y}`} fill="none" stroke="#185FA5" />}
-                  <text x={x + w / 2} y={y + h / 2 + 4} textAnchor="middle" fontSize={11} fill="#0C447C" pointerEvents="none">{i + 1}) {b.w}×{b.h}</text>
+                  <text x={x + w / 2} y={y + h / 2 + 4} textAnchor="middle" fontSize={11} fill="#0C447C" pointerEvents="none">{i + 1}) {n(b.w)}×{n(b.h)}</text>
                   {!readOnly && on && <circle data-box={b.id} data-h="size" cx={x + w} cy={y + h} r={8} fill="#185FA5" stroke="#fff" strokeWidth={2} style={{ cursor: "nwse-resize" }} />}
                 </g>
               );
@@ -110,7 +112,7 @@ export function PocketEditor({ spec, choices, readOnly, onChange }: {
             <div key={b.id} onClick={() => setSel(b.id)} className={`rounded-lg border p-2 ${b.id === sel ? "border-indigo-300 bg-indigo-50/40" : "border-slate-200"}`}>
               <div className="flex items-center gap-2 text-[13px]">
                 <span className="font-medium text-slate-700">ช่อง {i + 1}</span>
-                <span className="text-slate-500">{b.w}×{b.h} ซม. · ห่างขอบบน {b.y} · ขอบซ้าย {b.x}</span>
+                <span className="text-slate-500">{n(b.w)}×{fmtLen(b.h, unit)} · ห่างขอบบน {fmtLen(b.y, unit)} · ขอบซ้าย {fmtLen(b.x, unit)}</span>
                 {!readOnly && <button type="button" onClick={(e) => { e.stopPropagation(); setBoxes(boxes.filter((x) => x.id !== b.id)); setSel(null); }} className="ml-auto text-rose-600 text-[12px] hover:underline">ลบ</button>}
               </div>
               {!readOnly && (b.id === sel || boxes.length <= 2) && (
@@ -123,8 +125,8 @@ export function PocketEditor({ spec, choices, readOnly, onChange }: {
                   </div>
                   <div className="grid grid-cols-4 gap-1">
                     {(["w", "h", "y", "x"] as const).map((k) => (
-                      <label key={k} className="text-[11px] text-slate-500">{{ w: "กว้าง", h: "สูง", y: "ห่างบน", x: "ห่างซ้าย" }[k]}
-                        <input type="number" step={0.5} min={0} value={b[k]} onChange={(e) => patch(b.id, clampBox({ ...b, [k]: Number(e.target.value) || 0 }))} className="w-full h-7 px-1 border border-slate-200 rounded text-[12px]" />
+                      <label key={k} className="text-[11px] text-slate-500 block">{{ w: "กว้าง", h: "สูง", y: "ห่างบน", x: "ห่างซ้าย" }[k]}
+                        <LenInput cm={b[k]} unit={unit} onChange={(v) => patch(b.id, clampBox({ ...b, [k]: v }))} />
                       </label>
                     ))}
                   </div>

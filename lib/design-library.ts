@@ -9,8 +9,9 @@
  */
 
 // ─── ชนิดข้อมูล ──────────────────────────────────────────────────────────────
-export type ChoiceListKey = "category" | "hw_color" | "thread_color" | "pocket_type" | "rule";
+export type ChoiceListKey = "bag_type" | "category" | "hw_color" | "thread_color" | "pocket_type" | "rule";
 export const CHOICE_LISTS: { key: ChoiceListKey; label: string; hint: string }[] = [
+  { key: "bag_type",     label: "ประเภทกระเป๋า",     hint: "รหัส = ตัวนำหน้ารหัสแม่แบบ (เช่น HANB → HANB-001) · ชื่ออังกฤษใช้ใน prompt (เช่น Handbag)" },
   { key: "category",     label: "หมวดที่เปลี่ยนได้", hint: "จุดบนรูปเลือกหมวดจากรายการนี้ · แต่ละหมวดเลือกจากแหล่งต่างกัน" },
   { key: "hw_color",     label: "สีอะไหล่",          hint: "เลือกครั้งเดียว ใช้กับอะไหล่ทุกชิ้นทั้งใบ" },
   { key: "thread_color", label: "สีด้าย (รหัสสี)",   hint: "ใส่รหัสสีด้ายจริง เช่น TH-402" },
@@ -52,9 +53,12 @@ export const PANELS: { key: PanelKey; label: string; en: string; inside: boolean
   { key: "inside_back",  label: "ข้างใน · ฝั่งหลัง",    en: "inside back wall",  inside: true },
 ];
 export type Size = { w: number; h: number; d: number; strap: number };
-export type Spec = { size: Size; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]> };
+/** หูกระเป๋า (ซม.) · drop = ความสูงหูจากปากกระเป๋า · gap = ระยะห่างโคนหู 2 ข้าง · total = ความยาวรวมตัดจริง (0 = ให้ระบบประมาณ) · count 0 = ไม่มีหู */
+export type Handle = { drop: number; w: number; gap: number; count: number; total: number };
+export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]> };
 
 export const DEFAULT_SIZE: Size = { w: 30, h: 35, d: 12, strap: 0 };
+export const DEFAULT_HANDLE: Handle = { drop: 18, w: 3, gap: 12, count: 2, total: 0 };
 export const SIZE_LIMIT = { min: 1, max: 200 };
 export const MAX_PINS = 40;
 export const MAX_BOXES = 12;
@@ -71,6 +75,36 @@ export function cleanSize(v: unknown): Size {
   const s = (k: keyof Size, d: number, lo: number) => r1(clamp(num(o[k], d), lo, SIZE_LIMIT.max));
   return { w: s("w", DEFAULT_SIZE.w, 1), h: s("h", DEFAULT_SIZE.h, 1), d: s("d", DEFAULT_SIZE.d, 0), strap: s("strap", 0, 0) };
 }
+
+export function cleanHandle(v: unknown): Handle {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const s = (k: keyof Handle, d: number) => r1(clamp(num(o[k], d), 0, SIZE_LIMIT.max));
+  return { drop: s("drop", DEFAULT_HANDLE.drop), w: s("w", DEFAULT_HANDLE.w), gap: s("gap", DEFAULT_HANDLE.gap), count: Math.round(clamp(num(o.count, DEFAULT_HANDLE.count), 0, 4)), total: s("total", 0) };
+}
+
+/** ความยาวหูรวม (ซม.) — ใส่เองใช้ค่านั้น · ไม่ใส่ = ประมาณเป็นครึ่งวงรี (กว้าง = ระยะห่างโคนหู · สูง = ความสูงหู) + ส่วนเย็บติดตัว 4 ซม. × 2 */
+export function handleLength(h: Handle): number {
+  if (h.total > 0) return h.total;
+  const a = h.gap / 2, b = h.drop;
+  if (a <= 0 && b <= 0) return 0;
+  const half = Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b))) / 2;   // ครึ่งเส้นรอบวงรี (สูตร Ramanujan)
+  return Math.round((half + 8) * 2) / 2;
+}
+
+/** ความยาวแบบ 2 หน่วยสำหรับใบสรุป/prompt เช่น "30 cm (11.8 in)" */
+export const bothUnits = (cm: number) => `${r1(cm)} cm (${r1(cm / 2.54)} in)`;
+
+/** รหัสแม่แบบถัดไปของตัวนำหน้า เช่น HANB + [HANB-001, HANB-003] → HANB-004 (เลขสูงสุด + 1 · 3 หลัก) */
+export function nextTemplateCode(prefix: string, codes: string[]): string {
+  const p = prefix.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "BAG";
+  const re = new RegExp(`^${p}-(\\d+)$`);
+  const max = codes.reduce((m, c) => { const x = re.exec(String(c).toUpperCase()); return x ? Math.max(m, Number(x[1])) : m; }, 0);
+  return `${p}-${String(max + 1).padStart(3, "0")}`;
+}
+
+/** ประเภทกระเป๋าของแม่แบบ (template.category = รหัสประเภท) — ไม่ตรงรายการ = null (แม่แบบเก่าที่พิมพ์ทรงเอง) */
+export const bagTypeOf = (choices: Choice[], category: string | null | undefined) =>
+  choices.find((c) => c.list_key === "bag_type" && category && c.code.toUpperCase() === category.trim().toUpperCase()) ?? null;
 
 export function cleanPick(v: unknown): Pick | null {
   if (!v || typeof v !== "object") return null;
@@ -115,7 +149,7 @@ export function cleanSpec(v: unknown): Spec {
     pockets[p.key] = (Array.isArray(raw[p.key]) ? (raw[p.key] as unknown[]) : []).slice(0, MAX_BOXES)
       .map((b) => cleanBox(b, size)).filter((b): b is PocketBox => !!b);
   }
-  return { size, hw_color: str(o.hw_color, 40) || null, pins, pockets };
+  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets };
 }
 
 // ─── ชื่อ/รหัสของสิ่งที่เลือก ───────────────────────────────────────────────────
@@ -181,11 +215,13 @@ export function stockHits(spec: Spec, stock: StockMap, lowAt = 10): { out: Stock
 }
 
 // ─── Prompt (3 ชุด: 4 มุมรวมรูปเดียว · ข้างใน · คนสะพาย) ─────────────────────
-export type PromptSet = { key: "grid4" | "inside" | "model"; title: string; text: string };
-export const RENDER_VIEWS: { key: "grid4" | "inside" | "model" | "other"; label: string }[] = [
+export type PromptSet = { key: "grid4" | "inside" | "model" | "line" | "3d"; title: string; text: string; hint?: string };
+export type RenderView = "grid4" | "inside" | "model" | "line" | "other";
+export const RENDER_VIEWS: { key: RenderView; label: string }[] = [
   { key: "grid4",  label: "4 มุม (หน้า หลัง ข้าง เอียง)" },
   { key: "inside", label: "ข้างใน" },
   { key: "model",  label: "คนสะพาย" },
+  { key: "line",   label: "ลายเส้น (Vector)" },
   { key: "other",  label: "อื่น ๆ" },
 ];
 
@@ -196,7 +232,7 @@ function pocketsText(spec: Spec, choices: Choice[], inside: boolean): string {
   for (const p of PANELS.filter((x) => x.inside === inside)) {
     for (const b of spec.pockets[p.key]) {
       const t = choices.find((c) => c.list_key === "pocket_type" && c.code === b.type);
-      parts.push(`${p.en} ${en(t, "pocket").toLowerCase()} pocket ${b.w}x${b.h} cm placed ${b.y} cm below the top edge and ${b.x} cm from the left edge${b.note ? ` (${b.note})` : ""}`);
+      parts.push(`${p.en} ${en(t, "pocket").toLowerCase()} pocket ${bothUnits(b.w)} wide x ${bothUnits(b.h)} high, placed ${bothUnits(b.y)} below the top edge and ${bothUnits(b.x)} from the left edge${b.note ? ` (${b.note})` : ""}`);
     }
   }
   return parts.length ? parts.join("; ") : `no ${inside ? "inside" : "outer"} pockets`;
@@ -218,25 +254,67 @@ function partsText(spec: Spec, choices: Choice[]): string {
   }).filter(Boolean).join("; ");
 }
 
+/** ชนิดกระเป๋าภาษาอังกฤษสำหรับ prompt: ประเภทกระเป๋า (ชื่ออังกฤษ) → ถ้าไม่ตรงรายการ ใช้ข้อความเดิมของแม่แบบ */
+export function bagWord(tpl: { category?: string | null }, choices: Choice[]): string {
+  const t = bagTypeOf(choices, tpl.category);
+  return (t?.name_en?.trim() || t?.name || tpl.category?.trim() || "bag").toLowerCase();
+}
+
+export function handleText(h: Handle): string {
+  if (h.count <= 0) return "no top handles";
+  return `${h.count} top handle${h.count > 1 ? "s" : ""}, each ${bothUnits(h.w)} wide, rising ${bothUnits(h.drop)} above the bag opening, attached ${bothUnits(h.gap)} apart, total handle length about ${bothUnits(handleLength(h))}`;
+}
+
 export function buildPrompts(tpl: { name: string; category?: string | null }, spec: Spec, choices: Choice[]): PromptSet[] {
   const { w, h, d, strap } = spec.size;
   const hw = choices.find((c) => c.list_key === "hw_color" && c.code === spec.hw_color);
-  const bag = `${tpl.category?.trim() || "bag"} (${tpl.name}), size ${w} x ${h} x ${d} cm`;
+  const bag = `${bagWord(tpl, choices)} (${tpl.name}), ${bothUnits(w)} wide x ${bothUnits(h)} high x ${bothUnits(d)} deep, ${handleText(spec.handle)}${strap > 0 ? `, plus a long shoulder strap ${bothUnits(strap)}` : ""}`;
   const parts = partsText(spec, choices);
   const base = `${bag}. ${parts ? parts + "." : ""}${hw ? ` All metal hardware in ${en(hw, hw.name)} finish.` : ""} Outer pockets: ${pocketsText(spec, choices, false)}.`;
   const ref = "Match the attached reference images exactly: numbers [ref N] match the numbered callouts in the attached PDF.";
+  const extra: PromptSet[] = [
+    { key: "line", title: "ลายเส้น (Vector)", hint: "อัปรูปที่ได้ที่ช่อง “ลายเส้น” แล้วกดตั้งเป็นรูป Vector ของแม่แบบ",
+      text: `Clean technical line drawing of the same ${base} Front view only, same angle and proportions as the attached photo. Black outlines on a pure white background, no shading, no color, no texture, no text. Show seams, stitching lines, zipper, pockets and hardware as simple outlines.` },
+    { key: "3d", title: "3D (เว็บแปลงรูปเป็นโมเดล)", hint: "ใช้กับเว็บแปลงรูปเป็น 3D (เช่น Meshy, Tripo) — ได้ทรงไว้ดู ขนาดไม่แม่น · ทำแพทเทิร์นจริงใช้ปุ่ม “ส่งเข้าสตูดิโอแพทเทิร์น”",
+      text: `Create a 3D model of this ${base} Real-world scale: ${bothUnits(w)} wide, ${bothUnits(h)} high, ${bothUnits(d)} deep. Single watertight object, handles attached, closed bottom, realistic materials matching the reference images, neutral lighting, no background, export as GLB.` },
+  ];
   return [
     { key: "grid4", title: "4 มุมรวมรูปเดียว (หน้า · หลัง · ข้าง · เอียง)",
       text: `Create ONE image arranged as a 2x2 grid showing the SAME ${base} Top-left: front view. Top-right: back view. Bottom-left: side view showing the ${d} cm gusset. Bottom-right: three-quarter view. ${ref} Plain white background, soft studio light, photorealistic, identical color and texture in all 4 views, no text.` },
     { key: "inside", title: "ข้างใน",
       text: `Photorealistic top-down photo looking inside the open ${base} Inside pockets: ${pocketsText(spec, choices, true)}. Show the lining clearly. ${ref} Plain white background, soft light, no text.` },
     { key: "model", title: "คนสะพาย",
-      text: `Lifestyle photo of a Thai female model wearing the ${base}${strap > 0 ? ` Carried with the long shoulder strap (${strap} cm).` : " Carried on the shoulder by the handle."} Neutral outfit, clean minimal backdrop, natural light, the bag clearly visible and true to the reference images.` },
+      text: `Lifestyle photo of a Thai female model wearing the ${base}${strap > 0 ? ` Carried with the long shoulder strap, ${bothUnits(strap)} long.` : " Carried on the shoulder by the handle."} Neutral outfit, clean minimal backdrop, natural light, the bag clearly visible and true to the reference images.` },
+    ...extra,
   ];
+}
+
+// ─── ส่งเข้าสตูดิโอแพทเทิร์น (/pattern-studio) ────────────────────────────────
+/** ค่าแม่แบบทรงของสตูดิโอ (lib/bag-templates BagParams) จากสูตร — ช่องแรกของด้านนอกหน้า = ช่องบนตัวหน้า (ซิป/ช่องสอด) */
+export type StudioBagParams = { W: number; H: number; D: number; Lh: number; wh: number; g: number; win?: "rect" | "none"; winType?: "zip" | "slot"; ws?: number; wy?: number };
+export function toStudioParams(spec: Spec): StudioBagParams {
+  const { w, h, d } = spec.size, hd = spec.handle;
+  const p: StudioBagParams = { W: w, H: h, D: d, Lh: handleLength(hd) || 45, wh: hd.w || 2.5, g: hd.gap || 14 };
+  const f = spec.pockets.front[0];
+  if (f && (f.type === "zip" || f.type === "slip")) {
+    p.win = "rect"; p.winType = f.type === "zip" ? "zip" : "slot"; p.ws = f.w;
+    p.wy = r1(h - (f.y + (f.type === "zip" ? 0 : f.h / 2)));   // สตูดิโอวัดกลางช่องจากก้น · สูตรวัดจากขอบบน
+  }
+  return p;
+}
+/** ข้อมูลที่เก็บใน template ของแพทเทิร์นใหม่ → สตูดิโอเปิดตัวสร้างจากแม่แบบพร้อมค่านี้ (ตอนยังไม่มีชิ้น) */
+export type DlDraft = { params: StudioBagParams; notice: string; recipe_id: string };
+export function dlDraftOf(template: Record<string, unknown> | null | undefined): { params: StudioBagParams; notice: string } | null {
+  const d = template && typeof template === "object" ? (template as { dl_draft?: unknown }).dl_draft : null;
+  if (!d || typeof d !== "object") return null;
+  const o = d as Record<string, unknown>;
+  const params = (o.params && typeof o.params === "object" ? o.params : null) as StudioBagParams | null;
+  return params ? { params, notice: String(o.notice ?? "") } : null;
 }
 
 // ─── ใบสรุป (HTML ให้ PrintFrame) ───────────────────────────────────────────────
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+const inch = (cm: number) => r1(cm / 2.54);
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 /** รูปย่อของสิ่งที่เลือก (SVG ชิ้นเดียว — วางซ้อนใน SVG ใหญ่ได้) · img(key,w) = แปลง R2 key → URL */
@@ -355,7 +433,7 @@ export function buildBriefHtml(b: BriefInput): string {
   .hd { display:flex; gap:10px; border-bottom:2px solid #1f1f1f; padding-bottom:6px; }
   .hd .t { font-size:18px; font-weight:700; letter-spacing:.5px; } .hd .r { margin-left:auto; text-align:right; color:#444; }
   h4 { font-size:13px; margin:14px 0 6px; border-bottom:1px solid #ddd; padding-bottom:3px; }
-  .kv { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px; } .kv div { background:#f6f4ef; padding:5px 8px; border-radius:4px; } .kv b { display:block; font-size:13px; }
+  .kv { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px; } .kv div { background:#f6f4ef; padding:5px 8px; border-radius:4px; } .kv b { display:block; font-size:13px; } .kv .in { display:block; font-size:10.5px; color:#777; }
   .warn { margin-top:6px; padding:6px 8px; background:#FAEEDA; color:#633806; border-radius:4px; }
   table { width:100%; border-collapse:collapse; } td, th { padding:4px; border-bottom:1px solid #eee; vertical-align:middle; text-align:left; } th { color:#777; font-size:11px; font-weight:400; }
   .pks { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; } .pkn { font-size:10.5px; color:#444; }
@@ -365,8 +443,13 @@ export function buildBriefHtml(b: BriefInput): string {
   <div class="hd"><div><div class="t">DESIGN BRIEF</div><div style="color:#666">ใบสรุปแบบสำหรับสร้างรูป</div></div>
   <div class="r">${esc(t.code)} · ${esc(t.name)} · สูตร #${r.seq}${r.name ? ` ${esc(r.name)}` : ""}<br>${esc(b.dateText)}${r.created_by_name ? ` · ผู้ทำ: ${esc(r.created_by_name)}` : ""}</div></div>
   <div class="callout">${calloutSvg(b)}</div>
-  <div class="kv"><div>ขนาด (กว้าง×สูง×หนา)<b>${spec.size.w}×${spec.size.h}×${spec.size.d} ซม.</b></div><div>สายยาว<b>${spec.size.strap > 0 ? `${spec.size.strap} ซม.` : "ไม่มี"}</b></div>
+  <div class="kv"><div>ขนาด (กว้าง×สูง×หนา)<b>${spec.size.w}×${spec.size.h}×${spec.size.d} ซม.</b><span class="in">${inch(spec.size.w)}×${inch(spec.size.h)}×${inch(spec.size.d)} นิ้ว</span></div>
+  <div>สายยาว<b>${spec.size.strap > 0 ? `${spec.size.strap} ซม.` : "ไม่มี"}</b>${spec.size.strap > 0 ? `<span class="in">${inch(spec.size.strap)} นิ้ว</span>` : ""}</div>
   <div>สีอะไหล่ทั้งใบ<b>${esc(hw?.name ?? "—")}</b></div><div>จำนวนจุด<b>${spec.pins.length} จุด</b></div></div>
+  <div class="kv" style="grid-template-columns:repeat(5,1fr)">${spec.handle.count > 0 ? [
+    ["จำนวนหู", `${spec.handle.count} หู`, ""], ["ความสูงหู", `${spec.handle.drop} ซม.`, `${inch(spec.handle.drop)} นิ้ว`], ["ความกว้างหู", `${spec.handle.w} ซม.`, `${inch(spec.handle.w)} นิ้ว`],
+    ["ระยะห่างหู", `${spec.handle.gap} ซม.`, `${inch(spec.handle.gap)} นิ้ว`], [spec.handle.total > 0 ? "ความยาวรวมหู" : "ความยาวรวมหู (ประมาณ)", `${handleLength(spec.handle)} ซม.`, `${inch(handleLength(spec.handle))} นิ้ว`],
+  ].map(([a, v, i]) => `<div>${a}<b>${v}</b>${i ? `<span class="in">${i}</span>` : ""}</div>`).join("") : `<div>หูกระเป๋า<b>ไม่มีหู</b></div>`}</div>
   ${warn.length ? `<div class="warn">${warn.map(esc).join("<br>")}</div>` : ""}
   ${r.note ? `<div style="margin-top:6px">หมายเหตุ: ${esc(r.note)}</div>` : ""}
   <h4>ตารางสรุป</h4><table><tr><th style="width:5%">#</th><th style="width:14%">หมวด</th><th style="width:12%">รูป</th><th>รหัส · ชื่อ</th><th style="width:24%">โน้ต</th><th style="width:11%">สต็อก</th></tr>${rows || `<tr><td colspan="6" style="color:#999">ยังไม่มีจุด</td></tr>`}</table>

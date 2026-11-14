@@ -2,76 +2,82 @@
 
 /**
  * 📚 Design Library — ฟอร์มแม่แบบ (สร้าง/แก้) ใน ERPModal กลาง
- * รูปจริง + รูปลายเส้น (vector) อัปผ่านของกลาง uploadImagesWithDupCheck (ถามรูปซ้ำ) · ขนาดตั้งต้นของสูตรใหม่
- * สิทธิ์ design_library.manage (หน้าแม่ซ่อนปุ่มถ้าไม่มี + API ตรวจซ้ำ)
+ * ประเภทกระเป๋า (รายการ bag_type ใน ⚙️ ตัวเลือก) → รหัสขึ้นเอง HANB-001 (แก้ได้ · ซ้ำ = บันทึกไม่ผ่าน) · ชื่อเติมคำนำให้
+ * รูปจริง = ของกลาง MediaUploadField (ลากวาง / Ctrl+V / เลือกไฟล์ / เลือกจากคลัง) · รูปลายเส้นตั้งทีหลังจากหน้าสูตร (prompt ลายเส้น)
+ * ขนาด + หูกระเป๋า ตั้งต้นของสูตรใหม่ · สลับ ซม./นิ้ว (จำต่อคน) · สิทธิ์ design_library.manage
  */
 import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
-import { cleanSize, DEFAULT_SIZE, type Size } from "@/lib/design-library";
+import { MediaUploadField } from "@/components/media-upload-field";
+import { bagTypeOf, cleanHandle, cleanSize, DEFAULT_HANDLE, DEFAULT_SIZE, nextTemplateCode, type Choice, type Handle, type Size } from "@/lib/design-library";
 import { api, img, type Template } from "./shared";
+import { LenInput, UnitToggle, useLenUnit } from "./units";
 
-function readSize(file: File): Promise<{ w: number; h: number }> {
+function readSize(url: string): Promise<{ w: number; h: number }> {
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
     const im = new Image();
-    im.onload = () => { resolve({ w: im.naturalWidth, h: im.naturalHeight }); URL.revokeObjectURL(url); };
-    im.onerror = () => { resolve({ w: 0, h: 0 }); URL.revokeObjectURL(url); };
+    im.onload = () => resolve({ w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => resolve({ w: 0, h: 0 });
     im.src = url;
   });
 }
 
-type Form = { code: string; name: string; category: string; description: string; image_key: string | null; image_w: number | null; image_h: number | null; vector_image_key: string | null; size: Size };
-const blank: Form = { code: "", name: "", category: "", description: "", image_key: null, image_w: null, image_h: null, vector_image_key: null, size: DEFAULT_SIZE };
+type Form = { type: string; code: string; name: string; description: string; image_key: string | null; image_w: number | null; image_h: number | null; size: Size; handle: Handle };
+const blank: Form = { type: "", code: "", name: "", description: "", image_key: null, image_w: null, image_h: null, size: DEFAULT_SIZE, handle: DEFAULT_HANDLE };
 
 export function TemplateFormModal({ open, initial, onClose, onSaved }: {
   open: boolean; initial: Template | null; onClose: () => void; onSaved: (t: Template) => void;
 }) {
   const toast = useToast();
+  const unit = useLenUnit();
   const [f, setF] = useState<Form>(blank);
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState<"" | "photo" | "vector" | "save">("");
+  const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [types, setTypes] = useState<Choice[] | null>(null);
+  const [codes, setCodes] = useState<string[]>([]);
+  const [touched, setTouched] = useState({ code: false, name: false });
 
   useEffect(() => {
     if (!open) return;
-    setErrors([]); setDirty(false);
+    setErrors([]); setDirty(false); setTouched({ code: !!initial, name: !!initial });
+    Promise.all([
+      api<Choice[]>(`/api/design-library/choices?list_key=bag_type&limit=500`),
+      api<{ code: string }[]>(`/api/design-library/templates?include_inactive=true&limit=5000`),
+    ]).then(([t, rows]) => { setTypes(t); setCodes(rows.map((r) => r.code)); }).catch(() => { setTypes([]); setCodes([]); });
     setF(initial ? {
-      code: initial.code, name: initial.name, category: initial.category ?? "", description: initial.description ?? "",
-      image_key: initial.image_key, image_w: initial.image_w, image_h: initial.image_h, vector_image_key: initial.vector_image_key,
-      size: cleanSize(initial.default_spec?.size),
+      type: initial.category ?? "", code: initial.code, name: initial.name, description: initial.description ?? "",
+      image_key: initial.image_key, image_w: initial.image_w, image_h: initial.image_h,
+      size: cleanSize(initial.default_spec?.size), handle: cleanHandle(initial.default_spec?.handle),
     } : blank);
   }, [open, initial]);
 
   const set = (patch: Partial<Form>) => { setF((p) => ({ ...p, ...patch })); setDirty(true); };
-
-  const upload = async (file: File | undefined, which: "photo" | "vector") => {
-    if (!file) return;
-    setBusy(which);
-    try {
-      const [size, up] = await Promise.all([readSize(file), uploadImagesWithDupCheck([file], { folder: "design-library", max: 2400, onError: (_, e) => toast.error(e.message) })]);
-      const key = up?.keys[0];
-      if (!key) return;
-      if (which === "photo") set({ image_key: key, image_w: size.w || null, image_h: size.h || null });
-      else set({ vector_image_key: key });
-    } catch { toast.error("อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่"); }
-    finally { setBusy(""); }
+  const pickType = (code: string) => {
+    const t = (types ?? []).find((x) => x.code === code);
+    const patch: Partial<Form> = { type: code };
+    if (t && !touched.code) patch.code = nextTemplateCode(t.code, codes);
+    if (t && !touched.name) patch.name = `${t.name} `;
+    set(patch);
   };
 
   const save = async () => {
     const e: string[] = [];
-    if (!f.code.trim()) e.push("ใส่รหัสแม่แบบ เช่น TOTE-01");
+    if (!f.type && (types ?? []).length) e.push("เลือกประเภทกระเป๋า");
+    if (!f.code.trim()) e.push("ใส่รหัสแม่แบบ");
+    else if (!/^[A-Z0-9][A-Z0-9-]{0,39}$/.test(f.code.trim().toUpperCase())) e.push("รหัสใช้ได้เฉพาะตัวอังกฤษ ตัวเลข และ - (เช่น HANB-001)");
+    else if (codes.some((c) => c.toUpperCase() === f.code.trim().toUpperCase()) && f.code.trim().toUpperCase() !== initial?.code) e.push(`รหัส ${f.code.trim().toUpperCase()} มีแม่แบบใช้แล้ว — เปลี่ยนเลขใหม่`);
     if (!f.name.trim()) e.push("ใส่ชื่อแม่แบบ");
-    if (!f.image_key) e.push("อัปโหลดรูปจริงของแม่แบบ");
+    if (!f.image_key) e.push("ใส่รูปจริงของแม่แบบ");
     setErrors(e);
     if (e.length) return;
-    setBusy("save");
+    setBusy(true);
     try {
       const payload = {
-        code: f.code.trim().toUpperCase(), name: f.name.trim(), category: f.category.trim() || null, description: f.description.trim() || null,
-        image_key: f.image_key, image_w: f.image_w, image_h: f.image_h, vector_image_key: f.vector_image_key,
-        default_spec: { ...(initial?.default_spec ?? {}), size: cleanSize(f.size) },
+        code: f.code.trim().toUpperCase(), name: f.name.trim(), category: f.type || null, description: f.description.trim() || null,
+        image_key: f.image_key, image_w: f.image_w, image_h: f.image_h,
+        default_spec: { ...(initial?.default_spec ?? {}), size: cleanSize(f.size), handle: cleanHandle(f.handle) },
       };
       const row = initial
         ? await api<Template>(`/api/design-library/templates/${initial.id}`, { method: "PATCH", json: payload })
@@ -80,61 +86,83 @@ export function TemplateFormModal({ open, initial, onClose, onSaved }: {
       setDirty(false);
       onSaved(row);
     } catch (err) { setErrors([(err as Error).message]); }
-    finally { setBusy(""); }
+    finally { setBusy(false); }
   };
 
-  const sizeField = (k: keyof Size, label: string) => (
-    <label className="text-[12px] text-slate-500">{label}
-      <input type="number" min={0} step={0.5} value={f.size[k]} onChange={(e) => set({ size: { ...f.size, [k]: Number(e.target.value) } })}
-        className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800" />
-    </label>
+  const u = unit.unit;
+  const lenField = (label: string, v: number, onCm: (cm: number) => void) => (
+    <label className="text-[12px] text-slate-500 block">{label}<LenInput cm={v} unit={u} onChange={onCm} className="mt-1" /></label>
   );
-  const imgBox = (key: string | null, which: "photo" | "vector", label: string, hint: string) => (
-    <div>
-      <div className="text-[12px] text-slate-500 mb-1">{label}</div>
-      <label className="block h-44 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-indigo-300 cursor-pointer overflow-hidden relative">
-        {key
-          // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={img(key, 600)} alt="" className="w-full h-full object-contain bg-white" />
-          : <span className="absolute inset-0 flex flex-col items-center justify-center text-[12px] text-slate-400 px-3 text-center">{busy === which ? "กำลังอัปโหลด…" : hint}</span>}
-        <input type="file" accept="image/*" className="hidden" onChange={(e) => { void upload(e.target.files?.[0], which); e.target.value = ""; }} />
-      </label>
-      {key && <button type="button" onClick={() => set(which === "photo" ? { image_key: null, image_w: null, image_h: null } : { vector_image_key: null })} className="mt-1 text-[11px] text-rose-600 hover:underline">เอารูปออก</button>}
-    </div>
-  );
+  const oldType = f.type && types && !bagTypeOf(types, f.type) ? f.type : null;   // แม่แบบเก่าที่พิมพ์ทรงเอง
 
   return (
     <ERPModal open={open} onClose={onClose} title={initial ? `แก้แม่แบบ ${initial.code}` : "เพิ่มแม่แบบกระเป๋า"} size="lg" hasUnsavedChanges={dirty} defaultExpanded={false}
       footer={<div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
-        <button type="button" onClick={() => void save()} disabled={!!busy} className="h-9 px-4 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">{busy === "save" ? "กำลังบันทึก…" : "บันทึก"}</button>
+        <button type="button" onClick={() => void save()} disabled={busy} className="h-9 px-4 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
       </div>}>
       <div className="space-y-4">
         {errors.length > 0 && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[13px] text-rose-700">{errors.map((e) => <div key={e}>{e}</div>)}</div>}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label className="text-[12px] text-slate-500">รหัสแม่แบบ *
-            <input value={f.code} onChange={(e) => set({ code: e.target.value.toUpperCase() })} placeholder="TOTE-01" className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 font-mono" />
+        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.4fr)] gap-3">
+          <label className="text-[12px] text-slate-500">ประเภทกระเป๋า *
+            <select value={f.type} onChange={(e) => pickType(e.target.value)} className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 bg-white">
+              <option value="">{types === null ? "กำลังโหลด…" : "— เลือกประเภท —"}</option>
+              {oldType && <option value={oldType}>{oldType} (เดิม)</option>}
+              {(types ?? []).map((t) => <option key={t.id} value={t.code}>{t.name}{t.name_en ? ` · ${t.name_en}` : ""}</option>)}
+            </select>
+            {types && types.length === 0 && <span className="block mt-1 text-[11px] text-amber-700">ยังไม่มีประเภท — ผู้ดูแลเพิ่มได้ที่ “ตัวเลือก” → ประเภทกระเป๋า</span>}
           </label>
-          <label className="text-[12px] text-slate-500 sm:col-span-2">ชื่อ *
-            <input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="กระเป๋าถือทรงถัง" className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800" />
+          <label className="text-[12px] text-slate-500">รหัส {touched.code ? "" : "(ขึ้นเอง)"} *
+            <input value={f.code} onChange={(e) => { setTouched((t) => ({ ...t, code: true })); set({ code: e.target.value.toUpperCase() }); }} placeholder="HANB-001"
+              className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 font-mono" />
           </label>
-          <label className="text-[12px] text-slate-500">ทรง / ประเภท
-            <input value={f.category} onChange={(e) => set({ category: e.target.value })} placeholder="tote bag" className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800" />
-          </label>
-          <label className="text-[12px] text-slate-500 sm:col-span-2">รายละเอียด
-            <input value={f.description} onChange={(e) => set({ description: e.target.value })} className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800" />
+          <label className="text-[12px] text-slate-500">ชื่อ *
+            <input value={f.name} onChange={(e) => { setTouched((t) => ({ ...t, name: true })); set({ name: e.target.value }); }} placeholder="กระเป๋าถือทรงถัง"
+              className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800" />
           </label>
         </div>
-        <p className="text-[11px] text-slate-400 -mt-2">ทรง/ประเภท เขียนเป็นภาษาอังกฤษจะดีที่สุด (เช่น tote bag, crossbody bag) — ระบบใช้คำนี้ใน prompt ให้ GPT</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {imgBox(f.image_key, "photo", "รูปจริง *", "กดเพื่ออัปโหลดรูปถ่ายกระเป๋า (พื้นขาวจะดีที่สุด)")}
-          {imgBox(f.vector_image_key, "vector", "รูปลายเส้น / Vector (ไม่บังคับ)", "กดเพื่ออัปโหลดรูปลายเส้นมุมเดียวกัน — สลับดูกับรูปจริงได้")}
-        </div>
+        <label className="text-[12px] text-slate-500 block">รายละเอียด
+          <input value={f.description} onChange={(e) => set({ description: e.target.value })} className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800" />
+        </label>
+        <MediaUploadField label="รูปจริง *" hint="ลากรูปมาวาง · คลิกกรอบแล้วกด Ctrl+V · หรือเลือกจากคลัง (พื้นขาวจะดีที่สุด) — รูปลายเส้นตั้งทีหลังจากหน้าสูตร" allowVideo={false} folder="design-library" previewRatio="1 / 1"
+          value={f.image_key ? { kind: "image", key: f.image_key } : null}
+          onChange={async (m) => {
+            if (!m) { set({ image_key: null, image_w: null, image_h: null }); return; }
+            const s = await readSize(img(m.key, 0));
+            set({ image_key: m.key, image_w: s.w || null, image_h: s.h || null });
+          }} />
         <div>
-          <div className="text-[12px] text-slate-500 mb-1">ขนาดตั้งต้นของสูตรใหม่ (ซม.)</div>
-          <div className="grid grid-cols-4 gap-2">{sizeField("w", "กว้าง")}{sizeField("h", "สูง")}{sizeField("d", "หนา")}{sizeField("strap", "สายยาว (0 = ไม่มี)")}</div>
+          <div className="flex items-center gap-2 mb-1"><span className="text-[13px] font-medium text-slate-700">ขนาดตั้งต้นของสูตรใหม่</span><span className="ml-auto"><UnitToggle unit={u} set={unit.set} /></span></div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {lenField("กว้าง", f.size.w, (v) => set({ size: { ...f.size, w: v } }))}
+            {lenField("สูง", f.size.h, (v) => set({ size: { ...f.size, h: v } }))}
+            {lenField("หนา", f.size.d, (v) => set({ size: { ...f.size, d: v } }))}
+            {lenField("สายยาว (0 = ไม่มี)", f.size.strap, (v) => set({ size: { ...f.size, strap: v } }))}
+          </div>
         </div>
+        <HandleFields handle={f.handle} unit={u} onChange={(h) => set({ handle: h })} />
       </div>
     </ERPModal>
+  );
+}
+
+/** ช่องหูกระเป๋า (ใช้ทั้งฟอร์มแม่แบบ + หน้าสูตร) */
+export function HandleFields({ handle: h, unit, onChange, disabled }: { handle: Handle; unit: "cm" | "in"; onChange: (h: Handle) => void; disabled?: boolean }) {
+  const f = (label: string, k: "drop" | "w" | "gap" | "total") => (
+    <label className="text-[12px] text-slate-500 block">{label}<LenInput cm={h[k]} unit={unit} disabled={disabled || h.count === 0} onChange={(v) => onChange({ ...h, [k]: v })} className="mt-1" /></label>
+  );
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <span className="text-[13px] font-medium text-slate-700">หูกระเป๋า</span>
+        <span className="flex gap-1">{[0, 1, 2].map((n) => (
+          <button key={n} type="button" disabled={disabled} onClick={() => onChange({ ...h, count: n })}
+            className={`h-7 px-2.5 text-[12px] rounded-full border ${h.count === n ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-600"}`}>{n === 0 ? "ไม่มีหู" : `${n} หู`}</button>
+        ))}</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {f("ความสูงหู (จากปากกระเป๋า)", "drop")}{f("ความกว้างหู", "w")}{f("ระยะห่างหู 2 ข้าง", "gap")}{f("ความยาวรวม (0 = ให้ระบบประมาณ)", "total")}
+      </div>
+    </div>
   );
 }

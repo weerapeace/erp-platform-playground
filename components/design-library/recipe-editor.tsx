@@ -20,11 +20,15 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import {
-  bodyPickOf, buildPrompts, categoryOf, cleanSpec, pickInfo, RENDER_VIEWS, ruleHits, skuIdOf, specSkuIds, stockHits,
+  bodyPickOf, buildPrompts, categoryOf, cleanSpec, pickInfo, RENDER_VIEWS, ruleHits, skuIdOf, specSkuIds, stockHits, toStudioParams,
   MAX_PINS, type Pin, type Spec,
 } from "@/lib/design-library";
+import { PATTERN_SCHEMA } from "@/lib/pattern-project";
+import { apiFetch } from "@/lib/api";
 import { PickPanel, PickThumb } from "./pick-panel";
 import { PocketEditor } from "./pocket-editor";
+import { HandleFields } from "./template-form";
+import { LenInput, UnitToggle, useLenUnit } from "./units";
 import { api, img, newId, printHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
 
 export function RecipeEditor({ id }: { id: string }) {
@@ -39,6 +43,9 @@ export function RecipeEditor({ id }: { id: string }) {
   const [sel, setSel] = useState<number | null>(null);
   const [vector, setVector] = useState(false);
   const [stock, setStock] = useState<Record<string, number>>({});
+  const [sending, setSending] = useState(false);
+  const canManage = usePermission("design_library.manage");
+  const unit = useLenUnit();
   const readOnly = !canEdit;
 
   const load = useCallback(async () => {
@@ -80,6 +87,24 @@ export function RecipeEditor({ id }: { id: string }) {
     if (dirty && !(await save())) return;
     window.open(printHref(id), "_blank", "noopener");
   };
+  /** สร้างแพทเทิร์นใหม่ในสตูดิโอ: เก็บขนาดไว้ใน template.dl_draft → สตูดิโอเปิดตัวสร้างจากแม่แบบพร้อมค่านี้ให้ตรวจก่อนวาง */
+  const sendToStudio = async () => {
+    if (!b || !spec) return;
+    if (dirty && !(await save())) return;
+    setSending(true);
+    try {
+      const params = toStudioParams(spec);
+      const notice = `ขนาดจาก Design Library ${b.template.code} สูตร #${b.recipe.seq} — ตรวจและเลือกทรงให้ตรงก่อนวาง (แม่แบบในสตูดิโอเริ่มจากทรงโท้ท${spec.pockets.front.length > 1 ? " · ส่งช่องด้านหน้าได้ช่องแรกช่องเดียว" : ""})`;
+      const res = await apiFetch("/api/pattern-projects", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${b.template.code} สูตร #${b.recipe.seq}${b.recipe.name ? ` ${b.recipe.name}` : ""}`.slice(0, 120), template: { schema: PATTERN_SCHEMA, dl_draft: { params, notice, recipe_id: id } } }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 403) throw new Error("คุณยังไม่มีสิทธิ์สร้างแพทเทิร์นในสตูดิโอแพทเทิร์น — ขอผู้ดูแลเพิ่มสิทธิ์ให้");
+      if (!res.ok || j.error || !j.data?.id) throw new Error(j.error || "สร้างแพทเทิร์นไม่สำเร็จ กรุณาลองใหม่");
+      toast.success("สร้างแพทเทิร์นแล้ว — กำลังเปิดสตูดิโอ");
+      window.open(`/pattern-studio/${j.data.id}`, "_blank", "noopener");
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setSending(false); }
+  };
 
   if (err) return <div className="p-6"><ErrorState title="เปิดสูตรไม่สำเร็จ" hint={err} onRetry={() => void load()} /></div>;
   if (!b || !spec) return <div className="p-6"><LoadingState label="กำลังโหลดสูตร…" /></div>;
@@ -98,6 +123,9 @@ export function RecipeEditor({ id }: { id: string }) {
               className="h-8 px-2 border border-transparent hover:border-slate-200 focus:border-indigo-300 rounded-md text-[14px] min-w-0 w-56 bg-transparent" />
           </div>
         </div>
+        <button type="button" disabled={sending} onClick={() => void sendToStudio()}
+          title="สร้างแพทเทิร์นใหม่ในสตูดิโอแพทเทิร์นจากขนาดของสูตรนี้ (ได้ชิ้นตัด + 3D) — ต้องมีสิทธิ์แก้สตูดิโอแพทเทิร์น"
+          className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5"><Icon value="i:vector-bezier" />{sending ? "กำลังส่ง…" : "ส่งเข้าสตูดิโอแพทเทิร์น"}</button>
         <button type="button" onClick={() => void openPrint()} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1.5"><Icon value="i:printer" />ใบสรุป PDF</button>
       </div>
 
@@ -133,15 +161,15 @@ export function RecipeEditor({ id }: { id: string }) {
       {/* ── ขนาด + คำเตือน + หมายเหตุ ── */}
       <div className="grid gap-4 lg:grid-cols-2 mt-4">
         <div className="rounded-xl border border-slate-200 bg-white p-3">
-          <div className="text-[14px] font-medium text-slate-800 mb-2">ขนาดกระเป๋า (ซม.)</div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="flex items-center gap-2 mb-2"><span className="text-[14px] font-medium text-slate-800">ขนาดกระเป๋า</span><span className="ml-auto"><UnitToggle unit={unit.unit} set={unit.set} /></span></div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {(["w", "h", "d", "strap"] as const).map((k) => (
-              <label key={k} className="text-[12px] text-slate-500">{{ w: "กว้าง", h: "สูง", d: "หนา", strap: "สายยาว (0 = ไม่มี)" }[k]}
-                <input type="number" min={0} step={0.5} disabled={readOnly} value={spec.size[k]} onChange={(e) => update((s) => ({ ...s, size: { ...s.size, [k]: Math.max(0, Number(e.target.value) || 0) } }))}
-                  className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
+              <label key={k} className="text-[12px] text-slate-500 block">{{ w: "กว้าง", h: "สูง", d: "หนา", strap: "สายยาว (0 = ไม่มี)" }[k]}
+                <LenInput cm={spec.size[k]} unit={unit.unit} disabled={readOnly} onChange={(v) => update((s) => ({ ...s, size: { ...s.size, [k]: v } }))} className="mt-1" />
               </label>
             ))}
           </div>
+          <div className="mt-3"><HandleFields handle={spec.handle} unit={unit.unit} disabled={readOnly} onChange={(h) => update((s) => ({ ...s, handle: h }))} /></div>
           <label className="block text-[12px] text-slate-500 mt-3">หมายเหตุของสูตร
             <textarea rows={2} disabled={readOnly} value={meta.note} onChange={(e) => { setMeta((m) => ({ ...m, note: e.target.value })); setDirty(true); }}
               className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
@@ -153,14 +181,16 @@ export function RecipeEditor({ id }: { id: string }) {
       {/* ── ช่อง ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
         <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:ruler-measure" />วาดขนาดช่อง</div>
-        <PocketEditor spec={spec} choices={b.choices} readOnly={readOnly} onChange={(pockets) => update((s) => ({ ...s, pockets }))} />
+        <PocketEditor spec={spec} choices={b.choices} readOnly={readOnly} unit={unit.unit} onChange={(pockets) => update((s) => ({ ...s, pockets }))} />
       </section>
 
       {/* ── Prompt ── */}
       <Prompts spec={spec} b={b} dirty={dirty} />
 
       {/* ── รูปจาก GPT ── */}
-      <Renders recipeId={id} renders={b.renders} canEdit={canEdit} onChanged={(renders) => setB((p) => (p ? { ...p, renders } : p))} />
+      <Renders recipeId={id} renders={b.renders} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
+        onChanged={(renders) => setB((p) => (p ? { ...p, renders } : p))}
+        onVector={(key) => setB((p) => (p ? { ...p, template: { ...p.template, vector_image_key: key } } : p))} />
 
       {canEdit && <SaveBar dirty={dirty} saving={saving} onSave={() => void save()} onDiscard={discard} />}
     </div>
@@ -269,6 +299,7 @@ function Prompts({ spec, b, dirty }: { spec: Spec; b: RecipeBundle; dirty: boole
           <div key={p.key} className="rounded-lg border border-slate-200 p-2">
             <div className="flex items-center gap-2 mb-1"><span className="text-[13px] font-medium text-slate-700">{p.title}</span>
               <button type="button" onClick={() => void copy(p.text)} className="ml-auto h-7 px-2.5 text-[12px] rounded-md border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"><Icon value="i:copy" />คัดลอก</button></div>
+            {p.hint && <div className="text-[11.5px] text-indigo-700 mb-1">{p.hint}</div>}
             <div className="text-[12px] font-mono text-slate-600 whitespace-pre-wrap break-words">{p.text}</div>
           </div>
         ))}
@@ -277,7 +308,10 @@ function Prompts({ spec, b, dirty }: { spec: Spec; b: RecipeBundle; dirty: boole
   );
 }
 
-function Renders({ recipeId, renders, canEdit, onChanged }: { recipeId: string; renders: Render[]; canEdit: boolean; onChanged: (r: Render[]) => void }) {
+function Renders({ recipeId, renders, canEdit, canManage, vectorKey, onChanged, onVector }: {
+  recipeId: string; renders: Render[]; canEdit: boolean; canManage: boolean; vectorKey: string | null;
+  onChanged: (r: Render[]) => void; onVector: (key: string) => void;
+}) {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, string>>({});   // view → render id ที่กำลังดู
@@ -293,6 +327,10 @@ function Renders({ recipeId, renders, canEdit, onChanged }: { recipeId: string; 
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(null); }
   };
+  const setVector = async (r: Render) => {
+    try { await api(`/api/design-library/actions`, { json: { action: "set_template_vector", render_id: r.id } }); onVector(r.image_key); toast.success("ตั้งเป็นรูป Vector ของแม่แบบแล้ว — ปุ่มสลับ รูปจริง/Vector ใช้รูปนี้"); }
+    catch (e) { toast.error((e as Error).message); }
+  };
   const remove = async (r: Render) => {
     try { await api(`/api/design-library/renders/${r.id}`, { method: "DELETE" }); onChanged(renders.filter((x) => x.id !== r.id)); toast.success("ลบรูปแล้ว"); }
     catch (e) { toast.error((e as Error).message); }
@@ -301,7 +339,7 @@ function Renders({ recipeId, renders, canEdit, onChanged }: { recipeId: string; 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
       <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:photo" />รูปที่ได้จาก GPT (เก็บทุกเวอร์ชัน)</div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {RENDER_VIEWS.map((v) => {
           const list = renders.filter((r) => r.view_key === v.key).sort((a, c) => c.version - a.version);
           const cur = list.find((r) => r.id === open[v.key]) ?? list[0];
@@ -313,6 +351,9 @@ function Renders({ recipeId, renders, canEdit, onChanged }: { recipeId: string; 
                 {cur ? <a href={img(cur.image_key, 0)} target="_blank" rel="noopener"><img src={img(cur.image_key, 700)} alt="" className="w-full h-full object-contain" /></a> : <span className="text-[12px] text-slate-400">ยังไม่มีรูป</span>}
               </div>
               {cur && <div className="text-[11.5px] text-slate-500 mt-1">v{cur.version} · {cur.created_by_name ?? "—"} · {thaiDate(cur.created_at)}</div>}
+              {v.key === "line" && cur && (cur.image_key === vectorKey
+                ? <div className="text-[11.5px] text-emerald-700 mt-1">ใช้เป็นรูป Vector ของแม่แบบอยู่</div>
+                : canManage && <button type="button" onClick={() => void setVector(cur)} className="mt-1 h-7 px-2 text-[12px] rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50">ตั้งเป็นรูป Vector ของแม่แบบ</button>)}
               {list.length > 1 && (
                 <div className="flex flex-wrap gap-1 mt-1">{list.map((r) => (
                   <button key={r.id} type="button" onClick={() => setOpen((o) => ({ ...o, [v.key]: r.id }))} title={`${r.created_by_name ?? ""} · ${thaiDate(r.created_at)}`}

@@ -8,6 +8,7 @@
  *   (ของกลาง lib/media-upload · ⚠️ ไฟล์ใหญ่ต้องเปิด CORS ของ bucket ก่อน 1 ครั้ง — ยังไม่เปิด = ขึ้นข้อความบอกวิธี)
  * - พรีวิวในช่อง: รูป = ภาพ · วิดีโอ = เล่นเอง เงียบ วนซ้ำ
  * - 📥 ลากรูป/วิดีโอจากเครื่องมาวางในช่องได้ (ของกลาง useFileDrop · หลายไฟล์ = ใช้ไฟล์แรก)
+ * - 📋 คลิกที่ช่องแล้วกด Ctrl+V = วางรูปที่คัดลอกไว้ (เช่น คัดลอกจากเว็บ/โปรแกรมแต่งรูป) — 2026-11-14 เจ้าของขอ "ใช้ได้ทั้งระบบ"
  * ใช้: <MediaUploadField label value={{kind,key}} onChange={(m) => …} allowVideo />
  */
 import { useRef, useState } from "react";
@@ -77,6 +78,15 @@ export function MediaUploadField({
     }
   };
 
+  /** Ctrl+V: เอาไฟล์รูป (หรือวิดีโอ) ตัวแรกจากคลิปบอร์ด — ไม่มีไฟล์ (วางข้อความ) = ปล่อยผ่าน ไม่ทำอะไร */
+  const onPaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/") || (allowVideo && f.type.startsWith("video/")));
+    if (!files.length) return;
+    e.preventDefault();
+    if (busy) { toast.warning("กำลังอัปโหลดอยู่ — รอสักครู่แล้ววางใหม่"); return; }
+    void upload(files[0]);
+  };
+
   const drop = useFileDrop((files) => void upload(files[0]), {
     accept: allowVideo ? ["image/", "video/"] : "image/",
     disabled: !!busy,
@@ -85,11 +95,11 @@ export function MediaUploadField({
   });
 
   return (
-    <div {...drop.zone("field")} className="relative">
+    <div {...drop.zone("field")} onPaste={onPaste} className="relative">
       <FileDropHint show={drop.over === "field"} label={`วาง${allowVideo ? "รูป/วิดีโอ" : "รูป"}เพื่ออัปโหลด — ${label}`} />
       <label className="block text-[11px] font-medium text-slate-500 mb-1">{label}</label>
       <div className="flex items-start gap-2">
-        <div className="shrink-0 w-40 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center text-[11px] text-slate-400" style={{ aspectRatio: previewRatio }}>
+        <div tabIndex={0} title="คลิกแล้วกด Ctrl+V เพื่อวางรูปที่คัดลอกไว้" className="shrink-0 w-40 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center text-[11px] text-slate-400 outline-none focus:ring-2 focus:ring-blue-300" style={{ aspectRatio: previewRatio }}>
           {value ? (
             value.kind === "video" ? (
               <video key={value.key} src={keyUrl(value.key)} className="w-full h-full object-cover" autoPlay muted loop playsInline />
@@ -101,7 +111,7 @@ export function MediaUploadField({
             <span className="text-center leading-snug px-1">
               ยังไม่มี
               <br />
-              <span className="text-[10px] text-slate-300">ลาก{allowVideo ? "รูป/วิดีโอ" : "รูป"}มาวางได้</span>
+              <span className="text-[10px] text-slate-300">ลาก{allowVideo ? "รูป/วิดีโอ" : "รูป"}มาวาง หรือคลิกแล้ว Ctrl+V</span>
             </span>
           )}
         </div>
