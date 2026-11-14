@@ -291,6 +291,33 @@ describe("planProductCollection — เก็บทั้งโฟลเดอ�
   });
 });
 
+describe("planProductSort — จับคู่โฟลเดอร์เอง (folderMap · โปรแกรม v1.14)", () => {
+  const pp: CatalogParent[] = [{ parentId: "P351", code: "MGN351", name: "x", gallery: 0, galleryItems: [], desc: 0, descItems: [], png: false, pngKey: null, shopIds: [],
+    skus: [{ id: "A1", code: "MGN351-01/1", label: "ดำ", gallery: 0, items: [] }, { id: "A2", code: "MGN351-01/2", label: "ดำ L", gallery: 0, items: [] }, { id: "B1", code: "MGN351-02/1", label: "น้ำตาล", gallery: 0, items: [] }] }];
+  const ff: ProductFileIn[] = ["MGN351-01/1.jpg", "MGN351-01/2.jpg", "MGN351-02/1.jpg", "MGN351/1.jpg"].map((path) => ({ path, size: 100 }));
+  it("ชื่อหลายตัว = จับคู่ไม่ได้ (กลุ่มบอก key + รุ่นที่เดาได้ + ตัวเลือก SKU) · ตัวเดียว = จับให้ (how slash)", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "MGN351", folderPick: true });
+    const g1 = p.groups.find((g) => g.label === "MGN351-01")!;
+    expect(g1).toMatchObject({ code: null, key: "d:MGN351/MGN351-01", guessParentId: "P351", user: false, skip: false });
+    expect(p.files.find((f) => f.rel === "MGN351-01/1.jpg")).toMatchObject({ erp: false, why: "unmatched" });
+    expect(p.warnings.join(" ")).toContain("จับคู่กับ");
+    expect(p.groups.find((g) => g.label === "MGN351-02")).toMatchObject({ code: "MGN351-02/1", how: "slash" });
+    expect(p.parents[0].skus.map((s) => s.code)).toEqual(["MGN351-01/1", "MGN351-01/2", "MGN351-02/1"]);
+  });
+  it("เลือกจับคู่เอง → รูปเข้า SKU นั้น (how user) · เลือกไม่ลง → อยู่บน Z: · ค่ามั่ว (สีไม่มีในรุ่น) ไม่นับ", () => {
+    const p = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "MGN351", folderMap: { "d:MGN351/MGN351-01": { parentId: "P351", skuId: "A2" } } });
+    expect(p.groups.find((g) => g.label === "MGN351-01")).toMatchObject({ code: "MGN351-01/2", how: "user", user: true });
+    const s = p.slots.find((x) => x.skuId === "A2")!;
+    expect(s.rels).toEqual(["MGN351-01/1.jpg", "MGN351-01/2.jpg"]);
+    const sk = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "MGN351", folderMap: { "d:MGN351/MGN351-02": { skip: true } } });
+    expect(sk.groups.find((g) => g.label === "MGN351-02")).toMatchObject({ user: true, skip: true, code: null });
+    expect(sk.files.find((f) => f.rel === "MGN351-02/1.jpg")).toMatchObject({ erp: false, why: "archive" });
+    expect(sk.slots.some((x) => x.skuId === "B1")).toBe(false);
+    const bad = planProductSort(ff, pp, DEFAULT_PRODUCT_CONFIG, { jobFolder: "MGN351", folderMap: { "d:MGN351/MGN351-01": { parentId: "P351", skuId: "nope" } } });
+    expect(bad.groups.find((g) => g.label === "MGN351-01")).toMatchObject({ code: null, user: false });
+  });
+});
+
 describe("planProductSort — PNG ไปโฟลเดอร์ PNG · JPEG ใน Images ให้เลือกส่ง Contents", () => {
   const pp: CatalogParent[] = [{ parentId: "PX", code: "PIX39", name: "x", gallery: 0, galleryItems: [], desc: 0, descItems: [], png: false, pngKey: null, shopIds: [],
     skus: [{ id: "SX1", code: "PIX39-01", label: "", gallery: 0, items: [] }, { id: "SX2", code: "PIX39-02", label: "", gallery: 0, items: [] }] }];

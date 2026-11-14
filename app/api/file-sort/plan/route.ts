@@ -34,7 +34,7 @@ import { driveConfigured } from "@/lib/google-drive";
 import { findArtworkDriveFolder } from "@/lib/artwork-drive";
 import { findProfile, nasFolderFor, nasPatternFor, planFileSort, safeFolderName, type FileSortInput, type ProductVariant } from "@/lib/file-sort";
 import { artworkTypeFolderName, brandFolderName, loadFileSortConfig } from "@/lib/file-sort-server";
-import { PRODUCT_MAX_FILES, planProductCollection, planProductMoves, planProductSort, productNasFolder, type SlotModeInput } from "@/lib/file-sort-product";
+import { PRODUCT_MAX_FILES, planProductCollection, planProductMoves, planProductSort, productNasFolder, type FolderMapInput, type SlotModeInput } from "@/lib/file-sort-product";
 import { CONTENT_MAX_FILES, contentNasFolder, planContentSort } from "@/lib/file-sort-content";
 import { loadAlbumFiles } from "@/lib/content-albums-server";
 import { resolveBrandContentFolder } from "@/lib/content-drive";
@@ -110,6 +110,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 /** โหมดรายช่องจากโปรแกรม { "<slot key>": { mode: replace|append|pick, remove?: [id] } } — รูปแบบผิดทิ้ง · ไม่เกิน 60 ช่อง */
+/** จับคู่โฟลเดอร์เอง (โปรแกรม v1.14+): { "<key กลุ่ม>": { parentId, skuId|null } | { skip: true } } — ตัวเลือกจริงตรวจซ้ำในตัววางแผน (ต้องอยู่ในแผนนี้) */
+function cleanFolderMap(raw: unknown): FolderMapInput | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: FolderMapInput = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>).slice(0, 60)) {
+    if (!k || k.length > 400) continue;
+    const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+    if (o.skip === true) { out[k] = { skip: true }; continue; }
+    const pid = typeof o.parentId === "string" ? o.parentId.trim().slice(0, 64) : "";
+    const sid = typeof o.skuId === "string" && o.skuId.trim() ? o.skuId.trim().slice(0, 64) : null;
+    if (pid) out[k] = { parentId: pid, skuId: sid };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function cleanSlotModes(raw: unknown): SlotModeInput | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const out: SlotModeInput = {};
@@ -129,7 +144,7 @@ function cleanSlotModes(raw: unknown): SlotModeInput | undefined {
 }
 
 /** สูตรงานสินค้า: โหลดสินค้าตามรหัสในชื่อโฟลเดอร์/ไฟล์ (ตัวโหลดกลางชุดเดียวกับปุ่ม 📂 ในเว็บ) → แผนรายไฟล์/รายช่อง */
-async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; slot_modes?: unknown; scope_slots?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
+async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; variant?: string; png_gallery?: unknown; slot_modes?: unknown; scope_slots?: unknown; folder_map?: unknown; folder_pick?: unknown; files?: FileSortInput[] }): Promise<NextResponse> {
   if (!(await apiCan(request, "products.view"))) return NextResponse.json({ error: "บัญชีนี้ไม่มีสิทธิ์ดูสินค้า (products.view)" }, { status: 403 });
   const job = String(b.job_folder ?? "").trim();
   const files = Array.isArray(b.files) ? b.files.filter((f) => f && typeof f.path === "string") : [];
@@ -145,7 +160,9 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined,
     pngGallery: typeof b.png_gallery === "boolean" ? b.png_gallery : undefined, slotModes: cleanSlotModes(b.slot_modes),
     // โปรแกรม v1.12+ ส่ง scope_slots="ask" → ช่องที่เพิ่มสี/แก้สีไม่แตะ ส่งมาเป็นช่องตั้งไว้ไม่ลง (รุ่นเก่าไม่ส่ง = ข้ามเงียบเหมือนเดิม)
-    scopeAsk: b.scope_slots === "ask" });
+    scopeAsk: b.scope_slots === "ask",
+    // โปรแกรม v1.14+: จับคู่โฟลเดอร์เองได้ (folder_map) · folder_pick = บอกในคำเตือนว่าเลือกจับคู่ได้
+    folderMap: cleanFolderMap(b.folder_map), folderPick: b.folder_pick === true });
   // รูปย่อของ Description เดิม (ให้เลือกแทนบางรูป) — คลังเก็บ r2_key ไว้
   const descIds = [...new Set(plan.slots.filter((s) => s.kind === "desc").flatMap((s) => s.existingItems.map((x) => x.id)))];
   if (descIds.length) {

@@ -82,7 +82,8 @@ export interface FolderTarget {
   parentId: string;
   skuId: string | null;
 }
-export type MatchHow = "color" | "size" | "parent" | "file" | "none" | "user";
+/** slash = รหัส SKU มี "/" (ชื่อโฟลเดอร์ใส่ / ไม่ได้) → จับคู่จากชื่อที่ตัด / ออก เมื่อมีตัวเดียว */
+export type MatchHow = "color" | "size" | "parent" | "file" | "none" | "user" | "slash";
 export interface FolderMatch {
   target: FolderTarget | null;
   how: MatchHow;
@@ -110,8 +111,36 @@ export function matchName(name: string, parents: RouteParent[], index: CodeRef[]
   }
   // รหัสรุ่น + "-xx" แต่รุ่นนี้ไม่มีสีนั้น → ไม่เดา ให้เลือกเอง
   const dash = rest.match(/^-([A-Za-z0-9#.]+)/);
-  if (dash && p && p.skus.length) return { target: null, how: "none", guessParentId: p.parentId, note: tr(`ไม่มีสี ${dash[1].toUpperCase()} ในรุ่น ${p.code}`, `No color ${dash[1].toUpperCase()} in model ${p.code}`) };
+  if (dash && p && p.skus.length) {
+    const slash = matchSlashSku(p, `${p.code}-${dash[1]}`, rest.slice(dash[0].length));
+    if (slash) return slash;
+    return { target: null, how: "none", guessParentId: p.parentId, note: tr(`ไม่มีสี ${dash[1].toUpperCase()} ในรุ่น ${p.code}`, `No color ${dash[1].toUpperCase()} in model ${p.code}`) };
+  }
   return { target: { parentId: ref.parentId, skuId: null }, how: "parent" };
+}
+
+/**
+ * รหัส SKU ที่มี "/" (เช่น MGN236-01/1) — Windows ตั้งชื่อโฟลเดอร์มี / ไม่ได้ (เจ้าของเจอ 2026-11-14 · 26 SKU ใน 6 รุ่น)
+ *   ชื่อ "MGN236-01_2" / "MGN236-01-2" / "MGN236-01 2" = MGN236-01/2 ตรงตัว (มีจริงเท่านั้น)
+ *   ชื่อ "MGN236-01" = SKU ที่ขึ้นต้น "MGN236-01/" — มีสีเดียว = จับให้ · หลายสี = ไม่เดา (บอกให้เลือกเอง)
+ *   ไม่มี SKU แบบนี้เลย = null (ให้กติกาเดิมตัดสิน)
+ */
+function matchSlashSku(p: RouteParent, pre: string, after: string): FolderMatch | null {
+  const up = pre.toUpperCase();
+  const codesOf = (s: RouteSku) => [s.code, ...(s.aliases ?? [])].map((c) => c.trim().toUpperCase());
+  const next = after.match(/^[\s_\-.]+([A-Za-z0-9#.]+)/);
+  if (next) {
+    const exact = `${up}/${next[1].toUpperCase()}`;
+    const s = p.skus.find((x) => codesOf(x).includes(exact));
+    if (s) return { target: { parentId: p.parentId, skuId: s.id }, how: "slash", note: tr(`ชื่อโฟลเดอร์ใส่ / ไม่ได้ → SKU ${s.code}`, `Folder names can't contain / → SKU ${s.code}`) };
+  }
+  const cands = p.skus.filter((x) => codesOf(x).some((c) => c.startsWith(`${up}/`)));
+  if (cands.length === 1) return { target: { parentId: p.parentId, skuId: cands[0].id }, how: "slash", note: tr(`ชื่อโฟลเดอร์ใส่ / ไม่ได้ → SKU ${cands[0].code}`, `Folder names can't contain / → SKU ${cands[0].code}`) };
+  if (cands.length > 1) {
+    const list = cands.slice(0, 4).map((x) => x.code).join(", ") + (cands.length > 4 ? " …" : "");
+    return { target: null, how: "none", guessParentId: p.parentId, note: tr(`${up} ตรงกับ SKU ${cands.length} ตัว (${list}) — เลือกจับคู่เอง`, `${up} matches ${cands.length} SKUs (${list}) — pick one`) };
+  }
+  return null;
 }
 
 export interface RouteFileIn {

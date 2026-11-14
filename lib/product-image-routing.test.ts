@@ -58,6 +58,29 @@ describe("matchName", () => {
     // BCG11-010 ไม่ใช่ BCG11-01
     expect(matchName("BCG11-010", parents, idx).target).toBeNull();
   });
+  it("รหัส SKU มี / (ชื่อโฟลเดอร์ใส่ / ไม่ได้): ตัวเดียวจับให้ · หลายตัวไม่เดา · ใส่ _2 / -2 = /2 ตรงตัว · SKU ชื่อตรงมาก่อน", () => {
+    const S1 = "s1", S2 = "s2", S5 = "s5", A1 = "a1", A2 = "a2", X1 = "x1", X2 = "x2";
+    const ps: RouteParent[] = [
+      { parentId: "m236", code: "MGN236", name: "เข็มขัด", gallery: 0, desc: 0, png: false, shopIds: [], skus: [
+        { id: S1, code: "MGN236-01/1", label: "ดำ", gallery: 0 }, { id: S2, code: "MGN236-02/1", label: "น้ำตาล", gallery: 0 }, { id: S5, code: "MGN236-05", label: "เทา", gallery: 0 }] },
+      { parentId: "m351", code: "MGN351", name: "x", gallery: 0, desc: 0, png: false, shopIds: [], skus: [
+        { id: A1, code: "MGN351-01/1", label: "", gallery: 0 }, { id: A2, code: "MGN351-01/2", label: "", gallery: 0 }] },
+      { parentId: "m9", code: "MGN9", name: "x", gallery: 0, desc: 0, png: false, shopIds: [], skus: [
+        { id: X1, code: "MGN9-01", label: "", gallery: 0 }, { id: X2, code: "MGN9-01/1", label: "", gallery: 0 }] },
+    ];
+    const ix = routeCodeIndex(ps);
+    expect(matchName("MGN236-01", ps, ix)).toMatchObject({ how: "slash", target: { parentId: "m236", skuId: S1 }, note: "ชื่อโฟลเดอร์ใส่ / ไม่ได้ → SKU MGN236-01/1" });
+    expect(matchName("MGN236-05", ps, ix)).toMatchObject({ how: "color", target: { skuId: S5 } });
+    expect(matchName("MGN236-07", ps, ix)).toMatchObject({ how: "none", target: null, note: "ไม่มีสี 07 ในรุ่น MGN236" });
+    const many = matchName("MGN351-01", ps, ix);
+    expect(many).toMatchObject({ how: "none", target: null, guessParentId: "m351" });
+    expect(many.note).toContain("ตรงกับ SKU 2 ตัว");
+    expect(matchName("MGN351-01_2", ps, ix)).toMatchObject({ how: "slash", target: { skuId: A2 } });
+    expect(matchName("MGN351-01-1", ps, ix)).toMatchObject({ how: "slash", target: { skuId: A1 } });
+    expect(matchName("MGN351-01_9", ps, ix).target).toBeNull();
+    // มี SKU ชื่อตรง (MGN9-01) อยู่แล้ว → ใช้ตัวนั้นเหมือนเดิม
+    expect(matchName("MGN9-01", ps, ix)).toMatchObject({ how: "color", target: { skuId: X1 } });
+  });
 });
 
 describe("groupRouteFiles", () => {

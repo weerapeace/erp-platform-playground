@@ -97,14 +97,22 @@ export type SlotFileMode = "replace" | "append" | "pick";
  * skip = rel รูปใหม่ที่หน้าตาเหมือนรูปในระบบ (ไม่อัปซ้ำ) · exclude = rel รูปใหม่ที่คนเลือกไม่ลงเอง (รูปยังอยู่บน Z:) · keep = id รูปเดิมที่ตรงกับรูปใหม่ (แทนที่ทั้งหมด/เลือกแทนบางรูปก็ไม่เอาออก)
  */
 export type SlotModeInput = Record<string, { mode: SlotFileMode; remove?: string[]; skip?: string[]; exclude?: string[]; keep?: string[] }>;
-export type ProductPlanGroup = { label: string; role: GroupRole | null; code: string | null; count: number; note?: string };
+export type ProductPlanGroup = {
+  label: string; role: GroupRole | null; code: string | null; count: number; note?: string;
+  /** key กลุ่ม (ส่งกลับมาใน folderMap เพื่อจับคู่เอง) · how = จับคู่ยังไง (slash = ตัด / ให้ · user = เลือกเอง) · guessParentId = รู้รุ่นแต่ไม่รู้สี */
+  key: string; how: string; guessParentId: string | null;
+  /** โปรแกรมเลือกจับคู่เอง (folderMap) · skip = เลือก "ไม่ลง" */
+  user: boolean; skip: boolean;
+};
+/** จับคู่โฟลเดอร์เอง (โปรแกรม v1.14+): key กลุ่ม → รุ่น/สี (skuId null = แกลเลอรี Parent) หรือ skip = ไม่ลง (อยู่บน Z:) */
+export type FolderMapInput = Record<string, { parentId: string; skuId: string | null } | { skip: true }>;
 export type ProductPlan = {
   files: ProductFileAction[];
   slots: ProductPlanSlot[];
   groups: ProductPlanGroup[];
   counts: { total: number; erp: number; nas: number; skipped: number };
   warnings: string[];
-  parents: { id: string; code: string; name: string }[];
+  parents: { id: string; code: string; name: string; skus: { id: string; code: string; label: string }[] }[];
   mode: MassMode;
   variant: ProductVariant;
   /** รูป PNG ที่โปรแกรมก๊อปไปโฟลเดอร์ PNG ในโฟลเดอร์รุ่น (cfg.png) — name = ชื่อใหม่ตามรหัสสี/รุ่น เช่น PIX39-01.png (ชนกันโปรแกรมต่อ _2) */
@@ -122,7 +130,7 @@ const isErpImage = (ext: string) => (ERP_IMAGE_EXTS as readonly string[]).includ
  *   color = เพิ่มสี — เฉพาะแกลเลอรีของสีที่ยังไม่มีรูปในระบบ (Parent/Description/สีเดิมที่ก๊อปมาจาก Collection ไม่แตะ)
  *   edit  = แก้สี — เฉพาะแกลเลอรีของสีที่อยู่ในโฟลเดอร์ (Parent/Description/PNG ไม่แตะ)
  */
-export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean; slotModes?: SlotModeInput; scopeAsk?: boolean }): ProductPlan {
+export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant; pngGallery?: boolean; slotModes?: SlotModeInput; scopeAsk?: boolean; folderMap?: FolderMapInput; folderPick?: boolean }): ProductPlan {
   const mode: MassMode = opts.mode ?? cfg.mode;
   // เพิ่มสี/แก้สี: ช่องที่ "ไม่แตะ" ตามชนิดงาน (Parent · Description · PNG · สีที่มีรูปแล้ว) — scopeAsk (โปรแกรม v1.12+) = ส่งเป็นช่องตั้งไว้ไม่ลง ให้เลือกลงเองได้ · ไม่ส่ง = ข้ามเงียบเหมือนเดิม (โปรแกรมรุ่นเก่า)
   const offRels = new Set<string>();
@@ -162,10 +170,23 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   const groupInfo: ProductPlanGroup[] = [];
   const warnings: string[] = [];
   for (const g of groups) {
-    const t = g.match.target;
+    // จับคู่เอง (โปรแกรมเลือก "จับคู่กับ" ให้กลุ่มนี้) — เฉพาะโฟลเดอร์รหัส (ไม่ใช่โฟลเดอร์หน้าที่) · รุ่น/สีต้องอยู่ในแผนนี้จริง
+    const fm = !g.role ? opts.folderMap?.[g.key] : undefined;
+    let skipByUser = false;
+    if (fm && "skip" in fm) skipByUser = true;
+    else if (fm) {
+      const p = parents.find((x) => x.parentId === fm.parentId);
+      if (p && (fm.skuId === null || p.skus.some((s) => s.id === fm.skuId))) g.match = { target: { parentId: p.parentId, skuId: fm.skuId }, how: "user", note: "จับคู่เอง (เลือกในโปรแกรม)" };
+    }
+    const t = skipByUser ? null : g.match.target;
     const code = t ? codeOfTarget(t, parents) : null;
-    groupInfo.push({ label: g.label, role: g.role ?? null, code, count: g.fileIds.length, note: g.match.note });
+    groupInfo.push({ label: g.label, role: g.role ?? null, code, count: g.fileIds.length, note: skipByUser ? "ไม่ลง — เลือกเอง (อยู่บน Z:)" : g.match.note,
+      key: g.key, how: g.match.how, guessParentId: g.match.guessParentId ?? g.match.target?.parentId ?? null, user: !!fm && (skipByUser || g.match.how === "user"), skip: skipByUser });
     for (const id of g.fileIds) byId.get(id)!.group = g.label;
+    if (skipByUser) {
+      for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "archive", note: "ไม่ลง — เลือกเอง (อยู่บน Z:)" });
+      continue;
+    }
     if (g.role === "archive" || g.role === "old") {
       for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: g.role === "old" ? "old_version" : "archive", note: g.match.note });
       continue;
@@ -174,7 +195,7 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
       for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "unmatched", note: g.match.note ?? "จับคู่รหัสไม่ได้" });
       warnings.push(variant === "color" && g.match.guessParentId
         ? `สีใหม่ "${g.label}" ยังไม่มีในระบบ — สร้าง SKU สีนี้ในระบบก่อน แล้วกดตรวจใหม่`
-        : `"${g.label}" จับคู่กับสินค้าในระบบไม่ได้${g.match.note ? ` (${g.match.note})` : ""} — รูปในโฟลเดอร์นี้ไม่ลงระบบ`);
+        : `"${g.label}" จับคู่กับสินค้าในระบบไม่ได้${g.match.note ? ` (${g.match.note})` : ""} — ${opts.folderPick ? "เลือก \"จับคู่กับ\" ในกลุ่มของโฟลเดอร์นี้ได้ (ไม่เลือก = ไม่ลงระบบ)" : "รูปในโฟลเดอร์นี้ไม่ลงระบบ"}`);
       continue;
     }
     // เพิ่มสี / แก้สี: แตะเฉพาะแกลเลอรีสี (เพิ่มสี = เฉพาะสีที่ยังไม่มีรูป) · ที่เหลือเป็นของที่ก๊อปมาจาก Collection
@@ -368,7 +389,8 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     groups: groupInfo,
     counts: { total: out.length, erp: out.filter((a) => a.erp).length, nas: out.filter((a) => a.nas).length, skipped: out.filter((a) => !a.erp && !a.nas).length },
     warnings,
-    parents: parents.map((p) => ({ id: p.parentId, code: p.code, name: p.name })),
+    // skus = ไว้ให้โปรแกรมทำตัวเลือก "จับคู่กับ" (สีหลักของแต่ละสี · รหัสไซส์อยู่ใน aliases)
+    parents: parents.map((p) => ({ id: p.parentId, code: p.code, name: p.name, skus: p.skus.map((s) => ({ id: s.id, code: s.code, label: s.label })) })),
     mode,
     variant,
     pngs,
