@@ -4,7 +4,7 @@
  * POST { action: "save_recipe", id, spec, name?, note? }                → บันทึกสูตร (ทำความสะอาดด้วย cleanSpec ก่อนเสมอ)
  * POST { action: "add_render", recipe_id, view_key, image_key, colorway_id?, note? } → เพิ่มรูปที่ได้จาก GPT (version = ล่าสุดของชุดมุม+ชุดสีนั้น + 1 · colorway_id ว่าง = สีหลัก)
  * POST { action: "set_template_vector", render_id }                  → ตั้งรูปลายเส้นเป็นรูป Vector ของแม่แบบ (design_library.manage)
- * สิทธิ์ design_library.edit · audit ทุกงาน
+ * สิทธิ์ design_library.edit · audit ทุกงาน · ทุนประมาณ (spec.cost) แก้ได้เฉพาะ products.cost.view — ไม่มีสิทธิ์ = คงค่าเดิมไว้
  */
 import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
@@ -12,7 +12,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { requestActor } from "@/lib/request-actor";
 import { writeAudit } from "@/lib/audit";
-import { cleanSpec, RENDER_VIEWS } from "@/lib/design-library";
+import { cleanSpec, EMPTY_COST, RENDER_VIEWS } from "@/lib/design-library";
+import { COST_PERM } from "@/lib/cost-access";
 import { EDIT_PERM, MANAGE_PERM } from "../_resources";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!UUID.test(id)) return bad("ไม่พบสูตร");
     const { data: before } = await admin.from("design_library_recipes").select("id, seq, spec, name, note").eq("id", id).maybeSingle();
     if (!before) return bad("ไม่พบสูตร (อาจถูกลบไปแล้ว)", 404);
-    const spec = cleanSpec(body.spec);
+    const incoming = cleanSpec(body.spec);
+    // คนไม่มีสิทธิ์ดูต้นทุนได้ spec.cost ว่างจาก bundle → ห้ามทับของเดิม
+    const spec = (await apiCan(request, COST_PERM)) ? incoming : { ...incoming, cost: cleanSpec(before.spec).cost };
     const patch: Record<string, unknown> = { spec, updated_by_name: actor.name, updated_at: new Date().toISOString() };
     if ("name" in body) patch.name = String(body.name ?? "").trim().slice(0, 120) || null;
     if ("note" in body) patch.note = String(body.note ?? "").trim().slice(0, 2000) || null;
@@ -71,7 +74,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ...("note" in patch && patch.note !== before.note ? { note: { from: before.note, to: patch.note } } : {}),
       },
     });
-    return NextResponse.json({ data, error: null });
+    const canCost = await apiCan(request, COST_PERM);
+    return NextResponse.json({ data: canCost ? data : { ...data, spec: { ...spec, cost: EMPTY_COST } }, error: null });
   }
 
   if (body.action === "add_render") {

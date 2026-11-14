@@ -50,6 +50,7 @@ export const REPORT_USAGES: Record<string, ReportUsage[]> = {
   design_sheet_quote: [{ label: "พิมพ์ใบเสนอราคางานออกแบบ", path: "/print/design-sheet-quote/:id", pick: "default" }],
   design_sheet_supplier: [{ label: "พิมพ์ใบตีราคาสั่งจากร้าน", path: "/print/design-sheet-supplier/:id", pick: "default" }],
   ds_present: [{ label: "พิมพ์ใบนำเสนอ A4", path: "/print/design-sheet-present/:id", pick: "default" }],
+  dl_techpack: [{ label: "พิมพ์ใบสั่งทำตัวอย่าง (Design Library · เลขเอกสาร = id สูตร)", path: "/print/design-library/:id/techpack", pick: "default" }],
 };
 
 type TemplateLike = { entity_type: string; template_key: string; is_default: boolean; active: boolean };

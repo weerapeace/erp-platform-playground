@@ -74,8 +74,16 @@
 - **เทียบ 2 สูตร** `/master/design-library/compare?a=&b=&ca=&cb=` (`components/design-library/compare.tsx` · กฎ `compareRecipes`) — ข้ามแม่แบบได้ · วัสดุจับคู่ตามหมวด · ไฮไลต์บรรทัดที่ต่าง · ทางเข้า: ปุ่ม "เทียบสูตร" หน้าคลัง/หน้าสูตร · "เทียบ" บนการ์ดสูตร
 - migration `202612160100_design_library_colorways.sql` (+ `design_library_recipes.design_sheet_id` เตรียมไว้ให้ช่วง 3 ส่งเป็นใบงานออกแบบ)
 
+## รอบ 5 ช่วง 2 (2026-11-14) — ทุนประมาณ + ใบสั่งทำตัวอย่าง
+- **ทุนประมาณ** `lib/design-library-cost.ts` (pure + เทสต์) · แผง `components/design-library/cost-panel.tsx` ในหน้าสูตร — **เห็นเฉพาะ products.cost.view**
+  - ปริมาณ: ผ้าตัว/ซับใน/หู = พื้นที่ชิ้นตัดจาก `bagPieces` (ตัวเดียวกับสตูดิโอ · ช่องที่วาดคิดแยก 2 ชั้น) → หลาด้วย `calcCostQty` area_face (หน้าผ้า SKU `fabric_width_cm` > `bom_calc_settings`) · เทป = รอบปากกระเป๋า · อื่น ๆ = 1 ชิ้น/จุด
+  - ราคา: `skus_v2.standard_price` (GET /api/design-library/cost · products.cost.view) · ไม่มี = ใส่เอง (ผูกรหัสของ ใช้ร่วมทุกชุดสี) · รวมเงิน `bomMaterialCost` (แหล่งเดียว §37) + ค่าแรง + ค่าอื่น ๆ
+  - เก็บค่าที่แก้ใน `spec.cost` · bundle ตัด spec.cost ให้คนไม่มีสิทธิ์ · save_recipe ของคนไม่มีสิทธิ์ = คงค่าเดิม
+  - ขนาดเกินช่วงแม่แบบทรงสตูดิโอ (W 18–55 ฯลฯ) = เตือน "ควรแก้ปริมาณผ้าเอง"
+- **ใบสั่งทำตัวอย่างให้ช่าง** `/print/design-library/[id]/techpack?cw=` · ข้อมูล `lib/design-library-techpack.ts` buildTechpackData (ไม่มีราคา/prompt) · ปริมาณจาก estimateCost
+  - แม่แบบเอกสารกลาง entity **`dl_techpack`** → แก้หน้าตาที่ /admin/report-templates (ลงทะเบียน REPORT_ENTITY_DEFS + REPORT_USAGES + sample-docs แล้ว) · ไม่มีแถวใน DB = `DEFAULT_DL_TECHPACK_TEMPLATE`
+
 ## แผนรอบ 5 ที่เหลือ (เจ้าของยืนยัน 2026-11-14)
-- ช่วง 2: ใบสั่งทำตัวอย่างให้ช่าง (**แก้หน้าตาได้ในหน้าแม่แบบเอกสาร** → REPORT_USAGES + template) · ราคาทุนประมาณ (เห็นเฉพาะสิทธิ์ดูต้นทุน · ใช้สูตรคิดเงินกลาง lib/cost-inputs / design-sheets-meta)
 - ช่วง 3: ส่งเป็นใบงานออกแบบ (สร้างใหม่ หรือแนบใบเดิม ผ่าน DesignSheetPickerModal) · ชุดสี → ตารางสีของใบงาน
 - ช่วง 4: เปลี่ยนเป็นสินค้าจริง = ผ่านขั้นสร้าง SKU + BOM เดิมของใบงาน (ไม่สร้างทางที่ 2)
 

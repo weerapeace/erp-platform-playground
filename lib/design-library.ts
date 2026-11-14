@@ -60,7 +60,7 @@ export type Handle = { drop: number; w: number; gap: number; count: number; tota
  * ชุดสีอื่นเก็บเฉพาะจุดที่ต่างจากสีหลัก (picks[pinId]) · ไม่มีใน picks = เหมือนสีหลัก · hw_color null = สีอะไหล่เหมือนสีหลัก
  */
 export type Colorway = { id: string; name: string; hw_color: string | null; picks: Record<string, Pick | null> };
-export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[] };
+export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost };
 export const MAX_COLORWAYS = 8;
 export const MAIN_COLORWAY_LABEL = "สีหลัก";
 
@@ -69,6 +69,29 @@ export const DEFAULT_HANDLE: Handle = { drop: 18, w: 3, gap: 12, count: 2, total
 export const SIZE_LIMIT = { min: 1, max: 200 };
 export const MAX_PINS = 40;
 export const MAX_BOXES = 12;
+
+/** ทุนประมาณ: ค่าที่แก้เอง (lib/design-library-cost) — ราคาเห็นเฉพาะ products.cost.view (API ตัดออกให้คนไม่มีสิทธิ์) */
+/** ค่าที่ผู้ใช้แก้เอง (เก็บใน spec.cost) — qty ต่อบรรทัด · price ต่อรหัสของ (ทุกชุดสีใช้ร่วม) · ค่าแรง · ค่าอื่น ๆ */
+export type RecipeCost = { qty: Record<string, number>; price: Record<string, number>; labor: number; extras: { label: string; amount: number }[] };
+export const EMPTY_COST: RecipeCost = { qty: {}, price: {}, labor: 0, extras: [] };
+const n0 = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.round(n * 10000) / 10000 : null; };
+// eslint-disable-next-line no-control-regex
+const keyOk = (k: string) => k.length > 0 && k.length <= 120 && !/[\u0000-\u001f]/.test(k);
+export function cleanCost(v: unknown): RecipeCost {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const map = (x: unknown) => {
+    const out: Record<string, number> = {};
+    if (x && typeof x === "object") for (const [k, val] of Object.entries(x as Record<string, unknown>).slice(0, 200)) { const n = n0(val); if (n != null && keyOk(k)) out[k] = n; }
+    return out;
+  };
+  const extras = (Array.isArray(o.extras) ? o.extras : []).slice(0, 20).flatMap((e) => {
+    if (!e || typeof e !== "object") return [];
+    const q = e as Record<string, unknown>; const amount = n0(q.amount);
+    const label = typeof q.label === "string" ? q.label.trim().slice(0, 80) : "";
+    return amount == null || (!label && !amount) ? [] : [{ label, amount }];
+  });
+  return { qty: map(o.qty), price: map(o.price), labor: n0(o.labor) ?? 0, extras };
+}
 
 // ─── ทำความสะอาด / ตรวจ ───────────────────────────────────────────────────────
 const num = (v: unknown, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
@@ -156,7 +179,7 @@ export function cleanSpec(v: unknown): Spec {
     pockets[p.key] = (Array.isArray(raw[p.key]) ? (raw[p.key] as unknown[]) : []).slice(0, MAX_BOXES)
       .map((b) => cleanBox(b, size)).filter((b): b is PocketBox => !!b);
   }
-  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins) };
+  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost) };
 }
 
 /** ชุดสี: ตัดจุดที่ไม่มีแล้วทิ้ง · ชื่อว่าง = "สี N" · id ซ้ำ = ทิ้งตัวหลัง */

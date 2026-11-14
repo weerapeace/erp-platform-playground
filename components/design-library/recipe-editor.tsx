@@ -7,6 +7,7 @@
  * ขนาด · สีอะไหล่ทั้งใบ · คำเตือน (กฎห้ามคู่ + วัสดุหมด/เหลือน้อย) · วาดช่อง 4 ฝั่ง (PocketEditor)
  * Prompt 3 ชุด (คัดลอก) · ใบสรุป PDF (/print/design-library/[id]) · รูปที่ได้จาก GPT แยกตามชุดมุม เวอร์ชันซ้อน + ใครอัป
  * ชุดสี (รอบ 5): ColorwayBar สลับชุดสี → รูป/จุด/prompt/รูป GPT/ใบสรุป ทั้งหน้าแสดงตามชุดสีที่เลือก · แก้จุดตอนอยู่ชุดสีอื่น = เก็บเป็นของชุดสีนั้น
+ * ทุนประมาณ (รอบ 5 ช่วง 2): CostPanel เฉพาะ products.cost.view · ใบสั่งทำตัวอย่างให้ช่าง /print/design-library/[id]/techpack (แม่แบบเอกสาร dl_techpack)
  * บันทึกด้วย SaveBar กลาง (ถามก่อนออกถ้ายังไม่บันทึก) → POST /api/design-library/actions save_recipe
  * สิทธิ์: ดู design_library.view · แก้ design_library.edit (ไม่มีสิทธิ์ = ดูอย่างเดียว)
  */
@@ -30,8 +31,10 @@ import { PickPanel, PickThumb } from "./pick-panel";
 import { PocketEditor } from "./pocket-editor";
 import { HandleFields } from "./template-form";
 import { ColorwayBar, ColorwayTable } from "./colorways";
+import { CostPanel } from "./cost-panel";
+import type { MaterialInfo } from "@/lib/design-library-cost";
 import { LenInput, UnitToggle, useLenUnit } from "./units";
-import { api, compareHref, img, newId, printHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
+import { api, compareHref, img, newId, printHref, techpackHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
 
 export function RecipeEditor({ id }: { id: string }) {
   const toast = useToast();
@@ -45,6 +48,8 @@ export function RecipeEditor({ id }: { id: string }) {
   const [sel, setSel] = useState<number | null>(null);
   const [vector, setVector] = useState(false);
   const [stock, setStock] = useState<Record<string, number>>({});
+  const [materials, setMaterials] = useState<Record<string, MaterialInfo>>({});
+  const canCost = usePermission("products.cost.view");
   const [sending, setSending] = useState(false);
   const [cw, setCw] = useState<string | null>(null);   // ชุดสีที่กำลังดู/แก้ (null = สีหลัก)
   const canManage = usePermission("design_library.manage");
@@ -55,7 +60,7 @@ export function RecipeEditor({ id }: { id: string }) {
     setErr(null);
     try {
       const d = await api<RecipeBundle>(`/api/design-library/bundle?recipe_id=${id}`);
-      setB(d); setSpec(cleanSpec(d.recipe.spec)); setMeta({ name: d.recipe.name ?? "", note: d.recipe.note ?? "" }); setStock(d.stock); setDirty(false);
+      setB(d); setSpec(cleanSpec(d.recipe.spec)); setMeta({ name: d.recipe.name ?? "", note: d.recipe.note ?? "" }); setStock(d.stock); setMaterials(d.materials ?? {}); setDirty(false);
     } catch (e) { setErr((e as Error).message); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
@@ -66,8 +71,8 @@ export function RecipeEditor({ id }: { id: string }) {
     const need = allSkuIds(spec).filter((x) => !(x in stock));
     if (!need.length) return;
     let alive = true;
-    api<{ stock: Record<string, number> }>(`/api/design-library/bundle?stock_ids=${need.join(",")}`)
-      .then((d) => { if (alive) setStock((p) => ({ ...p, ...d.stock })); }).catch(() => undefined);
+    api<{ stock: Record<string, number>; materials?: Record<string, MaterialInfo> }>(`/api/design-library/bundle?stock_ids=${need.join(",")}`)
+      .then((d) => { if (alive) { setStock((p) => ({ ...p, ...d.stock })); setMaterials((p) => ({ ...p, ...(d.materials ?? {}) })); } }).catch(() => undefined);
     return () => { alive = false; };
   }, [spec, stock]);
 
@@ -101,6 +106,10 @@ export function RecipeEditor({ id }: { id: string }) {
   const openPrint = async () => {
     if (dirty && !(await save())) return;
     window.open(printHref(id, cw), "_blank", "noopener");
+  };
+  const openTechpack = async () => {
+    if (dirty && !(await save())) return;
+    window.open(techpackHref(id, cw), "_blank", "noopener");
   };
   /** สร้างแพทเทิร์นใหม่ในสตูดิโอ: เก็บขนาดไว้ใน template.dl_draft → สตูดิโอเปิดตัวสร้างจากแม่แบบพร้อมค่านี้ให้ตรวจก่อนวาง */
   const sendToStudio = async () => {
@@ -142,6 +151,8 @@ export function RecipeEditor({ id }: { id: string }) {
         <button type="button" disabled={sending} onClick={() => void sendToStudio()}
           title="สร้างแพทเทิร์นใหม่ในสตูดิโอแพทเทิร์นจากขนาดของสูตรนี้ (ได้ชิ้นตัด + 3D) — ต้องมีสิทธิ์แก้สตูดิโอแพทเทิร์น"
           className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5"><Icon value="i:vector-bezier" />{sending ? "กำลังส่ง…" : "ส่งเข้าสตูดิโอแพทเทิร์น"}</button>
+        <button type="button" onClick={() => void openTechpack()} title="ใบสำหรับช่างทำตัวอย่าง: ขนาด วัสดุ+จำนวน ช่อง ตารางสี ช่องเซ็น (ไม่มีราคา/prompt) — แก้หน้าตาได้ที่หน้าแม่แบบเอกสาร"
+          className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:scissors" />ใบสั่งทำตัวอย่าง</button>
         <button type="button" onClick={() => void openPrint()} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1.5"><Icon value="i:printer" />ใบสรุป PDF{spec.colorways.length ? ` · ${colorwayLabel(spec, cw)}` : ""}</button>
       </div>
 
@@ -209,6 +220,12 @@ export function RecipeEditor({ id }: { id: string }) {
         <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:ruler-measure" />วาดขนาดช่อง</div>
         <PocketEditor spec={spec} choices={b.choices} readOnly={readOnly} unit={unit.unit} onChange={(pockets) => update((s) => ({ ...s, pockets }))} />
       </section>
+
+      {/* ── ทุนประมาณ (เฉพาะสิทธิ์ดูต้นทุน) ── */}
+      {canCost && b.can_cost && (
+        <CostPanel spec={view} cost={spec.cost} choices={b.choices} materials={materials} calcRows={b.calc ?? []} skuIds={allSkuIds(spec)}
+          colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} readOnly={readOnly} onChange={(cost) => update((s) => ({ ...s, cost }))} />
+      )}
 
       {/* ── Prompt ── */}
       <Prompts spec={view} b={b} dirty={dirty} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} />

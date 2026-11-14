@@ -26,6 +26,7 @@ const SOURCES: Record<string, Source> = {
   design_sheet_quote: DESIGN_SHEET,
   design_sheet_supplier: DESIGN_SHEET,
   ds_present: DESIGN_SHEET,
+  dl_techpack: { table: "design_library_recipes", num: "seq", sub: "name", activeCol: "is_active" },   // เลขที่ = เลขสูตร (ค้นด้วยคำค้นไม่ได้ — เลือกจากรายการล่าสุด)
 };
 
 export type SampleDoc = { id: string; label: string; sub: string | null };

@@ -5,6 +5,7 @@
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { Choice, Spec } from "@/lib/design-library";
+import type { MaterialInfo } from "@/lib/design-library-cost";
 
 export type Template = {
   id: string; code: string; name: string; description: string | null; category: string | null;
@@ -24,7 +25,10 @@ export type Render = {
   id: string; recipe_id: string; view_key: string; version: number; image_key: string; note: string | null; colorway_id?: string | null;
   created_by_name: string | null; created_at: string;
 };
-export type RecipeBundle = { recipe: Recipe; template: Template; choices: Choice[]; renders: Render[]; stock: Record<string, number> };
+export type CalcRow = { material_type: string; default_face_width_cm: number | null; loss_percent: number | null; uom: string | null; cm_per_unit: number | null };
+/** materials = หน่วย/หน้าผ้าของ SKU ในสูตร (ไม่มีราคา) · calc = bom_calc_settings · can_cost = มีสิทธิ์ดูต้นทุน (ไม่มี = spec.cost ว่าง) */
+export type RecipeBundle = { recipe: Recipe; template: Template; choices: Choice[]; renders: Render[]; stock: Record<string, number>; materials: Record<string, MaterialInfo>; calc: CalcRow[]; can_cost: boolean };
+export const techpackHref = (id: string, colorwayId?: string | null) => `/print/design-library/${id}/techpack${colorwayId ? `?cw=${encodeURIComponent(colorwayId)}` : ""}`;
 
 export const LIB_HREF = "/master/design-library";
 export const tplHref = (id: string) => `${LIB_HREF}/${id}`;

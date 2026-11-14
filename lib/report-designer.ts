@@ -1,5 +1,6 @@
 import type { ReportTemplateRow } from "@/app/api/admin/report-templates/route";
 import { DS_PRESENT_SAMPLE_DATA } from "@/lib/design-sheet-present";
+import { DL_TECHPACK_SAMPLE_DATA } from "@/lib/design-library-techpack";
 import { EXTRA_REPORT_ENTITY_DEFS } from "@/lib/report-entity-samples";
 
 export type ReportFieldDef = {
@@ -154,6 +155,42 @@ const woLineColumns: ReportTableColumnDef[] = [
 ];
 
 export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
+  // ใบสั่งทำตัวอย่างให้ช่าง (Design Library) — เทมเพลตเริ่มต้น + ตัวแปรอยู่ที่ lib/design-library-techpack (ไม่มีราคา)
+  dl_techpack: {
+    key: "dl_techpack",
+    label: "ใบสั่งทำตัวอย่าง (Design Library)",
+    fields: [
+      { key: "code", label: "รหัสแม่แบบ", group: "สูตร", sample: "HANB-001" },
+      { key: "template_name", label: "ชื่อแม่แบบ", group: "สูตร", sample: "กระเป๋าถือ ทรงกล่อง" },
+      { key: "bag_type", label: "ประเภทกระเป๋า", group: "สูตร", sample: "กระเป๋าถือ" },
+      { key: "recipe_no", label: "เลขสูตร", group: "สูตร", sample: "3" },
+      { key: "recipe_name", label: "ชื่อสูตร", group: "สูตร", sample: "หนังมิ้นต์" },
+      { key: "colorway", label: "ชุดสี", group: "สูตร", sample: "สีมิ้นต์" },
+      { key: "date_th", label: "วันที่พิมพ์", group: "สูตร", sample: "14 พ.ย. 2569" },
+      { key: "made_by", label: "ผู้ทำสูตร", group: "สูตร", sample: "ทีมออกแบบ" },
+      { key: "note", label: "หมายเหตุสูตร", group: "สูตร", sample: "ขอบเย็บสองเส้น" },
+      { key: "size_w", label: "กว้าง (ซม.+นิ้ว)", group: "ขนาด", sample: "30 cm (11.8 in)" },
+      { key: "size_h", label: "สูง", group: "ขนาด", sample: "22 cm (8.7 in)" },
+      { key: "size_d", label: "หนา", group: "ขนาด", sample: "12 cm (4.7 in)" },
+      { key: "strap", label: "สายยาว", group: "ขนาด", sample: "ไม่มี" },
+      { key: "handle_count", label: "จำนวนหู", group: "หู", sample: "2 หู" },
+      { key: "handle_drop", label: "ความสูงหู", group: "หู", sample: "18 cm (7.1 in)" },
+      { key: "handle_w", label: "กว้างหู", group: "หู", sample: "3 cm (1.2 in)" },
+      { key: "handle_gap", label: "ระยะห่างหู", group: "หู", sample: "12 cm (4.7 in)" },
+      { key: "handle_total", label: "ความยาวรวมหู", group: "หู", sample: "54 cm (21.3 in)" },
+      { key: "hw_color", label: "สีอะไหล่ทั้งใบ", group: "วัสดุ", sample: "ทอง" },
+      { key: "callout_html", label: "รูปเส้นชี้ (HTML)", group: "รูป", sample: "" },
+      { key: "photo_html", label: "รูปแม่แบบ (HTML)", group: "รูป", sample: "" },
+      { key: "vector_html", label: "รูป Vector (HTML)", group: "รูป", sample: "" },
+      { key: "render_html", label: "รูป 4 มุมล่าสุด (HTML)", group: "รูป", sample: "" },
+      { key: "inside_html", label: "รูปข้างในล่าสุด (HTML)", group: "รูป", sample: "" },
+      { key: "materials", label: "วัสดุ (loop: idx/part/code/name/color/qty/uom/how/note/thumb_html)", group: "วัสดุ", sample: "" },
+      { key: "pockets_html", label: "รูปช่อง 4 ฝั่ง (HTML)", group: "ช่อง", sample: "" },
+      { key: "colorway_table_html", label: "ตารางชุดสี (HTML)", group: "ชุดสี", sample: "" },
+    ],
+    tables: [],
+    sampleData: DL_TECHPACK_SAMPLE_DATA,
+  },
   // ใบนำเสนอ A4 ของใบงานออกแบบ (เสนอลูกค้า) — เทมเพลตเริ่มต้น + ตัวแปรอยู่ที่ lib/design-sheet-present (ไม่มีฟิลด์ต้นทุนให้ใช้)
   ds_present: {
     key: "ds_present",
