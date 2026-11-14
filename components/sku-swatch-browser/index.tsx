@@ -41,7 +41,9 @@ export type SwatchSpotPick = {
   sku: SwatchSpot["sku"];
 };
 
-export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot }: {
+export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot, initialTagIds }: {
+  /** เริ่มด้วยกรองแท็กนี้ (Design Library: จุดซิป → แผงที่ติดแท็กซิป) · ผู้ใช้ล้างตัวกรองดูทุกแผงได้ */
+  initialTagIds?: string[];
   /** โหมดเลือก 1 ชิ้น — มีค่า = เมนูบนชิ้นมี "✓ เลือกชิ้นนี้" แล้วปิดแผง */
   onPickSpot?: (pick: SwatchSpotPick) => void;
   /** เปิดแผ่นนี้ทันที (มาจากลิงก์ในหน้า SKU) */
@@ -58,7 +60,7 @@ export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot }: {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [q, setQ] = useState("");
-  const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
+  const [tagFilter, setTagFilter] = useState<TagFilterValue>(initialTagIds?.length ? { ...EMPTY_FILTER, tagIds: initialTagIds } : EMPTY_FILTER);
   const [createOpen, setCreateOpen] = useState(false);
   const [open, setOpen] = useState<{ id: string; edit: boolean; spotId?: string | null } | null>(openId ? { id: openId, edit: false, spotId: focusSpotId ?? null } : null);
   // ลิงก์มาถึงหลังหน้าโหลดแล้ว (พารามิเตอร์อ่านใน effect ของหน้าแม่) → เปิดตาม

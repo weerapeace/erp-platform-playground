@@ -33,6 +33,7 @@ function BriefInner() {
     return buildBriefHtml({
       template: b.template, recipe: b.recipe, spec: applyColorway(base, cw), choices: b.choices, stock: b.stock, useVector: vector,
       baseSpec: has ? base : undefined, colorwayName: has ? colorwayLabel(base, cw) : null,
+      materialTags: Object.fromEntries(Object.entries(b.materials ?? {}).map(([k, v]) => [k, v.tags])),
       img: (key, w) => `${origin}${r2ImageUrl(key, w) ?? ""}`,
       dateText: new Date(b.recipe.updated_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }),
     });

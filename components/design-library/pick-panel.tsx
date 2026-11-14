@@ -2,6 +2,8 @@
 
 /**
  * 📚 Design Library — แผงเลือกของ "จุด" ที่กดบนรูป
+ * รอบ 7: แผงผ้า / SKU / SKU-หรือเขียนเอง → ป๊อปเลือกวัสดุ 3 แท็บเดียวกัน (material-modal: แผง · รายการตามแท็กของหมวด · ค้นทั้งหมด)
+ *        โลโก้ = วิธีทำ (logo_method) → แบบย่อย → วัสดุโลโก้ (ถ้าวิธีนั้นต้องใช้) + รูปโลโก้ · คำเตือนของวิธีขึ้นทันที
  * ยังไม่เลือกหมวด → ปุ่มหมวด (จากรายการตัวเลือก category) · เลือกแล้ว → ตัวเลือกตามแหล่งของหมวด:
  *   swatch   = แผงผ้า (ของกลาง SwatchBrowser โหมด onPickSpot) — ได้รูปชิ้นที่ตัดจากแผง + SKU
  *   sku      = ของกลาง SkuPicker (+ สีอะไหล่ทั้งใบ ถ้าหมวดตั้ง "สีอะไหล่")
@@ -12,17 +14,29 @@
  */
 import { useMemo, useState } from "react";
 import nextDynamic from "next/dynamic";
-import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
-import { SkuPicker } from "@/components/pickers";
+import { usePermission } from "@/components/auth";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import type { SwatchSpotPick } from "@/components/sku-swatch-browser";
-import { bodyPickOf, categoryOf, pickInfo, pickThumbSvg, skuIdOf, sourceOf, usesHwColor, type Choice, type Pick, type Pin, type Spec } from "@/lib/design-library";
+import {
+  bodyPickOf, categoryChips, categoryOf, categoryTags, defaultMaterialTab, logoMethods, logoNeedsMaterial, logoOptions, pickInfo, pickThumbSvg, skuIdOf, sourceOf, usesHwColor,
+  type Choice, type LogoMaterial, type Pick, type Pin, type Spec,
+} from "@/lib/design-library";
+import { HW_PARENT } from "@/lib/design-library-hwtags";
+import { MaterialPickModal, type MaterialPicked } from "./material-modal";
 import { img } from "./shared";
 
-const SwatchBrowser = nextDynamic(() => import("@/components/sku-swatch-browser").then((m) => m.SwatchBrowser), { ssr: false });
 const AssetPicker = nextDynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
+const HwTagSuggestModal = nextDynamic(() => import("./hw-tag-suggest").then((m) => m.HwTagSuggestModal), { ssr: false });
+type LogoPick = Extract<Pick, { kind: "logo" }>;
+/** วัสดุของโลโก้ (เช่น โลโก้หนัง) กรองตามแท็กนี้ก่อน — ตั้งที่วิธีทำโลโก้ config.material_tags */
+const materialTagsOf = (m: Choice | undefined): string[] => {
+  const v = m?.config?.material_tags;
+  const list = Array.isArray(v) ? v.map(String) : typeof v === "string" ? v.split(/[,\n]/) : [];
+  const out = list.map((s) => s.trim()).filter(Boolean);
+  return out.length ? out : ["หนัง", "PU"];
+};
 
 export function PickThumb({ pick, spec, choices, cat, size = 56 }: { pick: Pick | null; spec: Spec; choices: Choice[]; cat?: string; size?: number }) {
   const c = cat ? categoryOf(choices, cat) : undefined;
@@ -45,7 +59,9 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
   onClose?: () => void;
 }) {
   const toast = useToast();
-  const [swatchOpen, setSwatchOpen] = useState(false);
+  const canTag = usePermission("products.edit");
+  const [mat, setMat] = useState<null | "pick" | "logo">(null);
+  const [hwOpen, setHwOpen] = useState(false);
   const [assetOpen, setAssetOpen] = useState(false);
   const [colorQ, setColorQ] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -56,19 +72,33 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
   const colorList = choices.filter((c) => c.list_key === String(cat?.config?.color_list ?? "thread_color"));
   const info = pickInfo(pin.pick, { bodyPick: bodyPickOf(spec) });
   const setPick = (pick: Pick | null) => onChange({ ...pin, pick });
+  const logo = pin.pick?.kind === "logo" ? pin.pick : null;
+  /** แก้ส่วนหนึ่งของโลโก้ (รูป / วิธี / แบบ / วัสดุ) โดยคงส่วนอื่นไว้ */
+  const setLogo = (p: Partial<LogoPick>) => setPick({ kind: "logo", image_key: null, name: "", asset_id: null, ...(logo ?? {}), ...p } as LogoPick);
+  const methods = useMemo(() => logoMethods(choices), [choices]);
+  const method = logo?.method ? methods.find((m) => m.code === logo.method) : undefined;
+  const options = logoOptions(method);
+  const methodWarn = String(method?.config?.warn ?? "").trim();
 
   const fromSwatch = (p: SwatchSpotPick) => {
     if (!p.sku) { toast.warning("ชิ้นนี้บนแผงยังไม่ได้ผูก SKU — ใช้รหัสภายในของแผงแทน (ไม่มีสต็อก)"); }
     setPick({ kind: "swatch", swatch_id: p.swatch_id, swatch_name: p.swatch_name, image_key: p.image_key, image_w: p.image_w, image_h: p.image_h,
       x: p.x, y: p.y, w: p.w, h: p.h, sku_id: p.sku?.id ?? null, code: p.sku?.code ?? p.code ?? p.label ?? "", name: p.sku?.name ?? p.name ?? p.label ?? p.swatch_name });
   };
+  const fromMaterial = (m: MaterialPicked) => {
+    if (m.kind === "swatch") fromSwatch(m.spot);
+    else setPick({ kind: "sku", sku_id: m.sku.id, code: m.sku.code, name: m.sku.name, image_key: m.sku.image_key });
+  };
+  const logoMaterialOf = (m: MaterialPicked): LogoMaterial => m.kind === "swatch"
+    ? { sku_id: m.spot.sku?.id ?? null, code: m.spot.sku?.code ?? m.spot.code ?? "", name: m.spot.sku?.name ?? m.spot.name ?? m.spot.swatch_name, image_key: m.spot.image_key }
+    : { sku_id: m.sku.id, code: m.sku.code, name: m.sku.name, image_key: m.sku.image_key };
   const uploadLogo = async (file: File | undefined) => {
     if (!file) return;
     setUploading(true);
     try {
       const up = await uploadImagesWithDupCheck([file], { folder: "design-library/logos", max: 1600, onError: (_, e) => toast.error(e.message) });
       const key = up?.keys[0];
-      if (key) setPick({ kind: "logo", image_key: key, name: file.name.replace(/\.[a-z0-9]+$/i, ""), asset_id: null });
+      if (key) setLogo({ image_key: key, name: file.name.replace(/\.[a-z0-9]+$/i, ""), asset_id: null });
     } catch { toast.error("อัปโหลดโลโก้ไม่สำเร็จ กรุณาลองใหม่"); }
     finally { setUploading(false); }
   };
@@ -89,7 +119,7 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
           {cats.map((c) => (
             <button key={c.id} type="button" disabled={readOnly} onClick={() => onChange({ ...pin, cat: c.code, pick: c.code === "handle" ? { kind: "same_as_body" } : null })}
               className="h-9 px-2.5 rounded-lg border border-slate-200 text-left text-[13px] text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/40 disabled:opacity-50 flex items-center gap-2">
-              <span className="flex-1 truncate">{c.name}</span><span className="text-[10.5px] text-slate-400">{({ swatch: "แผง", sku: "SKU", color: "รหัสสี", logo: "อัป/คลัง", sku_text: "SKU/เขียน" } as const)[sourceOf(c)]}</span>
+              <span className="flex-1 truncate">{c.name}</span><span className="text-[10.5px] text-slate-400">{({ swatch: "แผง", sku: "รายการ", color: "รหัสสี", logo: "วิธี+รูป", sku_text: "ค้น/เขียน" } as const)[sourceOf(c)]}</span>
             </button>
           ))}
         </div>
@@ -121,16 +151,12 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
         {sid && <StockBadge onHand={stock[sid]} />}
       </div>
 
-      {!readOnly && src === "swatch" && (
+      {!readOnly && (src === "swatch" || src === "sku" || src === "sku_text") && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setSwatchOpen(true)} className={btn}><Icon value="i:photo" />เลือกจากแผงผ้า</button>
-          {pin.cat !== "body" && <button type="button" onClick={() => setPick({ kind: "same_as_body" })} className={`${btn} ${pin.pick?.kind === "same_as_body" ? "!border-indigo-300 !bg-indigo-50 text-indigo-700" : ""}`}>ใช้วัสดุเดียวกับตัวกระเป๋า</button>}
-        </div>
-      )}
-      {!readOnly && (src === "sku" || src === "sku_text") && (
-        <div>
-          <div className="text-[12px] text-slate-500 mb-1">{pin.pick?.kind === "sku" ? "เปลี่ยน SKU" : "เลือก SKU"}</div>
-          <SkuPicker value={null} onChange={(v) => v && setPick({ kind: "sku", sku_id: v.id, code: v.code, name: v.name, image_key: v.image_key ?? null })} placeholder="ค้นรหัส / ชื่อ SKU" />
+          <button type="button" onClick={() => setMat("pick")} className={`${btn} !border-indigo-300 !bg-indigo-50 text-indigo-700 hover:!bg-indigo-100`}>
+            <Icon value={src === "swatch" ? "i:layout-grid" : "i:search"} />{pin.pick && pin.pick.kind !== "text" && pin.pick.kind !== "same_as_body" ? "เปลี่ยน" : "เลือก"}{cat.name}
+          </button>
+          {src === "swatch" && pin.cat !== "body" && <button type="button" onClick={() => setPick({ kind: "same_as_body" })} className={`${btn} ${pin.pick?.kind === "same_as_body" ? "!border-indigo-300 !bg-indigo-50 text-indigo-700" : ""}`}>ใช้วัสดุเดียวกับตัวกระเป๋า</button>}
         </div>
       )}
       {!readOnly && src === "sku_text" && (
@@ -167,12 +193,53 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
           </div>
         </div>
       )}
-      {!readOnly && src === "logo" && (
-        <div className="flex flex-wrap gap-2">
-          <label className={`${btn} cursor-pointer`}><Icon value="i:upload" />{uploading ? "กำลังอัปโหลด…" : "อัปโหลดไฟล์โลโก้"}
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => { void uploadLogo(e.target.files?.[0]); e.target.value = ""; }} />
-          </label>
-          <button type="button" onClick={() => setAssetOpen(true)} className={btn}><Icon value="i:photo" />เลือกจากคลังรูป</button>
+      {src === "logo" && (
+        <div className="space-y-2.5">
+          {methods.length > 0 ? (
+            <div>
+              <div className="text-[12px] text-slate-500 mb-1">วิธีทำโลโก้</div>
+              <div className="flex flex-wrap gap-1.5">
+                {methods.map((m) => (
+                  <button key={m.id} type="button" disabled={readOnly} aria-pressed={logo?.method === m.code}
+                    onClick={() => setLogo({ method: m.code, option: undefined, material: logoNeedsMaterial(m) ? logo?.material ?? null : null })}
+                    className={`h-8 px-3 rounded-full border text-[12.5px] ${logo?.method === m.code ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{m.name}</button>
+                ))}
+              </div>
+            </div>
+          ) : <p className="text-[12px] text-slate-400">ยังไม่มีรายการวิธีทำโลโก้ — ผู้ดูแลเพิ่มที่ “ตัวเลือก” → วิธีทำโลโก้</p>}
+          {method && options.length > 0 && (
+            <div>
+              <div className="text-[12px] text-slate-500 mb-1">แบบ ({method.name})</div>
+              <div className="flex flex-wrap gap-1.5">
+                {options.map((o) => (
+                  <button key={o.code} type="button" disabled={readOnly} aria-pressed={logo?.option === o.code} onClick={() => setLogo({ option: logo?.option === o.code ? undefined : o.code })}
+                    className={`h-7 px-2.5 rounded-full border text-[12px] ${logo?.option === o.code ? "bg-violet-50 border-violet-300 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {methodWarn && <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-800 flex items-start gap-1.5"><Icon value="i:alert-triangle" className="mt-0.5 shrink-0" />{methodWarn}</p>}
+          {method && logoNeedsMaterial(method) && (
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 p-1.5">
+              {logo?.material?.image_key
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={img(logo.material.image_key, 160)} alt="" className="w-10 h-10 rounded object-cover bg-slate-50 shrink-0" />
+                : <span className="w-10 h-10 rounded bg-slate-100 shrink-0" />}
+              <span className="min-w-0 flex-1 text-[12.5px]">
+                <span className="block text-[11px] text-slate-500">วัสดุของโลโก้</span>
+                <span className="block truncate text-slate-800">{logo?.material ? `${logo.material.code ? `${logo.material.code} · ` : ""}${logo.material.name}` : "ยังไม่ได้เลือก"}</span>
+              </span>
+              {!readOnly && <button type="button" onClick={() => setMat("logo")} className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 shrink-0">{logo?.material ? "เปลี่ยน" : "เลือกวัสดุ"}</button>}
+            </div>
+          )}
+          {!readOnly && (
+            <div className="flex flex-wrap gap-2">
+              <label className={`${btn} cursor-pointer`}><Icon value="i:upload" />{uploading ? "กำลังอัปโหลด…" : logo?.image_key ? "เปลี่ยนไฟล์โลโก้" : "อัปโหลดไฟล์โลโก้"}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => { void uploadLogo(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              <button type="button" onClick={() => setAssetOpen(true)} className={btn}><Icon value="i:photo" />เลือกจากคลังรูป</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -181,13 +248,22 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
           className="mt-1 w-full h-9 px-2 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
       </label>
 
-      {swatchOpen && (
-        <ERPModal open onClose={() => setSwatchOpen(false)} title={`เลือก${cat.name}จากแผงผ้า`} description="เปิดแผง → กดชิ้นที่ต้องการ → “เลือกชิ้นนี้”" size="xl" storageKey="design-library-swatch">
-          <SwatchBrowser onPickSpot={(p) => { fromSwatch(p); setSwatchOpen(false); }} />
-        </ERPModal>
+      {mat === "pick" && (
+        <MaterialPickModal open onClose={() => setMat(null)} title={`เลือก${cat.name}`} tags={categoryTags(cat)} chips={categoryChips(cat)} defaultTab={defaultMaterialTab(cat)}
+          onPick={(m) => { fromMaterial(m); setMat(null); }}
+          footerNote={categoryTags(cat).includes(HW_PARENT) && canTag ? (
+            <p className="text-[12px] text-slate-500 flex flex-wrap items-center gap-2">อะไหล่ยังติดแท็กไม่ครบ?
+              <button type="button" onClick={() => setHwOpen(true)} className="h-7 px-2.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-1"><Icon value="i:tags" />ติดแท็กอะไหล่จากชื่อ SKU</button>
+            </p>
+          ) : null} />
       )}
+      {mat === "logo" && method && (
+        <MaterialPickModal open onClose={() => setMat(null)} title={`เลือกวัสดุของโลโก้ (${method.name})`} tags={materialTagsOf(method)} defaultTab="list"
+          onPick={(m) => { setLogo({ material: logoMaterialOf(m) }); setMat(null); }} />
+      )}
+      {hwOpen && <HwTagSuggestModal open onClose={() => setHwOpen(false)} />}
       <AssetPicker open={assetOpen} onClose={() => setAssetOpen(false)} typeFilter="image" title="เลือกโลโก้จากคลังรูป" defaultSource="artwork" defaultSearch="logo"
-        onSelect={(a) => { const x = a[0]; if (x) setPick({ kind: "logo", image_key: x.r2_key, name: x.title || x.file_name, asset_id: x.id }); setAssetOpen(false); }} />
+        onSelect={(a) => { const x = a[0]; if (x) setLogo({ image_key: x.r2_key, name: x.title || x.file_name, asset_id: x.id }); setAssetOpen(false); }} />
     </div>
   );
 }

@@ -12,13 +12,31 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 export async function loadMaterials(admin: Admin, ids: string[]): Promise<Record<string, MaterialInfo>> {
   if (!ids.length) return {};
   // หน่วย = uoms.name ของ SKU (ราคาทุน standard_price เป็นราคาต่อหน่วยนี้) — purchase_uom_en ยังว่างทุกแถว
-  const { data } = await admin.from("skus_v2").select("id, code, name_th, fabric_width_cm, uom:uoms!skus_v2_uom_id_fkey(name)").in("id", ids);
+  const [{ data }, links] = await Promise.all([
+    admin.from("skus_v2").select("id, code, name_th, fabric_width_cm, uom:uoms!skus_v2_uom_id_fkey(name)").in("id", ids),
+    // แท็กของ SKU (รอบ 7: เตือนโลโก้ไม่เหมาะกับวัสดุตัวกระเป๋า) — พลาด = ไม่มีแท็ก ไม่ทำให้ทั้งก้อนพัง
+    loadSkuTagNames(admin, ids),
+  ]);
   const out: Record<string, MaterialInfo> = {};
   for (const r of (data ?? []) as unknown as { id: string; code: string; name_th: string | null; fabric_width_cm: number | null; uom: { name: string | null } | { name: string | null }[] | null }[]) {
     const u = Array.isArray(r.uom) ? r.uom[0] : r.uom;
-    out[r.id] = { code: r.code, name: r.name_th ?? r.code, uom: u?.name ?? null, face_width_cm: Number(r.fabric_width_cm) > 0 ? Number(r.fabric_width_cm) : null };
+    out[r.id] = { code: r.code, name: r.name_th ?? r.code, uom: u?.name ?? null, face_width_cm: Number(r.fabric_width_cm) > 0 ? Number(r.fabric_width_cm) : null, tags: links[r.id] ?? [] };
   }
   return out;
+}
+
+/** ชื่อแท็กกลาง (product_families) ของ SKU · พลาด = {} */
+async function loadSkuTagNames(admin: Admin, ids: string[]): Promise<Record<string, string[]>> {
+  try {
+    const { data: links } = await admin.from("skus_v2_product_family_m2m").select("src_id, tgt_id").in("src_id", ids).limit(2000);
+    const famIds = [...new Set(((links ?? []) as { tgt_id: string }[]).map((l) => l.tgt_id))];
+    if (!famIds.length) return {};
+    const { data: fams } = await admin.from("product_families").select("id, name").in("id", famIds);
+    const nameOf = new Map(((fams ?? []) as { id: string; name: string | null }[]).map((f) => [f.id, f.name ?? ""]));
+    const out: Record<string, string[]> = {};
+    for (const l of (links ?? []) as { src_id: string; tgt_id: string }[]) { const n = nameOf.get(l.tgt_id); if (n) (out[l.src_id] ??= []).push(n); }
+    return out;
+  } catch { return {}; }
 }
 
 /** ราคาทุน (>0) ตาม sku_id · error = null (ให้ผู้เรียกบอกผู้ใช้) */

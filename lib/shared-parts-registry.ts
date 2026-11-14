@@ -401,8 +401,8 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "material-picker", label: "เลือกวัตถุดิบ", code: "MaterialPicker", category: "pick",
     source: { path: "components/material-picker" },
-    what: "เลือกวัตถุดิบ/ชิ้นส่วน พร้อมรูปและสต๊อก",
-    when: "BOM ขอซื้อวัตถุดิบ",
+    what: "เลือกวัตถุดิบ/ชิ้นส่วน พร้อมรูปและสต๊อก · MaterialSearchPanel = เนื้อในค้นแบบเต็ม (การ์ดรูป + ปุ่มกรองแท็ก/คำค้น) ฝังในป๊อปอื่นได้",
+    when: "BOM ขอซื้อวัตถุดิบ · ป๊อปเลือกวัสดุ Design Library (แท็บรายการ/ค้นทั้งหมด)",
   },
   {
     key: "mo-picker", label: "เลือกใบสั่งผลิต", code: "MoMultiPickerModal", category: "pick",

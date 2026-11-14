@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  allSkuIds, applyColorway, nudgePos, offsetPos, pinFromClipboard, pinToClipboard, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
+  accessoriesText, accessoryFromChoice, categoryChips, categoryTags, defaultMaterialTab, logoOptions, logoText, logoWarnings, allSkuIds, applyColorway, nudgePos, offsetPos, pinFromClipboard, pinToClipboard, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
 } from "./design-library";
 
 const ch = (list_key: Choice["list_key"], code: string, name: string, extra: Partial<Choice> = {}): Choice =>
@@ -278,5 +278,60 @@ describe("รอบ 7 — คัดลอก/วางจุด", () => {
     expect(nudgePos(99.8, 0.2, 0.5, -0.5)).toEqual({ x: 100, y: 0 });
     expect(offsetPos(10, 20)).toEqual({ x: 13, y: 23 });
     expect(offsetPos(99, 98)).toEqual({ x: 96, y: 95 });
+  });
+});
+
+describe("รอบ 7 — โลโก้ 2 ชั้น / ส่วนเสริม / แท็กหมวด", () => {
+  const LOGO: Choice[] = [
+    ch("category", "logo", "โลโก้", { config: { source: "logo" } }),
+    ch("logo_method", "emboss", "Embossed", { name_en: "Embossed", config: { options: [{ code: "gold", name: "ฟอยล์ทอง", name_en: "Gold foil" }, { code: "deboss", name: "พิมพ์จม", name_en: "Debossed" }] } }),
+    ch("logo_method", "uv", "UV", { name_en: "UV print", config: { warn: "พิมพ์บนบางวัสดุไม่ได้", avoid_tags: "PU, หนัง" } }),
+  ];
+  it("logo ที่มีแต่วิธี (ยังไม่อัปรูป) ไม่หาย · ไม่มีทั้งรูปและวิธี = ทิ้ง · ตัวเลือกย่อยต้องมีวิธี", () => {
+    const s = cleanSpec({ pins: [
+      { id: "a", x: 1, y: 1, cat: "logo", pick: { kind: "logo", method: "emboss", option: "gold" } },
+      { id: "b", x: 1, y: 1, cat: "logo", pick: { kind: "logo", option: "gold" } },
+      { id: "c", x: 1, y: 1, cat: "logo", pick: { kind: "logo", image_key: "k1", name: "L", material: { code: "LT-1", name: "หนังวัว" } } },
+    ] });
+    expect(s.pins[0].pick).toEqual({ kind: "logo", image_key: null, name: "", asset_id: null, method: "emboss", option: "gold" });
+    expect(s.pins[1].pick).toBeNull();
+    expect(s.pins[2].pick).toMatchObject({ image_key: "k1", material: { sku_id: null, code: "LT-1", name: "หนังวัว", image_key: null } });
+  });
+  it("ข้อความโลโก้ ไทย/อังกฤษ + ตัวเลือกย่อยจากข้อความ", () => {
+    const p = { kind: "logo" as const, image_key: null, name: "", asset_id: null, method: "emboss", option: "gold", material: { sku_id: null, code: "LT-1", name: "หนังวัว", image_key: null } };
+    expect(logoText(p, LOGO)).toBe("Embossed · ฟอยล์ทอง · วัสดุ หนังวัว");
+    expect(logoText(p, LOGO, "en")).toBe("Gold foil Embossed logo on หนังวัว");
+    expect(logoOptions(ch("logo_method", "x", "X", { config: { options: "พิมพ์จม=Debossed\nฟอยล์เงิน" } }))).toEqual([{ code: "o1", name: "พิมพ์จม", name_en: "Debossed" }, { code: "o2", name: "ฟอยล์เงิน", name_en: "" }]);
+  });
+  it("เตือนโลโก้: ข้อความคงที่เสมอ + เตือนเองเมื่อตัวกระเป๋ามีแท็กที่ไม่เหมาะ", () => {
+    const s = cleanSpec({ pins: [
+      { id: "a", x: 1, y: 1, cat: "body", pick: { kind: "sku", sku_id: "s1", code: "PU-1", name: "PU" } },
+      { id: "b", x: 1, y: 1, cat: "logo", pick: { kind: "logo", method: "uv" } },
+    ] });
+    expect(logoWarnings(s, LOGO).map((w) => w.tone)).toEqual(["info"]);
+    const w = logoWarnings(s, LOGO, { s1: ["pu"] });
+    expect(w[0]).toMatchObject({ tone: "warn", pinIndex: 1 });
+    expect(w[0].text).toContain("PU");
+  });
+  it("ส่วนเสริม: ทำความสะอาด + เข้า prompt + สต็อก", () => {
+    const s = cleanSpec({ accessories: [
+      { id: "x", code: "KC1", name: "พวงกุญแจหมี", name_en: "bear keychain", group: "พวงกุญแจ", sku_id: "k1", sku_code: "KC-001" },
+      { code: "KC1", name: "ซ้ำ" }, { code: "", name: "ไม่มีรหัส" },
+    ] });
+    expect(s.accessories).toHaveLength(1);
+    expect(accessoriesText(s)).toBe("bear keychain (KC-001)");
+    expect(allSkuIds(s)).toContain("k1");
+    expect(promptContext({ name: "T" }, s, [])["กระเป๋า"]).toContain("Accessories attached: bear keychain (KC-001)");
+    expect(accessoryFromChoice(ch("accessory", "CH1", "ชาร์มดาว", { name_en: "star charm", config: { group: "ชาร์ม", image_key: "img1" } }), "i1"))
+      .toEqual({ id: "i1", code: "CH1", name: "ชาร์มดาว", name_en: "star charm", group: "ชาร์ม", image_key: "img1", sku_id: null, sku_code: "", note: "" });
+  });
+  it("แท็ก/ปุ่มลัดของหมวด + แท็บเริ่ม", () => {
+    const zip = ch("category", "zip", "ซิป", { config: { source: "swatch", tags: ["ซิป"] } });
+    const thread = ch("category", "thread", "ด้าย", { config: { source: "sku", chips: "เบอร์ 20=THREAD-20, เบอร์ 30=THREAD-30" } });
+    expect(categoryTags(zip)).toEqual(["ซิป"]);
+    expect(categoryChips(thread)).toEqual([{ label: "เบอร์ 20", search: "THREAD-20" }, { label: "เบอร์ 30", search: "THREAD-30" }]);
+    expect(defaultMaterialTab(zip)).toBe("board");
+    expect(defaultMaterialTab(thread)).toBe("list");
+    expect(defaultMaterialTab(ch("category", "o", "อื่น", { config: { source: "sku_text" } }))).toBe("search");
   });
 });

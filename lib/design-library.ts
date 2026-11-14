@@ -9,7 +9,7 @@
  */
 
 // ─── ชนิดข้อมูล ──────────────────────────────────────────────────────────────
-export type ChoiceListKey = "bag_type" | "category" | "hw_color" | "thread_color" | "pocket_type" | "rule" | "prompt";
+export type ChoiceListKey = "bag_type" | "category" | "hw_color" | "thread_color" | "pocket_type" | "rule" | "prompt" | "logo_method" | "accessory";
 export const CHOICE_LISTS: { key: ChoiceListKey; label: string; hint: string }[] = [
   { key: "bag_type",     label: "ประเภทกระเป๋า",     hint: "รหัส = ตัวนำหน้ารหัสแม่แบบ (เช่น HANB → HANB-001) · ชื่ออังกฤษใช้ใน prompt (เช่น Handbag)" },
   { key: "category",     label: "หมวดที่เปลี่ยนได้", hint: "จุดบนรูปเลือกหมวดจากรายการนี้ · แต่ละหมวดเลือกจากแหล่งต่างกัน" },
@@ -18,16 +18,18 @@ export const CHOICE_LISTS: { key: ChoiceListKey; label: string; hint: string }[]
   { key: "pocket_type",  label: "แบบช่อง",           hint: "ใช้ตอนวาดช่องหน้า/หลัง/ข้างใน" },
   { key: "rule",         label: "กฎห้ามคู่",          hint: "ถ้าเลือก A คู่กับ B ระบบเตือน (ไม่บล็อก)" },
   { key: "prompt",       label: "Prompt",            hint: "เปิด/ปิด prompt ของระบบตั้งต้นทั้งทีม (แต่ละสูตรปรับเองได้) · เพิ่มแม่แบบ prompt ของทีม ใส่คำแทนอย่าง {ขนาด} {วัสดุ} ให้ระบบเติมค่าของสูตรให้" },
+  { key: "logo_method",  label: "วิธีทำโลโก้",        hint: "จุดโลโก้เลือกวิธี → ตัวเลือกย่อย (เช่น Embossed → ฟอยล์ทอง) · คำเตือนขึ้นทุกครั้งที่เลือก · แท็กวัสดุที่ไม่เหมาะ = เตือนเองเมื่อตัวกระเป๋าเป็นวัสดุนั้น" },
+  { key: "accessory",    label: "ส่วนเสริม",          hint: "พวงกุญแจ ชาร์ม สายคล้องแขน ฯลฯ · ใส่รูป + กลุ่ม · ผูก SKU ได้ (ไม่บังคับ) → ผูกแล้วเห็นสต็อก/ทุน" },
 ];
 
 /** แหล่งที่ใช้เลือกของหมวด */
 export type CategorySource = "swatch" | "sku" | "color" | "logo" | "sku_text";
 export const CATEGORY_SOURCES: { key: CategorySource; label: string }[] = [
-  { key: "swatch",   label: "แผงผ้า" },
-  { key: "sku",      label: "SKU" },
-  { key: "color",    label: "รหัสสี (สีด้าย)" },
-  { key: "logo",     label: "อัปโหลด / คลังโลโก้" },
-  { key: "sku_text", label: "SKU หรือเขียนเอง" },
+  { key: "swatch",   label: "แผงผ้า + รายการ (เปิดแผงก่อน)" },
+  { key: "sku",      label: "รายการวัสดุตามแท็ก (เปิดรายการก่อน)" },
+  { key: "color",    label: "รหัสสี (รายการสีด้ายเดิม)" },
+  { key: "logo",     label: "โลโก้ (วิธีทำ + รูป)" },
+  { key: "sku_text", label: "ค้นวัสดุ หรือเขียนเอง" },
 ];
 
 export type Choice = {
@@ -40,11 +42,16 @@ export type Pick =
       x: number; y: number; w: number; h: number; sku_id: string | null; code: string; name: string }
   | { kind: "sku"; sku_id: string; code: string; name: string; image_key: string | null }
   | { kind: "color"; code: string; name: string; hex: string | null }
-  | { kind: "logo"; image_key: string; name: string; asset_id: string | null }
+  /** โลโก้ (รอบ 7): รูป (ไม่บังคับถ้าเลือกวิธีแล้ว) + วิธีทำ (logo_method) + ตัวเลือกย่อย + วัสดุของโลโก้ (เช่น โลโก้หนัง) */
+  | { kind: "logo"; image_key: string | null; name: string; asset_id: string | null; method?: string; option?: string; material?: LogoMaterial | null }
   | { kind: "text"; text: string }
   | { kind: "same_as_body" };
 
+export type LogoMaterial = { sku_id: string | null; code: string; name: string; image_key: string | null };
 export type Pin = { id: string; x: number; y: number; cat: string; pick: Pick | null; note: string };
+/** ส่วนเสริมที่เลือกในสูตร (รอบ 7) — เก็บสำเนาชื่อ/รูป ณ ตอนเลือก (เปิดย้อนหลังได้แม้รายการถูกแก้) · ทุกชุดสีใช้ร่วมกัน */
+export type AccessoryPick = { id: string; code: string; name: string; name_en: string; group: string; image_key: string | null; sku_id: string | null; sku_code: string; note: string };
+export const MAX_ACCESSORIES = 20;
 export type PocketBox = { id: string; x: number; y: number; w: number; h: number; type: string; note: string };
 export type PanelKey = "front" | "back" | "inside_front" | "inside_back";
 export const PANELS: { key: PanelKey; label: string; en: string; inside: boolean }[] = [
@@ -61,7 +68,7 @@ export type Handle = { drop: number; w: number; gap: number; count: number; tota
  * ชุดสีอื่นเก็บเฉพาะจุดที่ต่างจากสีหลัก (picks[pinId]) · ไม่มีใน picks = เหมือนสีหลัก · hw_color null = สีอะไหล่เหมือนสีหลัก
  */
 export type Colorway = { id: string; name: string; hw_color: string | null; picks: Record<string, Pick | null> };
-export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost; prompts: RecipePrompts };
+export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost; prompts: RecipePrompts; accessories: AccessoryPick[] };
 export const MAX_COLORWAYS = 8;
 export const MAIN_COLORWAY_LABEL = "สีหลัก";
 
@@ -159,7 +166,13 @@ export function cleanPick(v: unknown): Pick | null {
     };
     case "sku": return str(o.sku_id, 40) ? { kind: "sku", sku_id: str(o.sku_id, 40), code: str(o.code, 80), name: str(o.name, 200), image_key: str(o.image_key, 300) || null } : null;
     case "color": return str(o.code, 40) ? { kind: "color", code: str(o.code, 40), name: str(o.name, 120), hex: /^#[0-9a-f]{6}$/i.test(String(o.hex ?? "")) ? String(o.hex) : null } : null;
-    case "logo": return str(o.image_key, 300) ? { kind: "logo", image_key: str(o.image_key, 300), name: str(o.name, 200), asset_id: str(o.asset_id, 40) || null } : null;
+    case "logo": {
+      const image_key = str(o.image_key, 300) || null, method = str(o.method, 40);
+      if (!image_key && !method) return null;
+      const m = o.material && typeof o.material === "object" ? (o.material as Record<string, unknown>) : null;
+      const material = m && (str(m.code, 80) || str(m.name, 200)) ? { sku_id: str(m.sku_id, 40) || null, code: str(m.code, 80), name: str(m.name, 200), image_key: str(m.image_key, 300) || null } : null;
+      return { kind: "logo", image_key, name: str(o.name, 200), asset_id: str(o.asset_id, 40) || null, ...(method ? { method } : {}), ...(method && str(o.option, 40) ? { option: str(o.option, 40) } : {}), ...(material ? { material } : {}) };
+    }
     case "text": return str(o.text, 300) ? { kind: "text", text: str(o.text, 300) } : null;
     case "same_as_body": return { kind: "same_as_body" };
     default: return null;
@@ -191,7 +204,26 @@ export function cleanSpec(v: unknown): Spec {
     pockets[p.key] = (Array.isArray(raw[p.key]) ? (raw[p.key] as unknown[]) : []).slice(0, MAX_BOXES)
       .map((b) => cleanBox(b, size)).filter((b): b is PocketBox => !!b);
   }
-  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost), prompts: cleanPrompts(o.prompts) };
+  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost), prompts: cleanPrompts(o.prompts), accessories: cleanAccessories(o.accessories) };
+}
+
+/** ส่วนเสริม: ตัดแถวไม่มีรหัส/ชื่อ · รหัสซ้ำ = ทิ้งตัวหลัง · สูงสุด MAX_ACCESSORIES */
+export function cleanAccessories(v: unknown): AccessoryPick[] {
+  const seen = new Set<string>();
+  return (Array.isArray(v) ? v : []).flatMap((a): AccessoryPick[] => {
+    if (!a || typeof a !== "object") return [];
+    const o = a as Record<string, unknown>;
+    const code = str(o.code, 60), name = str(o.name, 200);
+    if (!code || !name || seen.has(code)) return [];
+    seen.add(code);
+    return [{ id: idOf(o.id), code, name, name_en: str(o.name_en, 200), group: str(o.group, 80), image_key: str(o.image_key, 300) || null, sku_id: str(o.sku_id, 40) || null, sku_code: str(o.sku_code, 80), note: str(o.note, 300) }];
+  }).slice(0, MAX_ACCESSORIES);
+}
+
+/** รายการตัวเลือกส่วนเสริม → ของที่เก็บในสูตร (สำเนา ณ ตอนเลือก) */
+export function accessoryFromChoice(c: Choice, id: string): AccessoryPick {
+  const g = c.config ?? {};
+  return { id, code: c.code, name: c.name, name_en: c.name_en ?? "", group: str(g.group, 80), image_key: str(g.image_key, 300) || null, sku_id: str(g.sku_id, 40) || null, sku_code: str(g.sku_code, 80), note: "" };
 }
 
 /** ชุดสี: ตัดจุดที่ไม่มีแล้วทิ้ง · ชื่อว่าง = "สี N" · id ซ้ำ = ทิ้งตัวหลัง */
@@ -242,7 +274,7 @@ export function setColorwayPick(spec: Spec, colorwayId: string | null, pinId: st
 
 /** SKU ทั้งหมดในสูตร รวมทุกชุดสี (ดึงสต็อกสดครั้งเดียว) */
 export function allSkuIds(spec: Spec): string[] {
-  return [...new Set([...specSkuIds(spec), ...spec.colorways.flatMap((c) => Object.values(c.picks).map(skuIdOf))].filter((x): x is string => !!x))];
+  return [...new Set([...specSkuIds(spec), ...spec.colorways.flatMap((c) => Object.values(c.picks).map(skuIdOf)), ...(spec.accessories ?? []).map((a) => a.sku_id)].filter((x): x is string => !!x))];
 }
 
 // ─── ชื่อ/รหัสของสิ่งที่เลือก ───────────────────────────────────────────────────
@@ -261,7 +293,7 @@ export function pickInfo(p: Pick | null, ctx?: { bodyPick?: Pick | null }): { co
   }
 }
 
-export const skuIdOf = (p: Pick | null): string | null => (p && (p.kind === "sku" || p.kind === "swatch") ? p.sku_id : null);
+export const skuIdOf = (p: Pick | null): string | null => (p && (p.kind === "sku" || p.kind === "swatch") ? p.sku_id : p?.kind === "logo" ? p.material?.sku_id ?? null : null);
 /** SKU ทั้งหมดในสูตร (ดึงสต็อกสด) */
 export function specSkuIds(spec: Spec): string[] { return [...new Set(spec.pins.map((p) => skuIdOf(p.pick)).filter((x): x is string => !!x))]; }
 export const bodyPickOf = (spec: Spec): Pick | null => spec.pins.find((p) => p.cat === "body" && p.pick)?.pick ?? null;
@@ -273,6 +305,66 @@ export function sourceOf(cat: Choice | undefined): CategorySource {
 }
 /** หมวดนี้ใช้ "สีอะไหล่ทั้งใบ" ไหม (อะไหล่ / หมุดรอง) */
 export const usesHwColor = (cat: Choice | undefined) => cat?.config?.hw === true;
+
+/** รายการข้อความจาก config (array หรือข้อความคั่นด้วย , / ขึ้นบรรทัด) */
+const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => str(x, 80)) : typeof v === "string" ? v.split(/[,\n]/).map((x) => x.trim().slice(0, 80)) : []).filter(Boolean);
+/** แท็กของหมวด (ชื่อแท็กกลาง product_families) — ใช้กรองแผงผ้า + รายการวัสดุในป๊อปเลือก (รอบ 7) */
+export const categoryTags = (cat: Choice | undefined): string[] => listOf(cat?.config?.tags);
+export type CategoryChip = { label: string; search: string };
+/** ปุ่มลัดในแท็บรายการ เช่น เบอร์ด้าย "เบอร์ 30=THREAD-30" → ค้นด้วยคำนำหน้า */
+export function categoryChips(cat: Choice | undefined): CategoryChip[] {
+  return listOf(cat?.config?.chips).map((s) => { const [a, b] = s.split("="); return { label: a.trim(), search: (b ?? a).trim() }; }).filter((c) => c.label && c.search);
+}
+/** ป๊อปเลือกวัสดุเปิดแท็บไหนก่อน: หมวดจากแผงผ้า = แผง · นอกนั้น = รายการ */
+export const defaultMaterialTab = (cat: Choice | undefined): "board" | "list" | "search" => (sourceOf(cat) === "swatch" ? "board" : categoryTags(cat).length || categoryChips(cat).length ? "list" : "search");
+
+// ─── โลโก้ 2 ชั้น (รอบ 7) ─────────────────────────────────────────────────────
+export type LogoOption = { code: string; name: string; name_en: string };
+export const logoMethods = (choices: Choice[]) => choices.filter((c) => c.list_key === "logo_method" && c.is_active !== false);
+/** ตัวเลือกย่อยของวิธี — config.options = [{code,name,name_en}] หรือข้อความ "ชื่อ=English" ทีละบรรทัด */
+export function logoOptions(m: Choice | undefined): LogoOption[] {
+  const raw = m?.config?.options;
+  const arr = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/\n|,/) : [];
+  const seen = new Set<string>();
+  return arr.flatMap((x, i): LogoOption[] => {
+    if (typeof x === "string") { const [a, b] = x.split("="); const name = a.trim().slice(0, 80); if (!name) return []; const code = `o${i + 1}`; return [{ code, name, name_en: (b ?? "").trim().slice(0, 80) }]; }
+    if (!x || typeof x !== "object") return [];
+    const o = x as Record<string, unknown>; const name = str(o.name, 80); const code = str(o.code, 40) || `o${i + 1}`;
+    if (!name || seen.has(code)) return [];
+    seen.add(code);
+    return [{ code, name, name_en: str(o.name_en, 80) }];
+  });
+}
+/** วิธีนี้ต้องเลือกวัสดุของโลโก้ไหม (เช่น โลโก้หนัง) */
+export const logoNeedsMaterial = (m: Choice | undefined) => m?.config?.needs_material === true;
+/** โลโก้เป็นข้อความ — th = "Embossed · ฟอยล์ทอง · หนัง XX" · en = "Gold foil Embossed logo on XX" (ใช้ใน prompt) */
+export function logoText(p: Pick | null, choices: Choice[], lang: "th" | "en" = "th"): string {
+  if (!p || p.kind !== "logo" || !p.method) return "";
+  const m = choices.find((c) => c.list_key === "logo_method" && c.code === p.method);
+  const o = logoOptions(m).find((x) => x.code === p.option);
+  if (lang === "th") return [m?.name ?? p.method, o?.name, p.material ? `วัสดุ ${p.material.name || p.material.code}` : ""].filter(Boolean).join(" · ");
+  const method = m?.name_en?.trim() || m?.name || p.method;
+  return `${o ? `${o.name_en || o.name} ` : ""}${method} logo${p.material ? ` on ${p.material.name || p.material.code}` : ""}`;
+}
+export type LogoWarning = { pinIndex: number; tone: "warn" | "info"; text: string };
+/**
+ * คำเตือนโลโก้: ข้อความคงที่ของวิธี (config.warn) + เตือนเองเมื่อวัสดุของจุด "ตัวกระเป๋า" มีแท็กที่วิธีนี้ไม่เหมาะ (config.avoid_tags)
+ * materialTags = แท็กของ SKU (จาก API bundle) · ไม่มีข้อมูลแท็ก = ข้ามการเตือนเอง
+ */
+export function logoWarnings(spec: Spec, choices: Choice[], materialTags: Record<string, string[] | undefined> = {}): LogoWarning[] {
+  const bodyTags = new Set(spec.pins.filter((p) => p.cat === "body").flatMap((p) => { const id = skuIdOf(p.pick); return id ? materialTags[id] ?? [] : []; }).map((t) => t.toLowerCase()));
+  return spec.pins.flatMap((p, i): LogoWarning[] => {
+    if (p.pick?.kind !== "logo" || !p.pick.method) return [];
+    const m = choices.find((c) => c.list_key === "logo_method" && c.code === (p.pick as { method?: string }).method);
+    if (!m) return [];
+    const out: LogoWarning[] = [];
+    const bad = listOf(m.config?.avoid_tags).filter((t) => bodyTags.has(t.toLowerCase()));
+    if (bad.length) out.push({ pinIndex: i, tone: "warn", text: `จุด ${i + 1} โลโก้ ${m.name} ไม่เหมาะกับวัสดุตัวกระเป๋า (${bad.join(", ")})` });
+    const w = str(m.config?.warn, 200);
+    if (w) out.push({ pinIndex: i, tone: "info", text: `จุด ${i + 1} ${m.name}: ${w}` });
+    return out;
+  });
+}
 
 // ─── กฎห้ามคู่ ────────────────────────────────────────────────────────────────
 /** โทเคนของสูตร: "<หมวด>:<รหัส>" ทุกจุดที่เลือกแล้ว + "hw_color:<รหัสสีอะไหล่>" */
@@ -416,6 +508,7 @@ function partsText(spec: Spec, choices: Choice[]): string {
     let s = `${en(cat, "Detail")}: ${info.name || "as noted"}`;
     if (info.code && p.pick?.kind !== "text") s += ` (${info.code})`;
     if (p.pick?.kind === "color" && p.pick.hex) s += ` color ${p.pick.hex}`;
+    if (p.pick?.kind === "logo" && p.pick.method) s += `, ${logoText(p.pick, choices, "en")}`;
     if (usesHwColor(cat) && hw) s += `, ${en(hw, hw.name)} finish`;
     if (p.note) s += ` - note: ${p.note}`;
     return `${s} [ref ${i + 1}]`;
@@ -510,7 +603,12 @@ export const PROMPT_VARS: { key: string; label: string }[] = [
   { key: "วัสดุ", label: "วัสดุทุกจุด + เลข [ref N]" }, { key: "สีอะไหล่", label: "สีอะไหล่ทั้งใบ" },
   { key: "ช่องนอก", label: "ช่องด้านนอก" }, { key: "ช่องใน", label: "ช่องข้างใน" },
   { key: "อ้างอิง", label: "ประโยคให้ GPT ดูรูปเส้นชี้" },
+  { key: "ส่วนเสริม", label: "ส่วนเสริม (พวงกุญแจ ชาร์ม ฯลฯ)" },
 ];
+/** ส่วนเสริมเป็นประโยคอังกฤษ — "keychain (KC-01), wrist strap" · ไม่มี = "" */
+export function accessoriesText(spec: Spec): string {
+  return (spec.accessories ?? []).map((a) => `${a.name_en || a.name}${a.sku_code ? ` (${a.sku_code})` : ""}${a.note ? ` - ${a.note}` : ""}`).join(", ");
+}
 export type PromptCtx = Record<string, string>;
 export function promptContext(tpl: { name: string; category?: string | null }, spec: Spec, choices: Choice[]): PromptCtx {
   const hw = choices.find((c) => c.list_key === "hw_color" && c.code === spec.hw_color);
@@ -518,8 +616,10 @@ export function promptContext(tpl: { name: string; category?: string | null }, s
   const bag = [`${bagWord(tpl, choices)} (${tpl.name})`, sz, ht, strap > 0 ? `plus a long shoulder strap ${bothUnits(strap)}` : ""].filter(Boolean).join(", ");
   const parts = partsText(spec, choices);
   const hwText = hw ? en(hw, hw.name) : "";
+  const acc = accessoriesText(spec);
   return {
-    "กระเป๋า": `${bag}. ${parts ? parts + "." : ""}${hw ? ` All metal hardware in ${hwText} finish.` : ""} Outer pockets: ${pocketsText(spec, choices, false)}.`,
+    "กระเป๋า": `${bag}. ${parts ? parts + "." : ""}${hw ? ` All metal hardware in ${hwText} finish.` : ""} Outer pockets: ${pocketsText(spec, choices, false)}.${acc ? ` Accessories attached: ${acc}.` : ""}`,
+    "ส่วนเสริม": acc,
     "ประเภท": bagWord(tpl, choices), "ชื่อแม่แบบ": tpl.name, "ขนาด": sz, "หู": ht, "วัสดุ": parts, "สีอะไหล่": hwText,
     "ช่องนอก": pocketsText(spec, choices, false), "ช่องใน": pocketsText(spec, choices, true),
     "อ้างอิง": "Match the attached reference images exactly: numbers [ref N] match the numbered callouts in the attached PDF.",
@@ -601,6 +701,8 @@ export function pickThumbSvg(p: Pick | null, attrs: string, img: (key: string, w
     const vb = `${(p.x / 100) * iw} ${(p.y / 100) * ih} ${(p.w / 100) * iw} ${(p.h / 100) * ih}`;
     return `<svg ${attrs} viewBox="${vb}" preserveAspectRatio="xMidYMid slice"><image href="${esc(img(p.image_key, 1600))}" x="0" y="0" width="${iw}" height="${ih}"/></svg>`;
   }
+  if (p.kind === "logo" && !p.image_key && p.material?.image_key) return box(`<image href="${esc(img(p.material.image_key, 400))}" x="4" y="4" width="92" height="92" preserveAspectRatio="xMidYMid slice" opacity=".55"/><text x="50" y="56" text-anchor="middle" font-size="13" font-weight="700" fill="#333">LOGO</text>`);
+  if (p.kind === "logo" && !p.image_key) return box(`<text x="50" y="56" text-anchor="middle" font-size="13" font-weight="700" fill="#888">LOGO</text>`);
   if ((p.kind === "sku" || p.kind === "logo") && p.image_key) {
     const ring = ctx.isHw && ctx.hwHex ? `<rect x="2" y="2" width="96" height="96" rx="6" fill="none" stroke="${esc(ctx.hwHex)}" stroke-width="4"/>` : "";
     return box(`<image href="${esc(img(p.image_key, 400))}" x="4" y="4" width="92" height="92" preserveAspectRatio="xMidYMid meet"/>${ring}`);
@@ -618,6 +720,8 @@ export type BriefInput = {
   /** ชุดสีของใบนี้ (spec = สูตรที่ applyColorway แล้ว) · baseSpec = สูตรเต็มทุกชุดสี → โชว์ตารางชุดสี */
   colorwayName?: string | null;
   baseSpec?: Spec;
+  /** แท็กของ SKU (เตือนโลโก้ไม่เหมาะกับวัสดุ) — ไม่ส่ง = ข้ามการเตือนเอง */
+  materialTags?: Record<string, string[] | undefined>;
 };
 
 /** ตารางชุดสี: แถว = จุด · คอลัมน์ = สีหลัก + ชุดสีอื่น (โชว์เฉพาะจุดที่มีอย่างน้อย 1 ชุดสีเปลี่ยน + แถวสีอะไหล่) */
@@ -706,14 +810,16 @@ export function buildBriefHtml(b: BriefInput): string {
   const rules = ruleHits(spec, b.choices);
   const st = stockHits(spec, b.stock);
   const prompts = resolvePrompts(t, spec, b.choices).filter((p) => p.on);   // รอบ 6: พิมพ์เฉพาะ prompt ที่เปิด
-  const warn = [...rules.map((x) => `กฎทีม: ${x.reason}`), ...st.out.map((x) => `จุด ${x.pinIndex + 1} ${x.code} หมดสต็อก`), ...st.low.map((x) => `จุด ${x.pinIndex + 1} ${x.code} เหลือน้อย (${x.onHand})`)];
+  const warn = [...rules.map((x) => `กฎทีม: ${x.reason}`), ...st.out.map((x) => `จุด ${x.pinIndex + 1} ${x.code} หมดสต็อก`), ...st.low.map((x) => `จุด ${x.pinIndex + 1} ${x.code} เหลือน้อย (${x.onHand})`),
+    ...logoWarnings(spec, b.choices, b.materialTags).map((x) => x.text)];
+  const acc = spec.accessories ?? [];
   const rows = spec.pins.map((p, i) => {
     const cat = categoryOf(b.choices, p.cat);
     const info = pickInfo(p.pick, { bodyPick: body });
     const sid = skuIdOf(p.pick);
     const stock = sid && sid in b.stock ? (b.stock[sid] <= 0 ? `<span style="color:#A32D2D">หมด</span>` : b.stock[sid] < 10 ? `<span style="color:#854F0B">เหลือ ${b.stock[sid]}</span>` : `มี ${b.stock[sid].toLocaleString("th-TH")}`) : "—";
     return `<tr><td>${i + 1}</td><td>${esc(cat?.name ?? p.cat)}</td><td>${pickThumbSvg(p.pick, `width="56" height="56"`, b.img, { bodyPick: body, hwHex: hw?.hex, isHw: usesHwColor(cat) })}</td>
-      <td><b>${esc(info.code)}</b> ${esc(info.name)}${usesHwColor(cat) && hw ? ` · สี${esc(hw.name)}` : ""}${p.pick?.kind === "color" && p.pick.hex ? ` · ${esc(p.pick.hex)}` : ""}</td><td>${esc(p.note)}</td><td>${stock}</td></tr>`;
+      <td><b>${esc(info.code)}</b> ${esc(info.name)}${usesHwColor(cat) && hw ? ` · สี${esc(hw.name)}` : ""}${p.pick?.kind === "color" && p.pick.hex ? ` · ${esc(p.pick.hex)}` : ""}${p.pick?.kind === "logo" && p.pick.method ? `<br><span style="color:#534AB7">${esc(logoText(p.pick, b.choices))}</span>` : ""}</td><td>${esc(p.note)}</td><td>${stock}</td></tr>`;
   }).join("");
   const pocketCells = PANELS.map((p) => `<div class="pk">${pocketPanelSvg(spec, p.key, b.choices)}${spec.pockets[p.key].map((x, i) => {
     const tt = b.choices.find((c) => c.list_key === "pocket_type" && c.code === x.type);
@@ -747,6 +853,7 @@ export function buildBriefHtml(b: BriefInput): string {
   ${r.note ? `<div style="margin-top:6px">หมายเหตุ: ${esc(r.note)}</div>` : ""}
   <h4>ตารางสรุป</h4><table><tr><th style="width:5%">#</th><th style="width:14%">หมวด</th><th style="width:12%">รูป</th><th>รหัส · ชื่อ</th><th style="width:24%">โน้ต</th><th style="width:11%">สต็อก</th></tr>${rows || `<tr><td colspan="6" style="color:#999">ยังไม่มีจุด</td></tr>`}</table>
   ${b.baseSpec ? colorwayTableHtml(b.baseSpec, b.choices, b.img) : ""}
+  ${acc.length ? `<h4>ส่วนเสริม</h4><table><tr><th style="width:12%">รูป</th><th>ชื่อ</th><th style="width:16%">กลุ่ม</th><th style="width:28%">โน้ต</th></tr>${acc.map((a) => `<tr><td>${a.image_key ? `<img src="${esc(b.img(a.image_key, 200))}" style="width:48px;height:48px;object-fit:contain;border-radius:4px;background:#f6f4ef">` : "—"}</td><td><b>${esc(a.sku_code || a.code)}</b> ${esc(a.name)}</td><td>${esc(a.group)}</td><td>${esc(a.note)}</td></tr>`).join("")}</table>` : ""}
   <h4>ช่อง</h4><div class="pks">${pocketCells}</div>
   <h4>Prompt สำหรับ GPT (แนบรูปเส้นชี้หน้านี้ไปด้วย · เลข [ref N] = เลขจุด)</h4>
   ${prompts.map((p, i) => `<div class="pr"><b>${i + 1}) ${esc(p.title)}</b><div>${esc(p.text)}</div></div>`).join("")}

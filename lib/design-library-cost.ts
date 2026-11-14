@@ -16,7 +16,8 @@ import { bodyPickOf, categoryOf, EMPTY_COST, pickInfo, PANELS, sizeKnown, skuIdO
 
 // ─── ข้อมูลประกอบ ─────────────────────────────────────────────────────────────
 /** วัสดุที่ผูก SKU (ไม่มีราคา — ใช้คิดปริมาณ) */
-export type MaterialInfo = { code: string; name: string; uom: string | null; face_width_cm: number | null };
+/** tags = ชื่อแท็กกลางของ SKU (รอบ 7: เตือนโลโก้ไม่เหมาะกับวัสดุ) */
+export type MaterialInfo = { code: string; name: string; uom: string | null; face_width_cm: number | null; tags?: string[] };
 /** ค่าคิดผ้า (bom_calc_settings) */
 export type CalcSetting = { face: number; loss: number; cmPerUnit: number; uom: string };
 export type CalcSettings = { outer: CalcSetting; lining: CalcSetting };

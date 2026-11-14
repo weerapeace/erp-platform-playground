@@ -26,7 +26,7 @@ import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useFileDrop } from "@/components/file-drop";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import {
-  allSkuIds, applyColorway, bodyPickOf, categoryOf, chosenRenders, cleanSpec, colorwayLabel, pickInfo, RENDER_VIEWS, ruleHits, setColorwayPick, sizeKnown, skuIdOf, stockHits, toStudioParams,
+  allSkuIds, applyColorway, bodyPickOf, categoryOf, chosenRenders, cleanSpec, colorwayLabel, logoWarnings, pickInfo, RENDER_VIEWS, ruleHits, setColorwayPick, sizeKnown, skuIdOf, stockHits, toStudioParams,
   MAX_PINS, nudgePos, offsetPos, PANELS, type Pin, type PinCopy, type Spec,
 } from "@/lib/design-library";
 import { PATTERN_SCHEMA } from "@/lib/pattern-project";
@@ -43,6 +43,7 @@ import { ToProductModal } from "./to-product";
 import { PromptsPanel } from "./prompts-panel";
 import { useHistory, usePinShortcuts } from "./pin-shortcuts";
 import { ScrollTabs } from "@/components/scroll-tabs";
+import { AccessoriesCard } from "./accessories";
 
 /** หัวข้อล่างของหน้าสูตร (รอบ 7: เป็นแท็บ · จำแท็บล่าสุดในเครื่อง) */
 type LowerTab = "size" | "cost" | "prompt" | "renders";
@@ -276,7 +277,8 @@ export function RecipeEditor({ id }: { id: string }) {
           <div className="rounded-xl border border-slate-200 bg-white p-3">
             <PinList spec={view} b={b} stock={stock} sel={sel} onSelect={setSel} readOnly={readOnly} />
           </div>
-          <Warnings spec={view} b={b} stock={stock} />
+          <AccessoriesCard items={spec.accessories} choices={b.choices} stock={stock} readOnly={readOnly} onChange={(accessories) => update((s) => ({ ...s, accessories }))} />
+          <Warnings spec={view} b={b} stock={stock} materials={materials} />
         </div>
       </div>
 
@@ -449,11 +451,15 @@ function PinList({ spec, b, stock, sel, onSelect, readOnly }: { spec: Spec; b: R
   );
 }
 
-function Warnings({ spec, b, stock }: { spec: Spec; b: RecipeBundle; stock: Record<string, number> }) {
+function Warnings({ spec, b, stock, materials }: { spec: Spec; b: RecipeBundle; stock: Record<string, number>; materials: Record<string, MaterialInfo> }) {
   const rules = ruleHits(spec, b.choices);
   const st = stockHits(spec, stock);
+  const logo = logoWarnings(spec, b.choices, Object.fromEntries(Object.entries(materials).map(([k, v]) => [k, v.tags])));
+  const accOut = spec.accessories.filter((a) => a.sku_id && stock[a.sku_id] !== undefined && stock[a.sku_id] <= 0);
   const items = [
     ...rules.map((r) => ({ tone: "warn", text: `กฎทีม: ${r.reason}` })),
+    ...logo.map((w) => ({ tone: w.tone, text: w.text })),
+    ...accOut.map((a) => ({ tone: "bad", text: `ส่วนเสริม ${a.sku_code || a.name} หมดสต็อก` })),
     ...st.out.map((h) => ({ tone: "bad", text: `จุด ${h.pinIndex + 1} ${h.code} หมดสต็อก` })),
     ...st.low.map((h) => ({ tone: "warn", text: `จุด ${h.pinIndex + 1} ${h.code} เหลือน้อย (${h.onHand})` })),
     ...spec.pins.map((p, i) => (!p.cat ? { tone: "info", text: `จุด ${i + 1} ยังไม่เลือกหมวด` } : !p.pick && !p.note ? { tone: "info", text: `จุด ${i + 1} ยังไม่ได้เลือกของ` } : null)).filter(Boolean) as { tone: string; text: string }[],

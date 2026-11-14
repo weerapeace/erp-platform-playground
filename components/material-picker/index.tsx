@@ -166,10 +166,22 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   );
 }
 
-// MaterialSearchModal — ค้นหาวัตถุดิบแบบเต็ม (popup ใหญ่ + โหลดเพิ่ม)
-function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowedTags, initialSearch = "" }: { open: boolean; onClose: () => void; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[]; initialSearch?: string }) {
+/** ปุ่มกรองย่อยในหน้าค้นวัตถุดิบ — แท็ก (ชื่อ) และ/หรือ คำค้นนำหน้า (เช่น เบอร์ด้าย THREAD-30) */
+export type MaterialChip = { key: string; label: string; tags?: string[]; search?: string };
+
+/**
+ * MaterialSearchPanel — เนื้อในของ "ค้นหาวัตถุดิบแบบเต็ม" (ช่องค้น + การ์ดมีรูป + แบ่งหน้า) · ฝังในป๊อปอื่นได้
+ *   ใช้ที่: MaterialSearchModal (ข้างล่าง) · Design Library ป๊อปเลือกวัสดุ แท็บ "รายการ" / "ค้นทั้งหมด"
+ *   chips = ปุ่มกรองย่อยด้านบน ("ทั้งหมด" = allowedTags) · คำค้นนำหน้าของปุ่ม + คำที่พิมพ์ = ค้นด้วยกัน (ทุกคำต้องตรง)
+ */
+export function MaterialSearchPanel({ active = true, onItem, allowedGroupCodes, allowedTags, chips, defaultChip = "", initialSearch = "", thumbSize = 44, wide = false, copyMode = false, busy = false, refreshKey = 0, onSearchChange, emptyText = "ไม่พบวัตถุดิบ", placeholder = "ค้นหา รหัส / ชื่อวัตถุดิบ…" }: {
+  active?: boolean; onItem: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[]; chips?: MaterialChip[]; defaultChip?: string;
+  initialSearch?: string; thumbSize?: number; wide?: boolean; copyMode?: boolean; busy?: boolean; refreshKey?: number;
+  onSearchChange?: (s: string) => void; emptyText?: string; placeholder?: string;
+}) {
   const PAGE = 40;
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
+  const [chip, setChip] = useState(defaultChip);   // "" = ทั้งหมด
   const [items, setItems] = useState<BomComponent[]>([]);
   const [loading, setLoading] = useState(false);
   // เลื่อนดูเป็น "หน้า" (ของกลาง Pager — รู้ total ตอนค้นหา · ไม่รู้ตอนเลื่อนดูทั้งหมด ใช้ hasMore) — เดิมมีแค่ปุ่มโหลดเพิ่มที่ต้องกดรัวและย้อนกลับไม่ได้
@@ -177,30 +189,75 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const load = useCallback(async (q: string, pg: number) => {
+  const cur = chips?.find((c) => c.key === chip);
+  const tagKey = (cur?.tags?.length ? cur.tags : allowedTags ?? []).join(",");
+  const groupKey = (allowedGroupCodes ?? []).join(",");
+  const q = [cur?.search ?? "", search].map((s) => s.trim()).filter(Boolean).join(" ");
+  const load = useCallback(async (pg: number) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: String(PAGE), offset: String(pg * PAGE) });
       if (q) params.set("search", safeSearch(q));
-      if (allowedGroupCodes && allowedGroupCodes.length) params.set("groups", allowedGroupCodes.join(","));
-      if (allowedTags && allowedTags.length) params.set("tags", allowedTags.join(","));
+      if (groupKey) params.set("groups", groupKey);
+      if (tagKey) params.set("tags", tagKey);
       const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" }); const j = await res.json();
       const data = (j.data ?? []) as BomComponent[];
       setItems(data);
       setTotal(typeof j.total === "number" ? j.total : null);
       setHasMore(data.length === PAGE);
       listRef.current?.scrollTo({ top: 0 });   // เปลี่ยนหน้าแล้วเลื่อนกลับบนสุด
-    } finally { setLoading(false); }
-  }, [allowedGroupCodes, allowedTags]);
-  // เปิดป๊อป → เริ่มด้วยคำที่พิมพ์ค้างไว้ใน dropdown (ไม่ต้องพิมพ์ใหม่)
-  const wasOpen = useRef(false);
+    } catch { setItems([]); setHasMore(false); }
+    finally { setLoading(false); }
+  }, [q, groupKey, tagKey]);
+  // เพิ่งเปิด → เริ่มด้วยคำที่พิมพ์ค้างไว้ (ไม่ทับสิ่งที่ผู้ใช้พิมพ์ต่อ)
+  const wasActive = useRef(active);
   useEffect(() => {
-    if (open && !wasOpen.current) { setSearch(initialSearch); setPage(0); }   // เฉพาะตอนเพิ่งเปิด — ไม่ทับสิ่งที่ผู้ใช้พิมพ์ต่อ
-    wasOpen.current = open;
-  }, [open, initialSearch]);
-  // เปลี่ยนคำค้น → กลับหน้าแรกเสมอ (ไม่งั้นค้างอยู่หน้า 5 ของคำค้นเก่า แล้วเห็นว่าง)
-  useEffect(() => { setPage(0); }, [search]);
-  useEffect(() => { if (!open) return; const t = setTimeout(() => { void load(search, page); }, search ? 300 : 0); return () => clearTimeout(t); }, [open, search, page, load]);
+    if (active && !wasActive.current) { setSearch(initialSearch); setPage(0); }
+    wasActive.current = active;
+  }, [active, initialSearch]);
+  // เปลี่ยนคำค้น/ปุ่มกรอง → กลับหน้าแรกเสมอ (ไม่งั้นค้างอยู่หน้า 5 ของคำค้นเก่า แล้วเห็นว่าง)
+  useEffect(() => { setPage(0); }, [q, tagKey]);
+  useEffect(() => { if (!active) return; const t = setTimeout(() => { void load(page); }, search ? 300 : 0); return () => clearTimeout(t); }, [active, search, page, load, refreshKey]);
+  const reportRef = useRef(onSearchChange);
+  reportRef.current = onSearchChange;
+  useEffect(() => { reportRef.current?.(search); }, [search]);
+
+  return (
+    <div className="space-y-2">
+      <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder={placeholder}
+        className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {chips && chips.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {[{ key: "", label: "ทั้งหมด" } as MaterialChip, ...chips].map((c) => (
+            <button key={c.key || "_all"} type="button" onClick={() => setChip(c.key)}
+              className={`h-7 px-2.5 text-[12px] rounded-full border ${chip === c.key ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{c.label}</button>
+          ))}
+        </div>
+      )}
+      <div ref={listRef} className={`grid gap-2 max-h-[55vh] overflow-y-auto pr-1 ${wide ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-2"}`}>
+        {items.map((c) => (
+          <button key={c.id} type="button" disabled={busy} onClick={() => onItem(c)}
+            className={`flex items-center gap-2 p-2 border rounded-lg text-left disabled:opacity-50 ${copyMode ? "border-amber-200 hover:bg-amber-50 hover:border-amber-400" : "border-slate-200 hover:bg-blue-50 hover:border-blue-300"}`}>
+            <Thumb k={c.image_key} size={thumbSize} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1"><code className="text-[10px] text-slate-400">{c.code}</code>{c.out_of_group && <span className="text-[9px] px-1 rounded bg-amber-100 text-amber-700">นอกกลุ่ม</span>}{c.material_type && <span className="text-[9px] px-1 rounded bg-slate-100 text-slate-500">{c.material_type}</span>}</div>
+              <div className="text-sm text-slate-700 line-clamp-2 leading-tight">{c.name}</div>
+            </div>
+            {copyMode && <span className="text-[10px] text-amber-600 shrink-0">⧉ ก๊อป</span>}
+          </button>
+        ))}
+        {!loading && items.length === 0 && <div className="col-span-full text-center py-10 text-slate-400 text-sm">{emptyText}</div>}
+      </div>
+      {loading && <div className="text-center text-xs text-slate-400 py-1">กำลังค้นหา…</div>}
+      <Pager page={page} pageSize={PAGE} count={items.length} total={total} hasMore={hasMore} loading={loading} onPage={setPage} hideWhenSingle />
+    </div>
+  );
+}
+
+// MaterialSearchModal — ค้นหาวัตถุดิบแบบเต็ม (popup ใหญ่ + โหลดเพิ่ม) · เนื้อในใช้ MaterialSearchPanel
+function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowedTags, initialSearch = "" }: { open: boolean; onClose: () => void; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[]; initialSearch?: string }) {
+  const [search, setSearch] = useState(initialSearch);   // คำที่พิมพ์อยู่ (เติมให้ฟอร์ม "ขอเพิ่ม")
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // เพิ่ม/ก๊อป SKU วัตถุดิบตรงจากหน้าค้นหา (ไม่ต้องออกไปหน้าอื่น)
   const toast = useToast();
@@ -209,7 +266,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   const [copyMode, setCopyMode] = useState(false);       // ⧉ โหมดก๊อป: กดวัตถุดิบสักตัว = ก๊อป (ไม่ใช่เลือก)
   const [copying, setCopying] = useState(false);
   const [copyEditId, setCopyEditId] = useState<string | null>(null);   // เปิดตัวที่ก๊อปมาแก้สี/รหัส
-  const refreshSearch = useCallback(() => { void load(search, page); }, [load, search, page]);
+  const refreshSearch = useCallback(() => { setRefreshKey((k) => k + 1); }, []);
   const doCopy = async (c: BomComponent) => {
     setCopying(true);
     try {
@@ -235,24 +292,9 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
       </div>}>
       <div className="space-y-2">
         {copyMode && <div className="px-3 py-1.5 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">โหมดก๊อป — กดวัตถุดิบที่จะใช้เป็นต้นแบบ แล้วเปลี่ยนแค่ “สี”/รหัส (ระบบก๊อปฟิลด์อื่นให้)</div>}
-        <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ…"
-          className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        <div ref={listRef} className="grid grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1">
-          {items.map((c) => (
-            <button key={c.id} type="button" disabled={copying} onClick={() => (copyMode ? void doCopy(c) : onPick(c))}
-              className={`flex items-center gap-2 p-2 border rounded-lg text-left disabled:opacity-50 ${copyMode ? "border-amber-200 hover:bg-amber-50 hover:border-amber-400" : "border-slate-200 hover:bg-blue-50 hover:border-blue-300"}`}>
-              <Thumb k={c.image_key} size={44} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1"><code className="text-[10px] text-slate-400">{c.code}</code>{c.out_of_group && <span className="text-[9px] px-1 rounded bg-amber-100 text-amber-700">นอกกลุ่ม</span>}{c.material_type && <span className="text-[9px] px-1 rounded bg-slate-100 text-slate-500">{c.material_type}</span>}</div>
-                <div className="text-sm text-slate-700 line-clamp-2 leading-tight">{c.name}</div>
-              </div>
-              {copyMode && <span className="text-[10px] text-amber-600 shrink-0">⧉ ก๊อป</span>}
-            </button>
-          ))}
-          {!loading && items.length === 0 && <div className="col-span-2 text-center py-10 text-slate-300 text-sm">ไม่พบวัตถุดิบ</div>}
-        </div>
-        {loading && <div className="text-center text-xs text-slate-400 py-1">กำลังค้นหา…</div>}
-        <Pager page={page} pageSize={PAGE} count={items.length} total={total} hasMore={hasMore} loading={loading} onPage={setPage} hideWhenSingle />
+        <MaterialSearchPanel active={open} initialSearch={initialSearch} allowedGroupCodes={allowedGroupCodes} allowedTags={allowedTags}
+          copyMode={copyMode} busy={copying} refreshKey={refreshKey} onSearchChange={setSearch}
+          onItem={(c) => (copyMode ? void doCopy(c) : onPick(c))} />
       </div>
     </ERPModal>
 
