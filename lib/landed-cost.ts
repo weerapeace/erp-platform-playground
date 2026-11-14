@@ -197,3 +197,31 @@ export const fmtMoney = (v: number | null | undefined, digits = 2) =>
   (Number.isFinite(Number(v)) ? Number(v) : 0).toLocaleString("th-TH", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 export const curSymbol = (cur: string | null | undefined) => (isCNY(cur) ? "¥" : isForeignCurrency(cur) ? String(cur).toUpperCase() + " " : "฿");
 export const SHIP_METHOD_LABEL: Record<ShipMethod, string> = { none: "ไม่คิดค่าส่ง", cube: "ตามคิว (M3)", weight: "ตามน้ำหนัก (kg)" };
+
+/**
+ * ★ 2026-11-14 เจ้าของ: "บางทีไม่รู้เรท แต่รู้ยอดบาท — อยากแก้ราคาบาท แล้วให้คำนวณเรทให้ใหม่เอง"
+ * หาเรท (บาทต่อ 1 หน่วยสกุลใบ) ที่ทำให้ "ค่าสินค้า ฿" รวม = ยอดบาทที่พิมพ์ — คิดด้วยสูตรกลาง computeVoucher (ปัดราคาบาทต่อหน่วยเหมือนกัน)
+ * เริ่มจาก บาท ÷ ยอดสกุลใบ แล้วค้นหาละเอียด (6 ตำแหน่ง) ให้ตรงทุกสตางค์ · ไม่มียอดสกุลใบ / ยอดบาท ≤ 0 = null
+ */
+export function fxForTargetThb(header: VoucherHeaderInput, lines: VoucherLineInput[], targetThb: number): number | null {
+  const target = r2(n(targetThb));
+  const foreign = computeVoucher({ ...header, fx_rate: 1 }, lines).totals.subtotal_foreign;
+  if (!(target > 0) || !(foreign > 0)) return null;
+  const thbAt = (fx: number) => computeVoucher({ ...header, fx_rate: fx }, lines).totals.subtotal_thb;
+  const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+  let best = r6(target / foreign);
+  let bestDiff = Math.abs(thbAt(best) - target);
+  if (bestDiff < 0.005) return best;
+  // ค่าสินค้าบาทเพิ่มขึ้นตามเรท (ไม่ลด) → ค้นแบบแบ่งครึ่งรอบ ๆ ค่าเริ่มต้น
+  let lo = best * 0.98, hi = best * 1.02;
+  for (let i = 0; i < 60; i++) {
+    const mid = r6((lo + hi) / 2);
+    const v = thbAt(mid);
+    const d = Math.abs(v - target);
+    if (d < bestDiff) { best = mid; bestDiff = d; }
+    if (d < 0.005) break;
+    if (v < target) lo = mid; else hi = mid;
+    if (hi - lo < 1e-6) break;
+  }
+  return best;
+}

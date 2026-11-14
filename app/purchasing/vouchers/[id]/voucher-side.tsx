@@ -9,6 +9,7 @@
  */
 import { useState } from "react";
 import { ERPModal } from "@/components/modal";
+import { Icon } from "@/components/icon";
 import { formatDate } from "@/lib/date";
 import { fmtMoney } from "@/lib/landed-cost";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
@@ -60,7 +61,27 @@ function CheckList({ items }: { items: CheckItem[] }) {
   );
 }
 
-function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null }) {
+/**
+ * ★ 2026-11-14 เจ้าของ: "บางทีไม่รู้เรท แต่รู้ยอดบาท — อยากแก้ราคาบาท แล้วให้คำนวณเรทให้ใหม่เอง"
+ * ช่อง "ค่าสินค้า ฿" กดแก้ได้ (ใบสกุลต่างประเทศ · ใบร่าง) → หน้าใบคิดเรทใหม่ให้ (lib/landed-cost fxForTargetThb)
+ */
+function GoodsThbEdit({ value, onSet }: { value: number; onSet: (thb: number) => void }) {
+  const [edit, setEdit] = useState<string | null>(null);
+  const commit = () => { const v = Number(edit); setEdit(null); if (Number.isFinite(v) && v > 0 && Math.abs(v - value) >= 0.005) onSet(v); };
+  if (edit != null) return (
+    <input autoFocus type="number" inputMode="decimal" step="any" min={0} value={edit} onChange={(e) => setEdit(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEdit(null); }}
+      className="w-28 h-7 px-1.5 text-right text-sm tabular-nums border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-300" title="พิมพ์ยอดบาทที่จ่ายจริง แล้วกด Enter — ระบบคิดเรทให้ใหม่" />
+  );
+  return (
+    <button type="button" onClick={() => setEdit(value > 0 ? String(value) : "")} title="รู้ยอดบาทแต่ไม่รู้เรท? กดแก้ยอดบาท — ระบบคิดเรทให้ใหม่ (เรท = บาท ÷ ยอดสกุลใบ)"
+      className="group inline-flex items-center gap-1 rounded px-1 -mr-1 tabular-nums hover:bg-blue-50 hover:text-blue-700">
+      ฿{fmtMoney(value)}<Icon name="edit" mode="line" size={12} className="text-slate-300 group-hover:text-blue-600" />
+    </button>
+  );
+}
+
+function SummaryRows({ t, foreign, sym, fxRate, onSetGoodsThb }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; onSetGoodsThb?: (thb: number) => void }) {
   return (
     <dl className="text-sm space-y-1">
       {/* ★ 2026-11-14 ส่วนลดรวม (เจ้าของขอ "มีเขียนตรงสรุปด้วยว่าส่วนลดรวมเท่าไหร่") — ค่าสินค้าด้านล่าง = หักส่วนลดแล้ว */}
@@ -68,7 +89,7 @@ function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean;
       {(t.discount_foreign ?? 0) > 0 && <div className="flex justify-between text-red-600"><dt>ส่วนลดรวม</dt><dd className="tabular-nums">−{foreign ? sym : "฿"}{fmtMoney(t.discount_foreign)}{foreign && (t.discount_thb ?? 0) > 0 ? <span className="ml-1 text-[11px] text-red-400">(฿{fmtMoney(t.discount_thb)})</span> : null}</dd></div>}
       {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()}){(t.discount_foreign ?? 0) > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums">{sym}{fmtMoney(t.subtotal_foreign)}</dd></div>}
       {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {fxRate || "—"}</dd></div>}
-      <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า</dt><dd className="tabular-nums">฿{fmtMoney(t.subtotal_thb)}</dd></div>
+      <div className="flex justify-between items-center"><dt className="text-slate-500">ค่าสินค้า</dt><dd className="tabular-nums">{foreign && onSetGoodsThb && t.subtotal_foreign > 0 ? <GoodsThbEdit value={t.subtotal_thb} onSet={onSetGoodsThb} /> : <>฿{fmtMoney(t.subtotal_thb)}</>}</dd></div>
       <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
       <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5"><dt className="font-semibold text-slate-700">รวมทั้งสิ้น</dt><dd className="tabular-nums font-bold text-slate-900 text-lg">฿{fmtMoney(t.grand_total_thb)}</dd></div>
     </dl>
@@ -76,16 +97,18 @@ function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean;
 }
 
 /** ด้านขวาตอนเป็นร่าง: เช็กลิสต์ + สรุปยอด + บันทึกร่าง + ยืนยัน */
-export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, dirty, saving, onSave, onConfirm }: {
+export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, dirty, saving, onSave, onConfirm, onSetGoodsThb }: {
   items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   dirty: boolean; saving: boolean; onSave: () => void; onConfirm: () => void;
+  /** แก้ยอดค่าสินค้าบาท → หน้าใบคิดเรทใหม่ (ใบร่างสกุลต่างประเทศ) */
+  onSetGoodsThb?: (thb: number) => void;
 }) {
   const ok = canConfirm(items);
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4">
       <div className="text-sm font-semibold text-slate-700 mb-2">ก่อนยืนยัน</div>
       <CheckList items={items} />
-      <div className="mt-3 pt-3 border-t border-slate-100"><SummaryRows t={totals} foreign={foreign} sym={sym} fxRate={fxRate} /></div>
+      <div className="mt-3 pt-3 border-t border-slate-100"><SummaryRows t={totals} foreign={foreign} sym={sym} fxRate={fxRate} onSetGoodsThb={onSetGoodsThb} /></div>
       <button onClick={onConfirm} disabled={saving}
         className={`mt-3 w-full h-11 rounded-lg text-sm font-semibold text-white ${ok ? "bg-orange-600 hover:bg-orange-700" : "bg-orange-300 hover:bg-orange-400"} disabled:opacity-50`}>
         ✓ ยืนยัน + ออกเลข

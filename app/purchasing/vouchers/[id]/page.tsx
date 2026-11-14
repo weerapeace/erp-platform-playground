@@ -23,7 +23,7 @@ import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
-import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
+import { computeVoucher, fxForTargetThb, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist } from "@/lib/purchase-voucher-checklist";
 import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
@@ -128,15 +128,25 @@ export default function PurchaseVoucherFormPage() {
   const sym = curSymbol(currency);
 
   // คิดสดฝั่งหน้าเว็บ (สูตรเดียวกับ server)
-  const calc = useMemo(() => {
+  const calcIn = useMemo(() => {
     if (!data) return null;
-    return computeVoucher(
-      { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
-      data.lines.map((l) => { const e = ln[l.id]; return { qty: !l.gr_line_id && e?.qty ? num(e.qty) : l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null, ...discOf(e) }; }),
-    );
+    return {
+      header: { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
+      lines: data.lines.map((l) => { const e = ln[l.id]; return { qty: !l.gr_line_id && e?.qty ? num(e.qty) : l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null, ...discOf(e) }; }),
+    };
   }, [data, h, ln, currency]);
+  const calc = useMemo(() => (calcIn ? computeVoucher(calcIn.header, calcIn.lines) : null), [calcIn]);
 
   const setHeader = (patch: Partial<typeof h>) => { setH((p) => ({ ...p, ...patch })); setDirty(true); };
+  /** ★ 2026-11-14 รู้ยอดบาท ไม่รู้เรท → แก้ "ค่าสินค้า ฿" ในกล่องสรุป แล้วคิดเรทให้ใหม่ (ให้ยอดบาทตรงทุกสตางค์ · lib/landed-cost fxForTargetThb) */
+  const setGoodsThb = (thb: number) => {
+    if (!calcIn) return;
+    const fx = fxForTargetThb(calcIn.header, calcIn.lines, thb);
+    if (fx == null) { toast.error("คิดเรทไม่ได้ — ใส่ราคา (สกุลใบ) ในรายการก่อน"); return; }
+    setHeader({ fx_rate: String(fx) });
+    const got = computeVoucher({ ...calcIn.header, fx_rate: fx }, calcIn.lines).totals.subtotal_thb;
+    toast.success(`คิดเรทให้ใหม่ = ${fx} บาท/${sym.trim() || currency} (฿${fmtMoney(got)} ÷ ${sym}${fmtMoney(calc?.totals.subtotal_foreign ?? 0)})${Math.abs(got - thb) >= 0.01 ? ` · ใกล้สุดที่ได้ ฿${fmtMoney(got)}` : ""} — กดบันทึกร่างเพื่อเก็บ`);
+  };
   const setLine = (lid: string, patch: Partial<LineEdit>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
 
   const save = async (): Promise<boolean> => {
@@ -351,7 +361,7 @@ export default function PurchaseVoucherFormPage() {
                   </div>
                   {foreign && (
                     <label className="text-xs text-slate-500">เรท ฿ ต่อ 1 {sym.trim()} <span className="text-slate-400">(ค่าเริ่มต้น = เรทวันรับของ)</span>
-                      <input type="number" inputMode="decimal" step="0.001" min={0} value={h.fx_rate} disabled={readonly} onChange={(e) => setHeader({ fx_rate: e.target.value })} className={`${inputCls} w-full mt-1 tabular-nums`} placeholder="เช่น 5.18" />
+                      <input type="number" inputMode="decimal" step="any" min={0} value={h.fx_rate} disabled={readonly} onChange={(e) => setHeader({ fx_rate: e.target.value })} className={`${inputCls} w-full mt-1 tabular-nums`} placeholder="เช่น 5.18" />
                     </label>
                   )}
                   <label className="text-xs text-slate-500 sm:col-span-2 lg:col-span-1">หมายเหตุ
@@ -567,7 +577,7 @@ export default function PurchaseVoucherFormPage() {
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
                 {hd.status === "draft" && canEdit && (
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} dirty={dirty} saving={saving}
-                    onSave={() => void save()} onConfirm={() => setConfirmOpen(true)} />
+                    onSave={() => void save()} onConfirm={() => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
                 {/* ยืนยันแล้ว: งานถัดไป (พิมพ์ · จ่ายค่าสินค้า · ค่าส่ง) */}

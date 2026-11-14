@@ -130,3 +130,26 @@ describe("ใบสำคัญรับ — ส่วนลดรายบร�
     expect(lineDiscount(1, 2, -3, null)).toBe(0);
   });
 });
+
+describe("ใบสำคัญรับ — รู้ยอดบาท ไม่รู้เรท (2026-11-14)", () => {
+  it("¥600 อยากได้ ฿3,100 → เรทที่ทำให้ค่าสินค้าบาท = 3,100 พอดี", async () => {
+    const { fxForTargetThb } = await import("@/lib/landed-cost");
+    const H = { currency: "RMB", fx_rate: null, ship_method: "none" as const };
+    const lines = [{ qty: 200, unit_price: 3 }];
+    const fx = fxForTargetThb(H, lines, 3100)!;
+    expect(computeVoucher({ ...H, fx_rate: fx }, lines).totals.subtotal_thb).toBe(3100);
+  });
+  it("หลายรายการ + ส่วนลด ราคาบาทปัดต่อหน่วย → ยังหาเรทให้ตรงยอดได้", async () => {
+    const { fxForTargetThb } = await import("@/lib/landed-cost");
+    const H = { currency: "RMB", fx_rate: null, ship_method: "none" as const };
+    const lines = [{ qty: 333, unit_price: 1.37 }, { qty: 47, unit_price: 12.9, discount: 5 }, { qty: 1000, unit_price: 0.07 }];
+    const fx = fxForTargetThb(H, lines, 5555.55)!;
+    expect(Math.abs(computeVoucher({ ...H, fx_rate: fx }, lines).totals.subtotal_thb - 5555.55)).toBeLessThan(0.02);
+  });
+  it("ไม่มีราคา / ยอดบาท 0 = ไม่คิด", async () => {
+    const { fxForTargetThb } = await import("@/lib/landed-cost");
+    const H = { currency: "RMB", fx_rate: null, ship_method: "none" as const };
+    expect(fxForTargetThb(H, [{ qty: 1, unit_price: null }], 100)).toBeNull();
+    expect(fxForTargetThb(H, [{ qty: 1, unit_price: 3 }], 0)).toBeNull();
+  });
+});
