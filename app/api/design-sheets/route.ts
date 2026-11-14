@@ -17,7 +17,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
-import { isValidDsStatus } from "./shared";
+import { isValidDsStatus, nextDsNo } from "./shared";
 import { designSheetCoverMap } from "@/lib/design-sheet-covers";
 import { loadChecklistSummaries, seedChecklistOnCreate } from "@/lib/record-tasks-server";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
@@ -97,14 +97,6 @@ function latestQuote(rows: Array<Record<string, unknown>>): QuoteLatest | null {
   };
 }
 
-async function nextDsNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {
-  const { data, error } = await admin.rpc("erp_next_number", { p_key: "ds" });
-  if (!error && data) return String(data);
-  // fallback กันพลาด
-  const yr = new Date().getFullYear();
-  const { count } = await admin.from("design_sheets").select("id", { count: "exact", head: true });
-  return `DS-${yr}-${String((count ?? 0) + 1).padStart(4, "0")}`;
-}
 
 /** รูปหลักของแต่ละใบงาน — ของกลาง lib/design-sheet-covers (อีเมลรายงานงานค้างใช้ตัวเดียวกัน) */
 const coverMap = designSheetCoverMap;

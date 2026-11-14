@@ -83,8 +83,19 @@
 - **ใบสั่งทำตัวอย่างให้ช่าง** `/print/design-library/[id]/techpack?cw=` · ข้อมูล `lib/design-library-techpack.ts` buildTechpackData (ไม่มีราคา/prompt) · ปริมาณจาก estimateCost
   - แม่แบบเอกสารกลาง entity **`dl_techpack`** → แก้หน้าตาที่ /admin/report-templates (ลงทะเบียน REPORT_ENTITY_DEFS + REPORT_USAGES + sample-docs แล้ว) · ไม่มีแถวใน DB = `DEFAULT_DL_TECHPACK_TEMPLATE`
 
+## รอบ 5 ช่วง 3 (2026-11-14) — ส่งเป็นใบงานออกแบบ
+- ปุ่ม **"ส่งเป็นใบงาน"** ในหน้าสูตร (design_library.edit + products.edit) → ป๊อป `components/design-library/send-to-sheet.tsx`: สร้างใบใหม่ / ใบเดิมที่สูตรจำไว้ / แนบเข้าใบอื่น (`DesignSheetPickerModal` กลาง)
+- API `POST /api/design-library/send-to-sheet` · แปลงข้อมูล `lib/design-library-sheet.ts` (pure + เทสต์) · ใช้ตารางเดิมของใบงานทั้งหมด ไม่มีตารางใหม่
+  - ใบใหม่: เลข DS จาก `nextDsNo` (ย้ายไป `app/api/design-sheets/shared.ts` ใช้ร่วมกับสร้างใบปกติ) · รายละเอียดงานลิงก์กลับสูตร + ใบสั่งทำตัวอย่าง · ⏳ ข้อตั้งต้นแบบใบใหม่ปกติ
+  - รูป GPT ล่าสุด (ต่อมุม × ชุดสี) → `erp_playground_attachments` key R2 เดิม (แนบแล้วข้าม)
+  - รูปแม่แบบ + หมุดวัสดุ (ชุดสีที่ดูอยู่ · จำนวนจากทุนประมาณ) → `design_sheet_spec_pages/_pins` หน้าใหม่ชื่อ "Design Library · <แม่แบบ> สูตร #n · <ชุดสี>" — ส่งซ้ำ = แทนหน้าชื่อเดียวกัน
+  - ทุกชุดสี → `design_sheet_spec_colors` รวมกับของเดิม (แถวชื่อตรงใช้ร่วม · คอลัมน์ "<ชุดสี> · <สูตร>" ส่งซ้ำ = แทน)
+  - ทุนประมาณ → `design_sheet_cost_lines` **ต่อท้าย** (products.cost.view เท่านั้น) · ผ้า = area_face (กว้าง = หน้าผ้า · ยาว = พื้นที่ ÷ หน้าผ้า → ใบงานคิดซ้ำได้เลขเดียวกัน) · เทป = length · ชิ้น = count · แก้จำนวนเอง = ตายตัว · ชนิดวัสดุตามชื่อในใบงาน (ผ้า/อะไหล่/ซิป/สาย/เทป) ตั้งทับได้ที่ตัวเลือกหมวด `config.cost_group`
+  - จำใบงานไว้ที่ `design_library_recipes.design_sheet_id` → ป้าย "ใบงาน DS-…" ใต้ชื่อสูตร · กันกดซ้ำได้ใบงานซ้ำด้วย expect_sheet_id
+- **กันรูปหาย**: `lib/r2-refs` นับ `design_library_renders` / `design_library_templates` / `design_sheet_spec_pages` แล้ว — ลบรูปในใบงานไม่ย้ายไฟล์ที่สูตรยังใช้เข้าถังขยะ
+- ตัวอ่านร่วมฝั่งเซิร์ฟเวอร์ `lib/design-library-server.ts` (หน่วย/หน้าผ้า · ราคาทุน · ค่าคิดผ้า) ใช้ทั้ง bundle / cost / send-to-sheet
+
 ## แผนรอบ 5 ที่เหลือ (เจ้าของยืนยัน 2026-11-14)
-- ช่วง 3: ส่งเป็นใบงานออกแบบ (สร้างใหม่ หรือแนบใบเดิม ผ่าน DesignSheetPickerModal) · ชุดสี → ตารางสีของใบงาน
 - ช่วง 4: เปลี่ยนเป็นสินค้าจริง = ผ่านขั้นสร้าง SKU + BOM เดิมของใบงาน (ไม่สร้างทางที่ 2)
 
 ## ยังไม่ทำ (รอบถัดไป)

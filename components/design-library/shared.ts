@@ -27,7 +27,9 @@ export type Render = {
 };
 export type CalcRow = { material_type: string; default_face_width_cm: number | null; loss_percent: number | null; uom: string | null; cm_per_unit: number | null };
 /** materials = หน่วย/หน้าผ้าของ SKU ในสูตร (ไม่มีราคา) · calc = bom_calc_settings · can_cost = มีสิทธิ์ดูต้นทุน (ไม่มี = spec.cost ว่าง) */
-export type RecipeBundle = { recipe: Recipe; template: Template; choices: Choice[]; renders: Render[]; stock: Record<string, number>; materials: Record<string, MaterialInfo>; calc: CalcRow[]; can_cost: boolean };
+export type RecipeBundle = { recipe: Recipe; template: Template; choices: Choice[]; renders: Render[]; stock: Record<string, number>; materials: Record<string, MaterialInfo>; calc: CalcRow[]; can_cost: boolean;
+  /** ใบงานออกแบบที่สูตรนี้ส่งไปแล้ว (รอบ 5 ช่วง 3) */
+  sheet: { id: string; code: string; name: string; is_active: boolean | null } | null };
 export const techpackHref = (id: string, colorwayId?: string | null) => `/print/design-library/${id}/techpack${colorwayId ? `?cw=${encodeURIComponent(colorwayId)}` : ""}`;
 
 export const LIB_HREF = "/master/design-library";

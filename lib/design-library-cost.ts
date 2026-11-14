@@ -64,6 +64,8 @@ export type CostLine = {
   /** ราคาต่อหน่วย (0 = ไม่มี) · แหล่งราคา */
   unitPrice: number; priceSource: "sku" | "manual" | "none"; priceKey: string;
   amount: number;
+  /** ตัวตั้งที่ใช้คิดปริมาณอัตโนมัติ (ส่งต่อเป็นบรรทัดตีราคาใบงาน) · ไม่มี = คิดอัตโนมัติไม่ได้ */
+  basis?: { area_cm2?: number; length_cm?: number; face: number | null; loss: number; div: number };
 };
 export type CostEstimate = {
   lines: CostLine[]; materials: number; labor: number; extras: number; total: number; missing: number;
@@ -110,6 +112,10 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
     const face = mat?.face_width_cm;
     return area > 0 ? calcCostQty({ calc_method: "area_face", width_cm: 1, length_cm: 1, pieces: 1, area_cm2: area, face_width_cm: face && face > 0 ? face : setting.face, waste_percent: setting.loss, divisor: div }) : 0;
   };
+  const areaBasis = (area: number, setting: CalcSetting, mat: MaterialInfo | undefined): CostLine["basis"] => {
+    const div = lengthUnitCm(mat?.uom, setting.cmPerUnit);
+    return div == null || area <= 0 ? undefined : { area_cm2: area, face: mat?.face_width_cm && mat.face_width_cm > 0 ? mat.face_width_cm : setting.face, loss: setting.loss, div };
+  };
   const unitNote = (mat: MaterialInfo | undefined, setting: CalcSetting) => (lengthUnitCm(mat?.uom, setting.cmPerUnit) == null ? ` · SKU ขายเป็น ${mat?.uom} คิดอัตโนมัติไม่ได้ ใส่ปริมาณเอง` : "");
 
   spec.pins.forEach((p, i) => {
@@ -128,7 +134,7 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
       const setting = areaKind === "lining" ? calc.lining : calc.outer;
       if (!prev) {
         const a = areaKind === "body" ? areas.body + areas.pocketsOuter : areaKind === "lining" ? areas.lining + areas.pocketsInside : areas.handle;
-        const line: CostLine = { ...base, key: `area:${p.cat}`, method: "area", autoQty: fabricQty(a, setting, mat),
+        const line: CostLine = { ...base, key: `area:${p.cat}`, method: "area", autoQty: fabricQty(a, setting, mat), basis: areaBasis(a, setting, mat),
           detail: `ผ้า ${fmt(a)} ตร.ซม. · หน้า ${mat?.face_width_cm || setting.face} ซม. · เผื่อเสีย ${setting.loss}%${unitNote(mat, setting)}`, qty: 0, uom: mat?.uom || setting.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 };
         seenArea.set(p.cat, line); lines.push(line);
         return;
@@ -140,7 +146,7 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
       const len = areas.perimeter;
       const div = lengthUnitCm(mat?.uom, calc.outer.cmPerUnit);
       lines.push({ ...base, key: `pin:${p.id}`, method: "length", autoQty: div == null ? null : calcCostQty({ calc_method: "length", width_cm: null, length_cm: len, pieces: 1, face_width_cm: null, waste_percent: 10, divisor: div }),
-        detail: `รอบปากกระเป๋า ${fmt(len)} ซม. · เผื่อ 10%${unitNote(mat, calc.outer)}`, qty: 0, uom: mat?.uom || calc.outer.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
+        detail: `รอบปากกระเป๋า ${fmt(len)} ซม. · เผื่อ 10%${unitNote(mat, calc.outer)}`, basis: div == null ? undefined : { length_cm: len, face: null, loss: 10, div }, qty: 0, uom: mat?.uom || calc.outer.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
       return;
     }
     lines.push({ ...base, key: `pin:${p.id}`, method: "count", autoQty: 1, detail: "1 ชิ้นต่อจุด", qty: 0, uom: mat?.uom || "ชิ้น", unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
@@ -152,6 +158,7 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
     const a = areas.body + areas.pocketsOuter + areas.handle;
     const mat = bodyLine.skuId ? ctx.materials[bodyLine.skuId] : undefined;
     bodyLine.autoQty = fabricQty(a, calc.outer, mat);
+    bodyLine.basis = areaBasis(a, calc.outer, mat);
     bodyLine.detail = `ผ้า ${fmt(a)} ตร.ซม. (รวมหู) · หน้า ${mat?.face_width_cm || calc.outer.face} ซม. · เผื่อเสีย ${calc.outer.loss}%${unitNote(mat, calc.outer)}`;
   }
 

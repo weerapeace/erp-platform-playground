@@ -28,6 +28,12 @@ const REF_COLUMNS: { table: string; column: string }[] = [
   { table: "erp_playground_attachments", column: "file_path" },
   // 🕘 เวอร์ชันเก่าของสินค้า (lib/record-versions) — รูปที่ถูกแทน/ลบแต่ยังเก็บไว้ให้ย้อนกลับ
   { table: "entity_field_history",     column: "r2_key" },
+  // 📚 Design Library (รูปแม่แบบ + รูปผล GPT) — ส่งสูตรเป็นใบงาน แนบ key เดียวกันเข้าใบงาน · ลบรูปในใบงานต้องไม่ทำรูปในสูตรหาย
+  { table: "design_library_renders",   column: "image_key" },
+  { table: "design_library_templates", column: "image_key" },
+  { table: "design_library_templates", column: "vector_image_key" },
+  // หน้ารายละเอียดงานของใบงาน (รูปแม่แบบจาก Design Library / รูปที่ใช้ร่วมกับไฟล์แนบ)
+  { table: "design_sheet_spec_pages",  column: "image_key" },
 ];
 
 /**

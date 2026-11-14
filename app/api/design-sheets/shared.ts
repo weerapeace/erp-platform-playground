@@ -3,6 +3,16 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+/** เลขใบงานถัดไป DS-{YYYY}-{0000} (ของกลางระบบเลขเอกสาร erp_next_number) — ใช้ทั้งสร้างใบงานปกติ + ส่งสูตร Design Library เป็นใบงาน */
+export async function nextDsNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {
+  const { data, error } = await admin.rpc("erp_next_number", { p_key: "ds" });
+  if (!error && data) return String(data);
+  // fallback กันพลาด
+  const yr = new Date().getFullYear();
+  const { count } = await admin.from("design_sheets").select("id", { count: "exact", head: true });
+  return `DS-${yr}-${String((count ?? 0) + 1).padStart(4, "0")}`;
+}
+
 export const DS_STATUSES = ["design", "sent_customer", "revising", "costing", "quoted", "approved", "sku_created", "cancelled"] as const;
 
 /** สถานะถูกต้องไหม — เช็คกับระบบ Workflow กลาง (แก้เองได้ที่ /admin/workflows), ไม่มีข้อมูล workflow = ใช้ชุดในโค้ด */

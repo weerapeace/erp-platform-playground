@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { COST_PERM } from "@/lib/cost-access";
+import { loadCostPrices } from "@/lib/design-library-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,9 +18,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, COST_PERM); if (denied) return denied;
   const ids = (new URL(request.url).searchParams.get("sku_ids") ?? "").split(",").filter((x) => UUID.test(x)).slice(0, 200);
   if (!ids.length) return NextResponse.json({ data: { prices: {} }, error: null });
-  const { data, error } = await supabaseAdmin().from("skus_v2").select("id, standard_price").in("id", ids);
-  if (error) return NextResponse.json({ data: null, error: "โหลดราคาทุนไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
-  const prices: Record<string, number> = {};
-  for (const r of (data ?? []) as { id: string; standard_price: number | null }[]) if (Number(r.standard_price) > 0) prices[r.id] = Number(r.standard_price);
+  const prices = await loadCostPrices(supabaseAdmin(), ids);
+  if (!prices) return NextResponse.json({ data: null, error: "โหลดราคาทุนไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   return NextResponse.json({ data: { prices }, error: null }, { headers: { "Cache-Control": "no-store" } });
 }
