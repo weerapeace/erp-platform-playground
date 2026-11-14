@@ -3,19 +3,35 @@
  * GET ?platform_id=&brand_id=&from=&to=  (products.platforms.view)
  *   → kpi (ยอดขาย/ออเดอร์/สินค้า), byPlatform, byStatus, topProducts, lowStock, filters
  * รวมจาก: platform_orders(+items) · platform_catalog_listings · erp_playground_stock_balances
- * หมายเหตุ: aggregate ฝั่ง JS (ออเดอร์ยังไม่เยอะ) — ถ้าโตมากค่อยย้ายเป็น SQL/rpc
+ * หมายเหตุ: aggregate ฝั่ง JS (ออเดอร์ ~6,000 ใบ ไล่ทีละหน้า) — ถ้าโตมากค่อยย้ายเป็น SQL/rpc
+ * 🐛 แก้ 2026-11-14 (หลังดึงออเดอร์ Shopee จาก API แล้วออเดอร์เกินพัน):
+ *   - เดิม .limit(5000) แต่ PostgREST ตัดที่ 1,000 เงียบ ๆ → ยอดขาย/จำนวนคิดจาก 1,000 ใบสุ่ม → ไล่ทีละหน้า (fetchAllPages)
+ *   - ยอดขายนับใบที่ผู้ซื้อยังไม่จ่าย (UNPAID) → ใช้กติกากลาง countsAsSale (ตัวเดียวกับรายงานยอดขาย)
+ *   - "รอแพ็ค/ยืนยัน · รอส่ง" นับใบจากเมล (ส่งแล้ว สถานะ new ตลอด) เป็นพัน → ใช้ needsAction (ตัวเดียวกับศูนย์ออเดอร์)
+ *   - กรองวันที่ด้วย created_at (เวลาที่ระบบบันทึก — ใบที่ดึงย้อนหลังวันเดียวกันหมด) + ขอบวันแบบ UTC → ใช้ ordered_at ขอบวันเวลาไทย
+ *   - สินค้าขายดีส่ง id 5,000 ตัวในคำขอเดียว (ยาวเกิน/ตัดที่พัน) → ถามทีละชุด
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
+import { countsAsSale, isReportOnly, needsAction } from "@/lib/platform-order-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PENDING = new Set(["new", "confirmed"]);
 const STATUS_ORDER = ["new", "confirmed", "packed", "shipped", "cancelled"];
+const ITEM_CHUNK = 200;   // id ออเดอร์ต่อคำขอรายการสินค้า (URL ไม่ยาวเกิน · แถวไม่ถึงเพดาน 1,000)
+
+/** "YYYY-MM-DD" (วันที่เลือกในหน้า = วันไทย) → เวลาเริ่มวันนั้นตามเวลาไทย (ISO) · รูปไม่ถูก = null */
+function bkkDayStart(d: string, addDays = 0): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const ms = Date.parse(`${d}T00:00:00+07:00`);
+  return Number.isFinite(ms) ? new Date(ms + addDays * 86_400_000).toISOString() : null;
+}
+
+type OrderLite = { id: string; platform_id: string | null; status: string; platform_status: string | null; source: string | null; total: number | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
@@ -35,13 +51,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const brands = ((br ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? "") }));
 
   // ออเดอร์ (ตามฟิลเตอร์)
-  let oq = admin.from("platform_orders").select("id, platform_id, brand_id, status, total, created_at").limit(5000);
-  if (platformId) oq = oq.eq("platform_id", platformId);
-  if (brandId) oq = oq.eq("brand_id", brandId);
-  if (from) oq = oq.gte("created_at", from);
-  if (to) oq = oq.lte("created_at", `${to}T23:59:59`);
-  const { data: ordersData } = await oq;
-  const orders = (ordersData ?? []) as { id: string; platform_id: string; status: string; total: number | null }[];
+  const fromIso = from ? bkkDayStart(from) : null;
+  const toIso = to ? bkkDayStart(to, 1) : null;   // ถึงสิ้นวัน "to" (เวลาไทย) = ก่อนเริ่มวันถัดไป
+  const orders = await fetchAllPages<OrderLite>((a, b) => {
+    let oq = admin.from("platform_orders").select("id, platform_id, status, platform_status, source, total");
+    if (platformId) oq = oq.eq("platform_id", platformId);
+    if (brandId) oq = oq.eq("brand_id", brandId);
+    if (fromIso) oq = oq.gte("ordered_at", fromIso);
+    if (toIso) oq = oq.lt("ordered_at", toIso);
+    return oq.order("id", { ascending: true }).range(a, b);
+  });
+  const sales = orders.filter(countsAsSale);
 
   // สินค้าบนแพลตฟอร์ม (catalog) ตามฟิลเตอร์ (แพลตฟอร์ม/แบรนด์)
   // 🐛 เดิม .limit(20000) แต่ PostgREST ตัดที่ 1,000 เงียบ ๆ (มี ~1,200 ตัว → ตัวเลขขาด) → ไล่ทีละหน้า
@@ -53,9 +73,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 
   // KPI
-  const salesTotal = orders.filter((o) => o.status !== "cancelled").reduce((s, o) => s + (o.total ?? 0), 0);
-  const ordersPending = orders.filter((o) => PENDING.has(o.status)).length;
-  const ordersToShip = orders.filter((o) => o.status === "packed").length;
+  const sum = (os: OrderLite[]) => os.reduce((s, o) => s + (Number(o.total) || 0), 0);
+  const salesTotal = sum(sales);
+  // งานที่ต้องทำ (กติกาเดียวกับการ์ด "ต้องจัดส่ง" ของศูนย์ออเดอร์) — ไม่นับใบจากเมล/ยังไม่จ่าย/พักยกเลิก
+  const todo = orders.filter(needsAction);
+  const ordersPending = todo.filter((o) => o.status === "new" || o.status === "confirmed").length;
+  const ordersToShip = todo.filter((o) => o.status === "packed").length;
   const catalogMatched = catalog.filter((c) => c.matched_parent_sku_id).length;
   // "ยังไม่จับคู่" ไม่นับตัวที่กด "ไม่ต้องจับคู่" (งานบริการ/เลิกขาย) — ไม่งั้นไม่มีวันครบ
   const catalogIgnored = catalog.filter((c) => !c.matched_parent_sku_id && c.match_ignored).length;
@@ -70,20 +93,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const cs = catalog.filter((c) => c.platform_id === p.id);
     return {
       code: p.code, name_th: p.name_th, icon_key: p.icon_key,
-      orders: os.length, sales: os.filter((o) => o.status !== "cancelled").reduce((s, o) => s + (o.total ?? 0), 0),
+      orders: os.length, sales: sum(os.filter(countsAsSale)),
       catalog: cs.length, matched: cs.filter((c) => c.matched_parent_sku_id).length,
     };
   }).filter((x) => x.orders > 0 || x.catalog > 0);
 
   // แยกตามสถานะ
-  const byStatus = STATUS_ORDER.map((s) => ({ status: s, count: orders.filter((o) => o.status === s).length }));
+  //   ใบจากเมล = ยอดขายที่ร้านส่งของไปแล้ว (สถานะในระบบค้าง new) → นับเป็น "ส่งแล้ว" ไม่ใช่ "ใหม่"
+  const effStatus = (o: OrderLite) => (isReportOnly(o.source) && o.status !== "cancelled" ? "shipped" : o.status);
+  const byStatus = STATUS_ORDER.map((s) => ({ status: s, count: orders.filter((o) => effStatus(o) === s).length }));
 
-  // สินค้าขายดี (จาก order items ของออเดอร์ที่ผ่านฟิลเตอร์)
+  // สินค้าขายดี (จาก order items ของออเดอร์ที่นับเป็นยอดขาย) — ถามทีละชุด พร้อมกันทีละ 4
   let topProducts: { key: string; name: string; sku: string | null; qty: number; sales: number }[] = [];
-  const orderIds = orders.filter((o) => o.status !== "cancelled").map((o) => o.id);
+  const orderIds = sales.map((o) => o.id);
   if (orderIds.length) {
-    const { data: itemsData } = await admin.from("platform_order_items").select("matched_sku_id, sku_code, name, qty, price").in("order_id", orderIds.slice(0, 5000));
-    const items = (itemsData ?? []) as { matched_sku_id: string | null; sku_code: string | null; name: string | null; qty: number | null; price: number | null }[];
+    type ItemLite = { matched_sku_id: string | null; sku_code: string | null; name: string | null; qty: number | null; price: number | null };
+    const chunks: string[][] = [];
+    for (let i = 0; i < orderIds.length; i += ITEM_CHUNK) chunks.push(orderIds.slice(i, i + ITEM_CHUNK));
+    const items: ItemLite[] = [];
+    for (let i = 0; i < chunks.length; i += 4) {
+      const got = await Promise.all(chunks.slice(i, i + 4).map((ids) => fetchAllPages<ItemLite>((a, b) =>
+        admin.from("platform_order_items").select("id, matched_sku_id, sku_code, name, qty, price").in("order_id", ids).order("id", { ascending: true }).range(a, b))));
+      for (const g of got) items.push(...g);
+    }
     const map = new Map<string, { key: string; name: string; sku: string | null; qty: number; sales: number }>();
     for (const it of items) {
       const key = it.matched_sku_id || it.sku_code || it.name || "?";
