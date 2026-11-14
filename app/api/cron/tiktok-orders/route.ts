@@ -83,12 +83,15 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const shopee: { brand_id: string; ok: boolean; created?: number; updated?: number; error?: string }[] = [];
   if (spId) {
     const nowSec = Math.floor(Date.now() / 1000);
+    // เวลาที่เหลือของรอบ (maxDuration 120 วิ · เผื่อ 10 วิให้ recordWorkerRun ทำงานเสมอ) — TikTok ใช้ได้ถึง ~85 วิ/แบรนด์ (session TikTok เตือน 2026-11-14)
+    const leftMs = () => 110_000 - (Date.now() - startedAt);
     for (const brandId of shopeeBrands) {
-      const left = 110_000 - (Date.now() - startedAt);
-      if (left < 8_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก)" }); continue; }
+      if (leftMs() < 15_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก — ย้อน 3 ชม.)" }); continue; }
       const tok = await shopeeTokenOrReason(admin, brandId, spId, null);
       if (!tok.ok) { shopee.push({ brand_id: brandId, ok: false, error: tok.reason }); continue; }
-      const r = await syncShopeeOrders(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, window: { field: "update_time", from: nowSec - SHOPEE_WINDOW_SEC, to: nowSec }, timeBudgetMs: Math.min(30_000, left - 5_000) });
+      const budget = Math.min(30_000, leftMs() - 10_000);
+      if (budget < 5_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก — ย้อน 3 ชม.)" }); continue; }
+      const r = await syncShopeeOrders(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, window: { field: "update_time", from: nowSec - SHOPEE_WINDOW_SEC, to: nowSec }, timeBudgetMs: budget });
       shopee.push({ brand_id: brandId, ok: !r.stop_reason, created: r.created, updated: r.updated, ...(r.stop_reason ? { error: `Shopee: ${r.stop_reason}` } : {}) });
       if (r.created > 0 || r.stop_reason) {
         const { sample: _s, ...counts } = r;
@@ -100,18 +103,20 @@ async function handle(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const failed = [...results, ...shopee].filter((x) => !x.ok);
+  // ok = ส่วน TikTok เท่านั้น (เหมือนเดิม) · Shopee มีปัญหา = warn + เหตุผลต่อท้ายสรุป (ไม่ทำให้คน TikTok ในออฟฟิศขึ้นแดง)
+  const failed = results.filter((x) => !x.ok);
+  const spFailed = shopee.filter((x) => !x.ok);
   const created = results.reduce((a, x) => a + (x.created ?? 0), 0);
   const updated = results.reduce((a, x) => a + (x.updated ?? 0), 0);
   const spCreated = shopee.reduce((a, x) => a + (x.created ?? 0), 0);
   const spUpdated = shopee.reduce((a, x) => a + (x.updated ?? 0), 0);
-  const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated}` : "";
+  const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated}${spFailed.length ? ` ⚠️ ${spFailed.map((f) => f.error).join(" · ").slice(0, 160)}` : ""}` : "";
   await recordWorkerRun(admin, "tiktok-orders", {
-    ok: failed.length === 0,
+    ok: failed.length === 0, warn: spFailed.length > 0,
     summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote,
     ...(failed.length ? { error: failed.map((f) => f.error).join(" · ").slice(0, 300) } : {}),
   });
-  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee } });
+  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { ok: spFailed.length === 0, brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee } });
 }
 
 export const GET = handle;

@@ -86,7 +86,7 @@ export const isShippingActive = (s: Pick<OrderShipping, "status"> | null | undef
 export function canShipViaShippop(o: { source: string | null; platform_code: string | null; status: string; shipping?: Pick<OrderShipping, "status"> | null }): { ok: true } | { ok: false; reason: string } {
   if (o.source === "email") return { ok: false, reason: "ออเดอร์จากอีเมล — ร้านส่งของไปแล้ว" };
   if (o.platform_code === "lazada") return { ok: false, reason: "ออเดอร์ Lazada ใช้ขนส่งของ Lazada — กด พร้อมส่ง ของ Lazada (ขั้น 3)" };
-  if (o.platform_code === "shopee") return { ok: false, reason: "ออเดอร์ Shopee ใช้ขนส่งของ Shopee — นัดใน Seller Centre (Shopee ยังไม่ให้ใช้ API)" };
+  if (o.platform_code === "shopee") return { ok: false, reason: "ออเดอร์ Shopee ใช้ขนส่งของ Shopee — นัดใน Seller Centre / BigSeller" };
   if (isMarketplace(o.platform_code)) return { ok: false, reason: "ออเดอร์แพลตฟอร์มใช้ขนส่งของแพลตฟอร์ม" };
   if (o.status === "shipped") return { ok: false, reason: "ส่งไปแล้ว" };
   if (o.status === "cancelled") return { ok: false, reason: "ยกเลิกแล้ว" };
