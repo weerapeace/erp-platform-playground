@@ -8,6 +8,7 @@
 //   • Parent เดิม  = เลือกจากช่องค้นหา (หรือพิมพ์รหัสที่มีแล้ว) → ดึงชื่อ/แบรนด์/หมวด/รูปปกมาโชว์
 //                    + โชว์ SKU ลูกที่มีแล้ว (ถึงไหนแล้ว) + แนะนำรหัสถัดไป — เหมาะกับ "เพิ่มสี"
 // ราคาเริ่มต้น = ราคาที่เสนอ (แก้ได้)
+// ปุ่ม "ดึงสีจากตารางสี" = 1 แถวต่อชุดสีในแท็บรายละเอียดงาน (design_sheet_spec_colors · สูตร Design Library ส่งมาที่นี่) + เติมรหัสถัดไป
 // ============================================================
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -88,6 +89,7 @@ const FAMILIES: [string, () => string][] = [
 ];
 
 type SkuRow = { code: string; color: string; name: string; price: string; imgs: string[] };
+type SheetColorway = { name: string; image_key: string | null };
 
 /** รหัสลูกลำดับที่ i นับจากรหัสตั้งต้น เช่น base=WL36-18 → i=0 WL36-18, i=1 WL36-19 (คงจำนวนหลัก) */
 function nextCodeFrom(base: string, i: number): string {
@@ -154,6 +156,7 @@ export function SkuWizard({
   const [quotes, setQuotes] = useState<DesignSheetQuote[]>([]);      // รอบเสนอราคาของใบงาน → ตัวเลือกราคาขาย
   const [kidEdits, setKidEdits] = useState<Record<string, KidEdit>>({});   // ค่าที่กำลังแก้ของ SKU เดิม (ตาม id) — ยังไม่บันทึก
   const [kidSaving, setKidSaving] = useState<string | null>(null);   // id ที่กำลังบันทึก ("*" = ทั้งหมด)
+  const [sheetColors, setSheetColors] = useState<SheetColorway[]>([]);   // ชุดสีในตารางสีของใบงาน → ปุ่มดึงสี
 
   const parentInfo = check?.exists ? check.parent : null;            // ใช้ Parent เดิม (ข้อมูลด้านล่างมาจากตัวจริงใน DB)
   const kids = parentInfo ? (check?.children ?? []) : [];
@@ -216,6 +219,19 @@ export function SkuWizard({
     setKidEdits({}); setKidSaving(null);
     setRows([{ code: "", color: "", name: sheetName || "", price: defaultPrice != null ? String(defaultPrice) : "", imgs: [] }]);
   }, [open, parentCodeDefault, sheetName, defaultPrice, brandId]);
+
+  // โหลดชุดสีจากตารางสีของใบงาน (แท็บรายละเอียดงาน) → ปุ่ม "ดึงสีจากตารางสี"
+  useEffect(() => {
+    if (!open || !sheetId) return;
+    let alive = true;
+    apiFetch(`/api/design-sheets/${encodeURIComponent(sheetId)}/spec`).then((r) => r.json())
+      .then((j) => {
+        if (!alive) return;
+        const cws = (j?.colors?.colorways ?? []) as { name: string; cells: Record<string, { image_key?: string | null }> }[];
+        setSheetColors(cws.filter((c) => (c.name ?? "").trim()).map((c) => ({ name: c.name.trim(), image_key: null })));
+      }).catch(() => { if (alive) setSheetColors([]); });
+    return () => { alive = false; };
+  }, [open, sheetId]);
 
   // โหลดรอบเสนอราคาของใบงาน → ให้เลือกเป็นราคาขาย (ปุ่ม 💰▾ ข้างช่องราคา)
   useEffect(() => {
@@ -318,6 +334,17 @@ export function SkuWizard({
   const addRow = () => setRows((list) => fillCodes(
     [...list, { code: "", color: "", name: pName, price: defaultPrice != null ? String(defaultPrice) : "", imgs: [...(parentInfo ? [] : pImgs)] }],
     codeBase(), kids.map((k) => k.code)));
+  /** 1 แถวต่อชุดสี — แถวที่ยังไม่ได้กรอกอะไร (แถวตั้งต้น) ถูกแทน · แถวที่กรอกแล้วคงไว้ · สีที่มีแถวอยู่แล้วไม่เพิ่มซ้ำ */
+  const pullColors = () => setRows((list) => {
+    const blank = (r: SkuRow) => !r.code.trim() && !r.color.trim() && (r.name.trim() === "" || r.name.trim() === pName.trim() || r.name.trim() === (sheetName || "").trim());
+    const kept = list.filter((r) => !blank(r));
+    const have = new Set(kept.map((r) => r.color.trim().toLowerCase()));
+    const add = sheetColors.filter((c) => !have.has(c.name.toLowerCase())).map((c) => ({
+      code: "", color: c.name, name: `${pName.trim()} ${c.name}`.trim(), price: defaultPrice != null ? String(defaultPrice) : "", imgs: [...(parentInfo ? [] : pImgs)],
+    }));
+    const next = [...kept, ...add];
+    return fillCodes(next.length ? next : list, codeBase(), kids.map((k) => k.code));
+  });
   const removeRow = (i: number) => setRows((list) => (list.length <= 1 ? list : list.filter((_, idx) => idx !== i)));
 
   // ช่องเลือกรูปจากรูปที่แนบในใบงาน (ของกลางเล็ก ๆ ในหน้านี้) — คลิกเปิดกริดรูป → เลือก
@@ -470,7 +497,13 @@ export function SkuWizard({
       description={t("สร้างสินค้าใหม่ (Parent + SKU ลูกหลายสี) หรือเลือกสินค้าเดิมเพื่อเพิ่มสี — เลือกแล้วระบบดึงข้อมูลเดิมและบอกว่ารหัส SKU ไปถึงไหนแล้ว", "Create a new product (Parent + child SKUs in several colors) or pick an existing one to add colors — the system loads its data and shows how far the SKU codes have gone")}
       footer={
         <div className="flex justify-between items-center w-full">
-          <button onClick={addRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่ม SKU", "＋ Add SKU")}</button>
+          <div className="flex gap-2">
+            <button onClick={addRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่ม SKU", "＋ Add SKU")}</button>
+            {sheetColors.length > 0 && (
+              <button onClick={pullColors} disabled={saving} title={t("เพิ่ม 1 แถวต่อชุดสีในตารางสี (แท็บรายละเอียดงาน) พร้อมรหัสถัดไป — ตรวจ/แก้ก่อนกดสร้าง", "Add one row per colorway from the color table (Job details tab) with next codes — review before creating")}
+                className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t(`ดึงสีจากตารางสี (${sheetColors.length})`, `Pull colors from color table (${sheetColors.length})`)}</button>
+            )}
+          </div>
           <div className="flex gap-2">
             <button onClick={() => !saving && onClose()} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">

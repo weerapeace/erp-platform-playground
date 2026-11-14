@@ -24,7 +24,7 @@ import { writeAudit } from "@/lib/audit";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { applyColorway, allSkuIds, cleanSpec, colorwayLabel, type Choice } from "@/lib/design-library";
 import { calcSettingsFrom, estimateCost } from "@/lib/design-library-cost";
-import { latestRenders, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, recipeTag, sheetDetailHtml, specPageTitle, type RenderRow } from "@/lib/design-library-sheet";
+import { colorKeyPrefix, latestRenders, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, recipeTag, sheetDetailHtml, specPageTitle, type RenderRow } from "@/lib/design-library-sheet";
 import { loadCalcRows, loadCostPrices, loadMaterials } from "@/lib/design-library-server";
 import { cleanSpecColors } from "@/lib/design-sheet-spec-colors";
 import { seedChecklistOnCreate } from "@/lib/record-tasks-server";
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const incoming = recipeColorTable(spec, choices);
     if (incoming.colorways.length && incoming.rows.length) {
       const { data: cur } = await admin.from("design_sheet_spec_colors").select("data").eq("sheet_id", sheet.id).maybeSingle();
-      const merged = mergeColorTables(cleanSpecColors(cur?.data), incoming, tag);
+      const merged = mergeColorTables(cleanSpecColors(cur?.data), incoming, tag, colorKeyPrefix(recipeId));
       const { error } = await admin.from("design_sheet_spec_colors").upsert({ sheet_id: sheet.id, data: merged, updated_by: actor.id, updated_at: new Date().toISOString() }, { onConflict: "sheet_id" });
       if (error) warnings.push("ใส่ตารางสีไม่สำเร็จ"); else counts.colorways = incoming.colorways.length;
     }

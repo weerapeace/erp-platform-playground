@@ -1462,15 +1462,25 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   };
   // เปิดหน้าด้วยลิงก์ ?open=<id> (หรือ ?sheet=<id> เดิม) → เปิด modal ใบงานนั้นอัตโนมัติ (ครั้งเดียวตอนเข้าหน้า)
   // ?open= = พารามิเตอร์มาตรฐาน (การ์ดบน Design Dashboard ใช้ตัวนี้) · ?sheet= คงไว้ให้ลิงก์เก่ายังเปิดได้
+  // + &tab=<info|spec|comments|cost|quotes|notice> เปิดแท็บนั้น · &action=sku เด้งตัวสร้าง SKU (ปุ่ม "เปลี่ยนเป็นสินค้าจริง" ใน Design Library)
   const autoOpenRef = useRef(false);
+  const pendingSkuRef = useRef(false);
   useEffect(() => {
     if (detailOnly || autoOpenRef.current || typeof window === "undefined") return;   // detailOnly = เปิดตาม prop แทน URL
     autoOpenRef.current = true;
     const sp = new URLSearchParams(window.location.search);
     const id = sp.get("open") || sp.get("sheet");
-    if (id) void openEdit({ id } as DesignSheetListItem);
+    const tabQ = sp.get("tab");
+    const tab = tabQ === "spec" || tabQ === "comments" || tabQ === "cost" || tabQ === "quotes" || tabQ === "notice" ? tabQ : "info";
+    if (id) { pendingSkuRef.current = sp.get("action") === "sku"; void openEdit({ id } as DesignSheetListItem, tab); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // เด้งตัวสร้าง SKU หลังเปิดใบแล้ว + สิทธิ์ products.create โหลดเสร็จ (ไม่มีสิทธิ์ = ไม่เด้ง เหมือนไม่มีปุ่มในเมนู)
+  useEffect(() => {
+    if (!pendingSkuRef.current || !form?.id || !canCreate) return;
+    pendingSkuRef.current = false;
+    setSkuWizard(true);
+  }, [form?.id, canCreate]);
   // โหมด popup-เดี่ยว: เปิด/เปลี่ยนใบตาม openId prop (หน้าแม่คุม)
   const openIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -3105,6 +3115,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           item_name: r.item_name, group_name: r.group_name,
           width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces,
           face_width_cm: r.face_width_cm, waste_percent: r.waste_percent, qty: r.qty, uom: r.uom,
+          component_sku: r.item_sku_code?.trim() || null,   // บรรทัดที่เลือก SKU วัตถุดิบไว้ = ได้วัตถุดิบตัวจริงใน BOM เลย (2026-11-14)
         }))} />
 
       {/* 🧵 คำนวณจำนวนผ้า — จำลองวางชิ้นบนหน้าผ้า (ดูได้ทั้งโหมดดู/แก้ไข ไม่แก้ข้อมูล) */}

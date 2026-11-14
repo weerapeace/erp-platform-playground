@@ -7,6 +7,7 @@
  * ขนาด · สีอะไหล่ทั้งใบ · คำเตือน (กฎห้ามคู่ + วัสดุหมด/เหลือน้อย) · วาดช่อง 4 ฝั่ง (PocketEditor)
  * Prompt 3 ชุด (คัดลอก) · ใบสรุป PDF (/print/design-library/[id]) · รูปที่ได้จาก GPT แยกตามชุดมุม เวอร์ชันซ้อน + ใครอัป
  * ชุดสี (รอบ 5): ColorwayBar สลับชุดสี → รูป/จุด/prompt/รูป GPT/ใบสรุป ทั้งหน้าแสดงตามชุดสีที่เลือก · แก้จุดตอนอยู่ชุดสีอื่น = เก็บเป็นของชุดสีนั้น
+ * เปลี่ยนเป็นสินค้าจริง (รอบ 5 ช่วง 4): ToProductModal ตรวจความพร้อม → พาไปตัวสร้าง SKU / สร้างสูตร BOM เดิมของใบงาน (ไม่เขียนข้อมูลเอง)
  * ส่งเป็นใบงานออกแบบ (รอบ 5 ช่วง 3): SendToSheetModal (ใบใหม่ / ใบเดิม / ใบอื่น) · ป้ายลิงก์ใบงานใต้ชื่อสูตร
  * ทุนประมาณ (รอบ 5 ช่วง 2): CostPanel เฉพาะ products.cost.view · ใบสั่งทำตัวอย่างให้ช่าง /print/design-library/[id]/techpack (แม่แบบเอกสาร dl_techpack)
  * บันทึกด้วย SaveBar กลาง (ถามก่อนออกถ้ายังไม่บันทึก) → POST /api/design-library/actions save_recipe
@@ -36,6 +37,7 @@ import { CostPanel } from "./cost-panel";
 import type { MaterialInfo } from "@/lib/design-library-cost";
 import { LenInput, UnitToggle, useLenUnit } from "./units";
 import { SendToSheetModal, sheetHref } from "./send-to-sheet";
+import { ToProductModal } from "./to-product";
 import { api, compareHref, img, newId, printHref, techpackHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
 
 export function RecipeEditor({ id }: { id: string }) {
@@ -55,6 +57,7 @@ export function RecipeEditor({ id }: { id: string }) {
   const [sending, setSending] = useState(false);
   const canSheet = usePermission("products.edit");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [productOpen, setProductOpen] = useState(false);
   const [cw, setCw] = useState<string | null>(null);   // ชุดสีที่กำลังดู/แก้ (null = สีหลัก)
   const canManage = usePermission("design_library.manage");
   const unit = useLenUnit();
@@ -169,6 +172,8 @@ export function RecipeEditor({ id }: { id: string }) {
           <button type="button" onClick={() => void openSendSheet()} title="สร้างใบงานออกแบบใหม่ หรือแนบเข้าใบที่มีอยู่ พร้อมรูป GPT · หมุดวัสดุ · ตารางสี · ทุนประมาณ"
             className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:clipboard-list" />ส่งเป็นใบงาน</button>
         )}
+        <button type="button" onClick={() => setProductOpen(true)} title="ตรวจความพร้อม แล้วพาไปสร้าง SKU + สูตร BOM ผ่านใบงานออกแบบ"
+          className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:dna" />เปลี่ยนเป็นสินค้าจริง</button>
         <button type="button" onClick={() => void openTechpack()} title="ใบสำหรับช่างทำตัวอย่าง: ขนาด วัสดุ+จำนวน ช่อง ตารางสี ช่องเซ็น (ไม่มีราคา/prompt) — แก้หน้าตาได้ที่หน้าแม่แบบเอกสาร"
           className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:scissors" />ใบสั่งทำตัวอย่าง</button>
         <button type="button" onClick={() => void openPrint()} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1.5"><Icon value="i:printer" />ใบสรุป PDF{spec.colorways.length ? ` · ${colorwayLabel(spec, cw)}` : ""}</button>
@@ -253,11 +258,13 @@ export function RecipeEditor({ id }: { id: string }) {
         onChanged={(renders) => setB((p) => (p ? { ...p, renders } : p))}
         onVector={(key) => setB((p) => (p ? { ...p, template: { ...p.template, vector_image_key: key } } : p))} />
 
+      <ToProductModal open={productOpen} onClose={() => setProductOpen(false)} spec={spec} choices={b.choices} sheet={b.sheet}
+        canSend={canEdit && canSheet} onSend={() => { setProductOpen(false); void openSendSheet(); }} />
       <SendToSheetModal open={sheetOpen} onClose={() => setSheetOpen(false)} recipeId={id}
         defaultName={`${t.name} · ${meta.name.trim() || `สูตร #${b.recipe.seq}`}`} linked={b.sheet}
         colorwayId={cw} colorwayName={spec.colorways.length ? colorwayLabel(spec, cw) : null} colorwayCount={spec.colorways.length + 1}
         renderCount={b.renders.length} canCost={canCost && b.can_cost}
-        onSent={(s) => setB((p) => (p ? { ...p, sheet: { id: s.id, code: s.code, name: s.name, is_active: true }, recipe: { ...p.recipe, design_sheet_id: s.id } } : p))} />
+        onSent={(s) => setB((p) => (p ? { ...p, sheet: p.sheet?.id === s.id ? p.sheet : { id: s.id, code: s.code, name: s.name, is_active: true, status: "design", parent_sku_codes: [] }, recipe: { ...p.recipe, design_sheet_id: s.id } } : p))} />
       {canEdit && <SaveBar dirty={dirty} saving={saving} onSave={() => void save()} onDiscard={discard} />}
     </div>
   );

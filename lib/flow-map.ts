@@ -290,10 +290,10 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
     warn: "บิลจีนผูกกับ PO ไม่ได้ผูกกับใบสำคัญตรง ๆ · รูปบิลร้านที่เก็บแบบ sb: แนบอัตโนมัติไม่ได้ (หมายเหตุชี้ไปใบสำคัญ)",
     files: ["components/china-pay-send-button/index.tsx", "app/api/china-pay/voucher-prefill/route.ts", "app/api/purchasing/mark-paid/route.ts"], metrics: ["po_unpaid"] },
   // ── ผลิต ──
-  M1: { from: "ds", to: "sku", type: "auto", title: "กดสร้าง SKU จากใบงาน",
+  M1: { changed: { date: "2026-11-14", note: "ตัวสร้าง SKU มีปุ่ม “ดึงสีจากตารางสี” (1 แถวต่อชุดสี + รหัสถัดไป) · ลิงก์ ?open=<ใบ>&action=sku เด้งตัวสร้างเลย (ปุ่มเปลี่ยนเป็นสินค้าจริงใน Design Library)" }, from: "ds", to: "sku", type: "auto", title: "กดสร้าง SKU จากใบงาน",
     detail: "สร้างสินค้าแม่ + ลูกทุกสี · ใบงานเปลี่ยนเป็น “สร้าง SKU แล้ว”", files: ["app/api/design-sheets/[id]/create-skus/route.ts"] },
-  M2: { from: "ds", to: "sku", type: "manual", title: "สร้าง BOM จากตารางต้นทุน",
-    detail: "ตัวช่วยสร้าง BOM จากต้นทุนในใบงาน", warn: "บรรทัด BOM ไม่มีรหัสวัตถุดิบ จึงซื้อ/กางสูตรไม่ได้", files: ["components/design-sheet-detail/bom-from-cost-wizard.tsx"] },
+  M2: { changed: { date: "2026-11-14", note: "บรรทัดตีราคาที่เลือก SKU วัตถุดิบไว้ ส่งรหัสเข้า BOM แล้ว · สร้าง BOM จากหมุดในแท็บรายละเอียดงานได้รหัสครบ (Design Library ส่งหมุดพร้อมรหัส+จำนวนมา)" }, from: "ds", to: "sku", type: "manual", title: "สร้าง BOM จากตารางต้นทุน",
+    detail: "ตัวช่วยสร้าง BOM จากต้นทุนในใบงาน (หรือจากหมุดวัสดุในแท็บรายละเอียดงาน)", warn: "บรรทัดตีราคาที่ยังไม่ได้เลือก SKU วัตถุดิบ → บรรทัด BOM ไม่มีรหัส ซื้อ/กางสูตรไม่ได้จนกว่าจะเติม", files: ["components/design-sheet-detail/bom-from-cost-wizard.tsx"] },
   M3: { from: "ds", to: "so", type: "manual", title: "ลงออเดอร์จาก Design Dashboard",
     detail: "ติ๊กใบงาน → เปิดป๊อปลงออเดอร์หลายรายการ (ใบที่ไม่มี SKU ลงเป็นชื่อไว้ก่อน)", files: ["components/order-batch-entry/index.tsx"] },
   M12: { changed: { date: "2026-11-07", note: "ใหม่: ใบงาน ↔ ใบเสนอราคาผูกกันจริง · กันเปิดใบซ้ำ · ไม่ผ่าน → เปิดใบใหม่แทน + ประวัติทุกเวอร์ชัน · ปุ่ม “ยืนยัน · ผ่าน” → เปิดใบสั่งขาย + ปิดใบอื่น" },

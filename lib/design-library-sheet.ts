@@ -76,12 +76,16 @@ export function recipeColorTable(spec: Spec, choices: Choice[]): SpecColorTable 
   return cleanSpecColors({ rows: used, colorways });
 }
 
+/** รหัสนำหน้าคอลัมน์ชุดสีที่มาจากสูตรนี้ (จำได้ตอนส่งซ้ำ แม้ผู้ใช้เปลี่ยนชื่อคอลัมน์ในใบงาน) */
+export const colorKeyPrefix = (recipeId: string) => `dl${recipeId.replace(/[^0-9a-f]/gi, "").slice(0, 8)}-`;
+
 /**
  * รวมตารางสีของสูตรเข้าตารางเดิมของใบงาน (ไม่ลบของเดิม)
  *   แถว: ชื่อตรงกัน = ใช้แถวเดิม · ไม่มี = เพิ่มท้าย
- *   คอลัมน์: ชื่อ "<ชื่อชุดสี> · <สูตร>" — ตรงกับของเดิม (ส่งซ้ำ) = แทนเฉพาะช่องของแถวจากสูตร · ไม่มี = เพิ่มท้าย
+ *   คอลัมน์: รหัส <prefix><ชุดสี> ตรงกับของเดิม (ส่งซ้ำ) = แทนเฉพาะช่องของแถวจากสูตร (คงชื่อที่ผู้ใช้แก้) · ไม่มี = เพิ่มท้าย
+ *   ชื่อคอลัมน์ = ชื่อชุดสีเฉย ๆ (ใช้เป็นสี SKU ตอนสร้าง SKU) · ชนกับคอลัมน์เดิมของใบ = ต่อท้าย " · <สูตร>"
  */
-export function mergeColorTables(existing: SpecColorTable, incoming: SpecColorTable, tag: string): SpecColorTable {
+export function mergeColorTables(existing: SpecColorTable, incoming: SpecColorTable, tag: string, keyPrefix = ""): SpecColorTable {
   const rows = existing.rows.map((r) => ({ ...r }));
   const keyMap = new Map<string, string>();
   const used = new Set(rows.map((r) => r.key));
@@ -94,12 +98,13 @@ export function mergeColorTables(existing: SpecColorTable, incoming: SpecColorTa
   const colorways = existing.colorways.map((c) => ({ ...c, cells: { ...c.cells } }));
   const cwKeys = new Set(colorways.map((c) => c.key));
   for (const cw of incoming.colorways) {
-    const name = `${cw.name} · ${tag}`.slice(0, 80);
+    const key = `${keyPrefix}${cw.key}`.slice(0, 64);
     const cells: Record<string, SpecColorCell> = {};
     for (const [k, v] of Object.entries(cw.cells)) cells[keyMap.get(k) ?? k] = v;
-    const cur = colorways.find((c) => c.name === name);
+    const cur = colorways.find((c) => c.key === key);
     if (cur) { for (const k of keyMap.values()) delete cur.cells[k]; Object.assign(cur.cells, cells); continue; }
-    let k = cw.key, i = 2; while (cwKeys.has(k)) k = `${cw.key}-${i++}`;
+    const name = (colorways.some((c) => c.name.trim() === cw.name.trim()) ? `${cw.name} · ${tag}` : cw.name).slice(0, 80);
+    let k = key, i = 2; while (cwKeys.has(k)) k = `${key}-${i++}`.slice(0, 64);
     cwKeys.add(k); colorways.push({ key: k, name, cells });
   }
   return cleanSpecColors({ rows, colorways });
@@ -192,4 +197,16 @@ export function sheetDetailHtml(o: { recipeId: string; tag: string; templateName
     o.note ? `<p>${esc(o.note)}</p>` : "",
     `<p><a href="/print/design-library/${esc(o.recipeId)}/techpack">ใบสั่งทำตัวอย่าง</a></p>`,
   ].filter(Boolean).join("");
+}
+
+// ─── เปลี่ยนเป็นสินค้าจริง (ช่วง 4) ─────────────────────────────────────────
+/** ความพร้อมของสูตรก่อนสร้างสินค้า (pure — โชว์ในป๊อป) */
+export function productReadiness(spec: Spec, choices: Choice[]) {
+  const pins = spec.pins.filter((p) => p.cat);
+  const withCode = pins.filter((p) => p.pick && (p.pick.kind === "sku" || p.pick.kind === "swatch") && p.pick.sku_id);
+  const sameAsBody = pins.filter((p) => p.pick?.kind === "same_as_body");
+  const noCode = pins.filter((p) => !withCode.includes(p) && !sameAsBody.includes(p))
+    .map((p) => `${categoryOf(choices, p.cat)?.name ?? p.cat}${p.pick ? "" : " (ยังไม่เลือก)"}`);
+  const colorNames = [colorwayLabel(spec, null), ...spec.colorways.map((c) => c.name)];
+  return { colorNames, materials: pins.length, withCode: withCode.length, noCode };
 }

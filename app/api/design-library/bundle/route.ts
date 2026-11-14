@@ -81,7 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       loadSkuStock(admin, allSkuIds(spec)).catch(() => new Map()),
       loadMaterials(admin, allSkuIds(spec)).catch(() => ({})),
       loadCalcRows(admin),
-      rec.design_sheet_id ? admin.from("design_sheets").select("id, code, name, is_active").eq("id", rec.design_sheet_id).maybeSingle() : Promise.resolve({ data: null }),
+      rec.design_sheet_id ? admin.from("design_sheets").select("id, code, name, is_active, status, parent_sku_codes").eq("id", rec.design_sheet_id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
     if (!tpl) return fail("ไม่พบแม่แบบของสูตรนี้", 404);
     const stock: Record<string, number> = {};

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cleanSpec, type Choice } from "./design-library";
 import { estimateCost } from "./design-library-cost";
-import { costGroupOf, latestRenders, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, sheetDetailHtml, specPageTitle, type RenderRow } from "./design-library-sheet";
+import { colorKeyPrefix, costGroupOf, latestRenders, productReadiness, mergeColorTables, recipeColorTable, recipeCostRows, recipePagePins, sheetDetailHtml, specPageTitle, type RenderRow } from "./design-library-sheet";
 import { cleanSpecColors } from "./design-sheet-spec-colors";
 import { recomputeCostLine } from "./design-sheet-cost-row";
 
@@ -48,18 +48,24 @@ describe("ตารางสีใบงาน", () => {
     expect(t.rows.map((r) => r.name)).toEqual(["ตัวกระเป๋า"]);
     expect(recipeColorTable(cleanSpec({ ...s, pins: [s.pins[1]] }), CHOICES)).toEqual({ rows: [], colorways: [] });
   });
-  it("รวมเข้าตารางเดิม: แถวชื่อตรงใช้ร่วม · ส่งซ้ำแทนคอลัมน์เดิม ไม่เพิ่มซ้ำ · ของเดิมไม่หาย", () => {
-    const existing = cleanSpecColors({ rows: [{ key: "r1", name: "อะไหล่" }, { key: "r2", name: "ซับใน" }], colorways: [{ key: "c1", name: "สี 1", cells: { r2: { source: "pick", name: "ครีม" } } }] });
+  it("รวมเข้าตารางเดิม: แถวชื่อตรงใช้ร่วม · ส่งซ้ำแทนคอลัมน์เดิม (จำด้วยรหัส แม้เปลี่ยนชื่อ) · ของเดิมไม่หาย · ชื่อชนเท่านั้นที่ต่อท้ายสูตร", () => {
+    const existing = cleanSpecColors({ rows: [{ key: "r1", name: "อะไหล่" }, { key: "r2", name: "ซับใน" }], colorways: [{ key: "c1", name: "แดง", cells: { r2: { source: "pick", name: "ครีม" } } }] });
     const inc = recipeColorTable(spec(), CHOICES);
-    const once = mergeColorTables(existing, inc, "TOTE-01 สูตร #3");
+    const pre = colorKeyPrefix("abcdef12-3456-7890-abcd-ef1234567890");
+    expect(pre).toBe("dlabcdef12-");
+    const once = mergeColorTables(existing, inc, "TOTE-01 สูตร #3", pre);
     expect(once.rows.filter((r) => r.name === "อะไหล่")).toHaveLength(1);
     expect(once.rows.find((r) => r.name === "ซับใน")).toBeTruthy();
-    expect(once.colorways.map((c) => c.name)).toEqual(["สี 1", "สีหลัก · TOTE-01 สูตร #3", "แดง · TOTE-01 สูตร #3"]);
+    expect(once.colorways.map((c) => c.name)).toEqual(["แดง", "สีหลัก", "แดง · TOTE-01 สูตร #3"]);
+    expect(once.colorways[1].key).toBe("dlabcdef12-main");
     expect(once.colorways[1].cells.r1.sku_code).toBe("HW-9");  // แถว "อะไหล่" เดิม
-    const twice = mergeColorTables(once, inc, "TOTE-01 สูตร #3");
+    once.colorways[1].name = "เขียวใบตอง";                       // ผู้ใช้เปลี่ยนชื่อในใบงาน
+    const twice = mergeColorTables(once, inc, "TOTE-01 สูตร #3", pre);
     expect(twice.colorways).toHaveLength(3);
+    expect(twice.colorways[1].name).toBe("เขียวใบตอง");
     expect(twice.rows).toHaveLength(once.rows.length);
     expect(twice.colorways[0].cells.r2.name).toBe("ครีม");
+    expect(mergeColorTables({ rows: [], colorways: [] }, inc, "x", pre).colorways.map((c) => c.name)).toEqual(["สีหลัก", "แดง"]);   // ใบใหม่ = ชื่อสะอาด
   });
 });
 
@@ -110,5 +116,15 @@ describe("อื่น ๆ", () => {
     expect(h).toContain("/master/design-library/recipe/abc");
     expect(h).toContain("&lt;b&gt;");
     expect(h).toContain("สีหลัก · แดง");
+  });
+});
+
+describe("เปลี่ยนเป็นสินค้าจริง", () => {
+  it("ความพร้อม: จำนวนสี = จำนวน SKU · วัสดุผูกรหัส · ใช้ผ้าตัวไม่นับว่าขาดรหัส · ด้ายสี = ขาดรหัส", () => {
+    const r = productReadiness(spec(), CHOICES);
+    expect(r.colorNames).toEqual(["สีหลัก", "แดง"]);
+    expect(r.materials).toBe(5);
+    expect(r.withCode).toBe(3);
+    expect(r.noCode).toEqual(["ด้ายเย็บ"]);
   });
 });
