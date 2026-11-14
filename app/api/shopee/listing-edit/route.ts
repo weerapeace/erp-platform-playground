@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, writeAudit } from "@/lib/audit";
 import { shopeeErrorText, shopeeUpdateItem } from "@/lib/shopee";
 import { planShopeeEdit, shopeeListingView, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
@@ -48,9 +48,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (plan.errors.length) return reply({ ok: false, view, error: plan.errors.join(" · ") }, 400);
   if (!plan.changes.length) return reply({ ok: true, view, summary: "ไม่มีอะไรเปลี่ยน", error: null });
 
+  // ประวัติแบบกลาง "จากอะไรเป็นอะไร" (auditDiff) + ป้ายภาษาไทย (ลิ้นชักอ่าน label)
+  const before: Record<string, unknown> = { item_name: view.name, ...(plan.body.description != null ? { description: view.description } : {}) };
+  const changes = auditDiff(before, plan.body).map((c) => ({ ...c, label: c.field === "item_name" ? "ชื่อสินค้า" : "รายละเอียด" }));
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
     action: "update", entityType: "platform_catalog", entityId: r.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { source: "shopee_listing_edit", item_id: r.itemId, shop_id: r.shopId, changes: plan.changes, name_before: view.name, name_after: plan.body.item_name ?? null, desc_changed: plan.body.description != null, ...meta },
+    metadata: { source: "shopee_listing_edit", item_id: r.itemId, shop_id: r.shopId, changes, ...meta },
   });
   try {
     await shopeeUpdateItem(r.accessToken, r.shopId, r.itemId, plan.body);

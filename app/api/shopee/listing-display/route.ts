@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, writeAudit } from "@/lib/audit";
 import { shopeeErrorText, shopeeUnlistItems } from "@/lib/shopee";
 import { planShopeeDisplay, shopeeListingView, shopeeStatusBadge, shopeeUnlistErrors, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
@@ -43,7 +43,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
     action: "update", entityType: "platform_catalog", entityId: r.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { source: "shopee_listing_display", item_id: r.itemId, shop_id: r.shopId, name: view.name, open, status_before: view.status, in_promotion: view.inPromotion, ...meta },
+    metadata: {
+      source: "shopee_listing_display", item_id: r.itemId, shop_id: r.shopId, name: view.name, open, in_promotion: view.inPromotion,
+      changes: auditDiff({ item_status: view.status }, { item_status: open ? "NORMAL" : "UNLIST" }).map((c) => ({ ...c, label: "สถานะขาย" })),
+      ...meta,
+    },
   });
   try {
     const resp = await shopeeUnlistItems(r.accessToken, r.shopId, [{ itemId: r.itemId, unlist: !open }]);
