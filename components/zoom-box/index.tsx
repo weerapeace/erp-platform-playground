@@ -49,7 +49,9 @@ export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, classN
   useEffect(() => {
     const vp = vpRef.current;
     if (!vp) return;
-    const measure = () => setBox({ w: vp.clientWidth, h: vp.clientHeight });
+    // ⚠ วัด "ขนาดนอก" (รวมแถบเลื่อน) — ห้ามใช้ clientWidth/Height: แถบเลื่อนโผล่ → กล่องแคบลง → รูปเล็กลง → แถบหาย → รูปใหญ่ขึ้น → แถบโผล่…
+    //   วนไม่จบ = จอกระพริบรัว (เจ้าของเจอ 2026-11-14 อัดวิดีโอมา)
+    const measure = () => { const r = vp.getBoundingClientRect(); setBox((b) => (Math.abs(b.w - r.width) < 1 && Math.abs(b.h - r.height) < 1 ? b : { w: r.width, h: r.height })); };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(vp);
@@ -69,7 +71,7 @@ export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, classN
   const availW = Math.max(40, box.w - padding * 2), availH = Math.max(40, box.h - padding * 2);
   let fitW = aspect && aspect > 0 ? Math.min(availW, availH * aspect) : availW;
   if (maxFitWidth) fitW = Math.min(fitW, maxFitWidth);
-  const contentW = Math.round(fitW * zoom);
+  const contentW = Math.floor(fitW * zoom);   // ปัดลง — ปัดขึ้นแม้ 1px ก็ล้นกล่อง
 
   // หลังซูม: เลื่อนกล่องให้จุดเดิมยังอยู่ใต้เมาส์ (ซูมจากปุ่ม = ยึดกลางกล่อง)
   useLayoutEffect(() => {
@@ -85,9 +87,10 @@ export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, classN
 
   return (
     // ⚠ ไม่ใส่ relative เอง — ผู้เรียกมักส่ง absolute inset-0 (relative ของ Tailwind ชนะ absolute → กล่องยุบเหลือสูงเท่าเนื้อหา)
-    <div ref={vpRef} className={`overflow-auto ${className}`}>
-      {/* เล็กกว่ากล่อง = จัดกลาง · ใหญ่กว่า = เลื่อนดูได้ */}
-      <div className="flex items-start justify-center min-h-full" style={{ width: Math.max(box.w, contentW + padding * 2), padding }}>
+    // 100% = พอดีกล่องอยู่แล้ว → ไม่มีแถบเลื่อน (overflow visible: เมนู/ป้ายบนรูปไม่ถูกตัด) · ซูมเกิน 100% ค่อยเลื่อนได้
+    <div ref={vpRef} className={`${zoom > 1 ? "overflow-auto" : "overflow-visible"} ${className}`}>
+      {/* เล็กกว่ากล่อง = จัดกลาง · ใหญ่กว่า = เลื่อนดูได้ (ความกว้างขั้นต่ำ = กล่อง ด้วย CSS ไม่ใช่ตัวเลขที่วัด → ไม่ล้นเพราะแถบเลื่อน) */}
+      <div className="flex items-center justify-center" style={{ minWidth: "100%", minHeight: "100%", width: "max-content", padding }}>
         {box.w > 0 && <div ref={contentRef} style={{ width: contentW }} className="shrink-0">{children}</div>}
       </div>
     </div>
