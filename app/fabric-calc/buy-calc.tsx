@@ -18,7 +18,6 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ComponentPicker, type BomComponent } from "@/components/material-picker";
-import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { MoMultiPickerModal } from "@/components/mo-picker";
 import { FabricLayoutPreview } from "@/components/design-sheet-detail/fabric-layout-preview";
 import { printReportHtmlInNewWindow } from "@/components/report";
@@ -39,6 +38,7 @@ import { Card, Field, Group, Metric, Num, Seg, StepBar, fmt, inputCls, textCls, 
 import { usePageOwnsBottomBar } from "@/lib/app-shell-bar";
 import { FamilyCalc, emptyFamily, type FamilyState, type FamilySummary, type OpenSingleArgs } from "./family-calc";
 import { SavedCalcsBar, type SavePack } from "./saved-calcs";
+import { BomPickModal, bomLabel, fabricsFromBom, type BomHead, type SrcFabric } from "./bom-pick";
 import { FreeTextPicker } from "@/components/free-text-picker";
 import { CutStatusBadge, MeasureModal, useCutChecks, type MeasureTarget } from "./cut-check";
 
@@ -66,10 +66,7 @@ let _k = 0;
 const newPiece = (p?: Partial<BuyPiece>): BuyPiece => ({ label: "", width_cm: 0, length_cm: 0, per_unit: 1, no_rotate: false, ...p, total: undefined, key: `p${_k++}` });   // key ใหม่เสมอ (ก๊อปชิ้น = แถวใหม่) · ไม่พกยอดรวมจากโหมดตระกูล
 const QUICK_WIDTHS = [110, 137, 147, 150, 160];   // หน้ากว้างที่พบบ่อย (ซม.) — 137 ≈ 54" · 147 ≈ 58"
 
-type BomHead = { id: string; bom_code: string; product_sku: string | null; product_name: string | null; version: string | number | null };
-type BomLine = { component_sku?: string | null; component_name?: string | null; material_type?: string | null; cut_block_code?: string | null; piece_name?: string | null; cut_width?: number | null; cut_length?: number | null; pieces?: number | null; no_rotate?: boolean | null; face_width_cm?: number | null; size_variant?: boolean | null };
 /** ผ้าให้เลือก (จากสูตร หรือจากใบสั่งผลิตเก่า) → กดแล้วได้ชิ้นตัด */
-type SrcFabric = { sku: string; name: string; note: string; pieces: Omit<BuyPiece, "key">[]; sized?: boolean; product?: string | null; mo_no?: string | null; mo_qty?: number };
 type Origin = { product_sku: string; component_sku: string; mo_no?: string | null; mo_qty?: number };
 type Mode = "single" | "family";
 
@@ -80,8 +77,7 @@ export function FabricBuyCalc() {
   const [pieces, setPieces] = useState<BuyPiece[]>([newPiece()]);
   const [source, setSource] = useState<string | null>(null);        // "สูตร BOM-XXX" — โชว์/พิมพ์ว่าชิ้นมาจากไหน
   const [srcPanel, setSrcPanel] = useState<"" | "bom" | "mo">("");
-  const [bomSku, setBomSku] = useState<SkuPickerValue | null>(null);
-  const [boms, setBoms] = useState<BomHead[] | null>(null);
+  const [bomPick, setBomPick] = useState(false);   // ป๊อปดึงจากสูตร BOM (ค้นจากใบสั่งงาน · 2026-11-14)
   const [srcFabrics, setSrcFabrics] = useState<SrcFabric[] | null>(null);
   const [srcBusy, setSrcBusy] = useState(false);
   const [moPick, setMoPick] = useState(false);
@@ -178,35 +174,18 @@ export function FabricBuyCalc() {
     setUnit(u);
   };
 
-  // ── ดึงจากสูตร BOM: เลือก SKU → หาสูตรของ SKU นั้น → เลือกผ้าในสูตร → ชิ้นตัดของผ้านั้น ──
-  const pickBomSku = async (v: SkuPickerValue | null) => {
-    setBomSku(v); setBoms(null); setSrcFabrics(null);
-    if (!v) return;
-    setSrcBusy(true);
-    try {
-      const j = await apiFetch(`/api/bom?search=${encodeURIComponent(v.code)}&limit=50`).then((r) => r.json());
-      const list = ((j.data ?? []) as BomHead[]).filter((b) => b.product_sku === v.code);
-      setBoms(list);
-      if (list.length === 1) await loadBom(list[0]);
-    } catch { toast.error("โหลดสูตรไม่สำเร็จ ลองใหม่อีกครั้ง"); }
-    finally { setSrcBusy(false); }
+  // ── ดึงจากสูตร BOM: ป๊อปค้นจากใบสั่งงาน (bom-pick.tsx) → เลือกสินค้า → เลือกผ้าในสูตร ──
+  const onBomPicked = ({ bom, fabric, qty: q }: { bom: BomHead; fabric: SrcFabric; qty: number | null }) => {
+    setBomPick(false); setCurBom(bom); setSource(bomLabel(bom)); setSrcFabrics(null);
+    if (q && q > 0) setQty(q);
+    useSrcFabric(fabric);
   };
   const loadBom = async (b: BomHead): Promise<SrcFabric[]> => {
     setSrcBusy(true); setSrcFabrics(null); setCurBom(b);
     try {
-      const j = await apiFetch(`/api/bom/${encodeURIComponent(b.id)}`).then((r) => r.json());
-      const lines = ((j.data?.lines ?? []) as BomLine[]).filter((l) => Number(l.cut_width) > 0 && Number(l.cut_length) > 0);
-      const m = new Map<string, SrcFabric>();
-      for (const l of lines) {
-        const sku = String(l.component_sku ?? "") || "(ไม่ระบุรหัส)";
-        const f = m.get(sku) ?? { sku, name: String(l.component_name ?? sku), note: l.material_type ?? "", pieces: [], sized: false, product: b.product_sku };
-        f.pieces.push({ label: String(l.piece_name ?? "") || String(l.cut_block_code ?? "") || `${l.cut_width}×${l.cut_length}`, width_cm: Number(l.cut_width) || 0, length_cm: Number(l.cut_length) || 0, per_unit: Number(l.pieces) || 1, no_rotate: !!l.no_rotate });
-        if (l.size_variant) f.sized = true;
-        m.set(sku, f);
-      }
-      const list = [...m.values()];
+      const list = await fabricsFromBom(b);
       setSrcFabrics(list);
-      setSource(`สูตร ${b.bom_code}${b.version != null ? ` v${b.version}` : ""} (${b.product_sku ?? ""})`);
+      setSource(bomLabel(b));
       return list;
     } catch { toast.error("โหลดสูตรไม่สำเร็จ ลองใหม่อีกครั้ง"); return []; }
     finally { setSrcBusy(false); }
@@ -511,7 +490,7 @@ export function FabricBuyCalc() {
       <div className={step === 1 ? "space-y-4" : "hidden"}>
       <Card title="ชิ้นตัด" tag="need" right={source && <span className="truncate text-[12px] text-slate-500">จาก {source}</span>}>
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => { setSrcPanel((s) => (s === "bom" ? "" : "bom")); setSrcFabrics(null); }} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "bom" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="measure" /> ดึงจากสูตร BOM</button>
+          <button type="button" onClick={() => setBomPick(true)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "bom" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="measure" /> ดึงจากสูตร BOM</button>
           <button type="button" onClick={() => setMoPick(true)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[12px] ${srcPanel === "mo" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}><Icon name="repeat" /> ก๊อปจากใบสั่งผลิตเก่า</button>
           <button type="button" onClick={() => setShapeOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon name="edit" /> วาดชิ้นทรงพิเศษ{shaped ? ` (${pieces.filter((p) => p.outline).length})` : ""}</button>
           <button type="button" onClick={() => setPhotoOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50" title="ถ่ายรูปแพทเทิร์นกระดาษ → ลอกเส้นรอบชิ้นให้ (ในเครื่อง ไม่ใช้ AI)"><Icon name="camera" /> ถ่ายรูปแบบกระดาษ</button>
@@ -522,17 +501,7 @@ export function FabricBuyCalc() {
         {help && <HowTo onClose={() => setHelp(false)} />}
         {srcPanel !== "" && (
           <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
-            {srcPanel === "bom" && <>
-              <div className="mb-1 text-[12px] text-slate-600">เลือกสินค้า (SKU) ที่มีสูตรแล้ว → เลือกผ้าในสูตร</div>
-              <div className="max-w-md"><SkuPicker value={bomSku} onChange={(v) => void pickBomSku(v)} placeholder="ค้นรหัส / ชื่อสินค้า..." /></div>
-              {boms && boms.length === 0 && !srcBusy && <div className="mt-2 text-[12px] text-amber-700">สินค้านี้ยังไม่มีสูตร (BOM) — พิมพ์ชิ้นเองได้</div>}
-              {boms && boms.length > 1 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <span className="text-[12px] text-slate-500">มี {boms.length} สูตร:</span>
-                  {boms.map((b) => <button key={b.id} type="button" onClick={() => void loadBom(b)} className="h-7 rounded-full border border-slate-200 bg-white px-2.5 text-[12px] hover:border-indigo-300">{b.bom_code}{b.version != null ? ` v${b.version}` : ""}</button>)}
-                </div>
-              )}
-            </>}
+            {srcPanel === "bom" && <div className="mb-1 text-[12px] text-slate-600">บันทึกสูตร {curBom?.bom_code ?? ""} แล้ว → เลือกผ้าเพื่อดึงชิ้นใหม่ <button type="button" onClick={() => setBomPick(true)} className="ml-1 text-indigo-600 underline">เลือกสินค้าอื่น</button></div>}
             {srcPanel === "mo" && <div className="mb-1 text-[12px] text-slate-600">ผ้าในใบที่เลือก (ชิ้นต่อใบ = ชิ้นที่ระบบวางไว้ ÷ จำนวนในใบ) → เลือกผ้า <button type="button" onClick={() => setMoPick(true)} className="ml-1 text-indigo-600 underline">เลือกใบอื่น</button></div>}
             {srcBusy && <div className="mt-2 text-[12px] text-slate-500">กำลังโหลด…</div>}
             {srcFabrics && (srcFabrics.length === 0
@@ -736,6 +705,7 @@ export function FabricBuyCalc() {
       </div>
       </>}
 
+      <BomPickModal open={bomPick} onClose={() => setBomPick(false)} onUse={onBomPicked} onUseMo={(no) => { setBomPick(false); void loadMo(no); }} />
       {bomEdit && <BomEditorModal sku={bomEdit} onClose={(changed) => void afterBomEdit(changed)} />}
       {shapeOpen && <ShapeEditor open onClose={closeEditor} onSave={applyShapes} initialEdit={!!rowEdit} title={rowEdit ? "ปรับทรงชิ้นนี้ (ขนาดจริง ซม.)" : "วาดชิ้นทรงพิเศษ (ขนาดจริง ซม.)"}
         initial={shapeInit ?? pieces.filter((p) => p.shape).map((p) => p.shape as EditorPiece)} />}
