@@ -246,17 +246,25 @@ export function shopeePriceBatches(itemId: string, changes: ShopeePriceChange[])
 }
 
 /** ผล update_price รายตัว (HTTP 200 แต่ไม่สำเร็จรายตัวได้) · ไม่อยู่ทั้งสองรายการ = ถือว่าไม่ยืนยัน */
-export function shopeePriceResult(resp: Obj, sentModelIds: string[]): { ok: string[]; failed: { modelId: string; reason: string }[] } {
+export function shopeePriceResult(resp: Obj, sentModelIds: string[]): { ok: string[]; failed: { modelId: string; reason: string }[]; unsure: string[] } {
   const r = obj(resp.response) ?? resp;
-  const fail = new Map(arr(r.failure_list).map(obj).filter((x): x is Obj => !!x).map((f) => [String(f.model_id ?? ""), str(f.failed_reason) ?? "Shopee ไม่ให้แก้ราคาตัวนี้"]));
-  const okSet = new Set(arr(r.success_list).map(obj).filter((x): x is Obj => !!x).map((s) => String(s.model_id ?? "")));
-  const ok: string[] = [], failed: { modelId: string; reason: string }[] = [];
+  const failList = arr(r.failure_list).map(obj).filter((x): x is Obj => !!x);
+  const okList = arr(r.success_list).map(obj).filter((x): x is Obj => !!x);
+  const reasonOf = (f: Obj) => str(f.failed_reason) ?? "Shopee ไม่ให้แก้ราคาตัวนี้";
+  // สินค้าไม่มีตัวเลือก: ส่ง model_id 0 แต่ Shopee อาจตอบกลับด้วยรหัสตัวเลือกภายใน (ลองจริง BCG01-03 2026-11-14 ไม่เจอ 0 ในคำตอบ) → ดูจากรายการที่ตอบแทน
+  if (sentModelIds.length === 1 && sentModelIds[0] === "0") {
+    if (failList.length) return { ok: [], failed: [{ modelId: "0", reason: reasonOf(failList[0]) }], unsure: [] };
+    return okList.length ? { ok: ["0"], failed: [], unsure: [] } : { ok: [], failed: [], unsure: ["0"] };
+  }
+  const fail = new Map(failList.map((f) => [String(f.model_id ?? ""), reasonOf(f)]));
+  const okSet = new Set(okList.map((s) => String(s.model_id ?? "")));
+  const ok: string[] = [], failed: { modelId: string; reason: string }[] = [], unsure: string[] = [];
   for (const id of sentModelIds) {
     if (fail.has(id)) failed.push({ modelId: id, reason: fail.get(id)! });
     else if (okSet.has(id)) ok.push(id);
-    else failed.push({ modelId: id, reason: "Shopee ไม่ได้ยืนยันว่าแก้สำเร็จ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก" });
+    else unsure.push(id); // Shopee ตอบรับคำสั่งแต่ไม่ได้บอกรายตัว → API ดึงราคาจริงกลับมาเช็กเอง
   }
-  return { ok, failed };
+  return { ok, failed, unsure };
 }
 
 /**

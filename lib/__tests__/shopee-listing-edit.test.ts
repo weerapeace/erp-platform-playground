@@ -150,13 +150,17 @@ describe("Shopee ลิ้นชัก — เฟส 4B ราคาตั้ง
     expect(b[0].price_list).toHaveLength(50);
     expect(b[1].price_list[0]).toEqual({ model_id: 51, original_price: 120 });
   });
-  test("ผลรายตัว: failure_list = เหตุผล · success_list = ผ่าน · ไม่อยู่ทั้งคู่ = ไม่ยืนยัน", () => {
+  test("ผลรายตัว: failure_list = เหตุผล · success_list = ผ่าน · ไม่อยู่ทั้งคู่ = ยังไม่ยืนยัน (ไม่นับว่าล้ม)", () => {
     const res = shopeePriceResult({ response: { failure_list: [{ model_id: 1, failed_reason: "Price cannot be changed when model is under promotion." }], success_list: [{ model_id: 2, original_price: 1490 }] } }, ["1", "2", "3"]);
     expect(res.ok).toEqual(["2"]);
-    expect(res.failed).toEqual([
-      { modelId: "1", reason: "Price cannot be changed when model is under promotion." },
-      { modelId: "3", reason: "Shopee ไม่ได้ยืนยันว่าแก้สำเร็จ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก" },
-    ]);
+    expect(res.failed).toEqual([{ modelId: "1", reason: "Price cannot be changed when model is under promotion." }]);
+    expect(res.unsure).toEqual(["3"]);
+  });
+  test("สินค้าไม่มีตัวเลือก (model 0): Shopee ตอบด้วยรหัสตัวเลือกภายใน = ผ่าน · ตอบว่าง = ยังไม่ยืนยัน · failure = ไม่ผ่าน", () => {
+    expect(shopeePriceResult({ response: { success_list: [{ model_id: 123456789, original_price: 1251 }], failure_list: [] } }, ["0"])).toEqual({ ok: ["0"], failed: [], unsure: [] });
+    expect(shopeePriceResult({ response: {} }, ["0"])).toEqual({ ok: [], failed: [], unsure: ["0"] });
+    expect(shopeePriceResult({ response: { failure_list: [{ model_id: 123456789, failed_reason: "Can't update price when item is under promotion." }] } }, ["0"]))
+      .toEqual({ ok: [], failed: [{ modelId: "0", reason: "Can't update price when item is under promotion." }], unsure: [] });
   });
   test("แก้หลายตัว: ตั้งราคาเดียว / ปรับ % ปัดบาทเต็ม / เฉพาะที่ติ๊ก", () => {
     const rows = shopeePriceRowsFromView(v3());
@@ -167,5 +171,6 @@ describe("Shopee ลิ้นชัก — เฟส 4B ราคาตั้ง
   test("ข้อความประวัติแก้ราคา", () => {
     expect(listingHistoryText({ source: "shopee_listing_prices", ok: true, sent: 1, changes: [{ label: "สี: ดำ", text: "1,590฿ → 1,490฿" }] })).toBe("แก้ราคาบน Shopee 1 ตัวเลือก (1,590฿ → 1,490฿)");
     expect(listingHistoryText({ source: "shopee_listing_prices", ok: false, sent: 0, error: "x", changes: [{ label: "a" }, { label: "b" }] })).toBe("แก้ราคาบน Shopee 2 ตัวเลือก — ไม่สำเร็จ: x");
+    expect(listingHistoryText({ source: "shopee_listing_prices", ok: true, sent: 0, unsure: ["0"], changes: [{ label: "สินค้าเดียว", text: "1,250฿ → 1,251฿" }] })).toBe("แก้ราคาบน Shopee 1 ตัวเลือก (1,250฿ → 1,251฿) · รอ Shopee ยืนยัน 1 ตัวเลือก");
   });
 });

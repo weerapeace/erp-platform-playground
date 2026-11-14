@@ -297,7 +297,8 @@ export function listingHistoryText(meta: unknown): string {
     const detail = ch.length === 1 ? ` (${str(ch[0].text)})` : "";
     const fails = arr(m.failed).length;
     const sent = Number(m.sent ?? ch.length) || 0;
-    return `แก้ราคาบน Shopee ${sent > 0 ? sent : ch.length} ตัวเลือก${detail}${m.ok === false ? (sent > 0 ? ` — ไม่ผ่าน ${fails} ตัวเลือก: ${str(m.error)}` : ` — ไม่สำเร็จ: ${str(m.error)}`) : ""}`;
+    const unsure = arr(m.unsure).length;
+    return `แก้ราคาบน Shopee ${sent > 0 ? sent : ch.length} ตัวเลือก${detail}${m.ok === false ? (sent > 0 ? ` — ไม่ผ่าน ${fails} ตัวเลือก: ${str(m.error)}` : ` — ไม่สำเร็จ: ${str(m.error)}`) : ""}${unsure ? ` · รอ Shopee ยืนยัน ${unsure} ตัวเลือก` : ""}`;
   }
   if ("manual_match" in m) return m.to ? `จับคู่กับ ${str(m.matched_code) || "สินค้าในระบบ"}` : "ยกเลิกจับคู่";
   const ig = obj(m.match_ignored);
