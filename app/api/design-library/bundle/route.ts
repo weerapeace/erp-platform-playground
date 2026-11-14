@@ -29,10 +29,13 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 /** ข้อมูลวัสดุ (ไม่มีราคา) ของ SKU — หน่วยซื้อ + หน้าผ้า ใช้คิดปริมาณ */
 async function loadMaterials(admin: Admin, ids: string[]): Promise<Record<string, MaterialInfo>> {
   if (!ids.length) return {};
-  const { data } = await admin.from("skus_v2").select("id, code, name_th, purchase_uom_en, fabric_width_cm").in("id", ids);
+  // หน่วย = uoms.name ของ SKU (ราคาทุน standard_price เป็นราคาต่อหน่วยนี้) — purchase_uom_en ยังว่างทุกแถว
+  const { data } = await admin.from("skus_v2").select("id, code, name_th, fabric_width_cm, uom:uoms!skus_v2_uom_id_fkey(name)").in("id", ids);
   const out: Record<string, MaterialInfo> = {};
-  for (const r of (data ?? []) as { id: string; code: string; name_th: string | null; purchase_uom_en: string | null; fabric_width_cm: number | null }[])
-    out[r.id] = { code: r.code, name: r.name_th ?? r.code, uom: r.purchase_uom_en, face_width_cm: Number(r.fabric_width_cm) > 0 ? Number(r.fabric_width_cm) : null };
+  for (const r of (data ?? []) as unknown as { id: string; code: string; name_th: string | null; fabric_width_cm: number | null; uom: { name: string | null } | { name: string | null }[] | null }[]) {
+    const u = Array.isArray(r.uom) ? r.uom[0] : r.uom;
+    out[r.id] = { code: r.code, name: r.name_th ?? r.code, uom: u?.name ?? null, face_width_cm: Number(r.fabric_width_cm) > 0 ? Number(r.fabric_width_cm) : null };
+  }
   return out;
 }
 

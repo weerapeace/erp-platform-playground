@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanSpec, type Choice } from "./design-library";
-import { calcSettingsFrom, cleanCost, DEFAULT_CALC, estimateCost, fabricAreas } from "./design-library-cost";
+import { calcSettingsFrom, cleanCost, DEFAULT_CALC, estimateCost, fabricAreas, lengthUnitCm } from "./design-library-cost";
 
 const ch = (code: string, name: string, source: string): Choice =>
   ({ id: code, list_key: "category", code, name, name_en: null, hex: null, config: { source }, sort_order: 0, is_active: true });
@@ -68,5 +68,23 @@ describe("ทุนประมาณ", () => {
   it("ค่าคิดผ้าจาก bom_calc_settings", () => {
     expect(calcSettingsFrom([{ material_type: "ผ้าซับใน", default_face_width_cm: 110, loss_percent: 15, uom: "หลา", cm_per_unit: 91.44 }]).lining.face).toBe(110);
     expect(calcSettingsFrom([]).outer).toEqual(DEFAULT_CALC.outer);
+  });
+});
+
+describe("หน่วยจริงของ SKU", () => {
+  it("หลา/เมตร/kg", () => {
+    expect(lengthUnitCm("หลา", 91.44)).toBe(91.44);
+    expect(lengthUnitCm("m", 91.44)).toBe(100);
+    expect(lengthUnitCm(null, 91.44)).toBe(91.44);
+    expect(lengthUnitCm("kg", 91.44)).toBeNull();
+  });
+  it("ผ้าขายเป็นเมตร = ปริมาณน้อยกว่าหลา · ขายเป็น kg = ใส่เอง", () => {
+    const yd = estimateCost(spec(), CHOICES, { materials: { [FAB]: { code: "PU-1", name: "PU", uom: "หลา", face_width_cm: 150 } }, prices: {} }).lines[0];
+    const m = estimateCost(spec(), CHOICES, { materials: { [FAB]: { code: "PU-1", name: "PU", uom: "m", face_width_cm: 150 } }, prices: {} }).lines[0];
+    expect(m.qty).toBeCloseTo(yd.qty * 91.44 / 100, 3);
+    expect(m.uom).toBe("m");
+    const kg = estimateCost(spec(), CHOICES, { materials: { [FAB]: { code: "PU-1", name: "PU", uom: "kg", face_width_cm: 150 } }, prices: {} }).lines[0];
+    expect(kg.autoQty).toBeNull();
+    expect(kg.detail).toContain("ใส่ปริมาณเอง");
   });
 });
