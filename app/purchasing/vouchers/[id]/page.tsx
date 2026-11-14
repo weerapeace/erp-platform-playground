@@ -22,6 +22,7 @@ import { SellerBillPanel } from "@/components/seller-bill-panel";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { Icon } from "@/components/icon";
+import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist } from "@/lib/purchase-voucher-checklist";
@@ -362,127 +363,132 @@ export default function PurchaseVoucherFormPage() {
                 {foreign && <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />}
 
                 {/* รายการ */}
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 text-slate-500 text-xs">
-                        <tr>
-                          <th className="px-2 py-2 w-12"></th>
-                          <th className="text-left px-2 py-2 font-medium">สินค้า</th>
-                          <th className="text-left px-2 py-2 font-medium">ใบรับ / PO</th>
-                          <th className="text-right px-2 py-2 font-medium">รับจริง</th>
-                          <th className="text-right px-2 py-2 font-medium">ราคา/หน่วย ({sym.trim()})</th>
-                          {foreign && <th className="text-right px-2 py-2 font-medium">ราคา/หน่วย ฿</th>}
-                          <th className="text-right px-2 py-2 font-medium" title="ส่วนลดของรายการนี้ — ใส่เป็นยอดเงิน หรือ % (กดปุ่มข้างช่องสลับ) · ค่าสินค้า = จำนวน × ราคา − ส่วนลด">ส่วนลด</th>
-                          <th className="text-right px-2 py-2 font-medium">ค่าสินค้า ฿</th>
-                          {anyShip && <th className="text-left px-2 py-2 font-medium">คิดจาก</th>}
-                          {anyShip && <th className="text-right px-2 py-2 font-medium">คิว หรือ กก. /ชิ้น</th>}
-                          {anyShip && <th className="text-right px-2 py-2 font-medium">ค่าส่ง ฿</th>}
-                          {anyShip && <th className="text-right px-2 py-2 font-medium">ถึงมือ/ชิ้น ฿</th>}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {data.lines.map((l, i) => {
-                          const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "", ship_method: "" as const, qty: String(l.qty) };
-                          const manual = !l.gr_line_id;   // รายการที่เพิ่มเอง → แก้จำนวน/ลบได้ที่นี่
-                          const c = calc.lines[i];
-                          const src = SOURCE_BADGE[e.unit_price ? (l.price_source ?? "manual") : "none"];
-                          const lineMethod = c.method;   // วิธีคิดที่ใช้จริงกับบรรทัดนี้ (ระบุเอง หรือตามใบ)
-                          const basisKey = lineMethod === "weight" ? "kg_per_unit" : "cbm_per_unit";
-                          const parentVal = lineMethod === "weight" ? l.parent_kg : l.parent_cbm;
-                          return (
-                            <tr key={l.id} className={!c.has_price ? "bg-amber-50/40" : ""}>
-                              <td className="px-2 py-2">
-                                <HoverPreview url={l.image_url} previewW={320}>
-                                  <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
-                                    {l.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={l.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
-                                  </div>
-                                </HoverPreview>
-                              </td>
-                              <td className="px-2 py-2">
-                                <div className="text-slate-800 flex items-center gap-1">{l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")}<CopyButton value={l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")} title="คัดลอกชื่อ" /></div>
-                                <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1">{l.code || "—"}{l.code && <CopyButton value={l.code} title="คัดลอกรหัส" />}<span className={`ml-1 text-[10px] px-1 py-0.5 rounded border font-sans ${src.cls}`}>{src.text}</span></div>
-                              </td>
-                              <td className="px-2 py-2 text-[11px] text-slate-500 whitespace-nowrap">{manual ? (l.po_no
-                                ? <><span className="text-[10px] px-1 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200" title="ผูกบรรทัดใบสั่งซื้อแล้ว (จากบิลร้าน) แต่ยังไม่ได้มาจากใบรับของ — ยังไม่เข้าสต๊อก">ยังไม่รับของ</span><div>{l.po_no}</div></>
-                                : <span className="text-[10px] px-1 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span>) : <><div>{l.gr_no}</div><div>{l.po_no}</div></>}</td>
-                              <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
-                                {manual && !readonly
-                                  ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${inputCls} w-20 text-right tabular-nums`} />
-                                  : l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span>
-                                {manual && !readonly && <button onClick={() => setDelLine(l)} title="ลบรายการนี้" className="ml-1 text-slate-300 hover:text-red-600 font-normal">🗑</button>}
-                              </td>
-                              <td className="px-2 py-2 text-right align-top">
-                                <MoneyInput value={e.unit_price} disabled={readonly} onChange={(v) => setLine(l.id, { unit_price: v })} className={`${inputCls} w-24 text-right ${!c.has_price ? "border-amber-300" : ""}`} placeholder="0.00" />
-                                {/* ★ 2026-11-14 ราคาในระบบโชว์เล็ก ๆ + ปุ่มไอคอนเส้น (ชี้ดูว่าคืออะไร): ใช้ราคาระบบ = ดึงมาใส่ · แทนราคาในระบบ = เอาราคานี้ไปเป็นราคาต่อร้าน */}
-                                {l.item_sku_id && (l.sys_price != null || (!readonly && num(e.unit_price) > 0)) && (
-                                  <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400 whitespace-nowrap">
-                                    <span title={l.sys_price != null ? `ราคาในระบบ: ${SYS_SRC[l.sys_price_source ?? ""] ?? ""}` : "ยังไม่มีราคาในระบบ"}>ในระบบ {l.sys_price != null ? `${sym}${fmtMoney(l.sys_price, 4)}` : "—"}</span>
-                                    {!readonly && l.sys_price != null && Math.abs(num(e.unit_price) - l.sys_price) > 1e-9 && (
-                                      <button type="button" onClick={() => setLine(l.id, { unit_price: String(l.sys_price) })} title={`ใช้ราคาในระบบ — ใส่ ${sym}${fmtMoney(l.sys_price, 4)} (${SYS_SRC[l.sys_price_source ?? ""] ?? ""}) ลงช่องนี้`} aria-label="ใช้ราคาในระบบ"
-                                        className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Icon name="download" mode="line" size={13} /></button>
-                                    )}
-                                    {!readonly && num(e.unit_price) > 0 && (l.sys_price == null || Math.abs(num(e.unit_price) - l.sys_price) > 1e-9) && (
-                                      <button type="button" disabled={sysBusy === l.id} onClick={() => void replaceSysPrice(l.id, num(e.unit_price))} title={`แทนราคาในระบบ — บันทึก ${sym}${fmtMoney(num(e.unit_price), 4)} เป็นราคาต่อร้านของร้านนี้ทันที (ราคาเดิมเก็บในประวัติ)`} aria-label="แทนราคาในระบบ"
-                                        className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"><Icon name="upload" mode="line" size={13} /></button>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                              {foreign && <td className="px-2 py-2 text-right tabular-nums text-slate-600">{c.has_price ? fmtMoney(c.unit_price_thb) : "—"}</td>}
-                              <td className="px-2 py-2 text-right whitespace-nowrap align-top">
-                                {/* ★ 2026-11-14 ส่วนลด: ยอดเงิน (สกุลใบ) หรือ % — กดปุ่มข้างช่องสลับ */}
+                <div className="space-y-2">
+                  {/* ★ 2026-11-14 ตารางกลาง MiniTable (เจ้าของ: "แบบ A แต่อยากให้ปรับขนาด column ได้เองด้วย")
+                       — ลากขอบหัวคอลัมน์ปรับกว้าง (จำในเครื่อง) · ⋮ ที่หัวคอลัมน์ = พอดีเนื้อหา / คืนความกว้างเดิม
+                       — คอลัมน์สินค้ากว้างขั้นต่ำ + ชื่อ 2 บรรทัด (ชี้ดูชื่อเต็ม) · ล็อกรูป+สินค้าไว้ซ้ายตอนเลื่อนขวา · จอแคบเลื่อนแทนการบีบ */}
+                  {(() => {
+                    const H = (t: string, tip?: string) => <span className="whitespace-nowrap" title={tip}>{t}</span>;
+                    const rows = data.lines.map((l, i) => {
+                      const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "", ship_method: "" as const, qty: String(l.qty), discount: "", disc_mode: "amt" as const };
+                      const c = calc.lines[i];
+                      const lineMethod = c.method;   // วิธีคิดที่ใช้จริงกับบรรทัดนี้ (ระบุเอง หรือตามใบ)
+                      return {
+                        l, e, c, lineMethod,
+                        manual: !l.gr_line_id,   // รายการที่เพิ่มเอง → แก้จำนวน/ลบได้ที่นี่
+                        src: SOURCE_BADGE[e.unit_price ? (l.price_source ?? "manual") : "none"],
+                        basisKey: (lineMethod === "weight" ? "kg_per_unit" : "cbm_per_unit") as "kg_per_unit" | "cbm_per_unit",
+                        parentVal: lineMethod === "weight" ? l.parent_kg : l.parent_cbm,
+                      };
+                    });
+                    type R = (typeof rows)[number];
+                    const cols: MiniColumn<R>[] = [
+                      { key: "img", header: "", width: "3.25rem", cell: ({ l }) => (
+                        <HoverPreview url={l.image_url} previewW={320}>
+                          <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
+                            {l.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={l.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+                          </div>
+                        </HoverPreview>
+                      ) },
+                      { key: "item", header: H("สินค้า"), width: "minmax(13rem,2fr)", cell: ({ l, src }) => {
+                        const name = l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "");
+                        return (
+                          <div className="min-w-0">
+                            <div className="flex items-start gap-1 text-slate-800"><span className="line-clamp-2 min-w-0" title={name}>{name}</span><CopyButton value={name} title="คัดลอกชื่อ" /></div>
+                            <div className="mt-0.5 flex items-center gap-1 text-[11px] font-mono text-slate-400 whitespace-nowrap min-w-0">
+                              <span className="truncate">{l.code || "—"}</span>{l.code && <CopyButton value={l.code} title="คัดลอกรหัส" />}
+                              <span className={`shrink-0 text-[10px] px-1 py-0.5 rounded border font-sans whitespace-nowrap ${src.cls}`}>{src.text}</span>
+                            </div>
+                          </div>
+                        );
+                      } },
+                      { key: "ref", header: H("ใบรับ / PO"), width: "6.5rem", cell: ({ l, manual }) => (
+                        <div className="text-[11px] text-slate-500 whitespace-nowrap">{manual ? (l.po_no
+                          ? <><span className="text-[10px] px-1 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200" title="ผูกบรรทัดใบสั่งซื้อแล้ว (จากบิลร้าน) แต่ยังไม่ได้มาจากใบรับของ — ยังไม่เข้าสต๊อก">ยังไม่รับของ</span><div>{l.po_no}</div></>
+                          : <span className="text-[10px] px-1 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span>) : <><div>{l.gr_no}</div><div>{l.po_no}</div></>}</div>
+                      ) },
+                      { key: "qty", header: H("รับจริง"), align: "right", width: "6.5rem", cell: ({ l, e, manual }) => (
+                        <div className="text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
+                          {manual && !readonly
+                            ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${inputCls} w-16 text-right tabular-nums`} />
+                            : l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span>
+                          {manual && !readonly && <button onClick={() => setDelLine(l)} title="ลบรายการนี้" className="ml-1 text-slate-300 hover:text-red-600 font-normal">🗑</button>}
+                        </div>
+                      ) },
+                      { key: "price", header: H(`ราคา/หน่วย (${sym.trim()})`), align: "right", width: "8.5rem", cell: ({ l, e, c }) => (
+                        <div className="text-right">
+                          <MoneyInput value={e.unit_price} disabled={readonly} onChange={(v) => setLine(l.id, { unit_price: v })} className={`${inputCls} w-24 text-right ${!c.has_price ? "border-amber-300" : ""}`} placeholder="0.00" />
+                          {/* ราคาในระบบโชว์เล็ก ๆ + ปุ่มไอคอนเส้น (ชี้ดูว่าคืออะไร): ใช้ราคาระบบ = ดึงมาใส่ · แทนราคาในระบบ = เอาราคานี้ไปเป็นราคาต่อร้าน */}
+                          {l.item_sku_id && (l.sys_price != null || (!readonly && num(e.unit_price) > 0)) && (
+                            <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400 whitespace-nowrap">
+                              <span title={l.sys_price != null ? `ราคาในระบบ: ${SYS_SRC[l.sys_price_source ?? ""] ?? ""}` : "ยังไม่มีราคาในระบบ"}>ในระบบ {l.sys_price != null ? `${sym}${fmtMoney(l.sys_price, 4)}` : "—"}</span>
+                              {!readonly && l.sys_price != null && Math.abs(num(e.unit_price) - l.sys_price) > 1e-9 && (
+                                <button type="button" onClick={() => setLine(l.id, { unit_price: String(l.sys_price) })} title={`ใช้ราคาในระบบ — ใส่ ${sym}${fmtMoney(l.sys_price, 4)} (${SYS_SRC[l.sys_price_source ?? ""] ?? ""}) ลงช่องนี้`} aria-label="ใช้ราคาในระบบ"
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Icon name="download" mode="line" size={13} /></button>
+                              )}
+                              {!readonly && num(e.unit_price) > 0 && (l.sys_price == null || Math.abs(num(e.unit_price) - l.sys_price) > 1e-9) && (
+                                <button type="button" disabled={sysBusy === l.id} onClick={() => void replaceSysPrice(l.id, num(e.unit_price))} title={`แทนราคาในระบบ — บันทึก ${sym}${fmtMoney(num(e.unit_price), 4)} เป็นราคาต่อร้านของร้านนี้ทันที (ราคาเดิมเก็บในประวัติ)`} aria-label="แทนราคาในระบบ"
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"><Icon name="upload" mode="line" size={13} /></button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ) },
+                      ...(foreign ? [{ key: "price_thb", header: H("฿/หน่วย", "ราคาต่อหน่วยเป็นบาท (ราคา × เรท)"), align: "right" as const, width: "5.5rem", cell: ({ c }: R) => <span className="tabular-nums text-slate-600">{c.has_price ? fmtMoney(c.unit_price_thb) : "—"}</span> }] : []),
+                      { key: "disc", header: H("ส่วนลด", "ส่วนลดของรายการนี้ — ใส่เป็นยอดเงิน หรือ % (กดปุ่มข้างช่องสลับ) · ค่าสินค้า = จำนวน × ราคา − ส่วนลด"), align: "right", width: "6.5rem", cell: ({ l, e, c }) => (
+                        <div className="text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" inputMode="decimal" step="any" min={0} value={e.discount ?? ""} disabled={readonly} onChange={(ev) => setLine(l.id, { discount: ev.target.value })} onFocus={(ev) => ev.target.select()}
+                              className={`${inputCls} w-14 text-right tabular-nums ${num(e.discount) > 0 ? "border-red-200 text-red-600" : ""}`} placeholder="0" title="ส่วนลดของรายการนี้" />
+                            <button type="button" disabled={readonly} onClick={() => setLine(l.id, { disc_mode: e.disc_mode === "pct" ? "amt" : "pct" })} title={e.disc_mode === "pct" ? "ตอนนี้: เป็น % — กดเพื่อใส่เป็นยอดเงิน" : "ตอนนี้: เป็นยอดเงิน — กดเพื่อใส่เป็น %"}
+                              className="h-7 min-w-7 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{e.disc_mode === "pct" ? "%" : sym.trim() || "฿"}</button>
+                          </div>
+                          {e.disc_mode === "pct" && c.discount_foreign > 0 && <div className="text-[10px] text-red-400 mt-0.5">= −{sym}{fmtMoney(c.discount_foreign)}</div>}
+                        </div>
+                      ) },
+                      { key: "total", header: H("ค่าสินค้า ฿"), align: "right", width: "6.5rem", cell: ({ c }) => <span className="tabular-nums text-slate-800">{c.has_price ? fmtMoney(c.line_total_thb) : "—"}</span> },
+                      ...(anyShip ? [
+                        { key: "method", header: H("คิดจาก"), width: "5.5rem", cell: ({ l, e }: R) => (
+                          /* วิธีคิดเฉพาะบรรทัด — ว่าง = ตามค่าเริ่มต้นของใบ · มาจากใบส่งของ (BOX=คิว, CLOTH BLOCK=กก.) หรือเลือกเอง */
+                          <select value={e.ship_method} disabled={readonly} onChange={(ev) => setLine(l.id, { ship_method: ev.target.value as "" | "cube" | "weight" })}
+                            className={`${inputCls} w-full text-xs ${e.ship_method ? "border-indigo-300 bg-indigo-50" : ""}`}
+                            title={`คิดค่าส่งบรรทัดนี้จากอะไร — ตามใบ = ${h.ship_method === "cube" ? "คิว" : h.ship_method === "weight" ? "น้ำหนัก" : "ไม่คิด"}`}>
+                            <option value="">ตามใบ</option>
+                            <option value="cube">คิว</option>
+                            <option value="weight">กก.</option>
+                          </select>
+                        ) },
+                        { key: "basis", header: H("คิว/กก. ต่อชิ้น"), align: "right" as const, width: "7.5rem", cell: ({ l, e, lineMethod, basisKey, parentVal }: R) => (
+                          <div className="text-right whitespace-nowrap">
+                            {lineMethod === "none" ? <span className="text-slate-300 text-xs">—</span> : (
+                              <>
                                 <div className="flex items-center justify-end gap-1">
-                                  <input type="number" inputMode="decimal" step="any" min={0} value={e.discount ?? ""} disabled={readonly} onChange={(ev) => setLine(l.id, { discount: ev.target.value })} onFocus={(ev) => ev.target.select()}
-                                    className={`${inputCls} w-16 text-right tabular-nums ${num(e.discount) > 0 ? "border-red-200 text-red-600" : ""}`} placeholder="0" title="ส่วนลดของรายการนี้" />
-                                  <button type="button" disabled={readonly} onClick={() => setLine(l.id, { disc_mode: e.disc_mode === "pct" ? "amt" : "pct" })} title={e.disc_mode === "pct" ? "ตอนนี้: เป็น % — กดเพื่อใส่เป็นยอดเงิน" : "ตอนนี้: เป็นยอดเงิน — กดเพื่อใส่เป็น %"}
-                                    className="h-7 min-w-7 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{e.disc_mode === "pct" ? "%" : sym.trim() || "฿"}</button>
+                                  <input type="number" inputMode="decimal" step="any" min={0} value={e[basisKey]} disabled={readonly} onChange={(ev) => setLine(l.id, { [basisKey]: ev.target.value })}
+                                    className={`${inputCls} w-20 text-right tabular-nums ${!e[basisKey] ? "border-amber-300" : ""}`} placeholder={lineMethod === "cube" ? "0.0000" : "0.000"} />
+                                  <span className="text-[10px] text-slate-400 w-5">{lineMethod === "cube" ? "คิว" : "กก."}</span>
                                 </div>
-                                {e.disc_mode === "pct" && c.discount_foreign > 0 && <div className="text-[10px] text-red-400 mt-0.5">= −{sym}{fmtMoney(c.discount_foreign)}</div>}
-                              </td>
-                              <td className="px-2 py-2 text-right tabular-nums text-slate-800">{c.has_price ? fmtMoney(c.line_total_thb) : "—"}</td>
-                              {anyShip && (
-                                <td className="px-2 py-2 whitespace-nowrap">
-                                  {/* วิธีคิดเฉพาะบรรทัด — ว่าง = ตามค่าเริ่มต้นของใบ · มาจากใบส่งของ (BOX=คิว, CLOTH BLOCK=กก.) หรือเลือกเอง */}
-                                  <select value={e.ship_method} disabled={readonly} onChange={(ev) => setLine(l.id, { ship_method: ev.target.value as "" | "cube" | "weight" })}
-                                    className={`${inputCls} w-28 text-xs ${e.ship_method ? "border-indigo-300 bg-indigo-50" : ""}`} title="คิดค่าส่งบรรทัดนี้จากอะไร">
-                                    <option value="">ตามใบ ({h.ship_method === "cube" ? "คิว" : h.ship_method === "weight" ? "กก." : "ไม่คิด"})</option>
-                                    <option value="cube">📦 คิว (M3)</option>
-                                    <option value="weight">⚖️ น้ำหนัก (kg)</option>
-                                  </select>
-                                </td>
-                              )}
-                              {anyShip && (
-                                <td className="px-2 py-2 text-right whitespace-nowrap">
-                                  {lineMethod === "none" ? <span className="text-slate-300 text-xs">—</span> : (
-                                    <>
-                                      <div className="flex items-center justify-end gap-1">
-                                        <input type="number" inputMode="decimal" step="any" min={0} value={e[basisKey]} disabled={readonly} onChange={(ev) => setLine(l.id, { [basisKey]: ev.target.value })}
-                                          className={`${inputCls} w-24 text-right tabular-nums ${!e[basisKey] ? "border-amber-300" : ""}`} placeholder={lineMethod === "cube" ? "0.0000" : "0.000"} />
-                                        <span className="text-[10px] text-slate-400 w-6">{lineMethod === "cube" ? "คิว" : "กก."}</span>
-                                      </div>
-                                      {parentVal != null && String(parentVal) !== e[basisKey] && !readonly && (
-                                        <button onClick={() => setLine(l.id, { [basisKey]: String(parentVal) })} title="ใช้ค่าจากขนาด/น้ำหนักที่ตั้งไว้ที่ Parent SKU" className="block ml-auto text-[10px] text-indigo-600 hover:underline">ใช้ค่าตัวแม่ {parentVal}</button>
-                                      )}
-                                    </>
-                                  )}
-                                </td>
-                              )}
-                              {anyShip && <td className="px-2 py-2 text-right tabular-nums text-orange-700">{c.ship_alloc_thb > 0 ? fmtMoney(c.ship_alloc_thb) : <span className="text-slate-300">-</span>}</td>}
-                              {anyShip && <td className="px-2 py-2 text-right tabular-nums font-medium text-slate-800">{c.has_price ? fmtMoney(c.landed_unit_thb) : "—"}</td>}
-                            </tr>
-                          );
-                        })}
-                        {data.lines.length === 0 && <tr><td colSpan={12} className="px-3 py-8 text-center text-xs text-slate-300">— ยังไม่มีรายการ — เพิ่มจากแถบด้านล่าง</td></tr>}
-                      </tbody>
-                    </table>
-                  </div>
+                                {parentVal != null && String(parentVal) !== e[basisKey] && !readonly && (
+                                  <button onClick={() => setLine(l.id, { [basisKey]: String(parentVal) })} title="ใช้ค่าจากขนาด/น้ำหนักที่ตั้งไว้ที่ Parent SKU" className="block ml-auto text-[10px] text-indigo-600 hover:underline">ใช้ค่าตัวแม่ {parentVal}</button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        ) },
+                        { key: "ship", header: H("ค่าส่ง ฿"), align: "right" as const, width: "5rem", cell: ({ c }: R) => <span className="tabular-nums text-orange-700">{c.ship_alloc_thb > 0 ? fmtMoney(c.ship_alloc_thb) : <span className="text-slate-300">-</span>}</span> },
+                        { key: "landed", header: H("ถึงมือ/ชิ้น ฿"), align: "right" as const, width: "5.5rem", cell: ({ c }: R) => <span className="tabular-nums font-medium text-slate-800">{c.has_price ? fmtMoney(c.landed_unit_thb) : "—"}</span> },
+                      ] : []),
+                    ];
+                    return (
+                      <MiniTable rows={rows} rowKey={(r) => r.l.id} columns={cols} hideToolbar zebra={false} resizable storageKey="pv-lines" columnMenu={{}} stickyCols={2}
+                        emptyText={<span className="text-xs">— ยังไม่มีรายการ — เพิ่มจากแถบด้านล่าง</span>} />
+                    );
+                  })()}
                   {/* ＋ เพิ่มรายการเอง (ของที่ไม่ได้อยู่ในใบรับ / ใบที่สร้างเปล่า) · รายการจากใบรับ แก้จำนวน/ลบที่ใบรับ — พับไว้ (แบบ B) · ใบว่างเปิดให้เลย */}
                   {!readonly && !addOpen && data.lines.length > 0 && (
-                    <button type="button" onClick={() => setAddOpen(true)} className="w-full border-t border-slate-100 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50 hover:text-blue-600">＋ เพิ่มรายการเอง (ค่ากล่อง · ของแถม · สินค้าที่ไม่อยู่ในใบรับ)</button>
+                    <button type="button" onClick={() => setAddOpen(true)} className="w-full rounded-xl border border-dashed border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50 hover:text-blue-600">＋ เพิ่มรายการเอง (ค่ากล่อง · ของแถม · สินค้าที่ไม่อยู่ในใบรับ)</button>
                   )}
                   {!readonly && (addOpen || data.lines.length === 0) && (
-                    <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 flex items-end gap-2 flex-wrap">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 flex items-end gap-2 flex-wrap">
                       {/* ★ 2026-11-14 เลือกสินค้า = เพิ่มทันที (ไม่มีปุ่ม + เพิ่ม) · พิมพ์ชื่อเอง + Enter = เพิ่ม · จำนวน/ราคา/ส่วนลด แก้ต่อในตาราง */}
                       <div className="w-72"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า (เลือกแล้วเพิ่มเลย)</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(null); if (p) void addLine(p, ""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" /></div>
                       <div className="flex-1 min-w-[10rem]"><label className="block text-[11px] text-slate-500 mb-0.5">หรือพิมพ์ชื่อเอง (เช่น ค่ากล่อง, ของแถม) แล้วกด Enter</label><input value={addName} disabled={addBusy} onChange={(e) => setAddName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && addName.trim()) void addLine(null, addName); }} className={`${inputCls} w-full`} placeholder="ชื่อรายการ แล้วกด Enter" /></div>
