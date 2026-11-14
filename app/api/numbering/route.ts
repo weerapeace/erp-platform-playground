@@ -7,7 +7,7 @@ export type NumberingRule = {
   key:               string;
   label:             string;
   pattern:           string;
-  reset_policy:      "never" | "yearly" | "monthly";
+  reset_policy:      "never" | "yearly" | "monthly" | "daily";
   current_value:     number;
   last_reset_period: string | null;
   notes:             string | null;
@@ -58,7 +58,7 @@ type UpsertBody = {
   key:                string;
   label:              string;
   pattern:            string;
-  reset_policy:       "never" | "yearly" | "monthly";
+  reset_policy:       "never" | "yearly" | "monthly" | "daily";
   active?:            boolean;
   notes?:             string;
   recycle_cancelled?: boolean;

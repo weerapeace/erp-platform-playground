@@ -1,7 +1,7 @@
 /**
  * POST /api/purchasing/vouchers/<id>/confirm — ยืนยันใบสำคัญรับ
  *   1. ตรวจ: ทุกรายการมีราคา · สกุลต่างประเทศต้องมีเรท
- *   2. ออกเลข PV-{YYYY}-{00000} (erp_next_number 'pv')
+ *   2. ออกเลข PV{YYYY}-{MM}-{DD}-{000} ตามวันที่ใบ (assignVoucherNumber → DB erp_pv_assign_number · ใบร่างมีเลขแล้ว = คงเดิม)
  *   3. เขียนราคากลับ (ของกลาง lib/po-line-price): บรรทัด PO + ยอดรวมใบ · ราคาต่อร้านของ SKU · ราคาบน SKU (ไม่รวมค่าส่ง)
  *   4. สถานะ confirmed + audit log (จด "ราคาก่อนเขียนทับ" ไว้ด้วย → ใช้ย้อนราคาเมื่อยกเลิกใบ: POST .../void)
  */
@@ -10,7 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { fetchVoucher, recomputeVoucher } from "@/lib/purchase-voucher-server";
+import { fetchVoucher, recomputeVoucher, assignVoucherNumber } from "@/lib/purchase-voucher-server";
 import { applyPoLinePrice, loadPartnerMatcher, writeBackSkuPrice, upsertSupplierPrice, snapshotLinePrice, type PriceSnapshot } from "@/lib/po-line-price";
 import { isForeignCurrency, isCNY } from "@/lib/landed-cost";
 
@@ -35,9 +35,10 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   if (missing.length) return NextResponse.json({ error: `ยังไม่ได้ใส่ราคา ${missing.length} รายการ: ${missing.slice(0, 3).map((l) => l.item_name).join(", ")}${missing.length > 3 ? " …" : ""}` }, { status: 400 });
   if (isForeignCurrency(v.header.currency) && !(Number(v.header.fx_rate) > 0)) return NextResponse.json({ error: "ต้องใส่เรทแปลงเป็นบาทก่อน" }, { status: 400 });
 
-  // ออกเลข
-  const { data: pvNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "pv" });
-  if (numErr || !pvNo) return NextResponse.json({ error: "ออกเลขใบสำคัญไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
+  // ออกเลข — ★ 2026-11-14 ตามวันที่ใบ (PV{YYYY}-{MM}-{DD}-{000}) · ใบร่างมีเลขแล้วและตรงวัน = ใช้เลขเดิม · ใบร่างเก่าที่ยังไม่มีเลข = ได้ตอนนี้
+  let pvNo: string;
+  try { pvNo = (await assignVoucherNumber(admin, id, true)) as string; }
+  catch (e) { return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 500 }); }
 
   // เขียนราคากลับ — บรรทัด PO (+ยอดรวมใบ +ราคาต่อร้าน) และ SKU · ทำต่อจนครบ เก็บผลรายบรรทัดไว้รายงาน
   const matcher = await loadPartnerMatcher(admin);

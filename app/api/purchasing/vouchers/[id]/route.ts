@@ -10,7 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { fetchVoucher, recomputeVoucher, SHIP_METHODS } from "@/lib/purchase-voucher-server";
+import { fetchVoucher, recomputeVoucher, assignVoucherNumber, SHIP_METHODS } from "@/lib/purchase-voucher-server";
 import type { ShipMethod } from "@/lib/landed-cost";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +42,10 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
-  const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status").eq("id", id).maybeSingle();
+  const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status, pv_no").eq("id", id).maybeSingle();
   if (!cur) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
   const isDraft = (cur as { status: string }).status === "draft";
+  const hadNumber = !!(cur as { pv_no?: string | null }).pv_no;
 
   let body: PatchBody;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -114,8 +115,12 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       }
     }
   }
-  if (isDraft) await recomputeVoucher(admin, id);   // ยืนยันแล้วยอดล็อก ไม่คิดใหม่
-  else {
+  if (isDraft) {
+    await recomputeVoucher(admin, id);   // ยืนยันแล้วยอดล็อก ไม่คิดใหม่
+    // ★ 2026-11-14 เลขใบตามวันที่ใบ — แก้วันที่ใบร่าง = เลขย้ายไปวันใหม่ · วันเดิม = คงเลขเดิม
+    //   ใบร่างเก่าที่ยังไม่มีเลข = ไม่ออกตอนบันทึก (เจ้าของเลือก "ได้เลขตอนยืนยัน")
+    if (hadNumber && body.header?.voucher_date !== undefined) await assignVoucherNumber(admin, id);
+  } else {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { shipping_payment: body.header ?? null } });
   }
@@ -132,9 +137,11 @@ export async function DELETE(request: NextRequest, { params }: Params): Promise<
   if (!cur) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
   if ((cur as { status: string }).status !== "draft") return NextResponse.json({ error: "ยกเลิกได้เฉพาะใบร่าง (ใบที่ยืนยันแล้วเขียนราคากลับระบบไปแล้ว)" }, { status: 400 });
   // ปล่อยใบรับกลับคิว + ปิดใบร่าง
+  // ★ 2026-11-14 เจ้าของเลือก "ยกเลิกใบร่าง = คืนเลข" → ล้างเลขออก (ใบถัดไปของวันนั้นใช้เลขนี้ได้) · เลขเดิมจดไว้ในประวัติ
+  const releasedNo = (cur as { pv_no?: string | null }).pv_no ?? null;
   await admin.from("goods_receipts_v2").update({ voucher_id: null }).eq("voucher_id", id);
-  const { error } = await admin.from("purchase_vouchers_v2").update({ status: "cancelled", is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await admin.from("purchase_vouchers_v2").update({ status: "cancelled", is_active: false, pv_no: null, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  await writeAudit(admin, { action: "cancel", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { note: "ยกเลิกใบร่าง ปล่อย GR กลับคิว" } });
+  await writeAudit(admin, { action: "cancel", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { note: "ยกเลิกใบร่าง ปล่อย GR กลับคิว", released_pv_no: releasedNo } });
   return NextResponse.json({ ok: true, error: null });
 }

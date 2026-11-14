@@ -22,11 +22,13 @@ const RESET_LABEL: Record<string, string> = {
   never:   "ไม่รีเซ็ต",
   yearly:  "รีเซ็ตทุกปี",
   monthly: "รีเซ็ตทุกเดือน",
+  daily:   "รีเซ็ตทุกวัน",
 };
 const RESET_COLOR: Record<string, string> = {
   never:   "bg-slate-100 text-slate-600",
   yearly:  "bg-blue-50 text-blue-700",
   monthly: "bg-purple-50 text-purple-700",
+  daily:   "bg-amber-50 text-amber-700",
 };
 
 export default function NumberingAdminPage() {
@@ -195,6 +197,7 @@ export default function NumberingAdminPage() {
                         <option value="never">ไม่รีเซ็ต</option>
                         <option value="yearly">รีเซ็ตทุกปี</option>
                         <option value="monthly">รีเซ็ตทุกเดือน</option>
+                        <option value="daily">รีเซ็ตทุกวัน</option>
                       </select>
                     </label>
                   </div>

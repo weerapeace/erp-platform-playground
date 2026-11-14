@@ -203,7 +203,23 @@ export async function prefillFromGrs(admin: Admin, grIds: string[], actorName: s
   if (lErr) { await admin.from("purchase_vouchers_v2").delete().eq("id", voucherId); throw new Error("บันทึกรายการไม่สำเร็จ: " + lErr.message); }
   await admin.from("goods_receipts_v2").update({ voucher_id: voucherId }).in("id", ids);
   await recomputeVoucher(admin, voucherId);
+  await assignVoucherNumber(admin, voucherId);   // ★ ออกเลขตั้งแต่ใบร่าง (ตามวันที่ใบ)
   return voucherId;
+}
+
+/**
+ * ★ 2026-11-14 เลขใบสำคัญรับ PV{YYYY}-{MM}-{DD}-{000} ตาม "วันที่ใบสำคัญ" (เจ้าของสั่ง) — ของกลางในระบบออกเลข (DB: erp_pv_assign_number)
+ *   ออกตอนสร้างใบร่าง · แก้วันที่ใบร่าง = เรียกซ้ำ → เลขย้ายไปวันใหม่ · ยืนยันแล้วล็อก · เรียกซ้ำได้ (เลขตรงวันอยู่แล้ว = คงเดิม)
+ *   ออกเลขไม่สำเร็จ = ไม่ล้มงานหลัก (ใบได้เลขตอนบันทึก/ยืนยันครั้งถัดไป) · ตอนยืนยันใช้ requireNumber = ต้องได้เลข
+ */
+export async function assignVoucherNumber(admin: Admin, voucherId: string, requireNumber = false): Promise<string | null> {
+  const { data, error } = await admin.rpc("erp_pv_assign_number", { p_voucher_id: voucherId });
+  if (error || !data) {
+    if (requireNumber) throw new Error("ออกเลขใบสำคัญไม่สำเร็จ: " + (error?.message ?? "ไม่ได้เลข"));
+    console.warn("[pv-number]", voucherId, error?.message);
+    return null;
+  }
+  return String(data);
 }
 
 const sameCurrency = (a: string, b: string) => {
@@ -309,7 +325,9 @@ export async function createManualVoucher(admin: Admin, o: { seller_name: string
     carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null, note: o.note ?? null, created_by: o.actor,
   }).select("id").single();
   if (error || !ins) throw new Error("สร้างใบสำคัญไม่สำเร็จ: " + (error?.message ?? ""));
-  return String((ins as Row).id);
+  const id = String((ins as Row).id);
+  await assignVoucherNumber(admin, id);   // ★ ออกเลขตั้งแต่ใบร่าง (ตามวันที่ใบ)
+  return id;
 }
 
 /** ร้านขนส่งหลัก (is_default) — ใบสำคัญใหม่ใช้เป็นค่าเริ่มต้นของวิธีคิด + เรท */

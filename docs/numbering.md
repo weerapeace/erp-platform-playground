@@ -58,3 +58,16 @@ select erp_next_number('so_tax_ISG');   -- → ISG2569-09-014
 | `erp_numbering_rules_upsert(... p_recycle_cancelled)` | บันทึกกฎจากหน้าตั้งค่า (สิทธิ์ `admin.numbering`) |
 
 ไฟล์: `supabase/migrations/202609251200_numbering_recycle_cancelled.sql` · API `app/api/numbering/route.ts` · หน้า `app/admin/numbering/page.tsx`
+
+## เลขตาม "วันที่ของเอกสาร" (2026-11-14 — ใบสำคัญรับ PV)
+เจ้าของสั่ง "PV2026-10-30-001" = เลขตามวันที่ใบสำคัญ วิ่งใหม่ทุกวัน (ไม่ใช่วันที่กดยืนยัน)
+| ฟังก์ชัน | หน้าที่ |
+|---|---|
+| `erp_numbering_used_at(rule, branch, at, exclude_id)` / `erp_numbering_next_candidate_at(...)` | ตัวคำนวณเดิมที่รับวันที่ได้ — ตัวเดิม (`_used` / `_next_candidate`) เรียกตัวนี้ด้วย now() ผลเท่าเดิม |
+| `erp_next_number_at(key, date, branch, exclude_id)` | ออกเลขตามวันที่เอกสาร (ล็อกกฎ) · วันที่ → เที่ยงวัน UTC ก่อน to_char (DB เป็น UTC กันวันร่น) |
+| `erp_pv_assign_number(voucher_id)` | ใส่เลขให้ใบสำคัญตาม voucher_date · เลขตรงวันอยู่แล้ว = คงเดิม (เรียกซ้ำได้) · ยืนยันแล้ว = ไม่แตะ · เรียกจาก `assignVoucherNumber` (lib/purchase-voucher-server) |
+
+- คอลัมน์ใหม่ `recycle_keep_column`: ใบที่ยกเลิกแต่คอลัมน์นี้มีค่า ยังนับว่าใช้เลขแล้ว · ชุด pv ตั้ง = `pv_no` → ใบยืนยันแล้วถูกยกเลิก (ถือเลขอยู่) ไม่คืนเลข · ยกเลิก "ใบร่าง" API ล้าง pv_no = คืนเลข
+- ชุด pv: `PV{YYYY}-{MM}-{DD}-{000}` · reset `daily` · หาเลขจากใบจริงในตาราง (ลงวันที่ย้อนหลังก็นับต่อจากเลขของวันนั้นถูก) · หน้าตั้งค่าบันทึก "รีเซ็ตทุกวัน" ได้แล้ว
+- ออกเลขตอนสร้างใบร่าง (createFromGrs / createManualVoucher) · แก้วันที่ใบร่างที่มีเลข = เลขย้ายวัน · ใบร่างเก่าที่ยังไม่มีเลข = ได้ตอนยืนยัน (เจ้าของเลือก)
+- ไฟล์: `supabase/migrations/202612170300_pv_number_by_voucher_date.sql` (ฟังก์ชัน) + `202612170310_pv_number_rule_switch.sql` (สลับชุดเลข — รันหลังโค้ดขึ้นเว็บ)

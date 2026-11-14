@@ -293,6 +293,8 @@ export default function PurchaseVoucherFormPage() {
               <div>
                 <button onClick={() => router.push("/purchasing/vouchers")} className="text-xs text-slate-400 hover:text-blue-600">← กลับรายการใบสำคัญรับ</button>
                 <h1 className="text-xl font-semibold text-slate-800 mt-1">🧾 ใบสำคัญรับ {hd.pv_no ? <span className="font-mono">{hd.pv_no}</span> : <span className="text-slate-400 text-base">(ร่าง — ยังไม่ออกเลข)</span>}
+                  {/* ★ 2026-11-14 ใบร่างได้เลขตั้งแต่สร้าง (ตามวันที่ใบ · แก้วันที่ = เลขเปลี่ยน) */}
+                  {hd.status === "draft" && hd.pv_no && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-200 align-middle" title="เลขเดินตามวันที่ใบ — แก้วันที่ใบร่าง เลขจะเปลี่ยนตาม · กดยืนยันแล้วเลขล็อก">ร่าง · เลขเปลี่ยนตามวันที่ได้</span>}
                   {hd.status === "cancelled" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-red-50 text-red-700 border-red-200 align-middle">❌ ยกเลิกแล้ว</span>}
                   {hd.status === "confirmed" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 align-middle">✅ ยืนยันแล้ว {hd.confirmed_at ? formatDate(hd.confirmed_at) : ""} {hd.confirmed_by ? `· ${hd.confirmed_by}` : ""}</span>}
                 </h1>

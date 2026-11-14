@@ -307,7 +307,7 @@ export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
       { key: "supplier_name", label: "ร้าน / ผู้ขาย", group: "หัวเอกสาร", sample: "ร้านอี้หลงเจียห่าว" },
       { key: "receive_date_th", label: "วันที่รับ", group: "หัวเอกสาร", sample: "26 ก.ย. 2569" },
       { key: "receiver_name", label: "ผู้รับของ", group: "ผู้รับผิดชอบ", sample: "สมชาย ใจดี" },
-      { key: "pv_number", label: "เลขที่ใบสำคัญรับ (ถ้ามี)", group: "หัวเอกสาร", sample: "PV-2026-00003" },
+      { key: "pv_number", label: "เลขที่ใบสำคัญรับ (ถ้ามี)", group: "หัวเอกสาร", sample: "PV2026-09-26-003" },
       { key: "note", label: "หมายเหตุ", group: "หมายเหตุ", sample: "ของครบ กล่องบุบ 1" },
       { key: "line_count", label: "จำนวนรายการ", group: "ยอด", sample: "7" },
       { key: "total_received", label: "จำนวนรับรวม", group: "ยอด", sample: "440" },
@@ -341,7 +341,7 @@ export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
     key: "pv",
     label: "ใบสำคัญรับ (ใบซื้อ)",
     fields: [
-      { key: "pv_number", label: "เลขที่ใบสำคัญ", group: "หัวเอกสาร", sample: "PV-2026-00003" },
+      { key: "pv_number", label: "เลขที่ใบสำคัญ", group: "หัวเอกสาร", sample: "PV2026-09-26-003" },
       { key: "voucher_date_th", label: "วันที่", group: "หัวเอกสาร", sample: "26 ก.ย. 2569" },
       { key: "supplier_name", label: "ร้าน / ผู้ขาย", group: "หัวเอกสาร", sample: "ร้านอี้หลงเจียห่าว" },
       { key: "gr_numbers", label: "เลขใบรับ (ทั้งหมด)", group: "หัวเอกสาร", sample: "GR-2026-00012, GR-2026-00013" },
@@ -380,7 +380,7 @@ export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
       ],
     }],
     sampleData: {
-      pv_number: "PV-2026-00003", voucher_date_th: "26 ก.ย. 2569", supplier_name: "ร้านอี้หลงเจียห่าว", gr_numbers: "GR-2026-00012", po_numbers: "PO-2026-00113",
+      pv_number: "PV2026-09-26-003", voucher_date_th: "26 ก.ย. 2569", supplier_name: "ร้านอี้หลงเจียห่าว", gr_numbers: "GR-2026-00012", po_numbers: "PO-2026-00113",
       currency_code: "RMB", currency_symbol: "¥", fx_rate: "5.18", subtotal_foreign: "3,500.00", subtotal_thb: "18,130.00",
       ship_method_label: "ตามคิว (CBM)", ship_basis_label: "2.52 คิว", ship_rate: "3,500.00", ship_total_thb: "8,820.00", grand_total_thb: "26,950.00",
       grand_total_text: "สองหมื่นหกพันเก้าร้อยห้าสิบบาทถ้วน", note: "", confirmed_by: "จัดซื้อ", is_foreign: "1", has_shipping: "1",
