@@ -66,7 +66,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ดึงกลับตรวจ (รอจนเห็นสถานะที่ส่ง ~9 วิ — ข้อมูลฝั่ง Shopee อัปเดตช้ากว่าคำตอบ)
   const warnings: string[] = [];
-  if (echo.warning) warnings.push(`Shopee แจ้ง: ${echo.warning}`);
+  if (echo.show) warnings.push(`Shopee แจ้ง: ${echo.show}`);
   const want = open ? "NORMAL" : "UNLIST";
   const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, (l) => String(l.base.item_status ?? "").toUpperCase() === want);
   // ✅ ลองจริง 2026-11-14 (BCG01-03): คำสั่งผ่านทุกครั้ง แต่ข้อมูลที่ดึงกลับของ Shopee ช้ากว่าคำตอบหลายวินาที–นาที

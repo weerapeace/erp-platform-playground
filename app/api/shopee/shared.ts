@@ -245,11 +245,18 @@ export async function refetchShopeeLive(accessToken: string, shopId: string, ite
   return last;
 }
 
-/** คำตอบของ Shopee หลังเขียน (ตัดคำอธิบายยาวออก) — เก็บในประวัติไว้ดูว่า Shopee ตอบอะไร/เตือนอะไร */
-export function shopeeWriteEcho(resp: Record<string, unknown> | null | undefined): { warning: string | null; response: unknown } {
+/**
+ * คำเตือนทั่วไปที่ Shopee แนบมากับทุกคำสั่ง (ไม่เกี่ยวกับการแก้ครั้งนั้น) — เก็บในประวัติ แต่ไม่ขึ้นเตือนบนจอ
+ * เจอจริง 2026-11-14: "The size chart is a mandatory field for some category. Please update the third-party interface…" (แก้ชื่อ BCG01-03 ผ่านปกติ)
+ */
+const SHOPEE_GENERIC_WARNINGS = [/size chart is a mandatory field for some category/i];
+
+/** คำตอบของ Shopee หลังเขียน (ตัดคำอธิบายยาวออก) — เก็บในประวัติไว้ดูว่า Shopee ตอบอะไร/เตือนอะไร · show = คำเตือนที่ควรขึ้นบนจอ (ไม่รวมคำเตือนทั่วไป) */
+export function shopeeWriteEcho(resp: Record<string, unknown> | null | undefined): { warning: string | null; show: string | null; response: unknown } {
   const r = resp?.response && typeof resp.response === "object" ? { ...(resp.response as Record<string, unknown>) } : null;
   if (r) { delete r.description; delete r.description_info; }
   const w = resp ? String(resp.warning ?? "").trim() : "";
   const json = r ? JSON.stringify(r) : "";
-  return { warning: w || null, response: json.length > 1500 ? { preview: `${json.slice(0, 1500)}…` } : r };
+  const generic = !!w && SHOPEE_GENERIC_WARNINGS.some((re) => re.test(w));
+  return { warning: w || null, show: w && !generic ? w : null, response: json.length > 1500 ? { preview: `${json.slice(0, 1500)}…` } : r };
 }

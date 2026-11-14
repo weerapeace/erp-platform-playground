@@ -66,7 +66,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ดึงกลับตรวจว่าเปลี่ยนจริง (รอจนเห็นค่าที่ส่ง ~9 วิ — ข้อมูลฝั่ง Shopee อัปเดตช้ากว่าคำตอบ)
   const warnings: string[] = [];
-  if (echo.warning) warnings.push(`Shopee แจ้ง: ${echo.warning}`);
+  if (echo.show) warnings.push(`Shopee แจ้ง: ${echo.show}`);
   const landed = (l: { base: Record<string, unknown> }) => {
     const v2 = shopeeListingView(l.base, null);
     return !!v2 && (plan.body.item_name == null || norm(v2.name) === norm(plan.body.item_name)) && (plan.body.description == null || norm(v2.description) === norm(plan.body.description));
