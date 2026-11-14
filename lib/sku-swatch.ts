@@ -234,10 +234,10 @@ export const SWATCH_LABEL_SYSTEM = [
   "each colour chip has a bright green frame with a white number on a pink tag (1, 2, 3 …) at its top-left corner.",
   "Image 1 = the whole card. Image 2 (if given) = zoomed tiles: tile N shows frame N enlarged WITH its surroundings, so small printed numbers are readable.",
   "Each card prints the chip numbers in its own place: on a strip next to the chip (left or right), above, below, or on the chip itself. Work out the pattern of this card first, then apply it to every chip consistently.",
-  "For EVERY numbered frame return: label = the number/code printed for THAT chip exactly as printed (\"\" if none or unreadable — never guess a number that is not visible);",
-  "name = a short Thai colour name for the chip inside the frame (เช่น กรมท่า, แดงเลือดหมู, ครีม, เทาเข้ม, น้ำตาลทอง).",
+  "For EVERY numbered frame return: label = the number/code printed for THAT chip exactly as printed (\"\" if none or unreadable — never guess a number that is not visible).",
+  "Colour names are NOT needed (the system names colours from measured pixels).",
   "Do not invent frames. Do not move frames. Use the frame numbers exactly as drawn.",
-  "Reply JSON only: {\"items\": [{\"n\": number, \"label\": string, \"name\": string}]}",
+  "Reply JSON only: {\"items\": [{\"n\": number, \"label\": string}]}",
 ].join("\n");
 
 /** เลขอยู่ตรงไหนของชิ้น (ผู้ใช้บอกช่วย AI · auto = ให้ AI ดูเอง) */
@@ -246,7 +246,7 @@ export type LabelPosition = (typeof LABEL_POSITIONS)[number];
 export const LABEL_POSITION_TH: Record<LabelPosition, string> = { auto: "ให้ AI ดูเอง", right: "ขวาของชิ้น", left: "ซ้ายของชิ้น", below: "ใต้ชิ้น", above: "บนชิ้น", inside: "บนตัวชิ้น" };
 const LABEL_POSITION_EN: Record<LabelPosition, string> = { auto: "", right: "to the RIGHT of each chip", left: "to the LEFT of each chip", below: "BELOW each chip", above: "ABOVE each chip", inside: "ON the chip itself" };
 export const swatchLabelAsk = (count: number, pos: LabelPosition = "auto", tiles = false) =>
-  `รูปนี้มีกรอบเลข 1–${count} รวม ${count} กรอบ${tiles ? " (รูปที่ 2 = ภาพซูมรอบแต่ละกรอบ เลขตรงกับกรอบ)" : ""} อ่านเลขที่พิมพ์ของแต่ละชิ้น + ตั้งชื่อสีไทยให้ทุกกรอบ แล้วตอบ JSON ตามโครงที่กำหนด`
+  `รูปนี้มีกรอบเลข 1–${count} รวม ${count} กรอบ${tiles ? " (รูปที่ 2 = ภาพซูมรอบแต่ละกรอบ เลขตรงกับกรอบ)" : ""} อ่านเลขที่พิมพ์ของแต่ละชิ้นให้ทุกกรอบ แล้วตอบ JSON ตามโครงที่กำหนด`
   + (pos !== "auto" ? `\nOn this card the printed numbers are ${LABEL_POSITION_EN[pos]}.` : "");
 
 /** คำตอบ AI → เลข/ชื่อสีต่อกรอบ (เฉพาะเลขกรอบที่มีจริง 1..count · ซ้ำ = ใช้ตัวแรก) */

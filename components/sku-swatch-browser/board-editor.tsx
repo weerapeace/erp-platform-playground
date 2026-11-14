@@ -7,7 +7,8 @@
  *   - ชิ้นบนรูป (รอบ 2 · 2026-11-14 หลังเจ้าของลองรูปจริง):
  *       🎯 คลิกที่สี = ระบบไล่หาพื้นที่สีเดียวกันแล้วตีกรอบพอดีชิ้น + สีเฉลี่ยทั้งชิ้น (ทำในเครื่อง ฟรี · ปรับ "ความไวสี" ได้)
  *       ⬚ ลากกรอบเอง (ลากได้ทั้ง 2 โหมด) · แบ่งกรอบเท่า ๆ กัน · 🎯 ตีกรอบใหม่จากสี (ชิ้นที่เลือก)
- *       ✨ AI อ่านเลข + ชื่อสี = วาดกรอบพร้อมเลขลงรูปแล้วให้ AI อ่าน (ไม่แตะตำแหน่งกรอบ) · ให้ AI หาชิ้นเอง = ทดลอง
+ *       ✨ AI อ่านเลขบนแผง = วาดกรอบพร้อมเลขลงรูปแล้วให้ AI อ่าน (ไม่แตะตำแหน่งกรอบ) · ให้ AI หาชิ้นเอง = ทดลอง
+ *       🎨 ชื่อสี = สีที่ใกล้ที่สุดในทะเบียนสีกลาง จากสี่เหลี่ยมสี (ฟรี · ไม่ใช้ AI · เปลี่ยนสีแล้วชื่อตาม ถ้าไม่ได้พิมพ์เอง) — เจ้าของขอ 2026-11-14
  *   - แต่ละชิ้น: รหัสภายใน (ระบบออกตอนบันทึก) · สี · ชื่อสี · เลขบนแผง · ผูก SKU (ไม่บังคับ) / สร้าง SKU จากชิ้นนี้
  * สถานะทั้งหมดอยู่ใน useBoardDraft — ผู้เรียกเป็นคนบันทึก (อัปรูปที่ค้าง + POST/PATCH /api/sku-swatches)
  */
@@ -23,7 +24,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { chipCode, LABEL_POSITION_TH, LABEL_POSITIONS, overlapRatio, remapToCrop, rotateRect90, sortColumnOrder, sortReadingOrder, splitRect, type LabelPosition, type PctRect, type Pt } from "@/lib/sku-swatch";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { useUserPref } from "@/lib/use-user-pref";
-import { fitAtPoint, imageSize, readPhotoChips, readPhotoLabels, sampleColors, tempId, type DraftChip, type DraftPhoto } from "./swatch-tools";
+import { fitAtPoint, imageSize, readPhotoChips, readPhotoLabels, sampleColors, tempId, useColorNamer, type DraftChip, type DraftPhoto } from "./swatch-tools";
 
 /** ราคาโดยประมาณต่อรูป (บาท) — ตรงกับ costHint ใน lib/paid-services ("ai.swatch_read") · วัดจริง 2026-11-14 ≈ ฿0.09 */
 const AI_COST_HINT = "~฿0.1/รูป";
@@ -45,12 +46,21 @@ export function photoFromApi(i: { id: string; image_key: string; image_w: number
   return { key: i.id || tempId("img"), id: i.id || null, image_key: i.image_key, src: r2ImageUrl(i.image_key, 2400) ?? "", file: null, w: i.image_w ?? 0, h: i.image_h ?? 0 };
 }
 
-const newChip = (photo: string, rect: PctRect, color: string | null, source: DraftChip["source"] = "manual"): DraftChip =>
-  ({ id: tempId(), photo, ...rect, code: null, name: null, label: null, color_hex: color, source, sku_id: null, sku: null });
+/** ชิ้นใหม่ — name = ชื่อสีจากสี่เหลี่ยมสี (ทะเบียนสีกลาง) ถ้ารู้แล้ว */
+const newChip = (photo: string, rect: PctRect, color: string | null, name: string | null = null, source: DraftChip["source"] = "manual"): DraftChip =>
+  ({ id: tempId(), photo, ...rect, code: null, name, nameAuto: !!name, label: null, color_hex: color, source, sku_id: null, sku: null });
 
 // ───────────────────────────── สถานะ ─────────────────────────────
 export function useBoardDraft() {
   const toast = useToast();
+  // ชื่อสี = สีที่ใกล้ที่สุดในทะเบียนสีกลาง (จากสี่เหลี่ยมสีที่วัดจากพิกเซลจริง · ฟรี · ไม่ใช้ AI) — เจ้าของขอ 2026-11-14
+  const nameOf = useColorNamer();
+  /** สีของชิ้นเปลี่ยน → ชื่อเปลี่ยนตาม เฉพาะชื่อที่ระบบตั้ง (หรือยังว่าง) · ชื่อที่พิมพ์เองไม่ทับ */
+  const withAutoName = (c: DraftChip, hex: string | null): Partial<DraftChip> => {
+    if (!hex || (c.name && !c.nameAuto)) return {};
+    const n = nameOf(hex);
+    return n ? { name: n, nameAuto: true } : {};
+  };
   const [photos, setPhotos] = useState<DraftPhoto[]>([]);
   const [chips, setChips] = useState<DraftChip[]>([]);
   const [cur, setCur] = useState<string | null>(null);
@@ -124,7 +134,7 @@ export function useBoardDraft() {
     setChipsNow([...chipsRef.current, c]);
     setSelId(c.id); touch();
     const [hex] = await sampleColors(p.src, [rect]);
-    if (hex) setChips((all) => all.map((x) => (x.id === c.id && !x.color_hex ? { ...x, color_hex: hex } : x)));
+    if (hex) setChipsNow(chipsRef.current.map((x) => (x.id === c.id && !x.color_hex ? { ...x, color_hex: hex, ...withAutoName(x, hex) } : x)));
   };
   /** 🎯 คลิกที่สี → กรอบพอดีชิ้น · targetId = ตีกรอบใหม่ให้ชิ้นเดิม (เก็บรหัส/ชื่อ/SKU ไว้) · null = ชิ้นใหม่ */
   const fitChip = async (photoKey: string, pt: { x: number; y: number }, tol: number, targetId: string | null): Promise<boolean> => {
@@ -139,14 +149,15 @@ export function useBoardDraft() {
       return false;
     }
     if (targetId) {
-      patchChip(targetId, { ...res.rect, points: null, color_hex: res.hex, unsure: false });
+      const t = chipsRef.current.find((x) => x.id === targetId);
+      patchChip(targetId, { ...res.rect, points: null, color_hex: res.hex, unsure: false, ...(t ? withAutoName(t, res.hex) : {}) });
       setSelId(targetId);
       return true;
     }
     // ชิ้นเดิมขนาดใกล้กัน + ทับกันเกือบหมด = คลิกชิ้นเดิมซ้ำ (เทียบทั้งสองทาง กันกรอบใหญ่ครอบกรอบเล็กแล้วนับเป็นซ้ำ)
     const dup = chipsRef.current.find((c) => c.photo === p.key && overlapRatio(c, res.rect) > 0.7 && Math.min(c.w * c.h, res.rect.w * res.rect.h) / Math.max(c.w * c.h, res.rect.w * res.rect.h) > 0.6);
     if (dup) { setSelId(dup.id); toast.info("ชิ้นนี้มีกรอบแล้ว (เลือกให้)"); return false; }
-    const c = newChip(p.key, res.rect, res.hex);
+    const c = newChip(p.key, res.rect, res.hex, nameOf(res.hex));
     setChipsNow([...chipsRef.current, c]);
     setSelId(c.id); touch();
     return true;
@@ -171,14 +182,33 @@ export function useBoardDraft() {
     if (!ch || !p) return;
     const parts = splitRect(ch, cols, rows);
     const colors = await sampleColors(p.src, parts);
-    const fresh = parts.map((r, i) => newChip(p.key, r, colors[i]));
+    const fresh = parts.map((r, i) => newChip(p.key, r, colors[i], nameOf(colors[i])));
     setChipsNow([...chipsRef.current.filter((x) => x.id !== id), ...fresh]);
     setSelId(fresh[0]?.id ?? null); touch();
   };
-  /** ✨ AI อ่านเลข + ชื่อสี ให้ชิ้นที่มีกรอบแล้ว — เติมเฉพาะช่องที่ยังว่าง (ที่พิมพ์เองไม่ทับ) · ตำแหน่งกรอบไม่เปลี่ยน */
+  /** 🎨 ตั้งชื่อสีจากสี่เหลี่ยมสี (ทะเบียนสีกลาง) ให้ชิ้นบนรูปนี้ — all=false: เฉพาะชื่อว่าง/ชื่อที่ระบบตั้ง · all=true: ทับชื่อที่พิมพ์เองด้วย · คืนจำนวนที่เปลี่ยน (-1 = ทะเบียนยังไม่พร้อม) */
+  const nameFromColors = (photoKey: string, all: boolean): number => {
+    if (!nameOf("#808080")) return -1;
+    let n = 0;
+    setChipsNow(chipsRef.current.map((c) => {
+      if (c.photo !== photoKey || !c.color_hex || (!all && c.name && !c.nameAuto)) return c;
+      const name = nameOf(c.color_hex);
+      if (!name || (name === c.name && c.nameAuto)) return c;
+      n++;
+      return { ...c, name, nameAuto: true };
+    }));
+    if (n) touch();
+    return n;
+  };
+  /** สี่เหลี่ยมสีเปลี่ยน (เลือกสีเอง) → ชื่อตาม (ถ้าเป็นชื่อที่ระบบตั้ง) */
+  const setChipColor = (id: string, hex: string) => {
+    const c = chipsRef.current.find((x) => x.id === id);
+    if (c) patchChip(id, { color_hex: hex, unsure: false, ...withAutoName(c, hex) });
+  };
+  /** ✨ AI อ่านเลขที่พิมพ์บนแผง ให้ชิ้นที่มีกรอบแล้ว — เติมเฉพาะช่องที่ยังว่าง (ที่พิมพ์เองไม่ทับ) · ตำแหน่งกรอบไม่เปลี่ยน · ชื่อสีไม่ใช้ AI แล้ว (ตั้งจากสี่เหลี่ยมสี แม่นกว่า) */
   const labelPhotos = async (keys: string[], pos: LabelPosition = "auto") => {
     const list = keys.map(photoOf).filter((p): p is DraftPhoto => !!p && chipsRef.current.some((c) => c.photo === p.key));
-    if (!list.length) { toast.warning("ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป) แล้วค่อยให้ AI อ่านเลข/ชื่อสี"); return; }
+    if (!list.length) { toast.warning("ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป) แล้วค่อยให้ AI อ่านเลขบนแผง"); return; }
     let filled = 0, chipsRead = 0;
     setReading({ done: 0, total: list.length, what: "label" });
     try {
@@ -190,13 +220,12 @@ export function useBoardDraft() {
           if (!g) return c;
           const next = { ...c };
           if (!c.label && g.label) { next.label = g.label; filled++; }
-          if (!c.name && g.name) { next.name = g.name; filled++; }
           return next;
         }));
         setReading({ done: i + 1, total: list.length, what: "label" });
       }
       touch();
-      toast.success(chipsRead ? `AI อ่านแล้ว ${chipsRead} ชิ้น · เติม ${filled} ช่องที่ว่าง (ช่องที่พิมพ์เองไม่ทับ)` : "AI อ่านเลข/ชื่อสีไม่ออก — พิมพ์เองได้");
+      toast.success(chipsRead ? `AI อ่านแล้ว ${chipsRead} ชิ้น · เติมเลขบนแผง ${filled} ช่องที่ว่าง (ช่องที่พิมพ์เองไม่ทับ)` : "AI อ่านเลขบนแผงไม่ออก — พิมพ์เองได้");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "AI อ่านไม่สำเร็จ");
     } finally { setReading(null); }
@@ -212,7 +241,9 @@ export function useBoardDraft() {
         const res = await readPhotoChips(p);
         const kept = chipsRef.current.filter((c) => c.photo !== p.key || c.code || c.sku_id);
         const keptHere = kept.filter((c) => c.photo === p.key);
-        const add = res.chips.filter((n) => !keptHere.some((k) => overlapRatio(k, n) > 0.5));
+        // ชื่อสีจาก AI ไม่แม่น (ดูด้วยตา) → ใช้ชื่อจากสี่เหลี่ยมสีแทนเมื่อทะเบียนพร้อม
+        const add = res.chips.filter((n) => !keptHere.some((k) => overlapRatio(k, n) > 0.5))
+          .map((n) => { const nm = nameOf(n.color_hex); return nm ? { ...n, name: nm, nameAuto: true } : n; });
         found += add.length; unsure += add.filter((a) => a.unsure).length;
         setChipsNow([...kept, ...add]);
         if (selId && !kept.some((c) => c.id === selId)) setSelId(null);
@@ -226,7 +257,7 @@ export function useBoardDraft() {
     } finally { setReading(null); }
   };
 
-  return { photos, chips, cur, setCur, selId, setSelId, dirty, setDirty, reading, reset, addFiles, removePhoto, movePhoto, makeCover, applyCrop, addChip, fitChip, patchChip, reorderChips, sortChips, removeChip, splitChip, labelPhotos, findPhotos };
+  return { photos, chips, cur, setCur, selId, setSelId, dirty, setDirty, reading, reset, addFiles, removePhoto, movePhoto, makeCover, applyCrop, addChip, fitChip, patchChip, reorderChips, sortChips, removeChip, splitChip, labelPhotos, findPhotos, nameFromColors, setChipColor };
 }
 export type BoardDraft = ReturnType<typeof useBoardDraft>;
 
@@ -269,6 +300,7 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
   const { photos, chips, cur, setCur, selId, setSelId, reading } = draft;
   const [cropKey, setCropKey] = useState<string | null>(null);
   const [askFind, setAskFind] = useState<string[] | null>(null);
+  const [askName, setAskName] = useState<string | null>(null);   // ถามก่อนทับชื่อสีทั้งรูป
   const [tool, setTool] = useState<"click" | "draw">("click");
   const [tol, setTol] = useState(TOL_DEFAULT);
   const [armed, setArmed] = useState<string | null>(null);   // 🎯 ตีกรอบใหม่ให้ชิ้นนี้ — รอคลิกบนรูป
@@ -277,7 +309,7 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
   const [over, setOver] = useState<"main" | "tile" | null>(null);
   const [labelPos, setLabelPos] = useState<LabelPosition>("auto");
   const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { onOverlay?.(!!cropKey || !!askFind); }, [cropKey, askFind, onOverlay]);
+  useEffect(() => { onOverlay?.(!!cropKey || !!askFind || !!askName); }, [cropKey, askFind, askName, onOverlay]);
 
   // ── ขนาด: ลากแถบใต้รูป (สูง/เตี้ย · เฉพาะป๊อป) + เส้นกลาง (แผงชิ้นกว้าง/แคบ · ลากสุด = ซ่อน) — จำต่อคน ──
   const [saved, saveLayout] = useUserPref<EditorLayout>("swatch_editor_layout", LAYOUT_DEFAULT, parseLayout);
@@ -412,9 +444,9 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
   const aiBar = photo && (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2">
       <button type="button" onClick={() => void draft.labelPhotos([photo.key], labelPos)} disabled={!!reading}
-        title={here.length ? "AI เห็นรูปเต็ม + ภาพซูมรอบแต่ละชิ้น แล้วตอบว่ากรอบไหนพิมพ์เลขอะไร สีชื่ออะไร" : "ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป)"}
+        title={here.length ? "AI เห็นรูปเต็ม + ภาพซูมรอบแต่ละชิ้น แล้วตอบว่ากรอบไหนพิมพ์เลขอะไร (ชื่อสีตั้งจากสี่เหลี่ยมสีให้อยู่แล้ว)" : "ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป)"}
         className="h-8 px-3 text-[13px] font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
-        {reading?.what === "label" ? `กำลังอ่าน… ${reading.done}/${reading.total}` : "✨ AI อ่านเลข + ชื่อสี"}
+        {reading?.what === "label" ? `กำลังอ่าน… ${reading.done}/${reading.total}` : "✨ AI อ่านเลขบนแผง"}
       </button>
       {photos.length > 1 && !reading && (
         <button type="button" onClick={() => void draft.labelPhotos(photos.map((p) => p.key), labelPos)} className="h-8 px-3 text-[12px] rounded-lg border border-violet-300 text-violet-700 bg-white hover:bg-violet-50">ทุกรูป ({photos.length})</button>
@@ -497,8 +529,17 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
         </button>
       ) : (
         <ChipPanel draft={draft} codes={codes} here={here} selected={selected} total={chips.length} onCreateSku={onCreateSku} layout={layout} photoKey={photo?.key ?? null}
-          armed={armed} onArm={(id) => { setArmed((a) => (a === id ? null : id)); if (id) toast.info("คลิกที่สีของชิ้นนี้บนรูป — ระบบจะตีกรอบใหม่ให้"); }} />
+          armed={armed} onArm={(id) => { setArmed((a) => (a === id ? null : id)); if (id) toast.info("คลิกที่สีของชิ้นนี้บนรูป — ระบบจะตีกรอบใหม่ให้"); }}
+          onNameFromColors={(key) => {
+            const n = draft.nameFromColors(key, false);
+            if (n < 0) toast.warning("กำลังโหลดทะเบียนสี — ลองกดอีกครั้ง");
+            else if (n > 0) toast.success(`ตั้งชื่อสีจากสี่เหลี่ยมสีแล้ว ${n} ชิ้น (ชื่อที่พิมพ์เองไม่ทับ)`);
+            else setAskName(key);   // ทุกชิ้นมีชื่อที่พิมพ์เอง/ตั้งแล้ว → ถามก่อนทับทั้งหมด
+          }} />
       )}
+      <ConfirmDialog open={!!askName} onClose={() => setAskName(null)}
+        title="ตั้งชื่อสีใหม่ทั้งรูป?" message="ทุกชิ้นบนรูปนี้มีชื่อแล้ว — จะแทนชื่อทั้งหมด (รวมชื่อที่พิมพ์เองหรือที่ AI ตั้งไว้) ด้วยชื่อจากสี่เหลี่ยมสี (สีที่ใกล้ที่สุดในทะเบียนสีกลาง)" confirmText="แทนทั้งหมด" cancelText="ไม่แทน"
+        onConfirm={() => { const k = askName; setAskName(null); if (k) { const n = draft.nameFromColors(k, true); toast.success(n ? `ตั้งชื่อสีใหม่ ${n} ชิ้น` : "ชื่อตรงกับสีอยู่แล้ว"); } }} />
 
       {cropPhoto && (
         <ImageFreeCropModal open src={cropPhoto.src} onClose={() => setCropKey(null)}
@@ -516,9 +557,10 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
 }
 
 // ───────────────────────────── แผงชิ้น (ขวา) ─────────────────────────────
-function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, armed, onArm, photoKey }: {
+function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, armed, onArm, photoKey, onNameFromColors }: {
   draft: BoardDraft; codes: Map<string, string>; here: DraftChip[]; selected: DraftChip | null; total: number;
   onCreateSku?: (chip: DraftChip) => void; layout: "modal" | "full"; armed: string | null; onArm: (id: string | null) => void; photoKey: string | null;
+  onNameFromColors: (photoKey: string) => void;
 }) {
   const [cols, setCols] = useState(6);
   const [rows, setRows] = useState(1);
@@ -570,8 +612,12 @@ function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, a
       <div className="p-2.5">
         <div className="flex items-center gap-1 mb-1.5">
           <span className="text-[12px] font-medium text-slate-600">ชิ้นบนรูปนี้ ({here.length}){total !== here.length ? <span className="font-normal text-slate-400"> · ทั้งแผ่น {total}</span> : null}{unsure ? <span className="font-normal text-amber-600"> · ตรวจ {unsure}</span> : null}</span>
+          {here.length > 0 && photoKey && (
+            <button type="button" onClick={() => onNameFromColors(photoKey)} className="ml-auto h-6 px-1.5 text-[10.5px] rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+              title="ตั้งชื่อสีจากสี่เหลี่ยมสี (สีที่ใกล้ที่สุดในทะเบียนสีกลาง) — ชื่อที่พิมพ์เองไม่ทับ (ถามก่อนถ้าจะทับ)">🎨 ชื่อจากสี</button>
+          )}
           {here.length > 1 && photoKey && (
-            <span className="ml-auto inline-flex rounded border border-slate-200 overflow-hidden text-[10.5px]">
+            <span className="inline-flex rounded border border-slate-200 overflow-hidden text-[10.5px]">
               <button type="button" onClick={() => draft.sortChips(photoKey, "row")} className="h-6 px-1.5 text-slate-600 hover:bg-slate-50" title="เรียงเลขตามแถว: บนลงล่าง แต่ละแถวซ้ายไปขวา">แถว ⇢</button>
               <button type="button" onClick={() => draft.sortChips(photoKey, "col")} className="h-6 px-1.5 border-l border-slate-200 text-slate-600 hover:bg-slate-50" title="เรียงเลขตามคอลัมน์: ซ้ายไปขวา แต่ละคอลัมน์บนลงล่าง">คอลัมน์ ⇣</button>
             </span>
@@ -588,10 +634,11 @@ function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, a
                   <span className={`font-mono text-[10.5px] tabular-nums ${c.code ? "text-slate-700" : "text-slate-400"}`} title={codes.get(c.id)}>-{codes.get(c.id)?.split("-").pop()}</span>
                   <span className="[&_button]:!h-6 [&_button]:!w-6 [&_button]:rounded" title={c.color_hex ? `${c.color_hex.toUpperCase()} — กดเพื่อเปลี่ยนสี` : "กดเพื่อเลือกสี"}>
                     <ColorInput value={c.color_hex ?? "#cccccc"} allowText={false}
-                      onChange={(v) => { if (/^#[0-9a-fA-F]{6}$/.test(v)) draft.patchChip(c.id, { color_hex: v.toLowerCase(), unsure: false }); }} />
+                      onChange={(v) => { if (/^#[0-9a-fA-F]{6}$/.test(v)) draft.setChipColor(c.id, v.toLowerCase()); }} />
                   </span>
-                  <input value={c.name ?? ""} onChange={(e) => draft.patchChip(c.id, { name: e.target.value || null })} onFocus={() => draft.setSelId(c.id)} placeholder={c.sku ? c.sku.code : "ชื่อสี"}
-                    className="h-6 px-1.5 text-[12px] border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0 bg-white" />
+                  <input value={c.name ?? ""} onChange={(e) => draft.patchChip(c.id, { name: e.target.value || null, nameAuto: false })} onFocus={() => draft.setSelId(c.id)} placeholder={c.sku ? c.sku.code : "ชื่อสี"}
+                    title={c.nameAuto ? "ชื่อจากสี่เหลี่ยมสี (สีที่ใกล้ที่สุดในทะเบียนสี) — เปลี่ยนสี ชื่อเปลี่ยนตาม · พิมพ์เองได้" : undefined}
+                    className={`h-6 px-1.5 text-[12px] border rounded focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0 bg-white ${c.nameAuto ? "border-slate-200 text-slate-600" : "border-slate-200"}`} />
                   <input value={c.label ?? ""} onChange={(e) => draft.patchChip(c.id, { label: e.target.value || null })} onFocus={() => draft.setSelId(c.id)} placeholder="เลขแผง"
                     className="h-6 px-1.5 text-[12px] border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0 bg-white" />
                 </li>

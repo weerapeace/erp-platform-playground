@@ -1,6 +1,7 @@
 /**
  * /api/color-swatches — 🎨 ทะเบียนสีกลาง (หน้าตาจุดสีของแต่ละชื่อสี) · ข้อมูลอยู่ในพจนานุกรมสี erp_color_dictionary
  *   GET  → { entries: แถวในพจนานุกรม + จุดสี, used: ชื่อสีที่ SKU บนเว็บใช้อยู่ (นับ SKU + ร้าน) }
+ *   GET ?entries=1 → { entries } อย่างเดียว (เบา) — แผงผ้า Swatch ใช้ตั้งชื่อสีจากสีที่วัดได้
  *   GET ?images=ชื่อ1|ชื่อ2 → { groups: SKU ที่ใช้สีนี้ + รูปทั้งหมดของแต่ละตัว (ปก · แกลเลอรี · รูปเว็บ)
  *                               + กลุ่ม "รูปของรุ่น" (kind parent: ปก/แกลเลอรี Parent + รูปเว็บของรุ่น) } — ✂️ ครอปรูปลายจากรูปสินค้า
  *   POST { id?, th, en?, kind, colors, imageKey } → ตั้งจุดสี  (kind "none" = ไซส์ / ไม่มีสี) (มีชื่อนี้แล้ว = แก้ · ยังไม่มี = เพิ่มคำใหม่ ต้องมีคำอังกฤษ)
@@ -33,6 +34,13 @@ const MAX_BATCH = 200;
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const sb = supabaseAdmin();
+
+  // ?entries=1 → แค่ชื่อสี + จุดสี (เบา · ไม่นับ SKU ที่ใช้) — ใช้ตั้งชื่อสีจากสีที่วัดได้ (แผงผ้า Swatch → nearestColorName)
+  if (request.nextUrl.searchParams.get("entries")) {
+    const { data: dict, error } = await sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true).order("th");
+    if (error) return NextResponse.json({ data: null, error: error.message }, { status: 400 });
+    return NextResponse.json({ data: { entries: ((dict ?? []) as Row[]).map(rowToSwatchEntry) }, error: null });
+  }
 
   const imgParam = request.nextUrl.searchParams.get("images");
   if (imgParam !== null) {

@@ -6,7 +6,27 @@ import { apiFetch } from "@/lib/api";
 import { loadImageEl } from "@/components/image-crop-picker";
 import { uploadImagesWithDupCheck, type DuplicateCheckOptions } from "@/components/duplicate-upload";
 import type { UploadProgressState } from "@/components/upload-progress";
+import { useEffect, useState } from "react";
 import { averageHex, boxBlur3, floodFitRect, type AiChipLabel, type AiSwatchRead, type FloodFit, type LabelPosition, type PctRect, type Pt } from "@/lib/sku-swatch";
+import { colorNamePalette, nearestColorName, type SwatchEntry } from "@/lib/color-swatch";
+
+// ───────────────────────────── ชื่อสีจากสี่เหลี่ยมสี (ทะเบียนสีกลาง) ─────────────────────────────
+type Palette = ReturnType<typeof colorNamePalette>;
+let paletteP: Promise<Palette> | null = null;
+/** ชื่อสีไทยในทะเบียนสีกลาง (โหลดครั้งเดียวต่อหน้า · /api/color-swatches?entries=1) */
+export function loadColorPalette(): Promise<Palette> {
+  if (!paletteP) {
+    paletteP = apiFetch("/api/color-swatches?entries=1").then((r) => r.json()).then((j) => colorNamePalette((j.data?.entries ?? []) as SwatchEntry[]));
+    paletteP.catch(() => { paletteP = null; });
+  }
+  return paletteP;
+}
+/** (hex) → ชื่อสีที่ใกล้ที่สุดในทะเบียน · ทะเบียนยังไม่โหลด/ว่าง = null */
+export function useColorNamer(): (hex: string | null | undefined) => string | null {
+  const [pal, setPal] = useState<Palette | null>(null);
+  useEffect(() => { let alive = true; loadColorPalette().then((p) => { if (alive) setPal(p); }).catch(() => {}); return () => { alive = false; }; }, []);
+  return (hex) => (hex && pal ? nearestColorName(hex, pal)?.th ?? null : null);
+}
 
 // ───────────────────────────── คลิกที่สี = ตีกรอบให้ ─────────────────────────────
 /** พิกเซลของรูป (ย่อด้านยาว ≤ 900px + เบลอ 3×3 ลดลายผ้า) แคชตาม URL — คลิกหลายชิ้นไม่ต้องอ่านรูปใหม่ */
@@ -122,6 +142,8 @@ export type DraftChip = PctRect & {
   source: "manual" | "ai"; unsure?: boolean; sku_id: string | null; sku: SwatchSpot["sku"];
   /** กรอบดัดมุม (null/ไม่มี = สี่เหลี่ยมตรง) */
   points?: Pt[] | null;
+  /** ชื่อสีตั้งอัตโนมัติจากสี่เหลี่ยมสี (เปลี่ยนสี = ชื่อเปลี่ยนตาม · พิมพ์เอง = false) */
+  nameAuto?: boolean;
 };
 
 let seq = 0;

@@ -260,3 +260,70 @@ export function rowToSwatchEntry(r: {
 }
 
 export const SWATCH_SELECT = "id, th, en, swatch_kind, swatch_colors, swatch_image_key";
+
+// ───────────────────────────── ตั้งชื่อสีจากค่าสี (สีที่ใกล้ที่สุดในทะเบียนสี) ─────────────────────────────
+// ใช้ที่: แผงผ้า Swatch (สี่เหลี่ยมสีของชิ้น → ชื่อสีไทย) · ใช้ได้กับงานอื่นที่ "วัดสีได้แล้วอยากได้ชื่อ" (เช่น ดูดสีจากรูปสินค้า)
+// วัดความต่างสีแบบที่ตาคนเห็น (CIEDE2000 บน Lab) ไม่ใช่ระยะ RGB ตรง ๆ
+
+type Lab = [number, number, number];
+/** "#rrggbb" → Lab (D65) */
+export function hexToLab(hex: string): Lab | null {
+  if (!isHex(hex)) return null;
+  const n = parseInt(hex.trim().slice(1), 16);
+  const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const r = lin((n >> 16) & 255), g = lin((n >> 8) & 255), b = lin(n & 255);
+  const x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
+  const y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+  const z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
+  const f = (t: number) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+  const fx = f(x), fy = f(y), fz = f(z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+/** ความต่างสี CIEDE2000 (0 = เหมือนกัน · ~2 = แทบไม่เห็นต่าง · >10 = ต่างชัด) */
+export function deltaE2000(a: Lab, b: Lab): number {
+  const [L1, a1, b1] = a, [L2, a2, b2] = b;
+  const rad = Math.PI / 180;
+  const C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2), Cm = (C1 + C2) / 2;
+  const G = 0.5 * (1 - Math.sqrt(Cm ** 7 / (Cm ** 7 + 25 ** 7)));
+  const a1p = a1 * (1 + G), a2p = a2 * (1 + G);
+  const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
+  const h = (x: number, y: number) => { if (x === 0 && y === 0) return 0; const d = Math.atan2(y, x) / rad; return d >= 0 ? d : d + 360; };
+  const h1p = h(a1p, b1), h2p = h(a2p, b2);
+  const dLp = L2 - L1, dCp = C2p - C1p;
+  let dhp = 0;
+  if (C1p * C2p !== 0) { dhp = h2p - h1p; if (dhp > 180) dhp -= 360; else if (dhp < -180) dhp += 360; }
+  const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin((dhp / 2) * rad);
+  const Lmp = (L1 + L2) / 2, Cmp = (C1p + C2p) / 2;
+  let hmp = h1p + h2p;
+  if (C1p * C2p !== 0) { if (Math.abs(h1p - h2p) > 180) hmp += h1p + h2p < 360 ? 360 : -360; hmp /= 2; }
+  const T = 1 - 0.17 * Math.cos((hmp - 30) * rad) + 0.24 * Math.cos(2 * hmp * rad) + 0.32 * Math.cos((3 * hmp + 6) * rad) - 0.2 * Math.cos((4 * hmp - 63) * rad);
+  const Sl = 1 + (0.015 * (Lmp - 50) ** 2) / Math.sqrt(20 + (Lmp - 50) ** 2), Sc = 1 + 0.045 * Cmp, Sh = 1 + 0.015 * Cmp * T;
+  const Rt = -2 * Math.sqrt(Cmp ** 7 / (Cmp ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((hmp - 275) / 25) ** 2)) * rad);
+  return Math.sqrt((dLp / Sl) ** 2 + (dCp / Sc) ** 2 + (dHp / Sh) ** 2 + Rt * (dCp / Sc) * (dHp / Sh));
+}
+
+/** ชื่อในทะเบียนที่ใช้ตั้งชื่อสีได้: สีเดียว (solid) + ชื่อไทย (ตัดชื่อเฉพาะรุ่น เช่น "Black Cat" / "Carbon Black (01)") · ชื่อซ้ำใช้แถวแรก */
+export function colorNamePalette(entries: SwatchEntry[]): { th: string; en: string; hex: string; lab: Lab }[] {
+  const out: { th: string; en: string; hex: string; lab: Lab }[] = [];
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (e.kind !== "solid" || !e.colors[0] || !/[\u0E00-\u0E7F]/.test(e.th)) continue;
+    const th = e.th.trim().replace(/^เเ/, "แ");   // สะกด "เเ" (เ สองตัว) = แ
+    if (seen.has(th)) continue;
+    const lab = hexToLab(e.colors[0]);
+    if (!lab) continue;
+    seen.add(th);
+    out.push({ th, en: e.en, hex: e.colors[0], lab });
+  }
+  return out;
+}
+
+/** สีนี้ (hex) ใกล้ชื่อไหนในทะเบียนที่สุด → { th, en, hex, dE } · ทะเบียนว่าง/ค่าสีผิด = null · dE > 20 = ต่างมาก (ชื่อแค่ใกล้เคียง) */
+export function nearestColorName(hex: string, palette: ReturnType<typeof colorNamePalette>): { th: string; en: string; hex: string; dE: number } | null {
+  const lab = hexToLab(hex);
+  if (!lab || !palette.length) return null;
+  let best = palette[0], bestD = Infinity;
+  for (const p of palette) { const d = deltaE2000(lab, p.lab); if (d < bestD) { bestD = d; best = p; } }
+  return { th: best.th, en: best.en, hex: best.hex, dE: Math.round(bestD * 10) / 10 };
+}
