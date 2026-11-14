@@ -64,12 +64,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
     await saveShopeeConn(admin, brandId, spId, tok.access_token, tok.refresh_token, meta, null);
 
-    // เติมรหัสร้าน (ตัวเลข) ในบัญชีร้านของแบรนด์ ถ้ายังว่าง → ลิงก์หน้าสินค้า Shopee ในระบบใช้ได้ (ไม่ทับที่กรอกเอง)
-    await admin.from("platform_accounts").update({ external_shop_id: shopId, updated_at: new Date().toISOString() })
-      .eq("brand_id", brandId).eq("platform_id", spId).is("external_shop_id", null);
-
     // ด่าน 3 (เตือน): ชื่อร้านไม่ตรงชื่อแบรนด์ / ร้านเลือกอายุสิทธิ์สั้น
     const mismatch = shopNameMismatch(info?.shop_name, brandName);
+
+    // เติมรหัสร้าน (ตัวเลข) ในบัญชีร้านของแบรนด์ ถ้ายังว่าง → ลิงก์หน้าสินค้า Shopee ในระบบใช้ได้ (ไม่ทับที่กรอกเอง)
+    // 🐛 2026-11-14: เชื่อมร้าน LM ใต้แบรนด์ IG โดยไม่ตั้งใจ → รหัสร้าน LM ไปติดบัญชี IG (ลิงก์สินค้า IG ชี้ร้าน LM) → เติมเฉพาะเมื่อชื่อร้านตรงแบรนด์
+    if (!mismatch) {
+      await admin.from("platform_accounts").update({ external_shop_id: shopId, updated_at: new Date().toISOString() })
+        .eq("brand_id", brandId).eq("platform_id", spId).is("external_shop_id", null);
+    }
     const authDays = info?.auth_expires_at ? Math.floor((info.auth_expires_at - Date.now()) / 86_400_000) : null;
     await writeAudit(admin, {
       action: "update", entityType: "platform_credential", entityId: null, actorId: null, actorName: "shopee_oauth",

@@ -7,7 +7,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { getPlatformId, loadShopeeConn, saveShopeeConn } from "../shared";
+import { ttsBrandMismatch as shopNameMismatch } from "@/lib/tiktok-shop";
+import { brandNameOf, getPlatformId, loadShopeeConn, saveShopeeConn } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,6 +27,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const before = await loadShopeeConn(admin, brandId, spId);
   try { await saveShopeeConn(admin, brandId, spId, null, null, { stage: "disconnected" }, user?.id ?? null); }
   catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }); }
-  await writeAudit(admin, { action: "update", entityType: "platform_credential", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { brand_id: brandId, platform: "shopee", disconnected: true, shop_id: before?.meta.shop_id ?? null, shop_name: before?.meta.shop_name ?? null } });
+  // ร้านที่ชื่อไม่ตรงแบรนด์ (เชื่อมผิดแบรนด์) → ล้างรหัสร้านที่อาจถูกเติมไว้ในบัญชีร้านของแบรนด์นี้ (กันลิงก์สินค้าชี้ร้านอื่น)
+  let clearedShopId = false;
+  const shopId = before?.meta.shop_id ?? null;
+  if (shopId && shopNameMismatch(before?.meta.shop_name, await brandNameOf(admin, brandId))) {
+    const { data } = await admin.from("platform_accounts").update({ external_shop_id: null, updated_at: new Date().toISOString() })
+      .eq("brand_id", brandId).eq("platform_id", spId).eq("external_shop_id", shopId).select("id");
+    clearedShopId = (data ?? []).length > 0;
+  }
+  await writeAudit(admin, { action: "update", entityType: "platform_credential", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { brand_id: brandId, platform: "shopee", disconnected: true, shop_id: shopId, shop_name: before?.meta.shop_name ?? null, cleared_shop_id: clearedShopId } });
   return NextResponse.json({ ok: true, error: null });
 }
