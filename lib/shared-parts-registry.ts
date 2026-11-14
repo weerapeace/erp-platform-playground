@@ -482,7 +482,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "file-input", label: "ช่องไฟล์แนบเดี่ยว", code: "FileInput", category: "file",
     source: { path: "components/file-input" },
-    what: "อัปโหลดไฟล์แนบ 1 ไฟล์ (รูปหรือ PDF) เก็บตามกฎที่เก็บไฟล์",
+    what: "อัปโหลดไฟล์แนบ 1 ไฟล์ (รูปหรือ PDF) เก็บตามกฎที่เก็บไฟล์ · ลากไฟล์มาวาง / Ctrl+V ได้ · multiple = รับหลายไฟล์ (onChange ทีละไฟล์)",
     sameJob: "file-field", primary: true,
   },
   {

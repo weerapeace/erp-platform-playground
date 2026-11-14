@@ -5,10 +5,13 @@
  *   อัปโหลดรูป (หรือหยิบไฟล์แนบตอนรับของ GR) → 🔍 อ่านด้วย AI → ได้ รหัสขนส่ง EK-… + รายการ (P/o.No, Description, Pack, Qty, Weight, M3)
  *   → แก้ค่าที่อ่านผิดได้ → จับคู่แต่ละบรรทัดกับสินค้าในใบสำคัญ (เลือกได้หลายตัว) → ✓ ใช้น้ำหนัก/คิวจากใบนี้
  * ใช้: <DeliveryBillPanel voucherId lines readonly onApplied />  (lines = รายการในใบสำคัญ ไว้ให้เลือกจับคู่)
+ * ★ 2026-11-14 ลากรูป/PDF มาวาง (หรือ Ctrl+V ตอนชี้กล่อง) = AI อ่านต่อทันที · แถวเรียงตามใบจริง + เลข # บนกระดาษ · ลากหูจับย้ายแถวได้
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { FileInput } from "@/components/file-input";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { billLineNo } from "@/lib/bill-line-order";
 import { HoverPreview } from "@/components/hover-image";
 import { useFileRefUrls } from "@/components/file-ref";
 import { useToast } from "@/components/toast";
@@ -26,13 +29,15 @@ export type VoucherLineLite = { id: string; code: string; item_name: string; qty
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
 const inp = "h-8 px-1.5 text-xs border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
+/** ลากย้ายแถว: หลายใบในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับใบ × ROW_SPAN + ลำดับแถว (ลากข้ามใบไม่ได้) */
+const ROW_SPAN = 10000;
 
 export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { voucherId: string; lines: VoucherLineLite[]; readonly: boolean; onApplied: () => void | Promise<void> }) {
   const toast = useToast();
   const [bills, setBills] = useState<BillRow[]>([]);
   const [cands, setCands] = useState<Candidate[]>([]);
-  const [uploadKey, setUploadKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // "parse" | bill id
+  const [moved, setMoved] = useState<Record<string, boolean>>({});   // ย้ายแถวแล้วยังไม่บันทึก
   const [draft, setDraft] = useState<Record<string, { tracking_no: string; bill_date: string; lines: DeliveryBillLine[] }>>({});
   const [mapFor, setMapFor] = useState<{ billId: string; idx: number } | null>(null);
   const [open, setOpen] = useState(true);
@@ -58,11 +63,27 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as BillRow;
       toast.success(`อ่านใบส่งของแล้ว: ${b.tracking_no ?? "ไม่พบรหัสขนส่ง"} · ${(b.lines ?? []).length} รายการ — ตรวจตัวเลขแล้วจับคู่สินค้า`);
-      setUploadKey(null);
       await load();
     } catch (e) { toast.error("อ่านไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setBusy(null); }
   };
+  // ลาก/วาง/เลือกไฟล์เสร็จ = AI อ่านต่อทันที · หลายไฟล์ = ใบละไฟล์ อ่านทีละใบตามคิว
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  const readUploaded = (ref: string | null) => {
+    if (!ref) return;
+    setReading((r) => ({ done: r?.done ?? 0, total: (r?.total ?? 0) + 1 }));
+    queueRef.current = queueRef.current.then(() => parse(ref)).then(() =>
+      setReading((r) => (!r || r.done + 1 >= r.total ? null : { ...r, done: r.done + 1 })));
+  };
+  // ลากย้ายแถว — จำลำดับเมื่อกดบันทึก / ใช้น้ำหนัก/คิว
+  const drag = useDragReorder((from, to) => {
+    const bi = Math.floor(from / ROW_SPAN);
+    if (Math.floor(to / ROW_SPAN) !== bi) return;
+    const b = bills[bi]; if (!b) return;
+    setDraft((p) => { const d = p[b.id]; if (!d) return p; return { ...p, [b.id]: { ...d, lines: moveItem(d.lines, from % ROW_SPAN, to % ROW_SPAN) } }; });
+    setMoved((m) => ({ ...m, [b.id]: true }));
+  }, { group: `delivery-bill-${voucherId}` });
   const patchBill = async (billId: string, apply: boolean) => {
     const d = draft[billId]; if (!d) return;
     setBusy(billId);
@@ -71,6 +92,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       toast.success(apply ? `ใส่น้ำหนัก/คิวจากใบส่งของให้ ${j.applied} รายการแล้ว` : "บันทึกใบส่งของแล้ว");
+      setMoved((m) => ({ ...m, [billId]: false }));
       await load();
       if (apply) await onApplied();
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
@@ -98,15 +120,21 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
     <div className="bg-white border border-slate-200 rounded-xl p-4">
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700">{open ? "▾" : "▸"} 📄 ใบส่งของจากขนส่ง (Delivery Bill) {bills.length > 0 && <span className="font-normal text-slate-400">· {bills.length} ใบ</span>}</button>
-        <span className="text-[11px] text-slate-400">อัปโหลดรูป → AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → เลือกคิดจากคิว/กก. ตามกฎ Description → จับคู่สินค้า → ใช้ค่าจริงแทนค่าประเมิน</span>
+        <span className="text-[11px] text-slate-400">ลากรูป/PDF มาวาง → AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → เลือกคิดจากคิว/กก. ตามกฎ Description → จับคู่สินค้า → ใช้ค่าจริงแทนค่าประเมิน</span>
         <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-blue-600">⚙ กฎ Description</a>
       </div>
       {open && (
         <div className="mt-3 space-y-4">
           {!readonly && (
             <div className="flex items-end gap-3 flex-wrap">
-              <div className="w-64"><FileInput label="📷 รูปใบส่งของ (jpg/png)" value={uploadKey} onChange={setUploadKey} folder="delivery-bills" category="supplier_bills" /></div>
-              <button onClick={() => uploadKey && void parse(uploadKey)} disabled={!uploadKey || busy === "parse"} className="h-9 px-4 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">{busy === "parse" ? "🔍 กำลังอ่าน…" : "🔍 อ่านด้วย AI"}</button>
+              <div className="w-full max-w-md">
+                <FileInput label="รูปหรือ PDF ใบส่งของ" value={null} onChange={readUploaded} folder="delivery-bills" category="supplier_bills" multiple
+                  hint="วางแล้ว AI อ่านให้เลย · หลายไฟล์ = ใบละไฟล์ · Ctrl+V ได้ตอนชี้เมาส์ที่กล่องนี้" />
+              </div>
+              {reading && (
+                <span className="h-9 inline-flex items-center gap-1.5 text-sm text-indigo-700"><span className="animate-pulse">⏳</span>
+                  กำลังอ่าน {reading.total > 1 ? `ใบที่ ${Math.min(reading.done + 1, reading.total)}/${reading.total}` : ""}…</span>
+              )}
               {cands.filter((c) => !bills.some((b) => b.r2_key === c.r2_key)).map((c) => (
                 <button key={`${c.gr_id}-${c.kind}`} onClick={() => void parse(c.r2_key, c.gr_id)} disabled={busy === "parse"} title="ไฟล์ที่แนบไว้ตอนรับของ — ให้ AI อ่านได้เลย ไม่ต้องอัปโหลดซ้ำ"
                   className="h-9 px-3 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-40 inline-flex items-center gap-1.5">
@@ -117,7 +145,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
             </div>
           )}
           {bills.length === 0 && <div className="text-xs text-slate-300 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีใบส่งของ —</div>}
-          {bills.map((b) => {
+          {bills.map((b, bi) => {
             const d = draft[b.id] ?? { tracking_no: b.tracking_no ?? "", bill_date: b.bill_date ?? "", lines: b.lines ?? [] };
             const mapped = d.lines.filter((l) => l.voucher_line_ids.length > 0).length;
             return (
@@ -131,6 +159,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                   <div className="text-[11px] text-slate-500">{b.marking ? `Marking ${b.marking} · ` : ""}{b.delivery_area ? `${b.delivery_area} · ` : ""}รวม {d.lines.length} กล่อง · {num(b.total_weight_kg).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. · {num(b.total_m3).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว</div>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.status === "applied" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{b.status === "applied" ? `✓ ใช้แล้ว ${b.applied_at ? formatDate(b.applied_at) : ""}` : "ยังไม่ได้ใช้"}</span>
                   <div className="ml-auto flex items-center gap-1.5">
+                    {moved[b.id] && <span className="text-[11px] text-amber-700">ย้ายแถวแล้ว — กดบันทึกเพื่อจำลำดับ</span>}
                     {!readonly && <button onClick={() => void patchBill(b.id, false)} disabled={busy === b.id} className="h-8 px-2.5 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">💾 บันทึก</button>}
                     {!readonly && <button onClick={() => void patchBill(b.id, true)} disabled={busy === b.id || mapped === 0} title={mapped === 0 ? "จับคู่สินค้าก่อน" : "เขียนน้ำหนัก/คิวต่อชิ้นลงสินค้าที่จับคู่ + รหัสขนส่งลงหัวใบ"} className="h-8 px-3 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">✓ ใช้น้ำหนัก/คิวจากใบนี้ ({mapped}/{d.lines.length})</button>}
                     {!readonly && <button onClick={() => void removeBill(b.id)} disabled={busy === b.id} className="h-8 w-8 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50">✕</button>}
@@ -140,6 +169,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                   <table className="w-full text-xs">
                     <thead className="text-slate-500 bg-white border-b border-slate-100">
                       <tr>
+                        <th className="text-left px-2 py-1.5 font-medium w-12" title="บรรทัดที่เท่าไรในใบ (บนกระดาษ) · ลากหูจับเพื่อย้ายแถว">#</th>
                         <th className="text-left px-2 py-1.5 font-medium">Stock</th>
                         <th className="text-left px-2 py-1.5 font-medium">P/o.No</th>
                         <th className="text-left px-2 py-1.5 font-medium">Description</th>
@@ -156,8 +186,13 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                     <tbody className="divide-y divide-slate-100">
                       {d.lines.map((l, i) => {
                         const names = l.voucher_line_ids.map((id) => lines.find((x) => x.id === id)).filter(Boolean) as VoucherLineLite[];
+                        const dk = bi * ROW_SPAN + i;
                         return (
-                          <tr key={i} className={l.voucher_line_ids.length === 0 ? "bg-amber-50/30" : ""}>
+                          <tr key={i} {...drag.rowProps(dk)} className={`${l.voucher_line_ids.length === 0 ? "bg-amber-50/30" : ""} ${drag.rowCls(dk)}`}>
+                            <td className="px-2 py-1 whitespace-nowrap">
+                              {!readonly && <DragHandle {...drag.handleProps(dk)} title="ลากเพื่อย้ายแถว" className="text-base align-middle" />}
+                              <span className="font-mono text-[11px] text-slate-400 align-middle ml-0.5">{billLineNo(l.no, i)}</span>
+                            </td>
                             <td className="px-2 py-1"><input value={l.stock ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { stock: e.target.value })} className={`${inp} w-24 font-mono`} /></td>
                             <td className="px-2 py-1"><input value={l.po_no ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { po_no: e.target.value })} className={`${inp} w-28 font-mono`} /></td>
                             <td className="px-2 py-1"><input value={l.description ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { description: e.target.value })} className={`${inp} w-28`} /></td>

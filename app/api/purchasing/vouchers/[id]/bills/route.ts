@@ -101,6 +101,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       pack: optNum(l.pack), package: str(l.package) || null, qty: optNum(l.qty), weight_kg: optNum(l.weight_kg), m3: optNum(l.m3),
       method: l.method === "cube" || l.method === "weight" ? l.method : null,
       voucher_line_ids: Array.isArray(l.voucher_line_ids) ? (l.voucher_line_ids as unknown[]).map(String).filter(Boolean) : [],
+      no: optNum(l.no),   // เลขบรรทัดบนกระดาษ — ติดแถวไว้แม้ลากย้าย (lib/bill-line-order)
     }));
     patch.lines = lines;
     patch.total_weight_kg = lines.some((l) => l.weight_kg != null) ? Math.round(lines.reduce((a, l) => a + (l.weight_kg ?? 0), 0) * 10000) / 10000 : null;

@@ -11,7 +11,8 @@ import { aiChat } from "@/lib/paid-services-server";
 import type { UseCtx } from "@/lib/paid-services-server";
 import { recomputeVoucher } from "@/lib/purchase-voucher-server";
 import { isSupabaseRef } from "@/lib/file-ref";
-import { fileRefToDataUrl } from "@/lib/file-ref-server";
+import { billFileParts } from "@/lib/bill-file-parts";
+import { BILL_ORDER_RULE as ORDER_RULE, orderByBillPosition } from "@/lib/bill-line-order";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -29,6 +30,7 @@ export type DeliveryBillLine = {
   m3: number | null;
   method?: "cube" | "weight" | null;   // คิดค่าส่งกล่องนี้จากคิวหรือน้ำหนัก (auto จากกฎ Description · แก้ได้)
   voucher_line_ids: string[];    // สินค้าในใบสำคัญที่จับคู่กับบรรทัดนี้ (เลือกได้หลายตัว)
+  no?: number | null;            // เลขบรรทัดบนกระดาษ (lib/bill-line-order) — ใบเก่าไม่มี
 };
 
 /** กฎ "คำใน Description → วิธีคิด" จากตั้งค่ากลาง (/m/freight-description-rules) · เรียงตาม sort_order กฎแรกที่เข้าชนะ */
@@ -71,19 +73,24 @@ const SYSTEM = `คุณเป็นผู้ช่วยอ่านเอก�
 
 /** อ่านรูปใบส่งของด้วย AI → โครงสร้าง (โยน Error เป็นภาษาคนเมื่ออ่านไม่ได้) */
 export async function parseDeliveryBillImage(r2Key: string, admin?: Admin, who?: UseCtx): Promise<{ parsed: DeliveryBillParsed; raw: Record<string, unknown> }> {
-  if (/\.pdf$/i.test(r2Key)) throw new Error("อ่านได้เฉพาะรูปภาพ (jpg/png/webp) — ไฟล์ PDF ให้ถ่ายรูป/แปลงเป็นรูปก่อน");
   // r2Key = ที่อยู่ไฟล์กลาง (lib/file-ref) — บิลใหม่อยู่ Supabase ส่วนตัว (กฎที่เก็บไฟล์ หมวด supplier_bills)
-  const urls = isSupabaseRef(r2Key)
-    ? (admin ? [await fileRefToDataUrl(admin, r2Key)].filter((u): u is string => !!u) : [])
-    : await imagesToDataUrls([r2Key]);
-  if (urls.length === 0) throw new Error("อ่านไฟล์รูปไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ)");
+  // ★ 2026-11-14 รับ PDF ได้แล้ว (ของกลาง lib/bill-file-parts — วิธีเดียวกับบิลร้านจีน) · OCR ต้องการความละเอียดสูง (detail:high)
+  let fileParts: unknown[];
+  if (admin) {
+    fileParts = await billFileParts(admin, [r2Key], "ใบส่งของ");
+  } else {
+    if (/\.pdf$/i.test(r2Key)) throw new Error("อ่านได้เฉพาะรูปภาพ (jpg/png/webp) — ไฟล์ PDF ให้ถ่ายรูป/แปลงเป็นรูปก่อน");
+    const urls = isSupabaseRef(r2Key) ? [] : await imagesToDataUrls([r2Key]);
+    if (urls.length === 0) throw new Error("อ่านไฟล์รูปไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ)");
+    fileParts = urls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } }));
+  }
   const model = await productDetailModel();
-  // OCR ต้องการความละเอียดสูง — ไม่ใช้ detail:low ของ imageParts()
-  const raw = await aiChat("ai.delivery_bill", SYSTEM, [
+  const raw = await aiChat("ai.delivery_bill", SYSTEM + ORDER_RULE, [
     { type: "text", text: "อ่านใบส่งของนี้ แล้วตอบ JSON ตามโครงที่กำหนด" },
-    ...urls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } })),
+    ...fileParts,
   ], 1500, model, who);
-  const linesRaw = Array.isArray(raw.lines) ? (raw.lines as Row[]) : [];
+  // เรียงตามเอกสารจริง (หน้า + เลขบรรทัด) กัน AI สลับ — lib/bill-line-order
+  const linesRaw = orderByBillPosition(Array.isArray(raw.lines) ? (raw.lines as Row[]) : [], (l) => ({ page: l.page, line_no: l.line_no }));
   const lines: DeliveryBillLine[] = linesRaw
     .map((l) => ({
       stock: str(l.stock) || null, po_no: str(l.po_no) || null, description: str(l.description) || null,
@@ -91,7 +98,8 @@ export async function parseDeliveryBillImage(r2Key: string, admin?: Admin, who?:
       method: null, voucher_line_ids: [],
     }))
     // กันแถว EK-/Total ที่ AI เผลอใส่มา
-    .filter((l) => !(l.stock && /^EK-?\d+/i.test(l.stock) && !l.qty && !l.weight_kg) && !/^(total|sub-?total)$/i.test(str(l.description)));
+    .filter((l) => !(l.stock && /^EK-?\d+/i.test(l.stock) && !l.qty && !l.weight_kg) && !/^(total|sub-?total)$/i.test(str(l.description)))
+    .map((l, i) => ({ ...l, no: i + 1 }));   // เลขบรรทัดบนกระดาษ (โชว์ #) — ลากย้ายแถวแล้วยังติดแถวเดิม
   let tracking = str(raw.tracking_no) || null;
   if (!tracking) { const hit = linesRaw.map((l) => str(l.stock)).find((s) => /^EK-?\d{6,}/i.test(s)); if (hit) tracking = hit; }
   if (tracking) tracking = tracking.toUpperCase().replace(/^EK(\d)/, "EK-$1");
