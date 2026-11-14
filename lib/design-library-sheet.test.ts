@@ -42,6 +42,12 @@ describe("ตารางสีใบงาน", () => {
     expect(red.cells["hw-color"].name).toBe("เงิน");
     expect(cleanSpecColors(t)).toEqual(t);                    // ผ่านตัวทำความสะอาดของใบงานไม่เสีย
   });
+  it("จุดที่ยังไม่เลือกหมวด/วัสดุ = ไม่มีแถวว่าง (เจอในสูตรจริง TOTE-001)", () => {
+    const s = cleanSpec({ ...spec(), hw_color: null, colorways: [], pins: [...spec().pins.slice(0, 1), { id: "px", x: 1, y: 1, cat: "", note: "", pick: null }] });
+    const t = recipeColorTable(s, CHOICES);
+    expect(t.rows.map((r) => r.name)).toEqual(["ตัวกระเป๋า"]);
+    expect(recipeColorTable(cleanSpec({ ...s, pins: [s.pins[1]] }), CHOICES)).toEqual({ rows: [], colorways: [] });
+  });
   it("รวมเข้าตารางเดิม: แถวชื่อตรงใช้ร่วม · ส่งซ้ำแทนคอลัมน์เดิม ไม่เพิ่มซ้ำ · ของเดิมไม่หาย", () => {
     const existing = cleanSpecColors({ rows: [{ key: "r1", name: "อะไหล่" }, { key: "r2", name: "ซับใน" }], colorways: [{ key: "c1", name: "สี 1", cells: { r2: { source: "pick", name: "ครีม" } } }] });
     const inc = recipeColorTable(spec(), CHOICES);

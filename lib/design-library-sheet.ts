@@ -71,8 +71,9 @@ export function recipeColorTable(spec: Spec, choices: Choice[]): SpecColorTable 
     ...spec.colorways.map((cw) => column(`cw-${safeKey(cw.id)}`, colorwayLabel(spec, cw.id),
       spec.pins.map((p) => (p.id in cw.picks ? cw.picks[p.id] : p.pick)), cw.hw_color ?? spec.hw_color)),
   ];
-  if (!spec.pins.length && !colorways.some((c) => c.cells[HW_ROW])) return { rows: [], colorways: [] };
-  return cleanSpecColors({ rows, colorways });
+  const used = rows.filter((r) => colorways.some((c) => c.cells[r.key]));   // จุดที่ยังไม่เลือกอะไรเลยทุกชุดสี = ไม่ส่งแถวว่าง
+  if (!used.length) return { rows: [], colorways: [] };
+  return cleanSpecColors({ rows: used, colorways });
 }
 
 /**
@@ -128,7 +129,7 @@ export function recipePagePins(spec: Spec, choices: Choice[], lines: EstLine[]):
       qty: l && l.qty > 0 ? Math.round(l.qty * 10000) / 10000 : null, uom: l && l.qty > 0 ? l.uom || null : null,
       note: notes.join(" · ").slice(0, 500) || null,
     };
-  });
+  }).filter((p) => p.part_name || p.sku_id || p.note);   // จุดที่ยังว่างทั้งหมด (ไม่มีหมวด/ของ/โน้ต) = ไม่ส่งหมุดเปล่า
 }
 
 // ─── ทุนประมาณ → บรรทัดตีราคาใบงาน ──────────────────────────────────────────
