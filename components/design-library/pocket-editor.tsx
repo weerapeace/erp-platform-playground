@@ -1,47 +1,146 @@
 "use client";
 
 /**
- * 📚 Design Library — วาดช่อง (ด้านนอกหน้า/หลัง + ข้างใน 2 ฝั่ง) · 1 ฝั่งมีได้หลายกล่อง
+ * 📚 Design Library — วาดช่อง (ด้านนอกหน้า/หลัง + ข้างใน/ซับใน 2 ฝั่ง) · 1 ฝั่งมีได้หลายกล่อง
  * ลากที่ว่าง = วาดกล่องใหม่ · ลากกล่อง = ย้าย · ลากจุดมุมขวาล่าง = ปรับขนาด · หน่วยเป็น ซม. ตามขนาดกระเป๋า
- * รูปในใบสรุปใช้ pocketPanelSvg (lib/design-library) ชุดเดียวกัน
+ * รอบ 7 ช่วง 3 (เจ้าของขอ "วาดจากรูปได้ จะได้ขนาดเป๊ะ"):
+ *   เลือกรูปพื้นหลังต่อฝั่ง (รูปแม่แบบ / Vector / รูป GPT / รูปอ้างอิงที่อัปเพิ่มได้หลายรูป)
+ *   → โหมด "ปรับกรอบ": ดึงกรอบให้ตรงขอบกระเป๋าในรูป (กรอบ = กว้าง × สูงที่ใส่ไว้)
+ *   → โหมด "วาดช่อง": รูปถูกวางให้กรอบทับพอดีกรอบกระเป๋า (bgPlacement) แล้ววาดช่องทับรูป ได้ ซม. จริง
+ * รูปในใบสรุปใช้ pocketPanelSvg (lib/design-library) ชุดเดียวกัน (ไม่มีรูปพื้นหลัง)
  */
-import { useRef, useState, type PointerEvent as RPointerEvent } from "react";
-import { MAX_BOXES, PANELS, panelSize, type Choice, type PanelKey, type PocketBox, type Spec } from "@/lib/design-library";
-import { newId } from "./shared";
+import { useRef, useState, type ClipboardEvent as RClipboardEvent, type PointerEvent as RPointerEvent } from "react";
+import { useToast } from "@/components/toast";
+import { Icon } from "@/components/icon";
+import { useFileDrop } from "@/components/file-drop";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
+import {
+  bgPlacement, cleanFrame, DEFAULT_FRAME, MAX_BOXES, MAX_REFS, PANELS, panelSize,
+  type Choice, type Frame, type PanelBg, type PanelKey, type PocketBox, type RefImage, type Spec,
+} from "@/lib/design-library";
+import { img, newId } from "./shared";
 import { fmtLen, LenInput, type LenUnit } from "./units";
 
 type Drag = { kind: "move" | "size"; id: string; sx: number; sy: number; start: PocketBox } | { kind: "draw"; sx: number; sy: number; cx: number; cy: number };
+type FrameDrag = { kind: "move" | "nw" | "ne" | "sw" | "se"; sx: number; sy: number; start: Frame };
 const r1 = (n: number) => Math.round(n * 2) / 2;   // ปัดครึ่งเซนติเมตร
+/** รูปที่ใช้เป็นพื้นหลังได้ (ไม่รวมรูปอ้างอิง — อันนั้นอยู่ใน spec.refs) */
+export type BgOption = { key: string; label: string; w: number | null; h: number | null };
 
-export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }: {
+/** ขนาดจริงของรูป (โหลดจากไฟล์) */
+function loadSize(url: string): Promise<{ w: number; h: number }> {
+  return new Promise((ok) => {
+    const im = new Image();
+    im.onload = () => ok({ w: im.naturalWidth || 1000, h: im.naturalHeight || 1000 });
+    im.onerror = () => ok({ w: 1000, h: 1000 });
+    im.src = url;
+  });
+}
+
+export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange, bgOptions = [], onRefs, onBg }: {
   spec: Spec; choices: Choice[]; readOnly: boolean; unit?: LenUnit; onChange: (pockets: Spec["pockets"]) => void;
+  bgOptions?: BgOption[];
+  onRefs?: (refs: RefImage[]) => void;
+  onBg?: (panel: PanelKey, bg: PanelBg | null) => void;
 }) {
+  const toast = useToast();
   const n = (cm: number) => fmtLen(cm, unit).split(" ")[0];   // ตัวเลขในหน่วยที่เลือก (ไม่มีชื่อหน่วย)
   const [panel, setPanel] = useState<PanelKey>("front");
   const [sel, setSel] = useState<string | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [mode, setMode] = useState<"draw" | "frame">("draw");
+  const [fdrag, setFdrag] = useState<FrameDrag | null>(null);
+  const [uploading, setUploading] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const types = choices.filter((c) => c.list_key === "pocket_type");
   // ยังไม่ใส่ขนาด (0) → วาดในกรอบตัวอย่าง 30×35 (panelSize) · ตอนบันทึก cleanSpec บีบกล่องให้พอดีขนาดจริงเอง
   const P = panelSize(spec.size), W = P.w, H = P.h;
   const s = Math.min(320 / W, 340 / H), ox = (360 - W * s) / 2, oy = 24;
   const boxes = spec.pockets[panel];
-  const selBox = boxes.find((b) => b.id === sel) ?? null;
+  const bg = spec.pocket_bg?.[panel] ?? null;
+  const refs = spec.refs ?? [];
+  const canBg = !!onBg;
+  const curMode = bg ? mode : "draw";
+  const panelLabel = PANELS.find((p) => p.key === panel)?.label ?? "";
+  const unitName = fmtLen(0, unit).split(" ")[1];
 
   const setBoxes = (next: PocketBox[]) => onChange({ ...spec.pockets, [panel]: next });
   const patch = (id: string, p: Partial<PocketBox>) => setBoxes(boxes.map((b) => (b.id === id ? { ...b, ...p } : b)));
-  const toCm = (e: RPointerEvent) => {
+  const svgPt = (e: RPointerEvent) => {
     const svg = svgRef.current!; const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
-    const q = pt.matrixTransform(svg.getScreenCTM()!.inverse());
-    return { x: (q.x - ox) / s, y: (q.y - oy) / s };
+    return pt.matrixTransform(svg.getScreenCTM()!.inverse());
   };
+  const toCm = (e: RPointerEvent) => { const q = svgPt(e); return { x: (q.x - ox) / s, y: (q.y - oy) / s }; };
   const clampBox = (b: PocketBox): PocketBox => {
     const w = Math.max(1, Math.min(W, b.w)), h = Math.max(1, Math.min(H, b.h));
     return { ...b, w, h, x: Math.max(0, Math.min(W - w, b.x)), y: Math.max(0, Math.min(H - h, b.y)) };
   };
 
+  // ── พื้นหลัง / รูปอ้างอิง ──
+  const pickBg = async (o: { key: string; w: number | null; h: number | null }) => {
+    if (!onBg) return;
+    const dim = o.w && o.h ? { w: o.w, h: o.h } : await loadSize(img(o.key, 1400));
+    onBg(panel, { key: o.key, w: dim.w, h: dim.h, frame: bg?.key === o.key ? bg.frame : DEFAULT_FRAME });
+    if (bg?.key !== o.key) { setMode("frame"); toast.info("ดึงกรอบให้ตรงขอบกระเป๋าในรูป แล้วกด “วาดช่อง”"); }
+  };
+  const uploadRefs = async (files: File[]) => {
+    if (!onRefs || !files.length) return;
+    const room = MAX_REFS - refs.length;
+    if (room <= 0) { toast.warning(`รูปอ้างอิงได้สูงสุด ${MAX_REFS} รูป — ลบรูปเก่าก่อน`); return; }
+    setUploading(true);
+    try {
+      const up = await uploadImagesWithDupCheck(files.slice(0, room), { folder: "design-library/refs", max: 2400, onError: (_, e) => toast.error(e.message) });
+      const keys = (up?.keys ?? []).filter((k) => !refs.some((r) => r.image_key === k));
+      if (!keys.length) return;
+      const added = await Promise.all(keys.map(async (k) => { const d = await loadSize(img(k, 1400)); return { id: newId(), image_key: k, w: d.w, h: d.h, note: "" } as RefImage; }));
+      onRefs([...refs, ...added]);
+      toast.success(`เพิ่มรูปอ้างอิงแล้ว ${added.length} รูป`);
+      if (!bg && onBg) { const a = added[0]; onBg(panel, { key: a.image_key, w: a.w ?? 1000, h: a.h ?? 1000, frame: DEFAULT_FRAME }); setMode("frame"); }
+    } catch { toast.error("อัปโหลดรูปอ้างอิงไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setUploading(false); }
+  };
+  const removeRef = (r: RefImage) => {
+    if (!onRefs) return;
+    onRefs(refs.filter((x) => x.id !== r.id));
+    if (onBg) for (const p of PANELS) if (spec.pocket_bg?.[p.key]?.key === r.image_key) onBg(p.key, null);
+  };
+  const drop = useFileDrop((files) => void uploadRefs(files), { accept: "image/", disabled: readOnly || !onRefs || uploading, onReject: () => toast.error("วางได้เฉพาะไฟล์รูป") });
+  const onPaste = (e: RClipboardEvent) => {
+    if (readOnly || !onRefs) return;
+    const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault(); void uploadRefs(files);
+  };
+
+  // ── ปรับกรอบบนรูป (หน่วย % ของรูป) ──
+  const FW = 360, FH = bg ? Math.round((360 * bg.h) / bg.w) : 270;
+  const toPct = (e: RPointerEvent) => { const q = svgPt(e); return { x: (q.x / FW) * 100, y: (q.y / FH) * 100 }; };
+  const frameDown = (e: RPointerEvent<SVGSVGElement>) => {
+    if (!bg) return;
+    const t = (e.target as Element).closest("[data-fr]");
+    if (!t) return;
+    svgRef.current?.setPointerCapture(e.pointerId);
+    const p = toPct(e);
+    setFdrag({ kind: (t.getAttribute("data-fr") as FrameDrag["kind"]) ?? "move", sx: p.x, sy: p.y, start: bg.frame });
+  };
+  const frameMove = (e: RPointerEvent<SVGSVGElement>) => {
+    if (!fdrag || !bg || !onBg) return;
+    const p = toPct(e), dx = p.x - fdrag.sx, dy = p.y - fdrag.sy, f = fdrag.start;
+    let x = f.x, y = f.y, w = f.w, h = f.h;
+    if (fdrag.kind === "move") { x = Math.max(0, Math.min(100 - w, f.x + dx)); y = Math.max(0, Math.min(100 - h, f.y + dy)); }
+    else {
+      if (fdrag.kind.includes("w")) { x = Math.min(f.x + f.w - 2, Math.max(0, f.x + dx)); w = f.x + f.w - x; }
+      if (fdrag.kind.includes("e")) { w = Math.max(2, Math.min(100 - f.x, f.w + dx)); }
+      if (fdrag.kind.includes("n")) { y = Math.min(f.y + f.h - 2, Math.max(0, f.y + dy)); h = f.y + f.h - y; }
+      if (fdrag.kind.includes("s")) { h = Math.max(2, Math.min(100 - f.y, f.h + dy)); }
+    }
+    onBg(panel, { ...bg, frame: cleanFrame({ x, y, w, h }) });
+  };
+
+  // ── วาดช่อง ──
   const down = (e: RPointerEvent<SVGSVGElement>) => {
     if (readOnly) return;
+    if (curMode === "frame") { frameDown(e); return; }
     const t = (e.target as Element).closest("[data-box]");
     const p = toCm(e);
     svgRef.current?.setPointerCapture(e.pointerId);
@@ -51,6 +150,7 @@ export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }:
     } else if (boxes.length < MAX_BOXES) { setSel(null); setDrag({ kind: "draw", sx: p.x, sy: p.y, cx: p.x, cy: p.y }); }
   };
   const move = (e: RPointerEvent<SVGSVGElement>) => {
+    if (curMode === "frame") { frameMove(e); return; }
     if (!drag) return;
     const p = toCm(e);
     if (drag.kind === "draw") { setDrag({ ...drag, cx: p.x, cy: p.y }); return; }
@@ -58,6 +158,7 @@ export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }:
     patch(drag.id, drag.kind === "move" ? clampBox({ ...b, x: b.x + dx, y: b.y + dy }) : clampBox({ ...b, w: b.w + dx, h: b.h + dy }));
   };
   const up = () => {
+    if (curMode === "frame") { setFdrag(null); return; }
     if (drag?.kind === "draw") {
       const x = r1(Math.min(drag.sx, drag.cx)), y = r1(Math.min(drag.sy, drag.cy)), w = r1(Math.abs(drag.cx - drag.sx)), h = r1(Math.abs(drag.cy - drag.sy));
       if (w >= 1 && h >= 1) {
@@ -74,38 +175,108 @@ export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange }:
   };
 
   const draw = drag?.kind === "draw" ? drag : null;
+  const place = bg ? bgPlacement(bg.frame, ox, oy, W * s, H * s) : null;
+  const VH = oy + H * s + 12;
+  const bgTiles: (BgOption & { ref?: RefImage })[] = [...bgOptions, ...refs.map((r, i) => ({ key: r.image_key, label: `อ้างอิง ${i + 1}`, w: r.w, h: r.h, ref: r }))];
+
   return (
     <div>
-      {P.placeholder && <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-800">ยังไม่ใส่กว้าง/สูง — วาดในกรอบตัวอย่าง 30×35 ซม. ไปก่อน ใส่ขนาดจริงแล้วตำแหน่งช่องจะถูกบีบให้พอดีกรอบจริงตอนบันทึก</div>}
+      {P.placeholder && <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-800">ยังไม่ใส่กว้าง/สูง — วาดในกรอบตัวอย่าง 30×35 ซม. ไปก่อน ใส่ขนาดจริงแล้วตำแหน่งช่องจะถูกบีบให้พอดีกรอบจริงตอนบันทึก{bg ? " · กรอบบนรูปยังไม่ใช่ขนาดจริงจนกว่าจะใส่ขนาด" : ""}</div>}
       <div className="flex flex-wrap gap-1 mb-2">
         {PANELS.map((p) => (
-          <button key={p.key} type="button" onClick={() => { setPanel(p.key); setSel(null); }}
-            className={`h-8 px-3 text-[12.5px] rounded-full border ${panel === p.key ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-            {p.label} <span className="text-slate-400">{spec.pockets[p.key].length}</span>
+          <button key={p.key} type="button" onClick={() => { setPanel(p.key); setSel(null); setMode("draw"); }}
+            className={`h-8 px-3 text-[12.5px] rounded-full border inline-flex items-center gap-1 ${panel === p.key ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+            {p.label} <span className="text-slate-400">{spec.pockets[p.key].length}</span>{spec.pocket_bg?.[p.key] && <Icon value="i:photo" className="text-slate-400" />}
           </button>
         ))}
       </div>
+
+      {canBg && (
+        <div {...drop.zone("refs")} onPaste={onPaste} tabIndex={readOnly ? -1 : 0}
+          className={`mb-2 rounded-lg border p-2 outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${drop.over === "refs" ? "border-indigo-400 bg-indigo-50/50" : "border-slate-200"}`}>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
+            <span className="text-[12.5px] font-medium text-slate-700">รูปพื้นหลังของ “{panelLabel}”</span>
+            <span className="text-[11.5px] text-slate-400">เลือกรูป → ดึงกรอบให้ตรงขอบกระเป๋า → วาดช่องทับได้ขนาดจริง</span>
+            {bg && !readOnly && (
+              <span className="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden">
+                <button type="button" onClick={() => setMode("draw")} className={`h-7 px-2.5 text-[12px] ${curMode === "draw" ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-600"}`}>วาดช่อง</button>
+                <button type="button" onClick={() => setMode("frame")} className={`h-7 px-2.5 text-[12px] border-l border-slate-200 ${curMode === "frame" ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-600"}`}>ปรับกรอบให้ตรงขอบ</button>
+              </span>
+            )}
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto pt-1.5 pb-1">
+            <button type="button" disabled={readOnly} onClick={() => onBg?.(panel, null)} title="ไม่ใช้รูป (กรอบเปล่า)"
+              className={`shrink-0 w-14 h-14 rounded-lg border text-[11px] text-slate-500 inline-flex items-center justify-center ${!bg ? "border-indigo-400 ring-2 ring-indigo-200 bg-indigo-50/50" : "border-slate-200 hover:border-slate-400"}`}>ไม่มี</button>
+            {bgTiles.map((o) => (
+              <div key={`${o.key}-${o.label}`} className="relative shrink-0">
+                <button type="button" disabled={readOnly} onClick={() => void pickBg(o)} title={o.label}
+                  className={`relative w-14 h-14 rounded-lg border overflow-hidden bg-slate-50 block ${bg?.key === o.key ? "border-indigo-400 ring-2 ring-indigo-200" : "border-slate-200 hover:border-slate-400"}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img(o.key, 160)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9.5px] leading-4 truncate px-0.5">{o.label}</span>
+                </button>
+                {o.ref && !readOnly && <button type="button" onClick={() => removeRef(o.ref!)} aria-label="ลบรูปอ้างอิงนี้" title="ลบรูปอ้างอิงนี้"
+                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-white border border-slate-300 text-rose-600 text-[10px] inline-flex items-center justify-center shadow-sm"><Icon value="i:x" /></button>}
+              </div>
+            ))}
+            {!readOnly && onRefs && refs.length < MAX_REFS && (
+              <label className="shrink-0 w-14 h-14 rounded-lg border border-dashed border-indigo-300 text-indigo-700 text-[10.5px] leading-tight inline-flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:bg-indigo-50 text-center">
+                <Icon value={uploading ? "i:loader-2" : "i:plus"} />{uploading ? "กำลังอัป" : "รูปอ้างอิง"}
+                <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { void uploadRefs(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+              </label>
+            )}
+          </div>
+          {!readOnly && onRefs && <p className="text-[11px] text-slate-400 mt-1">รูปอ้างอิงอัปได้หลายรูป (สูงสุด {MAX_REFS}) · ลากรูปมาวาง หรือคลิกแถบนี้แล้วกด Ctrl+V · ขึ้นในใบสรุปด้วย</p>}
+        </div>
+      )}
+
       <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="rounded-lg bg-slate-50 p-2">
-          <svg ref={svgRef} viewBox={`0 0 360 ${oy + H * s + 12}`} width="100%" className="block bg-white rounded-md select-none" style={{ touchAction: "none", cursor: readOnly ? "default" : "crosshair" }}
-            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)}>
-            <rect x={ox} y={oy} width={W * s} height={H * s} fill={PANELS.find((p) => p.key === panel)?.inside ? "#eef2f7" : "#f4efe4"} stroke="#999" />
-            <text x={180} y={15} textAnchor="middle" fontSize={11} fill="#555">{PANELS.find((p) => p.key === panel)?.label} · {n(W)}×{n(H)} {fmtLen(0, unit).split(" ")[1]}</text>
-            {boxes.map((b, i) => {
-              const x = ox + b.x * s, y = oy + b.y * s, w = b.w * s, h = b.h * s, on = b.id === sel;
-              return (
-                <g key={b.id} data-box={b.id} style={{ cursor: readOnly ? "default" : "move" }}>
-                  <rect x={x} y={y} width={w} height={h} fill={on ? "rgba(55,138,221,.25)" : "rgba(55,138,221,.12)"} stroke="#185FA5" strokeWidth={on ? 2 : 1.3} />
-                  {b.type === "zip" && <line x1={x + 3} y1={y + 5} x2={x + w - 3} y2={y + 5} stroke="#185FA5" strokeDasharray="3 2" />}
-                  {b.type === "flap" && <path d={`M${x} ${y} L${x + w / 2} ${y + h * 0.35} L${x + w} ${y}`} fill="none" stroke="#185FA5" />}
-                  <text x={x + w / 2} y={y + h / 2 + 4} textAnchor="middle" fontSize={11} fill="#0C447C" pointerEvents="none">{i + 1}) {n(b.w)}×{n(b.h)}</text>
-                  {!readOnly && on && <circle data-box={b.id} data-h="size" cx={x + w} cy={y + h} r={8} fill="#185FA5" stroke="#fff" strokeWidth={2} style={{ cursor: "nwse-resize" }} />}
-                </g>
-              );
-            })}
-            {draw && <rect x={ox + Math.min(draw.sx, draw.cx) * s} y={oy + Math.min(draw.sy, draw.cy) * s} width={Math.abs(draw.cx - draw.sx) * s} height={Math.abs(draw.cy - draw.sy) * s} fill="rgba(55,138,221,.1)" stroke="#378ADD" strokeDasharray="4 3" />}
-          </svg>
-          {!readOnly && <p className="text-[11px] text-slate-400 mt-1">ลากบนที่ว่าง = วาดช่องใหม่ · ลากกล่อง = ย้าย · ลากจุดมุมขวาล่าง = ปรับขนาด</p>}
+          {curMode === "frame" && bg ? (
+            <svg ref={svgRef} viewBox={`0 0 ${FW} ${FH}`} width="100%" className="block bg-white rounded-md select-none" style={{ touchAction: "none" }}
+              onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setFdrag(null)}>
+              <image href={img(bg.key, 1400)} x={0} y={0} width={FW} height={FH} preserveAspectRatio="none" />
+              {(() => {
+                const f = bg.frame, x = (f.x / 100) * FW, y = (f.y / 100) * FH, w = (f.w / 100) * FW, h = (f.h / 100) * FH;
+                return (
+                  <g>
+                    <path d={`M0 0H${FW}V${FH}H0Z M${x} ${y}h${w}v${h}h${-w}Z`} fillRule="evenodd" fill="rgba(15,23,42,.38)" pointerEvents="none" />
+                    <rect data-fr="move" x={x} y={y} width={w} height={h} fill="rgba(55,138,221,.06)" stroke="#185FA5" strokeWidth={2} strokeDasharray="6 4" style={{ cursor: readOnly ? "default" : "move" }} />
+                    <text x={x + w / 2} y={Math.max(14, y - 6)} textAnchor="middle" fontSize={12} fontWeight={600} fill="#fff" stroke="#0C447C" strokeWidth={3} paintOrder="stroke" pointerEvents="none">กว้าง {n(W)} × สูง {n(H)} {unitName}</text>
+                    {!readOnly && ([["nw", x, y], ["ne", x + w, y], ["sw", x, y + h], ["se", x + w, y + h]] as const).map(([k, cx, cy]) => (
+                      <circle key={k} data-fr={k} cx={cx} cy={cy} r={9} fill="#185FA5" stroke="#fff" strokeWidth={2.5} style={{ cursor: k === "nw" || k === "se" ? "nwse-resize" : "nesw-resize" }} />
+                    ))}
+                  </g>
+                );
+              })()}
+            </svg>
+          ) : (
+            <svg ref={svgRef} viewBox={`0 0 360 ${VH}`} width="100%" className="block bg-white rounded-md select-none" style={{ touchAction: "none", cursor: readOnly ? "default" : "crosshair" }}
+              onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)}>
+              {bg && place && (
+                <>
+                  <image href={img(bg.key, 1400)} x={place.x} y={place.y} width={place.width} height={place.height} preserveAspectRatio="none" pointerEvents="none" />
+                  <path d={`M0 0H360V${VH}H0Z M${ox} ${oy}h${W * s}v${H * s}h${-W * s}Z`} fillRule="evenodd" fill="rgba(255,255,255,.62)" pointerEvents="none" />
+                </>
+              )}
+              <rect x={ox} y={oy} width={W * s} height={H * s} fill={bg ? "none" : PANELS.find((p) => p.key === panel)?.inside ? "#eef2f7" : "#f4efe4"} stroke={bg ? "#185FA5" : "#999"} strokeDasharray={bg ? "5 3" : undefined} pointerEvents="none" />
+              <text x={180} y={15} textAnchor="middle" fontSize={11} fill="#555" stroke={bg ? "#fff" : "none"} strokeWidth={bg ? 3 : 0} paintOrder="stroke">{panelLabel} · {n(W)}×{n(H)} {unitName}</text>
+              {boxes.map((b, i) => {
+                const x = ox + b.x * s, y = oy + b.y * s, w = b.w * s, h = b.h * s, on = b.id === sel;
+                return (
+                  <g key={b.id} data-box={b.id} style={{ cursor: readOnly ? "default" : "move" }}>
+                    <rect x={x} y={y} width={w} height={h} fill={on ? "rgba(55,138,221,.28)" : bg ? "rgba(55,138,221,.18)" : "rgba(55,138,221,.12)"} stroke="#185FA5" strokeWidth={on ? 2 : 1.3} />
+                    {b.type === "zip" && <line x1={x + 3} y1={y + 5} x2={x + w - 3} y2={y + 5} stroke="#185FA5" strokeDasharray="3 2" />}
+                    {b.type === "flap" && <path d={`M${x} ${y} L${x + w / 2} ${y + h * 0.35} L${x + w} ${y}`} fill="none" stroke="#185FA5" />}
+                    <text x={x + w / 2} y={y + h / 2 + 4} textAnchor="middle" fontSize={11} fill="#0C447C" stroke={bg ? "#fff" : "none"} strokeWidth={bg ? 3 : 0} paintOrder="stroke" pointerEvents="none">{i + 1}) {n(b.w)}×{n(b.h)}</text>
+                    {!readOnly && on && <circle data-box={b.id} data-h="size" cx={x + w} cy={y + h} r={8} fill="#185FA5" stroke="#fff" strokeWidth={2} style={{ cursor: "nwse-resize" }} />}
+                  </g>
+                );
+              })}
+              {draw && <rect x={ox + Math.min(draw.sx, draw.cx) * s} y={oy + Math.min(draw.sy, draw.cy) * s} width={Math.abs(draw.cx - draw.sx) * s} height={Math.abs(draw.cy - draw.sy) * s} fill="rgba(55,138,221,.1)" stroke="#378ADD" strokeDasharray="4 3" />}
+            </svg>
+          )}
+          {!readOnly && <p className="text-[11px] text-slate-400 mt-1">{curMode === "frame" ? "ลากมุมกรอบให้ตรงขอบซ้าย/ขวา/บน/ล่างของกระเป๋าในรูป · ลากกลางกรอบ = ย้าย · เสร็จแล้วกด “วาดช่อง”" : "ลากบนที่ว่าง = วาดช่องใหม่ · ลากกล่อง = ย้าย · ลากจุดมุมขวาล่าง = ปรับขนาด"}</p>}
         </div>
         <div className="space-y-2">
           {boxes.length === 0 && <div className="text-[13px] text-slate-400">ฝั่งนี้ยังไม่มีช่อง{readOnly ? "" : " — ลากบนรูปเพื่อวาด หรือกดปุ่มด้านล่าง"}</div>}

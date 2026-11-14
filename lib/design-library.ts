@@ -68,7 +68,16 @@ export type Handle = { drop: number; w: number; gap: number; count: number; tota
  * ชุดสีอื่นเก็บเฉพาะจุดที่ต่างจากสีหลัก (picks[pinId]) · ไม่มีใน picks = เหมือนสีหลัก · hw_color null = สีอะไหล่เหมือนสีหลัก
  */
 export type Colorway = { id: string; name: string; hw_color: string | null; picks: Record<string, Pick | null> };
-export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost; prompts: RecipePrompts; accessories: AccessoryPick[] };
+/** รูปอ้างอิงของสูตร (รอบ 7 ช่วง 3) — อัปได้หลายรูป · ใช้เป็นพื้นหลังวาดช่อง + โชว์ในใบสรุป */
+export type RefImage = { id: string; image_key: string; w: number | null; h: number | null; note: string };
+export const MAX_REFS = 12;
+/** กรอบขอบกระเป๋าบนรูป (% ของรูป) */
+export type Frame = { x: number; y: number; w: number; h: number };
+/** พื้นหลังวาดช่องของฝั่งหนึ่ง: รูป + กรอบที่ผู้ใช้ดึงให้ตรงขอบกระเป๋า (กรอบ = กว้าง × สูง ของกระเป๋า) → วาดช่องทับรูปแล้วได้ ซม. */
+export type PanelBg = { key: string; w: number; h: number; frame: Frame };
+export const DEFAULT_FRAME: Frame = { x: 10, y: 10, w: 80, h: 80 };
+export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[]; cost: RecipeCost; prompts: RecipePrompts; accessories: AccessoryPick[];
+  refs: RefImage[]; pocket_bg: Partial<Record<PanelKey, PanelBg>> };
 export const MAX_COLORWAYS = 8;
 export const MAIN_COLORWAY_LABEL = "สีหลัก";
 
@@ -204,7 +213,49 @@ export function cleanSpec(v: unknown): Spec {
     pockets[p.key] = (Array.isArray(raw[p.key]) ? (raw[p.key] as unknown[]) : []).slice(0, MAX_BOXES)
       .map((b) => cleanBox(b, size)).filter((b): b is PocketBox => !!b);
   }
-  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost), prompts: cleanPrompts(o.prompts), accessories: cleanAccessories(o.accessories) };
+  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins), cost: cleanCost(o.cost), prompts: cleanPrompts(o.prompts), accessories: cleanAccessories(o.accessories),
+    refs: cleanRefs(o.refs), pocket_bg: cleanPocketBg(o.pocket_bg) };
+}
+
+/** รูปอ้างอิง: ต้องมี key · key ซ้ำ = ทิ้งตัวหลัง · สูงสุด MAX_REFS */
+export function cleanRefs(v: unknown): RefImage[] {
+  const seen = new Set<string>();
+  return (Array.isArray(v) ? v : []).flatMap((x): RefImage[] => {
+    if (!x || typeof x !== "object") return [];
+    const o = x as Record<string, unknown>; const key = str(o.image_key, 300);
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    const dim = (n: unknown) => (Number(n) > 0 ? Math.round(Number(n)) : null);
+    return [{ id: idOf(o.id), image_key: key, w: dim(o.w), h: dim(o.h), note: str(o.note, 200) }];
+  }).slice(0, MAX_REFS);
+}
+
+/** กรอบ: บีบให้อยู่ในรูป (0–100%) · กว้าง/สูงอย่างน้อย 2% */
+export function cleanFrame(v: unknown): Frame {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const w = r1(clamp(num(o.w, DEFAULT_FRAME.w), 2, 100)), h = r1(clamp(num(o.h, DEFAULT_FRAME.h), 2, 100));
+  return { x: r1(clamp(num(o.x, DEFAULT_FRAME.x), 0, 100 - w)), y: r1(clamp(num(o.y, DEFAULT_FRAME.y), 0, 100 - h)), w, h };
+}
+export function cleanPocketBg(v: unknown): Partial<Record<PanelKey, PanelBg>> {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const out: Partial<Record<PanelKey, PanelBg>> = {};
+  for (const p of PANELS) {
+    const b = o[p.key];
+    if (!b || typeof b !== "object") continue;
+    const q = b as Record<string, unknown>; const key = str(q.key, 300);
+    const w = Number(q.w), h = Number(q.h);
+    if (!key || !(w > 0) || !(h > 0)) continue;
+    out[p.key] = { key, w: Math.round(w), h: Math.round(h), frame: cleanFrame(q.frame) };
+  }
+  return out;
+}
+/**
+ * วางรูปพื้นหลังในช่องวาด: กรอบบนรูป → ทับพอดีกรอบกระเป๋า (ox, oy, กว้าง pw, สูง ph หน่วยจอ)
+ * แกนนอก/ตั้งคิดแยกกัน (รูปถ่ายเอียงนิดหน่อยยังวัดได้ทั้ง 2 แกน) → คืนตำแหน่ง/ขนาดของรูปทั้งรูป
+ */
+export function bgPlacement(frame: Frame, ox: number, oy: number, pw: number, ph: number): { x: number; y: number; width: number; height: number } {
+  const width = pw / (frame.w / 100), height = ph / (frame.h / 100);
+  return { x: ox - (frame.x / 100) * width, y: oy - (frame.y / 100) * height, width, height };
 }
 
 /** ส่วนเสริม: ตัดแถวไม่มีรหัส/ชื่อ · รหัสซ้ำ = ทิ้งตัวหลัง · สูงสุด MAX_ACCESSORIES */
@@ -853,6 +904,7 @@ export function buildBriefHtml(b: BriefInput): string {
   ${r.note ? `<div style="margin-top:6px">หมายเหตุ: ${esc(r.note)}</div>` : ""}
   <h4>ตารางสรุป</h4><table><tr><th style="width:5%">#</th><th style="width:14%">หมวด</th><th style="width:12%">รูป</th><th>รหัส · ชื่อ</th><th style="width:24%">โน้ต</th><th style="width:11%">สต็อก</th></tr>${rows || `<tr><td colspan="6" style="color:#999">ยังไม่มีจุด</td></tr>`}</table>
   ${b.baseSpec ? colorwayTableHtml(b.baseSpec, b.choices, b.img) : ""}
+  ${(spec.refs ?? []).length ? `<h4>รูปอ้างอิง</h4><div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">${spec.refs.map((x) => `<div style="aspect-ratio:1/1;background:#f6f4ef;border-radius:4px;overflow:hidden"><img src="${esc(b.img(x.image_key, 400))}" style="width:100%;height:100%;object-fit:contain"></div>`).join("")}</div>` : ""}
   ${acc.length ? `<h4>ส่วนเสริม</h4><table><tr><th style="width:12%">รูป</th><th>ชื่อ</th><th style="width:16%">กลุ่ม</th><th style="width:28%">โน้ต</th></tr>${acc.map((a) => `<tr><td>${a.image_key ? `<img src="${esc(b.img(a.image_key, 200))}" style="width:48px;height:48px;object-fit:contain;border-radius:4px;background:#f6f4ef">` : "—"}</td><td><b>${esc(a.sku_code || a.code)}</b> ${esc(a.name)}</td><td>${esc(a.group)}</td><td>${esc(a.note)}</td></tr>`).join("")}</table>` : ""}
   <h4>ช่อง</h4><div class="pks">${pocketCells}</div>
   <h4>Prompt สำหรับ GPT (แนบรูปเส้นชี้หน้านี้ไปด้วย · เลข [ref N] = เลขจุด)</h4>

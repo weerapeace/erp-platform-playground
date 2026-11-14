@@ -316,7 +316,14 @@ export function RecipeEditor({ id }: { id: string }) {
       {/* ── ช่อง ── */}
       <section className="rounded-xl border border-slate-200 bg-white p-3">
         <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:ruler-measure" />วาดขนาดช่อง</div>
-        <PocketEditor spec={spec} choices={b.choices} readOnly={readOnly} unit={unit.unit} onChange={(pockets) => update((s) => ({ ...s, pockets }))} />
+        <PocketEditor spec={spec} choices={b.choices} readOnly={readOnly} unit={unit.unit} onChange={(pockets) => update((s) => ({ ...s, pockets }))}
+          bgOptions={[
+            ...(t.image_key ? [{ key: t.image_key, label: "รูปแม่แบบ", w: t.image_w, h: t.image_h }] : []),
+            ...(t.vector_image_key ? [{ key: t.vector_image_key, label: "Vector", w: null, h: null }] : []),
+            ...b.renders.filter((r) => (r.colorway_id ?? null) === cw).slice(0, 8).map((r, i) => ({ key: r.image_key, label: `GPT ${i + 1}`, w: null, h: null })),
+          ]}
+          onRefs={(refs) => update((s) => ({ ...s, refs }))}
+          onBg={(k, bg) => update((s) => { const next = { ...s.pocket_bg }; if (bg) next[k] = bg; else delete next[k]; return { ...s, pocket_bg: next }; })} />
       </section>
       </div>
       )}

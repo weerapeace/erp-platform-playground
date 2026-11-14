@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  accessoriesText, accessoryFromChoice, categoryChips, categoryTags, defaultMaterialTab, logoOptions, logoText, logoWarnings, allSkuIds, applyColorway, nudgePos, offsetPos, pinFromClipboard, pinToClipboard, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
+  accessoriesText, accessoryFromChoice, bgPlacement, categoryChips, categoryTags, defaultMaterialTab, logoOptions, logoText, logoWarnings, allSkuIds, applyColorway, nudgePos, offsetPos, pinFromClipboard, pinToClipboard, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
 } from "./design-library";
 
 const ch = (list_key: Choice["list_key"], code: string, name: string, extra: Partial<Choice> = {}): Choice =>
@@ -333,5 +333,25 @@ describe("รอบ 7 — โลโก้ 2 ชั้น / ส่วนเสร
     expect(defaultMaterialTab(zip)).toBe("board");
     expect(defaultMaterialTab(thread)).toBe("list");
     expect(defaultMaterialTab(ch("category", "o", "อื่น", { config: { source: "sku_text" } }))).toBe("search");
+  });
+});
+
+describe("รอบ 7 ช่วง 3 — รูปอ้างอิง + พื้นหลังวาดช่อง", () => {
+  it("ทำความสะอาดรูปอ้างอิง / พื้นหลัง / กรอบ", () => {
+    const s = cleanSpec({
+      refs: [{ id: "r1", image_key: "k1", w: 800, h: 600 }, { image_key: "k1" }, { image_key: "" }],
+      pocket_bg: { front: { key: "k1", w: 800, h: 600, frame: { x: 95, y: -3, w: 20, h: 1 } }, back: { key: "k2", w: 0, h: 10 }, weird: { key: "x", w: 1, h: 1 } },
+    });
+    expect(s.refs).toEqual([{ id: "r1", image_key: "k1", w: 800, h: 600, note: "" }]);
+    expect(s.pocket_bg.front).toEqual({ key: "k1", w: 800, h: 600, frame: { x: 80, y: 0, w: 20, h: 2 } });
+    expect(s.pocket_bg.back).toBeUndefined();
+    expect(Object.keys(s.pocket_bg)).toEqual(["front"]);
+  });
+  it("วางรูปให้กรอบทับพอดีกรอบกระเป๋า", () => {
+    const p = bgPlacement({ x: 10, y: 20, w: 50, h: 40 }, 100, 50, 200, 160);
+    expect(p).toEqual({ x: 60, y: -30, width: 400, height: 400 });
+    // ขอบซ้ายกรอบ = ox · ขอบล่างกรอบ = oy + ph
+    expect(p.x + 0.1 * p.width).toBe(100);
+    expect(p.y + 0.6 * p.height).toBe(210);
   });
 });
