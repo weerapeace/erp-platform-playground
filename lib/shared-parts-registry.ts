@@ -1439,7 +1439,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "media-upload-field", label: "ช่องอัปรูป/วิดีโอ 1 ไฟล์", code: "MediaUploadField", category: "file",
     source: { path: "components/media-upload-field" },
-    what: "ช่องใส่รูป (หรือวิดีโอสั้น) 1 ไฟล์ — อัปโหลด · ลากวาง · คลิกช่องแล้ว Ctrl+V วางรูปที่คัดลอกไว้ · เลือกจากคลังรูป · ไฟล์ใหญ่มีแถบ %",
+    what: "ช่องใส่รูป (หรือวิดีโอสั้น) 1 ไฟล์ — อัปโหลด · ลากวาง · คลิกช่องแล้ว Ctrl+V วางรูปที่คัดลอกไว้ · เลือกจากคลังรูป · ไฟล์ใหญ่มีแถบ % · layout stack = รูปเต็มกว้าง ปุ่มใต้รูป (คอลัมน์แคบ)",
     when: "ฟอร์มที่มีรูป 1 รูป เช่น รูปแม่แบบ Design Library · รูปบนเว็บ · New Drops",
     notWhen: "แนบหลายรูป ใช้ ImageAttach / ImageAttachKeys · แกลเลอรีสินค้า ใช้ ImageManager",
     doc: "file-drop.md",

@@ -9,12 +9,14 @@
  * - พรีวิวในช่อง: รูป = ภาพ · วิดีโอ = เล่นเอง เงียบ วนซ้ำ
  * - 📥 ลากรูป/วิดีโอจากเครื่องมาวางในช่องได้ (ของกลาง useFileDrop · หลายไฟล์ = ใช้ไฟล์แรก)
  * - 📋 คลิกที่ช่องแล้วกด Ctrl+V = วางรูปที่คัดลอกไว้ (เช่น คัดลอกจากเว็บ/โปรแกรมแต่งรูป) — 2026-11-14 เจ้าของขอ "ใช้ได้ทั้งระบบ"
+ * - layout="stack" (2026-11-14): พรีวิวเต็มความกว้างอยู่บน · ปุ่มเรียงใต้รูป — ใช้ในคอลัมน์แคบ (ฟอร์มแม่แบบ Design Library) · กดกรอบว่างเพื่อเลือกไฟล์ได้ · ค่าเริ่ม "row" = หน้าตาเดิม
  * ใช้: <MediaUploadField label value={{kind,key}} onChange={(m) => …} allowVideo />
  */
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
+import { Icon } from "@/components/icon";
 import { MediaUploadError, normalizeMediaFile, uploadMediaFile, type UploadHandle } from "@/lib/media-upload";
 
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
@@ -31,6 +33,7 @@ export function MediaUploadField({
   allowVideo = true,
   folder = "storefront-hero",
   previewRatio = "16 / 9",
+  layout = "row",
 }: {
   label: string;
   hint?: string;
@@ -40,6 +43,8 @@ export function MediaUploadField({
   folder?: string;
   /** สัดส่วนกรอบพรีวิว เช่น "16 / 9" · "4 / 5" */
   previewRatio?: string;
+  /** row = พรีวิวซ้าย ปุ่มขวา (เดิม) · stack = พรีวิวเต็มกว้างบน ปุ่มล่าง (คอลัมน์แคบ) */
+  layout?: "row" | "stack";
 }) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -94,6 +99,64 @@ export function MediaUploadField({
     onBusy: () => toast.warning("กำลังอัปโหลดอยู่ — รอสักครู่แล้วลากใหม่"),
   });
 
+  const inputEl = <input ref={inputRef} type="file" accept={allowVideo ? "image/*,video/mp4,video/webm,.mp4,.m4v,.webm" : "image/*"} className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />;
+  const picker = pickerOpen && (
+    <AssetPicker
+      open
+      onClose={() => setPickerOpen(false)}
+      typeFilter={allowVideo ? undefined : "image"}
+      kinds={allowVideo ? ["image", "video"] : undefined}
+      title={`${allowVideo ? "เลือกรูป / วิดีโอ" : "เลือกรูป"} — ${label}`}
+      onSelect={(rows) => {
+        const a = rows[0];
+        if (a?.r2_key) onChange({ kind: a.asset_type === "video" ? "video" : "image", key: a.r2_key });
+        setPickerOpen(false);
+      }}
+    />
+  );
+  if (layout === "stack") {
+    const btn = "h-8 px-2 text-[12px] rounded-lg border border-slate-200 bg-white hover:border-slate-400 inline-flex items-center justify-center gap-1 disabled:opacity-50 min-w-0";
+    return (
+      <div {...drop.zone("field")} onPaste={onPaste} className="relative">
+        <FileDropHint show={drop.over === "field"} label={`วาง${allowVideo ? "รูป/วิดีโอ" : "รูป"}เพื่ออัปโหลด — ${label}`} />
+        <label className="block text-[12px] text-slate-500 mb-1">{label}</label>
+        {inputEl}
+        <div tabIndex={0} role="button" title="คลิกเพื่อเลือกไฟล์ · หรือคลิกแล้วกด Ctrl+V เพื่อวางรูปที่คัดลอกไว้"
+          onClick={() => !value && !busy && inputRef.current?.click()}
+          onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !value) { e.preventDefault(); inputRef.current?.click(); } }}
+          className={`relative w-full rounded-xl border overflow-hidden flex items-center justify-center outline-none focus:ring-2 focus:ring-blue-300 ${value ? "border-slate-200 bg-white" : "border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 cursor-pointer"}`}
+          style={{ aspectRatio: previewRatio }}>
+          {value ? (
+            value.kind === "video"
+              ? <video key={value.key} src={keyUrl(value.key)} className="w-full h-full object-contain" autoPlay muted loop playsInline />
+              // eslint-disable-next-line @next/next/no-img-element
+              : <img src={keyUrl(value.key, 600)} alt="" className="w-full h-full object-contain" />
+          ) : (
+            <span className="flex flex-col items-center gap-1.5 text-center px-3 text-slate-400">
+              <Icon value="i:photo" className="text-[26px]" />
+              <span className="text-[12.5px] text-slate-500">{busy ? (busy.pct != null ? `กำลังอัปโหลด ${busy.pct}%` : "กำลังอัปโหลด…") : "คลิกเพื่อเลือกรูป"}</span>
+              <span className="text-[11px] leading-snug">หรือลากมาวาง · Ctrl+V</span>
+            </span>
+          )}
+        </div>
+        {busy?.pct != null && (
+          <div className="flex items-center gap-2 mt-1.5">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-blue-100"><div className="h-full bg-blue-500 transition-all" style={{ width: `${busy.pct}%` }} /></div>
+            <button type="button" onClick={() => handleRef.current?.abort()} className="shrink-0 text-[11px] text-rose-500 hover:underline">ยกเลิก</button>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+          <button type="button" disabled={!!busy} onClick={() => inputRef.current?.click()} className={btn}><Icon value="i:upload" /><span className="truncate">{value ? "เปลี่ยนรูป" : "อัปโหลด"}</span></button>
+          <button type="button" onClick={() => setPickerOpen(true)} className={btn}><Icon value="i:photo" /><span className="truncate">เลือกจากคลัง</span></button>
+        </div>
+        {value && <button type="button" onClick={() => onChange(null)} className="mt-1 text-[11px] text-rose-500 hover:underline">เอารูปออก</button>}
+        {hint && <p className="mt-1 text-[11px] text-slate-400 leading-snug">{hint}</p>}
+        {problem && <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">{problem}</p>}
+        {picker}
+      </div>
+    );
+  }
+
   return (
     <div {...drop.zone("field")} onPaste={onPaste} className="relative">
       <FileDropHint show={drop.over === "field"} label={`วาง${allowVideo ? "รูป/วิดีโอ" : "รูป"}เพื่ออัปโหลด — ${label}`} />
@@ -116,7 +179,7 @@ export function MediaUploadField({
           )}
         </div>
         <div className="flex flex-col gap-1.5 min-w-0">
-          <input ref={inputRef} type="file" accept={allowVideo ? "image/*,video/mp4,video/webm,.mp4,.m4v,.webm" : "image/*"} className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+          {inputEl}
           <button type="button" disabled={!!busy} onClick={() => inputRef.current?.click()} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:border-blue-400 disabled:opacity-50">
             {busy ? (busy.pct != null ? `กำลังอัปโหลด ${busy.pct}%` : "กำลังอัปโหลด…") : allowVideo ? "⬆ อัปโหลดรูป/วิดีโอ" : "⬆ อัปโหลดรูป"}
           </button>
@@ -136,20 +199,7 @@ export function MediaUploadField({
           {problem && <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">⚠️ {problem}</p>}
         </div>
       </div>
-      {pickerOpen && (
-        <AssetPicker
-          open
-          onClose={() => setPickerOpen(false)}
-          typeFilter={allowVideo ? undefined : "image"}
-          kinds={allowVideo ? ["image", "video"] : undefined}
-          title={`${allowVideo ? "เลือกรูป / วิดีโอ" : "เลือกรูป"} — ${label}`}
-          onSelect={(rows) => {
-            const a = rows[0];
-            if (a?.r2_key) onChange({ kind: a.asset_type === "video" ? "video" : "image", key: a.r2_key });
-            setPickerOpen(false);
-          }}
-        />
-      )}
+      {picker}
     </div>
   );
 }
