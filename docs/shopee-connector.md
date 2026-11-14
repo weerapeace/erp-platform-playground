@@ -1,6 +1,6 @@
 # ตัวเชื่อม Shopee Open Platform (ร้าน Louis Montini)
 
-> สถานะ 2026-11-14: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (efe2e02a) · **เฟส 3 = ออเดอร์อัตโนมัติ** (แทนเมล) · **เฟส 4A = แก้ชื่อ/รายละเอียด + เปิด/ปิดขาย จากลิ้นชัก** (แก้ร้านจริง · ถามก่อนทุกครั้ง) · ร้านที่เชื่อม: "Louis Montini & Pixie Dustie" (shop_id 9944732)
+> สถานะ 2026-11-14: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (efe2e02a) · **เฟส 3 = ออเดอร์อัตโนมัติ** (แทนเมล) · **เฟส 4A = แก้ชื่อ/รายละเอียด + เปิด/ปิดขาย จากลิ้นชัก** · **เฟส 4B = แก้ราคาตั้งรายตัวเลือก** (แก้ร้านจริง · ถามก่อนทุกครั้ง) · ร้านที่เชื่อม: "Louis Montini & Pixie Dustie" (shop_id 9944732)
 > แอป "Louis Montini ERP" (Seller In House System) **Go Live ผ่านแล้ว 2026-11-14** · เจ้าของใส่ SHOPEE_PARTNER_ID / SHOPEE_PARTNER_KEY / SHOPEE_ENV=live ใน Vercel แล้ว (env ใหม่มีผลหลังขึ้นเว็บรอบถัดไปเท่านั้น — ถ้าไม่มีงานรอขึ้นเว็บ ปุ่ม "ขึ้นเว็บทันที" จะไม่ build ต้องมี commit ใหม่ หรือกด Redeploy ใน Vercel)
 > แผนทั้งหมด: เฟส 1 เชื่อมร้าน → เฟส 2 ดึงสินค้า (อ่านอย่างเดียว) → เฟส 3 ดึงออเดอร์ → เฟส 4 แก้ชื่อ/ราคา/รูป (ทีละขั้น · อนุมัติทุกครั้ง)
 
@@ -101,8 +101,17 @@
 - สิทธิ์: ดู = products.platforms.view · ดึงตัวนี้ = products.platforms.edit · ส่งขึ้นร้าน = products.platforms.publish
 - ไฟล์: `lib/shopee-listing-edit.ts` (pure · client-safe · 16 เทสต์) · `components/platform-catalog/shopee-listing-panels.tsx` · `app/api/shopee/listing-{detail,edit,display}` · ของใช้ร่วม `app/api/shopee/shared.ts` (loadShopeeListingLive · saveShopeeSlimCopy · refetchShopeeLive) · ลิ้นชัก `components/platform-catalog/listing-drawer.tsx` (+ `ListingDetail.source`)
 - ประวัติในลิ้นชัก: `lib/line-listing-edit` listingHistoryText ("แก้บน Shopee: …" / "ปิดขายบน Shopee")
-- ยังไม่ทดสอบกับร้านจริง → แนะนำลองกับสินค้า 1 ตัวที่ปิดขายอยู่ก่อน
-**ถัดไป (ยังไม่ทำ):** 4B ราคา (`v2.product.update_price` · ระวังสินค้าในโปรโมชัน + ราคาตั้งของ LM เป็นราคาเต็มสูงแล้วลดผ่านโปรโมชัน) · 4C รูป (`v2.media_space.upload_image` → `update_item image.image_id_list`) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์
+- ✅ ลองกับร้านจริงแล้ว 2026-11-14 (BCG01-03 แก้ชื่อ + เปิด/ปิดขาย) · ข้อมูลที่ดึงกลับของ Shopee ช้ากว่าคำตอบหลายวินาที–นาที → รอดู ~9 วิ แล้วแสดงตามที่สั่งไว้ก่อน (optimistic) · คำเตือนทั่วไป "size chart" ที่ Shopee ส่งมาทุกครั้งถูกซ่อน (เก็บใน audit)
+
+**4B แก้ราคาตั้ง (ทำแล้ว · เจ้าของ "เริ่ม 4B" 2026-11-14):** แท็บ "ตัวเลือกสินค้า" ในลิ้นชัก
+- คอลัมน์ "ราคาตั้ง (แก้ได้)" ต่อตัวเลือก (`original_price` · สินค้าไม่มีตัวเลือก = แถวเดียว `model_id 0`) · มีหลายตัวเลือก = ติ๊กแล้ว "ตั้งราคาเดียว" / "ปรับ ±%" ได้ (ปัดเป็นบาทเต็ม)
+- กดปุ่มบันทึกเดียวกับชื่อ/รายละเอียด → ถามยืนยันรวม (ราคาเดิม→ใหม่ทุกตัว) → ส่งราคาก่อน `POST /api/shopee/listing-prices` → `v2.product.update_price` ชุดละ 50 → แล้วค่อยส่งชื่อ/รายละเอียด (ราคาล้ม = หยุด ไม่ส่งต่อ)
+- กติกาก่อนส่ง (`planShopeePrices`): ห้ามว่าง/≤0 · **ไทยต้องจำนวนเต็มบาท** · อยู่ในช่วงราคาของร้าน (get_item_limit `price_limit`) · **เปลี่ยน ≥80% (เหลือ ≤20% หรือ ≥5 เท่า) = บล็อก** กันพิมพ์ผิด · ลดเกินครึ่ง/ขึ้นเกิน 2 เท่า = เตือน
+- **ราคาที่ลูกค้าจ่ายจริงมาจากโปรโมชัน** (current_price) แก้ตรงนี้ไม่ได้ · ตัวเลือกที่ติดโปรโมชันมีป้าย "โปร" — Shopee มักไม่ยอมให้เปลี่ยนราคา → ตอบไม่ผ่านรายตัวใน `failure_list` (ตัวอื่นยังผ่าน · แสดงเหตุผลรายตัว)
+- กันทับ: ดึงสดก่อนส่ง ราคาบนร้านไม่ตรงกับตอนเปิดลิ้นชัก = 409 · หลังส่ง: รอดูราคาใหม่ ~9 วิ ไม่ทัน = แสดงตามที่ส่งสำเร็จ · audit `shopee_listing_prices` (ราคาเดิม→ใหม่รายตัว + ตัวที่ไม่ผ่าน + partial)
+- ไฟล์: `lib/shopee.ts` shopeeUpdatePrice · `lib/shopee-listing-edit.ts` (planShopeePrices · shopeePriceBatches · shopeePriceResult · applyShopeeBulkPrice) · `app/api/shopee/listing-prices/route.ts` · `ShopeeOptionsPanel` + `ShopeeBulkPrice` ใน shopee-listing-panels
+
+**ถัดไป (ยังไม่ทำ):** 4C รูป (`v2.media_space.upload_image` → `update_item image.image_id_list`) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์
 
 ## ⚠️ วันที่เปลี่ยนโดเมนเว็บ
 ลิงก์อนุญาต/ยกเลิกสิทธิ์ต้องพากลับโดเมนที่ลงทะเบียนไว้ — ร้านที่เชื่อมแล้ว**ไม่หลุด** (ดึงข้อมูล/ต่ออายุไม่ผ่านช่องนี้) แต่**กดเชื่อมใหม่จะ error** ถ้าไม่แก้ วันที่เปลี่ยน `NEXT_PUBLIC_APP_URL` ต้องแก้พร้อมกันครบ 3 เจ้า:

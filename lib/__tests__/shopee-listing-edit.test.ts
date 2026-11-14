@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   planShopeeDisplay, planShopeeEdit, shopeeDescriptionOf, shopeeLimitsOf, shopeeListingView, shopeeStatusBadge, shopeeTextLength, shopeeUnlistErrors,
+  applyShopeeBulkPrice, planShopeePrices, shopeePriceBatches, shopeePriceResult, shopeePriceRowsFromView,
   type ShopeeListingView,
 } from "@/lib/shopee-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
@@ -21,7 +22,7 @@ describe("Shopee ลิ้นชัก — มุมมองจากของ�
     expect(v).toMatchObject({ itemId: "800123", name: "Louis Montini กระเป๋าสตางค์", status: "NORMAL", description: "หนังแท้ 100%", descriptionEditable: true,
       images: ["https://cf.shopee.co.th/file/a", "https://cf.shopee.co.th/file/b"], categoryId: "100637", brand: "Louis Montini", itemSku: "TTM090",
       weight: 0.3, dims: { length: 20, width: 10, height: 5 }, hasModel: true, inPromotion: true, limits: LIMITS });
-    expect(v.models[0]).toEqual({ modelId: "1", sku: "TTM090-01", label: "สี: ดำ", price: 990, originalPrice: 1590, stock: 7, image: null, status: "MODEL_NORMAL" });
+    expect(v.models[0]).toEqual({ modelId: "1", sku: "TTM090-01", label: "สี: ดำ", price: 990, originalPrice: 1590, stock: 7, image: null, status: "MODEL_NORMAL", promo: false });
     expect(shopeeListingView({ item_name: "x" }, null)).toBeNull();
   });
   test("รายละเอียดแบบ extended = ต่อข้อความ + แก้ไม่ได้", () => {
@@ -31,7 +32,9 @@ describe("Shopee ลิ้นชัก — มุมมองจากของ�
   });
   test("ช่วงความยาวจาก get_item_limit · อ่านไม่ได้ = null", () => {
     expect(shopeeLimitsOf({ response: { item_name_length_limit: { min_limit: 10, max_limit: 120 }, item_description_length_limit: { min_limit: 20, max_limit: 3000 }, item_image_count_limit: { max_limit: 9 } } }))
-      .toEqual(LIMITS);
+      .toEqual({ ...LIMITS, priceMin: null, priceMax: null });
+    expect(shopeeLimitsOf({ response: { item_name_length_limit: { min_limit: 10, max_limit: 120 }, price_limit: { min_limit: 10, max_limit: 150000 } } }))
+      .toMatchObject({ nameMin: 10, nameMax: 120, priceMin: 10, priceMax: 150000 });
     expect(shopeeLimitsOf({ response: {} })).toBeNull();
     expect(shopeeLimitsOf(null)).toBeNull();
   });
@@ -102,5 +105,67 @@ describe("Shopee ลิ้นชัก — ข้อความประวั�
     expect(listingHistoryText({ source: "shopee_listing_edit", ok: false, error: "x", changes: [{ label: "ชื่อสินค้า" }] })).toBe("แก้บน Shopee: ชื่อสินค้า — ไม่สำเร็จ: x");
     expect(listingHistoryText({ source: "shopee_listing_display", ok: true, open: false })).toBe("ปิดขายบน Shopee");
     expect(listingHistoryText({ source: "shopee_listing_display", ok: false, open: true, error: "y" })).toBe("เปิดขายบน Shopee — ไม่สำเร็จ: y");
+  });
+});
+
+
+
+describe("Shopee ลิ้นชัก — เฟส 4B ราคาตั้ง", () => {
+  const MODELS3 = { models: [
+    { model_id: "1", sku: "A-1", label: "สี: ดำ", price: 990, original_price: 1590, stock: 7, image: null, status: "MODEL_NORMAL", promo: true },
+    { model_id: "2", sku: "A-2", label: "สี: น้ำตาล", price: 1590, original_price: 1590, stock: 0, image: null, status: "MODEL_NORMAL", promo: false },
+  ] };
+  const v3 = (): ShopeeListingView => shopeeListingView(BASE, MODELS3, { ...LIMITS, priceMin: 10, priceMax: 100000 })!;
+  test("แถวราคาจากของจริง (ไม่มีตัวเลือก = model 0)", () => {
+    expect(shopeePriceRowsFromView(v3())).toEqual([
+      { modelId: "1", label: "สี: ดำ", price: 1590, promo: true },
+      { modelId: "2", label: "สี: น้ำตาล", price: 1590, promo: false },
+    ]);
+    const single = shopeeListingView({ ...BASE, has_model: false, price_info: [{ current_price: 490, original_price: 590 }] }, null)!;
+    expect(shopeePriceRowsFromView(single)).toEqual([{ modelId: "0", label: "สินค้าเดียว (ไม่มีตัวเลือก)", price: 590, promo: true }]);
+  });
+  test("ส่งเฉพาะตัวที่เปลี่ยน + เตือนโปรโมชัน", () => {
+    const p = planShopeePrices(v3(), [{ modelId: "1", label: "สี: ดำ", price: 1490, promo: true }, { modelId: "2", label: "สี: น้ำตาล", price: 1590, promo: false }]);
+    expect(p.errors).toEqual([]);
+    expect(p.changes).toEqual([{ modelId: "1", label: "สี: ดำ", before: 1590, after: 1490, promo: true }]);
+    expect(p.warnings.join(" ")).toContain("โปรโมชัน");
+  });
+  test("ไทยต้องเป็นจำนวนเต็ม · ว่าง · นอกช่วงร้าน · เปลี่ยน ≥80% = บล็อก", () => {
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: 1590.5, promo: false }]).errors[0]).toContain("จำนวนเต็ม");
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: null, promo: false }]).errors[0]).toContain("ว่าง");
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: 5, promo: false }]).errors[0]).toMatch(/ต่ำกว่า|80%/);
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: 200, promo: false }]).errors[0]).toContain("80%");
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: 9000, promo: false }]).errors[0]).toContain("80%");
+  });
+  test("ลดครึ่ง/ขึ้น 2 เท่า = เตือน (ไม่บล็อก) · ไม่พบตัวเลือก = error", () => {
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: 700, promo: false }]).warnings.join(" ")).toContain("ครึ่ง");
+    expect(planShopeePrices(v3(), [{ modelId: "2", label: "x", price: 3500, promo: false }]).warnings.join(" ")).toContain("2 เท่า");
+    expect(planShopeePrices(v3(), [{ modelId: "9", label: "หาย", price: 100, promo: false }]).errors[0]).toContain("ไม่พบตัวเลือก");
+  });
+  test("ก้อนส่ง update_price ชุดละ 50 · model_id ตัวเลข", () => {
+    const changes = Array.from({ length: 51 }, (_, i) => ({ modelId: String(i + 1), label: `m${i}`, before: 100, after: 120, promo: false }));
+    const b = shopeePriceBatches("800123", changes);
+    expect(b).toHaveLength(2);
+    expect(b[0]).toMatchObject({ item_id: 800123 });
+    expect(b[0].price_list).toHaveLength(50);
+    expect(b[1].price_list[0]).toEqual({ model_id: 51, original_price: 120 });
+  });
+  test("ผลรายตัว: failure_list = เหตุผล · success_list = ผ่าน · ไม่อยู่ทั้งคู่ = ไม่ยืนยัน", () => {
+    const res = shopeePriceResult({ response: { failure_list: [{ model_id: 1, failed_reason: "Price cannot be changed when model is under promotion." }], success_list: [{ model_id: 2, original_price: 1490 }] } }, ["1", "2", "3"]);
+    expect(res.ok).toEqual(["2"]);
+    expect(res.failed).toEqual([
+      { modelId: "1", reason: "Price cannot be changed when model is under promotion." },
+      { modelId: "3", reason: "Shopee ไม่ได้ยืนยันว่าแก้สำเร็จ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก" },
+    ]);
+  });
+  test("แก้หลายตัว: ตั้งราคาเดียว / ปรับ % ปัดบาทเต็ม / เฉพาะที่ติ๊ก", () => {
+    const rows = shopeePriceRowsFromView(v3());
+    expect(applyShopeeBulkPrice(rows, new Set(), { price: 1290 }).rows.map((r) => r.price)).toEqual([1290, 1290]);
+    expect(applyShopeeBulkPrice(rows, new Set(["2"]), { pct: -10 }).rows.map((r) => r.price)).toEqual([1590, 1431]);
+    expect(applyShopeeBulkPrice(rows, new Set(), {}).error).toContain("ใส่ราคา");
+  });
+  test("ข้อความประวัติแก้ราคา", () => {
+    expect(listingHistoryText({ source: "shopee_listing_prices", ok: true, sent: 1, changes: [{ label: "สี: ดำ", text: "1,590฿ → 1,490฿" }] })).toBe("แก้ราคาบน Shopee 1 ตัวเลือก (1,590฿ → 1,490฿)");
+    expect(listingHistoryText({ source: "shopee_listing_prices", ok: false, sent: 0, error: "x", changes: [{ label: "a" }, { label: "b" }] })).toBe("แก้ราคาบน Shopee 2 ตัวเลือก — ไม่สำเร็จ: x");
   });
 });

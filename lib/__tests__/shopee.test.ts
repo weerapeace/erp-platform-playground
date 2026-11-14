@@ -143,7 +143,7 @@ describe("Shopee — สินค้า (get_item_list / base_info / model_list 
   test("ตัวเลือก: ชื่อ 'สี: ดำ · ขนาด: L' + รูปของชั้นแรก + สต๊อก (รุ่นใหม่/รุ่นเก่า)", () => {
     const s = shopeeModelsToSlim(MODELS);
     expect(s.tiers).toEqual([{ name: "สี", options: ["ดำ", "น้ำตาล"] }, { name: "ขนาด", options: ["M", "L"] }]);
-    expect(s.models[0]).toEqual({ model_id: "1", sku: "TTM090-01L", label: "สี: ดำ · ขนาด: L", price: 990, original_price: 1590, stock: 7, image: "https://cf.shopee.co.th/file/black", status: null });
+    expect(s.models[0]).toEqual({ model_id: "1", sku: "TTM090-01L", label: "สี: ดำ · ขนาด: L", price: 990, original_price: 1590, stock: 7, image: "https://cf.shopee.co.th/file/black", status: null, promo: false });
     expect(s.models[1]).toMatchObject({ label: "สี: น้ำตาล · ขนาด: M", stock: 3, image: "https://cf.shopee.co.th/file/brown" });
     expect(shopeeModelsToSlim(null)).toEqual({ tiers: [], models: [] });
   });

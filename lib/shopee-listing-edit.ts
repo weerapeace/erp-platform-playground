@@ -11,8 +11,8 @@
  */
 import type { ShopeeSlimModel } from "@/lib/shopee";
 
-export type ShopeeLimits = { nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMax: number | null };
-export type ShopeeModelView = { modelId: string; sku: string | null; label: string | null; price: number | null; originalPrice: number | null; stock: number | null; image: string | null; status: string | null };
+export type ShopeeLimits = { nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMax: number | null; priceMin?: number | null; priceMax?: number | null };
+export type ShopeeModelView = { modelId: string; sku: string | null; label: string | null; price: number | null; originalPrice: number | null; stock: number | null; image: string | null; status: string | null; /** อยู่ในโปรโมชัน — แก้ราคาตัวนี้ไม่ได้ */ promo?: boolean };
 export type ShopeeListingView = {
   itemId: string;
   name: string;
@@ -56,7 +56,8 @@ export function shopeeLimitsOf(j: Obj | null): ShopeeLimits | null {
   const rng = (k: string) => { const o = obj(r[k]); return { min: num(o?.min_limit ?? o?.min), max: num(o?.max_limit ?? o?.max) }; };
   const name = rng("item_name_length_limit"), desc = rng("item_description_length_limit");
   const imgs = obj(r.item_image_count_limit);
-  const out = { nameMin: name.min, nameMax: name.max, descMin: desc.min, descMax: desc.max, imagesMax: num(imgs?.max_limit ?? imgs?.max) };
+  const price = rng("price_limit");
+  const out = { nameMin: name.min, nameMax: name.max, descMin: desc.min, descMax: desc.max, imagesMax: num(imgs?.max_limit ?? imgs?.max), priceMin: price.min, priceMax: price.max };
   return Object.values(out).some((v) => v != null) ? out : null;
 }
 
@@ -81,7 +82,7 @@ export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]
   const p = obj(arr(base.price_info)[0]);
   const s2 = num(obj(obj(base.stock_info_v2)?.summary_info)?.total_available_stock);
   const dim = obj(base.dimension);
-  const ms = (models?.models ?? []).map((m) => ({ modelId: m.model_id, sku: m.sku, label: m.label, price: m.price, originalPrice: m.original_price, stock: m.stock, image: m.image, status: m.status }));
+  const ms = (models?.models ?? []).map((m) => ({ modelId: m.model_id, sku: m.sku, label: m.label, price: m.price, originalPrice: m.original_price, stock: m.stock, image: m.image, status: m.status, promo: m.promo === true }));
   return {
     itemId, name: String(base.item_name ?? ""), status: (str(base.item_status) ?? "").toUpperCase(),
     description: desc.text, descriptionType: desc.type, descriptionEditable: desc.type !== "extended",
@@ -176,4 +177,107 @@ export function shopeeUnlistErrors(resp: Obj, itemId: string): string[] {
   if (fail.length) return fail.map((f) => str(f.failed_reason) ?? "Shopee ไม่ให้ทำรายการนี้");
   const ok = arr(r.success_list).map(obj).some((s) => String(s?.item_id ?? "") === itemId);
   return ok ? [] : ["Shopee ไม่ได้ยืนยันว่าทำสำเร็จ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก"];
+}
+
+// ───────── เฟส 4B: ราคา (ราคาตั้ง original_price ต่อตัวเลือก) → v2.product.update_price ─────────
+// กติกา Shopee (เอกสาร 2026-11-14): price_list 1–50 ต่อครั้ง · model_id 0 = สินค้าไม่มีตัวเลือก · ร้านไทยตั้งได้เฉพาะ "จำนวนเต็มบาท"
+//   สินค้า/ตัวเลือกที่อยู่ในโปรโมชัน = แก้ราคาไม่ได้ (error_cannt_edit_price_in_promotion ฯลฯ) · ผลรายตัวอยู่ใน failure_list (HTTP 200)
+// ⚠️ ร้าน Louis Montini ตั้งราคาตั้งสูงแล้วลดผ่านโปรโมชัน → ราคาที่ลูกค้าจ่าย (current_price) มาจากโปรโมชัน แก้ตรงนี้ไม่ได้
+export const SHOPEE_PRICE_BATCH = 50;
+export type ShopeePriceRow = { modelId: string; label: string; price: number | null; promo: boolean };
+export type ShopeePriceChange = { modelId: string; label: string; before: number | null; after: number; promo: boolean };
+export type ShopeePricePlan = { changes: ShopeePriceChange[]; errors: string[]; warnings: string[] };
+
+/** แถวราคาตั้งจากของจริง (ไม่มีตัวเลือก = แถวเดียว model 0) */
+export function shopeePriceRowsFromView(v: ShopeeListingView): ShopeePriceRow[] {
+  if (!v.hasModel) return [{ modelId: "0", label: "สินค้าเดียว (ไม่มีตัวเลือก)", price: v.originalPrice, promo: v.inPromotion }];
+  return v.models.map((m) => ({ modelId: m.modelId, label: m.label ?? m.sku ?? `ตัวเลือก ${m.modelId}`, price: m.originalPrice, promo: m.promo === true }));
+}
+
+const bahtTxt = (n: number | null) => (n == null ? "—" : `${n.toLocaleString("th-TH")}฿`);
+export const shopeePriceChangeText = (c: Pick<ShopeePriceChange, "before" | "after">) => `${bahtTxt(c.before)} → ${bahtTxt(c.after)}`;
+
+/**
+ * เทียบราคาที่แก้กับของจริง → เฉพาะตัวที่เปลี่ยน
+ * บล็อก: ว่าง · ไม่ใช่จำนวนเต็ม (ไทย) · นอกช่วงราคาของร้าน · เปลี่ยนแรงจนน่าจะพิมพ์ผิด (เหลือ ≤20% หรือ ≥5 เท่า — กติกาเดียวกับ Lazada)
+ * เตือน: ลดครึ่ง/ขึ้น 2 เท่า · อยู่ในโปรโมชัน (Shopee มักปฏิเสธ) · ตัวเลือกแพงสุดเกิน 5 เท่าของถูกสุด
+ */
+export function planShopeePrices(view: ShopeeListingView, edit: ShopeePriceRow[]): ShopeePricePlan {
+  const base = shopeePriceRowsFromView(view);
+  const byId = new Map(base.map((r) => [r.modelId, r]));
+  const out: ShopeePricePlan = { changes: [], errors: [], warnings: [] };
+  const L = view.limits;
+  let half = 0, double = 0;
+  for (const e of edit) {
+    const b = byId.get(e.modelId);
+    if (!b) { out.errors.push(`ไม่พบตัวเลือก ${e.label} บนร้าน — กดดึงตัวนี้จาก Shopee ใหม่`); continue; }
+    if (e.price == null) { if (b.price != null) out.errors.push(`${b.label}: ราคาว่างไม่ได้`); continue; }
+    const after = e.price;
+    if (b.price != null && after === b.price) continue;
+    if (!Number.isFinite(after) || after <= 0) { out.errors.push(`${b.label}: ราคาต้องมากกว่า 0`); continue; }
+    if (!Number.isInteger(after)) { out.errors.push(`${b.label}: Shopee ไทยตั้งราคาได้เฉพาะจำนวนเต็มบาท (${after})`); continue; }
+    if (L?.priceMin != null && after < L.priceMin) { out.errors.push(`${b.label}: ต่ำกว่าราคาต่ำสุดที่ร้านตั้งได้ (${bahtTxt(L.priceMin)})`); continue; }
+    if (L?.priceMax != null && after > L.priceMax) { out.errors.push(`${b.label}: สูงกว่าราคาสูงสุดที่ร้านตั้งได้ (${bahtTxt(L.priceMax)})`); continue; }
+    if (b.price != null && b.price > 0) {
+      if (after <= b.price * 0.2 || after >= b.price * 5) { out.errors.push(`${b.label}: ${shopeePriceChangeText({ before: b.price, after })} เปลี่ยนเกิน 80% — น่าจะพิมพ์ผิด (ถ้าตั้งใจ ให้แก้ทีละขั้นหรือแก้ใน Seller Centre)`); continue; }
+      if (after <= b.price * 0.5) half++;
+      else if (after >= b.price * 2) double++;
+    }
+    out.changes.push({ modelId: b.modelId, label: b.label, before: b.price, after, promo: b.promo });
+  }
+  if (!out.changes.length) return out;
+  out.warnings.push("ราคาตั้งบน Shopee เปลี่ยนทันทีที่กดส่ง · ราคาที่ลูกค้าจ่ายตอนนี้มาจากโปรโมชันของร้าน (แก้ตรงนี้ไม่ได้)");
+  const promoN = out.changes.filter((c) => c.promo).length;
+  if (promoN) out.warnings.push(`${promoN} ตัวเลือกอยู่ในโปรโมชัน — Shopee มักไม่ให้แก้ราคาจนกว่าจะนำออกจากโปรโมชันใน Seller Centre (ถ้าไม่ผ่าน ระบบบอกเหตุผลรายตัว · ตัวอื่นยังส่งได้)`);
+  if (half) out.warnings.push(`ลดราคาลงครึ่งหนึ่งหรือมากกว่า ${half} ตัวเลือก — ตรวจตัวเลขอีกครั้ง`);
+  if (double) out.warnings.push(`ขึ้นราคาเป็น 2 เท่าหรือมากกว่า ${double} ตัวเลือก — ตรวจตัวเลขอีกครั้ง`);
+  const finalPrices = base.map((r) => out.changes.find((c) => c.modelId === r.modelId)?.after ?? r.price).filter((n): n is number => n != null && n > 0);
+  if (finalPrices.length > 1 && Math.max(...finalPrices) > Math.min(...finalPrices) * 5) out.warnings.push("ราคาตัวเลือกแพงสุดเกิน 5 เท่าของถูกสุด — Shopee อาจไม่รับ");
+  return out;
+}
+
+/** ก้อนที่ส่ง update_price (แบ่งชุดละ 50) */
+export function shopeePriceBatches(itemId: string, changes: ShopeePriceChange[]): { item_id: number; price_list: { model_id: number; original_price: number }[] }[] {
+  const out: { item_id: number; price_list: { model_id: number; original_price: number }[] }[] = [];
+  for (let i = 0; i < changes.length; i += SHOPEE_PRICE_BATCH) {
+    out.push({ item_id: Number(itemId), price_list: changes.slice(i, i + SHOPEE_PRICE_BATCH).map((c) => ({ model_id: Number(c.modelId), original_price: c.after })) });
+  }
+  return out;
+}
+
+/** ผล update_price รายตัว (HTTP 200 แต่ไม่สำเร็จรายตัวได้) · ไม่อยู่ทั้งสองรายการ = ถือว่าไม่ยืนยัน */
+export function shopeePriceResult(resp: Obj, sentModelIds: string[]): { ok: string[]; failed: { modelId: string; reason: string }[] } {
+  const r = obj(resp.response) ?? resp;
+  const fail = new Map(arr(r.failure_list).map(obj).filter((x): x is Obj => !!x).map((f) => [String(f.model_id ?? ""), str(f.failed_reason) ?? "Shopee ไม่ให้แก้ราคาตัวนี้"]));
+  const okSet = new Set(arr(r.success_list).map(obj).filter((x): x is Obj => !!x).map((s) => String(s.model_id ?? "")));
+  const ok: string[] = [], failed: { modelId: string; reason: string }[] = [];
+  for (const id of sentModelIds) {
+    if (fail.has(id)) failed.push({ modelId: id, reason: fail.get(id)! });
+    else if (okSet.has(id)) ok.push(id);
+    else failed.push({ modelId: id, reason: "Shopee ไม่ได้ยืนยันว่าแก้สำเร็จ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก" });
+  }
+  return { ok, failed };
+}
+
+/**
+ * แก้ราคาหลายตัวเลือกพร้อมกัน (ติ๊กบางตัว = เฉพาะที่ติ๊ก · ไม่ติ๊ก = ทุกตัว) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง
+ * price = ตั้งราคาเดียวกัน · pct = ปรับตาม % จากราคาเดิม (ปัดเป็นบาทเต็ม — Shopee ไทยรับเฉพาะจำนวนเต็ม)
+ */
+export function applyShopeeBulkPrice(rows: ShopeePriceRow[], selected: Set<string>, opt: { price?: number | null; pct?: number | null }): { rows: ShopeePriceRow[]; changed: number; error: string | null } {
+  const hasPrice = opt.price != null && Number.isFinite(opt.price);
+  const hasPct = opt.pct != null && Number.isFinite(opt.pct) && opt.pct !== 0;
+  if (!hasPrice && !hasPct) return { rows, changed: 0, error: "ใส่ราคา หรือ % ที่จะปรับก่อน" };
+  if (hasPrice && hasPct) return { rows, changed: 0, error: "เลือกอย่างใดอย่างหนึ่ง: ตั้งราคา หรือ ปรับ %" };
+  if (hasPct && (opt.pct! <= -100 || opt.pct! > 500)) return { rows, changed: 0, error: "ปรับ % ได้ระหว่าง −99 ถึง +500" };
+  let changed = 0;
+  const out = rows.map((r) => {
+    if (selected.size && !selected.has(r.modelId)) return r;
+    let next: number | null = r.price;
+    if (hasPrice) next = Math.round(opt.price!);
+    else if (r.price != null) next = Math.round(r.price * (1 + opt.pct! / 100));
+    if (next === r.price) return r;
+    changed++;
+    return { ...r, price: next };
+  });
+  return { rows: out, changed, error: null };
 }

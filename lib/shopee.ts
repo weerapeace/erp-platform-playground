@@ -247,7 +247,7 @@ export async function shopeeGetModelList(accessToken: string, shopId: string | n
 }
 
 // ───────── แปลงเป็นสำเนาย่อ (raw.shopee) — เก็บเฉพาะที่ใช้ ไม่เก็บคำอธิบายยาว ─────────
-export type ShopeeSlimModel = { model_id: string; sku: string | null; label: string | null; price: number | null; original_price: number | null; stock: number | null; image: string | null; status: string | null };
+export type ShopeeSlimModel = { model_id: string; sku: string | null; label: string | null; price: number | null; original_price: number | null; stock: number | null; image: string | null; status: string | null; /** อยู่ในโปรโมชัน (has_promotion) — Shopee ไม่ให้แก้ราคาตัวนี้ */ promo?: boolean };
 export type ShopeeSlimTier = { name: string; options: string[] };
 export type ShopeeSlim = {
   item_id: string; status: string | null; update_time: number | null;
@@ -281,7 +281,7 @@ export function shopeeModelsToSlim(raw: ShopeeModelsRaw | null): { tiers: Shopee
     const pr = priceOf(m);
     return {
       model_id: String(m.model_id ?? ""), sku: str(m.model_sku), label, price: pr.price, original_price: pr.original,
-      stock: stockOf(m), image: Number.isFinite(idx[0]) ? tierImg(idx[0]) : null, status: str(m.model_status),
+      stock: stockOf(m), image: Number.isFinite(idx[0]) ? tierImg(idx[0]) : null, status: str(m.model_status), promo: m.has_promotion === true,
     };
   }).filter((m) => m.model_id);
   return { tiers, models };
@@ -448,4 +448,10 @@ export async function shopeeGetItemLimit(accessToken: string, shopId: string | n
   try { val = await shopeeFetch("/api/v2/product/get_item_limit", { accessToken, shopId }); } catch { val = null; }
   limitCache.set(key, { at: Date.now(), val });
   return val;
+}
+
+/** v2.product.update_price — ราคาตั้ง (original_price) ต่อตัวเลือก ≤50 ต่อครั้ง · คืนคำตอบดิบ (ผลรายตัว failure_list / success_list) · ร้านไทยใช้จำนวนเต็ม */
+export async function shopeeUpdatePrice(accessToken: string, shopId: string | number, body: { item_id: number; price_list: { model_id: number; original_price: number }[] }): Promise<Record<string, unknown>> {
+  if (!body.price_list.length || body.price_list.length > 50) throw new ShopeeApiError("แก้ราคาได้ครั้งละ 1–50 ตัวเลือก", "error_param");
+  return shopeeFetch("/api/v2/product/update_price", { accessToken, shopId, body });
 }

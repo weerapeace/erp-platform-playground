@@ -11,7 +11,8 @@
  * ข้อมูล: GET /api/shopee/listing-detail (ดึงสด ไม่บันทึก) · ปุ่ม "ดึงตัวนี้จาก Shopee" = POST (อัปเดตสำเนาย่อในระบบด้วย)
  * ส่งขึ้นร้านจริง (ถามก่อนเสมอ · มีประวัติ): POST /api/shopee/listing-edit · /api/shopee/listing-display
  * กฎ: lib/shopee-listing-edit (pure + เทสต์ — หน้าเว็บกับ API ใช้ตัวเดียวกัน) · แผนเฟส: docs/shopee-connector.md
- * ยังไม่ทำ (ดูอย่างเดียว): รูป · ตัวเลือก · ราคา (เฟส 4B/4C) · สต๊อก (BigSeller ยังซิงค์อยู่ — ไม่แก้)
+ * เฟส 4B: ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก & ราคา → POST /api/shopee/listing-prices · มีผลทันที) — ปุ่มบันทึกเดียวกับชื่อ (ส่งราคาก่อน)
+ * ยังไม่ทำ (ดูอย่างเดียว): รูป (เฟส 4C) · สต๊อก (BigSeller ยังซิงค์อยู่ — ไม่แก้)
  * ของกลางที่ใช้: MiniTable · ConfirmDialog · ToggleSwitch · state-views · Icon · ./listing-images (ListingImageGrid)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -22,9 +23,10 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
+import { MoneyInput } from "@/components/money-input";
 import {
-  planShopeeDisplay, planShopeeEdit, shopeeIsOpen, shopeeStatusBadge, shopeeTextLength,
-  type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeeWriteResponse,
+  applyShopeeBulkPrice, planShopeeDisplay, planShopeeEdit, planShopeePrices, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeStatusBadge, shopeeTextLength,
+  type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
 } from "@/lib/shopee-listing-edit";
 import { ListingImageGrid } from "./listing-images";
 
@@ -91,13 +93,18 @@ export function useShopeeListing(listingId: string | null, onSaved?: () => void)
   return { listingId, view, error, loading, fetchedAt, reload: () => setN((x) => x + 1), refresh, refreshing, apply };
 }
 
-// ───────────────────────── เฟส 4A: แก้ชื่อ + รายละเอียด (ปุ่มบันทึกเดียว) ─────────────────────────
+// ───────────────────────── เฟส 4A: แก้ชื่อ + รายละเอียด · เฟส 4B: ราคาตั้งต่อตัวเลือก (ปุ่มบันทึกเดียว) ─────────────────────────
 export type ShopeeEditApi = {
   canEdit: boolean;
   name: string | null;
   setName: (v: string) => void;
   description: string | null;
   setDescription: (v: string) => void;
+  /** เฟส 4B: ราคาตั้ง (original_price) ต่อตัวเลือก · null = ยังไม่มีข้อมูล */
+  prices: ShopeePriceRow[] | null;
+  setPrice: (modelId: string, price: number | null) => void;
+  setPrices: (rows: ShopeePriceRow[]) => void;
+  pricePlan: ShopeePricePlan | null;
   changeCount: number;
   errors: string[];
   dirty: boolean;
@@ -112,60 +119,97 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
   const v = state.view;
   const [name, setNameState] = useState<string | null>(null);
   const [description, setDescState] = useState<string | null>(null);
+  const [prices, setPricesState] = useState<ShopeePriceRow[] | null>(null);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const priceBase = useMemo(() => (v ? shopeePriceRowsFromView(v) : null), [v]);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวอื่น / ดึงใหม่ / หลังบันทึก) → เริ่มจากของบนร้าน
-  useEffect(() => { setNameState(v ? v.name : null); setDescState(v ? v.description : null); }, [v]);
+  useEffect(() => { setNameState(v ? v.name : null); setDescState(v ? v.description : null); setPricesState(priceBase); }, [v, priceBase]);
 
   const plan = useMemo(() => (v && name != null && description != null ? planShopeeEdit(v, { name, description }) : null), [v, name, description]);
-  const changeCount = plan?.changes.length ?? 0;
+  const pricePlan = useMemo(() => (v && prices ? planShopeePrices(v, prices) : null), [v, prices]);
+  const infoN = plan?.changes.length ?? 0;
+  const priceN = pricePlan?.changes.length ?? 0;
+  const changeCount = infoN + priceN;
   const dirty = changeCount > 0;
-  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); } };
+  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? [])];
+  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); } };
 
+  /** ส่งราคาก่อน (มีผลทันที) แล้วค่อยชื่อ/รายละเอียด · ราคาไม่ผ่านทั้งหมด = หยุด ไม่ส่งชื่อต่อ */
   const save = async () => {
-    if (!v || !state.listingId || !plan || !plan.changes.length || plan.errors.length) return;
+    if (!v || !state.listingId || !dirty || errors.length) return;
     setSaving(true);
     try {
-      const r = await apiFetch("/api/shopee/listing-edit", {
-        method: "POST",
-        body: JSON.stringify({
-          listing_id: state.listingId, before: { name: v.name, description: v.description },
-          edit: { name: plan.body.item_name ?? null, description: plan.body.description ?? null },
-        }),
-      });
-      const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as ShopeeWriteResponse;
-      if (j.ok) {
+      let latest: ShopeeListingView | null = null;
+      if (priceN && pricePlan && priceBase) {
+        const r = await apiFetch("/api/shopee/listing-prices", {
+          method: "POST",
+          body: JSON.stringify({
+            listing_id: state.listingId,
+            before: priceBase.map((b) => ({ model_id: b.modelId, price: b.price })),
+            prices: pricePlan.changes.map((c) => ({ model_id: c.modelId, label: c.label, price: c.after })),
+          }),
+        });
+        const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as ShopeeWriteResponse;
+        if (!j.ok) {
+          toast.error(r.status === 401 ? NO_AUTH : (j.error ?? `HTTP ${r.status}`));
+          if ((r.status === 409 || r.status === 502) && j.view) { state.apply(j.view); setAsking(false); }
+          return;
+        }
+        toast.success(`${j.summary ?? "แก้ราคาบน Shopee แล้ว"} — บันทึกประวัติแล้ว`);
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        latest = j.view;
+      }
+      if (infoN && plan) {
+        const r = await apiFetch("/api/shopee/listing-edit", {
+          method: "POST",
+          body: JSON.stringify({
+            listing_id: state.listingId, before: { name: v.name, description: v.description },
+            edit: { name: plan.body.item_name ?? null, description: plan.body.description ?? null },
+          }),
+        });
+        const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as ShopeeWriteResponse;
+        if (!j.ok) {
+          toast.error(r.status === 401 ? NO_AUTH : (j.error ?? `HTTP ${r.status}`));
+          if (r.status === 409 && j.view) { state.apply(j.view); setAsking(false); }
+          else if (latest) state.apply(latest);
+          return;
+        }
         toast.success(`${j.summary ?? "บันทึกขึ้น Shopee แล้ว"} — บันทึกประวัติแล้ว`);
         (j.warnings ?? []).forEach((w) => toast.warning(w));
-        setAsking(false);
-        if (j.view) state.apply(j.view);
-        onSaved?.(j.view?.name ?? plan.body.item_name ?? v.name);
-      } else {
-        toast.error(r.status === 401 ? NO_AUTH : (j.error ?? `HTTP ${r.status}`));
-        if (r.status === 409 && j.view) { state.apply(j.view); setAsking(false); }
+        latest = j.view ?? latest;
       }
+      setAsking(false);
+      if (latest) state.apply(latest);
+      onSaved?.(latest?.name ?? plan?.body.item_name ?? v.name);
     } catch (e) { toast.error((e as Error).message); }
     finally { setSaving(false); }
   };
 
+  const warnings = [...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? [])];
   const dialog = (
-    <ConfirmDialog open={asking && !!plan} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
-      title={`ส่งการแก้ไข ${changeCount} ช่องขึ้นร้าน Shopee?`} confirmText="ส่งขึ้น Shopee"
-      message={plan ? (
+    <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
+      title={`ส่งการแก้ไข ${changeCount} รายการขึ้นร้าน Shopee?`} confirmText="ส่งขึ้น Shopee"
+      message={dirty ? (
         <div className="space-y-2 text-sm">
-          <p>ระบบจะแก้สินค้าบนร้าน Shopee จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · ราคา/สต๊อก/รูปไม่แตะ) · มีประวัติว่าใครแก้อะไร</p>
+          <p>ระบบจะแก้สินค้าบนร้าน Shopee จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · สต๊อก/รูปไม่แตะ) · มีประวัติว่าใครแก้อะไร</p>
           <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
-            {plan.changes.map((c, i) => (
-              <li key={i}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400 line-through">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
+            {(pricePlan?.changes ?? []).map((c) => (
+              <li key={`p-${c.modelId}`}><span className="font-medium text-slate-700">ราคาตั้ง {c.label}:</span> {shopeePriceChangeText(c)}{c.promo ? <span className="text-orange-700"> · ในโปรโมชัน</span> : null}</li>
+            ))}
+            {(plan?.changes ?? []).map((c, i) => (
+              <li key={`i-${i}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400 line-through">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
             ))}
           </ul>
-          {plan.warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
+          {warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
         </div>
       ) : ""} />
   );
   return {
     canEdit, name, setName: setNameState, description, setDescription: setDescState,
-    changeCount, errors: plan?.errors ?? [], dirty, reset, ask: () => setAsking(true), saving, dialog,
+    prices, setPrice: (modelId, price) => setPricesState((rows) => (rows ? rows.map((r) => (r.modelId === modelId ? { ...r, price } : r)) : rows)),
+    setPrices: setPricesState, pricePlan,
+    changeCount, errors, dirty, reset, ask: () => setAsking(true), saving, dialog,
   };
 }
 
@@ -176,7 +220,7 @@ export function ShopeeEditFooter({ edit, state }: { edit: ShopeeEditApi; state: 
     <div className="flex w-full flex-wrap items-center gap-2">
       <span className="min-w-0 flex-1 text-xs text-slate-500">
         {edit.errors.length ? <span className="text-rose-600">{edit.errors[0]}{edit.errors.length > 1 ? ` (และอีก ${edit.errors.length - 1})` : ""}</span>
-          : edit.dirty ? `แก้แล้ว ${edit.changeCount.toLocaleString()} ช่อง — ยังไม่ได้ส่งขึ้น Shopee` : "ยังไม่ได้แก้อะไร"}
+          : edit.dirty ? `แก้แล้ว ${edit.changeCount.toLocaleString()} รายการ — ยังไม่ได้ส่งขึ้น Shopee` : "ยังไม่ได้แก้อะไร"}
       </span>
       {edit.dirty && <button type="button" onClick={edit.reset} disabled={edit.saving} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">ยกเลิกที่แก้</button>}
       <button type="button" disabled={!edit.dirty || edit.errors.length > 0 || edit.saving} onClick={edit.ask}
@@ -321,7 +365,7 @@ export function ShopeeInfoPanel({ state, edit }: { state: ShopeeListingState; ed
         <ReadField label="หมวด (รหัส Shopee)">{v.categoryId ?? "—"}</ReadField>
         <ReadField label="น้ำหนัก / กล่อง">{v.weight != null ? `${v.weight} กก.` : "—"}{v.dims ? ` · ${v.dims.length ?? "?"}×${v.dims.width ?? "?"}×${v.dims.height ?? "?"} ซม.` : ""}</ReadField>
       </div>
-      <p className="text-[11px] text-slate-400">แก้ได้ตอนนี้: ชื่อ + รายละเอียด (แบบข้อความ) · รูป/ตัวเลือก/ราคา ดูอย่างเดียว (เปิดในเฟสถัดไป) · สต๊อกไม่แก้จากระบบ (BigSeller ยังซิงค์อยู่)</p>
+      <p className="text-[11px] text-slate-400">แก้ได้ตอนนี้: ชื่อ + รายละเอียด (แบบข้อความ) · ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก &amp; ราคา) · รูป ดูอย่างเดียว (เปิดในเฟสถัดไป) · สต๊อกไม่แก้จากระบบ (BigSeller ยังซิงค์อยู่)</p>
     </div>
   );
 }
@@ -334,25 +378,79 @@ export function ShopeeImagesPanel({ state, onOpen }: { state: ShopeeListingState
     onOpen={onOpen} onAdd={() => { /* ดูอย่างเดียว */ }} canAdd={false} note="ดูอย่างเดียว — แก้รูปบน Shopee จะเปิดในเฟสถัดไป" />;
 }
 
-/** แท็บตัวเลือก & ราคา — ดูอย่างเดียวในเฟส 4A (ราคาตั้ง/ราคาที่ลูกค้าจ่าย/สต๊อกบนร้าน) */
-export function ShopeeOptionsPanel({ state }: { state: ShopeeListingState }) {
+const numOrNull = (raw: string | number | null | undefined): number | null => { if (raw == null || raw === "") return null; const n = Number(raw); return Number.isFinite(n) ? n : null; };
+
+/** แถบแก้ราคาหลายตัวพร้อมกัน (ติ๊กบางตัว = เฉพาะที่ติ๊ก · ไม่ติ๊ก = ทุกตัว) — เติมฟอร์มอย่างเดียว ยังไม่ส่ง */
+function ShopeeBulkPrice({ edit, selected }: { edit: ShopeeEditApi; selected: Set<string> }) {
+  const [price, setPrice] = useState<string>("");
+  const [pct, setPct] = useState<string>("");
+  const [err, setErr] = useState<string | null>(null);
+  const apply = () => {
+    if (!edit.prices) return;
+    const res = applyShopeeBulkPrice(edit.prices, selected, { price: numOrNull(price), pct: numOrNull(pct) });
+    if (res.error) { setErr(res.error); return; }
+    edit.setPrices(res.rows); setErr(null); setPrice(""); setPct("");
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-600">
+      <label className="inline-flex items-center gap-1">ตั้งราคา<MoneyInput value={price} onChange={(raw) => { setPrice(String(raw ?? "")); setErr(null); }} placeholder="ไม่เปลี่ยน" className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-right" /></label>
+      <label className="inline-flex items-center gap-1">หรือ ปรับ<input type="number" min="-99" max="500" value={pct} onChange={(e) => { setPct(e.target.value); setErr(null); }} placeholder="-10" className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-right" />%</label>
+      <button type="button" onClick={apply} className="h-8 rounded-md bg-violet-600 px-2.5 text-white hover:bg-violet-700">ใช้กับ{selected.size ? `ที่ติ๊ก ${selected.size} ตัว` : "ทุกตัว"}</button>
+      <span className="text-slate-400">ปัดเป็นบาทเต็ม (Shopee ไทยรับเฉพาะจำนวนเต็ม)</span>
+      {err && <span className="w-full text-rose-600">{err}</span>}
+    </div>
+  );
+}
+
+/** แท็บตัวเลือก & ราคา — เฟส 4B แก้ "ราคาตั้ง" ต่อตัวเลือกได้ (ราคาที่ลูกค้าจ่ายมาจากโปรโมชัน · สต๊อกบนร้านไว้ดูเทียบ) */
+export function ShopeeOptionsPanel({ state, edit }: { state: ShopeeListingState; edit?: ShopeeEditApi | null }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const g = gate(state); if (g) return g;
   const v = state.view!;
+  const lockedStatus = v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE";
+  const canPrice = !!edit?.canEdit && !!edit.prices && !lockedStatus;
+  const rowOf = new Map((edit?.prices ?? []).map((r) => [r.modelId, r]));
   const rows: ShopeeModelView[] = v.hasModel ? v.models
-    : [{ modelId: "0", sku: v.itemSku, label: "สินค้าเดียว (ไม่มีตัวเลือก)", price: v.price, originalPrice: v.originalPrice, stock: v.stock, image: v.images[0] ?? null, status: null }];
+    : [{ modelId: "0", sku: v.itemSku, label: "สินค้าเดียว (ไม่มีตัวเลือก)", price: v.price, originalPrice: v.originalPrice, stock: v.stock, image: v.images[0] ?? null, status: null, promo: v.inPromotion }];
+  const promoN = rows.filter((m) => m.promo).length;
   const cols: MiniColumn<ShopeeModelView>[] = [
     { key: "img", header: "", width: "3rem", cell: (m) => (m.image ? <img src={m.image} alt="" className="h-9 w-9 rounded object-cover" /> : <div className="h-9 w-9 rounded bg-slate-100" />) },
     { key: "opt", header: "ตัวเลือก", width: "1.6fr", cell: (m) => (
-      <div className="min-w-0"><div className="truncate" title={m.label ?? ""}>{m.label ?? "—"}</div><div className="truncate font-mono text-[11px] text-slate-400">{m.sku ?? "ไม่มีรหัส"}</div></div>
+      <div className="min-w-0">
+        <div className="truncate" title={m.label ?? ""}>{m.label ?? "—"}{m.promo && <span className="ml-1 rounded bg-orange-50 px-1 text-[10px] text-orange-700" title="อยู่ในโปรโมชัน — Shopee มักไม่ให้แก้ราคาตัวนี้">โปร</span>}</div>
+        <div className="truncate font-mono text-[11px] text-slate-400">{m.sku ?? "ไม่มีรหัส"}</div>
+      </div>
     ) },
-    { key: "orig", header: "ราคาตั้ง", width: "6rem", align: "right", sortValue: (m) => m.originalPrice, cell: (m) => <span className="text-slate-500">{baht(m.originalPrice)}</span> },
+    {
+      key: "orig", header: canPrice ? "ราคาตั้ง (แก้ได้)" : "ราคาตั้ง", width: canPrice ? "7.5rem" : "6rem", align: "right", sortValue: (m) => m.originalPrice,
+      cell: (m) => {
+        if (!canPrice) return <span className="text-slate-500">{baht(m.originalPrice)}</span>;
+        const r = rowOf.get(m.modelId);
+        const changed = !!r && r.price !== m.originalPrice;
+        return (
+          <span className="block w-full">
+            <MoneyInput value={r?.price ?? null} onChange={(raw) => edit!.setPrice(m.modelId, numOrNull(raw))}
+              className={`h-8 w-full rounded-md border px-2 text-right text-sm ${changed ? "border-violet-400 bg-violet-50" : "border-slate-200"}`} />
+            {changed && <span className="block text-right text-[11px] text-slate-400 line-through">{baht(m.originalPrice)}</span>}
+          </span>
+        );
+      },
+    },
     { key: "price", header: "ลูกค้าจ่าย", width: "6rem", align: "right", sortValue: (m) => m.price, cell: (m) => <span className={m.price != null && m.originalPrice != null && m.price < m.originalPrice ? "font-medium text-rose-600" : ""}>{baht(m.price)}</span> },
     { key: "stock", header: "สต๊อกบนร้าน", width: "6rem", align: "right", sortValue: (m) => m.stock, cell: (m) => (m.stock == null ? "—" : m.stock.toLocaleString()) },
   ];
   return (
     <div className="space-y-2">
-      <MiniTable rows={rows} columns={cols} rowKey={(m) => m.modelId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-shopee-options" />
-      <p className="text-[11px] text-slate-400">ดูอย่างเดียว — แก้ราคาจะเปิดในเฟสถัดไป · สต๊อกบนร้านไว้ดูเทียบเท่านั้น (BigSeller ยังซิงค์อยู่ ระบบไม่ส่งสต๊อก)</p>
+      {canPrice && edit && <ShopeeBulkPrice edit={edit} selected={selected} />}
+      {canPrice && promoN > 0 && (
+        <p className="flex items-start gap-1 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs text-orange-800"><Icon name="warning" className="mt-0.5 shrink-0" />{promoN.toLocaleString()} ตัวเลือกอยู่ในโปรโมชัน (ป้าย “โปร”) — Shopee มักไม่ให้แก้ราคาจนกว่าจะนำออกจากโปรโมชันใน Seller Centre · ตัวที่ไม่อยู่ในโปรแก้ได้ตามปกติ</p>
+      )}
+      <MiniTable rows={rows} columns={cols} rowKey={(m) => m.modelId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-shopee-options"
+        selectable={canPrice && rows.length > 1} selected={selected} onSelectedChange={setSelected} />
+      <p className="text-[11px] text-slate-400">
+        {canPrice ? "แก้ราคาตั้งแล้วกด “บันทึกขึ้น Shopee” (ถามยืนยันก่อน · มีผลทันที) · ราคาที่ลูกค้าจ่ายมาจากโปรโมชันของร้าน (แก้ใน Seller Centre)" : "ดูอย่างเดียว"}
+        {" · "}สต๊อกบนร้านไว้ดูเทียบเท่านั้น (BigSeller ยังซิงค์อยู่ ระบบไม่ส่งสต๊อก)
+      </p>
     </div>
   );
 }
