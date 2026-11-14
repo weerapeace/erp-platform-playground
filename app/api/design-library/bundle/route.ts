@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadSkuStock } from "@/lib/sku-stock";
-import { cleanSpec, specSkuIds } from "@/lib/design-library";
+import { allSkuIds, cleanSpec } from "@/lib/design-library";
 import { VIEW_PERM } from "../_resources";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       admin.from("design_library_templates").select("*").eq("id", rec.template_id).maybeSingle(),
       admin.from("design_library_choices").select("*").eq("is_active", true).order("list_key").order("sort_order").order("name"),
       admin.from("design_library_renders").select("*").eq("recipe_id", recipeId).eq("is_active", true).order("view_key").order("version", { ascending: false }),
-      loadSkuStock(admin, specSkuIds(spec)).catch(() => new Map()),
+      loadSkuStock(admin, allSkuIds(spec)).catch(() => new Map()),
     ]);
     if (!tpl) return fail("ไม่พบแม่แบบของสูตรนี้", 404);
     const stock: Record<string, number> = {};

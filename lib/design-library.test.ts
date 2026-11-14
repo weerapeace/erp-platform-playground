@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  bagWord, bothUnits, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
+  allSkuIds, applyColorway, bagWord, bothUnits, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
 } from "./design-library";
 
 const ch = (list_key: Choice["list_key"], code: string, name: string, extra: Partial<Choice> = {}): Choice =>
@@ -129,5 +129,62 @@ describe("รอบ 4: ประเภทกระเป๋า · หู · ห�
     expect(dlDraftOf({ dl_draft: { params: p, notice: "n" } })).toEqual({ params: p, notice: "n" });
     expect(dlDraftOf({ schema: 2 })).toBeNull();
     expect(dlDraftOf(null)).toBeNull();
+  });
+});
+
+describe("รอบ 5: ชุดสี + เทียบสูตร", () => {
+  const RED = { kind: "color" as const, code: "TH-RED", name: "แดง", hex: "#cc0000" };
+  const withCw = cleanSpec({ ...SPEC, colorways: [
+    { id: "cw2", name: "สีแดง", hw_color: "gold", picks: { p1: { kind: "sku", sku_id: "33333333-3333-3333-3333-333333333333", code: "PU-RED", name: "PU แดง", image_key: null }, ghost: RED } },
+    { id: "cw2", name: "ซ้ำ", hw_color: null, picks: {} },
+    { id: "cw3", name: "", hw_color: null, picks: {} },
+  ] });
+  it("ทำความสะอาด: ตัดจุดที่ไม่มีแล้ว · id ซ้ำทิ้ง · ชื่อว่างตั้งให้", () => {
+    expect(withCw.colorways.map((c) => c.id)).toEqual(["cw2", "cw3"]);
+    expect(Object.keys(withCw.colorways[0].picks)).toEqual(["p1"]);
+    expect(withCw.colorways[1].name).toBe("สี 3");
+    expect(cleanSpec({ ...SPEC }).colorways).toEqual([]);   // สูตรเก่าไม่มีชุดสี
+  });
+  it("applyColorway: เปลี่ยนเฉพาะจุดที่ตั้ง + สีอะไหล่ · จุดอื่นเหมือนสีหลัก", () => {
+    const v = applyColorway(withCw, "cw2");
+    expect(pickInfo(v.pins[0].pick).code).toBe("PU-RED");
+    expect(pickInfo(v.pins[1].pick).code).toBe("ABC-001");
+    expect(v.hw_color).toBe("gold");
+    expect(applyColorway(withCw, "cw3").hw_color).toBe("silver");
+    expect(applyColorway(withCw, null)).toBe(withCw);
+    expect(colorwayLabel(withCw, "cw2")).toBe("สีแดง");
+    expect(colorwayLabel(withCw, null)).toBe("สีหลัก");
+  });
+  it("setColorwayPick: ตั้ง / กลับเป็นเหมือนสีหลัก / แก้สีหลักตรงจุด", () => {
+    const a = setColorwayPick(withCw, "cw3", "p3", RED);
+    expect(a.colorways[1].picks.p3).toEqual(RED);
+    expect("p3" in setColorwayPick(a, "cw3", "p3", undefined).colorways[1].picks).toBe(false);
+    expect(setColorwayPick(withCw, null, "p3", RED).pins[2].pick).toEqual(RED);
+  });
+  it("SKU รวมทุกชุดสี", () => {
+    expect(allSkuIds(withCw)).toContain("33333333-3333-3333-3333-333333333333");
+    expect(allSkuIds(withCw)).toContain("11111111-1111-1111-1111-111111111111");
+  });
+  it("ใบสรุปมีตารางชุดสี + ชื่อชุดสีที่หัวใบ", () => {
+    const html = buildBriefHtml({ template: { code: "T-01", name: "ทรง", category: null, image_key: null, image_w: null, image_h: null, vector_image_key: null },
+      recipe: { seq: 1, name: null, note: null, created_by_name: null, updated_at: "2026-11-14T00:00:00Z" }, spec: applyColorway(withCw, "cw2"), baseSpec: withCw, colorwayName: "สีแดง",
+      choices: CHOICES, stock: {}, useVector: false, img: (k) => k, dateText: "14 พ.ย." });
+    expect(html).toContain("ชุดสี (3 สี)");
+    expect(html).toContain("PU-RED");
+    expect(html).toContain("<b>สีแดง</b>");
+  });
+  it("เทียบข้ามแม่แบบ: จับคู่ตามหมวด · บอกบรรทัดที่ต่าง", () => {
+    const B = cleanSpec({ size: { w: 30, h: 40, d: 12 }, hw_color: "silver", pins: [
+      { id: "q1", x: 80, y: 80, cat: "body", note: "", pick: { kind: "sku", sku_id: "33333333-3333-3333-3333-333333333333", code: "PU-RED", name: "PU แดง", image_key: null } },
+      { id: "q2", x: 10, y: 10, cat: "zip", note: "", pick: { kind: "swatch", swatch_id: "s2", swatch_name: "แผงซิป", image_key: null, image_w: null, image_h: null, x: 0, y: 0, w: 10, h: 10, sku_id: null, code: "ZP-5G", name: "ซิปทอง" } },
+    ] });
+    const rows = compareRecipes({ spec: SPEC, choices: CHOICES, template: { code: "A-1", name: "ทรง A" } }, { spec: B, choices: CHOICES, template: { code: "B-1", name: "ทรง B" } });
+    const row = (l: string) => rows.find((r) => r.label === l)!;
+    expect(row("กว้าง").same).toBe(true);
+    expect(row("สูง").same).toBe(false);
+    expect(row("ซิป").same).toBe(true);          // จุดอยู่คนละที่ แต่ของเหมือนกัน
+    expect(row("ตัวกระเป๋า").same).toBe(false);
+    expect(row("อะไหล่").b).toBe("—");           // ฝั่ง B ไม่มีหมวดนี้
+    expect(row("ตัวกระเป๋า").picksB).toHaveLength(1);
   });
 });

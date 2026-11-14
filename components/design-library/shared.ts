@@ -17,11 +17,11 @@ export type RecipeCard = {
   created_at: string; updated_at: string; pin_count: number; cover_key: string | null;
 };
 export type Recipe = {
-  id: string; template_id: string; seq: number; name: string | null; note: string | null; spec: Spec;
+  id: string; template_id: string; seq: number; name: string | null; note: string | null; spec: Spec; design_sheet_id?: string | null;
   created_by_name: string | null; updated_by_name: string | null; created_at: string; updated_at: string;
 };
 export type Render = {
-  id: string; recipe_id: string; view_key: string; version: number; image_key: string; note: string | null;
+  id: string; recipe_id: string; view_key: string; version: number; image_key: string; note: string | null; colorway_id?: string | null;
   created_by_name: string | null; created_at: string;
 };
 export type RecipeBundle = { recipe: Recipe; template: Template; choices: Choice[]; renders: Render[]; stock: Record<string, number> };
@@ -29,7 +29,8 @@ export type RecipeBundle = { recipe: Recipe; template: Template; choices: Choice
 export const LIB_HREF = "/master/design-library";
 export const tplHref = (id: string) => `${LIB_HREF}/${id}`;
 export const recipeHref = (id: string) => `${LIB_HREF}/recipe/${id}`;
-export const printHref = (id: string) => `/print/design-library/${id}`;
+export const printHref = (id: string, colorwayId?: string | null) => `/print/design-library/${id}${colorwayId ? `?cw=${encodeURIComponent(colorwayId)}` : ""}`;
+export const compareHref = (a?: string | null, b?: string | null) => `${LIB_HREF}/compare${a ? `?a=${a}${b ? `&b=${b}` : ""}` : ""}`;
 export const img = (key: string | null | undefined, w: number) => r2ImageUrl(key, w) ?? "";
 
 /** เรียก API แล้วคืน data · error → โยนข้อความภาษาคน */

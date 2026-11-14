@@ -2,7 +2,7 @@
  * 📚 Design Library — งานที่ต้องคิดเลข/ตรวจก่อนเขียน
  * POST { action: "new_recipe", template_id, from_recipe_id? }          → สูตรใหม่ (เลข #ถัดไปของแม่แบบ · ตั้งต้นจากแม่แบบ หรือคัดลอกสูตรเดิม)
  * POST { action: "save_recipe", id, spec, name?, note? }                → บันทึกสูตร (ทำความสะอาดด้วย cleanSpec ก่อนเสมอ)
- * POST { action: "add_render", recipe_id, view_key, image_key, note? } → เพิ่มรูปที่ได้จาก GPT (version = ล่าสุดของชุดมุมนั้น + 1)
+ * POST { action: "add_render", recipe_id, view_key, image_key, colorway_id?, note? } → เพิ่มรูปที่ได้จาก GPT (version = ล่าสุดของชุดมุม+ชุดสีนั้น + 1 · colorway_id ว่าง = สีหลัก)
  * POST { action: "set_template_vector", render_id }                  → ตั้งรูปลายเส้นเป็นรูป Vector ของแม่แบบ (design_library.manage)
  * สิทธิ์ design_library.edit · audit ทุกงาน
  */
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await audit("update", "design_library_recipes", id, {
       seq: before.seq,
       changes: {
-        spec: { from: { pins: Array.isArray(b.pins) ? b.pins.length : 0 }, to: { pins: spec.pins.length, size: spec.size, hw_color: spec.hw_color } },
+        spec: { from: { pins: Array.isArray(b.pins) ? b.pins.length : 0 }, to: { pins: spec.pins.length, size: spec.size, hw_color: spec.hw_color, colorways: spec.colorways.length } },
         ...("name" in patch && patch.name !== before.name ? { name: { from: before.name, to: patch.name } } : {}),
         ...("note" in patch && patch.note !== before.note ? { note: { from: before.note, to: patch.note } } : {}),
       },
@@ -78,19 +78,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const recipeId = String(body.recipe_id ?? "");
     const view = String(body.view_key ?? "");
     const imageKey = String(body.image_key ?? "").trim();
+    const colorwayId = body.colorway_id == null || body.colorway_id === "" ? null : String(body.colorway_id);
     if (!UUID.test(recipeId)) return bad("ไม่พบสูตร");
+    if (colorwayId && !/^[A-Za-z0-9_-]{1,40}$/.test(colorwayId)) return bad("ไม่รู้จักชุดสีนี้");
     if (!RENDER_VIEWS.some((v) => v.key === view)) return bad("ไม่รู้จักชุดมุมนี้");
     if (!imageKey) return bad("ยังไม่มีรูป");
-    const { data: rc } = await admin.from("design_library_recipes").select("id").eq("id", recipeId).maybeSingle();
+    const { data: rc } = await admin.from("design_library_recipes").select("id, spec").eq("id", recipeId).maybeSingle();
     if (!rc) return bad("ไม่พบสูตร", 404);
-    const { data: last } = await admin.from("design_library_renders").select("version").eq("recipe_id", recipeId).eq("view_key", view).order("version", { ascending: false }).limit(1).maybeSingle();
+    if (colorwayId && !cleanSpec(rc.spec).colorways.some((c) => c.id === colorwayId)) return bad("ไม่พบชุดสีนี้ในสูตร — บันทึกสูตรก่อนแล้วอัปใหม่");
+    let lastQ = admin.from("design_library_renders").select("version").eq("recipe_id", recipeId).eq("view_key", view);
+    lastQ = colorwayId ? lastQ.eq("colorway_id", colorwayId) : lastQ.is("colorway_id", null);
+    const { data: last } = await lastQ.order("version", { ascending: false }).limit(1).maybeSingle();
     const version = (Number(last?.version) || 0) + 1;
     const { data, error } = await admin.from("design_library_renders").insert({
-      recipe_id: recipeId, view_key: view, version, image_key: imageKey, note: String(body.note ?? "").trim().slice(0, 500) || null,
+      recipe_id: recipeId, view_key: view, version, image_key: imageKey, colorway_id: colorwayId, note: String(body.note ?? "").trim().slice(0, 500) || null,
       created_by: actor.id, created_by_name: actor.name,
     }).select("*").single();
     if (error) return bad("บันทึกรูปไม่สำเร็จ กรุณาลองใหม่", 500);
-    await audit("create", "design_library_renders", data.id, { recipe_id: recipeId, view_key: view, version });
+    await audit("create", "design_library_renders", data.id, { recipe_id: recipeId, view_key: view, version, colorway_id: colorwayId });
     return NextResponse.json({ data, error: null });
   }
 

@@ -19,7 +19,7 @@ import { Icon } from "@/components/icon";
 import { TemplateFormModal } from "./template-form";
 import { ChoicesManager } from "./choices-manager";
 import { bagTypeOf, type Choice } from "@/lib/design-library";
-import { api, img, LIB_HREF, recipeHref, thaiDate, tplHref, type RecipeCard, type Template } from "./shared";
+import { api, compareHref, img, LIB_HREF, recipeHref, thaiDate, tplHref, type RecipeCard, type Template } from "./shared";
 
 /** ชื่อประเภทกระเป๋าจากรหัส (template.category) — แม่แบบเก่าที่พิมพ์ทรงเองโชว์ข้อความเดิม */
 function useBagTypes() {
@@ -67,6 +67,7 @@ export function DesignLibrary() {
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <Header title="Design Library" sub="คลังแม่แบบกระเป๋า — เลือกแม่แบบ ปรับวัสดุ/สี/ช่อง แล้วออกใบสรุป + prompt ให้ GPT สร้างรูป">
+        <Link href={compareHref()} className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:arrows-exchange" />เทียบสูตร</Link>
         {canManage && <button type="button" onClick={() => setChoicesOpen(true)} className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:settings" />ตัวเลือก</button>}
         {canManage && <button type="button" onClick={() => setForm({ open: true, t: null })} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1.5"><Icon value="i:plus" />เพิ่มแม่แบบ</button>}
       </Header>
@@ -185,10 +186,11 @@ export function TemplateView({ id }: { id: string }) {
                     <div className="text-[12px] text-slate-500">{r.pin_count} จุด · {r.cover_key ? "มีรูปจาก GPT" : "ยังไม่มีรูปจาก GPT"}</div>
                     <div className="text-[11px] text-slate-400">แก้ล่าสุด {thaiDate(r.updated_at)}{r.updated_by_name ? ` · ${r.updated_by_name}` : ""}</div>
                   </div>
-                  {canEdit && (
+                  {(
                     <div className="flex border-t border-slate-100 text-[12px]">
-                      <button type="button" disabled={busy} onClick={() => void newRecipe(r.id)} className="flex-1 h-8 hover:bg-slate-50 text-slate-600">คัดลอกเป็นสูตรใหม่</button>
-                      <button type="button" onClick={() => setConfirm({ kind: "recipe", r })} className="h-8 px-3 border-l border-slate-100 hover:bg-rose-50 text-rose-600" aria-label="ลบสูตร"><Icon value="i:trash" /></button>
+                      <Link href={compareHref(r.id)} className="h-8 px-3 inline-flex items-center hover:bg-slate-50 text-slate-600 border-r border-slate-100">เทียบ</Link>
+                      {canEdit && <button type="button" disabled={busy} onClick={() => void newRecipe(r.id)} className="flex-1 h-8 hover:bg-slate-50 text-slate-600">คัดลอกเป็นสูตรใหม่</button>}
+                      {canEdit && <button type="button" onClick={() => setConfirm({ kind: "recipe", r })} className="h-8 px-3 border-l border-slate-100 hover:bg-rose-50 text-rose-600" aria-label="ลบสูตร"><Icon value="i:trash" /></button>}
                     </div>
                   )}
                 </div>

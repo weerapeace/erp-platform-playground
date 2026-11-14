@@ -6,6 +6,7 @@
  * รูปแม่แบบ (สลับ รูปจริง / Vector) · กดตรงไหนก็ได้ = เพิ่มจุด → เลือกหมวด → เลือกของ (PickPanel) · ลากจุดย้ายได้
  * ขนาด · สีอะไหล่ทั้งใบ · คำเตือน (กฎห้ามคู่ + วัสดุหมด/เหลือน้อย) · วาดช่อง 4 ฝั่ง (PocketEditor)
  * Prompt 3 ชุด (คัดลอก) · ใบสรุป PDF (/print/design-library/[id]) · รูปที่ได้จาก GPT แยกตามชุดมุม เวอร์ชันซ้อน + ใครอัป
+ * ชุดสี (รอบ 5): ColorwayBar สลับชุดสี → รูป/จุด/prompt/รูป GPT/ใบสรุป ทั้งหน้าแสดงตามชุดสีที่เลือก · แก้จุดตอนอยู่ชุดสีอื่น = เก็บเป็นของชุดสีนั้น
  * บันทึกด้วย SaveBar กลาง (ถามก่อนออกถ้ายังไม่บันทึก) → POST /api/design-library/actions save_recipe
  * สิทธิ์: ดู design_library.view · แก้ design_library.edit (ไม่มีสิทธิ์ = ดูอย่างเดียว)
  */
@@ -20,7 +21,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import {
-  bodyPickOf, buildPrompts, categoryOf, cleanSpec, pickInfo, RENDER_VIEWS, ruleHits, skuIdOf, specSkuIds, stockHits, toStudioParams,
+  allSkuIds, applyColorway, bodyPickOf, buildPrompts, categoryOf, cleanSpec, colorwayLabel, pickInfo, RENDER_VIEWS, ruleHits, setColorwayPick, skuIdOf, stockHits, toStudioParams,
   MAX_PINS, type Pin, type Spec,
 } from "@/lib/design-library";
 import { PATTERN_SCHEMA } from "@/lib/pattern-project";
@@ -28,8 +29,9 @@ import { apiFetch } from "@/lib/api";
 import { PickPanel, PickThumb } from "./pick-panel";
 import { PocketEditor } from "./pocket-editor";
 import { HandleFields } from "./template-form";
+import { ColorwayBar, ColorwayTable } from "./colorways";
 import { LenInput, UnitToggle, useLenUnit } from "./units";
-import { api, img, newId, printHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
+import { api, compareHref, img, newId, printHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
 
 export function RecipeEditor({ id }: { id: string }) {
   const toast = useToast();
@@ -44,6 +46,7 @@ export function RecipeEditor({ id }: { id: string }) {
   const [vector, setVector] = useState(false);
   const [stock, setStock] = useState<Record<string, number>>({});
   const [sending, setSending] = useState(false);
+  const [cw, setCw] = useState<string | null>(null);   // ชุดสีที่กำลังดู/แก้ (null = สีหลัก)
   const canManage = usePermission("design_library.manage");
   const unit = useLenUnit();
   const readOnly = !canEdit;
@@ -60,7 +63,7 @@ export function RecipeEditor({ id }: { id: string }) {
   // SKU ที่เพิ่งเลือก → ดึงสต็อกสด
   useEffect(() => {
     if (!spec) return;
-    const need = specSkuIds(spec).filter((x) => !(x in stock));
+    const need = allSkuIds(spec).filter((x) => !(x in stock));
     if (!need.length) return;
     let alive = true;
     api<{ stock: Record<string, number> }>(`/api/design-library/bundle?stock_ids=${need.join(",")}`)
@@ -70,6 +73,18 @@ export function RecipeEditor({ id }: { id: string }) {
 
   const update = (fn: (s: Spec) => Spec) => { setSpec((s) => (s ? fn(s) : s)); setDirty(true); };
   const setPin = (i: number, p: Pin) => update((s) => ({ ...s, pins: s.pins.map((x, k) => (k === i ? p : x)) }));
+  /** สูตรตามชุดสีที่เลือก — ทุกส่วนของหน้า (รูป/จุด/คำเตือน/prompt) ใช้ตัวนี้ */
+  const view = useMemo(() => (spec ? applyColorway(spec, cw) : null), [spec, cw]);
+  /** แก้จุดจากแผงเลือก: ตำแหน่ง/หมวด/โน้ต = ของจุดเอง (ทุกชุดสี) · ของที่เลือก = ของชุดสีที่กำลังแก้ */
+  const editPin = (i: number, p: Pin) => {
+    if (!cw) { setPin(i, p); return; }
+    update((s) => {
+      const base = s.pins[i]; if (!base) return s;
+      const moved = { ...s, pins: s.pins.map((x, k) => (k === i ? { ...p, pick: base.pick } : x)) };
+      const curPick = applyColorway(s, cw).pins[i]?.pick ?? null;
+      return JSON.stringify(curPick) === JSON.stringify(p.pick) ? moved : setColorwayPick(moved, cw, base.id, p.pick);
+    });
+  };
 
   const save = async () => {
     if (!spec) return;
@@ -85,7 +100,7 @@ export function RecipeEditor({ id }: { id: string }) {
   const discard = () => { if (!b) return; setSpec(cleanSpec(b.recipe.spec)); setMeta({ name: b.recipe.name ?? "", note: b.recipe.note ?? "" }); setDirty(false); setSel(null); };
   const openPrint = async () => {
     if (dirty && !(await save())) return;
-    window.open(printHref(id), "_blank", "noopener");
+    window.open(printHref(id, cw), "_blank", "noopener");
   };
   /** สร้างแพทเทิร์นใหม่ในสตูดิโอ: เก็บขนาดไว้ใน template.dl_draft → สตูดิโอเปิดตัวสร้างจากแม่แบบพร้อมค่านี้ให้ตรวจก่อนวาง */
   const sendToStudio = async () => {
@@ -107,7 +122,7 @@ export function RecipeEditor({ id }: { id: string }) {
   };
 
   if (err) return <div className="p-6"><ErrorState title="เปิดสูตรไม่สำเร็จ" hint={err} onRetry={() => void load()} /></div>;
-  if (!b || !spec) return <div className="p-6"><LoadingState label="กำลังโหลดสูตร…" /></div>;
+  if (!b || !spec || !view) return <div className="p-6"><LoadingState label="กำลังโหลดสูตร…" /></div>;
   const t = b.template;
 
   return (
@@ -123,10 +138,21 @@ export function RecipeEditor({ id }: { id: string }) {
               className="h-8 px-2 border border-transparent hover:border-slate-200 focus:border-indigo-300 rounded-md text-[14px] min-w-0 w-56 bg-transparent" />
           </div>
         </div>
+        <Link href={compareHref(id)} className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"><Icon value="i:arrows-exchange" />เทียบสูตร</Link>
         <button type="button" disabled={sending} onClick={() => void sendToStudio()}
           title="สร้างแพทเทิร์นใหม่ในสตูดิโอแพทเทิร์นจากขนาดของสูตรนี้ (ได้ชิ้นตัด + 3D) — ต้องมีสิทธิ์แก้สตูดิโอแพทเทิร์น"
           className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5"><Icon value="i:vector-bezier" />{sending ? "กำลังส่ง…" : "ส่งเข้าสตูดิโอแพทเทิร์น"}</button>
-        <button type="button" onClick={() => void openPrint()} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1.5"><Icon value="i:printer" />ใบสรุป PDF</button>
+        <button type="button" onClick={() => void openPrint()} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1.5"><Icon value="i:printer" />ใบสรุป PDF{spec.colorways.length ? ` · ${colorwayLabel(spec, cw)}` : ""}</button>
+      </div>
+
+      {/* ── ชุดสี ── */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3 mb-4">
+        <ColorwayBar spec={spec} active={cw} readOnly={readOnly} renderCount={(c) => b.renders.filter((r) => (r.colorway_id ?? null) === c).length}
+          onActive={(c) => setCw(c)} onChange={(colorways) => update((s) => ({ ...s, colorways }))} />
+        {cw && <p className="text-[12px] text-indigo-700 mt-2">กำลังแก้ “{colorwayLabel(spec, cw)}” — เลือกของที่จุดไหน จะเปลี่ยนเฉพาะชุดสีนี้ · ย้ายจุด/เปลี่ยนหมวด/โน้ต มีผลทุกชุดสี</p>}
+        {spec.colorways.length > 0 && <div className="mt-3"><ColorwayTable spec={spec} choices={b.choices} active={cw} readOnly={readOnly}
+          onOpen={(c, i) => { setCw(c); setSel(i); }} onChange={(s) => update(() => s)} /></div>}
+        {!spec.colorways.length && !readOnly && <p className="text-[12px] text-slate-400 mt-2">ทรงเดิมหลายสี? กด “เพิ่มชุดสี” แล้วเปลี่ยนเฉพาะจุดที่ต่าง (ผ้า ซิป ด้าย สีอะไหล่) — ใบสรุป prompt และรูป GPT แยกตามชุดสีได้</p>}
       </div>
 
       {/* ── รูป + จุด | แผงเลือก ── */}
@@ -139,9 +165,9 @@ export function RecipeEditor({ id }: { id: string }) {
                 <button type="button" onClick={() => setVector(true)} className={`h-8 px-3 text-[13px] border-l border-slate-200 ${vector ? "bg-indigo-50 text-indigo-700" : "text-slate-600"}`}>Vector</button>
               </div>
             ) : <span className="text-[12px] text-slate-400">แม่แบบนี้ยังไม่มีรูป Vector</span>}
-            <span className="ml-auto text-[12px] text-slate-500">{spec.pins.length} จุด</span>
+            <span className="ml-auto text-[12px] text-slate-500">{spec.colorways.length > 0 && <b className="text-indigo-700 font-medium mr-2">{colorwayLabel(spec, cw)}</b>}{spec.pins.length} จุด</span>
           </div>
-          <Stage imageKey={vector && t.vector_image_key ? t.vector_image_key : t.image_key} pins={spec.pins} sel={sel} readOnly={readOnly}
+          <Stage imageKey={vector && t.vector_image_key ? t.vector_image_key : t.image_key} pins={view.pins} sel={sel} readOnly={readOnly}
             onSelect={setSel}
             onAdd={(x, y) => { if (spec.pins.length >= MAX_PINS) { toast.warning(`เพิ่มได้สูงสุด ${MAX_PINS} จุด`); return; } update((s) => ({ ...s, pins: [...s.pins, { id: newId(), x, y, cat: "", pick: null, note: "" }] })); setSel(spec.pins.length); }}
             onMove={(i, x, y) => setPin(i, { ...spec.pins[i], x, y })} />
@@ -149,11 +175,11 @@ export function RecipeEditor({ id }: { id: string }) {
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-3 self-start">
           {sel != null && spec.pins[sel] ? (
-            <PickPanel key={spec.pins[sel].id} pin={spec.pins[sel]} index={sel} spec={spec} choices={b.choices} stock={stock} readOnly={readOnly}
-              onChange={(p) => setPin(sel, p)} onHwColor={(code) => update((s) => ({ ...s, hw_color: code }))}
+            <PickPanel key={`${spec.pins[sel].id}-${cw ?? "main"}`} pin={view.pins[sel]} index={sel} spec={view} choices={b.choices} stock={stock} readOnly={readOnly}
+              onChange={(p) => editPin(sel, p)} onHwColor={(code) => update((s) => (cw ? { ...s, colorways: s.colorways.map((c) => (c.id === cw ? { ...c, hw_color: code } : c)) } : { ...s, hw_color: code }))}
               onDelete={() => { update((s) => ({ ...s, pins: s.pins.filter((_, k) => k !== sel) })); setSel(null); }} />
           ) : (
-            <PinList spec={spec} b={b} stock={stock} onSelect={setSel} readOnly={readOnly} />
+            <PinList spec={view} b={b} stock={stock} onSelect={setSel} readOnly={readOnly} />
           )}
         </div>
       </div>
@@ -175,7 +201,7 @@ export function RecipeEditor({ id }: { id: string }) {
               className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
           </label>
         </div>
-        <Warnings spec={spec} b={b} stock={stock} />
+        <Warnings spec={view} b={b} stock={stock} />
       </div>
 
       {/* ── ช่อง ── */}
@@ -185,10 +211,10 @@ export function RecipeEditor({ id }: { id: string }) {
       </section>
 
       {/* ── Prompt ── */}
-      <Prompts spec={spec} b={b} dirty={dirty} />
+      <Prompts spec={view} b={b} dirty={dirty} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} />
 
       {/* ── รูปจาก GPT ── */}
-      <Renders recipeId={id} renders={b.renders} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
+      <Renders recipeId={id} renders={b.renders.filter((r) => (r.colorway_id ?? null) === cw)} allRenders={b.renders} colorwayId={cw} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
         onChanged={(renders) => setB((p) => (p ? { ...p, renders } : p))}
         onVector={(key) => setB((p) => (p ? { ...p, template: { ...p.template, vector_image_key: key } } : p))} />
 
@@ -284,7 +310,7 @@ function Warnings({ spec, b, stock }: { spec: Spec; b: RecipeBundle; stock: Reco
   );
 }
 
-function Prompts({ spec, b, dirty }: { spec: Spec; b: RecipeBundle; dirty: boolean }) {
+function Prompts({ spec, b, dirty, colorway }: { spec: Spec; b: RecipeBundle; dirty: boolean; colorway: string | null }) {
   const toast = useToast();
   const prompts = useMemo(() => buildPrompts(b.template, spec, b.choices), [b.template, spec, b.choices]);
   const copy = async (text: string) => {
@@ -292,7 +318,7 @@ function Prompts({ spec, b, dirty }: { spec: Spec; b: RecipeBundle; dirty: boole
   };
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
-      <div className="text-[14px] font-medium text-slate-800 mb-1 flex items-center gap-2"><Icon value="i:sparkles" />Prompt สำหรับ GPT</div>
+      <div className="text-[14px] font-medium text-slate-800 mb-1 flex items-center gap-2"><Icon value="i:sparkles" />Prompt สำหรับ GPT{colorway && <span className="text-indigo-700 font-normal">· {colorway}</span>}</div>
       <p className="text-[12px] text-slate-500 mb-2">แนบรูปจากใบสรุป PDF (เส้นชี้ + รูปชิ้นส่วน) ไปพร้อม prompt · เลข [ref N] = เลขจุดบนรูป{dirty ? " · ยังไม่ได้บันทึก — prompt นี้ตามที่แก้อยู่ตอนนี้" : ""}</p>
       <div className="space-y-2">
         {prompts.map((p) => (
@@ -308,8 +334,8 @@ function Prompts({ spec, b, dirty }: { spec: Spec; b: RecipeBundle; dirty: boole
   );
 }
 
-function Renders({ recipeId, renders, canEdit, canManage, vectorKey, onChanged, onVector }: {
-  recipeId: string; renders: Render[]; canEdit: boolean; canManage: boolean; vectorKey: string | null;
+function Renders({ recipeId, renders, allRenders, colorwayId, colorway, canEdit, canManage, vectorKey, onChanged, onVector }: {
+  recipeId: string; renders: Render[]; allRenders: Render[]; colorwayId: string | null; colorway: string | null; canEdit: boolean; canManage: boolean; vectorKey: string | null;
   onChanged: (r: Render[]) => void; onVector: (key: string) => void;
 }) {
   const toast = useToast();
@@ -322,8 +348,8 @@ function Renders({ recipeId, renders, canEdit, canManage, vectorKey, onChanged, 
     try {
       const up = await uploadImagesWithDupCheck([file], { folder: "design-library/renders", max: 2400, onError: (_, e) => toast.error(e.message) });
       const key = up?.keys[0]; if (!key) return;
-      const r = await api<Render>(`/api/design-library/actions`, { json: { action: "add_render", recipe_id: recipeId, view_key: view, image_key: key } });
-      onChanged([r, ...renders]); setOpen((o) => ({ ...o, [view]: r.id })); toast.success(`เก็บรูปเวอร์ชัน ${r.version} แล้ว`);
+      const r = await api<Render>(`/api/design-library/actions`, { json: { action: "add_render", recipe_id: recipeId, view_key: view, image_key: key, colorway_id: colorwayId } });
+      onChanged([r, ...allRenders]); setOpen((o) => ({ ...o, [view]: r.id })); toast.success(`เก็บรูปเวอร์ชัน ${r.version} แล้ว`);
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(null); }
   };
@@ -332,13 +358,13 @@ function Renders({ recipeId, renders, canEdit, canManage, vectorKey, onChanged, 
     catch (e) { toast.error((e as Error).message); }
   };
   const remove = async (r: Render) => {
-    try { await api(`/api/design-library/renders/${r.id}`, { method: "DELETE" }); onChanged(renders.filter((x) => x.id !== r.id)); toast.success("ลบรูปแล้ว"); }
+    try { await api(`/api/design-library/renders/${r.id}`, { method: "DELETE" }); onChanged(allRenders.filter((x) => x.id !== r.id)); toast.success("ลบรูปแล้ว"); }
     catch (e) { toast.error((e as Error).message); }
     setDel(null);
   };
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
-      <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:photo" />รูปที่ได้จาก GPT (เก็บทุกเวอร์ชัน)</div>
+      <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:photo" />รูปที่ได้จาก GPT (เก็บทุกเวอร์ชัน){colorway && <span className="text-indigo-700 font-normal">· {colorway}</span>}</div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {RENDER_VIEWS.map((v) => {
           const list = renders.filter((r) => r.view_key === v.key).sort((a, c) => c.version - a.version);

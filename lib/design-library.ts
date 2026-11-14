@@ -55,7 +55,14 @@ export const PANELS: { key: PanelKey; label: string; en: string; inside: boolean
 export type Size = { w: number; h: number; d: number; strap: number };
 /** หูกระเป๋า (ซม.) · drop = ความสูงหูจากปากกระเป๋า · gap = ระยะห่างโคนหู 2 ข้าง · total = ความยาวรวมตัดจริง (0 = ให้ระบบประมาณ) · count 0 = ไม่มีหู */
 export type Handle = { drop: number; w: number; gap: number; count: number; total: number };
-export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]> };
+/**
+ * ชุดสี — สูตรเดียวแตกได้หลายสี · "สีหลัก" = ของที่เลือกในจุดของสูตรเอง (pins[].pick + hw_color)
+ * ชุดสีอื่นเก็บเฉพาะจุดที่ต่างจากสีหลัก (picks[pinId]) · ไม่มีใน picks = เหมือนสีหลัก · hw_color null = สีอะไหล่เหมือนสีหลัก
+ */
+export type Colorway = { id: string; name: string; hw_color: string | null; picks: Record<string, Pick | null> };
+export type Spec = { size: Size; handle: Handle; hw_color: string | null; pins: Pin[]; pockets: Record<PanelKey, PocketBox[]>; colorways: Colorway[] };
+export const MAX_COLORWAYS = 8;
+export const MAIN_COLORWAY_LABEL = "สีหลัก";
 
 export const DEFAULT_SIZE: Size = { w: 30, h: 35, d: 12, strap: 0 };
 export const DEFAULT_HANDLE: Handle = { drop: 18, w: 3, gap: 12, count: 2, total: 0 };
@@ -149,7 +156,58 @@ export function cleanSpec(v: unknown): Spec {
     pockets[p.key] = (Array.isArray(raw[p.key]) ? (raw[p.key] as unknown[]) : []).slice(0, MAX_BOXES)
       .map((b) => cleanBox(b, size)).filter((b): b is PocketBox => !!b);
   }
-  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets };
+  return { size, handle: cleanHandle(o.handle), hw_color: str(o.hw_color, 40) || null, pins, pockets, colorways: cleanColorways(o.colorways, pins) };
+}
+
+/** ชุดสี: ตัดจุดที่ไม่มีแล้วทิ้ง · ชื่อว่าง = "สี N" · id ซ้ำ = ทิ้งตัวหลัง */
+export function cleanColorways(v: unknown, pins: Pin[]): Colorway[] {
+  const pinIds = new Set(pins.map((p) => p.id));
+  const seen = new Set<string>();
+  return (Array.isArray(v) ? v : []).slice(0, MAX_COLORWAYS).flatMap((c): Colorway[] => {
+    if (!c || typeof c !== "object") return [];
+    const i = seen.size;   // ลำดับหลังตัดตัวเสียทิ้ง → ชื่อตั้งต้น "สี N" ไม่ข้ามเลข
+    const o = c as Record<string, unknown>;
+    const id = idOf(o.id);
+    if (seen.has(id)) return [];
+    seen.add(id);
+    const raw = (o.picks && typeof o.picks === "object" ? o.picks : {}) as Record<string, unknown>;
+    const picks: Record<string, Pick | null> = {};
+    for (const [pid, pk] of Object.entries(raw)) if (pinIds.has(pid)) picks[pid] = cleanPick(pk);
+    return [{ id, name: str(o.name, 60) || `สี ${i + 2}`, hw_color: str(o.hw_color, 40) || null, picks }];
+  });
+}
+
+/** สูตรตามชุดสีที่เลือก (null/ไม่พบ = สีหลัก) — ใช้ต่อกับ prompt / ใบสรุป / สต็อก ได้ทันทีเพราะหน้าตาเป็น Spec เดิม */
+export function applyColorway(spec: Spec, colorwayId: string | null | undefined): Spec {
+  const cw = colorwayId ? spec.colorways.find((c) => c.id === colorwayId) : null;
+  if (!cw) return spec;
+  return {
+    ...spec,
+    hw_color: cw.hw_color ?? spec.hw_color,
+    pins: spec.pins.map((p) => (p.id in cw.picks ? { ...p, pick: cw.picks[p.id] } : p)),
+  };
+}
+
+export const colorwayLabel = (spec: Spec, colorwayId: string | null | undefined) =>
+  (colorwayId && spec.colorways.find((c) => c.id === colorwayId)?.name) || MAIN_COLORWAY_LABEL;
+
+/** ตั้งของของ 1 จุดในชุดสี (pick = undefined → กลับไปเหมือนสีหลัก) · ชุดสีหลัก (null) = แก้ที่จุดตรง ๆ */
+export function setColorwayPick(spec: Spec, colorwayId: string | null, pinId: string, pick: Pick | null | undefined): Spec {
+  if (!colorwayId) return { ...spec, pins: spec.pins.map((p) => (p.id === pinId ? { ...p, pick: pick ?? null } : p)) };
+  return {
+    ...spec,
+    colorways: spec.colorways.map((c) => {
+      if (c.id !== colorwayId) return c;
+      const picks = { ...c.picks };
+      if (pick === undefined) delete picks[pinId]; else picks[pinId] = pick;
+      return { ...c, picks };
+    }),
+  };
+}
+
+/** SKU ทั้งหมดในสูตร รวมทุกชุดสี (ดึงสต็อกสดครั้งเดียว) */
+export function allSkuIds(spec: Spec): string[] {
+  return [...new Set([...specSkuIds(spec), ...spec.colorways.flatMap((c) => Object.values(c.picks).map(skuIdOf))].filter((x): x is string => !!x))];
 }
 
 // ─── ชื่อ/รหัสของสิ่งที่เลือก ───────────────────────────────────────────────────
@@ -212,6 +270,60 @@ export function stockHits(spec: Spec, stock: StockMap, lowAt = 10): { out: Stock
     if (h.onHand <= 0) out.push(h); else if (h.onHand < lowAt) low.push(h);
   });
   return { out, low };
+}
+
+// ─── เทียบ 2 สูตร (ข้ามแม่แบบได้ · จับคู่ตามหมวด ไม่ใช่ตามตำแหน่งจุด) ───────────
+export type CompareSide = { spec: Spec; choices: Choice[]; template: { code: string; name: string; category?: string | null } };
+export type CompareRow = {
+  group: "ทั่วไป" | "ขนาด" | "หู" | "วัสดุ" | "ช่อง";
+  label: string; a: string; b: string; same: boolean;
+  /** แถววัสดุ: ของที่เลือก (ไว้โชว์รูปย่อ) */
+  picksA?: (Pick | null)[]; picksB?: (Pick | null)[]; cat?: string;
+};
+
+const lenText = (cm: number) => (cm > 0 ? `${r1(cm)} ซม.` : "—");
+
+/** ของที่เลือกในหมวดหนึ่ง (หลายจุดหมวดเดียวกัน = หลายตัว) + ข้อความเทียบ (รหัส/ชื่อ เรียงตามจุด) */
+function categoryPicks(spec: Spec, cat: string): { picks: (Pick | null)[]; text: string } {
+  const body = bodyPickOf(spec);
+  const pins = spec.pins.filter((p) => p.cat === cat);
+  const text = pins.map((p) => { const i = pickInfo(p.pick, { bodyPick: body }); return [i.code, i.name].filter(Boolean).join(" · ") || "ยังไม่เลือก"; }).join(" / ");
+  return { picks: pins.map((p) => p.pick), text: text || "—" };
+}
+
+function pocketSummary(spec: Spec, panel: PanelKey, choices: Choice[]): string {
+  const boxes = spec.pockets[panel];
+  if (!boxes.length) return "ไม่มี";
+  return boxes.map((b) => `${choices.find((c) => c.list_key === "pocket_type" && c.code === b.type)?.name ?? "ช่อง"} ${r1(b.w)}×${r1(b.h)}`).join(", ");
+}
+
+export function compareRecipes(A: CompareSide, B: CompareSide): CompareRow[] {
+  const rows: CompareRow[] = [];
+  const push = (group: CompareRow["group"], label: string, a: string, b: string, extra: Partial<CompareRow> = {}) =>
+    rows.push({ group, label, a, b, same: a === b, ...extra });
+  const typeName = (s: CompareSide) => bagTypeOf(s.choices, s.template.category)?.name ?? s.template.category ?? "—";
+  push("ทั่วไป", "แม่แบบ", `${A.template.code} · ${A.template.name}`, `${B.template.code} · ${B.template.name}`);
+  push("ทั่วไป", "ประเภท", typeName(A), typeName(B));
+  const hwName = (s: CompareSide) => s.choices.find((c) => c.list_key === "hw_color" && c.code === s.spec.hw_color)?.name ?? "—";
+  push("ทั่วไป", "สีอะไหล่ทั้งใบ", hwName(A), hwName(B));
+  for (const [k, l] of [["w", "กว้าง"], ["h", "สูง"], ["d", "หนา"], ["strap", "สายยาว"]] as const) push("ขนาด", l, lenText(A.spec.size[k]), lenText(B.spec.size[k]));
+  const hd = (s: Spec) => s.handle;
+  push("หู", "จำนวนหู", `${hd(A.spec).count} หู`, `${hd(B.spec).count} หู`);
+  if (hd(A.spec).count > 0 || hd(B.spec).count > 0) {
+    for (const [k, l] of [["drop", "ความสูงหู"], ["w", "ความกว้างหู"], ["gap", "ระยะห่างหู"]] as const) push("หู", l, lenText(hd(A.spec)[k]), lenText(hd(B.spec)[k]));
+    push("หู", "ความยาวรวมหู", lenText(handleLength(hd(A.spec))), lenText(handleLength(hd(B.spec))));
+  }
+  // หมวด: เรียงตามลำดับในตัวเลือก (ใช้ตัวเลือกฝั่ง A ก่อน แล้วเติมหมวดที่มีแต่ฝั่ง B)
+  const order = [...A.choices, ...B.choices].filter((c) => c.list_key === "category").sort((x, y) => x.sort_order - y.sort_order).map((c) => c.code);
+  const used = new Set([...A.spec.pins, ...B.spec.pins].map((p) => p.cat).filter(Boolean));
+  const cats = [...new Set([...order.filter((c) => used.has(c)), ...used])];
+  for (const cat of cats) {
+    const a = categoryPicks(A.spec, cat), b = categoryPicks(B.spec, cat);
+    const name = categoryOf(A.choices, cat)?.name ?? categoryOf(B.choices, cat)?.name ?? cat;
+    push("วัสดุ", name, a.text, b.text, { picksA: a.picks, picksB: b.picks, cat });
+  }
+  for (const p of PANELS) push("ช่อง", p.label, pocketSummary(A.spec, p.key, A.choices), pocketSummary(B.spec, p.key, B.choices));
+  return rows;
 }
 
 // ─── Prompt (3 ชุด: 4 มุมรวมรูปเดียว · ข้างใน · คนสะพาย) ─────────────────────
@@ -341,7 +453,26 @@ export type BriefInput = {
   spec: Spec; choices: Choice[]; stock: StockMap; useVector: boolean;
   img: (key: string, w: number) => string;
   dateText: string;
+  /** ชุดสีของใบนี้ (spec = สูตรที่ applyColorway แล้ว) · baseSpec = สูตรเต็มทุกชุดสี → โชว์ตารางชุดสี */
+  colorwayName?: string | null;
+  baseSpec?: Spec;
 };
+
+/** ตารางชุดสี: แถว = จุด · คอลัมน์ = สีหลัก + ชุดสีอื่น (โชว์เฉพาะจุดที่มีอย่างน้อย 1 ชุดสีเปลี่ยน + แถวสีอะไหล่) */
+export function colorwayTableHtml(spec: Spec, choices: Choice[], img: (key: string, w: number) => string): string {
+  if (!spec.colorways.length) return "";
+  const cols = [{ id: null as string | null, name: MAIN_COLORWAY_LABEL }, ...spec.colorways.map((c) => ({ id: c.id as string | null, name: c.name }))];
+  const views = cols.map((c) => applyColorway(spec, c.id));
+  const changed = spec.pins.map((p, i) => ({ p, i })).filter(({ p }) => spec.colorways.some((c) => p.id in c.picks));
+  const hwName = (s: Spec) => esc(choices.find((c) => c.list_key === "hw_color" && c.code === s.hw_color)?.name ?? "—");
+  const head = `<tr><th style="width:16%">จุด</th>${cols.map((c) => `<th>${esc(c.name)}</th>`).join("")}</tr>`;
+  const body = changed.map(({ p, i }) => `<tr><td>${i + 1}. ${esc(categoryOf(choices, p.cat)?.name ?? p.cat)}</td>${views.map((v) => {
+    const pk = v.pins[i].pick; const info = pickInfo(pk, { bodyPick: bodyPickOf(v) });
+    return `<td><div style="display:flex;gap:4px;align-items:center">${pickThumbSvg(pk, `width="34" height="34"`, img, { bodyPick: bodyPickOf(v) })}<span style="font-size:10.5px">${esc(info.code || info.name || "—")}</span></div></td>`;
+  }).join("")}</tr>`).join("");
+  const hwRow = spec.colorways.some((c) => c.hw_color) ? `<tr><td>สีอะไหล่ทั้งใบ</td>${views.map((v) => `<td>${hwName(v)}</td>`).join("")}</tr>` : "";
+  return `<h4>ชุดสี (${cols.length} สี)</h4><table>${head}${body || ""}${hwRow}${!body && !hwRow ? `<tr><td colspan="${cols.length + 1}" style="color:#999">ทุกชุดสียังเหมือนสีหลัก</td></tr>` : ""}</table>`;
+}
 
 /** ภาพเส้นชี้: รูปกระเป๋ากลาง + การ์ดรูปชิ้นส่วนซ้าย/ขวา (รูปใหญ่ให้ GPT เห็นชัด) */
 export function calloutSvg(b: BriefInput): string {
@@ -441,7 +572,7 @@ export function buildBriefHtml(b: BriefInput): string {
   .callout { break-inside: avoid; margin-top: 8px; }
   </style></head><body><div class="doc">
   <div class="hd"><div><div class="t">DESIGN BRIEF</div><div style="color:#666">ใบสรุปแบบสำหรับสร้างรูป</div></div>
-  <div class="r">${esc(t.code)} · ${esc(t.name)} · สูตร #${r.seq}${r.name ? ` ${esc(r.name)}` : ""}<br>${esc(b.dateText)}${r.created_by_name ? ` · ผู้ทำ: ${esc(r.created_by_name)}` : ""}</div></div>
+  <div class="r">${esc(t.code)} · ${esc(t.name)} · สูตร #${r.seq}${r.name ? ` ${esc(r.name)}` : ""}${b.colorwayName ? ` · <b>${esc(b.colorwayName)}</b>` : ""}<br>${esc(b.dateText)}${r.created_by_name ? ` · ผู้ทำ: ${esc(r.created_by_name)}` : ""}</div></div>
   <div class="callout">${calloutSvg(b)}</div>
   <div class="kv"><div>ขนาด (กว้าง×สูง×หนา)<b>${spec.size.w}×${spec.size.h}×${spec.size.d} ซม.</b><span class="in">${inch(spec.size.w)}×${inch(spec.size.h)}×${inch(spec.size.d)} นิ้ว</span></div>
   <div>สายยาว<b>${spec.size.strap > 0 ? `${spec.size.strap} ซม.` : "ไม่มี"}</b>${spec.size.strap > 0 ? `<span class="in">${inch(spec.size.strap)} นิ้ว</span>` : ""}</div>
@@ -453,6 +584,7 @@ export function buildBriefHtml(b: BriefInput): string {
   ${warn.length ? `<div class="warn">${warn.map(esc).join("<br>")}</div>` : ""}
   ${r.note ? `<div style="margin-top:6px">หมายเหตุ: ${esc(r.note)}</div>` : ""}
   <h4>ตารางสรุป</h4><table><tr><th style="width:5%">#</th><th style="width:14%">หมวด</th><th style="width:12%">รูป</th><th>รหัส · ชื่อ</th><th style="width:24%">โน้ต</th><th style="width:11%">สต็อก</th></tr>${rows || `<tr><td colspan="6" style="color:#999">ยังไม่มีจุด</td></tr>`}</table>
+  ${b.baseSpec ? colorwayTableHtml(b.baseSpec, b.choices, b.img) : ""}
   <h4>ช่อง</h4><div class="pks">${pocketCells}</div>
   <h4>Prompt สำหรับ GPT (แนบรูปเส้นชี้หน้านี้ไปด้วย · เลข [ref N] = เลขจุด)</h4>
   ${prompts.map((p, i) => `<div class="pr"><b>${i + 1}) ${esc(p.title)}</b><div>${esc(p.text)}</div></div>`).join("")}
