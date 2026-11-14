@@ -752,3 +752,33 @@ export function buildBriefHtml(b: BriefInput): string {
   ${prompts.map((p, i) => `<div class="pr"><b>${i + 1}) ${esc(p.title)}</b><div>${esc(p.text)}</div></div>`).join("")}
   </div></body></html>`;
 }
+
+// ─── จุด: คัดลอก / วาง / ทำซ้ำ / ขยับ (รอบ 7 · เจ้าของขอ 2026-11-14) ────────────────────
+/** ป้ายข้อความในคลิปบอร์ด — วางข้ามสูตร/ข้ามแท็บได้ (อ่านจาก paste event ไม่ต้องขอสิทธิ์อ่านคลิปบอร์ด) */
+export const PIN_CLIP_TAG = "dl-pin/v1";
+export type PinCopy = Omit<Pin, "id">;
+
+/** จุด → ข้อความเก็บในคลิปบอร์ด (หมวด + ของที่เลือก + โน้ต + ตำแหน่ง) */
+export function pinToClipboard(p: Pin | PinCopy): string {
+  return JSON.stringify({ t: PIN_CLIP_TAG, x: p.x, y: p.y, cat: p.cat, pick: p.pick, note: p.note });
+}
+
+/** ข้อความในคลิปบอร์ด → จุด (ไม่ใช่ของเรา / เสีย = null) · ผ่านตัวทำความสะอาดเดียวกับตอนบันทึก */
+export function pinFromClipboard(text: string | null | undefined): PinCopy | null {
+  if (!text || text.length > 20000 || !text.includes(PIN_CLIP_TAG)) return null;
+  try {
+    const o = JSON.parse(text) as Record<string, unknown>;
+    if (!o || o.t !== PIN_CLIP_TAG) return null;
+    return { x: r1(clamp(num(o.x), 0, 100)), y: r1(clamp(num(o.y), 0, 100)), cat: str(o.cat, 40), pick: cleanPick(o.pick), note: str(o.note, 300) };
+  } catch { return null; }
+}
+
+/** ขยับตำแหน่งจุด (หน่วย % ของรูป) ให้อยู่ในรูปเสมอ */
+export function nudgePos(x: number, y: number, dx: number, dy: number): { x: number; y: number } {
+  return { x: r1(clamp(x + dx, 0, 100)), y: r1(clamp(y + dy, 0, 100)) };
+}
+
+/** ตำแหน่งวางจุดซ้ำ — เลื่อนเฉียงลงขวา 3% · ชนขอบ = เลื่อนกลับทางซ้าย/บน */
+export function offsetPos(x: number, y: number, step = 3): { x: number; y: number } {
+  return { x: r1(x + step > 100 ? x - step : x + step), y: r1(y + step > 100 ? y - step : y + step) };
+}

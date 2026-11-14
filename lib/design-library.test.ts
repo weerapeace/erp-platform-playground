@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  allSkuIds, applyColorway, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
+  allSkuIds, applyColorway, nudgePos, offsetPos, pinFromClipboard, pinToClipboard, bagWord, bothUnits, cleanPrompts, fillPromptVars, promptContext, resolvePrompts, teamPromptSettings, handleCountText, handleText, panelSize, sizeKnown, sizePhrase, colorwayLabel, compareRecipes, setColorwayPick, buildBriefHtml, buildPrompts, cleanSpec, dlDraftOf, handleLength, nextTemplateCode, pickInfo, pocketPanelSvg, ruleHits, specSkuIds, stockHits, toStudioParams, type Choice, type Spec,
 } from "./design-library";
 
 const ch = (list_key: Choice["list_key"], code: string, name: string, extra: Partial<Choice> = {}): Choice =>
@@ -255,5 +255,28 @@ describe("รอบ 6: prompt เปิด/ปิด · แก้ · เพิ�
     expect(html).toContain("my inside");
     expect(html).not.toContain("Create ONE image arranged");   // grid4 ปิด = ไม่พิมพ์
     expect(cleanPrompts(null)).toEqual({ on: {}, edits: {}, custom: [] });
+  });
+});
+
+describe("รอบ 7 — คัดลอก/วางจุด", () => {
+  it("คัดลอกแล้ววางกลับได้ครบ (หมวด ของ โน้ต ตำแหน่ง)", () => {
+    const p = { id: "p1", x: 12.3, y: 45.6, cat: "hw", pick: { kind: "sku" as const, sku_id: "s1", code: "HW-1", name: "ห่วง", image_key: null }, note: "ทอง" };
+    const back = pinFromClipboard(pinToClipboard(p));
+    expect(back).toEqual({ x: 12.3, y: 45.6, cat: "hw", pick: p.pick, note: "ทอง" });
+  });
+  it("ข้อความอื่น / JSON เสีย / ป้ายไม่ตรง = null", () => {
+    expect(pinFromClipboard("hello")).toBeNull();
+    expect(pinFromClipboard(`{"t":"${"dl-pin/v1"}"`)).toBeNull();
+    expect(pinFromClipboard(JSON.stringify({ t: "other", x: 1 }))).toBeNull();
+    expect(pinFromClipboard(null)).toBeNull();
+  });
+  it("ค่าเกินถูกบีบ + ของแปลกถูกทิ้ง", () => {
+    const back = pinFromClipboard(JSON.stringify({ t: "dl-pin/v1", x: 150, y: -5, cat: "zip", pick: { kind: "weird" }, note: 5 }));
+    expect(back).toEqual({ x: 100, y: 0, cat: "zip", pick: null, note: "" });
+  });
+  it("ขยับ / วางซ้ำ ไม่หลุดรูป", () => {
+    expect(nudgePos(99.8, 0.2, 0.5, -0.5)).toEqual({ x: 100, y: 0 });
+    expect(offsetPos(10, 20)).toEqual({ x: 13, y: 23 });
+    expect(offsetPos(99, 98)).toEqual({ x: 96, y: 95 });
   });
 });

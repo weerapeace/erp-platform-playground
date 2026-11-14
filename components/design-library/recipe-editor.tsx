@@ -13,7 +13,7 @@
  * บันทึกด้วย SaveBar กลาง (ถามก่อนออกถ้ายังไม่บันทึก) → POST /api/design-library/actions save_recipe
  * สิทธิ์: ดู design_library.view · แก้ design_library.edit (ไม่มีสิทธิ์ = ดูอย่างเดียว)
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -27,7 +27,7 @@ import { useFileDrop } from "@/components/file-drop";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import {
   allSkuIds, applyColorway, bodyPickOf, categoryOf, chosenRenders, cleanSpec, colorwayLabel, pickInfo, RENDER_VIEWS, ruleHits, setColorwayPick, sizeKnown, skuIdOf, stockHits, toStudioParams,
-  MAX_PINS, type Pin, type Spec,
+  MAX_PINS, nudgePos, offsetPos, PANELS, type Pin, type PinCopy, type Spec,
 } from "@/lib/design-library";
 import { PATTERN_SCHEMA } from "@/lib/pattern-project";
 import { apiFetch } from "@/lib/api";
@@ -41,6 +41,12 @@ import { LenInput, UnitToggle, useLenUnit } from "./units";
 import { SendToSheetModal, sheetHref } from "./send-to-sheet";
 import { ToProductModal } from "./to-product";
 import { PromptsPanel } from "./prompts-panel";
+import { useHistory, usePinShortcuts } from "./pin-shortcuts";
+import { ScrollTabs } from "@/components/scroll-tabs";
+
+/** หัวข้อล่างของหน้าสูตร (รอบ 7: เป็นแท็บ · จำแท็บล่าสุดในเครื่อง) */
+type LowerTab = "size" | "cost" | "prompt" | "renders";
+const TAB_KEY = "dl-recipe-tab";
 import { api, compareHref, img, newId, printHref, techpackHref, thaiDate, tplHref, type Recipe, type RecipeBundle, type Render } from "./shared";
 
 export function RecipeEditor({ id }: { id: string }) {
@@ -65,14 +71,21 @@ export function RecipeEditor({ id }: { id: string }) {
   const canManage = usePermission("design_library.manage");
   const unit = useLenUnit();
   const readOnly = !canEdit;
+  const hist = useHistory<Spec>();
+  const specRef = useRef<Spec | null>(null);
+  specRef.current = spec;
+  const hoverPt = useRef<{ x: number; y: number } | null>(null);   // เมาส์อยู่ตรงไหนบนรูป → Ctrl+V วางจุดตรงนั้น
+  const [tab, setTabState] = useState<LowerTab>("size");
+  useEffect(() => { try { const v = localStorage.getItem(TAB_KEY); if (v === "size" || v === "cost" || v === "prompt" || v === "renders") setTabState(v); } catch { /* ไม่มีที่เก็บ = ไม่จำ */ } }, []);
+  const setTab = (v: LowerTab) => { setTabState(v); try { localStorage.setItem(TAB_KEY, v); } catch { /* ไม่มีที่เก็บ = ไม่จำ */ } };
 
   const load = useCallback(async () => {
     setErr(null);
     try {
       const d = await api<RecipeBundle>(`/api/design-library/bundle?recipe_id=${id}`);
-      setB(d); setSpec(cleanSpec(d.recipe.spec)); setMeta({ name: d.recipe.name ?? "", note: d.recipe.note ?? "" }); setStock(d.stock); setMaterials(d.materials ?? {}); setDirty(false);
+      setB(d); setSpec(cleanSpec(d.recipe.spec)); setMeta({ name: d.recipe.name ?? "", note: d.recipe.note ?? "" }); setStock(d.stock); setMaterials(d.materials ?? {}); setDirty(false); hist.reset();
     } catch (e) { setErr((e as Error).message); }
-  }, [id]);
+  }, [id, hist]);
   useEffect(() => { void load(); }, [load]);
 
   // SKU ที่เพิ่งเลือก → ดึงสต็อกสด
@@ -86,7 +99,8 @@ export function RecipeEditor({ id }: { id: string }) {
     return () => { alive = false; };
   }, [spec, stock]);
 
-  const update = (fn: (s: Spec) => Spec) => { setSpec((s) => (s ? fn(s) : s)); setDirty(true); };
+  /** แก้สูตร — เก็บค่าก่อนแก้ไว้ย้อนกลับ (Ctrl+Z) ทุกครั้ง */
+  const update = (fn: (s: Spec) => Spec) => { setSpec((s) => { if (!s) return s; const n = fn(s); if (n !== s) hist.record(s); return n; }); setDirty(true); };
   const setPin = (i: number, p: Pin) => update((s) => ({ ...s, pins: s.pins.map((x, k) => (k === i ? p : x)) }));
   /** สูตรตามชุดสีที่เลือก — ทุกส่วนของหน้า (รูป/จุด/คำเตือน/prompt) ใช้ตัวนี้ */
   const view = useMemo(() => (spec ? applyColorway(spec, cw) : null), [spec, cw]);
@@ -101,6 +115,35 @@ export function RecipeEditor({ id }: { id: string }) {
     });
   };
 
+  /** เพิ่มจุด (ใหม่ / วางจากที่คัดลอก / ทำซ้ำ) — ของที่เลือกเข้าไปเป็นของสีหลักของจุดใหม่ */
+  const addPinCopy = (p: PinCopy, at?: { x: number; y: number }): number | null => {
+    if (!spec) return null;
+    if (spec.pins.length >= MAX_PINS) { toast.warning(`เพิ่มได้สูงสุด ${MAX_PINS} จุด`); return null; }
+    const pos = at ?? offsetPos(p.x, p.y);
+    const ni = spec.pins.length;
+    update((s) => ({ ...s, pins: [...s.pins, { ...p, id: newId(), x: pos.x, y: pos.y }] }));
+    setSel(ni);
+    return ni;
+  };
+  const duplicatePin = (i: number, at?: { x: number; y: number }) => { const p = view?.pins[i]; return p ? addPinCopy(p, at) : null; };
+  const deletePin = (i: number) => { update((s) => ({ ...s, pins: s.pins.filter((_, k) => k !== i) })); setSel(null); };
+  const movePin = (i: number, x: number, y: number) => update((s) => ({ ...s, pins: s.pins.map((p, k) => (k === i ? { ...p, x, y } : p)) }));
+  const undoRedo = (dir: "undo" | "redo") => {
+    const cur = specRef.current; if (!cur) return;
+    const next = dir === "undo" ? hist.undo(cur) : hist.redo(cur);
+    if (!next) { toast.info(dir === "undo" ? "ไม่มีอะไรให้ย้อนแล้ว" : "ไม่มีอะไรให้ทำซ้ำ"); return; }
+    setSpec(next); setDirty(true);
+    setSel((s) => (s != null && s < next.pins.length ? s : null));
+  };
+  usePinShortcuts({
+    enabled: !!spec, canEdit: !readOnly, sel, pins: view?.pins ?? [],
+    onDelete: deletePin, onDuplicate: (i) => { duplicatePin(i); },
+    onPaste: (p) => { addPinCopy(p, hoverPt.current ?? undefined); },
+    onNudge: (i, dx, dy) => { const p = spec?.pins[i]; if (p) { const q = nudgePos(p.x, p.y, dx, dy); movePin(i, q.x, q.y); } },
+    onUndo: () => undoRedo("undo"), onRedo: () => undoRedo("redo"), onEscape: () => setSel(null),
+    onCopied: () => toast.success("คัดลอกจุดแล้ว — กด Ctrl+V วางในสูตรนี้หรือสูตรอื่น"),
+  });
+
   const save = async () => {
     if (!spec) return;
     setSaving(true);
@@ -112,7 +155,7 @@ export function RecipeEditor({ id }: { id: string }) {
     } catch (e) { toast.error((e as Error).message); return false; }
     finally { setSaving(false); }
   };
-  const discard = () => { if (!b) return; setSpec(cleanSpec(b.recipe.spec)); setMeta({ name: b.recipe.name ?? "", note: b.recipe.note ?? "" }); setDirty(false); setSel(null); };
+  const discard = () => { if (!b) return; setSpec(cleanSpec(b.recipe.spec)); setMeta({ name: b.recipe.name ?? "", note: b.recipe.note ?? "" }); setDirty(false); setSel(null); hist.reset(); };
   const openPrint = async () => {
     if (dirty && !(await save())) return;
     window.open(printHref(id, cw), "_blank", "noopener");
@@ -148,6 +191,14 @@ export function RecipeEditor({ id }: { id: string }) {
   if (err) return <div className="p-6"><ErrorState title="เปิดสูตรไม่สำเร็จ" hint={err} onRetry={() => void load()} /></div>;
   if (!b || !spec || !view) return <div className="p-6"><LoadingState label="กำลังโหลดสูตร…" /></div>;
   const t = b.template;
+  const costOk = canCost && b.can_cost;
+  const lowerTabs: { key: LowerTab; label: string; icon: string; count: number | null }[] = [
+    { key: "size", label: "ขนาดและช่อง", icon: "i:ruler-measure", count: PANELS.reduce((n, p) => n + spec.pockets[p.key].length, 0) },
+    ...(costOk ? [{ key: "cost" as const, label: "ทุนประมาณ", icon: "i:coin", count: null }] : []),
+    { key: "prompt", label: "Prompt", icon: "i:sparkles", count: null },
+    { key: "renders", label: "รูปจาก GPT", icon: "i:photo", count: b.renders.filter((r) => (r.colorway_id ?? null) === cw).length },
+  ];
+  const curTab: LowerTab = tab === "cost" && !costOk ? "size" : tab;
 
   return (
     <div className="p-4 sm:p-6 pb-24 max-w-7xl mx-auto">
@@ -206,24 +257,44 @@ export function RecipeEditor({ id }: { id: string }) {
             <span className="ml-auto text-[12px] text-slate-500">{spec.colorways.length > 0 && <b className="text-indigo-700 font-medium mr-2">{colorwayLabel(spec, cw)}</b>}{spec.pins.length} จุด</span>
           </div>
           <Stage imageKey={vector && t.vector_image_key ? t.vector_image_key : t.image_key} pins={view.pins} sel={sel} readOnly={readOnly}
-            onSelect={setSel}
-            onAdd={(x, y) => { if (spec.pins.length >= MAX_PINS) { toast.warning(`เพิ่มได้สูงสุด ${MAX_PINS} จุด`); return; } update((s) => ({ ...s, pins: [...s.pins, { id: newId(), x, y, cat: "", pick: null, note: "" }] })); setSel(spec.pins.length); }}
-            onMove={(i, x, y) => setPin(i, { ...spec.pins[i], x, y })} />
-          {!readOnly && <p className="text-[12px] text-slate-400 mt-2">กดตรงไหนก็ได้บนรูป = เพิ่มจุด · ลากจุด = ย้ายตำแหน่ง · ตัวเลขบนจุด = เลขเดียวกับใบสรุปและ prompt</p>}
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3 self-start">
-          {sel != null && spec.pins[sel] ? (
-            <PickPanel key={`${spec.pins[sel].id}-${cw ?? "main"}`} pin={view.pins[sel]} index={sel} spec={view} choices={b.choices} stock={stock} readOnly={readOnly}
-              onChange={(p) => editPin(sel, p)} onHwColor={(code) => update((s) => (cw ? { ...s, colorways: s.colorways.map((c) => (c.id === cw ? { ...c, hw_color: code } : c)) } : { ...s, hw_color: code }))}
-              onDelete={() => { update((s) => ({ ...s, pins: s.pins.filter((_, k) => k !== sel) })); setSel(null); }} />
-          ) : (
-            <PinList spec={view} b={b} stock={stock} onSelect={setSel} readOnly={readOnly} />
+            onSelect={setSel} onBlank={() => setSel(null)} onHover={(p) => { hoverPt.current = p; }}
+            onAdd={(x, y) => { addPinCopy({ x, y, cat: "", pick: null, note: "" }, { x, y }); }}
+            onMove={movePin} onDuplicate={(i, x, y) => duplicatePin(i, { x, y })}
+            pop={sel != null && view.pins[sel] ? (
+              <PickPanel key={`${view.pins[sel].id}-${cw ?? "main"}`} pin={view.pins[sel]} index={sel} spec={view} choices={b.choices} stock={stock} readOnly={readOnly}
+                onChange={(p) => editPin(sel, p)} onHwColor={(code) => update((s) => (cw ? { ...s, colorways: s.colorways.map((c) => (c.id === cw ? { ...c, hw_color: code } : c)) } : { ...s, hw_color: code }))}
+                onDelete={() => deletePin(sel)} onClose={() => setSel(null)} />
+            ) : null} />
+          {!readOnly && (
+            <p className="text-[12px] text-slate-400 mt-2 leading-relaxed">
+              กดบนรูป = เพิ่มจุด · ลากจุด = ย้าย · <b className="font-medium text-slate-500">Alt+ลาก</b> = ทำซ้ำ · <b className="font-medium text-slate-500">Delete</b> ลบ ·{" "}
+              <b className="font-medium text-slate-500">Ctrl+C / Ctrl+V</b> คัดลอก-วาง (ข้ามสูตรได้) · <b className="font-medium text-slate-500">Ctrl+D</b> ทำซ้ำ · ลูกศร ขยับ · <b className="font-medium text-slate-500">Ctrl+Z</b> ย้อน
+            </p>
           )}
+        </div>
+        <div className="space-y-4 self-start">
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <PinList spec={view} b={b} stock={stock} sel={sel} onSelect={setSel} readOnly={readOnly} />
+          </div>
+          <Warnings spec={view} b={b} stock={stock} />
         </div>
       </div>
 
-      {/* ── ขนาด + คำเตือน + หมายเหตุ ── */}
-      <div className="grid gap-4 lg:grid-cols-2 mt-4">
+      {/* ── หัวข้อล่าง = แท็บ (รอบ 7 · จำแท็บล่าสุด) ── */}
+      <div className="mt-5">
+        <ScrollTabs activeKey={curTab} className="border-b border-slate-200">
+          {lowerTabs.map((x) => (
+            <button key={x.key} type="button" data-tab-key={x.key} onClick={() => setTab(x.key)}
+              className={`shrink-0 h-10 px-4 -mb-px border-b-2 text-[14px] inline-flex items-center gap-1.5 whitespace-nowrap ${curTab === x.key ? "border-indigo-600 text-indigo-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+              <Icon value={x.icon} />{x.label}
+              {x.count != null && x.count > 0 && <span className={`text-[11px] px-1.5 rounded-full ${curTab === x.key ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>{x.count}</span>}
+            </button>
+          ))}
+        </ScrollTabs>
+      </div>
+
+      {curTab === "size" && (
+      <div className="space-y-4 mt-4">
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           <div className="flex items-center gap-2 mb-2"><span className="text-[14px] font-medium text-slate-800">ขนาดกระเป๋า</span><span className="ml-auto"><UnitToggle unit={unit.unit} set={unit.set} /></span></div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -239,29 +310,29 @@ export function RecipeEditor({ id }: { id: string }) {
               className="mt-1 w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-800 disabled:bg-slate-50" />
           </label>
         </div>
-        <Warnings spec={view} b={b} stock={stock} />
-      </div>
 
       {/* ── ช่อง ── */}
-      <section className="rounded-xl border border-slate-200 bg-white p-3 mt-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-3">
         <div className="text-[14px] font-medium text-slate-800 mb-2 flex items-center gap-2"><Icon value="i:ruler-measure" />วาดขนาดช่อง</div>
         <PocketEditor spec={spec} choices={b.choices} readOnly={readOnly} unit={unit.unit} onChange={(pockets) => update((s) => ({ ...s, pockets }))} />
       </section>
+      </div>
+      )}
 
       {/* ── ทุนประมาณ (เฉพาะสิทธิ์ดูต้นทุน) ── */}
-      {canCost && b.can_cost && (
+      {curTab === "cost" && costOk && (
         <CostPanel spec={view} cost={spec.cost} choices={b.choices} materials={materials} calcRows={b.calc ?? []} skuIds={allSkuIds(spec)}
           colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} readOnly={readOnly} onChange={(cost) => update((s) => ({ ...s, cost }))} />
       )}
 
       {/* ── Prompt ── */}
-      <PromptsPanel template={b.template} spec={view} choices={b.choices} dirty={dirty} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null}
-        readOnly={readOnly} onChange={(p) => update((s) => ({ ...s, prompts: p }))} />
+      {curTab === "prompt" && <PromptsPanel template={b.template} spec={view} choices={b.choices} dirty={dirty} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null}
+        readOnly={readOnly} onChange={(p) => update((s) => ({ ...s, prompts: p }))} />}
 
       {/* ── รูปจาก GPT ── */}
-      <Renders recipeId={id} renders={b.renders.filter((r) => (r.colorway_id ?? null) === cw)} allRenders={b.renders} colorwayId={cw} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
+      {curTab === "renders" && <Renders recipeId={id} renders={b.renders.filter((r) => (r.colorway_id ?? null) === cw)} allRenders={b.renders} colorwayId={cw} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
         onChanged={(renders) => setB((p) => (p ? { ...p, renders } : p))}
-        onVector={(key) => setB((p) => (p ? { ...p, template: { ...p.template, vector_image_key: key } } : p))} />
+        onVector={(key) => setB((p) => (p ? { ...p, template: { ...p.template, vector_image_key: key } } : p))} />}
 
       <ToProductModal open={productOpen} onClose={() => setProductOpen(false)} spec={spec} choices={b.choices} sheet={b.sheet}
         canSend={canEdit && canSheet} onSend={() => { setProductOpen(false); void openSendSheet(); }} />
@@ -275,13 +346,18 @@ export function RecipeEditor({ id }: { id: string }) {
   );
 }
 
-/** รูป + จุด (พิกัด % ของรูป) — กดที่ว่างเพิ่มจุด · ลากจุดย้าย (ขยับ < 4px = กดเลือก) */
-function Stage({ imageKey, pins, sel, readOnly, onSelect, onAdd, onMove }: {
-  imageKey: string | null; pins: Pin[]; sel: number | null; readOnly: boolean;
-  onSelect: (i: number) => void; onAdd: (x: number, y: number) => void; onMove: (i: number, x: number, y: number) => void;
+/**
+ * รูป + จุด (พิกัด % ของรูป) — กดที่ว่างเพิ่มจุด · ลากจุดย้าย (ขยับ < 4px = กดเลือก) · Alt+ลากจุด = ทำซ้ำแล้วลากตัวใหม่
+ * ป๊อปจุด (รอบ 7): ลอยข้างจุดที่เลือก พลิกซ้าย/ขวา บน/ล่างตามตำแหน่ง · จอแคบ = อยู่ใต้รูป
+ *   ตอนป๊อปเปิด กดที่ว่างบนรูป = ปิดป๊อป (ไม่เพิ่มจุด กันเผลอ) · ป๊อปอยู่นอกกล่องรูป → คลิกในป๊อป/ป๊อปอัปที่เปิดจากป๊อป ไม่ถูกนับเป็นคลิกบนรูป
+ */
+function Stage({ imageKey, pins, sel, readOnly, pop, onSelect, onBlank, onHover, onAdd, onMove, onDuplicate }: {
+  imageKey: string | null; pins: Pin[]; sel: number | null; readOnly: boolean; pop: ReactNode;
+  onSelect: (i: number) => void; onBlank: () => void; onHover: (p: { x: number; y: number } | null) => void;
+  onAdd: (x: number, y: number) => void; onMove: (i: number, x: number, y: number) => void; onDuplicate: (i: number, x: number, y: number) => number | null;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ i: number; sx: number; sy: number; moved: boolean } | null>(null);
+  const drag = useRef<{ i: number; sx: number; sy: number; moved: boolean; dup: { x: number; y: number } | null } | null>(null);
   const pct = (e: { clientX: number; clientY: number }) => {
     const r = box.current!.getBoundingClientRect();
     return { x: Math.round(Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)) * 10) / 10, y: Math.round(Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100)) * 10) / 10 };
@@ -290,31 +366,62 @@ function Stage({ imageKey, pins, sel, readOnly, onSelect, onAdd, onMove }: {
     e.stopPropagation();
     if (readOnly) { onSelect(i); return; }
     (e.target as Element).setPointerCapture(e.pointerId);
-    drag.current = { i, sx: e.clientX, sy: e.clientY, moved: false };
+    const p = pins[i];
+    if (e.altKey && p) {
+      const ni = onDuplicate(i, p.x, p.y);
+      if (ni != null) { drag.current = { i: ni, sx: e.clientX, sy: e.clientY, moved: false, dup: { x: p.x, y: p.y } }; return; }
+    }
+    drag.current = { i, sx: e.clientX, sy: e.clientY, moved: false, dup: null };
   };
   const pinMove = (e: RPointerEvent) => {
     const d = drag.current; if (!d) return;
     if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) return;
     d.moved = true; const p = pct(e); onMove(d.i, p.x, p.y);
   };
-  const pinUp = () => { const d = drag.current; drag.current = null; if (d && !d.moved) onSelect(d.i); };
+  const pinUp = () => {
+    const d = drag.current; drag.current = null;
+    if (!d) return;
+    if (d.dup && !d.moved) { const q = offsetPos(d.dup.x, d.dup.y); onMove(d.i, q.x, q.y); return; }   // Alt+คลิกไม่ลาก = วางเยื้องให้เห็น
+    if (!d.moved) onSelect(d.i);
+  };
+  const sp = sel != null ? pins[sel] : null;
+  const popPos = sp ? ({
+    "--pl": sp.x < 55 ? `calc(${sp.x}% + 22px)` : "auto",
+    "--pr": sp.x < 55 ? "auto" : `calc(${100 - sp.x}% + 22px)`,
+    "--pt": sp.y < 50 ? `max(0px, calc(${sp.y}% - 28px))` : "auto",
+    "--pb": sp.y < 50 ? "auto" : `max(0px, calc(${100 - sp.y}% - 28px))`,
+  } as CSSProperties) : undefined;
   return (
-    <div ref={box} className="relative select-none" style={{ cursor: readOnly ? "default" : "crosshair", touchAction: "none" }}
-      onClick={(e) => { if (readOnly || (e.target as Element).closest("[data-pin]")) return; const p = pct(e); onAdd(p.x, p.y); }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      {imageKey ? <img src={img(imageKey, 1400)} alt="แม่แบบ" draggable={false} className="w-full block" /> : <div className="h-72 bg-slate-50" />}
-      {pins.map((p, i) => (
-        <button key={p.id} type="button" data-pin onPointerDown={(e) => pinDown(e, i)} onPointerMove={pinMove} onPointerUp={pinUp}
-          className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border text-[12px] font-semibold flex items-center justify-center ${i === sel ? "w-8 h-8 ring-4 ring-indigo-400/60" : "w-7 h-7"} ${p.pick || p.cat ? "bg-amber-400 border-amber-900 text-amber-950" : "bg-white border-slate-400 text-slate-600"}`}
-          style={{ left: `${p.x}%`, top: `${p.y}%`, cursor: readOnly ? "pointer" : "grab" }} aria-label={`จุดที่ ${i + 1}`}>
-          {i + 1}
-        </button>
-      ))}
+    <div className="relative">
+      <div ref={box} className="relative select-none" style={{ cursor: readOnly ? "default" : "crosshair", touchAction: "none" }}
+        onPointerMove={(e) => onHover(pct(e))} onPointerLeave={() => onHover(null)}
+        onClick={(e) => {
+          if (!box.current?.contains(e.target as Node) || (e.target as Element).closest("[data-pin]")) return;
+          if (pop) { onBlank(); return; }
+          if (readOnly) return;
+          const p = pct(e); onAdd(p.x, p.y);
+        }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {imageKey ? <img src={img(imageKey, 1400)} alt="แม่แบบ" draggable={false} className="w-full block" /> : <div className="h-72 bg-slate-50" />}
+        {pins.map((p, i) => (
+          <button key={p.id} type="button" data-pin onPointerDown={(e) => pinDown(e, i)} onPointerMove={pinMove} onPointerUp={pinUp}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border text-[12px] font-semibold flex items-center justify-center ${i === sel ? "w-8 h-8 ring-4 ring-indigo-400/60 z-[1]" : "w-7 h-7"} ${p.pick || p.cat ? "bg-amber-400 border-amber-900 text-amber-950" : "bg-white border-slate-400 text-slate-600"}`}
+            style={{ left: `${p.x}%`, top: `${p.y}%`, cursor: readOnly ? "pointer" : "grab" }} aria-label={`จุดที่ ${i + 1}`} title={readOnly ? undefined : "ลาก = ย้าย · Alt+ลาก = ทำซ้ำ · Delete = ลบ"}>
+            {i + 1}
+          </button>
+        ))}
+      </div>
+      {pop && sp && (
+        <div data-pin-pop style={popPos}
+          className="relative mt-2 sm:mt-0 sm:absolute z-30 w-full sm:w-[340px] max-w-full rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_32px_rgba(15,23,42,0.18)] sm:[left:var(--pl)] sm:[right:var(--pr)] sm:[top:var(--pt)] sm:[bottom:var(--pb)]">
+          {pop}
+        </div>
+      )}
     </div>
   );
 }
 
-function PinList({ spec, b, stock, onSelect, readOnly }: { spec: Spec; b: RecipeBundle; stock: Record<string, number>; onSelect: (i: number) => void; readOnly: boolean }) {
+function PinList({ spec, b, stock, sel, onSelect, readOnly }: { spec: Spec; b: RecipeBundle; stock: Record<string, number>; sel: number | null; onSelect: (i: number) => void; readOnly: boolean }) {
   const body = bodyPickOf(spec);
   if (!spec.pins.length) return <div className="text-[13px] text-slate-500 py-6 text-center">{readOnly ? "สูตรนี้ยังไม่มีจุด" : "กดบนรูปตรงส่วนที่อยากเปลี่ยน เพื่อเพิ่มจุดแรก"}</div>;
   return (
@@ -324,7 +431,8 @@ function PinList({ spec, b, stock, onSelect, readOnly }: { spec: Spec; b: Recipe
         {spec.pins.map((p, i) => {
           const info = pickInfo(p.pick, { bodyPick: body }); const sid = skuIdOf(p.pick);
           return (
-            <button key={p.id} type="button" onClick={() => onSelect(i)} className="w-full flex items-center gap-2 rounded-lg border border-slate-200 hover:border-indigo-300 p-1.5 text-left">
+            <button key={p.id} type="button" onClick={() => onSelect(i)} aria-pressed={sel === i}
+              className={`w-full flex items-center gap-2 rounded-lg border p-1.5 text-left ${sel === i ? "border-indigo-300 bg-indigo-50/50" : "border-slate-200 hover:border-indigo-300"}`}>
               <span className="w-6 h-6 rounded-full bg-amber-400 text-amber-950 text-[12px] font-semibold flex items-center justify-center shrink-0">{i + 1}</span>
               <PickThumb pick={p.pick} spec={spec} choices={b.choices} cat={p.cat} size={40} />
               <span className="min-w-0 flex-1 text-[13px]">

@@ -38,9 +38,11 @@ export function StockBadge({ onHand }: { onHand: number | undefined }) {
   return <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 whitespace-nowrap">มีของ {onHand.toLocaleString("th-TH")}</span>;
 }
 
-export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange, onHwColor, onDelete }: {
+export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange, onHwColor, onDelete, onClose }: {
   pin: Pin; index: number; spec: Spec; choices: Choice[]; stock: Record<string, number>; readOnly: boolean;
   onChange: (pin: Pin) => void; onHwColor: (code: string) => void; onDelete: () => void;
+  /** อยู่ในป๊อปข้างจุด (รอบ 7) → มีปุ่มปิด */
+  onClose?: () => void;
 }) {
   const toast = useToast();
   const [swatchOpen, setSwatchOpen] = useState(false);
@@ -71,11 +73,16 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
     finally { setUploading(false); }
   };
 
+  const closeBtn = onClose && (
+    <button type="button" onClick={onClose} aria-label="ปิด" title="ปิด (Esc)"
+      className={`h-7 w-7 -mr-1 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 inline-flex items-center justify-center shrink-0 ${readOnly ? "ml-auto" : ""}`}><Icon value="i:x" /></button>
+  );
+
   if (!pin.cat || !cat) {
     return (
       <div>
         <div className="flex items-center gap-2 mb-1"><span className="text-[14px] font-medium text-slate-800">จุดที่ {index + 1} · จะเปลี่ยนอะไร?</span>
-          {!readOnly && <button type="button" onClick={onDelete} className="ml-auto text-[12px] text-rose-600 hover:underline">ลบจุด</button>}</div>
+          {!readOnly && <button type="button" onClick={onDelete} className="ml-auto text-[12px] text-rose-600 hover:underline">ลบจุด</button>}{closeBtn}</div>
         <p className="text-[12px] text-slate-500 mb-2">เลือกหมวด — แต่ละหมวดเลือกจากแหล่งที่ต่างกัน</p>
         {cats.length === 0 && <p className="text-[13px] text-amber-700">ยังไม่มีรายการหมวด — ให้ผู้ดูแลเพิ่มที่ “ตัวเลือก” หน้า Design Library</p>}
         <div className="grid grid-cols-2 gap-1.5">
@@ -100,6 +107,7 @@ export function PickPanel({ pin, index, spec, choices, stock, readOnly, onChange
           <button type="button" onClick={() => onChange({ ...pin, cat: "", pick: null })} className="ml-auto text-[12px] text-slate-500 hover:underline">เปลี่ยนหมวด</button>
           <button type="button" onClick={onDelete} className="text-[12px] text-rose-600 hover:underline">ลบจุด</button>
         </>}
+        {closeBtn}
       </div>
 
       <div className="flex items-center gap-3 rounded-lg bg-slate-50 p-2">
