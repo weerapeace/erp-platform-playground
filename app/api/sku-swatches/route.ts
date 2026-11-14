@@ -22,7 +22,7 @@ import { loadSkuStock } from "@/lib/sku-stock";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit, auditChangeMeta } from "@/lib/audit";
-import { chipCode, cleanBoardCode, isHex, sortReadingOrder } from "@/lib/sku-swatch";
+import { bboxOf, chipCode, cleanBoardCode, cleanPoints, isAxisRect, isHex, type Pt } from "@/lib/sku-swatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,6 +34,8 @@ export type SwatchSpot = {
   image_id: string | null; image_key: string | null;
   /** รหัสภายใน SW-0001-01 · ชื่อสี · สีจริง #rrggbb · มาจาก AI หรือทำเอง */
   code: string | null; name: string | null; color_hex: string | null; source: "manual" | "ai";
+  /** กรอบดัดมุม: จุดมุม [[x,y],…] เป็น % ของรูป · null = สี่เหลี่ยมตรง (x/y/w/h = กรอบครอบเสมอ) */
+  points: Pt[] | null;
   sku_id: string | null;
   sku: { id: string; code: string; name: string; image: string | null; image_key: string | null; uom: string | null; color: string | null; qty_on_hand: number | null; is_active: boolean } | null;
 };
@@ -51,11 +53,11 @@ export type SkuSwatchLink = { swatch_id: string; swatch_name: string; image_key:
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type SwatchRow = { id: string; name: string | null; note: string | null; code: string | null; next_chip_no: number | null; image_key: string | null; image_w: number | null; image_h: number | null; family_tag_ids: unknown; created_at: string; updated_at: string };
-type SpotRow = { id: string; swatch_id: string; sku_id: string | null; image_id: string | null; x: number | string; y: number | string; w: number | string; h: number | string; label: string | null; sort_order: number; code: string | null; name: string | null; color_hex: string | null; source: string | null };
+type SpotRow = { id: string; swatch_id: string; sku_id: string | null; image_id: string | null; x: number | string; y: number | string; w: number | string; h: number | string; label: string | null; sort_order: number; code: string | null; name: string | null; color_hex: string | null; source: string | null; points: unknown };
 type ImageRow = { id: string; swatch_id: string; image_key: string; image_w: number | null; image_h: number | null; sort_order: number };
 
 const COLS = "id, name, note, code, next_chip_no, image_key, image_w, image_h, family_tag_ids, created_at, updated_at";
-const SPOT_COLS = "id, swatch_id, sku_id, image_id, x, y, w, h, label, sort_order, code, name, color_hex, source";
+const SPOT_COLS = "id, swatch_id, sku_id, image_id, x, y, w, h, label, sort_order, code, name, color_hex, source, points";
 const IMG_COLS = "id, swatch_id, image_key, image_w, image_h, sort_order";
 const UUID = /^[0-9a-f-]{36}$/i;
 const tagIdsOf = (v: unknown): string[] => (Array.isArray(v) ? v.map(String).filter((s) => UUID.test(s)) : []);
@@ -87,14 +89,18 @@ const friendlyDbError = (msg: string) => (/sku_swatches_code_uq/.test(msg) ? "�
 
 /** ชิ้นที่ส่งมาจากหน้าจอ → แถวที่บันทึกได้ (ยังไม่มีรหัส/รูป) */
 function parseSpot(p: Record<string, unknown>, i: number) {
-  const x = r2(clamp(p.x, 0, 100)), y = r2(clamp(p.y, 0, 100));
-  const w = r2(clamp(p.w, 0.5, 100 - x)), h = r2(clamp(p.h, 0.5, 100 - y));   // ไม่ให้ล้นขอบรูป
+  // กรอบดัดมุม: เก็บจุดมุม + กรอบครอบ (ไม่ได้ดัดจริง = เก็บเป็นสี่เหลี่ยมตรง)
+  const pts = cleanPoints(p.points);
+  const points = pts && !isAxisRect(pts) ? pts : null;
+  const bb = points ? bboxOf(points) : null;
+  const x = bb ? bb.x : r2(clamp(p.x, 0, 100)), y = bb ? bb.y : r2(clamp(p.y, 0, 100));
+  const w = bb ? r2(Math.min(bb.w, 100 - x)) : r2(clamp(p.w, 0.5, 100 - x)), h = bb ? r2(Math.min(bb.h, 100 - y)) : r2(clamp(p.h, 0.5, 100 - y));   // ไม่ให้ล้นขอบรูป
   return {
     id: typeof p.id === "string" && UUID.test(p.id) ? p.id : null,
     sku_id: typeof p.sku_id === "string" && UUID.test(p.sku_id) ? p.sku_id : null,
     image_index: Number.isInteger(Number(p.image_index)) && Number(p.image_index) >= 0 ? Number(p.image_index) : null,
     image_id: typeof p.image_id === "string" && UUID.test(p.image_id) ? p.image_id : null,
-    x, y, w, h, label: txt(p.label, 30), name: txt(p.name, 60),
+    x, y, w, h, points, label: txt(p.label, 30), name: txt(p.name, 60),
     color_hex: isHex(p.color_hex) ? p.color_hex.toLowerCase() : null,
     source: p.source === "ai" ? "ai" : "manual",
     sort_order: i,
@@ -102,14 +108,14 @@ function parseSpot(p: Record<string, unknown>, i: number) {
 }
 type ParsedSpot = ReturnType<typeof parseSpot>;
 
-/** ออกรหัสให้ชิ้นใหม่ตามลำดับ รูป → อ่านแบบหนังสือ · คืนเลขชิ้นถัดไป */
+/** ออกรหัสให้ชิ้นใหม่ตามลำดับ รูป → ลำดับที่ผู้ใช้จัดในรายการ (ลากสลับ / เรียงตามแถว-คอลัมน์) · คืนเลขชิ้นถัดไป */
 function assignCodes<T extends ParsedSpot & { image_id: string | null; code?: string | null }>(spots: T[], boardCode: string, nextNo: number, imageOrder: string[]): number {
   const need = spots.filter((s) => !s.code);
   const byImage = new Map<string, T[]>();
   for (const s of need) { const k = s.image_id ?? ""; byImage.set(k, [...(byImage.get(k) ?? []), s]); }
   const order = [...byImage.keys()].sort((a, b) => imageOrder.indexOf(a) - imageOrder.indexOf(b));
   let no = nextNo;
-  for (const k of order) for (const s of sortReadingOrder(byImage.get(k) ?? [])) s.code = chipCode(boardCode, no++);
+  for (const k of order) for (const s of byImage.get(k) ?? []) s.code = chipCode(boardCode, no++);
   return no;
 }
 
@@ -204,7 +210,7 @@ export async function GET(request: NextRequest) {
       created_at: s.created_at, updated_at: s.updated_at,
       images,
       spots: spots.map((p) => ({
-        id: p.id, x: Number(p.x), y: Number(p.y), w: Number(p.w), h: Number(p.h), label: p.label, sort_order: p.sort_order,
+        id: p.id, x: Number(p.x), y: Number(p.y), w: Number(p.w), h: Number(p.h), points: cleanPoints(p.points), label: p.label, sort_order: p.sort_order,
         image_id: p.image_id, image_key: (p.image_id && imgKey.get(p.image_id)) || cover?.image_key || null,
         code: p.code, name: p.name, color_hex: p.color_hex, source: p.source === "ai" ? "ai" : "manual",
         sku_id: p.sku_id, sku: p.sku_id ? (skuMap.get(p.sku_id) ?? null) : null,
@@ -308,7 +314,7 @@ export async function POST(request: NextRequest) {
   const nextNo = assignCodes(spots, code, 1, imageIds);
   if (spots.length) {
     const { error: spErr } = await admin.from("sku_swatch_spots").insert(spots.map((s) => ({
-      swatch_id: id, image_id: s.image_id, sku_id: s.sku_id, x: s.x, y: s.y, w: s.w, h: s.h, label: s.label, name: s.name,
+      swatch_id: id, image_id: s.image_id, sku_id: s.sku_id, x: s.x, y: s.y, w: s.w, h: s.h, points: s.points, label: s.label, name: s.name,
       color_hex: s.color_hex, source: s.source, code: s.code, sort_order: s.sort_order,
     })));
     if (spErr) return fail(spErr.message);
@@ -407,7 +413,7 @@ export async function PATCH(request: NextRequest) {
       if (old && old.sku_id !== p.sku_id) { if (p.sku_id) spotReport.linked++; else spotReport.unlinked++; }
       if (p.isOld) {
         const { error } = await admin.from("sku_swatch_spots").update({
-          sku_id: p.sku_id, image_id: p.image_id, x: p.x, y: p.y, w: p.w, h: p.h, label: p.label, name: p.name, color_hex: p.color_hex,
+          sku_id: p.sku_id, image_id: p.image_id, x: p.x, y: p.y, w: p.w, h: p.h, points: p.points, label: p.label, name: p.name, color_hex: p.color_hex,
           code: p.code, sort_order: p.sort_order, updated_at: now,
         }).eq("id", p.id as string).eq("swatch_id", id);
         if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
@@ -415,7 +421,7 @@ export async function PATCH(request: NextRequest) {
       }
     }
     const fresh = incoming.filter((p) => !p.isOld).map((p) => ({
-      swatch_id: id, image_id: p.image_id, sku_id: p.sku_id, x: p.x, y: p.y, w: p.w, h: p.h, label: p.label, name: p.name,
+      swatch_id: id, image_id: p.image_id, sku_id: p.sku_id, x: p.x, y: p.y, w: p.w, h: p.h, points: p.points, label: p.label, name: p.name,
       color_hex: p.color_hex, source: p.source, code: p.code, sort_order: p.sort_order,
     }));
     if (fresh.length) {

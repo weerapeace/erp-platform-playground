@@ -20,19 +20,21 @@ import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { chipCode, overlapRatio, remapToCrop, rotateRect90, sortReadingOrder, splitRect, type PctRect } from "@/lib/sku-swatch";
+import { chipCode, LABEL_POSITION_TH, LABEL_POSITIONS, overlapRatio, remapToCrop, rotateRect90, sortColumnOrder, sortReadingOrder, splitRect, type LabelPosition, type PctRect, type Pt } from "@/lib/sku-swatch";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { useUserPref } from "@/lib/use-user-pref";
 import { fitAtPoint, imageSize, readPhotoChips, readPhotoLabels, sampleColors, tempId, type DraftChip, type DraftPhoto } from "./swatch-tools";
 
 /** ราคาโดยประมาณต่อรูป (บาท) — ตรงกับ costHint ใน lib/paid-services ("ai.swatch_read") · วัดจริง 2026-11-14 ≈ ฿0.09 */
 const AI_COST_HINT = "~฿0.1/รูป";
 const TOL_DEFAULT = 38;
 
-/** รหัสที่จะได้ (ชิ้นที่มีรหัสแล้ว = รหัสเดิม · ชิ้นใหม่ = เลขต่อจาก nextNo ตามลำดับ รูป → อ่านแบบหนังสือ) — ต้องตรงกับ assignCodes ใน API */
+/** รหัสที่จะได้ (ชิ้นที่มีรหัสแล้ว = รหัสเดิม · ชิ้นใหม่ = เลขต่อจาก nextNo ตามลำดับ รูป → ลำดับในรายการ) — ต้องตรงกับ assignCodes ใน API */
 export function previewCodes(chips: DraftChip[], photos: DraftPhoto[], boardCode: string, nextNo: number): Map<string, string> {
   const m = new Map<string, string>();
   let no = nextNo;
   for (const p of photos) {
-    const fresh = sortReadingOrder(chips.filter((c) => c.photo === p.key && !c.code));
+    const fresh = chips.filter((c) => c.photo === p.key && !c.code);
     for (const c of fresh) m.set(c.id, chipCode(boardCode, no++));
   }
   for (const c of chips) if (c.code) m.set(c.id, c.code);
@@ -137,7 +139,7 @@ export function useBoardDraft() {
       return false;
     }
     if (targetId) {
-      patchChip(targetId, { ...res.rect, color_hex: res.hex, unsure: false });
+      patchChip(targetId, { ...res.rect, points: null, color_hex: res.hex, unsure: false });
       setSelId(targetId);
       return true;
     }
@@ -150,6 +152,18 @@ export function useBoardDraft() {
     return true;
   };
   const patchChip = (id: string, patch: Partial<DraftChip>) => { setChipsNow(chipsRef.current.map((x) => (x.id === id ? { ...x, ...patch } : x))); touch(); };
+  /** เรียงชิ้นของรูปหนึ่งใหม่ (ลำดับ = เลขที่จะได้) — ชิ้นของรูปอื่นอยู่ที่เดิม */
+  const setPhotoOrder = (photoKey: string, ordered: DraftChip[]) => {
+    const all = chipsRef.current;
+    let i = 0;
+    setChipsNow(all.map((c) => (c.photo === photoKey ? ordered[i++] : c)));
+    touch();
+  };
+  const reorderChips = (photoKey: string, from: number, to: number) => setPhotoOrder(photoKey, moveItem(chipsRef.current.filter((c) => c.photo === photoKey), from, to));
+  const sortChips = (photoKey: string, how: "row" | "col") => {
+    const mine = chipsRef.current.filter((c) => c.photo === photoKey);
+    setPhotoOrder(photoKey, how === "row" ? sortReadingOrder(mine) : sortColumnOrder(mine));
+  };
   const removeChip = (id: string) => { setChipsNow(chipsRef.current.filter((x) => x.id !== id)); setSelId((s) => (s === id ? null : s)); touch(); };
   /** แบ่งกรอบเป็น cols × rows ชิ้น (ชิ้นเดิมหายไป ถ้ามีรหัสแล้ว รหัสนั้นจะไม่ถูกใช้ซ้ำ) */
   const splitChip = async (id: string, cols: number, rows: number) => {
@@ -162,14 +176,14 @@ export function useBoardDraft() {
     setSelId(fresh[0]?.id ?? null); touch();
   };
   /** ✨ AI อ่านเลข + ชื่อสี ให้ชิ้นที่มีกรอบแล้ว — เติมเฉพาะช่องที่ยังว่าง (ที่พิมพ์เองไม่ทับ) · ตำแหน่งกรอบไม่เปลี่ยน */
-  const labelPhotos = async (keys: string[]) => {
+  const labelPhotos = async (keys: string[], pos: LabelPosition = "auto") => {
     const list = keys.map(photoOf).filter((p): p is DraftPhoto => !!p && chipsRef.current.some((c) => c.photo === p.key));
     if (!list.length) { toast.warning("ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป) แล้วค่อยให้ AI อ่านเลข/ชื่อสี"); return; }
     let filled = 0, chipsRead = 0;
     setReading({ done: 0, total: list.length, what: "label" });
     try {
       for (const [i, p] of list.entries()) {
-        const got = await readPhotoLabels(p, chipsRef.current);
+        const got = await readPhotoLabels(p, chipsRef.current, pos);
         chipsRead += got.size;
         setChipsNow(chipsRef.current.map((c) => {
           const g = got.get(c.id);
@@ -212,9 +226,33 @@ export function useBoardDraft() {
     } finally { setReading(null); }
   };
 
-  return { photos, chips, cur, setCur, selId, setSelId, dirty, setDirty, reading, reset, addFiles, removePhoto, movePhoto, makeCover, applyCrop, addChip, fitChip, patchChip, removeChip, splitChip, labelPhotos, findPhotos };
+  return { photos, chips, cur, setCur, selId, setSelId, dirty, setDirty, reading, reset, addFiles, removePhoto, movePhoto, makeCover, applyCrop, addChip, fitChip, patchChip, reorderChips, sortChips, removeChip, splitChip, labelPhotos, findPhotos };
 }
 export type BoardDraft = ReturnType<typeof useBoardDraft>;
+
+
+// ───────────────────────────── ขนาดหน้าจอแก้ (ลากปรับ · จำต่อคน) ─────────────────────────────
+/** h = ความสูงพื้นที่รูปในป๊อป (px · null = ครึ่งจอ) · pw = ความกว้างแผงชิ้น (px) · hide = ซ่อนแผงชิ้น */
+type EditorLayout = { h: number | null; pw: number; hide: boolean };
+const LAYOUT_DEFAULT: EditorLayout = { h: null, pw: 320, hide: false };
+const parseLayout = (v: unknown): EditorLayout | null => {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const h = typeof o.h === "number" && o.h >= 200 && o.h <= 2000 ? Math.round(o.h) : null;
+  const pw = typeof o.pw === "number" && o.pw >= 200 && o.pw <= 640 ? Math.round(o.pw) : 320;
+  return { h, pw, hide: o.hide === true };
+};
+
+/** ลากเส้น/แถบ → ค่าใหม่ (ระหว่างลากเปลี่ยนเฉพาะหน้าจอ · ปล่อยเมาส์ค่อยบันทึก) */
+function useDragSize(onMove: (delta: number) => void, onEnd: () => void, axis: "x" | "y") {
+  const start = useRef<number | null>(null);
+  return {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => { e.preventDefault(); start.current = axis === "x" ? e.clientX : e.clientY; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ } },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => { if (start.current == null) return; onMove((axis === "x" ? e.clientX : e.clientY) - start.current); },
+    onPointerUp: () => { if (start.current == null) return; start.current = null; onEnd(); },
+    onPointerCancel: () => { start.current = null; },
+  };
+}
 
 // ───────────────────────────── หน้าจอแก้ ─────────────────────────────
 export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "modal" }: {
@@ -237,8 +275,21 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
   const [zoom, setZoom] = useState(1);
   const [fitting, setFitting] = useState(false);
   const [over, setOver] = useState<"main" | "tile" | null>(null);
+  const [labelPos, setLabelPos] = useState<LabelPosition>("auto");
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => { onOverlay?.(!!cropKey || !!askFind); }, [cropKey, askFind, onOverlay]);
+
+  // ── ขนาด: ลากแถบใต้รูป (สูง/เตี้ย · เฉพาะป๊อป) + เส้นกลาง (แผงชิ้นกว้าง/แคบ · ลากสุด = ซ่อน) — จำต่อคน ──
+  const [saved, saveLayout] = useUserPref<EditorLayout>("swatch_editor_layout", LAYOUT_DEFAULT, parseLayout);
+  const [live, setLive] = useState<EditorLayout | null>(null);   // ระหว่างลาก
+  const lay = live ?? saved;
+  const imgH = lay.h ?? (typeof window !== "undefined" ? Math.round(window.innerHeight * 0.5) : 420);
+  const baseRef = useRef(lay);
+  const hGrip = useDragSize((d) => { const b = baseRef.current; const maxH = typeof window !== "undefined" ? window.innerHeight * 0.9 : 1200; setLive({ ...b, h: Math.round(Math.max(240, Math.min(maxH, (b.h ?? imgH) + d))) }); },
+    () => { if (live) saveLayout(live); setLive(null); }, "y");
+  const vGrip = useDragSize((d) => { const b = baseRef.current; const pw = b.hide ? 0 : b.pw; const next = pw - d; setLive(next < 150 ? { ...b, hide: true } : { ...b, hide: false, pw: Math.round(Math.min(560, Math.max(220, next))) }); },
+    () => { if (live) saveLayout(live); setLive(null); }, "x");
+  const gripStart = (h: { onPointerDown: (e: React.PointerEvent<HTMLElement>) => void }) => (e: React.PointerEvent<HTMLElement>) => { baseRef.current = lay; h.onPointerDown(e); };
 
   const photo = photos.find((p) => p.key === cur) ?? photos[0] ?? null;
   useEffect(() => { setZoom(1); setArmed(null); }, [photo?.key]);
@@ -251,6 +302,23 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
   }, [armed]);
+  // Delete / Backspace = ลบชิ้นที่เลือก (ตอนไม่ได้พิมพ์ในช่อง และไม่มีป๊อปอื่นเปิด)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const t = e.target as HTMLElement | null;
+      if (!selId || cropKey || askFind || t?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t?.tagName ?? "")) return;
+      if (document.querySelector("[role=dialog] [role=dialog], [data-confirm-open]")) return;
+      e.preventDefault();
+      const here = chips.filter((c) => c.photo === photo?.key);
+      const i = here.findIndex((c) => c.id === selId);
+      draft.removeChip(selId);
+      const next = here.filter((c) => c.id !== selId)[Math.min(Math.max(0, i), here.length - 2)];
+      if (next) setSelId(next.id);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selId, cropKey, askFind, chips, photo, draft, setSelId]);
 
   // วางรูป Ctrl+V = เพิ่มรูป (เฉพาะตอนไม่มีป๊อปอื่นเปิด)
   useEffect(() => {
@@ -343,15 +411,21 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
 
   const aiBar = photo && (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2">
-      <button type="button" onClick={() => void draft.labelPhotos([photo.key])} disabled={!!reading}
-        title={here.length ? "AI เห็นรูปพร้อมเลขกรอบ แล้วตอบว่ากรอบไหนพิมพ์เลขอะไร สีชื่ออะไร" : "ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป)"}
+      <button type="button" onClick={() => void draft.labelPhotos([photo.key], labelPos)} disabled={!!reading}
+        title={here.length ? "AI เห็นรูปเต็ม + ภาพซูมรอบแต่ละชิ้น แล้วตอบว่ากรอบไหนพิมพ์เลขอะไร สีชื่ออะไร" : "ตีกรอบชิ้นก่อน (คลิกที่สีบนรูป)"}
         className="h-8 px-3 text-[13px] font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
         {reading?.what === "label" ? `กำลังอ่าน… ${reading.done}/${reading.total}` : "✨ AI อ่านเลข + ชื่อสี"}
       </button>
       {photos.length > 1 && !reading && (
-        <button type="button" onClick={() => void draft.labelPhotos(photos.map((p) => p.key))} className="h-8 px-3 text-[12px] rounded-lg border border-violet-300 text-violet-700 bg-white hover:bg-violet-50">ทุกรูป ({photos.length})</button>
+        <button type="button" onClick={() => void draft.labelPhotos(photos.map((p) => p.key), labelPos)} className="h-8 px-3 text-[12px] rounded-lg border border-violet-300 text-violet-700 bg-white hover:bg-violet-50">ทุกรูป ({photos.length})</button>
       )}
-      <span className="text-[11.5px] text-violet-900/80">{here.length ? `เติมเลขบนแผง + ชื่อสี ให้ ${here.length} ชิ้นที่มีกรอบ (ช่องที่พิมพ์เองไม่ทับ) · ${AI_COST_HINT}` : "ตีกรอบชิ้นก่อน (🎯 คลิกที่สีบนรูป) แล้วค่อยให้ AI อ่านเลข/ชื่อสี"}</span>
+      <label className="flex items-center gap-1 text-[11.5px] text-violet-900/80" title="แต่ละแผงพิมพ์เลขคนละที่ — บอก AI ช่วยได้ (ไม่รู้ = ให้ AI ดูเอง)">
+        เลขอยู่
+        <select value={labelPos} onChange={(e) => setLabelPos(e.target.value as LabelPosition)} className="h-7 px-1 text-[12px] border border-violet-200 rounded bg-white">
+          {LABEL_POSITIONS.map((p) => <option key={p} value={p}>{LABEL_POSITION_TH[p]}</option>)}
+        </select>
+      </label>
+      <span className="text-[11.5px] text-violet-900/80">{here.length ? `${here.length} ชิ้น · เติมเฉพาะช่องว่าง · ${AI_COST_HINT}` : "ตีกรอบชิ้นก่อน (🎯 คลิกที่สีบนรูป)"}</span>
       <button type="button" onClick={() => startFind([photo.key])} disabled={!!reading} className="ml-auto text-[11.5px] text-violet-700 hover:underline disabled:opacity-50" title="ให้ AI หาตำแหน่งชิ้นเอง — ตำแหน่งได้แค่ประมาณ ตรวจก่อนบันทึก">
         {reading?.what === "find" ? `AI กำลังหาชิ้น… ${reading.done}/${reading.total}` : "🧪 ให้ AI หาชิ้นเอง (ทดลอง)"}
       </button>
@@ -368,36 +442,63 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
       </div>
     </div>
   ) : (
-    <div className={`relative rounded-xl bg-slate-100 ${layout === "modal" ? "h-[50vh] min-h-[280px]" : "flex-1 min-h-[320px]"} ${over === "main" ? "ring-2 ring-indigo-400" : ""}`}
-      onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); setOver("main"); } }} onDragLeave={() => setOver(null)} onDrop={dropFiles}>
-      <ZoomBox zoom={zoom} onZoom={setZoom} aspect={(photo.w || 4) / (photo.h || 3)} className="absolute inset-0 rounded-xl">
-        <ImageRegions<DraftChip> src={photo.src} mode="edit" className="w-full rounded-md shadow" regions={here} selectedId={selId}
-          onSelect={setSelId} onChange={(id, rect) => draft.patchChip(id, rect)} onCreate={(rect) => void draft.addChip(rect)}
-          onPointClick={tool === "click" || armed ? (pt, r) => void onPoint(pt, r) : undefined}
-          editCursor={armed ? "crosshair" : tool === "click" ? "crosshair" : "cell"}
-          regionLabel={(r) => codes.get(r.id)?.split("-").pop() ?? null}
-          isMuted={(r) => !!r.unsure} />
-      </ZoomBox>
-      {armed && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-2 z-[8] px-3 py-1.5 rounded-full bg-indigo-600 text-white text-[12px] shadow-lg whitespace-nowrap">
-          🎯 คลิกที่สีของชิ้น {codes.get(armed) ?? ""} บนรูป · Esc = ยกเลิก
+    <div className={layout === "full" ? "flex-1 min-h-[320px] flex flex-col" : ""}>
+      <div className={`relative bg-slate-100 ${layout === "modal" ? "rounded-t-xl" : "rounded-xl flex-1"} ${over === "main" ? "ring-2 ring-indigo-400" : ""}`}
+        style={layout === "modal" ? { height: imgH } : undefined}
+        onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); setOver("main"); } }} onDragLeave={() => setOver(null)} onDrop={dropFiles}>
+        <ZoomBox zoom={zoom} onZoom={setZoom} aspect={(photo.w || 4) / (photo.h || 3)} className={`absolute inset-0 ${layout === "modal" ? "rounded-t-xl" : "rounded-xl"}`}>
+          <ImageRegions<DraftChip> src={photo.src} mode="edit" className="w-full rounded-md shadow" regions={here} selectedId={selId} cornerMode="bend"
+            onSelect={setSelId}
+            onChange={(id, rect, points) => draft.patchChip(id, points !== undefined ? { ...rect, points } : rect)}
+            onCreate={(rect) => void draft.addChip(rect)}
+            onPointClick={tool === "click" || armed ? (pt, r) => void onPoint(pt, r) : undefined}
+            editCursor={armed ? "crosshair" : tool === "click" ? "crosshair" : "cell"}
+            regionLabel={(r) => codes.get(r.id)?.split("-").pop() ?? null}
+            isMuted={(r) => !!r.unsure} />
+        </ZoomBox>
+        {armed && (
+          <div className="absolute left-1/2 -translate-x-1/2 top-2 z-[8] px-3 py-1.5 rounded-full bg-indigo-600 text-white text-[12px] shadow-lg whitespace-nowrap">
+            🎯 คลิกที่สีของชิ้น {codes.get(armed) ?? ""} บนรูป · Esc = ยกเลิก
+          </div>
+        )}
+        {over === "main" && <div className="absolute inset-0 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-700 text-sm font-medium pointer-events-none">⬇ วางเพื่อเพิ่มรูป</div>}
+      </div>
+      {layout === "modal" && (
+        <div {...hGrip} onPointerDown={gripStart(hGrip)} onDoubleClick={() => saveLayout({ ...lay, h: null })} role="separator" aria-orientation="horizontal"
+          title="ลากเพื่อปรับความสูงพื้นที่รูป · ดับเบิลคลิก = ขนาดเริ่มต้น"
+          className="group h-3 rounded-b-xl bg-slate-100 border-t border-slate-200 cursor-row-resize flex items-center justify-center touch-none">
+          <span className="w-12 h-1 rounded-full bg-slate-300 group-hover:bg-indigo-500" />
         </div>
       )}
-      {over === "main" && <div className="absolute inset-0 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-700 text-sm font-medium pointer-events-none">⬇ วางเพื่อเพิ่มรูป</div>}
+    </div>
+  );
+
+  const splitter = (
+    <div {...vGrip} onPointerDown={gripStart(vGrip)} onDoubleClick={() => saveLayout({ ...lay, pw: LAYOUT_DEFAULT.pw, hide: false })} role="separator" aria-orientation="vertical"
+      title={lay.hide ? "ลากไปทางซ้ายเพื่อแสดงแผงชิ้น · ดับเบิลคลิก = ขนาดเริ่มต้น" : "ลากเพื่อปรับความกว้างแผงชิ้น (ลากไปขวาสุด = ซ่อน) · ดับเบิลคลิก = ขนาดเริ่มต้น"}
+      className="group hidden lg:flex w-3 shrink-0 cursor-col-resize items-center justify-center touch-none self-stretch">
+      <span className={`w-1 rounded-full group-hover:bg-indigo-500 ${lay.hide ? "h-20 bg-indigo-300" : "h-12 bg-slate-300"}`} />
     </div>
   );
 
   return (
-    <div className={layout === "modal" ? "grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]" : "contents"}>
-      <div className={layout === "modal" ? "min-w-0 space-y-2" : "flex-1 min-h-0 min-w-0 flex flex-col gap-2 bg-slate-100 p-3 sm:p-4 overflow-y-auto"}>
+    <div className={layout === "modal" ? "flex flex-col lg:flex-row gap-3 lg:gap-0" : "contents"} style={{ ["--pw" as string]: `${lay.pw}px` }}>
+      <div className={layout === "modal" ? "min-w-0 flex-1 space-y-2" : "flex-1 min-h-0 min-w-0 flex flex-col gap-2 bg-slate-100 p-3 sm:p-4 overflow-y-auto"}>
         {aiBar}
         {toolbar}
         {main}
         {strip}
-        {photo && <p className="text-[11px] text-slate-400">Ctrl + หมุนลูกกลิ้ง = ซูม · {tool === "click" ? "คลิกที่ชิ้นสี = ตีกรอบให้ · ลากบนรูป = ตีกรอบเอง" : "ลากบนรูป = ตีกรอบใหม่"} · ลากกรอบ = ย้าย · ลากมุม = ปรับขนาด · กรอบส้มเส้นประ = ให้ตรวจ</p>}
+        {photo && <p className="text-[11px] text-slate-400">Ctrl + หมุนลูกกลิ้ง = ซูม · {tool === "click" ? "คลิกที่ชิ้นสี = ตีกรอบให้" : "ลากบนรูป = ตีกรอบใหม่"} · ลากกรอบ = ย้าย · ลากจุดมุม = ดัดมุมนั้น · Delete = ลบชิ้นที่เลือก</p>}
       </div>
-      <ChipPanel draft={draft} codes={codes} here={here} selected={selected} total={chips.length} onCreateSku={onCreateSku} layout={layout}
-        armed={armed} onArm={(id) => { setArmed((a) => (a === id ? null : id)); if (id) toast.info("คลิกที่สีของชิ้นนี้บนรูป — ระบบจะตีกรอบใหม่ให้"); }} />
+      {splitter}
+      {lay.hide ? (
+        <button type="button" onClick={() => saveLayout({ ...lay, hide: false })} className="hidden lg:flex shrink-0 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-[11px] text-slate-500 hover:text-indigo-600 [writing-mode:vertical-rl]" title="แสดงแผงชิ้น">
+          ชิ้น ({here.length}) ◂
+        </button>
+      ) : (
+        <ChipPanel draft={draft} codes={codes} here={here} selected={selected} total={chips.length} onCreateSku={onCreateSku} layout={layout} photoKey={photo?.key ?? null}
+          armed={armed} onArm={(id) => { setArmed((a) => (a === id ? null : id)); if (id) toast.info("คลิกที่สีของชิ้นนี้บนรูป — ระบบจะตีกรอบใหม่ให้"); }} />
+      )}
 
       {cropPhoto && (
         <ImageFreeCropModal open src={cropPhoto.src} onClose={() => setCropKey(null)}
@@ -415,76 +516,87 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
 }
 
 // ───────────────────────────── แผงชิ้น (ขวา) ─────────────────────────────
-function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, armed, onArm }: {
+function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, armed, onArm, photoKey }: {
   draft: BoardDraft; codes: Map<string, string>; here: DraftChip[]; selected: DraftChip | null; total: number;
-  onCreateSku?: (chip: DraftChip) => void; layout: "modal" | "full"; armed: string | null; onArm: (id: string | null) => void;
+  onCreateSku?: (chip: DraftChip) => void; layout: "modal" | "full"; armed: string | null; onArm: (id: string | null) => void; photoKey: string | null;
 }) {
   const [cols, setCols] = useState(6);
   const [rows, setRows] = useState(1);
-  const list = useMemo(() => sortReadingOrder(here), [here]);
   const unsure = here.filter((c) => c.unsure).length;
+  const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => { if (photoKey) draft.reorderChips(photoKey, from, to); });
+  const selRowRef = useRef<HTMLLIElement | null>(null);
+  useEffect(() => { selRowRef.current?.scrollIntoView({ block: "nearest" }); }, [selected?.id]);
   return (
-    <aside className={layout === "modal" ? "min-w-0 rounded-xl border border-slate-200 bg-white overflow-hidden" : "w-full lg:w-[340px] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 bg-white overflow-y-auto max-h-[45vh] lg:max-h-none"}>
-      <div className="p-3 border-b border-slate-100">
-        <div className="text-[12px] font-medium text-slate-600 mb-1.5">ชิ้นที่เลือก</div>
+    <aside className={layout === "modal"
+      ? "min-w-0 rounded-xl border border-slate-200 bg-white overflow-hidden w-full lg:w-[var(--pw)] lg:shrink-0 lg:self-start"
+      : "w-full lg:w-[var(--pw)] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 bg-white overflow-y-auto max-h-[45vh] lg:max-h-none"}>
+      {/* ชิ้นที่เลือก — ผูก SKU / ตีกรอบใหม่ / ดัดมุมคืน / แบ่ง / ลบ (ชื่อสี · สี · เลขแผง แก้ในรายการได้เลย) */}
+      <div className="p-2.5 border-b border-slate-100">
         {selected ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <ColorInput value={selected.color_hex ?? "#cccccc"} onChange={(v) => draft.patchChip(selected.id, { color_hex: /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : selected.color_hex, unsure: false })} allowText={false} />
+              <span className="w-5 h-5 rounded shrink-0 ring-1 ring-black/10" style={{ background: selected.color_hex ?? "#e2e8f0" }} />
               <div className="min-w-0 flex-1">
-                <div className="font-mono text-[13px] text-slate-800 truncate">{codes.get(selected.id) ?? "—"}</div>
-                <div className="text-[10.5px] text-slate-400">{selected.code ? "รหัสภายใน (ล็อกแล้ว)" : "รหัสที่จะได้ตอนบันทึก"}{selected.source === "ai" ? " · จาก AI" : ""}</div>
+                <div className="font-mono text-[12.5px] text-slate-800 truncate">{codes.get(selected.id) ?? "—"}{selected.name ? <span className="font-sans text-slate-500"> · {selected.name}</span> : null}</div>
+                <div className="text-[10.5px] text-slate-400">{selected.code ? "รหัสภายใน (ล็อกแล้ว)" : "รหัสที่จะได้ตอนบันทึก"}{selected.source === "ai" ? " · จาก AI" : ""}{selected.points ? " · ดัดมุมแล้ว" : ""}</div>
               </div>
-              <button type="button" onClick={() => onArm(armed === selected.id ? null : selected.id)}
-                className={`h-7 px-2 text-[11px] rounded-lg border ${armed === selected.id ? "border-indigo-400 bg-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-                title="คลิกที่สีของชิ้นนี้บนรูป แล้วระบบตีกรอบใหม่ให้พอดีชิ้น + ดูดสีใหม่ (รหัส/ชื่อ/SKU คงเดิม)">{armed === selected.id ? "ยกเลิก" : "🎯 ตีกรอบใหม่จากสี"}</button>
             </div>
             {selected.unsure && <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">⚠ AI ไม่แน่ใจชิ้นนี้ — ตรวจขอบกรอบ/สี แล้วแก้ หรือลบทิ้ง</p>}
-            <div className="grid grid-cols-[1fr_88px] gap-2">
-              <input value={selected.name ?? ""} onChange={(e) => draft.patchChip(selected.id, { name: e.target.value || null })} placeholder="ชื่อสี เช่น กรมท่า"
-                className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0" />
-              <input value={selected.label ?? ""} onChange={(e) => draft.patchChip(selected.id, { label: e.target.value || null })} placeholder="เลขบนแผง"
-                className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0" />
+            <SkuPicker key={selected.id}
+              value={selected.sku ? ({ id: selected.sku.id, code: selected.sku.code, name: selected.sku.name, image_url: selected.sku.image } as SkuPickerValue) : null}
+              placeholder="ผูก SKU (ไม่บังคับ)"
+              onChange={(v) => draft.patchChip(selected.id, v
+                ? { sku_id: v.id, sku: { id: v.id, code: v.code, name: v.name, image: v.image_url ?? (v.image_key ? r2ImageUrl(v.image_key) : null), image_key: v.image_key ?? null, uom: v.uom_name ?? null, color: v.color ?? null, qty_on_hand: null, is_active: true } }
+                : { sku_id: null, sku: null })} />
+            <div className="flex flex-wrap items-center gap-1">
+              {!selected.sku_id && onCreateSku && <button type="button" onClick={() => onCreateSku(selected)} className="h-7 px-2 text-[11px] rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-50">+ สร้าง SKU</button>}
+              <button type="button" onClick={() => onArm(armed === selected.id ? null : selected.id)}
+                className={`h-7 px-2 text-[11px] rounded-lg border ${armed === selected.id ? "border-indigo-400 bg-indigo-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                title="คลิกที่สีของชิ้นนี้บนรูป แล้วระบบตีกรอบใหม่ให้พอดีชิ้น + ดูดสีใหม่ (รหัส/ชื่อ/SKU คงเดิม)">{armed === selected.id ? "ยกเลิก" : "🎯 ตีกรอบใหม่"}</button>
+              {selected.points && <button type="button" onClick={() => draft.patchChip(selected.id, { points: null })} className="h-7 px-2 text-[11px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" title="กลับเป็นสี่เหลี่ยมตรง (ครอบมุมที่ดัดไว้)">▭ สี่เหลี่ยมตรง</button>}
+              <button type="button" onClick={() => draft.removeChip(selected.id)} className="h-7 px-2 text-[11px] rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 ml-auto" title="ลบชิ้น (หรือกด Delete)">🗑 ลบ</button>
             </div>
-            <div>
-              <SkuPicker key={selected.id}
-                value={selected.sku ? ({ id: selected.sku.id, code: selected.sku.code, name: selected.sku.name, image_url: selected.sku.image } as SkuPickerValue) : null}
-                placeholder="ผูก SKU (ไม่บังคับ)"
-                onChange={(v) => draft.patchChip(selected.id, v
-                  ? { sku_id: v.id, sku: { id: v.id, code: v.code, name: v.name, image: v.image_url ?? (v.image_key ? r2ImageUrl(v.image_key) : null), image_key: v.image_key ?? null, uom: v.uom_name ?? null, color: v.color ?? null, qty_on_hand: null, is_active: true } }
-                  : { sku_id: null, sku: null })} />
-              {!selected.sku_id && onCreateSku && (
-                <button type="button" onClick={() => onCreateSku(selected)} className="mt-1 text-[11.5px] text-indigo-600 hover:underline">+ สร้าง SKU ใหม่จากชิ้นนี้</button>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
-              <span className="text-[11px] text-slate-500">แบ่งกรอบเป็น</span>
-              <input type="number" min={1} max={200} value={cols} onChange={(e) => setCols(Math.max(1, Number(e.target.value) || 1))} className="w-12 h-7 px-1 text-[12px] border border-slate-200 rounded" aria-label="จำนวนคอลัมน์" />
-              <span className="text-[11px] text-slate-400">×</span>
-              <input type="number" min={1} max={50} value={rows} onChange={(e) => setRows(Math.max(1, Number(e.target.value) || 1))} className="w-12 h-7 px-1 text-[12px] border border-slate-200 rounded" aria-label="จำนวนแถว" />
-              <button type="button" onClick={() => void draft.splitChip(selected.id, cols, rows)} className="h-7 px-2 text-[11px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" title="ชิ้นเรียงกันเป็นแถว: ลากกรอบครอบทั้งแถว แล้วแบ่งเท่า ๆ กัน">แบ่ง {cols * rows} ชิ้น</button>
-              <button type="button" onClick={() => draft.removeChip(selected.id)} className="h-7 px-2 text-[11px] rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 ml-auto">🗑 ลบชิ้น</button>
+            <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+              แบ่งกรอบเป็น
+              <input type="number" min={1} max={200} value={cols} onChange={(e) => setCols(Math.max(1, Number(e.target.value) || 1))} className="w-11 h-6 px-1 text-[11px] border border-slate-200 rounded" aria-label="จำนวนคอลัมน์" />
+              ×
+              <input type="number" min={1} max={50} value={rows} onChange={(e) => setRows(Math.max(1, Number(e.target.value) || 1))} className="w-11 h-6 px-1 text-[11px] border border-slate-200 rounded" aria-label="จำนวนแถว" />
+              <button type="button" onClick={() => void draft.splitChip(selected.id, cols, rows)} className="h-6 px-2 rounded border border-slate-200 text-slate-600 hover:bg-slate-50" title="ชิ้นเรียงกันเป็นแถว: ลากกรอบครอบทั้งแถว แล้วแบ่งเท่า ๆ กัน">แบ่ง {cols * rows}</button>
             </div>
           </div>
-        ) : <p className="text-[12px] text-slate-400">ยังไม่ได้เลือกชิ้น — 🎯 คลิกที่ชิ้นสีบนรูปเพื่อตีกรอบ หรือกดกรอบที่มีอยู่</p>}
+        ) : <p className="text-[12px] text-slate-400">ยังไม่ได้เลือกชิ้น — 🎯 คลิกที่ชิ้นสีบนรูป หรือกดแถวในรายการ</p>}
       </div>
-      <div className="p-3">
-        <div className="text-[12px] font-medium text-slate-600 mb-1.5">ชิ้นบนรูปนี้ ({here.length}){total !== here.length ? <span className="font-normal text-slate-400"> · ทั้งแผ่น {total}</span> : null}{unsure ? <span className="font-normal text-amber-600"> · ให้ตรวจ {unsure}</span> : null}</div>
-        {list.length === 0 ? <p className="text-[12px] text-slate-400">ยังไม่มีชิ้น — 🎯 คลิกที่สีบนรูป หรือลากตีกรอบเอง</p> : (
-          <ul className={`space-y-1 ${layout === "modal" ? "max-h-[38vh] overflow-y-auto pr-1" : ""}`}>
-            {list.map((c) => (
-              <li key={c.id}>
-                <button type="button" onClick={() => draft.setSelId(c.id)}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left ${c.id === selected?.id ? "border-indigo-300 bg-indigo-50" : c.unsure ? "border-amber-200 bg-amber-50/50 hover:bg-amber-50" : "border-slate-200 hover:bg-slate-50"}`}>
-                  <span className="w-5 h-5 rounded shrink-0 ring-1 ring-black/10" style={{ background: c.color_hex ?? "#e2e8f0" }} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-mono text-[11px] text-slate-700 truncate">{codes.get(c.id)}{c.label ? <span className="text-slate-400"> · {c.label}</span> : null}</span>
-                    <span className="block text-[11px] text-slate-500 truncate">{c.sku ? `${c.sku.code} ${c.sku.name}` : c.name ?? "—"}</span>
+      {/* รายการ (ลำดับ = เลขที่จะได้) — ลาก ⠿ สลับ · แก้สี/ชื่อสี/เลขแผงในแถว */}
+      <div className="p-2.5">
+        <div className="flex items-center gap-1 mb-1.5">
+          <span className="text-[12px] font-medium text-slate-600">ชิ้นบนรูปนี้ ({here.length}){total !== here.length ? <span className="font-normal text-slate-400"> · ทั้งแผ่น {total}</span> : null}{unsure ? <span className="font-normal text-amber-600"> · ตรวจ {unsure}</span> : null}</span>
+          {here.length > 1 && photoKey && (
+            <span className="ml-auto inline-flex rounded border border-slate-200 overflow-hidden text-[10.5px]">
+              <button type="button" onClick={() => draft.sortChips(photoKey, "row")} className="h-6 px-1.5 text-slate-600 hover:bg-slate-50" title="เรียงเลขตามแถว: บนลงล่าง แต่ละแถวซ้ายไปขวา">แถว ⇢</button>
+              <button type="button" onClick={() => draft.sortChips(photoKey, "col")} className="h-6 px-1.5 border-l border-slate-200 text-slate-600 hover:bg-slate-50" title="เรียงเลขตามคอลัมน์: ซ้ายไปขวา แต่ละคอลัมน์บนลงล่าง">คอลัมน์ ⇣</button>
+            </span>
+          )}
+        </div>
+        {here.length === 0 ? <p className="text-[12px] text-slate-400">ยังไม่มีชิ้น — 🎯 คลิกที่สีบนรูป หรือลากตีกรอบเอง</p> : (
+          <ul className={`space-y-0.5 ${layout === "modal" ? "max-h-[46vh] overflow-y-auto pr-0.5" : ""}`}>
+            {here.map((c, i) => {
+              const isSel = c.id === selected?.id;
+              return (
+                <li key={c.id} {...rowProps(i)} ref={isSel ? selRowRef : undefined} onClick={(e) => { if (!(e.target as HTMLElement).closest("input,button")) draft.setSelId(c.id); }}
+                  className={`grid grid-cols-[14px_30px_24px_minmax(0,1fr)_58px] items-center gap-1 px-1 py-0.5 rounded-md border cursor-pointer ${isSel ? "border-indigo-300 bg-indigo-50" : c.unsure ? "border-amber-200 bg-amber-50/50" : "border-transparent hover:bg-slate-50"} ${rowCls(i)}`}>
+                  <DragHandle {...handleProps(i)} title="ลากเพื่อสลับลำดับ (เลขเปลี่ยนตาม)" />
+                  <span className={`font-mono text-[10.5px] tabular-nums ${c.code ? "text-slate-700" : "text-slate-400"}`} title={codes.get(c.id)}>-{codes.get(c.id)?.split("-").pop()}</span>
+                  <span className="[&_button]:!h-6 [&_button]:!w-6 [&_button]:rounded" title={c.color_hex ? `${c.color_hex.toUpperCase()} — กดเพื่อเปลี่ยนสี` : "กดเพื่อเลือกสี"}>
+                    <ColorInput value={c.color_hex ?? "#cccccc"} allowText={false}
+                      onChange={(v) => { if (/^#[0-9a-fA-F]{6}$/.test(v)) draft.patchChip(c.id, { color_hex: v.toLowerCase(), unsure: false }); }} />
                   </span>
-                  {c.unsure && <span className="text-amber-600 text-[12px]" title="AI ไม่แน่ใจ">⚠</span>}
-                </button>
-              </li>
-            ))}
+                  <input value={c.name ?? ""} onChange={(e) => draft.patchChip(c.id, { name: e.target.value || null })} onFocus={() => draft.setSelId(c.id)} placeholder={c.sku ? c.sku.code : "ชื่อสี"}
+                    className="h-6 px-1.5 text-[12px] border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0 bg-white" />
+                  <input value={c.label ?? ""} onChange={(e) => draft.patchChip(c.id, { label: e.target.value || null })} onFocus={() => draft.setSelId(c.id)} placeholder="เลขแผง"
+                    className="h-6 px-1.5 text-[12px] border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200 min-w-0 bg-white" />
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

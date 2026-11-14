@@ -34,7 +34,7 @@ export const swatchTitle = (s: { name: string | null; seq: number; code?: string
 
 const spotToChip = (s: SwatchSpot, firstImage: string): DraftChip => ({
   id: s.id, photo: s.image_id || firstImage, x: s.x, y: s.y, w: s.w, h: s.h, code: s.code, name: s.name, label: s.label,
-  color_hex: s.color_hex, source: s.source, sku_id: s.sku_id, sku: s.sku,
+  color_hex: s.color_hex, source: s.source, sku_id: s.sku_id, sku: s.sku, points: s.points ?? null,
 });
 
 export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted, onPickSkus, onPickSpot }: {
@@ -104,13 +104,12 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
   const tryClose = () => { if (mode === "edit" && dirty) setConfirm("close"); else onClose(); };
   const tryLeaveEdit = () => { if (dirty) setConfirm("leave"); else setMode("view"); };
 
-  // ปุ่มลัด: Esc ปิด/ออกจากโหมดตั้งค่า · Delete ลบชิ้นที่เลือก (ตอนไม่ได้พิมพ์อยู่)
+  // ปุ่มลัด: Esc ปิด/ออกจากโหมดตั้งค่า (Delete ลบชิ้น = ตัวแก้แผงจัดการเอง ใช้ได้ทั้งป๊อปเพิ่มแผ่นและโหมดตั้งค่า)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (skuDrawer || confirm || prItems || bundleItems || editorOverlay || wizardFor) return;
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName ?? "");
       if (e.key === "Escape" && !typing) { if (mode === "edit") tryLeaveEdit(); else if (selecting) stopSelecting(); else onClose(); }
-      if ((e.key === "Delete" || e.key === "Backspace") && mode === "edit" && draft.selId && !typing) { e.preventDefault(); draft.removeChip(draft.selId); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

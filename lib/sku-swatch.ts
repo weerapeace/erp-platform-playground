@@ -44,14 +44,75 @@ export function sortReadingOrder<T extends PctRect>(items: T[]): T[] {
   return rows.flatMap((row) => row.sort((a, b) => a.x - b.x));
 }
 
-/** ครอปรูปแล้ว: กรอบเดิม (% ของรูปเดิม) → % ของรูปที่ครอป · ชิ้นที่จุดกลางหลุดกรอบครอป = ถูกตัด (คืนใน dropped) */
-export function remapToCrop<T extends PctRect>(items: T[], crop: PctRect): { kept: T[]; dropped: T[] } {
+/** เรียงตามคอลัมน์: คอลัมน์ซ้าย → ขวา แล้วบน → ล่าง (คอลัมน์เดียวกัน = จุดกลางห่างแนวนอนไม่เกินครึ่งความกว้างชิ้น) — แผงที่ไล่เลขลงทีละคอลัมน์ */
+export function sortColumnOrder<T extends PctRect>(items: T[]): T[] {
+  const list = [...items].sort((a, b) => a.x + a.w / 2 - (b.x + b.w / 2));
+  const cols: T[][] = [];
+  for (const it of list) {
+    const cx = it.x + it.w / 2;
+    const col = cols[cols.length - 1];
+    if (col) {
+      const ref = col.reduce((s, r) => s + r.x + r.w / 2, 0) / col.length;
+      const tol = Math.max(1, (col.reduce((s, r) => s + r.w, 0) / col.length) / 2);
+      if (Math.abs(cx - ref) <= tol) { col.push(it); continue; }
+    }
+    cols.push([it]);
+  }
+  return cols.flatMap((col) => col.sort((a, b) => a.y - b.y));
+}
+
+// ───────────────────────────── กรอบดัดมุม (จุดมุม) ─────────────────────────────
+/** จุด [x, y] เป็น % ของรูป */
+export type Pt = [number, number];
+/** กรอบที่อาจดัดมุมแล้ว: points = จุดมุมเรียงรอบรูป (null/ไม่มี = สี่เหลี่ยมตรง x/y/w/h) */
+export type ShapeRect = PctRect & { points?: Pt[] | null };
+
+/** มุมทั้ง 4 ของสี่เหลี่ยม (ซ้ายบน → ขวาบน → ขวาล่าง → ซ้ายล่าง) */
+export const rectCorners = (r: PctRect): Pt[] => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+
+/** กรอบสี่เหลี่ยมที่ครอบจุดทั้งหมด */
+export function bboxOf(points: Pt[]): PctRect {
+  const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x: r2(x), y: r2(y), w: r2(Math.max(0.5, Math.max(...xs) - x)), h: r2(Math.max(0.5, Math.max(...ys) - y)) };
+}
+
+/** จุดมุมที่ส่งมา → ใช้ได้ไหม (3–8 จุด · ตัวเลข · ตัดให้อยู่ใน 0–100) · ไม่ได้ = null (ถือเป็นสี่เหลี่ยมตรง) */
+export function cleanPoints(v: unknown): Pt[] | null {
+  if (!Array.isArray(v) || v.length < 3 || v.length > 8) return null;
+  const out: Pt[] = [];
+  for (const p of v) {
+    if (!Array.isArray(p) || p.length < 2) return null;
+    const x = Number(p[0]), y = Number(p[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    out.push([r2(clamp(x, 0, 100)), r2(clamp(y, 0, 100))]);
+  }
+  return out;
+}
+
+/** จุดมุมตรงกับมุมสี่เหลี่ยมเป๊ะ (ไม่ได้ดัด) → เก็บเป็น null ได้ */
+export function isAxisRect(points: Pt[] | null | undefined): boolean {
+  if (!points) return true;
+  if (points.length !== 4) return false;
+  const b = bboxOf(points);
+  const c = rectCorners(b);
+  return points.every((p, i) => Math.abs(p[0] - c[i][0]) < 0.05 && Math.abs(p[1] - c[i][1]) < 0.05);
+}
+
+/** ครอปรูปแล้ว: กรอบเดิม (% ของรูปเดิม) → % ของรูปที่ครอป · ชิ้นที่จุดกลางหลุดกรอบครอป = ถูกตัด (คืนใน dropped) · กรอบดัดมุม = เลื่อนทุกจุด */
+export function remapToCrop<T extends ShapeRect>(items: T[], crop: PctRect): { kept: T[]; dropped: T[] } {
   const kept: T[] = [];
   const dropped: T[] = [];
   if (crop.w <= 0 || crop.h <= 0) return { kept: [], dropped: [...items] };
+  const mapPt = (p: Pt): Pt => [r2(clamp(((p[0] - crop.x) / crop.w) * 100, 0, 100)), r2(clamp(((p[1] - crop.y) / crop.h) * 100, 0, 100))];
   for (const it of items) {
     const cx = it.x + it.w / 2, cy = it.y + it.h / 2;
     if (cx < crop.x || cx > crop.x + crop.w || cy < crop.y || cy > crop.y + crop.h) { dropped.push(it); continue; }
+    if (it.points?.length) {
+      const pts = it.points.map(mapPt);
+      kept.push({ ...it, ...bboxOf(pts), points: pts });
+      continue;
+    }
     const x1 = clamp(((it.x - crop.x) / crop.w) * 100, 0, 100);
     const y1 = clamp(((it.y - crop.y) / crop.h) * 100, 0, 100);
     const x2 = clamp(((it.x + it.w - crop.x) / crop.w) * 100, 0, 100);
@@ -61,11 +122,13 @@ export function remapToCrop<T extends PctRect>(items: T[], crop: PctRect): { kep
   return { kept, dropped };
 }
 
-/** หมุนรูป 90° — ตามเข็ม (cw) / ทวนเข็ม (ccw) · กรอบหมุนตามรูป */
-export function rotateRect90<T extends PctRect>(it: T, dir: "cw" | "ccw" = "cw"): T {
-  return dir === "cw"
+/** หมุนรูป 90° — ตามเข็ม (cw) / ทวนเข็ม (ccw) · กรอบ (และจุดมุมถ้ามี) หมุนตามรูป */
+export function rotateRect90<T extends ShapeRect>(it: T, dir: "cw" | "ccw" = "cw"): T {
+  const rot = (p: Pt): Pt => (dir === "cw" ? [r2(100 - p[1]), r2(p[0])] : [r2(p[1]), r2(100 - p[0])]);
+  const base = dir === "cw"
     ? { ...it, x: r2(100 - it.y - it.h), y: r2(it.x), w: it.h, h: it.w }
     : { ...it, x: r2(it.y), y: r2(100 - it.x - it.w), w: it.h, h: it.w };
+  return it.points?.length ? { ...base, points: it.points.map(rot) } : base;
 }
 
 /** แบ่งกรอบเป็น cols × rows ชิ้นเท่า ๆ กัน (gapPct = ช่องว่างระหว่างชิ้นเป็น % ของขนาดช่อง) · เรียงแบบอ่านหนังสือ */
@@ -167,14 +230,24 @@ export function normalizeAiChips(raw: unknown): AiSwatchRead {
 export type AiChipLabel = { n: number; label: string | null; name: string | null };
 
 export const SWATCH_LABEL_SYSTEM = [
-  "You look at ONE photo of a fabric / leather / thread swatch card. Someone already drew numbered frames on it:",
-  "each colour chip has a bright frame with a white number tag (1, 2, 3 …) at its top-left corner.",
-  "For EVERY numbered frame return: label = the number/code printed on or right next to THAT chip exactly as printed (\"\" if none or unreadable);",
+  "You look at a photo of a fabric / leather / thread swatch card. Someone already drew numbered frames on it:",
+  "each colour chip has a bright green frame with a white number on a pink tag (1, 2, 3 …) at its top-left corner.",
+  "Image 1 = the whole card. Image 2 (if given) = zoomed tiles: tile N shows frame N enlarged WITH its surroundings, so small printed numbers are readable.",
+  "Each card prints the chip numbers in its own place: on a strip next to the chip (left or right), above, below, or on the chip itself. Work out the pattern of this card first, then apply it to every chip consistently.",
+  "For EVERY numbered frame return: label = the number/code printed for THAT chip exactly as printed (\"\" if none or unreadable — never guess a number that is not visible);",
   "name = a short Thai colour name for the chip inside the frame (เช่น กรมท่า, แดงเลือดหมู, ครีม, เทาเข้ม, น้ำตาลทอง).",
   "Do not invent frames. Do not move frames. Use the frame numbers exactly as drawn.",
   "Reply JSON only: {\"items\": [{\"n\": number, \"label\": string, \"name\": string}]}",
 ].join("\n");
-export const swatchLabelAsk = (count: number) => `รูปนี้มีกรอบเลข 1–${count} รวม ${count} กรอบ อ่านเลขที่พิมพ์ข้างชิ้น + ตั้งชื่อสีไทยให้ทุกกรอบ แล้วตอบ JSON ตามโครงที่กำหนด`;
+
+/** เลขอยู่ตรงไหนของชิ้น (ผู้ใช้บอกช่วย AI · auto = ให้ AI ดูเอง) */
+export const LABEL_POSITIONS = ["auto", "right", "left", "below", "above", "inside"] as const;
+export type LabelPosition = (typeof LABEL_POSITIONS)[number];
+export const LABEL_POSITION_TH: Record<LabelPosition, string> = { auto: "ให้ AI ดูเอง", right: "ขวาของชิ้น", left: "ซ้ายของชิ้น", below: "ใต้ชิ้น", above: "บนชิ้น", inside: "บนตัวชิ้น" };
+const LABEL_POSITION_EN: Record<LabelPosition, string> = { auto: "", right: "to the RIGHT of each chip", left: "to the LEFT of each chip", below: "BELOW each chip", above: "ABOVE each chip", inside: "ON the chip itself" };
+export const swatchLabelAsk = (count: number, pos: LabelPosition = "auto", tiles = false) =>
+  `รูปนี้มีกรอบเลข 1–${count} รวม ${count} กรอบ${tiles ? " (รูปที่ 2 = ภาพซูมรอบแต่ละกรอบ เลขตรงกับกรอบ)" : ""} อ่านเลขที่พิมพ์ของแต่ละชิ้น + ตั้งชื่อสีไทยให้ทุกกรอบ แล้วตอบ JSON ตามโครงที่กำหนด`
+  + (pos !== "auto" ? `\nOn this card the printed numbers are ${LABEL_POSITION_EN[pos]}.` : "");
 
 /** คำตอบ AI → เลข/ชื่อสีต่อกรอบ (เฉพาะเลขกรอบที่มีจริง 1..count · ซ้ำ = ใช้ตัวแรก) */
 export function normalizeAiLabels(raw: unknown, count: number): AiChipLabel[] {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averageHex, boxBlur3, chipCode, cleanBoardCode, floodFitRect, normalizeAiChips, normalizeAiLabels, remapToCrop, rotateRect90, sortReadingOrder, splitRect } from "./sku-swatch";
+import { averageHex, bboxOf, boxBlur3, chipCode, cleanBoardCode, cleanPoints, floodFitRect, isAxisRect, normalizeAiChips, normalizeAiLabels, rectCorners, remapToCrop, rotateRect90, sortColumnOrder, sortReadingOrder, splitRect } from "./sku-swatch";
 
 describe("chipCode / cleanBoardCode", () => {
   it("เลขชิ้นอย่างน้อย 2 หลัก", () => {
@@ -161,5 +161,40 @@ describe("floodFitRect (คลิกที่สี = ตีกรอบให�
     // พื้นเทารอบนอก กว้าง 6px ทุกด้าน (~22% ของรูป) + การ์ดขาวข้างใน
     const px = img(W, H, [200, 200, 200], [{ x: 6, y: 6, w: 88, h: 88, c: [250, 250, 245] }, { x: 20, y: 20, w: 20, h: 20, c: [150, 80, 30] }]);
     expect(floodFitRect(px, W, H, 2, 50)).toEqual({ ok: false, reason: "too_big" });
+  });
+});
+
+describe("sortColumnOrder (แผงที่ไล่เลขลงทีละคอลัมน์)", () => {
+  it("คอลัมน์ซ้ายก่อน บนลงล่าง แม้กรอบเยื้องเล็กน้อย", () => {
+    const items = [
+      { id: "b1", x: 41, y: 10, w: 8, h: 6 }, { id: "a2", x: 10, y: 20, w: 8, h: 6 },
+      { id: "a1", x: 11, y: 10, w: 8, h: 6 }, { id: "b2", x: 40, y: 20, w: 8, h: 6 },
+    ];
+    expect(sortColumnOrder(items).map((i) => i.id)).toEqual(["a1", "a2", "b1", "b2"]);
+  });
+});
+
+describe("กรอบดัดมุม (points)", () => {
+  it("cleanPoints: 3–8 จุด ตัวเลข ตัดให้อยู่ 0–100 · ผิดรูป = null", () => {
+    expect(cleanPoints([[10, 10], [20, 10], [120, 30], [10, -5]])).toEqual([[10, 10], [20, 10], [100, 30], [10, 0]]);
+    expect(cleanPoints([[1, 1], [2, 2]])).toBeNull();
+    expect(cleanPoints([[1, "x"], [2, 2], [3, 3]])).toBeNull();
+    expect(cleanPoints("x")).toBeNull();
+  });
+  it("bboxOf / isAxisRect: มุมสี่เหลี่ยมตรง = ไม่ได้ดัด · ขยับมุมเดียว = ดัด", () => {
+    const r = { x: 10, y: 20, w: 30, h: 10 };
+    expect(isAxisRect(rectCorners(r))).toBe(true);
+    const bent = rectCorners(r); bent[2] = [38, 33];
+    expect(isAxisRect(bent)).toBe(false);
+    expect(bboxOf(bent)).toEqual({ x: 10, y: 20, w: 30, h: 13 });
+  });
+  it("ครอป/หมุน: จุดมุมเลื่อนตาม + กรอบครอบใหม่", () => {
+    const it0 = { id: 1, x: 30, y: 30, w: 10, h: 10, points: [[30, 30], [40, 30], [38, 40], [30, 40]] as [number, number][] };
+    const { kept } = remapToCrop([it0], { x: 20, y: 20, w: 50, h: 50 });
+    expect(kept[0].points).toEqual([[20, 20], [40, 20], [36, 40], [20, 40]]);
+    expect(kept[0]).toMatchObject({ x: 20, y: 20, w: 20, h: 20 });
+    const rot = rotateRect90(it0, "cw");
+    expect(rot.points).toEqual([[70, 30], [70, 40], [60, 38], [60, 30]]);
+    expect(rotateRect90(rot, "ccw").points).toEqual(it0.points);
   });
 });

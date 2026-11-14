@@ -29,8 +29,13 @@ import { canvasBgWindow } from "@/lib/website-canvas";
 export async function loadImageEl(src: string): Promise<HTMLImageElement> {
   const img = new Image();
   if (!/^(blob|data):/.test(src)) img.crossOrigin = "anonymous";
-  img.src = src;
-  await img.decode();
+  // รอ onload (ไม่ใช้ decode() — หน้าที่ถูกซ่อน/อยู่เบื้องหลัง Chrome อาจไม่ decode ให้จนกว่าจะกลับมาแสดง → ค้าง)
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("โหลดรูปไม่ได้"));
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) resolve();
+  });
   return img;
 }
 
