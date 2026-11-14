@@ -83,7 +83,8 @@ export interface FolderTarget {
   skuId: string | null;
 }
 /** slash = รหัส SKU มี "/" (ชื่อโฟลเดอร์ใส่ / ไม่ได้) → จับคู่จากชื่อที่ตัด / ออก เมื่อมีตัวเดียว */
-export type MatchHow = "color" | "size" | "parent" | "file" | "none" | "user" | "slash";
+/** combo = ชื่อย่อของ Parent ที่รหัสรวมหลายรุ่น ("MGN150, 156, 159" = "MGN150, MGN156, MGN159") */
+export type MatchHow = "color" | "size" | "parent" | "file" | "none" | "user" | "slash" | "combo";
 export interface FolderMatch {
   target: FolderTarget | null;
   how: MatchHow;
@@ -91,9 +92,14 @@ export interface FolderMatch {
   note?: string;
   /** จับคู่ไม่ได้แต่รู้รุ่น (รหัสสีไม่มีในรุ่น) */
   guessParentId?: string | null;
+  /** outer = ชื่อโฟลเดอร์นี้ไม่มีรหัส → ใช้รหัสของโฟลเดอร์ชั้นนอกแทน (เดา · ให้คนดูก่อน) */
+  guess?: "outer";
 }
 
 export function matchName(name: string, parents: RouteParent[], index: CodeRef[]): FolderMatch {
+  // ชื่อรวมหลายรุ่น ("MGN150, 156, 159") = Parent ที่รหัสรวมรุ่นชุดเดียวกัน → แกลเลอรี Parent (ตรวจก่อน ไม่ให้ไปติดรหัสตัวแรกตัวเดียว)
+  const combo = matchComboParent(name, parents);
+  if (combo) return combo;
   const hit = findCodePrefix(name.trim(), index);
   if (!hit) {
     const c = codeLike(name.trim());
@@ -117,6 +123,29 @@ export function matchName(name: string, parents: RouteParent[], index: CodeRef[]
     return { target: null, how: "none", guessParentId: p.parentId, note: tr(`ไม่มีสี ${dash[1].toUpperCase()} ในรุ่น ${p.code}`, `No color ${dash[1].toUpperCase()} in model ${p.code}`) };
   }
   return { target: { parentId: ref.parentId, skuId: null }, how: "parent" };
+}
+
+/** "MGN150, 156, 159" / "MGN150+MGN156" → [MGN150, MGN156, MGN159] (เลขล้วน = ใช้ตัวอักษรนำของรหัสแรก) · ไม่ใช่รายการรหัส = [] */
+export function expandCodeList(s: string): string[] {
+  const parts = s.split(/\s*(?:,|\+|&|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return [];
+  const first = parts[0].match(/^([A-Za-z]+)(\d[A-Za-z0-9-]*)$/);
+  if (!first) return [];
+  const out: string[] = [];
+  for (const p of parts) {
+    if (/^\d[A-Za-z0-9-]*$/.test(p)) out.push(`${first[1]}${p}`.toUpperCase());
+    else if (/^[A-Za-z]+\d[A-Za-z0-9-]*$/.test(p)) out.push(p.toUpperCase());
+    else return [];
+  }
+  return out;
+}
+/** ชื่อโฟลเดอร์ที่เป็นรายการรหัสหลายรุ่น ตรงกับ Parent ที่รหัสรวมรุ่นชุดเดียวกันพอดี (ลำดับไม่สำคัญ) → แกลเลอรี Parent นั้น (เจ้าของเจอ 2026-11-14) */
+function matchComboParent(name: string, parents: RouteParent[]): FolderMatch | null {
+  if (!/[,+&]/.test(name)) return null;
+  const want = expandCodeList(name).sort().join("|");
+  if (!want) return null;
+  const p = parents.find((x) => /[,+&]/.test(x.code) && expandCodeList(x.code).sort().join("|") === want);
+  return p ? { target: { parentId: p.parentId, skuId: null }, how: "combo", note: tr(`ชื่อย่อของ Parent ${p.code}`, `Short name of Parent ${p.code}`) } : null;
 }
 
 /**
@@ -247,6 +276,9 @@ export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], in
       // → ไม่มีรหัสเลย = ดูชื่อไฟล์ข้างใน
       const tries = g.folders.map((n) => matchName(n, parents, index));
       match = tries.find((m) => m.target || m.guessParentId);
+      // โฟลเดอร์รหัสที่ชื่อตัวเองไม่มีรหัส → ได้รหัสจากโฟลเดอร์ชั้นนอก = เดา (บอกคน · ตัวแยกไฟล์ให้เปลี่ยนได้)
+      const at = match ? tries.indexOf(match) : -1;
+      if (match && at > 0 && !g.role && match.target) match = { ...match, guess: "outer", note: tr(`เดาจากโฟลเดอร์ชั้นนอก "${g.folders[at]}"`, `Guessed from the outer folder "${g.folders[at]}"`) };
       if (!match && g.role !== "archive") {
         const byFile = g.files.map((x) => matchName(x.base, parents, index)).find((m) => m.target);
         match = byFile ? { ...byFile, how: "file", note: tr("จับคู่จากชื่อไฟล์ข้างใน", "Matched from the file names inside") } : tries[0];

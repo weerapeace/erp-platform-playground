@@ -101,6 +101,8 @@ export type ProductPlanGroup = {
   label: string; role: GroupRole | null; code: string | null; count: number; note?: string;
   /** key กลุ่ม (ส่งกลับมาใน folderMap เพื่อจับคู่เอง) · how = จับคู่ยังไง (slash = ตัด / ให้ · user = เลือกเอง) · guessParentId = รู้รุ่นแต่ไม่รู้สี */
   key: string; how: string; guessParentId: string | null;
+  /** ปลายทางตอนนี้ (null = ไม่ลง) · guess = "outer" เดาจากโฟลเดอร์ชั้นนอก */
+  target: { parentId: string; skuId: string | null } | null; guess: string | null;
   /** โปรแกรมเลือกจับคู่เอง (folderMap) · skip = เลือก "ไม่ลง" */
   user: boolean; skip: boolean;
 };
@@ -181,7 +183,8 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     const t = skipByUser ? null : g.match.target;
     const code = t ? codeOfTarget(t, parents) : null;
     groupInfo.push({ label: g.label, role: g.role ?? null, code, count: g.fileIds.length, note: skipByUser ? "ไม่ลง — เลือกเอง (อยู่บน Z:)" : g.match.note,
-      key: g.key, how: g.match.how, guessParentId: g.match.guessParentId ?? g.match.target?.parentId ?? null, user: !!fm && (skipByUser || g.match.how === "user"), skip: skipByUser });
+      key: g.key, how: g.match.how, guessParentId: g.match.guessParentId ?? g.match.target?.parentId ?? null, user: !!fm && (skipByUser || g.match.how === "user"), skip: skipByUser,
+      target: t ? { parentId: t.parentId, skuId: t.skuId } : null, guess: g.match.how === "user" ? null : g.match.guess ?? null });
     for (const id of g.fileIds) byId.get(id)!.group = g.label;
     if (skipByUser) {
       for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "archive", note: "ไม่ลง — เลือกเอง (อยู่บน Z:)" });

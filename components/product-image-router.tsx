@@ -1136,7 +1136,7 @@ function GroupCard({ g, parents, itemById, plan, warnOf, seenOf, similarOf, onCo
     ? <span className="rounded bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">{g.match.note ?? t("ยังไม่ได้เลือกรุ่น/สี", "Model/color not chosen yet")}</span>
     : g.picked
       ? <span className="rounded bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">{t("เลือกเอง", "Chosen manually")}</span>
-      : <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">{g.match.how === "size" || g.match.how === "slash" ? g.match.note : g.match.how === "parent" ? t("รหัสรุ่น · ทั้งรุ่น", "Model code · whole model") : g.match.how === "file" ? t("จับคู่จากชื่อไฟล์", "Matched from file name") : t("จับคู่เอง", "Auto-matched")}</span>;
+      : <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">{g.match.how === "size" || g.match.how === "slash" || g.match.how === "combo" || g.match.guess ? g.match.note : g.match.how === "parent" ? t("รหัสรุ่น · ทั้งรุ่น", "Model code · whole model") : g.match.how === "file" ? t("จับคู่จากชื่อไฟล์", "Matched from file name") : t("จับคู่เอง", "Auto-matched")}</span>;
   const existing = sku ? sku.items : p && !g.target?.skuId ? p.galleryItems : [];
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5">

@@ -12,6 +12,7 @@ import {
   codePrefixes,
   destFromName,
   estimateBytes,
+  expandCodeList,
   groupRouteFiles,
   imageWarning,
   matchName,
@@ -80,6 +81,32 @@ describe("matchName", () => {
     expect(matchName("MGN351-01_9", ps, ix).target).toBeNull();
     // มี SKU ชื่อตรง (MGN9-01) อยู่แล้ว → ใช้ตัวนั้นเหมือนเดิม
     expect(matchName("MGN9-01", ps, ix)).toMatchObject({ how: "color", target: { skuId: X1 } });
+  });
+  it("ชื่อย่อของ Parent รวมหลายรุ่น: \"MGN150, 156, 159\" = Parent \"MGN150, MGN156, MGN159\" (ลำดับไม่สำคัญ) · ชุดไม่ครบ = ไม่ใช่", () => {
+    const ps: RouteParent[] = [
+      { parentId: "combo", code: "MGN150, MGN156, MGN159", name: "x", gallery: 0, desc: 0, png: false, shopIds: [], skus: [
+        { id: "c3", code: "MGN156-03", label: "", gallery: 0 }, { id: "c1", code: "MGN150-01", label: "", gallery: 0 }] },
+    ];
+    const ix = routeCodeIndex(ps);
+    expect(expandCodeList("MGN150, 156, 159")).toEqual(["MGN150", "MGN156", "MGN159"]);
+    expect(expandCodeList("MGN150 + MGN159")).toEqual(["MGN150", "MGN159"]);
+    expect(expandCodeList("รูปคนใส่, ชุด 2")).toEqual([]);
+    expect(matchName("MGN150, 156, 159", ps, ix)).toMatchObject({ how: "combo", target: { parentId: "combo", skuId: null }, note: "ชื่อย่อของ Parent MGN150, MGN156, MGN159" });
+    expect(matchName("MGN159,MGN150,MGN156", ps, ix)).toMatchObject({ how: "combo" });
+    expect(matchName("MGN150, 156", ps, ix).how).not.toBe("combo");
+    expect(matchName("MGN156-03", ps, ix)).toMatchObject({ how: "color", target: { skuId: "c3" } });
+  });
+  it("โฟลเดอร์ที่ชื่อไม่มีรหัส ได้รหัสจากโฟลเดอร์ชั้นนอก = บอกว่าเดา (guess outer) · โฟลเดอร์ชื่อรหัสเอง = ไม่ใช่การเดา", () => {
+    const ps: RouteParent[] = [
+      { parentId: "combo", code: "MGN150, MGN156, MGN159", name: "x", gallery: 0, desc: 0, png: false, shopIds: [], skus: [{ id: "c3", code: "MGN156-03", label: "", gallery: 0 }] },
+    ];
+    const gs = groupRouteFiles([
+      { id: "1", path: "MGN156-03/Lifestyle/1.jpg" }, { id: "2", path: "MGN156-03/MGN156-03/1.jpg" }, { id: "3", path: "MGN156-03/MGN150, 156, 159/0.jpeg" },
+    ], ps, routeCodeIndex(ps));
+    const by = (label: string) => gs.find((g) => g.label === label)!;
+    expect(by("Lifestyle").match).toMatchObject({ target: { skuId: "c3" }, guess: "outer", note: 'เดาจากโฟลเดอร์ชั้นนอก "MGN156-03"' });
+    expect(by("MGN156-03").match.guess).toBeUndefined();
+    expect(by("MGN150, 156, 159").match).toMatchObject({ how: "combo", target: { parentId: "combo", skuId: null } });
   });
 });
 

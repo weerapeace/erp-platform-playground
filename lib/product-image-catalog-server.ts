@@ -51,6 +51,12 @@ export async function loadImageCatalog(sb: Admin, req: { codes: string[]; parent
     const { data } = await sb.from("skus_v2").select("parent_sku_id").in("code", part).not("parent_sku_id", "is", null);
     for (const r of (data ?? []) as { parent_sku_id: string }[]) ids.add(r.parent_sku_id);
   }
+  // รหัสรุ่นที่ไม่มี Parent ชื่อตรง (เช่น MGN150 อยู่ใน Parent รวม "MGN150, MGN156, MGN159") → หาจาก SKU ที่ขึ้นต้น "MGN150-" (2026-11-14)
+  const modelLike = [...new Set(req.codes.map((c) => c.trim().toUpperCase()).filter((c) => /^[A-Z]+\d+[A-Z0-9]*$/.test(c)))].slice(0, 60);
+  for (const part of chunk(modelLike, 20)) {
+    const { data } = await sb.from("skus_v2").select("parent_sku_id").or(part.map((c) => `code.ilike.${c}-*`).join(",")).not("parent_sku_id", "is", null).limit(400);
+    for (const r of (data ?? []) as { parent_sku_id: string }[]) ids.add(r.parent_sku_id);
+  }
   const parentIds = [...ids].slice(0, CATALOG_MAX_PARENTS);
   const { data: shopRows } = await sb.from("shops").select("id, name, is_default").order("is_default", { ascending: false }).order("name");
   const shops = ((shopRows ?? []) as { id: string; name: string; is_default: boolean | null }[]).map((s) => ({ id: s.id, name: s.name, isDefault: !!s.is_default }));
