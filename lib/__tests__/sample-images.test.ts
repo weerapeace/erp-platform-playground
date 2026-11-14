@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { albumPreviewKeys, inferAlbumBrand, parseSampleMark, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+import { albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
 
 describe("ชื่ออัลบั้มตามแบรนด์ + วันที่ลง (เวลาไทย)", () => {
   it("วันไทย ปี พ.ศ. · ใช้เวลาไทยไม่ใช่ UTC", () => {
@@ -9,14 +9,51 @@ describe("ชื่ออัลบั้มตามแบรนด์ + วั�
     expect(sampleAlbumName(new Date("2026-11-13T16:59:00Z"), "Good Goods")).toBe("SAMPLE Good Goods 13 พ.ย. 2569");
     expect(sampleAlbumName(new Date("2026-11-13T05:00:00Z"), "  ")).toBe("SAMPLE 13 พ.ย. 2569");
   });
-  it("ป้ายอัลบั้ม: ไม่มีแบรนด์ / มีแบรนด์ · อ่านกลับได้ · อัลบั้มอื่น = null", () => {
+  it("ป้ายอัลบั้ม: ไม่มีแบรนด์ / มีแบรนด์ / อัลบั้มย่อย · อ่านกลับได้ · อัลบั้มอื่น = null", () => {
     expect(sampleAlbumMark(null)).toBe("sample-images");
     expect(sampleAlbumMark("b1")).toBe("sample-images:b1");
-    expect(parseSampleMark("sample-images")).toEqual({ brandId: null });
-    expect(parseSampleMark("sample-images:b1")).toEqual({ brandId: "b1" });
-    expect(parseSampleMark("sample-images:")).toEqual({ brandId: null });
+    expect(sampleAlbumMark("b1", "p1")).toBe("sample-images:b1|in:p1");
+    expect(sampleAlbumMark(null, "p1")).toBe("sample-images|in:p1");
+    expect(parseSampleMark("sample-images")).toEqual({ brandId: null, parentId: null });
+    expect(parseSampleMark("sample-images:b1")).toEqual({ brandId: "b1", parentId: null });
+    expect(parseSampleMark("sample-images:b1|in:p1")).toEqual({ brandId: "b1", parentId: "p1" });
+    expect(parseSampleMark("sample-images|in:p1")).toEqual({ brandId: null, parentId: "p1" });
+    expect(parseSampleMark("sample-images:")).toEqual({ brandId: null, parentId: null });
     expect(parseSampleMark("อัลบั้มทั่วไป")).toBeNull();
     expect(parseSampleMark(null)).toBeNull();
+  });
+});
+
+describe("อัลบั้มในอัลบั้ม", () => {
+  //  top ─ a ─ a1
+  //      └ b
+  //  lost → แม่ไม่อยู่ในรายการ = ชั้นบนสุด
+  const T = [
+    { id: "top", parent_id: null }, { id: "a", parent_id: "top" }, { id: "a1", parent_id: "a" },
+    { id: "b", parent_id: "top" }, { id: "lost", parent_id: "gone" },
+  ];
+  it("เส้นทาง / แม่ / ลูกทุกชั้น", () => {
+    expect(albumPath(T, "a1")).toEqual(["top", "a", "a1"]);
+    expect(albumPath(T, "lost")).toEqual(["lost"]);
+    expect(albumPath(T, "nope")).toEqual([]);
+    expect(parentOf(T, "lost")).toBeNull();
+    expect(descendantIds(T, "top").sort()).toEqual(["a", "a1", "b"]);
+    expect(descendantIds(T, "a1")).toEqual([]);
+  });
+  it("กันวนซ้ำ: ย้ายเข้าตัวเอง/ลูกตัวเองไม่ได้ · ขึ้นชั้นบนสุดได้เสมอ", () => {
+    expect(canMoveAlbum(T, "a", "b")).toBe(true);
+    expect(canMoveAlbum(T, "a", "a1")).toBe(false);
+    expect(canMoveAlbum(T, "a", "a")).toBe(false);
+    expect(canMoveAlbum(T, "a", null)).toBe(true);
+    expect(canMoveAlbum(T, "a", "gone")).toBe(false);
+    const loop = [{ id: "x", parent_id: "y" }, { id: "y", parent_id: "x" }];
+    expect(albumPath(loop, "x").length).toBeLessThanOrEqual(2);   // ข้อมูลวน = ไม่ค้าง
+  });
+  it("รวมรูปทุกชั้นบนการ์ด (ไม่นับถังขยะ) + จำนวนอัลบั้มย่อยชั้นถัดไป", () => {
+    const ph = (k: string, at: string, sent = false, trashed = false) => ({ r2_key: k, created_at: at, trashed, moved_to: sent ? [{ id: "s", code: "s", name: "s", brand_id: null }] : [] });
+    const by = new Map([["top", [ph("t1", "1")]], ["a", [ph("a1k", "2", true)]], ["a1", [ph("deep", "0"), ph("bin", "3", false, true)]]]);
+    expect(rollupAlbum(T, by, "top")).toEqual({ photos: 3, sent: 1, preview_keys: ["deep", "t1", "a1k"], sub_count: 2 });
+    expect(rollupAlbum(T, by, "b")).toEqual({ photos: 0, sent: 0, preview_keys: [], sub_count: 0 });
   });
 });
 

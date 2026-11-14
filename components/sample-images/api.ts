@@ -70,3 +70,26 @@ export async function trashSample(id: string): Promise<void> {
 export async function restoreSample(id: string): Promise<void> {
   await json(await apiFetch(`/api/assets/${encodeURIComponent(id)}`, { method: "PATCH", headers: JSON_HDR, body: JSON.stringify({ restore: true }) }), "เอากลับไม่สำเร็จ");
 }
+
+// ── อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14) ──
+const post = async <T,>(body: Record<string, unknown>, fallback: string): Promise<T> =>
+  (await json<{ data: T }>(await apiFetch("/api/sample-images", { method: "POST", headers: JSON_HDR, body: JSON.stringify(body) }), fallback)).data;
+
+/** สร้างอัลบั้มย่อยใน parentId (+ ย้ายรูปที่เลือกจาก fromAlbumId เข้าไป) */
+export const createSubAlbum = (parentId: string, name: string, assetIds: string[] = [], fromAlbumId?: string) =>
+  post<{ id: string; name: string; moved: number }>({ action: "create_sub", parent_id: parentId, name, asset_ids: assetIds, from_album_id: fromAlbumId }, "สร้างอัลบั้มไม่สำเร็จ");
+
+/** ย้ายรูปจากอัลบั้มหนึ่งไปอีกอัลบั้ม */
+export const movePhotosTo = (assetIds: string[], fromAlbumId: string, toAlbumId: string) =>
+  post<{ moved: number }>({ action: "move_photos", asset_ids: assetIds, from_album_id: fromAlbumId, to_album_id: toAlbumId }, "ย้ายรูปไม่สำเร็จ");
+
+/** ย้ายทั้งอัลบั้มเข้าไปในอีกอัลบั้ม (null = ขึ้นชั้นบนสุด) */
+export const moveAlbumTo = (albumId: string, toParentId: string | null) =>
+  post<{ id: string }>({ action: "move_album", album_id: albumId, to_parent_id: toParentId }, "ย้ายอัลบั้มไม่สำเร็จ");
+
+export const renameAlbum = (albumId: string, name: string) =>
+  post<{ id: string; name: string }>({ action: "rename", album_id: albumId, name }, "เปลี่ยนชื่ออัลบั้มไม่สำเร็จ");
+
+/** ลบอัลบั้มย่อยที่ว่างแล้ว */
+export const deleteEmptyAlbum = (albumId: string) =>
+  post<{ id: string; parent_id: string | null }>({ action: "delete_album", album_id: albumId }, "ลบอัลบั้มไม่สำเร็จ");
