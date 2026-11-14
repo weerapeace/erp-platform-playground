@@ -9,7 +9,10 @@
  *   3. คนที่มีสิทธิ์ platform_orders.manage = โหมดดู (ไม่ดึง บอกแค่จะดึงแบรนด์ไหน)
  * + 2026-11-13 (เจ้าของ "ตามแนะนำเลย"): ต่อท้ายด้วยดึงสินค้า "เฉพาะตัวที่เปลี่ยน" ใน 1 ชม.ล่าสุด (../../tiktok-shop/products-sync)
  *   → เปิดขาย/เผยแพร่/ปิดขายใน Seller Center แล้ว สถานะใน ERP ตามเองภายใน ~15 นาที (ใช้ตัวตั้งเวลาเดิม ไม่ต้องเพิ่มใน DB)
- * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok
+ * + 2026-11-14 (เจ้าของ "เริ่มเฟส 3" Shopee): ต่อท้ายด้วยดึงออเดอร์ Shopee ที่ "เปลี่ยนสถานะ" ใน 3 ชม.ล่าสุด ของทุกแบรนด์ที่เชื่อม Shopee
+ *   (../../shopee/orders-sync · ใช้ตัวตั้งเวลาเดิม ไม่เพิ่มงานใน DB / ไม่เพิ่มคนในออฟฟิศ AI) · Shopee พลาดไม่ทำให้ส่วน TikTok ล้ม
+ *   ออเดอร์ Shopee ของแบรนด์ที่เชื่อมแล้วไม่บันทึกจากเมลอีก (lib/platform-email/server) → ตัวนี้คือทางเข้าหลัก จึงย้อน 3 ชม. เผื่อรอบที่ล้ม
+ * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok / Shopee
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -19,12 +22,16 @@ import { recordWorkerRun } from "@/lib/ai-office-runs";
 import { getPlatformId, ttsTokenOrReason, ttsConnectedBrandIds } from "../../tiktok-shop/shared";
 import { syncTiktokOrders, TTS_ORDER_SOURCE } from "../../tiktok-shop/orders-sync";
 import { syncTiktokProductsChanged } from "../../tiktok-shop/products-sync";
+import { shopeeConfigured } from "@/lib/shopee";
+import { shopeeTokenOrReason } from "../../shopee/shared";
+import { syncShopeeOrders, shopeeConnectedBrandIds, SHOPEE_ORDER_SOURCE } from "../../shopee/orders-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 120;
 
 const WINDOW_SEC = 3600;   // รอบละ 15 นาที แต่ย้อน 1 ชม. — รอบไหนล้มรอบถัดไปยังเก็บตก
+const SHOPEE_WINDOW_SEC = 3 * 3600;   // Shopee: ทางเข้าหลัก (ไม่มีเมลสำรองแล้ว) → ย้อน 3 ชม.
 
 async function authorized(request: NextRequest): Promise<"cron" | "dry" | null> {
   const admin = supabaseAdmin();
@@ -46,7 +53,10 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const ttId = await getPlatformId(admin, "tiktok");
   if (!ttId) return NextResponse.json({ ok: false, error: "ยังไม่มีแพลตฟอร์ม TikTok ในระบบ" }, { status: 400 });
   const brands = await ttsConnectedBrandIds(admin, ttId);
-  if (mode === "dry") return NextResponse.json({ ok: true, dry: true, brands: brands.length });
+  const spId = shopeeConfigured() ? await getPlatformId(admin, "shopee") : null;
+  const shopeeBrands = spId ? await shopeeConnectedBrandIds(admin, spId) : [];
+  if (mode === "dry") return NextResponse.json({ ok: true, dry: true, brands: brands.length, shopee_brands: shopeeBrands.length });
+  const startedAt = Date.now();
 
   const updateTimeGe = Math.floor(Date.now() / 1000) - WINDOW_SEC;
   const results: { brand_id: string; ok: boolean; created?: number; updated?: number; products?: number; error?: string }[] = [];
@@ -69,15 +79,39 @@ async function handle(request: NextRequest): Promise<NextResponse> {
       });
     }
   }
-  const failed = results.filter((x) => !x.ok);
+  // ── Shopee: ออเดอร์ที่เปลี่ยนสถานะใน 3 ชม.ล่าสุด (เวลาที่เหลือของรอบ · ≤ 30 วิ/แบรนด์) ──
+  const shopee: { brand_id: string; ok: boolean; created?: number; updated?: number; error?: string }[] = [];
+  if (spId) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const brandId of shopeeBrands) {
+      const left = 110_000 - (Date.now() - startedAt);
+      if (left < 8_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก)" }); continue; }
+      const tok = await shopeeTokenOrReason(admin, brandId, spId, null);
+      if (!tok.ok) { shopee.push({ brand_id: brandId, ok: false, error: tok.reason }); continue; }
+      const r = await syncShopeeOrders(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, window: { field: "update_time", from: nowSec - SHOPEE_WINDOW_SEC, to: nowSec }, timeBudgetMs: Math.min(30_000, left - 5_000) });
+      shopee.push({ brand_id: brandId, ok: !r.stop_reason, created: r.created, updated: r.updated, ...(r.stop_reason ? { error: `Shopee: ${r.stop_reason}` } : {}) });
+      if (r.created > 0 || r.stop_reason) {
+        const { sample: _s, ...counts } = r;
+        await writeAudit(admin, {
+          action: "import", entityType: "platform_orders", entityId: null, actorId: null, actorName: "shopee_orders_cron",
+          metadata: { source: SHOPEE_ORDER_SOURCE, auto: true, shop_id: tok.shopId, brand_id: brandId, window_hours: SHOPEE_WINDOW_SEC / 3600, ...counts },
+        });
+      }
+    }
+  }
+
+  const failed = [...results, ...shopee].filter((x) => !x.ok);
   const created = results.reduce((a, x) => a + (x.created ?? 0), 0);
   const updated = results.reduce((a, x) => a + (x.updated ?? 0), 0);
+  const spCreated = shopee.reduce((a, x) => a + (x.created ?? 0), 0);
+  const spUpdated = shopee.reduce((a, x) => a + (x.updated ?? 0), 0);
+  const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated}` : "";
   await recordWorkerRun(admin, "tiktok-orders", {
     ok: failed.length === 0,
-    summary: brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`,
+    summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote,
     ...(failed.length ? { error: failed.map((f) => f.error).join(" · ").slice(0, 300) } : {}),
   });
-  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results });
+  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee } });
 }
 
 export const GET = handle;

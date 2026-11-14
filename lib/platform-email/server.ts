@@ -146,6 +146,12 @@ export async function rematchPendingItems(admin: Admin): Promise<{ checked: numb
 
 type OrderRow = { id: string; status: string; source: string | null; stock_deducted: boolean | null; order_no: string | null };
 
+/** แบรนด์นี้เชื่อม Shopee Open Platform อยู่ไหม (platform_credentials stage = connected) — ใช่ = ออเดอร์ Shopee มาจาก API ไม่ใช่เมล */
+async function shopeeApiConnected(admin: Admin, platformId: string, brandId: string): Promise<boolean> {
+  const { data } = await admin.from("platform_credentials").select("meta").eq("brand_id", brandId).eq("platform_id", platformId).maybeSingle();
+  return (data as { meta: { stage?: string } | null } | null)?.meta?.stage === "connected";
+}
+
 async function findOrder(admin: Admin, platformId: string, orderNo: string): Promise<(OrderRow & { items: number }) | null> {
   const { data } = await admin.from("platform_orders").select("id, status, source, stock_deducted, order_no")
     .eq("platform_id", platformId).eq("external_order_id", orderNo).maybeSingle();
@@ -219,6 +225,13 @@ export async function processParsed(
     return res("attention", p.shop_name
       ? `ชื่อร้านในเมล "${p.shop_name}" ยังไม่อยู่ในรายการร้าน — ถ้าเป็นร้านเรา เพิ่มในแท็บตั้งค่าแล้วกด "อ่านใหม่"`
       : "หาชื่อร้านในเมลไม่เจอ — ตรวจเมลนี้ว่าเป็นร้านเราไหม");
+  }
+
+  // เจ้าของเลือก 2026-11-14 "ไม่ต้องดึงจากเมลแล้ว — ออเดอร์จาก Shopee ตรงกว่า": แบรนด์ที่เชื่อม Shopee API อยู่ → ออเดอร์ Shopee มาจาก API อย่างเดียว
+  //   (app/api/shopee/orders-sync · ดึงเองทุก 15 นาที) เมลไม่สร้าง/ไม่แก้ออเดอร์ · เมลคำขอคืนเงินยังนับตามเดิม (อยู่ข้างบน)
+  //   ตัดการเชื่อม Shopee เมื่อไร = กลับมาบันทึกจากเมลเอง
+  if (p.platform === "shopee" && shop.brand_id && await shopeeApiConnected(admin, platformId, shop.brand_id)) {
+    return res("ignored", `ออเดอร์ Shopee ของแบรนด์นี้ดึงจาก Shopee API แล้ว (ตรงกว่า) — ไม่บันทึกจากเมล${p.order_no ? ` · ออเดอร์ ${p.order_no}` : ""}`);
   }
 
   const orderNo = p.order_no as string;

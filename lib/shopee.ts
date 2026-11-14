@@ -316,3 +316,105 @@ export function shopeeItemToCatalogItem(base: Obj, models: { tiers: ShopeeSlimTi
   const listPrice = hasModel ? minPos(ms.map((m) => m.original_price ?? m.price)) : (pr.original ?? pr.price);
   return { external_product_id: itemId, title: str(base.item_name), skus, price: listPrice, status: shopeeListingStatus(slim.status), raw: { shopee: slim } };
 }
+
+// ───────── ออเดอร์ (อ่านอย่างเดียว · PII ปิด = ไม่ขอ/ไม่เก็บที่อยู่ผู้รับ) ─────────
+// v2.order.get_order_list (ช่วงเวลา ≤ 15 วัน/ครั้ง · ≤100/หน้า · cursor) → v2.order.get_order_detail (≤50/ครั้ง)
+
+/** ช่วงเวลาที่ get_order_list รับได้ต่อครั้ง (15 วัน) */
+export const SHOPEE_ORDER_WINDOW_SEC = 15 * 86_400;
+/** ช่องเสริมที่ขอจาก get_order_detail — ไม่ขอ recipient_address (ไม่เก็บที่อยู่/เบอร์ผู้รับ) */
+export const SHOPEE_ORDER_FIELDS = "buyer_username,item_list,pay_time,package_list,shipping_carrier,payment_method,total_amount,cancel_by,cancel_reason,buyer_cancel_reason";
+
+export type ShopeeOrderRef = { order_sn: string; order_status: string | null };
+export type ShopeeOrderPage = { orders: ShopeeOrderRef[]; more: boolean; nextCursor: string };
+
+/** อ่านคำตอบ get_order_list */
+export function shopeeOrderListOf(j: Obj): ShopeeOrderPage {
+  const r = respOf(j);
+  const orders = arr(r.order_list).map(obj).filter((x): x is Obj => !!x)
+    .map((x) => ({ order_sn: String(x.order_sn ?? "").trim(), order_status: str(x.order_status) }))
+    .filter((x) => x.order_sn);
+  return { orders, more: r.more === true, nextCursor: String(r.next_cursor ?? "") };
+}
+
+/** ออเดอร์ในช่วงเวลา (field = create_time สร้าง / update_time เปลี่ยนสถานะ) · ช่วง ≤ 15 วัน */
+export async function shopeeGetOrderList(accessToken: string, shopId: string | number, args: { field: "create_time" | "update_time"; from: number; to: number; cursor?: string; pageSize?: number }): Promise<ShopeeOrderPage> {
+  const from = Math.floor(args.from), to = Math.floor(args.to);
+  if (to - from > SHOPEE_ORDER_WINDOW_SEC) throw new ShopeeApiError("ช่วงเวลาออเดอร์ต่อครั้งต้องไม่เกิน 15 วัน", "error_param");
+  return shopeeOrderListOf(await shopeeFetch("/api/v2/order/get_order_list", {
+    accessToken, shopId,
+    query: { time_range_field: args.field, time_from: from, time_to: to, page_size: Math.min(100, Math.max(1, args.pageSize ?? 100)), cursor: args.cursor ?? "", response_optional_fields: "order_status" },
+  }));
+}
+
+/** รายละเอียดออเดอร์ ≤ 50 ใบต่อครั้ง (รายการสินค้า · ยอด · กำหนดส่ง · ขนส่ง) */
+export async function shopeeGetOrderDetail(accessToken: string, shopId: string | number, orderSns: string[]): Promise<Obj[]> {
+  if (!orderSns.length) return [];
+  if (orderSns.length > 50) throw new ShopeeApiError("ขอรายละเอียดออเดอร์ได้ครั้งละไม่เกิน 50 ใบ", "error_param");
+  const j = await shopeeFetch("/api/v2/order/get_order_detail", { accessToken, shopId, query: { order_sn_list: orderSns.join(","), response_optional_fields: SHOPEE_ORDER_FIELDS } });
+  return arr(respOf(j).order_list).map(obj).filter((x): x is Obj => !!x);
+}
+
+export type ShopeeOrderItem = { sku_code: string | null; name: string | null; variant: string | null; qty: number; price: number | null; item_id: string | null; model_id: string | null };
+export type ShopeeOrderMapped = {
+  external_order_id: string;
+  head: {
+    order_no: string; customer_name: string | null; status: string; platform_status: string | null;
+    total: number | null; currency: string; ordered_at: string | null; ship_by_at: string | null;
+    carrier: string | null; package_no: string | null; cod_amount: number;
+    raw: { shopee: Record<string, unknown> };
+  };
+  items: ShopeeOrderItem[];
+};
+const isoFromSec = (v: unknown): string | null => { const n = num(v); return n && n > 0 ? new Date(n * 1000).toISOString() : null; };
+
+/**
+ * ออเดอร์ Shopee 1 ใบ (get_order_detail) → หัวออเดอร์ + รายการ (platform_orders / platform_order_items)
+ * สถานะในระบบ = toInternal (lib/platform-order-status shopeeToInternal · ไม่รู้จัก = "new" ให้คนดู)
+ * ราคา/ชิ้น = model_discounted_price (หลังส่วนลดร้าน) ไม่มีก็ราคาตั้ง · รหัส = model_sku (ไม่มีก็ item_sku) · ไม่เก็บที่อยู่ผู้รับ
+ */
+export function shopeeOrderToPlatformOrder(o: Obj, toInternal: (code: string | null) => string | null): ShopeeOrderMapped | null {
+  const sn = str(o.order_sn);
+  if (!sn) return null;
+  const status = str(o.order_status);
+  const total = num(o.total_amount);
+  const cod = o.cod === true;
+  const pkgs = arr(o.package_list).map(obj).filter((x): x is Obj => !!x);
+  const byKey = new Map<string, ShopeeOrderItem>();
+  for (const li of arr(o.item_list).map(obj).filter((x): x is Obj => !!x)) {
+    const code = str(li.model_sku) ?? str(li.item_sku);
+    const key = `${li.item_id ?? ""}:${li.model_id ?? ""}:${code ?? str(li.item_name) ?? "?"}`;
+    const qty = Math.max(0, num(li.model_quantity_purchased) ?? 1);
+    const prev = byKey.get(key);
+    if (prev) { prev.qty += qty; continue; }
+    byKey.set(key, {
+      sku_code: code, name: str(li.item_name), variant: str(li.model_name), qty,
+      price: num(li.model_discounted_price) ?? num(li.model_original_price),
+      item_id: li.item_id != null ? String(li.item_id) : null, model_id: li.model_id != null && String(li.model_id) !== "0" ? String(li.model_id) : null,
+    });
+  }
+  return {
+    external_order_id: sn,
+    head: {
+      order_no: sn,
+      customer_name: str(o.buyer_username),
+      status: toInternal(status) ?? "new",
+      platform_status: status,
+      total, currency: str(o.currency) ?? "THB",
+      ordered_at: isoFromSec(o.create_time),
+      ship_by_at: isoFromSec(o.ship_by_date),
+      carrier: str(o.shipping_carrier) ?? str(pkgs[0]?.shipping_carrier),
+      package_no: str(pkgs[0]?.package_number),
+      cod_amount: cod ? (total ?? 0) : 0,   // ช่องนี้ห้ามว่าง (ค่าเริ่ม 0)
+      raw: {
+        shopee: {
+          status, update_time: num(o.update_time), pay_time: num(o.pay_time), ship_by_date: num(o.ship_by_date), days_to_ship: num(o.days_to_ship),
+          cod, payment_method: str(o.payment_method), shipping_carrier: str(o.shipping_carrier),
+          cancel_by: str(o.cancel_by), cancel_reason: str(o.cancel_reason), buyer_cancel_reason: str(o.buyer_cancel_reason),
+          packages: pkgs.map((p) => ({ package_number: str(p.package_number), logistics_status: str(p.logistics_status) })).filter((p) => p.package_number),
+        },
+      },
+    },
+    items: [...byKey.values()],
+  };
+}

@@ -4,8 +4,10 @@ import {
   shopeeSignBase, shopeeSign, shopeeAuthUrl, shopeeCallbackParams, shopeeConfigured, shopeeEnv, shopeeHost,
   shopeeErrorText, shopeeIsRateLimit, ShopeeApiError, shopeeTokenOf, shopeeTokenTimes, shopeeReconnectBy, shopeeShopInfoOf,
   SHOPEE_HOSTS, SHOPEE_REFRESH_TTL_MS, shopeeItemListOf, shopeeModelsToSlim, shopeeItemToCatalogItem, shopeeListingStatus, SHOPEE_PULL_STATUSES,
+  shopeeOrderListOf, shopeeOrderToPlatformOrder, SHOPEE_ORDER_FIELDS,
 } from "@/lib/shopee";
 import { summarizeListing, countsAsDuplicate } from "@/lib/platform-listing-health";
+import { shopeeToInternal, isShopManaged, checkTransition, shopManagedName, needsAction } from "@/lib/platform-order-status";
 
 describe("Shopee — เซ็นคำขอ", () => {
   test("ข้อความที่เซ็น: ระดับแอป = partner_id+path+timestamp · ระดับร้าน ต่อ access_token+shop_id", () => {
@@ -200,5 +202,64 @@ describe("Shopee — ป้าย 'ซ้ำ' (countsAsDuplicate)", () => {
     expect(countsAsDuplicate("reviewing")).toBe(true);
     expect(countsAsDuplicate("normal")).toBe(true);
     expect(countsAsDuplicate(null)).toBe(true);
+  });
+});
+
+describe("Shopee — ออเดอร์ (get_order_list / get_order_detail → ศูนย์ออเดอร์)", () => {
+  test("รายการเลขออเดอร์ + more / next_cursor", () => {
+    expect(shopeeOrderListOf({ response: { more: true, next_cursor: "20", order_list: [{ order_sn: "261113715SA23B", order_status: "READY_TO_SHIP" }, { order_sn: "" }] } }))
+      .toEqual({ orders: [{ order_sn: "261113715SA23B", order_status: "READY_TO_SHIP" }], more: true, nextCursor: "20" });
+  });
+  test("ไม่ขอที่อยู่ผู้รับ (PII ปิด)", () => {
+    expect(SHOPEE_ORDER_FIELDS).not.toContain("recipient_address");
+    expect(SHOPEE_ORDER_FIELDS).toContain("item_list");
+  });
+  const ORDER = {
+    order_sn: "261113715SA23B", order_status: "READY_TO_SHIP", currency: "THB", cod: true, total_amount: 1028, create_time: 1763031787, update_time: 1763032000,
+    ship_by_date: 1763204587, days_to_ship: 2, buyer_username: "buyer_x", shipping_carrier: "Flash Express", payment_method: "Cash on Delivery",
+    recipient_address: { name: "****", phone: "******89" },
+    package_list: [{ package_number: "OFG123", logistics_status: "LOGISTICS_READY", shipping_carrier: "Flash Express" }],
+    item_list: [
+      { item_id: 800123, item_name: "กระเป๋าสะพาย", item_sku: "BBP12", model_id: 184839708451, model_name: "ดำ เทา ขาว แดง (01)", model_sku: "BBP12-01", model_quantity_purchased: 2, model_original_price: 2000, model_discounted_price: 490 },
+      { item_id: 900, item_name: "ของแถม", item_sku: "GIFT1", model_id: 0, model_name: "", model_sku: "", model_quantity_purchased: 1, model_original_price: 0, model_discounted_price: 0 },
+    ],
+  };
+  test("หัวออเดอร์: สถานะ (READY_TO_SHIP → new) · ยอด · กำหนดส่ง · COD · เลขพัสดุ · ไม่เก็บที่อยู่", () => {
+    const m = shopeeOrderToPlatformOrder(ORDER, shopeeToInternal)!;
+    expect(m.external_order_id).toBe("261113715SA23B");
+    expect(m.head).toMatchObject({ order_no: "261113715SA23B", customer_name: "buyer_x", status: "new", platform_status: "READY_TO_SHIP", total: 1028, currency: "THB", carrier: "Flash Express", package_no: "OFG123", cod_amount: 1028 });
+    expect(m.head.ordered_at).toBe(new Date(1763031787 * 1000).toISOString());
+    expect(m.head.ship_by_at).toBe(new Date(1763204587 * 1000).toISOString());
+    expect(JSON.stringify(m)).not.toContain("******89");
+  });
+  test("รายการ: รหัส = model_sku (ไม่มีก็ item_sku) · จำนวน · ราคาหลังส่วนลด", () => {
+    const m = shopeeOrderToPlatformOrder(ORDER, shopeeToInternal)!;
+    expect(m.items).toEqual([
+      { sku_code: "BBP12-01", name: "กระเป๋าสะพาย", variant: "ดำ เทา ขาว แดง (01)", qty: 2, price: 490, item_id: "800123", model_id: "184839708451" },
+      { sku_code: "GIFT1", name: "ของแถม", variant: null, qty: 1, price: 0, item_id: "900", model_id: null },
+    ]);
+  });
+  test("ไม่ใช่ COD = cod_amount 0 (ช่องห้ามว่าง) · สถานะไม่รู้จัก = new · ส่งแล้ว = shipped · ยกเลิก = cancelled", () => {
+    expect(shopeeOrderToPlatformOrder({ ...ORDER, cod: false }, shopeeToInternal)!.head.cod_amount).toBe(0);
+    expect(shopeeOrderToPlatformOrder({ ...ORDER, order_status: "SOMETHING_NEW" }, shopeeToInternal)!.head.status).toBe("new");
+    expect(shopeeOrderToPlatformOrder({ ...ORDER, order_status: "SHIPPED" }, shopeeToInternal)!.head.status).toBe("shipped");
+    expect(shopeeOrderToPlatformOrder({ ...ORDER, order_status: "CANCELLED" }, shopeeToInternal)!.head.status).toBe("cancelled");
+    expect(shopeeOrderToPlatformOrder({ order_status: "X" }, shopeeToInternal)).toBeNull();
+  });
+});
+
+describe("Shopee — ศูนย์ออเดอร์: shopee_api = สถานะตามร้าน (ดูอย่างเดียว)", () => {
+  test("shopee_api เปลี่ยนสถานะ/ตัดสต๊อกที่ ERP ไม่ได้ · ข้อความบอกชื่อร้านถูก", () => {
+    expect(isShopManaged("shopee_api")).toBe(true);
+    expect(shopManagedName("shopee_api")).toBe("Shopee");
+    const r = checkTransition({ status: "new", source: "shopee_api" }, "confirmed");
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toContain("Shopee");
+    const t = checkTransition({ status: "new", source: "tiktok_api" }, "confirmed");
+    expect(!t.ok && t.reason).toContain("TikTok");   // TikTok เหมือนเดิม
+  });
+  test("ยังนับเป็นงานต้องจัดส่ง (READY_TO_SHIP) แต่ไม่นับยังไม่ชำระ (UNPAID)", () => {
+    expect(needsAction({ status: "new", source: "shopee_api", platform_status: "READY_TO_SHIP" })).toBe(true);
+    expect(needsAction({ status: "new", source: "shopee_api", platform_status: "UNPAID" })).toBe(false);
   });
 });

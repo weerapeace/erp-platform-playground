@@ -10,7 +10,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 import {
-  SHIP_DUE_LABEL, allowedNext, isPlatformOrderStatus, isReportOnly, isShopManaged, platformStatusLabel, platformStatusWarning, shipDue,
+  SHIP_DUE_LABEL, allowedNext, isPlatformOrderStatus, isReportOnly, isShopManaged, shopManagedName, platformStatusLabel, platformStatusWarning, shipDue,
   type PlatformOrderItemRow, type PlatformOrderStatus,
 } from "@/lib/platform-order-status";
 import { EMPTY_SHIP_TO, canShipViaShippop, isMarketplace, isShippingActive, manualChannelLabel, nextSimStatus, shipToText, type OrderShipping, type ShipTo } from "@/lib/order-shipping";
@@ -77,8 +77,9 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
   const status = String(order?.status ?? "new");
   const source = (order?.source as string | null) ?? null;
   const reportOnly = isReportOnly(source);
-  // ออเดอร์ TikTok (API) = สถานะตามร้าน — ซ่อนปุ่มเปลี่ยนสถานะ/ขนส่ง เหมือนออเดอร์จากเมล (ออกใบกำกับได้)
+  // ออเดอร์ TikTok / Shopee (API) = สถานะตามร้าน — ซ่อนปุ่มเปลี่ยนสถานะ/ขนส่ง เหมือนออเดอร์จากเมล (ออกใบกำกับได้)
   const shopManaged = isShopManaged(source);
+  const shopName = shopManagedName(source) ?? "ร้าน";
   const readOnly = reportOnly || shopManaged;
   const pStatus = (order?.platform_status as string | null) ?? null;
   const warn = platformStatusWarning(pStatus);
@@ -123,7 +124,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
               {channelLabel && <span className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-slate-600">สั่งทาง {channelLabel}</span>}
             </div>
             {reportOnly && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:mail" className="mr-1" />ออเดอร์นี้มาจากอีเมลแจ้งยอดขาย — ร้านส่งของไปแล้วผ่าน Seller Centre จึงเปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (ออกใบกำกับภาษีได้)</p>}
-            {shopManaged && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:refresh" className="mr-1" />ออเดอร์ TikTok — สถานะตามร้าน TikTok (กด ดึงออเดอร์ TikTok เพื่ออัปเดต) · จัดส่งใน TikTok Seller Center / BigSeller จึงเปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (ออกใบกำกับภาษีได้)</p>}
+            {shopManaged && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:refresh" className="mr-1" />ออเดอร์ {shopName} — สถานะตามร้าน {shopName} (อัปเดตเองทุก 15 นาที หรือกด ดึงออเดอร์ {shopName}) · จัดส่งใน {shopName} Seller Center / BigSeller จึงเปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (ออกใบกำกับภาษีได้)</p>}
             {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="warning" className="mr-1" />{warn}</p>}
 
             <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5">

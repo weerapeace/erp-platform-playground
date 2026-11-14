@@ -84,6 +84,7 @@ function PlatformOrdersInner() {
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [ttsSyncing, setTtsSyncing] = useState(false);
+  const [shpSyncing, setShpSyncing] = useState(false);
   const reqSeq = useRef(0);   // กันคำตอบเก่ามาทับ (สลับร้าน/การ์ดเร็ว ๆ)
 
   useEffect(() => { (async () => {
@@ -247,6 +248,27 @@ function PlatformOrdersInner() {
     } finally { setTtsSyncing(false); }
   };
 
+  // ดึงออเดอร์ Shopee 30 วันล่าสุด (อ่านอย่างเดียว · สถานะตามร้าน) — Shopee ให้ถามทีละ ≤15 วัน → server ไล่ช่วง + หน้า แล้วส่งจุดต่อ (next) กลับมา
+  //   ใบที่เคยมาจากเมล (เลขเดียวกัน) ถูกอัปเดตเป็นสถานะจริงจาก Shopee (เจ้าของเลือก 2026-11-14) · ปกติไม่ต้องกด — ระบบดึงเองทุก 15 นาที
+  const syncShopeeOrders = async () => {
+    setShpSyncing(true);
+    let next: { wi: number; cursor: string; anchor: number } | null = null;
+    let sum = { fetched: 0, created: 0, updated: 0, from_email: 0, items_matched: 0, items_created: 0 };
+    try {
+      for (let round = 0; round < 40; round++) {
+        type R = { error?: string | null; fetched?: number; created?: number; updated?: number; from_email?: number; items_matched?: number; items_created?: number; next?: { wi: number; cursor: string; anchor: number } | null; done?: boolean; stop_reason?: string | null };
+        const j = await apiFetch("/api/shopee/sync-orders", { method: "POST", body: JSON.stringify({ brand_id: brandId || undefined, days: 30, ...(next ?? {}) }) })
+          .then((r) => r.json()).catch(() => ({ error: "ระบบตอบผิดพลาด กรุณาลองใหม่" })) as R;
+        if (j.error) { toast.error(j.error); break; }
+        sum = { fetched: sum.fetched + (j.fetched ?? 0), created: sum.created + (j.created ?? 0), updated: sum.updated + (j.updated ?? 0), from_email: sum.from_email + (j.from_email ?? 0), items_matched: sum.items_matched + (j.items_matched ?? 0), items_created: sum.items_created + (j.items_created ?? 0) };
+        if (j.done) { toast.success(`ดึงออเดอร์ Shopee 30 วันครบแล้ว (${sum.fetched.toLocaleString("th-TH")} ใบ) · ใหม่ ${sum.created} · อัปเดตสถานะ ${sum.updated}${sum.from_email ? ` (ใบจากเมล ${sum.from_email})` : ""} · จับคู่สินค้า ${sum.items_matched}/${sum.items_created}${j.stop_reason ? ` · ⚠️ ${j.stop_reason}` : ""}`); break; }
+        if (j.stop_reason || !j.next) { toast.warning(`ดึงได้ ${sum.fetched} ใบแล้วหยุด: ${j.stop_reason ?? "ไม่มีหน้าถัดไป"} — กดดึงอีกครั้งได้ (ใบที่ได้แล้วไม่ซ้ำ)`); break; }
+        next = j.next;
+      }
+      await load();
+    } finally { setShpSyncing(false); }
+  };
+
   const viewTab = (k: "todo" | "history", label: string, n: number | undefined) => (
     <button type="button" onClick={() => { setView(k); setCard(k === "todo" ? "todo" : "all"); }}
       className={`h-9 rounded-lg border px-3 text-sm ${view === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -266,6 +288,12 @@ function PlatformOrdersInner() {
             <button type="button" onClick={() => void syncTiktokOrders()} disabled={ttsSyncing} title="ดึงออเดอร์ 30 วันล่าสุดจาก TikTok Shop (อ่านอย่างเดียว · สถานะตามร้าน)"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <PlatformIcon code="tiktok" size={16} />{ttsSyncing ? "กำลังดึง…" : "ดึงออเดอร์ TikTok"}
+            </button>
+          )}
+          {canManage && !demo && (
+            <button type="button" onClick={() => void syncShopeeOrders()} disabled={shpSyncing} title="ดึงออเดอร์ 30 วันล่าสุดจาก Shopee (อ่านอย่างเดียว · สถานะตามร้าน · ปกติระบบดึงเองทุก 15 นาที)"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <PlatformIcon code="shopee" size={16} />{shpSyncing ? "กำลังดึง…" : "ดึงออเดอร์ Shopee"}
             </button>
           )}
           {canManage && !demo && <button type="button" onClick={() => setShowManual(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"><Icon value="i:plus" />สร้างออเดอร์</button>}

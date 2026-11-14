@@ -9,6 +9,8 @@
  *      → ไม่ใช่งานที่ต้องจัดส่ง · ห้ามเปลี่ยนสถานะ/ตัดสต๊อกจากหน้าศูนย์ออเดอร์ (เคยกดยืนยันแล้วตัดสต๊อกคลังออนไลน์ติดลบได้)
  *   ⚠️ ออเดอร์ที่ดึงจาก TikTok Shop API (source = "tiktok_api") = สถานะตามร้าน TikTok (แปลงด้วย tiktokToInternal ทุกครั้งที่ดึง)
  *      → ยังจัดส่งผ่าน TikTok Seller Center / BigSeller · นับเป็นงาน "ต้องจัดส่ง" ให้เห็นภาพรวม แต่เปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (isShopManaged)
+ *   ⚠️ ออเดอร์ที่ดึงจาก Shopee Open Platform (source = "shopee_api") = สถานะตามร้าน Shopee (shopeeToInternal) แบบเดียวกับ TikTok
+ *      → เจ้าของเลือก 2026-11-14 "ไม่ต้องดึงจากเมลแล้ว": ใบที่เคยมาจากเมล (เลขออเดอร์เดียวกัน) ถูกอัปเดตเป็นแหล่งนี้ตอนดึง (app/api/shopee/orders-sync)
  *
  * ใช้ที่: app/api/platform-orders (ตรวจก่อนบันทึก) · app/master/platform-orders (ป้าย/ตัวกรอง) · lib/platform-order-demo
  * ทะเบียน workflow: lib/workflow-registry.ts key "platform-order"
@@ -54,7 +56,11 @@ export function isReportOnly(source: string | null | undefined): boolean {
 }
 
 /** ที่มาของออเดอร์ที่ "สถานะตามร้าน" (ดึงจาก API ของแพลตฟอร์ม แล้วจัดการ/จัดส่งบนร้าน) — นับเป็นงาน แต่เปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ */
-export const SHOP_MANAGED_SOURCES = ["tiktok_api"] as const;
+export const SHOP_MANAGED_SOURCES = ["tiktok_api", "shopee_api"] as const;
+/** ชื่อร้านของออเดอร์ที่สถานะตามร้าน (ใช้ในข้อความ) · ไม่ใช่ = null */
+export function shopManagedName(source: string | null | undefined): string | null {
+  return source === "tiktok_api" ? "TikTok" : source === "shopee_api" ? "Shopee" : null;
+}
 export function isShopManaged(source: string | null | undefined): boolean {
   return (SHOP_MANAGED_SOURCES as readonly string[]).includes(String(source ?? ""));
 }
@@ -74,7 +80,10 @@ export function allowedNext(from: string): PlatformOrderStatus[] {
 /** ตรวจก่อนเปลี่ยนสถานะ — ok=false → เหตุผลภาษาคน (ส่งกลับให้ผู้ใช้ได้เลย) */
 export function checkTransition(order: { status: string; source?: string | null }, to: string): { ok: true } | { ok: false; reason: string } {
   if (isReportOnly(order.source)) return { ok: false, reason: "ออเดอร์นี้มาจากอีเมลแจ้งยอดขาย (ร้านส่งของไปแล้ว) — เปลี่ยนสถานะหรือตัดสต๊อกจากที่นี่ไม่ได้" };
-  if (isShopManaged(order.source)) return { ok: false, reason: "ออเดอร์ TikTok — สถานะตามร้าน TikTok (จัดส่งใน TikTok Seller Center / BigSeller) ระบบดึงมาให้ดูอย่างเดียว เปลี่ยนสถานะหรือตัดสต๊อกที่นี่ไม่ได้" };
+  if (isShopManaged(order.source)) {
+    const n = shopManagedName(order.source) ?? "ร้าน";
+    return { ok: false, reason: `ออเดอร์ ${n} — สถานะตามร้าน ${n} (จัดส่งใน ${n} Seller Center / BigSeller) ระบบดึงมาให้ดูอย่างเดียว เปลี่ยนสถานะหรือตัดสต๊อกที่นี่ไม่ได้` };
+  }
   if (!isPlatformOrderStatus(to)) return { ok: false, reason: "สถานะไม่ถูกต้อง" };
   if (order.status === to) return { ok: true };
   if (!allowedNext(order.status).includes(to)) {
