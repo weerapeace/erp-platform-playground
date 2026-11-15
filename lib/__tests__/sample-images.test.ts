@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+import { browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -138,5 +138,72 @@ describe("หน้าตาร่วม (หน้า SAMPLE + แท็บ SAM
     expect(m.get("b1")).toBe(5);
     expect(m.get(SAMPLE_TAB_NONE)).toBe(4);
     expect(m.get("b2")).toBeUndefined();
+  });
+});
+
+describe("ค้นหา + เรียง (หน้า SAMPLE + แท็บในตัวเลือกไฟล์กลาง)", () => {
+  const al = (name: string, created_at: string, photos: number, parent_id: string | null = null) => ({ name, created_at, parent_id, deep: { photos, sent: 0, sub_count: 0 } });
+  const A = al("SAMPLE Good Goods 15 พ.ย. 2569", "2026-11-15T03:00:00Z", 8);
+  const B = al("2026-11-15-002", "2026-11-15T09:00:00Z", 3);
+  const C = al("SAMPLE Good Goods 13 พ.ย. 2569", "2026-11-13T03:00:00Z", 2);
+  const D = al("กระเป๋าใส ลายหมี", "2026-11-14T03:00:00Z", 8, "p1");
+  it("เรียงอัลบั้ม: ล่าสุด · เก่าสุด · ชื่อบนการ์ด · รูปมากสุด (เท่ากัน = ล่าสุดก่อน)", () => {
+    expect(sortAlbums([A, B, C], "newest").map((x) => x.name)).toEqual([B.name, A.name, C.name]);
+    expect(sortAlbums([A, B, C], "oldest").map((x) => x.name)).toEqual([C.name, A.name, B.name]);
+    expect(sortAlbums([A, D, C], "most").map((x) => x.name)).toEqual([A.name, D.name, C.name]);
+    expect(sortAlbums([D, B], "name").map((x) => x.name)).toEqual([B.name, D.name]);   // ตัวเลขก่อนไทย
+  });
+  it("เรียงรูป: ลำดับที่ลง (ค่าเดิม) · ใหม่สุดก่อน · ชื่อไฟล์แบบตัวเลข (9 ก่อน 10)", () => {
+    const p = (file_name: string, created_at: string) => ({ file_name, created_at });
+    const xs = [p("IMG_10.jpg", "2026-11-15T01:00:00Z"), p("IMG_9.jpg", "2026-11-15T02:00:00Z"), p("IMG_2.jpg", "2026-11-15T03:00:00Z")];
+    expect(sortPhotos(xs, "oldest").map((x) => x.file_name)).toEqual(["IMG_10.jpg", "IMG_9.jpg", "IMG_2.jpg"]);
+    expect(sortPhotos(xs, "newest").map((x) => x.file_name)).toEqual(["IMG_2.jpg", "IMG_9.jpg", "IMG_10.jpg"]);
+    expect(sortPhotos(xs, "name").map((x) => x.file_name)).toEqual(["IMG_2.jpg", "IMG_9.jpg", "IMG_10.jpg"]);
+  });
+  it("ค้นอัลบั้ม: ชื่อจริง · วันที่บนการ์ด · ชื่อแบรนด์ · ข้ามตัวคั่นได้ · ทุกคำต้องเจอ", () => {
+    expect(albumMatches(A, "")).toBe(true);
+    expect(albumMatches(A, "  -  ")).toBe(true);
+    expect(albumMatches(A, "15 พ.ย.")).toBe(true);
+    expect(albumMatches(C, "15 พ.ย.")).toBe(false);
+    expect(albumMatches(B, "11-15")).toBe(true);
+    expect(albumMatches(B, "2026 002")).toBe(true);
+    expect(albumMatches(D, "ลายหมี")).toBe(true);
+    expect(albumMatches(D, "good", "Good Goods")).toBe(true);
+    expect(albumMatches(D, "good")).toBe(false);
+    expect(albumMatches(A, "good หมี")).toBe(false);
+  });
+  it("ค้นรูป: ชื่อไฟล์ · เลขใบงานที่ส่งเข้าไป", () => {
+    const ph = { file_name: "3M2A9868.jpg", moved_to: [{ id: "s1", code: "DS-2026-0008", name: "กระเป๋าสาน", brand_id: null }] };
+    expect(photoMatches(ph, "9868")).toBe(true);
+    expect(photoMatches(ph, "DS-2026-0008")).toBe(true);
+    expect(photoMatches(ph, "0008")).toBe(true);
+    expect(photoMatches(ph, "สาน")).toBe(true);
+    expect(photoMatches(ph, "9999")).toBe(false);
+  });
+  it("ตรวจค่าที่จำไว้", () => {
+    expect(isAlbumSort("most")).toBe(true);
+    expect(isAlbumSort("x")).toBe(false);
+    expect(isPhotoSort("name")).toBe(true);
+    expect(isPhotoSort("most")).toBe(false);
+  });
+});
+
+describe("การ์ดหน้าแฟ้ม (ไม่ค้น = ชั้นบนสุด · ค้น = ทุกชั้นที่ตรง)", () => {
+  const mk = (id: string, name: string, created_at: string, brand_id: string | null, parent_id: string | null = null, photos = 1) =>
+    ({ id, name, created_at, brand_id, parent_id, suggested_brand_id: null, counts: { photos, trash: 0, sent: 0 }, deep: { photos, sent: 0, sub_count: 0 }, preview_keys: [] });
+  const albums = [
+    mk("a1", "SAMPLE Good Goods 15 พ.ย. 2569", "2026-11-15T03:00:00Z", "gg"),
+    mk("s1", "กระเป๋าใส ลายหมี", "2026-11-15T05:00:00Z", "gg", "a1"),
+    mk("a2", "SAMPLE Findig 14 พ.ย. 2569", "2026-11-14T03:00:00Z", "fd"),
+  ];
+  const bn = (id: string | null) => (id === "gg" ? "Good Goods" : id === "fd" ? "Findig" : null);
+  it("ไม่ค้น: เฉพาะชั้นบนสุดของแท็บ เรียงล่าสุดก่อน", () => {
+    expect(browseAlbums(albums, "all", "", "newest", bn).map((x) => x.album.id)).toEqual(["a1", "a2"]);
+    expect(browseAlbums(albums, "fd", "", "newest", bn).map((x) => x.album.id)).toEqual(["a2"]);
+  });
+  it("ค้น: เจออัลบั้มย่อยด้วย + บอกว่าอยู่ในอัลบั้มไหน · ยังกรองตามแท็บแบรนด์", () => {
+    expect(browseAlbums(albums, "all", "หมี", "newest", bn)).toEqual([{ album: albums[1], inside: "Good Goods · 15 พ.ย. 2569" }]);
+    expect(browseAlbums(albums, "fd", "หมี", "newest", bn)).toEqual([]);
+    expect(browseAlbums(albums, "all", "good", "oldest", bn).map((x) => x.album.id)).toEqual(["a1", "s1"]);
   });
 });

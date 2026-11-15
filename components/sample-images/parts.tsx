@@ -14,10 +14,48 @@ import { Icon } from "@/components/icon";
 import { AlbumCover } from "@/components/album-cover";
 import { safeColor } from "@/components/design-dashboard/dashboard-helpers";
 import { withImageWidth } from "@/lib/r2-image";
+import { useUserPref } from "@/lib/use-user-pref";
 import {
-  SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, brandPhotoTotals,
-  type SampleAlbum, type SampleBrand, type SamplePhoto,
+  SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, brandPhotoTotals, isAlbumSort, isPhotoSort,
+  type SampleAlbum, type SampleAlbumSort, type SampleBrand, type SamplePhoto, type SamplePhotoSort,
 } from "@/lib/sample-images";
+
+/** วิธีเรียงที่เลือกไว้ (จำรายคน · หน้า SAMPLE กับแท็บในตัวเลือกไฟล์ใช้ค่าเดียวกัน) — อัลบั้ม: ล่าสุดก่อน · รูป: ตามลำดับที่ลง */
+export function useSampleSorts() {
+  const [albumSort, setAlbumSort] = useUserPref<SampleAlbumSort>("sample_images_album_sort", "newest", (v) => (isAlbumSort(v) ? v : null));
+  const [photoSort, setPhotoSort] = useUserPref<SamplePhotoSort>("sample_images_photo_sort", "oldest", (v) => (isPhotoSort(v) ? v : null));
+  return { albumSort, setAlbumSort, photoSort, setPhotoSort };
+}
+
+/** แถวค้นหา + เรียง (เจ้าของสั่ง 2026-11-15) — ช่องค้น (มีปุ่มล้าง · Esc = ล้าง) + เลือกวิธีเรียง · children = ของต่อท้ายแถว */
+export function SampleSearchSort<K extends string>({ query, onQuery, placeholder, sort, onSort, options, children }: {
+  query: string; onQuery: (q: string) => void; placeholder: string;
+  sort: K; onSort: (k: K) => void; options: { key: K; th: string; en: string }[]; children?: ReactNode;
+}) {
+  const t = useT();
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative min-w-[180px] max-w-md flex-1">
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"><Icon value="i:search" /></span>
+        <input type="search" value={query} onChange={(e) => onQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape" && query) { e.stopPropagation(); onQuery(""); } }}
+          placeholder={placeholder} aria-label={placeholder}
+          className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-8 text-sm text-slate-700 placeholder:text-slate-400 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200 [&::-webkit-search-cancel-button]:hidden" />
+        {query && (
+          <button type="button" onClick={() => onQuery("")} aria-label={t("ล้างคำค้น", "Clear search")} title={t("ล้างคำค้น", "Clear search")}
+            className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Icon value="i:x" /></button>
+        )}
+      </div>
+      <label className="inline-flex items-center gap-1.5 text-[12px] text-slate-500">
+        <Icon value="i:arrows-sort" />{t("เรียง", "Sort")}
+        <select value={sort} onChange={(e) => onSort(e.target.value as K)}
+          className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-[13px] text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200">
+          {options.map((o) => <option key={o.key} value={o.key}>{t(o.th, o.en)}</option>)}
+        </select>
+      </label>
+      {children}
+    </div>
+  );
+}
 
 /** ลิงก์รูปจากคลัง (w = ย่อความกว้างให้โหลดเร็ว) */
 export const sampleImgUrl = (key: string, w?: number) => {
@@ -58,8 +96,10 @@ type CardExtra = ButtonHTMLAttributes<HTMLButtonElement>;
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
+  /** ผลค้นหาที่เป็นอัลบั้มย่อย → บอกว่าอยู่ในอัลบั้มไหน (เช่น "Good Goods · 15 พ.ย. 2569") */
+  inside?: string | null;
 }) {
   const t = useT();
   const a = album;
@@ -83,6 +123,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra }:
       <AlbumCover keys={a.preview_keys} total={a.deep.photos} />
       <div className="space-y-1.5 p-3">
         <div className="font-medium text-slate-800">{albumCardLabel(a)}</div>
+        {inside && <div className="flex items-center gap-1 truncate text-[11px] text-slate-400"><Icon value="i:folder" /><span className="truncate">{t(`อยู่ใน ${inside}`, `In ${inside}`)}</span></div>}
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1"><BrandDot color={brand?.color} />{brand?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>

@@ -10,6 +10,7 @@
 // เลือกรูป → "ส่งไป Design Dashboard" → ตัวเลือกใบงานกลาง (กรองแบรนด์ของอัลบั้มไว้ให้) → ใบงานแนบรูปเดิมจากคลัง (ไม่ก๊อปไฟล์)
 // อัลบั้มไม่ระบุแบรนด์ (ลงก่อนมีระบบแบรนด์) → ปุ่ม "ย้ายอัลบั้มเข้าแบรนด์" (ป้าย แนะนำ = แบรนด์ของใบงานที่รูปถูกส่งไป)
 // ของกลาง: StandaloneShell · useFileDrop · UploadProgress · BulkActionBar · ConfirmDialog · gallery-columns · DesignSheetPickerModal
+// ค้นหา + เรียง (เจ้าของสั่ง 2026-11-15): แถวค้นหาใต้แถบแบรนด์ — หน้าแฟ้มค้นอัลบั้มทุกชั้น · ในอัลบั้มค้นรูป/อัลบั้มย่อย/เลข DS · วิธีเรียงจำรายคน
 // หน้าตาแถบแบรนด์/การ์ดอัลบั้ม/เส้นทาง/ช่องรูป = ./parts ใช้ร่วมกับแท็บ "SAMPLE Images" ในตัวเลือกไฟล์กลาง (./picker · AssetPicker) — แก้ที่ parts ทั้งสองที่เปลี่ยนตาม
 // ข้อมูล: components/sample-images/api.ts → API กลางเดิม · ตรรกะ: lib/sample-images · doc: docs/sample-images.md
 // สิทธิ์: ดู assets.view · ลงรูป assets.upload · ลบ assets.delete · เอากลับ/ย้ายอัลบั้มเข้าแบรนด์ assets.edit · ส่งเข้าใบงาน attachments.upload
@@ -30,8 +31,8 @@ import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
-import { SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumPath, canMoveAlbum, inBrandTab, isDayAlbum, photosToMove, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
-import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, sampleImgUrl } from "./parts";
+import { SAMPLE_ALBUM_SORTS, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, canMoveAlbum, inBrandTab, isDayAlbum, photoMatches, photosToMove, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, restoreSample, setAlbumBrand, trashSample, uploadSample } from "./api";
 
 /** ลากภายในหน้า (รูป/อัลบั้ม) — ใช้ชนิดข้อมูลของเราเอง ตัวรับไฟล์จากเครื่อง (useFileDrop) จะไม่ยุ่ง */
@@ -73,6 +74,10 @@ export function SampleImagesPage() {
   // Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย (เจ้าของสั่ง 2026-11-15) — รูปในอัลบั้ม และการ์ดอัลบั้มหน้าแฟ้ม (จำแยกกัน รายคน)
   const { cols, setCols, gridStyle, wheelRef } = useGalleryColumns("sample-images", 6, "0.75rem", { ctrlWheel: true });
   const albumGrid = useGalleryColumns("sample-albums", 3, "0.75rem", { options: GALLERY_COL_CHOICES, ctrlWheel: true });
+  // ค้นหา + เรียง (เจ้าของสั่ง 2026-11-15) — หน้าแฟ้ม = ค้นอัลบั้มทุกชั้น · ในอัลบั้ม = ค้นรูป/อัลบั้มย่อย · วิธีเรียงจำรายคน (ใช้ร่วมกับแท็บในตัวเลือกไฟล์)
+  const [query, setQuery] = useState("");
+  const { albumSort, setAlbumSort, photoSort, setPhotoSort } = useSampleSorts();
+  const searching = !!query.trim();
   const canView = can("assets.view"), canUpload = can("assets.upload"), canDelete = can("assets.delete"), canEdit = can("assets.edit");
   const canMove = can("attachments.upload");   // ส่งเข้าใบงาน = แนบไฟล์ (ด่านเดียวกับใน DB) — ไม่มีสิทธิ์ = ไม่โชว์ปุ่ม
   const brandOf = useCallback((id: string | null | undefined) => (id ? brands.find((b) => b.id === id) ?? null : null), [brands]);
@@ -101,14 +106,14 @@ export function SampleImagesPage() {
   /** เปิดอัลบั้ม · fromHistory = มาจากปุ่ม Back (ไม่จดก้าวซ้ำ) */
   const openAlbum = async (id: string, fromHistory = false) => {
     if (!fromHistory && id !== albumId) steps.push({ album: id });
-    setAlbumId(id); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null);
+    setAlbumId(id); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); setQuery("");
     try { const d = await loadSamples(id); setAlbums(d.albums); setBrands(d.brands); setPhotos(d.photos ?? []); }
     catch (e) { setErr((e as Error).message); }
   };
   /** กลับหน้าแฟ้ม (การ์ดอัลบั้ม) */
   const closeAlbum = (fromHistory = false) => {
     if (!fromHistory && albumId) steps.push({ album: null });
-    setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null);
+    setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); setQuery("");
   };
   const switchTab = (next: BrandTab) => { setTab(next); closeAlbum(); };
 
@@ -142,7 +147,7 @@ export function SampleImagesPage() {
       }
       const nextTab = tab === ALL ? ALL : brandId ?? NONE;
       if (nextTab !== tab) setTab(nextTab);
-      setTrashView(false);
+      setTrashView(false); setQuery("");   // ลงรูปใหม่ = โชว์ทั้งอัลบั้ม (ไม่ให้รูปที่เพิ่งลงโดนคำค้นซ่อน)
       await reload(album.id, nextTab);
       if (done) pushToast("success", t(`ลง ${done} รูปใน ${album.name} แล้ว${dup ? ` (${dup} รูปเคยลงไว้ ใช้รูปเดิม)` : ""}`, `Added ${done} image(s) to ${album.name}`));
       if (fails.length) pushToast("error", t(`ลงไม่สำเร็จ ${fails.length} รูป — ${fails[0]}`, `${fails.length} failed — ${fails[0]}`));
@@ -157,11 +162,15 @@ export function SampleImagesPage() {
   const album = albums?.find((a) => a.id === albumId) ?? null;
   const albumBrand = brandOf(album?.brand_id);
   // หน้าแฟ้ม = อัลบั้มชั้นบนสุดของแท็บ · อัลบั้มย่อยโผล่ตอนเปิดอัลบั้มแม่
-  const tabAlbums = useMemo(() => (albums ?? []).filter((a) => inTab(a, tab) && !a.parent_id), [albums, tab]);
+  // การ์ดหน้าแฟ้ม: ไม่ค้น = ชั้นบนสุดของแท็บ · ค้น = ทุกชั้นที่ตรง (บอกว่าอยู่ในอัลบั้มไหน) — lib/sample-images browseAlbums
+  const cards = useMemo(() => browseAlbums(albums ?? [], tab, query, albumSort, (id) => brands.find((b) => b.id === id)?.name ?? null), [albums, tab, query, albumSort, brands]);
   const tree = useMemo(() => (albums ?? []).map((a) => ({ id: a.id, parent_id: a.parent_id })), [albums]);
   const path = useMemo(() => (album ? albumPath(tree, album.id).map((id) => albums!.find((a) => a.id === id)!) : []), [album, tree, albums]);
   const children = useMemo(() => (album ? (albums ?? []).filter((a) => a.parent_id === album.id) : []), [album, albums]);
-  const list = useMemo(() => (photos ?? []).filter((p) => p.trashed === trashView), [photos, trashView]);
+  const shownChildren = useMemo(() => sortAlbums(children.filter((a) => albumMatches(a, query)), albumSort), [children, query, albumSort]);
+  const allInView = useMemo(() => (photos ?? []).filter((p) => p.trashed === trashView), [photos, trashView]);
+  // รูปที่โชว์ = ตามคำค้น + วิธีเรียง (เลือกทั้งหมด / ลาก / ส่ง ใช้กับรูปที่โชว์อยู่)
+  const list = useMemo(() => sortPhotos(allInView.filter((p) => photoMatches(p, query)), photoSort), [allInView, query, photoSort]);
   const trashCount = (photos ?? []).filter((p) => p.trashed).length;
   const selected = list.filter((p) => sel.has(p.id));
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -299,14 +308,17 @@ export function SampleImagesPage() {
 
             <div className="min-w-0 space-y-3">
               {!album && (
-                <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-500">
-                  <span>
+                <>
+                  <SampleSearchSort query={query} onQuery={setQuery} placeholder={t("ค้นชื่ออัลบั้ม / วันที่ / แบรนด์…", "Search album / date / brand…")}
+                    sort={albumSort} onSort={setAlbumSort} options={SAMPLE_ALBUM_SORTS}>
+                    <span className="flex-1" />
+                    {cards.length > 0 && <GalleryColumnsControl cols={albumGrid.cols} onChange={albumGrid.setCols} options={GALLERY_COL_CHOICES} as="select" wheelHint className="max-sm:hidden" />}
+                  </SampleSearchSort>
+                  <div className="text-[13px] text-slate-500">
                     <b className="font-semibold text-slate-800">{tab === ALL ? t("อัลบั้มทุกแบรนด์", "All albums") : tab === NONE ? t("อัลบั้มที่ยังไม่ระบุแบรนด์", "Albums without a brand") : t(`อัลบั้มของ ${brandOf(tab)?.name ?? ""}`, `Albums of ${brandOf(tab)?.name ?? ""}`)}</b>
-                    {tabAlbums.length > 0 && <> · {t(`${tabAlbums.length} อัลบั้ม`, `${tabAlbums.length} albums`)}</>}
-                  </span>
-                  <span className="flex-1" />
-                  {tabAlbums.length > 0 && <GalleryColumnsControl cols={albumGrid.cols} onChange={albumGrid.setCols} options={GALLERY_COL_CHOICES} as="select" wheelHint className="max-sm:hidden" />}
-                </div>
+                    {cards.length > 0 && <> · {searching ? t(`พบ ${cards.length} อัลบั้ม (รวมอัลบั้มย่อย)`, `${cards.length} found (incl. sub-albums)`) : t(`${cards.length} อัลบั้ม`, `${cards.length} albums`)}</>}
+                  </div>
+                </>
               )}
 
               {/* ที่วางรูป / ความคืบหน้า — เปิดอัลบั้มอยู่ = เพิ่มเข้าอัลบั้มนั้น · หน้าแฟ้ม = อัลบั้มของแบรนด์ + วันนี้ */}
@@ -367,6 +379,11 @@ export function SampleImagesPage() {
                   <GalleryColumnsControl cols={cols} onChange={setCols} as="select" wheelHint />
                 </div>
 
+                <SampleSearchSort query={query} onQuery={setQuery} placeholder={t("ค้นชื่อรูป / อัลบั้มย่อย / เลขใบงาน DS-…", "Search photo / sub-album / DS-…")}
+                  sort={photoSort} onSort={setPhotoSort} options={SAMPLE_PHOTO_SORTS}>
+                  {searching && photos && <span className="text-[12px] text-slate-500">{t(`พบ ${list.length} จาก ${allInView.length} รูป`, `${list.length} of ${allInView.length}`)}</span>}
+                </SampleSearchSort>
+
                 {toBrand && !album.brand_id && (
                   <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-violet-100 bg-violet-50/50 p-2 text-[12px]">
                     <span className="text-slate-600">{t("อัลบั้มนี้เป็นของแบรนด์ไหน?", "Which brand is this album?")}</span>
@@ -400,11 +417,11 @@ export function SampleImagesPage() {
                 )}
 
                 {/* อัลบั้มย่อย — กดเปิด · ลากรูป/อัลบั้มมาวาง = ย้ายเข้า · ลากการ์ดไปวางที่อื่น = ย้ายทั้งอัลบั้ม */}
-                {children.length > 0 && !trashView && (
+                {shownChildren.length > 0 && !trashView && (
                   <div>
-                    <div className="mb-1.5 text-[12px] font-medium text-slate-400">{t(`อัลบั้มย่อย (${children.length})`, `Sub-albums (${children.length})`)}</div>
+                    <div className="mb-1.5 text-[12px] font-medium text-slate-400">{t(`อัลบั้มย่อย (${shownChildren.length})`, `Sub-albums (${shownChildren.length})`)}</div>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                      {children.map((c) => (
+                      {shownChildren.map((c) => (
                         <SampleAlbumCard key={c.id} sub album={c} onOpen={() => void openAlbum(c.id)} highlight={overKey === `al:${c.id}`}
                           extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...dropOnAlbum(c) }} />
                       ))}
@@ -417,7 +434,7 @@ export function SampleImagesPage() {
                 )}
 
                 {photos === null ? <LoadingState className="py-12 text-sm" />
-                  : !list.length ? ((children.length && !trashView) ? null : <EmptyState icon={<Icon value={trashView ? "i:trash" : "i:photo"} />} className="p-8"
+                  : !list.length ? ((shownChildren.length && !trashView) ? null : searching && allInView.length ? <EmptyState icon={<Icon value="i:search" />} className="p-8" title={t(`ไม่พบ "${query.trim()}"`, `No match for "${query.trim()}"`)} hint={t("ลองคำอื่น หรือกดกากบาทในช่องค้นเพื่อดูทั้งหมด", "Try another word, or clear the search")} /> : <EmptyState icon={<Icon value={trashView ? "i:trash" : "i:photo"} />} className="p-8"
                       title={trashView ? t("ถังขยะว่าง", "Trash is empty") : t("ยังไม่มีรูปในอัลบั้มนี้", "No images yet")}
                       hint={trashView ? undefined : t("ลากรูปมาวางด้านบนได้เลย", "Drop images above")} />)
                   : (
@@ -435,13 +452,14 @@ export function SampleImagesPage() {
                     </div>
                   )}
                 </>
-              ) : !tabAlbums.length ? (
-                <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้ม", "No albums yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มของวันนี้ให้เอง", "Drop photos above — today's album is created for you") : undefined} />
+              ) : !cards.length ? (
+                searching ? <EmptyState icon={<Icon value="i:search" />} className="p-8" title={t(`ไม่พบ "${query.trim()}"`, `No match for "${query.trim()}"`)} hint={t("ลองคำอื่น หรือเปลี่ยนแบรนด์ด้านบน", "Try another word or brand")} />
+                : <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้ม", "No albums yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มของวันนี้ให้เอง", "Drop photos above — today's album is created for you") : undefined} />
               ) : (
                 /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
                 /* จำนวนการ์ดต่อแถวตามที่เลือก (Ctrl + ลูกกลิ้ง / ▦) · มือถือคงไว้ 1–2 ต่อแถวเหมือนเดิม */
                 <div ref={albumGrid.wheelRef} style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
-                  {tabAlbums.map((a) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} onOpen={() => void openAlbum(a.id)} />)}
+                  {cards.map(({ album: a, inside }) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} inside={inside} onOpen={() => void openAlbum(a.id)} />)}
                 </div>
               )}
             </div>

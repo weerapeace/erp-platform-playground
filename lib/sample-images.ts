@@ -8,6 +8,8 @@
 // เทสต์: lib/__tests__/sample-images.test.ts
 // ============================================================
 
+import { scoreRow, tokenize } from "@/lib/search-score";
+
 /** ป้ายใน asset_collections.description ที่บอกว่าอัลบั้มนี้เป็นอัลบั้ม SAMPLE (+ ":<brand_id>" = ของแบรนด์นั้น) */
 export const SAMPLE_ALBUM_MARK = "sample-images";
 /** source ของรูปที่ลงจากหน้านี้ (รูปที่เคยมีในคลังแล้ว = ใช้แถวเดิม source เดิม) */
@@ -175,6 +177,73 @@ export function brandPhotoTotals(albums: readonly Pick<SampleAlbum, "brand_id" |
   const m = new Map<string, number>();
   for (const a of albums) { const k = a.brand_id ?? SAMPLE_TAB_NONE; m.set(k, (m.get(k) ?? 0) + a.counts.photos); }
   return m;
+}
+
+// ── ค้นหา + เรียง (เจ้าของสั่ง 2026-11-15 "ขอ search, sort ด้วย") — ใช้ทั้งหน้า SAMPLE และแท็บในตัวเลือกไฟล์กลาง ──
+// ค้นด้วยตัวจับคู่กลาง lib/search-score (แตกคำ · ทุกคำต้องเจอ · ข้ามตัวคั่นได้) แล้วเรียงตามที่เลือก
+
+export type SampleAlbumSort = "newest" | "oldest" | "name" | "most";
+export const SAMPLE_ALBUM_SORTS: { key: SampleAlbumSort; th: string; en: string }[] = [
+  { key: "newest", th: "ล่าสุดก่อน", en: "Newest first" },
+  { key: "oldest", th: "เก่าสุดก่อน", en: "Oldest first" },
+  { key: "name", th: "ชื่อ ก–ฮ / A–Z", en: "Name A–Z" },
+  { key: "most", th: "รูปมากสุดก่อน", en: "Most photos" },
+];
+export type SamplePhotoSort = "oldest" | "newest" | "name";
+export const SAMPLE_PHOTO_SORTS: { key: SamplePhotoSort; th: string; en: string }[] = [
+  { key: "oldest", th: "ตามลำดับที่ลง (เก่า → ใหม่)", en: "Order added (old → new)" },
+  { key: "newest", th: "ใหม่สุดก่อน", en: "Newest first" },
+  { key: "name", th: "ชื่อไฟล์", en: "File name" },
+];
+export const isAlbumSort = (v: unknown): v is SampleAlbumSort => SAMPLE_ALBUM_SORTS.some((s) => s.key === v);
+export const isPhotoSort = (v: unknown): v is SamplePhotoSort => SAMPLE_PHOTO_SORTS.some((s) => s.key === v);
+
+const byText = (a: string, b: string) => a.localeCompare(b, "th", { numeric: true, sensitivity: "base" });
+const newestFirst = (a: { created_at: string }, b: { created_at: string }) => b.created_at.localeCompare(a.created_at);
+
+/** เรียงอัลบั้ม: ล่าสุด/เก่าสุด (วันที่สร้าง) · ชื่อบนการ์ด · รูปมากสุด (รวมอัลบั้มย่อย) — เท่ากันเรียงล่าสุดก่อน */
+export function sortAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "parent_id" | "deep">>(albums: readonly T[], sort: SampleAlbumSort): T[] {
+  const out = [...albums];
+  if (sort === "oldest") return out.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (sort === "name") return out.sort((a, b) => byText(albumCardLabel(a), albumCardLabel(b)) || newestFirst(a, b));
+  if (sort === "most") return out.sort((a, b) => b.deep.photos - a.deep.photos || newestFirst(a, b));
+  return out.sort(newestFirst);
+}
+
+/** เรียงรูป: ตามลำดับที่ลง (ค่าเดิม — รูปแรกของการถ่ายก่อน) · ใหม่สุดก่อน · ชื่อไฟล์ (3M2A9 ก่อน 3M2A10) */
+export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name">>(photos: readonly T[], sort: SamplePhotoSort): T[] {
+  const out = [...photos];
+  if (sort === "newest") return out.sort((a, b) => newestFirst(a, b) || byText(a.file_name, b.file_name));
+  if (sort === "name") return out.sort((a, b) => byText(a.file_name, b.file_name) || a.created_at.localeCompare(b.created_at));
+  return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.file_name.localeCompare(b.file_name));
+}
+
+/** อัลบั้มตรงคำค้นไหม — ค้นจากชื่อจริง ("SAMPLE Good Goods 15 พ.ย. 2569" / "2026-11-15-002") · ชื่อบนการ์ด (วันที่) · ชื่อแบรนด์ · คำค้นว่าง = ตรงทุกอัน */
+export function albumMatches(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">, query: string, brandName?: string | null): boolean {
+  const q = query.trim(), toks = tokenize(q);
+  if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
+  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), brandName] }) > 0;
+}
+
+/** รูปตรงคำค้นไหม — ชื่อไฟล์ · เลข/ชื่อใบงานที่รูปถูกส่งเข้าไป (DS-2026-0008) · คำค้นว่าง = ตรงทุกรูป */
+export function photoMatches(p: Pick<SamplePhoto, "file_name" | "moved_to">, query: string): boolean {
+  const q = query.trim(), toks = tokenize(q);
+  if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
+  return scoreRow(q, toks, { texts: [p.file_name, ...p.moved_to.flatMap((s) => [s.code, s.name])] }) > 0;
+}
+
+/** การ์ดหน้าแฟ้ม: ไม่ค้น = อัลบั้มชั้นบนสุดของแท็บแบรนด์ · ค้น = อัลบั้มทุกชั้นที่ตรง + บอกว่าอยู่ในอัลบั้มไหน (inside) — เรียงตามที่เลือก */
+export function browseAlbums<T extends SampleAlbum>(
+  albums: readonly T[], tab: string, query: string, sort: SampleAlbumSort, brandName: (id: string | null) => string | null | undefined,
+): { album: T; inside: string | null }[] {
+  const q = query.trim();
+  const tree = albums.map((a) => ({ id: a.id, parent_id: a.parent_id }));
+  const pool = albums.filter((a) => inBrandTab(a, tab) && (q ? albumMatches(a, q, brandName(a.brand_id)) : !a.parent_id));
+  return sortAlbums(pool, sort).map((a) => {
+    if (!q || !a.parent_id) return { album: a, inside: null };
+    const names = albumPath(tree, a.id).slice(0, -1).map((id) => albums.find((x) => x.id === id)).filter((x): x is T => !!x).map((x) => albumFullName(x, brandName(x.brand_id)));
+    return { album: a, inside: names.join(" › ") || null };
+  });
 }
 
 /** แยกไฟล์ที่ลากมา: รูปที่ลงได้ · ไฟล์ที่แปลงไม่ได้ (RAW/ไฟล์งาน) · ไม่ใช่รูป */
