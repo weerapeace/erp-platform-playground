@@ -10,7 +10,7 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { SkuPickerValue } from "@/components/pickers";
 import { withImageWidth } from "@/lib/r2-image";
 import { SearchMultiPick, type SearchPage } from "@/components/search-multi-pick";
-import type { ParentSkuVal, MktSkuVal } from "./card-skeletons";
+import type { ParentSkuVal, MktSkuVal } from "./skeletons";
 
 export const PICK_PAGE = 30;   // โหลดทีละ 30 + ปุ่มโหลดเพิ่ม (เดิมตัดที่ 30 แล้วไม่มีทางเห็นตัวที่เหลือ เช่นค้น WK เจอ 40 เห็นแค่ 30)
 

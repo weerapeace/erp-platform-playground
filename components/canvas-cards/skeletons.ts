@@ -1,6 +1,6 @@
-// โครงการ์ดบนกระดานแคมเปญ (SKU / Parent / SKU การตลาด / ใบออกแบบ / เทรนด์ / ไฟล์ / คอนเทนต์ / โฟลเดอร์ / ตาราง / งาน) — ฟังก์ชันล้วน · แยกจาก page.tsx (Y1)
+// โครงการ์ดบนกระดาน (ของกลาง components/canvas-cards — กระดานแคมเปญ + กระดานแผนงาน ใช้ร่วมกัน) (SKU / Parent / SKU การตลาด / ใบออกแบบ / เทรนด์ / ไฟล์ / คอนเทนต์ / โฟลเดอร์ / ตาราง / งาน) — ฟังก์ชันล้วน · แยกจาก page.tsx (Y1)
 import type { SkuPickerValue } from "@/components/pickers";
-import type { CreatedTask } from "../../create-task-modal";
+import type { CreatedTask } from "@/app/tasks/create-task-modal";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth } from "@/lib/r2-image";
 import { getLang } from "@/lib/lang";

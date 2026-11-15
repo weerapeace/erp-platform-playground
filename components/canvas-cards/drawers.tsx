@@ -1,6 +1,6 @@
 "use client";
-// แผงข้างของกระดานแคมเปญ: รายละเอียดการ์ดไฟล์ / SKU · สรุปการ์ด · เมนูเครื่องมือ — แยกจาก page.tsx (Y1)
-import { useEffect, useRef, useState } from "react";
+// แผงข้างของกระดาน (ของกลาง components/canvas-cards): รายละเอียดการ์ดไฟล์ / SKU · สรุปการ์ด · เมนูเครื่องมือ — กระดานแคมเปญ + กระดานแผนงานใช้ร่วมกัน
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import { DrawerShell } from "@/components/modal";
 import { FloatingDropdown } from "@/components/floating-dropdown";
@@ -15,9 +15,12 @@ export const TOOL_TONE: Record<string, string> = {
   slate: "text-slate-600 border-slate-200 hover:bg-slate-50",
 };
 
+/** 1 รายการในเมนูเครื่องมือ — icon = ข้อความเดิม (อีโมจิของกระดานแคมเปญ) หรือ <Icon> ก็ได้ */
+export type ToolMenuItem = { icon: ReactNode; label: string; hint?: string; onClick: () => void };
+
 export function ToolMenu({ label, icon, tone = "slate", items }: {
-  label: string; icon: string; tone?: "violet" | "teal" | "slate";
-  items: { icon: string; label: string; hint?: string; onClick: () => void }[];
+  label: string; icon: ReactNode; tone?: "violet" | "teal" | "slate";
+  items: ToolMenuItem[];
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
