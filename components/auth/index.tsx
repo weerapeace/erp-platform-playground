@@ -79,6 +79,8 @@ export type Permission =
   | "task_template.create" | "task_template.edit" | "task_template.delete" | "task_subtask.approve" | "task_subtask.revise" | "task_subtask.cancel"
   | "product_media.sync" | "sku_description.sync"
   | "admin.users" | "admin.audit_log"
+  // 💬 ห้องแชทรวม /chat (lib/chat · docs/chat-inbox.md) — สิทธิ์จริงอ่านจาก DB
+  | "chat.view" | "chat.reply" | "chat.assign" | "chat.settings"
   // 🔐 สิทธิ์เว็บไซต์ (lib/website-access): website.access / website.<กลุ่ม>.view|edit / website.shop.<slug>
   | `website.${string}`;
 
@@ -126,6 +128,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts", "platform_orders.view", "platform_orders.manage", "work_board.dispatch", "production.piecework", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view", "task_template.create", "task_template.edit", "task_template.delete", "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   manager: [
+    "chat.view", "chat.reply", "chat.assign", "chat.settings",   // ห้องแชทรวม (ตรงกับ DB migration 202612180200)
     "products.view", "products.create", "products.edit", "products.cost.view", "products.images.delete",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",

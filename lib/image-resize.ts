@@ -83,3 +83,32 @@ export async function shrinkImageToFit(file: File, maxBytes: number): Promise<{ 
     bitmap.close?.();
   }
 }
+
+/**
+ * ย่อรูปเป็น JPEG เสมอ (ด้านยาวสุด ≤ maxSide · พื้นใสเป็นสีขาว) — สำหรับส่งรูปให้แพลตฟอร์มที่รับแค่ JPEG/PNG
+ * (เช่น ห้องแชท LINE: ไม่รับ webp · รูปพรีวิวควร ≤1MB) · เปิดรูปไม่ได้ (HEIC/TIFF) = null
+ */
+export async function toChatJpeg(file: File, maxSide = 1600, quality = 0.85): Promise<File | null> {
+  if (!SHRINKABLE_IMAGE_TYPES.includes(file.type) && file.type !== "image/gif") return null;
+  let bitmap: ImageBitmap | null = null;
+  try { bitmap = await createImageBitmap(file); } catch { return null; }
+  try {
+    const long = Math.max(bitmap.width, bitmap.height);
+    if (!long) return null;
+    const scale = Math.min(1, maxSide / long);
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", quality));
+    if (!blob) return null;
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg", lastModified: file.lastModified });
+  } finally {
+    bitmap.close?.();
+  }
+}
