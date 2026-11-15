@@ -3424,9 +3424,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const langPair = (f: FieldDef) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
           const enKeys = new Set(baseVisible.map(langPair).filter(Boolean));
           // 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อ (ทะเบียนฟิลด์ ui_style.insert_details) → แทรกช่องไทย + คู่อังกฤษ (ถ้ามี) ในคราวเดียว
-          //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้ บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
+          //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้/ขนาดช่อง (compartments) บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
           //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (PATCH ครั้งเดียวทุกช่อง · audit ของกลางที่ API)
-          const INSERT_WRITABLE = ["size_length_cm", "size_height_cm", "size_thickness_cm", "weight_g", "handle_drop_cm", "strap_drop_cm", "strap_drop_max_cm", "fits"];
+          const INSERT_WRITABLE = ["size_length_cm", "size_height_cm", "size_thickness_cm", "weight_g", "handle_drop_cm", "strap_drop_cm", "strap_drop_max_cm", "fits", "compartments"];
           const insertBtn = (f: FieldDef, enKey: string): React.ReactNode => {
             if (!(f.uiStyle as Record<string, unknown> | undefined)?.insert_details) return null;
             if (!canEdit || f.readonly || (drawerMode === "view" && !editingId)) return null;

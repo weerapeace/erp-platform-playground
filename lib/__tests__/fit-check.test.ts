@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { areaPath, bestFit, compartmentsProblem, fitInto, fitLabel, fitNames, fitPose, fitReport, fitTargetOf, fitText, parseArea, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
+import { areaPath, bestFit, compartmentsProblem, findCompartment, isWindowName, upsertCompartments, fitInto, fitLabel, fitNames, fitPose, fitReport, fitTargetOf, fitText, parseArea, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
 
 /** 📐 ใส่ได้ไหม / กี่ชิ้น — ตอบลูกค้าตรง ๆ จึงต้องถูกเสมอ */
 const labubu: FitTarget = { id: "l", name: "Labubu", w: 9.5, h: 17, d: 7, soft: true };
@@ -129,5 +129,33 @@ describe("บีบได้กี่ % ตั้งต่อตุ๊กตา"
   });
   it("ชื่ออังกฤษติดไปด้วย (เว็บ /en สลับเอง)", () => {
     expect(fitTargetOf({ id: "1", name: "ตุ๊กตา", name_en: " Doll ", width_cm: 9, height_cm: 9, depth_cm: 7 })).toMatchObject({ name: "ตุ๊กตา", name_en: "Doll" });
+  });
+});
+
+describe("upsertCompartments — ขนาดช่องจากป๊อปแทรก (เจ้าของ 2026-11-15)", () => {
+  const base: Compartment[] = [{ id: "c1", name: "ช่องหลัก", name_en: "Main", w: 20, h: 15, d: 6, area: { x: 1, y: 1, w: 50, h: 50 } }];
+  it("ชื่อซ้ำ = อัปเดตขนาด (คงรหัส/ชื่ออังกฤษ/กรอบ) · ชื่อใหม่ = ต่อท้าย", () => {
+    const r = upsertCompartments(base, [{ name: " ช่อง หลัก ", w: 21, h: 15, d: 6 }, { name: "ช่องใสใส่รูป", name_en: "Clear photo pocket", w: 6, h: 9, d: 0.5, window: true }])!;
+    expect(r).toHaveLength(2);
+    expect(r[0]).toMatchObject({ id: "c1", name: "ช่องหลัก", name_en: "Main", w: 21, area: { x: 1 } });
+    expect(r[1]).toMatchObject({ id: "c2", name: "ช่องใสใส่รูป", name_en: "Clear photo pocket", w: 6, h: 9, d: 0.5, window: true });
+  });
+  it("ขนาดไม่ครบ 3 ด้าน = ข้าม · ไม่มีอะไรเปลี่ยน = null · ยังไม่วัด (null) เริ่มจากว่าง", () => {
+    expect(upsertCompartments(base, [{ name: "ช่องใส", w: 6, h: 9, d: "" }])).toBeNull();
+    expect(upsertCompartments(base, [{ name: "ช่องหลัก", w: 20, h: 15, d: 6 }])).toBeNull();
+    expect(upsertCompartments(null, [{ name: "ช่องหลัก", w: 20, h: 15, d: 6 }])).toEqual([{ id: "c1", name: "ช่องหลัก", w: 20, h: 15, d: 6 }]);
+  });
+  it("รหัสไม่ชน · ไม่เกิน 8 ช่อง", () => {
+    const odd: Compartment[] = [{ id: "c2", name: "ก", w: 1, h: 1, d: 1 }];
+    expect(upsertCompartments(odd, [{ name: "ข", w: 2, h: 2, d: 2 }])![1].id).toBe("c3");
+    const full = Array.from({ length: 8 }, (_, i) => ({ id: `c${i + 1}`, name: `ช่อง ${i}`, w: 1, h: 1, d: 1 }));
+    expect(upsertCompartments(full, [{ name: "ใหม่", w: 2, h: 2, d: 2 }])).toBeNull();
+  });
+  it("findCompartment + isWindowName (ใส ≠ ใส่)", () => {
+    expect(findCompartment(base, "ช่องหลัก ")?.id).toBe("c1");
+    expect(findCompartment(base, "")).toBeNull();
+    expect(isWindowName("ช่องใสใส่รูป")).toBe(true);
+    expect(isWindowName("ช่องใส่บัตร")).toBe(false);
+    expect(isWindowName("Front pocket", "Clear pocket")).toBe(true);
   });
 });

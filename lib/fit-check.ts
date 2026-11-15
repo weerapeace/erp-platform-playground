@@ -159,6 +159,52 @@ export function areaPath(shape: AreaShape | undefined, x: number, y: number, w: 
   return `M${f(x + r)} ${f(y)}H${f(x + w - r)}A${r} ${r} 0 0 1 ${f(x + w)} ${f(y + r)}V${f(y + h - r)}A${r} ${r} 0 0 1 ${f(x + w - r)} ${f(y + h)}H${f(x + r)}A${r} ${r} 0 0 1 ${f(x)} ${f(y + h - r)}V${f(y + r)}A${r} ${r} 0 0 1 ${f(x + r)} ${f(y)}Z`;
 }
 
+const nameKey = (x: unknown) => String(x ?? "").replace(/\s+/g, "").toLowerCase();
+
+/** ช่องในรายการที่ชื่อตรงกัน (ไม่สนตัวพิมพ์/ช่องว่าง) — ใช้เติมขนาดเดิมในป๊อปแทรก */
+export function findCompartment(list: Compartment[] | null | undefined, name: string): Compartment | null {
+  const k = nameKey(name);
+  return k ? (list ?? []).find((c) => nameKey(c.name) === k) ?? null : null;
+}
+
+/** ชื่อช่องแบบหน้าใส: "ช่องใส…" (ไม่ใช่ "ใส่") / clear · window · transparent */
+export const isWindowName = (name: string, nameEn?: string | null): boolean =>
+  /ใส(?!่)/.test(name) || /\b(clear|window|transparent)\b/i.test(nameEn ?? "");
+
+/**
+ * ขนาดช่องจากขั้น "ช่อง" ของป๊อปแทรก → รวมเข้ากับช่องเดิมของสินค้า
+ *   ชื่อซ้ำ = อัปเดตขนาด (คงรหัส/ชื่ออังกฤษ/กรอบบนรูป) · ชื่อใหม่ = ต่อท้าย · ขนาดไม่ครบ 3 ด้าน = ข้าม (ระบบเทียบขนาดต้องใช้ความหนา)
+ *   ไม่เกิน MAX_COMPARTMENTS · ไม่มีอะไรเปลี่ยน = null
+ */
+export function upsertCompartments(
+  current: Compartment[] | null | undefined,
+  add: { name: string; name_en?: string | null; w: unknown; h: unknown; d: unknown; window?: boolean }[]
+): Compartment[] | null {
+  const list = (current ?? []).map((c) => ({ ...c }));
+  let changed = false;
+  for (const a of add) {
+    const w = n(a.w), h = n(a.h), d = n(a.d);
+    const name = String(a.name ?? "").trim().slice(0, 40);
+    if (!name || !w || !h || !d) continue;
+    const i = list.findIndex((c) => nameKey(c.name) === nameKey(name));
+    if (i >= 0) {
+      const c = list[i];
+      if (c.w !== w || c.h !== h || c.d !== d) {
+        list[i] = { ...c, w, h, d };
+        changed = true;
+      }
+      continue;
+    }
+    if (list.length >= MAX_COMPARTMENTS) continue;
+    let k = list.length + 1;
+    while (list.some((c) => c.id === `c${k}`)) k++;
+    const nameEn = String(a.name_en ?? "").trim().slice(0, 40);
+    list.push({ id: `c${k}`, name, ...(nameEn ? { name_en: nameEn } : {}), w, h, d, ...(a.window ? { window: true } : {}) });
+    changed = true;
+  }
+  return changed ? list : null;
+}
+
 /** ตรวจข้อมูลจากฟอร์ม (บอกว่าต้องแก้อะไร ไม่เดาค่าให้) · null = ผ่าน */
 export function compartmentsProblem(rows: { name?: unknown; w?: unknown; h?: unknown; d?: unknown }[]): string | null {
   if (rows.length > MAX_COMPARTMENTS) return `ใส่ได้ไม่เกิน ${MAX_COMPARTMENTS} ช่อง`;

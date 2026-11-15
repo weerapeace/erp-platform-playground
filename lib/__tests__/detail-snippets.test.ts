@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { arrangeEn, arrangeRows, arrangeTh, composeLines, enInsertAt, insertLines, materialLine, moveNewBlock, newBlockAt, newRowKey, oldRowsMoved, slotLine, slotText, splitLines } from "@/lib/detail-snippets";
-import { findMaterialLinks, materialTerms, mentionsMaterial, publicMaterial, type MaterialRow } from "@/lib/product-materials";
+import { arrangeEn, arrangeRows, arrangeTh, availableSteps, composeLines, slotDimsText, stepAfter, STEP_TABS, enInsertAt, insertLines, materialLine, moveNewBlock, newBlockAt, newRowKey, oldRowsMoved, slotLine, slotText, splitLines } from "@/lib/detail-snippets";
+import { findMaterialLinks, materialTerms, mentionsMaterial, publicMaterial, suggestMaterials, type MaterialRow } from "@/lib/product-materials";
 
 const card = { id: "c", name: "ช่องใส่บัตรเครดิต", name_en: "Card slot", kind: "slot", template_en: "{n} card slots" };
 const bill = { id: "b", name: "ช่องใส่ธนบัตร", name_en: "Bill compartment", kind: "slot" };
@@ -279,5 +279,41 @@ describe("รอบ 11 — ⧉ คัดลอกจากรุ่นอื่�
     expect(r.th).toEqual(["ขนาด 20 x 10 ซม.", "- ผ้าซับในเนื้อดี", "- กันน้ำ"]);
     expect(r.en).toEqual(["Size 20 x 10 cm", "- Water resistant"]);
     expect(r.enMissing).toBe(1);
+  });
+});
+
+describe("โหมดทีละขั้น + ขนาดช่อง + แนะนำวัสดุ (เจ้าของ 2026-11-15)", () => {
+  it("ขั้นที่ใช้ได้ตามแท็บที่เปิด · ตรวจแล้วแทรกมีเสมอ · ถัดไป/ก่อนหน้าชนขอบ", () => {
+    expect(availableSteps(["phrase", "material", "slot", "size", "fit", "lifestyle"])).toEqual(["material", "slot", "highlight", "size", "fit", "review"]);
+    // ชุดเข็มขัด (ข้อความ วัสดุ ขนาด) → ไม่มีขั้นช่อง/ใส่อะไรได้
+    expect(availableSteps(["phrase", "material", "size"])).toEqual(["material", "highlight", "size", "review"]);
+    expect(availableSteps(["lifestyle"])).toEqual(["highlight", "review"]);
+    const s = availableSteps(["material", "slot"]);
+    expect(stepAfter(s, "material", 1)).toBe("slot");
+    expect(stepAfter(s, "material", -1)).toBe("material");
+    expect(stepAfter(s, "review", 1)).toBe("review");
+    expect(stepAfter(s, "fit", 1)).toBe("material");
+    expect(STEP_TABS.highlight).toEqual(["phrase", "lifestyle"]);
+  });
+
+  it("ขนาดช่องต่อท้ายชื่อช่อง (กว้าง+สูง ต้องครบ)", () => {
+    const clear = { id: "w", name: "ช่องใสใส่รูป", name_en: "Clear photo pocket", kind: "slot" };
+    expect(slotDimsText({ w: 6, h: "9", d: "" }, "th")).toBe(" (ขนาด 6 × 9 ซม.)");
+    expect(slotDimsText({ w: 6, h: 9, d: 0.55 }, "en")).toBe(" (6 × 9 × 0.6 cm)");
+    expect(slotDimsText({ w: 6, h: "" }, "th")).toBe("");
+    expect(slotLine([{ item: clear, n: 1, dims: { w: 6, h: 9 } }, { item: bill, n: 2 }], "th")).toBe("ช่องใสใส่รูป 1 ช่อง (ขนาด 6 × 9 ซม.) และ ช่องใส่ธนบัตร 2 ช่อง");
+    expect(slotLine([{ item: clear, n: 1, dims: { w: 6, h: 9 } }], "en")).toBe("Clear photo pocket × 1 (6 × 9 cm)");
+    const r = composeLines({ phrases: [], materials: [], slots: [{ item: clear, n: 1, dims: { w: 6, h: 9 } }] });
+    expect(r.pairs[0]).toEqual({ th: "- ช่องใสใส่รูป 1 ช่อง (ขนาด 6 × 9 ซม.)", en: "- Clear photo pocket × 1 (6 × 9 cm)" });
+  });
+
+  it("แนะนำวัสดุจากข้อมูลฝ่ายผลิต — คำยาวกว่าชนะ · เรียงตามตำแหน่ง · ปิดใช้ไม่แนะนำ", () => {
+    const M = (id: string, name: string, name_en: string | null, extra: Partial<MaterialRow> = {}): MaterialRow => ({ id, name, name_en, slug: id, ...extra });
+    const mats = [M("cv", "ผ้าแคนวาส", "Canvas"), M("jq", "ผ้าแคนวาสแจ็คการ์ด", "Jacquard canvas"), M("pu", "โพลียูรีเทน", "Polyurethane (PU)", { aliases: "พียู, PU" }), M("old", "ผ้าไนล่อน", "Nylon", { is_active: false })];
+    expect(suggestMaterials("ผ้าแคนวาส 12 oz กันน้ำ", mats).map((m) => m.id)).toEqual(["cv"]);
+    expect(suggestMaterials("ผ้าแคนวาสแจ็คการ์ด สีครีม", mats).map((m) => m.id)).toEqual(["jq"]);
+    expect(suggestMaterials("ผ้าถักลายตาราง K-9474 , พียู(PU) HRH-7261 + Canvas", mats).map((m) => m.id)).toEqual(["pu", "cv"]);
+    expect(suggestMaterials("ผ้าไนล่อน", mats)).toEqual([]);
+    expect(suggestMaterials(null, mats)).toEqual([]);
   });
 });

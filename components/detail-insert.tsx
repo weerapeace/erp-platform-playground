@@ -9,7 +9,13 @@
  *     "ล้าง" ในแท็บขนาด/ใส่อะไรได้ = คืนค่าเดิมของสินค้า (ไม่ลบข้อมูลจริง)
  *   ⚙️ รูปแบบบรรทัดกลาง (คำนำหน้า · คำเชื่อม "และ" · ชื่ออังกฤษในวงเล็บ) = /api/detail-insert/templates ใช้ทุกสินค้า ทุกคน
  *   ✏️ ทุกรายการ → ป๊อปเล็กแก้ชื่อไทย/อังกฤษ (🌐 แปล) · รูปแบบบรรทัดช่อง · ขนาด+รูป (ของที่ใส่ได้) · ลบ = ซ่อนจากรายการกลาง (กู้ได้)
- * กฎคิดบรรทัด: lib/detail-snippets.ts · วัสดุ: lib/product-materials.ts · ใส่อะไรได้: lib/product-fits.ts
+ *   🪜 โหมด "ทีละขั้น" (เจ้าของ 2026-11-15 · ค่าเริ่ม · สลับกลับ "แบบแท็บ" ได้ จำต่อคน): วัตถุดิบ → ช่อง → จุดเด่น → ขนาด/น้ำหนัก → ใส่อะไรได้ → ตรวจแล้วแทรก
+ *     ข้ามได้ทุกขั้น (ข้าม = ไม่ใส่เรื่องนั้น) · ใช้เนื้อหาแท็บเดิม (ไม่มีหน้าซ้ำ) · กติกาขั้น = lib/detail-snippets availableSteps/stepAfter
+ *     วัตถุดิบ: เลือกแล้ว + ค้นหา + ใช้บ่อย (ดูทั้งหมด = รายการเต็ม) · แนะนำจากข้อมูลวัสดุฝ่ายผลิต (parent.materials · suggestMaterials — คนกดเลือกเอง)
+ *     ช่อง: เพิ่มช่องแบบใหม่ได้ทันที (เก็บเข้าคลังกลาง หรือใช้ครั้งนี้) · 📏 ใส่ขนาดช่อง → ต่อท้ายบรรทัด + บันทึกเป็น "ช่องใส่ของ" (compartments · ครบ 3 ด้าน) → ขั้นใส่อะไรได้เช็กจากขนาดนี้
+ *     🌐 ภาษาหน้าจอ ไทย/English สลับในป๊อปได้ (เริ่มตามภาษาของบัญชี · ไม่เปลี่ยนภาษาทั้งระบบ) — พนักงานที่อ่านไทยไม่ออกใช้ได้
+ *     เฟส 2 (ยังไม่ทำ): AI ดูรูปเสนอจุดเด่น 7 ข้อ + ความจำ ชอบ/ไม่ชอบ ในขั้น "จุดเด่น"
+ * กฎคิดบรรทัด: lib/detail-snippets.ts · วัสดุ: lib/product-materials.ts · ใส่อะไรได้: lib/product-fits.ts · ช่องใส่ของ: lib/fit-check.ts
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import nextDynamic from "next/dynamic";
@@ -23,7 +29,15 @@ import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers
 import { parseVariants, resolvePhrase, variantSearchText, variantsOf, VARIANT_MODE_LABEL, type VariantMode } from "@/lib/phrase-variants";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useSWRLite } from "@/lib/swr-lite";
+import { useLang } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import {
+  availableSteps,
+  stepAfter,
+  STEP_TABS,
+  slotDimsText,
+  type InsertStep,
+  type SlotDims,
   DEFAULT_INSERT_TEMPLATES,
   DEFAULT_SLOT_TEMPLATE,
   DEFAULT_SLOT_TEMPLATE_EN,
@@ -61,10 +75,10 @@ import {
   type LineKind,
   type SnippetItem,
 } from "@/lib/detail-snippets";
-import { hasMaterialPage, type MaterialRow } from "@/lib/product-materials";
+import { hasMaterialPage, suggestMaterials, type MaterialRow } from "@/lib/product-materials";
 import { fitSizeOptions, parseFits, parseSizeDims, sizeDimsFor, type FitItem, type FitPick } from "@/lib/product-fits";
 import { translateContent } from "@/lib/content-translate";
-import { bestFit, fitTargetOf, parseCompartments, type Compartment } from "@/lib/fit-check";
+import { bestFit, findCompartment, fitTargetOf, isWindowName, parseCompartments, upsertCompartments, type Compartment } from "@/lib/fit-check";
 
 // กด "🔗 มีหน้า" ที่วัสดุ = เปิดระเบียนวัสดุ (drawer ตัวจริงของหน้า master · แก้คำอธิบาย/วิธีดูแล/รูปได้) — ต้อง dynamic กัน import วนกับ master-crud
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -95,14 +109,36 @@ type NumK = (typeof NUM_FIELDS)[number]["k"];
 type SizeLine = "size" | "weight" | "handle" | "strap";
 const SIZE_LINE_KEYS: Record<SizeLine, NumK[]> = { size: ["w", "h", "d"], weight: ["g"], handle: ["hd"], strap: ["s1", "s2"] };
 
-const TABS: { key: Tab; label: string; hint: string }[] = [
-  { key: "phrase", label: "📝 ข้อความ", hint: "ติ๊กได้หลายข้อ — ได้บรรทัดละข้อ เรียงตามลำดับที่กด" },
-  { key: "material", label: "🧵 วัสดุ", hint: "ติ๊กได้หลายตัว — รวมเป็นบรรทัดเดียว · วัสดุที่มีหน้า ลูกค้ากดดูบนเว็บได้" },
-  { key: "slot", label: "🔢 ช่อง", hint: "พิมพ์แค่จำนวน — ช่องที่ใส่ตัวเลขรวมเป็นบรรทัดเดียว" },
-  { key: "size", label: "📏 ขนาด/น้ำหนัก", hint: "ดึงค่าจากช่องของสินค้ามาให้ · แก้ตรงนี้ = แก้ช่องของสินค้าด้วย" },
-  { key: "fit", label: "🎒 ใส่อะไรได้", hint: "กดการ์ดเพื่อเลือก (เลือกขนาดได้) · เลือกตรงนี้ = แก้ช่อง \"ใส่อะไรได้บ้าง\" ของสินค้าด้วย" },
-  { key: "lifestyle", label: "🌿 Lifestyle / อื่นๆ", hint: "เลือกสไตล์ → ติ๊กข้อความ (บรรทัดละข้อ เรียงตามลำดับที่กด) · พิมพ์เองได้ · คัดลอก prompt ไปถาม ChatGPT" },
+const TABS: { key: Tab; label: string; en: string; hint: string; hintEn: string }[] = [
+  { key: "phrase", label: "📝 ข้อความ", en: "📝 Phrases", hint: "ติ๊กได้หลายข้อ — ได้บรรทัดละข้อ เรียงตามลำดับที่กด", hintEn: "Tick as many as you like — one line each, in the order you tick" },
+  { key: "material", label: "🧵 วัสดุ", en: "🧵 Material", hint: "ติ๊กได้หลายตัว — รวมเป็นบรรทัดเดียว · วัสดุที่มีหน้า ลูกค้ากดดูบนเว็บได้", hintEn: "Pick one or more — they go on one line · materials with a page link on the web shop" },
+  { key: "slot", label: "🔢 ช่อง", en: "🔢 Pockets", hint: "พิมพ์แค่จำนวน — ช่องที่ใส่ตัวเลขรวมเป็นบรรทัดเดียว", hintEn: "Type how many — pockets with a number go on one line" },
+  { key: "size", label: "📏 ขนาด/น้ำหนัก", en: "📏 Size/weight", hint: "ดึงค่าจากช่องของสินค้ามาให้ · แก้ตรงนี้ = แก้ช่องของสินค้าด้วย", hintEn: "Filled from the product · editing here also updates the product" },
+  { key: "fit", label: "🎒 ใส่อะไรได้", en: "🎒 What fits", hint: "กดการ์ดเพื่อเลือก (เลือกขนาดได้) · เลือกตรงนี้ = แก้ช่อง \"ใส่อะไรได้บ้าง\" ของสินค้าด้วย", hintEn: "Tap a card to pick (sizes available) · also updates the product's \"What fits\" field" },
+  { key: "lifestyle", label: "🌿 Lifestyle / อื่นๆ", en: "🌿 Lifestyle / other", hint: "เลือกสไตล์ → ติ๊กข้อความ (บรรทัดละข้อ เรียงตามลำดับที่กด) · พิมพ์เองได้ · คัดลอก prompt ไปถาม ChatGPT", hintEn: "Pick a style → tick lines (one each, in tick order) · or type your own · copy a prompt for ChatGPT" },
 ];
+
+/** 🪜 โหมดทีละขั้น — ชื่อขั้น + คำอธิบาย (ไทย/อังกฤษ) */
+const STEP_LABEL: Record<InsertStep, [string, string]> = {
+  material: ["วัตถุดิบ", "Material"],
+  slot: ["ช่อง", "Pockets"],
+  highlight: ["จุดเด่น", "Highlights"],
+  size: ["ขนาด/น้ำหนัก", "Size/weight"],
+  fit: ["ใส่อะไรได้", "What fits"],
+  review: ["ตรวจแล้วแทรก", "Review & insert"],
+};
+const STEP_HINT: Record<InsertStep, [string, string]> = {
+  material: ["เลือกวัสดุหลักของสินค้า — รวมเป็นบรรทัดเดียว · ไม่มี = กดข้าม", "Pick the main materials — one line · none = skip"],
+  slot: ["ใส่จำนวนช่อง · เพิ่มช่องแบบใหม่ได้ · กดไม้บรรทัดเพื่อใส่ขนาดช่อง (เช่น ช่องใส)", "Set pocket counts · add a new kind · tap the ruler to add a pocket size (e.g. clear pocket)"],
+  highlight: ["ติ๊กจุดเด่นของสินค้า (บรรทัดละข้อ) · AI ช่วยคิดจากรูปจะมาเร็ว ๆ นี้", "Tick the product's highlights (one line each) · AI suggestions from photos coming soon"],
+  size: ["ดึงจากข้อมูลสินค้าให้แล้ว · แก้ตรงนี้ = แก้ของสินค้าด้วย", "Filled from the product · edits here also update the product"],
+  fit: ["ระบบเช็กจากขนาดช่องให้ · กดการ์ดเพื่อเลือก", "Checked against the pocket sizes · tap a card to pick"],
+  review: ["ดูตัวอย่างด้านขวา ลาก ⠿ สลับบรรทัดได้ แล้วกด แทรก", "Check the preview, drag ⠿ to reorder, then press Insert"],
+};
+const SIZE_LINE_EN = { size: "size", weight: "weight", handle: "handle drop", strap: "strap length" } as const;
+const INSERT_MODES = ["steps", "tabs"] as const;
+type InsertMode = (typeof INSERT_MODES)[number];
+const SIDE_EN: Record<string, string> = { inside: "Inside", outside: "Outside", "": "No position" };
 
 export type DetailInsertResult = {
   th: string;
@@ -119,6 +155,7 @@ const numStr = (v: unknown): string => {
 const FIT_SIZES = ["s", "m", "l"] as const;
 type FitSize = (typeof FIT_SIZES)[number];
 const FIT_SIZE_LABEL: Record<FitSize, string> = { s: "เล็ก", m: "กลาง", l: "ใหญ่" };
+const FIT_SIZE_EN: Record<FitSize, string> = { s: "S", m: "M", l: "L" };
 const FIT_GRID: Record<FitSize, string> = { s: "grid-cols-4 sm:grid-cols-7", m: "grid-cols-3 sm:grid-cols-5", l: "grid-cols-2 sm:grid-cols-3" };
 const toggle = (ids: string[], id: string) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 const readHide = () => {
@@ -195,6 +232,7 @@ export function DetailInsertButton({
   currentId?: string | null;
 }) {
   const [open, setOpen] = useState(false);
+  const { lang } = useLang();
   return (
     <>
       <button
@@ -205,10 +243,10 @@ export function DetailInsertButton({
           e.stopPropagation();
           setOpen(true);
         }}
-        title="เลือกรายละเอียดสำเร็จรูป / วัสดุ / จำนวนช่อง / ขนาด / ใส่อะไรได้ แล้วแทรกลงคำอธิบายตรงตำแหน่งที่เลือก"
+        title={lang === "en" ? "Add material / pockets / highlights / size / what fits to the description, step by step" : "เลือกรายละเอียดสำเร็จรูป / วัสดุ / จำนวนช่อง / ขนาด / ใส่อะไรได้ แล้วแทรกลงคำอธิบายตรงตำแหน่งที่เลือก (ทำทีละขั้นได้)"}
         className="ml-1.5 inline-flex items-center rounded-full border border-orange-300 px-2 py-[1px] align-middle text-[10.5px] font-medium text-orange-600 hover:bg-orange-50"
       >
-        ＋ แทรก
+        {lang === "en" ? "＋ Insert" : "＋ แทรก"}
       </button>
       {open && (
         <DetailInsertModal
@@ -249,6 +287,13 @@ function DetailInsertModal({
   copyFrom?: CopyFromCfg | null;
 }) {
   const toast = useToast();
+  // 🌐 ภาษาหน้าจอของป๊อป — เริ่มตามภาษาของบัญชี · สลับในป๊อปได้ (ไม่เปลี่ยนภาษาทั้งระบบ · ไม่ต้องรีโหลด)
+  const { lang: appLang } = useLang();
+  const [uiLang, setUiLang] = useState<"th" | "en">(appLang === "en" ? "en" : "th");
+  const isEn = uiLang === "en";
+  const t = (th: string, enText: string) => (isEn ? enText : th);
+  /** ชื่อรายการตามภาษาหน้าจอ (อังกฤษว่าง = ไทย) */
+  const nm = (x: { name: string; name_en?: string | null }) => (isEn && x.name_en?.trim() ? x.name_en : x.name);
   const { data: snipRows, loading: snipLoading, revalidate: reloadSnips, mutate: mutateSnips } = useTickCatalog(SNIP);
   const { data: matRows, loading: matLoading, revalidate: reloadMats, mutate: mutateMats } = useTickCatalog(MAT);
   const { data: fitRows, loading: fitLoading, revalidate: reloadFits, mutate: mutateFits } = useTickCatalog(FIT);
@@ -274,7 +319,9 @@ function DetailInsertModal({
   const [profileSel, setProfileSel] = useState<string | null>(null); // null = อัตโนมัติ · "__all" = ไม่กรอง
   const profile: InsertProfile | null = profileSel === null ? autoProfile : profileSel === "__all" ? null : baseTpl.profiles.find((p) => p.id === profileSel) ?? null;
   const phraseItems = allPhrase.filter((x) => profileAllows(profile, "phrase", x.id));
-  const slotItems = allSlot.filter((x) => profileAllows(profile, "slot", x.id));
+  // 🔢 ช่องแบบใหม่ที่ "ใช้ครั้งนี้" (ไม่เก็บเข้าคลังกลาง) — ต่อท้ายรายการช่อง
+  const [tmpSlots, setTmpSlots] = useState<SnippetItem[]>([]);
+  const slotItems = [...allSlot.filter((x) => profileAllows(profile, "slot", x.id)), ...tmpSlots];
   const visMats = mats.filter((x) => profileAllows(profile, "material", x.id));
   const fitItems = allFits.filter((x) => profileAllows(profile, "fit", x.id));
 
@@ -285,6 +332,13 @@ function DetailInsertModal({
 
   const lines = useMemo(() => splitLines(thText), [thText]);
   const enLines = useMemo(() => splitLines(enText), [enText]);
+  // 🪜 โหมดทีละขั้น (ค่าเริ่ม) / แบบแท็บ — จำต่อคน · ขั้นที่ใช้ได้ตามแท็บที่ป๊อปเปิดให้
+  const modePref = useViewPref<InsertMode>("detail_insert_mode", INSERT_MODES, "steps");
+  const stepMode = modePref.view === "steps";
+  const steps = availableSteps(tabs.map((x) => x.key));
+  const [stepSel, setStepSel] = useState<InsertStep>("material");
+  const step: InsertStep = steps.includes(stepSel) ? stepSel : steps[0];
+  const [skipped, setSkipped] = useState<InsertStep[]>([]);
   const [tab, setTab] = useState<Tab>("phrase");
   const [q, setQ] = useState("");
   const [phraseIds, setPhraseIds] = useState<string[]>([]);
@@ -305,7 +359,7 @@ function DetailInsertModal({
   const [slotN, setSlotN] = useState<Record<string, string>>({});
   const [at, setAt] = useState(lines.length);
   const [withEn, setWithEn] = useState(hasEn);   // ค่าเริ่ม = ติ๊ก (เจ้าของ 2026-10-19)
-  const [view, setView] = useState<"th" | "en">("th");
+  const [view, setView] = useState<"th" | "en">(() => (uiLang === "en" && hasEn ? "en" : "th"));
   const [hideOld, setHideOld] = useState(readHide);
   const fitSize = useViewPref<FitSize>("detail_insert_fit_size", FIT_SIZES, "m");
   // 🔤 รายการ: ซ่อนชื่ออังกฤษเป็นค่าเริ่ม (เจ้าของ 2026-10-19 "ดูรก") · กด EN สลับดู — จำต่อคน
@@ -339,13 +393,50 @@ function DetailInsertModal({
   const [fits, setFits] = useState<FitPick[]>(fitOrig);
   const [fitSeen, setFitSeen] = useState(false);
   const [useFit, setUseFit] = useState(() => !alreadyMentions(thText, "fit"));
+  // 🧵 วัตถุดิบแบบไม่รก (โหมดทีละขั้น): ดูทั้งหมด = รายการเต็มแบบเดิม
+  const [matAll, setMatAll] = useState(false);
+  // 🔢 ขนาดช่อง (📏) ต่อช่อง + เพิ่มช่องแบบใหม่
+  const [slotDims, setSlotDims] = useState<Record<string, { w: string; h: string; d: string }>>({});
+  const [newSlot, setNewSlot] = useState<{ name: string; side: string; save: boolean }>({ name: "", side: "inside", save: true });
+  const [slotErr, setSlotErr] = useState("");
+  const [addingSlot, setAddingSlot] = useState(false);
 
-  const openTab = (t: Tab) => {
-    setTab(t);
+  const openTab = (k: Tab) => {
+    setTab(k);
     setQ("");
-    if (t === "size") setSizeSeen(true);
-    if (t === "fit") setFitSeen(true);
+    if (k === "size") setSizeSeen(true);
+    if (k === "fit") setFitSeen(true);
   };
+  /** 🪜 ไปขั้น s — เปิดแท็บของขั้นนั้น (จุดเด่น: อยู่ Lifestyle อยู่แล้ว = คงไว้) */
+  const goStep = (s: InsertStep) => {
+    setStepSel(s);
+    const ks = STEP_TABS[s].filter((k) => tabs.some((x) => x.key === k));
+    if (ks.length && !ks.includes(tab)) openTab(ks[0]);
+  };
+  const nextStep = () => {
+    setSkipped((p) => p.filter((x) => x !== step));
+    goStep(stepAfter(steps, step, 1));
+  };
+  /** ข้าม = ไม่ใส่เรื่องนี้ (ล้างที่เลือกในขั้นนี้ · ขนาด/ใส่อะไรได้ คืนค่าเดิมของสินค้า) */
+  const skipStep = () => {
+    STEP_TABS[step].forEach((k) => clearTab(k));
+    if (step === "slot") setSlotDims({});
+    setSkipped((p) => (p.includes(step) ? p : [...p, step]));
+    goStep(stepAfter(steps, step, 1));
+  };
+  const switchMode = (m: InsertMode) => {
+    modePref.setView(m);
+    void modePref.saveDefault(m);
+    if (m === "steps") goStep(steps.find((s) => STEP_TABS[s].includes(tab)) ?? steps[0]);
+  };
+  // เปิดป๊อปในโหมดทีละขั้น → เริ่มที่ขั้นแรก (แท็บเริ่มต้นเดิม = ข้อความ)
+  const stepInit = useRef(false);
+  useEffect(() => {
+    if (!stepMode || stepInit.current || !tabs.length) return;
+    stepInit.current = true;
+    goStep(steps[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepMode, tabs.length]);
   // ชุดที่เลือกไม่มีแท็บที่เปิดอยู่ → ย้ายไปแท็บแรกของชุด
   const tabKeys = tabs.map((t) => t.key).join(",");
   useEffect(() => {
@@ -354,9 +445,23 @@ function DetailInsertModal({
   }, [tabKeys, tab]);
 
   // 📐 ตรวจซ้ำว่าของใส่ได้จริงไหม (ของกลาง lib/fit-check เหมือนระบบเทียบขนาด) — เทียบช่องด้านในที่วัดไว้ · ยังไม่วัด = เทียบขนาดนอก
-  const comps = useMemo(() => parseCompartments(values.compartments), [values.compartments]);
-  const outer: Compartment | null = Number(num.w) > 0 && Number(num.h) > 0 && Number(num.d) > 0 ? { id: "outer", name: "ขนาดนอก", w: Number(num.w), h: Number(num.h), d: Number(num.d) } : null;
-  const boxes: Compartment[] = comps && comps.length ? comps : outer ? [outer] : [];
+  const compsSaved = useMemo(() => parseCompartments(values.compartments), [values.compartments]);
+  //    📏 ขนาดช่องที่ใส่ในขั้น "ช่อง" (ครบ 3 ด้าน) → บันทึกเป็น "ช่องใส่ของ" ของสินค้า (ใช้เช็กใส่อะไรได้ทั้งป๊อปนี้และบนเว็บ)
+  //       ค่าเริ่ม: สินค้าวัดช่องไว้แล้ว = บันทึก (อัปเดตช่องชื่อเดียวกัน) · ยังไม่เคยวัด = ไม่บันทึก จนกว่าจะติ๊กเอง
+  //       (กันกรณีวัดแค่ช่องใสช่องเดียว แล้วระบบ/เว็บเข้าใจว่ากระเป๋ามีแค่ช่องเล็กนั้น)
+  const canComp = writable.includes("compartments");
+  const hadComps = !!compsSaved?.length;
+  const [saveComps, setSaveComps] = useState(hadComps);
+  const dimEntries = slotItems.flatMap((it) => {
+    const d = slotDims[it.id];
+    return d && (Math.floor(Number(slotN[it.id])) || 0) > 0 ? [{ name: it.name, name_en: it.name_en ?? null, w: d.w, h: d.h, d: d.d, window: isWindowName(it.name, it.name_en) }] : [];
+  });
+  const fullDims = dimEntries.filter((d) => Number(d.w) > 0 && Number(d.h) > 0 && Number(d.d) > 0).length;
+  const compsNext = canComp && saveComps ? upsertCompartments(compsSaved, dimEntries) : null;
+  const comps = compsNext ?? compsSaved;
+  const outer: Compartment | null = Number(num.w) > 0 && Number(num.h) > 0 && Number(num.d) > 0 ? { id: "outer", name: t("ขนาดนอก", "Outer size"), w: Number(num.w), h: Number(num.h), d: Number(num.d) } : null;
+  //    ยังไม่เคยวัดช่อง แต่เพิ่งใส่บางช่อง → เทียบขนาดนอกด้วย (ช่องหลักยังไม่ได้วัด)
+  const boxes: Compartment[] = comps && comps.length ? [...comps, ...(!hadComps && outer ? [outer] : [])] : outer ? [outer] : [];
   const boxBasis = comps && comps.length ? "inner" : outer ? "outer" : "none";
   //    เลือกขนาด (เช่น สมาร์ทโฟน ถึง 6.7 นิ้ว) → ใช้ขนาดของตัวเลือกนั้น (size_dims) · ไม่เลือก/ไม่มี = ขนาดหลักของรายการ
   const fitCheck = (it: FitRow, size?: string | null) => {
@@ -383,7 +488,7 @@ function DetailInsertModal({
   const sel = {
     phrases: byClick(phraseIds, phraseItems).map((x) => resolvePhrase(x, phrasePick[x.id])),
     materials: byClick(matIds, visMats),
-    slots: slotItems.map((item) => ({ item, n: Math.floor(Number(slotN[item.id])) || 0 })).filter((p) => p.n > 0),
+    slots: slotItems.map((item) => ({ item, n: Math.floor(Number(slotN[item.id])) || 0, dims: (slotDims[item.id] ?? null) as SlotDims | null })).filter((p) => p.n > 0),
     size: sizeSeen && use.size && has("w") ? { w: num.w, h: num.h, d: num.d } : null,
     weight: sizeSeen && use.weight && has("g") ? num.g : null,
     handle: sizeSeen && use.handle && has("hd") ? num.hd : null,
@@ -440,11 +545,15 @@ function DetailInsertModal({
   for (const f of numFields) {
     if (num[f.k] === numOrig[f.k]) continue;
     fields[f.field] = num[f.k] === "" ? null : Number(num[f.k]);
-    changes.push(`${f.label} ${numOrig[f.k] || "ว่าง"}→${num[f.k] || "ว่าง"}`);
+    changes.push(`${t(f.label, f.en)} ${numOrig[f.k] || t("ว่าง", "empty")}→${num[f.k] || t("ว่าง", "empty")}`);
   }
   if (canFit && JSON.stringify(fits) !== JSON.stringify(fitOrig)) {
     fields.fits = fits.length ? fits : null;
-    changes.push(`ใส่อะไรได้ (${fits.length} รายการ)`);
+    changes.push(t(`ใส่อะไรได้ (${fits.length} รายการ)`, `What fits (${fits.length} items)`));
+  }
+  if (compsNext) {
+    fields.compartments = compsNext;
+    changes.push(t(`ขนาดช่อง (${dimEntries.length} ช่อง)`, `Pocket sizes (${dimEntries.length})`));
   }
   const picked = finalTh.length > 0;
   const dirty = picked || reordered || changes.length > 0;
@@ -459,7 +568,7 @@ function DetailInsertModal({
     if (t === "phrase") { setPhraseIds([]); setPhrasePick({}); }
     if (t === "lifestyle") { setLifeIds([]); setLifeTh(""); setLifeEn(""); }
     if (t === "material") setMatIds([]);
-    if (t === "slot") setSlotN({});
+    if (t === "slot") { setSlotN({}); setSlotDims({}); }
     if (t === "size") {
       setNum(numOrig);
       setUse({ size: false, weight: false, handle: false, strap: false });
@@ -479,9 +588,76 @@ function DetailInsertModal({
     t === "lifestyle" ? sel.lifestyle.length : t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
   const tabDirty = (t: Tab) => tabCount(t) > 0 || (t === "size" && numFields.some((f) => num[f.k] !== numOrig[f.k])) || (t === "fit" && JSON.stringify(fits) !== JSON.stringify(fitOrig));
 
+  // 📏 ขนาดช่อง: เปิด = เติมขนาดเดิมของช่องชื่อเดียวกัน (ถ้าวัดไว้) · ปิด = ไม่ใส่ขนาด
+  const toggleDims = (it: SnippetItem) =>
+    setSlotDims((p) => {
+      if (p[it.id]) {
+        const next = { ...p };
+        delete next[it.id];
+        return next;
+      }
+      const c = findCompartment(compsSaved, it.name);
+      return { ...p, [it.id]: { w: c ? String(c.w) : "", h: c ? String(c.h) : "", d: c ? String(c.d) : "" } };
+    });
+  /** ＋ ช่องแบบใหม่: พิมพ์ไทยหรืออังกฤษ → แปลอีกภาษาให้ · เก็บเข้าคลังกลาง (ทุกสินค้าเลือกได้ · audit ที่ API กลาง) หรือใช้ครั้งนี้ */
+  const addNewSlot = async () => {
+    const raw = newSlot.name.replace(/\s+/g, " ").trim();
+    if (!raw) { setSlotErr(t("พิมพ์ชื่อช่องก่อน", "Type a pocket name first")); return; }
+    if (slotItems.some((x) => x.name === raw || x.name_en === raw)) { setSlotErr(t("มีช่องชื่อนี้อยู่แล้ว — ใส่จำนวนที่รายการด้านบน", "This pocket already exists — set its count above")); return; }
+    setSlotErr("");
+    setAddingSlot(true);
+    try {
+      const thai = /[฀-๿]/.test(raw);
+      const other = (await translateContent([raw], thai ? "en" : "th", { place: "product" }).catch(() => [""]))[0]?.trim() ?? "";
+      const name = thai ? raw : other || raw;
+      const nameEn = thai ? other || null : raw;
+      const side = newSlot.side || null;
+      let id = `tmp:${Date.now()}`;
+      if (newSlot.save) {
+        const r = await apiFetch(`/api/master-v2/${SNIP}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, name_en: nameEn, kind: "slot", slot_side: side, sort_order: 500, is_active: true }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error || !j.data?.id) throw new Error(j.error || (r.status === 403 ? t("ไม่มีสิทธิ์เพิ่มรายการกลาง — ติ๊ก \"ใช้ครั้งนี้\" แทน", "No permission to add to the shared list — untick \"Save\" to use it once") : t("เพิ่มช่องไม่สำเร็จ", "Couldn't add the pocket")));
+        id = String(j.data.id);
+        await reloadSnips(true);
+        toast.success(t(`เพิ่ม "${name}" เข้าคลังกลางแล้ว (ใช้ได้ทุกรุ่น)`, `Added "${nameEn || name}" to the shared list`));
+      } else {
+        setTmpSlots((p) => [...p, { id, name, name_en: nameEn, kind: "slot", slot_side: side }]);
+      }
+      setSlotN((p) => ({ ...p, [id]: "1" }));
+      setNewSlot((p) => ({ ...p, name: "" }));
+    } catch (e) {
+      setSlotErr(e instanceof Error ? e.message : t("เพิ่มช่องไม่สำเร็จ", "Couldn't add the pocket"));
+    } finally {
+      setAddingSlot(false);
+    }
+  };
+
+  /** 🌐 พิมพ์เอง (Lifestyle/อื่น ๆ): แปลช่องที่ว่างจากอีกช่อง บรรทัดต่อบรรทัด — คนที่พิมพ์อังกฤษได้ไทยให้ด้วย (กรอกทั้ง 2 ช่อง = แปลจากภาษาหน้าจอทับอีกช่อง) */
+  const [lifeBusy, setLifeBusy] = useState(false);
+  const translateFree = async () => {
+    const hasTh = !!lifeTh.trim(), hasEnTxt = !!lifeEn.trim();
+    const fromTh = hasTh && !hasEnTxt ? true : !hasTh && hasEnTxt ? false : !isEn;
+    const src = (fromTh ? lifeTh : lifeEn).split("\n").map((x) => x.trim()).filter(Boolean);
+    if (!src.length) return;
+    setLifeBusy(true);
+    try {
+      const got = await translateContent(src, fromTh ? "en" : "th", { place: "product" });
+      const text = got.map((x, i) => x.trim() || src[i]).join("\n");
+      if (fromTh) { setLifeTh(src.join("\n")); setLifeEn(text); } else { setLifeEn(src.join("\n")); setLifeTh(text); }
+    } catch {
+      toast.error(t("แปลไม่สำเร็จ — ลองใหม่อีกครั้ง", "Translation failed — try again"));
+    } finally {
+      setLifeBusy(false);
+    }
+  };
+
   const apply = async () => {
     if (!dirty) {
-      toast.warning("ยังไม่ได้เลือกรายละเอียด");
+      toast.warning(t("ยังไม่ได้เลือกรายละเอียด", "Nothing picked yet"));
       return;
     }
     // ประกอบตามลำดับในตัวอย่าง (ไม่ได้ลาก = เหมือนแทรกก้อนที่ตำแหน่งเดิมทุกอย่าง) · อังกฤษ: ใส่บรรทัดใหม่ หรือบรรทัดเดิมถูกสลับ (บรรทัดเท่าไทย = สลับตาม)
@@ -573,15 +749,23 @@ function DetailInsertModal({
   const dupKind: LineKind | null = tab === "material" ? "material" : tab === "fit" ? "fit" : null;
 
   const editBtn = (kind: CatalogKind, item: Record<string, unknown>, cls = "") => (
-    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditor({ kind, item }); }} title="แก้ / ลบ รายการนี้ (รายการกลาง)" aria-label={`แก้ ${String(item.name)}`}
+    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditor({ kind, item }); }} title={t("แก้ / ลบ รายการนี้ (รายการกลาง)", "Edit / delete this item (shared list)")} aria-label={`${t("แก้", "Edit")} ${String(item.name)}`}
       className={`shrink-0 rounded px-1 text-[13px] text-slate-400 hover:bg-white hover:text-slate-700 ${cls}`}>✏️</button>
   );
-  const addBtn = (kind: CatalogKind, label: string) => (
-    <button type="button" onClick={() => setEditor({ kind, item: null })} className="mt-1 text-xs text-orange-600 hover:underline">＋ เพิ่ม{label}ใหม่</button>
+  const addBtn = (kind: CatalogKind, label: string, labelEn: string) => (
+    <button type="button" onClick={() => setEditor({ kind, item: null })} className="mt-1 text-xs text-orange-600 hover:underline">{t(`＋ เพิ่ม${label}ใหม่`, `＋ New ${labelEn}`)}</button>
   );
   const rowCls = (on: boolean) => `flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${on ? "border-orange-300 bg-orange-50" : "border-slate-200 hover:bg-slate-50"}`;
   const dupNote = (kind: LineKind) =>
-    alreadyMentions(thText, kind, baseTpl) ? <span className="text-[11px] text-amber-700">⚠️ คำอธิบายมีเรื่อง &quot;{LINE_KIND_LABEL[kind]}&quot; อยู่แล้ว — อาจซ้ำ</span> : null;
+    alreadyMentions(thText, kind, baseTpl) ? <span className="text-[11px] text-amber-700">{t(`⚠️ คำอธิบายมีเรื่อง "${LINE_KIND_LABEL[kind]}" อยู่แล้ว — อาจซ้ำ`, `⚠️ The description already mentions this — it may repeat`)}</span> : null;
+  /** ชื่อ 2 บรรทัดตามภาษาหน้าจอ — อังกฤษ: ชื่ออังกฤษเป็นหลัก ไม่โชว์ไทยซ้อน */
+  const twoLines = (x: { name: string; name_en?: string | null }, on: boolean) => <NameTwoLines th={nm(x)} en={isEn ? x.name : x.name_en} on={on} showEn={isEn ? false : showEn} noEnText={t("ไม่มีอังกฤษ", "no English name")} />;
+  // 🪜 โหมดทีละขั้น: วัตถุดิบแบบไม่รก · หน้าสรุปตอนตรวจ
+  const compactMat = stepMode && tab === "material" && !matAll;
+  const reviewing = stepMode && step === "review";
+  const matHint = typeof values.materials === "string" ? values.materials.replace(/\s+/g, " ").trim() : "";
+  const matSuggest = suggestMaterials(matHint, visMats).filter((m) => !matIds.includes(m.id));
+  const stepCount = (s: InsertStep) => STEP_TABS[s].reduce((n, k) => n + (tabs.some((x) => x.key === k) ? tabCount(k) : 0), 0);
 
   // ─── ตัวอย่าง: ไทย = ลาก ⠿ สลับได้ทุกบรรทัด · คลิกช่องระหว่างบรรทัด = ย้ายบรรทัดใหม่ทั้งก้อน · อังกฤษ = ดูอย่างเดียว (เรียงตามไทย) ───
   const { rowProps, handleProps, rowCls: dragCls } = useDragReorder(dragRow);
@@ -777,24 +961,26 @@ function DetailInsertModal({
       size="xl"
       defaultExpanded={false}
       hasUnsavedChanges={dirty}
-      title="แทรกรายละเอียด"
-      description="ซ้าย = เลือกรายละเอียด · ขวา = ตัวอย่างคำอธิบาย ลาก ⠿ สลับบรรทัดได้ทุกบรรทัด · คลิกบรรทัดสีส้มเพื่อแก้ก่อนแทรก"
+      title={t("แทรกรายละเอียด", "Insert details")}
+      description={stepMode
+        ? t("ทำทีละขั้น ข้ามได้ทุกขั้น · ขวา = ตัวอย่างคำอธิบาย ลาก ⠿ สลับบรรทัดได้ · คลิกบรรทัดสีส้มเพื่อแก้ก่อนแทรก", "Go step by step, skip any step · right = preview, drag ⠿ to reorder · click an orange line to edit it")
+        : t("ซ้าย = เลือกรายละเอียด · ขวา = ตัวอย่างคำอธิบาย ลาก ⠿ สลับบรรทัดได้ทุกบรรทัด · คลิกบรรทัดสีส้มเพื่อแก้ก่อนแทรก", "Left = pick details · right = preview, drag ⠿ to reorder · click an orange line to edit it")}
       footer={
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={clearAll} disabled={!dirty} className="h-9 rounded-lg px-2.5 text-sm text-slate-500 hover:bg-slate-100 disabled:opacity-40" data-insert-clear-all>
-            ล้างทั้งหมด
+            {t("ล้างทั้งหมด", "Clear all")}
           </button>
           <span className="mr-auto text-xs text-slate-500">
-            {picked ? `จะแทรก ${finalTh.length} บรรทัด` : reordered ? "จัดลำดับบรรทัดใหม่" : "ยังไม่ได้เลือกบรรทัด"}
-            {picked && reordered && " · จัดลำดับบรรทัดเดิมใหม่"}
-            {changes.length > 0 && ` · อัปเดตช่องสินค้า ${changes.length} ช่อง`}
+            {picked ? t(`จะแทรก ${finalTh.length} บรรทัด`, `${finalTh.length} lines to insert`) : reordered ? t("จัดลำดับบรรทัดใหม่", "Lines reordered") : t("ยังไม่ได้เลือกบรรทัด", "No lines picked yet")}
+            {picked && reordered && t(" · จัดลำดับบรรทัดเดิมใหม่", " · existing lines reordered")}
+            {changes.length > 0 && t(` · อัปเดตช่องสินค้า ${changes.length} ช่อง`, ` · ${changes.length} product fields updated`)}
           </span>
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
-            ยกเลิก
+            {t("ยกเลิก", "Cancel")}
           </button>
           <button type="button" onClick={() => void apply()} disabled={saving || !dirty} data-detail-insert-apply
             className="h-9 rounded-lg bg-orange-500 px-4 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
-            {saving ? "กำลังบันทึก…" : saveLabel ?? "แทรก"}
+            {saving ? t("กำลังบันทึก…", "Saving…") : saveLabel ?? t("แทรก", "Insert")}
           </button>
         </div>
       }
@@ -802,76 +988,153 @@ function DetailInsertModal({
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]" data-detail-insert-modal>
         {/* ─── ซ้าย: เลือก ─── */}
         <div className="min-w-0 space-y-2.5">
-          {baseTpl.profiles.length > 0 && (
+          {/* 🪜 ทีละขั้น / แบบแท็บ · 🌐 ภาษาหน้าจอ */}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11.5px]">
+            <span className="inline-flex overflow-hidden rounded-md border border-slate-200" data-insert-mode>
+              {INSERT_MODES.map((m) => (
+                <button key={m} type="button" onClick={() => switchMode(m)} aria-pressed={modePref.view === m} data-insert-mode-opt={m}
+                  className={`px-2.5 py-1 ${m !== "steps" ? "border-l border-slate-200" : ""} ${modePref.view === m ? "bg-orange-50 font-medium text-orange-700" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  {m === "steps" ? t("ทีละขั้น", "Step by step") : t("แบบแท็บ", "Tabs")}
+                </button>
+              ))}
+            </span>
+            <span className="inline-flex overflow-hidden rounded-md border border-slate-200" data-insert-ui-lang title={t("ภาษาหน้าจอของป๊อปนี้ (ไม่เปลี่ยนภาษาทั้งระบบ)", "Language of this window only")}>
+              {(["th", "en"] as const).map((l) => (
+                <button key={l} type="button" onClick={() => { setUiLang(l); if (hasEn) { setView(l); setEditing(null); } }} aria-pressed={uiLang === l} data-insert-ui-lang-opt={l}
+                  className={`px-2.5 py-1 ${l === "en" ? "border-l border-slate-200" : ""} ${uiLang === l ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  {l === "th" ? "ไทย" : "English"}
+                </button>
+              ))}
+            </span>
+          </div>
+          {baseTpl.profiles.length > 0 && !reviewing && (
             <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-600" data-insert-profile>
-              <span>🗂 ชุดรายการ</span>
-              <select value={profileSel ?? "__auto"} onChange={(e) => setProfileSel(e.target.value === "__auto" ? null : e.target.value)} aria-label="ชุดรายการ"
+              <span>🗂 {t("ชุดรายการ", "Item set")}</span>
+              <select value={profileSel ?? "__auto"} onChange={(e) => setProfileSel(e.target.value === "__auto" ? null : e.target.value)} aria-label={t("ชุดรายการ", "Item set")}
                 className="h-7 max-w-full rounded-md border border-slate-200 px-1.5 text-[12px]">
                 <option value="__auto">
-                  {`อัตโนมัติ: ${autoProfile ? autoProfile.name : "ทั้งหมด"}${productCat && catById.get(productCat) ? ` (หมวด ${catById.get(productCat)!.name})` : ""}`}
+                  {`${t("อัตโนมัติ", "Auto")}: ${autoProfile ? autoProfile.name : t("ทั้งหมด", "All")}${productCat && catById.get(productCat) ? ` (${t("หมวด", "category")} ${catById.get(productCat)!.name})` : ""}`}
                 </option>
                 {baseTpl.profiles.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
-                <option value="__all">ทั้งหมด (ไม่กรอง)</option>
+                <option value="__all">{t("ทั้งหมด (ไม่กรอง)", "All (no filter)")}</option>
               </select>
-              {profile && <span className="text-[11px] text-slate-400">โชว์เฉพาะรายการของชุดนี้</span>}
+              {profile && <span className="text-[11px] text-slate-400">{t("โชว์เฉพาะรายการของชุดนี้", "Showing this set's items only")}</span>}
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {tabs.map((t) => (
-              <button key={t.key} type="button" onClick={() => openTab(t.key)} data-insert-tab={t.key}
-                className={`h-8 rounded-lg border px-2.5 text-[12.5px] font-medium ${tab === t.key ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                {t.label}
-                {tabCount(t.key) > 0 && <span className="ml-1 rounded-full bg-orange-500 px-1.5 text-[10.5px] text-white">{tabCount(t.key)}</span>}
-              </button>
-            ))}
-            <button type="button" onClick={() => setTplOpen(true)} title="ตั้งรูปแบบบรรทัด (คำนำหน้า · คำเชื่อม และ · ชื่ออังกฤษในวงเล็บ) — ใช้กับทุกสินค้า" data-insert-tpl
-              className="ml-auto h-8 rounded-lg border border-slate-200 px-2.5 text-[12.5px] text-slate-600 hover:bg-slate-50">⚙️ รูปแบบบรรทัด</button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="min-w-0 flex-1 text-[11.5px] text-slate-500">{tabInfo.hint}</p>
+          {stepMode ? (
+            <>
+              <div className="flex flex-wrap items-center gap-1.5" data-insert-steps>
+                {steps.map((s, i) => {
+                  const cur = s === step;
+                  const skip = skipped.includes(s);
+                  const n = s === "review" ? 0 : stepCount(s);
+                  return (
+                    <button key={s} type="button" onClick={() => goStep(s)} aria-current={cur ? "step" : undefined} data-insert-step={s}
+                      className={`h-8 rounded-full border px-2.5 text-[12px] font-medium ${cur ? "border-orange-300 bg-orange-50 text-orange-700" : skip ? "border-slate-200 bg-white text-slate-400 line-through" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      {i + 1}. {t(STEP_LABEL[s][0], STEP_LABEL[s][1])}
+                      {n > 0 && <span className="ml-1 rounded-full bg-orange-500 px-1.5 text-[10.5px] text-white no-underline">{n}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11.5px] text-slate-500" data-insert-step-hint>{t(STEP_HINT[step][0], STEP_HINT[step][1])}</p>
+              {step === "highlight" && STEP_TABS.highlight.filter((k) => tabs.some((x) => x.key === k)).length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5" data-insert-highlight-tabs>
+                  {tabs.filter((x) => STEP_TABS.highlight.includes(x.key)).map((x) => (
+                    <button key={x.key} type="button" onClick={() => openTab(x.key)} data-insert-tab={x.key}
+                      className={`h-7 rounded-lg border px-2.5 text-[12px] ${tab === x.key ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      {t(x.label, x.en)}
+                      {tabCount(x.key) > 0 && <span className="ml-1 rounded-full bg-orange-500 px-1.5 text-[10.5px] text-white">{tabCount(x.key)}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {tabs.map((x) => (
+                <button key={x.key} type="button" onClick={() => openTab(x.key)} data-insert-tab={x.key}
+                  className={`h-8 rounded-lg border px-2.5 text-[12.5px] font-medium ${tab === x.key ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  {t(x.label, x.en)}
+                  {tabCount(x.key) > 0 && <span className="ml-1 rounded-full bg-orange-500 px-1.5 text-[10.5px] text-white">{tabCount(x.key)}</span>}
+                </button>
+              ))}
+              <button type="button" onClick={() => setTplOpen(true)} title={t("ตั้งรูปแบบบรรทัด (คำนำหน้า · คำเชื่อม และ · ชื่ออังกฤษในวงเล็บ) — ใช้กับทุกสินค้า", "Line format (prefix · joiner · English in brackets) — all products")} data-insert-tpl
+                className="ml-auto h-8 rounded-lg border border-slate-200 px-2.5 text-[12.5px] text-slate-600 hover:bg-slate-50">⚙️ {t("รูปแบบบรรทัด", "Line format")}</button>
+            </div>
+          )}
+          {!reviewing && <div className="flex flex-wrap items-center gap-2">
+            {!stepMode && <p className="min-w-0 flex-1 text-[11.5px] text-slate-500">{t(tabInfo.hint, tabInfo.hintEn)}</p>}
             <button type="button" onClick={() => clearTab(tab)} disabled={!tabDirty(tab)} data-insert-clear
-              title={tab === "size" || tab === "fit" ? "คืนตัวเลข/ของที่ใส่ได้ เป็นค่าเดิมของสินค้า และไม่ใส่บรรทัดของหน้านี้" : "เอาที่เลือกในหน้านี้ออกทั้งหมด (หน้าอื่นไม่เปลี่ยน)"}
+              title={tab === "size" || tab === "fit" ? t("คืนตัวเลข/ของที่ใส่ได้ เป็นค่าเดิมของสินค้า และไม่ใส่บรรทัดของหน้านี้", "Restore the product's values and add no line from this page") : t("เอาที่เลือกในหน้านี้ออกทั้งหมด (หน้าอื่นไม่เปลี่ยน)", "Remove everything picked on this page")}
               className="h-7 shrink-0 rounded-md border border-slate-200 px-2 text-[11.5px] text-slate-600 hover:border-rose-300 hover:text-rose-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600">
-              🧹 {tab === "size" || tab === "fit" ? "ล้างหน้านี้ (คืนค่าเดิม)" : "ล้างหน้านี้"}
+              🧹 {tab === "size" || tab === "fit" ? t("ล้างหน้านี้ (คืนค่าเดิม)", "Clear (restore)") : t("ล้างหน้านี้", "Clear page")}
             </button>
-            {tab !== "size" && tab !== "slot" && (
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา…"
+            {tab !== "size" && tab !== "slot" && !compactMat && (
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหา…", "Search…")}
                 className="h-8 w-28 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
             )}
-            <button type="button" onClick={() => { const v = showEn ? "hide" : "show"; enPref.setView(v); void enPref.saveDefault(v); }} aria-pressed={showEn} data-insert-show-en
-              title={showEn ? "ซ่อนชื่ออังกฤษในรายการ" : "แสดงชื่ออังกฤษในรายการ"}
-              className={`h-7 shrink-0 rounded-md border px-2 text-[11.5px] font-medium ${showEn ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>EN</button>
-          </div>
-          {copyFrom && (
+            {!isEn && (
+              <button type="button" onClick={() => { const v = showEn ? "hide" : "show"; enPref.setView(v); void enPref.saveDefault(v); }} aria-pressed={showEn} data-insert-show-en
+                title={showEn ? "ซ่อนชื่ออังกฤษในรายการ" : "แสดงชื่ออังกฤษในรายการ"}
+                className={`h-7 shrink-0 rounded-md border px-2 text-[11.5px] font-medium ${showEn ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>EN</button>
+            )}
+            {stepMode && (
+              <button type="button" onClick={() => setTplOpen(true)} title={t("ตั้งรูปแบบบรรทัด — ใช้กับทุกสินค้า", "Line format — all products")} data-insert-tpl
+                className="ml-auto h-7 shrink-0 rounded-md border border-slate-200 px-2 text-[11.5px] text-slate-600 hover:bg-slate-50">⚙️ {t("รูปแบบบรรทัด", "Line format")}</button>
+            )}
+          </div>}
+          {copyFrom && !reviewing && (
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={() => setCopyOpen(true)} data-insert-copy-from
-                className="h-7 rounded-md border border-slate-200 px-2.5 text-[12px] text-slate-700 hover:bg-slate-50">⧉ คัดลอกจากรุ่นอื่น</button>
+                className="h-7 rounded-md border border-slate-200 px-2.5 text-[12px] text-slate-700 hover:bg-slate-50">⧉ {t("คัดลอกจากรุ่นอื่น", "Copy from another model")}</button>
               {copied.length > 0 && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[11.5px] text-orange-700" data-insert-copied>
-                  คัดลอกมา {copied.length} บรรทัด
-                  <button type="button" onClick={() => setCopied([])} title="เอาบรรทัดที่คัดลอกออก" aria-label="เอาบรรทัดที่คัดลอกออก" className="text-orange-400 hover:text-rose-600">✕</button>
+                  {t(`คัดลอกมา ${copied.length} บรรทัด`, `${copied.length} lines copied`)}
+                  <button type="button" onClick={() => setCopied([])} title={t("เอาบรรทัดที่คัดลอกออก", "Remove copied lines")} aria-label={t("เอาบรรทัดที่คัดลอกออก", "Remove copied lines")} className="text-orange-400 hover:text-rose-600">✕</button>
                 </span>
               )}
             </div>
           )}
-          {(bracketKind || dupKind) && (
+          {(bracketKind || dupKind) && !reviewing && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               {bracketKind && (
                 <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-slate-600">
                   <input type="checkbox" checked={tpl.enInBrackets[bracketKind]} onChange={(e) => setEnBr((p) => ({ ...p, [bracketKind]: e.target.checked }))} className="h-3.5 w-3.5 accent-orange-500" data-insert-enbr />
-                  ใส่ชื่ออังกฤษในวงเล็บ <span className="text-slate-400">เช่น ผ้าไนล่อน (Nylon)</span>
+                  {t("ใส่ชื่ออังกฤษในวงเล็บ", "Add the English name in brackets (Thai lines)")} <span className="text-slate-400">{t("เช่น ผ้าไนล่อน (Nylon)", "e.g. ผ้าไนล่อน (Nylon)")}</span>
                 </label>
               )}
               {dupKind && dupNote(dupKind)}
             </div>
           )}
 
-          {loading ? (
+          {reviewing ? (
+            <ReviewSummary
+              steps={steps.filter((s) => s !== "review")}
+              skipped={skipped}
+              t={t}
+              label={(s) => t(STEP_LABEL[s][0], STEP_LABEL[s][1])}
+              summary={(s) => {
+                const L = (k: "th" | "en") => composeLines(
+                  s === "material" ? { phrases: [], materials: sel.materials, slots: [] }
+                    : s === "slot" ? { phrases: [], materials: [], slots: sel.slots }
+                    : s === "highlight" ? { phrases: sel.phrases, materials: [], slots: [], lifestyle: sel.lifestyle }
+                    : s === "size" ? { phrases: [], materials: [], slots: [], size: sel.size, weight: sel.weight, handle: sel.handle, strap: sel.strap }
+                    : { phrases: [], materials: [], slots: [], fits: sel.fits },
+                  tpl
+                )[k];
+                const out = isEn ? L("en") : L("th");
+                return (out.length ? out : L("th")).map((x) => x.replace(/^- /, ""));
+              }}
+              onEdit={goStep}
+              changes={changes}
+            />
+          ) : loading ? (
             <div className="h-40 animate-pulse rounded-lg bg-slate-100" />
           ) : (
-            <div className="max-h-[22rem] space-y-1 overflow-auto pr-1">
+            <div className={`${compactMat ? "" : "max-h-[22rem] overflow-auto"} space-y-1 pr-1`}>
               {tab === "phrase" && (
                 <>
                   <SortList items={phraseItems.filter(matchPhrase)} disabled={!!needle} onMove={(f, t) => void reorder("phrase", phraseItems, f, t)} render={(it, handle) => {
@@ -884,7 +1147,7 @@ function DetailInsertModal({
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setPhraseIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           {on && phraseIds.length > 1 && <ClickOrder n={phraseIds.indexOf(it.id) + 1} />}
-                          <NameTwoLines th={shown.name} en={shown.name_en} on={on} showEn={showEn} />
+                          {twoLines(shown, on)}
                         </label>
                           {v && (
                             <div className="flex shrink-0 items-center text-[11.5px] text-slate-500" data-phrase-variant={v.mode} title={it.name}>
@@ -905,14 +1168,90 @@ function DetailInsertModal({
                       </div>
                     );
                   }} />
-                  {!phraseItems.filter(matchPhrase).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบข้อความ</p>}
-                  {addBtn("phrase", "ข้อความ")}
+                  {!phraseItems.filter(matchPhrase).length && <p className="py-3 text-center text-xs text-slate-400">{t("ไม่พบข้อความ", "No phrases found")}</p>}
+                  {addBtn("phrase", "ข้อความ", "phrase")}
                 </>
               )}
 
-              {tab === "material" && (
+              {compactMat && (
+                <div className="space-y-2.5" data-insert-mat-compact>
+                  {/* ที่เลือกแล้ว (กด ✕ เอาออก · เลขลำดับ = ลำดับในบรรทัด) */}
+                  <div className="flex flex-wrap items-center gap-1.5" data-mat-picked>
+                    {byClick(matIds, visMats).map((m, i) => (
+                      <span key={m.id} className="inline-flex items-center gap-1 rounded-full border border-orange-300 bg-orange-50 px-2.5 py-1 text-[12.5px] font-medium text-orange-800" data-mat-chip={m.id}>
+                        {matIds.length > 1 && <span className="text-[10.5px] text-orange-500">{i + 1}.</span>}
+                        {nm(m)}
+                        <button type="button" onClick={() => setMatIds((p) => p.filter((x) => x !== m.id))} aria-label={`${t("เอาออก", "Remove")} ${nm(m)}`} className="ml-0.5 text-orange-400 hover:text-rose-600">
+                          <Icon name="cancel" />
+                        </button>
+                      </span>
+                    ))}
+                    {!matIds.length && <span className="text-[12px] text-slate-400">{t("ยังไม่ได้เลือกวัสดุ", "No material picked yet")}</span>}
+                  </div>
+                  {/* แนะนำจากข้อมูลวัสดุของฝ่ายผลิต (parent.materials) — คนกดเลือกเอง */}
+                  {matHint && (
+                    <div className="rounded-lg bg-slate-50 px-2.5 py-2 text-[12px] text-slate-600" data-mat-suggest>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Icon name="factory" />
+                        <span>{t("ข้อมูลวัสดุจากฝ่ายผลิต:", "Production material note:")}</span>
+                        <span className="font-medium text-slate-700">“{matHint.slice(0, 120)}”</span>
+                      </div>
+                      {matSuggest.length ? (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11.5px] text-slate-500">{t("แนะนำ:", "Suggested:")}</span>
+                          {matSuggest.map((m) => (
+                            <button key={m.id} type="button" onClick={() => setMatIds((p) => (p.includes(m.id) ? p : [...p, m.id]))} data-mat-suggest-pick={m.id}
+                              className="rounded-full border border-orange-300 bg-white px-2.5 py-0.5 text-[12px] text-orange-700 hover:bg-orange-50">＋ {nm(m)}</button>
+                          ))}
+                          {matSuggest.length > 1 && (
+                            <button type="button" onClick={() => setMatIds((p) => [...p, ...matSuggest.map((m) => m.id).filter((id) => !p.includes(id))])} className="text-[11.5px] text-orange-600 hover:underline">
+                              {t("เลือกทั้งหมด", "Pick all")}
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-slate-400">{t("ไม่ตรงกับวัสดุในคลัง — ค้นหาด้านล่าง หรือเพิ่มวัสดุใหม่", "No match in the material list — search below or add a new one")}</p>
+                      )}
+                    </div>
+                  )}
+                  {/* ค้นหา → รายการสั้น ๆ (ไม่เกิน 6) */}
+                  <div className="space-y-1">
+                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาวัสดุ เช่น หนัง, ไนล่อน, canvas", "Search material, e.g. leather, nylon")} aria-label={t("ค้นหาวัสดุ", "Search material")} data-mat-search
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                    {needle && (
+                      <div className="overflow-hidden rounded-lg border border-slate-200" data-mat-results>
+                        {visMats.filter((m) => match(m) && !matIds.includes(m.id)).slice(0, 6).map((m) => (
+                          <button key={m.id} type="button" onClick={() => { setMatIds((p) => [...p, m.id]); setQ(""); }} data-mat-result={m.id}
+                            className="flex w-full items-center justify-between gap-2 border-b border-slate-100 px-2.5 py-1.5 text-left text-[13px] last:border-b-0 hover:bg-orange-50">
+                            <span className="text-slate-800">{nm(m)}</span>
+                            <span className="truncate text-[11px] text-slate-400">{isEn ? m.name : m.name_en}</span>
+                          </button>
+                        ))}
+                        {!visMats.some((m) => match(m) && !matIds.includes(m.id)) && <p className="px-2.5 py-2 text-[12px] text-slate-400">{t("ไม่พบวัสดุ", "No material found")}</p>}
+                      </div>
+                    )}
+                  </div>
+                  {/* ใช้บ่อย (ลำดับตามรายการกลาง) · ดูทั้งหมด = รายการเต็มแบบเดิม (มีหน้าวัสดุ / แก้รายการ / ลากจัดลำดับ) */}
+                  <div className="flex flex-wrap items-center gap-1.5" data-mat-often>
+                    <span className="text-[11.5px] text-slate-500">{t("ใช้บ่อย:", "Common:")}</span>
+                    {visMats.filter((m) => !matIds.includes(m.id) && !matSuggest.some((x) => x.id === m.id)).slice(0, 6).map((m) => (
+                      <button key={m.id} type="button" onClick={() => setMatIds((p) => [...p, m.id])} data-mat-often-pick={m.id}
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[12px] text-slate-700 hover:border-orange-300 hover:bg-orange-50">＋ {nm(m)}</button>
+                    ))}
+                    <button type="button" onClick={() => setMatAll(true)} data-mat-all className="text-[11.5px] text-orange-600 hover:underline">
+                      {t(`ดูทั้งหมด (${visMats.length})`, `See all (${visMats.length})`)}
+                    </button>
+                  </div>
+                  {addBtn("material", "วัสดุ", "material")}
+                </div>
+              )}
+
+              {tab === "material" && !compactMat && (
                 <>
-                  <SortList items={visMats.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("material", visMats, f, t)} render={(m, handle) => {
+                  {stepMode && (
+                    <button type="button" onClick={() => setMatAll(false)} className="text-[11.5px] text-orange-600 hover:underline" data-mat-less>{t("← กลับแบบย่อ", "← Back to short view")}</button>
+                  )}
+                  <SortList items={visMats.filter(match)} disabled={!!needle} onMove={(f, to) => void reorder("material", visMats, f, to)} render={(m, handle) => {
                     const on = matIds.includes(m.id);
                     const page = hasMaterialPage(m);
                     return (
@@ -921,58 +1260,131 @@ function DetailInsertModal({
                         <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                           <input type="checkbox" checked={on} onChange={() => setMatIds((p) => toggle(p, m.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                           {on && matIds.length > 1 && <ClickOrder n={matIds.indexOf(m.id) + 1} />}
-                          <NameTwoLines th={m.name} en={m.name_en} on={on} showEn={showEn} />
+                          {twoLines(m, on)}
                         </label>
                         {page ? (
-                          <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title="เปิดหน้าวัสดุ (แก้คำอธิบาย/วิธีดูแล/รูปได้) — ชื่อวัสดุนี้บนเว็บกดมาหน้านี้"
-                            className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10.5px] text-emerald-700 hover:bg-emerald-100 hover:underline">🔗 มีหน้า</button>
+                          <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title={t("เปิดหน้าวัสดุ (แก้คำอธิบาย/วิธีดูแล/รูปได้) — ชื่อวัสดุนี้บนเว็บกดมาหน้านี้", "Open the material page (description / care / photo)")}
+                            className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10.5px] text-emerald-700 hover:bg-emerald-100 hover:underline">🔗 {t("มีหน้า", "Has page")}</button>
                         ) : (
-                          <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title="ยังไม่มีคำอธิบายวัสดุ — กดเพื่อเขียน แล้วชื่อวัสดุบนเว็บจะกดดูได้"
-                            className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] text-slate-500 hover:bg-slate-200 hover:text-slate-700">✍️ เขียนหน้า</button>
+                          <button type="button" onClick={() => setMatOpen(m.id)} data-mat-page={m.id} title={t("ยังไม่มีคำอธิบายวัสดุ — กดเพื่อเขียน แล้วชื่อวัสดุบนเว็บจะกดดูได้", "No material page yet — write one so the web shop can link it")}
+                            className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] text-slate-500 hover:bg-slate-200 hover:text-slate-700">✍️ {t("เขียนหน้า", "Write page")}</button>
                         )}
                         {editBtn("material", m as unknown as Record<string, unknown>)}
                       </div>
                     );
                   }} />
-                  {!visMats.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบวัสดุ</p>}
-                  {addBtn("material", "วัสดุ")}
+                  {!visMats.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">{t("ไม่พบวัสดุ", "No material found")}</p>}
+                  {addBtn("material", "วัสดุ", "material")}
                 </>
               )}
 
               {tab === "slot" && (
                 <>
-                  <SortList items={[...slotItems].sort((a, b) => sideRank(a.slot_side) - sideRank(b.slot_side))} onMove={(f, t) => void reorder("slot", [...slotItems].sort((a, b) => sideRank(a.slot_side) - sideRank(b.slot_side)), f, t)}
+                  <SortList items={[...slotItems].sort((a, b) => sideRank(a.slot_side) - sideRank(b.slot_side))} disabled={tmpSlots.length > 0} onMove={(f, to) => void reorder("slot", [...slotItems].sort((a, b) => sideRank(a.slot_side) - sideRank(b.slot_side)), f, to)}
                     header={(it, i, all) =>
                       slotItems.some((x) => x.slot_side) && (i === 0 || sideRank(all[i - 1].slot_side) !== sideRank(it.slot_side)) ? (
-                        <p className="px-1 pt-1.5 text-[11px] font-semibold text-slate-500" data-slot-group={it.slot_side ?? ""}>{SIDE_LABEL[it.slot_side ?? ""] ?? SIDE_LABEL[""]}</p>
+                        <p className="px-1 pt-1.5 text-[11px] font-semibold text-slate-500" data-slot-group={it.slot_side ?? ""}>{isEn ? SIDE_EN[it.slot_side ?? ""] ?? SIDE_EN[""] : SIDE_LABEL[it.slot_side ?? ""] ?? SIDE_LABEL[""]}</p>
                       ) : null
                     }
                     render={(it, handle) => {
                     const n = Math.floor(Number(slotN[it.id])) || 0;
+                    const tmp = it.id.startsWith("tmp:");
+                    const dims = slotDims[it.id];
+                    const dimTxt = slotDimsText(dims, isEn ? "en" : "th");
                     return (
-                      <div className={rowCls(n > 0)}>
+                      <div className={`${rowCls(n > 0)} flex-wrap`} data-slot-row={it.id}>
                         {handle}
                         <span className={`min-w-0 flex-1 text-sm ${n > 0 ? "font-medium text-slate-800" : "text-slate-600"}`}>
-                          <span className="block leading-snug">{it.name}</span>
-                          {showEn && <span className={`block truncate text-[11px] font-normal leading-snug ${it.name_en ? "text-slate-400" : "text-slate-300"}`}>{it.name_en || "ไม่มีอังกฤษ"}</span>}
+                          <span className="block leading-snug">
+                            {nm(it)}
+                            {tmp && <span className="ml-1 rounded-full bg-violet-50 px-1.5 text-[10.5px] font-normal text-violet-700">{t("ใช้ครั้งนี้", "this time only")}</span>}
+                          </span>
+                          {showEn && !isEn && <span className={`block truncate text-[11px] font-normal leading-snug ${it.name_en ? "text-slate-400" : "text-slate-300"}`}>{it.name_en || "ไม่มีอังกฤษ"}</span>}
                           {n > 0 && (
                             <span className="block text-[11px] font-normal text-slate-400">
-                              → {slotText(it, n, "th", tpl)}
+                              → {slotText(it, n, "th", tpl)}{slotDimsText(dims, "th")}
                               {" · "}
-                              {slotText(it, n, "en", tpl) ?? "— (ยังไม่มีอังกฤษ)"}
+                              {slotText(it, n, "en", tpl) ? `${slotText(it, n, "en", tpl)}${slotDimsText(dims, "en")}` : t("— (ยังไม่มีอังกฤษ)", "— (no English name yet)")}
                             </span>
                           )}
                         </span>
-                        <input aria-label={`จำนวน ${it.name}`} type="number" inputMode="numeric" min={0} max={99} step={1} value={slotN[it.id] ?? ""} placeholder="0"
+                        {n > 0 && (
+                          <button type="button" onClick={() => toggleDims(it)} aria-pressed={!!dims} data-slot-dims-toggle={it.id}
+                            title={dims ? t("เอาขนาดช่องออก", "Remove pocket size") : t("ใส่ขนาดช่อง (เช่น ช่องใส) — ต่อท้ายบรรทัด + ใช้เช็กใส่อะไรได้", "Add pocket size (e.g. clear pocket) — added to the line and used for the fit check")}
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-[15px] ${dims ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                            <Icon name="ruler" />
+                          </button>
+                        )}
+                        <input aria-label={`${t("จำนวน", "Count")} ${nm(it)}`} type="number" inputMode="numeric" min={0} max={99} step={1} value={slotN[it.id] ?? ""} placeholder="0"
                           onChange={(e) => setSlotN((p) => ({ ...p, [it.id]: e.target.value.replace(/[^\d]/g, "").slice(0, 2) }))}
                           className="h-8 w-14 rounded-md border border-slate-200 px-2 text-right text-sm tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                        <span className="w-6 text-xs text-slate-400">ช่อง</span>
-                        {editBtn("slot", it as unknown as Record<string, unknown>)}
+                        <span className="w-8 text-xs text-slate-400">{t("ช่อง", "pcs")}</span>
+                        {!tmp && editBtn("slot", it as unknown as Record<string, unknown>)}
+                        {tmp && (
+                          <button type="button" onClick={() => { setTmpSlots((p) => p.filter((x) => x.id !== it.id)); setSlotN((p) => ({ ...p, [it.id]: "" })); }} aria-label={t("เอาช่องนี้ออก", "Remove this pocket")}
+                            className="shrink-0 rounded px-1 text-slate-400 hover:text-rose-600"><Icon name="cancel" /></button>
+                        )}
+                        {dims && n > 0 && (
+                          <div className="flex basis-full flex-wrap items-center gap-1.5 pl-6 text-[11.5px] text-slate-600" data-slot-dims={it.id}>
+                            <span>{t("ขนาดด้านใน", "Inside size")}</span>
+                            {(["w", "h", "d"] as const).map((k, i) => (
+                              <Fragment key={k}>
+                                {i > 0 && <span className="text-slate-400">×</span>}
+                                <input aria-label={`${nm(it)} ${k === "w" ? t("กว้าง", "width") : k === "h" ? t("สูง", "height") : t("หนา", "depth")}`} inputMode="decimal" value={dims[k]}
+                                  placeholder={k === "w" ? t("กว้าง", "W") : k === "h" ? t("สูง", "H") : t("หนา", "D")}
+                                  onChange={(e) => setSlotDims((p) => ({ ...p, [it.id]: { ...p[it.id], [k]: e.target.value.replace(/[^\d.]/g, "").slice(0, 6) } }))}
+                                  className="h-7 w-14 rounded border border-slate-200 px-1.5 text-right text-[12px] tabular-nums focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                              </Fragment>
+                            ))}
+                            <span className="text-slate-400">{t("ซม.", "cm")}</span>
+                            <span className="basis-full text-[10.5px] text-slate-400">
+                              {!dimTxt ? t("ใส่กว้าง + สูง เพื่อต่อท้ายบรรทัด", "Enter width + height to add it to the line")
+                                : !canComp ? t("ต่อท้ายบรรทัดให้แล้ว", "Added to the line")
+                                : Number(dims.d) > 0 ? (saveComps ? t("ต่อท้ายบรรทัด + บันทึกเป็นช่องใส่ของของสินค้า (ใช้เช็กใส่อะไรได้)", "Added to the line + saved as a product pocket (used for the fit check)") : t("ต่อท้ายบรรทัดแล้ว (ยังไม่บันทึกเป็นช่องใส่ของ — ติ๊กด้านล่าง)", "Added to the line (not saved as a pocket — tick below)"))
+                                : t("ต่อท้ายบรรทัดแล้ว · ใส่ความหนาด้วย = บันทึกเป็นช่องใส่ของ + เช็กใส่อะไรได้", "Added to the line · add depth to save it as a pocket and check what fits")}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   }} />
-                  {!slotItems.length && <p className="py-3 text-center text-xs text-slate-400">ยังไม่มีช่อง</p>}
-                  {addBtn("slot", "ช่อง")}
+                  {!slotItems.length && <p className="py-3 text-center text-xs text-slate-400">{t("ยังไม่มีช่อง", "No pockets yet")}</p>}
+                  {canComp && fullDims > 0 && (
+                    <label className="mt-1 flex cursor-pointer items-start gap-1.5 rounded-lg bg-sky-50 px-2 py-1.5 text-[11.5px] text-sky-900" data-slot-save-comps>
+                      <input type="checkbox" checked={saveComps} onChange={(e) => setSaveComps(e.target.checked)} className="mt-0.5 h-3.5 w-3.5 accent-orange-500" />
+                      <span>
+                        {t(`บันทึกขนาด ${fullDims} ช่องเป็น "ช่องใส่ของ" ของสินค้าด้วย (ใช้เช็กใส่อะไรได้ · โชว์บนเว็บ)`, `Also save ${fullDims} pocket size(s) as product pockets (used for the fit check · shown on the web shop)`)}
+                        {!hadComps && <span className="block text-sky-700/80">{t("สินค้านี้ยังไม่ได้วัดช่องอื่น — ถ้าบันทึกแค่ช่องนี้ ระบบจะคิดว่ากระเป๋ามีแค่ช่องนี้ (วัดช่องหลักด้วยจะแม่นกว่า)", "Other pockets aren't measured yet — saving only this one makes the system think the bag has just this pocket (measure the main pocket too)")}</span>}
+                      </span>
+                    </label>
+                  )}
+                  {/* ＋ ช่องแบบใหม่ (ช่องแปลก ๆ) — พิมพ์ไทยหรืออังกฤษ แปลให้ · เก็บเข้าคลังกลาง หรือใช้ครั้งนี้ */}
+                  <div className="mt-1.5 space-y-1.5 rounded-lg bg-slate-50 p-2" data-slot-new>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <input value={newSlot.name} onChange={(e) => { setNewSlot((p) => ({ ...p, name: e.target.value })); setSlotErr(""); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void addNewSlot(); } }}
+                        placeholder={t("ช่องแบบใหม่ เช่น ช่องใส่ปากกา", "New pocket, e.g. pen holder")} aria-label={t("ชื่อช่องแบบใหม่", "New pocket name")} data-slot-new-name
+                        className="h-8 min-w-[10rem] flex-1 rounded-md border border-slate-200 bg-white px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      <select value={newSlot.side} onChange={(e) => setNewSlot((p) => ({ ...p, side: e.target.value }))} aria-label={t("ตำแหน่งช่อง", "Pocket position")} data-slot-new-side
+                        className="h-8 rounded-md border border-slate-200 bg-white px-1.5 text-[12.5px]">
+                        <option value="outside">{t("ด้านนอก", "Outside")}</option>
+                        <option value="inside">{t("ด้านใน", "Inside")}</option>
+                        <option value="">{t("ไม่ระบุ", "No position")}</option>
+                      </select>
+                      <button type="button" onClick={() => void addNewSlot()} disabled={addingSlot} data-slot-new-add
+                        className="inline-flex h-8 items-center gap-1 rounded-md border border-orange-300 bg-white px-2.5 text-[12.5px] font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-50">
+                        <Icon name="add" /> {addingSlot ? t("กำลังเพิ่ม…", "Adding…") : t("เพิ่มช่อง", "Add pocket")}
+                      </button>
+                    </div>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-slate-600">
+                      <input type="checkbox" checked={newSlot.save} onChange={(e) => setNewSlot((p) => ({ ...p, save: e.target.checked }))} className="h-3.5 w-3.5 accent-orange-500" data-slot-new-save />
+                      {t("เก็บเข้าคลังกลาง (สินค้าอื่นเลือกได้ด้วย) · ไม่ติ๊ก = ใช้ครั้งนี้", "Save to the shared list (other products can use it) · unticked = this time only")}
+                    </label>
+                    {slotErr && <p className="text-[11.5px] text-rose-600" data-slot-new-err>{slotErr}</p>}
+                  </div>
+                  <button type="button" onClick={() => setEditor({ kind: "slot", item: null })} className="mt-1 text-xs text-orange-600 hover:underline">
+                    {t("＋ เพิ่มช่องแบบละเอียด (รูปแบบบรรทัด · ใช้กับชุด)", "＋ New pocket with full settings")}
+                  </button>
                 </>
               )}
 
@@ -991,26 +1403,26 @@ function DetailInsertModal({
                       return (
                         <div key={f.k} className={rowCls(changed)}>
                           <span className="w-20 shrink-0 leading-tight">
-                            <span className="block text-sm text-slate-700">{f.label}</span>
-                            <span className="block text-[10.5px] text-slate-400">{f.en}</span>
+                            <span className="block text-sm text-slate-700">{t(f.label, f.en)}</span>
+                            {!isEn && <span className="block text-[10.5px] text-slate-400">{f.en}</span>}
                           </span>
                           {f.k === "s1" ? (
                             <span className="flex items-center gap-1">
-                              {has("s1") && box("s1", "สายสะพายสั้นสุด")}
+                              {has("s1") && box("s1", t("สายสะพายสั้นสุด", "Shortest strap"))}
                               {has("s1") && has("s2") && <span className="text-xs text-slate-400">–</span>}
-                              {has("s2") && box("s2", "สายสะพายยาวสุด")}
+                              {has("s2") && box("s2", t("สายสะพายยาวสุด", "Longest strap"))}
                             </span>
                           ) : (
-                            box(f.k, f.label)
+                            box(f.k, t(f.label, f.en))
                           )}
-                          <span className="w-8 shrink-0 text-xs text-slate-400">{f.unit}</span>
+                          <span className="w-10 shrink-0 text-xs text-slate-400">{isEn ? (f.k === "g" ? "g" : "cm") : f.unit}</span>
                           <span className={`min-w-0 flex-1 truncate text-right text-[11px] ${changed ? "text-orange-700" : "text-slate-400"}`}>
-                            {changed ? `เดิม ${ks.map((k) => numOrig[k] || "ว่าง").join("–")}` : ks.some((k) => numOrig[k]) ? "ตรงกับสินค้า" : "สินค้ายังไม่กรอก"}
+                            {changed ? `${t("เดิม", "was")} ${ks.map((k) => numOrig[k] || t("ว่าง", "empty")).join("–")}` : ks.some((k) => numOrig[k]) ? t("ตรงกับสินค้า", "Same as product") : t("สินค้ายังไม่กรอก", "Not filled on product")}
                           </span>
                         </div>
                       );
                     })}
-                  {has("s1") && has("s2") && <p className="text-[11px] text-slate-400">สาย: ใส่ 2 ค่า = ปรับได้ (เช่น 100–120) · สายเส้นเดียว ใส่ช่องแรกช่องเดียว</p>}
+                  {has("s1") && has("s2") && <p className="text-[11px] text-slate-400">{t("สาย: ใส่ 2 ค่า = ปรับได้ (เช่น 100–120) · สายเส้นเดียว ใส่ช่องแรกช่องเดียว", "Strap: 2 values = adjustable (e.g. 100–120) · fixed strap = first box only")}</p>}
                   <div className="space-y-1 pt-1 text-[12.5px] text-slate-600">
                     {(["size", "weight", "handle", "strap"] as SizeLine[])
                       .filter((k) => SIZE_LINE_KEYS[k].some(has))
@@ -1018,7 +1430,7 @@ function DetailInsertModal({
                         <div key={k} className="flex flex-wrap items-center gap-x-2">
                           <label className="flex cursor-pointer items-center gap-2">
                             <input type="checkbox" checked={use[k]} onChange={(e) => setUse((p) => ({ ...p, [k]: e.target.checked }))} className="h-4 w-4 accent-orange-500" data-insert-use={k} />
-                            ใส่บรรทัด{LINE_KIND_LABEL[k]}
+                            {t(`ใส่บรรทัด${LINE_KIND_LABEL[k]}`, `Add ${SIZE_LINE_EN[k]} line`)}
                           </label>
                           {dupNote(k)}
                           {(() => {
@@ -1034,7 +1446,7 @@ function DetailInsertModal({
                           })()}
                         </div>
                       ))}
-                    <p className="text-[11px] text-slate-400">ไม่ติ๊ก = ไม่ใส่บรรทัด แต่ตัวเลขที่แก้ยังบันทึกกลับช่องของสินค้า</p>
+                    <p className="text-[11px] text-slate-400">{t("ไม่ติ๊ก = ไม่ใส่บรรทัด แต่ตัวเลขที่แก้ยังบันทึกกลับช่องของสินค้า", "Unticked = no line, but edited numbers are still saved to the product")}</p>
                   </div>
                 </div>
               )}
@@ -1049,18 +1461,18 @@ function DetailInsertModal({
                         <span key={st.id} className="inline-flex items-center">
                           <button type="button" onClick={() => setStyleId(st.id)} data-life-style={st.id} aria-pressed={on} title={st.name_en ?? undefined}
                             className={`h-7 rounded-full border px-2.5 text-[12px] ${on ? "border-orange-400 bg-orange-50 font-medium text-orange-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                            {st.name}{n ? ` · ${n}` : ""}
+                            {nm(st)}{n ? ` · ${n}` : ""}
                           </button>
                           {on && editBtn("style", st as unknown as Record<string, unknown>)}
                         </span>
                       );
                     })}
-                    <button type="button" onClick={() => setEditor({ kind: "style", item: null })} className="h-7 rounded-full border border-dashed border-orange-300 px-2.5 text-[12px] text-orange-600 hover:bg-orange-50">＋ สไตล์ใหม่</button>
+                    <button type="button" onClick={() => setEditor({ kind: "style", item: null })} className="h-7 rounded-full border border-dashed border-orange-300 px-2.5 text-[12px] text-orange-600 hover:bg-orange-50">{t("＋ สไตล์ใหม่", "＋ New style")}</button>
                   </div>
-                  {curStyle?.name_en && <p className="px-1 text-[11px] text-slate-400">{curStyle.name_en}</p>}
-                  {!styles.length && <p className="py-2 text-center text-xs text-slate-400">ยังไม่มีสไตล์ — กด &quot;＋ สไตล์ใหม่&quot;</p>}
+                  {curStyle?.name_en && !isEn && <p className="px-1 text-[11px] text-slate-400">{curStyle.name_en}</p>}
+                  {!styles.length && <p className="py-2 text-center text-xs text-slate-400">{t("ยังไม่มีสไตล์ — กด \"＋ สไตล์ใหม่\"", "No styles yet — press \"＋ New style\"")}</p>}
                   {curStyle && (
-                    <SortList items={styleItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("lifestyle", styleItems, f, t)} render={(it, handle) => {
+                    <SortList items={styleItems.filter(match)} disabled={!!needle} onMove={(f, to) => void reorder("lifestyle", styleItems, f, to)} render={(it, handle) => {
                       const on = lifeIds.includes(it.id);
                       return (
                         <div className={rowCls(on)} data-life-row={it.id}>
@@ -1068,29 +1480,39 @@ function DetailInsertModal({
                           <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                             <input type="checkbox" checked={on} onChange={() => setLifeIds((p) => toggle(p, it.id))} className="h-4 w-4 shrink-0 accent-orange-500" />
                             {on && lifeIds.length > 1 && <ClickOrder n={lifeIds.indexOf(it.id) + 1} />}
-                            <NameTwoLines th={it.name} en={it.name_en} on={on} showEn={showEn} />
+                            {twoLines(it, on)}
                           </label>
                           {editBtn("lifestyle", it as unknown as Record<string, unknown>)}
                         </div>
                       );
                     }} />
                   )}
-                  {curStyle && !styleItems.filter(match).length && <p className="py-2 text-center text-xs text-slate-400">ยังไม่มีข้อความในสไตล์นี้</p>}
-                  {curStyle && addBtn("lifestyle", `ข้อความ (${curStyle.name})`)}
+                  {curStyle && !styleItems.filter(match).length && <p className="py-2 text-center text-xs text-slate-400">{t("ยังไม่มีข้อความในสไตล์นี้", "No lines in this style yet")}</p>}
+                  {curStyle && addBtn("lifestyle", `ข้อความ (${curStyle.name})`, `line (${nm(curStyle)})`)}
                   <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 p-2" data-life-free>
-                    <p className="text-[11.5px] font-medium text-slate-600">✍️ อื่น ๆ — พิมพ์เอง <span className="font-normal text-slate-400">(บรรทัดละข้อ)</span></p>
-                    <textarea value={lifeTh} onChange={(e) => setLifeTh(e.target.value)} rows={2} placeholder="เช่น ใส่ไปคาเฟ่ก็ปัง ใส่ไปทำงานก็ดี" aria-label="ข้อความพิมพ์เอง ไทย"
-                      className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    {hasEn && (
-                      <textarea value={lifeEn} onChange={(e) => setLifeEn(e.target.value)} rows={2} placeholder="อังกฤษ (บรรทัดตรงกับไทย) — เว้นว่างได้" aria-label="ข้อความพิมพ์เอง อังกฤษ"
-                        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    )}
+                    <p className="text-[11.5px] font-medium text-slate-600">✍️ {t("อื่น ๆ — พิมพ์เอง", "Other — type your own")} <span className="font-normal text-slate-400">{t("(บรรทัดละข้อ)", "(one per line)")}</span></p>
+                    {(() => {
+                      const thBox = (
+                        <textarea key="th" value={lifeTh} onChange={(e) => setLifeTh(e.target.value)} rows={2} placeholder={t("เช่น ใส่ไปคาเฟ่ก็ปัง ใส่ไปทำงานก็ดี", "Thai (one per line) — or type English below and press Translate")} aria-label={t("ข้อความพิมพ์เอง ไทย", "Your own lines, Thai")}
+                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      );
+                      const enBox = hasEn ? (
+                        <textarea key="en" value={lifeEn} onChange={(e) => setLifeEn(e.target.value)} rows={2} placeholder={t("อังกฤษ (บรรทัดตรงกับไทย) — เว้นว่างได้", "English (one per line, same order as Thai)")} aria-label={t("ข้อความพิมพ์เอง อังกฤษ", "Your own lines, English")}
+                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+                      ) : null;
+                      return isEn ? <>{enBox}{thBox}</> : <>{thBox}{enBox}</>;
+                    })()}
                     <div className="flex flex-wrap items-center gap-2">
+                      {hasEn && (
+                        <button type="button" onClick={() => void translateFree()} disabled={lifeBusy || (!lifeTh.trim() && !lifeEn.trim())} data-life-translate
+                          title={t("แปลช่องที่ว่างจากอีกช่อง (บรรทัดต่อบรรทัด)", "Fill the empty box by translating the other one, line by line")}
+                          className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-100 disabled:opacity-40">🌐 {lifeBusy ? t("กำลังแปล…", "Translating…") : t("แปลอีกภาษาให้", "Translate the other language")}</button>
+                      )}
                       <button type="button" onClick={() => void copyPrompt()} data-life-prompt
-                        className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-100">📋 คัดลอก prompt ถาม ChatGPT</button>
-                      <a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="text-[11.5px] text-slate-500 hover:text-blue-600 hover:underline">เปิด ChatGPT ↗</a>
+                        className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-100">📋 {t("คัดลอก prompt ถาม ChatGPT", "Copy a ChatGPT prompt")}</button>
+                      <a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="text-[11.5px] text-slate-500 hover:text-blue-600 hover:underline">{t("เปิด ChatGPT ↗", "Open ChatGPT ↗")}</a>
                     </div>
-                    <p className="text-[10.5px] text-slate-400">prompt มีชื่อสินค้า + สไตล์ที่เลือก + คำอธิบายตอนนี้ · ได้คำตอบแล้ววางกลับในช่องด้านบน (บรรทัดละข้อ)</p>
+                    <p className="text-[10.5px] text-slate-400">{t("prompt มีชื่อสินค้า + สไตล์ที่เลือก + คำอธิบายตอนนี้ · ได้คำตอบแล้ววางกลับในช่องด้านบน (บรรทัดละข้อ)", "The prompt has the product name, the style and the current description · paste the answer back above (one per line)")}</p>
                   </div>
                 </>
               )}
@@ -1099,47 +1521,47 @@ function DetailInsertModal({
                 <>
                   <div className="rounded-md bg-slate-50 px-2 py-1 text-[11.5px] text-slate-600" data-fit-bag>
                     📐 {boxBasis === "inner"
-                      ? <>ช่องด้านใน: {(comps ?? []).map((c) => `${c.name || "ช่อง"} ${c.w}×${c.h}×${c.d}`).join(" · ")} ซม.</>
+                      ? <>{t("ช่องด้านใน", "Inside pockets")}: {(comps ?? []).map((c) => `${(isEn && c.name_en) || c.name || t("ช่อง", "pocket")} ${c.w}×${c.h}×${c.d}`).join(" · ")} {t("ซม.", "cm")}{compsNext && <span className="ml-1 text-orange-600">{t("(รวมขนาดที่ใส่ในขั้นช่อง)", "(includes sizes from the Pockets step)")}</span>}</>
                       : boxBasis === "outer"
-                        ? <>กระเป๋า (ขนาดนอก): {num.w}×{num.h}×{num.d} ซม. <span className="text-slate-400">— ยังไม่วัดช่องด้านใน ใส่ได้จริงอาจน้อยกว่านี้</span></>
-                        : <span className="text-slate-400">ยังไม่มีขนาดกระเป๋า — ใส่ กว้าง/สูง/หนา ที่แท็บขนาด แล้วระบบจะตรวจว่าใส่ได้ไหม</span>}
+                        ? <>{t("กระเป๋า (ขนาดนอก)", "Bag (outer size)")}: {num.w}×{num.h}×{num.d} {t("ซม.", "cm")} <span className="text-slate-400">{t("— ยังไม่วัดช่องด้านใน ใส่ได้จริงอาจน้อยกว่านี้ · ใส่ขนาดช่องได้ที่ขั้น \"ช่อง\" (ปุ่มไม้บรรทัด)", "— inside pockets not measured, real fit may be less · add pocket sizes in the Pockets step (ruler)")}</span></>
+                        : <span className="text-slate-400">{t("ยังไม่มีขนาดกระเป๋า — ใส่ กว้าง/สูง/หนา ที่ขั้นขนาด หรือขนาดช่องที่ขั้นช่อง แล้วระบบจะตรวจว่าใส่ได้ไหม", "No bag size yet — add length/height/width in Size, or pocket sizes in Pockets, and the system will check what fits")}</span>}
                   </div>
                   {badFits.length > 0 && (
                     <p className="rounded-md bg-rose-50 px-2 py-1 text-[11.5px] text-rose-700" data-fit-warn>
-                      ⚠️ เลือกไว้แต่ขนาดอาจไม่พอ: {badFits.join(", ")} — ตรวจขนาดกระเป๋า/ของอีกครั้ง
+                      {t(`⚠️ เลือกไว้แต่ขนาดอาจไม่พอ: ${badFits.join(", ")} — ตรวจขนาดกระเป๋า/ของอีกครั้ง`, `⚠️ Picked but may not fit: ${badFits.join(", ")} — check the sizes again`)}
                     </p>
                   )}
                   <div className="flex items-center justify-end gap-1.5 text-[11px] text-slate-500" data-fit-size>
-                    🖼 ขนาดรูป
+                    🖼 {t("ขนาดรูป", "Card size")}
                     <span className="inline-flex overflow-hidden rounded-md border border-slate-200">
                       {FIT_SIZES.map((z) => (
                         <button key={z} type="button" onClick={() => { fitSize.setView(z); void fitSize.saveDefault(z); }} aria-pressed={fitSize.view === z} data-fit-size-opt={z}
                           className={`px-2 py-0.5 ${z !== "s" ? "border-l border-slate-200" : ""} ${fitSize.view === z ? "bg-orange-50 font-medium text-orange-700" : "bg-white hover:bg-slate-50"}`}>
-                          {FIT_SIZE_LABEL[z]}
+                          {isEn ? FIT_SIZE_EN[z] : FIT_SIZE_LABEL[z]}
                         </button>
                       ))}
                     </span>
                   </div>
                   <div className={`grid gap-1 ${FIT_GRID[fitSize.view]}`} data-insert-fit-grid>
-                    <SortList items={fitItems.filter(match)} disabled={!!needle} onMove={(f, t) => void reorder("fit", fitItems, f, t)} render={(it, handle) => {
+                    <SortList items={fitItems.filter(match)} disabled={!!needle} onMove={(f, to) => void reorder("fit", fitItems, f, to)} render={(it, handle) => {
                       const pick = fits.find((p) => p.id === it.id);
                       const opts = fitSizeOptions(it);
                       const flip = () => setFits((p) => (pick ? p.filter((x) => x.id !== it.id) : [...p, { id: it.id }]));
                       return (
                         <div className={`relative h-full rounded-lg border p-1 ${pick ? "border-orange-400 bg-orange-50 ring-1 ring-orange-300" : "border-slate-200 hover:border-slate-300"}`}>
-                          <button type="button" onClick={flip} aria-pressed={!!pick} aria-label={`เลือก ${it.name}`} className="block w-full text-left">
+                          <button type="button" onClick={flip} aria-pressed={!!pick} aria-label={`${t("เลือก", "Pick")} ${nm(it)}`} className="block w-full text-left">
                             <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-slate-50">
                               {it.image_key ? <img src={imgUrl(it.image_key, 160)} alt="" className="h-full w-full object-contain" /> : <span className="text-xl opacity-40">🎒</span>}
                             </div>
-                            <div className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-700" title={it.name}>{it.name}</div>
-                            {showEn && fitSize.view !== "s" && <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>}
+                            <div className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-700" title={nm(it)}>{nm(it)}</div>
+                            {showEn && !isEn && fitSize.view !== "s" && <div className="truncate text-[9.5px] leading-tight text-slate-400" title={it.name_en ?? ""}>{it.name_en || "ไม่มีอังกฤษ"}</div>}
                             {(() => {
                               const c = fitCheck(it, pick?.size);
                               const dims = c.t ? `${c.t.w}×${c.t.h}×${c.t.d}` : "";
                               const tone = c.kind === "roomy" ? "text-emerald-700" : c.kind === "snug" ? "text-amber-700" : c.kind === "no" ? "text-rose-600" : "text-slate-400";
-                              const mark = c.kind === "roomy" ? "✓ ใส่ได้" : c.kind === "snug" ? "≈ พอดี" : c.kind === "no" ? "⚠️ ไม่พอ" : c.kind === "nosize" ? "ไม่มีขนาด" : "";
+                              const mark = c.kind === "roomy" ? t("✓ ใส่ได้", "✓ Fits") : c.kind === "snug" ? t("≈ พอดี", "≈ Snug") : c.kind === "no" ? t("⚠️ ไม่พอ", "⚠️ Too big") : c.kind === "nosize" ? t("ไม่มีขนาด", "No size") : "";
                               return (
-                                <div className={`truncate text-[9.5px] leading-tight ${tone}`} data-fit-check={c.kind} title={c.kind === "nosize" ? "ใส่ขนาดของที่ ✏️ เพื่อให้ระบบตรวจว่าใส่ได้ไหม" : `${pick?.size ? `${pick.size}: ` : ""}${dims} ซม.${c.t?.estimated ? " (ค่าประมาณ)" : ""}`}>
+                                <div className={`truncate text-[9.5px] leading-tight ${tone}`} data-fit-check={c.kind} title={c.kind === "nosize" ? t("ใส่ขนาดของที่ ✏️ เพื่อให้ระบบตรวจว่าใส่ได้ไหม", "Add the item's size (✏️) so the system can check") : `${pick?.size ? `${pick.size}: ` : ""}${dims} ${t("ซม.", "cm")}${c.t?.estimated ? t(" (ค่าประมาณ)", " (estimate)") : ""}`}>
                                   {mark}{dims ? ` · ${dims}` : ""}
                                 </div>
                               );
@@ -1149,12 +1571,12 @@ function DetailInsertModal({
                           {editBtn("fit", it as unknown as Record<string, unknown>, "absolute right-0.5 top-0.5 bg-white/80 text-[11px]")}
                           {handle && <span className="absolute bottom-0.5 right-0.5 text-[11px]">{handle}</span>}
                           {pick && opts.length > 0 && (
-                            <select aria-label={`ขนาด ${it.name}`} value={pick.size ?? ""} onChange={(e) => setFits((p) => p.map((x) => (x.id === it.id ? (e.target.value ? { id: it.id, size: e.target.value } : { id: it.id }) : x)))}
+                            <select aria-label={`${t("ขนาด", "Size")} ${nm(it)}`} value={pick.size ?? ""} onChange={(e) => setFits((p) => p.map((x) => (x.id === it.id ? (e.target.value ? { id: it.id, size: e.target.value } : { id: it.id }) : x)))}
                               className="mt-0.5 h-6 w-full rounded border border-slate-200 px-0.5 text-[10.5px]">
-                              <option value="">ไม่ระบุขนาด</option>
+                              <option value="">{t("ไม่ระบุขนาด", "No size")}</option>
                               {opts.map((o) => {
                                 const oc = fitCheck(it, o);
-                                const m = oc.kind === "roomy" ? " ✓" : oc.kind === "snug" ? " ≈ พอดี" : oc.kind === "no" ? " ⚠️ ไม่พอ" : "";
+                                const m = oc.kind === "roomy" ? " ✓" : oc.kind === "snug" ? t(" ≈ พอดี", " ≈ snug") : oc.kind === "no" ? t(" ⚠️ ไม่พอ", " ⚠️ too big") : "";
                                 return <option key={o} value={o}>{o}{m}</option>;
                               })}
                             </select>
@@ -1163,81 +1585,104 @@ function DetailInsertModal({
                       );
                     }} />
                   </div>
-                  {!fitItems.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">ไม่พบรายการ</p>}
-                  {addBtn("fit", "ของที่ใส่ได้")}
-                  {!needle && fitItems.length > 1 && <p className="text-[10.5px] text-slate-400">ลาก ⠿ มุมการ์ดเพื่อจัดลำดับ (ใช้กับทุกสินค้า)</p>}
+                  {!fitItems.filter(match).length && <p className="py-3 text-center text-xs text-slate-400">{t("ไม่พบรายการ", "Nothing found")}</p>}
+                  {addBtn("fit", "ของที่ใส่ได้", "item")}
+                  {!needle && fitItems.length > 1 && <p className="text-[10.5px] text-slate-400">{t("ลาก ⠿ มุมการ์ดเพื่อจัดลำดับ (ใช้กับทุกสินค้า)", "Drag ⠿ on a card corner to reorder (all products)")}</p>}
                   <label className="flex cursor-pointer items-center gap-2 pt-1 text-[12.5px] text-slate-600">
                     <input type="checkbox" checked={useFit} onChange={(e) => setUseFit(e.target.checked)} className="h-4 w-4 accent-orange-500" data-insert-use="fit" />
-                    ใส่บรรทัด &quot;{baseTpl.prefix.fit.th || "ใส่ได้"} …&quot; ลงคำอธิบาย
+                    {t(`ใส่บรรทัด "${baseTpl.prefix.fit.th || "ใส่ได้"} …" ลงคำอธิบาย`, `Add a "${baseTpl.prefix.fit.en || "Fits:"} …" line to the description`)}
                   </label>
                 </>
               )}
             </div>
           )}
-          {(tab === "phrase" || tab === "slot" || tab === "material" || tab === "fit" || tab === "lifestyle") && (
+          {!reviewing && !compactMat && (tab === "phrase" || tab === "slot" || tab === "material" || tab === "fit" || tab === "lifestyle") && (
             <a href={`/m/${catalogOf(tab === "slot" ? "slot" : tab)}`} target="_blank" rel="noreferrer" className="block text-right text-[11px] text-slate-400 hover:text-blue-600 hover:underline">
-              ดูรายการกลางทั้งหมด (รวมที่ลบไปแล้ว) ↗
+              {t("ดูรายการกลางทั้งหมด (รวมที่ลบไปแล้ว) ↗", "Open the full shared list (incl. deleted) ↗")}
             </a>
+          )}
+          {/* 🪜 ย้อนกลับ · ข้าม · ถัดไป (ขั้นตรวจ = ปุ่มแทรกด้านล่าง) */}
+          {stepMode && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5" data-insert-step-nav>
+              {step !== steps[0] && (
+                <button type="button" onClick={() => goStep(stepAfter(steps, step, -1))} data-insert-step-back
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50">
+                  <Icon name="back" /> {t("ย้อนกลับ", "Back")}
+                </button>
+              )}
+              {step !== "review" && (
+                <>
+                  <button type="button" onClick={skipStep} data-insert-step-skip title={t("ไม่ใส่เรื่องนี้ (ล้างที่เลือกในขั้นนี้)", "Leave this out (clears this step)")}
+                    className="ml-auto h-9 rounded-lg px-3 text-sm text-slate-500 hover:bg-slate-100">{t("ข้ามขั้นนี้", "Skip step")}</button>
+                  <button type="button" onClick={nextStep} data-insert-step-next
+                    className="inline-flex h-9 items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-4 text-sm font-medium text-orange-700 hover:bg-orange-100">
+                    {t("ถัดไป", "Next")} <span aria-hidden>→</span>
+                  </button>
+                </>
+              )}
+              {step === "review" && <span className="ml-auto text-[11.5px] text-slate-500">{t("พร้อมแล้ว กด แทรก ด้านล่าง", "All set — press Insert below")}</span>}
+            </div>
           )}
         </div>
 
         {/* ─── ขวา: ตัวอย่างคำอธิบาย ─── */}
         <div className="min-w-0 space-y-2 rounded-xl bg-slate-50/80 p-2.5 md:sticky md:top-0 md:self-start">
           <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-500">
-            <span className="flex-1 font-medium text-slate-700">ตัวอย่างคำอธิบาย</span>
-            <button type="button" onClick={() => setHide(!hideOld)} title={hideOld ? "โชว์บรรทัดเดิมทั้งหมด" : "ซ่อนบรรทัดเดิม ดูเฉพาะบรรทัดใหม่"} data-insert-hide
-              className={`rounded px-1.5 ${hideOld ? "bg-slate-800 text-white" : "hover:bg-slate-200/60"}`}>{hideOld ? "🙈 ซ่อนบรรทัดเดิม" : "👁 บรรทัดเดิม"}</button>
+            <span className="flex-1 font-medium text-slate-700">{t("ตัวอย่างคำอธิบาย", "Description preview")}</span>
+            <button type="button" onClick={() => setHide(!hideOld)} title={hideOld ? t("โชว์บรรทัดเดิมทั้งหมด", "Show existing lines") : t("ซ่อนบรรทัดเดิม ดูเฉพาะบรรทัดใหม่", "Hide existing lines, show new ones only")} data-insert-hide
+              className={`rounded px-1.5 ${hideOld ? "bg-slate-800 text-white" : "hover:bg-slate-200/60"}`}>{hideOld ? t("🙈 ซ่อนบรรทัดเดิม", "🙈 Existing hidden") : t("👁 บรรทัดเดิม", "👁 Existing lines")}</button>
             {view === "th" && (
               <>
-                <button type="button" onClick={() => placeAt(0)} title="ย้ายบรรทัดใหม่ทั้งหมดไปบนสุด" className={`rounded px-1.5 ${blockPos === 0 ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>บนสุด</button>
-                <button type="button" onClick={() => placeAt(lines.length)} title="ย้ายบรรทัดใหม่ทั้งหมดไปท้ายสุด" className={`rounded px-1.5 ${blockPos === lines.length ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>ท้ายสุด</button>
+                <button type="button" onClick={() => placeAt(0)} title={t("ย้ายบรรทัดใหม่ทั้งหมดไปบนสุด", "Move all new lines to the top")} className={`rounded px-1.5 ${blockPos === 0 ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>{t("บนสุด", "Top")}</button>
+                <button type="button" onClick={() => placeAt(lines.length)} title={t("ย้ายบรรทัดใหม่ทั้งหมดไปท้ายสุด", "Move all new lines to the end")} className={`rounded px-1.5 ${blockPos === lines.length ? "bg-orange-100 text-orange-700" : "hover:bg-slate-200/60"}`}>{t("ท้ายสุด", "End")}</button>
               </>
             )}
             {hasEn && (
               <span className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white">
                 {(["th", "en"] as const).map((l) => (
                   <button key={l} type="button" onClick={() => { setView(l); setEditing(null); }} data-insert-view={l}
-                    className={`px-2 py-0.5 text-[11px] ${view === l ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{l === "th" ? "ไทย" : "EN"}</button>
+                    className={`px-2 py-0.5 text-[11px] ${view === l ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{l === "th" ? t("ไทย", "Thai") : "EN"}</button>
                 ))}
               </span>
             )}
           </div>
           <div className="max-h-[22rem] overflow-auto rounded-lg border border-slate-200 bg-white p-1.5 text-[13px] leading-snug" data-detail-insert-preview>
             {view === "th" ? thBody : enBody}
-            {!(view === "en" ? enLines : lines).length && !hideOld && <p className="px-2 text-[11.5px] text-slate-400">{view === "en" ? "คำอธิบายอังกฤษยังว่าง" : "คำอธิบายยังว่าง — จะใส่เป็นบรรทัดแรก"}</p>}
+            {!(view === "en" ? enLines : lines).length && !hideOld && <p className="px-2 text-[11.5px] text-slate-400">{view === "en" ? t("คำอธิบายอังกฤษยังว่าง", "English description is empty") : t("คำอธิบายยังว่าง — จะใส่เป็นบรรทัดแรก", "Description is empty — new lines go first")}</p>}
           </div>
           {view === "th" && lines.length + pairs.length > 1 && (
             <p className="text-[11px] text-slate-400">
-              ลาก ⠿ สลับได้ทุกบรรทัด{hideOld && lines.length ? " (กด 👁 บรรทัดเดิม เพื่อลากบรรทัดเดิมด้วย)" : ""}
-              {picked ? " · คลิกบรรทัดสีส้มเพื่อแก้คำเฉพาะรุ่นนี้ (ลบข้อความทั้งหมด = ไม่ใส่บรรทัดนั้น)" : ""}
+              {t("ลาก ⠿ สลับได้ทุกบรรทัด", "Drag ⠿ to reorder any line")}{hideOld && lines.length ? t(" (กด 👁 บรรทัดเดิม เพื่อลากบรรทัดเดิมด้วย)", " (press 👁 to move existing lines too)") : ""}
+              {picked ? t(" · คลิกบรรทัดสีส้มเพื่อแก้คำเฉพาะรุ่นนี้ (ลบข้อความทั้งหมด = ไม่ใส่บรรทัดนั้น)", " · click an orange line to edit it for this model (empty = leave it out)") : ""}
               {custom && (
-                <button type="button" onClick={() => setCustom(null)} className="ml-1 text-slate-500 underline hover:text-slate-800" data-insert-reset-order>↺ คืนลำดับเดิม</button>
+                <button type="button" onClick={() => setCustom(null)} className="ml-1 text-slate-500 underline hover:text-slate-800" data-insert-reset-order>{t("↺ คืนลำดับเดิม", "↺ Reset order")}</button>
               )}
             </p>
           )}
-          {view === "en" && <p className="text-[11px] text-slate-400">ลำดับฝั่งอังกฤษตามภาษาไทย (บรรทัดไม่เท่ากัน = บรรทัดใหม่ต่อท้าย) · สลับเป็น &quot;ไทย&quot; เพื่อลากจัดลำดับ</p>}
+          {view === "en" && <p className="text-[11px] text-slate-400">{t("ลำดับฝั่งอังกฤษตามภาษาไทย (บรรทัดไม่เท่ากัน = บรรทัดใหม่ต่อท้าย) · สลับเป็น \"ไทย\" เพื่อลากจัดลำดับ", "English follows the Thai order (different line counts = new lines at the end) · switch to Thai to drag")}</p>}
           {reordered && (
             <p className="rounded-md bg-sky-50 px-2 py-1.5 text-[11.5px] text-sky-800" data-insert-reordered>
-              🔀 จัดลำดับบรรทัดเดิมใหม่ — บันทึกตอนกด &quot;{saveLabel ?? "แทรก"}&quot;
-              {hasEn && enText.trim() ? (enAligned ? " · คำอธิบายอังกฤษสลับตาม" : " · คำอธิบายอังกฤษบรรทัดไม่เท่าไทย = คงลำดับเดิม") : ""}
+              {t(`🔀 จัดลำดับบรรทัดเดิมใหม่ — บันทึกตอนกด "${saveLabel ?? "แทรก"}"`, `🔀 Existing lines reordered — saved when you press "${saveLabel ?? "Insert"}"`)}
+              {hasEn && enText.trim() ? (enAligned ? t(" · คำอธิบายอังกฤษสลับตาม", " · English follows") : t(" · คำอธิบายอังกฤษบรรทัดไม่เท่าไทย = คงลำดับเดิม", " · English line count differs = order kept")) : ""}
             </p>
           )}
 
           {changes.length > 0 && (
             <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[11.5px] text-amber-800" data-insert-writeback>
-              🔄 บันทึกกลับช่องของสินค้าด้วย: {changes.join(" · ")}
+              🔄 {t("บันทึกกลับช่องของสินค้าด้วย", "Also saved to the product")}: {changes.join(" · ")}
             </p>
           )}
 
           {hasEn && (
             <div className="space-y-1 text-xs text-slate-600">
               <label className="flex cursor-pointer items-center gap-2">
-                <input type="checkbox" checked={withEn} onChange={(e) => setWithEn(e.target.checked)} className="h-4 w-4 accent-orange-500" />
-                <span>ใส่ภาษาอังกฤษในคำอธิบายอังกฤษด้วย</span>
+                <input type="checkbox" checked={withEn} onChange={(e) => setWithEn(e.target.checked)} className="h-4 w-4 accent-orange-500" data-insert-with-en />
+                <span>{t("ใส่ภาษาอังกฤษในคำอธิบายอังกฤษด้วย", "Also add the English lines to the English description")}</span>
               </label>
-              {!enText.trim() && <p className="pl-6 text-slate-400">คำอธิบายอังกฤษยังว่าง — ติ๊กแล้วจะได้แค่บรรทัดใหม่ หรือปล่อยไว้แล้วกด 🌐 แปลทั้งหมด ทีหลัง</p>}
-              {withEn && out.enMissing > 0 && <p className="pl-6 text-amber-700">⚠️ {out.enMissing} บรรทัดยังไม่มีชื่ออังกฤษ — ฝั่งอังกฤษจะข้ามบรรทัดนั้น (กด ✏️ ที่รายการเพื่อใส่ชื่ออังกฤษ)</p>}
-              {enAppend && <p className="pl-6 text-slate-400">จำนวนบรรทัดอังกฤษไม่เท่าภาษาไทย — ฝั่งอังกฤษจะต่อท้ายให้</p>}
+              {!enText.trim() && <p className="pl-6 text-slate-400">{t("คำอธิบายอังกฤษยังว่าง — ติ๊กแล้วจะได้แค่บรรทัดใหม่ หรือปล่อยไว้แล้วกด 🌐 แปลทั้งหมด ทีหลัง", "English description is empty — ticked = only the new lines, or press 🌐 Translate all later")}</p>}
+              {withEn && out.enMissing > 0 && <p className="pl-6 text-amber-700">{t(`⚠️ ${out.enMissing} บรรทัดยังไม่มีชื่ออังกฤษ — ฝั่งอังกฤษจะข้ามบรรทัดนั้น (กด ✏️ ที่รายการเพื่อใส่ชื่ออังกฤษ)`, `⚠️ ${out.enMissing} lines have no English name — skipped on the English side (use ✏️ to add one)`)}</p>}
+              {enAppend && <p className="pl-6 text-slate-400">{t("จำนวนบรรทัดอังกฤษไม่เท่าภาษาไทย — ฝั่งอังกฤษจะต่อท้ายให้", "English line count differs from Thai — new English lines go at the end")}</p>}
+              {isEn && picked && <p className="pl-6 text-amber-700" data-insert-thai-check>{t("", "Thai lines come from the shared lists or auto-translation — ask a Thai reader to check before publishing.")}</p>}
             </div>
           )}
         </div>
@@ -1697,12 +2142,55 @@ function CopyFromDialog({ cfg, hasEn, showEn, currentTh, onClose, onPick }: {
 }
 
 /** ชื่อในรายการ: ไทยบน · อังกฤษตัวเล็กข้างล่าง (เจ้าของ 2026-10-19 "จะได้ดูสวย") */
-function NameTwoLines({ th, en, on, showEn = true }: { th: string; en?: string | null; on: boolean; showEn?: boolean }) {
+function NameTwoLines({ th, en, on, showEn = true, noEnText = "ไม่มีอังกฤษ" }: { th: string; en?: string | null; on: boolean; showEn?: boolean; noEnText?: string }) {
   return (
     <span className="min-w-0 flex-1" title={!showEn && en ? en : undefined}>
       <span className={`block text-sm leading-snug ${on ? "font-medium text-slate-800" : "text-slate-600"}`}>{th}</span>
-      {showEn && <span className={`block truncate text-[11px] leading-snug ${en ? "text-slate-400" : "text-slate-300"}`} title={en ?? ""}>{en || "ไม่มีอังกฤษ"}</span>}
+      {showEn && <span className={`block truncate text-[11px] leading-snug ${en ? "text-slate-400" : "text-slate-300"}`} title={en ?? ""}>{en || noEnText}</span>}
     </span>
+  );
+}
+
+/** 🪜 ขั้น "ตรวจแล้วแทรก" — สรุปทีละขั้น (บรรทัดที่จะได้ / ข้าม / ยังไม่ได้เลือก) · กด "แก้" กลับไปขั้นนั้น */
+function ReviewSummary({
+  steps,
+  skipped,
+  t,
+  label,
+  summary,
+  onEdit,
+  changes,
+}: {
+  steps: InsertStep[];
+  skipped: InsertStep[];
+  t: (th: string, en: string) => string;
+  label: (s: InsertStep) => string;
+  summary: (s: InsertStep) => string[];
+  onEdit: (s: InsertStep) => void;
+  changes: string[];
+}) {
+  return (
+    <div className="space-y-1.5" data-insert-review>
+      {steps.map((s, i) => {
+        const got = summary(s);
+        const skip = skipped.includes(s) && !got.length;
+        return (
+          <div key={s} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2" data-insert-review-step={s}>
+            <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${got.length ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-400"}`}>{i + 1}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12.5px] font-medium text-slate-700">{label(s)}</div>
+              {got.length ? (
+                got.map((l, k) => <div key={k} className="text-[12px] leading-snug text-slate-600">- {l}</div>)
+              ) : (
+                <div className="text-[11.5px] text-slate-400">{skip ? t("ข้าม — ไม่ใส่เรื่องนี้", "Skipped — left out") : t("ยังไม่ได้เลือก", "Nothing picked")}</div>
+              )}
+            </div>
+            <button type="button" onClick={() => onEdit(s)} className="shrink-0 rounded-md px-2 py-0.5 text-[11.5px] text-orange-600 hover:bg-orange-50" data-insert-review-edit={s}>{t("แก้", "Edit")}</button>
+          </div>
+        );
+      })}
+      {changes.length > 0 && <p className="text-[11.5px] text-amber-700">🔄 {t("บันทึกกลับช่องของสินค้าด้วย", "Also saved to the product")}: {changes.join(" · ")}</p>}
+    </div>
   );
 }
 

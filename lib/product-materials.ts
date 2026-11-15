@@ -41,6 +41,29 @@ export function materialTerms(m: MaterialRow): string[] {
   });
 }
 
+/**
+ * วัสดุในคลังที่ข้อความพูดถึง (เช่น ข้อมูลวัสดุจากฝ่ายผลิต "ผ้าแคนวาส 12 oz กันน้ำ") — ใช้แนะนำในป๊อปแทรก (คนกดเลือกเอง ไม่ติ๊กให้)
+ *   เรียงตามตำแหน่งที่เจอ · คำที่อยู่ในคำยาวกว่าของวัสดุอื่น = ไม่นับ ("ผ้าแคนวาส" ใน "ผ้าแคนวาสแจ็คการ์ด" → เหลือแจ็คการ์ด) · ปิดใช้ = ไม่แนะนำ
+ */
+export function suggestMaterials<T extends MaterialRow>(text: unknown, mats: T[]): T[] {
+  const hay = s(text).toLowerCase();
+  if (!hay) return [];
+  const hits: { m: T; at: number; len: number }[] = [];
+  for (const m of mats) {
+    if (m.is_active === false) continue;
+    let best: { at: number; len: number } | null = null;
+    for (const t of materialTerms(m)) {
+      const at = hay.indexOf(t.toLowerCase());
+      if (at >= 0 && (!best || t.length > best.len)) best = { at, len: t.length };
+    }
+    if (best) hits.push({ m, ...best });
+  }
+  return hits
+    .filter((a) => !hits.some((b) => b !== a && b.len > a.len && b.at <= a.at && a.at + a.len <= b.at + b.len))
+    .sort((a, b) => a.at - b.at)
+    .map((x) => x.m);
+}
+
 export type MaterialLink = { slug: string; terms: string[] };
 
 /** ข้อความใดข้อความหนึ่งพูดถึงวัสดุนี้ไหม (ชื่อ/ชื่ออังกฤษ/คำเรียกอื่น · ไม่สนตัวพิมพ์) — ไม่เช็กว่ามีหน้าแล้วหรือยัง */

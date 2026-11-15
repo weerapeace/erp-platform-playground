@@ -63,6 +63,23 @@ export type InsertTemplates = {
 export type InsertTab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle";
 export type CatalogKind = "phrase" | "material" | "slot" | "fit" | "style" | "lifestyle";
 export const INSERT_TABS: InsertTab[] = ["phrase", "material", "slot", "size", "fit", "lifestyle"];
+
+/* ─────────── โหมด "ทีละขั้น" (เจ้าของ 2026-11-15) ─────────── */
+/** ขั้นของโหมดทีละขั้น — ข้ามได้ทุกขั้น · ขั้นสุดท้าย = ตรวจแล้วแทรก · แต่ละขั้นใช้แท็บเดิมของป๊อป (ไม่มีหน้าซ้ำ) */
+export type InsertStep = "material" | "slot" | "highlight" | "size" | "fit" | "review";
+export const INSERT_STEPS: InsertStep[] = ["material", "slot", "highlight", "size", "fit", "review"];
+/** แท็บที่แต่ละขั้นใช้ (จุดเด่น = ข้อความสำเร็จรูป + Lifestyle · เฟส 2 จะมี AI ดูรูปในขั้นนี้) */
+export const STEP_TABS: Record<InsertStep, InsertTab[]> = { material: ["material"], slot: ["slot"], highlight: ["phrase", "lifestyle"], size: ["size"], fit: ["fit"], review: [] };
+/** ขั้นที่ใช้ได้จากแท็บที่ป๊อปเปิดให้ (ชุดตามประเภท / ช่องที่ฟอร์มแก้ได้) — ตรวจแล้วแทรกมีเสมอ */
+export function availableSteps(tabs: readonly InsertTab[]): InsertStep[] {
+  return INSERT_STEPS.filter((s) => s === "review" || STEP_TABS[s].some((t) => tabs.includes(t)));
+}
+/** ขั้นถัดไป (dir 1) / ก่อนหน้า (dir -1) — ชนขอบ = ขั้นเดิม · ขั้นที่ไม่อยู่ในรายการ = ขั้นแรก */
+export function stepAfter(steps: readonly InsertStep[], cur: InsertStep, dir: 1 | -1): InsertStep {
+  const i = steps.indexOf(cur);
+  if (i < 0) return steps[0] ?? "review";
+  return steps[Math.min(steps.length - 1, Math.max(0, i + dir))];
+}
 /** ช่องตัวเลขในแท็บขนาด (กว้าง สูง หนา น้ำหนัก หูหิ้ว สาย สายยาวสุด) */
 export const INSERT_SIZE_KEYS = ["w", "h", "d", "g", "hd", "s1", "s2"] as const;
 
@@ -272,11 +289,29 @@ function countEn(tplEn: string, s: string, n: number): string {
   return s.replace(/([A-Za-z]+)$/, (w) => (/(ches|shes|sses|xes|zes)$/i.test(w) ? w.slice(0, -2) : /[^su]s$/i.test(w) ? w.slice(0, -1) : w));
 }
 
-/** หลายช่องรวมบรรทัดเดียว "ช่องหลัก 2 ช่อง, ช่องซิป 2 ช่อง และ ช่องใส่บัตร 1 ช่อง" · อังกฤษขาดตัวไหน = null ทั้งบรรทัด */
-export function slotLine(picks: { item: SnippetItem; n: number }[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES, kind: "slot" | "slot_in" | "slot_out" = "slot"): string | null {
+/** ขนาดด้านในของช่อง (ใส่ในขั้น "ช่อง" ของป๊อปแทรก · เช่น ช่องใสใส่รูป) */
+export type SlotDims = { w?: unknown; h?: unknown; d?: unknown };
+const dimStr = (v: unknown): string => {
+  const x = Number(v);
+  return v == null || v === "" || !isFinite(x) || x <= 0 ? "" : String(Math.round(x * 10) / 10);
+};
+/** ขนาดช่อง → " (ขนาด 6 × 9 ซม.)" / " (6 × 9 cm)" — ต้องมีกว้าง + สูง (หนาใส่หรือไม่ก็ได้) · ไม่ครบ = "" */
+export function slotDimsText(dims: SlotDims | null | undefined, lang: Lang): string {
+  if (!dims) return "";
+  const w = dimStr(dims.w), h = dimStr(dims.h), d = dimStr(dims.d);
+  if (!w || !h) return "";
+  const s = [w, h, d].filter(Boolean).join(" × ");
+  return lang === "en" ? ` (${s} cm)` : ` (ขนาด ${s} ซม.)`;
+}
+
+/** หลายช่องรวมบรรทัดเดียว "ช่องหลัก 2 ช่อง, ช่องซิป 2 ช่อง และ ช่องใส่บัตร 1 ช่อง" · อังกฤษขาดตัวไหน = null ทั้งบรรทัด · มีขนาดช่อง = ต่อท้ายชื่อช่องนั้น */
+export function slotLine(picks: { item: SnippetItem; n: number; dims?: SlotDims | null }[], lang: Lang, tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES, kind: "slot" | "slot_in" | "slot_out" = "slot"): string | null {
   const used = picks.filter((p) => p.n > 0);
   if (!used.length) return null;
-  const parts = used.map((p) => slotText(p.item, p.n, lang, tpl));
+  const parts = used.map((p) => {
+    const t = slotText(p.item, p.n, lang, tpl);
+    return t ? t + slotDimsText(p.dims, lang) : null;
+  });
   if (parts.some((x) => !x)) return null;
   return withLead(lead(tpl, kind, lang), joinList(parts as string[], lang, tpl));
 }
@@ -417,7 +452,7 @@ export function composeLines(
   sel: {
     phrases: SnippetItem[];
     materials: MaterialPick[];
-    slots: { item: SnippetItem; n: number }[];
+    slots: { item: SnippetItem; n: number; dims?: SlotDims | null }[];
     size?: SizeInput | null;
     weight?: unknown;
     handle?: unknown;
