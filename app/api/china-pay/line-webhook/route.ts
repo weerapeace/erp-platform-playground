@@ -31,6 +31,8 @@ import { handleOrderImageEvents, pickOrderImageEvents, type LineEvent } from "@/
 import { handleDesignEvents, pickDesignEvents } from "@/lib/design-line-inbox";
 import { DESIGN_IDEA_SLOT, handleIdeaEvents, pickIdeaEvents } from "@/lib/design-idea-line";
 import { MAIN_BOT, isLineBotKey, lineBot, lineBotKeyFor, lineConfigForBot, type LineBotView, type LineConfig } from "@/lib/line-send";
+import { pickLineChatEvents } from "@/lib/chat/line";
+import { ingestLineChatEvents } from "@/lib/chat/line-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -114,6 +116,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const ideaEvents = lineBotKeyFor(cur, DESIGN_IDEA_SLOT) === bot.key ? pickIdeaEvents(botCfg, events) : [];
     if (ideaEvents.length > 0) {
       after(() => handleIdeaEvents(admin, botCfg, ideaEvents).catch((e) => console.error("[line-webhook] idea inbox", e)));
+    }
+
+    // งานที่ 5 "ห้องแชทรวม": แชท 1:1 จากลูกค้า (ไม่ใช่กลุ่ม) ของ OA ที่ติ๊ก "รับแชทลูกค้า" → /chat (lib/chat/line-server)
+    //   บังคับต้องตรวจลายเซ็นผ่าน (บอทที่ยังไม่ตั้ง Channel secret = ไม่รับแชท) · ระบบกลุ่มด้านบนไม่เกี่ยว
+    const chatEvents = pickLineChatEvents(events);
+    if (chatEvents.length > 0 && secret) {
+      after(() => ingestLineChatEvents(admin, bot, chatEvents, true).then(() => undefined).catch((e) => console.error("[line-webhook] chat inbox", e)));
     }
   } catch { /* best-effort */ }
 

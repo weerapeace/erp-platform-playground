@@ -52,7 +52,8 @@ create table public.chat_messages (
   created_at           timestamptz not null default now()
 );
 create index chat_messages_conv_idx on public.chat_messages (conversation_id, sent_at desc);
-create unique index chat_messages_ext_uniq on public.chat_messages (conversation_id, external_message_id) where external_message_id is not null;
+-- ไม่ซ้ำในห้อง (NULL ซ้ำได้ตามปกติของ unique) — เป็น constraint เต็มเพื่อให้ upsert ignoreDuplicates ใช้ได้ (index แบบมีเงื่อนไขใช้กับ on conflict ของ PostgREST ไม่ได้)
+alter table public.chat_messages add constraint chat_messages_ext_uniq unique (conversation_id, external_message_id);
 alter table public.chat_messages enable row level security;
 
 revoke all on public.chat_conversations, public.chat_messages from anon, authenticated;
