@@ -1392,7 +1392,7 @@ export default function PlatformCatalogPage() {
         onGoMatch={(listingId) => { setAddPick(false); setFilter("all"); setPendingOpen(listingId); if (view !== "match") setView("match"); }} />
       {addFor && (
         <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : undefined}
-          onClose={() => setAddFor(null)} onDone={() => { setAddFor(null); void reloadCurrent(); }} />
+          onClose={() => setAddFor(null)} onDone={() => { void reloadCurrent(); }} />
       )}
       <ListingDrawer listingId={openListing?.id ?? null} onClose={() => setOpenListing(null)} canPublish={canPublish} onChanged={onListingChanged}
         matchTab={openListing ? (

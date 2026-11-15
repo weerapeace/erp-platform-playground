@@ -54,6 +54,9 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const canAdd = can("products.platforms.edit");
   const canPublish = can("products.platforms.publish");
   const lastLoadRef = useRef(0);                              // เวลาที่โหลดล่าสุด (ใช้หน่วง auto-refresh)
+  // สินค้าที่โหลดเสร็จล่าสุด — โหลดซ้ำของสินค้าเดิม (กดรีเฟรช / ตัวช่วยลงสินค้าเสร็จ) ต้องไม่ซ่อนทั้งแท็บ
+  // 🐛 2026-11-15: เดิมโหลดซ้ำ = แสดง "กำลังโหลด…" แทนทั้งแท็บ → ตัวช่วยลงสินค้าถูกถอดแล้วเปิดใหม่ที่ขั้น 1 (ผลการลงหาย · เจ้าของเห็นว่า "เด้งกลับ")
+  const loadedForRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -67,6 +70,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       setParent((j.parent ?? null) as Parent | null);
       setMatched((j.matchedListings ?? {}) as Record<string, { id?: string; external_id: string | null }>);
       lastLoadRef.current = Date.now();
+      loadedForRef.current = parentId;
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [parentId]);
   const refreshAll = useCallback(() => { void load(); }, [load]);
@@ -97,7 +101,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   }, [parentId, load]);
 
   if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">บันทึกสินค้าก่อน แล้วค่อยตั้งค่าการขายแต่ละแพลตฟอร์ม</div>;
-  if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
+  if (loading && loadedForRef.current !== parentId) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
   if (platforms.length === 0) return <div className="text-sm text-slate-400 py-8 text-center">ยังไม่มีแพลตฟอร์มที่เปิดใช้ — เพิ่มที่ตั้งค่า</div>;
 
   const isOnSale = (p: Platform) => { const d = drafts[p.id] ?? {}; return d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id || !!matched[p.id]; };
