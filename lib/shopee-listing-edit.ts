@@ -251,7 +251,7 @@ export function shopeePriceResult(resp: Obj, sentModelIds: string[]): { ok: stri
   const failList = arr(r.failure_list).map(obj).filter((x): x is Obj => !!x);
   const okList = arr(r.success_list).map(obj).filter((x): x is Obj => !!x);
   const reasonOf = (f: Obj) => str(f.failed_reason) ?? "Shopee ไม่ให้แก้ราคาตัวนี้";
-  // สินค้าไม่มีตัวเลือก: ส่ง model_id 0 แต่ Shopee อาจตอบกลับด้วยรหัสตัวเลือกภายใน (ลองจริง BCG01-03 2026-11-14 ไม่เจอ 0 ในคำตอบ) → ดูจากรายการที่ตอบแทน
+  // สินค้าไม่มีตัวเลือก: ส่ง model_id 0 แต่ Shopee ตอบ success_list: [{ original_price }] โดยไม่มี model_id เลย (ลองจริง BCG01-03 2026-11-15) → ดูจากรายการที่ตอบแทน
   if (sentModelIds.length === 1 && sentModelIds[0] === "0") {
     if (failList.length) return { ok: [], failed: [{ modelId: "0", reason: reasonOf(failList[0]) }], unsure: [] };
     return okList.length ? { ok: ["0"], failed: [], unsure: [] } : { ok: [], failed: [], unsure: ["0"] };

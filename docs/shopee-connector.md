@@ -109,6 +109,7 @@
 - กติกาก่อนส่ง (`planShopeePrices`): ห้ามว่าง/≤0 · **ไทยต้องจำนวนเต็มบาท** · อยู่ในช่วงราคาของร้าน (get_item_limit `price_limit`) · **เปลี่ยน ≥80% (เหลือ ≤20% หรือ ≥5 เท่า) = บล็อก** กันพิมพ์ผิด · ลดเกินครึ่ง/ขึ้นเกิน 2 เท่า = เตือน
 - **ราคาที่ลูกค้าจ่ายจริงมาจากโปรโมชัน** (current_price) แก้ตรงนี้ไม่ได้ · ตัวเลือกที่ติดโปรโมชันมีป้าย "โปร" — Shopee มักไม่ยอมให้เปลี่ยนราคา → ตอบไม่ผ่านรายตัวใน `failure_list` (ตัวอื่นยังผ่าน · แสดงเหตุผลรายตัว)
 - กันทับ: ดึงสดก่อนส่ง ราคาบนร้านไม่ตรงกับตอนเปิดลิ้นชัก = 409 · หลังส่ง: รอดูราคาใหม่ ~9 วิ ไม่ทัน = แสดงตามที่ส่งสำเร็จ · audit `shopee_listing_prices` (ราคาเดิม→ใหม่รายตัว + ตัวที่ไม่ผ่าน + partial)
+- ✅ ลองกับร้านจริงแล้ว (BCG01-03 สินค้าไม่มีตัวเลือก): รอบแรก 2026-11-14 ขึ้นว่า "ไม่สำเร็จ" ผิด ๆ เพราะ Shopee ตอบ `success_list: [{ original_price }]` **ไม่มี model_id** (ราคาเปลี่ยนจริง) → แก้ 81ec0625: สินค้าไม่มีตัวเลือกดูแค่ว่ามีรายการผ่าน/ไม่ผ่าน · ตัวที่ Shopee ไม่บอกผลรายตัว = "รอยืนยัน" แล้วดึงราคาจริงกลับมาตัดสิน · เก็บคำตอบดิบใน audit `shopee_responses` · รอบสอง 2026-11-15 ผ่าน (1,251→1,252→1,250 · ดึงกลับเห็นราคาใหม่ทันที) · **สินค้ามีหลายตัวเลือกยังไม่ได้ลองจริง**
 - ไฟล์: `lib/shopee.ts` shopeeUpdatePrice · `lib/shopee-listing-edit.ts` (planShopeePrices · shopeePriceBatches · shopeePriceResult · applyShopeeBulkPrice) · `app/api/shopee/listing-prices/route.ts` · `ShopeeOptionsPanel` + `ShopeeBulkPrice` ใน shopee-listing-panels
 
 **ถัดไป (ยังไม่ทำ):** 4C รูป (`v2.media_space.upload_image` → `update_item image.image_id_list`) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์

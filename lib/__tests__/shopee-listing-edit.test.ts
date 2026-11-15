@@ -158,6 +158,8 @@ describe("Shopee ลิ้นชัก — เฟส 4B ราคาตั้ง
   });
   test("สินค้าไม่มีตัวเลือก (model 0): Shopee ตอบด้วยรหัสตัวเลือกภายใน = ผ่าน · ตอบว่าง = ยังไม่ยืนยัน · failure = ไม่ผ่าน", () => {
     expect(shopeePriceResult({ response: { success_list: [{ model_id: 123456789, original_price: 1251 }], failure_list: [] } }, ["0"])).toEqual({ ok: ["0"], failed: [], unsure: [] });
+    // คำตอบจริงจากร้าน (BCG01-03 2026-11-15): ไม่มี model_id ใน success_list
+    expect(shopeePriceResult({ error: "", message: "", response: { failure_list: [], success_list: [{ original_price: 1250 }] } }, ["0"])).toEqual({ ok: ["0"], failed: [], unsure: [] });
     expect(shopeePriceResult({ response: {} }, ["0"])).toEqual({ ok: [], failed: [], unsure: ["0"] });
     expect(shopeePriceResult({ response: { failure_list: [{ model_id: 123456789, failed_reason: "Can't update price when item is under promotion." }] } }, ["0"]))
       .toEqual({ ok: [], failed: [{ modelId: "0", reason: "Can't update price when item is under promotion." }], unsure: [] });
