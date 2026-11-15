@@ -384,6 +384,9 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
           await admin.from("purchase_voucher_lines_v2").update({ unit_price: price, price_source: "bill", discount: null, discount_pct: discPctFor(l), updated_at: now }).eq("id", gl.voucher_line_id!).eq("voucher_id", v.id);
           updated++;
         }
+        // ★ 2026-11-15 จดว่ารายการจากใบรับนี้มาจากแถวบิลไหน (เดิมไม่จด → แถวโชว์ "ยังไม่ลงใบ" ทั้งที่ลงแล้ว · หน้าใบแยกตามบิลไม่ได้)
+        //   ปลอดภัย: ขั้น "ถอดรายการเดิม" ข้ามรายการจากใบรับเสมอ (gr_line_id ไม่ว่าง) → ไม่โดนปิด
+        ids.push(gl.voucher_line_id!);
       }
       // บรรทัดที่ยังไม่ได้มาจากใบรับ → เพิ่ม/อัปเดตรายการผูก PO
       const open = g.lines.filter((x) => !x.from_gr);

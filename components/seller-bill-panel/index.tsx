@@ -30,6 +30,12 @@ import { emptySummary, type BillSummary } from "@/lib/seller-bill-summary";
 const ROW_SPAN = 10000;
 /** ★ 2026-11-15 คอลัมน์คงที่ของแถวบิล (# · สินค้า · จำนวน · ราคา · ส่วนลด · ยอด · ปุ่ม) — ตัวเลขเรียงตรงกันทุกแถว */
 const ROW_GRID = "grid grid-cols-[3.5rem_minmax(0,1fr)_4.75rem_5.25rem_6.5rem_5.5rem_9rem] gap-x-2";
+/** ★ 2026-11-15 รอบ 4 (เจ้าของ: "ตารางล่างเอามารวมกับอันบน · compact") — หน้าใบส่งยอดบาทมา (lineMoney) = เพิ่ม ฿/ชิ้น + ยอด ฿ ต่อท้ายแถว */
+const ROW_GRID_THB = "grid grid-cols-[2.75rem_minmax(0,1fr)_3.75rem_4.5rem_4.75rem_4.75rem_4.5rem_5.25rem_7.5rem] gap-x-2";
+/** ยอดบาทของรายการในใบ 1 บรรทัด (หน้าใบคิดด้วยสูตรกลาง computeVoucher) */
+export type BillLineMoney = { unit_thb: number | null; total_thb: number | null };
+/** รายการในใบ → มาจากบิลไหน (หน้าใบใช้ทำมุม "รวมเป็นตาราง" + กล่อง "ไม่มีบิล") */
+export type BillLinkMap = Record<string, { bill_id: string; bill_no: string | null }>;
 
 /** งานแก้ใบสั่งซื้อจากหน้านี้ (ผ่าน API กลาง po-edit / cancel-line) — ย้าย PO ทำ "ก่อน" ใส่ลงใบ · ลด/ปิดยอด ทำ "หลัง" */
 type PoPlan = {
@@ -81,7 +87,7 @@ export type SellerBillPanelApi = {
   runPoPlans: () => Promise<{ ok: string[]; fail: string[] }>;
 };
 
-export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, controlRef, hideSaveBar = false, onStatus }: {
+export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, controlRef, hideSaveBar = false, onStatus, lineMoney, onLinks }: {
   voucherId: string; readonly: boolean; onApplied: () => void | Promise<void>;
   /** bare = ไม่มีกรอบการ์ด + หัวพับในตัว (หน้าที่ห่อด้วยกล่องพับของตัวเองอยู่แล้ว) — แสดงเนื้อเลย */
   bare?: boolean;
@@ -90,7 +96,11 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   /** หน้าใบมีแถบบันทึกร่างของตัวเองแล้ว → ซ่อนแถบบันทึกของแผงนี้ */
   hideSaveBar?: boolean;
   /** แจ้งหน้าใบ: ยังมีที่ไม่บันทึกไหม · บิลยังเหลือแถวที่ไม่ได้เช็กกี่แถว */
-  onStatus?: (s: { pending: boolean; undecided: number }) => void;
+  onStatus?: (s: { pending: boolean; undecided: number; bills: number }) => void;
+  /** ★ 2026-11-15 ยอดบาทของรายการในใบ (id บรรทัด → ฿/ชิ้น · ยอด ฿) — ส่งมา = แถวบิลโชว์ 2 คอลัมน์บาท (ไม่ต้องดูตารางล่าง) */
+  lineMoney?: Record<string, BillLineMoney>;
+  /** ★ 2026-11-15 แจ้งหน้าใบว่ารายการในใบบรรทัดไหนมาจากบิลไหน */
+  onLinks?: (m: BillLinkMap) => void;
 }) {
   const toast = useToast();
   const [bills, setBills] = useState<Bill[]>([]);
@@ -383,7 +393,29 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
     },
   };
   const undecidedAll = bills.reduce((a, b) => a + undecidedCount(draft[b.id] ?? b.lines), 0);
-  useEffect(() => { onStatus?.({ pending: auto.pending, undecided: undecidedAll }); }, [onStatus, auto.pending, undecidedAll]);
+  useEffect(() => { onStatus?.({ pending: auto.pending, undecided: undecidedAll, bills: bills.length }); }, [onStatus, auto.pending, undecidedAll, bills.length]);
+  // ★ 2026-11-15 รายการในใบ → บิล (ส่งเฉพาะตอนเปลี่ยนจริง กันหน้าใบวาดซ้ำวน)
+  const linksSig = useRef("");
+  useEffect(() => {
+    if (!onLinks) return;
+    const m: BillLinkMap = {};
+    for (const b of bills) for (const l of draft[b.id] ?? b.lines) for (const vid of l.voucher_line_ids ?? []) m[vid] = { bill_id: b.id, bill_no: b.bill_no };
+    const sig = JSON.stringify(m);
+    if (sig === linksSig.current) return;
+    linksSig.current = sig; onLinks(m);
+  }, [onLinks, bills, draft]);
+  const thb = !!lineMoney;
+  const GRID = thb ? ROW_GRID_THB : ROW_GRID;
+  /** ฿ ของแถวบิล = รวมรายการในใบที่แถวนี้ลงไว้ (แถวเดียวลงหลาย PO = หลายบรรทัด) */
+  const rowThb = (l: SellerBillLine): BillLineMoney | null => {
+    const ms = (l.voucher_line_ids ?? []).map((id) => lineMoney?.[id]).filter((x): x is BillLineMoney => !!x);
+    if (!ms.length) return null;
+    const tot = ms.reduce((a, x) => a + (x.total_thb ?? 0), 0);
+    return { unit_thb: ms.find((x) => x.unit_thb != null)?.unit_thb ?? null, total_thb: ms.some((x) => x.total_thb != null) ? tot : null };
+  };
+  const fmtB = (v: number | null | undefined) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  // ★ 2026-11-15 สรุปยอดบิล + ไม่อยู่ในบิล = พับไว้ กดเปิดเมื่อจะดู
+  const [extraOpen, setExtraOpen] = useState<Record<string, boolean>>({});
 
   const patch = async (billId: string, mode: "save" | "rematch" | "apply", plan?: PoPlan) => {
     const lines = draft[billId] ?? [];
@@ -515,6 +547,12 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
             const url = fileUrls[b.r2_key] ?? undefined;
             const pdf = isPdfRef(b.r2_key);
             const ro = readonly || busy === b.id;
+            // ★ 2026-11-15 แถบพับ "สรุปยอดบิล · ไม่อยู่ในบิล" — นับไว้โชว์บนแถบ
+            const sumNow = sums[b.id] ?? b.summary ?? null;
+            const missN = missingGroups(expandAllocRows(lines).parts, groups, missScope[b.id] ?? "bill").length;
+            const closeN = Object.values(missAct[b.id] ?? {}).filter((a) => a === "close").length;
+            const exOpen = extraOpen[b.id] ?? closeN > 0;
+            const billThb = thb ? lines.reduce((a, l) => a + (l.decision === "skip" ? 0 : rowThb(l)?.total_thb ?? 0), 0) : 0;
             return (
               <div key={b.id} className="border border-slate-200 rounded-lg overflow-hidden">
                 <div className="flex items-start gap-3 px-3 py-2 bg-slate-50 flex-wrap">
@@ -527,7 +565,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                         <span className={`ml-2 ${n === lines.length && lines.length ? CHIP_OK : n ? CHIP_NEU : CHIP_WARN}`}>{n === lines.length && lines.length ? "ลงใบครบแล้ว" : n ? `ลงใบแล้ว ${n}/${lines.length}` : "ยังไม่ได้ลงใบ"}</span>
                       ); })()}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{thb && billThb > 0 && <span className="mr-2 font-medium text-slate-700 tabular-nums" title="ค่าสินค้าของบิลนี้ที่ลงใบแล้ว (บาท · ไม่รวมค่าส่ง)">ลงใบ ฿{fmtB(billThb)}</span>}ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
                     {/* ★ 2026-11-15 ป้ายหัวบิล — โชว์เฉพาะที่ต้องดู (เดิม: อ่านได้ n แถว · ค้นใน PO n รายการ · ส่วนลดรวม … ตาลาย)
                          บิลที่มีสรุปยอด (付款详情) = กล่องสรุปเช็กยอดแทน · ป้าย "รวมรายการ ≠ ยอดบิล" เดิมเทียบกับยอดก่อนลด จึงขัดกับสรุป */}
                     {(() => {
@@ -550,9 +588,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                      คอลัมน์คงที่: # · สินค้า · จำนวน · ราคา ¥ · ส่วนลด · ยอด ¥ · ปุ่ม — ตัวเลขตรงกันทุกแถว
                      แถวที่ตัดสินแล้ว (ยืนยัน/ข้าม/ค่าใช้จ่าย) = ลงใบแล้ว พับเหลือบรรทัดเดียว กด "แก้" เปิดกลับ · ปุ่มรองอยู่ในเมนู ⋯ */}
                 <div className="overflow-x-auto">
-                <div className="min-w-[46rem]">
-                <div className={`${ROW_GRID} px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100 bg-white`}>
-                  <span>#</span><span>สินค้า</span><span className="text-right">จำนวน</span><span className="text-right">ราคา ¥</span><span className="text-right">ส่วนลด</span><span className="text-right">ยอด ¥</span><span />
+                <div className={thb ? "min-w-[54rem]" : "min-w-[46rem]"}>
+                <div className={`${GRID} px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100 bg-white`}>
+                  <span>#</span><span>สินค้า</span><span className="text-right">จำนวน</span><span className="text-right">ราคา ¥</span><span className="text-right">ส่วนลด</span><span className="text-right">ยอด ¥</span>
+                  {thb && <><span className="text-right" title="ราคาต่อชิ้นเป็นบาท (ราคา × เรท) — จากรายการในใบ">฿/ชิ้น</span><span className="text-right" title="ค่าสินค้าเป็นบาท (ไม่รวมค่าส่ง) — จากรายการในใบ">ยอด ฿</span></>}<span />
                 </div>
                 <div className="divide-y divide-slate-100">
                   {lines.map((l, i) => {
@@ -590,7 +629,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                     if (done) {
                       const notIn = (l.decision === "confirmed" || l.decision === "expense") && !applied && !busyRow;
                       return (
-                        <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${ROW_GRID} items-center px-3 py-1 ${l.decision === "skip" ? "bg-slate-50/60 text-slate-400" : "bg-emerald-50/20"} ${drag.rowCls(dk)}`}>
+                        <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${GRID} items-center px-3 py-1 ${l.decision === "skip" ? "bg-slate-50/60 text-slate-400" : "bg-emerald-50/20"} ${drag.rowCls(dk)}`}>
                           {noCell}
                           <div className="min-w-0 flex items-center gap-1.5">
                             {l.decision === "skip"
@@ -611,6 +650,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                           <span className="text-right text-xs tabular-nums text-slate-600">{l.decision === "skip" ? "" : n2(l.unit_price, 4)}</span>
                           <span className="text-right text-xs tabular-nums text-red-500">{disc > 0 ? `−${n2(disc)}` : ""}</span>
                           <span className={`text-right text-[13px] tabular-nums ${l.decision === "skip" ? "text-slate-300" : "font-medium text-slate-800"}`}>{l.decision === "skip" ? "—" : n2(calc)}</span>
+                          {thb && (() => { const m = l.decision === "skip" ? null : rowThb(l); return (<>
+                            <span className="text-right text-xs tabular-nums text-slate-600">{m ? fmtB(m.unit_thb) : ""}</span>
+                            <span className="text-right text-[13px] tabular-nums font-medium text-slate-800">{m ? fmtB(m.total_thb) : ""}</span>
+                          </>); })()}
                           <span className="flex items-center justify-end gap-1">
                             {busyRow ? <span className="text-[11px] text-slate-400">กำลังลงใบ…</span> : (<>
                               {notIn && !ro && <button type="button" onClick={() => void applyRows(b.id, [l.rid as string], draftRef.current[b.id] ?? lines)} className="h-6 px-2 text-[11px] rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50">ลงใบอีกที</button>}
@@ -634,7 +677,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                           { label: "ลบแถว (AI อ่านผิด/ซ้ำ)", onClick: () => removeRow(b.id, i), danger: true, disabled: applied, title: applied ? "แถวนี้มีรายการในใบอยู่ — กดข้ามแทน" : undefined },
                         ];
                     return (
-                      <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${ROW_GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/30" : ""} ${drag.rowCls(dk)}`}>
+                      <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/30" : ""} ${drag.rowCls(dk)}`}>
                         {noCell}
                         <div className="min-w-0">
                           {/* บรรทัดบน: สินค้าของเรา (ตัวหนา) — ยังไม่จับคู่ = ชื่อตามบิล */}
@@ -728,6 +771,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                             className="h-7 min-w-6 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{pctMode ? "%" : "¥"}</button>
                         </span>
                         <span className="pt-1 text-right text-[13px] font-medium tabular-nums text-slate-800" title="จำนวน × ราคา − ส่วนลด (ยอดที่ลงใบ)">{n2(calc)}</span>
+                        {thb && <><span className="pt-1 text-right text-[11px] text-slate-300" title="ยังไม่ลงใบ — ยืนยันแล้วขึ้นยอดบาท">—</span><span className="pt-1 text-right text-[11px] text-slate-300">—</span></>}
                         <span className="flex items-center justify-end gap-1">
                           {busyRow ? <span className="text-[11px] text-slate-400">กำลังลงใบ…</span>
                             : l.level === "fee"
@@ -750,11 +794,19 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                 )}
 
                 {/* ★ 2026-11-15 สรุปยอดบิล (付款详情) — ยอดสินค้า/ส่วนลด/ค่าส่งในจีน/ค่าธรรมเนียม/ยอดจ่ายจริง → ใส่ลงใบแล้วขึ้นหัวใบ + เรทจากยอดจ่ายจริง */}
-                <BillSummaryBox s={sums[b.id] ?? b.summary ?? emptySummary()} lines={lines} readonly={ro} rereading={rereading === b.id}
-                  onChange={(p) => setSum(b.id, p)} onReread={() => void rereadSummary(b.id)} />
+                <button type="button" onClick={() => setExtraOpen((m) => ({ ...m, [b.id]: !exOpen }))}
+                  className="w-full flex items-center gap-2 flex-wrap px-3 py-1.5 border-t border-slate-100 text-left text-[11px] text-slate-500 hover:bg-slate-50">
+                  <span className="text-slate-400">{exOpen ? "▾" : "▸"}</span>
+                  <span className="font-medium text-slate-600">สรุปยอดบิล</span>
+                  <span>{sumNow?.paid_total ? `ยอดจ่าย ${sumNow.paid_currency === "THB" ? "฿" : "¥"}${n2(sumNow.paid_total)}` : sumNow?.goods_total ? `ยอดสินค้า ¥${n2(sumNow.goods_total)}` : "ยังไม่ได้กรอก"}</span>
+                  {missN > 0 && <span>· ไม่อยู่ในบิล ({missN}){closeN > 0 && <span className="text-red-600"> · ปิดยอด {closeN}</span>}</span>}
+                  {!exOpen && <span className="ml-auto text-slate-400">กดเพื่อดู</span>}
+                </button>
+                {exOpen && <BillSummaryBox s={sums[b.id] ?? b.summary ?? emptySummary()} lines={lines} readonly={ro} rereading={rereading === b.id}
+                  onChange={(p) => setSum(b.id, p)} onReread={() => void rereadSummary(b.id)} />}
 
                 {/* ไม่อยู่ในบิล — ของที่สั่งรอบเดียวกัน (PO เดียวกัน + วันเดียวกัน) ที่ร้านยังไม่ส่ง: รอรอบหน้า (คงค้างรับ) / ปิดยอด (ของไม่มาแล้ว → หน้าขอซื้อ/ใบสั่งผลิตกลับเป็น "ต้องซื้อ") */}
-                {(() => {
+                {exOpen && (() => {
                   const scope = missScope[b.id] ?? "bill";
                   const flat = expandAllocRows(lines).parts;   // แถวที่ลงหลาย PO นับทุก PO
                   const miss = missingGroups(flat, groups, scope);

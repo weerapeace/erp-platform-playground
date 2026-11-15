@@ -118,6 +118,11 @@ describe("บิลร้านจีน — ใส่ลงใบสำคั�
     expect(r.inserted).toBe(0);
     expect(r.updated).toBe(1);
     expect(tables.purchase_voucher_lines_v2.find((l) => l.id === "gr1")).toMatchObject({ qty: 270, unit_price: 2.6, price_source: "bill" });
+    // ★ 2026-11-15 แถวบิลจดรายการจากใบรับไว้ (แถว = ลงใบแล้ว · หน้าใบแยกตามบิลได้)
+    expect(r.lines[0].voucher_line_ids).toEqual(["gr1"]);
+    // กดใส่ซ้ำ: รายการจากใบรับไม่ถูกปิด
+    await applySellerBill(db(), v, r.lines, { remember: false, actorName: null, previousIds: r.lines.flatMap((l) => l.voucher_line_ids) });
+    expect(tables.purchase_voucher_lines_v2.find((l) => l.id === "gr1")?.is_active).not.toBe(false);
     // ชื่อจีนเดิมของสินค้าไม่ถูกทับ
     expect(r.filledCn).toBe(0);
     expect(tables.skus_v2.find((s) => s.id === "s2")?.name_cn).toBe("方底狗扣 镍");

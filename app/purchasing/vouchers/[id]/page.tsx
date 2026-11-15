@@ -18,7 +18,7 @@ import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
-import { SellerBillPanel, type SellerBillPanelApi } from "@/components/seller-bill-panel";
+import { SellerBillPanel, type SellerBillPanelApi, type BillLineMoney, type BillLinkMap } from "@/components/seller-bill-panel";
 import { SaveBar } from "@/components/save-bar";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
@@ -111,8 +111,14 @@ export default function PurchaseVoucherFormPage() {
   const [addOpen, setAddOpen] = useState(false);   // แถบ ＋ เพิ่มรายการเอง (พับไว้)
   // ★ 2026-11-15 แผงบิลร้านให้หน้าใบคุม (เจ้าของ: "ขอปุ่มบันทึกร่างด้วย" — แถบเดียวบันทึกทั้งหน้า) + งานแก้ PO ทำตอนยืนยันใบ
   const panelRef = useRef<SellerBillPanelApi | null>(null);
-  const [panelStatus, setPanelStatus] = useState<{ pending: boolean; undecided: number }>({ pending: false, undecided: 0 });
-  const onPanelStatus = useCallback((s: { pending: boolean; undecided: number }) => setPanelStatus((p) => (p.pending === s.pending && p.undecided === s.undecided ? p : s)), []);
+  const [panelStatus, setPanelStatus] = useState<{ pending: boolean; undecided: number; bills: number }>({ pending: false, undecided: 0, bills: 0 });
+  const onPanelStatus = useCallback((s: { pending: boolean; undecided: number; bills: number }) => setPanelStatus((p) => (p.pending === s.pending && p.undecided === s.undecided && p.bills === s.bills ? p : s)), []);
+  // ★ 2026-11-15 รอบ 4 (เจ้าของ: "ตารางล่างไม่ค่อยจำเป็น เอาไปรวมกับอันบน · อยากได้ view รวมทุกอันเป็นตาราง และดูแบบแยกบิล")
+  //   แยกตามบิล = แผงบิลร้าน (แถวบาง + ฿/ชิ้น · ยอด ฿) + กล่อง "ไม่มีบิล" · รวมเป็นตาราง = ตารางเดียวทุกรายการ + คอลัมน์ "บิล" · จำในเครื่อง
+  const [linesView, setLinesView] = useState<"bill" | "all">("bill");
+  useEffect(() => { try { const v = localStorage.getItem("pv-lines-view"); if (v === "bill" || v === "all") setLinesView(v); } catch { /* ไม่มีที่เก็บ = ค่าเริ่ม */ } }, []);
+  const changeLinesView = (v: "bill" | "all") => { setLinesView(v); try { localStorage.setItem("pv-lines-view", v); } catch { /* ไม่เป็นไร */ } };
+  const [billLinks, setBillLinks] = useState<BillLinkMap>({});
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const applyData = useCallback((d: Detail) => {
@@ -185,6 +191,13 @@ export default function PurchaseVoucherFormPage() {
     };
   }, [data, h, ln, currency]);
   const calc = useMemo(() => (calcIn ? computeVoucher(calcIn.header, calcIn.lines) : null), [calcIn]);
+  /** ★ 2026-11-15 ยอดบาทต่อบรรทัด (สูตรกลางเดียวกับตาราง) → แถวบิลร้านโชว์ ฿/ชิ้น · ยอด ฿ */
+  const lineMoney = useMemo(() => {
+    if (!data || !calc) return undefined;
+    const m: Record<string, BillLineMoney> = {};
+    data.lines.forEach((l, i) => { const c = calc.lines[i]; if (c) m[l.id] = { unit_thb: c.has_price ? c.unit_price_thb : null, total_thb: c.has_price ? c.line_total_thb : null }; });
+    return m;
+  }, [data, calc]);
 
   const setHeader = (patch: Partial<typeof h>) => { setH((p) => ({ ...p, ...patch })); setDirty(true); };
   /** ★ 2026-11-14 รู้ยอดบาท ไม่รู้เรท → แก้ "ค่าสินค้า ฿" ในกล่องสรุป แล้วคิดเรทให้ใหม่ (ให้ยอดบาทตรงทุกสตางค์ · lib/landed-cost fxForTargetThb) */
@@ -395,6 +408,10 @@ export default function PurchaseVoucherFormPage() {
     seller_ship_foreign: t?.seller_ship_foreign ?? 0, seller_ship_thb: t?.seller_ship_thb ?? 0, pay_fee_thb: t?.pay_fee_thb ?? 0, shop_total_thb: t?.shop_total_thb ?? 0, paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb), ship_manual: shipManual };
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
+  /** ช่องกรอกในตารางรายการ (แถวบาง) */
+  const cellCls = "h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
+  const hasBills = foreign && panelStatus.bills > 0;
+  const billView = hasBills && linesView === "bill";
 
   return (
     <PlaygroundShell>
@@ -494,7 +511,31 @@ export default function PurchaseVoucherFormPage() {
                 </div>
 
                 {/* บิลจากร้าน (ภาษาจีน) — ใบหยวน = ทางหลักเติมราคา จึงเปิดไว้บนสุด · ใบบาทพับไว้ล่างสุด (แบบ B) */}
-                {foreign && <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} />}
+                {hasBills && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-700">รายการในใบ</span>
+                    <span className="text-xs text-slate-400">{data.lines.length} รายการ · บิลร้าน {panelStatus.bills} ใบ</span>
+                    <div className="ml-auto inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs" role="tablist" aria-label="มุมมองรายการ">
+                      {([["bill", "แยกตามบิล"], ["all", "รวมเป็นตาราง"]] as const).map(([v, label], n) => (
+                        <button key={v} type="button" role="tab" aria-selected={linesView === v} onClick={() => changeLinesView(v)}
+                          className={`h-8 px-3 ${n > 0 ? "border-l border-slate-200" : ""} ${linesView === v ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* แผงต้องอยู่ตลอด (ซ่อนเฉย ๆ ในมุมรวม) — หน้าใบใช้บันทึกร่าง/งานแก้ PO ตอนยืนยันผ่าน controlRef */}
+                {foreign && (
+                  <div className={hasBills && !billView ? "hidden" : ""}>
+                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} lineMoney={lineMoney} onLinks={setBillLinks} />
+                  </div>
+                )}
+                {hasBills && !billView && (
+                  <div className="flex items-center gap-2 flex-wrap rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-[11px] text-slate-500">
+                    <span>บิลร้าน {panelStatus.bills} ใบ</span>
+                    {panelStatus.undecided > 0 && <span className="text-amber-700">· ยังมี {panelStatus.undecided} แถวในบิลรอยืนยัน</span>}
+                    <button type="button" onClick={() => changeLinesView("bill")} className="ml-auto text-blue-600 hover:underline">{panelStatus.undecided > 0 ? "ไปยืนยันที่มุมแยกตามบิล" : "ดูแบบแยกตามบิล / เพิ่มบิล"}</button>
+                  </div>
+                )}
 
                 {/* รายการ */}
                 <div className="space-y-2">
@@ -503,7 +544,7 @@ export default function PurchaseVoucherFormPage() {
                        — คอลัมน์สินค้ากว้างขั้นต่ำ + ชื่อ 2 บรรทัด (ชี้ดูชื่อเต็ม) · ล็อกรูป+สินค้าไว้ซ้ายตอนเลื่อนขวา · จอแคบเลื่อนแทนการบีบ */}
                   {(() => {
                     const H = (t: string, tip?: string) => <span className="whitespace-nowrap" title={tip}>{t}</span>;
-                    const rows = data.lines.map((l, i) => {
+                    const allRows = data.lines.map((l, i) => {
                       const e = ln[l.id] ?? { unit_price: "", cbm_per_unit: "", kg_per_unit: "", ship_method: "" as const, qty: String(l.qty), discount: "", disc_mode: "amt" as const };
                       const c = calc.lines[i];
                       const lineMethod = c.method;   // วิธีคิดที่ใช้จริงกับบรรทัดนี้ (ระบุเอง หรือตามใบ)
@@ -513,46 +554,54 @@ export default function PurchaseVoucherFormPage() {
                         src: SOURCE_BADGE[e.unit_price ? (l.price_source ?? "manual") : "none"],
                         basisKey: (lineMethod === "weight" ? "kg_per_unit" : "cbm_per_unit") as "kg_per_unit" | "cbm_per_unit",
                         parentVal: lineMethod === "weight" ? l.parent_kg : l.parent_cbm,
+                        bill: billLinks[l.id] ?? null,
                       };
                     });
-                    type R = (typeof rows)[number];
+                    // มุมแยกตามบิล: ตารางนี้เหลือเฉพาะรายการที่ไม่ได้มาจากบิล (จากใบรับ / เพิ่มเอง) · มุมรวม = ทุกรายการ
+                    const rows = billView ? allRows.filter((r) => !r.bill) : allRows;
+                    type R = (typeof allRows)[number];
                     const cols: MiniColumn<R>[] = [
-                      { key: "img", header: "", width: "3.25rem", cell: ({ l }) => (
-                        <HoverPreview url={l.image_url} previewW={320}>
-                          <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
-                            {l.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={l.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
-                          </div>
-                        </HoverPreview>
-                      ) },
-                      { key: "item", header: H("สินค้า"), width: "minmax(13rem,2fr)", cell: ({ l, src }) => {
+                      /* ★ 2026-11-15 แถวบาง: รูปเล็กชี้ดูรูปใหญ่ · ชื่อบรรทัดเดียว · บรรทัดล่าง = รหัส · ใบรับ/PO · ที่มาราคา (โชว์เฉพาะที่ไม่ได้มาจากบิล) */
+                      { key: "item", header: H("สินค้า"), width: "minmax(14rem,2fr)", sortValue: ({ l }) => l.item_name, cell: ({ l, src, manual }) => {
                         const name = l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "");
                         return (
-                          <div className="min-w-0">
-                            <div className="flex items-start gap-1 text-slate-800"><span className="line-clamp-2 min-w-0" title={name}>{name}</span><CopyButton value={name} title="คัดลอกชื่อ" /></div>
-                            <div className="mt-0.5 flex items-center gap-1 text-[11px] font-mono text-slate-400 whitespace-nowrap min-w-0">
-                              <span className="truncate">{l.code || "—"}</span>{l.code && <CopyButton value={l.code} title="คัดลอกรหัส" />}
-                              <span className={`shrink-0 text-[10px] px-1 py-0.5 rounded border font-sans whitespace-nowrap ${src.cls}`}>{src.text}</span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <HoverPreview url={l.image_url} previewW={320}>
+                              <div className="w-7 h-7 shrink-0 rounded bg-slate-50 overflow-hidden border border-slate-100">
+                                {l.image_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={l.image_url} alt="" className="w-full h-full object-cover" />}
+                              </div>
+                            </HoverPreview>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1 text-[13px] font-medium text-slate-800 min-w-0"><span className="truncate" title={name}>{name}</span><CopyButton value={name} title="คัดลอกชื่อ" /></div>
+                              <div className="flex items-center gap-1 text-[11px] text-slate-400 whitespace-nowrap min-w-0">
+                                <span className="font-mono truncate">{l.code || "—"}</span>{l.code && <CopyButton value={l.code} title="คัดลอกรหัส" />}
+                                {manual
+                                  ? (l.po_no
+                                    ? <><span className="shrink-0 text-[10px] px-1 rounded border bg-violet-50 text-violet-700 border-violet-200" title="ผูกบรรทัดใบสั่งซื้อแล้ว (จากบิลร้าน) แต่ยังไม่ได้มาจากใบรับของ — ยังไม่เข้าสต๊อก">ยังไม่รับของ</span><span className="shrink-0">{l.po_no}</span></>
+                                    : <span className="shrink-0 text-[10px] px-1 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span>)
+                                  : <span className="shrink-0" title="ใบรับ · ใบสั่งซื้อ">· {[l.gr_no, l.po_no].filter(Boolean).join(" · ")}</span>}
+                                {src.text !== SOURCE_BADGE.bill.text && <span className={`shrink-0 text-[10px] px-1 rounded border whitespace-nowrap ${src.cls}`}>{src.text}</span>}
+                              </div>
                             </div>
                           </div>
                         );
                       } },
-                      { key: "ref", header: H("ใบรับ / PO"), width: "6.5rem", cell: ({ l, manual }) => (
-                        <div className="text-[11px] text-slate-500 whitespace-nowrap">{manual ? (l.po_no
-                          ? <><span className="text-[10px] px-1 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200" title="ผูกบรรทัดใบสั่งซื้อแล้ว (จากบิลร้าน) แต่ยังไม่ได้มาจากใบรับของ — ยังไม่เข้าสต๊อก">ยังไม่รับของ</span><div>{l.po_no}</div></>
-                          : <span className="text-[10px] px-1 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span>) : <><div>{l.gr_no}</div><div>{l.po_no}</div></>}</div>
-                      ) },
+                      /* มุมรวมเป็นตาราง: มาจากบิลไหน (กดหัวคอลัมน์เรียงตามบิล) */
+                      ...(hasBills && !billView ? [{ key: "bill", header: H("บิล", "รายการนี้มาจากบิลร้านใบไหน"), width: "5.5rem", sortValue: ({ bill }: R) => bill?.bill_no ?? "~", cell: ({ bill }: R) => bill
+                        ? <span className="text-[11px] px-1.5 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200 font-mono whitespace-nowrap" title={`บิลร้าน No. ${bill.bill_no ?? "—"}`}>{bill.bill_no ? bill.bill_no.slice(-6) : "บิล"}</span>
+                        : <span className="text-[11px] text-slate-400 whitespace-nowrap">ไม่มีบิล</span> }] : []),
                       { key: "qty", header: H("รับจริง"), align: "right", width: "6.5rem", cell: ({ l, e, manual }) => (
                         <div className="text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
                           {manual && !readonly
-                            ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${inputCls} w-16 text-right tabular-nums`} />
+                            ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${cellCls} w-16 text-right tabular-nums`} />
                             : l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span>
                         </div>
                       ) },
                       { key: "price", header: H(`ราคา/หน่วย (${sym.trim()})`), align: "right", width: "8.5rem", cell: ({ l, e, c }) => (
                         <div className="text-right">
-                          <MoneyInput value={e.unit_price} disabled={readonly} onChange={(v) => setLine(l.id, { unit_price: v })} className={`${inputCls} w-24 text-right ${!c.has_price ? "border-amber-300" : ""}`} placeholder="0.00" />
+                          <span title={l.sys_price != null ? `ราคาในระบบ ${sym}${fmtMoney(l.sys_price, 4)}` : undefined}><MoneyInput value={e.unit_price} disabled={readonly} onChange={(v) => setLine(l.id, { unit_price: v })} className={`${cellCls} w-24 text-right ${!c.has_price ? "border-amber-300" : ""}`} placeholder="0.00" /></span>
                           {/* ราคาในระบบโชว์เล็ก ๆ + ปุ่มไอคอนเส้น (ชี้ดูว่าคืออะไร): ใช้ราคาระบบ = ดึงมาใส่ · แทนราคาในระบบ = เอาราคานี้ไปเป็นราคาต่อร้าน */}
-                          {l.item_sku_id && (l.sys_price != null || (!readonly && num(e.unit_price) > 0)) && (
+                          {l.item_sku_id && ((l.sys_price != null && Math.abs(num(e.unit_price) - l.sys_price) > 1e-9) || (l.sys_price == null && !readonly && num(e.unit_price) > 0)) && (
                             <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-400 whitespace-nowrap">
                               <span title={l.sys_price != null ? `ราคาในระบบ: ${SYS_SRC[l.sys_price_source ?? ""] ?? ""}` : "ยังไม่มีราคาในระบบ"}>ในระบบ {l.sys_price != null ? `${sym}${fmtMoney(l.sys_price, 4)}` : "—"}</span>
                               {!readonly && l.sys_price != null && Math.abs(num(e.unit_price) - l.sys_price) > 1e-9 && (
@@ -572,7 +621,7 @@ export default function PurchaseVoucherFormPage() {
                         <div className="text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
                             <input type="number" inputMode="decimal" step="any" min={0} value={e.discount ?? ""} disabled={readonly} onChange={(ev) => setLine(l.id, { discount: ev.target.value })} onFocus={(ev) => ev.target.select()}
-                              className={`${inputCls} w-14 text-right tabular-nums ${num(e.discount) > 0 ? "border-red-200 text-red-600" : ""}`} placeholder="0" title="ส่วนลดของรายการนี้" />
+                              className={`${cellCls} w-14 text-right tabular-nums ${num(e.discount) > 0 ? "border-red-200 text-red-600" : ""}`} placeholder="0" title="ส่วนลดของรายการนี้" />
                             <button type="button" disabled={readonly} onClick={() => setLine(l.id, { disc_mode: e.disc_mode === "pct" ? "amt" : "pct" })} title={e.disc_mode === "pct" ? "ตอนนี้: เป็น % — กดเพื่อใส่เป็นยอดเงิน" : "ตอนนี้: เป็นยอดเงิน — กดเพื่อใส่เป็น %"}
                               className="h-7 min-w-7 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{e.disc_mode === "pct" ? "%" : sym.trim() || "฿"}</button>
                           </div>
@@ -584,7 +633,7 @@ export default function PurchaseVoucherFormPage() {
                         { key: "method", header: H("คิดจาก"), width: "5.5rem", cell: ({ l, e }: R) => (
                           /* วิธีคิดเฉพาะบรรทัด — ว่าง = ตามค่าเริ่มต้นของใบ · มาจากใบส่งของ (BOX=คิว, CLOTH BLOCK=กก.) หรือเลือกเอง */
                           <select value={e.ship_method} disabled={readonly} onChange={(ev) => setLine(l.id, { ship_method: ev.target.value as "" | "cube" | "weight" })}
-                            className={`${inputCls} w-full text-xs ${e.ship_method ? "border-indigo-300 bg-indigo-50" : ""}`}
+                            className={`${cellCls} w-full ${e.ship_method ? "border-indigo-300 bg-indigo-50" : ""}`}
                             title={`คิดค่าส่งบรรทัดนี้จากอะไร — ตามใบ = ${h.ship_method === "cube" ? "คิว" : h.ship_method === "weight" ? "น้ำหนัก" : "ไม่คิด"}`}>
                             <option value="">ตามใบ</option>
                             <option value="cube">คิว</option>
@@ -597,7 +646,7 @@ export default function PurchaseVoucherFormPage() {
                               <>
                                 <div className="flex items-center justify-end gap-1">
                                   <input type="number" inputMode="decimal" step="any" min={0} value={e[basisKey]} disabled={readonly} onChange={(ev) => setLine(l.id, { [basisKey]: ev.target.value })}
-                                    className={`${inputCls} w-20 text-right tabular-nums ${!e[basisKey] ? "border-amber-300" : ""}`} placeholder={lineMethod === "cube" ? "0.0000" : "0.000"} />
+                                    className={`${cellCls} w-20 text-right tabular-nums ${!e[basisKey] ? "border-amber-300" : ""}`} placeholder={lineMethod === "cube" ? "0.0000" : "0.000"} />
                                   <span className="text-[10px] text-slate-400 w-5">{lineMethod === "cube" ? "คิว" : "กก."}</span>
                                 </div>
                                 {parentVal != null && String(parentVal) !== e[basisKey] && !readonly && (
@@ -619,10 +668,20 @@ export default function PurchaseVoucherFormPage() {
                         <span title={`มาจากใบรับ ${l.gr_no ?? ""} — ลบที่นี่ไม่ได้ (จำนวนต้องตรงกับของที่รับจริง) ให้แก้/ลบที่ใบรับ`} className="inline-flex h-7 w-7 items-center justify-center text-slate-300"><Icon name="lock" mode="line" size={14} /></span>
                       ) }]),
                     ];
-                    return (
-                      <MiniTable rows={rows} rowKey={(r) => r.l.id} columns={cols} hideToolbar zebra={false} resizable storageKey="pv-lines" columnMenu={{}} stickyCols={2}
+                    if (billView && rows.length === 0) return null;   // ทุกรายการมาจากบิล → ไม่ต้องมีกล่อง "ไม่มีบิล"
+                    const table = (
+                      <MiniTable rows={rows} rowKey={(r) => r.l.id} columns={cols} hideToolbar zebra={false} dense resizable storageKey="pv-lines-c" columnMenu={{}} stickyCols={1}
                         emptyText={<span className="text-xs">— ยังไม่มีรายการ — เพิ่มจากแถบด้านล่าง</span>} />
                     );
+                    return billView ? (
+                      <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 text-sm">
+                          <span className="font-medium text-slate-800">ไม่มีบิล</span>
+                          <span className="text-[11px] text-slate-500">{rows.length} รายการ · จากใบรับ / เพิ่มเอง — แก้ในแถวได้เลย</span>
+                        </div>
+                        {table}
+                      </div>
+                    ) : table;
                   })()}
                   {/* ＋ เพิ่มรายการเอง (ของที่ไม่ได้อยู่ในใบรับ / ใบที่สร้างเปล่า) · รายการจากใบรับ แก้จำนวน/ลบที่ใบรับ — พับไว้ (แบบ B) · ใบว่างเปิดให้เลย */}
                   {!readonly && !addOpen && data.lines.length > 0 && (
@@ -682,7 +741,7 @@ export default function PurchaseVoucherFormPage() {
                       </div>
                       <div className="mt-1.5 text-[11px] text-slate-400">แต่ละบรรทัดเลือกคิดจาก คิว หรือ น้ำหนัก ได้เอง (คอลัมน์ "คิดจาก") · อ่านใบส่งของแล้วระบบเลือกให้ตามกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="hover:text-blue-600 underline decoration-dotted">⚙ แก้กฎ</a></div>
                       {anyShip && (t?.missing_basis_count ?? 0) > 0 && (
-                        <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มีคิว/กก. ตามวิธีที่เลือก (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU และยังไม่ได้อ่านจากใบส่งของ) → รายการนั้นจะไม่ได้รับค่าส่ง ใส่เองในตารางได้</div>
+                        <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มีคิว/กก. ตามวิธีที่เลือก (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU และยังไม่ได้อ่านจากใบส่งของ) → รายการนั้นจะไม่ได้รับค่าส่ง ใส่เองในตารางได้{billView && <> (<button type="button" onClick={() => changeLinesView("all")} className="underline">กด รวมเป็นตาราง</button>)</>}</div>
                       )}
                       {anyShip && (t?.missing_rate_count ?? 0) > 0 && (
                         <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_rate_count} รายการมีปริมาณแต่ยังไม่มีเรทของวิธีนั้น (ใส่ ฿/คิว หรือ ฿/กก. ให้ครบ)</div>
