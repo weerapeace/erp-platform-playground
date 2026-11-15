@@ -678,6 +678,14 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "ห้ามยิง LINE API เองในหน้า/API อื่น",
   },
   {
+    key: "chat-inbox", label: "ห้องแชทรวม (แชทลูกค้าทุกช่องทาง)", code: "lib/chat", category: "notify",
+    source: { path: "lib/chat" },
+    what: "รับ/ตอบแชทลูกค้าทุกช่องทางที่เดียว (/chat) — ตาราง chat_conversations/chat_messages + ตัวต่อช่องทางแบบเดียวกัน · กติกาตอบฟรี/ยังไม่ตอบ/แจ้งเตือน",
+    when: "ต่อแชทช่องทางใหม่ (Lazada/Shopee/TikTok/Meta) → ไฟล์ตัวต่อ 1 ไฟล์ + 1 บรรทัดใน lib/chat/registry · ข้อความเข้าทุกช่องทาง → ingestInbound (lib/chat/store)",
+    notWhen: "ห้ามทำหน้าแชท/ตารางเก็บแชทแยกต่อช่องทาง · ส่ง LINE ถึงลูกค้าต้องผ่านตัวส่งกลาง lib/line-send",
+    doc: "chat-inbox.md",
+  },
+  {
     key: "bell-switch", label: "สวิตช์เปิด/ปิดกระดิ่งที่ส่งตรง", code: "lib/bell-switch", category: "notify",
     source: { path: "lib/bell-switch" },
     what: "เช็กว่าแอดมินปิดกระดิ่งเรื่องนี้ไว้ไหม ก่อนส่งกระดิ่งที่โค้ดส่งตรง (ไม่ผ่านกฎ) · สวิตช์อยู่ในแผงกระดิ่งของแผนผังการทำงาน",

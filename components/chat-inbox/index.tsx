@@ -74,7 +74,11 @@ export function ChatInbox() {
 
   // ?c=<id> จากกระดิ่ง/ศูนย์แจ้งเตือน → เปิดห้องนั้น (อ่านครั้งเดียวหลังโหลดหน้า)
   useEffect(() => {
-    try { const c = new URLSearchParams(window.location.search).get("c"); if (c) setSelectedId(c); } catch { /* ไม่มีก็ไม่เป็นไร */ }
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const c = sp.get("c"); if (c) setSelectedId(c);
+      if (sp.get("unanswered") === "1") setUnanswered(true);   // ลิงก์ "เปิดหน้าแชท" จากศูนย์แจ้งเตือน
+    } catch { /* ไม่มีก็ไม่เป็นไร */ }
   }, []);
 
   useEffect(() => {

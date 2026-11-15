@@ -10,7 +10,7 @@
 | เฟส | อะไร | สถานะ |
 |---|---|---|
 | 0 | ตรวจคู่มือ API แชทของทุกแพลตฟอร์ม + หา LINE OA ของร้าน + เช็กลิสต์ให้เจ้าของ | เอกสารนี้ |
-| 1 | หน้าแชท 3 ช่อง + LINE (รับ/ตอบ/แจ้งเตือน) | รอเจ้าของอนุมัติรายการไฟล์ |
+| 1 | หน้าแชท 3 ช่อง + LINE (รับ/ตอบ/แจ้งเตือน) | ทำแล้ว 2026-11-15 — รอเจ้าของต่อ OA ร้าน (เช็กลิสต์ A) ถึงจะมีแชทเข้า |
 | 2 | Lazada · TikTok · Shopee ทีละร้าน (เมื่อได้สิทธิ์) | ยังไม่เริ่ม |
 | 3 | แผงข้าง: ออเดอร์ · สต็อก · การ์ดสินค้า · ข้อความสำเร็จรูป · มอบหมาย (ครบชุด) | ยังไม่เริ่ม |
 | 4 | Facebook / Instagram (รอ Meta App Review) + AI ร่างคำตอบ | ยังไม่เริ่ม |
@@ -72,7 +72,7 @@ developers.facebook.com/documentation/business-messaging/messenger-platform/{sen
 
 ---
 
-## เฟส 1 — แบบที่เสนอ (รอเจ้าของอนุมัติ)
+## เฟส 1 — สิ่งที่ทำ (เจ้าของอนุมัติ 2026-11-15)
 
 ### ข้อมูล (ตารางใหม่ 2 ตาราง — แบบเดียวใช้ได้ทุกช่องทาง)
 
@@ -153,13 +153,15 @@ developers.facebook.com/documentation/business-messaging/messenger-platform/{sen
 
 | ไฟล์ | ทำอะไร |
 |---|---|
-| `supabase/migrations/2026121802xx_chat_inbox.sql` | 2 ตาราง + RLS + สิทธิ์ 4 ตัว + ให้ admin/manager |
-| `lib/chat/types.ts` | แบบข้อมูลกลาง + แบบ "ตัวต่อช่องทาง" |
-| `lib/chat/rules.ts` | กติกาล้วน: ตอบฟรีได้ไหม · ยังไม่ตอบไหม · ความยาวข้อความต่อช่องทาง · ข้อความย่อในรายการ |
-| `lib/chat/line.ts` | ตัวต่อ LINE (แปลง event · ดึงชื่อ/รูปลูกค้า · ดึงรูปลง R2 · ส่ง reply/push · อ่านแล้ว) |
-| `lib/chat/registry.ts` | ทะเบียนช่องทาง (เพิ่มช่องทาง = เพิ่ม 1 บรรทัด) |
-| `lib/chat/store.ts` | บันทึกข้อความเข้า/ออก + ส่งกระดิ่ง |
-| `lib/chat/settings.ts` | OA ไหนรับแชท + แบรนด์ · ข้อความสำเร็จรูป |
+| `supabase/migrations/202612180200_chat_inbox.sql` | 2 ตาราง + RLS + สิทธิ์ 4 ตัว + ให้ admin/manager (**applied 2026-11-15**) |
+| `lib/chat/types.ts` | แบบข้อมูลกลาง (ห้อง · ข้อความ · ไฟล์แนบ · ค่าตั้ง) |
+| `lib/chat/rules.ts` | กติกาล้วน: ตอบฟรีได้ไหม · ยังไม่ตอบไหม · แจ้งเตือนเมื่อไหร่ · ความยาวข้อความต่อช่องทาง · ตัวกรอง · ข้อความสำเร็จรูป |
+| `lib/chat/line.ts` | ตัวต่อ LINE ส่วนกติกาล้วน: เลือก event 1:1 · แปลงเป็นข้อความกลาง |
+| `lib/chat/line-server.ts` | ตัวต่อ LINE ส่วนคุยกับ LINE: ดึงชื่อ/รูปลูกค้า · รูปลง R2 · ส่ง reply/push · การ์ดสินค้า Flex · อ่านแล้ว · โควตา · ดู webhook |
+| `lib/chat/registry.ts` | ทะเบียนช่องทาง `CHAT_ADAPTERS` (เพิ่มช่องทาง = 1 ไฟล์ + 1 บรรทัด) |
+| `lib/chat/store.ts` | บันทึกข้อความเข้า/ออก (`ingestInbound` / `recordOutbound`) + กระดิ่ง `chat.new_message` + นับห้องรอ |
+| `lib/chat/products.ts` | การ์ดสินค้าจากข้อมูลจริง (ราคา/ลิงก์จากรายการบนร้านของช่องทางนั้น) + สต็อกสินค้าที่คุย |
+| `lib/chat/settings.ts` | อ่าน/บันทึก `ui_config` key `chat_settings` |
 | `app/api/chat/conversations/route.ts` · `[id]/route.ts` · `[id]/send/route.ts` · `summary/route.ts` · `settings/route.ts` | API (ตรวจสิทธิ์ `chat.*` · audit ทุกการส่ง/มอบหมาย/ตั้งค่า) |
 | `app/chat/page.tsx` + `components/chat-inbox/*` | หน้า 3 ช่อง (รายการ · ข้อความ+กล่องตอบ · ลูกค้า) + ตั้งค่า |
 | `components/work-popup/chat-tab.tsx` | แท็บ "แชท" ในศูนย์แจ้งเตือน |
@@ -174,7 +176,16 @@ developers.facebook.com/documentation/business-messaging/messenger-platform/{sen
 | `components/work-popup/float-pref.ts` · `index.tsx` · `lib/notify-sources.ts` · `lib/push-categories.ts` | แท็บ + แหล่งแจ้งเตือน + ประเภท push |
 | `lib/brand-hub.ts` · `lib/brand-hub-server.ts` · `components/brand-hub/sections.ts` | การ์ด "แชทยังไม่ตอบ" + ตัวนับ + ลิงก์ `/chat?brand=` |
 | `lib/audit-entities.ts` | ชื่อสวยในหน้าประวัติ (ห้องแชท) |
-| `lib/shared-parts-registry.ts` | ลงทะเบียนถ้ามีชิ้นใช้ ≥3 จุด |
+| `lib/shared-parts-registry.ts` | ลงทะเบียน key `chat-inbox` (lib/chat) |
+| `components/auth/index.tsx` | ชนิดสิทธิ์ `chat.*` + สำรองของ manager |
+| `lib/image-resize.ts` | เพิ่ม `toChatJpeg` (ย่อเป็น JPEG — LINE ไม่รับ webp) |
+
+### เพิ่มช่องทางใหม่ (เฟส 2)
+
+1. ตัวต่อ 1 ไฟล์ `lib/chat/<ช่องทาง>-server.ts`: แปลงข้อความเข้าเป็น `ChatInbound` + ฟังก์ชันส่ง/อ่านแล้ว
+2. รับเข้า: webhook ของช่องทาง (ตอบ 200 ก่อน แล้วทำใน `after()`) หรือ cron ดึงเอง (เรียก `recordWorkerRun` + ลงทะเบียน `lib/ai-office`) → `ingestInbound`
+3. เพิ่ม 1 บรรทัดใน `CHAT_ADAPTERS` (`lib/chat/registry.ts`) — หน้า `/chat` ส่งได้ทันที
+4. ช่วงเวลาตอบ/ความยาวข้อความ แก้ที่ `CHAT_CHANNEL_INFO` (`lib/chat/rules.ts`)
 
 ไม่แตะ: ระบบกลุ่มไลน์เดิม (คำสั่งซื้อ/งานออกแบบ/ไอเดีย) · การตั้งค่า OA จริง · BigSeller · สต็อก
 

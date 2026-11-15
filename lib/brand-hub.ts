@@ -60,6 +60,8 @@ export type HubCounts = {
   no_box: number;
   /** ตัวเลือก (SKU เปิดใช้) ที่ไม่มีรูป — ร้านโชว์รูปต่อสี/ตัวเลือก */
   sku_no_image: number;
+  /** ห้องแชทลูกค้าที่ยังไม่มีใครตอบ (ห้องเปิดอยู่ + ลูกค้ารอ — กฎเดียวกับ lib/chat/rules isUnanswered) */
+  chat_unanswered: number;
 };
 
 /** ลิงก์ตาราง Parent SKU กรองแบรนด์ (ตารางกลางรับ ?flt= — รูปแบบตัวกรองคอลัมน์ {type:"text"} = เท่ากับ ถ้าเป็นรหัส) */
@@ -73,6 +75,7 @@ export function buildHubTodos(brandId: string, c: HubCounts): HubTodo[] {
   const b = encodeURIComponent(brandId);
   const parents = parentSkusOfBrandHref(brandId);
   const all: HubTodo[] = [
+    { key: "chat_unanswered", label: "แชทยังไม่ตอบ", hint: "ลูกค้าทักแล้วยังไม่มีใครตอบ", count: c.chat_unanswered, href: `/chat?brand=${b}&unanswered=1`, perm: "chat.view", tone: "danger" },
     { key: "orders_to_ship", label: "ออเดอร์รอจัดส่ง", hint: "ลูกค้าจ่ายแล้ว รอแพ็ก/ส่ง", count: c.orders_to_ship, href: `/master/platform-orders?brand=${b}`, perm: "platform_orders.view", tone: "danger" },
     { key: "unmatched", label: "ยังไม่จับคู่", hint: "สินค้าบนร้านที่ยังไม่รู้ว่าเป็นตัวไหนในระบบ", count: c.unmatched, href: `/master/platform-catalog?brand=${b}`, perm: "products.platforms.view", tone: "warning" },
     { key: "not_listed", label: "ยังไม่ลงร้านไหนเลย", hint: "สินค้าในระบบที่ยังไม่มีบนร้าน", count: c.not_listed, href: `/master/platform-catalog?brand=${b}&view=shop`, perm: "products.platforms.view", tone: "info" },

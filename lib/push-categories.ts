@@ -20,6 +20,7 @@ export const PUSH_CATEGORIES: PushCategory[] = [
   { key: "team_plan", icon: "📋", label: "แผนงานทีม: มอบงาน / ใกล้กำหนด / สรุปเช้า", hint: "งานในหน้าแผนงาน — เตือนก่อนกำหนด เลยกำหนด รอคนอื่นนาน สรุปงานตอน 9 โมง", match: ["team_plan.*"] },
   { key: "tasks", icon: "📝", label: "งาน: มอบหมาย / รอตรวจ / อนุมัติ", hint: "งานใหม่ งานย่อยส่งตรวจ อนุมัติ ส่งกลับแก้ ถูกแท็กชื่อ", match: ["task_*", "subtask_*", "checklist.*", "comment.mention"] },
   { key: "purchasing", icon: "🛒", label: "จัดซื้อ: ใบขอซื้อ / PO / คำขอ", hint: "PR ใหม่ อนุมัติ/ปฏิเสธ PO ยืนยัน/รับของ คำขอวัตถุดิบ/แก้สูตร", match: ["pr.*", "pr_*", "po.*", "material_request.*", "bom_request.*"] },
+  { key: "chat", icon: "💬", label: "แชทลูกค้า: มีคนทักรอคำตอบ", hint: "ลูกค้าทักห้องแชทรวม (LINE ฯลฯ) — เด้งครั้งเดียวต่อรอบที่ลูกค้ารอ ไม่เด้งทุกข้อความ", match: ["chat.*"] },
   { key: "sales", icon: "💼", label: "งานขาย: ใบสั่งขาย / ข้อความจากเว็บ", hint: "SO ยืนยัน/จัดส่ง/ปิด ข้อความลูกค้าจากเว็บร้าน", match: ["so.*", "storefront_contact.*"] },
   { key: "production", icon: "🏭", label: "ผลิต / QC / ของเสีย", hint: "งานรอ QC พบของเสีย", match: ["qc.*", "wo.*"] },
   { key: "security", icon: "🔐", label: "ความปลอดภัย: ล็อกอินเครื่องใหม่", hint: "มีคนเข้าบัญชีของคุณจากเครื่องที่ไม่เคยใช้", match: ["security.*"] },

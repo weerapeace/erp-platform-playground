@@ -23,6 +23,7 @@ export const HUB_TOOL_GROUPS: HubToolGroup[] = [
   {
     key: "orders", label: "ออเดอร์ + ส่งของ", icon: "truck", links: [
       { label: "ศูนย์ออเดอร์ออนไลน์", href: (id) => `/master/platform-orders?brand=${q(id)}`, perm: "platform_orders.view", brandAware: true },
+      { label: "แชทลูกค้า (รวมทุกช่องทาง)", href: (id) => `/chat?brand=${q(id)}`, perm: "chat.view", brandAware: true },
       { label: "สินค้าที่ขายได้", href: () => "/master/platform-sales", perm: "platform_orders.view" },
       { label: "แดชบอร์ดแพลตฟอร์ม", href: () => "/master/platform-dashboard", perm: "products.platforms.view" },
     ],

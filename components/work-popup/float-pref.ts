@@ -58,6 +58,7 @@ export const CENTER_TABS: { key: string; label: string; icon: string; perm?: str
   { key: "tasks", label: "Task", icon: "inspect", perm: ["tasks.view"] },
   { key: "plan", label: "แผนงาน", icon: "calendar", perm: ["tasks.view"] },
   { key: "line", label: "LINE", icon: "chat", perm: ["products.view", "po.view"] },
+  { key: "chat", label: "แชท", icon: "chat", perm: ["chat.view"] },   // ห้องแชทรวม — ลูกค้ายังรอคำตอบ (components/work-popup/chat-tab)
   { key: "bell", label: "กระดิ่ง", icon: "notify" },
   { key: "watches", label: "ของฉัน", icon: "star" },
   { key: "gif", label: "GIF", icon: "gift" },

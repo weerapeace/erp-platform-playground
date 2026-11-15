@@ -27,6 +27,7 @@ import { FloatViewContext, WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScr
 import type { FloatLevel } from "./float-pref";
 import { GifInbox, type GifPoke } from "./gif-inbox";
 import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
+import { ChatTab, type ChatSummary } from "./chat-tab";
 import type { LinePendingPayload } from "@/lib/line-pending";
 import { inboxCount, type InboxItem, type InboxPayload } from "@/lib/task-inbox";
 import { groupMyPlan, planPetCount, planPetNews } from "@/lib/team-plan-pet";
@@ -349,7 +350,7 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
-  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell" | "watches" | "tasks" | "plan" | "deploy">("work");
+  const [tab, setTab] = useState<"work" | "gif" | "line" | "chat" | "bell" | "watches" | "tasks" | "plan" | "deploy">("work");
   // ตั้งค่าการแจ้งเตือนต่อคน (หน้าต่างตัว Pet → การแจ้งเตือน · lib/notify-sources): โชว์ในศูนย์ / ตัว Pet เด้งบอก / ห้ามรบกวน
   const [notifyPrefs] = useNotifyPrefs();
   const showIn = (key: string) => notifyOn(notifyPrefs, key, "center");
@@ -407,6 +408,38 @@ export function WorkPopupHost() {
     order: showIn("line_order") ? linePending.order : undefined,
   } : null;
   const lineCount = linePendingCount(lineShown);
+
+  // ── แท็บ แชท: ห้องแชทที่ลูกค้ายังรอคำตอบ (GET /api/chat/summary · สิทธิ์ chat.view — ไม่มีสิทธิ์ = data null แท็บไม่ขึ้น) ──
+  //   ถามทุก 3 นาทีเหมือนแท็บ LINE (ข้อความใหม่เด้งทันทีทางกระดิ่ง/เครื่องอยู่แล้ว) · เปิดแท็บนี้อยู่ → กระดิ่งเรื่องแชทไม่ขึ้นซ้ำในแท็บกระดิ่ง
+  const chatOn = enabled && showIn("chat") && tabOn("chat");
+  const [chatSum, setChatSum] = useState<ChatSummary | null>(null);
+  const loadChat = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const r = await apiFetch("/api/chat/summary");
+      if (!r.ok) return;
+      const j = (await r.json()) as { data?: ChatSummary | null };
+      setChatSum(j.data ?? null);
+    } catch { /* เงียบ */ }
+  }, [uid]);
+  useEffect(() => {
+    if (!uid || skip || !chatOn || !wide) { if (!chatOn) setChatSum(null); return; }
+    const first = setTimeout(() => void loadChat(), 3800);
+    const iv = window.setInterval(() => { if (document.visibilityState === "visible") void loadChat(); }, POKE_POLL_MS);
+    return () => { clearTimeout(first); window.clearInterval(iv); };
+  }, [uid, skip, chatOn, wide, loadChat]);
+  useRefresh(() => { if (wide && chatOn && !skip) void loadChat(); });
+  const chatCount = chatOn ? chatSum?.waiting ?? 0 : 0;
+  const chatSeenKey = uid ? `fpet-chat-seen:${uid}` : "";
+  const [chatSeen, setChatSeen] = useState<Set<string>>(new Set());
+  useEffect(() => { if (chatSeenKey) setChatSeen(readIds(chatSeenKey)); }, [chatSeenKey]);
+  // ห้องใหม่ที่ยังไม่เคยเห็น (id + เวลาเริ่มรอ: ลูกค้าทักรอบใหม่ = เรื่องใหม่)
+  const newChat = chatOn && bounceOn("chat") && chatSum ? chatSum.items.filter((c) => !chatSeen.has(`${c.id}:${c.waiting_since}`)) : [];
+  useEffect(() => {   // เปิดแท็บแชทดู = เห็นแล้ว (ตัว Pet ไม่พูดเรื่องเดิมซ้ำ)
+    if (!expanded || !uid || tab !== "chat" || !newChat.length) return;
+    const n = new Set([...chatSeen, ...newChat.map((c) => `${c.id}:${c.waiting_since}`)]); setChatSeen(n); saveIds(chatSeenKey, n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, tab, uid, newChat.length]);
 
   // ── แท็บ Task: งาน Task Manager ที่รอฉัน (รอตรวจ / ต้องแก้ / มอบให้ — GET /api/creative-tasks/inbox · lib/task-inbox) ──
   // ถามทุก 3 นาที เหมือนแท็บ LINE · ปิด "โชว์ในศูนย์" ของเรื่องนี้ = ไม่ถามเลย · ตัวนับ = รอตรวจ + ต้องแก้
@@ -539,7 +572,7 @@ export function WorkPopupHost() {
 
   // ── แท็บ กระดิ่ง: แจ้งเตือนที่ยังไม่อ่าน (ตัวดึงกลางเดียวกับกระดิ่งบนแถบ) เฉพาะประเภทที่เปิดโชว์ในศูนย์ ──
   const feed = useNotificationFeed(wide && enabled && !skip && tabOn("bell") ? uid : null);
-  const bellItems = !tabOn("bell") ? [] : feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k) && !(k === "bell.team_plan" && planOn); });
+  const bellItems = !tabOn("bell") ? [] : feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k) && !(k === "bell.team_plan" && planOn) && !(k === "bell.chat" && chatOn); });
   const bellSeenKey = uid ? `fpet-bell-seen:${uid}` : "";
   const [bellSeen, setBellSeen] = useState<Set<string>>(new Set());
   useEffect(() => { if (bellSeenKey) setBellSeen(readIds(bellSeenKey)); }, [bellSeenKey]);
@@ -695,7 +728,7 @@ export function WorkPopupHost() {
   const gifOn = enabled && showIn("gif") && tabOn("gif");
   const gifCount = gifOn ? pokes.length : 0;
   const bellCount = enabled ? bellItems.length : 0;
-  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn || planTabOn || deployOn)));
+  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || chatCount > 0 || bellCount > 0 || watchCount > 0 || taskTabOn || planTabOn || deployOn)));
   const tabs: FloatTab[] = [
     ...(workTabOn && cur ? [{
       key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer, flush: true,
@@ -708,6 +741,10 @@ export function WorkPopupHost() {
     ...(planTabOn && uid ? [{
       key: "plan", label: "แผนงาน", icon: "calendar", count: planCount, subtitle: "แผนงานทีม · งานของฉัน",
       content: <PlanTab items={planItems} me={uid} onChanged={() => void loadPlan()} onOpen={setPlanEdit} onGo={go} />,
+    }] : []),
+    ...(chatCount > 0 ? [{
+      key: "chat", label: "แชท", icon: "chat", count: chatCount, subtitle: "ลูกค้าทักแล้วยังไม่มีใครตอบ",
+      content: <ChatTab data={chatSum} onGo={go} />,
     }] : []),
     ...(enabled && lineCount > 0 ? [{
       key: "line", label: "LINE", icon: "chat", count: lineCount, subtitle: "ส่งเข้ากลุ่มไลน์แล้ว รอคนจัดการ",
@@ -741,9 +778,10 @@ export function WorkPopupHost() {
   const alertTasks = taskTabOn && newTasks.length > 0;
   const alertPlan = planTabOn && newPlan.length > 0;
   const alertDeploy = !!newDeploy;
-  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell || alertWatch || alertTasks || alertPlan || alertDeploy);
+  const alertChat = chatCount > 0 && newChat.length > 0;
+  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertChat || alertBell || alertWatch || alertTasks || alertPlan || alertDeploy);
   // ตัวเลขบนตัว Pet ไม่นับงานรอขึ้นเว็บ (ไม่ใช่งานของคน) — แต่ตอนมีเรื่องขึ้นเว็บใหม่ ตัว Pet ต้องตื่นมาพูด
-  const total = workCount + gifCount + lineCount + bellCount + watchCount + taskCount + planCount;
+  const total = workCount + gifCount + lineCount + chatCount + bellCount + watchCount + taskCount + planCount;
   // ฟองค้าง = ไม่มีเรื่องใหม่อื่นให้พูด แต่ยังกำลังขึ้นเว็บอยู่ → พูดสถานะขึ้นเว็บต่อ (ไม่กระโดด)
   const stickyTalk = !quietNow && !petAlert && !!stickyDeploy;
   const petState = {
@@ -757,6 +795,7 @@ export function WorkPopupHost() {
       : alertPlan && newPlan[0].kind === "overdue" ? newPlan[0].text
       : alertTasks ? `${newTasks[0].status === "revision" ? "งานถูกตีกลับ" : "งานรอคุณตรวจ"}: ${newTasks[0].task_no ?? ""} ${newTasks[0].title}`.trim()
       : alertPlan ? newPlan[0].text
+      : alertChat ? `แชทใหม่: ${newChat[0].customer_name?.trim() || "ลูกค้า"} — ${newChat[0].last_preview ?? ""}`.trim()
       : alertBell ? newBell[0].title
       : alertWatch ? `${newWatch[0].watch}: ${newWatch[0].title}`
       : alertLine ? `ไลน์: ${newLine[0].title}`
@@ -767,15 +806,16 @@ export function WorkPopupHost() {
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {wide ? (floatOn && tabs.length > 0 && (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" || k === "watches" || k === "tasks" || k === "plan" || k === "deploy" ? k : "work")} pet={petState}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "chat" || k === "bell" || k === "watches" || k === "tasks" || k === "plan" || k === "deploy" ? k : "work")} pet={petState}
           onMinimize={collapse}
           onExpand={() => {
             setExpanded(true);
             // เปิดแท็บของเรื่องที่ทำให้ตัว Pet เด้งก่อน
-            setTab(alertWork ? "work" : alertDeploy ? "deploy" : alertPlan && newPlan[0].kind === "overdue" ? "plan" : alertTasks ? "tasks" : alertPlan ? "plan" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : planCount > 0 ? "plan" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : planTabOn ? "plan" : "gif");
+            setTab(alertWork ? "work" : alertDeploy ? "deploy" : alertPlan && newPlan[0].kind === "overdue" ? "plan" : alertTasks ? "tasks" : alertPlan ? "plan" : alertChat ? "chat" : alertBell ? "bell" : alertWatch ? "watches" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : taskCount > 0 ? "tasks" : planCount > 0 ? "plan" : watchCount > 0 ? "watches" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : taskTabOn ? "tasks" : planTabOn ? "plan" : "gif");
             if (cur) void check(undefined, true);
             void loadPokes();
             void loadLine();
+            if (chatOn) void loadChat();
             if (tasksOn) void loadInbox();
             if (planOn) void loadPlan();
             void feed.refresh();

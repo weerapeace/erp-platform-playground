@@ -11,6 +11,7 @@ import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
 import { REPORT_ONLY_SOURCES } from "@/lib/platform-order-status";
 import { isGoneStatus } from "@/lib/platform-listing-health";
+import { countWaiting } from "@/lib/chat/store";
 import { loadBrandSummaries } from "@/lib/platform-shop-view-server";
 import {
   HUB_CHANNELS, buildHubTodos, hubConnState,
@@ -67,7 +68,7 @@ export async function loadHubDetail(admin: Admin, brandId: string): Promise<HubD
   const parentsBase = () => admin.from("parent_skus_v2").select("id", { count: "exact", head: true }).eq("brand_id", brandId).eq("is_active", true);
   const reportOnly = REPORT_ONLY_SOURCES.map((s) => `source.neq.${s}`).join(",");
 
-  const [pfs, { data: creds }, parentIds, listings, parents, centralSet, noCover, ordersToShip, noWeight, noBox, skuNoImage] = await Promise.all([
+  const [pfs, { data: creds }, parentIds, listings, parents, centralSet, noCover, ordersToShip, noWeight, noBox, skuNoImage, chatUnanswered] = await Promise.all([
     loadPlatforms(admin),
     admin.from("platform_credentials").select("brand_id, platform_id, api_key, meta").eq("brand_id", brandId),
     fetchAllPages<{ id: string }>((from, to) => admin.from("parent_skus_v2").select("id").eq("brand_id", brandId).eq("is_active", true)
@@ -89,6 +90,8 @@ export async function loadHubDetail(admin: Admin, brandId: string): Promise<HubD
     // SKU เปิดใช้ ใต้ Parent เปิดใช้ของแบรนด์ ที่ไม่มีรูป (join แบบ inner — นับอย่างเดียว ไม่ดึงแถว)
     headCount(admin.from("skus_v2").select("id, parent_skus_v2!inner(brand_id, is_active)", { count: "exact", head: true })
       .eq("parent_skus_v2.brand_id", brandId).eq("parent_skus_v2.is_active", true).eq("is_active", true).is("cover_image_r2_key", null)),
+    // ห้องแชทที่ลูกค้ายังรอคำตอบ (ห้องแชทรวม /chat · lib/chat/store countWaiting) — ตารางยังไม่มี/อ่านพลาด = 0
+    countWaiting(admin, brandId).catch(() => 0),
   ]);
 
   const codeOf = new Map(pfs.map((p) => [p.id, p.code]));
@@ -118,7 +121,7 @@ export async function loadHubDetail(admin: Admin, brandId: string): Promise<HubD
   const counts: HubCounts = {
     orders_to_ship: ordersToShip, unmatched, not_listed: notListed, gone,
     no_cover: noCover, no_category: Math.max(0, parents - centralSet),
-    no_weight: noWeight, no_box: noBox, sku_no_image: skuNoImage,
+    no_weight: noWeight, no_box: noBox, sku_no_image: skuNoImage, chat_unanswered: chatUnanswered,
   };
   return {
     id: b.id, name: b.name ?? "—", logo_key: b.logo_url, color: b.color,

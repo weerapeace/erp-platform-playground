@@ -40,6 +40,8 @@ const CENTER_SOURCES: NotifySource[] = [
   { key: "plan", group: "center", label: "แผนงานทีม: งานของฉัน", hint: "แท็บ แผนงาน — เกินกำหนด / ครบวันนี้ / งานหลักวันนี้ · ตัว Pet พูดตอนถึงเวลาเตือน เลยกำหนด มีคนมอบงาน สรุปเช้า (เปิดอยู่ = เรื่องแผนงานไม่ขึ้นซ้ำในแท็บกระดิ่ง)", icon: "calendar", permission: "tasks.view", added: "2026-11-11" },
   { key: "line_design", group: "center", label: "LINE: งานออกแบบ", hint: "ส่งเข้ากลุ่มไลน์ รอเปิดใบงาน", icon: "design", permission: "products.view", added: "2026-11-05" },
   { key: "line_order", group: "center", label: "LINE: คำสั่งซื้อ", hint: "แคปคำสั่งซื้อจากไลน์ รอผูก PO", icon: "cart", permission: "po.view", defaults: { bounce: false }, added: "2026-11-05" },
+  // ห้องแชทรวม (/chat) — ห้องที่ลูกค้ายังรอคำตอบ (GET /api/chat/summary) · เด้งที่เครื่องผ่านกระดิ่งประเภท "แชทลูกค้า"
+  { key: "chat", group: "center", label: "แชทลูกค้า: รอคำตอบ", hint: "แท็บ แชท — ห้องที่ลูกค้าทักแล้วยังไม่มีใครตอบ กดแล้วเปิดห้องนั้น", icon: "chat", permission: "chat.view", push: "chat", added: "2026-11-15" },
   { key: "gif", group: "center", label: "GIF จากเพื่อน", hint: "เพื่อนส่ง GIF มาสะกิด", icon: "gift" },
   { key: "watches", group: "center", label: "การเตือนของฉัน", hint: "เงื่อนไขที่คุณตั้งเอง (แท็บ การเตือนของฉัน)", icon: "star", added: "2026-11-06" },
   // ข้อมูลเดียวกับหน้า /admin/deploy (GET /api/admin/deploy · สิทธิ์ admin.users) — คำพูด = deployPetNews ใน lib/deploy-queue
