@@ -19,7 +19,7 @@
  *   ไม่ให้เลือกร้านต้นทางเป็นปลายทาง · เข้าขั้น 2 = คัดลอกข้อมูลจากร้านต้นทางลงร่าง LINE (ค่าเริ่ม) ทีละตัว
  *   → ตารางจับคู่ CopyMappingTable (เปลี่ยนแหล่งรายช่อง / เติมราคาที่ว่าง) อยู่เหนือหน้าดูก่อนส่ง · ลงจริงใช้ create-product เดิม (อ่านร่าง)
  * ลงทุกร้านในครั้งเดียว (เจ้าของอนุมัติ 2026-11-10 เฟส A+B): ร้านที่ลงจริงได้/ดูก่อนส่งได้ มาจากทะเบียนกลาง lib/platform-create-registry
- *   ขั้น 2 = แท็บต่อร้าน (LINE: LineCreatePreviewEditor · Lazada: LazadaCreatePreviewEditor · TikTok: TiktokCreatePreviewEditor — ลงเป็นฉบับร่าง) · ขั้น 3 ลงทุกร้านในรอบเดียว + ผลแยกร้าน
+ *   ขั้น 2 = แท็บต่อร้าน (LINE: LineCreatePreviewEditor · Lazada: LazadaCreatePreviewEditor · TikTok: TiktokCreatePreviewEditor — ลงเป็นฉบับร่าง · Shopee: ShopeeCreatePreviewEditor — ปิดขาย + สต๊อก 0) · ขั้น 3 ลงทุกร้านในรอบเดียว + ผลแยกร้าน
  *   Lazada ยังไม่เปิดลงจริง (LAZADA_CREATE_LIVE) → ดูก่อนส่ง + บันทึกร่าง · ร้านใหม่ = เพิ่มแถวในทะเบียน + หน้าดูก่อนส่งของร้านนั้น
  * กันซ้ำ: ข้ามตัวที่มีบนร้านแล้ว (on_shop / ร่างมีรหัส) · ลงจริงทีละตัว · server ล็อกระหว่างสร้าง · ลงจริง > 20 ต้องพิมพ์ยืนยัน
  * สิทธิ์: บันทึกร่าง = products.platforms.edit · ลงจริง = products.platforms.publish · สร้างงาน = tasks.create
@@ -38,6 +38,7 @@ import { LineStorefrontPreview } from "./line-storefront-preview";
 import type { LineCreatePreview } from "@/lib/line-create-payload";
 import type { LazCreatePreview } from "@/lib/lazada-create-plan";
 import type { TtsCreatePreview } from "@/lib/tiktok-create-plan";
+import type { ShopeeCreatePreview } from "@/lib/shopee-create-plan";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
 import { creatorOf, hasCreatePreview, liveCreateEndpoint, type CreateStep } from "@/lib/platform-create-registry";
@@ -56,6 +57,7 @@ const CopyMappingTable = dynamic(() => import("./copy-mapping-table").then((m) =
 const LazadaCreatePreviewEditor = dynamic(() => import("./lazada-create-preview").then((m) => m.LazadaCreatePreviewEditor), { ssr: false });
 // หน้าดูก่อนส่งของ TikTok (ลงเป็นฉบับร่าง) — โหลดเมื่อเลือก TikTok เท่านั้น
 const TiktokCreatePreviewEditor = dynamic(() => import("./tiktok-create-preview").then((m) => m.TiktokCreatePreviewEditor), { ssr: false });
+const ShopeeCreatePreviewEditor = dynamic(() => import("./shopee-create-preview").then((m) => m.ShopeeCreatePreviewEditor), { ssr: false });
 
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
@@ -262,6 +264,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   }, []);
   const onTtLoaded = useCallback((pv: TtsCreatePreview, blockers: string[]) => {
     setPvState((s) => ({ ...s, [`tiktok:${pv.parent_id}`]: pv.missing.length + blockers.filter((b) => !b.startsWith("มีบน TikTok")).length }));
+  }, []);
+  const onSpLoaded = useCallback((pv: ShopeeCreatePreview, blockers: string[]) => {
+    setPvState((s) => ({ ...s, [`shopee:${pv.parent_id}`]: pv.missing.length + blockers.filter((b) => !b.startsWith("มีบน Shopee")).length }));
   }, []);
   const onPvLoaded = useCallback((pv: LineCreatePreview) => {
     setPvState((s) => ({ ...s, [`line_shopping:${pv.parent_id}`]: pv.missing.length + pv.blockers.filter((b) => !b.startsWith("มีบน LINE")).length }));
@@ -546,6 +551,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                           <LazadaCreatePreviewEditor key={`laz:${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} onLoaded={onLazLoaded} />
                         ) : activePf.code === "tiktok" ? (
                           <TiktokCreatePreviewEditor key={`tts:${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} onLoaded={onTtLoaded} />
+                        ) : activePf.code === "shopee" ? (
+                          <ShopeeCreatePreviewEditor key={`spe:${focusRow.id}:${pvNonce}`} parentId={focusRow.id} canEdit={canEdit} onLoaded={onSpLoaded} />
                         ) : (
                           <>
                             {/* ลงร้านอื่น: ตารางจับคู่ช่อง (ร้านต้นทาง / ข้อมูลในระบบ) — ใช้แล้วหน้าดูก่อนส่งด้านล่างโหลดใหม่ */}

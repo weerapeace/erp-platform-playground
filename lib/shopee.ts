@@ -456,6 +456,34 @@ export async function shopeeGetItemLimit(accessToken: string, shopId: string | n
   return val;
 }
 
+// ───────── ลงสินค้าใหม่ (เฟส 5 · ดูก่อนส่ง/สร้าง — กติกาประกอบ lib/shopee-create-plan) ─────────
+// เอกสาร (อ่าน 2026-11-15): GET ทั้งหมด · รายการส่งเป็นค่าคั่นจุลภาค (แบบ get_item_base_info)
+
+/** v2.product.get_item_limit แบบระบุหมวด — ช่วงชื่อ/ตัวเลือก/วันส่ง/กล่องบังคับไหม (shopeeCreateLimitsOf) · แคช 6 ชม. ต่อร้าน×หมวด · ไม่ได้ = null */
+const catLimitCache = new Map<string, { at: number; val: Record<string, unknown> | null }>();
+export async function shopeeGetCategoryLimit(accessToken: string, shopId: string | number, categoryId: string): Promise<Record<string, unknown> | null> {
+  const key = `${shopId}:${categoryId}`;
+  const hit = catLimitCache.get(key);
+  if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.val;
+  let val: Record<string, unknown> | null = null;
+  try { val = await shopeeFetch("/api/v2/product/get_item_limit", { accessToken, shopId, query: { category_id: categoryId } }); } catch { val = null; }
+  if (val) catLimitCache.set(key, { at: Date.now(), val });
+  return val;
+}
+
+/** v2.product.get_attribute_tree (ภาษาไทย) → ช่องคุณลักษณะของหมวด (ดิบ · แปลงด้วย shopeeAttrFieldsOf) */
+export async function shopeeGetAttributeTree(accessToken: string, shopId: string | number, categoryId: string): Promise<Obj[]> {
+  const r = respOf(await shopeeFetch("/api/v2/product/get_attribute_tree", { accessToken, shopId, query: { category_id_list: categoryId, language: "th" } }));
+  const one = arr(r.list).map(obj).find((x) => String(x?.category_id ?? "") === String(categoryId)) ?? obj(arr(r.list)[0]);
+  return arr(one?.attribute_tree).map(obj).filter((x): x is Obj => !!x);
+}
+
+/** v2.product.category_recommend → รหัสหมวดที่ Shopee แนะนำจากชื่อสินค้า (เรียงตามที่ Shopee ส่ง) */
+export async function shopeeCategoryRecommend(accessToken: string, shopId: string | number, itemName: string): Promise<string[]> {
+  const r = respOf(await shopeeFetch("/api/v2/product/category_recommend", { accessToken, shopId, query: { item_name: itemName.slice(0, 255) } }));
+  return arr(r.category_id).map((n) => String(n ?? "").trim()).filter(Boolean);
+}
+
 /**
  * v2.media_space.upload_image — ฝากรูป 1 รูปกับ Shopee → image_id (ใส่ใน update_item image.image_id_list)
  * เอกสาร (อ่าน 2026-11-15): Public API = เซ็นแค่ partner_id+path+timestamp (ไม่ใช้กุญแจร้าน) · multipart ช่อง image · JPG/JPEG/PNG ≤10MB

@@ -28,11 +28,23 @@ export type PlatformCreator = {
  */
 export const LAZADA_CREATE_LIVE = false;
 
+/**
+ * Shopee (เฟส 5 · เจ้าของ "เริ่ม 5A" 2026-11-15): lib/shopee-create-plan + /api/shopee/create-product
+ *   5A = ดูก่อนส่ง + บันทึกร่าง (ไม่แตะร้าน) · 5B = ลงจริง → เปลี่ยนเป็น true หลังเจ้าของอนุมัติ + ลองจริง 1 ตัว
+ *   ลงแบบ "ปิดขาย" (UNLIST) + สต๊อก 0 เสมอ — BigSeller ยังคุมสต๊อก
+ */
+export const SHOPEE_CREATE_LIVE = false;
+
 export const PLATFORM_CREATORS: Record<string, PlatformCreator> = {
   line_shopping: { code: "line_shopping", label: "LINE SHOPPING", endpoint: "/api/line-shopping/create-product", live: true },
   lazada: {
     code: "lazada", label: "Lazada", endpoint: "/api/lazada/create-product", live: LAZADA_CREATE_LIVE,
     notLiveReason: "ดูก่อนส่ง + บันทึกร่างได้ · ลงจริงเปิดเมื่อ Lazada ให้สร้างสินค้าอีกครั้ง (ปิดช่วงแคมเปญ)",
+  },
+  shopee: {
+    code: "shopee", label: "Shopee", endpoint: "/api/shopee/create-product", live: SHOPEE_CREATE_LIVE,
+    notLiveReason: "ดูก่อนส่ง + บันทึกร่างได้ · ลงจริงเปิดในขั้นถัดไป (ลงแบบปิดขาย + สต๊อก 0)",
+    note: "ลงแบบ \"ปิดขาย\" + สต๊อก 0 (BigSeller ยังคุมสต๊อก) — ตรวจในลิ้นชักสินค้าบนร้าน แล้วค่อยเปิดขาย/ใส่สต๊อก",
   },
   // TikTok Shop (เฟส D 2026-11-12 · เจ้าของเลือก "ลงเป็นร่าง"): lib/tiktok-create-plan + /api/tiktok-shop/create-product
   //   ลงเป็นฉบับร่างเสมอ (ไม่ขึ้นขาย) · TikTok บังคับสต๊อก ≥ 1 แม้เป็นร่าง (เจอจริง 2026-11-13) → ร่างใส่ 1 ชิ้น แก้ก่อนเผยแพร่
