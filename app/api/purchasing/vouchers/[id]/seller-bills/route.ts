@@ -139,10 +139,21 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   // ★ 2026-11-15 สรุปยอดบิล (付款详情) ที่คนแก้ในกล่อง "สรุปยอดบิล"
   if (body.summary !== undefined) patch.summary = normalizeBillSummary(body.summary);
   const summaryChanged = body.summary !== undefined && JSON.stringify(normalizeBillSummary((bill as Row).summary)) !== JSON.stringify(patch.summary);
+  /**
+   * ★ 2026-11-15 กันบันทึกทับกัน (เจอจริง PV2026-09-29-001: ยืนยัน 2 แถวห่างกัน 0.5 วิ → คำขอที่ 2 อ่านบิลก่อนคำขอแรกเขียน
+   *   แล้วเขียนทับ id รายการในใบของแถวแรกเป็นค่าว่าง → ยืนยันแถวนั้นซ้ำ = รายการซ้ำในใบ)
+   *   อ่านแถวล่าสุดในฐานข้อมูล "ก่อนเขียน" — id รายการในใบของแถวที่คำขอนี้ไม่ได้ลงใบ ยึดของล่าสุดเสมอ (ฝั่งเว็บไม่เคยล้าง id เอง)
+   */
+  const withFreshIds = async (ls: SellerBillLine[], keep: Set<string>): Promise<SellerBillLine[]> => {
+    const { data: fresh } = await admin.from("purchase_delivery_bills").select("lines").eq("id", billId).maybeSingle();
+    const fl = (Array.isArray((fresh as Row | null)?.lines) ? ((fresh as Row).lines as Row[]) : []).map(normalizeBillLine);
+    const byRid = new Map(fl.filter((l) => l.rid).map((l) => [l.rid as string, l.voucher_line_ids ?? []]));
+    return ls.map((l) => (l.rid && !keep.has(l.rid) && byRid.has(l.rid) ? { ...l, voucher_line_ids: byRid.get(l.rid) ?? [] } : l));
+  };
 
   // ★ 2026-11-14 บันทึกร่างอัตโนมัติ (หน้าเว็บยิงทุก ~2 วิหลังแก้) — เก็บตามที่ส่งมา ไม่จับคู่/คิดป้ายใหม่ (เร็ว + ไม่ทับที่กำลังแก้)
   if (body.autosave && !body.apply && !body.rematch) {
-    patch.lines = lines;
+    patch.lines = await withFreshIds(lines, new Set());
     const { error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     // บิลที่ใส่ลงใบแล้ว + แก้สรุปยอด → หัวใบ (ค่าส่งในจีน/ค่าธรรมเนียม/ยอดจ่ายจริง/เรท) ตามทันที
@@ -177,6 +188,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
         fillCnName: body.fill_cn !== false, actorId: actor.id, billId, backfillPo: body.backfill_po === true, billNo: str((bill as Row).bill_no) || null, billDate: str((bill as Row).bill_date) || null });
       const got = new Map(result.lines.filter((l) => l.rid).map((l) => [l.rid as string, l]));
       lines = lines.map((l) => (isT(l) ? got.get(l.rid as string) ?? l : l));
+      lines = await withFreshIds(lines, rids);   // แถวอื่น = id ล่าสุดในฐานข้อมูล (อีกคำขออาจเพิ่งลงใบไป)
       patch.status = lines.some((l) => (l.voucher_line_ids ?? []).length > 0) ? "applied" : "parsed";
       patch.applied_at = new Date().toISOString();
     } else if (body.apply) {
@@ -188,6 +200,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       lines = result.lines;
       patch.status = "applied"; patch.applied_at = new Date().toISOString();
     }
+    if (!result) lines = await withFreshIds(lines, new Set());   // จับคู่ใหม่/บันทึกเฉย ๆ = ไม่ได้ลงใบ → id ยึดของล่าสุด
     patch.lines = lines;
     const { data: upd, error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId).select("*").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

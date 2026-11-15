@@ -161,7 +161,17 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   const dirtyBills = useRef(new Set<string>());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [auto, setAuto] = useState<{ pending: boolean; saving: boolean; at: Date | null; err: string | null }>({ pending: false, saving: false, at: null, err: null });
-  const flushSave = useCallback(async () => {
+  /**
+   * ★ 2026-11-15 คิวบันทึก: บันทึกร่าง + ลงใบ วิ่งทีละคำขอ (เจอจริง: กดยืนยัน 2 แถวห่างกัน 0.5 วิ = 2 คำขอพร้อมกัน
+   *   → คำขอหลังบันทึกทับ id รายการในใบของแถวแรก → ยืนยันแถวนั้นซ้ำได้รายการซ้ำในใบ) · เซิร์ฟเวอร์กันซ้ำอีกชั้น (อ่านล่าสุดก่อนเขียน)
+   */
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const p = saveChain.current.then(fn, fn);
+    saveChain.current = p.catch(() => undefined);
+    return p;
+  }, []);
+  const flushSave = useCallback(() => enqueue(async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
     const ids = [...dirtyBills.current]; if (!ids.length) return;
     dirtyBills.current.clear();
@@ -181,7 +191,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
       ids.forEach((id) => dirtyBills.current.add(id));
       setAuto((s) => ({ ...s, saving: false, pending: true, err: String((e as Error).message ?? e) }));
     }
-  }, [voucherId]);
+  }), [voucherId, enqueue]);
   const markDirty = (billId: string) => {
     if (readonly) return;
     dirtyBills.current.add(billId);
@@ -243,18 +253,28 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   //   กด ✓ ยืนยัน / ข้าม / เป็นค่าใช้จ่าย = ลงใบแถวนั้นทันที (API apply_rids · แถวอื่นไม่แตะ) → แถวพับเป็นบรรทัดเดียว · กด "แก้" = เปิดกลับมาแก้
   //   งานแก้ใบสั่งซื้อ (ลด PO / ปิดยอด) ไม่ทำตอนนี้ → ทำตอนกด "ยืนยัน + ออกเลข" ที่หน้าใบ (controlRef.runPoPlans) · ย้าย PO ร้านอื่น = ถามก่อนลงแถวนั้น
   const [applying, setApplying] = useState<Set<string>>(new Set());
-  const applyRows = async (billId: string, rids: string[], nextLines: SellerBillLine[], opts?: { backfill?: boolean }) => {
-    if (!rids.length) return;
+  const applyRows = (billId: string, rids: string[], nextLines: SellerBillLine[], opts?: { backfill?: boolean }) => {
+    if (!rids.length) return Promise.resolve();
     setApplying((s) => { const nx = new Set(s); rids.forEach((r) => nx.add(r)); return nx; });
+    return enqueue(async () => {
     dirtyBills.current.delete(billId);   // ส่งแถวทั้งบิลไปพร้อมกันแล้ว
+    // ถึงคิวแล้วส่งแถว "ล่าสุด" (คำขอก่อนหน้าอาจเพิ่งลงใบแถวอื่น) · แถวที่จะลงใบ = ตามที่กดไว้
+    const want = new Map(nextLines.filter((l) => l.rid).map((l) => [l.rid as string, l]));
+    const send = (draftRef.current[billId] ?? nextLines).map((l) => (l.rid && rids.includes(l.rid) ? want.get(l.rid) ?? l : l));
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bill_id: billId, lines: nextLines, apply_rids: rids, remember, fill_cn: fillCn, backfill_po: !!opts?.backfill, ...(sums[billId] ? { summary: sums[billId] } : {}) }) });
+        body: JSON.stringify({ bill_id: billId, lines: send, apply_rids: rids, remember, fill_cn: fillCn, backfill_po: !!opts?.backfill, ...(sumsRef.current[billId] ? { summary: sumsRef.current[billId] } : {}) }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as Bill;
-      setDraft((p) => ({ ...p, [billId]: b.lines }));
-      draftRef.current = { ...draftRef.current, [billId]: b.lines };
+      // รับผลเฉพาะแถวที่ลงใบ + id รายการในใบของทุกแถว — แถวอื่นคงที่ผู้ใช้กำลังทำ (เช่น แถวที่กดยืนยันรอคิวอยู่)
+      const srv = new Map(b.lines.filter((l) => l.rid).map((l) => [l.rid as string, l]));
+      const latest = draftRef.current[billId] ?? [];
+      const merged = latest.length && latest.every((l) => !l.rid || srv.has(l.rid))
+        ? latest.map((l) => { const s = l.rid ? srv.get(l.rid) : undefined; return !s ? l : rids.includes(l.rid as string) ? s : { ...l, voucher_line_ids: s.voucher_line_ids }; })
+        : b.lines;
+      setDraft((p) => ({ ...p, [billId]: merged }));
+      draftRef.current = { ...draftRef.current, [billId]: merged };
       setBills((bs) => bs.map((x) => (x.id === billId ? { ...x, ...b } : x)));
       setAuto((st) => ({ ...st, at: new Date(), err: null, pending: dirtyBills.current.size > 0 }));
       if (j.applied?.backfilled) toast.success(`เปิด ${j.applied.backfilled.po_no} ย้อนหลังให้รายการนอกใบสั่งซื้อแล้ว`);
@@ -264,6 +284,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
     } finally {
       setApplying((s) => { const nx = new Set(s); rids.forEach((r) => nx.delete(r)); return nx; });
     }
+    });
   };
   /** ตัดสินแถว (ยืนยัน / ข้าม / ค่าใช้จ่าย) → ลงใบทันที · แถวที่เลือก PO ร้านอื่น = ถามย้าย PO ก่อน */
   const decide = (billId: string, idx: number, decision: "confirmed" | "skip" | "expense") => {
