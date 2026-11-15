@@ -58,6 +58,7 @@ const LazadaCreatePreviewEditor = dynamic(() => import("./lazada-create-preview"
 // หน้าดูก่อนส่งของ TikTok (ลงเป็นฉบับร่าง) — โหลดเมื่อเลือก TikTok เท่านั้น
 const TiktokCreatePreviewEditor = dynamic(() => import("./tiktok-create-preview").then((m) => m.TiktokCreatePreviewEditor), { ssr: false });
 const ShopeeCreatePreviewEditor = dynamic(() => import("./shopee-create-preview").then((m) => m.ShopeeCreatePreviewEditor), { ssr: false });
+const ShopeeBulkCategoryDialog = dynamic(() => import("./shopee-bulk-category").then((m) => m.ShopeeBulkCategoryDialog), { ssr: false });
 
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
@@ -121,6 +122,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [copyErr, setCopyErr] = useState<Record<string, string>>({});
   const [copying, setCopying] = useState<{ done: number; total: number } | null>(null);
   const [pvNonce, setPvNonce] = useState(0);                               // หน้าดูก่อนส่งโหลดใหม่หลังใช้ตารางจับคู่
+  const [spBulkCat, setSpBulkCat] = useState(false);                       // Shopee: ป๊อปยืนยันหมวดทีละหลายตัว (เฟส 5C)
 
   // เปิดใหม่ = เริ่มขั้น 1 · ติ๊กร้านที่ส่งมาให้ · ร้านลงจริงได้ + มีสิทธิ์ = ติ๊ก "ลงจริง" ไว้ให้
   useEffect(() => {
@@ -313,7 +315,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         const endpoint = liveCreateEndpoint(pf.code);
         if (!endpoint) { res.push({ parent_id: id, platform: pf.name_th, ok: true, text: "บันทึกร่างแล้ว · ร้านนี้ยังไม่เปิดลงจริง" }); continue; }
         // กำลังทำตัวไหน (โชว์ระหว่างรอ) — TikTok ฝากรูป + สร้างฉบับร่าง ใช้เวลาหลายวินาที
-        setProgress({ done: i, total: toCreate.length, label: "กำลังลงบนร้าน", current: `${nameOf(id)} → ${pf.name_th}`, hint: creatorOf(pf.code)?.mode === "draft" ? "ตรวจข้อมูล → ฝากรูป → สร้างฉบับร่าง → บันทึกในระบบ (ประมาณ 10–20 วินาทีต่อสินค้า)" : undefined });
+        setProgress({ done: i, total: toCreate.length, label: "กำลังลงบนร้าน", current: `${nameOf(id)} → ${pf.name_th}`, hint: creatorOf(pf.code)?.mode === "draft" ? "ตรวจข้อมูล → ฝากรูป → สร้างฉบับร่าง → บันทึกในระบบ (ประมาณ 10–20 วินาทีต่อสินค้า)"
+          : pf.code === "shopee" ? `ตรวจข้อมูล → ฝากรูป → สร้างสินค้า (ปิดขาย) → รอ Shopee 6 วิ → สร้างตัวเลือก → บันทึกในระบบ (ประมาณ 20–30 วินาทีต่อสินค้า · เหลือ ${toCreate.length - i} ตัว ≈ ${Math.ceil(((toCreate.length - i) * 25) / 60)} นาที · เปิดหน้านี้ค้างไว้)` : undefined });
         try {
           const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: afterDisplay }) });
           const j = await r.json();
@@ -516,6 +519,16 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                       ))}
                     </div>
                   ) : <div className="flex items-center gap-1.5 text-sm font-medium"><PlatformIcon code={activePf.code} iconKey={activePf.icon_key} size={16} />{activePf.name_th} — สิ่งที่จะส่งขึ้นร้าน</div>}
+                  {activePf.code === "shopee" && canEdit && lineRows.filter((r) => !isOnShop(r) && !skipped.has(r.id)).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+                      <Icon name="info" /><span className="min-w-0 flex-1">หมวดที่ระบบเดาต้องยืนยันก่อนลง — ยืนยันทีละหลายตัวได้ในตารางเดียว</span>
+                      <button type="button" onClick={() => setSpBulkCat(true)} className="h-7 rounded-md bg-violet-600 px-2.5 text-xs text-white hover:bg-violet-700">ยืนยันหมวด Shopee ทีละหลายตัว ({lineRows.filter((r) => !isOnShop(r) && !skipped.has(r.id)).length.toLocaleString()})</button>
+                    </div>
+                  )}
+                  {activePf.code === "shopee" && spBulkCat && (
+                    <ShopeeBulkCategoryDialog open parentIds={lineRows.filter((r) => !isOnShop(r) && !skipped.has(r.id)).map((r) => r.id)} canEdit={canEdit}
+                      onClose={() => setSpBulkCat(false)} onSaved={() => { setPvNonce((n) => n + 1); void check(); }} />
+                  )}
                   {lineRows.length > 1 && (
                     <div className="flex gap-1.5 overflow-x-auto pb-1">
                       {lineRows.map((r) => {

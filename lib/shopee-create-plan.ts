@@ -66,6 +66,17 @@ export type ShopeeCreateDraft = {
 // ───────── หมวด ─────────
 export type ShopeeCategoryKind = "draft" | "central" | "recommend" | "same_type";
 export type ShopeeCategoryPick = { id: string; label: string; kind: ShopeeCategoryKind; src: string };
+/** แถวของตารางยืนยันหมวดทีละหลายตัว (GET /api/shopee/create-product/categories · เฟส 5C) */
+export type ShopeeBulkCategoryRow = {
+  parent_id: string; code: string; name: string;
+  /** มีหมวดที่ยืนยันแล้ว (เลือกไว้ในร่าง หรือจากหมวดกลาง) — ไม่ต้องยืนยันซ้ำ */
+  confirmed: boolean;
+  suggestion: ShopeeCategoryPick | null;
+  candidates: ShopeeCategoryPick[];
+  on_shop: string | null;
+  /** เหตุที่แนะนำไม่ได้ (เช่น แบรนด์ยังไม่เชื่อม Shopee) */
+  note: string | null;
+};
 /** "{id} · ชื่อ" / "{id}" → id หมวด */
 export const shopeeCategoryIdOf = (path: unknown): string | null => {
   const s = str(path); if (!s) return null;

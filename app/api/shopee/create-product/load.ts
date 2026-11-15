@@ -50,6 +50,37 @@ async function sameTypeCategories(admin: SupabaseClient, platformId: string, pro
   return [...count.entries()].map(([id, n]) => ({ id, n })).sort((a, b) => b.n - a.n);
 }
 
+/**
+ * ผู้สมัครหมวด Shopee ของสินค้า 1 ตัว (เรียงตามลำดับที่ใช้) — ใช้ร่วม: ดูก่อนส่ง/ลงจริง (loadShopeeCreate) + ตารางยืนยันหมวดทีละหลายตัว (./categories)
+ *   ร่าง → หมวดกลาง → Shopee แนะนำจากชื่อ (category_recommend · 3 อันดับ · แคช 10 นาที) → หมวดที่สินค้าประเภทเดียวกันบนร้านใช้มากสุด (2 อันดับ)
+ */
+export async function shopeeCategoryCandidates(admin: SupabaseClient, a: {
+  platformId: string; token: { accessToken: string; shopId: string } | null; name: string;
+  draftPath: string | null; mappedCategory: string | null; productCategoryId: string | null; productCategoryName: string | null;
+}): Promise<ShopeeCategoryPick[]> {
+  const cands: ShopeeCategoryPick[] = [];
+  const dPath = str(a.draftPath);
+  if (shopeeCategoryIdOf(dPath)) cands.push({ id: shopeeCategoryIdOf(dPath)!, label: dPath, kind: "draft", src: "เลือกไว้สำหรับ Shopee" });
+  if (shopeeCategoryIdOf(a.mappedCategory)) cands.push({ id: shopeeCategoryIdOf(a.mappedCategory)!, label: str(a.mappedCategory), kind: "central", src: "หมวดกลางของสินค้า → หมวด Shopee" });
+  let recIds: string[] = [];
+  if (a.token && a.name) {
+    const t = a.token, nm = a.name;
+    try { recIds = (await cached(`rec:${t.shopId}:${nm}`, () => shopeeCategoryRecommend(t.accessToken, t.shopId, nm))).slice(0, 3); }
+    catch (e) { console.warn(`[shopee create] หมวดแนะนำไม่ได้: ${shopeeErrorText(e)}`); }
+  }
+  let same: { id: string; n: number }[] = [];
+  if (a.productCategoryId) { try { same = (await sameTypeCategories(admin, a.platformId, a.productCategoryId)).slice(0, 2); } catch (e) { console.warn(`[shopee create] หมวดสินค้าประเภทเดียวกันไม่ได้: ${(e as Error).message}`); } }
+  const labelIds = [...new Set([...recIds, ...same.map((s) => s.id)])];
+  const labels = new Map<string, string>();
+  if (labelIds.length) {
+    const { data: opts } = await admin.from("platform_category_options").select("external_id, name_th, name_en").eq("platform_id", a.platformId).in("external_id", labelIds);
+    for (const o of (opts ?? []) as Row[]) labels.set(str(o.external_id), `${str(o.external_id)} · ${str(o.name_th) || str(o.name_en)}`);
+  }
+  recIds.forEach((id, i) => cands.push({ id, label: labels.get(id) ?? id, kind: "recommend", src: i === 0 ? "Shopee แนะนำจากชื่อสินค้า" : `Shopee แนะนำจากชื่อสินค้า (อันดับ ${i + 1})` }));
+  same.forEach((s) => cands.push({ id: s.id, label: labels.get(s.id) ?? s.id, kind: "same_type", src: `สินค้าประเภท "${a.productCategoryName ?? "เดียวกัน"}" บนร้านใช้หมวดนี้ ${s.n.toLocaleString()} ตัว` }));
+  return shopeeUniqueCategories(cands);
+}
+
 export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, userId: string | null): Promise<ShopeeCreateLoad> {
   const platformId = await getPlatformId(admin, "shopee");
   if (!platformId) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม Shopee" };
@@ -85,28 +116,11 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
     else token = { accessToken: tok.accessToken, shopId: tok.shopId };
   }
 
-  // ---------- หมวด: ร่าง → หมวดกลาง → Shopee แนะนำจากชื่อ → สินค้าประเภทเดียวกันบนร้าน ----------
-  const cands: ShopeeCategoryPick[] = [];
-  const dPath = str(draft?.category_path);
-  if (shopeeCategoryIdOf(dPath)) cands.push({ id: shopeeCategoryIdOf(dPath)!, label: dPath, kind: "draft", src: "เลือกไว้สำหรับ Shopee" });
-  if (shopeeCategoryIdOf(it.platformCategory)) cands.push({ id: shopeeCategoryIdOf(it.platformCategory)!, label: it.platformCategory, kind: "central", src: "หมวดกลางของสินค้า → หมวด Shopee" });
-  let recIds: string[] = [];
-  if (token && name) {
-    const t = token;
-    try { recIds = (await cached(`rec:${t.shopId}:${name}`, () => shopeeCategoryRecommend(t.accessToken, t.shopId, name))).slice(0, 3); }
-    catch (e) { console.warn(`[shopee create] หมวดแนะนำไม่ได้: ${shopeeErrorText(e)}`); }
-  }
-  let same: { id: string; n: number }[] = [];
-  if (p.category_id) { try { same = (await sameTypeCategories(admin, platformId, p.category_id)).slice(0, 2); } catch (e) { console.warn(`[shopee create] หมวดสินค้าประเภทเดียวกันไม่ได้: ${(e as Error).message}`); } }
-  const labelIds = [...new Set([...recIds, ...same.map((s) => s.id)])];
-  const labels = new Map<string, string>();
-  if (labelIds.length) {
-    const { data: opts } = await admin.from("platform_category_options").select("external_id, name_th, name_en").eq("platform_id", platformId).in("external_id", labelIds);
-    for (const o of (opts ?? []) as Row[]) labels.set(str(o.external_id), `${str(o.external_id)} · ${str(o.name_th) || str(o.name_en)}`);
-  }
-  recIds.forEach((id, i) => cands.push({ id, label: labels.get(id) ?? id, kind: "recommend", src: i === 0 ? "Shopee แนะนำจากชื่อสินค้า" : `Shopee แนะนำจากชื่อสินค้า (อันดับ ${i + 1})` }));
-  same.forEach((s) => cands.push({ id: s.id, label: labels.get(s.id) ?? s.id, kind: "same_type", src: `สินค้าประเภท "${p.category_name ?? "เดียวกัน"}" บนร้านใช้หมวดนี้ ${s.n.toLocaleString()} ตัว` }));
-  const candidates = shopeeUniqueCategories(cands);
+  // ---------- หมวด: ร่าง → หมวดกลาง → Shopee แนะนำจากชื่อ → สินค้าประเภทเดียวกันบนร้าน (ตัวเดียวกับตารางยืนยันหมวดทีละหลายตัว) ----------
+  const candidates = await shopeeCategoryCandidates(admin, {
+    platformId, token, name, draftPath: str(draft?.category_path) || null, mappedCategory: it.platformCategory || null,
+    productCategoryId: p.category_id, productCategoryName: p.category_name,
+  });
   const category = shopeePickCategory(candidates);
 
   // ---------- ช่วงตามหมวด + ช่องของหมวด + สินค้าแบบ (ต้องมีกุญแจ) ----------
