@@ -22,6 +22,8 @@ import { isPdfRef } from "@/lib/file-ref";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, autoSplitRounds, ensureRowIds, allocOf, editAlloc, addAllocRound, rebalanceAlloc, mergeSplitRows, expandAllocRows, normalizeBillLine, billLineDiscount, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 import { SaveBar } from "@/components/save-bar";
+import { BillSummaryBox } from "./bill-summary";
+import { emptySummary, type BillSummary } from "@/lib/seller-bill-summary";
 
 /** ลากย้ายแถว: หลายบิลในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับบิล × ROW_SPAN + ลำดับแถว (ลากข้ามบิลไม่ได้) */
 const ROW_SPAN = 10000;
@@ -42,6 +44,7 @@ type Bill = {
   id: string; r2_key: string; gr_id: string | null; bill_no: string | null; bill_date: string | null; seller_text: string | null;
   total_amount: number | null; currency: string | null; lines: SellerBillLine[]; status: string; applied_at: string | null; created_at: string;
   raw?: { files?: string[] } | null;   // บิลหลายหน้า (โยนรูปจากป๊อปออกใบสำคัญ) — r2_key = หน้าแรก
+  summary?: BillSummary | null;        // ★ 2026-11-15 สรุปยอดบิล (付款详情) — lib/seller-bill-summary
 };
 type Candidate = { gr_id: string; gr_no: string; kind: "receipt" | "bill"; r2_key: string };
 
@@ -118,6 +121,11 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   }, { group: `seller-bill-${voucherId}` });
   // ★ 2026-11-14 บันทึกร่างอัตโนมัติ (เจ้าของ: "refresh ต้องบันทึก draft ไว้ กันหาย") — แก้แล้วรอ 2 วิ ค่อยส่ง · แถบสถานะ = ของกลาง SaveBar (mode auto)
   const draftRef = useRef(draft); draftRef.current = draft;
+  // ★ 2026-11-15 สรุปยอดบิล (付款详情) ต่อบิล — แก้แล้วบันทึกอัตโนมัติพร้อมแถว
+  const [sums, setSums] = useState<Record<string, BillSummary>>({});
+  const sumsRef = useRef(sums); sumsRef.current = sums;
+  const [rereading, setRereading] = useState<string | null>(null);
+  const onAppliedRef = useRef(onApplied); onAppliedRef.current = onApplied;
   const dirtyBills = useRef(new Set<string>());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [auto, setAuto] = useState<{ pending: boolean; saving: boolean; at: Date | null; err: string | null }>({ pending: false, saving: false, at: null, err: null });
@@ -127,12 +135,15 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
     dirtyBills.current.clear();
     setAuto((s) => ({ ...s, saving: true, pending: false }));
     try {
+      let synced = false;
       for (const id of ids) {
         const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bill_id: id, lines: draftRef.current[id] ?? [], autosave: true }) });
+          body: JSON.stringify({ bill_id: id, lines: draftRef.current[id] ?? [], autosave: true, ...(sumsRef.current[id] ? { summary: sumsRef.current[id] } : {}) }) });
         const j = await res.json().catch(() => ({}));
         if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+        if (j.synced) synced = true;
       }
+      if (synced) void onAppliedRef.current();   // บิลที่ใส่ลงใบแล้ว + แก้สรุปยอด → หัวใบเปลี่ยน (ค่าส่งในจีน/ค่าธรรมเนียม/เรท) → โหลดใบใหม่
       setAuto({ pending: dirtyBills.current.size > 0, saving: false, at: new Date(), err: null });
     } catch (e) {
       ids.forEach((id) => dirtyBills.current.add(id));
@@ -171,6 +182,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
         if (m.length !== (b.lines ?? []).length) merged.push(b.id);
       }
       setDraft((p) => { const nx = { ...p }; for (const [k, v] of Object.entries(add)) if (!nx[k]) nx[k] = v; return nx; });
+      setSums((p) => { const nx = { ...p }; for (const b of rows) if (!nx[b.id]) nx[b.id] = b.summary ?? emptySummary(); return nx; });
       draftRef.current = { ...draftRef.current, ...add };   // ให้บันทึกอัตโนมัติเห็นแถวที่รวมแล้วทันที
       if (merged.length && !readonly) { merged.forEach((id) => dirtyBills.current.add(id)); if (saveTimer.current) clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => void flushSave(), 2000); }
     } catch { /* แผงเสริม — เงียบ */ }
@@ -189,6 +201,23 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   /** แก้แถวของบิล (ทุกการแก้จากผู้ใช้ผ่านตัวนี้) → บันทึกอัตโนมัติใน 2 วิ */
   const setLines = (billId: string, fn: (ls: SellerBillLine[]) => SellerBillLine[]) => { setDraft((p) => ({ ...p, [billId]: fn(p[billId] ?? []) })); setMsg((m) => ({ ...m, [billId]: "" })); markDirty(billId); };
   const setLine = (billId: string, idx: number, patch: Partial<SellerBillLine>) => setLines(billId, (ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  // ★ 2026-11-15 สรุปยอดบิล: แก้ช่อง → บันทึกอัตโนมัติ · ติ๊ก "ราคาในแถวหักแล้ว" = ล้างส่วนลดแถว (กันหักซ้ำ)
+  const setSum = (billId: string, patch: Partial<BillSummary>) => {
+    setSums((p) => ({ ...p, [billId]: { ...(p[billId] ?? emptySummary()), ...patch } }));
+    if (patch.discount_in_price === true) setLines(billId, (ls) => ls.map((l) => (!l.is_fee && (l.discount != null || l.discount_pct != null) ? { ...l, discount: null, discount_pct: null } : l)));
+    else markDirty(billId);
+  };
+  const rereadSummary = async (billId: string) => {
+    setRereading(billId);
+    try {
+      const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bill_id: billId, reread_summary: true }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+      if (j.summary) { setSums((p) => ({ ...p, [billId]: j.summary as BillSummary })); toast.success("AI อ่านสรุปยอดบิลแล้ว — ตรวจตัวเลขก่อนใส่ลงใบ"); void onAppliedRef.current(); }
+      else toast.error(j.error ?? "ไม่เจอกล่องสรุปยอดในบิลนี้ — ใส่ยอดเองได้");
+    } catch (e) { toast.error("อ่านไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setRereading(null); }
+  };
 
   const parse = async (r2_key: string, gr_id?: string) => {
     setBusy("parse");
@@ -275,7 +304,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
     try {
       if (mode === "apply" && plan) { const err = await runMoves(plan); if (err) throw new Error(err); }
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bill_id: billId, lines, rematch: mode === "rematch", apply: mode === "apply", remember, fill_cn: fillCn, backfill_po: backfill }) });
+        body: JSON.stringify({ bill_id: billId, lines, rematch: mode === "rematch", apply: mode === "apply", remember, fill_cn: fillCn, backfill_po: backfill, ...(sums[billId] ? { summary: sums[billId] } : {}) }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as Bill;
@@ -552,6 +581,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                     <Icon name="add" /> เพิ่มรายการสินค้าเอง (AI อ่านตกหล่น)
                   </button>
                 )}
+
+                {/* ★ 2026-11-15 สรุปยอดบิล (付款详情) — ยอดสินค้า/ส่วนลด/ค่าส่งในจีน/ค่าธรรมเนียม/ยอดจ่ายจริง → ใส่ลงใบแล้วขึ้นหัวใบ + เรทจากยอดจ่ายจริง */}
+                <BillSummaryBox s={sums[b.id] ?? b.summary ?? emptySummary()} lines={lines} readonly={ro} rereading={rereading === b.id}
+                  onChange={(p) => setSum(b.id, p)} onReread={() => void rereadSummary(b.id)} />
 
                 {/* ไม่อยู่ในบิล — ของที่สั่งรอบเดียวกัน (PO เดียวกัน + วันเดียวกัน) ที่ร้านยังไม่ส่ง: รอรอบหน้า (คงค้างรับ) / ปิดยอด (ของไม่มาแล้ว → หน้าขอซื้อ/ใบสั่งผลิตกลับเป็น "ต้องซื้อ") */}
                 {(() => {

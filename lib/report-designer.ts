@@ -583,6 +583,8 @@ export const DEFAULT_PV_TEMPLATE = {
 <table class="totals">
   {{#is_foreign}}<tr><td class="label">ค่าสินค้า ({{currency_code}})</td><td class="text-right">{{currency_symbol}}{{subtotal_foreign}}</td></tr>{{/is_foreign}}
   <tr><td class="label">ค่าสินค้า (บาท)</td><td class="text-right">{{subtotal_thb}}</td></tr>
+  {{#has_seller_ship}}<tr><td class="label">ค่าส่งในจีน {{seller_ship_label}}</td><td class="text-right">{{seller_ship_thb}}</td></tr>{{/has_seller_ship}}
+  {{#has_pay_fee}}<tr><td class="label">ค่าธรรมเนียมจ่ายเงิน</td><td class="text-right">{{pay_fee_thb}}</td></tr>{{/has_pay_fee}}
   {{#has_shipping}}<tr><td class="label">ค่าส่ง — {{ship_method_label}} {{ship_basis_label}} {{ship_rate}}</td><td class="text-right">{{ship_total_thb}}</td></tr>{{/has_shipping}}
   <tr><td class="label">รวมทั้งสิ้น (บาท)</td><td class="text-right"><b>{{grand_total_thb}}</b></td></tr>
 </table>

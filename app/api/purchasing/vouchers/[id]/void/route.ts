@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { restoreLinePrices, type PriceSnapshot, type RestoreResult } from "@/lib/po-line-price";
+import { mergePriceSnapshots } from "@/lib/voucher-revision";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,18 +33,27 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   if (!reason) return NextResponse.json({ error: "ต้องระบุเหตุผลที่ยกเลิก" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status, pv_no, note, shipping_payment_status").eq("id", id).maybeSingle();
+  const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status, pv_no, note, shipping_payment_status, editing_at").eq("id", id).maybeSingle();
   if (!cur) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
   const c = cur as Row;
   if (c.status === "draft") return NextResponse.json({ error: "ใบนี้ยังเป็นร่าง — ใช้ปุ่ม “ยกเลิกใบร่าง”" }, { status: 400 });
   if (c.status !== "confirmed") return NextResponse.json({ error: "ใบนี้ถูกยกเลิกไปแล้ว" }, { status: 400 });
+  if (c.editing_at) return NextResponse.json({ error: "ใบนี้กำลังเปิดแก้อยู่ — กด “ยกเลิกการแก้” หรือ “บันทึกการแก้ไข” ก่อน แล้วค่อยยกเลิกใบ" }, { status: 400 });
   if (c.shipping_payment_status === "paid") return NextResponse.json({ error: "ใบนี้มาร์ค “จ่ายค่าส่งแล้ว” — กดยกเลิกการจ่ายค่าส่งก่อน แล้วค่อยยกเลิกใบ" }, { status: 400 });
 
   // ราคาเดิมที่จดไว้ตอนยืนยัน
   const { data: logs } = await admin.from("audit_logs").select("metadata, created_at")
     .eq("entity_type", "purchase_vouchers_v2").eq("entity_id", id).eq("action", "confirm").order("created_at", { ascending: false }).limit(1);
-  const meta = ((logs ?? [])[0] as Row | undefined)?.metadata as Row | undefined;
-  const snaps = Array.isArray(meta?.price_before) ? (meta?.price_before as PriceSnapshot[]) : null;
+  const confirmLog = (logs ?? [])[0] as Row | undefined;
+  const meta = confirmLog?.metadata as Row | undefined;
+  let snaps = Array.isArray(meta?.price_before) ? (meta?.price_before as PriceSnapshot[]) : null;
+  // ★ 2026-11-15 แก้หลังยืนยัน (revise_save) เขียนราคาทับอีกรอบ → รวม: ราคาเดิมจากตอนยืนยัน · ราคาที่เขียนล่าสุดจากการแก้ครั้งหลังสุด (lib/voucher-revision)
+  if (snaps && confirmLog?.created_at) {
+    const { data: revs } = await admin.from("audit_logs").select("metadata, created_at")
+      .eq("entity_type", "purchase_vouchers_v2").eq("entity_id", id).eq("action", "revise_save").gt("created_at", String(confirmLog.created_at)).order("created_at", { ascending: true });
+    const more = ((revs ?? []) as Row[]).map((r) => ((r.metadata as Row | undefined)?.price_before as PriceSnapshot[] | undefined) ?? []).filter((g) => g.length);
+    if (more.length) snaps = mergePriceSnapshots([snaps, ...more]);
+  }
 
   let restored: RestoreResult[] = [];
   if (snaps) restored = await restoreLinePrices(admin, snaps, { actorId: user?.id ?? null, actorName, refLabel: `ยกเลิก ${String(c.pv_no ?? "")}` });

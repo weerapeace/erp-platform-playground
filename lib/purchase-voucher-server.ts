@@ -36,8 +36,12 @@ export type VoucherHeader = {
   shipping_bill_id: string | null; shipping_payment_status: "unpaid" | "paid"; shipping_paid_date: string | null;
   /** ใบนี้ออกจากบิลโอนเงินจีน (ค่าสินค้า) ใบไหน — ป๊อป ＋ ออกใบสำคัญรับ แท็บ จากบิลโอนเงินจีน (lib/china-bill-voucher) */
   china_bill_id: string | null;
-  /** สถานะจ่ายค่าสินค้าของแต่ละใบ PO ในใบสำคัญนี้ — ยอดค้างจ่ายอ้างจากราคาในใบสำคัญ (goods_thb) */
+  /** สถานะจ่ายค่าสินค้าของแต่ละใบ PO ในใบสำคัญนี้ — ยอดค้างจ่ายอ้างจากราคาในใบสำคัญ (goods_thb · รวมส่วนแบ่งค่าส่งในจีน/ค่าธรรมเนียม) */
   po_payments: PoPayment[];
+  /** ★ 2026-11-15 ค่าส่งในจีน (สกุลใบ) · ค่าธรรมเนียมจ่ายเงิน (฿) · ยอดจ่ายจริงตามบิล (฿ ไว้เทียบ) */
+  seller_ship_foreign: number | null; pay_fee_thb: number | null; paid_total_thb: number | null;
+  /** ★ 2026-11-15 แก้หลังยืนยัน: เวอร์ชันปัจจุบัน · กำลังเปิดแก้ (เวลา/ใคร/เหตุผล) */
+  revision: number; editing_at: string | null; editing_by: string | null; edit_reason: string | null;
 };
 export type PoPayment = { po_id: string; po_no: string; currency: string; payment_status: string; paid_date: string | null; paid_amount_thb: number | null; goods_thb: number; goods_foreign: number; grand_total: number;
   /** บิลจีนที่ยังรอโอนของใบนี้ (DB trigger จาก china_bill_po_links) → "ลงบิลแล้ว รอโอน" · paid_via = china_bill เมื่อจ่ายครบด้วยบิลจีน */
@@ -65,6 +69,10 @@ const toHeader = (v: Row, grNos: string[], poNos: string[], poPayments: PoPaymen
   shipping_payment_status: v.shipping_payment_status === "paid" ? "paid" : "unpaid",
   shipping_paid_date: (v.shipping_paid_date as string) ?? null,
   po_payments: poPayments,
+  seller_ship_foreign: v.seller_ship_foreign == null ? null : num(v.seller_ship_foreign),
+  pay_fee_thb: v.pay_fee_thb == null ? null : num(v.pay_fee_thb),
+  paid_total_thb: v.paid_total_thb == null ? null : num(v.paid_total_thb),
+  revision: num(v.revision) || 1, editing_at: (v.editing_at as string) ?? null, editing_by: (v.editing_by as string) ?? null, edit_reason: (v.edit_reason as string) ?? null,
   id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: String(v.status ?? "draft"), voucher_date: String(v.voucher_date ?? ""),
   seller_name: (v.seller_name as string) ?? null, seller_partner_id: (v.seller_partner_id as string) ?? null,
   currency: String(v.currency ?? "THB"), fx_rate: v.fx_rate == null ? null : num(v.fx_rate),
@@ -247,6 +255,8 @@ export async function recomputeVoucher(admin: Admin, voucherId: string): Promise
       ship_rate: h.ship_rate == null ? null : num(h.ship_rate),
       ship_rate_cube: h.ship_rate_cube == null ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg == null ? null : num(h.ship_rate_kg),
       ship_manual_total: h.ship_manual_total == null ? null : num(h.ship_manual_total),
+      seller_ship_foreign: h.seller_ship_foreign == null ? null : num(h.seller_ship_foreign),
+      pay_fee_thb: h.pay_fee_thb == null ? null : num(h.pay_fee_thb),
     },
     lines.map((l) => ({
       qty: num(l.qty), unit_price: l.unit_price == null ? null : num(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? null : num(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? null : num(l.kg_per_unit),
@@ -331,15 +341,23 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
   const poPayments: PoPayment[] = [];
   if (poIds.length) {
     const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, currency, payment_status, paid_date, paid_amount_thb, grand_total, china_bill_id, paid_via").in("id", poIds);
+    // ★ 2026-11-15 ค่าส่งในจีน + ค่าธรรมเนียมจ่ายเงิน = ส่วนหนึ่งของยอดจ่ายร้าน → แบ่งลงแต่ละ PO ตามมูลค่าสินค้า
+    const vr = v as Row;
+    const fxv = isForeignCurrency(String(vr.currency ?? "THB")) ? num(vr.fx_rate) : 1;
+    const shipF = num(vr.seller_ship_foreign), extraThb = Math.round((shipF * fxv + num(vr.pay_fee_thb)) * 100) / 100;
+    const goodsAllThb = lines.reduce((a, l) => a + num(l.line_total_thb), 0);
+    const goodsAllF = lines.reduce((a, l) => a + num(l.unit_price) * num(l.qty) - lineDiscount(l.unit_price, l.qty, l.discount, l.discount_pct), 0);
     for (const p of (pos ?? []) as Row[]) {
       const mine = lines.filter((l) => l.po_id === String(p.id));
+      const gThb = mine.reduce((a, l) => a + num(l.line_total_thb), 0);
+      const gF = mine.reduce((a, l) => a + num(l.unit_price) * num(l.qty) - lineDiscount(l.unit_price, l.qty, l.discount, l.discount_pct), 0);
       poPayments.push({
         po_id: String(p.id), po_no: String(p.po_no ?? ""), currency: String(p.currency ?? "THB").toUpperCase(),
         payment_status: String(p.payment_status ?? "unpaid"), paid_date: (p.paid_date as string) ?? null,
         china_bill_id: (p.china_bill_id as string) ?? null, paid_via: (p.paid_via as string) ?? null,
         paid_amount_thb: p.paid_amount_thb == null ? null : num(p.paid_amount_thb), grand_total: num(p.grand_total),
-        goods_thb: Math.round(mine.reduce((a, l) => a + num(l.line_total_thb), 0) * 100) / 100,
-        goods_foreign: Math.round(mine.reduce((a, l) => a + num(l.unit_price) * num(l.qty) - lineDiscount(l.unit_price, l.qty, l.discount, l.discount_pct), 0) * 100) / 100,
+        goods_thb: Math.round((gThb + (goodsAllThb > 0 ? extraThb * gThb / goodsAllThb : 0)) * 100) / 100,
+        goods_foreign: Math.round((gF + (goodsAllF > 0 ? shipF * gF / goodsAllF : 0)) * 100) / 100,
       });
     }
     poPayments.sort((a, b) => a.po_no.localeCompare(b.po_no));
@@ -382,4 +400,41 @@ export async function defaultCarrier(admin: Admin): Promise<{ id: string; name: 
   const rateCube = r.rate_cube_thb != null ? num(r.rate_cube_thb) : m === "cube" ? num(r.rate_thb) : null;
   const rateKg = r.rate_kg_thb != null ? num(r.rate_kg_thb) : m === "weight" ? num(r.rate_thb) : null;
   return { id: String(r.id), name: String(r.name ?? ""), method: m, rate: (m === "cube" ? rateCube : rateKg) ?? 0, rate_cube: rateCube, rate_kg: rateKg };
+}
+
+// ---------------- ★ 2026-11-15 แก้หลังยืนยัน: เก็บ/คืนเอกสารทั้งใบ (lib/document-revisions · lib/voucher-revision) ----------------
+const RESTORE_HEADER_KEYS = ["voucher_date", "fx_rate", "ship_method", "ship_rate", "ship_rate_cube", "ship_rate_kg", "ship_manual_total", "note", "carrier_id", "carrier_name", "tracking_no", "seller_ship_foreign", "pay_fee_thb", "paid_total_thb"] as const;
+const RESTORE_LINE_KEYS = ["qty", "unit_price", "price_source", "discount", "discount_pct", "cbm_per_unit", "kg_per_unit", "ship_method", "item_name", "uom", "sort_order"] as const;
+
+/** เอกสารทั้งใบตอนนี้ (หัว + รายการที่ใช้อยู่ + บิลที่แนบ) — เก็บเป็นเวอร์ชัน */
+export async function snapshotVoucher(admin: Admin, id: string): Promise<{ header: Row; lines: Row[]; bills: Row[] }> {
+  const [{ data: v }, { data: ls }, { data: bs }] = await Promise.all([
+    admin.from("purchase_vouchers_v2").select("*").eq("id", id).maybeSingle(),
+    admin.from("purchase_voucher_lines_v2").select("*").eq("voucher_id", id).not("is_active", "is", false).order("sort_order"),
+    admin.from("purchase_delivery_bills").select("id, kind, lines, status, summary, applied_at, tracking_no, bill_no, bill_date").eq("voucher_id", id).not("is_active", "is", false),
+  ]);
+  return { header: (v ?? {}) as Row, lines: (ls ?? []) as Row[], bills: (bs ?? []) as Row[] };
+}
+
+/** คืนใบกลับเป็นเวอร์ชันที่เก็บไว้ (ยกเลิกการแก้) — หัวใบ · รายการ (ที่เพิ่มระหว่างแก้ = ปิด · ที่ลบ = เปิดคืน) · บิลที่แนบ แล้วคิดใหม่ */
+export async function restoreVoucherSnapshot(admin: Admin, id: string, snap: { header?: Row; lines?: Row[]; bills?: Row[] }): Promise<void> {
+  const now = new Date().toISOString();
+  const hp: Row = { updated_at: now };
+  for (const k of RESTORE_HEADER_KEYS) if (snap.header && k in snap.header) hp[k] = snap.header[k] ?? null;
+  await admin.from("purchase_vouchers_v2").update(hp).eq("id", id);
+  const keep = new Set((snap.lines ?? []).map((l) => String(l.id)));
+  for (const l of snap.lines ?? []) {
+    const p: Row = { is_active: true, updated_at: now };
+    for (const k of RESTORE_LINE_KEYS) if (k in l) p[k] = l[k] ?? null;
+    await admin.from("purchase_voucher_lines_v2").update(p).eq("id", String(l.id)).eq("voucher_id", id);
+  }
+  const { data: cur } = await admin.from("purchase_voucher_lines_v2").select("id").eq("voucher_id", id).not("is_active", "is", false);
+  for (const r of (cur ?? []) as Row[]) if (!keep.has(String(r.id))) await admin.from("purchase_voucher_lines_v2").update({ is_active: false, updated_at: now }).eq("id", String(r.id));
+  if (Array.isArray(snap.bills)) {
+    const keepB = new Set(snap.bills.map((b) => String(b.id)));
+    for (const b of snap.bills) await admin.from("purchase_delivery_bills").update({ lines: b.lines ?? [], status: b.status ?? "parsed", summary: b.summary ?? null, applied_at: b.applied_at ?? null, is_active: true, updated_at: now }).eq("id", String(b.id)).eq("voucher_id", id);
+    const { data: curB } = await admin.from("purchase_delivery_bills").select("id").eq("voucher_id", id).not("is_active", "is", false);
+    for (const r of (curB ?? []) as Row[]) if (!keepB.has(String(r.id))) await admin.from("purchase_delivery_bills").update({ is_active: false, updated_at: now }).eq("id", String(r.id));
+  }
+  await recomputeVoucher(admin, id);
 }

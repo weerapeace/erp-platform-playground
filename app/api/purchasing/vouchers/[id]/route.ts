@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { fetchVoucher, recomputeVoucher, assignVoucherNumber, SHIP_METHODS } from "@/lib/purchase-voucher-server";
 import type { ShipMethod } from "@/lib/landed-cost";
+import { voucherEditable } from "@/lib/voucher-revision";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,6 +34,8 @@ type PatchBody = {
     voucher_date?: string; currency?: string; fx_rate?: unknown; ship_method?: string; ship_rate?: unknown; ship_rate_cube?: unknown; ship_rate_kg?: unknown; ship_manual_total?: unknown; note?: string | null; seller_name?: string;
     carrier_id?: string | null; carrier_name?: string | null; tracking_no?: string | null;
     shipping_bill_id?: string | null; shipping_payment_status?: string; shipping_paid_date?: string | null;
+    /** ★ 2026-11-15 ค่าส่งในจีน (สกุลใบ) · ค่าธรรมเนียมจ่ายเงิน (฿) · ยอดจ่ายจริงตามบิล (฿) */
+    seller_ship_foreign?: unknown; pay_fee_thb?: unknown; paid_total_thb?: unknown;
   };
   /** qty / item_name / uom แก้ได้เฉพาะรายการที่ "เพิ่มเอง" (ไม่มี gr_line_id) — รายการจากใบรับต้องแก้ที่ใบรับ */
   lines?: { id: string; unit_price?: unknown; cbm_per_unit?: unknown; kg_per_unit?: unknown; ship_method?: string | null; qty?: unknown; item_name?: string; uom?: string | null; discount?: unknown; discount_pct?: unknown }[];
@@ -42,9 +45,11 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
-  const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status, pv_no").eq("id", id).maybeSingle();
+  const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status, pv_no, editing_at").eq("id", id).maybeSingle();
   if (!cur) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
-  const isDraft = (cur as { status: string }).status === "draft";
+  const draftStatus = (cur as { status: string }).status === "draft";
+  // ★ 2026-11-15 ใบที่ยืนยันแล้วแต่ "เปิดแก้" อยู่ (lib/voucher-revision) = แก้ได้เหมือนร่าง
+  const isDraft = voucherEditable(cur as { status: string; editing_at?: string | null });
   const hadNumber = !!(cur as { pv_no?: string | null }).pv_no;
 
   let body: PatchBody;
@@ -77,6 +82,12 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     if (h.ship_rate_cube !== undefined) patch.ship_rate_cube = optNum(h.ship_rate_cube);
     if (h.ship_rate_kg !== undefined) patch.ship_rate_kg = optNum(h.ship_rate_kg);
     if (h.ship_manual_total !== undefined) patch.ship_manual_total = optNum(h.ship_manual_total);
+    for (const k of ["seller_ship_foreign", "pay_fee_thb", "paid_total_thb"] as const) {
+      if (h[k] === undefined) continue;
+      const x = optNum(h[k]);
+      if (x != null && x < 0) return NextResponse.json({ error: "ค่าส่งในจีน / ค่าธรรมเนียม / ยอดจ่ายจริง ติดลบไม่ได้" }, { status: 400 });
+      patch[k] = x != null && x > 0 ? x : null;
+    }
     if (h.note !== undefined) patch.note = h.note ? String(h.note) : null;
     if (h.seller_name !== undefined) patch.seller_name = String(h.seller_name ?? "").trim() || null;
     if (Object.keys(patch).length) {
@@ -122,7 +133,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     await recomputeVoucher(admin, id);   // ยืนยันแล้วยอดล็อก ไม่คิดใหม่
     // ★ 2026-11-14 เลขใบตามวันที่ใบ — แก้วันที่ใบร่าง = เลขย้ายไปวันใหม่ · วันเดิม = คงเลขเดิม
     //   ใบร่างเก่าที่ยังไม่มีเลข = ไม่ออกตอนบันทึก (เจ้าของเลือก "ได้เลขตอนยืนยัน")
-    if (hadNumber && body.header?.voucher_date !== undefined) await assignVoucherNumber(admin, id);
+    if (draftStatus && hadNumber && body.header?.voucher_date !== undefined) await assignVoucherNumber(admin, id);   // เปิดแก้หลังยืนยัน = คงเลขเดิม
   } else {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { shipping_payment: body.header ?? null } });

@@ -20,6 +20,8 @@ import {
   type PoGroup, type PoGroupLine, type SellerBillLine, type AliasRow,
 } from "@/lib/seller-bill-match";
 import { BILL_ORDER_RULE, orderByBillPosition } from "@/lib/bill-line-order";
+import { summaryFromAi, reconcileBillDiscount, normalizeBillSummary, billNetGoods, type BillSummary } from "@/lib/seller-bill-summary";
+import { fxForTargetThb, type ShipMethod } from "@/lib/landed-cost";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -34,13 +36,15 @@ const OPEN_PO_STATUS = ["draft", "purchase", "partial"];
 const CLOSED_LINE_STATUS = ["received", "short_closed", "closed_short", "cancelled"];
 const MAX_PROMPT_GROUPS = 220;
 
-export type VoucherLite = { id: string; status: string; seller_name: string | null; seller_partner_id: string | null; currency: string };
+export type VoucherLite = { id: string; status: string; seller_name: string | null; seller_partner_id: string | null; currency: string;
+  /** ★ 2026-11-15 ยืนยันแล้วแต่เปิดแก้อยู่ (lib/voucher-revision voucherEditable) */
+  editing_at?: string | null };
 
 export async function loadVoucherLite(admin: Admin, id: string): Promise<VoucherLite | null> {
-  const { data } = await admin.from("purchase_vouchers_v2").select("id, status, seller_name, seller_partner_id, currency").eq("id", id).maybeSingle();
+  const { data } = await admin.from("purchase_vouchers_v2").select("id, status, seller_name, seller_partner_id, currency, editing_at").eq("id", id).maybeSingle();
   const v = data as Row | null;
   if (!v) return null;
-  return { id: String(v.id), status: str(v.status) || "draft", seller_name: (v.seller_name as string) ?? null, seller_partner_id: (v.seller_partner_id as string) ?? null, currency: str(v.currency) || "THB" };
+  return { id: String(v.id), status: str(v.status) || "draft", seller_name: (v.seller_name as string) ?? null, seller_partner_id: (v.seller_partner_id as string) ?? null, currency: str(v.currency) || "THB", editing_at: (v.editing_at as string) ?? null };
 }
 
 /**
@@ -148,6 +152,7 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
   "bill_date": "YYYY-MM-DD หรือ null",
   "currency": "CNY",
   "total_amount": ตัวเลขยอดรวมทั้งบิล (合计/总计) หรือ null,
+  "payment": { "goods_total": 商品总价 หรือ null, "discounts": [{ "label": "店铺优惠", "amount": 5 }], "ship": 运费 หรือ null, "fee": 支付手续费 หรือ null, "fee_currency": "THB หรือ CNY", "paid_total": 实付款 หรือ null, "paid_currency": "THB หรือ CNY" } หรือ null,
   "lines": [
     { "name_cn": "品名ตามบิล", "spec_cn": "规格/颜色/尺寸/型号 ตามบิล หรือ null", "name_th": "ชื่อแปลไทย", "spec_th": "สเปกแปลไทย หรือ null",
       "qty": ตัวเลข, "unit": "个/条/米/码/卷/包… หรือ null", "unit_price": ตัวเลข, "amount": ตัวเลข,
@@ -158,6 +163,9 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
 กฎ:
 - candidate: เลือกได้เฉพาะรหัส P… ในรายการที่ให้ ถ้าไม่มีตัวที่เป็นของชิ้นเดียวกันจริง = null (ห้ามเลือกเพื่อให้ครบ)
   ดูชนิดของ + ขนาด (มม./ซม./เบอร์) + สี + เบอร์สี/รหัส (เช่น #402, G322) + ราคา ประกอบกัน · ชนิดเดียวกันแต่ขนาดหรือสีต่างกัน = ไม่ใช่
+- payment: หน้าคำสั่งซื้อ Taobao/1688 มีกล่อง 付款详情 / 订单金额 → 商品总价 = goods_total · ส่วนลดทั้งบิล (店铺优惠 / 平台优惠 / 立减 / 红包 / 优惠券 / 回头客 / 满减) = discounts (ยอดเป็นบวก) · 运费 = ship · 支付手续费 / 手续费 = fee · 实付款 / 实付 = paid_total · สกุลตามที่พิมพ์ (THB / ฿ = "THB" · ¥ = "CNY") · ไม่มีกล่องนี้ = null
+  ส่วนลดในกล่อง 付款详情 เป็นของทั้งบิล ห้ามใส่เป็น discount ของบรรทัด · 运费 ในกล่องนี้ไม่ต้องใส่เป็นแถว is_fee
+  ราคาต่อหน่วยในแถวให้อ่านราคาที่จ่ายจริงที่พิมพ์ตัวเด่น (ตัวขีดฆ่า = ราคาก่อนลด ไม่ใช่ราคาที่ใช้)
 `;
 
 /** กฎอ่านบิล + คำแปลศัพท์อะไหล่/สีที่ร้านเราใช้ — ใช้ร่วมทุก prompt ของบิลร้าน (แก้ที่นี่ที่เดียว) */
@@ -206,7 +214,9 @@ export const billTotalOf = (v: unknown) => numOrNull(v);
 
 /** ส่งรูป/PDF + รายการ PO ของร้านนี้ให้ AI อ่าน → หัวบิล + แถว (มีคู่ที่ AI เลือก) */
 export async function parseSellerBill(admin: Admin, ref: string | string[], groups: PoGroup[], who?: UseCtx): Promise<{
-  header: { is_bill: boolean; seller_text: string | null; bill_no: string | null; bill_date: string | null; currency: string | null; total_amount: number | null };
+  header: { is_bill: boolean; seller_text: string | null; bill_no: string | null; bill_date: string | null; currency: string | null; total_amount: number | null;
+    /** ★ 2026-11-15 สรุปยอดบิล (付款详情) — ยอดสินค้า/ส่วนลด/ค่าส่งในจีน/ค่าธรรมเนียม/ยอดจ่ายจริง · ไม่มีกล่องนี้ = null */
+    summary: BillSummary | null };
   lines: SellerBillLine[]; raw: Row; model: string;
 }> {
   const fileParts = await billFileParts(admin, Array.isArray(ref) ? ref : [ref]);   // หลายไฟล์ = หลายหน้าของบิลเดียวกัน
@@ -216,8 +226,11 @@ export async function parseSellerBill(admin: Admin, ref: string | string[], grou
     is_bill: raw.is_bill !== false,
     seller_text: str(raw.seller_name) || null, bill_no: str(raw.bill_no) || null, bill_date: normDate(raw.bill_date),
     currency: str(raw.currency) || null, total_amount: numOrNull(raw.total_amount),
+    summary: summaryFromAi(raw.payment),
   };
-  return { header, lines: sanitizeAiBillLines(raw.lines, idOf), raw, model: SELLER_BILL_MODEL };
+  // กันหักส่วนลดซ้ำ (ราคาในแถวหักมาแล้ว) / แบ่งส่วนลดท้ายบิลลงแถว · แถว 运费 ที่อยู่ในสรุปแล้ว = ข้าม (lib/seller-bill-summary)
+  const rec = reconcileBillDiscount(sanitizeAiBillLines(raw.lines, idOf), header.summary);
+  return { header: { ...header, summary: rec.summary }, lines: rec.lines, raw, model: SELLER_BILL_MODEL };
 }
 
 const SYSTEM_PICK = `คุณเป็นผู้ช่วยฝ่ายจัดซื้อ จับคู่ "รายการในบิลร้านจีน" (ข้อความที่อ่านแล้ว) กับ "รายการในใบสั่งซื้อของเรา" (รหัส P1, P2, …)
@@ -466,4 +479,61 @@ export async function unlinkVoucherLineFromSellerBills(admin: Admin, voucherId: 
     await admin.from("purchase_delivery_bills").update(patch).eq("id", String(b.id));
   }
   return touched;
+}
+
+/**
+ * ★ 2026-11-15 สรุปยอดบิลร้าน (付款详情) → หัวใบสำคัญรับ (ตอนกดใส่ลงใบ / แก้สรุปของบิลที่ใส่แล้ว)
+ *   ค่าส่งในจีน (+ ค่าธรรมเนียมที่เป็นหยวน) → seller_ship_foreign · ค่าธรรมเนียมบาท → pay_fee_thb · ยอดจ่ายจริงบาท (ทุกบิล) → paid_total_thb
+ *   เรท: ทุกบิลมียอดจ่ายจริงเป็นบาท + ค่าสินค้าในบิลเท่ากับในใบ → ตั้งเรทให้ "ยอดจ่ายร้าน" ตรงยอดจ่ายจริงพอดี (fxForTargetThb แบบ shop)
+ *   ไม่มีบิลไหนมีสรุป = ไม่แตะค่าที่คนใส่เองที่หัวใบ
+ */
+export async function syncSellerBillExtras(admin: Admin, voucherId: string): Promise<{ updated: boolean; fx: number | null }> {
+  const { data: vr } = await admin.from("purchase_vouchers_v2").select("id, currency, fx_rate, ship_method, ship_rate, ship_rate_cube, ship_rate_kg, ship_manual_total").eq("id", voucherId).maybeSingle();
+  if (!vr) return { updated: false, fx: null };
+  const v = vr as Row;
+  const { data: bs } = await admin.from("purchase_delivery_bills").select("id, lines, summary").eq("voucher_id", voucherId).eq("kind", "seller").not("is_active", "is", false);
+  const bills = ((bs ?? []) as Row[]).map((b) => ({ lines: (Array.isArray(b.lines) ? (b.lines as Row[]) : []).map(normalizeBillLine), summary: normalizeBillSummary(b.summary) }));
+  const withSum = bills.filter((b) => b.summary);
+  if (withSum.length === 0) return { updated: false, fx: null };
+  const foreign = isCNY(String(v.currency ?? ""));
+  let ship = 0, feeThb = 0, paidThb = 0;
+  let allPaidThb = bills.length > 0;
+  for (const b of bills) {
+    const s = b.summary;
+    if (!s || s.paid_currency !== "THB" || !(Number(s.paid_total) > 0)) allPaidThb = false;
+    if (!s) continue;
+    ship += Number(s.ship) || 0;
+    if (s.fee_currency === "THB") feeThb += Number(s.fee) || 0; else if (foreign) ship += Number(s.fee) || 0;
+    if (s.paid_currency === "THB") paidThb += Number(s.paid_total) || 0;
+  }
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const patch: Row = { seller_ship_foreign: ship > 0 ? r2(ship) : null, pay_fee_thb: feeThb > 0 ? r2(feeThb) : null, paid_total_thb: allPaidThb && paidThb > 0 ? r2(paidThb) : null, updated_at: new Date().toISOString() };
+  let fx: number | null = null;
+  if (foreign && allPaidThb && paidThb > 0) {
+    const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("qty, unit_price, cbm_per_unit, kg_per_unit, ship_method, discount, discount_pct").eq("voucher_id", voucherId).not("is_active", "is", false);
+    const lines = ((ls ?? []) as Row[]).map((l) => ({ qty: num(l.qty), unit_price: l.unit_price == null ? null : num(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? null : num(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? null : num(l.kg_per_unit),
+      ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method as ShipMethod : null, discount: l.discount == null ? null : num(l.discount), discount_pct: l.discount_pct == null ? null : num(l.discount_pct) }));
+    const header = { currency: String(v.currency ?? "RMB"), fx_rate: 1, ship_method: (v.ship_method as ShipMethod) ?? "none", ship_rate: v.ship_rate == null ? null : num(v.ship_rate),
+      ship_rate_cube: v.ship_rate_cube == null ? null : num(v.ship_rate_cube), ship_rate_kg: v.ship_rate_kg == null ? null : num(v.ship_rate_kg), ship_manual_total: v.ship_manual_total == null ? null : num(v.ship_manual_total),
+      seller_ship_foreign: patch.seller_ship_foreign as number | null, pay_fee_thb: patch.pay_fee_thb as number | null };
+    const voucherGoods = lines.reduce((a, l) => a + num(l.qty) * num(l.unit_price) - (num(l.discount_pct) > 0 ? num(l.qty) * num(l.unit_price) * num(l.discount_pct) / 100 : num(l.discount)), 0);
+    const billGoods = bills.reduce((a, b) => a + billNetGoods(b.lines) + b.lines.filter((l) => l.is_fee && l.decision === "expense").reduce((x, l) => x + (Number(l.amount) || 0), 0), 0);
+    // ค่าสินค้าในแถวของทุกบิลต้องตรง "ยอดสินค้า − ส่วนลด" ในสรุป (ไม่งั้นเรทจะเพี้ยนเพื่อกลบส่วนลดซ้ำ/แถวตกหล่น)
+    const billsOk = bills.every((b) => { const s = b.summary; if (!s || !(Number(s.goods_total) > 0)) return true; const exp = Number(s.goods_total) - (Number(s.discount_total) || 0); return Math.abs(billNetGoods(b.lines) - exp) <= Math.max(0.05, exp * 0.002); });
+    // + ค่าสินค้าในบิลต้องเท่ากับในใบ (ใบไม่มีรายการอื่นที่บิลไม่ได้คิด) ถึงจะคิดเรทจากยอดจ่ายได้ถูก
+    if (billsOk && voucherGoods > 0 && Math.abs(billGoods - voucherGoods) <= Math.max(0.05, voucherGoods * 0.005)) {
+      fx = fxForTargetThb(header, lines, paidThb, "shop");
+      if (fx) patch.fx_rate = fx;
+    }
+  }
+  await admin.from("purchase_vouchers_v2").update(patch).eq("id", voucherId);
+  await recomputeVoucher(admin, voucherId);
+  return { updated: true, fx };
+}
+
+/** ไฟล์ของบิล (บิลหลายหน้า = raw.files · ไม่งั้น r2_key) — ใช้ให้ AI อ่านซ้ำ */
+export function billFileRefs(bill: Row): string[] {
+  const raw = (bill.raw ?? null) as Row | null;
+  const files = Array.isArray(raw?.files) ? (raw!.files as unknown[]).map(String).filter(Boolean) : [];
+  return files.length ? files : [String(bill.r2_key ?? "")].filter(Boolean);
 }

@@ -161,6 +161,23 @@
 - ทะเบียนกลาง: หน้า `/m/freight-description-rules` ส่วนบน (`components/freight-description-registry`) — Description ทุกแบบที่เคยเจอ (กี่กล่อง · ล่าสุด · เคยเลือกคิว/กก.) ยังไม่ตั้งขึ้นก่อน · กด คิว/กก. = กฎในตาราง `freight_description_rules` เดิม (ไม่มีตารางใหม่) · API `/api/purchasing/freight-descriptions` (GET products.view · POST products.edit + audit) · บันทึกกฎแล้วเติมวิธีคิดให้กล่องที่ยังว่างในใบส่งของที่ยังไม่ได้ใช้
 - ยังไม่ทำ: อัปโหลดประวัติเดือนก่อน (รอไฟล์ตัวอย่าง) · ปุ่มจัดการเคสไม่ตรง (รอบหน้า, รอเจ้าของเลือก) · ค่าส่งยังหารด้วยจำนวนในใบสำคัญ (ถ้าใบส่งของเกิน ค่าต่อชิ้นจะสูงขึ้น)
 
+## สรุปยอดบิล (付款详情) + ค่าส่งในจีน/ค่าธรรมเนียม (2026-11-15)
+
+- เจ้าของ: "ยอดสุดท้ายไม่ตรงบิล รวมทั้งสิ้นต้องได้ 347.53" — บิล Taobao: ราคา ¥5.86 หักส่วนลดมาแล้ว แต่ระบบหักซ้ำ ¥5 + ไม่มี 运费 ¥8 / 支付手续费 ฿10.12 → ใบได้ ฿272.29
+- AI อ่านกล่อง 付款详情 → `purchase_delivery_bills.summary` (lib/seller-bill-summary `summaryFromAi`) · `reconcileBillDiscount`: ราคาในแถวรวม = ยอดสินค้า − ส่วนลด → ล้างส่วนลดแถว · ราคายังไม่หัก → แบ่งส่วนลดท้ายบิลลงแถว · แถว 运费 ที่อยู่ในสรุปแล้ว = ข้าม
+- กล่อง "สรุปยอดบิล" ในบิลร้าน (`components/seller-bill-panel/bill-summary.tsx`) แก้ได้ + ปุ่ม "ให้ AI อ่านยอดจากบิล" (PATCH `reread_summary`) · เทียบค่าสินค้าในแถวกับยอดหลังลด · บอกเรทจากยอดจ่ายจริง
+- ใส่ลงใบ / แก้สรุปของบิลที่ใส่แล้ว → `syncSellerBillExtras` (lib/seller-bill): หัวใบ `seller_ship_foreign` · `pay_fee_thb` · `paid_total_thb` + ตั้งเรทให้ยอดจ่ายร้านตรงยอดจ่ายจริง (เฉพาะเมื่อค่าสินค้าทุกบิลตรงสรุป + ตรงในใบ — กันเรทเพี้ยนกลบส่วนลดซ้ำ)
+- สูตรกลาง `computeVoucher`: ค่าส่งในจีน + ค่าธรรมเนียม เฉลี่ยลงบรรทัดตามค่าสินค้า (`extra_alloc_thb`) → ต้นทุนถึงมือ/ชิ้น · totals `shop_total_thb` (ยอดจ่ายร้าน) · `grand_total_thb` = ยอดจ่ายร้าน + ค่าส่งขนส่ง · PO payments goods_thb/goods_foreign รวมส่วนแบ่ง · `fxForTargetThb(…, "shop")` = ปุ่ม "ปรับเรทให้ตรงยอดจ่าย"
+- เช็กลิสต์ก่อนยืนยัน: key `paid` (ต่างเกิน ฿1 = เตือน ยืนยันได้) · หน้าพิมพ์ใบซื้อมีบรรทัดค่าส่งในจีน/ค่าธรรมเนียม · migration 202612180200
+
+## แก้ใบที่ยืนยันแล้ว + เวอร์ชัน (2026-11-15)
+
+- เจ้าของเลือกแบบ ก.: เปิดแก้ในใบเดิม (เลขเดิม · บังคับเหตุผล · เก็บทุกเวอร์ชัน) · สิทธิ์ `pv.edit_confirmed` (admin + manager)
+- สถานะยังเป็น confirmed + `editing_at` มีค่า → API แก้หัวใบ/รายการ/บิลร้าน/ใบส่งของ ยอมให้แก้ (`voucherEditable` lib/voucher-revision)
+- POST `/api/purchasing/vouchers/[id]/revise` start (เก็บใบตอนนี้เป็นเวอร์ชันปัจจุบันก่อน — ใบเก่า = v1 ย้อนหลัง) · save (ตรวจเหมือนยืนยัน → `writeBackVoucherPrices` lib/voucher-writeback → เวอร์ชันใหม่ + diff → audit `revise_save` พร้อม price_before · เตือน PO ที่จ่ายแล้วยอดไม่เท่า) · cancel (`restoreVoucherSnapshot` คืนหัว/รายการ/บิล)
+- เก็บเวอร์ชันที่ตารางกลาง `document_revisions` (lib/document-revisions · ใบสั่งซื้อ/ใบสั่งขายใช้ต่อได้) · ยืนยันครั้งแรกเก็บ v1 ให้เลย · การ์ด "ประวัติการแก้ไข" (`revision-history.tsx`) ดู diff + เปิดใบเวอร์ชันเก่าทั้งใบ
+- ยกเลิกใบ (void) รวมราคาก่อนเขียนทับจาก confirm + revise_save ทุกครั้ง (`mergePriceSnapshots`: ค่าเดิมจากครั้งแรก · ค่าที่เขียนล่าสุด) · เปิดแก้อยู่ = ยกเลิกใบไม่ได้ · migration 202612180210
+
 ## เทสต์
 
 `lib/__tests__/delivery-bill-check.test.ts` (กฎ Description · เช็กจำนวนหลายรอบ/ขาด/เกิน/กล่องปน · เดาสินค้าให้กล่อง) · `lib/__tests__/seller-bill-match.test.ts` (สัญญาณ ขนาด/สี/รหัส · จับคู่ · แบ่งจำนวน · ตรวจยอด) · `lib/__tests__/seller-bill-apply.test.ts` (PO ร้านนี้เท่านั้น · ค้าง · ใส่ลงใบ · กดซ้ำไม่บวกซ้ำ · บรรทัดจากใบรับใส่ราคาอย่างเดียว · ของนอก PO ไม่ยอม) · `lib/__tests__/bill-line-order.test.ts` (ลำดับแถว · เลข # · รหัสแถว · แบ่งรอบอัตโนมัติ 330 → 240 + 90)

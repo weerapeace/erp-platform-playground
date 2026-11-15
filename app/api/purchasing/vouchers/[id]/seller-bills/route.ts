@@ -14,9 +14,11 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { isRefForCategory } from "@/lib/file-ref";
 import { normDate } from "@/lib/delivery-bill";
-import { loadVoucherLite, loadShopGroups, loadAliases, parseSellerBill, rematchLines, applySellerBill } from "@/lib/seller-bill";
+import { loadVoucherLite, loadShopGroups, loadAliases, parseSellerBill, rematchLines, applySellerBill, syncSellerBillExtras, billFileRefs } from "@/lib/seller-bill";
 import { loadOtherShopGroups } from "@/lib/seller-bill-intake";
 import { matchAndSplit, normalizeBillLine, ensureRowIds, undecidedCount, applyGroupToLine, type SellerBillLine } from "@/lib/seller-bill-match";
+import { normalizeBillSummary } from "@/lib/seller-bill-summary";
+import { voucherEditable } from "@/lib/voucher-revision";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +31,7 @@ const actorOf = async (request: NextRequest) => {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   return { id: user?.id ?? null, name: (user?.user_metadata?.name as string) || user?.email || null, email: user?.email ?? null };
 };
-const toBill = (b: Row) => ({ ...b, lines: (Array.isArray(b.lines) ? (b.lines as Row[]) : []).map(normalizeBillLine) });
+const toBill = (b: Row) => ({ ...b, lines: (Array.isArray(b.lines) ? (b.lines as Row[]) : []).map(normalizeBillLine), summary: normalizeBillSummary(b.summary) });
 
 export async function GET(request: NextRequest, { params }: Params): Promise<NextResponse> {
   const denied = await guardApi(request, "products.cost.view"); if (denied) return denied;
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   const admin = supabaseAdmin();
   const v = await loadVoucherLite(admin, id);
   if (!v) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
-  if (v.status !== "draft") return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว อ่านบิลเพิ่มไม่ได้" }, { status: 400 });
+  if (!voucherEditable(v)) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว อ่านบิลเพิ่มไม่ได้ (กด แก้ไขใบ ก่อน)" }, { status: 400 });
 
   try {
     const groups = await loadShopGroups(admin, v);
@@ -82,7 +84,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     const { data: ins, error } = await admin.from("purchase_delivery_bills").insert({
       voucher_id: id, gr_id: body.gr_id || null, r2_key: ref, kind: "seller",
       bill_no: header.bill_no, seller_text: header.seller_text, bill_date: header.bill_date, total_amount: header.total_amount, currency: header.currency,
-      lines: matched, raw, status: "parsed", created_by: actor.name,
+      lines: matched, raw, status: "parsed", created_by: actor.name, summary: header.summary,
     }).select("*").single();
     if (error || !ins) return NextResponse.json({ error: "บันทึกบิลไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
     const cnt = (lv: string) => matched.filter((l) => l.level === lv).length;
@@ -99,7 +101,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const actor = await actorOf(request);
   const { id } = await params;
-  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean; backfill_po?: boolean; autosave?: boolean };
+  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean; backfill_po?: boolean; autosave?: boolean;
+    /** ★ 2026-11-15 สรุปยอดบิล (付款详情) · reread_summary = ให้ AI อ่านสรุปใหม่จากไฟล์เดิม */
+    summary?: unknown; reread_summary?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const billId = str(body.bill_id);
   if (!billId) return NextResponse.json({ error: "ไม่ระบุบิล" }, { status: 400 });
@@ -107,7 +111,19 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const v = await loadVoucherLite(admin, id);
   const { data: bill } = await admin.from("purchase_delivery_bills").select("*").eq("id", billId).eq("voucher_id", id).eq("kind", "seller").maybeSingle();
   if (!v || !bill) return NextResponse.json({ error: "ไม่พบบิล" }, { status: 404 });
-  if (v.status !== "draft") return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว แก้บิลไม่ได้" }, { status: 400 });
+  if (!voucherEditable(v)) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว แก้บิลไม่ได้ (กด แก้ไขใบ ก่อน)" }, { status: 400 });
+
+  // ★ 2026-11-15 ให้ AI อ่าน "สรุปยอดบิล" (付款详情) ใหม่จากไฟล์เดิม — บิลที่อ่านก่อนมีช่องนี้ · เก็บเฉพาะสรุป ไม่แตะแถว
+  if (body.reread_summary) {
+    try {
+      const { header } = await parseSellerBill(admin, billFileRefs(bill as Row), [], { request });
+      const summary = header.summary;
+      await admin.from("purchase_delivery_bills").update({ summary, updated_at: new Date().toISOString() }).eq("id", billId);
+      if ((bill as Row).status === "applied") await syncSellerBillExtras(admin, id);
+      await writeAudit(admin, { action: "ai_seller_bill_summary", entityType: "purchase_delivery_bills", entityId: billId, actorId: actor.id, actorName: actor.email, metadata: { voucher_id: id, found: !!summary } });
+      return NextResponse.json({ ok: true, summary, error: summary ? null : "ไม่เจอกล่องสรุปยอด (付款详情) ในบิลนี้ — ใส่ยอดเองได้" });
+    } catch (e) { return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 400 }); }
+  }
 
   const prev = (Array.isArray((bill as Row).lines) ? ((bill as Row).lines as Row[]) : []).map(normalizeBillLine);
   let lines: SellerBillLine[] = Array.isArray(body.lines) ? (body.lines as Row[]).map(normalizeBillLine) : prev;
@@ -118,13 +134,18 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const patch: Row = { updated_at: new Date().toISOString() };
   if (body.bill_no !== undefined) patch.bill_no = str(body.bill_no) || null;
   if (body.bill_date !== undefined) patch.bill_date = normDate(body.bill_date);
+  // ★ 2026-11-15 สรุปยอดบิล (付款详情) ที่คนแก้ในกล่อง "สรุปยอดบิล"
+  if (body.summary !== undefined) patch.summary = normalizeBillSummary(body.summary);
+  const summaryChanged = body.summary !== undefined && JSON.stringify(normalizeBillSummary((bill as Row).summary)) !== JSON.stringify(patch.summary);
 
   // ★ 2026-11-14 บันทึกร่างอัตโนมัติ (หน้าเว็บยิงทุก ~2 วิหลังแก้) — เก็บตามที่ส่งมา ไม่จับคู่/คิดป้ายใหม่ (เร็ว + ไม่ทับที่กำลังแก้)
   if (body.autosave && !body.apply && !body.rematch) {
     patch.lines = lines;
     const { error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true, saved_at: patch.updated_at, error: null });
+    // บิลที่ใส่ลงใบแล้ว + แก้สรุปยอด → หัวใบ (ค่าส่งในจีน/ค่าธรรมเนียม/ยอดจ่ายจริง/เรท) ตามทันที
+    const synced = summaryChanged && (bill as Row).status === "applied" ? await syncSellerBillExtras(admin, id) : null;
+    return NextResponse.json({ ok: true, saved_at: patch.updated_at, synced: !!synced?.updated, error: null });
   }
 
   try {
@@ -152,6 +173,8 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     patch.lines = lines;
     const { data: upd, error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId).select("*").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // ★ 2026-11-15 ใส่ลงใบ (หรือแก้สรุปของบิลที่ใส่แล้ว) → สรุปยอดบิลขึ้นหัวใบ + เรทจากยอดจ่ายจริง
+    if (result || (summaryChanged && (bill as Row).status === "applied")) await syncSellerBillExtras(admin, id);
     if (result) await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: actor.id, actorName: actor.email,
       metadata: { seller_bill_applied: billId, inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn, backfilled_po: result.backfilled?.po_no ?? null } });
     return NextResponse.json({ ok: true, data: toBill(upd as Row), applied: result ? { inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn, backfilled: result.backfilled } : null, error: null });

@@ -77,6 +77,11 @@ export default function PrintPurchaseVoucherPage() {
       fx_rate: h.fx_rate != null ? String(h.fx_rate) : "",
       subtotal_foreign: fmtMoney(h.subtotal_foreign), subtotal_thb: fmtMoney(h.subtotal_thb),
       has_shipping: h.ship_method !== "none" && h.ship_total_thb > 0 ? "1" : "",
+      // ★ 2026-11-15 ค่าส่งในจีน + ค่าธรรมเนียมจ่ายเงิน (รวมในยอดจ่ายร้าน · ยอดรวมทั้งสิ้นรวมแล้ว)
+      has_seller_ship: (h.seller_ship_foreign ?? 0) > 0 ? "1" : "",
+      seller_ship_label: foreign && (h.seller_ship_foreign ?? 0) > 0 ? `(${sym}${fmtMoney(h.seller_ship_foreign)} × ${h.fx_rate ?? "—"})` : "",
+      seller_ship_thb: fmtMoney(Math.round((h.seller_ship_foreign ?? 0) * (foreign ? Number(h.fx_rate) || 0 : 1) * 100) / 100),
+      has_pay_fee: (h.pay_fee_thb ?? 0) > 0 ? "1" : "", pay_fee_thb: fmtMoney(h.pay_fee_thb ?? 0),
       ship_method_label: `${mixed ? "คิว + น้ำหนัก" : chargedKg > 0 && chargedCbm === 0 ? SHIP_LABEL.weight : SHIP_LABEL[h.ship_method] ?? h.ship_method}${h.carrier_name ? ` · ${h.carrier_name}` : ""}`, ship_basis_label: basis,
       ship_rate: h.ship_manual_total != null ? "(ยอดจริงจากบิลขนส่ง)" : "",
       ship_total_thb: fmtMoney(h.ship_total_thb), grand_total_thb: fmtMoney(h.grand_total_thb),

@@ -152,6 +152,7 @@ export async function createVoucherFromChinaBill(admin: Admin, billId: string, o
       await admin.from("purchase_delivery_bills").insert({
         voucher_id: voucherId, r2_key: files[0], kind: "seller", bill_no: header.bill_no, seller_text: header.seller_text, bill_date: header.bill_date ?? billDate,
         total_amount: header.total_amount, currency: header.currency, lines: matched, raw: { ...raw, files, china_bill_id: billId }, status: "parsed", created_by: opts.actor.name,
+        summary: header.summary,   // ★ 2026-11-15 สรุปยอดบิล (付款详情)
       });
       ok = matched.filter((l) => l.level === "ok").length; mid = matched.filter((l) => l.level === "mid").length; no = matched.filter((l) => l.level === "no").length;
       const read = header.total_amount ?? checkBillMath(matched, null).sum;

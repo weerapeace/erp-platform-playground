@@ -14,6 +14,7 @@ import { recomputeVoucher, fetchVoucher } from "@/lib/purchase-voucher-server";
 import { loadPartnerMatcher } from "@/lib/po-line-price";
 import { cbmFromCm, isCNY } from "@/lib/landed-cost";
 import { unlinkVoucherLineFromSellerBills } from "@/lib/seller-bill";
+import { voucherEditable } from "@/lib/voucher-revision";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,7 +26,7 @@ const str = (v: unknown) => String(v ?? "").trim();
 
 async function loadDraft(id: string) {
   const admin = supabaseAdmin();
-  const { data: v } = await admin.from("purchase_vouchers_v2").select("id, status, seller_name, currency").eq("id", id).maybeSingle();
+  const { data: v } = await admin.from("purchase_vouchers_v2").select("id, status, seller_name, currency, editing_at").eq("id", id).maybeSingle();
   return { admin, v: (v as Row | null) };
 }
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const { admin, v } = await loadDraft(id);
   if (!v) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
-  if (v.status !== "draft") return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว เพิ่มรายการไม่ได้" }, { status: 400 });
+  if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว เพิ่มรายการไม่ได้ (กด แก้ไขใบ ก่อน)" }, { status: 400 });
 
   const skuId = str(body.item_sku_id) || null;
   let name = str(body.item_name);
@@ -88,7 +89,7 @@ export async function DELETE(request: NextRequest, { params }: Params): Promise<
   if (!lineId) return NextResponse.json({ error: "ไม่ระบุรายการ" }, { status: 400 });
   const { admin, v } = await loadDraft(id);
   if (!v) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
-  if (v.status !== "draft") return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว ลบรายการไม่ได้" }, { status: 400 });
+  if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบนี้ยืนยันแล้ว ลบรายการไม่ได้ (กด แก้ไขใบ ก่อน)" }, { status: 400 });
   const { data: l } = await admin.from("purchase_voucher_lines_v2").select("id, gr_line_id, gr_no, item_name, qty, unit_price").eq("id", lineId).eq("voucher_id", id).maybeSingle();
   const line = l as Row | null;
   if (!line) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });

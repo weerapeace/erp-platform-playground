@@ -64,6 +64,10 @@ export type VoucherHeaderInput = {
   /** @deprecated เรทเดิมตัวเดียว (ใช้กับ ship_method) — ยังรับไว้ให้ข้อมูลเก่า */
   ship_rate?: number | null;
   ship_manual_total?: number | null; // กรอกยอดค่าส่งจริงทับ (null = คิดจากเรท)
+  /** ★ 2026-11-15 ค่าส่งจากร้าน/ค่าส่งในจีน (运费) สกุลของใบ — รวมยอดจ่ายร้าน + เฉลี่ยเข้าต้นทุนต่อชิ้นตามมูลค่า */
+  seller_ship_foreign?: number | null;
+  /** ★ 2026-11-15 ค่าธรรมเนียมจ่ายเงิน (支付手续费) เป็นบาท — รวมยอดจ่ายร้าน + เฉลี่ยเข้าต้นทุนต่อชิ้นตามมูลค่า */
+  pay_fee_thb?: number | null;
 };
 
 export type VoucherLineCalc = {
@@ -75,7 +79,8 @@ export type VoucherLineCalc = {
   basis: number;                   // ปริมาณที่คิด (คิวรวม หรือ กก.รวม ของบรรทัด ตาม method)
   ship_by_rate_thb: number;        // ค่าส่งตามเรทของบรรทัดนี้ (ก่อนเฉลี่ยยอดจริง)
   ship_alloc_thb: number;          // ค่าส่งที่ใช้จริงของบรรทัดนี้ (บาท)
-  landed_unit_thb: number;         // ต้นทุนถึงมือ/ชิ้น = ราคาบาท + ค่าส่ง/ชิ้น
+  extra_alloc_thb: number;         // ส่วนแบ่งค่าส่งในจีน + ค่าธรรมเนียมจ่ายเงิน (บาท) ตามมูลค่าบรรทัด
+  landed_unit_thb: number;         // ต้นทุนถึงมือ/ชิ้น = (ค่าสินค้า + ค่าส่ง + ส่วนแบ่งค่าส่งในจีน/ค่าธรรมเนียม) ÷ จำนวน
   has_price: boolean;
 };
 
@@ -90,7 +95,11 @@ export type VoucherTotals = {
   charged_kg: number;              // กก.ที่ถูกคิดค่าส่งจริง (บรรทัดที่คิดตามน้ำหนัก)
   ship_from_rate_thb: number;      // ค่าส่งรวมตามเรท (ไว้เทียบกับยอดจริง)
   ship_total_thb: number;          // ค่าส่งที่ใช้จริง (manual ถ้ากรอก)
-  grand_total_thb: number;         // ค่าสินค้า + ค่าส่ง (โชว์แยกบรรทัดบนใบ)
+  seller_ship_foreign: number;     // ค่าส่งในจีน สกุลใบ
+  seller_ship_thb: number;         // ค่าส่งในจีน บาท
+  pay_fee_thb: number;             // ค่าธรรมเนียมจ่ายเงิน บาท
+  shop_total_thb: number;          // ยอดจ่ายร้าน = ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม (เทียบกับยอดจ่ายจริงในบิล)
+  grand_total_thb: number;         // ยอดจ่ายร้าน + ค่าส่งขนส่ง (โชว์แยกบรรทัดบนใบ)
   missing_price_count: number;     // บรรทัดที่ยังไม่มีราคา
   missing_basis_count: number;     // บรรทัดที่ต้องคิดค่าส่งแต่ไม่มีคิว/กก.
   missing_rate_count: number;      // บรรทัดที่มีปริมาณแต่ไม่มีเรทของวิธีนั้น
@@ -159,6 +168,18 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
     }
   }
 
+  // 4) ★ 2026-11-15 ค่าส่งในจีน + ค่าธรรมเนียมจ่ายเงิน → เฉลี่ยลงบรรทัดตามค่าสินค้า (บาท) · เศษปัดลงบรรทัดสุดท้ายที่มีค่าสินค้า
+  const sellerShipForeign = r2(n(header.seller_ship_foreign));
+  const sellerShipThb = r2(sellerShipForeign * fx);
+  const payFeeThb = r2(n(header.pay_fee_thb));
+  const extrasThb = r2(sellerShipThb + payFeeThb);
+  const valueSum = base.reduce((a, b) => a + Math.max(0, b.lineThb), 0);
+  const extras = base.map((b) => (extrasThb > 0 && valueSum > 0 && b.lineThb > 0 ? r2(extrasThb * (b.lineThb / valueSum)) : 0));
+  if (extrasThb > 0 && valueSum > 0) {
+    const diff = r2(extrasThb - extras.reduce((a, v) => a + v, 0));
+    if (diff !== 0) { for (let i = extras.length - 1; i >= 0; i--) { if (base[i].lineThb > 0) { extras[i] = r2(extras[i] + diff); break; } } }
+  }
+
   const outLines: VoucherLineCalc[] = base.map((b, i) => ({
     unit_price_thb: b.unitThb,
     line_total_foreign: b.lineForeign,
@@ -168,7 +189,8 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
     basis: b.basis,
     ship_by_rate_thb: b.cost,
     ship_alloc_thb: allocs[i],
-    landed_unit_thb: b.qty > 0 ? (b.disc > 0 ? r4((b.lineThb + allocs[i]) / b.qty) : r4(b.unitThb + allocs[i] / b.qty)) : b.unitThb,
+    extra_alloc_thb: extras[i],
+    landed_unit_thb: b.qty > 0 ? (b.disc > 0 ? r4((b.lineThb + allocs[i] + extras[i]) / b.qty) : r4(b.unitThb + (allocs[i] + extras[i]) / b.qty)) : b.unitThb,
     has_price: b.hasPrice,
   }));
 
@@ -185,7 +207,11 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
     charged_kg: chargedKg,
     ship_from_rate_thb: shipFromRate,
     ship_total_thb: shipTotal,
-    grand_total_thb: r2(subtotalThb + shipTotal),
+    seller_ship_foreign: sellerShipForeign,
+    seller_ship_thb: sellerShipThb,
+    pay_fee_thb: payFeeThb,
+    shop_total_thb: r2(subtotalThb + extrasThb),
+    grand_total_thb: r2(subtotalThb + extrasThb + shipTotal),
     missing_price_count: base.filter((b) => !b.hasPrice).length,
     missing_basis_count: base.filter((b) => b.method !== "none" && b.basis <= 0).length,
     missing_rate_count: base.filter((b) => b.method !== "none" && b.basis > 0 && b.rate <= 0).length,
@@ -203,11 +229,14 @@ export const SHIP_METHOD_LABEL: Record<ShipMethod, string> = { none: "ไม่�
  * หาเรท (บาทต่อ 1 หน่วยสกุลใบ) ที่ทำให้ "ค่าสินค้า ฿" รวม = ยอดบาทที่พิมพ์ — คิดด้วยสูตรกลาง computeVoucher (ปัดราคาบาทต่อหน่วยเหมือนกัน)
  * เริ่มจาก บาท ÷ ยอดสกุลใบ แล้วค้นหาละเอียด (6 ตำแหน่ง) ให้ตรงทุกสตางค์ · ไม่มียอดสกุลใบ / ยอดบาท ≤ 0 = null
  */
-export function fxForTargetThb(header: VoucherHeaderInput, lines: VoucherLineInput[], targetThb: number): number | null {
-  const target = r2(n(targetThb));
-  const foreign = computeVoucher({ ...header, fx_rate: 1 }, lines).totals.subtotal_foreign;
+export function fxForTargetThb(header: VoucherHeaderInput, lines: VoucherLineInput[], targetThb: number, of: "goods" | "shop" = "goods"): number | null {
+  // of = "goods" → ค่าสินค้า ฿ · "shop" → ยอดจ่ายร้าน (ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม) = ยอดจ่ายจริงในบิล (★ 2026-11-15)
+  const fee = of === "shop" ? r2(n(header.pay_fee_thb)) : 0;
+  const target = r2(n(targetThb) - fee);
+  const t1 = computeVoucher({ ...header, fx_rate: 1 }, lines).totals;
+  const foreign = of === "shop" ? r2(t1.subtotal_foreign + t1.seller_ship_foreign) : t1.subtotal_foreign;
   if (!(target > 0) || !(foreign > 0)) return null;
-  const thbAt = (fx: number) => computeVoucher({ ...header, fx_rate: fx }, lines).totals.subtotal_thb;
+  const thbAt = (fx: number) => { const t = computeVoucher({ ...header, fx_rate: fx }, lines).totals; return of === "shop" ? r2(t.shop_total_thb - t.pay_fee_thb) : t.subtotal_thb; };
   const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
   let best = r6(target / foreign);
   let bestDiff = Math.abs(thbAt(best) - target);

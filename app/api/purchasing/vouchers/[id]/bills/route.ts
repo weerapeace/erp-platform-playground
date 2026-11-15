@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { parseDeliveryBillImage, applyDeliveryBill, normDate, loadDescriptionRules, methodForDescription, type DeliveryBillLine } from "@/lib/delivery-bill";
 import { isRefForCategory } from "@/lib/file-ref";
+import { voucherEditable } from "@/lib/voucher-revision";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -89,7 +90,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   if (!billId) return NextResponse.json({ error: "ไม่ระบุใบส่งของ" }, { status: 400 });
   const admin = supabaseAdmin();
   const [{ data: v }, { data: bill }] = await Promise.all([
-    admin.from("purchase_vouchers_v2").select("id, status").eq("id", id).maybeSingle(),
+    admin.from("purchase_vouchers_v2").select("id, status, editing_at").eq("id", id).maybeSingle(),
     admin.from("purchase_delivery_bills").select("*").eq("id", billId).eq("voucher_id", id).maybeSingle(),
   ]);
   if (!v || !bill) return NextResponse.json({ error: "ไม่พบใบส่งของ" }, { status: 404 });
@@ -111,7 +112,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   }
   let applied = 0;
   if (body.apply) {
-    if ((v as Row).status !== "draft") return NextResponse.json({ error: "ใบสำคัญยืนยันแล้ว ใส่น้ำหนัก/คิวเพิ่มไม่ได้" }, { status: 400 });
+    if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบสำคัญยืนยันแล้ว ใส่น้ำหนัก/คิวเพิ่มไม่ได้ (กด แก้ไขใบ ก่อน)" }, { status: 400 });
     const useLines = lines ?? ((bill as Row).lines as DeliveryBillLine[]) ?? [];
     if (!useLines.some((l) => (l.voucher_line_ids ?? []).length > 0)) return NextResponse.json({ error: "ยังไม่ได้จับคู่สินค้ากับรายการในใบส่งของเลย" }, { status: 400 });
     applied = await applyDeliveryBill(admin, id, { tracking_no: (patch.tracking_no as string | null) ?? ((bill as Row).tracking_no as string | null) ?? null, lines: useLines });

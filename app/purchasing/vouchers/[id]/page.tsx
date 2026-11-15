@@ -25,8 +25,9 @@ import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { computeVoucher, fxForTargetThb, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
-import { voucherChecklist } from "@/lib/purchase-voucher-checklist";
+import { voucherChecklist, paidDiff, PAID_TOLERANCE_THB } from "@/lib/purchase-voucher-checklist";
 import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
+import { RevisionHistory } from "./revision-history";
 
 type Detail = { header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate?: number | null };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -60,7 +61,9 @@ export default function PurchaseVoucherFormPage() {
   const [loading, setLoading] = useState(true);
   // ค่าที่กำลังแก้ (ยังไม่บันทึก)
   // หัวใบ: 2 เรท (฿/คิว, ฿/กก.) · ship_method = วิธีคิดเริ่มต้นของบรรทัดที่ไม่ระบุเอง
-  const [h, setH] = useState<{ voucher_date: string; fx_rate: string; ship_method: ShipMethod; ship_rate_cube: string; ship_rate_kg: string; ship_manual_total: string; note: string; carrier_id: string; carrier_name: string }>({ voucher_date: "", fx_rate: "", ship_method: "none", ship_rate_cube: "", ship_rate_kg: "", ship_manual_total: "", note: "", carrier_id: "", carrier_name: "" });
+  const [h, setH] = useState<{ voucher_date: string; fx_rate: string; ship_method: ShipMethod; ship_rate_cube: string; ship_rate_kg: string; ship_manual_total: string; note: string; carrier_id: string; carrier_name: string;
+    /** ★ 2026-11-15 ค่าส่งในจีน (สกุลใบ) · ค่าธรรมเนียมจ่ายเงิน (฿) · ยอดจ่ายจริงตามบิล (฿) */
+    seller_ship_foreign: string; pay_fee_thb: string; paid_total_thb: string }>({ voucher_date: "", fx_rate: "", ship_method: "none", ship_rate_cube: "", ship_rate_kg: "", ship_manual_total: "", note: "", carrier_id: "", carrier_name: "", seller_ship_foreign: "", pay_fee_thb: "", paid_total_thb: "" });
   // ร้านขนส่ง/เรทค่าส่ง จากตั้งค่ากลาง (/m/freight-carriers) — เลือกแล้วได้วิธีคิดเริ่มต้น + 2 เรททันที
   const [carriers, setCarriers] = useState<{ id: string; name: string; method: ShipMethod; rate_cube: number | null; rate_kg: number | null }[]>([]);
   useEffect(() => {
@@ -96,6 +99,13 @@ export default function PurchaseVoucherFormPage() {
   const [confirming, setConfirming] = useState(false);
   const [lastConfirm, setLastConfirm] = useState<ConfirmResult | null>(null);   // ผลยืนยันล่าสุด (อัปเดตราคาไปกี่ที่) → โชว์ในการ์ดงานถัดไป
   const [sellerKey, setSellerKey] = useState(0);   // ลบรายการแล้ว → โหลดแผงบิลร้านใหม่
+  // ★ 2026-11-15 แก้ใบที่ยืนยันแล้ว (แบบ ก.: เลขเดิม · บังคับเหตุผล · เก็บทุกเวอร์ชัน) — สิทธิ์ pv.edit_confirmed (แอดมิน/หัวหน้า)
+  const canRevise = usePermission("pv.edit_confirmed");
+  const [reviseOpen, setReviseOpen] = useState(false);
+  const [reviseReason, setReviseReason] = useState("");
+  const [reviseCancelOpen, setReviseCancelOpen] = useState(false);
+  const [reviseBusy, setReviseBusy] = useState(false);
+  const [histKey, setHistKey] = useState(0);
   const [addOpen, setAddOpen] = useState(false);   // แถบ ＋ เพิ่มรายการเอง (พับไว้)
 
   const applyData = useCallback((d: Detail) => {
@@ -104,7 +114,8 @@ export default function PurchaseVoucherFormPage() {
     // ข้อมูลเก่ามีเรทตัวเดียว (ship_rate) → ใส่ให้ช่องของวิธีคิดเดิม
     const rateCube = hd0.ship_rate_cube ?? (hd0.ship_method === "cube" ? hd0.ship_rate : null);
     const rateKg = hd0.ship_rate_kg ?? (hd0.ship_method === "weight" ? hd0.ship_rate : null);
-    setH({ voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "" });
+    setH({ voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "",
+      seller_ship_foreign: hd0.seller_ship_foreign == null ? "" : String(hd0.seller_ship_foreign), pay_fee_thb: hd0.pay_fee_thb == null ? "" : String(hd0.pay_fee_thb), paid_total_thb: hd0.paid_total_thb == null ? "" : String(hd0.paid_total_thb) });
     const m: typeof ln = {};
     for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "", qty: String(l.qty),
       discount: l.discount_pct ? String(l.discount_pct) : l.discount ? String(l.discount) : "", disc_mode: l.discount_pct ? "pct" : "amt" };
@@ -123,7 +134,29 @@ export default function PurchaseVoucherFormPage() {
   }, [id, applyData]);
   useEffect(() => { if (canView && id) void load(); }, [load, canView, id]);
 
-  const readonly = !canEdit || (data?.header.status ?? "draft") !== "draft";
+  // ใบร่าง หรือใบยืนยันแล้วที่ "เปิดแก้" อยู่ = แก้ได้ (lib/voucher-revision)
+  const editing = data?.header.status === "confirmed" && !!data?.header.editing_at;
+  const readonly = !canEdit || !((data?.header.status ?? "draft") === "draft" || editing);
+  const reviseCall = async (action: "start" | "save" | "cancel", reason?: string) => {
+    setReviseBusy(true);
+    try {
+      if (action === "save" && dirty && !(await save())) return;
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/revise`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      applyData(j.data as Detail);
+      setSellerKey((k) => k + 1); setHistKey((k) => k + 1);
+      if (action === "start") { setReviseOpen(false); toast.success("เปิดแก้แล้ว — แก้ได้เหมือนตอนร่าง เสร็จแล้วกด บันทึกการแก้ไข"); }
+      if (action === "cancel") { setReviseCancelOpen(false); toast.success("ยกเลิกการแก้แล้ว — ใบกลับเป็นเวอร์ชันล่าสุด"); }
+      if (action === "save") {
+        if (j.unchanged) toast.success("ไม่มีอะไรเปลี่ยน — ปิดการแก้แล้ว");
+        else toast.success(`บันทึกการแก้ไขแล้ว (เวอร์ชัน ${j.rev_no}) · เปลี่ยน ${(j.diff ?? []).length} จุด${j.failed ? ` · เขียนราคากลับไม่สำเร็จ ${j.failed} รายการ` : ""}`);
+        for (const w of (j.pay_warnings ?? []) as { po_no: string; paid_thb: number; now_thb: number }[])
+          toast.error(`${w.po_no} จ่ายไปแล้ว ฿${fmtMoney(w.paid_thb)} แต่ยอดใหม่ ฿${fmtMoney(w.now_thb)} (ต่าง ฿${fmtMoney(Math.abs(w.now_thb - w.paid_thb))}) — ตรวจการจ่ายเงิน`);
+      }
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setReviseBusy(false); }
+  };
   const currency = data?.header.currency ?? "THB";
   const foreign = isForeignCurrency(currency);
   const sym = curSymbol(currency);
@@ -132,7 +165,8 @@ export default function PurchaseVoucherFormPage() {
   const calcIn = useMemo(() => {
     if (!data) return null;
     return {
-      header: { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total) },
+      header: { currency, fx_rate: h.fx_rate === "" ? null : num(h.fx_rate), ship_method: h.ship_method, ship_rate_cube: h.ship_rate_cube === "" ? null : num(h.ship_rate_cube), ship_rate_kg: h.ship_rate_kg === "" ? null : num(h.ship_rate_kg), ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total),
+        seller_ship_foreign: h.seller_ship_foreign === "" ? null : num(h.seller_ship_foreign), pay_fee_thb: h.pay_fee_thb === "" ? null : num(h.pay_fee_thb) },
       lines: data.lines.map((l) => { const e = ln[l.id]; return { qty: !l.gr_line_id && e?.qty ? num(e.qty) : l.qty, unit_price: e?.unit_price ? num(e.unit_price) : null, cbm_per_unit: e?.cbm_per_unit ? num(e.cbm_per_unit) : null, kg_per_unit: e?.kg_per_unit ? num(e.kg_per_unit) : null, ship_method: e?.ship_method || null, ...discOf(e) }; }),
     };
   }, [data, h, ln, currency]);
@@ -148,6 +182,15 @@ export default function PurchaseVoucherFormPage() {
     const got = computeVoucher({ ...calcIn.header, fx_rate: fx }, calcIn.lines).totals.subtotal_thb;
     toast.success(`คิดเรทให้ใหม่ = ${fx} บาท/${sym.trim() || currency} (฿${fmtMoney(got)} ÷ ${sym}${fmtMoney(calc?.totals.subtotal_foreign ?? 0)})${Math.abs(got - thb) >= 0.01 ? ` · ใกล้สุดที่ได้ ฿${fmtMoney(got)}` : ""} — กดบันทึกร่างเพื่อเก็บ`);
   };
+  /** ★ 2026-11-15 ปรับเรทให้ "ยอดจ่ายร้าน" (ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม) = ยอดจ่ายจริงตามบิลพอดี */
+  const fitPaidTotal = () => {
+    if (!calcIn || !(num(h.paid_total_thb) > 0)) return;
+    const fx = fxForTargetThb(calcIn.header, calcIn.lines, num(h.paid_total_thb), "shop");
+    if (fx == null) { toast.error("คิดเรทไม่ได้ — ใส่ราคา (สกุลใบ) ในรายการก่อน"); return; }
+    setHeader({ fx_rate: String(fx) });
+    const got = computeVoucher({ ...calcIn.header, fx_rate: fx }, calcIn.lines).totals.shop_total_thb;
+    toast.success(`ปรับเรทเป็น ${fx} — ยอดจ่ายร้าน ฿${fmtMoney(got)} ตรงยอดจ่ายจริง · กดบันทึกร่างเพื่อเก็บ`);
+  };
   const setLine = (lid: string, patch: Partial<LineEdit>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
 
   const save = async (): Promise<boolean> => {
@@ -161,6 +204,7 @@ export default function PurchaseVoucherFormPage() {
           // เรทเดิมตัวเดียว = เรทของวิธีคิดเริ่มต้น (ให้ของเก่าที่ยังอ่านช่องนี้ใช้ได้)
           ship_rate: h.ship_method === "cube" ? (h.ship_rate_cube === "" ? null : num(h.ship_rate_cube)) : h.ship_method === "weight" ? (h.ship_rate_kg === "" ? null : num(h.ship_rate_kg)) : null,
           ship_manual_total: h.ship_manual_total === "" ? null : num(h.ship_manual_total), note: h.note || null, carrier_id: h.carrier_id || null, carrier_name: h.carrier_name || null,
+          seller_ship_foreign: h.seller_ship_foreign === "" ? null : num(h.seller_ship_foreign), pay_fee_thb: h.pay_fee_thb === "" ? null : num(h.pay_fee_thb), paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb),
         },
         lines: data.lines.map((l) => { const e = ln[l.id]; return { id: l.id, ...(!l.gr_line_id && num(e?.qty) > 0 ? { qty: num(e?.qty) } : {}), unit_price: e?.unit_price === "" ? null : num(e?.unit_price), cbm_per_unit: e?.cbm_per_unit === "" ? null : num(e?.cbm_per_unit), kg_per_unit: e?.kg_per_unit === "" ? null : num(e?.kg_per_unit), ship_method: e?.ship_method || null, ...discOf(e) }; }),
       };
@@ -315,8 +359,10 @@ export default function PurchaseVoucherFormPage() {
     missing_price_count: t?.missing_price_count ?? 0, any_ship: anyShip, ship_total_thb: t?.ship_total_thb ?? 0,
     missing_basis_count: t?.missing_basis_count ?? 0, missing_rate_count: t?.missing_rate_count ?? 0, dirty: dirty && !readonly,
     ref_fx_rate: data?.ref_fx_rate ?? null,   // เรทหยวนวันที่ใบ → เตือนเมื่อเรทต่างเกิน 10%
+    paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb), shop_total_thb: t?.shop_total_thb ?? 0,   // ★ 2026-11-15 เทียบยอดจ่ายจริงตามบิล
   });
-  const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0, discount_foreign: t?.discount_foreign ?? 0, discount_thb: t?.discount_thb ?? 0 };
+  const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0, discount_foreign: t?.discount_foreign ?? 0, discount_thb: t?.discount_thb ?? 0,
+    seller_ship_foreign: t?.seller_ship_foreign ?? 0, seller_ship_thb: t?.seller_ship_thb ?? 0, pay_fee_thb: t?.pay_fee_thb ?? 0, shop_total_thb: t?.shop_total_thb ?? 0, paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb) };
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 
@@ -336,6 +382,8 @@ export default function PurchaseVoucherFormPage() {
                   {hd.status === "draft" && hd.pv_no && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-200 align-middle" title="เลขเดินตามวันที่ใบ — แก้วันที่ใบร่าง เลขจะเปลี่ยนตาม · กดยืนยันแล้วเลขล็อก">ร่าง · เลขเปลี่ยนตามวันที่ได้</span>}
                   {hd.status === "cancelled" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-red-50 text-red-700 border-red-200 align-middle">❌ ยกเลิกแล้ว</span>}
                   {hd.status === "confirmed" && <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 align-middle">✅ ยืนยันแล้ว {hd.confirmed_at ? formatDate(hd.confirmed_at) : ""} {hd.confirmed_by ? `· ${hd.confirmed_by}` : ""}</span>}
+                  {hd.status === "confirmed" && hd.revision > 1 && <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 align-middle" title="ใบนี้ถูกแก้หลังยืนยันแล้ว — ดูประวัติการแก้ไขด้านขวา">v{hd.revision}</span>}
+                  {editing && <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200 align-middle">กำลังแก้ไข → v{hd.revision + 1}</span>}
                 </h1>
                 <div className="text-sm text-slate-500 mt-0.5">🏪 {hd.seller_name ?? "—"} · ใบรับ {hd.gr_nos.join(", ") || "—"} · PO {hd.po_nos.join(", ") || "—"}{hd.tracking_no && <span className="ml-2 font-mono text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="รหัสขนส่ง (จากใบส่งของ)">🚚 {hd.tracking_no}</span>}</div>
               </div>
@@ -345,12 +393,33 @@ export default function PurchaseVoucherFormPage() {
                   return <a key={gid} href={`/print/goods-receipt/${gid}`} target="_blank" rel="noreferrer" className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 inline-flex items-center">🖨 ใบรับ {no}</a>;
                 })}
                 <a href={`/print/purchase-voucher/${id}`} target="_blank" rel="noreferrer" className={`h-9 px-3 text-xs rounded-md border inline-flex items-center ${hd.status === "confirmed" ? "border-slate-800 bg-slate-800 text-white hover:bg-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>🖨 ใบซื้อ (ใบสำคัญรับ)</a>
-                {!readonly && <button onClick={() => setCancelOpen(true)} className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบร่าง</button>}
-                {canEdit && hd.status === "confirmed" && <button onClick={() => setVoidOpen(true)} title="ใส่ราคา/ค่าส่งผิด → ยกเลิกใบนี้ แล้วออกใบใหม่" className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบนี้</button>}
+                {!readonly && hd.status === "draft" && <button onClick={() => setCancelOpen(true)} className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบร่าง</button>}
+                {canRevise && hd.status === "confirmed" && !editing && (
+                  <button onClick={() => { setReviseReason(""); setReviseOpen(true); }} title="แก้ใบนี้โดยใช้เลขเดิม — ต้องใส่เหตุผล · ใบเดิมเก็บเป็นประวัติ"
+                    className="h-9 px-3 text-xs rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 inline-flex items-center gap-1"><Icon name="edit" mode="line" size={13} /> แก้ไขใบ</button>
+                )}
+                {canEdit && hd.status === "confirmed" && !editing && <button onClick={() => setVoidOpen(true)} title="ใส่ราคา/ค่าส่งผิด → ยกเลิกใบนี้ แล้วออกใบใหม่" className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบนี้</button>}
                 {/* บันทึกร่าง / ยืนยัน ย้ายไปการ์ด "ก่อนยืนยัน" ด้านขวา (แบบ B) — จอแคบการ์ดอยู่ล่างสุด จึงมีปุ่มสำรองบนหัว */}
-                {!readonly && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="xl:hidden h-9 px-4 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
+                {!readonly && hd.status === "draft" && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="xl:hidden h-9 px-4 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
               </div>
             </div>
+
+            {/* ★ 2026-11-15 กำลังแก้ใบที่ยืนยันแล้ว — บอกชัดว่ายังไม่จบ + ปุ่มจบ/ยกเลิก */}
+            {editing && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3 flex-wrap">
+                <Icon name="edit" mode="line" size={18} className="text-amber-700 mt-0.5" />
+                <div className="flex-1 min-w-[16rem] text-sm text-amber-900">
+                  <div className="font-medium">กำลังแก้ใบที่ยืนยันแล้ว → จะเป็นเวอร์ชัน {hd.revision + 1}</div>
+                  <div className="text-xs text-amber-800 mt-0.5">เหตุผล: &ldquo;{hd.edit_reason ?? "—"}&rdquo; · เปิดแก้โดย {hd.editing_by ?? "—"} {hd.editing_at ? formatDate(hd.editing_at) : ""} · ราคาใหม่จะเขียนกลับใบสั่งซื้อ/ราคาร้านตอนกด &ldquo;บันทึกการแก้ไข&rdquo;</div>
+                </div>
+                {canRevise && (
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setReviseCancelOpen(true)} disabled={reviseBusy} className="h-9 px-3 text-xs rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิกการแก้</button>
+                    <button onClick={() => void reviseCall("save")} disabled={reviseBusy || saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
               {/* ซ้าย: หัวใบ + รายการ */}
@@ -369,6 +438,28 @@ export default function PurchaseVoucherFormPage() {
                   )}
                   <label className="text-xs text-slate-500 sm:col-span-2 lg:col-span-1">หมายเหตุ
                     <input value={h.note} disabled={readonly} onChange={(e) => setHeader({ note: e.target.value })} className={`${inputCls} w-full mt-1`} placeholder="เลขบิลขนส่ง / ชิปเมนต์…" />
+                  </label>
+                  {/* ★ 2026-11-15 ยอดในบิลร้านที่ไม่ใช่ค่าสินค้า (เจ้าของ: "รวมทั้งสิ้นต้องได้ 347.53 ตามบิล") — บิลร้านใส่ลงใบแล้วเติมให้เอง · แก้เองได้ */}
+                  <label className="text-xs text-slate-500" title="运费 — ร้านส่งไปโกดัง · รวมในยอดจ่ายร้าน + เฉลี่ยเข้าต้นทุนต่อชิ้นตามมูลค่า">{foreign ? "ค่าส่งในจีน (ร้าน→โกดัง)" : "ค่าส่งจากร้าน"} {sym.trim()}
+                    <MoneyInput value={h.seller_ship_foreign} disabled={readonly} onChange={(v) => setHeader({ seller_ship_foreign: v })} className={`${inputCls} w-full mt-1 text-right`} placeholder="0.00" />
+                  </label>
+                  <label className="text-xs text-slate-500" title="支付手续费 — ค่าธรรมเนียมจ่ายเงิน (บัตร) เป็นบาท · รวมในยอดจ่ายร้าน + เฉลี่ยเข้าต้นทุนต่อชิ้น">ค่าธรรมเนียมจ่ายเงิน ฿
+                    <MoneyInput value={h.pay_fee_thb} disabled={readonly} onChange={(v) => setHeader({ pay_fee_thb: v })} className={`${inputCls} w-full mt-1 text-right`} placeholder="0.00" />
+                  </label>
+                  <label className="text-xs text-slate-500 sm:col-span-2" title="实付款 — ยอดที่จ่ายจริงตามบิล ไว้เทียบว่าใบตรงบิลไหม (ไม่ได้บวกเข้ายอด)">ยอดจ่ายจริงตามบิล ฿ <span className="text-slate-400">(ไว้เทียบ ไม่บวกเข้ายอด)</span>
+                    <div className="mt-1 flex items-center gap-2">
+                      <MoneyInput value={h.paid_total_thb} disabled={readonly} onChange={(v) => setHeader({ paid_total_thb: v })} className={`${inputCls} w-40 text-right`} placeholder="0.00" />
+                      {(() => {
+                        const pd = paidDiff(t?.shop_total_thb, num(h.paid_total_thb));
+                        if (pd == null) return null;
+                        return Math.abs(pd) <= PAID_TOLERANCE_THB
+                          ? <span className="text-[11px] px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">ตรงยอดใบ ฿{fmtMoney(t?.shop_total_thb ?? 0)}</span>
+                          : <>
+                              <span className="text-[11px] px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200">ยอดใบ ฿{fmtMoney(t?.shop_total_thb ?? 0)} ต่าง ฿{fmtMoney(Math.abs(pd))}</span>
+                              {foreign && !readonly && <button type="button" onClick={fitPaidTotal} className="text-[11px] text-blue-600 hover:underline whitespace-nowrap" title="หาเรทที่ทำให้ ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม = ยอดจ่ายจริงพอดี">ปรับเรทให้ตรงยอดจ่าย</button>}
+                            </>;
+                      })()}
+                    </div>
                   </label>
                 </div>
 
@@ -583,11 +674,12 @@ export default function PurchaseVoucherFormPage() {
               </div>
 
               {/* ขวา: สรุปยอด (ค่าส่งแยกบรรทัด ไม่รวมในราคาสินค้า) + การจ่ายเงิน (หลังยืนยัน) */}
-              <aside className={`space-y-3 ${hd.status === "draft" ? "xl:sticky xl:top-4 xl:self-start" : ""}`}>
+              <aside className={`space-y-3 ${hd.status === "draft" || editing ? "xl:sticky xl:top-4 xl:self-start" : ""}`}>
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
-                {hd.status === "draft" && canEdit && (
-                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving}
-                    onSave={() => void save()} onConfirm={() => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb} />
+                {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
+                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving || reviseBusy}
+                    onSave={() => void save()} onConfirm={editing ? () => void reviseCall("save") : () => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb}
+                    revise={editing ? { nextRev: hd.revision + 1 } : null} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
                 {/* ยืนยันแล้ว: งานถัดไป (พิมพ์ · จ่ายค่าสินค้า · ค่าส่ง) */}
@@ -623,20 +715,27 @@ export default function PurchaseVoucherFormPage() {
                     )} />
                 )}
                 {/* สรุปยอด — ใบที่ยืนยัน/ยกเลิกแล้ว หรือคนที่ไม่มีสิทธิ์แก้ (การ์ดเช็กลิสต์มีสรุปยอดในตัวแล้ว) */}
-                {(hd.status !== "draft" || !canEdit) && (
+                {(hd.status !== "draft" || !canEdit) && !(editing && canRevise) && (
                   <div className="bg-white border border-slate-200 rounded-xl p-4">
                     <div className="text-sm font-semibold text-slate-700 mb-2">สรุปยอด</div>
                     <dl className="text-sm space-y-1.5">
                       {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()})</dt><dd className="tabular-nums">{sym}{fmtMoney(t?.subtotal_foreign)}</dd></div>}
                       {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {h.fx_rate || "—"}</dd></div>}
                       <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า (฿)</dt><dd className="tabular-nums font-medium">฿{fmtMoney(t?.subtotal_thb)}</dd></div>
+                      {(t?.seller_ship_foreign ?? 0) > 0 && <div className="flex justify-between"><dt className="text-slate-500">ค่าส่งในจีน{foreign ? <span className="text-[11px] text-slate-400"> {sym}{fmtMoney(t?.seller_ship_foreign)}</span> : null}</dt><dd className="tabular-nums">฿{fmtMoney(t?.seller_ship_thb)}</dd></div>}
+                      {(t?.pay_fee_thb ?? 0) > 0 && <div className="flex justify-between"><dt className="text-slate-500">ค่าธรรมเนียมจ่ายเงิน</dt><dd className="tabular-nums">฿{fmtMoney(t?.pay_fee_thb)}</dd></div>}
                       <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง (฿) <span className="text-[10px] text-slate-400">แยก ไม่รวมในราคาสินค้า</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t?.ship_total_thb)}</dd></div>
                       {anyShip && (t?.charged_cbm ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามคิว</dt><dd className="tabular-nums text-slate-500">{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × ฿{fmtMoney(num(h.ship_rate_cube), 0)}</dd></div>}
                       {anyShip && (t?.charged_kg ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามน้ำหนัก</dt><dd className="tabular-nums text-slate-500">{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × ฿{fmtMoney(num(h.ship_rate_kg), 0)}</dd></div>}
                       <div className="flex justify-between border-t border-slate-200 pt-2 mt-2"><dt className="text-slate-700 font-semibold">รวมทั้งสิ้น (฿)</dt><dd className="tabular-nums font-bold text-slate-900 text-base">฿{fmtMoney(t?.grand_total_thb)}</dd></div>
                     </dl>
+                    {num(h.paid_total_thb) > 0 && (() => { const pd = paidDiff(t?.shop_total_thb, num(h.paid_total_thb)) ?? 0; return (
+                      <div className={`mt-2 text-xs ${Math.abs(pd) <= PAID_TOLERANCE_THB ? "text-emerald-700" : "text-amber-700"}`}>จ่ายจริงตามบิล ฿{fmtMoney(num(h.paid_total_thb))} · {Math.abs(pd) <= PAID_TOLERANCE_THB ? "ตรง ✓" : `ยอดใบต่าง ฿${fmtMoney(Math.abs(pd))}`}</div>
+                    ); })()}
                   </div>
                 )}
+                {/* ★ 2026-11-15 ประวัติการแก้ไข (ทุกเวอร์ชัน · อะไรเปลี่ยน · ดูใบเก่า) */}
+                {hd.status !== "draft" && <RevisionHistory key={histKey} voucherId={id} sym={sym} />}
               </aside>
             </div>
           </>
@@ -658,6 +757,36 @@ export default function PurchaseVoucherFormPage() {
           </>}>
           <p className="text-sm text-slate-600">ลบรายการนี้ออกจากใบสำคัญ ({delLine.qty.toLocaleString()} {delLine.uom ?? ""}) — ยอดรวมและค่าส่งเฉลี่ยจะคิดใหม่</p>
           {delLine.price_source === "bill" && <p className="mt-2 text-xs text-slate-500">รายการนี้มาจากบิลร้าน — แถวในบิลจะกลับเป็น &quot;ยังไม่ใส่ลงใบ&quot; (กดยืนยันหรือข้ามใหม่)</p>}
+        </ERPModal>
+      )}
+      {/* ★ 2026-11-15 เปิดแก้ใบที่ยืนยันแล้ว — บังคับเหตุผล */}
+      {reviseOpen && hd && (
+        <ERPModal open onClose={() => !reviseBusy && setReviseOpen(false)} size="sm" storageKey="pv-revise-start" closeOnBackdrop={false}
+          title={`แก้ไขใบ ${hd.pv_no ?? ""}`} description="ใช้เลขเดิม · ใบตอนนี้เก็บเป็นประวัติ · แก้เสร็จกด บันทึกการแก้ไข"
+          footer={<>
+            <button onClick={() => setReviseOpen(false)} disabled={reviseBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button onClick={() => void reviseCall("start", reviseReason)} disabled={reviseBusy || reviseReason.trim().length < 3} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังเปิด…" : "เปิดแก้"}</button>
+          </>}>
+          <label className="text-xs text-slate-600">เหตุผลที่แก้ <span className="text-red-500">*</span>
+            <textarea value={reviseReason} onChange={(e) => setReviseReason(e.target.value)} rows={3} autoFocus placeholder="เช่น ร้านลดราคากล่อง 13×10 / ใส่เรทผิด / ลืมค่าส่งในจีน"
+              className="mt-1 w-full px-2 py-1.5 text-sm border border-slate-200 rounded-md" />
+          </label>
+          {reviseReason.length > 0 && reviseReason.trim().length < 3 && <div className="text-[11px] text-red-600 mt-1">ใส่เหตุผลอย่างน้อย 3 ตัวอักษร</div>}
+          <ul className="mt-2 text-[11px] text-slate-500 list-disc pl-4 space-y-0.5">
+            <li>ระหว่างแก้ ใบยังเป็น &ldquo;ยืนยันแล้ว&rdquo; — ราคาใหม่เขียนกลับใบสั่งซื้อ/ราคาร้านตอนกดบันทึกการแก้ไข</li>
+            <li>ไม่อยากแก้แล้ว กด &ldquo;ยกเลิกการแก้&rdquo; ใบกลับเป็นแบบเดิม</li>
+            <li>จ่ายเงินไปแล้วและยอดเปลี่ยน ระบบจะเตือน (ไม่แก้การจ่ายเงินให้เอง)</li>
+          </ul>
+        </ERPModal>
+      )}
+      {reviseCancelOpen && hd && (
+        <ERPModal open onClose={() => !reviseBusy && setReviseCancelOpen(false)} size="sm" storageKey="pv-revise-cancel"
+          title="ยกเลิกการแก้?" description={`ใบจะกลับเป็นเวอร์ชัน v${hd.revision} — สิ่งที่แก้ไว้รอบนี้จะหาย`}
+          footer={<>
+            <button onClick={() => setReviseCancelOpen(false)} disabled={reviseBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">แก้ต่อ</button>
+            <button onClick={() => void reviseCall("cancel")} disabled={reviseBusy} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{reviseBusy ? "กำลังคืน…" : "ยกเลิกการแก้"}</button>
+          </>}>
+          <p className="text-sm text-slate-600">หัวใบ รายการ และบิลที่แนบ จะกลับเป็นแบบก่อนเปิดแก้</p>
         </ERPModal>
       )}
       {/* ยกเลิกใบที่ยืนยันแล้ว */}

@@ -16,7 +16,34 @@ import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { canConfirm, fxAbnormal, fxDeviationPct, fxDeviationText, nextSteps, type CheckItem } from "@/lib/purchase-voucher-checklist";
 import type { PoPayment, VoucherHeader } from "@/lib/purchase-voucher-server";
 
-type Totals = { subtotal_foreign: number; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; discount_foreign?: number; discount_thb?: number };
+type Totals = { subtotal_foreign: number; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; discount_foreign?: number; discount_thb?: number;
+  /** ★ 2026-11-15 ค่าส่งในจีน (สกุลใบ/บาท) · ค่าธรรมเนียมจ่ายเงิน ฿ · ยอดจ่ายร้าน ฿ · ยอดจ่ายจริงตามบิล ฿ */
+  seller_ship_foreign?: number; seller_ship_thb?: number; pay_fee_thb?: number; shop_total_thb?: number; paid_total_thb?: number | null };
+
+/** ★ 2026-11-15 บรรทัดค่าส่งในจีน + ค่าธรรมเนียมจ่ายเงิน (ไม่มี = ไม่โชว์) — ใช้ทั้งกล่องก่อนยืนยันและสรุปใบที่ยืนยันแล้ว */
+function ExtraRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null }) {
+  const ship = t.seller_ship_foreign ?? 0, fee = t.pay_fee_thb ?? 0;
+  return (<>
+    {ship > 0 && (
+      <div className="flex justify-between gap-2"><dt className="text-slate-500" title="运费 — ร้านส่งไปโกดัง · เฉลี่ยเข้าต้นทุนต่อชิ้น">ค่าส่งในจีน{foreign ? <span className="text-[11px] text-slate-400"> {sym}{fmtMoney(ship)} × {r4(Number(fxRate) || 0)}</span> : null}</dt>
+        <dd className="tabular-nums">฿{fmtMoney(t.seller_ship_thb ?? ship)}</dd></div>
+    )}
+    {fee > 0 && <div className="flex justify-between"><dt className="text-slate-500" title="支付手续费 — ค่าธรรมเนียมจ่ายเงิน (บาท) · เฉลี่ยเข้าต้นทุนต่อชิ้น">ค่าธรรมเนียมจ่ายเงิน</dt><dd className="tabular-nums">฿{fmtMoney(fee)}</dd></div>}
+  </>);
+}
+/** ★ 2026-11-15 เทียบยอดจ่ายจริงตามบิล (ยอดจ่ายร้าน = ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม) */
+function PaidRow({ t }: { t: Totals }) {
+  const paid = Number(t.paid_total_thb) || 0;
+  if (!(paid > 0)) return null;
+  const diff = Math.round(((t.shop_total_thb ?? 0) - paid) * 100) / 100;
+  const ok = Math.abs(diff) <= 1;
+  return (
+    <div className={`flex justify-between gap-2 text-xs ${ok ? "text-emerald-700" : "text-amber-700"}`}>
+      <dt>จ่ายจริงตามบิล ฿{fmtMoney(paid)}</dt>
+      <dd className="tabular-nums">{ok ? "ตรง ✓" : `ยอดใบ${diff > 0 ? "มากกว่า" : "น้อยกว่า"} ฿${fmtMoney(Math.abs(diff))}`}</dd>
+    </div>
+  );
+}
 export type ConfirmResult = { pv_no: string; write_back: { po: boolean; price_list: boolean; sku: boolean; error?: string }[]; failed: number };
 
 // ★ 2026-11-15 กล่อง "ก่อนยืนยัน" แบบ B (เจ้าของเลือก: "แต่ละ section ดูกลืนกัน") — แถวที่ต้องดูเป็นแถบสีทั้งแถว ไม่ใช่แค่ไอคอนเล็ก
@@ -154,7 +181,9 @@ function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb }: { t: To
         {foreign
           ? <GoodsThbRow t={t} sym={sym} rate={Number(fxRate) || 0} refFx={refFx} onSet={onSetGoodsThb} />
           : <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า{disc > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums font-medium text-slate-800">฿{fmtMoney(t.subtotal_thb)}</dd></div>}
+        <ExtraRows t={t} foreign={foreign} sym={sym} fxRate={fxRate} />
         <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
+        <PaidRow t={t} />
       </dl>
     </div>
   );
@@ -169,20 +198,24 @@ function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean;
       {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()}){(t.discount_foreign ?? 0) > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums">{sym}{fmtMoney(t.subtotal_foreign)}</dd></div>}
       {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {fxRate || "—"}</dd></div>}
       <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า</dt><dd className="tabular-nums">฿{fmtMoney(t.subtotal_thb)}</dd></div>
+      <ExtraRows t={t} foreign={foreign} sym={sym} fxRate={fxRate} />
       <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
       <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5"><dt className="font-semibold text-slate-700">รวมทั้งสิ้น</dt><dd className="tabular-nums font-bold text-slate-900 text-lg">฿{fmtMoney(t.grand_total_thb)}</dd></div>
+      <PaidRow t={t} />
     </dl>
   );
 }
 
 /** ด้านขวาตอนเป็นร่าง: เช็กลิสต์ + สรุปยอด + บันทึกร่าง + ยืนยัน */
-export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb }: {
+export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null }: {
   items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   /** เรทอ้างอิง (เรทหยวนวันที่ใบ) — ใช้เตือนเรทผิดปกติ · ไม่มี = ไม่เทียบ */
   refFx?: number | null;
   dirty: boolean; saving: boolean; onSave: () => void; onConfirm: () => void;
   /** แก้ยอดค่าสินค้าบาท → หน้าใบคิดเรทใหม่ (ใบร่างสกุลต่างประเทศ) */
   onSetGoodsThb?: (thb: number) => void;
+  /** ★ 2026-11-15 กำลังแก้ใบที่ยืนยันแล้ว → ปุ่มหลัก = บันทึกการแก้ไข (เวอร์ชันถัดไป) · ไม่ใช่ยืนยัน + ออกเลข */
+  revise?: { nextRev: number } | null;
 }) {
   const ok = canConfirm(items);
   // ★ 2026-11-15 แบบ B: การ์ดเดียว 4 ช่อง — ตรวจ (ขาว) · ยอดเงิน (เทาอ่อน) · รวมทั้งสิ้น (แถบเข้ม) · ปุ่ม
@@ -199,15 +232,17 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
       </div>
       <div className="px-4 py-3">
         <button onClick={onConfirm} disabled={saving}
-          className={`w-full h-11 rounded-lg text-sm font-semibold text-white ${ok ? "bg-orange-600 hover:bg-orange-700" : "bg-orange-300 hover:bg-orange-400"} disabled:opacity-50`}>
-          ✓ ยืนยัน + ออกเลข
+          className={`w-full h-11 rounded-lg text-sm font-semibold text-white ${revise ? (ok ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-300 hover:bg-blue-400") : ok ? "bg-orange-600 hover:bg-orange-700" : "bg-orange-300 hover:bg-orange-400"} disabled:opacity-50`}>
+          {revise ? `✓ บันทึกการแก้ไข → เวอร์ชัน ${revise.nextRev}` : "✓ ยืนยัน + ออกเลข"}
         </button>
         <button onClick={onSave} disabled={saving || !dirty}
           className="mt-2 w-full h-9 rounded-lg text-sm border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-          {saving ? "กำลังบันทึก…" : dirty ? "💾 บันทึกร่าง (ยังไม่ยืนยัน)" : "บันทึกร่างแล้ว"}
+          {saving ? "กำลังบันทึก…" : dirty ? (revise ? "💾 เก็บที่แก้ไว้ก่อน (ยังไม่จบการแก้)" : "💾 บันทึกร่าง (ยังไม่ยืนยัน)") : (revise ? "เก็บที่แก้แล้ว" : "บันทึกร่างแล้ว")}
         </button>
         <div className="mt-3 text-[11px] text-slate-500 leading-relaxed">
-          <b className="font-medium text-slate-600">กดยืนยันแล้ว:</b> ได้เลขใบ PV · ราคาอัปเดตที่ใบสั่งซื้อ / ราคาร้าน / ต้นทุนสินค้า · ใบล็อกแก้ราคาไม่ได้ · ต่อไปจ่ายเงิน
+          {revise
+            ? <><b className="font-medium text-slate-600">กดบันทึกการแก้ไขแล้ว:</b> เลขใบเดิม · เก็บใบเดิมเป็นประวัติ · ราคาใหม่อัปเดตที่ใบสั่งซื้อ / ราคาร้าน / ต้นทุนสินค้า · จ่ายเงินไปแล้วและยอดเปลี่ยน = ระบบเตือน</>
+            : <><b className="font-medium text-slate-600">กดยืนยันแล้ว:</b> ได้เลขใบ PV · ราคาอัปเดตที่ใบสั่งซื้อ / ราคาร้าน / ต้นทุนสินค้า · ใบล็อกแก้ราคาไม่ได้ · ต่อไปจ่ายเงิน</>}
         </div>
       </div>
     </div>

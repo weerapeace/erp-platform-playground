@@ -10,9 +10,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { fetchVoucher, recomputeVoucher, assignVoucherNumber } from "@/lib/purchase-voucher-server";
-import { applyPoLinePrice, loadPartnerMatcher, writeBackSkuPrice, upsertSupplierPrice, snapshotLinePrice, type PriceSnapshot } from "@/lib/po-line-price";
-import { isForeignCurrency, isCNY } from "@/lib/landed-cost";
+import { fetchVoucher, recomputeVoucher, assignVoucherNumber, snapshotVoucher } from "@/lib/purchase-voucher-server";
+import { writeBackVoucherPrices } from "@/lib/voucher-writeback";
+import { saveRevision, VOUCHER_ENTITY } from "@/lib/document-revisions";
+import { isForeignCurrency } from "@/lib/landed-cost";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,46 +41,15 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try { pvNo = (await assignVoucherNumber(admin, id, true)) as string; }
   catch (e) { return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 500 }); }
 
-  // เขียนราคากลับ — บรรทัด PO (+ยอดรวมใบ +ราคาต่อร้าน) และ SKU · ทำต่อจนครบ เก็บผลรายบรรทัดไว้รายงาน
-  const matcher = await loadPartnerMatcher(admin);
-  const sellerPartner = v.header.seller_name ? (matcher.match(v.header.seller_name) as Record<string, unknown> | undefined) : undefined;
-  const results: { line: string; po: boolean; price_list: boolean; sku: boolean; error?: string }[] = [];
-  const before: PriceSnapshot[] = [];   // ราคาก่อนเขียนทับ — เก็บลงประวัติ ใช้ย้อนตอนยกเลิกใบ
-  for (const l of v.lines) {
-    const price = Number(l.unit_price);
-    const r = { line: l.item_name, po: false, price_list: false, sku: false } as (typeof results)[number];
-    let snap: PriceSnapshot | null = null;
-    try { snap = await snapshotLinePrice(admin, { itemName: l.item_name, poLineId: l.po_line_id ?? null, skuId: l.item_sku_id ?? null, fallbackPartnerId: sellerPartner ? String(sellerPartner.id) : null, matcher }); }
-    catch { snap = null; }
-    try {
-      if (l.po_line_id) {
-        const a = await applyPoLinePrice(admin, { lineId: l.po_line_id, price, actorId: user?.id ?? null, actorName, matcher, skipAudit: true });
-        r.po = true; r.price_list = a.saved_to_price_list;
-      } else if (l.item_sku_id && sellerPartner) {
-        // บรรทัดที่ไม่มี PO (รับตรง) → อย่างน้อยเก็บราคาต่อร้าน
-        r.price_list = await upsertSupplierPrice(admin, { skuId: l.item_sku_id, partnerId: String(sellerPartner.id), price, currency: v.header.currency, actorId: user?.id ?? null, actorName });
-      }
-      if (l.item_sku_id) {
-        r.sku = await writeBackSkuPrice(admin, { skuId: l.item_sku_id, currency: v.header.currency, unitPrice: price, unitPriceThb: Number(l.unit_price_thb ?? 0), actorId: user?.id ?? null, actorName, refLabel: String(pvNo) });
-      }
-    } catch (e) { r.error = String((e as Error).message ?? e); }
-    if (snap) {
-      const thb = Number(l.unit_price_thb ?? 0);
-      snap.written = {
-        po_price: r.po ? price : null,
-        supplier_price: r.price_list ? price : null,
-        rmb_cost: r.sku && isCNY(v.header.currency) && price > 0 ? price : null,
-        standard_price: r.sku && thb > 0 ? thb : null,
-      };
-      before.push(snap);
-    }
-    results.push(r);
-  }
+  // เขียนราคากลับ — บรรทัด PO (+ยอดรวมใบ +ราคาต่อร้าน) และ SKU · ทำต่อจนครบ เก็บผลรายบรรทัดไว้รายงาน (ของกลาง lib/voucher-writeback)
+  const { results, before } = await writeBackVoucherPrices(admin, v, { actorId: user?.id ?? null, actorName, refLabel: String(pvNo) });
 
   const { error: upErr } = await admin.from("purchase_vouchers_v2").update({
-    status: "confirmed", pv_no: pvNo, confirmed_by: actorName, confirmed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    status: "confirmed", pv_no: pvNo, confirmed_by: actorName, confirmed_at: new Date().toISOString(), updated_at: new Date().toISOString(), revision: 1,
   }).eq("id", id);
   if (upErr) return NextResponse.json({ error: "บันทึกสถานะไม่สำเร็จ: " + upErr.message }, { status: 500 });
+  // ★ 2026-11-15 เวอร์ชัน 1 = ใบตอนยืนยัน (ไว้เทียบเมื่อแก้หลังยืนยัน · ตารางกลาง document_revisions) — บันทึกไม่ได้ไม่ทำให้ยืนยันพัง
+  try { await saveRevision(admin, { entityType: VOUCHER_ENTITY, entityId: id, revNo: 1, action: "confirm", reason: null, snapshot: await snapshotVoucher(admin, id), diff: null, actorId: user?.id ?? null, actorName }); } catch { /* best-effort */ }
 
   await writeAudit(admin, {
     action: "confirm", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,

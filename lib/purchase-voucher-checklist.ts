@@ -22,7 +22,16 @@ export type ChecklistInput = {
   dirty: boolean;
   /** เรทอ้างอิง = เรทหยวนของวันที่ใบ (แอปโอนเงินจีน) · ไม่มี = ไม่เช็กว่าเรทผิดปกติ */
   ref_fx_rate?: number | null;
+  /** ★ 2026-11-15 ยอดจ่ายจริงตามบิล (实付款 ฿) · ยอดจ่ายร้านของใบ (ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม) — ไม่มียอดจ่ายจริง = ไม่เช็ก */
+  paid_total_thb?: number | null;
+  shop_total_thb?: number;
 };
+
+/** ยอดใบกับยอดจ่ายจริงต่างกันไม่เกินเท่านี้ (บาท) ถือว่าตรง — เศษปัดเรท/สตางค์ */
+export const PAID_TOLERANCE_THB = 1;
+/** ยอดใบ − ยอดจ่ายจริง (บวก = ใบสูงกว่า) · ไม่มียอดจ่ายจริง = null */
+export const paidDiff = (shopTotalThb: number | null | undefined, paidThb: number | null | undefined): number | null =>
+  Number(paidThb) > 0 ? Math.round((Number(shopTotalThb ?? 0) - Number(paidThb)) * 100) / 100 : null;
 
 /**
  * ★ 2026-11-15 เจ้าของ: "อยากให้เตือนเวลาพิมพ์เกินไปเยอะ" (ยอดบาท ¥600 → ฿5,000 = เรท 8.33 ทั้งที่เรทจริง ~5.2)
@@ -58,6 +67,15 @@ export function voucherChecklist(i: ChecklistInput): CheckItem[] {
         : { key: "fx", level: "ok", label: `เรท ${i.fx_rate} บาท ต่อ 1 ${i.currency_label}` });
   } else {
     out.push({ key: "fx", level: "ok", label: "สกุลบาท ไม่ต้องใช้เรท" });
+  }
+
+  // ★ 2026-11-15 เทียบยอดจ่ายจริงตามบิล (เจ้าของ: "รวมทั้งสิ้นต้องได้ 347.53 ตามบิล") — ยืนยันได้ แต่ควรดู
+  const pd = paidDiff(i.shop_total_thb, i.paid_total_thb);
+  if (pd != null) {
+    out.push(Math.abs(pd) <= PAID_TOLERANCE_THB
+      ? { key: "paid", level: "ok", label: `ยอดตรงกับที่จ่ายจริง ฿${money(Number(i.paid_total_thb))}` }
+      : { key: "paid", level: "warn", label: `ยอดใบ ฿${money(Number(i.shop_total_thb))} ${pd > 0 ? "มากกว่า" : "น้อยกว่า"}ยอดจ่ายจริง ฿${money(Number(i.paid_total_thb))} (ต่าง ฿${money(Math.abs(pd))})`,
+          hint: "เช็กส่วนลดซ้ำ / ค่าส่งในจีน / ค่าธรรมเนียม / เรท — หรือกด \"ปรับเรทให้ตรงยอดจ่าย\" (ยืนยันได้)" });
   }
 
   if (!i.any_ship) out.push({ key: "ship", level: "info", label: "ไม่คิดค่าส่งรอบนี้", hint: "มีค่าส่ง → เปิดกล่องค่าส่งแล้วเลือกร้านขนส่ง" });
