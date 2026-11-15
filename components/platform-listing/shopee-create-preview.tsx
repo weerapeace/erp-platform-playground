@@ -6,7 +6,7 @@
  * ข้อมูล = GET /api/shopee/create-product?parent_sku_id= (ตัวประกอบเดียวกับตอนลงจริง — lib/shopee-create-plan)
  * แก้แล้วเขียนลง "ร่าง Shopee" (PATCH /api/product-platforms) — ไม่แก้ข้อมูลสินค้าในระบบ:
  *   ชื่อ / รายละเอียด / หมวด → ร่าง · รูป → extra.shopee_images · น้ำหนัก (แทนของสินค้า) → extra.shopee_weight · ช่องของหมวด → extra.shopee_attrs
- * ลงแบบ "ปิดขาย" + สต๊อก 0 เสมอ (BigSeller ยังคุมสต๊อก) · 5A = ปุ่มลงจริงยังปิด (ทะเบียน lib/platform-create-registry)
+ * ลงแบบ "ปิดขาย" + สต๊อก 0 เสมอ (BigSeller ยังคุมสต๊อก) · 5B: ลงจริงจากขั้นสุดท้ายของตัวช่วย (POST /api/shopee/create-product)
  * ของกลางที่ใช้: ListingImageGrid/ListingImagePicker (รูป) · PlatformCategoryPicker (หมวด) · LazadaAttrField + ttsAttrDef (ช่องของหมวด) · state-views · Icon
  * ห้ามใช้: แก้สินค้าที่มีบน Shopee แล้ว (ใช้ลิ้นชักสินค้าบนร้าน)
  */
@@ -255,6 +255,18 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
 
 function LastAttemptBox({ a }: { a: LastAttempt }) {
   const when = thDateTime(a.at);
+  if (a.status === "tier_failed") {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="font-medium"><Icon name="warning" /> สร้างสินค้าบน Shopee แล้ว #{a.product_id}{when ? ` (${when})` : ""} แต่ยังไม่มีตัวเลือก (ปิดขายอยู่ · ลูกค้ายังไม่เห็น)</div>
+        {a.error && <div className="mt-0.5">{a.error}</div>}
+        <div className="mt-0.5">เพิ่มตัวเลือกใน Seller Centre หรือลบสินค้านี้แล้วลงใหม่ — ระบบไม่สร้างซ้ำให้อัตโนมัติ</div>
+      </div>
+    );
+  }
+  if (a.status === "creating") {
+    return <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="refresh" /> กำลังสร้างบน Shopee{when ? ` (เริ่ม ${when})` : ""}{a.product_id ? ` · สร้างสินค้าแล้ว #${a.product_id}` : ""} — ถ้าค้างเกิน 3 นาที ให้ดูใน Seller Centre ก่อนกดใหม่</p>;
+  }
   if (a.product_id) {
     return <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"><Icon name="done" /> ลงบน Shopee แล้ว #{a.product_id}{when ? ` (${when})` : ""} — ตรวจ/แก้ในลิ้นชักสินค้าบนร้าน แล้วค่อยเปิดขาย</p>;
   }

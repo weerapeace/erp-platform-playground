@@ -5,7 +5,7 @@
  * สร้างแบบ **ปิดขาย (UNLIST) + สต๊อก 0 เสมอ** — BigSeller ยังคุมสต๊อก · เจ้าของตรวจในลิ้นชัก (แก้ได้จากเฟส 4) แล้วค่อยเปิดขาย/ใส่สต๊อก
  * ใช้ 2 ที่ — ต้องตรงกันเสมอ (แบบเดียวกับ lib/tiktok-create-plan · lib/lazada-create-plan):
  *   1) GET  /api/shopee/create-product?parent_sku_id=  → ตัวช่วยลงสินค้า "ดูก่อนส่ง"
- *   2) POST /api/shopee/create-product                  → (5B) ฝากรูป → add_item → รอ ≥5 วิ → init_tier_variation
+ *   2) POST /api/shopee/create-product                  → (5B · เจ้าของ "เริ่ม 5B" 2026-11-15) ฝากรูป → add_item → รอ ≥5 วิ → init_tier_variation
  * ห้าม import lib/shopee (มีโค้ดเซ็นคำขอ) — หน้าเว็บ import ไฟล์นี้
  *
  * เอกสาร Shopee (อ่าน 2026-11-15):
@@ -397,6 +397,37 @@ export function planShopeeCreate(input: {
       missing, warnings, on_shop: onShop, template_item: t?.itemId ?? null, draft_extra: extra,
     },
   };
+}
+
+/** รูปสินค้าที่ต้องฝาก (บังคับ — ฝากไม่ได้ = หยุด) */
+export const shopeeCreateMainImageRefs = (payload: { add_item: Record<string, unknown> }): string[] =>
+  [...new Set(((obj(payload.add_item.image)?.image_ref_list as unknown[] | undefined) ?? []).map(str).filter(Boolean))];
+/** รูปตัวเลือกที่ต้องฝาก (ไม่บังคับ — ฝากไม่ครบ = ไม่ใส่รูปตัวเลือกทั้งชุด) */
+export const shopeeCreateOptionImageRefs = (payload: { tier: Record<string, unknown> | null }): string[] =>
+  [...new Set(arrOf(payload.tier?.standardise_tier_variation).flatMap((t) => arrOf(t.variation_option_list).map((o) => str(o.image_ref))).filter(Boolean))];
+
+/**
+ * แทน ref ด้วย image_id ที่ฝากแล้ว → body ที่ส่ง Shopee ได้จริง
+ * add_item.image = { image_id_list } · รูปตัวเลือก: ฝากครบทุกตัว = ใส่ image_id · ไม่ครบ = ตัดทั้งชุด (optionImages=false)
+ */
+export function shopeeCreateResolve(payload: { add_item: Record<string, unknown>; tier: Record<string, unknown> | null }, idOf: Map<string, string>): { add_item: Record<string, unknown>; tier: Record<string, unknown> | null; optionImages: boolean } {
+  const add = JSON.parse(JSON.stringify(payload.add_item)) as Record<string, unknown>;
+  const img = obj(add.image) ?? {};
+  const ids = ((img.image_ref_list as unknown[] | undefined) ?? []).map(str).filter(Boolean).map((r) => idOf.get(r)).filter((x): x is string => !!x);
+  const { image_ref_list: _drop, ...restImg } = img as Record<string, unknown>;
+  void _drop;
+  add.image = { ...restImg, image_id_list: ids };
+  if (!payload.tier) return { add_item: add, tier: null, optionImages: false };
+  const tier = JSON.parse(JSON.stringify(payload.tier)) as Record<string, unknown>;
+  const optRefs = shopeeCreateOptionImageRefs(payload);
+  const allOk = optRefs.length > 0 && optRefs.every((r) => idOf.has(r));
+  for (const t of arrOf(tier.standardise_tier_variation)) {
+    for (const o of arrOf(t.variation_option_list)) {
+      const r = str(o.image_ref); delete o.image_ref;
+      if (r && allOk) o.image_id = idOf.get(r)!;
+    }
+  }
+  return { add_item: add, tier, optionImages: allOk };
 }
 
 /** รูปทั้งหมดที่ต้องฝากกับ Shopee ก่อนส่ง (รูปสินค้า + รูปตัวเลือก · ไม่ซ้ำ) — ใช้ตอนลงจริง (5B) */

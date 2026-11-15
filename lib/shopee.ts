@@ -485,6 +485,22 @@ export async function shopeeCategoryRecommend(accessToken: string, shopId: strin
 }
 
 /**
+ * v2.product.add_item — สร้างสินค้าใหม่ 1 ตัว (เฟส 5B · ผู้เรียกต้องถามเจ้าของก่อน + ลงประวัติ) → item_id
+ * ไม่ลองซ้ำอัตโนมัติ (กันสร้างซ้ำ) · body จาก lib/shopee-create-plan (shopeeCreateResolve แทนรูปเป็น image_id แล้ว)
+ */
+export async function shopeeAddItem(accessToken: string, shopId: string | number, body: Record<string, unknown>): Promise<{ itemId: string; raw: Record<string, unknown> }> {
+  const j = await shopeeFetch("/api/v2/product/add_item", { accessToken, shopId, body });
+  const itemId = String(respOf(j).item_id ?? "").trim();
+  if (!itemId || itemId === "0") throw new ShopeeApiError("Shopee ไม่ส่งรหัสสินค้ากลับมา — ดูใน Seller Centre ว่าสร้างแล้วหรือยัง ก่อนลองใหม่", "error_data");
+  return { itemId, raw: j };
+}
+
+/** v2.product.init_tier_variation — ตั้งชั้นตัวเลือก + ตัวเลือก (หลัง add_item ≥5 วิ · standardise_tier_variation) · คืนคำตอบดิบ */
+export async function shopeeInitTierVariation(accessToken: string, shopId: string | number, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return shopeeFetch("/api/v2/product/init_tier_variation", { accessToken, shopId, body });
+}
+
+/**
  * v2.media_space.upload_image — ฝากรูป 1 รูปกับ Shopee → image_id (ใส่ใน update_item image.image_id_list)
  * เอกสาร (อ่าน 2026-11-15): Public API = เซ็นแค่ partner_id+path+timestamp (ไม่ใช้กุญแจร้าน) · multipart ช่อง image · JPG/JPEG/PNG ≤10MB
  *   scene "normal" = Shopee ทำเป็นจัตุรัสให้ (รูปสินค้า) · ratio "3:4" เฉพาะร้านที่ Shopee เปิดให้ (ไม่ส่ง = 1:1)

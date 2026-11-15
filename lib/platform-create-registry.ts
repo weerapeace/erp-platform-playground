@@ -30,10 +30,10 @@ export const LAZADA_CREATE_LIVE = false;
 
 /**
  * Shopee (เฟส 5 · เจ้าของ "เริ่ม 5A" 2026-11-15): lib/shopee-create-plan + /api/shopee/create-product
- *   5A = ดูก่อนส่ง + บันทึกร่าง (ไม่แตะร้าน) · 5B = ลงจริง → เปลี่ยนเป็น true หลังเจ้าของอนุมัติ + ลองจริง 1 ตัว
- *   ลงแบบ "ปิดขาย" (UNLIST) + สต๊อก 0 เสมอ — BigSeller ยังคุมสต๊อก
+ *   5A = ดูก่อนส่ง + บันทึกร่าง (ไม่แตะร้าน) · 5B (เจ้าของ "เริ่ม 5B" 2026-11-15) = ลงจริง → เปิดแล้ว
+ *   ลงแบบ "ปิดขาย" (UNLIST) + สต๊อก 0 เสมอ — BigSeller ยังคุมสต๊อก · ลองครั้งแรก = เจ้าของกด MGW318 ตัวเดียว
  */
-export const SHOPEE_CREATE_LIVE = false;
+export const SHOPEE_CREATE_LIVE = true;
 
 export const PLATFORM_CREATORS: Record<string, PlatformCreator> = {
   line_shopping: { code: "line_shopping", label: "LINE SHOPPING", endpoint: "/api/line-shopping/create-product", live: true },

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   planShopeeCreate, shopeeAttrFieldsOf, shopeeAttrPayload, shopeeAttrStateOf, shopeeBrandMatches, shopeeCategoryIdOf, shopeeCreateImageRefs,
   shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories, SHOPEE_CREATE_STOCK,
+  shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve,
   type ShopeeCategoryPick, type ShopeeCreateParent, type ShopeeCreateSku, type ShopeeTemplate,
 } from "@/lib/shopee-create-plan";
 
@@ -102,6 +103,21 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     ]);
     expect(pv.attrs.fromTemplate).toBe("467297004");
     expect(shopeeCreateImageRefs(payload)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"]);
+  });
+  test("ลงจริง (5B): แทนรูปเป็น image_id · รูปตัวเลือกฝากไม่ครบ = ตัดทั้งชุด", () => {
+    const { payload } = plan();
+    expect(shopeeCreateMainImageRefs(payload)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"]);
+    expect(shopeeCreateOptionImageRefs(payload)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg"]);
+    const all = new Map([["r2:img/BCG09-01.jpg", "id1"], ["r2:img/BCG09-02.jpg", "id2"], ["r2:gal/1.jpg", "id3"]]);
+    const ok = shopeeCreateResolve(payload, all);
+    expect(ok.add_item.image).toEqual({ image_id_list: ["id1", "id2", "id3"] });
+    expect(ok.optionImages).toBe(true);
+    const opts = (ok.tier!.standardise_tier_variation as { variation_option_list: Record<string, unknown>[] }[])[0].variation_option_list;
+    expect(opts).toEqual([{ variation_option_id: 0, variation_option_name: "ดำ", image_id: "id1" }, { variation_option_id: 0, variation_option_name: "น้ำตาล", image_id: "id2" }]);
+    const part = shopeeCreateResolve(payload, new Map([["r2:img/BCG09-01.jpg", "id1"], ["r2:gal/1.jpg", "id3"]]));
+    expect(part.optionImages).toBe(false);
+    expect((part.tier!.standardise_tier_variation as { variation_option_list: Record<string, unknown>[] }[])[0].variation_option_list.some((o) => "image_id" in o || "image_ref" in o)).toBe(false);
+    expect(payload.add_item.image).toEqual({ image_ref_list: ["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"] }); // ต้นฉบับไม่ถูกแก้
   });
   test("SKU เดียว = ไม่มีชั้น · item_sku = รหัส SKU · ราคา = ของ SKU", () => {
     const { preview: pv, payload } = plan({ skus: [sku("BCG10", { fake_price: null, list_price: 1290 })] });
