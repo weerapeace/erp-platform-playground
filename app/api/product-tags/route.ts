@@ -6,6 +6,7 @@
  *
  * ทำไมไม่ใช้ /api/admin/schema/m2m-links: ตัวนั้นต้องมีสิทธิ์ระดับแอดมินโครงสร้างตาราง
  * (admin.schema.view / delete_field) ซึ่งแรงเกินไปสำหรับ "คนที่แก้สินค้าได้ควรติดแท็กได้"
+ * (2026-11-15: m2m-links ปรับแล้ว — ตารางแท็กสินค้าใช้ products.view / products.edit + มี audit ทุกครั้ง)
  *
  * สิทธิ์: อ่าน = products.view · ติด/ปลด/แก้ชื่อ = products.edit
  */
