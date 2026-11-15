@@ -72,10 +72,14 @@ const isHttps = (u: unknown): u is string => typeof u === "string" && /^https:\/
 /** URL รูปที่ LINE ดึงได้ (ผ่าน proxy รูปกลาง · LINE ไม่ส่งหัว Sec-Fetch-Dest จึงได้ไฟล์ต้นฉบับ) */
 export const lineImageUrl = (origin: string, key: string) => `${origin}/api/r2-image?key=${encodeURIComponent(key)}`;
 
-/** การ์ดสินค้า (Flex) — รูปใส่เฉพาะ JPEG/PNG (LINE ไม่รับ webp) · ปุ่มเปิดหน้าสินค้าถ้ามีลิงก์ */
+/**
+ * การ์ดสินค้า (Flex) · ปุ่มเปิดหน้าสินค้าถ้ามีลิงก์
+ * รูป: LINE ไม่รับ webp แต่รูปปกส่วนใหญ่ในระบบเป็น webp (ตรวจ 11-15: JPG/PNG แค่ ~8%) → ขอผ่านตัวเสิร์ฟรูปโหมด sq=1
+ *      (จัตุรัส 1:1 พื้นขาว JPEG — โหมดเดียวกับรูปตัวเลือกที่ส่ง LINE SHOPPING) ทุกไฟล์
+ */
 export function lineProductFlex(p: Extract<ChatAttachment, { kind: "product" }>, origin: string): LineMessage {
   const price = p.price != null && Number.isFinite(p.price) && p.price > 0 ? `฿${Number(p.price).toLocaleString("th-TH", { maximumFractionDigits: 2 })}` : null;
-  const img = p.image_key && /\.(jpe?g|png)$/i.test(p.image_key) ? lineImageUrl(origin, p.image_key) : null;
+  const img = p.image_key ? `${lineImageUrl(origin, p.image_key)}&w=800&sq=1` : null;
   const bubble: Record<string, unknown> = {
     type: "bubble",
     body: {
