@@ -18,6 +18,8 @@
  *   ชื่อ = ร่าง → ชื่อสำหรับแพลตฟอร์ม → ชื่อสินค้า · หมวด = ร่าง ("{id} · ชื่อ") → หมวดกลางที่ผูก Lazada
  *   รายละเอียด = ร่าง → รายละเอียดสำหรับแพลตฟอร์ม → รายละเอียดสินค้า (ข้อความ → ย่อหน้า HTML)
  *   รูป = ร่าง extra.lazada_images (เลือกไว้) → ร่าง image_keys → ปกตัวสี + ปกตัวขาย · ref "r2:<key>" = รูปในระบบ · http = ลิงก์
+ *   รูปตัวเลือก (ต่อ SKU ≤ 8) = ร่าง extra.lazada_sku_images { รหัส SKU: [ref] } (เลือกเอง) → ปกตัวสี + รูปแกลเลอรีทั้งหมดของ SKU/ตัวสี (lib/sku-gallery-images)
+ *     SKU ที่ค่าชั้นแรกเดียวกัน (เช่น สีเดียวกันหลายไซซ์) ได้รูปชุดเดียวกัน · เกิน 8 = ส่ง 8 รูปแรก
  *   แบรนด์ = "No Brand" (ร้าน IG บน Lazada ใช้ No Brand ทุกรายการ · ใช้รหัสแบรนด์ของ Lazada = งานถัดไป)
  *   ราคา = ราคาเต็ม (fake_price) + ราคาลด (ราคาขาย) · ไม่มีราคาเต็ม = ราคาขายเป็นราคาปกติ · ตัวขายไม่มี → ใช้ของตัวสี
  *   สต๊อก = 0 (ไม่ส่งสต๊อกตอนสร้าง — ระบบสต๊อกกลาง/BigSeller ดูแล)
@@ -25,6 +27,7 @@
  */
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { lazAttrEditable, lazNormAttr, linesToHighlights, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
+import { skuImageKeys, type SkuImageSource } from "@/lib/sku-gallery-images";
 
 export const LAZADA_CREATE_MAX_IMAGES = 8;
 export const LAZADA_NO_BRAND = "No Brand";
@@ -41,6 +44,8 @@ export type LazCreateSku = {
   id: string; code: string; color_th: string | null; color: string | null;
   list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null;
   attribute_values: Record<string, unknown> | null; is_active: boolean; sale_ok?: boolean | null;
+  /** รูปแกลเลอรีของ SKU (r2 key เรียง ⭐ ก่อน) — loadSkuGalleryKeys · ไม่มี = ใช้แค่ปก */
+  gallery_keys?: string[] | null;
 };
 export type LazCreateParent = {
   id: string; code: string; name_th: string | null; name_platform: string | null;
@@ -71,7 +76,16 @@ export type LazCreateVariantRow = {
   saleProp: Record<string, string>;
   price: number | null; special: number | null;
   fake: number | null; sale: number | null;
+  /** รูปแรก (ปก) ของตัวเลือก */
   image_ref: string | null;
+  /** รูปที่จะส่ง (≤ 8 · ตัวแรก = ปก) */
+  image_refs: string[];
+  /** รูปทั้งหมดของตัวเลือกในระบบ (ให้เลือก/ติ๊กออก · ไม่ตัดจำนวน) */
+  image_pool: string[];
+  /** เลือกรูปเองไว้ (ร่าง extra.lazada_sku_images) */
+  images_custom: boolean;
+  /** ค่าชั้นแรก (SKU ที่ค่าเดียวกันใช้รูปชุดเดียวกัน) · null = ไม่มีชั้นตัวเลือก */
+  group: string | null;
 };
 export type LazCreateField<T> = { value: T; src: string };
 export type LazCreatePreview = {
@@ -203,11 +217,31 @@ export function planLazadaCreate(input: {
   if (ourDims.length > 2) warnings.push("สินค้านี้มีตัวเลือกเกิน 2 ชั้น — Lazada รับ 2 ชั้นแรก");
   if (new Set(dims.map((x) => x.lazName)).size < dims.length) missing.push("ชื่อชั้นตัวเลือกซ้ำกัน");
 
-  // ---------- รูปต่อตัวเลือก (ชั้นแรก · ไม่ใช่ size · ต้องครบทุกตัว) ----------
+  // ---------- รูปต่อตัวเลือก (ชั้นแรก · ไม่ใช่ size · ต้องครบทุกตัว · ≤ 8 รูป/ตัว) ----------
+  // ชุดรูปต่อ "ค่าชั้นแรก" (เช่น สีเดียวกันหลายไซซ์ = ชุดเดียวกัน): ปกตัวสี → รูปทั้งหมดของ SKU ในกลุ่ม (+ ของตัวสี)
   const colorImg = new Map<string, string>();
   for (const s of act) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const k = masters.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (k) colorImg.set(c, k); }
-  const imgOfSku = (s: LazCreateSku): string | null => { const k = colorImg.get(colorOf(s)) ?? s.cover_image_r2_key ?? masterOf(s.code)?.cover_image_r2_key ?? null; return k ? r2(k) : null; };
-  if (dims[0] && !/size/i.test(dims[0].lazName) && sellable.every((s) => imgOfSku(s))) dims[0].hasImage = true;
+  const coverOfSku = (s: LazCreateSku): string | null => colorImg.get(colorOf(s)) ?? s.cover_image_r2_key ?? masterOf(s.code)?.cover_image_r2_key ?? null;
+  const srcOf = (s: LazCreateSku | null): SkuImageSource | null => (s ? { cover: s.cover_image_r2_key, gallery: s.gallery_keys ?? [] } : null);
+  const groupOf = (s: LazCreateSku) => (dims[0] ? ourDims[0].valOf(s) : s.code);
+  const savedSkuImgs = (extra.lazada_sku_images && typeof extra.lazada_sku_images === "object" ? extra.lazada_sku_images : {}) as Record<string, unknown>;
+  const savedOf = (code: string) => { const v = savedSkuImgs[code]; return Array.isArray(v) ? [...new Set(v.map(str).filter(Boolean))] : null; };
+  const groupMembers = new Map<string, LazCreateSku[]>();
+  for (const s of sellable) { const g = groupOf(s); groupMembers.set(g, [...(groupMembers.get(g) ?? []), s]); }
+  const groupImgs = new Map<string, { pool: string[]; refs: string[]; custom: boolean }>();
+  for (const [g, members] of groupMembers) {
+    const keys: string[] = [];
+    const add = (k: string | null | undefined) => { if (k && !keys.includes(k)) keys.push(k); };
+    add(coverOfSku(members[0]));
+    for (const m of members) skuImageKeys(srcOf(m)!, srcOf(masterOf(m.code))).forEach(add);
+    const pool = keys.map(r2);
+    const saved = members.map((m) => savedOf(m.code)).find((x) => !!x && x.length > 0) ?? null;   // ตัวแรกในกลุ่มที่เลือกไว้ ใช้ทั้งกลุ่ม
+    groupImgs.set(g, { pool, refs: (saved ?? pool).slice(0, LAZADA_CREATE_MAX_IMAGES), custom: !!saved });
+  }
+  const imgsOf = (s: LazCreateSku) => groupImgs.get(groupOf(s)) ?? { pool: [], refs: [], custom: false };
+  if (dims[0] && !/size/i.test(dims[0].lazName) && sellable.every((s) => imgsOf(s).refs.length > 0)) dims[0].hasImage = true;
+  const overMax = [...groupImgs.values()].filter((g) => !g.custom && g.pool.length > LAZADA_CREATE_MAX_IMAGES).length;
+  if (dims[0]?.hasImage && overMax) warnings.push(`รูปตัวเลือก ${overMax} ชุดมีเกิน ${LAZADA_CREATE_MAX_IMAGES} รูป — ส่ง ${LAZADA_CREATE_MAX_IMAGES} รูปแรก (กดจำนวนรูปที่แถวเพื่อเลือกเอง)`);
 
   // ---------- แถวตัวเลือก ----------
   const variants: LazCreateVariantRow[] = sellable.map((s) => {
@@ -215,7 +249,8 @@ export function planLazadaCreate(input: {
     const price = fake ?? sale; const special = fake && sale && sale < fake ? sale : null;
     const saleProp: Record<string, string> = {};
     dims.forEach((dm, i) => { saleProp[dm.lazName] = ourDims[i].valOf(s); });
-    return { sku_id: s.id, code: s.code, saleProp, price, special, fake, sale, image_ref: imgOfSku(s) };
+    const im = imgsOf(s);
+    return { sku_id: s.id, code: s.code, saleProp, price, special, fake, sale, image_ref: im.refs[0] ?? null, image_refs: im.refs, image_pool: im.pool, images_custom: im.custom, group: dims[0] ? groupOf(s) : null };
   });
   if (variants.length && variants.some((v) => !v.price)) missing.push(`ราคา (${variants.filter((v) => !v.price).length} ตัวเลือกยังไม่มีราคา)`);
   if (dims.length) {
@@ -268,7 +303,7 @@ export function planLazadaCreate(input: {
     package_width: box.w != null ? String(round2(box.w)) : "",
     package_height: box.h != null ? String(round2(box.h)) : "",
     ...(dims.length ? { saleProp: v.saleProp } : {}),
-    ...(dims[0]?.hasImage && v.image_ref ? { Images: img([v.image_ref]) } : {}),
+    ...(dims[0]?.hasImage && v.image_refs.length ? { Images: img(v.image_refs) } : {}),
   }));
   const payload = {
     Request: {

@@ -34,6 +34,7 @@ import {
   planLazadaAttrs, lazAttrDefsWithExtras, lazAttrEditable, lazAttrGroup, lazAttrDisplay, lazAttrFill, lazNormAttr, type LazadaAttrDef, type LazadaAttrPlan,
   type LazadaEditChange, type LazadaEditPlan, type LazadaEditState, type LazadaListingDetailResponse, type LazadaListingView, type LazadaPricePlan, type LazadaPriceRow, type LazadaSkuView, type LazadaWriteResponse,
 } from "@/lib/lazada-listing-edit";
+import { systemImageRef } from "@/lib/line-listing-edit";
 
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อกด "แก้รายละเอียด" เท่านั้น
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
@@ -649,7 +650,7 @@ export function LazadaOptionsPanel({ state, disp, edit, matchedParent, matchedCo
  * กติกา Lazada (planLazadaSkuMedia): รูปตัวเลือกครบทุกตัว · ใส่ได้เฉพาะชั้นแรกที่ไม่ใช่ไซซ์
  */
 function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { state: LazadaListingState; edit: LazadaEditApi | null; matchedParent: string | null; matchedCode: string | null }) {
-  const sys = useSystemImages(matchedParent);
+  const sys = useSystemImages(matchedParent, { withSkuImages: true });
   const [openFor, setOpenFor] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const v = state.view!;
@@ -673,7 +674,7 @@ function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { stat
       cell: (r) => {
         const changed = (baseOf.get(r.skuId)?.images ?? []).join("\n") !== r.images.join("\n");
         return (
-          <button type="button" onClick={() => setOpenFor(r.skuId)} title={can ? "จัดการรูปของตัวเลือกนี้" : "ดูรูปของตัวเลือกนี้"}
+          <button type="button" onClick={() => { setOpenFor(r.skuId); if (can) sys.load(); }} title={can ? "จัดการรูปของตัวเลือกนี้" : "ดูรูปของตัวเลือกนี้"}
             className={`flex items-center gap-1 rounded-md p-0.5 hover:bg-slate-50 ${changed ? "ring-2 ring-violet-300" : ""}`}>
             {r.images.slice(0, 3).map((ref, i) => <img key={`${ref}-${i}`} src={listingImgSrc(ref, 120)} alt="" className="h-8 w-8 rounded object-cover" />)}
             {r.images.length === 0 && <span className="flex h-8 w-8 items-center justify-center rounded bg-slate-50 text-slate-300"><Icon name="image" /></span>}
@@ -690,6 +691,14 @@ function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { stat
   const row = rows.find((r) => r.skuId === openFor) ?? null;
   const group = row ? groupOf.get(row.skuId) ?? null : null;
   const sameGroup = row && group != null ? rows.filter((r) => groupOf.get(r.skuId) === group).length : 0;
+  // รูปทั้งหมดของ SKU นี้ในระบบ (จับคู่ด้วยรหัส SKU บนร้าน = รหัส SKU ในระบบ · ไม่สนตัวพิมพ์)
+  const sysSkuImgs = (() => {
+    const code = row?.sellerSku?.trim(); const map = sys.skuImages;
+    if (!code || !map) return null;
+    const hit = map[code] ?? Object.entries(map).find(([k]) => k.toLowerCase() === code.toLowerCase())?.[1];
+    return hit && hit.length ? hit.map(systemImageRef) : null;
+  })();
+  const sysSkuSame = !!row && !!sysSkuImgs && sysSkuImgs.slice(0, MAX_LAZADA_IMAGES).join("\n") === row.images.join("\n");
   const errs = edit?.skuPlan?.errors ?? [];
   return (
     <div className="space-y-2">
@@ -707,6 +716,13 @@ function LazadaSkuMediaTable({ state, edit, matchedParent, matchedCode }: { stat
               ? <p className="text-xs text-slate-500">ตัวเลือกนี้ยังไม่มีรูป</p>
               : <ListingImageGrid images={row.images} onChange={(next) => edit?.setSkuMedia(row.skuId, { images: next })} canEdit={can && !iv?.isSize} max={MAX_LAZADA_IMAGES} platformName="Lazada (รูปตัวเลือก)"
                   dragGroup="lazada-sku-images" onOpen={() => {}} onAdd={() => { setAdding(true); sys.load(); }} canAdd note="รูปจากระบบจะถูกทำเป็นจัตุรัสพื้นขาวแล้วฝากกับ Lazada" />}
+            {can && !iv?.isSize && sysSkuImgs && !sysSkuSame && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                <span className="flex-1">SKU {row.sellerSku} ในระบบมี {sysSkuImgs.length} รูป{sysSkuImgs.length > MAX_LAZADA_IMAGES ? ` (ใช้ ${MAX_LAZADA_IMAGES} รูปแรก)` : ""} — แทนรูปของตัวเลือกนี้ด้วยรูปชุดนั้น</span>
+                <button type="button" onClick={() => edit!.setSkuMedia(row.skuId, { images: sysSkuImgs.slice(0, MAX_LAZADA_IMAGES) })}
+                  className="h-8 rounded-md border border-violet-300 bg-white px-2.5 text-violet-700 hover:bg-violet-50">ใช้รูปทั้งหมดของ SKU นี้</button>
+              </div>
+            )}
             {can && !iv?.isSize && sameGroup > 1 && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-2 text-xs text-violet-900">
                 <span className="flex-1">ตัวเลือก “{group}” มี {sameGroup} ตัว (เช่น หลายไซซ์) — Lazada แนะนำให้ใช้รูปชุดเดียวกัน</span>

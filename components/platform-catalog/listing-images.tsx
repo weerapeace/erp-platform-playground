@@ -27,18 +27,22 @@ export const listingImgSrc = (ref: string | null | undefined, w = 400): string =
 };
 
 export type SystemImage = { key: string; source: string };
-/** คลังรูปของสินค้าในระบบที่จับคู่ (/api/product-platforms?parent_sku_id=) — โหลดครั้งเดียวเมื่อเรียก load() */
-export function useSystemImages(parentSkuId: string | null): { images: SystemImage[] | null; load: () => void } {
-  const [state, setState] = useState<{ for: string | null; images: SystemImage[] | null }>({ for: null, images: null });
-  const images = state.for === parentSkuId ? state.images : null;
+/**
+ * คลังรูปของสินค้าในระบบที่จับคู่ (/api/product-platforms?parent_sku_id=) — โหลดครั้งเดียวเมื่อเรียก load()
+ * withSkuImages = โหลด "รูปทั้งหมดของแต่ละ SKU" มาด้วย (skuImages { รหัส SKU: [r2 key] } · รวมรูปตัวสีให้ตัวขายแล้ว)
+ */
+export function useSystemImages(parentSkuId: string | null, opts?: { withSkuImages?: boolean }): { images: SystemImage[] | null; skuImages: Record<string, string[]> | null; load: () => void } {
+  const withSku = !!opts?.withSkuImages;
+  const [state, setState] = useState<{ for: string | null; images: SystemImage[] | null; skuImages: Record<string, string[]> | null }>({ for: null, images: null, skuImages: null });
+  const mine = state.for === parentSkuId;
   const load = useCallback(() => {
     if (!parentSkuId || (state.for === parentSkuId && state.images)) return;
     const pid = parentSkuId;
-    apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(pid)}`).then((r) => r.json())
-      .then((j: { images?: SystemImage[] }) => setState({ for: pid, images: Array.isArray(j.images) ? j.images : [] }))
-      .catch(() => setState({ for: pid, images: [] }));
-  }, [parentSkuId, state]);
-  return { images, load };
+    apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(pid)}${withSku ? "&with=sku_images" : ""}`).then((r) => r.json())
+      .then((j: { images?: SystemImage[]; sku_images?: Record<string, string[]> }) => setState({ for: pid, images: Array.isArray(j.images) ? j.images : [], skuImages: j.sku_images && typeof j.sku_images === "object" ? j.sku_images : null }))
+      .catch(() => setState({ for: pid, images: [], skuImages: null }));
+  }, [parentSkuId, state, withSku]);
+  return { images: mine ? state.images : null, skuImages: mine ? state.skuImages : null, load };
 }
 
 /** ตารางรูปสินค้า — ลากเรียง · ตั้งปก · ลบ · ปุ่มเพิ่มจากรูปในระบบ */

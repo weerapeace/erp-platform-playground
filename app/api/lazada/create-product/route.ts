@@ -25,7 +25,7 @@ import { lazWithRetry } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 60;
+export const maxDuration = 300;   // ฝากรูปตัวเลือก ≤ 8 รูป/ตัว × หลายสี อาจเป็นร้อยรูป
 
 const NO_STORE = { "Cache-Control": "no-store" };
 type Resp = { preview: LazCreatePreview | null; blockers?: string[]; live?: boolean; platform_id?: string; brand_id?: string | null; error: string | null };
@@ -79,12 +79,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: msg }, { status });
   };
 
-  // 1) ฝากรูปเข้า Lazada ทีละรูป (Lazada ไม่รับลิงก์นอก — 4138) · ฝากไม่ผ่าน = หยุด ไม่สร้างสินค้า
+  // 1) ฝากรูปเข้า Lazada (Lazada ไม่รับลิงก์นอก — 4138) · พร้อมกันทีละ 3 (โดนจำกัดความถี่ = lazWithRetry รอแล้วลองใหม่) · ฝากไม่ผ่าน = หยุด ไม่สร้างสินค้า
   const migrated = new Map<string, string>();
-  for (const ref of lazCreateImageRefs(r.payload)) {
-    try { migrated.set(ref, await lazWithRetry(() => lazMigrateImage(token.gateway, token.accessToken, lazMigrateImageXml(migrateUrlOf(ref))), "create-product migrate")); }
-    catch (e) { return fail(`ฝากรูปกับ Lazada ไม่สำเร็จ: ${lazErrorText(e)}`); }
-  }
+  const queue = lazCreateImageRefs(r.payload);
+  let migrateErr: unknown = null;
+  const worker = async () => {
+    while (!migrateErr && queue.length) {
+      const ref = queue.shift()!;
+      try { migrated.set(ref, await lazWithRetry(() => lazMigrateImage(token.gateway, token.accessToken, lazMigrateImageXml(migrateUrlOf(ref))), "create-product migrate")); }
+      catch (e) { migrateErr = e; }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  if (migrateErr) return fail(`ฝากรูปกับ Lazada ไม่สำเร็จ: ${lazErrorText(migrateErr)}`);
   const payload = lazCreateResolveImages(r.payload, migrated);
 
   // 2) สร้างสินค้า — ไม่ลองซ้ำอัตโนมัติ (กันสร้างซ้ำ) · ⚠️ เฟส C ตรวจ: คู่มือบอก brand จะเลิกใช้ → ถ้า Lazada ไม่รับ "No Brand" ต้องหา brand_id (GetBrandByPages)

@@ -77,6 +77,54 @@ describe("ชั้นตัวเลือก", () => {
   });
 });
 
+describe("รูปตัวเลือก — ส่งรูปทั้งหมดของ SKU (≤ 8)", () => {
+  const draftWith = (extra: Record<string, unknown>) => ({ title: null, description: null, category_path: null, image_keys: null, extra, platform_product_id: null });
+  const skuImgs = (pv: { variants: { code: string; image_refs: string[] }[] }) => Object.fromEntries(pv.variants.map((v) => [v.code, v.image_refs]));
+  it("ปกก่อน แล้วรูปแกลเลอรีของ SKU ตามลำดับ (ไม่ซ้ำ) · payload ส่งครบทุกรูป", () => {
+    const { preview: p, payload } = planLazadaCreate({ ...base, parent: parent(), skus: [
+      sku("B-01", "แดง", 100, null, { gallery_keys: ["img/B-01.jpg", "g/B-01-2.jpg", "g/B-01-3.jpg"] }),
+      sku("B-02", "ฟ้า", 100, null, { gallery_keys: ["g/B-02-2.jpg"] }),
+    ] });
+    expect(skuImgs(p)).toEqual({ "B-01": ["r2:img/B-01.jpg", "r2:g/B-01-2.jpg", "r2:g/B-01-3.jpg"], "B-02": ["r2:img/B-02.jpg", "r2:g/B-02-2.jpg"] });
+    expect(p.variants[0]).toMatchObject({ image_ref: "r2:img/B-01.jpg", images_custom: false, group: "แดง" });
+    const prod = (payload.Request as { Product: Record<string, any> }).Product;
+    expect(prod.Skus.Sku[0].Images).toEqual({ Image: ["r2:img/B-01.jpg", "r2:g/B-01-2.jpg", "r2:g/B-01-3.jpg"] });
+    expect(lazCreateImageRefs(payload)).toEqual(expect.arrayContaining(["r2:g/B-01-3.jpg", "r2:g/B-02-2.jpg"]));
+  });
+  it("เกิน 8 รูป = ส่ง 8 รูปแรก + เตือน · image_pool เก็บครบให้เลือก", () => {
+    const many = Array.from({ length: 11 }, (_, i) => `g/M-${i}.jpg`);
+    const { preview: p } = planLazadaCreate({ ...base, parent: parent(), skus: [sku("M-01", "แดง", 100, null, { gallery_keys: many }), sku("M-02", "ฟ้า", 100)] });
+    expect(p.variants[0].image_refs).toHaveLength(8);
+    expect(p.variants[0].image_pool).toHaveLength(12);
+    expect(p.warnings.some((w) => w.includes("เกิน 8 รูป"))).toBe(true);
+  });
+  it("สีเดียวกันหลายไซซ์ = รูปชุดเดียวกัน (รวมรูปตัวสี + ของแต่ละไซซ์)", () => {
+    const vo = (v: string) => ({ variant_option: { name: "ไซส์", value: v } });
+    const { preview: p } = planLazadaCreate({ ...base, parent: parent(), skus: [
+      sku("C-01", "ดำ", 100, null, { gallery_keys: ["g/C-01-a.jpg"] }),
+      sku("C-01S", "ดำ", null, null, { cover_image_r2_key: null, attribute_values: vo("S"), gallery_keys: ["g/C-01S.jpg"] }),
+      sku("C-01M", "ดำ", null, null, { cover_image_r2_key: null, attribute_values: vo("M") }),
+    ] });
+    expect(p.variants.map((v) => v.code)).toEqual(["C-01S", "C-01M"]);
+    expect(p.variants[0].image_refs).toEqual(["r2:img/C-01.jpg", "r2:g/C-01S.jpg", "r2:g/C-01-a.jpg"]);
+    expect(p.variants[1].image_refs).toEqual(p.variants[0].image_refs);
+    expect(p.dims[0].hasImage).toBe(true);
+  });
+  it("เลือกเองในร่าง (extra.lazada_sku_images) ใช้ทั้งกลุ่ม · ตัวอื่นยังอัตโนมัติ", () => {
+    const { preview: p } = planLazadaCreate({ ...base, parent: parent(), draft: draftWith({ lazada_sku_images: { "B-01": ["r2:g/B-01-3.jpg", "r2:img/B-01.jpg", "", "r2:g/B-01-3.jpg"] } }), skus: [
+      sku("B-01", "แดง", 100, null, { gallery_keys: ["g/B-01-2.jpg", "g/B-01-3.jpg"] }),
+      sku("B-02", "ฟ้า", 100),
+    ] });
+    expect(p.variants[0]).toMatchObject({ image_refs: ["r2:g/B-01-3.jpg", "r2:img/B-01.jpg"], images_custom: true });
+    expect(p.variants[1]).toMatchObject({ image_refs: ["r2:img/B-02.jpg"], images_custom: false });
+  });
+  it("ชั้นแรกเป็นไซซ์ = ไม่ส่งรูปตัวเลือก (Lazada ไม่รับ)", () => {
+    const { preview: p, payload } = planLazadaCreate({ ...base, parent: parent(), draft: draftWith({ lazada_variation: { color: { name: "size", customize: false } } }), skus: [sku("S-01", "S", 100, null, { gallery_keys: ["g/S-01.jpg"] }), sku("S-02", "M", 100)] });
+    expect(p.dims[0].hasImage).toBe(false);
+    expect((payload.Request as { Product: Record<string, any> }).Product.Skus.Sku[0].Images).toBeUndefined();
+  });
+});
+
 describe("ของช่วย", () => {
   it("รูปที่ต้องฝาก = ที่ยังไม่ใช่ลิงก์ Lazada · แทนลิงก์ทุกจุด", () => {
     const payload = { Request: { Product: { Images: { Image: ["r2:a", "https://th-live-01.slatic.net/p/x.jpg", "https://obs.line-scdn.net/y"] }, Skus: { Sku: [{ Images: { Image: ["r2:a"] } }, { SellerSku: "z" }] } } } };

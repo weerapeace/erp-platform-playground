@@ -8,6 +8,7 @@ import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { lazErrorText, type LazGateway } from "@/lib/lazada";
 import { lazAttrDefsWithExtras } from "@/lib/lazada-listing-edit";
 import { planLazadaCreate, lazCategoryIdOf, type LazCreatePreview, type LazCreateSku } from "@/lib/lazada-create-plan";
+import { loadSkuGalleryKeys } from "@/lib/sku-gallery-images";
 import { getPlatformId, lazCategoryAttrsCached, lazTokenOrReason } from "../shared";
 
 type Row = Record<string, unknown>;
@@ -31,7 +32,12 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
   ]);
   const it = items[0];
   if (!it) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
-  const { data: pRow } = await admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g").eq("id", parentId).maybeSingle();
+  // รูปแกลเลอรีของ SKU ทุกตัว (รูปตัวเลือกบน Lazada ได้ ≤ 8 รูป/ตัว) · โหลดไม่ได้ = ใช้แค่ปก (ไม่ล้มทั้งหน้า)
+  const skuRows = (skus ?? []) as Row[];
+  const [{ data: pRow }, gallery] = await Promise.all([
+    admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g").eq("id", parentId).maybeSingle(),
+    loadSkuGalleryKeys(admin, skuRows.map((s) => str(s.id))).catch((e) => { console.warn("[lazada create] sku gallery", (e as Error).message); return {} as Record<string, string[]>; }),
+  ]);
   const pr = (pRow ?? {}) as Row;
   const brandId = str(pr.brand_id) || null;
   const d = it.draft as Row | null;
@@ -69,11 +75,12 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
       description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height },
     },
-    skus: ((skus ?? []) as Row[]).map((s): LazCreateSku => ({
+    skus: skuRows.map((s): LazCreateSku => ({
       id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null,
       list_price: s.list_price == null ? null : Number(s.list_price), fake_price: s.fake_price == null ? null : Number(s.fake_price),
       cover_image_r2_key: (s.cover_image_r2_key as string) ?? null, attribute_values: (s.attribute_values as Record<string, unknown>) ?? null,
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
+      gallery_keys: gallery[str(s.id)] ?? [],
     })),
     draft, mappedCategory: it.platformCategory || null,
     galleryKeys: it.images.map((x) => x.key), attrDefs,

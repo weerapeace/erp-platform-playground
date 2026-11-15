@@ -1440,7 +1440,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "listing-images", label: "รูปสินค้าบนร้าน (เรียง/ปก/ลบ/เพิ่มจากระบบ)", code: "ListingImageGrid", category: "feature",
     source: { path: "components/platform-catalog/listing-images" },
-    what: "ตารางรูปสินค้าของรายการบนร้าน — ลากเรียง · ตั้งปก · ลบ (เหลือ ≥ 1) · ปุ่มเพิ่มจากคลังรูปของสินค้าที่จับคู่ + ป๊อปเลือกรูป (ListingImagePicker: เพิ่มรูปสินค้า / รูปตัวเลือก) · รูปจากระบบอยู่ในฟอร์มเป็น \"r2:<key>\"",
+    what: "ตารางรูปสินค้าของรายการบนร้าน — ลากเรียง · ตั้งปก · ลบ (เหลือ ≥ 1) · ปุ่มเพิ่มจากคลังรูปของสินค้าที่จับคู่ + ป๊อปเลือกรูป (ListingImagePicker: เพิ่มรูปสินค้า / รูปตัวเลือก) · รูปจากระบบอยู่ในฟอร์มเป็น \"r2:<key>\" · useSystemImages(id, { withSkuImages: true }) ได้รูปทั้งหมดของแต่ละ SKU ด้วย (skuImages)",
     when: "ลิ้นชักสินค้าบนร้าน: แท็บรูป LINE + Lazada · ป๊อปเลือกรูปตัวเลือก (LINE รายละเอียดตัวเลือก · Lazada รูป·น้ำหนัก·กล่อง)",
     notWhen: "คลังรูปของสินค้าในระบบ (หน้า Parent SKU) ให้ใช้ ProductImageGallery · อัปโหลดไฟล์ใหม่ ให้ใช้ ImageAttach",
     doc: "platform-catalog.md",

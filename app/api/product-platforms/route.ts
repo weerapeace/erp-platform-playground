@@ -10,17 +10,24 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit, writeAuditMany } from "@/lib/audit";
 import { loadListingContext } from "@/lib/product-listing-context";
+import { loadSkuImagesByCode } from "@/lib/sku-gallery-images";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // ตรรกะประกอบข้อมูล (ตัวสี/ตัวขาย · รวมรูป · น้ำหนัก/กล่อง · หมวดกลาง→ร้าน) อยู่ที่ของกลาง lib/product-listing-context
+// ?with=sku_images → เพิ่ม sku_images { รหัส SKU: [r2 key] } = รูปทั้งหมดของแต่ละ SKU (ลิ้นชัก Lazada ใช้ · lib/sku-gallery-images)
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
-  const parentId = (new URL(request.url).searchParams.get("parent_sku_id") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  const parentId = (sp.get("parent_sku_id") ?? "").trim();
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parent_sku_id" }, { status: 400 });
-  const ctx = await loadListingContext(supabaseAdmin(), parentId);
-  return NextResponse.json({ ...ctx, error: null });
+  const admin = supabaseAdmin();
+  const [ctx, skuImages] = await Promise.all([
+    loadListingContext(admin, parentId),
+    sp.get("with") === "sku_images" ? loadSkuImagesByCode(admin, parentId).catch(() => ({})) : Promise.resolve(undefined),
+  ]);
+  return NextResponse.json({ ...ctx, ...(skuImages ? { sku_images: skuImages } : {}), error: null });
 }
 
 const FIELDS = ["title", "description", "category_path", "status", "image_keys", "description_image_keys"] as const;

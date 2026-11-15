@@ -7,6 +7,7 @@
  * แก้แล้วเขียนลง "ร่าง Lazada" (PATCH /api/product-platforms) — ไม่แก้ข้อมูลสินค้าในระบบ:
  *   ชื่อ / รายละเอียด / หมวด → ร่าง · รูป → extra.lazada_images · จุดเด่น → extra.lazada_highlights
  *   น้ำหนัก (แทนของสินค้า) → extra.lazada_weight · ชั้นตัวเลือก → extra.lazada_variation · ข้อมูลเฉพาะของหมวด → extra.lazada_attrs
+ *   รูปตัวเลือก (≤ 8 รูป/ตัว · สีเดียวกันใช้ชุดเดียวกัน) → extra.lazada_sku_images { รหัส SKU: [ref] } — ไม่ตั้ง = รูปทั้งหมดของ SKU ในระบบ
  * ของกลางที่ใช้: ListingImageGrid/ListingImagePicker (รูป) · LazadaAttrField + useLazadaAttrDefs (ช่องของหมวด — ตัวเดียวกับลิ้นชัก Lazada)
  *   PlatformCategoryPicker (หมวด) · state-views
  * ห้ามใช้: แก้สินค้าที่มีบน Lazada แล้ว (ใช้ลิ้นชักสินค้าบนร้าน)
@@ -16,6 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
+import { ERPModal } from "@/components/modal";
 import { PlatformCategoryPicker } from "@/components/platform-category-picker";
 import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "@/components/platform-catalog/listing-images";
 import { LazadaAttrField, useLazadaAttrDefs } from "@/components/platform-catalog/lazada-listing-panels";
@@ -43,6 +45,7 @@ export function LazadaCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const [picker, setPicker] = useState(false);
   const [attrs, setAttrs] = useState<Record<string, string> | null>(null);
   const [moreAttrs, setMoreAttrs] = useState(false);
+  const [skuImgFor, setSkuImgFor] = useState<string | null>(null);
   const sys = useSystemImages(parentId);
 
   const load = useCallback(async () => {
@@ -60,18 +63,26 @@ export function LazadaCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const { load: loadDefs } = defsState;
   useEffect(() => { loadDefs(); }, [loadDefs]);
 
-  const patch = async (body: Record<string, unknown>, okMsg: string) => {
-    if (!pv || !data?.platform_id) return;
+  const patch = async (body: Record<string, unknown>, okMsg: string): Promise<boolean> => {
+    if (!pv || !data?.platform_id) return false;
     setSaving(true);
     try {
       const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentId, platform_id: data.platform_id, ...body }) });
       const j = await r.json();
       if (j.error) throw new Error(j.error);
       toast.success(okMsg); setEdit(null); await load();
-    } catch (e) { toast.error((e as Error).message || "บันทึกไม่สำเร็จ"); }
+      return true;
+    } catch (e) { toast.error((e as Error).message || "บันทึกไม่สำเร็จ"); return false; }
     finally { setSaving(false); }
   };
   const patchExtra = (partial: Record<string, unknown>, okMsg: string) => patch({ extra: { ...(pv?.draft_extra ?? {}), ...partial } }, okMsg);
+  /** รูปตัวเลือก: เขียนให้ทุก SKU ในกลุ่ม (สีเดียวกัน) · refs = null → กลับไปใช้รูปอัตโนมัติ */
+  const saveSkuImages = async (codes: string[], refs: string[] | null) => {
+    const cur = { ...((pv?.draft_extra.lazada_sku_images as Record<string, unknown> | undefined) ?? {}) };
+    for (const c of codes) { if (refs) cur[c] = refs; else delete cur[c]; }
+    const ok = await patchExtra({ lazada_sku_images: Object.keys(cur).length ? cur : null }, refs ? "บันทึกรูปตัวเลือกแล้ว" : "กลับไปใช้รูปอัตโนมัติ");
+    if (ok) setSkuImgFor(null);
+  };
 
   const editable = useMemo(() => (defsState.defs ?? []).filter((d) => lazAttrEditable(d) && lazAttrGroup(d) !== "gift"), [defsState.defs]);
   if (err) return <ErrorState title="โหลดข้อมูลที่จะส่ง Lazada ไม่สำเร็จ" hint={err} onRetry={() => void load()} className="py-6" />;
@@ -203,14 +214,19 @@ export function LazadaCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
         )}
         <div className="max-h-64 divide-y divide-slate-100 overflow-auto rounded-lg border border-slate-100">
           {pv.variants.map((v) => (
-            <div key={v.sku_id} className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 text-xs">
-              {v.image_ref ? <img src={listingImgSrc(v.image_ref, 96)} alt="" className="h-8 w-8 rounded object-cover" /> : <span className="h-8 w-8 rounded bg-slate-50" />}
+            <div key={v.sku_id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 text-xs">
+              <button type="button" disabled={!pv.dims[0]?.hasImage} onClick={() => setSkuImgFor(v.sku_id)} title={pv.dims[0]?.hasImage ? (canEdit ? "เลือกรูปของตัวเลือกนี้" : "ดูรูปของตัวเลือกนี้") : undefined}
+                className="flex items-center gap-1.5 rounded-md p-0.5 enabled:hover:bg-violet-50 disabled:cursor-default">
+                {v.image_ref ? <img src={listingImgSrc(v.image_ref, 96)} alt="" className="h-8 w-8 rounded object-cover" /> : <span className="h-8 w-8 rounded bg-slate-50" />}
+                {pv.dims[0]?.hasImage && <span className={`whitespace-nowrap text-[11px] ${v.images_custom ? "font-medium text-violet-700" : "text-slate-500"}`}>{v.image_pool.length > v.image_refs.length ? `${v.image_refs.length}/${v.image_pool.length}` : v.image_refs.length} รูป</span>}
+              </button>
               <div className="min-w-0"><div className="truncate font-mono">{v.code}</div><div className="truncate text-slate-500">{Object.values(v.saleProp).join(" · ") || "—"}</div></div>
               <div className="text-right">{v.special != null ? <><span className="text-slate-400 line-through">{baht(v.price)}</span> <span className="font-medium text-rose-600">{baht(v.special)}</span></> : <span className={v.price ? "font-medium" : "text-rose-600"}>{v.price ? baht(v.price) : "ไม่มีราคา"}</span>}</div>
             </div>
           ))}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400">ราคาเต็ม = ราคาเต็มในระบบ · ราคาลด = ราคาขาย (ไม่มีราคาเต็ม = ราคาขายเป็นราคาปกติ) · แก้ราคาที่หน้า SKU</div>
+        <div className="mt-1 text-[11px] text-slate-400">ราคาเต็ม = ราคาเต็มในระบบ · ราคาลด = ราคาขาย (ไม่มีราคาเต็ม = ราคาขายเป็นราคาปกติ) · แก้ราคาที่หน้า SKU{pv.dims[0]?.hasImage ? ` · รูปตัวเลือก = รูปทั้งหมดของ SKU ในระบบ (สูงสุด ${LAZADA_CREATE_MAX_IMAGES}) กดจำนวนรูปเพื่อเลือกเอง · สีเดียวกันใช้รูปชุดเดียวกัน` : ""}</div>
+        <SkuImagesModal pv={pv} skuId={skuImgFor} canEdit={canEdit} saving={saving} onClose={() => setSkuImgFor(null)} onSave={(codes, refs) => void saveSkuImages(codes, refs)} />
       </div>
 
       {/* ข้อมูลเฉพาะของหมวด */}
@@ -241,5 +257,54 @@ export function LazadaCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
           )}
       </div>
     </div>
+  );
+}
+
+/** ป๊อปรูปของตัวเลือก 1 ตัว — ลากเรียง/ตั้งปก/เอาออก (เหลือ ≥ 1) · เพิ่มคืนจากรูปของ SKU ในระบบ · บันทึกให้ทุก SKU ค่าเดียวกัน */
+function SkuImagesModal({ pv, skuId, canEdit, saving, onClose, onSave }: {
+  pv: LazCreatePreview; skuId: string | null; canEdit: boolean; saving: boolean;
+  onClose: () => void;
+  /** refs = null → กลับไปใช้รูปอัตโนมัติ */
+  onSave: (codes: string[], refs: string[] | null) => void;
+}) {
+  const [sel, setSel] = useState<string[] | null>(null);
+  useEffect(() => { setSel(null); }, [skuId]);
+  const v = pv.variants.find((x) => x.sku_id === skuId) ?? null;
+  if (!v) return null;
+  const cur = sel ?? v.image_refs;
+  const dirty = !!sel && sel.join("|") !== v.image_refs.join("|");
+  const members = v.group != null ? pv.variants.filter((x) => x.group === v.group) : [v];
+  const rest = v.image_pool.filter((r) => !cur.includes(r));
+  const full = cur.length >= LAZADA_CREATE_MAX_IMAGES;
+  return (
+    <ERPModal open onClose={onClose} size="lg" storageKey="lazada-create-sku-images" hasUnsavedChanges={dirty}
+      title={`รูปของตัวเลือก ${Object.values(v.saleProp).join(" · ") || v.code}`}
+      description={members.length > 1 ? `ใช้กับ ${members.length} SKU ที่ค่าเดียวกัน (${members.map((m) => m.code).join(", ")}) — Lazada ใช้รูปชุดเดียวกันต่อตัวเลือก` : v.code}
+      footer={canEdit ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {v.images_custom && !dirty && <button type="button" disabled={saving} onClick={() => onSave(members.map((m) => m.code), null)} className="h-9 rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-50">กลับไปใช้รูปอัตโนมัติ</button>}
+          <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50">ปิด</button>
+          <button type="button" disabled={!dirty || saving || cur.length === 0} onClick={() => onSave(members.map((m) => m.code), cur)} className="h-9 rounded-lg bg-violet-600 px-3 text-sm text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง Lazada</button>
+        </div>
+      ) : undefined}>
+      <div className="space-y-3">
+        <ListingImageGrid images={cur} onChange={setSel} canEdit={canEdit} max={LAZADA_CREATE_MAX_IMAGES} platformName="Lazada (รูปตัวเลือก)"
+          onOpen={() => {}} onAdd={() => {}} canAdd={false} dragGroup="lazada-create-sku-images" note="ระบบฝากรูปเข้า Lazada ให้ตอนลงจริง" />
+        {rest.length > 0 && (
+          <div>
+            <div className="mb-1 text-xs text-slate-600">รูปของตัวเลือกนี้ในระบบที่ยังไม่ได้ส่ง ({rest.length}) — {full ? `ครบ ${LAZADA_CREATE_MAX_IMAGES} รูปแล้ว เอารูปข้างบนออกก่อน` : "กดเพื่อเพิ่ม"}</div>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+              {rest.map((r) => (
+                <button key={r} type="button" disabled={!canEdit || full} onClick={() => setSel([...cur, r])} title="เพิ่มรูปนี้"
+                  className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-slate-300 enabled:hover:border-violet-400 disabled:opacity-40">
+                  <img src={listingImgSrc(r, 200)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                  {canEdit && !full && <span className="absolute bottom-1 right-1 rounded-full bg-white/90 px-1 text-[10px] text-violet-700"><Icon name="add" /></span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
