@@ -31,6 +31,7 @@ import { AlbumCover } from "@/components/album-cover";
 import { safeColor } from "@/components/design-dashboard/dashboard-helpers";
 import { withImageWidth } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
+import { useStepHistory } from "@/lib/use-step-history";
 import { albumPath, canMoveAlbum, isDayAlbum, photosToMove, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, restoreSample, setAlbumBrand, trashSample, uploadSample } from "./api";
 
@@ -95,13 +96,24 @@ export function SampleImagesPage() {
   }, [albumId, tab]);
   useEffect(() => { if (permsReady && canView) void reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [permsReady, canView]);
 
-  const openAlbum = async (id: string) => {
+  // ปุ่ม Back ย้อนทีละก้าวตามที่เดินมา (อัลบั้มย่อย → อัลบั้มแม่ → หน้าแฟ้ม) — เจ้าของสั่ง 2026-11-15 · ของกลาง lib/use-step-history
+  const steps = useStepHistory<{ album: string | null }>("sample-album", (s) => {
+    const want = s?.album ?? null;
+    if (want === albumId) return;            // ป๊อปที่เพิ่งปิดพากลับมาก้าวเดิม — อยู่ที่เดิมแล้ว
+    if (want) void openAlbum(want, true); else closeAlbum(true);
+  });
+  /** เปิดอัลบั้ม · fromHistory = มาจากปุ่ม Back (ไม่จดก้าวซ้ำ) */
+  const openAlbum = async (id: string, fromHistory = false) => {
+    if (!fromHistory && id !== albumId) steps.push({ album: id });
     setAlbumId(id); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null);
     try { const d = await loadSamples(id); setAlbums(d.albums); setBrands(d.brands); setPhotos(d.photos ?? []); }
     catch (e) { setErr((e as Error).message); }
   };
   /** กลับหน้าแฟ้ม (การ์ดอัลบั้ม) */
-  const closeAlbum = () => { setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); };
+  const closeAlbum = (fromHistory = false) => {
+    if (!fromHistory && albumId) steps.push({ album: null });
+    setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null);
+  };
   const switchTab = (next: BrandTab) => { setTab(next); closeAlbum(); };
 
   // ── แบรนด์ที่จะลงรูป: แท็บแบรนด์ = แบรนด์นั้น · ไม่ระบุแบรนด์ = ไม่มี · ทุกแบรนด์ = ปุ่มเลือกในกรอบวางรูป (จำล่าสุด) ──
@@ -344,7 +356,7 @@ export function SampleImagesPage() {
                 <>
                 {/* เส้นทาง: ← อัลบั้มทั้งหมด · อัลบั้มของวัน › อัลบั้มย่อย — วางรูป/อัลบั้มบนชื่อ = ย้ายขึ้นไปที่นั่น */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <button type="button" onClick={closeAlbum} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:arrow-left" />{t("อัลบั้มทั้งหมด", "All albums")}</button>
+                  <button type="button" onClick={() => closeAlbum()} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:arrow-left" />{t("อัลบั้มทั้งหมด", "All albums")}</button>
                   {path.map((a, i) => {
                     const last = i === path.length - 1;
                     return (
