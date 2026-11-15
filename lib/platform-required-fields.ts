@@ -81,8 +81,9 @@ const SHOPEE: Spec = {
     { ok: !!c.title.trim(), label: "ชื่อสินค้า", required: true },
     { ok: /^\s*\d+/.test(c.category), label: "หมวด Shopee", required: true,
       note: c.category.trim() ? (/^\s*\d+/.test(c.category) ? undefined : "ต้องเป็นหมวดจากรายการของ Shopee (มีรหัสหมวด)") : "ยังไม่ได้ยืนยัน — กด \"ใช้หมวดนี้\" ในหน้าดูก่อนส่ง หรือเลือกหมวดเอง" },
-    { ok: c.imagesToSend >= 1 && c.imagesToSend <= 9, label: "รูปสินค้า 1–9 รูป", required: true,
-      note: c.imagesToSend === 0 ? "ยังไม่มีรูป" : c.imagesToSend > 9 ? `เลือกไว้ ${c.imagesToSend} รูป (Shopee รับไม่เกิน 9)` : undefined },
+    // นับจากร่าง (ตัวเตรียมร่างใส่แค่ปก) — ตอนลงจริงระบบเติมจากรูปสินค้าในระบบจนครบ 3 (lib/shopee-create-plan) → ที่นี่บังคับแค่ ≥ 1
+    { ok: c.imagesToSend >= 1 && c.imagesToSend <= 9, label: "รูปสินค้า (Shopee ต้อง 3–9 รูป)", required: true,
+      note: c.imagesToSend === 0 ? "ยังไม่มีรูป" : c.imagesToSend > 9 ? `เลือกไว้ ${c.imagesToSend} รูป (Shopee รับไม่เกิน 9)` : c.imagesToSend < 3 ? "ระบบเติมจากรูปสินค้าในระบบให้ตอนลง — ดูจำนวนจริงในหน้าดูก่อนส่ง" : undefined },
     { ok: c.variantCount > 0, label: "มีตัวเลือก/SKU ≥ 1", required: true },
     { ok: c.allHavePrice, label: "ทุกตัวเลือกมีราคา", required: true },
     { ok: (c.weightKg ?? 0) > 0, label: "น้ำหนักพัสดุ", required: true, note: (c.weightKg ?? 0) > 0 ? undefined : "ยังไม่ได้ใส่น้ำหนัก (แก้ที่หน้าสินค้า หรือในหน้าดูก่อนส่ง)" },

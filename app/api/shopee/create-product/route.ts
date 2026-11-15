@@ -15,7 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { shopeeAddItem, shopeeErrorText, shopeeInitTierVariation, shopeeItemToCatalogItem } from "@/lib/shopee";
+import { ShopeeApiError, shopeeAddItem, shopeeErrorText, shopeeInitTierVariation, shopeeItemToCatalogItem } from "@/lib/shopee";
 import { shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve, type ShopeeCreatePreview } from "@/lib/shopee-create-plan";
 import { upsertCatalogListings, type CatalogSyncItem } from "@/lib/platform-catalog-sync";
 import { creatorOf, type CreateStep } from "@/lib/platform-create-registry";
@@ -31,6 +31,8 @@ type Resp = { preview: ShopeeCreatePreview | null; blockers?: string[]; live?: b
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Shopee: รออย่างน้อย 5 วิ หลังสร้างสินค้า ก่อนสร้างตัวเลือก */
 const TIER_WAIT_MS = 6000;
+/** Shopee ตอบปฏิเสธชัดเจน (เช่น error_param — ข้อมูลผิดกติกา) = แน่ใจว่ายังไม่ได้สร้าง · เน็ต/ระบบ Shopee ขัดข้อง = ไม่แน่ใจ */
+const surelyNotCreated = (e: unknown) => e instanceof ShopeeApiError && !!e.code && !/^(error_server|error_inner|error_network|error_unknown|http_5|http_0)/i.test(e.code) && e.httpStatus < 500;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
@@ -120,7 +122,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     itemId = created.itemId; addEcho = shopeeWriteEcho(created.raw);
   } catch (e) {
     bad("create", "สร้างสินค้าบน Shopee", shopeeErrorText(e));
-    return fail(`Shopee ไม่รับ: ${shopeeErrorText(e)} — ถ้าไม่แน่ใจว่าสร้างไปแล้วหรือยัง ให้ดูใน Seller Centre (สินค้าที่ปิดขาย) ก่อนลองใหม่`, 502, { raw_error: (e as Error).message, uploaded: idOf.size });
+    const tail = surelyNotCreated(e) ? "ยังไม่ได้สร้างสินค้าบน Shopee — แก้ตามนี้แล้วกดลงใหม่ได้" : "ถ้าไม่แน่ใจว่าสร้างไปแล้วหรือยัง ให้ดูใน Seller Centre (สินค้าที่ปิดขาย) ก่อนลองใหม่";
+    return fail(`Shopee ไม่รับ: ${shopeeErrorText(e)} — ${tail}`, 502, { raw_error: (e as Error).message, raw_code: (e as { code?: string }).code ?? null, uploaded: idOf.size });
   }
   done("create", "สร้างสินค้าบน Shopee (ปิดขาย)", `#${itemId}${addEcho.show ? ` · Shopee แจ้ง: ${addEcho.show}` : ""}`);
   // เก็บรหัสทันที (กันกดซ้ำแล้วสร้างซ้ำ แม้ขั้นถัดไปพัง)

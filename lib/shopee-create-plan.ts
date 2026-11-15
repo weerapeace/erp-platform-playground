@@ -34,6 +34,8 @@ export const SHOPEE_CREATE_MAX_MODELS = 50;
 export const SHOPEE_CREATE_MAX_TIERS = 2;
 const MODEL_SKU_MAX = 100;
 const DEFAULT_IMAGES_MAX = 9;
+/** ✅ ลองจริง 2026-11-15 (MGW318 2 รูป): Shopee ปฏิเสธ "The number of product images must be between 3 and 9" → อย่างน้อย 3 (ร้านบอกช่วงเองได้ใน get_item_limit) */
+export const SHOPEE_MIN_IMAGES = 3;
 const DEFAULT_DESC_MAX = 3000;
 
 type Obj = Record<string, unknown>;
@@ -83,7 +85,7 @@ export function shopeeUniqueCategories(cands: ShopeeCategoryPick[]): ShopeeCateg
 
 // ───────── ช่วงตามร้าน×หมวด (get_item_limit?category_id) ─────────
 export type ShopeeCreateLimits = {
-  nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMax: number | null;
+  nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMin?: number | null; imagesMax: number | null;
   priceMin: number | null; priceMax: number | null; tierNameMax: number | null; tierOptionMax: number | null;
   /** วันส่งของสินค้าที่ไม่ใช่พรีออเดอร์ */
   dtsNonPreOrder: number | null; dimensionMandatory: boolean | null; weightMandatory: boolean | null;
@@ -97,7 +99,7 @@ export function shopeeCreateLimitsOf(j: Obj | null): ShopeeCreateLimits | null {
   const dts = obj(r.dts_limit);
   const bool = (v: unknown) => (v === true ? true : v === false ? false : null);
   const out: ShopeeCreateLimits = {
-    nameMin: name.min, nameMax: name.max, descMin: desc.min, descMax: desc.max, imagesMax: img.max, priceMin: price.min, priceMax: price.max,
+    nameMin: name.min, nameMax: name.max, descMin: desc.min, descMax: desc.max, imagesMin: img.min, imagesMax: img.max, priceMin: price.min, priceMax: price.max,
     tierNameMax: tn.max, tierOptionMax: to.max, dtsNonPreOrder: num(dts?.non_pre_order_days_to_ship),
     dimensionMandatory: bool(obj(r.dimension_limit)?.dimension_mandatory), weightMandatory: bool(obj(r.weight_limit)?.weight_mandatory),
   };
@@ -179,7 +181,7 @@ export type ShopeeCreatePreview = {
   description: ShopeeCreateField<string>;
   category: { id: string | null; label: string | null; kind: ShopeeCategoryKind | null; src: string; candidates: ShopeeCategoryPick[] };
   brand: { id: number; name: string; src: string };
-  images: { refs: string[]; src: string; custom: boolean; max: number };
+  images: { refs: string[]; src: string; custom: boolean; min: number; max: number };
   weight: { kg: number | null; src: string };
   box: { l: number | null; w: number | null; h: number | null; mandatory: boolean };
   dims: ShopeeCreateDim[];
@@ -301,9 +303,12 @@ export function planShopeeCreate(input: {
   const picked = Array.isArray(extra.shopee_images) ? (extra.shopee_images as unknown[]).map(str).filter(Boolean) : [];
   const draftKeys = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean).map(r2) : [];
   const autoRefs = [...new Set([...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null), ...input.galleryKeys].filter(Boolean) as string[])].map(r2);
-  const refs = [...new Set(picked.length ? picked : draftKeys.length ? draftKeys : autoRefs)].slice(0, imagesMax);
-  const imgSrc = picked.length ? "เลือกไว้สำหรับ Shopee" : draftKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU + รูปสินค้า (อัตโนมัติ)";
-  if (!refs.length) missing.push("รูปสินค้า ≥ 1");
+  // เลือกเอง (extra.shopee_images) = ใช้ตามนั้น · ไม่ได้เลือก = รูปในร่าง (ตัวเตรียมร่างเติมให้แค่ปก) แล้วเติมด้วยรูปสินค้าในระบบจนครบ
+  //   🐛 ลองจริง 2026-11-15: MGW318 ร่างมีแค่ 2 รูป (ปกสินค้า + ปก SKU) ทั้งที่แกลเลอรีมีอีก 4 → Shopee ปฏิเสธ (ต้อง ≥ 3) — เดิมใช้รูปในร่างอย่างเดียว
+  const refs = [...new Set(picked.length ? picked : [...draftKeys, ...autoRefs])].slice(0, imagesMax);
+  const imgSrc = picked.length ? "เลือกไว้สำหรับ Shopee" : draftKeys.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "ปกตัวสี + ปก SKU + รูปสินค้า (อัตโนมัติ)";
+  const imagesMin = Math.max(SHOPEE_MIN_IMAGES, L?.imagesMin ?? 0);
+  if (refs.length < imagesMin) missing.push(`รูปสินค้าต้องมีอย่างน้อย ${imagesMin} รูป (Shopee บังคับ · ตอนนี้ ${refs.length} รูป) — เพิ่มรูปในแท็บรูปของหน้านี้ หรือเพิ่มรูปสินค้าที่หน้า Parent SKU`);
   else if (refs.length < 5) warnings.push(`มีรูป ${refs.length} รูป — แนะนำอย่างน้อย 5 รูป (Shopee รับได้ ${imagesMax})`);
 
   // ---------- น้ำหนัก + กล่อง ----------
@@ -387,7 +392,7 @@ export function planShopeeCreate(input: {
       description: { value: desc, src: descSrc },
       category: { id: categoryId, label: cat?.label ?? null, kind: cat?.kind ?? null, src: catSrc, candidates: input.candidates },
       brand: { ...brand, src: brandSrc },
-      images: { refs, src: imgSrc, custom: picked.length > 0, max: imagesMax },
+      images: { refs, src: imgSrc, custom: picked.length > 0, min: imagesMin, max: imagesMax },
       weight: { kg: weight, src: wSrc },
       box: { ...box, mandatory: boxMandatory },
       dims, variants,

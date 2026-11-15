@@ -130,7 +130,7 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
       <div>
         <ListingImageGrid images={curImgs} onChange={(next) => setImgs(next)} canEdit={canEdit} max={pv.images.max} platformName="Shopee" dragGroup="shopee-create-images"
           onOpen={() => {}} onAdd={() => { setPicker(true); sys.load(); }} canAdd={canEdit}
-          note={`รูปแรก = ปก · ระบบทำเป็น JPG จัตุรัสพื้นขาวแล้วฝากกับ Shopee ให้ตอนลง · Shopee รับไม่เกิน ${pv.images.max} รูป`} />
+          note={`รูปแรก = ปก · Shopee ต้องมี ${pv.images.min}–${pv.images.max} รูป · ระบบทำเป็น JPG จัตุรัสพื้นขาวแล้วฝากกับ Shopee ให้ตอนลง`} />
         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
           <span>มาจาก: {imgDirty ? "ที่เลือกตอนนี้ (ยังไม่บันทึก)" : pv.images.src}</span>
           {canEdit && imgDirty && <button type="button" disabled={saving || curImgs.length === 0} onClick={() => void patchExtra({ shopee_images: curImgs }, "บันทึกรูปแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกรูปที่เลือก</button>}

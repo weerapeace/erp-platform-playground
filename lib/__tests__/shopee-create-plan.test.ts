@@ -119,6 +119,17 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     expect((part.tier!.standardise_tier_variation as { variation_option_list: Record<string, unknown>[] }[])[0].variation_option_list.some((o) => "image_id" in o || "image_ref" in o)).toBe(false);
     expect(payload.add_item.image).toEqual({ image_ref_list: ["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"] }); // ต้นฉบับไม่ถูกแก้
   });
+  test("รูป: ร่างมีแค่ปก 2 รูป → เติมจากรูปสินค้าในระบบ · น้อยกว่า 3 = ขาด (ลองจริง MGW318)", () => {
+    const draft = { title: null, description: null, category_path: null, platform_product_id: null, extra: {}, image_keys: ["cover.jpg", "img/BCG09-01.jpg"] };
+    const { preview: pv } = plan({ draft, galleryKeys: ["gal/1.jpg", "gal/2.jpg"] });
+    expect(pv.images.refs).toEqual(["r2:cover.jpg", "r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg", "r2:gal/2.jpg"]);
+    expect(pv.images.min).toBe(3);
+    const few = plan({ skus: [sku("A1", { cover_image_r2_key: null })], galleryKeys: ["g1.jpg"] });
+    expect(few.preview.missing.join(" ")).toContain("อย่างน้อย 3 รูป");
+    const picked = plan({ draft: { ...draft, extra: { shopee_images: ["r2:a", "r2:b"] } } });
+    expect(picked.preview.images.refs).toEqual(["r2:a", "r2:b"]);                 // เลือกเอง = ใช้ตามนั้น (ไม่เติม)
+    expect(picked.preview.missing.join(" ")).toContain("อย่างน้อย 3 รูป");
+  });
   test("SKU เดียว = ไม่มีชั้น · item_sku = รหัส SKU · ราคา = ของ SKU", () => {
     const { preview: pv, payload } = plan({ skus: [sku("BCG10", { fake_price: null, list_price: 1290 })] });
     expect(pv.dims).toEqual([]);
