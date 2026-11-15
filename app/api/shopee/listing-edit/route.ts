@@ -100,6 +100,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const warnings: string[] = [];
   if (echo.show) warnings.push(`Shopee แจ้ง: ${echo.show}`);
   // รูป: รูปเดิมต้องอยู่ตำแหน่งเดิมตามที่ส่ง + จำนวนเท่ากัน (รูปใหม่ Shopee อาจตั้งรหัสใหม่ — ไม่บังคับรหัสตรง)
+  // ✅ ลองจริง 2026-11-15 BCG01-03 สลับปก: ดึงกลับเห็นลำดับใหม่ทันที · แต่คำตอบ update_item (echo.response.images) ยังเป็นลำดับเดิม → ตัดสินจากผลดึงกลับเท่านั้น
   const kept = new Set(imgChanged ? imgPlan!.refs.map(shopeeImageIdOfRef).filter((x): x is string => !!x) : []);
   const imagesLanded = (ids: string[]) => !sentIds || (ids.length === sentIds.length && sentIds.every((id, i) => !kept.has(id) || ids[i] === id));
   const landed = (l: { base: Record<string, unknown> }) => {
