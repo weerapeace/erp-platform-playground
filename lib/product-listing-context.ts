@@ -11,6 +11,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap } from "@/lib/listing-hidden-platforms";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -29,7 +30,7 @@ export type ListingParent = {
   id: string; code: unknown; name_th: unknown; name_platform: unknown; description: unknown;
   category_id: string | null; category_name: string | null;
   platform_category_id: string | null; platform_category_name: string | null;
-  brand_name: string | null; weight_kg: number | null;
+  brand_id?: string | null; brand_name: string | null; weight_kg: number | null;
   box_width: number | null; box_length: number | null; box_height: number | null;
 };
 export type ListingContext = {
@@ -42,6 +43,8 @@ export type ListingContext = {
   descImages: ListingImage[];
   accounts: Record<string, ListingAccount>;
   matchedListings: Record<string, { id: string; title: string | null; external_id: string | null; sku_code: string | null }>;
+  /** ร้านที่แบรนด์สั่งซ่อนในแท็บแพลตฟอร์ม (platform code · lib/listing-hidden-platforms) */
+  hiddenPlatformCodes: string[];
 };
 
 const PARENT_COLS = "id, code, name_th, name_en, name_platform, introduction, description, platform_description, english_description, cover_image_r2_key, category_id, platform_category_id, brand_id, weight_g, parcel_size_id";
@@ -162,11 +165,14 @@ export async function loadListingContext(admin: Admin, parentId: string): Promis
   // ร้านตามแบรนด์ (แบรนด์ × แพลตฟอร์ม)
   const accounts: Record<string, ListingAccount> = {};
   let brandName: string | null = null;
+  let hiddenPlatformCodes: string[] = [];
   if (brandId) {
-    const [{ data: accts }, { data: br }] = await Promise.all([
+    const [{ data: accts }, { data: br }, { data: hid }] = await Promise.all([
       admin.from("platform_accounts").select("platform_id, label, is_active, external_shop_id").eq("brand_id", brandId),
       admin.from("brands").select("name").eq("id", brandId).maybeSingle(),
+      admin.from("ui_config").select("value").eq("key", LISTING_HIDDEN_KEY).maybeSingle(),
     ]);
+    hiddenPlatformCodes = hiddenCodesOf(normalizeHiddenMap((hid as { value?: unknown } | null)?.value), brandId);
     for (const a of ((accts ?? []) as Row[])) accounts[String(a.platform_id)] = { label: (a.label as string) ?? null, is_active: a.is_active !== false, external_shop_id: (a.external_shop_id as string) ?? null };
     brandName = (br as { name?: string } | null)?.name ?? null;
   }
@@ -208,8 +214,8 @@ export async function loadListingContext(admin: Admin, parentId: string): Promis
   }
 
   return {
-    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: (pRow.platform_description || pRow.description) ?? "", category_id: categoryId, category_name: categoryName, platform_category_id: platformCategoryId, platform_category_name: platformCategoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
-    platforms, drafts: draftMap, variants, mappings, images, descImages, accounts, matchedListings,
+    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: (pRow.platform_description || pRow.description) ?? "", category_id: categoryId, category_name: categoryName, platform_category_id: platformCategoryId, platform_category_name: platformCategoryName, brand_id: brandId, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
+    platforms, drafts: draftMap, variants, mappings, images, descImages, accounts, matchedListings, hiddenPlatformCodes,
   };
 }
 
@@ -285,7 +291,7 @@ export async function loadListingContexts(admin: Admin, parentIds: string[], pla
         category_id: (pRow.category_id as string) ?? null, category_name: null,
         platform_category_id: central, platform_category_name: central ? centralName.get(central) ?? null : null,
         central_category_name: central ? centralName.get(central) ?? null : null,
-        brand_name: brandName.get(String(pRow.brand_id ?? "")) ?? null,
+        brand_id: (pRow.brand_id as string) ?? null, brand_name: brandName.get(String(pRow.brand_id ?? "")) ?? null,
         weight_kg: weightKgOf(pRow.weight_g), box_width: box.w, box_length: box.l, box_height: box.h,
       },
       variants, images,

@@ -2,15 +2,17 @@
  * Product Platform Listing Manager — /api/product-platforms (เฟส 1a, MVP ในบ้าน)
  * GET   ?parent_sku_id=  (products.platforms.view) → แพลตฟอร์มที่เปิด + ร่างต่อแพลตฟอร์ม + SKU variants จริง + ข้อมูล parent
  * PATCH { parent_sku_id, platform_id, title?, description?, category_path?, status? } (products.platforms.edit) → upsert ร่าง
+ *       { set_platform_hidden, brand_id, platform_code, hidden } → ซ่อน/เลิกซ่อนแถวร้านนี้ทั้งแบรนด์ (ui_config · lib/listing-hidden-platforms)
  * ตาราง: erp_platforms (registry) + platform_listing_drafts (ร่างต่อสินค้า×แพลตฟอร์ม) + skus_v2 (variant ดึงสด)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit, writeAuditMany } from "@/lib/audit";
+import { auditChangeMeta, writeAudit, writeAuditMany } from "@/lib/audit";
 import { loadListingContext } from "@/lib/product-listing-context";
 import { loadSkuImagesByCode } from "@/lib/sku-gallery-images";
+import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap, setPlatformHidden } from "@/lib/listing-hidden-platforms";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -67,6 +69,30 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
     await writeAuditMany(admin1, ids.map((pid) => ({ action: "update", entityType: "parent_sku", entityId: pid, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platform_category_id: central, parent_sku_id: pid, bulk: ids.length > 1 } })));
     return NextResponse.json({ ok: true, updated: ids.length, error: null });
+  }
+
+  // ซ่อน/เลิกซ่อนร้านนี้ "ทั้งแบรนด์" ในแท็บแพลตฟอร์ม (เช่น Instagram ที่เชื่อมไว้แค่โพสต์) — ui_config ไม่แก้โครงตาราง (lib/listing-hidden-platforms)
+  if (body.set_platform_hidden) {
+    const brandId = String(body.brand_id ?? "").trim();
+    const code = String(body.platform_code ?? "").trim();
+    if (!brandId || !code) return NextResponse.json({ error: "ต้องมี brand_id + platform_code" }, { status: 400 });
+    const hidden = body.hidden === true;
+    const admin2 = supabaseAdmin();
+    const { data: cur, error: readErr } = await admin2.from("ui_config").select("value").eq("key", LISTING_HIDDEN_KEY).maybeSingle();
+    if (readErr) return NextResponse.json({ error: readErr.message }, { status: 400 });
+    const map0 = normalizeHiddenMap((cur as { value?: unknown } | null)?.value);
+    const next = setPlatformHidden(map0, brandId, code, hidden);
+    const { error } = await admin2.from("ui_config").upsert({ key: LISTING_HIDDEN_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin2, {
+      action: "update", entityType: "brand_listing_platforms", entityId: brandId, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: {
+        platform_code: code, hidden, brand_id: brandId,
+        label: hidden ? `ซ่อนร้าน ${code} ในแท็บแพลตฟอร์ม (ทั้งแบรนด์)` : `เลิกซ่อนร้าน ${code} ในแท็บแพลตฟอร์ม (ทั้งแบรนด์)`,
+        ...auditChangeMeta({ hidden_platforms: hiddenCodesOf(map0, brandId) }, { hidden_platforms: hiddenCodesOf(next, brandId) }),
+      },
+    });
+    return NextResponse.json({ ok: true, hidden_codes: hiddenCodesOf(next, brandId), error: null });
   }
 
   const parent_sku_id = String(body.parent_sku_id ?? "").trim();

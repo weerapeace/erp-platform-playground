@@ -27,4 +27,22 @@ describe("splitPlatformsByConnection", () => {
     expect(r.shown).toEqual([]);
     expect(r.hidden).toHaveLength(2);
   });
+
+  it("ร้านที่แบรนด์สั่งซ่อน → แยกไปกลุ่ม brandHidden แม้เชื่อมแล้ว (เช่น Instagram)", () => {
+    const ps = [
+      { code: "instagram", connected: true, onSale: false },
+      { code: "shopee", connected: true, onSale: false },
+      { code: "lazada", connected: false, onSale: false },
+    ];
+    const r = splitPlatformsByConnection(ps, (p) => p.connected, (p) => p.onSale, (p) => p.code === "instagram");
+    expect(r.shown.map((p) => p.code)).toEqual(["shopee"]);
+    expect(r.brandHidden.map((p) => p.code)).toEqual(["instagram"]);
+    expect(r.hidden.map((p) => p.code)).toEqual(["lazada"]);
+  });
+
+  it("สั่งซ่อนแล้วแต่สินค้านี้อยู่บนร้านนั้น → ยังโชว์ (ของที่ขายอยู่ห้ามหาย)", () => {
+    const r = splitPlatformsByConnection([{ code: "shopee", connected: true, onSale: true }], (p) => p.connected, (p) => p.onSale, () => true);
+    expect(r.shown.map((p) => p.code)).toEqual(["shopee"]);
+    expect(r.brandHidden).toEqual([]);
+  });
 });
