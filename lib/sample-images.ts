@@ -218,11 +218,12 @@ export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name
   return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.file_name.localeCompare(b.file_name));
 }
 
-/** อัลบั้มตรงคำค้นไหม — ค้นจากชื่อจริง ("SAMPLE Good Goods 15 พ.ย. 2569" / "2026-11-15-002") · ชื่อบนการ์ด (วันที่) · ชื่อแบรนด์ · คำค้นว่าง = ตรงทุกอัน */
+/** อัลบั้มตรงคำค้นไหม — ค้นจากชื่อจริง ("SAMPLE Good Goods 15 พ.ย. 2569" / "2026-11-15-002") · ชื่อบนการ์ด · ชื่อแบรนด์
+ *  · วันที่สร้างอัลบั้มแบบไทย (เวลาไทย) — ค้น "15 พ.ย." เจอทุกอัลบั้มของวันนั้น รวมอัลบั้มที่ตั้งชื่อเอง (เจ้าของสั่ง 2026-11-15) · คำค้นว่าง = ตรงทุกอัน */
 export function albumMatches(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">, query: string, brandName?: string | null): boolean {
   const q = query.trim(), toks = tokenize(q);
   if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
-  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), brandName] }) > 0;
+  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName] }) > 0;
 }
 
 /** รูปตรงคำค้นไหม — ชื่อไฟล์ · เลข/ชื่อใบงานที่รูปถูกส่งเข้าไป (DS-2026-0008) · คำค้นว่าง = ตรงทุกรูป */

@@ -165,6 +165,11 @@ describe("ค้นหา + เรียง (หน้า SAMPLE + แท็บ�
     expect(albumMatches(A, "  -  ")).toBe(true);
     expect(albumMatches(A, "15 พ.ย.")).toBe(true);
     expect(albumMatches(C, "15 พ.ย.")).toBe(false);
+    // ค้นวันที่ = เจออัลบั้มที่ตั้งชื่อเองของวันนั้นด้วย (วันที่สร้าง · เวลาไทย)
+    expect(albumMatches(B, "15 พ.ย.")).toBe(true);
+    expect(albumMatches(D, "14 พ.ย. 2569")).toBe(true);
+    expect(albumMatches(al("ตั้งชื่อเอง", "2026-11-14T18:30:00Z", 1), "15 พ.ย.")).toBe(true);   // 01:30 ของ 15 พ.ย. เวลาไทย
+    expect(albumMatches(al("ตั้งชื่อเอง", "2026-11-14T18:30:00Z", 1), "14 พ.ย.")).toBe(false);
     expect(albumMatches(B, "11-15")).toBe(true);
     expect(albumMatches(B, "2026 002")).toBe(true);
     expect(albumMatches(D, "ลายหมี")).toBe(true);
