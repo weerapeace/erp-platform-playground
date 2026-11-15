@@ -105,7 +105,7 @@ export async function createNextRepeat(admin: Admin, row: PlanRow, actor: { id: 
     module_key: TEAM_PLAN_MODULE, record_id: "", record_type: "",
     title: row.title, description: row.description, status: "open", priority: row.priority,
     assigned_to: row.assigned_to, due_at: nextDue(row.due_at, plan.repeat, now), created_by: actor.name,
-    metadata: { ...meta, plan: { ...plan, star_date: null, waiting: null } },
+    metadata: { ...meta, plan: { ...plan, star_date: null, waiting: null, linked: [] } },   // รอบใหม่ไม่ติดเส้นผูกของการ์ดรอบเดิม (ผูกใหม่บนกระดานได้)
   }).select(PLAN_COLS).single();
   const next = (data as PlanRow | null) ?? null;
   // ✅ รอบใหม่ได้เช็กลิสต์ชุดเดิม (ยังไม่ติ๊กทุกข้อ · ผู้รับผิดชอบรายข้อเดิม) — พลาดไม่ขวางการสร้างรอบใหม่

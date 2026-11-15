@@ -78,6 +78,8 @@ const SupplierQuoteSection = dynamic(() => import("./supplier-quote").then((m) =
 const AddToPlanButton = dynamic(() => import("@/components/team-plan/add-to-plan").then((m) => m.AddToPlanButton), { ssr: false });
 // ป๊อป "ใส่แผนงาน" (เปิดจากเมนู ส่งต่อ ปุ่มล่าง) — โหลดเฉพาะตอนกด
 const AddToPlanModal = dynamic(() => import("@/components/team-plan/add-to-plan").then((m) => m.AddToPlanModal), { ssr: false });
+// ป้าย "อยู่ในแผนงาน N งาน" (ปุ่มล่าง) — ไม่มีงานที่ผูก = ไม่โชว์
+const PlanLinkedBadge = dynamic(() => import("@/components/team-plan/linked-badge").then((m) => m.PlanLinkedBadge), { ssr: false });
 const CostVersionsModal = dynamic(() => import("./cost-versions").then((m) => m.CostVersionsModal), { ssr: false });
 const SkuWizard = dynamic(() => import("@/app/master/design-sheets/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
 const FabricCalcModal = dynamic(() => import("./fabric-calc-modal").then((m) => m.FabricCalcModal), { ssr: false });
@@ -2312,6 +2314,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               })()} />
             </div>
           )}
+          {/* 🔗 ใบนี้อยู่ในแผนงานทีมกี่งาน (ผูกจากเส้นบนกระดานแผนงาน / ปุ่มใส่แผนงาน) — ไม่มี = ไม่โชว์ (ของกลาง team-plan) */}
+          {form?.id && <PlanLinkedBadge kind="design_sheet" id={form.id} />}
           <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">{t("ปิด", "Close")}</button>
           {/* ไม่มีปุ่ม ✏️ แก้ไขแล้ว (เจ้าของขอ 2026-11-07) — ดับเบิลคลิกช่อง/แถวที่ล็อกเพื่อแก้ · บอกวิธีไว้ตรงที่ปุ่มเคยอยู่ */}
           {canEdit && form?.id && (modalTab === "info" || modalTab === "cost") && (editing ? (

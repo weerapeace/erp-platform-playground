@@ -33,7 +33,8 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
   if (!row) return NextResponse.json({ error: "ไม่พบงานนี้ (อาจถูกลบไปแล้ว)" }, { status: 404 });
 
   const actorName = (await userNames(admin, [user.id])).get(user.id) ?? user.email ?? "ผู้ใช้";
-  const plan = { ...normalizePlanMeta(row.metadata?.plan), star_date: null, waiting: null, created_by_id: user.id };
+  // linked = ผูกจากเส้นบนกระดาน (อยู่กับการ์ดของงานเดิม) → งานสำเนาเริ่มแบบยังไม่ผูก
+  const plan = { ...normalizePlanMeta(row.metadata?.plan), star_date: null, waiting: null, created_by_id: user.id, linked: [] };
   const meta: Record<string, unknown> = { ...(row.metadata ?? {}), plan };
   delete meta.plan_sent;   // งานใหม่ = ยังไม่เคยเตือน
   const title = `${row.title} (สำเนา)`.slice(0, 300);

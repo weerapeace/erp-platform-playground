@@ -7,9 +7,11 @@
  *   - ⭐ งานหลักวันนี้ (สูงสุด 3 งานต่อคน) · ⏸ รอคนอื่น · 🔁 ทำซ้ำ · 🔔 เตือน · ลิงก์กลับเรื่องเดิม
  *   - ทั้งทีม / ของฉัน + ตัวกรอง (⭐ วันนี้ / รอคนอื่น / เกินกำหนด) · จำมุมมองต่อคน
  *   - 📅 ปฏิทิน (ของกลาง ScheduleBoard): ลากงานลงวัน = ตั้งกำหนดวันนั้น (คงเวลาเดิม) · ลากกลับกล่อง = ไม่กำหนดวัน
+ *   - 🧲 กระดาน (2026-11-15 · ./board-view): กระดานทีม 1 อัน วางงานคู่การ์ดจากระบบอื่น · ลากเส้น = ผูกงาน (ผูกไว้ N อย่าง โชว์ทุกมุมมอง)
  * ข้อมูล: /api/team-plan (lib/team-plan-client) · กฎ: lib/team-plan · doc: docs/team-plan.md
  */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import {
   DndContext, DragOverlay, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent,
@@ -34,8 +36,14 @@ import { PlanEditModal } from "./edit-modal";
 import { PlanTagChip } from "./tag-input";
 import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 import { AiSplitModal } from "./ai-split-modal";
+import type { PlanBoardHandle } from "./board-view";
 
-const VIEWS = ["priority", "matrix", "calendar"] as const;
+// กระดาน (Excalidraw ก้อนใหญ่) — โหลดเฉพาะตอนกดแท็บ "กระดาน" ไม่ถ่วงมุมมองอื่น
+const PlanCanvasBoard = dynamic(() => import("./board-view").then((m) => m.PlanCanvasBoard), {
+  ssr: false, loading: () => <LoadingState />,
+});
+
+const VIEWS = ["priority", "matrix", "calendar", "board"] as const;
 export type PlanView = (typeof VIEWS)[number];
 const SCOPES = ["all", "me"] as const;
 type Filter = "" | "star" | "waiting" | "overdue";
@@ -62,6 +70,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const [editing, setEditing] = useState<PlanItem | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const boardRef = useRef<PlanBoardHandle | null>(null);   // ลบงานในป๊อป → เอาการ์ดออกจากกระดานด้วย
 
   const load = useCallback(async () => {
     setErr(null);
@@ -156,6 +165,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
           <button type="button" className={seg(view === "priority")} onClick={() => pickView("priority")}>ตามความด่วน</button>
           <button type="button" className={seg(view === "matrix")} onClick={() => pickView("matrix")}>ตาราง 4 ช่อง</button>
           <button type="button" className={seg(view === "calendar")} onClick={() => pickView("calendar")}><Icon name="calendar" /> ปฏิทิน</button>
+          <button type="button" className={seg(view === "board")} onClick={() => pickView("board")} title="กระดานวางงานคู่กับใบงาน / SKU / งาน / คอนเทนต์ · ลากเส้นผูกงาน"><Icon name="magnet" /> กระดาน</button>
         </div>
         <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
           <button type="button" className={seg(scope === "all")} onClick={() => { scopePref.setView("all"); void scopePref.saveDefault("all"); }}>ทั้งทีม</button>
@@ -180,8 +190,8 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         </div>
       )}
 
-      {/* ⭐ งานหลักวันนี้ของฉัน */}
-      {items && (
+      {/* ⭐ งานหลักวันนี้ของฉัน (มุมมองกระดานซ่อน — ให้กระดานได้พื้นที่เต็ม) */}
+      {items && view !== "board" && (
         <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-medium text-amber-800"><Icon name="star" /> งานหลักวันนี้ของฉัน</span>
@@ -205,10 +215,14 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         </div>
       )}
 
-      {canAdd && <QuickAdd me={me} meName={user?.name ?? ""} onAdded={(t) => upsert([t])} />}
+      {canAdd && view !== "board" && <QuickAdd me={me} meName={user?.name ?? ""} onAdded={(t) => upsert([t])} />}
 
       {err ? <ErrorState title="โหลดแผนงานไม่สำเร็จ" hint={err} onRetry={() => void load()} />
         : !items ? <LoadingState />
+        : view === "board" ? (
+          <PlanCanvasBoard items={all} trayItems={shown} canEdit={canEdit} tagNames={planTagCounts(all).map((x) => x.tag)}
+            onOpen={setEditing} onUpsert={upsert} onReload={load} handleRef={boardRef} />
+        )
         : all.length === 0 ? <EmptyState title="ยังไม่มีงานในแผน" hint="พิมพ์งานแรกในช่องด้านบน แล้วกด Enter — เลือกความด่วน กำหนด และคนรับผิดชอบได้" />
         : view === "calendar" ? (
           <ScheduleBoard<PlanItem>
@@ -248,7 +262,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         )}
 
       {/* เสร็จแล้ว (7 วันล่าสุด) */}
-      {done.length > 0 && (
+      {done.length > 0 && view !== "board" && (
         <div className="rounded-xl border border-slate-200 bg-white">
           <button type="button" onClick={() => setShowDone((s) => !s)} className="w-full px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50">
             {showDone ? "▾" : "▸"} เสร็จแล้ว {done.length} งาน (7 วันล่าสุด)
@@ -272,7 +286,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         <PlanEditModal item={all.find((t) => t.id === editing.id) ?? editing} canEdit={canEdit} me={me}
           onClose={() => setEditing(null)}
           onSaved={(list) => upsert(list)}
-          onDeleted={(id) => { setItems((cur) => (cur ?? []).filter((t) => t.id !== id)); setEditing(null); }}
+          onDeleted={(id) => { setItems((cur) => (cur ?? []).filter((t) => t.id !== id)); setEditing(null); boardRef.current?.removePlanCard(id); }}
           onChecklist={setChecklist} tagSuggestions={planTagCounts(all).map((x) => x.tag)}
           onDuplicated={(copy) => { upsert([copy]); setEditing(copy); }} />
       )}
@@ -328,6 +342,7 @@ function PlanCardView({ t, canEdit, onOpen, onUpdate, onChecklist, onTag }: Card
         {t.plan.repeat && <span className={`${chip} bg-slate-100 text-slate-600`}><Icon name="repeat" /> {REPEAT_LABEL(t.plan.repeat)}</span>}
         {t.plan.remind !== "none" && t.due_at && <span className={`${chip} bg-slate-100 text-slate-500`} title={`เตือน ${REMIND_LABEL[t.plan.remind]}`}><Icon name="notify" /></span>}
         {t.plan.source && <a href={t.plan.source.href} onPointerDown={stop} onClick={stop} className={`${chip} bg-blue-50 text-blue-700 hover:underline`}><Icon name="link" /> {t.plan.source.label}</a>}
+        {t.plan.linked.length > 0 && <span className={`${chip} bg-indigo-50 text-indigo-700`} title={`ผูกไว้กับ (ลากเส้นบนกระดาน): ${t.plan.linked.map((r) => r.label).join(" · ")}`}><Icon name="magnet" /> ผูกไว้ {t.plan.linked.length} อย่าง</span>}
         {t.plan.estimate_min && <span className={`${chip} bg-slate-100 text-slate-600`} title="เวลาที่คาดว่าใช้"><Icon name="clock" /> ~{estimateLabel(t.plan.estimate_min)}</span>}
         {t.plan.watchers.length > 0 && <span className={`${chip} bg-slate-100 text-slate-500`} title={`คนติดตาม: ${t.plan.watchers.map((w) => w.name).join(", ")}`}><Icon name="view" /> {t.plan.watchers.length}</span>}
         {t.plan.tags.map((g) => <span key={g} onPointerDown={stop} onClick={stop}><PlanTagChip tag={g} onClick={onTag ? () => onTag(g) : undefined} /></span>)}

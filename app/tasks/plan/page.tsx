@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { TeamPlanBoard, type PlanView } from "@/components/team-plan";
 
-const VIEW_PARAM: PlanView[] = ["priority", "matrix", "calendar"];
+const VIEW_PARAM: PlanView[] = ["priority", "matrix", "calendar", "board"];
 
 function PlanPageInner() {
   const sp = useSearchParams();

@@ -12,11 +12,13 @@ import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { createPlanItem } from "@/lib/team-plan-client";
+import type { PlanItem } from "@/lib/team-plan";
 import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 
 export type PlanSource = { label: string; href: string };
 
-export function AddToPlanModal({ open, defaultTitle, source, onClose }: { open: boolean; defaultTitle: string; source?: PlanSource | null; onClose: () => void }) {
+/** onCreated = ได้งานที่สร้างกลับไป (เช่น กระดานแผนงานวางการ์ดให้ทันที) · ไม่ส่ง = แจ้ง "ใส่แผนงานแล้ว" อย่างเดียว */
+export function AddToPlanModal({ open, defaultTitle, source, onClose, onCreated }: { open: boolean; defaultTitle: string; source?: PlanSource | null; onClose: () => void; onCreated?: (item: PlanItem) => void }) {
   const { user } = useAuth();
   const toast = useToast();
   const draft = usePlanDraft();
@@ -31,8 +33,9 @@ export function AddToPlanModal({ open, defaultTitle, source, onClose }: { open: 
     if (draft.problem) { setErr(draft.problem); return; }
     setBusy(true); setErr(null);
     try {
-      await createPlanItem(draft.toDraft(title.trim(), user?.id ?? null, { note: note.trim() || null, source: source ?? null }));
-      toast.success(draft.s.who && draft.s.who.id !== user?.id ? `ใส่แผนงานแล้ว — ${draft.s.who.name} จะได้แจ้งเตือน` : "ใส่แผนงานแล้ว (ดูที่เมนู แผนงาน)");
+      const item = await createPlanItem(draft.toDraft(title.trim(), user?.id ?? null, { note: note.trim() || null, source: source ?? null }));
+      onCreated?.(item);
+      toast.success(draft.s.who && draft.s.who.id !== user?.id ? `ใส่แผนงานแล้ว — ${draft.s.who.name} จะได้แจ้งเตือน` : onCreated ? "สร้างงานในแผนแล้ว" : "ใส่แผนงานแล้ว (ดูที่เมนู แผนงาน)");
       onClose();
     } catch (e) { setErr(e instanceof Error ? e.message : "ใส่แผนงานไม่สำเร็จ"); }
     finally { setBusy(false); }

@@ -51,6 +51,7 @@ import { StatusBadge, PriorityBadge } from "./task-badges";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { type PushToast } from "@/components/toast";
 import { BrandSelect } from "@/components/brand-select";
+import { PlanLinkedBadge } from "@/components/team-plan/linked-badge";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue, priorityLabel, approvalLabel, assetLabel,
   getTask, updateTask, claimTask, addComment, updateComment, deleteComment, addAttachment, deleteAttachment, syncTaskDrive,
@@ -283,6 +284,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               className="text-base font-semibold text-slate-900 w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-violet-400 focus:outline-none" />
             <span className="font-mono text-xs text-slate-500">{d.task_no}</span>
             {d.created_by_label && <span className="text-xs text-slate-400 ml-2">· {t("สร้างโดย", "by")} {d.created_by_label}</span>}
+            {/* 🔗 งานนี้อยู่ในแผนงานทีมกี่งาน (ผูกจากกระดานแผนงาน) — ไม่มี = ไม่โชว์ */}
+            <span className="ml-2 inline-flex align-middle"><PlanLinkedBadge kind="task" id={d.id} className="inline-flex h-6 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100" /></span>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={() => setQuickOpen(true)} title={t("ตรวจสินค้าเร็ว: Description · สี · ราคา · รูป (ดูอย่างเดียว)", "Quick product check: description, colors, prices, images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="inspect" />{t("ตรวจเร็ว", "Quick check")}</button>

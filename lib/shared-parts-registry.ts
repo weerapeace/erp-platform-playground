@@ -1352,6 +1352,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "canvas-sketch.md", sameJob: "drawing-board", primary: true,
   },
   {
+    key: "canvas-cards", label: "ชุดการ์ดบนกระดาน (การ์ดจากระบบอื่น)", code: "useCardKit", category: "feature",
+    source: { path: "components/canvas-cards" },
+    what: "ปุ่ม \"เพิ่มการ์ด\" + ป๊อปเลือก + ป๊อปเปิดดูเมื่อดับเบิลคลิก + ซิงค์การ์ดสด ของการ์ด SKU · Parent SKU · SKU การตลาด · งาน (Task) · คอนเทนต์ · เทรนด์ · ใบงานออกแบบ (เปิดป๊อปเดียวกับ Design Dashboard) · รูปจากคลัง · โฟลเดอร์ · ตารางคำนวณ · โซน (กรอบ) — ใช้คู่กับกระดานวาด (CanvasSketch)",
+    when: "กระดานที่อยากวางการ์ดจากระบบอื่น — ใช้แล้วที่ กระดานแคมเปญ + กระดานแผนงานทีม (ยกมาจากกระดานแคมเปญ 2026-11-15)",
+    notWhen: "การ์ดเฉพาะของโมดูลตัวเอง (เช่น การ์ดงานในแผน · การ์ดบอร์ดจ่ายงาน) → ทำในโมดูลนั้นแล้วจัดการดับเบิลคลิกเองเมื่อ onCardOpen คืน false · กระดานแบบผังกล่องต่อเส้น → FlowchartBoard",
+    doc: "canvas-sketch.md",
+  },
+  {
     key: "flowchart-board", label: "กระดาน flowchart", code: "FlowchartBoard", category: "feature",
     source: { path: "components/flowchart-board" },
     what: "ผังกล่องต่อเส้นแบบ flowchart: เริ่ม/จบ ขั้นตอน คำถาม ใช่/ไม่ใช่ ที่เก็บ (ไอคอน Google Drive/R2/NAS ... จาก lib/storage-places) ไฟล์ โฟลเดอร์ หน้าใน ERP (เลือกจากเมนูจริง กดเปิดหน้าได้) โน้ต กรอบโซน (ลากหัวกรอบ = ย้ายทั้งกลุ่ม) · เส้นติดกล่องเสมอ ลูกศร 3 แบบ (หักมุม · ตรง · โค้ง) · คัดลอก/วาง (วางข้ามหน้าได้ · วางข้อความจากที่อื่น = กล่องใหม่) · บันทึกอัตโนมัติ · บันทึกเป็นรูป",
@@ -1362,7 +1370,15 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "team-plan", label: "แผนงานทีม", code: "TeamPlan", category: "feature",
     source: { path: "components/team-plan" },
-    what: "กระดานงานจัดตามความด่วน/ความสำคัญ เพิ่มงานจากหน้าไหนก็ได้",
+    what: "กระดานงานจัดตามความด่วน/ความสำคัญ เพิ่มงานจากหน้าไหนก็ได้ · มุมมองกระดาน (canvas) วางงานคู่การ์ดจากระบบอื่น ลากเส้น = ผูกงาน",
+    doc: "team-plan.md",
+  },
+  {
+    key: "plan-linked-badge", label: "ป้าย \"อยู่ในแผนงาน N งาน\"", code: "PlanLinkedBadge", category: "feature",
+    source: { path: "components/team-plan/linked-badge" },
+    what: "โชว์กลับในเรื่องที่ถูกผูกกับงานในแผนงานทีม (ผูกจากเส้นบนกระดานแผนงาน หรือกด \"ใส่แผนงาน\" จากเรื่องนั้น) กดแล้วกางรายการงาน → เปิดในหน้าแผนงาน · ไม่มีงาน/ไม่มีสิทธิ์ = ไม่โชว์",
+    when: "ป๊อป/หน้ารายละเอียดของเรื่องที่ผูกกับแผนงานได้ (ชนิดตามการ์ดบนกระดาน: ใบงานออกแบบ · SKU · Parent · งาน · คอนเทนต์ · เทรนด์) — ใช้แล้วที่ ป๊อปใบงานออกแบบ · ป๊อปโพสต์คอนเทนต์ · ป๊อปงาน",
+    notWhen: "สร้างงานใหม่เข้าแผน → AddToPlanButton / AddToPlanModal",
     doc: "team-plan.md",
   },
   {

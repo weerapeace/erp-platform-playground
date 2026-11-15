@@ -59,6 +59,15 @@ ref.current?.insert([
 - `openCanvasFolder(path)` — เรียกใน `onCardOpen` เมื่อ `data.kind === "folder"` → เปิด File Explorer ผ่าน `erpfolder:` (ลง `/erp-open-folder.reg` ครั้งเดียวต่อเครื่อง) + คัดลอก path สำรอง · กันเตือน "Leave site?" ให้เอง (suppressUnload)
 - ใช้ที่: กระดานแคมเปญ (`/tasks/campaigns/[id]`) · กระดาน flowchart กลาง (`components/flowchart-board` — กล่องโฟลเดอร์ใช้ป๊อป + openCanvasFolder ตัวเดียวกัน)
 
+## ชุดการ์ดจากระบบอื่น (ของกลาง `components/canvas-cards` — `useCardKit`)
+
+- `const kit = useCardKit({ sketchRef, campaign?, sectionPresets?, contextLabel? })` → `kit.items` (ปุ่มเมนู: sku · parent · marketing · task · content · trend · designSheet · section · table · folder · asset · cards) · `kit.onCardOpen` (คืน false = ไม่ใช่การ์ดของชุดนี้ → หน้าจัดการการ์ดของตัวเองต่อ) · `kit.onBoardReady` · `kit.syncAll` · `{kit.ui}` (ป๊อปทั้งหมด)
+- `campaign` = กระดานของแคมเปญ: งาน/คอนเทนต์ที่สร้างจากกระดานผูกแคมเปญนั้น · ใบงานใหม่ใช้แบรนด์แคมเปญ · ไม่ส่ง = ไม่ผูก
+- โครงการ์ด `skeletons.ts` · ตัวเลือกหลายตัว `multi-picks.tsx` · แผงข้าง + `ToolMenu` (ไอคอนเป็นข้อความหรือ `<Icon>` ก็ได้) `drawers.tsx`
+- ใช้ที่: กระดานแคมเปญ (`/tasks/campaigns/[id]` — ย้ายมาจากหน้านี้ 2026-11-15) · กระดานแผนงานทีม (`components/team-plan/board-view.tsx`)
+- `insert(skeletons, { at: { clientX, clientY } })` = วางตรงจุดบนจอ (เช่น ลากของจากถาดมาปล่อย) แทนกลางจอ
+- `refreshCards` เขียนผลลง "กระดานตอนนี้" (2026-11-15) — ซิงค์หลายชนิดพร้อมกัน/ผู้ใช้ลากการ์ดระหว่างรอ จะไม่ถูกทับกลับ
+
 ## ฝังลิงก์ YouTube / Pinterest / TikTok
 
 - copy ลิงก์แล้วกด Ctrl+V บนกระดาน → ได้กล่องโชว์รูป/วิดีโอ (วางหลายลิงก์ทีเดียว = เรียงเป็นแถว) · คลิกกล่อง 1 ครั้งเพื่อกดเล่น/เลื่อนในกล่อง

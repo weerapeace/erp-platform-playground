@@ -3,6 +3,8 @@
  *
  * GET  → { data: PlanItem[] } งานที่ยังไม่เสร็จทั้งหมด + งานที่เสร็จใน 7 วันล่าสุด (ทั้งทีม · หน้าเว็บกรอง "ของฉัน" เอง) · checklist = สรุปเช็กลิสต์ในงาน
  *      ?mine=1 = เฉพาะงานของฉัน (แท็บแผนงานในศูนย์แจ้งเตือน)
+ *      ?linked=<ชนิด>:<id> = งานในแผนที่ผูกกับเรื่องนั้น (เส้นบนกระดานแผนงาน) หรือ "ใส่แผนงาน" มาจากเรื่องนั้น (ทุกสถานะ · ล่าสุดก่อน)
+ *        เช่น ?linked=design_sheet:<id> — ป้าย "อยู่ในแผนงาน" ในป๊อปใบงาน (components/team-plan/linked-badge)
  * POST body { title, note?, priority?, due_at?, assigned_to?, important?, remind?, repeat?, waiting_note?, source?, links? } → สร้าง 1 งาน
  *      มอบให้คนอื่น → กระดิ่งเด้งบอกคนนั้น (+ มือถือ ถ้าเปิดรับ)
  *
@@ -16,7 +18,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { isUuid, loadChecklistSummaries, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
-import { asPriority, dueLabel, normalizePlanMeta, PLAN_NOTE_MAX, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE } from "@/lib/team-plan";
+import { asPriority, dueLabel, linkedHref, normalizePlanMeta, PLAN_LINK_KINDS, PLAN_NOTE_MAX, TEAM_PLAN_CHECK, TEAM_PLAN_MODULE } from "@/lib/team-plan";
 import { notifyPlanAssignee, PLAN_COLS, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +26,8 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
+  const linkedQ = new URL(request.url).searchParams.get("linked");
+  if (linkedQ !== null) return linkedTo(linkedQ);
   // ?mine=1 = เฉพาะงานของฉัน (ผู้รับผิดชอบคือฉัน หรือไม่มีผู้รับผิดชอบแต่ฉันสร้าง) — แท็บแผนงานในศูนย์แจ้งเตือนใช้
   const mine = new URL(request.url).searchParams.get("mine") === "1";
   const me = mine ? (await supabaseFromRequest(request).auth.getUser()).data.user?.id ?? null : null;
@@ -41,6 +45,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ✅ สรุปเช็กลิสต์ในงาน (ครั้งเดียวทุกงาน) — พลาด = การ์ดไม่โชว์ป้าย แต่รายการยังมา
   const checks = await loadChecklistSummaries(admin, TEAM_PLAN_CHECK.moduleKey, rows.map((r) => r.id)).catch(() => new Map());
   return NextResponse.json({ data: rows.map((r) => ({ ...toPlanItem(r, names), checklist: checks.get(r.id) ?? null })), error: null });
+}
+
+/** 🔗 งานในแผนที่ผูกกับเรื่องหนึ่ง — ผูกจากเส้นบนกระดาน (metadata.plan.linked) + สร้างด้วยปุ่ม "ใส่แผนงาน" ของเรื่องนั้น (metadata.plan.source.href) */
+async function linkedTo(q: string): Promise<NextResponse> {
+  const cut = q.indexOf(":");
+  const kind = cut > 0 ? q.slice(0, cut) : "", id = cut > 0 ? q.slice(cut + 1).trim() : "";
+  if (!Object.prototype.hasOwnProperty.call(PLAN_LINK_KINDS, kind) || !id || id.length > 300) return NextResponse.json({ data: [], error: "ระบุเรื่องที่จะค้นไม่ถูกต้อง" }, { status: 400 });
+  const admin = supabaseAdmin();
+  const base = () => admin.from("erp_record_tasks").select(PLAN_COLS).eq("module_key", TEAM_PLAN_MODULE).eq("record_id", "");
+  const href = linkedHref({ kind, id });
+  const [a, b] = await Promise.all([
+    base().contains("metadata", { plan: { linked: [{ kind, id }] } }).order("created_at", { ascending: false }).limit(200),
+    href ? base().eq("metadata->plan->source->>href", href).order("created_at", { ascending: false }).limit(200) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (a.error || b.error) return NextResponse.json({ data: [], error: (a.error ?? b.error)?.message ?? "โหลดไม่สำเร็จ" }, { status: 500 });
+  const seen = new Set<string>();
+  const rows = [...((a.data ?? []) as PlanRow[]), ...((b.data ?? []) as PlanRow[])].filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+    .sort((x, y) => Number(x.status === "resolved") - Number(y.status === "resolved") || Date.parse(y.created_at) - Date.parse(x.created_at));
+  const names = await userNames(admin, rows.map((r) => r.assigned_to));
+  return NextResponse.json({ data: rows.map((r) => toPlanItem(r, names)), error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

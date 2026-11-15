@@ -64,8 +64,56 @@ export type PlanMeta = {
   tags: string[];                                   // 🏷 แท็ก/โปรเจกต์ เช่น "เว็บ ISG" (กรองบนกระดาน) — 2026-11-12
   watchers: PlanWatcher[];                          // 👀 คนติดตาม — กระดิ่งบอกตอนงานเสร็จ
   estimate_min: number | null;                      // ⏱ เวลาที่คาดว่าใช้ (นาที) — รวมเป็นภาระงานต่อวัน
+  linked: PlanLinkedRef[];                          // 🔗 ของที่ผูกกับงาน (ลากเส้นบนกระดานแผนงาน) — 2026-11-15
 };
 export type PlanWatcher = { id: string; name: string };
+
+// ── 🔗 ผูกงานกับของในระบบอื่น (เจ้าของเลือก 2026-11-15 "ผูกข้อมูลจริงเลย") ──
+// ลากเส้นบนกระดานแผนงาน จากการ์ดงาน → การ์ดใบงาน/SKU/งาน/คอนเทนต์ ฯลฯ = ผูกจริง (เก็บใน metadata.plan.linked)
+// กระดานเป็นตัวกำหนด: งานที่มีการ์ดบนกระดาน → รายการผูก = ตามเส้นที่ต่ออยู่ (ลบเส้น = เลิกผูก) · ตรรกะอ่านเส้นอยู่ที่ lib/team-plan-board
+export type PlanLinkedRef = { kind: string; id: string; label: string };
+export const PLAN_LINKED_MAX = 30;
+/** ชนิดของที่ผูกได้ (= ชนิดการ์ดบนกระดาน) · href = เปิดเรื่องนั้น (ไม่มี = โชว์ชื่ออย่างเดียว) */
+export const PLAN_LINK_KINDS: Record<string, { label: string; href?: (id: string) => string }> = {
+  design_sheet: { label: "ใบงานออกแบบ", href: (id) => `/master/design-dashboard?open=${encodeURIComponent(id)}` },
+  sku: { label: "SKU", href: (id) => `/master/skus?open=${encodeURIComponent(id)}` },
+  parent_sku: { label: "Parent SKU", href: (id) => `/master/parent-skus?open=${encodeURIComponent(id)}` },
+  marketing_sku: { label: "SKU การตลาด", href: (id) => `/master/parent-skus?open=${encodeURIComponent(id)}` },
+  task: { label: "งาน (Task)", href: (id) => `/tasks?task=${encodeURIComponent(id)}` },
+  content: { label: "คอนเทนต์", href: (id) => `/tasks/content-calendar?content=${encodeURIComponent(id)}` },
+  trend: { label: "เทรนด์", href: (id) => `/tasks/trends/${encodeURIComponent(id)}` },
+  erp_page: { label: "หน้าใน ERP", href: (id) => id },
+  asset: { label: "รูปจากคลัง" },
+  table: { label: "ตารางคำนวณ" },
+  folder: { label: "โฟลเดอร์" },
+};
+const isInternalHref = (v: string) => v.startsWith("/") && !v.startsWith("//") && !/[\s\\]/.test(v);
+/** รายการผูก: ชนิดต้องรู้จัก · id ไม่ว่าง (หน้าใน ERP ต้องเป็นลิงก์ในเว็บ) · ไม่ซ้ำ · สูงสุด PLAN_LINKED_MAX */
+export function cleanPlanLinked(raw: unknown): PlanLinkedRef[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PlanLinkedRef[] = [];
+  for (const v of raw) {
+    const o = (v ?? {}) as { kind?: unknown; id?: unknown; label?: unknown };
+    const kind = typeof o.kind === "string" ? o.kind : "";
+    const id = typeof o.id === "string" ? o.id.trim().slice(0, 300) : "";
+    if (!Object.prototype.hasOwnProperty.call(PLAN_LINK_KINDS, kind) || !id || (kind === "erp_page" && !isInternalHref(id))) continue;
+    if (out.some((x) => x.kind === kind && x.id === id)) continue;
+    const label = typeof o.label === "string" ? o.label.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+    out.push({ kind, id, label: label || PLAN_LINK_KINDS[kind].label });
+    if (out.length >= PLAN_LINKED_MAX) break;
+  }
+  return out;
+}
+/** ลิงก์เปิดของที่ผูก (ไม่มี = null) */
+export const linkedHref = (r: { kind: string; id: string }): string | null =>
+  Object.prototype.hasOwnProperty.call(PLAN_LINK_KINDS, r.kind) ? PLAN_LINK_KINDS[r.kind].href?.(r.id) ?? null : null;
+/** รายการผูกเท่ากันไหม (ไม่สนลำดับ · เทียบชนิด+id+ชื่อ) — ใช้ตัดสินว่าต้องบันทึกไหม */
+export function sameLinked(a: PlanLinkedRef[], b: PlanLinkedRef[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (r: PlanLinkedRef) => `${r.kind}\u0000${r.id}\u0000${r.label}`;
+  const s = new Set(a.map(key));
+  return b.every((r) => s.has(key(r)));
+}
 export const PLAN_TAG_MAX = 8;
 export const PLAN_WATCHERS_MAX = 10;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -168,6 +216,7 @@ export function normalizePlanMeta(raw: unknown, now: Date = new Date()): PlanMet
     tags: cleanPlanTags(r.tags),
     watchers: cleanPlanWatchers(r.watchers),
     estimate_min: cleanEstimate(r.estimate_min),
+    linked: cleanPlanLinked(r.linked),
   };
 }
 

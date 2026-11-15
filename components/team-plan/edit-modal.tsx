@@ -15,8 +15,8 @@ import { Icon } from "@/components/icon";
 import { RecordChecklist, WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
 import { ERPDateTime24 } from "@/components/form";
 import {
-  dueLabel, nthWeekdayOf, WEEKDAY_TH, ESTIMATE_OPTIONS, estimateLabel, PLAN_WATCHERS_MAX, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, waitingDays,
-  type PlanItem, type PlanWatcher, type Priority, type RemindMode, type RepeatRule,
+  dueLabel, nthWeekdayOf, WEEKDAY_TH, ESTIMATE_OPTIONS, estimateLabel, linkedHref, PLAN_LINK_KINDS, PLAN_WATCHERS_MAX, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, waitingDays,
+  type PlanItem, type PlanLinkedRef, type PlanWatcher, type Priority, type RemindMode, type RepeatRule,
 } from "@/lib/team-plan";
 import { deletePlanItem, duplicatePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
 import { RecordFilesField } from "@/components/record-files";
@@ -121,6 +121,16 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
       toast.success(`ทำสำเนาแล้ว — "${copy.title}"${copy.checklist ? " (เช็กลิสต์ชุดเดิม ยังไม่ติ๊ก)" : ""}`);
       onDuplicated?.(copy);
     } catch (e) { setErr(e instanceof Error ? e.message : "ทำสำเนาไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  /** เลิกผูก 1 อย่าง (บันทึกทันที ไม่ต้องกดบันทึก) */
+  const unlink = async (r: PlanLinkedRef) => {
+    setBusy(true); setErr(null);
+    try {
+      const { item: saved } = await patchPlanItem(item.id, { linked: item.plan.linked.filter((x) => !(x.kind === r.kind && x.id === r.id)) });
+      onSaved([saved]);
+      toast.success(`เลิกผูก ${r.label} แล้ว`);
+    } catch (e) { setErr(e instanceof Error ? e.message : "เลิกผูกไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
   const remove = async () => {
@@ -300,6 +310,24 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
         {!done && <PersonalPlanRow item={item} />}
         {item.plan.source && (
           <a href={item.plan.source.href} className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline"><Icon name="link" /> เปิดเรื่องเดิม: {item.plan.source.label}</a>
+        )}
+        {item.plan.linked.length > 0 && (
+          <div>
+            <label className={lbl}><Icon name="magnet" /> ผูกไว้ {item.plan.linked.length} อย่าง <span className="font-normal text-slate-400">· ลากเส้นบนกระดานแผนงาน (ลบเส้น = เลิกผูก)</span></label>
+            <div className="flex flex-wrap gap-1.5">
+              {item.plan.linked.map((r) => {
+                const href = linkedHref(r);
+                return (
+                  <span key={`${r.kind}:${r.id}`} className="inline-flex max-w-full items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-2 py-1 text-xs text-indigo-800">
+                    <span className="shrink-0 text-indigo-400">{PLAN_LINK_KINDS[r.kind]?.label ?? r.kind}</span>
+                    {href ? <a href={href} target="_blank" rel="noreferrer" className="truncate hover:underline">{r.label}</a> : <span className="truncate">{r.label}</span>}
+                    {canEdit && <button type="button" disabled={busy} title="เลิกผูก (ถ้าเส้นบนกระดานยังอยู่ ระบบจะผูกกลับตอนกระดานบันทึก — ลบเส้นบนกระดานด้วย)"
+                      onClick={() => void unlink(r)} className="shrink-0 rounded px-0.5 text-indigo-400 hover:bg-indigo-100 hover:text-rose-600"><Icon name="cancel" /></button>}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
         )}
         <p className="text-[11px] text-slate-400">สร้างโดย {item.created_by ?? "—"}{done && item.resolved_by ? ` · เสร็จโดย ${item.resolved_by}` : ""}</p>
         {err && <p className="text-sm text-rose-600">{err}</p>}

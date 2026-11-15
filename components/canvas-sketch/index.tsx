@@ -50,8 +50,9 @@ const socialTextsOf = (els: any[]) => els.filter((e) => !e.isDeleted && e.type =
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
 export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
-  /** opts.fitImages=false → ไม่ต้องวัดสัดส่วนรูปจริง (ใช้กรอบที่ส่งมาเลย) — แทรกการ์ดจำนวนมากพร้อมรูปได้ทันที ไม่ต้องรอโหลดทีละใบ */
-  insert: (skeletons: Record<string, unknown>[], opts?: { fitImages?: boolean }) => Promise<void>;
+  /** opts.fitImages=false → ไม่ต้องวัดสัดส่วนรูปจริง (ใช้กรอบที่ส่งมาเลย) — แทรกการ์ดจำนวนมากพร้อมรูปได้ทันที ไม่ต้องรอโหลดทีละใบ
+   *  opts.at = จุดบนจอ (clientX/Y เช่น ตอนลากของมาวาง) → วางมุมซ้ายบนของการ์ดตรงนั้นแทนกลางจอ */
+  insert: (skeletons: Record<string, unknown>[], opts?: { fitImages?: boolean; at?: { clientX: number; clientY: number } }) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
   /** อ่าน element ดิบบนกระดาน (อ่านอย่างเดียว) — โมดูลที่ต้องรู้ตำแหน่ง/frame ของการ์ด เช่น บอร์ดจ่ายงาน (การ์ดอยู่ในกรอบโต๊ะไหน) */
   getElements: () => Record<string, unknown>[];
@@ -380,7 +381,7 @@ export function CanvasSketch({
 
           const st = api.getAppState();
           const center = lib.viewportCoordsToSceneCoords(
-            { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 },
+            opts?.at ?? { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 },
             st,
           );
           // ทิ้ง image element ที่โหลดรูปไม่สำเร็จ (ไม่มี fileId) กัน Excalidraw error
@@ -559,7 +560,18 @@ export function CanvasSketch({
           finalLay.set(gid, { textY: ry + PAD + imgBlock, rectH: PAD + imgBlock + textH + PAD, sig });
         }
 
-        const next = els.map((el) => {
+        // เขียนลง "กระดานตอนนี้" (ไม่ใช่ภาพตอนเริ่ม) — ระหว่างรอโหลดข้อมูล การ์ดอื่นอาจถูกซิงค์/ลาก/เพิ่มไปแล้ว ถ้าใช้ภาพเก่าจะทับของพวกนั้นกลับ
+        // การ์ดที่ถูกลากระหว่างรอ → เลื่อนข้อความ/รูปใหม่ตามกรอบ (dx,dy) · การ์ดที่ถูกลบระหว่างรอ → ไม่เติมรูปกลับ
+        const current = ((api.getSceneElements() as any[]) ?? els);
+        const alive = new Set<string>(); const shift = new Map<string, { dx: number; dy: number }>();
+        for (const el of current) {
+          const gid = el?.groupIds?.[0]; if (!gid || !updates.has(gid)) continue;
+          alive.add(gid);
+          if (el.type !== "rectangle") continue;
+          const was = (groups.get(gid) ?? []).find((e) => e.id === el.id);
+          if (was && ((el.x ?? 0) !== (was.x ?? 0) || (el.y ?? 0) !== (was.y ?? 0))) shift.set(gid, { dx: (el.x ?? 0) - (was.x ?? 0), dy: (el.y ?? 0) - (was.y ?? 0) });
+        }
+        const next = current.map((el) => {
           const gid = el?.groupIds?.[0]; const u = gid ? updates.get(gid) : undefined; if (!u) return el;
           if (removeIds.has(el.id)) return el;   // รูปเก่าที่จะถูกลบ (กรองออกตอนท้าย)
           const merged = { ...el.customData, ...(u.data ?? {}) };
@@ -567,7 +579,7 @@ export function CanvasSketch({
           if (el.type === "text") {
             let base: any = el;
             if (u.text != null) { const lines = u.text.split("\n").length; const fs = el.fontSize ?? 14; base = { ...el, text: u.text, originalText: u.text, height: Math.round(lines * fs * 1.25) }; }
-            if (lay) base = { ...base, y: lay.textY };
+            if (lay) base = { ...base, y: lay.textY + (shift.get(gid!)?.dy ?? 0) };
             return { ...base, customData: merged };
           }
           if (el.type === "rectangle") {
@@ -579,7 +591,9 @@ export function CanvasSketch({
           return { ...el, customData: merged };   // รูปที่คงไว้ / element อื่น
         });
 
-        const addedEls: any[] = [...rebuilt.values()].flat();
+        const addedEls: any[] = [...rebuilt.entries()].filter(([gid]) => alive.has(gid)).flatMap(([gid, arr]) => {
+          const s = shift.get(gid); return s ? arr.map((e) => ({ ...e, x: (e.x ?? 0) + s.dx, y: (e.y ?? 0) + s.dy })) : arr;
+        });
 
         api.updateScene({ elements: [...next.filter((e) => !removeIds.has(e.id)), ...addedEls] });
         if (editable) queueSave();

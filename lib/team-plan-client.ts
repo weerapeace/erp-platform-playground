@@ -3,7 +3,7 @@
  * ผิดพลาด = throw Error ข้อความภาษาคนจาก API
  */
 import { apiFetch } from "@/lib/api";
-import type { PlanItem, PlanWatcher, Priority, RemindMode, RepeatRule } from "@/lib/team-plan";
+import type { PlanItem, PlanLinkedRef, PlanWatcher, Priority, RemindMode, RepeatRule } from "@/lib/team-plan";
 
 export type PlanDraft = {
   title: string; note?: string | null; priority?: Priority; due_at?: string | null; assigned_to?: string | null;
@@ -15,6 +15,8 @@ export type PlanPatch = Partial<{
   status: "open" | "resolved"; important: boolean; star: boolean; waiting: { note: string } | null;
   repeat: RepeatRule | null; remind: RemindMode;
   tags: string[]; watchers: PlanWatcher[]; estimate_min: number | null;
+  /** ของที่ผูกกับงาน (ทั้งชุด) — กระดานแผนงานส่งเองตามเส้นที่ต่ออยู่ */
+  linked: PlanLinkedRef[];
   /** เตือนอีกครั้ง (กำหนดส่งไม่เปลี่ยน): "1h" = อีก 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 */
   snooze: "1h" | "tomorrow";
 }>;
@@ -30,6 +32,9 @@ const json = (method: string, body: unknown): RequestInit => ({ method, headers:
 export const listPlanItems = () => call<{ data: PlanItem[] }>("/api/team-plan").then((j) => j.data ?? []);
 /** เฉพาะงานของฉัน (แท็บแผนงานในศูนย์แจ้งเตือน) */
 export const listMyPlanItems = () => call<{ data: PlanItem[] }>("/api/team-plan?mine=1").then((j) => j.data ?? []);
+/** งานในแผนที่ผูกกับเรื่องหนึ่ง (เส้นบนกระดาน หรือ "ใส่แผนงาน" มาจากเรื่องนั้น) เช่น ("design_sheet", id) */
+export const listLinkedPlanItems = (kind: string, id: string) =>
+  call<{ data: PlanItem[] }>(`/api/team-plan?linked=${encodeURIComponent(`${kind}:${id}`)}`).then((j) => j.data ?? []);
 export const createPlanItem = (d: PlanDraft) => call<{ data: PlanItem }>("/api/team-plan", json("POST", d)).then((j) => j.data);
 export const patchPlanItem = (id: string, p: PlanPatch) =>
   call<{ data: PlanItem; next: PlanItem | null }>(`/api/team-plan/${encodeURIComponent(id)}`, json("PATCH", p)).then((j) => ({ item: j.data, next: j.next }));

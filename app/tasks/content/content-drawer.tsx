@@ -42,6 +42,7 @@ import { CaptionToolbar, CaptionCard, AiCaptionModal, PullCaptionModal } from ".
 import { ContentAttachments } from "./content-attachments";
 import { ContentBriefCard } from "./content-brief";
 import { AddToPlanModal } from "@/components/team-plan/add-to-plan";
+import { PlanLinkedBadge } from "@/components/team-plan/linked-badge";
 
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
@@ -1144,6 +1145,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             ...(can("tasks.create") ? [{ label: `📝 ${t("ใส่แผนงาน", "Add to plan")}`, onClick: () => setPlanOpen(true) }] : []),
             { label: `🗑 ${t("ลบคอนเทนต์นี้", "Delete this content")}`, onClick: () => (onDelete ? onDelete(d) : setConfirmDel(true)) },
           ]} />
+          {/* 🔗 โพสต์นี้อยู่ในแผนงานทีมกี่งาน (ผูกจากกระดานแผนงาน / ใส่แผนงาน) — ไม่มี = ไม่โชว์ */}
+          <PlanLinkedBadge kind="content" id={contentId} />
           <button onClick={requestClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
