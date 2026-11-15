@@ -146,15 +146,19 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
   // 2) ค่าส่งรวม: ตามเรท หรือยอดจริงที่กรอกทับ
   const anyShip = base.some((b) => b.method !== "none");
   const manual = header.ship_manual_total;
+  const hasManual = manual != null && Number.isFinite(Number(manual));
   const shipFromRate = anyShip ? costSum : 0;
-  const shipTotal = !anyShip ? 0 : (manual != null && Number.isFinite(Number(manual)) ? r2(n(manual)) : shipFromRate);
+  // ★ 2026-11-15 เจ้าของ: "อยากใส่ค่าส่งเองได้" — พิมพ์ยอดค่าส่งเอง = นับเสมอ แม้ใบตั้ง "ไม่คิดค่าส่ง" (เดิมไม่คิดค่าส่ง → ยอดที่พิมพ์หาย)
+  const shipTotal = anyShip ? (hasManual ? r2(n(manual)) : shipFromRate) : (hasManual && n(manual) > 0 ? r2(n(manual)) : 0);
 
   // 3) เฉลี่ยยอดจริงตามสัดส่วน "ค่าส่งตามเรท" (เทียบคิวกับกก.ตรง ๆ ไม่ได้ จึงเทียบด้วยเงิน)
   //    ไม่มีเรท/ปริมาณเลย → เฉลี่ยตามจำนวนชิ้นของบรรทัดที่ต้องคิดค่าส่ง · เศษปัดลงบรรทัดสุดท้าย
-  const shipQtySum = base.filter((b) => b.method !== "none").reduce((a, b) => a + b.qty, 0);
+  //    ใบตั้ง "ไม่คิดค่าส่ง" แต่พิมพ์ยอดเอง → ทุกบรรทัดรับค่าส่งตามจำนวนชิ้น
+  const takesShip = (b: { method: ShipMethod; qty: number }) => (anyShip ? b.method !== "none" : b.qty > 0);
+  const shipQtySum = base.filter(takesShip).reduce((a, b) => a + b.qty, 0);
   const allocs = base.map((b) => {
-    if (shipTotal <= 0 || b.method === "none") return 0;
-    if (manual == null || !Number.isFinite(Number(manual))) return b.cost;
+    if (shipTotal <= 0 || !takesShip(b)) return 0;
+    if (!hasManual) return b.cost;
     if (costSum > 0) return r2(shipTotal * (b.cost / costSum));
     if (shipQtySum > 0) return r2(shipTotal * (b.qty / shipQtySum));
     return 0;
@@ -163,7 +167,7 @@ export function computeVoucher(header: VoucherHeaderInput, lines: VoucherLineInp
     const diff = r2(shipTotal - allocs.reduce((a, v) => a + v, 0));
     if (diff !== 0) {
       let idx = -1;
-      for (let i = allocs.length - 1; i >= 0; i--) { if (allocs[i] > 0 || (base[i].method !== "none" && base[i].qty > 0)) { idx = i; break; } }
+      for (let i = allocs.length - 1; i >= 0; i--) { if (allocs[i] > 0 || (takesShip(base[i]) && base[i].qty > 0)) { idx = i; break; } }
       if (idx >= 0) allocs[idx] = r2(allocs[idx] + diff);
     }
   }

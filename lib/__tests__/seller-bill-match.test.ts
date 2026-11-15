@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aliasKey, groupKey, sizesMm, colorsOf, codeTokens, distributeQty, checkBillMath, matchBillLines, undecidedCount, normalizeBillLine, applyGroupToLine, cnNameForSku,
-  shortfallOf, reducePlan, missingGroups, outsidePoLines, otherShopHint,
+  shortfallOf, reducePlan, missingGroups, outsidePoLines, otherShopHint, billRowMismatch, billRowCalc, isFeeName,
   type PoGroup, type SellerBillLine,
 } from "@/lib/seller-bill-match";
 
@@ -98,11 +98,22 @@ describe("บิลร้านจีน — แบ่งจำนวน / ต�
   });
   it("จำนวน × ราคา = ยอด · รวม = ยอดบิล", () => {
     const ls = [L({ qty: 300, unit_price: 4.5, amount: 1350 }), L({ qty: 100, unit_price: 0.4, amount: 400 })];
-    const r = checkBillMath(ls, 1390);
+    // ★ 2026-11-15 ผลรวม = แบบที่ใบสำคัญใช้ (จำนวน × ราคา) — ยอดบิลพิมพ์ 1,750 แต่ใบได้ 1,390 = ไม่ตรง ต้องเตือน
+    const r = checkBillMath(ls, 1750);
     expect(r.rowsBad).toEqual([1]);
-    expect(r.sum).toBe(1750);
+    expect(r.sum).toBe(1390);
     expect(r.totalOk).toBe(false);
     expect(checkBillMath([ls[0]], 1350).totalOk).toBe(true);
+  });
+  it("★ 2026-11-15 ยอดแถวที่บิลเขียนไม่ตรง จำนวน × ราคา (แม้ ¥6.40) = เตือน + เสนอจำนวนที่ถูก · ถุง/กล่องที่เป็นสินค้า ไม่ใช่ค่าใช้จ่าย", () => {
+    const m = billRowMismatch(L({ qty: 1240, unit_price: 1.6, amount: 1990.4 }));
+    expect(m).toMatchObject({ printed: 1990.4, calc: 1984, diff: 6.4, fixQty: 1244 });
+    expect(billRowMismatch(L({ qty: 1244, unit_price: 1.6, amount: 1990.4 }))).toBeNull();
+    expect(billRowCalc(L({ qty: 1240, unit_price: 1.6, amount: 1990.4 }))).toBe(1984);
+    expect(isFeeName("pe袋塑料袋包装干口袋防潮防水袋")).toBe(false);
+    expect(isFeeName("纸箱")).toBe(false);
+    expect(isFeeName("运费")).toBe(true);
+    expect(isFeeName("包装费")).toBe(true);
   });
   it("ชื่อจีนบนสินค้า (เติมจากบิลก่อน ๆ) ช่วยจับคู่ได้แม้ AI ไม่ได้เลือก และร้านอื่นตั้งชื่อคล้ายกัน", () => {
     const withCn = groups.map((g, i) => (i === 4 ? { ...g, name_cn: "D扣 0.9cm 银色" } : g));

@@ -63,6 +63,7 @@ export function SaveBar({
   note,
   saveLabel,
   extra,
+  alwaysEnabled = false,
 }: {
   /** มีของที่ยังไม่บันทึก (auto = แก้แล้วรอบันทึก) */
   dirty: boolean;
@@ -80,6 +81,8 @@ export function SaveBar({
   saveLabel?: string;
   /** ปุ่มเพิ่ม (ซ้ายของปุ่มบันทึก) */
   extra?: ReactNode;
+  /** ★ 2026-11-15 ปุ่มบันทึกกดได้เสมอ (ไม่แก้ก็กดได้ — เจ้าของ: "ขอปุ่มบันทึกร่างด้วย" ใบสำคัญรับ) · ค่าเริ่ม = กดได้เมื่อมีการแก้ */
+  alwaysEnabled?: boolean;
 }) {
   useReportUnsaved(dirty || !!error);
   const t = useT();
@@ -97,7 +100,7 @@ export function SaveBar({
       {savedAt ? ` ${hhmm(savedAt, lang)}` : ""}
     </span>
   );
-  const canSave = (dirty || !!error) && !saving;
+  const canSave = (alwaysEnabled || dirty || !!error) && !saving;
   return (
     <div className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm" role="region" aria-label={t("บันทึก", "Save")}>
       <span className="text-xs">{status}</span>

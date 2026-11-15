@@ -55,3 +55,17 @@ describe("landed-cost — ค่าส่งในจีน + ค่าธรร
     expect(old.lines[0].landed_unit_thb).toBe(50);
   });
 });
+
+describe("landed-cost — ค่าส่งพิมพ์เอง (★ 2026-11-15)", () => {
+  it("ใบตั้งไม่คิดค่าส่ง แต่พิมพ์ยอดเอง = นับ + เฉลี่ยตามจำนวนชิ้น · ไม่พิมพ์ = 0 เหมือนเดิม", () => {
+    const lines = [{ qty: 30, unit_price: 1 }, { qty: 10, unit_price: 2 }];
+    const c = computeVoucher({ currency: "RMB", fx_rate: 5, ship_method: "none", ship_manual_total: 120 }, lines);
+    expect(c.totals.ship_total_thb).toBe(120);
+    expect(c.lines.map((l) => l.ship_alloc_thb)).toEqual([90, 30]);
+    expect(c.totals.grand_total_thb).toBe(370);
+    expect(computeVoucher({ currency: "RMB", fx_rate: 5, ship_method: "none" }, lines).totals.ship_total_thb).toBe(0);
+    // คิดตามคิวแต่ไม่มีคิวเลย + พิมพ์ยอดเอง = เฉลี่ยตามจำนวนชิ้นของบรรทัดที่คิดค่าส่ง
+    const c2 = computeVoucher({ currency: "RMB", fx_rate: 5, ship_method: "cube", ship_rate_cube: 7000, ship_manual_total: 80 }, lines);
+    expect(c2.lines.map((l) => l.ship_alloc_thb)).toEqual([60, 20]);
+  });
+});

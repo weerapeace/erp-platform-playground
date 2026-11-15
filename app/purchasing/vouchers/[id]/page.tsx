@@ -6,7 +6,7 @@
  *   รายการ: จำนวนรับ · ราคา/หน่วย (¥ หรือ ฿) · ราคาบาท · คิวหรือกก./ชิ้น (ค่าเริ่มต้นจาก Parent SKU) · ค่าส่งเฉลี่ย · ต้นทุนถึงมือ
  *   ตัวเลขคิดสดด้วยสูตรกลาง lib/landed-cost (ตัวเดียวกับ server) · บันทึกร่าง → ยืนยัน = ออกเลข + เขียนราคากลับ
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
@@ -18,7 +18,8 @@ import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
-import { SellerBillPanel } from "@/components/seller-bill-panel";
+import { SellerBillPanel, type SellerBillPanelApi } from "@/components/seller-bill-panel";
+import { SaveBar } from "@/components/save-bar";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { Icon } from "@/components/icon";
@@ -107,6 +108,11 @@ export default function PurchaseVoucherFormPage() {
   const [reviseBusy, setReviseBusy] = useState(false);
   const [histKey, setHistKey] = useState(0);
   const [addOpen, setAddOpen] = useState(false);   // แถบ ＋ เพิ่มรายการเอง (พับไว้)
+  // ★ 2026-11-15 แผงบิลร้านให้หน้าใบคุม (เจ้าของ: "ขอปุ่มบันทึกร่างด้วย" — แถบเดียวบันทึกทั้งหน้า) + งานแก้ PO ทำตอนยืนยันใบ
+  const panelRef = useRef<SellerBillPanelApi | null>(null);
+  const [panelStatus, setPanelStatus] = useState<{ pending: boolean; undecided: number }>({ pending: false, undecided: 0 });
+  const onPanelStatus = useCallback((s: { pending: boolean; undecided: number }) => setPanelStatus((p) => (p.pending === s.pending && p.undecided === s.undecided ? p : s)), []);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   const applyData = useCallback((d: Detail) => {
     setData(d);
@@ -140,6 +146,7 @@ export default function PurchaseVoucherFormPage() {
   const reviseCall = async (action: "start" | "save" | "cancel", reason?: string) => {
     setReviseBusy(true);
     try {
+      if (action === "save") await panelRef.current?.flush();   // บิลร้านที่แก้ค้าง
       if (action === "save" && dirty && !(await save())) return;
       const res = await apiFetch(`/api/purchasing/vouchers/${id}/revise`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason }) });
       const j = await res.json().catch(() => ({}));
@@ -192,6 +199,13 @@ export default function PurchaseVoucherFormPage() {
     toast.success(`ปรับเรทเป็น ${fx} — ยอดจ่ายร้าน ฿${fmtMoney(got)} ตรงยอดจ่ายจริง · กดบันทึกร่างเพื่อเก็บ`);
   };
   const setLine = (lid: string, patch: Partial<LineEdit>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
+  /** ★ 2026-11-15 บันทึกร่างทั้งหน้า — บิลร้านที่ค้าง (บันทึกอัตโนมัติยังไม่ทันส่ง) + หัวใบ/รายการ · ไม่ได้แก้อะไรก็กดได้ */
+  const saveAll = async () => {
+    await panelRef.current?.flush();
+    if (dirty) { if (!(await save())) return; }
+    setSavedAt(new Date());
+    toast.success("บันทึกร่างแล้ว");
+  };
 
   const save = async (): Promise<boolean> => {
     if (!data) return false;
@@ -220,10 +234,17 @@ export default function PurchaseVoucherFormPage() {
   const confirm = async () => {
     setConfirming(true);
     try {
+      await panelRef.current?.flush();   // บิลร้านที่แก้ค้าง (บันทึกอัตโนมัติยังไม่ทันส่ง)
       if (dirty && !(await save())) return;
       const res = await apiFetch(`/api/purchasing/vouchers/${id}/confirm`, { method: "POST" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      // ★ 2026-11-15 งานแก้ใบสั่งซื้อที่เลือกไว้ในบิลร้าน (ลด PO ตามบิล / ปิดยอดของที่ไม่มา) — ทำหลังยืนยันใบสำเร็จ
+      if (panelRef.current && panelRef.current.poPlanLabels().length) {
+        const r = await panelRef.current.runPoPlans();
+        if (r.ok.length) toast.success(`แก้ใบสั่งซื้อแล้ว — ${r.ok.join(" · ")}`);
+        if (r.fail.length) toast.error(`แก้ใบสั่งซื้อไม่สำเร็จบางส่วน — ${r.fail.join(" · ")}`);
+      }
       toast.success(`ยืนยันแล้ว — เลขที่ ${j.pv_no}${j.failed ? ` (เขียนราคากลับไม่สำเร็จ ${j.failed} รายการ ดูในประวัติ)` : ""}`);
       setLastConfirm({ pv_no: String(j.pv_no ?? ""), write_back: Array.isArray(j.write_back) ? j.write_back : [], failed: Number(j.failed) || 0 });
       setConfirmOpen(false);
@@ -350,7 +371,8 @@ export default function PurchaseVoucherFormPage() {
   const grIds = [...new Set((data?.lines ?? []).map((l) => l.gr_id ?? "").filter(Boolean))];
   const t = calc?.totals;
   // มีค่าส่งให้คิดไหม = ค่าเริ่มต้นของใบไม่ใช่ "ไม่คิด" หรือมีบรรทัดที่ระบุวิธีคิดเอง
-  const anyShip = h.ship_method !== "none" || (data?.lines ?? []).some((l) => !!ln[l.id]?.ship_method);
+  const shipManual = h.ship_manual_total !== "" && num(h.ship_manual_total) >= 0 && h.ship_manual_total != null;   // ★ 2026-11-15 พิมพ์ยอดค่าส่งเอง = นับเสมอ
+  const anyShip = h.ship_method !== "none" || (data?.lines ?? []).some((l) => !!ln[l.id]?.ship_method) || (shipManual && num(h.ship_manual_total) > 0);
   // ค่าส่งมีปัญหา (ขาดคิว/กก. หรือเรท) → กล่องค่าส่งเปิดเอง + ขอบเหลือง
   const shipIssue = anyShip && ((t?.missing_basis_count ?? 0) > 0 || (t?.missing_rate_count ?? 0) > 0);
   // เช็กลิสต์ก่อนยืนยัน (กติกากลาง lib/purchase-voucher-checklist — ตรงกับที่ API ยืนยันจะปฏิเสธ)
@@ -359,10 +381,11 @@ export default function PurchaseVoucherFormPage() {
     missing_price_count: t?.missing_price_count ?? 0, any_ship: anyShip, ship_total_thb: t?.ship_total_thb ?? 0,
     missing_basis_count: t?.missing_basis_count ?? 0, missing_rate_count: t?.missing_rate_count ?? 0, dirty: dirty && !readonly,
     ref_fx_rate: data?.ref_fx_rate ?? null,   // เรทหยวนวันที่ใบ → เตือนเมื่อเรทต่างเกิน 10%
+    ship_manual: shipManual, bill_undecided: panelStatus.undecided,   // ★ 2026-11-15
     paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb), shop_total_thb: t?.shop_total_thb ?? 0,   // ★ 2026-11-15 เทียบยอดจ่ายจริงตามบิล
   });
   const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0, discount_foreign: t?.discount_foreign ?? 0, discount_thb: t?.discount_thb ?? 0,
-    seller_ship_foreign: t?.seller_ship_foreign ?? 0, seller_ship_thb: t?.seller_ship_thb ?? 0, pay_fee_thb: t?.pay_fee_thb ?? 0, shop_total_thb: t?.shop_total_thb ?? 0, paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb) };
+    seller_ship_foreign: t?.seller_ship_foreign ?? 0, seller_ship_thb: t?.seller_ship_thb ?? 0, pay_fee_thb: t?.pay_fee_thb ?? 0, shop_total_thb: t?.shop_total_thb ?? 0, paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb), ship_manual: shipManual };
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 
@@ -464,7 +487,7 @@ export default function PurchaseVoucherFormPage() {
                 </div>
 
                 {/* บิลจากร้าน (ภาษาจีน) — ใบหยวน = ทางหลักเติมราคา จึงเปิดไว้บนสุด · ใบบาทพับไว้ล่างสุด (แบบ B) */}
-                {foreign && <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} />}
+                {foreign && <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} />}
 
                 {/* รายการ */}
                 <div className="space-y-2">
@@ -668,7 +691,7 @@ export default function PurchaseVoucherFormPage() {
 
                 {!foreign && (
                   <CollapseCard title="✨ มีบิลจีน? ให้ AI อ่าน + เติมราคา" summary="ใช้กับบิลร้านภาษาจีน">
-                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} bare />
+                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} bare controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} />
                   </CollapseCard>
                 )}
               </div>
@@ -679,7 +702,7 @@ export default function PurchaseVoucherFormPage() {
                 {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving || reviseBusy}
                     onSave={() => void save()} onConfirm={editing ? () => void reviseCall("save") : () => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb}
-                    revise={editing ? { nextRev: hd.revision + 1 } : null} />
+                    revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
                 {/* ยืนยันแล้ว: งานถัดไป (พิมพ์ · จ่ายค่าสินค้า · ค่าส่ง) */}
@@ -738,6 +761,16 @@ export default function PurchaseVoucherFormPage() {
                 {hd.status !== "draft" && <RevisionHistory key={histKey} voucherId={id} sym={sym} />}
               </aside>
             </div>
+
+            {/* ★ 2026-11-15 เจ้าของ: "ขอปุ่มบันทึกร่างด้วย" — แถบเดียวติดล่างจอ บันทึกทั้งหน้า (บิลร้าน + หัวใบ + รายการ) กดได้ตลอด (ของกลาง SaveBar) */}
+            {!readonly && (
+              <SaveBar dirty={dirty || panelStatus.pending} saving={saving || reviseBusy} savedAt={savedAt} alwaysEnabled
+                saveLabel={editing ? "💾 เก็บที่แก้ไว้ก่อน" : "💾 บันทึกร่าง"} onSave={saveAll}
+                note={editing ? `กำลังแก้ → เวอร์ชัน ${hd.revision + 1} · กด "บันทึกการแก้ไข" เมื่อเสร็จ` : "บิลร้าน + หัวใบ + รายการ"}
+                extra={editing
+                  ? (canRevise ? <button type="button" onClick={() => void reviseCall("save")} disabled={reviseBusy || saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ บันทึกการแก้ไข</button> : null)
+                  : (hd.status === "draft" && canEdit ? <button type="button" onClick={() => setConfirmOpen(true)} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50">✓ ยืนยัน + ออกเลข</button> : null)} />
+            )}
           </>
         )}
       </div>
@@ -745,7 +778,7 @@ export default function PurchaseVoucherFormPage() {
       {/* ยืนยัน — ป๊อปบอก 4 อย่างที่จะเกิด (ออกเลข · อัปเดตราคา 3 ที่ · ใบล็อก · ต่อไปจ่ายเงิน) · แบบ B */}
       {confirmOpen && data && hd && calc && (
         <VoucherConfirmModal header={hd} items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} skuCount={skuCount}
-          confirming={confirming} onClose={() => setConfirmOpen(false)} onConfirm={() => void confirm()} />
+          confirming={confirming} onClose={() => setConfirmOpen(false)} onConfirm={() => void confirm()} poPlanLabels={panelRef.current?.poPlanLabels() ?? []} />
       )}
       {/* ยืนยันลบรายการที่เพิ่มเอง */}
       {delLine && (

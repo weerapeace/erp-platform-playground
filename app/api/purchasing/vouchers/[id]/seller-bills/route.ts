@@ -103,7 +103,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const { id } = await params;
   let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean; backfill_po?: boolean; autosave?: boolean;
     /** ★ 2026-11-15 สรุปยอดบิล (付款详情) · reread_summary = ให้ AI อ่านสรุปใหม่จากไฟล์เดิม */
-    summary?: unknown; reread_summary?: boolean };
+    summary?: unknown; reread_summary?: boolean;
+    /** ★ 2026-11-15 ลงใบเฉพาะแถวเหล่านี้ (rid) — กดยืนยัน/ข้าม/ค่าใช้จ่ายแถวไหน ลงใบแถวนั้นทันที */
+    apply_rids?: string[] };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const billId = str(body.bill_id);
   if (!billId) return NextResponse.json({ error: "ไม่ระบุบิล" }, { status: 400 });
@@ -161,7 +163,23 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
         .map((l, i) => ({ ...l, decision: lines[i].decision, voucher_line_ids: lines[i].voucher_line_ids, move_po: lines[i].move_po, sku_pick: lines[i].sku_pick, alloc: lines[i].alloc ?? null }));
     }
     let result: Awaited<ReturnType<typeof applySellerBill>> | null = null;
-    if (body.apply) {
+    if (!body.apply && Array.isArray(body.apply_rids) && body.apply_rids.length) {
+      // ★ 2026-11-15 ลงใบทีละแถว (เจ้าของ: "พอยืนยันแล้ว ให้ลงในใบเลย · เอาใส่ลงใบอีกครั้งออก") — แตะเฉพาะแถวที่ส่งมา แถวอื่นคงเดิม
+      const rids = new Set(body.apply_rids.map(String));
+      const isT = (l: SellerBillLine) => !!l.rid && rids.has(l.rid);
+      const targets = lines.filter(isT);
+      if (!targets.length) return NextResponse.json({ error: "ไม่พบแถวที่จะลงใบ — โหลดหน้าใหม่แล้วลองอีกครั้ง" }, { status: 400 });
+      if (targets.some((l) => !l.decision)) return NextResponse.json({ error: "แถวที่จะลงใบต้องกดยืนยัน / ข้าม / เป็นค่าใช้จ่าย ก่อน" }, { status: 400 });
+      const previousIds = targets.flatMap((l) => (l.rid ? prevByRid.get(l.rid)?.voucher_line_ids ?? [] : []));
+      // รายการในใบของแถวอื่น = ห้ามแตะ (แถวที่จับ PO เดียวกันจะไม่เขียนทับกัน)
+      const protectIds = lines.filter((l) => !isT(l)).flatMap((l) => l.voucher_line_ids ?? []);
+      result = await applySellerBill(admin, v, lines.map((l) => (isT(l) ? l : { ...l, decision: null })), { remember: body.remember !== false, actorName: actor.name, previousIds, protectIds,
+        fillCnName: body.fill_cn !== false, actorId: actor.id, billId, backfillPo: body.backfill_po === true, billNo: str((bill as Row).bill_no) || null, billDate: str((bill as Row).bill_date) || null });
+      const got = new Map(result.lines.filter((l) => l.rid).map((l) => [l.rid as string, l]));
+      lines = lines.map((l) => (isT(l) ? got.get(l.rid as string) ?? l : l));
+      patch.status = lines.some((l) => (l.voucher_line_ids ?? []).length > 0) ? "applied" : "parsed";
+      patch.applied_at = new Date().toISOString();
+    } else if (body.apply) {
       const left = undecidedCount(lines);
       if (left > 0) return NextResponse.json({ error: `ยังเหลือ ${left} แถวที่ยังไม่ได้เช็ก — กดใช่ / เลือกจับคู่เอง / ข้าม ให้ครบก่อน` }, { status: 400 });
       const previousIds = prev.flatMap((l) => l.voucher_line_ids);

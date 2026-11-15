@@ -18,7 +18,9 @@ import type { PoPayment, VoucherHeader } from "@/lib/purchase-voucher-server";
 
 type Totals = { subtotal_foreign: number; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; discount_foreign?: number; discount_thb?: number;
   /** ★ 2026-11-15 ค่าส่งในจีน (สกุลใบ/บาท) · ค่าธรรมเนียมจ่ายเงิน ฿ · ยอดจ่ายร้าน ฿ · ยอดจ่ายจริงตามบิล ฿ */
-  seller_ship_foreign?: number; seller_ship_thb?: number; pay_fee_thb?: number; shop_total_thb?: number; paid_total_thb?: number | null };
+  seller_ship_foreign?: number; seller_ship_thb?: number; pay_fee_thb?: number; shop_total_thb?: number; paid_total_thb?: number | null;
+  /** ★ 2026-11-15 ค่าส่งเป็นยอดที่พิมพ์เอง (ทับเรท) */
+  ship_manual?: boolean };
 
 /** ★ 2026-11-15 บรรทัดค่าส่งในจีน + ค่าธรรมเนียมจ่ายเงิน (ไม่มี = ไม่โชว์) — ใช้ทั้งกล่องก่อนยืนยันและสรุปใบที่ยืนยันแล้ว */
 function ExtraRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null }) {
@@ -169,7 +171,33 @@ function GoodsThbRow({ t, sym, rate, refFx, onSet }: { t: Totals; sym: string; r
 }
 
 /** ส่วน "ยอดเงิน" ของกล่องก่อนยืนยัน (พื้นเทาอ่อน) — ส่วนลด · ¥ × เรท = ฿ · ค่าส่ง */
-function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; refFx: number | null; onSetGoodsThb?: (thb: number) => void }) {
+/** ★ 2026-11-15 เจ้าของ: "อยากใส่ค่าส่งเองได้" — กดดินสอพิมพ์ยอดค่าส่งเอง (ทับเรท · นับเสมอแม้ใบไม่คิดค่าส่ง) · "ใช้ตามเรท" = ล้างยอดที่พิมพ์ */
+function ShipRow({ t, onSet }: { t: Totals; onSet?: (thb: number | null) => void }) {
+  const [edit, setEdit] = useState<string | null>(null);
+  const manual = !!t.ship_manual;
+  const commit = (v: string) => { setEdit(null); if (!onSet) return; const s = v.trim(); if (s === "") return; const n = Number(s); if (Number.isFinite(n) && n >= 0) onSet(Math.round(n * 100) / 100); };
+  return (
+    <div className="flex justify-between items-center gap-2">
+      <dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">{manual ? "ใส่เอง" : "แยก"}</span>
+        {manual && onSet && edit === null && <button type="button" onClick={() => onSet(null)} title="ล้างยอดที่พิมพ์ — กลับไปคิดตามเรท คิว/กก." className="ml-1.5 text-[10px] text-blue-600 hover:underline">ใช้ตามเรท</button>}
+      </dt>
+      <dd className="flex items-center gap-1">
+        {edit !== null ? (
+          <input autoFocus type="number" inputMode="decimal" step="any" min={0} value={edit} onChange={(e) => setEdit(e.target.value)} placeholder="ยอดค่าส่ง ฿"
+            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { (e.target as HTMLInputElement).dataset.cancel = "1"; (e.target as HTMLInputElement).blur(); } }}
+            onBlur={(e) => { if (e.currentTarget.dataset.cancel) { setEdit(null); return; } commit(e.currentTarget.value); }}
+            className="h-7 w-24 px-1.5 text-sm text-right tabular-nums border border-blue-300 rounded-md bg-white" />
+        ) : (<>
+          <span className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</span>
+          {onSet && <button type="button" onClick={() => setEdit(t.ship_total_thb > 0 ? String(t.ship_total_thb) : "")} title="พิมพ์ยอดค่าส่งเอง (เฉลี่ยลงสินค้าตามคิว/กก. หรือจำนวนชิ้น)" aria-label="พิมพ์ยอดค่าส่งเอง"
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Icon name="edit" mode="line" size={12} /></button>}
+        </>)}
+      </dd>
+    </div>
+  );
+}
+
+function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb, onSetShip }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; refFx: number | null; onSetGoodsThb?: (thb: number) => void; onSetShip?: (thb: number | null) => void }) {
   const disc = t.discount_foreign ?? 0;
   const cur = foreign ? sym : "฿";
   return (
@@ -182,7 +210,7 @@ function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb }: { t: To
           ? <GoodsThbRow t={t} sym={sym} rate={Number(fxRate) || 0} refFx={refFx} onSet={onSetGoodsThb} />
           : <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า{disc > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums font-medium text-slate-800">฿{fmtMoney(t.subtotal_thb)}</dd></div>}
         <ExtraRows t={t} foreign={foreign} sym={sym} fxRate={fxRate} />
-        <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
+        <ShipRow t={t} onSet={onSetShip} />
         <PaidRow t={t} />
       </dl>
     </div>
@@ -207,7 +235,7 @@ function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean;
 }
 
 /** ด้านขวาตอนเป็นร่าง: เช็กลิสต์ + สรุปยอด + บันทึกร่าง + ยืนยัน */
-export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null }: {
+export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null, onSetShip, hideSave = false }: {
   items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   /** เรทอ้างอิง (เรทหยวนวันที่ใบ) — ใช้เตือนเรทผิดปกติ · ไม่มี = ไม่เทียบ */
   refFx?: number | null;
@@ -216,6 +244,10 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
   onSetGoodsThb?: (thb: number) => void;
   /** ★ 2026-11-15 กำลังแก้ใบที่ยืนยันแล้ว → ปุ่มหลัก = บันทึกการแก้ไข (เวอร์ชันถัดไป) · ไม่ใช่ยืนยัน + ออกเลข */
   revise?: { nextRev: number } | null;
+  /** ★ 2026-11-15 พิมพ์ยอดค่าส่งเองในส่วนยอดเงิน (null = กลับไปคิดตามเรท) */
+  onSetShip?: (thb: number | null) => void;
+  /** หน้าใบมีแถบบันทึกร่างติดล่างจอแล้ว → ไม่ต้องมีปุ่มบันทึกซ้ำในการ์ด */
+  hideSave?: boolean;
 }) {
   const ok = canConfirm(items);
   // ★ 2026-11-15 แบบ B: การ์ดเดียว 4 ช่อง — ตรวจ (ขาว) · ยอดเงิน (เทาอ่อน) · รวมทั้งสิ้น (แถบเข้ม) · ปุ่ม
@@ -225,7 +257,7 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
         <SectionTitle icon="inspect">ตรวจก่อนยืนยัน<CheckChip items={items} /></SectionTitle>
         <div className="-mx-2"><CheckList items={items} /></div>
       </div>
-      <MoneySection t={totals} foreign={foreign} sym={sym} fxRate={fxRate} refFx={refFx} onSetGoodsThb={onSetGoodsThb} />
+      <MoneySection t={totals} foreign={foreign} sym={sym} fxRate={fxRate} refFx={refFx} onSetGoodsThb={onSetGoodsThb} onSetShip={onSetShip} />
       <div className="bg-slate-800 text-white px-4 py-2.5 flex items-baseline justify-between gap-2">
         <span className="text-sm text-slate-200">รวมทั้งสิ้น</span>
         <span className="text-xl font-bold tabular-nums">฿{fmtMoney(totals.grand_total_thb)}</span>
@@ -235,10 +267,12 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
           className={`w-full h-11 rounded-lg text-sm font-semibold text-white ${revise ? (ok ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-300 hover:bg-blue-400") : ok ? "bg-orange-600 hover:bg-orange-700" : "bg-orange-300 hover:bg-orange-400"} disabled:opacity-50`}>
           {revise ? `✓ บันทึกการแก้ไข → เวอร์ชัน ${revise.nextRev}` : "✓ ยืนยัน + ออกเลข"}
         </button>
-        <button onClick={onSave} disabled={saving || !dirty}
-          className="mt-2 w-full h-9 rounded-lg text-sm border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-          {saving ? "กำลังบันทึก…" : dirty ? (revise ? "💾 เก็บที่แก้ไว้ก่อน (ยังไม่จบการแก้)" : "💾 บันทึกร่าง (ยังไม่ยืนยัน)") : (revise ? "เก็บที่แก้แล้ว" : "บันทึกร่างแล้ว")}
-        </button>
+        {!hideSave && (
+          <button onClick={onSave} disabled={saving || !dirty}
+            className="mt-2 w-full h-9 rounded-lg text-sm border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+            {saving ? "กำลังบันทึก…" : dirty ? (revise ? "💾 เก็บที่แก้ไว้ก่อน (ยังไม่จบการแก้)" : "💾 บันทึกร่าง (ยังไม่ยืนยัน)") : (revise ? "เก็บที่แก้แล้ว" : "บันทึกร่างแล้ว")}
+          </button>
+        )}
         <div className="mt-3 text-[11px] text-slate-500 leading-relaxed">
           {revise
             ? <><b className="font-medium text-slate-600">กดบันทึกการแก้ไขแล้ว:</b> เลขใบเดิม · เก็บใบเดิมเป็นประวัติ · ราคาใหม่อัปเดตที่ใบสั่งซื้อ / ราคาร้าน / ต้นทุนสินค้า · จ่ายเงินไปแล้วและยอดเปลี่ยน = ระบบเตือน</>
@@ -250,9 +284,11 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
 }
 
 /** ป๊อปยืนยัน — บอกชัด ๆ ว่ากดแล้วเกิดอะไร (ใช้ข้อมูลจริงของใบ) */
-export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRate, skuCount, confirming, onClose, onConfirm }: {
+export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRate, skuCount, confirming, onClose, onConfirm, poPlanLabels = [] }: {
   header: VoucherHeader; items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   skuCount: number; confirming: boolean; onClose: () => void; onConfirm: () => void;
+  /** ★ 2026-11-15 งานแก้ใบสั่งซื้อที่เลือกไว้ในบิลร้าน (ลด PO ตามบิล / ปิดยอดของที่ไม่มา) — ทำหลังยืนยันใบ */
+  poPlanLabels?: string[];
 }) {
   const blocks = items.filter((c) => c.level === "block");
   const fxWarn = items.find((c) => c.key === "fx" && c.level === "warn");
@@ -270,6 +306,13 @@ export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRat
         <button onClick={onClose} disabled={confirming} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยังก่อน</button>
         <button onClick={onConfirm} disabled={confirming || blocks.length > 0} className="px-5 h-9 text-sm font-semibold bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">{confirming ? "กำลังยืนยัน…" : "ยืนยัน + ออกเลข"}</button>
       </>}>
+      {poPlanLabels.length > 0 && (
+        <div className="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <div className="font-medium">จะแก้ใบสั่งซื้อด้วย ({poPlanLabels.length}) — ตามที่เลือกไว้ในบิลร้าน</div>
+          <ul className="mt-1 list-disc pl-4 space-y-0.5">{poPlanLabels.map((x, k) => <li key={k}>{x}</li>)}</ul>
+          <div className="mt-1 text-[11px] text-amber-700">ของที่ปิดยอด หน้าขอซื้อ / ใบสั่งผลิตจะกลับเป็น &quot;ต้องซื้อ&quot;</div>
+        </div>
+      )}
       {blocks.length > 0 && (
         <div className="mb-3 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">
           ยังยืนยันไม่ได้ — {blocks.map((b) => b.label).join(" · ")}

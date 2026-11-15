@@ -510,18 +510,46 @@ export function distributeQty(qty: number, lines: PoGroupLine[]): { id: string; 
   return out;
 }
 
-/** ตรวจตัวเลขในบิล: จำนวน × ราคา = ยอด ทุกแถว + ผลรวม = ยอดรวมบิล */
+/**
+ * ★ 2026-11-15 ชื่อแบบนี้ = "ค่า…" ในบิล (ค่าส่ง/ค่าแพ็ก/ค่ากล่อง/ภาษี/ค่าธรรมเนียม) ไม่ใช่สินค้า
+ * เดิมเห็น 包装 / 纸箱 เฉย ๆ ก็ตีเป็นค่าใช้จ่าย → ถุง/กล่องที่ร้านบรรจุภัณฑ์ขาย (pe袋塑料袋包装…) จับคู่ไม่ได้
+ */
+export const isFeeName = (s: string | null | undefined) => /运费|快递|物流|包装费|打包费|纸箱费|手续费|税/.test(String(s ?? ""));
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+/** ★ 2026-11-15 ยอดแถวที่ใบสำคัญใช้จริง = จำนวน × ราคา − ส่วนลด (ไม่ใช่ยอดที่บิลเขียน) · ไม่มีจำนวน/ราคา = ใช้ยอดที่บิลเขียน */
+export function billRowCalc(l: Pick<SellerBillLine, "qty" | "unit_price" | "amount" | "discount" | "discount_pct">): number {
+  const q = Number(l.qty ?? 0), p = Number(l.unit_price ?? 0);
+  const gross = q > 0 && p > 0 ? q * p : Number(l.amount ?? 0);
+  return round2(gross - billLineDiscount({ ...l, amount: gross }));
+}
+/**
+ * ★ 2026-11-15 ยอดที่บิลเขียน (amount ที่ AI อ่าน) ไม่ตรง จำนวน × ราคา เกิน ¥0.05 (เจ้าของ: "บวกเลขไม่ตรง" — 1,240 × 1.6 = 1,984 แต่บิลเขียน 1,990.40)
+ * fixQty = จำนวนที่ทำให้ตรง (ยอด ÷ ราคา เป็นเลขเต็ม) · fixPrice = ราคาที่ทำให้ตรง (4 ตำแหน่ง)
+ */
+export function billRowMismatch(l: Pick<SellerBillLine, "qty" | "unit_price" | "amount">): { printed: number; calc: number; diff: number; fixQty: number | null; fixPrice: number | null } | null {
+  const q = Number(l.qty ?? 0), p = Number(l.unit_price ?? 0);
+  if (l.amount == null || !(q > 0) || !(p > 0)) return null;
+  const a = Number(l.amount), gross = q * p;
+  if (Math.abs(gross - a) <= 0.05) return null;
+  const q2 = a / p, p2 = Math.round((a / q) * 10000) / 10000;
+  return {
+    printed: round2(a), calc: round2(gross), diff: round2(a - gross),
+    fixQty: Math.abs(q2 - Math.round(q2)) < 1e-6 && Math.round(q2) > 0 ? Math.round(q2) : null,
+    fixPrice: Math.abs(p2 * q - a) <= 0.01 ? p2 : null,
+  };
+}
+
+/** ตรวจตัวเลขในบิล: จำนวน × ราคา = ยอดที่บิลเขียน ทุกแถว (ต่างเกิน ¥0.05) + ผลรวม (แบบที่ใบใช้) = ยอดรวมบิล */
 export function checkBillMath(lines: SellerBillLine[], total: number | null): { rowsBad: number[]; sum: number; totalOk: boolean | null } {
   const rowsBad: number[] = [];
   let sum = 0;
   lines.forEach((l, i) => {
-    const q = Number(l.qty ?? 0), p = Number(l.unit_price ?? 0), a = l.amount == null ? null : Number(l.amount);
-    const calc = q * p;
-    sum += (a ?? calc) - billLineDiscount(l);   // ★ 2026-11-14 ยอดบิล = หลังหักส่วนลดของแต่ละแถว
-    if (a != null && q > 0 && p > 0 && Math.abs(calc - a) > Math.max(0.05, a * 0.01)) rowsBad.push(i);
+    sum += billRowCalc(l);   // ★ 2026-11-15 ผลรวมแบบเดียวกับที่ใบสำคัญคิด (เดิมใช้ยอดที่บิลเขียน → บอกว่าตรงทั้งที่ใบคิดได้น้อยกว่า)
+    if (billRowMismatch(l)) rowsBad.push(i);
   });
-  sum = Math.round(sum * 100) / 100;
-  return { rowsBad, sum, totalOk: total == null || !(total > 0) ? null : Math.abs(sum - total) <= Math.max(0.5, total * 0.005) };
+  sum = round2(sum);
+  return { rowsBad, sum, totalOk: total == null || !(total > 0) ? null : Math.abs(sum - total) <= 0.05 };
 }
 
 /** ชื่อจีนที่จะเติมให้สินค้า = ชื่อ + สเปกตามบิล (เช่น "狗扣 9mm 银色") · ว่าง = ไม่เติม */

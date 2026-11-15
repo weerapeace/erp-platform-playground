@@ -16,7 +16,7 @@ import { normDate } from "@/lib/delivery-bill";
 import { loadSkuCnNames, fillSkuCnNames } from "@/lib/sku-cn-name";
 import { createManualPo } from "@/lib/po-manual";
 import {
-  groupKey, stripCode, matchAndSplit, normalizeBillLine, distributeQty, aliasKey, cnNameForSku, expandAllocRows, collapseAllocRows,
+  groupKey, stripCode, matchAndSplit, isFeeName, normalizeBillLine, distributeQty, aliasKey, cnNameForSku, expandAllocRows, collapseAllocRows,
   type PoGroup, type PoGroupLine, type SellerBillLine, type AliasRow,
 } from "@/lib/seller-bill-match";
 import { BILL_ORDER_RULE, orderByBillPosition } from "@/lib/bill-line-order";
@@ -172,7 +172,7 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
 export const BILL_READ_RULES = `- ตัวเลขอ่านตามบิลจริง ห้ามเดา อ่านไม่ออก = null · 1,000 → 1000 · ลายมือ: ตรวจด้วย จำนวน × ราคา = ยอด
 - แถวรวม (合计 / 总计 / 小计 / 大写) ไม่ใช่รายการ → ใส่ใน total_amount
 - ส่วนลดรายบรรทัด (优惠 / 折扣 / 减 / 让利) ที่พิมพ์ไว้ → "discount" (ยอดเงิน ¥) หรือ "discount_pct" (เช่น 9折 = 10) · amount = จำนวน × ราคา ก่อนหักส่วนลด · ไม่มีส่วนลด = null
-- ค่าส่ง ค่าขนส่ง ค่ากล่อง ค่าแพ็ก ภาษี (运费 / 快递费 / 物流费 / 包装费 / 纸箱 / 税) → is_fee = true
+- ค่าส่ง ค่าขนส่ง ค่ากล่อง ค่าแพ็ก ภาษี (运费 / 快递费 / 物流费 / 包装费 / 纸箱费 / 税) → is_fee = true · แต่ถุง/กล่อง/บรรจุภัณฑ์ที่เป็น "สินค้าที่สั่ง" (มีจำนวนหลายชิ้น + ราคาต่อชิ้น เช่น pe袋 / 纸盒 / 包装袋) = สินค้า is_fee = false
 - คำแปล (ใช้คำแบบนี้): 狗扣/钩子=คอหมา · D扣/D字扣=ตัวดี · 日字扣=ห่วงเลขแปด · 方扣=ห่วงสี่เหลี่ยม · 圆环/O环=ห่วงกลม · 拉头/拉片=หางซิป · 拉链=ซิป · 尼龙拉链=ซิปไนล่อน · 金属拉链=ซิปฟันเหล็ก · 树脂拉链=ซิปฟันกระดูก · 链条=โซ่ · 气眼/鸡眼=ตาไก่ · 铆钉=นมหนู · 磁扣=กระดุมแม่เหล็ก · 线=ด้าย · 布=ผ้า · 织带=สายผ้า · 绳=เชือก
 - สี: 镍色/白镍=สีนิเกิ้ล · 银色=สีเงิน · 枪色/枪黑/黑镍=สีรมดำ · 金色=สีทอง · 浅金=สีทองอ่อน · 黑色=สีดำ · 白色=สีขาว · 米白/米色=สีครีม · 古铜=สีทองแดงรมดำ · 玫瑰金=สีโรสโกลด์
 - ถ้ารูปไม่ใช่บิลซื้อของ ให้ "is_bill": false และ lines = []${BILL_ORDER_RULE}`;
@@ -203,7 +203,8 @@ export function sanitizeAiBillLines(rawLines: unknown, idOf?: Map<string, string
   const rows = orderByBillPosition(Array.isArray(rawLines) ? (rawLines as Row[]) : [], (r) => ({ page: r.page, line_no: r.line_no }));
   return rows.map((r) => {
     const key = idOf ? idOf.get(str(r.candidate).toUpperCase()) ?? null : null;
-    const fee = r.is_fee === true || /运费|快递|物流|包装|纸箱|税/.test(`${str(r.name_cn)}${str(r.spec_cn)}`);
+    // ★ 2026-11-15 เดิมเห็นคำว่า 包装/纸箱 ก็ตีเป็นค่าใช้จ่าย → ถุง/กล่องที่ร้านบรรจุภัณฑ์ขาย (pe袋塑料袋包装…) จับคู่ไม่ได้ · ใช้กฎกลาง isFeeName (เฉพาะ "ค่า…" จริง)
+    const fee = r.is_fee === true || isFeeName(`${str(r.name_cn)}${str(r.spec_cn)}`);
     return normalizeBillLine({ ...r, is_fee: fee, ai_pick: fee ? null : key, ai_conf: r.confidence, decision: null, manual: false, voucher_line_ids: [], rid: null, no: null });
   }).filter((l) => l.name_cn || l.name_th || l.qty != null || l.amount != null)
     .filter((l) => !/^(合计|总计|小计|大写|total)/i.test(str(l.name_cn)))
@@ -282,8 +283,9 @@ export type ApplyResult = { inserted: number; updated: number; expenses: number;
  *   • ค่าใช้จ่าย (ค่าส่งในจีน ฯลฯ) ที่เลือก "เพิ่มเป็นค่าใช้จ่าย" → รายการเพิ่มเองไม่ผูก PO
  *   • แถว "ย้าย PO มาร้านนี้" (move_po) — หน้าเว็บย้ายผ่าน API กลาง po-edit ก่อนเรียกฟังก์ชันนี้ (ที่นี่ถือเป็นแถว PO ร้านนี้ธรรมดา)
  */
-export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[]; fillCnName?: boolean; actorId?: string | null; billId?: string | null; backfillPo?: boolean; billNo?: string | null; billDate?: string | null }): Promise<ApplyResult> {
+export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[]; protectIds?: string[]; fillCnName?: boolean; actorId?: string | null; billId?: string | null; backfillPo?: boolean; billNo?: string | null; billDate?: string | null }): Promise<ApplyResult> {
   // ★ 2026-11-14 แถวเดียวลงหลาย PO (alloc) → แตกเป็นแถวย่อยชั่วคราว 1 แถว/PO แล้วรวมกลับตอนท้าย (collapseAllocRows)
+  const protect = new Set(opts.protectIds ?? []);   // ★ 2026-11-15 ลงใบทีละแถว: รายการในใบของแถวอื่น ห้ามเขียนทับ
   const exp = expandAllocRows(billLinesIn);
   let billLines = exp.parts.map((l) => ({ ...l }));
   // 1) ตรวจทุกแถวก่อนเขียน — แถว PO ต้องเป็นบรรทัดใบสั่งซื้อของร้านนี้ · แถวนอก PO ต้องเป็นสินค้าที่มีจริง
@@ -391,7 +393,7 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
         const basis = parentBasis(sku);
         for (const a of distributeQty(num(l.qty), open)) {
           const gl = open.find((x) => x.id === a.id)!;
-          if (gl.voucher_line_id) {
+          if (gl.voucher_line_id && !protect.has(gl.voucher_line_id)) {
             await admin.from("purchase_voucher_lines_v2").update({ qty: a.qty, unit_price: price, price_source: price != null ? "bill" : "none", ...discFor(l, a.qty), updated_at: now }).eq("id", gl.voucher_line_id).eq("voucher_id", v.id);
             ids.push(gl.voucher_line_id); updated++;
             continue;

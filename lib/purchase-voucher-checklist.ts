@@ -25,6 +25,10 @@ export type ChecklistInput = {
   /** ★ 2026-11-15 ยอดจ่ายจริงตามบิล (实付款 ฿) · ยอดจ่ายร้านของใบ (ค่าสินค้า + ค่าส่งในจีน + ค่าธรรมเนียม) — ไม่มียอดจ่ายจริง = ไม่เช็ก */
   paid_total_thb?: number | null;
   shop_total_thb?: number;
+  /** ★ 2026-11-15 พิมพ์ยอดค่าส่งเอง (ทับเรท) — เฉลี่ยตามคิว/กก. หรือจำนวนชิ้น จึงไม่ต้องเตือนเรื่องขาดคิว/กก./เรท */
+  ship_manual?: boolean;
+  /** ★ 2026-11-15 บิลร้านยังเหลือแถวที่ไม่ได้ยืนยัน/ข้าม (ยืนยันแถว = ลงใบทันที) — แถวพวกนี้ยังไม่อยู่ในใบ */
+  bill_undecided?: number;
 };
 
 /** ยอดใบกับยอดจ่ายจริงต่างกันไม่เกินเท่านี้ (บาท) ถือว่าตรง — เศษปัดเรท/สตางค์ */
@@ -54,7 +58,7 @@ const money = (n: number) => (Math.round((Number(n) || 0) * 100) / 100).toLocale
 /** รายการเช็กก่อนยืนยัน — block = ยืนยันไม่ได้ (ตรงกับที่ API จะปฏิเสธ) · warn = ยืนยันได้แต่ควรดู */
 export function voucherChecklist(i: ChecklistInput): CheckItem[] {
   const out: CheckItem[] = [];
-  if (i.line_count === 0) out.push({ key: "lines", level: "block", label: "ยังไม่มีรายการ", hint: "เพิ่มจากใบรับ หรือกด ＋ เพิ่มรายการเอง" });
+  if (i.line_count === 0) out.push({ key: "lines", level: "block", label: "ยังไม่มีรายการ", hint: (i.bill_undecided ?? 0) > 0 ? "กด ✓ ยืนยัน แถวในบิลร้าน แล้วรายการจะเข้าใบทันที" : "เพิ่มจากใบรับ หรือกด ＋ เพิ่มรายการเอง" });
   else if (i.missing_price_count > 0) out.push({ key: "price", level: "block", label: `ยังไม่มีราคา ${i.missing_price_count} รายการ`, hint: "ใส่ราคาในตาราง (ช่องสีเหลือง) หรือให้ AI อ่านบิลร้าน" });
   else out.push({ key: "price", level: "ok", label: `ทุกรายการมีราคา (${i.line_count})` });
 
@@ -69,6 +73,8 @@ export function voucherChecklist(i: ChecklistInput): CheckItem[] {
     out.push({ key: "fx", level: "ok", label: "สกุลบาท ไม่ต้องใช้เรท" });
   }
 
+  if ((i.bill_undecided ?? 0) > 0) out.push({ key: "bill", level: "warn", label: `บิลร้าน: ยังไม่ได้ยืนยัน ${i.bill_undecided} แถว`, hint: "แถวที่ยังไม่ยืนยันยังไม่อยู่ในใบ — กด ✓ ยืนยัน หรือ ⋯ ข้าม (ยืนยันใบได้)" });
+
   // ★ 2026-11-15 เทียบยอดจ่ายจริงตามบิล (เจ้าของ: "รวมทั้งสิ้นต้องได้ 347.53 ตามบิล") — ยืนยันได้ แต่ควรดู
   const pd = paidDiff(i.shop_total_thb, i.paid_total_thb);
   if (pd != null) {
@@ -78,7 +84,8 @@ export function voucherChecklist(i: ChecklistInput): CheckItem[] {
           hint: "เช็กส่วนลดซ้ำ / ค่าส่งในจีน / ค่าธรรมเนียม / เรท — หรือกด \"ปรับเรทให้ตรงยอดจ่าย\" (ยืนยันได้)" });
   }
 
-  if (!i.any_ship) out.push({ key: "ship", level: "info", label: "ไม่คิดค่าส่งรอบนี้", hint: "มีค่าส่ง → เปิดกล่องค่าส่งแล้วเลือกร้านขนส่ง" });
+  if (i.ship_manual && i.ship_total_thb > 0) out.push({ key: "ship", level: "ok", label: `ค่าส่ง ฿${money(i.ship_total_thb)} (ใส่เอง)`, hint: i.missing_basis_count > 0 ? "เฉลี่ยลงสินค้าตามจำนวนชิ้น (ยังไม่มีคิว/กก.)" : undefined });
+  else if (!i.any_ship) out.push({ key: "ship", level: "info", label: "ไม่คิดค่าส่งรอบนี้", hint: "มีค่าส่ง → พิมพ์ยอดที่ช่องค่าส่งในการ์ดยอดเงิน" });
   else if (i.missing_basis_count > 0 || i.missing_rate_count > 0) {
     const parts = [i.missing_basis_count > 0 ? `${i.missing_basis_count} รายการไม่มีคิว/กก.` : "", i.missing_rate_count > 0 ? `${i.missing_rate_count} รายการไม่มีเรท` : ""].filter(Boolean);
     out.push({ key: "ship", level: "warn", label: `ค่าส่ง ฿${money(i.ship_total_thb)} — ${parts.join(" · ")}`, hint: "รายการนั้นจะไม่ได้รับค่าส่ง (ยืนยันได้)" });
