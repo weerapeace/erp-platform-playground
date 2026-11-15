@@ -4,10 +4,24 @@ import {
   shopeeSignBase, shopeeSign, shopeeAuthUrl, shopeeCallbackParams, shopeeConfigured, shopeeEnv, shopeeHost,
   shopeeErrorText, shopeeIsRateLimit, ShopeeApiError, shopeeTokenOf, shopeeTokenTimes, shopeeReconnectBy, shopeeShopInfoOf,
   SHOPEE_HOSTS, SHOPEE_REFRESH_TTL_MS, shopeeItemListOf, shopeeModelsToSlim, shopeeItemToCatalogItem, shopeeListingStatus, SHOPEE_PULL_STATUSES,
-  shopeeOrderListOf, shopeeOrderToPlatformOrder, SHOPEE_ORDER_FIELDS,
+  shopeeOrderListOf, shopeeOrderToPlatformOrder, SHOPEE_ORDER_FIELDS, shopeeUploadImageOf,
 } from "@/lib/shopee";
 import { summarizeListing, countsAsDuplicate } from "@/lib/platform-listing-health";
 import { shopeeToInternal, isShopManaged, checkTransition, shopManagedName, needsAction, countsAsSale } from "@/lib/platform-order-status";
+
+describe("Shopee — ฝากรูป (media_space.upload_image · เฟส 4C)", () => {
+  test("คำตอบรุ่นเดิม image_info → รหัส + ลิงก์ภูมิภาค TH ก่อน", () => {
+    expect(shopeeUploadImageOf({ error: "", response: { image_info: { image_id: "th-11134207-abc", image_url_list: [
+      { image_url_region: "SG", image_url: "https://cf.shopee.sg/file/abc" }, { image_url_region: "TH", image_url: "https://cf.shopee.co.th/file/abc" },
+    ] } } })).toEqual({ imageId: "th-11134207-abc", url: "https://cf.shopee.co.th/file/abc" });
+  });
+  test("คำตอบรุ่นใหม่ image_info_list · error รายรูป = โยน · ไม่มีรหัส = โยน", () => {
+    expect(shopeeUploadImageOf({ response: { image_info_list: [{ id: 0, error: "", message: "", image_info: { image_id: "x1", image_url_list: [{ image_url_region: "XX", image_url: "https://u/x1" }] } }] } }))
+      .toEqual({ imageId: "x1", url: "https://u/x1" });
+    expect(() => shopeeUploadImageOf({ response: { image_info_list: [{ id: 0, error: "error_param", message: "image too large" }] } })).toThrow("image too large");
+    expect(() => shopeeUploadImageOf({ response: {} })).toThrow(ShopeeApiError);
+  });
+});
 
 describe("Shopee — เซ็นคำขอ", () => {
   test("ข้อความที่เซ็น: ระดับแอป = partner_id+path+timestamp · ระดับร้าน ต่อ access_token+shop_id", () => {

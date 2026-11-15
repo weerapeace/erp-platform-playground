@@ -15,7 +15,7 @@
  *   เฟส A: แก้ชื่อ (useTiktokEdit → /api/tiktok-shop/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useTiktokDisplay → /listing-display) · เฟส B: ราคาต่อตัวเลือก (→ /listing-prices) · ที่เหลือดูอย่างเดียว
  *   แผนเฟส + กติกา TikTok: docs/tiktok-shop-connector.md
  * Shopee (เฉพาะรายการที่ดึงผ่าน API · source = "api" — ไฟล์ export ใช้แท็บทั่วไปเหมือนเดิม): ดึงสด → ./shopee-listing-panels (GET /api/shopee/listing-detail)
- *   เฟส 4A: แก้ชื่อ + รายละเอียด (useShopeeEdit → /api/shopee/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useShopeeDisplay → /listing-display) · เฟส 4B: ราคาตั้งต่อตัวเลือก (→ /listing-prices) · รูป ดูอย่างเดียว · docs/shopee-connector.md
+ *   เฟส 4A: แก้ชื่อ + รายละเอียด (useShopeeEdit → /api/shopee/listing-edit) + เปิด/ปิดขายทั้งสินค้า (useShopeeDisplay → /listing-display) · เฟส 4B: ราคาตั้งต่อตัวเลือก (→ /listing-prices) · เฟส 4C: รูปสินค้า (ส่งพร้อมชื่อ) · docs/shopee-connector.md
  *
  * ข้อมูล: GET /api/platform-catalog?view=listing (รายละเอียด+ประวัติ) + ?view=variants (ตัวเลือก↔SKU + ราคาที่ระบบจะส่ง)
  * ส่ง: POST /api/line-shopping/listing-edit · กฎกลาง lib/line-listing-edit (planLineEdit — หน้าเว็บกับ API ใช้ตัวเดียวกัน)
@@ -215,7 +215,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const lazView = isLazada ? laz.view : null;
   const ttView = isTiktok ? tt.view : null;
   const spView = isShopee ? sp.view : null;
-  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? (ttEdit.images ?? ttView.images).length : spView ? spView.images.length : null;
+  const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? (ttEdit.images ?? ttView.images).length : spView ? (spEdit.images ?? spView.images).length : null;
   const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : spView ? (spView.hasModel ? spView.models.length : 1) : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
@@ -489,7 +489,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} />)
+                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -520,7 +520,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && ttView && <ImageLightbox images={(ttEdit.images ?? ttView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && lazView && <ImageLightbox images={(lazEdit.form?.images ?? lazView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
-      {!line && spView && <ImageLightbox images={spView.images.map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
+      {!line && spView && <ImageLightbox images={(spEdit.images ?? spView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
 
       {/* เลือกรูป: เพิ่มรูปสินค้าจากคลังรูปในระบบ / เลือกรูปให้ตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ) */}
       <ListingImagePicker open={!!picker && !!form} onClose={() => setPicker(null)} mode={picker?.mode ?? "product"}

@@ -4,7 +4,7 @@
  *
  * เฟส 4A (เจ้าของ "เฟส 4" 2026-11-14): แก้ชื่อ + รายละเอียด (ข้อความธรรมดา) → v2.product.update_item (ส่งเฉพาะช่องที่เปลี่ยน · ช่องที่ไม่ส่งคงเดิม)
  *                                     เปิด/ปิดขาย → v2.product.unlist_item (ปิด = UNLIST · เปิด = กลับเป็น NORMAL)
- *   รูป / ตัวเลือก / ราคา = ดูอย่างเดียวในเฟสนี้ · สต๊อก = ไม่แก้ (BigSeller ยังซิงค์อยู่)
+ *   เฟส 4B ราคาตั้ง (update_price) · เฟส 4C รูปสินค้า (media_space.upload_image + update_item image) · ตัวเลือก = ดูอย่างเดียว · สต๊อก = ไม่แก้ (BigSeller ยังซิงค์อยู่)
  * กติกา Shopee (เอกสาร open.shopee.com อ่าน 2026-11-14):
  *   - update_item: ทุกช่องไม่บังคับยกเว้น item_id · description_type extended (ร้าน whitelist) ต้องส่ง description_info แทน → เฟสนี้แก้เฉพาะแบบ normal
  *   - unlist_item: item_list ≤50 · สินค้าที่อยู่ในโปรโมชัน "ปิดขายไม่ได้" · รอตรวจ/ถูกแบน ปิด/เปิดไม่ได้ · ผลรายตัวอยู่ใน failure_list (HTTP 200)
@@ -23,6 +23,10 @@ export type ShopeeListingView = {
   /** แก้รายละเอียดได้ไหม (แบบ extended = ร้าน whitelist ต้องใช้ฟอร์มอื่น → เฟสนี้ดูอย่างเดียว) */
   descriptionEditable: boolean;
   images: string[];
+  /** รหัสรูปบน Shopee เรียงตรงกับ images (ใช้ส่ง update_item · ว่าง = Shopee ไม่ส่งรหัสมา) */
+  imageIds: string[];
+  /** สัดส่วนรูป "1:1" / "3:4" (3:4 = ร้านที่ Shopee เปิดให้) · ไม่รู้ = null */
+  imageRatio: string | null;
   categoryId: string | null;
   brand: string | null;
   itemSku: string | null;
@@ -83,10 +87,13 @@ export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]
   const s2 = num(obj(obj(base.stock_info_v2)?.summary_info)?.total_available_stock);
   const dim = obj(base.dimension);
   const ms = (models?.models ?? []).map((m) => ({ modelId: m.model_id, sku: m.sku, label: m.label, price: m.price, originalPrice: m.original_price, stock: m.stock, image: m.image, status: m.status, promo: m.promo === true }));
+  const img = obj(base.image);
+  const imgIds = arr(img?.image_id_list).map((u) => str(u));
+  const imgs = arr(img?.image_url_list).map((u, i) => ({ url: str(u), id: imgIds[i] ?? null })).filter((x): x is { url: string; id: string | null } => !!x.url);
   return {
     itemId, name: String(base.item_name ?? ""), status: (str(base.item_status) ?? "").toUpperCase(),
     description: desc.text, descriptionType: desc.type, descriptionEditable: desc.type !== "extended",
-    images: arr(obj(base.image)?.image_url_list).map((u) => str(u)).filter((u): u is string => !!u),
+    images: imgs.map((x) => x.url), imageIds: imgs.map((x) => x.id ?? ""), imageRatio: str(img?.image_ratio),
     categoryId: base.category_id != null ? String(base.category_id) : null,
     brand: str(obj(base.brand)?.original_brand_name), itemSku: str(base.item_sku),
     weight: num(base.weight),
@@ -177,6 +184,66 @@ export function shopeeUnlistErrors(resp: Obj, itemId: string): string[] {
   if (fail.length) return fail.map((f) => str(f.failed_reason) ?? "Shopee ไม่ให้ทำรายการนี้");
   const ok = arr(r.success_list).map(obj).some((s) => String(s?.item_id ?? "") === itemId);
   return ok ? [] : ["Shopee ไม่ได้ยืนยันว่าทำสำเร็จ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก"];
+}
+
+// ───────── เฟส 4C: รูปสินค้า → media_space.upload_image (รูปใหม่) + update_item image.image_id_list ─────────
+// กติกา Shopee (เอกสาร 2026-11-15): ส่งทั้งชุด (แทนของเดิมทั้งหมด) · เรียงตามที่ส่ง · รูปแรก = ปก · จำนวนสูงสุดตามร้าน (get_item_limit · ไม่รู้ = 9)
+//   รูปใหม่ต้องฝากก่อน (JPG/PNG ≤10MB) → ได้ image_id · รูปเดิมบนร้านใช้ image_id เดิม (ไม่ต้องฝากซ้ำ)
+// ฟอร์มหน้าเว็บ: รูปเดิม = ลิงก์ของร้าน (ตามที่ get_item_base_info ส่งมา) · รูปใหม่จากคลังรูปในระบบ = "r2:<key>" (เหมือน TikTok/LINE)
+// ส่ง API: รูปเดิม = "spi:<image_id>" · รูปใหม่ = "r2:<key>" (API ฝากให้ตอนกดบันทึก — ฝากไม่ผ่าน = หยุด ไม่แก้สินค้า)
+export const SHOPEE_MAX_IMAGES = 9;
+export const shopeeImageRef = (id: string): string => `spi:${id}`;
+export const shopeeImageIdOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("spi:") ? ref.slice(4) || null : null);
+export const shopeeR2KeyOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) || null : null);
+/** จำนวนรูปสูงสุดของร้าน (get_item_limit) · ไม่รู้ = 9 */
+export const shopeeImagesMax = (v: Pick<ShopeeListingView, "limits">): number => v.limits?.imagesMax ?? SHOPEE_MAX_IMAGES;
+
+/** ฟอร์มหน้าเว็บ (ลิงก์รูปเดิม / "r2:<key>") → ref ที่ส่ง API · ลิงก์ที่ไม่รู้จัก หรือรูปเดิมที่ไม่มีรหัส = null (ให้ผู้ใช้ดึงตัวนี้ใหม่) */
+export function shopeeRefsForSend(formImages: string[], v: Pick<ShopeeListingView, "images" | "imageIds">): string[] | null {
+  const idOf = new Map(v.images.map((url, i) => [url, v.imageIds[i] ?? ""]));
+  const out: string[] = [];
+  for (const ref of formImages) {
+    if (shopeeR2KeyOfRef(ref)) { out.push(ref); continue; }
+    const id = idOf.get(ref);
+    if (!id) return null;
+    out.push(shopeeImageRef(id));
+  }
+  return out;
+}
+
+export type ShopeeImagePlan = {
+  changed: boolean;
+  /** ref ที่จะส่ง ("spi:<id>" / "r2:<key>") เรียงตามลำดับใหม่ */
+  refs: string[];
+  newImages: number; removed: number; coverChanged: boolean;
+  changes: { label: string; before: string; after: string }[];
+  errors: string[]; warnings: string[];
+};
+
+/** เทียบรูปบนร้าน (รหัสเดิม) กับที่แก้ → ส่งอะไรบ้าง · กฎเดียวกันทั้งหน้าเว็บและ API */
+export function planShopeeImages(v: Pick<ShopeeListingView, "imageIds" | "imageRatio" | "limits" | "status">, refs: string[]): ShopeeImagePlan {
+  const errors: string[] = []; const warnings: string[] = []; const changes: ShopeeImagePlan["changes"] = [];
+  const max = shopeeImagesMax(v);
+  const baseRefs = v.imageIds.map((id) => (id ? shopeeImageRef(id) : ""));
+  const list = refs.filter(Boolean);
+  const changed = list.join("\n") !== baseRefs.join("\n");
+  const newImages = list.filter((r) => shopeeR2KeyOfRef(r)).length;
+  const removed = baseRefs.filter((r) => r && !list.includes(r)).length;
+  const coverChanged = list[0] !== baseRefs[0];
+  if (!changed) return { changed, refs: list, newImages: 0, removed: 0, coverChanged: false, changes, errors, warnings };
+  if (list.length === 0) errors.push("ต้องมีรูปสินค้าอย่างน้อย 1 รูป");
+  if (list.length > max) errors.push(`Shopee รับรูปสินค้าได้สูงสุด ${max} รูป (ตอนนี้ ${list.length} รูป)`);
+  if (new Set(list).size !== list.length) errors.push("มีรูปซ้ำกัน — เอารูปที่ซ้ำออกก่อน");
+  if (list.some((r) => !shopeeImageIdOfRef(r) && !shopeeR2KeyOfRef(r))) errors.push("มีรูปที่ระบบไม่รู้จัก — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่");
+  if (v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE") errors.push("สินค้านี้ถูกลบแล้ว — แก้รูปไม่ได้");
+  const bits = [newImages ? `ใหม่ ${newImages}` : "", removed ? `เอาออก ${removed}` : "", coverChanged ? "เปลี่ยนปก" : "", !newImages && !removed && !coverChanged ? "สลับลำดับ" : ""].filter(Boolean);
+  changes.push({ label: "รูปสินค้า", before: `${baseRefs.length} รูป`, after: `${list.length} รูป${bits.length ? ` (${bits.join(" · ")})` : ""}` });
+  if (newImages) warnings.push(`รูปใหม่ ${newImages} รูปจะถูกทำเป็น${v.imageRatio === "3:4" ? "แนวตั้ง 3:4" : "จัตุรัส"}พื้นขาว แล้วฝากกับ Shopee ตอนกดบันทึก`);
+  if (coverChanged) warnings.push("รูปแรก = ปกที่ลูกค้าเห็นในหน้าค้นหาและหน้าร้าน");
+  if (removed) warnings.push(`รูปที่เอาออก ${removed} รูปจะหายจากหน้าสินค้าบน Shopee ทันที`);
+  if (v.status === "REVIEWING") warnings.push("สินค้านี้กำลังรอ Shopee ตรวจ — แก้แล้วอาจต้องรอตรวจต่อ");
+  if (v.status === "BANNED") warnings.push("สินค้านี้ถูก Shopee แบน — แก้ตามที่ Shopee แจ้งแล้วอาจต้องรอตรวจใหม่");
+  return { changed, refs: list, newImages, removed, coverChanged, changes, errors, warnings };
 }
 
 // ───────── เฟส 4B: ราคา (ราคาตั้ง original_price ต่อตัวเลือก) → v2.product.update_price ─────────

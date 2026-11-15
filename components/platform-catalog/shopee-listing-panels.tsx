@@ -3,7 +3,7 @@
  * เนื้อหาแท็บของสินค้าบน Shopee ในลิ้นชักสินค้าบนร้าน (listing-drawer) — แบบเดียวกับ ./tiktok-listing-panels (ฉบับเบา)
  *
  *   const sp   = useShopeeListing(isShopee ? listingId : null, onSaved);   // ดึงสดจาก Shopee ตอนเปิด
- *   const edit = useShopeeEdit(sp, canEdit, onSaved);                       // เฟส 4A: แก้ชื่อ + รายละเอียด → ส่งขึ้น Shopee (ถามก่อน)
+ *   const edit = useShopeeEdit(sp, canEdit, onSaved);                       // เฟส 4A: แก้ชื่อ + รายละเอียด · 4B ราคา · 4C รูป → ส่งขึ้น Shopee (ถามก่อน)
  *   const disp = useShopeeDisplay(sp, onDone);                              // เฟส 4A: เปิด/ปิดขายทั้งสินค้า (ถามก่อน)
  *   <ShopeeHeaderStatus …/>  <ShopeeInfoPanel …/>  <ShopeeImagesPanel …/>  <ShopeeOptionsPanel …/>
  *   footer = <ShopeeEditFooter …/> · {edit.dialog}{disp.dialog}
@@ -12,8 +12,9 @@
  * ส่งขึ้นร้านจริง (ถามก่อนเสมอ · มีประวัติ): POST /api/shopee/listing-edit · /api/shopee/listing-display
  * กฎ: lib/shopee-listing-edit (pure + เทสต์ — หน้าเว็บกับ API ใช้ตัวเดียวกัน) · แผนเฟส: docs/shopee-connector.md
  * เฟส 4B: ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก & ราคา → POST /api/shopee/listing-prices · มีผลทันที) — ปุ่มบันทึกเดียวกับชื่อ (ส่งราคาก่อน)
- * ยังไม่ทำ (ดูอย่างเดียว): รูป (เฟส 4C) · สต๊อก (BigSeller ยังซิงค์อยู่ — ไม่แก้)
- * ของกลางที่ใช้: MiniTable · ConfirmDialog · ToggleSwitch · state-views · Icon · ./listing-images (ListingImageGrid)
+ * เฟส 4C: รูปสินค้า (แท็บรูป — ลากเรียง/ตั้งปก/ลบ/เพิ่มจากคลังรูปในระบบ) → ส่งพร้อมชื่อใน /api/shopee/listing-edit (รูปใหม่ฝากกับ Shopee ตอนกดบันทึก)
+ * ยังไม่ทำ: ตัวเลือก (ดูอย่างเดียว) · สต๊อก (BigSeller ยังซิงค์อยู่ — ไม่แก้)
+ * ของกลางที่ใช้: MiniTable · ConfirmDialog · ToggleSwitch · state-views · Icon · ./listing-images (ListingImageGrid · ListingImagePicker · useSystemImages)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
@@ -25,10 +26,11 @@ import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { MoneyInput } from "@/components/money-input";
 import {
-  applyShopeeBulkPrice, planShopeeDisplay, planShopeeEdit, planShopeePrices, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeStatusBadge, shopeeTextLength,
-  type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
+  applyShopeeBulkPrice, planShopeeDisplay, planShopeeEdit, planShopeeImages, planShopeePrices, shopeeImagesMax, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeRefsForSend,
+  shopeeStatusBadge, shopeeTextLength,
+  type ShopeeImagePlan, type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
 } from "@/lib/shopee-listing-edit";
-import { ListingImageGrid } from "./listing-images";
+import { ListingImageGrid, ListingImagePicker, useSystemImages } from "./listing-images";
 
 export type ShopeeListingState = {
   listingId: string | null;
@@ -105,6 +107,10 @@ export type ShopeeEditApi = {
   setPrice: (modelId: string, price: number | null) => void;
   setPrices: (rows: ShopeePriceRow[]) => void;
   pricePlan: ShopeePricePlan | null;
+  /** เฟส 4C: รูปในฟอร์ม (ลิงก์รูปเดิมบนร้าน / "r2:<key>" รูปใหม่จากระบบ) · null = ยังไม่มีข้อมูล */
+  images: string[] | null;
+  setImages: (next: string[]) => void;
+  imagePlan: ShopeeImagePlan | null;
   changeCount: number;
   errors: string[];
   dirty: boolean;
@@ -120,22 +126,31 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
   const [name, setNameState] = useState<string | null>(null);
   const [description, setDescState] = useState<string | null>(null);
   const [prices, setPricesState] = useState<ShopeePriceRow[] | null>(null);
+  const [images, setImagesState] = useState<string[] | null>(null);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   const priceBase = useMemo(() => (v ? shopeePriceRowsFromView(v) : null), [v]);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวอื่น / ดึงใหม่ / หลังบันทึก) → เริ่มจากของบนร้าน
-  useEffect(() => { setNameState(v ? v.name : null); setDescState(v ? v.description : null); setPricesState(priceBase); }, [v, priceBase]);
+  useEffect(() => { setNameState(v ? v.name : null); setDescState(v ? v.description : null); setPricesState(priceBase); setImagesState(v ? v.images : null); }, [v, priceBase]);
 
   const plan = useMemo(() => (v && name != null && description != null ? planShopeeEdit(v, { name, description }) : null), [v, name, description]);
   const pricePlan = useMemo(() => (v && prices ? planShopeePrices(v, prices) : null), [v, prices]);
+  const imagePlan = useMemo((): ShopeeImagePlan | null => {
+    if (!v || !images) return null;
+    if (images.join("\n") === v.images.join("\n")) return null; // ไม่ได้แตะรูป
+    const refs = shopeeRefsForSend(images, v);
+    return refs ? planShopeeImages(v, refs)
+      : { changed: true, refs: [], newImages: 0, removed: 0, coverChanged: false, changes: [], errors: ["มีรูปเดิมที่ระบบหารหัสบน Shopee ไม่เจอ — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่"], warnings: [] };
+  }, [v, images]);
   const infoN = plan?.changes.length ?? 0;
   const priceN = pricePlan?.changes.length ?? 0;
-  const changeCount = infoN + priceN;
+  const imgN = imagePlan?.changed ? 1 : 0;
+  const changeCount = infoN + priceN + imgN;
   const dirty = changeCount > 0;
-  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? [])];
-  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); } };
+  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? []), ...(imgN ? imagePlan!.errors : [])];
+  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); setImagesState(v.images); } };
 
-  /** ส่งราคาก่อน (มีผลทันที) แล้วค่อยชื่อ/รายละเอียด · ราคาไม่ผ่านทั้งหมด = หยุด ไม่ส่งชื่อต่อ */
+  /** ส่งราคาก่อน (มีผลทันที) แล้วค่อยชื่อ/รายละเอียด/รูป (คำสั่งเดียว) · ราคาไม่ผ่านทั้งหมด = หยุด ไม่ส่งต่อ */
   const save = async () => {
     if (!v || !state.listingId || !dirty || errors.length) return;
     setSaving(true);
@@ -160,12 +175,13 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
         (j.warnings ?? []).forEach((w) => toast.warning(w));
         latest = j.view;
       }
-      if (infoN && plan) {
+      if ((infoN && plan) || (imgN && imagePlan)) {
         const r = await apiFetch("/api/shopee/listing-edit", {
           method: "POST",
           body: JSON.stringify({
-            listing_id: state.listingId, before: { name: v.name, description: v.description },
-            edit: { name: plan.body.item_name ?? null, description: plan.body.description ?? null },
+            listing_id: state.listingId,
+            ...(infoN && plan ? { before: { name: v.name, description: v.description }, edit: { name: plan.body.item_name ?? null, description: plan.body.description ?? null } } : {}),
+            ...(imgN && imagePlan ? { images: { before_ids: v.imageIds, refs: imagePlan.refs } } : {}),
           }),
         });
         const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as ShopeeWriteResponse;
@@ -186,18 +202,18 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     finally { setSaving(false); }
   };
 
-  const warnings = [...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? [])];
+  const warnings = [...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? []), ...(imgN ? imagePlan!.warnings : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
       title={`ส่งการแก้ไข ${changeCount} รายการขึ้นร้าน Shopee?`} confirmText="ส่งขึ้น Shopee"
       message={dirty ? (
         <div className="space-y-2 text-sm">
-          <p>ระบบจะแก้สินค้าบนร้าน Shopee จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · สต๊อก/รูปไม่แตะ) · มีประวัติว่าใครแก้อะไร</p>
+          <p>ระบบจะแก้สินค้าบนร้าน Shopee จริงตามนี้ (ส่งเฉพาะที่เปลี่ยน · สต๊อกไม่แตะ) · มีประวัติว่าใครแก้อะไร</p>
           <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
             {(pricePlan?.changes ?? []).map((c) => (
               <li key={`p-${c.modelId}`}><span className="font-medium text-slate-700">ราคาตั้ง {c.label}:</span> {shopeePriceChangeText(c)}{c.promo ? <span className="text-orange-700"> · ในโปรโมชัน</span> : null}</li>
             ))}
-            {(plan?.changes ?? []).map((c, i) => (
+            {[...(plan?.changes ?? []), ...(imgN ? imagePlan!.changes : [])].map((c, i) => (
               <li key={`i-${i}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400 line-through">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
             ))}
           </ul>
@@ -209,6 +225,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     canEdit, name, setName: setNameState, description, setDescription: setDescState,
     prices, setPrice: (modelId, price) => setPricesState((rows) => (rows ? rows.map((r) => (r.modelId === modelId ? { ...r, price } : r)) : rows)),
     setPrices: setPricesState, pricePlan,
+    images, setImages: setImagesState, imagePlan,
     changeCount, errors, dirty, reset, ask: () => setAsking(true), saving, dialog,
   };
 }
@@ -365,17 +382,42 @@ export function ShopeeInfoPanel({ state, edit }: { state: ShopeeListingState; ed
         <ReadField label="หมวด (รหัส Shopee)">{v.categoryId ?? "—"}</ReadField>
         <ReadField label="น้ำหนัก / กล่อง">{v.weight != null ? `${v.weight} กก.` : "—"}{v.dims ? ` · ${v.dims.length ?? "?"}×${v.dims.width ?? "?"}×${v.dims.height ?? "?"} ซม.` : ""}</ReadField>
       </div>
-      <p className="text-[11px] text-slate-400">แก้ได้ตอนนี้: ชื่อ + รายละเอียด (แบบข้อความ) · ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก &amp; ราคา) · รูป ดูอย่างเดียว (เปิดในเฟสถัดไป) · สต๊อกไม่แก้จากระบบ (BigSeller ยังซิงค์อยู่)</p>
+      <p className="text-[11px] text-slate-400">แก้ได้ตอนนี้: ชื่อ + รายละเอียด (แบบข้อความ) · รูปสินค้า (แท็บรูป) · ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก &amp; ราคา) · สต๊อกไม่แก้จากระบบ (BigSeller ยังซิงค์อยู่)</p>
     </div>
   );
 }
 
-/** แท็บรูป — ดูอย่างเดียวในเฟส 4A */
-export function ShopeeImagesPanel({ state, onOpen }: { state: ShopeeListingState; onOpen: (index: number) => void }) {
+/** แท็บรูป — เฟส 4C: ลากเรียง / ตั้งปก / ลบ / เพิ่มจากคลังรูปในระบบ (ของกลาง ./listing-images · แบบเดียวกับ TikTok) · ไม่มีสิทธิ์ = ดูอย่างเดียว */
+export function ShopeeImagesPanel({ state, onOpen, edit, matchedParent, matchedCode }: {
+  state: ShopeeListingState; onOpen: (index: number) => void; edit?: ShopeeEditApi | null; matchedParent?: string | null; matchedCode?: string | null;
+}) {
+  const sys = useSystemImages(matchedParent ?? null);
+  const [picking, setPicking] = useState(false);
   const g = gate(state); if (g) return g;
   const v = state.view!;
-  return <ListingImageGrid images={v.images} onChange={() => { /* ดูอย่างเดียว */ }} canEdit={false} max={v.limits?.imagesMax ?? 9} platformName="Shopee"
-    onOpen={onOpen} onAdd={() => { /* ดูอย่างเดียว */ }} canAdd={false} note="ดูอย่างเดียว — แก้รูปบน Shopee จะเปิดในเฟสถัดไป" />;
+  const max = shopeeImagesMax(v);
+  const locked = v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE";
+  const can = !!edit?.canEdit && !!edit.images && !locked;
+  const images = can ? edit!.images! : v.images;
+  const note = can
+    ? `ลากเพื่อเรียง · รูปแรก = ปก · Shopee รับไม่เกิน ${max} รูป${v.imageRatio === "3:4" ? " (สินค้านี้ใช้รูปแนวตั้ง 3:4)" : ""} · รูปใหม่จะฝากกับ Shopee ตอนกด “บันทึกขึ้น Shopee”`
+    : "ดูอย่างเดียว";
+  return (
+    <div className="space-y-3">
+      {!can && images.length === 0
+        ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">สินค้านี้ไม่มีรูปบน Shopee</p>
+        : <ListingImageGrid images={images} onChange={(next) => edit?.setImages(next)} canEdit={can} max={max} platformName="Shopee" dragGroup="shopee-listing-images"
+            onOpen={onOpen} onAdd={() => { setPicking(true); sys.load(); }} canAdd={can && !!matchedParent} note={note} />}
+      {can && !matchedParent && <p className="text-[11px] text-slate-400">เพิ่มรูปจากระบบได้เมื่อจับคู่สินค้านี้กับ Parent SKU แล้ว (แท็บจับคู่) · เรียง/ลบรูปเดิมได้เลย</p>}
+      {can && (
+        <ListingImagePicker open={picking} onClose={() => setPicking(false)} mode="product" storageKey="shopee-image-picker"
+          title="เพิ่มรูปสินค้าจากคลังรูปในระบบ" description={`เลือกได้อีก ${Math.max(0, max - images.length)} รูป (Shopee รับไม่เกิน ${max}) · ส่งขึ้นร้านตอนกดบันทึก`}
+          matchedParent={matchedParent ?? null} matchedCode={matchedCode} sysImages={sys.images}
+          isUsed={(ref) => images.includes(ref)} full={images.length >= max}
+          onPick={(ref) => edit!.setImages([...images, ref])} />
+      )}
+    </div>
+  );
 }
 
 const numOrNull = (raw: string | number | null | undefined): number | null => { if (raw == null || raw === "") return null; const n = Number(raw); return Number.isFinite(n) ? n : null; };

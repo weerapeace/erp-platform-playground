@@ -1,6 +1,6 @@
 # ตัวเชื่อม Shopee Open Platform (ร้าน Louis Montini)
 
-> สถานะ 2026-11-14: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (efe2e02a) · **เฟส 3 = ออเดอร์อัตโนมัติ** (แทนเมล) · **เฟส 4A = แก้ชื่อ/รายละเอียด + เปิด/ปิดขาย จากลิ้นชัก** · **เฟส 4B = แก้ราคาตั้งรายตัวเลือก** (แก้ร้านจริง · ถามก่อนทุกครั้ง) · ร้านที่เชื่อม: "Louis Montini & Pixie Dustie" (shop_id 9944732)
+> สถานะ 2026-11-15: **เฟส 1 = เชื่อมร้าน** (8234e37d) · **เฟส 2 = ดึงสินค้า อ่านอย่างเดียว** (efe2e02a) · **เฟส 3 = ออเดอร์อัตโนมัติ** (แทนเมล) · **เฟส 4A = แก้ชื่อ/รายละเอียด + เปิด/ปิดขาย จากลิ้นชัก** · **เฟส 4B = แก้ราคาตั้งรายตัวเลือก** · **เฟส 4C = แก้รูปสินค้า** (แก้ร้านจริง · ถามก่อนทุกครั้ง) · ร้านที่เชื่อม: "Louis Montini & Pixie Dustie" (shop_id 9944732)
 > แอป "Louis Montini ERP" (Seller In House System) **Go Live ผ่านแล้ว 2026-11-14** · เจ้าของใส่ SHOPEE_PARTNER_ID / SHOPEE_PARTNER_KEY / SHOPEE_ENV=live ใน Vercel แล้ว (env ใหม่มีผลหลังขึ้นเว็บรอบถัดไปเท่านั้น — ถ้าไม่มีงานรอขึ้นเว็บ ปุ่ม "ขึ้นเว็บทันที" จะไม่ build ต้องมี commit ใหม่ หรือกด Redeploy ใน Vercel)
 > แผนทั้งหมด: เฟส 1 เชื่อมร้าน → เฟส 2 ดึงสินค้า (อ่านอย่างเดียว) → เฟส 3 ดึงออเดอร์ → เฟส 4 แก้ชื่อ/ราคา/รูป (ทีละขั้น · อนุมัติทุกครั้ง)
 
@@ -112,7 +112,16 @@
 - ✅ ลองกับร้านจริงแล้ว (BCG01-03 สินค้าไม่มีตัวเลือก): รอบแรก 2026-11-14 ขึ้นว่า "ไม่สำเร็จ" ผิด ๆ เพราะ Shopee ตอบ `success_list: [{ original_price }]` **ไม่มี model_id** (ราคาเปลี่ยนจริง) → แก้ 81ec0625: สินค้าไม่มีตัวเลือกดูแค่ว่ามีรายการผ่าน/ไม่ผ่าน · ตัวที่ Shopee ไม่บอกผลรายตัว = "รอยืนยัน" แล้วดึงราคาจริงกลับมาตัดสิน · เก็บคำตอบดิบใน audit `shopee_responses` · รอบสอง 2026-11-15 ผ่าน (1,251→1,252→1,250 · ดึงกลับเห็นราคาใหม่ทันที) · **สินค้ามีหลายตัวเลือกยังไม่ได้ลองจริง**
 - ไฟล์: `lib/shopee.ts` shopeeUpdatePrice · `lib/shopee-listing-edit.ts` (planShopeePrices · shopeePriceBatches · shopeePriceResult · applyShopeeBulkPrice) · `app/api/shopee/listing-prices/route.ts` · `ShopeeOptionsPanel` + `ShopeeBulkPrice` ใน shopee-listing-panels
 
-**ถัดไป (ยังไม่ทำ):** 4C รูป (`v2.media_space.upload_image` → `update_item image.image_id_list`) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์
+**4C แก้รูปสินค้า (ทำแล้ว · เจ้าของ "เริ่ม 4C" 2026-11-15):** แท็บ "รูป" ในลิ้นชัก — แบบเดียวกับ TikTok (ของกลาง `./listing-images`: ListingImageGrid + ListingImagePicker + useSystemImages)
+- ลากเรียง · รูปแรก = ปก · ลบ · เพิ่มจากคลังรูปในระบบ (ต้องจับคู่ Parent SKU ก่อน) · จำนวนสูงสุดตามร้าน (get_item_limit `item_image_count_limit` · ไม่รู้ = 9)
+- กดปุ่มบันทึกเดียวกับชื่อ/รายละเอียด → ถามยืนยัน (รูป 5 → 6 รูป · ใหม่/เอาออก/เปลี่ยนปก) → ส่งพร้อมชื่อใน `POST /api/shopee/listing-edit` ช่อง `images: { before_ids, refs }` (ราคายังส่งก่อนตามเดิม)
+- ref ที่ส่ง: `spi:<image_id>` = รูปเดิมบนร้าน (ไม่ต้องฝากซ้ำ) · `r2:<key>` = รูปใหม่ → API ทำเป็น JPG พื้นขาว 1500px (`/api/r2-image&sq=1` · สินค้าแนวตั้ง 3:4 ใช้ `&pad=34`) → `v2.media_space.upload_image` (Public API: เซ็นแค่ partner ไม่ใช้กุญแจร้าน · JPG/PNG ≤10MB · scene normal) ได้ `image_id` — **ฝากไม่ผ่าน = หยุด ไม่แก้สินค้า**
+- แล้ว `v2.product.update_item` ครั้งเดียว: `image: { image_id_list (ทั้งชุด · แทนของเดิม), image_ratio "3:4" เฉพาะสินค้าที่เป็น 3:4 }` + ชื่อ/รายละเอียดถ้าแก้
+- กันทับ: รหัสรูปบนร้านไม่ตรงกับตอนเปิดลิ้นชัก = 409 · หลังส่ง: รอดู ~9 วิ (รูปเดิมต้องอยู่ตำแหน่งเดิม + จำนวนเท่ากัน · รูปใหม่ไม่บังคับรหัสตรง) ไม่ทัน = แสดงตามที่ส่ง · audit `shopee_listing_edit` (changes ป้าย "รูปสินค้า" + uploaded + sent_ids + ids_after)
+- ไฟล์: `lib/shopee.ts` shopeeUploadImage / shopeeUploadImageOf · `lib/shopee-listing-edit.ts` (shopeeRefsForSend · planShopeeImages · view.imageIds/imageRatio) · `app/api/shopee/shared.ts` shopeeUploadRef · `app/api/shopee/listing-edit/route.ts` · `ShopeeImagesPanel`
+- ⏳ **ยังไม่ได้ลองกับร้านจริง** — ลองครั้งแรกให้เจ้าของกดเอง (แนะนำสินค้าที่ปิดขายอยู่ เช่น BCG01-03 · สลับลำดับก่อน แล้วค่อยลองเพิ่มรูปใหม่)
+
+**ถัดไป (ยังไม่ทำ):** รูปของตัวเลือก (tier_variation image) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์
 
 ## ⚠️ วันที่เปลี่ยนโดเมนเว็บ
 ลิงก์อนุญาต/ยกเลิกสิทธิ์ต้องพากลับโดเมนที่ลงทะเบียนไว้ — ร้านที่เชื่อมแล้ว**ไม่หลุด** (ดึงข้อมูล/ต่ออายุไม่ผ่านช่องนี้) แต่**กดเชื่อมใหม่จะ error** ถ้าไม่แก้ วันที่เปลี่ยน `NEXT_PUBLIC_APP_URL` ต้องแก้พร้อมกันครบ 3 เจ้า:

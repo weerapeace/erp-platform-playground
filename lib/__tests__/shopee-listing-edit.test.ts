@@ -2,13 +2,14 @@ import { describe, expect, test } from "vitest";
 import {
   planShopeeDisplay, planShopeeEdit, shopeeDescriptionOf, shopeeLimitsOf, shopeeListingView, shopeeStatusBadge, shopeeTextLength, shopeeUnlistErrors,
   applyShopeeBulkPrice, planShopeePrices, shopeePriceBatches, shopeePriceResult, shopeePriceRowsFromView,
+  planShopeeImages, shopeeImagesMax, shopeeRefsForSend, shopeeImageIdOfRef, shopeeR2KeyOfRef,
   type ShopeeListingView,
 } from "@/lib/shopee-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
 
 const BASE = {
   item_id: 800123, item_name: "Louis Montini กระเป๋าสตางค์", item_status: "NORMAL", description: "หนังแท้ 100%", description_type: "normal",
-  image: { image_url_list: ["https://cf.shopee.co.th/file/a", "https://cf.shopee.co.th/file/b"] }, category_id: 100637, item_sku: "TTM090",
+  image: { image_url_list: ["https://cf.shopee.co.th/file/a", "https://cf.shopee.co.th/file/b"], image_id_list: ["ida", "idb"], image_ratio: "1:1" }, category_id: 100637, item_sku: "TTM090",
   brand: { original_brand_name: "Louis Montini" }, weight: 0.3, dimension: { package_length: 20, package_width: 10, package_height: 5 },
   has_model: true, has_promotion: true, update_time: 1763000000,
 };
@@ -24,6 +25,12 @@ describe("Shopee ลิ้นชัก — มุมมองจากของ�
       weight: 0.3, dims: { length: 20, width: 10, height: 5 }, hasModel: true, inPromotion: true, limits: LIMITS });
     expect(v.models[0]).toEqual({ modelId: "1", sku: "TTM090-01", label: "สี: ดำ", price: 990, originalPrice: 1590, stock: 7, image: null, status: "MODEL_NORMAL", promo: false });
     expect(shopeeListingView({ item_name: "x" }, null)).toBeNull();
+    expect(v.imageIds).toEqual(["ida", "idb"]);
+    expect(v.imageRatio).toBe("1:1");
+    // ลิงก์ว่างถูกตัด — รหัสต้องตัดตามให้ตรงตำแหน่ง · ไม่มีรหัส = ""
+    const odd = shopeeListingView({ ...BASE, image: { image_url_list: ["", "https://u/b", "https://u/c"], image_id_list: ["x", "yb"] } }, null)!;
+    expect(odd.images).toEqual(["https://u/b", "https://u/c"]);
+    expect(odd.imageIds).toEqual(["yb", ""]);
   });
   test("รายละเอียดแบบ extended = ต่อข้อความ + แก้ไม่ได้", () => {
     const d = shopeeDescriptionOf({ description_type: "extended", description_info: { extended_description: { field_list: [{ field_type: "text", text: "บรรทัด 1" }, { field_type: "image", image_info: { image_id: "x" } }, { field_type: "text", text: "บรรทัด 2" }] } } });
@@ -174,5 +181,45 @@ describe("Shopee ลิ้นชัก — เฟส 4B ราคาตั้ง
     expect(listingHistoryText({ source: "shopee_listing_prices", ok: true, sent: 1, changes: [{ label: "สี: ดำ", text: "1,590฿ → 1,490฿" }] })).toBe("แก้ราคาบน Shopee 1 ตัวเลือก (1,590฿ → 1,490฿)");
     expect(listingHistoryText({ source: "shopee_listing_prices", ok: false, sent: 0, error: "x", changes: [{ label: "a" }, { label: "b" }] })).toBe("แก้ราคาบน Shopee 2 ตัวเลือก — ไม่สำเร็จ: x");
     expect(listingHistoryText({ source: "shopee_listing_prices", ok: true, sent: 0, unsure: ["0"], changes: [{ label: "สินค้าเดียว", text: "1,250฿ → 1,251฿" }] })).toBe("แก้ราคาบน Shopee 1 ตัวเลือก (1,250฿ → 1,251฿) · รอ Shopee ยืนยัน 1 ตัวเลือก");
+  });
+});
+
+describe("Shopee เฟส 4C — รูปสินค้า", () => {
+  const A = "https://cf.shopee.co.th/file/a", B = "https://cf.shopee.co.th/file/b";
+  test("ฟอร์ม → ref ที่ส่ง: รูปเดิม = spi:<รหัส> · รูปใหม่ r2: ผ่าน · ลิงก์แปลก = null", () => {
+    const v = view();
+    expect(shopeeRefsForSend([B, "r2:products/x.jpg", A], v)).toEqual(["spi:idb", "r2:products/x.jpg", "spi:ida"]);
+    expect(shopeeRefsForSend(["https://elsewhere/z.jpg"], v)).toBeNull();
+    expect(shopeeRefsForSend([A], view({ imageIds: ["", "idb"] }))).toBeNull(); // รูปเดิมไม่มีรหัส
+    expect(shopeeImageIdOfRef("spi:abc")).toBe("abc");
+    expect(shopeeR2KeyOfRef("r2:k/1.jpg")).toBe("k/1.jpg");
+    expect(shopeeImageIdOfRef("r2:k")).toBeNull();
+  });
+  test("ไม่เปลี่ยน = changed false · สลับลำดับ = เปลี่ยนปก", () => {
+    expect(planShopeeImages(view(), ["spi:ida", "spi:idb"]).changed).toBe(false);
+    const p = planShopeeImages(view(), ["spi:idb", "spi:ida"]);
+    expect(p).toMatchObject({ changed: true, newImages: 0, removed: 0, coverChanged: true, errors: [] });
+    expect(p.changes).toEqual([{ label: "รูปสินค้า", before: "2 รูป", after: "2 รูป (เปลี่ยนปก)" }]);
+    expect(p.warnings.some((w) => w.includes("ปก"))).toBe(true);
+  });
+  test("เพิ่มรูปใหม่ + เอาออก → นับถูก + เตือนฝากรูป", () => {
+    const p = planShopeeImages(view(), ["spi:ida", "r2:products/x.jpg", "r2:products/y.jpg"]);
+    expect(p).toMatchObject({ changed: true, newImages: 2, removed: 1, coverChanged: false, errors: [] });
+    expect(p.changes[0].after).toBe("3 รูป (ใหม่ 2 · เอาออก 1)");
+    expect(p.warnings.join(" ")).toContain("จัตุรัส");
+    expect(planShopeeImages(view({ imageRatio: "3:4" }), ["spi:ida", "r2:k"]).warnings.join(" ")).toContain("3:4");
+  });
+  test("บล็อก: ไม่มีรูป · เกินจำนวนของร้าน · ซ้ำ · ไม่รู้จัก · ถูกลบแล้ว", () => {
+    expect(planShopeeImages(view(), []).errors).toContain("ต้องมีรูปสินค้าอย่างน้อย 1 รูป");
+    const ten = Array.from({ length: 10 }, (_, i) => `r2:k${i}`);
+    expect(planShopeeImages(view(), ten).errors.join(" ")).toContain("สูงสุด 9 รูป");
+    expect(shopeeImagesMax(view({ limits: { ...LIMITS, imagesMax: 12 } }))).toBe(12);
+    expect(planShopeeImages(view({ limits: { ...LIMITS, imagesMax: 12 } }), ten).errors).toEqual([]);
+    expect(planShopeeImages(view(), ["spi:ida", "spi:ida"]).errors.join(" ")).toContain("ซ้ำ");
+    expect(planShopeeImages(view(), ["https://x"]).errors.join(" ")).toContain("ไม่รู้จัก");
+    expect(planShopeeImages(view({ status: "SELLER_DELETE" }), ["spi:idb"]).errors.join(" ")).toContain("ถูกลบแล้ว");
+  });
+  test("ประวัติ: แก้รูป = ป้าย รูปสินค้า", () => {
+    expect(listingHistoryText({ source: "shopee_listing_edit", ok: true, changes: [{ label: "รูปสินค้า", text: "2 รูป → 3 รูป" }] })).toBe("แก้บน Shopee: รูปสินค้า");
   });
 });

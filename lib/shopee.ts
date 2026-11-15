@@ -117,7 +117,8 @@ export function shopeeErrorText(e: unknown): string {
 }
 
 // ───────── เรียก API ─────────
-type ShopeeCall = { method?: "GET" | "POST"; query?: Record<string, string | number>; body?: Record<string, unknown>; accessToken?: string; shopId?: string | number };
+/** form = multipart (ฝากรูป media_space) — ส่งแทน body · ไม่ตั้ง Content-Type เอง (ให้ fetch ใส่ boundary) */
+type ShopeeCall = { method?: "GET" | "POST"; query?: Record<string, string | number>; body?: Record<string, unknown>; form?: FormData; accessToken?: string; shopId?: string | number };
 
 /** เรียก Shopee 1 ครั้ง (เซ็นให้เอง) · คำตอบมี error ไม่ว่าง หรือ HTTP ไม่ 2xx = โยน ShopeeApiError */
 export async function shopeeFetch(path: string, opts: ShopeeCall = {}): Promise<Record<string, unknown>> {
@@ -129,11 +130,11 @@ export async function shopeeFetch(path: string, opts: ShopeeCall = {}): Promise<
   const q = new URLSearchParams({ partner_id: pid, timestamp: String(ts), sign });
   if (shopLevel) { q.set("access_token", opts.accessToken!); q.set("shop_id", String(opts.shopId)); }
   for (const [k, v] of Object.entries(opts.query ?? {})) q.set(k, String(v));
-  const method = opts.method ?? (opts.body ? "POST" : "GET");
+  const method = opts.method ?? (opts.body || opts.form ? "POST" : "GET");
   const res = await fetch(`${shopeeHost()}${path}?${q.toString()}`, {
     method, cache: "no-store",
     headers: opts.body ? { "Content-Type": "application/json" } : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    body: opts.form ?? (opts.body ? JSON.stringify(opts.body) : undefined),
   });
   const text = await res.text();
   let j: Record<string, unknown> = {};
@@ -424,10 +425,15 @@ export function shopeeOrderToPlatformOrder(o: Obj, toInternal: (code: string | n
  * v2.product.update_item — แก้เฉพาะช่องที่ส่ง (ช่องที่ไม่ส่งคงเดิม · เอกสาร 2026-11-14) · เฟส 4A ส่งแค่ item_name / description
  * ⚠️ ห้ามส่ง weight/dimension เฉย ๆ — Shopee เขียนทับทุกตัวเลือก
  */
-export async function shopeeUpdateItem(accessToken: string, shopId: string | number, itemId: string, patch: { item_name?: string; description?: string }): Promise<Record<string, unknown>> {
+export async function shopeeUpdateItem(accessToken: string, shopId: string | number, itemId: string, patch: { item_name?: string; description?: string; image?: { image_id_list: string[]; image_ratio?: string } }): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = { item_id: Number(itemId) };
   if (patch.item_name != null) body.item_name = patch.item_name;
   if (patch.description != null) body.description = patch.description;
+  // เฟส 4C: รูปสินค้า = ส่งทั้งชุด (แทนของเดิมทั้งหมด · เรียงตามที่ส่ง · รูปแรก = ปก)
+  if (patch.image) {
+    if (!patch.image.image_id_list.length) throw new ShopeeApiError("ต้องมีรูปสินค้าอย่างน้อย 1 รูป", "error_param");
+    body.image = { image_id_list: patch.image.image_id_list, ...(patch.image.image_ratio ? { image_ratio: patch.image.image_ratio } : {}) };
+  }
   if (Object.keys(body).length < 2) throw new ShopeeApiError("ไม่มีอะไรให้แก้", "error_param");
   return shopeeFetch("/api/v2/product/update_item", { accessToken, shopId, body });
 }
@@ -448,6 +454,34 @@ export async function shopeeGetItemLimit(accessToken: string, shopId: string | n
   try { val = await shopeeFetch("/api/v2/product/get_item_limit", { accessToken, shopId }); } catch { val = null; }
   limitCache.set(key, { at: Date.now(), val });
   return val;
+}
+
+/**
+ * v2.media_space.upload_image — ฝากรูป 1 รูปกับ Shopee → image_id (ใส่ใน update_item image.image_id_list)
+ * เอกสาร (อ่าน 2026-11-15): Public API = เซ็นแค่ partner_id+path+timestamp (ไม่ใช้กุญแจร้าน) · multipart ช่อง image · JPG/JPEG/PNG ≤10MB
+ *   scene "normal" = Shopee ทำเป็นจัตุรัสให้ (รูปสินค้า) · ratio "3:4" เฉพาะร้านที่ Shopee เปิดให้ (ไม่ส่ง = 1:1)
+ * ฝากแล้วยังไม่แก้สินค้า (รูปค้างในคลังของ Shopee จนกว่าจะส่ง update_item)
+ */
+export async function shopeeUploadImage(bytes: ArrayBuffer, name: string, contentType: string, ratio: "1:1" | "3:4" = "1:1"): Promise<{ imageId: string; url: string | null }> {
+  const fd = new FormData();
+  fd.append("image", new Blob([bytes], { type: contentType }), name);
+  fd.append("scene", "normal");
+  if (ratio === "3:4") fd.append("ratio", "3:4");
+  return shopeeUploadImageOf(await shopeeFetch("/api/v2/media_space/upload_image", { form: fd }));
+}
+
+/** คำตอบ upload_image → รหัสรูป + ลิงก์ (ภูมิภาค TH ก่อน) · รุ่นใหม่มี image_info_list (error รายรูป) · ไม่มีรหัส = โยน */
+export function shopeeUploadImageOf(j: Obj): { imageId: string; url: string | null } {
+  const r = obj(j.response) ?? {};
+  const first = obj(arr(r.image_info_list)[0]);
+  const fe = str(first?.error);
+  if (fe) throw new ShopeeApiError(str(first?.message) ?? fe, fe);
+  const info = obj(r.image_info) ?? obj(first?.image_info);
+  const imageId = str(info?.image_id);
+  if (!imageId) throw new ShopeeApiError("Shopee ไม่ส่งรหัสรูปกลับมา — ลองใหม่อีกครั้ง", "error_data");
+  const urls = arr(info?.image_url_list).map(obj).filter((x): x is Obj => !!x);
+  const th = urls.find((u) => (str(u.image_url_region) ?? "").toUpperCase() === "TH");
+  return { imageId, url: str(th?.image_url) ?? str(urls[0]?.image_url) };
 }
 
 /** v2.product.update_price — ราคาตั้ง (original_price) ต่อตัวเลือก ≤50 ต่อครั้ง · คืนคำตอบดิบ (ผลรายตัว failure_list / success_list) · ร้านไทยใช้จำนวนเต็ม */
