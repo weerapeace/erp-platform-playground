@@ -126,4 +126,10 @@ describe("draftImageCount — นับรูปแบบเดียวกั�
     expect(draftImageCount("lazada", { image_keys: ["a"], extra: { line_images: ["x", "y"] } })).toBe(1);
     expect(draftImageCount("lazada", null)).toBe(0);
   });
+  it("Shopee: รูปที่เลือกไว้ (shopee_images) มาก่อน image_keys · ไม่เกิน 9", async () => {
+    const { draftImageCount } = await import("@/lib/platform-listing-builder");
+    expect(draftImageCount("shopee", { image_keys: ["a"], extra: { shopee_images: ["r2:x", "r2:y", "r2:x"] } })).toBe(2);
+    expect(draftImageCount("shopee", { image_keys: ["a", "b"], extra: {} })).toBe(2);
+    expect(draftImageCount("shopee", { image_keys: [], extra: { shopee_images: Array.from({ length: 12 }, (_, i) => `r2:k${i}`) } })).toBe(9);
+  });
 });

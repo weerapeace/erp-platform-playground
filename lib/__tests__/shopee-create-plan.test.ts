@@ -126,10 +126,11 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     expect(withDraft.preview.attrs.fromTemplate).toBeNull();
     expect(withDraft.preview.missing).toEqual([]);
   });
-  test("หมวดที่ระบบเดา = เตือนให้ตรวจ · ชื่อตามช่วงของร้าน · ตัวเลือกยาวเกิน = ขาด", () => {
+  test("หมวดที่ระบบเดา = ต้องยืนยันก่อนลง · ชื่อตามช่วงของร้าน · ตัวเลือกยาวเกิน = ขาด", () => {
     const L = shopeeCreateLimitsOf({ response: { item_name_length_limit: { min_limit: 50, max_limit: 120 }, tier_variation_option_length_limit: { max_limit: 3 } } });
     const { preview: pv } = plan({ category: { ...CAT, kind: "recommend", src: "Shopee แนะนำจากชื่อสินค้า" }, limits: L });
-    expect(pv.warnings.join(" ")).toContain("ระบบเดาให้");
+    expect(pv.missing.join(" ")).toContain("ยืนยันหมวด Shopee");
+    expect(plan({ category: { ...CAT, kind: "draft" } }).preview.missing).toEqual([]);
     expect(pv.missing.join(" ")).toContain("ชื่อสั้นไป");
     expect(pv.missing.join(" ")).toContain("ยาวเกิน 3 ตัวอักษร");
   });

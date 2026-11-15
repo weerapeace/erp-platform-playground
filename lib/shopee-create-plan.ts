@@ -238,7 +238,7 @@ export function planShopeeCreate(input: {
   const categoryId = cat?.id ?? null;
   const catSrc = cat ? cat.src : "ยังไม่ได้เลือก — เลือกหมวด Shopee";
   if (!categoryId) missing.push("หมวด Shopee");
-  else if (cat && (cat.kind === "recommend" || cat.kind === "same_type")) warnings.push(`หมวดนี้ระบบเดาให้ (${cat.src}) — ตรวจว่าตรงก่อนลง · กดเลือกหมวดอื่นได้`);
+  else if (cat && (cat.kind === "recommend" || cat.kind === "same_type")) missing.push(`ยืนยันหมวด Shopee — ระบบเดาให้ (${cat.src}) · กด "ใช้หมวดนี้" ถ้าตรง หรือเลือกหมวดอื่น`);
 
   // ---------- ตัวขาย + ราคา ----------
   const { masters, sellable, masterOf, act } = splitSkus(input.skus);

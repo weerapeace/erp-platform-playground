@@ -84,8 +84,12 @@ const hasPriceFor = (platformCode: string, v: ListingVariantLite) =>
  */
 export function draftImageCount(platformCode: string, d: { image_keys?: unknown; extra?: unknown } | null | undefined): number {
   const keys = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).filter(Boolean).length : 0;
-  if (platformCode !== "line_shopping") return keys;
   const ex = d?.extra && typeof d.extra === "object" ? d.extra as Record<string, unknown> : {};
+  if (platformCode === "shopee") {
+    const sp = Array.isArray(ex.shopee_images) ? new Set((ex.shopee_images as unknown[]).map((x) => str(x)).filter(Boolean)).size : 0;
+    return sp > 0 ? Math.min(sp, 9) : keys;
+  }
+  if (platformCode !== "line_shopping") return keys;
   const line = Array.isArray(ex.line_images) ? new Set((ex.line_images as unknown[]).map((x) => str(x)).filter(Boolean)).size : 0;
   return line > 0 ? Math.min(line, 7) : keys;
 }

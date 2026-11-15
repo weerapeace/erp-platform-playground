@@ -72,6 +72,25 @@ const LAZADA: Spec = {
   },
 };
 
+// SHOPEE — ตามที่ add_item บังคับจริง (ตรงกับ lib/shopee-create-plan · เอกสาร 2026-11-15): ชื่อ · รายละเอียด · หมวด (รหัส) · รูป 1–9 · ราคา · น้ำหนัก
+//   รูปของทุกตัวเลือก ไม่บังคับ (ไม่ครบ = ไม่ใส่รูปตัวเลือก) · หมวดที่ระบบเดาต้องกด "ใช้หมวดนี้" ในหน้าดูก่อนส่งก่อน (ร่างถึงจะมีหมวด)
+const SHOPEE: Spec = {
+  label: "Shopee",
+  maxImages: 9,
+  build: (c) => [
+    { ok: !!c.title.trim(), label: "ชื่อสินค้า", required: true },
+    { ok: /^\s*\d+/.test(c.category), label: "หมวด Shopee", required: true,
+      note: c.category.trim() ? (/^\s*\d+/.test(c.category) ? undefined : "ต้องเป็นหมวดจากรายการของ Shopee (มีรหัสหมวด)") : "ยังไม่ได้ยืนยัน — กด \"ใช้หมวดนี้\" ในหน้าดูก่อนส่ง หรือเลือกหมวดเอง" },
+    { ok: c.imagesToSend >= 1 && c.imagesToSend <= 9, label: "รูปสินค้า 1–9 รูป", required: true,
+      note: c.imagesToSend === 0 ? "ยังไม่มีรูป" : c.imagesToSend > 9 ? `เลือกไว้ ${c.imagesToSend} รูป (Shopee รับไม่เกิน 9)` : undefined },
+    { ok: c.variantCount > 0, label: "มีตัวเลือก/SKU ≥ 1", required: true },
+    { ok: c.allHavePrice, label: "ทุกตัวเลือกมีราคา", required: true },
+    { ok: (c.weightKg ?? 0) > 0, label: "น้ำหนักพัสดุ", required: true, note: (c.weightKg ?? 0) > 0 ? undefined : "ยังไม่ได้ใส่น้ำหนัก (แก้ที่หน้าสินค้า หรือในหน้าดูก่อนส่ง)" },
+    { ok: !!c.description.trim(), label: "รายละเอียดสินค้า", required: true },
+    { ok: c.allHaveImage, label: "ทุกตัวเลือกมีรูป", required: false, note: c.allHaveImage ? undefined : "ไม่ครบ = ไม่ใส่รูปตัวเลือก (ลงได้)" },
+  ],
+};
+
 // ชุดทั่วไป (แพลตฟอร์มที่ยังไม่ได้นิยามเฉพาะ) — เท่าพฤติกรรมเดิม
 const GENERIC: Spec = {
   label: "ทั่วไป",
@@ -87,7 +106,7 @@ const GENERIC: Spec = {
   ],
 };
 
-const SPECS: Record<string, Spec> = { line_shopping: LINE, lazada: LAZADA };
+const SPECS: Record<string, Spec> = { line_shopping: LINE, lazada: LAZADA, shopee: SHOPEE };
 
 export function requiredSpec(platformCode: string): Spec {
   return SPECS[platformCode] ?? GENERIC;

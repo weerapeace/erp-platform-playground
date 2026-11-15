@@ -151,6 +151,10 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
           <div className="min-w-0">
             <div className={`text-sm ${pv.category.id ? "text-slate-800" : "text-rose-600"}`}>{pv.category.label || "ยังไม่ได้เลือก — ต้องเลือกก่อนลง"}</div>
             <div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.category.src}</div>
+            {canEdit && pv.category.id && pv.category.label && (pv.category.kind === "recommend" || pv.category.kind === "same_type") && (
+              <button type="button" disabled={saving} onClick={() => void patch({ category_path: pv.category.label }, "ยืนยันหมวดแล้ว")}
+                className="mt-1.5 inline-flex h-7 items-center gap-1 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50"><Icon name="done" />ใช้หมวดนี้</button>
+            )}
             {canEdit && pv.category.candidates.filter((c) => c.id !== pv.category.id).length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1">
                 <span className="text-[11px] text-slate-500">หมวดอื่นที่น่าจะใช่:</span>

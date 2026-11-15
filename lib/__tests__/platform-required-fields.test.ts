@@ -24,6 +24,21 @@ describe("platform-required-fields (LINE)", () => {
   });
 });
 
+describe("platform-required-fields (Shopee)", () => {
+  const sp: ReqCtx = { ...full, category: "100032 · เครื่องประดับ > เข็มขัด", weightKg: 0.09 };
+  it("ครบ → พร้อม · ตัวเลือกบางตัวไม่มีรูป = ยังลงได้ (Shopee ไม่บังคับ)", () => {
+    expect(requiredSpec("shopee").label).toBe("Shopee");
+    expect(isReadyForPlatform("shopee", sp)).toBe(true);
+    expect(isReadyForPlatform("shopee", { ...sp, allHaveImage: false })).toBe(true);
+  });
+  it("บังคับ: หมวดต้องมีรหัส · น้ำหนัก · รายละเอียด · รูป ≤ 9", () => {
+    expect(isReadyForPlatform("shopee", { ...sp, category: "" })).toBe(false);
+    expect(isReadyForPlatform("shopee", { ...sp, category: "เข็มขัด" })).toBe(false);
+    expect(isReadyForPlatform("shopee", { ...sp, weightKg: null })).toBe(false);
+    expect(isReadyForPlatform("shopee", { ...sp, imagesToSend: 10 })).toBe(false);
+  });
+});
+
 describe("แพลตฟอร์มที่ยังไม่นิยาม → ชุดทั่วไป", () => {
   it("fallback generic", () => {
     expect(requiredSpec("some_new_platform").label).toBe("ทั่วไป");
