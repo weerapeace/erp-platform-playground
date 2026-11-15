@@ -12,7 +12,7 @@
 import { bagGeometry, bagPieces } from "@/lib/bag-templates";
 import { bomMaterialCost } from "@/lib/cost-inputs";
 import { calcCostQty } from "@/lib/design-sheets-meta";
-import { bodyPickOf, categoryOf, EMPTY_COST, pickInfo, PANELS, sizeKnown, skuIdOf, toStudioParams, type Choice, type Pick, type RecipeCost, type Spec } from "@/lib/design-library";
+import { bodyPickOf, categoryOf, EMPTY_COST, logoOptions, pickInfo, pinQty, PANELS, sizeKnown, skuIdOf, toStudioParams, type Choice, type Pick, type RecipeCost, type Spec } from "@/lib/design-library";
 
 // ─── ข้อมูลประกอบ ─────────────────────────────────────────────────────────────
 /** วัสดุที่ผูก SKU (ไม่มีราคา — ใช้คิดปริมาณ) */
@@ -62,14 +62,18 @@ export type CostLine = {
   pick: Pick | null; code: string; name: string; skuId: string | null;
   method: CostMethod; detail: string;
   autoQty: number | null; qty: number; uom: string;
-  /** ราคาต่อหน่วย (0 = ไม่มี) · แหล่งราคา */
-  unitPrice: number; priceSource: "sku" | "manual" | "none"; priceKey: string;
+  /** ราคาต่อหน่วย (0 = ไม่มี) · แหล่งราคา (fee = ค่าทำต่อชิ้นของวิธีทำโลโก้ — รอบ 8) */
+  unitPrice: number; priceSource: "sku" | "manual" | "fee" | "none"; priceKey: string;
   amount: number;
   /** ตัวตั้งที่ใช้คิดปริมาณอัตโนมัติ (ส่งต่อเป็นบรรทัดตีราคาใบงาน) · ไม่มี = คิดอัตโนมัติไม่ได้ */
   basis?: { area_cm2?: number; length_cm?: number; face: number | null; loss: number; div: number };
 };
+/** ค่าทำครั้งแรก (รอบ 8): ค่าบล็อก/เพลทของวิธีทำโลโก้ (config.block_fee · แก้ทับได้) + ที่ใส่เอง (spec.cost.once) */
+export type OnceLine = { key: string; label: string; amount: number; source: "fee" | "manual"; pinIndex: number | null; auto: number };
 export type CostEstimate = {
   lines: CostLine[]; materials: number; labor: number; extras: number; total: number; missing: number;
+  /** ค่าทำครั้งแรก · รวม · หารต่อใบ (เมื่อใส่จำนวนผลิตต่อล็อต — รวมใน total แล้ว) */
+  once: OnceLine[]; onceTotal: number; oncePerBag: number;
   areas: FabricAreas;
   /** ยังไม่ใส่กว้าง/สูง/หนาครบ → ผ้า/เทปคิดอัตโนมัติไม่ได้ (รอบ 6: ขนาดไม่บังคับ) */
   sizeMissing: boolean;
@@ -80,6 +84,8 @@ const AREA_CATS: Record<string, "body" | "lining" | "handle"> = { body: "body", 
 const LENGTH_CATS = new Set(["tape"]);
 
 const fmt = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
+/** คีย์สั้นของข้อความยาว (รหัสรูป R2) — คีย์ใน spec.cost ยาวได้ไม่เกิน 120 ตัว */
+const shortKey = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
 
 /**
  * หน่วยของ SKU (uoms.name) → ซม. ต่อหน่วย สำหรับวัสดุที่คิดตามความยาว/พื้นที่
@@ -147,15 +153,32 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
       lines.push({ ...base, key: `pin:${p.id}`, method: "count", autoQty: null, detail: `${base.catName}อีกชนิดในจุดที่ ${i + 1} — ใส่ปริมาณเอง`, qty: 0, uom: mat?.uom || setting.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
       return;
     }
+    const q = pinQty(p);
     if (LENGTH_CATS.has(p.cat)) {
-      const len = areas.perimeter;
-      const div = sizeMissing ? null : lengthUnitCm(mat?.uom, calc.outer.cmPerUnit);
+      // รอบ 8: ใส่ความยาวที่จุดเอง = ใช้ค่านั้น (× จำนวน) · ไม่ใส่ = รอบปากกระเป๋า
+      const own = p.len && p.len > 0 ? p.len * q : 0;
+      const len = own || areas.perimeter;
+      const div = !own && sizeMissing ? null : lengthUnitCm(mat?.uom, calc.outer.cmPerUnit);
       lines.push({ ...base, key: `pin:${p.id}`, method: "length", autoQty: div == null ? null : calcCostQty({ calc_method: "length", width_cm: null, length_cm: len, pieces: 1, face_width_cm: null, waste_percent: 10, divisor: div }),
-        detail: sizeMissing ? NEED_SIZE : `รอบปากกระเป๋า ${fmt(len)} ซม. · เผื่อ 10%${unitNote(mat, calc.outer)}`, basis: div == null ? undefined : { length_cm: len, face: null, loss: 10, div }, qty: 0, uom: mat?.uom || calc.outer.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
+        detail: !own && sizeMissing ? NEED_SIZE : `${own ? `ยาว ${fmt(p.len!)} ซม.${q > 1 ? ` × ${q}` : ""}` : `รอบปากกระเป๋า ${fmt(len)} ซม.`} · เผื่อ 10%${unitNote(mat, calc.outer)}`, basis: div == null ? undefined : { length_cm: len, face: null, loss: 10, div }, qty: 0, uom: mat?.uom || calc.outer.uom, unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
       return;
     }
-    lines.push({ ...base, key: `pin:${p.id}`, method: "count", autoQty: 1, detail: "1 ชิ้นต่อจุด", qty: 0, uom: mat?.uom || "ชิ้น", unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
+    // รอบ 8: จำนวนต่อจุด · ความยาวต่อจุด (เช่น ซิป) — SKU ขายเป็นความยาว = คิดเป็นหน่วยนั้น · ขายเป็นชิ้น = นับชิ้น
+    const lenDiv = p.len && p.len > 0 && mat?.uom ? lengthUnitCm(mat.uom, NaN) : null;
+    if (lenDiv != null && Number.isFinite(lenDiv)) {
+      const total = p.len! * q;
+      lines.push({ ...base, key: `pin:${p.id}`, method: "length", autoQty: Math.round((total / lenDiv) * 10000) / 10000, detail: `ยาว ${fmt(p.len!)} ซม.${q > 1 ? ` × ${q}` : ""} · คิดเป็น ${mat!.uom}`, basis: { length_cm: total, face: null, loss: 0, div: lenDiv }, qty: 0, uom: mat!.uom ?? "", unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
+      return;
+    }
+    lines.push({ ...base, key: `pin:${p.id}`, method: "count", autoQty: q, detail: `${q} ชิ้นต่อจุด${p.len ? ` · ยาว ${fmt(p.len)} ซม.` : ""}`, qty: 0, uom: mat?.uom || "ชิ้น", unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
   });
+
+  // ส่วนเสริม (รอบ 8) — 1 บรรทัดต่อชิ้น · จำนวนตามที่ใส่ · ราคาทุน SKU ที่ผูก (ไม่ผูก = ใส่เอง)
+  for (const a of spec.accessories ?? []) {
+    const mat = a.sku_id ? ctx.materials[a.sku_id] : undefined;
+    lines.push({ key: `acc:${a.code}`, cat: "accessory", catName: `ส่วนเสริม${a.group ? ` · ${a.group}` : ""}`, pinIndex: null, pick: null, code: a.sku_code, name: a.name, skuId: a.sku_id,
+      method: "count", autoQty: pinQty(a), detail: a.sku_id ? `${pinQty(a)} ชิ้นต่อใบ` : `${pinQty(a)} ชิ้นต่อใบ · ยังไม่ผูก SKU ใส่ราคาเอง`, qty: 0, uom: mat?.uom || "ชิ้น", unitPrice: 0, priceSource: "none", priceKey: "", amount: 0 });
+  }
 
   // หูใช้ผ้าเดียวกับตัวกระเป๋า → บวกพื้นที่หูเข้าบรรทัดผ้าตัว
   const bodyLine = seenArea.get("body");
@@ -168,19 +191,40 @@ export function estimateCost(spec: Spec, choices: Choice[], ctx: { materials: Re
   }
 
   // จำนวน + ราคา
+  const methodOf = (pick: Pick | null) => (pick?.kind === "logo" && pick.method ? choices.find((c) => c.list_key === "logo_method" && c.code === pick.method) : undefined);
+  const fee = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   for (const l of lines) {
     l.qty = cost.qty[l.key] ?? l.autoQty ?? 0;
     l.priceKey = l.code ? `code:${l.code}` : `line:${l.key}`;
     const manual = cost.price[l.priceKey];
     const skuPrice = l.skuId ? ctx.prices[l.skuId] ?? 0 : 0;
+    const unitFee = fee(methodOf(l.pick)?.config?.unit_fee);
     if (manual != null && manual > 0) { l.unitPrice = manual; l.priceSource = "manual"; }
     else if (skuPrice > 0) { l.unitPrice = skuPrice; l.priceSource = "sku"; }
+    else if (unitFee > 0) { l.unitPrice = unitFee; l.priceSource = "fee"; }
   }
+  // ค่าทำครั้งแรก: บล็อก/เพลทต่อโลโก้ (วิธี + ไฟล์เดียวกัน = ครั้งเดียว) + ที่ใส่เอง
+  const once: OnceLine[] = [];
+  const seenOnce = new Set<string>();
+  spec.pins.forEach((p, i) => {
+    const m = methodOf(p.pick);
+    if (!m || p.pick?.kind !== "logo") return;
+    const key = `once:${m.code}:${shortKey(p.pick.image_key || p.pick.material?.code || p.id)}`;
+    if (seenOnce.has(key)) return;
+    seenOnce.add(key);
+    const auto = fee(m.config?.block_fee), manual = cost.price[key];
+    if (!auto && manual == null) return;
+    const opt = logoOptions(m).find((o) => o.code === (p.pick as { option?: string }).option);
+    once.push({ key, label: `ค่าทำบล็อก/เพลท · ${m.name}${opt ? ` ${opt.name}` : ""} (จุด ${i + 1})`, amount: manual ?? auto, source: manual != null ? "manual" : "fee", pinIndex: i, auto });
+  });
+  cost.once.forEach((x, k) => once.push({ key: `own:${k}`, label: x.label || "ค่าทำครั้งแรก", amount: x.amount, source: "manual", pinIndex: null, auto: 0 }));
   // รวมเงินด้วยของกลาง (ราคาต่อ "รหัส" = priceKey)
   const sum = bomMaterialCost(lines.map((l) => ({ component_sku: l.priceKey, component_name: l.name, uom: l.uom, qty: l.qty })), new Map(lines.map((l) => [l.priceKey, l.unitPrice])));
   sum.materials.forEach((m, i) => { lines[i].amount = m.line_pp; });
   const missing = lines.filter((l) => l.qty > 0 && l.unitPrice <= 0).length;
   const extras = cost.extras.reduce((s, e) => s + e.amount, 0);
   const r2 = (x: number) => Math.round(x * 100) / 100;
-  return { lines, materials: r2(sum.material_cost_pp), labor: cost.labor, extras: r2(extras), total: r2(sum.material_cost_pp + cost.labor + extras), missing, areas, sizeMissing };
+  const onceTotal = r2(once.reduce((s, x) => s + x.amount, 0));
+  const oncePerBag = cost.batch > 0 ? r2(onceTotal / cost.batch) : 0;
+  return { lines, materials: r2(sum.material_cost_pp), labor: cost.labor, extras: r2(extras), total: r2(sum.material_cost_pp + cost.labor + extras + oncePerBag), missing, areas, sizeMissing, once, onceTotal, oncePerBag };
 }

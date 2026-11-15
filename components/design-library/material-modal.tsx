@@ -8,11 +8,14 @@
  *   ค้นทั้งหมด = วัตถุดิบทุกตัว
  *   รายการ/ค้น ใช้ของกลาง MaterialSearchPanel ตัวเดียวกับหน้า BOM (ไม่สร้างตัวค้นที่ 2)
  * แท็ก/ปุ่มลัดของหมวด ผู้ดูแลตั้งที่ "ตัวเลือก" → หมวด (lib/design-library categoryTags / categoryChips)
+ * รอบ 8: แท็บแผง มีปุ่ม "ติดแท็กแผง" (BoardTagModal · สิทธิ์ products.edit) — แผงยังไม่ติดแท็กของหมวด ติดได้จากตรงนี้เลย
  */
 import { useEffect, useMemo, useState } from "react";
 import nextDynamic from "next/dynamic";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
+import { usePermission } from "@/components/auth";
+import { BoardTagModal } from "./board-tag";
 import { MaterialSearchPanel, type MaterialChip } from "@/components/material-picker";
 import type { SwatchSpotPick } from "@/components/sku-swatch-browser";
 import { apiFetch } from "@/lib/api";
@@ -63,6 +66,9 @@ export function MaterialPickModal({ open, onClose, title, tags, chips = [], defa
   const first = tabs.find((t) => t.key === defaultTab)?.key ?? tabs[0].key;
   const [tab, setTab] = useState<Tab>(first);
   const [tree, setTree] = useState<TagTree | null>(null);
+  const canTagBoard = usePermission("products.edit");
+  const [tagOpen, setTagOpen] = useState(false);
+  const [boardKey, setBoardKey] = useState(0);   // ติดแท็กแล้ว → โหลดแผงใหม่
   useEffect(() => { if (open) { setTab(first); void loadTagTree().then(setTree); } }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const tagKey = tags.join(",");
@@ -88,9 +94,16 @@ export function MaterialPickModal({ open, onClose, title, tags, chips = [], defa
           </button>
         ))}
       </div>
+      {tab === "board" && tags.length > 0 && tree && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-[12px] text-slate-600">
+          {tagIds.length ? <>เริ่มที่แผงที่ติดแท็ก “{tags.join(", ")}” · ไม่เจอแผงที่ต้องการ? แผงอาจยังไม่ได้ติดแท็ก</> : <>ยังไม่มีแท็ก “{tags.join(", ")}” ในระบบ — ผู้ดูแลแก้แท็กของหมวดได้ที่ “ตัวเลือก”</>}
+          {canTagBoard && tagIds.length > 0 && <button type="button" onClick={() => setTagOpen(true)} className="ml-auto h-7 px-2.5 rounded-lg border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-1"><Icon value="i:tags" />ติดแท็กแผง</button>}
+        </div>
+      )}
       {tab === "board" && (tags.length && !tree
         ? <div className="py-10 text-center text-[13px] text-slate-400">กำลังโหลดแผง…</div>
-        : <SwatchBrowser key={tagIds.join(",")} initialTagIds={tagIds} onPickSpot={(p) => onPick({ kind: "swatch", spot: p })} />)}
+        : <SwatchBrowser key={`${tagIds.join(",")}-${boardKey}`} initialTagIds={tagIds} onPickSpot={(p) => onPick({ kind: "swatch", spot: p })} />)}
+      {tagOpen && tree && <BoardTagModal open onClose={() => setTagOpen(false)} tags={tree.tags.filter((t) => tagIds.includes(t.id)).map((t) => ({ id: t.id, name: t.name }))} onChanged={() => setBoardKey((k) => k + 1)} />}
       {tab === "list" && (
         <div className="space-y-2">
           {tags.length > 0 && tree && tagIds.length === 0 && <p className="text-[12px] text-amber-700">ยังไม่มีแท็กชื่อ “{tags.join(", ")}” ในระบบ — ผู้ดูแลแก้แท็กของหมวดได้ที่ “ตัวเลือก”</p>}

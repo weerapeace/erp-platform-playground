@@ -71,7 +71,7 @@ describe("ตารางสีใบงาน", () => {
 });
 
 describe("หน้ารายละเอียดงาน + ตีราคา", () => {
-  const est = estimateCost(spec(), CHOICES, { materials: MATS, prices: { [FAB]: 120 }, cost: { qty: { "pin:p4": 2 }, price: {}, labor: 0, extras: [] } });
+  const est = estimateCost(spec(), CHOICES, { materials: MATS, prices: { [FAB]: 120 }, cost: { qty: { "pin:p4": 2 }, price: {}, labor: 0, extras: [], once: [], batch: 0 } });
   it("หมุด: ตำแหน่งเดิม · SKU · จำนวน · จุดซ้ำ/ใช้ผ้าตัว = โน้ตรวมที่ไหน", () => {
     const pins = recipePagePins(spec(), CHOICES, est.lines);
     expect(pins).toHaveLength(5);

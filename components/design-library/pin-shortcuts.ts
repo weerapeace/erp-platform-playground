@@ -7,10 +7,11 @@
  *   (Alt+ลากจุด = ทำซ้ำ อยู่ใน Stage ของ recipe-editor)
  * ไม่ทำงานตอนพิมพ์ในช่อง หรือมีป๊อปอัป/หน้าต่างเต็มจอเปิดทับ (ปล่อยให้ตัวนั้นใช้ Delete/Esc ของมันเอง)
  * คัดลอก/วางใช้ event copy/paste ของเบราว์เซอร์ (อ่านคลิปบอร์ดได้โดยไม่ต้องขอสิทธิ์) · ตัวอักษรใช้ shortcutKey (คีย์บอร์ดไทยก็ได้)
+ * รอบ 8: ทำงานกับ "จุดที่เลือกทั้งหมด" (targets — Shift+คลิก / ลากคลุม เลือกหลายจุด) · คัดลอก/วางได้ทีละหลายจุด
  */
 import { useEffect, useRef } from "react";
 import { shortcutKey } from "@/lib/shortcut-key";
-import { pinFromClipboard, pinToClipboard, type Pin, type PinCopy } from "@/lib/design-library";
+import { pinsFromClipboard, pinsToClipboard, type Pin, type PinCopy } from "@/lib/design-library";
 
 /** ประวัติไว้ย้อนกลับ — แก้ต่อเนื่องภายใน 0.6 วิ (ลากจุด/พิมพ์โน้ต) นับเป็นครั้งเดียว · เก็บ 60 ครั้ง */
 export function useHistory<T>() {
@@ -55,16 +56,19 @@ const hasTextSelection = () => (typeof window !== "undefined" ? (window.getSelec
 export function usePinShortcuts(o: {
   enabled: boolean;          // มีสิทธิ์แก้ (ดูอย่างเดียว = ใช้แค่ Esc / คัดลอก)
   canEdit: boolean;
-  sel: number | null;
+  /** จุดที่เลือก (ดัชนีในสูตร) — ว่าง = ไม่มี */
+  targets: number[];
+  /** มีอะไรให้ Esc ยกเลิกไหม (เลือกจุดอยู่ / กำลังปักส่วนเสริม) */
+  escActive: boolean;
   pins: Pin[];               // จุดตามชุดสีที่ดูอยู่ (คัดลอกของที่เห็น)
-  onDelete: (i: number) => void;
-  onPaste: (p: PinCopy) => void;
-  onDuplicate: (i: number) => void;
-  onNudge: (i: number, dx: number, dy: number) => void;
+  onDelete: (idx: number[]) => void;
+  onPaste: (p: PinCopy[]) => void;
+  onDuplicate: (idx: number[]) => void;
+  onNudge: (idx: number[], dx: number, dy: number) => void;
   onUndo: () => void;
   onRedo: () => void;
   onEscape: () => void;
-  onCopied: () => void;
+  onCopied: (n: number) => void;
 }) {
   const ref = useRef(o);
   ref.current = o;
@@ -74,29 +78,31 @@ export function usePinShortcuts(o: {
       if (!c.enabled || e.defaultPrevented || typing(e.target) || overlayOpen()) return;
       const mod = e.ctrlKey || e.metaKey;
       const k = shortcutKey(e);
-      if (e.key === "Escape" && c.sel != null) { c.onEscape(); return; }
+      if (e.key === "Escape" && c.escActive) { c.onEscape(); return; }
       if (!c.canEdit) return;
       if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) c.onRedo(); else c.onUndo(); return; }
       if (mod && k === "y") { e.preventDefault(); c.onRedo(); return; }
-      if (c.sel == null || !c.pins[c.sel]) return;
-      if (mod && k === "d") { e.preventDefault(); c.onDuplicate(c.sel); return; }
-      if (!mod && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); c.onDelete(c.sel); return; }
+      const t = c.targets.filter((i) => !!c.pins[i]);
+      if (!t.length) return;
+      if (mod && k === "d") { e.preventDefault(); c.onDuplicate(t); return; }
+      if (!mod && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); c.onDelete(t); return; }
       const step = e.shiftKey ? 2 : 0.5;
       const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key];
-      if (d && !mod && !e.altKey) { e.preventDefault(); c.onNudge(c.sel, d[0], d[1]); }
+      if (d && !mod && !e.altKey) { e.preventDefault(); c.onNudge(t, d[0], d[1]); }
     };
     const onCopy = (e: ClipboardEvent) => {
       const c = ref.current;
-      if (!c.enabled || c.sel == null || !c.pins[c.sel] || typing(e.target) || overlayOpen() || hasTextSelection()) return;
-      e.clipboardData?.setData("text/plain", pinToClipboard(c.pins[c.sel]));
+      const t = c.targets.filter((i) => !!c.pins[i]);
+      if (!c.enabled || !t.length || typing(e.target) || overlayOpen() || hasTextSelection()) return;
+      e.clipboardData?.setData("text/plain", pinsToClipboard(t.map((i) => c.pins[i])));
       e.preventDefault();
-      c.onCopied();
+      c.onCopied(t.length);
     };
     const onPasteEv = (e: ClipboardEvent) => {
       const c = ref.current;
       if (!c.enabled || !c.canEdit || typing(e.target) || overlayOpen()) return;
-      const p = pinFromClipboard(e.clipboardData?.getData("text/plain"));
-      if (!p) return;   // ไม่ใช่จุด (เช่น รูป) → ปล่อยให้ตัวอื่นจัดการ
+      const p = pinsFromClipboard(e.clipboardData?.getData("text/plain"));
+      if (!p.length) return;   // ไม่ใช่จุด (เช่น รูป) → ปล่อยให้ตัวอื่นจัดการ
       e.preventDefault();
       c.onPaste(p);
     };

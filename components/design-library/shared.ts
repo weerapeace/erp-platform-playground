@@ -54,3 +54,21 @@ export const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 
 export const newId = () => Math.random().toString(36).slice(2, 10);
+
+/** ขนาดจริงของรูป (โหลดจาก URL) — ใช้ร่วม: พื้นหลังวาดช่อง · รูปอ้างอิง · มุมเพิ่ม · สัดส่วนโลโก้ */
+export function loadSize(url: string): Promise<{ w: number; h: number }> {
+  return new Promise((ok) => {
+    const im = new Image();
+    im.onload = () => ok({ w: im.naturalWidth || 1000, h: im.naturalHeight || 1000 });
+    im.onerror = () => ok({ w: 1000, h: 1000 });
+    im.src = url;
+  });
+}
+
+/** ขนาดโลโก้ที่เคยใส่ในสูตรอื่น (รอบ 8) — โหลดครั้งเดียวต่อหน้า · k = "img:<key>" | "asset:<id>" | "sku:<id>" */
+export type LogoSizeHit = { k: string; w: number; h: number; seq: number };
+let LOGO_SIZES: Promise<LogoSizeHit[]> | null = null;
+export function loadLogoSizes(): Promise<LogoSizeHit[]> {
+  if (!LOGO_SIZES) LOGO_SIZES = api<LogoSizeHit[]>(`/api/design-library/bundle?logo_sizes=1`).catch(() => { LOGO_SIZES = null; return []; });
+  return LOGO_SIZES;
+}

@@ -8,6 +8,7 @@
  */
 import {
   bothUnits, calloutSvg, logoText, handleCountText, colorwayTableHtml, handleLength, MAIN_COLORWAY_LABEL, PANELS, pickInfo, pickThumbSvg, pocketPanelSvg, usesHwColor, categoryOf, bodyPickOf,
+  accessoryLabel, dimText, pinQty, viewsCalloutHtml,
   type BriefInput, type Choice, type Spec,
 } from "@/lib/design-library";
 import type { CostLine } from "@/lib/design-library-cost";
@@ -51,7 +52,7 @@ export function buildTechpackData(t: TechpackInput): Record<string, unknown> {
     return {
       idx: i + 1, part: cat?.name ?? (p.cat || "—"),
       code: info.code === "LOGO" ? "" : info.code, name: sameAsBody ? "ใช้วัสดุเดียวกับตัวกระเป๋า" : (info.name || (p.note ? "" : "ยังไม่เลือก")),
-      color: isHw && hw ? `สีอะไหล่ ${hw.name}` : p.pick?.kind === "color" ? `${p.pick.code}${p.pick.hex ? ` ${p.pick.hex}` : ""}` : p.pick?.kind === "logo" ? logoText(p.pick, t.choices) : "",
+      color: isHw && hw ? `สีอะไหล่ ${hw.name}` : p.pick?.kind === "color" ? `${p.pick.code}${p.pick.hex ? ` ${p.pick.hex}` : ""}` : p.pick?.kind === "logo" ? [logoText(p.pick, t.choices), p.dim ? `ขนาด ${dimText(p.dim)}` : ""].filter(Boolean).join(" · ") : "",
       qty: l ? qtyText(l.qty) : sameAsBody ? "(รวมในผ้าตัว)" : merged ? `(รวมในจุดที่ ${merged.pinIndex! + 1})` : "", uom: l && l.qty > 0 ? l.uom : "",
       how: l?.detail ?? "",
       note: p.note,
@@ -62,8 +63,8 @@ export function buildTechpackData(t: TechpackInput): Record<string, unknown> {
   // ส่วนเสริม (รอบ 7) ต่อท้ายตารางวัสดุ — 1 ชิ้นต่อใบ
   (spec.accessories ?? []).forEach((a, k) => {
     materials.push({
-      idx: spec.pins.length + k + 1, part: `ส่วนเสริม${a.group ? ` · ${a.group}` : ""}`, code: a.sku_code, name: a.name, color: "",
-      qty: "1", uom: "ชิ้น", how: "", note: a.note,
+      idx: spec.pins.length + k + 1, part: `ส่วนเสริม${a.group ? ` · ${a.group}` : ""}${a.pos ? ` (${accessoryLabel(k)} บนรูป)` : ""}`, code: a.sku_code, name: a.name, color: "",
+      qty: String(pinQty(a)), uom: "ชิ้น", how: "", note: a.note,
       thumb_html: a.image_key ? `<img src="${esc(t.img(a.image_key, 200))}" width="64" height="64" style="object-fit:contain" alt="" />` : "",
     });
   });
@@ -91,7 +92,7 @@ export function buildTechpackData(t: TechpackInput): Record<string, unknown> {
     photo_html: imgTag(tp.image_key, "tp-photo"), vector_html: imgTag(tp.vector_image_key, "tp-photo"),
     render_html: t.renders.map((k) => imgTag(k, "tp-render")).join(""), inside_html: "",   // inside_html คงไว้ให้แม่แบบเดิมไม่พัง
     has_renders: t.renders.length > 0,
-    callout_html: calloutSvg(brief),
+    callout_html: calloutSvg(brief) + viewsCalloutHtml(brief),   // รอบ 8: มุมเพิ่มต่อท้าย
     materials, material_count: materials.length,
     pockets_html: pocketsHtml, pocket_count: PANELS.reduce((s, p) => s + spec.pockets[p.key].length, 0),
     colorway_table_html: t.baseSpec.colorways.length ? colorwayTableHtml(t.baseSpec, t.choices, t.img) : "",

@@ -15,6 +15,8 @@ import { useToast } from "@/components/toast";
 import { LoadingState, ErrorState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { SkuPicker } from "@/components/pickers";
+import { usePermission } from "@/components/auth";
+import { MoneyInput } from "@/components/money-input";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { buildPrompts, CATEGORY_SOURCES, CHOICE_LISTS, cleanSpec, logoOptions, PROMPT_SYSTEM_KEYS, PROMPT_VARS, type Choice, type ChoiceListKey } from "@/lib/design-library";
 import { api, img, newId } from "./shared";
@@ -33,6 +35,7 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
   const [del, setDel] = useState<Row | null>(null);
   const [optDraft, setOptDraft] = useState<Record<string, string>>({});   // ข้อความแบบย่อยโลโก้ที่กำลังพิมพ์ (ไม่ให้บรรทัดว่างหาย)
   const [upId, setUpId] = useState<string | null>(null);
+  const canCost = usePermission("products.cost.view");   // รอบ 8: ค่าทำโลโก้ = ราคา → เห็น/แก้เฉพาะคนดูต้นทุนได้
 
   const load = useCallback(async () => {
     setErr(null);
@@ -142,6 +145,25 @@ export function ChoicesManager({ open, onClose, onChanged }: { open: boolean; on
             <label className="flex items-center gap-1 text-[12px] text-slate-600 whitespace-nowrap"><input type="checkbox" checked={r.config.needs_material === true} onChange={(e) => patchCfg(r, { needs_material: e.target.checked })} />ต้องเลือกวัสดุของโลโก้</label>
             {r.config.needs_material === true && <input className={`${inp} flex-1 min-w-[140px]`} value={listText(r.config.material_tags)} onChange={(e) => patchCfg(r, { material_tags: e.target.value.slice(0, 200) })} placeholder="แท็กวัสดุ เช่น หนัง, PU" title="ป๊อปเลือกวัสดุโลโก้ เปิดรายการที่ติดแท็กนี้ก่อน" />}
           </div>
+          {r.config.needs_material === true && (
+            <div className="space-y-1.5">
+              <input className={inp} value={listText(r.config.material_chips)} onChange={(e) => patchCfg(r, { material_chips: e.target.value.slice(0, 300) })} placeholder="ปุ่มลัดค้นวัสดุ เช่น โลโก้ทั้งหมด=LOGO-" title="ชื่อปุ่ม=คำค้น · คั่นด้วย ," />
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                <label className="flex items-center gap-1 text-[12px] text-slate-600"><input type="checkbox" checked={r.config.material_board === false} onChange={(e) => patchCfg(r, { material_board: e.target.checked ? false : undefined })} />ไม่เปิดแท็บแผงผ้า</label>
+                <label className="flex items-center gap-1 text-[12px] text-slate-600"><input type="checkbox" checked={r.config.no_artwork === true} onChange={(e) => patchCfg(r, { no_artwork: e.target.checked || undefined })} />ไม่ต้องมีไฟล์โลโก้ (ใช้รูป SKU)</label>
+              </div>
+            </div>
+          )}
+          <label className={lab}>สีที่ให้เลือก (คั่นด้วย , · ว่าง = ทอง เงิน ดำ ขาว …)
+            <input className={`${inp} mt-0.5`} value={listText(r.config.colors)} onChange={(e) => patchCfg(r, { colors: e.target.value.slice(0, 300) })} placeholder="เช่น ทอง, เงิน, ดำ" /></label>
+          {canCost && (
+            <div className="grid grid-cols-2 gap-2">
+              <label className={lab}>ค่าทำบล็อก/เพลท (ครั้งแรก · บาท)
+                <MoneyInput value={r.config.block_fee == null ? "" : String(r.config.block_fee)} placeholder="0.00" onChange={(raw) => { const n = Number(raw); patchCfg(r, { block_fee: raw.trim() && Number.isFinite(n) && n > 0 ? n : undefined }); }} className={`${inp} mt-0.5 text-right`} /></label>
+              <label className={lab}>ค่าทำต่อชิ้น (บาท)
+                <MoneyInput value={r.config.unit_fee == null ? "" : String(r.config.unit_fee)} placeholder="0.00" onChange={(raw) => { const n = Number(raw); patchCfg(r, { unit_fee: raw.trim() && Number.isFinite(n) && n > 0 ? n : undefined }); }} className={`${inp} mt-0.5 text-right`} /></label>
+            </div>
+          )}
         </div>
       </div>
     );

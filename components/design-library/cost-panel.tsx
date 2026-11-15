@@ -5,6 +5,7 @@
  * บรรทัดวัสดุคิดจากสูตร (ชุดสีที่เลือก) → ปริมาณอัตโนมัติ (แก้เองได้) × ราคาทุน SKU (ไม่มี = ใส่เอง) + ค่าแรง + ค่าอื่น ๆ
  * กฎคิดเลข: lib/design-library-cost estimateCost (ใช้สูตรกลาง calcCostQty + bomMaterialCost) · ราคา: GET /api/design-library/cost
  * ค่าที่แก้เก็บใน spec.cost (บันทึกพร้อมสูตรด้วย SaveBar) — ราคาที่ใส่เองผูกกับ "รหัสของ" จึงใช้ร่วมทุกชุดสี
+ * รอบ 8: ส่วนเสริมเข้าทุน (บรรทัดในตาราง) · ค่าทำครั้งแรก (ค่าบล็อก/เพลทของวิธีทำโลโก้ + ใส่เอง) → ใส่จำนวนผลิตต่อล็อต = หารเข้าทุนต่อใบ
  */
 import { useEffect, useMemo, useState } from "react";
 import { MoneyInput } from "@/components/money-input";
@@ -78,7 +79,7 @@ export function CostPanel({ spec, cost, choices, materials, calcRows, skuIds, co
                 <td className={cell}>
                   <MoneyInput value={cost.price[l.priceKey] ?? ""} disabled={readOnly} placeholder={l.priceSource === "sku" ? baht(l.unitPrice) : "ใส่ราคา"}
                     onChange={(raw) => setPrice(l.priceKey, numOrNull(raw))} className="w-full h-8 px-2 border border-slate-200 rounded-md text-right" />
-                  <div className={`text-[10.5px] mt-0.5 ${l.priceSource === "none" ? "text-amber-700" : "text-slate-400"}`}>{l.priceSource === "sku" ? "ราคาทุนจาก SKU" : l.priceSource === "manual" ? "ใส่เอง" : "ยังไม่มีราคา"}</div>
+                  <div className={`text-[10.5px] mt-0.5 ${l.priceSource === "none" ? "text-amber-700" : "text-slate-400"}`}>{l.priceSource === "sku" ? "ราคาทุนจาก SKU" : l.priceSource === "manual" ? "ใส่เอง" : l.priceSource === "fee" ? "ค่าทำต่อชิ้นของวิธีโลโก้" : "ยังไม่มีราคา"}</div>
                 </td>
                 <td className={`${cell} text-right tabular-nums ${l.priceSource === "none" && l.qty > 0 ? "text-slate-300" : "text-slate-800"}`}>{baht(l.amount)}</td>
               </tr>
@@ -106,9 +107,44 @@ export function CostPanel({ spec, cost, choices, materials, calcRows, skuIds, co
             {!readOnly && cost.extras.length < 20 && (
               <tr><td colSpan={5} className={cell}><button type="button" onClick={() => onChange({ ...cost, extras: [...cost.extras, { label: "", amount: 0 }] })} className="h-7 px-2.5 text-[12px] rounded-md border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50">+ เพิ่มค่าใช้จ่ายอื่น</button></td></tr>
             )}
+            {est.oncePerBag > 0 && <tr className="border-t border-slate-100"><td className={`${cell} text-slate-600`} colSpan={4}>ค่าทำครั้งแรก หาร {cost.batch.toLocaleString("th-TH")} ใบ</td><td className={`${cell} text-right tabular-nums`}>{baht(est.oncePerBag)}</td></tr>}
             <tr className="border-t-2 border-slate-300"><td className={`${cell} font-medium text-slate-800`} colSpan={4}>รวมทุนประมาณ/ใบ</td><td className={`${cell} text-right font-semibold tabular-nums`}>{baht(est.total)}</td></tr>
           </tbody>
         </table>
+      </div>
+      {/* ── ค่าทำครั้งแรก (รอบ 8) ── */}
+      <div className="mt-3 rounded-lg border border-slate-200 p-2.5">
+        <div className="flex flex-wrap items-center gap-2 mb-1.5">
+          <span className="text-[13px] font-medium text-slate-800">ค่าทำครั้งแรก</span>
+          <span className="text-[11.5px] text-slate-500">ค่าบล็อก/เพลทโลโก้ แม่พิมพ์ ฯลฯ — จ่ายครั้งเดียวต่อล็อต</span>
+          <span className="ml-auto text-[14px] font-semibold tabular-nums">{baht(est.onceTotal)} <span className="text-[12px] font-normal text-slate-500">บาท</span></span>
+        </div>
+        {est.once.length === 0 && <p className="text-[12px] text-slate-400 mb-1">ยังไม่มี — วิธีทำโลโก้ที่ตั้ง “ค่าทำบล็อก/เพลท” ไว้ที่ ตัวเลือก จะขึ้นเอง หรือกดเพิ่มเองด้านล่าง</p>}
+        <div className="space-y-1">
+          {est.once.map((x) => {
+            const own = x.key.startsWith("own:");
+            const k = own ? Number(x.key.slice(4)) : -1;
+            return (
+              <div key={x.key} className="flex items-center gap-2 text-[12.5px]">
+                {own ? <input value={cost.once[k]?.label ?? ""} disabled={readOnly} maxLength={80} placeholder="เช่น ค่าแม่พิมพ์ / ค่าบล็อกปั๊ม" onChange={(e) => onChange({ ...cost, once: cost.once.map((y, i) => (i === k ? { ...y, label: e.target.value } : y)) })}
+                  className="flex-1 min-w-0 h-8 px-2 border border-slate-200 rounded-md disabled:bg-slate-50" />
+                  : <span className="flex-1 min-w-0 truncate text-slate-700" title={x.label}>{x.label}</span>}
+                <MoneyInput value={own ? (cost.once[k]?.amount || "") : (cost.price[x.key] ?? "")} disabled={readOnly} placeholder={x.auto ? baht(x.auto) : "0.00"}
+                  onChange={(raw) => (own ? onChange({ ...cost, once: cost.once.map((y, i) => (i === k ? { ...y, amount: numOrNull(raw) ?? 0 } : y)) }) : setPrice(x.key, numOrNull(raw)))}
+                  className="w-32 h-8 px-2 border border-slate-200 rounded-md text-right" />
+                {own && !readOnly ? <button type="button" onClick={() => onChange({ ...cost, once: cost.once.filter((_, i) => i !== k) })} className="h-8 w-8 rounded-md text-rose-600 hover:bg-rose-50" aria-label="ลบค่านี้"><Icon value="i:trash" /></button>
+                  : <span className="w-8 text-[10.5px] text-slate-400 text-center">{x.source === "fee" ? "ตั้งไว้" : "แก้แล้ว"}</span>}
+              </div>
+            );
+          })}
+        </div>
+        {!readOnly && cost.once.length < 10 && <button type="button" onClick={() => onChange({ ...cost, once: [...cost.once, { label: "", amount: 0 }] })} className="mt-1.5 h-7 px-2.5 text-[12px] rounded-md border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50">+ เพิ่มค่าทำครั้งแรก</button>}
+        <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[12.5px] text-slate-600">
+          หารเข้าทุนต่อใบ: ผลิตล็อตละ
+          <input type="number" min={0} step={1} disabled={readOnly} value={cost.batch || ""} placeholder="—" onChange={(e) => { const n = Math.round(Number(e.target.value)); onChange({ ...cost, batch: Number.isFinite(n) && n > 0 ? Math.min(1_000_000, n) : 0 }); }}
+            className="w-24 h-8 px-2 border border-slate-200 rounded-md text-right disabled:bg-slate-50" /> ใบ
+          <span className="text-[11.5px] text-slate-400">{cost.batch > 0 ? `= +${baht(est.oncePerBag)} บาท/ใบ (รวมในยอดด้านบนแล้ว)` : "ว่าง = ไม่รวมในทุนต่อใบ"}</span>
+        </div>
       </div>
     </section>
   );

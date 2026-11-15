@@ -18,7 +18,7 @@ import {
   bgPlacement, cleanFrame, DEFAULT_FRAME, MAX_BOXES, MAX_REFS, PANELS, panelSize,
   type Choice, type Frame, type PanelBg, type PanelKey, type PocketBox, type RefImage, type Spec,
 } from "@/lib/design-library";
-import { img, newId } from "./shared";
+import { img, loadSize, newId } from "./shared";
 import { fmtLen, LenInput, type LenUnit } from "./units";
 
 type Drag = { kind: "move" | "size"; id: string; sx: number; sy: number; start: PocketBox } | { kind: "draw"; sx: number; sy: number; cx: number; cy: number };
@@ -27,15 +27,6 @@ const r1 = (n: number) => Math.round(n * 2) / 2;   // ปัดครึ่ง�
 /** รูปที่ใช้เป็นพื้นหลังได้ (ไม่รวมรูปอ้างอิง — อันนั้นอยู่ใน spec.refs) */
 export type BgOption = { key: string; label: string; w: number | null; h: number | null };
 
-/** ขนาดจริงของรูป (โหลดจากไฟล์) */
-function loadSize(url: string): Promise<{ w: number; h: number }> {
-  return new Promise((ok) => {
-    const im = new Image();
-    im.onload = () => ok({ w: im.naturalWidth || 1000, h: im.naturalHeight || 1000 });
-    im.onerror = () => ok({ w: 1000, h: 1000 });
-    im.src = url;
-  });
-}
 
 export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange, bgOptions = [], onRefs, onBg }: {
   spec: Spec; choices: Choice[]; readOnly: boolean; unit?: LenUnit; onChange: (pockets: Spec["pockets"]) => void;
@@ -221,7 +212,7 @@ export function PocketEditor({ spec, choices, readOnly, unit = "cm", onChange, b
             ))}
             {!readOnly && onRefs && refs.length < MAX_REFS && (
               <label className="shrink-0 w-14 h-14 rounded-lg border border-dashed border-indigo-300 text-indigo-700 text-[10.5px] leading-tight inline-flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:bg-indigo-50 text-center">
-                <Icon value={uploading ? "i:loader-2" : "i:plus"} />{uploading ? "กำลังอัป" : "รูปอ้างอิง"}
+                <Icon value={uploading ? "i:hourglass" : "i:plus"} />{uploading ? "กำลังอัป" : "รูปอ้างอิง"}
                 <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { void uploadRefs(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
               </label>
             )}

@@ -4,6 +4,9 @@
  * POST { action: "save_recipe", id, spec, name?, note? }                → บันทึกสูตร (ทำความสะอาดด้วย cleanSpec ก่อนเสมอ)
  * POST { action: "add_render", recipe_id, view_key, image_key, colorway_id?, note? } → เพิ่มรูปที่ได้จาก GPT (version = ล่าสุดของชุดมุม+ชุดสีนั้น + 1 · colorway_id ว่าง = สีหลัก)
  * POST { action: "set_template_vector", render_id }                  → ตั้งรูปลายเส้นเป็นรูป Vector ของแม่แบบ (design_library.manage)
+ * POST { action: "save_accessory", id?, name, name_en?, group?, image_key?, sku_id?, sku_code? } → เพิ่ม/แก้ส่วนเสริมจากป๊อปเลือกในหน้าสูตร (รอบ 8)
+ * POST { action: "delete_accessory", id }                             → ซ่อนส่วนเสริม (is_active = false · สูตรที่เลือกไว้แล้วยังมีสำเนาเดิม)
+ *   ส่วนเสริม: เจ้าของเลือก 2026-11-15 "ทุกคนที่แก้สูตรได้" เพิ่ม/แก้/ลบได้ (เฉพาะรายการ accessory — ตัวเลือกอื่นยังต้อง design_library.manage)
  * สิทธิ์ design_library.edit · audit ทุกงาน · ทุนประมาณ (spec.cost) แก้ได้เฉพาะ products.cost.view — ไม่มีสิทธิ์ = คงค่าเดิมไว้
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { requestActor } from "@/lib/request-actor";
 import { writeAudit } from "@/lib/audit";
-import { cleanSpec, EMPTY_COST, RENDER_VIEWS } from "@/lib/design-library";
+import { cleanSpec, EMPTY_COST, nextAccessoryCode, RENDER_VIEWS } from "@/lib/design-library";
 import { COST_PERM } from "@/lib/cost-access";
 import { EDIT_PERM, MANAGE_PERM } from "../_resources";
 
@@ -118,6 +121,55 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error) return bad("ตั้งรูปไม่สำเร็จ กรุณาลองใหม่", 500);
     await audit("update", "design_library_templates", before.id, { code: before.code, from_render: renderId, changes: { vector_image_key: { from: before.vector_image_key, to: rnd.image_key } } });
     return NextResponse.json({ data, error: null });
+  }
+
+  if (body.action === "save_accessory") {
+    const s = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
+    const name = s(body.name, 120);
+    if (!name) return bad("ต้องใส่ชื่อส่วนเสริม");
+    const id = body.id ? String(body.id) : null;
+    if (id && !UUID.test(id)) return bad("ไม่พบส่วนเสริม");
+    const skuId = UUID.test(s(body.sku_id, 40)) ? s(body.sku_id, 40) : "";
+    const cfgIn: Record<string, string> = { group: s(body.group, 80), image_key: s(body.image_key, 300), sku_id: skuId, sku_code: skuId ? s(body.sku_code, 80) : "" };
+    const nameEn = s(body.name_en, 120) || null;
+    const withCfg = (base: Record<string, unknown>) => {
+      const out: Record<string, unknown> = { ...base };
+      for (const [k, v] of Object.entries(cfgIn)) { if (v) out[k] = v; else delete out[k]; }
+      return out;
+    };
+    if (id) {
+      const { data: before } = await admin.from("design_library_choices").select("*").eq("id", id).eq("list_key", "accessory").maybeSingle();
+      if (!before) return bad("ไม่พบส่วนเสริม (อาจถูกลบไปแล้ว)", 404);
+      const config = withCfg((before.config ?? {}) as Record<string, unknown>);
+      const { data, error } = await admin.from("design_library_choices").update({ name, name_en: nameEn, config, updated_at: new Date().toISOString() }).eq("id", id).select("*").single();
+      if (error) return bad("บันทึกส่วนเสริมไม่สำเร็จ กรุณาลองใหม่", 500);
+      await audit("update", "design_library_choices", id, { list_key: "accessory", code: before.code, from: "recipe_picker",
+        changes: { ...(before.name !== name ? { name: { from: before.name, to: name } } : {}), ...(before.name_en !== nameEn ? { name_en: { from: before.name_en, to: nameEn } } : {}), config: { from: before.config, to: config } } });
+      return NextResponse.json({ data, error: null });
+    }
+    // รหัสใหม่ ACC-xxx (นับรวมตัวที่ซ่อนแล้ว — รหัสห้ามซ้ำทั้งรายการ) · ชนกันพร้อมกัน = ลองเลขถัดไปอีกครั้ง
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: rows } = await admin.from("design_library_choices").select("code").eq("list_key", "accessory");
+      const code = nextAccessoryCode(((rows ?? []) as { code: string }[]).map((r) => r.code));
+      const { data, error } = await admin.from("design_library_choices").insert({ list_key: "accessory", code, name, name_en: nameEn, config: withCfg({}), sort_order: 100, is_active: true }).select("*").single();
+      if (!error && data) {
+        await audit("create", "design_library_choices", data.id, { list_key: "accessory", code, name, from: "recipe_picker", config: data.config });
+        return NextResponse.json({ data, error: null });
+      }
+      if (error && error.code !== "23505") return bad("เพิ่มส่วนเสริมไม่สำเร็จ กรุณาลองใหม่", 500);
+    }
+    return bad("มีคนเพิ่มส่วนเสริมพร้อมกัน กรุณากดบันทึกอีกครั้ง", 409);
+  }
+
+  if (body.action === "delete_accessory") {
+    const id = String(body.id ?? "");
+    if (!UUID.test(id)) return bad("ไม่พบส่วนเสริม");
+    const { data: before } = await admin.from("design_library_choices").select("id, code, name, is_active").eq("id", id).eq("list_key", "accessory").maybeSingle();
+    if (!before) return bad("ไม่พบส่วนเสริม", 404);
+    const { error } = await admin.from("design_library_choices").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return bad("ลบส่วนเสริมไม่สำเร็จ กรุณาลองใหม่", 500);
+    await audit("delete", "design_library_choices", id, { list_key: "accessory", code: before.code, name: before.name, soft: true, from: "recipe_picker", changes: { is_active: { from: before.is_active, to: false } } });
+    return NextResponse.json({ data: { id }, error: null });
   }
 
   return bad("ไม่รู้จักคำสั่งนี้");
