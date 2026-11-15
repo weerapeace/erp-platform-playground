@@ -297,7 +297,7 @@ export async function systemPrices(admin: Admin, skuIds: string[], partnerId: st
 }
 
 /** อ่านใบ + รายการ (พร้อมรหัส/รูป/ค่าจากตัวแม่) — null เมื่อไม่พบ */
-export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ header: VoucherHeader; lines: VoucherLine[] } | null> {
+export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate: number | null } | null> {
   const { data: v } = await admin.from("purchase_vouchers_v2").select("*").eq("id", voucherId).maybeSingle();
   if (!v) return null;
   const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("*").eq("voucher_id", voucherId).not("is_active", "is", false).order("sort_order");
@@ -344,7 +344,10 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
     }
     poPayments.sort((a, b) => a.po_no.localeCompare(b.po_no));
   }
-  return { header: toHeader(v as Row, grNos, poNos, poPayments), lines };
+  // ★ 2026-11-15 เรทอ้างอิง = เรทหยวนของวันที่ใบ (แอปโอนเงินจีน daily_rates) → หน้าใบเตือนเมื่อเรทต่างเกิน 10% (lib/purchase-voucher-checklist)
+  //   เฉพาะใบหยวน — daily_rates เป็นเรทหยวนอย่างเดียว เทียบกับสกุลอื่นไม่ได้
+  const ref_fx_rate = isCNY(String((v as Row).currency ?? "")) ? await fxRateForDate(admin, (v as Row).voucher_date ? String((v as Row).voucher_date) : null) : null;
+  return { header: toHeader(v as Row, grNos, poNos, poPayments), lines, ref_fx_rate };
 }
 
 /**

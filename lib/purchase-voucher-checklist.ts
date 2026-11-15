@@ -20,7 +20,25 @@ export type ChecklistInput = {
   missing_basis_count: number;
   missing_rate_count: number;
   dirty: boolean;
+  /** เรทอ้างอิง = เรทหยวนของวันที่ใบ (แอปโอนเงินจีน) · ไม่มี = ไม่เช็กว่าเรทผิดปกติ */
+  ref_fx_rate?: number | null;
 };
+
+/**
+ * ★ 2026-11-15 เจ้าของ: "อยากให้เตือนเวลาพิมพ์เกินไปเยอะ" (ยอดบาท ¥600 → ฿5,000 = เรท 8.33 ทั้งที่เรทจริง ~5.2)
+ * เรทต่างจากเรทอ้างอิงเกินกี่ % ถึงเตือน — เจ้าของเลือก 10% (เรทจริงขยับไม่ถึง 5% จึงไม่เตือนพร่ำเพรื่อ)
+ */
+export const FX_WARN_PCT = 10;
+/** เรทต่างจากเรทอ้างอิงกี่ % (บวก = สูงกว่า) · ไม่มีเรทตัวใดตัวหนึ่ง = null */
+export function fxDeviationPct(rate: number, ref: number | null | undefined): number | null {
+  const r = Number(ref);
+  if (!(Number(rate) > 0) || !(r > 0)) return null;
+  return ((Number(rate) - r) / r) * 100;
+}
+/** เรทผิดปกติ = ต่างจากเรทอ้างอิงเกิน FX_WARN_PCT */
+export const fxAbnormal = (pct: number | null) => pct != null && Math.abs(pct) > FX_WARN_PCT;
+/** ข้อความสั้น เช่น "สูงกว่าเรทวันที่ใบ (5.21) 60%" */
+export const fxDeviationText = (pct: number, ref: number) => `${pct > 0 ? "สูง" : "ต่ำ"}กว่าเรทวันที่ใบ (${ref}) ${Math.round(Math.abs(pct))}%`;
 
 const money = (n: number) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -32,9 +50,12 @@ export function voucherChecklist(i: ChecklistInput): CheckItem[] {
   else out.push({ key: "price", level: "ok", label: `ทุกรายการมีราคา (${i.line_count})` });
 
   if (i.foreign) {
-    out.push(i.fx_rate > 0
-      ? { key: "fx", level: "ok", label: `เรท ${i.fx_rate} บาท ต่อ 1 ${i.currency_label}` }
-      : { key: "fx", level: "block", label: "ยังไม่มีเรทแปลงเป็นบาท", hint: "ใส่เรทที่หัวใบ" });
+    const dev = fxDeviationPct(i.fx_rate, i.ref_fx_rate);
+    out.push(!(i.fx_rate > 0)
+      ? { key: "fx", level: "block", label: "ยังไม่มีเรทแปลงเป็นบาท", hint: "ใส่เรทที่หัวใบ" }
+      : fxAbnormal(dev)
+        ? { key: "fx", level: "warn", label: `เรท ${i.fx_rate} ${fxDeviationText(dev as number, Number(i.ref_fx_rate))}`, hint: "ยอดบาทหรือเรทพิมพ์ผิดไหม? ถ้าถูกจริง ยืนยันได้" }
+        : { key: "fx", level: "ok", label: `เรท ${i.fx_rate} บาท ต่อ 1 ${i.currency_label}` });
   } else {
     out.push({ key: "fx", level: "ok", label: "สกุลบาท ไม่ต้องใช้เรท" });
   }

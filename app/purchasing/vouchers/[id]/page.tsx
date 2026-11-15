@@ -28,7 +28,7 @@ import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist } from "@/lib/purchase-voucher-checklist";
 import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
 
-type Detail = { header: VoucherHeader; lines: VoucherLine[] };
+type Detail = { header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate?: number | null };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const SHIP_LABEL: Record<ShipMethod, string> = { none: "ไม่คิดค่าส่ง", cube: "📦 ตามคิว (CBM)", weight: "⚖️ ตามน้ำหนัก (กก.)" };
 const SOURCE_BADGE: Record<string, { text: string; cls: string }> = {
@@ -312,6 +312,7 @@ export default function PurchaseVoucherFormPage() {
     line_count: data?.lines.length ?? 0, foreign, currency_label: sym.trim() || currency, fx_rate: num(h.fx_rate),
     missing_price_count: t?.missing_price_count ?? 0, any_ship: anyShip, ship_total_thb: t?.ship_total_thb ?? 0,
     missing_basis_count: t?.missing_basis_count ?? 0, missing_rate_count: t?.missing_rate_count ?? 0, dirty: dirty && !readonly,
+    ref_fx_rate: data?.ref_fx_rate ?? null,   // เรทหยวนวันที่ใบ → เตือนเมื่อเรทต่างเกิน 10%
   });
   const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0, discount_foreign: t?.discount_foreign ?? 0, discount_thb: t?.discount_thb ?? 0 };
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
@@ -576,7 +577,7 @@ export default function PurchaseVoucherFormPage() {
               <aside className={`space-y-3 ${hd.status === "draft" ? "xl:sticky xl:top-4 xl:self-start" : ""}`}>
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
                 {hd.status === "draft" && canEdit && (
-                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} dirty={dirty} saving={saving}
+                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving}
                     onSave={() => void save()} onConfirm={() => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}

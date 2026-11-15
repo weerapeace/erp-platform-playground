@@ -13,18 +13,20 @@ import { Icon } from "@/components/icon";
 import { formatDate } from "@/lib/date";
 import { fmtMoney } from "@/lib/landed-cost";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
-import { canConfirm, nextSteps, type CheckItem } from "@/lib/purchase-voucher-checklist";
+import { canConfirm, fxAbnormal, fxDeviationPct, fxDeviationText, nextSteps, type CheckItem } from "@/lib/purchase-voucher-checklist";
 import type { PoPayment, VoucherHeader } from "@/lib/purchase-voucher-server";
 
 type Totals = { subtotal_foreign: number; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; discount_foreign?: number; discount_thb?: number };
 export type ConfirmResult = { pv_no: string; write_back: { po: boolean; price_list: boolean; sku: boolean; error?: string }[]; failed: number };
 
-const ICON: Record<CheckItem["level"], { mark: string; cls: string }> = {
-  ok: { mark: "✓", cls: "text-emerald-700" },
-  block: { mark: "✕", cls: "text-rose-600" },
-  warn: { mark: "!", cls: "text-amber-700" },
-  info: { mark: "i", cls: "text-slate-500" },
+// ★ 2026-11-15 กล่อง "ก่อนยืนยัน" แบบ B (เจ้าของเลือก: "แต่ละ section ดูกลืนกัน") — แถวที่ต้องดูเป็นแถบสีทั้งแถว ไม่ใช่แค่ไอคอนเล็ก
+const ROW: Record<CheckItem["level"], { icon: string; row: string; ic: string; hint: string }> = {
+  ok: { icon: "done", row: "text-slate-700", ic: "text-emerald-600", hint: "text-slate-400" },
+  block: { icon: "forbidden", row: "bg-rose-50 text-rose-700", ic: "text-rose-600", hint: "text-rose-500" },
+  warn: { icon: "warning", row: "bg-amber-50 text-amber-800", ic: "text-amber-600", hint: "text-amber-700/80" },
+  info: { icon: "info", row: "text-slate-600", ic: "text-slate-400", hint: "text-slate-400" },
 };
+const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
 
 export function CollapseCard({ title, summary, defaultOpen = false, tone, children }: {
   title: React.ReactNode; summary?: React.ReactNode; defaultOpen?: boolean; tone?: "warn"; children: React.ReactNode;
@@ -47,13 +49,13 @@ export function CollapseCard({ title, summary, defaultOpen = false, tone, childr
 
 function CheckList({ items }: { items: CheckItem[] }) {
   return (
-    <ul className="space-y-1.5">
+    <ul className="space-y-1">
       {items.map((c) => (
-        <li key={c.key} className="flex gap-2 text-[13px]">
-          <span className={`w-4 h-4 mt-0.5 shrink-0 rounded-full border text-[10px] font-bold flex items-center justify-center ${ICON[c.level].cls} border-current`}>{ICON[c.level].mark}</span>
+        <li key={c.key} className={`flex gap-2 text-[13px] rounded-md px-2 py-1 ${ROW[c.level].row}`}>
+          <Icon name={ROW[c.level].icon} mode="line" size={15} className={`mt-0.5 shrink-0 ${ROW[c.level].ic}`} />
           <span className="min-w-0">
-            <span className={c.level === "block" ? "text-rose-700" : c.level === "warn" ? "text-amber-800" : "text-slate-700"}>{c.label}</span>
-            {c.hint && c.level !== "ok" && <span className="block text-[11px] text-slate-400">{c.hint}</span>}
+            <span>{c.label}</span>
+            {c.hint && c.level !== "ok" && <span className={`block text-[11px] ${ROW[c.level].hint}`}>{c.hint}</span>}
           </span>
         </li>
       ))}
@@ -61,27 +63,104 @@ function CheckList({ items }: { items: CheckItem[] }) {
   );
 }
 
+/** ป้ายสรุปหัวกล่องตรวจ: ติด N (ยืนยันไม่ได้) · เตือน N · พร้อมยืนยัน */
+function CheckChip({ items }: { items: CheckItem[] }) {
+  const b = items.filter((c) => c.level === "block").length;
+  const w = items.filter((c) => c.level === "warn").length;
+  const [text, cls] = b ? [`ติด ${b}`, "bg-rose-100 text-rose-700"] : w ? [`เตือน ${w}`, "bg-amber-100 text-amber-800"] : ["พร้อมยืนยัน", "bg-emerald-100 text-emerald-700"];
+  return <span className={`ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full ${cls}`}>{text}</span>;
+}
+
+function SectionTitle({ icon, children }: { icon: string; children: React.ReactNode }) {
+  return <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2"><Icon name={icon} mode="line" size={14} className="text-slate-400" />{children}</div>;
+}
+
 /**
  * ★ 2026-11-14 เจ้าของ: "บางทีไม่รู้เรท แต่รู้ยอดบาท — อยากแก้ราคาบาท แล้วให้คำนวณเรทให้ใหม่เอง"
  * ช่อง "ค่าสินค้า ฿" กดแก้ได้ (ใบสกุลต่างประเทศ · ใบร่าง) → หน้าใบคิดเรทใหม่ให้ (lib/landed-cost fxForTargetThb)
  */
-function GoodsThbEdit({ value, onSet }: { value: number; onSet: (thb: number) => void }) {
+/**
+ * แถว "¥ยอด × เรท = ฿ยอด" — ช่องบาทกดแก้ได้ (onSet ไม่ส่ง = ดูอย่างเดียว)
+ * ★ 2026-11-15 เจ้าของ: "อยากให้เตือนเวลาพิมพ์เกินไปเยอะ" — ระหว่างพิมพ์บอกเรทที่จะได้ · เรทต่างจากเรทวันที่ใบเกิน 10%
+ *   กด Enter แล้วยังไม่เปลี่ยน ถามก่อน [ใช้ยอดนี้จริง] / [แก้ใหม่] (เกณฑ์ = FX_WARN_PCT ใน lib/purchase-voucher-checklist)
+ */
+function GoodsThbRow({ t, sym, rate, refFx, onSet }: { t: Totals; sym: string; rate: number; refFx: number | null; onSet?: (thb: number) => void }) {
   const [edit, setEdit] = useState<string | null>(null);
-  const commit = () => { const v = Number(edit); setEdit(null); if (Number.isFinite(v) && v > 0 && Math.abs(v - value) >= 0.005) onSet(v); };
-  if (edit != null) return (
-    <input autoFocus type="number" inputMode="decimal" step="any" min={0} value={edit} onChange={(e) => setEdit(e.target.value)} onBlur={commit}
-      onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEdit(null); }}
-      className="w-28 h-7 px-1.5 text-right text-sm tabular-nums border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-300" title="พิมพ์ยอดบาทที่จ่ายจริง แล้วกด Enter — ระบบคิดเรทให้ใหม่" />
-  );
+  const [ask, setAsk] = useState<number | null>(null);   // ยอดที่ทำให้เรทผิดปกติ — รอให้ตอบก่อน
+  const foreignAmt = t.subtotal_foreign;
+  const rateOf = (thb: number) => (foreignAmt > 0 ? thb / foreignAmt : 0);
+  const dev = fxDeviationPct(rate, refFx);
+  const typed = Number(edit);
+  const previewRate = edit != null && typed > 0 ? rateOf(typed) : 0;
+  const pDev = fxDeviationPct(previewRate, refFx);
+  const askDev = ask != null ? fxDeviationPct(rateOf(ask), refFx) : null;
+  const commit = () => {
+    if (edit == null) return;
+    const v = Number(edit);
+    setEdit(null);
+    if (!onSet || !(Number.isFinite(v) && v > 0) || Math.abs(v - t.subtotal_thb) < 0.005) return;
+    if (fxAbnormal(fxDeviationPct(rateOf(v), refFx))) { setAsk(v); return; }
+    onSet(v);
+  };
+  const editable = !!onSet && foreignAmt > 0 && ask == null;
   return (
-    <button type="button" onClick={() => setEdit(value > 0 ? String(value) : "")} title="รู้ยอดบาทแต่ไม่รู้เรท? กดแก้ยอดบาท — ระบบคิดเรทให้ใหม่ (เรท = บาท ÷ ยอดสกุลใบ)"
-      className="group inline-flex items-center gap-1 rounded px-1 -mr-1 tabular-nums hover:bg-blue-50 hover:text-blue-700">
-      ฿{fmtMoney(value)}<Icon name="edit" mode="line" size={12} className="text-slate-300 group-hover:text-blue-600" />
-    </button>
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+        <dt className="text-slate-500 tabular-nums">{sym}{fmtMoney(foreignAmt)} × <span className={fxAbnormal(dev) ? "text-red-600 font-semibold" : "text-slate-700"}
+          title={fxAbnormal(dev) && refFx ? fxDeviationText(dev as number, refFx) : "เรทแปลงเป็นบาท (แก้ที่หัวใบ)"}>{rate || "—"}</span></dt>
+        <dd className="tabular-nums">
+          {edit != null ? (
+            <input autoFocus type="number" inputMode="decimal" step="any" min={0} value={edit} onChange={(e) => setEdit(e.target.value)}
+              onBlur={(e) => { if (e.currentTarget.dataset.cancel) setEdit(null); else commit(); }}
+              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { e.currentTarget.dataset.cancel = "1"; e.currentTarget.blur(); } }}
+              className="w-28 h-7 px-1.5 text-right text-sm tabular-nums border border-blue-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-300" title="พิมพ์ยอดบาทที่จ่ายจริง แล้วกด Enter — ระบบคิดเรทให้ใหม่" />
+          ) : editable ? (
+            <button type="button" onClick={() => setEdit(t.subtotal_thb > 0 ? String(t.subtotal_thb) : "")} title="รู้ยอดบาทแต่ไม่รู้เรท? กดแก้ยอดบาท — ระบบคิดเรทให้ใหม่ (เรท = บาท ÷ ยอดสกุลใบ)"
+              className="group inline-flex items-center gap-1 rounded px-1 -mr-1 tabular-nums font-medium text-slate-800 hover:bg-blue-50 hover:text-blue-700">
+              ฿{fmtMoney(t.subtotal_thb)}<Icon name="edit" mode="line" size={12} className="text-slate-300 group-hover:text-blue-600" />
+            </button>
+          ) : <span className="font-medium text-slate-800">฿{fmtMoney(t.subtotal_thb)}</span>}
+        </dd>
+      </div>
+      {/* ระหว่างพิมพ์: บอกเรทที่จะได้ + เทียบเรทวันที่ใบ */}
+      {edit != null && previewRate > 0 && (fxAbnormal(pDev) && refFx
+        ? <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-700"><Icon name="warning" mode="line" size={12} className="mt-0.5 shrink-0" />เรทจะเป็น {r4(previewRate)} — {fxDeviationText(pDev as number, refFx)}</div>
+        : <div className="mt-1 text-[11px] text-slate-500">เรทจะเป็น {r4(previewRate)}{pDev != null && refFx ? ` · ใกล้เคียงเรทวันที่ใบ (${refFx})` : ""}</div>)}
+      {/* กด Enter แล้วเรทผิดปกติ: ถามก่อน */}
+      {ask != null && refFx != null && askDev != null && (
+        <div className="mt-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs text-amber-800">
+          <div className="flex items-start gap-1 font-semibold"><Icon name="warning" mode="line" size={13} className="mt-0.5 shrink-0" />เรทจะเป็น {r4(rateOf(ask))} — {fxDeviationText(askDev, refFx)}</div>
+          <div className="mt-0.5 text-amber-700">ถ้าใช้เรทวันที่ใบ ยอดควรอยู่ราว ฿{fmtMoney(foreignAmt * refFx)} — ยอด ฿{fmtMoney(ask)} พิมพ์ผิดหรือเปล่า?</div>
+          <div className="mt-2 flex gap-1.5">
+            <button type="button" onClick={() => { const v = ask; setAsk(null); onSet?.(v); }} className="h-7 px-2.5 rounded-md bg-amber-600 text-white font-medium hover:bg-amber-700">ใช้ยอดนี้จริง</button>
+            <button type="button" onClick={() => { setEdit(String(ask)); setAsk(null); }} className="h-7 px-2.5 rounded-md border border-amber-300 bg-white hover:bg-amber-100">แก้ใหม่</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-function SummaryRows({ t, foreign, sym, fxRate, onSetGoodsThb }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; onSetGoodsThb?: (thb: number) => void }) {
+/** ส่วน "ยอดเงิน" ของกล่องก่อนยืนยัน (พื้นเทาอ่อน) — ส่วนลด · ¥ × เรท = ฿ · ค่าส่ง */
+function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; refFx: number | null; onSetGoodsThb?: (thb: number) => void }) {
+  const disc = t.discount_foreign ?? 0;
+  const cur = foreign ? sym : "฿";
+  return (
+    <div className="bg-slate-50 border-t border-slate-200 px-4 py-3">
+      <SectionTitle icon="calc">ยอดเงิน</SectionTitle>
+      <dl className="text-sm space-y-1">
+        {disc > 0 && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้าก่อนลด</dt><dd className="tabular-nums">{cur}{fmtMoney(t.subtotal_foreign + disc)}</dd></div>}
+        {disc > 0 && <div className="flex justify-between text-red-600"><dt>ส่วนลดรวม</dt><dd className="tabular-nums">−{cur}{fmtMoney(disc)}{foreign && (t.discount_thb ?? 0) > 0 ? <span className="ml-1 text-[11px] text-red-400">(฿{fmtMoney(t.discount_thb)})</span> : null}</dd></div>}
+        {foreign
+          ? <GoodsThbRow t={t} sym={sym} rate={Number(fxRate) || 0} refFx={refFx} onSet={onSetGoodsThb} />
+          : <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า{disc > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums font-medium text-slate-800">฿{fmtMoney(t.subtotal_thb)}</dd></div>}
+        <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
+function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null }) {
   return (
     <dl className="text-sm space-y-1">
       {/* ★ 2026-11-14 ส่วนลดรวม (เจ้าของขอ "มีเขียนตรงสรุปด้วยว่าส่วนลดรวมเท่าไหร่") — ค่าสินค้าด้านล่าง = หักส่วนลดแล้ว */}
@@ -89,7 +168,7 @@ function SummaryRows({ t, foreign, sym, fxRate, onSetGoodsThb }: { t: Totals; fo
       {(t.discount_foreign ?? 0) > 0 && <div className="flex justify-between text-red-600"><dt>ส่วนลดรวม</dt><dd className="tabular-nums">−{foreign ? sym : "฿"}{fmtMoney(t.discount_foreign)}{foreign && (t.discount_thb ?? 0) > 0 ? <span className="ml-1 text-[11px] text-red-400">(฿{fmtMoney(t.discount_thb)})</span> : null}</dd></div>}
       {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()}){(t.discount_foreign ?? 0) > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums">{sym}{fmtMoney(t.subtotal_foreign)}</dd></div>}
       {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {fxRate || "—"}</dd></div>}
-      <div className="flex justify-between items-center"><dt className="text-slate-500">ค่าสินค้า</dt><dd className="tabular-nums">{foreign && onSetGoodsThb && t.subtotal_foreign > 0 ? <GoodsThbEdit value={t.subtotal_thb} onSet={onSetGoodsThb} /> : <>฿{fmtMoney(t.subtotal_thb)}</>}</dd></div>
+      <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า</dt><dd className="tabular-nums">฿{fmtMoney(t.subtotal_thb)}</dd></div>
       <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง <span className="text-[10px] text-slate-400">แยก</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t.ship_total_thb)}</dd></div>
       <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5"><dt className="font-semibold text-slate-700">รวมทั้งสิ้น</dt><dd className="tabular-nums font-bold text-slate-900 text-lg">฿{fmtMoney(t.grand_total_thb)}</dd></div>
     </dl>
@@ -97,28 +176,39 @@ function SummaryRows({ t, foreign, sym, fxRate, onSetGoodsThb }: { t: Totals; fo
 }
 
 /** ด้านขวาตอนเป็นร่าง: เช็กลิสต์ + สรุปยอด + บันทึกร่าง + ยืนยัน */
-export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, dirty, saving, onSave, onConfirm, onSetGoodsThb }: {
+export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb }: {
   items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
+  /** เรทอ้างอิง (เรทหยวนวันที่ใบ) — ใช้เตือนเรทผิดปกติ · ไม่มี = ไม่เทียบ */
+  refFx?: number | null;
   dirty: boolean; saving: boolean; onSave: () => void; onConfirm: () => void;
   /** แก้ยอดค่าสินค้าบาท → หน้าใบคิดเรทใหม่ (ใบร่างสกุลต่างประเทศ) */
   onSetGoodsThb?: (thb: number) => void;
 }) {
   const ok = canConfirm(items);
+  // ★ 2026-11-15 แบบ B: การ์ดเดียว 4 ช่อง — ตรวจ (ขาว) · ยอดเงิน (เทาอ่อน) · รวมทั้งสิ้น (แถบเข้ม) · ปุ่ม
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4">
-      <div className="text-sm font-semibold text-slate-700 mb-2">ก่อนยืนยัน</div>
-      <CheckList items={items} />
-      <div className="mt-3 pt-3 border-t border-slate-100"><SummaryRows t={totals} foreign={foreign} sym={sym} fxRate={fxRate} onSetGoodsThb={onSetGoodsThb} /></div>
-      <button onClick={onConfirm} disabled={saving}
-        className={`mt-3 w-full h-11 rounded-lg text-sm font-semibold text-white ${ok ? "bg-orange-600 hover:bg-orange-700" : "bg-orange-300 hover:bg-orange-400"} disabled:opacity-50`}>
-        ✓ ยืนยัน + ออกเลข
-      </button>
-      <button onClick={onSave} disabled={saving || !dirty}
-        className="mt-2 w-full h-9 rounded-lg text-sm border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-        {saving ? "กำลังบันทึก…" : dirty ? "💾 บันทึกร่าง (ยังไม่ยืนยัน)" : "บันทึกร่างแล้ว"}
-      </button>
-      <div className="mt-3 text-[11px] text-slate-500 leading-relaxed">
-        <b className="font-medium text-slate-600">กดยืนยันแล้ว:</b> ได้เลขใบ PV · ราคาอัปเดตที่ใบสั่งซื้อ / ราคาร้าน / ต้นทุนสินค้า · ใบล็อกแก้ราคาไม่ได้ · ต่อไปจ่ายเงิน
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 pt-3 pb-3">
+        <SectionTitle icon="inspect">ตรวจก่อนยืนยัน<CheckChip items={items} /></SectionTitle>
+        <div className="-mx-2"><CheckList items={items} /></div>
+      </div>
+      <MoneySection t={totals} foreign={foreign} sym={sym} fxRate={fxRate} refFx={refFx} onSetGoodsThb={onSetGoodsThb} />
+      <div className="bg-slate-800 text-white px-4 py-2.5 flex items-baseline justify-between gap-2">
+        <span className="text-sm text-slate-200">รวมทั้งสิ้น</span>
+        <span className="text-xl font-bold tabular-nums">฿{fmtMoney(totals.grand_total_thb)}</span>
+      </div>
+      <div className="px-4 py-3">
+        <button onClick={onConfirm} disabled={saving}
+          className={`w-full h-11 rounded-lg text-sm font-semibold text-white ${ok ? "bg-orange-600 hover:bg-orange-700" : "bg-orange-300 hover:bg-orange-400"} disabled:opacity-50`}>
+          ✓ ยืนยัน + ออกเลข
+        </button>
+        <button onClick={onSave} disabled={saving || !dirty}
+          className="mt-2 w-full h-9 rounded-lg text-sm border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+          {saving ? "กำลังบันทึก…" : dirty ? "💾 บันทึกร่าง (ยังไม่ยืนยัน)" : "บันทึกร่างแล้ว"}
+        </button>
+        <div className="mt-3 text-[11px] text-slate-500 leading-relaxed">
+          <b className="font-medium text-slate-600">กดยืนยันแล้ว:</b> ได้เลขใบ PV · ราคาอัปเดตที่ใบสั่งซื้อ / ราคาร้าน / ต้นทุนสินค้า · ใบล็อกแก้ราคาไม่ได้ · ต่อไปจ่ายเงิน
+        </div>
       </div>
     </div>
   );
@@ -130,6 +220,7 @@ export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRat
   skuCount: number; confirming: boolean; onClose: () => void; onConfirm: () => void;
 }) {
   const blocks = items.filter((c) => c.level === "block");
+  const fxWarn = items.find((c) => c.key === "fx" && c.level === "warn");
   const pos = header.po_nos.length ? header.po_nos.join(", ") : "—";
   const step = (n: number, title: string, body: React.ReactNode) => (
     <li className="flex gap-2.5">
@@ -147,6 +238,13 @@ export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRat
       {blocks.length > 0 && (
         <div className="mb-3 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">
           ยังยืนยันไม่ได้ — {blocks.map((b) => b.label).join(" · ")}
+        </div>
+      )}
+      {/* ★ 2026-11-15 เรทผิดปกติ (ต่างจากเรทวันที่ใบเกิน 10%) — เตือนอีกรอบก่อนกดยืนยัน (ยืนยันได้) */}
+      {fxWarn && (
+        <div className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+          <Icon name="warning" mode="line" size={15} className="mt-0.5 shrink-0 text-amber-600" />
+          <span>{fxWarn.label} — ตรวจยอดบาท/เรทอีกทีก่อนยืนยัน</span>
         </div>
       )}
       <div className="rounded-lg bg-slate-50 px-3 py-2 mb-3"><SummaryRows t={totals} foreign={foreign} sym={sym} fxRate={fxRate} /></div>
