@@ -25,13 +25,13 @@ import { useFileDrop } from "@/components/file-drop";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
-import { GalleryColumnsControl, useGalleryColumns } from "@/components/gallery-columns";
+import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@/components/gallery-columns";
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
 import { AlbumCover } from "@/components/album-cover";
 import { safeColor } from "@/components/design-dashboard/dashboard-helpers";
 import { withImageWidth } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
-import { albumPath, canMoveAlbum, photosToMove, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { albumPath, canMoveAlbum, isDayAlbum, photosToMove, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, restoreSample, setAlbumBrand, trashSample, uploadSample } from "./api";
 
 /** ลากภายในหน้า (รูป/อัลบั้ม) — ใช้ชนิดข้อมูลของเราเอง ตัวรับไฟล์จากเครื่อง (useFileDrop) จะไม่ยุ่ง */
@@ -73,7 +73,9 @@ export function SampleImagesPage() {
   const [toBrand, setToBrand] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const { cols, setCols, gridStyle } = useGalleryColumns("sample-images", 6);
+  // Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย (เจ้าของสั่ง 2026-11-15) — รูปในอัลบั้ม และการ์ดอัลบั้มหน้าแฟ้ม (จำแยกกัน รายคน)
+  const { cols, setCols, gridStyle, wheelRef } = useGalleryColumns("sample-images", 6, "0.75rem", { ctrlWheel: true });
+  const albumGrid = useGalleryColumns("sample-albums", 3, "0.75rem", { options: GALLERY_COL_CHOICES, ctrlWheel: true });
   const canView = can("assets.view"), canUpload = can("assets.upload"), canDelete = can("assets.delete"), canEdit = can("assets.edit");
   const canMove = can("attachments.upload");   // ส่งเข้าใบงาน = แนบไฟล์ (ด่านเดียวกับใน DB) — ไม่มีสิทธิ์ = ไม่โชว์ปุ่ม
   const brandOf = useCallback((id: string | null | undefined) => (id ? brands.find((b) => b.id === id) ?? null : null), [brands]);
@@ -210,7 +212,8 @@ export function SampleImagesPage() {
   };
 
   // ── อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14): สร้างจากรูปที่เลือก · ย้ายรูป/อัลบั้ม · เปลี่ยนชื่อ · ลบอัลบั้มว่าง ──
-  const nameOf = (a: SampleAlbum | null | undefined) => (a ? (a.parent_id ? a.name : `${brandOf(a.brand_id)?.name ? `${brandOf(a.brand_id)!.name} · ` : ""}${thaiShortDate(new Date(a.created_at))}`) : "");
+  // อัลบั้มของวัน = โชว์เป็นวันที่ · อัลบั้มที่ตั้งชื่อเอง (ชั้นไหนก็ได้ เช่น Louis Batch สร้าง) = ชื่อจริง
+  const nameOf = (a: SampleAlbum | null | undefined) => (a ? (!isDayAlbum(a) ? a.name : `${brandOf(a.brand_id)?.name ? `${brandOf(a.brand_id)!.name} · ` : ""}${thaiShortDate(new Date(a.created_at))}`) : "");
   const act = async (fn: () => Promise<string | null>, stayOn?: string | null) => {
     setBusy(true);
     try { const msg = await fn(); if (msg) pushToast("success", msg); await reload(stayOn); }
@@ -233,13 +236,13 @@ export function SampleImagesPage() {
     void act(async () => { await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้ายอัลบั้ม "${nameOf(moving)}" ${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, "Album moved"); }, albumId);
   };
   const rename = async () => {
-    if (!album?.parent_id) return;
+    if (!album || isDayAlbum(album)) return;
     const name = await askText({ title: t("เปลี่ยนชื่ออัลบั้ม", "Rename album"), initial: album.name, required: true, confirmText: t("บันทึก", "Save") });
     if (!name?.trim() || name.trim() === album.name) return;
     await act(async () => { await renameAlbum(album.id, name.trim()); return t("เปลี่ยนชื่ออัลบั้มแล้ว", "Album renamed"); }, album.id);
   };
   const removeEmpty = async () => {
-    if (!album?.parent_id) return;
+    if (!album || isDayAlbum(album)) return;
     if (!(await askConfirm({ title: t(`ลบอัลบั้ม "${album.name}"?`, `Delete "${album.name}"?`), message: t("อัลบั้มนี้ว่างแล้ว (ไม่มีรูป ไม่มีอัลบั้มย่อย)", "This album is empty"), variant: "danger", confirmText: t("ลบอัลบั้ม", "Delete album") }))) return;
     const parent = album.parent_id;
     await act(async () => { await deleteEmptyAlbum(album.id); return t("ลบอัลบั้มแล้ว", "Album deleted"); }, parent);
@@ -268,7 +271,7 @@ export function SampleImagesPage() {
 
   const dot = (color: string | null | undefined) => <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color ? safeColor(color) : "#cbd5e1" }} />;
   const pill = (on: boolean) => `inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] ${on ? "border-violet-300 bg-violet-50 font-medium text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`;
-  const albumLabel = (a: SampleAlbum) => (a.parent_id ? a.name : thaiShortDate(new Date(a.created_at)));
+  const albumLabel = (a: SampleAlbum) => (!isDayAlbum(a) ? a.name : thaiShortDate(new Date(a.created_at)));
 
   return (
     <div {...drop.guard} className="space-y-4 px-4 py-5 sm:px-8">
@@ -303,9 +306,13 @@ export function SampleImagesPage() {
 
             <div className="min-w-0 space-y-3">
               {!album && (
-                <div className="text-[13px] text-slate-500">
-                  <b className="font-semibold text-slate-800">{tab === ALL ? t("อัลบั้มทุกแบรนด์", "All albums") : tab === NONE ? t("อัลบั้มที่ยังไม่ระบุแบรนด์", "Albums without a brand") : t(`อัลบั้มของ ${brandOf(tab)?.name ?? ""}`, `Albums of ${brandOf(tab)?.name ?? ""}`)}</b>
-                  {tabAlbums.length > 0 && <> · {t(`${tabAlbums.length} อัลบั้ม`, `${tabAlbums.length} albums`)}</>}
+                <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-500">
+                  <span>
+                    <b className="font-semibold text-slate-800">{tab === ALL ? t("อัลบั้มทุกแบรนด์", "All albums") : tab === NONE ? t("อัลบั้มที่ยังไม่ระบุแบรนด์", "Albums without a brand") : t(`อัลบั้มของ ${brandOf(tab)?.name ?? ""}`, `Albums of ${brandOf(tab)?.name ?? ""}`)}</b>
+                    {tabAlbums.length > 0 && <> · {t(`${tabAlbums.length} อัลบั้ม`, `${tabAlbums.length} albums`)}</>}
+                  </span>
+                  <span className="flex-1" />
+                  {tabAlbums.length > 0 && <GalleryColumnsControl cols={albumGrid.cols} onChange={albumGrid.setCols} options={GALLERY_COL_CHOICES} as="select" wheelHint className="max-sm:hidden" />}
                 </div>
               )}
 
@@ -353,7 +360,7 @@ export function SampleImagesPage() {
                   {!album.brand_id && !album.parent_id && canEdit && brands.length > 0 && (
                     <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
                   )}
-                  {album.parent_id && canEdit && (
+                  {!isDayAlbum(album) && canEdit && (
                     <>
                       <button type="button" onClick={() => void rename()} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:pencil" />{t("เปลี่ยนชื่อ", "Rename")}</button>
                       <button type="button" onClick={() => setChooser((c) => (c === "album" ? null : "album"))} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:transfer-out" />{t("ย้ายอัลบั้มนี้", "Move album")}</button>
@@ -376,7 +383,7 @@ export function SampleImagesPage() {
                       <Icon value={trashView ? "i:arrow-left" : "i:trash"} />{trashView ? t("กลับไปที่รูป", "Back to photos") : t(`ถังขยะ (${trashCount})`, `Trash (${trashCount})`)}
                     </button>
                   )}
-                  <GalleryColumnsControl cols={cols} onChange={setCols} as="select" />
+                  <GalleryColumnsControl cols={cols} onChange={setCols} as="select" wheelHint />
                 </div>
 
                 {toBrand && !album.brand_id && (
@@ -399,7 +406,7 @@ export function SampleImagesPage() {
                       <button type="button" onClick={() => setChooser(null)} aria-label={t("ปิด", "Close")} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"><Icon value="i:x" /></button>
                     </div>
                     <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">
-                      {chooser === "album" && <button type="button" disabled={busy} onClick={() => moveAlbum(album.id, null)} className="inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 hover:border-violet-300"><Icon value="i:layout-grid" />{t("ชั้นบนสุด (หน้าแฟ้ม)", "Top level")}</button>}
+                      {chooser === "album" && album.parent_id && <button type="button" disabled={busy} onClick={() => moveAlbum(album.id, null)} className="inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 hover:border-violet-300"><Icon value="i:layout-grid" />{t("ชั้นบนสุด (หน้าแฟ้ม)", "Top level")}</button>}
                       {(albums ?? []).filter((a) => a.brand_id === album.brand_id && (chooser === "photos" ? a.id !== album.id : a.id !== album.parent_id && canMoveAlbum(tree, album.id, a.id))).slice(0, 60).map((a) => (
                         <button key={a.id} type="button" disabled={busy} onClick={() => (chooser === "photos" ? movePhotos(selected.map((p) => p.id), a) : moveAlbum(album.id, a))}
                           className="inline-flex h-8 max-w-full items-center gap-1 truncate rounded-full border border-slate-200 bg-white px-3 text-slate-700 hover:border-violet-300 disabled:opacity-60">
@@ -443,7 +450,7 @@ export function SampleImagesPage() {
                       title={trashView ? t("ถังขยะว่าง", "Trash is empty") : t("ยังไม่มีรูปในอัลบั้มนี้", "No images yet")}
                       hint={trashView ? undefined : t("ลากรูปมาวางด้านบนได้เลย", "Drop images above")} />)
                   : (
-                    <div className="grid" style={gridStyle}>
+                    <div ref={wheelRef} className="grid" style={gridStyle}>
                       {list.map((p) => {
                         const on = sel.has(p.id);
                         const over = overKey === `ph:${p.id}`;
@@ -479,7 +486,8 @@ export function SampleImagesPage() {
                 <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้ม", "No albums yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มของวันนี้ให้เอง", "Drop photos above — today's album is created for you") : undefined} />
               ) : (
                 /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
-                <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                /* จำนวนการ์ดต่อแถวตามที่เลือก (Ctrl + ลูกกลิ้ง / ▦) · มือถือคงไว้ 1–2 ต่อแถวเหมือนเดิม */
+                <div ref={albumGrid.wheelRef} style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
                   {tabAlbums.map((a) => {
                     const b = brandOf(a.brand_id);
                     return (

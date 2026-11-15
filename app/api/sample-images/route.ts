@@ -8,8 +8,9 @@
  * POST {action:"create_sub", parent_id, name, asset_ids?, from_album_id?} → สร้างอัลบั้มย่อย (+ ย้ายรูปที่เลือกเข้าไป)
  * POST {action:"move_photos", asset_ids, from_album_id, to_album_id} → ย้ายรูปจากอัลบั้มนี้ไปอีกอัลบั้ม
  * POST {action:"move_album", album_id, to_parent_id|null}           → ย้ายทั้งอัลบั้มเข้าไปในอีกอัลบั้ม / ขึ้นชั้นบนสุด (กันวนซ้ำ)
- * POST {action:"rename", album_id, name}                            → เปลี่ยนชื่ออัลบั้มย่อย (อัลบั้มของวันใช้ชื่อตามวันที่ เปลี่ยนไม่ได้)
- * POST {action:"delete_album", album_id}                            → ลบอัลบั้มย่อยที่ว่างแล้ว (ไม่มีรูป ไม่มีอัลบั้มย่อย)
+ * POST {action:"create_top", brand_id?, name}                      → สร้างอัลบั้มชั้นบนสุดตั้งชื่อเอง (Louis Batch · ชื่อ+แบรนด์ซ้ำ = ใช้อันเดิม)
+ * POST {action:"rename", album_id, name}                            → เปลี่ยนชื่ออัลบั้ม (ยกเว้นอัลบั้มของวัน = isDayAlbum ใช้ชื่อตามวันที่)
+ * POST {action:"delete_album", album_id}                            → ลบอัลบั้มที่ว่างแล้ว (ไม่มีรูป ไม่มีอัลบั้มย่อย · ยกเว้นอัลบั้มของวัน)
  *
  * อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14 · ไม่แก้ฐานข้อมูล): จดอัลบั้มแม่ในป้ายเดิม description "sample-images[:<brand>]|in:<parent>"
  * ของที่ทำผ่าน API กลางเดิม (ไม่เขียนซ้ำ):
@@ -24,7 +25,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { actorId } from "@/app/api/assets/shared";
 import {
-  SAMPLE_ALBUM_MARK, canMoveAlbum, descendantIds, inferAlbumBrand, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
+  SAMPLE_ALBUM_MARK, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
   type SampleAlbum, type SampleBrand, type SamplePhoto, type SampleSheetRef,
 } from "@/lib/sample-images";
 
@@ -206,6 +207,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ data: made, created: true, error: null });
     }
 
+    // ── สร้างอัลบั้มชั้นบนสุด ตั้งชื่อเอง (Louis Batch "อัลบั้มใหม่" — เจ้าของสั่ง 2026-11-15 "สร้างใหม่ข้างนอก ไม่เอาข้างใน") ──
+    //   แบรนด์เดียวกัน + ชื่อเดียวกัน (ชั้นบนสุด) มีอยู่แล้ว = ใช้อันเดิม กันอัลบั้มแฝดตอนส่งซ้ำ
+    if (body.action === "create_top") {
+      const denied = await guardApi(request, "assets.upload");
+      if (denied) return denied;
+      const name = cleanName(body.name);
+      if (!name) return NextResponse.json({ error: "ใส่ชื่ออัลบั้มก่อน" }, { status: 400 });
+      if (looksLikeDayAlbumName(name)) return NextResponse.json({ error: "ชื่อนี้เหมือนอัลบั้มของวัน — ตั้งชื่ออื่น" }, { status: 400 });
+      const brand = await brandOf(body.brand_id);
+      if (body.brand_id && !brand) return NextResponse.json({ error: "ไม่พบแบรนด์นี้" }, { status: 400 });
+      const mark = sampleAlbumMark(brand?.id);
+      const { data: found, error } = await admin.from("asset_collections").select("id, name")
+        .eq("description", mark).eq("name", name).order("created_at", { ascending: true }).limit(1).maybeSingle();
+      if (error) return NextResponse.json({ error: "หาอัลบั้มไม่สำเร็จ" }, { status: 500 });
+      if (found) return NextResponse.json({ data: found, created: false, error: null });
+      const { data: made, error: e2 } = await admin.from("asset_collections").insert({ name, description: mark }).select("id, name").single();
+      if (e2 || !made) return NextResponse.json({ error: "สร้างอัลบั้มไม่สำเร็จ" }, { status: 500 });
+      await audit("create", made.id as string, { name, brand_id: brand?.id ?? null, top_level: true });
+      return NextResponse.json({ data: made, created: true, error: null });
+    }
+
     // ── สร้างอัลบั้มย่อย (+ ย้ายรูปที่เลือกเข้าไป) ──
     if (body.action === "create_sub") {
       const denied = await guardApi(request, "assets.upload");
@@ -268,7 +290,8 @@ export async function POST(request: NextRequest) {
       const all = await loadAlbums(admin, 2000);
       const album = all.find((a) => a.id === body.album_id);
       if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
-      if (!album.parentId) return NextResponse.json({ error: "อัลบั้มของวันใช้ชื่อตามวันที่ — เปลี่ยนได้เฉพาะอัลบั้มย่อย" }, { status: 400 });
+      if (isDayAlbum(album)) return NextResponse.json({ error: "อัลบั้มของวันใช้ชื่อตามวันที่ — เปลี่ยนชื่อไม่ได้" }, { status: 400 });
+      if (!album.parentId && looksLikeDayAlbumName(name)) return NextResponse.json({ error: "ชื่อนี้เหมือนอัลบั้มของวัน — ตั้งชื่ออื่น" }, { status: 400 });
       await admin.from("asset_collections").update({ name }).eq("id", album.id);
       await audit("update", album.id, { old_name: album.name, new_name: name });
       return NextResponse.json({ data: { id: album.id, name }, error: null });
@@ -281,7 +304,7 @@ export async function POST(request: NextRequest) {
       const all = await loadAlbums(admin, 2000);
       const album = all.find((a) => a.id === body.album_id);
       if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
-      if (!album.parentId) return NextResponse.json({ error: "ลบได้เฉพาะอัลบั้มย่อย" }, { status: 400 });
+      if (isDayAlbum(album)) return NextResponse.json({ error: "อัลบั้มของวันลบไม่ได้ — ลบได้เฉพาะอัลบั้มที่ตั้งชื่อเอง" }, { status: 400 });
       const { count } = await admin.from("asset_collection_map").select("asset_id", { count: "exact", head: true }).eq("collection_id", album.id);
       if ((count ?? 0) > 0 || all.some((a) => a.parentId === album.id)) return NextResponse.json({ error: "อัลบั้มยังมีรูปหรืออัลบั้มย่อยอยู่ — ย้ายออกก่อนค่อยลบ" }, { status: 409 });
       await admin.from("asset_collections").delete().eq("id", album.id);
@@ -298,11 +321,13 @@ export async function POST(request: NextRequest) {
       const all = await loadAlbums(admin, 2000);
       const a = all.find((x) => x.id === String(body.album_id ?? ""));
       if (!a) return NextResponse.json({ error: "ไม่พบอัลบั้มนี้" }, { status: 404 });
-      const name = a.parentId ? a.name : sampleAlbumName(new Date(a.created_at), brand.name);
+      // อัลบั้มของวัน = ตั้งชื่อใหม่ตามแบรนด์ + รวมกับอัลบั้มวันเดียวกันของแบรนด์นั้น · อัลบั้มที่ตั้งชื่อเอง = ชื่อเดิม ไม่รวม
+      const day = isDayAlbum(a);
+      const name = day ? sampleAlbumName(new Date(a.created_at), brand.name) : a.name;
       const desc = sampleAlbumMark(brand.id, a.parentId);
       const { data: maps } = await admin.from("asset_collection_map").select("asset_id").eq("collection_id", a.id);
       const ids = ((maps ?? []) as { asset_id: string }[]).map((m) => m.asset_id);
-      const target = a.parentId ? null : all.find((x) => x.id !== a.id && !x.parentId && x.brandId === brand.id && x.name === name) ?? null;
+      const target = day ? all.find((x) => x.id !== a.id && !x.parentId && x.brandId === brand.id && x.name === name) ?? null : null;
       let resultId = a.id;
       if (target) {
         // แบรนด์นี้มีอัลบั้มวันเดียวกันอยู่แล้ว → รวมรูปเข้าอัลบั้มนั้น · อัลบั้มย่อยย้ายตามไปอยู่ในอัลบั้มนั้น · แล้วลบอัลบั้มเปล่า

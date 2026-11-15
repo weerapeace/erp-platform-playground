@@ -896,7 +896,8 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "gallery-columns", label: "เลือกจำนวนการ์ดต่อแถว", code: "GalleryColumns", category: "layout",
     source: { path: "components/gallery-columns" },
-    what: "ปุ่มเลือกว่ามุมมองกริดจะโชว์กี่การ์ดต่อแถว (จำค่าไว้)",
+    what: "ปุ่มเลือกว่ามุมมองกริดจะโชว์กี่การ์ดต่อแถว (จำค่าไว้) · เปิด { ctrlWheel: true } = Ctrl + หมุนลูกกลิ้งบนกริดย่อ/ขยายการ์ดได้ (ผูก wheelRef ที่กริด) · options GALLERY_COL_CHOICES มี 2 ต่อแถวสำหรับการ์ดใหญ่",
+    when: "หน้าที่โชว์การ์ด/รูปเป็นกริด แล้วอยากให้คนเลือกขนาดเอง",
   },
   {
     key: "info-hint", label: "ปุ่มคำอธิบายสั้น ๆ", code: "InfoHint", category: "layout",

@@ -46,6 +46,15 @@ export type SampleAlbum = {
 export const sampleAlbumMark = (brandId: string | null | undefined, parentId?: string | null): string =>
   `${brandId ? `${SAMPLE_ALBUM_MARK}:${brandId}` : SAMPLE_ALBUM_MARK}${parentId ? `|in:${parentId}` : ""}`;
 
+/** ชื่อแบบอัลบั้มของวัน ("SAMPLE [แบรนด์] 15 พ.ย. 2569" = sampleAlbumName) */
+export const looksLikeDayAlbumName = (name: string | null | undefined): boolean => /^SAMPLE\s.*\d{4}$/.test(String(name ?? "").trim());
+
+/** อัลบั้มของวัน = ชั้นบนสุด + ชื่อแบบ sampleAlbumName → การ์ดโชว์เป็นวันที่ · ชื่อล็อก (เปลี่ยน/ลบไม่ได้)
+ *  อัลบั้มชั้นบนสุดอื่น (Louis Batch สร้างให้ "อัลบั้มใหม่" · อัลบั้มย่อยที่ย้ายขึ้นมา — เจ้าของสั่ง 2026-11-15) = ใช้ชื่อจริง เปลี่ยนชื่อ/ลบตอนว่างได้ */
+export function isDayAlbum(a: { name: string; parent_id?: string | null; parentId?: string | null }): boolean {
+  return !(a.parent_id ?? a.parentId ?? null) && looksLikeDayAlbumName(a.name);
+}
+
 /** อ่านป้ายอัลบั้ม → ไม่ใช่อัลบั้ม SAMPLE = null */
 export function parseSampleMark(desc: string | null | undefined): { brandId: string | null; parentId: string | null } | null {
   if (typeof desc !== "string") return null;

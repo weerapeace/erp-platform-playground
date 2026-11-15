@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+import { albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+
+describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
+  it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
+    const day = sampleAlbumName(new Date("2026-11-15T05:00:00Z"), "Good Goods");
+    expect(isDayAlbum({ name: day, parent_id: null })).toBe(true);
+    expect(isDayAlbum({ name: sampleAlbumName(new Date("2026-11-15T05:00:00Z")), parentId: null })).toBe(true);
+    expect(isDayAlbum({ name: "2026-11-15-002", parent_id: null })).toBe(false);      // Louis Batch "อัลบั้มใหม่"
+    expect(isDayAlbum({ name: day, parent_id: "p1" })).toBe(false);                    // อัลบั้มของวันที่ถูกย้ายเข้าไปในอัลบั้มอื่น
+    expect(isDayAlbum({ name: "SAMPLE ทดลอง", parent_id: null })).toBe(false);
+    expect(looksLikeDayAlbumName("  SAMPLE Louis Montini 1 ม.ค. 2570 ")).toBe(true);
+    expect(looksLikeDayAlbumName("")).toBe(false);
+  });
+});
 
 describe("ชื่ออัลบั้มตามแบรนด์ + วันที่ลง (เวลาไทย)", () => {
   it("วันไทย ปี พ.ศ. · ใช้เวลาไทยไม่ใช่ UTC", () => {
