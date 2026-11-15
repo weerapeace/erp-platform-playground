@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { fetchVoucher, recomputeVoucher, snapshotVoucher, restoreVoucherSnapshot } from "@/lib/purchase-voucher-server";
 import { writeBackVoucherPrices } from "@/lib/voucher-writeback";
 import { saveRevision, listRevisions, getRevision, VOUCHER_ENTITY } from "@/lib/document-revisions";
-import { diffVoucherSnapshots, type VoucherSnapshot } from "@/lib/voucher-revision";
+import { diffVoucherSnapshots, pvNoNeedsRenumber, type VoucherSnapshot } from "@/lib/voucher-revision";
 import { isForeignCurrency } from "@/lib/landed-cost";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,8 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const actorName = (user?.user_metadata?.name as string) || user?.email || null;
   const { id } = await params;
-  let body: { action?: string; reason?: string };
+  /** renumber = ตอนบันทึกการแก้ไข เปลี่ยนเลขใบตามวันที่ใบ (เลขเดิมวันที่ไม่ตรง — ★ 2026-11-15 เจ้าของเลือกแบบ ก.) */
+  let body: { action?: string; reason?: string; renumber?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const { data: cur } = await admin.from("purchase_vouchers_v2").select("id, status, pv_no, revision, editing_at, editing_by, edit_reason, confirmed_at, confirmed_by").eq("id", id).maybeSingle();
@@ -92,6 +93,16 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   if (missing.length) return NextResponse.json({ error: `ยังไม่ได้ใส่ราคา ${missing.length} รายการ: ${missing.slice(0, 3).map((l) => l.item_name).join(", ")}${missing.length > 3 ? " …" : ""}` }, { status: 400 });
   if (isForeignCurrency(v.header.currency) && !(Number(v.header.fx_rate) > 0)) return NextResponse.json({ error: "ต้องใส่เรทแปลงเป็นบาทก่อน" }, { status: 400 });
 
+  // ★ 2026-11-15 เลขใบตามวันที่ใบ (เลือกแล้วในป๊อป) — เลขถัดไปที่ว่างของวันนั้น (ระบบออกเลขกลาง ไม่ชนใบอื่น) · เลขเก่าอยู่ในเวอร์ชันก่อน + diff
+  let renumbered: { from: string | null; to: string } | null = null;
+  if (body.renumber && pvNoNeedsRenumber(v.header.pv_no, v.header.voucher_date)) {
+    const { data: nn, error: ne } = await admin.rpc("erp_next_number_at", { p_key: "pv", p_date: String(v.header.voucher_date).slice(0, 10), p_branch: null, p_exclude_id: id });
+    if (ne || !nn) return NextResponse.json({ error: "ออกเลขใหม่ไม่สำเร็จ: " + (ne?.message ?? "ไม่ได้เลข") }, { status: 500 });
+    const { error: ue } = await admin.from("purchase_vouchers_v2").update({ pv_no: String(nn), updated_at: new Date().toISOString() }).eq("id", id);
+    if (ue) return NextResponse.json({ error: "เปลี่ยนเลขใบไม่สำเร็จ: " + ue.message }, { status: 500 });
+    renumbered = { from: v.header.pv_no, to: String(nn) };
+    v.header.pv_no = String(nn);
+  }
   const prev = await getRevision(admin, VOUCHER_ENTITY, id, revision);
   const next = await snapshotVoucher(admin, id);
   const diff = prev?.snapshot ? diffVoucherSnapshots(prev.snapshot as VoucherSnapshot, next) : [];
@@ -107,11 +118,11 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   await admin.from("purchase_vouchers_v2").update({ ...clearEditing, revision: newRev }).eq("id", id);
   await writeAudit(admin, {
     action: "revise_save", entityType: VOUCHER_ENTITY, entityId: id, actorId: user?.id ?? null, actorName,
-    metadata: { pv_no: v.header.pv_no, rev_no: newRev, reason: c.edit_reason ?? null, diff, grand_total_thb: v.header.grand_total_thb, write_back: results, price_before: before },
+    metadata: { pv_no: v.header.pv_no, rev_no: newRev, reason: c.edit_reason ?? null, diff, renumbered, grand_total_thb: v.header.grand_total_thb, write_back: results, price_before: before },
   });
   // จ่ายค่าสินค้าไปแล้ว + ยอดใหม่ไม่เท่าที่จ่าย → เตือน (ไม่แก้การจ่ายเงินเอง)
   const payWarnings = v.header.po_payments
     .filter((p) => String(p.payment_status).toLowerCase() === "paid" && p.paid_amount_thb != null && Math.abs(Number(p.paid_amount_thb) - p.goods_thb) > 1)
     .map((p) => ({ po_no: p.po_no, paid_thb: Number(p.paid_amount_thb), now_thb: p.goods_thb }));
-  return NextResponse.json({ ok: true, rev_no: newRev, diff, failed: results.filter((r) => r.error).length, pay_warnings: payWarnings, data: await fetchVoucher(admin, id), error: null });
+  return NextResponse.json({ ok: true, rev_no: newRev, renumbered, diff, failed: results.filter((r) => r.error).length, pay_warnings: payWarnings, data: await fetchVoucher(admin, id), error: null });
 }

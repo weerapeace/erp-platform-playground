@@ -37,3 +37,19 @@ describe("voucher-revision", () => {
     expect(m[1].po_line_id).toBe("pl2");
   });
 });
+
+describe("voucher-revision — เลขใบตามวันที่ (★ 2026-11-15 แบบ ก.)", () => {
+  it("อ่านวันที่จากเลข · เลขไม่ตรงวันที่ใบ/เลขแบบเก่า = ควรเปลี่ยน", async () => {
+    const { pvNoDate, pvNoNeedsRenumber } = await import("@/lib/voucher-revision");
+    expect(pvNoDate("PV2026-10-05-001")).toBe("2026-10-05");
+    expect(pvNoDate("PV-2026-00002")).toBeNull();
+    expect(pvNoNeedsRenumber("PV2020-10-10-001", "2026-10-05")).toBe(true);
+    expect(pvNoNeedsRenumber("PV2026-10-05-001", "2026-10-05")).toBe(false);
+    expect(pvNoNeedsRenumber("PV-2026-00002", "2026-11-05")).toBe(true);
+    expect(pvNoNeedsRenumber(null, "2026-11-05")).toBe(false);
+  });
+  it("เลขใบเปลี่ยน = ขึ้นในรายการสิ่งที่เปลี่ยน", () => {
+    const d = diffVoucherSnapshots({ header: { pv_no: "PV2020-10-10-001" }, lines: [] }, { header: { pv_no: "PV2026-10-05-001" }, lines: [] });
+    expect(d).toContainEqual({ label: "เลขใบ", before: "PV2020-10-10-001", after: "PV2026-10-05-001" });
+  });
+});

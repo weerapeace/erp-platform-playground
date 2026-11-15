@@ -14,6 +14,18 @@ type Row = Record<string, unknown>;
 export const voucherEditable = (v: { status?: string | null; editing_at?: string | null } | null | undefined) =>
   !!v && (v.status === "draft" || (v.status === "confirmed" && !!v.editing_at));
 
+/** ★ 2026-11-15 วันที่ในเลขใบ (PV2026-10-05-001 → "2026-10-05") · เลขแบบเก่า (PV-2026-00002) = null */
+export function pvNoDate(pvNo: string | null | undefined): string | null {
+  const m = String(pvNo ?? "").match(/^PV(\d{4})-(\d{2})-(\d{2})-\d+$/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+/**
+ * ★ 2026-11-15 เจ้าของเลือกแบบ ก.: แก้วันที่ใบหลังยืนยันแล้ว เลขควรตามวันที่ (เคยเจอ PV2020-10-10-001 ทั้งที่วันที่ใบ 05/10/2026)
+ * เลขไม่ตรงวันที่ใบ (หรือเป็นเลขแบบเก่า) = ควรเปลี่ยน → ตอนบันทึกการแก้ไขถาม "เปลี่ยนเลขตามวันที่ใบไหม"
+ */
+export const pvNoNeedsRenumber = (pvNo: string | null | undefined, voucherDate: string | null | undefined) =>
+  !!pvNo && !!voucherDate && pvNoDate(pvNo) !== String(voucherDate).slice(0, 10);
+
 /** เอกสารทั้งใบของ 1 เวอร์ชัน (เก็บใน document_revisions.snapshot) */
 export type VoucherSnapshot = {
   header: Row;            // แถว purchase_vouchers_v2
@@ -23,6 +35,7 @@ export type VoucherSnapshot = {
 export type DiffItem = { label: string; before: string | null; after: string | null };
 
 const HEADER_FIELDS: { key: string; label: string; kind: "num" | "text" | "date" | "method" }[] = [
+  { key: "pv_no", label: "เลขใบ", kind: "text" },
   { key: "voucher_date", label: "วันที่ใบ", kind: "date" },
   { key: "fx_rate", label: "เรท", kind: "num" },
   { key: "seller_ship_foreign", label: "ค่าส่งในจีน", kind: "num" },

@@ -29,6 +29,7 @@ import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist, paidDiff, PAID_TOLERANCE_THB } from "@/lib/purchase-voucher-checklist";
 import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
 import { RevisionHistory } from "./revision-history";
+import { pvNoNeedsRenumber } from "@/lib/voucher-revision";
 
 type Detail = { header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate?: number | null };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -143,12 +144,12 @@ export default function PurchaseVoucherFormPage() {
   // ใบร่าง หรือใบยืนยันแล้วที่ "เปิดแก้" อยู่ = แก้ได้ (lib/voucher-revision)
   const editing = data?.header.status === "confirmed" && !!data?.header.editing_at;
   const readonly = !canEdit || !((data?.header.status ?? "draft") === "draft" || editing);
-  const reviseCall = async (action: "start" | "save" | "cancel", reason?: string) => {
+  const reviseCall = async (action: "start" | "save" | "cancel", reason?: string, renumber = false) => {
     setReviseBusy(true);
     try {
       if (action === "save") await panelRef.current?.flush();   // บิลร้านที่แก้ค้าง
       if (action === "save" && dirty && !(await save())) return;
-      const res = await apiFetch(`/api/purchasing/vouchers/${id}/revise`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason }) });
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/revise`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason, renumber }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       applyData(j.data as Detail);
@@ -157,12 +158,18 @@ export default function PurchaseVoucherFormPage() {
       if (action === "cancel") { setReviseCancelOpen(false); toast.success("ยกเลิกการแก้แล้ว — ใบกลับเป็นเวอร์ชันล่าสุด"); }
       if (action === "save") {
         if (j.unchanged) toast.success("ไม่มีอะไรเปลี่ยน — ปิดการแก้แล้ว");
-        else toast.success(`บันทึกการแก้ไขแล้ว (เวอร์ชัน ${j.rev_no}) · เปลี่ยน ${(j.diff ?? []).length} จุด${j.failed ? ` · เขียนราคากลับไม่สำเร็จ ${j.failed} รายการ` : ""}`);
+        else toast.success(`บันทึกการแก้ไขแล้ว (เวอร์ชัน ${j.rev_no}) · เปลี่ยน ${(j.diff ?? []).length} จุด${j.renumbered ? ` · เลขใบใหม่ ${j.renumbered.to}` : ""}${j.failed ? ` · เขียนราคากลับไม่สำเร็จ ${j.failed} รายการ` : ""}`);
         for (const w of (j.pay_warnings ?? []) as { po_no: string; paid_thb: number; now_thb: number }[])
           toast.error(`${w.po_no} จ่ายไปแล้ว ฿${fmtMoney(w.paid_thb)} แต่ยอดใหม่ ฿${fmtMoney(w.now_thb)} (ต่าง ฿${fmtMoney(Math.abs(w.now_thb - w.paid_thb))}) — ตรวจการจ่ายเงิน`);
       }
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setReviseBusy(false); }
+  };
+  // ★ 2026-11-15 เจ้าของเลือกแบบ ก.: บันทึกการแก้ไขแล้ววันที่ในเลขไม่ตรงวันที่ใบ → ถามเปลี่ยนเลขตามวันที่ (เลขถัดไปที่ว่างของวันนั้น)
+  const [renumberAsk, setRenumberAsk] = useState(false);
+  const startReviseSave = () => {
+    if (pvNoNeedsRenumber(data?.header.pv_no, h.voucher_date)) { setRenumberAsk(true); return; }
+    void reviseCall("save");
   };
   const currency = data?.header.currency ?? "THB";
   const foreign = isForeignCurrency(currency);
@@ -438,7 +445,7 @@ export default function PurchaseVoucherFormPage() {
                 {canRevise && (
                   <div className="flex items-center gap-2">
                     <button onClick={() => setReviseCancelOpen(true)} disabled={reviseBusy} className="h-9 px-3 text-xs rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิกการแก้</button>
-                    <button onClick={() => void reviseCall("save")} disabled={reviseBusy || saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
+                    <button onClick={startReviseSave} disabled={reviseBusy || saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
                   </div>
                 )}
               </div>
@@ -701,7 +708,7 @@ export default function PurchaseVoucherFormPage() {
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
                 {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving || reviseBusy}
-                    onSave={() => void save()} onConfirm={editing ? () => void reviseCall("save") : () => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb}
+                    onSave={() => void save()} onConfirm={editing ? startReviseSave : () => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb}
                     revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
@@ -768,7 +775,7 @@ export default function PurchaseVoucherFormPage() {
                 saveLabel={editing ? "💾 เก็บที่แก้ไว้ก่อน" : "💾 บันทึกร่าง"} onSave={saveAll}
                 note={editing ? `กำลังแก้ → เวอร์ชัน ${hd.revision + 1} · กด "บันทึกการแก้ไข" เมื่อเสร็จ` : "บิลร้าน + หัวใบ + รายการ"}
                 extra={editing
-                  ? (canRevise ? <button type="button" onClick={() => void reviseCall("save")} disabled={reviseBusy || saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ บันทึกการแก้ไข</button> : null)
+                  ? (canRevise ? <button type="button" onClick={startReviseSave} disabled={reviseBusy || saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ บันทึกการแก้ไข</button> : null)
                   : (hd.status === "draft" && canEdit ? <button type="button" onClick={() => setConfirmOpen(true)} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50">✓ ยืนยัน + ออกเลข</button> : null)} />
             )}
           </>
@@ -820,6 +827,17 @@ export default function PurchaseVoucherFormPage() {
             <button onClick={() => void reviseCall("cancel")} disabled={reviseBusy} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{reviseBusy ? "กำลังคืน…" : "ยกเลิกการแก้"}</button>
           </>}>
           <p className="text-sm text-slate-600">หัวใบ รายการ และบิลที่แนบ จะกลับเป็นแบบก่อนเปิดแก้</p>
+        </ERPModal>
+      )}
+      {/* ★ 2026-11-15 บันทึกการแก้ไข + วันที่ในเลขไม่ตรงวันที่ใบ → ถามเปลี่ยนเลข (แบบ ก.) */}
+      {renumberAsk && hd && (
+        <ERPModal open onClose={() => !reviseBusy && setRenumberAsk(false)} size="sm" storageKey="pv-revise-renumber"
+          title="เปลี่ยนเลขใบตามวันที่ใบ?" description={`เลข ${hd.pv_no ?? "—"} ไม่ตรงวันที่ใบ ${h.voucher_date ? formatDate(h.voucher_date) : "—"}`}
+          footer={<>
+            <button onClick={() => { setRenumberAsk(false); void reviseCall("save", undefined, false); }} disabled={reviseBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">คงเลขเดิม</button>
+            <button onClick={() => { setRenumberAsk(false); void reviseCall("save", undefined, true); }} disabled={reviseBusy} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">เปลี่ยนเลขตามวันที่</button>
+          </>}>
+          <p className="text-sm text-slate-600">ระบบจะใช้เลขถัดไปที่ยังว่างของวันที่ {h.voucher_date ? formatDate(h.voucher_date) : "—"} (ไม่ชนใบอื่น) · เลขเดิมเก็บไว้ในประวัติการแก้ไข</p>
         </ERPModal>
       )}
       {/* ยกเลิกใบที่ยืนยันแล้ว */}
