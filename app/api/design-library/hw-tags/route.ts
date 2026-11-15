@@ -1,7 +1,9 @@
 /**
  * 📚 Design Library — เสนอแท็กอะไหล่จากชื่อ SKU แล้วให้คนติ๊กยืนยัน (รอบ 7 · เจ้าของเลือก 2026-11-14)
- *   GET  → SKU ที่ชื่อเหมือนอะไหล่ (lib/design-library-hwtags) จัดตามแท็กย่อยที่เสนอ · กันสินค้าสำเร็จรูปออก (ชื่อ / แท็ก Brands · หมวดหมู่สินค้า)
+ *   GET  → SKU ที่ชื่อเหมือนอะไหล่ (lib/design-library-hwtags) จัดตามแท็กย่อยที่เสนอ · กันสินค้าสำเร็จรูปออก (ชื่อ / แท็กหมวดหมู่สินค้า)
  *          บอกว่าตัวไหนติดแท็กย่อยนั้นอยู่แล้ว
+ *          2026-11-15: เลิกใช้แท็ก Brands ตัดสินว่าเป็นสินค้าสำเร็จ (ระบบช่วยเดาแท็กใส่แบรนด์ให้วัตถุดิบด้วย เช่น IG International)
+ *          + ข้ามตัวที่มีแท็กวัตถุดิบอื่นแล้ว (ซิป/หนัง/PU …) — กลุ่ม วัตถุดิบ เลือกได้ 1
  *   POST { items: [{ tag, sku_ids[] }] } → สร้างกลุ่มแท็ก "อะไหล่" (ใต้ วัตถุดิบ) + แท็กย่อยถ้ายังไม่มี → ติดแท็กให้ SKU ที่ติ๊ก
  *          trigger roll-up (erp_sku_family_tag_rollup) ติดแท็กพ่อ "อะไหล่" ให้เอง · ไม่ลบแท็กเดิมของใคร · audit 1 แถว
  * สิทธิ์: ดู design_library.view · บันทึก products.edit
@@ -51,9 +53,12 @@ export async function GET(request: NextRequest) {
     if (error) return bad("โหลดรายการ SKU ไม่สำเร็จ กรุณาลองใหม่", 500);
     const rows = ((data ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null }[]).filter((r) => !looksFinished(r.name_th));
     const { groups, fams } = await tree(admin);
-    const finishedGroups = withChildren(groups, ["หมวดหมู่สินค้า", "Brands", "ฺBrands"]);
+    const finishedGroups = withChildren(groups, ["หมวดหมู่สินค้า"]);
     const finishedFams = new Set(fams.filter((f) => f.group_id && finishedGroups.has(f.group_id)).map((f) => f.id));
     const hwGroup = groups.find((g) => g.name.trim() === HW_PARENT);
+    // แท็กวัตถุดิบชนิดอื่น (ไม่ใช่ อะไหล่/แท็กย่อยอะไหล่) — มีแล้ว = ไม่เสนออะไหล่ซ้ำ (กันผิดกฎเลือกได้ 1)
+    const matGroups = withChildren(groups, [HW_PARENT_GROUP]);
+    const otherMatFams = new Set(fams.filter((f) => f.group_id && matGroups.has(f.group_id) && f.group_id !== hwGroup?.id && f.name.trim() !== HW_PARENT).map((f) => f.id));
     const subByName = new Map(fams.filter((f) => hwGroup && f.group_id === hwGroup.id).map((f) => [f.name.trim(), f.id]));
     const links = await linksOf(admin, rows.map((r) => r.id));
     const tagsOf = new Map<string, Set<string>>();
@@ -62,7 +67,7 @@ export async function GET(request: NextRequest) {
     let skipped = 0;
     for (const r of rows) {
       const t = tagsOf.get(r.id) ?? new Set<string>();
-      if ([...t].some((x) => finishedFams.has(x))) { skipped++; continue; }
+      if ([...t].some((x) => finishedFams.has(x) || otherMatFams.has(x))) { skipped++; continue; }
       const tag = suggestHwTag(r.name_th); if (!tag) continue;
       const subId = subByName.get(tag);
       (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push({ id: r.id, code: r.code, name: r.name_th ?? r.code, image_key: r.cover_image_r2_key, tagged: !!subId && t.has(subId) });

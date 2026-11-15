@@ -1128,6 +1128,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "ไล่ดูสินค้าจากกลุ่มหลัก → กลุ่มย่อย → แท็ก (มี Taobao และขอเพิ่มวัตถุดิบในตัว)",
   },
   {
+    key: "tag-suggest", label: "ระบบช่วยเดาแท็ก", code: "TagSuggestModal", category: "feature",
+    source: { path: "components/tag-suggest" },
+    what: "เดาแท็กให้สินค้าที่ยังไม่มี จากแบรนด์/หมวดของ Parent และรหัส/คำในชื่อ แล้วให้คนยืนยันทีละกลุ่มก่อนบันทึก (ไม่ใช้ AI)",
+    when: "อยากเติมแท็กให้สินค้าจำนวนมากที่ยังว่าง · เพิ่มกฎคำ → แท็ก ที่ lib/tag-suggest-rules",
+    notWhen: "ใส่แท็กชุดเดียวกันให้สินค้าที่เลือกเอง ให้ใช้ตะกร้าในหน้า Tags Manager · แท็กย่อยอะไหล่ใน Design Library ใช้ป๊อปของ Design Library (คำอะไหล่ชุดเดียวกัน)",
+    doc: "tag-suggest.md",
+  },
+  {
     key: "marketing-sku-picker", label: "ป๊อปเลือกรุ่นแบบการ์ดรูป", code: "MarketingSkuPickerModal", category: "pick",
     source: { path: "components/marketing-sku-picker-modal" },
     what: "เลือกหลายรุ่นจากการ์ดรูป แยกแบรนด์ กรองป้าย (แบบหน้า SKU การตลาด)",

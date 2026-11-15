@@ -21,6 +21,11 @@ import { FamilyNavTabs } from "@/components/family-nav-tabs";
 import { IconPicker } from "@/components/icon-picker";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
+import { Icon } from "@/components/icon";
+import dynamic from "next/dynamic";
+
+// ระบบช่วยเดาแท็ก (ของกลาง components/tag-suggest) — โหลดเมื่อกดเปิดเท่านั้น
+const TagSuggestModal = dynamic(() => import("@/components/tag-suggest").then((m) => m.TagSuggestModal), { ssr: false });
 
 type Rec = { id: string; code: string; name: string; image: string | null };
 type Tag = { id: string; label: string; group_id: string | null };
@@ -174,6 +179,7 @@ export default function TagsManagerPage() {
   // จัดการแท็ก (แก้ชื่อ / ลบ / ย้ายกลุ่ม) — ของกลาง TagOrganizerModal ตัวเดียวกับในช่องแท็กของ drawer สินค้า
   const [tagMgr, setTagMgr] = useState(false);
   const [prefixMgr, setPrefixMgr] = useState(false);   // จัดการรหัสนำหน้า SKU ต่อแท็ก
+  const [suggestOpen, setSuggestOpen] = useState(false);   // ระบบช่วยเดาแท็ก
   const loadGroups = useCallback(() => {
     apiFetch(`/api/master-v2/product_family_groups?limit=500`).then((r) => r.json())
       .then((j) => setGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
@@ -475,6 +481,7 @@ export default function TagsManagerPage() {
       {groupMgr && <GroupManager groups={groups} onClose={() => setGroupMgr(false)} onChanged={loadGroups} />}
       {tagMgr && <TagOrganizerModal moduleKey="product_families" labelField="name" onClose={() => setTagMgr(false)} onChanged={() => { loadTags(); loadGroups(); }} />}
       {prefixMgr && <SkuPrefixManager onClose={() => setPrefixMgr(false)} />}
+      {suggestOpen && <TagSuggestModal open entity={entity} onClose={() => setSuggestOpen(false)} onDone={() => { setTagMap({}); loadPool(); }} />}
       <TagUsageModal tagId={usageTagId} onClose={() => setUsageTagId(null)} />
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
@@ -483,6 +490,8 @@ export default function TagsManagerPage() {
           <p className="text-sm text-slate-500 mt-0.5">ใส่แท็ก (Product Family) ให้สินค้าหลายตัวพร้อมกัน — กดหรือลากเพื่อเลือก</p>
         </div>
         <div className="flex items-center gap-2">
+        <button onClick={() => setSuggestOpen(true)} title="ระบบเดาแท็กให้สินค้าที่ยังไม่มีแท็ก แล้วให้ยืนยันทีละกลุ่ม"
+          className="inline-flex items-center gap-1 text-xs px-2.5 h-9 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium"><Icon value="i:sparkles" /> ระบบช่วยเดาแท็ก</button>
         <button onClick={() => setPrefixMgr(true)} className="text-xs px-2.5 h-9 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">🔢 รหัสนำหน้า SKU</button>
         <span className="text-xs text-slate-500">จัดแท็กให้:</span>
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">

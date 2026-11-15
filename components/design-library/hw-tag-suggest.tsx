@@ -62,7 +62,7 @@ export function HwTagSuggestModal({ open, onClose, onDone }: { open: boolean; on
         : groups.length === 0 ? <div className="py-10 text-center text-[13px] text-slate-500">ไม่พบ SKU ที่ชื่อเหมือนอะไหล่</div>
         : (
           <div className="space-y-2">
-            {skipped > 0 && <p className="text-[12px] text-slate-500">ข้ามสินค้าสำเร็จรูป {skipped.toLocaleString("th-TH")} รายการ (มีแท็กแบรนด์/หมวดหมู่สินค้า)</p>}
+            {skipped > 0 && <p className="text-[12px] text-slate-500">ข้าม {skipped.toLocaleString("th-TH")} รายการ (เป็นสินค้าสำเร็จรูป หรือมีแท็กวัตถุดิบชนิดอื่นแล้ว เช่น ซิป/หนัง)</p>}
             {groups.map((g) => {
               const fresh = g.items.filter((i) => !i.tagged), on = fresh.filter((i) => !off.has(i.id)).length, isOpen = openTag === g.tag;
               return (
