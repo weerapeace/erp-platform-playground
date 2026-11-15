@@ -461,6 +461,7 @@ export async function shopeeGetItemLimit(accessToken: string, shopId: string | n
  * เอกสาร (อ่าน 2026-11-15): Public API = เซ็นแค่ partner_id+path+timestamp (ไม่ใช้กุญแจร้าน) · multipart ช่อง image · JPG/JPEG/PNG ≤10MB
  *   scene "normal" = Shopee ทำเป็นจัตุรัสให้ (รูปสินค้า) · ratio "3:4" เฉพาะร้านที่ Shopee เปิดให้ (ไม่ส่ง = 1:1)
  * ฝากแล้วยังไม่แก้สินค้า (รูปค้างในคลังของ Shopee จนกว่าจะส่ง update_item)
+ * ✅ ลองจริง 2026-11-15 (BPU02-01): ได้ image_id "sg-11134201-…" · update_item เก็บรหัสนี้ตามเดิม (ดึงกลับเห็นรหัสเดียวกัน)
  */
 export async function shopeeUploadImage(bytes: ArrayBuffer, name: string, contentType: string, ratio: "1:1" | "3:4" = "1:1"): Promise<{ imageId: string; url: string | null }> {
   const fd = new FormData();

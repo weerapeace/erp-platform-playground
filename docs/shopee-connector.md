@@ -120,7 +120,7 @@
 - กันทับ: รหัสรูปบนร้านไม่ตรงกับตอนเปิดลิ้นชัก = 409 · หลังส่ง: รอดู ~9 วิ (รูปเดิมต้องอยู่ตำแหน่งเดิม + จำนวนเท่ากัน · รูปใหม่ไม่บังคับรหัสตรง) ไม่ทัน = แสดงตามที่ส่ง · audit `shopee_listing_edit` (changes ป้าย "รูปสินค้า" + uploaded + sent_ids + ids_after)
 - ไฟล์: `lib/shopee.ts` shopeeUploadImage / shopeeUploadImageOf · `lib/shopee-listing-edit.ts` (shopeeRefsForSend · planShopeeImages · view.imageIds/imageRatio) · `app/api/shopee/shared.ts` shopeeUploadRef · `app/api/shopee/listing-edit/route.ts` · `ShopeeImagesPanel`
 - ✅ ลองจริง 2026-11-15 BCG01-03 สลับรูป 1↔2 (เปลี่ยนปก): ผ่าน · ดึงกลับเห็นลำดับใหม่ทันที (ids_after = sent_ids · ไม่ต้อง optimistic) · ⚠️ คำตอบของ update_item (shopee_response.images) ยังเป็น**ลำดับเดิม**ก่อนแก้ — ห้ามใช้คำตอบนั้นตัดสินว่ารูปเปลี่ยนไหม ใช้ผลดึงกลับเท่านั้น
-- ⏳ ยังไม่ได้ลอง: **เพิ่มรูปใหม่** (ฝากรูป media_space) — ไม่รู้ว่า Shopee เก็บ image_id ที่ฝากไว้ตามเดิมไหม (ดู ids_after ใน audit ตอนลอง)
+- ✅ ลองจริง 2026-11-15 BPU02-01 เพิ่มรูปใหม่จากระบบ 1 รูป (6 → 7): ผ่าน · ฝากรูปได้ image_id ขึ้นต้น `sg-11134201-…` (คลังกลางของ Shopee — ใช้กับร้านไทยได้) · **Shopee เก็บ image_id ที่ฝากไว้ตามเดิม** (ids_after = sent_ids) · ดึงกลับเห็นทันที · ลิงก์ `cf.shopee.co.th/file/<id>` เปิดได้ (JPG) → **เฟส 4 ใช้ได้ครบกับร้านจริง (ชื่อ/รายละเอียด/เปิด-ปิดขาย/ราคา/รูป)**
 
 **ถัดไป (ยังไม่ทำ):** รูปของตัวเลือก (tier_variation image) · **สต๊อกไม่แก้** ตราบที่ BigSeller ยังซิงค์
 
