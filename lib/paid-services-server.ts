@@ -12,6 +12,7 @@
  *
  * ctx = { request?, userId?, place? } — request = หาคนที่กด (บันทึกยอดรายคน) · place = "ที่" ในทะเบียน (เปิด-ปิดรายที่)
  * งบต่อเดือน = ui_config PAID_BUDGET_KEY (นับเฉพาะ GPT · รวม + รายฟีเจอร์ per_service + รายคน per_user / per_user_default) · ใกล้เต็ม/เกิน = แจ้งเตือนผู้ดูแลครั้งเดียวต่อเดือนต่อระดับ (erp_notify)
+ * โควตาจำนวนครั้งต่อคน (count_quota รายฟีเจอร์) = นับครั้งที่สำเร็จเดือนนี้ของคนที่กด · ครบ = หยุดฟีเจอร์นั้นสำหรับคนนั้น (BudgetExceededError) · countQuotaStatus(key, ctx) ใช้โชว์ "ใช้ไป x/y"
  * ค่าตั้ง = paid_service_settings (แคช 30 วิ) · อ่านไม่ได้ = ถือว่าเปิด (ไม่ทำให้ระบบอื่นพังเพราะศูนย์นี้)
  * บันทึกการใช้ = paid_service_usage (key "<service>@<place>" เมื่อมีหลายที่ · บันทึกไม่ได้ = ข้าม ไม่ขวางงาน)
  */
@@ -20,7 +21,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { openAiChatRaw, openAiKey, openAiWebSearchRaw, type WebCitation } from "@/lib/ai-caption";
 import { getAi, type AiRunner } from "@/lib/ai";
 import {
-  budgetOverMessage, budgetState, cleanBudget, effectiveChoice, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
+  budgetOverMessage, budgetState, cleanBudget, countCap, countQuotaOverMessage, effectiveChoice, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
   placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, userBudgetOverMessage, userBudgetState, userCap, type PaidBudget,
 } from "@/lib/paid-services";
 
@@ -102,13 +103,15 @@ export async function loadBudget(force = false): Promise<PaidBudget> {
 }
 
 const SPEND_TTL_MS = 60_000;
-type Spend = { total: number; byKey: Map<string, number>; byUser: Map<string, number> };
+/** countByKeyUser = จำนวนครั้งที่สำเร็จ (มีค่าใช้จ่าย) ต่อ "<service key>|<user id>" — ใช้กับโควตาจำนวนครั้ง */
+type Spend = { total: number; byKey: Map<string, number>; byUser: Map<string, number>; countByKeyUser: Map<string, number> };
+const keyUser = (key: string, userId: string) => `${splitPlaceKey(key).key}|${userId.toLowerCase()}`;
 let spendCache: { at: number; month: string; spend: Spend } | null = null;
 /** ยอดใช้ GPT เดือนนี้ (บาท ประมาณ) — รวม + แยกรายบริการ (รวมทุกที่ของบริการนั้น) */
 export async function monthSpend(force = false): Promise<Spend> {
   const month = monthKeyBangkok();
   if (!force && spendCache && spendCache.month === month && Date.now() - spendCache.at < SPEND_TTL_MS) return spendCache.spend;
-  const spend: Spend = { total: 0, byKey: new Map(), byUser: new Map() };
+  const spend: Spend = { total: 0, byKey: new Map(), byUser: new Map(), countByKeyUser: new Map() };
   try {
     const start = monthStartBangkokIso();
     for (let from = 0; from < 500_000; from += 10_000) {
@@ -117,7 +120,10 @@ export async function monthSpend(force = false): Promise<Spend> {
       for (const r of (data ?? []) as { key: string; est_cost_thb: number | null; user_id: string | null }[]) {
         const v = Number(r.est_cost_thb ?? 0); const k = splitPlaceKey(r.key).key;
         spend.total += v; spend.byKey.set(k, (spend.byKey.get(k) ?? 0) + v);
-        if (r.user_id) spend.byUser.set(r.user_id, (spend.byUser.get(r.user_id) ?? 0) + v);
+        if (r.user_id) {
+          spend.byUser.set(r.user_id, (spend.byUser.get(r.user_id) ?? 0) + v);
+          const ku = keyUser(k, r.user_id); spend.countByKeyUser.set(ku, (spend.countByKeyUser.get(ku) ?? 0) + 1);
+        }
       }
       if ((data ?? []).length < 10_000) break;
     }
@@ -129,6 +135,12 @@ export const monthSpendThb = async (force = false) => (await monthSpend(force)).
 
 /** เกินงบแบบ "หยุด" ไหม (งบรวม · งบของฟีเจอร์นี้ · งบของคนนี้) — คืนข้อความที่จะบอกผู้ใช้ · null = ใช้ได้ */
 async function overBudgetMessage(key: string, b: PaidBudget, userId: string | null): Promise<string | null> {
+  // โควตาจำนวนครั้งต่อคน (รายฟีเจอร์) — หยุดเสมอเมื่อครบ (ไม่ขึ้นกับ over_action)
+  const cc = countCap(b, key, userId);
+  if (cc !== null && userId) {
+    const used = (await monthSpend()).countByKeyUser.get(keyUser(key, userId)) ?? 0;
+    if (used >= cc) return countQuotaOverMessage(key, cc);
+  }
   const cap = userCap(b, userId);
   if (b.over_action !== "stop" || (!b.monthly_thb && !b.per_service[key] && !cap)) return null;
   const sp = await monthSpend();
@@ -136,6 +148,15 @@ async function overBudgetMessage(key: string, b: PaidBudget, userId: string | nu
   if (serviceBudgetState(sp.byKey.get(key) ?? 0, b, key) === "over") return serviceBudgetOverMessage(key, b);
   if (cap && userBudgetState(sp.byUser.get(userId!) ?? 0, b, userId) === "over") return userBudgetOverMessage(cap);
   return null;
+}
+
+/** โควตาจำนวนครั้งเดือนนี้ของคนที่กด (โชว์ในหน้าจอ "ใช้ไป x/y") — limit null = ไม่จำกัด · ไม่รู้ว่าใครกด = used 0 */
+export async function countQuotaStatus(key: string, ctx?: UseCtx): Promise<{ used: number; limit: number | null; on: boolean }> {
+  const userId = await resolveUser(ctx);
+  const on = await serviceOn(key, ctx?.place);
+  const limit = countCap(await loadBudget(), key, userId);
+  const used = userId ? (await monthSpend()).countByKeyUser.get(keyUser(key, userId)) ?? 0 : 0;
+  return { used, limit, on };
 }
 
 /** GPT ใช้ได้ไหม (เปิด + ไม่เกินงบแบบหยุด) — ใช้ตอนมีทางสำรองฟรี */
@@ -180,7 +201,10 @@ async function guardedGpt<T>(
     await logServiceUse(key, { model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costThb: cost, userId, place: ctx?.place });
     if (spendCache && spendCache.month === monthKeyBangkok()) {
       spendCache.spend.total += cost; spendCache.spend.byKey.set(key, (spendCache.spend.byKey.get(key) ?? 0) + cost);
-      if (userId) spendCache.spend.byUser.set(userId, (spendCache.spend.byUser.get(userId) ?? 0) + cost);
+      if (userId) {
+        spendCache.spend.byUser.set(userId, (spendCache.spend.byUser.get(userId) ?? 0) + cost);
+        const ku = keyUser(key, userId); spendCache.spend.countByKeyUser.set(ku, (spendCache.spend.countByKeyUser.get(ku) ?? 0) + 1);
+      }
     }
     if (budget.monthly_thb || budget.per_service[key] || userCap(budget, userId)) await checkBudgetAlerts(budget, key, userId).catch(() => { /* แจ้งไม่ได้ ไม่ขวางงาน */ });
     return r.value;

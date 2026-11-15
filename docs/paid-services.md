@@ -53,6 +53,15 @@
 - **ใครใช้** — ส่ง `{ request }` (หรือ `{ userId }`) เป็นพารามิเตอร์สุดท้ายของ `aiChat` / `getAiFor` · ไม่มีคน = "ระบบ / อัตโนมัติ"
 - **กราฟย้อนหลัง** — `GET /api/admin/paid-services?view=history&mode=day|month&key=` · ของกลาง `components/bar-chart` (SimpleBarChart)
 
+## โควตาจำนวนครั้งต่อคนต่อเดือน (2026-11-15)
+
+- เก็บใน budget `count_quota` = { "<service key>": { per_user_default, per_user: { <user_id>: ครั้ง | null } } } (ui_config เดิม · ไม่มีตารางใหม่)
+- นับเฉพาะครั้งที่ AI ตอบสำเร็จ (มีค่าใช้จ่าย) ของคนที่กด เดือนนี้ (เวลาไทย) · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้น (BudgetExceededError) จนวันที่ 1 — ไม่ขึ้นกับ over_action
+- ตั้งได้ทุกฟีเจอร์ GPT ที่หน้า /admin/paid-services ส่วน "จำกัดจำนวนครั้งต่อคนต่อเดือน" (ค่าเริ่มของทุกคน + ตั้งเฉพาะคน · ไม่จำกัด / ใช้ค่าเริ่ม)
+- API: PATCH `{ count_quota: { key, limit } }` · `{ count_quota: { key, user_id, limit } }` (limit "default" = กลับไปใช้ค่าเริ่ม · null/"unlimited" = ไม่จำกัด) · GET คืน count_usage + count_users
+- หน้าจอโชว์ "ใช้ไป x/y": `countQuotaStatus(key, { request })` ใน lib/paid-services-server
+- ใช้ครั้งแรกกับ `ai.desc_highlights` (AI ดูรูปเสนอจุดเด่นสินค้า · ป๊อปแทรก Description)
+
 ## ผู้ให้บริการที่เลือกได้ (2026-11-06)
 - ทะเบียน `providerChoices` (ตัวแรก = ค่าเริ่ม) · ค่าที่เลือก `paid_service_settings.provider`
 - อ่านรูป (สลิป / ใบเสร็จ): `readImageText(key, …)` — GPT (ค่าเริ่ม) หรือ Cloudflare · ตัวที่เลือกยังไม่ตั้งรหัส = ลองอีกตัวให้เอง

@@ -240,7 +240,8 @@ describe("รอบ 8 — ลำดับบรรทัดตั้งได้
     const base = composeLines(sel).th;
     expect(base.map((l) => l.slice(2, 8))).toEqual(["ผลิตใน", "วัสดุ:", "ขนาด: ", "น้ำหนั", "ใส่ได้"]);
     const tpl = normalizeInsertTemplates({ order: ["fit", "size", "phrase"] });
-    expect(tpl.order.slice(0, 3)).toEqual(["fit", "size", "phrase"]);
+    // ชนิดที่ตั้งไว้คงลำดับตามที่ตั้ง (ชนิดที่เพิ่มทีหลัง เช่น เติมจากข้อมูล แทรกต่อจากชนิดที่ผูกไว้)
+    expect(tpl.order.filter((k) => ["fit", "size", "phrase"].includes(k))).toEqual(["fit", "size", "phrase"]);
     expect(tpl.order).toHaveLength(DEFAULT_LINE_ORDER.length);
     expect(composeLines(sel, tpl).th.map((l) => l.slice(2, 8))).toEqual(["ใส่ได้", "ขนาด: ", "ผลิตใน", "วัสดุ:", "น้ำหนั"]);
   });
@@ -293,7 +294,7 @@ describe("โหมดทีละขั้น + ขนาดช่อง + แ�
     expect(stepAfter(s, "material", -1)).toBe("material");
     expect(stepAfter(s, "review", 1)).toBe("review");
     expect(stepAfter(s, "fit", 1)).toBe("material");
-    expect(STEP_TABS.highlight).toEqual(["phrase", "lifestyle"]);
+    expect(STEP_TABS.highlight).toEqual(["ai", "phrase", "lifestyle"]);
   });
 
   it("ขนาดช่องต่อท้ายชื่อช่อง (กว้าง+สูง ต้องครบ)", () => {
@@ -315,5 +316,48 @@ describe("โหมดทีละขั้น + ขนาดช่อง + แ�
     expect(suggestMaterials("ผ้าถักลายตาราง K-9474 , พียู(PU) HRH-7261 + Canvas", mats).map((m) => m.id)).toEqual(["pu", "cv"]);
     expect(suggestMaterials("ผ้าไนล่อน", mats)).toEqual([]);
     expect(suggestMaterials(null, mats)).toEqual([]);
+  });
+});
+
+describe("เฟส 2-3 — จุดเด่น AI + เติมจากข้อมูล (เจ้าของ 2026-11-15)", () => {
+  it("ลำดับที่บันทึกไว้ก่อนมีจุดเด่น AI → แทรกหลังช่อง (ไม่ไปท้ายสุด) · เติมจากข้อมูลหลังใส่อะไรได้", async () => {
+    const { normalizeLineOrder } = await import("@/lib/detail-snippets");
+    const saved = ["material", "phrase", "slot_out", "slot_in", "slot", "size", "weight", "handle", "strap", "fit", "lifestyle"];
+    const o = normalizeLineOrder(saved);
+    expect(o.indexOf("ai")).toBe(o.indexOf("slot") + 1);
+    expect(o.indexOf("info")).toBe(o.indexOf("fit") + 1);
+    expect(o.slice(0, 2)).toEqual(["material", "phrase"]);
+  });
+  it("composeLines: จุดเด่น AI อยู่หลังช่อง ก่อนขนาด · เติมจากข้อมูลบรรทัดละข้อ", () => {
+    const r = composeLines({
+      phrases: [], materials: [{ id: "m", name: "ผ้าแคนวาส", name_en: "Canvas" }],
+      slots: [{ item: { id: "s", name: "ช่องหลัก", name_en: "Main compartment", kind: "slot" }, n: 1 }],
+      size: { w: 14, h: 20 }, ai: [{ th: "สายสะพายปรับความยาวได้", en: "Adjustable strap" }], info: [{ th: "มีให้เลือก 3 สี: ดำ, ครีม และ เขียว", en: null }],
+    });
+    expect(r.th.map((l) => l.slice(2, 8))).toEqual(["วัสดุ:", "ช่องหล", "สายสะพ", "ขนาด: ", "มีให้เ"]);
+    expect(r.enMissing).toBe(1);
+  });
+  it("สีจาก SKU ลูก: ไม่ซ้ำ · ตัดหลัง / · อังกฤษที่เป็นไทยไม่ใช้ · สีเดียวไม่มีบรรทัด · เกิน 8 สี = 6 + และอื่น ๆ", async () => {
+    const { uniqueColors, colorLine } = await import("@/lib/detail-snippets");
+    const cs = uniqueColors([{ color_th: "ดำ/หนังเรียบ", color: "Black/Smooth" }, { color_th: "ดำ", color: "Black" }, { color_th: "ครีม", color: "ครีม" }, { color_th: "เขียว", color: "Green" }]);
+    expect(cs).toEqual([{ th: "ดำ", en: "Black" }, { th: "ครีม", en: null }, { th: "เขียว", en: "Green" }]);
+    expect(colorLine(cs)).toEqual({ th: "มีให้เลือก 3 สี: ดำ, ครีม และ เขียว", en: "Available in 3 colors" });
+    expect(colorLine([{ th: "ดำ", en: "Black" }])).toBeNull();
+    const ten = Array.from({ length: 10 }, (_, i) => ({ th: `สี${i}`, en: `C${i}` }));
+    expect(colorLine(ten)).toEqual({ th: "มีให้เลือก 10 สี: สี0, สี1, สี2, สี3, สี4, สี5 และอื่น ๆ", en: "Available in 10 colors: C0, C1, C2, C3, C4, C5 and more" });
+  });
+  it("รับประกัน: ไม่มีรับประกัน/ว่าง = ไม่มีบรรทัด · แปลหน่วยเป็นอังกฤษ", async () => {
+    const { warrantyLine } = await import("@/lib/detail-snippets");
+    expect(warrantyLine("1 ปี")).toEqual({ th: "รับประกันสินค้า 1 ปี", en: "1-year warranty" });
+    expect(warrantyLine("รับประกัน 2 เดือน")).toEqual({ th: "รับประกัน 2 เดือน", en: "2-month warranty" });
+    expect(warrantyLine("ไม่มีรับประกัน")).toBeNull();
+    expect(warrantyLine("")).toBeNull();
+    expect(warrantyLine("ตลอดอายุการใช้งาน")).toEqual({ th: "รับประกันสินค้า ตลอดอายุการใช้งาน", en: null });
+  });
+  it("วิธีดูแลจากวัสดุ: ประโยคแรก · หลายวัสดุใส่ชื่อ · ไม่มี care = ข้าม", async () => {
+    const { careLines } = await import("@/lib/detail-snippets");
+    expect(careLines([{ name: "ผ้าแคนวาส", name_en: "Canvas", care: ["เช็ดด้วยผ้าหมาด", "ห้ามซักเครื่อง"].join("\n"), care_en: "Wipe with a damp cloth." }])).toEqual([{ th: "วิธีดูแล: เช็ดด้วยผ้าหมาด", en: "Care: Wipe with a damp cloth." }]);
+    const two = careLines([{ name: "หนัง", name_en: "Leather", care: "ลงครีม", care_en: null }, { name: "ผ้า", care: "ซักมือ" }, { name: "โลหะ", care: "" }]);
+    expect(two).toEqual([{ th: "วิธีดูแลหนัง: ลงครีม", en: null }, { th: "วิธีดูแลผ้า: ซักมือ", en: null }]);
   });
 });

@@ -1081,6 +1081,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [translating, setTranslating] = useState(false);
   const [aiDetailOpen, setAiDetailOpen] = useState(false);              // ✨ ป๊อป "ให้ AI คิดรายละเอียดสินค้า"
   const [detailLoading, setDetailLoading] = useState(false);
+  // ⏭ ป๊อป "＋ แทรก": ไปรายการถัดไปที่ช่องยังว่าง แล้วเปิดป๊อปให้เอง (รอโหลดค่าเต็มของรายการก่อน — fullReadyId)
+  const [insertNext, setInsertNext] = useState<{ id: string; field: string } | null>(null);
+  const [fullReadyId, setFullReadyId] = useState<string | null>(null);
+  const [insertScanning, setInsertScanning] = useState(false);
 
   // อัปเดตค่า "related" สด เมื่อเปลี่ยน FK ต้นทางในฟอร์ม (เช่น เลือก size_description_id → size_description/how_to_size อัปเดตตาม)
   const relViaKey = relatedFields
@@ -1500,7 +1504,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
     // fetch full row ใน background — master-v2 + payroll (master/core) มี GET /[id]
     // (กันฟอร์มว่างตอนเปิดแก้ผ่าน ?open ที่ไม่มีค่าจาก row เช่น แก้งวด/สัญญาจากตัวเลือกด้านบน)
-    if (!isRest && !(apiBase ?? "").includes("/payroll/")) return;
+    setFullReadyId(null);
+    if (!isRest && !(apiBase ?? "").includes("/payroll/")) { setFullReadyId(String(r.id)); return; }
     apiFetch(`${apiBase}${config.apiPath}/${r.id}`)
       .then((res) => res.json())
       .then(async (json) => {
@@ -1526,8 +1531,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         // merge (ไม่ replace) → ค่า m2m/o2m ที่ widget โหลดไว้ไม่หาย
         setForm((prev) => ({ ...prev, ...f }));
         baseSnapRef.current = { ...baseSnapRef.current, ...f };   // ค่าตั้งต้น = ค่าจริงจาก DB ตอนเปิด
+        setFullReadyId(String(r.id));
       })
-      .catch(() => { /* keep partial — ดีกว่าค้าง */ });
+      .catch(() => { setFullReadyId(String(r.id)); /* keep partial — ดีกว่าค้าง */ });
   };
   // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation / ผลจาก Global Search)
   // ของกลาง useOpenParam: อ่านจาก URL ตอน mount + ฟัง event ตอนอยู่หน้าเดิมแล้วมีคนสั่งเปิดใบอื่น
@@ -2333,6 +2339,30 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } catch (e) {
       notify.error(e instanceof Error ? e.message : tr("แปลไม่สำเร็จ", "Translation failed"));
     }
+  };
+
+  // ⏭ "แทรก + ตัวถัดไปที่ยังว่าง" (ป๊อปแทรก Description) — ไล่รายการถัดไปในลิสต์ที่แสดงอยู่ (ตามตัวกรอง/เรียง) หาตัวที่ช่องนี้ยังว่าง
+  //    แถวในลิสต์ไม่มีค่าช่องนี้ = โหลดรายการนั้นมาดู (สูงสุด 80 รายการต่อครั้ง) · เจอ = เปิดรายการนั้น + เปิดป๊อปให้เอง
+  const goNextEmptyForInsert = async (fieldKey: string) => {
+    if (insertScanning) return;
+    const list = navRowsRef.current;
+    const idx = list.findIndex((r) => String(r.id) === String(editingId));
+    const emptyText = (v: unknown) => !String(v ?? "").replace(/<[^>]*>/g, "").trim();
+    setInsertScanning(true);
+    try {
+      for (let i = idx + 1, n = 0; i < list.length && n < 80; i++, n++) {
+        let v: unknown = (list[i] as Record<string, unknown>)[fieldKey];
+        if (!(fieldKey in (list[i] as Record<string, unknown>))) {
+          const j = await apiFetch(`${apiBase}${config.apiPath}/${list[i].id}`).then((r) => r.json()).catch(() => null) as { data?: Record<string, unknown> } | null;
+          v = j?.data?.[fieldKey];
+        }
+        if (!emptyText(v)) continue;
+        setInsertNext({ id: String(list[i].id), field: fieldKey });
+        openEdit(list[i]);
+        return;
+      }
+      flash(tr("รายการต่อจากนี้มีข้อความในช่องนี้แล้ว (หรือสุดรายการ)", "Every item after this one already has text here (or end of list)"));
+    } finally { setInsertScanning(false); }
   };
 
   // 📝 "ตัวถัดไปที่ยังไม่ครบ" — ไล่รายการถัดไปในลิสต์ที่เปิดอยู่ (เช็กเฉพาะช่องข้อมูล · รูป/แท็กต้องเปิดดูถึงรู้)
@@ -3438,6 +3468,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 values={form} writable={writable}
                 fieldKey={f.key} enFieldKey={enKey || undefined}
                 copyFromApi={config.moduleKey === "parent-skus-v2" ? `${apiBase}${config.apiPath}` : undefined} currentId={editingId ?? null}
+                aiParentId={config.moduleKey === "parent-skus-v2" ? editingId ?? null : null}
+                onApplyNext={viewMode && editingId ? () => void goNextEmptyForInsert(f.key) : undefined}
+                autoOpen={!!insertNext && !!editingId && insertNext.id === String(editingId) && insertNext.field === f.key && fullReadyId === String(editingId)}
+                onAutoOpened={() => setInsertNext(null)}
                 onApply={async ({ th, en, fields }) => {
                   const withEn = !!enKey && en !== undefined;
                   const patch: Record<string, unknown> = { [f.key]: th, ...(withEn ? { [enKey]: en } : {}), ...(fields ?? {}) };

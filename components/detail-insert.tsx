@@ -14,7 +14,9 @@
  *     วัตถุดิบ: เลือกแล้ว + ค้นหา + ใช้บ่อย (ดูทั้งหมด = รายการเต็ม) · แนะนำจากข้อมูลวัสดุฝ่ายผลิต (parent.materials · suggestMaterials — คนกดเลือกเอง)
  *     ช่อง: เพิ่มช่องแบบใหม่ได้ทันที (เก็บเข้าคลังกลาง หรือใช้ครั้งนี้) · 📏 ใส่ขนาดช่อง → ต่อท้ายบรรทัด + บันทึกเป็น "ช่องใส่ของ" (compartments · ครบ 3 ด้าน) → ขั้นใส่อะไรได้เช็กจากขนาดนี้
  *     🌐 ภาษาหน้าจอ ไทย/English สลับในป๊อปได้ (เริ่มตามภาษาของบัญชี · ไม่เปลี่ยนภาษาทั้งระบบ) — พนักงานที่อ่านไทยไม่ออกใช้ได้
- *     เฟส 2 (ยังไม่ทำ): AI ดูรูปเสนอจุดเด่น 7 ข้อ + ความจำ ชอบ/ไม่ชอบ ในขั้น "จุดเด่น"
+ *     ✨ เฟส 2: แท็บ "AI ดูรูป" ในขั้นจุดเด่น (components/detail-insert-ai · ส่ง aiParentId) — 7 ข้อ ไทย+อังกฤษ · ติ๊ก/ชอบ/ไม่ชอบ + ความจำ · ศูนย์ AI ai.desc_highlights
+ *     ⏭ ทำหลายตัวต่อกัน (หน้าดู): ปุ่ม "แทรก + ตัวถัดไปที่ยังว่าง" (onApplyNext) → master-crud ไปรุ่นถัดไปในรายการที่ช่องนี้ยังว่าง แล้วเปิดป๊อปให้เอง (autoOpen)
+ *     📋 เฟส 3: เติมจากข้อมูล (สี จาก SKU ลูก · รับประกัน · วิธีดูแลจากวัสดุ) ในขั้นตรวจ · AI เตือน Description เดิมไม่ตรงรูป + แทนที่ของเดิมทั้งหมดได้
  * กฎคิดบรรทัด: lib/detail-snippets.ts · วัสดุ: lib/product-materials.ts · ใส่อะไรได้: lib/product-fits.ts · ช่องใส่ของ: lib/fit-check.ts
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
@@ -30,12 +32,18 @@ import { parseVariants, resolvePhrase, variantSearchText, variantsOf, VARIANT_MO
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useSWRLite } from "@/lib/swr-lite";
 import { useLang } from "@/components/i18n";
+import { usePermission } from "@/components/auth";
+import { DetailInsertAi, EMPTY_AI, aiPicked, type AiState } from "@/components/detail-insert-ai";
 import { Icon } from "@/components/icon";
 import {
   availableSteps,
   stepAfter,
   STEP_TABS,
   slotDimsText,
+  careLines,
+  colorLine,
+  warrantyLine,
+  type ColorEntry,
   type InsertStep,
   type SlotDims,
   DEFAULT_INSERT_TEMPLATES,
@@ -83,7 +91,7 @@ import { bestFit, findCompartment, fitTargetOf, isWindowName, parseCompartments,
 // กด "🔗 มีหน้า" ที่วัสดุ = เปิดระเบียนวัสดุ (drawer ตัวจริงของหน้า master · แก้คำอธิบาย/วิธีดูแล/รูปได้) — ต้อง dynamic กัน import วนกับ master-crud
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-type Tab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle";
+type Tab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle" | "ai";
 type CatalogKind = "phrase" | "slot" | "material" | "fit" | "style" | "lifestyle";
 type FitRow = FitItem & { kind?: string | null; image_key?: string | null; width_cm?: number | null; height_cm?: number | null; depth_cm?: number | null; is_soft?: boolean | null; size_estimated?: boolean | null; size_dims?: unknown };
 
@@ -115,6 +123,7 @@ const TABS: { key: Tab; label: string; en: string; hint: string; hintEn: string 
   { key: "slot", label: "🔢 ช่อง", en: "🔢 Pockets", hint: "พิมพ์แค่จำนวน — ช่องที่ใส่ตัวเลขรวมเป็นบรรทัดเดียว", hintEn: "Type how many — pockets with a number go on one line" },
   { key: "size", label: "📏 ขนาด/น้ำหนัก", en: "📏 Size/weight", hint: "ดึงค่าจากช่องของสินค้ามาให้ · แก้ตรงนี้ = แก้ช่องของสินค้าด้วย", hintEn: "Filled from the product · editing here also updates the product" },
   { key: "fit", label: "🎒 ใส่อะไรได้", en: "🎒 What fits", hint: "กดการ์ดเพื่อเลือก (เลือกขนาดได้) · เลือกตรงนี้ = แก้ช่อง \"ใส่อะไรได้บ้าง\" ของสินค้าด้วย", hintEn: "Tap a card to pick (sizes available) · also updates the product's \"What fits\" field" },
+  { key: "ai", label: "✨ AI ดูรูป", en: "✨ AI from photos", hint: "AI ดูรูปสินค้าแล้วเสนอจุดเด่น 7 ข้อ (ไทย + อังกฤษ) · ติ๊กเลือก · ชอบ/ไม่ชอบ = AI จำไว้", hintEn: "AI reads the photos and suggests 7 highlights (Thai + English) · tick to use · like/dislike is remembered" },
   { key: "lifestyle", label: "🌿 Lifestyle / อื่นๆ", en: "🌿 Lifestyle / other", hint: "เลือกสไตล์ → ติ๊กข้อความ (บรรทัดละข้อ เรียงตามลำดับที่กด) · พิมพ์เองได้ · คัดลอก prompt ไปถาม ChatGPT", hintEn: "Pick a style → tick lines (one each, in tick order) · or type your own · copy a prompt for ChatGPT" },
 ];
 
@@ -213,6 +222,10 @@ export function DetailInsertButton({
   enFieldKey,
   copyFromApi,
   currentId,
+  aiParentId,
+  onApplyNext,
+  autoOpen,
+  onAutoOpened,
 }: {
   thText: string;
   enText: string;
@@ -230,9 +243,22 @@ export function DetailInsertButton({
   enFieldKey?: string;
   copyFromApi?: string;
   currentId?: string | null;
+  /** ✨ Parent SKU id สำหรับแท็บ AI ดูรูป (ไม่ส่ง = ไม่มีแท็บ AI) */
+  aiParentId?: string | null;
+  /** ⏭ หลังแทรกสำเร็จ ไปรายการถัดไปที่ช่องนี้ยังว่าง (หน้าดูของ master-crud) — ไม่ส่ง = ไม่มีปุ่ม */
+  onApplyNext?: () => void;
+  /** เปิดป๊อปให้เอง (มาถึงรายการถัดไปจากปุ่ม ⏭) — เปิดแล้วเรียก onAutoOpened */
+  autoOpen?: boolean;
+  onAutoOpened?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { lang } = useLang();
+  useEffect(() => {
+    if (!autoOpen) return;
+    setOpen(true);
+    onAutoOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
   return (
     <>
       <button
@@ -259,6 +285,8 @@ export function DetailInsertButton({
           onApply={onApply}
           onClose={() => setOpen(false)}
           copyFrom={copyFromApi && fieldKey ? { api: copyFromApi, fieldKey, enFieldKey: enFieldKey ?? null, currentId: currentId ?? null } : null}
+          aiParentId={aiParentId ?? null}
+          onApplyNext={onApplyNext}
         />
       )}
     </>
@@ -275,6 +303,8 @@ function DetailInsertModal({
   onApply,
   onClose,
   copyFrom,
+  aiParentId,
+  onApplyNext,
 }: {
   thText: string;
   enText: string;
@@ -285,6 +315,8 @@ function DetailInsertModal({
   onApply: (next: DetailInsertResult) => Promise<boolean> | boolean;
   onClose: () => void;
   copyFrom?: CopyFromCfg | null;
+  aiParentId?: string | null;
+  onApplyNext?: () => void;
 }) {
   const toast = useToast();
   // 🌐 ภาษาหน้าจอของป๊อป — เริ่มตามภาษาของบัญชี · สลับในป๊อปได้ (ไม่เปลี่ยนภาษาทั้งระบบ · ไม่ต้องรีโหลด)
@@ -328,7 +360,9 @@ function DetailInsertModal({
   const numFields = NUM_FIELDS.filter((f) => writable.includes(f.field) && (!profile?.sizeFields || profile.sizeFields.includes(f.k)));
   const has = (k: NumK) => numFields.some((f) => f.k === k);
   const canFit = writable.includes("fits");
-  const tabs = TABS.filter((t) => (t.key === "size" ? numFields.length > 0 : t.key === "fit" ? canFit : true) && (!profile?.tabs || profile.tabs.includes(t.key)));
+  const canAiPerm = usePermission("ai.caption");
+  const canAi = !!aiParentId && canAiPerm;
+  const tabs = TABS.filter((t) => (t.key === "ai" ? canAi : (t.key === "size" ? numFields.length > 0 : t.key === "fit" ? canFit : true) && (!profile?.tabs || profile.tabs.includes(t.key))));
 
   const lines = useMemo(() => splitLines(thText), [thText]);
   const enLines = useMemo(() => splitLines(enText), [enText]);
@@ -395,6 +429,12 @@ function DetailInsertModal({
   const [useFit, setUseFit] = useState(() => !alreadyMentions(thText, "fit"));
   // 🧵 วัตถุดิบแบบไม่รก (โหมดทีละขั้น): ดูทั้งหมด = รายการเต็มแบบเดิม
   const [matAll, setMatAll] = useState(false);
+  // ✨ AI ดูรูป (state อยู่ที่นี่ — ล้างหน้า/ข้ามขั้นได้)
+  const [aiState, setAiState] = useState<AiState>(EMPTY_AI);
+  // 📋 เติมจากข้อมูล (ขั้นตรวจ) — สี / รับประกัน / วิธีดูแล · แทนที่ Description เดิมทั้งหมด
+  const [info, setInfo] = useState<{ color: boolean; warranty: boolean; care: boolean }>({ color: false, warranty: false, care: false });
+  const [facts, setFacts] = useState<{ colors: ColorEntry[]; warranty: string | null } | null>(null);
+  const [dropOld, setDropOld] = useState(false);
   // 🔢 ขนาดช่อง (📏) ต่อช่อง + เพิ่มช่องแบบใหม่
   const [slotDims, setSlotDims] = useState<Record<string, { w: string; h: string; d: string }>>({});
   const [newSlot, setNewSlot] = useState<{ name: string; side: string; save: boolean }>({ name: "", side: "inside", save: true });
@@ -437,6 +477,14 @@ function DetailInsertModal({
     goStep(steps[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepMode, tabs.length]);
+  // 📋 ข้อมูลจริงสำหรับ "เติมจากข้อมูล" (สี/รับประกัน) — โหลดครั้งเดียวตอนเปิดป๊อป (ระเบียน Parent SKU เท่านั้น)
+  const factsId = aiParentId ?? copyFrom?.currentId ?? null;
+  useEffect(() => {
+    if (!factsId) return;
+    let off = false;
+    apiFetch(`/api/parent-skus/${encodeURIComponent(factsId)}/desc-facts`).then((r) => r.json()).then((j) => { if (!off && j.data) setFacts(j.data); }).catch(() => { /* ไม่มีข้อมูล = ไม่โชว์ตัวเลือก */ });
+    return () => { off = true; };
+  }, [factsId]);
   // ชุดที่เลือกไม่มีแท็บที่เปิดอยู่ → ย้ายไปแท็บแรกของชุด
   const tabKeys = tabs.map((t) => t.key).join(",");
   useEffect(() => {
@@ -485,6 +533,16 @@ function DetailInsertModal({
     const it = fitItems.find((x) => x.id === p.id);
     return it ? [{ th: it.name, en: it.name_en, size: p.size }] : [];
   });
+  // 📋 เติมจากข้อมูล (ขั้นตรวจ) — สีจาก SKU ลูก · รับประกัน · วิธีดูแลของวัสดุที่เลือก (ฟรี ไม่ใช้ AI · lib/detail-snippets)
+  const pickedMats = byClick(matIds, visMats);
+  const infoColor = facts ? colorLine(facts.colors, tpl) : null;
+  const infoWarranty = facts?.warranty ? warrantyLine(facts.warranty) : null;
+  const infoCare = careLines(pickedMats);
+  const infoLines = [
+    ...(info.color && infoColor ? [infoColor] : []),
+    ...(info.warranty && infoWarranty ? [infoWarranty] : []),
+    ...(info.care ? infoCare : []),
+  ];
   const sel = {
     phrases: byClick(phraseIds, phraseItems).map((x) => resolvePhrase(x, phrasePick[x.id])),
     materials: byClick(matIds, visMats),
@@ -496,8 +554,12 @@ function DetailInsertModal({
     fits: fitSeen && useFit ? fitEntries : null,
     copied,
     lifestyle: [...byClick(lifeIds, lifeItems).map((x) => ({ th: x.name, en: x.name_en ?? null })), ...freeLines(lifeTh, lifeEn)],
+    ai: aiPicked(aiState),
+    info: infoLines,
   };
   const out = composeLines(sel, tpl);
+  /** บรรทัดที่เลือกจากขั้นอื่น (ส่งให้ AI เลี่ยงเรื่องซ้ำ) */
+  const chosenTh = composeLines({ ...sel, ai: null, copied: null }, tpl).th.map((l) => l.replace(/^- /, ""));
   // ⠿ ลำดับทุกบรรทัดในตัวอย่าง (บรรทัดเดิม + บรรทัดใหม่ · lib/detail-snippets arrangeRows)
   //   custom = null → ยังไม่เคยลาก: บรรทัดใหม่เป็นก้อนเดียวที่ตำแหน่ง at (เหมือนเดิม) · ลาก/↑↓ แล้ว = จำลำดับทั้งหมด
   const [custom, setCustom] = useState<RowKey[] | null>(null);
@@ -556,7 +618,7 @@ function DetailInsertModal({
     changes.push(t(`ขนาดช่อง (${dimEntries.length} ช่อง)`, `Pocket sizes (${dimEntries.length})`));
   }
   const picked = finalTh.length > 0;
-  const dirty = picked || reordered || changes.length > 0;
+  const dirty = picked || reordered || changes.length > 0 || (dropOld && lines.length > 0);
   const enAppend = withEn && enLines.length > 0 && enLines.length !== lines.length;
 
   const needle = q.trim().toLowerCase();
@@ -567,6 +629,7 @@ function DetailInsertModal({
   const clearTab = (t: Tab) => {
     if (t === "phrase") { setPhraseIds([]); setPhrasePick({}); }
     if (t === "lifestyle") { setLifeIds([]); setLifeTh(""); setLifeEn(""); }
+    if (t === "ai") setAiState((p) => ({ ...p, items: p.items.map((x) => ({ ...x, on: false })) }));
     if (t === "material") setMatIds([]);
     if (t === "slot") { setSlotN({}); setSlotDims({}); }
     if (t === "size") {
@@ -579,13 +642,13 @@ function DetailInsertModal({
     }
   };
   const clearAll = () => {
-    (["phrase", "material", "slot", "size", "fit", "lifestyle"] as Tab[]).forEach(clearTab);
+    (["phrase", "material", "slot", "size", "fit", "lifestyle", "ai"] as Tab[]).forEach(clearTab);
     setEdits({ th: {}, en: {} });
     setCustom(null);
     setCopied([]);
   };
   const tabCount = (t: Tab) =>
-    t === "lifestyle" ? sel.lifestyle.length : t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
+    t === "ai" ? sel.ai.length : t === "lifestyle" ? sel.lifestyle.length : t === "phrase" ? sel.phrases.length : t === "material" ? sel.materials.length : t === "slot" ? sel.slots.length : t === "size" ? [sel.size, sel.weight, sel.handle, sel.strap].filter((x) => x != null && x !== "").length : sel.fits?.length ?? 0;
   const tabDirty = (t: Tab) => tabCount(t) > 0 || (t === "size" && numFields.some((f) => num[f.k] !== numOrig[f.k])) || (t === "fit" && JSON.stringify(fits) !== JSON.stringify(fitOrig));
 
   // 📏 ขนาดช่อง: เปิด = เติมขนาดเดิมของช่องชื่อเดียวกัน (ถ้าวัดไว้) · ปิด = ไม่ใส่ขนาด
@@ -655,19 +718,24 @@ function DetailInsertModal({
     }
   };
 
-  const apply = async () => {
+  const apply = async (next = false) => {
     if (!dirty) {
       toast.warning(t("ยังไม่ได้เลือกรายละเอียด", "Nothing picked yet"));
       return;
     }
     // ประกอบตามลำดับในตัวอย่าง (ไม่ได้ลาก = เหมือนแทรกก้อนที่ตำแหน่งเดิมทุกอย่าง) · อังกฤษ: ใส่บรรทัดใหม่ หรือบรรทัดเดิมถูกสลับ (บรรทัดเท่าไทย = สลับตาม)
-    const th = picked || reordered ? arrangeTh(rows, lines, thOf).join("\n") : thText;
+    // 🔁 แทนที่ของเดิมทั้งหมด (เช่น AI เตือนว่า Description เดิมไม่ตรงรูป) = เหลือเฉพาะบรรทัดใหม่ · ย้อนได้จากประวัติเวอร์ชัน
+    const th = dropOld ? finalTh.join("\n") : picked || reordered ? arrangeTh(rows, lines, thOf).join("\n") : thText;
     const addEn = picked && withEn && hasEn && finalEn.length > 0;
-    const en = addEn || (hasEn && reordered && enAligned) ? arrangeEn(rows, lines, enLines, addEn ? enOf : () => null).join("\n") : undefined;
+    const en = dropOld ? (hasEn ? (withEn ? finalEn.join("\n") : "") : undefined)
+      : addEn || (hasEn && reordered && enAligned) ? arrangeEn(rows, lines, enLines, addEn ? enOf : () => null).join("\n") : undefined;
     setSaving(true);
     try {
       const ok = await onApply({ th, en, ...(changes.length ? { fields } : {}) });
-      if (ok !== false) onClose();
+      if (ok !== false) {
+        onClose();
+        if (next) onApplyNext?.();
+      }
     } finally {
       setSaving(false);
     }
@@ -978,6 +1046,13 @@ function DetailInsertModal({
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
             {t("ยกเลิก", "Cancel")}
           </button>
+          {onApplyNext && (
+            <button type="button" onClick={() => void apply(true)} disabled={saving || !dirty} data-detail-insert-apply-next
+              title={t("แทรกแล้วไปรุ่นถัดไปในรายการที่ช่องนี้ยังว่าง (เปิดป๊อปให้เอง)", "Insert, then go to the next item in the list whose field is empty")}
+              className="h-9 rounded-lg border border-orange-300 px-3 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-50">
+              {t("แทรก + ตัวถัดไปที่ยังว่าง ▶", "Insert + next empty ▶")}
+            </button>
+          )}
           <button type="button" onClick={() => void apply()} disabled={saving || !dirty} data-detail-insert-apply
             className="h-9 rounded-lg bg-orange-500 px-4 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
             {saving ? t("กำลังบันทึก…", "Saving…") : saveLabel ?? t("แทรก", "Insert")}
@@ -1042,7 +1117,7 @@ function DetailInsertModal({
               <p className="text-[11.5px] text-slate-500" data-insert-step-hint>{t(STEP_HINT[step][0], STEP_HINT[step][1])}</p>
               {step === "highlight" && STEP_TABS.highlight.filter((k) => tabs.some((x) => x.key === k)).length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5" data-insert-highlight-tabs>
-                  {tabs.filter((x) => STEP_TABS.highlight.includes(x.key)).map((x) => (
+                  {STEP_TABS.highlight.flatMap((k) => tabs.filter((x) => x.key === k)).map((x) => (
                     <button key={x.key} type="button" onClick={() => openTab(x.key)} data-insert-tab={x.key}
                       className={`h-7 rounded-lg border px-2.5 text-[12px] ${tab === x.key ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
                       {t(x.label, x.en)}
@@ -1072,7 +1147,7 @@ function DetailInsertModal({
               className="h-7 shrink-0 rounded-md border border-slate-200 px-2 text-[11.5px] text-slate-600 hover:border-rose-300 hover:text-rose-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600">
               🧹 {tab === "size" || tab === "fit" ? t("ล้างหน้านี้ (คืนค่าเดิม)", "Clear (restore)") : t("ล้างหน้านี้", "Clear page")}
             </button>
-            {tab !== "size" && tab !== "slot" && !compactMat && (
+            {tab !== "size" && tab !== "slot" && tab !== "ai" && !compactMat && (
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหา…", "Search…")}
                 className="h-8 w-28 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
             )}
@@ -1120,7 +1195,7 @@ function DetailInsertModal({
                 const L = (k: "th" | "en") => composeLines(
                   s === "material" ? { phrases: [], materials: sel.materials, slots: [] }
                     : s === "slot" ? { phrases: [], materials: [], slots: sel.slots }
-                    : s === "highlight" ? { phrases: sel.phrases, materials: [], slots: [], lifestyle: sel.lifestyle }
+                    : s === "highlight" ? { phrases: sel.phrases, materials: [], slots: [], lifestyle: sel.lifestyle, ai: sel.ai }
                     : s === "size" ? { phrases: [], materials: [], slots: [], size: sel.size, weight: sel.weight, handle: sel.handle, strap: sel.strap }
                     : { phrases: [], materials: [], slots: [], fits: sel.fits },
                   tpl
@@ -1131,10 +1206,60 @@ function DetailInsertModal({
               onEdit={goStep}
               changes={changes}
             />
-          ) : loading ? (
+          ) : null}
+          {reviewing && (
+            <div className="space-y-2" data-insert-review-extra>
+              {aiState.mismatch && (
+                <div className="rounded-lg bg-amber-50 px-2.5 py-2 text-[12px] text-amber-900" data-insert-mismatch>
+                  ⚠️ {t("AI เตือน: ", "AI warning: ")}{isEn ? aiState.mismatch.en || aiState.mismatch.th : aiState.mismatch.th}
+                  {lines.length > 0 && !dropOld && (
+                    <button type="button" onClick={() => setDropOld(true)} className="ml-2 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11.5px] font-medium text-amber-800 hover:bg-amber-100">{t("แทนที่ของเดิม", "Replace old text")}</button>
+                  )}
+                </div>
+              )}
+              {(infoColor || infoWarranty || infoCare.length > 0 || (facts && pickedMats.length > 0)) && (
+                <div className="rounded-lg border border-slate-200 px-2.5 py-2" data-insert-info>
+                  <div className="mb-1 text-[12px] font-medium text-slate-700">{t("เติมจากข้อมูล (ฟรี)", "Add from product data (free)")}</div>
+                  {infoColor && (
+                    <label className="flex cursor-pointer items-start gap-2 py-0.5 text-[12px] text-slate-700">
+                      <input type="checkbox" checked={info.color} onChange={(e) => setInfo((p) => ({ ...p, color: e.target.checked }))} className="mt-0.5 h-4 w-4 accent-orange-500" data-insert-info-color />
+                      <span>{isEn ? infoColor.en ?? infoColor.th : infoColor.th} <span className="text-slate-400">{t("(จาก SKU ลูก)", "(from child SKUs)")}</span></span>
+                    </label>
+                  )}
+                  {infoWarranty && (
+                    <label className="flex cursor-pointer items-start gap-2 py-0.5 text-[12px] text-slate-700">
+                      <input type="checkbox" checked={info.warranty} onChange={(e) => setInfo((p) => ({ ...p, warranty: e.target.checked }))} className="mt-0.5 h-4 w-4 accent-orange-500" data-insert-info-warranty />
+                      <span>{isEn ? infoWarranty.en ?? infoWarranty.th : infoWarranty.th} <span className="text-slate-400">{t("(ช่องรับประกัน)", "(warranty field)")}</span></span>
+                    </label>
+                  )}
+                  {infoCare.length > 0 ? (
+                    <label className="flex cursor-pointer items-start gap-2 py-0.5 text-[12px] text-slate-700">
+                      <input type="checkbox" checked={info.care} onChange={(e) => setInfo((p) => ({ ...p, care: e.target.checked }))} className="mt-0.5 h-4 w-4 accent-orange-500" data-insert-info-care />
+                      <span>{infoCare.map((c) => (isEn ? c.en ?? c.th : c.th)).join(" · ")} <span className="text-slate-400">{t("(จากคลังวัสดุ)", "(from the material list)")}</span></span>
+                    </label>
+                  ) : pickedMats.length > 0 && (
+                    <p className="py-0.5 text-[11.5px] text-slate-400">{t("วัสดุที่เลือกยังไม่มีวิธีดูแลในคลังวัสดุ — กด \"ดูทั้งหมด\" ในขั้นวัตถุดิบ แล้วกด \"เขียนหน้า\" เพื่อเติม", "The picked materials have no care text yet — add it on the material page")}</p>
+                  )}
+                </div>
+              )}
+              {lines.length > 0 && (
+                <label className={`flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 text-[12px] ${dropOld ? "bg-rose-50 text-rose-800" : "text-slate-600"}`} data-insert-drop-old>
+                  <input type="checkbox" checked={dropOld} onChange={(e) => setDropOld(e.target.checked)} className="mt-0.5 h-4 w-4 accent-rose-600" />
+                  <span>{t(`แทนที่ Description เดิมทั้งหมด (${lines.length} บรรทัด) ด้วยบรรทัดใหม่`, `Replace the whole existing description (${lines.length} lines) with the new lines`)}
+                    <span className="block text-[11px] opacity-70">{t("ย้อนกลับได้จากประวัติเวอร์ชันของสินค้า", "You can undo from the product's version history")}</span></span>
+                </label>
+              )}
+            </div>
+          )}
+          {reviewing ? null : loading ? (
             <div className="h-40 animate-pulse rounded-lg bg-slate-100" />
           ) : (
             <div className={`${compactMat ? "" : "max-h-[22rem] overflow-auto"} space-y-1 pr-1`}>
+              {tab === "ai" && aiParentId && (
+                <DetailInsertAi parentId={aiParentId} brandId={typeof values.brand_id === "string" ? values.brand_id : null} isEn={isEn}
+                  state={aiState} setState={setAiState} chosen={chosenTh} />
+              )}
+
               {tab === "phrase" && (
                 <>
                   <SortList items={phraseItems.filter(matchPhrase)} disabled={!!needle} onMove={(f, t) => void reorder("phrase", phraseItems, f, t)} render={(it, handle) => {
@@ -1750,7 +1875,7 @@ const SAMPLE = {
   ],
 };
 /** ชื่อแถวในตารางลำดับบรรทัด (ข้อความสำเร็จรูป = ไม่มีคำนำหน้า) */
-const ORDER_LABEL = (k: OrderKind) => (k === "phrase" ? "ข้อความ (ติ๊ก)" : k === "lifestyle" ? "Lifestyle / อื่นๆ" : LINE_KIND_LABEL[k]);
+const ORDER_LABEL = (k: OrderKind) => (k === "phrase" ? "ข้อความ (ติ๊ก)" : k === "lifestyle" ? "Lifestyle / อื่นๆ" : k === "ai" ? "จุดเด่น (AI ดูรูป)" : k === "info" ? "เติมจากข้อมูล (สี/รับประกัน/วิธีดูแล)" : LINE_KIND_LABEL[k]);
 
 type CatalogLists = Record<CatalogKind, { id: string; name: string; name_en?: string | null }[]>;
 
@@ -1872,8 +1997,8 @@ function TemplateDialog({ value, catalogs, categories, onClose, onSaved }: { val
                   <div className="grid grid-cols-[1rem_5.2rem_minmax(0,1fr)_minmax(0,1fr)_2.6rem] items-center gap-1.5" data-order-row={k}>
                     <span className="flex justify-center">{handle}</span>
                     <span className="truncate" title={ORDER_LABEL(k)}><span className="mr-1 text-[10px] text-slate-400">{i + 1}.</span>{ORDER_LABEL(k)}</span>
-                    {k === "phrase" || k === "lifestyle" ? (
-                      <span className="col-span-2 px-1 text-[11px] text-slate-400">{k === "lifestyle" ? "บรรทัดละข้อ (ไม่มีคำนำหน้า) — ข้อความของสไตล์ + พิมพ์เอง" : "บรรทัดละข้อ (ไม่มีคำนำหน้า) — เรียงตามลำดับที่กด"}</span>
+                    {k === "phrase" || k === "lifestyle" || k === "ai" || k === "info" ? (
+                      <span className="col-span-2 px-1 text-[11px] text-slate-400">{k === "lifestyle" ? "บรรทัดละข้อ (ไม่มีคำนำหน้า) — ข้อความของสไตล์ + พิมพ์เอง" : k === "ai" ? "บรรทัดละข้อ (ไม่มีคำนำหน้า) — จุดเด่นที่ติ๊กจาก AI ดูรูป" : k === "info" ? "บรรทัดละข้อ (ไม่มีคำนำหน้า) — สี / รับประกัน / วิธีดูแล จากข้อมูลสินค้า" : "บรรทัดละข้อ (ไม่มีคำนำหน้า) — เรียงตามลำดับที่กด"}</span>
                     ) : (
                       <>
                         <input value={t.prefix[k].th} onChange={(e) => setPre(k, "th", e.target.value)} placeholder="(ไม่มี)" className={inp} aria-label={`คำนำหน้า ${LINE_KIND_LABEL[k]} ไทย`} />

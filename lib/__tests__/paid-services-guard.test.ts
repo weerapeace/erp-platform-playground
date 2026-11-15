@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap, effectiveChoice } from "@/lib/paid-services";
+import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap, effectiveChoice, countCap, countQuotaOverMessage } from "@/lib/paid-services";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
@@ -110,8 +110,8 @@ describe("ศูนย์ AI / API ที่เสียเงิน — กั�
 describe("งบต่อเดือน", () => {
   it("ค่าแปลก = ค่าเริ่ม · ไม่ใส่งบ = ไม่จำกัด", () => {
     expect(cleanBudget(null)).toEqual(DEFAULT_BUDGET);
-    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn", per_service: {}, per_user_default: null, per_user: {} });
-    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {} });
+    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} });
+    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} });
   });
   it("สถานะงบ: ไม่ตั้ง / ปกติ / ใกล้เต็ม / เกิน", () => {
     const b = { ...DEFAULT_BUDGET, monthly_thb: 100, warn_pct: 80, over_action: "stop" as const };
@@ -182,5 +182,30 @@ describe("เลือกผู้ให้บริการ", () => {
     expect(effectiveChoice(slip, "nope")?.id).toBe("openai");
     expect(effectiveChoice(paidService("ai.caption")!, "x")).toBeNull();
     expect(effectiveChoice(paidService("email.send")!, null)?.id).toBe("auto");
+  });
+});
+
+describe("โควตาจำนวนครั้งต่อคนต่อเดือน (count_quota · เจ้าของขอ 2026-11-15)", () => {
+  const U1 = "11111111-1111-4111-8111-111111111111", U2 = "22222222-2222-4222-8222-222222222222";
+  it("รับเฉพาะฟีเจอร์ GPT · จำนวนเต็ม > 0 · รายคน null = ไม่จำกัด · ค่าเพี้ยนตัดทิ้ง", () => {
+    const b = cleanBudget({ count_quota: {
+      "ai.desc_highlights": { per_user_default: "30.7", per_user: { [U1]: 5, [U2]: "unlimited", "not-a-uuid": 3, "33333333-3333-4333-8333-333333333333": -2 } },
+      "line.push": { per_user_default: 10 }, "ai.nope": { per_user_default: 1 }, "ai.caption": { per_user_default: 0 },
+    } });
+    expect(b.count_quota).toEqual({ "ai.desc_highlights": { per_user_default: 30, per_user: { [U1]: 5, [U2]: null } } });
+  });
+  it("countCap: ตั้งรายคนชนะค่าเริ่ม · ไม่มีคนกด/ไม่ได้ตั้ง = ไม่จำกัด · รายที่ (key@place) ใช้โควตาของบริการ", () => {
+    const b = cleanBudget({ count_quota: { "ai.desc_highlights": { per_user_default: 30, per_user: { [U1]: 5, [U2]: null } } } });
+    expect(countCap(b, "ai.desc_highlights", U1)).toBe(5);
+    expect(countCap(b, "ai.desc_highlights", U1.toUpperCase())).toBe(5);
+    expect(countCap(b, "ai.desc_highlights", U2)).toBeNull();
+    expect(countCap(b, "ai.desc_highlights", "44444444-4444-4444-8444-444444444444")).toBe(30);
+    expect(countCap(b, "ai.desc_highlights", null)).toBeNull();
+    expect(countCap(b, "ai.caption", U1)).toBeNull();
+    expect(countCap(b, "ai.desc_highlights@x", U1)).toBe(5);
+    expect(countQuotaOverMessage("ai.desc_highlights", 30)).toContain("30");
+  });
+  it("ลงทะเบียนปุ่ม AI จุดเด่นสินค้าแล้ว (เลือกรุ่นได้ในศูนย์ AI)", () => {
+    expect(paidService("ai.desc_highlights")?.kind).toBe("ai_chat");
   });
 });

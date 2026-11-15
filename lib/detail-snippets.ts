@@ -43,9 +43,11 @@ const fill = (tpl: string, name: string, n: number) => tpl.replace(/\{name\}/g, 
 export type LineKind = "material" | "slot" | "slot_in" | "slot_out" | "fit" | "size" | "weight" | "handle" | "strap";
 export type BracketKind = "phrase" | "material" | "slot" | "fit";
 /** ชนิดบรรทัดที่จัดลำดับได้ = ข้อความสำเร็จรูป + Lifestyle + บรรทัดที่มีคำนำหน้า */
-export type OrderKind = "phrase" | "lifestyle" | LineKind;
+export type OrderKind = "phrase" | "lifestyle" | "ai" | "info" | LineKind;
 /** ลำดับบรรทัดตั้งต้น (เหมือนเดิมก่อนมีตั้งค่า): ข้อความ → วัสดุ → ช่องนอก → ช่องใน → ช่อง → ขนาด → น้ำหนัก → หูหิ้ว → สาย → ใส่ได้ → Lifestyle */
-export const DEFAULT_LINE_ORDER: OrderKind[] = ["phrase", "material", "slot_out", "slot_in", "slot", "size", "weight", "handle", "strap", "fit", "lifestyle"];
+export const DEFAULT_LINE_ORDER: OrderKind[] = ["phrase", "material", "slot_out", "slot_in", "slot", "ai", "size", "weight", "handle", "strap", "fit", "info", "lifestyle"];
+/** ชนิดที่เพิ่มทีหลัง — ลำดับที่บันทึกไว้ก่อนมีชนิดนี้ ให้แทรกต่อจากชนิดที่ระบุ (ไม่ไปต่อท้ายสุด) · จุดเด่น (AI) อยู่หลังช่อง ก่อนขนาด (เจ้าของ 2026-11-15) */
+const INSERT_AFTER: Partial<Record<OrderKind, OrderKind>> = { ai: "slot", info: "fit" };
 
 export type InsertTemplates = {
   /** คำเชื่อมรายการ: 2 รายการ = A{last}B · 3+ = A{sep}B{last}C */
@@ -60,16 +62,16 @@ export type InsertTemplates = {
   profiles: InsertProfile[];
 };
 
-export type InsertTab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle";
+export type InsertTab = "phrase" | "material" | "slot" | "size" | "fit" | "lifestyle" | "ai";
 export type CatalogKind = "phrase" | "material" | "slot" | "fit" | "style" | "lifestyle";
-export const INSERT_TABS: InsertTab[] = ["phrase", "material", "slot", "size", "fit", "lifestyle"];
+export const INSERT_TABS: InsertTab[] = ["phrase", "material", "slot", "size", "fit", "lifestyle", "ai"];
 
 /* ─────────── โหมด "ทีละขั้น" (เจ้าของ 2026-11-15) ─────────── */
 /** ขั้นของโหมดทีละขั้น — ข้ามได้ทุกขั้น · ขั้นสุดท้าย = ตรวจแล้วแทรก · แต่ละขั้นใช้แท็บเดิมของป๊อป (ไม่มีหน้าซ้ำ) */
 export type InsertStep = "material" | "slot" | "highlight" | "size" | "fit" | "review";
 export const INSERT_STEPS: InsertStep[] = ["material", "slot", "highlight", "size", "fit", "review"];
-/** แท็บที่แต่ละขั้นใช้ (จุดเด่น = ข้อความสำเร็จรูป + Lifestyle · เฟส 2 จะมี AI ดูรูปในขั้นนี้) */
-export const STEP_TABS: Record<InsertStep, InsertTab[]> = { material: ["material"], slot: ["slot"], highlight: ["phrase", "lifestyle"], size: ["size"], fit: ["fit"], review: [] };
+/** แท็บที่แต่ละขั้นใช้ (จุดเด่น = ✨ AI ดูรูป + ข้อความสำเร็จรูป + Lifestyle) */
+export const STEP_TABS: Record<InsertStep, InsertTab[]> = { material: ["material"], slot: ["slot"], highlight: ["ai", "phrase", "lifestyle"], size: ["size"], fit: ["fit"], review: [] };
 /** ขั้นที่ใช้ได้จากแท็บที่ป๊อปเปิดให้ (ชุดตามประเภท / ช่องที่ฟอร์มแก้ได้) — ตรวจแล้วแทรกมีเสมอ */
 export function availableSteps(tabs: readonly InsertTab[]): InsertStep[] {
   return INSERT_STEPS.filter((s) => s === "review" || STEP_TABS[s].some((t) => tabs.includes(t)));
@@ -131,7 +133,13 @@ export function normalizeLineOrder(raw: unknown): OrderKind[] {
   const known = new Set<string>(DEFAULT_LINE_ORDER);
   const out: OrderKind[] = [];
   if (Array.isArray(raw)) for (const x of raw) if (typeof x === "string" && known.has(x) && !out.includes(x as OrderKind)) out.push(x as OrderKind);
-  for (const k of DEFAULT_LINE_ORDER) if (!out.includes(k)) out.push(k);
+  for (const k of DEFAULT_LINE_ORDER) {
+    if (out.includes(k)) continue;
+    const after = INSERT_AFTER[k];
+    const at = after ? out.indexOf(after) : -1;
+    if (at >= 0) out.splice(at + 1, 0, k);
+    else out.push(k);
+  }
   return out;
 }
 
@@ -460,6 +468,10 @@ export function composeLines(
     fits?: FitEntry[] | null;
     /** 🌿 Lifestyle / อื่นๆ — บรรทัดละข้อ (ข้อความของสไตล์ + พิมพ์เอง) */
     lifestyle?: { th: string; en: string | null }[] | null;
+    /** ✨ จุดเด่นจาก AI ดูรูป (ป๊อปแทรก ขั้นจุดเด่น) — บรรทัดละข้อ ไทย + อังกฤษ */
+    ai?: { th: string; en: string | null }[] | null;
+    /** 📋 เติมจากข้อมูล (สี / รับประกัน / วิธีดูแล) — บรรทัดละข้อ */
+    info?: { th: string; en: string | null }[] | null;
     /** ⧉ คัดลอกจากรุ่นอื่น — ใส่ตามต้นฉบับ (ไม่เติม "- ") ก่อนบรรทัดอื่น */
     copied?: { th: string; en: string | null }[] | null;
   },
@@ -497,6 +509,8 @@ export function composeLines(
     strap: () => { if (sel.strap) push(strapLine(sel.strap.min, sel.strap.max, "th", tpl), strapLine(sel.strap.min, sel.strap.max, "en", tpl)); },
     fit: () => { if (sel.fits?.length) push(fitLine(sel.fits, "th", tpl), fitLine(sel.fits, "en", tpl)); },
     lifestyle: () => { for (const l of sel.lifestyle ?? []) push(clean(l.th) || null, clean(l.en) || null); },
+    ai: () => { for (const l of sel.ai ?? []) push(clean(l.th) || null, clean(l.en) || null); },
+    info: () => { for (const l of sel.info ?? []) push(clean(l.th) || null, clean(l.en) || null); },
   };
   for (const k of normalizeLineOrder(tpl.order)) emit[k]();
   return { th, en, enMissing, pairs };
@@ -594,4 +608,56 @@ export function arrangeEn(rows: RowKey[], thOld: string[], enOld: string[], newT
   };
   if (enOld.length === thOld.length) return rows.flatMap((k) => (isNewRow(k) ? neu(k) : [enOld[oldRowIndex(k)] ?? ""]));
   return [...enOld, ...rows.filter(isNewRow).flatMap(neu)];
+}
+
+/* ─────────── 📋 เติมจากข้อมูล (เฟส 3 · เจ้าของ 2026-11-15) — ฟรี ไม่ใช้ AI ─────────── */
+
+/** สีของ SKU ลูก (th = color_th · en = color) */
+export type ColorEntry = { th: string; en?: string | null };
+/** สีต่อ SKU ลูก → รายการสีไม่ซ้ำ (ตัดส่วนหลัง "/" เช่น "ดำ/หนังเรียบ" → "ดำ") */
+export function uniqueColors(rows: { color_th?: string | null; color?: string | null }[]): ColorEntry[] {
+  const out: ColorEntry[] = [];
+  for (const r of rows) {
+    const th = clean(String(r.color_th ?? "").split("/")[0]);
+    if (!th || out.some((c) => c.th === th)) continue;
+    const enRaw = clean(String(r.color ?? "").split("/")[0]);
+    out.push({ th, en: enRaw && !/[\u0E00-\u0E7F]/.test(enRaw) ? enRaw : null });
+  }
+  return out;
+}
+/** "มีให้เลือก 5 สี: ดำ, ครีม และ เขียว" · มากกว่า 8 สี = 6 สีแรก + "และอื่น ๆ" · สีเดียว = ไม่มีบรรทัด · อังกฤษขาดชื่อสี = บอกแค่จำนวน */
+export function colorLine(colors: ColorEntry[], tpl: InsertTemplates = DEFAULT_INSERT_TEMPLATES): { th: string; en: string | null } | null {
+  const list = colors.filter((c) => clean(c.th));
+  if (list.length < 2) return null;
+  const n = list.length;
+  const show = n <= 8 ? list : list.slice(0, 6);
+  const more = show.length < n;
+  const th = `มีให้เลือก ${n} สี: ${more ? show.map((c) => clean(c.th)).join(tpl.joiner.sep) + " และอื่น ๆ" : joinList(show.map((c) => clean(c.th)), "th", tpl)}`;
+  const ens = show.map((c) => clean(c.en));
+  const en = ens.every(Boolean)
+    ? `Available in ${n} colors: ${more ? ens.join(tpl.joiner.sep_en) + " and more" : joinList(ens, "en", tpl)}`
+    : `Available in ${n} colors`;
+  return { th, en };
+}
+/** การรับประกัน (ช่องของสินค้า) → "รับประกันสินค้า 1 ปี" / "1-year warranty" · "ไม่มีรับประกัน"/ว่าง = ไม่มีบรรทัด */
+export function warrantyLine(text: unknown): { th: string; en: string | null } | null {
+  const t = clean(text);
+  if (!t || /ไม่มี|no\s*warranty|^-$/i.test(t)) return null;
+  const th = /^รับประกัน/.test(t) ? t : `รับประกันสินค้า ${t}`;
+  const m = t.match(/(\d+)\s*(วัน|เดือน|ปี|day|month|year)/i);
+  const unit = m ? ({ วัน: "day", เดือน: "month", ปี: "year" } as Record<string, string>)[m[2]] ?? m[2].toLowerCase() : null;
+  return { th, en: m && unit ? `${m[1]}-${unit} warranty` : null };
+}
+/** วิธีดูแลจากวัสดุที่เลือก (คลังวัสดุ care / care_en) → บรรทัดละวัสดุ · ตัดเหลือประโยคแรก ≤ 140 ตัว · หลายวัสดุ = ใส่ชื่อวัสดุ */
+export function careLines(mats: { name: string; name_en?: string | null; care?: string | null; care_en?: string | null }[]): { th: string; en: string | null }[] {
+  const first = (v: unknown) => clean(String(v ?? "").split(/\n|(?<=[.!?。])\s/)[0]).slice(0, 140);
+  const withCare = mats.filter((m) => first(m.care));
+  return withCare.map((m) => {
+    const many = withCare.length > 1;
+    const en = first(m.care_en);
+    return {
+      th: `วิธีดูแล${many ? `${clean(m.name)}` : ""}: ${first(m.care)}`,
+      en: en ? `Care${many && clean(m.name_en) ? ` (${clean(m.name_en)})` : ""}: ${en}` : null,
+    };
+  });
 }

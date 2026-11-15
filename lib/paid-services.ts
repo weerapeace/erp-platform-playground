@@ -94,6 +94,10 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "การ์ดแบรนด์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/brand-profile-draft/route.ts"] },
   { key: "ai.product_detail", th: "เขียนรายละเอียดสินค้า", en: "Product description writer", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้าสินค้า (รายละเอียดสำหรับเว็บ/แพลตฟอร์ม)", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/product-detail/route.ts"] },
+  { key: "ai.desc_highlights", th: "คิดจุดเด่นสินค้าจากรูป (7 ข้อ)", en: "Product highlights from photos", group: "สินค้า / เว็บร้าน",
+    usedAt: "หน้าสินค้า → ＋ แทรก (Description) → ขั้นจุดเด่น → ✨ AI ดูรูป · ตรวจ Description เดิมว่าตรงรูปไหม", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่ม ✨ AI ในขั้นจุดเด่นขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ติ๊กข้อความสำเร็จรูป / พิมพ์เองได้ตามปกติ",
+    costHint: "ประมาณ 0.1–0.4 บาท/ครั้ง (ดูรูปไม่เกิน 6 รูป · ขึ้นกับรุ่น) · จำกัดจำนวนครั้งต่อคนได้", files: ["app/api/ai/desc-highlights/route.ts"] },
   { key: "ai.swatch_read", th: "อ่านแผงผ้าจากรูป (หาชิ้นสี + ตั้งรหัส)", en: "Swatch board reader", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้า SKU → แท็บ Swatch (แผงผ้า) → ปุ่ม อ่านจากรูป (1 รูป = 1 ครั้ง)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม อ่านจากรูป ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ตีกรอบชิ้นเอง / แบ่งกรอบเท่า ๆ กัน ใช้ได้ตามปกติ",
@@ -221,8 +225,13 @@ export type BudgetOverAction = "stop" | "warn";
 export type PaidBudget = {
   monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction; per_service: Record<string, number>;
   per_user_default: number | null; per_user: Record<string, number | null>;
+  /** โควตา "จำนวนครั้งต่อคนต่อเดือน" รายฟีเจอร์ (เจ้าของขอ 2026-11-15) { "<service key>": { per_user_default, per_user } }
+   *  นับเฉพาะครั้งที่สำเร็จ (มีค่าใช้จ่าย) ของคนที่กด · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้นจนวันที่ 1 (ไม่ขึ้นกับ over_action) · ไม่มี = ไม่จำกัด */
+  count_quota: Record<string, CountQuota>;
 };
-export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {} };
+/** per_user_default = ครั้ง/คน/เดือน (null = ไม่จำกัด) · per_user = ตั้งรายคน { <user_id>: ครั้ง | null (ไม่จำกัด) } */
+export type CountQuota = { per_user_default: number | null; per_user: Record<string, number | null> };
+export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} };
 
 export function cleanBudget(v: unknown): PaidBudget {
   const r = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -235,8 +244,41 @@ export function cleanBudget(v: unknown): PaidBudget {
     per_service: cleanPerService(r.per_service),
     per_user_default: positiveOrNull(r.per_user_default),
     per_user: cleanPerUser(r.per_user),
+    count_quota: cleanCountQuota(r.count_quota),
   };
 }
+
+const countOrNull = (v: unknown): number | null => { const n = Math.floor(Number(v)); return v === null || v === "" || v === undefined || !Number.isFinite(n) || n <= 0 ? null : Math.min(n, 100_000); };
+/** โควตาจำนวนครั้ง — รับเฉพาะ key GPT ในทะเบียน · ค่า = จำนวนเต็ม > 0 · รายคน null = ไม่จำกัด · ไม่มีค่าเลย = ตัดทิ้ง */
+function cleanCountQuota(v: unknown): Record<string, CountQuota> {
+  const out: Record<string, CountQuota> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (paidService(k)?.kind !== "ai_chat" || !raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    const per: Record<string, number | null> = {};
+    if (r.per_user && typeof r.per_user === "object") {
+      for (const [uid, n] of Object.entries(r.per_user as Record<string, unknown>)) {
+        if (!UUID_RE.test(uid)) continue;
+        if (n === null || n === "unlimited" || Number(n) === 0) { per[uid.toLowerCase()] = null; continue; }
+        const c = countOrNull(n);
+        if (c !== null) per[uid.toLowerCase()] = c;
+      }
+    }
+    const def = countOrNull(r.per_user_default);
+    if (def !== null || Object.keys(per).length) out[k] = { per_user_default: def, per_user: per };
+  }
+  return out;
+}
+/** โควตาจำนวนครั้งของคนนี้ในฟีเจอร์นี้ — null = ไม่จำกัด (ไม่มีคนกด / ไม่ได้ตั้ง / ตั้งไม่จำกัด) */
+export function countCap(b: PaidBudget, key: string, userId: string | null | undefined): number | null {
+  const q = b.count_quota?.[splitPlaceKey(key).key];
+  if (!q || !userId) return null;
+  const k = userId.toLowerCase();
+  return k in q.per_user ? q.per_user[k] : q.per_user_default;
+}
+export const countQuotaOverMessage = (key: string, cap: number) =>
+  `คุณใช้ "${paidService(key)?.th ?? key}" ครบ ${cap.toLocaleString("th-TH")} ครั้งของเดือนนี้แล้ว — ใช้ได้อีกครั้งวันที่ 1 หรือขอผู้ดูแลเพิ่มโควตา · Monthly limit reached (${cap} uses) — ask an admin for more`;
 
 const positiveOrNull = (v: unknown): number | null => { const n = Number(v); return v === null || v === "" || v === undefined || !Number.isFinite(n) || n <= 0 ? null : Math.round(n * 100) / 100; };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

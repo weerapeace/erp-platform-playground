@@ -3,6 +3,7 @@
 // ============================================================
 // 🤖 ศูนย์ AI และ API ที่เสียเงิน — ดูว่าระบบใช้ AI / บริการเสียเงินตรงไหน · เปิด-ปิด (ทั้งบริการ / รายที่) · เปลี่ยนโมเดล
 //    งบต่อเดือน (ใกล้เต็มแจ้งเตือน · เกินงบหยุด/แจ้งเตือนอย่างเดียว) · ยอดใช้เดือนนี้ + รายคน
+//    โควตาจำนวนครั้งต่อคนต่อเดือน รายฟีเจอร์ (CountQuotaSection · เจ้าของขอ 2026-11-15 สำหรับปุ่ม AI จุดเด่นสินค้า — ใช้ได้ทุกฟีเจอร์ GPT)
 // ทะเบียนจุดที่ใช้ = lib/paid-services (ของกลาง · เพิ่มจุดใหม่ต้องลงทะเบียน — เทสต์ paid-services-guard บังคับ)
 // ด่านกลาง = lib/paid-services-server · ข้อมูลผ่าน /api/admin/paid-services (admin.paid_services)
 // ของกลาง: MiniTable (ค้นหา/เรียง/จัดกลุ่ม/กางแถว) · ConfirmDialog (ยืนยันก่อนปิด) · Toast
@@ -48,9 +49,11 @@ function PaidServicesView() {
   const toast = useToast();
   const [rows, setRows] = useState<Row[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [countUsage, setCountUsage] = useState<Record<string, Record<string, number>>>({});
+  const [countUsers, setCountUsers] = useState<{ user_id: string; name: string }[]>([]);
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [totals, setTotals] = useState({ calls: 0, failed: 0, cost_thb: 0 });
-  const [budget, setBudget] = useState<PaidBudget>({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {} });
+  const [budget, setBudget] = useState<PaidBudget>({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} });
   const [bState, setBState] = useState<BudgetState>("none");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -67,6 +70,7 @@ function PaidServicesView() {
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
       setRows(j.services ?? []); setTotals(j.totals ?? { calls: 0, failed: 0, cost_thb: 0 }); setModels(j.model_choices ?? []);
       setBudget(j.budget); setBState(j.budget_state ?? "none"); setUsers(j.by_user ?? []);
+      setCountUsage(j.count_usage ?? {}); setCountUsers(j.count_users ?? []);
     } catch (e) { setErr((e as Error).message); }
     finally { setLoading(false); }
   }, []);
@@ -132,6 +136,21 @@ function PaidServicesView() {
       toast.success(j.data.budget.per_user_default ? `งบต่อคน ฿${j.data.budget.per_user_default.toLocaleString("th-TH")}/เดือน แล้ว` : "ยกเลิกงบต่อคน (ไม่จำกัด)");
       void load();
     } catch (e) { toast.error(`บันทึกงบไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  };
+
+  /** โควตาจำนวนครั้ง — ค่าเริ่มของทุกคน (user = null) หรือรายคน (limit "default" = กลับไปใช้ค่าเริ่ม) */
+  const saveCountQuota = async (key: string, user: { id: string; name: string } | null, limit: number | "unlimited" | "default" | null) => {
+    setBusy(`count:${key}:${user?.id ?? "default"}`);
+    try {
+      const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count_quota: { key, ...(user ? { user_id: user.id } : {}), limit } }) });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      setBudget(j.data.budget);
+      toast.success(user ? `ตั้งโควตาของ ${user.name} แล้ว` : "ตั้งโควตาค่าเริ่มต่อคนแล้ว");
+      void load();
+    } catch (e) { toast.error(`บันทึกโควตาไม่สำเร็จ: ${(e as Error).message}`); }
     finally { setBusy(null); }
   };
 
@@ -297,6 +316,9 @@ function PaidServicesView() {
               <MiniTable rows={users} rowKey={(u) => u.user_id ?? "_auto"} columns={userColumns}
                 searchText={(u) => `${u.name} ${u.top.map((t) => t.th).join(" ")}`} searchPlaceholder="ค้นหาชื่อ" countUnit="คน" />
             ) : <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">ยังไม่มีการใช้เดือนนี้</p>}
+
+            <CountQuotaSection services={rows.filter((r) => r.kind === "ai_chat")} budget={budget} usage={countUsage} users={countUsers} busy={busy}
+              onSave={(key, user, limit) => void saveCountQuota(key, user, limit)} />
 
             <HistoryCard services={rows} />
 
@@ -564,6 +586,80 @@ function UserBudgetCell({ u, defaultCap, warnPct, busy, onSave }: { u: UserRow; 
           : <button type="button" disabled={busy} onClick={() => onSave("unlimited")} className="text-slate-500 hover:text-slate-700 hover:underline">ไม่จำกัด</button>}
         {u.cap_source === "custom" && <button type="button" disabled={busy} onClick={() => onSave("default")} className="text-slate-500 hover:text-slate-700 hover:underline">ใช้ค่าเริ่ม</button>}
         <span className="text-slate-400">{u.cap_source === "custom" ? "ตั้งเฉพาะคนนี้" : u.cap_source === "unlimited" ? "ไม่จำกัด (ตั้งเฉพาะคนนี้)" : u.cap_source === "default" ? "ใช้ค่าเริ่ม" : "ไม่จำกัด"}</span>
+      </div>
+    </div>
+  );
+}
+
+/** 🔢 โควตาจำนวนครั้งต่อคนต่อเดือน (รายฟีเจอร์ GPT) — ค่าเริ่มของทุกคน + ตั้งรายคน · นับเฉพาะครั้งที่สำเร็จ · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้นจนวันที่ 1 */
+function CountQuotaSection({ services, budget, usage, users, busy, onSave }: {
+  services: Row[]; budget: PaidBudget; usage: Record<string, Record<string, number>>; users: { user_id: string; name: string }[]; busy: string | null;
+  onSave: (key: string, user: { id: string; name: string } | null, limit: number | "unlimited" | "default" | null) => void;
+}) {
+  const withQuota = services.filter((s) => budget.count_quota?.[s.key]);
+  const [key, setKey] = useState<string>(() => withQuota[0]?.key ?? services.find((s) => s.key === "ai.desc_highlights")?.key ?? services[0]?.key ?? "");
+  const q = budget.count_quota?.[key] ?? { per_user_default: null, per_user: {} };
+  const [def, setDef] = useState(q.per_user_default ? String(q.per_user_default) : "");
+  useEffect(() => { setDef(q.per_user_default ? String(q.per_user_default) : ""); }, [key, q.per_user_default]);
+  const [who, setWho] = useState<UserPickerValue | null>(null);
+  const [amt, setAmt] = useState("");
+  const used = usage[key] ?? {};
+  const rowsFor = [...new Set([...Object.keys(used), ...Object.keys(q.per_user)])]
+    .map((id) => ({ id, name: users.find((u) => u.user_id === id)?.name ?? "ผู้ใช้", used: used[id] ?? 0, custom: id in q.per_user ? q.per_user[id] : undefined }))
+    .sort((a, b) => b.used - a.used || a.name.localeCompare(b.name, "th"));
+  const capOf = (r: { custom: number | null | undefined }) => (r.custom === undefined ? q.per_user_default : r.custom);
+  if (!services.length) return null;
+  return (
+    <div className="mt-6" data-count-quota>
+      <h2 className="mb-2 text-sm font-semibold text-slate-700">จำกัดจำนวนครั้งต่อคนต่อเดือน (รายฟีเจอร์)</h2>
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+          <label className="text-xs font-medium text-slate-600">ฟีเจอร์
+            <select value={key} onChange={(e) => setKey(e.target.value)} className="mt-1 block h-8 w-72 max-w-full rounded-md border border-slate-200 bg-white px-1.5 text-sm font-normal outline-none focus:border-blue-400">
+              {services.map((s) => <option key={s.key} value={s.key}>{s.th}{budget.count_quota?.[s.key] ? " · ตั้งโควตาแล้ว" : ""}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-medium text-slate-600">ค่าเริ่มของทุกคน
+            <span className="mt-1 flex items-center gap-1.5">
+              <input type="number" min={0} step={1} value={def} disabled={busy === `count:${key}:default`} placeholder="ไม่จำกัด"
+                onChange={(e) => setDef(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                onBlur={() => { const n = Math.floor(Number(def)); const next = def.trim() && n > 0 ? n : null; if (next !== (q.per_user_default ?? null)) onSave(key, null, next); }}
+                className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal tabular-nums outline-none focus:border-blue-400 disabled:opacity-50" />
+              <span className="font-normal text-slate-500">ครั้ง / คน / เดือน</span>
+            </span>
+          </label>
+          <div className="text-xs font-medium text-slate-600">ตั้งเฉพาะคน
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <span className="w-52"><UserPicker value={who} onChange={setWho} disableCreate /></span>
+              <input type="number" min={0} step={1} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="ไม่จำกัด"
+                className="h-8 w-20 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal tabular-nums outline-none focus:border-blue-400" />
+              <span className="font-normal text-slate-500">ครั้ง</span>
+              <button type="button" disabled={!who} onClick={() => { if (!who) return; const n = Math.floor(Number(amt)); onSave(key, { id: who.id, name: who.name }, amt.trim() && n > 0 ? n : "unlimited"); setWho(null); setAmt(""); }}
+                className="h-8 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">ตั้งโควตา</button>
+            </div>
+          </div>
+        </div>
+        {rowsFor.length ? (
+          <div className="mt-3 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+            {rowsFor.map((r) => {
+              const cap = capOf(r);
+              const pct = cap ? Math.min(100, Math.round((r.used / cap) * 100)) : 0;
+              return (
+                <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm" data-count-quota-row={r.id}>
+                  <span className="min-w-0 flex-1 font-medium text-slate-800">{r.name}</span>
+                  <span className="tabular-nums text-slate-600">ใช้ {r.used.toLocaleString("th-TH")} / {cap ?? "∞"} ครั้ง</span>
+                  {cap ? <span className="h-1.5 w-24 overflow-hidden rounded bg-slate-100"><span className={`block h-full ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} /></span> : null}
+                  <span className="text-[11px] text-slate-400">{r.custom === undefined ? "ใช้ค่าเริ่ม" : r.custom === null ? "ไม่จำกัด (ตั้งเฉพาะคนนี้)" : "ตั้งเฉพาะคนนี้"}</span>
+                  <span className="flex gap-2 text-[11px]">
+                    {r.custom !== null && <button type="button" disabled={busy === `count:${key}:${r.id}`} onClick={() => onSave(key, { id: r.id, name: r.name }, "unlimited")} className="text-slate-500 hover:underline">ไม่จำกัด</button>}
+                    {r.custom !== undefined && <button type="button" disabled={busy === `count:${key}:${r.id}`} onClick={() => onSave(key, { id: r.id, name: r.name }, "default")} className="text-blue-600 hover:underline">ใช้ค่าเริ่ม</button>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : <p className="mt-3 text-xs text-slate-400">เดือนนี้ยังไม่มีใครใช้ฟีเจอร์นี้</p>}
+        <p className="mt-2 text-[11px] text-slate-400">นับเฉพาะครั้งที่ AI ตอบสำเร็จของคนที่กด · ครบ = คนนั้นใช้ฟีเจอร์นี้ไม่ได้จนวันที่ 1 (ปุ่มอื่นยังใช้ได้) · ผู้ดูแลตั้ง "ไม่จำกัด" ให้ตัวเองได้ · ทุกการเปลี่ยนบันทึกประวัติ</p>
       </div>
     </div>
   );
