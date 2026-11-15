@@ -133,6 +133,34 @@ const parentHit = (r: Row): ScanHit => ({
   href: `/master/parent-skus?open=${encodeURIComponent(str(r.id))}`,
 });
 
+/** แผงผ้า: รหัสชิ้น (SW-0001-01) → เปิดแผ่นแล้วชี้ชิ้น · รหัสแผ่น (SW-0001 / รหัสที่ตั้งเอง) → เปิดแผ่น */
+async function findSwatch(code: string, byId: boolean): Promise<ScanHit | null> {
+  const admin = supabaseAdmin();
+  if (!byId) {
+    const { data: spots } = await admin.from("sku_swatch_spots").select("id, swatch_id, code, name, label").ilike("code", likeSafe(code)).limit(1);
+    const p = ((spots ?? []) as Row[])[0];
+    if (p) {
+      const { data: b } = await admin.from("sku_swatches").select("id, name, code, is_active").eq("id", str(p.swatch_id)).maybeSingle();
+      const board = b as Row | null;
+      if (board && board.is_active !== false) return {
+        kind: "swatch", id: str(p.id), code: str(p.code), status: null,
+        title: [str(p.code), str(p.name)].filter(Boolean).join(" · "),
+        subtitle: `ชิ้นบนแผงผ้า ${str(board.name) || str(board.code)}${str(p.label) ? ` · เลขบนแผง ${str(p.label)}` : ""}`,
+        href: `/master/skus?swatch=${encodeURIComponent(str(p.swatch_id))}&spot=${encodeURIComponent(str(p.id))}`,
+      };
+    }
+  }
+  const q = admin.from("sku_swatches").select("id, name, code, is_active");
+  const { data } = await (byId ? q.eq("id", code) : q.ilike("code", likeSafe(code))).eq("is_active", true).limit(1);
+  const r = ((data ?? []) as Row[])[0];
+  if (!r) return null;
+  return {
+    kind: "swatch", id: str(r.id), code: str(r.code), status: null,
+    title: str(r.name) || str(r.code) || "แผงผ้า", subtitle: `แผงผ้า (Swatch)${str(r.name) && str(r.code) ? ` · ${str(r.code)}` : ""}`,
+    href: `/master/skus?swatch=${encodeURIComponent(str(r.id))}`,
+  };
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
 
@@ -155,14 +183,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
    * ปลอดภัยเพราะตรวจ DB แล้วว่า "ไม่มีรหัสซ้ำข้ามตาราง" (PO/MO/PR/SKU ไม่ชนกันเลย)
    */
   const guess = parsed.kind === "unknown" ? [] : [parsed.kind];
-  const order = [...guess, ...(["sku", "po", "mo", "pr"] as ScanKind[])];
+  const order = [...guess, ...(["sku", "po", "mo", "pr", "swatch"] as ScanKind[])];
 
   let hit: ScanHit | null = null;
   const tried = new Set<ScanKind>();
   for (const k of order) {
     if (tried.has(k)) continue;
     tried.add(k);
-    hit = k === "sku" ? await findSku(parsed.code, parsed.byId) : await findDoc(k, parsed.code, parsed.byId);
+    hit = k === "sku" ? await findSku(parsed.code, parsed.byId) : k === "swatch" ? await findSwatch(parsed.code, parsed.byId) : await findDoc(k, parsed.code, parsed.byId);
     if (hit) break;
   }
 

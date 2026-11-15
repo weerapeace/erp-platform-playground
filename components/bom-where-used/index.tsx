@@ -9,11 +9,13 @@
  * กดรหัสสินค้า = เปิดจอสินค้าตัวนั้น · กด "เปิดสูตร" = ไปหน้า BOM ที่สูตรนั้น
  * ไม่มีสูตรไหนใช้ = โชว์บรรทัดเดียวบอกว่ายังไม่ถูกใช้ (ไม่รก)
  *
- * ใช้ที่: MasterRecordDrawer (moduleKey=skus-v2) และหน้า /master/skus — แท็บ "BOM (สูตรผลิต)"
+ * หลายรหัสพร้อมกัน: skuCodes=[…] (เช่น ทั้งแผงผ้า) → มีคอลัมน์ "ชิ้น" บอกว่าแถวนั้นมาจากรหัสไหน (componentCell = แต่งป้ายเอง)
+ *
+ * ใช้ที่: MasterRecordDrawer (moduleKey=skus-v2) และหน้า /master/skus — แท็บ "BOM (สูตรผลิต)" · แผงผ้า Swatch (ป๊อปดูทั้งแผ่น)
  * ของกลางที่ใช้: MiniTable · HoverPreview · apiFetch · r2ImageUrl · MasterRecordDrawer
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import nextDynamic from "next/dynamic";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverPreview } from "@/components/hover-image";
@@ -24,6 +26,7 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
 
 type Row = {
   line_id: string;
+  component_sku: string | null;
   bom_code: string | null;
   version: string | null;
   status: string | null;
@@ -43,29 +46,40 @@ type Row = {
 const imgSrc = (v: string | null, w: number) => (!v ? null : v.startsWith("http") ? v : r2ImageUrl(v, w));
 const fmtQty = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { maximumFractionDigits: 4 }));
 
-export function BomWhereUsed({ skuId, skuCode }: {
-  skuId: string;
+export function BomWhereUsed({ skuId, skuCode, skuCodes, componentCell }: {
+  skuId?: string;
   /** รู้รหัสอยู่แล้วก็ส่งมาได้ (ประหยัดการค้นรหัสฝั่งเซิร์ฟเวอร์) */
   skuCode?: string | null;
+  /** หลายรหัสพร้อมกัน (≤ 300) → เพิ่มคอลัมน์ "ชิ้น" */
+  skuCodes?: string[];
+  /** ป้ายในคอลัมน์ "ชิ้น" (ไม่ส่ง = รหัส SKU) */
+  componentCell?: (skuCode: string) => ReactNode;
 }) {
+  const multi = !!skuCodes?.length;
+  const codesKey = multi ? skuCodes!.join(",") : "";
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [openSkuId, setOpenSkuId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!skuId && !skuCode) return;
+    if (!skuId && !skuCode && !codesKey) { setLoading(false); return; }
     setLoading(true);
     try {
-      const p = skuCode ? `sku=${encodeURIComponent(skuCode)}` : `sku_id=${encodeURIComponent(skuId)}`;
+      const p = codesKey ? `skus=${encodeURIComponent(codesKey)}` : skuCode ? `sku=${encodeURIComponent(skuCode)}` : `sku_id=${encodeURIComponent(skuId ?? "")}`;
       const j = await apiFetch(`/api/bom/where-used?${p}`).then((r) => r.json());
       setRows(Array.isArray(j.data) ? (j.data as Row[]) : []);
     } catch { setRows([]); }
     finally { setLoading(false); }
-  }, [skuId, skuCode]);
+  }, [skuId, skuCode, codesKey]);
 
   useEffect(() => { void load(); }, [load]);
 
   const columns: MiniColumn<Row>[] = [
+    ...(multi ? [{
+      key: "component", header: "ชิ้น", width: "7rem",
+      sortValue: (r: Row) => r.component_sku ?? "", sortLabel: "ชิ้น",
+      cell: (r: Row) => r.component_sku ? (componentCell ? componentCell(r.component_sku) : <span className="font-mono text-[11.5px] text-slate-600">{r.component_sku}</span>) : "—",
+    } satisfies MiniColumn<Row>] : []),
     {
       key: "product", header: "สินค้าที่ใช้ของชิ้นนี้", width: "2fr",
       sortValue: (r) => r.product_sku ?? "", sortLabel: "รหัสสินค้า",
@@ -142,7 +156,7 @@ export function BomWhereUsed({ skuId, skuCode }: {
         columns={columns}
         title={<span className="text-[13px] font-medium text-slate-700">🔎 ใช้เป็นวัตถุดิบใน {products.toLocaleString("th-TH")} สินค้า</span>}
         countUnit="บรรทัด"
-        searchText={(r) => `${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.bom_code ?? ""} ${r.slot_code ?? ""}`}
+        searchText={(r) => `${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.bom_code ?? ""} ${r.slot_code ?? ""} ${r.component_sku ?? ""}`}
         searchPlaceholder="ค้นหาสินค้า / รหัสสูตร…"
         dense
         maxHeightClass="max-h-[420px]"

@@ -6,13 +6,12 @@
  * แถว = ส่วนประกอบ · คอลัมน์ = สีของรุ่น · ช่อง = สีที่เลือก (กดช่องเปิดป๊อปเลือกสี)
  * ป๊อปเลือกสี 4 ทาง: แผงผ้า (ชิ้นบนรูปแผ่น Swatch) · SKU · ทะเบียนสีกลาง · ดูดสีจากรูป / เลือกเอง
  *
- * ของกลางที่ใช้: LineItemsGrid (variant lines) · ImageRegions · ComponentPicker · ImageEyedropper · ColorInput · ERPModal · ConfirmDialog
+ * ของกลางที่ใช้: LineItemsGrid (variant lines) · SwatchBrowser (แผงผ้า โหมดเลือก 1 ชิ้น) · ComponentPicker · ImageEyedropper · ColorInput · ERPModal · ConfirmDialog
  * ข้อมูล: lib/design-sheet-spec-colors (cleanSpecColors ใช้ทั้ง API และหน้าจอ) · บันทึกพร้อมแท็บ (PUT /spec body.colors)
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
-import { ImageRegions } from "@/components/image-regions";
 import { ComponentPicker } from "@/components/material-picker";
 import { ColorInput } from "@/components/color-picker";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
@@ -27,9 +26,11 @@ import {
   SPEC_COLOR_SOURCE_LABEL, cropBackground,
   type SpecColorCell, type SpecColorRow, type SpecColorTable,
 } from "@/lib/design-sheet-spec-colors";
-import type { SwatchCard, SwatchDetail, SwatchSpot } from "@/app/api/sku-swatches/route";
+import type { SwatchSpotPick } from "@/components/sku-swatch-browser";
 
 const ImageEyedropper = dynamic(() => import("@/components/image-eyedropper").then((m) => m.ImageEyedropper), { ssr: false });
+// แผงผ้า = ของกลาง SwatchBrowser (ค้นด้วยข้อความ/สี · กรองแท็ก · ดูแผ่นเต็มจอ) — ห้ามทำรายการแผงเอง (lib/__tests__/sku-swatch-guard.test.ts)
+const SwatchBrowser = dynamic(() => import("@/components/sku-swatch-browser").then((m) => m.SwatchBrowser), { ssr: false });
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -218,33 +219,11 @@ function SpecColorPickerModal({ title, cell, imageKeys, onClose, onPick }: {
     source, name: null, hex: null, colors: [], image_key: null, crop: null, sku_id: null, sku_code: null, sku_name: null, swatch_id: null, ...patch,
   });
 
-  // ── แผงผ้า ──
-  const [boards, setBoards] = useState<SwatchCard[] | null>(null);
-  const [board, setBoard] = useState<SwatchDetail | null>(null);
-  const [boardLoading, setBoardLoading] = useState(false);
-  const [boardPhoto, setBoardPhoto] = useState<string | null>(null);   // แผงหลายรูป: รูปที่ดูอยู่
-  useEffect(() => {
-    if (tab !== "swatch" || boards) return;
-    apiFetch("/api/sku-swatches?limit=60").then((r) => r.json()).then((j) => {
-      const list = (j.swatches ?? []) as SwatchCard[];
-      setBoards(list);
-      const want = cell?.swatch_id ?? (list.length === 1 ? list[0].id : null);   // เปิดแผ่นเดิม / มีแผ่นเดียวเปิดให้เลย
-      if (want) void openBoard(want);
-    }).catch(() => setBoards([]));
-  }, [tab, boards]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const openBoard = async (id: string) => {
-    setBoardLoading(true);
-    try { const j = await apiFetch(`/api/sku-swatches?id=${id}`).then((r) => r.json()); setBoard((j.swatch ?? null) as SwatchDetail | null); setBoardPhoto(null); }
-    catch { setBoard(null); }
-    finally { setBoardLoading(false); }
-  };
-  const pickSpot = (s: SwatchSpot) => {
-    if (!board) return;
-    setDraft(base("swatch", {
-      name: s.sku?.color || s.name || s.label || s.sku?.name || null, image_key: s.image_key ?? board.image_key, crop: { x: Number(s.x), y: Number(s.y), w: Number(s.w), h: Number(s.h) },
-      sku_id: s.sku_id, sku_code: s.sku?.code ?? null, sku_name: s.sku?.name ?? null, swatch_id: board.id,
-    }));
-  };
+  // ── แผงผ้า (ของกลาง SwatchBrowser โหมดเลือก 1 ชิ้น) ──
+  const pickSpot = (p: SwatchSpotPick) => setDraft(base("swatch", {
+    name: p.sku?.color || p.name || p.label || p.sku?.name || null, hex: p.color_hex, image_key: p.image_key, crop: { x: Number(p.x), y: Number(p.y), w: Number(p.w), h: Number(p.h) },
+    sku_id: p.sku?.id ?? null, sku_code: p.sku?.code ?? null, sku_name: p.sku?.name ?? null, swatch_id: p.swatch_id,
+  }));
 
   // ── ทะเบียนสี ──
   const [dict, setDict] = useState<SwatchEntry[] | null>(dictCache);
@@ -297,54 +276,8 @@ function SpecColorPickerModal({ title, cell, imageKeys, onClose, onPick }: {
 
         {tab === "swatch" && (
           <div className="space-y-2">
-            {boards == null ? <p className="text-sm text-slate-400 py-4 text-center">{t("กำลังโหลดแผงผ้า…", "Loading fabric boards…")}</p>
-              : boards.length === 0 ? <p className="text-sm text-slate-400 py-4 text-center">{t("ยังไม่มีแผงผ้า — เพิ่มได้ที่หน้า SKU แท็บ 🎨 Swatch (ถ่ายรูปแผงผ้าแล้วตีกรอบผูก SKU)", "No fabric boards yet — add them in SKUs → 🎨 Swatch tab")}</p>
-              : (
-                <>
-                  {boards.length > 1 && (
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {boards.map((b) => (
-                        <button key={b.id} type="button" onClick={() => void openBoard(b.id)}
-                          className={`shrink-0 w-24 rounded-lg border overflow-hidden text-left ${board?.id === b.id ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200 hover:border-violet-300"}`}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={r2ImageUrl(b.image_key, 240) ?? ""} alt="" className="w-full h-16 object-cover bg-slate-100" />
-                          <span className="block px-1.5 py-1 text-[11px] text-slate-600 truncate">{b.name || `#${b.seq}`} · {b.linked_count}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {boardLoading && <p className="text-sm text-slate-400 py-3 text-center">{t("กำลังเปิดแผงผ้า…", "Opening board…")}</p>}
-                  {board && !boardLoading && (board.spots.length === 0
-                    ? <p className="text-sm text-slate-400 py-3 text-center">{t("แผงนี้ยังไม่ได้ตีกรอบชิ้นผ้า — ไปตีกรอบที่หน้า SKU แท็บ 🎨 Swatch", "This board has no marked pieces yet")}</p>
-                    : (
-                      <>
-                        <p className="text-xs text-slate-500">{t("กดชิ้นผ้าบนรูปเพื่อเลือก", "Click a fabric piece on the image")}</p>
-                        {(board.images?.length ?? 0) > 1 && (
-                          <div className="flex gap-1.5 overflow-x-auto pb-1">
-                            {board.images.map((im, i) => (
-                              <button key={im.id || i} type="button" onClick={() => setBoardPhoto(im.id)}
-                                className={`shrink-0 w-16 h-11 rounded-md overflow-hidden border-2 ${(boardPhoto ?? board.images[0]?.id) === im.id ? "border-violet-500" : "border-transparent hover:border-slate-300"}`}>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={r2ImageUrl(im.image_key, 160) ?? ""} alt="" className="w-full h-full object-cover" />
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {(() => {
-                          const imgs = board.images ?? [];
-                          const ph = imgs.find((i) => i.id === boardPhoto) ?? imgs[0] ?? null;
-                          const spots = ph ? board.spots.filter((s) => (s.image_id || imgs[0]?.id) === ph.id) : board.spots;
-                          return (
-                            <div className="rounded-lg border border-slate-200 overflow-hidden">
-                              <ImageRegions src={r2ImageUrl(ph?.image_key ?? board.image_key, 1600) ?? ""} regions={spots} mode="view" onRegionClick={pickSpot}
-                                renderTooltip={(s) => <span>{s.sku ? `${s.sku.code} · ${s.sku.name}${s.sku.color ? ` (${s.sku.color})` : ""}` : [s.code, s.name, s.label].filter(Boolean).join(" · ") || t("ยังไม่ผูก SKU", "No SKU")}</span>} />
-                            </div>
-                          );
-                        })()}
-                      </>
-                    ))}
-                </>
-              )}
+            <p className="text-xs text-slate-500">{t("กดแผ่นเพื่อเปิด แล้วกดชิ้นผ้าบนรูป → เลือกชิ้นนี้ · ค้นด้วยสีได้", "Open a board, click a piece → Pick this piece · you can search by colour")}</p>
+            <SwatchBrowser onPickSpot={pickSpot} />
           </div>
         )}
 

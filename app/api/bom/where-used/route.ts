@@ -3,8 +3,9 @@
  *
  * GET ?sku_id=<uuid>  หรือ  ?sku=<รหัส SKU>   [&limit=200]
  *   → รายการบรรทัดใน bom_lines ที่ component_sku = รหัสนี้ + ข้อมูลหัวสูตร (สินค้าที่ผลิต/เวอร์ชัน/สถานะ)
+ * GET ?skus=<รหัส1>,<รหัส2>,…  (หลายรหัส ≤ 300 · แต่ละแถวบอก component_sku ว่ามาจากรหัสไหน) — เช่น ทั้งแผงผ้า
  *
- * ใช้ที่: แท็บ "BOM (สูตรผลิต)" ในหน้า SKU (components/bom-where-used)
+ * ใช้ที่: แท็บ "BOM (สูตรผลิต)" ในหน้า SKU (components/bom-where-used) · แผงผ้า Swatch (ทั้งแผ่น/รายชิ้น)
  * ของกลาง: guardApi (products.view) · supabaseAdmin
  * หมายเหตุ: bom_lines/bom_headers ผูกกันด้วย bom_code (text) และอ้างสินค้าด้วย "รหัส SKU" ไม่ใช่ id
  */
@@ -17,6 +18,8 @@ export const revalidate = 0;
 
 export type BomWhereUsedRow = {
   line_id: string;
+  /** รหัสวัตถุดิบของบรรทัดนี้ (ใช้ตอนถามหลายรหัส) */
+  component_sku: string | null;
   bom_code: string | null;
   version: string | null;
   status: string | null;
@@ -41,6 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skuId = (sp.get("sku_id") ?? "").trim();
   const limit = Math.min(Number(sp.get("limit")) || 200, 500);
   let   code  = (sp.get("sku") ?? "").trim();
+  const codes = (sp.get("skus") ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 300);
 
   const admin = supabaseAdmin();
 
@@ -49,14 +53,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data } = await admin.from("skus_v2").select("code").eq("id", skuId).maybeSingle();
     code = ((data as Record<string, unknown> | null)?.code as string) ?? "";
   }
-  if (!code) return NextResponse.json({ data: [], total: 0, sku_code: null, error: null });
+  if (!code && !codes.length) return NextResponse.json({ data: [], total: 0, sku_code: null, error: null });
 
-  const { data: lines, error } = await admin
+  const base = admin
     .from("bom_lines")
-    .select("id, bom_code, qty, uom, slot_code, waste_percent, is_optional, sequence, is_active")
-    .eq("component_sku", code)
-    .eq("is_active", true)
-    .limit(limit);
+    .select("id, component_sku, bom_code, qty, uom, slot_code, waste_percent, is_optional, sequence, is_active")
+    .eq("is_active", true);
+  const { data: lines, error } = await (codes.length ? base.in("component_sku", codes).limit(Math.max(limit, 500)) : base.eq("component_sku", code).limit(limit));
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
 
   const rows = (lines ?? []) as Record<string, unknown>[];
@@ -90,6 +93,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const p = productSku ? prodMap.get(productSku) : undefined;
     return {
       line_id:        String(r.id),
+      component_sku:  (r.component_sku as string) ?? null,
       bom_code:       (r.bom_code as string) ?? null,
       version:        (h.version as string) ?? null,
       status:         (h.status as string) ?? null,

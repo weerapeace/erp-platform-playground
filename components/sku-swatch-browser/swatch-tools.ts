@@ -144,6 +144,8 @@ export type DraftChip = PctRect & {
   points?: Pt[] | null;
   /** ชื่อสีตั้งอัตโนมัติจากสี่เหลี่ยมสี (เปลี่ยนสี = ชื่อเปลี่ยนตาม · พิมพ์เอง = false) */
   nameAuto?: boolean;
+  /** ราคา/ร้านรายชิ้น (ว่าง = ใช้ของแผ่น) · supplier_ref = id ร้านของแผ่น */
+  price?: number | null; supplier_ref?: string | null;
 };
 
 let seq = 0;
@@ -235,5 +237,23 @@ export function chipsToApi(chips: DraftChip[], photos: DraftPhoto[]) {
   return chips.filter((c) => order.includes(c.photo)).map((c) => ({
     id: c.id.startsWith("new-") ? undefined : c.id, image_index: order.indexOf(c.photo),
     x: c.x, y: c.y, w: c.w, h: c.h, points: c.points ?? null, label: c.label, name: c.name, color_hex: c.color_hex, source: c.source, sku_id: c.sku_id,
+    price: c.price ?? null, supplier_ref: c.supplier_ref ?? null,
   }));
+}
+
+/** ตัดรูปชิ้นเดียวออกจากรูปแผง (กรอบครอบ + ขอบ 4%) → ไฟล์ JPG (ใช้เป็นรูปปก SKU) */
+export async function cropChipFile(src: string, r: PctRect, name: string, maxSide = 1200): Promise<File> {
+  const img = await loadImageEl(src);
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const pad = 0.04;
+  const x0 = Math.max(0, (r.x / 100 - (r.w / 100) * pad) * W), y0 = Math.max(0, (r.y / 100 - (r.h / 100) * pad) * H);
+  const x1 = Math.min(W, ((r.x + r.w) / 100 + (r.w / 100) * pad) * W), y1 = Math.min(H, ((r.y + r.h) / 100 + (r.h / 100) * pad) * H);
+  const sw = Math.max(1, x1 - x0), sh = Math.max(1, y1 - y0);
+  const k = Math.min(1, maxSide / Math.max(sw, sh));
+  const c = document.createElement("canvas");
+  c.width = Math.round(sw * k); c.height = Math.round(sh * k);
+  c.getContext("2d")!.drawImage(img, x0, y0, sw, sh, 0, 0, c.width, c.height);
+  const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/jpeg", 0.9));
+  if (!blob) throw new Error("ตัดรูปชิ้นไม่สำเร็จ");
+  return new File([blob], `${name.replace(/[^A-Za-z0-9._-]+/g, "_") || "chip"}.jpg`, { type: "image/jpeg" });
 }

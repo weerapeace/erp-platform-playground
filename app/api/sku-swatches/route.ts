@@ -7,7 +7,10 @@
  *   GET    ?sku_id=<uuid>                         → SKU นี้อยู่บนแผ่นไหน ตรงไหน (ลิงก์ย้อนกลับในหน้า SKU)
  *   POST   { name?, note?, code?, family_tag_ids?, images: [{image_key,image_w,image_h}], spots?: Spot[] }   → สร้างแผ่นใหม่
  *          (รุ่นเก่า: image_key/image_w/image_h ตัวเดียว ยังรับ)
- *   PATCH  { id, name?, note?, family_tag_ids?, images?, spots? }
+ *   GET    รายการ: + no_tags=1 (ยังไม่ติดแท็ก) · sort=new|name|code|chips|unlinked|shop · color=#hex (ค้นด้วยสี ΔE ≤ 20)
+ *   PATCH  { id, name?, note?, family_tag_ids?, images?, spots?, suppliers?, material?, weight?, weight_unit?, width_cm?, thickness_mm?, supplier_model? }
+ *          suppliers = ร้าน "ทั้งชุด" (มี id = แก้ · ไม่มี id = เพิ่ม · id เดิมที่ไม่ส่ง = ลบ) · ร้านหลักได้ร้านเดียว
+ *          spot.price / spot.supplier_ref = ราคา/ร้านรายชิ้น (supplier_ref ต้องเป็นร้านของแผ่นนี้ ไม่งั้นเป็นว่าง)
  *          images = รูป "ทั้งชุด" ตามลำดับ (มี id = รูปเดิม · ไม่มี id = รูปใหม่ · id เดิมที่ไม่ส่ง = ลบ พร้อมชิ้นบนรูปนั้น) · ตัวแรก = ปก
  *          spots  = ชิ้น "ทั้งแผ่น" (มี id = แก้ · ไม่มี id = เพิ่ม · id เดิมที่ไม่ส่ง = ลบ) · image_index = ลำดับรูปใน images ที่ส่งมา (ไม่ส่ง images = ลำดับรูปปัจจุบัน)
  *   DELETE ?id=                                   → ลบแผ่น (รูป/ชิ้นลบตาม cascade · SKU ไม่กระทบ · ไฟล์รูปใน R2 ไม่ลบ)
@@ -17,12 +20,13 @@
  * สิทธิ์: products.view (อ่าน) / products.edit (เขียน) + audit log ของกลาง
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
 import { loadSkuStock } from "@/lib/sku-stock";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { bboxOf, chipCode, cleanBoardCode, cleanPoints, isAxisRect, isHex, type Pt } from "@/lib/sku-swatch";
+import { deltaE2000, hexToLab } from "@/lib/color-swatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,28 +40,104 @@ export type SwatchSpot = {
   code: string | null; name: string | null; color_hex: string | null; source: "manual" | "ai";
   /** กรอบดัดมุม: จุดมุม [[x,y],…] เป็น % ของรูป · null = สี่เหลี่ยมตรง (x/y/w/h = กรอบครอบเสมอ) */
   points: Pt[] | null;
+  /** ราคา/ร้านรายชิ้น (ว่าง = ใช้ของแผ่น) · supplier_ref = id ใน suppliers ของแผ่น */
+  price: number | null; supplier_ref: string | null;
   sku_id: string | null;
-  sku: { id: string; code: string; name: string; image: string | null; image_key: string | null; uom: string | null; color: string | null; qty_on_hand: number | null; is_active: boolean } | null;
+  sku: { id: string; code: string; name: string; image: string | null; image_key: string | null; uom: string | null; color: string | null; qty_on_hand: number | null; is_active: boolean;
+    /** ซื้อล่าสุด (ใบสั่งซื้อ v2) · ราคา = ว่างถ้าไม่มีสิทธิ์ดูต้นทุน */
+    last_po?: LastPurchase | null } | null;
 };
-export type SwatchCard = {
+export type LastPurchase = { po_no: string | null; date: string | null; seller: string | null; price: number | null; currency: string | null; uom: string | null };
+/** ร้านที่สั่งได้ของแผ่น (หลัก + สำรอง) — ราคา/เงื่อนไขซื้ออยู่กับร้าน */
+export type SwatchSupplier = {
+  id: string; partner_id: string | null; partner_name: string | null; /** ชื่อที่โชว์ (ทะเบียนคู่ค้า → ชื่อที่พิมพ์) */ name: string;
+  buy_url: string | null; price: number | null; currency: "THB" | "CNY" | "USD"; unit: string | null;
+  moq: number | null; lead_days: number | null; price_updated_at: string | null; is_main: boolean; note: string | null; sort_order: number;
+};
+/** สเปกวัสดุของแผ่น */
+export type SwatchSpecs = { material: string | null; weight: number | null; weight_unit: "oz" | "gsm" | null; width_cm: number | null; thickness_mm: number | null; supplier_model: string | null };
+export type SwatchCard = SwatchSpecs & {
   id: string; name: string | null; note: string | null; seq: number; code: string | null;
-  /** ปก (= รูปแรก) */
-  image_key: string | null; image_w: number | null; image_h: number | null; image_count: number;
+  /** ปก (= รูปแรก) + รูปทั้งหมด (≤ 6 · ชี้การ์ดแล้วเลื่อนดู) */
+  image_key: string | null; image_w: number | null; image_h: number | null; image_count: number; image_keys: string[];
   family_tag_ids: string[]; tags: { id: string; name: string }[];
   spot_count: number; linked_count: number;
+  /** สีของชิ้นตามลำดับ (≤ 40 · แถบสีจิ๋วใต้การ์ด) */
+  chip_colors: string[];
+  /** ร้านหลัก (หรือร้านแรก) — โชว์บนการ์ด/ตาราง */
+  main_supplier: { name: string; price: number | null; currency: string; unit: string | null } | null;
+  /** ค้นด้วยสี: ชิ้นที่สีใกล้สุด */
+  color_match?: { code: string | null; name: string | null; hex: string; dE: number } | null;
   created_at: string; updated_at: string;
 };
-export type SwatchDetail = SwatchCard & { images: SwatchImage[]; spots: SwatchSpot[]; next_chip_no: number };
+export type SwatchDetail = SwatchCard & { images: SwatchImage[]; spots: SwatchSpot[]; next_chip_no: number; suppliers: SwatchSupplier[]; /** เห็นราคาซื้อได้ไหม (products.cost.view) */ can_cost: boolean };
 /** ตำแหน่งของ SKU บนแผ่น swatch (1 แถว = 1 ชิ้น) — image_key = รูปที่ชิ้นอยู่ */
 export type SkuSwatchLink = { swatch_id: string; swatch_name: string; image_key: string | null; spot_id: string; label: string | null; code: string | null; x: number; y: number; w: number; h: number };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-type SwatchRow = { id: string; name: string | null; note: string | null; code: string | null; next_chip_no: number | null; image_key: string | null; image_w: number | null; image_h: number | null; family_tag_ids: unknown; created_at: string; updated_at: string };
-type SpotRow = { id: string; swatch_id: string; sku_id: string | null; image_id: string | null; x: number | string; y: number | string; w: number | string; h: number | string; label: string | null; sort_order: number; code: string | null; name: string | null; color_hex: string | null; source: string | null; points: unknown };
+type SwatchRow = { id: string; name: string | null; note: string | null; code: string | null; next_chip_no: number | null; image_key: string | null; image_w: number | null; image_h: number | null; family_tag_ids: unknown; created_at: string; updated_at: string;
+  material: string | null; weight: number | string | null; weight_unit: string | null; width_cm: number | string | null; thickness_mm: number | string | null; supplier_model: string | null };
+type SpotRow = { id: string; swatch_id: string; sku_id: string | null; image_id: string | null; x: number | string; y: number | string; w: number | string; h: number | string; label: string | null; sort_order: number; code: string | null; name: string | null; color_hex: string | null; source: string | null; points: unknown; price: number | string | null; supplier_ref: string | null };
 type ImageRow = { id: string; swatch_id: string; image_key: string; image_w: number | null; image_h: number | null; sort_order: number };
+type SupRow = { id: string; swatch_id: string; partner_id: string | null; partner_name: string | null; buy_url: string | null; price: number | string | null; currency: string; unit: string | null; moq: number | string | null; lead_days: number | null; price_updated_at: string | null; is_main: boolean; note: string | null; sort_order: number };
 
-const COLS = "id, name, note, code, next_chip_no, image_key, image_w, image_h, family_tag_ids, created_at, updated_at";
-const SPOT_COLS = "id, swatch_id, sku_id, image_id, x, y, w, h, label, sort_order, code, name, color_hex, source, points";
+const COLS = "id, name, note, code, next_chip_no, image_key, image_w, image_h, family_tag_ids, created_at, updated_at, material, weight, weight_unit, width_cm, thickness_mm, supplier_model";
+const SPOT_COLS = "id, swatch_id, sku_id, image_id, x, y, w, h, label, sort_order, code, name, color_hex, source, points, price, supplier_ref";
+const SUP_COLS = "id, swatch_id, partner_id, partner_name, buy_url, price, currency, unit, moq, lead_days, price_updated_at, is_main, note, sort_order";
+const numOrNull = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+const specsOf = (s: SwatchRow): SwatchSpecs => ({
+  material: s.material ?? null, weight: numOrNull(s.weight), weight_unit: s.weight_unit === "oz" || s.weight_unit === "gsm" ? s.weight_unit : null,
+  width_cm: numOrNull(s.width_cm), thickness_mm: numOrNull(s.thickness_mm), supplier_model: s.supplier_model ?? null,
+});
+/** ร้านของหลายแผ่น + ชื่อจากทะเบียนคู่ค้า · ราคา = ต้นทุน → ไม่มีสิทธิ์ products.cost.view = ว่าง */
+async function suppliersOf(admin: Admin, swatchIds: string[], canCost: boolean): Promise<Map<string, SwatchSupplier[]>> {
+  const out = new Map<string, SwatchSupplier[]>();
+  if (!swatchIds.length) return out;
+  const { data } = await admin.from("sku_swatch_suppliers").select(SUP_COLS).in("swatch_id", swatchIds).order("sort_order");
+  const rows = (data ?? []) as unknown as SupRow[];
+  const pids = [...new Set(rows.map((r) => r.partner_id).filter((x): x is string => !!x))];
+  const pname = new Map<string, string>();
+  if (pids.length) {
+    const { data: ps } = await admin.from("partners_v2").select("id, name_th, display_name, code").in("id", pids);
+    for (const p of (ps ?? []) as { id: string; name_th: string | null; display_name: string | null; code: string | null }[]) pname.set(p.id, p.name_th || p.display_name || p.code || "ร้าน");
+  }
+  for (const r of rows) {
+    const list = out.get(r.swatch_id) ?? [];
+    list.push({
+      id: r.id, partner_id: r.partner_id, partner_name: r.partner_name, name: (r.partner_id && pname.get(r.partner_id)) || r.partner_name || "ร้าน",
+      buy_url: r.buy_url, price: canCost ? numOrNull(r.price) : null, currency: r.currency === "CNY" || r.currency === "USD" ? r.currency : "THB", unit: r.unit,
+      moq: numOrNull(r.moq), lead_days: r.lead_days, price_updated_at: r.price_updated_at, is_main: r.is_main, note: r.note, sort_order: r.sort_order,
+    });
+    out.set(r.swatch_id, list);
+  }
+  return out;
+}
+const mainOf = (list: SwatchSupplier[] | undefined) => {
+  const m = list?.find((s) => s.is_main) ?? list?.[0];
+  return m ? { name: m.name, price: m.price, currency: m.currency, unit: m.unit } : null;
+};
+/** ซื้อล่าสุดของแต่ละ SKU — บรรทัดใบสั่งซื้อ v2 (ไม่นับใบที่ปิดใช้) เรียงวันที่ใบ → วันที่สร้างบรรทัด */
+async function lastPurchases(admin: Admin, skuIds: string[], canCost: boolean): Promise<Map<string, LastPurchase>> {
+  const out = new Map<string, LastPurchase>();
+  if (!skuIds.length) return out;
+  const { data: lines } = await admin.from("purchase_order_lines_v2").select("item_sku_id, po_id, price_est, currency, uom, created_at").in("item_sku_id", skuIds).not("is_active", "is", false).limit(2000);
+  const ls = (lines ?? []) as { item_sku_id: string; po_id: string | null; price_est: number | string | null; currency: string | null; uom: string | null; created_at: string }[];
+  const poIds = [...new Set(ls.map((l) => l.po_id).filter((x): x is string => !!x))];
+  const po = new Map<string, { po_no: string | null; seller_name: string | null; order_date: string | null; currency: string | null }>();
+  if (poIds.length) {
+    const { data: heads } = await admin.from("purchase_orders_v2").select("id, po_no, seller_name, order_date, currency").in("id", poIds).not("is_active", "is", false);
+    for (const h of (heads ?? []) as { id: string; po_no: string | null; seller_name: string | null; order_date: string | null; currency: string | null }[]) po.set(h.id, h);
+  }
+  const when = (l: (typeof ls)[number]) => (l.po_id && po.get(l.po_id)?.order_date) || l.created_at.slice(0, 10);
+  for (const l of ls) {
+    const h = l.po_id ? po.get(l.po_id) : undefined;
+    if (l.po_id && !h) continue;   // ใบปิดใช้/ลบแล้ว
+    const cur = out.get(l.item_sku_id);
+    if (cur && (cur.date ?? "") >= when(l)) continue;
+    out.set(l.item_sku_id, { po_no: h?.po_no ?? null, date: when(l), seller: h?.seller_name ?? null, price: canCost ? numOrNull(l.price_est) : null, currency: l.currency ?? h?.currency ?? null, uom: l.uom });
+  }
+  return out;
+}
 const IMG_COLS = "id, swatch_id, image_key, image_w, image_h, sort_order";
 const UUID = /^[0-9a-f-]{36}$/i;
 const tagIdsOf = (v: unknown): string[] => (Array.isArray(v) ? v.map(String).filter((s) => UUID.test(s)) : []);
@@ -103,10 +183,45 @@ function parseSpot(p: Record<string, unknown>, i: number) {
     x, y, w, h, points, label: txt(p.label, 30), name: txt(p.name, 60),
     color_hex: isHex(p.color_hex) ? p.color_hex.toLowerCase() : null,
     source: p.source === "ai" ? "ai" : "manual",
+    // ราคา/ร้านรายชิ้น (ว่าง = ใช้ของแผ่น) · supplier_ref ตรวจว่าเป็นร้านของแผ่นนี้ตอนบันทึก
+    price: numOrNull(p.price) !== null && Number(p.price) >= 0 ? Number(p.price) : null,
+    supplier_ref: typeof p.supplier_ref === "string" && UUID.test(p.supplier_ref) ? p.supplier_ref : null,
     sort_order: i,
   };
 }
 type ParsedSpot = ReturnType<typeof parseSpot>;
+
+/** สเปกที่ส่งมา (เฉพาะช่องที่ส่ง) */
+function parseSpecs(b: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if ("material" in b) out.material = txt(b.material, 120);
+  if ("supplier_model" in b) out.supplier_model = txt(b.supplier_model, 60);
+  if ("weight_unit" in b) out.weight_unit = b.weight_unit === "oz" || b.weight_unit === "gsm" ? b.weight_unit : null;
+  for (const k of ["weight", "width_cm", "thickness_mm"]) if (k in b) { const n = numOrNull(b[k]); out[k] = n !== null && n >= 0 ? n : null; }
+  return out;
+}
+/** ร้านที่ส่งมา → แถวที่บันทึกได้ (ตัดแถวที่ไม่มีทั้งร้านในทะเบียนและชื่อ) · มีร้านหลักได้ร้านเดียว */
+function parseSuppliers(v: unknown) {
+  if (!Array.isArray(v)) return null;
+  const list = (v as Record<string, unknown>[]).slice(0, 20).map((s, i) => ({
+    id: typeof s?.id === "string" && UUID.test(s.id) ? s.id : null,
+    partner_id: typeof s?.partner_id === "string" && UUID.test(s.partner_id) ? s.partner_id : null,
+    partner_name: txt(s?.partner_name, 120),
+    buy_url: typeof s?.buy_url === "string" && /^https?:\/\//i.test(s.buy_url.trim()) ? s.buy_url.trim().slice(0, 1000) : txt(s?.buy_url, 300),
+    price: numOrNull(s?.price) !== null && Number(s?.price) >= 0 ? Number(s?.price) : null,
+    currency: s?.currency === "CNY" || s?.currency === "USD" ? (s.currency as string) : "THB",
+    unit: txt(s?.unit, 20),
+    moq: numOrNull(s?.moq) !== null && Number(s?.moq) >= 0 ? Number(s?.moq) : null,
+    lead_days: numOrNull(s?.lead_days) !== null && Number(s?.lead_days) >= 0 ? Math.round(Number(s?.lead_days)) : null,
+    price_updated_at: typeof s?.price_updated_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(s.price_updated_at) ? s.price_updated_at.slice(0, 10) : null,
+    is_main: s?.is_main === true,
+    note: txt(s?.note, 500),
+    sort_order: i,
+  })).filter((s) => s.partner_id || s.partner_name);
+  const mainIdx = list.findIndex((s) => s.is_main);
+  list.forEach((s, i) => { s.is_main = mainIdx < 0 ? i === 0 : i === mainIdx; });   // ไม่ได้เลือก = ร้านแรกเป็นหลัก
+  return list;
+}
 
 /** ออกรหัสให้ชิ้นใหม่ตามลำดับ รูป → ลำดับที่ผู้ใช้จัดในรายการ (ลากสลับ / เรียงตามแถว-คอลัมน์) · คืนเลขชิ้นถัดไป */
 function assignCodes<T extends ParsedSpot & { image_id: string | null; code?: string | null }>(spots: T[], boardCode: string, nextNo: number, imageOrder: string[]): number {
@@ -183,10 +298,12 @@ export async function GET(request: NextRequest) {
     const imgKey = new Map(images.map((i) => [i.id, i.image_key]));
     const skuIds = [...new Set(spots.map((p) => p.sku_id).filter((x): x is string => !!x))];
     const skuMap = new Map<string, NonNullable<SwatchSpot["sku"]>>();
+    const canCost = await apiCan(request, "products.cost.view");
     if (skuIds.length) {
-      const [skuRes, balRes] = await Promise.all([
+      const [skuRes, balRes, lastPo] = await Promise.all([
         admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, color, is_active, uom:uoms!uom_id(name)").in("id", skuIds),
         loadSkuStock(admin, skuIds),
+        lastPurchases(admin, skuIds, canCost),
       ]);
       const stock = new Map<string, number>([...balRes].map(([id, s]) => [id, s.onHand]));
       for (const k of (skuRes.data ?? []) as unknown as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; color: string | null; is_active: boolean | null; uom: { name: string | null } | { name: string | null }[] | null }[]) {
@@ -196,23 +313,30 @@ export async function GET(request: NextRequest) {
           image_key: k.cover_image_r2_key ?? null, uom: uomRow?.name ?? null,
           image: k.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(k.cover_image_r2_key)}` : null,
           qty_on_hand: stock.has(k.id) ? (stock.get(k.id) as number) : null,
+          last_po: lastPo.get(k.id) ?? null,
         });
       }
     }
     const tids = tagIdsOf(s.family_tag_ids);
-    const [names, seq] = await Promise.all([tagNames(admin, tids), seqMap(admin)]);
+    const [names, seq, sups] = await Promise.all([tagNames(admin, tids), seqMap(admin), suppliersOf(admin, [id], canCost)]);
     const cover = images[0] ?? null;
+    const supList = sups.get(id) ?? [];
     const detail: SwatchDetail = {
       id: s.id, name: s.name, note: s.note, seq: seq.get(s.id) ?? 0, code: s.code, next_chip_no: s.next_chip_no ?? 1,
+      ...specsOf(s),
       image_key: cover?.image_key ?? s.image_key, image_w: cover?.image_w ?? s.image_w, image_h: cover?.image_h ?? s.image_h, image_count: images.length,
+      image_keys: images.map((i) => i.image_key).slice(0, 6),
       family_tag_ids: tids, tags: tids.map((t) => ({ id: t, name: names.get(t) ?? "แท็ก" })),
       spot_count: spots.length, linked_count: spots.filter((p) => p.sku_id && skuMap.has(p.sku_id)).length,
+      chip_colors: spots.map((p) => p.color_hex).filter((c): c is string => !!c).slice(0, 40),
+      main_supplier: mainOf(supList), suppliers: supList, can_cost: canCost,
       created_at: s.created_at, updated_at: s.updated_at,
       images,
       spots: spots.map((p) => ({
         id: p.id, x: Number(p.x), y: Number(p.y), w: Number(p.w), h: Number(p.h), points: cleanPoints(p.points), label: p.label, sort_order: p.sort_order,
         image_id: p.image_id, image_key: (p.image_id && imgKey.get(p.image_id)) || cover?.image_key || null,
         code: p.code, name: p.name, color_hex: p.color_hex, source: p.source === "ai" ? "ai" : "manual",
+        price: canCost ? numOrNull(p.price) : null, supplier_ref: p.supplier_ref ?? null,
         sku_id: p.sku_id, sku: p.sku_id ? (skuMap.get(p.sku_id) ?? null) : null,
       })),
     };
@@ -224,20 +348,36 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(200, Math.max(1, Number(sp.get("limit") ?? 60)));
   const offset = Math.max(0, Number(sp.get("offset") ?? 0));
   const familyIds = (sp.get("family_ids") ?? "").split(",").map((x) => x.trim()).filter((x) => UUID.test(x));
+  const noTags = sp.get("no_tags") === "1";                        // ตัวกรอง "ยังไม่ติดแท็ก" (รวมกับแท็กที่เลือก = OR)
+  const sort = sp.get("sort") ?? "new";                            // new · name · code · chips · unlinked · shop
+  const colorQ = (sp.get("color") ?? "").trim();                   // ค้นด้วยสี "#rrggbb"
+  const colorLab = colorQ ? hexToLab(colorQ.startsWith("#") ? colorQ : `#${colorQ}`) : null;
 
-  let q = admin.from("sku_swatches").select(COLS).eq("is_active", true).order("created_at", { ascending: false });
-  if (familyIds.length) q = q.or(familyIds.map((f) => `family_tag_ids.cs.["${f}"]`).join(","));   // หลายแท็ก = OR เหมือนหน้า SKU
-  const { data: all, error } = await q.limit(2000);
+  const { data: all, error } = await admin.from("sku_swatches").select(COLS).eq("is_active", true).order("created_at", { ascending: false }).limit(2000);
   if (error) return NextResponse.json({ swatches: [], total: 0, error: error.message }, { status: 500 });
   let rows = (all ?? []) as unknown as SwatchRow[];
+  if (familyIds.length || noTags) rows = rows.filter((r) => { const t = tagIdsOf(r.family_tag_ids); return (noTags && t.length === 0) || t.some((x) => familyIds.includes(x)); });   // หลายแท็ก = OR เหมือนหน้า SKU
   const seq = await seqMap(admin);
 
-  // ชิ้น + รูปของทุกแผ่น (นับ + ใช้ค้นด้วยรหัสชิ้น/ชื่อสี/เลขบนแผง/รหัส-ชื่อ SKU ข้างใน)
+  // ชิ้น + รูปของทุกแผ่น (นับ + แถบสี + ค้นด้วยรหัสชิ้น/ชื่อสี/เลขบนแผง/รหัส-ชื่อ SKU/สี)
   const ids = rows.map((r) => r.id);
+  type LiteSpot = { swatch_id: string; sku_id: string | null; code: string | null; name: string | null; label: string | null; color_hex: string | null; sort_order: number };
   const [spotRows, imgRows] = ids.length ? await Promise.all([
-    admin.from("sku_swatch_spots").select("swatch_id, sku_id, code, name, label").in("swatch_id", ids).then((r) => (r.data ?? []) as { swatch_id: string; sku_id: string | null; code: string | null; name: string | null; label: string | null }[]),
-    admin.from("sku_swatch_images").select("swatch_id").in("swatch_id", ids).then((r) => (r.data ?? []) as { swatch_id: string }[]),
-  ]) : [[], []];
+    admin.from("sku_swatch_spots").select("swatch_id, sku_id, code, name, label, color_hex, sort_order").in("swatch_id", ids).order("sort_order").then((r) => (r.data ?? []) as LiteSpot[]),
+    admin.from("sku_swatch_images").select("swatch_id, image_key, sort_order").in("swatch_id", ids).order("sort_order").then((r) => (r.data ?? []) as { swatch_id: string; image_key: string; sort_order: number }[]),
+  ]) : [[] as LiteSpot[], [] as { swatch_id: string; image_key: string; sort_order: number }[]];
+  // ค้นด้วยสี: ชิ้นที่สีใกล้สุดของแต่ละแผ่น (CIEDE2000 · ใกล้พอ ≤ 20)
+  const colorBest = new Map<string, { code: string | null; name: string | null; hex: string; dE: number }>();
+  if (colorLab) {
+    for (const p of spotRows) {
+      const lab = p.color_hex ? hexToLab(p.color_hex) : null;
+      if (!lab) continue;
+      const d = Math.round(deltaE2000(colorLab, lab) * 10) / 10;
+      const cur = colorBest.get(p.swatch_id);
+      if (!cur || d < cur.dE) colorBest.set(p.swatch_id, { code: p.code, name: p.name, hex: p.color_hex as string, dE: d });
+    }
+    rows = rows.filter((r) => (colorBest.get(r.id)?.dE ?? 99) <= 20);
+  }
   if (search) {
     const s = search.toLowerCase();
     const safe = search.replace(/[%,()]/g, " ").trim();
@@ -250,17 +390,32 @@ export async function GET(request: NextRequest) {
     }
     rows = rows.filter((r) => hit.has(r.id) || (r.name ?? "").toLowerCase().includes(s) || (r.note ?? "").toLowerCase().includes(s) || (r.code ?? "").toLowerCase().includes(s) || `swatch #${seq.get(r.id)}`.includes(s));
   }
+  // เรียง (ร้าน = ต้องรู้ร้านทุกแผ่นก่อนตัดหน้า)
+  const sups = await suppliersOf(admin, rows.map((r) => r.id), await apiCan(request, "products.cost.view"));
+  const spotsOf = (id: string) => spotRows.filter((p) => p.swatch_id === id);
+  const title = (r: SwatchRow) => (r.name?.trim() || r.code || "").toLowerCase();
+  if (colorLab) rows.sort((a, b) => (colorBest.get(a.id)?.dE ?? 99) - (colorBest.get(b.id)?.dE ?? 99));
+  else if (sort === "name") rows.sort((a, b) => title(a).localeCompare(title(b), "th"));
+  else if (sort === "code") rows.sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""));
+  else if (sort === "chips") rows.sort((a, b) => spotsOf(b.id).length - spotsOf(a.id).length);
+  else if (sort === "unlinked") rows.sort((a, b) => spotsOf(b.id).filter((p) => !p.sku_id).length - spotsOf(a.id).filter((p) => !p.sku_id).length);
+  else if (sort === "shop") rows.sort((a, b) => (mainOf(sups.get(a.id))?.name ?? "￿").localeCompare(mainOf(sups.get(b.id))?.name ?? "￿", "th"));
   const total = rows.length;
   const page = rows.slice(offset, offset + limit);
   const names = await tagNames(admin, [...new Set(page.flatMap((r) => tagIdsOf(r.family_tag_ids)))]);
   const swatches: SwatchCard[] = page.map((r) => {
-    const mine = spotRows.filter((p) => p.swatch_id === r.id);
+    const mine = spotsOf(r.id);
     const tids = tagIdsOf(r.family_tag_ids);
+    const imgs = imgRows.filter((i) => i.swatch_id === r.id).map((i) => i.image_key);
     return {
-      id: r.id, name: r.name, note: r.note, seq: seq.get(r.id) ?? 0, code: r.code,
-      image_key: r.image_key, image_w: r.image_w, image_h: r.image_h, image_count: imgRows.filter((i) => i.swatch_id === r.id).length || (r.image_key ? 1 : 0),
+      id: r.id, name: r.name, note: r.note, seq: seq.get(r.id) ?? 0, code: r.code, ...specsOf(r),
+      image_key: r.image_key, image_w: r.image_w, image_h: r.image_h, image_count: imgs.length || (r.image_key ? 1 : 0),
+      image_keys: (imgs.length ? imgs : r.image_key ? [r.image_key] : []).slice(0, 6),
       family_tag_ids: tids, tags: tids.map((t) => ({ id: t, name: names.get(t) ?? "แท็ก" })),
       spot_count: mine.length, linked_count: mine.filter((p) => !!p.sku_id).length,
+      chip_colors: mine.map((p) => p.color_hex).filter((c): c is string => !!c).slice(0, 40),
+      main_supplier: mainOf(sups.get(r.id)),
+      color_match: colorBest.get(r.id) ?? null,
       created_at: r.created_at, updated_at: r.updated_at,
     };
   });
@@ -286,12 +441,14 @@ export async function POST(request: NextRequest) {
   if (!images.length && typeof b.image_key === "string" && b.image_key.trim()) images = [{ id: null, image_key: b.image_key.trim(), image_w: posInt(b.image_w), image_h: posInt(b.image_h) }];
   if (!images.length) return NextResponse.json({ error: "ต้องอัปโหลดรูปแผ่น swatch ก่อน" }, { status: 400 });
   const admin = supabaseAdmin();
+  const canCost = await apiCan(request, "products.cost.view");
 
   let code: string;
   try { code = await boardCodeFor(admin, b.code); } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 500 }); }
   const cover = images[0];
   const row = {
-    name: txt(b.name), note: txt(b.note, 500), code,
+    name: txt(b.name), note: typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 4000) : null, code,
+    ...parseSpecs(b),
     image_key: cover.image_key, image_w: cover.image_w, image_h: cover.image_h,
     family_tag_ids: tagIdsOf(b.family_tag_ids),
     created_by: actor.id,
@@ -315,7 +472,7 @@ export async function POST(request: NextRequest) {
   if (spots.length) {
     const { error: spErr } = await admin.from("sku_swatch_spots").insert(spots.map((s) => ({
       swatch_id: id, image_id: s.image_id, sku_id: s.sku_id, x: s.x, y: s.y, w: s.w, h: s.h, points: s.points, label: s.label, name: s.name,
-      color_hex: s.color_hex, source: s.source, code: s.code, sort_order: s.sort_order,
+      color_hex: s.color_hex, source: s.source, code: s.code, sort_order: s.sort_order, price: canCost ? s.price : null,
     })));
     if (spErr) return fail(spErr.message);
   }
@@ -339,11 +496,62 @@ export async function PATCH(request: NextRequest) {
   if (!headRow) return NextResponse.json({ error: "ไม่พบแผ่น swatch นี้" }, { status: 404 });
   const head = headRow as unknown as SwatchRow;
   const now = new Date().toISOString();
+  const canCost = await apiCan(request, "products.cost.view");   // ราคาซื้อ = ต้นทุน · ไม่มีสิทธิ์ = ไม่แตะราคาเดิม
+
+  // ── ผูก SKU ให้ชิ้นเดียว (หน้าดู: ขอซื้อชิ้นที่ยังไม่ผูก → สร้าง SKU แล้วผูกทันที) — ไม่ต้องส่งชิ้นทั้งแผ่น ──
+  if (b.link_spot && typeof b.link_spot === "object") {
+    const ls = b.link_spot as Record<string, unknown>;
+    const spotId = typeof ls.spot_id === "string" && UUID.test(ls.spot_id) ? ls.spot_id : null;
+    const skuId = typeof ls.sku_id === "string" && UUID.test(ls.sku_id) ? ls.sku_id : null;
+    if (!spotId) return NextResponse.json({ error: "ต้องระบุชิ้น" }, { status: 400 });
+    const { data: sp } = await admin.from("sku_swatch_spots").select("id, code, sku_id").eq("id", spotId).eq("swatch_id", id).maybeSingle();
+    if (!sp) return NextResponse.json({ error: "ไม่พบชิ้นนี้บนแผ่น" }, { status: 404 });
+    const { error } = await admin.from("sku_swatch_spots").update({ sku_id: skuId, updated_at: now }).eq("id", spotId).eq("swatch_id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await admin.from("sku_swatches").update({ updated_at: now }).eq("id", id);
+    await writeAudit(admin, {
+      action: "update", entityType: "sku_swatches", entityId: id, actorId: actor.id, actorName: actor.name,
+      metadata: { code: head.code, name: head.name, link_spot: { chip: (sp as { code: string | null }).code, old_sku_id: (sp as { sku_id: string | null }).sku_id, new_sku_id: skuId } },
+    });
+    return NextResponse.json({ ok: true, error: null });
+  }
 
   const changes: Record<string, unknown> = {};
   if ("name" in b) changes.name = txt(b.name);
-  if ("note" in b) changes.note = txt(b.note, 500);
+  if ("note" in b) changes.note = typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 4000) : null;   // รายละเอียดหลายบรรทัด
   if (Array.isArray(b.family_tag_ids)) changes.family_tag_ids = tagIdsOf(b.family_tag_ids);
+  Object.assign(changes, parseSpecs(b));
+
+  // ── ร้านที่สั่งได้ (ทั้งชุด: มี id = แก้ · ไม่มี id = เพิ่ม · id เดิมที่ไม่ส่ง = ลบ) ──
+  const supReport = { added: 0, updated: 0, removed: 0 };
+  const supIn = parseSuppliers(b.suppliers);
+  let supIds: string[] | null = null;   // ร้านของแผ่นหลังบันทึก (ตรวจ supplier_ref ของชิ้น)
+  if (supIn) {
+    const { data: curS } = await admin.from("sku_swatch_suppliers").select("id").eq("swatch_id", id);
+    const curSet = new Set(((curS ?? []) as { id: string }[]).map((r) => r.id));
+    const keepS = new Set(supIn.map((s) => s.id).filter((x): x is string => !!x && curSet.has(x)));
+    const removeS = [...curSet].filter((x) => !keepS.has(x));
+    if (removeS.length) {
+      const { error } = await admin.from("sku_swatch_suppliers").delete().eq("swatch_id", id).in("id", removeS);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      supReport.removed = removeS.length;
+    }
+    supIds = [];
+    for (const s of supIn) {
+      const { id: sid, ...all } = s;
+      const vals: Partial<typeof all> = { ...all };
+      if (!canCost) delete vals.price;
+      if (sid && curSet.has(sid)) {
+        const { error } = await admin.from("sku_swatch_suppliers").update({ ...vals, updated_at: now }).eq("id", sid).eq("swatch_id", id);
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        supIds.push(sid); supReport.updated++;
+      } else {
+        const { data: ins, error } = await admin.from("sku_swatch_suppliers").insert({ ...vals, swatch_id: id }).select("id").single();
+        if (error || !ins) return NextResponse.json({ error: error?.message ?? "บันทึกร้านไม่สำเร็จ" }, { status: 400 });
+        supIds.push(ins.id as string); supReport.added++;
+      }
+    }
+  }
   // รุ่นเก่า: เปลี่ยนรูปเดียว = แทนรูปปก
   if (!Array.isArray(b.images) && typeof b.image_key === "string" && b.image_key.trim()) {
     const { data: firstImg } = await admin.from("sku_swatch_images").select("id").eq("swatch_id", id).order("sort_order").limit(1).maybeSingle();
@@ -408,13 +616,16 @@ export async function PATCH(request: NextRequest) {
     const boardCode = head.code ?? (await boardCodeFor(admin, null));
     if (!head.code) changes.code = boardCode;
     nextNo = assignCodes(incoming, boardCode, nextNo, imageIds);
+    // ร้านรายชิ้นต้องเป็นร้านของแผ่นนี้ (ไม่ส่งร้านมา = อ่านร้านปัจจุบัน)
+    if (!supIds) supIds = (((await admin.from("sku_swatch_suppliers").select("id").eq("swatch_id", id)).data ?? []) as { id: string }[]).map((r) => r.id);
+    for (const p of incoming) if (p.supplier_ref && !supIds.includes(p.supplier_ref)) p.supplier_ref = null;
     for (const p of incoming) {
       const old = p.id ? curMap.get(p.id) : undefined;
       if (old && old.sku_id !== p.sku_id) { if (p.sku_id) spotReport.linked++; else spotReport.unlinked++; }
       if (p.isOld) {
         const { error } = await admin.from("sku_swatch_spots").update({
           sku_id: p.sku_id, image_id: p.image_id, x: p.x, y: p.y, w: p.w, h: p.h, points: p.points, label: p.label, name: p.name, color_hex: p.color_hex,
-          code: p.code, sort_order: p.sort_order, updated_at: now,
+          code: p.code, sort_order: p.sort_order, ...(canCost ? { price: p.price } : {}), supplier_ref: p.supplier_ref, updated_at: now,
         }).eq("id", p.id as string).eq("swatch_id", id);
         if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
         spotReport.updated++;
@@ -422,7 +633,7 @@ export async function PATCH(request: NextRequest) {
     }
     const fresh = incoming.filter((p) => !p.isOld).map((p) => ({
       swatch_id: id, image_id: p.image_id, sku_id: p.sku_id, x: p.x, y: p.y, w: p.w, h: p.h, points: p.points, label: p.label, name: p.name,
-      color_hex: p.color_hex, source: p.source, code: p.code, sort_order: p.sort_order,
+      color_hex: p.color_hex, source: p.source, code: p.code, sort_order: p.sort_order, price: canCost ? p.price : null, supplier_ref: p.supplier_ref,
     }));
     if (fresh.length) {
       const { error } = await admin.from("sku_swatch_spots").insert(fresh);
@@ -445,6 +656,7 @@ export async function PATCH(request: NextRequest) {
       ...auditChangeMeta(head as unknown as Record<string, unknown>, shown, { opaque: ["family_tag_ids"] }),
       images: Array.isArray(b.images) ? imgReport : null,
       spots: Array.isArray(b.spots) ? spotReport : null,
+      suppliers: supIn ? supReport : null,
     },
   });
   return NextResponse.json({ ok: true, images: imgReport, spots: spotReport, error: null });

@@ -344,3 +344,7 @@ export function floodFitRect(px: ArrayLike<number>, W: number, H: number, sx: nu
   const rect = { x: r2((cx1 / W) * 100), y: r2((cy1 / H) * 100), w: r2(((cx2 - cx1) / W) * 100), h: r2(((cy2 - cy1) / H) * 100) };
   return { ok: true, rect, hex: averageHex(pick.length ? pick : [px[(y0 * W + x0) * 4], px[(y0 * W + x0) * 4 + 1], px[(y0 * W + x0) * 4 + 2], 255]), frac: count / (W * H) };
 }
+
+export type SwatchLabelSize = "big" | "small";
+/** ลิงก์หน้าพิมพ์ป้ายแผงผ้า + QR (เปิดแท็บใหม่) — app/print/swatch-label */
+export const swatchLabelUrl = (ids: string[], size: SwatchLabelSize = "big") => `/print/swatch-label?ids=${ids.join(",")}&size=${size}`;

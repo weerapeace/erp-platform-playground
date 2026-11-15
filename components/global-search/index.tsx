@@ -20,6 +20,8 @@ const ENTITY: Record<SearchHit["entity_type"], { icon: string; label: string; co
   guide:     { icon: "📖", label: "วิธีใช้งาน",         color: "text-teal-700"    },
   sku:       { icon: "📦", label: "สินค้า (SKU)",       color: "text-blue-700"    },
   partner:   { icon: "🏢", label: "คู่ค้า (ลูกค้า/ร้าน)", color: "text-emerald-700" },
+  swatch:    { icon: "🎨", label: "แผงผ้า (Swatch)",    color: "text-pink-700"    },
+  swatch_chip: { icon: "🎨", label: "ชิ้นบนแผงผ้า",     color: "text-pink-700"    },
   po:        { icon: "🧾", label: "ใบสั่งซื้อ (PO)",    color: "text-amber-700"   },
   pv:        { icon: "🧾", label: "ใบสำคัญรับ (ใบซื้อ)", color: "text-orange-700"  },
   mo:        { icon: "🏭", label: "ใบสั่งผลิต (MO)",    color: "text-rose-700"    },

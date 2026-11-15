@@ -14,7 +14,8 @@
 // ds_pattern = หน้าแพทเทิร์นจากตีราคา (doc_id = design_sheets.id) จาก /print/design-sheet/<id>/pattern
 // pattern_project = หน้าพิมพ์/ไฟล์ตัดของแพทเทิร์นในแอปสตูดิโอแพทเทิร์น (doc_id = pattern_projects.id) จาก /print/pattern-project/<id>
 // fabric_plan = ใบตัดผ้าจากหน้าวางแผนตัดผ้า (doc_id = manufacturing_orders.id ของแต่ละใบในแผน) จาก /print/fabric-plan
-export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice", "ds_pattern", "pattern_project", "fabric_plan"] as const;
+// swatch_label = ป้ายแผงผ้า + QR (doc_id = sku_swatches.id) จาก /print/swatch-label?ids=
+export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice", "ds_pattern", "pattern_project", "fabric_plan", "swatch_label"] as const;
 export type PrintDocType = (typeof PRINT_DOC_TYPES)[number];
 /** สิทธิ์ดู/บันทึกประวัติพิมพ์ต่อชนิด (ไม่ระบุ = ดูสินค้าได้ products.view) — ฝ่ายขายเปิดใบสั่งขายได้แต่อาจไม่มีสิทธิ์ดูสินค้า */
 export const PRINT_DOC_PERM: Partial<Record<PrintDocType, string>> = { so_order: "so.view", pattern_project: "pattern_studio.view" };

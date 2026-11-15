@@ -10,6 +10,7 @@ export type SearchEntity =
   | "command"            // คำสั่งลัด (จับคู่ฝั่ง UI จาก lib/search-commands — API ไม่ส่งชนิดนี้)
   | "page" | "guide"
   | "sku" | "partner"
+  | "swatch" | "swatch_chip"   // แผงผ้า (แผ่น Swatch) + ชิ้นบนแผง — เปิดในหน้า SKU แท็บ Swatch (ของกลาง SwatchBrowser)
   | "po" | "pv"
   | "mo"
   | "invoice" | "quotation" | "billing" | "delivery" | "cn"
@@ -243,6 +244,25 @@ const SOURCES: Source[] = [
     // ราคาทุน (standard_price) โชว์เฉพาะคนมีสิทธิ์ products.cost.view · ราคาขายโชว์ได้
     sublabel: (r, can) => join(s(r, "name_th"), s(r, "color_th") || s(r, "color"), money(r.list_price) && `ขาย ${money(r.list_price)}`, can("products.cost.view") && money(r.standard_price) ? `ทุน ${money(r.standard_price)}` : ""),
     link: (r) => `/master/skus?open=${s(r, "id")}`, perEntity: 5,
+  },
+  {
+    entity: "swatch", table: "sku_swatches", perms: ["products.view"],
+    select: "id, code, name, note, material, supplier_model, is_active",
+    cols: ["code", "name", "note", "material", "supplier_model"],
+    filter: (q) => q.eq("is_active", true),
+    code: (r) => s(r, "code"), texts: (r) => [s(r, "name"), s(r, "material"), s(r, "supplier_model"), s(r, "note")],
+    label: (r) => s(r, "name") || s(r, "code") || "แผงผ้า",
+    sublabel: (r) => join(s(r, "name") ? s(r, "code") : "", s(r, "material"), s(r, "supplier_model") && `รุ่น ${s(r, "supplier_model")}`),
+    link: (r) => `/master/skus?swatch=${s(r, "id")}`, perEntity: 3,
+  },
+  {
+    entity: "swatch_chip", table: "sku_swatch_spots", perms: ["products.view"],
+    select: "id, swatch_id, code, name, label, color_hex, board:sku_swatches!swatch_id(name, code)",
+    cols: ["code", "name", "label"],
+    code: (r) => s(r, "code"), texts: (r) => [s(r, "name"), s(r, "label")],
+    label: (r) => join(s(r, "code"), s(r, "name")) || "ชิ้นบนแผงผ้า",
+    sublabel: (r) => { const b = (r.board ?? {}) as Row; return join(`แผง ${s(b, "name") || s(b, "code")}`, s(r, "label") && `เลขบนแผง ${s(r, "label")}`, s(r, "color_hex").toUpperCase()); },
+    link: (r) => `/master/skus?swatch=${s(r, "swatch_id")}&spot=${s(r, "id")}`, perEntity: 4,
   },
   {
     entity: "partner", table: "partners_v2", perms: ["products.view"],

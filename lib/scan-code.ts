@@ -14,7 +14,7 @@
  * เพราะป้าย/ใบที่พิมพ์ไปแล้วแก้ไม่ได้ — ถ้าวันหน้าอยากเปลี่ยนปลายทาง จะได้แก้ที่ไฟล์นี้ที่เดียว
  */
 
-export type ScanKind = "po" | "mo" | "pr" | "sku" | "unknown";
+export type ScanKind = "po" | "mo" | "pr" | "sku" | "swatch" | "unknown";   // swatch = แผงผ้า (แผ่น SW-0001 / ชิ้น SW-0001-01)
 
 export type ParsedScan = {
   kind: ScanKind;
@@ -40,6 +40,7 @@ const DOC_RULES: { kind: ScanKind; re: RegExp }[] = [
   { kind: "pr", re: /^PR-\d{4}-\d+$/i },
   { kind: "po", re: /^P\d{4,}$/i },        // ใบสั่งซื้อระบบเดิม เช่น P00181
   { kind: "pr", re: /^PR-[A-Z]+-\d+$/i },  // ใบขอซื้อจาก LINE เช่น PR-LINE-18
+  { kind: "swatch", re: /^SW-\d+(-\d+)?$/i },   // แผงผ้า: แผ่น SW-0001 · ชิ้น SW-0001-01 (ตรวจ DB 2026-11-15: ไม่มี SKU/Parent ขึ้นต้น SW-)
 ];
 
 /**

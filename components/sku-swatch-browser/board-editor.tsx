@@ -19,6 +19,7 @@ import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { ColorInput } from "@/components/color-picker";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { ConfirmDialog } from "@/components/modal";
+import { MoneyInput } from "@/components/money-input";
 import { useToast } from "@/components/toast";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { chipCode, LABEL_POSITION_TH, LABEL_POSITIONS, overlapRatio, remapToCrop, rotateRect90, sortColumnOrder, sortReadingOrder, splitRect, type LabelPosition, type PctRect, type Pt } from "@/lib/sku-swatch";
@@ -286,7 +287,7 @@ function useDragSize(onMove: (delta: number) => void, onEnd: () => void, axis: "
 }
 
 // ───────────────────────────── หน้าจอแก้ ─────────────────────────────
-export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "modal" }: {
+export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "modal", suppliers, canCost }: {
   draft: BoardDraft;
   /** รหัสที่จะได้ของทุกชิ้น (previewCodes) */
   codes: Map<string, string>;
@@ -295,6 +296,10 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
   /** มีป๊อปของกลาง (ครอป/ยืนยัน) เปิดอยู่ไหม — หน้าเต็มจอที่ครอบอยู่ต้องถอยไปข้างหลัง */
   onOverlay?: (open: boolean) => void;
   layout?: "modal" | "full";
+  /** ร้านของแผ่น (แผ่นที่บันทึกแล้ว) → เลือกร้าน/ราคารายชิ้นได้ · ไม่ส่ง = ไม่โชว์ */
+  suppliers?: { id: string; name: string }[];
+  /** เห็น/แก้ราคาได้ไหม (products.cost.view) */
+  canCost?: boolean;
 }) {
   const toast = useToast();
   const { photos, chips, cur, setCur, selId, setSelId, reading } = draft;
@@ -528,7 +533,7 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
           ชิ้น ({here.length}) ◂
         </button>
       ) : (
-        <ChipPanel draft={draft} codes={codes} here={here} selected={selected} total={chips.length} onCreateSku={onCreateSku} layout={layout} photoKey={photo?.key ?? null}
+        <ChipPanel draft={draft} codes={codes} here={here} selected={selected} total={chips.length} onCreateSku={onCreateSku} layout={layout} photoKey={photo?.key ?? null} suppliers={suppliers} canCost={canCost}
           armed={armed} onArm={(id) => { setArmed((a) => (a === id ? null : id)); if (id) toast.info("คลิกที่สีของชิ้นนี้บนรูป — ระบบจะตีกรอบใหม่ให้"); }}
           onNameFromColors={(key) => {
             const n = draft.nameFromColors(key, false);
@@ -557,7 +562,8 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
 }
 
 // ───────────────────────────── แผงชิ้น (ขวา) ─────────────────────────────
-function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, armed, onArm, photoKey, onNameFromColors }: {
+function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, armed, onArm, photoKey, onNameFromColors, suppliers, canCost }: {
+  suppliers?: { id: string; name: string }[]; canCost?: boolean;
   draft: BoardDraft; codes: Map<string, string>; here: DraftChip[]; selected: DraftChip | null; total: number;
   onCreateSku?: (chip: DraftChip) => void; layout: "modal" | "full"; armed: string | null; onArm: (id: string | null) => void; photoKey: string | null;
   onNameFromColors: (photoKey: string) => void;
@@ -598,6 +604,21 @@ function ChipPanel({ draft, codes, here, selected, total, onCreateSku, layout, a
               {selected.points && <button type="button" onClick={() => draft.patchChip(selected.id, { points: null })} className="h-7 px-2 text-[11px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" title="กลับเป็นสี่เหลี่ยมตรง (ครอบมุมที่ดัดไว้)">▭ สี่เหลี่ยมตรง</button>}
               <button type="button" onClick={() => draft.removeChip(selected.id)} className="h-7 px-2 text-[11px] rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 ml-auto" title="ลบชิ้น (หรือกด Delete)">🗑 ลบ</button>
             </div>
+            {suppliers && (
+              <div className="flex items-center gap-1 text-[11px] text-slate-500" title="ชิ้นนี้ราคา/ร้านต่างจากแผ่น (ว่าง = ใช้ร้านหลัก/ราคาของแผ่น)">
+                <span className="shrink-0">ชิ้นนี้</span>
+                {canCost && (
+                  <MoneyInput value={selected.price ?? null} placeholder="ราคา (ว่าง = ตามแผ่น)"
+                    onChange={(v) => draft.patchChip(selected.id, { price: v === "" ? null : Number(v) })}
+                    className="h-6 w-28 px-1.5 text-[11.5px] border border-slate-200 rounded bg-white" />
+                )}
+                <select value={selected.supplier_ref ?? ""} onChange={(e) => draft.patchChip(selected.id, { supplier_ref: e.target.value || null })}
+                  className="h-6 min-w-0 flex-1 px-1 text-[11.5px] border border-slate-200 rounded bg-white" aria-label="ร้านของชิ้นนี้">
+                  <option value="">ร้าน: ตามแผ่น</option>
+                  {suppliers.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                </select>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
               แบ่งกรอบเป็น
               <input type="number" min={1} max={200} value={cols} onChange={(e) => setCols(Math.max(1, Number(e.target.value) || 1))} className="w-11 h-6 px-1 text-[11px] border border-slate-200 rounded" aria-label="จำนวนคอลัมน์" />

@@ -21,10 +21,34 @@ import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { PrCreateModal, type PrCreateItem } from "@/components/pr-create-modal";
 import { BundleAddModal, type BundleAddItem } from "@/components/bundle-add-modal";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
+import { ERPModal } from "@/components/modal";
+import { BomWhereUsed } from "@/components/bom-where-used";
+import { RecordHistoryDrawer } from "@/components/activity-feed/record-history-drawer";
+import { uploadImagesToRecord } from "@/components/relation-multi/image-board";
+import { useUserPref } from "@/lib/use-user-pref";
+import { swatchLabelUrl } from "@/lib/sku-swatch";
 import type { SwatchDetail, SwatchSpot } from "@/app/api/sku-swatches/route";
+import type { BomWhereUsedRow } from "@/app/api/bom/where-used/route";
 import { BoardEditor, photoFromApi, previewCodes, useBoardDraft } from "./board-editor";
-import { chipsToApi, uploadPendingPhotos, type DraftChip } from "./swatch-tools";
+import { chipsToApi, cropChipFile, uploadPendingPhotos, type DraftChip } from "./swatch-tools";
+import { SwatchInfoPanel, fmtPrice } from "./info-panel";
 import type { SwatchSpotPick } from "./index";
+
+/** มีป๊อปของกลาง (ERPModal / ConfirmDialog) เปิด "หลังหน้านี้เปิด" ไหม — ป๊อปที่ชิ้นส่วนข้างในเปิดเอง (เช่น ยืนยันลบไฟล์แนบ) หน้านี้ต้องถอยให้
+ *  (ป๊อปที่เปิดอยู่ก่อนแล้ว เช่น ป๊อปวัสดุของ Design Library ที่เปิดหน้านี้ขึ้นมา ไม่นับ) */
+function useSharedModalOpen(): boolean {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const before = new Set(Array.from(document.querySelectorAll("[data-erp-modal]")));
+    const check = () => setOpen(Array.from(document.querySelectorAll("[data-erp-modal]")).some((el) => !before.has(el)));
+    const mo = new MutationObserver(check);
+    mo.observe(document.body, { childList: true });
+    check();
+    return () => mo.disconnect();
+  }, []);
+  return open;
+}
+const parseBool = (v: unknown) => (typeof v === "boolean" ? v : null);
 
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 const SkuWizard = nextDynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
@@ -35,6 +59,7 @@ export const swatchTitle = (s: { name: string | null; seq: number; code?: string
 const spotToChip = (s: SwatchSpot, firstImage: string): DraftChip => ({
   id: s.id, photo: s.image_id || firstImage, x: s.x, y: s.y, w: s.w, h: s.h, code: s.code, name: s.name, label: s.label,
   color_hex: s.color_hex, source: s.source, sku_id: s.sku_id, sku: s.sku, points: s.points ?? null,
+  price: s.price, supplier_ref: s.supplier_ref,
 });
 
 export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted, onPickSkus, onPickSpot }: {
@@ -59,7 +84,6 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
   // ── โหมดตั้งค่า ──
   const draft = useBoardDraft();
   const [name, setName] = useState("");
-  const [note, setNote] = useState("");
   const [tags, setTags] = useState<TagFilterValue>(EMPTY_FILTER);
   const [infoDirty, setInfoDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -69,12 +93,21 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
   const [wizardFor, setWizardFor] = useState<DraftChip | null>(null);
   const [pendingChip, setPendingChip] = useState<{ id: string; wizard: boolean } | null>(null);   // ผูก/สร้าง SKU จากเมนูโหมดดู
   const dirty = draft.dirty || infoDirty;
+  // ── แผงข้อมูล (โหมดดู): Note · ร้าน · สเปก · BOM · ไฟล์แนบ · ประวัติ ──
+  const [showInfo, saveShowInfo] = useUserPref<boolean>("swatch_viewer_info", true, parseBool);
+  const [infoEditing, setInfoEditing] = useState(false);
+  const [bom, setBom] = useState<BomWhereUsedRow[] | null>(null);
+  const [bomOpen, setBomOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [coverFor, setCoverFor] = useState<SwatchSpot | null>(null);   // ใช้รูปชิ้นเป็นรูปปก SKU (ถามก่อน)
+  const [buyWizard, setBuyWizard] = useState<SwatchSpot | null>(null);   // ขอซื้อชิ้นที่ยังไม่ผูก: สร้าง SKU → ผูกทันที → ใบขอซื้อ
+  const sharedModal = useSharedModalOpen();
 
   const resetEdit = useCallback((d: SwatchDetail) => {
     const photos = d.images.map(photoFromApi);
     const first = photos[0]?.key ?? "";
     draft.reset(photos, d.spots.map((s) => spotToChip(s, first)));
-    setName(d.name ?? ""); setNote(d.note ?? ""); setTags({ tagIds: d.family_tag_ids, none: false }); setInfoDirty(false);
+    setName(d.name ?? ""); setTags({ tagIds: d.family_tag_ids, none: false }); setInfoDirty(false);
   }, [draft.reset]);   // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(async () => {
     setErr(null);
@@ -91,6 +124,43 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
   }, [id, resetEdit, focusSpotId]);
   useEffect(() => { void load(); }, [load]);
 
+  // BOM: สินค้าไหนใช้ SKU ที่ผูกบนแผ่นนี้ (ทั้งแผ่นในครั้งเดียว — ของกลาง /api/bom/where-used?skus=)
+  const linkedCodesKey = useMemo(() => [...new Set((data?.spots ?? []).map((s) => s.sku?.code).filter((x): x is string => !!x))].sort().join(","), [data]);
+  useEffect(() => {
+    if (!linkedCodesKey) { setBom([]); return; }
+    let alive = true;
+    setBom(null);
+    void apiFetch(`/api/bom/where-used?skus=${encodeURIComponent(linkedCodesKey)}`).then((r) => r.json())
+      .then((j) => { if (alive) setBom(Array.isArray(j.data) ? (j.data as BomWhereUsedRow[]) : []); })
+      .catch(() => { if (alive) setBom([]); });
+    return () => { alive = false; };
+  }, [linkedCodesKey]);
+  /** รหัส SKU → จำนวนสินค้าที่ใช้ (ป้ายชิ้น) */
+  const bomCount = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const r of bom ?? []) if (r.component_sku && r.product_sku) m.set(r.component_sku, (m.get(r.component_sku) ?? new Set()).add(r.product_sku));
+    return m;
+  }, [bom]);
+  const supName = useMemo(() => new Map((data?.suppliers ?? []).map((s) => [s.id, s])), [data]);
+
+  // ใช้รูปชิ้นเป็นรูปปก SKU — ตัดรูปชิ้น → อัปเข้าแกลเลอรีของ SKU → ตั้งเป็นรูปปก (ผ่านตัวแก้หลายแถวของกลาง = มีประวัติ)
+  const [coverBusy, setCoverBusy] = useState(false);
+  const setChipAsCover = async (r: SwatchSpot) => {
+    if (!r.sku || !data) return;
+    const im = data.images.find((i) => i.id === r.image_id) ?? data.images[0];
+    if (!im) return;
+    setCoverBusy(true);
+    try {
+      const file = await cropChipFile(r2ImageUrl(im.image_key, 2400) ?? "", r, `${r.sku.code}-swatch`);
+      const res = await uploadImagesToRecord({ entityType: "skus_v2", moduleKey: "skus", imageField: "cover_image_r2_key", row: { id: r.sku.id, cover_image_r2_key: null }, files: [file] });
+      if (!res.ok) throw new Error(res.errors[0] ?? "อัปรูปไม่สำเร็จ");
+      toast.success(`ตั้งรูปชิ้น ${r.code ?? ""} เป็นรูปปกของ ${r.sku.code} แล้ว`);
+      setCoverFor(null);
+      void load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้งรูปปกไม่สำเร็จ"); }
+    finally { setCoverBusy(false); }
+  };
+
   // เมนูโหมดดู → "ผูก SKU" / "สร้าง SKU" = เข้าโหมดตั้งค่าแล้วเลือกชิ้นนั้น
   useEffect(() => {
     if (!pendingChip || mode !== "edit") return;
@@ -101,20 +171,20 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
     setPendingChip(null);
   }, [pendingChip, mode, draft]);
 
-  const tryClose = () => { if (mode === "edit" && dirty) setConfirm("close"); else onClose(); };
+  const tryClose = () => { if ((mode === "edit" && dirty) || (mode === "view" && infoEditing)) setConfirm("close"); else onClose(); };
   const tryLeaveEdit = () => { if (dirty) setConfirm("leave"); else setMode("view"); };
 
   // ปุ่มลัด: Esc ปิด/ออกจากโหมดตั้งค่า (Delete ลบชิ้น = ตัวแก้แผงจัดการเอง ใช้ได้ทั้งป๊อปเพิ่มแผ่นและโหมดตั้งค่า)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (skuDrawer || confirm || prItems || bundleItems || editorOverlay || wizardFor) return;
+      if (skuDrawer || confirm || prItems || bundleItems || editorOverlay || wizardFor || bomOpen || historyOpen || coverFor || buyWizard || sharedModal) return;
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName ?? "");
-      if (e.key === "Escape" && !typing) { if (mode === "edit") tryLeaveEdit(); else if (selecting) stopSelecting(); else onClose(); }
+      if (e.key === "Escape" && !typing) { if (mode === "edit") tryLeaveEdit(); else if (selecting) stopSelecting(); else tryClose(); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, draft.selId, dirty, skuDrawer, confirm, prItems, bundleItems, selecting, editorOverlay, wizardFor]);
+  }, [mode, draft.selId, dirty, skuDrawer, confirm, prItems, bundleItems, selecting, editorOverlay, wizardFor, bomOpen, historyOpen, coverFor, sharedModal, infoEditing]);
 
   const save = async () => {
     if (!data || saving) return;
@@ -124,7 +194,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
       const keys = await uploadPendingPhotos(draft.photos, { target: `แผ่น ${swatchTitle(data)}`, existingKeys: data.images.map((i) => i.image_key) }, setUp);
       if (!keys) return;
       const body = {
-        id: data.id, name, note, family_tag_ids: tags.tagIds,
+        id: data.id, name, family_tag_ids: tags.tagIds,   // รายละเอียด (Note) แก้ที่แผงข้อมูลโหมดดู
         images: draft.photos.map((p) => ({ id: p.id ?? undefined, image_key: keys.get(p.key) ?? p.image_key, image_w: p.w, image_h: p.h })),
         spots: chipsToApi(draft.chips, draft.photos),
       };
@@ -147,7 +217,7 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
     finally { setSaving(false); setConfirm(null); }
   };
 
-  const behind = !!confirm || !!skuDrawer || !!prItems || !!bundleItems || editorOverlay || !!wizardFor;
+  const behind = !!confirm || !!skuDrawer || !!prItems || !!bundleItems || editorOverlay || !!wizardFor || bomOpen || historyOpen || !!coverFor || !!buyWizard || sharedModal;
   const images = data?.images ?? [];
   const photo = images.find((i) => i.id === photoId) ?? images[0] ?? null;
   const viewSpots = useMemo(() => (data?.spots ?? []).filter((s) => (s.image_id || images[0]?.id) === photo?.id), [data, photo, images]);
@@ -199,6 +269,16 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
               {selecting ? "✕ เลิกเลือก" : "☑ เลือกหลายรายการ"}
             </button>
           )}
+          {mode === "view" && data && !selecting && (
+            <a href={swatchLabelUrl([data.id])} target="_blank" rel="noopener noreferrer" title="พิมพ์ป้ายแผ่นนี้ + QR (สแกนแล้วเปิดแผ่นนี้ในระบบ)"
+              className="hidden sm:inline-flex h-9 px-3 items-center text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">พิมพ์ป้าย</a>
+          )}
+          {mode === "view" && data && (
+            <button onClick={() => saveShowInfo(!showInfo)} aria-pressed={showInfo} title={showInfo ? "ซ่อนแผงข้อมูล (รายละเอียด · ร้าน · สเปก · BOM · ไฟล์แนบ)" : "แสดงแผงข้อมูล"}
+              className={`hidden lg:inline-flex h-9 px-3 items-center text-sm rounded-lg border ${showInfo ? "border-slate-300 bg-slate-100 text-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+              {showInfo ? "ซ่อนข้อมูล" : "ข้อมูลแผ่น"}
+            </button>
+          )}
           {mode === "view" && canEdit && data && !selecting && (
             <button onClick={() => enterEdit()} className="h-9 px-3 text-sm rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">✏️ ตั้งค่า</button>
           )}
@@ -217,8 +297,6 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
           <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-slate-100 bg-slate-50/60">
             <input value={name} onChange={(e) => { setName(e.target.value); setInfoDirty(true); }} placeholder={`ชื่อแผ่น (ว่าง = ${data.code ?? `Swatch #${data.seq}`})`}
               className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 w-56 max-w-full" />
-            <input value={note} onChange={(e) => { setNote(e.target.value); setInfoDirty(true); }} placeholder="โน้ต เช่น ร้าน / เล่มตัวอย่างเล่มไหน"
-              className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 flex-1 min-w-[160px]" />
             <TagGroupFilter value={tags} onChange={(v) => { setTags(v); setInfoDirty(true); }} label="🏷️ แท็ก" showNone={false} />
             <span className="text-[11px] text-slate-500">{tags.tagIds.length > 0 ? `${tags.tagIds.length} แท็ก` : "ยังไม่ติดแท็ก"}</span>
             <button onClick={() => setConfirm("delete")} disabled={saving} className="h-8 px-2.5 text-[12px] rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50 ml-auto">🗑 ลบแผ่นนี้</button>
@@ -228,9 +306,11 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
         {/* เนื้อหา */}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
           {mode === "edit" && data ? (
-            <BoardEditor draft={draft} codes={codes} layout="full" onOverlay={setEditorOverlay} onCreateSku={(c) => setWizardFor(c)} />
+            <BoardEditor draft={draft} codes={codes} layout="full" onOverlay={setEditorOverlay} onCreateSku={(c) => setWizardFor(c)}
+              suppliers={data.suppliers.map((s) => ({ id: s.id, name: s.name }))} canCost={data.can_cost} />
           ) : (
-            <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-slate-100 p-3 sm:p-5">
+            <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-y-auto lg:overflow-hidden lg:flex-row">
+            <div className="flex-1 min-h-[62vh] lg:min-h-0 min-w-0 flex flex-col bg-slate-100 p-3 sm:p-5">
               {err ? (
                 <div className="text-center py-16 text-sm text-rose-600">⚠ {err} <button onClick={() => void load()} className="underline ml-1">ลองใหม่</button></div>
               ) : !data ? (
@@ -282,6 +362,12 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
                               <button type="button" role="menuitem" onClick={() => { close(); setSkuDrawer(r.sku!.id); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50">
                                 <span>🔍</span><span className="flex-1">ดูรายละเอียด SKU</span>
                               </button>
+                              {canEdit && (
+                                <button type="button" role="menuitem" onClick={() => { close(); setCoverFor(r); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50"
+                                  title="ตัดรูปชิ้นนี้จากแผง แล้วตั้งเป็นรูปปกของ SKU (รูปเข้าแกลเลอรีของ SKU ด้วย)">
+                                  <span>🖼️</span><span className="flex-1">ใช้รูปชิ้นนี้เป็นรูปปก SKU</span>
+                                </button>
+                              )}
                               <button type="button" role="menuitem" onClick={() => { close(); setChecked(new Set([r.id])); setSelecting(true); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50 border-t border-slate-100">
                                 <span>☑</span><span className="flex-1">เลือกหลายรายการ</span>
                               </button>
@@ -294,6 +380,12 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
                               <button type="button" role="menuitem" onClick={() => { close(); enterEdit({ id: r.id, wizard: true }); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50">
                                 <span>➕</span><span className="flex-1">สร้าง SKU จากชิ้นนี้</span>
                               </button>
+                              {canPr && (
+                                <button type="button" role="menuitem" onClick={() => { close(); setBuyWizard(r); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50 border-t border-slate-100"
+                                  title="ชิ้นนี้ยังไม่มี SKU — สร้าง SKU ให้ก่อน (ผูกกับชิ้นให้ทันที) แล้วเปิดใบขอซื้อต่อ">
+                                  <span>🛒</span><span className="flex-1">ขอซื้อ (สร้าง SKU ก่อน)</span>
+                                </button>
+                              )}
                             </>
                           ) : <p className="px-3 py-2 text-[12px] text-slate-400">ยังไม่ผูก SKU — ขอซื้อไม่ได้จนกว่าจะผูก</p>}
                         </div>
@@ -308,14 +400,32 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
                             <div className="font-mono text-[11px] text-amber-300 truncate">{chipTitle(r) || r.sku?.code || "ชิ้นบนแผง"}</div>
                             <div className="truncate">{r.sku ? `${r.sku.code} · ${r.sku.name}` : r.name || "—"}</div>
                             <div className="text-[10.5px] text-slate-300">
-                              {r.sku ? <>{r.sku.color ? `สี ${r.sku.color} · ` : ""}สต๊อก {r.sku.qty_on_hand != null ? r.sku.qty_on_hand.toLocaleString("th-TH") : "—"}{!r.sku.is_active ? " · ปิดใช้งาน" : ""}</> : "ยังไม่ผูก SKU"}
+                              {r.sku ? <>{r.sku.color ? `สี ${r.sku.color} · ` : ""}สต๊อก {r.sku.qty_on_hand != null ? r.sku.qty_on_hand.toLocaleString("th-TH") : "—"}{r.sku.uom ? ` ${r.sku.uom}` : ""}{!r.sku.is_active ? " · ปิดใช้งาน" : ""}</> : "ยังไม่ผูก SKU"}
+                              {r.color_hex && <span className="ml-1 font-mono text-slate-400">{r.color_hex.toUpperCase()}</span>}
                             </div>
+                            {(() => {   // ราคา/ร้าน: ของชิ้น → ของแผ่น (ร้านหลัก)
+                              const own = r.supplier_ref ? supName.get(r.supplier_ref) : null;
+                              const main = data?.main_supplier;
+                              const shop = own?.name ?? main?.name ?? null;
+                              const price = r.price ?? own?.price ?? main?.price ?? null;
+                              const cur = own?.currency ?? main?.currency ?? "THB", unit = own?.unit ?? main?.unit ?? null;
+                              return shop || price != null ? <div className="text-[10.5px] text-slate-300">{shop ?? ""}{price != null ? `${shop ? " · " : ""}${fmtPrice(price, cur, unit)}` : ""}{r.price != null || own ? " (เฉพาะชิ้นนี้)" : ""}</div> : null;
+                            })()}
+                            {r.sku?.last_po && <div className="text-[10.5px] text-slate-300">ซื้อล่าสุด {r.sku.last_po.date ? new Date(`${r.sku.last_po.date}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : ""}{r.sku.last_po.price != null ? ` · ${fmtPrice(r.sku.last_po.price, r.sku.last_po.currency, r.sku.last_po.uom)}` : ""}</div>}
+                            {r.sku && bomCount.get(r.sku.code)?.size ? <div className="text-[10.5px] text-emerald-300">ใช้ในสินค้า {bomCount.get(r.sku.code)!.size} ตัว (BOM)</div> : null}
                           </div>
                         </div>
                       )} />
                   </ZoomBox>
                 </>
               )}
+            </div>
+            {data && (
+              <aside className={`w-full lg:w-[380px] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 bg-slate-50 p-3 lg:overflow-y-auto ${showInfo ? "" : "lg:hidden"}`}>
+                <SwatchInfoPanel data={data} canEdit={canEdit} bom={bom} onEditing={setInfoEditing}
+                  onSaved={() => { void load(); onChanged(); }} onOpenBom={() => setBomOpen(true)} onOpenSku={setSkuDrawer} onHistory={() => setHistoryOpen(true)} />
+              </aside>
+            )}
             </div>
           )}
         </div>
@@ -348,6 +458,43 @@ export function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onC
       )}
       {bundleItems && bundleItems.length > 0 && (
         <BundleAddModal items={bundleItems} onClose={() => setBundleItems(null)} onDone={() => stopSelecting()} />
+      )}
+      {data && (
+        <ERPModal open={bomOpen} onClose={() => setBomOpen(false)} size="xl" title={`ใช้ในสินค้าไหน — ${swatchTitle(data)}`}>
+          <BomWhereUsed skuCodes={linkedCodesKey ? linkedCodesKey.split(",") : []}
+            componentCell={(code) => {
+              const chips = data.spots.filter((s) => s.sku?.code === code);
+              return (
+                <span className="inline-flex items-center gap-1 min-w-0" title={code}>
+                  <span className="w-3.5 h-3.5 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: chips[0]?.color_hex ?? "#e2e8f0" }} />
+                  <span className="font-mono text-[11px] text-slate-600 truncate">{chips.map((c) => `-${(c.code ?? "").split("-").pop()}`).join(" ") || code}</span>
+                </span>
+              );
+            }} />
+        </ERPModal>
+      )}
+      <RecordHistoryDrawer onClose={() => setHistoryOpen(false)}
+        target={historyOpen && data ? { entityType: "sku_swatches", entityId: data.id, title: `${swatchTitle(data)}${data.code && data.name?.trim() ? ` · ${data.code}` : ""}`, subtitle: "สินค้า · แผ่น Swatch (แผงผ้า)" } : null} />
+      <ConfirmDialog open={!!coverFor} onClose={() => setCoverFor(null)} onConfirm={() => coverFor && void setChipAsCover(coverFor)} loading={coverBusy}
+        title="ใช้รูปชิ้นนี้เป็นรูปปก SKU?"
+        message={coverFor?.sku ? `ตัดรูปชิ้น ${coverFor.code ?? ""} จากแผง แล้วตั้งเป็นรูปปกของ ${coverFor.sku.code} · ${coverFor.sku.name} — รูปปกเดิมจะถูกแทน (ย้อนดูได้ในประวัติของ SKU) และรูปใหม่เข้าแกลเลอรีของ SKU ด้วย` : ""}
+        confirmText="ตั้งเป็นรูปปก" />
+      {buyWizard && data && (
+        <SkuWizard open onClose={() => setBuyWizard(null)}
+          prefill={{ name_th: buyWizard.name ?? "", color: buyWizard.name ?? "" }}
+          onCreated={async (res) => {
+            const sku = res?.skus?.[0];
+            const chip = buyWizard;
+            setBuyWizard(null);
+            if (!sku || !chip) return;
+            try {
+              const j = await apiFetch("/api/sku-swatches", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: data.id, link_spot: { spot_id: chip.id, sku_id: sku.id } }) }).then((r) => r.json());
+              if (j.error) throw new Error(j.error);
+              toast.success(`สร้าง ${sku.code} และผูกกับชิ้น ${chip.code ?? ""} แล้ว — เปิดใบขอซื้อต่อ`);
+              void load(); onChanged();
+            } catch (e) { toast.error(`สร้าง ${sku.code} แล้ว แต่ผูกกับชิ้นไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); }
+            requestItems([{ sku_id: sku.id, code: sku.code, name: chip.name ?? sku.code, image: null, image_key: null, uom: null }]);
+          }} />
       )}
       {wizardFor && (
         <SkuWizard open onClose={() => setWizardFor(null)}
