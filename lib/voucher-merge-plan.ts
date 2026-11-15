@@ -29,3 +29,22 @@ export function mixedCurrencyShops(grs: MergeGr[]): string[] {
   for (const g of grs) { const s = by.get(g.seller_name) ?? new Set<string>(); s.add(curKey(g.currency)); by.set(g.seller_name, s); }
   return [...by.entries()].filter(([, s]) => s.size > 1).map(([n]) => n);
 }
+
+/**
+ * ★ 2026-11-15 รวมใบร่างหลายใบเป็นใบเดียว (เจ้าของ: "บิลนี้เป็น 3 บิล แต่ส่งของมารอบเดียว" → เลือกแบบ A รวมใบเดียว)
+ * รวมได้เมื่อ: เลือก ≥ 2 ใบ · ทุกใบเป็นร่าง · ร้านเดียวกัน · สกุลเดียวกัน — ไม่ผ่าน = บอกเหตุผลเป็นภาษาคน
+ * ใบหลัก (ค่าเริ่ม) = ใบที่วันที่เก่าสุด (บิลแรก) · ใช้ทั้งหน้ารายการและ API /api/purchasing/vouchers/merge
+ */
+export type DraftForMerge = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; editing_at?: string | null };
+export function checkDraftMerge(rows: DraftForMerge[]): { ok: boolean; reason: string | null; targetId: string | null } {
+  if (rows.length < 2) return { ok: false, reason: "เลือกใบร่างอย่างน้อย 2 ใบ", targetId: null };
+  const notDraft = rows.filter((r) => r.status !== "draft" || r.editing_at);
+  if (notDraft.length) return { ok: false, reason: `รวมได้เฉพาะใบร่าง — ${notDraft.map((r) => r.pv_no ?? "ใบที่ไม่มีเลข").join(", ")} ไม่ใช่ร่าง`, targetId: null };
+  const norm = (s: string | null) => String(s ?? "").trim();
+  const shops = [...new Set(rows.map((r) => norm(r.seller_name)))];
+  if (shops.length > 1) return { ok: false, reason: `ต้องเป็นร้านเดียวกัน (เลือกมา ${shops.length} ร้าน)`, targetId: null };
+  const curs = [...new Set(rows.map((r) => String(r.currency ?? "THB").toUpperCase().replace("YUAN", "RMB").replace("CNY", "RMB")))];
+  if (curs.length > 1) return { ok: false, reason: `ต้องเป็นสกุลเงินเดียวกัน (${curs.join(" / ")})`, targetId: null };
+  const target = [...rows].sort((a, b) => String(a.voucher_date).localeCompare(String(b.voucher_date)) || String(a.pv_no ?? "").localeCompare(String(b.pv_no ?? "")))[0];
+  return { ok: true, reason: null, targetId: target.id };
+}

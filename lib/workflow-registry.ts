@@ -106,6 +106,7 @@ export const WORKFLOWS: WorkflowDef[] = [
       "app/api/purchasing/receive/route.ts", "app/api/purchasing/cancel-line/route.ts", "app/api/purchasing/po-edit/route.ts",
       "app/api/purchasing/po-currency/route.ts",
       "app/api/purchasing/vouchers/[id]/confirm/route.ts", "app/api/purchasing/vouchers/[id]/void/route.ts", "app/api/purchasing/vouchers/[id]/revise/route.ts",
+      "app/api/purchasing/vouchers/merge/route.ts",
     ],
     tables: ["purchase_requests_v2", "purchase_orders_v2", "purchase_order_lines_v2", "goods_receipts_v2", "goods_receipt_lines_v2"],
     signals: ["line_closed"],

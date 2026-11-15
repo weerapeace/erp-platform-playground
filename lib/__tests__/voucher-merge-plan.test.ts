@@ -23,3 +23,21 @@ describe("voucher-merge-plan (แยก / รวม ใบสำคัญ)", () 
     expect(mixedCurrencyShops(grs)).toEqual(["ร้านด้ายเมืองจีน (HAO TI CHE THREAD)"]);
   });
 });
+
+describe("checkDraftMerge — รวมใบร่างเป็นใบเดียว (★ 2026-11-15)", () => {
+  const d = (id: string, date: string, extra: Record<string, unknown> = {}) => ({ id, pv_no: `PV${date}-001`, status: "draft", voucher_date: date, seller_name: "ร้าน PU HRH", currency: "RMB", editing_at: null, ...extra });
+  it("ร่าง ร้านเดียว สกุลเดียว = รวมได้ · ใบหลัก = ใบวันที่เก่าสุด", async () => {
+    const { checkDraftMerge } = await import("@/lib/voucher-merge-plan");
+    const r = checkDraftMerge([d("c", "2026-10-26"), d("a", "2026-09-29"), d("b", "2026-10-16", { currency: "CNY" })]);
+    expect(r.ok).toBe(true);
+    expect(r.targetId).toBe("a");
+  });
+  it("ไม่ผ่าน: เลือกใบเดียว / มีใบยืนยันแล้ว / ต่างร้าน / ต่างสกุล", async () => {
+    const { checkDraftMerge } = await import("@/lib/voucher-merge-plan");
+    expect(checkDraftMerge([d("a", "2026-09-29")]).reason).toMatch("อย่างน้อย 2");
+    expect(checkDraftMerge([d("a", "2026-09-29"), d("b", "2026-10-16", { status: "confirmed" })]).reason).toMatch("เฉพาะใบร่าง");
+    expect(checkDraftMerge([d("a", "2026-09-29"), d("b", "2026-10-16", { status: "draft", editing_at: "x" })]).ok).toBe(false);
+    expect(checkDraftMerge([d("a", "2026-09-29"), d("b", "2026-10-16", { seller_name: "ร้านอื่น" })]).reason).toMatch("ร้านเดียวกัน");
+    expect(checkDraftMerge([d("a", "2026-09-29"), d("b", "2026-10-16", { currency: "THB" })]).reason).toMatch("สกุลเงิน");
+  });
+});
