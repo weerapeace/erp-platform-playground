@@ -414,7 +414,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "asset-picker", label: "เลือกรูปจากคลังกลาง", code: "AssetPicker", category: "file",
     source: { path: "components/asset-picker" },
-    what: "เปิดคลังรูป/วิดีโอแล้วเลือกมาใช้ ไม่ต้องอัปโหลดซ้ำ",
+    what: "เปิดคลังรูป/วิดีโอแล้วเลือกมาใช้ ไม่ต้องอัปโหลดซ้ำ · มีแท็บ SAMPLE Images (อัลบั้มรูปตัวอย่างประจำแบรนด์ หน้าตาเดียวกับหน้า /tasks/samples)",
     when: "ทุกช่องรูปที่น่าจะมีรูปในคลังอยู่แล้ว",
   },
   {

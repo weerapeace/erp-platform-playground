@@ -44,6 +44,11 @@ export async function GET(request: NextRequest) {
   const folder    = (sp.get("folder") ?? "").replace(/[^a-zA-Z0-9_-]/g, "");   // เฉพาะรูปในโฟลเดอร์ Drive นี้ (folder id)
   const byKey     = (sp.get("key") ?? "").trim();   // หา 1 รายการจาก r2_key (ตัวอัปโหลดกลาง → เลือกไฟล์ที่เพิ่งอัป)
   const byId      = (sp.get("id") ?? "").trim();
+  // หลายรายการจาก id (คั่นด้วย ,) — ตัวเลือกไฟล์กลางดึงรูปที่เลือกจากแท็บ SAMPLE Images ครั้งเดียว · สูงสุด 200
+  const idsRaw    = (sp.get("ids") ?? "").trim();
+  const byIds     = idsRaw ? idsRaw.split(",").map((s) => s.trim()).filter((s) => /^[0-9a-f-]{36}$/i.test(s)).slice(0, 200) : [];
+  if (idsRaw && !byIds.length)
+    return NextResponse.json({ data: [], total: 0, error: null } satisfies AssetListResponse);
 
   const admin = supabaseAdmin();
 
@@ -75,6 +80,7 @@ export async function GET(request: NextRequest) {
   if (type) q = q.eq("asset_type", type);
   if (byKey) q = q.eq("r2_key", byKey);
   if (byId) q = q.eq("id", byId);
+  if (byIds.length) q = q.in("id", byIds);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);
   if (tagAssetIds) q = q.in("id", tagAssetIds);

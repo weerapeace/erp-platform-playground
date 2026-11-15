@@ -10,6 +10,9 @@
  * 📦 พิมพ์ค้น = กล่อง "รูปจาก Parent SKU ที่ตรงคำค้น" บนสุด (รูป Parent + SKU ลูก + Description · /api/assets/parent-images)
  *    รูปในแกลเลอรีสินค้าที่ยังไม่อยู่ในคลัง → ลงคลังให้ตอนกด "ใช้รูปที่เลือก" (โมดูลเจ้าของได้ AssetRow id จริงเสมอ)
  * ค้นหารอพิมพ์เสร็จ ~0.3 วิ + ทิ้งผลของคำเก่าที่มาช้า (กันผลค้น "pix" มาทับ "pix22")
+ * 📸 แท็บ "SAMPLE Images" (เจ้าของสั่ง 2026-11-15) = อัลบั้มรูปตัวอย่างประจำแบรนด์ หน้าตาเดียวกับหน้า /tasks/samples
+ *    (components/sample-images/picker · โหลดแยกชิ้นตอนกดแท็บ) · เลือกข้ามอัลบั้ม/ข้ามแท็บได้ · ตอนกดใช้ → ดึงแถวคลังจริง (/api/assets?ids=)
+ *    ซ่อนเมื่อ: ช่องวิดีโอ/เอกสารอย่างเดียว · ล็อกอัลบั้ม · ต้องมีโฟลเดอร์ Drive
  *
  * ตัวอย่าง:
  *   <AssetPicker open={open} onClose={...} multiple typeFilter="image"
@@ -17,6 +20,7 @@
  *     onSelect={(assets) => { ...เก็บ asset.id/asset.url... }} />
  */
 import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
@@ -31,6 +35,25 @@ import { Icon } from "@/components/icon";
 import {
   PARENT_ATT_PREFIX, PARENT_IMAGE_GROUP_LABEL, isPendingParentImage, type ParentImageGroup, type ParentImageHit,
 } from "@/lib/parent-sku-images";
+import type { SamplePhoto } from "@/lib/sample-images";
+
+// 📸 แท็บ SAMPLE Images — โหลดโค้ดเฉพาะตอนกดแท็บ (19 ช่องรูปที่ใช้ตัวเลือกนี้ไม่ต้องแบกโค้ดส่วนนี้)
+const SamplePickerPanel = dynamic(() => import("@/components/sample-images/picker"), {
+  ssr: false,
+  loading: () => <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
+});
+
+/** รูปจาก SAMPLE Images → แถวชั่วคราวไว้โชว์ว่าเลือกแล้ว (id จริงของคลัง) — ตอนกดใช้ จะดึงแถวคลังตัวจริงมาแทน */
+function sampleAsRow(p: SamplePhoto): AssetRow {
+  const ext = (p.file_name.split(".").pop() ?? "").toLowerCase() || null;
+  return {
+    id: p.id, title: p.file_name.replace(/\.[^.]+$/, ""), file_name: p.file_name, r2_key: p.r2_key,
+    url: `/api/r2-image?key=${encodeURIComponent(p.r2_key)}`, asset_type: "image", content_type: null, ext, size_bytes: null,
+    width: p.width, height: p.height, description: null, collection_id: null, status: "active", trashed_at: null, uploaded_by: null,
+    created_at: p.created_at, master_path: null, master_url: null, source: "sample", print_type: null, print_items: [],
+    artwork_type: null, artwork_types: [], keywords: null, sizes: [], parent_sku_codes: [], tags: [], usage_count: 0,
+  };
+}
 
 const TYPE_ICON: Record<AssetType, string> = { image: "🖼️", design: "🎨", document: "📄", video: "🎬", other: "📦" };
 const TYPE_FILTERS: { key: string; label: string }[] = [
@@ -59,7 +82,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const firstKind = typeFilter ?? kinds?.[0] ?? "";
   const kindTabs = !typeFilter && (kinds?.length ?? 0) > 1 ? kinds! : null;
   const toast = useToast();
-  const [tab, setTab] = useState<"library" | "upload">("library");
+  const [tab, setTab] = useState<"library" | "upload" | "sample">("library");
+  // 📸 SAMPLE Images: ช่องที่รับรูปได้เท่านั้น (ไม่ใช่ช่องวิดีโอ/เอกสารอย่างเดียว · ไม่ล็อกอัลบั้ม · ไม่บังคับโฟลเดอร์ Drive)
+  const sampleOk = !lockCollectionName && !requireDriveFolder && (!typeFilter || typeFilter === "image") && (!kinds || kinds.includes("image"));
+  const fromSample = useRef<Set<string>>(new Set());   // id ที่เลือกมาจากแท็บ SAMPLE (ตอนกดใช้ ดึงแถวคลังจริงมาแทน)
   const [rows, setRows] = useState<AssetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);              // จำนวนทั้งหมด (จาก API) — ใช้รู้ว่ามีให้โหลดเพิ่มไหม
@@ -83,7 +109,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(defaultSearch ?? ""); setQuery(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); setParentGroup(""); } }, [open, firstKind, defaultSource, defaultSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setSelected(new Map()); fromSample.current = new Set(); setTab("library"); setSearch(defaultSearch ?? ""); setQuery(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); setParentGroup(""); } }, [open, firstKind, defaultSource, defaultSearch]); // eslint-disable-line react-hooks/exhaustive-deps
   // พิมพ์ค้น → รอหยุดพิมพ์ 0.3 วิ ค่อยค้นจริง (ไม่ยิงทุกตัวอักษร)
   useEffect(() => {
     if (search === query) return;
@@ -168,6 +194,19 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       return n;
     });
   };
+  // 📸 เลือกจากแท็บ SAMPLE Images (รูปเดียว / ทั้งอัลบั้ม)
+  const pickSample = (p: SamplePhoto) => { fromSample.current.add(p.id); pick(sampleAsRow(p)); };
+  const pickSampleMany = (ps: SamplePhoto[], on: boolean) => {
+    if (!multiple) return;
+    setSelected((m) => {
+      const n = new Map(m);
+      for (const p of ps) {
+        if (!on) { n.delete(p.id); continue; }
+        if (!n.has(p.id)) { fromSample.current.add(p.id); n.set(p.id, sampleAsRow(p)); }
+      }
+      return n;
+    });
+  };
 
   const confirm = async () => {
     const list = Array.from(selected.values());
@@ -191,9 +230,32 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         return;
       } finally { setConfirming(false); }
     }
+    // 📸 รูปจาก SAMPLE Images → ดึงแถวคลังตัวจริง (ชื่อ/แท็ก/ขนาดครบ) — รูปเดิมในคลัง ไม่อัปซ้ำ
+    const sampleIds = final.filter((a) => fromSample.current.has(a.id)).map((a) => a.id);
+    if (sampleIds.length) {
+      setConfirming(true);
+      try {
+        const real = new Map<string, AssetRow>();
+        for (let i = 0; i < sampleIds.length; i += 100) {
+          const p = new URLSearchParams({ ids: sampleIds.slice(i, i + 100).join(","), source: "all", status: "active", limit: "200" });
+          const res = await apiFetch(`/api/assets?${p.toString()}`);
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.error) throw new Error(j.error || "ดึงรูปจาก SAMPLE Images ไม่สำเร็จ");
+          for (const r of (j.data ?? []) as AssetRow[]) real.set(r.id, r);
+        }
+        const missing = sampleIds.filter((id) => !real.has(id)).length;
+        final = final.map((a) => (fromSample.current.has(a.id) ? real.get(a.id) : a)).filter((a): a is AssetRow => !!a);
+        if (missing) toast.warning(`${missing} รูปถูกย้ายไปถังขยะแล้ว — ข้ามไป`);
+        if (!final.length) return;
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "ดึงรูปจาก SAMPLE Images ไม่สำเร็จ");
+        return;
+      } finally { setConfirming(false); }
+    }
     onSelect(final);
     onClose();
   };
+  const unitType = tab === "sample" ? "image" : type;   // คำในปุ่ม/ตัวนับ: รูป · คลิป · ไฟล์
 
   if (!open) return null;
 
@@ -201,11 +263,11 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
     <ERPModal open onClose={onClose} title={title ?? (typeFilter === "video" ? "เลือกวิดีโอจากคลัง" : kindTabs ? "เลือกจากคลัง" : "เลือกรูปจากคลัง")} description={contextLabel} size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-sm text-indigo-600 font-medium">{selected.size > 0 ? `เลือกแล้ว ${selected.size} ${type === "video" ? "คลิป" : type === "image" ? "รูป" : "ไฟล์"}` : "ยังไม่ได้เลือก"}</span>
+          <span className="text-sm text-indigo-600 font-medium">{selected.size > 0 ? `เลือกแล้ว ${selected.size} ${unitType === "video" ? "คลิป" : unitType === "image" ? "รูป" : "ไฟล์"}` : "ยังไม่ได้เลือก"}</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
             <button onClick={() => void confirm()} disabled={selected.size === 0 || confirming}
-              className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{confirming ? "กำลังเตรียมรูป…" : type === "video" ? "ใช้วิดีโอที่เลือก" : type === "image" ? "ใช้รูปที่เลือก" : "ใช้ไฟล์ที่เลือก"}</button>
+              className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{confirming ? "กำลังเตรียมรูป…" : unitType === "video" ? "ใช้วิดีโอที่เลือก" : unitType === "image" ? "ใช้รูปที่เลือก" : "ใช้ไฟล์ที่เลือก"}</button>
           </div>
         </div>
       }>
@@ -213,6 +275,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       <div className="flex gap-4 border-b border-slate-200 mb-3">
         <button onClick={() => setTab("library")}
           className={`pb-2 text-sm ${tab === "library" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>📁 เลือกจากคลัง</button>
+        {sampleOk && (
+          <button onClick={() => setTab("sample")}
+            className={`pb-2 text-sm inline-flex items-center gap-1 ${tab === "sample" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}><Icon value="i:camera" /> SAMPLE Images</button>
+        )}
         {!lockCollectionName && (
           <button onClick={() => setTab("upload")}
             className={`pb-2 text-sm ${tab === "upload" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⬆ อัปโหลดใหม่</button>
@@ -298,6 +364,8 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
             </>
           )}
         </>
+      ) : tab === "sample" ? (
+        <SamplePickerPanel multiple={multiple} isSelected={(id) => selected.has(id)} onToggle={pickSample} onPickMany={pickSampleMany} />
       ) : (
         <UploadTab actor={actor} typeFilter={typeFilter} kinds={kinds}
           onUploaded={(assets) => {

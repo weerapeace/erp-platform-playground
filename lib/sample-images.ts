@@ -149,6 +149,34 @@ export function photosToMove(photos: readonly Pick<SamplePhoto, "id" | "moved_to
   return photos.filter((p) => want.has(p.id) && !p.moved_to.some((s) => s.id === sheetId)).map((p) => p.id);
 }
 
+// ── หน้าตาที่ใช้ร่วมกัน: หน้า SAMPLE Images + แท็บ SAMPLE Images ในตัวเลือกไฟล์กลาง (components/sample-images/parts) ──
+
+/** แท็บแบรนด์: "all" = ทุกแบรนด์ · "none" = ไม่ระบุแบรนด์ · อื่น ๆ = id แบรนด์ */
+export const SAMPLE_TAB_ALL = "all";
+export const SAMPLE_TAB_NONE = "none";
+
+/** อัลบั้มนี้อยู่ในแท็บแบรนด์นี้ไหม */
+export function inBrandTab(a: Pick<SampleAlbum, "brand_id">, tab: string): boolean {
+  return tab === SAMPLE_TAB_ALL || (tab === SAMPLE_TAB_NONE ? !a.brand_id : a.brand_id === tab);
+}
+
+/** ชื่อบนการ์ดหน้าแฟ้ม: อัลบั้มของวัน = วันที่ ("13 พ.ย. 2569") · ตั้งชื่อเอง = ชื่อจริง */
+export function albumCardLabel(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">): string {
+  return isDayAlbum(a) ? thaiShortDate(new Date(a.created_at)) : a.name;
+}
+
+/** ชื่อเต็ม (เส้นทาง/ข้อความแจ้ง): อัลบั้มของวัน = "แบรนด์ · วันที่" · ตั้งชื่อเอง = ชื่อจริง */
+export function albumFullName(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">, brandName?: string | null): string {
+  return isDayAlbum(a) ? `${brandName ? `${brandName} · ` : ""}${thaiShortDate(new Date(a.created_at))}` : a.name;
+}
+
+/** จำนวนรูปรวมต่อแบรนด์ (ตัวเลขบนแถบแบรนด์ · นับทุกชั้น) — ไม่ระบุแบรนด์ = key "none" */
+export function brandPhotoTotals(albums: readonly Pick<SampleAlbum, "brand_id" | "counts">[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const a of albums) { const k = a.brand_id ?? SAMPLE_TAB_NONE; m.set(k, (m.get(k) ?? 0) + a.counts.photos); }
+  return m;
+}
+
 /** แยกไฟล์ที่ลากมา: รูปที่ลงได้ · ไฟล์ที่แปลงไม่ได้ (RAW/ไฟล์งาน) · ไม่ใช่รูป */
 export function splitSampleFiles<F extends { name: string; type: string }>(files: readonly F[]): { ok: F[]; unsupported: F[]; notImage: F[] } {
   const ok: F[] = [], unsupported: F[] = [], notImage: F[] = [];

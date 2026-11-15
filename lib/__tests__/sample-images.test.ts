@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+import { SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -108,5 +108,35 @@ describe("แยกไฟล์ที่ลากมา", () => {
     expect(r.ok.map((x) => x.name)).toEqual(["a.jpg", "b.PNG", "c.heic", "g.webp"]);
     expect(r.unsupported.map((x) => x.name)).toEqual(["d.CR2", "e.psd"]);
     expect(r.notImage.map((x) => x.name)).toEqual(["f.pdf"]);
+  });
+});
+
+describe("หน้าตาร่วม (หน้า SAMPLE + แท็บ SAMPLE ในตัวเลือกไฟล์กลาง)", () => {
+  const day = { name: sampleAlbumName(new Date("2026-11-15T05:00:00Z"), "Good Goods"), created_at: "2026-11-15T05:00:00Z", parent_id: null };
+  const named = { name: "กระเป๋าใส ลายหมี", created_at: "2026-11-15T05:00:00Z", parent_id: null };
+  const sub = { ...day, parent_id: "p1" };
+  it("ชื่อการ์ด: อัลบั้มของวัน = วันที่ · ตั้งชื่อเอง/อัลบั้มย่อย = ชื่อจริง", () => {
+    expect(albumCardLabel(day)).toBe("15 พ.ย. 2569");
+    expect(albumCardLabel(named)).toBe("กระเป๋าใส ลายหมี");
+    expect(albumCardLabel(sub)).toBe(day.name);
+  });
+  it("ชื่อเต็ม: อัลบั้มของวัน = แบรนด์ · วันที่ (ไม่มีแบรนด์ = วันที่อย่างเดียว)", () => {
+    expect(albumFullName(day, "Good Goods")).toBe("Good Goods · 15 พ.ย. 2569");
+    expect(albumFullName(day, null)).toBe("15 พ.ย. 2569");
+    expect(albumFullName(named, "Good Goods")).toBe("กระเป๋าใส ลายหมี");
+  });
+  it("แท็บแบรนด์: ทุกแบรนด์ / ไม่ระบุแบรนด์ / แบรนด์นั้น", () => {
+    expect(inBrandTab({ brand_id: "b1" }, SAMPLE_TAB_ALL)).toBe(true);
+    expect(inBrandTab({ brand_id: null }, SAMPLE_TAB_NONE)).toBe(true);
+    expect(inBrandTab({ brand_id: "b1" }, SAMPLE_TAB_NONE)).toBe(false);
+    expect(inBrandTab({ brand_id: "b1" }, "b1")).toBe(true);
+    expect(inBrandTab({ brand_id: "b2" }, "b1")).toBe(false);
+  });
+  it("ตัวเลขบนแถบแบรนด์ = รวมรูปทุกอัลบั้มของแบรนด์ · ไม่ระบุแบรนด์ = none", () => {
+    const c = (photos: number) => ({ photos, trash: 0, sent: 0 });
+    const m = brandPhotoTotals([{ brand_id: "b1", counts: c(3) }, { brand_id: "b1", counts: c(2) }, { brand_id: null, counts: c(4) }]);
+    expect(m.get("b1")).toBe(5);
+    expect(m.get(SAMPLE_TAB_NONE)).toBe(4);
+    expect(m.get("b2")).toBeUndefined();
   });
 });

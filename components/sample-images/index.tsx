@@ -10,6 +10,7 @@
 // เลือกรูป → "ส่งไป Design Dashboard" → ตัวเลือกใบงานกลาง (กรองแบรนด์ของอัลบั้มไว้ให้) → ใบงานแนบรูปเดิมจากคลัง (ไม่ก๊อปไฟล์)
 // อัลบั้มไม่ระบุแบรนด์ (ลงก่อนมีระบบแบรนด์) → ปุ่ม "ย้ายอัลบั้มเข้าแบรนด์" (ป้าย แนะนำ = แบรนด์ของใบงานที่รูปถูกส่งไป)
 // ของกลาง: StandaloneShell · useFileDrop · UploadProgress · BulkActionBar · ConfirmDialog · gallery-columns · DesignSheetPickerModal
+// หน้าตาแถบแบรนด์/การ์ดอัลบั้ม/เส้นทาง/ช่องรูป = ./parts ใช้ร่วมกับแท็บ "SAMPLE Images" ในตัวเลือกไฟล์กลาง (./picker · AssetPicker) — แก้ที่ parts ทั้งสองที่เปลี่ยนตาม
 // ข้อมูล: components/sample-images/api.ts → API กลางเดิม · ตรรกะ: lib/sample-images · doc: docs/sample-images.md
 // สิทธิ์: ดู assets.view · ลงรูป assets.upload · ลบ assets.delete · เอากลับ/ย้ายอัลบั้มเข้าแบรนด์ assets.edit · ส่งเข้าใบงาน attachments.upload
 // ============================================================
@@ -27,12 +28,10 @@ import { BulkActionBar } from "@/components/bulk-action-bar";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@/components/gallery-columns";
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
-import { AlbumCover } from "@/components/album-cover";
-import { safeColor } from "@/components/design-dashboard/dashboard-helpers";
-import { withImageWidth } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
-import { albumPath, canMoveAlbum, isDayAlbum, photosToMove, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumPath, canMoveAlbum, inBrandTab, isDayAlbum, photosToMove, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, sampleImgUrl } from "./parts";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, restoreSample, setAlbumBrand, trashSample, uploadSample } from "./api";
 
 /** ลากภายในหน้า (รูป/อัลบั้ม) — ใช้ชนิดข้อมูลของเราเอง ตัวรับไฟล์จากเครื่อง (useFileDrop) จะไม่ยุ่ง */
@@ -41,14 +40,11 @@ type DragItem = { kind: "photos"; ids: string[] } | { kind: "album"; id: string 
 
 /** แท็บแบรนด์: "all" = ทุกแบรนด์ · "none" = ไม่ระบุแบรนด์ · อื่น ๆ = id แบรนด์ */
 type BrandTab = string;
-const ALL = "all", NONE = "none";
+const ALL = SAMPLE_TAB_ALL, NONE = SAMPLE_TAB_NONE;
 const strPref = (raw: unknown) => (typeof raw === "string" && raw ? raw : null);
 
-const imgUrl = (key: string, w?: number) => {
-  const u = `/api/r2-image?key=${encodeURIComponent(key)}`;
-  return w ? withImageWidth(u, w) ?? u : u;
-};
-const inTab = (a: SampleAlbum, tab: BrandTab) => tab === ALL || (tab === NONE ? !a.brand_id : a.brand_id === tab);
+const imgUrl = sampleImgUrl;
+const inTab = inBrandTab;
 
 export function SampleImagesPage() {
   const t = useT();
@@ -170,12 +166,6 @@ export function SampleImagesPage() {
   const selected = list.filter((p) => sel.has(p.id));
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const allOn = list.length > 0 && list.every((p) => sel.has(p.id));
-  const brandTotals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const a of albums ?? []) { const k = a.brand_id ?? NONE; m.set(k, (m.get(k) ?? 0) + a.counts.photos); }
-    return m;
-  }, [albums]);
-  const hasNoBrand = (albums ?? []).some((a) => !a.brand_id);
 
   // ── ส่งเข้าใบงาน / ลบ / เอากลับ / ย้ายอัลบั้มเข้าแบรนด์ ──
   const doMove = async (sheet: PickedDesignSheet) => {
@@ -225,7 +215,7 @@ export function SampleImagesPage() {
 
   // ── อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14): สร้างจากรูปที่เลือก · ย้ายรูป/อัลบั้ม · เปลี่ยนชื่อ · ลบอัลบั้มว่าง ──
   // อัลบั้มของวัน = โชว์เป็นวันที่ · อัลบั้มที่ตั้งชื่อเอง (ชั้นไหนก็ได้ เช่น Louis Batch สร้าง) = ชื่อจริง
-  const nameOf = (a: SampleAlbum | null | undefined) => (a ? (!isDayAlbum(a) ? a.name : `${brandOf(a.brand_id)?.name ? `${brandOf(a.brand_id)!.name} · ` : ""}${thaiShortDate(new Date(a.created_at))}`) : "");
+  const nameOf = (a: SampleAlbum | null | undefined) => (a ? albumFullName(a, brandOf(a.brand_id)?.name) : "");
   const act = async (fn: () => Promise<string | null>, stayOn?: string | null) => {
     setBusy(true);
     try { const msg = await fn(); if (msg) pushToast("success", msg); await reload(stayOn); }
@@ -281,9 +271,8 @@ export function SampleImagesPage() {
 
   if (permsReady && !canView) return <EmptyState icon={<Icon value="i:lock" />} title={t("คุณไม่มีสิทธิ์ดูคลังไฟล์", "You can't view the file library")} hint={t("ขอสิทธิ์ \"ดูคลังไฟล์\" จากแอดมิน", "Ask an admin for file library access")} />;
 
-  const dot = (color: string | null | undefined) => <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color ? safeColor(color) : "#cbd5e1" }} />;
-  const pill = (on: boolean) => `inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] ${on ? "border-violet-300 bg-violet-50 font-medium text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`;
-  const albumLabel = (a: SampleAlbum) => (!isDayAlbum(a) ? a.name : thaiShortDate(new Date(a.created_at)));
+  const dot = (color: string | null | undefined) => <BrandDot color={color} />;
+  const albumLabel = albumCardLabel;
 
   return (
     <div {...drop.guard} className="space-y-4 px-4 py-5 sm:px-8">
@@ -305,16 +294,8 @@ export function SampleImagesPage() {
         : !albums ? <LoadingState className="py-16 text-sm" />
         : (
           <>
-            {/* แถบแบรนด์ */}
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              <button type="button" className={pill(tab === ALL)} onClick={() => switchTab(ALL)}><Icon value="i:layout-grid" />{t("ทุกแบรนด์", "All brands")}</button>
-              {brands.map((b) => (
-                <button key={b.id} type="button" className={pill(tab === b.id)} onClick={() => switchTab(b.id)}>
-                  {dot(b.color)}{b.name}{brandTotals.get(b.id) ? <span className="text-[11px] tabular-nums text-slate-400">{brandTotals.get(b.id)}</span> : null}
-                </button>
-              ))}
-              {(hasNoBrand || tab === NONE) && <button type="button" className={pill(tab === NONE)} onClick={() => switchTab(NONE)}><Icon value="i:help-circle" />{t("ไม่ระบุแบรนด์", "No brand")}<span className="text-[11px] tabular-nums text-slate-400">{brandTotals.get(NONE) ?? 0}</span></button>}
-            </div>
+            {/* แถบแบรนด์ (ชิ้นส่วนร่วม ./parts — ใช้ในตัวเลือกไฟล์กลางด้วย) */}
+            <SampleBrandBar brands={brands} albums={albums} tab={tab} onTab={switchTab} />
 
             <div className="min-w-0 space-y-3">
               {!album && (
@@ -356,19 +337,7 @@ export function SampleImagesPage() {
                 <>
                 {/* เส้นทาง: ← อัลบั้มทั้งหมด · อัลบั้มของวัน › อัลบั้มย่อย — วางรูป/อัลบั้มบนชื่อ = ย้ายขึ้นไปที่นั่น */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <button type="button" onClick={() => closeAlbum()} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:arrow-left" />{t("อัลบั้มทั้งหมด", "All albums")}</button>
-                  {path.map((a, i) => {
-                    const last = i === path.length - 1;
-                    return (
-                      <span key={a.id} className="flex items-center gap-1">
-                        {i > 0 && <span className="text-slate-300">›</span>}
-                        <button type="button" {...(last ? {} : dropOnAlbum(a))} onClick={() => { if (!last) void openAlbum(a.id); }}
-                          className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[14px] ${last ? "cursor-default font-semibold text-slate-800" : "text-slate-600 hover:bg-slate-100"} ${overKey === `al:${a.id}` ? "ring-2 ring-emerald-400 ring-offset-1" : ""}`}>
-                          {i === 0 ? dot(albumBrand?.color) : <Icon value="i:folder" />}{nameOf(a)}
-                        </button>
-                      </span>
-                    );
-                  })}
+                  <SampleAlbumPath path={path} brandColor={albumBrand?.color} nameOf={nameOf} onBack={() => closeAlbum()} onOpen={(id) => void openAlbum(id)} crumbExtra={dropOnAlbum} overKey={overKey} />
                   {!album.brand_id && !album.parent_id && canEdit && brands.length > 0 && (
                     <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
                   )}
@@ -436,18 +405,8 @@ export function SampleImagesPage() {
                     <div className="mb-1.5 text-[12px] font-medium text-slate-400">{t(`อัลบั้มย่อย (${children.length})`, `Sub-albums (${children.length})`)}</div>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                       {children.map((c) => (
-                        <button key={c.id} type="button" onClick={() => void openAlbum(c.id)} {...dragProps(() => ({ kind: "album", id: c.id }))} {...dropOnAlbum(c)}
-                          className={`overflow-hidden rounded-xl border bg-white text-left transition hover:shadow-md ${overKey === `al:${c.id}` ? "border-emerald-400 ring-2 ring-emerald-300" : "border-slate-200 hover:border-slate-300"}`}>
-                          <AlbumCover keys={c.preview_keys} total={c.deep.photos} />
-                          <div className="space-y-1 p-2.5">
-                            <div className="flex items-center gap-1 truncate text-[13px] font-medium text-slate-800"><Icon value="i:folder" />{c.name}</div>
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
-                              <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{c.deep.photos}</span>
-                              {c.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{c.deep.sub_count}</span>}
-                              {c.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-1.5 text-emerald-700">{t(`ส่งเข้าใบงาน ${c.deep.sent}`, `${c.deep.sent} in sheets`)}</span>}
-                            </div>
-                          </div>
-                        </button>
+                        <SampleAlbumCard key={c.id} sub album={c} onOpen={() => void openAlbum(c.id)} highlight={overKey === `al:${c.id}`}
+                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...dropOnAlbum(c) }} />
                       ))}
                     </div>
                   </div>
@@ -467,28 +426,10 @@ export function SampleImagesPage() {
                         const on = sel.has(p.id);
                         const over = overKey === `ph:${p.id}`;
                         return (
-                          <div key={p.id} {...dragProps(() => photoDrag(p.id))}
-                            {...(trashView ? {} : dropProps(`ph:${p.id}`, (d) => d.kind === "photos" && !d.ids.includes(p.id), (d) => { if (d.kind === "photos") void createSub([...new Set([...d.ids, p.id])]); }))}
-                            className={`group relative overflow-hidden rounded-xl border bg-white ${over ? "border-emerald-400 ring-2 ring-emerald-300" : on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
-                            <button type="button" onClick={() => toggle(p.id)} className="block w-full cursor-pointer" aria-pressed={on} title={p.file_name}>
-                              <img src={imgUrl(p.r2_key, 480)} alt={p.file_name} loading="lazy" draggable={false} className={`aspect-square w-full bg-slate-50 object-contain ${trashView ? "opacity-60" : ""}`} />
-                            </button>
-                            <a href={imgUrl(p.r2_key)} target="_blank" rel="noopener noreferrer" title={t("ดูรูปเต็ม", "Open full image")} draggable={false}
-                              className="absolute left-1.5 top-1.5 hidden h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 group-hover:inline-flex"><Icon value="i:external-link" /></a>
-                            {on && <span className="absolute right-1.5 top-1.5 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
+                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over}
+                            extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : dropProps(`ph:${p.id}`, (d) => d.kind === "photos" && !d.ids.includes(p.id), (d) => { if (d.kind === "photos") void createSub([...new Set([...d.ids, p.id])]); })) }}>
                             {over && <span className="pointer-events-none absolute inset-x-1.5 top-1.5 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-center text-[11px] text-white">{t("ปล่อย = รวมเป็นอัลบั้มใหม่", "Drop to make an album")}</span>}
-                            <div className="space-y-1 px-2 py-1.5">
-                              <div className="truncate text-[11px] text-slate-500">{p.file_name}</div>
-                              {p.moved_to.length > 0 && (
-                                <div className="flex flex-wrap gap-1">
-                                  {p.moved_to.map((s) => (
-                                    <a key={s.id} href={`/master/design-dashboard?open=${encodeURIComponent(s.id)}`} target="_blank" rel="noopener noreferrer" draggable={false} title={t(`อยู่ในใบงาน ${s.code} · ${s.name} — กดเปิด`, `In ${s.code} — open`)}
-                                      className="max-w-full truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10.5px] text-emerald-700 hover:bg-emerald-100">→ {s.code}</a>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                          </SamplePhotoTile>
                         );
                       })}
                     </div>
@@ -500,23 +441,7 @@ export function SampleImagesPage() {
                 /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
                 /* จำนวนการ์ดต่อแถวตามที่เลือก (Ctrl + ลูกกลิ้ง / ▦) · มือถือคงไว้ 1–2 ต่อแถวเหมือนเดิม */
                 <div ref={albumGrid.wheelRef} style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
-                  {tabAlbums.map((a) => {
-                    const b = brandOf(a.brand_id);
-                    return (
-                      <button key={a.id} type="button" onClick={() => void openAlbum(a.id)} className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition hover:border-slate-300 hover:shadow-md">
-                        <AlbumCover keys={a.preview_keys} total={a.deep.photos} />
-                        <div className="space-y-1.5 p-3">
-                          <div className="font-medium text-slate-800">{albumLabel(a)}</div>
-                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
-                            <span className="inline-flex items-center gap-1">{dot(b?.color)}{b?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
-                            <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
-                            {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1" title={t("อัลบั้มย่อย", "Sub-albums")}><Icon value="i:folder" />{a.deep.sub_count}</span>}
-                            {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {tabAlbums.map((a) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} onOpen={() => void openAlbum(a.id)} />)}
                 </div>
               )}
             </div>
