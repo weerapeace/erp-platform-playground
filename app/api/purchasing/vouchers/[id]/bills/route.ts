@@ -41,7 +41,9 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
       if (g.bill_doc_r2_key) candidates.push({ gr_id: String(g.id), gr_no: String(g.gr_no ?? ""), kind: "bill", r2_key: String(g.bill_doc_r2_key) });
     }
   }
-  return NextResponse.json({ data: bills ?? [], candidates, error: null });
+  // กฎ Description (คิว/กก.) — หน้าเว็บใช้บอก "ตามกฎ" / ปุ่มจำกฎ (★ 2026-11-15)
+  const rules = await loadDescriptionRules(admin);
+  return NextResponse.json({ data: bills ?? [], candidates, rules, error: null });
 }
 
 export async function POST(request: NextRequest, { params }: Params): Promise<NextResponse> {

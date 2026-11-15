@@ -95,6 +95,7 @@ export default function PurchaseVoucherFormPage() {
   const [voiding, setVoiding] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [lastConfirm, setLastConfirm] = useState<ConfirmResult | null>(null);   // ผลยืนยันล่าสุด (อัปเดตราคาไปกี่ที่) → โชว์ในการ์ดงานถัดไป
+  const [sellerKey, setSellerKey] = useState(0);   // ลบรายการแล้ว → โหลดแผงบิลร้านใหม่
   const [addOpen, setAddOpen] = useState(false);   // แถบ ＋ เพิ่มรายการเอง (พับไว้)
 
   const applyData = useCallback((d: Detail) => {
@@ -230,6 +231,7 @@ export default function PurchaseVoucherFormPage() {
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       applyData(j.data as Detail);
       setDelLine(null);
+      setSellerKey((k) => k + 1);   // แถวในบิลร้านกลับเป็น "ยังไม่ใส่ลงใบ" → โหลดแผงบิลใหม่
       toast.success("ลบรายการแล้ว");
     } catch (e) { toast.error("ลบไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setAddBusy(false); }
@@ -371,7 +373,7 @@ export default function PurchaseVoucherFormPage() {
                 </div>
 
                 {/* บิลจากร้าน (ภาษาจีน) — ใบหยวน = ทางหลักเติมราคา จึงเปิดไว้บนสุด · ใบบาทพับไว้ล่างสุด (แบบ B) */}
-                {foreign && <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />}
+                {foreign && <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} />}
 
                 {/* รายการ */}
                 <div className="space-y-2">
@@ -423,7 +425,6 @@ export default function PurchaseVoucherFormPage() {
                           {manual && !readonly
                             ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${inputCls} w-16 text-right tabular-nums`} />
                             : l.qty.toLocaleString()} <span className="text-xs font-normal text-slate-400">{l.uom}</span>
-                          {manual && !readonly && <button onClick={() => setDelLine(l)} title="ลบรายการนี้" className="ml-1 text-slate-300 hover:text-red-600 font-normal">🗑</button>}
                         </div>
                       ) },
                       { key: "price", header: H(`ราคา/หน่วย (${sym.trim()})`), align: "right", width: "8.5rem", cell: ({ l, e, c }) => (
@@ -488,6 +489,14 @@ export default function PurchaseVoucherFormPage() {
                         { key: "ship", header: H("ค่าส่ง ฿"), align: "right" as const, width: "5rem", cell: ({ c }: R) => <span className="tabular-nums text-orange-700">{c.ship_alloc_thb > 0 ? fmtMoney(c.ship_alloc_thb) : <span className="text-slate-300">-</span>}</span> },
                         { key: "landed", header: H("ถึงมือ/ชิ้น ฿"), align: "right" as const, width: "5.5rem", cell: ({ c }: R) => <span className="tabular-nums font-medium text-slate-800">{c.has_price ? fmtMoney(c.landed_unit_thb) : "—"}</span> },
                       ] : []),
+                      /* ★ 2026-11-15 เจ้าของ: "เพิ่มรายการเอง ต้องลบได้ด้วย เอาปุ่มลบไปไว้หลังสุด" — เดิมเป็นไอคอนจางข้างช่องจำนวน หาไม่เจอ
+                           รายการเพิ่มเอง/จากบิลร้าน = ลบได้ (ถามก่อน) · รายการจากใบรับ = แม่กุญแจ (จำนวนต้องตรงของที่รับจริง → ลบที่ใบรับ) */
+                      ...(readonly ? [] : [{ key: "del", header: "", align: "center" as const, width: "2.75rem", cell: ({ l, manual }: R) => manual ? (
+                        <button type="button" onClick={() => setDelLine(l)} title="ลบรายการนี้" aria-label="ลบรายการนี้"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600"><Icon name="delete" mode="line" size={15} /></button>
+                      ) : (
+                        <span title={`มาจากใบรับ ${l.gr_no ?? ""} — ลบที่นี่ไม่ได้ (จำนวนต้องตรงกับของที่รับจริง) ให้แก้/ลบที่ใบรับ`} className="inline-flex h-7 w-7 items-center justify-center text-slate-300"><Icon name="lock" mode="line" size={14} /></span>
+                      ) }]),
                     ];
                     return (
                       <MiniTable rows={rows} rowKey={(r) => r.l.id} columns={cols} hideToolbar zebra={false} resizable storageKey="pv-lines" columnMenu={{}} stickyCols={2}
@@ -561,14 +570,14 @@ export default function PurchaseVoucherFormPage() {
     
                     {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
                     <DeliveryBillPanel voucherId={id} readonly={readonly}
-                      lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no }))}
+                      lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no, is_product: !!l.item_sku_id }))}
                       onApplied={load} />
                   </div>
                 </CollapseCard>
 
                 {!foreign && (
                   <CollapseCard title="✨ มีบิลจีน? ให้ AI อ่าน + เติมราคา" summary="ใช้กับบิลร้านภาษาจีน">
-                    <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} bare />
+                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} bare />
                   </CollapseCard>
                 )}
               </div>
@@ -648,6 +657,7 @@ export default function PurchaseVoucherFormPage() {
             <button onClick={() => void removeLine()} disabled={addBusy} className="px-5 h-9 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">{addBusy ? "กำลังลบ…" : "ยืนยันลบ"}</button>
           </>}>
           <p className="text-sm text-slate-600">ลบรายการนี้ออกจากใบสำคัญ ({delLine.qty.toLocaleString()} {delLine.uom ?? ""}) — ยอดรวมและค่าส่งเฉลี่ยจะคิดใหม่</p>
+          {delLine.price_source === "bill" && <p className="mt-2 text-xs text-slate-500">รายการนี้มาจากบิลร้าน — แถวในบิลจะกลับเป็น &quot;ยังไม่ใส่ลงใบ&quot; (กดยืนยันหรือข้ามใหม่)</p>}
         </ERPModal>
       )}
       {/* ยกเลิกใบที่ยืนยันแล้ว */}

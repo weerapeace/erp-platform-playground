@@ -18,13 +18,15 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { DeliveryBillLine } from "@/lib/delivery-bill";
+import { normDesc, ruleForDescription, type DescRule } from "@/lib/delivery-bill-check";
+import { QtyCheckCard, type BoxSuggestion } from "./qty-check";
 
 export type BillRow = {
   id: string; gr_id: string | null; r2_key: string; tracking_no: string | null; bill_date: string | null; marking: string | null; delivery_area: string | null;
   total_weight_kg: number | null; total_m3: number | null; total_packages: number | null; lines: DeliveryBillLine[]; status: string; applied_at: string | null; created_at: string;
 };
 type Candidate = { gr_id: string; gr_no: string; kind: "receipt" | "bill"; r2_key: string };
-export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null };
+export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null; is_product?: boolean };
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
@@ -41,6 +43,8 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
   const [draft, setDraft] = useState<Record<string, { tracking_no: string; bill_date: string; lines: DeliveryBillLine[] }>>({});
   const [mapFor, setMapFor] = useState<{ billId: string; idx: number } | null>(null);
   const [open, setOpen] = useState(true);
+  const [rules, setRules] = useState<DescRule[]>([]);   // กฎ Description → คิว/กก. (/m/freight-description-rules)
+  const [remembering, setRemembering] = useState<string | null>(null);
   // รูปบิลเป็น "ที่อยู่ไฟล์กลาง" — บิลใหม่อยู่ Supabase ส่วนตัว ต้องขอลิงก์ชั่วคราว (components/file-ref)
   const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.map((b) => b.r2_key)]);
   const imgUrl = (ref: string) => fileUrls[ref] ?? undefined;
@@ -49,7 +53,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
     try {
       const j = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`).then((r) => r.json());
       const rows = (j.data ?? []) as BillRow[];
-      setBills(rows); setCands((j.candidates ?? []) as Candidate[]);
+      setBills(rows); setCands((j.candidates ?? []) as Candidate[]); setRules((j.rules ?? []) as DescRule[]);
       setDraft((p) => { const n = { ...p }; for (const b of rows) if (!n[b.id]) n[b.id] = { tracking_no: b.tracking_no ?? "", bill_date: b.bill_date ?? "", lines: b.lines ?? [] }; return n; });
     } catch { /* เงียบ — แผงนี้เป็นส่วนเสริม */ }
   }, [voucherId]);
@@ -112,6 +116,33 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
     setDraft((p) => { const d = p[billId]; if (!d) return p; const ls = d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)); return { ...p, [billId]: { ...d, lines: ls } }; });
   const addLine = (billId: string) => setDraft((p) => { const d = p[billId]; if (!d) return p; return { ...p, [billId]: { ...d, lines: [...d.lines, { stock: null, po_no: null, description: null, pack: null, package: null, qty: null, weight_kg: null, m3: null, method: null, voucher_line_ids: [] }] } }; });
   const delLine = (billId: string, idx: number) => setDraft((p) => { const d = p[billId]; if (!d) return p; return { ...p, [billId]: { ...d, lines: d.lines.filter((_, i) => i !== idx) } }; });
+  // ★ 2026-11-15 กล่องเช็กจำนวน: ระบบเดาสินค้าให้กล่องที่ยังว่าง → คนกดยืนยันก่อน (ยังไม่บันทึก จนกว่าจะกด บันทึก / ใช้น้ำหนัก/คิว)
+  const applySuggest = (sugg: BoxSuggestion[]) => {
+    setDraft((p) => {
+      const nx = { ...p };
+      for (const s of sugg) { const d = nx[s.bill_id]; if (!d) continue; nx[s.bill_id] = { ...d, lines: d.lines.map((l, i) => (i === s.idx && l.voucher_line_ids.length === 0 ? { ...l, voucher_line_ids: [s.line_id] } : l)) }; }
+      return nx;
+    });
+    setMoved((m) => { const nx = { ...m }; for (const s of sugg) nx[s.bill_id] = true; return nx; });
+    toast.success(`จับคู่ให้ ${sugg.length} กล่องแล้ว — ตรวจแล้วกด บันทึก`);
+  };
+  // ★ 2026-11-15 จำกฎ Description (เช่น METAL ACCY = กก.) → ใบส่งของครั้งหน้าระบบเลือกให้เอง + เติมกล่องที่ยังว่างในใบที่ยังไม่ได้ใช้
+  const rememberRule = async (description: string, method: "cube" | "weight") => {
+    const key = normDesc(description); if (!key) return;
+    setRemembering(key);
+    try {
+      const res = await apiFetch("/api/purchasing/freight-descriptions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description: key, method, source: "bill" }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      const rule: DescRule = { keyword: key, method };
+      const next = [rule, ...rules.filter((r) => normDesc(r.keyword) !== key)];
+      setRules(next);
+      // กล่องที่ยังว่างในแผงนี้ → ใช้กฎทันที (ฝั่งเซิร์ฟเวอร์เติมให้ใบที่ยังไม่ได้ใช้แล้ว)
+      setDraft((p) => { const nx = { ...p }; for (const [id, d] of Object.entries(nx)) nx[id] = { ...d, lines: d.lines.map((l) => (!l.method && ruleForDescription(l.description, next) ? { ...l, method: ruleForDescription(l.description, next)!.method } : l)) }; return nx; });
+      toast.success(`จำแล้ว: ${key} = ${method === "cube" ? "คิว" : "กก."}${j.backfilled ? ` · เติมให้กล่องที่ยังว่างอีก ${j.backfilled} กล่อง` : ""}`);
+    } catch (e) { toast.error("จำกฎไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setRemembering(null); }
+  };
 
   const mapLine = mapFor ? draft[mapFor.billId]?.lines[mapFor.idx] : null;
   const usedElsewhere = (billId: string, idx: number, lineId: string) => (draft[billId]?.lines ?? []).some((l, i) => i !== idx && l.voucher_line_ids.includes(lineId));
@@ -145,6 +176,9 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
             </div>
           )}
           {bills.length === 0 && <div className="text-xs text-slate-300 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีใบส่งของ —</div>}
+          {/* ★ 2026-11-15 เช็กจำนวน: รวมทุกใบส่งของ (มาหลายรอบ) เทียบกับในใบ → ครบ / ขาด / เกิน / ยังไม่มา */}
+          <QtyCheckCard lines={lines} readonly={readonly} onSuggest={applySuggest}
+            bills={bills.map((b) => ({ id: b.id, tracking_no: (draft[b.id]?.tracking_no || b.tracking_no) ?? null, lines: draft[b.id]?.lines ?? b.lines ?? [] }))} />
           {bills.map((b, bi) => {
             const d = draft[b.id] ?? { tracking_no: b.tracking_no ?? "", bill_date: b.bill_date ?? "", lines: b.lines ?? [] };
             const mapped = d.lines.filter((l) => l.voucher_line_ids.length > 0).length;
@@ -159,7 +193,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                   <div className="text-[11px] text-slate-500">{b.marking ? `Marking ${b.marking} · ` : ""}{b.delivery_area ? `${b.delivery_area} · ` : ""}รวม {d.lines.length} กล่อง · {num(b.total_weight_kg).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. · {num(b.total_m3).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว</div>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.status === "applied" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{b.status === "applied" ? `✓ ใช้แล้ว ${b.applied_at ? formatDate(b.applied_at) : ""}` : "ยังไม่ได้ใช้"}</span>
                   <div className="ml-auto flex items-center gap-1.5">
-                    {moved[b.id] && <span className="text-[11px] text-amber-700">ย้ายแถวแล้ว — กดบันทึกเพื่อจำลำดับ</span>}
+                    {moved[b.id] && <span className="text-[11px] text-amber-700">แก้แล้วยังไม่บันทึก — กดบันทึก</span>}
                     {!readonly && <button onClick={() => void patchBill(b.id, false)} disabled={busy === b.id} className="h-8 px-2.5 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">💾 บันทึก</button>}
                     {!readonly && <button onClick={() => void patchBill(b.id, true)} disabled={busy === b.id || mapped === 0} title={mapped === 0 ? "จับคู่สินค้าก่อน" : "เขียนน้ำหนัก/คิวต่อชิ้นลงสินค้าที่จับคู่ + รหัสขนส่งลงหัวใบ"} className="h-8 px-3 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">✓ ใช้น้ำหนัก/คิวจากใบนี้ ({mapped}/{d.lines.length})</button>}
                     {!readonly && <button onClick={() => void removeBill(b.id)} disabled={busy === b.id} className="h-8 w-8 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50">✕</button>}
@@ -187,6 +221,8 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                       {d.lines.map((l, i) => {
                         const names = l.voucher_line_ids.map((id) => lines.find((x) => x.id === id)).filter(Boolean) as VoucherLineLite[];
                         const dk = bi * ROW_SPAN + i;
+                        const descKey = normDesc(l.description);
+                        const rule = ruleForDescription(l.description, rules);
                         return (
                           <tr key={i} {...drag.rowProps(dk)} className={`${l.voucher_line_ids.length === 0 ? "bg-amber-50/30" : ""} ${drag.rowCls(dk)}`}>
                             <td className="px-2 py-1 whitespace-nowrap">
@@ -203,11 +239,22 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
                             <td className="px-2 py-1"><input type="number" step="any" value={l.m3 ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { m3: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-20 text-right`} /></td>
                             <td className="px-2 py-1">
                               <select value={l.method ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { method: (e.target.value || null) as "cube" | "weight" | null })}
+                                title={rule ? `กฎ Description: "${rule.keyword}" = ${rule.method === "cube" ? "คิว" : "กก."}` : "Description นี้ยังไม่มีกฎ — เลือกแล้วกด \"จำ\" ครั้งหน้าระบบเลือกให้เอง"}
                                 className={`${inp} w-28 ${l.method === "cube" ? "bg-sky-50 border-sky-200" : l.method === "weight" ? "bg-violet-50 border-violet-200" : "border-amber-300"}`}>
                                 <option value="">ตามใบ</option>
                                 <option value="cube">📦 คิว (M3)</option>
                                 <option value="weight">⚖️ น้ำหนัก (kg)</option>
                               </select>
+                              {/* ★ 2026-11-15 ทะเบียน Description: ยังไม่มีกฎ + เลือกแล้ว = ปุ่มจำ · มีกฎแต่กล่องยังว่าง = ปุ่มใช้ตามกฎ */}
+                              {!readonly && descKey && l.method && !rule && (
+                                <button type="button" disabled={remembering === descKey} onClick={() => void rememberRule(descKey, l.method as "cube" | "weight")}
+                                  title={`บันทึกเป็นกฎกลาง: ${descKey} = ${l.method === "cube" ? "คิว" : "กก."} — ใบส่งของครั้งหน้าระบบเลือกให้เอง (แก้ได้ที่ ⚙ กฎ Description)`}
+                                  className="block mt-0.5 text-[10px] text-blue-600 hover:underline disabled:opacity-50 whitespace-nowrap">{remembering === descKey ? "กำลังจำ…" : `จำ: ${descKey} = ${l.method === "cube" ? "คิว" : "กก."}`}</button>
+                              )}
+                              {!readonly && !l.method && rule && (
+                                <button type="button" onClick={() => setLine(b.id, i, { method: rule.method })} title={`กฎ "${rule.keyword}" = ${rule.method === "cube" ? "คิว" : "กก."} (ตั้งไว้หลังอ่านใบนี้)`}
+                                  className="block mt-0.5 text-[10px] text-blue-600 hover:underline whitespace-nowrap">ใช้ตามกฎ: {rule.method === "cube" ? "คิว" : "กก."}</button>
+                              )}
                             </td>
                             <td className="px-2 py-1">
                               <button disabled={readonly} onClick={() => setMapFor({ billId: b.id, idx: i })} className={`h-8 px-2 rounded-md border text-left max-w-[16rem] truncate ${names.length ? "border-blue-200 bg-blue-50 text-blue-700" : "border-amber-300 bg-amber-50 text-amber-700"} disabled:opacity-70`} title={names.map((n) => `${n.code || ""} ${stripCode(n.item_name)}`).join("\n") || "ยังไม่ได้จับคู่"}>

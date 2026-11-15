@@ -38,10 +38,8 @@ export async function loadDescriptionRules(admin: Admin): Promise<{ keyword: str
   const { data } = await admin.from("freight_description_rules").select("keyword, method, sort_order, is_active").not("is_active", "is", false).order("sort_order");
   return ((data ?? []) as Row[]).map((r) => ({ keyword: str(r.keyword).toUpperCase(), method: r.method === "weight" ? "weight" as const : "cube" as const })).filter((r) => r.keyword);
 }
-export function methodForDescription(desc: string | null | undefined, rules: { keyword: string; method: "cube" | "weight" }[]): "cube" | "weight" | null {
-  const d = str(desc).toUpperCase(); if (!d) return null;
-  return rules.find((r) => d.includes(r.keyword))?.method ?? null;
-}
+// สูตรจับกฎย้ายไป lib/delivery-bill-check (pure — หน้าเว็บใช้ได้ด้วย · เทียบแบบไม่สนช่องว่างซ้ำ) · คงชื่อเดิมไว้ให้ผู้เรียกเก่า
+export { methodForDescription } from "@/lib/delivery-bill-check";
 export type DeliveryBillParsed = {
   tracking_no: string | null;    // EK-########
   bill_date: string | null;      // YYYY-MM-DD

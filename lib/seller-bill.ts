@@ -438,3 +438,32 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn:
   await recomputeVoucher(admin, v.id);
   return { inserted, updated, expenses, remembered, filledCn, backfilled, lines: collapseAllocRows(billLinesIn, out, exp.parent) };
 }
+
+/**
+ * ★ 2026-11-15 ลบรายการในใบสำคัญ (ปุ่มลบท้ายแถว) ที่มาจากบิลร้าน → ถอดรหัสรายการนั้นออกจากแถวในบิล
+ * เดิมบิลยังโชว์ "ยืนยันแล้ว / ใส่ลงใบแล้ว" ค้าง ทั้งที่รายการถูกลบไปแล้ว
+ *   แถวที่ไม่เหลือรายการในใบ = กลับเป็น "ยังไม่ได้เช็ก" (decision = null) → ต้องกดยืนยัน/ข้ามใหม่ ไม่เด้งกลับเองตอนกดใส่ลงใบอีกครั้ง
+ *   บิลที่ไม่เหลือแถวไหนใส่ลงใบแล้ว = สถานะกลับเป็น "ยังไม่ได้ใส่ลงใบ" (parsed)
+ * คืนจำนวนแถวในบิลที่ถูกถอด
+ */
+export async function unlinkVoucherLineFromSellerBills(admin: Admin, voucherId: string, lineId: string): Promise<number> {
+  const { data: bills } = await admin.from("purchase_delivery_bills").select("id, lines, status").eq("voucher_id", voucherId).eq("kind", "seller").not("is_active", "is", false);
+  let touched = 0;
+  for (const b of (bills ?? []) as Row[]) {
+    const lines = Array.isArray(b.lines) ? (b.lines as Row[]) : [];
+    let hit = false;
+    const next = lines.map((l) => {
+      const ids = Array.isArray(l.voucher_line_ids) ? (l.voucher_line_ids as unknown[]).map(String) : [];
+      if (!ids.includes(lineId)) return l;
+      hit = true; touched++;
+      const rest = ids.filter((x) => x !== lineId);
+      return rest.length ? { ...l, voucher_line_ids: rest } : { ...l, voucher_line_ids: [], decision: null };
+    });
+    if (!hit) continue;
+    const anyApplied = next.some((l) => Array.isArray(l.voucher_line_ids) && (l.voucher_line_ids as unknown[]).length > 0);
+    const patch: Row = { lines: next, updated_at: new Date().toISOString() };
+    if (!anyApplied && b.status === "applied") { patch.status = "parsed"; patch.applied_at = null; }
+    await admin.from("purchase_delivery_bills").update(patch).eq("id", String(b.id));
+  }
+  return touched;
+}

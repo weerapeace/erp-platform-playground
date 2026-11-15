@@ -13,6 +13,7 @@ import { writeAudit } from "@/lib/audit";
 import { recomputeVoucher, fetchVoucher } from "@/lib/purchase-voucher-server";
 import { loadPartnerMatcher } from "@/lib/po-line-price";
 import { cbmFromCm, isCNY } from "@/lib/landed-cost";
+import { unlinkVoucherLineFromSellerBills } from "@/lib/seller-bill";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -94,7 +95,9 @@ export async function DELETE(request: NextRequest, { params }: Params): Promise<
   if (line.gr_line_id) return NextResponse.json({ error: `รายการนี้มาจากใบรับ ${line.gr_no ?? ""} — ลบที่นี่ไม่ได้ (จำนวนต้องตรงกับของที่รับจริง) ให้แก้/ลบที่ใบรับแทน` }, { status: 400 });
   const { error } = await admin.from("purchase_voucher_lines_v2").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", lineId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ★ 2026-11-15 รายการที่มาจากบิลร้าน → แถวในบิลกลับเป็น "ยังไม่ใส่ลงใบ" (lib/seller-bill)
+  const unlinked = await unlinkVoucherLineFromSellerBills(admin, id, lineId);
   await recomputeVoucher(admin, id);
-  await writeAudit(admin, { action: "delete", entityType: "purchase_voucher_lines_v2", entityId: lineId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { voucher_id: id, snapshot: line } });
+  await writeAudit(admin, { action: "delete", entityType: "purchase_voucher_lines_v2", entityId: lineId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { voucher_id: id, snapshot: line, seller_bill_rows_unlinked: unlinked } });
   return NextResponse.json({ ok: true, data: await fetchVoucher(admin, id), error: null });
 }

@@ -11,6 +11,10 @@ import { StatusBadge } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import dynamic from "next/dynamic";
+
+// ★ 2026-11-15 หน้า "กฎคิดค่าส่ง" — ทะเบียน Description ที่เจอในใบส่งของ (ตั้งคิว/กก.) เหนือตารางกฎ · โหลดเฉพาะหน้านี้
+const FreightDescriptionRegistry = dynamic(() => import("@/components/freight-description-registry").then((m) => m.FreightDescriptionRegistry), { ssr: false });
 
 // หน้าจัดซื้อ v2 — แสดงคอลัมน์ status เป็นป้ายสถานะภาษาไทย (ของกลาง StatusBadge)
 const PURCHASING_V2 = ["purchase-requests-v2", "purchase-orders-v2", "goods-receipts-v2"];
@@ -182,6 +186,7 @@ export default function GenericModulePage() {
   if (!moduleKey) return <div className="p-10 text-center text-slate-400">ไม่พบโมดูล</div>;
   return (
     <>
+      {moduleKey === "freight-description-rules" && <FreightDescriptionRegistry />}
       <MasterPage
         apiPath={moduleKey}
         moduleKey={moduleKey}
