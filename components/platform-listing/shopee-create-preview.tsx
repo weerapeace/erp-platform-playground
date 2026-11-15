@@ -6,6 +6,7 @@
  * ข้อมูล = GET /api/shopee/create-product?parent_sku_id= (ตัวประกอบเดียวกับตอนลงจริง — lib/shopee-create-plan)
  * แก้แล้วเขียนลง "ร่าง Shopee" (PATCH /api/product-platforms) — ไม่แก้ข้อมูลสินค้าในระบบ:
  *   ชื่อ / รายละเอียด / หมวด → ร่าง · รูป → extra.shopee_images · น้ำหนัก (แทนของสินค้า) → extra.shopee_weight · ช่องของหมวด → extra.shopee_attrs
+ *   ขนส่ง (ติ๊กเปิด/ปิด · เจ้าของขอ 2026-11-15) → extra.shopee_logistics · ช่องของหมวด: บอกที่มา + แนะนำจากข้อความ (ฟรี) / AI ช่วยเติม (ของกลาง ../platform-catalog/attr-suggest-box)
  * ลงแบบ "ปิดขาย" + สต๊อก 0 เสมอ (BigSeller ยังคุมสต๊อก) · 5B: ลงจริงจากขั้นสุดท้ายของตัวช่วย (POST /api/shopee/create-product)
  * ของกลางที่ใช้: ListingImageGrid/ListingImagePicker (รูป) · PlatformCategoryPicker (หมวด) · LazadaAttrField + ttsAttrDef (ช่องของหมวด) · state-views · Icon
  * ห้ามใช้: แก้สินค้าที่มีบน Shopee แล้ว (ใช้ลิ้นชักสินค้าบนร้าน)
@@ -21,6 +22,8 @@ import { LazadaAttrField } from "@/components/platform-catalog/lazada-listing-pa
 import { useWeightUnit } from "@/components/platform-catalog/weight-unit";
 import { kgToUnit, sameAttrState, ttsAttrDef, ttsAttrFromText, ttsAttrToText, unitToKg, type TtsAttrState, type WeightUnit } from "@/lib/tiktok-attrs";
 import type { ShopeeCreatePreview } from "@/lib/shopee-create-plan";
+import { ToggleSwitch } from "@/components/toggle-switch";
+import { AttrSuggestButtons, AttrSuggestPanel, applyAttrHits, useAttrSuggest, type AttrSuggestSource } from "@/components/platform-catalog/attr-suggest-box";
 
 type LastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
 type Resp = { preview: ShopeeCreatePreview | null; blockers?: string[]; live?: boolean; platform_id?: string; brand_id?: string | null; last_attempt?: LastAttempt | null; error: string | null };
@@ -44,15 +47,23 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const [picker, setPicker] = useState(false);
   const [attrs, setAttrs] = useState<TtsAttrState | null>(null);
   const [moreAttrs, setMoreAttrs] = useState(false);
+  const [attrSrc, setAttrSrc] = useState<Record<string, AttrSuggestSource>>({});   // ช่องที่เพิ่งเติมจากตัวแนะนำ (ยังไม่บันทึก)
+  const [logs, setLogs] = useState<number[] | null>(null);                          // ขนส่งที่ติ๊กไว้ (ยังไม่บันทึก)
   const [unit, setUnit] = useWeightUnit();
   const sys = useSystemImages(parentId);
+  const pvx = data?.preview ?? null;
+  const sug = useAttrSuggest({
+    fields: pvx?.attrs.fields ?? [], values: attrs ?? pvx?.attrs.values ?? {},
+    text: () => `${pvx?.name.value ?? ""}\n${pvx?.description.value ?? ""}`,
+    ai: pvx && canEdit ? { platform: "Shopee", name: pvx.name.value, description: pvx.description.value, category: pvx.category.label, imageKeys: pvx.images.refs.filter((r) => r.startsWith("r2:")).map((r) => r.slice(3)) } : null,
+  });
 
   const load = useCallback(async () => {
     setErr(null);
     try {
       const j = await apiFetch(`/api/shopee/create-product?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json()) as Resp;
       if (j.error || !j.preview) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setData(j); setImgs(null); setAttrs(null); onLoaded?.(j.preview, j.blockers ?? []);
+      setData(j); setImgs(null); setAttrs(null); setAttrSrc({}); setLogs(null); onLoaded?.(j.preview, j.blockers ?? []);
     } catch (e) { setErr((e as Error).message || "โหลดไม่สำเร็จ"); }
   }, [parentId, onLoaded]);
   useEffect(() => { setData(null); void load(); }, [load]);
@@ -194,11 +205,44 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
           </div>
         )}
         <div className="mt-0.5 text-[11px] text-slate-400">น้ำหนักมาจาก: {pv.weight.src} · ขนาดกล่องแก้ที่หน้าสินค้า (Parent SKU)</div>
-        <div className="mt-2 text-xs text-slate-600">
-          ขนส่ง: {pv.logistics.channels.length ? pv.logistics.channels.map((c) => c.name || `#${c.id}`).join(" · ") : <span className="text-rose-600">ไม่พบ</span>}
-          {pv.daysToShip ? <span className="text-slate-500"> · ส่งภายใน {pv.daysToShip} วัน (ไม่ใช่พรีออเดอร์)</span> : null}
-        </div>
-        <div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.logistics.src}</div>
+        {(() => {
+          const baseOn = pv.logistics.options.filter((o) => o.on).map((o) => o.id);
+          const cur = logs ?? baseOn;
+          const logDirty = !!logs && [...logs].sort().join(",") !== [...baseOn].sort().join(",");
+          return (
+            <div className="mt-2">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                <span>ขนส่ง (ติ๊กเปิด/ปิดได้){pv.daysToShip ? <span className="text-slate-500"> · ส่งภายใน {pv.daysToShip} วัน (ไม่ใช่พรีออเดอร์)</span> : null}</span>
+                {canEdit && logDirty && (
+                  <div className="flex gap-1.5">
+                    <button type="button" disabled={saving || cur.length === 0} onClick={() => void patchExtra({ shopee_logistics: cur }, "บันทึกขนส่งแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง Shopee</button>
+                    <button type="button" onClick={() => setLogs(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+                  </div>
+                )}
+                {canEdit && !logDirty && pv.logistics.custom && <button type="button" disabled={saving} onClick={() => void dropExtra("shopee_logistics", "กลับไปใช้ขนส่งค่าเริ่ม")} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">กลับไปใช้ค่าเริ่ม</button>}
+              </div>
+              {pv.logistics.options.length === 0 ? <p className="text-xs text-rose-600">ไม่พบขนส่ง — ต้องมีสินค้าแบรนด์เดียวกันขายอยู่บนร้านอย่างน้อย 1 ตัว</p> : (
+                <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {pv.logistics.options.map((o) => {
+                    const on = cur.includes(o.id);
+                    return (
+                      <div key={o.id} className="flex items-center gap-2 px-2 py-1.5 text-xs">
+                        <ToggleSwitch on={on} size="sm" disabled={!canEdit || o.forced || (!!o.blocked && !on)} title={o.forced ? "ร้านบังคับเปิดขนส่งนี้" : o.blocked ?? (on ? "ปิดขนส่งนี้" : "เปิดขนส่งนี้")}
+                          onChange={(v) => setLogs(() => { const s = new Set(cur); if (v) s.add(o.id); else s.delete(o.id); return [...s]; })} />
+                        <span className={`min-w-0 flex-1 ${on ? "text-slate-800" : "text-slate-400"}`}>
+                          {o.name}{o.forced ? <span className="text-[11px] text-slate-400"> · ร้านบังคับเปิด</span> : null}
+                          {o.blocked && <span className="block text-[11px] text-amber-700">{o.blocked}</span>}
+                        </span>
+                        <span className={on ? "text-slate-600" : "text-slate-300"}>{o.fee == null ? "ตามน้ำหนัก" : o.fee === 0 ? "฿0" : `฿${o.fee.toLocaleString("th-TH")}`}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.logistics.src} · ค่าส่งเป็นค่าประมาณตามน้ำหนัก (Shopee คิดจริงตอนสั่งซื้อ)</div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ตัวเลือก + ราคา */}
@@ -225,13 +269,19 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
       <div className="rounded-xl border border-slate-200 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-600">ช่องของหมวด {pv.attrs.required.length ? <span className="text-rose-600">· ช่องบังคับยังว่าง {pv.attrs.required.length}</span> : null}</span>
+          {canEdit && fields.length > 0 && <AttrSuggestButtons s={sug} />}
           {canEdit && attrDirty && (
             <div className="flex gap-1.5">
               <button type="button" disabled={saving} onClick={() => void patchExtra({ shopee_attrs: attrs }, "บันทึกช่องของหมวดแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง Shopee</button>
-              <button type="button" onClick={() => setAttrs(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+              <button type="button" onClick={() => { setAttrs(null); setAttrSrc({}); }} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
             </div>
           )}
         </div>
+        <div className="mb-2"><AttrSuggestPanel s={sug} onApply={(hits, src) => {
+          const { next, filledIds } = applyAttrHits(attrs ?? pv.attrs.values, hits);
+          setAttrs(next); setAttrSrc((m) => ({ ...m, ...Object.fromEntries(filledIds.map((id) => [id, src])) }));
+          if (filledIds.some((id) => restFields.some((f) => f.id === id))) setMoreAttrs(true);
+        }} /></div>
         {!pv.category.id ? <p className="text-xs text-slate-500">เลือกหมวดก่อน แล้วช่องของหมวดจะขึ้นที่นี่</p>
           : !pv.attrs.loaded ? <p className="text-xs text-slate-500">ดึงช่องของหมวดจาก Shopee ไม่ได้</p>
           : fields.length === 0 ? <p className="text-xs text-slate-500">หมวดนี้ไม่มีช่องให้กรอก</p>
@@ -239,10 +289,21 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
             <>
               {pv.attrs.fromTemplate && <p className="mb-2 text-[11px] text-amber-700">ช่องบังคับเติมจากสินค้าบนร้านหมวดเดียวกัน (#{pv.attrs.fromTemplate}) — ตรวจว่าตรงกับสินค้านี้ แล้วกดบันทึก</p>}
               <div className="grid gap-2 sm:grid-cols-2">
-                {(moreAttrs ? [...mainFields, ...restFields] : mainFields).map((f) => (
-                  <LazadaAttrField key={f.id} def={ttsAttrDef(f)} value={ttsAttrToText(vals[f.id])} base={ttsAttrToText(pv.attrs.values[f.id])} can={canEdit}
-                    onChange={(text) => setAttrs((a) => { const n = { ...(a ?? pv.attrs.values) }; const v = ttsAttrFromText(f, text); if (v.length) n[f.id] = v; else delete n[f.id]; return n; })} />
-                ))}
+                {(moreAttrs ? [...mainFields, ...restFields] : mainFields).map((f) => {
+                  const has = (vals[f.id] ?? []).length > 0;
+                  const pend = has ? attrSrc[f.id] : undefined;
+                  const saved = has && !pend && sameAttrState({ x: vals[f.id] ?? [] }, { x: pv.attrs.values[f.id] ?? [] }) ? pv.attrs.sources[f.id] : undefined;
+                  const label = pend === "ai" ? "AI เดา · ตรวจก่อน (ยังไม่บันทึก)" : pend === "text" ? "แนะนำจากชื่อ/รายละเอียด (ยังไม่บันทึก)"
+                    : saved === "template" ? `จากสินค้าบนร้านหมวดเดียวกัน #${pv.attrs.fromTemplate ?? ""} — ตรวจก่อน` : saved === "draft" ? "บันทึกไว้ในร่าง" : has ? "แก้ตอนนี้ (ยังไม่บันทึก)" : null;
+                  return (
+                    <div key={f.id}>
+                      <LazadaAttrField def={ttsAttrDef(f)} value={ttsAttrToText(vals[f.id])} base={ttsAttrToText(pv.attrs.values[f.id])} can={canEdit}
+                        suggested={pend ? (vals[f.id] ?? []).map((x) => x.id).filter((x): x is string => !!x) : undefined}
+                        onChange={(text) => { setAttrSrc((m) => { const n = { ...m }; delete n[f.id]; return n; }); setAttrs((a) => { const n = { ...(a ?? pv.attrs.values) }; const v = ttsAttrFromText(f, text); if (v.length) n[f.id] = v; else delete n[f.id]; return n; }); }} />
+                      {label && <div className={`mt-0.5 text-[10px] ${pend === "ai" ? "text-violet-700" : pend === "text" || saved === "template" ? "text-amber-700" : "text-slate-400"}`}>มาจาก: {label}</div>}
+                    </div>
+                  );
+                })}
               </div>
               {mainFields.length === 0 && !moreAttrs && <p className="text-xs text-slate-500">หมวดนี้ไม่มีช่องบังคับ</p>}
               {restFields.length > 0 && <button type="button" onClick={() => setMoreAttrs((x) => !x)} className="mt-2 text-xs text-violet-700 hover:underline">{moreAttrs ? "ซ่อนช่องไม่บังคับ" : `แสดงช่องไม่บังคับ (${restFields.length} ช่อง)`}</button>}

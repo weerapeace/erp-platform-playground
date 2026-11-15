@@ -1446,6 +1446,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "attr-suggest-box", label: "แนะนำช่องคุณลักษณะ (จับคำฟรี / AI ช่วยเติม)", code: "useAttrSuggest", category: "feature",
+    source: { path: "components/platform-catalog/attr-suggest-box" },
+    what: "ปุ่ม \"แนะนำจากชื่อ/รายละเอียด (ฟรี)\" (lib/attr-suggest) + \"ให้ AI ช่วยเติม\" (POST /api/ai/attr-fill · ด่านกลาง aiChat \"ai.attr_fill\" · lib/attr-ai-fill) → กล่องผล (AI ติดป้าย \"AI เดา · ตรวจก่อน\") → ใส่ทั้งหมด (applyAttrHits เติมเฉพาะช่องที่ว่าง)",
+    when: "ช่องคุณลักษณะของหมวดตอนลง/แก้สินค้าบนร้าน (Shopee ใช้แล้ว · TikTok/Lazada ย้ายมาใช้ได้) — ช่องรูปแบบ TtsAttrField",
+    notWhen: "เดาแท็กสินค้าในระบบ ให้ใช้ lib/tag-suggest-rules · ห้ามเติมแล้วส่งขึ้นร้านอัตโนมัติ (คนต้องกดใส่ + บันทึกเอง)",
+    doc: "shopee-connector.md",
+  },
+  {
     key: "listing-links", label: "ปุ่มดูหน้าร้าน / Seller Center", code: "ListingLinks", category: "feature",
     source: { path: "components/platform-catalog/listing-links" },
     what: "ปุ่มเปิดหน้าสินค้าที่ลูกค้าเห็น + หลังร้าน (Seller Center) ของรายการบนร้าน ทุกแพลตฟอร์ม — ลิงก์จาก lib/platform-links (listingLinks) · หลังร้านที่ไม่มีลิงก์ตรง = หน้าแรก + คัดลอกรหัส · ตั้งร้านไม่ครบ = บอกว่าต้องตั้งอะไร",

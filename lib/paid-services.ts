@@ -98,6 +98,10 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "หน้า SKU → แท็บ Swatch (แผงผ้า) → ปุ่ม อ่านจากรูป (1 รูป = 1 ครั้ง)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม อ่านจากรูป ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ตีกรอบชิ้นเอง / แบ่งกรอบเท่า ๆ กัน ใช้ได้ตามปกติ",
     costHint: "ประมาณ 0.2 บาท/รูป (gpt-4.1-mini) · 0.5–0.7 บาท (gpt-5.4-mini)", files: ["app/api/sku-swatches/ai-read/route.ts"] },
+  { key: "ai.attr_fill", th: "AI เติมช่องคุณลักษณะสินค้า (ลงร้านค้าออนไลน์)", en: "AI attribute fill (marketplace listing)", group: "สินค้า / เว็บร้าน",
+    usedAt: "ตัวช่วยลงสินค้า → แท็บ Shopee → ช่องของหมวด → ปุ่ม ให้ AI ช่วยเติม (1 ครั้ง = 1 สินค้า · อ่านชื่อ + รายละเอียด + รูป ≤ 3)", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่ม ให้ AI ช่วยเติม ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ปุ่ม แนะนำจากชื่อ/รายละเอียด (ฟรี) และกรอกเองใช้ได้ตามปกติ",
+    costHint: "ประมาณ 0.05–0.3 บาท/ครั้ง (ขึ้นกับจำนวนช่อง/รูป และโมเดล)", files: ["app/api/ai/attr-fill/route.ts"] },
   // ── จัดซื้อ / บิล
   { key: "ai.seller_bill", th: "อ่านบิลร้านจีน + จับคู่สินค้า", en: "China seller bill reader", group: "จัดซื้อ / บิล",
     usedAt: "จับคู่บิลจีน · รับบิลเข้าใบสำคัญจ่าย", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,

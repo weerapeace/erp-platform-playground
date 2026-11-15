@@ -153,15 +153,15 @@ export function shopeeAttrStateOf(v: unknown): TtsAttrState {
 }
 
 // ───────── "สินค้าแบบ" บนร้าน (get_item_base_info ของสินค้าที่ขายอยู่ แบรนด์เดียวกัน) → แบรนด์ / ขนส่ง / วันส่ง / ค่าคุณลักษณะ ─────────
-export type ShopeeLogistic = { logistic_id: number; name: string | null; enabled: boolean; shipping_fee?: number; size_id?: number; is_free?: boolean };
+export type ShopeeLogistic = { logistic_id: number; name: string | null; enabled: boolean; shipping_fee?: number; size_id?: number; is_free?: boolean; /** ค่าส่งโดยประมาณตามน้ำหนัก (get_item_base_info · โชว์อย่างเดียว) */ estimated_fee?: number };
 export type ShopeeTemplate = { itemId: string; categoryId: string | null; brand: { id: number; name: string } | null; logistics: ShopeeLogistic[]; daysToShip: number | null; attrs: TtsAttrState };
 export function shopeeTemplateOf(base: Obj): ShopeeTemplate | null {
   const itemId = str(base.item_id); if (!itemId) return null;
   const b = obj(base.brand);
   const brandId = num(b?.brand_id);
   const logistics = arrOf(base.logistic_info).map((l): ShopeeLogistic => {
-    const fee = num(l.shipping_fee), size = num(l.size_id);
-    return { logistic_id: num(l.logistic_id) ?? 0, name: str(l.logistic_name) || null, enabled: l.enabled === true, ...(fee != null ? { shipping_fee: fee } : {}), ...(size ? { size_id: size } : {}), ...(l.is_free === true ? { is_free: true } : {}) };
+    const fee = num(l.shipping_fee), size = num(l.size_id), est = num(l.estimated_shipping_fee);
+    return { logistic_id: num(l.logistic_id) ?? 0, name: str(l.logistic_name) || null, enabled: l.enabled === true, ...(fee != null ? { shipping_fee: fee } : {}), ...(size ? { size_id: size } : {}), ...(l.is_free === true ? { is_free: true } : {}), ...(est != null ? { estimated_fee: est } : {}) };
   }).filter((l) => l.logistic_id > 0);
   const attrs: TtsAttrState = {};
   for (const a of arrOf(base.attribute_list)) {
@@ -175,6 +175,65 @@ export function shopeeTemplateOf(base: Obj): ShopeeTemplate | null {
     logistics, daysToShip: num(obj(base.pre_order)?.days_to_ship), attrs,
   };
 }
+// ───────── ขนส่ง (เจ้าของขอ 2026-11-15 "ตรงติ๊กจัดส่งด้วย อยากให้ติ๊กได้ด้วย") ─────────
+// รายการ = ขนส่งของสินค้าแบบ (มีชื่อ + ค่าส่งโดยประมาณ) รวมกับขนส่งของร้าน (v2.logistics.get_channel_list · ร้านเปิดอยู่เท่านั้น)
+// ค่าเริ่ม = ที่สินค้าแบบเปิดอยู่ (ยกเว้นขนส่งของใหญ่ — ปิดไว้จนกว่าจะเลือกเอง) · เลือกเองเก็บร่าง extra.shopee_logistics = [logistic_id]
+export type ShopeeChannel = {
+  id: number; name: string; shopEnabled: boolean; feeType: string | null; forceEnable: boolean;
+  sizes: { id: number; name: string; price: number | null }[]; maxWeight: number | null; maskChannelId: number | null;
+};
+export function shopeeChannelsOf(j: Obj | null): ShopeeChannel[] {
+  if (!j) return [];
+  const r = obj(j.response) ?? j;
+  return arrOf(r.logistics_channel_list).map((c): ShopeeChannel => ({
+    id: num(c.logistics_channel_id) ?? 0, name: str(c.logistics_channel_name), shopEnabled: c.enabled === true, feeType: str(c.fee_type) || null,
+    forceEnable: c.force_enable === true,
+    sizes: arrOf(c.size_list).map((s) => ({ id: num(s.size_id) ?? 0, name: str(s.name), price: num(s.default_price) })).filter((s) => s.id > 0),
+    maxWeight: (() => { const w = num(obj(c.weight_limit)?.item_max_weight); return w && w > 0 ? w : null; })(),
+    maskChannelId: num(c.mask_channel_id),
+  })).filter((c) => c.id > 0);
+}
+export const isBulkyChannel = (name: string | null | undefined) => /bulky|ขนาดใหญ่|ของใหญ่/i.test(String(name ?? ""));
+export type ShopeeLogisticOption = {
+  id: number; name: string; on: boolean;
+  /** ค่าส่งที่โชว์ (โดยประมาณ) · null = ไม่รู้ */
+  fee: number | null;
+  /** ร้านบังคับเปิด (ปิดไม่ได้) */
+  forced: boolean;
+  /** เปิดไม่ได้ + เหตุผล (เช่น ต้องเลือกขนาดใน Seller Centre · หนักเกิน) */
+  blocked: string | null;
+  sizeId: number | null; shippingFee: number | null; isFree: boolean;
+};
+/** รวมรายการขนส่ง (แบบ + ร้าน) → ตัวเลือกที่ติ๊กได้ · picked = extra.shopee_logistics (null = ใช้ค่าเริ่ม) */
+export function shopeeLogisticOptions(template: ShopeeTemplate | null, channels: ShopeeChannel[] | null, picked: number[] | null, weightKg: number | null): ShopeeLogisticOption[] {
+  const byId = new Map<number, ShopeeLogisticOption>();
+  const chById = new Map((channels ?? []).map((c) => [c.id, c]));
+  const shopOff = (id: number) => { const c = chById.get(id); return !!channels && (!c || !c.shopEnabled); };
+  for (const l of template?.logistics ?? []) {
+    if (shopOff(l.logistic_id)) continue;
+    const c = chById.get(l.logistic_id);
+    byId.set(l.logistic_id, {
+      id: l.logistic_id, name: c?.name || l.name || `#${l.logistic_id}`, on: l.enabled && !isBulkyChannel(c?.name || l.name), fee: l.is_free ? 0 : (l.estimated_fee ?? l.shipping_fee ?? null),
+      forced: !!c?.forceEnable, blocked: null, sizeId: l.size_id ?? null, shippingFee: l.shipping_fee ?? null, isFree: !!l.is_free,
+    });
+  }
+  // ขนส่งที่ร้านเปิดแต่สินค้าแบบไม่มี — เป็นช่องลูกของขนส่งหลัก (mask) ไม่ใส่ · ใส่เฉพาะช่องหลัก
+  for (const c of channels ?? []) {
+    if (!c.shopEnabled || byId.has(c.id) || (c.maskChannelId ?? 0) !== 0) continue;
+    byId.set(c.id, { id: c.id, name: c.name, on: false, fee: c.sizes[0]?.price ?? null, forced: c.forceEnable, blocked: null, sizeId: null, shippingFee: null, isFree: false });
+  }
+  const pick = picked ? new Set(picked) : null;
+  return [...byId.values()].map((o) => {
+    const c = chById.get(o.id);
+    let blocked: string | null = null;
+    if (c?.feeType === "SIZE_SELECTION" && !o.sizeId) blocked = "ขนส่งนี้ต้องเลือกขนาดพัสดุ — ตั้งใน Seller Centre";
+    else if (c?.feeType === "CUSTOM_PRICE" && o.shippingFee == null) blocked = "ขนส่งนี้ต้องตั้งค่าส่งเอง — ตั้งใน Seller Centre";
+    else if (c?.maxWeight && weightKg && weightKg > c.maxWeight) blocked = `หนักเกินที่ขนส่งนี้รับ (ไม่เกิน ${c.maxWeight} กก.)`;
+    const on = o.forced || (!blocked && (pick ? pick.has(o.id) : o.on));
+    return { ...o, blocked, on };
+  }).sort((a, b) => Number(b.on) - Number(a.on) || a.name.localeCompare(b.name));
+}
+
 /** ชื่อแบรนด์ในระบบตรงกับแบรนด์บน Shopee ไหม ("Louis Montini" ↔ "Louis Montini(หลุยส์ มอนตินี่)") */
 export function shopeeBrandMatches(erpBrand: string | null | undefined, shopeeBrand: string | null | undefined): boolean {
   const n = (s: string) => s.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9ก-๙]/g, "");
@@ -198,8 +257,10 @@ export type ShopeeCreatePreview = {
   dims: ShopeeCreateDim[];
   variants: ShopeeCreateVariantRow[];
   /** ช่องคุณลักษณะของหมวด · required = ช่องบังคับที่ยังว่าง · fromTemplate = เติมจากสินค้าแบบ (#item) */
-  attrs: { required: string[]; loaded: boolean; fields: TtsAttrField[]; values: TtsAttrState; fromTemplate: string | null };
-  logistics: { channels: { id: number; name: string | null }[]; src: string };
+  /** ช่องคุณลักษณะของหมวด · sources = ค่าแต่ละช่องมาจากไหน (draft = กรอก/บันทึกไว้ในร่าง · template = สินค้าบนร้านหมวดเดียวกัน) */
+  attrs: { required: string[]; loaded: boolean; fields: TtsAttrField[]; values: TtsAttrState; fromTemplate: string | null; sources: Record<string, "draft" | "template"> };
+  /** ขนส่ง: options = ติ๊กได้ (เปิด/ปิด · ค่าส่งโดยประมาณ) · custom = เลือกเองไว้ในร่าง */
+  logistics: { channels: { id: number; name: string | null }[]; options: ShopeeLogisticOption[]; custom: boolean; src: string };
   daysToShip: number | null;
   stock: number; status: string;
   /** ข้อที่ต้องแก้ก่อนลงจริง (Shopee จะปฏิเสธ) */
@@ -219,6 +280,8 @@ export function planShopeeCreate(input: {
   category: ShopeeCategoryPick | null; candidates: ShopeeCategoryPick[];
   galleryKeys: string[]; attrFields: TtsAttrField[] | null; limits: ShopeeCreateLimits | null;
   template: ShopeeTemplate | null; onShop: string | null;
+  /** ขนส่งของร้าน (get_channel_list) · null = ดึงไม่ได้ (ใช้ของสินค้าแบบอย่างเดียว) */
+  channels?: ShopeeChannel[] | null;
 }): { preview: ShopeeCreatePreview; payload: { add_item: Record<string, unknown>; tier: Record<string, unknown> | null } } {
   const { parent: p, draft: d } = input;
   const L = input.limits;
@@ -340,21 +403,26 @@ export function planShopeeCreate(input: {
   const brand = brandOk ? t!.brand! : { id: 0, name: "NoBrand" };
   const brandSrc = brandOk ? `แบรนด์เดียวกับสินค้าบนร้าน (#${t!.itemId})` : t ? `สินค้าแบบบนร้านไม่ใช่แบรนด์ "${p.brand_name ?? "—"}" — ใส่ "ไม่มีแบรนด์" (แก้ใน Seller Centre ได้)` : "ไม่พบสินค้าแบบบนร้าน — ใส่ \"ไม่มีแบรนด์\"";
   if (!brandOk) warnings.push(`แบรนด์: ${brandSrc}`);
-  const channels = (t?.logistics ?? []).filter((l) => l.enabled);
-  const logSrc = t ? `ขนส่งเดียวกับสินค้าบนร้าน (#${t.itemId})` : "ไม่พบสินค้าแบบบนร้าน";
-  if (!channels.length) missing.push(t ? `สินค้าแบบบนร้าน (#${t.itemId}) ไม่ได้เปิดขนส่งไหนเลย — เปิดขนส่งใน Seller Centre ก่อน` : "ขนส่ง — ต้องมีสินค้าแบรนด์เดียวกันขายอยู่บนร้านอย่างน้อย 1 ตัว (ใช้เป็นแบบ)");
+  const pickedLog = Array.isArray(extra.shopee_logistics) ? (extra.shopee_logistics as unknown[]).map((x) => num(x)).filter((n): n is number => n != null && n > 0) : null;
+  const logOptions = shopeeLogisticOptions(t, input.channels ?? null, pickedLog, weight);
+  const chosenLog = logOptions.filter((o) => o.on);
+  const logSrc = pickedLog ? "เลือกไว้สำหรับ Shopee" : t ? `ค่าเริ่ม = ขนส่งเดียวกับสินค้าบนร้าน (#${t.itemId}) · ขนส่งของใหญ่ปิดไว้ก่อน` : "ไม่พบสินค้าแบบบนร้าน";
+  if (!chosenLog.length) missing.push(!t && !logOptions.length ? "ขนส่ง — ต้องมีสินค้าแบรนด์เดียวกันขายอยู่บนร้านอย่างน้อย 1 ตัว (ใช้เป็นแบบ)" : "ขนส่ง — เปิดอย่างน้อย 1 ขนส่ง");
   const daysToShip = L?.dtsNonPreOrder ?? t?.daysToShip ?? null;
 
   // ---------- ช่องคุณลักษณะของหมวด ----------
   const fields = input.attrFields ?? null;
   const draftAttrs = shopeeAttrStateOf(extra.shopee_attrs);
-  let attrVals = draftAttrs;
+  const attrVals: TtsAttrState = { ...draftAttrs };
+  const attrSources: Record<string, "draft" | "template"> = Object.fromEntries(Object.keys(draftAttrs).map((k) => [k, "draft" as const]));
   let fromTemplate: string | null = null;
-  if (!Object.keys(draftAttrs).length && fields && t && t.categoryId && t.categoryId === categoryId) {
-    const req = new Set(fields.filter((f) => f.required).map((f) => f.id));
-    const pickedT: TtsAttrState = {};
-    for (const [k, v] of Object.entries(t.attrs)) if (req.has(k)) pickedT[k] = v;
-    if (Object.keys(pickedT).length) { attrVals = pickedT; fromTemplate = t.itemId; }
+  // ช่องบังคับที่ร่างยังไม่มี → เติมจากสินค้าแบบหมวดเดียวกัน (เตือนให้ตรวจ)
+  if (fields && t && t.categoryId && t.categoryId === categoryId) {
+    for (const f of fields) {
+      if (!f.required || (attrVals[f.id] ?? []).length) continue;
+      const v = t.attrs[f.id];
+      if (v?.length) { attrVals[f.id] = v; attrSources[f.id] = "template"; fromTemplate = t.itemId; }
+    }
   }
   const required = fields ? fields.filter((f) => f.required && !(attrVals[f.id] ?? []).length).map((f) => f.name) : [];
   if (required.length) missing.push(`ช่องบังคับของหมวดยังว่าง ${required.length} ช่อง (${required.slice(0, 3).join(", ")}${required.length > 3 ? " …" : ""})`);
@@ -379,7 +447,7 @@ export function planShopeeCreate(input: {
     item_status: SHOPEE_CREATE_STATUS,
     image: { image_ref_list: refs },
     brand: { brand_id: brand.id, original_brand_name: brand.name },
-    logistic_info: channels.map((l) => ({ logistic_id: l.logistic_id, enabled: true, ...(l.size_id ? { size_id: l.size_id } : {}), ...(l.shipping_fee != null ? { shipping_fee: l.shipping_fee } : {}), ...(l.is_free ? { is_free: true } : {}) })),
+    logistic_info: chosenLog.map((l) => ({ logistic_id: l.id, enabled: true, ...(l.sizeId ? { size_id: l.sizeId } : {}), ...(l.shippingFee != null ? { shipping_fee: l.shippingFee } : {}), ...(l.isFree ? { is_free: true } : {}) })),
     seller_stock: [{ stock: SHOPEE_CREATE_STOCK }],
     item_sku: dims.length ? p.code : (variants[0]?.code ?? p.code),
     condition: "NEW",
@@ -407,8 +475,8 @@ export function planShopeeCreate(input: {
       weight: { kg: weight, src: wSrc },
       box: { ...box, mandatory: boxMandatory },
       dims, variants,
-      attrs: { required, loaded: !!fields, fields: fields ?? [], values: attrVals, fromTemplate },
-      logistics: { channels: channels.map((l) => ({ id: l.logistic_id, name: l.name })), src: logSrc },
+      attrs: { required, loaded: !!fields, fields: fields ?? [], values: attrVals, fromTemplate, sources: attrSources },
+      logistics: { channels: chosenLog.map((l) => ({ id: l.id, name: l.name })), options: logOptions, custom: !!pickedLog, src: logSrc },
       daysToShip, stock: SHOPEE_CREATE_STOCK, status: SHOPEE_CREATE_STATUS,
       missing, warnings, on_shop: onShop, template_item: t?.itemId ?? null, draft_extra: extra,
     },

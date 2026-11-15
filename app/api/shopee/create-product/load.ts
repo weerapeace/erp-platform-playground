@@ -7,10 +7,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { shopeeCategoryRecommend, shopeeErrorText, shopeeGetAttributeTree, shopeeGetCategoryLimit, shopeeGetItemBaseInfo } from "@/lib/shopee";
+import { shopeeCategoryRecommend, shopeeErrorText, shopeeGetAttributeTree, shopeeGetCategoryLimit, shopeeGetChannelList, shopeeGetItemBaseInfo } from "@/lib/shopee";
 import {
-  planShopeeCreate, shopeeAttrFieldsOf, shopeeCategoryIdOf, shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories,
-  type ShopeeCategoryPick, type ShopeeCreatePreview, type ShopeeCreateSku, type ShopeeTemplate,
+  planShopeeCreate, shopeeAttrFieldsOf, shopeeCategoryIdOf, shopeeChannelsOf, shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories,
+  type ShopeeCategoryPick, type ShopeeChannel, type ShopeeCreatePreview, type ShopeeCreateSku, type ShopeeTemplate,
 } from "@/lib/shopee-create-plan";
 import type { TtsAttrField } from "@/lib/tiktok-attrs";
 import { getPlatformId, shopeeTokenOrReason } from "../shared";
@@ -127,7 +127,12 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
   let limitsRaw: Record<string, unknown> | null = null;
   let attrFields: TtsAttrField[] | null = null;
   let template: ShopeeTemplate | null = null;
+  let channels: ShopeeChannel[] | null = null;
   if (token) {
+    const tk = token;
+    // ขนส่งของร้าน (ติ๊กเปิด/ปิดได้ในหน้าดูก่อนส่ง) · แคช 10 นาที · ดึงไม่ได้ = ใช้ของสินค้าแบบอย่างเดียว
+    try { channels = shopeeChannelsOf(await cached(`ch:${tk.shopId}`, () => shopeeGetChannelList(tk.accessToken, tk.shopId))); }
+    catch (e) { console.warn(`[shopee create] ขนส่งของร้านไม่ได้: ${shopeeErrorText(e)}`); }
     const t = token;
     const catId = category?.id ?? null;
     const brandName = p.brand_name ? String(p.brand_name) : "";
@@ -171,7 +176,7 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
       cover_image_r2_key: (s.cover_image_r2_key as string) ?? null, attribute_values: (s.attribute_values as Record<string, unknown>) ?? null,
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
-    draft, category, candidates, galleryKeys: it.images.map((x) => x.key), attrFields, limits: shopeeCreateLimitsOf(limitsRaw), template,
+    draft, category, candidates, galleryKeys: it.images.map((x) => x.key), attrFields, limits: shopeeCreateLimitsOf(limitsRaw), template, channels,
     onShop: exOnShop ? str(exOnShop.external_product_id) : null,
   });
   if (preview.on_shop) blockers.push(`มีบน Shopee แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);

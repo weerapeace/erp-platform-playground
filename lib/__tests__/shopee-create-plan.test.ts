@@ -3,6 +3,7 @@ import {
   planShopeeCreate, shopeeAttrFieldsOf, shopeeAttrPayload, shopeeAttrStateOf, shopeeBrandMatches, shopeeCategoryIdOf, shopeeCreateImageRefs,
   shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories, SHOPEE_CREATE_STOCK,
   shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve,
+  shopeeChannelsOf, shopeeLogisticOptions, isBulkyChannel,
   type ShopeeCategoryPick, type ShopeeCreateParent, type ShopeeCreateSku, type ShopeeTemplate,
 } from "@/lib/shopee-create-plan";
 
@@ -129,6 +130,47 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     const picked = plan({ draft: { ...draft, extra: { shopee_images: ["r2:a", "r2:b"] } } });
     expect(picked.preview.images.refs).toEqual(["r2:a", "r2:b"]);                 // เลือกเอง = ใช้ตามนั้น (ไม่เติม)
     expect(picked.preview.missing.join(" ")).toContain("อย่างน้อย 3 รูป");
+  });
+  test("ขนส่ง: ค่าเริ่มจากสินค้าแบบ · ของใหญ่ปิดไว้ · ร้านปิด = ไม่โชว์ · ต้องเลือกขนาด = เปิดไม่ได้ · เลือกเองในร่าง = ตามนั้น", () => {
+    const ch = shopeeChannelsOf({ response: { logistics_channel_list: [
+      { logistics_channel_id: 70016, logistics_channel_name: "Standard Delivery", enabled: true, fee_type: "SIZE_INPUT", mask_channel_id: 0 },
+      { logistics_channel_id: 70020, logistics_channel_name: "Standard Delivery Bulky", enabled: true, fee_type: "SIZE_INPUT", mask_channel_id: 0 },
+      { logistics_channel_id: 70066, logistics_channel_name: "SPX Express", enabled: true, fee_type: "SIZE_INPUT", mask_channel_id: 0 },
+      { logistics_channel_id: 70099, logistics_channel_name: "Express Delivery", enabled: true, fee_type: "SIZE_SELECTION", mask_channel_id: 0, size_list: [{ size_id: 1, name: "S", default_price: 29 }] },
+      { logistics_channel_id: 79999, logistics_channel_name: "Closed", enabled: false, mask_channel_id: 0 },
+      { logistics_channel_id: 70100, logistics_channel_name: "Flash (child)", enabled: true, mask_channel_id: 70016 },
+    ] } });
+    expect(ch).toHaveLength(6);
+    expect(isBulkyChannel("Standard Delivery Bulky")).toBe(true);
+    const tpl: typeof TEMPLATE = { ...TEMPLATE, logistics: [
+      { logistic_id: 70016, name: "Standard Delivery", enabled: true, estimated_fee: 29 },
+      { logistic_id: 70020, name: "Standard Delivery Bulky", enabled: true, estimated_fee: 100 },
+      { logistic_id: 70066, name: "SPX Express", enabled: true, is_free: true },
+      { logistic_id: 79999, name: "Closed", enabled: true },
+    ] };
+    const opts = shopeeLogisticOptions(tpl, ch, null, 0.35);
+    const byId = Object.fromEntries(opts.map((o) => [o.id, o]));
+    expect(byId[70016]).toMatchObject({ on: true, fee: 29 });
+    expect(byId[70020]).toMatchObject({ on: false, fee: 100 });            // ของใหญ่ปิดไว้ก่อน แม้แบบเปิด
+    expect(byId[70066]).toMatchObject({ on: true, fee: 0 });
+    expect(byId[79999]).toBeUndefined();                                    // ร้านปิด = ไม่โชว์
+    expect(byId[70100]).toBeUndefined();                                    // ช่องลูก = ไม่โชว์
+    expect(byId[70099]).toMatchObject({ on: false, blocked: expect.stringContaining("ขนาดพัสดุ") });
+    const picked = shopeeLogisticOptions(tpl, ch, [70020], 0.35);
+    expect(picked.filter((o) => o.on).map((o) => o.id)).toEqual([70020]);
+    // แผน: เลือกเองในร่าง → logistic_info ตามนั้น · ปิดหมด = ขาด
+    const { payload } = plan({ template: tpl, channels: ch, draft: { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra: { shopee_logistics: [70016, 70020] } } });
+    expect((payload.add_item.logistic_info as { logistic_id: number }[]).map((l) => l.logistic_id).sort()).toEqual([70016, 70020]);
+    const none = plan({ template: tpl, channels: ch, draft: { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra: { shopee_logistics: [79999] } } });
+    expect(none.preview.missing.join(" ")).toContain("เปิดอย่างน้อย 1 ขนส่ง");
+  });
+  test("ช่องของหมวด: บอกที่มาแต่ละช่อง (ร่าง / สินค้าบนร้าน)", () => {
+    const fields = [...FIELDS, { id: "200", name: "ลาย", required: true, multiple: false, customizable: true, numeric: false, options: [] }];
+    const t2 = { ...TEMPLATE, attrs: { ...TEMPLATE.attrs, "200": [{ name: "เรียบ" }] } };
+    const { preview: pv } = plan({ attrFields: fields, template: t2, draft: { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra: { shopee_attrs: { "100134": [{ id: "1165" }] } } } });
+    expect(pv.attrs.sources).toEqual({ "100134": "draft", "200": "template" });
+    expect(pv.attrs.values["200"]).toEqual([{ name: "เรียบ" }]);
+    expect(pv.attrs.fromTemplate).toBe("467297004");
   });
   test("SKU เดียว = ไม่มีชั้น · item_sku = รหัส SKU · ราคา = ของ SKU", () => {
     const { preview: pv, payload } = plan({ skus: [sku("BCG10", { fake_price: null, list_price: 1290 })] });

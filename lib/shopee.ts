@@ -478,6 +478,11 @@ export async function shopeeGetAttributeTree(accessToken: string, shopId: string
   return arr(one?.attribute_tree).map(obj).filter((x): x is Obj => !!x);
 }
 
+/** v2.logistics.get_channel_list — ขนส่งทั้งหมดของร้าน (ดิบ · แปลงด้วย shopeeChannelsOf) */
+export async function shopeeGetChannelList(accessToken: string, shopId: string | number): Promise<Record<string, unknown>> {
+  return shopeeFetch("/api/v2/logistics/get_channel_list", { accessToken, shopId });
+}
+
 /** v2.product.category_recommend → รหัสหมวดที่ Shopee แนะนำจากชื่อสินค้า (เรียงตามที่ Shopee ส่ง) */
 export async function shopeeCategoryRecommend(accessToken: string, shopId: string | number, itemName: string): Promise<string[]> {
   const r = respOf(await shopeeFetch("/api/v2/product/category_recommend", { accessToken, shopId, query: { item_name: itemName.slice(0, 255) } }));
