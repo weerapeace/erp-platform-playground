@@ -224,6 +224,26 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const [fixes, setFixes] = useState<PieceFix[]>([]);
   const [editFix, setEditFix] = useState<{ ci: number; quad: PPt[]; w: number; h: number; name: string; count: number; idx: number | null } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  // กระดานสูงพอดีพื้นที่ที่เหลือในป๊อป (ไม่ต้องเลื่อนลง · เจ้าของเจอ 2026-11-16) — วัดจากกล่องเลื่อนของป๊อปจริง ไม่เดาด้วย vh
+  const [boardEl, setBoardEl] = useState<HTMLDivElement | null>(null);
+  const [boardH, setBoardH] = useState(0);
+  useEffect(() => {
+    if (!boardEl) return;
+    let sp: HTMLElement | null = boardEl.parentElement;
+    while (sp && !/(auto|scroll)/.test(getComputedStyle(sp).overflowY)) sp = sp.parentElement;
+    if (!sp) return;
+    const box = sp;
+    const measure = () => {
+      const top = boardEl.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      const pad = parseFloat(getComputedStyle(box).paddingBottom) || 0;
+      const h = Math.floor(box.clientHeight - top - pad - 2);
+      setBoardH((old) => (Math.abs(old - Math.max(320, h)) < 2 ? old : Math.max(320, h)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure); ro.observe(box);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [boardEl, img]);
   const [pvRot, setPvRot] = useState(0);             // หมุนรูปชิ้นในแผง (ให้อ่านตัวเขียนตรง)
   const [reading, setReading] = useState(false);     // กำลังให้ AI อ่านตัวเขียน
   const [readText, setReadText] = useState<string | null>(null);
@@ -582,7 +602,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
           }), r.seams)} />
         ) : tab === "trace" ? (
           // 2026-11-16 รอบ 4 (เจ้าของขอ): กระดานเต็มป๊อป · เครื่องมือ / ป้ายชิ้น / ซูม / ตั้งค่า / แผงชิ้น ลอยทับรูป (กล่องลอยไม่กินที่ ปล่อยคลิกทะลุช่องว่าง)
-          <div className="relative" data-photo-board>
+          <div ref={setBoardEl} className="relative" data-photo-board>
             {!img && (
               <div className="space-y-2">
                 {fileBtn(t("เลือกรูปแพทเทิร์น", "Choose a pattern photo"), (f) => void pickTrace(f))}
@@ -663,7 +683,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
             )}
             {img && tool === "fix" && editFix && piecePanel}
             {img && (
-                <ZoomBox zoom={zoom} onZoom={setZoom} aspect={img.w / img.h} dragPan wheelZoom padding={0} className="h-[62vh] min-h-[340px] rounded-lg border border-slate-200 bg-slate-100 md:h-[calc(100dvh-190px)]">
+                <ZoomBox zoom={zoom} onZoom={setZoom} aspect={img.w / img.h} dragPan wheelZoom padding={0} className={`rounded-lg border border-slate-200 bg-slate-100 ${boardH ? "" : "h-[60vh]"}`} style={boardH ? { height: boardH } : undefined}>
                 <div className="relative" data-photo-zoom>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img.url} alt="" className="block w-full select-none" draggable={false} />

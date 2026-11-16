@@ -22,8 +22,10 @@ export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 6;
 const clampZoom = (z: number, min = ZOOM_MIN, max = ZOOM_MAX) => Math.round(Math.min(max, Math.max(min, z)) * 100) / 100;
 
-export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, className = "", children, min = ZOOM_MIN, max = ZOOM_MAX, dragPan = false, wheelZoom = false }: {
+export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, className = "", children, min = ZOOM_MIN, max = ZOOM_MAX, dragPan = false, wheelZoom = false, style }: {
   zoom: number;
+  /** สไตล์ของกล่อง (เช่น ความสูงที่วัดได้จริง) */
+  style?: React.CSSProperties;
   /** true = หมุนลูกกลิ้งเฉย ๆ บนกล่องก็ซูม (ไม่ต้องกด Ctrl) — เลื่อนรูปใช้ dragPan / แถบเลื่อนแทน */
   wheelZoom?: boolean;
   /** true = กดลูกกลิ้งค้าง / Space ค้าง แล้วลาก = เลื่อนรูป (เมื่อคลิกซ้ายบนรูปมีหน้าที่อื่น) */
@@ -149,7 +151,7 @@ export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, classN
   return (
     // ⚠ ไม่ใส่ relative เอง — ผู้เรียกมักส่ง absolute inset-0 (relative ของ Tailwind ชนะ absolute → กล่องยุบเหลือสูงเท่าเนื้อหา)
     // 100% = พอดีกล่องอยู่แล้ว → ไม่มีแถบเลื่อน (overflow visible: เมนู/ป้ายบนรูปไม่ถูกตัด) · ซูมเกิน 100% ค่อยเลื่อนได้
-    <div ref={vpRef} className={`${zoom > 1 ? "overflow-auto" : "overflow-visible"} ${className}`}>
+    <div ref={vpRef} style={style} className={`${zoom > 1 ? "overflow-auto" : "overflow-visible"} ${className}`}>
       {/* เล็กกว่ากล่อง = จัดกลาง · ใหญ่กว่า = เลื่อนดูได้ (ความกว้างขั้นต่ำ = กล่อง ด้วย CSS ไม่ใช่ตัวเลขที่วัด → ไม่ล้นเพราะแถบเลื่อน) */}
       <div className="flex items-center justify-center" style={{ minWidth: "100%", minHeight: "100%", width: "max-content", padding }}>
         {box.w > 0 && <div ref={contentRef} style={{ width: contentW }} className="shrink-0">{children}</div>}
