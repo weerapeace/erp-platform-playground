@@ -24,7 +24,8 @@ import { SecurityDevices } from "@/components/security-devices";
 import { ERPModal } from "@/components/modal";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { getTheme, setTheme } from "@/lib/theme";
-import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
+import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, useCanPreviewDevice, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
+import { DevicePreviewModal } from "@/components/device-preview";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
 import { BrowserPushToggle } from "@/components/web-push";
@@ -72,6 +73,8 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
   const pwa = usePwaInstall();                                        // ติดตั้งแอปนี้บนเครื่องที่กำลังใช้อยู่ (แท็บเล็ต/มือถือไม่มีปุ่มที่หัว)
   const [installHint, setInstallHint] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);              // ป๊อปติดตั้งแอป (ของกลาง) — หน้าปกติที่ไม่มีส่วน 📟
+  const [previewOpen, setPreviewOpen] = useState(false);              // ดูหน้านี้แบบมือถือ/แท็บเล็ต (เว็บปกติ · ย้ายมาจากเมนูซ้าย 2026-11-16)
+  const canPreview = useCanPreviewDevice();                           // จอสัมผัส/อยู่ในกรอบแล้ว = ไม่โชว์
   const canDeploy = usePermission("admin.users");                     // นับถอยหลังขึ้นเว็บ (ผู้ดูแลระบบ)
 
   /** แถบข้าง: วางเมนูเหนือการ์ดชื่อ ชิดซ้าย ลอยทับเนื้อหา (ไม่ถูกตัดตามความกว้างแถบข้าง) · สูงไม่เกินจอ เลื่อนในเมนูได้ */
@@ -208,6 +211,12 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
       <MenuSection label={t("อุปกรณ์และแอป", "Devices and app")} />
       {/* ติดตั้งแอปบนเครื่อง — โหมดแอปมีชุดมุมมองอุปกรณ์ด้านล่างแทน */}
       {!device && <InstallAppMenuItem onClick={() => { close(); setInstallOpen(true); }} />}
+      {/* ดูหน้านี้แบบแท็บเล็ต/มือถือ (กรอบจำลอง + QR) — เว็บปกติ · โหมดแอปใช้ "มุมมองอุปกรณ์" ด้านล่างแทน */}
+      {!device && canPreview && (
+        <button type="button" className={ROW} onClick={() => { close(); setPreviewOpen(true); }}>
+          <Icon value="📱" /> {t("ดูหน้านี้แบบแท็บเล็ต / มือถือ", "Preview this page as tablet / phone")}
+        </button>
+      )}
       {/* มุมมองอุปกรณ์ (โหมดแอปเท่านั้น) — ดูแอปนี้แบบแท็บเล็ต/มือถือบนจอคอม (กรอบจำลอง) + QR สแกนเปิดบนเครื่องจริง */}
       {device && (
         <div className="px-3 py-2 border-t border-slate-100">
@@ -288,6 +297,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
       )}
 
       {!device && <InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)} />}
+      {!device && <DevicePreviewModal open={previewOpen} onClose={() => setPreviewOpen(false)} />}
 
       {/* ความปลอดภัย — popup (ไม่ออกจากหน้า) */}
       <ERPModal open={securityOpen} onClose={() => setSecurityOpen(false)} title={t("🔐 ความปลอดภัย — อุปกรณ์ที่เข้าสู่ระบบ", "🔐 Security — signed-in devices")} size="lg" storageKey="security-devices">

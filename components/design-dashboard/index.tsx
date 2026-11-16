@@ -23,7 +23,9 @@ import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-c
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
-import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
+import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
+import { NewSheetFromLibraryModal, useCanSheetFromLibrary } from "@/components/design-library/new-sheet-from-library";
+import { LIB_HREF } from "@/components/design-library/shared";
 import { useStickyHeader } from "@/components/sticky-header";
 import { type ListResponse, type StatusResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard } from "./dashboard-helpers";
 import { BoardCard, GalleryCard } from "./dashboard-cards";
@@ -299,6 +301,13 @@ export function DesignDashboard() {
   const [summaryBuilder, setSummaryBuilder] = useState<{ id: string | null; sheetIds: string[] } | null>(null);
   const [summaryMenuOpen, setSummaryMenuOpen] = useState(false);
   const [summaryReload, setSummaryReload] = useState(0);
+  // ＋ เพิ่มงาน → เลือก "ใบงานเปล่า" (ฟอร์มเดิม) / "จาก Design Library" (เจ้าของขอ 2026-11-16) · ไม่มีสิทธิ์ใช้ Design Library = เปิดฟอร์มเดิมทันทีเหมือนก่อน
+  const canLibrary = usePermission("design_library.view");
+  const canFromLibrary = useCanSheetFromLibrary();
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [fromLibraryOpen, setFromLibraryOpen] = useState(false);
+  const addAnchorRef = useRef<HTMLButtonElement>(null);
+  const openAddJob = () => { if (canFromLibrary) setAddMenuOpen(true); else setCreateOpen(true); };
   const openSummary = (id: string | null, sheetIds: string[] = []) => { setSummaryMenuOpen(false); setMoreOpen(false); setSummaryBuilder({ id, sheetIds }); };
 
   useEffect(() => {
@@ -682,9 +691,8 @@ export function DesignDashboard() {
                 <p className="truncate text-[11px] text-slate-400">{scopeLabel} · {activeJobs} {t("งานเดินอยู่", "active")}{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} {t("ใกล้ครบ", "due soon")}</span></> : null}</p>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef}>
-              <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
-            </div>
+            {/* ตัวสลับจอย้ายไปเมนูโปรไฟล์แล้ว (เจ้าของสั่ง 2026-11-16) — div นี้เหลือไว้เป็นจุดยึดดรอปดาวน์ "สรุปที่บันทึกไว้" */}
+            <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef} />
           </div>
         ) : (
         /* หัวทั้งก้อน sticky แบบเหลือแค่แถบล่าง (ปุ่ม) — ป้าย/คำอธิบายเลื่อนหายไปเอง · ตอนติด: ซ่อนข้อความเดิม (ยังกินที่เท่าเดิม ไม่กระตุก) แล้วโชว์ชื่อหน้าแบบย่อแทน */
@@ -711,9 +719,14 @@ export function DesignDashboard() {
           </div>
           <div ref={sticky.keepRef} className="flex flex-wrap items-center gap-2">
             <BrandSlot theme={brandTheme} id="header_right" className="shrink-0" />
-            {/* สลับรูปแบบจอ (ของกลาง): 🖥️ จอคอม / 📟 แท็บเล็ต / 📱 มือถือ — เลือกแบบเล็กกว่าจอจริงจะได้กรอบพรีวิว + QR สแกนเปิดบนเครื่อง */}
-            <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact={!isDesktop} />
+            {/* ตัวสลับ จอคอม/แท็บเล็ต/มือถือ ย้ายไปเมนูโปรไฟล์แล้ว (เจ้าของสั่ง 2026-11-16) */}
             <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
+            {canLibrary && (
+              <a data-gg-action href={LIB_HREF} title={t("เปิด Design Library — คลังแม่แบบกระเป๋า", "Open Design Library — bag template library")}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50/90 px-3 text-sm font-medium text-indigo-700 shadow-sm hover:bg-indigo-100">
+                <Icon value="📚" /> Design Library
+              </a>
+            )}
             <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
               {t("กลับ Design Sheets", "Back to Design Sheets")}
             </a>
@@ -731,9 +744,9 @@ export function DesignDashboard() {
               </button>
             )}
             <LineInboxButton count={inboxCount.pending} onClick={() => setInboxOpen(true)} />
-            <button data-gg-action="primary" onClick={() => setCreateOpen(true)}
-              className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
-              ＋ {t("เพิ่มงาน", "Add job")}
+            <button ref={addAnchorRef} data-gg-action="primary" onClick={openAddJob} aria-haspopup={canFromLibrary ? "menu" : undefined} aria-expanded={canFromLibrary ? addMenuOpen : undefined}
+              className="inline-flex h-9 items-center gap-1 rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
+              ＋ {t("เพิ่มงาน", "Add job")}{canFromLibrary && <span className="text-[10px] opacity-70">▾</span>}
             </button>
           </div>
         </div>
@@ -895,7 +908,7 @@ export function DesignDashboard() {
         </div>
         {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}
         {isPhone && !pickMode && (
-          <button type="button" onClick={() => setCreateOpen(true)} title={t("เพิ่มงานใหม่", "Add new job")} aria-label={t("เพิ่มงานใหม่", "Add new job")}
+          <button type="button" onClick={openAddJob} title={t("เพิ่มงานใหม่", "Add new job")} aria-label={t("เพิ่มงานใหม่", "Add new job")}
             className="fixed bottom-[76px] right-4 z-[60] flex h-[52px] w-[52px] items-center justify-center rounded-full bg-slate-900 text-2xl leading-none text-white shadow-lg shadow-slate-900/30 active:scale-95">＋</button>
         )}
         {/* มือถือ: แถบล่าง บอร์ด · วันนี้ · ไลน์ · เมนู (เจ้าของเลือกแบบ widget 2026-11-10) — ซ่อนตอนโหมดเลือก (แถบเลือกไว้ N ใบใช้ที่นั้น) */}
@@ -924,6 +937,7 @@ export function DesignDashboard() {
             <button type="button" className={menuItem} onClick={() => { setInboxOpen(true); setMoreOpen(false); }}>
               <Icon name="chat" /> {t("งานจากไลน์", "Jobs from LINE")}{inboxCount.pending > 0 ? ` (${inboxCount.pending})` : ""}
             </button>
+            {canLibrary && <a href={LIB_HREF} className={menuItem}>📚 Design Library</a>}
             <a href="/master/design-sheets" className={menuItem}>📄 {t("กลับ Design Sheets", "Back to Design Sheets")}</a>
             <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 {t("รีเฟรชข้อมูล", "Refresh data")}</button>
             {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 {t("ปรับธีม", "Theme")} {selectedBrand?.name}</button>}
@@ -968,6 +982,26 @@ export function DesignDashboard() {
       <FloatingDropdown anchorRef={moreAnchorRef} open={summaryMenuOpen} onClose={() => setSummaryMenuOpen(false)} minWidth={300} maxWidth={380}>
         <SummaryListMenu reloadKey={summaryReload} onNew={() => { setSummaryMenuOpen(false); startPick("summary"); }} onOpen={(id) => openSummary(id)} />
       </FloatingDropdown>
+      {/* ＋ เพิ่มงาน: เลือกทาง — จอคอม/แท็บเล็ต = ดรอปดาวน์ใต้ปุ่ม · มือถือ = แผ่นเลื่อนจากล่าง */}
+      {(() => {
+        const items = (<>
+          <button type="button" role="menuitem" className={`${menuItem} items-start`} onClick={() => { setAddMenuOpen(false); setCreateOpen(true); }}>
+            <Icon value="i:file" className="mt-0.5 text-slate-500" />
+            <span>{t("ใบงานเปล่า", "Blank job")}<span className="block text-[11px] text-slate-400">{t("กรอกเองตามฟอร์มเดิม", "Fill in the usual form")}</span></span>
+          </button>
+          <button type="button" role="menuitem" className={`${menuItem} items-start`} onClick={() => { setAddMenuOpen(false); setFromLibraryOpen(true); }}>
+            <Icon value="📚" className="mt-0.5" />
+            <span>{t("จาก Design Library", "From Design Library")}<span className="block text-[11px] text-slate-400">{t("เลือกสูตร → ได้ใบงานพร้อมรูป/หมุด/ตารางสี/ตีราคา", "Pick a recipe → job with images, pins, colors, costing")}</span></span>
+          </button>
+        </>);
+        return isPhone
+          ? <BottomSheet open={addMenuOpen} onClose={() => setAddMenuOpen(false)} title={t("เพิ่มงาน", "Add job")} backKey="dd-add"><div className="space-y-0.5 pb-1" role="menu">{items}</div></BottomSheet>
+          : <FloatingDropdown anchorRef={addAnchorRef} open={addMenuOpen} onClose={() => setAddMenuOpen(false)} minWidth={280} maxWidth={320}><div className="p-1" role="menu">{items}</div></FloatingDropdown>;
+      })()}
+      {fromLibraryOpen && (
+        <NewSheetFromLibraryModal open onClose={() => setFromLibraryOpen(false)} defaultBrandId={selectedBrandId}
+          onCreated={(s) => { silentRefresh(); openDetail(s.id); }} />
+      )}
       {summaryBuilder && (
         <DesignSheetSummaryBuilder open summaryId={summaryBuilder.id} initialSheetIds={summaryBuilder.sheetIds}
           onClose={() => setSummaryBuilder(null)} onChanged={() => setSummaryReload((k) => k + 1)} />

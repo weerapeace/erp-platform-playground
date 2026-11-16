@@ -22,7 +22,6 @@ import { PageChromeBar, useChromeHost, useIsDesktopXl, usePageChromeHas } from "
 import { AccountMenu } from "@/components/account-menu";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
-import { DevicePreviewButton } from "@/components/device-preview";
 import { cachedGetJson } from "@/lib/shell-cache";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
@@ -844,10 +843,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
           {/* (เดิม) หมวด "⚙ ตั้งค่า" อัตโนมัติถูกเอาออกแล้ว — ให้เพิ่มเมนูตั้งค่าเองที่ /admin/menu */}
         </nav>
 
-        {/* ดูหน้านี้แบบมือถือ/แท็บเล็ต — ท้ายเมนู เหนือชื่อผู้ใช้ */}
-        <div className="px-2 py-1 border-t border-slate-100">
-          <DevicePreviewButton collapsed={!navExpanded} />
-        </div>
+        {/* "ดูหน้านี้แบบมือถือ/แท็บเล็ต" ย้ายไปเมนูโปรไฟล์แล้ว (AccountMenu · เจ้าของสั่ง 2026-11-16) */}
         <UserSwitcher collapsed={!navExpanded} />
       </aside>
 

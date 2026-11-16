@@ -1,6 +1,7 @@
 /**
  * 📚 Design Library — โหลดข้อมูลครบสำหรับ 1 หน้า (ลดการยิงหลายรอบ)
  * GET ?overview=1          → แม่แบบทั้งหมด + จำนวนสูตร + รูปผลล่าสุด (หน้าคลัง)
+ * GET ?picker=1            → สูตรทุกแม่แบบ (ล่าสุดก่อน) + ปก + ใบงานที่เคยส่ง — ตัวเลือกสูตรของ Design Dashboard
  * GET ?template_id=<uuid>  → แม่แบบ + สูตรทั้งหมด (+ รูปผลล่าสุดต่อสูตร)
  * GET ?recipe_id=<uuid>    → สูตร + แม่แบบ + ตัวเลือกทั้งหมด + รูปผลทุกเวอร์ชัน + สต็อกสดของ SKU ในสูตร + ใบงานที่ส่งไปแล้ว (sheet)
  * GET ?stock_ids=a,b       → สต็อกสด + ข้อมูลวัสดุ (หน่วย/หน้าผ้า ไม่มีราคา) ของ SKU ที่เพิ่งเลือก (ยังไม่บันทึก)
@@ -61,6 +62,39 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const count = new Map<string, number>();
     for (const r of (recs ?? []) as { template_id: string }[]) count.set(r.template_id, (count.get(r.template_id) ?? 0) + 1);
     return NextResponse.json({ data: (tpls ?? []).map((t) => ({ ...t, recipe_count: count.get(t.id as string) ?? 0 })), error: null });
+  }
+
+  // ตัวเลือกสูตร (หน้า Design Dashboard → เพิ่มงาน → จาก Design Library): สูตรทุกแม่แบบ + ปก + ใบงานที่เคยส่ง
+  if (sp.get("picker")) {
+    const [{ data: tpls, error: te }, { data: recs, error: re }] = await Promise.all([
+      admin.from("design_library_templates").select("id, code, name, image_key, category").is("deleted_at", null).eq("is_active", true),
+      admin.from("design_library_recipes").select("id, template_id, seq, name, spec, design_sheet_id, updated_at").is("deleted_at", null).eq("is_active", true).order("updated_at", { ascending: false }),
+    ]);
+    if (te || re) return fail("โหลดสูตรไม่สำเร็จ กรุณาลองใหม่");
+    const tplById = new Map((tpls ?? []).map((t) => [t.id as string, t]));
+    const live = (recs ?? []).filter((r) => tplById.has(r.template_id as string));
+    const ids = live.map((r) => r.id as string);
+    const sheetIds = [...new Set(live.map((r) => r.design_sheet_id as string | null).filter(Boolean) as string[])];
+    const [{ data: rnd }, { data: sheets }] = await Promise.all([
+      ids.length ? admin.from("design_library_renders").select("recipe_id, image_key, created_at, colorway_id, is_starred").in("recipe_id", ids).eq("is_active", true) : Promise.resolve({ data: [] }),
+      sheetIds.length ? admin.from("design_sheets").select("id, code, name, is_active").in("id", sheetIds) : Promise.resolve({ data: [] }),
+    ]);
+    const cover = latestByRecipe((rnd ?? []) as Render[]);
+    const renderCount = new Map<string, number>();
+    for (const r of (rnd ?? []) as Render[]) renderCount.set(r.recipe_id, (renderCount.get(r.recipe_id) ?? 0) + 1);
+    const sheetById = new Map(((sheets ?? []) as { id: string; code: string; name: string; is_active: boolean | null }[]).map((s) => [s.id, s]));
+    const data = live.map((r) => {
+      const t = tplById.get(r.template_id as string)!;
+      const spec = cleanSpec(r.spec);
+      return {
+        id: r.id, seq: r.seq, name: r.name, updated_at: r.updated_at,
+        template: { id: t.id, code: t.code, name: t.name, image_key: t.image_key, category: t.category },
+        cover_key: cover.get(r.id as string) ?? null, pin_count: spec.pins.length,
+        colorway_count: spec.colorways.length + 1, render_count: renderCount.get(r.id as string) ?? 0,
+        sheet: r.design_sheet_id ? sheetById.get(r.design_sheet_id as string) ?? null : null,
+      };
+    });
+    return NextResponse.json({ data, error: null });
   }
 
   const templateId = sp.get("template_id");

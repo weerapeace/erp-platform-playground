@@ -18,7 +18,7 @@ export const sheetHref = (id: string) => `/master/design-sheets?open=${id}`;
 
 type Include = { images: boolean; spec: boolean; colors: boolean; cost: boolean };
 
-export function SendToSheetModal({ open, onClose, recipeId, defaultName, linked, colorwayId, colorwayName, colorwayCount, renderCount, canCost, onSent }: {
+export function SendToSheetModal({ open, onClose, recipeId, defaultName, linked, colorwayId, colorwayName, colorwayCount, renderCount, canCost, onSent, defaultBrandId }: {
   open: boolean; onClose: () => void;
   recipeId: string; defaultName: string;
   /** ใบงานที่สูตรนี้ส่งไปแล้ว (null = ยังไม่เคย) */
@@ -27,6 +27,8 @@ export function SendToSheetModal({ open, onClose, recipeId, defaultName, linked,
   colorwayId: string | null; colorwayName: string | null; colorwayCount: number; renderCount: number;
   canCost: boolean;
   onSent: (sheet: LinkedSheet) => void;
+  /** แบรนด์ตั้งต้นของใบใหม่ (Design Dashboard ส่งแบรนด์ที่กรองอยู่มา) */
+  defaultBrandId?: string | null;
 }) {
   const toast = useToast();
   const [mode, setMode] = useState<"new" | "linked" | "other">("new");
@@ -40,8 +42,8 @@ export function SendToSheetModal({ open, onClose, recipeId, defaultName, linked,
 
   useEffect(() => {
     if (!open) return;
-    setMode(linked ? "linked" : "new"); setName(defaultName); setOther(null); setInc({ images: true, spec: true, colors: true, cost: true });
-  }, [open, linked, defaultName]);
+    setMode(linked ? "linked" : "new"); setName(defaultName); setBrandId(defaultBrandId ?? ""); setOther(null); setInc({ images: true, spec: true, colors: true, cost: true });
+  }, [open, linked, defaultName, defaultBrandId]);
   useEffect(() => {
     if (!open || brands.length) return;
     let alive = true;
