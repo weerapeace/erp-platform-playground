@@ -132,6 +132,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   // "ไม่อยู่ในบิล": ต่อบิล → กลุ่ม PO → รอรอบหน้า (ค่าเริ่ม) / ปิดยอด · ขอบเขต PO เดียวกับบิล / ทั้งร้าน
   const [missAct, setMissAct] = useState<Record<string, Record<string, "wait" | "close">>>({});
   const [missScope, setMissScope] = useState<Record<string, "bill" | "shop">>({});
+  // ★ 2026-11-16 เจ้าของ: "อยากให้ติ๊กเลือกได้ด้วย เพราะบางทีในบิลยังไม่ส่ง" → แบบ B: ติ๊กหลายรายการ แล้วกด รอรอบหน้า / ปิดยอด ทีเดียว
+  const [missSel, setMissSel] = useState<Record<string, string[]>>({});
   const [poPlan, setPoPlan] = useState<PoPlan | null>(null);
   // ป๊อปเลือกจับคู่เอง 3 แท็บ: PO ร้านนี้ / PO ร้านอื่น / สินค้าทั้งหมด
   const [pickTab, setPickTab] = useState<PickTab>("this");
@@ -589,6 +591,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
             const exOpen = extraOpen[b.id] ?? closeN > 0;
             const billThb = thb ? lines.reduce((a, l) => a + (l.decision === "skip" ? 0 : rowThb(l)?.total_thb ?? 0), 0) : 0;
             const T = billTotals(lines, b.total_amount, sumNow);   // ★ 2026-11-16 แถวรวมท้ายบิล
+            // ★ 2026-11-16 ของที่ร้านยังไม่ส่ง (ไม่อยู่ในบิล · รอบเดียวกับบิล) — ป้าย "รอของ" (ข้อ 3) + บรรทัดในแถวรวม (ข้อ 1)
+            const missBill = missingGroups(expandAllocRows(lines).parts, groups, "bill");
+            const waitN = missBill.filter((g) => (missAct[b.id]?.[g.key] ?? "wait") === "wait").length;
+            const missValue = missBill.reduce((a, g) => a + pendingReceiveOf(g) * (Number(g.unit_price) || 0), 0);
             return (
               <div key={b.id} className="border border-slate-200 rounded-lg overflow-hidden">
                 <div className="flex items-start gap-3 px-3 py-2 bg-slate-50 flex-wrap">
@@ -600,6 +606,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                       {(() => { const n = lines.filter((x) => (x.voucher_line_ids ?? []).length > 0 || x.decision === "skip").length; return (
                         <span className={`ml-2 ${n === lines.length && lines.length ? CHIP_OK : n ? CHIP_NEU : CHIP_WARN}`}>{n === lines.length && lines.length ? "ลงใบครบแล้ว" : n ? `ลงใบแล้ว ${n}/${lines.length}` : "ยังไม่ได้ลงใบ"}</span>
                       ); })()}
+                      {waitN > 0 && <button type="button" onClick={() => setExtraOpen((m) => ({ ...m, [b.id]: true }))} title="ของที่สั่งรอบเดียวกับบิลนี้ แต่ร้านยังไม่ส่ง — กดเพื่อดูรายการ" className={`ml-1.5 ${CHIP_WARN} hover:bg-amber-100`}>รอของ {waitN} รายการ</button>}
                     </div>
                     <div className="text-[11px] text-slate-500 mt-0.5">ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
                     {/* ★ 2026-11-15 ป้ายหัวบิล — โชว์เฉพาะที่ต้องดู (เดิม: อ่านได้ n แถว · ค้นใน PO n รายการ · ส่วนลดรวม … ตาลาย)
@@ -828,7 +835,13 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                   <div className={`${GRID} items-center px-3 py-1.5 border-t border-slate-300 bg-slate-50 text-slate-800`}>
                     <span className="max-md:hidden" />
                     <span className="min-w-0 text-xs font-semibold max-md:basis-full">รวมบิลนี้ {T.rows} แถว{T.skipped > 0 && <span className="font-normal text-slate-400"> (ข้าม {T.skipped})</span>}<BillCheckBadge c={T.check} skipped={T.skipped} />
-                      {(() => { const n = lines.filter((l) => l.decision !== "skip" && !(l.voucher_line_ids ?? []).length).length; return thb && n > 0 ? <span className="ml-1.5 text-[11px] font-normal text-slate-500" title="ยอด ฿ นับเฉพาะแถวที่ลงใบแล้ว">· ยังไม่ลงใบ {n} แถว (฿ ยังไม่นับ)</span> : null; })()}</span>
+                      {(() => { const n = lines.filter((l) => l.decision !== "skip" && !(l.voucher_line_ids ?? []).length).length; return thb && n > 0 ? <span className="ml-1.5 text-[11px] font-normal text-slate-500" title="ยอด ฿ นับเฉพาะแถวที่ลงใบแล้ว">· ยังไม่ลงใบ {n} แถว (฿ ยังไม่นับ)</span> : null; })()}
+                      {missBill.length > 0 && (
+                        <button type="button" onClick={() => setExtraOpen((m) => ({ ...m, [b.id]: true }))} title="ของที่สั่งรอบเดียวกับบิลนี้ แต่บิลนี้ไม่มี — กดเพื่อดู/ติ๊กเลือก"
+                          className="block text-left text-[11px] font-normal text-amber-700 hover:underline">
+                          ร้านยังไม่ส่ง {missBill.length} รายการ{missValue > 0 ? ` ≈ ¥${n2(missValue)} (ราคา PO)` : ""}{missBill.length - waitN > 0 ? ` · ปิดยอด ${missBill.length - waitN}` : ""} — ไม่นับในยอดบิลนี้
+                        </button>
+                      )}</span>
                     <span className="text-right text-xs font-semibold tabular-nums whitespace-nowrap" title="จำนวนรวม — ไม่นับค่าใช้จ่ายและแถวที่ข้าม · หน่วยต่างกันไม่บวกรวมกัน">{billQtyText(T.qty)}</span>
                     <span className="max-md:hidden" />
                     <span className={`text-right text-xs tabular-nums text-red-500 ${T.discount > 0 ? "" : "max-md:hidden"}`}>{T.discount > 0 ? `−${n2(T.discount)}` : ""}</span>
@@ -866,25 +879,46 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                   if (miss.length === 0 && shopCount === 0) return null;
                   const acts = missAct[b.id] ?? {};
                   const setAct = (key: string, a: "wait" | "close") => setMissAct((m) => ({ ...m, [b.id]: { ...(m[b.id] ?? {}), [key]: a } }));
+                  // ★ 2026-11-16 ติ๊กเลือก (แบบ B) — เลือกทั้งหมด (ข้อ 2) · กด รอรอบหน้า / ปิดยอด ให้ทุกรายการที่ติ๊กทีเดียว
+                  const sel = new Set((missSel[b.id] ?? []).filter((k) => miss.some((g) => g.key === k)));
+                  const setSel = (keys: string[]) => setMissSel((m) => ({ ...m, [b.id]: keys }));
+                  const toggleSel = (key: string) => setSel(sel.has(key) ? [...sel].filter((k) => k !== key) : [...sel, key]);
+                  const allSel = miss.length > 0 && miss.every((g) => sel.has(g.key));
+                  const applySel = (a: "wait" | "close") => { setMissAct((m) => { const cur = { ...(m[b.id] ?? {}) }; for (const k of sel) cur[k] = a; return { ...m, [b.id]: cur }; }); setSel([]); };
+                  const waitHere = miss.filter((g) => (acts[g.key] ?? "wait") === "wait").length;
+                  const valueHere = miss.reduce((s2, g) => s2 + pendingReceiveOf(g) * (Number(g.unit_price) || 0), 0);
                   return (
                     <div className="border-t border-slate-200">
                       <div className="flex items-center gap-2 flex-wrap px-3 py-2 bg-amber-50/40">
+                        {!ro && miss.length > 0 && <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? [] : miss.map((g) => g.key))} title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด" className="w-4 h-4 accent-slate-700" />}
                         <span className="text-xs font-semibold text-slate-700">ไม่อยู่ในบิล</span>
-                        <span className="text-[11px] text-slate-500">{scope === "bill" ? "ของที่สั่งรอบเดียวกับบิลนี้ (PO เดียวกัน + PO ที่สั่งวันเดียวกัน) ที่ร้านยังไม่ส่ง" : "ของค้างรับทั้งร้าน ที่บิลนี้ไม่มี"} ({miss.length})</span>
-                        <button type="button" onClick={() => setMissScope((m) => ({ ...m, [b.id]: scope === "bill" ? "shop" : "bill" }))} className="text-[11px] text-blue-600 hover:underline">{scope === "bill" ? `แสดงทั้งร้าน (${shopCount})` : "เฉพาะรอบเดียวกับบิล"}</button>
-                        {!readonly && miss.length > 0 && <button type="button" onClick={() => setMissAct((m) => ({ ...m, [b.id]: {} }))} className="ml-auto text-[11px] text-slate-500 hover:text-slate-700">ทั้งหมด = รอรอบหน้า</button>}
+                        <span className="text-[11px] text-slate-500">{scope === "bill" ? "ของที่สั่งรอบเดียวกับบิลนี้ (PO เดียวกัน + PO ที่สั่งวันเดียวกัน) ที่ร้านยังไม่ส่ง" : "ของค้างรับทั้งร้าน ที่บิลนี้ไม่มี"} ({miss.length}){valueHere > 0 ? ` ≈ ¥${n2(valueHere)}` : ""} · รอรอบหน้า {waitHere}{miss.length - waitHere > 0 ? ` · ปิดยอด ${miss.length - waitHere}` : ""}</span>
+                        <button type="button" onClick={() => { setMissScope((m) => ({ ...m, [b.id]: scope === "bill" ? "shop" : "bill" })); setSel([]); }} className="text-[11px] text-blue-600 hover:underline">{scope === "bill" ? `แสดงทั้งร้าน (${shopCount})` : "เฉพาะรอบเดียวกับบิล"}</button>
                       </div>
+                      {!ro && sel.size > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap px-3 py-1.5 bg-slate-800 text-white text-xs">
+                          <span className="font-medium">เลือก {sel.size} รายการ</span>
+                          <button type="button" onClick={() => applySel("wait")} title="คงค้างรับเหมือนเดิม รอร้านส่งรอบหน้า" className="h-7 px-2.5 rounded-md bg-white text-slate-800 hover:bg-slate-100">รอรอบหน้า</button>
+                          <button type="button" onClick={() => applySel("close")} title="ของไม่มาแล้ว — ปิดยอดบรรทัดเหล่านี้ในใบสั่งซื้อ (ทำตอนกด ยืนยัน + ออกเลข)" className="h-7 px-2.5 rounded-md bg-red-600 text-white hover:bg-red-700">ปิดยอด</button>
+                          <button type="button" onClick={() => setSel([])} className="ml-auto h-7 px-2 rounded-md text-slate-300 hover:text-white">ล้างที่เลือก</button>
+                        </div>
+                      )}
                       {miss.length === 0 ? <div className="px-3 py-2 text-[11px] text-slate-400">— บิลนี้มีครบทุกรายการใน PO เดียวกัน —</div> : (
                         <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
                           {miss.map((g) => {
                             const a = acts[g.key] ?? "wait";
+                            const on = sel.has(g.key);
                             return (
-                              <div key={g.key} className={`flex items-center gap-2 px-3 py-1.5 text-xs ${a === "close" ? "bg-red-50/40" : ""}`}>
+                              <div key={g.key} className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-xs ${on ? "bg-blue-50" : a === "close" ? "bg-red-50/40" : ""}`}>
+                                {!ro && <input type="checkbox" checked={on} onChange={() => toggleSel(g.key)} aria-label={`เลือก ${g.item_name}`} className="w-4 h-4 shrink-0 accent-slate-700" />}
                                 {g.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-7 h-7 rounded object-cover border border-slate-100 shrink-0" /> : <span className="w-7 h-7 rounded bg-slate-50 border border-slate-100 shrink-0" />}
-                                <span className="font-mono text-[11px] text-slate-500 w-28 shrink-0 truncate">{g.code || "—"}</span>
-                                <span className="flex-1 min-w-0 truncate text-slate-800" title={g.item_name}>{g.item_name}</span>
-                                <span className="text-[11px] text-slate-500 shrink-0">{g.po_no} · ค้างรับ {n2(pendingReceiveOf(g))} {g.uom ?? ""}</span>
-                                <div className="inline-flex rounded-md border border-slate-200 overflow-hidden shrink-0">
+                                <span className="font-mono text-[11px] text-slate-500 w-28 shrink-0 truncate max-md:hidden">{g.code || "—"}</span>
+                                <span className="flex-1 min-w-0 max-md:min-w-[calc(100%-4.5rem)]" onClick={!ro ? () => toggleSel(g.key) : undefined}>
+                                  <span className="block truncate text-slate-800" title={g.item_name}>{g.item_name}</span>
+                                  <span className="md:hidden block truncate text-[11px] text-slate-500">{g.code || "—"} · {g.po_no} · ค้างรับ {n2(pendingReceiveOf(g))} {g.uom ?? ""}</span>
+                                </span>
+                                <span className="text-[11px] text-slate-500 shrink-0 max-md:hidden">{g.po_no} · ค้างรับ {n2(pendingReceiveOf(g))} {g.uom ?? ""}</span>
+                                <div className="inline-flex rounded-md border border-slate-200 overflow-hidden shrink-0 max-md:ml-auto">
                                   <button type="button" disabled={ro} onClick={() => setAct(g.key, "wait")} title="คงค้างรับเหมือนเดิม รอร้านส่งรอบหน้า"
                                     className={`h-6 px-2 text-[11px] ${a === "wait" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-60`}>รอรอบหน้า</button>
                                   <button type="button" disabled={ro} onClick={() => setAct(g.key, "close")} title="ของไม่มาแล้ว — ปิดยอดบรรทัดนี้ในใบสั่งซื้อ (หน้าขอซื้อ/ใบสั่งผลิตจะกลับเป็น ต้องซื้อ) · ทำตอนกดใส่ลงใบ"

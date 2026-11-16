@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { prefillFromGrs, createManualVoucher } from "@/lib/purchase-voucher-server";
+import { countWaitingByVoucher, poLineWaiting, OPEN_PO_STATUS_FOR_WAIT, type WaitPoLine, type WaitVoucherLine } from "@/lib/voucher-waiting";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -70,17 +71,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rows = (vs ?? []) as Row[];
   const ids = rows.map((v) => String(v.id));
   const cnt = new Map<string, number>(); const grNos = new Map<string, Set<string>>(); const poNos = new Map<string, Set<string>>();
+  const waitLines: WaitVoucherLine[] = [];   // ★ 2026-11-16 ไว้นับ "รอของ"
   for (let i = 0; i < ids.length; i += 300) {
-    const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("voucher_id, gr_no, po_no").in("voucher_id", ids.slice(i, i + 300)).not("is_active", "is", false);
+    const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("voucher_id, gr_no, po_no, po_id").in("voucher_id", ids.slice(i, i + 300)).not("is_active", "is", false);
     for (const l of (ls ?? []) as Row[]) {
+      if (l.po_id) waitLines.push({ voucher_id: String(l.voucher_id), po_id: String(l.po_id) });
       const k = String(l.voucher_id); cnt.set(k, (cnt.get(k) ?? 0) + 1);
       if (l.gr_no) (grNos.get(k) ?? grNos.set(k, new Set()).get(k)!).add(String(l.gr_no));
       if (l.po_no) (poNos.get(k) ?? poNos.set(k, new Set()).get(k)!).add(String(l.po_no));
     }
   }
+  // ★ 2026-11-16 "รอของ" (lib/voucher-waiting) — ของใน PO ของใบนั้นที่ร้านยังไม่ส่ง · ใบที่ยกเลิกไม่นับ · พังเงียบ = ไม่โชว์ป้าย (ไม่ล้มรายการ)
+  let waiting = new Map<string, number>();
+  try { waiting = await waitingCounts(admin, waitLines.filter((l) => rows.some((v) => String(v.id) === l.voucher_id && v.status !== "cancelled"))); }
+  catch (e) { console.warn("[pv-waiting]", (e as Error).message); }
   const data = rows.map((v) => ({
     ...v, line_count: cnt.get(String(v.id)) ?? 0,
     gr_nos: [...(grNos.get(String(v.id)) ?? [])], po_nos: [...(poNos.get(String(v.id)) ?? [])],
+    waiting_count: waiting.get(String(v.id)) ?? 0,
   }));
   return NextResponse.json({ data, error: null });
 }
@@ -113,4 +121,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (e) {
     return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 400 });
   }
+}
+
+/** ★ 2026-11-16 นับ "รอของ" ต่อใบ — PO ที่ใบอ้างถึง (ยังเปิด) → บรรทัดที่ยังไม่รับครบ/ไม่ปิด → ตัดบรรทัดที่อยู่ในใบสำคัญที่ยังไม่ยกเลิกออก */
+async function waitingCounts(admin: ReturnType<typeof supabaseAdmin>, vLines: WaitVoucherLine[]): Promise<Map<string, number>> {
+  const poIds = [...new Set(vLines.map((l) => l.po_id).filter((x): x is string => !!x))];
+  if (!poIds.length) return new Map();
+  const openPo = new Set<string>();
+  for (let i = 0; i < poIds.length; i += 200) {
+    const { data } = await admin.from("purchase_orders_v2").select("id, status").in("id", poIds.slice(i, i + 200)).not("is_active", "is", false);
+    for (const p of (data ?? []) as Row[]) if (OPEN_PO_STATUS_FOR_WAIT.includes(String(p.status ?? ""))) openPo.add(String(p.id));
+  }
+  if (!openPo.size) return new Map();
+  const poLines: WaitPoLine[] = [];
+  const openIds = [...openPo];
+  for (let i = 0; i < openIds.length; i += 100) {
+    const { data } = await admin.from("purchase_order_lines_v2").select("id, po_id, qty, qty_received, line_status, is_active").in("po_id", openIds.slice(i, i + 100)).limit(5000);
+    poLines.push(...((data ?? []) as WaitPoLine[]));
+  }
+  // บรรทัดที่ยังรอ (ก่อนดูใบสำคัญ) → ดูว่าอยู่ในใบสำคัญใบไหนแล้วบ้าง
+  const candidates = poLines.filter((p) => poLineWaiting(p, new Set())).map((p) => p.id);
+  const billed = new Set<string>();
+  const vRows: Row[] = [];
+  for (let i = 0; i < candidates.length; i += 200) {
+    const { data } = await admin.from("purchase_voucher_lines_v2").select("po_line_id, voucher_id").in("po_line_id", candidates.slice(i, i + 200)).not("is_active", "is", false);
+    vRows.push(...((data ?? []) as Row[]));
+  }
+  const vIds = [...new Set(vRows.map((r) => String(r.voucher_id)))];
+  const alive = new Set<string>();
+  for (let i = 0; i < vIds.length; i += 200) {
+    const { data } = await admin.from("purchase_vouchers_v2").select("id, status, is_active").in("id", vIds.slice(i, i + 200));
+    for (const v of (data ?? []) as Row[]) if (v.is_active !== false && v.status !== "cancelled") alive.add(String(v.id));
+  }
+  for (const r of vRows) if (alive.has(String(r.voucher_id))) billed.add(String(r.po_line_id));
+  return countWaitingByVoucher(vLines, poLines, billed, openPo);
 }

@@ -28,7 +28,7 @@ import { checkDraftMerge, mixedCurrencyShops, planVoucherGroups, type VoucherPla
 import { BulkActionBar } from "@/components/bulk-action-bar";
 
 type PendingGr = { id: string; gr_no: string; po_id: string | null; po_no: string; seller_name: string; receive_date: string | null; receiver: string; line_count: number; currency: string; receipt_batch_no: string | null; is_backfill: boolean };
-type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string };
+type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string; waiting_count?: number };
 
 const STATUS_BADGE: Record<string, { text: string; cls: string }> = {
   draft: { text: "ร่าง", cls: "bg-slate-100 text-slate-600 border-slate-200" },
@@ -247,7 +247,13 @@ export default function PurchaseVouchersPage() {
 
   const voucherCols = useMemo<MiniColumn<VoucherRow>[]>(() => [
     { key: "pv", header: "เลขที่", width: "9rem", sortValue: (v) => v.pv_no ?? "", cell: (v) => v.pv_no ? <span className="font-mono text-sm font-semibold text-slate-800">{v.pv_no}</span> : <span className="text-xs text-slate-400">— ร่าง —</span> },
-    { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (v) => v.status, cell: (v) => { const b = STATUS_BADGE[v.status] ?? { text: v.status, cls: "bg-slate-100 text-slate-500 border-slate-200" }; return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>; } },
+    { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (v) => v.status, cell: (v) => { const b = STATUS_BADGE[v.status] ?? { text: v.status, cls: "bg-slate-100 text-slate-500 border-slate-200" }; return (
+      <span className="inline-flex flex-col items-center gap-0.5">
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
+        {/* ★ 2026-11-16 รอของ (lib/voucher-waiting) — ของในใบสั่งซื้อของใบนี้ที่ร้านยังไม่ส่ง */}
+        {(v.waiting_count ?? 0) > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200 whitespace-nowrap" title="ของที่สั่งในใบสั่งซื้อของใบนี้ แต่ร้านยังไม่ส่ง (ยังไม่อยู่ในใบสำคัญใบไหน)">รอของ {v.waiting_count}</span>}
+      </span>
+    ); } },
     { key: "seller", header: "ร้าน", width: "1.5fr", sortValue: (v) => v.seller_name ?? "", cell: (v) => <span className="block truncate" title={v.seller_name ?? ""}>🏪 {v.seller_name ?? "—"}</span> },
     { key: "date", header: "วันที่", width: "7rem", align: "center", sortValue: (v) => v.voucher_date, cell: (v) => <span className="text-xs text-slate-500">{formatDate(v.voucher_date)}</span> },
     { key: "refs", header: "ใบรับ / PO", width: "1.2fr", cell: (v) => <span className="text-[11px] text-slate-500 truncate block" title={[...v.gr_nos, ...v.po_nos].join(", ")}>{v.gr_nos.length === 0 && v.po_nos.length === 0 ? <span className="text-slate-300">สร้างเอง (ไม่มีใบรับ)</span> : <>{v.gr_nos.join(", ")}{v.po_nos.length ? ` · ${v.po_nos.join(", ")}` : ""}</>}</span> },
