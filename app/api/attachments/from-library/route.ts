@@ -35,7 +35,10 @@ export async function POST(request: NextRequest) {
 
   const db = supabaseFromRequest(request);
   let attached = 0;
-  for (const a of (assets ?? []) as { id: string; r2_key: string; file_name: string; content_type: string | null; size_bytes: number | null }[]) {
+  // แนบตามลำดับที่ส่งมา (รูปแรก = ปกของใบงาน · DB คืนแถวไม่เรียงตาม asset_ids)
+  const order = new Map(ids.map((id, i) => [id, i]));
+  const ordered = [...(assets ?? [])].sort((x, y) => (order.get((x as { id: string }).id) ?? 0) - (order.get((y as { id: string }).id) ?? 0));
+  for (const a of ordered as { id: string; r2_key: string; file_name: string; content_type: string | null; size_bytes: number | null }[]) {
     const publicUrl = `/api/r2-image?key=${encodeURIComponent(a.r2_key)}`;
     const { error: addErr } = await db.rpc("erp_playground_attachments_add", {
       p_entity_type: entityType, p_entity_id: entityId,

@@ -37,6 +37,14 @@ import { DesignSheetPickerModal } from "@/components/design-sheet-picker";
 - ข้อมูลชุดเดียวกับหน้า Design Dashboard: `GET /api/design-sheets?limit=500` (ใบที่ยังไม่เก็บเข้ากรุ) + `GET /api/design-sheets/statuses` (ชื่อ/สีสถานะ)
 - อ่านต้องมี `products.view` (ด่านเดียวกับ Design Dashboard) · ตัวเลือกไม่เขียนข้อมูลเอง — ที่ที่เอาไปใช้บันทึก/ลงประวัติเอง
 
+## สร้างใบงานใหม่จากรูป (prop `createNew` · 2026-11-16)
+
+- ส่ง `createNew={{ assetIds, imageUrls, brandId, name, imagesLabel, onCreated }}` → บนสุดของป๊อปมีปุ่ม "＋ สร้างใบงานใหม่จาก N รูปนี้"
+- กดแล้วเปิด **ฟอร์มเดิมของ ＋ เพิ่มงาน → ใบงานเปล่า** (`DesignSheetsDetail` createMode) — ไม่มีฟอร์มที่ 2 · แบรนด์/ชื่อตั้งต้นตามที่ส่งมา
+- กดบันทึก → POST /api/design-sheets (ออกเลข DS + audit create) → แนบรูปจากคลังด้วย /api/attachments/from-library ตามลำดับ (รูปแรก = ปก · DB เช็ก attachments.upload + audit เอง)
+- ใบใหม่ค้างเปิดให้ดูต่อ · ปิดแล้วเรียก `onCreated` + ปิดป๊อปเลือก · ยังไม่บันทึกแล้วปิด = กลับมาป๊อปเลือก
+- ใช้ที่: หน้า SAMPLE Images
+
 ## ข้อจำกัด
 
 - โหลดสูงสุด 500 ใบที่ยังไม่เก็บเข้ากรุ (ตอนทำมี 87 ใบ) แล้วค้นในเครื่อง — ใบในกรุเลือกไม่ได้

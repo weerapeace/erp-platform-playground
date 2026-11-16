@@ -618,6 +618,12 @@ export function SampleImagesPage() {
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}
         initialBrand={albumBrand?.name ?? null}
+        createNew={canMove && selected.length ? {   // ＋ สร้างใบงานใหม่จากรูปที่เลือก (เจ้าของขอ 2026-11-16) · ชื่อตั้งต้น = ชื่ออัลบั้ม · แบรนด์ = แบรนด์อัลบั้ม
+          assetIds: selected.map((p) => p.id), imageUrls: selected.map((p) => imgUrl(p.r2_key, 240)), brandId: albumBrand?.id ?? null,
+          name: album ? (isDayAlbum(album) && !album.display_name?.trim() ? album.name : albumCardLabel(album)) : null,
+          imagesLabel: t(`รูปจาก SAMPLE Images ${selected.length} รูป — แนบให้ตอนกดบันทึก (รูปแรก = ปก)`, `${selected.length} SAMPLE image(s) — attached when you save (first = cover)`),
+          onCreated: async () => { setSel(new Set()); await reload(); },
+        } : null}
         title={t(`ส่ง ${selected.length} รูปไปใบงานไหน?`, `Send ${selected.length} image(s) to which sheet?`)}
         confirmText={t(`ส่ง ${selected.length} รูป`, `Send ${selected.length}`)}
         head={(

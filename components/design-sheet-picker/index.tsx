@@ -11,11 +11,14 @@
 // ใช้:      <DesignSheetPickerModal open onClose={…} title="ย้าย 3 รูปไปใบงานไหน?" confirmText="ย้าย 3 รูป"
 //             onConfirm={async (sheet) => { … }} head={<รูปที่จะย้าย/>} />
 // ใช้เมื่อ:  ต้องให้ผู้ใช้ชี้ใบงานออกแบบ 1 ใบ (เช่น หน้า SAMPLE Images ย้ายรูปเข้าใบงาน)
+// createNew (ไม่บังคับ) = ปุ่ม "＋ สร้างใบงานใหม่จาก N รูปนี้" บนสุด → เปิดฟอร์มเดิมของ "＋ เพิ่มงาน → ใบงานเปล่า" (DesignSheetsDetail createMode)
+//           แบรนด์/ชื่อตั้งต้นตามที่ส่งมา · บันทึกแล้วแนบรูปจากคลังตามลำดับ (รูปแรก = ปก) · ใบใหม่ค้างเปิดให้ดูต่อ · ปิดแล้วเรียก onCreated (เจ้าของขอ 2026-11-16)
 // ห้ามใช้:  เลือกหลายใบพร้อมกัน → SearchMultiPick (เช่นกระดานแคมเปญ) · เปิดดู/แก้ใบงาน → DesignSheetsDetail
 // สิทธิ์: อ่านรายการต้องมี products.view (ด่านเดียวกับ Design Dashboard) · doc: docs/design-sheet-picker.md
 // ============================================================
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
@@ -27,6 +30,22 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";
 import { UNKNOWN_STATUS_CLS, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
+
+// ฟอร์มสร้างใบงาน = ของเดิมใน Design Dashboard (โหลดเฉพาะตอนกดสร้าง ไม่ถ่วงป๊อปเลือก)
+const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
+
+/** สร้างใบงานใหม่จากรูปในคลังกลาง (asset id ตามลำดับ · รูปแรก = ปก) */
+export type DesignSheetCreateNew = {
+  assetIds: string[];
+  /** รูปย่อที่โชว์ในฟอร์ม (ลำดับเดียวกับ assetIds) */
+  imageUrls?: string[];
+  brandId?: string | null;
+  name?: string | null;
+  /** ข้อความแถบรูปในฟอร์ม เช่น "รูปจาก SAMPLE Images 3 รูป — แนบให้ตอนกดบันทึก" */
+  imagesLabel?: string | null;
+  /** เรียกตอนปิดฟอร์มหลังสร้างสำเร็จ (ป๊อปเลือกปิดตัวเองต่อ) */
+  onCreated?: (sheet: { id: string; code: string }) => void | Promise<void>;
+};
 
 export type PickedDesignSheet = { id: string; code: string; name: string; brand_name: string | null; cover_url: string | null };
 type View = "grid" | "list";
@@ -49,7 +68,7 @@ function Cover({ url, w, className }: { url: string | null; w: number; className
     : <div className={`flex items-center justify-center bg-slate-100 text-slate-300 ${className}`}><Icon value="i:photo" /></div>;
 }
 
-export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confirmText, head, initialBrand }: {
+export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confirmText, head, initialBrand, createNew }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (sheet: PickedDesignSheet) => void | Promise<void>;
@@ -59,6 +78,8 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
   head?: ReactNode;
   /** เปิดมาให้กรองแบรนด์นี้ไว้ก่อน (ชื่อแบรนด์ตามใบงาน) — ผู้ใช้กด "ทุกแบรนด์" ได้ */
   initialBrand?: string | null;
+  /** มี = โชว์ปุ่ม "＋ สร้างใบงานใหม่จาก N รูปนี้" (ฟอร์มสร้างใบงานเดิม + แนบรูปให้) */
+  createNew?: DesignSheetCreateNew | null;
 }) {
   const t = useT();
   const [rows, setRows] = useState<DesignSheetListItem[] | null>(null);
@@ -74,6 +95,16 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
   const [view, setView] = useUserPref<View>("design_sheet_picker_view", "grid", (raw) => (raw === "grid" || raw === "list" ? raw : null));
   const { cols, setCols, gridStyle } = useGalleryColumns("design-sheet-picker", 4);
   const { recent, remember } = useRecentPicks<Recent>(RECENT_KEYS.designSheets, open);
+  const [creating, setCreating] = useState(false);
+  const createdRef = useRef<{ id: string; code: string } | null>(null);
+  useEffect(() => { if (!open) setCreating(false); }, [open]);
+  const closeCreate = async () => {
+    const made = createdRef.current;
+    createdRef.current = null;
+    setCreating(false);
+    if (made) { await createNew?.onCreated?.(made); onClose(); }   // สร้างแล้ว → จบ · ยังไม่บันทึก = กลับมาป๊อปเลือก
+  };
+  const nNew = createNew?.assetIds.length ?? 0;
 
   useEffect(() => {
     if (!open) return;
@@ -136,10 +167,24 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
   );
 
   return (
-    <ERPModal open={open} onClose={onClose} title={title ?? t("เลือกใบงานใน Design Dashboard", "Choose a design sheet")} size="xl" defaultExpanded={false} storageKey="design-sheet-picker"
+    <>
+    <ERPModal open={open && !creating} onClose={onClose} title={title ?? t("เลือกใบงานใน Design Dashboard", "Choose a design sheet")} size="xl" defaultExpanded={false} storageKey="design-sheet-picker"
       description={t("ค้นได้ทั้งรหัส ชื่องาน แบรนด์ · กดเลือกแล้วกดยืนยันด้านล่าง", "Search by code, name or brand · pick one, then confirm below")} footer={footer}>
       <div className="space-y-2">
         {head}
+        {createNew && nNew > 0 && (
+          <>
+            <button type="button" onClick={() => { createdRef.current = null; setCreating(true); }}
+              className="flex w-full items-center gap-3 rounded-xl border-[1.5px] border-dashed border-violet-300 bg-violet-50 px-3 py-2.5 text-left text-violet-800 hover:border-violet-400 hover:bg-violet-100">
+              <span className="text-2xl"><Icon value="i:square-plus" /></span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{t(`สร้างใบงานใหม่จาก ${nNew} รูปนี้`, `New design sheet from ${nNew} image(s)`)}</span>
+                <span className="block truncate text-[12px] text-violet-700/80">{t("ฟอร์มเดียวกับ ＋ เพิ่มงาน · รูปแรกเป็นปก", "Same form as + Add job · first image = cover")}</span>
+              </span>
+            </button>
+            <div className="text-center text-[12px] text-slate-400">{t("หรือ ส่งเข้าใบงานที่มีอยู่", "or send to an existing sheet")}</div>
+          </>
+        )}
         <div className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <span className="pointer-events-none absolute left-3 top-2.5 text-slate-400"><Icon value="i:search" /></span>
@@ -205,5 +250,13 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
           )}
       </div>
     </ERPModal>
+    {open && creating && createNew && (
+      <DesignSheetDetail detailOnly createMode defaultBrandId={createNew.brandId ?? null}
+        prefill={{ name: createNew.name ?? null, brand_id: createNew.brandId ?? null, images: createNew.imageUrls ?? [], libraryAssetIds: createNew.assetIds,
+          imagesLabel: createNew.imagesLabel ?? t(`รูปที่เลือก ${nNew} รูป — แนบให้ตอนกดบันทึก (รูปแรก = ปก)`, `${nNew} selected image(s) — attached when you save (first = cover)`) }}
+        onCreated={(sheet) => { createdRef.current = sheet; }}
+        onDetailClose={() => void closeCreate()} />
+    )}
+    </>
   );
 }

@@ -390,10 +390,12 @@ function LinkedSkuChips({ ids, codeOf, onRemove }: { ids: string[]; codeOf: (sid
 // hideSendToBoard = ซ่อนปุ่ม "ส่งขึ้นกระดาน" (ส่งมาจากหน้ากระดานแคมเปญเอง — การ์ดอยู่บนกระดานแล้ว ปุ่มนี้ซ้ำซ้อน)
 // prefill = ค่าตั้งต้นของฟอร์มสร้าง (createMode) เช่น เปิดใบงานจาก "กล่องงานจากไลน์" — lineInboxId ส่งไปกับการบันทึก
 //           ให้ server แนบรูปจากไลน์เข้าใบงาน + ผูกร่าง (รูปจากไลน์ไม่อัปซ้ำ แค่ผูกไฟล์เดิม)
+//           libraryAssetIds = รูปจากคลังกลาง (เช่น หน้า SAMPLE Images) → แนบเข้าใบงานใหม่ตอนบันทึก ตามลำดับ (รูปแรก = ปก) · imagesLabel = ข้อความแถบรูป (ไม่ส่ง = "รูปจากไลน์")
 //           note = ข้อความดิบ (เช่น แชตลูกค้าที่ส่งต่อมาในไลน์) → ช่อง Note · มีค่า = กาง "ใส่ข้อมูลอื่น" ให้เห็นเลย
 export type DesignSheetPrefill = {
   name?: string | null; brand_id?: string | null; deadline?: string | null; detail?: string | null; note?: string | null;
   lineInboxId?: string | null; images?: string[]; sourceLabel?: string | null;
+  libraryAssetIds?: string[]; imagesLabel?: string | null;
 };
 export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, prefill = null, onDetailClose, onCreated, onOpenPresentation }:
   { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; prefill?: DesignSheetPrefill | null; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void;
@@ -1558,8 +1560,20 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           clearPend();
           if (fail > 0) toast.error(t(`อัปโหลดรูปไม่สำเร็จ ${fail} ไฟล์ (สำเร็จ ${ok})`, `${fail} image(s) failed to upload (${ok} done)`));
         }
+        // รูปจากคลังกลาง (เช่น SAMPLE Images) → แนบไฟล์เดิม ไม่อัปซ้ำ · ลำดับตามที่ส่งมา (รูปแรก = ปก)
+        let libImages = 0;
+        if (prefill?.libraryAssetIds?.length) {
+          try {
+            const lr = await apiFetch("/api/attachments/from-library", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ entity_type: "design_sheet", entity_id: j.id, asset_ids: prefill.libraryAssetIds, actor: user?.name ?? user?.email ?? null }) });
+            const lj = await lr.json().catch(() => ({})); if (!lr.ok || lj.error) throw new Error(lj.error || "attach failed");
+            libImages = Number(lj.attached ?? 0);
+          } catch { toast.error(t("สร้างใบงานแล้ว แต่แนบรูปไม่สำเร็จ — ส่งรูปเข้าใบงานนี้ใหม่อีกครั้ง", "Sheet created, but images could not be attached — send them to this sheet again")); }
+        }
         // สร้างเสร็จ → ค้างป๊อปอัพไว้ (กลายเป็นโหมดแก้) ให้แนบรูป/comment ต่อได้เลย
-        toast.success(j.line_images
+        toast.success(libImages
+          ? t(`สร้างใบงานแล้ว: ${j.code} · แนบรูป ${libImages} รูป`, `Design sheet created: ${j.code} · ${libImages} image(s) attached`)
+          : j.line_images
           ? t(`สร้างใบงานแล้ว: ${j.code} · แนบรูปจากไลน์ ${j.line_images} รูป`, `Design sheet created: ${j.code} · ${j.line_images} LINE image(s) attached`)
           : t(`สร้างใบงานแล้ว: ${j.code}`, `Design sheet created: ${j.code}`));
         if (form.brand_id) pushRecent(RECENT_KEYS.designBrands, { id: form.brand_id });   // ปุ่มแบรนด์ล่าสุดครั้งหน้า
@@ -1829,7 +1843,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {(prefill?.images?.length ?? 0) > 0 && (
         <div className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
           <p className="mb-1.5 text-xs text-emerald-800">
-            <Icon name="chat" /> {t(`รูปจากไลน์ ${prefill!.images!.length} รูป — แนบให้ตอนกดบันทึก`, `${prefill!.images!.length} LINE image(s) — attached when you save`)}
+            {prefill?.imagesLabel ? <><Icon value="i:photo" /> {prefill.imagesLabel}</> : <><Icon name="chat" /> {t(`รูปจากไลน์ ${prefill!.images!.length} รูป — แนบให้ตอนกดบันทึก`, `${prefill!.images!.length} LINE image(s) — attached when you save`)}</>}
             {prefill?.sourceLabel ? <span className="block text-[11px] text-emerald-700/80">{prefill.sourceLabel}</span> : null}
           </p>
           <div className="grid grid-cols-3 gap-1.5">
