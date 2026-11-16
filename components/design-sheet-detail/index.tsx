@@ -72,6 +72,7 @@ const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entr
 const DesignSheetSpecTab = dynamic(() => import("./spec-tab").then((m) => m.DesignSheetSpecTab), { ssr: false });
 const DesignSheetNoticeTab = dynamic(() => import("./notice-tab").then((m) => m.DesignSheetNoticeTab), { ssr: false });
 // ⚡ ส่วนในป๊อปใบงาน/ป๊อปย่อย (ตัวแก้ข้อความ tiptap ~300KB ฯลฯ) → โหลดโค้ดตอนเปิดใช้ (จุดวางเดิม พฤติกรรมเดิม — npm run perf-check 2026-11-07 หน้า /master/design-sheets 729KB)
+const NoteDimsModal = dynamic(() => import("./note-dims-modal").then((m) => m.NoteDimsModal), { ssr: false });   // 📝 อ่านจากรูปโน้ตขนาดชิ้น (AI) → บรรทัดตีราคา
 const PatternStudio = dynamic(() => import("@/components/pattern-studio").then((m) => m.PatternStudio), { ssr: false });   // ✏️ วาดชิ้นวัสดุ + ภาพ 3D + แม่แบบทรงกระเป๋า (ครอบ ShapeEditor · โหลดเมื่อเปิด)
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false });
 const SupplierQuoteSection = dynamic(() => import("./supplier-quote").then((m) => m.SupplierQuoteSection), { ssr: false });
@@ -543,6 +544,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     waste_percent: null, divisor: null, qty: null, uom: null,
     unit_price: null, amount: null, note: null, sort_order: costLines.length + 1,
   }), [costLines.length, costParent]);
+  const [noteOpen, setNoteOpen] = useState(false);   // 📝 ป๊อปอ่านจากรูปโน้ต (AI)
   const addCostRow = useCallback(() => { setCostLines((prev) => [...prev, newCostRow()]); setCostDirty(true); }, [newCostRow]);
   // ✏️ เปิด "แบบวาด" ของแท็บที่ดูอยู่: บรรทัดที่วาดไว้ = รูปทรงจริง (รวมบรรทัดชิ้นเดียวกันด้วย pid) · บรรทัดแบบเดิมที่มีกว้าง×ยาว = สี่เหลี่ยม
   //   บรรทัดที่ไม่มีกว้าง×ยาว (อะไหล่ นับชิ้น · สาย/เทป คิดตามยาว) ไม่ขึ้นกระดาน (บอกจำนวนไว้)
@@ -2770,9 +2772,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 onAdd={newCostRow}
                 addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
-                addExtra={<button type="button" onClick={() => openBoardRef.current(null)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                addExtra={<><button type="button" onClick={() => openBoardRef.current(null)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
                   title={t("วาดชิ้นวัสดุ (สี่เหลี่ยม วงกลม ปากกา) หรือก๊อปจาก Illustrator มาวาง → ได้บรรทัดใหม่พร้อมกว้าง×ยาว", "Draw pieces (rectangle, circle, pen) or paste from Illustrator → new lines with width×length")}>
-                  <Icon value="i:vector-bezier" className="text-[14px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>}
+                  <Icon value="i:vector-bezier" className="text-[14px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
+                <button type="button" onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                  title={t("ถ่ายรูปโน้ตที่ช่างจดขนาดชิ้น → AI อ่านเป็นตาราง ให้ตรวจก่อนเพิ่มบรรทัด", "Photo of handwritten piece sizes → AI reads it into a table to check before adding lines")}>
+                  <Icon value="i:camera" className="text-[14px]" />{t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)")}</button></>}
                 emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
                 // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
                 emptyAction={canEdit ? (
@@ -2783,6 +2788,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">{t("📄 ดึงจากใบงานอื่น", "📄 Pull from another sheet")}</button>
                     <button type="button" onClick={() => openBoardRef.current(null)}
                       className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:vector-bezier" className="text-[15px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
+                    <button type="button" onClick={() => setNoteOpen(true)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-4 text-sm font-medium text-blue-700 hover:bg-blue-50"><Icon value="i:camera" className="text-[15px]" />{t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)")}</button>
                   </div>
                 ) : null}
                 onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}`, shape: r.shape ? { ...r.shape, pid: undefined } : r.shape })}
@@ -3321,6 +3328,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         excludeIds={pmLinkFor ? (pmLinks[pmLinkFor.id] ?? []) : []} onConfirm={onPmLinkPicked} />
 
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
+      {/* 📝 อ่านจากรูปโน้ต (AI) → เพิ่มบรรทัดตีราคาในแท็บที่กำลังดู (ยังไม่บันทึก — ผู้ใช้กดบันทึกตามปกติ) */}
+      {noteOpen && (
+        <NoteDimsModal open onClose={() => setNoteOpen(false)} items={priceItems} onCreateItem={(q, done) => void createPriceItemInline(q, done)}
+          parentCode={costParent || null} startIdx={costLines.length}
+          onAdd={(lines) => {
+            const stamp = Date.now();
+            setCostLines((prev) => [...prev, ...lines.map((l, i): CostRow => ({ ...l, key: `nt${stamp}_${i}` }))]);
+            setCostDirty(true); setEditing(true); setNoteOpen(false);
+            toast.success(t(`เพิ่ม ${lines.length} บรรทัดจากรูปโน้ตแล้ว — ตรวจแล้วกดบันทึก`, `Added ${lines.length} lines from the note — check them, then save`));
+          }} />
+      )}
       {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
       {form?.id && (
         <PullCostFromSheetModal open={copyFromOpen} excludeId={form.id} targetLabel={costTabLabel(costParent, generalLabel)} targetCount={curLines.length}

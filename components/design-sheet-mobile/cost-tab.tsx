@@ -12,6 +12,7 @@
  * doc: docs/design-sheet-mobile.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import type { PriceItem } from "@/app/api/design-sheets/price-items/route";
 import { apiFetch } from "@/lib/api";
@@ -31,6 +32,8 @@ import { costUsagePerUnit } from "@/lib/cost-usage";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
 type Row = CostLine & { key: string };
+// 📝 อ่านจากรูปโน้ต (AI) — ตัวเดียวกับหน้าคอม (โหลดเมื่อกด)
+const NoteDimsModal = dynamic(() => import("@/components/design-sheet-detail/note-dims-modal").then((m) => m.NoteDimsModal), { ssr: false });
 const pk = (s: string | null | undefined) => s ?? "";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const fmtN = (n: number | null | undefined, d = 2) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { maximumFractionDigits: d }));
@@ -220,6 +223,7 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabC
   const [editKey, setEditKey] = useState<string | null>(null);
   const [pick, setPick] = useState<{ mode: "add" } | { mode: "change"; key: string } | null>(null);
   const [extraIdx, setExtraIdx] = useState<number | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
   const editing = rows.find((r) => r.key === editKey) ?? null;
   const toggleGroup = (k: string) => setOpenGroups((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
@@ -409,12 +413,26 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabC
           <button type="button" onClick={() => setPick({ mode: "add" })} className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-800">
             <Icon name="add" /> {t("เพิ่มวัสดุ", "Add material")}
           </button>
+          <button type="button" onClick={() => setNoteOpen(true)} disabled={!items} aria-label={t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)")} title={t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)")}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-300 bg-white px-3 text-sm font-medium text-blue-700 disabled:opacity-50">
+            <Icon value="i:camera" className="text-[16px]" />{!dirty && t("รูปโน้ต", "Note")}
+          </button>
           {dirty && (
             <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg bg-slate-900 text-sm font-semibold text-white disabled:opacity-60">
               <Icon name="save" /> {saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}
             </button>
           )}
         </div>
+      )}
+
+      {noteOpen && items && (
+        <NoteDimsModal open onClose={() => setNoteOpen(false)} items={items} parentCode={parent || null} startIdx={rows.length}
+          onAdd={(lines) => {
+            commitRows([...rows, ...lines.map((l): Row => ({ ...l, key: newKey() }))]);
+            setOpenGroups((s) => { const n = new Set(s); for (const l of lines) n.add(l.group_name || tr("ไม่ระบุชนิด", "Unspecified type")); return n; });
+            setNoteOpen(false);
+            toast.success(t(`เพิ่ม ${lines.length} บรรทัดจากรูปโน้ตแล้ว — ตรวจแล้วกดบันทึก`, `Added ${lines.length} lines from the note — check them, then save`));
+          }} />
       )}
 
       {/* ── แผ่นแก้บรรทัด ── */}
