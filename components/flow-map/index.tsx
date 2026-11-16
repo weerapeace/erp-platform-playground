@@ -158,6 +158,16 @@ export function FlowMap() {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthAt, setHealthAt] = useState<string | null>(null);
   const [healthErr, setHealthErr] = useState(false);
+  // ศูนย์งานแก้แอป: งานแก้ค้างต่อกล่อง/เส้น ("n:qt" → 2) → ป้าย "แก้ N" บนกล่อง → /admin/app-changes?flow= (docs/app-changes.md)
+  const [changeCounts, setChangeCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let off = false;
+    apiFetch("/api/app-changes/flow-counts").then((r) => (r.ok ? r.json() : null)).then((j) => { if (!off && j?.counts) setChangeCounts(j.counts); }).catch(() => { /* ป้ายแค่ไม่ขึ้น */ });
+    // ลิงก์จากศูนย์งานแก้: /master/flow-map?node=qt → เปิดลิ้นชักกล่องนั้น
+    const node = new URLSearchParams(window.location.search).get("node");
+    if (node && FLOW_NODES[node]) setSel({ k: "n", id: node });
+    return () => { off = true; };
+  }, []);
 
   useEffect(() => {
     let off = false;
@@ -251,6 +261,11 @@ export function FlowMap() {
           <div className="font-semibold text-[16px] text-slate-800">{n.label}</div>
           <div className="text-[11.5px] text-slate-500">{FLOW_AREA_LABEL[n.area]} · {n.sub}</div>
         </div>
+        {changeCounts[`n:${sel.id}`] ? (
+          <Link href={`/admin/app-changes?flow=n:${sel.id}`} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1 text-[12px] rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100">
+            {t(`งานแก้ ${changeCounts[`n:${sel.id}`]}`, `Changes ${changeCounts[`n:${sel.id}`]}`)}
+          </Link>
+        ) : null}
         {n.href && (
           <Link href={n.href} className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
             {t("เปิดหน้า", "Open")} <span aria-hidden="true">↗</span>
@@ -431,6 +446,13 @@ export function FlowMap() {
           <text x={x + FM_W / 2} y={y + h / 2 - 6} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill={g ? "#334155" : "#312e81"}>{n.label}</text>
           <text x={x + FM_W / 2} y={y + h / 2 + 10} textAnchor="middle" dominantBaseline="central" fontSize={11} fill={g ? "#64748b" : "#6366f1"}>{n.sub}</text>
           {nodeAlert(id) && <circle cx={x + FM_W - 9} cy={y + 9} r={3.5} fill="#dc2626" />}
+          {changeCounts[`n:${id}`] ? (
+            <a href={`/admin/app-changes?flow=n:${id}`} onClick={(ev) => ev.stopPropagation()}>
+              <title>{t(`งานแก้แอปค้าง ${changeCounts[`n:${id}`]} งาน — กดดูในศูนย์งานแก้`, "Pending app changes — open")}</title>
+              <rect x={x + FM_W - 40} y={y + h - 6} width={36} height={13} rx={6.5} fill="#fef3c7" stroke="#f59e0b" strokeWidth={0.75} />
+              <text x={x + FM_W - 22} y={y + h + 0.5} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={600} fill="#b45309">{t(`แก้ ${changeCounts[`n:${id}`]}`, `fix ${changeCounts[`n:${id}`]}`)}</text>
+            </a>
+          ) : null}
           {view.finance && n.cashflow && <circle cx={x + 9} cy={y + 9} r={3.5} fill={FM_CASHFLOW_DOT}><title>{t("นับในกระแสเงินสด", "Counted in cash flow")}</title></circle>}
           {nt.length ? (
             <g transform={`translate(${bx} ${by})`} className="cursor-pointer" onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
