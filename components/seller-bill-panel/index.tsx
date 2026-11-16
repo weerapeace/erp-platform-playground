@@ -22,6 +22,7 @@ import { isPdfRef } from "@/lib/file-ref";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, autoSplitRounds, ensureRowIds, allocOf, editAlloc, addAllocRound, rebalanceAlloc, mergeSplitRows, expandAllocRows, normalizeBillLine, billLineDiscount, billRowCalc, billRowMismatch, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 import { SaveBar } from "@/components/save-bar";
+import { useUserPref } from "@/lib/use-user-pref";
 import { BillSummaryBox } from "./bill-summary";
 import { RowMenu, type RowMenuItem } from "./row-menu";
 import { emptySummary, billTotals, mergeBillTotals, billQtyText, type BillSummary, type BillTotalCheck } from "@/lib/seller-bill-summary";
@@ -134,6 +135,12 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   const [missScope, setMissScope] = useState<Record<string, "bill" | "shop">>({});
   // ★ 2026-11-16 เจ้าของ: "อยากให้ติ๊กเลือกได้ด้วย เพราะบางทีในบิลยังไม่ส่ง" → แบบ B: ติ๊กหลายรายการ แล้วกด รอรอบหน้า / ปิดยอด ทีเดียว
   const [missSel, setMissSel] = useState<Record<string, string[]>>({});
+  // ★ 2026-11-16 เจ้าของ: "ตาลาย มองแถวไม่ออก" → แบบ A สลับสีพื้น + เส้นแบ่งชัด · ตัวกรอง (ข้อ 2 จำต่อคน) · ยืนยันทั้งชุดถามก่อน (ข้อ 5) · คีย์บอร์ด (ข้อ 6)
+  const [rowFilter, setRowFilter] = useUserPref<"all" | "todo" | "done">("pv.billRowFilter", "all", (r) => (r === "all" || r === "todo" || r === "done" ? r : null));
+  const [focusRow, setFocusRow] = useState<string | null>(null);   // "billId|rid" แถวที่มีกรอบฟ้า (ว่าง = แถวแรกที่ยังไม่ยืนยัน)
+  const [highAsk, setHighAsk] = useState<{ billId: string; n: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrollToFocus = useRef(false);
   const [poPlan, setPoPlan] = useState<PoPlan | null>(null);
   // ป๊อปเลือกจับคู่เอง 3 แท็บ: PO ร้านนี้ / PO ร้านอื่น / สินค้าทั้งหมด
   const [pickTab, setPickTab] = useState<PickTab>("this");
@@ -294,8 +301,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
       setAuto((st) => ({ ...st, at: new Date(), err: null, pending: dirtyBills.current.size > 0 }));
       if (j.applied?.backfilled) toast.success(`เปิด ${j.applied.backfilled.po_no} ย้อนหลังให้รายการนอกใบสั่งซื้อแล้ว`);
       await onAppliedRef.current();
+      return true;
     } catch (e) {
       toast.error("ลงใบไม่สำเร็จ: " + String((e as Error).message ?? e));
+      return false;
     } finally {
       setApplying((s) => { const nx = new Set(s); rids.forEach((r) => nx.delete(r)); return nx; });
     }
@@ -308,6 +317,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
     const next = ensureRowIds(cur.map((l, k) => (k === idx ? { ...l, decision } : l)));
     const rid = next[idx].rid as string;
     setDraft((p) => ({ ...p, [billId]: next })); draftRef.current = { ...draftRef.current, [billId]: next };
+    advanceFocusRef.current(billId, row.rid ?? `i${idx}`);
     if (decision === "confirmed" && row.move_po && !gByKey.has(row.match_key ?? "")) {
       setPoPlan({ billId, moves: [row.move_po], edits: [], close: [], reduceLabels: [], closeLabels: [], reason: "", rids: [rid], lines: next });
       return;
@@ -323,7 +333,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
     const next = cur.map((l) => { if (l.level === "ok" && l.match_key && !l.decision && !l.move_po) { rids.push(l.rid as string); return { ...l, decision: "confirmed" as const }; } return l; });
     if (!rids.length) { toast.error("ไม่มีแถวที่มั่นใจสูงและยังไม่ได้ยืนยัน"); return; }
     setDraft((p) => ({ ...p, [billId]: next })); draftRef.current = { ...draftRef.current, [billId]: next };
-    void applyRows(billId, rids, next);
+    void applyRows(billId, rids, next).then((ok) => { if (ok) toast.success(`ลงใบแล้ว ${rids.length} แถว (แถวที่ระบบมั่นใจ)`); });
   };
   /** แถวนอกใบสั่งซื้อที่ลงใบแล้ว → เปิดใบสั่งซื้อย้อนหลังให้ครั้งเดียว (รวมทุกแถว) */
   const backfillOutside = (billId: string) => {
@@ -454,6 +464,65 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   // ★ 2026-11-15 สรุปยอดบิล + ไม่อยู่ในบิล = พับไว้ กดเปิดเมื่อจะดู
   const [extraOpen, setExtraOpen] = useState<Record<string, boolean>>({});
 
+  /* ★ 2026-11-16 ตัวกรอง (ข้อ 2): ทั้งหมด / ต้องจัดการ (ยังไม่ยืนยัน รวมยังไม่จับคู่) / ลงใบแล้ว (ยืนยัน + ค่าใช้จ่าย) · แถวที่ข้ามเห็นใน "ทั้งหมด" */
+  const rowDone = (l: SellerBillLine) => l.decision === "confirmed" || l.decision === "skip" || l.decision === "expense";
+  const rowShown = (l: SellerBillLine) => rowFilter === "all" || (rowFilter === "todo" ? !rowDone(l) : l.decision === "confirmed" || l.decision === "expense");
+  const rowKey = (billId: string, l: SellerBillLine, i: number) => `${billId}|${l.rid ?? `i${i}`}`;
+  /* ข้อ 6: ลำดับแถวที่เห็นทุกบิล (เรียงตามกระดาษ) — กรอบฟ้า = ที่เลือกไว้ หรือแถวแรกที่ยังไม่ยืนยัน */
+  const navRows = readonly ? [] : bills.flatMap((b) => (draft[b.id] ?? b.lines).map((l, i) => ({ key: rowKey(b.id, l, i), billId: b.id, i, l, done: rowDone(l) })).filter((x) => rowShown(x.l)));
+  const activeKey = (focusRow && navRows.some((x) => x.key === focusRow) ? focusRow : navRows.find((x) => !x.done)?.key) ?? null;
+  const navRef = useRef({ navRows, activeKey });
+  navRef.current = { navRows, activeKey };
+  const advanceFocusRef = useRef((billId: string, rid: string) => { void billId; void rid; });
+  advanceFocusRef.current = (billId: string, rid: string) => {
+    const { navRows: rows, activeKey: act } = navRef.current;
+    const key = `${billId}|${rid}`;
+    if (act !== key) return;   // กดยืนยันแถวอื่นด้วยเมาส์ = กรอบอยู่ที่เดิม
+    const at = rows.findIndex((x) => x.key === key);
+    const nx = rows.slice(at + 1).find((x) => !x.done) ?? rows.find((x) => !x.done && x.key !== key);
+    setFocusRow(nx?.key ?? null);
+    scrollToFocus.current = true;
+  };
+
+  const kbRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  kbRef.current = (e: KeyboardEvent) => {
+    if (readonly || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "Enter" && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const t = e.target instanceof Element ? e.target : null;
+    if (t && t !== document.body && t.closest("input, textarea, select, button, a, [contenteditable=true], [role=listbox], [role=menu]")) return;
+    if (document.querySelector("[data-erp-modal]")) return;   // ป๊อปเปิดอยู่
+    const root = rootRef.current;
+    if (!root || root.offsetParent === null) return;          // แผงถูกซ่อน (มุมรวมเป็นตาราง)
+    const r = root.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) return;   // แผงไม่อยู่บนจอ = ปล่อยให้เลื่อนหน้าปกติ
+    const { navRows: rows, activeKey: act } = navRef.current;
+    if (!rows.length) return;
+    const at = rows.findIndex((x) => x.key === act);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const to = rows[Math.max(0, Math.min(rows.length - 1, at < 0 ? 0 : at + (e.key === "ArrowDown" ? 1 : -1)))];
+      setFocusRow(to.key); scrollToFocus.current = true;
+      return;
+    }
+    const row = rows[at];
+    if (!row || row.done || applying.has(row.l.rid ?? "")) return;
+    e.preventDefault();
+    if (row.l.level === "fee") decide(row.billId, row.i, "expense");
+    else if (gAny(row.l.match_key) || row.l.sku_pick) decide(row.billId, row.i, "confirmed");
+    else openPick(row.billId, row.i);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => kbRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    if (!scrollToFocus.current || !activeKey) return;
+    scrollToFocus.current = false;
+    const el = rootRef.current?.querySelector(`[data-rowkey="${CSS.escape(activeKey)}"]`);
+    (el as HTMLElement | null)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [activeKey]);
+
   const patch = async (billId: string, mode: "save" | "rematch" | "apply", plan?: PoPlan) => {
     const lines = draft[billId] ?? [];
     if (mode === "apply") {
@@ -543,7 +612,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
     setPicked((l) => ({ ...l, is_fee: false, match_key: null, move_po: null, sku_pick: sku, level: "mid", score: 1, reasons: [], warns: [], manual: true, decision: "confirmed" }));
 
   return (
-    <div className={bare ? "" : "bg-white border border-slate-200 rounded-xl p-4"}>
+    <div ref={rootRef} className={bare ? "" : "bg-white border border-slate-200 rounded-xl p-4"}>
       {!bare && (
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
@@ -628,14 +697,40 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                 {/* ★ 2026-11-15 แถวแบบใหม่ (เจ้าของ: "ชื่อสินค้าเด่นกว่านี้ · ตัวเลขเรียงกัน · ยืนยันแล้วลงใบเลย + readonly ไม่รก")
                      คอลัมน์คงที่: # · สินค้า · จำนวน · ราคา ¥ · ส่วนลด · ยอด ¥ · ปุ่ม — ตัวเลขตรงกันทุกแถว
                      แถวที่ตัดสินแล้ว (ยืนยัน/ข้าม/ค่าใช้จ่าย) = ลงใบแล้ว พับเหลือบรรทัดเดียว กด "แก้" เปิดกลับ · ปุ่มรองอยู่ในเมนู ⋯ */}
+                {lines.length > 0 && (() => {
+                  const nTodo = lines.filter((l) => !rowDone(l)).length;
+                  const nDone = lines.filter((l) => l.decision === "confirmed" || l.decision === "expense").length;
+                  const highN = lines.filter((l) => l.level === "ok" && l.match_key && !l.decision && !l.move_po).length;
+                  return (
+                    <div className="flex items-center gap-2 flex-wrap px-3 py-1.5 border-t border-slate-200 bg-white">
+                      <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-[11px]" role="tablist" aria-label="กรองแถวในบิล">
+                        {([["all", `ทั้งหมด ${lines.length}`], ["todo", `ต้องจัดการ ${nTodo}`], ["done", `ลงใบแล้ว ${nDone}`]] as const).map(([k, label], n) => (
+                          <button key={k} type="button" role="tab" aria-selected={rowFilter === k} onClick={() => setRowFilter(k)}
+                            className={`h-7 px-2.5 ${n > 0 ? "border-l border-slate-200" : ""} ${rowFilter === k ? "bg-slate-800 text-white" : k === "todo" && nTodo > 0 ? "bg-white text-amber-700 hover:bg-amber-50" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                        ))}
+                      </div>
+                      {!ro && highN > 0 && (
+                        <button type="button" onClick={() => setHighAsk({ billId: b.id, n: highN })} disabled={applying.size > 0} title="ลงใบทุกแถวที่จับคู่แล้วและระบบมั่นใจสูง (ไม่รวมแถว ให้เช็ก และแถวที่ยังไม่จับคู่) — ถามก่อน"
+                          className="ml-auto h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">✓ ยืนยันทุกแถวที่มั่นใจ ({highN})</button>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div className="overflow-x-auto">
                 <div className={thb ? "md:min-w-[54rem]" : "md:min-w-[46rem]"}>
-                <div className={`hidden ${GRID_MD} px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100 bg-white`}>
+                <div className={`hidden ${GRID_MD} px-3 py-1 text-[10px] text-slate-400 border-y border-slate-200 bg-slate-100/70`}>
                   <span>#</span><span>สินค้า</span><span className="text-right">จำนวน</span><span className="text-right">ราคา ¥</span><span className="text-right">ส่วนลด</span><span className="text-right">ยอด ¥</span>
                   {thb && <><span className="text-right" title="ราคาต่อชิ้นเป็นบาท (ราคา × เรท) — จากรายการในใบ">฿/ชิ้น</span><span className="text-right" title="ค่าสินค้าเป็นบาท (ไม่รวมค่าส่ง) — จากรายการในใบ">ยอด ฿</span></>}<span />
                 </div>
-                <div className="divide-y divide-slate-100">
-                  {lines.map((l, i) => {
+                <div className="divide-y divide-slate-200">
+                  {lines.length > 0 && !lines.some(rowShown) && <div className="px-3 py-3 text-center text-[11px] text-slate-400">— {rowFilter === "todo" ? "ไม่มีแถวที่ต้องจัดการแล้ว" : "ยังไม่มีแถวที่ลงใบ"} —</div>}
+                  {lines.map((l, i) => ({ l, i })).filter((x) => rowShown(x.l)).map(({ l, i }, vi) => {
+                    /* ★ 2026-11-16 แบบ A: แถวคู่/คี่สลับสีพื้น (นับตามแถวที่เห็น) + เส้นแบ่งเข้มขึ้น · กรอบฟ้า = แถวที่กำลังเช็ก (คีย์บอร์ด) */
+                    const zebra = vi % 2 === 1 ? "bg-slate-50" : "bg-white";
+                    const rkey = rowKey(b.id, l, i);
+                    const isFocus = !ro && activeKey === rkey;
+                    const focusCls = isFocus ? "md:ring-2 md:ring-inset md:ring-sky-500" : "";   // ฟ้าจริง (blue ในระบบนี้ = ส้มแบรนด์)
+                    const rowEvents = { "data-rowkey": rkey, onMouseDown: () => { if (!ro) setFocusRow(rkey); } };
                     const g = gAny(l.match_key);
                     const hint = !g && otherGroups ? otherShopHint(l, otherGroups) : null;
                     const picked = !g && l.sku_pick ? l.sku_pick : null;
@@ -661,7 +756,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                     const poLabel = alloc.map((a) => (gAny(a.key)?.po_no ?? "").replace(/^PO-\d{4}-/, "PO-")).filter(Boolean).join(", ");
                     const noCell = (
                       <span className="flex items-center gap-0.5 pt-1">
-                        {!ro && !done && <DragHandle {...drag.handleProps(dk)} title="ลากเพื่อย้ายแถว" className="text-base" />}
+                        {!ro && !done && rowFilter === "all" && <DragHandle {...drag.handleProps(dk)} title="ลากเพื่อย้ายแถว" className="text-base" />}
                         <span className={`font-mono text-[11px] ${added ? "text-blue-600" : "text-slate-400"}`} title={added ? "รายการที่เพิ่มเอง (ไม่ได้อยู่บนกระดาษ)" : "บรรทัดที่เท่าไรในบิล (บนกระดาษ)"}>{added ? "เพิ่ม" : `#${billLineNo(l.no, i)}`}</span>
                       </span>
                     );
@@ -670,7 +765,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                     if (done) {
                       const notIn = (l.decision === "confirmed" || l.decision === "expense") && !applied && !busyRow;
                       return (
-                        <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${GRID} items-center px-3 py-1 ${l.decision === "skip" ? "bg-slate-50/60 text-slate-400" : "bg-emerald-50/20"} ${drag.rowCls(dk)}`}>
+                        <div key={l.rid ?? i} {...drag.rowProps(dk)} {...rowEvents} className={`${GRID} items-center px-3 py-1 ${zebra} ${l.decision === "skip" ? "text-slate-400" : "text-slate-500"} ${focusCls} ${drag.rowCls(dk)}`}>
                           {noCell}
                           <div className="min-w-0 flex items-center gap-1.5 max-md:flex-1">
                             {l.decision === "skip"
@@ -678,7 +773,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                               : <>
                                   <Icon name="done" mode="line" size={15} className={notIn ? "text-amber-500" : "text-emerald-600"} />
                                   {g?.image_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-6 h-6 rounded object-cover border border-slate-100 shrink-0" />}
-                                  <span className="min-w-0 truncate text-[13px] font-medium text-slate-800" title={`${prodCode ?? ""} ${prodName ?? ""}\nบิล: ${billText} ${thText}`}>
+                                  <span className="min-w-0 truncate text-[13px] text-slate-600" title={`${prodCode ?? ""} ${prodName ?? ""}\nบิล: ${billText} ${thText}`}>
                                     {l.decision === "expense" ? <>ค่าใช้จ่าย: {billText || thText || "—"}</> : <>{prodName ?? (thText || billText || "—")}{prodCode && <span className="ml-1 font-mono text-[11px] font-normal text-slate-400">{prodCode}</span>}</>}
                                   </span>
                                   {poLabel && <span className="shrink-0 text-[11px] text-slate-400">· {poLabel}</span>}
@@ -691,10 +786,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                           <span className={`text-right text-xs tabular-nums text-slate-600 max-md:order-2 max-md:pl-6 ${l.decision === "skip" ? "max-md:hidden" : ""}`}>{l.decision === "skip" ? "" : n2(l.qty)}</span>
                           <span className={`text-right text-xs tabular-nums text-slate-600 max-md:order-2 ${l.decision === "skip" ? "max-md:hidden" : ""}`}>{l.decision === "skip" ? "" : <><span className="md:hidden">× ¥</span>{n2(l.unit_price, 4)}</>}</span>
                           <span className={`text-right text-xs tabular-nums text-red-500 max-md:order-2 ${disc > 0 ? "" : "max-md:hidden"}`}>{disc > 0 ? `−${n2(disc)}` : ""}</span>
-                          <span className={`text-right text-[13px] tabular-nums max-md:order-2 max-md:ml-auto ${l.decision === "skip" ? "text-slate-300 max-md:hidden" : "font-medium text-slate-800"}`}>{l.decision === "skip" ? "—" : <><span className="md:hidden">¥</span>{n2(calc)}</>}</span>
+                          <span className={`text-right text-[13px] tabular-nums max-md:order-2 max-md:ml-auto ${l.decision === "skip" ? "text-slate-300 max-md:hidden" : "text-slate-600"}`}>{l.decision === "skip" ? "—" : <><span className="md:hidden">¥</span>{n2(calc)}</>}</span>
                           {thb && (() => { const m = l.decision === "skip" ? null : rowThb(l); return (<>
                             <span className="text-right text-xs tabular-nums text-slate-600 max-md:hidden">{m ? fmtB(m.unit_thb) : ""}</span>
-                            <span className={`text-right text-[13px] tabular-nums font-medium text-slate-800 max-md:order-2 ${m ? "" : "max-md:hidden"}`}>{m ? <><span className="md:hidden">· ฿</span>{fmtB(m.total_thb)}</> : ""}</span>
+                            <span className={`text-right text-[13px] tabular-nums text-slate-600 max-md:order-2 ${m ? "" : "max-md:hidden"}`}>{m ? <><span className="md:hidden">· ฿</span>{fmtB(m.total_thb)}</> : ""}</span>
                           </>); })()}
                           <span className="flex items-center justify-end gap-1">
                             {busyRow ? <span className="text-[11px] text-slate-400">กำลังลงใบ…</span> : (<>
@@ -719,7 +814,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                           { label: "ลบแถว (AI อ่านผิด/ซ้ำ)", onClick: () => removeRow(b.id, i), danger: true, disabled: applied, title: applied ? "แถวนี้มีรายการในใบอยู่ — กดข้ามแทน" : undefined },
                         ];
                     return (
-                      <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/30" : ""} ${drag.rowCls(dk)}`}>
+                      <div key={l.rid ?? i} {...drag.rowProps(dk)} {...rowEvents} className={`${GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/50" : zebra} ${focusCls} ${drag.rowCls(dk)}`}>
                         {noCell}
                         <div className="min-w-0 max-md:flex-1">
                           {/* บรรทัดบน: สินค้าของเรา (ตัวหนา) — ยังไม่จับคู่ = ชื่อตามบิล */}
@@ -767,8 +862,9 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                                   {addable.map((r) => <option key={r.key} value={r.key}>{r.po_no} · {r.order_date ? formatDate(r.order_date) : "—"} · ค้าง {n2(r.remaining)}</option>)}
                                 </select>
                               )}
-                              {(l.level !== "ok" || l.manual) && <LevelBadge l={l} />}
-                              {(l.warns ?? []).length > 0 && <span className={`${CHIP_WARN} cursor-help`} title={(l.warns ?? []).join("\n")}>เตือน {(l.warns ?? []).length}</span>}
+                              {/* ★ 2026-11-16 ข้อ 3: จอคอม ป้ายย้ายไปเหนือปุ่มด้านขวา (แถวเตี้ยลง) · มือถืออยู่ตรงนี้ */}
+                              {(l.level !== "ok" || l.manual) && <span className="md:hidden"><LevelBadge l={l} /></span>}
+                              {(l.warns ?? []).length > 0 && <span className={`${CHIP_WARN} cursor-help md:hidden`} title={(l.warns ?? []).join("\n")}>เตือน {(l.warns ?? []).length}</span>}
                             </>) : picked ? null : (<>
                               <span className="text-red-600">ยังไม่จับคู่ — กดเลือกจับคู่ หรือ ⋯ ข้าม</span>
                               {hint && !ro && (<>
@@ -817,7 +913,14 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                         </span>
                         <span className="pt-1 text-right text-[13px] font-medium tabular-nums text-slate-800 max-md:order-2 max-md:ml-auto max-md:pt-0" title="จำนวน × ราคา − ส่วนลด (ยอดที่ลงใบ)"><span className="md:hidden">¥</span>{n2(calc)}</span>
                         {thb && <><span className="pt-1 text-right text-[11px] text-slate-300 max-md:hidden" title="ยังไม่ลงใบ — ยืนยันแล้วขึ้นยอดบาท">—</span><span className="pt-1 text-right text-[11px] text-slate-300 max-md:hidden">—</span></>}
-                        <span className="flex items-center justify-end gap-1 max-md:order-3 max-md:basis-full">
+                        <span className="flex flex-col items-end gap-1 max-md:order-3 max-md:basis-full">
+                          {g && ((l.level !== "ok" || l.manual) || (l.warns ?? []).length > 0) && (
+                            <span className="max-md:hidden flex flex-wrap justify-end gap-1 max-w-full">
+                              {(l.level !== "ok" || l.manual) && <LevelBadge l={l} />}
+                              {(l.warns ?? []).length > 0 && <span className={`${CHIP_WARN} cursor-help`} title={(l.warns ?? []).join("\n")}>เตือน {(l.warns ?? []).length}</span>}
+                            </span>
+                          )}
+                          <span className="flex items-center justify-end gap-1">
                           {busyRow ? <span className="text-[11px] text-slate-400">กำลังลงใบ…</span>
                             : l.level === "fee"
                               ? <button type="button" disabled={ro} onClick={() => decide(b.id, i, "expense")} title="ลงใบเป็นรายการค่าใช้จ่าย" className="h-7 px-2 text-[11px] rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50">เป็นค่าใช้จ่าย</button>
@@ -825,6 +928,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                                 ? <button type="button" disabled={ro} onClick={() => decide(b.id, i, "confirmed")} title="ยืนยัน = ลงใบสำคัญทันที" className="h-7 px-2.5 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ ยืนยัน</button>
                                 : <button type="button" disabled={ro} onClick={() => openPick(b.id, i)} className="h-7 px-2 text-[11px] rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50">เลือกจับคู่</button>}
                           {!ro && !busyRow && <RowMenu items={menu} />}
+                          </span>
                         </span>
                       </div>
                     );
@@ -938,7 +1042,6 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                   <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-t border-slate-100 bg-slate-50/60">
                     {(() => {
                       const left = undecidedCount(lines);
-                      const highN = lines.filter((l) => l.level === "ok" && l.match_key && !l.decision && !l.move_po).length;
                       const outsideN = lines.filter((l) => l.decision === "confirmed" && !l.is_fee && !l.match_key && l.sku_pick && (l.voucher_line_ids ?? []).length > 0).length;
                       return (<>
                         <span className="text-xs text-slate-600">{left === 0 ? <span className="text-emerald-700">✓ ลงใบครบทุกแถวแล้ว ({lines.length})</span> : <>ลงใบแล้ว {decided}/{lines.length} แถว · <span className="text-amber-700">เหลือเช็ก {left}</span></>}</span>
@@ -948,7 +1051,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                           </span>
                         )}
                         <span className="flex-1" />
-                        {highN > 0 && <button type="button" onClick={() => confirmHigh(b.id)} disabled={applying.size > 0} className="h-8 px-2.5 text-xs rounded-md border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">✓ ยืนยันทุกแถวที่มั่นใจสูง ({highN})</button>}
+                        {/* ★ 2026-11-16 ปุ่ม "ยืนยันทุกแถวที่มั่นใจ" ย้ายไปหัวตาราง (ข้อ 5 · ถามก่อน) */}
                         <RowMenu label="⋯" title="ตัวเลือกบิลนี้" items={[
                           { label: "จับคู่ใหม่ (แถวที่ยังไม่ได้ยืนยัน)", onClick: () => void patch(b.id, "rematch") },
                           { label: "จำคู่ที่ยืนยันไว้ ครั้งหน้าจับให้เอง", checked: remember, onClick: () => setRemember((v) => !v) },
@@ -962,6 +1065,14 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
               </div>
             );
           })}
+          {/* ★ 2026-11-16 ข้อ 6: วิธีใช้คีย์บอร์ด (เฉพาะคอม) */}
+          {!readonly && navRows.some((x) => !x.done) && (
+            <div className="hidden md:block text-[11px] text-slate-400">แป้นพิมพ์: <b className="font-medium text-slate-500">↑ ↓</b> เลื่อนกรอบฟ้า · <b className="font-medium text-slate-500">Enter</b> = ยืนยันแถวที่มีกรอบ (ค่าใช้จ่าย = เป็นค่าใช้จ่าย · ยังไม่จับคู่ = เปิดเลือกจับคู่) แล้วไปแถวถัดไป · กดที่แถวเพื่อย้ายกรอบ</div>
+          )}
+          <ConfirmDialog open={!!highAsk} onClose={() => setHighAsk(null)} onConfirm={() => { const a = highAsk; setHighAsk(null); if (a) confirmHigh(a.billId); }}
+            title={`ลงใบ ${highAsk?.n ?? 0} แถวที่ระบบมั่นใจ?`}
+            message="ยืนยันทุกแถวที่จับคู่แล้วและระบบมั่นใจสูงในบิลนี้ — ลงใบสำคัญทันที (แถว ให้เช็ก และแถวที่ยังไม่จับคู่ ไม่รวม) · แก้ทีละแถวได้ภายหลังด้วยปุ่ม แก้"
+            confirmText={`ลงใบ ${highAsk?.n ?? 0} แถว`} cancelText="ยกเลิก" />
           {/* ★ 2026-11-16 รวมทุกบิล (ข้อ 2) — ใบที่รวมหลายบิลร้าน เทียบกับกระดาษทั้งชุดได้ในบรรทัดเดียว */}
           {bills.length >= 2 && (() => {
             const all = bills.map((b) => { const ls = draft[b.id] ?? b.lines; return { t: billTotals(ls, b.total_amount, sums[b.id] ?? b.summary ?? null), thbSum: thb ? ls.reduce((a, l) => a + (l.decision === "skip" ? 0 : rowThb(l)?.total_thb ?? 0), 0) : 0 }; });
