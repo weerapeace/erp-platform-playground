@@ -27,7 +27,8 @@ type Mem = { liked: MemEntry[]; disliked: MemEntry[]; rules: MemEntry[] };
 /** quota = นับเป็น "ครั้ง" เสมอ (ระบบแปลงงบบาทเป็นครั้งให้) · model/est_thb มาเฉพาะคนที่มีสิทธิ์ดูค่าใช้จ่าย (admin.paid_services) — พนักงานไม่เห็นเงิน (เจ้าของสั่ง 2026-11-16) */
 type Status = {
   allowed?: boolean; can_see_cost?: boolean; model?: string; est_thb?: number; images: number; configured: boolean;
-  quota: { used: number; limit: number | null; remaining: number | null; on: boolean };
+  /** shared = ตัวที่จำกัดคืองบรวมของทีม (ไม่ใช่โควตาของคนนี้) */
+  quota: { used: number; limit: number | null; remaining: number | null; shared?: boolean; on: boolean };
 };
 const RECOMMENDED = 4;
 let seq = 0;
@@ -186,11 +187,13 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
   };
 
   const thisMonth = quota
-    ? quota.remaining !== null && quota.limit !== null
-      ? t(`ใช้ได้อีก ${quota.remaining} ครั้ง (จาก ${quota.limit} ครั้งเดือนนี้)`, `${quota.remaining} uses left (of ${quota.limit} this month)`)
-      : t(`เดือนนี้ใช้ไป ${quota.used} ครั้ง`, `Used ${quota.used} times this month`)
+    ? quota.remaining !== null && quota.shared
+      ? t(`ใช้ได้อีกประมาณ ${quota.remaining.toLocaleString("th-TH")} ครั้ง (งบรวมของทีมเดือนนี้)`, `About ${quota.remaining.toLocaleString("en-US")} uses left (team budget this month)`)
+      : quota.remaining !== null && quota.limit !== null
+        ? t(`ใช้ได้อีก ${quota.remaining} ครั้ง (จาก ${quota.limit} ครั้งเดือนนี้)`, `${quota.remaining} uses left (of ${quota.limit} this month)`)
+        : t(`เดือนนี้ใช้ไป ${quota.used} ครั้ง`, `Used ${quota.used} times this month`)
     : "";
-  const usedPct = quota && quota.limit ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : null;
+  const usedPct = quota && quota.limit && !quota.shared ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : null;
   return (
     <div className="space-y-2" data-insert-ai>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-[11.5px] text-slate-600">

@@ -24,7 +24,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { imageParts, imagesToDataUrls, openAiKey, productDetailModel } from "@/lib/ai-caption";
 import { AI_MODEL_CHOICES, isReasoningModel } from "@/lib/ai-caption-models";
-import { aiChat, loadServiceSettings, serviceAccess, usageAllowance } from "@/lib/paid-services-server";
+import { aiChat, callTokensFor, loadServiceSettings, serviceAccess, usageAllowance } from "@/lib/paid-services-server";
+import { callCostThb } from "@/lib/paid-services";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { parentImageKeys } from "@/lib/product-image-keys";
 import { cleanText, DESC_AI_MEMORY_KEY, hasMeasurement, isSimilar, memoryFor, normalizeMemory } from "@/lib/desc-ai-memory";
@@ -48,6 +49,11 @@ async function modelFor(): Promise<string> {
   const s = await loadServiceSettings();
   return s.get(KEY)?.model || (await productDetailModel());
 }
+/** ราคาต่อครั้ง (บาท) — มีประวัติใช้จริง = เฉลี่ยจริง (ตรงกับศูนย์ AI) · ยังไม่เคยใช้ = ประมาณจากจำนวนรูป */
+async function perCallThb(model: string, images: number): Promise<number> {
+  const t = await callTokensFor(KEY);
+  return t.source === "history" ? callCostThb(model, t) : estThb(model, images);
+}
 /** ค่าใช้จ่ายประมาณต่อครั้ง (บาท) — รูปละ ~2,800 token (คิดเผื่อ) + ข้อความ ~2,500 · ตอบ ~900 (+เวลาคิดรุ่น 5.x) */
 function estThb(model: string, images: number): number {
   const m = AI_MODEL_CHOICES.find((x) => x.id === model) ?? AI_MODEL_CHOICES[0];
@@ -70,7 +76,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     serviceAccess(KEY, { request }),
     apiCan(request, "admin.paid_services"),
   ]);
-  const perCall = estThb(model, Math.max(1, keys.length));
+  const perCall = await perCallThb(model, Math.max(1, keys.length));
   const quota = await usageAllowance(KEY, { request }, perCall);
   return NextResponse.json({ data: {
     allowed, can_see_cost: canSeeCost, images: keys.length, quota, configured: !!openAiKey(),
@@ -194,6 +200,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch { /* audit ล้มไม่ควรทำให้ผู้ใช้เสียงาน */ }
 
-  const quota = await usageAllowance(KEY, { request }, estThb(model, Math.max(1, images.length)));
+  const quota = await usageAllowance(KEY, { request }, await perCallThb(model, Math.max(1, images.length)));
   return NextResponse.json({ data: { items, mismatch, images: images.length, quota }, error: null });
 }

@@ -197,28 +197,30 @@ export async function effectiveModel(key: string, fallback?: string | null, plac
  * "ใช้ได้อีก N ครั้ง" ของคนที่กด (เจ้าของสั่ง 2026-11-16: พนักงานเห็นเป็นจำนวนครั้ง ไม่เห็นเงิน)
  *   รวมทุกขีดจำกัด → เอาตัวที่น้อยสุด: โควตาฟีเจอร์ (ครั้ง หรือ บาท÷ราคาต่อครั้ง) · งบรายคน/รายฟีเจอร์/รวม (เฉพาะแบบ "หยุด")
  *   limit = used + remaining (ประมาณ) · ไม่มีขีดจำกัด = limit/remaining null
+ *   shared = ตัวที่จำกัดคืองบรวมของทีม (งบรายฟีเจอร์/งบรวม) ไม่ใช่ของคนนี้ → หน้าจอบอก "งบรวมของทีม" แทน "จาก M ครั้ง"
  */
-export async function usageAllowance(key: string, ctx: UseCtx | undefined, perCallThb: number): Promise<{ used: number; limit: number | null; remaining: number | null; on: boolean }> {
+export async function usageAllowance(key: string, ctx: UseCtx | undefined, perCallThb: number): Promise<{ used: number; limit: number | null; remaining: number | null; shared: boolean; on: boolean }> {
   const userId = await resolveUser(ctx);
   const on = await serviceOn(key, ctx?.place);
   const b = await loadBudget();
   const sp = await monthSpend();
   const used = userId ? sp.countByKeyUser.get(keyUser(key, userId)) ?? 0 : 0;
-  const rem: number[] = [];
+  const rem: { n: number; shared: boolean }[] = [];
+  const pushThb = (left: number, shared: boolean) => { const c = callsFromThb(left, perCallThb); if (c !== null) rem.push({ n: c, shared }); };
   const cc = countCap(b, key, userId);
   if (cc !== null && userId) {
-    if (quotaUnit(b, key) === "count") rem.push(Math.max(0, cc - used));
-    else { const c = callsFromThb(cc - (sp.thbByKeyUser.get(keyUser(key, userId)) ?? 0), perCallThb); if (c !== null) rem.push(c); }
+    if (quotaUnit(b, key) === "count") rem.push({ n: Math.max(0, cc - used), shared: false });
+    else pushThb(cc - (sp.thbByKeyUser.get(keyUser(key, userId)) ?? 0), false);
   }
   if (b.over_action === "stop") {
-    const pushThb = (left: number) => { const c = callsFromThb(left, perCallThb); if (c !== null) rem.push(c); };
     const uc = userCap(b, userId);
-    if (uc && userId) pushThb(uc - (sp.byUser.get(userId) ?? 0));
-    if (b.per_service[key]) pushThb(b.per_service[key] - (sp.byKey.get(splitPlaceKey(key).key) ?? 0));
-    if (b.monthly_thb) pushThb(b.monthly_thb - sp.total);
+    if (uc && userId) pushThb(uc - (sp.byUser.get(userId) ?? 0), false);
+    const base = splitPlaceKey(key).key;
+    if (b.per_service[base]) pushThb(b.per_service[base] - (sp.byKey.get(base) ?? 0), true);
+    if (b.monthly_thb) pushThb(b.monthly_thb - sp.total, true);
   }
-  const remaining = rem.length ? Math.min(...rem) : null;
-  return { used, limit: remaining === null ? null : used + remaining, remaining, on };
+  const best = rem.length ? rem.reduce((a, x) => (x.n < a.n || (x.n === a.n && !x.shared) ? x : a)) : null;
+  return { used, limit: best === null ? null : used + best.n, remaining: best?.n ?? null, shared: !!best?.shared, on };
 }
 
 // ── ใครใช้ได้ (รายฟีเจอร์) — ui_config PAID_ACCESS_KEY · แคช 30 วิ
