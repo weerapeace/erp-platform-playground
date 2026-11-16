@@ -18,10 +18,18 @@ import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { ToolMenu, type ToolMenuItem } from "@/components/canvas-cards/drawers";
 import { useCardKit } from "@/components/canvas-cards/use-card-kit";
 import { MenuPagePickerModal } from "@/components/menu-page-picker";
-import { dueLabel, isOverdue, PRIORITY_META, type PlanItem } from "@/lib/team-plan";
+import { dueLabel, isOverdue, planCoverSource, PRIORITY_META, type PlanItem } from "@/lib/team-plan";
 import { patchPlanItem } from "@/lib/team-plan-client";
 import { boardPlanLinks, planLinkPatches, PLAN_CARD_KIND, TEAM_PLAN_BOARD } from "@/lib/team-plan-board";
-import { erpPageCardSkeleton, planCardSkeleton, planCardStroke, planCardText, stickyNoteSkeleton } from "./board-cards";
+import { r2ImageUrl, withImageWidth } from "@/lib/r2-image";
+import { erpPageCardSkeleton, isEmptySync, planCardSkeleton, planCardSync, stickyNoteSkeleton } from "./board-cards";
+
+/** URL รูปเล็กหน้าการ์ดงาน (รูปปกที่แนบเอง → รูปของสิ่งที่ผูก → ไม่มี) · ขอรูปย่อ 160px กันกระดานหนัก */
+const planCoverUrl = (t: PlanItem): string | null => {
+  const s = planCoverSource(t.plan);
+  if (!s) return null;
+  return "key" in s ? r2ImageUrl(s.key, 160) : withImageWidth(s.url, 160) ?? s.url;
+};
 import { AddToPlanModal } from "./add-to-plan";
 
 // Excalidraw ก้อนใหญ่ — โหลดเฉพาะตอนเปิดมุมมองนี้
@@ -74,24 +82,33 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
     setOnBoard((cur) => (cur.size === ids.size && [...ids].every((x) => cur.has(x)) ? cur : ids));
   }, []);
 
-  /** การ์ดงานในแผน → ข้อความ/สีขอบตามข้อมูลล่าสุด (เปลี่ยนเฉพาะใบที่ต่าง · ไม่มีอะไรต่าง = ไม่บันทึก) */
+  /** การ์ดงานในแผน → หน้าตา/ข้อมูล/รูปล่าสุด ทีละชิ้น (board-cards planCardSync) — การ์ดแบบเก่าแปลงเป็นแบบใหม่ให้เอง
+   *  ไม่เปลี่ยน id กรอบการ์ด (เส้นผูกงานไม่หลุด) · ไม่มีอะไรต่าง = ไม่บันทึก */
   const refreshPlanCards = useCallback(async () => {
     const ctrl = sketchRef.current; if (!ctrl || !readyRef.current) return;
     const map = new Map(itemsRef.current.map((t) => [t.id, t]));
     const now = new Date();
-    let need = false;
+    const groups = new Map<string, Record<string, unknown>[]>();
     for (const el of ctrl.getElements()) {
+      if (el.isDeleted) continue;
       const d = el.customData as Record<string, unknown> | undefined;
-      if (d?.kind !== PLAN_CARD_KIND) continue;
-      const t = map.get(String(d.id ?? "")); if (!t) continue;
-      if ((el.type === "text" && el.text !== planCardText(t, now)) || (el.type === "rectangle" && el.strokeColor !== planCardStroke(t, now))) { need = true; break; }
+      const gid = (el.groupIds as string[] | undefined)?.[0];
+      if (d?.kind !== PLAN_CARD_KIND || !gid) continue;
+      const arr = groups.get(gid) ?? []; arr.push(el); groups.set(gid, arr);
     }
-    if (!need) return;
-    await ctrl.refreshCards(async ({ kind, id }) => {
-      if (kind !== PLAN_CARD_KIND) return null;
-      const t = map.get(id); if (!t) return null;
-      return { text: planCardText(t, now), stroke: planCardStroke(t, now), data: { title: t.title } };
-    });
+    const patches = new Map<string, Record<string, unknown>>();
+    const remove = new Set<string>();
+    const insert: Record<string, unknown>[] = [];
+    for (const els of groups.values()) {
+      const t = map.get(String((els[0].customData as Record<string, unknown>).id ?? "")); if (!t) continue;
+      const s = planCardSync(els, t, now, planCoverUrl(t));
+      if (isEmptySync(s)) continue;
+      for (const [id, p] of s.patches) patches.set(id, p);
+      for (const id of s.remove) remove.add(id);
+      insert.push(...s.insert);
+    }
+    if (patches.size || remove.size) ctrl.patchElements((el) => { const id = String(el.id); return remove.has(id) ? { isDeleted: true } : patches.get(id) ?? null; });
+    if (insert.length) await ctrl.insert(insert, { scene: true });
   }, []);
   // ข้อมูลงานเปลี่ยน (แก้ในป๊อป · ติ๊กเสร็จ · โหลดใหม่) → การ์ดบนกระดานเปลี่ยนตาม
   useEffect(() => { if (ready) void serial(refreshPlanCards); }, [items, ready, serial, refreshPlanCards]);
@@ -141,7 +158,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
     const ctrl = sketchRef.current;
     if (!ctrl) { toast.info("กระดานยังโหลดไม่เสร็จ ลองอีกครั้ง"); return; }
     const k = at ? 0 : (placeCount.current++ % 6) * 28;
-    const els = planCardSkeleton(t).map((el) => ({ ...el, x: (Number(el.x) || 0) + k, y: (Number(el.y) || 0) + k }));
+    const els = planCardSkeleton(t, new Date(), planCoverUrl(t)).map((el) => ({ ...el, x: (Number(el.x) || 0) + k, y: (Number(el.y) || 0) + k }));
     void ctrl.insert(els, at ? { at } : undefined);
     setOnBoard((cur) => new Set(cur).add(t.id));
   }, [toast]);

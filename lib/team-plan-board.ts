@@ -8,7 +8,7 @@
  *     → งานนั้น "ผูกกับ" ของชิ้นนั้น · เก็บใน metadata.plan.linked หลังกระดานบันทึก (board-view → PATCH linked)
  *   - กระดานเป็นตัวกำหนดเฉพาะงานที่มีการ์ดอยู่บนกระดาน (ลบเส้น = เลิกผูก) · งานที่ไม่มีการ์ดบนกระดาน = ไม่แตะ
  */
-import { cleanPlanLinked, PLAN_LINK_KINDS, sameLinked, type PlanLinkedRef } from "@/lib/team-plan";
+import { cleanImageUrl, cleanPlanLinked, PLAN_LINK_KINDS, sameLinked, type PlanLinkedRef } from "@/lib/team-plan";
 
 export const TEAM_PLAN_BOARD = { entityType: "team_plan_board", entityId: "main" } as const;
 export const PLAN_CARD_KIND = "team_plan";
@@ -49,7 +49,9 @@ export function boardPlanLinks(elements: El[]): { onBoard: Set<string>; links: M
     // งาน↔งาน (ลำดับงาน) ยังไม่เก็บ · ชนิดที่ไม่รู้จัก (เช่น การ์ดของโมดูลอื่นในอนาคต) = ไม่ผูก
     if (!plan || other.kind === PLAN_CARD_KIND || !Object.prototype.hasOwnProperty.call(PLAN_LINK_KINDS, other.kind)) continue;
     const list = raw.get(plan.id) ?? [];
-    list.push({ kind: other.kind, id: other.kind === "erp_page" ? str(other.data.href) || other.id : other.id, label: refLabel(other.kind, other.data) });
+    // รูปของสิ่งที่ผูก (จากข้อมูลบนการ์ด) → รูปหน้าการ์ดงาน ถ้างานไม่ได้แนบรูปปกเอง
+    const image = cleanImageUrl(other.data.image_url) ?? cleanImageUrl(other.data.cover_url) ?? (other.kind === "asset" ? cleanImageUrl(other.data.url) : null);
+    list.push({ kind: other.kind, id: other.kind === "erp_page" ? str(other.data.href) || other.id : other.id, label: refLabel(other.kind, other.data), ...(image ? { image } : {}) });
     raw.set(plan.id, list);
   }
   const links = new Map<string, PlanLinkedRef[]>();

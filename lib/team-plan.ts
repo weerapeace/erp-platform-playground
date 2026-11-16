@@ -65,13 +65,15 @@ export type PlanMeta = {
   watchers: PlanWatcher[];                          // 👀 คนติดตาม — กระดิ่งบอกตอนงานเสร็จ
   estimate_min: number | null;                      // ⏱ เวลาที่คาดว่าใช้ (นาที) — รวมเป็นภาระงานต่อวัน
   linked: PlanLinkedRef[];                          // 🔗 ของที่ผูกกับงาน (ลากเส้นบนกระดานแผนงาน) — 2026-11-15
+  cover: string | null;                             // 🖼 รูปปกที่แนบเอง (r2_key) — รูปเล็กหน้าการ์ดบนกระดาน · 2026-11-16
 };
 export type PlanWatcher = { id: string; name: string };
 
 // ── 🔗 ผูกงานกับของในระบบอื่น (เจ้าของเลือก 2026-11-15 "ผูกข้อมูลจริงเลย") ──
 // ลากเส้นบนกระดานแผนงาน จากการ์ดงาน → การ์ดใบงาน/SKU/งาน/คอนเทนต์ ฯลฯ = ผูกจริง (เก็บใน metadata.plan.linked)
 // กระดานเป็นตัวกำหนด: งานที่มีการ์ดบนกระดาน → รายการผูก = ตามเส้นที่ต่ออยู่ (ลบเส้น = เลิกผูก) · ตรรกะอ่านเส้นอยู่ที่ lib/team-plan-board
-export type PlanLinkedRef = { kind: string; id: string; label: string };
+/** image = URL รูปของสิ่งที่ผูก (เก็บจากการ์ดบนกระดานตอนลากเส้น) — ใช้เป็นรูปหน้าการ์ดงานเมื่อไม่ได้แนบรูปปกเอง */
+export type PlanLinkedRef = { kind: string; id: string; label: string; image?: string };
 export const PLAN_LINKED_MAX = 30;
 /** ชนิดของที่ผูกได้ (= ชนิดการ์ดบนกระดาน) · href = เปิดเรื่องนั้น (ไม่มี = โชว์ชื่ออย่างเดียว) */
 export const PLAN_LINK_KINDS: Record<string, { label: string; href?: (id: string) => string }> = {
@@ -88,18 +90,39 @@ export const PLAN_LINK_KINDS: Record<string, { label: string; href?: (id: string
   folder: { label: "โฟลเดอร์" },
 };
 const isInternalHref = (v: string) => v.startsWith("/") && !v.startsWith("//") && !/[\s\\]/.test(v);
+/** URL รูป: ลิงก์ในเว็บ (/api/r2-image…) หรือ https เท่านั้น · ยาวสุด 600 · อย่างอื่น = ไม่มีรูป */
+export function cleanImageUrl(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s || s.length > 600 || /[\s\\"<>]/.test(s)) return null;
+  return isInternalHref(s) || /^https:\/\/[^/]/.test(s) ? s : null;
+}
+/** r2_key ของรูปปก: ตัวอักษรปลอดภัย · ยาวสุด 300 · ว่าง/ค่าแปลก = ไม่มีรูปปก */
+export function cleanCoverKey(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  return s && s.length <= 300 && /^[\w\-./:]+$/.test(s) && !s.includes("..") ? s : null;
+}
+/** ที่มาของรูปหน้าการ์ดงาน: รูปปกที่แนบเองก่อน → รูปของสิ่งที่ผูกตัวแรกที่มีรูป → ไม่มี (เจ้าของเลือก 2026-11-16)
+ *  คืน { key } = r2_key (หน้าเว็บแปลงเป็น URL เอง) หรือ { url } = URL พร้อมใช้ */
+export function planCoverSource(plan: { cover: string | null; linked: PlanLinkedRef[] }): { key: string } | { url: string } | null {
+  if (plan.cover) return { key: plan.cover };
+  const hit = plan.linked.find((r) => r.image);
+  return hit?.image ? { url: hit.image } : null;
+}
 /** รายการผูก: ชนิดต้องรู้จัก · id ไม่ว่าง (หน้าใน ERP ต้องเป็นลิงก์ในเว็บ) · ไม่ซ้ำ · สูงสุด PLAN_LINKED_MAX */
 export function cleanPlanLinked(raw: unknown): PlanLinkedRef[] {
   if (!Array.isArray(raw)) return [];
   const out: PlanLinkedRef[] = [];
   for (const v of raw) {
-    const o = (v ?? {}) as { kind?: unknown; id?: unknown; label?: unknown };
+    const o = (v ?? {}) as { kind?: unknown; id?: unknown; label?: unknown; image?: unknown };
     const kind = typeof o.kind === "string" ? o.kind : "";
     const id = typeof o.id === "string" ? o.id.trim().slice(0, 300) : "";
     if (!Object.prototype.hasOwnProperty.call(PLAN_LINK_KINDS, kind) || !id || (kind === "erp_page" && !isInternalHref(id))) continue;
     if (out.some((x) => x.kind === kind && x.id === id)) continue;
     const label = typeof o.label === "string" ? o.label.replace(/\s+/g, " ").trim().slice(0, 120) : "";
-    out.push({ kind, id, label: label || PLAN_LINK_KINDS[kind].label });
+    const image = cleanImageUrl(o.image);
+    out.push({ kind, id, label: label || PLAN_LINK_KINDS[kind].label, ...(image ? { image } : {}) });
     if (out.length >= PLAN_LINKED_MAX) break;
   }
   return out;
@@ -110,7 +133,7 @@ export const linkedHref = (r: { kind: string; id: string }): string | null =>
 /** รายการผูกเท่ากันไหม (ไม่สนลำดับ · เทียบชนิด+id+ชื่อ) — ใช้ตัดสินว่าต้องบันทึกไหม */
 export function sameLinked(a: PlanLinkedRef[], b: PlanLinkedRef[]): boolean {
   if (a.length !== b.length) return false;
-  const key = (r: PlanLinkedRef) => `${r.kind}\u0000${r.id}\u0000${r.label}`;
+  const key = (r: PlanLinkedRef) => `${r.kind}\u0000${r.id}\u0000${r.label}\u0000${r.image ?? ""}`;
   const s = new Set(a.map(key));
   return b.every((r) => s.has(key(r)));
 }
@@ -217,6 +240,7 @@ export function normalizePlanMeta(raw: unknown, now: Date = new Date()): PlanMet
     watchers: cleanPlanWatchers(r.watchers),
     estimate_min: cleanEstimate(r.estimate_min),
     linked: cleanPlanLinked(r.linked),
+    cover: cleanCoverKey(r.cover),
   };
 }
 

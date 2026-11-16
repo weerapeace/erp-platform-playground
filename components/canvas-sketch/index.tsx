@@ -51,8 +51,9 @@ const socialTextsOf = (els: any[]) => els.filter((e) => !e.isDeleted && e.type =
 export type CanvasSketchControls = {
   isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
   /** opts.fitImages=false → ไม่ต้องวัดสัดส่วนรูปจริง (ใช้กรอบที่ส่งมาเลย) — แทรกการ์ดจำนวนมากพร้อมรูปได้ทันที ไม่ต้องรอโหลดทีละใบ
-   *  opts.at = จุดบนจอ (clientX/Y เช่น ตอนลากของมาวาง) → วางมุมซ้ายบนของการ์ดตรงนั้นแทนกลางจอ */
-  insert: (skeletons: Record<string, unknown>[], opts?: { fitImages?: boolean; at?: { clientX: number; clientY: number } }) => Promise<void>;
+   *  opts.at = จุดบนจอ (clientX/Y เช่น ตอนลากของมาวาง) → วางมุมซ้ายบนของการ์ดตรงนั้นแทนกลางจอ
+   *  opts.scene = true → x,y ใน skeleton เป็นพิกัดจริงบนกระดานแล้ว (ไม่เลื่อนไปกลางจอ) — ใช้เติมชิ้นเข้าการ์ดเดิม (เช่น รูปหน้าการ์ดงานในแผน) */
+  insert: (skeletons: Record<string, unknown>[], opts?: { fitImages?: boolean; at?: { clientX: number; clientY: number }; scene?: boolean }) => Promise<void>;
   listCards: () => { kind: string; data: Record<string, unknown> }[];
   /** อ่าน element ดิบบนกระดาน (อ่านอย่างเดียว) — โมดูลที่ต้องรู้ตำแหน่ง/frame ของการ์ด เช่น บอร์ดจ่ายงาน (การ์ดอยู่ในกรอบโต๊ะไหน) */
   getElements: () => Record<string, unknown>[];
@@ -385,7 +386,8 @@ export function CanvasSketch({
             st,
           );
           // ทิ้ง image element ที่โหลดรูปไม่สำเร็จ (ไม่มี fileId) กัน Excalidraw error
-          const placed = work.filter((s) => s.type !== "image" || s.fileId).map((s) => ({ ...s, x: (Number(s.x) || 0) + center.x, y: (Number(s.y) || 0) + center.y }));
+          const off = opts?.scene ? { x: 0, y: 0 } : center;
+          const placed = work.filter((s) => s.type !== "image" || s.fileId).map((s) => ({ ...s, x: (Number(s.x) || 0) + off.x, y: (Number(s.y) || 0) + off.y }));
           const els = lib.convertToExcalidrawElements(placed);
           api.updateScene({ elements: [...api.getSceneElements(), ...els] });
           if (editable) queueSave();

@@ -23,6 +23,7 @@ import {
 } from "@/lib/team-plan";
 import { deletePlanItem, duplicatePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
 import { RecordFilesField } from "@/components/record-files";
+import { ImageAttachKeys } from "@/components/image-attach";
 import { CommentThread } from "@/components/comment-thread";
 import { RecordHistoryInline } from "@/components/activity-feed/record-history-drawer";
 import { PlanTagChip, PlanTagInput } from "./tag-input";
@@ -67,6 +68,7 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
   const [note, setNote] = useState(initNote);
   const [check, setCheck] = useState<ChecklistSummary | null>(item.checklist ?? null);
   const [tags, setTags] = useState<string[]>(item.plan.tags);
+  const [cover, setCover] = useState<string | null>(item.plan.cover);
   const [watchers, setWatchers] = useState<PlanWatcher[]>(item.plan.watchers);
   const [pickWatcher, setPickWatcher] = useState(false);
   const [estimate, setEstimate] = useState<number | null>(item.plan.estimate_min);
@@ -107,8 +109,9 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
     if (JSON.stringify(tags) !== JSON.stringify(item.plan.tags)) p.tags = tags;
     if (JSON.stringify(watchers.map((w) => w.id)) !== JSON.stringify(item.plan.watchers.map((w) => w.id))) p.watchers = watchers;
     if (estimate !== item.plan.estimate_min) p.estimate_min = estimate;
+    if (cover !== item.plan.cover) p.cover = cover;
     return p;
-  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, repeatNth, repeatWd, waitingOn, waitingNote, tags, watchers, estimate, item]);
+  }, [title, note, initNote, priority, important, due, who, remind, repeatEvery, repeatN, repeatNth, repeatWd, waitingOn, waitingNote, tags, watchers, estimate, cover, item]);
   const dirty = Object.keys(patch).length > 0;
 
   const save = async (extra: PlanPatch = {}) => {
@@ -384,6 +387,15 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
                     className="h-8 rounded-lg border border-emerald-300 bg-white px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">ปิดงาน</button>
                 </div>
               )}
+            </div>
+            {/* 🖼 รูปปก = รูปเล็กหน้าการ์ดบนกระดานแผนงาน (เจ้าของเลือก 2026-11-16: แนบเอง → ไม่แนบใช้รูปของสิ่งที่ผูก) */}
+            <div className={`${card} order-4 p-3 md:order-none`}>
+              <label className={lbl}><Icon name="image" /> รูปปก <span className="font-normal text-slate-400">· รูปเล็กหน้าการ์ดบนกระดาน · ลากวาง / Ctrl+V / เลือกไฟล์</span></label>
+              <ImageAttachKeys value={cover ? [cover] : []} onChange={(keys) => setCover(keys.length ? keys[keys.length - 1] : null)} folder="team-plan" maxSize={800} disabled={ro} />
+              {!cover && (() => {
+                const hit = item.plan.linked.find((r) => r.image);
+                return <p className="mt-1 text-[11px] text-slate-400">{hit ? `ไม่แนบ = ใช้รูปของ "${hit.label}" ที่ผูกไว้` : "ไม่แนบ = ใช้รูปของสิ่งที่ผูกไว้บนกระดาน (ถ้ามี)"}</p>;
+              })()}
             </div>
             {(item.plan.linked.length > 0 || item.plan.source) && (
               <div className={`${card} order-4 space-y-2 p-3 md:order-none`}>

@@ -5,7 +5,8 @@
  *     important?, star? (true = ⭐ งานหลักวันนี้ · สูงสุด 3 ต่อคนต่อวัน), waiting? (null | { note }), repeat? (null | { every, n }), remind?, links?,
  *     snooze? ("1h" = เตือนอีกครั้งใน 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 — กำหนดส่งไม่เปลี่ยน · ตัวตั้งเวลาเตือนตอนถึงเวลา),
  *     tags? (string[]) · watchers? ([{id,name}] — กระดิ่งบอกตอนเสร็จ) · estimate_min? (นาที | null)
- *     linked? ([{kind,id,label}] — ของที่ผูกกับงาน · กระดานแผนงานส่งมาเองหลังลาก/ลบเส้น · ป๊อปงานกด × เลิกผูกได้) }
+ *     linked? ([{kind,id,label,image?}] — ของที่ผูกกับงาน · กระดานแผนงานส่งมาเองหลังลาก/ลบเส้น · ป๊อปงานกด × เลิกผูกได้)
+ *     cover? (r2_key รูปปกที่แนบเอง · null = เอาออก — รูปเล็กหน้าการ์ดบนกระดาน) }
  *   ติ๊กเสร็จงานทำซ้ำ → สร้างรอบถัดไปให้ (คืน next) · มอบให้คนใหม่ → กระดิ่งบอกคนนั้น
  * DELETE /api/team-plan/[id]  — คนสร้าง หรือคนที่มีสิทธิ์ tasks.delete
  * สิทธิ์แก้ tasks.edit · ทุกครั้งเขียนประวัติ (audit_logs entity record_task)
@@ -18,7 +19,7 @@ import { writeAudit } from "@/lib/audit";
 import { isUuid, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
 import { addDaysYmd, todayBangkok } from "@/lib/date";
-import { asPriority, cleanEstimate, cleanPlanLinked, cleanPlanTags, cleanPlanWatchers, dueLabel, MAX_STARS, normalizePlanMeta, PLAN_NOTE_MAX, starCountFor, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, TEAM_PLAN_MODULE } from "@/lib/team-plan";
+import { asPriority, cleanCoverKey, cleanEstimate, cleanPlanLinked, cleanPlanTags, cleanPlanWatchers, dueLabel, MAX_STARS, normalizePlanMeta, PLAN_NOTE_MAX, starCountFor, TEAM_PLAN_CHECK, TEAM_PLAN_FILES, TEAM_PLAN_MODULE } from "@/lib/team-plan";
 import { createNextRepeat, notifyPlanAssignee, notifyPlanWatchers, PLAN_COLS, snoozeMetadata, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 import { deleteRecordFilesFor } from "@/lib/record-files";
 
@@ -89,6 +90,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
   if (body.watchers !== undefined) { plan.watchers = cleanPlanWatchers(body.watchers); planChanged = true; }
   if (body.estimate_min !== undefined) { plan.estimate_min = cleanEstimate(body.estimate_min); planChanged = true; }
   if (body.linked !== undefined) { plan.linked = cleanPlanLinked(body.linked); planChanged = true; }
+  if (body.cover !== undefined) { plan.cover = cleanCoverKey(body.cover); planChanged = true; }
   if (body.star !== undefined) {
     if (body.star) {
       // ⭐ สูงสุด 3 งานต่อคนต่อวัน (นับตามผู้รับผิดชอบ · ไม่มี = คนสร้าง)

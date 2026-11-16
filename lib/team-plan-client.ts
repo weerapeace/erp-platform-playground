@@ -17,6 +17,8 @@ export type PlanPatch = Partial<{
   tags: string[]; watchers: PlanWatcher[]; estimate_min: number | null;
   /** ของที่ผูกกับงาน (ทั้งชุด) — กระดานแผนงานส่งเองตามเส้นที่ต่ออยู่ */
   linked: PlanLinkedRef[];
+  /** รูปปกที่แนบเอง (r2_key) · null = เอาออก */
+  cover: string | null;
   /** เตือนอีกครั้ง (กำหนดส่งไม่เปลี่ยน): "1h" = อีก 1 ชม. · "tomorrow" = พรุ่งนี้ 09:00 */
   snooze: "1h" | "tomorrow";
 }>;

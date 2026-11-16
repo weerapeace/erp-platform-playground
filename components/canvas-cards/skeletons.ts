@@ -117,7 +117,8 @@ export function dsCardText(s: DsCardInfo, statusLabel?: string | null): string {
 
 export function designSheetCardSkeleton(s: DsCardInfo, statusLabel?: string | null, statusColor?: string | null): Record<string, unknown>[] {
   const gid = `design_sheet-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
-  const data = { kind: "design_sheet", id: s.id, code: s.code, name: s.name, brand_name: s.brand_name ?? null, status: s.status ?? null };
+  // cover_url = รูปหน้าการ์ดงานในแผนที่ลากเส้นผูกใบนี้ (lib/team-plan-board)
+  const data = { kind: "design_sheet", id: s.id, code: s.code, name: s.name, brand_name: s.brand_name ?? null, status: s.status ?? null, cover_url: s.cover_url ?? null };
   const img = s.cover_url ? (withImageWidth(s.cover_url, 480) ?? s.cover_url) : null;
   const text = dsCardText(s, statusLabel);
   const lineCount = text ? text.split("\n").length : 1;

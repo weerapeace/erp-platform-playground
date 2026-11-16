@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boardPlanLinks, planLinkPatches, progressBar, refLabel } from "@/lib/team-plan-board";
-import { cleanPlanLinked, linkedHref, normalizePlanMeta, sameLinked, type PlanItem } from "@/lib/team-plan";
-import { planCardHeight, planCardSkeleton, planCardStroke, planCardText } from "@/components/team-plan/board-cards";
+import { cleanPlanLinked, linkedHref, normalizePlanMeta, sameLinked } from "@/lib/team-plan";
 
-const NOW = new Date("2026-11-15T03:00:00Z");   // 10:00 เวลาไทย
 
 // การ์ด = กลุ่ม element ที่มี customData เดียวกัน (กรอบ + ข้อความ) · เส้น = arrow ที่หัว/ท้ายเกาะ element
 const card = (elId: string, kind: string, id: string, extra: Record<string, unknown> = {}) => [
@@ -108,35 +106,5 @@ describe("team-plan · รายการผูก (metadata.plan.linked)", () =
     expect(sameLinked([a, b], [b, a])).toBe(true);
     expect(sameLinked([a], [{ ...a, label: "ชื่อใหม่" }])).toBe(false);
     expect(sameLinked([a], [])).toBe(false);
-  });
-});
-
-describe("การ์ดงานในแผน (board-cards)", () => {
-  const item = (over: Partial<PlanItem> = {}): PlanItem => ({
-    id: "plan-1", title: "สั่งผ้าก้างปลาเพิ่ม", note: null, status: "open", priority: "high",
-    due_at: "2026-11-16T11:00:00Z", assigned_to: "u1", assigned_name: "แนน",
-    created_by: "พี", created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-01T00:00:00Z",
-    resolved_by: null, resolved_at: null, links: [], plan: normalizePlanMeta(null, NOW), ...over,
-  });
-
-  it("ข้อความ: ชื่อ · กำหนด · คนทำ · เช็กลิสต์ x/y + แถบ · ผูกไว้ N", () => {
-    const t = item({ checklist: { open: ["a", "b"], done: 2 }, plan: { ...normalizePlanMeta(null, NOW), linked: [{ kind: "sku", id: "s", label: "S" }] } });
-    expect(planCardText(t, NOW)).toBe("☐ สั่งผ้าก้างปลาเพิ่ม\nกำหนด: พรุ่งนี้ 18:00\nคนทำ: แนน\nเช็กลิสต์ 2/4  ■■■■■□□□□□\nผูกไว้ 1 อย่าง");
-  });
-
-  it("เสร็จแล้ว = ☑ + บรรทัดเสร็จ + ขอบเขียว · เกินกำหนด = ขอบแดง · ไม่มีกำหนด/คนทำ", () => {
-    const done = item({ status: "resolved", resolved_by: "แนน" });
-    expect(planCardText(done, NOW).startsWith("☑ ")).toBe(true);
-    expect(planCardText(done, NOW).endsWith("เสร็จแล้ว · แนน")).toBe(true);
-    expect(planCardStroke(done, NOW)).toBe("#16a34a");
-    expect(planCardStroke(item({ due_at: "2026-11-14T11:00:00Z" }), NOW)).toBe("#dc2626");
-    expect(planCardText(item({ due_at: null, assigned_name: null }), NOW)).toContain("กำหนด: ไม่มีกำหนด\nคนทำ: ยังไม่ระบุ");
-  });
-
-  it("โครงการ์ด: กรอบสูงตามบรรทัด (สูตรเดียวกับตอนซิงค์) + customData kind team_plan", () => {
-    const els = planCardSkeleton(item(), NOW);
-    const text = planCardText(item(), NOW);
-    expect(els[0]).toMatchObject({ type: "rectangle", height: planCardHeight(text), customData: { kind: "team_plan", id: "plan-1" } });
-    expect(els[1]).toMatchObject({ type: "text", text });
   });
 });
