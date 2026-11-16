@@ -562,7 +562,8 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "export", label: "ส่งออก CSV / Excel", code: "lib/export", category: "data",
     source: { path: "lib/export" },
     what: "ส่งออกแถวที่เห็น / ที่เลือก / ทั้งหมดที่กรองไว้ เป็น CSV หรือ Excel",
-    when: "ทุกปุ่มส่งออก",
+    when: "ทุกปุ่มส่งออกของตาราง",
+    notWhen: "ไฟล์รายละเอียดสินค้าหลายรุ่น (ไทย/อังกฤษ · แยกแถวตามสี · ฝังรูป) ให้ใช้หน้า /master/parent-skus/export (lib/spec-export)",
     legacyKey: "export_service",
   },
   {
@@ -1091,7 +1092,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "field-chips-picker", label: "เลือกหลายฟิลด์แบบชิป", code: "FieldChipsPicker", category: "pick",
     source: { path: "components/field-chips-picker" },
-    what: "เลือกหลายฟิลด์ โชว์ที่เลือกเป็นชิป + ป๊อปค้นหา/จัดกลุ่ม",
+    what: "เลือกหลายฟิลด์ โชว์ที่เลือกเป็นชิป + ป๊อปค้นหา/จัดกลุ่ม · groupNav = รายชื่อหมวดด้านซ้าย (ฟิลด์เยอะหลายหมวด)",
   },
   {
     key: "table-column-select", label: "เลือกคอลัมน์จากตารางปลายทาง", code: "TableColumnSelect", category: "pick",

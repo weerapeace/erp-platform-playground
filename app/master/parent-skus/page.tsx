@@ -20,6 +20,8 @@ import { useAuth } from "@/components/auth";
 import { AddToPlanModal, type PlanSource } from "@/components/team-plan/add-to-plan";
 import { apiFetch } from "@/lib/api";
 import { CREATOR_CODES } from "@/lib/platform-create-registry";
+import { SPEC_EXPORT_IDS_KEY, SPEC_EXPORT_PATH } from "@/lib/spec-export";
+import { useRouter } from "next/navigation";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -173,16 +175,30 @@ export default function ParentSKUsV2Page() {
   const actor = user?.name ?? user?.email ?? undefined;
   // เพิ่ม row action "ลงขายหลายแพลตฟอร์ม" + ช่อง "รูป Description" ในฟอร์ม — config สร้างใน component เพื่อ setState/actor
   const canRoute = can("products.edit") && can("files.upload");
+  const router = useRouter();
+  // 📤 ส่งออกรายละเอียด (หลายรุ่น → Excel) — ส่งรุ่นที่ติ๊กไปหน้าส่งออก
+  const openSpecExport = (ids: string[]) => {
+    try { sessionStorage.setItem(SPEC_EXPORT_IDS_KEY, JSON.stringify(ids)); } catch { /* เปิดหน้าเปล่าแล้วเลือกเอง */ }
+    router.push(SPEC_EXPORT_PATH);
+  };
   const config = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
-    headerActions: canRoute ? () => (
-      <button type="button" onClick={() => setRouterOpen(true)}
-        title="ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก / รหัสรุ่น) หลายรุ่นทีเดียว แล้วเลือกว่ารูปไหนลงช่องไหน"
-        className="h-9 rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">📂 จัดรูปหลายโฟลเดอร์</button>
-    ) : undefined,
+    headerActions: () => (
+      <>
+        <button type="button" onClick={() => router.push(SPEC_EXPORT_PATH)}
+          title="รวมรายละเอียดหลายรุ่น (ไทย/อังกฤษ) เป็นไฟล์ Excel ส่งลูกค้า/ตัวแทน — ติ๊กหลายแถวแล้วกด &quot;ส่งออกรายละเอียด&quot; ได้ด้วย"
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50">ส่งออกรายละเอียด</button>
+        {canRoute && (
+          <button type="button" onClick={() => setRouterOpen(true)}
+            title="ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก / รหัสรุ่น) หลายรุ่นทีเดียว แล้วเลือกว่ารูปไหนลงช่องไหน"
+            className="h-9 rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">📂 จัดรูปหลายโฟลเดอร์</button>
+        )}
+      </>
+    ),
     // ติ๊กหลายรุ่น → ตัวช่วยลงสินค้า (ตรวจความครบ → แก้/ส่งงาน → ลงจริงหรือบันทึกร่าง)
     extraBulkActions: [
       ...(CONFIG.extraBulkActions ?? []),
+      { label: "ส่งออกรายละเอียด", onClick: (rows: Record<string, unknown>[]) => openSpecExport(rows.map((r) => String(r.id))) },
       ...(canAddPf ? [{ label: "ลงบนแพลตฟอร์ม", onClick: (rows: Record<string, unknown>[]) => {
         const brands = [...new Set(rows.map((r) => (r.brand_id as string) ?? "").filter(Boolean))];
         setAddRows({ parents: rows.map((r) => ({ id: String(r.id), code: String(r.code ?? ""), name: (r.name as string) || (r.name_th as string) || null })), brandId: brands.length === 1 ? brands[0] : null });
@@ -227,7 +243,8 @@ export default function ParentSKUsV2Page() {
     extraTabs: parentSkuExtraTabs(),
     // 🖼 ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (การ์ดบนฉากของเว็บร้านใช้) — ชุดเดียวกับ drawer
     sidePngSlots: parentSkuPngSlots(),
-  }), [actor, canRoute, canPlan, canAddPf]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- openSpecExport ใช้ router (คงที่)
+  }), [actor, canRoute, canPlan, canAddPf, router]);
   return (
     <>
       <MasterCRUDPage config={config} />

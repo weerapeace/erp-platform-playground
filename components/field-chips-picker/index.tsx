@@ -11,6 +11,8 @@
  * ใช้กับรายการอื่นที่ไม่ใช่ฟิลด์ก็ได้ (เช่น หมวดบนเว็บ): addLabel/searchPlaceholder/unit · showKeys={false} · icon ต่อรายการ
  *   markFirst="หลัก" = ตัวแรกมี ★ + ในป๊อปกด ★ ตั้งตัวไหนเป็นตัวแรกได้ (หมวดหลัก)
  *   hint ต่อรายการ = ข้อความเล็กด้านขวาในป๊อป (เช่น "มีข้อมูล 1/54") แทน key · ไม่โชว์บนชิป
+ *   groupNav = ป๊อปมีรายชื่อหมวดด้านซ้าย (มือถือ = แถบเลื่อนด้านบน) กดแล้วโชว์เฉพาะหมวดนั้น · พิมพ์ค้นหา = ค้นทุกหมวด
+ *     (ใช้เมื่อฟิลด์เยอะหลายหมวด เช่น ส่งออกรายละเอียดสินค้า) · ไม่ใส่ = หน้าตาเดิม
  */
 import { useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -33,6 +35,7 @@ export function FieldChipsPicker({
   markFirst,
   emptyText,
   groupToggle = false,
+  groupNav = false,
 }: {
   value: string[];
   onChange: (keys: string[]) => void;
@@ -58,9 +61,12 @@ export function FieldChipsPicker({
   emptyText?: string;
   /** หัวกลุ่มในป๊อปมีปุ่ม "เลือกทั้งกลุ่ม / เอาออกทั้งกลุ่ม" (เลือกหลายช่องทีเดียว เช่น คอลัมน์ของตารางแก้ไขแบบตาราง) */
   groupToggle?: boolean;
+  /** ป๊อปมีรายชื่อหมวดด้านซ้าย กดแล้วกรองเฉพาะหมวด (ฟิลด์เยอะหลายหมวด) */
+  groupNav?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [navGroup, setNavGroup] = useState<string | null>(null);
   const fieldOf = (k: string) => fields.find((f) => f.key === k);
   const labelOf = (k: string) => {
     const f = fieldOf(k);
@@ -75,7 +81,9 @@ export function FieldChipsPicker({
 
   const chip = compact ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs";
   const ql = q.trim().toLowerCase();
-  const shown = fields.filter((f) => !ql || f.label.toLowerCase().includes(ql) || f.key.toLowerCase().includes(ql));
+  const allGroups = [...new Set(fields.map((f) => f.group ?? ""))];
+  const activeNav = groupNav && !ql ? (navGroup !== null && allGroups.includes(navGroup) ? navGroup : allGroups[0] ?? "") : null;
+  const shown = fields.filter((f) => (!ql || f.label.toLowerCase().includes(ql) || f.key.toLowerCase().includes(ql)) && (activeNav === null || (f.group ?? "") === activeNav));
   const grouped = new Map<string, PickableField[]>();
   for (const f of shown) {
     const g = f.group ?? "";
@@ -107,7 +115,7 @@ export function FieldChipsPicker({
         onClose={() => setOpen(false)}
         title={title}
         description={description}
-        size="md"
+        size={groupNav ? "lg" : "md"}
         defaultExpanded={false}
         storageKey="field-chips-picker"
         footer={
@@ -138,6 +146,23 @@ export function FieldChipsPicker({
                 ))}
               </div>
             )}
+            <div className={groupNav ? "sm:grid sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-3" : ""}>
+            {groupNav && (
+              <div className="mb-2 flex gap-1 overflow-x-auto sm:mb-0 sm:flex-col sm:overflow-visible sm:border-r sm:border-slate-100 sm:pr-2">
+                {allGroups.map((g) => {
+                  const n = fields.filter((f) => (f.group ?? "") === g && value.includes(f.key)).length;
+                  const on = activeNav === g;
+                  return (
+                    <button key={g || "all"} type="button" onClick={() => { setQ(""); setNavGroup(g); }}
+                      className={`flex shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-xs ${on ? "bg-blue-50 font-medium text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
+                      <span>{groups?.[g] ?? (g || "อื่น ๆ")}</span>
+                      {n > 0 && <span className="rounded-full bg-blue-100 px-1.5 text-[10px] text-blue-700">{n}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="min-w-0 space-y-3">
             {[...grouped.entries()].map(([g, list]) => (
               <div key={g || "all"}>
                 {g && (
@@ -187,6 +212,8 @@ export function FieldChipsPicker({
               </div>
             ))}
             {shown.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">ไม่พบ{unit}ที่ค้นหา</div>}
+            </div>
+            </div>
           </div>
         )}
       </ERPModal>
