@@ -53,3 +53,15 @@ describe("voucher-revision — เลขใบตามวันที่ (★ 2
     expect(d).toContainEqual({ label: "เลขใบ", before: "PV2020-10-10-001", after: "PV2026-10-05-001" });
   });
 });
+
+describe("เหตุผลเปิดแก้ — แอดมินไม่บังคับ (★ 2026-11-16 reviseReasonFor)", () => {
+  it("คนทั่วไปต้อง ≥ 3 ตัวอักษร · แอดมินว่างได้ (ประวัติเขียนข้อความแอดมิน) · พิมพ์มา = ใช้ตามที่พิมพ์", async () => {
+    const { reviseReasonFor, ADMIN_NO_REASON } = await import("@/lib/voucher-revision");
+    expect(reviseReasonFor("", false).ok).toBe(false);
+    expect(reviseReasonFor("ab", false).ok).toBe(false);
+    expect(reviseReasonFor("  ใส่เรทผิด ", false)).toEqual({ ok: true, reason: "ใส่เรทผิด" });
+    expect(reviseReasonFor("", true)).toEqual({ ok: true, reason: ADMIN_NO_REASON });
+    expect(reviseReasonFor("แก้", true)).toEqual({ ok: true, reason: "แก้" });
+    expect(reviseReasonFor(null, true)).toEqual({ ok: true, reason: ADMIN_NO_REASON });
+  });
+});

@@ -14,6 +14,16 @@ type Row = Record<string, unknown>;
 export const voucherEditable = (v: { status?: string | null; editing_at?: string | null } | null | undefined) =>
   !!v && (v.status === "draft" || (v.status === "confirmed" && !!v.editing_at));
 
+/** ★ 2026-11-16 เจ้าของ: "ถ้าเป็น Admin ไม่ต้องใส่เหตุผล" (แบบ A: ป๊อปยังอยู่ ช่องเหตุผลไม่บังคับ · ข้อ 2 ประวัติเขียนข้อความนี้) */
+export const ADMIN_NO_REASON = "แอดมินแก้ — ไม่ระบุเหตุผล";
+/** เหตุผลเปิดแก้ใบที่ยืนยันแล้ว: ≥ 3 ตัวอักษร = ใช้ตามที่พิมพ์ · แอดมินว่าง/สั้น = ได้ (ว่าง → ADMIN_NO_REASON) · คนอื่นต้องใส่ — ใช้ทั้งป๊อปและ API */
+export function reviseReasonFor(raw: unknown, isAdmin: boolean): { ok: true; reason: string } | { ok: false; error: string } {
+  const r = String(raw ?? "").trim();
+  if (r.length >= 3) return { ok: true, reason: r };
+  if (isAdmin) return { ok: true, reason: r || ADMIN_NO_REASON };
+  return { ok: false, error: "ใส่เหตุผลที่แก้ (อย่างน้อย 3 ตัวอักษร)" };
+}
+
 /** ★ 2026-11-15 วันที่ในเลขใบ (PV2026-10-05-001 → "2026-10-05") · เลขแบบเก่า (PV-2026-00002) = null */
 export function pvNoDate(pvNo: string | null | undefined): string | null {
   const m = String(pvNo ?? "").match(/^PV(\d{4})-(\d{2})-(\d{2})-\d+$/);

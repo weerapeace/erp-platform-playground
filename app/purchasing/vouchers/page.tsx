@@ -90,6 +90,14 @@ export default function PurchaseVouchersPage() {
   const [dateSaving, setDateSaving] = useState(false);
 
   useEffect(() => { const t = localStorage.getItem(TAB_KEY); if (t === "pending" || t === "vouchers") setTab(t); }, []);
+  // ★ 2026-11-16 ปุ่ม "＋ ใบใหม่ ▾" ในหน้าใบ → มาที่นี่พร้อม ?new=<วิธี> → เปิดป๊อปออกใบสำคัญรับให้เลย แล้วล้าง URL (กดย้อนกลับไม่เปิดซ้ำ)
+  useEffect(() => {
+    if (!canEdit) return;
+    const m = new URLSearchParams(window.location.search).get("new");
+    if (m !== "gr" && m !== "bill" && m !== "china" && m !== "manual") return;
+    setAddMode(m); setAddOpen(true);
+    router.replace("/purchasing/vouchers");
+  }, [canEdit, router]);
   const changeTab = (t: "pending" | "vouchers") => { setTab(t); localStorage.setItem(TAB_KEY, t); };
 
   const load = useCallback(async () => {

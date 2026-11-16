@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { fetchVoucher, recomputeVoucher, snapshotVoucher, restoreVoucherSnapshot } from "@/lib/purchase-voucher-server";
 import { writeBackVoucherPrices } from "@/lib/voucher-writeback";
 import { saveRevision, listRevisions, getRevision, VOUCHER_ENTITY } from "@/lib/document-revisions";
-import { diffVoucherSnapshots, pvNoNeedsRenumber, type VoucherSnapshot } from "@/lib/voucher-revision";
+import { diffVoucherSnapshots, pvNoNeedsRenumber, reviseReasonFor, type VoucherSnapshot } from "@/lib/voucher-revision";
 import { isForeignCurrency } from "@/lib/landed-cost";
 
 export const dynamic = "force-dynamic";
@@ -55,8 +55,14 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
   // ---------- เปิดแก้ ----------
   if (body.action === "start") {
-    const reason = String(body.reason ?? "").trim();
-    if (reason.length < 3) return NextResponse.json({ error: "ใส่เหตุผลที่แก้ (อย่างน้อย 3 ตัวอักษร)" }, { status: 400 });
+    // ★ 2026-11-16 แอดมินไม่ต้องใส่เหตุผล (ว่าง = ประวัติเขียน "แอดมินแก้ — ไม่ระบุเหตุผล") · ตำแหน่งดูจาก erp_current_user (ไม่เชื่อค่าจากหน้าเว็บ)
+    let isAdmin = false;
+    if (String(body.reason ?? "").trim().length < 3) {
+      try { const { data: me } = await supabaseFromRequest(request).rpc("erp_current_user"); isAdmin = (me as { role?: string | null } | null)?.role === "admin"; } catch { isAdmin = false; }
+    }
+    const rr = reviseReasonFor(body.reason, isAdmin);
+    if (!rr.ok) return NextResponse.json({ error: rr.error }, { status: 400 });
+    const reason = rr.reason;
     if (c.editing_at) return NextResponse.json({ error: `ใบนี้กำลังถูกแก้อยู่โดย ${c.editing_by ?? "—"}` }, { status: 409 });
     // เก็บใบตอนนี้เป็นเวอร์ชันปัจจุบันก่อน (ใบที่ยืนยันก่อนมีระบบนี้ = เวอร์ชัน 1 ย้อนหลัง)
     if (!(await getRevision(admin, VOUCHER_ENTITY, id, revision))) {

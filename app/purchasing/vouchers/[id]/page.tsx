@@ -9,9 +9,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { usePermission, AccessDenied } from "@/components/auth";
+import { usePermission, AccessDenied, useAuth } from "@/components/auth";
+import { RowMenu, type RowMenuItem } from "@/components/seller-bill-panel/row-menu";
 import { useToast } from "@/components/toast";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { MoneyInput } from "@/components/money-input";
@@ -29,7 +30,7 @@ import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist, paidDiff, PAID_TOLERANCE_THB } from "@/lib/purchase-voucher-checklist";
 import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
 import { RevisionHistory } from "./revision-history";
-import { pvNoNeedsRenumber } from "@/lib/voucher-revision";
+import { pvNoNeedsRenumber, reviseReasonFor, ADMIN_NO_REASON } from "@/lib/voucher-revision";
 
 type Detail = { header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate?: number | null };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -103,6 +104,8 @@ export default function PurchaseVoucherFormPage() {
   const [sellerKey, setSellerKey] = useState(0);   // ลบรายการแล้ว → โหลดแผงบิลร้านใหม่
   // ★ 2026-11-15 แก้ใบที่ยืนยันแล้ว (แบบ ก.: เลขเดิม · บังคับเหตุผล · เก็บทุกเวอร์ชัน) — สิทธิ์ pv.edit_confirmed (แอดมิน/หัวหน้า)
   const canRevise = usePermission("pv.edit_confirmed");
+  const isAdmin = useAuth().user?.role === "admin";   // ★ 2026-11-16 แอดมินเปิดแก้ได้ไม่ต้องใส่เหตุผล (API ตรวจซ้ำ)
+  const [leaveTo, setLeaveTo] = useState<string | null>(null);   // ★ 2026-11-16 ปุ่มใบใหม่: มีที่ยังไม่บันทึก → ถามก่อนออก
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseReason, setReviseReason] = useState("");
   const [reviseCancelOpen, setReviseCancelOpen] = useState(false);
@@ -434,7 +437,30 @@ export default function PurchaseVoucherFormPage() {
                 </h1>
                 <div className="text-sm text-slate-500 mt-0.5">🏪 {hd.seller_name ?? "—"} · ใบรับ {hd.gr_nos.join(", ") || "—"} · PO {hd.po_nos.join(", ") || "—"}{hd.tracking_no && <span className="ml-2 font-mono text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="รหัสขนส่ง (จากใบส่งของ)">🚚 {hd.tracking_no}</span>}</div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              {(() => {
+                /* ★ 2026-11-16 ปุ่ม "＋ ใบใหม่ ▾" (เจ้าของเลือกแบบ B) — ไปหน้ารายการแล้วเปิดป๊อป "ออกใบสำคัญรับ" ตามวิธีที่เลือก · มีที่ยังไม่บันทึก = ถามก่อน */
+                const goNew = (mode: "gr" | "bill" | "china" | "manual") => { const to = `/purchasing/vouchers?new=${mode}`; if ((dirty || panelStatus.pending) && !readonly) setLeaveTo(to); else router.push(to); };
+                const newItems: RowMenuItem[] = [
+                  { label: "จากใบรับ (GR)", onClick: () => goNew("gr") },
+                  { label: "จากบิลร้าน (ให้ AI อ่าน)", onClick: () => goNew("bill") },
+                  { label: "จากบิลโอนเงินจีน", onClick: () => goNew("china") },
+                  { label: "สร้างเปล่า (ไม่มีใบรับ)", onClick: () => goNew("manual") },
+                ];
+                /* มือถือ (ข้อ 3): ปุ่มหัวใบรวมในเมนู ⋯ — ทำงานเหมือนปุ่มบน PC ทุกตัว */
+                const mobileItems: RowMenuItem[] = [
+                  ...grIds.map((gid) => ({ label: `พิมพ์ใบรับ ${data.lines.find((l) => l.gr_id === gid)?.gr_no ?? ""}`, onClick: () => { window.open(`/print/goods-receipt/${gid}`, "_blank"); } })),
+                  { label: "พิมพ์ใบซื้อ (ใบสำคัญรับ)", onClick: () => { window.open(`/print/purchase-voucher/${id}`, "_blank"); } },
+                  ...(canRevise && hd.status === "confirmed" && !editing ? [{ label: "แก้ไขใบ", onClick: () => { setReviseReason(""); setReviseOpen(true); } }] : []),
+                  ...(!readonly && hd.status === "draft" ? [{ label: "ยกเลิกใบร่าง", onClick: () => setCancelOpen(true), danger: true }] : []),
+                  ...(canEdit && hd.status === "confirmed" && !editing ? [{ label: "ยกเลิกใบนี้", onClick: () => setVoidOpen(true), danger: true }] : []),
+                  ...(canEdit ? newItems.map((it) => ({ ...it, label: `＋ ใบใหม่ · ${it.label}` })) : []),
+                ];
+                return (<>
+              <div className="flex md:hidden items-center gap-2">
+                {!readonly && hd.status === "draft" && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="h-9 px-3 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน</button>}
+                <RowMenu items={mobileItems} label="⋯" title="เมนูใบนี้" buttonClassName="h-9 min-w-9 px-2 text-lg leading-none rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" />
+              </div>
+              <div className="hidden md:flex items-center gap-2 flex-wrap">
                 {grIds.map((gid) => {
                   const no = data.lines.find((l) => l.gr_id === gid)?.gr_no ?? gid;
                   return <a key={gid} href={`/print/goods-receipt/${gid}`} target="_blank" rel="noreferrer" className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 inline-flex items-center">🖨 ใบรับ {no}</a>;
@@ -442,13 +468,17 @@ export default function PurchaseVoucherFormPage() {
                 <a href={`/print/purchase-voucher/${id}`} target="_blank" rel="noreferrer" className={`h-9 px-3 text-xs rounded-md border inline-flex items-center ${hd.status === "confirmed" ? "border-slate-800 bg-slate-800 text-white hover:bg-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>🖨 ใบซื้อ (ใบสำคัญรับ)</a>
                 {!readonly && hd.status === "draft" && <button onClick={() => setCancelOpen(true)} className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบร่าง</button>}
                 {canRevise && hd.status === "confirmed" && !editing && (
-                  <button onClick={() => { setReviseReason(""); setReviseOpen(true); }} title="แก้ใบนี้โดยใช้เลขเดิม — ต้องใส่เหตุผล · ใบเดิมเก็บเป็นประวัติ"
+                  <button onClick={() => { setReviseReason(""); setReviseOpen(true); }} title={isAdmin ? "แก้ใบนี้โดยใช้เลขเดิม · ใบเดิมเก็บเป็นประวัติ" : "แก้ใบนี้โดยใช้เลขเดิม — ต้องใส่เหตุผล · ใบเดิมเก็บเป็นประวัติ"}
                     className="h-9 px-3 text-xs rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 inline-flex items-center gap-1"><Icon name="edit" mode="line" size={13} /> แก้ไขใบ</button>
                 )}
                 {canEdit && hd.status === "confirmed" && !editing && <button onClick={() => setVoidOpen(true)} title="ใส่ราคา/ค่าส่งผิด → ยกเลิกใบนี้ แล้วออกใบใหม่" className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบนี้</button>}
                 {/* บันทึกร่าง / ยืนยัน ย้ายไปการ์ด "ก่อนยืนยัน" ด้านขวา (แบบ B) — จอแคบการ์ดอยู่ล่างสุด จึงมีปุ่มสำรองบนหัว */}
                 {!readonly && hd.status === "draft" && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="xl:hidden h-9 px-4 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
+                {canEdit && <RowMenu items={newItems} label="＋ ใบใหม่ ▾" title="ออกใบสำคัญรับใบใหม่"
+                  buttonClassName="h-9 px-3 text-xs font-medium rounded-md border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" />}
               </div>
+                </>);
+              })()}
             </div>
 
             {/* ★ 2026-11-15 กำลังแก้ใบที่ยืนยันแล้ว — บอกชัดว่ายังไม่จบ + ปุ่มจบ/ยกเลิก */}
@@ -858,19 +888,24 @@ export default function PurchaseVoucherFormPage() {
           {delLine.price_source === "bill" && <p className="mt-2 text-xs text-slate-500">รายการนี้มาจากบิลร้าน — แถวในบิลจะกลับเป็น &quot;ยังไม่ใส่ลงใบ&quot; (กดยืนยันหรือข้ามใหม่)</p>}
         </ERPModal>
       )}
-      {/* ★ 2026-11-15 เปิดแก้ใบที่ยืนยันแล้ว — บังคับเหตุผล */}
+      {/* ★ 2026-11-16 ปุ่มใบใหม่ — มีที่ยังไม่บันทึก ถามก่อนออก */}
+      <ConfirmDialog open={!!leaveTo} onClose={() => setLeaveTo(null)} onConfirm={() => { const to = leaveTo; setLeaveTo(null); if (to) router.push(to); }}
+        title="คุณมีข้อมูลที่ยังไม่ได้บันทึก" message="ต้องการออกไปออกใบใหม่โดยไม่บันทึกหรือไม่? (กด อยู่ต่อ แล้วกดบันทึกร่างก่อนก็ได้)"
+        confirmText="ออกโดยไม่บันทึก" cancelText="อยู่ต่อ" variant="danger" />
+      {/* ★ 2026-11-15 เปิดแก้ใบที่ยืนยันแล้ว — บังคับเหตุผล · ★ 2026-11-16 แอดมินไม่บังคับ (lib/voucher-revision reviseReasonFor) */}
       {reviseOpen && hd && (
         <ERPModal open onClose={() => !reviseBusy && setReviseOpen(false)} size="sm" storageKey="pv-revise-start" closeOnBackdrop={false}
           title={`แก้ไขใบ ${hd.pv_no ?? ""}`} description="ใช้เลขเดิม · ใบตอนนี้เก็บเป็นประวัติ · แก้เสร็จกด บันทึกการแก้ไข"
           footer={<>
             <button onClick={() => setReviseOpen(false)} disabled={reviseBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-            <button onClick={() => void reviseCall("start", reviseReason)} disabled={reviseBusy || reviseReason.trim().length < 3} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังเปิด…" : "เปิดแก้"}</button>
+            <button onClick={() => void reviseCall("start", reviseReason)} disabled={reviseBusy || !reviseReasonFor(reviseReason, isAdmin).ok} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังเปิด…" : "เปิดแก้"}</button>
           </>}>
-          <label className="text-xs text-slate-600">เหตุผลที่แก้ <span className="text-red-500">*</span>
+          <label className="text-xs text-slate-600">เหตุผลที่แก้ {isAdmin ? <span className="text-slate-400">(ไม่บังคับ — แอดมิน)</span> : <span className="text-red-500">*</span>}
             <textarea value={reviseReason} onChange={(e) => setReviseReason(e.target.value)} rows={3} autoFocus placeholder="เช่น ร้านลดราคากล่อง 13×10 / ใส่เรทผิด / ลืมค่าส่งในจีน"
               className="mt-1 w-full px-2 py-1.5 text-sm border border-slate-200 rounded-md" />
           </label>
-          {reviseReason.length > 0 && reviseReason.trim().length < 3 && <div className="text-[11px] text-red-600 mt-1">ใส่เหตุผลอย่างน้อย 3 ตัวอักษร</div>}
+          {!isAdmin && reviseReason.length > 0 && reviseReason.trim().length < 3 && <div className="text-[11px] text-red-600 mt-1">ใส่เหตุผลอย่างน้อย 3 ตัวอักษร</div>}
+          {isAdmin && reviseReason.trim().length === 0 && <div className="text-[11px] text-slate-400 mt-1">ว่างไว้ = ประวัติเขียน &ldquo;{ADMIN_NO_REASON}&rdquo;</div>}
           <ul className="mt-2 text-[11px] text-slate-500 list-disc pl-4 space-y-0.5">
             <li>ระหว่างแก้ ใบยังเป็น &ldquo;ยืนยันแล้ว&rdquo; — ราคาใหม่เขียนกลับใบสั่งซื้อ/ราคาร้านตอนกดบันทึกการแก้ไข</li>
             <li>ไม่อยากแก้แล้ว กด &ldquo;ยกเลิกการแก้&rdquo; ใบกลับเป็นแบบเดิม</li>
