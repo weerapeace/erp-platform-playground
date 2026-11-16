@@ -69,7 +69,7 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, collab = false, stickyTop,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop,
 }: {
   entityType: string;
   entityId:   string;
@@ -89,6 +89,8 @@ export function CanvasSketch({
   onReady?: () => void;
   /** เรียกทุกครั้งที่บันทึกกระดานสำเร็จ — ใช้ตอนต้องเขียนผลการลากกลับเข้าข้อมูลจริง (เช่น ลากการ์ดข้ามโต๊ะ → อัปเดตแผนจ่ายงาน) */
   onSaved?: () => void;
+  /** ชิ้นที่เลือกบนกระดานเปลี่ยน (ส่ง id ที่เลือก) — ใช้โชว์ปุ่มตามการ์ดที่เลือก เช่น "แตกเช็กลิสต์" · เรียกเฉพาะตอนเปลี่ยนจริง */
+  onSelectionChange?: (selectedIds: string[]) => void;
 }) {
   const t = useT();
   const [scene, setScene] = useState<Scene | "loading">("loading");
@@ -120,6 +122,8 @@ export function CanvasSketch({
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
   const savedCbRef = useRef(onSaved);      savedCbRef.current = onSaved;
+  const selCbRef   = useRef(onSelectionChange); selCbRef.current = onSelectionChange;
+  const selSigRef  = useRef("");
   const editableRef = useRef(editable);    editableRef.current = editable;
   const hoistRef = useRef<((files: Record<string, any>) => void) | null>(null); // ตัวย้ายรูปขึ้น R2 (ตั้งค่าหลัง hoistImages นิยาม)
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
@@ -1143,6 +1147,7 @@ export function CanvasSketch({
             const sel = appState?.selectedElementIds || {};
             const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
             setSelFont(tx ? Math.round(tx.fontSize) : null);
+            if (selCbRef.current) { const ids = Object.keys(sel).filter((k) => sel[k]); const sg = ids.join(","); if (sg !== selSigRef.current) { selSigRef.current = sg; selCbRef.current(ids); } }
             if ((elements as any[]).some((e) => !e.isDeleted)) hadContentRef.current = true; // เคยมีงานจริง
             const nSocial = socialTextsOf(elements as any[]).length; // ปุ่ม "แปลงลิงก์" โชว์เมื่อมีลิงก์ค้างเป็นข้อความ
             if (nSocial !== socialCountRef.current) { socialCountRef.current = nSocial; setSocialTextCount(nSocial); }

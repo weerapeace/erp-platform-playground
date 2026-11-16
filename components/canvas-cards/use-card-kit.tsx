@@ -13,6 +13,7 @@
  *   - onCardOpen คืน true เมื่อเป็นการ์ดของชุดนี้ (หน้าที่มีการ์ดชนิดของตัวเอง เช่น team_plan จัดการต่อเองเมื่อได้ false)
  * หน้าที่ใช้: กระดานแคมเปญ · กระดานแผนงานทีม (components/team-plan/board-view) · doc: docs/canvas-sketch.md
  */
+import { isChecklistPartKind } from "./checklist-box";
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useT, useLang } from "@/components/i18n";
@@ -303,7 +304,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
   // workflow/ลบงาน สำหรับ TaskDetailDrawer เต็มบน canvas
   const moveTask = useCallback(async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); }, [pushToast]);
   const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast, t]);
-  const openCards = () => { setCards(sketchRef.current?.listCards() ?? []); setCardsOpen(true); };
+  const openCards = () => { setCards((sketchRef.current?.listCards() ?? []).filter((c) => !isChecklistPartKind(c.kind))); setCardsOpen(true); };   // กล่องเช็กลิสต์ที่แตกออกมา ไม่ใช่การ์ด
 
   // ② ซิงค์งานย่อยสดบนการ์ดงานเมื่อเปิดกระดาน (การ์ดเก็บ snapshot -- อัปเดตให้ตรงปัจจุบัน)
   const syncTaskCards = useCallback(async () => {

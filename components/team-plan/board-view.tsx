@@ -8,6 +8,7 @@
  *   - ถาด "งานที่ยังไม่ได้วาง" ด้านล่าง: กด = วางกลางจอ · ลากลงกระดาน = วางตรงที่ปล่อย
  *   - 🔗 ลากเส้นจากการ์ดงาน → การ์ดอื่น = ผูกจริง (หลังกระดานบันทึก ระบบเขียน metadata.plan.linked ให้ · ลบเส้น = เลิกผูก) — ตรรกะ lib/team-plan-board
  *   - กรอบโปรเจกต์ = Section (frame) ตั้งชื่อตามแท็กที่ใช้อยู่ได้
+ *   - 📋 เลือกการ์ดที่มีเช็กลิสต์ → ปุ่ม "แตกเช็กลิสต์" = กล่องรายการข้างการ์ด (ของกลาง useChecklistExplode · ติ๊ก/เพิ่มข้อได้ · ซิงค์ตอนเปิด/อัปเดตการ์ด)
  * โหลดเฉพาะตอนกดแท็บ "กระดาน" (dynamic import จาก components/team-plan/index.tsx) · doc: docs/team-plan.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
@@ -17,6 +18,7 @@ import { useToast } from "@/components/toast";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { ToolMenu, type ToolMenuItem } from "@/components/canvas-cards/drawers";
 import { useCardKit } from "@/components/canvas-cards/use-card-kit";
+import { useChecklistExplode } from "@/components/canvas-cards/use-checklist-explode";
 import { MenuPagePickerModal } from "@/components/menu-page-picker";
 import { dueLabel, isOverdue, planCoverSource, PRIORITY_META, type PlanItem } from "@/lib/team-plan";
 import { patchPlanItem } from "@/lib/team-plan-client";
@@ -59,6 +61,12 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
   const sketchRef = useRef<CanvasSketchControls | null>(null);
   const kit = useCardKit({ sketchRef, sectionPresets: tagNames.slice(0, 12).map((g) => `โปรเจกต์: ${g}`), contextLabel: "กระดานแผนงาน" });
   const itemsRef = useRef(items); itemsRef.current = items;
+  // 📋 แตกเช็กลิสต์ของการ์ดที่เลือกออกมาเป็นกล่องข้างการ์ด (ของกลาง) — ติ๊กในกล่อง = เช็กลิสต์จริงเปลี่ยน → โหลดงานใหม่ให้ป้าย x/y บนการ์ดตาม
+  const checklist = useChecklistExplode({
+    sketchRef, canEdit,
+    onOpenTask: (id) => { kit.onCardOpen({ kind: "task", id }); },
+    onChanged: (src) => { if (src.ownerKind === PLAN_CARD_KIND) void onReload().catch(() => {}); },
+  });
   const onOpenRef = useRef(onOpen); onOpenRef.current = onOpen;
   const onUpsertRef = useRef(onUpsert); onUpsertRef.current = onUpsert;
   const canEditRef = useRef(canEdit); canEditRef.current = canEdit;
@@ -111,7 +119,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
     if (insert.length) await ctrl.insert(insert, { scene: true });
   }, []);
   // ข้อมูลงานเปลี่ยน (แก้ในป๊อป · ติ๊กเสร็จ · โหลดใหม่) → การ์ดบนกระดานเปลี่ยนตาม
-  useEffect(() => { if (ready) void serial(refreshPlanCards); }, [items, ready, serial, refreshPlanCards]);
+  useEffect(() => { if (ready) void serial(refreshPlanCards).then(() => checklist.syncBoxes()); }, [items, ready, serial, refreshPlanCards]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 🔗 หลังกระดานบันทึก → อ่านเส้น → บันทึกรายการผูกของงานที่เปลี่ยน (เฉพาะคนที่แก้แผนงานได้)
   const inflight = useRef(new Set<string>());
@@ -148,7 +156,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
 
   const updateCards = async () => {
     setRefreshing(true);
-    try { await onReload(); await serial(kit.syncAll); toast.success("อัปเดตการ์ดแล้ว"); }
+    try { await onReload(); await serial(kit.syncAll); await checklist.syncBoxes(); toast.success("อัปเดตการ์ดแล้ว"); }
     catch (e) { toast.error(e instanceof Error ? e.message : "อัปเดตการ์ดไม่สำเร็จ"); }
     finally { setRefreshing(false); }
   };
@@ -178,6 +186,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
   }, [handleRef]);
 
   const onCardOpen = useCallback((data: Record<string, unknown>) => {
+    if (checklist.onCardOpen(data)) return;
     if (data.kind === PLAN_CARD_KIND) {
       const t = itemsRef.current.find((x) => x.id === String(data.id ?? ""));
       if (t) onOpenRef.current(t);
@@ -190,7 +199,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
       return;
     }
     kit.onCardOpen(data);
-  }, [kit, toast]);
+  }, [kit, toast, checklist]);
 
   const tray = useMemo(() => trayItems.filter((t) => !onBoard.has(t.id)), [trayItems, onBoard]);
   const k = kit.items;
@@ -226,14 +235,15 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">
           <Icon name="refresh" /> {refreshing ? "กำลังอัปเดต…" : "อัปเดตการ์ด"}
         </button>
-        <span className="text-[11px] text-slate-400">ดับเบิลคลิกการ์ด = เปิดดู/แก้ · ลากเส้นจากการ์ดงานไปการ์ดอื่น = ผูกงาน (ลบเส้น = เลิกผูก) · ล้อเมาส์ = ซูม</span>
+        {canEdit && ready && checklist.button}
+        <span className="text-[11px] text-slate-400">ดับเบิลคลิกการ์ด = เปิดดู/แก้ · ลากเส้นจากการ์ดงานไปการ์ดอื่น = ผูกงาน (ลบเส้น = เลิกผูก) · เลือกการ์ดแล้วกด "แตกเช็กลิสต์" = กล่องรายการข้างการ์ด · ล้อเมาส์ = ซูม</span>
       </div>
 
       <div className={`relative rounded-xl ${dragOver ? "ring-2 ring-violet-300" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer.types.includes("text/plan-id")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
         <CanvasSketch entityType={TEAM_PLAN_BOARD.entityType} entityId={TEAM_PLAN_BOARD.entityId} editable={canEdit} height="calc(100vh - 260px)"
-          controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onReady} onSaved={onSaved} collab stickyTop={56} />
+          controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onReady} onSaved={onSaved} onSelectionChange={checklist.onSelectionChange} collab stickyTop={56} />
 
         {/* ถาด "งานที่ยังไม่ได้วาง" — ลอยด้านล่างกระดาน */}
         {canEdit && ready && (
@@ -266,6 +276,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
 
       {/* ป๊อปของชุดการ์ดกลาง (เลือก/สร้าง/เปิดดูการ์ดจากระบบอื่น) */}
       {kit.ui}
+      {checklist.ui}
       {planNew && <AddToPlanModal open defaultTitle="" onClose={() => setPlanNew(false)}
         onCreated={(item) => { onUpsertRef.current([item]); placePlan(item); }} />}
       <MenuPagePickerModal open={pagePick} onClose={() => setPagePick(false)} title="เลือกหน้าใน ERP มาวางบนกระดาน"
