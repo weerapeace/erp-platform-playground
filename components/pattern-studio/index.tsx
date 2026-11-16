@@ -739,11 +739,25 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
         bindPieces={live as unknown as ProjectPiece[]} bindSeams={sew?.seams ?? []} />}
       {pocket && <PocketModal open onClose={() => setPocket(false)} defaultPid={pocketHost()} onInsert={addPocket}
         hosts={live.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, box: shapeBox(p.shape), lining: liningPids.has(p.pid) }))} />}
-      {dxf && <DxfModal open onClose={() => setDxf(false)} onInsert={(list) => {
+      {dxf && <DxfModal open tol={tol} onClose={() => setDxf(false)} onInsert={(list, plan) => {
         setDxf(false);
         // ชิ้นจากไฟล์วางต่อจากขวาสุดของชิ้นเดิม เรียงตามตำแหน่งในไฟล์ · เส้นในเก็บเฉพาะหน้าที่มีงานเส้นใน (แอปสตูดิโอแพทเทิร์น)
-        setInject({ nonce: Date.now(), pieces: list.map((p) => ({ shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name, at: p.at, grain: p.grain, notches: p.notches, ...(sew && p.inner.length ? { inner: p.inner } : {}) })) });
-        setNotice(t(`นำเข้าแล้ว ${list.length} ชิ้น — ไฟล์ DXF ไม่มีตะเข็บและวัสดุ ต้องเย็บขอบและเลือกวัสดุเอง · ตรวจขนาดเทียบกับของจริงอย่างน้อย 1 ชิ้น`, `Imported ${list.length} pieces — DXF has no seams or materials, so sew the edges and pick materials yourself · check at least one size against the original`));
+        // รอบ J1: ผลหน้าตรวจ → ชื่อไทย + รหัสชิ้นเดิม · ผูกชิ้นเหมือนกัน · จุดติดหู · ตะเข็บที่รับ · เปิดภาพ 3D
+        const stamp = Date.now().toString(36), pids = list.map((_, i) => `dx${stamp}p${i}`);
+        const linkOf = new Map((plan?.links ?? []).map((l) => [l.i, l]));
+        setInject({ nonce: Date.now(), pieces: list.map((p, i) => {
+          const l = linkOf.get(i), spot = new Set(plan?.spots[i] ?? []);
+          const inner = p.inner.map((q) => (spot.has(q.id) ? { ...q, name: t("จุดติดหู", "Handle spot") } : q));
+          return { pid: pids[i], shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: plan?.names[i] ?? p.name, at: p.at, grain: p.grain, notches: p.notches,
+            ...(sew && inner.length ? { inner } : {}),
+            ...(plan && plan.codes[i] ? { info: { code: plan.codes[i].slice(0, 40) } } : {}),
+            ...(l ? { link: { to: pids[l.to], ...(l.mirror ? { mirror: "x" as const } : {}) } } : {}) };
+        }), ...(sew && plan?.seams.length ? { seams: [...sew.seams, ...plan.seams.map((x, k) => ({ id: `s${stamp}d${k}`, a: { pid: pids[x.a.i], from: x.a.from, count: x.a.count, n: x.a.n }, b: { pid: pids[x.b.i], from: x.b.from, count: x.b.count, n: x.b.n } }))] } : {}) });
+        if (plan?.open3d && sew) { setShow3d(true); setView3d("sewn"); }
+        if (plan?.tol && sew?.onTolChange && plan.tol > tol) sew.onTolChange(plan.tol);
+        const nSeam = sew ? plan?.seams.length ?? 0 : 0, nLink = plan?.links.length ?? 0;
+        setNotice(plan ? t(`นำเข้าแล้ว ${list.length} ชิ้น · รับ ${nSeam} ตะเข็บ · ผูกชิ้นเหมือนกัน ${nLink} ชิ้น${plan.tol && sew?.onTolChange && plan.tol > tol ? ` · ค่าคลาดตะเข็บ ${Math.round(plan.tol * 100) / 10} มม.` : ""} — ตะเข็บเป็นการเดาจากความยาวขอบ ตรวจด้วย "ตรวจแบบ" + ภาพ 3D · เลือกวัสดุเอง · ตรวจขนาดเทียบของจริงอย่างน้อย 1 ชิ้น`, `Imported ${list.length} pieces · ${nSeam} seams · ${nLink} linked — seams are guessed from edge lengths, check with Pattern check + 3D · pick materials · check at least one size`)
+          : t(`นำเข้าแล้ว ${list.length} ชิ้น — ไฟล์ DXF ไม่มีตะเข็บและวัสดุ ต้องเย็บขอบและเลือกวัสดุเอง · ตรวจขนาดเทียบกับของจริงอย่างน้อย 1 ชิ้น`, `Imported ${list.length} pieces — DXF has no seams or materials, so sew the edges and pick materials yourself · check at least one size against the original`));
       }} />}
       {photo && <PhotoModal open onClose={() => setPhoto(false)}
         materials={props.materials}
