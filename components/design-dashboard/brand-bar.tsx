@@ -7,7 +7,7 @@ import { FloatingDropdown } from "@/components/floating-dropdown";
 import { BRAND_GROUPS, GROUP_KEY, GROUP_LABEL, MINE_KEY, type BrandGroup, type BrandGroupView, type BrandSummary } from "./dashboard-helpers";
 import { useT } from "@/components/i18n";
 
-export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey, setSelectedBrandKey, brandMark, brandTheme, brandSummaries, setBrandSettingsOpen, setCreateOpen, favKeys = [], favBrands = [], onToggleFav }: {
+export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey, setSelectedBrandKey, brandMark, brandTheme, brandSummaries, setBrandSettingsOpen, onAddJob, favKeys = [], favBrands = [], onToggleFav }: {
   isPhone: boolean;
   isDesktop: boolean;
   loading: boolean;
@@ -18,7 +18,8 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
   brandTheme: BrandTheme;
   brandSummaries: BrandSummary[];
   setBrandSettingsOpen: (open: boolean) => void;
-  setCreateOpen: (open: boolean) => void;
+  /** ＋ เพิ่มงาน — หน้าแม่เปิดเมนู "ใบงานเปล่า / จาก Design Library" ยึดใต้ปุ่มที่กด (ไม่มีสิทธิ์ Design Library = ฟอร์มเดิมทันที) */
+  onAddJob: (anchor: HTMLElement) => void;
   /** ⭐ แบรนด์โปรด (จำต่อคน) — ติดดาวที่การ์ดแบรนด์ · การ์ด "แบรนด์ของฉัน" รวมงานทุกแบรนด์ที่ติดดาว */
   favKeys?: string[];
   favBrands?: BrandSummary[];
@@ -97,7 +98,7 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
               {/* 2 กลุ่ม (งานลูกค้า / แบรนด์เรา) ไม่ปนกัน — แต่ละกลุ่มมีปุ่ม "ทั้งหมด" ของตัวเอง
                   จอคอม = ห่อบรรทัด · แท็บเล็ต = แถวละกลุ่ม เลื่อนซ้าย-ขวา (การ์ดแบรนด์ไม่กินพื้นที่แนวตั้ง) */}
               <div className="flex items-stretch gap-2">
-                <button data-gg-action onClick={() => setCreateOpen(true)} title={t("สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)", "Create a new job (pick or add a brand in the form)")}
+                <button data-gg-action onClick={(e) => onAddJob(e.currentTarget)} title={t("สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)", "Create a new job (pick or add a brand in the form)")}
                   className="flex shrink-0 flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ {t("เพิ่มงาน", "Add job")}</button>
 
                 {/* ⭐ แบรนด์ของฉัน — รวมงานทุกแบรนด์ที่ติดดาว (จำต่อคน) · ยังไม่ติดดาว = บอกวิธี */}

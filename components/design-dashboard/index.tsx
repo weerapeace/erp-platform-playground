@@ -306,8 +306,13 @@ export function DesignDashboard() {
   const canFromLibrary = useCanSheetFromLibrary();
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [fromLibraryOpen, setFromLibraryOpen] = useState(false);
-  const addAnchorRef = useRef<HTMLButtonElement>(null);
-  const openAddJob = () => { if (canFromLibrary) setAddMenuOpen(true); else setCreateOpen(true); };
+  const addAnchorRef = useRef<HTMLButtonElement>(null);          // ปุ่ม ＋ เพิ่มงาน บนหัว
+  const addMenuAnchorRef = useRef<HTMLElement | null>(null);      // ปุ่มที่กดจริง (หัว / แถบแบรนด์) → ดรอปดาวน์ยึดใต้ปุ่มนั้น
+  const openAddJob = (anchor?: HTMLElement | null) => {
+    if (!canFromLibrary) { setCreateOpen(true); return; }
+    addMenuAnchorRef.current = anchor ?? addAnchorRef.current;
+    setAddMenuOpen(true);
+  };
   const openSummary = (id: string | null, sheetIds: string[] = []) => { setSummaryMenuOpen(false); setMoreOpen(false); setSummaryBuilder({ id, sheetIds }); };
 
   useEffect(() => {
@@ -744,7 +749,7 @@ export function DesignDashboard() {
               </button>
             )}
             <LineInboxButton count={inboxCount.pending} onClick={() => setInboxOpen(true)} />
-            <button ref={addAnchorRef} data-gg-action="primary" onClick={openAddJob} aria-haspopup={canFromLibrary ? "menu" : undefined} aria-expanded={canFromLibrary ? addMenuOpen : undefined}
+            <button ref={addAnchorRef} data-gg-action="primary" onClick={(e) => openAddJob(e.currentTarget)} aria-haspopup={canFromLibrary ? "menu" : undefined} aria-expanded={canFromLibrary ? addMenuOpen : undefined}
               className="inline-flex h-9 items-center gap-1 rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
               ＋ {t("เพิ่มงาน", "Add job")}{canFromLibrary && <span className="text-[10px] opacity-70">▾</span>}
             </button>
@@ -766,7 +771,7 @@ export function DesignDashboard() {
 
         {/* แบรนด์: แถวบนสุด (เต็มกว้าง) */}
         <BrandBar isPhone={isPhone} isDesktop={isDesktop} loading={loading} groups={groups} selectedBrandKey={selectedBrandKey} setSelectedBrandKey={pickBrand}
-          favKeys={brandPrefs.fav} favBrands={favBrands} onToggleFav={toggleFavBrand} brandMark={brandMark} brandTheme={brandTheme} brandSummaries={brandSummaries} setBrandSettingsOpen={setBrandSettingsOpen} setCreateOpen={setCreateOpen} />
+          favKeys={brandPrefs.fav} favBrands={favBrands} onToggleFav={toggleFavBrand} brandMark={brandMark} brandTheme={brandTheme} brandSummaries={brandSummaries} setBrandSettingsOpen={setBrandSettingsOpen} onAddJob={openAddJob} />
 
         {/* ป๊อปอัปตั้งค่าแบรนด์ (เรียง/ซ่อน) — บันทึกรายคน */}
         <BrandSettingsModal brandSettingsOpen={brandSettingsOpen} setBrandSettingsOpen={setBrandSettingsOpen} orderedAll={orderedAll} brandPrefs={brandPrefs} topBrands={topBrands} moveBrand={moveBrand} brandMark={brandMark} toggleHiddenBrand={toggleHiddenBrand} />
@@ -908,7 +913,7 @@ export function DesignDashboard() {
         </div>
         {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}
         {isPhone && !pickMode && (
-          <button type="button" onClick={openAddJob} title={t("เพิ่มงานใหม่", "Add new job")} aria-label={t("เพิ่มงานใหม่", "Add new job")}
+          <button type="button" onClick={() => openAddJob()} title={t("เพิ่มงานใหม่", "Add new job")} aria-label={t("เพิ่มงานใหม่", "Add new job")}
             className="fixed bottom-[76px] right-4 z-[60] flex h-[52px] w-[52px] items-center justify-center rounded-full bg-slate-900 text-2xl leading-none text-white shadow-lg shadow-slate-900/30 active:scale-95">＋</button>
         )}
         {/* มือถือ: แถบล่าง บอร์ด · วันนี้ · ไลน์ · เมนู (เจ้าของเลือกแบบ widget 2026-11-10) — ซ่อนตอนโหมดเลือก (แถบเลือกไว้ N ใบใช้ที่นั้น) */}
@@ -996,7 +1001,7 @@ export function DesignDashboard() {
         </>);
         return isPhone
           ? <BottomSheet open={addMenuOpen} onClose={() => setAddMenuOpen(false)} title={t("เพิ่มงาน", "Add job")} backKey="dd-add"><div className="space-y-0.5 pb-1" role="menu">{items}</div></BottomSheet>
-          : <FloatingDropdown anchorRef={addAnchorRef} open={addMenuOpen} onClose={() => setAddMenuOpen(false)} minWidth={280} maxWidth={320}><div className="p-1" role="menu">{items}</div></FloatingDropdown>;
+          : <FloatingDropdown anchorRef={addMenuAnchorRef} open={addMenuOpen} onClose={() => setAddMenuOpen(false)} minWidth={280} maxWidth={320}><div className="p-1" role="menu">{items}</div></FloatingDropdown>;
       })()}
       {fromLibraryOpen && (
         <NewSheetFromLibraryModal open onClose={() => setFromLibraryOpen(false)} defaultBrandId={selectedBrandId}
