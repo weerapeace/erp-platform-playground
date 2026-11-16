@@ -198,6 +198,16 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const hist = useRef<EditSnap[]>([]), fut = useRef<EditSnap[]>([]);
   const [, setHistTick] = useState(0);
   const touches = useRef(new Set<number>());
+  // จุดบนจอต่อ 1 จุดภาพ (วัดจากรูปที่โชว์จริง) → เลขชิ้นบนรูปขนาดเท่าเดิมทุกระดับซูม
+  const [svgEl, svgRef] = useState<SVGSVGElement | null>(null);   // ref แบบ state — รูปโผล่ช้า (กล่องซูมวัดขนาดก่อน)
+  const [svgScale, setSvgScale] = useState(1);
+  useEffect(() => {
+    const el = svgEl; if (!el || !img) return;
+    const measure = () => { const w = el.getBoundingClientRect().width; if (w > 0) setSvgScale(w / img.w); };
+    measure();
+    const ro = new ResizeObserver(measure); ro.observe(el);
+    return () => ro.disconnect();
+  }, [svgEl, img]);
   const resetEdits = () => { setEdits(null); setBgVals([]); setStroke(null); hist.current = []; fut.current = []; setHistTick((x) => x + 1); };
   const snapshot = (): EditSnap => ({ edits: edits ? edits.slice() : null, bg: [...bgVals] });
   const pushHist = () => { hist.current = [...hist.current.slice(-24), snapshot()]; fut.current = []; setHistTick((x) => x + 1); };
@@ -300,9 +310,9 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
 
   const place = () => {
     const out: EditorPiece[] = [];
-    chosen.forEach(({ c }, k) => {
+    chosen.forEach(({ c, i }) => {   // ชื่อใช้เลขเดียวกับป้าย/เลขบนรูป
       const shape = contourShape(c, cmPerPx);
-      if (shape) out.push({ shape, count: 1, allow: 0, name: t(`ชิ้นจากรูป ${k + 1}`, `Traced piece ${k + 1}`), at: [Math.round(c.box.x * cmPerPx * 10) / 10, Math.round(c.box.y * cmPerPx * 10) / 10] });
+      if (shape) out.push({ shape, count: 1, allow: 0, name: t(`ชิ้นจากรูป ${i + 1}`, `Traced piece ${i + 1}`), at: [Math.round(c.box.x * cmPerPx * 10) / 10, Math.round(c.box.y * cmPerPx * 10) / 10] });
     });
     if (out.length) onPieces(out);
   };
@@ -382,18 +392,36 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                   <label className="ml-auto inline-flex items-center gap-1">{t("ช่วงสี ±", "Range ±")}<input type="number" min={2} max={60} value={bgTol} onChange={(e) => setBgTol(Math.max(2, Math.min(60, Number(e.target.value) || 12)))} className="h-6 w-12 rounded border border-sky-200 px-1 text-right" aria-label={t("ช่วงสีที่นับเป็นพื้น", "Shade range counted as background")} /></label>
                 </div>
               )}
+              {img && (traced?.contours.length ?? 0) > 0 && (
+                <div className="flex gap-1.5 overflow-x-auto pb-0.5 text-[11px] sm:flex-wrap" data-photo-chips>
+                  {traced!.contours.map((c, i) => (
+                    <button key={i} type="button" onClick={() => toggle(i)} aria-pressed={!off.has(i)} title={off.has(i) ? t("กดเพื่อเอาชิ้นนี้", "Click to include") : t("กดเพื่อไม่เอาชิ้นนี้", "Click to skip")}
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 tabular-nums ${off.has(i) ? "border-slate-200 text-slate-400 line-through" : "border-blue-300 bg-blue-50 text-blue-800"}`}>
+                      <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-white ${off.has(i) ? "bg-slate-300" : "bg-blue-600"}`}>{i + 1}</span>
+                      {cmPerPx > 0 ? `${(c.box.w * cmPerPx).toFixed(1)} × ${(c.box.h * cmPerPx).toFixed(1)} ${t("ซม.", "cm")}` : t(`${c.pts.length} จุด`, `${c.pts.length} pts`)}
+                    </button>
+                  ))}
+                  <span className="shrink-0 self-center text-slate-400">{t(`เลือก ${chosen.length}/${traced!.contours.length}`, `${chosen.length}/${traced!.contours.length} chosen`)}</span>
+                </div>
+              )}
               {img ? (
-                <ZoomBox zoom={zoom} onZoom={setZoom} aspect={img.w / img.h} dragPan padding={0} className="h-[46vh] rounded-lg border border-slate-200 bg-slate-50 md:h-[56vh]">
+                <ZoomBox zoom={zoom} onZoom={setZoom} aspect={img.w / img.h} dragPan wheelZoom padding={0} className="h-[52vh] min-h-[300px] rounded-lg border border-slate-200 bg-slate-50 md:h-[calc(100dvh-330px)]">
                 <div className="relative" data-photo-zoom>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img.url} alt="" className="block w-full select-none" draggable={false} />
-                  <svg viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full" onClick={onImgClick} onPointerDown={onBrushDown} onPointerMove={onBrushMove} onPointerUp={onBrushUp} onPointerCancel={(e) => { touches.current.delete(e.pointerId); setStroke(null); }} onPointerLeave={() => setCursor(null)}
+                  <svg ref={svgRef} viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full" onClick={onImgClick} onPointerDown={onBrushDown} onPointerMove={onBrushMove} onPointerUp={onBrushUp} onPointerCancel={(e) => { touches.current.delete(e.pointerId); setStroke(null); }} onPointerLeave={() => setCursor(null)}
                     style={{ cursor: clickMode || tool === "bgpick" ? "crosshair" : brushing ? "none" : undefined, touchAction: brushing || tool === "bgpick" ? "none" : undefined }} data-photo-svg>
                     {editsImg && <image href={editsImg} x={0} y={0} width={img.w} height={img.h} style={{ pointerEvents: "none" }} />}
                     {(traced?.contours ?? []).map((c, i) => (
                       <polygon key={i} points={c.pts.map((p) => p.join(",")).join(" ")} onClick={() => { if (!clickMode && tool === "pick") toggle(i); }} style={{ cursor: clickMode ? "crosshair" : "pointer", pointerEvents: clickMode || tool !== "pick" ? "none" : undefined }}
-                        fill={off.has(i) ? "rgba(148,163,184,0.15)" : "rgba(37,99,235,0.22)"} stroke={off.has(i) ? "#94a3b8" : "#2563eb"} strokeWidth={Math.max(1.5, img.w / 400)} strokeDasharray={off.has(i) ? "6 4" : undefined} />
+                        fill={off.has(i) ? "rgba(148,163,184,0.18)" : "rgba(37,99,235,0.3)"} stroke={off.has(i) ? "#94a3b8" : "#1d4ed8"} strokeWidth={off.has(i) ? 1.5 : 2.5} vectorEffect="non-scaling-stroke" strokeDasharray={off.has(i) ? "6 4" : undefined} />
                     ))}
+                    {/* เส้นหนาเท่ากันบนจอทุกระดับซูม (non-scaling) + เลขชิ้นตรงกับป้ายเหนือรูป · ขนาดเลขคิดจากขนาดรูปที่โชว์จริง */}
+                    {(traced?.contours ?? []).map((c, i) => { const s = 1 / (svgScale || 1), cx = c.box.x + c.box.w / 2, cy = c.box.y + c.box.h / 2; return (
+                      <g key={`n${i}`} style={{ pointerEvents: "none" }} data-photo-num>
+                        <circle cx={cx} cy={cy} r={11 * s} fill={off.has(i) ? "#94a3b8" : "#1d4ed8"} stroke="#fff" strokeWidth={1.5 * s} />
+                        <text x={cx} y={cy} fontSize={12 * s} textAnchor="middle" dominantBaseline="central" fill="#fff">{i + 1}</text>
+                      </g>); })}
                     {quad.length > 0 && <g data-photo-quad style={{ pointerEvents: "none" }}>
                       {quad.length > 1 && <polyline points={[...quad, ...(quad.length === 4 ? [quad[0]] : [])].map((p) => p.join(",")).join(" ")} fill="none" stroke="#f59e0b" strokeWidth={Math.max(1.5, img.w / 350)} />}
                       {quad.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={Math.max(4, img.w / 120)} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />)}
@@ -411,9 +439,9 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
               ) : (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500">{t("วางแพทเทิร์นกระดาษบนพื้นสีตัดกัน (กระดาษขาวบนโต๊ะสีเข้ม หรือกลับกัน) แล้วถ่ายตรงจากด้านบน", "Lay the paper pattern on a contrasting surface and shoot straight from above")}</div>
               )}
-              {img && <p className="text-[11px] text-slate-500" data-photo-zoom-hint>{t("Ctrl + ลูกกลิ้ง = ซูมตรงจุดที่ชี้ · กดลูกกลิ้งค้าง หรือ Space ค้างแล้วลาก = เลื่อนรูป · มือถือใช้สองนิ้วซูม/เลื่อน", "Ctrl + wheel = zoom at the pointer · hold the wheel or Space and drag = pan · on phones, pinch with two fingers")}
-                {tool === "erase" ? t(" · ยางลบ: ระบายทับส่วนที่ลามออกไป ระบบลอกเส้นใหม่ให้เอง", " · Eraser: paint over the part that leaked out; the outline is re-traced") : tool === "add" ? t(" · แปรงเติม: ระบายส่วนของชิ้นที่ขาดหาย", " · Fill brush: paint in missing parts of a piece") : ""}</p>}
-              {img && <p className="text-xs text-slate-500">{traced?.contours.length ? t(`เจอ ${traced.contours.length} ชิ้น · กดที่ชิ้นในรูปเพื่อเอา/ไม่เอา · รูปไม่ถูกอัปโหลด ประมวลผลในเครื่องนี้`, `Found ${traced.contours.length} pieces · click a piece to include or skip it · the photo stays on this device`) : t("ยังแยกชิ้นไม่ได้ ลองปรับแถบด้านขวา หรือเปลี่ยนเป็นชิ้นเข้ม/อ่อนกว่าพื้น", "No pieces found yet. Try the sliders on the right, or switch darker/lighter.")}</p>}
+              {img && <p className="text-[11px] text-slate-500" data-photo-zoom-hint>{t("หมุนลูกกลิ้งบนรูป = ซูมตรงจุดที่ชี้ · กดลูกกลิ้งค้าง หรือ Space ค้างแล้วลาก = เลื่อนรูป · มือถือใช้สองนิ้ว", "Wheel on the photo = zoom at the pointer · hold the wheel or Space and drag = pan · on phones, use two fingers")}
+                {tool === "erase" ? t(" · ยางลบ: ระบายทับส่วนที่ลามออกไป ระบบลอกเส้นใหม่ให้เอง", " · Eraser: paint over the part that leaked out; the outline is re-traced") : tool === "add" ? t(" · แปรงเติม: ระบายส่วนของชิ้นที่ขาดหาย", " · Fill brush: paint in missing parts of a piece") : t(" · กดชิ้นในรูปหรือป้ายด้านบนเพื่อเอา/ไม่เอา · รูปไม่ถูกอัปโหลด", " · click a piece or its tag above to include/skip · the photo stays on this device")}</p>}
+              {img && !traced?.contours.length && <p className="text-xs text-amber-700">{t("ยังแยกชิ้นไม่ได้ ลองปรับแถบด้านขวา หรือเปลี่ยนเป็นชิ้นเข้ม/อ่อนกว่าพื้น", "No pieces found yet. Try the sliders on the right, or switch darker/lighter.")}</p>}
             </div>
             <div className="space-y-3 text-xs">
               <div className="space-y-1">
@@ -426,8 +454,8 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
               <RangeInput label={t("ความละเอียดของเส้น (น้อย = ตามรูปมาก จุดเยอะ)", "Outline detail (lower = more points)")} min={0.5} max={10} step={0.5} value={eps} onChange={setEps} />
               {img && cmPerPx > 0 && <p className="-mt-2 text-[11px] text-slate-500" data-trace-tol>{t(`เส้นที่ลอกห่างขอบในรูปได้ไม่เกิน ≈ ${traceTolMm(eps, cmPerPx)} มม. · 1 จุดภาพ = ${Math.round(cmPerPx * 100) / 10} มม.`, `Traced line stays within ≈ ${traceTolMm(eps, cmPerPx)} mm of the photo edge · 1 px = ${Math.round(cmPerPx * 100) / 10} mm`)}</p>}
               {img && (
-                <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50/60 p-2" data-photo-rectify>
-                  <div className="font-medium text-slate-700">{t("แก้มุมเอียงของรูป", "Fix photo perspective")}</div>
+                <details open={!!orig || clickMode === "quad" || quad.length > 0} className="group space-y-1.5 rounded-md border border-amber-200 bg-amber-50/60 p-2" data-photo-rectify>
+                  <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-slate-700 [&::-webkit-details-marker]:hidden">{t("แก้มุมเอียงของรูป", "Fix photo perspective")}{orig && <span className="font-normal text-emerald-700">· {t("แก้แล้ว", "fixed")}</span>}<Icon value="i:chevron-down" className="ml-auto text-sm text-slate-400 transition-transform group-open:rotate-180" /></summary>
                   {orig ? <div className="flex items-center gap-1.5 text-emerald-700">{t("แก้แล้ว · มาตราส่วนจากกรอบอ้างอิง", "Fixed · scale from the reference")}<button type="button" onClick={undoRectify} className="ml-auto h-7 rounded-md border border-slate-200 bg-white px-2 text-slate-600 hover:bg-slate-50">{t("กลับรูปเดิม", "Undo")}</button></div> : <>
                     <p className="text-[11px] text-slate-500">{t("วางของที่รู้ขนาดในรูป (กระดาษ A4 29.7×21 · แผ่นรองตัด) แล้วคลิก 4 มุมของมัน", "Put something of known size in the photo (A4 paper 29.7×21, a cutting mat) and click its 4 corners")}</p>
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -442,12 +470,12 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                       <button type="button" data-photo-rectify-apply disabled={quad.length !== 4 || !(refW > 0 && refH > 0)} onClick={rectify} className="h-7 rounded-md bg-amber-500 px-2 text-white hover:bg-amber-600 disabled:opacity-40">{t("แก้มุมเอียง", "Fix perspective")}</button>
                     </div>
                   </>}
-                </div>
+                </details>
               )}
               {img && (
-                <div className="space-y-1.5 rounded-md border border-emerald-200 bg-emerald-50/50 p-2" data-photo-checks>
-                  <div className="flex items-center gap-1.5 font-medium text-slate-700">{t("จุดตรวจระยะ", "Check distances")}
-                    <span className="ml-auto inline-flex items-center gap-1 font-normal text-slate-500">{t("คลาดได้ ±", "Tolerance ±")}<input type="number" min={0.05} step={0.05} value={tolCm} onChange={(e) => setTolCm(Math.max(0.05, Number(e.target.value) || 0.3))} className="h-6 w-14 rounded border border-slate-200 px-1 text-right" aria-label={t("ค่าคลาดที่ยอมได้ (ซม.)", "Tolerance (cm)")} />{t("ซม.", "cm")}</span></div>
+                <details open={checks.length > 0 || clickMode === "check"} className="group space-y-1.5 rounded-md border border-emerald-200 bg-emerald-50/50 p-2" data-photo-checks>
+                  <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-slate-700 [&::-webkit-details-marker]:hidden">{t("จุดตรวจระยะ", "Check distances")}{chk && <span className={`font-normal ${chk.ok ? "text-emerald-700" : "text-rose-700"}`}>· {chk.ok ? t("ผ่าน", "pass") : t("คลาดเกิน", "off")}</span>}<Icon value="i:chevron-down" className="ml-auto text-sm text-slate-400 transition-transform group-open:rotate-180" /></summary>
+                  <div className="flex items-center gap-1 text-slate-500">{t("คลาดได้ ±", "Tolerance ±")}<input type="number" min={0.05} step={0.05} value={tolCm} onChange={(e) => setTolCm(Math.max(0.05, Number(e.target.value) || 0.3))} className="h-6 w-14 rounded border border-slate-200 px-1 text-right" aria-label={t("ค่าคลาดที่ยอมได้ (ซม.)", "Tolerance (cm)")} />{t("ซม.", "cm")}</div>
                   <p className="text-[11px] text-slate-500">{t("คลิก 2 จุดที่รู้ระยะจริง (เช่น ขอบชิ้นที่วัดแล้ว ไม้บรรทัดในรูป) แล้วพิมพ์ระยะ — หลายคู่ = ระบบตรวจว่าทั้งรูปตรงไหม", "Click 2 points with a known real distance (a measured edge, a ruler in the photo) and type it — several pairs show whether the whole photo is true")}</p>
                   {checks.map((c, i) => { const k = checks.slice(0, i).filter((x) => x.b).length, row = c.b ? chk?.rows[k] : undefined; return (
                     <div key={i} className="flex flex-wrap items-center gap-1.5" data-photo-check-row>
@@ -458,20 +486,15 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                     </div>); })}
                   <button type="button" data-photo-check-add onClick={() => setClickMode(clickMode === "check" ? null : "check")} aria-pressed={clickMode === "check"} className={`h-7 rounded-md border px-2 ${clickMode === "check" ? "border-emerald-400 bg-emerald-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}>{clickMode === "check" ? t("คลิก 2 จุดบนรูป…", "Click 2 points on the photo…") : t("+ จุดตรวจ", "+ Check")}</button>
                   {chk && <p className={`text-[11px] ${chk.ok ? "text-emerald-700" : "text-rose-700"}`} data-photo-check-sum>{chk.ok ? t(`ผ่านทุกจุด (คลาดมากสุด ${chk.worst} ซม.)`, `All checks pass (worst ${chk.worst} cm)`) : (fixedScale ? t(`คลาดเกิน ±${tolCm} ซม. (มากสุด ${chk.worst}) — ตรวจว่าวัดของจริงถูก คลิกตรงจุด และชิ้นวางราบกับกระดาษ`, `Off by more than ±${tolCm} cm (worst ${chk.worst}) — check the real measurement, the clicked points, and that pieces lie flat`) : t(`คลาดเกิน ±${tolCm} ซม. (มากสุด ${chk.worst}) — รูปอาจถ่ายเอียง ลอง "แก้มุมเอียง" ก่อน`, `Off by more than ±${tolCm} cm (worst ${chk.worst}) — the photo may be tilted, try "Fix perspective" first`))}</p>}
-                </div>
+                </details>
               )}
               {scaleFrom === "widest" ? <RangeInput label={t("ความกว้างจริงของชิ้นที่กว้างที่สุด", "Real width of the widest piece")} unit={t("ซม.", "cm")} min={2} max={150} step={0.5} value={realW} onChange={setRealW} />
                 : <p className="text-[11px] text-slate-600" data-scale-from>{scaleFrom === "rect" ? t("มาตราส่วนจากกรอบอ้างอิงที่แก้มุมเอียง", "Scale from the perspective reference") : t("มาตราส่วนจากจุดตรวจระยะ (เข้ากับทุกคู่มากที่สุด)", "Scale from the check distances (best fit to all pairs)")}</p>}
-              {chosen.length > 0 && cmPerPx > 0 && (
-                <ul className="space-y-0.5 rounded-md bg-slate-50 p-2 tabular-nums text-slate-600">
-                  {chosen.map(({ c, i }, k) => <li key={i}>{t(`ชิ้น ${k + 1}`, `Piece ${k + 1}`)} · {(c.box.w * cmPerPx).toFixed(1)} × {(c.box.h * cmPerPx).toFixed(1)} {t("ซม.", "cm")} · {c.pts.length} {t("จุด", "pts")}</li>)}
-                </ul>
-              )}
-              <div className="space-y-1 rounded-md border border-slate-200 p-2 text-slate-500">
-                <div className="font-medium text-slate-700">{t("ช่างคิดยังไง", "How a pattern maker thinks")}</div>
+              <details className="group space-y-1 rounded-md border border-slate-200 p-2 text-slate-500">
+                <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-slate-700 [&::-webkit-details-marker]:hidden">{t("ช่างคิดยังไง", "How a pattern maker thinks")}<Icon value="i:chevron-down" className="ml-auto text-sm text-slate-400 transition-transform group-open:rotate-180" /></summary>
                 <p>{t("รูปถ่ายไม่มีมาตราส่วน ระบบจึงต้องให้คุณวัดของจริง 1 ค่า แล้วย่อขยายทุกชิ้นตามค่านั้น — ถ่ายเอียงนิดเดียวขนาดก็เพี้ยนได้ ให้วัดซ้ำอีกด้านหลังวางลงกระดาน", "A photo has no scale, so you give one real measurement and everything is scaled from it. A slightly tilted shot distorts sizes — re-measure another side after placing.")}</p>
                 <p>{t("เส้นที่ลอกได้คือขอบกระดาษ ระบบไม่รู้ว่าเป็นเส้นตัดหรือเส้นเย็บ ชิ้นที่วางจึงยังไม่มีเผื่อเย็บ ให้ตั้งเองในแผงของชิ้น · เส้นโค้งจะเป็นเส้นตรงสั้น ๆ ต่อกัน ใช้ แก้จุด เกลาได้", "The traced line is the paper edge — the system cannot tell cut line from sew line, so placed pieces have no allowance yet. Curves become short straight segments; refine with Edit points.")}</p>
-              </div>
+              </details>
             </div>
           </div>
         ) : (

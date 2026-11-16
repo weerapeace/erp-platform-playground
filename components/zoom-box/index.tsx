@@ -4,7 +4,7 @@
  * ZoomBox — ของกลาง: กล่องดูรูป/เนื้อหาที่ซูมได้ (เจ้าของขอ 2026-11-14 "ต้องซูมรูปได้ ctrl + scroll เมาส์")
  *
  *   Ctrl (หรือ ⌘) + หมุนลูกกลิ้ง = ซูมเข้า/ออก "ตรงจุดที่เมาส์ชี้" · หมุนลูกกลิ้งเฉย ๆ = เลื่อนดูส่วนอื่น (เหมือนเดิม)
- *   มือถือ: สองนิ้ว = ถ่างซูมตรงกลางนิ้ว + ลากเลื่อน · dragPan = กดลูกกลิ้ง/Space ค้างแล้วลาก = เลื่อน
+ *   มือถือ: สองนิ้ว = ถ่างซูมตรงกลางนิ้ว + ลากเลื่อน · dragPan = กดลูกกลิ้ง/Space ค้างแล้วลาก = เลื่อน · wheelZoom = หมุนลูกกลิ้งเฉย ๆ ก็ซูม
  *   ปุ่ม − / % / + = ZoomControls (วางที่ไหนก็ได้ · กด % = กลับพอดีกล่อง)
  *   100% = พอดีกล่อง (ใช้ aspect = กว้าง/สูง ของเนื้อหา คำนวณให้เห็นทั้งรูป) · เนื้อหาข้างใน (เช่น ImageRegions) กว้าง = ขนาดพอดี × zoom
  *   → กรอบที่ใช้ % ของรูปยังตรงตำแหน่งทุกระดับซูม
@@ -22,8 +22,10 @@ export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 6;
 const clampZoom = (z: number, min = ZOOM_MIN, max = ZOOM_MAX) => Math.round(Math.min(max, Math.max(min, z)) * 100) / 100;
 
-export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, className = "", children, min = ZOOM_MIN, max = ZOOM_MAX, dragPan = false }: {
+export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, className = "", children, min = ZOOM_MIN, max = ZOOM_MAX, dragPan = false, wheelZoom = false }: {
   zoom: number;
+  /** true = หมุนลูกกลิ้งเฉย ๆ บนกล่องก็ซูม (ไม่ต้องกด Ctrl) — เลื่อนรูปใช้ dragPan / แถบเลื่อนแทน */
+  wheelZoom?: boolean;
   /** true = กดลูกกลิ้งค้าง / Space ค้าง แล้วลาก = เลื่อนรูป (เมื่อคลิกซ้ายบนรูปมีหน้าที่อื่น) */
   dragPan?: boolean;
   onZoom: (z: number) => void;
@@ -48,6 +50,8 @@ export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, classN
   zoomRef.current = zoom;
   const onZoomRef = useRef(onZoom);
   onZoomRef.current = onZoom;
+  const wheelZoomRef = useRef(wheelZoom);
+  wheelZoomRef.current = wheelZoom;
 
   useEffect(() => {
     const vp = vpRef.current;
@@ -59,7 +63,7 @@ export function ZoomBox({ zoom, onZoom, aspect, maxFitWidth, padding = 8, classN
     const ro = new ResizeObserver(measure);
     ro.observe(vp);
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;   // ไม่กด Ctrl = เลื่อนตามปกติ
+      if (!(e.ctrlKey || e.metaKey || wheelZoomRef.current)) return;   // ไม่กด Ctrl = เลื่อนตามปกติ (เว้นแต่เปิด wheelZoom)
       e.preventDefault();                      // กันเบราว์เซอร์ซูมทั้งหน้า
       const c = contentRef.current?.getBoundingClientRect();
       if (c && c.width > 0 && c.height > 0) anchor.current = { fx: (e.clientX - c.left) / c.width, fy: (e.clientY - c.top) / c.height, cx: e.clientX, cy: e.clientY };
