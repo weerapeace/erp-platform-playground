@@ -8,7 +8,7 @@
  *   cards = การ์ดในแถบซ้ายของหน้าจัดเรียง
  *   table = ตารางใหญ่ในหน้าต่าง "⤢ ขยาย" (แถวละลาย · ค้นหา · ลากหูจับ ⠿ สลับลำดับ — ของกลาง useDragReorder)
  */
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useT, useLang } from "@/components/i18n";
 import { useFileDrop } from "@/components/file-drop";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
@@ -20,6 +20,7 @@ import {
   type FileInfo, type Settings,
 } from "./nest-utils";
 import { NumInput } from "./num-input";
+import { cardSha, rowsWithoutCard } from "./artwork-card";
 
 export type AssetPreview = { url: string | null; sizes: AssetSize[] };
 
@@ -36,6 +37,7 @@ export function ItemsPanel({
   items, infos, missing, previews, settings, resultByKey, busy, onChange, onAttach, onAddFiles, onPickLibrary,
   canSplit, onSplit, onMergeBack, variant = "cards", cloud = {}, onLibrarySize, librarySizeOf, onSaveSize,
   missWhy = {}, cloudReady = false, helperVersion = null, onDrivePick,
+  cardBusy = {}, canCard = false, onKeepCard, onManageCard, artworkBar = null,
 }: {
   items: NestingItem[];
   infos: Record<string, FileInfo>;
@@ -60,6 +62,11 @@ export function ItemsPanel({
   cloudReady?: boolean;                    // ตัวช่วยรุ่นนี้ส่ง/โหลดไฟล์กับคลังได้ (v1.5.0+)
   helperVersion?: string | null;
   onDrivePick?: (key: string) => void;     // ใช้ไฟล์จาก Drive ของลายในคลัง
+  cardBusy?: Record<string, "saving" | "error">;   // การ์ดในคลัง Artwork กำลังสร้าง/พลาด (ตาม sha) — artwork-card.ts
+  canCard?: boolean;                       // เก็บเข้าคลัง Artwork ได้ (สิทธิ์ assets.upload)
+  onKeepCard?: (key: string | null) => void;   // "เก็บเข้าคลัง" แถวนี้ / ทั้งหมด (null)
+  onManageCard?: (assetId: string) => void;    // "จัดการ" = หน้ารายละเอียดไฟล์ของคลังไฟล์กลาง (ของกลาง)
+  artworkBar?: ReactNode;                  // แถบเลือกแบรนด์/ชนิดของการ์ดที่จะสร้าง
 }) {
   const t = useT();
   const { lang } = useLang();
@@ -136,11 +143,47 @@ export function ItemsPanel({
     const m = {
       saving: ["text-sky-700", t("☁️ กำลังบันทึกเข้าคลัง…", "☁️ Saving to library…")],
       fetching: ["text-sky-700", t("☁️ กำลังโหลดจากคลัง…", "☁️ Downloading…")],
-      saved: ["text-emerald-700", t("☁️ เก็บในคลังแล้ว", "☁️ In the library")],
+      saved: ["text-emerald-700", t("☁️ เก็บไฟล์พิมพ์แล้ว", "☁️ Print file saved")],
       error: ["text-amber-700", t("☁️ บันทึกเข้าคลังไม่สำเร็จ", "☁️ Not saved to library")],
     }[st];
     return <span className={`shrink-0 text-[11px] ${m[0]}`}>{m[1]}</span>;
   };
+  /** การ์ดในคลัง Artwork ของแถว: มีแล้ว = ปุ่ม "จัดการ" (หน้ารายละเอียดคลัง) · ยังไม่มี = ปุ่ม "เก็บเข้าคลัง" */
+  const artLine = (it: NestingItem, c: Ctx) => {
+    const sha = cardSha(it);
+    const st = sha ? cardBusy[sha] : undefined;
+    if (it.asset_id) {
+      return (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">🗂 {t("อยู่ในคลัง Artwork", "In the Artwork library")}</span>
+          {onManageCard && (
+            <button type="button" onClick={() => onManageCard(it.asset_id!)}
+              title={t("เปิดรายละเอียดไฟล์ในคลัง — แก้ชื่อ/ชนิด/แท็ก/อัลบั้ม/ขนาด/Parent SKU", "Open the file details in the library — edit name/type/tags/albums/sizes/Parent SKU")}
+              className="rounded border border-violet-300 bg-white px-2 py-0.5 text-violet-700 hover:bg-violet-50">
+              ⚙️ {t("จัดการ", "Manage")}
+            </button>
+          )}
+        </div>
+      );
+    }
+    if (!sha || !canCard) return null;
+    if (st === "saving") return <div className="text-[11px] text-sky-700">🗂 {t("กำลังเก็บเข้าคลัง Artwork…", "Saving to the Artwork library…")}</div>;
+    const local = !!c.info && !c.info.error && !c.miss;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span className={`rounded px-1.5 py-0.5 ${st === "error" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
+          🗂 {st === "error" ? t("เก็บเข้าคลังไม่สำเร็จ", "Couldn't save to the library") : t("ยังไม่อยู่ในคลัง Artwork", "Not in the Artwork library yet")}
+        </span>
+        {local && onKeepCard && (
+          <button type="button" onClick={() => onKeepCard(it.key)} disabled={busy}
+            className="rounded border border-violet-300 bg-white px-2 py-0.5 text-violet-700 hover:bg-violet-50 disabled:opacity-50">
+            ☁️ {st === "error" ? t("ลองอีกครั้ง", "Try again") : t("เก็บเข้าคลัง", "Save to library")}
+          </button>
+        )}
+      </div>
+    );
+  };
+  const keepable = canCard ? rowsWithoutCard(items).filter((g) => infos[g.sha] && !infos[g.sha].error && !missing[g.sha]).length : 0;
   /** แสดงปุ่ม "บันทึกเป็นไซส์ในคลัง" — มีลายในคลัง + ขนาดนี้ยังไม่มีในไซส์ของลาย */
   const canSaveSize = (it: NestingItem, c: Ctx) => {
     const v = librarySizeOf?.(it);
@@ -384,7 +427,7 @@ export function ItemsPanel({
               style={{ gridTemplateColumns: TABLE_COLS(fill) }}>
               <span className="pt-3">{!q && <DragHandle {...drag.handleProps(i)} title={t("ลากเพื่อสลับลำดับ", "Drag to reorder")} />}</span>
               {thumb(it, c)}
-              <div className="min-w-0 space-y-1">{titleBlock(it, c)}{fileLine(it, c)}</div>
+              <div className="min-w-0 space-y-1">{titleBlock(it, c)}{fileLine(it, c)}{artLine(it, c)}</div>
               <div>{sizeCtl(it, c)}</div>
               <div className="pt-0.5">{qtyCtl(it, false)}</div>
               <div>{lockToggle(it)}{lockDetail(it, true)}</div>
@@ -411,7 +454,7 @@ export function ItemsPanel({
               <div className="min-w-0 flex-1">{titleBlock(it, c)}</div>
               {actionBtns(it)}
             </div>
-            <div className="mt-1.5">{fileLine(it, c)}</div>
+            <div className="mt-1.5 space-y-1">{fileLine(it, c)}{artLine(it, c)}</div>
             <div className="mt-2">{sizeCtl(it, c)}</div>
             <div className="mt-1.5">{qtyCtl(it, true)}</div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">{lockToggle(it)}{rowsBtn(it)}{splitBtn(it, c)}</div>
@@ -438,17 +481,31 @@ export function ItemsPanel({
           className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-100 disabled:opacity-50">
           🖼 {t("เลือกลายจากคลัง Artwork", "Pick artwork from library")}
         </button>
+        {keepable > 0 && onKeepCard && (
+          <button type="button" onClick={() => onKeepCard(null)} disabled={busy}
+            title={t("สร้างการ์ดในคลัง Artwork ให้ทุกแถวที่ยังไม่มี (ไฟล์เดิมเคยเข้าคลังแล้ว = ใช้การ์ดเดิม)", "Create Artwork library cards for every row without one (files already in the library reuse their card)")}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            ☁️ {t(`เก็บเข้าคลังทั้งหมด (${keepable})`, `Save all to library (${keepable})`)}
+          </button>
+        )}
         {variant === "table" && (
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("ค้นหาลาย / ชื่อไฟล์…", "Search artwork / file name…")}
             className="ml-auto h-9 w-64 rounded-lg border border-slate-300 px-3 text-sm" />
         )}
       </div>
+      {artworkBar}
       <div {...drop.zone("new")} onClick={() => browse(null)}
         className={`mt-2 cursor-pointer rounded-lg border-2 border-dashed px-3 py-3 text-center text-sm ${drop.over === "new" ? "border-violet-400 bg-violet-50" : "border-slate-300 text-slate-500 hover:border-slate-400"}`}>
         ⬆ {t("ลากไฟล์ PNG มาวางเพื่อเพิ่มลาย หรือกดเลือก", "Drop PNG files here to add, or click to browse")}
       </div>
 
-      {variant === "table" ? table : cards}
+      {variant === "table" ? (
+        <>
+          <div className="hidden md:block">{table}</div>
+          {/* มือถือ: ตารางกว้างเลื่อนยาก → ใช้การ์ดแทน (ตัวควบคุมชุดเดียวกัน) */}
+          <div className="md:hidden">{cards}</div>
+        </>
+      ) : cards}
 
       {fill && items.length > 0 && (
         <div className="mt-2 flex items-center gap-2 text-xs">

@@ -37,6 +37,12 @@ import { SheetView, rotated90, type HelperPart, type Placed } from "./sheet-view
 import { PublishModal } from "./publish-modal";
 import { SplitModal } from "./split-modal";
 import { JobSummary } from "./job-summary";
+import { ArtworkBar } from "./artwork-bar";
+import {
+  attachCard, cardFileName, cardTitle, createArtworkCard, findCardsByPrint, getCard, loadTarget, realSize, renameByCard, rowsWithoutCard,
+  saveTarget, targetReady, type ArtworkTarget,
+} from "./artwork-card";
+import { helperFileUrl } from "@/lib/nesting-helper";
 
 // การ์ดในคลังไฟล์ (ของกลาง) — โหลดเมื่อกดดูเท่านั้น (คลังไฟล์ตัวใหญ่ ไม่ให้หน้าจัดเรียงช้า)
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
@@ -94,7 +100,7 @@ const sameSplit = (a: NestingItem, b: NestingItem) =>
 export function NestingEditor({ id }: { id: string }) {
   const t = useT();
   const { lang } = useLang();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const toast = usePushToast();
   const { status: helper, recheck } = useHelperStatus();
   const ready = helper.state === "ready";
@@ -163,6 +169,77 @@ export function NestingEditor({ id }: { id: string }) {
   const [missWhy, setMissWhy] = useState<Record<string, MissWhy>>({});
   const replaced = useRef(new Set<string>());   // ใช้ไฟล์พิมพ์ของลายในคลังแทนไปแล้ว (กันทำซ้ำต่อชิ้น)
   const [drivePick, setDrivePick] = useState<NestingItem | null>(null);
+
+  // ---------------------------------------------------------------- การ์ดในคลัง Artwork ของไฟล์ที่ลากมา (artwork-card.ts)
+  const canCard = can("assets.upload");
+  const [artTarget, setArtTarget] = useState<ArtworkTarget>(() => loadTarget());
+  const changeTarget = (v: ArtworkTarget) => { setArtTarget(v); saveTarget(v); };
+  const [cardBusy, setCardBusy] = useState<Record<string, "saving" | "error">>({});   // ตาม sha
+  const [manageId, setManageId] = useState<string | null>(null);   // การ์ดที่เปิดหน้ารายละเอียดคลังอยู่
+  const rememberCard = (a: AssetRow) => {
+    askedAssets.current.add(a.id);
+    setPreviews((p) => ({ ...p, [a.id]: { url: a.url, sizes: a.sizes ?? [] } }));
+  };
+  const clearCardBusy = (sha: string) => setCardBusy((m) => { const x = { ...m }; delete x[sha]; return x; });
+  /**
+   * ไฟล์พิมพ์นี้ → การ์ดในคลัง: เคยเข้าคลังแล้ว (ตามเนื้อไฟล์) = การ์ดเดิม · ยังไม่มี = สร้างใหม่ (ต้องเลือกแบรนด์+ชนิดก่อน)
+   * คืน id การ์ด หรือ null (ไม่มีสิทธิ์ / ยังไม่เลือกแบรนด์ / พลาด — แถวยังใช้งานได้ปกติ กด "เก็บเข้าคลัง" ทีหลังได้)
+   */
+  const ensureCard = async (sha: string, title: string, preview: () => Promise<File>, info: FileInfo | undefined, quiet = false): Promise<string | null> => {
+    if (!canCard || !canRun) return null;
+    setCardBusy((m) => ({ ...m, [sha]: "saving" }));
+    try {
+      let card = (await findCardsByPrint([sha]))[sha];
+      if (!card) {
+        if (!targetReady(artTarget)) {
+          if (!quiet) toast("warning", t("เลือกแบรนด์และชนิด Artwork ที่แถบ “เก็บเข้าคลัง Artwork เป็น” ก่อน แล้วกด “เก็บเข้าคลัง” ที่แถว",
+            "Choose a brand and artwork type in the “Save to Artwork as” bar, then press “Save to library” on the row"));
+          clearCardBusy(sha);
+          return null;
+        }
+        card = await createArtworkCard(await preview(), { title, target: artTarget, size: realSize(info, t("ขนาดจริง", "Actual size")), actor: user?.email ?? null });
+      }
+      const id = card.id;
+      rememberCard(card);
+      setItems((list) => attachCard(list, sha, id));
+      clearCardBusy(sha);
+      return id;
+    } catch (e) {
+      setCardBusy((m) => ({ ...m, [sha]: "error" }));
+      toast("warning", t(`เก็บ ${title} เข้าคลัง Artwork ไม่สำเร็จ — ยังใช้ในงานนี้ได้ (${(e as Error).message})`, `Couldn't save ${title} to the Artwork library — it still works in this job (${(e as Error).message})`));
+      return null;
+    }
+  };
+  /** รูปตัวอย่างจากตัวช่วยในเครื่อง (แถวที่ลากไว้ก่อนมีระบบนี้ — ไม่มีไฟล์ในเบราว์เซอร์แล้ว) */
+  const helperPreview = (sha: string, name: string) => async (): Promise<File> => {
+    const r = await fetch(helperFileUrl(sha, "view"));
+    if (!r.ok) throw new Error(t("อ่านรูปจากตัวช่วยในเครื่องไม่ได้", "Couldn't read the image from the helper"));
+    return new File([await r.blob()], `${stem(name)}.png`, { type: "image/png" });
+  };
+  /** ปุ่ม "เก็บเข้าคลัง" (แถวเดียว = key · ทั้งหมด = null) */
+  const keepToLibrary = async (key: string | null) => {
+    if (needHelper()) return;
+    const groups = rowsWithoutCard(items).filter((g) => !key || g.keys.includes(key))
+      .filter((g) => infos[g.sha] && !infos[g.sha].error && !missing[g.sha]);
+    if (!groups.length) { toast("warning", t("ไม่มีแถวที่เก็บได้ — ไฟล์ต้องอยู่ในเครื่องนี้", "Nothing to save — the file must be on this computer")); return; }
+    let ok = 0;
+    for (const g of groups) {
+      const id = await ensureCard(g.sha, cardTitle(g.first), helperPreview(g.sha, cardFileName(g.first)), infos[g.sha], ok > 0);
+      if (!id) { if (!targetReady(artTarget)) break; continue; }
+      ok++;
+      void saveToCloud(g.sha, cardFileName(g.first), id);   // ผูกไฟล์พิมพ์กับการ์ด (มีในคลังแล้วไม่ส่งซ้ำ)
+    }
+    if (ok) toast("success", t(`เก็บเข้าคลัง Artwork แล้ว ${ok} ลาย`, `Saved ${ok} artwork(s) to the library`));
+  };
+  /** หลังแก้ในหน้ารายละเอียดคลัง → ชื่อ/รูป/ไซส์ในแถวตามการ์ด · การ์ดถูกลบ = แถวเลิกผูก */
+  const syncCard = async (assetId: string) => {
+    try {
+      const a = await getCard(assetId);
+      if (a.status === "trashed") { setItems((list) => list.map((x) => (x.asset_id === assetId ? { ...x, asset_id: null } : x))); return; }
+      rememberCard(a);
+      setItems((list) => renameByCard(list, assetId, a.title));
+    } catch { /* อ่านไม่ได้ = คงค่าเดิม */ }
+  };
 
   useEffect(() => {
     for (const it of items) {
@@ -408,7 +485,15 @@ export function NestingEditor({ id }: { id: string }) {
     if (needHelper()) return;
     void withBusy(t(`กำลังอ่านและตรวจ ${files.length} ไฟล์…`, `Reading and checking ${files.length} file(s)…`), async () => {
       const ok = await uploadToHelper(files);
-      for (const info of ok) void saveToCloud(info.sha, info.name ?? "image.png", null);   // เปิดงานนี้เครื่องอื่นโหลดให้เอง
+      // เก็บเข้าคลัง Artwork (การ์ด) แล้วผูกไฟล์พิมพ์กับการ์ด · ไม่มีสิทธิ์/ยังไม่เลือกแบรนด์ = เก็บไฟล์พิมพ์อย่างเดียวเหมือนเดิม
+      for (const [i, info] of ok.entries()) {
+        const nm = info.name ?? "image.png";
+        const file = files.find((f) => f.name === nm);
+        void (async () => {
+          const id = await ensureCard(info.sha, stem(nm), file ? async () => file : helperPreview(info.sha, nm), info, i > 0);
+          await saveToCloud(info.sha, nm, id);   // เปิดงานนี้เครื่องอื่นโหลดให้เอง
+        })();
+      }
       setItems((list) => [...list, ...ok.map((info): NestingItem => ({
         key: newKey(), asset_id: null, title: stem(info.name ?? "image.png"), size: { mode: "natural", value: null },
         qty: 1, fill_pct: 0, file: { name: info.name ?? "image.png", sha: info.sha },
@@ -863,7 +948,9 @@ export function NestingEditor({ id }: { id: string }) {
               canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack}
               cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize}
               missWhy={missWhy} cloudReady={cloudVer} helperVersion={helper.state === "ready" ? helper.version : null}
-              onDrivePick={canRun ? (key) => setDrivePick(items.find((x) => x.key === key) ?? null) : undefined} />
+              onDrivePick={canRun ? (key) => setDrivePick(items.find((x) => x.key === key) ?? null) : undefined}
+              cardBusy={cardBusy} canCard={canCard && canRun} onKeepCard={(key) => void keepToLibrary(key)} onManageCard={setManageId}
+              artworkBar={canCard && canRun ? <ArtworkBar value={artTarget} onChange={changeTarget} /> : null} />
           </section>
           {canRun && (
             <div className="sticky bottom-2 rounded-xl border border-slate-200 bg-white p-3">
@@ -1063,7 +1150,9 @@ export function NestingEditor({ id }: { id: string }) {
           canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack}
               cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize}
               missWhy={missWhy} cloudReady={cloudVer} helperVersion={helper.state === "ready" ? helper.version : null}
-              onDrivePick={canRun ? (key) => setDrivePick(items.find((x) => x.key === key) ?? null) : undefined} />
+              onDrivePick={canRun ? (key) => setDrivePick(items.find((x) => x.key === key) ?? null) : undefined}
+              cardBusy={cardBusy} canCard={canCard && canRun} onKeepCard={(key) => void keepToLibrary(key)} onManageCard={setManageId}
+              artworkBar={canCard && canRun ? <ArtworkBar value={artTarget} onChange={changeTarget} /> : null} />
       </ERPModal>
       {drivePick?.asset_id && (
         <DrivePrintPicker assetId={drivePick.asset_id} title={drivePick.piece?.parent.title || drivePick.title}
@@ -1074,6 +1163,10 @@ export function NestingEditor({ id }: { id: string }) {
           initial={splitInitial} saved={!!savedSplit} canRemember={!!splitItem.asset_id && canRun} unit={settings.unit}
           onApply={(res, params, qtys, remember) => applySplit(splitItem.key, res, params, qtys, remember)}
           onForget={() => forgetSplit(splitItem.asset_id!)} />
+      )}
+      {manageId && (   // หน้ารายละเอียดไฟล์ตัวเดียวกับคลังไฟล์กลาง (ของกลาง) — แก้แล้วแถวตาม
+        <AssetDetailPopup assetId={manageId} onChanged={() => void syncCard(manageId)}
+          onClose={() => { void syncCard(manageId); setManageId(null); }} />
       )}
       <AssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} multiple typeFilter="image" defaultSource="artwork"
         title={t("เลือกลายจากคลัง Artwork", "Pick artwork from the library")}
