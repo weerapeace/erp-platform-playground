@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseLabelRead } from "@/lib/pattern-label-read";
+import { matchMaterials, parseLabelRead } from "@/lib/pattern-label-read";
 
 describe("อ่านตัวเขียนบนชิ้นแพทเทิร์น (ตัวตรวจคำตอบ AI)", () => {
   it("คำตอบปกติ → ชื่อ / กว้าง / ยาว / จำนวน", () => {
     const r = parseLabelRead('```json\n{"text":"ข้าง 102x30 ×2","name":"ข้าง","w_cm":30,"l_cm":102,"count":2,"unsure":false}\n```');
-    expect(r).toEqual({ text: "ข้าง 102x30 ×2", name: "ข้าง", w: 30, l: 102, count: 2, unsure: false });
+    expect(r).toEqual({ text: "ข้าง 102x30 ×2", name: "ข้าง", w: 30, l: 102, count: 2, mats: [], unsure: false });
   });
   it("กว้างมากกว่ายาว → สลับให้ · ตัวเลขเป็นข้อความก็อ่านได้", () => {
     const r = parseLabelRead('{"text":"","name":"ก้น","w_cm":"40 cm","l_cm":"12","count":"3","unsure":false}');
@@ -15,10 +15,17 @@ describe("อ่านตัวเขียนบนชิ้นแพทเท�
     expect([r.w, r.l, r.count, r.unsure]).toEqual([null, null, null, true]);
   });
   it("รับ object ที่แปลง JSON แล้วได้ (aiChat คืนแบบนี้)", () => {
-    expect(parseLabelRead({ text: "หู ×4", name: "หู", w_cm: null, l_cm: 45, count: 4 })).toEqual({ text: "หู ×4", name: "หู", w: null, l: 45, count: 4, unsure: false });
+    expect(parseLabelRead({ text: "หู ×4", name: "หู", w_cm: null, l_cm: 45, count: 4 })).toEqual({ text: "หู ×4", name: "หู", w: null, l: 45, count: 4, mats: [], unsure: false });
   });
   it("ไม่ใช่ JSON = ค่าว่าง ไม่พัง", () => {
     expect(parseLabelRead("อ่านไม่ออก").unsure).toBe(true);
     expect(parseLabelRead("{oops").name).toBe("");
+  });
+  it("อ่านวัสดุ + จำนวนต่อวัสดุ แล้วจับคู่กับรายการวัสดุของหน้า", () => {
+    const r = parseLabelRead({ text: "ผ้าตัว 2 ซับใน 1", name: "ตัวหน้า", materials: [{ name: "ผ้าตัว", count: 2 }, { name: "ซับใน", count: "1" }, "กาว", { name: "" }] });
+    expect(r.mats).toEqual([{ name: "ผ้าตัว", count: 2 }, { name: "ซับใน", count: 1 }, { name: "กาว", count: null }]);
+    const list = [{ id: "a", name: "ผ้าตัว Oxford" }, { id: "b", name: "ซับใน" }, { id: "c", name: "หนัง PU" }];
+    expect(matchMaterials(r.mats, list)).toEqual([{ id: "a", name: "ผ้าตัว Oxford", count: 2 }, { id: "b", name: "ซับใน", count: 1 }]);
+    expect(matchMaterials([{ name: "ซับใน", count: 1 }, { name: "ซับ ใน", count: 3 }], list)).toHaveLength(1);
   });
 });

@@ -17,6 +17,8 @@ import { RangeInput } from "@/components/range-input";
 import { apiFetch } from "@/lib/api";
 import type { BagParams } from "@/lib/bag-templates";
 import { contourShape, EDIT_ERASE, EDIT_KEEP, paintEdits, traceGray } from "@/lib/pattern-trace";
+import { matchMaterials, type LabelRead } from "@/lib/pattern-label-read";
+import { SearchableSelect } from "@/components/searchable-select";
 import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { shortcutKey } from "@/lib/shortcut-key";
 import type { Pt } from "@/lib/pattern-shape";
@@ -63,7 +65,9 @@ function sampleGray(gray: Uint8Array, w: number, h: number, x: number, y: number
 
 type TraceTool = "pick" | "erase" | "add" | "bgpick" | "crop" | "fix";
 /** ชิ้นที่ทำให้ตรงแล้ว: 4 มุมบนรูป (จุดภาพ) + ขนาดจริง (ซม. · 0 = ไม่รู้ด้านนั้น) — ผูกกับชิ้นด้วย "จุดกลาง 4 มุมอยู่ในชิ้นไหน" (เลขชิ้นเปลี่ยนได้หลังลบ/ปรับแถบ) */
-type PieceFix = { quad: PPt[]; w: number; h: number; name?: string; count?: number };
+/** วัสดุของชิ้น · q = จำนวนของวัสดุนั้น (ใช้เมื่อ split = จำนวนต่างกันต่อวัสดุ → ตอนวางแยกเป็นชิ้นละวัสดุ) */
+type FixMat = { id: string; name: string; q: number };
+type PieceFix = { quad: PPt[]; w: number; h: number; name?: string; count?: number; mats?: FixMat[]; split?: boolean };
 
 function pointInPoly([x, y]: PPt, P: PPt[]): boolean {
   let c = false;
@@ -222,7 +226,8 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const [crop, setCrop] = useState<CropRect | null>(null);
   const cropDrag = useRef<{ mode: "new" | "move"; start: PPt; orig: CropRect } | null>(null);
   const [fixes, setFixes] = useState<PieceFix[]>([]);
-  const [editFix, setEditFix] = useState<{ ci: number; quad: PPt[]; w: number; h: number; name: string; count: number; idx: number | null } | null>(null);
+  const [editFix, setEditFix] = useState<{ ci: number; quad: PPt[]; w: number; h: number; name: string; count: number; mats: FixMat[]; split: boolean; idx: number | null } | null>(null);
+  const lastMats = useRef<{ mats: FixMat[]; split: boolean }>({ mats: [], split: false });   // วัสดุชุดล่าสุด → ใส่ให้ชิ้นถัดไป
   const [showSettings, setShowSettings] = useState(false);
   // กระดานสูงพอดีพื้นที่ที่เหลือในป๊อป (ไม่ต้องเลื่อนลง · เจ้าของเจอ 2026-11-16) — วัดจากกล่องเลื่อนของป๊อปจริง ไม่เดาด้วย vh
   const [boardEl, setBoardEl] = useState<HTMLDivElement | null>(null);
@@ -307,11 +312,12 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
     const c = contours[ci]; if (!c) return;
     const k = fixOf[ci];
     setReadText(null); setPvRot(0);
-    if (k != null) { const f = fixes[k]; setEditFix({ ci, quad: f.quad, w: f.w, h: f.h, name: f.name ?? "", count: f.count ?? 1, idx: k }); return; }
+    if (k != null) { const f = fixes[k]; setEditFix({ ci, quad: f.quad, w: f.w, h: f.h, name: f.name ?? "", count: f.count ?? 1, mats: f.mats ?? [], split: !!f.split, idx: k }); return; }
     const q = autoQuad(c.pts); if (!q) return;
-    // ขนาดเริ่มว่าง (ช่องโชว์ค่าประมาณเป็นตัวจาง) — กดบันทึกโดยไม่ใส่ขนาด = เก็บแค่ชื่อ/จำนวน ไม่ดัดชิ้น
-    setEditFix({ ci, quad: q, w: 0, h: 0, name: "", count: 1, idx: null });
+    // ขนาดเริ่มว่าง (ช่องโชว์ค่าประมาณเป็นตัวจาง) — กดบันทึกโดยไม่ใส่ขนาด = เก็บแค่ชื่อ/จำนวน ไม่ดัดชิ้น · วัสดุ = ชุดที่ใช้ล่าสุด (ลบออกได้)
+    setEditFix({ ci, quad: q, w: 0, h: 0, name: "", count: 1, mats: lastMats.current.mats.map((m) => ({ ...m })), split: lastMats.current.split, idx: null });
   };
+  const matOptions = (materials ?? []).filter((m) => !editFix?.mats.some((x) => x.id === m.id)).map((m) => ({ value: m.id, label: m.name }));
   /** ขนาดโดยประมาณของชิ้นที่กำลังแก้ (จากมาตราส่วนตอนนี้) — โชว์เป็นตัวจางในช่อง */
   const estSize = (q: PPt[]): [number, number] | null => {
     const k2 = cmPerPxRef.current; if (!(k2 > 0)) return null;
@@ -322,7 +328,8 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
     if (!editFix) return;
     const sized = editFix.w > 0 || editFix.h > 0;
     if (sized && !straightenPts(editFix.quad, editFix.quad, editFix.w, editFix.h)) { setErr(t("4 มุมต้องไม่ไขว้กัน — ลากจุด A B C D ให้ตรงมุมชิ้น", "The 4 corners must not cross — drag A B C D onto the piece corners")); return; }
-    const f: PieceFix = { quad: editFix.quad, w: editFix.w, h: editFix.h, name: editFix.name.trim(), count: Math.max(1, Math.round(editFix.count) || 1) };
+    const f: PieceFix = { quad: editFix.quad, w: editFix.w, h: editFix.h, name: editFix.name.trim(), count: Math.max(1, Math.round(editFix.count) || 1), mats: editFix.mats, split: editFix.split && editFix.mats.length > 1 };
+    lastMats.current = { mats: editFix.mats.map((m) => ({ ...m })), split: editFix.split };
     setFixes((o) => (editFix.idx != null ? o.map((x, j) => (j === editFix.idx ? f : x)) : [...o, f]));
     setOff((s) => { const n = new Set(s); n.delete(editFix.ci); return n; });
     setEditFix(null); setErr(null);
@@ -411,9 +418,17 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
       const res = await apiFetch("/api/pattern-projects/read-label", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: pvImg }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      const d = j.data as { text: string; name: string; w: number | null; l: number | null; count: number | null; unsure: boolean };
-      setReadText(d.text || t("(อ่านไม่ออก)", "(nothing readable)"));
-      setEditFix((f) => (f ? { ...f, name: d.name || f.name, w: d.w ?? f.w, h: d.l ?? f.h, count: d.count ?? f.count } : f));
+      const d = j.data as LabelRead;
+      // วัสดุที่เขียนไว้ → จับคู่รายการวัสดุของหน้า (ไม่เจอ = ข้าม ไม่สร้างใหม่) · จำนวนต่อวัสดุต่างกัน = เปิดแยกจำนวนให้
+      const hit = matchMaterials(d.mats ?? [], materials ?? []);
+      const miss = (d.mats ?? []).filter((m) => !hit.some((h) => h.name.toLowerCase().includes(m.name.toLowerCase()) || m.name.toLowerCase().includes(h.name.toLowerCase())));
+      setReadText((d.text || t("(อ่านไม่ออก)", "(nothing readable)")) + (miss.length ? t(` · ไม่มีในรายการวัสดุ: ${miss.map((m) => m.name).join(", ")}`, ` · not in the material list: ${miss.map((m) => m.name).join(", ")}`) : ""));
+      setEditFix((f) => {
+        if (!f) return f;
+        const mats = hit.length ? hit.map((m) => ({ id: m.id, name: m.name, q: m.count ?? d.count ?? f.count })) : f.mats;
+        const split = hit.length > 1 && new Set(hit.map((m) => m.count ?? -1)).size > 1 ? true : f.split;
+        return { ...f, name: d.name || f.name, w: d.w ?? f.w, h: d.l ?? f.h, count: d.count ?? (hit.length === 1 && hit[0].count ? hit[0].count : f.count), mats, split };
+      });
     } catch (e) { setErr((e as Error).message); }
     finally { setReading(false); }
   };
@@ -450,7 +465,14 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
         }
       }
       if (!shape) shape = contourShape(c, cmPerPx);
-      if (shape) out.push({ shape, count: Math.max(1, f?.count ?? 1), allow: 0, name: f?.name || t(`ชิ้นจากรูป ${i + 1}`, `Traced piece ${i + 1}`), at: [Math.round(c.box.x * cmPerPx * 10) / 10, Math.round(c.box.y * cmPerPx * 10) / 10] });
+      if (!shape) return;
+      const name = f?.name || t(`ชิ้นจากรูป ${i + 1}`, `Traced piece ${i + 1}`), at: [number, number] = [Math.round(c.box.x * cmPerPx * 10) / 10, Math.round(c.box.y * cmPerPx * 10) / 10];
+      const mats = f?.mats ?? [];
+      if (f?.split && mats.length > 1) {
+        // จำนวนต่างกันต่อวัสดุ → แยกเป็นชิ้นละวัสดุ วางเรียงลงข้างล่างกัน (รูปทรงเดียวกัน)
+        const hCm = shape.k === "path" ? Math.max(...shape.nodes.map((n) => n.y)) : 0;
+        mats.forEach((m, j) => out.push({ shape: shape!, count: Math.max(1, m.q), allow: 0, name: `${name} · ${m.name}`, mats: [{ id: m.id, name: m.name }], at: [at[0], Math.round((at[1] + j * (hCm + 3)) * 10) / 10] }));
+      } else out.push({ shape, count: Math.max(1, f?.count ?? 1), allow: 0, name, at, ...(mats.length ? { mats: mats.map((m) => ({ id: m.id, name: m.name })) } : {}) });
     });
     if (out.length) onPieces(out);
   };
@@ -554,7 +576,27 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
             <label>{t("กว้าง", "Width")}<input type="number" min={0} step={0.1} value={editFix.w || ""} placeholder={est ? String(est[0]) : "—"} onChange={(e) => setEditFix((f) => (f ? { ...f, w: Math.max(0, Number(e.target.value) || 0) } : f))} className="mt-0.5 block h-8 w-20 rounded-md border border-slate-200 px-2 text-right" aria-label={t("กว้างจริง (ซม.)", "Real width (cm)")} /></label>
             <label>{t("ยาว", "Length")}<input type="number" min={0} step={0.1} value={editFix.h || ""} placeholder={est ? String(est[1]) : "—"} onChange={(e) => setEditFix((f) => (f ? { ...f, h: Math.max(0, Number(e.target.value) || 0) } : f))} className="mt-0.5 block h-8 w-20 rounded-md border border-slate-200 px-2 text-right" aria-label={t("ยาวจริง (ซม.)", "Real length (cm)")} /></label>
             <span className="pb-2 text-slate-400">{t("ซม.", "cm")}</span>
-            <label>{t("จำนวน", "Qty")}<input type="number" min={1} step={1} value={editFix.count} onChange={(e) => setEditFix((f) => (f ? { ...f, count: Math.max(1, Math.round(Number(e.target.value)) || 1) } : f))} className="mt-0.5 block h-8 w-16 rounded-md border border-slate-200 px-2 text-right" aria-label={t("จำนวนชิ้น", "Quantity")} /></label>
+            {!(editFix.split && editFix.mats.length > 1) && <label>{t("จำนวน", "Qty")}<input type="number" min={1} step={1} value={editFix.count} onChange={(e) => setEditFix((f) => (f ? { ...f, count: Math.max(1, Math.round(Number(e.target.value)) || 1) } : f))} className="mt-0.5 block h-8 w-16 rounded-md border border-slate-200 px-2 text-right" aria-label={t("จำนวนชิ้น", "Quantity")} /></label>}
+          </div>
+          <div className="space-y-1" data-photo-piece-mats>
+            <div className="flex flex-wrap items-center gap-2">
+              <span>{t("วัสดุ", "Materials")}</span>
+              {editFix.mats.length > 1 && <label className="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-600"><input type="checkbox" checked={editFix.split} onChange={(e) => setEditFix((f) => (f ? { ...f, split: e.target.checked, mats: f.mats.map((m) => ({ ...m, q: m.q || f.count })) } : f))} />{t("จำนวนต่างกันต่อวัสดุ", "Different qty per material")}</label>}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {editFix.mats.length ? editFix.mats.map((m, j) => (
+                <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-800">
+                  {m.name}
+                  {editFix.split && editFix.mats.length > 1 && <>×<input type="number" min={1} step={1} value={m.q} onChange={(e) => { const v = Math.max(1, Math.round(Number(e.target.value)) || 1); setEditFix((f) => (f ? { ...f, mats: f.mats.map((x, k) => (k === j ? { ...x, q: v } : x)) } : f)); }} className="h-6 w-11 rounded border border-blue-200 bg-white px-1 text-right" aria-label={t(`จำนวน ${m.name}`, `Qty of ${m.name}`)} /></>}
+                  <button type="button" onClick={() => setEditFix((f) => (f ? { ...f, mats: f.mats.filter((_, k) => k !== j) } : f))} className="text-blue-400 hover:text-rose-600" aria-label={t(`เอา ${m.name} ออก`, `Remove ${m.name}`)}>✕</button>
+                </span>
+              )) : <span className="text-amber-600">{t("ยังไม่เลือกวัสดุ", "No material yet")}</span>}
+            </div>
+            {(materials?.length ?? 0) > 0
+              ? <SearchableSelect value="" options={matOptions} placeholder={t("＋ เพิ่มวัสดุ (เช่น ผ้าตัว, ซับใน)", "＋ Add material (e.g. fabric, lining)")}
+                  onChange={(v) => { const m = materials?.find((x) => x.id === v); if (m) setEditFix((f) => (f && !f.mats.some((x) => x.id === m.id) ? { ...f, mats: [...f.mats, { id: m.id, name: m.name, q: f.count }] } : f)); }} />
+              : <div className="text-[11px] text-slate-400">{t("เลือกวัสดุทีหลังบนกระดาน", "Pick materials later on the board")}</div>}
+            {editFix.split && editFix.mats.length > 1 && <p className="text-[11px] text-slate-500">{t(`ตอนวางจะแยกเป็น ${editFix.mats.length} ชิ้น (ชิ้นละวัสดุ ตามจำนวนที่ใส่)`, `Will be placed as ${editFix.mats.length} pieces (one per material, with these quantities)`)}</p>}
           </div>
           <p className="text-[11px] text-slate-500">{t("ใส่ขนาดจริง = ดัดชิ้นนี้ให้ตรงตามขนาดนั้น (ด้านเดียวก็ได้) · เว้นว่าง = ใช้แค่ชื่อและจำนวน ขนาดตามมาตราส่วนรวม", "Real size = straighten this piece to it (one side is enough) · leave empty = keep only name and quantity, size from the overall scale")}</p>
           <div className="rounded-md border border-amber-200 bg-amber-50/70 p-2">
@@ -658,7 +700,10 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                       <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-white ${off.has(i) ? "bg-slate-300" : fs ? "bg-emerald-600" : "bg-blue-600"}`}>{i + 1}</span>
                       {k != null && fixes[k].name ? <span className="font-medium">{fixes[k].name}</span> : null}
                       {fs ? `${fs[0].toFixed(1)} × ${fs[1].toFixed(1)} ${t("ซม.", "cm")}` : cmPerPx > 0 ? `${(c.box.w * cmPerPx).toFixed(1)} × ${(c.box.h * cmPerPx).toFixed(1)} ${t("ซม.", "cm")}` : t(`${c.pts.length} จุด`, `${c.pts.length} pts`)}
-                      {k != null && (fixes[k].count ?? 1) > 1 ? <span>×{fixes[k].count}</span> : null}{fs ? " ✓" : null}
+                      {k != null && fixes[k].split && (fixes[k].mats?.length ?? 0) > 1
+                        ? <span className="text-slate-500">· {fixes[k].mats!.map((m) => `${m.name} ×${m.q}`).join(" · ")}</span>
+                        : <>{k != null && (fixes[k].count ?? 1) > 1 ? <span>×{fixes[k].count}</span> : null}{k != null && fixes[k].mats?.length ? <span className="text-slate-500">· {fixes[k].mats!.map((m) => m.name).join(", ")}</span> : null}</>}
+                      {fs ? " ✓" : null}
                     </button>); })}
                   <span className="shrink-0 self-center pr-1 text-slate-400">{t(`เลือก ${chosen.length}/${traced!.contours.length}`, `${chosen.length}/${traced!.contours.length} chosen`)}</span>
                 </div>
