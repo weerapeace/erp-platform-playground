@@ -10,7 +10,7 @@
  *   PC 2 คอลัมน์: ซ้าย = ข้อมูล/โน้ต/ไฟล์/คอมเมนต์ · ขวา = เช็กลิสต์ + ผูกไว้ · มือถือ = คอลัมน์เดียว (เช็กลิสต์ต่อจากข้อมูล)
  *   โน้ตพิมพ์ได้ตลอด · ธีมรายคน (ปุ่มแต่งหน้า · useDrawerTheme("plan")): กระจกใส (Liquid Glass แบบเบา) + พื้นหลัง + ขนาด · กระจกไม่ตั้งพื้นหลัง = สีตามความด่วน
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -33,6 +33,7 @@ import { addToPlan } from "@/lib/planner-client";
 import { bucketLabel, type PlanBucket } from "@/lib/planner";
 import { noteToHtml, noteToText } from "@/lib/rich-note";
 import { checklistProgress, type ChecklistSummary } from "@/lib/record-tasks";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 // กล่องพิมพ์จัดรูปแบบหนัก (Tiptap) → โหลดตอนเปิดป๊อปเท่านั้น ไม่ถ่วงหน้ากระดาน
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), {
@@ -156,16 +157,20 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
     finally { setBusy(false); setAskDelete(false); }
   };
 
+  // ── กระชับ (เจ้าของเลือกจาก widget 2026-11-16): ช่องว่างรวมเป็นปุ่ม "+" แถวเดียว · PC 2 ช่องต่อแถว · ไฟล์/คอมเมนต์/ประวัติ ย่อเป็นป้าย ──
+  const [openField, setOpenField] = useState<string | null>(null);         // กด "+ แท็ก" จากแถวเพิ่มข้อมูล → ช่องนั้นโผล่มาในโหมดแก้
+  const [editingField, setEditingField] = useState<string | null>(null);   // ช่องที่กำลังแก้ (PC ขยายเต็มแถว)
+  const [showFiles, setShowFiles] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
+
   const done = item.status === "resolved";
   const prog = checklistProgress(check);
   // 🫧 ธีมป๊อปรายคน (ของกลาง drawer-theme) — กระจกใส + พื้นหลัง + ขนาด · ไม่ตั้งพื้นหลัง = สีตามความด่วน
   const glass = theme.glass;
   const card = `rounded-2xl border ${glass ? GLASS_CARD : PLAIN_CARD}`;
-  const lbl = "mb-1 block text-xs font-medium text-slate-600";
   const field = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50";
-  const row = "flex items-start gap-2 border-b border-slate-200/70 px-3 py-2 last:border-b-0";
-  const rowLbl = "flex w-24 shrink-0 sm:w-28 items-center gap-1.5 pt-1 text-xs text-slate-500";
-  const chip = "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs";
+  const chip = "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]";
   const dueIso = fromLocal(due);
   const overdue = !done && isOverdue(dueIso);
   const pMeta = PRIORITY_META[priority];
@@ -173,6 +178,135 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
     : repeatEvery === "month_nth" ? { every: "month", n: Math.max(1, Math.round(repeatN) || 1), nth: repeatNth, wd: repeatWd }
     : { every: repeatEvery, n: Math.max(1, Math.round(repeatN) || 1) };
   const ro = !canEdit;
+  const fp = (key: string) => ({
+    disabled: ro, autoEdit: openField === key,
+    onDone: () => setOpenField((k) => (k === key ? null : k)),
+    onEditingChange: (on: boolean) => setEditingField((k) => (on ? key : k === key ? null : k)),
+  });
+
+  // ข้อมูลงาน — มีค่า = แถว (ล็อก ดับเบิลคลิกแก้) · ว่าง = ปุ่มเล็กในแถว "เพิ่มข้อมูล" · hidden = ยังใช้ไม่ได้ (เตือนต้องมีกำหนดก่อน)
+  const fields: { key: string; icon: string; label: string; filled: boolean; hidden?: boolean; node: () => ReactNode }[] = [
+    { key: "due", icon: "calendar", label: "กำหนด", filled: !!due, node: () => (
+      <InlineField {...fp("due")} filled={!!due} emptyLabel="ตั้งกำหนด"
+        display={<span className={overdue ? "font-medium text-rose-600" : "text-slate-800"}>{dueDateText(dueIso)}<span className="ml-1.5 text-[11px] font-normal text-slate-400">{dueLabel(dueIso)}</span></span>}
+        editor={() => (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ERPDateTime24 value={due} onChange={setDue} defaultTime="18:00" />
+            {due && <button type="button" onClick={() => setDue("")} className="text-xs text-slate-400 hover:text-slate-700">ล้าง</button>}
+          </div>
+        )} />
+    ) },
+    { key: "remind", icon: "notify", label: "เตือน", filled: remind !== "none", hidden: !due, node: () => (
+      <InlineField {...fp("remind")} filled={remind !== "none"} emptyLabel="ตั้งเตือน" emptyText="ไม่เตือน"
+        display={<span className="text-slate-800">{REMIND_LABEL[remind]}</span>}
+        editor={(fin) => (
+          <select value={remind} onChange={(e) => { setRemind(e.target.value as RemindMode); fin(); }} className={field} autoFocus>
+            {REMIND_MODES.map((m) => <option key={m} value={m}>{REMIND_LABEL[m]}</option>)}
+          </select>
+        )} />
+    ) },
+    { key: "who", icon: "user", label: "คนทำ", filled: !!who, node: () => (
+      <InlineField {...fp("who")} filled={!!who} emptyLabel="มอบให้ใคร" emptyText="ยังไม่ระบุ"
+        display={<WhoChip name={who?.name} />}
+        editor={(fin) => <WhoPicker allowNone={!!who} onCancel={fin} onPick={(u) => { setWho(u); fin(); }} />} />
+    ) },
+    { key: "watch", icon: "view", label: "คนติดตาม", filled: watchers.length > 0, node: () => (
+      <InlineField {...fp("watch")} filled={watchers.length > 0} emptyLabel="เพิ่มคนติดตาม" emptyText="ไม่มี"
+        display={<span className="flex flex-wrap gap-1">{watchers.map((w) => <WhoChip key={w.id} name={w.name} compact />)}</span>}
+        editor={() => (
+          <div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {watchers.map((w) => (
+                <span key={w.id} className="inline-flex items-center gap-1">
+                  <WhoChip name={w.name} compact />
+                  <button type="button" onClick={() => setWatchers((l) => l.filter((x) => x.id !== w.id))} aria-label={`เอา ${w.name} ออกจากคนติดตาม`} className="text-xs text-slate-300 hover:text-rose-500">×</button>
+                </span>
+              ))}
+              {watchers.length < PLAN_WATCHERS_MAX && (
+                <button type="button" onClick={() => setPickWatcher((p) => !p)} className="h-7 rounded-full border border-dashed border-slate-300 bg-white px-2.5 text-xs text-slate-500 hover:border-violet-300 hover:text-violet-700">＋ เพิ่ม</button>
+              )}
+            </div>
+            {pickWatcher && <WhoPicker allowNone={false} onCancel={() => setPickWatcher(false)}
+              onPick={(u) => { if (u && !watchers.some((w) => w.id === u.id)) setWatchers((l) => [...l, { id: u.id, name: u.name }]); setPickWatcher(false); }} />}
+            <p className="mt-1 text-[11px] text-slate-400">ได้แจ้งเตือนตอนงานเสร็จ</p>
+          </div>
+        )} />
+    ) },
+    { key: "tags", icon: "tag", label: "แท็ก", filled: tags.length > 0, node: () => (
+      <InlineField {...fp("tags")} filled={tags.length > 0} emptyLabel="ใส่แท็ก" emptyText="ไม่มี"
+        display={<span className="flex flex-wrap gap-1">{tags.map((g) => <PlanTagChip key={g} tag={g} />)}</span>}
+        editor={() => <PlanTagInput value={tags} onChange={setTags} suggestions={tagSuggestions} />} />
+    ) },
+    { key: "est", icon: "clock", label: "เวลาที่คาด", filled: !!estimate, node: () => (
+      <InlineField {...fp("est")} filled={!!estimate} emptyLabel="ประเมินเวลา" emptyText="ไม่ระบุ"
+        display={<span className="text-slate-800">~{estimateLabel(estimate)}</span>}
+        editor={(fin) => (
+          <select value={estimate ?? ""} autoFocus onChange={(e) => { setEstimate(e.target.value ? Number(e.target.value) : null); fin(); }} className={`${field} sm:w-48`}>
+            <option value="">ไม่ระบุ</option>
+            {estimate && !(ESTIMATE_OPTIONS as readonly number[]).includes(estimate) && <option value={estimate}>{estimateLabel(estimate)}</option>}
+            {ESTIMATE_OPTIONS.map((m) => <option key={m} value={m}>{m === 240 ? "ครึ่งวัน (4 ชม.)" : m === 480 ? "1 วัน (8 ชม.)" : estimateLabel(m)}</option>)}
+          </select>
+        )} />
+    ) },
+    { key: "rep", icon: "repeat", label: "ทำซ้ำ", filled: !!repeatEvery, node: () => (
+      <InlineField {...fp("rep")} filled={!!repeatEvery} emptyLabel="ตั้งทำซ้ำ" emptyText="ไม่ทำซ้ำ"
+        display={<span className="text-slate-800">{REPEAT_LABEL(repDraft)}</span>}
+        editor={() => (
+          <div>
+            <div className="flex items-center gap-1.5">
+              <select value={repeatEvery} className={field}
+                onChange={(e) => {
+                  const v = e.target.value as RepeatRule["every"] | "month_nth" | "";
+                  // เลือกแบบวันในสัปดาห์ → ตั้งค่าเริ่มจากวันกำหนด (เช่น กำหนดพุธที่ 2 → พุธที่ 2 ของทุกเดือน)
+                  if (v === "month_nth" && due) { const x = nthWeekdayOf(due.slice(0, 10)); setRepeatNth(x.nth); setRepeatWd(x.wd); }
+                  setRepeatEvery(v);
+                }}>
+                <option value="">ไม่ทำซ้ำ</option><option value="day">ทุกวัน</option><option value="week">ทุกสัปดาห์</option>
+                <option value="month">ทุกเดือน (วันที่เดิม)</option><option value="month_nth">ทุกเดือน (เช่น พุธที่ 2)</option>
+              </select>
+              {repeatEvery && <>
+                <span className="text-xs text-slate-500">ทุก</span>
+                <input type="number" min={1} max={30} value={repeatN} onChange={(e) => setRepeatN(Number(e.target.value))} className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-sm" aria-label="ทุกกี่รอบ" />
+              </>}
+            </div>
+            {repeatEvery === "month_nth" && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                <select value={repeatWd} onChange={(e) => setRepeatWd(Number(e.target.value))} aria-label="วันในสัปดาห์" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                  {WEEKDAY_TH.map((w, i) => <option key={w} value={i}>{w}</option>)}
+                </select>
+                <span>ที่</span>
+                <select value={repeatNth} onChange={(e) => setRepeatNth(Number(e.target.value))} aria-label="สัปดาห์ที่" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                  {[1, 2, 3, 4].map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+                <span>ของเดือน</span>
+              </div>
+            )}
+            {repeatEvery && <p className="mt-1 text-[11px] text-slate-400">ติ๊กเสร็จแล้วระบบสร้างรอบถัดไปให้เอง{repeatEvery === "month_nth" ? ` — รอบหน้า = ${WEEKDAY_TH[repeatWd]}ที่ ${repeatNth} ของเดือนถัดไป` : ""}</p>}
+          </div>
+        )} />
+    ) },
+    { key: "wait", icon: "waiting", label: "รอคนอื่น", filled: waitingOn, node: () => (
+      <InlineField {...fp("wait")} filled={waitingOn} emptyLabel="รออะไร / รอใคร" emptyText="ไม่ได้รอ"
+        display={<span className="text-amber-800">รอ{waitingNote.trim() ? `: ${waitingNote.trim()}` : ""}{item.plan.waiting ? ` · ${waitingDays(item.plan.waiting.since)} วัน` : ""}</span>}
+        editor={() => (
+          <div className="space-y-1.5">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+              <input type="checkbox" checked={waitingOn} onChange={(e) => setWaitingOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" /> รอคนอื่นอยู่
+            </label>
+            <input value={waitingNote} onChange={(e) => { setWaitingNote(e.target.value); if (!waitingOn) setWaitingOn(true); }} maxLength={120}
+              placeholder="รออะไร / รอใคร เช่น รอลูกค้าตอบ" className={field} />
+          </div>
+        )} />
+    ) },
+  ];
+  const rowsShown = fields.filter((f) => !f.hidden && (f.filled || openField === f.key || editingField === f.key));
+  const addable = ro ? [] : fields.filter((f) => !f.hidden && !f.filled && openField !== f.key && editingField !== f.key);
+  const secBtn = (on: boolean, icon: string, label: string, toggle: () => void) => (
+    <button type="button" onClick={toggle} aria-expanded={on}
+      className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs ${on ? "border-violet-300 bg-violet-50 text-violet-700" : glass ? "border-white/70 bg-white/60 text-slate-600 hover:bg-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+      <Icon name={icon} /> {label} <span className="text-[10px] text-slate-400">{on ? "▴" : "▾"}</span>
+    </button>
+  );
 
   return (
     <ERPModal open onClose={onClose} title="งานในแผนงาน" size="xl" hasUnsavedChanges={dirty}
@@ -187,16 +321,16 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
         {canEdit && <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="h-9 whitespace-nowrap rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : <><Icon name="save" /> บันทึก</>}</button>}
       </>}>
       {/* พื้นป๊อป: กระจกใส = วงสีตามความด่วน (หรือพื้นหลังที่ตั้งเอง) ให้เห็นทะลุการ์ด · ปกติ = พื้นที่ตั้งไว้/เทาอ่อน */}
-      <div className="-mx-3 -my-3 min-h-full px-3 py-3 sm:-mx-6 sm:-my-5 sm:px-6 sm:py-5"
+      <div className="-mx-3 -my-3 min-h-full px-3 py-3 sm:-mx-6 sm:-my-4 sm:px-5 sm:py-4"
         style={{ ...(glass ? glassBackdropStyle(theme, pMeta.color) : { background: "#f8fafc", ...drawerBgStyle(theme) }), zoom: drawerZoom(theme.size) }}>
         {/* หัว: ชื่องาน + ป้ายสถานะ (มีค่าแล้วล็อก ดับเบิลคลิกเพื่อแก้) */}
-        <div className="mb-3 flex items-start gap-2">
+        <div className="mb-2.5 flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <InlineField filled={!!title.trim()} disabled={ro} emptyLabel="ตั้งชื่องาน"
-              display={<h3 className="break-words text-lg font-semibold text-slate-900">{title}</h3>}
+              display={<h3 className="break-words text-base font-semibold text-slate-900">{title}</h3>}
               editor={(fin) => <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} autoFocus aria-label="ชื่องาน"
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); fin(); } }} className={field} />} />
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <div className="mt-1 flex flex-wrap items-center gap-1">
               <InlineField filled disabled={ro} emptyLabel="" hint="ดับเบิลคลิกเพื่อเปลี่ยนความด่วน"
                 display={<span className={chip} style={{ background: `${pMeta.color}1f`, color: pMeta.color }}>{pMeta.label}</span>}
                 editor={(fin) => (
@@ -225,161 +359,71 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
           <DrawerThemeButton theme={theme} update={updateTheme} sections={[]} parts={["glass", "background", "size"]} label="แต่งหน้าป๊อปงาน (ของฉัน)" />
         </div>
 
-        {/* PC: ซ้าย = ข้อมูล/โน้ต/ไฟล์/คอมเมนต์ · ขวา = เช็กลิสต์ + ผูกไว้ · มือถือ: คอลัมน์เดียว เรียงตาม order (เช็กลิสต์ต่อจากข้อมูล) */}
-        <div className="flex flex-col gap-3 md:grid md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] md:items-start">
-          <div className="contents md:flex md:flex-col md:gap-3">
-            <div className={`${card} order-1 md:order-none`}>
-              <div className={row}><span className={rowLbl}><Icon name="calendar" /> กำหนด</span>
-                <div className="min-w-0 flex-1"><InlineField filled={!!due} disabled={ro} emptyLabel="ตั้งกำหนด"
-                  display={<span className={`text-sm ${overdue ? "font-medium text-rose-600" : "text-slate-800"}`}>{dueDateText(dueIso)}<span className="ml-1.5 text-xs font-normal text-slate-400">{dueLabel(dueIso)}</span></span>}
-                  editor={() => (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <ERPDateTime24 value={due} onChange={setDue} defaultTime="18:00" />
-                      {due && <button type="button" onClick={() => setDue("")} className="text-xs text-slate-400 hover:text-slate-700">ล้าง</button>}
+        {/* PC: ซ้าย = ข้อมูล/โน้ต/ไฟล์·คอมเมนต์·ประวัติ · ขวา = เช็กลิสต์ (เด่น) + รูปปก + ผูกไว้ · มือถือ: คอลัมน์เดียว เช็กลิสต์ขึ้นก่อน (CSS order) */}
+        <div className="flex flex-col gap-2.5 md:grid md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] md:items-start">
+          <div className="contents md:flex md:flex-col md:gap-2.5">
+            {/* ข้อมูลงาน: PC 2 ช่องต่อแถว · ช่องว่างรวมเป็นปุ่มเล็กแถวเดียว */}
+            <div className={`${card} order-2 overflow-hidden md:order-none`}>
+              {rowsShown.length > 0 && (
+                <div className="md:grid md:grid-cols-2">
+                  {rowsShown.map((f) => (
+                    <div key={f.key} className={`flex min-w-0 items-start gap-2 border-b border-slate-200/70 px-3 py-1.5 ${editingField === f.key || openField === f.key ? "md:col-span-2" : ""}`}>
+                      <span className="flex w-[4.5rem] shrink-0 items-center gap-1 pt-0.5 text-[11px] text-slate-500"><Icon name={f.icon} /> {f.label}</span>
+                      <div className="min-w-0 flex-1 text-sm">{f.node()}</div>
                     </div>
-                  )} /></div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="notify" /> เตือน</span>
-                <div className="min-w-0 flex-1">{!due ? <span className="text-xs text-slate-400">ตั้งกำหนดก่อน แล้วค่อยตั้งเตือน</span> : (
-                  <InlineField filled={remind !== "none"} disabled={ro} emptyLabel="ตั้งเตือน" emptyText="ไม่เตือน"
-                    display={<span className="text-sm text-slate-800">{REMIND_LABEL[remind]}</span>}
-                    editor={(fin) => (
-                      <select value={remind} onChange={(e) => { setRemind(e.target.value as RemindMode); fin(); }} className={field} autoFocus>
-                        {REMIND_MODES.map((m) => <option key={m} value={m}>{REMIND_LABEL[m]}</option>)}
-                      </select>
-                    )} />
-                )}</div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="user" /> ผู้รับผิดชอบ</span>
-                <div className="min-w-0 flex-1"><InlineField filled={!!who} disabled={ro} emptyLabel="มอบให้ใคร" emptyText="ยังไม่ระบุ"
-                  display={<WhoChip name={who?.name} />}
-                  editor={(fin) => <WhoPicker allowNone={!!who} onCancel={fin} onPick={(u) => { setWho(u); fin(); }} />} /></div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="view" /> คนติดตาม</span>
-                <div className="min-w-0 flex-1"><InlineField filled={watchers.length > 0} disabled={ro} emptyLabel="เพิ่มคนติดตาม" emptyText="ไม่มี"
-                  display={<span className="flex flex-wrap gap-1">{watchers.map((w) => <WhoChip key={w.id} name={w.name} compact />)}</span>}
-                  editor={() => (
-                    <div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {watchers.map((w) => (
-                          <span key={w.id} className="inline-flex items-center gap-1">
-                            <WhoChip name={w.name} compact />
-                            <button type="button" onClick={() => setWatchers((l) => l.filter((x) => x.id !== w.id))} aria-label={`เอา ${w.name} ออกจากคนติดตาม`} className="text-xs text-slate-300 hover:text-rose-500">×</button>
-                          </span>
-                        ))}
-                        {watchers.length < PLAN_WATCHERS_MAX && (
-                          <button type="button" onClick={() => setPickWatcher((p) => !p)} className="h-7 rounded-full border border-dashed border-slate-300 bg-white px-2.5 text-xs text-slate-500 hover:border-violet-300 hover:text-violet-700">＋ เพิ่ม</button>
-                        )}
-                      </div>
-                      {pickWatcher && <WhoPicker allowNone={false} onCancel={() => setPickWatcher(false)}
-                        onPick={(u) => { if (u && !watchers.some((w) => w.id === u.id)) setWatchers((l) => [...l, { id: u.id, name: u.name }]); setPickWatcher(false); }} />}
-                      <p className="mt-1 text-[11px] text-slate-400">ได้แจ้งเตือนตอนงานเสร็จ</p>
-                    </div>
-                  )} /></div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="tag" /> แท็ก / โปรเจกต์</span>
-                <div className="min-w-0 flex-1"><InlineField filled={tags.length > 0} disabled={ro} emptyLabel="ใส่แท็ก" emptyText="ไม่มี"
-                  display={<span className="flex flex-wrap gap-1">{tags.map((g) => <PlanTagChip key={g} tag={g} />)}</span>}
-                  editor={() => <PlanTagInput value={tags} onChange={setTags} suggestions={tagSuggestions} />} /></div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="clock" /> เวลาที่คาด</span>
-                <div className="min-w-0 flex-1"><InlineField filled={!!estimate} disabled={ro} emptyLabel="ประเมินเวลา" emptyText="ไม่ระบุ"
-                  display={<span className="text-sm text-slate-800">~{estimateLabel(estimate)}</span>}
-                  editor={(fin) => (
-                    <select value={estimate ?? ""} autoFocus onChange={(e) => { setEstimate(e.target.value ? Number(e.target.value) : null); fin(); }} className={`${field} sm:w-48`}>
-                      <option value="">ไม่ระบุ</option>
-                      {estimate && !(ESTIMATE_OPTIONS as readonly number[]).includes(estimate) && <option value={estimate}>{estimateLabel(estimate)}</option>}
-                      {ESTIMATE_OPTIONS.map((m) => <option key={m} value={m}>{m === 240 ? "ครึ่งวัน (4 ชม.)" : m === 480 ? "1 วัน (8 ชม.)" : estimateLabel(m)}</option>)}
-                    </select>
-                  )} /></div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="repeat" /> ทำซ้ำ</span>
-                <div className="min-w-0 flex-1"><InlineField filled={!!repeatEvery} disabled={ro} emptyLabel="ตั้งทำซ้ำ" emptyText="ไม่ทำซ้ำ"
-                  display={<span className="text-sm text-slate-800">{REPEAT_LABEL(repDraft)}</span>}
-                  editor={() => (
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <select value={repeatEvery} className={field}
-                          onChange={(e) => {
-                            const v = e.target.value as RepeatRule["every"] | "month_nth" | "";
-                            // เลือกแบบวันในสัปดาห์ → ตั้งค่าเริ่มจากวันกำหนด (เช่น กำหนดพุธที่ 2 → พุธที่ 2 ของทุกเดือน)
-                            if (v === "month_nth" && due) { const x = nthWeekdayOf(due.slice(0, 10)); setRepeatNth(x.nth); setRepeatWd(x.wd); }
-                            setRepeatEvery(v);
-                          }}>
-                          <option value="">ไม่ทำซ้ำ</option><option value="day">ทุกวัน</option><option value="week">ทุกสัปดาห์</option>
-                          <option value="month">ทุกเดือน (วันที่เดิม)</option><option value="month_nth">ทุกเดือน (เช่น พุธที่ 2)</option>
-                        </select>
-                        {repeatEvery && <>
-                          <span className="text-xs text-slate-500">ทุก</span>
-                          <input type="number" min={1} max={30} value={repeatN} onChange={(e) => setRepeatN(Number(e.target.value))} className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-sm" aria-label="ทุกกี่รอบ" />
-                        </>}
-                      </div>
-                      {repeatEvery === "month_nth" && (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                          <select value={repeatWd} onChange={(e) => setRepeatWd(Number(e.target.value))} aria-label="วันในสัปดาห์" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm">
-                            {WEEKDAY_TH.map((w, i) => <option key={w} value={i}>{w}</option>)}
-                          </select>
-                          <span>ที่</span>
-                          <select value={repeatNth} onChange={(e) => setRepeatNth(Number(e.target.value))} aria-label="สัปดาห์ที่" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm">
-                            {[1, 2, 3, 4].map((k) => <option key={k} value={k}>{k}</option>)}
-                          </select>
-                          <span>ของเดือน</span>
-                        </div>
-                      )}
-                      {repeatEvery && <p className="mt-1 text-[11px] text-slate-400">ติ๊กเสร็จแล้วระบบสร้างรอบถัดไปให้เอง{repeatEvery === "month_nth" ? ` — รอบหน้า = ${WEEKDAY_TH[repeatWd]}ที่ ${repeatNth} ของเดือนถัดไป` : ""}</p>}
-                    </div>
-                  )} /></div>
-              </div>
-              <div className={row}><span className={rowLbl}><Icon name="waiting" /> รอคนอื่น</span>
-                <div className="min-w-0 flex-1"><InlineField filled={waitingOn} disabled={ro} emptyLabel="รออะไร / รอใคร" emptyText="ไม่ได้รอ"
-                  display={<span className="text-sm text-amber-800">รอ{waitingNote.trim() ? `: ${waitingNote.trim()}` : ""}{item.plan.waiting ? ` · ${waitingDays(item.plan.waiting.since)} วัน` : ""}</span>}
-                  editor={() => (
-                    <div className="space-y-1.5">
-                      <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
-                        <input type="checkbox" checked={waitingOn} onChange={(e) => setWaitingOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" /> รอคนอื่นอยู่
-                      </label>
-                      <input value={waitingNote} onChange={(e) => { setWaitingNote(e.target.value); if (!waitingOn) setWaitingOn(true); }} maxLength={120}
-                        placeholder="รออะไร / รอใคร เช่น รอลูกค้าตอบ" className={field} />
-                    </div>
-                  )} /></div>
-              </div>
+                  ))}
+                </div>
+              )}
+              {addable.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 px-3 py-1.5">
+                  <span className="mr-0.5 text-[11px] text-slate-400">เพิ่มข้อมูล:</span>
+                  {addable.map((f) => (
+                    <button key={f.key} type="button" onClick={() => setOpenField(f.key)}
+                      className="h-6 rounded-full border border-dashed border-slate-300 bg-white/70 px-2 text-[11px] text-slate-500 hover:border-violet-300 hover:text-violet-700">＋ {f.label}</button>
+                  ))}
+                </div>
+              )}
+              {rowsShown.length === 0 && addable.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">ไม่มีข้อมูลเพิ่มเติม</p>}
             </div>
 
             {/* โน้ต — พิมพ์ได้ตลอด (เจ้าของขอ 2026-11-16) */}
-            <div className={`${card} order-3 p-3 md:order-none`}>
-              <label className={lbl}><Icon name="note" /> โน้ต <span className="font-normal text-slate-400">· พิมพ์ได้เลย · กดปุ่ม bullet หรือพิมพ์ &quot;- &quot; ขึ้นต้นบรรทัด</span></label>
-              <RichTextEditor toolbar="basic" value={note} onChange={setNote} editable={canEdit} minHeight={88} placeholder="รายละเอียดเพิ่มเติม…" />
+            <div className={`${card} order-3 p-2.5 md:order-none`}>
+              <label className="mb-1 block text-[11px] font-medium text-slate-500"><Icon name="note" /> โน้ต <span className="font-normal text-slate-400">· พิมพ์ได้เลย</span></label>
+              <RichTextEditor toolbar="basic" value={note} onChange={setNote} editable={canEdit} minHeight={60} placeholder="รายละเอียดเพิ่มเติม…" />
             </div>
-            <div className={`${card} order-5 p-3 md:order-none`}>
-              <RecordFilesField entityType={TEAM_PLAN_FILES} entityId={item.id} readonly={!canEdit} title="รูป / ไฟล์แนบ"
-                description="ลากไฟล์มาวาง หรือกดเลือก — เช่น แคปหน้าเว็บที่ต้องแก้ ใบเสนอราคา" />
-            </div>
-            <div className={`${card} order-6 p-2 md:order-none`}>
-              <CommentThread entityType={TEAM_PLAN_FILES} entityId={item.id} title="คอมเมนต์" maxHeight={240} />
-            </div>
-            <div className="order-8 md:order-none">
-              <button type="button" onClick={() => setShowHistory((s) => !s)} className="text-xs text-slate-500 hover:text-slate-800">
-                {showHistory ? "▾" : "▸"} <Icon name="history" /> ประวัติของงานนี้ (ใครแก้ ใครเลื่อนกำหนด ใครติ๊ก)
-              </button>
-              {showHistory && <div className={`${card} mt-1.5 max-h-72 overflow-y-auto p-2`}><RecordHistoryInline entityType="record_task" entityId={item.id} emptyMessage="ยังไม่มีประวัติของงานนี้" /></div>}
+
+            {/* ไฟล์แนบ / คอมเมนต์ / ประวัติ — ย่อเป็นป้าย กดแล้วกาง (เจ้าของเลือก 2026-11-16) */}
+            <div className="order-6 md:order-none">
+              <div className="flex flex-wrap gap-1.5">
+                {secBtn(showFiles, "attach", "ไฟล์แนบ", () => setShowFiles((s) => !s))}
+                {secBtn(showComments, "chat", "คอมเมนต์", () => setShowComments((s) => !s))}
+                {secBtn(showHistory, "history", "ประวัติ", () => setShowHistory((s) => !s))}
+              </div>
+              {showFiles && <div className={`${card} mt-2 p-3`}><RecordFilesField entityType={TEAM_PLAN_FILES} entityId={item.id} readonly={!canEdit} title="รูป / ไฟล์แนบ"
+                description="ลากไฟล์มาวาง หรือกดเลือก — เช่น แคปหน้าเว็บที่ต้องแก้ ใบเสนอราคา" /></div>}
+              {showComments && <div className={`${card} mt-2 p-2`}><CommentThread entityType={TEAM_PLAN_FILES} entityId={item.id} title="คอมเมนต์" maxHeight={240} /></div>}
+              {showHistory && <div className={`${card} mt-2 max-h-72 overflow-y-auto p-2`}><RecordHistoryInline entityType="record_task" entityId={item.id} emptyMessage="ยังไม่มีประวัติของงานนี้" /></div>}
             </div>
           </div>
 
-          <div className="contents md:flex md:flex-col md:gap-3">
-            {/* เช็กลิสต์ — คอลัมน์ขวา (เจ้าของขอ 2026-11-16) · ติ๊ก/เพิ่มแล้วบันทึกทันที */}
-            <div className={`${card} order-2 p-3 md:order-none`}>
-              <div className="mb-1 flex items-center gap-2">
-                <span className="shrink-0 whitespace-nowrap text-xs font-medium text-slate-600"><Icon name="done" /> เช็กลิสต์</span>
-                {prog.total > 0 && <>
-                  <span className={`text-xs tabular-nums ${prog.allDone ? "text-emerald-700" : "text-slate-500"}`}>เสร็จ {prog.done}/{prog.total}</span>
-                  <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100" aria-hidden><span className="block h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.round((prog.done / prog.total) * 100)}%` }} /></span>
-                </>}
-                <span className="ml-auto hidden text-[11px] text-slate-400 sm:inline">ติ๊ก/เพิ่มแล้วบันทึกทันที</span>
+          <div className="contents md:flex md:flex-col md:gap-2.5">
+            {/* เช็กลิสต์ — เด่น (ขอบสี ตัวใหญ่ แถบใหญ่) · ช่องเพิ่มข้อเล็ก · แม่แบบ/ตั้งค่าในปุ่ม ⋯ (variant="focus") · ติ๊ก/เพิ่มแล้วบันทึกทันที */}
+            <div className={`order-1 rounded-2xl border-[1.5px] p-3 md:order-none ${glass ? "border-violet-300/80 bg-white/70 backdrop-blur-md" : "border-violet-300 bg-white"}`}>
+              <div className="flex items-center gap-2">
+                <span className="whitespace-nowrap text-[15px] font-semibold text-slate-800"><Icon name="done" /> เช็กลิสต์</span>
+                {prog.total > 0 && <span className={`text-sm tabular-nums ${prog.allDone ? "font-medium text-emerald-700" : "text-slate-500"}`}>{prog.done}/{prog.total}</span>}
               </div>
-              <RecordChecklist moduleKey={TEAM_PLAN_CHECK.moduleKey} recordType={TEAM_PLAN_CHECK.recordType} recordId={item.id} canEdit={canEdit}
-                presetType={TEAM_PLAN_CHECK.presetType} templateType={TEAM_PLAN_CHECK.templateType} presetTitle="ข้อที่ใช้บ่อย"
-                emptyText="ยังไม่มีข้อ — พิมพ์เพิ่มด้านล่าง หรือใส่จากแม่แบบ" placeholder="＋ เพิ่มข้อ… (Enter)"
-                onChange={(s) => { setCheck(s); onChecklist?.(item.id, s); }} />
+              {prog.total > 0 && (
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+                  <div className="h-2 rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.round((prog.done / prog.total) * 100)}%` }} />
+                </div>
+              )}
+              <div className="mt-1">
+                <RecordChecklist variant="focus" moduleKey={TEAM_PLAN_CHECK.moduleKey} recordType={TEAM_PLAN_CHECK.recordType} recordId={item.id} canEdit={canEdit}
+                  presetType={TEAM_PLAN_CHECK.presetType} templateType={TEAM_PLAN_CHECK.templateType} presetTitle="ข้อที่ใช้บ่อย"
+                  emptyText="ยังไม่มีข้อ — พิมพ์ด้านล่าง หรือกด ⋯ ใส่จากแม่แบบ" placeholder="เพิ่มข้อ… (Enter)"
+                  onChange={(s) => { setCheck(s); onChecklist?.(item.id, s); }} />
+              </div>
               {canEdit && !done && prog.allDone && (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                   <span><Icon name="done" /> เช็กลิสต์ครบทุกข้อแล้ว — ปิดงานนี้เลยไหม?</span>
@@ -388,28 +432,19 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
                 </div>
               )}
             </div>
-            {/* 🖼 รูปปก = รูปเล็กหน้าการ์ดบนกระดานแผนงาน (เจ้าของเลือก 2026-11-16: แนบเอง → ไม่แนบใช้รูปของสิ่งที่ผูก) */}
-            <div className={`${card} order-4 p-3 md:order-none`}>
-              <label className={lbl}><Icon name="image" /> รูปปก <span className="font-normal text-slate-400">· รูปเล็กหน้าการ์ดบนกระดาน · ลากวาง / Ctrl+V / เลือกไฟล์</span></label>
-              <ImageAttachKeys value={cover ? [cover] : []} onChange={(keys) => setCover(keys.length ? keys[keys.length - 1] : null)} folder="team-plan" maxSize={800} disabled={ro} />
-              {!cover && (() => {
-                const hit = item.plan.linked.find((r) => r.image);
-                return <p className="mt-1 text-[11px] text-slate-400">{hit ? `ไม่แนบ = ใช้รูปของ "${hit.label}" ที่ผูกไว้` : "ไม่แนบ = ใช้รูปของสิ่งที่ผูกไว้บนกระดาน (ถ้ามี)"}</p>;
-              })()}
-            </div>
             {(item.plan.linked.length > 0 || item.plan.source) && (
-              <div className={`${card} order-4 space-y-2 p-3 md:order-none`}>
+              <div className={`${card} order-4 space-y-1.5 px-3 py-2 md:order-none`}>
                 {item.plan.source && (
-                  <a href={item.plan.source.href} className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline"><Icon name="link" /> เปิดเรื่องเดิม: {item.plan.source.label}</a>
+                  <a href={item.plan.source.href} className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline"><Icon name="link" /> เปิดเรื่องเดิม: {item.plan.source.label}</a>
                 )}
                 {item.plan.linked.length > 0 && (
                   <div>
-                    <label className={lbl}><Icon name="magnet" /> ผูกไว้ {item.plan.linked.length} อย่าง <span className="font-normal text-slate-400">· ลากเส้นบนกระดานแผนงาน (ลบเส้น = เลิกผูก)</span></label>
-                    <div className="flex flex-wrap gap-1.5">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500"><Icon name="magnet" /> ผูกไว้ {item.plan.linked.length} อย่าง <span className="font-normal text-slate-400">· ลากเส้นบนกระดาน (ลบเส้น = เลิกผูก)</span></label>
+                    <div className="flex flex-wrap gap-1">
                       {item.plan.linked.map((r) => {
                         const href = linkedHref(r);
                         return (
-                          <span key={`${r.kind}:${r.id}`} className="inline-flex max-w-full items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-2 py-1 text-xs text-indigo-800">
+                          <span key={`${r.kind}:${r.id}`} className="inline-flex max-w-full items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-800">
                             <span className="shrink-0 text-indigo-400">{PLAN_LINK_KINDS[r.kind]?.label ?? r.kind}</span>
                             {href ? <a href={href} target="_blank" rel="noreferrer" className="truncate hover:underline">{r.label}</a> : <span className="truncate">{r.label}</span>}
                             {canEdit && <button type="button" disabled={busy} title="เลิกผูก (ถ้าเส้นบนกระดานยังอยู่ ระบบจะผูกกลับตอนกระดานบันทึก — ลบเส้นบนกระดานด้วย)"
@@ -422,6 +457,22 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted, 
                 )}
               </div>
             )}
+            {/* 🖼 รูปปก = รูปเล็กหน้าการ์ดบนกระดานแผนงาน (แนบเอง → ไม่แนบใช้รูปของสิ่งที่ผูก) · ย่อเหลือแถวเดียว กดแนบ/เปลี่ยนแล้วค่อยกางช่องวางรูป */}
+            <div className={`${card} order-5 px-3 py-2 md:order-none`}>
+              <div className="flex min-w-0 items-center gap-2 text-xs">
+                <span className="shrink-0 text-slate-500"><Icon name="image" /> รูปปก</span>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {cover && !coverOpen && <img src={r2ImageUrl(cover, 120) ?? undefined} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />}
+                {!ro && <button type="button" onClick={() => setCoverOpen((o) => !o)}
+                  className="h-6 shrink-0 rounded-full border border-dashed border-slate-300 bg-white/70 px-2 text-[11px] text-slate-500 hover:border-violet-300 hover:text-violet-700">
+                  {coverOpen ? "ย่อ" : cover ? "เปลี่ยน" : "＋ แนบรูป"}</button>}
+                {!cover && (() => {
+                  const hit = item.plan.linked.find((r) => r.image);
+                  return <span className="min-w-0 truncate text-[11px] text-slate-400">{hit ? `ไม่แนบ = ใช้รูปของ "${hit.label}"` : "ไม่แนบ = ใช้รูปของสิ่งที่ผูกไว้ (ถ้ามี)"}</span>;
+                })()}
+              </div>
+              {coverOpen && <div className="mt-2"><ImageAttachKeys value={cover ? [cover] : []} onChange={(keys) => setCover(keys.length ? keys[keys.length - 1] : null)} folder="team-plan" maxSize={800} disabled={ro} /></div>}
+            </div>
             {!done && <div className="order-7 md:order-none"><PersonalPlanRow item={item} /></div>}
             <div className="order-9 md:order-none">
               <p className="text-[11px] text-slate-400">สร้างโดย {item.created_by ?? "—"}{done && item.resolved_by ? ` · เสร็จโดย ${item.resolved_by}` : ""}{canEdit ? " · ช่องที่มีข้อมูลแล้ว ดับเบิลคลิกเพื่อแก้" : ""}</p>

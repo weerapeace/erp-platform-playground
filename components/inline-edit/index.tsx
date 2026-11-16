@@ -116,7 +116,7 @@ export function InlineEdit({
 const DOUBLE_TAP_MS = 450;
 
 /** ช่องที่ "มีค่าแล้วล็อก ดับเบิลคลิกถึงแก้ · ว่างกดใส่ได้เลย" โดยตัวกรอกเป็นอะไรก็ได้ (ดูหัวไฟล์) */
-export function InlineField({ filled, display, emptyLabel, editor, disabled = false, emptyText = "—", hint = "ดับเบิลคลิกเพื่อแก้", className = "" }: {
+export function InlineField({ filled, display, emptyLabel, editor, disabled = false, emptyText = "—", hint = "ดับเบิลคลิกเพื่อแก้", className = "", autoEdit = false, onDone, onEditingChange }: {
   /** มีค่าแล้วไหม (มี = ล็อก) */
   filled: boolean;
   /** หน้าตาตอนล็อก */
@@ -131,10 +131,18 @@ export function InlineField({ filled, display, emptyLabel, editor, disabled = fa
   emptyText?: string;
   hint?: string;
   className?: string;
+  /** เปิดมาในโหมดแก้เลย (เช่น กด "+ แท็ก" จากแถวรวมช่องว่าง แล้วช่องนั้นโผล่มาให้กรอก) */
+  autoEdit?: boolean;
+  /** ปิดตัวกรอกแล้ว (กด ✓ เสร็จ / Esc / ตัวกรอกเรียก done) */
+  onDone?: () => void;
+  /** บอกหน้าที่เรียกว่ากำลังแก้อยู่ไหม (เช่น ขยายช่องให้กว้างตอนแก้) */
+  onEditingChange?: (editing: boolean) => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditingState] = useState(autoEdit);
   const lastTap = useRef(0);
-  const done = () => setEditing(false);
+  const setEditing = (v: boolean) => { setEditingState(v); onEditingChange?.(v); };
+  const done = () => { setEditing(false); onDone?.(); };
+  useEffect(() => { if (autoEdit) onEditingChange?.(true); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   if (editing && !disabled) {
     return (
       <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${className}`}

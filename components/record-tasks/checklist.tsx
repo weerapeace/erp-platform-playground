@@ -117,7 +117,10 @@ function LinkAdder({ existing, onAdd, onClose }: { existing: TaskLink[]; onAdd: 
 }
 
 export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdit, onChange, presetType = null, label = null,
-  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true, autoNew = false, templateType = null }: Common & {
+  emptyText = "ไม่มีอะไรรอ", placeholder = "＋ เพิ่มสิ่งที่รอ… (Enter)", presetTitle = "ค่าที่ใช้บ่อย", assignable = true, autoNew = false, templateType = null, variant = "default" }: Common & {
+  /** "focus" (2026-11-16 ป๊อปงานในแผนงาน) = เน้นเช็กลิสต์: ตัวหนังสือใหญ่ · ติ๊กวงกลม · ไม่มีกรอบซ้อน · ช่องเพิ่มข้อบรรทัดเดียวบาง ๆ
+   *  · ใช้บ่อย/แม่แบบ/ตั้งค่า ซ่อนในปุ่ม ⋯ · ค่าเริ่ม "default" = หน้าตาเดิม (หน้าอื่นไม่เปลี่ยน) */
+  variant?: "default" | "focus";
   /** ชนิดค่ากลางของ "แม่แบบหลายข้อ" (null = ไม่มีแถบแม่แบบ) — name = ชื่อแม่แบบ · metadata.items = ข้อในแม่แบบ */
   templateType?: string | null;
   /** ชนิดค่ากลางของปุ่มลัด (null = ไม่มีปุ่มลัด) */
@@ -179,6 +182,12 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
   const [presetOpen, setPresetOpen] = useState(false);
   const [pickFor, setPickFor] = useState<string | null>(null);   // id ข้อที่กำลังเลือกคน · "new" = ข้อที่กำลังจะเพิ่ม
   const [newWho, setNewWho] = useState<{ id: string; name: string } | null>(null);
+  const focus = variant === "focus";
+  const [toolsOpen, setToolsOpen] = useState(false);   // focus: ใช้บ่อย/แม่แบบ/ตั้งค่า ซ่อนไว้หลังปุ่ม ⋯
+  const showTools = !focus || toolsOpen;
+  const tick = (done: boolean) => focus
+    ? `mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-[11px] leading-none ${done ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-400 bg-white text-transparent hover:border-emerald-500"}`
+    : tickCls(done);
 
   const openItems = items.filter((t) => !isTaskDone(t.status));
   const doneItems = items.filter((t) => isTaskDone(t.status));
@@ -201,8 +210,8 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
     const meta = (done ? ["✓", [it.resolved_by, relTime(it.resolved_at)].filter(Boolean).join(" · ")] : [[it.created_by, relTime(it.created_at)].filter(Boolean).join(" · ")]).join(" ");
     return (
       <div key={it.id}>
-      <div className="group flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-slate-50">
-        <button type="button" onClick={() => canEdit && void toggle(it)} disabled={!canEdit} className={tickCls(done)}
+      <div className={`group flex items-start rounded-md hover:bg-slate-50 ${focus ? "gap-2.5 px-1 py-1.5" : "gap-2 px-1.5 py-1"}`}>
+        <button type="button" onClick={() => canEdit && void toggle(it)} disabled={!canEdit} className={tick(done)}
           title={done ? "ทำเครื่องหมายว่ายังรอ" : "ติ๊กว่าเสร็จ"} aria-label={done ? `ยกเลิกติ๊ก ${it.title}` : `ติ๊กเสร็จ ${it.title}`}>✓</button>
         <div className="min-w-0 flex-1">
           {editing?.id === it.id ? (
@@ -212,7 +221,7 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
               className="h-7 w-full rounded-md border border-blue-400 bg-white px-1.5 text-sm focus:outline-none" />
           ) : (
             <button type="button" disabled={!canEdit} onClick={() => setEditing({ id: it.id, text: it.title })} title={canEdit ? "กดเพื่อแก้" : undefined}
-              className={`block w-full break-words text-left text-sm disabled:cursor-default ${done ? "text-slate-400 line-through" : "text-slate-700"}`}>{it.title}</button>
+              className={`block w-full break-words text-left ${focus ? "text-[15px] leading-snug" : "text-sm"} disabled:cursor-default ${done ? "text-slate-400 line-through" : focus ? "text-slate-800" : "text-slate-700"}`}>{it.title}</button>
           )}
           <TaskLinkList links={it.links} className="mt-0.5" onRemove={canEdit ? (url) => void setLinks(it, (it.links ?? []).filter((l) => l.url !== url)) : undefined} />
         </div>
@@ -224,7 +233,7 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
           </button>
         )}
         {assignable && (it.assigned_name || canEdit) && <WhoChip name={it.assigned_name} onClick={canEdit ? () => setPickFor(pickFor === it.id ? null : it.id) : undefined} />}
-        <span className="mt-0.5 hidden shrink-0 whitespace-nowrap text-[10px] text-slate-400 sm:inline">{meta}</span>
+        {!focus && <span className="mt-0.5 hidden shrink-0 whitespace-nowrap text-[10px] text-slate-400 sm:inline">{meta}</span>}
         {canEdit && (
           <button type="button" onClick={() => void remove(it)} title="ลบ" aria-label={`ลบ ${it.title}`}
             className="mt-0.5 shrink-0 px-0.5 text-xs text-slate-300 opacity-0 hover:text-rose-500 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100">✕</button>
@@ -243,11 +252,27 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
           {label}{items.length > 0 && <span className="text-slate-400"> · เหลือ {openItems.length}/{items.length}</span>}
         </div>
       )}
-      <div className="mt-0.5 rounded-lg border border-slate-200 bg-white p-1">
+      <div className={focus ? "" : "mt-0.5 rounded-lg border border-slate-200 bg-white p-1"}>
         {!loaded && loading ? <div className="px-2 py-1.5 text-xs text-slate-400">กำลังโหลด…</div>
           : openItems.length ? openItems.map(row)
           : <div className="px-2 py-1.5 text-xs text-slate-400">{emptyText}</div>}
-        {canEdit && (
+        {canEdit && focus && (
+          // ช่องเพิ่มข้อแบบเล็ก: บรรทัดเดียว ไม่มีกรอบ · ปุ่ม "เพิ่ม" โผล่ตอนพิมพ์ · ⋯ = ใช้บ่อย/แม่แบบ/ตั้งค่า
+          <div className="flex items-center gap-1.5 border-t border-slate-100 px-1 pt-1">
+            <span className="text-sm text-slate-400" aria-hidden>＋</span>
+            <input value={text} maxLength={300} placeholder={placeholder.replace(/^＋\s*/, "")} aria-label="เพิ่มรายการ"
+              onChange={(e) => { setText(e.target.value); setErr(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(text); } }}
+              className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs placeholder:text-slate-400 focus:outline-none focus:ring-0" />
+            {text.trim() && <button type="button" onClick={() => void submit(text)} disabled={busy} className="h-6 shrink-0 rounded-md bg-slate-100 px-2 text-[11px] text-slate-700 hover:bg-slate-200 disabled:opacity-50">เพิ่ม</button>}
+            {assignable && <span className="flex scale-90 items-center"><WhoChip name={newWho?.name} onClick={() => setPickFor(pickFor === "new" ? null : "new")} /></span>}
+            {(presetType || templateType) && (
+              <button type="button" onClick={() => setToolsOpen((o) => !o)} aria-expanded={toolsOpen} title="ข้อที่ใช้บ่อย · แม่แบบ · ตั้งค่า"
+                className={`h-6 shrink-0 rounded-md px-1.5 text-sm leading-none ${toolsOpen ? "bg-slate-100 text-slate-700" : "text-slate-400 hover:bg-slate-50 hover:text-slate-700"}`}>⋯</button>
+            )}
+          </div>
+        )}
+        {canEdit && !focus && (
           <div className="flex gap-1.5 px-1 pt-1">
             <input value={text} maxLength={300} placeholder={placeholder} aria-label="เพิ่มรายการ"
               onChange={(e) => { setText(e.target.value); setErr(false); }}
@@ -259,7 +284,7 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
         )}
         {pickFor === "new" && <WhoPicker allowNone={!!newWho} onCancel={() => setPickFor(null)} onPick={(u) => { setNewWho(u); setPickFor(null); }} />}
         {err && <p className="px-2 pt-1 text-xs text-rose-600">พิมพ์ข้อความก่อน</p>}
-        {canEdit && presetType && (
+        {canEdit && presetType && showTools && (
           <div className="flex flex-wrap items-center gap-1 px-1 pb-0.5 pt-1.5">
             {quick.length > 0 && <span className="text-[11px] text-slate-400">ใช้บ่อย:</span>}
             {quick.map((p) => (
@@ -270,7 +295,7 @@ export function RecordChecklist({ moduleKey, recordType = null, recordId, canEdi
               className="ml-auto rounded px-1 text-[11px] text-slate-400 hover:text-blue-600">⚙️ ตั้งค่า</button>
           </div>
         )}
-        {canEdit && templateType && (
+        {canEdit && templateType && showTools && (
           <div className="flex flex-wrap items-center gap-1.5 px-1 pb-0.5 pt-1.5">
             <span className="text-[11px] text-slate-400"><Icon name="documents" /> แม่แบบ:</span>
             <select value="" disabled={busy || tplRows.length === 0} aria-label="ใส่จากแม่แบบ"
