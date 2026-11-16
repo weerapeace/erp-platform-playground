@@ -17,8 +17,15 @@
  *   <InlineEdit dense trigger="dblclick" editKey={n} .../> // แถวแน่น ๆ (ต้นไม้/รายการ) · เปลี่ยน editKey = เปิดแก้จากเมนู "ตั้งชื่อ"
  *
  * หมายเหตุ: onSave จะได้ string เสมอ (ค่าว่าง = "") · ฝั่งเรียกเป็นคนตัดสินใจว่าจะบันทึกยังไง/เด้ง toast อะไร
+ *
+ * InlineField (2026-11-16 · ป๊อปงานในแผนงาน) — แบบเดียวกันแต่ "ตัวกรอกเป็นอะไรก็ได้" (วัน+เวลา · เลือกคน · แท็ก · ตัวเลือก):
+ *   <InlineField filled={!!due} display={dueLabel(due)} emptyLabel="ตั้งกำหนด"
+ *     editor={(done) => <ERPDateTime24 value={due} onChange={(v) => setDue(v)} />} />
+ *   - มีค่าแล้ว = ล็อก (โชว์ค่า) ดับเบิลคลิก / แตะ 2 ครั้ง ถึงจะแก้ · ยังว่าง = ปุ่มเส้นประ กดครั้งเดียวใส่ได้เลย
+ *   - กำลังแก้: ปุ่ม ✓ เสร็จ / กด Esc = ปิดตัวกรอก (ค่าที่แก้อยู่ในมือหน้าที่เรียก — จะบันทึกเมื่อไหร่ หน้านั้นตัดสินใจ)
+ *   - ตัวกรอกแบบเลือกแล้วจบ (เช่น เลือกคน) เรียก done() เองได้เลย
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export type InlineEditProps = {
   value: string | number | null | undefined;
@@ -103,5 +110,56 @@ export function InlineEdit({
       {!disabled && !compact && <span className="text-[10px] text-slate-300 group-hover:text-blue-500 shrink-0">✏️</span>}
       {!disabled && compact && <span className="text-[10px] text-transparent group-hover:text-blue-400 shrink-0">✏️</span>}
     </button>
+  );
+}
+
+const DOUBLE_TAP_MS = 450;
+
+/** ช่องที่ "มีค่าแล้วล็อก ดับเบิลคลิกถึงแก้ · ว่างกดใส่ได้เลย" โดยตัวกรอกเป็นอะไรก็ได้ (ดูหัวไฟล์) */
+export function InlineField({ filled, display, emptyLabel, editor, disabled = false, emptyText = "—", hint = "ดับเบิลคลิกเพื่อแก้", className = "" }: {
+  /** มีค่าแล้วไหม (มี = ล็อก) */
+  filled: boolean;
+  /** หน้าตาตอนล็อก */
+  display: ReactNode;
+  /** ป้ายปุ่มเส้นประตอนยังว่าง เช่น "ตั้งกำหนด" */
+  emptyLabel: string;
+  /** ตัวกรอกจริง · done() = ปิดตัวกรอก */
+  editor: (done: () => void) => ReactNode;
+  /** ไม่มีสิทธิ์แก้ = โชว์ค่าอย่างเดียว */
+  disabled?: boolean;
+  /** ข้อความตอนว่างและแก้ไม่ได้ */
+  emptyText?: string;
+  hint?: string;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const lastTap = useRef(0);
+  const done = () => setEditing(false);
+  if (editing && !disabled) {
+    return (
+      <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${className}`}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); done(); } }}>
+        <div className="min-w-0 flex-1">{editor(done)}</div>
+        <button type="button" onClick={done} title="เสร็จ (Esc)"
+          className="h-7 shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2.5 text-xs text-violet-700 hover:bg-violet-100">✓ เสร็จ</button>
+      </div>
+    );
+  }
+  if (!filled) {
+    return disabled ? <span className={`text-sm text-slate-400 ${className}`}>{emptyText}</span> : (
+      <button type="button" onClick={() => setEditing(true)}
+        className={`inline-flex h-7 items-center rounded-full border border-dashed border-slate-300 px-2.5 text-xs text-slate-500 hover:border-violet-300 hover:text-violet-700 ${className}`}>
+        ＋ {emptyLabel}
+      </button>
+    );
+  }
+  return (
+    <div title={disabled ? undefined : hint}
+      onDoubleClick={() => { if (!disabled) setEditing(true); }}
+      // จอทัช: แตะ 2 ครั้งเร็ว ๆ = ดับเบิลคลิก
+      onPointerUp={(e) => { if (disabled || e.pointerType === "mouse") return; const now = Date.now(); if (now - lastTap.current < DOUBLE_TAP_MS) setEditing(true); lastTap.current = now; }}
+      className={`min-w-0 select-none rounded-lg ${disabled ? "" : "-mx-1.5 cursor-text px-1.5 py-0.5 hover:bg-violet-50/70"} ${className}`}>
+      {display}
+    </div>
   );
 }

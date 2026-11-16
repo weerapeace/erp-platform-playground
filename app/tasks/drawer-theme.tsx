@@ -22,6 +22,8 @@ export type DrawerTheme = {
   bg: string | null; bgImage: string | null; bgGradient: DrawerGradient;   // พื้นหลัง: สีเดียว / รูป / ไล่สี
   subCardBg: string | null; subCardBgImage: string | null; subCardBgGradient: DrawerGradient;   // พื้นหลังการ์ดงานย่อย
   size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[]; order: string[]; collapsed: string[];
+  /** 🫧 กระจกใส (Liquid Glass แบบเบา) — เฉพาะป๊อปที่เปิดตัวเลือกนี้ (parts มี "glass") · เจ้าของเลือก 2026-11-16 */
+  glass: boolean;
 };
 export const DEFAULT_DRAWER_THEME: DrawerTheme = {
   accent: "#7c3aed", accent2: "#ec4899", accentGradient: false,
@@ -29,7 +31,23 @@ export const DEFAULT_DRAWER_THEME: DrawerTheme = {
   bg: null, bgImage: null, bgGradient: null,
   subCardBg: null, subCardBgImage: null, subCardBgGradient: null,
   size: "md", density: "normal", swap: false, hidden: [], order: [], collapsed: ["attach"],
+  glass: false,
 };
+/** ส่วนในปุ่มแต่งหน้า — ป๊อปที่ไม่มีบางอย่าง (เช่น ไม่มีการ์ดงานย่อย) ส่งเฉพาะที่ใช้ได้จริง · "glass" ต้องขอเอง */
+export type DrawerThemePart = "size" | "density" | "colors" | "background" | "subCard" | "swap" | "sections" | "glass";
+const DEFAULT_PARTS: DrawerThemePart[] = ["size", "density", "colors", "background", "subCard", "swap", "sections"];
+
+// ── 🫧 กระจกใส (Liquid Glass แบบเบา) ──
+/** การ์ดกระจก: ขาวโปร่ง + เบลอสิ่งที่อยู่ข้างหลัง + ขอบบนสะท้อนแสง (แบบเบา = ทึบพอให้อ่านง่ายบนหน้าขาว) */
+export const GLASS_CARD = "border-white/70 bg-white/60 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]";
+export const PLAIN_CARD = "border-slate-200 bg-white";
+/** พื้นหลังข้างหลังกระจก: ผู้ใช้ตั้งรูป/สีเองไว้ = ใช้อันนั้น (ฉากขาวบางลง ให้เห็นทะลุกระจก) · ไม่ได้ตั้ง = วงสีจาง ๆ ตาม tint (เช่น สีความด่วน) */
+export function glassBackdropStyle(theme: DrawerTheme, tint: string): React.CSSProperties {
+  if (theme.bgImage) { const u = r2ImageUrl(theme.bgImage); if (u) return { backgroundImage: `linear-gradient(rgba(255,255,255,0.35),rgba(255,255,255,0.35)), url(${u})`, backgroundSize: "cover" }; }
+  if (theme.bgGradient) return { background: `linear-gradient(160deg, ${theme.bgGradient.from}, ${theme.bgGradient.to})` };
+  if (theme.bg) return { background: theme.bg };
+  return { background: `radial-gradient(circle at 12% 8%, ${tint}55, transparent 42%), radial-gradient(circle at 92% 30%, #7F77DD40, transparent 40%), radial-gradient(circle at 45% 100%, ${tint}38, transparent 45%), #f6f5fb` };
+}
 
 export function mergeDrawerTheme(v: unknown): DrawerTheme {
   const o = (v ?? {}) as Partial<DrawerTheme>;
@@ -40,6 +58,7 @@ export function mergeDrawerTheme(v: unknown): DrawerTheme {
     subCardBg: o.subCardBg ?? null, subCardBgImage: o.subCardBgImage ?? null, subCardBgGradient: o.subCardBgGradient ?? null,
     size: o.size ?? "md", density: o.density ?? "normal", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [], order: Array.isArray(o.order) ? o.order : [],
     collapsed: Array.isArray(o.collapsed) ? o.collapsed : DEFAULT_DRAWER_THEME.collapsed,
+    glass: !!o.glass,
   };
 }
 // พับ/กางส่วน (ต่อคน) — เก็บคีย์ที่ "พับอยู่"
@@ -88,7 +107,8 @@ export function subCardBgStyle(theme: DrawerTheme): React.CSSProperties | undefi
   return theme.subCardBg ? { background: theme.subCardBg } : undefined;
 }
 
-export function useDrawerTheme(which: "task" | "content") {
+/** which = ป๊อปไหน (เก็บแยกกันต่อคน) · "plan" = ป๊อปงานในแผนงานทีม */
+export function useDrawerTheme(which: "task" | "content" | "plan") {
   const prefKey = `tasks_drawer_theme_${which}`;
   const [theme, setTheme] = useState<DrawerTheme>(DEFAULT_DRAWER_THEME);
   useEffect(() => {
@@ -103,8 +123,15 @@ export function useDrawerTheme(which: "task" | "content") {
 }
 
 // ปุ่ม 🎨 + popover ปรับธีม drawer
-export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTheme; update: (p: Partial<DrawerTheme>) => void; sections: { key: string; label: string }[] }) {
+export function DrawerThemeButton({ theme, update, sections, parts = DEFAULT_PARTS, label }: {
+  theme: DrawerTheme; update: (p: Partial<DrawerTheme>) => void; sections: { key: string; label: string }[];
+  /** ส่วนที่โชว์ในแผง (ไม่ส่ง = แบบเดิมของ drawer งาน/คอนเทนต์) · ใส่ "glass" = มีสวิตช์กระจกใส */
+  parts?: DrawerThemePart[];
+  /** หัวแผง (ไม่ส่ง = "แต่งหน้า drawer") */
+  label?: string;
+}) {
   const t = useT();
+  const has = (p: DrawerThemePart) => parts.includes(p);
   const toast = useToast();   // แจ้งผิดพลาดด้วย toast กลาง (เดิม alert ของเบราว์เซอร์)
   const [open, setOpen] = useState(false);
   const [bgBusy, setBgBusy] = useState(false);
@@ -140,29 +167,38 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
   };
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((o) => !o)} title={t("แต่งหน้า drawer (ของฉัน)", "Customize drawer (yours)")} className="h-8 px-2 text-xs text-slate-400 hover:text-violet-600 rounded-md hover:bg-slate-50">🎨</button>
+      <button onClick={() => setOpen((o) => !o)} title={label ?? t("แต่งหน้า drawer (ของฉัน)", "Customize drawer (yours)")} className="h-8 px-2 text-xs text-slate-400 hover:text-violet-600 rounded-md hover:bg-slate-50">🎨</button>
       {open && (
         <>
           <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-[61] mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl p-3 space-y-3 text-left">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-700">🎨 {t("แต่งหน้า drawer", "Customize drawer")}</p>
+              <p className="text-sm font-semibold text-slate-700">🎨 {label ?? t("แต่งหน้า drawer", "Customize drawer")}</p>
               <button onClick={() => update({ ...DEFAULT_DRAWER_THEME })} className="text-[11px] text-slate-400 hover:text-violet-600">{t("รีเซ็ต", "Reset")}</button>
             </div>
+            {/* 🫧 กระจกใส — เฉพาะป๊อปที่ขอ (parts มี "glass") */}
+            {has("glass") && (
+              <label className="flex items-start gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-sm text-slate-700 cursor-pointer hover:bg-slate-50">
+                <input type="checkbox" checked={theme.glass} onChange={(e) => update({ glass: e.target.checked })} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600" />
+                <span>{t("กระจกใส (Liquid Glass)", "Glass (Liquid Glass)")}
+                  <span className="block text-[11px] text-slate-400">{t("การ์ดโปร่งเห็นพื้นหลังเบลอ ๆ · ไม่ตั้งพื้นหลัง = สีตามความด่วน", "Translucent cards over a blurred background · no background set = tinted by priority")}</span></span>
+              </label>
+            )}
             {/* ขนาดเนื้อหา */}
-            <div className="flex items-center gap-2">
+            {has("size") && <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 w-20">{t("ขนาดเนื้อหา", "Content size")}</span>
               {(["sm", "md", "lg"] as const).map((s) => (
                 <button key={s} onClick={() => update({ size: s })} className={`h-7 px-2.5 text-xs rounded border ${theme.size === s ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{s === "sm" ? t("เล็ก", "S") : s === "lg" ? t("ใหญ่", "L") : t("กลาง", "M")}</button>
               ))}
-            </div>
+            </div>}
             {/* ความแน่น (ระยะห่าง) */}
-            <div className="flex items-center gap-2">
+            {has("density") && <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 w-20">{t("ความแน่น", "Density")}</span>
               {(["compact", "normal", "spacious"] as const).map((d) => (
                 <button key={d} onClick={() => update({ density: d })} className={`h-7 px-2.5 text-xs rounded border ${theme.density === d ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{d === "compact" ? t("แน่น", "Compact") : d === "spacious" ? t("โปร่ง", "Spacious") : t("ปกติ", "Normal")}</button>
               ))}
-            </div>
+            </div>}
+            {has("colors") && <>
             {/* ชุดสีสำเร็จรูป */}
             <div>
               <span className="text-xs text-slate-500">{t("ชุดสีสำเร็จรูป", "Presets")}</span>
@@ -187,6 +223,8 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
               <ColorOpt label={t("คืบหน้า", "Bar")} value={theme.progressColor} fallback={theme.accent} onChange={(c) => update({ progressColor: c })} />
               <ColorOpt label={t("เส้นแบ่ง", "Line")} value={theme.dividerColor} fallback="#e2e8f0" onChange={(c) => update({ dividerColor: c })} />
             </div>
+            </>}
+            {has("background") && <>
             {/* พื้นหลัง: ขาว / สีเดียว / ไล่สี / รูป */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-500 w-20">{t("พื้นหลัง", "Background")}</span>
@@ -205,6 +243,8 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
                 <input type="color" value={theme.bgGradient.to} onChange={(e) => update({ bgGradient: { from: theme.bgGradient!.from, to: e.target.value } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
               </div>
             )}
+            </>}
+            {has("subCard") && <>
             {/* พื้นหลังการ์ดงานย่อย: ขาว / สีเดียว / ไล่สี / รูป */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-500 w-20">{t("พื้นการ์ดย่อย", "Subtask card")}</span>
@@ -223,12 +263,13 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
                 <input type="color" value={theme.subCardBgGradient.to} onChange={(e) => update({ subCardBgGradient: { from: theme.subCardBgGradient!.from, to: e.target.value } })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
               </div>
             )}
+            </>}
             {/* สลับซ้าย-ขวา */}
-            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            {has("swap") && <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
               <input type="checkbox" checked={theme.swap} onChange={(e) => update({ swap: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("สลับซ้าย-ขวา", "Swap left/right")}
-            </label>
+            </label>}
             {/* ซ่อน/แสดง + เรียงลำดับส่วน (↑/↓) */}
-            {sections.length > 0 && (() => {
+            {has("sections") && sections.length > 0 && (() => {
               const ord = orderedKeys(theme, sections.map((s) => s.key));
               return (
                 <div>
