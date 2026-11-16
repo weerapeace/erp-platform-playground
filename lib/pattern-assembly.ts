@@ -19,18 +19,22 @@
  * ใช้ที่: components/pattern-studio/assembly-view · components/pattern-3d (mode assembly) · เทสต์ lib/__tests__/pattern-assembly.test.ts
  * คู่มือ: docs/pattern-studio.md
  */
+import type { HandleStyle, TabKind } from "./pattern-handles";
 import { flattenShape, shapeArea, shapeBox, type InnerLine, type Pt, type Shape } from "@/lib/pattern-shape";
 import { checkSeam, isInnerSide, isPartialSeam, isRangedSide, pieceEdges, sidePoints, type Seam, type SeamSide, type EdgeMeta } from "@/lib/pattern-seams";
 
 /** จุดติดของชิ้นที่ไม่ได้เย็บขอบชนขอบ — handle: ปลายหู 2 จุดบนแผ่น (พิกัดเทียบมุมซ้ายบนของกรอบเส้นเย็บของแผ่น · y ลง) · behind: แผ่นปิดหลังรูแรกของแผ่น */
-export type Attach = { id: string; kind: "handle" | "behind"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number;
+export type Attach = { id: string; kind: "handle" | "behind" | "tab"; pid: string; on: string; a?: Pt; b?: Pt; len?: number; w?: number; tail?: number;
+  /** รอบ J2: แบบหู (ไม่มี = แบน) · ไส้เชือก มม. · ชิ้นหูชั้นใน (ประกบ) · ชนิดห่วง/แถบ (kind "tab" · จุดติด = a) */ style?: HandleStyle; cord?: number; inner?: string; tab?: TabKind;
   /** สายพาดข้างถึงข้าง (2026-11-11): โคนสายอยู่ที่ชิ้นข้างซ้าย/ขวา กึ่งกลางความหนา ต่ำจากปาก = a[1] — ไม่ใช่บนแผ่นหน้า/หลัง */ across?: boolean };
 export type AsmPiece = { pid: string; name: string; count: number; shape: Shape; holes: Shape[]; /** ชั้นซับใน (ไม่ใส่ = ชั้นนอก) */ layer?: "lining"; /** เส้นในชิ้น — ให้ชิ้นอื่นมาเย็บ (ภาพเย็บติด lib/pattern-sewn) */ inner?: InnerLine[]; /** ค่ารายขอบ (กุ้น / ติดซิป) — ภาพเย็บติดวาดเป็นเส้นตามขอบ */ edgeMeta?: EdgeMeta[] | null };
 
 export type AsmPanel = { pid: string; side: 1 | -1; outline: Pt[]; holes: Pt[][] };
 export type AsmSweep = { pid: string; pts: Pt[]; dir: Pt };
 /** side: 1 = แผ่นหน้า · -1 = แผ่นหลัง · 0 = กึ่งกลางความหนา (สายพาดข้างถึงข้าง โคนอยู่ที่ชิ้นข้าง) */
-export type AsmHandle = { pid: string; side: 1 | -1 | 0; a: Pt; b: Pt; len: number; w: number; tail: number };
+export type AsmHandle = { pid: string; side: 1 | -1 | 0; a: Pt; b: Pt; len: number; w: number; tail: number; /** รอบ J2 */ id?: string; style?: HandleStyle; cord?: number };
+/** ห่วง/แถบ (รอบ J2): จุดติดในกรอบประกอบ · ขนาดแถบ */
+export type AsmTab = { id: string; pid: string; side: 1 | -1; at: Pt; w: number; h: number; tab: TabKind };
 export type AsmBehind = { pid: string; side: 1 | -1; x: number; y: number; w: number; h: number };
 /** extra = ชิ้นเสริมที่เย็บบางช่วงกับแผ่นหน้า/หลัง (มาจากภาพเย็บติด lib/pattern-sewn · assemble() เองไม่สร้างขั้นนี้) */
 export type AsmStepKey = "behind" | "handle" | "extra" | "gusset" | "back" | "lining";
@@ -39,7 +43,7 @@ export type AsmNote = "depth-differs" | "mismatch" | "same-back";
 export type AssemblyOk = {
   ok: true; kind: "wrap" | "pouch"; depth: number; width: number; height: number;
   front: string; back: string; bridges: string[];
-  panels: AsmPanel[]; sweeps: AsmSweep[]; handles: AsmHandle[]; behind: AsmBehind[];
+  panels: AsmPanel[]; sweeps: AsmSweep[]; handles: AsmHandle[]; behind: AsmBehind[]; tabs: AsmTab[];
   steps: AsmStep[]; loose: string[]; notes: AsmNote[];
   /** สูงของแผ่นหน้า / แผ่นหลัง ในกรอบประกอบ */
   panelH: [number, number];
@@ -199,22 +203,26 @@ export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Atta
     return { pid: x.pid, pts, dir: Math.hypot(v[0], v[1]) > 1e-6 ? unit(v[0], v[1]) : [0, -1] };
   });
 
-  const handles: AsmHandle[] = [], behind: AsmBehind[] = [], attached = new Set<string>();
+  const handles: AsmHandle[] = [], behind: AsmBehind[] = [], tabs: AsmTab[] = [], attached = new Set<string>();
   for (const at of attaches) {
     const child = byPid.get(at.pid);
     if (!child || (at.on !== front && at.on !== back)) continue;
     if (at.kind === "handle" && at.across && at.len && at.w) {
       // สายพาดข้างถึงข้าง: โคนซ้าย/ขวาอยู่ที่ขอบข้างสุดของแผ่นหน้า ณ ความสูงนั้น (= ผิวชิ้นข้าง) กึ่งกลางความหนา
       const y = Math.max(0, ff.h - Math.max(0, at.a?.[1] ?? 0)), near = ff.outline.filter((q) => q[1] >= y - 1.5), P = near.length >= 2 ? near : ff.outline;
-      handles.push({ pid: at.pid, side: 0, a: [Math.min(...P.map((q) => q[0])) - 0.15, y], b: [Math.max(...P.map((q) => q[0])) + 0.15, y], len: at.len, w: at.w, tail: at.tail ?? 4 });
-      attached.add(at.pid);
+      handles.push({ pid: at.pid, side: 0, a: [Math.min(...P.map((q) => q[0])) - 0.15, y], b: [Math.max(...P.map((q) => q[0])) + 0.15, y], len: at.len, w: at.w, tail: at.tail ?? 4, id: at.id, ...(at.style ? { style: at.style } : {}), ...(at.cord ? { cord: at.cord } : {}) });
+      attached.add(at.pid); if (at.inner) attached.add(at.inner);
       continue;
     }
     const sides: (1 | -1)[] = front === back ? [1, -1] : [at.on === front ? 1 : -1];
     for (const side of sides) {
       const P = side > 0 ? F : B, f = side > 0 ? ff : fb, box = shapeBox(P.shape);
       if (at.kind === "handle" && at.a && at.b && at.len && at.w) {
-        handles.push({ pid: at.pid, side, a: f.map([box.x + at.a[0], box.y + at.a[1]]), b: f.map([box.x + at.b[0], box.y + at.b[1]]), len: at.len, w: at.w, tail: at.tail ?? 4 });
+        handles.push({ pid: at.pid, side, a: f.map([box.x + at.a[0], box.y + at.a[1]]), b: f.map([box.x + at.b[0], box.y + at.b[1]]), len: at.len, w: at.w, tail: at.tail ?? 4, id: at.id, ...(at.style ? { style: at.style } : {}), ...(at.cord ? { cord: at.cord } : {}) });
+        attached.add(at.pid); if (at.inner) attached.add(at.inner);
+      } else if (at.kind === "tab" && at.a && at.tab) {
+        const cb = shapeBox(child.shape);
+        tabs.push({ id: at.id, pid: at.pid, side, at: f.map([box.x + at.a[0], box.y + at.a[1]]), w: Math.min(cb.w, cb.h), h: Math.max(cb.w, cb.h) / 2, tab: at.tab });
         attached.add(at.pid);
       } else if (at.kind === "behind" && P.holes.length) {
         const hb = shapeBox(P.holes[0]), cb = shapeBox(child.shape), c = f.map([hb.x + hb.w / 2, hb.y + hb.h / 2]);
@@ -227,12 +235,12 @@ export function assemble(allPieces: AsmPiece[], allSeams: Seam[], attaches: Atta
   const used = new Set([front, back, ...bridges, ...attached]);
   const steps: AsmStep[] = [];
   if (behind.length) steps.push({ key: "behind", pids: [...new Set(behind.map((x) => x.pid))] });
-  if (handles.length) steps.push({ key: "handle", pids: [...new Set(handles.map((x) => x.pid))] });
+  if (handles.length || tabs.length) steps.push({ key: "handle", pids: [...new Set([...handles.map((x) => x.pid), ...tabs.map((x) => x.pid)])] });
   if (kind === "wrap") steps.push({ key: "gusset", pids: bridges });
   steps.push({ key: "back", pids: [back] });
   return {
     ok: true, kind, depth, width: Math.max(ff.w, fb.w), height: Math.max(ff.h, fb.h), front, back, bridges,
-    panels, sweeps, handles, behind, steps, loose: all.filter((pid) => !used.has(pid)), notes,
+    panels, sweeps, handles, behind, tabs, steps, loose: all.filter((pid) => !used.has(pid)), notes,
     panelH: [ff.h, fb.h],
     toLocal: {
       front: (q) => { const b = shapeBox(F.shape), u = ff.unmap(q); return [u[0] - b.x, u[1] - b.y]; },
@@ -255,9 +263,17 @@ export function cleanAttaches(raw: unknown, pids: Set<string>): Attach[] {
     const pid = typeof r.pid === "string" ? r.pid : "", on = typeof r.on === "string" ? r.on : "";
     if (!id || !pids.has(pid) || !pids.has(on) || pid === on || out.some((o) => o.id === id)) continue;
     if (r.kind === "behind") { out.push({ id, kind: "behind", pid, on }); continue; }
+    if (r.kind === "tab") {   // ห่วง/แถบ (รอบ J2)
+      const a0 = pt(r.a), tab = r.tab === "dring" || r.tab === "snap" || r.tab === "strap" ? r.tab : null;
+      if (a0 && tab) out.push({ id, kind: "tab", pid, on, a: a0, tab });
+      continue;
+    }
     const a = pt(r.a), b = pt(r.b), len = num(r.len), w = num(r.w), tail = num(r.tail);
     if (r.kind !== "handle" || !a || !b || !len || !w || len <= 0 || len > 300 || w <= 0 || w > 30) continue;
-    out.push({ id, kind: "handle", pid, on, a, b, len, w, tail: tail != null && tail >= 0 && tail <= 30 ? tail : 4, ...(r.across === true ? { across: true } : {}) });
+    const style = r.style === "flat" || r.style === "roll" || r.style === "mix" ? r.style : null, cord = num(r.cord);
+    const inner = typeof r.inner === "string" && pids.has(r.inner) && r.inner !== pid && r.inner !== on ? r.inner : null;
+    out.push({ id, kind: "handle", pid, on, a, b, len, w, tail: tail != null && tail >= 0 && tail <= 30 ? tail : 4, ...(r.across === true ? { across: true } : {}),
+      ...(style ? { style } : {}), ...(cord != null && cord > 0 && cord <= 30 ? { cord: Math.round(cord) } : {}), ...(inner ? { inner } : {}) });
   }
   return out;
 }

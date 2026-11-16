@@ -37,10 +37,13 @@ export function bomRows(pieces: PatternPiece[]): { material: string; pieces: num
   for (const p of pieces) { const x = m.get(p.material) ?? { material: p.material, pieces: 0, area: 0 }; x.pieces += p.count; x.area += (p.area ?? p.w * p.h) * p.count; m.set(p.material, x); }
   return [...m.values()].map((x) => ({ ...x, area: r1(x.area) })).sort((a, b) => b.area - a.area);
 }
-export function bomCsv(pieces: PatternPiece[], meta: { rev?: number | null; code?: string; qty?: number } = {}): string {
+/** วัสดุเสริมที่ไม่ได้คิดเป็นพื้นที่ (ไส้เชือก · ห่วง · กระดุม — รอบ J2) */
+export type ExtraBom = { material: string; qty: number; unit: string };
+export function bomCsv(pieces: PatternPiece[], meta: { rev?: number | null; code?: string; qty?: number; extra?: ExtraBom[] } = {}): string {
   const q = Math.max(1, Math.round(meta.qty ?? 1));
   const rows: (string | number | null)[][] = [["วัสดุ", "ชิ้นที่ตัดต่อใบ", "พื้นที่ตัดต่อใบ (ตร.ซม.)", "พื้นที่ตัดต่อใบ (ตร.ม.)", `ผลิต ${q} ใบ (ตร.ม.)`, "แพทเทิร์น", "รุ่น"]];
   for (const b of bomRows(pieces)) rows.push([b.material, b.pieces, b.area, Math.round(b.area / 100) / 100, Math.round((b.area * q) / 100) / 100, meta.code ?? "", meta.rev ?? ""]);
+  for (const x of meta.extra ?? []) rows.push([x.material, `${x.qty} ${x.unit}`, "", "", `${Math.round(x.qty * q * 10) / 10} ${x.unit}`, meta.code ?? "", meta.rev ?? ""]);
   return toCsv(rows);
 }
 

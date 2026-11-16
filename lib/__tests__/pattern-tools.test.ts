@@ -67,3 +67,4 @@ describe("ค้นหาเครื่องมือ", () => {
   });
   it("หลายคำ = ต้องเจอทุกคำ", () => { expect(ids("เย็บ บางช่วง")[0]).toBe("sewpart"); });
 });
+describe("รอบ J2: ค้นหาหูม้วน", () => { it("หูม้วน / ไส้เชือก / ห่วง d", () => { expect(searchTools("หูม้วน")[0].id).toBe("handles"); expect(searchTools("ไส้เชือก")[0].id).toBe("handles"); }); });

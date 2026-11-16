@@ -17,6 +17,8 @@ import { PIECE_ROLES, cleanMatProps, projectEdgeRows, projectPatternLines, proje
 import { cleanTrims, trimRows } from "@/lib/pattern-trims";
 import { buildSewn } from "@/lib/pattern-sewn";
 import { cleanAttaches, type AsmPiece } from "@/lib/pattern-assembly";
+import { HANDLE_STYLES, TAB_KINDS, cordLength, rollSection } from "@/lib/pattern-handles";
+import type { ExtraBom } from "@/lib/pattern-export";
 import type { Pattern3DApi } from "@/components/pattern-3d";
 
 const Pattern3D = dynamic(() => import("@/components/pattern-3d").then((m) => m.Pattern3D), { ssr: false });
@@ -45,6 +47,7 @@ export default function PrintPatternProjectPage() {
   const seamRows = useMemo(() => (project ? projectSeamRows(project.pieces ?? [], project.seams ?? []) : []), [project]);
   const edgeRows = useMemo(() => (project ? projectEdgeRows(project.pieces ?? []) : []), [project]);
   const pieceRows = useMemo(() => (project ? projectPieceRows(project.pieces ?? []) : []), [project]);
+  const attachList = useMemo(() => (project?.pieces?.length ? cleanAttaches((project.template as { attach?: unknown } | null)?.attach, new Set(project.pieces.map((p) => p.pid))) : []), [project]);
   const trims = useMemo(() => (project ? trimRows(cleanTrims((project.template as { trims?: unknown } | null)?.trims), project.pieces ?? [], project.seams ?? []).filter((r) => !r.gone) : []), [project]);
   // อะไหล่ที่วางบนชิ้น: ชิ้นไหน ชนิดอะไร ขนาด และระยะจากขอบบน/ซ้ายของชิ้น (ไม่ขึ้นกับว่าเลือกวัสดุตีราคาแล้วหรือยัง)
   const hwRows = useMemo(() => (project?.pieces ?? []).flatMap((p, i) => (p.inner ?? []).filter((l) => l.kind === "hw").map((l) => {
@@ -55,7 +58,7 @@ export default function PrintPatternProjectPage() {
   const scene = useMemo(() => {
     if (!project?.pieces?.length) return null;
     const asm: AsmPiece[] = project.pieces.map((p, i) => ({ pid: p.pid, name: p.name || `P${i + 1}`, count: p.count, shape: p.shape, holes: p.holes, ...(p.info?.role === "lining" ? { layer: "lining" as const } : {}), ...(p.inner?.length ? { inner: p.inner } : {}), ...(p.edgeMeta ? { edgeMeta: p.edgeMeta } : {}) }));
-    const sc = buildSewn(asm, project.seams ?? [], cleanAttaches((project.template as { attach?: unknown } | null)?.attach, new Set(asm.map((p) => p.pid))));
+    const sc = buildSewn(asm, project.seams ?? [], attachList);
     return sc.joined > 0 ? sc : null;
   }, [project]);
   const [shots, setShots] = useState<{ url: string; label: string }[] | null>(null);
@@ -75,6 +78,15 @@ export default function PrintPatternProjectPage() {
     window.setTimeout(() => { const u = api.snapshot("iso"); setInner(u ? { url: u, label: "ภายใน (ผ่าด้านหน้า)" } : null); }, 450);
   };
   const body = scene?.asm ?? null;
+  // ── หูม้วน + ห่วง (รอบ J2): หมายเหตุ · ไส้เชือก/ห่วงในสรุปวัสดุ · รูปตัดหูม้วน ──
+  const handleAtt = attachList.filter((a) => a.kind === "handle"), tabAtt = attachList.filter((a) => a.kind === "tab");
+  const rolled = handleAtt.filter((a) => (a.style ?? "flat") !== "flat");
+  const cordCm = cordLength(handleAtt.map((a) => ({ len: a.len ?? 0, style: a.style, cord: a.cord })));
+  const extraBom: ExtraBom[] = [
+    ...(cordCm > 0 ? [{ material: `ไส้เชือกหู ⌀${rolled.find((a) => a.cord)?.cord ?? 0} มม.`, qty: cordCm, unit: "ซม." }] : []),
+    ...TAB_KINDS.flatMap((k) => { const n = tabAtt.filter((a) => a.tab === k.key).length; return n ? [{ material: k.key === "dring" ? "ห่วง D" : k.key === "snap" ? "กระดุมแป๊ก (ชุด)" : "ห่วงยึดสายสะพาย", qty: n, unit: "ชิ้น" }] : []; }),
+  ];
+  const sec = rolled[0] ? rollSection(rolled[0].w ?? 3, rolled[0].cord ?? 0, rolled[0].tail ?? 4) : null;
   // ── ใบสเปก (Tech pack · รอบ H): ขนาดเป้าหมาย · ลำดับประกอบ · หมายเหตุการผลิต ──
   const tplObj = (project?.template ?? null) as { params?: { W?: number; flare?: number; H?: number; D?: number }; rev?: number } | null;
   const STEP_TH: Record<string, string> = { behind: "ติดแผ่นหลังช่อง / PVC ด้านหลังตัวหน้า", handle: "ติดหู / สาย", extra: "ติดชิ้นที่เย็บติด (ช่อง แถบ สาย)", gusset: "เย็บชิ้นข้าง/ก้นกับตัวหน้า", back: "เย็บตัวหลังปิด", lining: "ใส่ซับใน" };
@@ -96,15 +108,32 @@ export default function PrintPatternProjectPage() {
     const glue = (project.pieces ?? []).flatMap((p) => (p.inner ?? []).filter((l) => l.kind === "glue" || l.kind === "skive").map((l) => `${p.name}: ${l.kind === "glue" ? "ทากาว" : "ปาดบาง"}`));
     if (glue.length) out.push(`แนวทากาว/ปาดบาง: ${glue.join(", ")}`);
     const tops = edgeRows.filter((r) => r.top), binds = edgeRows.filter((r) => r.bind);
+    if (handleAtt.length) out.push(`หู ${handleAtt.length} เส้น · ${handleAtt.map((a) => `${pname(a.pid)}${a.inner ? ` + ${pname(a.inner)} (ประกบใน)` : ""}: ${HANDLE_STYLES.find((s) => s.key === (a.style ?? "flat"))?.th ?? "แบน"} ยาวโผล่ ${a.len} ซม.${a.cord && a.style !== "flat" ? ` ไส้เชือก ⌀${a.cord} มม.` : ""}`).join(" · ")}`);
+    if (tabAtt.length) out.push(`ห่วง/แถบ: ${TAB_KINDS.flatMap((k) => { const n = tabAtt.filter((a) => a.tab === k.key).length; return n ? [`${k.th} ×${n}`] : []; }).join(" · ")}`);
     if (tops.length || binds.length) out.push([tops.length ? `เดินด้ายทับ ${tops.length} ขอบ` : "", binds.length ? `กุ๊น/หุ้มขอบ ${binds.length} ขอบ` : ""].filter(Boolean).join(" · "));
     return out;
-  }, [project, edgeRows]);
+  }, [project, edgeRows, attachList]);   // eslint-disable-line react-hooks/exhaustive-deps
   const techPack = (
     <div className="mt-3 grid gap-3 text-[12px] text-slate-700 sm:grid-cols-2" data-tech-pack>
       {tplObj?.params?.W ? <div className="break-inside-avoid"><div className="mb-1 text-[11px] font-medium text-slate-600">ขนาดเป้าหมาย (จากแม่แบบ)</div>
         ก้นกว้าง {tplObj.params.W} · ปากกว้าง {Math.round((tplObj.params.W + 2 * (tplObj.params.flare ?? 0)) * 10) / 10} · สูง {tplObj.params.H} · หนา {tplObj.params.D} ซม.</div> : null}
       {body?.steps?.length ? <div className="break-inside-avoid" data-assembly-order><div className="mb-1 text-[11px] font-medium text-slate-600">ลำดับประกอบ (จากตะเข็บ)</div>
         <ol className="list-decimal space-y-0.5 pl-4">{body.steps.map((st, i) => <li key={i}>{STEP_TH[st.key] ?? st.key}: {st.pids.map(pname).join(", ")}</li>)}</ol></div> : null}
+      {sec ? <div className="break-inside-avoid sm:col-span-2" data-handle-section><div className="mb-1 text-[11px] font-medium text-slate-600">รูปตัดหูม้วน (ไม่ตามสเกล)</div>
+        <div className="flex flex-wrap items-center gap-4">
+          <svg viewBox="0 0 120 80" className="h-24 w-36" role="img" aria-label="รูปตัดหูม้วน">
+            <circle cx="40" cy="40" r="26" fill="#d6c3a5" stroke="#7a5a3a" strokeWidth="2" />
+            {sec.cord > 0 && <circle cx="40" cy="40" r="20" fill="#f5efe4" stroke="#a08a6a" strokeDasharray="3 2" />}
+            <line x1="40" y1="66" x2="40" y2="76" stroke="#7a5a3a" strokeWidth="2" /><circle cx="40" cy="69" r="1.6" fill="#1e293b" />
+            <line x1="72" y1="14" x2="72" y2="66" stroke="#64748b" /><text x="76" y="44" fontSize="9" fill="#334155">⌀ {sec.dia} ซม.</text>
+          </svg>
+          <svg viewBox="0 0 220 60" className="h-20 w-64" role="img" aria-label="หูด้านข้าง ปลายแบน">
+            <rect x="4" y="22" width="34" height="16" fill="#d6c3a5" stroke="#7a5a3a" /><rect x="182" y="22" width="34" height="16" fill="#d6c3a5" stroke="#7a5a3a" />
+            <rect x="38" y="25" width="144" height="10" rx="5" fill="#c9b08a" stroke="#7a5a3a" />
+            <text x="21" y="54" fontSize="8" textAnchor="middle" fill="#334155">ปลายแบน {sec.tail} ซม.</text><text x="110" y="18" fontSize="8" textAnchor="middle" fill="#334155">ส่วนม้วน (เย็บปิดใต้หู ห่างขอบ {sec.seamOffset * 10} มม.)</text>
+          </svg>
+          <ul className="list-disc pl-4 text-[11px]"><li>หนังรอบไส้: {sec.wrap} ซม. + เผื่อเย็บ</li>{sec.cord > 0 && <li>ไส้เชือก ⌀{Math.round(sec.cord * 10)} มม. · รวม {cordCm} ซม./ใบ</li>}</ul>
+        </div></div> : null}
       {notes.length ? <div className="break-inside-avoid sm:col-span-2" data-prod-notes><div className="mb-1 text-[11px] font-medium text-slate-600">หมายเหตุการผลิต</div>
         <ul className="list-disc space-y-0.5 pl-4">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul></div> : null}
     </div>
@@ -248,7 +277,7 @@ export default function PrintPatternProjectPage() {
   if (err) return <div className="p-10 text-center text-sm text-rose-600">{err}</div>;
 
   return (
-    <PatternPrintView lines={lines} afterTable={tables} beforeTable={spec} rev={tplObj?.rev ?? null}
+    <PatternPrintView lines={lines} afterTable={tables} beforeTable={spec} rev={tplObj?.rev ?? null} extraBom={extraBom}
       stamp={[tplObj?.rev ? `rev ${tplObj.rev}` : "", project?.updated_at ? new Date(project.updated_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : ""].filter(Boolean).join(" · ") || undefined} overviewLabel="ใบสเปก + วางบนผ้า" fileName={docFileName("แพทเทิร์น", code || String(id))}
       eyebrow={`สตูดิโอแพทเทิร์น${project?.sku_code ? ` · ${project.sku_code}` : ""}`} title={`${code} ${project?.name ?? ""}`} footCode={`${code || (project?.name ?? "")}${(project?.template as { rev?: number } | null)?.rev ? ` · rev ${(project?.template as { rev?: number }).rev}` : ""}${draft ? " · แบบร่าง" : ""}`} draft={draft}
       emptyText="แพทเทิร์นนี้ยังไม่มีชิ้น — วาดชิ้นหรือสร้างจากแม่แบบทรงในสตูดิโอ กดบันทึก แล้วเปิดหน้านี้ใหม่" />

@@ -46,6 +46,7 @@ import { ColorwayBar } from "./colorway-bar";
 import { ComparePanel, type CompareRef } from "./compare-panel";
 import { GradingPanel, type GradeGhost } from "./grading-panel";
 import { CoachPanel } from "./coach-panel";
+import { HandlesPanel } from "./handles-panel";
 import { gradeSeamReport, type GradeSpec } from "@/lib/pattern-grading";
 import type { CoachInput } from "@/lib/pattern-coach";
 import { LENGTH_UNITS, formatLength, isLengthUnit, type LengthUnit } from "@/lib/length-units";
@@ -158,6 +159,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
   const [gradeOpen, setGradeOpen] = useState(false);                 // ขยายไซซ์ (รอบ I2)
   const [gradeGhosts, setGradeGhosts] = useState<GradeGhost[] | null>(null);
   const [coachOpen, setCoachOpen] = useState(false);                 // โค้ช (รอบ I3)
+  const [handlesOpen, setHandlesOpen] = useState(false);             // หูหิ้วและห่วง (รอบ J2)
   const [overlay, setOverlay] = useState<CompareRef | null>(null);   // ชิ้นกระเป๋า: สาย/หู · กุ๊น · ช่องโชว์ (รอบ F2)
   const [dxf, setDxf] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -351,6 +353,12 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
   const pieceTex = useMemo(() => { const out: Record<string, { kind: string; size: number; color2?: string }> = {}; for (const p of live) { const x = p.mats.map((m) => props.matProps?.[m.id]?.tex).find(Boolean); if (x) out[p.pid] = x; } return out; }, [live, props.matProps]);
   const cwMats = useMemo(() => { const seen = new Map<string, { id: string; name: string; color: string }>(); for (const p of live) for (const m of p.mats) if (!seen.has(m.id)) seen.set(m.id, { id: m.id, name: m.name, color: props.matProps?.[m.id]?.color ?? "#d8c08c" }); return [...seen.values()]; }, [live, props.matProps]);
   const sewnOn = !!sewnScene && sewnScene.joined > 0;
+  /** ลากปลายหูในภาพ 3D (รอบ J2): ตำแหน่งในกรอบประกอบ → จุดติดของแผ่น (เทียบมุมชิ้น) */
+  const moveHandleEnd = (id: string, end: "a" | "b", p: [number, number], side: 1 | -1) => {
+    const A = sewnScene?.asm; if (!A || !sew?.onAttachesChange) return;
+    const q = A.toLocal[side > 0 ? "front" : "back"](p), r3 = (v: number) => Math.round(v * 1000) / 1000;
+    sew.onAttachesChange((sew.attaches ?? []).map((a) => (a.id === id ? { ...a, [end]: [r3(q[0]), r3(q[1])] } : a)));
+  };
   const onLive = useCallback((pieces: ResultPiece[]) => setLive(pieces), []);
   const onSel = useCallback((pid: string | null) => setSelPid(pid), []);
   const pick3d = useCallback((pid: string | null) => { setSelectReq({ nonce: Date.now(), pid }); if (pid) addEvent("pick-3d"); }, [addEvent]);
@@ -651,7 +659,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
         const h3 = wide ? 520 : 340;
         const viewEl = (<>
             {sewnOn && sewnScene
-              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} pieceTex={pieceTex} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} volume={sewnScene?.asm ? bagVolumeLiters(sewnScene.asm) : null} />
+              ? <Pattern3D saveName={imageName} mode="sewn" sewn={sewnScene} cut={cut} pieceColors={pieceColors} pieceTex={pieceTex} seamColors={SEAM_COLORS} selected={selPid} onSelect={pick3d} onHandleMove={handlesOpen && !readonly && sew?.onAttachesChange ? moveHandleEnd : undefined} height={sew ? h3 : wide ? 520 : 380} volume={sewnScene?.asm ? bagVolumeLiters(sewnScene.asm) : null} />
               : <Pattern3D saveName={imageName} mode="flat" pieces={flat} threads={threads} selected={selPid} onSelect={pick3d} height={sew ? h3 : wide ? 520 : 380} />}
             {sewnOn && sewnScene ? (
               <div className="space-y-1 text-[11px] text-slate-500">
@@ -683,6 +691,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
               <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("แบบของภาพ 3D", "3D view type")}>
                 {VIEWS_3D.filter((v) => v.key !== "sim" || lvNum >= 3).map((v) => <button key={v.key} type="button" data-view3d={v.key} onClick={() => setView3d(v.key)} aria-pressed={view3d === v.key} title={t(v.hintTh, v.hintEn)} className={seg3(view3d === v.key)}>{t(v.th, v.en)}</button>)}
               </div>
+              {sewnOn && sewnScene?.asm && <button type="button" data-3d-handles onClick={() => setHandlesOpen(!handlesOpen)} aria-pressed={handlesOpen} title={t("หูหิ้วม้วน ห่วง แถบกระดุม — ยึดตามจุดติดหู", "Rolled handles, rings, snap tabs — attached at the handle spots")} className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${handlesOpen ? "border-blue-300 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"}`}><Icon value="i:shopping-bag" className="text-sm" />{t("หูหิ้วและห่วง", "Handles")}</button>}
               <span className="ml-auto inline-flex gap-1">
                 {wide && <button type="button" data-swap-3d onClick={() => setSide3d(side3d === "left" ? "right" : "left")} title={t("สลับฝั่ง: ภาพ 3D ซ้าย / ขวา", "Swap sides: 3D left / right")} aria-label={t("สลับฝั่งภาพ 3D", "Swap the 3D side")} className={ib3}><Icon value="i:arrows-exchange" className="text-sm" /></button>}
                 <button type="button" data-hide-3d onClick={() => setShow3d(false)} title={t("ซ่อนภาพ 3D (กระดานเต็มจอ)", "Hide 3D (full-width board)")} aria-label={t("ซ่อนภาพ 3D", "Hide 3D")} className={ib3}><Icon value="i:eye-off" className="text-sm" /></button>
@@ -694,6 +703,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
                 <span>{t(`ยืนยันได้: ${lv.okTh} · ยังสรุปไม่ได้: ${lv.noTh}`, `Shows: ${lv.okEn} · Can't tell yet: ${lv.noEn}`)}</span>
               </p>
             ); })()}
+            {handlesOpen && sewnOn && sewnScene?.asm && sew && <HandlesPanel pieces={asmLive} asm={sewnScene.asm} attaches={sew.attaches ?? []} onAttachesChange={readonly ? undefined : sew.onAttachesChange} onClose={() => setHandlesOpen(false)} />}
             {!asmMode && sewnOn && sewnScene && (sewnScene.asm || sewnScene.lining) && (
               <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("ผ่าดูข้างใน", "Cut-away view")}>
               {(["none", "front", "back"] as const).map((k) => <button key={k} type="button" onClick={() => setCut(k)} aria-pressed={cut === k} className={`h-7 rounded-md px-2.5 text-xs ${cut === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{k === "none" ? t("ดูข้างนอก", "Outside") : k === "front" ? t("ผ่าด้านหน้า", "Cut front") : t("ผ่าด้านหลัง", "Cut back")}</button>)}

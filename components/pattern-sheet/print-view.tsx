@@ -16,7 +16,7 @@ import { PrintToolbar } from "@/components/report";
 import {
   DXF_PROFILES, buildPatternDxf, buildPatternSvg, pagesWithPieces, patternPieces, patternSheetWidth, shelfLayout, tilePages, type DxfProfile, type PatternLineInput, type PatternPiece,
 } from "@/lib/pattern-sheet";
-import { bomCsv, bomRows, checkDxf, cutListCsv } from "@/lib/pattern-export";
+import { bomCsv, bomRows, checkDxf, cutListCsv, type ExtraBom } from "@/lib/pattern-export";
 /** ขนาดกระดาษพิมพ์ขนาดจริง (รอบ H): A4 · A3 · กำหนดเอง — ขอบกระดาษ 10 มม. ทุกด้าน */
 type Paper = { key: "a4" | "a3" | "custom"; w: number; h: number };   // มม. แนวตั้ง
 const PAPERS: Record<"a4" | "a3", { w: number; h: number; th: string }> = { a4: { w: 210, h: 297, th: "A4" }, a3: { w: 297, h: 420, th: "A3" } };
@@ -55,7 +55,9 @@ function DraftMark() {
   );
 }
 
-export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า", draft = false, stamp, rev = null }: {
+export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, emptyText, controls, afterTable, beforeTable, overviewLabel = "ภาพรวม + วางบนผ้า", draft = false, stamp, rev = null, extraBom = [] }: {
+  /** วัสดุเสริมต่อใบที่ไม่ได้คิดเป็นพื้นที่ (ไส้เชือก ห่วง กระดุม · รอบ J2) — ต่อท้ายตารางสรุปวัสดุ + CSV */
+  extraBom?: ExtraBom[];
   /** บรรทัดใต้ป้ายชิ้นทุกชิ้น + ไฟล์ DXF เช่น "rev 7 · 13/11/2026" (รอบ H) */
   stamp?: string;
   /** รุ่นของแพทเทิร์น (ใส่ใน CSV) */
@@ -186,7 +188,7 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
             title="ไฟล์ภาพเวกเตอร์ขนาดจริง (เปิดใน Illustrator ได้)"
             className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">ดาวน์โหลด SVG</button>
           <button type="button" disabled={!pieces.length} data-csv-cut onClick={() => download(`${fileName}-รายการตัด.csv`, cutListCsv(pieces, { rev, code: footCode }), "text/csv;charset=utf-8")} title="ตารางรายการตัด (เปิดใน Excel)" className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">CSV รายการตัด</button>
-          <button type="button" disabled={!pieces.length} data-csv-bom onClick={() => download(`${fileName}-วัสดุ.csv`, bomCsv(pieces, { rev, code: footCode, qty: orderQty }), "text/csv;charset=utf-8")} title="สรุปวัสดุต่อใบ + ตามจำนวนผลิต (เปิดใน Excel)" className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">CSV วัสดุ (BOM)</button>
+          <button type="button" disabled={!pieces.length} data-csv-bom onClick={() => download(`${fileName}-วัสดุ.csv`, bomCsv(pieces, { rev, code: footCode, qty: orderQty, extra: extraBom }), "text/csv;charset=utf-8")} title="สรุปวัสดุต่อใบ + ตามจำนวนผลิต (เปิดใน Excel)" className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">CSV วัสดุ (BOM)</button>
         </div>
         {dxfMsg && <p className={`w-full text-right text-[11px] ${dxfMsg.ok ? "text-emerald-700" : "text-amber-700"}`} data-dxf-check>{dxfMsg.text} · ยังต้องลองกับโปรแกรม/เครื่องตัดปลายทางก่อนใช้จริง</p>}
       </div>
@@ -198,11 +200,11 @@ export function PatternPrintView({ lines, eyebrow, title, footCode, fileName, em
           {head}
           {beforeTable}
           {pieceTable}
-          {(() => { const b = bomRows(pieces); return b.length ? (   // รอบ H: สรุปวัสดุต่อใบ (พื้นที่ตัดรวม — ยังไม่รวมเผื่อเสียจากการวาง)
+          {(() => { const b = bomRows(pieces); return b.length || extraBom.length ? (   // รอบ H: สรุปวัสดุต่อใบ (พื้นที่ตัดรวม — ยังไม่รวมเผื่อเสียจากการวาง)
             <div className="break-inside-avoid" data-bom>
               <div className="mb-1 text-[11px] font-medium text-slate-600">สรุปวัสดุต่อใบ (พื้นที่ตัดรวม ยังไม่รวมเผื่อเสียจากการวาง — ดูการใช้ผ้าจริงที่ "วางบนผ้า")</div>
               <table className="w-full border-collapse text-[12px]"><thead><tr className="border-b border-slate-300 text-left text-[11px] text-slate-500"><th className="py-1 pr-2">วัสดุ</th><th className="py-1 pr-2 text-right">ชิ้นที่ตัด</th><th className="py-1 pr-2 text-right">ตร.ซม.</th><th className="py-1 text-right">ตร.ม.</th></tr></thead>
-                <tbody>{b.map((x) => <tr key={x.material} className="border-b border-slate-100"><td className="py-1 pr-2">{x.material}</td><td className="py-1 pr-2 text-right tabular-nums">{x.pieces}</td><td className="py-1 pr-2 text-right tabular-nums">{x.area}</td><td className="py-1 text-right tabular-nums">{(x.area / 10000).toFixed(3)}</td></tr>)}</tbody></table>
+                <tbody>{b.map((x) => <tr key={x.material} className="border-b border-slate-100"><td className="py-1 pr-2">{x.material}</td><td className="py-1 pr-2 text-right tabular-nums">{x.pieces}</td><td className="py-1 pr-2 text-right tabular-nums">{x.area}</td><td className="py-1 text-right tabular-nums">{(x.area / 10000).toFixed(3)}</td></tr>)}{extraBom.map((x) => <tr key={`x${x.material}`} className="border-b border-slate-100" data-bom-extra><td className="py-1 pr-2">{x.material}</td><td className="py-1 pr-2 text-right tabular-nums" colSpan={3}>{x.qty} {x.unit}</td></tr>)}</tbody></table>
             </div>) : null; })()}
           {afterTable}
           {skipped > 0 && <p className="text-[11px] text-slate-500">ไม่ได้วาด {skipped} บรรทัด (ไม่ได้คิดแบบกว้าง × ยาว เช่น อะไหล่ / สาย-เทปคิดตามยาว / ชิ้นสำเร็จ)</p>}
