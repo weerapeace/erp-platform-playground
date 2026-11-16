@@ -2,12 +2,14 @@
  * /api/ai/desc-highlights — ✨ ให้ AI ดูรูปสินค้าแล้วเสนอ "จุดเด่น" 7 ข้อ (ไทย + อังกฤษ) สำหรับ Description
  *   ใช้ที่ ป๊อปแทรก (components/detail-insert-ai) ขั้นจุดเด่น · เจ้าของสั่ง 2026-11-15
  *
- * GET  ?parent_id=  → { data: { model, est_thb, images, quota: { used, limit, on } } }   (ยังไม่เรียก AI — โชว์ราคา/โควตาก่อนกด)
+ * GET  ?check=1     → { data: { allowed } }   (ป๊อปแทรกใช้ซ่อนแท็บ AI ถ้าผู้ดูแลไม่ได้เปิดให้คนนี้ — "ใครใช้ได้" ในศูนย์ AI)
+ * GET  ?parent_id=  → { data: { allowed, can_see_cost, model?, est_thb?, images, quota: { used, limit, remaining, on } } }   (ยังไม่เรียก AI)
+ *   พนักงานเห็นแค่ "ใช้ได้อีก N ครั้ง" (เจ้าของสั่ง 2026-11-16) · รุ่น/ราคาต่อครั้ง ส่งให้เฉพาะคนที่มีสิทธิ์ admin.paid_services
  * POST { parent_id, keep?: [{th,en}], shown?: string[], chosen?: string[], extra?: string }
  *   keep   = ข้อที่ติ๊กไว้ (สุ่มใหม่ก็ไม่หาย · AI คิดเพิ่มให้ครบ 7)
  *   shown  = ข้อที่เคยเสนอไปแล้ว (สุ่มใหม่ = ขอไอเดียอื่น)
  *   chosen = บรรทัดที่เลือกในขั้นอื่นแล้ว (วัตถุดิบ/ช่อง/ขนาด) — ห้ามซ้ำเรื่องเดิม
- *   → { data: { items: [{ th, en, src: seen|data|library|check, photos, note_th, note_en, fav, keep }], mismatch: {th,en}|null, model, images, quota } }
+ *   → { data: { items: [{ th, en, src: seen|data|library|check, photos, note_th, note_en, fav, keep }], mismatch: {th,en}|null, images, quota } }  (403 access_denied = ผู้ดูแลไม่ได้เปิดให้)
  *   mismatch = Description เดิมพูดถึงสิ่งที่ขัดกับรูป/ข้อมูล (เช่น สินค้าเป็นกระเป๋าแต่เขียนว่าเสื้อ) — ตรวจในการเรียกครั้งเดียวกัน ไม่เสียเพิ่ม
  *
  * กันข้อมูลผิด: ห้ามตัวเลขขนาด/น้ำหนัก · ห้ามอ้างวัสดุ/คุณสมบัติที่ไม่มีในข้อมูล · ทุกข้อบอกที่มา (เห็นในรูปที่… / จากข้อมูล / จากคลัง / ต้องตรวจ)
@@ -22,7 +24,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { imageParts, imagesToDataUrls, openAiKey, productDetailModel } from "@/lib/ai-caption";
 import { AI_MODEL_CHOICES, isReasoningModel } from "@/lib/ai-caption-models";
-import { aiChat, countQuotaStatus, loadServiceSettings } from "@/lib/paid-services-server";
+import { aiChat, loadServiceSettings, serviceAccess, usageAllowance } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { parentImageKeys } from "@/lib/product-image-keys";
 import { cleanText, DESC_AI_MEMORY_KEY, hasMeasurement, isSimilar, memoryFor, normalizeMemory } from "@/lib/desc-ai-memory";
@@ -55,17 +57,25 @@ function estThb(model: string, images: number): number {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "ai.caption"))) return noAccess();
-  const parentId = (new URL(request.url).searchParams.get("parent_id") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  if (sp.get("check") === "1") return NextResponse.json({ data: { allowed: await serviceAccess(KEY, { request }) }, error: null });
+  const parentId = (sp.get("parent_id") ?? "").trim();
   if (!UUID_RE.test(parentId)) return NextResponse.json({ error: "ต้องระบุ parent_id" }, { status: 400 });
   const admin = supabaseAdmin();
   const { data: p } = await admin.from("parent_skus_v2").select("id, cover_image_r2_key").eq("id", parentId).maybeSingle();
   if (!p) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
-  const [model, keys, quota] = await Promise.all([
+  const [model, keys, allowed, canSeeCost] = await Promise.all([
     modelFor(),
     parentImageKeys(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG),
-    countQuotaStatus(KEY, { request }),
+    serviceAccess(KEY, { request }),
+    apiCan(request, "admin.paid_services"),
   ]);
-  return NextResponse.json({ data: { model, est_thb: estThb(model, Math.max(1, keys.length)), images: keys.length, quota, configured: !!openAiKey() }, error: null });
+  const perCall = estThb(model, Math.max(1, keys.length));
+  const quota = await usageAllowance(KEY, { request }, perCall);
+  return NextResponse.json({ data: {
+    allowed, can_see_cost: canSeeCost, images: keys.length, quota, configured: !!openAiKey(),
+    ...(canSeeCost ? { model, est_thb: perCall } : {}),
+  }, error: null });
 }
 
 type Body = { parent_id?: string; keep?: { th?: string; en?: string }[]; shown?: string[]; chosen?: string[]; extra?: string };
@@ -149,7 +159,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ";
     const code = (e as { code?: string } | null)?.code;
-    return NextResponse.json({ error: msg }, { status: code === "budget_exceeded" ? 429 : code === "service_off" ? 403 : 502 });
+    return NextResponse.json({ error: msg, code: code ?? null }, { status: code === "budget_exceeded" ? 429 : code === "service_off" || code === "access_denied" ? 403 : 502 });
   }
 
   // ── กรองหลัง AI ตอบ (กันข้อมูลผิด/ซ้ำ แม้ AI ไม่ทำตามคำสั่ง) ──
@@ -184,6 +194,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch { /* audit ล้มไม่ควรทำให้ผู้ใช้เสียงาน */ }
 
-  const quota = await countQuotaStatus(KEY, { request });
-  return NextResponse.json({ data: { items, mismatch, model, images: images.length, quota }, error: null });
+  const quota = await usageAllowance(KEY, { request }, estThb(model, Math.max(1, images.length)));
+  return NextResponse.json({ data: { items, mismatch, images: images.length, quota }, error: null });
 }

@@ -361,7 +361,16 @@ function DetailInsertModal({
   const has = (k: NumK) => numFields.some((f) => f.k === k);
   const canFit = writable.includes("fits");
   const canAiPerm = usePermission("ai.caption");
-  const canAi = !!aiParentId && canAiPerm;
+  // "ใครใช้ได้" ในศูนย์ AI — ผู้ดูแลไม่ได้เปิดให้คนนี้ = ซ่อนแท็บ AI (ถามครั้งเดียวต่อการเปิดป๊อป)
+  const wantAi = !!aiParentId && canAiPerm;
+  const [aiAllowed, setAiAllowed] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!wantAi) return;
+    let off = false;
+    apiFetch("/api/ai/desc-highlights?check=1").then((r) => r.json()).then((j) => { if (!off) setAiAllowed(j?.data?.allowed !== false); }).catch(() => { /* ถามไม่ได้ = ให้หลังบ้านตัดสินตอนกด */ });
+    return () => { off = true; };
+  }, [wantAi]);
+  const canAi = wantAi && aiAllowed !== false;
   const tabs = TABS.filter((t) => (t.key === "ai" ? canAi : (t.key === "size" ? numFields.length > 0 : t.key === "fit" ? canFit : true) && (!profile?.tabs || profile.tabs.includes(t.key))));
 
   const lines = useMemo(() => splitLines(thText), [thText]);

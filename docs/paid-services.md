@@ -53,14 +53,30 @@
 - **ใครใช้** — ส่ง `{ request }` (หรือ `{ userId }`) เป็นพารามิเตอร์สุดท้ายของ `aiChat` / `getAiFor` · ไม่มีคน = "ระบบ / อัตโนมัติ"
 - **กราฟย้อนหลัง** — `GET /api/admin/paid-services?view=history&mode=day|month&key=` · ของกลาง `components/bar-chart` (SimpleBarChart)
 
-## โควตาจำนวนครั้งต่อคนต่อเดือน (2026-11-15)
+## โควตาต่อคนต่อเดือน (2026-11-15 · หน่วยครั้ง/บาท 2026-11-16)
 
-- เก็บใน budget `count_quota` = { "<service key>": { per_user_default, per_user: { <user_id>: ครั้ง | null } } } (ui_config เดิม · ไม่มีตารางใหม่)
-- นับเฉพาะครั้งที่ AI ตอบสำเร็จ (มีค่าใช้จ่าย) ของคนที่กด เดือนนี้ (เวลาไทย) · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้น (BudgetExceededError) จนวันที่ 1 — ไม่ขึ้นกับ over_action
-- ตั้งได้ทุกฟีเจอร์ GPT ที่หน้า /admin/paid-services ส่วน "จำกัดจำนวนครั้งต่อคนต่อเดือน" (ค่าเริ่มของทุกคน + ตั้งเฉพาะคน · ไม่จำกัด / ใช้ค่าเริ่ม)
-- API: PATCH `{ count_quota: { key, limit } }` · `{ count_quota: { key, user_id, limit } }` (limit "default" = กลับไปใช้ค่าเริ่ม · null/"unlimited" = ไม่จำกัด) · GET คืน count_usage + count_users
-- หน้าจอโชว์ "ใช้ไป x/y": `countQuotaStatus(key, { request })` ใน lib/paid-services-server
+- เก็บใน budget `count_quota` = { "<service key>": { unit: "count"|"thb", per_user_default, per_user: { <user_id>: ค่า | null } } } (ui_config เดิม · ไม่มีตารางใหม่ · ไม่มี unit = ครั้ง)
+- นับเฉพาะครั้งที่ AI ตอบสำเร็จ (มีค่าใช้จ่าย) ของคนที่กด เดือนนี้ (เวลาไทย) · หน่วยบาท = รวมค่าใช้จ่ายของคนนั้นในฟีเจอร์นั้น · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้น (BudgetExceededError) จนวันที่ 1 — ไม่ขึ้นกับ over_action · ข้อความไม่บอกตัวเงิน
+- ตั้งได้ทุกฟีเจอร์ GPT ที่หน้า /admin/paid-services ส่วน "จำกัดการใช้ต่อคนต่อเดือน" (ค่าเริ่มของทุกคน + ตั้งเฉพาะคน · ไม่จำกัด / ใช้ค่าเริ่ม · สลับ "จำนวนครั้ง / บาท" — สลับแล้วระบบแปลงค่าเดิมตามราคาต่อครั้ง)
+- API: PATCH `{ count_quota: { key, limit } }` · `{ count_quota: { key, user_id, limit } }` (limit "default" = กลับไปใช้ค่าเริ่ม · null/"unlimited" = ไม่จำกัด) · `{ count_quota: { key, unit } }` เปลี่ยนหน่วย · GET คืน count_usage (ครั้ง) + count_usage_thb (บาท) + count_users
+- **พนักงานเห็นเป็น "ใช้ได้อีก N ครั้ง" เสมอ** (เจ้าของสั่ง 2026-11-16 "ไม่ต้องเห็นว่าใช้เท่าไหร่"): `usageAllowance(key, { request }, ราคาต่อครั้ง)` ใน lib/paid-services-server → { used, limit, remaining } เป็นครั้ง
+  รวมทุกขีดจำกัดแล้วเอาตัวที่น้อยสุด: โควตาฟีเจอร์ (ครั้ง หรือ บาท÷ราคาต่อครั้ง) · งบรายคน / รายฟีเจอร์ / รวม (เฉพาะแบบ "หยุด") — รุ่นและราคาต่อครั้งส่งให้หน้าจอเฉพาะคนที่มีสิทธิ์ admin.paid_services
 - ใช้ครั้งแรกกับ `ai.desc_highlights` (AI ดูรูปเสนอจุดเด่นสินค้า · ป๊อปแทรก Description)
+
+## ราคาต่อครั้งของแต่ละรุ่น (2026-11-16)
+
+- ตัวเลือกโมเดลในศูนย์ AI โชว์ "~฿x/ครั้ง" ทุกรุ่น + ใต้ช่อง "กดครั้งละ ~฿x (เฉลี่ยจากใช้จริง N ครั้ง / ประมาณการ)"
+- คิดจาก `callCostThb(model, จำนวนคำต่อครั้ง)` (lib/paid-services · รุ่นที่ต้องคิดนานบวกคำตอบ +600)
+- จำนวนคำต่อครั้ง = เฉลี่ยจาก paid_service_usage ที่สำเร็จ 90 วัน (`avgCallTokens` / `callTokensFor` แคช 10 นาที) → ยังไม่เคยใช้ = `costProfile` ในทะเบียน → ค่ากลาง `DEFAULT_CALL_TOKENS` (3,000 / 400)
+- ฟีเจอร์ใหม่ที่ใช้รูปเยอะ/ข้อความยาว ควรใส่ `costProfile` ในทะเบียนให้ราคาก่อนใช้จริงใกล้ความจริง
+
+## ใครใช้ได้ รายฟีเจอร์ (2026-11-16)
+
+- ui_config `paid_services_access` = { "<service key>": { mode: "custom", roles: [key ของ erp_roles], users: [user id] } } · ไม่มีรายการ = ทุกคนที่มีสิทธิ์ใช้ฟีเจอร์นั้นอยู่แล้ว (ค่าเริ่ม — ขึ้นเว็บแล้วไม่มีใครเสียสิทธิ์)
+- บังคับที่ด่านกลาง `guardedGpt` (aiChat / aiWebSearch) → `AccessDeniedError` · `aiAvailable` คืน false (ฟีเจอร์ที่มีทางฟรีจะใช้ทางฟรีแทน เช่น แปลภาษา) (code "access_denied" · API ควรตอบ 403) · ผู้ดูแลระบบ (บทบาท admin) ใช้ได้เสมอ · งานอัตโนมัติ (ไม่มีคนกด) ไม่ถูกกั้น
+- บทบาทของคน = user_profiles.role + user_roles (แคช 60 วิ) · ค่าตั้งแคช 30 วิ
+- หน้าจอซ่อนปุ่ม: `serviceAccess(key, { request })` — ตัวอย่าง /api/ai/desc-highlights?check=1 (ป๊อปแทรกซ่อนแท็บ AI)
+- ตั้งที่ /admin/paid-services ปุ่ม "ใครใช้ได้" ในแถวฟีเจอร์ GPT (ทุกคนที่มีสิทธิ์ / เฉพาะบทบาท + รายคน) · PATCH `{ access: { key, mode, roles, users } }` · audit entity paid_service_access
 
 ## ผู้ให้บริการที่เลือกได้ (2026-11-06)
 - ทะเบียน `providerChoices` (ตัวแรก = ค่าเริ่ม) · ค่าที่เลือก `paid_service_settings.provider`

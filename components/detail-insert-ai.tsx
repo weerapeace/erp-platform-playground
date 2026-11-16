@@ -24,7 +24,11 @@ export const aiPicked = (s: AiState) => s.items.filter((x) => x.on && x.th.trim(
 
 type MemEntry = { text: string; by?: string | null; by_name?: string | null; scope: string };
 type Mem = { liked: MemEntry[]; disliked: MemEntry[]; rules: MemEntry[] };
-type Status = { model: string; est_thb: number; images: number; quota: { used: number; limit: number | null; on: boolean }; configured: boolean };
+/** quota = นับเป็น "ครั้ง" เสมอ (ระบบแปลงงบบาทเป็นครั้งให้) · model/est_thb มาเฉพาะคนที่มีสิทธิ์ดูค่าใช้จ่าย (admin.paid_services) — พนักงานไม่เห็นเงิน (เจ้าของสั่ง 2026-11-16) */
+type Status = {
+  allowed?: boolean; can_see_cost?: boolean; model?: string; est_thb?: number; images: number; configured: boolean;
+  quota: { used: number; limit: number | null; remaining: number | null; on: boolean };
+};
 const RECOMMENDED = 4;
 let seq = 0;
 /** รหัสประจำแถว (กันช่องแก้ข้อความหลุดโฟกัสตอนพิมพ์ — key ต้องไม่เปลี่ยนตามข้อความ) */
@@ -75,7 +79,9 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
   }, [parentId, brandId]);
 
   const quota = status?.quota;
-  const full = !!quota && quota.limit !== null && quota.used >= quota.limit;
+  const full = !!quota && quota.remaining !== null && quota.remaining <= 0;
+  const denied = status?.allowed === false;
+  const costTag = status?.can_see_cost && typeof status.est_thb === "number" ? status.est_thb.toFixed(2) : null;
   const picked = state.items.filter((x) => x.on).length;
   const isLiked = (th: string) => mem.liked.some((m) => key(m.text) === key(th));
 
@@ -104,7 +110,7 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
           ran: true,
         };
       });
-      if (j.data?.quota) setStatus((s) => (s ? { ...s, quota: j.data.quota, model: j.data.model ?? s.model } : s));
+      if (j.data?.quota) setStatus((s) => (s ? { ...s, quota: j.data.quota } : s));
     } catch (e) {
       setErr(e instanceof Error ? e.message : t("AI ตอบกลับไม่สำเร็จ", "AI request failed"));
     } finally {
@@ -179,26 +185,37 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
     return <span className={`shrink-0 rounded-full px-1.5 py-px text-[10.5px] ${cls}`} title={isEn ? it.note_en || it.note_th : it.note_th}>{t(th, en)}</span>;
   };
 
-  const thisMonth = quota ? (quota.limit !== null ? t(`เดือนนี้ใช้ไป ${quota.used}/${quota.limit} ครั้ง`, `This month ${quota.used}/${quota.limit} uses`) : t(`เดือนนี้ใช้ไป ${quota.used} ครั้ง`, `Used ${quota.used} times this month`)) : "";
+  const thisMonth = quota
+    ? quota.remaining !== null && quota.limit !== null
+      ? t(`ใช้ได้อีก ${quota.remaining} ครั้ง (จาก ${quota.limit} ครั้งเดือนนี้)`, `${quota.remaining} uses left (of ${quota.limit} this month)`)
+      : t(`เดือนนี้ใช้ไป ${quota.used} ครั้ง`, `Used ${quota.used} times this month`)
+    : "";
+  const usedPct = quota && quota.limit ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : null;
   return (
     <div className="space-y-2" data-insert-ai>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-[11.5px] text-slate-600">
         <Icon name="ai" />
         <span>{t(`AI ดูรูป ${status?.images ?? "…"} รูป + ข้อมูลสินค้า แล้วเสนอ 7 ข้อ (ไทย + อังกฤษ)`, `AI reads ${status?.images ?? "…"} photos + product data and suggests 7 points (Thai + English)`)}</span>
-        {status && <span className="text-slate-400">· {status.model} · ~{status.est_thb.toFixed(2)} {t("บาท/ครั้ง", "THB per run")}</span>}
-        {thisMonth && <span className={`ml-auto ${full ? "font-medium text-rose-600" : "text-slate-500"}`} data-ai-quota>{thisMonth}</span>}
+        {costTag && <span className="text-slate-400" data-ai-cost>· {status?.model} · ~{costTag} {t("บาท/ครั้ง", "THB per run")}</span>}
+        {thisMonth && (
+          <span className={`ml-auto inline-flex items-center gap-1.5 ${full ? "font-medium text-rose-600" : "text-slate-500"}`} data-ai-quota>
+            {usedPct !== null && <span className="h-1.5 w-14 overflow-hidden rounded-full bg-slate-200" aria-hidden><span className={`block h-full rounded-full ${full ? "bg-rose-500" : usedPct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${usedPct}%` }} /></span>}
+            {thisMonth}
+          </span>
+        )}
       </div>
 
       {!state.ran ? (
         <div className="space-y-2">
           <input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder={t("คำสั่งเพิ่มครั้งนี้ (ไม่ใส่ก็ได้) เช่น เน้นความน่ารัก", "Extra instruction (optional), e.g. focus on cuteness")} aria-label={t("คำสั่งเพิ่มให้ AI", "Extra instruction for AI")}
             className="h-8 w-full rounded-md border border-slate-200 px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
-          <button type="button" onClick={() => void run(false)} disabled={busy || full || status?.quota.on === false} data-ai-run
+          <button type="button" onClick={() => void run(false)} disabled={busy || full || denied || status?.quota.on === false} data-ai-run
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-orange-500 px-4 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
             <Icon name="ai" /> {busy ? t("AI กำลังดูรูป…", "AI is reading the photos…") : t("ให้ AI เสนอ 7 ข้อ", "Ask AI for 7 points")}
           </button>
           {full && <p className="text-[11.5px] text-rose-600">{t("ครบโควตาเดือนนี้แล้ว — ขอผู้ดูแลเพิ่มได้ที่ศูนย์ AI · ติ๊กข้อความสำเร็จรูป/พิมพ์เองได้ตามปกติ", "Monthly limit reached — ask an admin · phrases and typing still work")}</p>}
           {status?.quota.on === false && <p className="text-[11.5px] text-rose-600">{t("ผู้ดูแลปิดฟีเจอร์นี้ไว้ (ศูนย์ AI ที่เสียเงิน)", "An admin turned this feature off")}</p>}
+          {denied && <p className="text-[11.5px] text-rose-600">{t("ผู้ดูแลยังไม่ได้เปิดให้คุณใช้ AI ตัวนี้ — ขอได้ที่ผู้ดูแลระบบ · ติ๊กข้อความสำเร็จรูป/พิมพ์เองได้ตามปกติ", "You don't have access to this AI yet — ask an admin · phrases and typing still work")}</p>}
           <p className="text-[11px] text-slate-400">{t("AI ไม่เขียนตัวเลขขนาด/น้ำหนัก · ไม่อ้างวัสดุหรือคุณสมบัติที่ไม่มีข้อมูล · ทุกข้อบอกที่มา", "AI won't write sizes/weights or unproven claims · every point shows where it came from")}</p>
         </div>
       ) : (
@@ -237,9 +254,9 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
           )}
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <span className={`text-[11.5px] ${picked > RECOMMENDED ? "text-amber-700" : "text-slate-500"}`}>{t(`เลือก ${picked} ข้อ (แนะนำ ${RECOMMENDED})`, `${picked} picked (suggested ${RECOMMENDED})`)}</span>
-            <button type="button" onClick={() => void run(true)} disabled={busy || full} data-ai-reroll
+            <button type="button" onClick={() => void run(true)} disabled={busy || full || denied} data-ai-reroll
               className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <Icon name="refresh" /> {busy ? t("กำลังคิด…", "Thinking…") : t(`สุ่มใหม่ เฉพาะข้อที่ไม่ได้ติ๊ก${status ? ` (~${status.est_thb.toFixed(2)} บาท)` : ""}`, `Reroll unticked${status ? ` (~${status.est_thb.toFixed(2)} THB)` : ""}`)}
+              <Icon name="refresh" /> {busy ? t("กำลังคิด…", "Thinking…") : t(`สุ่มใหม่ เฉพาะข้อที่ไม่ได้ติ๊ก${costTag ? ` (~${costTag} บาท)` : ""}`, `Reroll unticked${costTag ? ` (~${costTag} THB)` : ""}`)}
             </button>
           </div>
           <div className="flex items-center gap-1.5">

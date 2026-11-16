@@ -12,7 +12,9 @@
  *
  * ctx = { request?, userId?, place? } — request = หาคนที่กด (บันทึกยอดรายคน) · place = "ที่" ในทะเบียน (เปิด-ปิดรายที่)
  * งบต่อเดือน = ui_config PAID_BUDGET_KEY (นับเฉพาะ GPT · รวม + รายฟีเจอร์ per_service + รายคน per_user / per_user_default) · ใกล้เต็ม/เกิน = แจ้งเตือนผู้ดูแลครั้งเดียวต่อเดือนต่อระดับ (erp_notify)
- * โควตาจำนวนครั้งต่อคน (count_quota รายฟีเจอร์) = นับครั้งที่สำเร็จเดือนนี้ของคนที่กด · ครบ = หยุดฟีเจอร์นั้นสำหรับคนนั้น (BudgetExceededError) · countQuotaStatus(key, ctx) ใช้โชว์ "ใช้ไป x/y"
+ * โควตาต่อคน (count_quota รายฟีเจอร์ · หน่วยครั้ง/บาท) = นับครั้ง/บาทที่สำเร็จเดือนนี้ของคนที่กด · ครบ = หยุดฟีเจอร์นั้นสำหรับคนนั้น (BudgetExceededError)
+ *   usageAllowance(key, ctx) = "ใช้ได้อีก N ครั้ง" (รวมทุกขีดจำกัด แปลงบาทเป็นครั้งจากราคาต่อครั้ง) — พนักงานเห็นแค่จำนวนครั้ง
+ * ใครใช้ได้ (ui_config PAID_ACCESS_KEY รายฟีเจอร์) = บังคับใน guardedGpt (AccessDeniedError) · serviceAccess(key, ctx) ใช้ซ่อนปุ่มในหน้าจอ
  * ค่าตั้ง = paid_service_settings (แคช 30 วิ) · อ่านไม่ได้ = ถือว่าเปิด (ไม่ทำให้ระบบอื่นพังเพราะศูนย์นี้)
  * บันทึกการใช้ = paid_service_usage (key "<service>@<place>" เมื่อมีหลายที่ · บันทึกไม่ได้ = ข้าม ไม่ขวางงาน)
  */
@@ -21,7 +23,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { openAiChatRaw, openAiKey, openAiWebSearchRaw, type WebCitation } from "@/lib/ai-caption";
 import { getAi, type AiRunner } from "@/lib/ai";
 import {
-  budgetOverMessage, budgetState, cleanBudget, countCap, countQuotaOverMessage, effectiveChoice, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
+  accessAllowed, accessDeniedMessage, budgetOverMessage, budgetState, callCostThb, callsFromThb, cleanAccess, cleanBudget, countCap, countQuotaOverMessage, DEFAULT_CALL_TOKENS, effectiveChoice, PAID_ACCESS_KEY, quotaUnit, type CallTokens, type ServiceAccess, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
   placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, userBudgetOverMessage, userBudgetState, userCap, type PaidBudget,
 } from "@/lib/paid-services";
 
@@ -44,7 +46,7 @@ export async function loadServiceSettings(force = false): Promise<Map<string, Se
 }
 
 /** ล้างแคชหลังแอดมินเปลี่ยนค่า (เครื่องเดียวกันเห็นทันที · เครื่องอื่นไม่เกิน 30 วิ) */
-export const invalidateServiceSettings = () => { cache = null; budgetCache = null; };
+export const invalidateServiceSettings = () => { cache = null; budgetCache = null; accessCache = null; };
 
 /** เปิดอยู่ไหม — บริการ + "ที่" (ถ้ามี) ต้องไม่ถูกปิด · ปิดไม่ได้ (locked) = เปิดเสมอ */
 export async function serviceOn(key: string, place?: string | null): Promise<boolean> {
@@ -59,6 +61,10 @@ export async function serviceOn(key: string, place?: string | null): Promise<boo
 export class ServiceOffError extends Error {
   readonly code = "service_off";
   constructor(public readonly key: string) { super(serviceOffMessage(key)); }
+}
+export class AccessDeniedError extends Error {
+  readonly code = "access_denied";
+  constructor(public readonly key: string) { super(accessDeniedMessage(key)); }
 }
 export class BudgetExceededError extends Error {
   readonly code = "budget_exceeded";
@@ -103,15 +109,15 @@ export async function loadBudget(force = false): Promise<PaidBudget> {
 }
 
 const SPEND_TTL_MS = 60_000;
-/** countByKeyUser = จำนวนครั้งที่สำเร็จ (มีค่าใช้จ่าย) ต่อ "<service key>|<user id>" — ใช้กับโควตาจำนวนครั้ง */
-type Spend = { total: number; byKey: Map<string, number>; byUser: Map<string, number>; countByKeyUser: Map<string, number> };
+/** countByKeyUser / thbByKeyUser = จำนวนครั้ง / บาท ที่สำเร็จ ต่อ "<service key>|<user id>" — ใช้กับโควตาต่อคนรายฟีเจอร์ */
+type Spend = { total: number; byKey: Map<string, number>; byUser: Map<string, number>; countByKeyUser: Map<string, number>; thbByKeyUser: Map<string, number> };
 const keyUser = (key: string, userId: string) => `${splitPlaceKey(key).key}|${userId.toLowerCase()}`;
 let spendCache: { at: number; month: string; spend: Spend } | null = null;
 /** ยอดใช้ GPT เดือนนี้ (บาท ประมาณ) — รวม + แยกรายบริการ (รวมทุกที่ของบริการนั้น) */
 export async function monthSpend(force = false): Promise<Spend> {
   const month = monthKeyBangkok();
   if (!force && spendCache && spendCache.month === month && Date.now() - spendCache.at < SPEND_TTL_MS) return spendCache.spend;
-  const spend: Spend = { total: 0, byKey: new Map(), byUser: new Map(), countByKeyUser: new Map() };
+  const spend: Spend = { total: 0, byKey: new Map(), byUser: new Map(), countByKeyUser: new Map(), thbByKeyUser: new Map() };
   try {
     const start = monthStartBangkokIso();
     for (let from = 0; from < 500_000; from += 10_000) {
@@ -122,7 +128,7 @@ export async function monthSpend(force = false): Promise<Spend> {
         spend.total += v; spend.byKey.set(k, (spend.byKey.get(k) ?? 0) + v);
         if (r.user_id) {
           spend.byUser.set(r.user_id, (spend.byUser.get(r.user_id) ?? 0) + v);
-          const ku = keyUser(k, r.user_id); spend.countByKeyUser.set(ku, (spend.countByKeyUser.get(ku) ?? 0) + 1);
+          const ku = keyUser(k, r.user_id); spend.countByKeyUser.set(ku, (spend.countByKeyUser.get(ku) ?? 0) + 1); spend.thbByKeyUser.set(ku, (spend.thbByKeyUser.get(ku) ?? 0) + v);
         }
       }
       if ((data ?? []).length < 10_000) break;
@@ -135,11 +141,13 @@ export const monthSpendThb = async (force = false) => (await monthSpend(force)).
 
 /** เกินงบแบบ "หยุด" ไหม (งบรวม · งบของฟีเจอร์นี้ · งบของคนนี้) — คืนข้อความที่จะบอกผู้ใช้ · null = ใช้ได้ */
 async function overBudgetMessage(key: string, b: PaidBudget, userId: string | null): Promise<string | null> {
-  // โควตาจำนวนครั้งต่อคน (รายฟีเจอร์) — หยุดเสมอเมื่อครบ (ไม่ขึ้นกับ over_action)
+  // โควตาต่อคน (รายฟีเจอร์ · ครั้ง/บาท) — หยุดเสมอเมื่อครบ (ไม่ขึ้นกับ over_action) · ข้อความไม่บอกตัวเงิน
   const cc = countCap(b, key, userId);
   if (cc !== null && userId) {
-    const used = (await monthSpend()).countByKeyUser.get(keyUser(key, userId)) ?? 0;
-    if (used >= cc) return countQuotaOverMessage(key, cc);
+    const sp0 = await monthSpend();
+    const unit = quotaUnit(b, key);
+    const used = unit === "thb" ? sp0.thbByKeyUser.get(keyUser(key, userId)) ?? 0 : sp0.countByKeyUser.get(keyUser(key, userId)) ?? 0;
+    if (used >= cc) return countQuotaOverMessage(key, unit === "count" ? cc : null);
   }
   const cap = userCap(b, userId);
   if (b.over_action !== "stop" || (!b.monthly_thb && !b.per_service[key] && !cap)) return null;
@@ -150,18 +158,113 @@ async function overBudgetMessage(key: string, b: PaidBudget, userId: string | nu
   return null;
 }
 
-/** โควตาจำนวนครั้งเดือนนี้ของคนที่กด (โชว์ในหน้าจอ "ใช้ไป x/y") — limit null = ไม่จำกัด · ไม่รู้ว่าใครกด = used 0 */
-export async function countQuotaStatus(key: string, ctx?: UseCtx): Promise<{ used: number; limit: number | null; on: boolean }> {
-  const userId = await resolveUser(ctx);
-  const on = await serviceOn(key, ctx?.place);
-  const limit = countCap(await loadBudget(), key, userId);
-  const used = userId ? (await monthSpend()).countByKeyUser.get(keyUser(key, userId)) ?? 0 : 0;
-  return { used, limit, on };
+// ── จำนวนคำเฉลี่ยต่อครั้งของแต่ละฟีเจอร์ (ใช้จริง 90 วันย้อนหลัง) — คิด "ราคาต่อครั้ง" ของแต่ละรุ่น · แคช 10 นาที
+let tokCache: { at: number; map: Map<string, CallTokens & { calls: number }> } | null = null;
+export async function avgCallTokens(force = false): Promise<Map<string, CallTokens & { calls: number }>> {
+  if (!force && tokCache && Date.now() - tokCache.at < 600_000) return tokCache.map;
+  const sum = new Map<string, { i: number; o: number; n: number }>();
+  try {
+    const since = new Date(Date.now() - 90 * 86400_000).toISOString();
+    for (let from = 0; from < 200_000; from += 10_000) {
+      const { data, error } = await supabaseAdmin().from("paid_service_usage").select("key, tokens_in, tokens_out").gte("at", since).eq("ok", true).not("tokens_in", "is", null).range(from, from + 9_999);
+      if (error) throw error;
+      for (const r of (data ?? []) as { key: string; tokens_in: number | null; tokens_out: number | null }[]) {
+        const k = splitPlaceKey(r.key).key; const x = sum.get(k) ?? { i: 0, o: 0, n: 0 };
+        x.i += Number(r.tokens_in ?? 0); x.o += Number(r.tokens_out ?? 0); x.n += 1; sum.set(k, x);
+      }
+      if ((data ?? []).length < 10_000) break;
+    }
+  } catch { return tokCache?.map ?? new Map(); }
+  const map = new Map([...sum.entries()].map(([k, x]) => [k, { in: Math.round(x.i / x.n), out: Math.round(x.o / x.n), calls: x.n }]));
+  tokCache = { at: Date.now(), map };
+  return map;
+}
+/** จำนวนคำต่อครั้งของฟีเจอร์ (ประวัติจริง → costProfile ในทะเบียน → ค่ากลาง) */
+export async function callTokensFor(key: string): Promise<CallTokens & { source: "history" | "estimate"; calls: number }> {
+  const h = (await avgCallTokens()).get(splitPlaceKey(key).key);
+  if (h && h.calls > 0) return { in: h.in, out: h.out, calls: h.calls, source: "history" };
+  const p = paidService(key)?.costProfile ?? DEFAULT_CALL_TOKENS;
+  return { in: p.in, out: p.out, calls: 0, source: "estimate" };
+}
+/** รุ่นที่ใช้จริงของฟีเจอร์ (ที่ผู้ดูแลเลือก → ที่ฟีเจอร์ส่งมา) */
+export async function effectiveModel(key: string, fallback?: string | null, place?: string | null): Promise<string | null> {
+  const settings = await loadServiceSettings();
+  const p = resolvePlace(key, place);
+  return (p ? settings.get(placeKey(key, p))?.model : null) || settings.get(key)?.model || fallback || null;
 }
 
-/** GPT ใช้ได้ไหม (เปิด + ไม่เกินงบแบบหยุด) — ใช้ตอนมีทางสำรองฟรี */
+/**
+ * "ใช้ได้อีก N ครั้ง" ของคนที่กด (เจ้าของสั่ง 2026-11-16: พนักงานเห็นเป็นจำนวนครั้ง ไม่เห็นเงิน)
+ *   รวมทุกขีดจำกัด → เอาตัวที่น้อยสุด: โควตาฟีเจอร์ (ครั้ง หรือ บาท÷ราคาต่อครั้ง) · งบรายคน/รายฟีเจอร์/รวม (เฉพาะแบบ "หยุด")
+ *   limit = used + remaining (ประมาณ) · ไม่มีขีดจำกัด = limit/remaining null
+ */
+export async function usageAllowance(key: string, ctx: UseCtx | undefined, perCallThb: number): Promise<{ used: number; limit: number | null; remaining: number | null; on: boolean }> {
+  const userId = await resolveUser(ctx);
+  const on = await serviceOn(key, ctx?.place);
+  const b = await loadBudget();
+  const sp = await monthSpend();
+  const used = userId ? sp.countByKeyUser.get(keyUser(key, userId)) ?? 0 : 0;
+  const rem: number[] = [];
+  const cc = countCap(b, key, userId);
+  if (cc !== null && userId) {
+    if (quotaUnit(b, key) === "count") rem.push(Math.max(0, cc - used));
+    else { const c = callsFromThb(cc - (sp.thbByKeyUser.get(keyUser(key, userId)) ?? 0), perCallThb); if (c !== null) rem.push(c); }
+  }
+  if (b.over_action === "stop") {
+    const pushThb = (left: number) => { const c = callsFromThb(left, perCallThb); if (c !== null) rem.push(c); };
+    const uc = userCap(b, userId);
+    if (uc && userId) pushThb(uc - (sp.byUser.get(userId) ?? 0));
+    if (b.per_service[key]) pushThb(b.per_service[key] - (sp.byKey.get(splitPlaceKey(key).key) ?? 0));
+    if (b.monthly_thb) pushThb(b.monthly_thb - sp.total);
+  }
+  const remaining = rem.length ? Math.min(...rem) : null;
+  return { used, limit: remaining === null ? null : used + remaining, remaining, on };
+}
+
+// ── ใครใช้ได้ (รายฟีเจอร์) — ui_config PAID_ACCESS_KEY · แคช 30 วิ
+let accessCache: { at: number; map: Record<string, ServiceAccess> } | null = null;
+export async function loadAccess(force = false): Promise<Record<string, ServiceAccess>> {
+  if (!force && accessCache && Date.now() - accessCache.at < TTL_MS) return accessCache.map;
+  let map: Record<string, ServiceAccess> = {};
+  try {
+    const { data } = await supabaseAdmin().from("ui_config").select("value").eq("key", PAID_ACCESS_KEY).maybeSingle();
+    map = cleanAccess((data as { value?: unknown } | null)?.value ?? null);
+    accessCache = { at: Date.now(), map };
+  } catch { /* อ่านไม่ได้ = ไม่กั้นใคร */ }
+  return map;
+}
+export const invalidateAccess = () => { accessCache = null; };
+/** บทบาทของคน (user_profiles.role + user_roles) — แคช 60 วิ */
+const roleCache = new Map<string, { at: number; roles: string[] }>();
+async function userRoles(userId: string): Promise<string[]> {
+  const hit = roleCache.get(userId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.roles;
+  const roles = new Set<string>();
+  try {
+    const [{ data: p }, { data: ur }] = await Promise.all([
+      supabaseAdmin().from("user_profiles").select("role").eq("id", userId).maybeSingle(),
+      supabaseAdmin().from("user_roles").select("role").eq("user_id", userId),
+    ]);
+    if ((p as { role?: string } | null)?.role) roles.add(String((p as { role: string }).role));
+    for (const r of (ur ?? []) as { role: string | null }[]) if (r.role) roles.add(r.role);
+  } catch { /* อ่านไม่ได้ = ไม่มีบทบาท */ }
+  const out = [...roles];
+  roleCache.set(userId, { at: Date.now(), roles: out });
+  return out;
+}
+/** คนที่กดใช้ฟีเจอร์นี้ได้ไหม (ตั้ง "ใครใช้ได้" ในศูนย์ AI) — ใช้ซ่อนปุ่ม · ไม่รู้ว่าใครกด = ได้ (งานอัตโนมัติ) */
+export async function serviceAccess(key: string, ctx?: UseCtx): Promise<boolean> {
+  const acc = (await loadAccess())[splitPlaceKey(key).key];
+  if (!acc || acc.mode !== "custom") return true;
+  const userId = await resolveUser(ctx);
+  if (!userId) return true;
+  return accessAllowed(acc, { id: userId, roles: await userRoles(userId) });
+}
+
+/** GPT ใช้ได้ไหม (เปิด + คนนี้ได้รับสิทธิ์ + ไม่เกินงบแบบหยุด) — ใช้ตอนมีทางสำรองฟรี (ไม่ได้รับสิทธิ์ = ไปทางฟรี) */
 export async function aiAvailable(key: string, ctx?: UseCtx): Promise<boolean> {
   if (!(await serviceOn(key, ctx?.place))) return false;
+  if (!(await serviceAccess(key, ctx))) return false;
   return (await overBudgetMessage(key, await loadBudget(), await resolveUser(ctx))) === null;
 }
 
@@ -189,6 +292,7 @@ async function guardedGpt<T>(
   if (!(await serviceOn(key, ctx?.place))) throw new ServiceOffError(key);
   const budget = await loadBudget();
   const userId = await resolveUser(ctx);
+  if (!(await serviceAccess(key, ctx))) throw new AccessDeniedError(key);
   const over = await overBudgetMessage(key, budget, userId);
   if (over) throw new BudgetExceededError(over);
   // โมเดล: ที่เลือกให้ "ที่" นี้ → ที่เลือกให้ทั้งบริการ → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
@@ -203,7 +307,7 @@ async function guardedGpt<T>(
       spendCache.spend.total += cost; spendCache.spend.byKey.set(key, (spendCache.spend.byKey.get(key) ?? 0) + cost);
       if (userId) {
         spendCache.spend.byUser.set(userId, (spendCache.spend.byUser.get(userId) ?? 0) + cost);
-        const ku = keyUser(key, userId); spendCache.spend.countByKeyUser.set(ku, (spendCache.spend.countByKeyUser.get(ku) ?? 0) + 1);
+        const ku = keyUser(key, userId); spendCache.spend.countByKeyUser.set(ku, (spendCache.spend.countByKeyUser.get(ku) ?? 0) + 1); spendCache.spend.thbByKeyUser.set(ku, (spendCache.spend.thbByKeyUser.get(ku) ?? 0) + cost);
       }
     }
     if (budget.monthly_thb || budget.per_service[key] || userCap(budget, userId)) await checkBudgetAlerts(budget, key, userId).catch(() => { /* แจ้งไม่ได้ ไม่ขวางงาน */ });

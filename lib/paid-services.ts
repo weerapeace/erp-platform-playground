@@ -10,7 +10,7 @@
  * เพิ่มจุดใหม่: (1) เพิ่มแถวใน PAID_SERVICES (key ไม่ซ้ำ · files = ไฟล์ที่เรียกจริง) (2) เรียกผ่านด่านกลางด้วย key นั้น
  * ค่าที่แอดมินเปลี่ยน (เปิด/ปิด · โมเดล) เก็บในตาราง paid_service_settings · ไม่มีแถว = ค่าเริ่มต้น (เปิด · โมเดลเดิมของระบบ)
  */
-import { AI_MODEL_CHOICES } from "@/lib/ai-caption-models";
+import { AI_MODEL_CHOICES, isReasoningModel } from "@/lib/ai-caption-models";
 
 export type PaidProvider = "openai" | "cloudflare" | "easyslip" | "line" | "email" | "shippop";
 /** ai_chat = เลือกโมเดลได้ + คิดเงินตามคำ · ai_ocr = AI ฟรีตามโควตา · per_call = คิดต่อครั้ง/ตามโควตา · locked = ปิดไม่ได้ (โชว์อย่างเดียว) */
@@ -31,6 +31,8 @@ export type PaidService = {
   costHint: string;
   /** ไฟล์ที่เรียกจริง — เทสต์ตรวจว่าไฟล์มีอยู่และอ้าง key นี้ */
   files: string[];
+  /** จำนวนคำต่อครั้งโดยประมาณ (ใช้คิด "ราคาต่อครั้ง" ตอนยังไม่มีประวัติการใช้) — ไม่ใส่ = ค่ากลาง DEFAULT_CALL_TOKENS */
+  costProfile?: CallTokens;
   /** ใช้หลายที่ → เปิด-ปิดรายที่ได้ (เจ้าของขอ 2026-11-06) · ไฟล์ของแต่ละที่ต้องส่ง place: "<key>" (เทสต์ตรวจ) */
   places?: PaidPlace[];
   /** เปลี่ยนผู้ให้บริการได้ (ตัวแรก = ค่าเริ่ม) · ค่าที่เลือกเก็บ paid_service_settings.provider */
@@ -97,7 +99,7 @@ export const PAID_SERVICES: PaidService[] = [
   { key: "ai.desc_highlights", th: "คิดจุดเด่นสินค้าจากรูป (7 ข้อ)", en: "Product highlights from photos", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้าสินค้า → ＋ แทรก (Description) → ขั้นจุดเด่น → ✨ AI ดูรูป · ตรวจ Description เดิมว่าตรงรูปไหม", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม ✨ AI ในขั้นจุดเด่นขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ติ๊กข้อความสำเร็จรูป / พิมพ์เองได้ตามปกติ",
-    costHint: "ประมาณ 0.1–0.4 บาท/ครั้ง (ดูรูปไม่เกิน 6 รูป · ขึ้นกับรุ่น) · จำกัดจำนวนครั้งต่อคนได้", files: ["app/api/ai/desc-highlights/route.ts"] },
+    costHint: "ประมาณ 0.1–0.4 บาท/ครั้ง (ดูรูปไม่เกิน 6 รูป · ขึ้นกับรุ่น) · จำกัดจำนวนครั้งต่อคนได้", files: ["app/api/ai/desc-highlights/route.ts"], costProfile: { in: 19300, out: 900 } },
   { key: "ai.swatch_read", th: "อ่านแผงผ้าจากรูป (หาชิ้นสี + ตั้งรหัส)", en: "Swatch board reader", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้า SKU → แท็บ Swatch (แผงผ้า) → ปุ่ม อ่านจากรูป (1 รูป = 1 ครั้ง)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม อ่านจากรูป ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ตีกรอบชิ้นเอง / แบ่งกรอบเท่า ๆ กัน ใช้ได้ตามปกติ",
@@ -225,12 +227,14 @@ export type BudgetOverAction = "stop" | "warn";
 export type PaidBudget = {
   monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction; per_service: Record<string, number>;
   per_user_default: number | null; per_user: Record<string, number | null>;
-  /** โควตา "จำนวนครั้งต่อคนต่อเดือน" รายฟีเจอร์ (เจ้าของขอ 2026-11-15) { "<service key>": { per_user_default, per_user } }
+  /** โควตาต่อคนต่อเดือน รายฟีเจอร์ (เจ้าของขอ 2026-11-15/16) { "<service key>": { unit, per_user_default, per_user } }
+   *  unit "count" = จำนวนครั้ง · "thb" = บาท (พนักงานเห็นเป็น "ใช้ได้อีก N ครั้ง" — แปลงจากราคาต่อครั้ง)
    *  นับเฉพาะครั้งที่สำเร็จ (มีค่าใช้จ่าย) ของคนที่กด · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้นจนวันที่ 1 (ไม่ขึ้นกับ over_action) · ไม่มี = ไม่จำกัด */
   count_quota: Record<string, CountQuota>;
 };
-/** per_user_default = ครั้ง/คน/เดือน (null = ไม่จำกัด) · per_user = ตั้งรายคน { <user_id>: ครั้ง | null (ไม่จำกัด) } */
-export type CountQuota = { per_user_default: number | null; per_user: Record<string, number | null> };
+/** unit = หน่วยของค่า (ครั้ง / บาท) · per_user_default = ต่อคนต่อเดือน (null = ไม่จำกัด) · per_user = ตั้งรายคน { <user_id>: ค่า | null (ไม่จำกัด) } */
+export type QuotaUnit = "count" | "thb";
+export type CountQuota = { unit: QuotaUnit; per_user_default: number | null; per_user: Record<string, number | null> };
 export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} };
 
 export function cleanBudget(v: unknown): PaidBudget {
@@ -248,37 +252,88 @@ export function cleanBudget(v: unknown): PaidBudget {
   };
 }
 
-const countOrNull = (v: unknown): number | null => { const n = Math.floor(Number(v)); return v === null || v === "" || v === undefined || !Number.isFinite(n) || n <= 0 ? null : Math.min(n, 100_000); };
-/** โควตาจำนวนครั้ง — รับเฉพาะ key GPT ในทะเบียน · ค่า = จำนวนเต็ม > 0 · รายคน null = ไม่จำกัด · ไม่มีค่าเลย = ตัดทิ้ง */
+/** ค่าโควตา: ครั้ง = จำนวนเต็ม > 0 · บาท = > 0 ปัด 2 ตำแหน่ง */
+const quotaOrNull = (v: unknown, unit: QuotaUnit): number | null => {
+  const x = Number(v);
+  if (v === null || v === "" || v === undefined || !Number.isFinite(x) || x <= 0) return null;
+  return unit === "count" ? Math.min(Math.floor(x), 100_000) || null : Math.min(Math.round(x * 100) / 100, 1_000_000);
+};
+/** โควตาต่อคน — รับเฉพาะ key GPT ในทะเบียน · รายคน null = ไม่จำกัด · ไม่มีค่าเลย = ตัดทิ้ง · ไม่ระบุหน่วย = ครั้ง (ค่าเดิมก่อนมีหน่วย) */
 function cleanCountQuota(v: unknown): Record<string, CountQuota> {
   const out: Record<string, CountQuota> = {};
   if (!v || typeof v !== "object") return out;
   for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
     if (paidService(k)?.kind !== "ai_chat" || !raw || typeof raw !== "object") continue;
     const r = raw as Record<string, unknown>;
+    const unit: QuotaUnit = r.unit === "thb" ? "thb" : "count";
     const per: Record<string, number | null> = {};
     if (r.per_user && typeof r.per_user === "object") {
       for (const [uid, n] of Object.entries(r.per_user as Record<string, unknown>)) {
         if (!UUID_RE.test(uid)) continue;
         if (n === null || n === "unlimited" || Number(n) === 0) { per[uid.toLowerCase()] = null; continue; }
-        const c = countOrNull(n);
+        const c = quotaOrNull(n, unit);
         if (c !== null) per[uid.toLowerCase()] = c;
       }
     }
-    const def = countOrNull(r.per_user_default);
-    if (def !== null || Object.keys(per).length) out[k] = { per_user_default: def, per_user: per };
+    const def = quotaOrNull(r.per_user_default, unit);
+    // หน่วยบาทเก็บไว้แม้ยังไม่ใส่ค่า (จำว่าผู้ดูแลเลือกหน่วยบาท)
+    if (def !== null || Object.keys(per).length || unit === "thb") out[k] = { unit, per_user_default: def, per_user: per };
   }
   return out;
 }
-/** โควตาจำนวนครั้งของคนนี้ในฟีเจอร์นี้ — null = ไม่จำกัด (ไม่มีคนกด / ไม่ได้ตั้ง / ตั้งไม่จำกัด) */
+/** โควตาของคนนี้ในฟีเจอร์นี้ (ค่าในหน่วยของโควตา) — null = ไม่จำกัด (ไม่มีคนกด / ไม่ได้ตั้ง / ตั้งไม่จำกัด) */
 export function countCap(b: PaidBudget, key: string, userId: string | null | undefined): number | null {
   const q = b.count_quota?.[splitPlaceKey(key).key];
   if (!q || !userId) return null;
   const k = userId.toLowerCase();
   return k in q.per_user ? q.per_user[k] : q.per_user_default;
 }
-export const countQuotaOverMessage = (key: string, cap: number) =>
-  `คุณใช้ "${paidService(key)?.th ?? key}" ครบ ${cap.toLocaleString("th-TH")} ครั้งของเดือนนี้แล้ว — ใช้ได้อีกครั้งวันที่ 1 หรือขอผู้ดูแลเพิ่มโควตา · Monthly limit reached (${cap} uses) — ask an admin for more`;
+/** หน่วยของโควตาฟีเจอร์นี้ (ไม่ได้ตั้ง = ครั้ง) */
+export const quotaUnit = (b: PaidBudget, key: string): QuotaUnit => b.count_quota?.[splitPlaceKey(key).key]?.unit ?? "count";
+/** ข้อความเมื่อครบโควตา — ไม่บอกตัวเงิน (พนักงานเห็นแค่ครั้ง · เจ้าของสั่ง 2026-11-16) */
+export const countQuotaOverMessage = (key: string, cap?: number | null) =>
+  `คุณใช้ "${paidService(key)?.th ?? key}" ครบโควตาของเดือนนี้แล้ว${cap ? ` (${cap.toLocaleString("th-TH")} ครั้ง)` : ""} — ใช้ได้อีกครั้งวันที่ 1 หรือขอผู้ดูแลเพิ่มโควตา · Monthly limit reached — ask an admin for more`;
+
+/* ── ราคาต่อครั้ง (เจ้าของขอ 2026-11-16 "อยากเห็นว่าแต่ละรุ่นกดครั้งละเท่าไหร่") ──
+ *   คิดจาก "จำนวนคำเฉลี่ยต่อครั้ง" ของฟีเจอร์นั้น (ใช้จริงย้อนหลัง) × ราคาของรุ่น · ยังไม่เคยใช้ = costProfile ในทะเบียน หรือค่ากลาง
+ *   รุ่น 5.x "คิดก่อนตอบ" = บวกคำตอบ ~600 คำ (ตั้งให้คิดน้อย) */
+export type CallTokens = { in: number; out: number };
+export const DEFAULT_CALL_TOKENS: CallTokens = { in: 3000, out: 400 };
+export function callCostThb(model: string | null | undefined, t: CallTokens): number {
+  const m = PAID_MODEL_CHOICES.find((x) => x.id === model) ?? PAID_MODEL_CHOICES[0];
+  const out = t.out + (isReasoningModel(m.id) ? 600 : 0);
+  return Math.round(((t.in * m.inPerM + out * m.outPerM) / 1e6) * 10000) / 10000;
+}
+/** ใช้ได้อีกกี่ครั้ง จากเงินที่เหลือ ÷ ราคาต่อครั้ง (ไม่รู้ราคา = null) */
+export const callsFromThb = (thb: number, perCall: number): number | null => (perCall > 0 ? Math.max(0, Math.floor((thb + 1e-9) / perCall)) : null);
+
+/* ── ใครเห็น / ใช้ได้ รายฟีเจอร์ (เจ้าของขอ 2026-11-16) ── ui_config PAID_ACCESS_KEY
+ *   ไม่มีรายการ / mode "all" = ทุกคนที่มีสิทธิ์ใช้ฟีเจอร์นั้นอยู่แล้ว (ค่าเริ่ม — ขึ้นเว็บแล้วไม่มีใครเสียสิทธิ์)
+ *   mode "custom" = เฉพาะบทบาท (roles · key ของ erp_roles) หรือรายคน (users) ที่เลือก · ผู้ดูแลระบบ (admin) ใช้ได้เสมอ · งานอัตโนมัติ (ไม่มีคนกด) ไม่ถูกกั้น
+ *   บังคับที่ด่านกลาง (aiChat) + หน้าจอซ่อนปุ่มของคนที่ไม่ได้รับสิทธิ์ */
+export const PAID_ACCESS_KEY = "paid_services_access";
+export type ServiceAccess = { mode: "all" | "custom"; roles: string[]; users: string[] };
+const ROLE_RE = /^[A-Za-z0-9_-]{1,40}$/;
+export function cleanAccess(v: unknown): Record<string, ServiceAccess> {
+  const out: Record<string, ServiceAccess> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!paidService(k) || !raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    if (r.mode !== "custom") continue;
+    const roles = Array.isArray(r.roles) ? [...new Set(r.roles.filter((x): x is string => typeof x === "string" && ROLE_RE.test(x)))].slice(0, 30) : [];
+    const users = Array.isArray(r.users) ? [...new Set(r.users.filter((x): x is string => typeof x === "string" && UUID_RE.test(x)).map((x) => x.toLowerCase()))].slice(0, 300) : [];
+    out[k] = { mode: "custom", roles, users };
+  }
+  return out;
+}
+/** คนนี้ใช้ฟีเจอร์นี้ได้ไหม — user null = งานอัตโนมัติ (ไม่กั้น) · admin = ได้เสมอ */
+export function accessAllowed(acc: ServiceAccess | null | undefined, user: { id: string; roles: string[] } | null): boolean {
+  if (!acc || acc.mode !== "custom" || !user) return true;
+  if (user.roles.includes("admin")) return true;
+  return acc.users.includes(user.id.toLowerCase()) || user.roles.some((r) => acc.roles.includes(r));
+}
+export const accessDeniedMessage = (key: string) => `ผู้ดูแลยังไม่ได้เปิดให้คุณใช้ "${paidService(key)?.th ?? key}" — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ · You don't have access to this AI feature yet`;
 
 const positiveOrNull = (v: unknown): number | null => { const n = Number(v); return v === null || v === "" || v === undefined || !Number.isFinite(n) || n <= 0 ? null : Math.round(n * 100) / 100; };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -10,9 +10,13 @@
  * PATCH { budget_user_default: บาท | null }       งบต่อคน (ค่าเริ่มของทุกคน · null = ไม่จำกัด)
  * PATCH { budget_user: { user_id, monthly_thb } }  ตั้งรายคน — บาท · null = ไม่จำกัด · "default" = กลับไปใช้ค่าเริ่มต่อคน
  * PATCH { budget: { monthly_thb, warn_pct, over_action } }  ตั้งงบต่อเดือน (ui_config) · ทุกการเปลี่ยนเขียน audit_logs
- * PATCH { count_quota: { key, limit } }            โควตาจำนวนครั้งต่อคนต่อเดือน (ค่าเริ่มของทุกคน · null = ไม่จำกัด)
- * PATCH { count_quota: { key, user_id, limit } }   ตั้งรายคน — ครั้ง · null/"unlimited" = ไม่จำกัด · "default" = กลับไปใช้ค่าเริ่ม
- *   GET คืน count_usage { <key>: { <user_id>: ครั้ง } } (ครั้งที่สำเร็จเดือนนี้ · เฉพาะฟีเจอร์ GPT) + count_users [{ user_id, name }]
+ * PATCH { count_quota: { key, limit } }            โควตาต่อคนต่อเดือน (ค่าเริ่มของทุกคน · null = ไม่จำกัด) — หน่วยตามที่ตั้ง (ครั้ง / บาท)
+ * PATCH { count_quota: { key, user_id, limit } }   ตั้งรายคน · null/"unlimited" = ไม่จำกัด · "default" = กลับไปใช้ค่าเริ่ม
+ * PATCH { count_quota: { key, unit: "count"|"thb" } }  เปลี่ยนหน่วย — ค่าที่ตั้งไว้แปลงให้ตามราคาต่อครั้ง (ครั้ง × ราคา / บาท ÷ ราคา)
+ *   GET คืน count_usage { <key>: { <user_id>: ครั้ง } } + count_usage_thb (บาท) (สำเร็จเดือนนี้ · เฉพาะฟีเจอร์ GPT) + count_users [{ user_id, name }]
+ * PATCH { access: { key, mode: "all"|"custom", roles: [role key], users: [user id] } }  ใครใช้ได้ (เฉพาะฟีเจอร์ GPT · ผู้ดูแลใช้ได้เสมอ)
+ *   GET คืน access { <key>: { mode, roles, users } } + roles [{ key, label }] (erp_roles) + access_users [{ user_id, name }]
+ *   GET services[].call_tokens = { in, out, calls, source: history|estimate } — จำนวนคำเฉลี่ยต่อครั้ง (90 วัน) ใช้คิด "ราคาต่อครั้ง" ของแต่ละรุ่น
  * ทะเบียน = lib/paid-services · ด่านกลาง = lib/paid-services-server
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -24,10 +28,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { openAiKey } from "@/lib/ai-caption";
 import { emailProvider } from "@/lib/email";
 import {
-  AUTO_USER_LABEL, budgetState, effectiveChoice, type ProviderChoice, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES,
+  AUTO_USER_LABEL, budgetState, callCostThb, cleanAccess, DEFAULT_CALL_TOKENS, effectiveChoice, type ProviderChoice, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_ACCESS_KEY, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES, type QuotaUnit,
   paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, userBudgetState, userCap, type PaidBudget, type PaidProvider,
 } from "@/lib/paid-services";
-import { checkBudgetAlerts, invalidateServiceSettings, loadBudget } from "@/lib/paid-services-server";
+import { avgCallTokens, callTokensFor, checkBudgetAlerts, effectiveModel, invalidateServiceSettings, loadAccess, loadBudget } from "@/lib/paid-services-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -74,10 +78,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     monthRows.push(...((data ?? []) as typeof monthRows));
     if ((data ?? []).length < 10_000) break;
   }
-  const [settings, recent, budget] = await Promise.all([
+  const [settings, recent, budget, tokMap, access, rolesRes] = await Promise.all([
     admin.from(SETTINGS).select("*"),
     admin.from(USAGE).select("key, at").order("at", { ascending: false }).limit(5000),
     loadBudget(true),
+    avgCallTokens(true),
+    loadAccess(true),
+    admin.from("erp_roles").select("key, label, active, sort_order").order("sort_order", { ascending: true }),
   ]);
   if (settings.error) return NextResponse.json({ services: [], error: "โหลดค่าตั้งไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
 
@@ -86,6 +93,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const byKey = new Map<string, Stat>(), byPlace = new Map<string, Stat>();
   const byUser = new Map<string, Stat & { keys: Map<string, number> }>();
   const countUsage: Record<string, Record<string, number>> = {};
+  const countUsageThb: Record<string, Record<string, number>> = {};
   for (const r of monthRows) {
     const { key } = splitPlaceKey(r.key);
     const add = (m: Map<string, Stat>, k: string) => { const s = m.get(k) ?? emptyStat(); s.calls += 1; if (!r.ok) s.failed += 1; s.cost_thb += Number(r.est_cost_thb ?? 0); s.tokens += Number(r.tokens_in ?? 0) + Number(r.tokens_out ?? 0); m.set(k, s); };
@@ -98,6 +106,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (r.user_id && r.ok && r.est_cost_thb !== null && paidService(key)?.kind === "ai_chat") {
       const m = countUsage[key] ?? (countUsage[key] = {});
       m[r.user_id] = (m[r.user_id] ?? 0) + 1;
+      const mt = countUsageThb[key] ?? (countUsageThb[key] = {});
+      mt[r.user_id] = Math.round(((mt[r.user_id] ?? 0) + Number(r.est_cost_thb ?? 0)) * 10000) / 10000;
     }
   }
   const last = new Map<string, string>();
@@ -118,6 +128,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       enabled: s.kind === "locked" ? true : st?.enabled !== false,
       model: (st?.model as string | null) ?? null,
       configured: choice ? choiceConfigured(choice) : configured(s.provider),
+      call_tokens: s.kind === "ai_chat" ? (() => {
+        const h = tokMap.get(s.key);
+        if (h && h.calls > 0) return { in: h.in, out: h.out, calls: h.calls, source: "history" as const };
+        const p = s.costProfile ?? DEFAULT_CALL_TOKENS;
+        return { in: p.in, out: p.out, calls: 0, source: "estimate" as const };
+      })() : null,
       month: byKey.get(s.key) ?? emptyStat(),
       last_used_at: last.get(s.key) ?? null,
       updated_at: (st?.updated_at as string | null) ?? null,
@@ -133,7 +149,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ยอดรายคน — ชื่อจาก user_profiles · ไม่มีคนกด = ระบบ/อัตโนมัติ · คนที่ตั้งงบรายคนไว้แต่ยังไม่ได้ใช้ = แถวยอด 0
   for (const uid of Object.keys(budget.per_user)) if (!byUser.has(uid)) byUser.set(uid, { ...emptyStat(), keys: new Map<string, number>() });
   const quotaUids = Object.values(budget.count_quota ?? {}).flatMap((q) => Object.keys(q.per_user));
-  const uids = [...new Set([...byUser.keys(), ...quotaUids])].filter(Boolean);
+  const accessUids = Object.values(access).flatMap((a) => a.users);
+  const uids = [...new Set([...byUser.keys(), ...quotaUids, ...accessUids])].filter(Boolean);
   const names = new Map<string, string>();
   if (uids.length) {
     const { data: profs } = await admin.from("user_profiles").select("id, display_name, email").in("id", uids);
@@ -150,9 +167,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const countUids = [...new Set([...Object.values(countUsage).flatMap((m) => Object.keys(m)), ...quotaUids])];
   const count_users = countUids.map((id) => ({ user_id: id, name: names.get(id) ?? "ผู้ใช้" })).sort((a, b) => a.name.localeCompare(b.name, "th"));
+  const roles = ((rolesRes.data ?? []) as Array<{ key: string; label: string | null; active: boolean | null }>).filter((r) => r.active !== false).map((r) => ({ key: r.key, label: r.label || r.key }));
+  const access_users = [...new Set(accessUids)].map((id) => ({ user_id: id, name: names.get(id) ?? "ผู้ใช้ (ลบแล้ว)" }));
   return NextResponse.json({
-    services, totals, budget, budget_state: budgetState(totals.cost_thb, budget), by_user, count_usage: countUsage, count_users,
-    month_start: monthStart, model_choices: PAID_MODEL_CHOICES, error: null,
+    services, totals, budget, budget_state: budgetState(totals.cost_thb, budget), by_user, count_usage: countUsage, count_usage_thb: countUsageThb, count_users,
+    access, roles, access_users, month_start: monthStart, model_choices: PAID_MODEL_CHOICES, error: null,
   });
 }
 
@@ -207,32 +226,70 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ data: { budget: next }, error: null });
   }
 
-  // ── โควตาจำนวนครั้งต่อคนต่อเดือน (รายฟีเจอร์ · ค่าเริ่ม / รายคน)
+  // ── ใครใช้ได้ (รายฟีเจอร์ GPT) — ui_config PAID_ACCESS_KEY · บังคับที่ด่านกลาง aiChat
+  if (body.access && typeof body.access === "object") {
+    const a = body.access as { key?: unknown; mode?: unknown; roles?: unknown; users?: unknown };
+    const k = String(a.key ?? "");
+    if (paidService(k)?.kind !== "ai_chat") return NextResponse.json({ error: "ตั้ง \"ใครใช้ได้\" ได้เฉพาะฟีเจอร์ที่ใช้ GPT" }, { status: 400 });
+    const before = await loadAccess(true);
+    const next = cleanAccess({ ...before, [k]: { mode: a.mode === "custom" ? "custom" : "all", roles: a.roles, users: a.users } });
+    const { error } = await admin.from("ui_config").upsert({ key: PAID_ACCESS_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
+    invalidateServiceSettings();
+    const from = before[k] ?? { mode: "all" }, to = next[k] ?? { mode: "all" };
+    if (JSON.stringify(from) !== JSON.stringify(to)) {
+      await writeAudit(admin, { action: "update", entityType: "paid_service_access", entityId: null, actorId: actor.id, actorName: actor.name,
+        metadata: { key: k, label: paidService(k)?.th, changes: { access: { from, to } } } });
+    }
+    return NextResponse.json({ data: { access: next }, error: null });
+  }
+
+  // ── โควตาต่อคนต่อเดือน (รายฟีเจอร์ · ค่าเริ่ม / รายคน · หน่วยครั้ง/บาท)
   if (body.count_quota && typeof body.count_quota === "object") {
-    const cq = body.count_quota as { key?: unknown; user_id?: unknown; limit?: unknown };
+    const cq = body.count_quota as { key?: unknown; user_id?: unknown; limit?: unknown; unit?: unknown };
     const k = String(cq.key ?? "");
     if (paidService(k)?.kind !== "ai_chat") return NextResponse.json({ error: "ตั้งโควตาได้เฉพาะฟีเจอร์ที่ใช้ GPT" }, { status: 400 });
     const before = await loadBudget(true);
-    const cur = before.count_quota[k] ?? { per_user_default: null, per_user: {} };
-    const q = { per_user_default: cur.per_user_default, per_user: { ...cur.per_user } as Record<string, number | null> };
-    const lim = cq.limit;
-    const n = Math.floor(Number(lim));
+    const cur = before.count_quota[k] ?? { unit: "count" as QuotaUnit, per_user_default: null, per_user: {} };
+    const q = { unit: cur.unit, per_user_default: cur.per_user_default, per_user: { ...cur.per_user } as Record<string, number | null> };
     let meta: Record<string, unknown>;
+    if (cq.unit === "count" || cq.unit === "thb") {
+      // เปลี่ยนหน่วย — แปลงค่าที่ตั้งไว้ตามราคาต่อครั้งของรุ่นที่ใช้อยู่ (ไม่รู้ราคา = ล้างค่า)
+      const to: QuotaUnit = cq.unit;
+      if (to === q.unit) return NextResponse.json({ data: { budget: before }, error: null });
+      const perCall = callCostThb(await effectiveModel(k, null), await callTokensFor(k));
+      const conv = (v: number | null): number | null => {
+        if (v === null || !(perCall > 0)) return null;
+        return to === "thb" ? Math.max(0.01, Math.round(v * perCall * 100) / 100) : Math.max(1, Math.floor(v / perCall));
+      };
+      q.per_user_default = conv(q.per_user_default);
+      for (const [uid, v] of Object.entries(q.per_user)) q.per_user[uid] = v === null ? null : conv(v);
+      meta = { key: k, label: paidService(k)?.th, per_call_thb: perCall, changes: { count_quota_unit: { from: q.unit, to } } };
+      q.unit = to;
+      const next = cleanBudget({ ...before, count_quota: { ...before.count_quota, [k]: q } });
+      const { error } = await admin.from("ui_config").upsert({ key: PAID_BUDGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+      if (error) return NextResponse.json({ error: "บันทึกโควตาไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
+      invalidateServiceSettings();
+      await writeAudit(admin, { action: "update", entityType: "paid_service_budget", entityId: null, actorId: actor.id, actorName: actor.name, metadata: meta });
+      return NextResponse.json({ data: { budget: next }, error: null });
+    }
+    const lim = cq.limit;
+    const n = q.unit === "thb" ? Math.round(Number(lim) * 100) / 100 : Math.floor(Number(lim));
     if (cq.user_id !== undefined && cq.user_id !== null) {
       const uid = String(cq.user_id).toLowerCase();
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uid)) return NextResponse.json({ error: "ไม่ได้ระบุผู้ใช้" }, { status: 400 });
       const from = uid in q.per_user ? q.per_user[uid] : "default";
       if (lim === "default") delete q.per_user[uid];
       else if (lim === null || lim === "unlimited") q.per_user[uid] = null;
-      else if (!Number.isFinite(n) || n <= 0) return NextResponse.json({ error: "ใส่จำนวนครั้งมากกว่า 0" }, { status: 400 });
+      else if (!Number.isFinite(n) || n <= 0) return NextResponse.json({ error: q.unit === "thb" ? "ใส่จำนวนเงินมากกว่า 0" : "ใส่จำนวนครั้งมากกว่า 0" }, { status: 400 });
       else q.per_user[uid] = n;
       const { data: prof } = await admin.from("user_profiles").select("display_name").eq("id", uid).maybeSingle();
       meta = { key: k, label: paidService(k)?.th, user_id: uid, user_name: (prof as { display_name?: string } | null)?.display_name ?? null,
-        changes: { count_quota_user: { from, to: uid in q.per_user ? q.per_user[uid] : "default" } } };
+        unit: q.unit, changes: { count_quota_user: { from, to: uid in q.per_user ? q.per_user[uid] : "default" } } };
     } else {
       const from = q.per_user_default;
       q.per_user_default = lim === null || lim === "" || lim === "unlimited" || !Number.isFinite(n) || n <= 0 ? null : n;
-      meta = { key: k, label: paidService(k)?.th, changes: { count_quota_default: { from, to: q.per_user_default } } };
+      meta = { key: k, label: paidService(k)?.th, unit: q.unit, changes: { count_quota_default: { from, to: q.per_user_default } } };
     }
     const next = cleanBudget({ ...before, count_quota: { ...before.count_quota, [k]: q } });
     const { error } = await admin.from("ui_config").upsert({ key: PAID_BUDGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });

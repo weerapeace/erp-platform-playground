@@ -4,6 +4,7 @@
 // 🤖 ศูนย์ AI และ API ที่เสียเงิน — ดูว่าระบบใช้ AI / บริการเสียเงินตรงไหน · เปิด-ปิด (ทั้งบริการ / รายที่) · เปลี่ยนโมเดล
 //    งบต่อเดือน (ใกล้เต็มแจ้งเตือน · เกินงบหยุด/แจ้งเตือนอย่างเดียว) · ยอดใช้เดือนนี้ + รายคน
 //    โควตาจำนวนครั้งต่อคนต่อเดือน รายฟีเจอร์ (CountQuotaSection · เจ้าของขอ 2026-11-15 สำหรับปุ่ม AI จุดเด่นสินค้า — ใช้ได้ทุกฟีเจอร์ GPT)
+//    2026-11-16: ราคาต่อครั้งของแต่ละรุ่น (ในตัวเลือกโมเดล) · "ใครใช้ได้" รายฟีเจอร์ (AccessModal) · โควตาเลือกหน่วยครั้ง/บาท — พนักงานเห็นเป็น "ใช้ได้อีก N ครั้ง" เสมอ
 // ทะเบียนจุดที่ใช้ = lib/paid-services (ของกลาง · เพิ่มจุดใหม่ต้องลงทะเบียน — เทสต์ paid-services-guard บังคับ)
 // ด่านกลาง = lib/paid-services-server · ข้อมูลผ่าน /api/admin/paid-services (admin.paid_services)
 // ของกลาง: MiniTable (ค้นหา/เรียง/จัดกลุ่ม/กางแถว) · ConfirmDialog (ยืนยันก่อนปิด) · Toast
@@ -11,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
@@ -20,7 +21,7 @@ import { SimpleBarChart } from "@/components/bar-chart";
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { PROVIDER_LABEL, type BudgetState, type PaidBudget, type PaidProvider, type PaidService } from "@/lib/paid-services";
+import { callCostThb, callsFromThb, PROVIDER_LABEL, type BudgetState, type CallTokens, type PaidBudget, type PaidProvider, type PaidService, type QuotaUnit, type ServiceAccess } from "@/lib/paid-services";
 
 type Stat = { calls: number; failed: number; cost_thb: number; tokens: number };
 type PlaceRow = { key: string; th: string; enabled: boolean; model: string | null; month: Stat; last_used_at: string | null; updated_by_name: string | null };
@@ -29,7 +30,11 @@ type Row = Omit<PaidService, "places" | "providerChoices"> & {
   enabled: boolean; model: string | null; configured: boolean | null; month: Stat;
   provider_choice: string | null; provider_choices: ChoiceRow[];
   last_used_at: string | null; updated_at: string | null; updated_by_name: string | null; places: PlaceRow[];
+  /** จำนวนคำเฉลี่ยต่อครั้ง (ใช้จริง 90 วัน / ประมาณการ) — คิดราคาต่อครั้งของแต่ละรุ่น · เฉพาะ GPT */
+  call_tokens: (CallTokens & { calls: number; source: "history" | "estimate" }) | null;
 };
+type RoleOpt = { key: string; label: string };
+type NamedUser = { user_id: string; name: string };
 type UserRow = {
   user_id: string | null; name: string; calls: number; failed: number; cost_thb: number; top: { key: string; th: string; calls: number }[];
   cap: number | null; cap_source: "auto" | "unlimited" | "custom" | "default" | "none"; budget_state: BudgetState;
@@ -38,6 +43,9 @@ type ModelChoice = { id: string; label: string; note: string; inPerM: number; ou
 type OffTarget = { row: Row; place: PlaceRow | null };
 
 const baht = (n: number) => (n === 0 ? "฿0" : n < 1 ? `฿${n.toFixed(2)}` : `฿${n.toLocaleString("th-TH", { maximumFractionDigits: n < 100 ? 1 : 0 })}`);
+/** ราคาต่อครั้ง — เล็กมากโชว์ 3 ตำแหน่ง */
+const perCallText = (n: number) => (n < 0.001 ? "<฿0.001" : n < 0.1 ? `฿${n.toFixed(3)}` : `฿${n.toFixed(2)}`);
+const perCallOf = (r: { call_tokens: Row["call_tokens"] }, model: string | null | undefined) => (r.call_tokens ? callCostThb(model, r.call_tokens) : null);
 const fmtWhen = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" });
 
 export default function PaidServicesPage() {
@@ -51,6 +59,11 @@ function PaidServicesView() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [countUsage, setCountUsage] = useState<Record<string, Record<string, number>>>({});
   const [countUsers, setCountUsers] = useState<{ user_id: string; name: string }[]>([]);
+  const [countUsageThb, setCountUsageThb] = useState<Record<string, Record<string, number>>>({});
+  const [access, setAccess] = useState<Record<string, ServiceAccess>>({});
+  const [roles, setRoles] = useState<RoleOpt[]>([]);
+  const [accessUsers, setAccessUsers] = useState<NamedUser[]>([]);
+  const [accessFor, setAccessFor] = useState<Row | null>(null);
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [totals, setTotals] = useState({ calls: 0, failed: 0, cost_thb: 0 });
   const [budget, setBudget] = useState<PaidBudget>({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} });
@@ -70,7 +83,8 @@ function PaidServicesView() {
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
       setRows(j.services ?? []); setTotals(j.totals ?? { calls: 0, failed: 0, cost_thb: 0 }); setModels(j.model_choices ?? []);
       setBudget(j.budget); setBState(j.budget_state ?? "none"); setUsers(j.by_user ?? []);
-      setCountUsage(j.count_usage ?? {}); setCountUsers(j.count_users ?? []);
+      setCountUsage(j.count_usage ?? {}); setCountUsers(j.count_users ?? []); setCountUsageThb(j.count_usage_thb ?? {});
+      setAccess(j.access ?? {}); setRoles(j.roles ?? []); setAccessUsers(j.access_users ?? []);
     } catch (e) { setErr((e as Error).message); }
     finally { setLoading(false); }
   }, []);
@@ -154,6 +168,33 @@ function PaidServicesView() {
     finally { setBusy(null); }
   };
 
+  /** เปลี่ยนหน่วยโควตา (ครั้ง ↔ บาท) — ค่าที่ตั้งไว้ระบบแปลงให้ตามราคาต่อครั้ง */
+  const saveQuotaUnit = async (key: string, unit: QuotaUnit) => {
+    setBusy(`count:${key}:unit`);
+    try {
+      const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count_quota: { key, unit } }) });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      setBudget(j.data.budget);
+      toast.success(unit === "thb" ? "เปลี่ยนเป็นตั้งเป็นบาทแล้ว — พนักงานยังเห็นเป็นจำนวนครั้ง" : "เปลี่ยนเป็นตั้งเป็นจำนวนครั้งแล้ว");
+    } catch (e) { toast.error(`เปลี่ยนหน่วยไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  };
+  /** ใครใช้ได้ (รายฟีเจอร์) */
+  const saveAccess = async (r: Row, next: ServiceAccess, picked: NamedUser[]) => {
+    setBusy(`access:${r.key}`);
+    try {
+      const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ access: { key: r.key, ...next } }) });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      setAccess(j.data.access ?? {});
+      setAccessUsers((cur) => [...cur.filter((u) => !picked.some((p) => p.user_id === u.user_id)), ...picked]);
+      setAccessFor(null);
+      toast.success(next.mode === "all" ? `"${r.th}" ใช้ได้ทุกคนที่มีสิทธิ์แล้ว` : `ตั้งคนที่ใช้ "${r.th}" ได้แล้ว`);
+    } catch (e) { toast.error(`บันทึกไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  };
+
   const providers = useMemo(() => {
     const m = new Map<PaidProvider, number>();
     for (const r of rows) m.set(r.provider, (m.get(r.provider) ?? 0) + 1);
@@ -173,6 +214,16 @@ function PaidServicesView() {
           <div className="font-medium text-slate-800">{r.th}</div>
           <div className="text-xs text-slate-500">ใช้ที่: {r.usedAt}</div>
           <div className="text-[11px] text-slate-400">ถ้าปิด: {r.offBehavior}</div>
+          {r.kind === "ai_chat" && (() => {
+            const a = access[r.key];
+            const custom = a?.mode === "custom";
+            return (
+              <button type="button" onClick={() => setAccessFor(r)} data-access-btn={r.key}
+                className={`mr-1 mt-1 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] hover:bg-slate-50 ${custom ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600"}`}>
+                <Icon name="users" /> ใครใช้ได้: {custom ? `เฉพาะ ${[a.roles.length ? `${a.roles.length} บทบาท` : "", a.users.length ? `${a.users.length} คน` : ""].filter(Boolean).join(" + ") || "ผู้ดูแลเท่านั้น"}` : "ทุกคนที่มีสิทธิ์"}
+              </button>
+            );
+          })()}
           {r.places.length > 0 && (
             <button type="button" onClick={() => toggleOpen(r.key)} className="mt-1 inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50">
               <Icon name="sliders" /> เปิด-ปิดรายที่ ({r.places.length} ที่{r.places.some((p) => !p.enabled) ? ` · ปิด ${r.places.filter((p) => !p.enabled).length}` : ""})
@@ -197,9 +248,17 @@ function PaidServicesView() {
           <select value={r.model ?? ""} disabled={!r.enabled || busy === r.key} onChange={(e) => void save(r, { model: e.target.value })}
             className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 text-xs outline-none focus:border-blue-400 disabled:opacity-50">
             <option value="">ค่าเดิมของระบบ</option>
-            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            {models.map((m) => { const c = perCallOf(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
           </select>
-          {(() => { const m = models.find((x) => x.id === r.model); return m ? <span className="text-[11px] text-slate-400">{m.note} · เข้า ฿{m.inPerM}/ออก ฿{m.outPerM} ต่อ 1 ล้านคำ</span> : null; })()}
+          {(() => {
+            const m = models.find((x) => x.id === r.model); const c = r.model ? perCallOf(r, r.model) : null;
+            return (
+              <>
+                {c !== null && <span className="text-[11px] font-medium text-slate-600" data-per-call={r.key}>กดครั้งละ ~{perCallText(c)} <span className="font-normal text-slate-400">({r.call_tokens?.source === "history" ? `เฉลี่ยจากใช้จริง ${r.call_tokens.calls.toLocaleString("th-TH")} ครั้ง` : "ประมาณการ ยังไม่เคยใช้"})</span></span>}
+                {m && <span className="text-[11px] text-slate-400">{m.note} · เข้า ฿{m.inPerM}/ออก ฿{m.outPerM} ต่อ 1 ล้านคำ</span>}
+              </>
+            );
+          })()}
           <ServiceBudgetInput cap={budget.per_service[r.key] ?? null} spent={r.month.cost_thb} warnPct={budget.warn_pct}
             disabled={busy === `${r.key}:budget`} onSave={(v) => void saveServiceBudget(r, v)} />
         </div>
@@ -294,7 +353,7 @@ function PaidServicesView() {
                             title="โมเดลเฉพาะที่นี้ — ไม่เลือก = ใช้ตามบริการ"
                             className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 text-xs outline-none focus:border-blue-400 disabled:opacity-50">
                             <option value="">ตามบริการ ({models.find((m) => m.id === r.model)?.id ?? "ค่าเดิมของระบบ"})</option>
-                            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                            {models.map((m) => { const c = perCallOf(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
                           </select>
                         )}
                         <MonthCell s={p.month} showCost={r.kind === "ai_chat"} last={p.last_used_at} />
@@ -317,8 +376,8 @@ function PaidServicesView() {
                 searchText={(u) => `${u.name} ${u.top.map((t) => t.th).join(" ")}`} searchPlaceholder="ค้นหาชื่อ" countUnit="คน" />
             ) : <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">ยังไม่มีการใช้เดือนนี้</p>}
 
-            <CountQuotaSection services={rows.filter((r) => r.kind === "ai_chat")} budget={budget} usage={countUsage} users={countUsers} busy={busy}
-              onSave={(key, user, limit) => void saveCountQuota(key, user, limit)} />
+            <CountQuotaSection services={rows.filter((r) => r.kind === "ai_chat")} budget={budget} usage={countUsage} usageThb={countUsageThb} users={countUsers} busy={busy}
+              onSave={(key, user, limit) => void saveCountQuota(key, user, limit)} onUnit={(key, unit) => void saveQuotaUnit(key, unit)} />
 
             <HistoryCard services={rows} />
 
@@ -328,6 +387,11 @@ function PaidServicesView() {
             </p>
           </>
         )}
+
+      {accessFor && (
+        <AccessModal row={accessFor} value={access[accessFor.key] ?? { mode: "all", roles: [], users: [] }} roles={roles} knownUsers={accessUsers}
+          busy={busy === `access:${accessFor.key}`} onClose={() => setAccessFor(null)} onSave={(next, picked) => void saveAccess(accessFor, next, picked)} />
+      )}
 
       <ConfirmDialog open={confirmOff !== null} onClose={() => setConfirmOff(null)} variant="danger"
         onConfirm={() => { const t = confirmOff; setConfirmOff(null); if (t) void save(t.row, { enabled: false }, t.place ?? undefined); }}
@@ -591,27 +655,42 @@ function UserBudgetCell({ u, defaultCap, warnPct, busy, onSave }: { u: UserRow; 
   );
 }
 
-/** 🔢 โควตาจำนวนครั้งต่อคนต่อเดือน (รายฟีเจอร์ GPT) — ค่าเริ่มของทุกคน + ตั้งรายคน · นับเฉพาะครั้งที่สำเร็จ · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้นจนวันที่ 1 */
-function CountQuotaSection({ services, budget, usage, users, busy, onSave }: {
-  services: Row[]; budget: PaidBudget; usage: Record<string, Record<string, number>>; users: { user_id: string; name: string }[]; busy: string | null;
+/** 🔢 โควตาต่อคนต่อเดือน (รายฟีเจอร์ GPT) — ตั้งเป็น "ครั้ง" หรือ "บาท" · ค่าเริ่มของทุกคน + ตั้งรายคน · นับเฉพาะครั้งที่สำเร็จ · ครบ = ฟีเจอร์นั้นหยุดสำหรับคนนั้นจนวันที่ 1
+ *   พนักงานเห็นเป็น "ใช้ได้อีก N ครั้ง" เสมอ (หน่วยบาท = ระบบหารด้วยราคาต่อครั้งให้ · เจ้าของสั่ง 2026-11-16) */
+function CountQuotaSection({ services, budget, usage, usageThb, users, busy, onSave, onUnit }: {
+  services: Row[]; budget: PaidBudget; usage: Record<string, Record<string, number>>; usageThb: Record<string, Record<string, number>>; users: { user_id: string; name: string }[]; busy: string | null;
   onSave: (key: string, user: { id: string; name: string } | null, limit: number | "unlimited" | "default" | null) => void;
+  onUnit: (key: string, unit: QuotaUnit) => void;
 }) {
   const withQuota = services.filter((s) => budget.count_quota?.[s.key]);
   const [key, setKey] = useState<string>(() => withQuota[0]?.key ?? services.find((s) => s.key === "ai.desc_highlights")?.key ?? services[0]?.key ?? "");
-  const q = budget.count_quota?.[key] ?? { per_user_default: null, per_user: {} };
+  const q = budget.count_quota?.[key] ?? { unit: "count" as QuotaUnit, per_user_default: null, per_user: {} };
+  const unit: QuotaUnit = q.unit ?? "count";
+  const isThb = unit === "thb";
+  const svc = services.find((s) => s.key === key);
+  const perCall = svc ? perCallOf(svc, svc.model) : null;
   const [def, setDef] = useState(q.per_user_default ? String(q.per_user_default) : "");
   useEffect(() => { setDef(q.per_user_default ? String(q.per_user_default) : ""); }, [key, q.per_user_default]);
   const [who, setWho] = useState<UserPickerValue | null>(null);
   const [amt, setAmt] = useState("");
   const used = usage[key] ?? {};
+  const usedThb = usageThb[key] ?? {};
+  const parse = (v: string): number | null => { const n = isThb ? Math.round(Number(v) * 100) / 100 : Math.floor(Number(v)); return v.trim() && Number.isFinite(n) && n > 0 ? n : null; };
   const rowsFor = [...new Set([...Object.keys(used), ...Object.keys(q.per_user)])]
-    .map((id) => ({ id, name: users.find((u) => u.user_id === id)?.name ?? "ผู้ใช้", used: used[id] ?? 0, custom: id in q.per_user ? q.per_user[id] : undefined }))
+    .map((id) => ({ id, name: users.find((u) => u.user_id === id)?.name ?? "ผู้ใช้", used: used[id] ?? 0, usedThb: usedThb[id] ?? 0, custom: id in q.per_user ? q.per_user[id] : undefined }))
     .sort((a, b) => b.used - a.used || a.name.localeCompare(b.name, "th"));
   const capOf = (r: { custom: number | null | undefined }) => (r.custom === undefined ? q.per_user_default : r.custom);
+  const unitWord = isThb ? "บาท" : "ครั้ง";
+  /** คำแปลงหน่วยใต้ช่อง — บาท → "พนักงานเห็นว่าใช้ได้ N ครั้ง" · ครั้ง → "≈ ฿/คน/เดือน" */
+  const convHint = (v: number | null) => {
+    if (v === null || perCall === null) return null;
+    if (isThb) { const c = callsFromThb(v, perCall); return c === null ? null : `พนักงานจะเห็นว่าใช้ได้ ${c.toLocaleString("th-TH")} ครั้ง`; }
+    return `≈ ${baht(v * perCall)} / คน / เดือน`;
+  };
   if (!services.length) return null;
   return (
     <div className="mt-6" data-count-quota>
-      <h2 className="mb-2 text-sm font-semibold text-slate-700">จำกัดจำนวนครั้งต่อคนต่อเดือน (รายฟีเจอร์)</h2>
+      <h2 className="mb-2 text-sm font-semibold text-slate-700">จำกัดการใช้ต่อคนต่อเดือน (รายฟีเจอร์)</h2>
       <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
         <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
           <label className="text-xs font-medium text-slate-600">ฟีเจอร์
@@ -619,35 +698,56 @@ function CountQuotaSection({ services, budget, usage, users, busy, onSave }: {
               {services.map((s) => <option key={s.key} value={s.key}>{s.th}{budget.count_quota?.[s.key] ? " · ตั้งโควตาแล้ว" : ""}</option>)}
             </select>
           </label>
+          <div className="text-xs font-medium text-slate-600">ตั้งเป็น
+            <div className="mt-1 inline-flex overflow-hidden rounded-md border border-slate-200 bg-white" role="group" aria-label="หน่วยของโควตา" data-quota-unit={unit}>
+              {(["count", "thb"] as const).map((u) => (
+                <button key={u} type="button" disabled={busy === `count:${key}:unit`} onClick={() => { if (u !== unit) onUnit(key, u); }} aria-pressed={u === unit}
+                  className={`h-8 px-3 text-xs ${u === unit ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"} disabled:opacity-50`}>
+                  {u === "count" ? "จำนวนครั้ง" : "บาท"}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="text-xs font-medium text-slate-600">ค่าเริ่มของทุกคน
             <span className="mt-1 flex items-center gap-1.5">
-              <input type="number" min={0} step={1} value={def} disabled={busy === `count:${key}:default`} placeholder="ไม่จำกัด"
+              <input type="number" min={0} step={isThb ? 0.01 : 1} value={def} disabled={busy === `count:${key}:default`} placeholder="ไม่จำกัด"
                 onChange={(e) => setDef(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                onBlur={() => { const n = Math.floor(Number(def)); const next = def.trim() && n > 0 ? n : null; if (next !== (q.per_user_default ?? null)) onSave(key, null, next); }}
+                onBlur={() => { const next = parse(def); if (next !== (q.per_user_default ?? null)) onSave(key, null, next); }}
                 className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal tabular-nums outline-none focus:border-blue-400 disabled:opacity-50" />
-              <span className="font-normal text-slate-500">ครั้ง / คน / เดือน</span>
+              <span className="font-normal text-slate-500">{unitWord} / คน / เดือน</span>
             </span>
+            {convHint(parse(def)) && <span className="mt-0.5 block text-[11px] font-normal text-slate-400" data-quota-hint>{convHint(parse(def))}</span>}
           </label>
           <div className="text-xs font-medium text-slate-600">ตั้งเฉพาะคน
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <span className="w-52"><UserPicker value={who} onChange={setWho} disableCreate /></span>
-              <input type="number" min={0} step={1} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="ไม่จำกัด"
+              <input type="number" min={0} step={isThb ? 0.01 : 1} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="ไม่จำกัด"
                 className="h-8 w-20 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal tabular-nums outline-none focus:border-blue-400" />
-              <span className="font-normal text-slate-500">ครั้ง</span>
-              <button type="button" disabled={!who} onClick={() => { if (!who) return; const n = Math.floor(Number(amt)); onSave(key, { id: who.id, name: who.name }, amt.trim() && n > 0 ? n : "unlimited"); setWho(null); setAmt(""); }}
+              <span className="font-normal text-slate-500">{unitWord}</span>
+              <button type="button" disabled={!who} onClick={() => { if (!who) return; onSave(key, { id: who.id, name: who.name }, parse(amt) ?? "unlimited"); setWho(null); setAmt(""); }}
                 className="h-8 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">ตั้งโควตา</button>
             </div>
           </div>
         </div>
+        {perCall !== null && (
+          <p className="mt-2 text-[11px] text-slate-500" data-quota-percall>
+            ฟีเจอร์นี้กดครั้งละ ~{perCallText(perCall)} ({svc?.call_tokens?.source === "history" ? "เฉลี่ยจากใช้จริง" : "ประมาณการ"}) · พนักงานเห็นแค่ &quot;ใช้ได้อีก N ครั้ง&quot; ไม่เห็นตัวเงิน
+          </p>
+        )}
         {rowsFor.length ? (
           <div className="mt-3 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
             {rowsFor.map((r) => {
               const cap = capOf(r);
-              const pct = cap ? Math.min(100, Math.round((r.used / cap) * 100)) : 0;
+              const usedV = isThb ? r.usedThb : r.used;
+              const pct = cap ? Math.min(100, Math.round((usedV / cap) * 100)) : 0;
+              const left = cap === null ? null : isThb ? (perCall ? callsFromThb(cap - r.usedThb, perCall) : null) : Math.max(0, cap - r.used);
               return (
                 <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm" data-count-quota-row={r.id}>
                   <span className="min-w-0 flex-1 font-medium text-slate-800">{r.name}</span>
-                  <span className="tabular-nums text-slate-600">ใช้ {r.used.toLocaleString("th-TH")} / {cap ?? "∞"} ครั้ง</span>
+                  <span className="tabular-nums text-slate-600">
+                    {isThb ? `ใช้ ${baht(r.usedThb)} / ${cap === null ? "∞" : baht(cap)}` : `ใช้ ${r.used.toLocaleString("th-TH")} / ${cap ?? "∞"} ครั้ง`}
+                    {left !== null && <span className="ml-1 text-[11px] text-slate-400">(คนนี้เห็น: เหลือ {left.toLocaleString("th-TH")} ครั้ง)</span>}
+                  </span>
                   {cap ? <span className="h-1.5 w-24 overflow-hidden rounded bg-slate-100"><span className={`block h-full ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} /></span> : null}
                   <span className="text-[11px] text-slate-400">{r.custom === undefined ? "ใช้ค่าเริ่ม" : r.custom === null ? "ไม่จำกัด (ตั้งเฉพาะคนนี้)" : "ตั้งเฉพาะคนนี้"}</span>
                   <span className="flex gap-2 text-[11px]">
@@ -659,8 +759,70 @@ function CountQuotaSection({ services, budget, usage, users, busy, onSave }: {
             })}
           </div>
         ) : <p className="mt-3 text-xs text-slate-400">เดือนนี้ยังไม่มีใครใช้ฟีเจอร์นี้</p>}
-        <p className="mt-2 text-[11px] text-slate-400">นับเฉพาะครั้งที่ AI ตอบสำเร็จของคนที่กด · ครบ = คนนั้นใช้ฟีเจอร์นี้ไม่ได้จนวันที่ 1 (ปุ่มอื่นยังใช้ได้) · ผู้ดูแลตั้ง "ไม่จำกัด" ให้ตัวเองได้ · ทุกการเปลี่ยนบันทึกประวัติ</p>
+        <p className="mt-2 text-[11px] text-slate-400">นับเฉพาะครั้งที่ AI ตอบสำเร็จของคนที่กด · ครบ = คนนั้นใช้ฟีเจอร์นี้ไม่ได้จนวันที่ 1 (ปุ่มอื่นยังใช้ได้) · เปลี่ยนหน่วยแล้วระบบแปลงค่าที่ตั้งไว้ให้ตามราคาต่อครั้ง · ผู้ดูแลตั้ง &quot;ไม่จำกัด&quot; ให้ตัวเองได้ · ทุกการเปลี่ยนบันทึกประวัติ</p>
       </div>
     </div>
+  );
+}
+
+/** 👥 ใครใช้ได้ (รายฟีเจอร์ GPT) — ทุกคนที่มีสิทธิ์ / เฉพาะบทบาท + รายคน · ผู้ดูแลระบบใช้ได้เสมอ · บังคับที่ด่านกลาง (คนที่ไม่ได้รับสิทธิ์จะไม่เห็นปุ่ม/แท็บ) */
+function AccessModal({ row, value, roles, knownUsers, busy, onClose, onSave }: {
+  row: Row; value: ServiceAccess; roles: RoleOpt[]; knownUsers: NamedUser[]; busy: boolean;
+  onClose: () => void; onSave: (next: ServiceAccess, picked: NamedUser[]) => void;
+}) {
+  const [mode, setMode] = useState<ServiceAccess["mode"]>(value.mode);
+  const [sel, setSel] = useState<string[]>(value.roles);
+  const [people, setPeople] = useState<NamedUser[]>(() => value.users.map((id) => ({ user_id: id, name: knownUsers.find((u) => u.user_id === id)?.name ?? "ผู้ใช้" })));
+  const [who, setWho] = useState<UserPickerValue | null>(null);
+  const dirty = mode !== value.mode || JSON.stringify([...sel].sort()) !== JSON.stringify([...value.roles].sort()) || JSON.stringify(people.map((p) => p.user_id).sort()) !== JSON.stringify([...value.users].sort());
+  const toggleRole = (k: string) => setSel((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]));
+  const addWho = (u: UserPickerValue | null) => { setWho(null); if (u && !people.some((p) => p.user_id === u.id)) setPeople((cur) => [...cur, { user_id: u.id, name: u.name }]); };
+  return (
+    <ERPModal open onClose={onClose} title={`ใครใช้ได้ — ${row.th}`} description="เลือกว่าใครกดใช้ AI ตัวนี้ได้ · คนที่ไม่ได้เลือกจะไม่เห็นปุ่ม" size="md" defaultExpanded={false} storageKey="paid-service-access" hasUnsavedChanges={dirty}
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-9 rounded-md border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+          <button type="button" disabled={busy || !dirty} onClick={() => onSave({ mode, roles: mode === "custom" ? sel : [], users: mode === "custom" ? people.map((p) => p.user_id) : [] }, people)} data-access-save
+            className="h-9 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+        </div>
+      )}>
+      <div className="space-y-3 text-sm" data-access-modal>
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-2.5 hover:bg-slate-50">
+          <input type="radio" name="access-mode" checked={mode === "all"} onChange={() => setMode("all")} className="mt-0.5" />
+          <span><span className="font-medium text-slate-800">ทุกคนที่มีสิทธิ์ใช้ AI</span><span className="block text-xs text-slate-500">ค่าเริ่ม — ใครที่มีสิทธิ์ &quot;ใช้ AI&quot; อยู่แล้วกดได้หมด</span></span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-2.5 hover:bg-slate-50">
+          <input type="radio" name="access-mode" checked={mode === "custom"} onChange={() => setMode("custom")} className="mt-0.5" />
+          <span><span className="font-medium text-slate-800">เฉพาะที่เลือก</span><span className="block text-xs text-slate-500">เลือกตามบทบาท และ/หรือ รายคน</span></span>
+        </label>
+        {mode === "custom" && (
+          <div className="space-y-3 rounded-lg bg-slate-50 p-3">
+            <div>
+              <div className="mb-1.5 text-xs font-medium text-slate-600">บทบาท</div>
+              <div className="flex flex-wrap gap-1.5">
+                {roles.filter((r) => r.key !== "admin").map((r) => (
+                  <Chip key={r.key} on={sel.includes(r.key)} onClick={() => toggleRole(r.key)}>{r.label}</Chip>
+                ))}
+                {!roles.filter((r) => r.key !== "admin").length && <span className="text-xs text-slate-400">ยังไม่มีบทบาท</span>}
+              </div>
+            </div>
+            <div>
+              <div className="mb-1.5 text-xs font-medium text-slate-600">รายคน</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {people.map((p) => (
+                  <span key={p.user_id} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs text-slate-700 ring-1 ring-slate-200">
+                    {p.name}
+                    <button type="button" aria-label={`เอา ${p.name} ออก`} onClick={() => setPeople((cur) => cur.filter((x) => x.user_id !== p.user_id))} className="text-slate-400 hover:text-red-600"><Icon name="cancel" /></button>
+                  </span>
+                ))}
+                <span className="w-56"><UserPicker value={who} onChange={addWho} disableCreate /></span>
+              </div>
+            </div>
+            {!sel.length && !people.length && <p className="text-xs text-amber-700">ยังไม่ได้เลือกใคร — จะใช้ได้เฉพาะผู้ดูแลระบบ</p>}
+          </div>
+        )}
+        <p className="text-[11px] text-slate-400">ผู้ดูแลระบบ (บทบาท admin) ใช้ได้เสมอ · งานอัตโนมัติไม่ถูกกั้น · มีผลภายใน ~30 วินาที · ทุกการเปลี่ยนบันทึกประวัติ</p>
+      </div>
+    </ERPModal>
   );
 }

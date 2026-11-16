@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap, effectiveChoice, countCap, countQuotaOverMessage } from "@/lib/paid-services";
+import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap, effectiveChoice, countCap, countQuotaOverMessage, quotaUnit, callCostThb, callsFromThb, cleanAccess, accessAllowed, PAID_MODEL_CHOICES } from "@/lib/paid-services";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
@@ -192,7 +192,18 @@ describe("โควตาจำนวนครั้งต่อคนต่อ�
       "ai.desc_highlights": { per_user_default: "30.7", per_user: { [U1]: 5, [U2]: "unlimited", "not-a-uuid": 3, "33333333-3333-4333-8333-333333333333": -2 } },
       "line.push": { per_user_default: 10 }, "ai.nope": { per_user_default: 1 }, "ai.caption": { per_user_default: 0 },
     } });
-    expect(b.count_quota).toEqual({ "ai.desc_highlights": { per_user_default: 30, per_user: { [U1]: 5, [U2]: null } } });
+    expect(b.count_quota).toEqual({ "ai.desc_highlights": { unit: "count", per_user_default: 30, per_user: { [U1]: 5, [U2]: null } } });
+  });
+  it("หน่วยบาท: ทศนิยม 2 ตำแหน่ง · จำหน่วยไว้แม้ยังไม่ใส่ค่า · ไม่ระบุหน่วย = ครั้ง (ค่าเดิม)", () => {
+    const b = cleanBudget({ count_quota: {
+      "ai.desc_highlights": { unit: "thb", per_user_default: "12.345", per_user: { [U1]: 0.5 } },
+      "ai.caption": { unit: "thb" },
+    } });
+    expect(b.count_quota["ai.desc_highlights"]).toEqual({ unit: "thb", per_user_default: 12.35, per_user: { [U1]: 0.5 } });
+    expect(b.count_quota["ai.caption"]).toEqual({ unit: "thb", per_user_default: null, per_user: {} });
+    expect(quotaUnit(b, "ai.desc_highlights")).toBe("thb");
+    expect(quotaUnit(b, "ai.product_detail")).toBe("count");
+    expect(countQuotaOverMessage("ai.desc_highlights", null)).not.toMatch(/บาท|฿/);
   });
   it("countCap: ตั้งรายคนชนะค่าเริ่ม · ไม่มีคนกด/ไม่ได้ตั้ง = ไม่จำกัด · รายที่ (key@place) ใช้โควตาของบริการ", () => {
     const b = cleanBudget({ count_quota: { "ai.desc_highlights": { per_user_default: 30, per_user: { [U1]: 5, [U2]: null } } } });
@@ -207,5 +218,46 @@ describe("โควตาจำนวนครั้งต่อคนต่อ�
   });
   it("ลงทะเบียนปุ่ม AI จุดเด่นสินค้าแล้ว (เลือกรุ่นได้ในศูนย์ AI)", () => {
     expect(paidService("ai.desc_highlights")?.kind).toBe("ai_chat");
+  });
+});
+
+describe("ราคาต่อครั้ง + แปลงบาทเป็นครั้ง (เจ้าของขอ 2026-11-16)", () => {
+  it("callCostThb = คำเข้า×ราคาเข้า + คำออก×ราคาออก · รุ่นแพงกว่า = ต่อครั้งแพงกว่า · รุ่นไม่รู้จัก = รุ่นแรก", () => {
+    const t = { in: 10000, out: 500 };
+    const cheap = [...PAID_MODEL_CHOICES].sort((a, b) => a.inPerM - b.inPerM)[0];
+    const dear = [...PAID_MODEL_CHOICES].sort((a, b) => b.inPerM - a.inPerM)[0];
+    expect(callCostThb(cheap.id, t)).toBeGreaterThan(0);
+    expect(callCostThb(dear.id, t)).toBeGreaterThan(callCostThb(cheap.id, t));
+    expect(callCostThb("no-such-model", t)).toBe(callCostThb(PAID_MODEL_CHOICES[0].id, t));
+  });
+  it("callsFromThb: ปัดลง · ติดลบ = 0 · ไม่รู้ราคา = null", () => {
+    expect(callsFromThb(100, 1)).toBe(100);
+    expect(callsFromThb(1, 0.3)).toBe(3);
+    expect(callsFromThb(0.9, 0.3)).toBe(3);
+    expect(callsFromThb(-5, 0.3)).toBe(0);
+    expect(callsFromThb(100, 0)).toBeNull();
+  });
+});
+
+describe("ใครใช้ได้ รายฟีเจอร์ (เจ้าของขอ 2026-11-16)", () => {
+  const U1 = "11111111-1111-4111-8111-111111111111";
+  it("cleanAccess: เก็บเฉพาะแบบเลือกเอง · key ต้องอยู่ในทะเบียน · บทบาท/ผู้ใช้เพี้ยนตัดทิ้ง", () => {
+    const a = cleanAccess({
+      "ai.desc_highlights": { mode: "custom", roles: ["designer", "bad role!", "designer"], users: [U1.toUpperCase(), "nope"] },
+      "ai.caption": { mode: "all", roles: ["staff"] },
+      "ai.nope": { mode: "custom", roles: ["staff"] },
+    });
+    expect(a).toEqual({ "ai.desc_highlights": { mode: "custom", roles: ["designer"], users: [U1] } });
+  });
+  it("accessAllowed: ไม่ตั้ง/ทุกคน = ได้ · งานอัตโนมัติ = ได้ · admin = ได้เสมอ · ที่เหลือต้องอยู่ในบทบาทหรือรายคน", () => {
+    const acc = { mode: "custom" as const, roles: ["designer"], users: [U1] };
+    expect(accessAllowed(undefined, { id: "x", roles: [] })).toBe(true);
+    expect(accessAllowed({ mode: "all", roles: [], users: [] }, { id: "x", roles: [] })).toBe(true);
+    expect(accessAllowed(acc, null)).toBe(true);
+    expect(accessAllowed(acc, { id: "x", roles: ["admin"] })).toBe(true);
+    expect(accessAllowed(acc, { id: "x", roles: ["designer"] })).toBe(true);
+    expect(accessAllowed(acc, { id: U1.toUpperCase(), roles: ["staff"] })).toBe(true);
+    expect(accessAllowed(acc, { id: "y", roles: ["staff"] })).toBe(false);
+    expect(accessAllowed({ mode: "custom", roles: [], users: [] }, { id: "y", roles: ["staff"] })).toBe(false);
   });
 });
