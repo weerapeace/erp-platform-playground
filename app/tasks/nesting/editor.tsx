@@ -16,6 +16,7 @@ import { useAuth } from "@/components/auth";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { AssetPicker } from "@/components/asset-picker";
 import { SaveBar } from "@/components/save-bar";
+import { CopyButton } from "@/components/copy-button";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
@@ -923,7 +924,13 @@ export function NestingEditor({ id }: { id: string }) {
               <button type="button" onClick={() => setCardOpen(true)} className="font-medium underline">{t("เปิดการ์ด", "Open card")}</button>
             )}
             {pub.drive_folder_url && (
-              <a href={pub.drive_folder_url} target="_blank" rel="noreferrer" className="font-medium underline">Drive ↗</a>
+              <>
+                <a href={pub.drive_folder_url} target="_blank" rel="noreferrer" className="font-medium underline">Drive ↗</a>
+                {/* คัดลอกลิงก์โฟลเดอร์งานบน Drive (ลิงก์แชร์ให้ร้านพิมพ์) — ของกลาง CopyButton */}
+                <CopyButton value={pub.drive_folder_url} label={t("คัดลอกลิงก์", "Copy link")}
+                  title={t("คัดลอกลิงก์โฟลเดอร์งานบน Drive (ส่งให้ร้านพิมพ์ได้เลย)", "Copy the job's Drive folder link (send it to the print shop)")}
+                  className="!py-0.5 !text-[11px]" />
+              </>
             )}
           </span>
         )}
