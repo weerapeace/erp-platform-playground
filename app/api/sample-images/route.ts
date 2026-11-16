@@ -241,7 +241,9 @@ export async function POST(request: NextRequest) {
       const all = await loadAlbums(admin, 2000);
       const parent = all.find((a) => a.id === body.parent_id);
       if (!parent) return NextResponse.json({ error: "ไม่พบอัลบั้มที่จะสร้างอัลบั้มย่อยไว้ข้างใน" }, { status: 404 });
-      const { data: made, error } = await admin.from("asset_collections").insert({ name, description: sampleAlbumMark(parent.brandId, parent.id) }).select("id, name").single();
+      // ลำดับจัดเอง: อัลบั้มย่อยใหม่ต่อท้ายพี่น้อง (ค่าเริ่มของตาราง = 0 จะไปอยู่หน้าสุดหลังเคยจัดลำดับแล้ว)
+      const siblingMax = all.filter((a) => a.parentId === parent.id).reduce((m, a) => Math.max(m, a.sort_order ?? 0), 0);
+      const { data: made, error } = await admin.from("asset_collections").insert({ name, description: sampleAlbumMark(parent.brandId, parent.id), sort_order: siblingMax + 1 }).select("id, name").single();
       if (error || !made) return NextResponse.json({ error: "สร้างอัลบั้มไม่สำเร็จ" }, { status: 500 });
       let moved = 0;
       if (assetIds.length && body.from_album_id) {

@@ -253,8 +253,18 @@ describe("ชื่ออัลบั้มของวัน · Product ### · 
       { name: "B", created_at: "2", parent_id: "p", deep: { photos: 0, sent: 0, sub_count: 0 }, sort_order: 1 },
       { name: "C", created_at: "3", parent_id: "p", deep: { photos: 0, sent: 0, sub_count: 0 }, sort_order: null },
     ];
-    expect(sortAlbums(as, "manual").map((a) => a.name)).toEqual(["B", "C", "A"]);
+    expect(sortAlbums(as, "manual").map((a) => a.name)).toEqual(["B", "A", "C"]);
     expect(isPhotoSort("manual")).toBe(true);
     expect(isAlbumSort("manual")).toBe(true);
+  });
+});
+
+describe("จัดเอง: หน้าแฟ้มชั้นบนสุดยังล่าสุดก่อน (ค่าเริ่มของตาราง sort_order = 0)", () => {
+  it("ชั้นบนสุดเท่ากัน = ล่าสุดก่อน", () => {
+    const top = [
+      { name: "A", created_at: "1", parent_id: null, deep: { photos: 0, sent: 0, sub_count: 0 }, sort_order: 0 },
+      { name: "B", created_at: "2", parent_id: null, deep: { photos: 0, sent: 0, sub_count: 0 }, sort_order: 0 },
+    ];
+    expect(sortAlbums(top, "manual").map((a) => a.name)).toEqual(["B", "A"]);
   });
 });

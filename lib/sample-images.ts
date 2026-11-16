@@ -248,7 +248,8 @@ const newestFirst = (a: { created_at: string }, b: { created_at: string }) => b.
 /** เรียงอัลบั้ม: ล่าสุด/เก่าสุด (วันที่สร้าง) · ชื่อบนการ์ด · รูปมากสุด (รวมอัลบั้มย่อย) — เท่ากันเรียงล่าสุดก่อน */
 export function sortAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "parent_id" | "deep"> & { sort_order?: number | null; display_name?: string | null }>(albums: readonly T[], sort: SampleAlbumSort): T[] {
   const out = [...albums];
-  if (sort === "manual") return out.sort((a, b) => byManual(a, b) || newestFirst(a, b));
+  // จัดเอง: ตามเลขที่จัด · เท่ากัน/ยังไม่จัด → อัลบั้มย่อย = ตามลำดับที่สร้าง (Product 001, 002, 003 เรียงต่อกัน) · หน้าแฟ้มชั้นบนสุด = ล่าสุดก่อนเหมือนเดิม
+  if (sort === "manual") return out.sort((a, b) => byManual(a, b) || (a.parent_id || b.parent_id ? a.created_at.localeCompare(b.created_at) : newestFirst(a, b)));
   if (sort === "oldest") return out.sort((a, b) => a.created_at.localeCompare(b.created_at));
   if (sort === "name") return out.sort((a, b) => byText(albumCardLabel(a), albumCardLabel(b)) || newestFirst(a, b));
   if (sort === "most") return out.sort((a, b) => b.deep.photos - a.deep.photos || newestFirst(a, b));

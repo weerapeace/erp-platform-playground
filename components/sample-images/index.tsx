@@ -217,7 +217,8 @@ export function SampleImagesPage() {
   const tree = useMemo(() => (albums ?? []).map((a) => ({ id: a.id, parent_id: a.parent_id })), [albums]);
   const path = useMemo(() => (album ? albumPath(tree, album.id).map((id) => albums!.find((a) => a.id === id)!) : []), [album, tree, albums]);
   const children = useMemo(() => (album ? (albums ?? []).filter((a) => a.parent_id === album.id) : []), [album, albums]);
-  const shownChildren = useMemo(() => sortAlbums(children.filter((a) => albumMatches(a, query)), albumSort), [children, query, albumSort]);
+  // อัลบั้มย่อยในอัลบั้ม = ลำดับจัดเองเสมอ (ยังไม่จัด = ตามลำดับที่สร้าง Product 001, 002…) — เจ้าของสั่ง 2026-11-16 · ตัวเลือกเรียงในหน้านี้เป็นของรูป
+  const shownChildren = useMemo(() => sortAlbums(children.filter((a) => albumMatches(a, query)), "manual"), [children, query]);
   const allInView = useMemo(() => (photos ?? []).filter((p) => p.trashed === trashView), [photos, trashView]);
   // รูปที่โชว์ = ตามคำค้น + วิธีเรียง (เลือกทั้งหมด / ลาก / ส่ง ใช้กับรูปที่โชว์อยู่)
   const list = useMemo(() => sortPhotos(allInView.filter((p) => photoMatches(p, query)), photoSort), [allInView, query, photoSort]);
@@ -332,7 +333,6 @@ export function SampleImagesPage() {
     if (order.join() === cur.join()) return;
     const rank = new Map(order.map((x, i) => [x, i + 1]));
     setAlbums((as) => as && as.map((a) => (rank.has(a.id) ? { ...a, sort_order: rank.get(a.id)! } : a)));
-    if (albumSort !== "manual") setAlbumSort("manual");
     try { await reorderAlbums(album.id, order); }
     catch (e) { pushToast("error", (e as Error).message); void reload(album.id); }
   };
