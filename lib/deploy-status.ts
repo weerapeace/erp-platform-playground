@@ -75,3 +75,17 @@ export async function getDeployStatus(): Promise<DeployStatus> {
     throw e;
   }
 }
+
+// ─── ข้อความ commit ล่าสุดบนเว็บจริง (ศูนย์งานแก้แอปใช้หา [CH-xxxxxx] → ป้าย "ขึ้นเว็บแล้ว") ─────────
+async function fetchLiveCommitMessages(): Promise<string[]> {
+  const list = await gh(`/commits?sha=${PROD_BRANCH}&per_page=100`) as { commit?: { message?: string } }[];
+  return (Array.isArray(list) ? list : []).map((c) => (c.commit?.message ?? "").split("\n")[0]).filter(Boolean);
+}
+const cachedLiveMessages = unstable_cache(fetchLiveCommitMessages, ["deploy-live-msgs-v1"], { revalidate: Math.max(REFRESH, 120), tags: [DEPLOY_STATUS_TAG] });
+
+/** 100 commit ล่าสุดบนสาขา prod (บรรทัดแรก) — พัง/โดนจำกัด = [] (ป้ายแค่ไม่ขึ้น ไม่ทำหน้าพัง) */
+export async function getLiveCommitMessages(): Promise<string[]> {
+  if (Date.now() < blockedUntil) return [];
+  try { return await cachedLiveMessages(); }
+  catch (e) { if (e instanceof GitHubLimited) blockedUntil = e.resetAt; return []; }
+}

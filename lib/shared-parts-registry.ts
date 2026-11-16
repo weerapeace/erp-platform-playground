@@ -639,6 +639,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "pattern-studio.md",
   },
   {
+    key: "app-change", label: "ศูนย์งานแก้แอป (ป๊อปขอแก้หน้านี้ + หน้าภาพรวม)", code: "AppChangeRequestModal · useAppChangeMenu · AppChangeHub · lib/app-change", category: "feature",
+    source: { path: "components/app-change" },
+    what: "จดงานแก้ดีไซน์/จุกจิกผูกกับหน้า — ระบบใส่หน้า + ของกลางที่หน้านั้นใช้ + กล่องในแผนผังการทำงานให้เอง แนบภาพหน้าจอได้ · หน้า /admin/app-changes จัดกลุ่มตามหน้า/ของกลาง/สถานะ ดูผลกระทบของกลาง ส่งเข้าแผนทีม สร้างคำสั่งให้ AI · ป้ายรอขึ้นเว็บ/ขึ้นเว็บแล้วจากรหัส [CH-xxxxxx] ใน commit · เก็บใน issue_reports (page_path/parts/flow_refs)",
+    when: "อยากจดว่าหน้านี้ควรแก้อะไร (เมนูโปรไฟล์ → ขอแก้หน้านี้) · ชิ้นงานอื่นอยากรู้ว่าหน้าไหนใช้ของกลางอะไร → partsForPage / pagesForPart ใน lib/app-change",
+    notWhen: "พนักงานแจ้งปัญหาการใช้งานทั่วไป ใช้หน้า /issue-report เดิม (ตารางเดียวกัน แต่ไม่มี page_path) · ห้ามทำปุ่มลอยแยก — ศูนย์แจ้งเตือน Pet เป็นของลอยตัวเดียว",
+    doc: "app-changes.md",
+  },
+  {
     key: "pattern-3d", label: "ตัวแสดงชิ้นแพทเทิร์นเป็นภาพ 3D", code: "Pattern3D · lib/three-loader", category: "feature",
     source: { path: "components/pattern-3d" },
     what: "วาดชิ้นแพทเทิร์นเป็นแผ่น 3D วางบนโต๊ะ (มีรูเจาะจริง เส้นเย็บ ป้ายชื่อ) หรือวาดกระเป๋าที่ประกอบแล้วจากแม่แบบทรง หรือกระเป๋าที่ประกอบจากชิ้นจริงกับตะเข็บ (mode assembly) หรือภาพจำลองวัสดุทิ้งตัวแบบทดลอง (mode sim · lib/pattern-sim) หมุน ซูม แยกชิ้นดู คลิกเลือกชิ้นได้ ไลบรารี 3D โหลดจาก public/vendor ตอนเปิดครั้งแรก ไม่ทำให้หน้าอื่นหนัก",

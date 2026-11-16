@@ -31,6 +31,7 @@ import { WorkPopupFloatToggle } from "@/components/work-popup/float";
 import { BrowserPushToggle } from "@/components/web-push";
 import { PageViewOptionsSection } from "@/components/page-chrome";
 import { InstallAppMenuItem, InstallAppModal, SoloInstallSection } from "@/components/install-app";
+import { AppChangeMenuRow, useAppChangeMenu } from "@/components/app-change/menu-item";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
 export type AccountMenuDevice = { mode: DeviceMode; viewport: DeviceLayout; onChange: (m: DeviceMode) => void; qr?: DeviceQrOpts };
@@ -76,6 +77,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
   const [previewOpen, setPreviewOpen] = useState(false);              // ดูหน้านี้แบบมือถือ/แท็บเล็ต (เว็บปกติ · ย้ายมาจากเมนูซ้าย 2026-11-16)
   const canPreview = useCanPreviewDevice();                           // จอสัมผัส/อยู่ในกรอบแล้ว = ไม่โชว์
   const canDeploy = usePermission("admin.users");                     // นับถอยหลังขึ้นเว็บ (ผู้ดูแลระบบ)
+  const appChange = useAppChangeMenu();                               // "ขอแก้หน้านี้" → ศูนย์งานแก้แอป (report.manage · 2026-11-16)
 
   /** แถบข้าง: วางเมนูเหนือการ์ดชื่อ ชิดซ้าย ลอยทับเนื้อหา (ไม่ถูกตัดตามความกว้างแถบข้าง) · สูงไม่เกินจอ เลื่อนในเมนูได้ */
   const place = useCallback(() => {
@@ -153,6 +155,14 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
       <div className="px-3 py-2 text-xs text-slate-500 truncate">{user.email}</div>
       {/* มุมมองหน้านี้ (หน้าลงทะเบียนผ่าน usePageChrome เช่น บอร์ดจ่ายงาน: คอม/iPad · หน้าตา · เต็มจอ) */}
       <PageViewOptionsSection />
+      {/* ขอแก้หน้านี้ (ศูนย์งานแก้แอป · components/app-change) — จดงานแก้ผูกหน้า + ของกลาง + แผนผัง · "ทั้งหมด" = /admin/app-changes */}
+      {appChange.can && (
+        <div className="flex items-stretch">
+          <AppChangeMenuRow className={`${ROW} flex-1`} onClick={() => { close(); appChange.openFor(); }} />
+          <button type="button" onClick={() => { close(); router.push("/admin/app-changes"); }}
+            className="px-3 text-[11px] text-slate-400 hover:text-slate-700 hover:bg-slate-50 border-t border-slate-100">{t("ทั้งหมด", "All")}</button>
+        </div>
+      )}
       {/* Dashboard ของฉัน — ซ่อนเมื่ออยู่ในแอป (onDark) เพราะจะพาออกจากแอป */}
       {!onDark && (
         <button type="button" onClick={() => { close(); router.push("/dashboard"); }} className={ROW}>
@@ -298,6 +308,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
 
       {!device && <InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)} />}
       {!device && <DevicePreviewModal open={previewOpen} onClose={() => setPreviewOpen(false)} />}
+      {appChange.modal}
 
       {/* ความปลอดภัย — popup (ไม่ออกจากหน้า) */}
       <ERPModal open={securityOpen} onClose={() => setSecurityOpen(false)} title={t("🔐 ความปลอดภัย — อุปกรณ์ที่เข้าสู่ระบบ", "🔐 Security — signed-in devices")} size="lg" storageKey="security-devices">

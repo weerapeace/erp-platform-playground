@@ -28,6 +28,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/storage-plan", sameAs: "/master/assets" },   // แผนผังการเก็บไฟล์ (กระดานวาดเอง)
   { href: "/admin/paid-services", keys: ["admin.paid_services"] },   // ศูนย์ AI / API ที่เสียเงิน
   { href: "/admin/deploy", keys: ["admin.users"] },   // ขึ้นเว็บ (คิวรอขึ้นเว็บ + ปุ่มขึ้นทันที)
+  { href: "/admin/app-changes", keys: ["report.manage"] },   // ศูนย์งานแก้แอป (งานแก้ผูกหน้า/ของกลาง/แผนผัง · docs/app-changes.md)
   { href: "/chat", prefixes: ["chat."] },   // ห้องแชทรวม — ดู / ตอบ / มอบหมาย / ตั้งค่า (docs/chat-inbox.md)
   { href: "/admin/app-manager", keys: ["admin.users"] },   // จัดการแอป (ทุกแอป + ถังขยะเมนู) — เหมือน /admin/menu
   { href: "/website", prefixes: ["website."] },
