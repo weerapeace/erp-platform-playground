@@ -4,6 +4,8 @@
  * 📝 ป๊อป "อ่านจากรูปโน้ต (AI)" ของตารางตีราคา (เจ้าของขอ 2026-11-16) — หน้าคอม + มือถือใช้ตัวเดียวกัน
  *   อัปรูปโน้ตขนาดชิ้นที่ช่างจดมือ → AI อ่าน (POST /api/design-sheets/read-note · เสียเงิน ai.note_dims)
  *   → ตารางยืนยัน: เลือกวัตถุดิบทีละกลุ่ม (AI เดาจากชื่อกลุ่มให้ก่อน) / เปลี่ยนรายบรรทัด · แก้ชื่อชิ้น กว้าง ยาว จำนวน · ติ๊กแถวที่จะเอา
+ *   ชื่อชิ้นตรงวัสดุในทะเบียน = ใส่ให้เลย ("ตรงชื่อ") · คล้าย = ใส่ให้ + ป้าย "AI เดา" · เลือกบรรทัดหนึ่ง → บรรทัดชื่อเดียวกันได้ตาม (ไม่ทับที่เลือกเอง)
+ *   ช่องเลือกวัสดุเปิดมาพร้อมคำค้น = ชื่อชิ้น → ปุ่ม "+ เพิ่มวัสดุใหม่" โผล่ทันที
  *   → onAdd(บรรทัดตีราคา) — หน้าแม่เติมลงตาราง แล้วผู้ใช้กดบันทึกตามปกติ (ป๊อปนี้ไม่เขียนฐานข้อมูลเอง)
  *   สูตร/ตัวตรวจ: lib/note-dims (costLineFromNote ใช้สูตรกลางของบรรทัดตีราคา)
  * ใช้ที่: components/design-sheet-detail/index.tsx (ตารางตีราคา) · components/design-sheet-mobile/cost-tab.tsx
@@ -16,11 +18,11 @@ import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { toChatJpeg } from "@/lib/image-resize";
-import { costLineFromNote, guessNoteItem, type NoteDimRow, type NoteDims } from "@/lib/note-dims";
+import { costLineFromNote, guessNoteItem, matchNoteName, sameNoteName, type NoteDimRow, type NoteDims } from "@/lib/note-dims";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 
-type Row = NoteDimRow & { use: boolean; item: string | undefined };   // item: undefined = ตามกลุ่ม · "" = ไม่เลือก · id = เลือกเฉพาะบรรทัด
+type Row = NoteDimRow & { use: boolean; item: string | undefined; src?: "match" | "guess" | "follow" | "user" };   // item: undefined = ตามกลุ่ม · "" = ไม่เลือก · id = เลือกเฉพาะบรรทัด · src = มาจากไหน (ชื่อตรง / AI เดา / ตามชื่อเดียวกัน / เลือกเอง)
 
 const fileToDataUrl = (f: File) => new Promise<string>((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = () => bad(r.error); r.readAsDataURL(f); });
 const numIn = (s: string): number | null => { const n = Number(s.replace(",", ".")); return s.trim() !== "" && Number.isFinite(n) && n > 0 ? n : null; };
@@ -67,13 +69,19 @@ export function NoteDimsModal<T extends CostItemLike>({ open, onClose, items, on
       const gi: Record<string, string> = {}, gs = new Set<string>();
       for (const g of d.groups) { const it = guessNoteItem(g, items); if (it) { gi[g] = it.id; gs.add(g); } }
       setGroups(d.groups); setGroupItem(gi); setGuessed(gs); setNotes(d.notes);
-      setRows(d.rows.map((r) => ({ ...r, use: true, item: undefined })));
+      setRows(d.rows.map((r) => { let m = r.name ? matchNoteName(r.name, items) : null; if (m?.kind === "guess" && gi[r.group]) m = null; /* ชื่อแค่คล้าย ไม่ทับวัสดุของกลุ่ม (เช่น "ช่องซิป" ในกลุ่ม PU) */ return { ...r, use: true, item: m?.item.id, src: m?.kind }; }));
     } catch (e) { toast.error(e instanceof Error ? e.message : t("AI อ่านรูปไม่สำเร็จ", "AI couldn't read the photo")); }
     finally { setBusy(false); }
   };
 
   const itemOf = (r: Row) => (r.item !== undefined ? r.item : groupItem[r.group] ?? "");
   const setRow = (i: number, p: Partial<Row>) => setRows((rs) => rs && rs.map((r, k) => (k === i ? { ...r, ...p } : r)));
+  /** เลือกวัสดุให้บรรทัด i → บรรทัดอื่นที่ชื่อชิ้นเหมือนกัน และไม่ได้เลือกเอง ได้ตัวเดียวกันตาม */
+  const pickRowItem = (i: number, id: string) => setRows((rs) => rs && rs.map((r, k) => {
+    if (k === i) return { ...r, item: id, src: "user" as const };
+    if (id && r.src !== "user" && sameNoteName(r.name, rs[i].name)) return { ...r, item: id, src: "follow" as const };
+    return r;
+  }));
   const create = (q: string, done: (it: T) => void) => onCreateItem?.(q, (it) => { setExtraItems((x) => [it, ...x]); done(it); });
 
   const picked = rows?.filter((r) => r.use) ?? [];
@@ -153,14 +161,15 @@ export function NoteDimsModal<T extends CostItemLike>({ open, onClose, items, on
 
               {/* แถวที่อ่านได้ */}
               <div className="space-y-1.5">
-                <div className="hidden grid-cols-[1.5rem_minmax(0,1fr)_4.5rem_4.5rem_3.5rem_minmax(0,11rem)] gap-1.5 px-1 text-[11px] text-slate-500 sm:grid">
+                <div className="hidden grid-cols-[1.5rem_minmax(0,1fr)_4.5rem_4.5rem_3.5rem_minmax(0,14rem)] gap-1.5 px-1 text-[11px] text-slate-500 sm:grid">
                   <span /><span>{t("ชื่อชิ้น (หมายเหตุ)", "Piece name (note)")}</span><span className="text-right">{t("กว้าง", "Width")}</span><span className="text-right">{t("ยาว", "Length")}</span><span className="text-right">{t("ชิ้น", "Pcs")}</span><span>{t("วัตถุดิบ", "Material")}</span>
                 </div>
                 {rows.map((r, i) => {
                   const warn = r.unsure ? "border-amber-400 bg-amber-50" : "border-slate-200";
-                  const own = r.item !== undefined;
+                  const own = r.src === "user";
+                  const chip = r.item ? ({ match: ["ตรงชื่อ", "Name match", "bg-emerald-50 text-emerald-700"], guess: ["AI เดา", "AI guess", "bg-violet-50 text-violet-700"], follow: ["ตามชื่อเดียวกัน", "Same name", "bg-blue-50 text-blue-700"] } as const)[r.src as "match" | "guess" | "follow"] : undefined;
                   return (
-                    <div key={i} className={`grid grid-cols-[1.5rem_minmax(0,1fr)] gap-1.5 rounded-lg border p-1.5 sm:grid-cols-[1.5rem_minmax(0,1fr)_4.5rem_4.5rem_3.5rem_minmax(0,11rem)] sm:items-center sm:border-0 sm:p-0.5 ${r.use ? "" : "opacity-50"} ${r.unsure ? "border-amber-200" : "border-slate-200"}`}>
+                    <div key={i} className={`grid grid-cols-[1.5rem_minmax(0,1fr)] gap-1.5 rounded-lg border p-1.5 sm:grid-cols-[1.5rem_minmax(0,1fr)_4.5rem_4.5rem_3.5rem_minmax(0,14rem)] sm:items-center sm:border-0 sm:p-0.5 ${r.use ? "" : "opacity-50"} ${r.unsure ? "border-amber-200" : "border-slate-200"}`}>
                       <input type="checkbox" checked={r.use} onChange={(e) => setRow(i, { use: e.target.checked })} aria-label={t("เอาแถวนี้", "Use this row")} className="h-4 w-4 self-center" />
                       <div className="min-w-0">
                         <input value={r.name} onChange={(e) => setRow(i, { name: e.target.value })} placeholder={r.group || t("ชื่อชิ้น", "Piece name")}
@@ -180,11 +189,13 @@ export function NoteDimsModal<T extends CostItemLike>({ open, onClose, items, on
                             className={`h-8 w-full rounded border px-1.5 text-right text-sm text-slate-800 ${warn}`} />
                         </label>
                       </div>
-                      <div className="col-span-2 min-w-0 pl-7 sm:col-span-1 sm:pl-0">
+                      <div className="col-span-2 flex min-w-0 items-center gap-1 pl-7 sm:col-span-1 sm:pl-0">
                         <SearchableSelect value={itemOf(r)} options={options} placeholder={t("— ตามกลุ่ม / ไม่เลือก —", "— Group / none —")}
-                          className={own ? "ring-1 ring-blue-300 rounded" : !itemOf(r) ? "ring-1 ring-rose-300 rounded" : undefined}
-                          onChange={(v) => setRow(i, { item: v })}
-                          onCreate={onCreateItem ? (q) => create(q, (it) => setRow(i, { item: it.id })) : undefined} createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
+                          className={`min-w-0 flex-1 ${own ? "ring-1 ring-blue-300 rounded" : r.src === "guess" && r.item ? "ring-1 ring-violet-300 rounded" : !itemOf(r) ? "ring-1 ring-rose-300 rounded" : ""}`}
+                          onChange={(v) => pickRowItem(i, v)}
+                          initialQuery={itemOf(r) ? undefined : (r.name || r.group.replace(/ชิ้น\s*\d*/g, "")).trim() || undefined}
+                          onCreate={onCreateItem ? (q) => create(q, (it) => pickRowItem(i, it.id)) : undefined} createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
+                        {chip && <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] ${chip[2]}`} title={r.src === "guess" ? t("ชื่อคล้ายวัสดุนี้ — ตรวจให้ถูกก่อนเพิ่ม", "Similar name — check before adding") : undefined}>{t(chip[0], chip[1])}</span>}
                       </div>
                     </div>
                   );

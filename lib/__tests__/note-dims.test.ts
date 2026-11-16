@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costLineFromNote, guessNoteItem, parseNoteDims } from "../note-dims";
+import { costLineFromNote, guessNoteItem, matchNoteName, parseNoteDims, sameNoteName } from "../note-dims";
 import type { CostItemLike } from "../design-sheet-cost-row";
 
 describe("parseNoteDims", () => {
@@ -45,5 +45,26 @@ describe("costLineFromNote", () => {
   it("ไม่เลือกวัตถุดิบ → บรรทัดว่างที่มีขนาด (ยอดว่าง)", () => {
     const l = costLineFromNote({ name: "", w: 9, h: 6.5, qty: 1 }, null, 3, null);
     expect(l).toMatchObject({ item_id: null, width_cm: 9, length_cm: 6.5, pieces: 1, note: null, sort_order: 4, amount: null });
+  });
+});
+
+describe("matchNoteName", () => {
+  const items = [
+    { id: "f15", name: "โฟมดำ 1.5", group_name: "โฟม" }, { id: "f3", name: "โฟมดำ 3", group_name: "โฟม" },
+    { id: "pw", name: "กระดาษขาวแข็ง", group_name: "ตัวเสริม" }, { id: "pu", name: "PU จอนนี่", group_name: "PU" },
+  ];
+  it("ชื่อตรง (ไม่สนช่องว่าง) = match", () => {
+    expect(matchNoteName("โฟมดำ 1.5", items)).toMatchObject({ kind: "match", item: { id: "f15" } });
+    expect(matchNoteName("โฟมดำ1.5", items)?.kind).toBe("match");
+  });
+  it("ชื่อคล้าย = guess · ตัวเลขต้องตรง", () => {
+    expect(matchNoteName("กระดาษบางแข็ง", items)).toMatchObject({ kind: "guess", item: { id: "pw" } });
+    expect(matchNoteName("โฟมดำ 2", items)).toBeNull();
+    expect(matchNoteName("ช่องซิปกระเป๋า", items)).toBeNull();
+    expect(matchNoteName("", items)).toBeNull();
+  });
+  it("sameNoteName", () => {
+    expect(sameNoteName("โฟมดำ 1.5", "โฟมดำ1.5")).toBe(true);
+    expect(sameNoteName("", "")).toBe(false);
   });
 });
