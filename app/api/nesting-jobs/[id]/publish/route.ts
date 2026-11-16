@@ -1,6 +1,7 @@
 /**
  * POST /api/nesting-jobs/[id]/publish (multipart) — ปิดท้าย "ส่งเข้าคลังงานพิมพ์" หลังตัวช่วยส่งไฟล์ขึ้น Drive ครบแล้ว
- *   file = รูปตัวอย่างแผ่น (ย่อแล้ว ≤4 MB) · meta = JSON { print_type_code, group?, file_ids[], sizes[], print_items[], width?, height? }
+ *   file = รูปตัวอย่างแผ่น (ย่อแล้ว ≤4 MB) · meta = JSON { print_type_code, folder_name?, date, root_folder_id?, file_ids[], sizes[], print_items[], width?, height? }
+ *   (โฟลเดอร์เดียวกับ /drive — ส่งค่าชุดเดียวกันมา) · ปิดท้ายเปิดลิงก์แชร์ "ทุกคนที่มีลิงก์ดูได้" ที่โฟลเดอร์งาน → share_url / share_error
  *   1) ทับของเดิม: ไฟล์ชื่อเดียวกับไฟล์ใหม่ (รอบก่อน) ในโฟลเดอร์ → ถังขยะ Drive (กู้คืนได้ 30 วัน)
  *   2) การ์ดในคลังไฟล์ หมวดงานพิมพ์ (assets.source='print') — ส่งครั้งแรก = สร้าง · ส่งซ้ำ = อัปเดตการ์ดเดิม (รูปเก่าลงถัง R2)
  *   3) จำไว้ในงาน (asset_id / drive_folder_url / published_at) + ฉบับร่าง → "เสร็จ"
@@ -10,13 +11,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { driveConfigured, driveListFiles, driveTrashFile } from "@/lib/google-drive";
+import { driveConfigured, driveListFiles, driveShareAnyone, driveTrashFile } from "@/lib/google-drive";
 import { isR2Configured, r2MoveToTrash, r2PutObject } from "@/lib/r2";
 import { ASSET_MAX_BYTES, extOf, sha256Hex } from "@/lib/assets";
 import { printPreviewProblem } from "@/lib/print-file-policy";
 import { normalizePrintItems, normalizeSizes } from "@/app/api/assets/shared";
 import { SELECT, actorOf, cleanUuid, toJob } from "../../shared";
-import { printTypeByCode, resolveJobFolder, safeName } from "../../publish-shared";
+import { RootMissingError, dateFolderOf, printTypeByCode, resolveJobFolder, safeName } from "../../publish-shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -52,8 +53,12 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
   const newIds = new Set((Array.isArray(meta.file_ids) ? meta.file_ids : []).map(String).filter(Boolean));
 
   let folder;
-  try { folder = await resolveJobFolder(admin, job.name as string, pt, safeName(meta.group, 80)); }
-  catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 }); }
+  const name = safeName(meta.folder_name) || safeName(job.name) || "งานพิมพ์";
+  try { folder = await resolveJobFolder(admin, { typeCode: pt.code, name, date: dateFolderOf(meta.date), rootOverride: safeName(meta.root_folder_id, 100) || null }); }
+  catch (e) {
+    if (e instanceof RootMissingError) return NextResponse.json({ error: e.message, code: "root_missing" }, { status: 409 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 });
+  }
 
   // 1) ทับของเดิม — เฉพาะไฟล์ที่ชื่อชนกับไฟล์ที่เพิ่งขึ้น (ไฟล์อื่นในโฟลเดอร์ไม่แตะ)
   let replaced = 0;
@@ -74,7 +79,7 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
 
   const actor = await actorOf(request, admin);
   const fields = {
-    title: job.name as string, file_name: `${folder.folderName}.${ext}`, r2_key: r2Key, asset_type: "image",
+    title: job.name as string, file_name: `${name}.${ext}`, r2_key: r2Key, asset_type: "image",
     content_type: file.type, ext, size_bytes: file.size, width: intOrNull(meta.width), height: intOrNull(meta.height),
     checksum: await sha256Hex(buffer), source: "print", print_type: pt.code,
     sizes: normalizeSizes(meta.sizes), print_items: normalizePrintItems(meta.print_items),
@@ -106,8 +111,13 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
     updated_by: actor.id, updated_by_name: actor.name, updated_at: new Date().toISOString(),
   }).eq("id", id).select(SELECT).single();
   if (upErr || !row) return NextResponse.json({ error: "ส่งแล้ว แต่บันทึกลงงานไม่สำเร็จ: " + (upErr?.message ?? "") }, { status: 500 });
+  // 4) ลิงก์แชร์ให้ร้านพิมพ์ (ทุกคนที่มีลิงก์ดูได้) — ไม่สำเร็จ (นโยบาย Shared drive) = แจ้งในหน้าต่าง งานส่งเสร็จแล้ว
+  let shareError: string | null = null;
+  try { const sh = await driveShareAnyone(folder.folderId); if (!sh.ok) shareError = sh.error; }
+  catch (e) { shareError = e instanceof Error ? e.message : "share error"; }
   await writeAuditFor(request, admin, { action: "publish", entityType: "erp_nesting_jobs", entityId: id,
-    metadata: { asset_id: assetId, created, folder_url: folder.folderUrl, files: newIds.size, replaced } });
+    metadata: { asset_id: assetId, created, folder_url: folder.folderUrl, files: newIds.size, replaced, shared_anyone: !shareError, share_error: shareError } });
 
-  return NextResponse.json({ data: { job: toJob(row as Record<string, unknown>), asset_id: assetId, created, replaced, local_path: folder.localPath }, error: null });
+  return NextResponse.json({ data: { job: toJob(row as Record<string, unknown>), asset_id: assetId, created, replaced, local_path: folder.localPath,
+    folder_url: folder.folderUrl, share_url: shareError ? null : folder.folderUrl, share_error: shareError }, error: null });
 }

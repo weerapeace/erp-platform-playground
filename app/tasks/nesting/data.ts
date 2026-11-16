@@ -93,7 +93,36 @@ export async function deleteNestingJob(id: string): Promise<void> {
 
 export type DriveGroups = { configured: boolean; subpath: string; folders: string[] };
 export type DriveUploads = { folder_url: string; local_path: string; uploads: { key: string; filename: string; upload_url: string }[] };
-export type PublishResult = { job: NestingJobRow; asset_id: string; created: boolean; replaced: number; local_path: string };
+export type PublishResult = {
+  job: NestingJobRow; asset_id: string; created: boolean; replaced: number; local_path: string;
+  folder_url?: string; share_url?: string | null; share_error?: string | null;   // ลิงก์แชร์ "ทุกคนที่มีลิงก์ดูได้" ของโฟลเดอร์งาน
+};
+
+/** ปลายทางที่จะส่ง (โฟลเดอร์ส่งร้านพิมพ์ / วันที่ / ประเภท - ชื่อ) */
+export type SendTarget = { print_type_code: string; folder_name: string; date: string; root_folder_id: string | null };
+
+export type DriveFolderRef = { id: string; name: string; url: string };
+export type DriveRootInfo = {
+  configured: boolean;
+  default: (DriveFolderRef & { found: boolean; local_path: string }) | null;
+  folder: DriveFolderRef | null;   // โฟลเดอร์ที่ขอให้ตรวจ (ไม่พบ = null)
+  can_set_default: boolean;
+};
+
+/** โฟลเดอร์ส่งร้านพิมพ์ตั้งต้น (ยังอยู่ไหม) + ตรวจโฟลเดอร์/ลิงก์ที่ผู้ใช้เลือก */
+export async function getDriveRoot(folder?: string | null): Promise<DriveRootInfo> {
+  return json<DriveRootInfo>(await apiFetch(`/api/nesting-jobs/drive-root${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`));
+}
+/** ตั้งเป็นโฟลเดอร์ส่งร้านพิมพ์ตั้งต้นของทุกคน (ผู้ดูแล) */
+export async function setDefaultDriveRoot(folderId: string): Promise<DriveFolderRef> {
+  return json<DriveFolderRef>(await apiFetch("/api/nesting-jobs/drive-root", { method: "PUT", body: JSON.stringify({ folder_id: folderId }) }));
+}
+
+/** วันที่วันนี้ของเครื่องนี้ (YYYY-MM-DD) — ชื่อโฟลเดอร์วันที่ */
+export function todayFolder(now = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
 
 /** โฟลเดอร์ย่อยที่มีอยู่แล้วใต้ [แม่งานพิมพ์]/Printed/<ประเภท> (ทำ dropdown) */
 export async function listDriveGroups(printTypeCode: string): Promise<DriveGroups> {
@@ -101,7 +130,7 @@ export async function listDriveGroups(printTypeCode: string): Promise<DriveGroup
 }
 
 /** เปิดช่องอัปโหลดบน Drive ให้ตัวช่วยส่งไฟล์ตรง — files = ชื่อไฟล์ผลลัพธ์ของตัวช่วย (sheet_01.pdf, preview_01.png …) */
-export async function openDriveUploads(id: string, body: { print_type_code: string; group: string; files: string[] }): Promise<DriveUploads> {
+export async function openDriveUploads(id: string, body: SendTarget & { files: string[] }): Promise<DriveUploads> {
   return json<DriveUploads>(await apiFetch(`/api/nesting-jobs/${id}/drive`, { method: "POST", body: JSON.stringify(body) }));
 }
 

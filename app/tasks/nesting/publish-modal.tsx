@@ -4,24 +4,33 @@
  * หน้าต่าง "ส่งเข้าคลังงานพิมพ์" (เฟส 3) — ใช้ ERPModal กลาง
  *
  * 1) ตัวช่วยทำไฟล์ (PDF + รูปตัวอย่าง [+ EPS]) ตามตำแหน่งบนจอตอนนี้
- * 2) ERP เปิดช่องอัปโหลดในโฟลเดอร์ [แม่งานพิมพ์]/Printed/<ประเภท>/<โฟลเดอร์ย่อย>/<ชื่องาน>
+ * 2) ERP เปิดช่องอัปโหลดในโฟลเดอร์ [ไฟล์ส่งร้านพิมพ์]/<YYYY-MM-DD>/<ประเภท> - <ชื่องาน> (เจ้าของสั่ง 2026-11-16)
+ *    ปลายทางตั้งต้น = ของระบบ · เปลี่ยนเองได้ (วางลิงก์โฟลเดอร์ · จำในเครื่องนี้) · หาไม่เจอ = ให้เลือกใหม่ · ผู้ดูแลตั้งเป็นค่าเริ่มของทุกคนได้
  * 3) ตัวช่วยส่งไฟล์ขึ้น Drive ตรงจากเครื่อง (ไฟล์ใหญ่ได้ — ไม่ผ่านเซิร์ฟเวอร์ ERP ที่รับได้แค่ 4 MB)
- * 4) ERP ทับไฟล์รอบก่อน + สร้าง/อัปเดตการ์ดในคลังไฟล์ หมวดงานพิมพ์ + จำไว้ในงาน
+ * 4) ERP ทับไฟล์รอบก่อน + สร้าง/อัปเดตการ์ดในคลังไฟล์ หมวดงานพิมพ์ + จำไว้ในงาน + ลิงก์แชร์ "ทุกคนที่มีลิงก์ดูได้" (คัดลอกให้เอง)
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useT, useLang } from "@/components/i18n";
 import { ERPModal } from "@/components/modal";
 import { downscaleImageWidth, shrinkImageToFit } from "@/lib/image-resize";
 import { HELPER_DRIVE_VERSION, helperApi, helperFile, versionAtLeast, type DrivePush } from "@/lib/nesting-helper";
-import { listDriveGroups, openDriveUploads, publishToLibrary, type PrintType, type PublishResult } from "./data";
+import {
+  getDriveRoot, openDriveUploads, publishToLibrary, setDefaultDriveRoot, todayFolder,
+  type DriveFolderRef, type DriveRootInfo, type PrintType, type PublishResult,
+} from "./data";
 import type { Placed } from "./sheet-view";
 
 type ExportSheet = { pdf: string; preview?: string; eps?: string };
 type Phase = "idle" | "export" | "drive" | "upload" | "card";
 
-const GROUP_PREF = "nesting-drive-group:";
-const readPref = (code: string) => { try { return localStorage.getItem(GROUP_PREF + code) ?? ""; } catch { return ""; } };
-const writePref = (code: string, v: string) => { try { localStorage.setItem(GROUP_PREF + code, v); } catch { /* ไม่มีที่เก็บ = ไม่จำ */ } };
+// ปลายทางที่เลือกเอง — จำในเครื่องนี้ (ความสะดวกรายคน · อ่านไม่ได้ = ใช้ตั้งต้นของระบบ)
+const ROOT_PREF = "nesting-send-root";
+const readRoot = (): DriveFolderRef | null => {
+  try { const v = JSON.parse(localStorage.getItem(ROOT_PREF) ?? "null"); return v && typeof v.id === "string" ? v as DriveFolderRef : null; } catch { return null; }
+};
+const writeRoot = (v: DriveFolderRef | null) => { try { if (v) localStorage.setItem(ROOT_PREF, JSON.stringify(v)); else localStorage.removeItem(ROOT_PREF); } catch { /* ไม่จำ */ } };
+/** ข้อความจากเซิร์ฟเวอร์เมื่อหาโฟลเดอร์ปลายทางไม่เจอ (publish-shared RootMissingError) */
+const ROOT_MISSING = "หาโฟลเดอร์ปลายทางบน Drive ไม่เจอ";
 
 const CARD_MAX_BYTES = 3.5 * 1024 * 1024;   // รูปการ์ดอัปผ่านเซิร์ฟเวอร์ ERP (ลิมิต body ~4 MB)
 const mb = (n: number) => (n / 1024 / 1024).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1);
@@ -53,10 +62,17 @@ export function PublishModal({
   const t = useT();
   const { lang } = useLang();
   const [code, setCode] = useState("");
-  const [group, setGroup] = useState("");
-  const [groups, setGroups] = useState<string[]>([]);
-  const [subpath, setSubpath] = useState("");
-  const [driveOn, setDriveOn] = useState(true);
+  const [folderName, setFolderName] = useState("");
+  const [rootInfo, setRootInfo] = useState<DriveRootInfo | null>(null);
+  const [pick, setPick] = useState<DriveFolderRef | null>(null);     // ปลายทางที่เลือกเอง (null = ตั้งต้นของระบบ)
+  const [pickMissing, setPickMissing] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const [link, setLink] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkErr, setLinkErr] = useState<string | null>(null);
+  const [done, setDone] = useState<PublishResult | null>(null);
+  const [copied, setCopied] = useState(false);
+  const driveOn = rootInfo?.configured !== false;
   const [withPreview, setWithPreview] = useState(true);
   const [withEps, setWithEps] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -66,25 +82,57 @@ export function PublishModal({
   const busy = phase !== "idle";
   const canPush = !!helperVersion && versionAtLeast(helperVersion, HELPER_DRIVE_VERSION);
 
-  // เปิดหน้าต่าง → ประเภทตามงาน (ไม่มีใช้ตัวแรก) + โฟลเดอร์ย่อยที่ใช้ล่าสุดของประเภทนั้น
+  // เปิดหน้าต่าง → ประเภทตามงาน (ไม่มีใช้ตัวแรก) + ชื่อโฟลเดอร์ = ชื่องาน + ตรวจปลายทาง (ตั้งต้น / ที่จำไว้ในเครื่อง) ว่ายังอยู่
   useEffect(() => {
     if (!open) return;
     const pt = printTypes.find((p) => p.id === defaultPrintTypeId) ?? printTypes[0];
     setCode(pt?.code ?? "");
-    setGroup(pt ? readPref(pt.code) : "");
-    setPhase("idle"); setPush(null); setError(null);
-  }, [open, defaultPrintTypeId, printTypes]);
-
-  useEffect(() => {
-    if (!open || !code) return;
+    setFolderName(jobName.trim());
+    setPhase("idle"); setPush(null); setError(null); setDone(null); setCopied(false);
+    setChanging(false); setLink(""); setLinkErr(null); setPickMissing(false);
+    const mine = readRoot();
+    setPick(mine);
     let alive = true;
-    listDriveGroups(code).then((g) => { if (alive) { setGroups(g.folders); setSubpath(g.subpath); setDriveOn(g.configured); } })
-      .catch(() => { if (alive) setGroups([]); });
+    getDriveRoot(mine?.id).then((r) => {
+      if (!alive) return;
+      setRootInfo(r);
+      if (mine && !r.folder) { setPickMissing(true); setPick(null); writeRoot(null); }   // โฟลเดอร์ที่จำไว้หายไป → ให้เลือกใหม่
+      else if (mine && r.folder) setPick(r.folder);
+    }).catch(() => { if (alive) setRootInfo(null); });
     return () => { alive = false; };
-  }, [open, code]);
+  }, [open, defaultPrintTypeId, printTypes, jobName]);
 
-  const dest = useMemo(() => [...(subpath || code).split(/[\\/]+/), group.trim(), jobName.trim() || t("งานพิมพ์", "Print job")]
-    .filter(Boolean), [subpath, code, group, jobName, t]);
+  const date = useMemo(() => todayFolder(), [open]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const nameOrDefault = folderName.trim() || jobName.trim() || t("งานพิมพ์", "Print job");
+  const subName = code ? `${code} - ${nameOrDefault}` : nameOrDefault;
+  const target = pick ?? (rootInfo?.default?.found ? rootInfo.default : null);
+  const rootMissing = !pick && rootInfo?.configured && rootInfo.default && !rootInfo.default.found;
+  const dest = [target?.name || t("(ยังไม่ได้เลือกโฟลเดอร์)", "(no folder chosen)"), date, subName];
+
+  /** ตรวจลิงก์โฟลเดอร์ที่วาง → ใช้เป็นปลายทาง (จำในเครื่องนี้) */
+  const applyLink = async () => {
+    const v = link.trim();
+    if (!v) { setLinkErr(t("วางลิงก์โฟลเดอร์ Google Drive ก่อน", "Paste a Google Drive folder link first")); return; }
+    setLinkBusy(true); setLinkErr(null);
+    try {
+      const r = await getDriveRoot(v);
+      if (!r.folder) { setLinkErr(t("หาโฟลเดอร์นี้ไม่เจอ หรือยังไม่ได้แชร์ให้ระบบ — ตรวจลิงก์อีกครั้ง", "Couldn't find this folder, or it isn't shared with the system — check the link")); return; }
+      setPick(r.folder); writeRoot(r.folder); setPickMissing(false); setChanging(false); setLink("");
+    } catch (e) { setLinkErr((e as Error).message); } finally { setLinkBusy(false); }
+  };
+  const useDefault = () => { setPick(null); writeRoot(null); setChanging(false); };
+  const makeDefault = async () => {
+    if (!pick) return;
+    setLinkBusy(true); setLinkErr(null);
+    try {
+      const f = await setDefaultDriveRoot(pick.id);
+      setRootInfo((r) => (r ? { ...r, default: { ...f, found: true, local_path: "" } } : r));
+      setPick(null); writeRoot(null);
+    } catch (e) { setLinkErr((e as Error).message); } finally { setLinkBusy(false); }
+  };
+  const copyLink = async (url: string) => {
+    try { await navigator.clipboard.writeText(url); setCopied(true); } catch { setCopied(false); }
+  };
 
   const send = async () => {
     setError(null);
@@ -102,9 +150,8 @@ export function PublishModal({
         .filter((f): f is string => !!f);
 
       setPhase("drive");
-      const g = group.trim();
-      const up = await openDriveUploads(id, { print_type_code: code, group: g, files });
-      writePref(code, g);
+      const where = { print_type_code: code, folder_name: nameOrDefault, date, root_folder_id: pick?.id ?? null };
+      const up = await openDriveUploads(id, { ...where, files });
 
       setPhase("upload");
       let st = await helperApi<DrivePush>(`/api/jobs/${hid}/drive-push`, lang, {
@@ -128,12 +175,16 @@ export function PublishModal({
       }
       const dim = await imageSize(preview);
       const r = await publishToLibrary(id, preview, {
-        print_type_code: code, group: g, file_ids: st.files.map((f) => f.id).filter(Boolean),
+        ...where, file_ids: st.files.map((f) => f.id).filter(Boolean),
         ...buildMeta(), width: dim?.width, height: dim?.height,
       });
+      setDone(r);
+      if (r.share_url) void copyLink(r.share_url);   // คัดลอกลิงก์ให้เลย ส่งร้านพิมพ์ได้ทันที
       onPublished(r);
     } catch (e) {
-      setError(cancelled.current ? t("ยกเลิกการส่งแล้ว", "Sending cancelled") : (e as Error).message);
+      const msg = (e as Error).message;
+      if (msg.startsWith(ROOT_MISSING)) { if (pick) { setPickMissing(true); setPick(null); writeRoot(null); } setChanging(true); }
+      setError(cancelled.current ? t("ยกเลิกการส่งแล้ว", "Sending cancelled") : msg);
     } finally {
       setPhase("idle");
     }
@@ -164,7 +215,8 @@ export function PublishModal({
       : t("ติดต่อตัวช่วยในเครื่องนี้ไม่ได้", "Cannot reach the helper on this computer"))
     : !driveOn ? t("ยังไม่ได้ตั้งค่า Google Drive ของระบบ — แจ้งผู้ดูแล", "Google Drive isn't set up for the system yet — ask an admin")
       : !code ? t("ยังไม่มีประเภทงานพิมพ์ — ตั้งที่คลังไฟล์ → ⚙️ จัดการประเภทงานพิมพ์", "No print types yet — set them up in the file library → ⚙️ Manage print types")
-        : null;
+        : rootInfo && !target ? t("เลือกโฟลเดอร์ปลายทางก่อนส่ง", "Choose a destination folder before sending")
+          : null;
 
   return (
     <ERPModal open={open} onClose={cancel} size="md" closeOnBackdrop={!busy} defaultExpanded={false}
@@ -174,7 +226,7 @@ export function PublishModal({
         <div className="flex justify-end gap-2">
           <button type="button" onClick={cancel} disabled={busy && phase !== "upload"}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">
-            {phase === "upload" ? t("หยุดส่ง", "Stop upload") : t("ยกเลิก", "Cancel")}
+            {phase === "upload" ? t("หยุดส่ง", "Stop upload") : done ? t("เสร็จ", "Done") : t("ยกเลิก", "Cancel")}
           </button>
           <button type="button" onClick={() => void send()} disabled={busy || !!blocked}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
@@ -196,7 +248,7 @@ export function PublishModal({
           <div className="mb-1 text-xs text-slate-500">{t("ประเภทงานพิมพ์", "Print type")}</div>
           <div className="flex flex-wrap gap-2">
             {printTypes.map((p) => (
-              <button key={p.id} type="button" disabled={busy} onClick={() => { setCode(p.code); setGroup(readPref(p.code)); }}
+              <button key={p.id} type="button" disabled={busy} onClick={() => setCode(p.code)}
                 className={`rounded-lg border px-3 py-1 text-xs ${p.code === code ? "border-violet-400 bg-violet-50 font-semibold text-violet-700" : "border-slate-300 text-slate-600"}`}>
                 {p.code}{p.name && p.name !== p.code ? ` · ${p.name}` : ""}
               </button>
@@ -204,15 +256,60 @@ export function PublishModal({
           </div>
         </div>
 
+        <div>
+          <div className="mb-1 text-xs text-slate-500">{t("โฟลเดอร์ปลายทาง", "Destination folder")}</div>
+          {(rootMissing || pickMissing) && !pick && (
+            <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              ⚠ {pickMissing ? t("หาโฟลเดอร์ที่เลือกไว้ไม่เจอ (ถูกย้าย/ลบ?) — เลือกโฟลเดอร์ใหม่", "The folder you chose earlier is gone (moved/deleted?) — choose a new one")
+                : t("หาโฟลเดอร์ส่งร้านพิมพ์ตั้งต้นไม่เจอ (ถูกย้าย/เปลี่ยนชื่อ?) — เลือกโฟลเดอร์ใหม่ก่อนส่ง", "The default print-shop folder is missing (moved/renamed?) — choose a new one before sending")}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1 break-all rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
+              📁 {target ? target.name : rootInfo ? t("— ยังไม่ได้เลือก —", "— not chosen —") : t("กำลังตรวจ…", "Checking…")}
+              {pick && <span className="ml-1 text-[11px] text-violet-600">{t("(เลือกเอง · จำในเครื่องนี้)", "(your choice · remembered here)")}</span>}
+            </div>
+            {target?.url && <a href={target.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-violet-700 underline">{t("เปิด", "Open")}</a>}
+            <button type="button" disabled={busy} onClick={() => setChanging((v) => !v)}
+              className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              {t("เปลี่ยน", "Change")}
+            </button>
+          </div>
+          {(changing || ((rootMissing || pickMissing) && !pick)) && (
+            <div className="mt-2 space-y-1.5">
+              <div className="flex gap-2">
+                <input value={link} disabled={busy || linkBusy} onChange={(e) => { setLink(e.target.value); setLinkErr(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void applyLink(); } }}
+                  placeholder={t("วางลิงก์โฟลเดอร์ Google Drive", "Paste a Google Drive folder link")} className="h-9 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 text-xs" />
+                <button type="button" disabled={busy || linkBusy} onClick={() => void applyLink()}
+                  className="shrink-0 rounded-lg border border-violet-300 bg-violet-50 px-3 text-xs text-violet-700 hover:bg-violet-100 disabled:opacity-50">
+                  {linkBusy ? t("กำลังตรวจ…", "Checking…") : t("ใช้โฟลเดอร์นี้", "Use this folder")}
+                </button>
+              </div>
+              {linkErr && <div className="text-xs text-red-600">{linkErr}</div>}
+              <div className="text-[11px] text-slate-500">{t("ระบบตรวจว่ามีโฟลเดอร์จริงและแชร์ให้ระบบแล้ว · จำไว้ในเครื่องนี้", "The system checks the folder exists and is shared with it · remembered on this computer")}</div>
+            </div>
+          )}
+          {pick && (
+            <div className="mt-1.5 flex flex-wrap gap-3 text-[11px]">
+              {rootInfo?.default?.found && <button type="button" disabled={busy} onClick={useDefault} className="text-slate-500 underline">{t(`กลับไปใช้ตั้งต้น (${rootInfo.default.name})`, `Back to the default (${rootInfo.default.name})`)}</button>}
+              {rootInfo?.can_set_default && (
+                <button type="button" disabled={busy || linkBusy} onClick={() => void makeDefault()} className="text-violet-700 underline">
+                  {t("ตั้งเป็นค่าเริ่มของทุกคน", "Make it everyone's default")}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         <label className="block">
-          <span className="mb-1 block text-xs text-slate-500">{t("โฟลเดอร์ย่อย (เลือกที่มี หรือพิมพ์ชื่อใหม่ · ไม่ใส่ก็ได้)", "Subfolder (pick one or type a new name · optional)")}</span>
-          <input list="nesting-drive-groups" value={group} disabled={busy} maxLength={80} onChange={(e) => setGroup(e.target.value)}
-            placeholder={t("เช่น goodgoods", "e.g. goodgoods")} className="h-9 w-full rounded-lg border border-slate-300 px-3" />
-          <datalist id="nesting-drive-groups">{groups.map((g) => <option key={g} value={g} />)}</datalist>
+          <span className="mb-1 block text-xs text-slate-500">{t("ชื่อโฟลเดอร์งาน (ตั้งจากชื่องาน แก้ได้ · มีประเภทนำหน้าให้เอง)", "Job folder name (from the job name, editable · type is added in front)")}</span>
+          <input value={folderName} disabled={busy} maxLength={100} onChange={(e) => setFolderName(e.target.value)}
+            placeholder={jobName || t("งานพิมพ์", "Print job")} className="h-9 w-full rounded-lg border border-slate-300 px-3" />
         </label>
 
         <div>
-          <div className="mb-1 text-xs text-slate-500">{t("ปลายทางบน Drive", "Destination on Drive")}</div>
+          <div className="mb-1 text-xs text-slate-500">{t("จะสร้างที่", "Will be created at")}</div>
           <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">📁 {dest.join(" / ")}</div>
         </div>
 
@@ -234,6 +331,23 @@ export function PublishModal({
           </div>
         )}
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">{error}</div>}
+        {done && !busy && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
+            <div className="font-medium">✅ {done.share_url
+              ? (copied ? t("ส่งแล้ว · คัดลอกลิงก์ให้แล้ว (ทุกคนที่มีลิงก์ดูได้)", "Sent · link copied (anyone with the link can view)") : t("ส่งแล้ว · ลิงก์แชร์ (ทุกคนที่มีลิงก์ดูได้)", "Sent · share link (anyone with the link can view)"))
+              : t("ส่งแล้ว", "Sent")}</div>
+            {done.share_error && (
+              <div className="mt-1 text-xs text-amber-700">{t(`เปิดลิงก์แชร์ให้คนนอกไม่ได้ (Shared drive อาจตั้งห้ามแชร์ออกนอกองค์กร) — ไฟล์ขึ้น Drive แล้ว: ${done.share_error}`, `Couldn't open an anyone-with-the-link share (the Shared drive may block outside sharing) — files are on Drive: ${done.share_error}`)}</div>
+            )}
+            {(done.share_url || done.folder_url) && (
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate rounded bg-white px-2 py-1 font-mono text-xs text-slate-700">{done.share_url || done.folder_url}</span>
+                <button type="button" onClick={() => void copyLink((done.share_url || done.folder_url)!)} className="shrink-0 rounded border border-emerald-300 bg-white px-2 py-1 text-xs">{t("คัดลอก", "Copy")}</button>
+                <a href={(done.share_url || done.folder_url)!} target="_blank" rel="noreferrer" className="shrink-0 rounded border border-emerald-300 bg-white px-2 py-1 text-xs">{t("เปิด", "Open")}</a>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </ERPModal>
   );

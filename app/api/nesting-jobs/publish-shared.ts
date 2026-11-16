@@ -1,13 +1,11 @@
 /**
  * ส่งงานจัดเรียงเข้าคลังงานพิมพ์ (เฟส 3) — ของใช้ร่วมฝั่งเซิร์ฟเวอร์ของ /api/nesting-jobs/[id]/drive + /publish
  *
- * ปลายทาง = โครงเดียวกับ "เพิ่มงานพิมพ์" ในคลังไฟล์ (components/asset-library/print-modals.tsx):
- *   [โฟลเดอร์แม่ของงานพิมพ์ (ui_config print_drive_root)] / [ซับของประเภท เช่น Printed/DTF] / [โฟลเดอร์ย่อย?] / [ชื่องาน]
+ * ปลายทาง = [โฟลเดอร์ส่งร้านพิมพ์] / YYYY-MM-DD / <ประเภท> - <ชื่องาน> (ดู resolveJobFolder ด้านล่าง · docs/nesting-artwork-cards.md)
  * ไฟล์ใหญ่ไม่ผ่านเซิร์ฟเวอร์นี้ (ลิมิต body 4 MB ของ Vercel) — เปิดช่องอัปโหลด (resumable session) ให้ตัวช่วยในเครื่องส่งตรงเข้า Drive
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { driveGetFolder } from "@/lib/google-drive";
-import { resolveArtworkDriveFolder } from "@/lib/artwork-drive";
+import { driveEnsureFolder, driveGetFolder } from "@/lib/google-drive";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -54,16 +52,58 @@ export async function printDriveRoot(admin: Admin): Promise<{ folder_id: string;
 
 export const subpathOf = (pt: PrintTypeRef) => (pt.drive_subpath ?? "").trim() || pt.code;
 
-/** หา/สร้างโฟลเดอร์ของงาน (เรียกซ้ำได้ — มีอยู่แล้ว = ใช้ตัวเดิม) + path ในเครื่อง (Google Drive บนเครื่อง) */
-export async function resolveJobFolder(admin: Admin, jobName: string, pt: PrintTypeRef, group: string): Promise<JobFolder> {
-  const root = await printDriveRoot(admin);
-  const folderName = safeName(jobName) || "งานพิมพ์";
-  const sub = subpathOf(pt);
-  const folderId = await resolveArtworkDriveFolder(admin, {
-    name: folderName, subpathOverride: [sub, group].filter(Boolean).join("/"), rootFolderId: root.folder_id || null,
-  });
+
+// ---------------------------------------------------------------- ปลายทาง "ไฟล์ส่งร้านพิมพ์" (เจ้าของสั่ง 2026-11-16)
+// [โฟลเดอร์ส่งร้านพิมพ์] / YYYY-MM-DD / <ประเภท> - <ชื่องาน>  + ลิงก์แชร์ "ทุกคนที่มีลิงก์ดูได้" ที่โฟลเดอร์ชื่องาน
+// โฟลเดอร์ส่งร้านพิมพ์ = ui_config nesting_drive_root (ผู้ดูแลตั้งจากหน้าต่างส่ง) → ไม่มี = print_drive_root เดิม (คลังไฟล์ใช้ร่วม)
+// ผู้ใช้เปลี่ยนปลายทางเองได้ (วางลิงก์โฟลเดอร์ · จำในเครื่อง) → ส่ง root_folder_id มา
+
+export const DATE_FOLDER = /^\d{4}-\d{2}-\d{2}$/;
+
+/** ชื่อโฟลเดอร์งาน: "<ประเภท> - <ชื่อ>" (ชื่อว่าง = "งานพิมพ์") */
+export function jobFolderName(typeCode: string, name: string): string {
+  const n = safeName(name) || "งานพิมพ์";
+  const c = safeName(typeCode, 20);
+  return c ? `${c} - ${n}`.slice(0, 120) : n;
+}
+
+/** วันที่โฟลเดอร์ (เครื่องผู้ใช้ส่งมา) — ผิดรูปแบบ = วันนี้ตามเวลาไทย */
+export function dateFolderOf(v: unknown, now = new Date()): string {
+  const s = String(v ?? "").trim();
+  if (DATE_FOLDER.test(s)) return s;
+  return new Date(now.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+export type SendRoot = { folder_id: string; local_base_path: string; source: "nesting" | "print" };
+
+/** โฟลเดอร์ส่งร้านพิมพ์ตั้งต้นของทุกคน */
+export async function sendRootDefault(admin: Admin): Promise<SendRoot> {
+  const { data } = await admin.from("ui_config").select("value").eq("key", "nesting_drive_root").maybeSingle();
+  const v = (data?.value ?? {}) as Record<string, unknown>;
+  const id = String(v.folder_id ?? "").trim();
+  if (id) return { folder_id: id, local_base_path: String(v.local_base_path ?? "").trim(), source: "nesting" };
+  const p = await printDriveRoot(admin);
+  return { ...p, source: "print" };
+}
+
+export class RootMissingError extends Error {
+  constructor() { super("หาโฟลเดอร์ปลายทางบน Drive ไม่เจอ (อาจถูกย้าย/ลบ หรือยังไม่ได้แชร์ให้ระบบ) — เลือกโฟลเดอร์ใหม่ในหน้าต่างส่ง"); }
+}
+
+/**
+ * หา/สร้างโฟลเดอร์ของงาน (เรียกซ้ำได้ — มีอยู่แล้ว = ใช้ตัวเดิม)
+ * rootOverride = โฟลเดอร์ที่ผู้ใช้เลือกเอง (ไม่ใส่ = ตั้งต้น) · หาโฟลเดอร์ปลายทางไม่เจอ = RootMissingError
+ */
+export async function resolveJobFolder(admin: Admin, p: { typeCode: string; name: string; date: string; rootOverride?: string | null }): Promise<JobFolder> {
+  const def = await sendRootDefault(admin);
+  const rootId = (p.rootOverride || "").trim() || def.folder_id;
+  const root = rootId ? await driveGetFolder(rootId) : null;
+  if (!root) throw new RootMissingError();
+  const folderName = jobFolderName(p.typeCode, p.name);
+  const dateId = await driveEnsureFolder(p.date, root.id);
+  const folderId = await driveEnsureFolder(folderName, dateId);
   const info = await driveGetFolder(folderId);
-  const segs = [...sub.split(/[\\/]+/), group, folderName].map((s) => s.trim()).filter(Boolean);
-  const localPath = root.local_base_path ? [root.local_base_path.replace(/[\\/]+$/, ""), ...segs].join("\\") : "";
+  const useLocal = root.id === def.folder_id && def.local_base_path;
+  const localPath = useLocal ? [def.local_base_path.replace(/[\/]+$/, ""), p.date, folderName].join("\\") : "";
   return { folderId, folderUrl: info?.webViewLink ?? `https://drive.google.com/drive/folders/${folderId}`, localPath, folderName };
 }

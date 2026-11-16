@@ -874,8 +874,7 @@ export function NestingEditor({ id }: { id: string }) {
     return { sizes, print_items: [...merged.values()] };
   };
   const onPublished = (r: PublishResult) => {
-    applyJob(r.job);
-    setPublishOpen(false);
+    applyJob(r.job);   // หน้าต่างส่งยังเปิดอยู่ — โชว์ลิงก์แชร์ให้คัดลอก (ปิดเองด้วยปุ่ม "เสร็จ")
     toast("success", r.created
       ? t("ส่งเข้าคลังงานพิมพ์แล้ว — สร้างการ์ดใหม่ในคลังไฟล์", "Sent to the print library — a new card was created in the file library")
       : t(`ส่งใหม่แล้ว — อัปเดตการ์ดเดิม${r.replaced ? ` · ย้ายไฟล์เก่า ${r.replaced} ไฟล์ลงถังขยะ Drive` : ""}`,

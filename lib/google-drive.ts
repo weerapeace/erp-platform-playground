@@ -198,6 +198,23 @@ export async function driveTrashFolder(id: string): Promise<boolean> {
 /** ทิ้งไฟล์ลงถังขยะตาม id (Drive ใช้ endpoint เดียวกับโฟลเดอร์) — ใช้ตอน "ทับ" ไฟล์ปกเดิม */
 export async function driveTrashFile(id: string): Promise<boolean> { return driveTrashFolder(id); }
 
+/**
+ * เปิดลิงก์แชร์ "ทุกคนที่มีลิงก์ดูได้" ให้ไฟล์/โฟลเดอร์ (เช่น ส่งงานให้ร้านพิมพ์) — เปิดซ้ำได้ (Drive ไม่สร้างสิทธิ์ซ้ำ)
+ * Shared drive ที่ตั้งห้ามแชร์นอกองค์กร = ไม่สำเร็จ → คืน { ok:false, error } (ผู้เรียกแจ้งผู้ใช้ ไม่ทำให้งานหลักพัง)
+ */
+export async function driveShareAnyone(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const fid = (id || "").trim(); if (!fid) return { ok: false, error: "no id" };
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}/permissions?supportsAllDrives=true`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ role: "reader", type: "anyone", allowFileDiscovery: false }),
+  });
+  if (res.ok) return { ok: true };
+  const j = await res.json().catch(() => ({}));
+  return { ok: false, error: String(j.error?.message || res.status) };
+}
+
 /** อัปไฟล์ขึ้นโฟลเดอร์ (multipart) → คืน { id, webViewLink } · ใช้เฟสอัปไฟล์ */
 export async function driveUploadFile(name: string, mimeType: string, data: ArrayBuffer | Uint8Array, parentId: string): Promise<{ id: string; webViewLink: string }> {
   const token = await getAccessToken();

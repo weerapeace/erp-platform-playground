@@ -1,7 +1,8 @@
 /**
  * POST /api/nesting-jobs/[id]/drive — เปิด "ช่องอัปโหลด" บน Drive ให้ตัวช่วยในเครื่องส่งไฟล์ตรง (ไฟล์ใหญ่ได้)
- *   body { print_type_code, group?, files: ["sheet_01.pdf", "preview_01.png", …] }   (ชื่อไฟล์ผลลัพธ์ของตัวช่วย)
- *   → หา/สร้างโฟลเดอร์ [แม่งานพิมพ์]/Printed/DTF/[group]/[ชื่องาน] + resumable session ต่อไฟล์
+ *   body { print_type_code, folder_name?, date (YYYY-MM-DD), root_folder_id?, files: ["sheet_01.pdf", "preview_01.png", …] }
+ *   → หา/สร้างโฟลเดอร์ [ไฟล์ส่งร้านพิมพ์]/<วันที่>/<ประเภท> - <ชื่อ> + resumable session ต่อไฟล์
+ *   หาโฟลเดอร์ปลายทางไม่เจอ = 409 { code: "root_missing" } (หน้าต่างให้เลือกโฟลเดอร์ใหม่)
  *   → { folder_url, local_path, uploads: [{ key, filename, upload_url }] }  — nesting.run
  * ไฟล์ชื่อเดียวกันของรอบก่อนยังไม่ลบตรงนี้ — ลบ (ลงถังขยะ Drive) ตอน /publish หลังไฟล์ใหม่ขึ้นครบแล้ว
  */
@@ -10,7 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { driveConfigured, driveCreateResumableSession } from "@/lib/google-drive";
 import { cleanUuid } from "../../shared";
-import { driveFileName, printTypeByCode, resolveJobFolder, safeName, sheetCount } from "../../publish-shared";
+import { RootMissingError, dateFolderOf, driveFileName, printTypeByCode, resolveJobFolder, safeName, sheetCount } from "../../publish-shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,16 +35,17 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
 
   const keys = [...new Set((Array.isArray(b.files) ? b.files : []).map(String))].slice(0, 40);
   const sheets = sheetCount(keys);
-  const folderName = safeName(job.name) || "งานพิมพ์";
+  const folderName = safeName(b.folder_name) || safeName(job.name) || "งานพิมพ์";
   const named = keys.map((key) => ({ key, ...driveFileName(folderName, key, sheets) }));
   if (!named.length || named.some((n) => !n.name)) return NextResponse.json({ error: "รายการไฟล์ที่จะส่งไม่ถูกต้อง" }, { status: 400 });
 
   try {
-    const folder = await resolveJobFolder(admin, job.name as string, pt, safeName(b.group, 80));
+    const folder = await resolveJobFolder(admin, { typeCode: pt.code, name: folderName, date: dateFolderOf(b.date), rootOverride: safeName(b.root_folder_id, 100) || null });
     const uploads: { key: string; filename: string; upload_url: string }[] = [];
     for (const n of named) uploads.push({ key: n.key, filename: n.name!, upload_url: await driveCreateResumableSession(n.name!, n.mime!, folder.folderId) });
     return NextResponse.json({ data: { folder_url: folder.folderUrl, local_path: folder.localPath, uploads }, error: null });
   } catch (e) {
+    if (e instanceof RootMissingError) return NextResponse.json({ error: e.message, code: "root_missing" }, { status: 409 });
     return NextResponse.json({ error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 });
   }
 }
