@@ -151,10 +151,23 @@ const roleOf = (layer: string): Role => {
   if (L === "11") return "hole";
   if (L === "HW") return "skip";   // ตำแหน่งอะไหล่ในไฟล์ที่ระบบนี้ส่งออก — ไม่ใช่เส้นตัด
   if (L === "LABEL" || L === "15" || L === "2" || L === "3" || L === "5" || L === "13") return "skip";
+  // CLO3D (DXF-AAMA) แถมสำเนาเส้นเดิมแบบแตกจุดโค้งไว้ในชั้น 84 (เส้นตัด) · 85 (เส้นใน) · 86 (ช่องเจาะ) · 87 (เส้นเย็บ)
+  // อ่านเป็นเส้นตัด = ชิ้นซ้ำ 3 เท่า + สำเนากลายเป็นรูเจาะทับตัวเอง (พบ 2026-11-16 ไฟล์ leather bag จาก CLO 2025) → ใช้ชั้นหลัก 1/8/11/14
+  if (L === "84" || L === "85" || L === "86" || L === "87") return "skip";
   return "cut";
 };
 const area = (P: Pt[]) => { let s = 0; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; s += a[0] * b[1] - b[0] * a[1]; } return Math.abs(s) / 2; };
 const lenOf = (P: Pt[]) => { let l = 0; for (let i = 1; i < P.length; i++) l += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); return l; };
+/** ลูกศรทางผ้ายาวเกินชิ้น → ย่อให้อยู่ในชิ้น (ทิศเดิม · ผ่านกลางกรอบชิ้น · ยาว 70% ของความยาวชิ้นตามทิศนั้น) · อยู่ในชิ้นอยู่แล้ว = คงเดิม */
+function fitGrain(gr: [Pt, Pt], outline: Pt[]): [Pt, Pt] {
+  const dx = gr[1][0] - gr[0][0], dy = gr[1][1] - gr[0][1], L = Math.hypot(dx, dy);
+  if (L < 1e-6 || outline.length < 3) return gr;
+  const ux = dx / L, uy = dy / L, proj = outline.map((p) => p[0] * ux + p[1] * uy);
+  const lo = Math.min(...proj), hi = Math.max(...proj), g0 = gr[0][0] * ux + gr[0][1] * uy, g1 = gr[1][0] * ux + gr[1][1] * uy;
+  if (Math.min(g0, g1) >= lo - 1e-6 && Math.max(g0, g1) <= hi + 1e-6) return gr;
+  const b = polyBox(outline), cx = b.x + b.w / 2, cy = b.y + b.h / 2, half = ((hi - lo) * 0.7) / 2, r = (v: number) => Math.round(v * 1000) / 1000;
+  return [[r(cx - ux * half), r(cy - uy * half)], [r(cx + ux * half), r(cy + uy * half)]];
+}
 
 /** ต่อเส้นเปิดที่ปลายชนกันให้เป็นเส้นยาว/วงปิด (tol = ระยะที่ถือว่าเป็นจุดเดียวกัน) */
 function chain(open: Pt[][], tol: number): { loops: Pt[][]; rest: Pt[][] } {
@@ -311,7 +324,9 @@ export function parseDxfPattern(text: string, unit?: DxfUnit): DxfImport | null 
     const texts = E.filter((e): e is Extract<Ent, { t: "text" }> => e.t === "text");
     for (const O of outer) {
       const inside = (p: Pt) => pointInPolygon(p, O);
-      let sew = loops.sew.filter((S) => S !== O && inside(S[0])).sort((a, b) => area(b) - area(a))[0] ?? null;
+      // เส้นเย็บทับเส้นตัดพอดี (งานหนังตัดชนขอบ ไม่มีเผื่อ) — จุดอยู่บนขอบพอดี ตรวจ "อยู่ข้างใน" ไม่ผ่าน → นับกรอบเท่ากันด้วย
+      const ob = polyBox(O), same = (S: Pt[]) => { const b = polyBox(S); return Math.abs(b.x - ob.x) < 0.05 && Math.abs(b.y - ob.y) < 0.05 && Math.abs(b.w - ob.w) < 0.05 && Math.abs(b.h - ob.h) < 0.05; };
+      let sew = loops.sew.filter((S) => S !== O && (inside(S[0]) || same(S))).sort((a, b) => area(b) - area(a))[0] ?? null;
       let holes = [...loops.cut, ...loops.hole].filter((H) => H !== O && inside(H[0]));
       // ไม่มีชั้นเส้นเย็บ แต่มีวงข้างในที่ใหญ่เกือบเท่าเส้นตัด (เกิน 70%) = เส้นเย็บที่อยู่ชั้นเดียวกับเส้นตัด
       if (!sew) { const big = holes.filter((H) => area(H) > area(O) * 0.7).sort((a, b) => area(b) - area(a))[0]; if (big) { sew = big; holes = holes.filter((H) => H !== big); } }
@@ -319,7 +334,8 @@ export function parseDxfPattern(text: string, unit?: DxfUnit): DxfImport | null 
         cut: O, sew, holes, grp: g,
         inner: inner.filter((l) => inside(l.pts[Math.floor(l.pts.length / 2)])),
         notch: notch.filter((p) => { const pr = projectOnOutline(sew ?? O, p); return pr.d < 2.5; }),
-        grain: grain.filter((P) => inside(P[0]) || inside(P[P.length - 1])),
+        // ลูกศรทางผ้าที่ยาวกว่าชิ้น (CLO ใช้ 18 ซม. ทุกชิ้น) ปลายทั้งสองอยู่นอกชิ้น → นับถ้าจุดกลางอยู่ในชิ้น หรือบล็อกนี้มีชิ้นเดียว
+        grain: grain.filter((P) => { const a = P[0], b = P[P.length - 1]; return inside(a) || inside(b) || inside([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) || (g !== 0 && outer.length === 1); }),
         texts: texts.filter((t) => g !== 0 || inside(cm(t.p))).map((t) => t.s),
       });
     }
@@ -346,7 +362,7 @@ export function parseDxfPattern(text: string, unit?: DxfUnit): DxfImport | null 
       holes: f.holes.map((H) => loopShape(H.map(sh))).filter((s): s is Shape => !!s).slice(0, 40),
       inner: f.inner.slice(0, 40).map((l, i) => ({ id: `dx${n}i${i}`, kind: l.kind, pts: l.pts.slice(0, 60).map(sh) })),
       notches: f.notch.map((p) => projectOnOutline(outline, sh(p)).at).slice(0, 100),
-      grain: g && g.length >= 2 ? [sh(g[0]), sh(g[g.length - 1])] : null,
+      grain: g && g.length >= 2 ? fitGrain([sh(g[0]), sh(g[g.length - 1])], outline) : null,
       at: [r3(sb.x - x0), r3(sb.y - y0)], w: Math.round(sb.w * 10) / 10, h: Math.round(sb.h * 10) / 10,
       edges: shape.k === "rect" ? 4 : shape.k === "ellipse" ? 1 : shape.nodes.length,
       ...(!f.sew && !notes.has("nocut") ? { cutOnly: true } : {}),

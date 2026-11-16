@@ -125,3 +125,35 @@ describe("นำเข้า DXF — เส้นและกรณีขอบ"
     expect(parseDxfPattern(file([], sp))!.notes).toContain("spline");
   });
 });
+
+describe("นำเข้า DXF — CLO3D (AAMA) งานหนังไม่มีเผื่อ (พบ 2026-11-16 ไฟล์ leather bag)", () => {
+  // CLO แถมสำเนาเส้นแบบแตกจุดโค้งในชั้น 84/85/86/87 · เส้นเย็บ (14) ทับเส้นตัด (1) พอดี · ลูกศรทางผ้ายาว 180 มม. ทุกชิ้น (ยื่นเลยชิ้นเล็ก)
+  const tab = rect(0, 0, 21, 63), body = rect(0, 0, 430, 197), slot = rect(140, 160, 150, 5);
+  const b1 = block("Pattern_1_M", [
+    ...poly("1", body), ...poly("84", body), ...poly("11", slot), ...poly("86", slot), ...poly("14", body), ...poly("87", body),
+    ...line("7", [215, 10], [215, 190]), ...text("1", "PIECE NAME: Pattern_1"), ...text("1", "QUANTITY: 1"),
+  ]);
+  const b2 = block("Pattern_2_M", [
+    ...poly("1", tab), ...poly("84", tab), ...poly("14", tab), ...poly("87", tab), ...poly("8", rect(5, 5, 10, 20)), ...poly("85", rect(5, 5, 10, 20)),
+    ...line("7", [10, -60], [10, 120]), ...text("1", "PIECE NAME: Pattern_2"), ...text("1", "QUANTITY: 1"),
+  ]);
+  const imp = parseDxfPattern(file([b1, b2], [...E(0, "INSERT", 8, 1, 2, "Pattern_1_M", 10, 0, 20, 0), ...E(0, "INSERT", 8, 1, 2, "Pattern_2_M", 10, 500, 20, 0)]))!;
+  it("ได้ชิ้นละ 1 (ไม่ซ้ำจากชั้นสำเนา) · ช่องเจาะ 1 ช่อง ไม่ใช่สำเนาเส้นนอก · เส้นใน 1 เส้น", () => {
+    expect(imp.pieces.map((p) => p.name).sort()).toEqual(["Pattern_1", "Pattern_2"]);
+    const a = imp.pieces.find((p) => p.name === "Pattern_1")!, b = imp.pieces.find((p) => p.name === "Pattern_2")!;
+    expect(a.holes).toHaveLength(1); expect(b.inner).toHaveLength(1);
+    expect(shapeBox(a.holes[0])).toMatchObject({ w: 15 });
+  });
+  it("เส้นเย็บทับเส้นตัด = มีเส้นเย็บ เผื่อ 0 (ไม่ถามระยะเผื่อ)", () => {
+    for (const p of imp.pieces) { expect(p.allow).toBe(0); expect(p.cutOnly).toBeFalsy(); }
+  });
+  it("ลูกศรทางผ้าที่ยาวเกินชิ้นเล็ก ยังได้ และถูกย่อให้อยู่ในชิ้น (ทิศเดิม)", () => {
+    const b = imp.pieces.find((p) => p.name === "Pattern_2")!, box = shapeBox(b.shape);
+    expect(b.grain).not.toBeNull();
+    const [[x1, y1], [x2, y2]] = b.grain!;
+    expect(x1).toBeCloseTo(x2, 3);
+    for (const y of [y1, y2]) { expect(y).toBeGreaterThanOrEqual(box.y - 1e-6); expect(y).toBeLessThanOrEqual(box.y + box.h + 1e-6); }
+    const a = imp.pieces.find((p) => p.name === "Pattern_1")!;
+    expect(a.grain && Math.abs(a.grain[0][1] - a.grain[1][1])).toBeCloseTo(18, 3);   // ลูกศรอยู่ในชิ้นอยู่แล้ว = คงยาวเดิม
+  });
+});
