@@ -101,12 +101,13 @@ export type PublishResult = {
 /** ปลายทางที่จะส่ง (โฟลเดอร์ส่งร้านพิมพ์ / วันที่ / ประเภท - ชื่อ) */
 export type SendTarget = { print_type_code: string; folder_name: string; date: string; root_folder_id: string | null };
 
-export type DriveFolderRef = { id: string; name: string; url: string };
+export type DriveFolderRef = { id: string; name: string; url: string; can_write?: boolean };   // can_write = บัญชีระบบสร้างโฟลเดอร์ข้างในได้
 export type DriveRootInfo = {
   configured: boolean;
   default: (DriveFolderRef & { found: boolean; local_path: string }) | null;
   folder: DriveFolderRef | null;   // โฟลเดอร์ที่ขอให้ตรวจ (ไม่พบ = null)
   can_set_default: boolean;
+  service_email?: string;          // บัญชีระบบที่ต้องแชร์โฟลเดอร์ให้ (ผู้จัดการเนื้อหา)
 };
 
 /** โฟลเดอร์ส่งร้านพิมพ์ตั้งต้น (ยังอยู่ไหม) + ตรวจโฟลเดอร์/ลิงก์ที่ผู้ใช้เลือก */

@@ -17,7 +17,7 @@ import { ASSET_MAX_BYTES, extOf, sha256Hex } from "@/lib/assets";
 import { printPreviewProblem } from "@/lib/print-file-policy";
 import { normalizePrintItems, normalizeSizes } from "@/app/api/assets/shared";
 import { SELECT, actorOf, cleanUuid, toJob } from "../../shared";
-import { RootMissingError, dateFolderOf, printTypeByCode, resolveJobFolder, safeName } from "../../publish-shared";
+import { RootMissingError, RootNoWriteError, dateFolderOf, printTypeByCode, resolveJobFolder, safeName } from "../../publish-shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,6 +57,7 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
   try { folder = await resolveJobFolder(admin, { typeCode: pt.code, name, date: dateFolderOf(meta.date), rootOverride: safeName(meta.root_folder_id, 100) || null }); }
   catch (e) {
     if (e instanceof RootMissingError) return NextResponse.json({ error: e.message, code: "root_missing" }, { status: 409 });
+    if (e instanceof RootNoWriteError) return NextResponse.json({ error: e.message, code: "no_write" }, { status: 409 });
     return NextResponse.json({ error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 });
   }
 

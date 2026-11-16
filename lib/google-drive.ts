@@ -14,6 +14,9 @@ export const DRIVE_ROOT_FOLDER_ID = (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || 
 /** ตั้งค่าครบพร้อมใช้ไหม (มีอีเมล + กุญแจ) */
 export function driveConfigured(): boolean { return !!CLIENT_EMAIL && !!PRIVATE_KEY; }
 
+/** อีเมลบัญชีระบบ (service account) — ให้ผู้ใช้แชร์โฟลเดอร์ให้บัญชีนี้ (ไม่ใช่ความลับ) */
+export function driveServiceEmail(): string { return CLIENT_EMAIL; }
+
 let cachedToken: { token: string; exp: number } | null = null;
 
 /** ขอ access token จาก service account (เซ็น JWT RS256) — แคช ~55 นาที */
@@ -161,6 +164,20 @@ export async function driveGetFolder(id: string): Promise<{ id: string; name: st
   // โฟลเดอร์ที่ถูกลบ (trashed) = ถือว่าไม่มี → คืน null (ให้ผู้เรียกสร้างใหม่ / reject ลิงก์ที่ลบแล้ว)
   if (!res.ok || !j.id || j.mimeType !== "application/vnd.google-apps.folder" || j.trashed) return null;
   return { id: j.id as string, name: (j.name as string) ?? "", webViewLink: (j.webViewLink as string) || `https://drive.google.com/drive/folders/${j.id}` };
+}
+
+/**
+ * เหมือน driveGetFolder + บอกว่าบัญชีระบบ "สร้างของในโฟลเดอร์นี้ได้ไหม" (capabilities.canAddChildren)
+ * ใช้ตรวจก่อนส่งไฟล์ — โฟลเดอร์ที่แชร์ให้แค่ดู = เห็นชื่อได้ แต่สร้างโฟลเดอร์ย่อยไม่ได้ (Insufficient permissions)
+ */
+export async function driveFolderAccess(id: string): Promise<{ id: string; name: string; webViewLink: string; canAddChildren: boolean } | null> {
+  const fid = (id || "").trim(); if (!fid) return null;
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true&fields=id,name,webViewLink,mimeType,trashed,capabilities(canAddChildren)`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.id || j.mimeType !== "application/vnd.google-apps.folder" || j.trashed) return null;
+  return { id: j.id as string, name: (j.name as string) ?? "", webViewLink: (j.webViewLink as string) || `https://drive.google.com/drive/folders/${j.id}`, canAddChildren: j.capabilities?.canAddChildren === true };
 }
 
 /** ดึง folder id จากลิงก์ Drive (…/folders/<id>) — ลิงก์ที่ไม่ใช่ folders = null */

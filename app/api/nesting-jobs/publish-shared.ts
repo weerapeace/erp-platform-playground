@@ -5,7 +5,7 @@
  * ไฟล์ใหญ่ไม่ผ่านเซิร์ฟเวอร์นี้ (ลิมิต body 4 MB ของ Vercel) — เปิดช่องอัปโหลด (resumable session) ให้ตัวช่วยในเครื่องส่งตรงเข้า Drive
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { driveEnsureFolder, driveGetFolder } from "@/lib/google-drive";
+import { driveEnsureFolder, driveFolderAccess, driveGetFolder, driveServiceEmail } from "@/lib/google-drive";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -90,6 +90,13 @@ export class RootMissingError extends Error {
   constructor() { super("หาโฟลเดอร์ปลายทางบน Drive ไม่เจอ (อาจถูกย้าย/ลบ หรือยังไม่ได้แชร์ให้ระบบ) — เลือกโฟลเดอร์ใหม่ในหน้าต่างส่ง"); }
 }
 
+/** ระบบเห็นโฟลเดอร์ แต่สร้างของข้างในไม่ได้ (แชร์ให้แค่ดู) → ต้องแชร์ให้บัญชีระบบเป็น "ผู้จัดการเนื้อหา" */
+export class RootNoWriteError extends Error {
+  constructor(folderName: string) {
+    super(`ระบบยังไม่มีสิทธิ์สร้างโฟลเดอร์ใน "${folderName}" — แชร์โฟลเดอร์นี้ให้ ${driveServiceEmail() || "บัญชีระบบ (service account)"} เป็น "ผู้จัดการเนื้อหา" (Content manager) แล้วกดส่งใหม่`);
+  }
+}
+
 /**
  * หา/สร้างโฟลเดอร์ของงาน (เรียกซ้ำได้ — มีอยู่แล้ว = ใช้ตัวเดิม)
  * rootOverride = โฟลเดอร์ที่ผู้ใช้เลือกเอง (ไม่ใส่ = ตั้งต้น) · หาโฟลเดอร์ปลายทางไม่เจอ = RootMissingError
@@ -97,13 +104,14 @@ export class RootMissingError extends Error {
 export async function resolveJobFolder(admin: Admin, p: { typeCode: string; name: string; date: string; rootOverride?: string | null }): Promise<JobFolder> {
   const def = await sendRootDefault(admin);
   const rootId = (p.rootOverride || "").trim() || def.folder_id;
-  const root = rootId ? await driveGetFolder(rootId) : null;
+  const root = rootId ? await driveFolderAccess(rootId) : null;
   if (!root) throw new RootMissingError();
+  if (!root.canAddChildren) throw new RootNoWriteError(root.name);
   const folderName = jobFolderName(p.typeCode, p.name);
   const dateId = await driveEnsureFolder(p.date, root.id);
   const folderId = await driveEnsureFolder(folderName, dateId);
   const info = await driveGetFolder(folderId);
   const useLocal = root.id === def.folder_id && def.local_base_path;
-  const localPath = useLocal ? [def.local_base_path.replace(/[\/]+$/, ""), p.date, folderName].join("\\") : "";
+  const localPath = useLocal ? [def.local_base_path.replace(/[\\/]+$/, ""), p.date, folderName].join("\\") : "";
   return { folderId, folderUrl: info?.webViewLink ?? `https://drive.google.com/drive/folders/${folderId}`, localPath, folderName };
 }

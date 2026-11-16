@@ -29,8 +29,9 @@ const readRoot = (): DriveFolderRef | null => {
   try { const v = JSON.parse(localStorage.getItem(ROOT_PREF) ?? "null"); return v && typeof v.id === "string" ? v as DriveFolderRef : null; } catch { return null; }
 };
 const writeRoot = (v: DriveFolderRef | null) => { try { if (v) localStorage.setItem(ROOT_PREF, JSON.stringify(v)); else localStorage.removeItem(ROOT_PREF); } catch { /* ไม่จำ */ } };
-/** ข้อความจากเซิร์ฟเวอร์เมื่อหาโฟลเดอร์ปลายทางไม่เจอ (publish-shared RootMissingError) */
+/** ข้อความจากเซิร์ฟเวอร์เมื่อหาโฟลเดอร์ปลายทางไม่เจอ / ไม่มีสิทธิ์เขียน (publish-shared RootMissingError / RootNoWriteError) */
 const ROOT_MISSING = "หาโฟลเดอร์ปลายทางบน Drive ไม่เจอ";
+const NO_WRITE = "ระบบยังไม่มีสิทธิ์สร้างโฟลเดอร์ใน";
 
 const CARD_MAX_BYTES = 3.5 * 1024 * 1024;   // รูปการ์ดอัปผ่านเซิร์ฟเวอร์ ERP (ลิมิต body ~4 MB)
 const mb = (n: number) => (n / 1024 / 1024).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1);
@@ -107,6 +108,19 @@ export function PublishModal({
   const subName = code ? `${code} - ${nameOrDefault}` : nameOrDefault;
   const target = pick ?? (rootInfo?.default?.found ? rootInfo.default : null);
   const rootMissing = !pick && rootInfo?.configured && rootInfo.default && !rootInfo.default.found;
+  const [noWrite, setNoWrite] = useState(false);   // ส่งแล้วเซิร์ฟเวอร์ตอบว่าเขียนไม่ได้ (เผื่อสิทธิ์เปลี่ยนหลังตรวจ)
+  const cantWrite = !!target && (target.can_write === false || noWrite);
+  const saEmail = rootInfo?.service_email ?? "";
+  const [emailCopied, setEmailCopied] = useState(false);
+  /** ตรวจปลายทางใหม่ (หลังเจ้าของไปแชร์สิทธิ์ใน Drive แล้ว) */
+  const recheck = async () => {
+    setLinkBusy(true); setNoWrite(false); setError(null);
+    try {
+      const r = await getDriveRoot(pick?.id);
+      setRootInfo(r);
+      if (pick && r.folder) setPick(r.folder);
+    } catch (e) { setLinkErr((e as Error).message); } finally { setLinkBusy(false); }
+  };
   const dest = [target?.name || t("(ยังไม่ได้เลือกโฟลเดอร์)", "(no folder chosen)"), date, subName];
 
   /** ตรวจลิงก์โฟลเดอร์ที่วาง → ใช้เป็นปลายทาง (จำในเครื่องนี้) */
@@ -117,7 +131,7 @@ export function PublishModal({
     try {
       const r = await getDriveRoot(v);
       if (!r.folder) { setLinkErr(t("หาโฟลเดอร์นี้ไม่เจอ หรือยังไม่ได้แชร์ให้ระบบ — ตรวจลิงก์อีกครั้ง", "Couldn't find this folder, or it isn't shared with the system — check the link")); return; }
-      setPick(r.folder); writeRoot(r.folder); setPickMissing(false); setChanging(false); setLink("");
+      setPick(r.folder); writeRoot(r.folder); setPickMissing(false); setChanging(false); setLink(""); setNoWrite(false);
     } catch (e) { setLinkErr((e as Error).message); } finally { setLinkBusy(false); }
   };
   const useDefault = () => { setPick(null); writeRoot(null); setChanging(false); };
@@ -184,6 +198,7 @@ export function PublishModal({
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.startsWith(ROOT_MISSING)) { if (pick) { setPickMissing(true); setPick(null); writeRoot(null); } setChanging(true); }
+      if (msg.startsWith(NO_WRITE)) setNoWrite(true);
       setError(cancelled.current ? t("ยกเลิกการส่งแล้ว", "Sending cancelled") : msg);
     } finally {
       setPhase("idle");
@@ -216,7 +231,8 @@ export function PublishModal({
     : !driveOn ? t("ยังไม่ได้ตั้งค่า Google Drive ของระบบ — แจ้งผู้ดูแล", "Google Drive isn't set up for the system yet — ask an admin")
       : !code ? t("ยังไม่มีประเภทงานพิมพ์ — ตั้งที่คลังไฟล์ → ⚙️ จัดการประเภทงานพิมพ์", "No print types yet — set them up in the file library → ⚙️ Manage print types")
         : rootInfo && !target ? t("เลือกโฟลเดอร์ปลายทางก่อนส่ง", "Choose a destination folder before sending")
-          : null;
+          : cantWrite ? t("ระบบยังเขียนลงโฟลเดอร์ปลายทางไม่ได้ — ดูวิธีแก้ด้านล่าง", "The system can't write to the destination folder yet — see below")
+            : null;
 
   return (
     <ERPModal open={open} onClose={cancel} size="md" closeOnBackdrop={!busy} defaultExpanded={false}
@@ -275,6 +291,23 @@ export function PublishModal({
               {t("เปลี่ยน", "Change")}
             </button>
           </div>
+          {cantWrite && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <div>⚠ {t(`ระบบเห็นโฟลเดอร์ "${target!.name}" แต่ยังไม่มีสิทธิ์สร้างโฟลเดอร์ข้างใน — ใน Google Drive คลิกขวาโฟลเดอร์นี้ → แชร์ → เพิ่มบัญชีด้านล่างเป็น "ผู้จัดการเนื้อหา" (Content manager) แล้วกด "ตรวจอีกครั้ง"`,
+                `The system can see "${target!.name}" but can't create folders in it — in Google Drive right-click the folder → Share → add the account below as "Content manager", then press "Check again"`)}</div>
+              {saEmail && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate rounded bg-white px-2 py-1 font-mono text-[11px] text-slate-700">{saEmail}</span>
+                  <button type="button" onClick={() => { void navigator.clipboard.writeText(saEmail).then(() => setEmailCopied(true)).catch(() => {}); }}
+                    className="shrink-0 rounded border border-red-300 bg-white px-2 py-1 text-[11px]">{emailCopied ? t("คัดลอกแล้ว", "Copied") : t("คัดลอก", "Copy")}</button>
+                </div>
+              )}
+              <div className="mt-1.5 flex flex-wrap gap-3">
+                <button type="button" disabled={linkBusy} onClick={() => void recheck()} className="font-medium underline">{linkBusy ? t("กำลังตรวจ…", "Checking…") : t("ตรวจอีกครั้ง", "Check again")}</button>
+                <button type="button" onClick={() => setChanging(true)} className="underline">{t("หรือเลือกโฟลเดอร์อื่น", "or choose another folder")}</button>
+              </div>
+            </div>
+          )}
           {(changing || ((rootMissing || pickMissing) && !pick)) && (
             <div className="mt-2 space-y-1.5">
               <div className="flex gap-2">

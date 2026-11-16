@@ -1,6 +1,7 @@
 /**
  * /api/nesting-jobs/drive-root — โฟลเดอร์ "ไฟล์ส่งร้านพิมพ์" ของหน้าต่างส่งเข้าคลังงานพิมพ์
- *   GET ?folder=<id หรือลิงก์ Drive>  → { configured, default: { id, name, url, found }, folder: { id, name, url } | null, can_set_default }
+ *   GET ?folder=<id หรือลิงก์ Drive>  → { configured, default: { id, name, url, found, can_write }, folder: { id, name, url, can_write } | null, can_set_default, service_email }
+ *       can_write = บัญชีระบบสร้างโฟลเดอร์ข้างในได้ (แชร์ให้แค่ดู = false → ต้องแชร์ให้ service_email เป็นผู้จัดการเนื้อหา)
  *       ตรวจว่าโฟลเดอร์ตั้งต้นยังอยู่ (หาไม่เจอ = found false → หน้าต่างให้เลือกใหม่) + ตรวจลิงก์ที่ผู้ใช้วาง — nesting.view
  *   PUT { folder_id } → ตั้งเป็นค่าเริ่มของทุกคน (ui_config nesting_drive_root) — assets.manage · audit
  * ตั้งต้นจริง = nesting_drive_root → ไม่มี = print_drive_root (โฟลเดอร์แม่งานพิมพ์ของคลังไฟล์)
@@ -9,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { driveConfigured, driveGetFolder, parseDriveFolderId } from "@/lib/google-drive";
+import { driveConfigured, driveFolderAccess, driveGetFolder, driveServiceEmail, parseDriveFolderId } from "@/lib/google-drive";
 import { printDriveRoot, sendRootDefault } from "../publish-shared";
 
 export const dynamic = "force-dynamic";
@@ -31,18 +32,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   try {
     const def = await sendRootDefault(admin);
-    const d = def.folder_id ? await driveGetFolder(def.folder_id) : null;
+    const d = def.folder_id ? await driveFolderAccess(def.folder_id) : null;
     const raw = request.nextUrl.searchParams.get("folder");
-    let folder: { id: string; name: string; url: string } | null = null;
+    let folder: { id: string; name: string; url: string; can_write: boolean } | null = null;
     if (raw) {
       const id = folderIdOf(raw);
-      const f = id ? await driveGetFolder(id) : null;
-      if (f) folder = { id: f.id, name: f.name, url: f.webViewLink };
+      const f = id ? await driveFolderAccess(id) : null;
+      if (f) folder = { id: f.id, name: f.name, url: f.webViewLink, can_write: f.canAddChildren };
     }
     return NextResponse.json({ data: {
       configured: true,
-      default: { id: def.folder_id, name: d?.name ?? "", url: d?.webViewLink ?? "", found: !!d, local_path: def.local_base_path },
-      folder, can_set_default: await apiCan(request, "assets.manage"),
+      default: { id: def.folder_id, name: d?.name ?? "", url: d?.webViewLink ?? "", found: !!d, can_write: !!d?.canAddChildren, local_path: def.local_base_path },
+      folder, can_set_default: await apiCan(request, "assets.manage"), service_email: driveServiceEmail(),
     }, error: null });
   } catch (e) {
     return NextResponse.json({ data: null, error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 });

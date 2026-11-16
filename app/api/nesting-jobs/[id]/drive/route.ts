@@ -11,7 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { driveConfigured, driveCreateResumableSession } from "@/lib/google-drive";
 import { cleanUuid } from "../../shared";
-import { RootMissingError, dateFolderOf, driveFileName, printTypeByCode, resolveJobFolder, safeName, sheetCount } from "../../publish-shared";
+import { RootMissingError, RootNoWriteError, dateFolderOf, driveFileName, printTypeByCode, resolveJobFolder, safeName, sheetCount } from "../../publish-shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,6 +46,7 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
     return NextResponse.json({ data: { folder_url: folder.folderUrl, local_path: folder.localPath, uploads }, error: null });
   } catch (e) {
     if (e instanceof RootMissingError) return NextResponse.json({ error: e.message, code: "root_missing" }, { status: 409 });
+    if (e instanceof RootNoWriteError) return NextResponse.json({ error: e.message, code: "no_write" }, { status: 409 });
     return NextResponse.json({ error: e instanceof Error ? e.message : "Google Drive error" }, { status: 500 });
   }
 }
