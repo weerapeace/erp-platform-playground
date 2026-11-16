@@ -93,9 +93,9 @@ export function QuotationCartDrawer({
   const setLine = (i: number, p: Partial<QuoteLine>) => { setLines((l) => l.map((x, idx) => (idx === i ? { ...x, ...p } : x))); setDirty(true); };
   const removeLine = (i: number) => { setLines((l) => l.filter((_, idx) => idx !== i)); setDirty(true); };
 
-  const save = async () => {
-    if (!cartId) return;
-    setSaving(true);
+  /** บันทึกบรรทัดลงใบจริง (ไม่แจ้ง/ไม่โหลดใหม่) — คืน true ถ้าสำเร็จ */
+  const persist = async (): Promise<boolean> => {
+    if (!cartId) return false;
     try {
       const payload = lines.map((l) => ({
         id: l.id, product_id: l.product_id ?? null, sku: l.sku, product_name: l.product_name,
@@ -105,10 +105,34 @@ export function QuotationCartDrawer({
       }));
       const res = await apiFetch(`/api/quotations/${cartId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: payload }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(tr("บันทึกตะกร้าแล้ว", "Cart saved"));
-      await load();
-    } catch (e) { toast.error(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); }
+      return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); return false; }
+  };
+  const save = async () => {
+    setSaving(true);
+    try { if (await persist()) { toast.success(tr("บันทึกตะกร้าแล้ว", "Cart saved")); await load(); } }
     finally { setSaving(false); }
+  };
+
+  /** พิมพ์ แล้วเริ่มใบใหม่: (มีแก้ค้าง → บันทึกก่อน) → เปิดหน้าพิมพ์ → ล้างตัวชี้ตะกร้า (ใบยังอยู่ในระบบขาย) */
+  const printAndStartNew = async () => {
+    if (!cartId || !quote) return;
+    const id = cartId;
+    const num = quote.quote_number ?? tr("ร่าง", "Draft");
+    // เปิดแท็บทันทีตอนกด (ถ้ารอบันทึกก่อนค่อยเปิด เบราว์เซอร์จะบล็อกป๊อปอัป)
+    const w = window.open(dirty ? "about:blank" : `/print/quotation/${id}`, "_blank");
+    if (dirty) {
+      setSaving(true);
+      const ok = await persist();
+      setSaving(false);
+      if (!ok) { w?.close(); return; }   // บันทึกไม่ผ่าน → ไม่พิมพ์ ไม่ล้าง (ของที่แก้ยังอยู่)
+      if (w) w.location.href = `/print/quotation/${id}`;
+    }
+    if (!w) window.location.href = `/print/quotation/${id}`;   // ป๊อปอัปถูกบล็อก → เปิดในแท็บนี้แทน
+    setDetailOpen(false); setOpen(false);
+    onClear();
+    toast.action(tr(`เริ่มตะกร้าใหม่แล้ว · ใบ ${num} อยู่ในระบบขาย`, `New cart started · ${num} is in Sales`), tr("เปิดใบนั้น", "Open it"),
+      () => { window.open(`/quotations?open=${id}`, "_blank", "noreferrer"); });
   };
 
   const total = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0), 0);
@@ -233,8 +257,8 @@ export function QuotationCartDrawer({
                   className="h-9 w-full rounded-lg bg-blue-600 text-sm text-white hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("💾 บันทึกการแก้ไข", "💾 Save changes")}</button>
               )}
               <div className="flex gap-2">
-                <a href="/quotations" target="_blank" rel="noreferrer"
-                  className="flex h-9 flex-1 items-center justify-center rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50">{t("เปิดใบเต็มในระบบขาย ↗", "Open full quotation in Sales ↗")}</a>
+                <a href={`/quotations?open=${cartId}`} target="_blank" rel="noreferrer"
+                  className="flex h-9 flex-1 items-center justify-center rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50">{t("เปิดใบนี้ในระบบขาย ↗", "Open this quotation in Sales ↗")}</a>
                 <button onClick={() => { onClear(); setOpen(false); toast.success(tr("ล้างตะกร้าแล้ว (ใบยังอยู่ในระบบขาย)", "Cart cleared (the quotation is still in Sales)")); }}
                   className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-600 hover:bg-slate-50">{t("เริ่มใบใหม่", "Start new quotation")}</button>
               </div>
@@ -247,15 +271,16 @@ export function QuotationCartDrawer({
       {detailOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" onClick={() => setDetailOpen(false)}>
           <div className="flex max-h-[88vh] w-[580px] max-w-full flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
               <div className="min-w-0">
                 <div className="text-base font-semibold text-slate-800">🧾 {quote.quote_number ?? t("(ร่าง)", "(Draft)")}</div>
                 <div className="truncate text-xs text-slate-500">{quote.customer_name ?? t("ไม่ระบุลูกค้า", "No customer")}{quote.customer_code ? ` (${quote.customer_code})` : ""}</div>
                 <div className="text-[11px] text-slate-400">{t("วันที่", "Date")} {quote.quote_date}{quote.valid_until ? ` · ${t("ใช้ได้ถึง", "Valid until")} ${quote.valid_until}` : ""}</div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <a href={`/print/quotation/${cartId}`} target="_blank" rel="noreferrer"
-                  className="inline-flex h-8 items-center rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">{t("🖨 พิมพ์", "🖨 Print")}</a>
+                <button type="button" onClick={() => void printAndStartNew()} disabled={saving}
+                  title={t("เปิดหน้าพิมพ์ แล้วล้างตะกร้าเพื่อเริ่มใบใหม่ (ใบนี้ยังอยู่ในระบบขาย)", "Open the print page, then clear the cart to start a new quotation (this one stays in Sales)")}
+                  className="inline-flex h-8 items-center whitespace-nowrap rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังบันทึก…", "Saving…") : t("🖨 พิมพ์ แล้วเริ่มใบใหม่", "🖨 Print & start new")}</button>
                 <button onClick={() => setDetailOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
               </div>
             </div>
@@ -297,8 +322,13 @@ export function QuotationCartDrawer({
                 <span className="text-slate-700">{t(`รวม ${count} รายการ`, `Total ${count} items`)}</span>
                 <span className="tabular-nums text-emerald-700">{baht(total)} ฿</span>
               </div>
-              {dirty && <p className="mt-1 text-[11px] text-amber-600">{t("● มีการแก้ไขที่ยังไม่บันทึก — กด “บันทึกการแก้ไข” ก่อนพิมพ์เพื่อให้เอกสารตรง", "● Unsaved changes — click “Save changes” before printing so the document matches")}</p>}
-              <p className="mt-1 text-[11px] text-slate-400">{t("ภาษี/ส่วนลดท้ายบิลจะแสดงครบในเอกสารพิมพ์", "Tax and end-of-bill discounts are shown in full on the printed document")}</p>
+              {dirty && <p className="mt-1 text-[11px] text-amber-600">{t("● มีการแก้ไขที่ยังไม่บันทึก — กด “พิมพ์ แล้วเริ่มใบใหม่” ระบบจะบันทึกให้ก่อนพิมพ์", "● Unsaved changes — “Print & start new” saves them before printing")}</p>}
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] text-slate-400">{t("ภาษี/ส่วนลดท้ายบิลจะแสดงครบในเอกสารพิมพ์", "Tax and end-of-bill discounts are shown in full on the printed document")}</p>
+                <a href={`/print/quotation/${cartId}`} target="_blank" rel="noreferrer"
+                  title={dirty ? t("พิมพ์ตามที่บันทึกล่าสุด (ยังไม่รวมที่แก้ค้าง)", "Prints the last saved version (without unsaved edits)") : undefined}
+                  className="shrink-0 text-[11px] text-indigo-600 underline hover:text-indigo-800">{t("พิมพ์อย่างเดียว (เก็บตะกร้าไว้)", "Print only (keep cart)")}</a>
+              </div>
             </div>
           </div>
         </div>
