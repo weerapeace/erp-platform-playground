@@ -179,3 +179,27 @@ export const maxBytesLabel = (n: number | null) => (n ? `${Math.round((n / 1024 
 
 /** นามสกุลที่รับ อ่านง่าย (ว่าง = ทุกชนิด) */
 export const fileTypesLabel = (types: string[]) => (types.length ? types.map((x) => x.toUpperCase()).join(" · ") : null);
+
+/**
+ * แผนผังการเก็บไฟล์ (/master/storage-plan) — กล่อง "ที่เก็บ" ผูกกับกฎที่เก็บจริงแล้ว เทียบว่าแผนตรงกับที่ระบบทำจริงไหม
+ *   place = ไอคอนที่เก็บในแผน (lib/storage-places key) · rule = กฎที่ผูก (null = หากฎไม่เจอแล้ว)
+ *   warn เมื่อ: หากฎไม่เจอ · แผนบอกที่เก็บหนึ่งแต่กฎตั้งอีกที่ · กฎตั้งไว้แต่ช่องอัปยังส่งไปที่อื่น (ruleStatus mismatch)
+ */
+export type PlanRuleCheck = { tone: "ok" | "warn"; th: string; en: string };
+export function planRuleCheck(
+  place: string | null | undefined,
+  rule: Pick<StorageRule, "rule_key" | "provider" | "label"> | null,
+  wiring: Record<string, StorageProvider | "rule"> = STORAGE_WIRING,
+): PlanRuleCheck {
+  if (!rule) return { tone: "warn", th: "ไม่พบกฎนี้แล้ว — ผูกกฎใหม่", en: "Rule not found — link again" };
+  const want = STORAGE_PROVIDERS[rule.provider];
+  if (place && place !== rule.provider) {
+    const planned = isStorageProvider(place) ? STORAGE_PROVIDERS[place].label : null;
+    return planned
+      ? { tone: "warn", th: `ไม่ตรงกฎ: แผนบอก ${planned} แต่กฎ "${rule.label}" ตั้ง ${want.label}`, en: `Mismatch: plan says ${planned}, rule says ${want.en}` }
+      : { tone: "warn", th: `ไม่ตรงกฎ: กฎ "${rule.label}" เก็บที่ ${want.label} (ไม่ใช่ที่นี่)`, en: `Mismatch: the rule stores in ${want.en}` };
+  }
+  const st = ruleStatus(rule, wiring);
+  if (st.kind === "mismatch") return { tone: "warn", th: `กฎตั้ง ${want.label} แต่ช่องอัปยังส่งไป ${STORAGE_PROVIDERS[st.actual].label}`, en: `Rule says ${want.en} but uploads still go to ${STORAGE_PROVIDERS[st.actual].en}` };
+  return { tone: "ok", th: `ตรงกฎ "${rule.label}" · ${want.label}`, en: `Matches rule · ${want.en}` };
+}

@@ -9,10 +9,17 @@
  *          แท็บแจ้งเตือน (./notify · ทะเบียน lib/flow-map-notify.ts) + กระดิ่งบนกล่อง
  *          กดกล่อง/เส้น → ลิ้นชักขวา (DrawerShell modal={false} — ผังกดต่อได้) แบ่งแท็บ: กล่อง = ภาพรวม/ช่องโหว่/แจ้งเตือน/เส้นเข้า-ออก/โน้ต/อยากแก้อะไร
  *            · เส้น = รายละเอียด/คำแนะนำ/โน้ต/อยากแก้อะไร · กระดิ่ง = เปิดแท็บแจ้งเตือน · แผงขวาของหน้า = ภาพรวมผัง (ช่องโหว่ + ทุกเส้น + โน้ตผัง)
+ *          ผังเป็นกระดานกลาง FlowchartBoard (เจ้าของเลือก 2026-11-16 "แบบ A"): ผังของระบบ = ชั้นล็อก วาดจากทะเบียนทุกครั้ง
+ *            · วาดเสริมทับได้ (กล่อง/เส้น/โน้ต) บันทึกถาวร ทุกคนเห็น แยกต่อแท็บ (entity flow_map_canvas/<view key>)
+ *            · ดับเบิลคลิกกล่องระบบ = ปลดทีละกล่องแล้วลากย้าย (จำตำแหน่ง) · ปุ่มคืนตำแหน่งเดิม · ซ่อน/แสดงที่วาดเสริม · เส้นค้าง = เตือน
  * ใช้ที่ /master/flow-map · แก้เนื้อหาแผนผังที่ lib/flow-map.ts ที่เดียว (ดู docs/flow-map.md)
  */
-import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import { LoadingState } from "@/components/state-views";
+import type { FlowLockedLayer } from "@/components/flowchart-board";
+import type { LockedLine } from "@/lib/flowchart-locked";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
@@ -21,7 +28,7 @@ import {
   FLOW_NODES, FLOW_EDGES, FLOW_METRICS, FLOW_EDGE_TYPES, FLOW_AREA_LABEL, FLOW_RECENT_DAYS, FLOW_FINANCE_PERM, flowViewsFor,
   type FlowEdgeType, type FlowMetricKey,
 } from "@/lib/flow-map";
-import { FM_W, FM_CX, FM_BAND_LABELS, FM_CASHFLOW_DOT, fmXY, fmBox, fmTouches, layoutFlowView, isRecentEdge, type FmDrawn } from "@/lib/flow-map-layout";
+import { FM_W, FM_CX, FM_BAND_LABELS, FM_CASHFLOW_DOT, fmBox, fmTouches, layoutFlowView, isRecentEdge, type FmDrawn } from "@/lib/flow-map-layout";
 import { FlowRequestBox, FlowBasketPanel, useFlowBasket } from "./request";
 import { FlowMetricListModal } from "./metric-list";
 import { FlowJourney } from "./journey";
@@ -35,6 +42,12 @@ import { NotifyEditModal } from "@/components/flow-map/notify-edit";
 import { NodeNotifyPanel } from "@/components/flow-map/node-notify";
 import { NOTIFY_NODE_SUGGEST, notifyAllTopics, notifyTopicsOfNode } from "@/lib/flow-map-notify";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
+
+// กระดาน (React Flow) โหลดเฉพาะตอนเปิดผัง — ไม่ถ่วงแท็บออเดอร์/แจ้งเตือน
+const FlowchartBoard = dynamic(() => import("@/components/flowchart-board").then((m) => m.FlowchartBoard), {
+  ssr: false,
+  loading: () => <LoadingState className="h-[60vh] text-sm" />,
+});
 
 type Sel = { k: "n"; id: string } | { k: "e"; id: string } | null;
 /** แท็บในลิ้นชักกล่อง / ลิ้นชักเส้น */
@@ -137,7 +150,6 @@ export function FlowMap() {
   const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
   const notesApi = useFlowNotes();
-  const svgRef = useRef<SVGSVGElement | null>(null);
   const [viewKey, setViewKey] = useState("ov");
   const [sel, setSel] = useState<Sel>(null);
   const [basketOpen, setBasketOpen] = useState(false);
@@ -190,14 +202,6 @@ export function FlowMap() {
   const notesOf = (kind: "n" | "e", id: string) => notesApi.notes.filter((n) => n.attach?.kind === kind && n.attach.id === id);
   const noteView = isJourney ? views[0].key : view.key;   // แท็บออเดอร์ไม่มีผังของตัวเอง → นับเป็นผังแรก
   const freeNotes = isJourney ? [] : notesApi.notes.filter((n) => !n.attach && n.view === view.key);
-  const onNodeClick = (e: RMouseEvent, id: string, picked: boolean) => {
-    e.stopPropagation();
-    pick(picked ? null : { k: "n", id });
-  };
-  const onEdgeClick = (e: RMouseEvent, id: string, toggle: boolean) => {
-    e.stopPropagation();
-    pick(toggle && sel?.k === "e" && sel.id === id ? null : { k: "e", id });
-  };
   const pickView = (k: string) => { setViewKey(k); setSel(null); setBackNode(null); };
   /** แท็บแจ้งเตือน → กล่องในผังแรกที่มีกล่องนั้น */
   const openNodeOnMap = (id: string) => { const v = views.find((x) => x.pos[id]); setViewKey(v?.key ?? views[0].key); setSel({ k: "n", id }); setBasketOpen(false); };
@@ -412,6 +416,80 @@ export function FlowMap() {
     );
   }
 
+  // ── ผังของระบบ → ชั้นล็อกของกระดานกลาง (พิกัดกระดาน = พิกัดผังเดิม 680 × ความสูงผัง) ──
+  const nodeSvg = (id: string): ReactNode => {
+    const p = view.pos[id];
+    if (!p) return null;
+    const { x, y, h } = fmBox(p), n = FLOW_NODES[id], g = isGray(id), on = nodeOn(id), picked = sel?.k === "n" && sel.id === id;
+    const nt = notifyTopicsOfNode(id);
+    const bx = x + (view.finance && n.cashflow ? 21 : 10), by = y + 10;
+    return (
+      <svg width={FM_W} height={h} viewBox={`${x} ${y} ${FM_W} ${h}`} overflow="visible" className="block" role="img" aria-label={n.label}>
+        <g opacity={on ? 1 : 0.4}>
+          <title>{n.label}</title>
+          <rect x={x} y={y} width={FM_W} height={h} rx={8} fill={g ? "#f8fafc" : "#eef2ff"} stroke={picked ? "#4f46e5" : g ? "#cbd5e1" : "#a5b4fc"} strokeWidth={picked ? 2 : 0.75} />
+          <text x={x + FM_W / 2} y={y + h / 2 - 6} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill={g ? "#334155" : "#312e81"}>{n.label}</text>
+          <text x={x + FM_W / 2} y={y + h / 2 + 10} textAnchor="middle" dominantBaseline="central" fontSize={11} fill={g ? "#64748b" : "#6366f1"}>{n.sub}</text>
+          {nodeAlert(id) && <circle cx={x + FM_W - 9} cy={y + 9} r={3.5} fill="#dc2626" />}
+          {view.finance && n.cashflow && <circle cx={x + 9} cy={y + 9} r={3.5} fill={FM_CASHFLOW_DOT}><title>{t("นับในกระแสเงินสด", "Counted in cash flow")}</title></circle>}
+          {nt.length ? (
+            <g transform={`translate(${bx} ${by})`} className="cursor-pointer" onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
+              <title>{t(`แจ้งเตือน ${nt.length} เรื่อง: ${nt.map((tp) => tp.label).join(" · ")} — กดดู/จัดการ`, `${nt.length} notifications — click to view/manage`)}</title>
+              <circle r={7} fill="#fff" stroke={notifyNodeColor(nt, notify.live)} strokeWidth={1.25} />
+              <path d={BELL_D} fill={notifyNodeColor(nt, notify.live)} stroke={notifyNodeColor(nt, notify.live)} strokeWidth={0.6} strokeLinecap="round" strokeLinejoin="round" />
+            </g>
+          ) : NOTIFY_NODE_SUGGEST[id]?.length ? (
+            // ยังไม่มีแจ้งเตือนแต่มีข้อเสนอ (NOTIFY_NODE_SUGGEST) → กระดิ่งเส้นประ กดดูข้อเสนอ
+            <g transform={`translate(${bx} ${by})`} className="cursor-pointer" onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
+              <title>{t("ยังไม่มีแจ้งเตือน — กดดูข้อเสนอ", "No notifications — see suggestions")}</title>
+              <circle r={7} fill="#fff" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 2" />
+              <path d="M0 -3.5v7M-3.5 0h7" stroke="#94a3b8" strokeWidth={1.2} strokeLinecap="round" />
+            </g>
+          ) : null}
+        </g>
+      </svg>
+    );
+  };
+  const lockedLayer: FlowLockedLayer = {
+    boxes: Object.entries(view.pos).map(([id, p]) => { const b = fmBox(p); return { id, x: b.x, y: b.y, w: FM_W, h: b.h, label: `${FLOW_NODES[id].label} ${FLOW_NODES[id].sub}` }; }),
+    lines: shown.map((e): LockedLine => {
+      const ty = FLOW_EDGE_TYPES[e.type];
+      return {
+        id: e.id, source: e.a, target: e.b, d: e.d, feeds: e.feeds.map((f) => f.d), badge: { x: e.badge[0], y: e.badge[1] },
+        color: ty.color, dash: ty.dash, width: e.type === "missing" ? 2 : 1.5, text: String(e.i + 1),
+        dot: isRecentEdge(e.id) ? "#7c3aed" : undefined, title: FLOW_EDGES[e.id].title, opacity: edgeOn(e) ? 1 : 0.12,
+      };
+    }),
+    backdrop: (view.bands || view.heads) ? {
+      width: 680, height: view.height,
+      content: (
+        <svg width={680} height={view.height} viewBox={`0 0 680 ${view.height}`} className="block" aria-hidden="true">
+          {view.bands && (
+            <g>
+              {FM_BAND_LABELS.map((h, i) => (
+                <g key={h}>
+                  <rect x={FM_CX[i] - 8} y={28} width={FM_W + 16} height={388} rx={12} fill="#f1f5f9" />
+                  <text x={FM_CX[i] + FM_W / 2} y={16} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill="#334155">{h}</text>
+                </g>
+              ))}
+              <rect x={10} y={424} width={650} height={84} rx={12} fill="none" stroke="#cbd5e1" strokeWidth={0.75} strokeDasharray="4 4" />
+              <text x={22} y={438} dominantBaseline="central" fontSize={11} fill="#64748b">{t("คลังสินค้า (สต็อก)", "Stock")}</text>
+            </g>
+          )}
+          {view.heads?.map((h, i) => (
+            <g key={h}>
+              <rect x={FM_CX[i] - 8} y={28} width={FM_W + 16} height={view.height - 34} rx={12} fill="#f8fafc" />
+              <text x={FM_CX[i] + FM_W / 2} y={16} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600} fill="#334155">{h}</text>
+            </g>
+          ))}
+        </svg>
+      ),
+    } : undefined,
+    renderBox: nodeSvg,
+    onBoxClick: (id) => pick(sel?.k === "n" && sel.id === id ? null : { k: "n", id }),
+    onLineClick: (id) => pick(sel?.k === "e" && sel.id === id ? null : { k: "e", id }),
+  };
+
   return (
     <div className="max-w-[1280px] mx-auto px-4 sm:px-5 py-5">
       <div className="flex items-start gap-2 flex-wrap">
@@ -468,96 +546,17 @@ export function FlowMap() {
         ) : isJourney ? (
           <FlowJourney onPickNode={(id) => pick({ k: "n", id })} onPickEdge={(id) => pick({ k: "e", id })} />
         ) : (
-          <div className="rounded-xl border border-slate-200 bg-white p-2 overflow-x-auto">
-            <svg ref={svgRef} viewBox={`0 0 680 ${view.height}`} role="img" aria-label={t(`แผนผัง${view.label}`, `${view.label} map`)}
-              className="w-full min-w-[560px] h-auto">
-              <defs>
-                <marker id="fm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </marker>
-              </defs>
-              {view.bands && (
-                <g>
-                  {FM_BAND_LABELS.map((h, i) => (
-                    <g key={h}>
-                      <rect x={FM_CX[i] - 8} y={28} width={FM_W + 16} height={388} rx={12} fill="#f1f5f9" />
-                      <text x={FM_CX[i] + FM_W / 2} y={16} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill="#334155">{h}</text>
-                    </g>
-                  ))}
-                  <rect x={10} y={424} width={650} height={84} rx={12} fill="none" stroke="#cbd5e1" strokeWidth={0.75} strokeDasharray="4 4" />
-                  <text x={22} y={438} dominantBaseline="central" fontSize={11} fill="#64748b">{t("คลังสินค้า (สต็อก)", "Stock")}</text>
-                </g>
-              )}
-              {view.heads?.map((h, i) => (
-                <g key={h}>
-                  <rect x={FM_CX[i] - 8} y={28} width={FM_W + 16} height={view.height - 34} rx={12} fill="#f8fafc" />
-                  <text x={FM_CX[i] + FM_W / 2} y={16} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600} fill="#334155">{h}</text>
-                </g>
-              ))}
-              {shown.map((e) => {
-                const ty = FLOW_EDGE_TYPES[e.type], w = e.type === "missing" ? 2 : 1.5;
-                return (
-                  <g key={e.id} opacity={edgeOn(e) ? 1 : 0.12}>
-                    {e.feeds.map((f) => <path key={f.node} d={f.d} fill="none" stroke={ty.color} strokeWidth={w} strokeDasharray={ty.dash} strokeLinecap="round" />)}
-                    <path d={e.d} fill="none" stroke={ty.color} strokeWidth={w} strokeDasharray={ty.dash} strokeLinecap="round" markerEnd="url(#fm-arrow)" />
-                    {[e.d, ...e.feeds.map((f) => f.d)].map((d) => <path key={d} d={d} fill="none" stroke="transparent" strokeWidth={10} className="cursor-pointer" onClick={(ev) => onEdgeClick(ev, e.id, false)} />)}
-                  </g>
-                );
-              })}
-              {Object.entries(view.pos).map(([id, p]) => {
-                const { x, y, h } = fmBox(p), n = FLOW_NODES[id], g = isGray(id), on = nodeOn(id), picked = sel?.k === "n" && sel.id === id;
-                return (
-                  <g key={id} className="cursor-pointer" opacity={on ? 1 : 0.4} onClick={(ev) => onNodeClick(ev, id, picked)}>
-                    <title>{n.label}</title>
-                    <rect x={x} y={y} width={FM_W} height={h} rx={8} fill={g ? "#f8fafc" : "#eef2ff"} stroke={picked ? "#4f46e5" : g ? "#cbd5e1" : "#a5b4fc"} strokeWidth={picked ? 2 : 0.75} />
-                    <text x={x + FM_W / 2} y={y + h / 2 - 6} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill={g ? "#334155" : "#312e81"}>{n.label}</text>
-                    <text x={x + FM_W / 2} y={y + h / 2 + 10} textAnchor="middle" dominantBaseline="central" fontSize={11} fill={g ? "#64748b" : "#6366f1"}>{n.sub}</text>
-                    {nodeAlert(id) && <circle cx={x + FM_W - 9} cy={y + 9} r={3.5} fill="#dc2626" />}
-                    {view.finance && n.cashflow && <circle cx={x + 9} cy={y + 9} r={3.5} fill={FM_CASHFLOW_DOT}><title>{t("นับในกระแสเงินสด", "Counted in cash flow")}</title></circle>}
-                    {(() => {
-                      const nt = notifyTopicsOfNode(id);
-                      const bx = x + (view.finance && n.cashflow ? 21 : 10), by = y + 10;
-                      if (!nt.length) {
-                        // ยังไม่มีแจ้งเตือนแต่มีข้อเสนอ (NOTIFY_NODE_SUGGEST) → กระดิ่งเส้นประ กดดูข้อเสนอ
-                        if (!NOTIFY_NODE_SUGGEST[id]?.length) return null;
-                        return (
-                          <g transform={`translate(${bx} ${by})`} onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
-                            <title>{t("ยังไม่มีแจ้งเตือน — กดดูข้อเสนอ", "No notifications — see suggestions")}</title>
-                            <circle r={7} fill="#fff" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 2" />
-                            <path d="M0 -3.5v7M-3.5 0h7" stroke="#94a3b8" strokeWidth={1.2} strokeLinecap="round" />
-                          </g>
-                        );
-                      }
-                      return (
-                        <g transform={`translate(${bx} ${by})`} onClick={(ev) => { ev.stopPropagation(); openBell(id); }}>
-                          <title>{t(`แจ้งเตือน ${nt.length} เรื่อง: ${nt.map((tp) => tp.label).join(" · ")} — กดดู/จัดการ`, `${nt.length} notifications — click to view/manage`)}</title>
-                          <circle r={7} fill="#fff" stroke={notifyNodeColor(nt, notify.live)} strokeWidth={1.25} />
-                          <path d={BELL_D} fill={notifyNodeColor(nt, notify.live)} stroke={notifyNodeColor(nt, notify.live)} strokeWidth={0.6} strokeLinecap="round" strokeLinejoin="round" />
-                        </g>
-                      );
-                    })()}
-                  </g>
-                );
-              })}
-              {shown.map((e) => {
-                const ty = FLOW_EDGE_TYPES[e.type];
-                return (
-                  <g key={`b${e.id}`} className="cursor-pointer" opacity={edgeOn(e) ? 1 : 0.12} onClick={(ev) => onEdgeClick(ev, e.id, true)}>
-                    <title>{FLOW_EDGES[e.id].title}</title>
-                    <circle cx={e.badge[0]} cy={e.badge[1]} r={9} fill="#fff" stroke={ty.color} strokeWidth={1.5} />
-                    <text x={e.badge[0]} y={e.badge[1]} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} fill={ty.color}>{e.i + 1}</text>
-                    {isRecentEdge(e.id) && <circle cx={e.badge[0] + 7} cy={e.badge[1] - 7} r={3.5} fill="#7c3aed" stroke="#fff" strokeWidth={1} />}
-                  </g>
-                );
-              })}
-            </svg>
+          <div className="rounded-xl border border-slate-200 bg-white p-2">
+            {/* กระดานกลาง FlowchartBoard: ผังของระบบ = ชั้นล็อก (วาดจาก lib/flow-map ทุกครั้ง) · ที่วาดเสริมเก็บแยกต่อแท็บ (entity flow_map_canvas/<view>) */}
+            <FlowchartBoard key={view.key} entityType="flow_map_canvas" entityId={view.key} height="min(76vh, 760px)"
+              fileName={t(`แผนผัง${view.label}`, `${view.label} map`)} locked={lockedLayer} />
             <div className="px-2 pt-1 text-[11px] text-slate-400 flex flex-wrap gap-x-3">
               <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1 align-middle" />{t("มีช่องโหว่ / ตัวเลขที่ต้องตาม", "Gap or number to follow")}</span>
               <span><span className="inline-block w-2 h-2 rounded-full bg-violet-600 mr-1 align-middle" />{t(`เพิ่งแก้ (${FLOW_RECENT_DAYS} วัน)`, `Updated (${FLOW_RECENT_DAYS} days)`)}</span>
               <span className="inline-flex items-center gap-1"><Icon value="🔔" />{t("กดกระดิ่งดู/จัดการแจ้งเตือน (เขียว = ถึงคนครบ · เหลือง = บางทางยังเงียบ · เส้นประ = ยังไม่มี มีข้อเสนอ)", "Click a bell to view/manage (green = reaches · amber = partly silent · dashed = none yet)")}</span>
               {view.finance && <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: FM_CASHFLOW_DOT }} />{t("นับในกระแสเงินสด /cashflow", "Counted in /cashflow")}</span>}
               <span>{t("กล่องสีเทา = อยู่ส่วนอื่น", "Grey box = other area")}</span>
-              <span>{t("โน้ต: ลากแถบบนเพื่อย้าย · กดรูปกุญแจ/คน สลับส่วนตัว ↔ ทั้งทีม", "Notes: drag the top strip · toggle private / team")}</span>
+              <span>{t("ผังของระบบล็อกไว้ (ดับเบิลคลิกกล่อง = ปลดทีละกล่อง) · กล่อง/เส้นที่กดปุ่มบนแถบเพิ่ม = ที่วาดเสริม ทุกคนเห็น แยกตามแท็บ", "The system map is locked (double-click a box to unlock it) · boxes you add are your drawing, shared with everyone, per tab")}</span>
             </div>
           </div>
         )}

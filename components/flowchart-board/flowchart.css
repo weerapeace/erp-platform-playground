@@ -24,3 +24,8 @@
 .fc-board .react-flow__node-zone .react-flow__resize-control,
 .fc-board .react-flow__node-zone textarea { pointer-events: all !important; }
 .fc-board.fc-readonly .react-flow__node-zone .fc-zone-handle { cursor: default; }
+/* ชั้นล็อก (กล่อง/เส้นของระบบ) — ล็อกอยู่ = ชี้แล้วไม่ใช่มือจับ · ปลดล็อก = กรอบม่วงประ ลากได้ */
+.fc-board .react-flow__node-sys { cursor: pointer; }
+.fc-board .react-flow__node-sys.draggable { cursor: grab; }
+.fc-board .fc-sys-open { outline: 2px dashed #7c3aed; outline-offset: 2px; border-radius: 9px; }
+.fc-board .react-flow__node-sysBg { pointer-events: none !important; cursor: default; }

@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { r2PutObject, isR2Configured } from "@/lib/r2";
+import { FLOW_VIEWS, FLOW_FINANCE_PERM } from "@/lib/flow-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,17 +36,24 @@ const PERM: Record<string, { view: string; edit: string }> = {
   // storage_plan = รุ่นแรก (Excalidraw) ใช้ได้ครึ่งวัน มีแค่แม่แบบที่วางอัตโนมัติ — เก็บสิทธิ์ไว้ให้ข้อมูลเดิมยังเปิดอ่านได้
   storage_plan_flow:{ view: "assets.view",   edit: "assets.manage" },
   storage_plan:     { view: "assets.view",   edit: "assets.manage" },
+  // ที่วาดเสริมบนแผนผังการทำงาน (/master/flow-map · entity_id = key ของแท็บผัง) — ดูได้เท่าคนดูผัง · วาด/ปลดล็อกกล่องได้เฉพาะแอดมิน
+  // ผังการเงิน (FlowView.finance) ดูได้เฉพาะ FLOW_FINANCE_PERM — ดู permFor
+  flow_map_canvas:  { view: "products.view", edit: "admin.users" },
 };
-const permFor = (entityType: string) => PERM[entityType] ?? { view: "products.view", edit: "products.edit" };
+const FINANCE_VIEW_KEYS = new Set(FLOW_VIEWS.filter((v) => v.finance).map((v) => v.key));
+const permFor = (entityType: string, entityId = "") => {
+  if (entityType === "flow_map_canvas" && FINANCE_VIEW_KEYS.has(entityId)) return { view: FLOW_FINANCE_PERM, edit: "admin.users" };
+  return PERM[entityType] ?? { view: "products.view", edit: "products.edit" };
+};
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const entityType = (searchParams.get("entity_type") ?? "").trim();
   const entityId   = (searchParams.get("entity_id") ?? "").trim();
   if (!entityType || !entityId) return NextResponse.json({ data: null, error: "ต้องส่ง entity_type และ entity_id" }, { status: 400 });
-  const denied = await guardApi(request, permFor(entityType).view); if (denied) return denied;
+  const denied = await guardApi(request, permFor(entityType, entityId).view); if (denied) return denied;
   // ตรวจสิทธิ์แก้ด้วย (cache แล้ว = ถูก) → client เอาไปทำ read-only ถ้าแก้ไม่ได้ (กันวาดแล้วเซฟไม่ได้)
-  const canEdit = (await guardApi(request, permFor(entityType).edit)) === null;
+  const canEdit = (await guardApi(request, permFor(entityType, entityId).edit)) === null;
 
   const { data } = await supabaseAdmin().from("erp_canvas_sketches")
     .select("scene, preview_r2_key, updated_at, rev")
@@ -74,7 +82,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const entityType = (body.entity_type ?? "").trim();
   const entityId   = (body.entity_id ?? "").trim();
   if (!entityType || !entityId) return NextResponse.json({ error: "ต้องส่ง entity_type และ entity_id" }, { status: 400 });
-  const denied = await guardApi(request, permFor(entityType).edit); if (denied) return denied;
+  const denied = await guardApi(request, permFor(entityType, entityId).edit); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
   // กันกระดานบวมเกิน — วัดจาก content-length ของ request (ไม่ stringify ทั้ง scene ซ้ำ = ประหยัด CPU)

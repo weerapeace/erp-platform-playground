@@ -17,11 +17,11 @@
 
 import "@xyflow/react/dist/style.css";
 import "./flowchart.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MarkerType, ConnectionMode, NodeToolbar, Position,
   addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow,
-  type Connection, type Edge, type EdgeChange, type NodeChange,
+  type Connection, type Edge, type EdgeChange, type NodeChange, type Node,
 } from "@xyflow/react";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
@@ -43,16 +43,37 @@ import {
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
   flowIconScale, iconBoxBaseSize, nextIconScale, nodesInsideZone, refitIconBox, resizeIconBox, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
   FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, edgeShapeOf, isEdgeShape, type FlowEdgeShape,
+  isSysId, sysId, unSysId, type FlowPins,
 } from "@/lib/flowchart";
-import { EdgeShapeIcon, FlowBoardCtx, FlowEdgeView, FlowNodeView, FlowTools, type FlowBoardActions, type FlowRFNode } from "./nodes";
+import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
+import { planRuleCheck } from "@/lib/storage-policy";
+import {
+  EdgeShapeIcon, FlowBoardCtx, FlowEdgeView, FlowLockedCtx, FlowNodeView, FlowTools, SysBgView, SysEdgeView, SysNodeView,
+  type FlowBoardActions, type FlowLockedActions, type FlowRFNode, type SysBgRFNode, type SysEdgeData, type SysRFNode,
+} from "./nodes";
 import { CONNECTION_LINE } from "./edge-path";
 import { flowSceneToHtml } from "./export-html";
+import { StorageRuleModal, useStorageRules } from "./rule-modal";
+
+/** ชั้นล็อก — กล่อง/เส้นที่ระบบสร้าง (ไม่เก็บในกระดาน) ให้ผู้ใช้วาดเสริมทับ · ตรรกะ lib/flowchart-locked · ใช้: แผนผังการทำงาน */
+export type FlowLockedLayer = {
+  boxes: LockedBox[];
+  lines: LockedLine[];
+  /** พื้นหลัง (พิกัดกระดาน เริ่ม 0,0) เช่น แถบคอลัมน์ */
+  backdrop?: { width: number; height: number; content: ReactNode };
+  /** เนื้อหาของกล่องระบบ (หน้าแม่วาดเอง ขนาดเท่ากล่อง) */
+  renderBox: (id: string) => ReactNode;
+  onBoxClick?: (id: string) => void;
+  onLineClick?: (id: string) => void;
+};
+type BoardNode = FlowRFNode | SysRFNode | SysBgRFNode;
+const SYS_BG = "sys-bg";
 
 /** กล่องบนกระดาน → ชนิด/ข้อมูล/ตำแหน่ง/ขนาด (ไว้คิดขนาดไอคอน) */
 const boxOf = (n: FlowRFNode) => ({ type: n.type as FlowKind, data: n.data, position: n.position, width: n.width ?? n.measured?.width ?? 0, height: n.height ?? n.measured?.height ?? 0 });
 
-const NODE_TYPES = Object.fromEntries(FLOW_KINDS.map((k) => [k, FlowNodeView]));
-const EDGE_TYPES = { flow: FlowEdgeView };
+const NODE_TYPES = { ...Object.fromEntries(FLOW_KINDS.map((k) => [k, FlowNodeView])), sys: SysNodeView, sysBg: SysBgView };
+const EDGE_TYPES = { flow: FlowEdgeView, sys: SysEdgeView };
 const MARKER = { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#64748b" } as const;
 const SAVE_MS = 1000;
 const HISTORY_MAX = 60;
@@ -113,6 +134,8 @@ export type FlowchartBoardProps = {
   fileName?: string;
   /** แจ้งหน้าแม่ว่าผู้ใช้มีสิทธิ์แก้ไหม (ไว้ซ่อน/โชว์ปุ่มของหน้า) */
   onCanEdit?: (can: boolean) => void;
+  /** ชั้นล็อก (ระบบสร้าง) — มี = ที่วาดในกระดานนี้คือ "ที่วาดเสริม" ทับชั้นนี้ · ดับเบิลคลิกกล่องระบบ = ปลดล็อกทีละกล่อง */
+  locked?: FlowLockedLayer;
 };
 
 export function FlowchartBoard(props: FlowchartBoardProps) {
@@ -121,7 +144,7 @@ export function FlowchartBoard(props: FlowchartBoardProps) {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-function Board({ entityType, entityId, editable = true, height = "70vh", starter, fileName = "flowchart", onCanEdit }: FlowchartBoardProps) {
+function Board({ entityType, entityId, editable = true, height = "70vh", starter, fileName = "flowchart", onCanEdit, locked }: FlowchartBoardProps) {
   const t = useT();
   const pushToast = usePushToast();
   const rf = useReactFlow();
@@ -143,7 +166,14 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [exporting, setExporting] = useState(false);
   const [, setHistTick] = useState(0);
   const [clipReady, setClipReady] = useState(false);          // มีกล่องที่คัดลอกไว้ (โชว์ปุ่ม "วาง")
-  const readOnly = !(canEdit && editable);
+  // ── ชั้นล็อก ──
+  const [pins, setPins] = useState<FlowPins>({});             // ตำแหน่งที่ย้ายของกล่องระบบ (บันทึกในกระดาน · ทุกคนเห็น)
+  const [unlocked, setUnlocked] = useState<Set<string>>(() => new Set());   // กล่องระบบที่ปลดล็อกอยู่ (เฉพาะตอนนี้ ไม่บันทึก)
+  const hideKey = `erp-flowchart-hide-own:${entityType}`;
+  const [hideOwn, setHideOwn] = useState(false);              // ซ่อนที่วาดเสริม (จำต่อเครื่อง)
+  useEffect(() => { if (!locked) return; try { setHideOwn(localStorage.getItem(hideKey) === "1"); } catch { /* โหมดส่วนตัว */ } }, [hideKey, locked]);
+  const [rulePick, setRulePick] = useState<{ id: string } | null>(null);   // ป๊อปผูกกฎที่เก็บจริง
+  const readOnly = !(canEdit && editable) || (!!locked && hideOwn);
   const readOnlyRef = useRef(readOnly); readOnlyRef.current = readOnly;
   const pointerRef = useRef<{ x: number; y: number } | null>(null);   // เมาส์ล่าสุดบนกระดาน (วางตรงนั้น)
   const lastPasteRef = useRef<{ x: number; y: number; count: number } | null>(null);
@@ -153,7 +183,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   useEffect(() => { setEdgeShapeDefault(loadDefaultShape()); }, []);
 
   // ── ข้อมูลล่าสุด (ref ไว้ใช้ใน callback/timer ไม่ให้ค้างค่าเก่า) ──
-  const scene = useMemo(() => toFlowScene(nodes, edges), [nodes, edges]);
+  const scene = useMemo(() => toFlowScene(nodes, edges, pins), [nodes, edges, pins]);
   const sig = useMemo(() => flowSceneSig(scene), [scene]);
   const sceneRef = useRef(scene); sceneRef.current = scene;
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
@@ -172,6 +202,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     const sel = keepSelection ? new Set(nodesRef.current.filter((n) => n.selected).map((n) => n.id)) : undefined;
     setNodes(toRFNodes(s, sel));
     setEdges(toRFEdges(s));
+    setPins(s.pins ?? {});
   }, []);
 
   // ── โหลด ──
@@ -426,13 +457,31 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   }, [t, pushToast]);
 
   // ── แก้กระดาน ──
-  const onNodesChange = useCallback((ch: NodeChange<FlowRFNode>[]) => setNodes((ns) => applyNodeChanges(ch, ns)), []);
-  const onEdgesChange = useCallback((ch: EdgeChange[]) => setEdges((es) => applyEdgeChanges(ch, es)), []);
+  // กล่องระบบ (sys:) ไม่ได้อยู่ใน nodes — ลากกล่องที่ปลดล็อก = จดตำแหน่งลง pins · การเปลี่ยนอื่นของกล่องระบบไม่สน
+  const onNodesChange = useCallback((ch: NodeChange<BoardNode>[]) => {
+    const own: NodeChange<FlowRFNode>[] = [];
+    let moved: FlowPins | null = null;
+    for (const c of ch) {
+      const id = "id" in c ? c.id : null;
+      if (id && (isSysId(id) || id === SYS_BG)) {
+        if (c.type === "position" && c.position && isSysId(id)) (moved ??= {})[id] = { x: Math.round(c.position.x), y: Math.round(c.position.y) };
+        continue;
+      }
+      own.push(c as NodeChange<FlowRFNode>);
+    }
+    if (moved) { const m = moved; setPins((p) => ({ ...p, ...m })); }
+    if (own.length) setNodes((ns) => applyNodeChanges(own, ns));
+  }, []);
+  const onEdgesChange = useCallback((ch: EdgeChange[]) => {
+    const own = ch.filter((c) => !("id" in c) || !isSysId(c.id));
+    if (own.length) setEdges((es) => applyEdgeChanges(own, es));
+  }, []);
   // ลากหัวกรอบโซน → กล่องที่อยู่ในกรอบทั้งกล่องย้ายตาม (กล่องที่ React Flow ลากไปด้วยอยู่แล้ว = ข้าม ไม่ย้ายซ้ำ)
   const zoneDragRef = useRef<{ id: string; x: number; y: number; items: Map<string, { x: number; y: number }> } | null>(null);
-  const onNodeDragStart = useCallback((_: unknown, node: FlowRFNode, dragging: FlowRFNode[]) => {
+  const onNodeDragStart = useCallback((_: unknown, bnode: BoardNode, bdragging: BoardNode[]) => {
     zoneDragRef.current = null;
-    if (node.type !== "zone") return;
+    if (bnode.type !== "zone") return;
+    const node = bnode as FlowRFNode, dragging = bdragging as FlowRFNode[];
     const box = (n: FlowRFNode) => ({ id: n.id, position: n.position, width: n.width ?? n.measured?.width ?? 0, height: n.height ?? n.measured?.height ?? 0 });
     const all = nodesRef.current;
     const inside = new Set(nodesInsideZone(box(node), all.map(box)));
@@ -440,7 +489,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     const items = new Map(all.filter((n) => inside.has(n.id) && !movedByRF.has(n.id)).map((n) => [n.id, { x: n.position.x, y: n.position.y }]));
     if (items.size) zoneDragRef.current = { id: node.id, x: node.position.x, y: node.position.y, items };
   }, []);
-  const onNodeDrag = useCallback((_: unknown, node: FlowRFNode) => {
+  const onNodeDrag = useCallback((_: unknown, node: BoardNode) => {
     const z = zoneDragRef.current;
     if (!z || z.id !== node.id) return;
     const dx = node.position.x - z.x, dy = node.position.y - z.y;
@@ -486,7 +535,16 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // กล่อง "หน้าใน ERP": โหลดเมนูจริงเฉพาะตอนกระดานมีกล่องนี้ (แคชเดียวกับแถบเมนู) → ชื่อแอปล่าสุด + เตือนถ้าหน้าหลุดจากเมนู
   const hasPage = nodes.some((n) => n.type === "page");
   const menu = useMenuPages(hasPage);
+  // กล่องที่เก็บผูกกฎจริง: โหลดกฎเฉพาะตอนมีกล่องผูกกฎ / เปิดป๊อปเลือกกฎ
+  const hasRule = nodes.some((n) => n.type === "storage" && !!n.data.rule);
+  const storageRules = useStorageRules(hasRule || !!rulePick);
   const actions = useMemo<FlowBoardActions>(() => ({
+    editRule: (id) => setRulePick({ id }),
+    ruleCheck: (data) => {
+      if (!data.rule) return null;
+      if (!storageRules.rules) return "loading";
+      return planRuleCheck(data.place, storageRules.rules.find((r) => r.rule_key === data.rule) ?? null);
+    },
     readOnly, t, openFolder, selectedIds,
     editFileTypes: (id) => setFilePick({ id }),
     editPlace: (id) => setPlacePick({ id }),
@@ -526,7 +584,75 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules]);
+
+  // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
+  const lockedById = useMemo(() => new Map((locked?.boxes ?? []).map((b) => [b.id, b])), [locked?.boxes]);
+  const sysNodes = useMemo<BoardNode[]>(() => {
+    if (!locked) return [];
+    const out: BoardNode[] = [];
+    if (locked.backdrop) {
+      const { width: w, height: h, content } = locked.backdrop;
+      out.push({ id: SYS_BG, type: "sysBg", position: { x: 0, y: 0 }, width: w, height: h, measured: { width: w, height: h }, data: { content }, draggable: false, selectable: false, connectable: false, focusable: false, zIndex: -2 } as SysBgRFNode);
+    }
+    for (const b of locked.boxes) {
+      const p = boxAt(b, pins), open = unlocked.has(b.id);
+      out.push({
+        id: sysId(b.id), type: "sys", position: { x: p.x, y: p.y }, width: b.w, height: b.h, measured: { width: b.w, height: b.h },
+        data: { lid: b.id, unlocked: open }, draggable: open && !readOnly, selectable: false, deletable: false, focusable: false,
+      } as SysRFNode);
+    }
+    return out;
+  }, [locked, pins, unlocked, readOnly]);
+  const sysEdges = useMemo<Edge[]>(() => {
+    if (!locked) return [];
+    const out: Edge[] = [];
+    for (const l of locked.lines) {
+      const path = lockedLinePath(l, lockedById, pins);
+      if (!path) continue;
+      const data: SysEdgeData = { path, color: l.color, dash: l.dash, width: l.width, text: l.text, dot: l.dot, title: l.title, opacity: l.opacity };
+      out.push({
+        id: sysId(l.id), source: sysId(l.source), target: sysId(l.target), sourceHandle: "r", targetHandle: "l", type: "sys",
+        data: data as unknown as Record<string, unknown>, selectable: false, deletable: false, focusable: false,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: l.color },
+      });
+    }
+    return out;
+  }, [locked, lockedById, pins]);
+  const shownNodes = useMemo<BoardNode[]>(() => (locked && hideOwn ? sysNodes : [...sysNodes, ...nodes]), [locked, hideOwn, sysNodes, nodes]);
+  const shownEdges = useMemo<Edge[]>(() => (locked && hideOwn ? sysEdges : [...sysEdges, ...edges]), [locked, hideOwn, sysEdges, edges]);
+  const lockedCtx = useMemo<FlowLockedActions | null>(() => (locked ? { renderBox: locked.renderBox, canChange: !readOnly } : null), [locked, readOnly]);
+  const stale = useMemo(() => (locked ? staleEdges(edges, lockedById.keys()) : []), [locked, edges, lockedById]);
+  const movedCount = locked ? Object.keys(livePins(pins, lockedById.keys())).length : 0;
+  const toggleUnlock = (id: string) => {
+    if (readOnly) return;
+    const lid = unSysId(id), label = lockedById.get(lid)?.label ?? "";
+    const wasOpen = unlocked.has(lid);
+    setUnlocked((s) => { const n = new Set(s); if (wasOpen) n.delete(lid); else n.add(lid); return n; });
+    pushToast("info", wasOpen
+      ? t(`ล็อก "${label}" แล้ว`, `Locked "${label}"`)
+      : t(`ปลดล็อก "${label}" แล้ว — ลากย้ายได้ · ดับเบิลคลิกอีกครั้ง = ล็อกกลับ`, `Unlocked "${label}" — drag to move · double-click again to lock`));
+  };
+  const resetPins = () => { setPins({}); setUnlocked(new Set()); pushToast("success", t("คืนตำแหน่งกล่องของระบบแล้ว (กดย้อนกลับได้)", "System boxes moved back (undo available)")); };
+  const toggleHide = () => {
+    const next = !hideOwn;
+    setHideOwn(next);
+    try { localStorage.setItem(hideKey, next ? "1" : "0"); } catch { /* จำไม่ได้ก็ไม่เป็นไร */ }
+  };
+  const removeStale = () => { const s = new Set(stale); setEdges((es) => es.filter((e) => !s.has(e.id))); };
+
+  // ── ค้นหากล่อง + ซูมไปหา ──
+  const [findQ, setFindQ] = useState("");
+  const findItems = useMemo(() => [
+    ...(locked?.boxes ?? []).map((b) => ({ id: sysId(b.id), label: b.label })),
+    ...(locked && hideOwn ? [] : nodes.map((n) => ({ id: n.id, label: n.data.label.replace(/\n/g, " ") }))),
+  ], [locked, hideOwn, nodes]);
+  const findHits = useMemo(() => searchBoxes(findItems, findQ), [findItems, findQ]);
+  const goTo = (id: string) => {
+    setFindQ("");
+    void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.4, duration: 400 });
+    if (!isSysId(id)) setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
+  };
 
   // ── บันทึกเป็นรูป (ตัวแปลงกลาง lib/html-to-png) ──
   const exportImage = async () => {
@@ -592,7 +718,44 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
               ))}
             </span>
           )}
-          {readOnly && <span className="px-2 text-[12px] text-slate-500"><Icon value="i:lock" /> {canEdit ? t("โหมดดูอย่างเดียว", "View-only mode") : t("ดูอย่างเดียว (ไม่มีสิทธิ์แก้)", "View only (no edit permission)")}</span>}
+          {readOnly && <span className="px-2 text-[12px] text-slate-500"><Icon value="i:lock" /> {locked && hideOwn ? t("ซ่อนที่วาดเสริมอยู่", "Your drawing is hidden") : canEdit ? t("โหมดดูอย่างเดียว", "View-only mode") : t("ดูอย่างเดียว (ไม่มีสิทธิ์แก้)", "View only (no edit permission)")}</span>}
+          {locked && (
+            <>
+              <button type="button" className={tb} onClick={toggleHide} aria-pressed={!hideOwn}
+                title={hideOwn ? t("แสดงกล่อง/เส้นที่วาดเสริม", "Show your added boxes and lines") : t("ซ่อนกล่อง/เส้นที่วาดเสริม — ดูผังของระบบล้วน ๆ", "Hide added boxes — see only the system map")}>
+                <Icon value={hideOwn ? "i:eye-off" : "i:eye"} />{t("ที่วาดเสริม", "Your drawing")}
+                {nodes.length > 0 && <span className="rounded-full bg-violet-100 px-1.5 text-[10.5px] text-violet-700">{nodes.length}</span>}
+              </button>
+              {!readOnly && unlocked.size === 0 && <span className="hidden px-1 text-[11px] text-slate-400 lg:inline">{t("กล่องของระบบล็อกอยู่ · ดับเบิลคลิก = ปลดทีละกล่อง", "System boxes are locked · double-click to unlock one")}</span>}
+              {!readOnly && unlocked.size > 0 && (
+                <button type="button" className={`${tb} text-violet-700`} onClick={() => setUnlocked(new Set())} title={t("ล็อกกล่องของระบบทั้งหมดกลับ", "Lock all system boxes again")}>
+                  <Icon value="i:lock-open" />{t(`ปลดอยู่ ${unlocked.size} กล่อง · ล็อกทั้งหมด`, `${unlocked.size} unlocked · lock all`)}
+                </button>
+              )}
+              {!readOnly && movedCount > 0 && (
+                <button type="button" className={tb} onClick={resetPins} title={t("ย้ายกล่องของระบบที่เคยลากไว้ กลับที่เดิมทั้งหมด", "Move every system box back to its original place")}>
+                  <Icon value="i:arrow-back-up" />{t(`คืนตำแหน่งเดิม (${movedCount})`, `Reset positions (${movedCount})`)}
+                </button>
+              )}
+            </>
+          )}
+          <span className="relative">
+            <span className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-slate-400 focus-within:border-violet-300">
+              <Icon value="i:search" />
+              <input value={findQ} onChange={(e) => setFindQ(e.target.value)} placeholder={t("ค้นหากล่อง", "Find a box")}
+                onKeyDown={(e) => { if (e.key === "Enter" && findHits[0]) goTo(findHits[0].id); if (e.key === "Escape") setFindQ(""); }}
+                className="w-24 bg-transparent text-[12px] text-slate-700 outline-none sm:w-32" aria-label={t("ค้นหากล่องบนกระดาน", "Find a box on the board")} />
+            </span>
+            {findQ.trim() && (
+              <span className="absolute left-0 top-9 z-20 block max-h-72 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                {findHits.length ? findHits.map((h) => (
+                  <button key={h.id} type="button" onClick={() => goTo(h.id)} className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] text-slate-700 hover:bg-slate-50">
+                    <Icon value={isSysId(h.id) ? "i:lock" : "i:square"} className="shrink-0 text-slate-400" /><span className="truncate">{h.label || "—"}</span>
+                  </button>
+                )) : <span className="block px-2 py-1.5 text-[12px] text-slate-400">{t("ไม่พบกล่องที่ตรงคำค้น", "No matching box")}</span>}
+              </span>
+            )}
+          </span>
           <span className="flex-1" />
           {!readOnly && (
             <>
@@ -601,7 +764,13 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             </>
           )}
           <button type="button" className={tb} onClick={() => void rf.fitView({ padding: 0.2, maxZoom: 1, duration: 300 })} title={t("ดูทั้งแผนผัง", "Fit to screen")}><Icon value="i:maximize" /></button>
-          <button type="button" className={tb} onClick={() => void exportImage()} disabled={exporting} title={t("บันทึกแผนผังเป็นรูป PNG", "Save the chart as a PNG image")}><Icon value="i:photo" />{exporting ? t("กำลังสร้างรูป...", "Creating...") : t("บันทึกเป็นรูป", "Save image")}</button>
+          {!locked && (
+            <>
+              <a className={tb} href={`/print/flowchart?type=${encodeURIComponent(entityType)}&id=${encodeURIComponent(entityId)}&name=${encodeURIComponent(fileName)}`} target="_blank" rel="noopener"
+                title={t("พิมพ์ หรือบันทึกเป็น PDF (A4 แนวนอน)", "Print or save as PDF (A4 landscape)")}><Icon value="i:printer" />{t("พิมพ์ / PDF", "Print / PDF")}</a>
+              <button type="button" className={tb} onClick={() => void exportImage()} disabled={exporting} title={t("บันทึกแผนผังเป็นรูป PNG", "Save the chart as a PNG image")}><Icon value="i:photo" />{exporting ? t("กำลังสร้างรูป...", "Creating...") : t("บันทึกเป็นรูป", "Save image")}</button>
+            </>
+          )}
           {canEdit && (
             <span className={`ml-1 text-[11px] ${saveState === "error" ? "text-rose-600" : dirty || saveState === "saving" ? "text-blue-600" : "text-emerald-600"}`}>
               {saveState === "error"
@@ -611,17 +780,28 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             </span>
           )}
         </div>
+        {stale.length > 0 && !hideOwn && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-800">
+            <Icon value="i:alert-triangle" />
+            {t(`เส้นค้าง ${stale.length} เส้น — ต่อกับกล่องของระบบที่ถูกเอาออกแล้ว (เลยมองไม่เห็นบนกระดาน)`, `${stale.length} stale line(s) — attached to system boxes that no longer exist`)}
+            {!readOnly && <button type="button" onClick={removeStale} className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11.5px] hover:bg-amber-100">{t("ลบเส้นค้าง", "Remove them")}</button>}
+          </div>
+        )}
 
         {/* กระดาน */}
         <div ref={wrapRef} className="relative min-h-0 flex-1"
           onPointerMove={(e) => { pointerRef.current = { x: e.clientX, y: e.clientY }; }}
           onPointerLeave={() => { pointerRef.current = null; }}>
-          <ReactFlow<FlowRFNode, Edge>
-            nodes={nodes} edges={edges} nodeTypes={NODE_TYPES} edgeTypes={EDGE_TYPES}
+          <FlowLockedCtx.Provider value={lockedCtx}>
+          <ReactFlow<BoardNode, Edge>
+            nodes={shownNodes} edges={shownEdges} nodeTypes={NODE_TYPES} edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
             elevateNodesOnSelect={false}
-            onEdgeDoubleClick={(_, e) => { if (!readOnly) actions.editEdgeLabel(e.id); }}
+            onNodeClick={(_, n) => { if (isSysId(n.id)) locked?.onBoxClick?.(unSysId(n.id)); }}
+            onNodeDoubleClick={(_, n) => { if (isSysId(n.id)) toggleUnlock(n.id); }}
+            onEdgeClick={(_, e) => { if (isSysId(e.id)) locked?.onLineClick?.(unSysId(e.id)); }}
+            onEdgeDoubleClick={(_, e) => { if (!readOnly && !isSysId(e.id)) actions.editEdgeLabel(e.id); }}
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{ type: "flow", markerEnd: MARKER }}
             connectionLineStyle={{ stroke: "#7c3aed", strokeWidth: 2 }}
@@ -642,7 +822,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
               </NodeToolbar>
             )}
           </ReactFlow>
-          {nodes.length === 0 && (
+          </FlowLockedCtx.Provider>
+          {nodes.length === 0 && !locked && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <EmptyState title={readOnly ? t("ยังไม่มีแผนผัง", "No chart yet") : t("เริ่มจากกดปุ่มกล่องด้านบน", "Start with a box button above")}
                 hint={readOnly ? undefined : t("ลากจากจุดขอบกล่องไปอีกกล่อง = ต่อเส้น · ดับเบิลคลิกกล่อง = แก้ข้อความ · วางข้อความ/กล่องที่คัดลอกมา = Ctrl+V", "Drag from a box edge dot to another box to connect · double-click a box to edit · Ctrl+V pastes text or copied boxes")} />
@@ -687,6 +868,21 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             if (next) data.place = next.key; else delete data.place;
             if (next && (!n.data.label.trim() || defaults.includes(n.data.label))) data.label = t(next.th, next.en);   // ชื่อเดิมเป็นค่าตั้งต้น → ใช้ชื่อที่เก็บใหม่
             return { ...n, data, ...refitIconBox(boxOf(n), data) };
+          }));
+        }} />
+
+      {/* กล่อง "ที่เก็บ": ผูกกับกฎที่เก็บจริง (/api/storage-rules) — แผนไม่ตรงกฎ = ป้ายส้มใต้กล่อง */}
+      <StorageRuleModal open={!!rulePick} current={rulePick ? nodes.find((n) => n.id === rulePick.id)?.data.rule ?? null : null}
+        rules={storageRules.rules} error={storageRules.error} onReload={storageRules.reload} onClose={() => setRulePick(null)}
+        onPick={(ruleKey) => {
+          const id = rulePick?.id;
+          setRulePick(null);
+          if (!id) return;
+          setNodes((ns) => ns.map((n) => {
+            if (n.id !== id) return n;
+            const data: FlowNodeData = { ...n.data };
+            if (ruleKey) data.rule = ruleKey; else delete data.rule;
+            return { ...n, data };
           }));
         }} />
 

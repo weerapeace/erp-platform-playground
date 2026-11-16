@@ -10,6 +10,7 @@ import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { FLOW_COLORS, FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, edgeShapeOf, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, type FlowColor, type FlowEdgeShape, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
+import type { PlanRuleCheck } from "@/lib/storage-policy";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
 function PlaceIcon({ place, size }: { place: string; size: number }) {
@@ -56,6 +57,10 @@ export type FlowBoardActions = {
   setEdgeShape: (ids: string[], shape: FlowEdgeShape) => void;
   editEdgeLabel: (id: string) => void;
   removeEdge: (id: string) => void;
+  /** กล่อง "ที่เก็บ": เปิดป๊อปผูกกฎที่เก็บจริง (/master/storage-rules) */
+  editRule: (id: string) => void;
+  /** ผลเทียบแผนกับกฎที่ผูก · null = ไม่ได้ผูก · "loading" = กำลังโหลดกฎ */
+  ruleCheck: (data: FlowNodeData) => PlanRuleCheck | "loading" | null;
 };
 export const FlowBoardCtx = createContext<FlowBoardActions | null>(null);
 const useBoard = () => {
@@ -109,7 +114,7 @@ function InlineEditor({ initial, onDone, folder, zone }: { initial: FlowNodeData
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule } = useBoard();
   const cur = single ? nodeColor(single.kind, single.data) : null;
   const iconScale = iconScaleOf(ids);
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
@@ -127,6 +132,7 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
         <>
           <button type="button" className={btn} onClick={() => editPlace(ids[0])} title={t("เลือกไอคอนที่เก็บ เช่น Google Drive · R2 · NAS", "Choose a storage icon, e.g. Google Drive · R2 · NAS")}><Icon value="i:database" />{t("ไอคอน", "Icon")}</button>
           <button type="button" className={btn} onClick={() => editFileTypes(ids[0])} title={t("ใส่ไอคอนประเภทไฟล์ที่เก็บที่นี่", "Show which file types live here")}><Icon value="i:files" />{t("ไฟล์", "Files")}</button>
+          <button type="button" className={btn} onClick={() => editRule(ids[0])} title={t("ผูกกับกฎที่เก็บจริงของระบบ — แผนไม่ตรงกฎจะขึ้นป้ายเตือน", "Link to the real storage rule — warns when the plan doesn't match")}><Icon value="i:shield-check" />{t("กฎ", "Rule")}</button>
         </>
       )}
       {single?.kind === "page" && (
@@ -153,6 +159,20 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
   );
 }
 
+/** ป้ายใต้กล่องที่เก็บ: ผูกกฎที่เก็บจริงแล้ว ตรง (เขียว) / ไม่ตรง (ส้ม) · กด = เปลี่ยนกฎ */
+function RuleChip({ check, onClick }: { check: PlanRuleCheck | "loading" | null; onClick?: () => void }) {
+  const { t } = useBoard();
+  if (!check) return null;
+  const warn = check !== "loading" && check.tone === "warn";
+  const text = check === "loading" ? t("กำลังเทียบกับกฎ...", "Checking the rule...") : t(check.th, check.en);
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onClick?.(); }} onDoubleClick={(e) => e.stopPropagation()} title={text}
+      className={`nodrag nopan absolute left-1/2 top-full z-[2] mt-1 inline-flex max-w-[260px] -translate-x-1/2 items-center gap-1 truncate rounded-full border px-2 text-[10.5px] leading-5 ${onClick ? "" : "cursor-default"} ${check === "loading" ? "border-slate-200 bg-white text-slate-500" : warn ? "border-amber-300 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+      <Icon value={warn ? "i:alert-triangle" : "i:shield-check"} /><span className="truncate">{text}</span>
+    </button>
+  );
+}
+
 /** รูปทรงพื้นหลังแบบ SVG (คำถาม = ข้าวหลามตัด · ที่เก็บ = ทรงกระบอก) */
 function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
   const p = FLOW_PALETTE[color];
@@ -173,7 +193,7 @@ function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
-  const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo } = useBoard();
+  const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
@@ -314,6 +334,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
       >
         {!frameless && <ShapeBg kind={kind} color={color} />}
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
+        {kind === "storage" && data.rule && <RuleChip check={ruleCheck(data)} onClick={readOnly ? undefined : () => editRule(id)} />}
         {editing && (
           <InlineEditor initial={data} folder={kind === "folder"}
             onDone={(patch) => { setEditing(false); if (patch) updateData(id, patch); }} />
@@ -372,5 +393,74 @@ export function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
         </EdgeLabelRenderer>
       )}
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ชั้นล็อก (กล่อง/เส้นที่ระบบสร้าง — หน้าแม่ส่งมาทาง prop `locked`) · ตรรกะล้วน: lib/flowchart-locked
+// ─────────────────────────────────────────────────────────────
+
+/** ของที่กล่อง/เส้นของระบบต้องใช้ (หน้าแม่วาดเนื้อหากล่องเอง ผ่าน renderBox) */
+export type FlowLockedActions = {
+  renderBox: (id: string) => ReactNode;
+  /** แก้กระดานได้ (มีสิทธิ์ + ไม่ได้ซ่อนชั้นวาด) — ดับเบิลคลิกปลดล็อก/ต่อเส้นได้ */
+  canChange: boolean;
+};
+export const FlowLockedCtx = createContext<FlowLockedActions | null>(null);
+
+export type SysNodeData = { lid: string; unlocked: boolean };
+export type SysRFNode = Node<SysNodeData, "sys">;
+export type SysBgRFNode = Node<{ content: ReactNode }, "sysBg">;
+
+/** กล่องของระบบ: เนื้อหาจากหน้าแม่ · ล็อกอยู่ = ลากไม่ได้ (กดดูรายละเอียดได้) · ดับเบิลคลิก = ปลด/ล็อกกล่องนี้ · ต่อเส้นที่วาดเองเข้ามาได้ */
+export function SysNodeView({ data }: NodeProps<SysRFNode>) {
+  const ctx = useContext(FlowLockedCtx);
+  const { t } = useBoard();
+  if (!ctx) return null;
+  return (
+    <>
+      <div className={`fc-sys relative h-full w-full ${data.unlocked ? "fc-sys-open" : ""}`}
+        title={ctx.canChange ? (data.unlocked ? t("ปลดล็อกอยู่ — ลากย้ายได้ · ดับเบิลคลิก = ล็อกกลับ", "Unlocked — drag to move · double-click to lock") : t("กล่องของระบบ (ล็อก) — ดับเบิลคลิก = ปลดล็อกกล่องนี้", "System box (locked) — double-click to unlock")) : undefined}>
+        {ctx.renderBox(data.lid)}
+        {data.unlocked && (
+          <span className="pointer-events-none absolute -top-2.5 right-1 inline-flex items-center gap-0.5 rounded-full bg-violet-600 px-1.5 text-[10px] font-medium leading-4 text-white shadow">
+            <Icon value="i:lock-open" />{t("ปลดล็อก", "Unlocked")}
+          </span>
+        )}
+      </div>
+      {HANDLE_POS.map(([hid, pos]) => (
+        <Handle key={hid} id={hid} type="source" position={pos} className="fc-h" isConnectable={ctx.canChange} />
+      ))}
+    </>
+  );
+}
+
+/** พื้นหลังของชั้นล็อก (เช่น แถบคอลัมน์ ซื้อ/ผลิต/จ่ายงาน/ขาย) — กดทะลุ */
+export function SysBgView({ data }: NodeProps<SysBgRFNode>) {
+  return <div className="pointer-events-none h-full w-full">{data.content}</div>;
+}
+
+export type SysEdgeData = { path: { d: string; feeds: string[]; badge: { x: number; y: number } | null }; color: string; dash?: string; width?: number; text?: string; dot?: string; title?: string; opacity?: number };
+
+/** เส้นของระบบ: วาดตามเส้นทางที่คำนวณแล้ว (ไม่ใช้พิกัดจุดต่อของ React Flow) + วงกลมเลขกำกับ · กด = หน้าแม่เปิดรายละเอียด */
+export function SysEdgeView({ id, data, markerEnd }: EdgeProps) {
+  const e = data as unknown as SysEdgeData | undefined;
+  if (!e) return null;
+  const w = e.width ?? 1.5;
+  const style = { stroke: e.color, strokeWidth: w, strokeDasharray: e.dash, strokeLinecap: "round" as const };
+  return (
+    <g opacity={e.opacity ?? 1} className="cursor-pointer">
+      {e.title && <title>{e.title}</title>}
+      {e.path.feeds.map((d) => <path key={d} d={d} fill="none" style={style} />)}
+      <BaseEdge id={id} path={e.path.d} markerEnd={markerEnd} interactionWidth={12} style={style} />
+      {e.path.feeds.map((d) => <path key={`h${d}`} d={d} fill="none" stroke="transparent" strokeWidth={12} />)}
+      {e.path.badge && e.text && (
+        <g>
+          <circle cx={e.path.badge.x} cy={e.path.badge.y} r={9} fill="#fff" stroke={e.color} strokeWidth={1.5} />
+          <text x={e.path.badge.x} y={e.path.badge.y} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} fill={e.color}>{e.text}</text>
+          {e.dot && <circle cx={e.path.badge.x + 7} cy={e.path.badge.y - 7} r={3.5} fill={e.dot} stroke="#fff" strokeWidth={1} />}
+        </g>
+      )}
+    </g>
   );
 }

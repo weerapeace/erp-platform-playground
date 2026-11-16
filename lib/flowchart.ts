@@ -43,7 +43,8 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** exts = นามสกุลไฟล์ของกล่อง "ไฟล์" (เช่น ["cr2","jpg"]) — ไอคอน/สีจาก lib/file-types */
 /** place = ที่เก็บของกล่อง "ที่เก็บ" (drive · r2 · supabase · nas ...) — ไอคอน/ชื่อจาก lib/storage-places · ไม่มี = ทรงกระบอกเดิม */
 /** href/app/appName/icon = กล่อง "หน้าใน ERP": ลิงก์หน้าในระบบ (ขึ้นต้น "/") · รหัสแอป · ชื่อแอปตอนเลือก · ไอคอนเมนู — เลือกจากเมนูจริง (lib/menu-pages) */
-export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string };
+/** rule = กล่อง "ที่เก็บ" ผูกกับกฎที่เก็บจริง (erp_storage_rules.rule_key · หน้า /master/storage-rules) → กระดานเตือนเมื่อแผนไม่ตรงกฎ */
+export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -59,7 +60,34 @@ export const FLOW_EDGE_SHAPE_META: Record<FlowEdgeShape, { th: string; en: strin
 export const isEdgeShape = (v: unknown): v is FlowEdgeShape => typeof v === "string" && (FLOW_EDGE_SHAPES as readonly string[]).includes(v);
 /** แบบลูกศรของเส้น (ไม่ได้ตั้ง = หักมุม) */
 export const edgeShapeOf = (e: { shape?: unknown } | null | undefined): FlowEdgeShape => (isEdgeShape(e?.shape) ? e!.shape as FlowEdgeShape : "step");
-export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[] };
+/**
+ * pins = ตำแหน่งที่ย้ายของ "กล่องของระบบ" (ชั้นล็อก — หน้าแม่ส่ง locked มา เช่น แผนผังการทำงาน) · key = id กล่อง (ขึ้นต้น "sys:")
+ * ไม่มี = ทุกกล่องของระบบอยู่ที่เดิม · เก็บเฉพาะตอนมีค่า (กระดานเดิมลายเซ็นไม่เปลี่ยน)
+ */
+export type FlowPins = Record<string, { x: number; y: number }>;
+export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins };
+
+/** กล่อง/เส้นของ "ชั้นล็อก" (ระบบสร้าง ไม่ได้เก็บในกระดาน) ขึ้นต้นด้วยคำนี้ — เส้นที่วาดเองต่อเข้ากล่องพวกนี้ได้ */
+export const SYS_PREFIX = "sys:";
+export const isSysId = (id: unknown): id is string => typeof id === "string" && id.startsWith(SYS_PREFIX) && id.length > SYS_PREFIX.length && id.length <= 80;
+export const sysId = (id: string): string => `${SYS_PREFIX}${id}`;
+export const unSysId = (id: string): string => (id.startsWith(SYS_PREFIX) ? id.slice(SYS_PREFIX.length) : id);
+
+/** ตำแหน่งที่ย้ายของกล่องระบบ → ค่าที่ปลอดภัย (key ต้องขึ้นต้น sys: · ตัวเลขจริง · ปัดเป็นจำนวนเต็ม) */
+export function cleanPins(raw: unknown): FlowPins {
+  const out: FlowPins = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const o = (v ?? {}) as Record<string, unknown>;
+    if (!isSysId(k) || typeof o.x !== "number" || typeof o.y !== "number" || !Number.isFinite(o.x) || !Number.isFinite(o.y)) continue;
+    out[k] = { x: Math.round(o.x), y: Math.round(o.y) };
+  }
+  return out;
+}
+const withPins = (s: FlowScene, pins: FlowPins): FlowScene => (Object.keys(pins).length ? { ...s, pins } : s);
+
+/** รหัสกฎที่เก็บ (erp_storage_rules.rule_key) — ตัวเล็ก/ตัวเลข/ขีดล่าง */
+export const isRuleKey = (v: unknown): v is string => typeof v === "string" && /^[a-z0-9_]{1,40}$/.test(v);
 
 export const EMPTY_FLOW_SCENE: FlowScene = { kind: "flowchart", v: 1, nodes: [], edges: [] };
 
@@ -100,6 +128,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (exts.length) data.exts = exts;
     if (isPlaceKey(d.place)) data.place = d.place;
     if (o.type === "page") Object.assign(data, cleanPageData(d));
+    if (o.type === "storage" && isRuleKey(d.rule)) data.rule = d.rule;
     nodes.push({ id, type: o.type, position: { x: num(pos.x, 0), y: num(pos.y, 0) }, width: Math.max(40, num(o.width, meta.w)), height: Math.max(30, num(o.height, meta.h)), data });
     ids.add(id);
   }
@@ -108,12 +137,12 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
   for (const e of Array.isArray(r.edges) ? r.edges : []) {
     const o = (e ?? {}) as Record<string, unknown>;
     const id = str(o.id); const source = str(o.source); const target = str(o.target);
-    if (!id || eids.has(id) || !ids.has(source) || !ids.has(target)) continue;
+    if (!id || eids.has(id) || !(ids.has(source) || isSysId(source)) || !(ids.has(target) || isSysId(target))) continue;   // ปลายเส้น = กล่องในกระดาน หรือกล่องของระบบ (sys:)
     const shape = edgeShapeOf(o);
     edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}) });
     eids.add(id);
   }
-  return { kind: "flowchart", v: 1, nodes, edges };
+  return withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
 }
 
 /** ช่องของกล่อง "หน้าใน ERP" ที่ผ่านการตรวจ (ลิงก์ต้องเป็นหน้าในระบบเท่านั้น — กันลิงก์แปลก/javascript:) */
@@ -130,9 +159,9 @@ function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | 
 type NodeLike = { id: string; type?: string; position: { x: number; y: number }; width?: number | null; height?: number | null; measured?: { width?: number; height?: number }; data?: unknown };
 /** แบบลูกศรของเส้นบนกระดานเก็บใน data.shape (React Flow) */
 type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown; data?: unknown };
-export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[]): FlowScene {
+export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins): FlowScene {
   return parseFlowScene({
-    kind: "flowchart",
+    kind: "flowchart", pins,
     nodes: nodes.map((n) => ({
       id: n.id, type: n.type, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
       width: Math.round(n.width ?? n.measured?.width ?? 0) || undefined,
@@ -301,8 +330,16 @@ export function mergeFlowScenes(base: FlowScene, mine: FlowScene, theirs: FlowSc
   };
   const nodes = mergeList(base.nodes, mine.nodes, theirs.nodes);
   const ids = new Set(nodes.map((n) => n.id));
-  const edges = mergeList(base.edges, mine.edges, theirs.edges).filter((e) => ids.has(e.source) && ids.has(e.target));
-  return { kind: "flowchart", v: 1, nodes, edges };
+  const ok = (id: string) => ids.has(id) || isSysId(id);
+  const edges = mergeList(base.edges, mine.edges, theirs.edges).filter((e) => ok(e.source) && ok(e.target));
+  // ตำแหน่งกล่องระบบ: รวมทีละกล่อง (เราไม่ได้แตะกล่องไหน = เอาของอีกฝั่ง)
+  const bp = base.pins ?? {}, mp = mine.pins ?? {}, tp = theirs.pins ?? {};
+  const pins: FlowPins = {};
+  for (const k of new Set([...Object.keys(bp), ...Object.keys(mp), ...Object.keys(tp)])) {
+    const v = JSON.stringify(mp[k]) !== JSON.stringify(bp[k]) ? mp[k] : tp[k];
+    if (v) pins[k] = v;
+  }
+  return withPins({ kind: "flowchart", v: 1, nodes, edges }, pins);
 }
 
 /** จุดต่อเส้นของกล่อง (พิกัดบนกระดาน) — ใช้ตอนวาดเส้นในรูปที่บันทึก */
