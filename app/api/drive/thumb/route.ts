@@ -3,7 +3,7 @@
  * no-auth เหมือน /api/r2-image (เสิร์ฟเฉพาะไฟล์ที่ service account เข้าถึง = งานเราเอง)
  */
 import { NextRequest } from "next/server";
-import { driveConfigured, driveDownloadFile } from "@/lib/google-drive";
+import { driveConfigured, driveDownloadFile, driveThumbnail } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,6 +14,13 @@ export async function GET(request: NextRequest): Promise<Response> {
   const w = Math.min(2000, Math.max(40, Number(sp.get("w")) || 200));   // ≤2000 = ดูเต็มจอได้ (รูปจาก Drive ในคอนเทนต์)
   if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) return new Response("invalid id", { status: 400 });
   if (!driveConfigured()) return new Response("drive not configured", { status: 503 });
+
+  // ?t=1 = ภาพตัวอย่างที่ Drive ทำไว้ (ไม่โหลดไฟล์ทั้งก้อน — PSD/AI/PDF ใหญ่ ๆ ก็เร็ว) · Drive ไม่มีภาพให้ = 404 → จอโชว์ไอคอนชนิดไฟล์แทน
+  if (sp.get("t") === "1") {
+    const th = await driveThumbnail(id, w).catch(() => null);
+    if (!th) return new Response("no thumbnail", { status: 404, headers: { "Cache-Control": "private, max-age=300" } });
+    return new Response(th.bytes as BodyInit, { headers: { "Content-Type": th.contentType, "Cache-Control": "private, max-age=3600" } });
+  }
 
   const dl = await driveDownloadFile(id);
   if (!dl) return new Response("not found", { status: 404 });

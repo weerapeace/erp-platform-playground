@@ -22,7 +22,8 @@ export type DesignSheetDriveRow = { id: string; code: string | null; name: strin
 export const designSheetFolderName = (s: Pick<DesignSheetDriveRow, "id" | "code" | "name">) => safeDriveName(`${s.code ?? ""} ${s.name ?? ""}`) || s.id;
 const folderUrlOf = (id: string, link?: string | null) => link || `https://drive.google.com/drive/folders/${id}`;
 
-async function brandBaseFolder(admin: Admin, brandId: string | null): Promise<string> {
+/** โฟลเดอร์ฐานของแบรนด์ใน Drive (แอปจัดการงาน → คลัง Artwork → "งาน ERP") — ใช้ร่วมกับไฟล์แนบสินค้า (lib/product-drive-server) */
+export async function brandBaseFolder(admin: Admin, brandId: string | null): Promise<string> {
   if (brandId) {
     const task = await getBrandParentFolder(admin, brandId);
     if (task?.folder_id) return task.folder_id;

@@ -10,7 +10,7 @@
  *     (โมดูลคุมเองว่าโฟลเดอร์อยู่ไหน + ใครอัปได้ + ลงประวัติ — เช่น /api/design-sheets/[id]/drive)
  * ใช้ที่: ใบงานออกแบบ (แท็บข้อมูลงาน) · doc: docs/drive-upload-box.md
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
@@ -21,7 +21,7 @@ import { uploadFileToDrive } from "@/lib/drive-chunk-upload";
 
 export type DriveUploadStart = { upload_url: string; folder_url: string };
 
-export function DriveUploadBox({ folderUrl, startUpload, onUploaded, canUpload = true, title, hint, emptyText }: {
+export function DriveUploadBox({ folderUrl, startUpload, onUploaded, canUpload = true, title, hint, emptyText, list, actions }: {
   /** ลิงก์โฟลเดอร์ที่รู้อยู่แล้ว (โชว์รายการไฟล์) · ว่าง = ยังไม่มี (สร้างตอนอัปไฟล์แรก) */
   folderUrl?: string | null;
   /** เริ่มอัป 1 ไฟล์: หา/สร้างโฟลเดอร์ + เปิด session ที่ API ของโมดูล · โยน Error = แจ้งข้อความนั้น */
@@ -34,6 +34,10 @@ export function DriveUploadBox({ folderUrl, startUpload, onUploaded, canUpload =
   /** ข้อความข้างปุ่มแนบ (บอกชนิด/ขนาดไฟล์) */
   hint?: string;
   emptyText?: string;
+  /** รายการไฟล์แบบของโมดูลเอง (เช่น มีภาพตัวอย่าง/ปุ่มเอาออก) แทน DriveFolderFiles ตัวพื้นฐาน · ไม่ส่ง = เหมือนเดิม */
+  list?: ReactNode;
+  /** ปุ่มเสริมข้างปุ่ม "แนบไฟล์" (เช่น เลือกจากโฟลเดอร์กลาง) */
+  actions?: ReactNode;
 }) {
   const t = useT();
   const toast = useToast();
@@ -75,7 +79,7 @@ export function DriveUploadBox({ folderUrl, startUpload, onUploaded, canUpload =
 
   return (
     <div className="flex flex-col gap-2">
-      {folder
+      {list !== undefined ? list : folder /* list = รายการแบบของโมดูลเอง */
         ? <DriveFolderFiles folder={folder} title={title ?? t("ไฟล์ในโฟลเดอร์", "Files in the folder")} reloadKey={reloadKey} />
         : <p className="text-[11px] text-slate-400">{emptyText ?? t("ยังไม่มีไฟล์ — แนบไฟล์แรกแล้วระบบสร้างโฟลเดอร์ใน Drive ให้", "No files yet — the Drive folder is created with the first upload")}</p>}
       {canUpload && (
@@ -88,6 +92,7 @@ export function DriveUploadBox({ folderUrl, startUpload, onUploaded, canUpload =
                 <Icon name="upload" /> {t("แนบไฟล์", "Attach files")}
               </button>
               <span>{hint ?? t("หรือลากมาวาง · ไฟล์ใหญ่ได้ถึง 5GB", "or drag here · up to 5GB per file")}</span>
+              {actions}
             </div>
           )}
           <input ref={fileRef} type="file" multiple hidden onChange={(e) => { void uploadFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />

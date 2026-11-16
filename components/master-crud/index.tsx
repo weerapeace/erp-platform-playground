@@ -38,6 +38,7 @@ import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { PngSlot } from "@/components/png-slot";
 import { ImageManager } from "@/components/image-manager";
 import { RecordFilesField } from "@/components/record-files";
+import { ProductDriveFiles } from "@/components/product-drive-files";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
 import { RelationMany2Many, RelationOne2Many, MasterDetailRelation } from "@/components/relation-multi";
@@ -612,6 +613,8 @@ export type MasterCRUDConfig = {
     description?: string;
     maxItems?: number;
     maxSizeBytes?: number;
+    /** "drive" = เก็บใน Google Drive โฟลเดอร์ของรายการ (ใหญ่ถึง 5GB + เลือกจากโฟลเดอร์กลาง) — ตอนนี้รองรับเฉพาะสินค้า parent_skus_v2 / skus_v2 (ProductDriveFiles) · ไม่ใส่ = Supabase เหมือนเดิม */
+    storage?: "drive";
   };
   /** section พิเศษในฟอร์ม (เช่น รูป Description ของ Parent SKU) — render เมื่อเปิดฟอร์ม */
   extraFormSection?: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode;
@@ -781,6 +784,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const canView   = usePermission(config.permissions.view);
   const canCreate = usePermission(config.permissions.create) && !config.readOnly;
   const canEdit   = usePermission(config.permissions.edit)   && !config.readOnly;
+  // ไฟล์แนบเก็บ Google Drive (สินค้า Parent/SKU) → ProductDriveFiles · อื่น ๆ = RecordFilesField (Supabase) เหมือนเดิม
+  const fileDriveEntity = (() => {
+    const fa = config.fileAttachments;
+    if (fa?.storage !== "drive") return null;
+    const et = fa.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath;
+    return et === "parent_skus_v2" || et === "skus_v2" ? et : null;
+  })();
   const { user, can } = useAuth();
   const apiBase    = config.apiBase ?? "/api/master/";
   const activeField = config.activeField ?? "active";
@@ -3773,7 +3783,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               {/* ไฟล์แนบราย record (ของกลาง) — เก็บใน Supabase Storage, ลบ record ถาวร=ลบไฟล์ตาม */}
               {config.fileAttachments && (
                 <div className={`w-full md:order-5 rounded-xl border border-slate-200 bg-white p-3 ${mediaFold ? "order-2" : ""}`}>
-                  {editingId ? (
+                  {editingId && fileDriveEntity ? (
+                    <ProductDriveFiles entity={fileDriveEntity} entityId={String(editingId)} canEdit={canEdit}
+                      actor={user?.name ?? user?.email ?? undefined} title={config.fileAttachments.title} />
+                  ) : editingId ? (
                     <RecordFilesField
                       entityType={config.fileAttachments.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
                       entityId={String(editingId)}
@@ -4177,7 +4190,7 @@ export function MasterRecordDrawer({
           }
         : undefined,
       // ไฟล์แนบ: ผู้เรียกส่ง fileAttachments มาได้ตรงๆ (เช่น payroll พนักงาน) · fallback = สินค้า (Parent/SKU)
-      fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: tr("ไฟล์แนบ", "Attachments") } : undefined),
+      fileAttachments: fileAttachments ?? (productEntity ? { entityType: productEntity, title: tr("ไฟล์แนบ", "Attachments"), storage: "drive" } : undefined),
       // Parent SKU → ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (ชุดกลางเดียวกับหน้า /master/parent-skus)
       sidePngSlots: moduleKey === "parent-skus-v2" ? parentSkuPngSlots() : undefined,
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)

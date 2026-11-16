@@ -51,6 +51,8 @@ const CONFIG: MasterCRUDConfig = {
   // 📷 สแกนบาร์โค้ด/รหัส → เปิด SKU นั้นเลย (สแกนได้ Parent/เอกสารอื่น = โชว์ลิงก์ไปหน้าของมัน)
   scanOpen: { resolve: (h) => (h.kind === "sku" && h.entity !== "parent" ? h.id : null) },
   exportEntityType: "skus_v2",
+  // ไฟล์แนบ (PDF/AI/PSD) → Google Drive โฟลเดอร์ของ SKU · เลือกจากโฟลเดอร์กลางของแบรนด์ได้ (ProductDriveFiles)
+  fileAttachments: { entityType: "skus_v2", title: "ไฟล์แนบ", storage: "drive" },
   // รูปสินค้า SKU — แกลเลอรี (รูปหลักใหญ่ + รูปย่อย + อัป ≤9) แบบเดียวกับ Parent → ไปโผล่ใน album
   mediaGallery: {
     entityType: "skus_v2",

@@ -79,9 +79,13 @@ const iconOf = (f: RecordFile): string => {
   return "📎";
 };
 
-export function RecordFilesField({ entityType, entityId, actor, readonly, title, description, maxItems, maxSizeBytes }: {
+export function RecordFilesField({ entityType, entityId, actor, readonly, title, description, maxItems, maxSizeBytes, noUpload = false, hideWhenEmpty = false }: {
   entityType: string; entityId: string; actor?: string; readonly?: boolean;
   title?: string; description?: string; maxItems?: number; maxSizeBytes?: number;
+  /** ซ่อนช่องอัปเพิ่ม (ยังเปิด/ลบได้) — เช่น ไฟล์เดิมของสินค้าที่ย้ายไปแนบใน Drive แล้ว */
+  noUpload?: boolean;
+  /** ไม่มีไฟล์ = ไม่โชว์อะไรเลย */
+  hideWhenEmpty?: boolean;
 }) {
   const toast = useToast();
   const [files, setFiles] = useState<RecordFile[]>([]);
@@ -137,7 +141,8 @@ export function RecordFilesField({ entityType, entityId, actor, readonly, title,
     finally { setBusy(false); }
   };
 
-  const canAdd = !readonly && (!maxItems || files.length < maxItems);
+  const canAdd = !readonly && !noUpload && (!maxItems || files.length < maxItems);
+  if (hideWhenEmpty && files.length === 0) return null;   // รวมตอนกำลังโหลด (ไม่กระพริบ "กำลังโหลด…")
 
   return (
     <div>

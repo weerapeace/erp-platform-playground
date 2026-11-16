@@ -88,7 +88,7 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
   nesting_source_png: "r2",      // /api/nesting-jobs/print-files
   task_attachments: "r2",        // /api/admin/upload → /api/creative-tasks/[id]/attachments (+ ก๊อปขึ้น Drive ถ้าเปิดโฟลเดอร์)
   board_images: "r2",            // /api/canvas-sketch
-  record_files: "supabase",      // bucket record-files (/api/record-files)
+  record_files: "drive",         // ไฟล์แนบสินค้า Parent/SKU → Google Drive โฟลเดอร์สินค้า (ProductDriveFiles · /api/product-drive) · ไฟล์เดิม + ใบเสนอราคา/SO/พนักงาน ยังอยู่ bucket record-files (/api/record-files)
   supplier_bills: "rule",        // FileInput category="supplier_bills" → ตัวอัปกลาง lib/file-upload (เฟส 2)
   finance_private: "supabase",   // bucket invoices + payment-slips
   customer_print_uploads: "supabase", // bucket print-uploads

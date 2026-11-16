@@ -127,7 +127,8 @@ const CONFIG: MasterCRUDConfig = {
   fileAttachments: {
     entityType: "parent_skus_v2",
     title: "ไฟล์แนบ",
-    description: "แนบไฟล์งาน (PDF/AI/PSD ฯลฯ) เก็บใน Supabase · ลบสินค้าถาวรจะลบไฟล์ตามไปด้วย",
+    description: "แนบไฟล์งาน (PDF/AI/PSD ฯลฯ) เก็บใน Google Drive ใหญ่ได้ถึง 5GB · เลือกไฟล์จากโฟลเดอร์กลางได้",
+    storage: "drive",
   },
   permissions: {
     view:   "products.view",

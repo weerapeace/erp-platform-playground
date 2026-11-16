@@ -285,3 +285,86 @@ export function parseDriveFileId(url: string): string | null {
   const m3 = s.match(/\/d\/([a-zA-Z0-9_-]+)/);                        // .../d/<id>/...
   return m3 ? m3[1] : null;
 }
+
+// ===== เดินดูโฟลเดอร์ + ทางลัด + ภาพตัวอย่าง (กล่องไฟล์แนบสินค้า / หน้าต่างเลือกไฟล์จากโฟลเดอร์กลาง) =====
+
+export const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
+export const DRIVE_SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
+
+/** รายการในโฟลเดอร์ 1 ชั้น (ทั้งโฟลเดอร์ย่อยและไฟล์) — ทางลัดคืน target (ไฟล์จริง) ให้ด้วย */
+export type DriveEntry = {
+  id: string; name: string; mimeType: string; isFolder: boolean;
+  size?: number; webViewLink?: string; modifiedTime?: string;
+  /** Drive ทำภาพตัวอย่างให้ไหม (รูป · PDF · PSD · AI ที่เซฟแบบ PDF compatible) */
+  hasThumbnail: boolean;
+  /** ทางลัด = ชี้ไปไฟล์จริงตัวไหน */
+  shortcutTargetId?: string; shortcutTargetMimeType?: string;
+};
+
+type RawEntry = {
+  id: string; name: string; mimeType: string; size?: string; webViewLink?: string; modifiedTime?: string; hasThumbnail?: boolean;
+  shortcutDetails?: { targetId?: string; targetMimeType?: string };
+};
+const ENTRY_FIELDS = "id,name,mimeType,size,webViewLink,modifiedTime,hasThumbnail,shortcutDetails(targetId,targetMimeType)";
+const toEntry = (f: RawEntry): DriveEntry => ({
+  id: f.id, name: f.name, mimeType: f.mimeType, isFolder: f.mimeType === DRIVE_FOLDER_MIME,
+  size: f.size ? Number(f.size) : undefined, webViewLink: f.webViewLink, modifiedTime: f.modifiedTime,
+  hasThumbnail: !!f.hasThumbnail,
+  shortcutTargetId: f.shortcutDetails?.targetId, shortcutTargetMimeType: f.shortcutDetails?.targetMimeType,
+});
+
+/** ทุกอย่างในโฟลเดอร์ 1 ชั้น (โฟลเดอร์ก่อน แล้วไฟล์ เรียงชื่อ) · search = กรองชื่อไฟล์ที่มีคำนี้ (ในโฟลเดอร์นี้เท่านั้น) · สูงสุด 300 */
+export async function driveListEntries(parentId: string, search?: string): Promise<DriveEntry[]> {
+  const token = await getAccessToken();
+  const q = [`'${parentId.replace(/'/g, "")}' in parents`, "trashed = false"];
+  const s = (search ?? "").trim().replace(/['\\]/g, "");
+  if (s) q.push(`name contains '${s}'`);
+  const out: DriveEntry[] = [];
+  let pageToken = "";
+  for (let i = 0; i < 3; i++) {
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q.join(" and "))}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=nextPageToken,files(${ENTRY_FIELDS})&pageSize=100&orderBy=folder,name${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`อ่านโฟลเดอร์ Drive ไม่สำเร็จ: ${j.error?.message || res.status}`);
+    out.push(...((j.files ?? []) as RawEntry[]).map(toEntry));
+    pageToken = j.nextPageToken ?? "";
+    if (!pageToken) break;
+  }
+  return out;
+}
+
+/** ข้อมูลไฟล์/โฟลเดอร์ 1 ตัว + parents (ไว้ไล่หาว่าอยู่ใต้โฟลเดอร์ไหน) · ไม่เจอ/อยู่ถังขยะ = null */
+export async function driveGetEntry(id: string): Promise<(DriveEntry & { parents: string[] }) | null> {
+  const fid = (id || "").trim(); if (!/^[a-zA-Z0-9_-]+$/.test(fid)) return null;
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}?supportsAllDrives=true&fields=${ENTRY_FIELDS},parents,trashed`, { headers: { Authorization: `Bearer ${token}` } });
+  const j = await res.json().catch(() => ({})) as RawEntry & { parents?: string[]; trashed?: boolean };
+  if (!res.ok || !j.id || j.trashed) return null;
+  return { ...toEntry(j), parents: j.parents ?? [] };
+}
+
+/** สร้างทางลัด (shortcut) ของไฟล์ targetId ไว้ในโฟลเดอร์ parentId — ไฟล์จริงอยู่ที่เดิม ไม่กินพื้นที่ */
+export async function driveCreateShortcut(targetId: string, name: string, parentId: string): Promise<{ id: string }> {
+  const token = await getAccessToken();
+  const res = await fetch("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id", {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name, mimeType: DRIVE_SHORTCUT_MIME, parents: [parentId], shortcutDetails: { targetId } }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.id) throw new Error(`สร้างทางลัดใน Drive ไม่สำเร็จ: ${j.error?.message || res.status}`);
+  return { id: j.id as string };
+}
+
+/** ภาพตัวอย่างที่ Drive ทำไว้ (ไม่ต้องโหลดไฟล์ทั้งก้อน — PSD 300MB ก็เร็ว) · width = ความกว้างที่ขอ · ไม่มีภาพ = null */
+export async function driveThumbnail(fileId: string, width = 400): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  const token = await getAccessToken();
+  const meta = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=thumbnailLink,hasThumbnail,shortcutDetails(targetId)`, { headers: { Authorization: `Bearer ${token}` } });
+  const m = await meta.json().catch(() => ({})) as { thumbnailLink?: string; shortcutDetails?: { targetId?: string } };
+  if (!meta.ok) return null;
+  if (!m.thumbnailLink && m.shortcutDetails?.targetId && m.shortcutDetails.targetId !== fileId) return driveThumbnail(m.shortcutDetails.targetId, width);
+  if (!m.thumbnailLink) return null;
+  const link = /=s\d+$/.test(m.thumbnailLink) ? m.thumbnailLink.replace(/=s\d+$/, `=s${width}`) : m.thumbnailLink;
+  const img = await fetch(link, { headers: { Authorization: `Bearer ${token}` } });
+  if (!img.ok) return null;
+  return { bytes: new Uint8Array(await img.arrayBuffer()), contentType: img.headers.get("content-type") || "image/png" };
+}
