@@ -24,14 +24,27 @@ import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGr
 import { SaveBar } from "@/components/save-bar";
 import { BillSummaryBox } from "./bill-summary";
 import { RowMenu, type RowMenuItem } from "./row-menu";
-import { emptySummary, type BillSummary } from "@/lib/seller-bill-summary";
+import { emptySummary, billTotals, mergeBillTotals, billQtyText, type BillSummary, type BillTotalCheck } from "@/lib/seller-bill-summary";
 
 /** ลากย้ายแถว: หลายบิลในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับบิล × ROW_SPAN + ลำดับแถว (ลากข้ามบิลไม่ได้) */
 const ROW_SPAN = 10000;
 /** ★ 2026-11-15 คอลัมน์คงที่ของแถวบิล (# · สินค้า · จำนวน · ราคา · ส่วนลด · ยอด · ปุ่ม) — ตัวเลขเรียงตรงกันทุกแถว */
-const ROW_GRID = "grid grid-cols-[3.5rem_minmax(0,1fr)_4.75rem_5.25rem_6.5rem_5.5rem_9rem] gap-x-2";
+const ROW_GRID = "md:grid md:grid-cols-[3.5rem_minmax(0,1fr)_4.75rem_5.25rem_6.5rem_5.5rem_9rem] md:gap-x-2";
 /** ★ 2026-11-15 รอบ 4 (เจ้าของ: "ตารางล่างเอามารวมกับอันบน · compact") — หน้าใบส่งยอดบาทมา (lineMoney) = เพิ่ม ฿/ชิ้น + ยอด ฿ ต่อท้ายแถว */
-const ROW_GRID_THB = "grid grid-cols-[2.75rem_minmax(0,1fr)_3.75rem_4.5rem_4.75rem_4.75rem_4.5rem_5.25rem_7.5rem] gap-x-2";
+const ROW_GRID_THB = "md:grid md:grid-cols-[2.75rem_minmax(0,1fr)_3.75rem_4.5rem_4.75rem_4.75rem_4.5rem_5.25rem_7.5rem] md:gap-x-2";
+/** ★ 2026-11-16 มือถือ: แถวเป็นการ์ด (บรรทัด 1 = # + สินค้า + ปุ่ม · บรรทัด 2 = ตัวเลข) ไม่ต้องเลื่อนซ้ายขวา — จอ md ขึ้นไปเป็นตารางเหมือนเดิม */
+const ROW_MOBILE = "flex flex-wrap items-center gap-x-2 gap-y-1";
+/** ขึ้นบรรทัดใหม่ในการ์ดมือถือ (จอ PC ซ่อน = ไม่กินช่องตาราง) */
+const MBreak = () => <span aria-hidden className="basis-full h-0 md:hidden max-md:order-1" />;
+/** ป้ายเทียบยอดบิลในแถวรวม (ข้อ 1) */
+function BillCheckBadge({ c, skipped = 0 }: { c: BillTotalCheck; skipped?: number }) {
+  if (!c) return null;
+  const f = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const what = c.kind === "summary" ? "สรุปยอดบิล" : "ยอดบิล";
+  return c.ok
+    ? <span className="ml-1.5 text-[11px] font-normal text-emerald-700 whitespace-nowrap" title={`${what} ¥${c.expected.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}>✓ ตรง{what}</span>
+    : <span className="ml-1.5 text-[11px] font-normal text-amber-700 whitespace-nowrap" title="รวมแบบที่ใบคิด (จำนวน × ราคา − ส่วนลด)">⚠ {c.kind === "summary" ? "สรุปบิล" : "บิลเขียน"} ¥{f(c.expected)}{c.kind === "printed" && skipped > 0 ? ` · ทุกบรรทัดรวมที่ข้าม ¥${f(c.actual)}` : ""} ต่าง ¥{f(Math.abs(c.diff))}</span>;
+}
 /** ยอดบาทของรายการในใบ 1 บรรทัด (หน้าใบคิดด้วยสูตรกลาง computeVoucher) */
 export type BillLineMoney = { unit_thb: number | null; total_thb: number | null };
 /** รายการในใบ → มาจากบิลไหน (หน้าใบใช้ทำมุม "รวมเป็นตาราง" + กล่อง "ไม่มีบิล") */
@@ -426,7 +439,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
     linksSig.current = sig; onLinks(m);
   }, [onLinks, bills, draft]);
   const thb = !!lineMoney;
-  const GRID = thb ? ROW_GRID_THB : ROW_GRID;
+  const GRID_MD = thb ? ROW_GRID_THB : ROW_GRID;
+  const GRID = `${ROW_MOBILE} ${GRID_MD}`;
   /** ฿ ของแถวบิล = รวมรายการในใบที่แถวนี้ลงไว้ (แถวเดียวลงหลาย PO = หลายบรรทัด) */
   const rowThb = (l: SellerBillLine): BillLineMoney | null => {
     const ms = (l.voucher_line_ids ?? []).map((id) => lineMoney?.[id]).filter((x): x is BillLineMoney => !!x);
@@ -574,6 +588,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
             const closeN = Object.values(missAct[b.id] ?? {}).filter((a) => a === "close").length;
             const exOpen = extraOpen[b.id] ?? closeN > 0;
             const billThb = thb ? lines.reduce((a, l) => a + (l.decision === "skip" ? 0 : rowThb(l)?.total_thb ?? 0), 0) : 0;
+            const T = billTotals(lines, b.total_amount, sumNow);   // ★ 2026-11-16 แถวรวมท้ายบิล
             return (
               <div key={b.id} className="border border-slate-200 rounded-lg overflow-hidden">
                 <div className="flex items-start gap-3 px-3 py-2 bg-slate-50 flex-wrap">
@@ -586,18 +601,16 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                         <span className={`ml-2 ${n === lines.length && lines.length ? CHIP_OK : n ? CHIP_NEU : CHIP_WARN}`}>{n === lines.length && lines.length ? "ลงใบครบแล้ว" : n ? `ลงใบแล้ว ${n}/${lines.length}` : "ยังไม่ได้ลงใบ"}</span>
                       ); })()}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">{thb && billThb > 0 && <span className="mr-2 font-medium text-slate-700 tabular-nums" title="ค่าสินค้าของบิลนี้ที่ลงใบแล้ว (บาท · ไม่รวมค่าส่ง)">ลงใบ ฿{fmtB(billThb)}</span>}ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
                     {/* ★ 2026-11-15 ป้ายหัวบิล — โชว์เฉพาะที่ต้องดู (เดิม: อ่านได้ n แถว · ค้นใน PO n รายการ · ส่วนลดรวม … ตาลาย)
                          บิลที่มีสรุปยอด (付款详情) = กล่องสรุปเช็กยอดแทน · ป้าย "รวมรายการ ≠ ยอดบิล" เดิมเทียบกับยอดก่อนลด จึงขัดกับสรุป */}
+                    {/* ★ 2026-11-16 เทียบยอดบิลย้ายไปแถวรวมท้ายบิล (ข้อ 1) — หัวบิลเหลือเฉพาะ "ยอดแถวไม่ตรงบิล" */}
                     {(() => {
-                      const hasSum = !!(sums[b.id]?.goods_total ?? b.summary?.goods_total);
                       const badRows = math.rowsBad.map((k) => `#${billLineNo(lines[k]?.no, k)}`);
-                      if (hasSum && badRows.length === 0) return null;
+                      if (badRows.length === 0) return null;
                       return (
                         <div className="flex gap-1.5 flex-wrap mt-1.5" title={`AI อ่านได้ ${lines.length} แถว · ค้นใน PO ร้านนี้ ${groups.length} รายการ`}>
-                          {!hasSum && math.totalOk === true && <span className={CHIP_OK}>รวม ¥{n2(math.sum)} ตรงยอดบิล</span>}
-                          {!hasSum && math.totalOk === false && <span className={CHIP_WARN} title="รวมแบบที่ใบสำคัญคิด (จำนวน × ราคา − ส่วนลด)">รวม ¥{n2(math.sum)} ≠ ยอดบิล ¥{n2(b.total_amount)} · ต่าง ¥{n2(Math.abs(math.sum - Number(b.total_amount ?? 0)))}{badRows.length ? ` ที่แถว ${badRows.join(", ")}` : ""}</span>}
-                          {(hasSum || math.totalOk !== false) && badRows.length > 0 && <span className={CHIP_WARN}>ยอดแถวไม่ตรงบิล: {badRows.join(", ")}</span>}
+                          <span className={CHIP_WARN}>ยอดแถวไม่ตรงบิล: {badRows.join(", ")}</span>
                         </div>
                       );
                     })()}
@@ -609,8 +622,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                      คอลัมน์คงที่: # · สินค้า · จำนวน · ราคา ¥ · ส่วนลด · ยอด ¥ · ปุ่ม — ตัวเลขตรงกันทุกแถว
                      แถวที่ตัดสินแล้ว (ยืนยัน/ข้าม/ค่าใช้จ่าย) = ลงใบแล้ว พับเหลือบรรทัดเดียว กด "แก้" เปิดกลับ · ปุ่มรองอยู่ในเมนู ⋯ */}
                 <div className="overflow-x-auto">
-                <div className={thb ? "min-w-[54rem]" : "min-w-[46rem]"}>
-                <div className={`${GRID} px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100 bg-white`}>
+                <div className={thb ? "md:min-w-[54rem]" : "md:min-w-[46rem]"}>
+                <div className={`hidden ${GRID_MD} px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100 bg-white`}>
                   <span>#</span><span>สินค้า</span><span className="text-right">จำนวน</span><span className="text-right">ราคา ¥</span><span className="text-right">ส่วนลด</span><span className="text-right">ยอด ¥</span>
                   {thb && <><span className="text-right" title="ราคาต่อชิ้นเป็นบาท (ราคา × เรท) — จากรายการในใบ">฿/ชิ้น</span><span className="text-right" title="ค่าสินค้าเป็นบาท (ไม่รวมค่าส่ง) — จากรายการในใบ">ยอด ฿</span></>}<span />
                 </div>
@@ -652,7 +665,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                       return (
                         <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${GRID} items-center px-3 py-1 ${l.decision === "skip" ? "bg-slate-50/60 text-slate-400" : "bg-emerald-50/20"} ${drag.rowCls(dk)}`}>
                           {noCell}
-                          <div className="min-w-0 flex items-center gap-1.5">
+                          <div className="min-w-0 flex items-center gap-1.5 max-md:flex-1">
                             {l.decision === "skip"
                               ? <span className="text-xs truncate" title={`${billText} ${thText}`}>ข้าม · บิล: {billText || thText || "—"}</span>
                               : <>
@@ -667,13 +680,14 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                                   {notIn && <span className={`${CHIP_WARN} shrink-0`}>ยังไม่ลงใบ</span>}
                                 </>}
                           </div>
-                          <span className="text-right text-xs tabular-nums text-slate-600">{l.decision === "skip" ? "" : n2(l.qty)}</span>
-                          <span className="text-right text-xs tabular-nums text-slate-600">{l.decision === "skip" ? "" : n2(l.unit_price, 4)}</span>
-                          <span className="text-right text-xs tabular-nums text-red-500">{disc > 0 ? `−${n2(disc)}` : ""}</span>
-                          <span className={`text-right text-[13px] tabular-nums ${l.decision === "skip" ? "text-slate-300" : "font-medium text-slate-800"}`}>{l.decision === "skip" ? "—" : n2(calc)}</span>
+                          {l.decision !== "skip" && <MBreak />}
+                          <span className={`text-right text-xs tabular-nums text-slate-600 max-md:order-2 max-md:pl-6 ${l.decision === "skip" ? "max-md:hidden" : ""}`}>{l.decision === "skip" ? "" : n2(l.qty)}</span>
+                          <span className={`text-right text-xs tabular-nums text-slate-600 max-md:order-2 ${l.decision === "skip" ? "max-md:hidden" : ""}`}>{l.decision === "skip" ? "" : <><span className="md:hidden">× ¥</span>{n2(l.unit_price, 4)}</>}</span>
+                          <span className={`text-right text-xs tabular-nums text-red-500 max-md:order-2 ${disc > 0 ? "" : "max-md:hidden"}`}>{disc > 0 ? `−${n2(disc)}` : ""}</span>
+                          <span className={`text-right text-[13px] tabular-nums max-md:order-2 max-md:ml-auto ${l.decision === "skip" ? "text-slate-300 max-md:hidden" : "font-medium text-slate-800"}`}>{l.decision === "skip" ? "—" : <><span className="md:hidden">¥</span>{n2(calc)}</>}</span>
                           {thb && (() => { const m = l.decision === "skip" ? null : rowThb(l); return (<>
-                            <span className="text-right text-xs tabular-nums text-slate-600">{m ? fmtB(m.unit_thb) : ""}</span>
-                            <span className="text-right text-[13px] tabular-nums font-medium text-slate-800">{m ? fmtB(m.total_thb) : ""}</span>
+                            <span className="text-right text-xs tabular-nums text-slate-600 max-md:hidden">{m ? fmtB(m.unit_thb) : ""}</span>
+                            <span className={`text-right text-[13px] tabular-nums font-medium text-slate-800 max-md:order-2 ${m ? "" : "max-md:hidden"}`}>{m ? <><span className="md:hidden">· ฿</span>{fmtB(m.total_thb)}</> : ""}</span>
                           </>); })()}
                           <span className="flex items-center justify-end gap-1">
                             {busyRow ? <span className="text-[11px] text-slate-400">กำลังลงใบ…</span> : (<>
@@ -700,7 +714,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                     return (
                       <div key={l.rid ?? i} {...drag.rowProps(dk)} className={`${GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/30" : ""} ${drag.rowCls(dk)}`}>
                         {noCell}
-                        <div className="min-w-0">
+                        <div className="min-w-0 max-md:flex-1">
                           {/* บรรทัดบน: สินค้าของเรา (ตัวหนา) — ยังไม่จับคู่ = ชื่อตามบิล */}
                           <div className="flex items-center gap-1.5 min-w-0">
                             {g?.image_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-7 h-7 rounded object-cover border border-slate-100 shrink-0" />}
@@ -778,12 +792,15 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                             </div>
                           )}
                         </div>
+                        <MBreak />
+                        <label className="md:contents flex items-center gap-1 max-md:order-2"><span className="md:hidden text-[10px] text-slate-400">จำนวน</span>
                         <input type="number" inputMode="decimal" step="any" min={0} value={l.qty ?? ""} disabled={ro} onChange={(e) => setQty(e.target.value === "" ? null : Number(e.target.value))}
-                          className={`${inp} w-full ${mis ? "border-amber-300" : ""}`} title={`จำนวนในบิล${l.unit ? ` (${l.unit})` : ""} — แก้ได้ถ้า AI อ่านผิด`} />
+                          className={`${inp} w-full max-md:w-14 ${mis ? "border-amber-300" : ""}`} title={`จำนวนในบิล${l.unit ? ` (${l.unit})` : ""} — แก้ได้ถ้า AI อ่านผิด`} /></label>
+                        <label className="md:contents flex items-center gap-1 max-md:order-2"><span className="md:hidden text-[10px] text-slate-400">¥</span>
                         <input type="number" inputMode="decimal" step="any" min={0} value={l.unit_price ?? ""} disabled={ro}
                           onChange={(e) => { const p = e.target.value === "" ? null : Number(e.target.value); setLine(b.id, i, { unit_price: p, amount: p != null && l.qty != null ? Math.round(l.qty * p * 100) / 100 : l.amount }); }}
-                          className={`${inp} w-full ${mis ? "border-amber-300" : ""}`} title="ราคาต่อหน่วยในบิล (¥)" />
-                        <span className="flex items-center gap-0.5">
+                          className={`${inp} w-full max-md:w-16 ${mis ? "border-amber-300" : ""}`} title="ราคาต่อหน่วยในบิล (¥)" /></label>
+                        <span className="flex items-center gap-0.5 max-md:order-2 max-md:w-24"><span className="md:hidden text-[10px] text-slate-400 mr-0.5">ลด</span>
                           <input type="number" inputMode="decimal" step="any" min={0} disabled={ro} value={(pctMode ? l.discount_pct : l.discount) ?? ""} placeholder="0"
                             onChange={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); setLine(b.id, i, pctMode ? { discount_pct: v, discount: null } : { discount: v, discount_pct: null }); }}
                             className={`${inp} w-full min-w-0 ${disc > 0 ? "border-red-200 text-red-600" : ""}`} title={pctMode ? "ส่วนลดเป็น % ของ จำนวน × ราคา" : "ส่วนลดเป็นยอดเงิน ¥"} />
@@ -791,9 +808,9 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                             title={pctMode ? "ตอนนี้: เป็น % — กดเพื่อใส่เป็นยอดเงิน ¥" : "ตอนนี้: เป็นยอดเงิน ¥ — กดเพื่อใส่เป็น %"}
                             className="h-7 min-w-6 px-1 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{pctMode ? "%" : "¥"}</button>
                         </span>
-                        <span className="pt-1 text-right text-[13px] font-medium tabular-nums text-slate-800" title="จำนวน × ราคา − ส่วนลด (ยอดที่ลงใบ)">{n2(calc)}</span>
-                        {thb && <><span className="pt-1 text-right text-[11px] text-slate-300" title="ยังไม่ลงใบ — ยืนยันแล้วขึ้นยอดบาท">—</span><span className="pt-1 text-right text-[11px] text-slate-300">—</span></>}
-                        <span className="flex items-center justify-end gap-1">
+                        <span className="pt-1 text-right text-[13px] font-medium tabular-nums text-slate-800 max-md:order-2 max-md:ml-auto max-md:pt-0" title="จำนวน × ราคา − ส่วนลด (ยอดที่ลงใบ)"><span className="md:hidden">¥</span>{n2(calc)}</span>
+                        {thb && <><span className="pt-1 text-right text-[11px] text-slate-300 max-md:hidden" title="ยังไม่ลงใบ — ยืนยันแล้วขึ้นยอดบาท">—</span><span className="pt-1 text-right text-[11px] text-slate-300 max-md:hidden">—</span></>}
+                        <span className="flex items-center justify-end gap-1 max-md:order-3 max-md:basis-full">
                           {busyRow ? <span className="text-[11px] text-slate-400">กำลังลงใบ…</span>
                             : l.level === "fee"
                               ? <button type="button" disabled={ro} onClick={() => decide(b.id, i, "expense")} title="ลงใบเป็นรายการค่าใช้จ่าย" className="h-7 px-2 text-[11px] rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50">เป็นค่าใช้จ่าย</button>
@@ -806,6 +823,20 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                     );
                   })}
                 </div>
+                {/* ★ 2026-11-16 แถวรวมท้ายบิล (เจ้าของ: "อยากได้ Total ของแต่ละบิลด้วย") — ยอด ¥ แบบที่ใบคิด · ยอด ฿ จากรายการในใบ · เทียบยอดบิล */}
+                {lines.length > 0 && (
+                  <div className={`${GRID} items-center px-3 py-1.5 border-t border-slate-300 bg-slate-50 text-slate-800`}>
+                    <span className="max-md:hidden" />
+                    <span className="min-w-0 text-xs font-semibold max-md:basis-full">รวมบิลนี้ {T.rows} แถว{T.skipped > 0 && <span className="font-normal text-slate-400"> (ข้าม {T.skipped})</span>}<BillCheckBadge c={T.check} skipped={T.skipped} />
+                      {(() => { const n = lines.filter((l) => l.decision !== "skip" && !(l.voucher_line_ids ?? []).length).length; return thb && n > 0 ? <span className="ml-1.5 text-[11px] font-normal text-slate-500" title="ยอด ฿ นับเฉพาะแถวที่ลงใบแล้ว">· ยังไม่ลงใบ {n} แถว (฿ ยังไม่นับ)</span> : null; })()}</span>
+                    <span className="text-right text-xs font-semibold tabular-nums whitespace-nowrap" title="จำนวนรวม — ไม่นับค่าใช้จ่ายและแถวที่ข้าม · หน่วยต่างกันไม่บวกรวมกัน">{billQtyText(T.qty)}</span>
+                    <span className="max-md:hidden" />
+                    <span className={`text-right text-xs tabular-nums text-red-500 ${T.discount > 0 ? "" : "max-md:hidden"}`}>{T.discount > 0 ? `−${n2(T.discount)}` : ""}</span>
+                    <span className="text-right text-[13px] font-semibold tabular-nums max-md:ml-auto"><span className="md:hidden">¥</span>{n2(T.yuan)}</span>
+                    {thb && <><span className="max-md:hidden" /><span className="text-right text-[13px] font-semibold tabular-nums"><span className="md:hidden">· ฿</span>{fmtB(billThb)}</span></>}
+                    <span className="max-md:hidden" />
+                  </div>
+                )}
                 </div>
                 </div>
                 {!ro && (
@@ -897,6 +928,30 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
               </div>
             );
           })}
+          {/* ★ 2026-11-16 รวมทุกบิล (ข้อ 2) — ใบที่รวมหลายบิลร้าน เทียบกับกระดาษทั้งชุดได้ในบรรทัดเดียว */}
+          {bills.length >= 2 && (() => {
+            const all = bills.map((b) => { const ls = draft[b.id] ?? b.lines; return { t: billTotals(ls, b.total_amount, sums[b.id] ?? b.summary ?? null), thbSum: thb ? ls.reduce((a, l) => a + (l.decision === "skip" ? 0 : rowThb(l)?.total_thb ?? 0), 0) : 0 }; });
+            const M = mergeBillTotals(all.map((x) => x.t));
+            const thbAll = all.reduce((a, x) => a + x.thbSum, 0);
+            const bad = all.filter((x) => x.t.check && !x.t.check.ok).length;
+            return (
+              <div className="border-2 border-slate-300 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto"><div className={thb ? "md:min-w-[54rem]" : "md:min-w-[46rem]"}>
+                  <div className={`${GRID} items-center px-3 py-2 bg-slate-100 text-slate-900`}>
+                    <span className="max-md:hidden" />
+                    <span className="min-w-0 text-sm font-semibold max-md:basis-full">รวมทุกบิล <span className="text-xs font-normal text-slate-500">{M.bills} บิล · {M.rows} แถว</span>
+                      {bad > 0 ? <span className="ml-1.5 text-[11px] font-normal text-amber-700">⚠ ยอดไม่ตรงบิล {bad} ใบ</span> : all.every((x) => x.t.check?.ok) ? <span className="ml-1.5 text-[11px] font-normal text-emerald-700">✓ ตรงทุกบิล</span> : null}</span>
+                    <span className="text-right text-xs font-semibold tabular-nums whitespace-nowrap">{billQtyText(M.qty)}</span>
+                    <span className="max-md:hidden" />
+                    <span className={`text-right text-xs tabular-nums text-red-500 ${M.discount > 0 ? "" : "max-md:hidden"}`}>{M.discount > 0 ? `−${n2(M.discount)}` : ""}</span>
+                    <span className="text-right text-sm font-semibold tabular-nums max-md:ml-auto"><span className="md:hidden">¥</span>{n2(M.yuan)}</span>
+                    {thb && <><span className="max-md:hidden" /><span className="text-right text-sm font-semibold tabular-nums"><span className="md:hidden">· ฿</span>{fmtB(thbAll)}</span></>}
+                    <span className="max-md:hidden" />
+                  </div>
+                </div></div>
+              </div>
+            );
+          })()}
           {/* ★ 2026-11-14 บันทึกร่างอัตโนมัติ — แถบสถานะกลาง (SaveBar mode auto · ถามก่อนปิด/รีโหลดถ้ายังไม่บันทึก) */}
           {!readonly && !hideSaveBar && bills.length > 0 && (
             <SaveBar mode="auto" dirty={auto.pending} saving={auto.saving} error={auto.err} savedAt={auto.at} onSave={() => void flushSave()} note="บิลจากร้าน — แก้/ย้าย/ลบแถว ระบบเก็บร่างให้เองใน 2 วิ" />

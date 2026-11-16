@@ -69,3 +69,32 @@ describe("landed-cost — ค่าส่งพิมพ์เอง (★ 2026-1
     expect(c2.lines.map((l) => l.ship_alloc_thb)).toEqual([60, 20]);
   });
 });
+
+describe("แถวรวมท้ายบิล (★ 2026-11-16 billTotals)", () => {
+  const L = (o: Record<string, unknown>) => normalizeBillLine({ name_cn: "布", unit: "码", unit_price: 16, decision: "confirmed", ...o });
+  it("บิล PU HRH: 7 + 3 + 7 หลา × ¥16 = ¥272 ตรงยอดบิลที่พิมพ์ · หน่วย 码 → หลา", async () => {
+    const { billTotals, billQtyText } = await import("@/lib/seller-bill-summary");
+    const t = billTotals([L({ qty: 7 }), L({ qty: 3 }), L({ qty: 7 })], 272, null);
+    expect(t).toMatchObject({ rows: 3, skipped: 0, yuan: 272, discount: 0, check: { kind: "printed", ok: true, expected: 272, diff: 0 } });
+    expect(billQtyText(t.qty)).toBe("17 หลา");
+  });
+  it("หน่วยปนไม่บวกข้ามกัน · ค่าใช้จ่ายไม่นับจำนวน แต่นับยอด · แถวข้ามไม่นับยอดลงใบ", async () => {
+    const { billTotals, billQtyText } = await import("@/lib/seller-bill-summary");
+    const t = billTotals([L({ qty: 5 }), L({ qty: 2, unit: "个", unit_price: 3 }), normalizeBillLine({ name_cn: "运费", qty: 1, unit_price: 8, amount: 8, is_fee: true, decision: "expense" }), L({ qty: 1, decision: "skip" })], null, null);
+    expect(billQtyText(t.qty)).toBe("5 หลา · 2 ชิ้น");
+    expect(t).toMatchObject({ rows: 3, skipped: 1, yuan: 80 + 6 + 8, check: null });
+  });
+  it("มีสรุปยอดบิล = เทียบ ยอดสินค้า − ส่วนลด · ยอดไม่ตรง = บอกส่วนต่าง", async () => {
+    const { billTotals } = await import("@/lib/seller-bill-summary");
+    const ok = billTotals([L({ qty: 10, unit_price: 5 })], 999, { goods_total: 55, discount_total: 5 });
+    expect(ok.check).toMatchObject({ kind: "summary", ok: true, expected: 50 });
+    const bad = billTotals([L({ qty: 10, unit_price: 5 })], null, { goods_total: 60 });
+    expect(bad.check).toMatchObject({ kind: "summary", ok: false, expected: 60, diff: -10 });
+  });
+  it("รวมทุกบิล: แถว + ยอด + จำนวนแยกหน่วย", async () => {
+    const { billTotals, mergeBillTotals, billQtyText } = await import("@/lib/seller-bill-summary");
+    const m = mergeBillTotals([billTotals([L({ qty: 7 }), L({ qty: 3 }), L({ qty: 7 })], 272, null), billTotals([L({ qty: 6 })], 96, null), billTotals([L({ qty: 3 })], 48, null)]);
+    expect(m).toMatchObject({ bills: 3, rows: 5, yuan: 416 });
+    expect(billQtyText(m.qty)).toBe("26 หลา");
+  });
+});

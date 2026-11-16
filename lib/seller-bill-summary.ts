@@ -9,7 +9,7 @@
  * เก็บที่ purchase_delivery_bills.summary · ใส่ลงใบ → หัวใบ seller_ship_foreign / pay_fee_thb / paid_total_thb (lib/seller-bill syncSellerBillExtras)
  * ทดสอบ: lib/__tests__/seller-bill-summary.test.ts
  */
-import { billLineDiscount, type SellerBillLine } from "@/lib/seller-bill-match";
+import { billLineDiscount, billRowCalc, type SellerBillLine } from "@/lib/seller-bill-match";
 
 export type BillCur = "THB" | "CNY";
 export type BillSummary = {
@@ -114,4 +114,68 @@ export function billPaidFx(s: BillSummary | null, goodsForeign: number): number 
   const thb = Number(s.paid_total) - feeThb;
   if (!(foreign > 0) || !(thb > 0)) return null;
   return Math.round((thb / foreign) * 1e6) / 1e6;
+}
+
+/* ───────────── ★ 2026-11-16 แถวรวมท้ายบิล (เจ้าของ: "อยากได้ Total ของแต่ละบิลด้วย" · เลือกข้อ 1 เทียบยอดบิล · 2 รวมทุกบิล · 3 จำนวนพร้อมหน่วย) ───────────── */
+
+/** หน่วยในบิลจีน → ไทย (个 = ชิ้น · 码 = หลา …) · ไม่รู้จัก = คงเดิม · ว่าง = "" */
+const UNIT_TH: Record<string, string> = {
+  "个": "ชิ้น", "件": "ชิ้น", "只": "ชิ้น", "枚": "ชิ้น", "粒": "ชิ้น", pcs: "ชิ้น", pc: "ชิ้น", "ชิ้น": "ชิ้น",
+  "码": "หลา", y: "หลา", yd: "หลา", yds: "หลา", yard: "หลา", "หลา": "หลา",
+  "米": "เมตร", m: "เมตร", "เมตร": "เมตร", "卷": "ม้วน", "条": "เส้น", "根": "เส้น", "包": "ห่อ", "袋": "ถุง", "箱": "กล่อง", "盒": "กล่อง",
+  "套": "ชุด", "双": "คู่", "对": "คู่", "张": "แผ่น", "片": "แผ่น", "公斤": "กก.", "千克": "กก.", kg: "กก.",
+};
+export function billUnitTh(u: unknown): string {
+  const k = String(u ?? "").trim();
+  if (!k) return "";
+  return UNIT_TH[k] ?? UNIT_TH[k.toLowerCase()] ?? k;
+}
+
+/** เทียบยอดรวมของแถวกับบิล: มีสรุปยอด (付款详情) = เทียบ "ยอดสินค้า − ส่วนลด" · ไม่มี = เทียบยอดที่บิลพิมพ์ */
+export type BillTotalCheck = { kind: "summary" | "printed"; ok: boolean; expected: number; diff: number; actual: number } | null;
+export type BillQty = { unit: string; qty: number };
+export type BillTotals = {
+  rows: number;        // แถวที่ลงใบ (ไม่นับแถวที่ข้าม)
+  skipped: number;
+  qty: BillQty[];      // จำนวนรวมแยกหน่วย — เฉพาะแถวสินค้า (ไม่นับค่าใช้จ่าย/แถวที่ข้าม)
+  discount: number;    // ส่วนลดแถวรวม (สกุลบิล)
+  yuan: number;        // ยอดรวมแบบที่ใบคิด (จำนวน × ราคา − ส่วนลด) ของแถวที่ไม่ได้ข้าม
+  check: BillTotalCheck;
+};
+const r4 = (v: number) => Math.round(v * 10000) / 10000;
+const addQty = (into: Map<string, number>, unit: string, q: number) => into.set(unit, r4((into.get(unit) ?? 0) + q));
+
+export function billTotals(lines: SellerBillLine[], printedTotal: number | null | undefined, summary: unknown): BillTotals {
+  const inRows = lines.filter((l) => l.decision !== "skip");
+  const qty = new Map<string, number>();
+  for (const l of lines.filter(isGoods)) addQty(qty, billUnitTh(l.unit), Number(l.qty) || 0);
+  const discount = r2(inRows.reduce((a, l) => a + billLineDiscount({ ...l, amount: null }), 0));
+  const yuan = r2(inRows.reduce((a, l) => a + billRowCalc(l), 0));
+  let check: BillTotalCheck = null;
+  const s = normalizeBillSummary(summary);
+  const G = Number(s?.goods_total) || 0;
+  if (G > 0) {
+    const expected = r2(G - (Number(s?.discount_total) || 0));
+    const diff = r2(billNetGoods(lines) - expected);
+    check = { kind: "summary", ok: Math.abs(diff) <= 0.05, expected, diff, actual: billNetGoods(lines) };
+  } else if (Number(printedTotal) > 0) {
+    // ยอดที่บิลพิมพ์ = ทุกบรรทัดบนกระดาษ (นับแถวที่ข้ามด้วย เหมือนตัวตรวจเดิม checkBillMath)
+    const all = r2(lines.reduce((a, l) => a + billRowCalc(l), 0));
+    const diff = r2(all - Number(printedTotal));
+    check = { kind: "printed", ok: Math.abs(diff) <= 0.05, expected: Number(printedTotal), diff, actual: all };
+  }
+  return { rows: inRows.length, skipped: lines.length - inRows.length, qty: [...qty].map(([unit, q]) => ({ unit, qty: q })), discount, yuan, check };
+}
+
+/** รวมทุกบิล (ใบที่รวมหลายบิลร้าน) */
+export function mergeBillTotals(list: BillTotals[]): { bills: number; rows: number; qty: BillQty[]; discount: number; yuan: number } {
+  const qty = new Map<string, number>();
+  for (const t of list) for (const q of t.qty) addQty(qty, q.unit, q.qty);
+  return { bills: list.length, rows: list.reduce((a, t) => a + t.rows, 0), qty: [...qty].map(([unit, q]) => ({ unit, qty: q })),
+    discount: r2(list.reduce((a, t) => a + t.discount, 0)), yuan: r2(list.reduce((a, t) => a + t.yuan, 0)) };
+}
+
+/** "17 หลา" · หน่วยปน = "17 หลา · 5 ชิ้น" (ไม่บวกข้ามหน่วย) */
+export function billQtyText(qty: BillQty[]): string {
+  return qty.filter((q) => q.qty !== 0).map((q) => `${q.qty.toLocaleString("en-US", { maximumFractionDigits: 4 })}${q.unit ? " " + q.unit : ""}`).join(" · ");
 }
