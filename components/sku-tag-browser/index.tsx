@@ -11,6 +11,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { SPEC_EXPORT_IDS_KEY, SPEC_EXPORT_PATH } from "@/lib/spec-export";   // 📤 ส่งออกรายละเอียด (หลายรุ่น → Excel)
 import { useOpenParam } from "@/lib/open-param";
 import { withImageWidth } from "@/lib/r2-image";
 import { formatAmount } from "@/lib/money";
@@ -349,6 +351,12 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   // ── เลือกหลายตัว + bulk ──
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const clearSel = () => setSelected(new Set());
+  // 📤 ส่งออกรายละเอียด — ส่งรุ่นที่เลือก (หรือไม่เลือก = เปิดหน้าเปล่าให้เลือกเอง) ไปหน้าส่งออก
+  const router = useRouter();
+  const openSpecExport = (ids: string[]) => {
+    try { sessionStorage.setItem(SPEC_EXPORT_IDS_KEY, JSON.stringify(ids)); } catch { /* เปิดหน้าแล้วเลือกเอง */ }
+    router.push(SPEC_EXPORT_PATH);
+  };
   const selectAllShown = () => setSelected(new Set(shown.map((c) => c.id)));
   const allShownSelected = shown.length > 0 && shown.every((c) => selected.has(c.id));
 
@@ -480,6 +488,13 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
         )}
         {/* ขอเพิ่มวัตถุดิบ — พนักงานกรอกเท่าที่รู้ ยังไม่สร้าง SKU (ของกลาง material-request) */}
         {!taobao && !bundle && !swatch && entity === "skus" && <MaterialRequestButton />}
+        {!taobao && !bundle && !swatch && entity === "parent-skus" && !pick && (
+          <button onClick={() => openSpecExport(selected.size ? [...selected] : [])}
+            title={t("รวมรายละเอียดหลายรุ่น (ไทย/อังกฤษ) เป็นไฟล์ Excel — ติ๊กการ์ดก่อนกด = ส่งรุ่นที่ติ๊กไปด้วย", "Combine many models' details (TH/EN) into an Excel file — tick cards first to bring them along")}
+            className="h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 whitespace-nowrap">
+            📤 {t("ส่งออกรายละเอียด", "Export details")}
+          </button>
+        )}
         {!taobao && !bundle && !swatch && <button onClick={() => setMissingOpen(true)} title={t("ตรวจว่ามีสินค้าตัวไหนรูปเสีย (ไฟล์หายจากที่เก็บ) บ้าง", "Find products whose image files are missing from storage")}
           className="h-9 px-3 text-sm border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 whitespace-nowrap">
           🔎 {t("ตรวจรูปหาย", "Find broken images")}
@@ -660,6 +675,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           <button onClick={() => bulkStatus(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">เปิดใช้งาน</button>
           <button onClick={() => bulkStatus(false)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">ปิดใช้งาน</button>
           <button onClick={exportCsv} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">⬇ Export CSV</button>
+          {entity === "parent-skus" && <button onClick={() => openSpecExport([...selected])} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">📤 ส่งออกรายละเอียด</button>}
           <button onClick={() => setPrintOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">🏷️ พิมพ์บาร์โค้ด</button>
           <button onClick={clearSel} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
