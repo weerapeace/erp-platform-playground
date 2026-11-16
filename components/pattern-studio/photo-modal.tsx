@@ -20,7 +20,7 @@ import { contourShape, EDIT_ERASE, EDIT_KEEP, paintEdits, traceGray } from "@/li
 import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { shortcutKey } from "@/lib/shortcut-key";
 import type { Pt } from "@/lib/pattern-shape";
-import { checkScale, rectifyGray, traceTolMm, type CheckPair, type PPt } from "@/lib/pattern-photo";
+import { autoQuad, checkScale, cropCorners, cropGray, rectifyGray, scaleFromFixes, straightenPts, straightenSize, traceTolMm, type CheckPair, type CropRect, type PPt } from "@/lib/pattern-photo";
 import { AI_PATTERN_PROMPT, parseAiPattern, type AiImport, type AiSeam } from "@/lib/bag-ai-import";
 import { shapePathD } from "@/lib/pattern-shape";
 import type { EditorPiece } from "@/components/pattern-sheet/shape-editor";
@@ -61,7 +61,17 @@ function sampleGray(gray: Uint8Array, w: number, h: number, x: number, y: number
   return n ? Math.round(s / n) : 0;
 }
 
-type TraceTool = "pick" | "erase" | "add" | "bgpick";
+type TraceTool = "pick" | "erase" | "add" | "bgpick" | "crop" | "fix";
+/** ชิ้นที่ทำให้ตรงแล้ว: 4 มุมบนรูป (จุดภาพ) + ขนาดจริง (ซม. · 0 = ไม่รู้ด้านนั้น) — ผูกกับชิ้นด้วย "จุดกลาง 4 มุมอยู่ในชิ้นไหน" (เลขชิ้นเปลี่ยนได้หลังลบ/ปรับแถบ) */
+type PieceFix = { quad: PPt[]; w: number; h: number };
+
+function pointInPoly([x, y]: PPt, P: PPt[]): boolean {
+  let c = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [a, b] = P[i], [d, e] = P[j]; if ((b > y) !== (e > y) && x < ((d - a) * (y - b)) / (e - b) + a) c = !c; }
+  return c;
+}
+const quadCenter = (q: PPt[]): PPt => [q.reduce((s, p) => s + p[0], 0) / q.length, q.reduce((s, p) => s + p[1], 0) / q.length];
+const r1 = (v: number) => Math.round(v * 10) / 10;
 type EditSnap = { edits: Uint8Array | null; bg: number[] };
 
 /** อ่านไฟล์รูป → ย่อให้ด้านยาวไม่เกิน max จุดภาพ → ผืนผ้าใบ */
@@ -208,7 +218,13 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
     const ro = new ResizeObserver(measure); ro.observe(el);
     return () => ro.disconnect();
   }, [svgEl, img]);
-  const resetEdits = () => { setEdits(null); setBgVals([]); setStroke(null); hist.current = []; fut.current = []; setHistTick((x) => x + 1); };
+  // ── 2026-11-16 รอบ 3: ครอป (หมุนกรอบได้) + ทำให้ตรงรายชิ้น
+  const [crop, setCrop] = useState<CropRect | null>(null);
+  const cropDrag = useRef<{ mode: "new" | "move"; start: PPt; orig: CropRect } | null>(null);
+  const [fixes, setFixes] = useState<PieceFix[]>([]);
+  const [editFix, setEditFix] = useState<{ ci: number; quad: PPt[]; w: number; h: number; idx: number | null } | null>(null);
+  const cornerDrag = useRef<number | null>(null);
+  const resetEdits = () => { setEdits(null); setBgVals([]); setStroke(null); hist.current = []; fut.current = []; setHistTick((x) => x + 1); setFixes([]); setEditFix(null); setCrop(null); };
   const snapshot = (): EditSnap => ({ edits: edits ? edits.slice() : null, bg: [...bgVals] });
   const pushHist = () => { hist.current = [...hist.current.slice(-24), snapshot()]; fut.current = []; setHistTick((x) => x + 1); };
   const restore = (s: EditSnap) => { setEdits(s.edits); setBgVals(s.bg); };
@@ -260,17 +276,69 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
     return { p: [q.x, q.y] as Pt, r: brushPx / 2 / (m.a || 1) };
   };
   const brushing = tool === "erase" || tool === "add";
+  const contours = traced?.contours ?? [];
+  /** เลขชิ้น → ชิ้นที่ทำให้ตรงแล้ว (index ใน fixes) */
+  const fixOf = useMemo(() => contours.map((c) => { const k = fixes.findIndex((f) => pointInPoly(quadCenter(f.quad), c.pts)); return k >= 0 ? k : null; }), [contours, fixes]);
+  const startFix = (ci: number) => {
+    const c = contours[ci]; if (!c) return;
+    const k = fixOf[ci];
+    if (k != null) { const f = fixes[k]; setEditFix({ ci, quad: f.quad, w: f.w, h: f.h, idx: k }); return; }
+    const q = autoQuad(c.pts); if (!q) return;
+    // ค่าตั้งต้น = ขนาดโดยประมาณจากมาตราส่วนตอนนี้ (ยังไม่มีมาตราส่วน = ว่าง ให้ผู้ใช้พิมพ์)
+    const sa = Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]), sb = Math.hypot(q[3][0] - q[0][0], q[3][1] - q[0][1]), k2 = cmPerPxRef.current;
+    setEditFix({ ci, quad: q, w: k2 > 0 ? r1(Math.min(sa, sb) * k2) : 0, h: k2 > 0 ? r1(Math.max(sa, sb) * k2) : 0, idx: null });
+  };
+  const applyFix = () => {
+    if (!editFix) return;
+    if (!straightenPts(editFix.quad, editFix.quad, editFix.w, editFix.h)) { setErr(t("ใส่ขนาดจริงอย่างน้อย 1 ด้าน และ 4 มุมต้องไม่ไขว้กัน", "Enter at least one real size, and the 4 corners must not cross")); return; }
+    const f: PieceFix = { quad: editFix.quad, w: editFix.w, h: editFix.h };
+    setFixes((o) => (editFix.idx != null ? o.map((x, j) => (j === editFix.idx ? f : x)) : [...o, f]));
+    setOff((s) => { const n = new Set(s); n.delete(editFix.ci); return n; });
+    setEditFix(null); setErr(null);
+  };
+  const removeFix = () => { if (editFix?.idx == null) return; const k = editFix.idx; setFixes((o) => o.filter((_, j) => j !== k)); setEditFix(null); };
+  const applyCrop = () => {
+    if (!img || !crop) return;
+    const r = cropGray(img.gray, img.w, img.h, crop);
+    if (!r) { setErr(t("กรอบเล็กเกินไป ลากกรอบใหม่", "The frame is too small — drag a new one")); return; }
+    setOrig(orig ?? img); setImg({ url: grayUrl(r.gray, r.w, r.h), w: r.w, h: r.h, gray: r.gray });   // ขนาดจุดภาพเท่าเดิม มาตราส่วนไม่เปลี่ยน
+    setQuad([]); setChecks([]); setOff(new Set()); setErr(null); resetEdits(); setZoom(1); setTool("pick");
+  };
   const onBrushDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") touches.current.add(e.pointerId);
     if (clickMode || !img || e.button !== 0) return;
-    if (touches.current.size > 1) { setStroke(null); return; }   // นิ้วที่ 2 = ซูม/เลื่อน ไม่ใช่ระบาย
+    if (touches.current.size > 1) { setStroke(null); cropDrag.current = null; cornerDrag.current = null; return; }   // นิ้วที่ 2 = ซูม/เลื่อน
     const q = toImgPt(e.currentTarget, e.clientX, e.clientY); if (!q) return;
+    if (tool === "crop") {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      if (crop && crop.w > 2 && pointInPoly(q.p, cropCorners(crop))) cropDrag.current = { mode: "move", start: q.p, orig: crop };
+      else { const n: CropRect = { cx: q.p[0], cy: q.p[1], w: 0, h: 0, angle: crop?.angle ?? 0 }; cropDrag.current = { mode: "new", start: q.p, orig: n }; setCrop(n); }
+      return;
+    }
+    if (tool === "fix") {
+      const hit = 14 / (svgScale || 1);
+      if (editFix) { const k = editFix.quad.findIndex((c) => Math.hypot(c[0] - q.p[0], c[1] - q.p[1]) < hit); if (k >= 0) { e.currentTarget.setPointerCapture(e.pointerId); cornerDrag.current = k; return; } }
+      const ci = contours.findIndex((c) => pointInPoly(q.p, c.pts));
+      if (ci >= 0) startFix(ci);
+      return;
+    }
     if (tool === "bgpick") { pushHist(); setBgVals((v) => [...v, sampleGray(img.gray, img.w, img.h, q.p[0], q.p[1])].slice(-8)); return; }
     if (!brushing) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     setStroke({ pts: [q.p], r: q.r });
   };
   const onBrushMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (img && (cropDrag.current || cornerDrag.current != null) && touches.current.size <= 1) {
+      const q = toImgPt(e.currentTarget, e.clientX, e.clientY); if (!q) return;
+      const d = cropDrag.current;
+      if (d && d.mode === "move") setCrop({ ...d.orig, cx: d.orig.cx + q.p[0] - d.start[0], cy: d.orig.cy + q.p[1] - d.start[1] });
+      else if (d) {   // ลากกรอบใหม่ตามแนวมุมที่หมุนไว้
+        const a = (d.orig.angle * Math.PI) / 180, dx = q.p[0] - d.start[0], dy = q.p[1] - d.start[1];
+        const du = dx * Math.cos(a) + dy * Math.sin(a), dv = -dx * Math.sin(a) + dy * Math.cos(a);
+        setCrop({ ...d.orig, cx: d.start[0] + dx / 2, cy: d.start[1] + dy / 2, w: Math.abs(du), h: Math.abs(dv) });
+      } else if (cornerDrag.current != null) { const k = cornerDrag.current; setEditFix((f) => (f ? { ...f, quad: f.quad.map((c, j) => (j === k ? q.p : c)) } : f)); }
+      return;
+    }
     if (!brushing || !img) { if (cursor) setCursor(null); return; }
     const q = toImgPt(e.currentTarget, e.clientX, e.clientY); if (!q) return;
     if (e.pointerType === "mouse") setCursor({ x: q.p[0], y: q.p[1], r: q.r });
@@ -278,6 +346,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   };
   const onBrushUp = (e: React.PointerEvent<SVGSVGElement>) => {
     touches.current.delete(e.pointerId);
+    cropDrag.current = null; cornerDrag.current = null;
     if (!stroke || !img) return;
     const next = edits ? edits.slice() : new Uint8Array(img.w * img.h);
     if (paintEdits(next, img.w, img.h, stroke.pts, stroke.r, tool === "add" ? EDIT_KEEP : EDIT_ERASE) > 0) { pushHist(); setEdits(next); }
@@ -287,8 +356,13 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const widest = chosen.reduce((m, x) => Math.max(m, x.c.box.w), 0);
   const pairs: CheckPair[] = checks.flatMap((c) => (c.b ? [{ a: c.a, b: c.b, real: c.real }] : []));
   const chk = useMemo(() => checkScale(pairs, tolCm, fixedScale), [JSON.stringify(pairs), tolCm, fixedScale]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const scaleFrom: "rect" | "checks" | "widest" = fixedScale ? "rect" : chk ? "checks" : "widest";
-  const cmPerPx = fixedScale ?? chk?.cmPerPx ?? (widest > 0 && realW > 0 ? realW / widest : 0);
+  const pieceScale = useMemo(() => scaleFromFixes(fixes), [fixes]);   // ชิ้นที่ยังไม่ทำให้ตรง ใช้มาตราส่วนเฉลี่ยจากชิ้นที่ทำแล้ว
+  const scaleFrom: "rect" | "checks" | "pieces" | "widest" = fixedScale ? "rect" : chk ? "checks" : pieceScale ? "pieces" : "widest";
+  const cmPerPx = fixedScale ?? chk?.cmPerPx ?? pieceScale ?? (widest > 0 && realW > 0 ? realW / widest : 0);
+  const cmPerPxRef = useRef(0);
+  cmPerPxRef.current = cmPerPx;
+  /** ขนาดจริงของชิ้นที่ทำให้ตรงแล้ว (สั้น × ยาว ซม.) */
+  const fixSize = (f: PieceFix) => { const s = straightenSize(f.quad, f.w, f.h); return s ? [Math.min(s.a, s.b), Math.max(s.a, s.b)] : null; };
   /** คลิกบนรูป (โหมดเลือกมุม / จุดตรวจ) → พิกัดจุดภาพ */
   const onImgClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!clickMode || !img) return;
@@ -311,7 +385,17 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const place = () => {
     const out: EditorPiece[] = [];
     chosen.forEach(({ c, i }) => {   // ชื่อใช้เลขเดียวกับป้าย/เลขบนรูป
-      const shape = contourShape(c, cmPerPx);
+      const k = fixOf[i], f = k != null ? fixes[k] : null;
+      let shape = null;
+      if (f) {   // ทำให้ตรงแล้ว: บิดเส้นรอบชิ้นด้วย 4 มุม → ซม. (ส่งเป็น มม. ให้ลดจุดละเอียด 1 มม.)
+        const cm = straightenPts(c.pts, f.quad, f.w, f.h);
+        if (cm) {
+          const mm = cm.map(([x, y]) => [x * 10, y * 10] as Pt), xs = mm.map((p) => p[0]), ys = mm.map((p) => p[1]);
+          const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+          shape = contourShape({ pts: mm, box, area: box.w * box.h }, 0.1);
+        }
+      }
+      if (!shape) shape = contourShape(c, cmPerPx);
       if (shape) out.push({ shape, count: 1, allow: 0, name: t(`ชิ้นจากรูป ${i + 1}`, `Traced piece ${i + 1}`), at: [Math.round(c.box.x * cmPerPx * 10) / 10, Math.round(c.box.y * cmPerPx * 10) / 10] });
     });
     if (out.length) onPieces(out);
@@ -372,8 +456,8 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
               {img && (
                 <div className="flex flex-wrap items-center gap-1.5 text-xs" data-photo-tools>
                   <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("เครื่องมือบนรูป", "Photo tools")}>
-                    {([["pick", "i:pointer", "เลือกชิ้น", "Pick"], ["erase", "i:eraser", "ยางลบ", "Eraser"], ["add", "i:brush", "แปรงเติม", "Fill brush"], ["bgpick", "i:color-picker", "ดูดสีพื้น", "Pick background"]] as const).map(([k, ic, th, en]) => (
-                      <button key={k} type="button" data-photo-tool={k} aria-pressed={tool === k} onClick={() => { setTool(k); setClickMode(null); setCursor(null); }} className={`inline-flex h-8 items-center gap-1 rounded-md px-2 ${tool === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`} title={t(th, en)}>
+                    {([["pick", "i:pointer", "เลือกชิ้น", "Pick"], ["erase", "i:eraser", "ยางลบ", "Eraser"], ["add", "i:brush", "แปรงเติม", "Fill brush"], ["bgpick", "i:color-picker", "ดูดสีพื้น", "Pick background"], ["crop", "i:crop", "ครอป", "Crop"], ["fix", "i:perspective", "ทำให้ตรง", "Straighten"]] as const).map(([k, ic, th, en]) => (
+                      <button key={k} type="button" data-photo-tool={k} aria-pressed={tool === k} onClick={() => { setTool(k); setClickMode(null); setCursor(null); if (k !== "fix") setEditFix(null); }} className={`inline-flex h-8 items-center gap-1 rounded-md px-2 ${tool === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`} title={t(th, en)}>
                         <Icon value={ic} className="text-sm" /><span className="hidden sm:inline">{t(th, en)}</span>
                       </button>
                     ))}
@@ -385,6 +469,35 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                   <ZoomControls zoom={zoom} onZoom={setZoom} className="ml-auto" />
                 </div>
               )}
+              {img && tool === "crop" && (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1.5 text-[11px] text-slate-700" data-photo-cropbar>
+                  <span>{t("ลากกรอบรอบส่วนที่จะเก็บ · ลากในกรอบ = ย้าย", "Drag a frame around what to keep · drag inside to move")}</span>
+                  <label className="inline-flex items-center gap-1">{t("หมุนกรอบ", "Rotate")}<input type="range" min={-45} max={45} step={0.5} value={crop?.angle ?? 0} onChange={(e) => { const a = Number(e.target.value); setCrop((c) => (c ? { ...c, angle: a } : { cx: img.w / 2, cy: img.h / 2, w: img.w * 0.8, h: img.h * 0.8, angle: a })); }} className="w-24" aria-label={t("มุมกรอบครอป", "Crop angle")} /><span className="w-9 tabular-nums">{(crop?.angle ?? 0).toFixed(1)}°</span></label>
+                  <button type="button" data-photo-crop-apply disabled={!crop || crop.w < 8 || crop.h < 8} onClick={applyCrop} className="h-7 rounded-md bg-slate-800 px-2.5 text-white disabled:opacity-40">{t("ครอป", "Crop")}</button>
+                  {crop && <button type="button" onClick={() => setCrop(null)} className="h-7 rounded-md border border-slate-200 bg-white px-2">{t("ล้างกรอบ", "Clear frame")}</button>}
+                  {orig && <button type="button" onClick={undoRectify} className="ml-auto h-7 rounded-md border border-slate-200 bg-white px-2">{t("กลับรูปเดิม", "Back to original")}</button>}
+                </div>
+              )}
+              {img && tool === "fix" && (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-900" data-photo-fixbar>
+                  {!editFix ? <span>{t(`คลิกชิ้นที่รู้ขนาดจริง → ระบบวาง 4 มุมให้ → ลากปรับ → ใส่กว้าง × ยาว · ทำแล้ว ${fixes.length} ชิ้น`, `Click a piece whose real size you know → 4 corners appear → adjust → enter width × length · ${fixes.length} done`)}{fixes.length > 0 && contours.length > fixes.length && t(" · ชิ้นที่เหลือใช้มาตราส่วนเฉลี่ยจากชิ้นที่ทำแล้ว", " · other pieces use the average scale of these")}</span> : (() => {
+                    const pv = straightenPts(contours[editFix.ci]?.pts ?? [], editFix.quad, editFix.w, editFix.h);
+                    let pvPath = "", vb = "0 0 10 10";
+                    if (pv && pv.length > 2) { const xs = pv.map((p) => p[0]), ys = pv.map((p) => p[1]), x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0; vb = `${x0 - w * 0.05} ${y0 - h * 0.05} ${w * 1.1} ${h * 1.1}`; pvPath = pv.map((p) => p.join(",")).join(" "); }
+                    return <>
+                      <span className="font-medium">{t(`ชิ้น ${editFix.ci + 1}`, `Piece ${editFix.ci + 1}`)}</span>
+                      <span>{t("ลากจุด A B C D ให้ตรงมุมชิ้น", "Drag A B C D onto the piece corners")}</span>
+                      <label className="inline-flex items-center gap-1">{t("กว้าง", "W")}<input type="number" min={0} step={0.1} value={editFix.w || ""} placeholder="—" onChange={(e) => setEditFix((f) => (f ? { ...f, w: Math.max(0, Number(e.target.value) || 0) } : f))} className="h-7 w-16 rounded border border-emerald-200 px-1 text-right" aria-label={t("กว้างจริง (ซม.)", "Real width (cm)")} /></label>
+                      <label className="inline-flex items-center gap-1">{t("ยาว", "L")}<input type="number" min={0} step={0.1} value={editFix.h || ""} placeholder="—" onChange={(e) => setEditFix((f) => (f ? { ...f, h: Math.max(0, Number(e.target.value) || 0) } : f))} className="h-7 w-16 rounded border border-emerald-200 px-1 text-right" aria-label={t("ยาวจริง (ซม.)", "Real length (cm)")} />{t("ซม.", "cm")}</label>
+                      <span className="text-emerald-700/80">{t("(ใส่ด้านเดียวก็ได้)", "(one side is enough)")}</span>
+                      {pvPath && <svg viewBox={vb} className="h-10 w-10 rounded bg-white" aria-label={t("ตัวอย่างชิ้นหลังทำให้ตรง", "Preview after straightening")}><polygon points={pvPath} fill="rgba(16,185,129,0.35)" stroke="#059669" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></svg>}
+                      <button type="button" data-photo-fix-apply onClick={applyFix} className="h-7 rounded-md bg-emerald-600 px-2.5 text-white hover:bg-emerald-700">{t("ทำให้ตรง", "Straighten")}</button>
+                      <button type="button" onClick={() => setEditFix(null)} className="h-7 rounded-md border border-slate-200 bg-white px-2 text-slate-600">{t("ยกเลิก", "Cancel")}</button>
+                      {editFix.idx != null && <button type="button" onClick={removeFix} className="h-7 rounded-md border border-rose-200 bg-white px-2 text-rose-700">{t("เลิกทำให้ตรง", "Remove")}</button>}
+                    </>;
+                  })()}
+                </div>
+              )}
               {img && tool === "bgpick" && (
                 <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-sky-50 px-2 py-1.5 text-[11px] text-sky-900" data-photo-bgpick>
                   {t("คลิกที่พื้นตรงที่ระบบนับเป็นชิ้นผิด — สีนั้นจะถูกนับเป็นพื้นทั้งรูป", "Click the background where it was taken as a piece — that shade becomes background everywhere")}
@@ -394,13 +507,12 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
               )}
               {img && (traced?.contours.length ?? 0) > 0 && (
                 <div className="flex gap-1.5 overflow-x-auto pb-0.5 text-[11px] sm:flex-wrap" data-photo-chips>
-                  {traced!.contours.map((c, i) => (
-                    <button key={i} type="button" onClick={() => toggle(i)} aria-pressed={!off.has(i)} title={off.has(i) ? t("กดเพื่อเอาชิ้นนี้", "Click to include") : t("กดเพื่อไม่เอาชิ้นนี้", "Click to skip")}
-                      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 tabular-nums ${off.has(i) ? "border-slate-200 text-slate-400 line-through" : "border-blue-300 bg-blue-50 text-blue-800"}`}>
-                      <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-white ${off.has(i) ? "bg-slate-300" : "bg-blue-600"}`}>{i + 1}</span>
-                      {cmPerPx > 0 ? `${(c.box.w * cmPerPx).toFixed(1)} × ${(c.box.h * cmPerPx).toFixed(1)} ${t("ซม.", "cm")}` : t(`${c.pts.length} จุด`, `${c.pts.length} pts`)}
-                    </button>
-                  ))}
+                  {traced!.contours.map((c, i) => { const k = fixOf[i], fs = k != null ? fixSize(fixes[k]) : null; return (
+                    <button key={i} type="button" onClick={() => (tool === "fix" ? startFix(i) : toggle(i))} aria-pressed={!off.has(i)} title={tool === "fix" ? t("กดเพื่อทำให้ตรง", "Click to straighten") : off.has(i) ? t("กดเพื่อเอาชิ้นนี้", "Click to include") : t("กดเพื่อไม่เอาชิ้นนี้", "Click to skip")}
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 tabular-nums ${off.has(i) ? "border-slate-200 text-slate-400 line-through" : fs ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-blue-300 bg-blue-50 text-blue-800"}`}>
+                      <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-white ${off.has(i) ? "bg-slate-300" : fs ? "bg-emerald-600" : "bg-blue-600"}`}>{i + 1}</span>
+                      {fs ? `${fs[0].toFixed(1)} × ${fs[1].toFixed(1)} ${t("ซม.", "cm")} ✓` : cmPerPx > 0 ? `${(c.box.w * cmPerPx).toFixed(1)} × ${(c.box.h * cmPerPx).toFixed(1)} ${t("ซม.", "cm")}` : t(`${c.pts.length} จุด`, `${c.pts.length} pts`)}
+                    </button>); })}
                   <span className="shrink-0 self-center text-slate-400">{t(`เลือก ${chosen.length}/${traced!.contours.length}`, `${chosen.length}/${traced!.contours.length} chosen`)}</span>
                 </div>
               )}
@@ -410,16 +522,16 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img.url} alt="" className="block w-full select-none" draggable={false} />
                   <svg ref={svgRef} viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full" onClick={onImgClick} onPointerDown={onBrushDown} onPointerMove={onBrushMove} onPointerUp={onBrushUp} onPointerCancel={(e) => { touches.current.delete(e.pointerId); setStroke(null); }} onPointerLeave={() => setCursor(null)}
-                    style={{ cursor: clickMode || tool === "bgpick" ? "crosshair" : brushing ? "none" : undefined, touchAction: brushing || tool === "bgpick" ? "none" : undefined }} data-photo-svg>
+                    style={{ cursor: clickMode || tool === "bgpick" || tool === "crop" ? "crosshair" : brushing ? "none" : tool === "fix" ? "pointer" : undefined, touchAction: brushing || tool === "bgpick" || tool === "crop" || tool === "fix" ? "none" : undefined }} data-photo-svg>
                     {editsImg && <image href={editsImg} x={0} y={0} width={img.w} height={img.h} style={{ pointerEvents: "none" }} />}
                     {(traced?.contours ?? []).map((c, i) => (
                       <polygon key={i} points={c.pts.map((p) => p.join(",")).join(" ")} onClick={() => { if (!clickMode && tool === "pick") toggle(i); }} style={{ cursor: clickMode ? "crosshair" : "pointer", pointerEvents: clickMode || tool !== "pick" ? "none" : undefined }}
-                        fill={off.has(i) ? "rgba(148,163,184,0.18)" : "rgba(37,99,235,0.3)"} stroke={off.has(i) ? "#94a3b8" : "#1d4ed8"} strokeWidth={off.has(i) ? 1.5 : 2.5} vectorEffect="non-scaling-stroke" strokeDasharray={off.has(i) ? "6 4" : undefined} />
+                        fill={off.has(i) ? "rgba(148,163,184,0.18)" : fixOf[i] != null ? "rgba(16,185,129,0.3)" : "rgba(37,99,235,0.3)"} stroke={off.has(i) ? "#94a3b8" : fixOf[i] != null ? "#047857" : "#1d4ed8"} strokeWidth={off.has(i) ? 1.5 : 2.5} vectorEffect="non-scaling-stroke" strokeDasharray={off.has(i) ? "6 4" : undefined} />
                     ))}
                     {/* เส้นหนาเท่ากันบนจอทุกระดับซูม (non-scaling) + เลขชิ้นตรงกับป้ายเหนือรูป · ขนาดเลขคิดจากขนาดรูปที่โชว์จริง */}
                     {(traced?.contours ?? []).map((c, i) => { const s = 1 / (svgScale || 1), cx = c.box.x + c.box.w / 2, cy = c.box.y + c.box.h / 2; return (
                       <g key={`n${i}`} style={{ pointerEvents: "none" }} data-photo-num>
-                        <circle cx={cx} cy={cy} r={11 * s} fill={off.has(i) ? "#94a3b8" : "#1d4ed8"} stroke="#fff" strokeWidth={1.5 * s} />
+                        <circle cx={cx} cy={cy} r={11 * s} fill={off.has(i) ? "#94a3b8" : fixOf[i] != null ? "#047857" : "#1d4ed8"} stroke="#fff" strokeWidth={1.5 * s} />
                         <text x={cx} y={cy} fontSize={12 * s} textAnchor="middle" dominantBaseline="central" fill="#fff">{i + 1}</text>
                       </g>); })}
                     {quad.length > 0 && <g data-photo-quad style={{ pointerEvents: "none" }}>
@@ -433,6 +545,16 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                     </g>)}
                     {stroke && <polyline points={stroke.pts.map((p) => p.join(",")).join(" ")} fill="none" stroke={tool === "add" ? "rgba(16,185,129,0.45)" : "rgba(239,68,68,0.45)"} strokeWidth={stroke.r * 2} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />}
                     {cursor && brushing && <circle cx={cursor.x} cy={cursor.y} r={cursor.r} fill="none" stroke={tool === "add" ? "#059669" : "#dc2626"} strokeWidth={cursor.r / 10 + 0.5} style={{ pointerEvents: "none" }} data-photo-brush-cursor />}
+                    {crop && crop.w > 1 && (() => { const q = cropCorners(crop), d = q.map((p) => p.join(" ")).join(" L"); return (
+                      <g style={{ pointerEvents: "none" }} data-photo-crop>
+                        {tool === "crop" && <path d={`M0 0H${img.w}V${img.h}H0Z M${d}Z`} fill="rgba(0,0,0,0.55)" fillRule="evenodd" />}
+                        <path d={`M${d}Z`} fill="none" stroke="#fff" strokeWidth={1.5} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+                      </g>); })()}
+                    {editFix && tool === "fix" && (() => { const s = 1 / (svgScale || 1); return (
+                      <g style={{ pointerEvents: "none" }} data-photo-fixquad>
+                        <polygon points={editFix.quad.map((p) => p.join(",")).join(" ")} fill="rgba(245,158,11,0.12)" stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+                        {editFix.quad.map((p, k) => <g key={k}><circle cx={p[0]} cy={p[1]} r={9 * s} fill="#f59e0b" stroke="#fff" strokeWidth={1.5 * s} /><text x={p[0]} y={p[1]} fontSize={10 * s} textAnchor="middle" dominantBaseline="central" fill="#fff">{"ABCD"[k]}</text></g>)}
+                      </g>); })()}
                   </svg>
                 </div>
                 </ZoomBox>
@@ -489,7 +611,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                 </details>
               )}
               {scaleFrom === "widest" ? <RangeInput label={t("ความกว้างจริงของชิ้นที่กว้างที่สุด", "Real width of the widest piece")} unit={t("ซม.", "cm")} min={2} max={150} step={0.5} value={realW} onChange={setRealW} />
-                : <p className="text-[11px] text-slate-600" data-scale-from>{scaleFrom === "rect" ? t("มาตราส่วนจากกรอบอ้างอิงที่แก้มุมเอียง", "Scale from the perspective reference") : t("มาตราส่วนจากจุดตรวจระยะ (เข้ากับทุกคู่มากที่สุด)", "Scale from the check distances (best fit to all pairs)")}</p>}
+                : <p className="text-[11px] text-slate-600" data-scale-from>{scaleFrom === "rect" ? t("มาตราส่วนจากกรอบอ้างอิงที่แก้มุมเอียง", "Scale from the perspective reference") : scaleFrom === "pieces" ? t(`ชิ้นที่ทำให้ตรงใช้ขนาดจริงที่ใส่ · ชิ้นอื่นใช้มาตราส่วนเฉลี่ยจาก ${fixes.length} ชิ้นที่ทำแล้ว`, `Straightened pieces use the sizes you entered · others use the average scale of ${fixes.length} straightened pieces`) : t("มาตราส่วนจากจุดตรวจระยะ (เข้ากับทุกคู่มากที่สุด)", "Scale from the check distances (best fit to all pairs)")}</p>}
               <details className="group space-y-1 rounded-md border border-slate-200 p-2 text-slate-500">
                 <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-slate-700 [&::-webkit-details-marker]:hidden">{t("ช่างคิดยังไง", "How a pattern maker thinks")}<Icon value="i:chevron-down" className="ml-auto text-sm text-slate-400 transition-transform group-open:rotate-180" /></summary>
                 <p>{t("รูปถ่ายไม่มีมาตราส่วน ระบบจึงต้องให้คุณวัดของจริง 1 ค่า แล้วย่อขยายทุกชิ้นตามค่านั้น — ถ่ายเอียงนิดเดียวขนาดก็เพี้ยนได้ ให้วัดซ้ำอีกด้านหลังวางลงกระดาน", "A photo has no scale, so you give one real measurement and everything is scaled from it. A slightly tilted shot distorts sizes — re-measure another side after placing.")}</p>

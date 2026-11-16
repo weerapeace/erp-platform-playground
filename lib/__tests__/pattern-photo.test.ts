@@ -1,6 +1,6 @@
 /** Bag CAD รอบ I3: แก้มุมเอียงรูป · จุดตรวจระยะ · ความคลาดการลอกเส้น · โค้ช · ป้ายแหล่งที่มาของ AI */
 import { describe, expect, it } from "vitest";
-import { applyH, checkScale, epsForTolMm, homography, invert3, isConvexQuad, orderQuad, rectifyGray, traceTolMm, type PPt } from "@/lib/pattern-photo";
+import { applyH, autoQuad, checkScale, cropCorners, cropGray, scaleFromFixes, straightenPts, straightenSize, epsForTolMm, homography, invert3, isConvexQuad, orderQuad, rectifyGray, traceTolMm, type PPt } from "@/lib/pattern-photo";
 import { coachSummary, coachTips, parseCoachReply } from "@/lib/pattern-coach";
 import { bagParamsFromAiDraft } from "@/lib/bag-ai-draft";
 import type { Shape } from "@/lib/pattern-shape";
@@ -78,5 +78,46 @@ describe("ป้าย เห็นจากภาพ / ประมาณ", () 
     expect("ws" in d.sources).toBe(false);
     const old = bagParamsFromAiDraft({ height: 1 }, 30);
     expect(old.sources.H).toBe("estimated");
+  });
+});
+
+describe("ครอปรูป + ทำให้ตรงรายชิ้น (2026-11-16)", () => {
+  it("ครอปตรง ๆ = ตัดตรงตามพิกัด ขนาดจุดภาพเท่าเดิม", () => {
+    const w = 40, h = 30, g = new Uint8Array(w * h).map((_, i) => i % w);
+    const r = cropGray(g, w, h, { cx: 20, cy: 15, w: 10, h: 6, angle: 0 })!;
+    expect([r.w, r.h]).toEqual([10, 6]);
+    expect(r.gray[0]).toBe(15); expect(r.gray[9]).toBe(24);
+  });
+  it("ครอปหมุน 90° = มุมกรอบหมุนรอบจุดกลาง · กรอบเล็กเกิน = ไม่ครอป", () => {
+    const c = cropCorners({ cx: 50, cy: 50, w: 20, h: 10, angle: 90 }).map(([x, y]) => [Math.round(x), Math.round(y)]);
+    expect(c).toEqual([[55, 40], [55, 60], [45, 60], [45, 40]]);
+    expect(cropGray(new Uint8Array(100), 10, 10, { cx: 5, cy: 5, w: 2, h: 2, angle: 0 })).toBeNull();
+  });
+  it("หา 4 มุมของชิ้นคางหมู (ถ่ายเฉียง) ได้ใกล้มุมจริง", () => {
+    const trap: PPt[] = [[40, 20], [80, 20], [95, 220], [25, 220]];
+    const pts: PPt[] = [];
+    for (let i = 0; i < 4; i++) { const a = trap[i], b = trap[(i + 1) % 4]; for (let k = 0; k < 20; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / 20, a[1] + ((b[1] - a[1]) * k) / 20]); }
+    const q = autoQuad(pts)!;
+    q.forEach((p, i) => expect(Math.hypot(p[0] - trap[i][0], p[1] - trap[i][1])).toBeLessThan(3));
+  });
+  it("ทำให้ตรง: คางหมู + ขนาดจริง 30×102 → เป็นสี่เหลี่ยม 30×102 ซม. (ใส่สลับกว้าง/ยาวก็ได้)", () => {
+    const trap: PPt[] = [[40, 20], [80, 20], [95, 220], [25, 220]];
+    for (const [W, H] of [[30, 102], [102, 30]]) {
+      const out = straightenPts(trap, trap, W, H)!;
+      const xs = out.map((p) => p[0]), ys = out.map((p) => p[1]);
+      expect(Math.round(Math.max(...xs) - Math.min(...xs))).toBe(30);
+      expect(Math.round(Math.max(...ys) - Math.min(...ys))).toBe(102);
+    }
+  });
+  it("ใส่ขนาดด้านเดียว: รู้แค่ยาว 100 → กว้างคิดจากสัดส่วนในรูป", () => {
+    const rect: PPt[] = [[0, 0], [20, 0], [20, 100], [0, 100]];
+    expect(straightenSize(rect, 0, 100)).toEqual({ a: 20, b: 100 });
+    expect(straightenSize(rect, 20, 0)).toEqual({ a: 20, b: 100 });
+    expect(straightenSize(rect, 0, 0)).toBeNull();
+  });
+  it("มาตราส่วนเฉลี่ยจากชิ้นที่ทำแล้ว (ให้ชิ้นที่ยังไม่ทำ)", () => {
+    const k = scaleFromFixes([{ quad: [[0, 0], [100, 0], [100, 200], [0, 200]], w: 10, h: 20 }, { quad: [[0, 0], [50, 0], [50, 50], [0, 50]], w: 10, h: 10 }])!;
+    expect(k).toBeCloseTo(0.15, 5);
+    expect(scaleFromFixes([])).toBeNull();
   });
 });

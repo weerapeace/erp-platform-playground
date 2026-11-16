@@ -121,3 +121,105 @@ export function checkScale(pairs: CheckPair[], tolCm: number, fixed?: number | n
 /** ความคลาดของเส้นที่ลอก (มม.) จากค่าความละเอียดเส้น (จุดภาพ) · และกลับกัน */
 export const traceTolMm = (epsPx: number, cmPerPx: number): number => Math.round(epsPx * cmPerPx * 10 * 10) / 10;
 export const epsForTolMm = (tolMm: number, cmPerPx: number): number => (cmPerPx > 0 ? Math.max(0.5, Math.min(10, tolMm / 10 / cmPerPx)) : 2);
+
+// ── 2026-11-16 เจ้าของขอ: ครอปรูป (หมุนกรอบได้) + ทำให้ตรงรายชิ้น (ชิ้นใหญ่กว่า A4 ก็ได้ · ใส่ขนาดจริงต่อชิ้น)
+
+/** กรอบครอปหมุนได้: จุดกลาง กว้าง สูง (จุดภาพ) มุม (องศา ตามเข็ม) */
+export type CropRect = { cx: number; cy: number; w: number; h: number; angle: number };
+
+/** 4 มุมของกรอบครอป เรียง ซ้ายบน → ขวาบน → ขวาล่าง → ซ้ายล่าง (ก่อนหมุน) */
+export function cropCorners(r: CropRect): PPt[] {
+  const a = (r.angle * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), hw = r.w / 2, hh = r.h / 2;
+  return ([[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]] as PPt[]).map(([x, y]) => [r.cx + x * c - y * s, r.cy + x * s + y * c] as PPt);
+}
+
+/** ครอปภาพเทาตามกรอบ (หมุนได้) — ขนาดจุดภาพเท่าเดิม (มาตราส่วนไม่เปลี่ยน) · ส่วนที่เลยขอบรูป = สีเฉลี่ยขอบรูป */
+export function cropGray(gray: Uint8Array, w: number, h: number, r: CropRect): { gray: Uint8Array; w: number; h: number } | null {
+  const ow = Math.round(r.w), oh = Math.round(r.h);
+  if (!(ow >= 4 && oh >= 4) || ow * oh > 6_000_000) return null;
+  const a = (r.angle * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  let edge = 0, ne = 0;
+  for (let x = 0; x < w; x++) { edge += gray[x] + gray[(h - 1) * w + x]; ne += 2; }
+  const fill = Math.round(edge / Math.max(1, ne));
+  const out = new Uint8Array(ow * oh);
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+    const lx = x + 0.5 - ow / 2, ly = y + 0.5 - oh / 2;
+    const fx = r.cx + lx * c - ly * s - 0.5, fy = r.cy + lx * s + ly * c - 0.5, x0 = Math.floor(fx), y0 = Math.floor(fy);
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= w || y0 + 1 >= h) { out[y * ow + x] = fill; continue; }
+    const tx = fx - x0, ty = fy - y0, i = y0 * w + x0;
+    out[y * ow + x] = Math.round(gray[i] * (1 - tx) * (1 - ty) + gray[i + 1] * tx * (1 - ty) + gray[i + w] * (1 - tx) * ty + gray[i + w + 1] * tx * ty);
+  }
+  return { gray: out, w: ow, h: oh };
+}
+
+function hull(pts: PPt[]): PPt[] {
+  const P = [...pts].sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  if (P.length < 3) return P;
+  const cross = (o: PPt, a: PPt, b: PPt) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: PPt[] = [], up: PPt[] = [];
+  for (const p of P) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  return [...lo.slice(0, -1), ...up.slice(0, -1)];
+}
+export const polyAreaPx = (q: PPt[]): number => { let a = 0; for (let i = 0; i < q.length; i++) { const [x1, y1] = q[i], [x2, y2] = q[(i + 1) % q.length]; a += x1 * y2 - x2 * y1; } return Math.abs(a) / 2; };
+
+/**
+ * เส้นรอบชิ้น → 4 มุมโดยประมาณ ให้ผู้ใช้ลากปรับต่อ: หากรอบสี่เหลี่ยมหมุนได้ที่เล็กที่สุด แล้วแต่ละมุมเลือกจุดบนเส้นรอบชิ้นที่ใกล้ที่สุด
+ *   (ชิ้นที่ถ่ายเฉียง = สี่เหลี่ยมคางหมู มุมจะไปเกาะมุมจริงของชิ้น) · เรียง ซ้ายบน → ขวาบน → ขวาล่าง → ซ้ายล่าง
+ */
+export function autoQuad(pts: PPt[]): PPt[] | null {
+  const H = hull(pts);
+  if (H.length < 3) return null;
+  let best: { area: number; corners: PPt[] } | null = null;
+  for (let i = 0; i < H.length; i++) {
+    const [ax, ay] = H[i], [bx, by] = H[(i + 1) % H.length], len = Math.hypot(bx - ax, by - ay);
+    if (!(len > 0)) continue;
+    const ux = (bx - ax) / len, uy = (by - ay) / len;
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, y] of H) { const u = x * ux + y * uy, v = -x * uy + y * ux; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+    const area = (u1 - u0) * (v1 - v0);
+    if (!best || area < best.area) best = { area, corners: ([[u0, v0], [u1, v0], [u1, v1], [u0, v1]] as PPt[]).map(([u, v]) => [u * ux - v * uy, u * uy + v * ux] as PPt) };
+  }
+  if (!best) return null;
+  const snap = best.corners.map((c) => H.reduce((m, p) => (Math.hypot(p[0] - c[0], p[1] - c[1]) < Math.hypot(m[0] - c[0], m[1] - c[1]) ? p : m), H[0]));
+  const q = orderQuad(snap);
+  return isConvexQuad(q) ? q : orderQuad(best.corners);
+}
+
+/** ความยาวด้านของ 4 มุม (เฉลี่ยด้านตรงข้าม): a = ด้านบน/ล่าง · b = ด้านซ้าย/ขวา (จุดภาพ) */
+export function quadSides(q: PPt[]): { a: number; b: number } {
+  const o = orderQuad(q), d = (p: PPt, r: PPt) => Math.hypot(r[0] - p[0], r[1] - p[1]);
+  return { a: (d(o[0], o[1]) + d(o[3], o[2])) / 2, b: (d(o[1], o[2]) + d(o[0], o[3])) / 2 };
+}
+
+/**
+ * ขนาดจริงที่ผู้ใช้พิมพ์ (กว้าง × ยาว ซม.) → ความยาวด้าน a / b ของ 4 มุม
+ *   ค่ามากกว่าไปอยู่ด้านที่ยาวกว่าในรูปเสมอ (ไม่ต้องสนใจว่าชิ้นตั้งหรือนอน) · ใส่ค่าเดียว (อีกค่า 0) = อีกด้านคิดจากสัดส่วนในรูป
+ */
+export function straightenSize(q: PPt[], wCm: number, hCm: number): { a: number; b: number } | null {
+  const { a, b } = quadSides(q);
+  if (!(a > 0 && b > 0)) return null;
+  const W = wCm > 0 ? wCm : 0, Hh = hCm > 0 ? hCm : 0;
+  if (!W && !Hh) return null;
+  const aLong = a >= b, ratio = Math.min(a, b) / Math.max(a, b);
+  let long: number, short: number;
+  if (W && Hh) { long = Math.max(W, Hh); short = Math.min(W, Hh); }
+  else if (Hh) { long = Hh; short = Hh * ratio; }            // รู้แค่ "ยาว" = ด้านยาว
+  else { short = W; long = W / ratio; }                      // รู้แค่ "กว้าง" = ด้านสั้น
+  return aLong ? { a: long, b: short } : { a: short, b: long };
+}
+
+/** ทำให้ตรงรายชิ้น: เส้นรอบชิ้น (จุดภาพ) + 4 มุม + ขนาดจริง → เส้นรอบชิ้นหน่วย ซม. (มุมซ้ายบนของ 4 มุม = 0,0) */
+export function straightenPts(pts: PPt[], quad: PPt[], wCm: number, hCm: number): PPt[] | null {
+  const o = orderQuad(quad);
+  if (!isConvexQuad(o)) return null;
+  const s = straightenSize(o, wCm, hCm); if (!s) return null;
+  const H = homography(o, [[0, 0], [s.a, 0], [s.a, s.b], [0, s.b]]); if (!H) return null;
+  return pts.map((p) => applyH(H, p));
+}
+
+/** มาตราส่วนโดยประมาณ (ซม./จุดภาพ) จากชิ้นที่ทำให้ตรงแล้ว — ใช้กับชิ้นที่ยังไม่ได้ทำ (เฉลี่ยทุกชิ้น) */
+export function scaleFromFixes(fixes: { quad: PPt[]; w: number; h: number }[]): number | null {
+  const ks = fixes.flatMap((f) => { const s = straightenSize(f.quad, f.w, f.h), A = polyAreaPx(orderQuad(f.quad)); return s && A > 0 ? [Math.sqrt((s.a * s.b) / A)] : []; });
+  return ks.length ? ks.reduce((x, y) => x + y, 0) / ks.length : null;
+}
