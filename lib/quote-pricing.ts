@@ -168,3 +168,32 @@ export function quoteQtyMode(qtys: readonly (number | null)[]): QuoteQtyMode {
   if (qtys.length === 1) return qtys[0] == null ? "none" : "single";
   return "set";
 }
+
+/** 🧮 สรุปยอดรวมรอบเสนอราคา (เจ้าของขอ 2026-11-16: "อยากให้มีสรุปราคาด้วย ว่าทั้งหมดเท่าไหร่ เทียบกับต้นทุน เห็นกำไร")
+ *   จำนวนของช่อง: แบ่งสีมีจำนวน = รวมจำนวนสี (ราคาสีละ ราคาช่อง ± delta) · ไม่งั้น = จำนวนของช่อง · ไม่มีจำนวน = นับยอดไม่ได้ (missing)
+ *   ต้นทุน = ตีราคาตอนเสนอ (price) × จำนวน · ช่องไหนไม่มีตีราคา = ไม่รู้ต้นทุนรวม (cost null) ไม่เดาเป็น 0 */
+export type QuoteLineTotal = { size: string; unit: number | null; qty: number | null; sale: number | null; cost: number | null };
+export function quoteCellTotal(c: { parent_code: string | null; qty: number | null; price: number | null; offered_price: number | null; colors?: { qty: number | null; delta: number | null }[] | null }): QuoteLineTotal {
+  const unit = c.offered_price ?? c.price ?? null;
+  const cs = (c.colors ?? []).filter((x) => x.qty != null && x.qty > 0);
+  let qty: number | null = null; let sale: number | null = null;
+  if (cs.length) {
+    qty = cs.reduce((n, x) => n + (x.qty as number), 0);
+    sale = unit == null ? null : r2(cs.reduce((n, x) => n + (unit + (Number(x.delta) || 0)) * (x.qty as number), 0));
+  } else if (c.qty != null && c.qty > 0) {
+    qty = c.qty; sale = unit == null ? null : r2(unit * c.qty);
+  }
+  const cost = c.price != null && qty != null ? r2(c.price * qty) : null;
+  return { size: c.parent_code ?? "", unit, qty, sale, cost };
+}
+export type QuoteTotals = { qty: number; sale: number; cost: number | null; profit: number | null; pct: number | null; lines: QuoteLineTotal[]; missing: string[] };
+export function sumQuoteLines(lines: QuoteLineTotal[]): QuoteTotals {
+  const ok = lines.filter((l) => l.qty != null && l.sale != null);
+  const missing = lines.filter((l) => l.qty == null || l.sale == null).map((l) => l.size);
+  const qty = ok.reduce((n, l) => n + (l.qty as number), 0);
+  const sale = r2(ok.reduce((n, l) => n + (l.sale as number), 0));
+  const cost = ok.length && ok.every((l) => l.cost != null) ? r2(ok.reduce((n, l) => n + (l.cost as number), 0)) : null;
+  const profit = cost == null ? null : r2(sale - cost);
+  const pct = profit != null && sale > 0 ? (profit / sale) * 100 : null;
+  return { qty, sale, cost, profit, pct, lines, missing };
+}

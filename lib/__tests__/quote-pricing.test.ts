@@ -120,3 +120,25 @@ describe("quoteQtyMode", () => {
     expect(quoteQtyMode([])).toBe("set");
   });
 });
+
+describe("สรุปยอดรวมรอบเสนอราคา", () => {
+  it("แบ่งสี = รวมจำนวนสี + ราคาสีละ ± delta", async () => {
+    const { quoteCellTotal } = await import("../quote-pricing");
+    const t = quoteCellTotal({ parent_code: "PU", qty: null, price: 41.02, offered_price: 100, colors: [{ qty: 500, delta: null }, { qty: 500, delta: -20 }] });
+    expect(t).toEqual({ size: "PU", unit: 100, qty: 1000, sale: 90000, cost: 41020 });
+  });
+  it("ไม่มีสี = จำนวนของช่อง · ไม่มีจำนวน = นับไม่ได้", async () => {
+    const { quoteCellTotal } = await import("../quote-pricing");
+    expect(quoteCellTotal({ parent_code: "A", qty: 200, price: 10, offered_price: 15 })).toMatchObject({ qty: 200, sale: 3000, cost: 2000 });
+    expect(quoteCellTotal({ parent_code: "A", qty: null, price: 10, offered_price: 15 })).toMatchObject({ qty: null, sale: null, cost: null });
+  });
+  it("รวมหลายไซส์ · ไซส์ไม่มีจำนวนอยู่ใน missing · ขาดตีราคา = ไม่รู้ต้นทุน", async () => {
+    const { sumQuoteLines } = await import("../quote-pricing");
+    const r = sumQuoteLines([
+      { size: "A", unit: 60, qty: 7600, sale: 456000, cost: 203680 },
+      { size: "B", unit: 100, qty: null, sale: null, cost: null },
+    ]);
+    expect(r).toMatchObject({ qty: 7600, sale: 456000, cost: 203680, profit: 252320, missing: ["B"] });
+    expect(sumQuoteLines([{ size: "A", unit: 60, qty: 10, sale: 600, cost: null }])).toMatchObject({ sale: 600, cost: null, profit: null, pct: null });
+  });
+});

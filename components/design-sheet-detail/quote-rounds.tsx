@@ -15,6 +15,9 @@
  *   เก็บที่ design_sheet_quotes.colors ทีละช่อง · กติกา lib/quote-colors · การ์ดโชว์จำนวนต่อสี + เตือนแบ่งไม่ครบ/เกิน · ส่งไปใบเสนอราคา 1 สี = 1 บรรทัด
  * 🔢 3 แบบ (เจ้าของเลือก 2026-11-16): ใส่จำนวนเดียว · ราคาเป็นชุด · ไม่รู้จำนวน — ปุ่มสลับบนหัวฟอร์ม · ไม่เก็บแยกในฐานข้อมูล ดูจากขั้นจำนวน (lib/quote-pricing quoteQtyMode)
  *   ครั้งใหม่เปิดเป็นแบบเดียวกับครั้งก่อน · สลับแบบแล้วราคาไม่หาย (ย้ายคอลัมน์แรกไป) · การ์ดมีป้ายบอกแบบ
+ * 🧮 สรุปยอดรวม (เจ้าของเลือก 2026-11-16): จำนวนเดียว/ไม่รู้จำนวน = ตารางยอดต่อไซส์ + รวมทั้งหมด ใต้การ์ด · ราคาเป็นชุด = แถวรวมต่อขั้น (ถ้าสั่งขั้นนี้ทุกไซส์)
+ *   จำนวน = จำนวนสี (ถ้าแบ่งสี) หรือจำนวนของช่อง · ต้นทุน = ตีราคาตอนเสนอ · เทียบกำไรครั้งก่อน · ครั้งที่พับโชว์ยอด+กำไร · ฟอร์มโชว์สรุปสด
+ *   ต้นทุน/กำไร โชว์เฉพาะคนมีสิทธิ์ products.cost.view (คนอื่นเห็นแค่ยอดขาย) · สูตร lib/quote-pricing quoteCellTotal/sumQuoteLines
  * ของกลาง: ConfirmDialog · Popover (เมนู ⋮) · InfoHint · useCanHover · useToast · apiFetch · lib/quote-pricing · lib/quote-colors
  */
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -29,7 +32,8 @@ import { Icon } from "@/components/icon";
 import { Popover } from "@/components/popover";
 import { InfoHint } from "@/components/info-hint";
 import { useCanHover } from "@/lib/use-can-hover";
-import { priceFromCost, tierPrice, quoteQtyMode, type QuoteQtyMode } from "@/lib/quote-pricing";
+import { priceFromCost, tierPrice, quoteQtyMode, quoteCellTotal, sumQuoteLines, type QuoteQtyMode, type QuoteTotals } from "@/lib/quote-pricing";
+import { usePermission } from "@/components/auth";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
 import { QUOTE_COLOR_PALETTE, cleanQuoteColors, colorQtyStatus, colorUnitPrice, paletteHex, percentsToQty, qtyToPercent, splitEvenly, type QuoteColor } from "@/lib/quote-colors";
 
@@ -73,6 +77,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const canHover = useCanHover();
+  const showCost = usePermission("products.cost.view");   // ต้นทุน/กำไรในแถบสรุป — คนไม่มีสิทธิ์เห็นแค่ยอดขาย
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({});   // การ์ดที่กดเปิด/พับเอง (ไม่กด = เปิดเฉพาะครั้งล่าสุด)
   const [delBatch, setDelBatch] = useState<Batch | null>(null);
   const [delCell, setDelCell] = useState<DesignSheetQuote | null>(null);
@@ -122,6 +127,16 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
     return out;
   }, [quotes, sizes]);
   const cellOf = (b: Batch, size: string, qty: number | null) => b.quotes.find((q) => (q.parent_code ?? "") === size && qtyKey(q.qty) === qtyKey(qty)) ?? null;
+  // 🧮 ยอดรวมต่อขั้นจำนวน (จำนวนเดียว/ไม่รู้จำนวน = ขั้นเดียว)
+  const totalsOf = (b: Batch): QuoteTotals[] => b.qtys.map((qty) => sumQuoteLines(b.sizes.map((size) => cellOf(b, size, qty)).filter((q): q is DesignSheetQuote => !!q)
+    .map((q) => quoteCellTotal({ parent_code: q.parent_code ?? null, qty: q.qty ?? null, price: q.price ?? null, offered_price: q.offered_price ?? null, colors: cleanQuoteColors(q.colors) }))));
+  const profitTxt = (tt: QuoteTotals) => (tt.profit == null ? "—" : `${sgnShort(tt.profit)}${tt.pct != null ? ` (${tt.pct.toFixed(0)}%)` : ""}`);
+  // เทียบกำไรรวมกับครั้งก่อน (ขั้นเดียวกัน)
+  const vsPrev = (tt: QuoteTotals, prevT: QuoteTotals | null | undefined, prevBatch: number | undefined) => {
+    if (!showCost || tt.profit == null || prevT?.profit == null || !tt.qty || !prevT.qty) return null;
+    const d = Math.round((tt.profit - prevT.profit) * 100) / 100;
+    return <div className={`text-[10px] font-normal ${d === 0 ? "text-slate-400" : upDown(d)}`} title={t(`ครั้งที่ ${prevBatch} กำไร ${fmtShort(prevT.profit)}`, `Round ${prevBatch} profit ${fmtShort(prevT.profit)}`)}>{d === 0 ? t(`กำไรเท่าครั้งที่ ${prevBatch}`, `Same profit as round ${prevBatch}`) : t(`กำไร ${sgnShort(d)} จากครั้งที่ ${prevBatch}`, `Profit ${sgnShort(d)} vs round ${prevBatch}`)}</div>;
+  };
 
   const call = async (fn: () => Promise<void>, ok?: string) => {
     if (busy) return; setBusy(true);
@@ -203,7 +218,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
 
       {addOpen && (
         <RoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null} fill={fill}
-          costDirty={costDirty} saveCost={saveCost} onClose={() => { setAddOpen(false); setAddFrom(null); }}
+          costDirty={costDirty} saveCost={saveCost} showCost={showCost} onClose={() => { setAddOpen(false); setAddFrom(null); }}
           onSaved={async (n) => { setAddOpen(false); setAddFrom(null); await onReload(); toast.success(tr(`เสนอราคาครั้งที่ ${n} แล้ว`, `Quote round ${n} saved`)); }} />
       )}
 
@@ -225,7 +240,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
         const changes = b.sizes.map((s) => ({ size: s, q: b.quotes.find((q) => (q.parent_code ?? "") === s) })).filter((x) => x.q?.changes || x.q?.cost_snapshot_id);
         if (editKey === cardKey(b)) return (
           <RoundEditor key={`edit-${cardKey(b)}`} sheetId={sheetId} nextBatch={b.batch} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={null} editing={b} fill={fill}
-            costDirty={costDirty} saveCost={saveCost} onClose={() => setEditKey(null)} onReload={onReload}
+            costDirty={costDirty} saveCost={saveCost} showCost={showCost} onClose={() => setEditKey(null)} onReload={onReload}
             onSaved={async (n) => { setEditKey(null); await onReload(); toast.success(tr(`บันทึกการแก้ไขครั้งที่ ${n} แล้ว`, `Round ${n} changes saved`)); }} />
         );
         return (
@@ -255,6 +270,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                 <button type="button" onClick={toggle} className="flex-1 min-w-0 text-left text-[11px] truncate" title={[priceSummary, b.note].filter(Boolean).join("\n")}>
                   <span className="text-slate-400">{t(`${b.sizes.length} ไซส์`, `${b.sizes.length} sizes`)}</span>
                   {priceSummary && <span className="ml-1.5 font-medium text-blue-700 tabular-nums">{priceSummary}</span>}
+                  {(() => { if (quoteQtyMode(b.qtys) === "set") return null; const tt = totalsOf(b)[0]; if (!tt?.qty) return null;
+                    return <span className="ml-1.5 tabular-nums text-slate-500">· {t("ยอด", "Total")} {fmtShort(tt.sale)}{showCost && tt.profit != null && <span className={upDown(tt.profit)}> · {t("กำไร", "Profit")} {profitTxt(tt)}</span>}</span>; })()}
                   {b.note && <span className="ml-1.5 text-slate-400">· {b.note}</span>}
                 </button>
               ) : editNote?.batch === b.batch ? (
@@ -382,8 +399,76 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                     );
                   })}
                 </tbody>
+                {quoteQtyMode(b.qtys) === "set" && (() => {
+                  const tts = totalsOf(b); const pts = prev ? totalsOf(prev) : null;
+                  if (!tts.some((x) => x.qty)) return null;
+                  return (
+                    <tfoot>
+                      <tr className="border-t-2 border-emerald-200 bg-emerald-50/50">
+                        <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-emerald-800">{t("รวม", "Total")} <span className="font-normal text-[10px] text-emerald-700">{t("(ถ้าสั่งขั้นนี้ทุกไซส์)", "(if every size orders this tier)")}</span></td>
+                        {b.qtys.map((qty, i) => {
+                          const tt = tts[i]; const pi = prev ? prev.qtys.findIndex((q) => qtyKey(q) === qtyKey(qty)) : -1;
+                          return (
+                            <td key={qtyKey(qty)} className="px-2 py-1.5 text-right tabular-nums leading-tight align-top">
+                              {tt.qty ? <>
+                                <div className="text-xs font-semibold text-emerald-800">{fmtShort(tt.sale)}</div>
+                                {showCost && tt.cost != null && <div className="text-[10px] text-slate-500">{t("ต้นทุน", "Cost")} {fmtShort(tt.cost)}</div>}
+                                {showCost && tt.profit != null && <div className={`text-[10px] ${upDown(tt.profit)}`}>{t("กำไร", "Profit")} {profitTxt(tt)}</div>}
+                                {vsPrev(tt, pi >= 0 ? pts?.[pi] : null, prev?.batch)}
+                                {tt.missing.length > 0 && <div className="text-[10px] text-amber-600">{t(`ขาดจำนวน ${tt.missing.length} ไซส์`, `${tt.missing.length} sizes without qty`)}</div>}
+                              </> : <span className="text-slate-300">—</span>}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
+            {quoteQtyMode(b.qtys) !== "set" && (() => {
+              const tt = totalsOf(b)[0]; if (!tt?.lines.length) return null;
+              const pT = prev && quoteQtyMode(prev.qtys) !== "set" ? totalsOf(prev)[0] : null;
+              const th = "px-2 py-1 text-right font-medium";
+              return (
+                <div className="overflow-x-auto border-t border-emerald-100 bg-emerald-50/40">
+                  <table className="w-full text-xs tabular-nums">
+                    <thead><tr className="text-[10px] text-slate-400">
+                      <th className="px-3 py-1 text-left font-medium">{t("สรุปยอด", "Summary")}</th>
+                      {!compact && <th className={th}>{t("ราคา/ชิ้น", "Price/pc")}</th>}
+                      <th className={th}>{t("จำนวน", "Qty")}</th><th className={th}>{t("ยอดขาย", "Sales")}</th>
+                      {showCost && <><th className={th}>{t("ต้นทุน", "Cost")}</th><th className={th}>{t("กำไร", "Profit")}</th></>}
+                    </tr></thead>
+                    <tbody>
+                      {tt.lines.map((l) => (
+                        <tr key={l.size} className="border-t border-emerald-100/70">
+                          <td className="px-3 py-1 text-slate-700">{sizeLabel(l.size)}</td>
+                          {!compact && <td className="px-2 py-1 text-right text-slate-600">{fmtBaht(l.unit)}</td>}
+                          {l.qty == null
+                            ? <td colSpan={showCost ? 4 : 2} className="px-2 py-1 text-right text-[11px] text-amber-600">{t("ยังไม่มีจำนวน — ใส่จำนวนสี (⋮ แก้ไข) เพื่อคิดยอด", "No quantity yet — add color quantities (⋮ Edit) to total")}</td>
+                            : <>
+                              <td className="px-2 py-1 text-right">{fmtInt(l.qty)}</td>
+                              <td className="px-2 py-1 text-right text-slate-800">{l.sale == null ? "—" : fmtShort(l.sale)}</td>
+                              {showCost && <><td className="px-2 py-1 text-right text-slate-500">{l.cost == null ? "—" : fmtShort(l.cost)}</td>
+                                <td className={`px-2 py-1 text-right ${l.cost != null && l.sale != null ? upDown(l.sale - l.cost) : "text-slate-400"}`}>{l.cost != null && l.sale != null ? sgnShort(Math.round((l.sale - l.cost) * 100) / 100) : "—"}</td></>}
+                            </>}
+                        </tr>
+                      ))}
+                      {tt.qty > 0 && (
+                        <tr className="border-t border-emerald-200 font-semibold text-emerald-800 align-top">
+                          <td className="px-3 py-1.5">{t("รวมทั้งหมด", "Grand total")}</td>
+                          {!compact && <td />}
+                          <td className="px-2 py-1.5 text-right">{t(`${fmtInt(tt.qty)} ชิ้น`, `${fmtInt(tt.qty)} pcs`)}</td>
+                          <td className="px-2 py-1.5 text-right">{fmtShort(tt.sale)}</td>
+                          {showCost && <><td className="px-2 py-1.5 text-right font-normal text-slate-600">{tt.cost == null ? "—" : fmtShort(tt.cost)}</td>
+                            <td className={`px-2 py-1.5 text-right ${tt.profit != null ? upDown(tt.profit) : ""}`}>{profitTxt(tt)}{vsPrev(tt, pT, prev?.batch)}</td></>}
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
             </>}
           </div>
         );
@@ -403,7 +488,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
  *  ครั้งใหม่: เตรียมค่าจากครั้งล่าสุด/ครั้งที่คัดลอก
  *  แก้ไข (editing): ใส่ค่าของการ์ดนั้น → บันทึกเฉพาะที่เปลี่ยน ทีละช่อง (ช่องเดิมแก้ราคา/จำนวน · ล้างราคา/ปิดไซส์/เอาขั้นออก = ลบช่อง · ช่องใหม่ = เพิ่ม)
  *  วันที่/สถานะ/หมายเหตุ แก้เฉพาะช่องของการ์ดนี้ (ข้อมูลเก่าที่ครั้งเดียวกันแยกเป็นหลาย "รายการ" จะไม่กระทบกัน) */
-function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, fill = null, costDirty, saveCost, onClose, onSaved, onReload }: {
+function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, fill = null, costDirty, saveCost, showCost = false, onClose, onSaved, onReload }: {
+  showCost?: boolean;           // 🧮 สรุปสดท้ายฟอร์ม: โชว์ต้นทุน/กำไร (คนมีสิทธิ์ดูต้นทุน)
   copiedFrom?: number | null;   // คัดลอกมาจากครั้งที่ (โชว์ที่หัวฟอร์ม)
   fill?: PriceFill | null;      // 💰 จากตัวช่วยตั้งราคา: ใส่ราคา = ตีราคาของช่อง × ตัวคูณ (ทุกไซส์ที่ติ๊ก × ทุกขั้นจำนวน)
   editing?: Batch | null;       // ✏️ แก้ไขการ์ดนี้ (null = เสนอครั้งใหม่)
@@ -838,6 +924,32 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
           </tbody>
         </table>
       </div>
+      {(() => {
+        // 🧮 สรุปสด: ราคาที่กรอก × จำนวน (จำนวนสี ถ้าแบ่งสี) เทียบตีราคาปัจจุบัน
+        const live = qtys.map((qty) => sumQuoteLines(rowSizes.filter((sz) => onSizes.includes(sz.key)).flatMap((sz) => {
+          const v = cells[key(sz.key, qty)]?.trim(); if (!v) return [];
+          const n = Number(v); if (!Number.isFinite(n)) return [];
+          const c = currentCost(sz.key, qty);
+          return [quoteCellTotal({ parent_code: sz.key, qty, price: c > 0 ? c : null, offered_price: n, colors: colorsForCell(sz.key, qty) })];
+        })));
+        if (!live.some((x) => x.lines.length)) return null;
+        return (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 border-t border-blue-200 bg-emerald-50/60 text-[11px] tabular-nums">
+            <span className="font-semibold text-emerald-800">{t("สรุป", "Summary")}</span>
+            {live.map((tt, i) => !tt.lines.length ? null : (
+              <span key={qtyKey(qtys[i])} className="text-slate-600">
+                {mode === "set" && <span className="font-medium text-blue-700">{qtys[i] == null ? t("ไม่ระบุ", "No qty") : t(`${fmtInt(qtys[i])} ชิ้น`, `${fmtInt(qtys[i])} pcs`)}: </span>}
+                {tt.qty ? <>
+                  {mode !== "set" && t(`${fmtInt(tt.qty)} ชิ้น · `, `${fmtInt(tt.qty)} pcs · `)}{t("ยอด", "Total")} <span className="font-semibold text-slate-800">{fmtShort(tt.sale)}</span>
+                  {showCost && tt.cost != null && <> · {t("ต้นทุน", "Cost")} {fmtShort(tt.cost)}</>}
+                  {showCost && tt.profit != null && <> · <span className={upDown(tt.profit)}>{t("กำไร", "Profit")} {sgnShort(tt.profit)}{tt.pct != null ? ` (${tt.pct.toFixed(0)}%)` : ""}</span></>}
+                  {tt.missing.length > 0 && <span className="text-amber-600"> · {t(`${tt.missing.length} ไซส์ยังไม่มีจำนวน`, `${tt.missing.length} sizes without qty`)}</span>}
+                </> : <span className="text-amber-600">{t("ยังไม่มีจำนวน — ใส่จำนวนสีเพื่อคิดยอดรวม", "No quantity yet — enter color quantities to see the total")}</span>}
+              </span>
+            ))}
+          </div>
+        );
+      })()}
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-blue-200 bg-blue-50/60">
         <span className="text-[11px] text-slate-500">
           {editing ? t("ล้างราคา / ปิดไซส์ / เอาขั้นออก = ลบช่องนั้น · กดตัวเลขขั้นจำนวนที่หัวตารางเพื่อแก้", "Clear price / untick size / remove tier = delete that cell · click a tier number in the header to edit it") : mode === "none" ? t("ยังไม่รู้จำนวน ใส่แค่ราคาต่อชิ้น (รู้จำนวนทีหลัง กด ⋮ แก้ไข แล้วเลือก \"ใส่จำนวนเดียว\")", "Qty unknown — enter the price per piece only (later: ⋮ Edit → \"One qty\")") : mode === "single" ? t("ใส่จำนวนชิ้น 1 ค่า แล้วใส่ราคาต่อชิ้น", "Enter one quantity, then the price per piece") : t("ช่องว่าง = ไม่เสนอขั้นนั้น", "Empty cell = not quoted for that tier")}{t(" · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน", " · small number under a cell = profit/pc vs current costing")}{costDirty ? t(" · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน", " · unsaved costing will be saved first") : ""}
