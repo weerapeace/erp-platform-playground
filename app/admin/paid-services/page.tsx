@@ -32,6 +32,8 @@ type Row = Omit<PaidService, "places" | "providerChoices"> & {
   last_used_at: string | null; updated_at: string | null; updated_by_name: string | null; places: PlaceRow[];
   /** จำนวนคำเฉลี่ยต่อครั้ง (ใช้จริง 90 วัน / ประมาณการ) — คิดราคาต่อครั้งของแต่ละรุ่น · เฉพาะ GPT */
   call_tokens: (CallTokens & { calls: number; source: "history" | "estimate" }) | null;
+  /** รุ่นที่ใช้จริงครั้งล่าสุด — ใช้บอกราคาของ "ค่าเดิมของระบบ" */
+  used_model: string | null;
 };
 type RoleOpt = { key: string; label: string };
 type NamedUser = { user_id: string; name: string };
@@ -247,11 +249,12 @@ function PaidServicesView() {
         <div className="flex flex-col gap-1">
           <select value={r.model ?? ""} disabled={!r.enabled || busy === r.key} onChange={(e) => void save(r, { model: e.target.value })}
             className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 text-xs outline-none focus:border-blue-400 disabled:opacity-50">
-            <option value="">ค่าเดิมของระบบ</option>
+            <option value="">ค่าเดิมของระบบ{!r.model && r.used_model ? ` (ตอนนี้ ${r.used_model}${perCallOf(r, r.used_model) !== null ? ` · ~${perCallText(perCallOf(r, r.used_model)!)}/ครั้ง` : ""})` : ""}</option>
             {models.map((m) => { const c = perCallOf(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
           </select>
           {(() => {
-            const m = models.find((x) => x.id === r.model); const c = r.model ? perCallOf(r, r.model) : null;
+            const eff = r.model ?? r.used_model;
+            const m = models.find((x) => x.id === r.model); const c = eff ? perCallOf(r, eff) : null;
             return (
               <>
                 {c !== null && <span className="text-[11px] font-medium text-slate-600" data-per-call={r.key}>กดครั้งละ ~{perCallText(c)} <span className="font-normal text-slate-400">({r.call_tokens?.source === "history" ? `เฉลี่ยจากใช้จริง ${r.call_tokens.calls.toLocaleString("th-TH")} ครั้ง` : "ประมาณการ ยังไม่เคยใช้"})</span></span>}
@@ -668,7 +671,7 @@ function CountQuotaSection({ services, budget, usage, usageThb, users, busy, onS
   const unit: QuotaUnit = q.unit ?? "count";
   const isThb = unit === "thb";
   const svc = services.find((s) => s.key === key);
-  const perCall = svc ? perCallOf(svc, svc.model) : null;
+  const perCall = svc ? perCallOf(svc, svc.model ?? svc.used_model) : null;
   const [def, setDef] = useState(q.per_user_default ? String(q.per_user_default) : "");
   useEffect(() => { setDef(q.per_user_default ? String(q.per_user_default) : ""); }, [key, q.per_user_default]);
   const [who, setWho] = useState<UserPickerValue | null>(null);

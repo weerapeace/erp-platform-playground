@@ -17,6 +17,7 @@
  * PATCH { access: { key, mode: "all"|"custom", roles: [role key], users: [user id] } }  ใครใช้ได้ (เฉพาะฟีเจอร์ GPT · ผู้ดูแลใช้ได้เสมอ)
  *   GET คืน access { <key>: { mode, roles, users } } + roles [{ key, label }] (erp_roles) + access_users [{ user_id, name }]
  *   GET services[].call_tokens = { in, out, calls, source: history|estimate } — จำนวนคำเฉลี่ยต่อครั้ง (90 วัน) ใช้คิด "ราคาต่อครั้ง" ของแต่ละรุ่น
+ *   GET services[].used_model = รุ่นที่ใช้จริงครั้งล่าสุด (ไว้บอกราคาของ "ค่าเดิมของระบบ" เมื่อยังไม่ได้เลือกรุ่น)
  * ทะเบียน = lib/paid-services · ด่านกลาง = lib/paid-services-server
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -32,6 +33,12 @@ import {
   paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, userBudgetState, userCap, type PaidBudget, type PaidProvider,
 } from "@/lib/paid-services";
 import { avgCallTokens, callTokensFor, checkBudgetAlerts, effectiveModel, invalidateServiceSettings, loadAccess, loadBudget } from "@/lib/paid-services-server";
+
+/** รุ่นที่ฟีเจอร์นี้ใช้จริงครั้งล่าสุด (ยังไม่ได้เลือกรุ่นในศูนย์ = รู้ว่า "ค่าเดิม" คือรุ่นไหน) */
+async function lastUsedModel(key: string): Promise<string | null> {
+  const { data } = await supabaseAdmin().from(USAGE).select("model").or(`key.eq.${key},key.like.${key}@%`).eq("ok", true).not("model", "is", null).order("at", { ascending: false }).limit(1);
+  return ((data ?? [])[0] as { model?: string } | undefined)?.model ?? null;
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -80,7 +87,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const [settings, recent, budget, tokMap, access, rolesRes] = await Promise.all([
     admin.from(SETTINGS).select("*"),
-    admin.from(USAGE).select("key, at").order("at", { ascending: false }).limit(5000),
+    admin.from(USAGE).select("key, at, model, ok").order("at", { ascending: false }).limit(5000),
     loadBudget(true),
     avgCallTokens(true),
     loadAccess(true),
@@ -111,10 +118,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
   const last = new Map<string, string>();
-  for (const r of (recent.data ?? []) as Array<{ key: string; at: string }>) {
+  const lastModel = new Map<string, string>();
+  for (const r of (recent.data ?? []) as Array<{ key: string; at: string; model: string | null; ok: boolean }>) {
     if (!last.has(r.key)) last.set(r.key, r.at);
     const base = splitPlaceKey(r.key).key;
     if (!last.has(base)) last.set(base, r.at);
+    if (r.ok && r.model && !lastModel.has(base)) lastModel.set(base, r.model);
   }
 
   const services = PAID_SERVICES.map((s) => {
@@ -127,6 +136,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       provider_choices: (s.providerChoices ?? []).map((c) => ({ ...c, configured: choiceConfigured(c) })),
       enabled: s.kind === "locked" ? true : st?.enabled !== false,
       model: (st?.model as string | null) ?? null,
+      used_model: lastModel.get(s.key) ?? null,
       configured: choice ? choiceConfigured(choice) : configured(s.provider),
       call_tokens: s.kind === "ai_chat" ? (() => {
         const h = tokMap.get(s.key);
@@ -257,7 +267,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       // เปลี่ยนหน่วย — แปลงค่าที่ตั้งไว้ตามราคาต่อครั้งของรุ่นที่ใช้อยู่ (ไม่รู้ราคา = ล้างค่า)
       const to: QuotaUnit = cq.unit;
       if (to === q.unit) return NextResponse.json({ data: { budget: before }, error: null });
-      const perCall = callCostThb(await effectiveModel(k, null), await callTokensFor(k));
+      const perCall = callCostThb(await effectiveModel(k, await lastUsedModel(k)), await callTokensFor(k));
       const conv = (v: number | null): number | null => {
         if (v === null || !(perCall > 0)) return null;
         return to === "thb" ? Math.max(0.01, Math.round(v * perCall * 100) / 100) : Math.max(1, Math.floor(v / perCall));
