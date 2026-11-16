@@ -40,6 +40,8 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { LineConsole } from "@/components/line-console";
 import { NotifyEditModal } from "@/components/flow-map/notify-edit";
 import { NodeNotifyPanel } from "@/components/flow-map/node-notify";
+// ป๊อปดูหน้าจริง (iframe + เลือกโซน) โหลดเฉพาะตอนกด
+const FlowPagePreview = dynamic(() => import("./page-preview").then((m) => m.FlowPagePreview), { ssr: false });
 import { NOTIFY_NODE_SUGGEST, notifyAllTopics, notifyTopicsOfNode } from "@/lib/flow-map-notify";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 
@@ -146,6 +148,7 @@ export function FlowMap() {
   const [dTab, setDTab] = useState<NodeTab>("ov");   // แท็บของกล่อง — จำไว้ตอนกดกล่องอื่น (ไล่เทียบได้)
   const [eTab, setETab] = useState<EdgeTab>("d");    // แท็บของเส้น
   const [backNode, setBackNode] = useState<string | null>(null);   // เปิดเส้นจากแท็บ "เส้นเข้า/ออก" → ปุ่มกลับไปกล่องเดิม
+  const [previewNode, setPreviewNode] = useState<string | null>(null);   // ป๊อปดูหน้าจริง (./page-preview)
   const drawerSize = useDrawerResize("erp.flowMap.drawerW", 440, 360);
   const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
@@ -266,6 +269,12 @@ export function FlowMap() {
             {t(`งานแก้ ${changeCounts[`n:${sel.id}`]}`, `Changes ${changeCounts[`n:${sel.id}`]}`)}
           </Link>
         ) : null}
+        {n.href && (
+          <button type="button" onClick={() => setPreviewNode(sel.id)} title={t("ดูหน้าจริงในป๊อป: เส้นทางงาน · ส่วนของหน้า · ดึงข้อมูลจากไหน · เลือกโซนที่อยากแก้ส่งให้ Claude", "Preview the live page")}
+            className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100">
+            <Icon value="i:eye" size={14} />{t("ดูหน้าจริง", "Preview")}
+          </button>
+        )}
         {n.href && (
           <Link href={n.href} className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
             {t("เปิดหน้า", "Open")} <span aria-hidden="true">↗</span>
@@ -599,6 +608,7 @@ export function FlowMap() {
         <div className="flex-1 overflow-y-auto px-4 py-3">{drawerBody}</div>
       </DrawerShell>
       <FlowMetricListModal metric={metric} onClose={() => setMetric(null)} />
+      {previewNode && <FlowPagePreview nodeId={previewNode} onClose={() => setPreviewNode(null)} numOf={numOf} />}
       {canAdmin && <LineConsole open={lineOpen} onClose={closeLine} />}
       {canAdmin && notifyEditId && (
         <NotifyEditModal open topic={notifyAllTopics(notify.live).find((x) => x.id === notifyEditId) ?? null} live={notify.live}
