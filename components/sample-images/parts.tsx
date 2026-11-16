@@ -94,24 +94,35 @@ export function SampleBrandBar({ brands, albums, tab, onTab }: { brands: SampleB
 
 type CardExtra = ButtonHTMLAttributes<HTMLButtonElement>;
 
+/** ไอคอน "มีโน้ต" บนการ์ดอัลบั้ม — ชี้ค้าง = เห็นโน้ต (เจ้าของเลือก 2026-11-16) */
+function NoteMark({ note }: { note: string }) {
+  const t = useT();
+  return <span className="inline-flex items-center gap-1 text-amber-700" title={note}><Icon value="i:notes" />{t("มีโน้ต", "Note")}</span>;
+}
+
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
+  /** ลากสลับลำดับ: โชว์เส้นตำแหน่งที่จะวาง (ก่อน = ซ้าย · หลัง = ขวา) */
+  edge?: "before" | "after" | null;
   /** ผลค้นหาที่เป็นอัลบั้มย่อย → บอกว่าอยู่ในอัลบั้มไหน (เช่น "Good Goods · 15 พ.ย. 2569") */
   inside?: string | null;
 }) {
   const t = useT();
   const a = album;
+  const bar = edge ? <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1 rounded-full bg-violet-500 ${edge === "before" ? "-left-2" : "-right-2"}`} /> : null;
   if (sub) return (
     <button type="button" onClick={onOpen} {...extra}
-      className={`overflow-hidden rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : "border-slate-200 hover:border-slate-300"}`}>
-      <AlbumCover keys={a.preview_keys} total={a.deep.photos} />
+      className={`relative overflow-visible rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : "border-slate-200 hover:border-slate-300"}`}>
+      {bar}
+      <div className="overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} /></div>
       <div className="space-y-1 p-2.5">
         <div className="flex items-center gap-1 truncate text-[13px] font-medium text-slate-800"><Icon value="i:folder" />{a.name}</div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{a.deep.sub_count}</span>}
+          {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-1.5 text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
         </div>
       </div>
@@ -128,6 +139,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
           <span className="inline-flex items-center gap-1"><BrandDot color={brand?.color} />{brand?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1" title={t("อัลบั้มย่อย", "Sub-albums")}><Icon value="i:folder" />{a.deep.sub_count}</span>}
+          {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
         </div>
       </div>

@@ -93,3 +93,16 @@ export const renameAlbum = (albumId: string, name: string) =>
 /** ลบอัลบั้มย่อยที่ว่างแล้ว */
 export const deleteEmptyAlbum = (albumId: string) =>
   post<{ id: string; parent_id: string | null }>({ action: "delete_album", album_id: albumId }, "ลบอัลบั้มไม่สำเร็จ");
+
+// ── โน้ต + ลำดับแบบจัดเอง (เจ้าของสั่ง 2026-11-16) ──
+/** โน้ตของอัลบั้ม (ว่าง = ลบโน้ต) */
+export const saveAlbumNote = (albumId: string, note: string) =>
+  post<{ id: string; note: string | null }>({ action: "note", album_id: albumId, note }, "บันทึกโน้ตไม่สำเร็จ");
+
+/** ลำดับรูปในอัลบั้มแบบจัดเอง — ส่งทั้งชุดตามลำดับใหม่ (รูปแรก = ปก) */
+export const reorderPhotos = (albumId: string, assetIds: string[]) =>
+  post<{ ordered: number }>({ action: "reorder_photos", album_id: albumId, asset_ids: assetIds }, "บันทึกลำดับรูปไม่สำเร็จ");
+
+/** ลำดับอัลบั้มย่อยในอัลบั้มแม่แบบจัดเอง — ส่งทั้งชุดตามลำดับใหม่ */
+export const reorderAlbums = (parentId: string | null, albumIds: string[]) =>
+  post<{ ordered: number }>({ action: "reorder_albums", parent_id: parentId, album_ids: albumIds }, "บันทึกลำดับอัลบั้มไม่สำเร็จ");

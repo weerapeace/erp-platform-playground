@@ -26,6 +26,8 @@ export type SamplePhoto = {
   trashed: boolean;
   /** ใบงานที่รูปนี้ถูกส่งเข้าไปแล้ว (ส่งได้หลายใบ) */
   moved_to: SampleSheetRef[];
+  /** ลำดับแบบ "จัดเอง" ในอัลบั้มนี้ (asset_collection_map.sort_order · ไม่มี = ยังไม่จัด → ต่อท้ายตามลำดับที่ลง) */
+  sort_order?: number | null;
 };
 export type SampleBrand = { id: string; name: string; color: string | null; logo_url: string | null };
 export type SampleAlbum = {
@@ -41,7 +43,45 @@ export type SampleAlbum = {
   deep: { photos: number; sent: number; sub_count: number };
   /** r2_key รูปบนปกการ์ด (รวมอัลบั้มย่อย · รูปแรก ๆ ที่ไม่อยู่ถังขยะ สูงสุด 4) — components/album-cover */
   preview_keys: string[];
+  /** โน้ตของอัลบั้ม (2026-11-16) */
+  note?: string | null;
+  /** ชื่อที่โชว์ของอัลบั้มของวัน — ชื่อจริงยังเป็น "SAMPLE <แบรนด์> <วันที่>" (ใช้หาอัลบั้มของวันนี้ตอนลงรูป) · ว่าง = โชว์วันที่ */
+  display_name?: string | null;
+  /** ลำดับแบบ "จัดเอง" ในอัลบั้มแม่ (asset_collections.sort_order) */
+  sort_order?: number | null;
 };
+
+/** ยาวสุดของโน้ตอัลบั้ม */
+export const SAMPLE_NOTE_MAX = 2000;
+
+/** ชื่ออัลบั้มย่อยสำเร็จรูป "Product 001" — นับต่อจากเลขสูงสุดของแบรนด์เดียวกัน (ทุกวัน · ทุกชั้น) กันเลขซ้ำข้ามอัลบั้ม (เจ้าของเลือก 2026-11-16) */
+export function nextProductName(albums: readonly Pick<SampleAlbum, "name" | "brand_id">[], brandId: string | null): string {
+  let max = 0;
+  for (const a of albums) {
+    if ((a.brand_id ?? null) !== (brandId ?? null)) continue;
+    const m = /^product\s*#?\s*(\d+)$/i.exec(a.name.trim());
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `Product ${String(max + 1).padStart(3, "0")}`;
+}
+
+/** ลำดับแบบจัดเอง: มีเลขก่อน (น้อย → มาก) · ไม่มีเลข = ต่อท้าย · เท่ากัน = fallback */
+const byManual = (a: { sort_order?: number | null }, b: { sort_order?: number | null }) => {
+  const x = a.sort_order ?? null, y = b.sort_order ?? null;
+  if (x === y) return 0;
+  if (x === null) return 1;
+  if (y === null) return -1;
+  return x - y;
+};
+
+/** ย้ายของในรายการ: เอา ids (ตามลำดับเดิมในรายการ) ไปวางก่อน/หลัง target → รายการ id ใหม่ทั้งชุด · target อยู่ใน ids = ไม่เปลี่ยน */
+export function reorderIds(list: readonly string[], ids: readonly string[], target: string, place: "before" | "after"): string[] {
+  const moving = list.filter((x) => ids.includes(x));
+  if (!moving.length || ids.includes(target) || !list.includes(target)) return [...list];
+  const rest = list.filter((x) => !ids.includes(x));
+  const at = rest.indexOf(target) + (place === "after" ? 1 : 0);
+  return [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+}
 
 /** ป้ายของอัลบั้ม: "sample-images" · มีแบรนด์ "sample-images:<brand>" · อัลบั้มย่อย ต่อท้าย "|in:<parent>"
  *  (อัลบั้มในอัลบั้ม เจ้าของสั่ง 2026-11-14 — จดอัลบั้มแม่ในป้ายเดิม ไม่แก้ฐานข้อมูล) */
@@ -133,9 +173,9 @@ export function sampleCounts(photos: readonly Pick<SamplePhoto, "trashed" | "mov
   return { photos: photos.length - trash, trash, sent };
 }
 
-/** รูปบนปกอัลบั้ม: รูปที่ไม่อยู่ถังขยะ เรียงตามเวลาลง (เก่าก่อน = รูปแรกของการถ่าย) สูงสุด max รูป */
-export function albumPreviewKeys(photos: readonly Pick<SamplePhoto, "trashed" | "r2_key" | "created_at">[], max = 4): string[] {
-  return photos.filter((p) => !p.trashed && p.r2_key).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(0, max).map((p) => p.r2_key);
+/** รูปบนปกอัลบั้ม: รูปที่ไม่อยู่ถังขยะ ตามลำดับที่จัดเอง (รูปแรก = ปก) แล้วตามเวลาลง (เก่าก่อน = รูปแรกของการถ่าย) สูงสุด max รูป */
+export function albumPreviewKeys(photos: readonly (Pick<SamplePhoto, "trashed" | "r2_key" | "created_at"> & { sort_order?: number | null })[], max = 4): string[] {
+  return photos.filter((p) => !p.trashed && p.r2_key).sort((a, b) => byManual(a, b) || a.created_at.localeCompare(b.created_at)).slice(0, max).map((p) => p.r2_key);
 }
 
 /** แบรนด์ที่ควรเป็นของอัลบั้มที่ยังไม่ระบุแบรนด์: รูปที่ส่งเข้าใบงานแล้วไปอยู่ใบงานแบรนด์เดียวกันหมด → แบรนด์นั้น · ไม่มี/หลายแบรนด์ = null */
@@ -162,14 +202,16 @@ export function inBrandTab(a: Pick<SampleAlbum, "brand_id">, tab: string): boole
   return tab === SAMPLE_TAB_ALL || (tab === SAMPLE_TAB_NONE ? !a.brand_id : a.brand_id === tab);
 }
 
-/** ชื่อบนการ์ดหน้าแฟ้ม: อัลบั้มของวัน = วันที่ ("13 พ.ย. 2569") · ตั้งชื่อเอง = ชื่อจริง */
-export function albumCardLabel(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">): string {
-  return isDayAlbum(a) ? thaiShortDate(new Date(a.created_at)) : a.name;
+type Labelled = Pick<SampleAlbum, "name" | "created_at" | "parent_id"> & { display_name?: string | null };
+
+/** ชื่อบนการ์ดหน้าแฟ้ม: อัลบั้มของวัน = ชื่อที่โชว์ (ถ้าตั้งไว้) ไม่งั้นวันที่ ("13 พ.ย. 2569") · ตั้งชื่อเอง = ชื่อจริง */
+export function albumCardLabel(a: Labelled): string {
+  return isDayAlbum(a) ? (a.display_name?.trim() || thaiShortDate(new Date(a.created_at))) : a.name;
 }
 
-/** ชื่อเต็ม (เส้นทาง/ข้อความแจ้ง): อัลบั้มของวัน = "แบรนด์ · วันที่" · ตั้งชื่อเอง = ชื่อจริง */
-export function albumFullName(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">, brandName?: string | null): string {
-  return isDayAlbum(a) ? `${brandName ? `${brandName} · ` : ""}${thaiShortDate(new Date(a.created_at))}` : a.name;
+/** ชื่อเต็ม (เส้นทาง/ข้อความแจ้ง): อัลบั้มของวัน = "แบรนด์ · ชื่อที่โชว์/วันที่" · ตั้งชื่อเอง = ชื่อจริง */
+export function albumFullName(a: Labelled, brandName?: string | null): string {
+  return isDayAlbum(a) ? `${brandName ? `${brandName} · ` : ""}${albumCardLabel(a)}` : a.name;
 }
 
 /** จำนวนรูปรวมต่อแบรนด์ (ตัวเลขบนแถบแบรนด์ · นับทุกชั้น) — ไม่ระบุแบรนด์ = key "none" */
@@ -182,15 +224,17 @@ export function brandPhotoTotals(albums: readonly Pick<SampleAlbum, "brand_id" |
 // ── ค้นหา + เรียง (เจ้าของสั่ง 2026-11-15 "ขอ search, sort ด้วย") — ใช้ทั้งหน้า SAMPLE และแท็บในตัวเลือกไฟล์กลาง ──
 // ค้นด้วยตัวจับคู่กลาง lib/search-score (แตกคำ · ทุกคำต้องเจอ · ข้ามตัวคั่นได้) แล้วเรียงตามที่เลือก
 
-export type SampleAlbumSort = "newest" | "oldest" | "name" | "most";
+export type SampleAlbumSort = "manual" | "newest" | "oldest" | "name" | "most";
 export const SAMPLE_ALBUM_SORTS: { key: SampleAlbumSort; th: string; en: string }[] = [
+  { key: "manual", th: "จัดเอง (ลากสลับ)", en: "Custom (drag)" },
   { key: "newest", th: "ล่าสุดก่อน", en: "Newest first" },
   { key: "oldest", th: "เก่าสุดก่อน", en: "Oldest first" },
   { key: "name", th: "ชื่อ ก–ฮ / A–Z", en: "Name A–Z" },
   { key: "most", th: "รูปมากสุดก่อน", en: "Most photos" },
 ];
-export type SamplePhotoSort = "oldest" | "newest" | "name";
+export type SamplePhotoSort = "manual" | "oldest" | "newest" | "name";
 export const SAMPLE_PHOTO_SORTS: { key: SamplePhotoSort; th: string; en: string }[] = [
+  { key: "manual", th: "จัดเอง (ลากสลับ · รูปแรก = ปก)", en: "Custom (drag · first = cover)" },
   { key: "oldest", th: "ตามลำดับที่ลง (เก่า → ใหม่)", en: "Order added (old → new)" },
   { key: "newest", th: "ใหม่สุดก่อน", en: "Newest first" },
   { key: "name", th: "ชื่อไฟล์", en: "File name" },
@@ -202,8 +246,9 @@ const byText = (a: string, b: string) => a.localeCompare(b, "th", { numeric: tru
 const newestFirst = (a: { created_at: string }, b: { created_at: string }) => b.created_at.localeCompare(a.created_at);
 
 /** เรียงอัลบั้ม: ล่าสุด/เก่าสุด (วันที่สร้าง) · ชื่อบนการ์ด · รูปมากสุด (รวมอัลบั้มย่อย) — เท่ากันเรียงล่าสุดก่อน */
-export function sortAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "parent_id" | "deep">>(albums: readonly T[], sort: SampleAlbumSort): T[] {
+export function sortAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "parent_id" | "deep"> & { sort_order?: number | null; display_name?: string | null }>(albums: readonly T[], sort: SampleAlbumSort): T[] {
   const out = [...albums];
+  if (sort === "manual") return out.sort((a, b) => byManual(a, b) || newestFirst(a, b));
   if (sort === "oldest") return out.sort((a, b) => a.created_at.localeCompare(b.created_at));
   if (sort === "name") return out.sort((a, b) => byText(albumCardLabel(a), albumCardLabel(b)) || newestFirst(a, b));
   if (sort === "most") return out.sort((a, b) => b.deep.photos - a.deep.photos || newestFirst(a, b));
@@ -211,8 +256,9 @@ export function sortAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "
 }
 
 /** เรียงรูป: ตามลำดับที่ลง (ค่าเดิม — รูปแรกของการถ่ายก่อน) · ใหม่สุดก่อน · ชื่อไฟล์ (3M2A9 ก่อน 3M2A10) */
-export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name">>(photos: readonly T[], sort: SamplePhotoSort): T[] {
+export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name"> & { sort_order?: number | null }>(photos: readonly T[], sort: SamplePhotoSort): T[] {
   const out = [...photos];
+  if (sort === "manual") return out.sort((a, b) => byManual(a, b) || a.created_at.localeCompare(b.created_at) || a.file_name.localeCompare(b.file_name));
   if (sort === "newest") return out.sort((a, b) => newestFirst(a, b) || byText(a.file_name, b.file_name));
   if (sort === "name") return out.sort((a, b) => byText(a.file_name, b.file_name) || a.created_at.localeCompare(b.created_at));
   return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.file_name.localeCompare(b.file_name));
@@ -220,10 +266,10 @@ export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name
 
 /** อัลบั้มตรงคำค้นไหม — ค้นจากชื่อจริง ("SAMPLE Good Goods 15 พ.ย. 2569" / "2026-11-15-002") · ชื่อบนการ์ด · ชื่อแบรนด์
  *  · วันที่สร้างอัลบั้มแบบไทย (เวลาไทย) — ค้น "15 พ.ย." เจอทุกอัลบั้มของวันนั้น รวมอัลบั้มที่ตั้งชื่อเอง (เจ้าของสั่ง 2026-11-15) · คำค้นว่าง = ตรงทุกอัน */
-export function albumMatches(a: Pick<SampleAlbum, "name" | "created_at" | "parent_id">, query: string, brandName?: string | null): boolean {
+export function albumMatches(a: Labelled & { note?: string | null }, query: string, brandName?: string | null): boolean {
   const q = query.trim(), toks = tokenize(q);
   if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
-  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName] }) > 0;
+  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName, a.note] }) > 0;
 }
 
 /** รูปตรงคำค้นไหม — ชื่อไฟล์ · เลข/ชื่อใบงานที่รูปถูกส่งเข้าไป (DS-2026-0008) · คำค้นว่าง = ตรงทุกรูป */

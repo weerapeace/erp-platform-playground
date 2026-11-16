@@ -9,7 +9,10 @@
  * POST {action:"move_photos", asset_ids, from_album_id, to_album_id} → ย้ายรูปจากอัลบั้มนี้ไปอีกอัลบั้ม
  * POST {action:"move_album", album_id, to_parent_id|null}           → ย้ายทั้งอัลบั้มเข้าไปในอีกอัลบั้ม / ขึ้นชั้นบนสุด (กันวนซ้ำ)
  * POST {action:"create_top", brand_id?, name}                      → สร้างอัลบั้มชั้นบนสุดตั้งชื่อเอง (Louis Batch · ชื่อ+แบรนด์ซ้ำ = ใช้อันเดิม)
- * POST {action:"rename", album_id, name}                            → เปลี่ยนชื่ออัลบั้ม (ยกเว้นอัลบั้มของวัน = isDayAlbum ใช้ชื่อตามวันที่)
+ * POST {action:"rename", album_id, name}                            → เปลี่ยนชื่ออัลบั้ม · อัลบั้มของวัน = ตั้ง "ชื่อที่โชว์" (display_name · ว่าง = กลับไปโชว์วันที่ · ชื่อจริงตามวันที่คงไว้)
+ * POST {action:"note", album_id, note}                              → โน้ตของอัลบั้ม (ว่าง = ลบโน้ต)
+ * POST {action:"reorder_photos", album_id, asset_ids}               → ลำดับรูปแบบจัดเอง (asset_ids = ทั้งชุดตามลำดับใหม่ · รูปแรก = ปก)
+ * POST {action:"reorder_albums", parent_id|null, album_ids}         → ลำดับอัลบั้มย่อยแบบจัดเอง (asset_collections.sort_order)
  * POST {action:"delete_album", album_id}                            → ลบอัลบั้มที่ว่างแล้ว (ไม่มีรูป ไม่มีอัลบั้มย่อย · ยกเว้นอัลบั้มของวัน)
  *
  * อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14 · ไม่แก้ฐานข้อมูล): จดอัลบั้มแม่ในป้ายเดิม description "sample-images[:<brand>]|in:<parent>"
@@ -25,7 +28,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { actorId } from "@/app/api/assets/shared";
 import {
-  SAMPLE_ALBUM_MARK, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
+  SAMPLE_ALBUM_MARK, SAMPLE_NOTE_MAX, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
   type SampleAlbum, type SampleBrand, type SamplePhoto, type SampleSheetRef,
 } from "@/lib/sample-images";
 
@@ -41,7 +44,7 @@ const chunks = <T,>(xs: T[]): T[][] => { const out: T[][] = []; for (let i = 0; 
 
 type AssetLite = { id: string; r2_key: string; file_name: string | null; width: number | null; height: number | null; status: string | null; created_at: string };
 type BrandRow = SampleBrand & { is_customer_job: boolean | null };
-type AlbumRow = { id: string; name: string; description: string | null; created_at: string; brandId: string | null; parentId: string | null };
+type AlbumRow = { id: string; name: string; description: string | null; created_at: string; note: string | null; display_name: string | null; sort_order: number | null; brandId: string | null; parentId: string | null };
 
 /** r2_key → ใบงานที่แนบรูปนี้อยู่ (ดูจากไฟล์แนบจริงของใบงาน) */
 async function sheetsByKey(admin: Admin, keys: string[]): Promise<Map<string, SampleSheetRef[]>> {
@@ -78,7 +81,7 @@ async function loadBrands(admin: Admin): Promise<BrandRow[]> {
 
 /** อัลบั้ม SAMPLE ทั้งหมด (ล่าสุดก่อน) พร้อมแบรนด์/อัลบั้มแม่จากป้าย */
 async function loadAlbums(admin: Admin, limit = ALBUM_LIMIT): Promise<AlbumRow[]> {
-  const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at")
+  const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at, note, display_name, sort_order")
     .like("description", `${SAMPLE_ALBUM_MARK}%`).order("created_at", { ascending: false }).limit(limit);
   if (error) throw new Error(error.message);
   return ((data ?? []) as Omit<AlbumRow, "brandId" | "parentId">[]).flatMap((a) => {
@@ -97,9 +100,9 @@ export async function GET(request: NextRequest) {
     const ids = albumsRaw.map((a) => a.id);
 
     // รูปในอัลบั้มทั้งหมด (asset อยู่ได้หลายอัลบั้ม ผ่าน asset_collection_map)
-    const map: { asset_id: string; collection_id: string }[] = [];
+    const map: { asset_id: string; collection_id: string; sort_order: number | null }[] = [];
     for (const part of chunks(ids)) {
-      const { data, error: e } = await admin.from("asset_collection_map").select("asset_id, collection_id").in("collection_id", part);
+      const { data, error: e } = await admin.from("asset_collection_map").select("asset_id, collection_id, sort_order").in("collection_id", part);
       if (e) throw new Error(e.message);
       map.push(...((data ?? []) as typeof map));
     }
@@ -116,7 +119,7 @@ export async function GET(request: NextRequest) {
       const a = assets.get(m.asset_id);
       if (!a) continue;
       const list = byAlbum.get(m.collection_id) ?? [];
-      list.push({ id: a.id, r2_key: a.r2_key, file_name: a.file_name ?? "", width: a.width, height: a.height, created_at: a.created_at, trashed: a.status === "trashed", moved_to: moved.get(a.r2_key) ?? [] });
+      list.push({ id: a.id, r2_key: a.r2_key, file_name: a.file_name ?? "", width: a.width, height: a.height, created_at: a.created_at, trashed: a.status === "trashed", moved_to: moved.get(a.r2_key) ?? [], sort_order: m.sort_order ?? null });
       byAlbum.set(m.collection_id, list);
     }
     const tree = albumsRaw.map((a) => ({ id: a.id, parent_id: a.parentId }));
@@ -128,6 +131,7 @@ export async function GET(request: NextRequest) {
         id: a.id, name: a.name, created_at: a.created_at, brand_id: a.brandId, parent_id: parent,
         suggested_brand_id: a.brandId || parent ? null : inferAlbumBrand(ps),
         counts: sampleCounts(ps), deep: { photos: r.photos, sent: r.sent, sub_count: r.sub_count }, preview_keys: r.preview_keys,
+        note: a.note ?? null, display_name: a.display_name ?? null, sort_order: a.sort_order ?? null,
       };
     });
     // ทุกแบรนด์ที่เปิดใช้ — แบรนด์ของเราขึ้นก่อน แล้วค่อยแบรนด์ที่ติ๊กงานลูกค้า
@@ -176,7 +180,7 @@ async function rebrandBranch(admin: Admin, all: AlbumRow[], rootId: string, bran
 const cleanName = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, NAME_MAX) : "");
 
 export async function POST(request: NextRequest) {
-  let body: { action?: string; brand_id?: string | null; album_id?: string; parent_id?: string; to_parent_id?: string | null; name?: string; asset_ids?: string[]; from_album_id?: string; to_album_id?: string };
+  let body: { action?: string; brand_id?: string | null; album_id?: string; parent_id?: string | null; to_parent_id?: string | null; name?: string; note?: string | null; asset_ids?: string[]; album_ids?: string[]; from_album_id?: string; to_album_id?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const brandOf = async (id: string | null | undefined) => {
@@ -286,15 +290,75 @@ export async function POST(request: NextRequest) {
       const denied = await guardApi(request, "assets.edit");
       if (denied) return denied;
       const name = cleanName(body.name);
-      if (!name) return NextResponse.json({ error: "ใส่ชื่ออัลบั้มก่อน" }, { status: 400 });
       const all = await loadAlbums(admin, 2000);
       const album = all.find((a) => a.id === body.album_id);
       if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
-      if (isDayAlbum(album)) return NextResponse.json({ error: "อัลบั้มของวันใช้ชื่อตามวันที่ — เปลี่ยนชื่อไม่ได้" }, { status: 400 });
+      if (isDayAlbum(album)) {
+        // อัลบั้มของวัน: ชื่อจริงต้องคงไว้ (ใช้หาอัลบั้มของวันนี้ตอนลงรูป) → เก็บเป็น "ชื่อที่โชว์" แทน · ว่าง = กลับไปโชว์วันที่
+        const shown = name || null;
+        const { error } = await admin.from("asset_collections").update({ display_name: shown }).eq("id", album.id);
+        if (error) return NextResponse.json({ error: "เปลี่ยนชื่ออัลบั้มไม่สำเร็จ" }, { status: 500 });
+        await audit("update", album.id, { field: "display_name", old_value: album.display_name, new_value: shown });
+        return NextResponse.json({ data: { id: album.id, name: album.name, display_name: shown }, error: null });
+      }
+      if (!name) return NextResponse.json({ error: "ใส่ชื่ออัลบั้มก่อน" }, { status: 400 });
       if (!album.parentId && looksLikeDayAlbumName(name)) return NextResponse.json({ error: "ชื่อนี้เหมือนอัลบั้มของวัน — ตั้งชื่ออื่น" }, { status: 400 });
       await admin.from("asset_collections").update({ name }).eq("id", album.id);
       await audit("update", album.id, { old_name: album.name, new_name: name });
       return NextResponse.json({ data: { id: album.id, name }, error: null });
+    }
+
+    // ── โน้ตของอัลบั้ม ──
+    if (body.action === "note") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      const all = await loadAlbums(admin, 2000);
+      const album = all.find((a) => a.id === body.album_id);
+      if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
+      const note = typeof body.note === "string" ? body.note.replace(/\r\n/g, "\n").trim().slice(0, SAMPLE_NOTE_MAX) || null : null;
+      if (note === (album.note ?? null)) return NextResponse.json({ data: { id: album.id, note }, error: null });
+      const { error } = await admin.from("asset_collections").update({ note }).eq("id", album.id);
+      if (error) return NextResponse.json({ error: "บันทึกโน้ตไม่สำเร็จ" }, { status: 500 });
+      await audit("update", album.id, { field: "note", old_value: album.note, new_value: note });
+      return NextResponse.json({ data: { id: album.id, note }, error: null });
+    }
+
+    // ── ลำดับรูปแบบจัดเอง (ทั้งชุดตามลำดับใหม่ · เฉพาะรูปที่อยู่ในอัลบั้มนี้จริง) ──
+    if (body.action === "reorder_photos") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      const albumKey = String(body.album_id ?? "");
+      if (!albumKey || !assetIds.length) return NextResponse.json({ error: "ไม่มีรูปให้เรียง" }, { status: 400 });
+      const inAlbum = new Set<string>();
+      for (const part of chunks(assetIds)) {
+        const { data, error } = await admin.from("asset_collection_map").select("asset_id").eq("collection_id", albumKey).in("asset_id", part);
+        if (error) throw new Error(error.message);
+        for (const m of (data ?? []) as { asset_id: string }[]) inAlbum.add(m.asset_id);
+      }
+      const rows = assetIds.filter((id) => inAlbum.has(id)).map((id, i) => ({ asset_id: id, collection_id: albumKey, sort_order: i + 1 }));
+      for (const part of chunks(rows)) {
+        const { error } = await admin.from("asset_collection_map").upsert(part, { onConflict: "asset_id,collection_id" });
+        if (error) throw new Error(error.message);
+      }
+      await audit("update", albumKey, { reorder_photos: rows.length, first: rows[0]?.asset_id ?? null });
+      return NextResponse.json({ data: { ordered: rows.length }, error: null });
+    }
+
+    // ── ลำดับอัลบั้มย่อยแบบจัดเอง (เฉพาะอัลบั้มที่อยู่ในอัลบั้มแม่เดียวกันจริง) ──
+    if (body.action === "reorder_albums") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      const ids = Array.isArray(body.album_ids) ? [...new Set(body.album_ids.filter((x) => typeof x === "string" && x))].slice(0, 500) : [];
+      if (!ids.length) return NextResponse.json({ error: "ไม่มีอัลบั้มให้เรียง" }, { status: 400 });
+      const all = await loadAlbums(admin, 2000);
+      const parent = body.parent_id ?? null;
+      const ok = ids.filter((id) => all.some((a) => a.id === id && (a.parentId ?? null) === parent));
+      for (let i = 0; i < ok.length; i++) {
+        const { error } = await admin.from("asset_collections").update({ sort_order: i + 1 }).eq("id", ok[i]);
+        if (error) throw new Error(error.message);
+      }
+      if (ok.length) await audit("update", parent ?? ok[0], { reorder_albums: ok.length, parent_id: parent });
+      return NextResponse.json({ data: { ordered: ok.length }, error: null });
     }
 
     // ── ลบอัลบั้มย่อยที่ว่างแล้ว ──

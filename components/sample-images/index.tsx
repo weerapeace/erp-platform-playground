@@ -31,9 +31,59 @@ import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
-import { SAMPLE_ALBUM_SORTS, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, canMoveAlbum, inBrandTab, isDayAlbum, photoMatches, photosToMove, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
-import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, restoreSample, setAlbumBrand, trashSample, uploadSample } from "./api";
+import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, reorderAlbums, reorderPhotos, restoreSample, saveAlbumNote, setAlbumBrand, trashSample, uploadSample } from "./api";
+
+/** ลากสลับลำดับ: ตำแหน่งที่ชี้บนรูป/การ์ด — ขอบซ้าย 30% = วางก่อน · ขอบขวา 30% = วางหลัง · กลาง = รวม/ย้ายเข้า (แบบเดิม) */
+type DropZone = "before" | "after" | "merge";
+const zoneOf = (e: React.DragEvent): DropZone => {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const x = (e.clientX - r.left) / Math.max(1, r.width);
+  return x < 0.3 ? "before" : x > 0.7 ? "after" : "merge";
+};
+
+/** โน้ตของอัลบั้ม (เจ้าของสั่ง 2026-11-16) — พิมพ์แล้วบันทึกเองเมื่อหยุดพิมพ์ / ออกจากช่อง · ไม่มีสิทธิ์แก้ = อ่านอย่างเดียว */
+function AlbumNoteBox({ albumId, note, canEdit, label, onSaved }: { albumId: string; note: string | null; canEdit: boolean; label: string; onSaved: (note: string | null) => void }) {
+  const t = useT();
+  const pushToast = usePushToast();
+  const [val, setVal] = useState(note ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  const saved = useRef(note ?? "");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // เปลี่ยนอัลบั้ม = โหลดโน้ตของอัลบั้มนั้น · โน้ตเปลี่ยนจากที่อื่น (โหลดใหม่) = ใช้ค่าใหม่ — แต่ไม่ทับตอนเพิ่งบันทึกเอง (กันตัวอักษรที่พิมพ์ต่อหาย)
+  const shownFor = useRef(albumId);
+  useEffect(() => {
+    if (shownFor.current !== albumId) { shownFor.current = albumId; setVal(note ?? ""); saved.current = note ?? ""; setState("idle"); return; }
+    if ((note ?? "") !== saved.current) { setVal(note ?? ""); saved.current = note ?? ""; }
+  }, [albumId, note]);
+  const flush = useCallback(async (text: string) => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (text.trim() === saved.current.trim()) return;
+    setState("saving");
+    try { const r = await saveAlbumNote(albumId, text); saved.current = r.note ?? ""; setState("saved"); onSaved(r.note); }
+    catch (e) { setState("idle"); pushToast("error", (e as Error).message); }
+  }, [albumId, onSaved, pushToast]);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  if (!canEdit && !note) return null;
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-1.5 text-[12px] text-slate-500">
+        <Icon value="i:notes" />{t(`โน้ตของ ${label}`, `Note for ${label}`)}
+        {canEdit && <span className="text-slate-400">{state === "saving" ? t("· กำลังบันทึก…", "· Saving…") : state === "saved" ? t("· บันทึกแล้ว", "· Saved") : t("· บันทึกเองเมื่อพิมพ์เสร็จ", "· Saves when you stop typing")}</span>}
+      </div>
+      {canEdit ? (
+        <textarea value={val} maxLength={SAMPLE_NOTE_MAX} rows={2}
+          onChange={(e) => { const v = e.target.value; setVal(v); setState("idle"); if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => void flush(v), 1200); }}
+          onBlur={() => void flush(val)}
+          placeholder={t("เช่น ส่งมาวันไหน ขาดรูปอะไร สี/ขนาดที่ต้องจำ…", "e.g. what arrived, what's missing, colours/sizes…")}
+          className="block min-h-[56px] w-full resize-y rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[13px] text-amber-950 placeholder:text-amber-900/40 focus:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200" />
+      ) : (
+        <p className="whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[13px] text-amber-950">{note}</p>
+      )}
+    </div>
+  );
+}
 
 /** ลากภายในหน้า (รูป/อัลบั้ม) — ใช้ชนิดข้อมูลของเราเอง ตัวรับไฟล์จากเครื่อง (useFileDrop) จะไม่ยุ่ง */
 const DRAG_MIME = "application/x-erp-sample";
@@ -233,7 +283,8 @@ export function SampleImagesPage() {
   };
   const createSub = async (ids: string[]) => {
     if (!album) return;
-    const name = await askText({ title: ids.length ? t(`รวม ${ids.length} รูปเป็นอัลบั้มใหม่`, `New album from ${ids.length} image(s)`) : t("สร้างอัลบั้มย่อย", "New sub-album"), message: t(`อยู่ใน ${nameOf(album)}`, `Inside ${nameOf(album)}`), initial: t("อัลบั้มใหม่", "New album"), required: true, confirmText: t("สร้างอัลบั้ม", "Create album") });
+    // ชื่อสำเร็จรูป "Product 001" นับต่อจากเลขสูงสุดของแบรนด์นี้ (เจ้าของเลือก 2026-11-16) — แก้ชื่อเองได้
+    const name = await askText({ title: ids.length ? t(`รวม ${ids.length} รูปเป็นอัลบั้มใหม่`, `New album from ${ids.length} image(s)`) : t("สร้างอัลบั้มย่อย", "New sub-album"), message: t(`อยู่ใน ${nameOf(album)}`, `Inside ${nameOf(album)}`), initial: nextProductName(albums ?? [], album.brand_id), required: true, confirmText: t("สร้างอัลบั้ม", "Create album") });
     if (!name?.trim()) return;
     await act(async () => { const r = await createSubAlbum(album.id, name.trim(), ids, album.id); setChooser(null); return t(`สร้างอัลบั้ม "${r.name}" แล้ว${r.moved ? ` · ย้าย ${r.moved} รูปเข้าไป` : ""}`, `Album "${r.name}" created`); }, album.id);
   };
@@ -247,10 +298,43 @@ export function SampleImagesPage() {
     void act(async () => { await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้ายอัลบั้ม "${nameOf(moving)}" ${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, "Album moved"); }, albumId);
   };
   const rename = async () => {
-    if (!album || isDayAlbum(album)) return;
+    if (!album) return;
+    if (isDayAlbum(album)) {
+      // อัลบั้มของวัน: ตั้ง "ชื่อที่โชว์" (ชื่อจริงตามวันที่เก็บไว้ ใช้หาอัลบั้มของวันนี้ตอนลงรูป) · เว้นว่าง = กลับไปโชว์วันที่
+      const name = await askText({ title: t("ตั้งชื่ออัลบั้ม", "Name this album"), message: t(`อัลบั้มของวันที่ ${thaiShortDate(new Date(album.created_at))} — วันที่ยังเก็บไว้ · เว้นว่าง = โชว์เป็นวันที่เหมือนเดิม`, "The date is kept · leave empty to show the date"), initial: album.display_name ?? "", required: false, confirmText: t("บันทึก", "Save") });
+      if (name === null || name === undefined || name.trim() === (album.display_name ?? "")) return;
+      await act(async () => { await renameAlbum(album.id, name.trim()); return name.trim() ? t("ตั้งชื่ออัลบั้มแล้ว", "Album named") : t("กลับไปโชว์เป็นวันที่แล้ว", "Showing the date again"); }, album.id);
+      return;
+    }
     const name = await askText({ title: t("เปลี่ยนชื่ออัลบั้ม", "Rename album"), initial: album.name, required: true, confirmText: t("บันทึก", "Save") });
     if (!name?.trim() || name.trim() === album.name) return;
     await act(async () => { await renameAlbum(album.id, name.trim()); return t("เปลี่ยนชื่ออัลบั้มแล้ว", "Album renamed"); }, album.id);
+  };
+
+  // ── ลากสลับลำดับ (เจ้าของสั่ง 2026-11-16 · จำลำดับต่ออัลบั้ม — เปลี่ยนวิธีเรียงแล้วลำดับที่จัดไว้ไม่หาย) ──
+  //   ใช้ได้ตอนไม่ค้นหา · ลากแล้วสลับไปโหมด "จัดเอง" ให้เอง
+  const canReorder = canEdit && !trashView && !searching;
+  const movePhotoOrder = async (ids: string[], target: string, place: "before" | "after") => {
+    if (!album) return;
+    const cur = list.map((p) => p.id);
+    const order = reorderIds(cur, ids, target, place);
+    if (order.join() === cur.join()) return;
+    const rank = new Map(order.map((id, i) => [id, i + 1]));
+    setPhotos((ps) => ps && ps.map((p) => (rank.has(p.id) ? { ...p, sort_order: rank.get(p.id)! } : p)));
+    if (photoSort !== "manual") setPhotoSort("manual");
+    try { await reorderPhotos(album.id, order); }
+    catch (e) { pushToast("error", (e as Error).message); void reload(album.id); }
+  };
+  const moveAlbumOrder = async (id: string, target: string, place: "before" | "after") => {
+    if (!album) return;
+    const cur = shownChildren.map((c) => c.id);
+    const order = reorderIds(cur, [id], target, place);
+    if (order.join() === cur.join()) return;
+    const rank = new Map(order.map((x, i) => [x, i + 1]));
+    setAlbums((as) => as && as.map((a) => (rank.has(a.id) ? { ...a, sort_order: rank.get(a.id)! } : a)));
+    if (albumSort !== "manual") setAlbumSort("manual");
+    try { await reorderAlbums(album.id, order); }
+    catch (e) { pushToast("error", (e as Error).message); void reload(album.id); }
   };
   const removeEmpty = async () => {
     if (!album || isDayAlbum(album)) return;
@@ -277,6 +361,46 @@ export function SampleImagesPage() {
   const dropOnAlbum = (target: SampleAlbum) => dropProps(`al:${target.id}`,
     (d) => (d.kind === "photos" ? target.id !== album?.id : canMoveAlbum(tree, d.id, target.id) && albums?.find((a) => a.id === d.id)?.parent_id !== target.id),
     (d) => (d.kind === "photos" ? movePhotos(d.ids, target) : moveAlbum(d.id, target)));
+
+  /** ปล่อยบนรูป: ขอบซ้าย/ขวา = สลับลำดับ · กลาง = รวมเป็นอัลบั้มใหม่ (แบบเดิม) */
+  const photoDrop = (id: string) => {
+    const zoneHere = (e: React.DragEvent): DropZone => (canReorder ? zoneOf(e) : "merge");
+    const ok = (e: React.DragEvent) => { const d = dragRef.current; return isOurDrag(e) && d?.kind === "photos" && !d.ids.includes(id) ? d : null; };
+    return {
+      onDragOver: (e: React.DragEvent) => { if (!ok(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; const key = `ph:${id}:${zoneHere(e)}`; if (overKey !== key) setOverKey(key); },
+      onDragLeave: () => setOverKey((k) => (k?.startsWith(`ph:${id}:`) ? null : k)),
+      onDrop: (e: React.DragEvent) => {
+        const d = ok(e); if (!d || d.kind !== "photos") return;
+        e.preventDefault(); e.stopPropagation();
+        const z = zoneHere(e);
+        setOverKey(null); dragRef.current = null;
+        if (z === "merge") void createSub([...new Set([...d.ids, id])]);
+        else void movePhotoOrder(d.ids, id, z);
+      },
+    };
+  };
+  /** ปล่อยบนการ์ดอัลบั้มย่อย: ลากอัลบั้มพี่น้องมาที่ขอบ = สลับลำดับ · กลาง (หรือลากรูปมา) = ย้ายเข้า (แบบเดิม) */
+  const subAlbumDrop = (target: SampleAlbum) => {
+    const into = dropOnAlbum(target);
+    const sibling = (d: DragItem | null) => d?.kind === "album" && d.id !== target.id && albums?.find((a) => a.id === d.id)?.parent_id === target.parent_id;
+    const zoneHere = (e: React.DragEvent): DropZone => { const d = dragRef.current; return canReorder && sibling(d) ? zoneOf(e) : "merge"; };
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (zoneHere(e) === "merge") { setOverKey((k) => (k?.startsWith(`alo:${target.id}:`) ? null : k)); into.onDragOver(e); return; }
+        if (!isOurDrag(e)) return;
+        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move";
+        const key = `alo:${target.id}:${zoneOf(e)}`; if (overKey !== key) setOverKey(key);
+      },
+      onDragLeave: () => { setOverKey((k) => (k?.startsWith(`alo:${target.id}:`) || k === `al:${target.id}` ? null : k)); },
+      onDrop: (e: React.DragEvent) => {
+        const z = zoneHere(e);
+        if (z === "merge") { into.onDrop(e); return; }
+        const d = dragRef.current; if (!isOurDrag(e) || !d || d.kind !== "album") return;
+        e.preventDefault(); e.stopPropagation(); setOverKey(null); dragRef.current = null;
+        void moveAlbumOrder(d.id, target.id, z);
+      },
+    };
+  };
 
   if (permsReady && !canView) return <EmptyState icon={<Icon value="i:lock" />} title={t("คุณไม่มีสิทธิ์ดูคลังไฟล์", "You can't view the file library")} hint={t("ขอสิทธิ์ \"ดูคลังไฟล์\" จากแอดมิน", "Ask an admin for file library access")} />;
 
@@ -353,6 +477,9 @@ export function SampleImagesPage() {
                   {!album.brand_id && !album.parent_id && canEdit && brands.length > 0 && (
                     <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
                   )}
+                  {isDayAlbum(album) && canEdit && (
+                    <button type="button" onClick={() => void rename()} disabled={busy} title={t("ตั้งชื่อให้อัลบั้มของวันนี้ (วันที่ยังเก็บไว้)", "Give this day album a name (date is kept)")} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:pencil" />{album.display_name ? t("แก้ชื่อ", "Rename") : t("ตั้งชื่อ", "Name it")}</button>
+                  )}
                   {!isDayAlbum(album) && canEdit && (
                     <>
                       <button type="button" onClick={() => void rename()} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:pencil" />{t("เปลี่ยนชื่อ", "Rename")}</button>
@@ -378,6 +505,9 @@ export function SampleImagesPage() {
                   )}
                   <GalleryColumnsControl cols={cols} onChange={setCols} as="select" wheelHint />
                 </div>
+
+                {!trashView && <AlbumNoteBox albumId={album.id} note={album.note ?? null} canEdit={canEdit} label={nameOf(album)}
+                  onSaved={(n) => setAlbums((as) => as && as.map((a) => (a.id === album.id ? { ...a, note: n } : a)))} />}
 
                 <SampleSearchSort query={query} onQuery={setQuery} placeholder={t("ค้นชื่อรูป / อัลบั้มย่อย / เลขใบงาน DS-…", "Search photo / sub-album / DS-…")}
                   sort={photoSort} onSort={setPhotoSort} options={SAMPLE_PHOTO_SORTS}>
@@ -423,14 +553,17 @@ export function SampleImagesPage() {
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                       {shownChildren.map((c) => (
                         <SampleAlbumCard key={c.id} sub album={c} onOpen={() => void openAlbum(c.id)} highlight={overKey === `al:${c.id}`}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...dropOnAlbum(c) }} />
+                          edge={overKey === `alo:${c.id}:before` ? "before" : overKey === `alo:${c.id}:after` ? "after" : null}
+                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...subAlbumDrop(c) }} />
                       ))}
                     </div>
                   </div>
                 )}
 
                 {canEdit && !trashView && list.length > 1 && (
-                  <p className="text-[11px] text-slate-400">{t("ลากรูปไปวางบนอีกรูป = รวมเป็นอัลบั้มใหม่ · วางบนการ์ดอัลบั้ม หรือชื่ออัลบั้มด้านบน = ย้ายไปที่นั่น · เลือกหลายรูปแล้วลากไปพร้อมกันได้", "Drop a photo on another photo to make an album · drop on an album card or the path above to move it")}</p>
+                  <p className="text-[11px] text-slate-400">{canReorder
+                    ? t("ลากรูปไปวางที่ขอบซ้าย/ขวาของอีกรูป = สลับลำดับ (รูปแรก = ปก) · วางกลางรูป = รวมเป็นอัลบั้มใหม่ · วางบนการ์ดอัลบั้ม หรือชื่ออัลบั้มด้านบน = ย้ายไปที่นั่น · อัลบั้มย่อยลากที่ขอบการ์ดเพื่อสลับลำดับได้เหมือนกัน", "Drop on the left/right edge of a photo to reorder (first = cover) · drop in the middle to make an album · drop on an album card or the path to move")
+                    : t("ลากรูปไปวางบนอีกรูป = รวมเป็นอัลบั้มใหม่ · วางบนการ์ดอัลบั้ม หรือชื่ออัลบั้มด้านบน = ย้ายไปที่นั่น · เลือกหลายรูปแล้วลากไปพร้อมกันได้ (ล้างคำค้นก่อน ถึงจะลากสลับลำดับได้)", "Drop a photo on another photo to make an album · drop on an album card or the path above to move it")}</p>
                 )}
 
                 {photos === null ? <LoadingState className="py-12 text-sm" />
@@ -441,11 +574,15 @@ export function SampleImagesPage() {
                     <div ref={wheelRef} className="grid" style={gridStyle}>
                       {list.map((p) => {
                         const on = sel.has(p.id);
-                        const over = overKey === `ph:${p.id}`;
+                        const zone = overKey?.startsWith(`ph:${p.id}:`) ? (overKey.slice(`ph:${p.id}:`.length) as DropZone) : null;
+                        const over = zone === "merge";
+                        const idx = list.indexOf(p);
                         return (
                           <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over}
-                            extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : dropProps(`ph:${p.id}`, (d) => d.kind === "photos" && !d.ids.includes(p.id), (d) => { if (d.kind === "photos") void createSub([...new Set([...d.ids, p.id])]); })) }}>
+                            extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : photoDrop(p.id)) }}>
                             {over && <span className="pointer-events-none absolute inset-x-1.5 top-1.5 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-center text-[11px] text-white">{t("ปล่อย = รวมเป็นอัลบั้มใหม่", "Drop to make an album")}</span>}
+                            {(zone === "before" || zone === "after") && <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1.5 rounded-full bg-violet-500 ${zone === "before" ? "left-0" : "right-0"}`} />}
+                            {photoSort === "manual" && !searching && !trashView && <span className="pointer-events-none absolute bottom-[34px] left-1.5 rounded-md bg-white/90 px-1.5 text-[10.5px] font-medium text-slate-600 shadow-sm">{idx === 0 ? t("ปก", "Cover") : idx + 1}</span>}
                           </SamplePhotoTile>
                         );
                       })}
