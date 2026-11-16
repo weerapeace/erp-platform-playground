@@ -19,6 +19,9 @@ export const isRmbCurrency = (cur: string | null | undefined): boolean => RMB_CU
 const EPS = 0.01;
 const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
+/** บรรทัดสินค้าในใบสั่งซื้อ (โชว์ตอนกางดู) */
+export type BillPoLine = { name: string; qty: number; uom: string; price: number | null; total: number | null };
+
 /** ใบสั่งซื้อ 1 ใบ ในมุมของ "บิลที่กำลังลง" */
 export type BillPoCandidate = {
   po_id: string;
@@ -35,6 +38,8 @@ export type BillPoCandidate = {
   line_count: number;
   /** ชื่อสินค้าบรรทัดแรก ๆ (ไว้ให้คนจำใบได้) */
   items: string;
+  /** รายการสินค้าในใบ (กางดูในหน้าลงบิล · เจ้าของขอ 2026-11-16) — สูงสุด 50 บรรทัด/ใบ */
+  lines?: BillPoLine[];
   /** ยอด ¥ ที่ "บิลอื่น" ผูกไว้แล้ว (เฉพาะบิลที่ยังใช้งาน ไม่ยกเลิก) */
   linked_other_rmb: number;
   /** บิลอื่นปิดยอดใบนี้ไปแล้ว */

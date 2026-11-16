@@ -504,7 +504,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "file-multi-input", label: "ช่องไฟล์แนบหลายไฟล์", code: "FileMultiInput", category: "file",
     source: { path: "components/file-multi-input" },
-    what: "อัปโหลดไฟล์แนบหลายไฟล์ (รูปและ PDF) · ส่ง category = เก็บตามกฎที่เก็บไฟล์ (เช่น Supabase ส่วนตัว) · ไม่ส่ง = R2 ทางเดิม",
+    what: "อัปโหลดไฟล์แนบหลายไฟล์ (รูปและ PDF) · ลากไฟล์มาวาง / Ctrl+V ได้ (pasteFromPage = ทั้งหน้า) · มีแถบความคืบหน้า · ส่ง category = เก็บตามกฎที่เก็บไฟล์ (เช่น Supabase ส่วนตัว) · ไม่ส่ง = R2 ทางเดิม",
     sameJob: "file-field",
   },
   {

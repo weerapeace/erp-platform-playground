@@ -10,7 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { shopNameSimilarity } from "@/lib/partner-match";
 import { writeAudit } from "@/lib/audit";
-import { isRmbCurrency, validateBillLinks, type BillPoCandidate, type BillPoLinkInput, type ValidateResult } from "@/lib/china-bill-po";
+import { isRmbCurrency, validateBillLinks, type BillPoCandidate, type BillPoLine, type BillPoLinkInput, type ValidateResult } from "@/lib/china-bill-po";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -40,20 +40,24 @@ async function activeLinksForPos(admin: Admin, poIds: string[]): Promise<LinkRow
 }
 
 /** ชื่อสินค้า + จำนวนบรรทัดต่อใบ */
-async function lineSummary(admin: Admin, poIds: string[]): Promise<Map<string, { n: number; items: string }>> {
-  const map = new Map<string, { n: number; names: string[] }>();
+async function lineSummary(admin: Admin, poIds: string[]): Promise<Map<string, { n: number; items: string; lines: BillPoLine[] }>> {
+  const map = new Map<string, { n: number; names: string[]; lines: BillPoLine[] }>();
+  const optNum = (v: unknown) => (v == null || v === "" ? null : num(v));
   for (let i = 0; i < poIds.length; i += 200) {
-    const { data } = await admin.from("purchase_order_lines_v2").select("po_id, item_name")
-      .in("po_id", poIds.slice(i, i + 200)).not("is_active", "is", false).order("id").limit(5000);
+    const { data } = await admin.from("purchase_order_lines_v2").select("po_id, item_name, qty, uom, price_est, line_total, sort_order")
+      .in("po_id", poIds.slice(i, i + 200)).not("is_active", "is", false)
+      .order("sort_order", { ascending: true, nullsFirst: false }).order("id").limit(5000);
     for (const r of (data ?? []) as Row[]) {
-      const k = str(r.po_id); const e = map.get(k) ?? { n: 0, names: [] };
+      const k = str(r.po_id); const e = map.get(k) ?? { n: 0, names: [], lines: [] };
       e.n += 1;
+      // รายการเต็มไว้กางดูในหน้าลงบิล (เจ้าของขอ 2026-11-16) · ราคา/รวม ว่างได้ (ใบที่ยังไม่มีราคา)
+      if (e.lines.length < 50) e.lines.push({ name: str(r.item_name) || "—", qty: num(r.qty), uom: str(r.uom), price: optNum(r.price_est), total: optNum(r.line_total) });
       const nm = str(r.item_name).replace(/^\[[^\]]*\]\s*/, "");   // ตัด [รหัส] หน้าชื่อ ให้อ่านง่ายบนมือถือ
       if (nm && e.names.length < 2 && !e.names.includes(nm)) e.names.push(nm);
       map.set(k, e);
     }
   }
-  return new Map([...map].map(([k, v]) => [k, { n: v.n, items: v.names.join(" · ") }]));
+  return new Map([...map].map(([k, v]) => [k, { n: v.n, items: v.names.join(" · "), lines: v.lines }]));
 }
 
 async function partnerNames(admin: Admin, ids: string[]): Promise<Map<string, string>> {
@@ -65,7 +69,7 @@ async function partnerNames(admin: Admin, ids: string[]): Promise<Map<string, st
   return m;
 }
 
-function toCandidate(p: Row, others: LinkRow[], mine: LinkRow | undefined, lines: { n: number; items: string } | undefined, pname: string | null): BillPoCandidate {
+function toCandidate(p: Row, others: LinkRow[], mine: LinkRow | undefined, lines: { n: number; items: string; lines?: BillPoLine[] } | undefined, pname: string | null): BillPoCandidate {
   const isRmb = isRmbCurrency(p.currency as string);
   const total = num(p.grand_total);
   const linkedOther = r2(others.reduce((a, l) => a + l.amount_rmb, 0));
@@ -74,7 +78,7 @@ function toCandidate(p: Row, others: LinkRow[], mine: LinkRow | undefined, lines
     currency: str(p.currency) || "THB", is_rmb: isRmb, grand_total: total,
     partner_id: (p.seller_partner_id as string) ?? null, partner_name: pname ?? ((p.seller_name as string) ?? null),
     status: (p.status as string) ?? null, payment_status: (p.payment_status as string) ?? null, paid_via: (p.paid_via as string) ?? null,
-    line_count: lines?.n ?? 0, items: lines?.items ?? "",
+    line_count: lines?.n ?? 0, items: lines?.items ?? "", lines: lines?.lines ?? [],
     linked_other_rmb: linkedOther,
     settled_by_other: others.some((l) => l.settles_po),
     remaining_rmb: isRmb && total > 0 ? Math.max(0, r2(total - linkedOther)) : null,

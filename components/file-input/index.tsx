@@ -27,7 +27,8 @@ const ACCEPT_DROP = ["image/", "application/pdf"];
 const accepted = (f: File) => ACCEPT_DROP.some((p) => (f.type || "").startsWith(p)) || /\.pdf$/i.test(f.name);
 
 // กล่องที่เมาส์ชี้อยู่ (Ctrl+V ไปลงกล่องนั้นก่อน) — หลายกล่องในหน้าเดียวจะได้ไม่อัปซ้ำ
-let hoverOwner: symbol | null = null;
+// ใช้ร่วมกับ FileMultiInput (กล่องเดี่ยว + หลายไฟล์ในหน้าเดียวกัน ไม่แย่งกันรับรูปที่วาง)
+export const filePasteOwner: { cur: symbol | null } = { cur: null };
 
 export function FileInput({
   value, onChange, folder = "uploads", category, required, disabled, hasError, label, multiple, pasteFromPage, hint,
@@ -113,7 +114,7 @@ export function FileInput({
     if (blocked) return;
     const me = meRef.current;
     const onPaste = (e: ClipboardEvent) => {
-      const mine = hoverOwner === me || (hoverOwner === null && pasteFromPage);
+      const mine = filePasteOwner.cur === me || (filePasteOwner.cur === null && pasteFromPage);
       if (!mine) return;
       const files = Array.from(e.clipboardData?.items ?? []).filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter((f): f is File => !!f && accepted(f));
       if (!files.length) return;   // วางข้อความธรรมดา = ไม่ยุ่ง
@@ -121,11 +122,11 @@ export function FileInput({
       void handleFilesRef.current(files);
     };
     window.addEventListener("paste", onPaste);
-    return () => { window.removeEventListener("paste", onPaste); if (hoverOwner === me) hoverOwner = null; };
+    return () => { window.removeEventListener("paste", onPaste); if (filePasteOwner.cur === me) filePasteOwner.cur = null; };
   }, [blocked, pasteFromPage]);
   const hoverProps = {
-    onPointerEnter: () => { hoverOwner = meRef.current; },
-    onPointerLeave: () => { if (hoverOwner === meRef.current) hoverOwner = null; },
+    onPointerEnter: () => { filePasteOwner.cur = meRef.current; },
+    onPointerLeave: () => { if (filePasteOwner.cur === meRef.current) filePasteOwner.cur = null; },
   };
 
   const progress = up && <UploadProgress {...up} onCancel={() => abortRef.current?.abort()} />;

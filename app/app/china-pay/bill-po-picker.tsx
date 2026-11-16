@@ -30,13 +30,15 @@ const CHIP: Record<string, string> = {
   blocked: "bg-slate-100 text-slate-500 border-slate-200",
 };
 
-export function BillPoPicker({ supplierId, billId, initial, onChange }: {
+export function BillPoPicker({ supplierId, billId, initial, onChange, onModal }: {
   supplierId: string | null;
   /** แก้บิลเดิม → ติ๊กใบที่ผูกอยู่ให้ + ยอดที่เหลือไม่นับบิลนี้ */
   billId?: string | null;
   /** เติมจากใบสำคัญรับ (ปุ่ม "ส่งไปโอนเงินจีน") */
   initial?: { po_id: string; amount_rmb: number }[];
   onChange: (s: BillPoSummary) => void;
+  /** เปิด/ปิดป๊อปใบสั่งซื้อเต็ม — หน้าที่เป็นป๊อปอยู่แล้ว (แก้ไขบิล) ซ่อนตัวเองชั่วคราวไม่ให้บังกัน */
+  onModal?: (open: boolean) => void;
 }) {
   const [cands, setCands] = useState<BillPoCandidate[]>([]);
   const [similar, setSimilar] = useState<Similar[]>([]);
@@ -49,6 +51,11 @@ export function BillPoPicker({ supplierId, billId, initial, onChange }: {
   const [showAll, setShowAll] = useState(false);
   const [showThb, setShowThb] = useState(false);
   const [reload, setReload] = useState(0);
+  // กางดูรายการสินค้าในใบ (เจ้าของขอ 2026-11-16) · allOpen = ปุ่ม "กางทั้งหมด"
+  const [openLines, setOpenLines] = useState<Record<string, boolean>>({});
+  const [allOpen, setAllOpen] = useState(false);
+  const [poModal, setPoModal] = useState<string | null>(null);   // เปิดใบสั่งซื้อเต็ม (ป๊อปกลาง)
+  const isOpen = (id: string) => openLines[id] ?? allOpen;
 
   // เปลี่ยนร้าน = เริ่มใหม่
   useEffect(() => { setSel({}); setExtra(null); setQ(""); setShowAll(false); setShowThb(false); }, [supplierId]);
@@ -163,6 +170,41 @@ export function BillPoPicker({ supplierId, billId, initial, onChange }: {
             {c.items || "—"}{c.line_count > 0 ? ` · ${c.line_count} รายการ` : ""}
             {extra && c.partner_name ? ` · ${c.partner_name}` : ""}
           </div>
+          {(c.lines?.length ?? 0) > 0 && (
+            <div onClick={(e) => e.stopPropagation()}>
+              <button type="button" onClick={() => setOpenLines((m) => ({ ...m, [c.po_id]: !isOpen(c.po_id) }))}
+                className="mt-1 inline-flex items-center gap-1 h-7 px-2 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50">
+                {isOpen(c.po_id) ? "▴ ซ่อนรายการ" : `▾ ดู ${c.line_count} รายการ`}
+              </button>
+              {isOpen(c.po_id) && (
+                <div className="mt-1.5 rounded-lg border border-slate-100 bg-white overflow-hidden">
+                  <table className="w-full text-[11px] table-fixed">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="text-left font-medium px-2 py-1">สินค้า</th>
+                        <th className="text-right font-medium px-2 py-1 w-20">จำนวน</th>
+                        <th className="text-right font-medium px-2 py-1 w-20 hidden sm:table-cell">ราคา/หน่วย</th>
+                        <th className="text-right font-medium px-2 py-1 w-20">รวม</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {c.lines!.map((l, i) => (
+                        <tr key={i} className="border-t border-slate-100 align-top">
+                          <td className="px-2 py-1 text-slate-700 break-words">{l.name}</td>
+                          <td className="px-2 py-1 text-right tabular-nums text-slate-700 whitespace-nowrap">{fmtRmb(l.qty)}{l.uom ? ` ${l.uom}` : ""}</td>
+                          <td className="px-2 py-1 text-right tabular-nums text-slate-500 whitespace-nowrap hidden sm:table-cell">{l.price != null ? `${c.is_rmb ? "¥" : "฿"}${fmtRmb(l.price)}` : "—"}</td>
+                          <td className="px-2 py-1 text-right tabular-nums text-slate-700 whitespace-nowrap">{l.total != null ? `${c.is_rmb ? "¥" : "฿"}${fmtRmb(l.total)}` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {c.line_count > (c.lines?.length ?? 0) && <div className="px-2 py-1 text-[10px] text-slate-400 border-t border-slate-100">แสดง {c.lines!.length} จาก {c.line_count} รายการ — เปิดใบเต็มเพื่อดูทั้งหมด</div>}
+                  <button type="button" onClick={() => { setPoModal(c.po_id); onModal?.(true); }}
+                    className="w-full text-left px-2 py-1.5 text-[11px] text-blue-700 border-t border-slate-100 hover:bg-blue-50">↗ เปิดใบสั่งซื้อเต็ม</button>
+                </div>
+              )}
+            </div>
+          )}
           {c.linked_other_rmb > 0 && <div className="text-[11px] text-orange-700">บิลอื่นผูกแล้ว ¥{fmtRmb(c.linked_other_rmb)}{c.remaining_rmb != null ? ` · เหลือ ¥${fmtRmb(c.remaining_rmb)}` : ""}</div>}
           {p && (
             <div className="mt-1.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
@@ -195,7 +237,15 @@ export function BillPoPicker({ supplierId, billId, initial, onChange }: {
     <div>
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-slate-700">🧾 ใบสั่งซื้อที่จ่ายในบิลนี้</div>
-        {!loading && !error && visible.length > 0 && <div className="text-[11px] text-slate-400">ค้างจ่าย {visible.length} ใบ</div>}
+        {!loading && !error && visible.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-400">ค้างจ่าย {visible.length} ใบ</span>
+            <button type="button" onClick={() => { setAllOpen((v) => !v); setOpenLines({}); }}
+              className="h-7 px-2.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50">
+              {allOpen ? "▴ ย่อทั้งหมด" : "▾ กางทั้งหมด"}
+            </button>
+          </div>
+        )}
       </div>
       <div className="text-[11px] text-slate-400 mt-0.5">ติ๊กใบที่ร้านเก็บเงินในบิลนี้ · ไม่ติ๊กก็บันทึกบิลได้</div>
 
@@ -267,6 +317,7 @@ export function BillPoPicker({ supplierId, billId, initial, onChange }: {
           )}
         </>
       )}
+      {poModal && <PoDetailModal poId={poModal} onClose={() => { setPoModal(null); onModal?.(false); }} />}
     </div>
   );
 }
