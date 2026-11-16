@@ -5,6 +5,7 @@
  *   otsuThreshold   — หาค่าความสว่างที่แบ่งรูปเป็น 2 กลุ่มได้ชัดที่สุด
  *   traceGray       — ทั้งกระบวนการ: คืนเส้นรอบชิ้น (พิกัดจุดภาพ) เรียงจากชิ้นใหญ่ไปเล็ก
  *   simplifyClosed  — ลดจุดของเส้นรอบรูป (Douglas–Peucker) โดยรูปเพี้ยนไม่เกิน eps จุดภาพ
+ *   paintEdits      — ระบายยางลบ/แปรงเติมลงชั้นรอยของผู้ใช้ (traceGray อ่านผ่าน opts.edits · สีพื้นที่ดูด = opts.bgPick)
  *   contourShape    — เส้นรอบชิ้น (จุดภาพ) → รูปทรงของตัววาด (ซม.) ตามมาตราส่วนที่ผู้ใช้บอก
  *
  * ข้อจำกัด (บอกผู้ใช้ตรง ๆ ในหน้าจอ): ต้องถ่ายตรงจากด้านบน พื้นสีตัดกับกระดาษ · เงา/ขอบยับทำให้เส้นหยัก · โค้งกลายเป็นเส้นตรงสั้น ๆ ต่อกัน
@@ -25,7 +26,33 @@ export type TraceOpts = {
   /** ลดจุด: ยอมให้เส้นเพี้ยนได้กี่จุดภาพ */
   eps?: number;
   maxPieces?: number;
+  /** รอยที่ผู้ใช้ระบายเอง (ขนาด w×h): 0 = ปล่อยตามรูป · EDIT_ERASE = บังคับเป็นพื้น (ยางลบ) · EDIT_KEEP = บังคับเป็นชิ้น (แปรงเติม) — ชนะทุกอย่าง */
+  edits?: ArrayLike<number> | null;
+  /** สีพื้นที่ผู้ใช้ดูดจากรูป (ความสว่าง 0–255) — จุดที่สว่างห่างจากค่าใดค่าหนึ่งไม่เกิน tol = พื้น (ช่วยพื้นลายหลายสี) */
+  bgPick?: { values: number[]; tol: number } | null;
 };
+/** ค่าในช่อง edits */
+export const EDIT_ERASE = 1;
+export const EDIT_KEEP = 2;
+
+/** ระบายรอยเป็นวงกลมรัศมี r (จุดภาพ) ตามเส้นที่ลาก ลงบน edits (แก้ในที่) · val 0 = ล้างรอย · คืนจำนวนจุดที่เปลี่ยน */
+export function paintEdits(edits: Uint8Array, w: number, h: number, path: Pt[], r: number, val: number): number {
+  if (!path.length || !(r > 0)) return 0;
+  let changed = 0;
+  const dab = (cx: number, cy: number) => {
+    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(w - 1, Math.ceil(cx + r)), y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(h - 1, Math.ceil(cy + r)), rr = r * r;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 > rr) continue;
+      const i = y * w + x; if (edits[i] !== val) { edits[i] = val; changed++; }
+    }
+  };
+  dab(path[0][0], path[0][1]);
+  for (let k = 1; k < path.length; k++) {   // เติมวงระหว่างจุด กันเส้นขาดตอนลากเร็ว
+    const [ax, ay] = path[k - 1], [bx, by] = path[k], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / Math.max(0.5, r / 2)));
+    for (let j = 1; j <= n; j++) dab(ax + ((bx - ax) * j) / n, ay + ((by - ay) * j) / n);
+  }
+  return changed;
+}
 export type TraceResult = { contours: TraceContour[]; threshold: number; darkPieces: boolean };
 
 /** ค่าแบ่ง 2 กลุ่มความสว่างแบบ Otsu (0–255) */
@@ -87,6 +114,10 @@ export function traceGray(gray: ArrayLike<number>, w: number, h: number, opts: T
   const darkPieces = opts.pieces === "dark" ? true : opts.pieces === "light" ? false : darkBorder * 2 < border;
   const mask = new Uint8Array(n);
   for (let i = 0; i < n; i++) mask[i] = (gray[i] <= threshold) === darkPieces ? 1 : 0;
+  const pick = opts.bgPick && opts.bgPick.values.length ? opts.bgPick : null;
+  if (pick) for (let i = 0; i < n; i++) { if (!mask[i]) continue; for (const v of pick.values) if (Math.abs(gray[i] - v) <= pick.tol) { mask[i] = 0; break; } }
+  const ed = opts.edits && opts.edits.length >= n ? opts.edits : null;
+  if (ed) for (let i = 0; i < n; i++) { if (ed[i] === EDIT_ERASE) mask[i] = 0; else if (ed[i] === EDIT_KEEP) mask[i] = 1; }
 
   const lab = new Int32Array(n), minArea = Math.max(12, (opts.minAreaFrac ?? 0.004) * n), eps = Math.max(0.5, opts.eps ?? 2);
   const out: TraceContour[] = [], stack = new Int32Array(n);

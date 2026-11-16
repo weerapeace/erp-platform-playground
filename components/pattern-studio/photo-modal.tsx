@@ -16,7 +16,10 @@ import { useT } from "@/components/i18n";
 import { RangeInput } from "@/components/range-input";
 import { apiFetch } from "@/lib/api";
 import type { BagParams } from "@/lib/bag-templates";
-import { contourShape, traceGray } from "@/lib/pattern-trace";
+import { contourShape, EDIT_ERASE, EDIT_KEEP, paintEdits, traceGray } from "@/lib/pattern-trace";
+import { ZoomBox, ZoomControls } from "@/components/zoom-box";
+import { shortcutKey } from "@/lib/shortcut-key";
+import type { Pt } from "@/lib/pattern-shape";
 import { checkScale, rectifyGray, traceTolMm, type CheckPair, type PPt } from "@/lib/pattern-photo";
 import { AI_PATTERN_PROMPT, parseAiPattern, type AiImport, type AiSeam } from "@/lib/bag-ai-import";
 import { shapePathD } from "@/lib/pattern-shape";
@@ -34,6 +37,32 @@ function grayUrl(gray: Uint8Array, w: number, h: number): string {
   g.putImageData(d, 0, 0);
   return c.toDataURL("image/jpeg", 0.85);
 }
+
+/** ชั้นรอยยางลบ/แปรงเติม → รูปโปร่งใส (แดง = ลบ · เขียว = เติม) วางทับรูปให้เห็นว่าระบายตรงไหนไปแล้ว */
+function editsUrl(ed: Uint8Array, w: number, h: number): string {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"); if (!g) return "";
+  const d = g.createImageData(w, h);
+  for (let i = 0; i < ed.length; i++) {
+    if (ed[i] === EDIT_ERASE) { d.data[i * 4] = 239; d.data[i * 4 + 1] = 68; d.data[i * 4 + 2] = 68; d.data[i * 4 + 3] = 90; }
+    else if (ed[i] === EDIT_KEEP) { d.data[i * 4] = 16; d.data[i * 4 + 1] = 185; d.data[i * 4 + 2] = 129; d.data[i * 4 + 3] = 90; }
+  }
+  g.putImageData(d, 0, 0);
+  return c.toDataURL("image/png");
+}
+
+/** ความสว่างเฉลี่ย 3×3 รอบจุดที่คลิก (ดูดสีพื้น) */
+function sampleGray(gray: Uint8Array, w: number, h: number, x: number, y: number): number {
+  let s = 0, n = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const xx = Math.round(x) + dx, yy = Math.round(y) + dy;
+    if (xx >= 0 && yy >= 0 && xx < w && yy < h) { s += gray[yy * w + xx]; n++; }
+  }
+  return n ? Math.round(s / n) : 0;
+}
+
+type TraceTool = "pick" | "erase" | "add" | "bgpick";
+type EditSnap = { edits: Uint8Array | null; bg: number[] };
 
 /** อ่านไฟล์รูป → ย่อให้ด้านยาวไม่เกิน max จุดภาพ → ผืนผ้าใบ */
 async function toCanvas(file: File, max: number): Promise<HTMLCanvasElement> {
@@ -157,6 +186,24 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const [fixedScale, setFixedScale] = useState<number | null>(null);
   const [checks, setChecks] = useState<{ a: PPt; b?: PPt; real: number }[]>([]);
   const [tolCm, setTolCm] = useState(0.3);
+  // ── 2026-11-16 เจ้าของขอ: ซูม (Ctrl+ล้อเมาส์ · มือถือสองนิ้ว) + ยางลบ/แปรงเติม/ดูดสีพื้น + ย้อนกลับ/ทำซ้ำ
+  const [zoom, setZoom] = useState(1);
+  const [tool, setTool] = useState<TraceTool>("pick");
+  const [brushPx, setBrushPx] = useState(18);                    // ขนาดแปรงบนจอ (คงที่แม้ซูม)
+  const [edits, setEdits] = useState<Uint8Array | null>(null);   // ชั้นรอย ขนาดเท่ารูปที่ลอก
+  const [bgVals, setBgVals] = useState<number[]>([]);            // สีพื้นที่ดูดไว้
+  const [bgTol, setBgTol] = useState(12);
+  const [stroke, setStroke] = useState<{ pts: Pt[]; r: number } | null>(null);
+  const [cursor, setCursor] = useState<{ x: number; y: number; r: number } | null>(null);
+  const hist = useRef<EditSnap[]>([]), fut = useRef<EditSnap[]>([]);
+  const [, setHistTick] = useState(0);
+  const touches = useRef(new Set<number>());
+  const resetEdits = () => { setEdits(null); setBgVals([]); setStroke(null); hist.current = []; fut.current = []; setHistTick((x) => x + 1); };
+  const snapshot = (): EditSnap => ({ edits: edits ? edits.slice() : null, bg: [...bgVals] });
+  const pushHist = () => { hist.current = [...hist.current.slice(-24), snapshot()]; fut.current = []; setHistTick((x) => x + 1); };
+  const restore = (s: EditSnap) => { setEdits(s.edits); setBgVals(s.bg); };
+  const undo = () => { const s = hist.current.pop(); if (!s) return; fut.current.push(snapshot()); restore(s); setHistTick((x) => x + 1); };
+  const redo = () => { const s = fut.current.pop(); if (!s) return; hist.current.push(snapshot()); restore(s); setHistTick((x) => x + 1); };
   // ── AI จากรูปกระเป๋า
   const [bag, setBag] = useState<{ url: string; w: number; h: number } | null>(null);
   const [bagW, setBagW] = useState(32);
@@ -170,7 +217,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
       const gray = new Uint8Array(c.width * c.height);
       for (let i = 0; i < gray.length; i++) gray[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
       setImg({ url: c.toDataURL("image/jpeg", 0.8), w: c.width, h: c.height, gray }); setOff(new Set());
-      setOrig(null); setFixedScale(null); setQuad([]); setChecks([]); setClickMode(null);
+      setOrig(null); setFixedScale(null); setQuad([]); setChecks([]); setClickMode(null); resetEdits(); setZoom(1);
     } catch (e) { setErr((e as Error).message); }
   };
   const pickBag = async (f: File | undefined) => {
@@ -179,7 +226,53 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
     catch (e) { setErr((e as Error).message); }
   };
 
-  const traced = useMemo(() => (img ? traceGray(img.gray, img.w, img.h, { bias, pieces: mode, eps }) : null), [img, bias, mode, eps]);
+  const traced = useMemo(() => (img ? traceGray(img.gray, img.w, img.h, { bias, pieces: mode, eps, edits, bgPick: bgVals.length ? { values: bgVals, tol: bgTol } : null }) : null), [img, bias, mode, eps, edits, bgVals, bgTol]);
+  const editsImg = useMemo(() => (img && edits ? editsUrl(edits, img.w, img.h) : ""), [img, edits]);
+  // Ctrl+Z ย้อนกลับ · Ctrl+Y / Ctrl+Shift+Z ทำซ้ำ (แป้นไทยก็ได้ — shortcutKey) · ไม่ยุ่งตอนพิมพ์ในช่องตัวเลข
+  useEffect(() => {
+    if (!open || tab !== "trace") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const tg = e.target as HTMLElement | null;
+      if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
+      const k = shortcutKey(e);
+      if (k === "z" && !e.shiftKey) { if (hist.current.length) { e.preventDefault(); undo(); } }
+      else if (k === "y" || (k === "z" && e.shiftKey)) { if (fut.current.length) { e.preventDefault(); redo(); } }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });   // eslint-disable-line react-hooks/exhaustive-deps -- ผูกใหม่ทุกรอบให้ undo/redo เห็นค่าล่าสุด
+  /** พิกัดจอ → จุดภาพ + ขนาดแปรงเป็นจุดภาพ (แปรงคงขนาดบนจอแม้ซูม) */
+  const toImgPt = (svg: SVGSVGElement, cx: number, cy: number) => {
+    const m = svg.getScreenCTM(); if (!m) return null;
+    const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+    const q = pt.matrixTransform(m.inverse());
+    return { p: [q.x, q.y] as Pt, r: brushPx / 2 / (m.a || 1) };
+  };
+  const brushing = tool === "erase" || tool === "add";
+  const onBrushDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === "touch") touches.current.add(e.pointerId);
+    if (clickMode || !img || e.button !== 0) return;
+    if (touches.current.size > 1) { setStroke(null); return; }   // นิ้วที่ 2 = ซูม/เลื่อน ไม่ใช่ระบาย
+    const q = toImgPt(e.currentTarget, e.clientX, e.clientY); if (!q) return;
+    if (tool === "bgpick") { pushHist(); setBgVals((v) => [...v, sampleGray(img.gray, img.w, img.h, q.p[0], q.p[1])].slice(-8)); return; }
+    if (!brushing) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setStroke({ pts: [q.p], r: q.r });
+  };
+  const onBrushMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!brushing || !img) { if (cursor) setCursor(null); return; }
+    const q = toImgPt(e.currentTarget, e.clientX, e.clientY); if (!q) return;
+    if (e.pointerType === "mouse") setCursor({ x: q.p[0], y: q.p[1], r: q.r });
+    if (stroke && touches.current.size <= 1) setStroke((s) => (s ? { ...s, pts: [...s.pts, q.p] } : s));
+  };
+  const onBrushUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    touches.current.delete(e.pointerId);
+    if (!stroke || !img) return;
+    const next = edits ? edits.slice() : new Uint8Array(img.w * img.h);
+    if (paintEdits(next, img.w, img.h, stroke.pts, stroke.r, tool === "add" ? EDIT_KEEP : EDIT_ERASE) > 0) { pushHist(); setEdits(next); }
+    setStroke(null);
+  };
   const chosen = useMemo(() => (traced?.contours ?? []).map((c, i) => ({ c, i })).filter((x) => !off.has(x.i)), [traced, off]);
   const widest = chosen.reduce((m, x) => Math.max(m, x.c.box.w), 0);
   const pairs: CheckPair[] = checks.flatMap((c) => (c.b ? [{ a: c.a, b: c.b, real: c.real }] : []));
@@ -200,9 +293,9 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
     const r = rectifyGray(img.gray, img.w, img.h, quad, refW, refH, { extend: ext, maxSide: 900 });
     if (!r) { setErr(t("4 จุดต้องเป็นมุมของสี่เหลี่ยม ไม่ไขว้กัน — ลองคลิกใหม่", "The 4 points must be corners of a quadrilateral without crossing — try again")); return; }
     setOrig(orig ?? img); setImg({ url: grayUrl(r.gray, r.w, r.h), w: r.w, h: r.h, gray: r.gray }); setFixedScale(r.cmPerPx);
-    setQuad([]); setChecks([]); setOff(new Set()); setErr(null);
+    setQuad([]); setChecks([]); setOff(new Set()); setErr(null); resetEdits(); setZoom(1);   // รูปเปลี่ยนรูปร่าง → รอยลบเดิมไม่ตรงแล้ว ล้างทิ้ง
   };
-  const undoRectify = () => { if (!orig) return; setImg(orig); setOrig(null); setFixedScale(null); setChecks([]); setOff(new Set()); };
+  const undoRectify = () => { if (!orig) return; setImg(orig); setOrig(null); setFixedScale(null); setChecks([]); setOff(new Set()); resetEdits(); setZoom(1); };
   const toggle = (i: number) => setOff((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; });
 
   const place = () => {
@@ -266,13 +359,39 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
             <div className="space-y-2">
               {fileBtn(img ? t("เปลี่ยนรูป", "Change photo") : t("เลือกรูปแพทเทิร์น", "Choose a pattern photo"), (f) => void pickTrace(f))}
+              {img && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs" data-photo-tools>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("เครื่องมือบนรูป", "Photo tools")}>
+                    {([["pick", "i:pointer", "เลือกชิ้น", "Pick"], ["erase", "i:eraser", "ยางลบ", "Eraser"], ["add", "i:brush", "แปรงเติม", "Fill brush"], ["bgpick", "i:color-picker", "ดูดสีพื้น", "Pick background"]] as const).map(([k, ic, th, en]) => (
+                      <button key={k} type="button" data-photo-tool={k} aria-pressed={tool === k} onClick={() => { setTool(k); setClickMode(null); setCursor(null); }} className={`inline-flex h-8 items-center gap-1 rounded-md px-2 ${tool === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`} title={t(th, en)}>
+                        <Icon value={ic} className="text-sm" /><span className="hidden sm:inline">{t(th, en)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {brushing && <label className="inline-flex items-center gap-1 text-slate-500">{t("ขนาด", "Size")}<input type="range" min={4} max={80} step={2} value={brushPx} onChange={(e) => setBrushPx(Number(e.target.value))} className="w-20" aria-label={t("ขนาดแปรง", "Brush size")} /></label>}
+                  <button type="button" onClick={undo} disabled={!hist.current.length} className="h-8 w-8 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30" title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} aria-label={t("ย้อนกลับ", "Undo")}><Icon value="i:arrow-back-up" className="text-sm" /></button>
+                  <button type="button" onClick={redo} disabled={!fut.current.length} className="h-8 w-8 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30" title={t("ทำซ้ำ (Ctrl+Y)", "Redo (Ctrl+Y)")} aria-label={t("ทำซ้ำ", "Redo")}><Icon value="i:arrow-forward-up" className="text-sm" /></button>
+                  {(edits || bgVals.length > 0) && <button type="button" onClick={() => { pushHist(); setEdits(null); setBgVals([]); }} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-slate-600 hover:bg-slate-50">{t("ล้างรอยทั้งหมด", "Clear all marks")}</button>}
+                  <ZoomControls zoom={zoom} onZoom={setZoom} className="ml-auto" />
+                </div>
+              )}
+              {img && tool === "bgpick" && (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-sky-50 px-2 py-1.5 text-[11px] text-sky-900" data-photo-bgpick>
+                  {t("คลิกที่พื้นตรงที่ระบบนับเป็นชิ้นผิด — สีนั้นจะถูกนับเป็นพื้นทั้งรูป", "Click the background where it was taken as a piece — that shade becomes background everywhere")}
+                  {bgVals.map((v, i) => <button key={i} type="button" onClick={() => { pushHist(); setBgVals((o) => o.filter((_, j) => j !== i)); }} className="inline-flex items-center gap-1 rounded border border-sky-200 bg-white px-1.5 py-0.5" title={t("เอาสีนี้ออก", "Remove this shade")}><span className="h-3 w-3 rounded-sm border border-slate-300" style={{ background: `rgb(${v},${v},${v})` }} />✕</button>)}
+                  <label className="ml-auto inline-flex items-center gap-1">{t("ช่วงสี ±", "Range ±")}<input type="number" min={2} max={60} value={bgTol} onChange={(e) => setBgTol(Math.max(2, Math.min(60, Number(e.target.value) || 12)))} className="h-6 w-12 rounded border border-sky-200 px-1 text-right" aria-label={t("ช่วงสีที่นับเป็นพื้น", "Shade range counted as background")} /></label>
+                </div>
+              )}
               {img ? (
-                <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                <ZoomBox zoom={zoom} onZoom={setZoom} aspect={img.w / img.h} dragPan padding={0} className="h-[46vh] rounded-lg border border-slate-200 bg-slate-50 md:h-[56vh]">
+                <div className="relative" data-photo-zoom>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt="" className="block w-full" />
-                  <svg viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full" onClick={onImgClick} style={clickMode ? { cursor: "crosshair" } : undefined} data-photo-svg>
+                  <img src={img.url} alt="" className="block w-full select-none" draggable={false} />
+                  <svg viewBox={`0 0 ${img.w} ${img.h}`} className="absolute inset-0 h-full w-full" onClick={onImgClick} onPointerDown={onBrushDown} onPointerMove={onBrushMove} onPointerUp={onBrushUp} onPointerCancel={(e) => { touches.current.delete(e.pointerId); setStroke(null); }} onPointerLeave={() => setCursor(null)}
+                    style={{ cursor: clickMode || tool === "bgpick" ? "crosshair" : brushing ? "none" : undefined, touchAction: brushing || tool === "bgpick" ? "none" : undefined }} data-photo-svg>
+                    {editsImg && <image href={editsImg} x={0} y={0} width={img.w} height={img.h} style={{ pointerEvents: "none" }} />}
                     {(traced?.contours ?? []).map((c, i) => (
-                      <polygon key={i} points={c.pts.map((p) => p.join(",")).join(" ")} onClick={() => { if (!clickMode) toggle(i); }} style={{ cursor: clickMode ? "crosshair" : "pointer", pointerEvents: clickMode ? "none" : undefined }}
+                      <polygon key={i} points={c.pts.map((p) => p.join(",")).join(" ")} onClick={() => { if (!clickMode && tool === "pick") toggle(i); }} style={{ cursor: clickMode ? "crosshair" : "pointer", pointerEvents: clickMode || tool !== "pick" ? "none" : undefined }}
                         fill={off.has(i) ? "rgba(148,163,184,0.15)" : "rgba(37,99,235,0.22)"} stroke={off.has(i) ? "#94a3b8" : "#2563eb"} strokeWidth={Math.max(1.5, img.w / 400)} strokeDasharray={off.has(i) ? "6 4" : undefined} />
                     ))}
                     {quad.length > 0 && <g data-photo-quad style={{ pointerEvents: "none" }}>
@@ -284,11 +403,16 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                       {[c.a, ...(c.b ? [c.b] : [])].map((p, k) => <circle key={k} cx={p[0]} cy={p[1]} r={Math.max(3.5, img.w / 140)} fill="#059669" stroke="#fff" strokeWidth={1.2} />)}
                       <text x={c.a[0] + 6} y={c.a[1] - 6} fontSize={Math.max(10, img.w / 55)} fill="#047857" stroke="#fff" strokeWidth={3} paintOrder="stroke">{i + 1}</text>
                     </g>)}
+                    {stroke && <polyline points={stroke.pts.map((p) => p.join(",")).join(" ")} fill="none" stroke={tool === "add" ? "rgba(16,185,129,0.45)" : "rgba(239,68,68,0.45)"} strokeWidth={stroke.r * 2} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />}
+                    {cursor && brushing && <circle cx={cursor.x} cy={cursor.y} r={cursor.r} fill="none" stroke={tool === "add" ? "#059669" : "#dc2626"} strokeWidth={cursor.r / 10 + 0.5} style={{ pointerEvents: "none" }} data-photo-brush-cursor />}
                   </svg>
                 </div>
+                </ZoomBox>
               ) : (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500">{t("วางแพทเทิร์นกระดาษบนพื้นสีตัดกัน (กระดาษขาวบนโต๊ะสีเข้ม หรือกลับกัน) แล้วถ่ายตรงจากด้านบน", "Lay the paper pattern on a contrasting surface and shoot straight from above")}</div>
               )}
+              {img && <p className="text-[11px] text-slate-500" data-photo-zoom-hint>{t("Ctrl + ลูกกลิ้ง = ซูมตรงจุดที่ชี้ · กดลูกกลิ้งค้าง หรือ Space ค้างแล้วลาก = เลื่อนรูป · มือถือใช้สองนิ้วซูม/เลื่อน", "Ctrl + wheel = zoom at the pointer · hold the wheel or Space and drag = pan · on phones, pinch with two fingers")}
+                {tool === "erase" ? t(" · ยางลบ: ระบายทับส่วนที่ลามออกไป ระบบลอกเส้นใหม่ให้เอง", " · Eraser: paint over the part that leaked out; the outline is re-traced") : tool === "add" ? t(" · แปรงเติม: ระบายส่วนของชิ้นที่ขาดหาย", " · Fill brush: paint in missing parts of a piece") : ""}</p>}
               {img && <p className="text-xs text-slate-500">{traced?.contours.length ? t(`เจอ ${traced.contours.length} ชิ้น · กดที่ชิ้นในรูปเพื่อเอา/ไม่เอา · รูปไม่ถูกอัปโหลด ประมวลผลในเครื่องนี้`, `Found ${traced.contours.length} pieces · click a piece to include or skip it · the photo stays on this device`) : t("ยังแยกชิ้นไม่ได้ ลองปรับแถบด้านขวา หรือเปลี่ยนเป็นชิ้นเข้ม/อ่อนกว่าพื้น", "No pieces found yet. Try the sliders on the right, or switch darker/lighter.")}</p>}
             </div>
             <div className="space-y-3 text-xs">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contourShape, otsuThreshold, simplifyClosed, traceGray } from "@/lib/pattern-trace";
+import { contourShape, EDIT_ERASE, EDIT_KEEP, otsuThreshold, paintEdits, simplifyClosed, traceGray } from "@/lib/pattern-trace";
 import { cleanShape, shapeArea, shapeBox, type Pt } from "@/lib/pattern-shape";
 import { bagParamsFromAiDraft } from "@/lib/bag-ai-draft";
 import { BAG_DEFAULT, BAG_LIMITS } from "@/lib/bag-templates";
@@ -92,5 +92,53 @@ describe("ร่างค่าแม่แบบจากคำตอบ AI (ba
     expect(d.confidence).toBe(0);
     const no = bagParamsFromAiDraft({ is_bag: false, fits_template: false, height: "0.5" }, 40);
     expect([no.isBag, no.fits, no.params.H]).toEqual([false, false, 20]);
+  });
+});
+
+describe("ยางลบ / แปรงเติม / ดูดสีพื้น ในป๊อปแกะจากรูป", () => {
+  it("ชิ้นที่ลามติดก้อนข้าง ๆ → ยางลบระบายทางเชื่อม → แยกเป็น 2 ชิ้น", () => {
+    const c = canvas(200, 120); c.rect(20, 20, 100, 60); c.rect(120, 45, 10, 6); c.rect(130, 30, 50, 50);   // ชิ้นหลัก + สะพานแคบ + ก้อนที่ลาม
+    expect(traceGray(c.g, c.w, c.h).contours.length).toBe(1);
+    const ed = new Uint8Array(c.w * c.h);
+    expect(paintEdits(ed, c.w, c.h, [[125, 40], [125, 56]], 4, EDIT_ERASE)).toBeGreaterThan(0);
+    const r = traceGray(c.g, c.w, c.h, { edits: ed });
+    expect(r.contours.length).toBe(2);
+    expect(r.contours[0].box.w).toBeLessThanOrEqual(102);   // เหลือตอสะพานไม่เกิน 1-2 จุดภาพ
+  });
+  it("ยางลบระบายทับก้อนทั้งก้อน → เหลือชิ้นเดียว ขนาดเท่าชิ้นหลัก", () => {
+    const c = canvas(200, 120); c.rect(20, 20, 100, 60); c.rect(120, 30, 50, 50);
+    const ed = new Uint8Array(c.w * c.h);
+    for (let y = 26; y <= 84; y += 4) paintEdits(ed, c.w, c.h, [[123, y], [175, y]], 4, EDIT_ERASE);
+    const r = traceGray(c.g, c.w, c.h, { edits: ed });
+    expect(r.contours.length).toBe(1);
+    expect(r.contours[0].box.w).toBeLessThanOrEqual(100);
+  });
+  it("แปรงเติมเชื่อม 2 ชิ้นให้เป็นชิ้นเดียว · ระบาย 0 = ล้างรอยกลับตามรูป", () => {
+    const c = canvas(200, 120); c.rect(20, 20, 60, 60); c.rect(90, 20, 60, 60);
+    const ed = new Uint8Array(c.w * c.h);
+    paintEdits(ed, c.w, c.h, [[78, 50], [92, 50]], 5, EDIT_KEEP);
+    expect(traceGray(c.g, c.w, c.h, { edits: ed }).contours.length).toBe(1);
+    paintEdits(ed, c.w, c.h, [[78, 50], [92, 50]], 6, 0);
+    expect(traceGray(c.g, c.w, c.h, { edits: ed }).contours.length).toBe(2);
+  });
+  it("ลากเร็วจุดห่างกัน → รอยต่อเนื่อง ไม่ขาดเป็นช่วง ๆ", () => {
+    const ed = new Uint8Array(100 * 20);
+    paintEdits(ed, 100, 20, [[5, 10], [95, 10]], 2, EDIT_ERASE);
+    for (let x = 5; x <= 95; x++) expect(ed[10 * 100 + x]).toBe(EDIT_ERASE);
+  });
+  it("ดูดสีพื้น: พื้นลาย 2 สี (สีหนึ่งปนเป็นชิ้น) → บอกสีพื้นนั้น → เหลือแค่ชิ้นจริง", () => {
+    const c = canvas(200, 120, 240); c.rect(20, 20, 80, 60, 30); c.rect(130, 10, 60, 100, 90);   // ชิ้นเข้ม 30 · แถบพื้นเทา 90
+    const before = traceGray(c.g, c.w, c.h, { pieces: "dark" }).contours.length;
+    const after = traceGray(c.g, c.w, c.h, { pieces: "dark", bgPick: { values: [90], tol: 12 } });
+    expect(before).toBe(2);
+    expect(after.contours.length).toBe(1);
+    expect(after.contours[0].box.x).toBeLessThan(30);
+  });
+  it("รอยแปรงเติมชนะสีพื้นที่ดูด (ดูดแล้วกินชิ้น เติมกลับได้)", () => {
+    const c = canvas(120, 80, 240); c.rect(20, 20, 60, 40, 90);
+    const ed = new Uint8Array(c.w * c.h);
+    for (let y = 22; y <= 58; y += 4) paintEdits(ed, c.w, c.h, [[22, y], [78, y]], 3, EDIT_KEEP);
+    expect(traceGray(c.g, c.w, c.h, { pieces: "dark", bgPick: { values: [90], tol: 10 } }).contours.length).toBe(0);
+    expect(traceGray(c.g, c.w, c.h, { pieces: "dark", bgPick: { values: [90], tol: 10 }, edits: ed }).contours.length).toBe(1);
   });
 });
