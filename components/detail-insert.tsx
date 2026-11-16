@@ -139,7 +139,7 @@ const STEP_LABEL: Record<InsertStep, [string, string]> = {
 const STEP_HINT: Record<InsertStep, [string, string]> = {
   material: ["เลือกวัสดุหลักของสินค้า — รวมเป็นบรรทัดเดียว · ไม่มี = กดข้าม", "Pick the main materials — one line · none = skip"],
   slot: ["ใส่จำนวนช่อง · เพิ่มช่องแบบใหม่ได้ · กดไม้บรรทัดเพื่อใส่ขนาดช่อง (เช่น ช่องใส)", "Set pocket counts · add a new kind · tap the ruler to add a pocket size (e.g. clear pocket)"],
-  highlight: ["ติ๊กจุดเด่นของสินค้า (บรรทัดละข้อ) · AI ช่วยคิดจากรูปจะมาเร็ว ๆ นี้", "Tick the product's highlights (one line each) · AI suggestions from photos coming soon"],
+  highlight: ["ติ๊กจุดเด่นของสินค้า (บรรทัดละข้อ) · แท็บ AI ช่วยคิดจากรูป (ถ้าผู้ดูแลเปิดให้)", "Tick the product's highlights (one line each) · the AI tab suggests from photos (if enabled for you)"],
   size: ["ดึงจากข้อมูลสินค้าให้แล้ว · แก้ตรงนี้ = แก้ของสินค้าด้วย", "Filled from the product · edits here also update the product"],
   fit: ["ระบบเช็กจากขนาดช่องให้ · กดการ์ดเพื่อเลือก", "Checked against the pocket sizes · tap a card to pick"],
   review: ["ดูตัวอย่างด้านขวา ลาก ⠿ สลับบรรทัดได้ แล้วกด แทรก", "Check the preview, drag ⠿ to reorder, then press Insert"],
@@ -361,8 +361,9 @@ function DetailInsertModal({
   const has = (k: NumK) => numFields.some((f) => f.k === k);
   const canFit = writable.includes("fits");
   const canAiPerm = usePermission("ai.caption");
-  // "ใครใช้ได้" ในศูนย์ AI — ผู้ดูแลไม่ได้เปิดให้คนนี้ = ซ่อนแท็บ AI (ถามครั้งเดียวต่อการเปิดป๊อป)
-  const wantAi = !!aiParentId && canAiPerm;
+  // ใครเห็นแท็บ AI = ถามหลังบ้าน (รายชื่อ "ใครใช้ได้" ในศูนย์ AI ก่อน · ไม่ได้ตั้ง = สิทธิ์ ai.caption) — ถามครั้งเดียวต่อการเปิดป๊อป
+  //   ระหว่างรอคำตอบใช้สิทธิ์ ai.caption เดาไปก่อน (คนที่มีสิทธิ์ไม่ต้องรอ · คนที่อยู่ในรายชื่อแต่ไม่มีสิทธิ์ เห็นเมื่อคำตอบมา)
+  const wantAi = !!aiParentId;
   const [aiAllowed, setAiAllowed] = useState<boolean | null>(null);
   useEffect(() => {
     if (!wantAi) return;
@@ -370,7 +371,7 @@ function DetailInsertModal({
     apiFetch("/api/ai/desc-highlights?check=1").then((r) => r.json()).then((j) => { if (!off) setAiAllowed(j?.data?.allowed !== false); }).catch(() => { /* ถามไม่ได้ = ให้หลังบ้านตัดสินตอนกด */ });
     return () => { off = true; };
   }, [wantAi]);
-  const canAi = wantAi && aiAllowed !== false;
+  const canAi = wantAi && (aiAllowed ?? canAiPerm);
   const tabs = TABS.filter((t) => (t.key === "ai" ? canAi : (t.key === "size" ? numFields.length > 0 : t.key === "fit" ? canFit : true) && (!profile?.tabs || profile.tabs.includes(t.key))));
 
   const lines = useMemo(() => splitLines(thText), [thText]);

@@ -2,7 +2,8 @@
  * /api/ai/desc-highlights — ✨ ให้ AI ดูรูปสินค้าแล้วเสนอ "จุดเด่น" 7 ข้อ (ไทย + อังกฤษ) สำหรับ Description
  *   ใช้ที่ ป๊อปแทรก (components/detail-insert-ai) ขั้นจุดเด่น · เจ้าของสั่ง 2026-11-15
  *
- * GET  ?check=1     → { data: { allowed } }   (ป๊อปแทรกใช้ซ่อนแท็บ AI ถ้าผู้ดูแลไม่ได้เปิดให้คนนี้ — "ใครใช้ได้" ในศูนย์ AI)
+ * GET  ?check=1     → { data: { allowed } }   (ป๊อปแทรกใช้ซ่อน/โชว์แท็บ AI)
+ *   ใครเข้าได้ = featureAccess: ศูนย์ AI ตั้ง "เฉพาะที่เลือก" → รายชื่อนั้นตัดสิน (ไม่ต้องมี ai.caption) · "ทุกคน" → ต้องมีสิทธิ์ ai.caption
  * GET  ?parent_id=  → { data: { allowed, can_see_cost, model?, est_thb?, images, quota: { used, limit, remaining, on } } }   (ยังไม่เรียก AI)
  *   พนักงานเห็นแค่ "ใช้ได้อีก N ครั้ง" (เจ้าของสั่ง 2026-11-16) · รุ่น/ราคาต่อครั้ง ส่งให้เฉพาะคนที่มีสิทธิ์ admin.paid_services
  * POST { parent_id, keep?: [{th,en}], shown?: string[], chosen?: string[], extra?: string }
@@ -15,7 +16,7 @@
  * กันข้อมูลผิด: ห้ามตัวเลขขนาด/น้ำหนัก · ห้ามอ้างวัสดุ/คุณสมบัติที่ไม่มีในข้อมูล · ทุกข้อบอกที่มา (เห็นในรูปที่… / จากข้อมูล / จากคลัง / ต้องตรวจ)
  *   + กรองซ้ำหลัง AI ตอบ: ตัวเลขขนาด · คล้ายข้อที่ "ไม่ชอบ" · ซ้ำกับที่เลือกไว้/Description เดิม
  * ความจำ (ชอบ/ไม่ชอบ/กฎ) = lib/desc-ai-memory (ui_config) · การ์ดแบรนด์ = brandProfileBlock
- * ศูนย์ AI ที่เสียเงิน key "ai.desc_highlights" (เปิด-ปิด · เลือกรุ่น · งบ · โควตาครั้งต่อคน) · สิทธิ์ ai.caption · audit ai_desc_highlights
+ * ศูนย์ AI ที่เสียเงิน key "ai.desc_highlights" (เปิด-ปิด · เลือกรุ่น · งบ · โควตาต่อคน · ใครใช้ได้) · สิทธิ์ ai.caption หรือรายชื่อ "ใครใช้ได้" · audit ai_desc_highlights
  */
 import { NextRequest, NextResponse } from "next/server";
 import { apiCan } from "@/lib/api-auth";
@@ -24,7 +25,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { imageParts, imagesToDataUrls, openAiKey, productDetailModel } from "@/lib/ai-caption";
 import { AI_MODEL_CHOICES, isReasoningModel } from "@/lib/ai-caption-models";
-import { aiChat, callTokensFor, loadServiceSettings, serviceAccess, usageAllowance } from "@/lib/paid-services-server";
+import { aiChat, callTokensFor, featureAccess, loadServiceSettings, usageAllowance } from "@/lib/paid-services-server";
 import { callCostThb } from "@/lib/paid-services";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { parentImageKeys } from "@/lib/product-image-keys";
@@ -43,7 +44,9 @@ type Src = (typeof SRC)[number];
 type Item = { th: string; en: string; src: Src; photos: number[]; note_th: string; note_en: string; fav?: boolean; keep?: boolean };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const noAccess = () => NextResponse.json({ error: "คุณยังไม่ได้รับสิทธิ์ใช้ AI (ai.caption) — ขอสิทธิ์จากผู้ดูแลระบบ" }, { status: 401 });
+const noAccess = () => NextResponse.json({ error: "ผู้ดูแลยังไม่ได้เปิดให้คุณใช้ AI ตัวนี้ (ตั้งที่ศูนย์ AI → ใครใช้ได้) · You don't have access to this AI yet" }, { status: 401 });
+/** เข้าฟีเจอร์นี้ได้ไหม — รายชื่อ "ใครใช้ได้" ในศูนย์ AI ก่อน · ไม่ได้ตั้ง = สิทธิ์ ai.caption */
+const canUse = async (request: NextRequest) => featureAccess(KEY, { request }, await apiCan(request, "ai.caption"));
 
 async function modelFor(): Promise<string> {
   const s = await loadServiceSettings();
@@ -62,20 +65,21 @@ function estThb(model: string, images: number): number {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await apiCan(request, "ai.caption"))) return noAccess();
   const sp = new URL(request.url).searchParams;
-  if (sp.get("check") === "1") return NextResponse.json({ data: { allowed: await serviceAccess(KEY, { request }) }, error: null });
+  const ok = await canUse(request);
+  if (sp.get("check") === "1") return NextResponse.json({ data: { allowed: ok }, error: null });
+  if (!ok) return noAccess();
   const parentId = (sp.get("parent_id") ?? "").trim();
   if (!UUID_RE.test(parentId)) return NextResponse.json({ error: "ต้องระบุ parent_id" }, { status: 400 });
   const admin = supabaseAdmin();
   const { data: p } = await admin.from("parent_skus_v2").select("id, cover_image_r2_key").eq("id", parentId).maybeSingle();
   if (!p) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
-  const [model, keys, allowed, canSeeCost] = await Promise.all([
+  const [model, keys, canSeeCost] = await Promise.all([
     modelFor(),
     parentImageKeys(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG),
-    serviceAccess(KEY, { request }),
     apiCan(request, "admin.paid_services"),
   ]);
+  const allowed = true;
   const perCall = await perCallThb(model, Math.max(1, keys.length));
   const quota = await usageAllowance(KEY, { request }, perCall);
   return NextResponse.json({ data: {
@@ -87,7 +91,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type Body = { parent_id?: string; keep?: { th?: string; en?: string }[]; shown?: string[]; chosen?: string[]; extra?: string };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  if (!(await apiCan(request, "ai.caption"))) return noAccess();
+  if (!(await canUse(request))) return noAccess();
   if (!openAiKey()) return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า AI — ผู้ดูแลต้องใส่ค่า OPENAI_API_KEY ใน Vercel แล้ว redeploy" }, { status: 400 });
   let body: Body;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }

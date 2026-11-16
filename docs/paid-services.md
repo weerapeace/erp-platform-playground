@@ -75,7 +75,8 @@
 - ui_config `paid_services_access` = { "<service key>": { mode: "custom", roles: [key ของ erp_roles], users: [user id] } } · ไม่มีรายการ = ทุกคนที่มีสิทธิ์ใช้ฟีเจอร์นั้นอยู่แล้ว (ค่าเริ่ม — ขึ้นเว็บแล้วไม่มีใครเสียสิทธิ์)
 - บังคับที่ด่านกลาง `guardedGpt` (aiChat / aiWebSearch) → `AccessDeniedError` · `aiAvailable` คืน false (ฟีเจอร์ที่มีทางฟรีจะใช้ทางฟรีแทน เช่น แปลภาษา) (code "access_denied" · API ควรตอบ 403) · ผู้ดูแลระบบ (บทบาท admin) ใช้ได้เสมอ · งานอัตโนมัติ (ไม่มีคนกด) ไม่ถูกกั้น
 - บทบาทของคน = user_profiles.role + user_roles (แคช 60 วิ) · ค่าตั้งแคช 30 วิ
-- หน้าจอซ่อนปุ่ม: `serviceAccess(key, { request })` — ตัวอย่าง /api/ai/desc-highlights?check=1 (ป๊อปแทรกซ่อนแท็บ AI)
+- หน้าจอซ่อนปุ่ม: `serviceAccess(key, { request })`
+- **ด่านเข้าฟีเจอร์ `featureAccess(key, ctx, basePerm)`** (เจ้าของเจอ 2026-11-16: ใส่ชื่อพนักงานแล้วยังไม่เห็นปุ่ม เพราะไม่มีสิทธิ์ ai.caption) — ตั้ง "เฉพาะที่เลือก" = รายชื่อตัดสิน ไม่ต้องมีสิทธิ์พื้นฐาน · "ทุกคน" = ต้องมี basePerm เหมือนเดิม · ใช้ที่ /api/ai/desc-highlights (+ ?check=1 ให้ป๊อปแทรกโชว์/ซ่อนแท็บ AI) และ /api/ai/desc-memory · ฟีเจอร์ใหม่ที่อยากให้ศูนย์ AI เป็นตัวตัดสินใครใช้ได้ → ใช้ตัวนี้แทน apiCan อย่างเดียว
 - ตั้งที่ /admin/paid-services ปุ่ม "ใครใช้ได้" ในแถวฟีเจอร์ GPT (ทุกคนที่มีสิทธิ์ / เฉพาะบทบาท + รายคน) · PATCH `{ access: { key, mode, roles, users } }` · audit entity paid_service_access
 
 ## ผู้ให้บริการที่เลือกได้ (2026-11-06)

@@ -254,6 +254,18 @@ async function userRoles(userId: string): Promise<string[]> {
   roleCache.set(userId, { at: Date.now(), roles: out });
   return out;
 }
+/**
+ * ด่านเข้าฟีเจอร์ (ใช้แทนการเช็กสิทธิ์พื้นฐานอย่างเดียว) — เจ้าของเจอ 2026-11-16: ใส่ชื่อพนักงานใน "ใครใช้ได้" แล้วยังไม่เห็นปุ่ม เพราะไม่มีสิทธิ์ ai.caption
+ *   ตั้ง "เฉพาะที่เลือก" ในศูนย์ AI = รายชื่อ/บทบาทนั้นตัดสิน (ไม่ต้องมีสิทธิ์พื้นฐาน · admin ได้เสมอ · ไม่รู้ว่าใครกด = ไม่ได้)
+ *   "ทุกคน" (ค่าเริ่ม) = ต้องมีสิทธิ์พื้นฐาน (basePerm เช่น apiCan(request, "ai.caption")) เหมือนเดิม
+ */
+export async function featureAccess(key: string, ctx: UseCtx | undefined, basePerm: boolean): Promise<boolean> {
+  const acc = (await loadAccess())[splitPlaceKey(key).key];
+  if (!acc || acc.mode !== "custom") return basePerm;
+  const userId = await resolveUser(ctx);
+  if (!userId) return false;
+  return accessAllowed(acc, { id: userId, roles: await userRoles(userId) });
+}
 /** คนที่กดใช้ฟีเจอร์นี้ได้ไหม (ตั้ง "ใครใช้ได้" ในศูนย์ AI) — ใช้ซ่อนปุ่ม · ไม่รู้ว่าใครกด = ได้ (งานอัตโนมัติ) */
 export async function serviceAccess(key: string, ctx?: UseCtx): Promise<boolean> {
   const acc = (await loadAccess())[splitPlaceKey(key).key];

@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan } from "@/lib/api-auth";
+import { featureAccess } from "@/lib/paid-services-server";
 import { writeAudit } from "@/lib/audit";
 import { requestActor } from "@/lib/request-actor";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -20,7 +21,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const noAccess = () => NextResponse.json({ error: "คุณยังไม่ได้รับสิทธิ์ใช้ AI (ai.caption) — ขอสิทธิ์จากผู้ดูแลระบบ" }, { status: 401 });
+const noAccess = () => NextResponse.json({ error: "ผู้ดูแลยังไม่ได้เปิดให้คุณใช้ AI ตัวนี้ (ตั้งที่ศูนย์ AI → ใครใช้ได้) · You don't have access to this AI yet" }, { status: 401 });
+/** ความจำนี้เป็นของ AI จุดเด่น — ใครเข้าได้ตามฟีเจอร์ ai.desc_highlights (รายชื่อ "ใครใช้ได้" ก่อน · ไม่ได้ตั้ง = ai.caption) */
+const canUse = async (request: NextRequest) => featureAccess("ai.desc_highlights", { request }, await apiCan(request, "ai.caption"));
 
 async function loadStore() {
   const { data } = await supabaseAdmin().from("ui_config").select("value").eq("key", DESC_AI_MEMORY_KEY).maybeSingle();
@@ -28,7 +31,7 @@ async function loadStore() {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await apiCan(request, "ai.caption"))) return noAccess();
+  if (!(await canUse(request))) return noAccess();
   const brandId = new URL(request.url).searchParams.get("brand_id");
   const store = await loadStore();
   const data = memoryFor(store, brandId && UUID_RE.test(brandId) ? brandId : null);
@@ -36,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  if (!(await apiCan(request, "ai.caption"))) return noAccess();
+  if (!(await canUse(request))) return noAccess();
   let body: { action?: string; list?: string; text?: string; scope?: string; brand_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const list = String(body.list ?? "") as MemoryList;
