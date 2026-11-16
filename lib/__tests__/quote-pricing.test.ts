@@ -109,3 +109,14 @@ describe("ลดราคาตามจำนวน", () => {
     expect(tierPrice(() => 0, 300, 1.75, "nice", DEFAULT_QTY_DISC)).toBeNull();
   });
 });
+
+describe("quoteQtyMode", () => {
+  it("ดูแบบจากขั้นจำนวน", async () => {
+    const { quoteQtyMode } = await import("../quote-pricing");
+    expect(quoteQtyMode([null])).toBe("none");
+    expect(quoteQtyMode([500])).toBe("single");
+    expect(quoteQtyMode([100, 200, 500])).toBe("set");
+    expect(quoteQtyMode([100, null])).toBe("set");
+    expect(quoteQtyMode([])).toBe("set");
+  });
+});

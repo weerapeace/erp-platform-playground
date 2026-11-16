@@ -13,6 +13,8 @@
  *   เปิดครั้งล่าสุดไว้ให้ · ช่องราคา = ราคา + กำไร (%) บรรทัดเดียว · สถานะรายช่องโชว์ตอนชี้ (ถ้าทุกช่องสถานะเดียวกัน · จอสัมผัสโชว์ตลอด)
  * 🎨 หลายสีต่อไซส์ (เจ้าของขอ 2026-11-11): ฟอร์ม = แถวสีใต้ไซส์ · จำนวนต่อสีแยกตามขั้น (หรือใส่เป็น %) · แบ่งเท่ากัน · แยกราคาตามสี (± บาท จากราคาไซส์)
  *   เก็บที่ design_sheet_quotes.colors ทีละช่อง · กติกา lib/quote-colors · การ์ดโชว์จำนวนต่อสี + เตือนแบ่งไม่ครบ/เกิน · ส่งไปใบเสนอราคา 1 สี = 1 บรรทัด
+ * 🔢 3 แบบ (เจ้าของเลือก 2026-11-16): ใส่จำนวนเดียว · ราคาเป็นชุด · ไม่รู้จำนวน — ปุ่มสลับบนหัวฟอร์ม · ไม่เก็บแยกในฐานข้อมูล ดูจากขั้นจำนวน (lib/quote-pricing quoteQtyMode)
+ *   ครั้งใหม่เปิดเป็นแบบเดียวกับครั้งก่อน · สลับแบบแล้วราคาไม่หาย (ย้ายคอลัมน์แรกไป) · การ์ดมีป้ายบอกแบบ
  * ของกลาง: ConfirmDialog · Popover (เมนู ⋮) · InfoHint · useCanHover · useToast · apiFetch · lib/quote-pricing · lib/quote-colors
  */
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -27,7 +29,7 @@ import { Icon } from "@/components/icon";
 import { Popover } from "@/components/popover";
 import { InfoHint } from "@/components/info-hint";
 import { useCanHover } from "@/lib/use-can-hover";
-import { priceFromCost, tierPrice } from "@/lib/quote-pricing";
+import { priceFromCost, tierPrice, quoteQtyMode, type QuoteQtyMode } from "@/lib/quote-pricing";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
 import { QUOTE_COLOR_PALETTE, cleanQuoteColors, colorQtyStatus, colorUnitPrice, paletteHex, percentsToQty, qtyToPercent, splitEvenly, type QuoteColor } from "@/lib/quote-colors";
 
@@ -244,10 +246,14 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                   {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               ) : <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${st ? st.cls : "bg-amber-50 text-amber-700"}`}>{st ? st.label : t("◐ ผสม", "◐ Mixed")}</span>}
+              {(() => { const md = quoteQtyMode(b.qtys); return (
+                <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap ${md === "none" ? "bg-violet-50 text-violet-700" : md === "single" ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-600"}`} title={t("แบบที่เสนอครั้งนี้", "Quote type of this round")}>
+                  {md === "none" ? t("ไม่รู้จำนวน", "Qty unknown") : md === "single" ? t(`${fmtInt(b.qtys[0])} ชิ้น`, `${fmtInt(b.qtys[0])} pcs`) : t(`ชุด ${b.qtys.length} ขั้น`, `Set of ${b.qtys.length}`)}
+                </span>); })()}
               {/* พับอยู่ = บรรทัดสรุปราคา (กดเพื่อเปิด) · เปิดอยู่ = หมายเหตุ กดเพื่อแก้ (บันทึกทุกช่องของครั้งนี้) */}
               {!isOpen ? (
                 <button type="button" onClick={toggle} className="flex-1 min-w-0 text-left text-[11px] truncate" title={[priceSummary, b.note].filter(Boolean).join("\n")}>
-                  <span className="text-slate-400">{t(`${b.sizes.length} ไซส์ × ${b.qtys.length} ขั้น`, `${b.sizes.length} sizes × ${b.qtys.length} tiers`)}</span>
+                  <span className="text-slate-400">{t(`${b.sizes.length} ไซส์`, `${b.sizes.length} sizes`)}</span>
                   {priceSummary && <span className="ml-1.5 font-medium text-blue-700 tabular-nums">{priceSummary}</span>}
                   {b.note && <span className="ml-1.5 text-slate-400">· {b.note}</span>}
                 </button>
@@ -311,7 +317,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
                   <tr className="text-[11px] text-slate-500">
                     <th className="px-3 py-1.5 text-left font-medium w-28">{t("ไซส์", "Size")}</th>
                     <th className="px-2 py-1.5 text-right font-medium w-36" title={t("ราคาจากตีราคาตอนเสนอ → ตีราคาปัจจุบันของไซส์นี้ (ต้นทุนขึ้น=แดง ลง=เขียว)", "Costing at quote time → current costing for this size (cost up = red, down = green)")}>{t("ตีราคา → ปัจจุบัน", "Costing → now")}</th>
-                    {b.qtys.map((qty) => <th key={qtyKey(qty)} className="px-2 py-1.5 text-right font-medium min-w-[7rem] bg-blue-50/60 text-blue-700">{qty == null ? t("ไม่ระบุจำนวน", "No qty") : t(`${fmtInt(qty)} ชิ้น`, `${fmtInt(qty)} pcs`)}</th>)}
+                    {b.qtys.map((qty) => <th key={qtyKey(qty)} className="px-2 py-1.5 text-right font-medium min-w-[7rem] bg-blue-50/60 text-blue-700">{qty == null ? t("ราคาต่อชิ้น (ไม่รู้จำนวน)", "Per piece (qty unknown)") : t(`${fmtInt(qty)} ชิ้น`, `${fmtInt(qty)} pcs`)}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -498,11 +504,41 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     if (to !== null && (!Number.isFinite(to) || to <= 0)) { toast.error(tr("ใส่จำนวนเป็นตัวเลขมากกว่า 0 (เว้นว่าง = ไม่ระบุจำนวน)", "Enter a quantity greater than 0 (blank = no qty)")); return; }
     if (qtyKey(to) === qtyKey(from)) return;
     if (qtys.some((q) => qtyKey(q) === qtyKey(to))) { toast.error(tr("มีขั้นจำนวนนี้แล้ว", "This quantity tier already exists")); return; }
+    moveCol(from, to);
+  };
+  /** ย้ายคอลัมน์ขั้นจำนวน from → to พร้อมราคา/จำนวนสี/ช่องเดิม (ไม่ตรวจค่า — คนเรียกตรวจเอง) */
+  const moveCol = (from: number | null, to: number | null) => {
     setQtys((qs) => qs.map((q) => (qtyKey(q) === qtyKey(from) ? to : q)).sort(byQty));
     setCells((m) => { const n = { ...m }; for (const s of rowSizes) { const a = key(s.key, from); if (a in n) { n[key(s.key, to)] = n[a]; delete n[a]; } } return n; });
     setColorQty((m) => { const n = { ...m }; for (const s of rowSizes) for (const c of colorsOf(s.key)) { const a = ckey(s.key, from, c.name); if (a in n) { n[ckey(s.key, to, c.name)] = n[a]; delete n[a]; } } return n; });
     setOrigQty((o) => { const n = { ...o }; if (qtyKey(from) in n) { n[qtyKey(to)] = n[qtyKey(from)]; delete n[qtyKey(from)]; } return n; });
   };
+  // 🔢 แบบของครั้งนี้: จำนวนเดียว / ราคาเป็นชุด / ไม่รู้จำนวน — ตั้งต้นจากครั้งก่อน (หรือการ์ดที่แก้) · สลับแล้วเก็บราคาคอลัมน์แรกไว้
+  const [mode, setModeState] = useState<QuoteQtyMode>(() => quoteQtyMode(initQtys));
+  const [qtyDraft, setQtyDraft] = useState<string | null>(null);   // ช่องจำนวน (แบบจำนวนเดียว) ระหว่างพิมพ์
+  const switchMode = (to: QuoteQtyMode) => {
+    if (to === mode) return;
+    setEditQty(null); setQtyDraft(null);
+    if (to === "set") {
+      const add = [100, 200, 500, 1000].filter((d) => !qtys.some((q) => q === d));
+      setQtys((qs) => [...qs, ...add].sort(byQty));
+    } else {
+      const keep = qtys.find((q) => q != null) ?? null;   // คอลัมน์แรกที่มีจำนวน (ราคาของคอลัมน์นี้ตามไป)
+      for (const q of qtys) if (qtyKey(q) !== qtyKey(keep)) removeQty(q);
+      setQtys([keep]);
+      if (to === "none" && keep != null) moveCol(keep, null);
+    }
+    setModeState(to);
+  };
+  const commitSingleQty = () => {
+    if (qtyDraft == null) return;
+    const v = qtyDraft.trim(); setQtyDraft(null);
+    const to = v === "" ? null : Number(v);
+    if (to !== null && (!Number.isFinite(to) || to <= 0)) { toast.error(tr("ใส่จำนวนเป็นตัวเลขมากกว่า 0", "Enter a quantity greater than 0")); return; }
+    const from = qtys[0] ?? null;
+    if (qtyKey(to) !== qtyKey(from)) moveCol(from, to);
+  };
+  const needQty = () => { if (mode === "single" && qtys[0] == null) { toast.error(tr("ใส่จำนวนชิ้นก่อน — ถ้ายังไม่รู้จำนวน เลือก \"ไม่รู้จำนวน\"", "Enter the quantity first — or pick \"Qty unknown\"")); return true; } return false; };
   // 💰 ตัวช่วยตั้งราคาส่งวิธีคิดมา → ใส่ทุกช่อง (ไซส์ที่ติ๊ก × ขั้นจำนวน) จากตีราคาของช่องนั้น · ช่องที่ยังไม่ได้ตีราคา ไม่แตะ
   const [fillNote, setFillNote] = useState<string | null>(null);
   useEffect(() => {
@@ -547,6 +583,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
   };
   // ✏️ บันทึกการแก้ไข: เทียบกับช่องเดิมของการ์ด แล้วยิงเฉพาะที่เปลี่ยน (ทุก API มี audit อยู่แล้ว)
   const saveEdit = async (b: Batch) => {
+    if (needQty()) return;
     const priceOf = (s: string, qty: number | null): number | null => { const v = cells[key(s, qty)]?.trim(); return v ? Number(v) : null; };
     for (const s of rowSizes) if (onSizes.includes(s.key)) for (const qty of qtys) {
       const n = priceOf(s.key, qty);
@@ -613,6 +650,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
   };
   const save = async () => {
     if (editing) return saveEdit(editing);
+    if (needQty()) return;
     const list: { parent_code: string; qty: number | null; price: number | null; offered_price: number | null; colors: QuoteColor[] | null }[] = [];
     for (const s of sizes.filter((x) => onSizes.includes(x.key))) for (const qty of qtys) {
       const v = cells[key(s.key, qty)]?.trim(); if (!v) continue;
@@ -643,6 +681,12 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
           {editing?.status === "mixed" && <option value="mixed">{t("◐ ผสม (คงตามรายช่อง)", "◐ Mixed (keep per cell)")}</option>}
           {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
+        <span role="radiogroup" aria-label={t("แบบการเสนอราคา", "Quote type")} className="inline-flex w-full sm:w-auto overflow-hidden rounded-md border border-slate-200 bg-white text-xs">
+          {([["single", t("ใส่จำนวนเดียว", "One qty")], ["set", t("ราคาเป็นชุด", "Qty tiers")], ["none", t("ไม่รู้จำนวน", "Qty unknown")]] as [QuoteQtyMode, string][]).map(([m, l]) => (
+            <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => switchMode(m)}
+              className={`h-7 flex-1 sm:flex-none px-2.5 whitespace-nowrap border-l first:border-l-0 border-slate-200 ${mode === m ? "bg-blue-600 text-white font-medium" : "text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+          ))}
+        </span>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("หมายเหตุ (เช่น ลูกค้าขอลด 5%)", "Note (e.g. customer asked for 5% off)")} className="h-7 flex-1 min-w-[10rem] px-2 text-xs border border-slate-200 rounded-md bg-white" />
         <button type="button" onClick={fillFromCost} className="h-7 px-2 text-xs border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50" title={t("ช่องที่ยังว่าง ใส่ราคาเท่าตีราคาปัจจุบัน", "Fill empty cells with the current costing")}>{t("เติมจากตีราคา", "Fill from costing")}</button>
         <span className="inline-flex items-center gap-1 h-7 pl-2 pr-1 text-xs border border-slate-200 bg-white rounded-md text-slate-600" title={t("บวก/ลบราคาที่เสนอทุกช่องพร้อมกัน เช่น 10 → 400 เป็น 410 · -10 → 400 เป็น 390 (ช่องว่างไม่แตะ)", "Add/subtract on every offered price at once, e.g. 10 → 400 becomes 410 · -10 → 390 (empty cells untouched)")}>
@@ -659,7 +703,16 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
             <tr className="text-[11px] text-slate-500">
               <th className="px-3 py-1.5 text-left font-medium w-28">{t("ไซส์", "Size")}</th>
               <th className="px-2 py-1.5 text-right font-medium w-28">{t("ตีราคาปัจจุบัน", "Current costing")}</th>
-              {qtys.map((qty) => (
+              {mode === "single" ? (
+                <th className="px-2 py-1.5 text-right font-medium min-w-[7rem] text-blue-700">
+                  <span className="inline-flex items-center gap-1">{t("จำนวน", "Qty")}
+                    <input type="number" min={1} value={qtyDraft ?? (qtys[0] == null ? "" : String(qtys[0]))} onChange={(e) => setQtyDraft(e.target.value)} onBlur={commitSingleQty}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} placeholder={t("เช่น 500", "e.g. 500")} aria-label={t("จำนวนชิ้น", "Quantity")}
+                      className={`h-6 w-20 px-1 text-[11px] text-right border rounded ${qtys[0] == null ? "border-amber-400" : "border-blue-300"}`} />{t("ชิ้น", "pcs")}</span>
+                </th>
+              ) : mode === "none" ? (
+                <th className="px-2 py-1.5 text-right font-medium min-w-[7rem] text-blue-700">{t("ราคาต่อชิ้น", "Price / pc")} <span className="font-normal text-slate-400">{t("(ยังไม่รู้จำนวน)", "(qty unknown)")}</span></th>
+              ) : qtys.map((qty) => (
                 <th key={qtyKey(qty)} className="px-2 py-1.5 text-right font-medium min-w-[7rem] text-blue-700">
                   {editQty && qtyKey(editQty.from) === qtyKey(qty) ? (
                     <input autoFocus type="number" min={1} value={editQty.val} onChange={(e) => setEditQty({ from: qty, val: e.target.value })}
@@ -672,7 +725,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
                 </th>
               ))}
               <th className="px-2 py-1.5 text-left font-normal">
-                <span className="inline-flex items-center gap-1"><input type="number" min={1} value={newQty} onChange={(e) => setNewQty(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addQty(); }} placeholder={t("เพิ่มจำนวน", "Add qty")} className="h-6 w-20 px-1 text-[11px] border border-slate-200 rounded" /><button type="button" onClick={addQty} className="h-6 px-1.5 text-[11px] border border-slate-200 bg-white rounded hover:bg-slate-50">＋</button></span>
+                {mode === "set" && <span className="inline-flex items-center gap-1"><input type="number" min={1} value={newQty} onChange={(e) => setNewQty(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addQty(); }} placeholder={t("เพิ่มจำนวน", "Add qty")} className="h-6 w-20 px-1 text-[11px] border border-slate-200 rounded" /><button type="button" onClick={addQty} className="h-6 px-1.5 text-[11px] border border-slate-200 bg-white rounded hover:bg-slate-50">＋</button></span>}
               </th>
             </tr>
           </thead>
@@ -787,7 +840,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
       </div>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-blue-200 bg-blue-50/60">
         <span className="text-[11px] text-slate-500">
-          {editing ? t("ล้างราคา / ปิดไซส์ / เอาขั้นออก = ลบช่องนั้น · กดตัวเลขขั้นจำนวนที่หัวตารางเพื่อแก้", "Clear price / untick size / remove tier = delete that cell · click a tier number in the header to edit it") : t("ช่องว่าง = ไม่เสนอขั้นนั้น", "Empty cell = not quoted for that tier")}{t(" · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน", " · small number under a cell = profit/pc vs current costing")}{costDirty ? t(" · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน", " · unsaved costing will be saved first") : ""}
+          {editing ? t("ล้างราคา / ปิดไซส์ / เอาขั้นออก = ลบช่องนั้น · กดตัวเลขขั้นจำนวนที่หัวตารางเพื่อแก้", "Clear price / untick size / remove tier = delete that cell · click a tier number in the header to edit it") : mode === "none" ? t("ยังไม่รู้จำนวน ใส่แค่ราคาต่อชิ้น (รู้จำนวนทีหลัง กด ⋮ แก้ไข แล้วเลือก \"ใส่จำนวนเดียว\")", "Qty unknown — enter the price per piece only (later: ⋮ Edit → \"One qty\")") : mode === "single" ? t("ใส่จำนวนชิ้น 1 ค่า แล้วใส่ราคาต่อชิ้น", "Enter one quantity, then the price per piece") : t("ช่องว่าง = ไม่เสนอขั้นนั้น", "Empty cell = not quoted for that tier")}{t(" · ตัวเลขเล็กใต้ช่อง = กำไร/ชิ้น เทียบตีราคาปัจจุบัน", " · small number under a cell = profit/pc vs current costing")}{costDirty ? t(" · ตีราคาที่ยังไม่บันทึก ระบบจะบันทึกให้ก่อน", " · unsaved costing will be saved first") : ""}
         </span>
         <div className="flex gap-1.5">
           <button type="button" onClick={onClose} disabled={saving} className="h-8 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>

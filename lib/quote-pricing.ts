@@ -157,3 +157,14 @@ export function tierPrice(costAt: (qty: number) => number, qty: number, mult: nu
   const v = base * (1 - d / 100);
   return round === "none" ? r2(v) : round === "nice" ? niceNear(v) : roundQuotePrice(v, round);
 }
+
+/** 🔢 แบบของรอบเสนอราคา (เจ้าของขอ 2026-11-16: "บางทีเรายังไม่รู้จำนวน")
+ *   single = ใส่จำนวนเดียว · set = ราคาเป็นชุด (หลายขั้นจำนวน) · none = ไม่รู้จำนวน (ราคาต่อชิ้นอย่างเดียว)
+ *   ไม่เก็บแยกในฐานข้อมูล — ดูจากขั้นจำนวนของครั้งนั้น (qty = null คือไม่ระบุจำนวน ซึ่งเก็บได้อยู่แล้ว)
+ *   ข้อมูลเก่าหลายขั้น = set เหมือนเดิม */
+export type QuoteQtyMode = "single" | "set" | "none";
+export const QTY_MODE_LABEL: Record<QuoteQtyMode, string> = { single: "ใส่จำนวนเดียว", set: "ราคาเป็นชุด", none: "ไม่รู้จำนวน" };
+export function quoteQtyMode(qtys: readonly (number | null)[]): QuoteQtyMode {
+  if (qtys.length === 1) return qtys[0] == null ? "none" : "single";
+  return "set";
+}
