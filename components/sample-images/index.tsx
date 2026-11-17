@@ -37,6 +37,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
 import { AlbumCover } from "@/components/album-cover";
 import { AlbumDropDialog } from "./album-drop-dialog";
+import { SampleTwoPane } from "./two-pane";
 import { brandCards, brandViewItems, albumMonthKey } from "@/lib/sample-images";
 import { SAMPLE_SUB_SORTS, isAutoAlbumName, isSubSort, sortSubAlbums, parentGroupOf, type SampleSubSort } from "@/lib/sample-images";
 import { SampleAlbumPickerModal } from "./album-picker";
@@ -135,6 +136,7 @@ export function SampleImagesPage() {
   // อัลบั้มย่อย: เรียง (จัดเอง / ตาม Parent SKU / ใหม่สุด) · โหมดจัดลำดับ (← →) · โน้ตข้าง ๆ (เจ้าของเลือก 2026-11-17)
   const [subSort, setSubSort] = useUserPref<SampleSubSort>("sample_images_sub_sort", "manual", (r) => (isSubSort(r) ? r : null));
   const [orderMode, setOrderMode] = useState(false);
+  const [organize, setOrganize] = useState(false);   // ⇆ จัดเรียง 2 ฝั่ง
   const [month, setMonth] = useState<string | null>(null);
   const [albumDrop, setAlbumDrop] = useState<{ src: SampleAlbum; dst: SampleAlbum } | null>(null);   // ลากอัลบั้มวางบนอัลบั้ม → ถามรวม/ใส่ข้างใน   // หน้าแบรนด์: กรองเดือนที่ลง
   const [dropHost, setDropHost] = useState<SampleAlbum | null>(null);   // อัลบั้มแม่ของป๊อปลงรูป (อัลบั้มที่เปิด / อัลบั้มของวันนี้ตอนลงจากหน้าแบรนด์)
@@ -381,7 +383,7 @@ export function SampleImagesPage() {
   const allOn = list.length > 0 && list.every((p) => sel.has(p.id));
   // ลากกรอบจากที่ว่าง = เลือกหลายรูป + การ์ดอัลบั้มย่อย (เจ้าของขอ 2026-11-17 · ของกลาง lib/use-marquee-select) · id = "p:<รูป>" / "a:<อัลบั้ม>"
   const mq = useMarqueeSelect({
-    disabled: !album,
+    disabled: !album || organize,
     getSelected: () => [...[...sel].map((id) => `p:${id}`), ...[...selAlbums].map((id) => `a:${id}`)],
     setSelected: (ids) => {
       setSel(new Set(ids.filter((x) => x.startsWith("p:")).map((x) => x.slice(2))));
@@ -642,6 +644,12 @@ export function SampleImagesPage() {
             <button type="button" onClick={() => fileRef.current?.click()} disabled={!!up} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"><Icon value="i:upload" />{t("เลือกรูป", "Choose images")}</button>
           </>
         )}
+        {canEdit && albums && (
+          <button type="button" onClick={() => setOrganize((v) => !v)}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${organize ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+            <span aria-hidden>⇆</span>{organize ? t("ปิดจัดเรียง", "Close organizer") : t("จัดเรียง 2 ฝั่ง", "Two-pane organizer")}
+          </button>
+        )}
         <a href="/master/design-dashboard" target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:external-link" />Design Dashboard</a>
       </div>
 
@@ -652,7 +660,11 @@ export function SampleImagesPage() {
             {/* แถบแบรนด์ (ชิ้นส่วนร่วม ./parts — ใช้ในตัวเลือกไฟล์กลางด้วย) */}
             <SampleBrandBar brands={brands} albums={albums} tab={tab} onTab={switchTab} />
 
-            <div ref={mq.ref} className="relative min-w-0 space-y-3">
+            {organize && (
+              <SampleTwoPane startLeft={albumId} onClose={() => setOrganize(false)} albums={albums} brands={brands} tab={tab} canEdit={canEdit}
+                nameOf={(a) => nameOf(a)} onChanged={() => reload(albumId)} onAlbumOnAlbum={(src, dst) => setAlbumDrop({ src, dst })} />
+            )}
+            <div ref={mq.ref} className={`relative min-w-0 space-y-3 ${organize ? "hidden" : ""}`}>
               {mq.box && <div style={mq.box} className="rounded-sm border border-violet-500 bg-violet-500/10" />}
               {!album && (
                 <>
