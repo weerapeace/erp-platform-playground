@@ -5,6 +5,7 @@
  * ข้อมูลชุดเดียวกับมุมมอง "💰 ค่าแรงรายเดือน" ในบอร์ดจ่ายงาน (/api/mo/labor-summary)
  * ของกลาง: ระบบพิมพ์ (buildReportHtml + PrintFrame)
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -112,5 +113,5 @@ function Inner() {
 }
 
 export default function LaborSummaryPrintPage() {
-  return <Suspense fallback={<div className="p-8 text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

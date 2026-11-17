@@ -5,6 +5,7 @@
  *   ใบของคนรับของ: รายการ + จำนวน สั่ง/รับ/เสีย ไม่มีราคา · เทมเพลตจากระบบพิมพ์กลาง (entity gr) ไม่มีใน DB = ใช้ค่าเริ่มต้น
  *   /print/goods-receipt/RB-… = พิมพ์รวมทั้ง "ชุดรับของ" เป็นใบเดียว (รายการเรียงตามใบสั่งซื้อ · ชื่อสินค้านำหน้าด้วยเลข PO)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -105,7 +106,7 @@ export default function PrintGoodsReceiptPage() {
         {gr?.voucher_id && <a href={`/print/purchase-voucher/${gr.voucher_id}`} className="ml-auto text-sm text-blue-600 hover:underline">🧾 เปิดใบซื้อ (ใบสำคัญรับ) {gr.pv_no ?? ""}</a>}
       </div>
       <div className="py-6 px-4">
-        {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+        {loading ? <LoadingState />
         : error || !gr ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
         : <div className="relative mx-auto" style={{ maxWidth: 840 }}><PrintFrame html={html} fileName={fileName} /></div>}
       </div>

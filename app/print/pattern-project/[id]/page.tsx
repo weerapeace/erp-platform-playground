@@ -6,6 +6,7 @@
  *   ภาพรวม + วางบนผ้า · พิมพ์ขนาดจริง A4 1:1 · ดาวน์โหลด DXF / SVG — ตัวหน้าพิมพ์ = ของกลาง PatternPrintView (ตัวเดียวกับใบงานออกแบบ)
  *   อ่านแพทเทิร์นที่ "บันทึกแล้ว" จาก /api/pattern-projects/<id> (ต้องมีสิทธิ์ pattern_studio.view)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
@@ -273,7 +274,7 @@ export default function PrintPatternProjectPage() {
   const code = project?.pattern_no ?? "";
   usePrintLog("pattern_project", id && project ? [{ doc_id: String(id), doc_no: code || null }] : []);
 
-  if (loading) return <div className="p-10 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
   if (err) return <div className="p-10 text-center text-sm text-rose-600">{err}</div>;
 
   return (

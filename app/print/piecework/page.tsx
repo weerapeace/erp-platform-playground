@@ -4,6 +4,7 @@
  * พิมพ์ใบจ่ายงานเหมา — /print/piecework?batch=<id> (จ่ายชุดเดียวกัน) หรือ ?ids=a,b (เลือกเอง เช่น งานค้างของคนหนึ่ง)
  * 1 คน = 1 แผ่น · บันทึกประวัติพิมพ์ทุกแถว (usePrintLog "piecework")
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
@@ -53,7 +54,7 @@ function PieceworkPrintInner() {
       </div>
       <div className="px-4 py-6">
         {error && !rows?.length ? <div className="py-20 text-center text-red-500">{error}</div>
-          : rows === null ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+          : rows === null ? <LoadingState />
           : rows.length === 0 ? <div className="py-20 text-center text-slate-400">ไม่มีงานเหมาให้พิมพ์</div>
           : <PrintFrame html={html} fileName={fileName} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
@@ -62,5 +63,5 @@ function PieceworkPrintInner() {
 }
 
 export default function PieceworkPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><PieceworkPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><PieceworkPrintInner /></Suspense>;
 }

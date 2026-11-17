@@ -8,6 +8,7 @@
  *   • 📐 รายละเอียดงาน = รูป+สิ่งที่วาด+หมุดวัตถุดิบ · ตารางหมุด · สรุปวัตถุดิบ · ตารางสี (เปิดตรงได้ด้วย ?mode=spec)
  *   • เน้น Comment ลูกค้า = รูปหลักย่อเล็ก · comment เป็นการ์ด + ติ๊กเลือกรูปแนบที่จะพิมพ์ใหญ่ (lib/design-sheet-print)
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -439,7 +440,7 @@ export default function PrintDesignSheetPage() {
       <PrintToolbar onBack={() => router.back()} fileName={fileName} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !sheet ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบใบงาน"}</div>
         ) : !template ? (

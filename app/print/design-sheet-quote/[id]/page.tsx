@@ -4,6 +4,7 @@
  * พิมพ์ใบเสนอราคา (งานออกแบบ) — ข้อมูลใบงาน + ประวัติรอบเสนอราคา + ราคาล่าสุด
  * ใช้ระบบ template กลาง (erp_report_templates entity_type='design_sheet_quote')
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -103,7 +104,7 @@ export default function PrintDesignSheetQuotePage() {
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบเสนอราคา งานออกแบบ", sheet ? String(sheet.code ?? "") : null)} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !sheet ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบใบงาน"}</div>
         ) : !template ? (

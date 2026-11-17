@@ -10,6 +10,7 @@
  * 🔒 มีต้นทุน/กำไร → เปิดได้เฉพาะคนที่มีสิทธิ์ products.cost.view
  * กรองตามไซส์ (?parent=) ได้เหมือนใบตีราคาต้นทุน
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -155,7 +156,7 @@ export default function PrintSupplierQuotePage() {
     <div className="min-h-screen bg-slate-100">
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบตีราคาสั่งจากร้าน", sheet ? String(sheet.code ?? "") : null)} />
       <div className="px-4 py-6">
-        {loading ? <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
+        {loading ? <LoadingState />
           : error || !sheet ? <div className="py-20 text-center text-red-500">⚠️ {error ?? "ไม่พบใบงาน"}</div>
           : !template ? (
             <div className="py-20 text-center text-amber-600">

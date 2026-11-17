@@ -5,6 +5,7 @@
  * เปิดจากหน้า LINE พนักงาน: /print/payroll-line-invites?ids=<employee_id,...>
  * บัตรออกใหม่ทุกครั้งที่เปิดหน้านี้ (อายุ 14 วัน) · ออกให้เฉพาะคนที่ทำงานอยู่และยังไม่ผูก LINE
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
@@ -162,7 +163,7 @@ function LineInvitesPrint() {
 
 export default function PayrollLineInvitesPrintPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-slate-500">กำลังโหลดหน้าพิมพ์...</div>}>
+    <Suspense fallback={<LoadingState label="กำลังโหลดหน้าพิมพ์..." boxClassName="p-8 text-sm text-slate-500" />}>
       <LineInvitesPrint />
     </Suspense>
   );

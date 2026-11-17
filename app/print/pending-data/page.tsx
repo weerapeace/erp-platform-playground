@@ -7,6 +7,7 @@
  *   → ทุกหัวข้อจึงมี "ช่องว่าง" (blanks) ต่อท้ายให้เขียน
  * ใช้ข้อมูลชุดเดียวกับป๊อปรายงานบนแดชบอร์ด (/api/pending-data)
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -157,5 +158,5 @@ function PendingDataPrintInner() {
 }
 
 export default function PendingDataPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><PendingDataPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><PendingDataPrintInner /></Suspense>;
 }

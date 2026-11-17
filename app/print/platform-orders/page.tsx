@@ -7,6 +7,7 @@
  *   label = ใบปะหน้า: ออเดอร์ตัวอย่าง = ใบจำลองมีลายน้ำ · ออเดอร์จริง = ต้องใช้ไฟล์ของ Shopee (เฟส B หลังเชื่อมร้าน)
  * ตัวสร้างใบ = lib/platform-order-print (มีเทสต์) · ข้อมูล = /api/platform-orders?ids=
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -104,7 +105,7 @@ function Inner() {
   const back = <button onClick={() => (window.history.length > 1 ? router.back() : router.push("/master/platform-orders"))} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:arrow-left" />กลับ</button>;
 
   if (err) return <div className="min-h-screen bg-slate-100 p-6"><div className="mb-4">{back}</div><div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{err}</div></div>;
-  if (!orders) return <div className="min-h-screen bg-slate-100 py-20 text-center text-slate-400">กำลังโหลด…</div>;
+  if (!orders) return <LoadingState />;
   if (kind === "pick") return <PickView orders={orders} shop={shop} header={<>{back}{tabs}</>} />;
 
   return (
@@ -176,5 +177,5 @@ function PickView({ orders, shop, header }: { orders: PrintOrder[]; shop: string
 }
 
 export default function PlatformOrdersPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

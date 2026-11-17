@@ -7,6 +7,7 @@
  *   → พรีวิวเปลี่ยนทันที · เก็บไว้กับใบแจ้งใบนั้น (คนมีสิทธิ์แก้) · "จำไว้ใช้ครั้งหน้า" = ใบแจ้งใหม่ของคนนี้ตั้งต้นแบบนี้
  * ของกลาง: PrintToolbar / PrintFrame / SaveImageButton (components/report) · usePrintLog · buildNoticeHtml (lib/design-sheet-notice)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame, printReportFrameOrWindow } from "@/components/report";
@@ -123,7 +124,7 @@ export default function PrintDesignSheetNoticePage() {
       <PrintToolbar onBack={() => router.back()} fileName={fileName} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !notice ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบใบแจ้ง"}</div>
         ) : (

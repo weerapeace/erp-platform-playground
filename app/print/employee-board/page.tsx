@@ -10,6 +10,7 @@
  * ข้อมูลชุดเดียวกับหน้า "ผังพนักงาน (บอร์ด)" (/api/payroll/board) — เห็นเฉพาะที่บันทึกแล้ว (การย้ายที่ยังไม่กดบันทึกจะไม่ติดมา)
  * ของกลาง: ระบบพิมพ์ (buildReportHtmlMulti + PrintFrame) · apiFetch · r2ImageUrl
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -200,12 +201,12 @@ function Inner() {
           className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       {err && <div className="mx-6 mt-4 rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm">{err}</div>}
-      {!err && !data && <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลดรายชื่อพนักงาน…</div>}
+      {!err && !data && <LoadingState label="กำลังโหลดรายชื่อพนักงาน…" boxClassName="p-8 text-center text-slate-400 text-sm" />}
       {html && <PrintFrame html={html} />}
     </div>
   );
 }
 
 export default function EmployeeBoardPrintPage() {
-  return <Suspense fallback={<div className="p-8 text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

@@ -12,6 +12,7 @@
  * กรองตาม "ไซส์/แท็บ" (parent_code) — ค่าเริ่มต้นจาก ?parent= (ไซส์ที่กำลังดูตอนกดพิมพ์) · ไม่มี = ทั้งหมด
  * ใช้ระบบ template กลาง (erp_report_templates entity_type='design_sheet_cost') — แก้หน้าตาที่ /admin/report-templates
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -189,7 +190,7 @@ export default function PrintDesignSheetCostPage() {
       <div className="flex items-start gap-4 px-4 py-4">
         <div className="min-w-0 flex-1">
           {loading ? (
-            <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
+            <LoadingState />
           ) : error || !sheet ? (
             <div className="py-20 text-center text-red-500"><Icon name="warning" /> {error ?? "ไม่พบใบงาน"}</div>
           ) : !template ? (

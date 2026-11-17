@@ -4,6 +4,7 @@
  * พิมพ์ใบตัดผ้า — /print/fabric-plan?mo_nos=a,b[&sku=X] (จากหน้า วางแผนตัดผ้า)
  * คำนวณแผนใหม่ทุกครั้งที่เปิด (ตัวเดียวกับหน้าแผน lib/fabric-plan) · 1 ผ้า = 1 แผ่น · บันทึกประวัติพิมพ์ต่อใบสั่งผลิต (usePrintLog "fabric_plan")
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
@@ -58,5 +59,5 @@ function Inner() {
 }
 
 export default function FabricPlanPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -40,7 +41,7 @@ const dashMoney = (value: unknown) => Math.abs(num(value)) > 0.004 ? money(value
 
 export default function PayrollRegisterPrintPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-slate-500">กำลังโหลดทะเบียนเงินเดือน...</div>}>
+    <Suspense fallback={<LoadingState label="กำลังโหลดทะเบียนเงินเดือน..." boxClassName="p-8 text-sm text-slate-500" />}>
       <PayrollRegisterPrintContent />
     </Suspense>
   );
@@ -105,7 +106,7 @@ function PayrollRegisterPrintContent({ embedded = false }: { embedded?: boolean 
         </div>
       )}
 
-      {loading && <div className="mx-auto max-w-7xl rounded-lg bg-white p-8 text-center text-sm text-slate-500">กำลังโหลด...</div>}
+      {loading && <LoadingState />}
       {error && <div className="mx-auto max-w-7xl rounded-lg bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {!loading && !error && data?.rows.length === 0 && (
         <div className="mx-auto max-w-7xl rounded-lg bg-white p-8 text-center text-sm text-slate-500">ยังไม่มีผลคำนวณเงินเดือนสำหรับงวดนี้</div>

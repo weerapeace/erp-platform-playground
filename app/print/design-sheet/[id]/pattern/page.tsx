@@ -8,6 +8,7 @@
  *   ?parent= = แท็บตีราคาที่กำลังดู (ไซส์/เวอร์ชัน) · ชิ้นเป็นสี่เหลี่ยมตามกว้าง×ยาวในตาราง
  * หน้านี้ = โหลดใบงาน + เลือกแท็บ · ตัวหน้าพิมพ์ = ของกลาง PatternPrintView (components/pattern-sheet/print-view — ใช้ร่วมกับแอปสตูดิโอแพทเทิร์น)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { usePrintLog } from "@/components/report/use-print-log";
@@ -64,7 +65,7 @@ export default function PrintDesignSheetPatternPage() {
   const fileName = docFileName("แพทเทิร์น", `${code}${sel ? `-${sel}` : ""}`);
   usePrintLog("ds_pattern", id ? [{ doc_id: String(id), doc_no: code || null }] : []);
 
-  if (loading) return <div className="p-10 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
   if (err) return <div className="p-10 text-center text-sm text-rose-600">{err}</div>;
 
   return (

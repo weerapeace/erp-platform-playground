@@ -5,6 +5,7 @@
  * ใช้ระบบ template กลาง (erp_report_templates entity_type='ds_present') · ไม่มีใน DB = DEFAULT_DS_PRESENT_TEMPLATE
  * ไม่มีข้อมูลต้นทุน/ตีราคาในหน้านี้เลย (lib/design-sheet-present ไม่ส่งฟิลด์เหล่านั้นเข้าเทมเพลต)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -51,7 +52,7 @@ export default function PrintDesignSheetPresentPage() {
     <div className="min-h-screen bg-slate-100">
       <PrintToolbar onBack={() => router.back()} fileName={fileName} />
       <div className="px-4 py-6">
-        {loading ? <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
+        {loading ? <LoadingState />
           : error || !bundle ? <div className="py-20 text-center text-red-500">⚠️ {error ?? "ไม่พบใบงาน"}</div>
           : (
             <>

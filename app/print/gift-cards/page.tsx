@@ -9,6 +9,7 @@
  * ของกลาง: lib/website-gift-cards (ตัววาดการ์ด/จัดหน้า — ตัวเดียวกับพรีวิวในหน้าเว็บร้าน) · PrintFrame + printReportHtmlInNewWindow
  * ข้อมูล: /api/website/orders (ออเดอร์) · /api/website/gift-cards (ลาย/ขนาด) · PATCH cardPrinted (audit)
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -148,7 +149,7 @@ function Inner() {
 
 export default function GiftCardsPrintPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-slate-400">กำลังโหลด…</div>}>
+    <Suspense fallback={<LoadingState />}>
       <Inner />
     </Suspense>
   );
