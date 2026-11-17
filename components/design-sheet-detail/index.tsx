@@ -41,7 +41,7 @@ import type { EditorPiece, PieceMat, RefImage, ShapeEditorResult } from "@/compo
 import { SheetImagePicker } from "./sheet-image-picker";
 import { COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCostLine, missingCostFields, pieceArea, recomputeCostLine, restorePrevItem, withPrevItem } from "@/lib/design-sheet-cost-row";
 import { buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
-import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { LineItemsGrid, AddMenuButton, type AddMenuItem, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { cleanNestUsage, setNestEntry, type NestEntry, type NestUsage } from "@/lib/nest-usage";
 import { NestUsageChip } from "./nest-usage-chip";
@@ -67,7 +67,7 @@ import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import dynamic from "next/dynamic";
 import { DblClickToEdit } from "@/components/dbl-click-edit";
 import { DriveUploadBox } from "@/components/drive-upload-box";
-import { PartsCartModal } from "@/components/parts-cart-modal";
+import { PartsCartModal, type SkuCartEntry } from "@/components/parts-cart-modal";
 import { applyCartToLines, type CartEntry } from "@/lib/parts-cart";
 import { fetchSheetDriveFolder, startSheetDriveUpload } from "@/lib/design-sheet-drive-client";
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
@@ -554,14 +554,29 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [noteOpen, setNoteOpen] = useState(false);   // 📝 ป๊อปอ่านจากรูปโน้ต (AI)
   const addCostRow = useCallback(() => { setCostLines((prev) => [...prev, newCostRow()]); setCostDirty(true); }, [newCostRow]);
   // 🧷 ตะกร้าอะไหล่ → บรรทัดตีราคาของแท็บที่ดู (มีอะไหล่ตัวเดียวกันแล้ว = บวกเข้าบรรทัดเดิม · lib/parts-cart) แล้วเข้าโหมดแก้ไขให้ตรวจ+บันทึก
-  const applyPartsCart = (cart: CartEntry[]) => {
+  const applyPartsCart = (cart: CartEntry[], skuCart: SkuCartEntry[] = []) => {
     const stamp = Date.now();
     const res = applyCartToLines(curLines, cart, priceItemById, (base, idx): CostRow => ({ ...newCostRow(), ...base, key: `pc${stamp}_${idx}`, parent_code: costParent || null }));
-    if (!res.added && !res.merged) return;
+    // วัตถุดิบ SKU จริง (แท็บสต็อกจริงในป๊อปอะไหล่) → บรรทัด SKU แบบใส่จำนวนเอง (ราคา = ต้นทุนมาตรฐาน SKU) — เหมือนดึงจากรายละเอียดงาน
+    const skuRows = skuCart.map((x, i) => {
+      const base: CostRow = { ...newCostRow(), key: `ps${stamp}_${i}`, parent_code: costParent || null };
+      return recomputeRow({ ...base, ...costSkuPatch(x.c, priceGroups, base), calc_method: "manual", qty: x.qty, uom: x.c.uom_name ?? base.uom });
+    });
+    if (!res.added && !res.merged && !skuRows.length) return;
     const others = costLines.filter((r) => pkey(r.parent_code) !== costParent);
-    setCostLines([...others, ...res.lines]); setCostDirty(true); setEditing(true);
-    toast.success(t(`ลงอะไหล่แล้ว: บรรทัดใหม่ ${res.added}${res.merged ? ` · บวกเข้าบรรทัดเดิม ${res.merged}` : ""} — ตรวจแล้วกดบันทึก`, `Parts added: ${res.added} new${res.merged ? ` · ${res.merged} merged` : ""} — check, then save`));
+    setCostLines([...others, ...res.lines, ...skuRows]); setCostDirty(true); setEditing(true);
+    const added = res.added + skuRows.length;
+    toast.success(t(`ลงอะไหล่แล้ว: บรรทัดใหม่ ${added}${res.merged ? ` · บวกเข้าบรรทัดเดิม ${res.merged}` : ""} — ตรวจแล้วกดบันทึก`, `Parts added: ${added} new${res.merged ? ` · ${res.merged} merged` : ""} — check, then save`));
   };
+  // เมนู "＋ เพิ่มวัตถุดิบ ▾" ของตารางตีราคา (ต่อจาก "เพิ่มปกติ" ที่ตารางกลางใส่ให้)
+  const costAddMenu: AddMenuItem[] = [
+    { key: "parts", label: t("เพิ่มอะไหล่ (ตะกร้า)", "Add parts (cart)"), icon: "i:paperclip", onSelect: () => setPartsOpen(true),
+      hint: t("เลือกอะไหล่ ซิป เทป หรือ SKU จริง แบบตะกร้า → ลงตารางทีเดียว", "Pick parts, zips, tapes or real SKUs into a cart → add at once") },
+    { key: "draw", label: t("วาดชิ้นวัสดุ", "Draw pieces"), icon: "i:vector-bezier", onSelect: () => openBoardRef.current(null),
+      hint: t("วาดชิ้น (สี่เหลี่ยม วงกลม ปากกา) หรือก๊อปจาก Illustrator → บรรทัดพร้อมกว้าง×ยาว", "Draw pieces or paste from Illustrator → lines with width×length") },
+    { key: "note", label: t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)"), icon: "i:camera", onSelect: () => setNoteOpen(true),
+      hint: t("ถ่ายรูปโน้ตขนาดชิ้น → AI อ่านเป็นตาราง ให้ตรวจก่อนเพิ่ม", "Photo of piece sizes → AI reads it into a table to check first") },
+  ];
   const reloadPriceItems = () => {
     apiFetch("/api/design-sheets/price-items").then((r) => r.json())
       .then((j) => { if (!j.error) { setPriceItems((j.data ?? []) as PriceItem[]); setPriceGroups((j.groups ?? []) as PriceGroup[]); } }).catch(() => {});
@@ -2851,29 +2866,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 onAdd={newCostRow}
                 addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
-                addExtra={<><button type="button" onClick={() => setPartsOpen(true)} className="inline-flex items-center gap-1 text-sm font-medium text-amber-600 hover:text-amber-800"
-                  title={t("เลือกอะไหล่ ซิป เทป แบบตะกร้า (ตาราง/การ์ด) → ลงตารางทีเดียว · ซิปที่ตั้งชุดไว้จะถามหัวซิป/หางซิปให้", "Pick parts, zips, tapes into a cart (table/grid) → add to the table at once · zips with a set ask for sliders/stops")}>
-                  <Icon value="i:paperclip" className="text-[14px]" />{t("เพิ่มอะไหล่", "Add parts")}</button>
-                <button type="button" onClick={() => openBoardRef.current(null)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
-                  title={t("วาดชิ้นวัสดุ (สี่เหลี่ยม วงกลม ปากกา) หรือก๊อปจาก Illustrator มาวาง → ได้บรรทัดใหม่พร้อมกว้าง×ยาว", "Draw pieces (rectangle, circle, pen) or paste from Illustrator → new lines with width×length")}>
-                  <Icon value="i:vector-bezier" className="text-[14px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
-                <button type="button" onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
-                  title={t("ถ่ายรูปโน้ตที่ช่างจดขนาดชิ้น → AI อ่านเป็นตาราง ให้ตรวจก่อนเพิ่มบรรทัด", "Photo of handwritten piece sizes → AI reads it into a table to check before adding lines")}>
-                  <Icon value="i:camera" className="text-[14px]" />{t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)")}</button></>}
+                // ปุ่ม "＋ เพิ่มวัตถุดิบ ▾" เป็นเมนู (เจ้าของขอ 2026-11-17): เพิ่มปกติ / อะไหล่ / วาดชิ้น / อ่านโน้ต
+                addMenu={costAddMenu}
                 emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
                 // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
                 emptyAction={canEdit ? (
                   <div className="flex flex-wrap justify-center gap-2">
-                    {!fullEdit && <button type="button" onClick={() => { setEditing(true); addCostRow(); }}
-                      className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}</button>}
-                    <button type="button" onClick={() => setPartsOpen(true)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-700 hover:bg-amber-50"><Icon value="i:paperclip" className="text-[15px]" />{t("เพิ่มอะไหล่", "Add parts")}</button>
+                    {/* ตอนแก้ไข ปุ่มเมนูเพิ่มอยู่ในตารางแล้ว · ตอนดูอย่างเดียว ใช้เมนูนี้ (เพิ่มปกติ = เข้าโหมดแก้ + เพิ่มบรรทัด) */}
+                    {!fullEdit && <AddMenuButton variant="button" label={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
+                      items={[{ key: "row", label: t("เพิ่มปกติ (1 บรรทัด)", "Add one line"), icon: "i:plus", onSelect: () => { setEditing(true); addCostRow(); } }, ...costAddMenu]} />}
                     <button type="button" onClick={() => setCopyFromOpen(true)}
                       className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">{t("📄 ดึงจากใบงานอื่น", "📄 Pull from another sheet")}</button>
-                    <button type="button" onClick={() => openBoardRef.current(null)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:vector-bezier" className="text-[15px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
-                    <button type="button" onClick={() => setNoteOpen(true)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-4 text-sm font-medium text-blue-700 hover:bg-blue-50"><Icon value="i:camera" className="text-[15px]" />{t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)")}</button>
                   </div>
                 ) : null}
                 onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}`, shape: r.shape ? { ...r.shape, pid: undefined } : r.shape })}

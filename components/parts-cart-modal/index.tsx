@@ -4,6 +4,9 @@
  *   เลือกเฉพาะวัสดุตีราคากลุ่ม อะไหล่ / ซิป / เทป (กลุ่มคิด "นับชิ้น" หรือ "ตามความยาว") → ใส่ตะกร้า ปรับจำนวน → "ลงตารางตีราคา" ทีเดียว
  *   · มุมมอง ตาราง ↔ การ์ด (จำต่อคน useUserPref) · การ์ดใช้ไอคอนตามชนิด (วัสดุตีราคายังไม่มีรูป)
  *   · ชุด: วัสดุที่ตั้งชุดไว้ (design_price_items.set_items) → ใส่ตะกร้าแล้วถามว่าจะลงตัวในชุดด้วยไหม (ติ๊กออกได้ เช่น ไม่มีหางซิป)
+ *   · ปุ่ม "เพิ่มอะไหล่ใหม่" อยู่บนสุดข้างช่องค้นหา · เพิ่มเสร็จเปิดช่องราคาให้ทันที (2026-11-17)
+ *   · ช่องแก้ราคา: "เช็คราคาจาก SKU" (ComponentPicker) → ต้นทุนมาตรฐาน + ราคาซื้อล่าสุด (/api/sku-trade-history) → กดใช้ราคา
+ *   · แท็บ "สต็อกจริง (SKU)": เลือกวัตถุดิบ SKU จริงใส่ตะกร้าได้ → onConfirm(cart, skuCart) หน้าแม่ลงเป็นบรรทัด SKU
  *   · เพิ่มอะไหล่ใหม่ = MaterialQuickCreate (ของกลางตัวเดียวกับสตูดิโอ) · แก้ชื่อ/ราคา/หน่วย · เอาออก (ปิดใช้งาน ไม่ลบจริง) · ตั้งชุด
  *     ผ่าน API กลาง /api/master-v2/design-price-items (ด่านสิทธิ์ products.edit + ประวัติ audit อยู่ที่นั่น)
  *
@@ -21,6 +24,8 @@ import { useToast } from "@/components/toast";
 import { SearchableSelect } from "@/components/searchable-select";
 import { StepInput } from "@/components/step-input";
 import { MaterialQuickCreate } from "@/components/material-quick-create";
+import { ComponentPicker } from "@/components/material-picker";
+import type { BomComponent } from "@/app/api/bom/components/route";
 import { apiFetch } from "@/lib/api";
 import { useUserPref } from "@/lib/use-user-pref";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
@@ -31,6 +36,8 @@ import {
 
 export type PartsItem = CostItemLike & { set_items?: SetItem[] };
 type View = "table" | "grid";
+/** วัตถุดิบ SKU จริงในตะกร้า (แท็บสต็อกจริง) */
+export type SkuCartEntry = { c: BomComponent; qty: number };
 const ALL = "__all";
 const money = (v: number) => v.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ICON: Record<PartsMode, string> = { count: "i:circle-dot", length: "i:line-dashed" };
@@ -40,8 +47,8 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   onClose: () => void;
   /** วัสดุตีราคาทั้งหมด (ป๊อปกรองเหลือกลุ่มอะไหล่/ซิป/เทปเอง) */
   items: PartsItem[];
-  /** กด "ลงตารางตีราคา" — หน้าแม่เอาไปลงบรรทัด (lib/parts-cart applyCartToLines) */
-  onConfirm: (cart: CartEntry[]) => void;
+  /** กด "ลงตารางตีราคา" — หน้าแม่เอาไปลงบรรทัด (lib/parts-cart applyCartToLines) · skuCart = วัตถุดิบ SKU จริง */
+  onConfirm: (cart: CartEntry[], skuCart: SkuCartEntry[]) => void;
   /** แก้/เพิ่ม/เอาออก/ตั้งชุด สำเร็จ → หน้าแม่โหลดวัสดุตีราคาใหม่ */
   onItemsChanged: () => void;
   /** ใบนี้แก้ได้ไหม (ไม่ได้ = ดูอย่างเดียว ใส่ตะกร้าไม่ได้) */
@@ -61,6 +68,9 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   const [delId, setDelId] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"parts" | "sku">("parts");
+  const [skuCart, setSkuCart] = useState<SkuCartEntry[]>([]);
+  const addSku = (c: BomComponent) => setSkuCart((x) => (x.some((y) => y.c.id === c.id) ? x.map((y) => (y.c.id === c.id ? { ...y, qty: Math.min(PARTS_MAX_QTY, y.qty + 1) } : y)) : [...x, { c, qty: 1 }]));
 
   const parts = useMemo(() => items.flatMap((it) => { const mode = partsModeOf(it.calc_method); return mode ? [{ ...it, mode }] : []; }), [items]);
   const byId = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
@@ -70,9 +80,10 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
     return parts.filter((p) => (grp === ALL || (p.group_name ?? t("ไม่ระบุชนิด", "No type")) === grp) && (!k || p.name.toLowerCase().includes(k) || (p.group_name ?? "").toLowerCase().includes(k)));
   }, [parts, q, grp, t]);
   const qtyOf = (id: string) => cart.find((c) => c.item_id === id)?.qty ?? 0;
-  const total = cart.reduce((s, c) => s + cartEntryAmount(c, byId.get(c.item_id)), 0);
+  const total = cart.reduce((s, c) => s + cartEntryAmount(c, byId.get(c.item_id)), 0) + skuCart.reduce((s, x) => s + (x.c.standard_price ?? 0) * x.qty, 0);
+  const cartCount = cart.length + skuCart.length;
 
-  const reset = () => { setCart([]); setAsk(null); setEditing(null); setSetFor(null); setCreating(null); setQ(""); };
+  const reset = () => { setSkuCart([]); setTab("parts"); setCart([]); setAsk(null); setEditing(null); setSetFor(null); setCreating(null); setQ(""); };
   const close = () => { reset(); onClose(); };
 
   const add = (id: string, n = 1) => {
@@ -162,6 +173,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
         <input value={editing.uom} maxLength={20} onChange={(e) => setEditing({ ...editing, uom: e.target.value })} className="h-8 rounded border border-slate-200 bg-white px-2 text-sm" /></label>
       <button type="button" disabled={busy} onClick={() => void saveEdit()} className="h-8 rounded-md bg-blue-600 px-3 text-white hover:bg-blue-700 disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
       <button type="button" onClick={() => setEditing(null)} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+      <SkuPriceCheck onUse={(price, uom) => setEditing((e) => (e ? { ...e, price: String(price), uom: e.uom || uom || "" } : e))} />
     </div>
   );
 
@@ -215,8 +227,22 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
 
   const cartBox = (
     <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-2.5 md:sticky md:top-0 md:w-72 md:shrink-0 md:self-start">
-      <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700"><Icon value="i:shopping-cart" className="text-base" />{t("ตะกร้า", "Cart")}{cart.length > 0 && <span className="text-slate-400">({cart.length})</span>}</div>
-      {cart.length === 0 ? <p className="py-3 text-center text-xs text-slate-400">{t("กด ＋ ใส่ตะกร้า ที่อะไหล่", "Press ＋ Add on a part")}</p> : (
+      <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700"><Icon value="i:shopping-cart" className="text-base" />{t("ตะกร้า", "Cart")}{cartCount > 0 && <span className="text-slate-400">({cartCount})</span>}</div>
+      {skuCart.length > 0 && (
+        <div className="mb-1 divide-y divide-slate-100 border-b border-slate-100">
+          {skuCart.map((x) => (
+            <div key={x.c.id} className="space-y-1 py-1.5 text-xs">
+              <div className="flex items-start justify-between gap-2"><span className="min-w-0 text-slate-700"><span className="mr-1 rounded bg-sky-50 px-1 text-[10px] text-sky-700">SKU</span>{x.c.code} {x.c.name}</span><span className="shrink-0 tabular-nums text-slate-600">{x.c.standard_price != null ? money(x.c.standard_price * x.qty) : t("ไม่มีราคา", "No price")}</span></div>
+              <div className="flex items-center gap-1.5">
+                <StepInput value={x.qty} step={1} min={1} max={PARTS_MAX_QTY} integer unit={x.c.uom_name ?? t("ชิ้น", "pcs")} className="h-8 w-28" ariaLabel={t(`จำนวน ${x.c.name}`, `Quantity ${x.c.name}`)}
+                  onChange={(v) => setSkuCart((l) => l.map((y) => (y.c.id === x.c.id ? { ...y, qty: Math.max(1, Math.min(PARTS_MAX_QTY, Math.round(v ?? 1))) } : y)))} />
+                <button type="button" aria-label={t(`เอา ${x.c.name} ออกจากตะกร้า`, `Remove ${x.c.name}`)} onClick={() => setSkuCart((l) => l.filter((y) => y.c.id !== x.c.id))} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon value="i:x" className="text-sm" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {cart.length === 0 && skuCart.length === 0 ? <p className="py-3 text-center text-xs text-slate-400">{t("กด ＋ ใส่ตะกร้า ที่อะไหล่", "Press ＋ Add on a part")}</p> : (
         <div className="divide-y divide-slate-100">
           {cart.map((c) => {
             const p = byId.get(c.item_id); if (!p) return null;
@@ -241,14 +267,14 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   const footer = (
     <div className="flex w-full flex-wrap items-center justify-end gap-2">
       <button type="button" onClick={close} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-      <button type="button" disabled={!cart.length || !canEdit} onClick={() => { onConfirm(cart); reset(); onClose(); }}
-        className="h-9 rounded-lg bg-amber-500 px-4 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50">{t(`ลงตารางตีราคา${cart.length ? ` (${cart.length})` : ""}`, `Add to costing${cart.length ? ` (${cart.length})` : ""}`)}</button>
+      <button type="button" disabled={!cartCount || !canEdit} onClick={() => { onConfirm(cart, skuCart); reset(); onClose(); }}
+        className="h-9 rounded-lg bg-amber-500 px-4 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50">{t(`ลงตารางตีราคา${cartCount ? ` (${cartCount})` : ""}`, `Add to costing${cartCount ? ` (${cartCount})` : ""}`)}</button>
     </div>
   );
 
   return (
     <>
-      <ERPModal open={open} onClose={close} title={t("เพิ่มอะไหล่ · ซิป · เทป", "Add parts · zips · tapes")} size="xl" storageKey="parts-cart-modal" hasUnsavedChanges={cart.length > 0} footer={footer}>
+      <ERPModal open={open} onClose={close} title={t("เพิ่มอะไหล่ · ซิป · เทป", "Add parts · zips · tapes")} size="xl" storageKey="parts-cart-modal" hasUnsavedChanges={cartCount > 0} footer={footer}>
         <div className="flex flex-col gap-3 md:flex-row">
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -256,6 +282,10 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
                 <Icon value="i:search" className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm text-slate-400" />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นอะไหล่ เช่น หัวซิป", "Search parts, e.g. zipper slider")} className="h-9 w-full rounded-lg border border-slate-200 pl-7 pr-2 text-sm" aria-label={t("ค้นอะไหล่", "Search parts")} />
               </div>
+              {canCreate && tab === "parts" && (
+                <button type="button" onClick={() => setCreating(q.trim())}
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-medium text-amber-800 hover:bg-amber-100"><Icon value="i:plus" className="text-sm" />{t("เพิ่มอะไหล่ใหม่", "New part")}</button>
+              )}
               <div className="inline-flex rounded-lg border border-slate-200 p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
                 {(["table", "grid"] as const).map((v) => (
                   <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} title={v === "table" ? t("ตาราง", "Table") : t("การ์ด", "Grid")}
@@ -263,12 +293,39 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
                 ))}
               </div>
             </div>
+            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("แหล่งอะไหล่", "Part source")}>
+              {(["parts", "sku"] as const).map((k) => (
+                <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1 text-xs font-medium ${tab === k ? "border-amber-400 bg-amber-100 text-amber-900" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  <Icon value={k === "parts" ? "i:paperclip" : "i:package"} className="text-xs" />{k === "parts" ? t("อะไหล่ตีราคา", "Costing parts") : t("สต็อกจริง (SKU)", "Real stock (SKU)")}
+                  {k === "sku" && skuCart.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] text-white">{skuCart.length}</span>}
+                </button>
+              ))}
+            </div>
+            {tab === "sku" ? (
+              <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+                <p className="text-xs text-slate-500">{t("เลือกวัตถุดิบ SKU จริงจากคลัง → ใส่ตะกร้า (ราคา = ต้นทุนมาตรฐานของ SKU) · ลงตารางเป็นบรรทัด SKU", "Pick a real stock SKU → into the cart (price = SKU standard cost) · becomes an SKU line")}</p>
+                {canEdit ? <ComponentPicker sku="" name="" placeholder={t("ค้นหา SKU อะไหล่ เช่น หัวซิป", "Search an SKU, e.g. zipper slider")} onPick={addSku} />
+                  : <p className="text-xs text-slate-400">{t("ดูอย่างเดียว", "View only")}</p>}
+              </div>
+            ) : (<>
             <div className="flex flex-wrap gap-1.5">
               {[ALL, ...groups].map((g) => (
                 <button key={g} type="button" aria-pressed={grp === g} onClick={() => setGrp(g)}
                   className={`rounded-full border px-2.5 py-0.5 text-xs ${grp === g ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>{g === ALL ? t("ทั้งหมด", "All") : g}</button>
               ))}
             </div>
+            {canCreate && tab === "parts" && creating != null && (
+              <MaterialQuickCreate name={creating} materials={parts.map((p) => ({ id: p.id, name: p.name, sub: p.group_name }))}
+                groupFilter={(g) => partsModeOf(g.calc_method) != null} saveLabel={t("เพิ่มอะไหล่", "Add part")}
+                onPickExisting={(m) => { setCreating(null); add(m.id); }} onCancel={() => setCreating(null)}
+                onCreated={(m) => {
+                  setCreating(null); onItemsChanged();
+                  // เพิ่มเสร็จ → เปิดช่องราคาให้ทันที (มีเช็คราคาจาก SKU)
+                  if (canManage && m?.id) setEditing({ id: m.id, name: m.name ?? "", price: "", uom: "" });
+                  toast.success(t("เพิ่มอะไหล่แล้ว — ใส่ราคา (หรือเช็คราคาจาก SKU) แล้วกดบันทึก", "Part added — set the price (or check an SKU price), then save"));
+                }} />
+            )}
             {askPanel}{editPanel}{setPanel}
             {parts.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">{t("ยังไม่มีวัสดุกลุ่มอะไหล่/ซิป/เทป (หรือคุณไม่มีสิทธิ์ดูราคาต้นทุน)", "No parts/zips/tapes yet (or you can't see cost prices)")}</p>
@@ -298,14 +355,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
                 ))}
               </div>
             )}
-            {canCreate && (creating == null ? (
-              <button type="button" onClick={() => setCreating(q.trim())} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"><Icon value="i:plus" className="text-sm" />{t("เพิ่มอะไหล่ใหม่", "Add a new part")}</button>
-            ) : (
-              <MaterialQuickCreate name={creating} materials={parts.map((p) => ({ id: p.id, name: p.name, sub: p.group_name }))}
-                groupFilter={(g) => partsModeOf(g.calc_method) != null} saveLabel={t("เพิ่มอะไหล่", "Add part")}
-                onPickExisting={(m) => { setCreating(null); add(m.id); }} onCancel={() => setCreating(null)}
-                onCreated={() => { setCreating(null); onItemsChanged(); toast.success(t("เพิ่มอะไหล่แล้ว — ใส่ราคาด้วยปุ่มดินสอ", "Part added — set its price with the pencil")); }} />
-            ))}
+            </>)}
           </div>
           {cartBox}
         </div>
@@ -315,5 +365,41 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
         message={t(`"${delId ? byId.get(delId)?.name ?? "" : ""}" จะไม่ขึ้นให้เลือกอีก (ใบงานที่ใช้อยู่แล้วไม่เปลี่ยน · เปิดใช้คืนได้ที่หน้าวัสดุตีราคา)`, `"${delId ? byId.get(delId)?.name ?? "" : ""}" won't be offered anymore (existing sheets keep it · re-enable on the costing materials page)`)}
         confirmText={t("เอาออก", "Remove")} />
     </>
+  );
+}
+
+/** เช็คราคาจาก SKU (ช่องแก้ราคาอะไหล่) — ต้นทุนมาตรฐานของ SKU + ราคาซื้อล่าสุด (ราคาซื้อเห็นเฉพาะคนมีสิทธิ์ดูต้นทุน · ตัดที่เซิร์ฟเวอร์) */
+function SkuPriceCheck({ onUse }: { onUse: (price: number, uom: string | null) => void }) {
+  const t = useT();
+  const [c, setC] = useState<BomComponent | null>(null);
+  const [last, setLast] = useState<{ price: number; date: string | null; partner: string | null } | null | undefined>(undefined);
+  const pick = (x: BomComponent) => {
+    setC(x); setLast(undefined);
+    apiFetch(`/api/sku-trade-history?sku_id=${encodeURIComponent(x.id)}`).then((r) => r.json()).then((j) => {
+      const lb = j?.summary?.last_buy as { price: number; date: string | null } | null | undefined;
+      const po = ((j?.purchases ?? []) as { kind: string; price: number | null; partner: string | null }[]).find((p) => p.kind === "po" && p.price != null);
+      setLast(lb ? { price: lb.price, date: lb.date, partner: po?.partner ?? null } : null);
+    }).catch(() => setLast(null));
+  };
+  const useBtn = (price: number, label: string) => (
+    <button type="button" onClick={() => onUse(Math.round(price * 100) / 100, c?.uom_name ?? null)} className="h-7 rounded-md border border-blue-300 bg-white px-2 text-[11px] font-medium text-blue-700 hover:bg-blue-50">{label}</button>
+  );
+  return (
+    <div className="w-full space-y-1.5 border-t border-blue-100 pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1 text-slate-600"><Icon value="i:search" className="text-xs" />{t("เช็คราคาจาก SKU", "Check price from an SKU")}</span>
+        <div className="min-w-48 flex-1"><ComponentPicker sku={c?.code ?? ""} name={c?.name ?? ""} placeholder={t("เลือก SKU ที่ตรงกับอะไหล่นี้", "Pick the matching SKU")} onPick={pick} /></div>
+      </div>
+      {c && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white px-2 py-1.5 text-[11px] text-slate-600">
+          <span>{t("ต้นทุนมาตรฐาน", "Standard cost")} <b className="tabular-nums text-slate-800">{c.standard_price != null ? money(c.standard_price) : "—"}</b>{c.uom_name ? `/${c.uom_name}` : ""}</span>
+          {c.standard_price != null && useBtn(c.standard_price, t(`ใช้ ${money(c.standard_price)}`, `Use ${money(c.standard_price)}`))}
+          <span className="text-slate-300">|</span>
+          {last === undefined ? <span className="text-slate-400">{t("กำลังดูราคาซื้อล่าสุด…", "Loading last purchase…")}</span>
+            : last ? <><span>{t("ซื้อล่าสุด", "Last bought")} <b className="tabular-nums text-slate-800">{money(last.price)}</b>{last.partner ? ` · ${last.partner}` : ""}{last.date ? ` · ${new Date(last.date).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}` : ""}</span>{useBtn(last.price, t(`ใช้ ${money(last.price)}`, `Use ${money(last.price)}`))}</>
+            : <span className="text-slate-400">{t("ยังไม่เคยซื้อ (หรือไม่มีสิทธิ์ดูราคาซื้อ)", "No purchases yet (or no permission to see buy prices)")}</span>}
+        </div>
+      )}
+    </div>
   );
 }

@@ -17,6 +17,7 @@
  *     + ปุ่ม "เพิ่มบรรทัด" โผล่ตอน readonly ด้วย (กด = ขอเข้าโหมดแก้ + เพิ่มบรรทัด + โฟกัสบรรทัดใหม่)
  */
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { Icon } from "@/components/icon";
 import {
   DndContext, type DragEndEvent, PointerSensor, KeyboardSensor,
   useSensor, useSensors, closestCenter,
@@ -69,6 +70,8 @@ export type LineItemsGridProps<T> = {
   footer?:    React.ReactNode;
   /** ปุ่ม/ตัวเลือกเสริม วางข้างปุ่ม "เพิ่มบรรทัด" (เช่น เพิ่มจากรายการที่ใช้บ่อย) */
   addExtra?:  React.ReactNode;
+  /** ปุ่ม "เพิ่ม" เป็นเมนู (เจ้าของขอ 2026-11-17): ข้อแรก = เพิ่มบรรทัดปกติ (onAdd) ต่อด้วยรายการนี้ — เช่น เพิ่มอะไหล่ / วาดชิ้น / อ่านโน้ต */
+  addMenu?: AddMenuItem[];
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
   storageKey?: string;
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
@@ -111,7 +114,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
+  addMenu, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, stickyTop, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
@@ -422,7 +425,8 @@ export function LineItemsGrid<T>({
         <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-lg">
           <p className="text-sm text-slate-400 mb-2">{emptyText}</p>
           {onAdd && !readonly && (
-            <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
+            addMenu?.length ? <AddMenuButton label={addLabel} items={[{ key: "__row", label: "เพิ่มปกติ (1 บรรทัด)", icon: "i:plus", onSelect: () => onChange([...rows, onAdd()]) }, ...addMenu]} />
+              : <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
           )}
           {emptyAction && <div className="mt-1 flex justify-center">{emptyAction}</div>}
         </div>
@@ -462,7 +466,8 @@ export function LineItemsGrid<T>({
         <div className="flex items-center justify-between gap-3 pt-1">
           <div className="flex items-center gap-3">
             {onAdd && (
-              <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
+              addMenu?.length ? <AddMenuButton label={addLabel} items={[{ key: "__row", label: "เพิ่มปกติ (1 บรรทัด)", icon: "i:plus", onSelect: () => onChange([...rows, onAdd()]) }, ...addMenu]} />
+              : <button type="button" onClick={() => onChange([...rows, onAdd()])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
             )}
             {addExtra}
           </div>
@@ -485,7 +490,8 @@ export function LineItemsGrid<T>({
       {/* ดูอย่างเดียว + onRequestEdit: ปุ่มเพิ่มบรรทัดยังอยู่ (กด = เข้าโหมดแก้ + เพิ่มบรรทัดในคลิกเดียว) */}
       {readonly && rows.length > 0 && onAdd && onRequestEdit ? (
         <div className="flex items-center justify-between gap-3 pt-1">
-          <button type="button" onClick={() => { pendingAdd.current = true; onRequestEdit(null); }} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
+          {addMenu?.length ? <AddMenuButton label={addLabel} items={[{ key: "__row", label: "เพิ่มปกติ (1 บรรทัด)", icon: "i:plus", onSelect: () => { pendingAdd.current = true; onRequestEdit(null); } }, ...addMenu]} />
+            : <button type="button" onClick={() => { pendingAdd.current = true; onRequestEdit(null); }} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>}
           {footer}
         </div>
       ) : footer && (rows.length === 0 || readonly) && <div className="flex justify-end pt-1">{footer}</div>}
@@ -545,6 +551,40 @@ function GridRow<T>({
           )}
           <button type="button" onClick={onRemove} title="ลบบรรทัด"
             className="h-9 w-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- ปุ่ม "เพิ่ม" แบบเมนู (ใช้ได้นอกตารางด้วย เช่น กล่องตอนตารางว่าง) ----
+export type AddMenuItem = { key: string; label: React.ReactNode; icon?: string; hint?: string; onSelect: () => void };
+export function AddMenuButton({ label, items, variant = "link" }: { label: React.ReactNode; items: AddMenuItem[]; variant?: "link" | "button" }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", off); document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+        className={variant === "button"
+          ? "inline-flex h-9 items-center gap-1 rounded-lg bg-amber-500 px-4 text-sm font-medium text-white hover:bg-amber-600"
+          : "inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"}>
+        {label}<Icon value="i:chevron-down" className="text-xs" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 z-40 mt-1 min-w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-left shadow-lg">
+          {items.map((it) => (
+            <button key={it.key} type="button" role="menuitem" title={it.hint} onClick={() => { setOpen(false); it.onSelect(); }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              {it.icon && <Icon value={it.icon} className="text-[15px] text-slate-500" />}<span>{it.label}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
