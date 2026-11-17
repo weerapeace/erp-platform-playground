@@ -119,7 +119,7 @@ function WebFixPrintView({ payload }: { payload: WebFixPayload }) {
               groups={WEB_FIX_PRINT_GROUPS}
               builtinPresets={WEB_FIX_PRESETS}
               companies={companies}
-              estimatedPages={pages}
+              estimatedPages={pages} pageGroups={result.groupCounts}
               defaultTitle={WEB_FIX_TITLE}
               canSaveTeam={can("admin.users")}
               signatureHint="ผู้แก้ / ผู้ตรวจ"

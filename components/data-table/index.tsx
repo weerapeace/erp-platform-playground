@@ -1,5 +1,6 @@
 "use client";
 
+import { computeTotal, formatTotal, isSummableColumn, nextTotalMode, type TotalMode } from "@/lib/table-totals";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
@@ -723,6 +724,19 @@ export function DataTable<T extends Record<string, unknown>>({
   const [columnSizing,     setColumnSizing]     = useState<ColumnSizingState>({});  // resize
   const [columnOrder,      setColumnOrder]       = useState<ColumnOrderState>([]);   // reorder
   const [columnPinning,    setColumnPinning]     = useState<ColumnPinningState>({ left: [], right: [] });
+  // Σ แถวรวมยอดท้ายตาราง (ปุ่มบนแถบเครื่องมือ · 2026-11-17) — รวม/เฉลี่ยคอลัมน์ตัวเลขที่ "เห็นอยู่" เท่านั้น (คอลัมน์ไม่มีสิทธิ์ถูกซ่อนแล้ว)
+  //   กดช่องรวม = สลับ รวม → เฉลี่ย → ไม่แสดง · จำต่อตาราง (tableId) ในเครื่อง
+  const totalsKey = tableId ? `erp-dt-${tableId}-totals` : null;
+  const [showTotals, setShowTotals] = useState(false);
+  const [totalModes, setTotalModes] = useState<Record<string, TotalMode | "off">>({});
+  useEffect(() => {
+    if (!totalsKey) return;
+    try { const o = JSON.parse(localStorage.getItem(totalsKey) ?? "null"); if (o) { setShowTotals(!!o.on); setTotalModes(o.modes ?? {}); } } catch { /* ignore */ }
+  }, [totalsKey]);
+  const saveTotals = (on: boolean, modes: Record<string, TotalMode | "off">) => {
+    setShowTotals(on); setTotalModes(modes);
+    if (totalsKey) { try { localStorage.setItem(totalsKey, JSON.stringify({ on, modes })); } catch { /* ignore */ } }
+  };
   const [colDrag,          setColDrag]           = useState<string | null>(null);    // header drag
   const [globalSearch,     setGlobalSearch]     = useState("");
   const [activeView,       setActiveView]       = useState(views[0]?.id ?? "all");
@@ -1660,6 +1674,32 @@ export function DataTable<T extends Record<string, unknown>>({
           </button>
         )}
 
+        {/* 📌 ตรึงคอลัมน์แรก (ชื่อ/รหัส) ไว้ซ้ายตอนเลื่อนขวา · Σ แถวรวมยอด */}
+        {(() => {
+          const pinnedNow = (columnPinning.left?.length ?? 0) > 0;
+          const firstData = table.getVisibleLeafColumns().find((c) => !isInternalCol(c.id));
+          return (
+            <>
+              <button type="button"
+                onClick={() => {
+                  if (pinnedNow) { setColumnPinning({ left: [], right: columnPinning.right ?? [] }); return; }
+                  if (!firstData) return;
+                  const sel = table.getVisibleLeafColumns().some((c) => c.id === "__select__") ? ["__select__"] : [];
+                  setColumnPinning({ left: [...sel, firstData.id], right: columnPinning.right ?? [] });
+                }}
+                title={pinnedNow ? "เลิกตรึงคอลัมน์" : `ตรึงคอลัมน์ "${typeof firstData?.columnDef.header === "string" ? firstData.columnDef.header : firstData?.id ?? ""}" ไว้ซ้ายตอนเลื่อนขวา (ตรึงคอลัมน์อื่นได้ที่ Columns → 📌)`}
+                className={`flex items-center gap-1 h-8 px-2.5 text-sm border rounded-md transition-colors ${pinnedNow ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                📌<span className="hidden md:inline">{pinnedNow ? "ตรึงอยู่" : "ตรึง"}</span>
+              </button>
+              <button type="button" onClick={() => saveTotals(!showTotals, totalModes)}
+                title={showTotals ? "ซ่อนแถวรวมยอด" : "แถวรวมยอดท้ายตาราง (คอลัมน์ตัวเลข · กดช่องรวมเพื่อสลับ รวม/เฉลี่ย)"}
+                className={`flex items-center gap-1 h-8 px-2.5 text-sm border rounded-md transition-colors ${showTotals ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                Σ<span className="hidden md:inline">รวม</span>
+              </button>
+            </>
+          );
+        })()}
+
         {/* Column Manager */}
         <div className="relative">
           <button onClick={() => setShowColumnMgr(!showColumnMgr)}
@@ -2267,12 +2307,28 @@ export function DataTable<T extends Record<string, unknown>>({
               )}
             </tbody>
             {/* แถวสรุป (Total row) — จาก meta.summary หรือ settings.summaries */}
-            {(columns.some(c => c.meta?.summary) || Object.keys(layoutSettings?.summaries ?? {}).length > 0) && table.getRowModel().rows.length > 0 && (
-              <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0">
+            {(showTotals || columns.some(c => c.meta?.summary) || Object.keys(layoutSettings?.summaries ?? {}).length > 0) && table.getRowModel().rows.length > 0 && (
+              <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0 z-[2]">
                 <tr>
                   {table.getVisibleLeafColumns().map((col, i) => {
                     const s = col.columnDef.meta?.summary;
                     let content: React.ReactNode = i === 0 ? "รวม" : null;
+                    const pin = pinnedStyle(col);
+                    const footPin = { position: pin.position, left: pin.left, zIndex: col.getIsPinned() ? 3 : undefined };
+                    // Σ ปุ่มรวมยอด: คอลัมน์ตัวเลขที่ไม่ได้ตั้งสรุปไว้เอง
+                    if (!s && showTotals && !isInternalCol(col.id)) {
+                      const vals = filteredData.map((r) => (r as Record<string, unknown>)[col.id]);
+                      if (isSummableColumn(col.id, vals)) {
+                        const mode = totalModes[col.id] ?? "sum";
+                        const label = mode === "off" ? "·" : `${mode === "avg" ? "เฉลี่ย " : ""}${formatTotal(computeTotal(vals, mode))}`;
+                        return (
+                          <td key={col.id} style={footPin} className={`${cellPad} text-sm font-semibold text-slate-800 tabular-nums bg-slate-50`}>
+                            <button type="button" onClick={() => saveTotals(true, { ...totalModes, [col.id]: nextTotalMode(mode) })}
+                              title="กดเพื่อสลับ รวม → เฉลี่ย → ไม่แสดง" className="rounded px-1 -mx-1 hover:bg-emerald-100">{label}</button>
+                          </td>
+                        );
+                      }
+                    }
                     if (s) {
                       if (s === "sum") {
                         const sum = filteredData.reduce((a, r) => a + (Number((r as Record<string, unknown>)[col.id]) || 0), 0);
@@ -2283,7 +2339,7 @@ export function DataTable<T extends Record<string, unknown>>({
                         content = s(filteredData as unknown[]);
                       }
                     }
-                    return <td key={col.id} className={`${cellPad} text-sm font-semibold text-slate-800 tabular-nums`}>{content}</td>;
+                    return <td key={col.id} style={footPin} className={`${cellPad} text-sm font-semibold text-slate-800 tabular-nums bg-slate-50`}>{content}</td>;
                   })}
                 </tr>
               </tfoot>

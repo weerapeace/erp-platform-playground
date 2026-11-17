@@ -259,7 +259,7 @@ function ChinaBillsPrintView() {
               groups={CB_PRINT_GROUPS}
               builtinPresets={presets}
               companies={companies}
-              estimatedPages={pages}
+              estimatedPages={pages} pageGroups={result?.groupCounts ?? [0]}
               defaultTitle={defaultTitle}
               canSaveTeam={can("admin.users")}
               signatureHint={CB_PRINT_SIGN.join(" / ")}

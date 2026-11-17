@@ -153,7 +153,7 @@ function WorkBoardPrintInner() {
               groups={workBoardPrintGroups(type)}
               builtinPresets={WORK_BOARD_PRINT_PRESETS}
               companies={companies}
-              estimatedPages={pages}
+              estimatedPages={pages} pageGroups={result?.groupCounts ?? [0]}
               defaultTitle={defaultTitle}
               canSaveTeam={can("admin.users")}
               signatureHint={type === "production" ? "ผู้ตรวจ / หัวหน้าโต๊ะ" : "ผู้จ่ายงาน / ผู้รับงาน"}

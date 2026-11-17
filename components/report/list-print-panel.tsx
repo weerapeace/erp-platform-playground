@@ -12,7 +12,7 @@ import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import {
-  BLANK_WIDTHS, DENSITY_LABEL, EXTRA_COLUMNS, FONT_MAX, FONT_MIN, IMAGE_LABEL, MAX_CUSTOM_COLUMNS, applyListPrintPreset, isCustomColumn, isExtraColumn, newCustomColumn,
+  BLANK_WIDTHS, DENSITY_LABEL, EXTRA_COLUMNS, FONT_MAX, FONT_MIN, IMAGE_LABEL, MAX_CUSTOM_COLUMNS, applyListPrintPreset, fitListToOnePage, isCustomColumn, isExtraColumn, newCustomColumn,
   type ListPrintBlank, type ListPrintColumn, type ListPrintColumnPref, type ListPrintDensity, type ListPrintImage, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 import type { ListPrintSettingsState } from "@/components/report/use-list-print-settings";
@@ -65,8 +65,10 @@ function WidthInput({ value, auto, min, label, onCommit }: { value?: number; aut
 }
 
 export function ListPrintPanel({
-  state, available, sorts, groups, builtinPresets, companies, estimatedPages, defaultTitle, canSaveTeam, signatureHint, textNotes, extra, widthHints,
+  state, available, sorts, groups, builtinPresets, companies, estimatedPages, defaultTitle, canSaveTeam, signatureHint, textNotes, extra, widthHints, pageGroups,
 }: {
+  /** จำนวนแถวต่อกลุ่ม (result.groupCounts) — ส่งมา = มีปุ่ม "พอดี 1 หน้า" (ลดตัวอักษร/ระยะ/รูป ให้ลงหน้าเดียว) */
+  pageGroups?: number[];
   state: ListPrintSettingsState;
   available: ListPrintColumn[];
   sorts: Opt[];
@@ -182,6 +184,16 @@ export function ListPrintPanel({
           <input type="range" min={FONT_MIN} max={FONT_MAX} step={1} value={s.fontPx} onChange={(e) => set({ fontPx: Number(e.target.value) })} className="flex-1 accent-blue-600" />
           <span className="w-9 text-right font-mono">{s.fontPx}px</span>
         </label>
+        {pageGroups && estimatedPages > 1 && (
+          <button type="button" onClick={() => {
+            const r = fitListToOnePage(pageGroups, s);
+            if (Object.keys(r.patch).length) set(r.patch);
+            if (r.pages > 1) toast.warning(`ย่อสุดแล้วยังได้ ${r.pages} หน้า — ลองแนวนอน หรือซ่อนบางคอลัมน์`);
+            else toast.success("ปรับให้พอดี 1 หน้าแล้ว" + (r.patch.fontPx ? ` (ตัวอักษร ${r.patch.fontPx}px)` : ""));
+          }}
+            title="ลดขนาดตัวอักษร → ระยะกระชับ → รูปเล็กลง จนลงหน้าเดียว (ค่าประมาณ)"
+            className="mt-1 h-7 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100">⤓ พอดี 1 หน้า (ตอนนี้ ~{estimatedPages} หน้า)</button>
+        )}
         {/* ใบที่ไม่มีคอลัมน์รูป (เช่น สรุปบิลจีน) ไม่ต้องโชว์ขนาดรูป */}
         {available.some((c) => c.key === "img") && <>
           <div className="mt-2 text-xs text-slate-500">รูปสินค้า</div>

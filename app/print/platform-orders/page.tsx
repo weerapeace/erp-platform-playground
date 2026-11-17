@@ -168,7 +168,7 @@ function PickView({ orders, shop, header }: { orders: PrintOrder[]; shop: string
         <div className="w-full min-w-0 flex-1"><ListPrintFrame html={html} state={print} maxWidth={frameWidth} onPrint={doPrint} /></div>
         <aside className="no-print order-first w-full shrink-0 rounded-xl border border-slate-200 bg-white p-4 lg:order-none lg:sticky lg:top-[68px] lg:max-h-[calc(100vh-84px)] lg:w-[330px] lg:overflow-y-auto" aria-label="ตั้งค่าหน้าพิมพ์">
           <ListPrintPanel state={print} available={available} sorts={PICK_SORTS} groups={PICK_GROUPS} builtinPresets={PICK_PRESETS} companies={companies}
-            estimatedPages={estimateListPages(result.groupCounts, s)} defaultTitle={PICK_TITLE} canSaveTeam={can("admin.users")} signatureHint="ผู้หยิบ / ผู้ตรวจ" />
+            estimatedPages={estimateListPages(result.groupCounts, s)} pageGroups={result.groupCounts} defaultTitle={PICK_TITLE} canSaveTeam={can("admin.users")} signatureHint="ผู้หยิบ / ผู้ตรวจ" />
         </aside>
       </div>
     </div>

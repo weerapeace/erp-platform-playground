@@ -127,7 +127,7 @@ function SalesMatchPrintView({ payload }: { payload: SalesPrintPayload }) {
               groups={SALES_PRINT_GROUPS}
               builtinPresets={SALES_PRINT_PRESETS}
               companies={companies}
-              estimatedPages={pages}
+              estimatedPages={pages} pageGroups={result.groupCounts}
               defaultTitle={defaultTitle}
               canSaveTeam={can("admin.users")}
               signatureHint="ผู้จับคู่ / ผู้ตรวจ"

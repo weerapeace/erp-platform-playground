@@ -263,7 +263,7 @@ function PurchasingOrdersPrintView({ mode }: { mode: PoPrintMode }) {
               groups={PO_PRINT_GROUPS[mode]}
               builtinPresets={presets}
               companies={companies}
-              estimatedPages={pages}
+              estimatedPages={pages} pageGroups={result?.groupCounts ?? [0]}
               defaultTitle={defaultTitle}
               canSaveTeam={can("admin.users")}
               signatureHint={PO_PRINT_SIGN[mode].join(" / ")}

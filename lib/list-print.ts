@@ -370,3 +370,29 @@ export function estimateListPages(groups: number[], s: ListPrintSettings): numbe
   const total = header + groups.reduce((a, n) => a + groupHead + headRow + n * rowH, 0) + sign;
   return Math.max(1, Math.ceil(total / usable));
 }
+
+/**
+ * "พอดี 1 หน้า" — หาค่าที่ทำให้ใบลงหน้าเดียว โดยเปลี่ยนให้น้อยที่สุด (ของกลาง ListPrintPanel · ใช้ estimateListPages)
+ * ลำดับที่ลอง: ลดตัวอักษรทีละ 1px → ระยะกระชับ → รูปเล็กลง (ขนาดรูปไม่ปิดเอง) · ตัวอักษรไม่ต่ำกว่า FONT_MIN
+ * คืน { patch, pages } — pages > 1 = ย่อสุดแล้วยังไม่พอ (ให้แนะนำแนวนอน/ลดคอลัมน์)
+ */
+export function fitListToOnePage(groups: number[], s: ListPrintSettings): { patch: Partial<ListPrintSettings>; pages: number } {
+  const est = (p: Partial<ListPrintSettings>) => estimateListPages(groups, { ...s, ...p });
+  if (est({}) <= 1) return { patch: {}, pages: 1 };
+  const densities: ListPrintDensity[] = s.density === "airy" ? ["airy", "normal", "compact"] : s.density === "normal" ? ["normal", "compact"] : ["compact"];
+  const images: ListPrintImage[] = s.image === "none" ? ["none"] : s.image === "l" ? ["l", "m", "s"] : s.image === "m" ? ["m", "s"] : ["s"];
+  let last: Partial<ListPrintSettings> = {};
+  for (const image of images) {
+    for (const density of densities) {
+      for (let f = s.fontPx; f >= FONT_MIN; f--) {
+        const p: Partial<ListPrintSettings> = {};
+        if (f !== s.fontPx) p.fontPx = f;
+        if (density !== s.density) p.density = density;
+        if (image !== s.image) p.image = image;
+        last = p;
+        if (est(p) <= 1) return { patch: p, pages: 1 };
+      }
+    }
+  }
+  return { patch: last, pages: est(last) };
+}

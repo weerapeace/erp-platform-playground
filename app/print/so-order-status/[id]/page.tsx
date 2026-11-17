@@ -158,7 +158,7 @@ export default function SoOrderStatusPrintPage() {
               groups={SO_STATUS_GROUPS}
               builtinPresets={SO_STATUS_PRESETS}
               companies={companies}
-              estimatedPages={pages}
+              estimatedPages={pages} pageGroups={result?.groupCounts ?? [0]}
               defaultTitle={SO_STATUS_TITLE}
               canSaveTeam={can("admin.users")}
               signatureHint="ผู้ตรวจนับ / หัวหน้าผลิต / ผู้คีย์เข้าระบบ"
