@@ -3,6 +3,7 @@
 // หมวดหมู่ + คุณสมบัติ Lazada (ฐานสำหรับระบบลงสินค้า)
 // ดึงต้นไม้หมวดจาก Lazada มา cache → ค้นหาหมวดปลายทาง → ดูว่าหมวดนั้นต้องกรอกคุณสมบัติอะไรบ้าง
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { AppAccessGate } from "@/components/app-access-gate";
@@ -97,7 +98,7 @@ export default function LazadaCategoriesPage() {
             <div className="border border-slate-200 rounded-lg p-3">
               <p className="text-sm font-semibold text-slate-800 mb-0.5">{sel.name}</p>
               <p className="text-[11px] text-slate-400 mb-2">{sel.path} · <span className="font-mono">{sel.id}</span></p>
-              {attrLoading ? <p className="text-sm text-slate-400">กำลังโหลดคุณสมบัติ...</p>
+              {attrLoading ? <LoadingState label="กำลังโหลดคุณสมบัติ..." boxClassName="text-sm text-slate-400" />
                 : !attrs ? null
                 : attrs.length === 0 ? <p className="text-sm text-slate-400">— ไม่มีคุณสมบัติ</p>
                 : (

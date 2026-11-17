@@ -4,6 +4,7 @@
  * เพิ่ม = เปิดรอบนับ · แก้ = กรอก/สแกน/เพิ่ม-ลบรายการ · ลบ = "ยกเลิกรอบนับ" (ไม่ลบทิ้ง เก็บประวัติ · เปิดกลับมานับต่อได้)
  * นับสต๊อก (/inventory/count) — เปิดรอบนับ → ถ่ายยอดปัจจุบัน → กรอกจำนวนจริง → เทียบส่วนต่าง → ปรับอัตโนมัติ
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ConfirmDialog } from "@/components/modal";
@@ -234,7 +235,7 @@ export default function CountPage() {
                 </tr></thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">กำลังโหลด…</td></tr>
+                    <tr><td colSpan={5}><LoadingState rows={3} /></td></tr>
                   ) : sessions.length === 0 ? (
                     <tr><td colSpan={5} className="px-3 py-10 text-center text-slate-400">ยังไม่มีรอบนับ — เปิดรอบใหม่ด้านบน</td></tr>
                   ) : sessions.map((s) => {

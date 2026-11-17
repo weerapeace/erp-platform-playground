@@ -3,6 +3,7 @@
 // มุมกลับ: สินค้าเรา (Parent SKU) ขายอยู่บนแพลตฟอร์มไหนบ้าง — /master/platform-sku
 // ข้อมูลจาก /api/platform-sku-overview · เห็นต่อ SKU ว่าอยู่บนกี่ช่อง + ราคาแต่ละช่อง
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -81,7 +82,7 @@ export default function PlatformSkuPage() {
         </div>
       )}
 
-      {loading ? <p className="text-slate-400 text-sm py-10 text-center">กำลังโหลด...</p>
+      {loading ? <LoadingState />
         : shown.length === 0 ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่มีสินค้าที่จับคู่กับแพลตฟอร์ม<br /><span className="text-slate-300">ไปจับคู่ที่หน้า “จับคู่สินค้าเร็ว” ก่อน</span></div>
         : (
           <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">

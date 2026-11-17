@@ -5,6 +5,7 @@
 // หน้าตาแบบ ค. (เจ้าของเลือก 2026-11-05): ซ้าย = รายการแพลตฟอร์ม (แบ่ง เชื่อมต่ออัตโนมัติได้ / ร้านและช่องทางอื่น) · ขวา = รายละเอียดแพลตฟอร์มที่เลือก
 //   จอแคบ = เห็นรายการก่อน → กดเข้ารายละเอียด (มีปุ่มย้อนกลับ) · โทนมินิมอล ดำ/เทา/ขาว ใช้สีเฉพาะจุดสถานะ
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPInput } from "@/components/form";
@@ -862,7 +863,7 @@ export default function PlatformAccountsPage() {
       {/* ── ซ้ายรายการ · ขวารายละเอียด ── */}
       <div className="mt-6 grid gap-6 md:grid-cols-[17rem_minmax(0,1fr)]">
         <aside className={`${mobileDetail ? "hidden md:block" : ""} rounded-2xl border border-slate-200 bg-white p-2 self-start`}>
-          {loading && !platforms.length ? <p className="text-slate-400 text-sm py-8 text-center">กำลังโหลด...</p> : (
+          {loading && !platforms.length ? <LoadingState /> : (
             <>
               {autoList.length > 0 && <p className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">เชื่อมต่ออัตโนมัติได้</p>}
               {autoList.map(listItem)}

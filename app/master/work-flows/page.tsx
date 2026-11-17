@@ -5,6 +5,7 @@
  * เฟส 1: ดู flow (เลือกงาน → การ์ดขั้นตอน + เก็บที่ไหน + กดลิงก์)
  * เฟส 2: โหมดแก้ไข (เพิ่ม/ลบ/แก้ งาน + ขั้นตอน + ที่เก็บ + ลิงก์) — เฉพาะผู้มีสิทธิ์ products.edit
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -163,7 +164,7 @@ export default function WorkFlowsGuidePage() {
       </div>
 
       {loading ? (
-        <div className="text-sm text-slate-400 py-10 text-center">{t("กำลังโหลด…", "Loading…")}</div>
+        <LoadingState />
       ) : (
         <div className="mt-4">
           {/* แท็บงาน */}

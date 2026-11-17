@@ -4,6 +4,7 @@
 // 💬 ผูกบัญชี Discord เข้ากับ "ผู้ใช้ของฉัน" — กดปุ่มติ๊กเช็กลิสต์ในข้อความของบอท ERP ได้ (ระบบรู้ว่าเป็นใคร + เช็กสิทธิ์)
 // ยืนยันกับ Discord (สิทธิ์แค่ "รู้ว่าคุณคือใคร" ไม่อ่านแชท) · แบบเดียวกับหน้าผูก LINE (/account/line)
 // ============================================================
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -71,7 +72,7 @@ export default function AccountDiscordPage() {
         <div className="mt-5">
           {needLogin ? (
             <a href={`/login?next=${encodeURIComponent("/account/discord")}`} className="block h-12 w-full rounded-xl bg-slate-900 text-center text-sm font-bold leading-[3rem] text-white hover:bg-slate-800">เข้าสู่ระบบ ERP ก่อน</a>
-          ) : state === null ? <p className="text-sm text-slate-400">กำลังโหลด...</p>
+          ) : state === null ? <LoadingState label="กำลังโหลด..." boxClassName="text-sm text-slate-400" />
             : state.linked ? (
               <div className="space-y-3">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">✓ ผูกกับ Discord <b>{state.discord_username ?? ""}</b> แล้ว</div>

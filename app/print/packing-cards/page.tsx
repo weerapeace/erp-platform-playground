@@ -5,6 +5,7 @@
  * พิมพ์ A4 แล้วตัด/เคลือบติดโต๊ะ: แพ็คเสร็จ · มีปัญหา · อัดใหม่ · ข้าม + การ์ดกล่องทุกขนาด (ยิงการ์ดกล่อง = ตั้งกล่องที่ใช้จริง)
  * รหัสขึ้นต้น *PK- (lib/packing PACK_CMD_PREFIX) · พิมพ์เป็น Code128 เท่านั้น (Code39 ใช้ * เป็นตัวคั่น อ่านเพี้ยน)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
 import { apiFetch } from "@/lib/api";
@@ -63,7 +64,7 @@ export default function PackingCardsPrintPage() {
 
         <h2 className="mt-6 mb-2 text-base font-bold text-slate-800">การ์ดกล่อง — ยิงเพื่อบอกว่าใช้กล่องไหนจริง</h2>
         {err && <p className="no-print mb-2 text-sm text-red-600">{err}</p>}
-        {boxes === null ? <p className="text-sm text-slate-400">กำลังโหลดรายการกล่อง…</p> : (
+        {boxes === null ? <LoadingState label="กำลังโหลดรายการกล่อง…" boxClassName="text-sm text-slate-400" /> : (
           <div className="grid grid-cols-3 gap-3">
             {boxes.map((b) => (
               <div key={b.name} className="card rounded-lg border-2 border-slate-300 p-2 text-center">

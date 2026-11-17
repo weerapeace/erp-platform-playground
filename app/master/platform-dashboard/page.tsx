@@ -3,6 +3,7 @@
 // แดชบอร์ดรวมผู้บริหาร (หลายแพลตฟอร์ม) — ยอดขาย/ออเดอร์/สินค้าบนแพลตฟอร์ม/สต๊อก
 // ข้อมูลจาก /api/platform-dashboard · ส่วนที่ยังไม่มีข้อมูลจะขึ้นข้อความบอกวิธีเติม
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -93,7 +94,7 @@ export default function PlatformDashboardPage() {
         {(from || to || platformId || brandId) && <button onClick={() => { setFrom(""); setTo(""); setPlatformId(""); setBrandId(""); }} className="h-9 px-2 text-xs text-slate-400 hover:text-slate-600 underline">ล้างตัวกรอง</button>}
       </div>
 
-      {loading ? <p className="text-slate-400 text-sm py-10 text-center">กำลังโหลด...</p> : !kpi ? <p className="text-slate-400 text-sm py-10 text-center">โหลดข้อมูลไม่สำเร็จ</p> : (
+      {loading ? <LoadingState /> : !kpi ? <p className="text-slate-400 text-sm py-10 text-center">โหลดข้อมูลไม่สำเร็จ</p> : (
         <div className="space-y-5">
           {/* KPI */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

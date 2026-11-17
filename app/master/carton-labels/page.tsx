@@ -10,6 +10,7 @@
  *
  * ใช้ของกลาง: CustomerPicker, SkuPicker, Toast · เก็บใน DB ผ่าน /api/carton-labels
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
@@ -200,7 +201,7 @@ export default function CartonLabelsPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-400">กำลังโหลด…</td></tr>
+                <tr><td colSpan={6}><LoadingState rows={3} /></td></tr>
               ) : rows.length === 0 ? (
                 <tr><td colSpan={6} className="text-center py-12 text-slate-400">ยังไม่มีใบปะหน้ากล่อง — กด “สร้างใบปะหน้ากล่อง”</td></tr>
               ) : rows.map((r) => (
@@ -363,7 +364,7 @@ export default function CartonLabelsPage() {
                 <th className="px-3 py-2 font-medium text-right">รายการ</th><th className="px-3 py-2 font-medium text-right">ยอดรวม</th>
               </tr></thead>
               <tbody>
-                {soLoading ? <tr><td colSpan={4} className="text-center py-10 text-slate-400">กำลังโหลด…</td></tr>
+                {soLoading ? <tr><td colSpan={4}><LoadingState rows={3} /></td></tr>
                 : soRows.length === 0 ? <tr><td colSpan={4} className="text-center py-10 text-slate-400">ไม่พบใบขาย</td></tr>
                 : soRows.map((r) => (
                   <tr key={r.id} onClick={() => pickSo(r.id)} className="border-t border-slate-100 hover:bg-indigo-50/60 cursor-pointer">

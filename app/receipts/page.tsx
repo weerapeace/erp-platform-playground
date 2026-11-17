@@ -11,6 +11,7 @@
  * ใช้ของกลาง: ตารางกลาง DataTable · ERPModal/ConfirmDialog · CustomerPicker · MoneyInput · DateInput
  * สูตรยอดค้างรับ/ตรวจยอด อยู่ที่ lib/receipts.ts — ห้ามเขียนซ้ำในไฟล์นี้
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -460,7 +461,7 @@ function ReceiptFormModal({ open, editing, onClose, onSaved }: { open: boolean; 
           </div>
 
           {!customer && <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg py-6 text-center">เลือกลูกค้าก่อน แล้วใบที่ค้างรับจะขึ้นมาให้เลือก</p>}
-          {customer && loadingDocs && <p className="text-sm text-slate-400 py-4 text-center">กำลังโหลดใบค้างรับ…</p>}
+          {customer && loadingDocs && <LoadingState label="กำลังโหลดใบค้างรับ…" boxClassName="text-sm text-slate-400 py-4 text-center" />}
           {customer && !loadingDocs && docs.length === 0 && (
             <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg py-6 text-center">
               ลูกค้ารายนี้ไม่มีใบค้างรับ — เก็บเงินครบหมดแล้ว 🎉

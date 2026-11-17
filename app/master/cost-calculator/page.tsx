@@ -6,6 +6,7 @@
  * → บันทึกเป็น "ต้นทุนมาตรฐาน" ที่ Parent (ทุกสี) หรือ SKU นี้ (override)
  * สูตรคิด = ของกลาง lib/cost-calc (ตัวเดียวกับแท็บต้นทุนใน MO)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -274,7 +275,7 @@ export default function CostCalculatorPage() {
               {recent && recent.length > 0 && <span className="text-[11px] text-slate-400">กดเพื่อเปิดดู/แก้ต่อ</span>}
             </div>
             {recent === null ? (
-              <p className="text-center py-6 text-sm text-slate-400">กำลังโหลด…</p>
+              <LoadingState label="กำลังโหลด…" boxClassName="text-center py-6 text-sm text-slate-400" />
             ) : recent.length === 0 ? (
               <p className="text-center py-6 text-sm text-slate-400">ยังไม่เคยบันทึกต้นทุนสินค้าไหน — เลือกสินค้าด้านบนเพื่อเริ่มคิด</p>
             ) : (

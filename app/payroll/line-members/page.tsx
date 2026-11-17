@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AccessDenied, useAuth } from "@/components/auth";
@@ -388,7 +389,7 @@ export default function PayrollLineMembersPage() {
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-slate-400">กำลังโหลดข้อมูล...</td>
+                    <td colSpan={5}><LoadingState rows={3} /></td>
                   </tr>
                 ) : (
                   <>

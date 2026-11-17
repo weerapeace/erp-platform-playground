@@ -5,6 +5,7 @@
  * คอลัมน์: ช่างที่ผลิต · วันที่ส่ง · กำหนดส่ง · จำนวน · ค่าแรง (+ SKU/สินค้า/ใบผลิต/ใบจ่ายงาน)
  * ข้อมูลชุดนี้คือสิ่งที่ไหลเข้าโกดัง QC
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -112,7 +113,7 @@ export default function WorkSubmissionsPage() {
           </tr></thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="text-center py-12 text-slate-400">กำลังโหลด…</td></tr>
+              <tr><td colSpan={8}><LoadingState rows={3} /></td></tr>
             ) : rows.length === 0 ? (
               <tr><td colSpan={8} className="text-center py-12 text-slate-400">{tab === "pending" ? "ไม่มีรายการค้าง — ลงวันที่/ค่าแรงครบหมดแล้ว 🎉" : "ยังไม่มีการส่งงาน"}</td></tr>
             ) : rows.map((r) => (

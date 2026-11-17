@@ -3,6 +3,7 @@
 // หน้าจับคู่เร็ว (Platform Match) — รวมสินค้าแพลตฟอร์มที่ยังไม่จับคู่ ERP → เดารหัสให้ + กดยืนยันทีเดียว
 // ของกลาง: ParentSkuPicker (ค้นเอง) · API /api/platform-match (เดา) + /api/platform-catalog/match (บันทึก)
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -145,7 +146,7 @@ export default function PlatformMatchPage() {
 
       {rows.length > 0 && <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาในรายการที่ยังไม่จับ..." className="h-9 w-full sm:w-72 border border-slate-200 rounded-md px-3 text-sm mb-3" />}
 
-      {loading ? <p className="text-slate-400 text-sm py-10 text-center">กำลังโหลด...</p>
+      {loading ? <LoadingState />
         : rows.length === 0 ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-emerald-600">🎉 จับคู่ครบทุกตัวแล้ว!<br /><span className="text-slate-400">หรือยังไม่มีสินค้าที่ดึงเข้ามา — ไปดึงที่หน้าสินค้าบนแพลตฟอร์ม</span></div>
         : (
           <div className="border border-slate-200 rounded-xl overflow-hidden">

@@ -12,6 +12,7 @@
  * ทุกปุ่มแก้ข้อมูลเรียก API เดิมที่มีสิทธิ์ + ประวัติในตัวอยู่แล้ว (ดู docs/cashflow.md)
  * เลือกดูทีละบริษัทได้ (ปุ่มชุดเดียวกับกระดาน /cashflow/board — เลือกที่หน้าไหน อีกหน้าตามไปด้วย)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -856,7 +857,7 @@ function SettingsPanel({
               {companies.length > 0 && " · ระบุบริษัทของแต่ละบัญชีด้วย จะได้ดูเงินแยกบริษัทได้"}
             </p>
 
-            {loading && <p className="text-sm text-slate-400 py-2">กำลังโหลด…</p>}
+            {loading && <LoadingState label="กำลังโหลด…" boxClassName="text-sm text-slate-400 py-2" />}
 
             {!loading && accounts.length === 0 && (
               <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg py-4 text-center">
@@ -1115,7 +1116,7 @@ function ManualItemsSection({ canManage, companies, onChanged }: { canManage: bo
       </p>
 
       {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-600 mb-2">{err}</div>}
-      {loading && <p className="text-sm text-slate-400 py-2">กำลังโหลด…</p>}
+      {loading && <LoadingState label="กำลังโหลด…" boxClassName="text-sm text-slate-400 py-2" />}
 
       {!loading && items.length === 0 && (
         <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg py-4 text-center">
