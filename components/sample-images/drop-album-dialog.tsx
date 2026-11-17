@@ -73,30 +73,62 @@ function SkuToggleChips({ parent, kids, value, onChange }: { parent: ParentSkuPi
 type AlbumGroup = { key: number; name: string; hint?: string; parent: ParentSkuPickerValue | null; skus: string[] };
 
 /** การ์ดอัลบั้มในแถบซ้าย (แบบแยกหลายอัลบั้ม) — กด/ลากรูปมาวาง = ใส่รูปที่เลือก · ชื่อ + Parent + SKU ของอัลบั้มนั้น */
-function AlbumSideCard({ g, color, count, selCount, dropOver, drop, onPut, onChange, onRemove }: {
-  g: AlbumGroup; color: string; count: number; selCount: number; dropOver: boolean;
+function AlbumSideCard({ g, color, count, previews, selCount, dropOver, drop, onPut, onChange, onRemove }: {
+  g: AlbumGroup; color: string; count: number;
+  /** รูปตัวอย่าง (4 รูปแรกของอัลบั้ม) — รู้ทันทีว่าอัลบั้มไหนคือสินค้าอะไร */
+  previews: (string | null)[];
+  selCount: number; dropOver: boolean;
   drop: { onDragOver: (e: DragEvent) => void; onDragLeave: () => void; onDrop: (e: DragEvent) => void };
   onPut: () => void; onChange: (p: Partial<AlbumGroup>) => void; onRemove: () => void;
 }) {
   const t = useT();
   const kids = useKids(g.parent);
+  const [editLink, setEditLink] = useState(false);   // ส่วนเชื่อมสินค้า: ย่อเป็นบรรทัดเดียว กด "แก้" ถึงกาง
+  const skuShort = g.parent ? g.skus.map((c) => shortCode(g.parent!.code, c)).join(", ") : "";
   return (
-    <div {...drop} className={`space-y-1.5 rounded-xl border bg-white p-2 ${dropOver ? "border-violet-500 ring-2 ring-violet-200" : "border-slate-200"}`}>
+    <div {...drop} className={`space-y-2 rounded-xl border bg-white p-2.5 ${dropOver ? "border-violet-500 ring-2 ring-violet-200" : "border-slate-200"}`}>
       <div className="flex items-center gap-1.5">
         <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: color }} />
         <input value={g.name} onChange={(e) => onChange({ name: e.target.value })} maxLength={120} aria-label={t("ชื่ออัลบั้ม", "Album name")}
-          className="h-7 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1.5 text-[13px] font-medium focus:border-violet-400 focus:outline-none" />
-        <span className="shrink-0 text-[12px] tabular-nums text-slate-500">{count}</span>
+          className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-white px-1 text-sm font-semibold text-slate-800 hover:border-slate-200 focus:border-violet-400 focus:outline-none" />
+        <span className="shrink-0 rounded-full bg-violet-100 px-2 text-[12px] font-semibold tabular-nums text-violet-800">{count}</span>
         <button type="button" onClick={onRemove} title={t("เอาอัลบั้มนี้ออก (รูปกลับไปกองยังไม่จัด)", "Remove (photos go back to unsorted)")}
           className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600"><Icon value="i:x" /></button>
       </div>
+      {count > 0 ? (
+        <div className="flex items-center gap-1">
+          {previews.map((u, i) => (
+            <span key={i} className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+              {u
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={u} alt="" draggable={false} className="absolute inset-0 h-full w-full object-contain" />
+                : <span className="absolute inset-0 flex items-center justify-center text-slate-300"><Icon value="i:photo" /></span>}
+            </span>
+          ))}
+          {count > previews.length && <span className="pl-0.5 text-[12px] text-slate-500">+{count - previews.length}</span>}
+        </div>
+      ) : <p className="text-[12px] text-slate-400">{t("ว่าง — ลากรูปมาวางที่นี่", "Empty — drop photos here")}</p>}
       {g.hint && <p className="text-[11px] text-slate-400">{t(`จากโฟลเดอร์ ${g.hint}`, `From folder ${g.hint}`)}</p>}
+      {editLink ? (
+        <div className="space-y-1.5 border-t border-dashed border-slate-200 pt-2">
+          <ParentSkuPicker value={g.parent} onChange={(v) => onChange({ parent: v, skus: [] })} placeholder={t("Parent SKU (ไม่บังคับ)", "Parent SKU (optional)")} disableCreate />
+          {g.parent && <SkuToggleChips parent={g.parent} kids={kids} value={g.skus} onChange={(skus) => onChange({ skus })} />}
+          <button type="button" onClick={() => setEditLink(false)} className="text-[12px] font-medium text-violet-700 hover:underline">{t("เสร็จ", "Done")}</button>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 border-t border-dashed border-slate-200 pt-1.5 text-[12px]">
+          <span className="min-w-0 flex-1 text-slate-500">
+            {g.parent
+              ? <>{t("สินค้า: ", "Product: ")}<b className="font-medium text-slate-800">{g.parent.code}</b> <span className="text-slate-600">{g.parent.name}</span>{t(` · SKU ${skuShort || "ทั้งรุ่น"}`, ` · SKU ${skuShort || "all"}`)}</>
+              : t("ยังไม่เชื่อมสินค้า", "No product linked")}
+          </span>
+          <button type="button" onClick={() => setEditLink(true)} className="shrink-0 font-medium text-violet-700 hover:underline">{g.parent ? t("แก้", "Edit") : t("＋ เชื่อม Parent", "＋ Link")}</button>
+        </div>
+      )}
       {selCount > 0 && (
-        <button type="button" onClick={onPut} className="flex h-7 w-full items-center justify-center gap-1 rounded-md bg-violet-600 text-[12px] font-medium text-white hover:bg-violet-700">
+        <button type="button" onClick={onPut} className="flex h-8 w-full items-center justify-center gap-1 rounded-lg bg-violet-600 text-[12px] font-medium text-white hover:bg-violet-700">
           <Icon value="i:transfer-out" />{t(`ใส่ ${selCount} รูปที่เลือก`, `Put ${selCount} selected`)}</button>
       )}
-      <ParentSkuPicker value={g.parent} onChange={(v) => onChange({ parent: v, skus: [] })} placeholder={t("Parent SKU (ไม่บังคับ)", "Parent SKU (optional)")} disableCreate />
-      {g.parent && <SkuToggleChips parent={g.parent} kids={kids} value={g.skus} onChange={(skus) => onChange({ skus })} />}
     </div>
   );
 }
@@ -133,7 +165,7 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
   const [sel, setSel] = useState<Set<number>>(new Set());
   const lastClick = useRef<number | null>(null);
   const [overChip, setOverChip] = useState<string | null>(null);
-  const gallery = useGalleryColumns("sample-drop-sort", 8, "0.25rem", { options: [4, 5, 6, 8] as const, ctrlWheel: true });
+  const gallery = useGalleryColumns("sample-drop-sort", 6, "0.375rem", { options: [4, 5, 6, 8] as const, ctrlWheel: true });
 
   useEffect(() => {
     if (!open) return;
@@ -168,6 +200,7 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
   const albumColor = (key: number) => COLORS[(albumIdx.get(key) ?? 0) % COLORS.length];
   const skuGroups = useMemo(() => (bySku ? splitGroups(assign, kids ?? [], name.trim() || defaultName) : []), [bySku, assign, kids, name, defaultName]);
   const albumCount = (key: number) => albumOf.filter((k) => k === key).length;
+  const previewsOf = (key: number) => albumOf.flatMap((k, i) => (k === key ? [thumbs[i] ?? null] : [])).slice(0, 4);
   const unsortedCount = albumOf.filter((k) => k === UNSORTED).length;
   // รูปที่โชว์ในกริด (แบบแยกหลายอัลบั้ม + กรอง "ยังไม่จัด" = เฉพาะกองยังไม่จัด)
   const visible = useMemo(() => {
@@ -289,11 +322,12 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
         draggable={picking}
         onDragStart={(e) => { e.dataTransfer.setData(DRAG, String(i)); e.dataTransfer.effectAllowed = "move"; }}
         onClick={(e) => picking && clickPhoto(i, e.shiftKey)}
-        className={`relative aspect-square select-none overflow-hidden rounded-md border-2 bg-slate-50 ${picking ? "cursor-pointer" : ""} ${on ? "border-violet-500" : "border-transparent"}`}>
+        // ช่องจัตุรัสเท่ากันทุกรูป (pt-[100%] — aspect-ratio ในกริดที่สูงจำกัดถูกบีบจนรูปโดนตัด · เจ้าของแจ้ง 2026-11-17) · รูปเต็มใบไม่ตัดขอบ พื้นขาว
+        className={`relative w-full select-none overflow-hidden rounded-md border-2 bg-white pt-[100%] ${picking ? "cursor-pointer" : ""} ${on ? "border-violet-500" : "border-slate-200"}`}>
         {u
           // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={u} alt="" draggable={false} className="h-full w-full object-cover" />
-          : <span className="flex h-full w-full items-center justify-center text-slate-400"><Icon value="i:photo" /></span>}
+          ? <img src={u} alt="" draggable={false} loading="lazy" className="absolute inset-0 h-full w-full object-contain p-0.5" />
+          : <span className="absolute inset-0 flex items-center justify-center text-slate-400"><Icon value="i:photo" /></span>}
         {skuCode && <span className="absolute inset-x-0.5 bottom-0.5 truncate rounded px-1 text-center text-[10.5px] font-medium text-white" style={{ background: skuColor.get(skuCode) ?? "#7c3aed" }}>{shortCode(parent?.code, skuCode)}</span>}
         {ak !== undefined && ak !== UNSORTED && <span className="absolute left-1 top-1 h-2.5 w-2.5 rounded-full ring-1 ring-white" style={{ background: albumColor(ak) }} title={albums.find((a) => a.key === ak)?.name} />}
         {on && <span className="absolute right-0.5 top-0.5 rounded-full bg-white text-base text-violet-600"><Icon value="i:circle-check" /></span>}
@@ -383,11 +417,11 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
 
         {byAlbum ? (
           // ── จัดรูปเยอะ: แถบอัลบั้ม (ซ้าย · มือถืออยู่บน) + กริดรูปเล็ก ──
-          <div className="grid gap-3 sm:grid-cols-[250px_minmax(0,1fr)]">
+          <div className="grid gap-3 sm:grid-cols-[290px_minmax(0,1fr)]">
             <aside className="max-h-[230px] space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-2 sm:max-h-[62vh]">
               {albums.length === 0 && <p className="p-1 text-[12px] text-slate-500">{t("ยังไม่มีอัลบั้ม — เลือกรูปแล้วกด \"＋ อัลบั้มใหม่จากที่เลือก\" หรือ \"แบ่งตามเวลาถ่าย\"", "No albums yet — pick photos then \"＋ New album from selection\"")}</p>}
               {albums.map((a) => (
-                <AlbumSideCard key={a.key} g={a} color={albumColor(a.key)} count={albumCount(a.key)} selCount={sel.size}
+                <AlbumSideCard key={a.key} g={a} color={albumColor(a.key)} count={albumCount(a.key)} previews={previewsOf(a.key)} selCount={sel.size}
                   dropOver={overChip === `a:${a.key}`} drop={chipDrop(`a:${a.key}`, (x) => toAlbum(a.key, x))}
                   onPut={() => toAlbum(a.key)} onChange={(p) => patchAlbum(a.key, p)} onRemove={() => removeAlbum(a.key)} />
               ))}
