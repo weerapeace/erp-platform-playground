@@ -58,7 +58,7 @@ export function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSku
   const [error, setError] = useState<string | null>(null);
   // มุมมอง ☰ รายการ / 🖼️ การ์ด — จำรายคน (ของกลาง useViewPref) · จำนวนการ์ดต่อแถว (ของกลาง gallery-columns)
   const { view, setView, saveDefault } = useViewPref("campaign_mkt_pick_view", ["list", "grid"] as const, "grid");
-  const { cols, setCols, gridStyle } = useGalleryColumns("campaign-mkt-pick", 5);
+  const { cols, setCols, gridStyle, wheelRef, compactAttr, thumbW } = useGalleryColumns("campaign-mkt-pick", 5);
   useEffect(() => {
     let alive = true;
     apiFetch("/api/marketing/skus").then(async (r) => {
@@ -124,7 +124,7 @@ export function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSku
             : error ? <p className="px-3 py-6 text-sm text-rose-600 text-center">⚠️ {error}</p>
             : shown.length === 0 ? <p className="px-3 py-6 text-sm text-slate-400 text-center">{t("ไม่พบรุ่นที่ตรง", "No matching model")}</p>
             : (
-              <div style={gridStyle}>
+              <div ref={wheelRef} style={gridStyle} {...compactAttr}>
                 {shown.map((s) => { const on = selected.some((x) => x.id === s.id); return (
                   <button key={s.id} type="button" onClick={() => toggle(s)} title={`${s.code} · ${s.name}`}
                     className={`relative flex flex-col overflow-hidden rounded-lg border bg-white text-left transition ${on ? "border-orange-500 ring-2 ring-orange-200" : "border-slate-200 hover:border-orange-300"}`}
@@ -132,9 +132,9 @@ export function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSku
                     <span className={`absolute left-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold shadow-sm ${on ? "border-orange-600 bg-orange-600 text-white" : "border-slate-300 bg-white/90 text-transparent"}`}>✓</span>
                     {s.label && <span className="absolute right-1.5 top-1.5 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm" style={{ backgroundColor: s.label_color || "#ea580c" }}>{s.label}</span>}
                     {s.image_url
-                      ? <img src={`${s.image_url}&w=400`} alt="" loading="lazy" className="aspect-square w-full bg-slate-50 object-contain" />
+                      ? <img src={`${s.image_url}&w=${thumbW(400)}`} alt="" loading="lazy" className="aspect-square w-full bg-slate-50 object-contain" />
                       : <span className="flex aspect-square w-full items-center justify-center bg-slate-50 text-3xl text-slate-300">🎯</span>}
-                    <span className="flex flex-1 flex-col gap-1 p-2">
+                    <span className="gallery-label flex flex-1 flex-col gap-1 p-2">
                       <span className="flex items-center justify-between gap-1">
                         <span className="font-mono text-[10px] text-slate-500">{s.code}</span>
                         <span className="text-[10px] text-slate-500">🎨 {s.sku_active}/{s.sku_total}</span>

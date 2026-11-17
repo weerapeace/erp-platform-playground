@@ -163,7 +163,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
             </span>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+        <div className="gallery-label flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{a.deep.sub_count}</span>}
           {a.note && <NoteMark note={a.note} />}
@@ -180,8 +180,8 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
       <AlbumCover keys={a.preview_keys} total={a.deep.photos} />
       <div className="space-y-1.5 p-3">
         <div className="font-medium text-slate-800">{albumCardLabel(a)}</div>
-        {inside && <div className="flex items-center gap-1 truncate text-[11px] text-slate-400"><Icon value="i:folder" /><span className="truncate">{t(`อยู่ใน ${inside}`, `In ${inside}`)}</span></div>}
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+        {inside && <div className="gallery-label flex items-center gap-1 truncate text-[11px] text-slate-400"><Icon value="i:folder" /><span className="truncate">{t(`อยู่ใน ${inside}`, `In ${inside}`)}</span></div>}
+        <div className="gallery-label flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1"><BrandDot color={brand?.color} />{brand?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1" title={t("อัลบั้มย่อย", "Sub-albums")}><Icon value="i:folder" />{a.deep.sub_count}</span>}
@@ -222,8 +222,8 @@ export function SampleAlbumPath({ path, brandColor, nameOf, onBack, onOpen, crum
 
 /** ช่องรูป 1 รูป: กด = เลือก/เลิกเลือก · ชี้แล้วมีปุ่มดูรูปเต็ม · ป้าย → DS-xxxx = อยู่ในใบงานแล้ว
  *  faded = รูปในถังขยะ · highlight = ลากผ่าน · extra = props ลาก-วาง · children = ป้ายลอยเพิ่ม (เช่น "ปล่อย = รวมเป็นอัลบั้มใหม่") */
-export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, children }: {
-  photo: SamplePhoto; on: boolean; onToggle: () => void; faded?: boolean; highlight?: boolean;
+export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, children, thumbW = 480 }: {
+  photo: SamplePhoto; on: boolean; onToggle: () => void; faded?: boolean; highlight?: boolean; thumbW?: number;
   extra?: HTMLAttributes<HTMLDivElement>; children?: ReactNode;
 }) {
   const t = useT();
@@ -232,13 +232,13 @@ export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, 
     <div {...extra} className={`group relative overflow-hidden rounded-xl border bg-white ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
       <button type="button" onClick={onToggle} className="block w-full cursor-pointer" aria-pressed={on} title={p.file_name}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={sampleImgUrl(p.r2_key, 480)} alt={p.file_name} loading="lazy" draggable={false} className={`aspect-square w-full bg-slate-50 object-contain ${faded ? "opacity-60" : ""}`} />
+        <img src={sampleImgUrl(p.r2_key, thumbW)} alt={p.file_name} loading="lazy" draggable={false} className={`aspect-square w-full bg-slate-50 object-contain ${faded ? "opacity-60" : ""}`} />
       </button>
       <a href={sampleImgUrl(p.r2_key)} target="_blank" rel="noopener noreferrer" title={t("ดูรูปเต็ม", "Open full image")} draggable={false}
         className="absolute left-1.5 top-1.5 hidden h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 group-hover:inline-flex"><Icon value="i:external-link" /></a>
       {on && <span className="absolute right-1.5 top-1.5 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
       {children}
-      <div className="space-y-1 px-2 py-1.5">
+      <div className="gallery-label space-y-1 px-2 py-1.5">
         <div className="truncate text-[11px] text-slate-500">{p.file_name}</div>
         {p.moved_to.length > 0 && (
           <div className="flex flex-wrap gap-1">

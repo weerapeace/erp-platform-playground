@@ -201,7 +201,7 @@ export function DropAlbumDialog({ files, inside, insideId, existing = [], brandN
   const [sel, setSel] = useState<Set<number>>(new Set());
   const lastClick = useRef<number | null>(null);
   const [overChip, setOverChip] = useState<string | null>(null);
-  const gallery = useGalleryColumns("sample-drop-sort", 6, "0.375rem", { options: [4, 5, 6, 8] as const, ctrlWheel: true });
+  const gallery = useGalleryColumns("sample-drop-sort", 6, "0.375rem", { options: [4, 5, 6, 8, 10, 12, 14, 16] as const });
 
   useEffect(() => {
     if (!open) return;

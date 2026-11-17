@@ -74,7 +74,7 @@ export function IdeasView({ canEdit, isAdmin = false, initialView = "all", searc
   const [promote, setPromote] = useState<DesignIdea | null>(null);
   const [lb, setLb] = useState<{ keys: string[]; i: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const { cols, setCols, gridStyle } = useGalleryColumns("design_ideas", 4);
+  const { cols, setCols, gridStyle, wheelRef, thumbW } = useGalleryColumns("design_ideas", 4);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -209,9 +209,9 @@ export function IdeasView({ canEdit, isAdmin = false, initialView = "all", searc
             ))}
           </div>
         ) : (
-          <div style={gridStyle}>
+          <div ref={wheelRef} style={gridStyle}>
             {shown.map((it) => (
-              <IdeaCard key={it.id} it={it} fit={fit} small={cols >= 6} canEdit={canEdit} busy={busy === it.id}
+              <IdeaCard key={it.id} it={it} fit={fit} small={cols >= 6} thumbW={thumbW(640)} canEdit={canEdit} busy={busy === it.id}
                 onOpenImages={(i) => setLb({ keys: it.image_keys, i })}
                 onEdit={() => setForm(it)} onPromote={() => setPromote(it)} onStatus={(s) => void setStatus(it, s)} />
             ))}
@@ -256,8 +256,8 @@ export function IdeasView({ canEdit, isAdmin = false, initialView = "all", searc
   );
 }
 
-function IdeaCard({ it, fit, small, canEdit, busy, onOpenImages, onEdit, onPromote, onStatus }: {
-  it: DesignIdea; fit: Fit; small: boolean; canEdit: boolean; busy: boolean;
+function IdeaCard({ it, fit, small, thumbW = 640, canEdit, busy, onOpenImages, onEdit, onPromote, onStatus }: {
+  it: DesignIdea; fit: Fit; small: boolean; thumbW?: number; canEdit: boolean; busy: boolean;
   onOpenImages: (i: number) => void; onEdit: () => void; onPromote: () => void; onStatus: (s: "open" | "paused" | "archived") => void;
 }) {
   const t = useT();
@@ -271,7 +271,7 @@ function IdeaCard({ it, fit, small, canEdit, busy, onOpenImages, onEdit, onPromo
         {cover ? (
           <button type="button" onClick={() => onOpenImages(0)} className="block w-full cursor-zoom-in bg-slate-50" title={t("กดเพื่อดูรูปเต็มจอ", "Open full screen")}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={ideaImageUrl(cover, 640)} alt={it.name} loading="lazy"
+            <img src={ideaImageUrl(cover, thumbW)} alt={it.name} loading="lazy"
               className={`aspect-square w-full ${fit === "contain" ? "object-contain" : "object-cover"} ${archived ? "grayscale" : ""}`} />
           </button>
         ) : (

@@ -93,7 +93,7 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
   const [needPick, setNeedPick] = useState(false);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useUserPref<View>("design_sheet_picker_view", "grid", (raw) => (raw === "grid" || raw === "list" ? raw : null));
-  const { cols, setCols, gridStyle } = useGalleryColumns("design-sheet-picker", 4);
+  const { cols, setCols, gridStyle, wheelRef, compactAttr, thumbW } = useGalleryColumns("design-sheet-picker", 4);
   const { recent, remember } = useRecentPicks<Recent>(RECENT_KEYS.designSheets, open);
   const [creating, setCreating] = useState(false);
   const createdRef = useRef<{ id: string; code: string } | null>(null);
@@ -219,12 +219,12 @@ export function DesignSheetPickerModal({ open, onClose, onConfirm, title, confir
               title={qq || brand ? t("ไม่พบใบงานที่ตรงคำค้น", "No design sheet matches") : t("ยังไม่มีใบงาน", "No design sheets yet")}
               hint={qq || brand ? t("ลองคำอื่น หรือเลือก \"ทุกแบรนด์\" · งานปิดแล้วถูกซ่อนอยู่", "Try another word or \"All brands\" · closed jobs are hidden") : undefined} />
           : view === "grid" ? (
-            <div className="grid" style={gridStyle}>
+            <div ref={wheelRef} className="grid" style={gridStyle} {...compactAttr}>
               {list.map((r) => (
-                <button key={r.id} type="button" onClick={() => pick(r.id)}
+                <button key={r.id} type="button" onClick={() => pick(r.id)} title={`${r.code} · ${r.name}`}
                   className={`relative overflow-hidden rounded-xl border bg-white text-left transition ${picked === r.id ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200 hover:border-slate-300"}`}>
-                  <Cover url={r.cover_url} w={360} className="aspect-square w-full" />
-                  <div className="space-y-1 p-2">
+                  <Cover url={r.cover_url} w={thumbW(360)} className="aspect-square w-full" />
+                  <div className="gallery-label space-y-1 p-2">
                     <div className="truncate text-[11px] text-slate-400"><Hl text={r.code} q={qq} />{r.brand_name ? <> · <Hl text={r.brand_name} q={qq} /></> : null}</div>
                     <div className="line-clamp-2 text-[13px] leading-snug text-slate-800"><Hl text={r.name} q={qq} /></div>
                     {status(r.status)}

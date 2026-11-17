@@ -152,3 +152,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   }
   @page { size: A4; margin: 12mm; }
 }
+
+/* ของกลาง gallery-columns: การ์ด 12 ใบ/แถวขึ้นไป = ซ่อนชื่อ/ป้ายใต้การ์ด (ชี้ค้างดูชื่อจาก title) */
+[data-gallery-compact] .gallery-label { display: none !important; }

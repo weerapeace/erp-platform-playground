@@ -147,8 +147,8 @@ export function SampleImagesPage() {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย (เจ้าของสั่ง 2026-11-15) — รูปในอัลบั้ม และการ์ดอัลบั้มหน้าแฟ้ม (จำแยกกัน รายคน)
-  const { cols, setCols, gridStyle, wheelRef } = useGalleryColumns("sample-images", 6, "0.75rem", { ctrlWheel: true });
-  const albumGrid = useGalleryColumns("sample-albums", 3, "0.75rem", { options: GALLERY_COL_CHOICES, ctrlWheel: true });
+  const { cols, setCols, gridStyle, wheelRef, compactAttr, thumbW } = useGalleryColumns("sample-images", 6, "0.75rem");
+  const albumGrid = useGalleryColumns("sample-albums", 3, "0.75rem", { options: GALLERY_COL_CHOICES });
   // ค้นหา + เรียง (เจ้าของสั่ง 2026-11-15) — หน้าแฟ้ม = ค้นอัลบั้มทุกชั้น · ในอัลบั้ม = ค้นรูป/อัลบั้มย่อย · วิธีเรียงจำรายคน (ใช้ร่วมกับแท็บในตัวเลือกไฟล์)
   const [query, setQuery] = useState("");
   const { albumSort, setAlbumSort, photoSort, setPhotoSort } = useSampleSorts();
@@ -779,7 +779,7 @@ export function SampleImagesPage() {
                       )}
                       {orderMode && <span className="text-slate-500">{t("ลากการ์ดสลับ หรือกด ← → · บันทึกทันที", "Drag cards or use ← → · saved right away")}</span>}
                     </div>
-                    <div className="grid max-sm:!grid-cols-2" style={gridStyle}>
+                    <div className="grid max-sm:!grid-cols-2" style={gridStyle} {...compactAttr}>
                       {shownChildren.map((c, ci) => (<Fragment key={c.id}>
                         {subSort === "parent" && !orderMode && (ci === 0 || parentGroupOf(shownChildren[ci - 1]) !== parentGroupOf(c)) && (
                           <div className="col-span-full mt-1 border-b border-dashed border-slate-200 pb-0.5 text-[12px] font-semibold text-slate-500">
@@ -814,14 +814,14 @@ export function SampleImagesPage() {
                       title={trashView ? t("ถังขยะว่าง", "Trash is empty") : t("ยังไม่มีรูปในอัลบั้มนี้", "No images yet")}
                       hint={trashView ? undefined : t("ลากรูปมาวางด้านบนได้เลย", "Drop images above")} />)
                   : (
-                    <div className="grid" style={gridStyle}>
+                    <div className="grid" style={gridStyle} {...compactAttr}>
                       {list.map((p) => {
                         const on = sel.has(p.id);
                         const zone = overKey?.startsWith(`ph:${p.id}:`) ? (overKey.slice(`ph:${p.id}:`.length) as DropZone) : null;
                         const over = zone === "merge";
                         const idx = list.indexOf(p);
                         return (
-                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over}
+                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over} thumbW={thumbW(480)}
                             extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : photoDrop(p.id)), ...selAttr(`p:${p.id}`) }}>
                             {over && <span className="pointer-events-none absolute inset-x-1.5 top-1.5 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-center text-[11px] text-white">{t("ปล่อย = รวมเป็นอัลบั้มใหม่", "Drop to make an album")}</span>}
                             {(zone === "before" || zone === "after") && <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1.5 rounded-full bg-violet-500 ${zone === "before" ? "left-0" : "right-0"}`} />}
@@ -838,7 +838,7 @@ export function SampleImagesPage() {
               ) : (
                 /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
                 /* จำนวนการ์ดต่อแถวตามที่เลือก (Ctrl + ลูกกลิ้ง / ▦) · มือถือคงไว้ 1–2 ต่อแถวเหมือนเดิม */
-                <div style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
+                <div style={albumGrid.gridStyle} {...albumGrid.compactAttr} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
                   {cards.map(({ album: a, inside }) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} inside={inside} onOpen={() => void openAlbum(a.id)} dropLabel={cardDropLabel(a)} extra={withFileDrop(a.id)} />)}
                 </div>
               )}

@@ -13,7 +13,7 @@ import { ERPModal } from "@/components/modal";
 import { Pager } from "@/components/pager";
 import { useViewPref } from "@/lib/use-view-pref";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { labelName, type MarketingBrand, type MarketingSkuItem, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
@@ -91,7 +91,7 @@ export function MarketingSkuPickerModal({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   // ▦ การ์ดต่อแถว (dropdown · จำรายคน) — มือถือ 2 ใบเสมอ
-  const { cols, setCols } = useGalleryColumns(colsPrefKey, 6);
+  const { cols, setCols, wheelRef: gridWheelRef } = useGalleryColumns(colsPrefKey, 6);
 
   const doLoad = useCallback(async () => {
     setErr(null);
@@ -362,7 +362,7 @@ export function MarketingSkuPickerModal({
           {!filtered.length ? (
             <p className="py-10 text-center text-sm text-slate-400">{t("ไม่พบสินค้า ลองเปลี่ยนป้าย/แบรนด์ หรือคำค้น", "No products found — try another label/brand or search")}</p>
           ) : tab === "mkt" ? (
-            <div className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ ["--cols" as string]: cols } as React.CSSProperties}>
+            <div ref={gridWheelRef} className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:var(--cols)]" style={{ ["--cols" as string]: galleryTemplate(cols, "0.625rem") } as React.CSSProperties}>
               {pageRows.map((i) => {
                 const on = onShop.has(i.parent_sku_id);
                 const picked = sel.has(i.parent_sku_id);

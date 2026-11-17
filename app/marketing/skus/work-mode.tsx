@@ -25,7 +25,7 @@ import { HoverImage } from "@/components/hover-image";
 import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
 import { ParentWebDrawer } from "@/components/parent-web-drawer";
 import { Pager } from "@/components/pager";
-import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";
 import { useViewPref } from "@/lib/use-view-pref";
 import { useCanHover } from "@/lib/use-can-hover";
 import { apiFetch } from "@/lib/api";
@@ -112,7 +112,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
   const [q, setQ] = useState("");
   const [gridSort, setGridSort] = useState<GridSort>("order");
   const [gridPage, setGridPage] = useState(0);
-  const { cols: gridCols, setCols: setGridCols } = useGalleryColumns("marketing-work-grid", 5);
+  const { cols: gridCols, setCols: setGridCols, wheelRef: gridWheelRef } = useGalleryColumns("marketing-work-grid", 5);
   const [openParent, setOpenParent] = useState<string | null>(null);
   const [webParent, setWebParent] = useState<string | null>(null);
   const canHover = useCanHover();
@@ -678,7 +678,7 @@ export function WorkMode({ canManage, labels, labelMap, work, focusJobId, onLabe
                   <div className="ml-auto">{actionsEl}</div>
                 </div>
                 {gridRows.length === 0 ? emptyEl : (
-                  <div className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ ["--cols" as string]: gridCols } as React.CSSProperties}>
+                  <div ref={gridWheelRef} className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:var(--cols)]" style={{ ["--cols" as string]: galleryTemplate(gridCols, "0.625rem") } as React.CSSProperties}>
                     {pageRows.map((it) => {
                       const on = selected.has(it.id);
                       const p = itemProgress(it.step_done, steps, it.step_skip);

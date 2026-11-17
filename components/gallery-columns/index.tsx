@@ -13,17 +13,24 @@
  *   const { cols, setCols, gridStyle, wheelRef } = useGalleryColumns("sample-albums", 3, "0.75rem", { options: GALLERY_COL_CHOICES, ctrlWheel: true });
  *   <div ref={wheelRef} style={gridStyle}> … </div>
  *   หมุนลง = การ์ดเล็กลง (ต่อแถวมากขึ้น) · หมุนขึ้น = ใหญ่ขึ้น · ไม่ซูมทั้งหน้าเว็บเมื่อชี้อยู่บนกริด · นอกกริดซูมหน้าเว็บได้ตามปกติ
+ *
+ * สูงสุด 16 ใบต่อแถว (เจ้าของสั่ง 2026-11-17):
+ *   - ctrlWheel เปิดเป็นค่าเริ่มต้นแล้ว (ผูก wheelRef ที่กริด · ปิดได้ด้วย { ctrlWheel: false })
+ *   - gridStyle = "สูงสุด cols ใบ" — จอ/กล่องแคบจนการ์ดเล็กกว่า 70px ลดจำนวนต่อแถวเอง
+ *     หน้าที่ทำกริดเองด้วย CSS var ให้ใช้ galleryTemplate(cols, gap) แทน repeat(cols, …)
+ *   - {...compactAttr} ที่กริด + className={GALLERY_LABEL} ที่ชื่อ/ป้ายใต้การ์ด = 12 ใบขึ้นไปซ่อนเอง (ใส่ title ที่การ์ดไว้ให้ชี้ดูชื่อ)
+ *   - thumbW(base) = ความกว้างรูปย่อที่ควรขอ (การ์ดเล็ก = รูปเล็ก โหลดเร็ว)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
-import { stepGalleryCols } from "@/lib/gallery-cols";
+import { galleryTemplate, galleryThumbWidth, isCompactGallery, stepGalleryCols } from "@/lib/gallery-cols";
+import { GALLERY_COL_CHOICES, GALLERY_COL_OPTIONS, type GalleryCols } from "./options";
 
-/** ตัวเลือกมาตรฐาน (ทุกหน้าที่ใช้อยู่เดิม) */
-export const GALLERY_COL_OPTIONS = [3, 4, 5, 6, 8] as const;
-/** ตัวเลือกทั้งหมดที่รองรับ — มี 2 ต่อแถว ไว้สำหรับการ์ดใหญ่ (เช่น การ์ดอัลบั้ม) */
-export const GALLERY_COL_CHOICES = [2, 3, 4, 5, 6, 8] as const;
-export type GalleryCols = (typeof GALLERY_COL_CHOICES)[number];
+export { GALLERY_COL_CHOICES, GALLERY_COL_OPTIONS, type GalleryCols };
+export { galleryTemplate, galleryThumbWidth, isCompactGallery };
+/** ใส่ที่ชื่อ/ป้ายใต้การ์ด — กริดที่มี compactAttr (12 ใบขึ้นไป) จะซ่อนให้เอง (CSS ใน app/globals.css) */
+export const GALLERY_LABEL = "gallery-label";
 
 const isValidCols = (n: unknown, options: readonly number[]): n is GalleryCols =>
   typeof n === "number" && options.includes(n);
@@ -54,14 +61,18 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
   const gridStyle = useMemo<CSSProperties>(() => ({
     display: "grid",
     gap,
-    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+    gridTemplateColumns: galleryTemplate(cols, gap),
   }), [cols, gap]);
+  const compact = isCompactGallery(cols);
+  /** ใส่ที่กริด: {...compactAttr} — 12 ใบขึ้นไปซ่อนชื่อที่ติด GALLERY_LABEL */
+  const compactAttr = useMemo(() => (compact ? { "data-gallery-compact": "" } : {}) as Record<string, string>, [compact]);
+  const thumbW = useCallback((base = 480) => galleryThumbWidth(cols, base), [cols]);
 
   // Ctrl (⌘) + ลูกกลิ้ง — ฟังที่ตัวกริดเอง (passive:false เพื่อกันเบราว์เซอร์ซูมทั้งหน้า)
   const colsRef = useRef(cols);
   colsRef.current = cols;
   const detach = useRef<(() => void) | null>(null);
-  const ctrlWheel = !!opts?.ctrlWheel;
+  const ctrlWheel = opts?.ctrlWheel ?? true;
   const optionsKey = options.join(",");
   const wheelRef = useCallback((el: HTMLElement | null) => {
     detach.current?.();
@@ -82,12 +93,12 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctrlWheel, optionsKey, setCols]);
 
-  return { cols, setCols, gridStyle, wheelRef };
+  return { cols, setCols, gridStyle, wheelRef, compact, compactAttr, thumbW };
 }
 
 /** ปุ่มเลือกจำนวนการ์ดต่อแถว (segmented · หรือ as="select" = dropdown กะทัดรัด) — เสียบข้างแถบเครื่องมือของหน้ากริดใดก็ได้
  *  wheelHint = บอกในป้ายชี้ว่า Ctrl + ลูกกลิ้งบนกริดใช้ได้ (ใส่เมื่อเปิด ctrlWheel) */
-export function GalleryColumnsControl({ cols, onChange, options = GALLERY_COL_OPTIONS, className = "", as = "buttons", wheelHint = false }: {
+export function GalleryColumnsControl({ cols, onChange, options = GALLERY_COL_OPTIONS, className = "", as = "buttons", wheelHint = true }: {
   cols: number; onChange: (n: GalleryCols) => void; options?: readonly GalleryCols[]; className?: string; as?: "buttons" | "select"; wheelHint?: boolean;
 }) {
   const t = useT();

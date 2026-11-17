@@ -104,7 +104,7 @@ export function DesignDashboard() {
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery" | "ideas">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี) / ไอเดีย (ยังไม่ใช่งานจริง)
   const ideasLinkRef = useRef(false);   // เปิดด้วยลิงก์จากบอทไลน์ ?ideas=1 → มุมมองไอเดีย กล่องรอคัด (ไม่ทับค่าที่จำไว้)
-  const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
+  const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle, wheelRef: galleryWheelRef } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
   // ── รูปแบบจอ (ของกลาง device-view): จอคอม / แท็บเล็ต / มือถือ — อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) ──
   // `layout` = สิ่งที่ต้องเรนเดอร์จริง · เลือกดูแบบมือถือบนจอคอม → DevicePreviewFrame ครอบเป็นกรอบเครื่อง + QR ให้สแกนเปิดบนเครื่องจริง
   const viewport = useViewportLayout();
@@ -898,7 +898,7 @@ export function DesignDashboard() {
                 </div>
               ) : viewMode === "gallery" ? (
                 /* ── มุมมองการ์ดรูปใหญ่ (แกลเลอรี): เห็นรูปงานเต็มใบ ไม่โดนตัด · จำนวนต่อแถวเลือกได้ · เรียงตามอัปเดตล่าสุด ── */
-                <div style={galleryStyle}>
+                <div ref={galleryWheelRef} style={galleryStyle}>
                   {filteredSheets.map(renderGalleryCard)}
                 </div>
               ) : (

@@ -7,6 +7,7 @@
  *   จำนวนการ์ดต่อแถว = ของกลาง GalleryColumns (จำรายคน) · มือถือบังคับ 2 ใบ/แถว
  */
 import { type CSSProperties } from "react";
+import { galleryTemplate } from "@/lib/gallery-cols";
 import Link from "next/link";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
 import { useT } from "@/components/i18n";
@@ -55,7 +56,7 @@ export function MarketingSkuGrid({
     ids.forEach((id) => (on ? n.add(id) : n.delete(id)));
     onSelectedChange(n);
   };
-  const gridStyle = { "--mk-cols": `repeat(${cols}, minmax(0, 1fr))` } as CSSProperties;
+  const gridStyle = { "--mk-cols": galleryTemplate(cols, "0.75rem") } as CSSProperties;   // สูงสุด cols ใบ · จอแคบลดเอง
 
   return (
     <div className="space-y-5">

@@ -76,7 +76,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
   // มุมมอง ตาราง/การ์ด — สลับแล้วจำเป็นค่าเริ่มต้นของฉัน (ของกลาง useViewPref)
   const { view, setView, saveDefault } = useViewPref<View>("marketing_skus_view", VIEWS, "table");
   const pickView = (v: View) => { setView(v); void saveDefault(v); if (v === "work") setSelected(new Set()); };
-  const { cols, setCols } = useGalleryColumns("marketing-skus", 5);
+  const { cols, setCols, wheelRef: gridWheelRef } = useGalleryColumns("marketing-skus", 5);
   // งานของโหมดทำงาน — ใช้ทั้งในโหมดทำงาน และแถบ "ใส่ในงาน" ตอนติ๊กรุ่น
   const work = useWorkJobs(canManage || view === "work");
   const [focusJobId, setFocusJobId] = useState<string | null>(null);
@@ -430,10 +430,10 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
               <WorkMode canManage={canManage} labels={labels} labelMap={labelMap} work={work} focusJobId={focusJobId}
                 onLabelsChanged={() => void load(true)} />
             ) : view === "grid" ? (
-              <MarketingSkuGrid
+              <div ref={gridWheelRef}><MarketingSkuGrid
                 rows={pageRows} cols={cols} grouped={sort === "label"} labels={labels} labelMap={labelMap} brandMap={brandMap} showBrand={brandTab === BRAND_ALL}
                 canManage={canManage} busy={busy} labelOptions={labelOptions} selected={selected} onSelectedChange={setSelected}
-                onSetLabel={setLabel} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })} onActiveChange={onActiveChange} badges={badges} onBadgesSaved={onBadgesSaved} onBadgeCreated={onBadgeCreated} emptyText={emptyText} />
+                onSetLabel={setLabel} onEditNote={(it) => setNoteEdit({ item: it, text: it.note ?? "" })} onActiveChange={onActiveChange} badges={badges} onBadgesSaved={onBadgesSaved} onBadgeCreated={onBadgeCreated} emptyText={emptyText} /></div>
             ) : (
               <MiniTable<MarketingSkuItem>
                 rows={pageRows}
