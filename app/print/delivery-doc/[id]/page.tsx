@@ -1,6 +1,7 @@
 "use client";
 
 // พิมพ์ใบส่งสินค้า (โมดูล delivery-notes) — ใช้แม่แบบ so/delivery-note (ไม่มีราคา)
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -69,7 +70,7 @@ export default function PrintDeliveryDocPage() {
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบส่งของ", dn?.dn_number)} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !dn ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
         ) : !template ? (

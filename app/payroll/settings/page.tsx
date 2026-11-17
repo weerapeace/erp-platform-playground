@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -247,9 +248,7 @@ export default function PayrollSettingsCenterPage() {
         )}
 
         {tab === "overview" && !data && !error && (
-          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
-            กำลังโหลดศูนย์ตั้งค่า...
-          </div>
+          <LoadingState label="กำลังโหลดศูนย์ตั้งค่า..." boxClassName="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-400" />
         )}
 
         {tab === "overview" && data && (

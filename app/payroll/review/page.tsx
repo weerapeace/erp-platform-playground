@@ -5,6 +5,7 @@
  * เลือกงวด → ดูยอดรวมทั้งงวด (จำนวนคน/รายได้/หัก/ปกส./ภาษี/สุทธิ) + รายคน ของรอบคำนวณล่าสุด
  * ยอดรวมคิดจากทั้งงวดที่ server (ไม่ใช่แค่หน้าปัจจุบัน)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import { apiFetch } from "@/lib/api";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
@@ -314,7 +315,7 @@ export default function PayrollReviewPage() {
       )}
 
       {loading ? (
-        <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+        <LoadingState />
       ) : (
         <div className="max-h-[70vh] overflow-auto rounded-xl border border-slate-200">
           <table className="text-sm" style={{ tableLayout: "fixed", width: colW.reduce((a, b) => a + b, 0) }}>

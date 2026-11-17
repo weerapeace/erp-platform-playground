@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
@@ -976,7 +977,7 @@ export default function PayrollPaymentsPage() {
               {batchType !== "month_end" && <button type="button" onClick={clearZeroAmounts} className="h-10 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">ตัดยอด 0</button>}
             </div>
           </div>
-          {previewLoading ? <div className="rounded-lg border border-slate-200 p-8 text-center text-sm text-slate-400">กำลังโหลด preview...</div> : (
+          {previewLoading ? <LoadingState label="กำลังโหลด preview..." boxClassName="rounded-lg border border-slate-200 p-8 text-center text-sm text-slate-400" /> : (
             <div className="max-h-[480px] overflow-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[1320px] text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
@@ -1062,7 +1063,7 @@ export default function PayrollPaymentsPage() {
       >
         <div className="space-y-3">
           {addableLoading ? (
-            <div className="rounded-lg border border-slate-200 p-6 text-center text-sm text-slate-400">กำลังโหลดรายชื่อ…</div>
+            <LoadingState label="กำลังโหลดรายชื่อ…" boxClassName="rounded-lg border border-slate-200 p-6 text-center text-sm text-slate-400" />
           ) : addableList.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">พนักงานที่ใช้งานอยู่ทุกคนอยู่ในรอบนี้แล้ว</div>
           ) : (

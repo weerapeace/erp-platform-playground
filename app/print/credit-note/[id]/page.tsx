@@ -4,6 +4,7 @@
  * พิมพ์ใบลดหนี้ — /print/credit-note/[id]
  * ใช้ระบบพิมพ์กลาง: แม่แบบเก็บใน erp_report_templates (entity_type='cn') แก้หน้าตาเองได้ที่ /admin/report-templates
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -120,7 +121,7 @@ export default function PrintCreditNotePage() {
       <PrintToolbar onBack={() => router.back()} fileName={fileName} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !cn ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
         ) : !template ? (

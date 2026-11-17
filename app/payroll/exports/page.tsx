@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -1010,7 +1011,7 @@ function RecurringManager({ kind, rev, editId, busyId, onEdit, onSetActive }: {
       {open && (
         <div className="mt-2 rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
           {loadErr ? <div className="px-3 py-3 text-sm text-red-600">⚠ {loadErr}</div>
-            : items === null ? <div className="px-3 py-3 text-sm text-slate-400">กำลังโหลด…</div>
+            : items === null ? <LoadingState />
             : items.length === 0 ? <div className="px-3 py-3 text-sm text-slate-400">ยังไม่มีรายการ — เพิ่มจากช่องด้านบน</div>
             : items.map((it) => {
               const off = it.status === "inactive";

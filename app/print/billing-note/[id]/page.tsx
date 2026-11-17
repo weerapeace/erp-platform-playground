@@ -5,6 +5,7 @@
  *   ปรับคอลัมน์ (กว้าง มม./ชื่อหัว/ลำดับ/เปิด-ปิด) · ลากขอบหัวคอลัมน์บนกระดาษ · ตัวอักษร/ระยะแถว/เส้น
  *   ไม่กดบันทึก = ใช้กับใบนี้ · "บันทึกเป็นค่าเริ่มต้น" = ทุกคน (ui_config doc_print_billing_note · สิทธิ์ so.edit)
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -120,7 +121,7 @@ export default function PrintBillingNotePage() {
       <div className="flex items-start gap-4 px-4 py-4">
         <div className="min-w-0 flex-1">
           {loading ? (
-            <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+            <LoadingState />
           ) : error || !doc ? (
             <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
           ) : !template ? (

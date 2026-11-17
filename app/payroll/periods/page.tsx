@@ -4,6 +4,7 @@
  * Payroll module — งวดเงินเดือน (Phase 2) — ของจริง 8 งวด
  * ต่อ payroll_periods ผ่าน /api/payroll/master/periods (route กลาง)
  */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { apiFetch } from "@/lib/api";
@@ -15,7 +16,7 @@ import {
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const COMPANY_NAMES = ["ไอ.เอส.จี. เทรดดิ้ง", "หลุยส์ มอนตินี่"];

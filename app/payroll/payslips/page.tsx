@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
@@ -276,7 +277,7 @@ export default function PayrollPayslipsPage() {
       )}
 
       {loading ? (
-        <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+        <LoadingState />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full text-sm">

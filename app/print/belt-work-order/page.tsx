@@ -5,6 +5,7 @@
  * รวมหลายใบสั่งผลิต (MO) รุ่นเดียวกัน → ตารางไซส์รวม + สเปก (ดึงจาก product-spec)
  * ของกลาง: ระบบพิมพ์ (buildReportHtml + PrintFrame) · A4 แนวตั้ง
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -239,7 +240,7 @@ function BeltWorkOrderInner() {
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
-          : !bw ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+          : !bw ? <LoadingState />
           : <PrintFrame html={html} />}
       </div>
     </div>
@@ -247,5 +248,5 @@ function BeltWorkOrderInner() {
 }
 
 export default function BeltWorkOrderPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><BeltWorkOrderInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><BeltWorkOrderInner /></Suspense>;
 }

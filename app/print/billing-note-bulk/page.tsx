@@ -7,6 +7,7 @@
  *    (useDocPrintPrefs("billing_note") → buildBillingNoteData) — ปรับที่หน้าพิมพ์ทีละใบแล้วกดบันทึกเป็นค่าเริ่มต้น
  * ⭐⭐ สั่งพิมพ์ต้องใช้ printReportHtmlInNewWindow / PrintDocLinkButton (iframe พรีวิวไหลข้ามหน้ากระดาษไม่ได้)
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
@@ -91,5 +92,5 @@ function BulkInner() {
 }
 
 export default function BulkPrintBillingNotePage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><BulkInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><BulkInner /></Suspense>;
 }

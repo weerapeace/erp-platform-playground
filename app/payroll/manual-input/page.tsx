@@ -5,6 +5,7 @@
  * เลือกงวด → ตารางพนักงาน + ยอดสรุป (สาย/ขาด/ลา/OT/เพิ่มพิเศษ/หักอื่น) + สุทธิประมาณ (เครื่องจริง)
  * แก้ "เพิ่มพิเศษ/หักอื่น" ต่อคนผ่าน drawer → บันทึก → สุทธิประมาณอัปเดต → ไปคำนวณ+บันทึก
  */
+import { LoadingState } from "@/components/state-views";
 import { Fragment, useEffect, useState, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -555,7 +556,7 @@ export default function ManualInputPage() {
           description="วางโครง tab ไว้ก่อน เพื่อแยกข้อมูลตามชนิดให้เหมือนหน้าตัวอย่าง ขั้นถัดไปค่อยย้ายรายการเฉพาะหมวดนี้เข้ามา"
         />
       ) : loading ? (
-        <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+        <LoadingState />
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white">
           <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 bg-white px-3 py-3">
@@ -2110,7 +2111,7 @@ function AttendanceGrid({
   editable: boolean;
   onCellClick: (row: GridRow, cell: GridCell) => void;
 }) {
-  if (loading) return <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลดตารางเข้างาน...</div>;
+  if (loading) return <LoadingState label="กำลังโหลดตารางเข้างาน..." boxClassName="p-10 text-center text-slate-400 text-sm" />;
   if (error) return <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm">{error}</div>;
   if (!grid) return <div className="p-10 text-center text-slate-400 text-sm">ยังไม่มีข้อมูลตารางเข้างาน</div>;
 

@@ -5,6 +5,7 @@
  * โหลดเอกสารจาก /api/carton-labels/[id] แล้วสร้างใบต่อกล่อง (CARTON NO. i/N)
  * หน้าตาเอกสารตายตัว → สร้าง HTML เอง (ไม่ต้องตั้ง template ที่ admin) + ใช้ของกลาง PrintFrame/PrintToolbar
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -79,7 +80,7 @@ export default function PrintCartonLabelPage() {
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ป้ายกล่อง", doc?.po_no)} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !doc ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
         ) : !Array.isArray(doc.cartons) || doc.cartons.length === 0 ? (

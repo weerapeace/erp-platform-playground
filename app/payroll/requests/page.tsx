@@ -1,13 +1,14 @@
 "use client";
 
 /** Payroll module — คำขอจากพนักงาน (Phase 4) — อ่านอย่างเดียว (employee_portal_requests) */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { statusBadge, PAY_STATUS } from "@/components/payroll/cells";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const REQ_TYPE: Record<string, string> = { profile_edit: "ขอแก้ข้อมูล", medical: "ใบรับรองแพทย์", leave: "ขอลา", resignation: "แจ้งลาออก" };
