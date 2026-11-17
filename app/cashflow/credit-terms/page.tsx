@@ -12,6 +12,7 @@
  *   (X วัน · ทุกวันที่ X เดือนที่สั่ง · วันที่ X เดือนถัดไป) · รายที่ตั้งแล้ว = อ่านอย่างเดียว กด "แก้ไข" ก่อนถึงเปลี่ยนได้
  * ลูกค้าเก็บที่ partners_v2.sales_credit_term · ร้านค้าเก็บที่ purchase_credit_term
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -165,7 +166,7 @@ export default function CreditTermsPage() {
           </div>
         )}
 
-        {loading && <div className="text-center text-slate-400 py-16">กำลังโหลด…</div>}
+        {loading && <LoadingState />}
 
         {!loading && shown.length === 0 && (
           <div className="text-center text-slate-400 py-16 border border-dashed border-slate-200 rounded-xl">

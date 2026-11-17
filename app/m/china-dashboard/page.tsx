@@ -6,6 +6,7 @@
  * รายการโอนล่าสุด, กราฟยอดโอนรายวัน(เดือนนี้)/รายเดือน(ย้อนหลัง 6 เดือน)
  * ดึงข้อมูลฝั่ง client (กัน Worker 1102) ผ่าน /api/master-v2/*
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 
@@ -72,7 +73,7 @@ export default function ChinaDashboardPage() {
     return out;
   }, [transfers]);
 
-  if (loading) return <div className="p-10 text-center text-slate-400">กำลังโหลด Dashboard…</div>;
+  if (loading) return <LoadingState label="กำลังโหลด Dashboard…" boxClassName="p-10 text-center text-slate-400" />;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">

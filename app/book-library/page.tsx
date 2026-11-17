@@ -9,6 +9,7 @@
  * ชื่อช่อง/คอลัมน์/ป้ายตัวเลือก แก้เองได้ที่ปุ่ม 🎨 แต่งฟอร์ม (ทะเบียนกลาง erp_module_fields) ไม่ต้องแก้โค้ด
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
@@ -20,7 +21,7 @@ import { SeriesWizardModal } from "./series-wizard-modal";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 /** คะแนน 1-5 → ดาว (อ่านเร็วกว่าตัวเลขในตาราง) */

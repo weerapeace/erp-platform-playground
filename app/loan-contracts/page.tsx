@@ -6,6 +6,7 @@
  * ใช้ของกลาง MasterCRUDPage → ตาราง/ฟอร์ม/ค้นหา/สิทธิ์/ประวัติ/Export ครบ · เลขรันอัตโนมัติจาก trigger
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { LoanProgressActions } from "./progress-actions";
@@ -15,7 +16,7 @@ import { LoanRestructureSection } from "./restructure-section";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 // ---- ป้ายชื่อ (แสดงผลภาษาไทย จากค่าที่เก็บเป็นอังกฤษ) ----

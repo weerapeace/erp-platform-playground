@@ -8,6 +8,7 @@
  * ทุกอย่างผ่าน API กลาง /api/issue-reports
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
@@ -289,7 +290,7 @@ function ManageView() {
       </div>
 
       <div className="bg-white rounded-2xl border border-pink-100 shadow-sm overflow-hidden">
-        {loading ? <div className="p-10 text-center text-pink-300 text-sm">กำลังโหลด…</div>
+        {loading ? <LoadingState />
           : rows.length === 0 ? <div className="p-12 text-center text-pink-300 text-sm">🎉 ไม่มีรายการ</div>
           : (
           <table className="w-full text-sm">

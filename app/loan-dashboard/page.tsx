@@ -4,6 +4,7 @@
  * Dashboard เงินกู้ (Phase 1e) — อ่านจาก RPC loan_dashboard (สรุปจากรายการต้นทาง)
  * URL: /loan-dashboard
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -59,7 +60,7 @@ export default function LoanDashboardPage() {
       </div>
 
       <div className="px-4 md:px-8 py-6 space-y-6">
-        {loading && <div className="text-center text-slate-400 py-10">กำลังโหลดข้อมูล...</div>}
+        {loading && <LoadingState label="กำลังโหลดข้อมูล..." boxClassName="text-center text-slate-400 py-10" />}
         {err && (
           <div className="text-center py-10">
             <p className="text-red-600 font-medium">⚠️ {err}</p>

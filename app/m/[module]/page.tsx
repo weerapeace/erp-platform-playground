@@ -4,6 +4,7 @@
  * C2: Catch-all master page — /m/<module_key>
  * เปิดหน้า master ของ "module ใดก็ได้" ที่ลงทะเบียนใน erp_modules
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { MasterPage, type MasterPageProps } from "@/components/master-page";
@@ -135,7 +136,7 @@ function PartnerPicker({ value, onChange }: { value: Partner | null; onChange: (
       <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาร้าน/คู่ค้า..."
         className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md mb-2" />
       <div className="max-h-60 overflow-auto border border-slate-100 rounded-md">
-        {loading ? <div className="p-3 text-sm text-slate-400">กำลังโหลด…</div>
+        {loading ? <LoadingState />
           : rows.length === 0 ? <div className="p-3 text-sm text-slate-300">ไม่พบ</div>
           : rows.map(p => (
             <button key={p.id} onClick={() => onChange(p)}

@@ -5,6 +5,7 @@
  * สร้างได้ 2 แบบ: เลือกสินค้าเอง (เหมือนใบขาย) หรือดึงจากใบขายหลายใบ (ลูกค้าเดียวกัน) → รวมรายการ+จำนวน
  * ไม่มีราคา · workflow ร่าง → ส่งแล้ว → ยกเลิก (+ ย้อนสถานะ) · พิมพ์ด้วยแม่แบบใบส่งสินค้า
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
@@ -363,7 +364,7 @@ export default function DeliveryNotesPage() {
           </>
         ) : null}>
         {detailLoading || !detail ? (
-          <div className="py-16 text-center text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

@@ -4,6 +4,7 @@
  * ผังคลัง (/inventory/map) — ภาพรวมการไหลของสต๊อกตามโซน + ยอดสด + คลิกเจาะดูรายการ
  * ซัพพลายเออร์ → RAW → (จ่ายงาน) WIP → (รับเข้า QC) FG → ขาย · ของเสีย → SCRAP · โกดังขาย
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal } from "@/components/modal";
@@ -128,7 +129,7 @@ export default function InventoryMapPage() {
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
         {loading ? (
-          <div className="py-16 text-center text-slate-400">กำลังโหลดผังคลัง…</div>
+          <LoadingState label="กำลังโหลดผังคลัง…" boxClassName="py-16 text-center text-slate-400" />
         ) : (
           <>
             {/* วงจรผลิตหลัก */}
@@ -166,7 +167,7 @@ export default function InventoryMapPage() {
         title={drill ? `${KIND[drill.kind]?.emoji ?? "📦"} ${drill.name}` : ""}
         description={drill ? `${drill.sku_count} SKU · ${fmtQty(drill.total_qty)} ชิ้น` : undefined}>
         {drillLoading ? (
-          <div className="py-8 text-center text-slate-400">กำลังโหลด…</div>
+          <LoadingState />
         ) : drillRows.length === 0 ? (
           <div className="py-10 text-center text-slate-400 text-sm">ไม่มีสินค้าในโซนนี้</div>
         ) : (

@@ -11,6 +11,7 @@
  *   เปิด "งานลูกค้า" = เปิดสวิตช์นี้ให้ด้วย (พฤติกรรมเดิม · ปิดเองได้) · แบรนด์ที่มีร้านผูกอยู่ = ถามก่อนซ่อน
  * ของกลาง: ToggleSwitch · ImageInput · CustomerPicker · FloatingDropdown · askConfirm · useToast · Icon · ChipOverflow · lib/company-branch
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/toast";
@@ -154,7 +155,7 @@ export default function BrandsPage() {
             </div>
           ))}
           {loaded && brands.length === 0 && <div className="text-center text-sm text-slate-400 py-12">ยังไม่มีแบรนด์ — พิมพ์ชื่อด้านบนแล้วกด + เพิ่ม</div>}
-          {!loaded && <div className="text-center text-sm text-slate-400 py-12">กำลังโหลด…</div>}
+          {!loaded && <LoadingState />}
         </div>
       </div>
     </div>

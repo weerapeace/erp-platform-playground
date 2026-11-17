@@ -10,6 +10,7 @@
  *                MoneyInput · DateInput · permission · lib/credit-note (คิดเลขที่เดียวกับฝั่ง API)
  * ⚖️ ใบที่ออกเอกสารแล้วแก้/ลบไม่ได้ — ต้องยกเลิกแล้วออกใบใหม่
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -656,7 +657,7 @@ export default function CreditNotesPage() {
           </>
         ) : null}>
         {detailLoading || !detail ? (
-          <div className="py-16 text-center text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

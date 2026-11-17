@@ -7,6 +7,7 @@
  *   DataTable / ERPModal / ConfirmDialog / SkuPicker(/api/admin/picker) / useToast / useAuth
  *   ไม่ query Supabase ตรง — ผ่าน /api/bom (อ่าน auth, เขียน admin, audit)
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { SizeTemplate } from "@/app/api/admin/size-templates/route";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -464,7 +465,7 @@ export default function BomWorkspacePage() {
         }
       >
         {loadingForm ? (
-          <div className="py-12 text-center text-slate-400">กำลังโหลดสูตร...</div>
+          <LoadingState label="กำลังโหลดสูตร..." boxClassName="py-12 text-center text-slate-400" />
         ) : form && (
           <div className="space-y-2">
             {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
