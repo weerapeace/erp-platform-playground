@@ -7,6 +7,7 @@
  * บังคับแนบ "ใบรับของ + บิล" (รูป/PDF) ทุกครั้งก่อนบันทึก
  * รับไม่ครบ (แท็บ A) จะเด้งถามว่าจบงาน/รอของ · รับเกินได้
  */
+import { LoadingState } from "@/components/state-views";
 import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission } from "@/components/auth";
@@ -846,7 +847,7 @@ export default function ReceiveGoodsPage() {
             {pendPagerBar && <div className="mb-3">{pendPagerBar}</div>}
 
             {pendLoading ? (
-              <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+              <LoadingState />
             ) : pend.length === 0 ? (
               <div className="py-16 text-center text-slate-300 text-sm">{doneMode ? "— ยังไม่มีรายการที่รับครบ —" : "— ไม่มีสินค้าค้างรับ —"}</div>
             ) : shownPend.length === 0 ? (
@@ -1103,7 +1104,7 @@ export default function ReceiveGoodsPage() {
           </>}>
           <ReceiveAttachBox cart={rc} invalid={!!err} />
           {loading ? (
-            <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+            <LoadingState />
           ) : lines.length === 0 ? (
             <div className="py-10 text-center text-slate-300 text-sm">— ใบนี้ไม่มีรายการสินค้า —</div>
           ) : (
@@ -1165,7 +1166,7 @@ export default function ReceiveGoodsPage() {
           <div className="mt-4">
             <div className="text-xs font-semibold text-slate-600 mb-1.5">ประวัติการรับ {history.length > 0 && <span className="font-normal text-slate-400">· รับสะสมแล้ว {history.reduce((s, h) => s + h.qty_received, 0).toLocaleString()} {it.uom}</span>}</div>
             {histLoading ? (
-              <div className="py-4 text-center text-xs text-slate-400">กำลังโหลด…</div>
+              <LoadingState />
             ) : history.length === 0 ? (
               <div className="py-4 text-center text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg">— ยังไม่เคยรับรอบก่อนหน้า —</div>
             ) : (

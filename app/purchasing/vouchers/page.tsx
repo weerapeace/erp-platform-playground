@@ -8,6 +8,7 @@
  *   แก้ = เปิดใบ (ร่าง) · ลบ = ปุ่ม "ยกเลิกใบร่าง" ในฟอร์ม · ใบรับ: 👁 รายละเอียด (แก้/ลบ) + ✎ แก้วันที่รับจากแถว
  * คนรับของใส่แค่จำนวนที่หน้ารับของ · หน้านี้เป็นของจัดซื้อ (ใส่ราคา + ค่าส่ง)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -307,7 +308,7 @@ export default function PurchaseVouchersPage() {
                 <button onClick={() => setSelected(new Set())} className="ml-auto h-8 px-3 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ล้างเลือก</button>
               </div>
             )}
-            {loading ? <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
+            {loading ? <LoadingState /> : (
               <MiniTable rows={pending} columns={pendingCols} rowKey={(g) => g.id}
                 searchText={(g) => `${g.gr_no} ${g.po_no} ${g.seller_name} ${g.receiver}`} searchPlaceholder="🔎 เลขใบรับ / PO / ร้าน…"
                 groupBy={(g) => `🏪 ${g.seller_name}`} groupLabel="จัดกลุ่มตามร้าน" defaultGrouped
@@ -334,7 +335,7 @@ export default function PurchaseVouchersPage() {
               ))}
               <span className="text-slate-400">แก้ไข = กดเปิดใบ · ลบ = ปุ่ม &quot;ยกเลิกใบร่าง&quot; ในใบ (ใบที่ยืนยันแล้วลบไม่ได้ เพราะราคาถูกเขียนกลับระบบแล้ว)</span>
             </div>
-            {loading ? <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
+            {loading ? <LoadingState /> : (
               <MiniTable rows={vouchers} columns={voucherCols} rowKey={(v) => v.id}
                 searchText={(v) => `${v.pv_no ?? ""} ${v.seller_name ?? ""} ${v.gr_nos.join(" ")} ${v.po_nos.join(" ")}`} searchPlaceholder="🔎 เลขที่ / ร้าน / ใบรับ / PO…"
                 selectable={canEdit} selected={vSel} onSelectedChange={setVSel}

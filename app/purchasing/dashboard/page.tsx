@@ -5,6 +5,7 @@
  * ข้อมูลรวมจาก /api/purchasing/dashboard (คำขอเดียว) + ของใกล้เข้าจาก /api/purchasing/receivable (ของเดิม)
  * วาดกราฟเอง (CSS bar + SVG donut) ไม่พึ่งไลบรารีหนัก · responsive (มือถือเรียงลงเป็นแถวเดียว)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState, useRef, Fragment } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -145,7 +146,7 @@ export default function PurchasingDashboardPage() {
           </div>
         </div>
 
-        {loading && <div className="text-center text-slate-300 py-16 text-sm">กำลังโหลด...</div>}
+        {loading && <LoadingState />}
 
         {!loading && d && (
           <div className="space-y-3">
@@ -627,7 +628,7 @@ function DrillPanel({ drill, onClose }: { drill: { type: string; seller?: string
         {/* มุมมองปฏิทิน — ใช้ของกลางตัวเดียวกับหน้า /purchasing/calendar (ลากตั้งวันได้เหมือนกัน) */}
         {view === "calendar" && canCalendar ? (
           <PurchasingCalendarBoard mode={isReceive ? "in" : "pay"} showModeSwitch={false} />
-        ) : loading && rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</div>
+        ) : loading && rows.length === 0 ? <LoadingState />
           : rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-300">— ไม่มีรายการ —</div>
           : (
             <div className="space-y-3 max-h-[55vh] overflow-y-auto">

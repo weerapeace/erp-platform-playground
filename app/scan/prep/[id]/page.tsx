@@ -8,6 +8,7 @@
  *   - ใบไม่มีวัตถุดิบ (13 ใบ)   → ใช้ 2 ช่องระดับใบ
  * หน้านี้ส่ง apply_all ให้ API กลางจัดการให้ถูกแบบเอง ไม่ต้องรู้เองว่าใบไหนเป็นแบบไหน
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -129,7 +130,7 @@ export default function ScanPrepPage() {
     </div>
   );
 
-  if (phase === "loading") return <Shell><div className="text-center text-slate-400 py-24">กำลังโหลดใบสั่งผลิต...</div></Shell>;
+  if (phase === "loading") return <Shell><LoadingState label="กำลังโหลดใบสั่งผลิต..." boxClassName="text-center text-slate-400 py-24" /></Shell>;
 
   if (phase === "error" || !mo) {
     return (

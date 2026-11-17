@@ -6,6 +6,7 @@
  *   รายการ: จำนวนรับ · ราคา/หน่วย (¥ หรือ ฿) · ราคาบาท · คิวหรือกก./ชิ้น (ค่าเริ่มต้นจาก Parent SKU) · ค่าส่งเฉลี่ย · ต้นทุนถึงมือ
  *   ตัวเลขคิดสดด้วยสูตรกลาง lib/landed-cost (ตัวเดียวกับ server) · บันทึกร่าง → ยืนยัน = ออกเลข + เขียนราคากลับ
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -419,7 +420,7 @@ export default function PurchaseVoucherFormPage() {
   return (
     <PlaygroundShell>
       <div className="p-5 max-w-[1400px]">
-        {loading ? <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+        {loading ? <LoadingState />
         : err || !data || !hd || !calc ? <div className="py-16 text-center text-red-500 text-sm">⚠️ {err ?? "ไม่พบใบสำคัญรับ"}</div>
         : (
           <>

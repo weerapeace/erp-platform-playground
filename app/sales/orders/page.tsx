@@ -18,6 +18,7 @@
  *          CustomerPicker · DateInput · MoGroupPicker · SourceDocPickerModal · MoMultiPickerModal ·
  *          OrderBatchEntryModal · ERPModal/ConfirmDialog · useViewPref · openLink
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -446,7 +447,7 @@ export default function SoOrdersPage() {
         ))}
       </div>
 
-      {loading ? <div className="text-center py-20 text-slate-400 text-sm">กำลังโหลด…</div>
+      {loading ? <LoadingState />
         : view === "table" ? (
         <MiniTable rows={shown} rowKey={(r) => r.id} columns={cols}
           title="🧾 ใบสั่งขาย" countUnit="ใบ" onRowClick={(r) => void openRow(r)}

@@ -7,6 +7,7 @@
  * Filter ฝั่งซ้ายไม่ hardcode — ติ๊กเลือก field กรองเองจากทะเบียน field (skus-v2)
  * เลือก → ตะกร้า → สร้างใบขอซื้อ (PR + lines). currency: ร้าน CN → YUAN
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -1058,7 +1059,7 @@ export default function PurchasingShopPage() {
           {/* แท็บ "ใบสั่งผลิต": เลือกใบ → โชว์วัตถุดิบที่ต้องซื้อของใบนั้นเป็นการ์ด */}
           {source === "mo" && (() => {
             const ql = q.trim().toLowerCase();
-            if (moNeeds === null && !moSel && !moParentSel) return <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดใบสั่งผลิต…</div>;
+            if (moNeeds === null && !moSel && !moParentSel) return <LoadingState label="กำลังโหลดใบสั่งผลิต…" boxClassName="text-center text-slate-400 py-16 text-sm" />;
             if (moList.length === 0 && !moSel && !moParentSel) return <div className="text-center text-slate-300 py-16">ไม่มีวัตถุดิบที่ต้องซื้อจากใบสั่งผลิต 🎉</div>;
             // ----- รวมตามรุ่น: วัตถุดิบของทุกใบในรุ่นเดียวกัน (กดเปิดทีละใบได้ → ระดับ 2 เดิม, ย้อนกลับมาที่นี่) -----
             if (!moSel && moParentSel) {
@@ -1309,7 +1310,7 @@ export default function PurchasingShopPage() {
                 {moStatusErr && (
                   <div className="text-sm text-rose-600 py-8 text-center">โหลดวัตถุดิบของใบนี้ไม่สำเร็จ <button onClick={() => setMoStatusTick(t => t + 1)} className="underline">ลองใหม่</button></div>
                 )}
-                {!moStatusErr && !moStatus && <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดวัตถุดิบและสถานะการซื้อ…</div>}
+                {!moStatusErr && !moStatus && <LoadingState label="กำลังโหลดวัตถุดิบและสถานะการซื้อ…" boxClassName="text-center text-slate-400 py-16 text-sm" />}
                 {items.length > 0 && (
                   <div className="mb-4">
                     {/* ภาพรวมทั้งใบ: กี่ตัวต้องซื้อ / รออนุมัติ / สั่งแล้ว / ได้ของแล้ว */}
@@ -1434,7 +1435,7 @@ export default function PurchasingShopPage() {
             )}
           </div>
 
-          {loading && <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>}
+          {loading && <LoadingState />}
 
           {/* แถบล่าง: เลื่อนหน้า (ตัวหลัก) + ตัวปรับขนาดการ์ด */}
           {!loading && cards.length > 0 && (
@@ -1723,7 +1724,7 @@ export default function PurchasingShopPage() {
                   className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
               </div>
               <div className="p-4 space-y-2 overflow-auto flex-1">
-                {varsLoading && <div className="text-sm text-slate-400 py-6 text-center">กำลังโหลด…</div>}
+                {varsLoading && <LoadingState />}
                 {!varsLoading && vars.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ยังไม่มี SKU ในกลุ่มนี้ —</div>}
                 {!varsLoading && vars.length > 0 && shown.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ไม่พบ SKU ที่ตรงกับ &quot;{varQ}&quot; —</div>}
                 {shown.map(v => (
@@ -2283,7 +2284,7 @@ function MoReasonPicker({ value, onPick, emptyLabel }: { value: { no: string; la
             <div ref={panelRef} style={style} className="z-[9999] bg-white border border-slate-200 rounded-md shadow-xl max-h-72 overflow-auto">
               <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / รหัส / ชื่อสินค้า..."
                 className="w-full h-9 px-3 text-sm border-b border-slate-100 outline-none sticky top-0 bg-white" />
-              {loading && <div className="px-3 py-3 text-xs text-slate-400">กำลังโหลด…</div>}
+              {loading && <LoadingState />}
               {!loading && rows && rows.length === 0 && <div className="px-3 py-3 text-xs text-slate-300">— ไม่พบใบสั่งผลิตที่ยังเปิด —</div>}
               {!loading && (rows ?? []).map(m => {
                 const sel = isSel(m.mo_no);
@@ -2553,7 +2554,7 @@ function FilterCombobox({ column, label, values, onChange, relation, allFrom }: 
         <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-auto">
           <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา..."
             className="w-full h-8 px-2 text-xs border-b border-slate-100 outline-none" />
-          {loading && <div className="px-2 py-2 text-xs text-slate-400">กำลังโหลด…</div>}
+          {loading && <LoadingState />}
           {!loading && shown.length === 0 && <div className="px-2 py-2 text-xs text-slate-300">— ไม่พบค่า —</div>}
           {shown.map(o => {
             const on = values.includes(o.value);

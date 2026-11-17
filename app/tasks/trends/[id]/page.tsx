@@ -8,6 +8,7 @@
 // กระดานเปล่า → ระบบวาง "กรอบหน้า 16:9" + ช่องแนะนำ (โทนสี/ภาพอ้างอิง/เลย์เอาต์/ข้อความ) ให้ครั้งแรก
 // ============================================================
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -24,7 +25,7 @@ import { BrandSelect } from "@/components/brand-select";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
-  loading: () => <div className="flex h-[60vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400">กำลังโหลดกระดาน...</div>,
+  loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="flex h-[60vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
 });
 
 /** ขนาด "หน้ากระดาษ" ของบอร์ดเทรนด์ (16:9) */

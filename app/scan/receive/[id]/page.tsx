@@ -13,6 +13,7 @@
  * เขียนข้อมูลผ่าน API กลางเดิม POST /api/purchasing/receive
  * (ออกเลขใบรับ + สร้าง GR + อัปเดตบรรทัด PO + สถานะใบ + ลงบัญชีเดินสต๊อก + audit ครบอยู่แล้ว)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -98,7 +99,7 @@ export default function ScanReceivePage() {
   );
 
   if (phase === "loading") {
-    return <Shell><div className="text-center text-slate-400 py-24">กำลังโหลดใบสั่งซื้อ...</div></Shell>;
+    return <Shell><LoadingState label="กำลังโหลดใบสั่งซื้อ..." boxClassName="text-center text-slate-400 py-24" /></Shell>;
   }
 
   if (phase === "error" || !po) {

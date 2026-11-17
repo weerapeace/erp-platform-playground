@@ -5,6 +5,7 @@
  * แสดง PR ที่รอออกใบสั่งซื้อ → เลือก → สร้าง PO (แยกใบตามร้านอัตโนมัติ)
  * 2 view: ตาราง (DataTable) / การ์ด (ร้าน + การ์ดแบ่ง section + ตะกร้า)
  */
+import { LoadingState } from "@/components/state-views";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
@@ -498,7 +499,7 @@ export default function PurchaseOrdersPage() {
         )}
 
         {mode === "order" && view === "card" && (
-          loading ? <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลด…</div>
+          loading ? <LoadingState />
           : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
           : rows.length === 0 ? <div className="text-center text-slate-300 py-16">ไม่มีรายการรอสั่งซื้อ</div>
           : (
@@ -970,7 +971,7 @@ function ShopContactModal({ shopName, partnerId, onClose }: { shopName: string; 
       {!partnerId ? (
         <div className="py-6 text-center text-sm text-slate-400">ร้านนี้ไม่ใช่ผู้จำหน่ายในระบบ — เลือกร้านจากรายการก่อน ถึงจะเก็บข้อมูลติดต่อได้</div>
       ) : loading ? (
-        <div className="py-6 text-center text-sm text-slate-400">กำลังโหลด…</div>
+        <LoadingState />
       ) : edit ? (
         <div className="space-y-3">
           <div><label className={lbl}>ชื่อ Sale</label><input value={c.sale_name} onChange={(e) => set("sale_name", e.target.value)} className={inp} placeholder="ชื่อผู้ติดต่อ" /></div>
