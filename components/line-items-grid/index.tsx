@@ -10,6 +10,7 @@
  *   - Sort คลิกหัวคอลัมน์ (none → ▲ → ▼)
  *   - Group by + [เฟส 2] หัวกลุ่ม "พับ/ขยายได้" + บอกจำนวน + "รวมยอด" คอลัมน์ที่ summable
  *   - [เฟส 2] แก้ค่าที่หัวกลุ่ม → ทุกบรรทัดในกลุ่มเปลี่ยนตาม (คอลัมน์ที่มี setValue)
+ *   - enterNav: Enter ในช่องกรอก = ไปช่องถัดไปในแถว · ช่องสุดท้าย = แถวใหม่ (ต่อจากแถวนี้) + เปิดช่องเลือกตัวแรก · Shift+Enter = แถวใหม่ซ้ำของเดิม (repeatRow)
  *   - selectable + bulkBar: ติ๊กแถว/ติ๊กทั้งกลุ่ม → แถบคำสั่งลอยติดขอบล่าง (sticky) ท้ายตาราง
  *   - [เฟส 2] ปรับขนาดคอลัมน์ (ลากขอบหัวคอลัมน์) + จำค่าไว้ (localStorage ถ้ามี storageKey)
  *   - ลากเรียงลำดับ (dnd-kit) เมื่อไม่ sort/group · เพิ่ม/ลบบรรทัด · readonly
@@ -72,6 +73,9 @@ export type LineItemsGridProps<T> = {
   addExtra?:  React.ReactNode;
   /** ปุ่ม "เพิ่ม" เป็นเมนู (เจ้าของขอ 2026-11-17): ข้อแรก = เพิ่มบรรทัดปกติ (onAdd) ต่อด้วยรายการนี้ — เช่น เพิ่มอะไหล่ / วาดชิ้น / อ่านโน้ต */
   addMenu?: AddMenuItem[];
+  /** กรอกด้วยคีย์บอร์ด (เจ้าของขอ 2026-11-17): Enter ไปช่องถัดไป → ช่องสุดท้ายขึ้นแถวใหม่ + เปิดช่องเลือก (ปุ่ม data-field-trigger ตัวแรก)
+   *  repeatRow = Shift+Enter ทำแถวใหม่จากแถวนี้ (เช่น วัสดุเดิม ขนาดว่าง) แล้วโฟกัสคอลัมน์ repeatFocusCol */
+  enterNav?: { repeatRow?: (row: T) => T; repeatFocusCol?: string };
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
   storageKey?: string;
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
@@ -114,7 +118,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  addMenu, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
+  addMenu, enterNav, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, stickyTop, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
@@ -139,8 +143,9 @@ export function LineItemsGrid<T>({
   const headScrollRef = useRef<HTMLDivElement>(null);
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const syncHeadScroll = () => { if (headScrollRef.current && bodyScrollRef.current) headScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft; };
-  const pendingFocus = useRef<{ id: string; col: string | null } | null>(null);   // ดับเบิลคลิกแถวตอน readonly
-  const pendingAdd = useRef(false);   // กด "เพิ่มบรรทัด" ตอน readonly → เพิ่มให้หลังเข้าโหมดแก้
+  const pendingFocus = useRef<{ id: string; col: string | null; open?: boolean } | null>(null);   // ดับเบิลคลิกแถวตอน readonly
+  const pendingAdd = useRef(false);
+  const rowsRef = useRef(rows); rowsRef.current = rows;   // แถวล่าสุด (หลัง blur commit) — ใช้ตอน Enter ขึ้นแถวใหม่   // กด "เพิ่มบรรทัด" ตอน readonly → เพิ่มให้หลังเข้าโหมดแก้
 
   // เพิ่งออกจาก readonly: กดเพิ่มบรรทัด → เพิ่มแล้วโฟกัสบรรทัดใหม่ · ดับเบิลคลิก → โฟกัสช่องที่คลิกไว้
   // (ฟังตาม rows.length ด้วย — บรรทัดใหม่วาดเสร็จรอบถัดไปค่อยโฟกัส)
@@ -160,7 +165,9 @@ export function LineItemsGrid<T>({
     const rowEl = gridRef.current?.querySelector<HTMLElement>(`[data-lig-row="${window.CSS.escape(pf.id)}"]`);
     if (!rowEl) return;
     const cell = pf.col ? rowEl.querySelector<HTMLElement>(`[data-col="${window.CSS.escape(pf.col)}"]`) : null;
-    (cell?.querySelector<HTMLElement>(FOCUSABLE) ?? rowEl.querySelector<HTMLElement>(FOCUSABLE))?.focus();
+    const el = cell?.querySelector<HTMLElement>(FOCUSABLE) ?? rowEl.querySelector<HTMLElement>(FOCUSABLE);
+    el?.focus();
+    if (pf.open && el?.hasAttribute("data-field-trigger")) el.click();   // Enter ขึ้นแถวใหม่ → เปิดช่องเลือกให้พิมพ์ค้นหาเลย
   }, [readonly, rows.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ตัด id ที่หายไปออกจาก selection เมื่อ rows เปลี่ยน (สลับแท็บ/ลบแถว) → กันเลือกค้าง
@@ -392,8 +399,31 @@ export function LineItemsGrid<T>({
         </DndContext>
   );
 
+  // ⌨️ Enter ในช่องกรอกของแถว (enterNav) — ไปช่องถัดไป / ช่องสุดท้าย = แถวใหม่ต่อจากแถวนี้
+  const onGridKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!enterNav || readonly || !onAdd || e.key !== "Enter" || e.nativeEvent.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+    const target = e.target as HTMLElement;
+    if (target.tagName !== "INPUT" || (target as HTMLInputElement).type === "checkbox") return;
+    const rowEl = target.closest<HTMLElement>("[data-lig-row]");
+    if (!rowEl || !gridRef.current?.contains(rowEl)) return;
+    const id = rowEl.getAttribute("data-lig-row");
+    const idx = rows.findIndex((r) => rowId(r) === id);
+    if (idx < 0) return;
+    e.preventDefault();
+    if (!e.shiftKey) {
+      const inputs = [...rowEl.querySelectorAll<HTMLInputElement>('input:not([disabled]):not([type="checkbox"]):not([type="radio"])')];
+      const next = inputs[inputs.indexOf(target as HTMLInputElement) + 1];
+      if (next) { next.focus(); next.select?.(); return; }
+    }
+    const repeat = e.shiftKey && enterNav.repeatRow;
+    const r = repeat ? enterNav.repeatRow!(rows[idx]) : onAdd();
+    (target as HTMLInputElement).blur();   // ค่าที่พิมพ์ค้างในช่อง (onBlur commit) บันทึกก่อน
+    pendingFocus.current = { id: rowId(r), col: repeat ? enterNav.repeatFocusCol ?? null : null, open: !repeat };
+    setTimeout(() => onChange([...rowsRef.current.slice(0, idx + 1), r, ...rowsRef.current.slice(idx + 1)]), 0);
+  };
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" onKeyDown={enterNav ? onGridKeyDown : undefined}>
       {(groupByOptions.length > 0 || sort) && (
         <div className="flex items-center gap-3 text-xs">
           {groupByOptions.length > 0 && (

@@ -183,6 +183,14 @@ function rowFromItem(it: PriceItem, idx: number): CostRow {
  * เลือกวัตถุดิบ "จาก SKU คลังสินค้า" → เติมให้อัตโนมัติ: ประเภท(กลุ่ม) · สูตรคิด · ราคาซื้อมาตรฐาน · หน่วย · หน้ากว้าง · %เผื่อเสีย
  * กว้าง×ยาว ไม่เติม — เป็นขนาดชิ้นที่ตัดของงานนี้ ต้องกรอกเอง (ยกเว้นวัสดุที่ขายเป็นแผ่นซึ่งมีขนาดผืนติดมา)
  */
+/** โฟกัสช่องกรอกของแถวในตารางตีราคา (หลังเลือกวัสดุ) — ช่องไม่มี/ปิดอยู่ = ไม่ทำอะไร */
+function focusCostCell(key: string, col: string) {
+  setTimeout(() => {
+    const el = document.querySelector<HTMLInputElement>(`[data-lig-row="${CSS.escape(key)}"] [data-col="${col}"] input:not([disabled])`);
+    el?.focus(); el?.select?.();
+  }, 60);
+}
+
 function costSkuPatch(c: BomComponent, groups: PriceGroup[], r: CostRow): Partial<CostRow> {
   const g = groups.find((x) => x.name === c.material_type);   // กลุ่มวัตถุดิบเดียวกันทั้งระบบ (ชื่อกลุ่มตรงกัน)
   const method = g?.calc_method ?? null;
@@ -1764,7 +1772,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
         const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) : undefined;
         // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
-        const applyItem = (it: PriceItem) => u(withPrevItem(r, costItemPatch(it, r)));
+        // เลือกวัสดุเสร็จ → เคอร์เซอร์ไปช่อง "กว้าง" ของแถวนี้ (กรอกต่อด้วยคีย์บอร์ด · เจ้าของขอ 2026-11-17)
+        const applyItem = (it: PriceItem) => { u(withPrevItem(r, costItemPatch(it, r))); focusCostCell(r.key, "width_cm"); };
         if (!fullEdit) {
           // โหมดดู: ชื่อวัสดุบรรทัดเดียว (ไม่มีช่องเลือก/ปุ่มเสริม) — ดับเบิลคลิกแถวเพื่อแก้
           const name = r.item_sku_id ? [r.item_sku_code, r.item_name].filter(Boolean).join(" ") : (r.item_name || (inGroupMode ? `${t("กลุ่ม", "Group")}: ${r.group_name ?? r.group_code}` : ""));
@@ -1777,7 +1786,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {r.item_sku_id ? (
                 <ComponentPicker sku={r.item_sku_code ?? ""} name={r.item_name ?? ""}
                   placeholder={t("— เลือก SKU วัตถุดิบ —", "— Select material SKU —")}
-                  onPick={(c) => u(withPrevItem(r, costSkuPatch(c, priceGroups, r)))} />
+                  onPick={(c) => { u(withPrevItem(r, costSkuPatch(c, priceGroups, r))); focusCostCell(r.key, "width_cm"); }} />
               ) : (
               <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder={t("— เลือกกลุ่ม / วัสดุ —", "— Select group / material —")}
                 initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
@@ -2870,6 +2879,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
                 // ปุ่ม "＋ เพิ่มวัตถุดิบ ▾" เป็นเมนู (เจ้าของขอ 2026-11-17): เพิ่มปกติ / อะไหล่ / วาดชิ้น / อ่านโน้ต
                 addMenu={costAddMenu}
+                // ⌨️ Enter ไปช่องถัดไป → ช่องสุดท้ายขึ้นแถวใหม่ + เปิดช่องเลือกวัสดุ · Shift+Enter = แถวใหม่วัสดุเดิม ขนาดว่าง (เจ้าของขอ 2026-11-17)
+                enterNav={{ repeatFocusCol: "width_cm", repeatRow: (r) => recomputeRow({ ...r, id: undefined, key: `n${Date.now()}_${Math.round(Math.random() * 1e6)}`,
+                  width_cm: null, length_cm: null, pieces: null, qty: null, amount: null, note: null, shape: null, prev_item: null, price_ack: null }) }}
                 emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
                 // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
                 emptyAction={canEdit ? (
