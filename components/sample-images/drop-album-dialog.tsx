@@ -25,8 +25,8 @@ import { useGalleryColumns } from "@/components/gallery-columns";
 import { useMarqueeSelect } from "@/lib/use-marquee-select";
 import { bumpProductName, folderGroups, guessSku, splitGroups, timeGroups } from "@/lib/sample-sku-split";
 import { loadChildSkus, type ChildSku } from "./api";
-import { AlbumCover } from "@/components/album-cover";
-import { albumFullName, albumMatches, descendantIds, productLinkLabel, type SampleAlbum } from "@/lib/sample-images";
+import { SampleAlbumPickerModal } from "./album-picker";
+import { albumFullName, descendantIds, productLinkLabel, type SampleAlbum } from "@/lib/sample-images";
 import { sampleImgUrl } from "./parts";
 
 export type DropMode = "new" | "here";
@@ -307,8 +307,8 @@ export function DropAlbumDialog({ files, inside, insideId, existing = [], brandN
   const usedIds = new Set(albums.flatMap((a) => (a.existing ? [a.existing.id] : [])));
   const pickList = useMemo(() => {
     if (!picking2) return [];
-    const q = pickQ.trim();
-    const base = q ? existing.filter((a) => albumMatches(a, q, brandName)) : insideId ? (() => { const ids = new Set(descendantIds(existing, insideId)); return existing.filter((a) => ids.has(a.id)); })() : existing;
+    // ไม่พิมพ์ค้น = อัลบั้มย่อยทุกชั้นของอัลบั้มที่เปิดอยู่ (ค้นทั้งแบรนด์ทำในหน้าต่างเลือก)
+    const base = insideId ? (() => { const ids = new Set(descendantIds(existing, insideId)); return existing.filter((a) => ids.has(a.id)); })() : existing;
     return base.filter((a) => !usedIds.has(a.id)).slice(0, 120);
   }, [picking2, pickQ, existing, insideId, brandName, albums]);   // eslint-disable-line react-hooks/exhaustive-deps
   const addExisting = (a: SampleAlbum) => {
@@ -525,33 +525,11 @@ export function DropAlbumDialog({ files, inside, insideId, existing = [], brandN
           </div>
         )}
 
-        {/* หน้าต่างเลือกอัลบั้มที่มีอยู่ — ปกรูป + ชื่อ + จำนวนรูป + ค้นได้ทั้งแบรนด์ */}
-        <ERPModal open={picking2} onClose={() => { setPicking2(false); setPickQ(""); }} size="lg" storageKey="sample-drop-pick-existing"
+        {/* หน้าต่างเลือกอัลบั้มที่มีอยู่ — ของกลาง SampleAlbumPickerModal (ปกรูป + ชื่อ + จำนวนรูป + ค้นทั้งแบรนด์) */}
+        <SampleAlbumPickerModal open={picking2} onClose={() => { setPicking2(false); setPickQ(""); }} brandName={brandName}
           title={t("เลือกอัลบั้มที่มีอยู่แล้ว", "Pick an existing album")}
-          description={pickQ.trim() ? t(`ค้นทั้งแบรนด์${brandName ? ` ${brandName}` : ""}`, "Searching the whole brand") : t(`อัลบั้มย่อยใน ${inside} (พิมพ์ค้น = ทั้งแบรนด์)`, `Sub-albums of ${inside} (type to search the brand)`)}>
-          <div className="space-y-2.5">
-            <input value={pickQ} onChange={(e) => setPickQ(e.target.value)} autoFocus placeholder={t("ค้นชื่ออัลบั้ม / รหัสสินค้า…", "Search album / product code…")}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm focus:border-violet-400 focus:outline-none" />
-            {pickList.length === 0
-              ? <p className="py-8 text-center text-[13px] text-slate-400">{pickQ.trim() ? t("ไม่พบอัลบั้มที่ตรงคำค้น", "No matching albums") : t("อัลบั้มนี้ยังไม่มีอัลบั้มย่อย — พิมพ์ค้นทั้งแบรนด์ได้", "No sub-albums — type to search the brand")}</p>
-              : (
-                <div className="grid max-h-[60vh] grid-cols-2 gap-2.5 overflow-y-auto sm:grid-cols-4">
-                  {pickList.map((a) => (
-                    <button key={a.id} type="button" onClick={() => addExisting(a)} className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left hover:border-violet-400 hover:shadow-md">
-                      <AlbumCover keys={a.preview_keys ?? []} total={a.deep?.photos} />
-                      <div className="space-y-0.5 p-2">
-                        <div className="truncate text-[13px] font-medium text-slate-800">{albumFullName(a, brandName)}</div>
-                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                          <span>{t(`${a.deep?.photos ?? 0} รูป`, `${a.deep?.photos ?? 0} photos`)}</span>
-                          {productLinkLabel(a) && <span className="truncate rounded-full bg-violet-100 px-1.5 text-violet-800">{productLinkLabel(a)}</span>}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-          </div>
-        </ERPModal>
+          description={t(`อัลบั้มย่อยใน ${inside} ขึ้นก่อน · พิมพ์ค้น = ทั้งแบรนด์`, `Sub-albums of ${inside} first · type to search the brand`)}
+          albums={existing.filter((a) => !usedIds.has(a.id))} initial={pickList} onPick={addExisting} />
 
         {bySku && skuGroups.length > 0 && (
           <div className="rounded-lg bg-violet-50/60 px-3 py-2 text-[12px] text-violet-900">

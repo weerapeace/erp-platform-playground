@@ -278,6 +278,34 @@ export function sortAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "
   return out.sort(newestFirst);
 }
 
+/** ชื่อที่ระบบตั้งให้เอง (Product 012 / Version 2) — การ์ดไม่โชว์ชื่อนี้ โชว์เลขลำดับ + สินค้าที่เชื่อมแทน (เจ้าของเลือก 2026-11-17) */
+export function isAutoAlbumName(name: string): boolean {
+  return /^(product\s*#?\s*\d+|version\s*#?\s*\d+)$/i.test(name.trim());
+}
+
+/** เรียงอัลบั้มย่อย (ในอัลบั้มที่เปิดอยู่) */
+export type SampleSubSort = "manual" | "parent" | "newest";
+export const SAMPLE_SUB_SORTS: { key: SampleSubSort; th: string; en: string }[] = [
+  { key: "manual", th: "จัดเอง (ลากสลับ)", en: "Custom (drag)" },
+  { key: "parent", th: "ตาม Parent SKU", en: "By Parent SKU" },
+  { key: "newest", th: "ใหม่สุดก่อน", en: "Newest first" },
+];
+export const isSubSort = (v: unknown): v is SampleSubSort => SAMPLE_SUB_SORTS.some((s) => s.key === v);
+/** Parent SKU ตัวแรกที่เชื่อม ("" = ยังไม่เชื่อม) — ใช้จัดกลุ่ม */
+export const parentGroupOf = (a: Pick<SampleAlbum, "parent_sku_codes">): string => (a.parent_sku_codes ?? [])[0] ?? "";
+/** ตาม Parent SKU: กลุ่มตามรหัส (ก–ฮ/A–Z) · ยังไม่เชื่อมอยู่ท้ายสุด · ในกลุ่มคงลำดับจัดเอง */
+export function sortSubAlbums<T extends Pick<SampleAlbum, "name" | "created_at" | "parent_id" | "deep" | "parent_sku_codes"> & { sort_order?: number | null }>(albums: readonly T[], sort: SampleSubSort): T[] {
+  const manual = sortAlbums(albums, "manual");
+  if (sort === "newest") return sortAlbums(albums, "newest");
+  if (sort !== "parent") return manual;
+  const pos = new Map(manual.map((a, i) => [a, i]));
+  return [...manual].sort((a, b) => {
+    const x = parentGroupOf(a), y = parentGroupOf(b);
+    if (x !== y) return !x ? 1 : !y ? -1 : byText(x, y);
+    return (pos.get(a) ?? 0) - (pos.get(b) ?? 0);
+  });
+}
+
 /** เรียงรูป: ตามลำดับที่ลง (ค่าเดิม — รูปแรกของการถ่ายก่อน) · ใหม่สุดก่อน · ชื่อไฟล์ (3M2A9 ก่อน 3M2A10) */
 export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name"> & { sort_order?: number | null }>(photos: readonly T[], sort: SamplePhotoSort): T[] {
   const out = [...photos];

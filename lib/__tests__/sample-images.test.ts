@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextProductName, nextVersionName, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
+import { nextProductName, nextVersionName, isAutoAlbumName, sortSubAlbums, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -289,5 +289,19 @@ describe("nextVersionName — อัลบั้มย่อยในอัล�
     const list = [{ name: "Version 1", parent_id: "p" }, { name: "version 3", parent_id: "p" }, { name: "Version 9", parent_id: "q" }, { name: "Product 005", parent_id: "p" }];
     expect(nextVersionName(list, "p")).toBe("Version 4");
     expect(nextVersionName(list, "z")).toBe("Version 1");
+  });
+});
+
+describe("อัลบั้มย่อยไม่มีชื่อ + เรียงตาม Parent", () => {
+  it("isAutoAlbumName = Product ### / Version N เท่านั้น", () => {
+    expect(isAutoAlbumName("Product 012")).toBe(true);
+    expect(isAutoAlbumName("version 2")).toBe(true);
+    expect(isAutoAlbumName("กระเป๋าแดง")).toBe(false);
+  });
+  it("sortSubAlbums parent: กลุ่มตามรหัส · ยังไม่เชื่อมท้ายสุด · ในกลุ่มตามลำดับจัดเอง", () => {
+    const mk = (id: string, order: number, codes: string[]) => ({ id, name: id, created_at: "2026-11-17T00:00:00Z", parent_id: "p", deep: { photos: 1 } as never, parent_sku_codes: codes, sort_order: order });
+    const list = [mk("a", 1, []), mk("b", 2, ["CTL110"]), mk("c", 3, ["CTL107"]), mk("d", 4, ["CTL110"])];
+    expect(sortSubAlbums(list, "parent").map((x) => x.id)).toEqual(["c", "b", "d", "a"]);
+    expect(sortSubAlbums(list, "manual").map((x) => x.id)).toEqual(["a", "b", "c", "d"]);
   });
 });

@@ -19,7 +19,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import {
   SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, brandPhotoTotals, isAlbumSort, isPhotoSort,
   type SampleAlbum, type SampleAlbumSort, type SampleBrand, type SamplePhoto, type SamplePhotoSort,
-  productLinkLabel,
+  productLinkLabel, isAutoAlbumName,
 } from "@/lib/sample-images";
 
 /** วิธีเรียงที่เลือกไว้ (จำรายคน · หน้า SAMPLE กับแท็บในตัวเลือกไฟล์ใช้ค่าเดียวกัน) — อัลบั้ม: ล่าสุดก่อน · รูป: ตามลำดับที่ลง */
@@ -104,7 +104,7 @@ function NoteMark({ note }: { note: string }) {
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel, order, bigOrder, onShift }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
   /** ถูกเลือกอยู่ (ลากกรอบเลือก) — กรอบม่วง + ติ๊ก */
   selected?: boolean;
@@ -116,20 +116,38 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   menu?: { label: string; icon?: string; onClick: () => void }[];
   /** ลากไฟล์จากเครื่องมาค้างบนการ์ด → ป้ายทับ "วางเพื่อลงรูปใน …" */
   dropLabel?: string | null;
+  /** เลขลำดับ #n บนปก (อัลบั้มย่อย) · ชื่อที่ระบบตั้งเอง (Product 012) ไม่โชว์ — โชว์สินค้าที่เชื่อมแทน */
+  order?: number;
+  /** โหมดจัดลำดับ: เลขใหญ่ + ปุ่ม ← → */
+  bigOrder?: boolean;
+  onShift?: (dir: -1 | 1) => void;
 }) {
   const t = useT();
   const a = album;
   const bar = edge ? <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1 rounded-full bg-violet-500 ${edge === "before" ? "-left-2" : "-right-2"}`} /> : null;
+  const auto = order !== undefined && isAutoAlbumName(a.name);
+  const link = productLinkLabel(a);
   if (sub) return (
     <button type="button" onClick={onOpen} {...extra}
       className={`relative overflow-visible rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : selected ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200 hover:border-slate-300"}`}>
       {bar}
       {selected && <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
       {dropLabel && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{dropLabel}</span>}
-      <div className="overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} /></div>
+      <div className="relative overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} />
+        {order !== undefined && <span className={`absolute left-1.5 top-1.5 rounded-lg bg-violet-600 font-bold tabular-nums text-white shadow ${bigOrder ? "px-2.5 py-1 text-lg" : "px-1.5 text-[12px]"}`}>#{order}</span>}
+        {onShift && (
+          <span className="absolute bottom-1.5 right-1.5 flex gap-1" onClick={(e) => e.stopPropagation()}>
+            {([-1, 1] as const).map((d) => (
+              <span key={d} role="button" tabIndex={0} aria-label={d < 0 ? t("เลื่อนไปก่อน", "Move earlier") : t("เลื่อนไปหลัง", "Move later")}
+                onClick={() => onShift(d)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onShift(d); } }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-base font-bold text-violet-700 shadow hover:bg-violet-50">{d < 0 ? "←" : "→"}</span>
+            ))}
+          </span>
+        )}
+      </div>
       <div className="space-y-1 p-2.5">
         <div className="flex items-center gap-1 text-[13px] font-medium text-slate-800">
-          <Icon value="i:folder" /><span className="min-w-0 flex-1 truncate">{a.name}</span>
+          <Icon value="i:folder" /><span className={`min-w-0 flex-1 truncate ${auto && !link ? "font-normal text-slate-400" : ""}`}>{auto ? (link ?? t("ยังไม่เชื่อมสินค้า", "No product linked")) : a.name}</span>
           {!!menu?.length && (
             // ปุ่ม ⋯ อยู่ในการ์ด (ที่เป็นปุ่ม) → หยุดคลิกไม่ให้เปิดอัลบั้ม · แผงอยู่ใน portal แต่คลิกยังไหลถึงการ์ด จึงหยุดที่แผงด้วย
             <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="shrink-0">
@@ -150,7 +168,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{a.deep.sub_count}</span>}
           {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-1.5 text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
-          {productLinkLabel(a) && <span className="inline-flex h-5 max-w-full items-center gap-0.5 truncate rounded-full bg-violet-100 px-1.5 text-violet-800"><Icon value="i:link" />{productLinkLabel(a)}</span>}
+          {link && !auto && <span className="inline-flex h-5 max-w-full items-center gap-0.5 truncate rounded-full bg-violet-100 px-1.5 text-violet-800"><Icon value="i:link" />{link}</span>}
         </div>
       </div>
     </button>
