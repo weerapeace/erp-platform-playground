@@ -12,6 +12,9 @@
  *   const steps = useStepHistory<{ album: string | null }>("sample-album", (s) => go(s?.album ?? null));
  *   const open = (id) => { go(id); steps.push({ album: id }); }     // เดินเอง = จดก้าว
  *   // กด Back → onStep(ก้าวก่อนหน้า) · ย้อนถึงก้าวแรกของหน้า = onStep(null) (= หน้าแรกของหน้านั้น)
+ *   steps.replace(step) = จดก้าว "ตอนนี้" ทับก้าวปัจจุบัน (ไม่เพิ่มก้าว) — เรียกก่อน push ครั้งแรก
+ *     เพื่อให้ Back กลับมาถึง "หน้าตาตอนเปิดหน้า" ได้เป๊ะ (แท็บ/โหมดที่จำไว้) แทนที่จะได้ null
+ *   หน้าเดียวมีหลายอย่างที่เปลี่ยนได้ (แท็บ · อัลบั้ม · โหมด · แผง) → เก็บทั้งชุดเป็น step เดียว แล้ว onStep คืนค่าทั้งชุด
  *
  * กฎ:
  *   - เรียก push เฉพาะตอน "ผู้ใช้เดินเอง" — ห้ามเรียกใน onStep (จะวนเพิ่มก้าวไม่จบ)
@@ -23,7 +26,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { hasOpenDrawer } from "@/lib/drawer-history";
 
-export function useStepHistory<T>(key: string, onStep: (step: T | null) => void): { push: (step: T) => void } {
+export function useStepHistory<T>(key: string, onStep: (step: T | null) => void): { push: (step: T) => void; replace: (step: T) => void } {
   const fn = useRef(onStep);
   fn.current = onStep;
   const tag = `__step:${key}`;
@@ -43,5 +46,10 @@ export function useStepHistory<T>(key: string, onStep: (step: T | null) => void)
     try { window.history.pushState({ [tag]: step }, ""); } catch { /* history ใช้ไม่ได้ (เช่น iframe แปลก ๆ) = ไม่จดก้าว */ }
   }, [tag]);
 
-  return { push };
+  const replace = useCallback((step: T) => {
+    // รวมกับ state เดิม (ของ router ฯลฯ) — ไม่ทับทิ้ง
+    try { window.history.replaceState({ ...((window.history.state as Record<string, unknown> | null) ?? {}), [tag]: step }, ""); } catch { /* ใช้ไม่ได้ = ข้าม */ }
+  }, [tag]);
+
+  return { push, replace };
 }

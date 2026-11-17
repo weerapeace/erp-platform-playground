@@ -137,6 +137,8 @@ export function SampleImagesPage() {
   const [subSort, setSubSort] = useUserPref<SampleSubSort>("sample_images_sub_sort", "manual", (r) => (isSubSort(r) ? r : null));
   const [orderMode, setOrderMode] = useState(false);
   const [organize, setOrganize] = useState(false);   // ⇆ จัดเรียง 2 ฝั่ง
+  const [paneL, setPaneL] = useState<string | null>(null);
+  const [paneR, setPaneR] = useState<string | null>(null);
   const [month, setMonth] = useState<string | null>(null);
   const [albumDrop, setAlbumDrop] = useState<{ src: SampleAlbum; dst: SampleAlbum } | null>(null);   // ลากอัลบั้มวางบนอัลบั้ม → ถามรวม/ใส่ข้างใน   // หน้าแบรนด์: กรองเดือนที่ลง
   const [dropHost, setDropHost] = useState<SampleAlbum | null>(null);   // อัลบั้มแม่ของป๊อปลงรูป (อัลบั้มที่เปิด / อัลบั้มของวันนี้ตอนลงจากหน้าแบรนด์)
@@ -185,15 +187,29 @@ export function SampleImagesPage() {
     void (want ? reload(want, ALL) : reload());
   /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [permsReady, canView]);
 
-  // ปุ่ม Back ย้อนทีละก้าวตามที่เดินมา (อัลบั้มย่อย → อัลบั้มแม่ → หน้าแฟ้ม) — เจ้าของสั่ง 2026-11-15 · ของกลาง lib/use-step-history
-  const steps = useStepHistory<{ album: string | null }>("sample-album", (s) => {
-    const want = s?.album ?? null;
-    if (want === albumId) return;            // ป๊อปที่เพิ่งปิดพากลับมาก้าวเดิม — อยู่ที่เดิมแล้ว
-    if (want) void openAlbum(want, true); else closeAlbum(true);
+  // ปุ่ม Back (เบราว์เซอร์ · ปุ่มย้อนของเมาส์ · มือถือ) ย้อนทีละก้าว — ของกลาง lib/use-step-history
+  // ก้าว = ทั้งหน้าตา: แท็บแบรนด์ · อัลบั้มที่เปิด · โหมดจัดเรียง 2 ฝั่ง + อัลบั้มแต่ละฝั่ง (เจ้าของสั่ง 2026-11-17 "กดย้อนกลับที่เมาส์แล้วย้อนด้วย")
+  type View = { album: string | null; tab: string; org: boolean; L: string | null; R: string | null };
+  const snap = (p: Partial<View> = {}): View => ({ album: albumId, tab, org: organize, L: paneL, R: paneR, ...p });
+  const stepped = useRef(false);
+  const steps = useStepHistory<View>("sample-view", (s) => {
+    if (!s) { setOrganize(false); closeAlbum(true); return; }
+    if (s.tab !== tab) { setTab(s.tab as BrandTab); setMonth(null); }
+    setOrganize(s.org); setPaneL(s.L); setPaneR(s.R);
+    if (s.album === albumId) return;            // ป๊อปที่เพิ่งปิดพากลับมาก้าวเดิม — อยู่ที่เดิมแล้ว
+    if (s.album) void openAlbum(s.album, true); else closeAlbum(true);
   });
+  /** จดก้าว (ครั้งแรกจด "หน้าตาตอนนี้" ไว้ก่อน → Back กลับมาถึงจุดเริ่มได้) */
+  const pushStep = (p: Partial<View>) => {
+    if (!stepped.current) { steps.replace(snap()); stepped.current = true; }
+    steps.push(snap(p));
+  };
+  const setOrganizeStep = (v: boolean) => { if (v === organize) return; pushStep({ org: v, L: v ? albumId : paneL }); setOrganize(v); if (v) setPaneL(albumId); };
+  const setPaneLStep = (id: string | null) => { if (id === paneL) return; pushStep({ L: id }); setPaneL(id); };
+  const setPaneRStep = (id: string | null) => { if (id === paneR) return; pushStep({ R: id }); setPaneR(id); };
   /** เปิดอัลบั้ม · fromHistory = มาจากปุ่ม Back (ไม่จดก้าวซ้ำ) */
   const openAlbum = async (id: string, fromHistory = false) => {
-    if (!fromHistory && id !== albumId) steps.push({ album: id });
+    if (!fromHistory && id !== albumId) pushStep({ album: id });
     setAlbumId(id); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); setQuery("");
     setLinkedImgs([]);
     try { const d = await loadSamples(id); setAlbums(d.albums); setBrands(d.brands); setPhotos(d.photos ?? []); setLinkedImgs(d.linked_images ?? []); }
@@ -201,10 +217,13 @@ export function SampleImagesPage() {
   };
   /** กลับหน้าแฟ้ม (การ์ดอัลบั้ม) */
   const closeAlbum = (fromHistory = false) => {
-    if (!fromHistory && albumId) steps.push({ album: null });
+    if (!fromHistory && albumId) pushStep({ album: null });
     setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); setQuery("");
   };
-  const switchTab = (next: BrandTab) => { setTab(next); setMonth(null); closeAlbum(); };
+  const switchTab = (next: BrandTab) => {
+    if (next !== tab || albumId) pushStep({ tab: next, album: null });
+    setTab(next); setMonth(null); closeAlbum(true);
+  };
 
   // ── แบรนด์ที่จะลงรูป: แท็บแบรนด์ = แบรนด์นั้น · ไม่ระบุแบรนด์ = ไม่มี · ทุกแบรนด์ = ปุ่มเลือกในกรอบวางรูป (จำล่าสุด) ──
   const uploadBrandId: string | null = tab === NONE ? null : tab !== ALL ? tab : (brandOf(lastBrand)?.id ?? brands[0]?.id ?? null);
@@ -645,7 +664,7 @@ export function SampleImagesPage() {
           </>
         )}
         {canEdit && albums && (
-          <button type="button" onClick={() => setOrganize((v) => !v)}
+          <button type="button" onClick={() => setOrganizeStep(!organize)}
             className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${organize ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
             <span aria-hidden>⇆</span>{organize ? t("ปิดจัดเรียง", "Close organizer") : t("จัดเรียง 2 ฝั่ง", "Two-pane organizer")}
           </button>
@@ -661,7 +680,7 @@ export function SampleImagesPage() {
             <SampleBrandBar brands={brands} albums={albums} tab={tab} onTab={switchTab} />
 
             {organize && (
-              <SampleTwoPane startLeft={albumId} onClose={() => setOrganize(false)} albums={albums} brands={brands} tab={tab} canEdit={canEdit}
+              <SampleTwoPane left={paneL} right={paneR} onLeft={setPaneLStep} onRight={setPaneRStep} onClose={() => setOrganizeStep(false)} albums={albums} brands={brands} tab={tab} canEdit={canEdit}
                 nameOf={(a) => nameOf(a)} onChanged={() => reload(albumId)} onAlbumOnAlbum={(src, dst) => setAlbumDrop({ src, dst })} />
             )}
             <div ref={mq.ref} className={`relative min-w-0 space-y-3 ${organize ? "hidden" : ""}`}>

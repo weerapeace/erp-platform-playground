@@ -181,11 +181,10 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
   );
 }
 
-export function SampleTwoPane({ startLeft, onClose, ...sh }: Shared & { startLeft: string | null; onClose: () => void }) {
+/** left/right = อัลบั้มที่แต่ละฝั่งเปิด (หน้าเก็บไว้ · เปลี่ยนแล้วจดก้าว ปุ่มย้อนของเมาส์ถอยได้) */
+export function SampleTwoPane({ left, right, onLeft, onRight, onClose, ...sh }: Shared & { left: string | null; right: string | null; onLeft: (id: string | null) => void; onRight: (id: string | null) => void; onClose: () => void }) {
   const t = useT();
   const toast = useToast();
-  const [left, setLeft] = useState<string | null>(startLeft);
-  const [right, setRight] = useState<string | null>(null);
   const wide = useMediaQuery("(min-width: 1024px)");
   const split = useSplitWidth("sample-two-pane", { min: 320, reserve: 320 });
 
@@ -214,8 +213,8 @@ export function SampleTwoPane({ startLeft, onClose, ...sh }: Shared & { startLef
     } catch (e) { toast.error((e as Error).message); }
   };
 
-  const L = <Pane side="L" albumId={left} setAlbumId={setLeft} other={right} sendTo={sendTo} sh={sh} />;
-  const R = <Pane side="R" albumId={right} setAlbumId={setRight} other={left} sendTo={sendTo} sh={sh} />;
+  const L = <Pane side="L" albumId={left} setAlbumId={onLeft} other={right} sendTo={sendTo} sh={sh} />;
+  const R = <Pane side="R" albumId={right} setAlbumId={onRight} other={left} sendTo={sendTo} sh={sh} />;
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
