@@ -11,6 +11,7 @@
  * ของกลาง: MiniTable · useViewPref (จำมุมมองต่อคน) · lib/so-status · openLink (?open=<id>) · usePermission
  * ข้อมูล: /api/sales-orders (ตัวเดียวกับหน้าใบขาย — ไม่ได้ทำ API ใหม่)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { usePermission, AccessDenied } from "@/components/auth";
@@ -119,7 +120,7 @@ export default function SalesOrdersPlanPage() {
         )}
       </div>
 
-      {loading ? <div className="text-center py-20 text-slate-400 text-sm">กำลังโหลด…</div>
+      {loading ? <LoadingState />
         : err ? (
         <div className="text-center py-16">
           <div className="text-3xl mb-2">⚠️</div>

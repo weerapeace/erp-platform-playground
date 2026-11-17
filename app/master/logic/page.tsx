@@ -12,12 +12,13 @@
  * F20: client-only render (ssr:false) กัน Worker 1102
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const CAT_LABEL: Record<string, string> = {

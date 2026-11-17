@@ -12,6 +12,7 @@
  * ⚠️ ห้ามเปลี่ยน key เดิม — ลิงก์ ?tab=<key> เก่ายังใช้อยู่
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { ShellPresentContext } from "@/components/playground-shell";
 import { MasterPage } from "@/components/master-page";
@@ -101,7 +102,7 @@ export default function MasterLookupsPage() {
           </div>
         </div>
         <div className="flex-1 px-4 lg:px-6 py-4">
-          {!cur ? <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> : (
+          {!cur ? <LoadingState /> : (
           <SettingsNavLayout groups={groups} active={cur.key} onSelect={selectTab} searchPlaceholder="ค้นหาตาราง เช่น ธนาคาร">
             {(cur.key === "product_families" || cur.key === "brands") && (
               <a href={cur.key === "brands" ? "/master/brands" : "/admin/product-families"}

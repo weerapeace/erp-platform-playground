@@ -5,12 +5,13 @@
  * ยังไม่ผูกกับใบงาน / ยังไม่บันทึก — วาดเล่นได้เต็มที่ รีเฟรชแล้วหาย
  * ถ้าเคาะว่าเอา: จะเพิ่มช่อง canvas ลงใบงาน + เก็บรูปที่วางเข้า R2 + ถ่ายภาพ canvas ใส่ใบพิมพ์
  */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
-  loading: () => <div className="h-full flex items-center justify-center text-slate-400">กำลังโหลดกระดาน...</div>,
+  loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="h-full flex items-center justify-center text-slate-400" />,
 });
 
 export default function DesignCanvasDemoPage() {

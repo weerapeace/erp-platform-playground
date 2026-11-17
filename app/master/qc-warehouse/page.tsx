@@ -6,6 +6,7 @@
  * เฟส 2: 3 มุมมอง (บอร์ด/ตาราง/คิวงาน) · รูปสินค้าบนการ์ด · ปุ่มย้ายชั้นบนการ์ด · overflow เกิน 20 ใบ → "+เพิ่มเติม"
  * (สีแบรนด์จริง + งานลูกค้า + badge งานเหมา + ประวัติของเสียจริง = เฟส 3-4)
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { ERPModal } from "@/components/modal";
 import { ParentIssuesPanel } from "@/components/parent-issues-panel";
@@ -583,7 +584,7 @@ export default function QcWarehousePage() {
         </div>
       </div>
 
-      {loading ? <div className="text-center py-24 text-slate-400">กำลังโหลด…</div> : view === "board" ? (
+      {loading ? <LoadingState /> : view === "board" ? (
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
         {/* คิวรอ QC */}
         <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 p-3 h-fit">

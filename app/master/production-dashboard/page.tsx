@@ -6,6 +6,7 @@
  * ดูได้ 3 แบบ: จอคอม / แท็บเล็ต / มือถือ (ของกลาง device-view — ตัดสินด้วย `layout` ไม่ใช้ sm:/lg:)
  * ของกลาง: DataTable, HoverImage, getStatusStyle, ScheduleBoard, device-view, PlaygroundShell (ผ่าน /master/layout)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -445,7 +446,7 @@ function ProductionDashboardInner() {
           </div>
 
           {grouped ? (
-            loading ? <div className="py-16 text-center text-slate-400">กำลังโหลด…</div>
+            loading ? <LoadingState />
             : groups.length === 0 ? <div className="py-16 text-center text-slate-400">{cat === "all" ? "ยังไม่มีงานผลิต" : "ไม่มีงานในกลุ่มนี้"}</div>
             : <div className="space-y-3">
                 {groups.map(([label, items]) => {

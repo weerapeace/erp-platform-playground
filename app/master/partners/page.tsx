@@ -8,12 +8,13 @@
  * ฟิลด์: จัดการที่ /admin/schema-sync (module: Partners)
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 
 // client-only — กัน SSR component หนัก (มี drawer + portal)
 const PartnerManager = dynamic(
   () => import("@/components/partner-manager").then((m) => m.PartnerManager),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 export default function PartnersV2Page() {

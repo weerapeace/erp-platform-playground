@@ -8,6 +8,7 @@
  * - เพิ่มโมดูลใหม่เข้ากลุ่มนี้ได้เลย (➕)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ShellPresentContext } from "@/components/playground-shell";
@@ -167,7 +168,7 @@ export default function ModuleGroupPage() {
       </div>
       <div className="flex-1">
         {mods === null ? (
-          <div className="text-sm text-slate-400 py-16 text-center">กำลังโหลด…</div>
+          <LoadingState />
         ) : mods.length === 0 ? (
           <div className="text-sm text-slate-400 py-16 text-center">
             ยังไม่มีโมดูลในกลุ่ม “{groupParam}”<br />

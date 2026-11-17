@@ -8,6 +8,7 @@
  * อ่านอย่างเดียว — ไม่แก้ข้อมูล ไม่กระทบวิธีทำงานเดิม (ติ๊กเตรียม/ตัด ยังทำที่บอร์ดจ่ายงานเหมือนเดิม)
  * ของกลาง: HoverImage · ERPModal · useToast · apiFetch · addToPrCart · useViewPref
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -98,7 +99,7 @@ function CriticalitySettings({ onClose, onSaved }: { onClose: () => void; onSave
           กดเลือกได้เลย <b>บันทึกทันที</b> · มีผลกับทุกใบสั่งผลิตพร้อมกัน
           <br />ของหลัก = ขาดแล้วผลิตไม่ได้ · ต้องมี = นับใน % · สิ้นเปลือง = ไม่นับใน % เลย
         </p>
-        {rows === null ? <div className="py-8 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
+        {rows === null ? <LoadingState /> : (
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
             {rows.map((g) => (
               <div key={g.id} className="flex items-center gap-2 px-2.5 py-2">
@@ -249,7 +250,7 @@ export default function MaterialReadinessPage() {
       </div>
 
       {err ? <div className="py-20 text-center text-rose-500">⚠ {err}</div>
-        : !data ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+        : !data ? <LoadingState />
         : (
           <div className="flex flex-col xl:flex-row gap-3">
             {/* ซ้าย: ใบสั่งผลิต */}

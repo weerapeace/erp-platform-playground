@@ -7,6 +7,7 @@
  * Field config: /admin/schema-sync (เลือก module: SKUs)
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
@@ -25,15 +26,15 @@ import { AddToPlanModal, type PlanSource } from "@/components/team-plan/add-to-p
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 const SkuTagBrowser = dynamic(
   () => import("@/components/sku-tag-browser").then((m) => m.SkuTagBrowser),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 const TagsManagerPage = dynamic(
   () => import("@/app/master/tags-manager/page"),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const CONFIG: MasterCRUDConfig = {

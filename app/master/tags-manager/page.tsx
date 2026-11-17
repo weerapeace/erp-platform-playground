@@ -11,6 +11,7 @@
  * ใช้ของกลาง: API master-v2 (list) + m2m-links (ผูก/ดึงแท็ก bulk)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { TagUsageModal } from "@/components/tag-usage";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -635,7 +636,7 @@ export default function TagsManagerPage() {
           </div>
           {view === "card" ? (
             <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
-              {loadingPool && <div className="text-xs text-slate-400 py-4 text-center col-span-full">กำลังโหลด…</div>}
+              {loadingPool && <LoadingState />}
               {!loadingPool && shownPool.length === 0 && <div className="text-xs text-slate-400 py-4 text-center col-span-full">ไม่พบรายการ</div>}
               {shownPool.map((r) => (
                 <RecCard key={r.id} r={r} tags={tagMap[r.id] ?? EMPTY_TAGS} tagLabel={tagLabel}
@@ -644,7 +645,7 @@ export default function TagsManagerPage() {
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto">
-              {loadingPool && <div className="text-xs text-slate-400 py-4 text-center">กำลังโหลด…</div>}
+              {loadingPool && <LoadingState />}
               {!loadingPool && shownPool.length === 0 && <div className="text-xs text-slate-400 py-4 text-center">ไม่พบรายการ</div>}
               {!loadingPool && shownPool.length > 0 && (
                 <table className="w-full border-collapse">

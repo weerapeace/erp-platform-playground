@@ -12,6 +12,7 @@
  * ⭐ ใช้ Field Registry แบบ dynamic — field config จาก /admin/schema-sync
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
@@ -25,7 +26,7 @@ import { useRouter } from "next/navigation";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 const ProductPlatformManager = dynamic(
   () => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager),

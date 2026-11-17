@@ -8,6 +8,7 @@
  * เลือกหลายตัว → 📤 เตรียมลงสินค้า (บันทึกร่าง + ตรวจ) / 🗂️ ตั้งหมวดกลาง · รายแถว → เปิดตัวจัดการเดิมตรงแท็บร้านนั้น
  * ร้านที่ยังไม่มีตัวเชื่อมจริง (เช่น Lazada) = เตรียมร่างได้อย่างเดียว ยังไม่ส่งอะไรไปที่ร้าน · docs/platform-listing.md
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
@@ -20,7 +21,7 @@ import { BulkCategoryDialog } from "@/components/platform-listing/bulk-category-
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
 
@@ -170,7 +171,7 @@ export default function PlatformListingPage() {
       <button onClick={() => window.location.reload()} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ลองใหม่</button>
     </div>
   );
-  if (!config) return <div className="p-10 text-center text-slate-400">กำลังโหลด...</div>;
+  if (!config) return <LoadingState />;
 
   return (
     <>

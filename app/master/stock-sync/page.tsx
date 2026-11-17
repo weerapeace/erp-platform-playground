@@ -9,6 +9,7 @@
  * - ตารางกลาง (อ่านอย่างเดียว) เทียบ "พร้อมขาย ERP" กับ "พร้อมขาย BigSeller" · ปุ่ม 🔗 จับคู่รายแถว
  * ยังไม่ส่งอะไรออกไปที่ BigSeller/ร้าน (เฟส 2) — docs/channel-stock-sync.md
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -25,7 +26,7 @@ import type { SyncChannelRow } from "@/app/api/stock-sync/channels/route";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const TONE: Record<string, string> = {
@@ -219,7 +220,7 @@ export default function StockSyncPage() {
   }, [channel, channels, description, canEdit, canStock, planning]);
 
   if (!canView) return <AccessDenied />;
-  if (loading) return <div className="p-10 text-center text-slate-400">กำลังโหลด...</div>;
+  if (loading) return <LoadingState />;
   if (loadError) return (
     <div className="p-10 text-center">
       <div className="text-sm text-red-600 mb-3">เกิดข้อผิดพลาดในการโหลดข้อมูล: {loadError}</div>

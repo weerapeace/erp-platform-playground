@@ -5,6 +5,7 @@
  * ใช้หน้าต่างตัวเดียวกับบอร์ด (PieceworkDispatch asPage) · เลือกใบงานด้วยตัวเลือกใบงานกลาง (components/mo-picker) · โหลดรายชื่อคนเอง
  *   ?mo=MO-1,MO-2 = เปิดมาพร้อมใบ · ?tab=recv = เปิดแท็บรับงานคืน
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePermission } from "@/components/auth";
@@ -31,5 +32,5 @@ function Inner() {
 }
 
 export default function PieceworkDispatchPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

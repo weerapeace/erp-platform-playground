@@ -5,6 +5,7 @@
  * สร้าง MO: เลขรันอัตโนมัติ + เลือกสินค้า(รูป) + ดึง BOM เวอร์ชั่น default + กางสูตรตามจำนวน
  * ของกลาง: DataTable(server) / ERPModal / ConfirmDialog / ComponentPicker / useToast / useAuth
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useCallback, useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
@@ -547,7 +548,7 @@ export default function MoWorkspacePage() {
           <button onClick={() => setForm(null)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
           <button onClick={save} disabled={saving || !canEdit} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         </>}>
-        {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && (
+        {loadingForm ? <LoadingState /> : form && (
           <div className="space-y-2">
             {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
@@ -811,7 +812,7 @@ export default function MoWorkspacePage() {
                   })}
                 </div>
 
-                {woLoading ? <div className="text-center py-4 text-xs text-slate-400">กำลังโหลด…</div>
+                {woLoading ? <LoadingState />
                 : woList.length === 0 ? (
                   <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">ยังไม่มีใบจ่ายงาน — กด “จ่ายงาน” เพื่อเริ่ม</div>
                 ) : (
