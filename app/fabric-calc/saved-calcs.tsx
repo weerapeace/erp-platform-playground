@@ -22,9 +22,11 @@ const summaryTxt = (r: FabricBuyCalcRow) => {
   return `${s.need != null ? `ใช้ ${fmt(s.need)} ${s.unit ?? ""}` : "-"}${s.to_buy ? ` · ซื้อเพิ่ม ${fmt(s.to_buy)}` : ""}${s.cost_buy ? ` · ฿${fmt(s.cost_buy, 0)}` : ""}`;
 };
 
-export function SavedCalcsBar({ pack, onLoad }: { pack: () => SavePack; onLoad: (row: FabricBuyCalcRow) => void }) {
+export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePack; onLoad: (row: FabricBuyCalcRow) => void; onCurrent?: (cur: { id: string; name: string } | null) => void }) {
   const toast = useToast();
   const [cur, setCur] = useState<{ id: string; name: string } | null>(null);
+  // แจ้งหน้าแม่ว่าเปิด/บันทึกชุดไหนอยู่ (ใบพิมพ์ใช้ทำ QR ลิงก์กลับ)
+  useEffect(() => { onCurrent?.(cur); }, [cur, onCurrent]);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [listOpen, setListOpen] = useState(false);

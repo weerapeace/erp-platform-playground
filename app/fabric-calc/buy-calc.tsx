@@ -9,7 +9,7 @@
  *   รอบ 3 (2026-11-13): ปุ่มแก้สูตร BOM (BomEditorModal) · ป้าย คาดการณ์/วัดจริงแล้ว (cut-check.tsx · ตาราง fabric_cut_checks) · ราคาผ้าชัด ๆ
  *     · ใบพิมพ์วิธีตัด (lib/fabric-cut-sheet) · เลขชิ้นในผัง · ชิ้นทรงพิเศษ: วาดเอง (ShapeEditor) + วางตามรูปจริง (NestPanel → buyFromLength)
  *   รอบ 4: ปรับทรงรายแถว (กดรูปทรงหลังชื่อ / ปุ่มปรับทรง) · ถ่ายรูปแบบกระดาษ (PhotoModal traceOnly → ตรวจในตัววาด) · กล่องวิธีใช้ · ชื่อชิ้นจาก BOM (piece_name)
- * ของกลาง: calcFabricBuy/compareWidths/piecesFromMoBlocks (lib/fabric-buy → packFabric) · FabricLayoutPreview · ComponentPicker · SkuPicker · MoMultiPickerModal · MiniTable · addToPrCart · renderFabricBuyHtml + printReportHtmlInNewWindow · useToast
+ * ของกลาง: calcFabricBuy/compareWidths/piecesFromMoBlocks (lib/fabric-buy → packFabric) · FabricLayoutPreview · ComponentPicker · SkuPicker · MoMultiPickerModal · MiniTable · addToPrCart · พิมพ์ผ่าน FabricPrintSetup (print-setup.tsx → PrintSetupDialog กลาง) · useToast
  */
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -20,16 +20,16 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ComponentPicker, type BomComponent } from "@/components/material-picker";
 import { MoMultiPickerModal } from "@/components/mo-picker";
 import { FabricLayoutPreview } from "@/components/design-sheet-detail/fabric-layout-preview";
-import { printReportHtmlInNewWindow } from "@/components/report";
 import { BomEditorModal } from "@/components/bom-editor-modal";
 import { NestPanel } from "@/components/pattern-sheet/nest-panel";
 import type { EditorPiece, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import type { NestResult } from "@/lib/pattern-nest";
 import type { PatternPiece } from "@/lib/pattern-sheet";
-import { pieceLegend, pieceNumbers, planCutMarkers, renderCutSheetHtml } from "@/lib/fabric-cut-sheet";
+import { pieceLegend, pieceNumbers, planCutMarkers, type CutSheetInput } from "@/lib/fabric-cut-sheet";
 import { addToPrCart } from "@/lib/pr-cart";
 import { adjustedPieces, buyFromLength, calcFabricBuy, compareWidths, convertLength, cutCheckState, piecesFingerprint, piecesFromMoBlocks, unitFromUomName, type BuyInput, type BuyPiece, type BuyRound, type BuyUnit, type WidthCompareRow } from "@/lib/fabric-buy";
-import { renderFabricBuyHtml } from "@/lib/fabric-buy-print";
+import type { FabricPrintItem } from "@/lib/fabric-buy-print";
+import { FabricPrintSetup } from "./print-setup";
 import { YARD_CM } from "@/lib/fabric-calc";
 import type { PlanGroupInput } from "@/lib/fabric-plan";
 import type { FabricPlanMo } from "@/app/api/mo/fabric-plan/route";
@@ -89,6 +89,8 @@ export function FabricBuyCalc() {
   const [rowEdit, setRowEdit] = useState<string | null>(null);             // แถวที่กำลังปรับทรง
   const [photoOpen, setPhotoOpen] = useState(false);
   const [help, setHelp] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [calcCur, setCalcCur] = useState<{ id: string; name: string } | null>(null);   // ชุดที่บันทึก/เปิดอยู่ → QR ในใบพิมพ์
   const [nestRes, setNestRes] = useState<NestResult | null>(null);
   const [useNest, setUseNest] = useState(true);
   const [measure, setMeasure] = useState<MeasureTarget | null>(null);
@@ -287,24 +289,26 @@ export function FabricBuyCalc() {
     }]);
     toast.success(`ใส่ตะกร้าขอซื้อแล้ว ${fmt(res.to_buy)} ${u} (ตะกร้ามี ${n} รายการ) — ไปกดยืนยันที่หน้า “ขอซื้อ”`);
   };
+  // ── พิมพ์ / ส่งจัดซื้อ → หน้าปรับก่อนพิมพ์ (print-setup.tsx · เลือกใบ/ส่วน/ช่วงผัง) ──
+  const printDate = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+  const printItems = useMemo<FabricPrintItem[]>(() => [{ key: fabric?.code ?? `w${face}`, input: dIn, res: eff, compare: cmp, fabric_name: fabricLabel }], [fabric?.code, face, dIn, eff, cmp, fabricLabel]);
+  const printMeta = useMemo(() => ({ title: `คิดผ้าก่อนซื้อ ${fabric?.code ?? ""}`.trim(), date: printDate, source_label: source }), [fabric?.code, printDate, source]);
   const doPrint = () => {
     if (!eff.ok) { toast.error(eff.error ?? "ยังคำนวณไม่ได้"); return; }
-    const date = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
-    printReportHtmlInNewWindow(renderFabricBuyHtml(input, eff, cmp, { title: `คิดผ้าก่อนซื้อ ${fabric?.code ?? ""}`.trim(), date, fabric_name: fabricLabel, source_label: source }));
+    if (shaped) toast.success("ชิ้นทรงพิเศษในใบพิมพ์วาดเป็นกรอบสี่เหลี่ยม — ผังรูปจริงดูบนจอ");
+    setPrintOpen(true);
   };
 
-  // ── ใบวิธีตัด (แบบตัดซ้ำ ×รอบ · เลขชิ้น · ช่วง 90 ซม. · ตราสถานะ) ──
-  const doCutPrint = () => {
-    if (!adj.length || !(face - trim > 0)) { toast.error("ยังไม่มีชิ้นตัดหรือหน้ากว้างผ้า"); return; }
+  // ── ใบวิธีตัด (แบบตัดซ้ำ ×รอบ · เลขชิ้น · ช่วง 90 ซม. · ตราสถานะ) — ประกอบเข้าหน้าปรับก่อนพิมพ์ ──
+  const buildCut = useCallback((): CutSheetInput[] => {
+    if (!adj.length || !(face - trim > 0)) return [];
     const plan = planCutMarkers({ pieces: adj, qty, faceWidthCm: face - trim, sheetLengthCm: form === "sheet" ? sheetLen : null, allowRotate: rotate, gapCm: gap });
-    const date = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
-    printReportHtmlInNewWindow(renderCutSheetHtml(`วิธีตัด ${fabric?.code ?? ""}`.trim(), [{
-      title: "ใบวิธีตัด", date, fabric_name: fabricLabel, product_label: source, face_full_cm: face, usable_cm: face - trim, sheet_length_cm: form === "sheet" ? sheetLen : null,
+    return [{
+      title: "ใบวิธีตัด", date: printDate, fabric_name: fabricLabel, product_label: source, face_full_cm: face, usable_cm: face - trim, sheet_length_cm: form === "sheet" ? sheetLen : null,
       qty, legend: pieceLegend(adj, qty), plan, waste_pct: waste, unit_label: u,
       status: { measured: cst.state === "measured", text: cst.state === "measured" ? cst.detail : cst.state === "stale" ? "ขนาดชิ้นเปลี่ยนหลังวัด — ต้องวัดใหม่" : "" },
-    }]));
-    if (shaped) toast.success("ชิ้นทรงพิเศษในใบวิธีตัดวาดเป็นกรอบสี่เหลี่ยม — ผังรูปจริงดูบนจอ");
-  };
+    }];
+  }, [adj, face, trim, qty, form, sheetLen, rotate, gap, printDate, fabricLabel, source, waste, u, cst.state, cst.detail]);
   // ── ชิ้นทรงพิเศษ (วาดเอง) → ชิ้นที่มีเส้นรอบรูป ──
   // ชิ้นจากตัววาด → แถวในตาราง (สี่เหลี่ยมล้วนไม่มีรู = แถวธรรมดา · ทรงอื่น = ทรงพิเศษมีเส้นรอบจริง)
   const fromEditor = (p: ShapeEditorResult["pieces"][number], base?: BuyPiece): BuyPiece => {
@@ -464,7 +468,7 @@ export function FabricBuyCalc() {
 
   return (
     <div className="space-y-4">
-      <SavedCalcsBar pack={pack} onLoad={onLoad} />
+      <SavedCalcsBar pack={pack} onLoad={onLoad} onCurrent={setCalcCur} />
 
       <div className="inline-flex rounded-xl border border-indigo-200 bg-white p-1 text-sm">
         {([["single", "ผ้าเดียว"], ["family", "ทั้งตระกูล (แบ่งตามสี)"]] as [Mode, string][]).map(([k, label]) => (
@@ -474,7 +478,7 @@ export function FabricBuyCalc() {
 
       {/* ทั้งตระกูล (คงไว้ใน DOM ตอนสลับไปผ้าเดียว เพื่อไม่ต้องโหลดใหม่) */}
       <div className={family ? "space-y-4" : "hidden"}>
-        <FamilyCalc key={famKey} settings={settings} initial={famInit} onState={onFamState} onSummary={onFamSummary} onOpenSingle={openSingle} />
+        <FamilyCalc key={famKey} settings={settings} initial={famInit} onState={onFamState} onSummary={onFamSummary} onOpenSingle={openSingle} calcId={calcCur?.id ?? null} />
         <Card title="2. ค่าตั้งผ้า (ใช้กับทุกผ้า)" tag="rec">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{generalFields}</div>
         </Card>
@@ -499,6 +503,7 @@ export function FabricBuyCalc() {
           <span className="text-[12px] text-slate-400">หรือพิมพ์ขนาดชิ้นเองในตารางด้านล่าง</span>
         </div>
         {help && <HowTo onClose={() => setHelp(false)} />}
+        {mode === "single" && <FabricPrintSetup open={printOpen} onClose={() => setPrintOpen(false)} items={printItems} meta={printMeta} buildCut={buildCut} calcId={calcCur?.id ?? null} docNo={fabric?.code ?? calcCur?.name ?? null} />}
         {srcPanel !== "" && (
           <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
             {srcPanel === "bom" && <div className="mb-1 text-[12px] text-slate-600">บันทึกสูตร {curBom?.bom_code ?? ""} แล้ว → เลือกผ้าเพื่อดึงชิ้นใหม่ <button type="button" onClick={() => setBomPick(true)} className="ml-1 text-indigo-600 underline">เลือกสินค้าอื่น</button></div>}
@@ -580,8 +585,7 @@ export function FabricBuyCalc() {
           <span className="text-[12px] text-slate-500">{fabricLabel} · ผลิต {fmt(qty, 0)} ใบ · ชิ้นรวม {fmt(res.total_pieces, 0)} ชิ้น</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" onClick={addCart} className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 text-[12px] text-rose-700 hover:bg-rose-50"><Icon name="cart" /> ใส่ตะกร้าขอซื้อ</button>
-            <button type="button" onClick={doPrint} className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-[12px] text-indigo-700 hover:bg-indigo-50"><Icon name="print" /> พิมพ์สรุป</button>
-            <button type="button" onClick={doCutPrint} className="inline-flex h-8 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-700"><Icon name="cut" /> พิมพ์วิธีตัด</button>
+            <button type="button" onClick={doPrint} className="inline-flex h-8 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-700"><Icon name="print" /> พิมพ์ / ส่งจัดซื้อ</button>
           </span>
         </div>
         {!res.ok ? (

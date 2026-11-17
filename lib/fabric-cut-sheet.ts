@@ -205,7 +205,7 @@ export function cutSheetSection(c: CutSheetInput): string {
   </section>`;
 }
 
-const CSS = `@page{size:A4;margin:9mm}
+export const CUT_SHEET_CSS = `@page{size:A4;margin:9mm}
   body{font-family:"Sarabun","Noto Sans Thai",system-ui,sans-serif;color:#0f172a;margin:0;font-size:11px}
   .pg{page-break-after:always}.pg:last-child{page-break-after:auto}
   header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1.5px solid #0f172a;padding-bottom:4px;margin-bottom:6px;gap:8px}
@@ -221,5 +221,5 @@ const CSS = `@page{size:A4;margin:9mm}
 
 /** ใบวิธีตัดหลายผ้าในไฟล์เดียว (1 ผ้า = เริ่มหน้าใหม่) */
 export function renderCutSheetHtml(title: string, sections: CutSheetInput[]): string {
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${CSS}</style></head><body>${sections.map(cutSheetSection).join("") || "<p>ไม่มีผ้าให้พิมพ์</p>"}</body></html>`;
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${CUT_SHEET_CSS}</style></head><body>${sections.map(cutSheetSection).join("") || "<p>ไม่มีผ้าให้พิมพ์</p>"}</body></html>`;
 }

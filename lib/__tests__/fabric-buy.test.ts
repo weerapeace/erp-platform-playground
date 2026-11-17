@@ -176,3 +176,42 @@ describe("ซื้อจากความยาววางรูปจริ�
     expect(b.per_unit_cm).toBeCloseTo(55, 5);
   });
 });
+
+describe("ใบพิมพ์แบบเลือกได้ (renderFabricPrintHtml · 2026-11-17)", () => {
+  const big: BuyInput = { ...base, qty: 400, price: 140 };
+  it("ใบส่งจัดซื้อ: ตารางต้องสั่ง + งบรวม + ช่องเซ็น · ผ้าที่สต็อกพอบอกว่าพอแล้ว", async () => {
+    const { renderFabricPrintHtml, DEFAULT_FABRIC_PRINT } = await import("../fabric-buy-print");
+    const a = calcFabricBuy(big), b = calcFabricBuy({ ...big, stock: 9999 });
+    const html = renderFabricPrintHtml([
+      { key: "A", input: big, res: a, fabric_name: "ผ้า A", colors: ["ดำ"] },
+      { key: "B", input: big, res: b, fabric_name: "ผ้า B", colors: ["ครีม"] },
+    ], { title: "t", date: "17 พ.ย.", heading: "[P-1] กระเป๋า" }, { ...DEFAULT_FABRIC_PRINT, summary: false });
+    expect(html).toContain("ใบส่งจัดซื้อ");
+    expect(html).toContain("ผ้า A");
+    expect(html).toContain("พอแล้ว");
+    expect(html).toContain("รวมงบซื้อเพิ่ม");
+    expect(html).toContain("ผู้อนุมัติ");
+    expect(html).not.toContain("สรุปคิดผ้าก่อนซื้อ");
+  });
+  it("ใบสรุป: ปิดส่วนได้ · ผังเป็นภาพย่อตามช่วงที่เลือก", async () => {
+    const { renderFabricPrintHtml, DEFAULT_FABRIC_PRINT, layoutSegments } = await import("../fabric-buy-print");
+    const r = calcFabricBuy(big);
+    const segs = layoutSegments(r.layout, null);
+    expect(segs.length).toBeGreaterThan(2);
+    const one = renderFabricPrintHtml([{ key: "A", input: big, res: r, fabric_name: "ผ้า A" }], { title: "t", date: "d" },
+      { ...DEFAULT_FABRIC_PRINT, po: false, sections: { ...DEFAULT_FABRIC_PRINT.sections, settings: false }, layoutPick: { A: [1] } });
+    expect(one).toContain("สรุปคิดผ้าก่อนซื้อ");
+    expect(one).not.toContain("ค่าที่ตั้ง");
+    expect((one.match(/<figure class="th">/g) ?? []).length).toBe(1);
+    expect(one).toContain(`ช่วง 2/${segs.length}`);
+    const none = renderFabricPrintHtml([{ key: "A", input: big, res: r, fabric_name: "ผ้า A" }], { title: "t", date: "d" },
+      { ...DEFAULT_FABRIC_PRINT, po: false, layoutPick: { A: [] } });
+    expect(none).not.toContain("<figure");
+  });
+  it("ไม่เลือกใบใดเลย = ข้อความบอก · QR ใส่หัวใบได้", async () => {
+    const { renderFabricPrintHtml, DEFAULT_FABRIC_PRINT } = await import("../fabric-buy-print");
+    const r = calcFabricBuy(big);
+    expect(renderFabricPrintHtml([{ key: "A", input: big, res: r, fabric_name: "x" }], { title: "t", date: "d" }, { ...DEFAULT_FABRIC_PRINT, po: false, summary: false })).toContain("ยังไม่ได้เลือกใบ");
+    expect(renderFabricPrintHtml([{ key: "A", input: big, res: r, fabric_name: "x" }], { title: "t", date: "d", qr_html: '<img class="scan-qr" src="data:x">' }, DEFAULT_FABRIC_PRINT)).toContain("scan-qr");
+  });
+});
