@@ -39,8 +39,9 @@ export type LineColumn<T> = {
   groupLabel?: (row: T) => string;
   /** แก้ค่าที่ "หัวกลุ่ม" → ทุกบรรทัดในกลุ่มใช้ patch นี้ (เปิด cascade edit เมื่อ group ด้วยคอลัมน์นี้) */
   setValue?: (row: T, value: string) => Partial<T>;
-  /** ตัวแก้ที่หัวกลุ่มแบบ custom (เช่น picker) — apply(patch) จะใส่ patch ให้ทุกบรรทัดในกลุ่ม */
-  groupEditNode?: (apply: (patch: Partial<T>) => void) => React.ReactNode;
+  /** ตัวแก้ที่หัวกลุ่มแบบ custom (เช่น picker) — apply(patch) จะใส่ patch ให้ทุกบรรทัดในกลุ่ม
+   *  patch เป็นฟังก์ชันได้ (คิดต่อบรรทัด เช่น เปลี่ยนวัสดุแต่คงขนาดเดิม) · groupRows = บรรทัดในกลุ่มนั้น */
+  groupEditNode?: (apply: (patch: Partial<T> | ((row: T) => Partial<T>)) => void, groupRows: T[]) => React.ReactNode;
   render?:   (row: T, update: (patch: Partial<T>) => void, readonly: boolean) => React.ReactNode;
 };
 
@@ -52,6 +53,10 @@ export type LineItemsGridProps<T> = {
   readonly?:      boolean;
   enableReorder?: boolean;
   groupByOptions?: { key: string; label: string }[];
+  /** จัดกลุ่มตั้งต้น (key ใน groupByOptions) */
+  defaultGroupBy?: string;
+  /** จำการจัดกลุ่มที่เลือกล่าสุด (localStorage ของเครื่องนี้) — ใส่ชื่อคีย์ */
+  groupByMemoryKey?: string;
   addLabel?:  string;
   onAdd?:     () => T;
   /** ทำซ้ำบรรทัด — คืน row ใหม่ (ต้องตั้ง id/key ใหม่เอง) แล้วระบบแทรกต่อจากบรรทัดเดิม */
@@ -105,12 +110,22 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
+  groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, stickyTop, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
   const [sort, setSort]       = useState<SortState>(defaultSort);
-  const [groupBy, setGroupBy] = useState<string>("");
+  const [groupBy, setGroupByRaw] = useState<string>(defaultGroupBy);
+  // จำการจัดกลุ่มที่เลือกล่าสุด (เจ้าของขอ 2026-11-17) — "" = ไม่จัดกลุ่ม ก็จำ
+  useEffect(() => {
+    if (!groupByMemoryKey || typeof window === "undefined") return;
+    try { const v = window.localStorage.getItem(`lig-group:${groupByMemoryKey}`); if (v !== null && (v === "" || groupByOptions.some((g) => g.key === v))) setGroupByRaw(v); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupByMemoryKey]);
+  const setGroupBy = (v: string) => {
+    setGroupByRaw(v);
+    if (groupByMemoryKey) try { window.localStorage.setItem(`lig-group:${groupByMemoryKey}`, v); } catch { /* ignore */ }
+  };
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [widths, setWidths]   = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());   // แถวที่ติ๊กเลือก (rowId)
@@ -294,8 +309,8 @@ export function LineItemsGrid<T>({
     onChange(rows.map((r) => (groupKeyOf(r) === groupLabel ? { ...r, ...groupCol.setValue!(r, value) } : r)));
   };
   // ใส่ patch ให้ทุกบรรทัดในกลุ่ม (ใช้กับ groupEditNode เช่น เปลี่ยนวัตถุดิบทั้งกลุ่ม)
-  const applyGroupPatch = (groupLabel: string, patch: Partial<T>) =>
-    onChange(rows.map((r) => (groupKeyOf(r) === groupLabel ? { ...r, ...patch } : r)));
+  const applyGroupPatch = (groupLabel: string, patch: Partial<T> | ((row: T) => Partial<T>)) =>
+    onChange(rows.map((r) => (groupKeyOf(r) === groupLabel ? { ...r, ...(typeof patch === "function" ? patch(r) : patch) } : r)));
 
   // หัวตาราง + แถว ใช้ร่วม 2 แบบ (หัวติดในกล่อง/ไม่ติด · หัวติดตอนเลื่อนหน้า stickyTop)
   const headerRow = (
@@ -343,7 +358,7 @@ export function LineItemsGrid<T>({
                     <span className="font-semibold text-slate-700">{d.label}</span>
                   )}
                   <span className="text-slate-400">· {d.count} รายการ</span>
-                  {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch))}
+                  {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch), d.rows)}
                   {d.sums.filter((s) => s.total).map((s) => (
                     <span key={s.header} className="text-slate-500">· รวม{s.header} <span className="font-semibold text-slate-700 tabular-nums">{fmtNum(s.total)}</span></span>
                   ))}

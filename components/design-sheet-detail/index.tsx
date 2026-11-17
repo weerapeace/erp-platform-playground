@@ -1706,8 +1706,34 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />);
   // ความกว้างคอลัมน์: โหมดแก้ = กว้างพอให้ช่องกรอก · โหมดดู = แคบลงจนพอดีป๊อป ไม่ต้องเลื่อนซ้าย-ขวา
   const cw = (editW: number, viewW: number) => (fullEdit ? editW : viewW);
+  // 🔁 เปลี่ยนวัสดุทั้งกลุ่ม (หัวกลุ่ม · ตอนแก้ไข · เจ้าของขอ 2026-11-17) — คงขนาด/จำนวนเดิม คิดชนิด/ปริมาณ/ราคาใหม่ (สูตรเดียวกับเปลี่ยนรายบรรทัด)
+  //   กลุ่มเดิมเป็นวัสดุตัวเดียวและมีตัวเลข "วางจริง" → ย้ายไปอยู่กับวัสดุใหม่ (ถ้าวัสดุใหม่ยังไม่มีของตัวเอง)
+  const groupSwapNode = useCallback((apply: (patch: (row: CostRow) => Partial<CostRow>) => void, gRows: CostRow[]) => {
+    const swap = (it: PriceItem) => {
+      apply((r) => withPrevItem(r, costItemPatch(it, r)));
+      const olds = [...new Set(gRows.map((r) => r.item_id).filter(Boolean))] as string[];
+      if (olds.length === 1 && olds[0] !== it.id) {
+        setNestMap((m) => {
+          const e = m[costParent]?.[olds[0]];
+          if (!e || m[costParent]?.[it.id]) return m;
+          return setNestEntry(setNestEntry(m, costParent, olds[0], null), costParent, it.id, e);
+        });
+      }
+      toast.success(t(`เปลี่ยนเป็น "${it.name}" ทั้ง ${gRows.length} บรรทัดแล้ว (ยังไม่บันทึก)`, `Changed ${gRows.length} lines to "${it.name}" (not saved yet)`));
+    };
+    return (
+      <div className="w-48" onClick={(e) => e.stopPropagation()} title={t("เปลี่ยนวัสดุให้ทุกบรรทัดในกลุ่มนี้ — ขนาด/จำนวนเดิมคงไว้ ราคาคิดใหม่", "Change the material of every line in this group — sizes kept, price recalculated")}>
+        <SearchableSelect value="" placeholder={t("เปลี่ยนวัสดุทั้งกลุ่ม…", "Change material for group…")}
+          options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
+          onChange={(val) => { const it = priceItems.find((p) => p.id === val); if (it) swap(it); }}
+          onCreate={(q) => void createPriceItemInline(q, swap)} createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
+      </div>
+    );
+  }, [priceItems, costParent, createPriceItemInline, toast, t]);
+
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
     { key: "item", header: t("วัสดุ / กลุ่ม", "Material / group"), minWidth: cw(220, 150), sortable: true, getValue: (r) => r.item_name,
+      groupEditNode: groupSwapNode,
       render: (r, u) => {
         const inGroupMode = !r.item_id && !!r.group_code;   // รายการเดิมที่เคยเลือกแบบกลุ่ม
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
@@ -1795,6 +1821,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       } },
     { key: "group", header: t("ชนิด / สูตร", "Type / formula"), width: cw(116, 88), sortable: true, getValue: (r) => r.group_name,
       groupLabel: (r) => r.group_name || t("ไม่ระบุชนิด", "Unspecified type"),
+      groupEditNode: groupSwapNode,
       render: (r) => (!fullEdit
         ? <span className="block truncate px-1 text-xs text-slate-500" title={methodLabel(r.calc_method ?? "manual") ?? r.calc_method ?? undefined}>{r.group_name ?? "—"}</span>
         : <span className="flex min-w-0 items-center gap-1 px-1 text-xs text-slate-500" title={methodLabel(r.calc_method ?? "manual") ?? r.calc_method ?? undefined}>
@@ -1859,7 +1886,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         : <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmtBaht(r.amount)}</span>) },
     { key: "note", header: t("หมายเหตุ", "Note"), minWidth: cw(120, 80), getValue: (r) => r.note,
       render: (r, u) => textCell(r.note, (v) => u({ note: v }), "—") },
-  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, t]);
+  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, groupSwapNode, t]);
 
   // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
   const imageSection = !form ? null : form.id ? (
@@ -2775,6 +2802,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 // ดับเบิลคลิกแถวตอนดูอย่างเดียว → เข้าโหมดแก้ไข (เหมือนกด ✏️) แล้วเคอร์เซอร์ไปช่องที่คลิก (เจ้าของขอ 2026-11-03)
                 onRequestEdit={canEdit ? () => setEditing(true) : undefined}
                 groupByOptions={[{ key: "group", label: t("ชนิดวัสดุ", "Material type") }, { key: "item", label: t("วัสดุ", "Material") }, { key: "uom", label: t("หน่วย", "Unit") }]}
+                defaultGroupBy="item" groupByMemoryKey="design-sheet-cost"
                 groupNote={(rows) => {
                   // ใช้ต่อใบ (เจ้าของขอ 2026-10-26) — ผ้า/แผ่นที่คิดเป็น cm² → แปลงเป็นกี่ผืน จากขนาดผืนในทะเบียนวัสดุตีราคา (lib/cost-usage)
                   const u = costUsagePerUnit(rows.map((r) => ({ item_id: r.item_id, group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r) })), (id) => priceItemById.get(id));
