@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextProductName, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate } from "../sample-images";
+import { nextProductName, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -266,5 +266,20 @@ describe("จัดเอง: หน้าแฟ้มชั้นบนสุ�
       { name: "B", created_at: "2", parent_id: null, deep: { photos: 0, sent: 0, sub_count: 0 }, sort_order: 0 },
     ];
     expect(sortAlbums(top, "manual").map((a) => a.name)).toEqual(["B", "A"]);
+  });
+});
+
+describe("เชื่อมสินค้า (2026-11-17)", () => {
+  const base = { name: "Product 004", created_at: "2026-11-16T03:00:00Z", parent_id: "x" };
+  it("ป้ายรหัส: ไม่เชื่อม = null · ทั้งรุ่น = รหัส Parent · เลือก SKU = นับจำนวน", () => {
+    expect(productLinkLabel({})).toBeNull();
+    expect(productLinkLabel({ parent_sku_codes: ["GG-BAG24"], sku_codes: [] })).toBe("GG-BAG24");
+    expect(productLinkLabel({ parent_sku_codes: ["GG-BAG24"], sku_codes: ["GG-BAG24-CR", "GG-BAG24-BK"] })).toBe("GG-BAG24 · 2 SKU");
+  });
+  it("ค้นด้วยรหัส Parent / SKU ลูกที่เชื่อมแล้วเจออัลบั้ม", () => {
+    const a = { ...base, parent_sku_codes: ["GG-BAG24"], sku_codes: ["GG-BAG24-CR"] };
+    expect(albumMatches(a, "GG-BAG24")).toBe(true);
+    expect(albumMatches(a, "GG-BAG24-CR")).toBe(true);
+    expect(albumMatches({ ...base }, "GG-BAG24")).toBe(false);
   });
 });

@@ -18,6 +18,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import {
   SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, brandPhotoTotals, isAlbumSort, isPhotoSort,
   type SampleAlbum, type SampleAlbumSort, type SampleBrand, type SamplePhoto, type SamplePhotoSort,
+  productLinkLabel,
 } from "@/lib/sample-images";
 
 /** วิธีเรียงที่เลือกไว้ (จำรายคน · หน้า SAMPLE กับแท็บในตัวเลือกไฟล์ใช้ค่าเดียวกัน) — อัลบั้ม: ล่าสุดก่อน · รูป: ตามลำดับที่ลง */
@@ -127,6 +128,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{a.deep.sub_count}</span>}
           {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-1.5 text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
+          {productLinkLabel(a) && <span className="inline-flex h-5 max-w-full items-center gap-0.5 truncate rounded-full bg-violet-100 px-1.5 text-violet-800"><Icon value="i:link" />{productLinkLabel(a)}</span>}
         </div>
       </div>
     </button>
@@ -144,6 +146,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1" title={t("อัลบั้มย่อย", "Sub-albums")}><Icon value="i:folder" />{a.deep.sub_count}</span>}
           {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
+          {productLinkLabel(a) && <span className="inline-flex h-5 max-w-full items-center gap-0.5 truncate rounded-full bg-violet-100 px-2 text-[11px] text-violet-800"><Icon value="i:link" />{productLinkLabel(a)}</span>}
         </div>
       </div>
     </button>

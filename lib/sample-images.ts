@@ -49,7 +49,18 @@ export type SampleAlbum = {
   display_name?: string | null;
   /** ลำดับแบบ "จัดเอง" ในอัลบั้มแม่ (asset_collections.sort_order) */
   sort_order?: number | null;
+  /** เชื่อมสินค้า (2026-11-17): รหัส Parent SKU · รหัส SKU ลูก (ว่าง = ทั้งรุ่น) */
+  parent_sku_codes?: string[];
+  sku_codes?: string[];
 };
+
+/** ป้ายสินค้าที่เชื่อม เช่น "GG-BAG24 · 2 SKU" · ไม่เชื่อม = null */
+export function productLinkLabel(a: Pick<SampleAlbum, "parent_sku_codes" | "sku_codes">): string | null {
+  const p = a.parent_sku_codes ?? [];
+  if (!p.length) return null;
+  const n = (a.sku_codes ?? []).length;
+  return `${p.join(", ")}${n ? ` · ${n} SKU` : ""}`;
+}
 
 /** ยาวสุดของโน้ตอัลบั้ม */
 export const SAMPLE_NOTE_MAX = 2000;
@@ -267,10 +278,11 @@ export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name
 
 /** อัลบั้มตรงคำค้นไหม — ค้นจากชื่อจริง ("SAMPLE Good Goods 15 พ.ย. 2569" / "2026-11-15-002") · ชื่อบนการ์ด · ชื่อแบรนด์
  *  · วันที่สร้างอัลบั้มแบบไทย (เวลาไทย) — ค้น "15 พ.ย." เจอทุกอัลบั้มของวันนั้น รวมอัลบั้มที่ตั้งชื่อเอง (เจ้าของสั่ง 2026-11-15) · คำค้นว่าง = ตรงทุกอัน */
-export function albumMatches(a: Labelled & { note?: string | null }, query: string, brandName?: string | null): boolean {
+export function albumMatches(a: Labelled & { note?: string | null; parent_sku_codes?: string[]; sku_codes?: string[] }, query: string, brandName?: string | null): boolean {
   const q = query.trim(), toks = tokenize(q);
   if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
-  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName, a.note] }) > 0;
+  // ค้นด้วยรหัส Parent SKU / SKU ลูกที่เชื่อมได้ด้วย (ข้อเสนอ 3 · 2026-11-17)
+  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName, a.note, ...(a.parent_sku_codes ?? []), ...(a.sku_codes ?? [])] }) > 0;
 }
 
 /** รูปตรงคำค้นไหม — ชื่อไฟล์ · เลข/ชื่อใบงานที่รูปถูกส่งเข้าไป (DS-2026-0008) · คำค้นว่าง = ตรงทุกรูป */

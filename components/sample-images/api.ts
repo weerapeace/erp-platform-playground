@@ -13,7 +13,26 @@ async function json<T>(res: Response, fallback: string): Promise<T> {
   return j as T;
 }
 
-export type SampleData = { brands: SampleBrand[]; albums: SampleAlbum[]; photos: SamplePhoto[] | null };
+/** linked_images = รูปที่มีอยู่แล้วของ Parent/SKU ที่อัลบั้ม (ที่เปิด) เชื่อมไว้ — ไว้เทียบ */
+export type SampleData = { brands: SampleBrand[]; albums: SampleAlbum[]; photos: SamplePhoto[] | null; linked_images?: { key: string; label: string }[] };
+
+// ── เชื่อมสินค้า (2026-11-17) ──
+export type ChildSku = { id: string; code: string; name: string; image_key: string | null };
+export type ProductSampleAlbum = { id: string; name: string; parent_name: string | null; sku_codes: string[]; photos: { id: string; key: string }[]; total: number };
+export type ProductSamples = { parent_code: string | null; sku_code: string | null; albums: ProductSampleAlbum[] };
+
+/** SKU ลูกของรุ่น (ป๊อปเชื่อมสินค้า) */
+export async function loadChildSkus(parentId: string): Promise<ChildSku[]> {
+  return (await json<{ data: ChildSku[] }>(await apiFetch(`/api/sample-images?children_of=${encodeURIComponent(parentId)}`), "โหลด SKU ลูกไม่สำเร็จ")).data ?? [];
+}
+/** อัลบั้ม SAMPLE ที่เชื่อมกับสินค้านี้ + รูป (ส่วน "รูป SAMPLE" หน้า Parent / SKU) */
+export async function loadProductSamples(kind: "parent" | "sku", id: string): Promise<ProductSamples> {
+  return (await json<{ data: ProductSamples }>(await apiFetch(`/api/sample-images?product=${kind}:${encodeURIComponent(id)}`), "โหลดรูป SAMPLE ไม่สำเร็จ")).data;
+}
+/** เชื่อม/เลิกเชื่อมอัลบั้มกับสินค้า (ว่างทั้งคู่ = เลิกเชื่อม) */
+export async function linkAlbumProduct(albumId: string, parentCodes: string[], skuCodes: string[]): Promise<{ parent_sku_codes: string[]; sku_codes: string[] }> {
+  return (await json<{ data: { parent_sku_codes: string[]; sku_codes: string[] } }>(await apiFetch("/api/sample-images", { method: "POST", headers: JSON_HDR, body: JSON.stringify({ action: "link", album_id: albumId, parent_codes: parentCodes, sku_codes: skuCodes }) }), "บันทึกการเชื่อมสินค้าไม่สำเร็จ")).data;
+}
 
 export async function loadSamples(albumId: string | null): Promise<SampleData> {
   const q = albumId ? `?album=${encodeURIComponent(albumId)}` : "";

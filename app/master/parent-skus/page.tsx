@@ -54,6 +54,7 @@ const ParentCompartmentsField = dynamic(
   () => import("@/components/compartments-editor").then((m) => m.ParentCompartmentsField),
   { ssr: false },
 );
+const ProductSampleImages = dynamic(() => import("@/components/sample-images/product-samples").then((m) => m.ProductSampleImages), { ssr: false });
 const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
   { ssr: false },
@@ -236,7 +237,11 @@ export default function ParentSKUsV2Page() {
     },
     // section พิเศษในฟอร์ม: รูป Description (มีลำดับ)
     extraFormSection: ({ recordId, readonly }) => (
-      <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+      <>
+        <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+        {/* รูป SAMPLE — อัลบั้ม SAMPLE ที่เชื่อมกับรุ่นนี้ (แยกจากรูปขาย · 2026-11-17) */}
+        <div className="mt-4"><ProductSampleImages kind="parent" recordId={recordId} /></div>
+      </>
     ),
     // แท็บ "📊 ภาพรวม" + "🛍 เว็บไซต์"
     // แท็บพิเศษชุดกลาง (ภาพรวม/เว็บไซต์/แพลตฟอร์ม/ปัญหา) — ชุดเดียวกับ drawer ที่เปิดจากที่อื่น · เรียง/ซ่อนได้ในตัวออกแบบหน้า

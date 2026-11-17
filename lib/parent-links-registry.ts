@@ -116,6 +116,18 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
       image: { key: s(r.r2_key) || null }, href: `/master/assets?asset=${encodeURIComponent(s(r.id))}` }),
   },
   {
+    // อัลบั้ม SAMPLE ที่เชื่อมกับรุ่นนี้ (หน้า /tasks/samples · ปุ่ม "เชื่อม SKU / Parent" · 2026-11-17)
+    key: "sample_albums", group: "creative", label: "อัลบั้ม SAMPLE", icon: "📸",
+    table: "asset_collections", select: "id, name, display_name, sku_codes, created_at",
+    match: [{ by: "parent_codes", column: "parent_sku_codes" }],
+    order: { column: "created_at", ascending: false },
+    toItem: (r) => {
+      const skus = Array.isArray(r.sku_codes) ? (r.sku_codes as unknown[]).map(String) : [];
+      return { id: s(r.id), title: s(r.display_name) || s(r.name) || "(ไม่มีชื่อ)", sub: skus.length ? skus.join(", ") : "ทั้งรุ่น", date: day(r.created_at),
+        href: `/tasks/samples?album=${encodeURIComponent(s(r.id))}` };
+    },
+  },
+  {
     key: "creative_projects", group: "creative", label: "โปรเจกต์ครีเอทีฟ", icon: "📁",
     table: "erp_creative_projects", select: "id, code, name, status, created_at, google_slides_url, drive_folder_url",
     match: [

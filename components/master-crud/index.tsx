@@ -72,6 +72,8 @@ const EntryModeSettings = dynamic(() => import("@/components/entry-modes/setting
 const EntryModeStatusButton = dynamic(() => import("@/components/entry-modes/status").then((m) => m.EntryModeStatusButton), { ssr: false });
 // ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
 const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
+// ส่วน "รูป SAMPLE" (อัลบั้ม SAMPLE ที่เชื่อมกับสินค้า · แยกจากรูปขาย) — Parent + SKU ลูก (2026-11-17)
+const ProductSampleImages = dynamic(() => import("@/components/sample-images/product-samples").then((m) => m.ProductSampleImages), { ssr: false });
 // 🕘 ประวัติเวอร์ชันของสินค้า (Parent/SKU) — ดู/เทียบ/ย้อนกลับ (ของกลาง components/record-versions · lib/record-versions)
 const RecordVersionsPanel = dynamic(() => import("@/components/record-versions").then((m) => m.RecordVersionsPanel), { ssr: false });
 const VERSIONED_ENTITIES = new Set(["parent_skus_v2", "skus_v2"]);
@@ -4195,7 +4197,9 @@ export function MasterRecordDrawer({
       sidePngSlots: moduleKey === "parent-skus-v2" ? parentSkuPngSlots() : undefined,
       // Parent SKU → ช่อง "รูป Description" ในฟอร์ม (เหมือนหน้า master page โดยตรง)
       extraFormSection: moduleKey === "parent-skus-v2"
-        ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+        ? ({ recordId, readonly }) => <><ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} /><div className="mt-4"><ProductSampleImages kind="parent" recordId={recordId} /></div></>
+        : moduleKey === "skus-v2"
+        ? ({ recordId }) => <ProductSampleImages kind="sku" recordId={recordId} />
         : undefined,
       // Parent SKU → แท็บ "🛍 เว็บไซต์" · SKU → แท็บ "🏪 ร้านที่จำหน่าย" (ของกลาง: โผล่ทุก drawer SKU ไม่ว่าเปิดจากตาราง/แท็ก/การ์ด)
       extraTabs: moduleKey === "parent-skus-v2"

@@ -13,6 +13,8 @@
  * POST {action:"note", album_id, note}                              → โน้ตของอัลบั้ม (ว่าง = ลบโน้ต)
  * POST {action:"reorder_photos", album_id, asset_ids}               → ลำดับรูปแบบจัดเอง (asset_ids = ทั้งชุดตามลำดับใหม่ · รูปแรก = ปก)
  * POST {action:"reorder_albums", parent_id|null, album_ids}         → ลำดับอัลบั้มย่อยแบบจัดเอง (asset_collections.sort_order)
+ * POST {action:"link", album_id, parent_codes, sku_codes}           → เชื่อมอัลบั้มกับ Parent SKU / SKU ลูก (ว่าง = เลิกเชื่อม · 2026-11-17)
+ * GET ?children_of=<parent id>   → SKU ลูกของรุ่น (ป๊อปเชื่อมสินค้า) · GET ?product=parent:<id>|sku:<id> → อัลบั้มที่เชื่อม + รูป (ส่วน "รูป SAMPLE" หน้าสินค้า)
  * POST {action:"delete_album", album_id}                            → ลบอัลบั้มที่ว่างแล้ว (ไม่มีรูป ไม่มีอัลบั้มย่อย · ยกเว้นอัลบั้มของวัน)
  *
  * อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14 · ไม่แก้ฐานข้อมูล): จดอัลบั้มแม่ในป้ายเดิม description "sample-images[:<brand>]|in:<parent>"
@@ -27,6 +29,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { actorId } from "@/app/api/assets/shared";
+import { albumsForProduct, childSkus, codeList, productImages } from "@/lib/sample-product-links";
 import {
   SAMPLE_ALBUM_MARK, SAMPLE_NOTE_MAX, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
   type SampleAlbum, type SampleBrand, type SamplePhoto, type SampleSheetRef,
@@ -44,7 +47,7 @@ const chunks = <T,>(xs: T[]): T[][] => { const out: T[][] = []; for (let i = 0; 
 
 type AssetLite = { id: string; r2_key: string; file_name: string | null; width: number | null; height: number | null; status: string | null; created_at: string };
 type BrandRow = SampleBrand & { is_customer_job: boolean | null };
-type AlbumRow = { id: string; name: string; description: string | null; created_at: string; note: string | null; display_name: string | null; sort_order: number | null; brandId: string | null; parentId: string | null };
+type AlbumRow = { id: string; name: string; description: string | null; created_at: string; note: string | null; display_name: string | null; sort_order: number | null; parent_sku_codes?: unknown; sku_codes?: unknown; brandId: string | null; parentId: string | null };
 
 /** r2_key → ใบงานที่แนบรูปนี้อยู่ (ดูจากไฟล์แนบจริงของใบงาน) */
 async function sheetsByKey(admin: Admin, keys: string[]): Promise<Map<string, SampleSheetRef[]>> {
@@ -81,7 +84,7 @@ async function loadBrands(admin: Admin): Promise<BrandRow[]> {
 
 /** อัลบั้ม SAMPLE ทั้งหมด (ล่าสุดก่อน) พร้อมแบรนด์/อัลบั้มแม่จากป้าย */
 async function loadAlbums(admin: Admin, limit = ALBUM_LIMIT): Promise<AlbumRow[]> {
-  const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at, note, display_name, sort_order")
+  const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at, note, display_name, sort_order, parent_sku_codes, sku_codes")
     .like("description", `${SAMPLE_ALBUM_MARK}%`).order("created_at", { ascending: false }).limit(limit);
   if (error) throw new Error(error.message);
   return ((data ?? []) as Omit<AlbumRow, "brandId" | "parentId">[]).flatMap((a) => {
@@ -93,8 +96,21 @@ async function loadAlbums(admin: Admin, limit = ALBUM_LIMIT): Promise<AlbumRow[]
 export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "assets.view");
   if (denied) return denied;
-  const albumId = new URL(request.url).searchParams.get("album");
+  const sp = new URL(request.url).searchParams;
+  const albumId = sp.get("album");
   const admin = supabaseAdmin();
+  // ── เชื่อมสินค้า: SKU ลูกของรุ่น · อัลบั้มที่เชื่อมกับสินค้านี้ (หน้า Parent / SKU) ──
+  const childrenOf = sp.get("children_of");
+  if (childrenOf) {
+    try { return NextResponse.json({ data: await childSkus(admin, childrenOf), error: null }, { headers: { "Cache-Control": "no-store" } }); }
+    catch (e) { console.error("[sample-images] children failed:", e); return NextResponse.json({ data: null, error: "โหลด SKU ลูกไม่สำเร็จ" }, { status: 500 }); }
+  }
+  const product = /^(parent|sku):([0-9a-f-]{36})$/i.exec(sp.get("product") ?? "");
+  if (sp.get("product")) {
+    if (!product) return NextResponse.json({ error: "product ไม่ถูกต้อง" }, { status: 400 });
+    try { return NextResponse.json({ data: await albumsForProduct(admin, product[1].toLowerCase() as "parent" | "sku", product[2]), error: null }, { headers: { "Cache-Control": "no-store" } }); }
+    catch (e) { console.error("[sample-images] product failed:", e); return NextResponse.json({ data: null, error: "โหลดรูป SAMPLE ไม่สำเร็จ" }, { status: 500 }); }
+  }
   try {
     const [brandRows, albumsRaw] = await Promise.all([loadBrands(admin), loadAlbums(admin)]);
     const ids = albumsRaw.map((a) => a.id);
@@ -132,6 +148,7 @@ export async function GET(request: NextRequest) {
         suggested_brand_id: a.brandId || parent ? null : inferAlbumBrand(ps),
         counts: sampleCounts(ps), deep: { photos: r.photos, sent: r.sent, sub_count: r.sub_count }, preview_keys: r.preview_keys,
         note: a.note ?? null, display_name: a.display_name ?? null, sort_order: a.sort_order ?? null,
+        parent_sku_codes: codeList(a.parent_sku_codes), sku_codes: codeList(a.sku_codes),
       };
     });
     // ทุกแบรนด์ที่เปิดใช้ — แบรนด์ของเราขึ้นก่อน แล้วค่อยแบรนด์ที่ติ๊กงานลูกค้า
@@ -142,7 +159,10 @@ export async function GET(request: NextRequest) {
     const photos = albumId
       ? (byAlbum.get(albumId) ?? []).sort((x, y) => x.created_at.localeCompare(y.created_at) || x.file_name.localeCompare(y.file_name))
       : null;
-    return NextResponse.json({ data: { brands, albums, photos }, error: null }, { headers: { "Cache-Control": "no-store" } });
+    // อัลบั้มที่เปิดเชื่อมสินค้าอยู่ → รูปที่มีอยู่แล้วของสินค้านั้น (ไว้เทียบ · ข้อเสนอ 1)
+    const open = albumId ? albums.find((a) => a.id === albumId) : null;
+    const linked_images = open && open.parent_sku_codes?.length ? await productImages(admin, open.parent_sku_codes, open.sku_codes ?? []).catch(() => []) : [];
+    return NextResponse.json({ data: { brands, albums, photos, linked_images }, error: null }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     console.error("[sample-images] GET failed:", e);
     return NextResponse.json({ data: null, error: "โหลดรูปตัวอย่างไม่สำเร็จ — ลองใหม่อีกครั้ง" }, { status: 500 });
@@ -180,7 +200,7 @@ async function rebrandBranch(admin: Admin, all: AlbumRow[], rootId: string, bran
 const cleanName = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, NAME_MAX) : "");
 
 export async function POST(request: NextRequest) {
-  let body: { action?: string; brand_id?: string | null; album_id?: string; parent_id?: string | null; to_parent_id?: string | null; name?: string; note?: string | null; asset_ids?: string[]; album_ids?: string[]; from_album_id?: string; to_album_id?: string };
+  let body: { action?: string; brand_id?: string | null; album_id?: string; parent_id?: string | null; to_parent_id?: string | null; name?: string; note?: string | null; asset_ids?: string[]; album_ids?: string[]; from_album_id?: string; to_album_id?: string; parent_codes?: unknown; sku_codes?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const brandOf = async (id: string | null | undefined) => {
@@ -311,6 +331,26 @@ export async function POST(request: NextRequest) {
     }
 
     // ── โน้ตของอัลบั้ม ──
+    // ── เชื่อมอัลบั้มกับ Parent SKU / SKU ลูก (ระดับ A: Parent + เลือก SKU ลูกได้ · ว่างทั้งคู่ = เลิกเชื่อม) ──
+    if (body.action === "link") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      const all = await loadAlbums(admin, 2000);
+      const album = all.find((a) => a.id === body.album_id);
+      if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
+      const parentCodes = codeList(body.parent_codes).slice(0, 5);
+      const skuCodes = parentCodes.length ? codeList(body.sku_codes) : [];
+      if (parentCodes.length) {
+        const { data: ok } = await admin.from("parent_skus_v2").select("code").in("code", parentCodes);
+        if ((ok ?? []).length !== parentCodes.length) return NextResponse.json({ error: "ไม่พบรหัส Parent SKU นี้ในระบบ" }, { status: 400 });
+      }
+      const before = { parent_sku_codes: codeList(album.parent_sku_codes), sku_codes: codeList(album.sku_codes) };
+      const { error } = await admin.from("asset_collections").update({ parent_sku_codes: parentCodes, sku_codes: skuCodes }).eq("id", album.id);
+      if (error) return NextResponse.json({ error: "บันทึกการเชื่อมสินค้าไม่สำเร็จ" }, { status: 500 });
+      await audit("update", album.id, { field: "product_link", old_value: before, new_value: { parent_sku_codes: parentCodes, sku_codes: skuCodes } });
+      return NextResponse.json({ data: { id: album.id, parent_sku_codes: parentCodes, sku_codes: skuCodes }, error: null });
+    }
+
     if (body.action === "note") {
       const denied = await guardApi(request, "assets.edit");
       if (denied) return denied;

@@ -92,3 +92,13 @@
 - หน้ารวมอัลบั้ม = ไม่ถาม ลงอัลบั้มของวันนี้เหมือนเดิม · ปุ่ม "เลือกรูป" ไม่ถาม
 - ลากกรอบจากที่ว่าง (เมาส์) = เลือกรูป + การ์ดอัลบั้มย่อย · Ctrl/Shift = เลือกเพิ่ม · ของกลาง `lib/use-marquee-select` (ชิ้นที่เลือกได้ใส่ data-select-id) · อัลบั้มที่เลือก → "ย้าย N อัลบั้มไป…"
 - Ctrl + ลูกกลิ้งได้ทั้งหน้า (ฟังที่ตัวหน้า ไม่ใช่แค่กริด) · อัลบั้มย่อยใช้จำนวนต่อแถวเดียวกับรูป
+
+## เชื่อมอัลบั้มกับ SKU / Parent SKU (2026-11-17 · เจ้าของเลือกระดับ A + โชว์แบบ A + ข้อ 1-5)
+
+- ที่เก็บ: `asset_collections.parent_sku_codes` / `sku_codes` (jsonb · migration 202612190200 · เจ้าของอนุญาต) — sku_codes ว่าง = ทั้งรุ่น
+- ในอัลบั้ม: ปุ่ม "เชื่อม SKU / Parent" → `link-product-dialog` (ParentSkuPicker กลาง + ติ๊ก SKU ลูก · เลิกเชื่อมได้) · สิทธิ์ assets.edit · ลงประวัติ field product_link
+- อัลบั้มที่เชื่อมแล้ว: ป้ายรหัสบนการ์ด/หัวอัลบั้ม · แถบ "รูปที่มีอยู่แล้ว" ของสินค้า (แกลเลอรี Parent + SKU ที่เลือก) · ค้นด้วยรหัสได้
+- หน้า Parent / SKU: ส่วน "รูป SAMPLE" (`product-samples` · ใต้รูป Description ของ Parent · ฟอร์ม SKU) รวมทุกอัลบั้มที่เชื่อม · ปุ่ม "เชื่อมอัลบั้ม SAMPLE" เชื่อมจากฝั่งสินค้า · กดชื่ออัลบั้ม = /tasks/samples?album=<id>
+- แท็บภาพรวม Parent → "รายการที่เชื่อมกับสินค้านี้" เห็นอัลบั้ม SAMPLE (lib/parent-links-registry key sample_albums)
+- รูป SAMPLE ไม่ปนแกลเลอรี/รูปปกสินค้า (เจ้าของเลือกแบบ A)
+- API: GET ?children_of=<parent id> · GET ?product=parent:<id>|sku:<id> · POST {action:"link"} · server lib/sample-product-links

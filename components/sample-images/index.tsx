@@ -26,6 +26,7 @@ import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { filePathOf, useFileDrop } from "@/components/file-drop";
 import { useMarqueeSelect } from "@/lib/use-marquee-select";
 import { DropAlbumDialog, commonFolderName, type DropMode } from "./drop-album-dialog";
+import { LinkProductDialog } from "./link-product-dialog";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
@@ -33,7 +34,7 @@ import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
-import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, productLinkLabel, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, reorderAlbums, reorderPhotos, restoreSample, saveAlbumNote, setAlbumBrand, trashSample, uploadSample } from "./api";
 
@@ -120,7 +121,10 @@ export function SampleImagesPage() {
   // วางรูปตอนเปิดอัลบั้ม → ป๊อปสร้างอัลบั้มย่อยใหม่ (เจ้าของเลือก 2026-11-17) · จำทางที่เลือกล่าสุดรายคน
   const [dropFiles, setDropFiles] = useState<File[] | null>(null);
   const [dropPref, setDropPref] = useUserPref<DropMode>("sample_images_drop_mode", "new", (r) => (r === "new" || r === "here" ? r : null));
-  const [dropMode, setDropMode] = useState<DropMode>("new");   // แผงเลือกอัลบั้มปลายทาง
+  const [dropMode, setDropMode] = useState<DropMode>("new");
+  // เชื่อมสินค้า (2026-11-17): ป๊อปเชื่อม + รูปที่มีอยู่แล้วของสินค้าที่อัลบั้มเชื่อม (ไว้เทียบ)
+  const [linking, setLinking] = useState(false);
+  const [linkedImgs, setLinkedImgs] = useState<{ key: string; label: string }[]>([]);   // แผงเลือกอัลบั้มปลายทาง
   const [up, setUp] = useState<UploadProgressState | null>(null);
   const cancelRef = useRef(false);
   const [picking, setPicking] = useState(false);
@@ -148,11 +152,16 @@ export function SampleImagesPage() {
       const id = want !== undefined ? want : albumId;
       const pickId = id && list.some((a) => a.id === id) ? id : null;
       const d = pickId ? await loadSamples(pickId) : first;
-      setBrands(d.brands); setAlbums(d.albums); setAlbumId(pickId); setPhotos(pickId ? d.photos ?? [] : null);
+      setBrands(d.brands); setAlbums(d.albums); setAlbumId(pickId); setPhotos(pickId ? d.photos ?? [] : null); setLinkedImgs(pickId ? d.linked_images ?? [] : []);
       setSel(new Set());
     } catch (e) { setErr((e as Error).message); }
   }, [albumId, tab]);
-  useEffect(() => { if (permsReady && canView) void reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [permsReady, canView]);
+  // เปิดจากหน้าสินค้า (ส่วน "รูป SAMPLE") → /tasks/samples?album=<id> เปิดอัลบั้มนั้นเลย (ทุกแบรนด์)
+  useEffect(() => {
+    if (!permsReady || !canView) return;
+    const want = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("album") : null;
+    void (want ? reload(want, ALL) : reload());
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [permsReady, canView]);
 
   // ปุ่ม Back ย้อนทีละก้าวตามที่เดินมา (อัลบั้มย่อย → อัลบั้มแม่ → หน้าแฟ้ม) — เจ้าของสั่ง 2026-11-15 · ของกลาง lib/use-step-history
   const steps = useStepHistory<{ album: string | null }>("sample-album", (s) => {
@@ -164,7 +173,8 @@ export function SampleImagesPage() {
   const openAlbum = async (id: string, fromHistory = false) => {
     if (!fromHistory && id !== albumId) steps.push({ album: id });
     setAlbumId(id); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); setQuery("");
-    try { const d = await loadSamples(id); setAlbums(d.albums); setBrands(d.brands); setPhotos(d.photos ?? []); }
+    setLinkedImgs([]);
+    try { const d = await loadSamples(id); setAlbums(d.albums); setBrands(d.brands); setPhotos(d.photos ?? []); setLinkedImgs(d.linked_images ?? []); }
     catch (e) { setErr((e as Error).message); }
   };
   /** กลับหน้าแฟ้ม (การ์ดอัลบั้ม) */
@@ -537,6 +547,12 @@ export function SampleImagesPage() {
                       )}
                     </>
                   )}
+                  {!trashView && (canEdit || productLinkLabel(album)) && (
+                    productLinkLabel(album)
+                      ? <button type="button" onClick={() => canEdit && setLinking(true)} title={canEdit ? t("แก้การเชื่อมสินค้า", "Edit product link") : undefined}
+                          className="inline-flex h-8 max-w-[16rem] items-center gap-1 truncate rounded-full bg-violet-100 px-3 text-[12px] font-medium text-violet-800 hover:bg-violet-200"><Icon value="i:link" />{productLinkLabel(album)}</button>
+                      : <button type="button" onClick={() => setLinking(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:link" />{t("เชื่อม SKU / Parent", "Link SKU / Parent")}</button>
+                  )}
                   {canUpload && !trashView && (
                     <button type="button" onClick={() => void createSub([])} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:folders" />{t("อัลบั้มย่อย", "Sub-album")}</button>
                   )}
@@ -553,6 +569,19 @@ export function SampleImagesPage() {
                   )}
                   <GalleryColumnsControl cols={cols} onChange={setCols} as="select" wheelHint />
                 </div>
+
+                {/* รูปที่มีอยู่แล้วของสินค้าที่เชื่อม — เทียบกับ SAMPLE ได้เลย (ข้อเสนอ 1) */}
+                {!trashView && linkedImgs.length > 0 && (
+                  <div className="rounded-lg border border-violet-100 bg-violet-50/40 p-2">
+                    <div className="mb-1.5 text-[12px] text-violet-800"><Icon value="i:photo" /> {t(`รูปที่มีอยู่แล้วของ ${productLinkLabel(album) ?? ""}`, `Existing photos of ${productLinkLabel(album) ?? ""}`)}</div>
+                    <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                      {linkedImgs.map((im) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={im.key} src={imgUrl(im.key, 160)} alt="" title={im.label} loading="lazy" className="h-16 w-16 shrink-0 rounded-md border border-violet-100 bg-white object-cover" />
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {!trashView && <AlbumNoteBox albumId={album.id} note={album.note ?? null} canEdit={canEdit} label={nameOf(album)}
                   onSaved={(n) => setAlbums((as) => as && as.map((a) => (a.id === album.id ? { ...a, note: n } : a)))} />}
@@ -670,6 +699,16 @@ export function SampleImagesPage() {
         )}
         {trashView && canEdit && <button type="button" onClick={() => void doRestore()} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:arrow-back-up" />{t("เอากลับ", "Restore")}</button>}
       </BulkActionBar>
+
+      {album && (
+        <LinkProductDialog open={linking} albumId={album.id} albumName={nameOf(album)} parentCodes={album.parent_sku_codes ?? []} skuCodes={album.sku_codes ?? []}
+          onClose={() => setLinking(false)}
+          onSaved={(r) => {
+            setAlbums((as) => as && as.map((a) => (a.id === album.id ? { ...a, ...r } : a)));
+            pushToast("success", r.parent_sku_codes.length ? t(`เชื่อมกับ ${r.parent_sku_codes.join(", ")} แล้ว — รูปโชว์ที่หน้าสินค้าในส่วน "รูป SAMPLE"`, "Linked") : t("เลิกเชื่อมสินค้าแล้ว", "Unlinked"));
+            void reload(album.id);
+          }} />
+      )}
 
       <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
         onCancel={() => setDropFiles(null)} onConfirm={(name) => void confirmDrop(name)} />
