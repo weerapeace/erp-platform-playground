@@ -5,6 +5,7 @@
  *   ตัวสร้างใบ = lib/work-board-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel (แผงขวา)
  *   ค่าที่ตั้งจำต่อคน ต่อใบ (ตามไปทุกเครื่อง) · แบบของฉัน/ของทีม · ดึงข้อมูลจาก /api/mo/work-board ตัวเดียวกับบอร์ด
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -141,7 +142,7 @@ function WorkBoardPrintInner() {
       <div className="flex flex-col items-start gap-4 px-4 py-6 lg:flex-row">
         <div className="w-full min-w-0 flex-1">
           {error ? <div className="py-20 text-center text-red-500"><Icon value="i:alert-triangle" className="mr-1" />{error}</div>
-            : !result ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+            : !result ? <LoadingState />
             : <ListPrintFrame html={html} state={print} maxWidth={frameWidth} onPrint={doPrint} />}
         </div>
         {panelOpen && (
@@ -166,5 +167,5 @@ function WorkBoardPrintInner() {
 }
 
 export default function WorkBoardPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><WorkBoardPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><WorkBoardPrintInner /></Suspense>;
 }

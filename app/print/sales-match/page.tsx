@@ -5,6 +5,7 @@
  *   เปิดจากหน้าต่าง "อัปเดตงานจากใบขาย" (บอร์ดจ่ายงาน) · ข้อมูล = แถวที่หน้าต่างส่งมาทาง localStorage (ตามที่ติ๊ก/เลือกอยู่ตอนกด)
  *   ตัวสร้างใบ = lib/mo-sales-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel · ประวัติพิมพ์ usePrintLog("sale_line")
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -39,7 +40,7 @@ function SalesMatchPrintInner() {
     } catch { setMissing(true); }
   }, [k]);
   if (missing) return <div className="min-h-screen bg-slate-100 py-20 text-center text-slate-500"><Icon value="i:alert-triangle" className="mr-1" />ไม่พบรายการที่จะพิมพ์ — กลับไปกด “พิมพ์” จากหน้าต่าง “อัปเดตงานจากใบขาย” อีกครั้ง</div>;
-  if (!payload) return <div className="min-h-screen bg-slate-100 py-20 text-center text-slate-400">กำลังโหลด…</div>;
+  if (!payload) return <LoadingState />;
   return <SalesMatchPrintView payload={payload} />;
 }
 
@@ -140,5 +141,5 @@ function SalesMatchPrintView({ payload }: { payload: SalesPrintPayload }) {
 }
 
 export default function SalesMatchPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><SalesMatchPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><SalesMatchPrintInner /></Suspense>;
 }

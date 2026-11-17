@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
@@ -246,7 +247,7 @@ export default function PrintWorkOrderPage() {
 
       <div className="px-4 py-6">
         {loading ? (
-          <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !mo ? (
           <div className="py-20 text-center text-red-500">⚠ {error ?? "ไม่พบเอกสาร"}</div>
         ) : pdfmeTemplate ? (

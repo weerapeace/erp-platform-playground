@@ -5,6 +5,7 @@
  *   ตัวสร้างใบ = lib/so-status-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel (จำต่อคน · แบบของฉัน/ทีม)
  *   ข้อมูล = GET /api/so-orders/<id>?print=1 · ประวัติพิมพ์ usePrintLog("so_order")
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -142,7 +143,7 @@ export default function SoOrderStatusPrintPage() {
               <button onClick={() => void load()} className="ml-2 underline">ลองใหม่</button>
             </div>
           ) : !input ? (
-            <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-400">กำลังโหลดใบสั่งขาย…</div>
+            <LoadingState label="กำลังโหลดใบสั่งขาย…" boxClassName="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-400" />
           ) : input.lines.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-500">ใบสั่งขายนี้ยังไม่มีรายการสินค้า</div>
           ) : (

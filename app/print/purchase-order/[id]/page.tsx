@@ -9,6 +9,7 @@
  *
  * มี QR ชี้หน้ากลาง /s/<เลขใบ> → พิมพ์แขวนไว้ที่โต๊ะรับของ พนักงานส่องมือถือเปิดใบนี้ได้เลย
  */
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -277,7 +278,7 @@ export default function PrintPOPage() {
       )}
 
       <div className="py-6 px-4">
-        {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+        {loading ? <LoadingState />
          : error || !view ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
          : !template ? <div className="text-center py-20 text-amber-600">⚠️ ยังไม่มี template สำหรับ PO</div>
          : (

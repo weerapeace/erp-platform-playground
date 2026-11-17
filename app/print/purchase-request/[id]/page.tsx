@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -93,7 +94,7 @@ export default function PrintPRPage() {
       <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบขอซื้อ", pr?.pr_number)} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !pr ? (
           <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
         ) : !template ? (

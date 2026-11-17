@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame, ReportLayoutControls } from "@/components/report";
@@ -207,7 +208,7 @@ export default function PrintQuotationPage() {
       <PrintToolbar onBack={() => router.back()} fileName={quote ? fileName : undefined} />
       <div className="py-6 px-4">
         {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          <LoadingState />
         ) : error || !quote ? (
           <div className="text-center py-20 text-red-500">⚠ {error ?? "ไม่พบเอกสาร"}</div>
         ) : (

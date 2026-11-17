@@ -4,6 +4,7 @@
  * พิมพ์ป้ายแผงผ้า + QR — /print/swatch-label?ids=<id,id>&size=big|small
  * (จากหน้าดูแผ่น ปุ่ม "พิมพ์ป้าย" · รายการแผ่น โหมดเลือกหลายแผ่น) — ตัวทำงานอยู่ในของกลาง components/sku-swatch-browser/print-label.tsx
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SwatchLabelPrint } from "@/components/sku-swatch-browser/print-label";
@@ -16,5 +17,5 @@ function Inner() {
 }
 
 export default function SwatchLabelPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

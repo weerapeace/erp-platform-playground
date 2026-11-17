@@ -7,6 +7,7 @@
  *   ช่องใบสั่งผลิต = /api/mo/brief (รูป/ชื่อ/จำนวน/กำหนดส่ง) · หมายเหตุพิมพ์เอง = usePrintNotes (ทั้งทีมเห็น)
  *   "เฉพาะที่ติ๊กไว้" = สั่งซื้อ: ที่ติ๊กเลือกหลายชิ้น (erp.poPrint.pick.order) หรือในตะกร้าสั่งซื้อ · รอรับ: ในตะกร้ารับของ
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -249,7 +250,7 @@ function PurchasingOrdersPrintView({ mode }: { mode: PoPrintMode }) {
               <button onClick={() => void load()} className="ml-2 underline">ลองใหม่</button>
             </div>
           ) : !items ? (
-            <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-400">กำลังโหลดรายการ…</div>
+            <LoadingState label="กำลังโหลดรายการ…" boxClassName="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-400" />
           ) : (
             <ListPrintFrame html={html} state={print} maxWidth={frameWidth} onPrint={doPrint} onNote={notes.set} onNoteDone={notes.flush} />
           )}
@@ -278,5 +279,5 @@ function PurchasingOrdersPrintView({ mode }: { mode: PoPrintMode }) {
 }
 
 export default function PurchasingOrdersPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><PurchasingOrdersPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><PurchasingOrdersPrintInner /></Suspense>;
 }

@@ -5,6 +5,7 @@
  *   ราคา ¥ และ ฿ · ค่าส่ง (คิว/น้ำหนัก) แยกบรรทัด ไม่รวมในราคาสินค้า · ต้นทุนถึงมือ/ชิ้น
  *   เทมเพลตจากระบบพิมพ์กลาง (entity pv) ไม่มีใน DB = ใช้ค่าเริ่มต้น · ใบร่างพิมพ์ได้ (มีลายน้ำ "ร่าง")
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
@@ -104,7 +105,7 @@ export default function PrintPurchaseVoucherPage() {
       <PrintToolbar onBack={() => router.back()} fileName={data ? fileName : undefined} />
       {h && h.status !== "confirmed" && <div className="no-print bg-amber-50 border-b border-amber-200 text-amber-800 text-sm px-6 py-2">⚠ ใบนี้ยังเป็นร่าง (ยังไม่ออกเลข) — พิมพ์ได้แต่มีลายน้ำ "ร่าง"</div>}
       <div className="py-6 px-4">
-        {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+        {loading ? <LoadingState />
         : error || !data ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
         : <div className="relative mx-auto" style={{ maxWidth: 840 }}><PrintFrame html={html} fileName={fileName} /></div>}
       </div>

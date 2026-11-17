@@ -5,6 +5,7 @@
  *   สรุปยอดซื้อ · จ่ายแล้ว/ยังไม่จ่าย · รับเข้าแล้ว/ยังไม่รับเข้า · แยกตามร้าน · รายการใบสั่งซื้อทั้งเดือน
  * ของกลาง: ระบบพิมพ์ (buildReportHtml + PrintFrame) — เหมือนรายงานอื่นในระบบ
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -140,7 +141,7 @@ function Inner() {
               className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
           </div>
         </div>
-        {loading ? <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>
+        {loading ? <LoadingState />
           : <PrintFrame html={html} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
     </div>
@@ -148,5 +149,5 @@ function Inner() {
 }
 
 export default function PurchasingMonthlyReportPage() {
-  return <Suspense fallback={<div className="p-10 text-center text-slate-400">กำลังโหลด…</div>}><Inner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><Inner /></Suspense>;
 }

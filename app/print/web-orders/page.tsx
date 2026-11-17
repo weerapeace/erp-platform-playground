@@ -8,6 +8,7 @@
  * ของกลาง: lib/website-fulfillment (จัดหน้า) · PrintFrame + printReportHtmlInNewWindow · jsbarcode
  * ข้อมูล: /api/website/orders · ปุ่ม "📦 เปลี่ยนเป็นกำลังเตรียมของ" = PATCH bulk (audit ครบ)
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import JsBarcode from "jsbarcode";
@@ -122,7 +123,7 @@ function Inner() {
 
 export default function WebOrdersPrintPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-slate-400">กำลังโหลด…</div>}>
+    <Suspense fallback={<LoadingState />}>
       <Inner />
     </Suspense>
   );

@@ -4,6 +4,7 @@
  * พิมพ์ใบสั่งงานหลายใบทีเดียว — /print/work-order?ids=id1,id2,...
  * โหลด MO + สเปกแต่ละใบ → ต่อเป็นเอกสารเดียว (ขึ้นหน้าใหม่ทุกใบ) ด้วยของกลาง
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 // พิมพ์หลายใบ = หลายแผ่น → ต้องเปิดเอกสารจริงในแท็บใหม่ (iframe พรีวิวไหลข้ามหน้ากระดาษไม่ได้)
@@ -102,5 +103,5 @@ function BulkPrintInner() {
 }
 
 export default function BulkPrintWorkOrderPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><BulkPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><BulkPrintInner /></Suspense>;
 }

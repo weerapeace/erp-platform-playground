@@ -12,6 +12,7 @@
  *    เอกสารหลายใบ = หลายแผ่น แต่ **iframe พรีวิวไหลข้ามหน้ากระดาษไม่ได้**
  *    → สั่งพิมพ์จาก iframe จะได้แค่แผ่นเดียวหรือไม่ออกเลย ต้องเปิดเอกสารจริงในแท็บใหม่แล้วพิมพ์ที่นั่น
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
@@ -100,5 +101,5 @@ function BulkInner() {
 }
 
 export default function BulkPrintSalesOrderPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><BulkInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><BulkInner /></Suspense>;
 }

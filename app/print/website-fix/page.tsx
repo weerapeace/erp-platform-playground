@@ -6,6 +6,7 @@
  *   ตัวสร้างใบ = lib/website-fix-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel · JPG = SaveImageButton
  *   ไม่บันทึกประวัติพิมพ์ (เช็กลิสต์พิมพ์ใหม่ได้ทุกครั้งจากตัวกรองล่าสุด — เจ้าของเห็นด้วย 2026-11-10)
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -40,7 +41,7 @@ function WebFixPrintInner() {
     } catch { setMissing(true); }
   }, [k]);
   if (missing) return <div className="min-h-screen bg-slate-100 py-20 text-center text-slate-500"><Icon value="i:alert-triangle" className="mr-1" />ไม่พบรายการที่จะพิมพ์ — กลับไปกด “พิมพ์เช็กลิสต์” จากหน้า สินค้าบนเว็บ อีกครั้ง</div>;
-  if (!payload) return <div className="min-h-screen bg-slate-100 py-20 text-center text-slate-400">กำลังโหลด…</div>;
+  if (!payload) return <LoadingState />;
   return <WebFixPrintView payload={payload} />;
 }
 
@@ -149,5 +150,5 @@ function WebFixPrintView({ payload }: { payload: WebFixPayload }) {
 }
 
 export default function WebFixPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><WebFixPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><WebFixPrintInner /></Suspense>;
 }

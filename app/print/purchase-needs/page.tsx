@@ -13,6 +13,7 @@
  *   • โชว์จำนวนที่สั่งผลิตของแต่ละใบ (CTL044-02 ×1,000 (13.333) — ×1,000 = สั่งผลิต, (13.333) = วัตถุดิบที่ใบนั้นใช้)
  * รูปเป็นที่อยู่แบบย่อ (/api/r2-image?key=…) → ตอนเปิดแท็บพิมพ์มี <base href> ของกลางจัดการให้แล้ว
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -279,7 +280,7 @@ function PurchaseNeedsPrintInner() {
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
-          : rows === null ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+          : rows === null ? <LoadingState />
           : <PrintFrame html={html} />}
       </div>
     </div>
@@ -287,5 +288,5 @@ function PurchaseNeedsPrintInner() {
 }
 
 export default function PurchaseNeedsPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><PurchaseNeedsPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><PurchaseNeedsPrintInner /></Suspense>;
 }

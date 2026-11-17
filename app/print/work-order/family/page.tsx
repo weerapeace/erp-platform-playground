@@ -11,6 +11,7 @@
  * ใบ "ซื้อ-ตัด" = ตาราง ของ × สี (lib/family-print) · ใบ "ติดตามงาน" แบบเขียนมือ A/D (lib/family-track)
  * ใช้ระบบพิมพ์กลาง + เส้น/ขนาดจาก "ตั้งค่าใบรวมทั้งรุ่น"
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/components/report";
@@ -267,5 +268,5 @@ function FamilyPrintInner() {
 }
 
 export default function FamilyPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><FamilyPrintInner /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><FamilyPrintInner /></Suspense>;
 }

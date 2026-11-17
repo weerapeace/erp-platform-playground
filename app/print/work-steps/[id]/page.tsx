@@ -9,6 +9,7 @@
  *       ออกแบบให้ถ่ายรูปแล้ว AI อ่านง่าย (กล่องตัวเลข · QR ทุกหน้า · จุดมุม) — ตัวสร้างอยู่ lib/work-log-sheet.ts
  *   ใช้ PrintFrame + printReportFrameOrWindow ของกลาง (เหมือนใบสั่งงาน)
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
@@ -470,7 +471,7 @@ export default function PrintWorkStepsPage() {
       </ERPModal>
 
       <div className="px-4 py-6">
-        {loading ? <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
+        {loading ? <LoadingState />
           : error || !mo ? <div className="py-20 text-center text-red-500">⚠ {error ?? "ไม่พบเอกสาร"}</div>
           : <PrintFrame html={html} fileName={fileName} />}
       </div>
