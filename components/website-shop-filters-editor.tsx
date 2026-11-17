@@ -7,6 +7,8 @@
  */
 import { LangInput } from "@/components/bilingual-field";
 import { useState } from "react";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { ColorToneButton } from "@/components/color-tone-manager";
 import {
@@ -18,17 +20,20 @@ const inputCls = "rounded-lg border border-slate-200 px-2 py-1 text-xs text-slat
 const fmt = (n: number) => `฿${n.toLocaleString("th-TH")}`;
 
 /** คำอธิบายสั้น ๆ ว่ากลุ่มนี้ใช้ข้อมูลอะไรจากสินค้า */
-const KIND_HINT: Record<ShopFilter["kind"], string> = {
-  category: "หมวดของร้าน (แท็บ 📂 หมวดหมู่) · เลือกได้ทีละหมวด",
-  color: "สีของสินค้าจัดเป็นโทน — กดโทน “แดง” เห็นทุกเฉดแดง + รูปการ์ดเปลี่ยนเป็นสีนั้น",
-  price: "แบ่งช่วงจากราคาขาย",
-  size: "ดูจากด้านที่ยาวที่สุด (กว้าง/สูง) ในแท็บขนาดของสินค้า",
-  option2: "ไซส์จากปุ่มไซส์ของสินค้า (S/M/L …) เรียงเล็ก→ใหญ่ — สินค้าที่ไม่มีไซส์ไม่อยู่ในกลุ่มนี้ · ยังไม่มีสินค้าที่มีไซส์ = ซ่อนเองบนเว็บ",
-  collection: "คอลเลกชันที่ผูกไว้ในสินค้า",
-  fits: "ข้อมูล “ใส่ได้” ในแท็บขนาดของสินค้า — ยังไม่มีสินค้ากรอก กลุ่มนี้จะซ่อนเองบนเว็บ",
-  status: "พร้อมส่ง (มีของ) · กำลังลดราคา (มีราคาก่อนลด) · สินค้าใหม่",
-  field: "ค่าจากฟิลด์สินค้า",
-};
+const kindHint = (): Record<ShopFilter["kind"], string> => ({
+  category: tr("หมวดของร้าน (แท็บ 📂 หมวดหมู่) · เลือกได้ทีละหมวด", "Shop categories (📂 Categories tab) · one at a time"),
+  color: tr("สีของสินค้าจัดเป็นโทน — กดโทน “แดง” เห็นทุกเฉดแดง + รูปการ์ดเปลี่ยนเป็นสีนั้น", "Product colors grouped into tones — picking “red” shows every red shade + card image switches to that color"),
+  price: tr("แบ่งช่วงจากราคาขาย", "Ranges from the selling price"),
+  size: tr("ดูจากด้านที่ยาวที่สุด (กว้าง/สูง) ในแท็บขนาดของสินค้า", "Uses the longest side (width/height) from the product's size tab"),
+  option2: tr("ไซส์จากปุ่มไซส์ของสินค้า (S/M/L …) เรียงเล็ก→ใหญ่ — สินค้าที่ไม่มีไซส์ไม่อยู่ในกลุ่มนี้ · ยังไม่มีสินค้าที่มีไซส์ = ซ่อนเองบนเว็บ", "Sizes from the product's size buttons (S/M/L …) small→large — products without sizes are excluded · no sized products = hidden on web"),
+  collection: tr("คอลเลกชันที่ผูกไว้ในสินค้า", "Collections linked to the product"),
+  fits: tr("ข้อมูล “ใส่ได้” ในแท็บขนาดของสินค้า — ยังไม่มีสินค้ากรอก กลุ่มนี้จะซ่อนเองบนเว็บ", "“Fits” data from the product's size tab — hidden on web until some product has it"),
+  status: tr("พร้อมส่ง (มีของ) · กำลังลดราคา (มีราคาก่อนลด) · สินค้าใหม่", "Ready to ship (in stock) · On sale (has pre-sale price) · New"),
+  field: tr("ค่าจากฟิลด์สินค้า", "Values from a product field"),
+});
+
+/** ชื่อชนิดตัวกรองภาษาอังกฤษ (ป้ายในหน้าจัดการเท่านั้น · ค่าไทยต้นฉบับอยู่ lib/website-listing) */
+const KIND_LABEL_EN: Record<ShopFilter["kind"], string> = { category: "Category", color: "Color (tone)", price: "Price range", size: "Size", option2: "Size (size buttons)", collection: "Collection", fits: "Fits", status: "Status", field: "Product field" };
 
 /** ช่องตัวเลขหลายค่าคั่นด้วยจุลภาค — เก็บข้อความไว้ระหว่างพิมพ์ แล้วค่อยแปลงตอนออกจากช่อง */
 function NumsInput({ value, onCommit, className }: { value: number[]; onCommit: (v: number[]) => void; className?: string }) {
@@ -48,6 +53,7 @@ function NumsInput({ value, onCommit, className }: { value: number[]; onCommit: 
 }
 /** คำค้นของกลุ่ม (คั่นด้วยจุลภาค) */
 function WordsInput({ value, onCommit }: { value: string[]; onCommit: (v: string[]) => void }) {
+  const t = useT();
   const [txt, setTxt] = useState<string | null>(null);
   return (
     <input
@@ -57,7 +63,7 @@ function WordsInput({ value, onCommit }: { value: string[]; onCommit: (v: string
         if (txt != null) onCommit([...new Set(txt.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean))].slice(0, 12));
         setTxt(null);
       }}
-      placeholder="คำที่ต้องมี คั่นด้วย , เช่น หนัง, leather"
+      placeholder={t("คำที่ต้องมี คั่นด้วย , เช่น หนัง, leather", "Words to match, comma-separated, e.g. leather, suede")}
       className={`${inputCls} flex-1 min-w-0`}
     />
   );
@@ -73,6 +79,8 @@ export function ShopFiltersEditor({
   /** ฟิลด์ Parent SKU ที่ส่งออกเว็บ (choices.specFields) — ให้เลือกทำตัวกรองเพิ่ม */
   fields: { key: string; label: string }[];
 }) {
+  const t = useT();
+  const KIND_HINT = kindHint();
   // กันธีมเก่าที่ยังไม่ผ่าน normalizeTheme (ปกติ API เกลามาให้แล้ว)
   const list = Array.isArray(value.filters) ? value.filters : normalizeShopFilters(undefined, value.colorFilter === false);
   // สี: ติ๊กเปิด/ปิดแถว = เปิด/ปิด colorFilter ด้วย (ค่าเดิมที่เว็บเก่าใช้)
@@ -101,17 +109,17 @@ export function ShopFiltersEditor({
   const setKw = (f: ShopFilter, keywords: ShopFilterKeyword[]) => patch(f.id, { keywords });
 
   const b = normalizePriceBreaks(value.priceBreaks);
-  const priceLabels = [...b.map((v, i) => (i === 0 ? `ต่ำกว่า ${fmt(v)}` : `${fmt(b[i - 1])}–${fmt(v)}`)), `${fmt(b[b.length - 1])} ขึ้นไป`];
+  const priceLabels = [...b.map((v, i) => (i === 0 ? t(`ต่ำกว่า ${fmt(v)}`, `Under ${fmt(v)}`) : `${fmt(b[i - 1])}–${fmt(v)}`)), t(`${fmt(b[b.length - 1])} ขึ้นไป`, `${fmt(b[b.length - 1])} and up`)];
 
   const settings = (f: ShopFilter) => {
     if (f.kind === "price")
       return (
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            แบ่งช่วงที่ราคา (บาท)
+            {t("แบ่งช่วงที่ราคา (บาท)", "Price breaks (THB)")}
             <NumsInput value={b} onCommit={(v) => onChange({ ...value, priceBreaks: normalizePriceBreaks(v) })} className={`${inputCls} w-48`} />
           </div>
-          <p className="text-[11px] text-slate-400">ลูกค้าจะเห็น: {priceLabels.join(" · ")}</p>
+          <p className="text-[11px] text-slate-400">{t("ลูกค้าจะเห็น:", "Customers see:")} {priceLabels.join(" · ")}</p>
         </div>
       );
     if (f.kind === "size") {
@@ -119,18 +127,18 @@ export function ShopFiltersEditor({
       const setS = (i: 0 | 1, n: number) => onChange({ ...value, sizeBreaks: normalizeSizeBreaks(i === 0 ? [n, m] : [s, n]) });
       return (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-          เล็ก = ไม่เกิน
+          {t("เล็ก = ไม่เกิน", "Small = up to")}
           <input type="number" min={1} value={s} onChange={(e) => setS(0, Number(e.target.value))} className={`${inputCls} w-16`} />
-          ซม. · กลาง = ไม่เกิน
+          {t("ซม. · กลาง = ไม่เกิน", "cm · Medium = up to")}
           <input type="number" min={1} value={m} onChange={(e) => setS(1, Number(e.target.value))} className={`${inputCls} w-16`} />
-          ซม. · ใหญ่ = มากกว่านั้น
+          {t("ซม. · ใหญ่ = มากกว่านั้น", "cm · Large = above that")}
         </div>
       );
     }
     if (f.kind === "status")
       return (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-          “สินค้าใหม่” = ขึ้นร้านไม่เกิน
+          {t("“สินค้าใหม่” = ขึ้นร้านไม่เกิน", "“New” = listed within")}
           <input
             type="number"
             min={1}
@@ -139,7 +147,7 @@ export function ShopFiltersEditor({
             onChange={(e) => onChange({ ...value, newDays: Math.min(365, Math.max(1, Math.round(Number(e.target.value) || 30))) })}
             className={`${inputCls} w-16`}
           />
-          วัน
+          {t("วัน", "days")}
         </div>
       );
     if (f.kind === "field") {
@@ -147,7 +155,7 @@ export function ShopFiltersEditor({
       return (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            ฟิลด์
+            {t("ฟิลด์", "Field")}
             <select
               value={f.field}
               onChange={(e) => {
@@ -168,8 +176,8 @@ export function ShopFiltersEditor({
             </select>
             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
               {([
-                ["exact", "ค่าตรงตัว"],
-                ["keywords", "จัดกลุ่มด้วยคำ"],
+                ["exact", t("ค่าตรงตัว", "Exact value")],
+                ["keywords", t("จัดกลุ่มด้วยคำ", "Group by words")],
               ] as const).map(([v, l]) => (
                 <button
                   key={v}
@@ -184,7 +192,7 @@ export function ShopFiltersEditor({
           </div>
           {f.mode === "keywords" ? (
             <div className="space-y-1.5">
-              <p className="text-[11px] text-slate-400">ตัวเลือกบนเว็บ = ชื่อกลุ่ม · สินค้าเข้ากลุ่มเมื่อค่าในฟิลด์มีคำใดคำหนึ่ง (ไม่สนตัวพิมพ์เล็ก/ใหญ่) · 1 สินค้าเข้าได้หลายกลุ่ม</p>
+              <p className="text-[11px] text-slate-400">{t("ตัวเลือกบนเว็บ = ชื่อกลุ่ม · สินค้าเข้ากลุ่มเมื่อค่าในฟิลด์มีคำใดคำหนึ่ง (ไม่สนตัวพิมพ์เล็ก/ใหญ่) · 1 สินค้าเข้าได้หลายกลุ่ม", "Web options = group names · a product joins a group when the field contains any of its words (case-insensitive) · one product can be in several groups")}</p>
               {kws.map((k, i) => (
                 <div key={i} className="flex items-center gap-1.5">
                   <LangInput
@@ -192,24 +200,24 @@ export function ShopFiltersEditor({
                     k="label"
                     maxLength={40}
                     onPatch={(p) => setKw(f, kws.map((x, j) => (j === i ? { ...x, ...p } : x)))}
-                    placeholder="ชื่อกลุ่ม เช่น หนัง"
+                    placeholder={t("ชื่อกลุ่ม เช่น หนัง", "Group name, e.g. Leather")}
                     className={`${inputCls} w-32`}
                   />
                   <WordsInput value={k.words} onCommit={(words) => setKw(f, kws.map((x, j) => (j === i ? { ...x, words } : x)))} />
-                  <button type="button" onClick={() => setKw(f, kws.filter((_, j) => j !== i))} className="text-xs px-1.5 text-slate-400 hover:text-red-600" title="ลบกลุ่มนี้">
+                  <button type="button" onClick={() => setKw(f, kws.filter((_, j) => j !== i))} className="text-xs px-1.5 text-slate-400 hover:text-red-600" title={t("ลบกลุ่มนี้", "Delete this group")}>
                     ✕
                   </button>
                 </div>
               ))}
               <button type="button" onClick={() => setKw(f, [...kws, { label: "", words: [] }])} className="text-xs text-blue-600 hover:underline">
-                ＋ เพิ่มกลุ่มคำ
+                ＋ {t("เพิ่มกลุ่มคำ", "Add word group")}
               </button>
             </div>
           ) : (
-            <p className="text-[11px] text-slate-400">ตัวเลือกบนเว็บ = ค่าที่กรอกในสินค้าแต่ละตัว (พิมพ์ไม่เหมือนกัน = แยกเป็นคนละตัวเลือก) · ถ้าค่าเป็นข้อความยาว ๆ ใช้ “จัดกลุ่มด้วยคำ” จะเรียบร้อยกว่า</p>
+            <p className="text-[11px] text-slate-400">{t("ตัวเลือกบนเว็บ = ค่าที่กรอกในสินค้าแต่ละตัว (พิมพ์ไม่เหมือนกัน = แยกเป็นคนละตัวเลือก) · ถ้าค่าเป็นข้อความยาว ๆ ใช้ “จัดกลุ่มด้วยคำ” จะเรียบร้อยกว่า", "Web options = the value entered on each product (different spelling = separate options) · for long text values, “Group by words” is tidier")}</p>
           )}
           <button type="button" onClick={() => setList(list.filter((x) => x.id !== f.id))} className="text-xs text-red-600 hover:underline">
-            🗑 เอาตัวกรองนี้ออก
+            🗑 {t("เอาตัวกรองนี้ออก", "Remove this filter")}
           </button>
         </div>
       );
@@ -220,7 +228,7 @@ export function ShopFiltersEditor({
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-slate-500">
-        ลาก ⠿ เรียงลำดับ · ติ๊กช่องซ้าย = เปิดใช้ · แก้ชื่อที่ลูกค้าเห็นได้ · <b>กางไว้</b> = เปิดหน้ามาเห็นตัวเลือกเลย (ไม่ติ๊ก = พับ ลูกค้ากดหัวข้อเพื่อกาง) · กลุ่มที่สินค้ายังไม่มีข้อมูล จะซ่อนเองบนเว็บ
+        {t("ลาก ⠿ เรียงลำดับ · ติ๊กช่องซ้าย = เปิดใช้ · แก้ชื่อที่ลูกค้าเห็นได้ ·", "Drag ⠿ to reorder · left checkbox = enabled · you can edit the name customers see ·")} <b>{t("กางไว้", "Expanded")}</b> {t("= เปิดหน้ามาเห็นตัวเลือกเลย (ไม่ติ๊ก = พับ ลูกค้ากดหัวข้อเพื่อกาง) · กลุ่มที่สินค้ายังไม่มีข้อมูล จะซ่อนเองบนเว็บ", "= options visible on page load (unticked = collapsed, customers tap the heading to open) · groups with no product data are hidden on web")}
       </p>
       <ul className="space-y-1">
         {list.map((f, i) => {
@@ -229,22 +237,22 @@ export function ShopFiltersEditor({
             <li key={f.id} {...drag.rowProps(i)} className={`rounded-lg border bg-white ${open ? "border-blue-300" : "border-slate-200"} ${drag.rowCls(i)} ${f.enabled ? "" : "opacity-60"}`}>
               <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
                 <DragHandle {...drag.handleProps(i)} />
-                <input type="checkbox" checked={f.enabled} onChange={(e) => patch(f.id, { enabled: e.target.checked })} className="w-4 h-4 accent-blue-600" title="เปิดใช้" />
-                <LangInput obj={f} k="label" maxLength={40} onPatch={(p) => patch(f.id, p)} className={`${inputCls} w-32`} ariaLabel="ชื่อที่ลูกค้าเห็น" />
+                <input type="checkbox" checked={f.enabled} onChange={(e) => patch(f.id, { enabled: e.target.checked })} className="w-4 h-4 accent-blue-600" title={t("เปิดใช้", "Enabled")} />
+                <LangInput obj={f} k="label" maxLength={40} onPatch={(p) => patch(f.id, p)} className={`${inputCls} w-32`} ariaLabel={t("ชื่อที่ลูกค้าเห็น", "Name customers see")} />
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 whitespace-nowrap">
-                  {f.kind === "field" ? `ฟิลด์: ${fieldLabel(f.field)}${f.mode === "keywords" ? " · กลุ่มคำ" : ""}` : SHOP_FILTER_KIND_LABEL[f.kind]}
+                  {f.kind === "field" ? `${t("ฟิลด์", "Field")}: ${fieldLabel(f.field)}${f.mode === "keywords" ? t(" · กลุ่มคำ", " · word groups") : ""}` : t(SHOP_FILTER_KIND_LABEL[f.kind], KIND_LABEL_EN[f.kind])}
                 </span>
                 <span className="text-[11px] text-slate-400 flex-1 min-w-[8rem] truncate" title={KIND_HINT[f.kind]}>
                   {f.kind === "field" ? "" : KIND_HINT[f.kind]}
                 </span>
                 <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer whitespace-nowrap">
                   <input type="checkbox" checked={f.open} onChange={(e) => patch(f.id, { open: e.target.checked })} className="w-3.5 h-3.5 accent-blue-600" />
-                  กางไว้
+                  {t("กางไว้", "Expanded")}
                 </label>
-                {f.kind === "color" && <ColorToneButton label="🎨 จัดโทนสี" />}
+                {f.kind === "color" && <ColorToneButton label={t("🎨 จัดโทนสี", "🎨 Color tones")} />}
                 {hasSettings(f) && (
                   <button type="button" onClick={() => setOpenId(open ? null : f.id)} className={`text-xs px-2 py-0.5 rounded border ${open ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                    ⚙ ตั้งค่า
+                    ⚙ {t("ตั้งค่า", "Settings")}
                   </button>
                 )}
               </div>
@@ -256,7 +264,7 @@ export function ShopFiltersEditor({
       {freeFields.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <select value={addKey} onChange={(e) => setAddKey(e.target.value)} className={inputCls}>
-            <option value="">＋ เพิ่มตัวกรองจากฟิลด์สินค้า…</option>
+            <option value="">{t("＋ เพิ่มตัวกรองจากฟิลด์สินค้า…", "＋ Add filter from a product field…")}</option>
             {freeFields.map((f) => (
               <option key={f.key} value={f.key}>
                 {f.label}
@@ -265,7 +273,7 @@ export function ShopFiltersEditor({
           </select>
           {addKey && (
             <button type="button" onClick={addField} className="text-xs px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-              เพิ่ม
+              {t("เพิ่ม", "Add")}
             </button>
           )}
         </div>

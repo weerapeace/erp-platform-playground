@@ -7,6 +7,8 @@
  * ข้อมูล /api/website/customer-profile · กฎ lib/website-customer-profile · อ่านอย่างเดียว (ไม่มีปุ่มแก้)
  */
 import { useEffect, useState } from "react";
+import { useT } from "@/components/i18n";
+import { getLang, tr } from "@/lib/lang";
 import { Drawer } from "@/components/modal";
 import { MiniTable } from "@/components/mini-table";
 import { ErrorState, LoadingState } from "@/components/state-views";
@@ -36,9 +38,22 @@ export interface CustomerRef {
   name?: string;
 }
 
-const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "2-digit" }) : "–");
-const PROVIDER: Record<string, string> = { google: "Google", line: "LINE", facebook: "Facebook", email: "อีเมล", password: "อีเมล" };
-const REVIEW_STATUS: Record<string, string> = { pending: "รอตรวจ", approved: "ขึ้นเว็บ", hidden: "ซ่อน" };
+const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(getLang() === "en" ? "en-GB" : "th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "2-digit" }) : "–");
+const providerLabel = (x: string) => ({ google: "Google", line: "LINE", facebook: "Facebook", email: tr("อีเมล", "Email"), password: tr("อีเมล", "Email") } as Record<string, string>)[x] ?? x;
+const reviewStatusLabel = (x: string) => ({ pending: tr("รอตรวจ", "Pending"), approved: tr("ขึ้นเว็บ", "Live"), hidden: tr("ซ่อน", "Hidden") } as Record<string, string>)[x] ?? x;
+
+/**
+ * ป้ายสถานะออเดอร์/ชำระเงิน/วิธีจ่าย ภาษาอังกฤษ (หน้า ERP เท่านั้น) — ป้ายไทยมาจาก API (lib/website-orders ฝั่งเซิร์ฟเวอร์ · ส่งลูกค้าด้วย จึงไม่แตะ)
+ * ใช้ร่วม: แผงประวัติลูกค้า + แท็บออเดอร์ (website-orders-panel)
+ */
+const ORDER_STATUS_EN: Record<string, string> = { pending: "Pending", preparing: "Preparing", shipped: "Shipped", completed: "Completed", cancelled: "Cancelled" };
+const PAYMENT_STATUS_EN: Record<string, string> = { unpaid: "Unpaid", verifying: "Slip sent · to check", partial: "Deposit paid · balance due", paid: "Paid", refunded: "Refunded" };
+const PAYMENT_METHOD_EN: Record<string, string> = { cod: "Cash on delivery", promptpay: "PromptPay transfer" };
+/** ป้ายจาก API (ไทย) → แปลตามภาษาที่เลือก · kind = ชุดสถานะ */
+export function orderLabelUi(kind: "status" | "payment" | "method", key: string, th: string): string {
+  const en = (kind === "status" ? ORDER_STATUS_EN : kind === "payment" ? PAYMENT_STATUS_EN : PAYMENT_METHOD_EN)[key];
+  return en ? tr(th, en) : th;
+}
 const stars = (n: number) => "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n);
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -52,6 +67,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 export function WebsiteCustomerProfile({ shopSlug, who, onClose }: { shopSlug: string; who: CustomerRef | null; onClose: () => void }) {
+  const t = useT();
   const [data, setData] = useState<Profile | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -66,7 +82,7 @@ export function WebsiteCustomerProfile({ shopSlug, who, onClose }: { shopSlug: s
     apiFetch(`/api/website/customer-profile?${q}`)
       .then((r) => r.json())
       .then((j: Profile) => (j.error ? setError(j.error) : setData(j)))
-      .catch(() => setError("โหลดประวัติลูกค้าไม่สำเร็จ"))
+      .catch(() => setError(tr("โหลดประวัติลูกค้าไม่สำเร็จ", "Couldn't load customer history")))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shopSlug, key]);
@@ -74,13 +90,13 @@ export function WebsiteCustomerProfile({ shopSlug, who, onClose }: { shopSlug: s
   const s = data?.summary;
   const m = data?.member;
   const tone = (list: StatusDef[], k: string) => list.find((x) => x.key === k)?.tone ?? "bg-slate-100 text-slate-600";
-  const label = (list: StatusDef[], k: string) => list.find((x) => x.key === k)?.label ?? k;
-  const title = m?.name || s?.names[0] || who?.name || "ลูกค้า";
+  const label = (list: StatusDef[], k: string) => orderLabelUi(list === data?.paymentStatuses ? "payment" : "status", k, list.find((x) => x.key === k)?.label ?? k);
+  const title = m?.name || s?.names[0] || who?.name || t("ลูกค้า", "Customer");
 
   return (
-    <Drawer open={!!who} onClose={onClose} title={`👤 ${title}`} description={m ? "สมาชิกเว็บร้าน" : "ลูกค้าแขก (ไม่ได้สมัครสมาชิก) — รวมออเดอร์ที่ใช้เบอร์เดียวกัน"} size="lg" storageKey="website-customer-profile">
+    <Drawer open={!!who} onClose={onClose} title={`👤 ${title}`} description={m ? t("สมาชิกเว็บร้าน", "Shop member") : t("ลูกค้าแขก (ไม่ได้สมัครสมาชิก) — รวมออเดอร์ที่ใช้เบอร์เดียวกัน", "Guest customer (not a member) — orders with the same phone number")} size="lg" storageKey="website-customer-profile">
       {loading ? (
-        <LoadingState label="กำลังโหลดประวัติลูกค้า…" />
+        <LoadingState label={t("กำลังโหลดประวัติลูกค้า…", "Loading customer history…")} />
       ) : error ? (
         <ErrorState title={error} />
       ) : !data || !s ? null : (
@@ -100,58 +116,58 @@ export function WebsiteCustomerProfile({ shopSlug, who, onClose }: { shopSlug: s
               </p>
               {m && (
                 <p className="text-xs text-slate-500">
-                  สมัคร {day(m.createdAt)} · เข้าล่าสุด {day(m.lastLoginAt)}
-                  {m.providers.length > 0 && ` · เข้าด้วย ${m.providers.map((x) => PROVIDER[x] ?? x).join("/")}`}
-                  {m.marketingOptIn && " · รับข่าวสาร ✓"}
-                  {m.status === "blocked" && <span className="text-rose-600"> · ระงับอยู่</span>}
+                  {t("สมัคร", "Joined")} {day(m.createdAt)} · {t("เข้าล่าสุด", "Last login")} {day(m.lastLoginAt)}
+                  {m.providers.length > 0 && ` · ${t("เข้าด้วย", "Signs in with")} ${m.providers.map(providerLabel).join("/")}`}
+                  {m.marketingOptIn && t(" · รับข่าวสาร ✓", " · Newsletter ✓")}
+                  {m.status === "blocked" && <span className="text-rose-600"> · {t("ระงับอยู่", "Blocked")}</span>}
                 </p>
               )}
-              {s.names.length > 1 && <p className="text-xs text-slate-500">ชื่อที่เคยใช้สั่ง: {s.names.join(" · ")}</p>}
-              {s.firstSource && <p className="text-xs text-slate-500">รู้จักร้านจาก: {sourceLabel(s.firstSource)} (ออเดอร์แรก)</p>}
+              {s.names.length > 1 && <p className="text-xs text-slate-500">{t("ชื่อที่เคยใช้สั่ง", "Names used")}: {s.names.join(" · ")}</p>}
+              {s.firstSource && <p className="text-xs text-slate-500">{t("รู้จักร้านจาก", "Found the shop via")}: {sourceLabel(s.firstSource)} {t("(ออเดอร์แรก)", "(first order)")}</p>}
             </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Stat label="ออเดอร์" value={String(s.orders)} sub={s.cancelled ? `ยกเลิก ${s.cancelled}` : undefined} />
-            <Stat label="ซื้อรวม" value={formatAmount(s.spent)} sub={s.orders ? `เฉลี่ย ${formatAmount(s.avg)}` : undefined} />
-            <Stat label="ซื้อล่าสุด" value={day(s.lastAt)} sub={s.firstAt ? `ครั้งแรก ${day(s.firstAt)}` : undefined} />
+            <Stat label={t("ออเดอร์", "Orders")} value={String(s.orders)} sub={s.cancelled ? t(`ยกเลิก ${s.cancelled}`, `${s.cancelled} cancelled`) : undefined} />
+            <Stat label={t("ซื้อรวม", "Total spent")} value={formatAmount(s.spent)} sub={s.orders ? t(`เฉลี่ย ${formatAmount(s.avg)}`, `Avg ${formatAmount(s.avg)}`) : undefined} />
+            <Stat label={t("ซื้อล่าสุด", "Last order")} value={day(s.lastAt)} sub={s.firstAt ? t(`ครั้งแรก ${day(s.firstAt)}`, `First ${day(s.firstAt)}`) : undefined} />
             {data.points ? (
-              <Stat label="แต้มคงเหลือ" value={data.points.balance.toLocaleString("th-TH")} sub={data.points.tier ? `ระดับ ${data.points.tier.name}` : undefined} />
+              <Stat label={t("แต้มคงเหลือ", "Points balance")} value={data.points.balance.toLocaleString("th-TH")} sub={data.points.tier ? t(`ระดับ ${data.points.tier.name}`, `Tier ${data.points.tier.name}`) : undefined} />
             ) : (
-              <Stat label="ถูกใจไว้" value={String(data.wishlist)} sub="สินค้า" />
+              <Stat label={t("ถูกใจไว้", "Wishlist")} value={String(data.wishlist)} sub={t("สินค้า", "products")} />
             )}
           </div>
 
           <MiniTable
-            title="🧾 ออเดอร์"
+            title={t("🧾 ออเดอร์", "🧾 Orders")}
             rows={data.orders}
             rowKey={(o) => o.id}
             dense
-            countUnit="ใบ"
-            emptyText="ยังไม่มีออเดอร์"
+            countUnit={t("ใบ", "orders")}
+            emptyText={t("ยังไม่มีออเดอร์", "No orders yet")}
             columns={[
-              { key: "no", header: "เลขที่", width: "7.5rem", cell: (o) => <span className="font-mono text-xs">{o.orderNo}</span>, sortValue: (o) => o.orderNo },
-              { key: "at", header: "วันที่", width: "5.5rem", cell: (o) => day(o.createdAt), sortValue: (o) => o.createdAt },
-              { key: "st", header: "สถานะ", width: "minmax(7.5rem, 1fr)", cell: (o) => (
+              { key: "no", header: t("เลขที่", "No."), width: "7.5rem", cell: (o) => <span className="font-mono text-xs">{o.orderNo}</span>, sortValue: (o) => o.orderNo },
+              { key: "at", header: t("วันที่", "Date"), width: "5.5rem", cell: (o) => day(o.createdAt), sortValue: (o) => o.createdAt },
+              { key: "st", header: t("สถานะ", "Status"), width: "minmax(7.5rem, 1fr)", cell: (o) => (
                 <span className="flex flex-wrap gap-1">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${tone(data.statuses, o.status)}`}>{label(data.statuses, o.status)}</span>
                   <span className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${tone(data.paymentStatuses, o.paymentStatus)}`}>{label(data.paymentStatuses, o.paymentStatus)}</span>
                 </span>
               ) },
-              { key: "qty", header: "ชิ้น", align: "right", width: "3rem", cell: (o) => o.qty },
-              { key: "total", header: "ยอด", align: "right", width: "6rem", cell: (o) => formatAmount(o.total), sortValue: (o) => o.total },
+              { key: "qty", header: t("ชิ้น", "Qty"), align: "right", width: "3rem", cell: (o) => o.qty },
+              { key: "total", header: t("ยอด", "Total"), align: "right", width: "6rem", cell: (o) => formatAmount(o.total), sortValue: (o) => o.total },
             ]}
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <section className="rounded-xl border border-slate-200 p-3">
-              <h4 className="text-xs font-semibold text-slate-500 mb-2">🛍 ซื้อบ่อย</h4>
+              <h4 className="text-xs font-semibold text-slate-500 mb-2">{t("🛍 ซื้อบ่อย", "🛍 Bought often")}</h4>
               {s.topItems.length ? (
                 <ul className="space-y-1">
-                  {s.topItems.map((t) => (
-                    <li key={t.code} className="flex justify-between gap-2">
-                      <span className="truncate"><span className="font-mono text-[11px] text-slate-400">{t.code}</span> {t.name}</span>
-                      <span className="tabular-nums text-slate-600 shrink-0">×{t.qty}</span>
+                  {s.topItems.map((it) => (
+                    <li key={it.code} className="flex justify-between gap-2">
+                      <span className="truncate"><span className="font-mono text-[11px] text-slate-400">{it.code}</span> {it.name}</span>
+                      <span className="tabular-nums text-slate-600 shrink-0">×{it.qty}</span>
                     </li>
                   ))}
                 </ul>
@@ -160,12 +176,12 @@ export function WebsiteCustomerProfile({ shopSlug, who, onClose }: { shopSlug: s
               )}
             </section>
             <section className="rounded-xl border border-slate-200 p-3">
-              <h4 className="text-xs font-semibold text-slate-500 mb-2">📍 ที่อยู่ที่เคยส่ง</h4>
+              <h4 className="text-xs font-semibold text-slate-500 mb-2">{t("📍 ที่อยู่ที่เคยส่ง", "📍 Past addresses")}</h4>
               {s.addresses.length ? (
                 <ul className="space-y-1.5">
                   {s.addresses.map((a) => (
                     <li key={a.text} className="text-slate-700">
-                      {a.text} <span className="text-[11px] text-slate-400">({a.count} ครั้ง · ล่าสุด {day(a.lastAt)})</span>
+                      {a.text} <span className="text-[11px] text-slate-400">({t(`${a.count} ครั้ง · ล่าสุด`, `${a.count}× · last`)} {day(a.lastAt)})</span>
                     </li>
                   ))}
                 </ul>
@@ -177,12 +193,12 @@ export function WebsiteCustomerProfile({ shopSlug, who, onClose }: { shopSlug: s
 
           {data.reviews.length > 0 && (
             <section className="rounded-xl border border-slate-200 p-3">
-              <h4 className="text-xs font-semibold text-slate-500 mb-2">⭐ รีวิว ({data.reviews.length})</h4>
+              <h4 className="text-xs font-semibold text-slate-500 mb-2">{t("⭐ รีวิว", "⭐ Reviews")} ({data.reviews.length})</h4>
               <ul className="space-y-2">
                 {data.reviews.map((r) => (
                   <li key={r.id}>
                     <span className="text-amber-500">{stars(r.rating)}</span> <span className="text-slate-700">{r.productName}</span>
-                    <span className="text-[11px] text-slate-400"> · {day(r.createdAt)} · {REVIEW_STATUS[r.status] ?? r.status}</span>
+                    <span className="text-[11px] text-slate-400"> · {day(r.createdAt)} · {reviewStatusLabel(r.status)}</span>
                     {r.body && <p className="text-slate-600 text-xs mt-0.5 line-clamp-2">{r.body}</p>}
                   </li>
                 ))}

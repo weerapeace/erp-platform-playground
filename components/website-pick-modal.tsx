@@ -15,6 +15,8 @@ import { ERPModal } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { useViewPref } from "@/lib/use-view-pref";
 import { loadRecent, pushRecentMany } from "@/lib/recent-picks";
+import { useT } from "@/components/i18n";
+import { tr, getLang } from "@/lib/lang";
 
 const VIEWS = ["table", "cards"] as const;
 type View = (typeof VIEWS)[number];
@@ -31,14 +33,14 @@ export function rememberWebPicks(key: string, ids: string[]) {
 /** "x นาทีก่อน / เมื่อวาน / 3 วันก่อน" */
 function ago(at: number): string {
   const m = Math.floor((Date.now() - at) / 60000);
-  if (m < 1) return "เมื่อสักครู่";
-  if (m < 60) return `${m} นาทีก่อน`;
+  if (m < 1) return tr("เมื่อสักครู่", "just now");
+  if (m < 60) return tr(`${m} นาทีก่อน`, `${m} min ago`);
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ชม.ก่อน`;
+  if (h < 24) return tr(`${h} ชม.ก่อน`, `${h} h ago`);
   const d = Math.floor(h / 24);
-  if (d === 1) return "เมื่อวาน";
-  if (d < 30) return `${d} วันก่อน`;
-  return new Date(at).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+  if (d === 1) return tr("เมื่อวาน", "yesterday");
+  if (d < 30) return tr(`${d} วันก่อน`, `${d} days ago`);
+  return new Date(at).toLocaleDateString(getLang() === "en" ? "en-GB" : "th-TH", { day: "numeric", month: "short" });
 }
 
 export type PickCard = { image: string | null; code: string; title: string; sub?: string };
@@ -91,6 +93,7 @@ export function WebsitePickModal<T>({
   /** ข้อความเตือนใต้ตาราง */
   note?: ReactNode;
 }) {
+  const t = useT();
   const { view, setView, saveDefault } = useViewPref<View>("website_picker_view", VIEWS, "cards");
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "recent", dir: "asc" });
 
@@ -106,22 +109,22 @@ export function WebsitePickModal<T>({
   const NONE = Number.MAX_SAFE_INTEGER;
 
   const extraSorts = [
-    { key: "recent", label: "เรียง: เลือกล่าสุดก่อน", compare: (a: T, b: T) => (recentOf(a)?.i ?? NONE) - (recentOf(b)?.i ?? NONE) },
-    { key: "chosen", label: "เรียง: ที่เลือกไว้ขึ้นก่อน", compare: (a: T, b: T) => (chosenIdx.get(rowKey(a).toUpperCase()) ?? NONE) - (chosenIdx.get(rowKey(b).toUpperCase()) ?? NONE) },
+    { key: "recent", label: t("เรียง: เลือกล่าสุดก่อน", "Sort: recently picked first"), compare: (a: T, b: T) => (recentOf(a)?.i ?? NONE) - (recentOf(b)?.i ?? NONE) },
+    { key: "chosen", label: t("เรียง: ที่เลือกไว้ขึ้นก่อน", "Sort: selected first"), compare: (a: T, b: T) => (chosenIdx.get(rowKey(a).toUpperCase()) ?? NONE) - (chosenIdx.get(rowKey(b).toUpperCase()) ?? NONE) },
   ];
 
   const badge = (r: T) => {
     const p = recentOf(r);
     if (!p) return null;
     return (
-      <span title="เลือกล่าสุดเมื่อ" className="inline-block whitespace-nowrap rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
-        ⏱ {p.i === 0 ? "ล่าสุด · " : ""}
+      <span title={t("เลือกล่าสุดเมื่อ", "Last picked")} className="inline-block whitespace-nowrap rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+        ⏱ {p.i === 0 ? t("ล่าสุด · ", "Latest · ") : ""}
         {ago(p.at)}
       </span>
     );
   };
 
-  const cols: MiniColumn<T>[] = hasRecent ? [...columns, { key: "_recent", header: "เลือกล่าสุด", width: "7.5rem", cell: badge }] : columns;
+  const cols: MiniColumn<T>[] = hasRecent ? [...columns, { key: "_recent", header: t("เลือกล่าสุด", "Last picked"), width: "7.5rem", cell: badge }] : columns;
 
   const renderCard = (r: T) => {
     const c = card(r);
@@ -153,7 +156,7 @@ export function WebsitePickModal<T>({
   };
 
   const viewToggle = (
-    <div className="inline-flex overflow-hidden rounded-lg border border-slate-200" role="group" aria-label="มุมมอง">
+    <div className="inline-flex overflow-hidden rounded-lg border border-slate-200" role="group" aria-label={t("มุมมอง", "View")}>
       {VIEWS.map((v) => (
         <button
           key={v}
@@ -163,7 +166,7 @@ export function WebsitePickModal<T>({
           data-pick-view={v}
           className={`h-8 px-2.5 text-xs ${v === "table" ? "border-r border-slate-200" : ""} ${view === v ? "bg-blue-50 font-medium text-blue-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}
         >
-          {v === "table" ? "☰ ตาราง" : "▦ การ์ด"}
+          {v === "table" ? t("☰ ตาราง", "☰ Table") : t("▦ การ์ด", "▦ Cards")}
         </button>
       ))}
     </div>
@@ -178,14 +181,14 @@ export function WebsitePickModal<T>({
       footer={
         <div className="flex w-full items-center justify-between">
           <span className={`text-xs ${selected.size > max ? "text-red-600" : "text-slate-500"}`}>
-            เลือกแล้ว {selected.size} {unit} (สูงสุด {max})
+            {t(`เลือกแล้ว ${selected.size} ${unit} (สูงสุด ${max})`, `Selected ${selected.size} ${unit} (max ${max})`)}
           </span>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">
-              ยกเลิก
+              {t("ยกเลิก", "Cancel")}
             </button>
             <button type="button" onClick={onConfirm} disabled={selected.size > max} className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-              ใช้รายการนี้
+              {t("ใช้รายการนี้", "Use these")}
             </button>
           </div>
         </div>

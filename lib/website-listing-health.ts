@@ -2,6 +2,8 @@
  * ตรวจ "ข้อมูลบนเว็บยังไม่ครบ" ของสินค้า 1 ตัว (pure — ใช้ได้ทั้งหน้าจอและ API)
  * ใช้ที่: หน้า "สินค้าบนเว็บ" (ป้ายเหลือง + ตัวกรอง "ต้องแก้") · เพิ่มกฎใหม่ที่นี่ที่เดียว ทุกหน้าที่ใช้จะเห็นตาม
  */
+import { tr } from "@/lib/lang";
+
 export interface ListingHealthInput {
   /** ราคาที่เว็บใช้จริง */
   price: number;
@@ -44,28 +46,28 @@ export function colorWebImages(colors: HealthColor[]) {
 
 export function listingIssues(x: ListingHealthInput): ListingIssue[] {
   const out: ListingIssue[] = [];
-  if (!(x.price > 0)) out.push({ key: "no_price", label: "ยังไม่มีราคา" });
-  if (x.imageCount <= 0) out.push({ key: "no_image", label: "ยังไม่มีรูป" });
-  if (!x.categories.length) out.push({ key: "no_category", label: "ยังไม่อยู่หมวดไหน" });
+  if (!(x.price > 0)) out.push({ key: "no_price", label: tr("ยังไม่มีราคา", "No price yet") });
+  if (x.imageCount <= 0) out.push({ key: "no_image", label: tr("ยังไม่มีรูป", "No image yet") });
+  if (!x.categories.length) out.push({ key: "no_category", label: tr("ยังไม่อยู่หมวดไหน", "Not in any category") });
   const noSwatch = x.colors.filter((c) => !c.swatch && !c.noColor);
   if (noSwatch.length)
-    out.push({ key: "swatch_missing", label: `สียังไม่ผูกทะเบียนสี ${noSwatch.length}`, detail: noSwatch.map((c) => c.label).join(", "), names: noSwatch.map((c) => c.label) });
+    out.push({ key: "swatch_missing", label: tr(`สียังไม่ผูกทะเบียนสี ${noSwatch.length}`, `Colors not linked to the color registry: ${noSwatch.length}`), detail: noSwatch.map((c) => c.label).join(", "), names: noSwatch.map((c) => c.label) });
   // ตัวเลือกกรอกทับเอง (ไม่รู้ที่มารูป) = เช็กแบบเดิม "สีนี้มีรูปไหม"
   const noImg = x.colors.filter((c) => !c.img && !c.hasImage);
   if (noImg.length && x.colors.length > 1)
-    out.push({ key: "color_no_image", label: `สีที่ยังไม่มีรูป ${noImg.length}`, detail: noImg.map((c) => c.label).join(", "), skuId: noImg.find((c) => c.skuId)?.skuId });
+    out.push({ key: "color_no_image", label: tr(`สีที่ยังไม่มีรูป ${noImg.length}`, `Colors without images: ${noImg.length}`), detail: noImg.map((c) => c.label).join(", "), skuId: noImg.find((c) => c.skuId)?.skuId });
   // 🖼 สีที่ยังไม่ได้ลงรูปเว็บ (รูปปก SKU ไม่นับ) — ไม่ได้ลงเลยสักสี / ลงไว้บางสี
   const web = colorWebImages(x.colors);
   if (web.missing.length)
     out.push({
       key: "color_no_web_image",
-      label: web.noWeb ? "ยังไม่มีรูปบนเว็บเลย" : `รูปเว็บ ${web.webN}/${web.total} สี`,
-      detail: `ยังไม่มีรูปบนเว็บ: ${web.missing.map((c) => `${c.label}${c.img === "none" ? " (SKU ก็ไม่มีรูป)" : ""}`).join(", ")}`,
+      label: web.noWeb ? tr("ยังไม่มีรูปบนเว็บเลย", "No web images yet") : tr(`รูปเว็บ ${web.webN}/${web.total} สี`, `Web images ${web.webN}/${web.total} colors`),
+      detail: `${tr("ยังไม่มีรูปบนเว็บ", "No web image")}: ${web.missing.map((c) => `${c.label}${c.img === "none" ? tr(" (SKU ก็ไม่มีรูป)", " (SKU has no image either)") : ""}`).join(", ")}`,
       names: web.missing.map((c) => c.label),
       skuId: web.missing[0].skuId,
     });
   if (x.compartmentsMissing)
-    out.push({ key: "no_compartments", label: "ยังไม่ได้วัดช่องใส่ของ", detail: "ไม่ขึ้นในหน้าเช็คขนาดตุ๊กตา — วัดขนาดด้านในของแต่ละช่อง หรือกด \"ไม่มีช่องใส่ของ\" ถ้าไม่ใช่กระเป๋า" });
+    out.push({ key: "no_compartments", label: tr("ยังไม่ได้วัดช่องใส่ของ", "Compartments not measured"), detail: tr("ไม่ขึ้นในหน้าเช็คขนาดตุ๊กตา — วัดขนาดด้านในของแต่ละช่อง หรือกด \"ไม่มีช่องใส่ของ\" ถ้าไม่ใช่กระเป๋า", "Not shown on the doll size check page — measure the inside of each compartment, or press \"No compartments\" if it isn't a bag") });
   return out;
 }
 
@@ -81,13 +83,13 @@ export interface ShopPublishIssue {
 export function shopPublishIssues(rows: { code: string; published: boolean; issues: ListingIssue[] }[], fixHref?: string): ShopPublishIssue[] {
   const live = rows.filter((r) => r.published);
   const codes = (key: ListingIssue["key"]) => live.filter((r) => r.issues.some((i) => i.key === key)).map((r) => r.code);
-  const list = (cs: string[]) => cs.slice(0, 6).join(", ") + (cs.length > 6 ? ` และอีก ${cs.length - 6}` : "");
+  const list = (cs: string[]) => cs.slice(0, 6).join(", ") + (cs.length > 6 ? tr(` และอีก ${cs.length - 6}`, ` and ${cs.length - 6} more`) : "");
   const out: ShopPublishIssue[] = [];
   const noPrice = codes("no_price");
-  if (noPrice.length) out.push({ blockId: null, level: "error", message: `สินค้า ${noPrice.length} รุ่นยังไม่มีราคา — ลูกค้าเห็น "สอบถามราคา" สั่งออนไลน์ไม่ได้: ${list(noPrice)}`, fix: fixHref });
+  if (noPrice.length) out.push({ blockId: null, level: "error", message: tr(`สินค้า ${noPrice.length} รุ่นยังไม่มีราคา — ลูกค้าเห็น "สอบถามราคา" สั่งออนไลน์ไม่ได้: ${list(noPrice)}`, `${noPrice.length} models have no price — customers see "Ask for price" and can't order online: ${list(noPrice)}`), fix: fixHref });
   const noImg = codes("no_image");
-  if (noImg.length) out.push({ blockId: null, level: "warning", message: `สินค้า ${noImg.length} รุ่นยังไม่มีรูป: ${list(noImg)}`, fix: fixHref });
+  if (noImg.length) out.push({ blockId: null, level: "warning", message: tr(`สินค้า ${noImg.length} รุ่นยังไม่มีรูป: ${list(noImg)}`, `${noImg.length} models have no image: ${list(noImg)}`), fix: fixHref });
   const noCat = codes("no_category");
-  if (noCat.length) out.push({ blockId: null, level: "warning", message: `สินค้า ${noCat.length} รุ่นยังไม่อยู่หมวดไหน (ไม่ขึ้นตอนลูกค้าเลือกหมวด): ${list(noCat)}`, fix: fixHref });
+  if (noCat.length) out.push({ blockId: null, level: "warning", message: tr(`สินค้า ${noCat.length} รุ่นยังไม่อยู่หมวดไหน (ไม่ขึ้นตอนลูกค้าเลือกหมวด): ${list(noCat)}`, `${noCat.length} models are not in any category (hidden when customers pick a category): ${list(noCat)}`), fix: fixHref });
   return out;
 }

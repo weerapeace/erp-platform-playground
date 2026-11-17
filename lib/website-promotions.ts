@@ -15,15 +15,16 @@
  * คูปอง: คิดหลังโปรจากยอดที่ลดแล้ว · โปรที่ตั้ง "ใช้คู่คูปองไม่ได้" + ลูกค้าใส่โค้ด → ERP ไม่รับโค้ด (บอกเหตุผล)
  * เงินเป็นบาท ปัดทศนิยม 2 ตำแหน่ง
  */
+import { tr } from "@/lib/lang";
 export type PromoKind = "flash" | "item" | "qty_percent" | "bxgy" | "tier" | "bundle";
 
 export const PROMO_KINDS: { key: PromoKind; label: string; hint: string }[] = [
-  { key: "item", label: "🏷 ลดรายชิ้น", hint: "แต่ละรุ่นลดไม่เท่ากันได้ — ลด % / ลดบาท / ราคาพิเศษ · เว็บโชว์ราคาขีดฆ่า" },
-  { key: "flash", label: "⚡ ลดราคาตั้งเวลา (Flash sale)", hint: "ลด % ทุกชิ้นของรุ่นที่เลือก ช่วงเวลาที่ตั้ง · เว็บโชว์ราคาขีดฆ่า + นับถอยหลัง" },
-  { key: "qty_percent", label: "ซื้อครบ N ชิ้น ลด %", hint: "เช่น ซื้อ 2 ชิ้นขึ้นไป ลด 10% (นับรวมทุกรุ่นที่ร่วม)" },
-  { key: "bxgy", label: "ซื้อ X แถม Y", hint: "เช่น ซื้อ 2 แถม 1 — ชิ้นที่ถูกสุดในแต่ละชุดฟรี (หรือลด %)" },
-  { key: "tier", label: "ยอดครบ ลดขั้นบันได", hint: "เช่น ครบ ฿1,500 ลด ฿100 · ครบ ฿3,000 ลด 10%" },
-  { key: "bundle", label: "ซื้อเป็นเซ็ต ลดพิเศษ", hint: "เช่น กระเป๋า + เข็มขัด รุ่นที่กำหนด ซื้อคู่กันลด ฿200" },
+  { key: "item", get label() { return tr("🏷 ลดรายชิ้น", "🏷 Per-item discount"); }, get hint() { return tr("แต่ละรุ่นลดไม่เท่ากันได้ — ลด % / ลดบาท / ราคาพิเศษ · เว็บโชว์ราคาขีดฆ่า", "Each model can have its own discount — % off / baht off / special price · site shows struck-through price"); } },
+  { key: "flash", get label() { return tr("⚡ ลดราคาตั้งเวลา (Flash sale)", "⚡ Timed discount (Flash sale)"); }, get hint() { return tr("ลด % ทุกชิ้นของรุ่นที่เลือก ช่วงเวลาที่ตั้ง · เว็บโชว์ราคาขีดฆ่า + นับถอยหลัง", "% off every item of selected models during the set time · site shows struck-through price + countdown"); } },
+  { key: "qty_percent", get label() { return tr("ซื้อครบ N ชิ้น ลด %", "Buy N items, get % off"); }, get hint() { return tr("เช่น ซื้อ 2 ชิ้นขึ้นไป ลด 10% (นับรวมทุกรุ่นที่ร่วม)", "e.g. buy 2 or more, get 10% off (counts all participating models)"); } },
+  { key: "bxgy", get label() { return tr("ซื้อ X แถม Y", "Buy X get Y"); }, get hint() { return tr("เช่น ซื้อ 2 แถม 1 — ชิ้นที่ถูกสุดในแต่ละชุดฟรี (หรือลด %)", "e.g. buy 2 get 1 — cheapest item in each set is free (or % off)"); } },
+  { key: "tier", get label() { return tr("ยอดครบ ลดขั้นบันได", "Spend tiers"); }, get hint() { return tr("เช่น ครบ ฿1,500 ลด ฿100 · ครบ ฿3,000 ลด 10%", "e.g. spend ฿1,500 save ฿100 · spend ฿3,000 save 10%"); } },
+  { key: "bundle", get label() { return tr("ซื้อเป็นเซ็ต ลดพิเศษ", "Bundle discount"); }, get hint() { return tr("เช่น กระเป๋า + เข็มขัด รุ่นที่กำหนด ซื้อคู่กันลด ฿200", "e.g. a set bag + belt bought together saves ฿200"); } },
 ];
 
 /** โปรที่ลด "ต่อชิ้น" (โชว์เป็นราคาลดบนการ์ด/หน้าสินค้า · คิดก่อนโปรตะกร้า) */

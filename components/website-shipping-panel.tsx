@@ -17,6 +17,8 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { useToast } from "@/components/toast";
 import { SaveBar } from "@/components/save-bar";
 import { MoneyInput } from "@/components/money-input";
@@ -49,7 +51,7 @@ import { webForm } from "@/lib/website-form-styles";
 type Meta = {
   carriers: { key: string; label: string }[];
   boxes: { name: string; size: string }[];
-  areas: { key: ShippingArea; th: string; hint: string }[];
+  areas: { key: ShippingArea; th: string; en?: string; hint: string }[];
   suggestedRemote: string[];
   payCod: boolean;
 };
@@ -60,20 +62,23 @@ const parsePostals = (text: string) => text.split(/[\s,]+/).map((x) => x.replace
 /** เมนูซ้ายตัวพิเศษ (ไม่ใช่วิธีส่ง) */
 const REMOTE = "__remote";
 
-/** วิธีสำเร็จรูป — กดเพิ่มแล้วแก้ต่อได้ */
-const TEMPLATES: { icon: string; label: string; desc: string; make: () => Partial<ShippingMethod> }[] = [
+/** คำอธิบายพื้นที่ภาษาอังกฤษ (hint จาก lib/website-shipping เป็นไทย) — หน้า ERP เท่านั้น */
+const AREA_HINT_EN: Record<string, string> = { all: "Any postcode", bkk: "Postcodes starting with 10", metro: "Postcodes starting with 10, 11, 12, 73, 74" };
+
+/** วิธีสำเร็จรูป — กดเพิ่มแล้วแก้ต่อได้ (label/desc = ป้ายในหน้า ERP · ค่าใน make() = ข้อมูลที่บันทึก/ลูกค้าเห็น คงไทย) */
+const templates = (): { icon: string; label: string; desc: string; make: () => Partial<ShippingMethod> }[] => [
   {
     icon: "🚚",
-    label: "ส่งธรรมดา (Flash/Kerry/J&T)",
-    desc: "฿45–80 ตามจำนวนชิ้น · ส่งฟรีเมื่อ ฿1,500 · COD ได้",
+    label: tr("ส่งธรรมดา (Flash/Kerry/J&T)", "Standard (Flash/Kerry/J&T)"),
+    desc: tr("฿45–80 ตามจำนวนชิ้น · ส่งฟรีเมื่อ ฿1,500 · COD ได้", "฿45–80 by item count · free over ฿1,500 · COD OK"),
     make: () => ({
       kind: "ship", name: "ส่งธรรมดา", name_en: "Standard delivery", carrier: "flash", eta: "1–3 วัน", eta_en: "1–3 days", codAllowed: true, codFee: 30, remoteFee: 50, freeMin: 1500,
       fee: { kind: "tiers", tiers: [{ upTo: 1, fee: 45, box: "A" }, { upTo: 2, fee: 55, box: "B" }, { upTo: 4, fee: 70, box: "C" }, { upTo: null, fee: 80, box: "E" }] },
     }),
   },
-  { icon: "📮", label: "EMS ไปรษณีย์ไทย", desc: "เหมา ฿80 · ถึงใน 1–2 วัน", make: () => ({ kind: "ship", name: "EMS ไปรษณีย์ไทย", name_en: "EMS Thailand Post", carrier: "thaipost", eta: "1–2 วัน", eta_en: "1–2 days", fee: { kind: "flat", amount: 80 }, remoteFee: 0, codAllowed: false }) },
-  { icon: "⚡", label: "ด่วนในวัน (กทม.)", desc: "เหมา ฿120 · ตัดรอบ 14:00 · เฉพาะ กทม.", make: () => ({ kind: "ship", name: "ด่วนในวัน (กทม.)", name_en: "Same-day (Bangkok)", carrier: "other", area: "bkk", eta: "ภายในวันนี้", eta_en: "Today", cutoff: "14:00", fee: { kind: "flat", amount: 120 }, codAllowed: false }) },
-  { icon: "🏪", label: "รับเองที่ร้าน", desc: "ฟรี · ลูกค้าไม่ต้องกรอกที่อยู่", make: () => ({ kind: "pickup", name: "รับเองที่ร้าน", name_en: "Pick up at store", eta: "พร้อมรับภายใน 1 วัน", eta_en: "Ready within 1 day", fee: { kind: "flat", amount: 0 }, codAllowed: true, note: "" }) },
+  { icon: "📮", label: tr("EMS ไปรษณีย์ไทย", "EMS Thailand Post"), desc: tr("เหมา ฿80 · ถึงใน 1–2 วัน", "Flat ฿80 · 1–2 days"), make: () => ({ kind: "ship", name: "EMS ไปรษณีย์ไทย", name_en: "EMS Thailand Post", carrier: "thaipost", eta: "1–2 วัน", eta_en: "1–2 days", fee: { kind: "flat", amount: 80 }, remoteFee: 0, codAllowed: false }) },
+  { icon: "⚡", label: tr("ด่วนในวัน (กทม.)", "Same-day (Bangkok)"), desc: tr("เหมา ฿120 · ตัดรอบ 14:00 · เฉพาะ กทม.", "Flat ฿120 · cutoff 14:00 · Bangkok only"), make: () => ({ kind: "ship", name: "ด่วนในวัน (กทม.)", name_en: "Same-day (Bangkok)", carrier: "other", area: "bkk", eta: "ภายในวันนี้", eta_en: "Today", cutoff: "14:00", fee: { kind: "flat", amount: 120 }, codAllowed: false }) },
+  { icon: "🏪", label: tr("รับเองที่ร้าน", "Pick up at store"), desc: tr("ฟรี · ลูกค้าไม่ต้องกรอกที่อยู่", "Free · no address needed"), make: () => ({ kind: "pickup", name: "รับเองที่ร้าน", name_en: "Pick up at store", eta: "พร้อมรับภายใน 1 วัน", eta_en: "Ready within 1 day", fee: { kind: "flat", amount: 0 }, codAllowed: true, note: "" }) },
 ];
 
 /** id ใหม่ที่ยังไม่ซ้ำ (m1, m2, …) */
@@ -85,6 +90,7 @@ const nextId = (methods: ShippingMethod[]) => {
 };
 
 export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
+  const t = useT();
   const toast = useToast();
   const [cfg, setCfg] = useState<ShippingConfig | null>(null);
   const [saved, setSaved] = useState<string>("");
@@ -106,9 +112,9 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
       setMeta({ carriers: j.carriers, boxes: j.boxes, areas: j.areas, suggestedRemote: j.suggestedRemote, payCod: j.payCod });
       setSel((s) => (s && (s === REMOTE || (j.config.methods as ShippingMethod[]).some((m) => m.id === s)) ? s : j.config.methods[0]?.id ?? null));
     } catch {
-      toast.error("โหลดการตั้งค่าจัดส่งไม่สำเร็จ");
+      toast.error(t("โหลดการตั้งค่าจัดส่งไม่สำเร็จ", "Couldn't load shipping settings"));
     }
-  }, [shopSlug, toast]);
+  }, [shopSlug, toast, t]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -135,10 +141,10 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
     setSel(id);
     setOpen(true);
   };
-  const add = (t: Partial<ShippingMethod>) => {
+  const add = (tpl: Partial<ShippingMethod>) => {
     if (!cfg || cfg.methods.length >= MAX_SHIPPING_METHODS) return;
     const id = nextId(cfg.methods);
-    setCfg((c) => (c ? { ...c, legacy: undefined, methods: [...c.methods, normalizeMethod({ ...t, id }, c.methods.length)] } : c));
+    setCfg((c) => (c ? { ...c, legacy: undefined, methods: [...c.methods, normalizeMethod({ ...tpl, id }, c.methods.length)] } : c));
     choose(id);
   };
   const duplicate = (m: ShippingMethod) => {
@@ -152,13 +158,13 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
       return { ...c, legacy: undefined, methods: arr };
     });
     setSel(id);
-    toast.success("ทำซ้ำแล้ว — แก้ต่อได้เลย (ยังไม่บันทึก)");
+    toast.success(t("ทำซ้ำแล้ว — แก้ต่อได้เลย (ยังไม่บันทึก)", "Duplicated — edit away (not saved yet)"));
   };
   const remove = async (m: ShippingMethod) => {
     const ok = await askConfirm({
-      title: `ลบวิธีส่ง "${m.name}"?`,
-      message: "ออเดอร์เก่าที่เลือกวิธีนี้ยังเก็บชื่อไว้ครบ · ถ้าแค่อยากหยุดชั่วคราว ใช้สวิตช์ปิดแทนได้",
-      confirmText: "ลบวิธีนี้",
+      title: t(`ลบวิธีส่ง "${m.name}"?`, `Delete shipping method "${m.name}"?`),
+      message: t("ออเดอร์เก่าที่เลือกวิธีนี้ยังเก็บชื่อไว้ครบ · ถ้าแค่อยากหยุดชั่วคราว ใช้สวิตช์ปิดแทนได้", "Past orders keep this method's name · to pause it, use the switch instead"),
+      confirmText: t("ลบวิธีนี้", "Delete method"),
       variant: "danger",
     });
     if (!ok || !cfg) return;
@@ -180,19 +186,19 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shopId, config: { ...cfg, remotePostals } }),
       }).then((r) => r.json());
-      if (!j.ok) return toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+      if (!j.ok) return toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Couldn't save"));
       setCfg(j.config);
       setSaved(JSON.stringify(j.config));
       setRemoteText((j.config.remotePostals ?? []).join(" "));
-      toast.success("บันทึกวิธีจัดส่งแล้ว — เว็บร้านเปลี่ยนภายใน ~1 นาที");
+      toast.success(t("บันทึกวิธีจัดส่งแล้ว — เว็บร้านเปลี่ยนภายใน ~1 นาที", "Shipping saved — the shop updates within ~1 minute"));
     } catch {
-      toast.error("บันทึกไม่สำเร็จ");
+      toast.error(t("บันทึกไม่สำเร็จ", "Couldn't save"));
     } finally {
       setSaving(false);
     }
   };
 
-  if (!cfg || !meta) return <p className="py-8 text-center text-sm text-slate-500">กำลังโหลด…</p>;
+  if (!cfg || !meta) return <p className="py-8 text-center text-sm text-slate-500">{t("กำลังโหลด…", "Loading…")}</p>;
   const remoteDirty = remoteText.trim() !== (JSON.parse(saved || "{}") as ShippingConfig).remotePostals?.join(" ");
   // ค่าที่ใช้ตรวจ/ตัวอย่าง = รวมรายการพื้นที่ห่างไกลที่กำลังพิมพ์ (ยังไม่บันทึก) ด้วย
   const live: ShippingConfig = { ...cfg, remotePostals: parsePostals(remoteText) };
@@ -239,7 +245,7 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
         compact={cols === 1}
       />
     ) : (
-      <p className="py-10 text-center text-sm text-slate-400">{cfg.methods.length ? "เลือกวิธีส่งทางซ้ายเพื่อดูรายละเอียด" : "ยังไม่มีวิธีส่ง — กด + เพิ่มวิธีส่ง"}</p>
+      <p className="py-10 text-center text-sm text-slate-400">{cfg.methods.length ? t("เลือกวิธีส่งทางซ้ายเพื่อดูรายละเอียด", "Pick a method on the left to see details") : t("ยังไม่มีวิธีส่ง — กด + เพิ่มวิธีส่ง", "No shipping methods — click + Add method")}</p>
     );
   const preview = <ShippingCustomerPreview cfg={live} selectedId={m?.id ?? null} />;
 
@@ -247,7 +253,7 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
     <div ref={rootRef} className="space-y-4 pb-20" data-shipping-panel data-cols={cols}>
       {cfg.legacy && (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          ร้านนี้ยังใช้ <b>ค่าส่งเหมา</b> จากแท็บ 🏪 ข้อมูลร้าน (ด้านล่างคือค่าเดิมที่แปลงมาให้) — แก้/เพิ่มวิธีส่งแล้วกด 💾 บันทึก เพื่อเริ่มให้ลูกค้าเลือกวิธีส่งเอง
+          {t("ร้านนี้ยังใช้", "This shop still uses the")} <b>{t("ค่าส่งเหมา", "flat shipping fee")}</b> {t("จากแท็บ 🏪 ข้อมูลร้าน (ด้านล่างคือค่าเดิมที่แปลงมาให้) — แก้/เพิ่มวิธีส่งแล้วกด 💾 บันทึก เพื่อเริ่มให้ลูกค้าเลือกวิธีส่งเอง", "from the 🏪 Shop info tab (converted below) — edit/add methods and click 💾 Save to let customers choose")}
         </p>
       )}
 
@@ -256,7 +262,7 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
           <div>{list}</div>
           <div className="min-w-0">{detail}</div>
           <aside className="sticky top-2 space-y-2" data-preview-aside>
-            <div className="text-sm font-semibold text-slate-700">👀 ลูกค้าจะเห็นแบบนี้</div>
+            <div className="text-sm font-semibold text-slate-700">{t("👀 ลูกค้าจะเห็นแบบนี้", "👀 What customers see")}</div>
             {preview}
           </aside>
         </div>
@@ -277,15 +283,16 @@ export function WebsiteShippingPanel({ shopSlug, shopId }: { shopSlug: string; s
         list
       )}
 
-      <SaveBar dirty={dirty || remoteDirty} saving={saving} onSave={save} onDiscard={() => { const c = JSON.parse(saved) as ShippingConfig; setCfg(c); setRemoteText(c.remotePostals.join(" ")); }} note="บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที" />
+      <SaveBar dirty={dirty || remoteDirty} saving={saving} onSave={save} onDiscard={() => { const c = JSON.parse(saved) as ShippingConfig; setCfg(c); setRemoteText(c.remotePostals.join(" ")); }} note={t("บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที", "After saving, the shop updates within ~1 minute")} />
     </div>
   );
 }
 
 function PreviewCard({ children }: { children: ReactNode }) {
+  const t = useT();
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-3">
-      <div className="mb-2 text-sm font-semibold text-slate-700">👀 ลูกค้าจะเห็นแบบนี้</div>
+      <div className="mb-2 text-sm font-semibold text-slate-700">{t("👀 ลูกค้าจะเห็นแบบนี้", "👀 What customers see")}</div>
       {children}
     </section>
   );
@@ -334,6 +341,7 @@ function MethodList({ cfg, sel, checkOpts, onSelect, onToggle, onReorder, onAdd 
   onReorder: (from: number, to: number) => void;
   onAdd: (t: Partial<ShippingMethod>) => void;
 }) {
+  const t = useT();
   const { rowProps, handleProps, rowCls } = useDragReorder(onReorder);
   const firstOn = cfg.methods.find((m) => m.enabled)?.id;
   const full = cfg.methods.length >= MAX_SHIPPING_METHODS;
@@ -341,9 +349,9 @@ function MethodList({ cfg, sel, checkOpts, onSelect, onToggle, onReorder, onAdd 
     <div className="space-y-2.5" data-method-list>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-slate-900">วิธีจัดส่ง</h2>
+          <h2 className="text-base font-semibold text-slate-900">{t("วิธีจัดส่ง", "Shipping methods")}</h2>
           <p className="text-xs text-slate-500">
-            {cfg.methods.length} วิธี · เปิดอยู่ {cfg.methods.filter((m) => m.enabled).length} · ลากเรียงได้ (ลูกค้าเห็นตามลำดับนี้)
+            {t(`${cfg.methods.length} วิธี · เปิดอยู่ ${cfg.methods.filter((m) => m.enabled).length} · ลากเรียงได้ (ลูกค้าเห็นตามลำดับนี้)`, `${cfg.methods.length} methods · ${cfg.methods.filter((m) => m.enabled).length} on · drag to reorder (customers see this order)`)}
           </p>
         </div>
         <AddMenu disabled={full} onAdd={onAdd} />
@@ -365,8 +373,8 @@ function MethodList({ cfg, sel, checkOpts, onSelect, onToggle, onReorder, onAdd 
           />
         ))}
       </div>
-      {full && <p className="text-xs text-slate-400">ครบ {MAX_SHIPPING_METHODS} วิธีแล้ว (สูงสุดที่ระบบรับ)</p>}
-      <div className="pt-1 text-[11px] font-medium uppercase tracking-wider text-slate-400">ตั้งค่ารวมทุกวิธี</div>
+      {full && <p className="text-xs text-slate-400">{t(`ครบ ${MAX_SHIPPING_METHODS} วิธีแล้ว (สูงสุดที่ระบบรับ)`, `${MAX_SHIPPING_METHODS} methods reached (the maximum)`)}</p>}
+      <div className="pt-1 text-[11px] font-medium uppercase tracking-wider text-slate-400">{t("ตั้งค่ารวมทุกวิธี", "Settings for all methods")}</div>
       <button
         type="button"
         onClick={() => onSelect(REMOTE)}
@@ -375,8 +383,8 @@ function MethodList({ cfg, sel, checkOpts, onSelect, onToggle, onReorder, onAdd 
       >
         <span className="text-lg leading-none">🏝</span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-slate-800">พื้นที่ห่างไกล</span>
-          <span className="block text-xs text-slate-500">{cfg.remotePostals.length} รหัสไปรษณีย์ · ใช้กับวิธีที่ตั้ง “บวกพื้นที่ห่างไกล”</span>
+          <span className="block text-sm font-semibold text-slate-800">{t("พื้นที่ห่างไกล", "Remote areas")}</span>
+          <span className="block text-xs text-slate-500">{cfg.remotePostals.length} {t("รหัสไปรษณีย์ · ใช้กับวิธีที่ตั้ง “บวกพื้นที่ห่างไกล”", "postcodes · used by methods with a “remote area surcharge”")}</span>
         </span>
         <span className="text-slate-300">›</span>
       </button>
@@ -395,11 +403,12 @@ function MethodCard({ m, active, isDefault, serious, rowProps, rowCls, handle, o
   onSelect: () => void;
   onToggle: (v: boolean) => void;
 }) {
+  const t = useT();
   const tags: [keyof typeof TAG, string][] = [];
-  if (m.freeMin > 0) tags.push(["emerald", `ส่งฟรี ${money(m.freeMin)}`]);
-  if (m.codAllowed) tags.push(["amber", m.kind === "pickup" ? "จ่ายหน้าร้าน" : `COD${m.codFee ? ` +${money(m.codFee)}` : ""}`]);
-  if (m.kind === "ship" && m.area !== "all") tags.push(["sky", m.area === "bkk" ? "กทม.เท่านั้น" : "กทม.+ปริมณฑล"]);
-  if (m.cutoff) tags.push(["slate", `ตัดรอบ ${m.cutoff}`]);
+  if (m.freeMin > 0) tags.push(["emerald", t(`ส่งฟรี ${money(m.freeMin)}`, `Free over ${money(m.freeMin)}`)]);
+  if (m.codAllowed) tags.push(["amber", m.kind === "pickup" ? t("จ่ายหน้าร้าน", "Pay at store") : `COD${m.codFee ? ` +${money(m.codFee)}` : ""}`]);
+  if (m.kind === "ship" && m.area !== "all") tags.push(["sky", m.area === "bkk" ? t("กทม.เท่านั้น", "Bangkok only") : t("กทม.+ปริมณฑล", "Greater Bangkok")]);
+  if (m.cutoff) tags.push(["slate", t(`ตัดรอบ ${m.cutoff}`, `Cutoff ${m.cutoff}`)]);
   return (
     <div
       {...rowProps}
@@ -419,10 +428,10 @@ function MethodCard({ m, active, isDefault, serious, rowProps, rowCls, handle, o
       <span className={`pt-0.5 text-lg leading-none ${m.enabled ? "" : "opacity-50 grayscale"}`}>{m.kind === "pickup" ? "🏪" : "🚚"}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className={`truncate text-sm font-semibold ${m.enabled ? "text-slate-800" : "text-slate-400"}`}>{m.name || "(ไม่มีชื่อ)"}</span>
+          <span className={`truncate text-sm font-semibold ${m.enabled ? "text-slate-800" : "text-slate-400"}`}>{m.name || t("(ไม่มีชื่อ)", "(no name)")}</span>
           {isDefault && (
-            <span className="shrink-0 rounded bg-blue-600 px-1 text-[10px] font-medium text-white" title="วิธีแรกที่เปิดอยู่ = ถูกเลือกไว้ก่อนตอนลูกค้าเปิดหน้าชำระเงิน">
-              ค่าเริ่มต้น
+            <span className="shrink-0 rounded bg-blue-600 px-1 text-[10px] font-medium text-white" title={t("วิธีแรกที่เปิดอยู่ = ถูกเลือกไว้ก่อนตอนลูกค้าเปิดหน้าชำระเงิน", "The first enabled method is preselected at checkout")}>
+              {t("ค่าเริ่มต้น", "Default")}
             </span>
           )}
         </div>
@@ -432,23 +441,24 @@ function MethodCard({ m, active, isDefault, serious, rowProps, rowCls, handle, o
         </div>
         {(!m.enabled || tags.length > 0 || serious > 0) && (
           <div className="mt-1 flex flex-wrap gap-1">
-            {!m.enabled && <Tag c="slate">ปิดอยู่</Tag>}
-            {tags.map(([c, t]) => <Tag key={t} c={c}>{t}</Tag>)}
-            {serious > 0 && <Tag c="rose">⚠ {serious} จุดควรดู</Tag>}
+            {!m.enabled && <Tag c="slate">{t("ปิดอยู่", "Off")}</Tag>}
+            {tags.map(([c, tx]) => <Tag key={tx} c={c}>{tx}</Tag>)}
+            {serious > 0 && <Tag c="rose">⚠ {t(`${serious} จุดควรดู`, `${serious} to check`)}</Tag>}
           </div>
         )}
       </div>
-      <ToggleSwitch on={m.enabled} onChange={onToggle} title={m.enabled ? "เปิดให้ลูกค้าเลือกอยู่ — กดเพื่อปิด" : "ปิดอยู่ — กดเพื่อเปิด"} />
+      <ToggleSwitch on={m.enabled} onChange={onToggle} title={m.enabled ? t("เปิดให้ลูกค้าเลือกอยู่ — กดเพื่อปิด", "Customers can choose this — click to turn off") : t("ปิดอยู่ — กดเพื่อเปิด", "Off — click to turn on")} />
     </div>
   );
 }
 
 function AddMenu({ disabled, onAdd }: { disabled: boolean; onAdd: (t: Partial<ShippingMethod>) => void }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const pick = (t: Partial<ShippingMethod>) => {
+  const pick = (tpl: Partial<ShippingMethod>) => {
     setOpen(false);
-    onAdd(t);
+    onAdd(tpl);
   };
   return (
     <div ref={ref} className="shrink-0">
@@ -456,27 +466,27 @@ function AddMenu({ disabled, onAdd }: { disabled: boolean; onAdd: (t: Partial<Sh
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        title={disabled ? `ครบ ${MAX_SHIPPING_METHODS} วิธีแล้ว` : "เพิ่มจากแบบสำเร็จรูป หรือเริ่มว่าง"}
+        title={disabled ? t(`ครบ ${MAX_SHIPPING_METHODS} วิธีแล้ว`, `${MAX_SHIPPING_METHODS} methods reached`) : t("เพิ่มจากแบบสำเร็จรูป หรือเริ่มว่าง", "Add from a template or start blank")}
         className="whitespace-nowrap rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-slate-300"
         data-add-method
       >
-        + เพิ่มวิธีส่ง
+        {t("+ เพิ่มวิธีส่ง", "+ Add method")}
       </button>
       <FloatingDropdown anchorRef={ref} open={open} onClose={() => setOpen(false)} minWidth={300}>
         <div className="overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg" style={{ maxHeight: "var(--fd-max-h)" }}>
-          <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">เริ่มจากแบบสำเร็จรูป</div>
-          {TEMPLATES.map((t) => (
-            <button key={t.label} type="button" onClick={() => pick(t.make())} className="flex w-full gap-2.5 px-3 py-2 text-left hover:bg-slate-50">
-              <span className="text-lg leading-none">{t.icon}</span>
+          <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">{t("เริ่มจากแบบสำเร็จรูป", "Start from a template")}</div>
+          {templates().map((tp) => (
+            <button key={tp.icon} type="button" onClick={() => pick(tp.make())} className="flex w-full gap-2.5 px-3 py-2 text-left hover:bg-slate-50">
+              <span className="text-lg leading-none">{tp.icon}</span>
               <span>
-                <span className="block text-sm text-slate-800">{t.label}</span>
-                <span className="block text-xs text-slate-500">{t.desc}</span>
+                <span className="block text-sm text-slate-800">{tp.label}</span>
+                <span className="block text-xs text-slate-500">{tp.desc}</span>
               </span>
             </button>
           ))}
           <button type="button" onClick={() => pick({ kind: "ship", name: "วิธีส่งใหม่" })} className="flex w-full gap-2.5 border-t border-slate-100 px-3 py-2 text-left hover:bg-slate-50">
             <span className="text-lg leading-none">✏️</span>
-            <span className="text-sm text-slate-700">ว่าง (ตั้งเองทั้งหมด)</span>
+            <span className="text-sm text-slate-700">{t("ว่าง (ตั้งเองทั้งหมด)", "Blank (set everything yourself)")}</span>
           </button>
         </div>
       </FloatingDropdown>
@@ -518,46 +528,47 @@ function MethodDetail({ m, index, meta, issues, remoteCount, canDuplicate, onCha
   /** ช่องแคบ (มือถือ) — ตารางขั้นค่าส่งเรียง 2 บรรทัด */
   compact?: boolean;
 }) {
+  const t = useT();
   const lbl = webForm.label;
   const field = webForm.input;
   const of = (g: ShippingIssueGroup) => issues.filter((x) => x.group === g);
   const pickup = m.kind === "pickup";
   const tiers = m.fee.kind === "tiers" ? m.fee.tiers : null;
-  const setTiers = (t: { upTo: number | null; fee: number; box: string }[]) => onChange({ fee: { kind: "tiers", tiers: t } });
+  const setTiers = (tt: { upTo: number | null; fee: number; box: string }[]) => onChange({ fee: { kind: "tiers", tiers: tt } });
 
   return (
     <div className="space-y-3" data-method-detail={m.id}>
       <div className="space-y-1">
         {back && (
           <button type="button" onClick={back} className="mb-1 text-sm text-blue-600 hover:underline">
-            ‹ วิธีส่งทั้งหมด
+            {t("‹ วิธีส่งทั้งหมด", "‹ All methods")}
           </button>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-2xl leading-none">{pickup ? "🏪" : "🚚"}</span>
-          <h2 className="min-w-0 truncate text-lg font-semibold text-slate-900">{m.name || "(ไม่มีชื่อ)"}</h2>
+          <h2 className="min-w-0 truncate text-lg font-semibold text-slate-900">{m.name || t("(ไม่มีชื่อ)", "(no name)")}</h2>
           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
-            <ToggleSwitch on={m.enabled} onChange={(v) => onChange({ enabled: v })} size="sm" label={m.enabled ? "ลูกค้าเลือกได้" : "ปิดอยู่"} />
+            <ToggleSwitch on={m.enabled} onChange={(v) => onChange({ enabled: v })} size="sm" label={m.enabled ? t("ลูกค้าเลือกได้", "Available") : t("ปิดอยู่", "Off")} />
           </span>
           <span className="ml-auto flex gap-1.5">
-            <button type="button" disabled={!canDuplicate} onClick={onDuplicate} title={canDuplicate ? "สร้างวิธีใหม่จากวิธีนี้ แล้วแก้ต่อ" : `ครบ ${MAX_SHIPPING_METHODS} วิธีแล้ว`}
+            <button type="button" disabled={!canDuplicate} onClick={onDuplicate} title={canDuplicate ? t("สร้างวิธีใหม่จากวิธีนี้ แล้วแก้ต่อ", "Create a new method from this one") : t(`ครบ ${MAX_SHIPPING_METHODS} วิธีแล้ว`, `${MAX_SHIPPING_METHODS} methods reached`)}
               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 hover:border-slate-300 disabled:opacity-40" data-duplicate>
-              ⧉ ทำซ้ำ
+              {t("⧉ ทำซ้ำ", "⧉ Duplicate")}
             </button>
             <button type="button" onClick={onDelete} className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50">
-              ลบ
+              {t("ลบ", "Delete")}
             </button>
           </span>
         </div>
         <p className="text-xs tabular-nums text-slate-500">
-          ลำดับที่ {index + 1} ที่ลูกค้าเห็น · {feeSummary(m)}
-          {m.freeMin > 0 ? ` · ส่งฟรีเมื่อ ${money(m.freeMin)}` : ""}
+          {t(`ลำดับที่ ${index + 1} ที่ลูกค้าเห็น`, `Position ${index + 1} for customers`)} · {feeSummary(m)}
+          {m.freeMin > 0 ? ` · ${t("ส่งฟรีเมื่อ", "free over")} ${money(m.freeMin)}` : ""}
         </p>
       </div>
 
-      <Group id="customer" icon="👀" title="ลูกค้าเห็นอะไร" hint="ชื่อและหมายเหตุโชว์ในหน้าชำระเงินของเว็บร้าน" issues={of("customer")}>
+      <Group id="customer" icon="👀" title={t("ลูกค้าเห็นอะไร", "What customers see")} hint={t("ชื่อและหมายเหตุโชว์ในหน้าชำระเงินของเว็บร้าน", "Name and note show on the shop checkout")} issues={of("customer")}>
         <div className="max-w-xs">
-          <label className={lbl}>ชนิด</label>
+          <label className={lbl}>{t("ชนิด", "Type")}</label>
           <Seg
             value={m.kind}
             onChange={(v) =>
@@ -568,23 +579,23 @@ function MethodDetail({ m, index, meta, issues, remoteCount, canDuplicate, onCha
                   : { kind: v },
               )
             }
-            options={[{ v: "ship", l: "🚚 ส่งถึงบ้าน" }, { v: "pickup", l: "🏪 รับเองที่ร้าน" }]}
+            options={[{ v: "ship", l: t("🚚 ส่งถึงบ้าน", "🚚 Home delivery") }, { v: "pickup", l: t("🏪 รับเองที่ร้าน", "🏪 Store pickup") }]}
           />
         </div>
         <div>
-          <label className={lbl}>ชื่อที่ลูกค้าเห็น</label>
+          <label className={lbl}>{t("ชื่อที่ลูกค้าเห็น", "Name customers see")}</label>
           <div className="grid grid-cols-2 gap-2">
-            <input className={field} value={m.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="เช่น ส่งธรรมดา" />
-            <input className={field} value={m.name_en ?? ""} onChange={(e) => onChange({ name_en: e.target.value })} placeholder="English (ไม่ใส่ก็ได้)" />
+            <input className={field} value={m.name} onChange={(e) => onChange({ name: e.target.value })} placeholder={t("เช่น ส่งธรรมดา", "e.g. Standard delivery")} />
+            <input className={field} value={m.name_en ?? ""} onChange={(e) => onChange({ name_en: e.target.value })} placeholder={t("English (ไม่ใส่ก็ได้)", "English (optional)")} />
           </div>
         </div>
         <div>
-          <label className={lbl}>{pickup ? "ที่อยู่ / เวลารับของ" : "หมายเหตุ (ไม่ใส่ก็ได้)"}</label>
-          <input className={field} value={m.note} onChange={(e) => onChange({ note: e.target.value })} placeholder={pickup ? "เช่น ร้านสาขาสีลม 10:00–19:00" : "เช่น งดส่งวันอาทิตย์"} />
+          <label className={lbl}>{pickup ? t("ที่อยู่ / เวลารับของ", "Address / pickup hours") : t("หมายเหตุ (ไม่ใส่ก็ได้)", "Note (optional)")}</label>
+          <input className={field} value={m.note} onChange={(e) => onChange({ note: e.target.value })} placeholder={pickup ? t("เช่น ร้านสาขาสีลม 10:00–19:00", "e.g. Silom branch 10:00–19:00") : t("เช่น งดส่งวันอาทิตย์", "e.g. no delivery on Sundays")} />
         </div>
       </Group>
 
-      <Group id="fee" icon="💰" title="ค่าส่ง" hint={pickup ? "รับเองที่ร้านส่วนใหญ่ไม่คิดค่าส่ง (ใส่ 0)" : "เหมาราคาเดียว หรือแบ่งตามจำนวนชิ้น (แต่ละขั้นเลือกกล่องให้คนแพ็ก)"} issues={of("fee")}>
+      <Group id="fee" icon="💰" title={t("ค่าส่ง", "Shipping fee")} hint={pickup ? t("รับเองที่ร้านส่วนใหญ่ไม่คิดค่าส่ง (ใส่ 0)", "Store pickup is usually free (enter 0)") : t("เหมาราคาเดียว หรือแบ่งตามจำนวนชิ้น (แต่ละขั้นเลือกกล่องให้คนแพ็ก)", "One flat price, or by item count (each step picks a box for packers)")} issues={of("fee")}>
         {!pickup && (
           <div className="max-w-xs">
             <Seg
@@ -597,64 +608,64 @@ function MethodDetail({ m, index, meta, issues, remoteCount, canDuplicate, onCha
                   setTiers([{ upTo: 1, fee: a, box: "" }, { upTo: null, fee: a, box: "" }]);
                 }
               }}
-              options={[{ v: "flat", l: "เหมาราคาเดียว" }, { v: "tiers", l: "ตามจำนวนชิ้น" }]}
+              options={[{ v: "flat", l: t("เหมาราคาเดียว", "Flat price") }, { v: "tiers", l: t("ตามจำนวนชิ้น", "By item count") }]}
             />
           </div>
         )}
         {m.fee.kind === "flat" ? (
           <div className="flex items-center gap-2 text-sm">
             <MoneyInput value={m.fee.amount} onChange={(v) => onChange({ fee: { kind: "flat", amount: n(v) } })} className={`${field} !w-28 tabular-nums`} />
-            <span className="text-xs text-slate-500">บาท / ออเดอร์ {m.fee.amount === 0 ? "(ฟรี)" : ""}</span>
+            <span className="text-xs text-slate-500">{t("บาท / ออเดอร์", "THB / order")} {m.fee.amount === 0 ? t("(ฟรี)", "(free)") : ""}</span>
           </div>
         ) : (
           <TierTable tiers={tiers!} boxes={meta.boxes} onChange={setTiers} compact={compact} />
         )}
         <div className="border-t border-slate-100 pt-3">
-          <label className={lbl}>ส่งฟรีเมื่อยอดสินค้าถึง</label>
+          <label className={lbl}>{t("ส่งฟรีเมื่อยอดสินค้าถึง", "Free shipping when subtotal reaches")}</label>
           <div className="flex flex-wrap items-center gap-2">
             <MoneyInput value={m.freeMin} onChange={(v) => onChange({ freeMin: n(v) })} className={`${field} !w-28 tabular-nums`} />
-            <span className="text-xs text-slate-500">{m.freeMin > 0 ? `ซื้อครบ ${money(m.freeMin)} ไม่คิดค่าส่ง (เทียบยอดก่อนส่วนลด)` : "0 = ไม่มีส่งฟรี"}</span>
+            <span className="text-xs text-slate-500">{m.freeMin > 0 ? t(`ซื้อครบ ${money(m.freeMin)} ไม่คิดค่าส่ง (เทียบยอดก่อนส่วนลด)`, `Free from ${money(m.freeMin)} (before discounts)`) : t("0 = ไม่มีส่งฟรี", "0 = no free shipping")}</span>
           </div>
         </div>
       </Group>
 
       {!pickup && (
-        <Group id="area" icon="📍" title="ส่งที่ไหน · ใช้ขนส่งอะไร" issues={of("area")}>
+        <Group id="area" icon="📍" title={t("ส่งที่ไหน · ใช้ขนส่งอะไร", "Where · which carrier")} issues={of("area")}>
           <div>
-            <label className={lbl}>ส่งได้ที่</label>
+            <label className={lbl}>{t("ส่งได้ที่", "Ships to")}</label>
             <div className="grid gap-1.5">
               {meta.areas.map((a) => (
                 <label key={a.key} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-1.5 ${m.area === a.key ? "border-blue-400 bg-blue-50/60" : "border-slate-200 hover:border-slate-300"}`}>
                   <input type="radio" className="mt-1" name={`area-${m.id}`} checked={m.area === a.key} onChange={() => onChange({ area: a.key })} />
                   <span>
-                    <span className="block text-sm text-slate-800">{a.th}</span>
-                    <span className="block text-xs text-slate-500">{a.hint}</span>
+                    <span className="block text-sm text-slate-800">{a.en ? t(a.th, a.en) : a.th}</span>
+                    <span className="block text-xs text-slate-500">{AREA_HINT_EN[a.key] ? t(a.hint, AREA_HINT_EN[a.key]) : a.hint}</span>
                   </span>
                 </label>
               ))}
             </div>
           </div>
           <div>
-            <label className={lbl}>บวกเพิ่มพื้นที่ห่างไกล</label>
+            <label className={lbl}>{t("บวกเพิ่มพื้นที่ห่างไกล", "Remote area surcharge")}</label>
             <div className="flex flex-wrap items-center gap-2">
               <MoneyInput value={m.remoteFee} onChange={(v) => onChange({ remoteFee: n(v) })} className={`${field} !w-28 tabular-nums`} />
               <span className="text-xs text-slate-500">
-                {m.remoteFee > 0 ? "บวกแม้ส่งฟรี (ขนส่งเก็บจริง)" : "0 = ไม่บวก"} ·{" "}
+                {m.remoteFee > 0 ? t("บวกแม้ส่งฟรี (ขนส่งเก็บจริง)", "Added even with free shipping (carrier charges it)") : t("0 = ไม่บวก", "0 = none")} ·{" "}
                 <button type="button" onClick={onOpenRemote} className="text-blue-600 hover:underline">
-                  รายการรหัส ({remoteCount}) ›
+                  {t("รายการรหัส", "Postcode list")} ({remoteCount}) ›
                 </button>
               </span>
             </div>
           </div>
           <div>
             <label className={lbl}>
-              ขนส่ง <span className="font-normal text-slate-400">· ลูกค้าไม่เห็น ใช้เลือกให้เองตอนใส่เลขพัสดุ</span>
+              {t("ขนส่ง", "Carrier")} <span className="font-normal text-slate-400">{t("· ลูกค้าไม่เห็น ใช้เลือกให้เองตอนใส่เลขพัสดุ", "· hidden from customers, preselected when adding tracking")}</span>
             </label>
             <select className={field} value={m.carrier} onChange={(e) => onChange({ carrier: e.target.value })}>
-              <option value="">— ไม่ระบุ —</option>
+              <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
               {meta.carriers.map((c) => (
                 <option key={c.key} value={c.key}>
-                  {c.label}
+                  {c.key === "thaipost" ? t(c.label, "Thailand Post (EMS / registered)") : c.key === "other" ? t(c.label, "Other") : c.label}
                 </option>
               ))}
             </select>
@@ -662,44 +673,44 @@ function MethodDetail({ m, index, meta, issues, remoteCount, canDuplicate, onCha
         </Group>
       )}
 
-      <Group id="cod" icon="💵" title={pickup ? "จ่ายเงินตอนรับของ" : "เก็บเงินปลายทาง (COD)"} issues={of("cod")}>
+      <Group id="cod" icon="💵" title={pickup ? t("จ่ายเงินตอนรับของ", "Pay on pickup") : t("เก็บเงินปลายทาง (COD)", "Cash on delivery (COD)")} issues={of("cod")}>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-slate-700">{pickup ? "ลูกค้าจ่ายที่ร้านตอนมารับได้" : "ลูกค้าเลือกจ่ายตอนรับของได้"}</span>
-          <ToggleSwitch on={m.codAllowed} onChange={(v) => onChange({ codAllowed: v })} title="เปิด/ปิด" />
+          <span className="text-sm text-slate-700">{pickup ? t("ลูกค้าจ่ายที่ร้านตอนมารับได้", "Customers can pay at the store on pickup") : t("ลูกค้าเลือกจ่ายตอนรับของได้", "Customers can pay on delivery")}</span>
+          <ToggleSwitch on={m.codAllowed} onChange={(v) => onChange({ codAllowed: v })} title={t("เปิด/ปิด", "On/off")} />
         </div>
         {m.codAllowed && !pickup && (
           <div>
-            <label className={lbl}>ค่าธรรมเนียมเก็บปลายทาง</label>
+            <label className={lbl}>{t("ค่าธรรมเนียมเก็บปลายทาง", "COD fee")}</label>
             <div className="flex flex-wrap items-center gap-2">
               <MoneyInput value={m.codFee} onChange={(v) => onChange({ codFee: n(v) })} className={`${field} !w-28 tabular-nums`} />
-              <span className="text-xs text-slate-500">{m.codFee ? "บวกเมื่อลูกค้าเลือกเก็บปลายทาง" : "0 = ไม่คิดเพิ่ม"}</span>
+              <span className="text-xs text-slate-500">{m.codFee ? t("บวกเมื่อลูกค้าเลือกเก็บปลายทาง", "Added when the customer chooses COD") : t("0 = ไม่คิดเพิ่ม", "0 = no fee")}</span>
             </div>
           </div>
         )}
       </Group>
 
-      <Group id="time" icon="⏱" title="ระยะเวลา" issues={of("time")}>
+      <Group id="time" icon="⏱" title={t("ระยะเวลา", "Timing")} issues={of("time")}>
         <div>
-          <label className={lbl}>{pickup ? "พร้อมรับเมื่อไร" : "ถึงภายใน"}</label>
+          <label className={lbl}>{pickup ? t("พร้อมรับเมื่อไร", "Ready for pickup") : t("ถึงภายใน", "Arrives within")}</label>
           <div className="grid grid-cols-2 gap-2">
-            <input className={field} value={m.eta} onChange={(e) => onChange({ eta: e.target.value })} placeholder={pickup ? "พร้อมรับภายใน 1 วัน" : "1–3 วัน"} />
+            <input className={field} value={m.eta} onChange={(e) => onChange({ eta: e.target.value })} placeholder={pickup ? t("พร้อมรับภายใน 1 วัน", "Ready within 1 day") : t("1–3 วัน", "1–3 days")} />
             <input className={field} value={m.eta_en ?? ""} onChange={(e) => onChange({ eta_en: e.target.value })} placeholder="English" />
           </div>
-          {!pickup && <p className="mt-1 text-[11px] text-slate-400">ขึ้นต้นด้วยตัวเลข (เช่น 1–3 วัน) ลูกค้าจะเห็น “ถึงภายใน 1–3 วัน”</p>}
+          {!pickup && <p className="mt-1 text-[11px] text-slate-400">{t("ขึ้นต้นด้วยตัวเลข (เช่น 1–3 วัน) ลูกค้าจะเห็น “ถึงภายใน 1–3 วัน”", "Start with a number (e.g. 1–3 days) and customers see “Arrives within 1–3 days”")}</p>}
         </div>
         <div>
-          <label className={lbl}>รอบตัดส่ง</label>
+          <label className={lbl}>{t("รอบตัดส่ง", "Order cutoff")}</label>
           <div className="flex flex-wrap items-center gap-2">
             <input type="time" className={`${field} !w-32`} value={m.cutoff} onChange={(e) => onChange({ cutoff: e.target.value })} />
             {m.cutoff ? (
               <>
                 <button type="button" onClick={() => onChange({ cutoff: "" })} className="text-xs text-slate-400 hover:text-rose-600">
-                  ล้าง
+                  {t("ล้าง", "Clear")}
                 </button>
-                <span className="text-xs text-slate-500">ลูกค้าเห็นตอนนี้: “{cutoffText(m, new Date())}”</span>
+                <span className="text-xs text-slate-500">{t("ลูกค้าเห็นตอนนี้", "Customers see now")}: “{cutoffText(m, new Date())}”</span>
               </>
             ) : (
-              <span className="text-xs text-slate-400">ว่าง = ไม่บอกรอบตัด</span>
+              <span className="text-xs text-slate-400">{t("ว่าง = ไม่บอกรอบตัด", "Blank = no cutoff shown")}</span>
             )}
           </div>
         </div>
@@ -709,6 +720,7 @@ function MethodDetail({ m, index, meta, issues, remoteCount, canDuplicate, onCha
 }
 
 function TierTable({ tiers, boxes, onChange, compact }: { tiers: { upTo: number | null; fee: number; box: string }[]; boxes: Meta["boxes"]; onChange: (t: { upTo: number | null; fee: number; box: string }[]) => void; compact?: boolean }) {
+  const tx = useT();
   // จอแคบ: แต่ละขั้นเป็น 2 บรรทัด (จำนวนชิ้น+✕ / ค่าส่ง+กล่อง) — แถวเดียวจะเบียดจนอ่านไม่ออก
   const cols = compact
     ? "grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1.25rem] items-center gap-x-2 gap-y-1 rounded-lg border border-slate-100 p-2"
@@ -721,9 +733,9 @@ function TierTable({ tiers, boxes, onChange, compact }: { tiers: { upTo: number 
     <div className="space-y-1.5" data-tiers>
       {!compact && (
         <div className={`${cols} text-[11px] font-medium text-slate-400`}>
-          <span>จำนวนชิ้นในออเดอร์</span>
-          <span>ค่าส่ง (บาท)</span>
-          <span>กล่องที่ให้คนแพ็ก</span>
+          <span>{tx("จำนวนชิ้นในออเดอร์", "Items in order")}</span>
+          <span>{tx("ค่าส่ง (บาท)", "Fee (THB)")}</span>
+          <span>{tx("กล่องที่ให้คนแพ็ก", "Box for packers")}</span>
           <span />
         </div>
       )}
@@ -735,27 +747,27 @@ function TierTable({ tiers, boxes, onChange, compact }: { tiers: { upTo: number 
           <div key={ti} className={cols}>
             <span className={`whitespace-nowrap text-sm tabular-nums text-slate-600 ${compact ? "order-1 col-span-2" : ""}`}>
               {isLast ? (
-                <>{prev + 1} ชิ้นขึ้นไป</>
+                <>{tx(`${prev + 1} ชิ้นขึ้นไป`, `${prev + 1}+ items`)}</>
               ) : (
                 <>
                   {prev + 1}–
                   <input type="number" min={prev + 1} value={t.upTo ?? ""} onChange={(e) => setTier({ upTo: Math.max(prev + 1, Math.floor(Number(e.target.value) || prev + 1)) })}
-                    className="mx-1 w-12 rounded border border-slate-200 px-1 py-0.5 text-sm tabular-nums" aria-label={`ขั้นที่ ${ti + 1} ถึงกี่ชิ้น`} />
-                  ชิ้น
+                    className="mx-1 w-12 rounded border border-slate-200 px-1 py-0.5 text-sm tabular-nums" aria-label={tx(`ขั้นที่ ${ti + 1} ถึงกี่ชิ้น`, `Step ${ti + 1} up to how many items`)} />
+                  {tx("ชิ้น", "items")}
                 </>
               )}
             </span>
-            <MoneyInput value={t.fee} onChange={(v) => setTier({ fee: n(v) })} className={`${webForm.input} tabular-nums ${compact ? "order-3" : ""}`} title="ค่าส่ง (บาท)" />
-            <select value={t.box} onChange={(e) => setTier({ box: e.target.value })} className={`${webForm.input} ${compact ? "order-4" : ""}`} title="กล่องที่แนะนำให้คนแพ็ก">
-              <option value="">— ไม่ระบุ —</option>
+            <MoneyInput value={t.fee} onChange={(v) => setTier({ fee: n(v) })} className={`${webForm.input} tabular-nums ${compact ? "order-3" : ""}`} title={tx("ค่าส่ง (บาท)", "Fee (THB)")} />
+            <select value={t.box} onChange={(e) => setTier({ box: e.target.value })} className={`${webForm.input} ${compact ? "order-4" : ""}`} title={tx("กล่องที่แนะนำให้คนแพ็ก", "Suggested box for packers")}>
+              <option value="">{tx("— ไม่ระบุ —", "— None —")}</option>
               {boxes.map((b) => (
                 <option key={b.name} value={b.name}>
-                  กล่อง {b.name} ({b.size})
+                  {tx("กล่อง", "Box")} {b.name} ({b.size})
                 </option>
               ))}
             </select>
             {tiers.length > 1 ? (
-              <button type="button" title="ลบขั้นนี้" className={`text-slate-300 hover:text-rose-600 ${compact ? "order-2" : ""}`}
+              <button type="button" title={tx("ลบขั้นนี้", "Remove this step")} className={`text-slate-300 hover:text-rose-600 ${compact ? "order-2" : ""}`}
                 onClick={() => onChange(tiers.filter((_, xi) => xi !== ti).map((x, xi, arr) => (xi === arr.length - 1 ? { ...x, upTo: null } : x)))}>
                 ✕
               </button>
@@ -766,7 +778,7 @@ function TierTable({ tiers, boxes, onChange, compact }: { tiers: { upTo: number 
         );
       })}
       <button type="button" onClick={addTier} className="text-xs text-blue-600 hover:underline">
-        + เพิ่มขั้น
+        {tx("+ เพิ่มขั้น", "+ Add step")}
       </button>
     </div>
   );
@@ -775,6 +787,7 @@ function TierTable({ tiers, boxes, onChange, compact }: { tiers: { upTo: number 
 /* ───────── 🏝 พื้นที่ห่างไกล (ใช้ร่วมทุกวิธี) ───────── */
 
 function RemoteEditor({ text, suggested, onText, back }: { text: string; suggested: string[]; onText: (v: string) => void; back?: () => void }) {
+  const t = useT();
   const [probe, setProbe] = useState("84320");
   const list = parsePostals(text);
   const hit = probe.length === 5 ? isRemotePostal(probe, { remotePostals: list }) : null;
@@ -782,35 +795,35 @@ function RemoteEditor({ text, suggested, onText, back }: { text: string; suggest
     <div className="space-y-3" data-remote-editor>
       {back && (
         <button type="button" onClick={back} className="text-sm text-blue-600 hover:underline">
-          ‹ วิธีส่งทั้งหมด
+          {t("‹ วิธีส่งทั้งหมด", "‹ All methods")}
         </button>
       )}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900">🏝 พื้นที่ห่างไกล</h2>
-        <p className="text-xs text-slate-500">ใช้กับทุกวิธีที่ตั้ง “บวกพื้นที่ห่างไกล” ไว้ · ส่งฟรีก็ยังบวก เพราะขนส่งเก็บจริง</p>
+        <h2 className="text-lg font-semibold text-slate-900">{t("🏝 พื้นที่ห่างไกล", "🏝 Remote areas")}</h2>
+        <p className="text-xs text-slate-500">{t("ใช้กับทุกวิธีที่ตั้ง “บวกพื้นที่ห่างไกล” ไว้ · ส่งฟรีก็ยังบวก เพราะขนส่งเก็บจริง", "Used by every method with a “remote area surcharge” · still added with free shipping, since carriers charge it")}</p>
       </div>
       <section className={`${webForm.card} space-y-2`}>
-        <h3 className="text-sm font-semibold text-slate-800">✏️ รายการรหัสไปรษณีย์</h3>
-        <p className="text-xs text-slate-500">ใส่ 5 หลัก = ตรงตัว · 2–4 หลัก = ทุกรหัสที่ขึ้นต้นด้วยเลขนี้ · คั่นด้วยเว้นวรรค</p>
+        <h3 className="text-sm font-semibold text-slate-800">{t("✏️ รายการรหัสไปรษณีย์", "✏️ Postcode list")}</h3>
+        <p className="text-xs text-slate-500">{t("ใส่ 5 หลัก = ตรงตัว · 2–4 หลัก = ทุกรหัสที่ขึ้นต้นด้วยเลขนี้ · คั่นด้วยเว้นวรรค", "5 digits = exact · 2–4 digits = every postcode starting with it · separate with spaces")}</p>
         <textarea value={text} onChange={(e) => onText(e.target.value)} rows={3} className={`${webForm.input} font-mono text-xs`} placeholder="94 95 96 84320" />
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="text-slate-500">{list.length} รหัส</span>
+          <span className="text-slate-500">{list.length} {t("รหัส", "postcodes")}</span>
           <button type="button" onClick={() => onText([...new Set([...text.split(/[\s,]+/).filter(Boolean), ...suggested])].join(" "))} className="text-blue-600 hover:underline">
-            + เติมรายการแนะนำ ({suggested.length} รหัส)
+            {t(`+ เติมรายการแนะนำ (${suggested.length} รหัส)`, `+ Add suggested list (${suggested.length} postcodes)`)}
           </button>
-          <span className="text-slate-400">⚠️ รายการแนะนำเป็นตัวอย่าง — เช็กกับขนส่งที่ใช้จริงแล้วแก้ได้</span>
+          <span className="text-slate-400">{t("⚠️ รายการแนะนำเป็นตัวอย่าง — เช็กกับขนส่งที่ใช้จริงแล้วแก้ได้", "⚠️ The suggested list is a sample — check with your carrier and edit")}</span>
         </div>
       </section>
       <section className={`${webForm.card} space-y-2`}>
-        <h3 className="text-sm font-semibold text-slate-800">🔎 ลองเช็กรหัส</h3>
+        <h3 className="text-sm font-semibold text-slate-800">{t("🔎 ลองเช็กรหัส", "🔎 Check a postcode")}</h3>
         <div className="flex flex-wrap items-center gap-2">
-          <input value={probe} onChange={(e) => setProbe(e.target.value.replace(/\D/g, "").slice(0, 5))} className={`${webForm.input} !w-28 font-mono`} aria-label="รหัสไปรษณีย์ที่จะเช็ก" />
+          <input value={probe} onChange={(e) => setProbe(e.target.value.replace(/\D/g, "").slice(0, 5))} className={`${webForm.input} !w-28 font-mono`} aria-label={t("รหัสไปรษณีย์ที่จะเช็ก", "Postcode to check")} />
           {hit === null ? (
-            <span className="text-xs text-slate-400">ใส่ให้ครบ 5 หลัก</span>
+            <span className="text-xs text-slate-400">{t("ใส่ให้ครบ 5 หลัก", "Enter all 5 digits")}</span>
           ) : hit ? (
-            <Tag c="amber">อยู่ในพื้นที่ห่างไกล — บวกเพิ่ม</Tag>
+            <Tag c="amber">{t("อยู่ในพื้นที่ห่างไกล — บวกเพิ่ม", "Remote area — surcharge added")}</Tag>
           ) : (
-            <Tag c="emerald">ไม่ใช่พื้นที่ห่างไกล</Tag>
+            <Tag c="emerald">{t("ไม่ใช่พื้นที่ห่างไกล", "Not a remote area")}</Tag>
           )}
         </div>
       </section>

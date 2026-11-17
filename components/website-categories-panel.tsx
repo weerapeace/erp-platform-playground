@@ -18,6 +18,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { loadWebListings } from "@/lib/website-data";
 import { ImageChooser } from "@/components/website-canvas-media";
@@ -56,6 +58,7 @@ const labelCls = "block text-xs font-medium text-slate-600 mb-1";
 
 export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+  const t = useT();
   const [fieldMap, setFieldMap] = useState<Record<string, unknown> | null>(null);
   const [cats, setCats] = useState<WebCategoryDef[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
@@ -86,15 +89,15 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         apiFetch(`/api/website/field-map?shop=${encodeURIComponent(shopSlug)}`).then((r) => r.json()),
         loadWebListings<Listing>(shopSlug, true),
       ]);
-      if (!fm?.fieldMap) throw new Error(fm?.error || "โหลดหมวดไม่สำเร็จ");
-      if ((ls as { retryable?: boolean })?.retryable) throw new Error(ls?.error || "โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง");
+      if (!fm?.fieldMap) throw new Error(fm?.error || tr("โหลดหมวดไม่สำเร็จ", "Could not load categories"));
+      if ((ls as { retryable?: boolean })?.retryable) throw new Error(ls?.error || tr("โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง", "Product data incomplete — press Retry"));
       setFieldMap(fm.fieldMap);
       const list = (fm.fieldMap.categories ?? []) as WebCategoryDef[];
       setCats(list);
       setSelKey((k) => (k && list.some((c) => c.key === k) ? k : list[0]?.key ?? null));
       setListings((ls?.listings ?? []) as Listing[]);
     } catch (e) {
-      setError((e as Error).message || "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่");
+      setError((e as Error).message || tr("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่", "Error loading data, please try again"));
     } finally {
       setLoading(false);
     }
@@ -125,7 +128,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         body: JSON.stringify({ shopId, fieldMap: { ...fieldMap, categories: catsRef.current } }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok) throw new Error(j?.error || tr("บันทึกไม่สำเร็จ", "Save failed"));
       setSaveErr(null);
       setSavedAt(new Date());
       if (ver.current === v) {
@@ -168,7 +171,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         body: JSON.stringify({ shopId, action: "setCategories", category, items }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok || !j.ok) throw new Error(j?.error || t("บันทึกไม่สำเร็จ", "Save failed"));
       const byId = new Map(items.map((it) => [it.parentId, it.categories]));
       setListings((ls) => ls.map((l) => (byId.has(l.parentId) ? { ...l, categories: byId.get(l.parentId)! } : l)));
       toast.success(okMsg);
@@ -182,7 +185,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
   /* ── ✏️ เปลี่ยนลิงก์หมวด — server แก้ field_map เอง: บันทึกที่ค้างก่อนเปิด · เสร็จแล้วโหลดใหม่ (ไม่ให้รอบบันทึกถัดไปเขียนรหัสเก่าทับ) ── */
   const openRename = async (c: WebCategoryDef) => {
     if (dirty.current) await persist();
-    if (dirty.current) return toast.error("บันทึกหมวดที่แก้ค้างไว้ไม่สำเร็จ — ลองกด 💾 บันทึกก่อน");
+    if (dirty.current) return toast.error(t("บันทึกหมวดที่แก้ค้างไว้ไม่สำเร็จ — ลองกด 💾 บันทึกก่อน", "Could not save pending category edits — try pressing 💾 Save first"));
     setRenameOf(c);
   };
   const onRenamed = async (newKey: string, warning: string | null) => {
@@ -193,7 +196,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     await load();
     setSelKey(newKey);
     if (warning) toast.error(warning);
-    else toast.success(`เปลี่ยนลิงก์เป็น /c/${newKey} แล้ว · ลิงก์เก่าพาไปหน้าใหม่อัตโนมัติ`);
+    else toast.success(t(`เปลี่ยนลิงก์เป็น /c/${newKey} แล้ว · ลิงก์เก่าพาไปหน้าใหม่อัตโนมัติ`, `Link changed to /c/${newKey} · the old link redirects automatically`));
   };
 
   const sel = cats.find((c) => c.key === selKey) ?? null;
@@ -285,13 +288,13 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         return { parentId: l.parentId, categories: [...new Set(next)] };
       });
     setPicked(new Set());
-    void setCategoriesOf(items, toKey, copy ? `เพิ่ม ${items.length} รุ่นเข้าหมวด ${to.label} แล้ว (ยังอยู่หมวด ${sel.label})` : `ย้าย ${items.length} รุ่นไปหมวด ${to.label} แล้ว`);
+    void setCategoriesOf(items, toKey, copy ? t(`เพิ่ม ${items.length} รุ่นเข้าหมวด ${to.label} แล้ว (ยังอยู่หมวด ${sel.label})`, `Added ${items.length} models to ${to.label} (still in ${sel.label})`) : t(`ย้าย ${items.length} รุ่นไปหมวด ${to.label} แล้ว`, `Moved ${items.length} models to ${to.label}`));
   };
   const removeMany = (ids: string[]) => {
     if (!sel || !ids.length) return;
     const items = listings.filter((l) => ids.includes(l.parentId)).map((l) => ({ parentId: l.parentId, categories: l.categories.filter((k) => k !== sel.key) }));
     setPicked(new Set());
-    void setCategoriesOf(items, sel.key, `เอา ${items.length} รุ่นออกจากหมวด ${sel.label} แล้ว`);
+    void setCategoriesOf(items, sel.key, t(`เอา ${items.length} รุ่นออกจากหมวด ${sel.label} แล้ว`, `Removed ${items.length} models from ${sel.label}`));
   };
   // ปลายทางที่เลือกได้ (ทุกหมวดยกเว้นหมวดนี้ · เรียงแบบต้นไม้ ↳ = หมวดย่อย)
   const moveTargets = sel ? rows.filter((r) => r.cat.key !== sel.key).map((r) => r.cat) : [];
@@ -318,7 +321,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
 
   const removeFromCat = (l: Listing) => {
     if (!sel) return;
-    void setCategoriesOf([{ parentId: l.parentId, categories: l.categories.filter((k) => k !== sel.key) }], sel.key, `เอา "${nameOf(l)}" ออกจากหมวด ${sel.label} แล้ว`);
+    void setCategoriesOf([{ parentId: l.parentId, categories: l.categories.filter((k) => k !== sel.key) }], sel.key, t(`เอา "${nameOf(l)}" ออกจากหมวด ${sel.label} แล้ว`, `Removed "${nameOf(l)}" from ${sel.label}`));
   };
 
   const deleteCat = async () => {
@@ -327,21 +330,21 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     setConfirmDel(null);
     // สินค้าที่อยู่หมวดนี้ → เอาหมวดนี้ออก (สินค้ายังอยู่บนเว็บ)
     const affected = listings.filter((l) => l.categories.includes(c.key)).map((l) => ({ parentId: l.parentId, categories: l.categories.filter((k) => k !== c.key) }));
-    if (affected.length) await setCategoriesOf(affected, c.key, `เอาสินค้า ${affected.length} รายการออกจากหมวด ${c.label} แล้ว`);
+    if (affected.length) await setCategoriesOf(affected, c.key, t(`เอาสินค้า ${affected.length} รายการออกจากหมวด ${c.label} แล้ว`, `Removed ${affected.length} products from ${c.label}`));
     // หมวดย่อยของหมวดที่ลบ → กลายเป็นหมวดชั้นบน (ไม่หายไปด้วย)
     const next = flattenTree(cats.filter((x) => x.key !== c.key).map((x) => (x.parent === c.key ? { ...x, parent: null } : x)));
     editCats(next);
     setSelKey(next[0]?.key ?? null);
-    toast.success(`ลบหมวด "${c.label}" แล้ว`);
+    toast.success(t(`ลบหมวด "${c.label}" แล้ว`, `Category "${c.label}" deleted`));
   };
 
-  if (loading) return <p className="text-sm text-slate-400 py-10 text-center">กำลังโหลดหมวดหมู่…</p>;
+  if (loading) return <p className="text-sm text-slate-400 py-10 text-center">{t("กำลังโหลดหมวดหมู่…", "Loading categories…")}</p>;
   if (error)
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
         <p className="text-sm text-red-700">{error}</p>
         <button onClick={() => void load()} className="mt-3 rounded-lg border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100">
-          ลองใหม่
+          {t("ลองใหม่", "Retry")}
         </button>
       </div>
     );
@@ -350,32 +353,32 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[240px]">
-          <h2 className="text-base font-semibold text-slate-800">📂 หมวดหมู่สินค้าบนเว็บ</h2>
-          <p className="text-xs text-slate-500 mt-0.5">ลากเรียงลำดับได้ · 1 สินค้าอยู่ได้หลายหมวด · หมวดแรกของสินค้า = ป้ายบนการ์ด · รูปหมวดใช้ใน Section &quot;หมวดสินค้า&quot; หน้าแรก</p>
+          <h2 className="text-base font-semibold text-slate-800">📂 {t("หมวดหมู่สินค้าบนเว็บ", "Web categories")}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{t("ลากเรียงลำดับได้ · 1 สินค้าอยู่ได้หลายหมวด · หมวดแรกของสินค้า = ป้ายบนการ์ด · รูปหมวดใช้ใน Section \"หมวดสินค้า\" หน้าแรก", "Drag to reorder · a product can be in several categories · its first category = the card label · category images are used in the home page \"Categories\" section")}</p>
         </div>
         {/* 🌐 ชื่อหมวด / คำโปรย / SEO ภาษาอังกฤษ (หน้าเว็บ /en) — ตารางคำแปลของกลาง · บันทึกอัตโนมัติเหมือนช่องอื่น */}
         <TranslateButton
           value={cats}
           onChange={editCats}
           keys={CATEGORY_TEXT_KEYS}
-          crumbOf={(f) => ({ label: "ชื่อหมวด", blurb: "คำโปรย", seoTitle: "ชื่อใน Google", seoDescription: "คำอธิบายใน Google" })[f] ?? null}
-          title="หมวดหมู่ภาษาอังกฤษ — ชื่อ · คำโปรย · SEO"
-          description="บันทึกอัตโนมัติเหมือนช่องอื่นในแท็บนี้ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
+          crumbOf={(f) => ({ label: t("ชื่อหมวด", "Category name"), blurb: t("คำโปรย", "Tagline"), seoTitle: t("ชื่อใน Google", "Google title"), seoDescription: t("คำอธิบายใน Google", "Google description") })[f] ?? null}
+          title={t("หมวดหมู่ภาษาอังกฤษ — ชื่อ · คำโปรย · SEO", "Categories in English — name · tagline · SEO")}
+          description={t("บันทึกอัตโนมัติเหมือนช่องอื่นในแท็บนี้ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน", "Auto-saved like other fields in this tab · empty fields show Thai to customers on /en")}
         />
-        <span className="text-xs text-slate-400">💾 บันทึกอัตโนมัติ — ดูสถานะที่แถบล่าง</span>
+        <span className="text-xs text-slate-400">💾 {t("บันทึกอัตโนมัติ — ดูสถานะที่แถบล่าง", "Auto-save — see status in the bottom bar")}</span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         {/* ซ้าย: รายการหมวด */}
         <div className="rounded-xl border border-slate-200 bg-white p-2 h-fit">
-          {cats.length === 0 && <p className="text-xs text-slate-400 px-2 py-6 text-center">ยังไม่มีหมวด — กด ➕ เพิ่มหมวด</p>}
+          {cats.length === 0 && <p className="text-xs text-slate-400 px-2 py-6 text-center">{t("ยังไม่มีหมวด — กด ➕ เพิ่มหมวด", "No categories yet — press ➕ Add category")}</p>}
           {kidsOf.size > 0 && (
             <div className="flex items-center justify-end gap-1 px-1 pb-1">
               <button type="button" onClick={() => saveCollapsed(new Set())} disabled={collapsed.size === 0} className="rounded-md px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40">
-                ▾ ขยายทั้งหมด
+                ▾ {t("ขยายทั้งหมด", "Expand all")}
               </button>
               <button type="button" onClick={() => saveCollapsed(new Set(kidsOf.keys()))} disabled={[...kidsOf.keys()].every((k) => collapsed.has(k))} className="rounded-md px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40">
-                ▸ พับทั้งหมด
+                ▸ {t("พับทั้งหมด", "Collapse all")}
               </button>
             </div>
           )}
@@ -394,7 +397,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                   {...dropProps(c.key)}
                   onClick={() => setSelKey(c.key)}
                   className={`flex items-center gap-2 rounded-lg py-2 cursor-pointer ${depth ? "pl-9 pr-2" : "px-1.5"} ${dropKey === c.key ? "bg-emerald-50 ring-2 ring-emerald-400" : c.key === selKey ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"} ${rowCls(i)}`}
-                  title={dropKey === c.key ? "ปล่อยเพื่อย้ายมาหมวดนี้ (Ctrl ค้าง = เพิ่มเข้าหมวดนี้อีกหมวด)" : undefined}
+                  title={dropKey === c.key ? t("ปล่อยเพื่อย้ายมาหมวดนี้ (Ctrl ค้าง = เพิ่มเข้าหมวดนี้อีกหมวด)", "Drop to move here (hold Ctrl = also add to this category)") : undefined}
                 >
                   {depth > 0 && <span className="text-slate-300 text-xs -ml-3" aria-hidden>└</span>}
                   {/* ▸/▾ พับหมวดย่อย (เฉพาะหมวดแม่ที่มีหมวดย่อย · ไม่มี = เว้นที่ให้แถวตรงกัน) */}
@@ -406,9 +409,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                           e.stopPropagation();
                           toggleCollapse(c.key);
                         }}
-                        title={folded ? `ขยาย — โชว์หมวดย่อย ${kids} หมวด` : "พับหมวดย่อย"}
+                        title={folded ? t(`ขยาย — โชว์หมวดย่อย ${kids} หมวด`, `Expand — show ${kids} subcategories`) : t("พับหมวดย่อย", "Collapse subcategories")}
                         aria-expanded={!folded}
-                        aria-label={folded ? `ขยายหมวดย่อยของ ${c.label}` : `พับหมวดย่อยของ ${c.label}`}
+                        aria-label={folded ? t(`ขยายหมวดย่อยของ ${c.label}`, `Expand subcategories of ${c.label}`) : t(`พับหมวดย่อยของ ${c.label}`, `Collapse subcategories of ${c.label}`)}
                         className="shrink-0 w-5 h-5 -mr-1 rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 flex items-center justify-center"
                       >
                         <span className={`inline-block text-[10px] transition-transform ${folded ? "" : "rotate-90"}`}>▶</span>
@@ -427,22 +430,22 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                     <span className={`block ${depth ? "text-[13px]" : "text-sm font-medium"} text-slate-800 truncate`}>{c.label}</span>
                     <span className="block text-[10px] text-slate-400 truncate">
                       /c/{c.key}
-                      {folded && <span className="text-slate-500"> · {kids} หมวดย่อย</span>}
+                      {folded && <span className="text-slate-500"> · {kids} {t("หมวดย่อย", "subcategories")}</span>}
                     </span>
                   </span>
-                  <span className="text-[11px] text-slate-500 tabular-nums" title={depth ? undefined : "รวมสินค้าในหมวดย่อย"}>{countOf(c.key)}</span>
+                  <span className="text-[11px] text-slate-500 tabular-nums" title={depth ? undefined : t("รวมสินค้าในหมวดย่อย", "Includes products in subcategories")}>{countOf(c.key)}</span>
                 </div>
                 {/* ➕ หมวดย่อย — ท้ายกลุ่มของหมวดที่เลือกอยู่ */}
                 {lastOfGroup && selTop && (
                   <button type="button" onClick={() => setNewParent(selTop)} className="ml-7 mb-1 mt-0.5 rounded-md px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50">
-                    ➕ หมวดย่อยใน “{cats.find((x) => x.key === selTop)?.label}”
+                    ➕ {t("หมวดย่อยใน", "Subcategory in")} “{cats.find((x) => x.key === selTop)?.label}”
                   </button>
                 )}
               </div>
             );
           })}
           <button onClick={() => setNewParent("")} className="mt-1 w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-600">
-            ➕ เพิ่มหมวด
+            ➕ {t("เพิ่มหมวด", "Add category")}
           </button>
         </div>
 
@@ -456,25 +459,25 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                 value={selRec}
                 keys={CATEGORY_TEXT_KEYS}
                 onPatch={(p) => patchI18n(sel.key, p)}
-                note={editLang === "en" ? "🇬🇧 กำลังแก้ภาษาอังกฤษ — หน้าเว็บ /en ใช้ค่านี้ · ช่องที่ว่าง ลูกค้าเห็นภาษาไทยแทน" : undefined}
+                note={editLang === "en" ? t("🇬🇧 กำลังแก้ภาษาอังกฤษ — หน้าเว็บ /en ใช้ค่านี้ · ช่องที่ว่าง ลูกค้าเห็นภาษาไทยแทน", "🇬🇧 Editing English — used by /en pages · empty fields show Thai to customers") : undefined}
               />
               <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-                <BilingualText label="ชื่อหมวด" maxLength={60} value={selRec} fieldKey="label" onPatch={(p) => patchI18n(sel.key, p)} />
+                <BilingualText label={t("ชื่อหมวด", "Category name")} maxLength={60} value={selRec} fieldKey="label" onPatch={(p) => patchI18n(sel.key, p)} />
                 <div>
-                  <label className={labelCls}>ไอคอน (ถ้าไม่มีรูป)</label>
+                  <label className={labelCls}>{t("ไอคอน (ถ้าไม่มีรูป)", "Icon (if no image)")}</label>
                   <input value={sel.icon} onChange={(e) => patchCat(sel.key, { icon: e.target.value.slice(0, 8) })} className={inputCls} placeholder="👜" />
                 </div>
               </div>
               {/* 📂 อยู่ใต้หมวด (หมวดย่อย) */}
               <div className="flex flex-wrap items-center gap-2">
-                <label className="text-xs font-medium text-slate-600">อยู่ใต้หมวด</label>
+                <label className="text-xs font-medium text-slate-600">{t("อยู่ใต้หมวด", "Parent category")}</label>
                 <select
                   value={sel.parent ?? ""}
                   disabled={childCategories(cats, sel.key).length > 0}
                   onChange={(e) => editCats(flattenTree(cats.map((c) => (c.key === sel.key ? { ...c, parent: e.target.value || null } : c))))}
                   className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
                 >
-                  <option value="">— ไม่มี (เป็นหมวดหลัก) —</option>
+                  <option value="">{t("— ไม่มี (เป็นหมวดหลัก) —", "— None (main category) —")}</option>
                   {topCategories(cats)
                     .filter((c) => c.key !== sel.key)
                     .map((c) => (
@@ -485,38 +488,38 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                 </select>
                 <span className="text-[11px] text-slate-400">
                   {childCategories(cats, sel.key).length > 0
-                    ? `มีหมวดย่อย ${childCategories(cats, sel.key).length} หมวด — ย้ายไปอยู่ใต้หมวดอื่นไม่ได้ (ซ้อนได้ 2 ชั้น)`
+                    ? t(`มีหมวดย่อย ${childCategories(cats, sel.key).length} หมวด — ย้ายไปอยู่ใต้หมวดอื่นไม่ได้ (ซ้อนได้ 2 ชั้น)`, `Has ${childCategories(cats, sel.key).length} subcategories — can't move under another category (max 2 levels)`)
                     : sel.parent
-                      ? "สินค้าในหมวดนี้ขึ้นในหน้าหมวดแม่ด้วย · บนเว็บเป็นปุ่มชิปใต้ชื่อหมวดแม่"
-                      : "เลือกหมวดแม่ = ทำเป็นหมวดย่อย"}
+                      ? t("สินค้าในหมวดนี้ขึ้นในหน้าหมวดแม่ด้วย · บนเว็บเป็นปุ่มชิปใต้ชื่อหมวดแม่", "Products here also show on the parent category page · shown as a chip under the parent name on the web")
+                      : t("เลือกหมวดแม่ = ทำเป็นหมวดย่อย", "Pick a parent = make it a subcategory")}
                 </span>
               </div>
-              <BilingualText label="คำอธิบาย (ใต้ชื่อหมวด / บนหน้าหมวด)" multiline rows={2} maxLength={240} value={selRec} fieldKey="blurb" onPatch={(p) => patchI18n(sel.key, p)} />
+              <BilingualText label={t("คำอธิบาย (ใต้ชื่อหมวด / บนหน้าหมวด)", "Description (under the name / on the category page)")} multiline rows={2} maxLength={240} value={selRec} fieldKey="blurb" onPatch={(p) => patchI18n(sel.key, p)} />
               {/* 🔎 หน้าหมวดใน Google — หน้า /c/<รหัส> ของเว็บร้านใช้ค่านี้เป็น title/description */}
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-                <p className="text-xs font-semibold text-slate-700">🔎 หน้าหมวดใน Google <span className="font-normal text-slate-400">· ว่าง = ใช้ชื่อหมวด/คำอธิบายด้านบน</span></p>
+                <p className="text-xs font-semibold text-slate-700">🔎 {t("หน้าหมวดใน Google", "Category page in Google")} <span className="font-normal text-slate-400">{t("· ว่าง = ใช้ชื่อหมวด/คำอธิบายด้านบน", "· empty = use the name/description above")}</span></p>
                 {(() => {
                   // นับตัวอักษรตามภาษาที่กำลังแก้ (Google ตัดตามความยาวจริงของแต่ละภาษา)
-                  const t = pickText(selRec, "seoTitle", editLang);
+                  const seoT = pickText(selRec, "seoTitle", editLang);
                   const d = pickText(selRec, "seoDescription", editLang);
                   const lab = pickText(selRec, "label", editLang);
                   const blurb = pickText(selRec, "blurb", editLang);
                   return (
                     <>
                       <BilingualText
-                        label={`ชื่อใน Google (${t.length}/70 · แนะนำไม่เกิน 60)`}
+                        label={t(`ชื่อใน Google (${seoT.length}/70 · แนะนำไม่เกิน 60)`, `Google title (${seoT.length}/70 · recommended up to 60)`)}
                         maxLength={70}
-                        placeholder={`${sel.label} | ชื่อร้าน`}
+                        placeholder={`${sel.label} | ${t("ชื่อร้าน", "Shop name")}`}
                         value={selRec}
                         fieldKey="seoTitle"
                         onPatch={(p) => patchI18n(sel.key, p)}
                       />
                       <BilingualText
-                        label={`คำอธิบายใน Google (${d.length}/170 · แนะนำ 70–155)`}
+                        label={t(`คำอธิบายใน Google (${d.length}/170 · แนะนำ 70–155)`, `Google description (${d.length}/170 · recommended 70–155)`)}
                         multiline
                         rows={2}
                         maxLength={170}
-                        placeholder={sel.blurb || "เช่น กระเป๋าถือดีไซน์น่ารัก งานคุณภาพ ส่งไวทั่วไทย"}
+                        placeholder={sel.blurb || t("เช่น กระเป๋าถือดีไซน์น่ารัก งานคุณภาพ ส่งไวทั่วไทย", "e.g. Cute handbags, quality work, fast shipping nationwide")}
                         value={selRec}
                         fieldKey="seoDescription"
                         onPatch={(p) => patchI18n(sel.key, p)}
@@ -524,26 +527,26 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                       {/* ตัวอย่างหน้าตาผลค้นหา (ตามภาษาที่กำลังแก้ · อังกฤษว่าง = ไทย) */}
                       <div className="rounded-md bg-white border border-slate-200 px-3 py-2">
                         <p className="text-[11px] text-emerald-700 truncate">…{editLang === "en" ? "/en" : ""}/c/{sel.key}</p>
-                        <p className="text-sm text-blue-700 truncate">{t.trim() || `${lab} | ชื่อร้าน`}</p>
-                        <p className="text-xs text-slate-600 line-clamp-2">{d.trim() || blurb || "(ยังไม่มีคำอธิบาย — Google จะดึงข้อความจากหน้ามาเอง)"}</p>
+                        <p className="text-sm text-blue-700 truncate">{seoT.trim() || `${lab} | ${t("ชื่อร้าน", "Shop name")}`}</p>
+                        <p className="text-xs text-slate-600 line-clamp-2">{d.trim() || blurb || t("(ยังไม่มีคำอธิบาย — Google จะดึงข้อความจากหน้ามาเอง)", "(No description — Google will pull text from the page)")}</p>
                       </div>
                     </>
                   );
                 })()}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <ImageSlot label="รูปหมวด (การ์ด/แถบหมวดหน้าแรก)" k={sel.imageKey} aspect="1 / 1" onPick={() => setChooser("imageKey")} onClear={() => patchCat(sel.key, { imageKey: null })} />
-                <ImageSlot label="แบนเนอร์หัวหน้าหมวด" k={sel.bannerKey} aspect="21 / 9" onPick={() => setChooser("bannerKey")} onClear={() => patchCat(sel.key, { bannerKey: null })} />
+                <ImageSlot label={t("รูปหมวด (การ์ด/แถบหมวดหน้าแรก)", "Category image (home page card/strip)")} k={sel.imageKey} aspect="1 / 1" onPick={() => setChooser("imageKey")} onClear={() => patchCat(sel.key, { imageKey: null })} />
+                <ImageSlot label={t("แบนเนอร์หัวหน้าหมวด", "Category page banner")} k={sel.bannerKey} aspect="21 / 9" onPick={() => setChooser("bannerKey")} onClear={() => patchCat(sel.key, { bannerKey: null })} />
               </div>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-slate-400">
-                  ลิงก์หน้าหมวด: <code>/c/{sel.key}</code>{" "}
+                  {t("ลิงก์หน้าหมวด:", "Category link:")} <code>/c/{sel.key}</code>{" "}
                   <button onClick={() => void openRename(sel)} className="ml-1 text-blue-600 hover:underline">
-                    ✏️ เปลี่ยนลิงก์
+                    ✏️ {t("เปลี่ยนลิงก์", "Change link")}
                   </button>
                 </span>
                 <button onClick={() => setConfirmDel(sel)} className="text-xs text-red-600 hover:underline">
-                  🗑 ลบหมวดนี้
+                  🗑 {t("ลบหมวดนี้", "Delete this category")}
                 </button>
               </div>
             </div>
@@ -552,23 +555,23 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-center gap-2 mb-3">
                 <p className="flex-1 text-sm font-semibold text-slate-800">
-                  สินค้าในหมวด &quot;{sel.label}&quot; <span className="font-normal text-slate-400">({inCat.length})</span>
+                  {t("สินค้าในหมวด", "Products in")} &quot;{sel.label}&quot; <span className="font-normal text-slate-400">({inCat.length})</span>
                 </p>
                 <button disabled={busy} onClick={() => setAddOpen(true)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                  ➕ เพิ่มสินค้าเข้าหมวด
+                  ➕ {t("เพิ่มสินค้าเข้าหมวด", "Add products to category")}
                 </button>
               </div>
               {inCat.length > 0 && (
                 <p className="text-[11px] text-slate-400 -mt-1.5 mb-2">
-                  {inCat.length > 1 && "ลาก ⠿ = เรียงลำดับในหมวดนี้ · "}ลากรูปสินค้าไปวางบนหมวดทางซ้าย = <b className="font-medium text-slate-500">ย้าย</b> (Ctrl ค้าง = เพิ่มเข้าอีกหมวด) · ติ๊ก ☐ หลายรุ่นแล้วย้ายพร้อมกันได้
+                  {inCat.length > 1 && t("ลาก ⠿ = เรียงลำดับในหมวดนี้ · ", "Drag ⠿ = reorder in this category · ")}{t("ลากรูปสินค้าไปวางบนหมวดทางซ้าย =", "Drag a product image onto a category on the left =")} <b className="font-medium text-slate-500">{t("ย้าย", "move")}</b> {t("(Ctrl ค้าง = เพิ่มเข้าอีกหมวด) · ติ๊ก ☐ หลายรุ่นแล้วย้ายพร้อมกันได้", "(hold Ctrl = also add to that category) · tick ☐ several models to move them together")}
                 </p>
               )}
               {/* 📂 สินค้าจากหมวดย่อย (ไม่ได้อยู่หมวดนี้ตรง ๆ แต่ขึ้นในหน้าหมวดนี้บนเว็บ) */}
               {!sel.parent && countOf(sel.key) > inCat.length && (
-                <p className="text-[11px] text-blue-600 -mt-1 mb-2">+ อีก {countOf(sel.key) - inCat.length} รุ่นจากหมวดย่อย ({childCategories(cats, sel.key).map((c) => c.label).join(", ")}) — ขึ้นในหน้าหมวดนี้บนเว็บด้วย · จัดลำดับ/เพิ่ม-เอาออกที่หมวดย่อยนั้น</p>
+                <p className="text-[11px] text-blue-600 -mt-1 mb-2">+ {t(`อีก ${countOf(sel.key) - inCat.length} รุ่นจากหมวดย่อย`, `${countOf(sel.key) - inCat.length} more models from subcategories`)} ({childCategories(cats, sel.key).map((c) => c.label).join(", ")}) {t("— ขึ้นในหน้าหมวดนี้บนเว็บด้วย · จัดลำดับ/เพิ่ม-เอาออกที่หมวดย่อยนั้น", "— also shown on this category page · reorder/add/remove in that subcategory")}</p>
               )}
               {inCat.length === 0 ? (
-                <p className="text-xs text-slate-400 py-8 text-center">ยังไม่มีสินค้าในหมวดนี้ — กด ➕ เพิ่มสินค้าเข้าหมวด</p>
+                <p className="text-xs text-slate-400 py-8 text-center">{t("ยังไม่มีสินค้าในหมวดนี้ — กด ➕ เพิ่มสินค้าเข้าหมวด", "No products in this category — press ➕ Add products to category")}</p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
                   {inCat.map((l, i) => (
@@ -579,14 +582,14 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                       onDragStart={(e) => {
                         const ids = picked.has(l.parentId) ? [...picked] : [l.parentId];
                         e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
-                        e.dataTransfer.setData("text/plain", ids.length > 1 ? `${ids.length} รุ่น` : nameOf(l));
+                        e.dataTransfer.setData("text/plain", ids.length > 1 ? t(`${ids.length} รุ่น`, `${ids.length} models`) : nameOf(l));
                         e.dataTransfer.effectAllowed = "copyMove";
                       }}
                       onDragEnd={() => setDropKey(null)}
                       className={`group relative rounded-lg border p-1.5 ${picked.has(l.parentId) ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200"} ${prodDrag.rowCls(i)}`}
                     >
-                      <DragHandle {...prodDrag.handleProps(i)} title="ลากเพื่อเรียงลำดับในหมวดนี้" className="absolute left-2.5 top-2.5 z-10 rounded bg-white/90 px-1 text-sm shadow-sm" />
-                      <label className="absolute left-9 top-2.5 z-10 flex h-5 w-5 items-center justify-center rounded bg-white/90 shadow-sm cursor-pointer" title="ติ๊กเพื่อย้ายหลายรุ่นพร้อมกัน">
+                      <DragHandle {...prodDrag.handleProps(i)} title={t("ลากเพื่อเรียงลำดับในหมวดนี้", "Drag to reorder in this category")} className="absolute left-2.5 top-2.5 z-10 rounded bg-white/90 px-1 text-sm shadow-sm" />
+                      <label className="absolute left-9 top-2.5 z-10 flex h-5 w-5 items-center justify-center rounded bg-white/90 shadow-sm cursor-pointer" title={t("ติ๊กเพื่อย้ายหลายรุ่นพร้อมกัน", "Tick to move several models together")}>
                         <input
                           type="checkbox"
                           className="w-3.5 h-3.5 accent-blue-600"
@@ -604,8 +607,8 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                       <p className="mt-1 text-[11px] text-slate-700 line-clamp-2 leading-snug">{nameOf(l)}</p>
                       <p className="text-[10px] text-slate-400 truncate">
                         {l.code}
-                        {!l.published && " · ยังไม่เผยแพร่"}
-                        {l.categories[0] === sel.key ? " · หมวดหลัก" : l.categories.length > 1 ? ` · หลัก: ${labelOf(l.categories[0])}` : ""}
+                        {!l.published && t(" · ยังไม่เผยแพร่", " · unpublished")}
+                        {l.categories[0] === sel.key ? t(" · หมวดหลัก", " · main category") : l.categories.length > 1 ? ` · ${t("หลัก", "main")}: ${labelOf(l.categories[0])}` : ""}
                       </p>
                       {moveTargets.length > 0 && (
                         <select
@@ -613,9 +616,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                           disabled={busy}
                           onChange={(e) => e.target.value && moveTo([l.parentId], e.target.value)}
                           className="mt-1 w-full rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-600 focus:border-blue-400 focus:outline-none"
-                          aria-label="ย้ายไปหมวด"
+                          aria-label={t("ย้ายไปหมวด", "Move to category")}
                         >
-                          <option value="">↪ ย้ายไป…</option>
+                          <option value="">{t("↪ ย้ายไป…", "↪ Move to…")}</option>
                           {moveTargets.map((c) => (
                             <option key={c.key} value={c.key}>
                               {categoryChoiceLabel(c)}
@@ -624,7 +627,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
                         </select>
                       )}
                       <button
-                        title="เอาออกจากหมวดนี้"
+                        title={t("เอาออกจากหมวดนี้", "Remove from this category")}
                         disabled={busy}
                         onClick={() => removeFromCat(l)}
                         className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-full bg-white border border-slate-300 text-xs text-red-600 shadow-sm"
@@ -638,7 +641,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
             </div>
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-400">เลือกหมวดทางซ้าย หรือกด ➕ เพิ่มหมวด</div>
+          <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-400">{t("เลือกหมวดทางซ้าย หรือกด ➕ เพิ่มหมวด", "Pick a category on the left or press ➕ Add category")}</div>
         )}
       </div>
 
@@ -650,21 +653,21 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         error={saveState === "error" ? saveErr : null}
         savedAt={savedAt}
         onSave={persist}
-        note="ชื่อ/รูป/ลำดับหมวด บันทึกเองหลังหยุดแก้ · เพิ่ม/ย้ายสินค้าเข้าหมวด บันทึกทันที"
+        note={t("ชื่อ/รูป/ลำดับหมวด บันทึกเองหลังหยุดแก้ · เพิ่ม/ย้ายสินค้าเข้าหมวด บันทึกทันที", "Category names/images/order auto-save when you stop editing · adding/moving products saves instantly")}
       />
 
       {sel && (
-        <BulkActionBar count={picked.size} unit="รุ่น" onClear={() => setPicked(new Set())} extra={<button type="button" className="underline hover:text-white" onClick={() => setPicked(new Set(inCat.map((l) => l.parentId)))}>เลือกทั้งหมดในหมวด ({inCat.length})</button>}>
-          <select value="" disabled={busy} onChange={(e) => e.target.value && moveTo([...picked], e.target.value)} className="h-8 rounded-lg border border-slate-600 bg-slate-800 px-2 text-xs text-white" aria-label="ย้ายที่เลือกไปหมวด">
-            <option value="">↪ ย้ายไปหมวด…</option>
+        <BulkActionBar count={picked.size} unit={t("รุ่น", "models")} onClear={() => setPicked(new Set())} extra={<button type="button" className="underline hover:text-white" onClick={() => setPicked(new Set(inCat.map((l) => l.parentId)))}>{t("เลือกทั้งหมดในหมวด", "Select all in category")} ({inCat.length})</button>}>
+          <select value="" disabled={busy} onChange={(e) => e.target.value && moveTo([...picked], e.target.value)} className="h-8 rounded-lg border border-slate-600 bg-slate-800 px-2 text-xs text-white" aria-label={t("ย้ายที่เลือกไปหมวด", "Move selected to category")}>
+            <option value="">{t("↪ ย้ายไปหมวด…", "↪ Move to category…")}</option>
             {moveTargets.map((c) => (
               <option key={c.key} value={c.key}>
                 {categoryChoiceLabel(c)}
               </option>
             ))}
           </select>
-          <select value="" disabled={busy} onChange={(e) => e.target.value && moveTo([...picked], e.target.value, true)} className="h-8 rounded-lg border border-slate-600 bg-slate-800 px-2 text-xs text-white" aria-label="เพิ่มที่เลือกเข้าอีกหมวด">
-            <option value="">＋ เพิ่มเข้าอีกหมวด…</option>
+          <select value="" disabled={busy} onChange={(e) => e.target.value && moveTo([...picked], e.target.value, true)} className="h-8 rounded-lg border border-slate-600 bg-slate-800 px-2 text-xs text-white" aria-label={t("เพิ่มที่เลือกเข้าอีกหมวด", "Add selected to another category")}>
+            <option value="">{t("＋ เพิ่มเข้าอีกหมวด…", "＋ Also add to…")}</option>
             {moveTargets.map((c) => (
               <option key={c.key} value={c.key}>
                 {categoryChoiceLabel(c)}
@@ -672,7 +675,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
             ))}
           </select>
           <button type="button" disabled={busy} onClick={() => removeMany([...picked])} className="h-8 rounded-lg px-3 text-xs text-red-300 hover:bg-white/10">
-            เอาออกจากหมวดนี้
+            {t("เอาออกจากหมวดนี้", "Remove from this category")}
           </button>
         </BulkActionBar>
       )}
@@ -702,7 +705,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
             void setCategoriesOf(
               picked.map((l) => ({ parentId: l.parentId, categories: [...l.categories, sel.key] })),
               sel.key,
-              `เพิ่มสินค้า ${picked.length} รายการเข้าหมวด ${sel.label} แล้ว`
+              t(`เพิ่มสินค้า ${picked.length} รายการเข้าหมวด ${sel.label} แล้ว`, `Added ${picked.length} products to ${sel.label}`)
             );
           }}
         />
@@ -712,7 +715,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         open={!!chooser}
         onClose={() => setChooser(null)}
         shopSlug={shopSlug}
-        title={chooser === "bannerKey" ? "แบนเนอร์หัวหน้าหมวด" : "รูปหมวด"}
+        title={chooser === "bannerKey" ? t("แบนเนอร์หัวหน้าหมวด", "Category page banner") : t("รูปหมวด", "Category image")}
         onPick={(p) => {
           if (sel && chooser) patchCat(sel.key, { [chooser]: p.key });
           setChooser(null);
@@ -724,9 +727,9 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
         onClose={() => setConfirmDel(null)}
         onConfirm={() => void deleteCat()}
         variant="danger"
-        title={`ลบหมวด "${confirmDel?.label ?? ""}"?`}
-        message={`สินค้า ${confirmDel ? directCount(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์หน้าหมวด /c/${confirmDel?.key ?? ""} จะใช้ไม่ได้${confirmDel && childCategories(cats, confirmDel.key).length ? ` · หมวดย่อย ${childCategories(cats, confirmDel.key).length} หมวดจะกลายเป็นหมวดหลัก (ไม่ถูกลบ)` : ""}`}
-        confirmText="ลบหมวด"
+        title={t(`ลบหมวด "${confirmDel?.label ?? ""}"?`, `Delete category "${confirmDel?.label ?? ""}"?`)}
+        message={t(`สินค้า ${confirmDel ? directCount(confirmDel.key) : 0} รายการจะไม่อยู่ในหมวดนี้แล้ว (สินค้ายังอยู่บนเว็บ) · ลิงก์หน้าหมวด /c/${confirmDel?.key ?? ""} จะใช้ไม่ได้`, `${confirmDel ? directCount(confirmDel.key) : 0} products will leave this category (they stay on the website) · the category link /c/${confirmDel?.key ?? ""} will stop working`) + (confirmDel && childCategories(cats, confirmDel.key).length ? t(` · หมวดย่อย ${childCategories(cats, confirmDel.key).length} หมวดจะกลายเป็นหมวดหลัก (ไม่ถูกลบ)`, ` · ${childCategories(cats, confirmDel.key).length} subcategories become main categories (not deleted)`) : "")}
+        confirmText={t("ลบหมวด", "Delete category")}
       />
 
       <CategoryRenameModal cat={renameOf} cats={cats} shopId={shopId} onClose={() => setRenameOf(null)} onDone={(k, w) => void onRenamed(k, w)} />
@@ -735,6 +738,7 @@ export function WebsiteCategoriesPanel({ shopSlug, shopId }: { shopSlug: string;
 }
 
 function ImageSlot({ label, k, aspect, onPick, onClear }: { label: string; k?: string | null; aspect: string; onPick: () => void; onClear: () => void }) {
+  const t = useT();
   return (
     <div>
       <label className={labelCls}>{label}</label>
@@ -743,16 +747,16 @@ function ImageSlot({ label, k, aspect, onPick, onClear }: { label: string; k?: s
           // eslint-disable-next-line @next/next/no-img-element
           <img src={img(k, 600)!} alt="" className="w-full h-full object-cover" />
         ) : (
-          <span className="text-xs text-slate-400">＋ เลือกรูป</span>
+          <span className="text-xs text-slate-400">＋ {t("เลือกรูป", "Pick image")}</span>
         )}
       </button>
       {k && (
         <div className="mt-1 flex gap-3 text-[11px]">
           <button type="button" onClick={onPick} className="text-slate-600 hover:text-blue-600">
-            เปลี่ยนรูป
+            {t("เปลี่ยนรูป", "Change image")}
           </button>
           <button type="button" onClick={onClear} className="text-red-600 hover:underline">
-            เอาออก
+            {t("เอาออก", "Remove")}
           </button>
         </div>
       )}
@@ -762,6 +766,7 @@ function ImageSlot({ label, k, aspect, onPick, onClear }: { label: string; k?: s
 
 /** สร้างหมวดใหม่: ชื่อ + รหัสในลิงก์ (เดาจากชื่อภาษาอังกฤษ · ชื่อไทย = ต้องตั้งเอง) — ใช้ซ้ำในหน้า 🗂 จัดหมวด (website-category-sorter) */
 export function NewCategoryModal({ open, onClose, taken, onCreate, parentLabel, suggestPrefix = "" }: { open: boolean; onClose: () => void; taken: string[]; onCreate: (c: WebCategoryDef) => void; /** สร้างเป็นหมวดย่อยใต้หมวดนี้ */ parentLabel?: string | null; /** หมวดย่อย: รหัสขึ้นต้นด้วยรหัสแม่ (กันชนกับหมวดอื่น) */ suggestPrefix?: string }) {
+  const t = useT();
   const [label, setLabel] = useState("");
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
@@ -776,35 +781,35 @@ export function NewCategoryModal({ open, onClose, taken, onCreate, parentLabel, 
   const baseKey = cleanCategoryKey(label);
   const autoKey = baseKey ? (suggestPrefix ? cleanCategoryKey(`${suggestPrefix}-${baseKey}`) : baseKey) : "";
   const k = keyTouched ? cleanCategoryKey(key) : autoKey;
-  const problem = !label.trim() ? "ใส่ชื่อหมวด" : !k ? "ตั้งรหัสในลิงก์ (ภาษาอังกฤษ/ตัวเลข/ขีด)" : taken.includes(k) ? "รหัสนี้มีแล้ว — ตั้งใหม่" : null;
+  const problem = !label.trim() ? t("ใส่ชื่อหมวด", "Enter a category name") : !k ? t("ตั้งรหัสในลิงก์ (ภาษาอังกฤษ/ตัวเลข/ขีด)", "Set a link code (letters/numbers/dashes)") : taken.includes(k) ? t("รหัสนี้มีแล้ว — ตั้งใหม่", "This code already exists — pick another") : null;
   return (
     <ERPModal
       open={open}
       onClose={onClose}
-      title={parentLabel ? `➕ หมวดย่อยใน “${parentLabel}”` : "➕ เพิ่มหมวด"}
+      title={parentLabel ? t(`➕ หมวดย่อยใน “${parentLabel}”`, `➕ Subcategory in “${parentLabel}”`) : t("➕ เพิ่มหมวด", "➕ Add category")}
       size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">
-            ยกเลิก
+            {t("ยกเลิก", "Cancel")}
           </button>
           <button
             disabled={!!problem}
             onClick={() => onCreate({ key: k, label: label.trim().slice(0, 60), icon: "", blurb: "", imageKey: null, bannerKey: null })}
             className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
-            เพิ่มหมวด
+            {t("เพิ่มหมวด", "Add category")}
           </button>
         </div>
       }
     >
       <div className="space-y-3">
         <div>
-          <label className={labelCls}>ชื่อหมวด (โชว์บนเว็บ)</label>
-          <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} className={inputCls} placeholder="เช่น BAGS / กระเป๋าสะพาย" />
+          <label className={labelCls}>{t("ชื่อหมวด (โชว์บนเว็บ)", "Category name (shown on web)")}</label>
+          <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} className={inputCls} placeholder={t("เช่น BAGS / กระเป๋าสะพาย", "e.g. BAGS / Shoulder bags")} />
         </div>
         <div>
-          <label className={labelCls}>รหัสในลิงก์ (/c/…)</label>
+          <label className={labelCls}>{t("รหัสในลิงก์ (/c/…)", "Link code (/c/…)")}</label>
           <input
             value={keyTouched ? key : autoKey}
             onChange={(e) => {
@@ -812,9 +817,9 @@ export function NewCategoryModal({ open, onClose, taken, onCreate, parentLabel, 
               setKey(e.target.value);
             }}
             className={inputCls}
-            placeholder={suggestPrefix ? `เช่น ${suggestPrefix}-small` : "เช่น bags"}
+            placeholder={suggestPrefix ? t(`เช่น ${suggestPrefix}-small`, `e.g. ${suggestPrefix}-small`) : t("เช่น bags", "e.g. bags")}
           />
-          <p className="text-[11px] text-slate-400 mt-1">ภาษาอังกฤษตัวเล็ก ตัวเลข ขีดกลาง · ตั้งแล้วเปลี่ยนไม่ได้</p>
+          <p className="text-[11px] text-slate-400 mt-1">{t("ภาษาอังกฤษตัวเล็ก ตัวเลข ขีดกลาง · ตั้งแล้วเปลี่ยนไม่ได้", "Lowercase letters, numbers, dashes · can't be changed later")}</p>
         </div>
         {problem && label && <p className="text-xs text-amber-700">{problem}</p>}
       </div>
@@ -838,6 +843,7 @@ function AddProductsModal({
   labelOf: (k: string) => string;
   onAdd: (picked: Listing[]) => void;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -846,8 +852,8 @@ function AddProductsModal({
       setPicked(new Set());
     }
   }, [open]);
-  const t = q.trim().toLowerCase();
-  const shown = t ? listings.filter((l) => `${nameOf(l)} ${l.code}`.toLowerCase().includes(t)) : listings;
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? listings.filter((l) => `${nameOf(l)} ${l.code}`.toLowerCase().includes(needle)) : listings;
   const toggle = (id: string) =>
     setPicked((s) => {
       const n = new Set(s);
@@ -860,21 +866,21 @@ function AddProductsModal({
     <ERPModal
       open={open}
       onClose={onClose}
-      title={`➕ เพิ่มสินค้าเข้าหมวด "${category.label}"`}
+      title={t(`➕ เพิ่มสินค้าเข้าหมวด "${category.label}"`, `➕ Add products to "${category.label}"`)}
       size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          <span className="text-sm text-blue-700">{picked.size ? `เลือกแล้ว ${picked.size} รายการ` : "ยังไม่ได้เลือก"}</span>
+          <span className="text-sm text-blue-700">{picked.size ? t(`เลือกแล้ว ${picked.size} รายการ`, `${picked.size} selected`) : t("ยังไม่ได้เลือก", "Nothing selected")}</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">
-              ยกเลิก
+              {t("ยกเลิก", "Cancel")}
             </button>
             <button
               disabled={!picked.size}
               onClick={() => onAdd(listings.filter((l) => picked.has(l.parentId)))}
               className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
-              เพิ่ม {picked.size || ""} รายการ
+              {t(`เพิ่ม ${picked.size || ""} รายการ`, `Add ${picked.size || ""} items`)}
             </button>
           </div>
         </div>
@@ -882,7 +888,7 @@ function AddProductsModal({
     >
       <div className="space-y-3">
         <div className="flex gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} className={inputCls} placeholder="ค้นหาชื่อ / รหัสสินค้า" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} className={inputCls} placeholder={t("ค้นหาชื่อ / รหัสสินค้า", "Search name / product code")} />
           <button
             type="button"
             onClick={() => setPicked((s) => {
@@ -892,11 +898,11 @@ function AddProductsModal({
             })}
             className="shrink-0 rounded-lg border border-slate-300 px-3 text-xs text-slate-700 hover:border-blue-400"
           >
-            {allShown ? "เลิกเลือกที่เห็น" : "เลือกทั้งหมดที่เห็น"}
+            {allShown ? t("เลิกเลือกที่เห็น", "Deselect visible") : t("เลือกทั้งหมดที่เห็น", "Select all visible")}
           </button>
         </div>
         {shown.length === 0 ? (
-          <p className="text-sm text-slate-400 py-10 text-center">{listings.length ? "ไม่พบสินค้า ลองเปลี่ยนคำค้นหา" : "สินค้าทุกรายการอยู่ในหมวดนี้แล้ว"}</p>
+          <p className="text-sm text-slate-400 py-10 text-center">{listings.length ? t("ไม่พบสินค้า ลองเปลี่ยนคำค้นหา", "No products found, try another search") : t("สินค้าทุกรายการอยู่ในหมวดนี้แล้ว", "Every product is already in this category")}</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-[55vh] overflow-y-auto pr-1">
             {shown.map((l) => {
@@ -918,7 +924,7 @@ function AddProductsModal({
                   <span className="mt-1 block text-[11px] text-slate-700 line-clamp-2 leading-snug">{nameOf(l)}</span>
                   <span className="block text-[10px] text-slate-400 truncate">
                     {l.code}
-                    {l.categories.length ? ` · ${l.categories.map(labelOf).join(", ")}` : " · ไม่มีหมวด"}
+                    {l.categories.length ? ` · ${l.categories.map(labelOf).join(", ")}` : t(" · ไม่มีหมวด", " · no category")}
                   </span>
                 </button>
               );

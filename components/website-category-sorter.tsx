@@ -61,6 +61,7 @@ import type {
   Listing,
   ShopInfo,
 } from "@/components/website-listings-panel";
+import { useT } from "@/components/i18n";
 
 // ป๊อปเพิ่มหมวดของแท็บ 📂 หมวดหมู่ (โหลดเมื่อกด — ไฟล์นั้นใหญ่)
 const NewCategoryModal = dynamic(
@@ -130,12 +131,13 @@ export function WebsiteCategorySorter({
   paused?: boolean;
 }) {
   const toast = useToast();
+  const t = useT();
   const cats = categories;
   const catOf = (k: string) => cats.find((c) => c.key === k);
   const labelOf = (k: string) => {
-    if (k === NONE) return "ยังไม่ได้จัด";
+    if (k === NONE) return t("ยังไม่ได้จัด", "Unsorted");
     const m = nodeMain(k);
-    if (m) return `${catOf(m)?.label ?? m} · ยังไม่มีหมวดย่อย`;
+    if (m) return `${catOf(m)?.label ?? m} · ${t("ยังไม่มีหมวดย่อย", "no subcategory yet")}`;
     return catOf(k)?.label ?? k;
   };
   const treeRows = useMemo(() => categoryTree(cats), [cats]);
@@ -201,7 +203,7 @@ export function WebsiteCategorySorter({
       .map((l) => ({ l, cur: sortedCats(l), nx: fn(sortedCats(l)) }))
       .filter((x) => !sameList(x.cur, x.nx));
     if (!rows.length) {
-      toast.info("ไม่มีอะไรเปลี่ยน — สินค้าที่เลือกอยู่หมวดนั้นแล้ว");
+      toast.info(t("ไม่มีอะไรเปลี่ยน — สินค้าที่เลือกอยู่หมวดนั้นแล้ว", "Nothing changed — the picked products are already in that category"));
       return;
     }
     const step: UndoStep = {
@@ -228,10 +230,10 @@ export function WebsiteCategorySorter({
         auditKey,
       );
       setUndo((u) => [...u.slice(-19), step]);
-      toast.success(`${step.label} แล้ว`);
+      toast.success(t(`${step.label} แล้ว`, `${step.label} — done`));
     } catch {
       restore(step.items);
-      toast.error("บันทึกไม่สำเร็จ — คืนค่าเดิมแล้ว");
+      toast.error(t("บันทึกไม่สำเร็จ — คืนค่าเดิมแล้ว", "Save failed — reverted"));
     } finally {
       setBusy(false);
     }
@@ -251,9 +253,9 @@ export function WebsiteCategorySorter({
       );
       restore(step.items);
       setUndo((u) => u.slice(0, -1));
-      toast.success(`ย้อนแล้ว: ${step.label}`);
+      toast.success(t(`ย้อนแล้ว: ${step.label}`, `Undone: ${step.label}`));
     } catch {
-      toast.error("ย้อนไม่สำเร็จ ลองใหม่อีกครั้ง");
+      toast.error(t("ย้อนไม่สำเร็จ ลองใหม่อีกครั้ง", "Undo failed, try again"));
     } finally {
       setBusy(false);
     }
@@ -299,11 +301,11 @@ export function WebsiteCategorySorter({
     picks[name] ?? (ruleOf(name) || guessWebCategory(name, cats));
   const pickTag = (name: string) =>
     picks[name] !== undefined
-      ? "แก้แล้ว"
+      ? t("แก้แล้ว", "Edited")
       : ruleOf(name)
-        ? "กฎเดิม"
+        ? t("กฎเดิม", "Saved rule")
         : guessWebCategory(name, cats)
-          ? "เดาให้"
+          ? t("เดาให้", "Guessed")
           : "";
   const planned = groups.filter((g) => g.name && pickOf(g.name));
   const step1Count = planned.reduce((n, g) => n + g.items.length, 0);
@@ -334,16 +336,16 @@ export function WebsiteCategorySorter({
       if (hit.length)
         setUndo((u) => [
           ...u.slice(-19),
-          { label: `ใส่หมวดจาก ERP ${hit.length} ตัว`, items: hit.map(snap) },
+          { label: t(`ใส่หมวดจาก ERP ${hit.length} ตัว`, `Categories from ERP for ${hit.length} items`), items: hit.map(snap) },
         ]);
       if (j.rules && typeof j.rules === "object") setRules(j.rules);
       setPicks({});
       toast.success(
-        `ใส่หมวดให้ ${Number(j.count) || 0} ตัวแล้ว · จำกฎไว้ใช้กับสินค้าใหม่แล้ว`,
+        t(`ใส่หมวดให้ ${Number(j.count) || 0} ตัวแล้ว · จำกฎไว้ใช้กับสินค้าใหม่แล้ว`, `Categorized ${Number(j.count) || 0} items · rule saved for new products`),
       );
     } catch (e) {
       toast.error(
-        e instanceof Error && e.message ? e.message : "ใส่หมวดไม่สำเร็จ",
+        e instanceof Error && e.message ? e.message : t("ใส่หมวดไม่สำเร็จ", "Couldn't set categories"),
       );
     } finally {
       setBusy(false);
@@ -357,7 +359,7 @@ export function WebsiteCategorySorter({
   );
   const rows = useMemo(() => {
     const out: Row[] = [
-      { node: NONE, label: "⚠️ ยังไม่ได้จัด", icon: "", depth: 0 },
+      { node: NONE, label: t("⚠️ ยังไม่ได้จัด", "⚠️ Unsorted"), icon: "", depth: 0 },
     ];
     for (const { cat, depth } of treeRows) {
       out.push({
@@ -369,14 +371,14 @@ export function WebsiteCategorySorter({
       if (depth === 0 && childCategories(cats, cat.key).length)
         out.push({
           node: nosubNode(cat.key),
-          label: "ยังไม่มีหมวดย่อย",
+          label: t("ยังไม่มีหมวดย่อย", "No subcategory yet"),
           icon: "",
           depth: 1,
           muted: true,
         });
     }
     return out;
-  }, [treeRows, cats]);
+  }, [treeRows, cats, t]);
   const counts = useMemo(() => {
     const m = new Map<string, number>(rows.map((r) => [r.node, 0]));
     for (const l of boardListings) {
@@ -408,8 +410,8 @@ export function WebsiteCategorySorter({
   // 🔃 เรียงในกอง (ต่อคน): ยังไม่มีหมวดย่อยขึ้นก่อน (ค่าเริ่ม) / ตามเดิม — เฉพาะหมวดที่มีหมวดย่อย
   const [sortMode, setSortMode] = useUserPref<"nosub" | "default">("website_sorter_sort", "nosub", (v) => (v === "nosub" || v === "default" ? v : null));
   const items = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    const hit = (l: Listing) => !t || `${nameOf(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(t);
+    const needle = q.trim().toLowerCase();
+    const hit = (l: Listing) => !needle || `${nameOf(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(needle);
     const list = boardListings.filter((l) => inNode(listOf.get(l.parentId) ?? [], node, cats) && hit(l));
     const main = node === NONE || nodeMain(node) ? null : mainOf(cats, node);
     if (sortMode !== "nosub" || !main || !childCategories(cats, main).length) return list;
@@ -463,7 +465,7 @@ export function WebsiteCategorySorter({
     void change(
       ids,
       (list) => addToTarget(list, target, cats),
-      `เพิ่ม {n} ตัวเข้า ${labelOf(target)}`,
+      t(`เพิ่ม {n} ตัวเข้า ${labelOf(target)}`, `Add {n} items to ${labelOf(target)}`),
       target,
     );
   };
@@ -485,7 +487,7 @@ export function WebsiteCategorySorter({
     void change(
       ids,
       (list) => moveOut(list, from, target, cats),
-      `ย้าย {n} ตัวไป ${labelOf(target)}`,
+      t(`ย้าย {n} ตัวไป ${labelOf(target)}`, `Move {n} items to ${labelOf(target)}`),
       target,
     );
   };
@@ -502,7 +504,7 @@ export function WebsiteCategorySorter({
     void change(
       ids,
       (list) => moveToTarget(list, from, target, cats),
-      `ย้าย {n} ตัวไป ${labelOf(target)}`,
+      t(`ย้าย {n} ตัวไป ${labelOf(target)}`, `Move {n} items to ${labelOf(target)}`),
       target,
     );
   };
@@ -512,7 +514,7 @@ export function WebsiteCategorySorter({
     void change(
       ids,
       (list) => removeFromNode(list, from, cats),
-      `เอา {n} ตัวออกจาก ${labelOf(from)}`,
+      t(`เอา {n} ตัวออกจาก ${labelOf(from)}`, `Remove {n} items from ${labelOf(from)}`),
       from,
     );
   };
@@ -525,7 +527,7 @@ export function WebsiteCategorySorter({
     void change(
       ids,
       (list) => applyTargets(list, from, picks, how, cats),
-      how === "add" ? `เพิ่ม {n} ตัวเข้า ${names}` : `ย้าย {n} ตัวไป ${names}`,
+      how === "add" ? t(`เพิ่ม {n} ตัวเข้า ${names}`, `Add {n} items to ${names}`) : t(`ย้าย {n} ตัวไป ${names}`, `Move {n} items to ${names}`),
       picks.join(","),
     );
   };
@@ -536,8 +538,8 @@ export function WebsiteCategorySorter({
   useEffect(() => {
     if (blocked) return;
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target;
-      if (t instanceof HTMLElement && t.closest("input, textarea, select, [contenteditable='true']")) return;
+      const tgt = e.target;
+      if (tgt instanceof HTMLElement && tgt.closest("input, textarea, select, [contenteditable='true']")) return;
       if (
         (e.ctrlKey || e.metaKey) &&
         !e.shiftKey &&
@@ -623,11 +625,11 @@ export function WebsiteCategorySorter({
       });
       await reload();
       toast.success(
-        `เพิ่มหมวด “${c.label}” แล้ว — เลือกสินค้าแล้วกดชิป หรือลากไปวางได้เลย`,
+        t(`เพิ่มหมวด “${c.label}” แล้ว — เลือกสินค้าแล้วกดชิป หรือลากไปวางได้เลย`, `Category “${c.label}” added — pick products and press a chip, or drag them over`),
       );
     } catch (e) {
       toast.error(
-        e instanceof Error && e.message ? e.message : "เพิ่มหมวดไม่สำเร็จ",
+        e instanceof Error && e.message ? e.message : t("เพิ่มหมวดไม่สำเร็จ", "Couldn't add category"),
       );
     }
   };
@@ -649,28 +651,25 @@ export function WebsiteCategorySorter({
           >
             <span>
               <span className="font-semibold text-slate-800">
-                ⚡ ขั้น 1 · ใส่หมวดหลักทีเดียวจากหมวดใน ERP
+                {t("⚡ ขั้น 1 · ใส่หมวดหลักทีเดียวจากหมวดใน ERP", "⚡ Step 1 · Set main categories at once from ERP categories")}
               </span>{" "}
               <span className="text-xs text-amber-800">
-                ยังไม่ได้จัด {unsorted.length} ตัว
-                {!showOff && offUnsorted > 0 && ` (รวมตัวที่ปิดขาย ${offUnsorted} ตัว ที่ซ่อนจากกระดานอยู่)`}
+                {t(`ยังไม่ได้จัด ${unsorted.length} ตัว`, `${unsorted.length} unsorted`)}
+                {!showOff && offUnsorted > 0 && t(` (รวมตัวที่ปิดขาย ${offUnsorted} ตัว ที่ซ่อนจากกระดานอยู่)`, ` (incl. ${offUnsorted} unpublished items hidden from the board)`)}
               </span>
             </span>
             <span className="text-xs text-slate-500">
-              {open1 ? "▾ ซ่อน" : "▸ เปิด"}
+              {open1 ? t("▾ ซ่อน", "▾ Hide") : t("▸ เปิด", "▸ Show")}
             </span>
           </button>
           {open1 && (
             <div className="px-4 pb-4 space-y-2">
               <p className="text-xs text-slate-600">
-                เลือกหมวดบนเว็บให้แต่ละหมวดใน ERP (ระบบเลือกให้ก่อนแล้ว แก้ได้)
-                แล้วกดปุ่มเดียว ใส่ให้ทั้งกลุ่ม · ระบบจะจำกฎไว้ สินค้าใหม่ในหมวด
-                ERP เดียวกันเข้าหมวดนี้เอง
+                {t("เลือกหมวดบนเว็บให้แต่ละหมวดใน ERP (ระบบเลือกให้ก่อนแล้ว แก้ได้) แล้วกดปุ่มเดียว ใส่ให้ทั้งกลุ่ม · ระบบจะจำกฎไว้ สินค้าใหม่ในหมวด ERP เดียวกันเข้าหมวดนี้เอง", "Pick a web category for each ERP category (pre-filled, editable), then press one button to apply to the whole group · the rule is saved, so new products in the same ERP category go here automatically")}
                 {defCat && catOf(defCat) && (
                   <>
                     {" "}
-                    · ตอนนี้ตัวที่ยังไม่ได้จัด เว็บโยนไปหมวด “{labelOf(defCat)}”
-                    ทั้งหมด (ค่าเริ่มต้น)
+                    {t(`· ตอนนี้ตัวที่ยังไม่ได้จัด เว็บโยนไปหมวด “${labelOf(defCat)}” ทั้งหมด (ค่าเริ่มต้น)`, `· right now the website puts all unsorted items in “${labelOf(defCat)}” (default)`)}
                   </>
                 )}
               </p>
@@ -687,10 +686,10 @@ export function WebsiteCategorySorter({
                     </span>
                     <span className="flex-1 min-w-[8rem]">
                       <span className="block text-sm text-slate-800">
-                        {g.name || "ไม่มีหมวดใน ERP"}
+                        {g.name || t("ไม่มีหมวดใน ERP", "No ERP category")}
                       </span>
                       <span className="block text-[11px] text-slate-400">
-                        {g.items.length} ตัว
+                        {t(`${g.items.length} ตัว`, `${g.items.length} items`)}
                       </span>
                     </span>
                     <span className="text-slate-300">→</span>
@@ -706,7 +705,7 @@ export function WebsiteCategorySorter({
                           }
                           className={`${selectCls} w-52 !text-sm !py-1.5`}
                         >
-                          <option value="">— ยังไม่ใส่ (จัดเองในขั้น 2)</option>
+                          <option value="">{t("— ยังไม่ใส่ (จัดเองในขั้น 2)", "— Not set (sort yourself in step 2)")}</option>
                           {treeRows.map(({ cat }) => (
                             <option key={cat.key} value={cat.key}>
                               {categoryChoiceLabel(cat)}
@@ -719,7 +718,7 @@ export function WebsiteCategorySorter({
                       </span>
                     ) : (
                       <span className="w-[16.375rem] text-xs text-slate-400">
-                        จัดเองในขั้น 2 ↓
+                        {t("จัดเองในขั้น 2 ↓", "Sort yourself in step 2 ↓")}
                       </span>
                     )}
                   </div>
@@ -728,8 +727,8 @@ export function WebsiteCategorySorter({
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <span className="text-xs text-slate-500">
                   {rules === null
-                    ? "กำลังโหลดกฎเดิม…"
-                    : `จะใส่หมวดให้ ${step1Count} ตัว · ย้อนได้`}
+                    ? t("กำลังโหลดกฎเดิม…", "Loading saved rules…")
+                    : t(`จะใส่หมวดให้ ${step1Count} ตัว · ย้อนได้`, `Will categorize ${step1Count} items · can undo`)}
                 </span>
                 <button
                   type="button"
@@ -737,7 +736,7 @@ export function WebsiteCategorySorter({
                   onClick={() => setConfirm1(true)}
                   className="px-3.5 py-1.5 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-50"
                 >
-                  ⚡ ใส่หมวดให้ {step1Count} ตัว
+                  {t(`⚡ ใส่หมวดให้ ${step1Count} ตัว`, `⚡ Categorize ${step1Count} items`)}
                 </button>
               </div>
             </div>
@@ -750,11 +749,10 @@ export function WebsiteCategorySorter({
         <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
           <div>
             <p className="font-semibold text-slate-800">
-              🗂 ขั้น 2 · กระดานจัดหมวดย่อย
+              {t("🗂 ขั้น 2 · กระดานจัดหมวดย่อย", "🗂 Step 2 · Subcategory board")}
             </p>
             <p className="text-xs text-slate-500">
-              คลิกรูปเพื่อเลือก (Shift+คลิก = เลือกเป็นช่วง) → กดชิปหรือเลข 1–9
-              · ลากไปวางบนหมวดทางซ้ายก็ได้ · ดับเบิลคลิก = เปิดตั้งค่าสินค้า
+              {t("คลิกรูปเพื่อเลือก (Shift+คลิก = เลือกเป็นช่วง) → กดชิปหรือเลข 1–9 · ลากไปวางบนหมวดทางซ้ายก็ได้ · ดับเบิลคลิก = เปิดตั้งค่าสินค้า", "Click images to pick (Shift+click = range) → press a chip or 1–9 · or drag onto a category on the left · double-click = open product settings")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -763,11 +761,11 @@ export function WebsiteCategorySorter({
               type="button"
               onClick={() => setShowOff(!showOff)}
               aria-pressed={!showOff}
-              title={showOff ? "กดเพื่อไม่แสดงตัวที่ปิดขาย (ป้าย ซ่อน) บนกระดาน — แค่มุมมอง สถานะขายไม่เปลี่ยน" : "กดเพื่อแสดงตัวที่ปิดขายกลับมา"}
+              title={showOff ? t("กดเพื่อไม่แสดงตัวที่ปิดขาย (ป้าย ซ่อน) บนกระดาน — แค่มุมมอง สถานะขายไม่เปลี่ยน", "Hide unpublished items (Hidden badge) on the board — view only, sales status unchanged") : t("กดเพื่อแสดงตัวที่ปิดขายกลับมา", "Show unpublished items again")}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${showOff ? "border-slate-200 text-slate-700 hover:border-slate-400" : "border-slate-800 bg-slate-800 text-white hover:bg-slate-700"}`}
             >
               <Icon value={showOff ? "i:eye" : "i:eye-off"} />
-              ตัวที่ปิดขาย: {showOff ? "แสดง" : "ไม่แสดง"} ({offCount})
+              {t("ตัวที่ปิดขาย:", "Unpublished:")} {showOff ? t("แสดง", "shown") : t("ไม่แสดง", "hidden")} ({offCount})
             </button>
           )}
           <button
@@ -776,12 +774,12 @@ export function WebsiteCategorySorter({
             onClick={() => void undoLast()}
             title={
               undo.length
-                ? `ย้อน: ${undo[undo.length - 1].label} (Ctrl+Z)`
-                : "ยังไม่มีอะไรให้ย้อน"
+                ? `${t("ย้อน", "Undo")}: ${undo[undo.length - 1].label} (Ctrl+Z)`
+                : t("ยังไม่มีอะไรให้ย้อน", "Nothing to undo yet")
             }
             className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-400 disabled:opacity-40"
           >
-            ↩ ย้อน{undo.length ? ` (${undo.length})` : ""}
+            {t("↩ ย้อน", "↩ Undo")}{undo.length ? ` (${undo.length})` : ""}
           </button>
           </div>
         </header>
@@ -826,7 +824,7 @@ export function WebsiteCategorySorter({
               onClick={() => setNewCat({ parent: null })}
               className="mt-1 w-full rounded-lg border border-dashed border-slate-300 px-2 py-1.5 text-xs text-slate-500 hover:border-slate-500 hover:text-slate-700"
             >
-              + เพิ่มหมวด
+              {t("+ เพิ่มหมวด", "+ Add category")}
             </button>
           </nav>
 
@@ -835,31 +833,31 @@ export function WebsiteCategorySorter({
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <p className="text-sm font-medium text-slate-800 mr-auto">
                 {node === NONE
-                  ? "⚠️ ยังไม่ได้จัด"
+                  ? t("⚠️ ยังไม่ได้จัด", "⚠️ Unsorted")
                   : curMain && curMain !== node
-                    ? `${labelOf(curMain)} › ${nodeMain(node) ? "ยังไม่มีหมวดย่อย" : labelOf(node)}`
+                    ? `${labelOf(curMain)} › ${nodeMain(node) ? t("ยังไม่มีหมวดย่อย", "No subcategory yet") : labelOf(node)}`
                     : labelOf(node)}{" "}
                 <span className="font-normal text-slate-400">
-                  · {items.length} ตัว
+                  · {t(`${items.length} ตัว`, `${items.length} items`)}
                 </span>
               </p>
               {curMain && childCategories(cats, curMain).length > 0 && !nodeMain(node) && (
                 <>
                   <label className="flex items-center gap-1 text-xs text-slate-500">
-                    เรียง
+                    {t("เรียง", "Sort")}
                     <select value={sortMode} onChange={(e) => setSortMode(e.target.value === "default" ? "default" : "nosub")} className="h-7 rounded-lg border border-slate-200 px-1.5 text-xs">
-                      <option value="nosub">ยังไม่มีหมวดย่อยขึ้นก่อน</option>
-                      <option value="default">ตามเดิม</option>
+                      <option value="nosub">{t("ยังไม่มีหมวดย่อยขึ้นก่อน", "No subcategory first")}</option>
+                      <option value="default">{t("ตามเดิม", "Default")}</option>
                     </select>
                   </label>
                   {(counts.get(nosubNode(curMain)) ?? 0) > 0 && (
                     <button
                       type="button"
                       onClick={() => setNode(nosubNode(curMain))}
-                      title="ดูเฉพาะตัวที่ยังไม่มีหมวดย่อย"
+                      title={t("ดูเฉพาะตัวที่ยังไม่มีหมวดย่อย", "Show only items without a subcategory")}
                       className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-800 hover:border-amber-500"
                     >
-                      ⚠ ยังไม่มีหมวดย่อย {counts.get(nosubNode(curMain))}
+                      ⚠ {t("ยังไม่มีหมวดย่อย", "No subcategory yet")} {counts.get(nosubNode(curMain))}
                     </button>
                   )}
                 </>
@@ -867,7 +865,7 @@ export function WebsiteCategorySorter({
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="ค้นหาในกองนี้"
+                placeholder={t("ค้นหาในกองนี้", "Search this pile")}
                 className="w-44 rounded-lg border border-slate-200 px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
               />
               <button
@@ -880,7 +878,7 @@ export function WebsiteCategorySorter({
                 }
                 className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400 disabled:opacity-40"
               >
-                {allSel ? "ยกเลิกเลือก" : `เลือกทั้งหมด (${items.length})`}
+                {allSel ? t("ยกเลิกเลือก", "Clear selection") : t(`เลือกทั้งหมด (${items.length})`, `Select all (${items.length})`)}
               </button>
             </div>
 
@@ -892,11 +890,11 @@ export function WebsiteCategorySorter({
                 <span className="mr-1 text-xs text-slate-600">
                   {picked.length ? (
                     <>
-                      {node === NONE || pickMode === "move" ? "ย้าย" : pickMode === "add" ? "เพิ่ม" : "ย้าย/เพิ่ม"} <b className="text-blue-700">{picked.length}</b>{" "}
-                      ตัวไป:
+                      {node === NONE || pickMode === "move" ? t("ย้าย", "Move") : pickMode === "add" ? t("เพิ่ม", "Add") : t("ย้าย/เพิ่ม", "Move/add")} <b className="text-blue-700">{picked.length}</b>{" "}
+                      {t("ตัวไป:", "items to:")}
                     </>
                   ) : (
-                    "เลือกสินค้าก่อน แล้วกดหมวดที่จะย้ายไป:"
+                    t("เลือกสินค้าก่อน แล้วกดหมวดที่จะย้ายไป:", "Pick products first, then press the category to move to:")
                   )}
                 </span>
                 {targets.map((k, i) => (
@@ -923,7 +921,7 @@ export function WebsiteCategorySorter({
                     onClick={() => move(picked, nosubNode(curMain))}
                     className={`${chipCls} border-dashed border-slate-300 bg-white text-slate-500 enabled:hover:border-slate-500`}
                   >
-                    ↩ ยังไม่มีหมวดย่อย
+                    {t("↩ ยังไม่มีหมวดย่อย", "↩ No subcategory")}
                   </button>
                 )}
                 {/* ⭐ หมวดโปรด (ปุ่มลัดเลขต่อจากปลายทางปกติ) */}
@@ -935,7 +933,7 @@ export function WebsiteCategorySorter({
                       type="button"
                       disabled={!picked.length || busy}
                       onClick={() => move(picked, k)}
-                      title="หมวดโปรด — ถอนได้ที่ ⭐ ในช่องค้นหาหมวดอื่น"
+                      title={t("หมวดโปรด — ถอนได้ที่ ⭐ ในช่องค้นหาหมวดอื่น", "Favorite category — unpin with ⭐ in the other-category search")}
                       className={`${chipCls} border-amber-300 bg-amber-50 text-amber-800 enabled:hover:border-amber-500`}
                     >
                       {i < 9 && <kbd className="rounded bg-white px-1 font-mono text-[10px] text-amber-700">{i + 1}</kbd>}⭐ {labelOf(k)}
@@ -946,32 +944,32 @@ export function WebsiteCategorySorter({
                 <CategoryTickPop
                   cats={cats}
                   how="move"
-                  label={node === NONE ? "↪ ย้าย… (เลือกหลายหมวด)" : "↪ ย้ายไปหมวดหลักอื่น…"}
+                  label={node === NONE ? t("↪ ย้าย… (เลือกหลายหมวด)", "↪ Move… (pick several)") : t("↪ ย้ายไปหมวดหลักอื่น…", "↪ Move to another main category…")}
                   count={picked.length}
                   fromNone={node === NONE}
                   here={curMain}
                   disabled={busy}
                   chipCls={chipCls}
-                  onNeedPick={() => toast.info("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด")}
+                  onNeedPick={() => toast.info(t("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด", "Pick products first, then a category"))}
                   onApply={(picks) => applyMany(picked, picks, "move")}
                 />
                 {node !== NONE && (
                   <CategoryTickPop
                     cats={cats}
                     how="add"
-                    label="＋ เพิ่มไปหมวด…"
+                    label={t("＋ เพิ่มไปหมวด…", "＋ Add to category…")}
                     count={picked.length}
                     fromNone={false}
                     here={curMain}
                     disabled={busy}
                     chipCls={chipCls}
-                    onNeedPick={() => toast.info("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด")}
+                    onNeedPick={() => toast.info(t("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด", "Pick products first, then a category"))}
                     onApply={(picks) => applyMany(picked, picks, "add")}
                   />
                 )}
                 <SearchPick
                   className="w-44"
-                  placeholder="หมวดอื่น… พิมพ์ค้นหา"
+                  placeholder={t("หมวดอื่น… พิมพ์ค้นหา", "Other category… type to search")}
                   disabled={busy}
                   options={treeRows
                     .filter(({ cat }) => cat.key !== node)
@@ -979,19 +977,19 @@ export function WebsiteCategorySorter({
                   starred={favSet}
                   onToggleStar={toggleFav}
                   onPick={(k) => {
-                    if (!picked.length) return toast.info("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด");
+                    if (!picked.length) return toast.info(t("เลือกสินค้าก่อน แล้วค่อยเลือกหมวด", "Pick products first, then a category"));
                     move(picked, k);
                   }}
-                  emptyText="ไม่พบหมวด — กด + หมวดย่อยใหม่ ได้"
+                  emptyText={t("ไม่พบหมวด — กด + หมวดย่อยใหม่ ได้", "No category found — use + New subcategory")}
                 />
                 {node !== NONE && (
                   <button
                     type="button"
                     onClick={() => setPickMode(pickMode === "ask" ? "move" : pickMode === "move" ? "add" : "ask")}
-                    title="เลือกหมวดแล้วจะทำอะไร — กดเพื่อสลับ: ถามทุกครั้ง → ย้ายเสมอ → เพิ่มเสมอ"
+                    title={t("เลือกหมวดแล้วจะทำอะไร — กดเพื่อสลับ: ถามทุกครั้ง → ย้ายเสมอ → เพิ่มเสมอ", "What happens when you pick a category — click to cycle: always ask → always move → always add")}
                     className={`${chipCls} border-slate-300 bg-white text-slate-600 hover:border-slate-500`}
                   >
-                    ⚙ {pickMode === "ask" ? "ถามย้าย/เพิ่ม" : pickMode === "move" ? "ย้ายเสมอ" : "เพิ่มเสมอ"}
+                    ⚙ {pickMode === "ask" ? t("ถามย้าย/เพิ่ม", "Ask move/add") : pickMode === "move" ? t("ย้ายเสมอ", "Always move") : t("เพิ่มเสมอ", "Always add")}
                   </button>
                 )}
                 {node !== NONE && (
@@ -1001,7 +999,7 @@ export function WebsiteCategorySorter({
                     onClick={() => removeHere(picked)}
                     className={`${chipCls} border-red-200 bg-white text-red-600 enabled:hover:border-red-400`}
                   >
-                    ✕ เอาออกจากหมวดนี้
+                    {t("✕ เอาออกจากหมวดนี้", "✕ Remove from this category")}
                   </button>
                 )}
                 {curMain && (
@@ -1010,7 +1008,7 @@ export function WebsiteCategorySorter({
                     onClick={() => setNewCat({ parent: curMain })}
                     className="ml-auto text-xs text-blue-600 hover:underline"
                   >
-                    + หมวดย่อยใหม่ใน {labelOf(curMain)}
+                    {t("+ หมวดย่อยใหม่ใน", "+ New subcategory in")} {labelOf(curMain)}
                   </button>
                 )}
               </div>
@@ -1019,12 +1017,12 @@ export function WebsiteCategorySorter({
             {items.length === 0 ? (
               <div className="py-14 text-center text-sm text-slate-400">
                 {q.trim()
-                  ? "ไม่พบสินค้าที่ค้นหาในกองนี้"
+                  ? t("ไม่พบสินค้าที่ค้นหาในกองนี้", "No matching products in this pile")
                   : node === NONE
                     ? !showOff && offUnsorted > 0
-                      ? `ตัวที่ขายอยู่จัดหมวดครบแล้ว · ยังมีตัวที่ปิดขาย ${offUnsorted} ตัวที่ไม่ได้แสดง (กด “ตัวที่ปิดขาย: ไม่แสดง” เพื่อดู)`
-                      : "🎉 จัดหมวดครบทุกตัวแล้ว"
-                    : "ยังไม่มีสินค้าในกองนี้ — ลากรูปมาวางที่หมวดนี้ทางซ้ายได้"}
+                      ? t(`ตัวที่ขายอยู่จัดหมวดครบแล้ว · ยังมีตัวที่ปิดขาย ${offUnsorted} ตัวที่ไม่ได้แสดง (กด “ตัวที่ปิดขาย: ไม่แสดง” เพื่อดู)`, `All published items are sorted · ${offUnsorted} unpublished items are not shown (press “Unpublished: hidden” to see them)`)
+                      : t("🎉 จัดหมวดครบทุกตัวแล้ว", "🎉 Everything is categorized")
+                    : t("ยังไม่มีสินค้าในกองนี้ — ลากรูปมาวางที่หมวดนี้ทางซ้ายได้", "No products in this pile yet — drag images onto this category on the left")}
               </div>
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-2 select-none">
@@ -1041,7 +1039,7 @@ export function WebsiteCategorySorter({
                       onDragStart={(e) => dragStart(e, l.parentId)}
                       onClick={(e) => clickItem(e, i, l.parentId)}
                       onDoubleClick={() => onOpen(l.parentId)}
-                      title={`${nameOf(l)} · ${l.code}${l.erpCategory ? ` · หมวด ERP: ${l.erpCategory}` : ""}`}
+                      title={`${nameOf(l)} · ${l.code}${l.erpCategory ? ` · ${t("หมวด ERP", "ERP category")}: ${l.erpCategory}` : ""}`}
                       className={`relative overflow-hidden rounded-lg border bg-white text-left transition ${on ? "border-blue-500 ring-2 ring-blue-300" : "border-slate-200 hover:border-slate-400"} ${l.published ? "" : "opacity-70"}`}
                     >
                       <div className="relative aspect-square bg-slate-100">
@@ -1069,7 +1067,7 @@ export function WebsiteCategorySorter({
                       )}
                       {!l.published && (
                         <span className="absolute right-1 top-1 rounded bg-slate-800/75 px-1 text-[9px] text-white">
-                          ซ่อน
+                          {t("ซ่อน", "Hidden")}
                         </span>
                       )}
                       <div className="p-1.5">
@@ -1083,7 +1081,7 @@ export function WebsiteCategorySorter({
                         ) : (
                           <>
                             {curMain && !nodeMain(node) && lacksSub(list, curMain, cats) && (
-                              <p className="mt-0.5 truncate text-[10px] text-amber-700">⚠ ยังไม่มีหมวดย่อย</p>
+                              <p className="mt-0.5 truncate text-[10px] text-amber-700">⚠ {t("ยังไม่มีหมวดย่อย", "No subcategory yet")}</p>
                             )}
                             {extra.length > 0 && (
                               <p className="mt-0.5 truncate text-[10px] text-blue-700">
@@ -1106,7 +1104,7 @@ export function WebsiteCategorySorter({
         open={confirm1}
         onClose={() => setConfirm1(false)}
         onConfirm={() => void applyStep1()}
-        title={`ใส่หมวดให้ ${step1Count} ตัว?`}
+        title={t(`ใส่หมวดให้ ${step1Count} ตัว?`, `Categorize ${step1Count} items?`)}
         message={
           <div className="space-y-2 text-sm">
             <ul className="space-y-0.5">
@@ -1119,47 +1117,46 @@ export function WebsiteCategorySorter({
               ))}
             </ul>
             <p className="text-xs text-slate-500">
-              ระบบจะจำกฎนี้ไว้ (สินค้าใหม่ในหมวด ERP เดียวกันเข้าหมวดนี้เอง) ·
-              ใส่แล้วกด ↩ ย้อน ได้
+              {t("ระบบจะจำกฎนี้ไว้ (สินค้าใหม่ในหมวด ERP เดียวกันเข้าหมวดนี้เอง) · ใส่แล้วกด ↩ ย้อน ได้", "The rule will be saved (new products in the same ERP category go here automatically) · you can ↩ Undo afterwards")}
             </p>
           </div>
         }
-        confirmText="⚡ ใส่หมวด"
+        confirmText={t("⚡ ใส่หมวด", "⚡ Categorize")}
         loading={busy}
       />
       <ERPModal
         open={!!askFor}
         onClose={() => setAskFor(null)}
-        title={askFor ? `ไปที่ "${labelOf(askFor.target)}" — ย้ายหรือเพิ่ม? (${askFor.ids.length} ตัว)` : ""}
+        title={askFor ? t(`ไปที่ "${labelOf(askFor.target)}" — ย้ายหรือเพิ่ม? (${askFor.ids.length} ตัว)`, `To "${labelOf(askFor.target)}" — move or add? (${askFor.ids.length} items)`) : ""}
         size="sm"
         resizable={false}
       >
         {askFor && (
           <div className="space-y-3">
-            <p className="text-xs text-slate-500">สินค้าอยู่ได้หลายหมวด — เลือกว่าจะทำแบบไหน</p>
+            <p className="text-xs text-slate-500">{t("สินค้าอยู่ได้หลายหมวด — เลือกว่าจะทำแบบไหน", "A product can be in several categories — choose what to do")}</p>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" autoFocus onClick={() => answer("move")} className="rounded-xl border border-slate-300 p-3 text-left hover:border-blue-500 hover:bg-blue-50">
                 <div className="text-sm font-semibold text-slate-800">
-                  ↪ ย้าย <kbd className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-500">M</kbd>
+                  {t("↪ ย้าย", "↪ Move")} <kbd className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-500">M</kbd>
                 </div>
                 <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
                   {crossFamily(node, askFor.target, cats)
-                    ? `ออกจาก ${labelOf(nodeMain(node) ?? mainOf(cats, node))} ไปอยู่ ${labelOf(askFor.target)} แทน`
+                    ? t(`ออกจาก ${labelOf(nodeMain(node) ?? mainOf(cats, node))} ไปอยู่ ${labelOf(askFor.target)} แทน`, `Leave ${labelOf(nodeMain(node) ?? mainOf(cats, node))} and go to ${labelOf(askFor.target)} instead`)
                     : mainOf(cats, askFor.target) !== askFor.target
-                      ? `เปลี่ยนหมวดย่อยเป็น ${labelOf(askFor.target)} (หมวดย่อยเดิมออก · ยังอยู่ ${labelOf(mainOf(cats, askFor.target))})`
-                      : `ออกจาก ${labelOf(node)} ไปอยู่ ${labelOf(askFor.target)} แทน`}
+                      ? t(`เปลี่ยนหมวดย่อยเป็น ${labelOf(askFor.target)} (หมวดย่อยเดิมออก · ยังอยู่ ${labelOf(mainOf(cats, askFor.target))})`, `Change subcategory to ${labelOf(askFor.target)} (old subcategory removed · stays in ${labelOf(mainOf(cats, askFor.target))})`)
+                      : t(`ออกจาก ${labelOf(node)} ไปอยู่ ${labelOf(askFor.target)} แทน`, `Leave ${labelOf(node)} and go to ${labelOf(askFor.target)} instead`)}
                 </div>
               </button>
               <button type="button" onClick={() => answer("add")} className="rounded-xl border border-slate-300 p-3 text-left hover:border-blue-500 hover:bg-blue-50">
                 <div className="text-sm font-semibold text-slate-800">
-                  ＋ เพิ่ม <kbd className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-500">A</kbd>
+                  {t("＋ เพิ่ม", "＋ Add")} <kbd className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-500">A</kbd>
                 </div>
-                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">คงหมวดเดิมไว้ + อยู่ใน {labelOf(askFor.target)} ด้วย</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">{t(`คงหมวดเดิมไว้ + อยู่ใน ${labelOf(askFor.target)} ด้วย`, `Keep current categories + also in ${labelOf(askFor.target)}`)}</div>
               </button>
             </div>
             <label className="flex items-center gap-1.5 text-xs text-slate-600">
               <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-              จำคำตอบนี้ ไม่ต้องถามอีก (เปลี่ยนได้ที่ปุ่ม ⚙ บนแถบ)
+              {t("จำคำตอบนี้ ไม่ต้องถามอีก (เปลี่ยนได้ที่ปุ่ม ⚙ บนแถบ)", "Remember this answer, don't ask again (change it with the ⚙ button on the bar)")}
             </label>
           </div>
         )}
@@ -1254,6 +1251,7 @@ function TickPanel({
   here: string | null;
   onApply: (picks: string[]) => void;
 }) {
+  const t = useT();
   const [picks, setPicks] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
@@ -1269,11 +1267,11 @@ function TickPanel({
     setErr("");
     setPicks((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
   };
-  const t = q.trim().toLowerCase();
-  const hits = t ? cats.filter((c) => `${c.label} ${c.key}`.toLowerCase().includes(t)) : [];
+  const needle = q.trim().toLowerCase();
+  const hits = needle ? cats.filter((c) => `${c.label} ${c.key}`.toLowerCase().includes(needle)) : [];
   const star = how === "move" || fromNone;
   const row = (c: CategoryDef, sub = false): React.ReactNode => {
-    const kids = sub || t ? [] : kidsOf(c.key);
+    const kids = sub || needle ? [] : kidsOf(c.key);
     const isOpen = openKeys.has(c.key) || kids.some((k) => picks.includes(k.key));
     return (
       <div key={c.key}>
@@ -1281,7 +1279,7 @@ function TickPanel({
           {kids.length > 0 ? (
             <button
               type="button"
-              aria-label={isOpen ? "ซ่อนหมวดย่อย" : "ดูหมวดย่อย"}
+              aria-label={isOpen ? t("ซ่อนหมวดย่อย", "Hide subcategories") : t("ดูหมวดย่อย", "Show subcategories")}
               onClick={() =>
                 setOpenKeys((s) => {
                   const n = new Set(s);
@@ -1301,10 +1299,10 @@ function TickPanel({
             <input type="checkbox" checked={picks.includes(c.key)} onChange={() => toggle(c.key)} />
             <span className="truncate text-slate-700">
               {c.icon ? `${c.icon} ` : ""}
-              {t && c.parent ? labelOf(c.key) : c.label}
+              {needle && c.parent ? labelOf(c.key) : c.label}
             </span>
-            {kids.length > 0 && <span className="shrink-0 text-[10px] text-slate-400">{kids.length} ย่อย</span>}
-            {!sub && !t && here === c.key && <span className="shrink-0 rounded bg-slate-100 px-1 text-[10px] text-slate-500">อยู่ตอนนี้</span>}
+            {kids.length > 0 && <span className="shrink-0 text-[10px] text-slate-400">{t(`${kids.length} ย่อย`, `${kids.length} sub`)}</span>}
+            {!sub && !needle && here === c.key && <span className="shrink-0 rounded bg-slate-100 px-1 text-[10px] text-slate-500">{t("อยู่ตอนนี้", "Current")}</span>}
           </label>
         </div>
         {isOpen && kids.map((k) => row(k, true))}
@@ -1312,18 +1310,18 @@ function TickPanel({
     );
   };
   const go = () => {
-    if (!picks.length) return setErr("ติ๊กหมวดก่อน");
+    if (!picks.length) return setErr(t("ติ๊กหมวดก่อน", "Tick a category first"));
     onApply(picks);
   };
   const btn = fromNone
-    ? `ย้าย ${count} ตัวไป ${picks.length || ""} หมวด`
+    ? t(`ย้าย ${count} ตัวไป ${picks.length || ""} หมวด`, `Move ${count} items to ${picks.length || ""} categories`)
     : how === "add"
-      ? `＋ เพิ่ม ${count} ตัว (เก็บหมวดเดิม)`
-      : `↪ ย้าย ${count} ตัว (แทนหมวดเดิม)`;
+      ? t(`＋ เพิ่ม ${count} ตัว (เก็บหมวดเดิม)`, `＋ Add ${count} items (keep current categories)`)
+      : t(`↪ ย้าย ${count} ตัว (แทนหมวดเดิม)`, `↪ Move ${count} items (replace current categories)`);
   return (
     <div className="space-y-1.5">
       <p className="px-1 text-[11px] text-slate-500">
-        {how === "add" ? "เพิ่มเข้าหมวดที่ติ๊ก — หมวดเดิมยังอยู่" : fromNone ? "ติ๊กได้หลายหมวด แล้วกดย้าย" : "ออกจากหมวดนี้ แล้วไปอยู่หมวดที่ติ๊กแทน"} · กาง ▸ ดูหมวดย่อย
+        {how === "add" ? t("เพิ่มเข้าหมวดที่ติ๊ก — หมวดเดิมยังอยู่", "Add to the ticked categories — current ones stay") : fromNone ? t("ติ๊กได้หลายหมวด แล้วกดย้าย", "Tick several categories, then press Move") : t("ออกจากหมวดนี้ แล้วไปอยู่หมวดที่ติ๊กแทน", "Leave this category and go to the ticked ones instead")} · {t("กาง ▸ ดูหมวดย่อย", "expand ▸ to see subcategories")}
       </p>
       <input
         autoFocus
@@ -1332,14 +1330,14 @@ function TickPanel({
         onKeyDown={(e) => {
           if (e.key === "Enter" && hits.length === 1) toggle(hits[0].key);
         }}
-        placeholder="ค้นหาหมวด…"
+        placeholder={t("ค้นหาหมวด…", "Search categories…")}
         className="h-7 w-full rounded-lg border border-slate-300 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
       />
       <div className="max-h-[min(15rem,38vh)] overflow-y-auto">
-        {t
+        {needle
           ? hits.length
             ? hits.map((c) => row(c))
-            : <p className="px-2 py-2 text-xs text-slate-400">ไม่พบหมวด</p>
+            : <p className="px-2 py-2 text-xs text-slate-400">{t("ไม่พบหมวด", "No category found")}</p>
           : tops.map((c) => row(c))}
       </div>
       {picks.length > 0 && (
@@ -1349,10 +1347,10 @@ function TickPanel({
               key={k}
               type="button"
               onClick={() => toggle(k)}
-              title="กดเพื่อเอาออก"
+              title={t("กดเพื่อเอาออก", "Click to remove")}
               className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-800 hover:bg-blue-100"
             >
-              {star && i === 0 && <span title="หมวดหลัก">★</span>}
+              {star && i === 0 && <span title={t("หมวดหลัก", "Main category")}>★</span>}
               {labelOf(k)} ✕
             </button>
           ))}

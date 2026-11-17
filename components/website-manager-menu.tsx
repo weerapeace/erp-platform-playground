@@ -7,6 +7,7 @@
  *   กดกลุ่ม = ไปแท็บย่อยล่าสุดของกลุ่มนั้น (lastTabOf) หรือแท็บแรก · ใช้เฉพาะหน้าเว็บไซต์
  */
 import { Icon } from "@/components/icon";
+import { useT } from "@/components/i18n";
 import { WEBSITE_GROUPS, WEBSITE_GROUP_STYLE, WEBSITE_TAB_META, websiteGroupOfTab, type WebsiteGroup } from "@/lib/website-access";
 
 export function WebsiteManagerMenu<T extends string>({ tab, onGo, canSee, viewOnly, lastTabOf }: {
@@ -18,14 +19,15 @@ export function WebsiteManagerMenu<T extends string>({ tab, onGo, canSee, viewOn
   viewOnly?: (k: T) => boolean;
   lastTabOf?: Partial<Record<WebsiteGroup, T>>;
 }) {
+  const t = useT();
   const groups = WEBSITE_GROUPS
     .map((g) => ({ ...g, visible: (g.tabs as T[]).filter(canSee) }))
     .filter((g) => g.visible.length > 0);
   const curKey = websiteGroupOfTab(tab);
   const cur = groups.find((g) => g.key === curKey) ?? groups[0];
-  const eye = <Icon value="i:eye" size={13} className="text-slate-400" title="ดูได้อย่างเดียว" />;
+  const eye = <Icon value="i:eye" size={13} className="text-slate-400" title={t("ดูได้อย่างเดียว", "View only")} />;
   return (
-    <nav className="mb-4" aria-label="เมนูเว็บไซต์">
+    <nav className="mb-4" aria-label={t("เมนูเว็บไซต์", "Website menu")}>
       <div className="flex items-center gap-1 overflow-x-auto pb-2 border-b border-slate-200">
         {groups.map((g) => {
           const st = WEBSITE_GROUP_STYLE[g.key];

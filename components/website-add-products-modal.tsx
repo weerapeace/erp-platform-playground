@@ -9,14 +9,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
 
 /** ป้ายที่ควรเตือนก่อนเอาขึ้นเว็บ */
 const WARN_LABEL = /out of stock|ไม่ใช่สินค้าสำหรับขาย/i;
-const TAKEN_TEXT = { badge: "อยู่บนเว็บแล้ว", short: "เว็บ", hide: "ซ่อนที่อยู่บนเว็บแล้ว", row: "✓ อยู่แล้ว" };
+const takenText = () => ({ badge: tr("อยู่บนเว็บแล้ว", "Already on web"), short: tr("เว็บ", "Web"), hide: tr("ซ่อนที่อยู่บนเว็บแล้ว", "Hide ones already on web"), row: tr("✓ อยู่แล้ว", "✓ Already added") });
 
 export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open: boolean; onClose: () => void; shop: { id: string; slug: string; name: string }; onAdded: () => void | Promise<void> }) {
   const toast = useToast();
+  const t = useT();
   const [publish, setPublish] = useState(false);
   useEffect(() => { if (open) setPublish(false); }, [open]);
 
@@ -25,7 +28,7 @@ export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open
     try {
       j = await (await apiFetch(`/api/website/listings/catalog?shop=${encodeURIComponent(shop.slug)}`)).json();
     } catch {
-      throw new Error("โหลดรายการสินค้าไม่สำเร็จ");
+      throw new Error(tr("โหลดรายการสินค้าไม่สำเร็จ", "Failed to load products"));
     }
     if (j.error) throw new Error(String(j.error));
     const c = j as unknown as SkuPickerCatalog & { onShop?: string[]; shopBrandId?: string | null };
@@ -35,12 +38,12 @@ export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open
   const add = async (ids: string[]): Promise<boolean> => {
     try {
       const j = await (await apiFetch("/api/website/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId: shop.id, action: "addMany", parentIds: ids, publish }) })).json();
-      if (!j.ok) { toast.error(j.error ?? "เพิ่มไม่สำเร็จ"); return false; }
-      toast.success(`เพิ่ม ${j.added} รุ่นเข้าเว็บแล้ว${publish ? " (ขึ้นเว็บทันที)" : " — ซ่อนไว้ก่อน ไปตั้งรูป/ราคา/หมวดแล้วค่อยเปิด"}${j.skipped ? ` · ข้าม ${j.skipped} (อยู่แล้ว)` : ""}`);
+      if (!j.ok) { toast.error(j.error ?? t("เพิ่มไม่สำเร็จ", "Add failed")); return false; }
+      toast.success(t(`เพิ่ม ${j.added} รุ่นเข้าเว็บแล้ว${publish ? " (ขึ้นเว็บทันที)" : " — ซ่อนไว้ก่อน ไปตั้งรูป/ราคา/หมวดแล้วค่อยเปิด"}${j.skipped ? ` · ข้าม ${j.skipped} (อยู่แล้ว)` : ""}`, `Added ${j.added} models to the web${publish ? " (live now)" : " — hidden for now; set images/price/category, then publish"}${j.skipped ? ` · skipped ${j.skipped} (already added)` : ""}`));
       await onAdded();
       return true;
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Connection failed"));
       return false;
     }
   };
@@ -49,19 +52,19 @@ export function WebsiteAddProductsModal({ open, onClose, shop, onAdded }: { open
     <MarketingSkuPickerModal
       open={open}
       onClose={onClose}
-      title={`➕ เพิ่มสินค้าเข้าเว็บ — ${shop.name}`}
-      description="ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดเพิ่มทีเดียว"
+      title={t(`➕ เพิ่มสินค้าเข้าเว็บ — ${shop.name}`, `➕ Add products — ${shop.name}`)}
+      description={t("ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดเพิ่มทีเดียว", "Tick several models (kept across tabs/pages), then add them all at once")}
       load={load}
-      taken={TAKEN_TEXT}
-      warn={{ label: WARN_LABEL, note: "ยังเพิ่มได้ แนะนำซ่อนไว้ก่อน" }}
+      taken={takenText()}
+      warn={{ label: WARN_LABEL, note: t("ยังเพิ่มได้ แนะนำซ่อนไว้ก่อน", "Can still be added; best keep hidden for now") }}
       footerExtra={
         <select value={publish ? "pub" : "hide"} onChange={(e) => setPublish(e.target.value === "pub")} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">
-          <option value="hide">ซ่อนไว้ก่อน (ไปตั้งรูป/ราคา/หมวด)</option>
-          <option value="pub">ขึ้นเว็บทันที</option>
+          <option value="hide">{t("ซ่อนไว้ก่อน (ไปตั้งรูป/ราคา/หมวด)", "Keep hidden (set images/price/category first)")}</option>
+          <option value="pub">{t("ขึ้นเว็บทันที", "Go live now")}</option>
         </select>
       }
-      confirmText={(n) => (n ? `เพิ่ม ${n} รุ่นเข้าเว็บ` : "เพิ่มเข้าเว็บ")}
-      busyText="กำลังเพิ่ม…"
+      confirmText={(n) => (n ? t(`เพิ่ม ${n} รุ่นเข้าเว็บ`, `Add ${n} models`) : t("เพิ่มเข้าเว็บ", "Add to web"))}
+      busyText={t("กำลังเพิ่ม…", "Adding…")}
       onConfirm={add}
       tabPrefKey="website_add_products_tab"
       colsPrefKey="website-add-products"

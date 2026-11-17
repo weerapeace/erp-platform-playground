@@ -13,6 +13,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { AssetPicker } from "@/components/asset-picker";
 import { uploadToLibrary } from "@/components/website-canvas-media";
 import { loadSkus, type SkuRow } from "@/components/website-sku-picker";
@@ -54,8 +55,8 @@ export function WebsiteProductPicker({
   max = 24,
   onChange,
   rowImages,
-  imageLabel = "รูปบนแท็บ",
-  defaultImageLabel = "รูปปก Parent",
+  imageLabel: imageLabelProp,
+  defaultImageLabel: defaultImageLabelProp,
 }: {
   shopSlug: string;
   value: string[];
@@ -68,6 +69,9 @@ export function WebsiteProductPicker({
   defaultImageLabel?: string;
 }) {
   const toast = useToast();
+  const t = useT();
+  const imageLabel = imageLabelProp ?? t("รูปบนแท็บ", "tab image");
+  const defaultImageLabel = defaultImageLabelProp ?? t("รูปปก Parent", "Parent cover image");
   const [open, setOpen] = useState(false);
   // 🖼 แผงรูปของรุ่นที่กางอยู่ · รูปสีของทุกรุ่น (API สาธารณะตัวเดียวกับตัวเลือก SKU) · อัปโหลด/คลังของรุ่นไหน
   const [imgOpen, setImgOpen] = useState<string | null>(null);
@@ -117,27 +121,27 @@ export function WebsiteProductPicker({
   const skusOf = (code: string) => skuRows.filter((r) => up(r.code) === up(code) && r.ref.includes(":"));
   const chosen = (code: string): { url: string | null; label: string } | null => {
     const k = customKey(code);
-    if (k) return { url: keyUrl(k, 80), label: "รูปที่อัปโหลด / จากคลัง" };
+    if (k) return { url: keyUrl(k, 80), label: t("รูปที่อัปโหลด / จากคลัง", "Uploaded / from library") };
     const ref = skuRef(code);
     if (ref) {
       const r = skuRows.find((x) => x.ref.toLowerCase() === ref.toLowerCase());
-      return { url: r?.image ?? null, label: `รูป SKU ${r?.color || ref.split(":")[1]}` };
+      return { url: r?.image ?? null, label: t(`รูป SKU ${r?.color || ref.split(":")[1]}`, `SKU image ${r?.color || ref.split(":")[1]}`) };
     }
     return null;
   };
   const upload = async (code: string, f: File | undefined) => {
     if (!rowImages || !f) return;
     if (!f.type.startsWith("image/")) {
-      toast.error("เลือกไฟล์รูปเท่านั้น");
+      toast.error(t("เลือกไฟล์รูปเท่านั้น", "Image files only"));
       return;
     }
     setBusy(code);
     try {
       const { key } = await uploadToLibrary(f);
       rowImages.onSet(code, { key });
-      toast.success(`ตั้ง${imageLabel}แล้ว (เก็บเข้าคลังรูปด้วย)`);
+      toast.success(t(`ตั้ง${imageLabel}แล้ว (เก็บเข้าคลังรูปด้วย)`, `Set ${imageLabel} (also saved to the image library)`));
     } catch {
-      toast.error("อัปโหลดรูปไม่สำเร็จ");
+      toast.error(t("อัปโหลดรูปไม่สำเร็จ", "Image upload failed"));
     } finally {
       setBusy(null);
       if (fileRef.current) fileRef.current.value = "";
@@ -156,7 +160,7 @@ export function WebsiteProductPicker({
   return (
     <div className="space-y-2">
       {value.length === 0 ? (
-        <p className="text-xs text-slate-400">ยังไม่ได้เลือกสินค้า</p>
+        <p className="text-xs text-slate-400">{t("ยังไม่ได้เลือกสินค้า", "No products selected")}</p>
       ) : (
         <ul className="space-y-1">
           {value.map((code, i) => {
@@ -167,7 +171,7 @@ export function WebsiteProductPicker({
             return (
               <li key={code} {...rowProps(i)} className={`rounded-lg border ${isOpen ? "border-blue-300" : "border-slate-200"} bg-white ${rowCls(i)}`}>
                 <div className="flex items-center gap-2 px-1.5 py-1">
-                <DragHandle {...handleProps(i)} title="ลากเพื่อเรียงลำดับ" />
+                <DragHandle {...handleProps(i)} title={t("ลากเพื่อเรียงลำดับ", "Drag to reorder")} />
                 <span className="text-[10px] text-slate-400 tabular-nums w-3 text-right">{i + 1}</span>
                 {u ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
@@ -177,30 +181,30 @@ export function WebsiteProductPicker({
                 )}
                 <span className="flex-1 min-w-0">
                   <span className="block font-mono text-[11px] text-slate-700">{code}</span>
-                  <span className={`block text-[10px] truncate ${l ? "text-slate-400" : "text-amber-600"}`}>{l ? name(l) : rows.length ? "ไม่อยู่บนเว็บแล้ว" : ""}</span>
+                  <span className={`block text-[10px] truncate ${l ? "text-slate-400" : "text-amber-600"}`}>{l ? name(l) : rows.length ? t("ไม่อยู่บนเว็บแล้ว", "No longer on the web") : ""}</span>
                 </span>
                 {rowImages && (
                   <button
                     type="button"
                     onClick={() => setImgOpen(isOpen ? null : code)}
-                    title={pick ? `${imageLabel}: ${pick.label}` : `ตั้ง${imageLabel} (ตอนนี้ = ${defaultImageLabel})`}
+                    title={pick ? `${imageLabel}: ${pick.label}` : t(`ตั้ง${imageLabel} (ตอนนี้ = ${defaultImageLabel})`, `Set ${imageLabel} (now = ${defaultImageLabel})`)}
                     className={`h-7 shrink-0 rounded-md border px-1.5 text-xs ${isOpen ? "border-blue-500 bg-blue-50 text-blue-700" : pick ? "border-blue-300 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
                   >
                     🖼{pick ? " ✓" : ""}
                   </button>
                 )}
-                <button type="button" onClick={() => onChange(value.filter((c) => c !== code))} className="text-slate-400 hover:text-red-500 px-1.5" title="เอาออก">
+                <button type="button" onClick={() => onChange(value.filter((c) => c !== code))} className="text-slate-400 hover:text-red-500 px-1.5" title={t("เอาออก", "Remove")}>
                   ×
                 </button>
                 </div>
                 {rowImages && isOpen && (
                   <div className="mx-2 mb-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
                     <p className="text-[11px] text-slate-500">
-                      {imageLabel}ตอนนี้: <b className="font-medium text-slate-700">{pick?.label ?? `${defaultImageLabel} (เดิม)`}</b>
+                      {t(`${imageLabel}ตอนนี้:`, `Current ${imageLabel}:`)} <b className="font-medium text-slate-700">{pick?.label ?? t(`${defaultImageLabel} (เดิม)`, `${defaultImageLabel} (default)`)}</b>
                     </p>
                     {skusOf(code).length > 0 && (
                       <div>
-                        <p className="mb-1 text-[10px] text-slate-400">ใช้รูปของ SKU (สี)</p>
+                        <p className="mb-1 text-[10px] text-slate-400">{t("ใช้รูปของ SKU (สี)", "Use a SKU (color) image")}</p>
                         <div className="flex flex-wrap gap-1.5">
                           {skusOf(code).map((r) => {
                             const on = !customKey(code) && skuRef(code)?.toLowerCase() === r.ref.toLowerCase();
@@ -234,14 +238,14 @@ export function WebsiteProductPicker({
                         }}
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 hover:border-blue-400 disabled:opacity-50"
                       >
-                        {busy === code ? "กำลังอัปโหลด…" : "⬆ อัปโหลดรูป"}
+                        {busy === code ? t("กำลังอัปโหลด…", "Uploading…") : t("⬆ อัปโหลดรูป", "⬆ Upload image")}
                       </button>
                       <button type="button" disabled={!!busy} onClick={() => setLibFor(code)} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 hover:border-blue-400 disabled:opacity-50">
-                        🗂 เลือกจากคลังรูป
+                        {t("🗂 เลือกจากคลังรูป", "🗂 Pick from library")}
                       </button>
                       {pick && (
                         <button type="button" onClick={() => rowImages.onSet(code, null)} className="px-1 text-[11px] text-slate-500 hover:text-blue-600">
-                          ↺ ใช้รูปปก Parent
+                          {t("↺ ใช้รูปปก Parent", "↺ Use Parent cover")}
                         </button>
                       )}
                     </div>
@@ -260,7 +264,7 @@ export function WebsiteProductPicker({
               open
               onClose={() => setLibFor(null)}
               typeFilter="image"
-              title={`เลือก${imageLabel} — ${libFor}`}
+              title={t(`เลือก${imageLabel} — ${libFor}`, `Pick ${imageLabel} — ${libFor}`)}
               onSelect={(picked) => {
                 const key = picked[0]?.r2_key;
                 if (key) rowImages.onSet(libFor, { key });
@@ -271,32 +275,32 @@ export function WebsiteProductPicker({
         </>
       )}
       <button type="button" onClick={() => setOpen(true)} className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-700 hover:border-slate-500">
-        🛍️ เลือกสินค้า ({value.length}/{max})
+        {t(`🛍️ เลือกสินค้า (${value.length}/${max})`, `🛍️ Pick products (${value.length}/${max})`)}
       </button>
 
       {open && (
         <WebsitePickModal<Listing>
           open
           onClose={() => setOpen(false)}
-          title="เลือกสินค้าที่จะแสดง"
-          unit="รุ่น"
+          title={t("เลือกสินค้าที่จะแสดง", "Pick products to show")}
+          unit={t("รุ่น", "models")}
           max={max}
           rows={rows}
           rowKey={(r) => r.code}
           loading={loading}
-          loadingText="กำลังโหลดสินค้าบนเว็บ…"
+          loadingText={t("กำลังโหลดสินค้าบนเว็บ…", "Loading web products…")}
           selected={sel}
           onSelectedChange={setSel}
           chosen={value}
           recentKey={RECENT_KEYS.webProducts}
           onConfirm={confirm}
           searchText={(r) => `${r.code} ${name(r)} ${r.webCategory} ${r.mapped?.category ?? ""}`}
-          searchPlaceholder="ค้นหารหัส/ชื่อสินค้า"
-          emptyText='ยังไม่มีสินค้าที่เผยแพร่บนเว็บ — เพิ่มได้ที่แท็บ "สินค้าบนเว็บ"'
+          searchPlaceholder={t("ค้นหารหัส/ชื่อสินค้า", "Search code / product name")}
+          emptyText={t('ยังไม่มีสินค้าที่เผยแพร่บนเว็บ — เพิ่มได้ที่แท็บ "สินค้าบนเว็บ"', 'No products published on the web yet — add them in the "Web products" tab')}
           card={(r) => ({ image: keyUrl(firstImage(r), 320), code: r.code, title: name(r) })}
           note={
             byCode.size > 0 && value.some((c) => !byCode.has(c)) ? (
-              <p className="mt-2 text-[11px] text-amber-600">บางรหัสที่เลือกไว้ไม่อยู่บนเว็บแล้ว (ถูกปิดเผยแพร่) — จะไม่แสดงบนเว็บ</p>
+              <p className="mt-2 text-[11px] text-amber-600">{t("บางรหัสที่เลือกไว้ไม่อยู่บนเว็บแล้ว (ถูกปิดเผยแพร่) — จะไม่แสดงบนเว็บ", "Some selected codes are no longer on the web (unpublished) — they won't be shown")}</p>
             ) : null
           }
           columns={[
@@ -314,9 +318,9 @@ export function WebsiteProductPicker({
                 );
               },
             },
-            { key: "code", header: "รหัส", width: "7rem", cell: (r) => <span className="font-mono text-xs">{r.code}</span>, sortValue: (r) => r.code },
-            { key: "name", header: "ชื่อบนเว็บ", width: "1fr", cell: (r) => <span className="text-sm line-clamp-2">{name(r)}</span>, sortValue: (r) => name(r) },
-            { key: "cat", header: "หมวด", width: "7rem", cell: (r) => <span className="text-xs text-slate-500">{r.webCategory || r.mapped?.category || "—"}</span>, sortValue: (r) => r.webCategory || r.mapped?.category || "" },
+            { key: "code", header: t("รหัส", "Code"), width: "7rem", cell: (r) => <span className="font-mono text-xs">{r.code}</span>, sortValue: (r) => r.code },
+            { key: "name", header: t("ชื่อบนเว็บ", "Web name"), width: "1fr", cell: (r) => <span className="text-sm line-clamp-2">{name(r)}</span>, sortValue: (r) => name(r) },
+            { key: "cat", header: t("หมวด", "Category"), width: "7rem", cell: (r) => <span className="text-xs text-slate-500">{r.webCategory || r.mapped?.category || "—"}</span>, sortValue: (r) => r.webCategory || r.mapped?.category || "" },
           ]}
         />
       )}

@@ -9,24 +9,26 @@ import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { AccessDenied, useAuth } from "@/components/auth";
 import { WebsiteAccessSettings } from "@/components/website-access-settings";
+import { useT } from "@/components/i18n";
 
 export default function WebsiteAccessPage() {
   const { can, permsReady, user } = useAuth();
+  const t = useT();
   const know = permsReady || user?.role === "admin";
   return (
     <PlaygroundShell>
       <div className="max-w-[1400px] mx-auto px-5 py-6">
         <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
-          ← เว็บไซต์ทั้งหมด
+          ← {t("เว็บไซต์ทั้งหมด", "All websites")}
         </Link>
-        <h1 className="mt-1.5 text-xl font-semibold text-slate-900">🔐 ใครทำอะไรได้ในเว็บไซต์</h1>
-        <p className="mt-1 mb-4 text-sm text-slate-500">ตั้งว่าแต่ละคนเห็นหรือแก้ส่วนไหนของเว็บได้ และเข้าร้านไหนได้ — ระบบกันทั้งหน้าจอและตอนบันทึก</p>
+        <h1 className="mt-1.5 text-xl font-semibold text-slate-900">🔐 {t("ใครทำอะไรได้ในเว็บไซต์", "Who can do what on the website")}</h1>
+        <p className="mt-1 mb-4 text-sm text-slate-500">{t("ตั้งว่าแต่ละคนเห็นหรือแก้ส่วนไหนของเว็บได้ และเข้าร้านไหนได้ — ระบบกันทั้งหน้าจอและตอนบันทึก", "Set which parts of the website each person can see or edit, and which shops they can open — enforced on screen and on save")}</p>
         {!know ? (
           <div className="h-64 rounded-2xl bg-slate-100 animate-pulse" />
         ) : can("admin.users") ? (
           <WebsiteAccessSettings />
         ) : (
-          <AccessDenied message="หน้านี้สำหรับผู้ดูแลที่จัดการผู้ใช้ได้" />
+          <AccessDenied message={t("หน้านี้สำหรับผู้ดูแลที่จัดการผู้ใช้ได้", "This page is for admins who can manage users")} />
         )}
       </div>
     </PlaygroundShell>

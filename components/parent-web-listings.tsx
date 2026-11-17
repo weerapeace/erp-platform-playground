@@ -52,6 +52,8 @@ import { SizeGridEditor, type SizeGridView } from "@/components/website-size-gri
 import { MoneyInput } from "@/components/money-input";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { renameCardColor } from "@/lib/website-card-colors";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 /**
  * label = ชื่อสีที่เว็บโชว์ (ไทยก่อน) · colorTh/colorEn = ค่าดิบใน SKU (สี (ไทย) / ช่อง Color) ให้แก้ในแถวสี
@@ -145,11 +147,11 @@ type Tab = "sell" | "detail" | "extra" | "fix";
 
 /** ปุ่มกฎชื่อ — ป้ายโชว์คำที่จะถูกลบจริงของรุ่นนี้ */
 const NAME_RULE_CHIPS: { flag: NameRuleFlag; label: string; ref?: keyof Resp["nameRefs"] }[] = [
-  { flag: "removeBrand", label: "ลบแบรนด์", ref: "brand" },
-  { flag: "removeCollection", label: "ลบคอลเลกชัน", ref: "collection" },
-  { flag: "removeCode", label: "ลบรหัสสินค้า", ref: "code" },
-  { flag: "removeParens", label: "ลบข้อความในวงเล็บ" },
-  { flag: "removeParenMarks", label: "ลบแค่วงเล็บ" },
+  { flag: "removeBrand", get label() { return tr("ลบแบรนด์", "Remove brand"); }, ref: "brand" },
+  { flag: "removeCollection", get label() { return tr("ลบคอลเลกชัน", "Remove collection"); }, ref: "collection" },
+  { flag: "removeCode", get label() { return tr("ลบรหัสสินค้า", "Remove product code"); }, ref: "code" },
+  { flag: "removeParens", get label() { return tr("ลบข้อความในวงเล็บ", "Remove text in brackets"); } },
+  { flag: "removeParenMarks", get label() { return tr("ลบแค่วงเล็บ", "Remove brackets only"); } },
 ];
 
 /** ตัวเลือกสถานะสต๊อก = ทะเบียนกลาง (ชุดเดียวกับแก้หลายรายการ) */
@@ -166,11 +168,11 @@ const MAX_SKU_IMAGES = 8;
 const keyUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 const baht = (n: number) => `฿${n.toLocaleString("th-TH")}`;
 const SOURCE_LABEL: Record<string, string> = {
-  description: "คำอธิบายสินค้า",
-  fields: "ฟิลด์ Parent SKU",
-  details: "จุดเด่น",
-  text: "ข้อความตายตัว",
-  shipping: "การจัดส่ง/ชำระเงิน",
+  get description() { return tr("คำอธิบายสินค้า", "Product description"); },
+  get fields() { return tr("ฟิลด์ Parent SKU", "Parent SKU fields"); },
+  get details() { return tr("จุดเด่น", "Highlights"); },
+  get text() { return tr("ข้อความตายตัว", "Fixed text"); },
+  get shipping() { return tr("การจัดส่ง/ชำระเงิน", "Shipping/payment"); },
 };
 const inputCls = "w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-orange-400";
 const labelCls = "block text-xs text-slate-500 mb-1";
@@ -195,6 +197,7 @@ export function ParentWebListings({
   /** ปุ่ม "ไปเติมที่ Parent SKU" ในกล่องข้อมูลที่เชื่อม (ไม่ส่ง = อยู่ในหน้า Parent SKU อยู่แล้ว → บอกให้ไปแท็บข้อมูล) */
   onOpenParent?: () => void;
 }) {
+  const t = useT();
   const toast = useToast();
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,7 +279,7 @@ export function ParentWebListings({
   const patchShop = (sid: string, p: Partial<ShopState>) =>
     setData((d) => (d ? { ...d, shops: d.shops.map((s) => (s.shopId === sid ? { ...s, ...p } : s)) } : d));
   const tabFor = (sid: string): Tab => tabOf[sid] ?? "sell";
-  const setTab = (sid: string, t: Tab) => setTabOf((m) => ({ ...m, [sid]: t }));
+  const setTab = (sid: string, tab: Tab) => setTabOf((m) => ({ ...m, [sid]: tab }));
 
   const setSkuImages = (s: ShopState, skuId: string, keys: string[]) => {
     const n = { ...s.webSkuImages };
@@ -304,12 +307,12 @@ export function ParentWebListings({
         body: JSON.stringify({ parentId, shopId: sid, action: "add" }),
       });
       if ((await r.json()).ok) {
-        toast.success("เพิ่มเข้าร้านแล้ว (ยังปิดอยู่)");
+        toast.success(t("เพิ่มเข้าร้านแล้ว (ยังปิดอยู่)", "Added to shop (still hidden)"));
         await load(true);
         onChanged?.();
-      } else toast.error("เพิ่มไม่สำเร็จ");
+      } else toast.error(t("เพิ่มไม่สำเร็จ", "Add failed"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
     }
     setSavingShop(null);
   };
@@ -332,11 +335,11 @@ export function ParentWebListings({
       const fresh = (await (await apiFetch(`/api/parent-web-listings?parentId=${encodeURIComponent(parentId)}`)).json()) as Resp;
       const f = fresh?.shops?.find((x) => x.shopId === s.shopId);
       if (f) patchShop(s.shopId, { autoName: f.autoName, nameRule: f.nameRule });
-      toast.success(`กฎชื่อร้าน ${s.shopName} ใช้กับทุกสินค้าในร้านแล้ว`);
+      toast.success(t(`กฎชื่อร้าน ${s.shopName} ใช้กับทุกสินค้าในร้านแล้ว`, `Name rule for ${s.shopName} now applies to every product in the shop`));
       onChanged?.();
     } catch {
       patchShop(s.shopId, { nameRule: s.nameRule });
-      toast.error("บันทึกกฎชื่อไม่สำเร็จ");
+      toast.error(t("บันทึกกฎชื่อไม่สำเร็จ", "Couldn't save the name rule"));
     }
   };
 
@@ -351,7 +354,7 @@ export function ParentWebListings({
     for (const v of dirtySkus) {
       const d = skuDraft[v.id];
       if (d.price.trim() !== "" && !(Number(d.price) > 0)) {
-        toast.error(`ราคา ${v.code} ต้องมากกว่า 0`);
+        toast.error(t(`ราคา ${v.code} ต้องมากกว่า 0`, `Price for ${v.code} must be greater than 0`));
         return null;
       }
     }
@@ -371,13 +374,13 @@ export function ParentWebListings({
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) {
-        toast.error(j?.error || "บันทึกชื่อสี/ราคาไม่สำเร็จ");
+        toast.error(j?.error || t("บันทึกชื่อสี/ราคาไม่สำเร็จ", "Couldn't save color names/prices"));
         return null;
       }
-      toast.success(`บันทึกชื่อสี/ราคา ${dirtySkus.length} สีแล้ว — แก้ที่ SKU ใน ERP (ทุกร้านเห็นค่าใหม่)`);
+      toast.success(t(`บันทึกชื่อสี/ราคา ${dirtySkus.length} สีแล้ว — แก้ที่ SKU ใน ERP (ทุกร้านเห็นค่าใหม่)`, `Saved color names/prices for ${dirtySkus.length} colors — updated on the ERP SKU (every shop sees the new values)`));
       return (j.renames ?? []) as { from: string; to: string }[];
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
       return null;
     } finally {
       setSavingSkus(false);
@@ -458,10 +461,10 @@ export function ParentWebListings({
       ok = !!(await r.json()).ok;
       if (ok) {
         setSavedSnap((p) => ({ ...p, [s.shopId]: snapOf(s) }));
-        toast.success(`บันทึก ${s.shopName} แล้ว — เว็บเปลี่ยนตามทันที`);
-      } else toast.error("บันทึกไม่สำเร็จ");
+        toast.success(t(`บันทึก ${s.shopName} แล้ว — เว็บเปลี่ยนตามทันที`, `Saved ${s.shopName} — the site updates right away`));
+      } else toast.error(t("บันทึกไม่สำเร็จ", "Save failed"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
     }
     setSavingShop(null);
     return ok;
@@ -504,8 +507,8 @@ export function ParentWebListings({
     fileRef.current?.click();
   };
   const onUploadFiles = async (files: FileList | null) => {
-    const t = uploadTo.current;
-    if (t) await uploadFilesTo(t, Array.from(files ?? []));
+    const dest = uploadTo.current;
+    if (dest) await uploadFilesTo(dest, Array.from(files ?? []));
     if (fileRef.current) fileRef.current.value = "";
   };
   // 📥 ลากรูปจากเครื่องมาวางที่ "รูปบนเว็บ" หรือแถวสี = อัปโหลดเข้าที่นั้น (ของกลาง useFileDrop · key = "<shopId>:<target>")
@@ -517,34 +520,34 @@ export function ParentWebListings({
     {
       accept: "image/",
       disabled: !!uploading,
-      onReject: () => toast.error("ลากมาได้เฉพาะไฟล์รูป (jpg / png / webp)"),
-      onBusy: () => toast.warning("กำลังอัปโหลดรูปชุดก่อนอยู่ — รอสักครู่แล้วลากใหม่"),
+      onReject: () => toast.error(tr("ลากมาได้เฉพาะไฟล์รูป (jpg / png / webp)", "Only image files can be dropped (jpg / png / webp)")),
+      onBusy: () => toast.warning(tr("กำลังอัปโหลดรูปชุดก่อนอยู่ — รอสักครู่แล้วลากใหม่", "Still uploading the previous batch — wait a moment and drop again")),
     }
   );
   // 🔁 ของกลาง uploadImagesWithDupCheck: รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่งไฟล์ (ไม่เปลืองที่เก็บไฟล์) · รูปที่อยู่ในช่องนี้แล้ว → เสนอ "ข้าม"
-  const uploadFilesTo = async (t: { shopId: string; target: string }, files: File[]) => {
+  const uploadFilesTo = async (dest: { shopId: string; target: string }, files: File[]) => {
     const imgs = files.filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
-    const s = data?.shops.find((x) => x.shopId === t.shopId);
-    const v = data?.variants.find((x) => x.id === t.target);
-    const bannerKey = t.target.startsWith("banner:") ? s?.webBanners.find((b) => b.id === t.target.slice(7))?.imageKey : null;
-    const here = !s ? [] : t.target === "gallery" ? s.webImages : bannerKey ? [bannerKey] : s.webSkuImages[t.target] ?? [];
-    const where = v ? `แถวสี ${v.code} · ${v.label}` : t.target === "gallery" ? "รูปบนเว็บ" : "แบนเนอร์";
-    setUploading(`${t.shopId}:${t.target}`);
+    const s = data?.shops.find((x) => x.shopId === dest.shopId);
+    const v = data?.variants.find((x) => x.id === dest.target);
+    const bannerKey = dest.target.startsWith("banner:") ? s?.webBanners.find((b) => b.id === dest.target.slice(7))?.imageKey : null;
+    const here = !s ? [] : dest.target === "gallery" ? s.webImages : bannerKey ? [bannerKey] : s.webSkuImages[dest.target] ?? [];
+    const where = v ? tr(`แถวสี ${v.code} · ${v.label}`, `Color row ${v.code} · ${v.label}`) : dest.target === "gallery" ? tr("รูปบนเว็บ", "Web images") : tr("แบนเนอร์", "Banner");
+    setUploading(`${dest.shopId}:${dest.target}`);
     try {
       const r = await uploadImagesWithDupCheck(imgs, {
         folder: "storefront-products",
         max: 2000,
         target: s ? `${where} (${s.shopName})` : where,
         existingKeys: here,
-        onError: (f, e) => toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`),
+        onError: (f, e) => toast.error(tr(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`, `Upload of ${f.name} failed: ${e.message}`)),
         onProgress: setUpProgress,
       });
       if (r?.keys.length) {
-        addImages(t.shopId, t.target, r.keys);
-        const parts = [r.uploaded && `อัปโหลด ${r.uploaded} รูป`, r.reused && `ใช้รูปเดิม ${r.reused} รูป`].filter(Boolean).join(" · ");
-        toast.success(`${parts} แล้ว — กดบันทึก เพื่อขึ้นเว็บ`);
-      } else if (r?.skipped) toast.info("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ");
+        addImages(dest.shopId, dest.target, r.keys);
+        const parts = [r.uploaded && tr(`อัปโหลด ${r.uploaded} รูป`, `Uploaded ${r.uploaded} images`), r.reused && tr(`ใช้รูปเดิม ${r.reused} รูป`, `reused ${r.reused} images`)].filter(Boolean).join(" · ");
+        toast.success(tr(`${parts} แล้ว — กดบันทึก เพื่อขึ้นเว็บ`, `${parts} — click Save to publish`));
+      } else if (r?.skipped) toast.info(tr("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ", "The selected images are already here — not added again"));
     } finally {
       setUploading(null);
       setUpProgress(null);
@@ -560,10 +563,10 @@ export function ParentWebListings({
         type="button"
         onClick={() => startUpload(sid, target)}
         disabled={!!uploading}
-        title="อัปโหลดรูปจากเครื่อง (เลือกได้หลายรูป · ย่อให้อัตโนมัติ · เก็บเข้าคลังไฟล์ด้วย) — หรือลากรูปมาวางที่แถวนี้ก็ได้"
+        title={t("อัปโหลดรูปจากเครื่อง (เลือกได้หลายรูป · ย่อให้อัตโนมัติ · เก็บเข้าคลังไฟล์ด้วย) — หรือลากรูปมาวางที่แถวนี้ก็ได้", "Upload images from your computer (multiple · auto-resized · also saved to the file library) — or drop images on this row")}
         className={`${cls} disabled:opacity-50`}
       >
-        {busy ? "กำลังอัป…" : "⬆ อัปโหลด"}
+        {busy ? t("กำลังอัป…", "Uploading…") : t("⬆ อัปโหลด", "⬆ Upload")}
       </button>
     );
   };
@@ -601,12 +604,12 @@ export function ParentWebListings({
     }
   };
   const inFooter = useFooterSave(
-    parentId && data ? { label: "เว็บไซต์", dirty: dirtyShops.length > 0 || dirtySkus.length > 0, saving: savingShop !== null || savingSkus, onSave: saveDirty } : null
+    parentId && data ? { label: t("เว็บไซต์", "Website"), dirty: dirtyShops.length > 0 || dirtySkus.length > 0, saving: savingShop !== null || savingSkus, onSave: saveDirty } : null
   );
 
-  if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">บันทึกรุ่นก่อน แล้วค่อยตั้งค่าการขายบนเว็บ</div>;
-  if (loading) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
-  if (!data) return <div className="text-sm text-slate-400 py-8 text-center">โหลดข้อมูลไม่สำเร็จ</div>;
+  if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">{t("บันทึกรุ่นก่อน แล้วค่อยตั้งค่าการขายบนเว็บ", "Save the model first, then set up web selling")}</div>;
+  if (loading) return <div className="text-sm text-slate-400 py-8 text-center">{t("กำลังโหลด…", "Loading…")}</div>;
+  if (!data) return <div className="text-sm text-slate-400 py-8 text-center">{t("โหลดข้อมูลไม่สำเร็จ", "Couldn't load data")}</div>;
 
   /* ───────── 🛒 ขายบนเว็บ ───────── */
   const renderSell = (s: ShopState) => {
@@ -615,34 +618,34 @@ export function ParentWebListings({
       <div className="space-y-3">
         <div className="flex items-end gap-4 flex-wrap">
           <div className="flex items-center gap-4 flex-wrap flex-1 min-w-0 pb-2">
-          <Toggle label={s.published ? "ขึ้นเว็บอยู่" : "ซ่อนอยู่ (ลูกค้าไม่เห็น)"} on={s.published} onClick={() => patchShop(s.shopId, { published: !s.published })} />
+          <Toggle label={s.published ? t("ขึ้นเว็บอยู่", "Live") : t("ซ่อนอยู่ (ลูกค้าไม่เห็น)", "Hidden (customers can't see it)")} on={s.published} onClick={() => patchShop(s.shopId, { published: !s.published })} />
           <button type="button" onClick={() => patchShop(s.shopId, { featured: !s.featured })} className={`text-xs flex items-center gap-1 ${s.featured ? "text-amber-500" : "text-slate-400 hover:text-amber-400"}`}>
-            <span className="text-base leading-none">★</span> สินค้าแนะนำ
+            <span className="text-base leading-none">★</span> {t("สินค้าแนะนำ", "Featured")}
           </button>
           </div>
           <div className="w-44 shrink-0">
-            <NumField label={`ราคาเว็บ (ว่าง = ${s.auto.price > 0 ? baht(s.auto.price) : "ราคาปกติ"})`} value={s.webPrice} onChange={(v) => patchShop(s.shopId, { webPrice: v })} />
+            <NumField label={t(`ราคาเว็บ (ว่าง = ${s.auto.price > 0 ? baht(s.auto.price) : "ราคาปกติ"})`, `Web price (empty = ${s.auto.price > 0 ? baht(s.auto.price) : "regular price"})`)} value={s.webPrice} onChange={(v) => patchShop(s.shopId, { webPrice: v })} />
           </div>
         </div>
 
         <div>
-          <span className={labelCls}>หมวดบนเว็บ (เลือกได้หลายหมวด · ตัวแรก = หมวดหลัก)</span>
+          <span className={labelCls}>{t("หมวดบนเว็บ (เลือกได้หลายหมวด · ตัวแรก = หมวดหลัก)", "Web categories (pick several · first = main category)")}</span>
           {s.shopCategories.length ? (
             <FieldChipsPicker
               value={cats.filter((k) => s.shopCategories.some((c) => c.key === k))}
               onChange={(next) => patchShop(s.shopId, { webCategories: next, categories: next })}
               fields={s.shopCategories.map((c) => ({ key: c.key, label: c.label, icon: c.icon || undefined }))}
-              title="เลือกหมวดบนเว็บ"
-              description="ติ๊กได้หลายหมวด · ★ = หมวดหลัก (กด ★ เปลี่ยนได้) — สินค้าโผล่ในทุกหมวดที่ติ๊ก"
-              addLabel="＋ เลือกหมวด"
-              searchPlaceholder="ค้นหาหมวด…"
-              unit="หมวด"
+              title={t("เลือกหมวดบนเว็บ", "Pick web categories")}
+              description={t("ติ๊กได้หลายหมวด · ★ = หมวดหลัก (กด ★ เปลี่ยนได้) — สินค้าโผล่ในทุกหมวดที่ติ๊ก", "Tick several · ★ = main category (click ★ to change) — the product appears in every ticked category")}
+              addLabel={t("＋ เลือกหมวด", "＋ Pick category")}
+              searchPlaceholder={t("ค้นหาหมวด…", "Search categories…")}
+              unit={t("หมวด", "categories")}
               showKeys={false}
-              markFirst="หมวดหลัก"
-              emptyText="ยังไม่อยู่หมวดไหน"
+              markFirst={t("หมวดหลัก", "Main category")}
+              emptyText={t("ยังไม่อยู่หมวดไหน", "Not in any category yet")}
             />
           ) : (
-            <p className="text-[11px] text-slate-400">ร้านนี้ยังไม่ได้ตั้งหมวด — ตั้งที่ เว็บไซต์ → 📂 หมวดหมู่</p>
+            <p className="text-[11px] text-slate-400">{t("ร้านนี้ยังไม่ได้ตั้งหมวด — ตั้งที่ เว็บไซต์ → 📂 หมวดหมู่", "This shop has no categories yet — set them in Website → 📂 Categories")}</p>
           )}
         </div>
 
@@ -659,17 +662,17 @@ export function ParentWebListings({
         {/* 📏 ตารางไซส์ของรุ่นนี้ — อัตโนมัติตามหมวด / เลือกเอง / ไม่แสดง (ตั้งตารางที่ เว็บไซต์ → 📏 ตารางไซส์) */}
         {data.sizeGrid && !s.webOptions?.items?.length && (
           <label className="flex items-center gap-2 flex-wrap text-xs text-slate-600">
-            <span>📏 ตารางไซส์บนหน้าสินค้า</span>
+            <span>{t("📏 ตารางไซส์บนหน้าสินค้า", "📏 Size guide on product page")}</span>
             <select value={s.webSizeGuide ?? ""} onChange={(e) => patchShop(s.shopId, { webSizeGuide: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-1 text-xs">
-              <option value="">อัตโนมัติตามหมวด ({s.autoSizeGuide ?? "ไม่มีตารางของหมวดนี้"})</option>
+              <option value="">{t("อัตโนมัติตามหมวด", "Auto by category")} ({s.autoSizeGuide ?? t("ไม่มีตารางของหมวดนี้", "no guide for this category")})</option>
               {(s.sizeGuides ?? []).map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.name}
                 </option>
               ))}
-              <option value="none">ไม่แสดงตารางไซส์</option>
+              <option value="none">{t("ไม่แสดงตารางไซส์", "Don't show a size guide")}</option>
             </select>
-            {!(s.sizeGuides ?? []).length && <span className="text-slate-400">ร้านนี้ยังไม่มีตารางไซส์ — ตั้งที่ เว็บไซต์ → 📏 ตารางไซส์</span>}
+            {!(s.sizeGuides ?? []).length && <span className="text-slate-400">{t("ร้านนี้ยังไม่มีตารางไซส์ — ตั้งที่ เว็บไซต์ → 📏 ตารางไซส์", "This shop has no size guides yet — set them in Website → 📏 Size guides")}</span>}
           </label>
         )}
       </div>
@@ -682,11 +685,11 @@ export function ParentWebListings({
   const renderDetail = (s: ShopState) => (
     <div className="space-y-3">
       <div>
-        <Field label="ชื่อบนเว็บ (ว่าง = ใช้ชื่ออัตโนมัติด้านล่าง)" value={s.webName} onChange={(v) => patchShop(s.shopId, { webName: v })} placeholder={s.autoName} />
+        <Field label={t("ชื่อบนเว็บ (ว่าง = ใช้ชื่ออัตโนมัติด้านล่าง)", "Web name (empty = use the auto name below)")} value={s.webName} onChange={(v) => patchShop(s.shopId, { webName: v })} placeholder={s.autoName} />
         {/* กฎชื่อของร้าน: ประกอบชื่ออัตโนมัติจากชื่อใน ERP โดยตัดส่วนที่ไม่ต้องการออก */}
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-slate-400" title="ตั้งครั้งเดียว ใช้กับทุกสินค้าในร้านนี้ (แก้ได้ที่ เว็บไซต์ → จับคู่ฟิลด์ ด้วย)">
-            กฎชื่อร้านนี้:
+          <span className="text-[11px] text-slate-400" title={t("ตั้งครั้งเดียว ใช้กับทุกสินค้าในร้านนี้ (แก้ได้ที่ เว็บไซต์ → จับคู่ฟิลด์ ด้วย)", "Set once, applies to every product in this shop (also editable in Website → Field mapping)")}>
+            {t("กฎชื่อร้านนี้:", "Shop name rule:")}
           </span>
           {NAME_RULE_CHIPS.map((c) => {
             const ref = c.ref ? data.nameRefs[c.ref] : null;
@@ -702,7 +705,7 @@ export function ParentWebListings({
                 {on ? "✓ " : ""}
                 {c.label}
                 {/* ลบรหัส = รหัสแบบเดียวกันทุกตัว (PIX13 → PIX ทุกเลข · website-field-map removeCodes) */}
-                {ref ? (c.flag === "removeCode" && /^[A-Za-z]{2,}\d/.test(ref) ? ` "${ref.match(/^[A-Za-z]+/)![0]}…" ทุกตัว` : ` "${ref}"`) : ""}
+                {ref ? (c.flag === "removeCode" && /^[A-Za-z]{2,}\d/.test(ref) ? t(` "${ref.match(/^[A-Za-z]+/)![0]}…" ทุกตัว`, ` "${ref.match(/^[A-Za-z]+/)![0]}…" all`) : ` "${ref}"`) : ""}
               </button>
             );
           })}
@@ -712,23 +715,23 @@ export function ParentWebListings({
           autoText={s.autoName}
           emptyNote={
             <>
-              ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
+              {t("ชื่อที่เว็บจะโชว์:", "Name shown on web:")} <span className="text-slate-700">{s.autoName}</span>
             </>
           }
-          customNote="ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม"
-          useLabel="ใช้ชื่อนี้"
-          useTitle="เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้"
-          resetTitle="ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)"
+          customNote={t("ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม", "Using a typed name — changing the Parent SKU name won't update the site")}
+          useLabel={t("ใช้ชื่อนี้", "Use this name")}
+          useTitle={t("เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้", "Fill in the auto name, then edit it")}
+          resetTitle={t("ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)", "Clear the typed name — go back to the auto name (follows Parent SKU)")}
           onUse={() => patchShop(s.shopId, { webName: s.autoName })}
           onReset={() => patchShop(s.shopId, { webName: "" })}
         />
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
-        <Field label={`หน่วยขาย${s.auto.unit ? ` (อัตโนมัติ: ${s.auto.unit})` : ""}`} value={s.webUnit} onChange={(v) => patchShop(s.shopId, { webUnit: v })} placeholder={s.auto.unit || "ชิ้น / ใบ / หลา"} />
+        <Field label={t(`หน่วยขาย${s.auto.unit ? ` (อัตโนมัติ: ${s.auto.unit})` : ""}`, `Sales unit${s.auto.unit ? ` (auto: ${s.auto.unit})` : ""}`)} value={s.webUnit} onChange={(v) => patchShop(s.shopId, { webUnit: v })} placeholder={s.auto.unit || t("ชิ้น / ใบ / หลา", "pc / bag / yard")} />
         <label className="block">
           <span className={`${labelCls} flex items-center gap-1.5 flex-wrap`}>
-            สถานะสต๊อกบนเว็บ
+            {t("สถานะสต๊อกบนเว็บ", "Web stock status")}
             {/* 🔔 ลูกค้าที่ฝากให้แจ้งเมื่อมีของ (โชว์เมื่อมีคนรอ) */}
             {parentId && <RestockBadge shopId={s.shopId} parentId={parentId} soldOut={(s.webStockStatus || "in") === "out"} />}
           </span>
@@ -741,26 +744,26 @@ export function ParentWebListings({
           </select>
         </label>
         <label className="block">
-          <span className={labelCls}>ป้ายบนการ์ด</span>
+          <span className={labelCls}>{t("ป้ายบนการ์ด", "Card badge")}</span>
           <CardBadgeSelect shopId={s.shopId} value={s.webBadge} onChange={(v) => patchShop(s.shopId, { webBadge: v })} />
         </label>
       </div>
 
       <div>
-        <Field textarea rows={s.webDescription.trim() ? 6 : 2} label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={autoDescOf(s) || "—"} />
+        <Field textarea rows={s.webDescription.trim() ? 6 : 2} label={t("คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)", "Web description (empty = use ERP)")} value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={autoDescOf(s) || "—"} />
         {/* ว่าง = เว็บใช้คำอธิบายจาก ERP → ปุ่มเติมข้อความนั้นลงช่องแล้วแก้ต่อ (เหมือนชื่อบนเว็บ) */}
         <AutoValueRow
           custom={!!s.webDescription.trim()}
           autoText={autoDescOf(s)}
-          emptyNote="ตอนนี้เว็บใช้คำอธิบายจาก ERP (ตัวจางในช่อง)"
-          customNote="ใช้คำอธิบายที่พิมพ์เอง — แก้คำอธิบายใน ERP แล้วเว็บจะไม่เปลี่ยนตาม"
-          useLabel="ใช้ข้อความนี้"
-          useTitle="เติมคำอธิบายจาก ERP ลงช่อง แล้วแก้ต่อได้"
-          resetTitle="ลบคำอธิบายที่พิมพ์ — กลับไปใช้คำอธิบายจาก ERP"
+          emptyNote={t("ตอนนี้เว็บใช้คำอธิบายจาก ERP (ตัวจางในช่อง)", "The site currently uses the ERP description (greyed in the box)")}
+          customNote={t("ใช้คำอธิบายที่พิมพ์เอง — แก้คำอธิบายใน ERP แล้วเว็บจะไม่เปลี่ยนตาม", "Using a typed description — changing it in ERP won't update the site")}
+          useLabel={t("ใช้ข้อความนี้", "Use this text")}
+          useTitle={t("เติมคำอธิบายจาก ERP ลงช่อง แล้วแก้ต่อได้", "Fill in the ERP description, then edit it")}
+          resetTitle={t("ลบคำอธิบายที่พิมพ์ — กลับไปใช้คำอธิบายจาก ERP", "Clear the typed description — go back to the ERP description")}
           onUse={() => patchShop(s.shopId, { webDescription: autoDescOf(s) })}
           onReset={async () => {
             // ข้อความยาวที่แก้ไปแล้ว → ถามก่อนลบ (ยังไม่ขึ้นเว็บจนกว่าจะบันทึก)
-            if (s.webDescription.trim() !== autoDescOf(s).trim() && !(await askConfirm({ title: "ลบคำอธิบายที่พิมพ์เอง?", message: "ช่องจะว่าง แล้วเว็บกลับไปใช้คำอธิบายจาก ERP (ยังไม่ขึ้นเว็บจนกว่าจะกดบันทึก)", variant: "danger", confirmText: "ลบ" }))) return;
+            if (s.webDescription.trim() !== autoDescOf(s).trim() && !(await askConfirm({ title: t("ลบคำอธิบายที่พิมพ์เอง?", "Clear the typed description?"), message: t("ช่องจะว่าง แล้วเว็บกลับไปใช้คำอธิบายจาก ERP (ยังไม่ขึ้นเว็บจนกว่าจะกดบันทึก)", "The box will be empty and the site goes back to the ERP description (not live until you click Save)"), variant: "danger", confirmText: t("ลบ", "Delete") }))) return;
             patchShop(s.shopId, { webDescription: "" });
           }}
         />
@@ -769,17 +772,17 @@ export function ParentWebListings({
 
       {/* ตัวเลือกกรอกเอง + สีตัวอย่าง — ใช้กับร้านวัสดุ (ร้านกระเป๋าใช้สีจาก SKU อัตโนมัติ) */}
       <details className="rounded-lg border border-slate-200 bg-white px-3 py-2" open={!!(s.webOptions?.items?.length || s.webSwatch)}>
-        <summary className="cursor-pointer text-xs text-slate-500">ตั้งค่าเพิ่มเติม (ตัวเลือกกรอกเอง · สีตัวอย่างแทนรูป)</summary>
+        <summary className="cursor-pointer text-xs text-slate-500">{t("ตั้งค่าเพิ่มเติม (ตัวเลือกกรอกเอง · สีตัวอย่างแทนรูป)", "More settings (custom options · sample color instead of image)")}</summary>
         <div className="grid gap-2 sm:grid-cols-3 mt-2">
-          <Field label="ชื่อชุดตัวเลือก" value={s.webOptions?.label ?? ""} onChange={(v) => patchShop(s.shopId, { webOptions: { label: v, items: s.webOptions?.items ?? [] } })} placeholder="ความหนา / สี" />
+          <Field label={t("ชื่อชุดตัวเลือก", "Option set name")} value={s.webOptions?.label ?? ""} onChange={(v) => patchShop(s.shopId, { webOptions: { label: v, items: s.webOptions?.items ?? [] } })} placeholder={t("ความหนา / สี", "Thickness / Color")} />
           <div className="sm:col-span-2">
-            <span className={labelCls}>ตัวเลือก (คั่นด้วยจุลภาค · ว่าง = ใช้สีจาก SKU อัตโนมัติ)</span>
+            <span className={labelCls}>{t("ตัวเลือก (คั่นด้วยจุลภาค · ว่าง = ใช้สีจาก SKU อัตโนมัติ)", "Options (comma separated · empty = use SKU colors automatically)")}</span>
             <ItemsInput value={s.webOptions} onCommit={(items) => patchShop(s.shopId, { webOptions: items.length ? { label: s.webOptions?.label || "ตัวเลือก", items } : null })} />
           </div>
           <div className="sm:col-span-3">
-            <span className={labelCls}>สีตัวอย่าง (ใช้แทนรูปจนกว่าจะมีรูปจริง)</span>
+            <span className={labelCls}>{t("สีตัวอย่าง (ใช้แทนรูปจนกว่าจะมีรูปจริง)", "Sample color (used until a real image exists)")}</span>
             <div className="flex items-center gap-2">
-              <input value={s.webSwatch} onChange={(e) => patchShop(s.shopId, { webSwatch: e.target.value })} placeholder="#C89A5B หรือ linear-gradient(...)" className={inputCls} />
+              <input value={s.webSwatch} onChange={(e) => patchShop(s.shopId, { webSwatch: e.target.value })} placeholder={t("#C89A5B หรือ linear-gradient(...)", "#C89A5B or linear-gradient(...)")} className={inputCls} />
               <span className="shrink-0 w-9 h-9 rounded-lg border border-slate-200" style={s.webSwatch ? { background: s.webSwatch } : { background: "#f1f5f9" }} />
             </div>
           </div>
@@ -794,27 +797,27 @@ export function ParentWebListings({
       {/* 🎬 รูปเปิดหน้าสินค้า (Hero) — ภาพ/วิดีโอแรกของแกลเลอรี เต็มช่องแบบ Gucci */}
       <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="text-xs font-medium text-slate-700">🎬 รูปเปิดหน้าสินค้า (Hero) — ภาพแรกเต็มช่อง ไม่มีขอบ</span>
+          <span className="text-xs font-medium text-slate-700">{t("🎬 รูปเปิดหน้าสินค้า (Hero) — ภาพแรกเต็มช่อง ไม่มีขอบ", "🎬 Product page hero — first image, full width, no border")}</span>
           <span className="text-[11px] text-slate-500">
-            {s.webHero?.desktop || s.webHero?.mobile ? "ตั้งไว้แล้ว" : "ว่าง = ใช้รูปสินค้าตามเดิม"}
-            {s.webHero?.sku && Object.keys(s.webHero.sku).length > 0 && ` · Hero รายสี ${Object.keys(s.webHero.sku).length} สี`}
+            {s.webHero?.desktop || s.webHero?.mobile ? t("ตั้งไว้แล้ว", "Set") : t("ว่าง = ใช้รูปสินค้าตามเดิม", "Empty = use product images as before")}
+            {s.webHero?.sku && Object.keys(s.webHero.sku).length > 0 && t(` · Hero รายสี ${Object.keys(s.webHero.sku).length} สี`, ` · per-color hero: ${Object.keys(s.webHero.sku).length} colors`)}
           </span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <MediaUploadField label="🖥 คอม" hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`} value={s.webHero?.desktop ?? null} onChange={(m) => setHero(s, "desktop", m)} previewRatio="16 / 9" />
-          <MediaUploadField label="📱 มือถือ" hint={HERO_SIZE_HINT.mobile} value={s.webHero?.mobile ?? null} onChange={(m) => setHero(s, "mobile", m)} previewRatio="4 / 5" />
+          <MediaUploadField label={t("🖥 คอม", "🖥 Desktop")} hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`} value={s.webHero?.desktop ?? null} onChange={(m) => setHero(s, "desktop", m)} previewRatio="16 / 9" />
+          <MediaUploadField label={t("📱 มือถือ", "📱 Mobile")} hint={HERO_SIZE_HINT.mobile} value={s.webHero?.mobile ?? null} onChange={(m) => setHero(s, "mobile", m)} previewRatio="4 / 5" />
         </div>
       </div>
 
       {/* รูปเว็บ (รุ่น) — 📥 ลากรูปจากเครื่องมาวางในกล่องนี้ = อัปโหลด */}
       <div {...fileDrop.zone(`${s.shopId}:gallery`)} className="relative">
-        <FileDropHint show={fileDrop.over === `${s.shopId}:gallery`} label="วางรูปเพื่ออัปโหลดเป็นรูปบนเว็บ" />
+        <FileDropHint show={fileDrop.over === `${s.shopId}:gallery`} label={t("วางรูปเพื่ออัปโหลดเป็นรูปบนเว็บ", "Drop images to upload as web images")} />
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-slate-600">รูปบนเว็บ ({s.webImages.length}) — ว่าง = ใช้รูป ERP · ลากรูปมาวางได้</span>
+          <span className="text-xs font-medium text-slate-600">{t(`รูปบนเว็บ (${s.webImages.length}) — ว่าง = ใช้รูป ERP · ลากรูปมาวางได้`, `Web images (${s.webImages.length}) — empty = use ERP images · drop images here`)}</span>
           <div className="flex items-center gap-1.5">
             {uploadBtn(s.shopId, "gallery", "text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1")}
             <button onClick={() => setPicker({ shopId: s.shopId, target: "gallery" })} className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-2.5 py-1">
-              🖼 เลือกรูปจากคลัง
+              {t("🖼 เลือกรูปจากคลัง", "🖼 Pick from library")}
             </button>
           </div>
         </div>
@@ -824,7 +827,7 @@ export function ParentWebListings({
             keys={s.webImages}
             onChange={(next) => patchShop(s.shopId, { webImages: next })}
             size="w-14 h-14"
-            badge={(i) => (i === 0 ? <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-orange-500 text-white rounded px-1">ปก</span> : null)}
+            badge={(i) => (i === 0 ? <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-orange-500 text-white rounded px-1">{t("ปก", "Cover")}</span> : null)}
           />
         )}
       </div>
@@ -836,7 +839,7 @@ export function ParentWebListings({
     if (!data.variants.length)
       return (
         <div data-web-skus className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-400">
-          🎨 รุ่นนี้ยังไม่มี SKU ที่ใช้งานอยู่ — สร้าง/เปิดใช้ SKU ที่ Parent SKU ก่อน
+          {t("🎨 รุ่นนี้ยังไม่มี SKU ที่ใช้งานอยู่ — สร้าง/เปิดใช้ SKU ที่ Parent SKU ก่อน", "🎨 This model has no active SKUs — create/activate SKUs on the Parent SKU first")}
         </div>
       );
     const noPrice = data.variants.filter((v) => !(v.price > 0)).length;
@@ -844,27 +847,28 @@ export function ParentWebListings({
     const imgOf = (v: Variant): "web" | "sku" | "none" => ((s.webSkuImages[v.id] ?? []).length ? "web" : v.erpImageKey ? "sku" : "none");
     const web = colorWebImages(data.variants.map((v) => ({ label: v.label, swatch: null, hasImage: imgOf(v) !== "none", img: imgOf(v), skuId: v.id })));
     const noneN = web.missing.filter((c) => c.img === "none").length;
-    const missNames = web.missing.slice(0, 3).map((c) => c.label).join(", ") + (web.missing.length > 3 ? ` และอีก ${web.missing.length - 3} สี` : "");
+    const missNames = web.missing.slice(0, 3).map((c) => c.label).join(", ") + (web.missing.length > 3 ? t(` และอีก ${web.missing.length - 3} สี`, ` and ${web.missing.length - 3} more`) : "");
+
     return (
         <div data-web-skus={s.shopId}>
           <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
-            <span className="text-sm font-semibold text-slate-800">🎨 SKU ในรุ่นนี้ ({data.variants.length})</span>
-            {noPrice > 0 && <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[11px] text-rose-700">ยังไม่มีราคา {noPrice} ตัว — ใส่ราคาในแถวได้เลย</span>}
+            <span className="text-sm font-semibold text-slate-800">{t(`🎨 SKU ในรุ่นนี้ (${data.variants.length})`, `🎨 SKUs in this model (${data.variants.length})`)}</span>
+            {noPrice > 0 && <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[11px] text-rose-700">{t(`ยังไม่มีราคา ${noPrice} ตัว — ใส่ราคาในแถวได้เลย`, `${noPrice} without a price — enter it in the row`)}</span>}
             {web.missing.length > 0 ? (
               <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${noneN ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
                 <Icon name="image" size={12} />
-                {web.noWeb ? `ยังไม่มีรูปบนเว็บเลย (0/${web.total} สี) — ตอนนี้ลูกค้าเห็นรูปปก SKU แทน` : `รูปบนเว็บ ${web.webN}/${web.total} สี · ${missNames} ยังไม่มี`}
-                {noneN ? ` · SKU ก็ไม่มีรูป ${noneN} สี` : ""}
+                {web.noWeb ? t(`ยังไม่มีรูปบนเว็บเลย (0/${web.total} สี) — ตอนนี้ลูกค้าเห็นรูปปก SKU แทน`, `No web images yet (0/${web.total} colors) — customers see the SKU cover image instead`) : t(`รูปบนเว็บ ${web.webN}/${web.total} สี · ${missNames} ยังไม่มี`, `Web images ${web.webN}/${web.total} colors · ${missNames} missing`)}
+                {noneN ? t(` · SKU ก็ไม่มีรูป ${noneN} สี`, ` · ${noneN} colors have no SKU image either`) : ""}
                 <button type="button" onClick={() => jumpToSku(s.shopId, web.missing[0].skuId!)} className="underline hover:no-underline">
-                  {web.noWeb ? "ไปลงรูป" : "ไปที่สีนั้น"}
+                  {web.noWeb ? t("ไปลงรูป", "Add images") : t("ไปที่สีนั้น", "Go to that color")}
                 </button>
               </span>
             ) : web.total > 0 ? (
-              <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] text-emerald-700">✓ รูปบนเว็บครบทุกสี</span>
+              <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] text-emerald-700">{t("✓ รูปบนเว็บครบทุกสี", "✓ Web images for every color")}</span>
             ) : null}
           </div>
           <div className="text-[11px] text-slate-500 mb-1.5">
-            ✏️ แก้ชื่อสี ไทย/EN + ราคา ในแถวได้เลย (แก้ที่ SKU ใน ERP — ทุกร้านเห็น · กด 💾 บันทึก) · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
+            {t("✏️ แก้ชื่อสี ไทย/EN + ราคา ในแถวได้เลย (แก้ที่ SKU ใน ERP — ทุกร้านเห็น · กด 💾 บันทึก) · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง", "✏️ Edit TH/EN color names + price right in the row (updates the ERP SKU — every shop sees it · click 💾 Save) · pick several web images per color (empty = SKU cover image) · picking a color on the site shows that image set · 📥 drop images from your computer on a color row · press and drag an image = reorder")}
           </div>
           {(() => {
             const all = colorLabels();
@@ -873,18 +877,18 @@ export function ParentWebListings({
             return (
               <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 mb-1.5 rounded-lg bg-emerald-50/60 px-2 py-1">
                 <span>
-                  🎴 การ์ดสินค้า: โชว์จุดสี{" "}
+                  {t("🎴 การ์ดสินค้า: โชว์จุดสี", "🎴 Product card: showing color dots")}{" "}
                   <b className="text-slate-700">
                     {shown}/{all.length}
                   </b>{" "}
-                  สี · ★ สีหลัก (รูปแรกบนการ์ด): <b className="text-slate-700">{s.webCardColors.main ?? "ตามลำดับเดิม"}</b>
+                  {t("สี · ★ สีหลัก (รูปแรกบนการ์ด):", "colors · ★ main color (first image on card):")} <b className="text-slate-700">{s.webCardColors.main ?? t("ตามลำดับเดิม", "default order")}</b>
                 </span>
                 {custom && (
                   <button type="button" onClick={() => patchShop(s.shopId, { webCardColors: { colors: null, main: null } })} className="text-blue-600 hover:underline">
-                    ใช้ค่าเริ่มต้น (ทุกสี)
+                    {t("ใช้ค่าเริ่มต้น (ทุกสี)", "Use default (all colors)")}
                   </button>
                 )}
-                <span className="text-slate-400">กด 🎴 เพื่อโชว์/ซ่อนบนการ์ด · กด ★ เลือกสีหลัก</span>
+                <span className="text-slate-400">{t("กด 🎴 เพื่อโชว์/ซ่อนบนการ์ด · กด ★ เลือกสีหลัก", "Click 🎴 to show/hide on the card · click ★ to pick the main color")}</span>
               </div>
             );
           })()}
@@ -905,7 +909,7 @@ export function ParentWebListings({
                   {...fileDrop.zone(`${s.shopId}:${v.id}`)}
                   className={`relative p-2 space-y-1.5 transition-colors duration-700 ${flashSku === v.id ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : gap === "none" ? "bg-rose-50/50" : gap === "warn" ? "bg-amber-50/50" : "bg-white"}`}
                 >
-                  <FileDropHint show={fileDrop.over === `${s.shopId}:${v.id}`} label={`วางรูปเพื่ออัปโหลดเข้าสี ${v.label}`} />
+                  <FileDropHint show={fileDrop.over === `${s.shopId}:${v.id}`} label={t(`วางรูปเพื่ออัปโหลดเข้าสี ${v.label}`, `Drop images to upload to ${v.label}`)} />
                   <div className="flex items-center gap-2.5">
                     {v.erpImageKey ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -918,48 +922,48 @@ export function ParentWebListings({
                       const d = draftOf(v);
                       const changed = !!skuDraft[v.id] && draftChanged(v, d);
                       const enTyped = d.colorEn.trim();
-                      const enHint = !enTyped || THAI_RE.test(enTyped) ? (v.labelEn ? `เว็บ EN ตอนนี้: ${v.labelEn} (แปลจากทะเบียนสี)` : "ว่าง = เว็บ EN ใช้ชื่อไทย") : "";
+                      const enHint = !enTyped || THAI_RE.test(enTyped) ? (v.labelEn ? t(`เว็บ EN ตอนนี้: ${v.labelEn} (แปลจากทะเบียนสี)`, `EN site now: ${v.labelEn} (from the color registry)`) : t("ว่าง = เว็บ EN ใช้ชื่อไทย", "Empty = EN site uses the Thai name")) : "";
                       const box = "flex items-center border border-slate-200 rounded-lg bg-white focus-within:border-orange-400 focus-within:ring-1 focus-within:ring-orange-200";
                       const tag = "text-[10px] font-medium text-slate-400 pl-2 pr-1 shrink-0";
                       return (
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <label className={`${box} w-44 max-w-full`} title="ชื่อสีภาษาไทย (ช่อง สี (ไทย) ของ SKU) — เว็บหน้าไทยโชว์ชื่อนี้ · ว่าง = ใช้ชื่ออังกฤษ">
-                              <span className={tag}>ไทย</span>
+                            <label className={`${box} w-44 max-w-full`} title={t("ชื่อสีภาษาไทย (ช่อง สี (ไทย) ของ SKU) — เว็บหน้าไทยโชว์ชื่อนี้ · ว่าง = ใช้ชื่ออังกฤษ", "Thai color name (the SKU's Thai color field) — the Thai site shows this · empty = use the English name")}>
+                              <span className={tag}>{t("ไทย", "TH")}</span>
                               <input
                                 value={d.colorTh}
                                 maxLength={80}
-                                placeholder={v.colorEn || "ชื่อสีไทย"}
+                                placeholder={v.colorEn || t("ชื่อสีไทย", "Thai color name")}
                                 onChange={(e) => setDraft(v, { colorTh: e.target.value })}
-                                aria-label={`ชื่อสีภาษาไทย ${v.code}`}
+                                aria-label={t(`ชื่อสีภาษาไทย ${v.code}`, `Thai color name ${v.code}`)}
                                 className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 py-1 pr-2 outline-none"
                               />
                             </label>
-                            <label className={`${box} w-44 max-w-full`} title="ชื่อสีภาษาอังกฤษ (ช่อง Color ของ SKU) — เว็บหน้า /en โชว์ชื่อนี้ · เป็นภาษาไทย/ว่าง = แปลจากทะเบียนสีกลาง">
+                            <label className={`${box} w-44 max-w-full`} title={t("ชื่อสีภาษาอังกฤษ (ช่อง Color ของ SKU) — เว็บหน้า /en โชว์ชื่อนี้ · เป็นภาษาไทย/ว่าง = แปลจากทะเบียนสีกลาง", "English color name (the SKU's Color field) — the /en site shows this · Thai/empty = translated from the color registry")}>
                               <span className={tag}>EN</span>
                               <input
                                 value={d.colorEn}
                                 maxLength={80}
                                 placeholder={v.labelEn || "Color name"}
                                 onChange={(e) => setDraft(v, { colorEn: e.target.value })}
-                                aria-label={`ชื่อสีภาษาอังกฤษ ${v.code}`}
+                                aria-label={t(`ชื่อสีภาษาอังกฤษ ${v.code}`, `English color name ${v.code}`)}
                                 className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 py-1 pr-2 outline-none"
                               />
                             </label>
-                            <label className={`${box} w-28 ${!(v.price > 0) && !d.price.trim() ? "!border-rose-300 !bg-rose-50/60" : ""}`} title="ราคาขายของ SKU นี้ (ราคากลาง ใช้ทุกช่องทาง)">
+                            <label className={`${box} w-28 ${!(v.price > 0) && !d.price.trim() ? "!border-rose-300 !bg-rose-50/60" : ""}`} title={t("ราคาขายของ SKU นี้ (ราคากลาง ใช้ทุกช่องทาง)", "This SKU's selling price (central price, used on every channel)")}>
                               <span className={tag}>฿</span>
                               <MoneyInput
                                 value={d.price}
                                 onChange={(raw) => setDraft(v, { price: raw })}
-                                placeholder="ราคา"
+                                placeholder={t("ราคา", "Price")}
                                 className="min-w-0 w-full bg-transparent text-sm text-right text-slate-800 py-1 pr-2 outline-none tabular-nums"
                               />
                             </label>
                             {changed && (
                               <span className="flex items-center gap-1 text-[11px] text-amber-600">
-                                ● ยังไม่บันทึก
+                                {t("● ยังไม่บันทึก", "● Unsaved")}
                                 <button type="button" onClick={() => setSkuDraft((m) => { const n = { ...m }; delete n[v.id]; return n; })} className="text-slate-400 hover:text-slate-600 underline">
-                                  คืนค่าเดิม
+                                  {t("คืนค่าเดิม", "Revert")}
                                 </button>
                               </span>
                             )}
@@ -967,16 +971,16 @@ export function ParentWebListings({
                           <div className="text-xs text-slate-400">
                             {v.code} ·{" "}
                             {v.qty === null ? (
-                              <span title="ระบบยังไม่มียอดสต๊อกของ SKU นี้ — เว็บใช้ป้ายสถานะสินค้าที่ตั้งเอง">ยังไม่มีข้อมูลสต๊อก</span>
+                              <span title={t("ระบบยังไม่มียอดสต๊อกของ SKU นี้ — เว็บใช้ป้ายสถานะสินค้าที่ตั้งเอง", "No stock figure for this SKU yet — the site uses the stock status you set")}>{t("ยังไม่มีข้อมูลสต๊อก", "No stock data")}</span>
                             ) : v.qty <= 0 ? (
-                              <span className="rounded-full bg-rose-50 border border-rose-200 px-1.5 text-rose-700" title="ยอดคงเหลือในระบบ = 0">
-                                สต๊อกหมด
+                              <span className="rounded-full bg-rose-50 border border-rose-200 px-1.5 text-rose-700" title={t("ยอดคงเหลือในระบบ = 0", "Stock on hand = 0")}>
+                                {t("สต๊อกหมด", "Out of stock")}
                               </span>
                             ) : (
-                              <>สต๊อก {v.qty.toLocaleString("th-TH")}</>
+                              <>{t("สต๊อก", "Stock")} {v.qty.toLocaleString("th-TH")}</>
                             )}{" "}
-                            · รูปใน SKU {v.gallery.length}
-                            {!(v.price > 0) && <span className="text-rose-500"> · ยังไม่มีราคา (เว็บใช้ราคารุ่นแทน)</span>}
+                            {t(`· รูปใน SKU ${v.gallery.length}`, `· SKU images ${v.gallery.length}`)}
+                            {!(v.price > 0) && <span className="text-rose-500">{t(" · ยังไม่มีราคา (เว็บใช้ราคารุ่นแทน)", " · no price (site uses the model price)")}</span>}
                             {enHint && <span className="text-slate-400"> · 🌐 {enHint}</span>}
                           </div>
                         </div>
@@ -986,7 +990,7 @@ export function ParentWebListings({
                       <button
                         type="button"
                         onClick={() => toggleCardColor(s, v.label)}
-                        title={on ? "โชว์เป็นจุดสีบนการ์ดสินค้า — กดเพื่อซ่อน" : "ไม่โชว์บนการ์ด — กดเพื่อโชว์"}
+                        title={on ? t("โชว์เป็นจุดสีบนการ์ดสินค้า — กดเพื่อซ่อน", "Shown as a color dot on the product card — click to hide") : t("ไม่โชว์บนการ์ด — กดเพื่อโชว์", "Not shown on the card — click to show")}
                         className={`text-xs border rounded-lg px-1.5 py-1 ${on ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-300 line-through"}`}
                       >
                         🎴
@@ -994,7 +998,7 @@ export function ParentWebListings({
                       <button
                         type="button"
                         onClick={() => setCardMain(s, v.label)}
-                        title={isMain ? "สีหลักของการ์ด — กดเพื่อยกเลิก" : "ตั้งเป็นสีหลัก (รูปแรกบนการ์ดเป็นรูปสีนี้)"}
+                        title={isMain ? t("สีหลักของการ์ด — กดเพื่อยกเลิก", "Card's main color — click to unset") : t("ตั้งเป็นสีหลัก (รูปแรกบนการ์ดเป็นรูปสีนี้)", "Set as main color (first card image uses this color)")}
                         className={`text-base leading-none px-0.5 ${isMain ? "text-amber-500" : "text-slate-300 hover:text-amber-400"}`}
                       >
                         ★
@@ -1002,27 +1006,27 @@ export function ParentWebListings({
                       <button
                         onClick={() => setSkuPanel(panelOpen ? null : { shopId: s.shopId, skuId: v.id })}
                         disabled={!v.gallery.length}
-                        title={v.gallery.length ? "เลือกจากรูปที่อัปโหลดไว้ในหน้า SKU" : "SKU นี้ยังไม่มีรูป — อัปโหลดในหน้า SKU ก่อน"}
+                        title={v.gallery.length ? t("เลือกจากรูปที่อัปโหลดไว้ในหน้า SKU", "Pick from images uploaded on the SKU page") : t("SKU นี้ยังไม่มีรูป — อัปโหลดในหน้า SKU ก่อน", "This SKU has no images — upload on the SKU page first")}
                         className={`text-xs border rounded-lg px-2 py-1 disabled:opacity-40 ${panelOpen ? "bg-orange-500 border-orange-500 text-white" : "border-orange-300 text-orange-600 hover:bg-orange-50"}`}
                       >
-                        📷 จากรูป SKU
+                        {t("📷 จากรูป SKU", "📷 From SKU images")}
                       </button>
                       {/* 🎬 Hero ของสีนี้ (ลูกค้าเลือกสีนี้ = รูปเปิดเปลี่ยนเป็นภาพนี้) */}
                       <button
                         type="button"
                         onClick={() => setHeroPanel(heroOpen ? null : { shopId: s.shopId, skuId: v.id })}
-                        title={skuHero ? "สีนี้มี Hero ของตัวเอง — กดเพื่อแก้" : "ตั้งรูปเปิดหน้าสินค้า (Hero) เฉพาะสีนี้ · ไม่ตั้ง = ใช้ Hero ของรุ่น"}
+                        title={skuHero ? t("สีนี้มี Hero ของตัวเอง — กดเพื่อแก้", "This color has its own hero — click to edit") : t("ตั้งรูปเปิดหน้าสินค้า (Hero) เฉพาะสีนี้ · ไม่ตั้ง = ใช้ Hero ของรุ่น", "Set a product page hero for this color only · not set = use the model's hero")}
                         className={`text-xs border rounded-lg px-2 py-1 ${heroOpen ? "bg-violet-600 border-violet-600 text-white" : skuHero ? "border-violet-300 bg-violet-50 text-violet-700" : "border-violet-200 text-violet-600 hover:bg-violet-50"}`}
                       >
                         🎬 Hero{skuHero ? " ✓" : ""}
                       </button>
                       {uploadBtn(s.shopId, v.id, "text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1")}
                       <button onClick={() => setPicker({ shopId: s.shopId, target: v.id })} className="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg px-2 py-1">
-                        🖼 จากคลัง
+                        {t("🖼 จากคลัง", "🖼 From library")}
                       </button>
                       {chosen.length > 0 && (
                         <button onClick={() => setSkuImages(s, v.id, [])} className="text-xs text-rose-500 hover:underline">
-                          ล้าง
+                          {t("ล้าง", "Clear")}
                         </button>
                       )}
                     </div>
@@ -1053,7 +1057,7 @@ export function ParentWebListings({
                       >
                         <Icon name="image" size={16} />
                         <span>
-                          {gap === "none" ? "ยังไม่มีรูปบนเว็บ — SKU ก็ไม่มีรูป ลูกค้าเห็นช่องว่าง" : "ยังไม่มีรูปบนเว็บ — ตอนนี้ลูกค้าเห็นรูปปก SKU 1 รูปแทน"} · ลากรูปมาวาง หรือกดเลือกจากคลัง
+                          {gap === "none" ? t("ยังไม่มีรูปบนเว็บ — SKU ก็ไม่มีรูป ลูกค้าเห็นช่องว่าง", "No web images — the SKU has none either, customers see a blank") : t("ยังไม่มีรูปบนเว็บ — ตอนนี้ลูกค้าเห็นรูปปก SKU 1 รูปแทน", "No web images — customers currently see 1 SKU cover image instead")} {t("· ลากรูปมาวาง หรือกดเลือกจากคลัง", "· drop images here or pick from library")}
                         </span>
                       </button>
                     </div>
@@ -1064,15 +1068,15 @@ export function ParentWebListings({
                     <div className="ml-12 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
                       <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
                         <span>
-                          🎬 Hero ของสี <b>{v.label}</b> — ลูกค้าเลือกสีนี้ (หรือกดการ์ดสีนี้มา) รูปเปิดจะเป็นภาพนี้ · ว่าง = ใช้ Hero ของรุ่น
+                          {t("🎬 Hero ของสี", "🎬 Hero for")} <b>{v.label}</b> {t("— ลูกค้าเลือกสีนี้ (หรือกดการ์ดสีนี้มา) รูปเปิดจะเป็นภาพนี้ · ว่าง = ใช้ Hero ของรุ่น", "— when a customer picks this color (or comes from its card) the hero shows this · empty = model hero")}
                         </span>
                         <button type="button" onClick={() => setHeroPanel(null)} className="text-slate-500 hover:underline shrink-0">
-                          ปิด
+                          {t("ปิด", "Close")}
                         </button>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <MediaUploadField label="🖥 คอม (16:9)" hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`} value={skuHero?.desktop ?? null} onChange={(m) => setSkuHero(s, v.id, "desktop", m)} previewRatio="16 / 9" />
-                        <MediaUploadField label="📱 มือถือ (4:5)" hint={HERO_SIZE_HINT.mobile} value={skuHero?.mobile ?? null} onChange={(m) => setSkuHero(s, v.id, "mobile", m)} previewRatio="4 / 5" />
+                        <MediaUploadField label={t("🖥 คอม (16:9)", "🖥 Desktop (16:9)")} hint={`${HERO_SIZE_HINT.desktop} · ${HERO_SIZE_HINT.video}`} value={skuHero?.desktop ?? null} onChange={(m) => setSkuHero(s, v.id, "desktop", m)} previewRatio="16 / 9" />
+                        <MediaUploadField label={t("📱 มือถือ (4:5)", "📱 Mobile (4:5)")} hint={HERO_SIZE_HINT.mobile} value={skuHero?.mobile ?? null} onChange={(m) => setSkuHero(s, v.id, "mobile", m)} previewRatio="4 / 5" />
                       </div>
                     </div>
                   )}
@@ -1082,14 +1086,14 @@ export function ParentWebListings({
                     <div className="ml-12 rounded-lg border border-orange-200 bg-orange-50/50 p-2 space-y-1.5">
                       <div className="flex items-center justify-between text-[11px] text-slate-500">
                         <span>
-                          รูปในหน้า SKU {v.code} — กดเพื่อเลือก (สูงสุด {MAX_SKU_IMAGES} รูป · เลือกแล้ว {chosen.length})
+                          {t(`รูปในหน้า SKU ${v.code} — กดเพื่อเลือก (สูงสุด ${MAX_SKU_IMAGES} รูป · เลือกแล้ว ${chosen.length})`, `Images on SKU ${v.code} — click to pick (max ${MAX_SKU_IMAGES} · picked ${chosen.length})`)}
                         </span>
                         <div className="flex gap-2">
                           <button onClick={() => setSkuImages(s, v.id, v.gallery)} className="text-orange-600 hover:underline">
-                            เลือกทั้งหมด
+                            {t("เลือกทั้งหมด", "Select all")}
                           </button>
                           <button onClick={() => setSkuPanel(null)} className="text-slate-500 hover:underline">
-                            ปิด
+                            {t("ปิด", "Close")}
                           </button>
                         </div>
                       </div>
@@ -1108,7 +1112,7 @@ export function ParentWebListings({
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img src={keyUrl(k)} alt="" className="w-14 h-14 object-cover" />
                               {sel && <span className="absolute top-0.5 left-0.5 text-[10px] bg-orange-500 text-white rounded px-1">{idx + 1}</span>}
-                              {k === v.erpImageKey && <span className="absolute bottom-0 inset-x-0 text-[9px] bg-black/50 text-white text-center">ปก SKU</span>}
+                              {k === v.erpImageKey && <span className="absolute bottom-0 inset-x-0 text-[9px] bg-black/50 text-white text-center">{t("ปก SKU", "SKU cover")}</span>}
                             </button>
                           );
                         })}
@@ -1126,8 +1130,8 @@ export function ParentWebListings({
   /* ───────── 🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด ───────── */
   const imageOptionsOf = (s: ShopState) =>
     [
-      ...s.webImages.map((k, i) => ({ key: k, label: `รูปเว็บ ${i + 1}` })),
-      ...data.variants.flatMap((v) => (s.webSkuImages[v.id] ?? v.gallery).map((k, i) => ({ key: k, label: `${v.label} · รูป ${i + 1}` }))),
+      ...s.webImages.map((k, i) => ({ key: k, label: t(`รูปเว็บ ${i + 1}`, `Web image ${i + 1}`) })),
+      ...data.variants.flatMap((v) => (s.webSkuImages[v.id] ?? v.gallery).map((k, i) => ({ key: k, label: t(`${v.label} · รูป ${i + 1}`, `${v.label} · image ${i + 1}`) }))),
     ].filter((o, i, arr) => arr.findIndex((x) => x.key === o.key) === i);
   const flip = (setter: typeof setPzOpen, sid: string) =>
     setter((prev) => {
@@ -1148,10 +1152,10 @@ export function ParentWebListings({
         <div className="rounded-lg border border-slate-200 p-3 space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs font-medium text-slate-600">
-              🔗 สินค้าที่เกี่ยวข้องของรุ่นนี้
-              {(s.webRelated ?? []).length > 0 && <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">เลือกไว้ {(s.webRelated ?? []).length} รุ่น</span>}
+              {t("🔗 สินค้าที่เกี่ยวข้องของรุ่นนี้", "🔗 Related products for this model")}
+              {(s.webRelated ?? []).length > 0 && <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">{t(`เลือกไว้ ${(s.webRelated ?? []).length} รุ่น`, `${(s.webRelated ?? []).length} models picked`)}</span>}
             </span>
-            <span className="text-[11px] text-slate-400">ขึ้นก่อนในหัวข้อ &quot;สินค้าที่เกี่ยวข้อง&quot; ของหน้าสินค้านี้ · ไม่เลือก = ใช้กฎกลาง (หน้าดีไซน์ → 🔗 แนะนำสินค้า)</span>
+            <span className="text-[11px] text-slate-400">{t(`ขึ้นก่อนในหัวข้อ "สินค้าที่เกี่ยวข้อง" ของหน้าสินค้านี้ · ไม่เลือก = ใช้กฎกลาง (หน้าดีไซน์ → 🔗 แนะนำสินค้า)`, `Shown first under "Related products" on this product page · none picked = central rule (Design → 🔗 Product recommendations)`)}</span>
           </div>
           <WebsiteProductPicker
             shopSlug={s.slug}
@@ -1164,8 +1168,8 @@ export function ParentWebListings({
         {/* 🔎 SEO ของรุ่นนี้ — ชื่อ/คำอธิบายใน Google + ตอนแชร์ลิงก์ · ว่าง = ใช้ชื่อ/คำอธิบายสินค้า */}
         <div className="rounded-lg border border-slate-200 p-3 space-y-2" data-web-seo>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-xs font-medium text-slate-600">🔎 SEO ของรุ่นนี้ (Google · แชร์ลิงก์)</span>
-            <span className="text-[11px] text-slate-400">ว่าง = ใช้ชื่อสินค้า/คำอธิบายบนเว็บตามเดิม · ชื่อไม่เกิน ~60 ตัว · คำอธิบาย ~150 ตัวกำลังดี</span>
+            <span className="text-xs font-medium text-slate-600">{t("🔎 SEO ของรุ่นนี้ (Google · แชร์ลิงก์)", "🔎 SEO for this model (Google · link sharing)")}</span>
+            <span className="text-[11px] text-slate-400">{t("ว่าง = ใช้ชื่อสินค้า/คำอธิบายบนเว็บตามเดิม · ชื่อไม่เกิน ~60 ตัว · คำอธิบาย ~150 ตัวกำลังดี", "Empty = use the web product name/description · title up to ~60 chars · description ~150 chars is ideal")}</span>
           </div>
           {(() => {
             const seo = s.webSeo ?? { title: "", description: "", title_en: "", description_en: "" };
@@ -1173,16 +1177,16 @@ export function ParentWebListings({
             const cnt = (v: string, max: number) => <span className={`text-[10px] ${v.length > max ? "text-amber-600" : "text-slate-400"}`}>{v.length}/{max}</span>;
             return (
               <div className="grid gap-2 sm:grid-cols-2">
-                <label className="block text-[11px] text-slate-500">ชื่อใน Google {cnt(seo.title, 60)}
+                <label className="block text-[11px] text-slate-500">{t("ชื่อใน Google", "Google title")} {cnt(seo.title, 60)}
                   <input value={seo.title} maxLength={120} onChange={(e) => set("title", e.target.value)} placeholder={s.display?.name ?? s.webName} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                 </label>
-                <label className="block text-[11px] text-slate-500">ชื่อใน Google (อังกฤษ)
+                <label className="block text-[11px] text-slate-500">{t("ชื่อใน Google (อังกฤษ)", "Google title (English)")}
                   <input value={seo.title_en} maxLength={120} onChange={(e) => set("title_en", e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                 </label>
-                <label className="block text-[11px] text-slate-500">คำอธิบายใน Google {cnt(seo.description, 160)}
+                <label className="block text-[11px] text-slate-500">{t("คำอธิบายใน Google", "Google description")} {cnt(seo.description, 160)}
                   <textarea value={seo.description} maxLength={320} rows={2} onChange={(e) => set("description", e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                 </label>
-                <label className="block text-[11px] text-slate-500">คำอธิบายใน Google (อังกฤษ)
+                <label className="block text-[11px] text-slate-500">{t("คำอธิบายใน Google (อังกฤษ)", "Google description (English)")}
                   <textarea value={seo.description_en} maxLength={320} rows={2} onChange={(e) => set("description_en", e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                 </label>
               </div>
@@ -1194,20 +1198,20 @@ export function ParentWebListings({
         <div className="rounded-lg border border-slate-200" data-fit-section>
           <button type="button" onClick={() => setFitOpen((v) => !v)} className="w-full flex items-center justify-between px-3 py-2 text-left">
             <span className="text-xs font-medium text-slate-600">
-              📐 ช่องใส่ของ (ใส่ตุ๊กตา/ของได้ไหม)
+              {t("📐 ช่องใส่ของ (ใส่ตุ๊กตา/ของได้ไหม)", "📐 Compartments (what fits inside)")}
               {comps === null ? (
-                <span className={`ml-2 text-[10px] rounded-full px-1.5 py-0.5 ${s.fitCheck ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-500"}`}>ยังไม่ได้วัด</span>
+                <span className={`ml-2 text-[10px] rounded-full px-1.5 py-0.5 ${s.fitCheck ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-500"}`}>{t("ยังไม่ได้วัด", "Not measured")}</span>
               ) : comps.length ? (
-                <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">{comps.length} ช่อง</span>
+                <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">{t(`${comps.length} ช่อง`, `${comps.length} compartments`)}</span>
               ) : (
-                <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 rounded-full px-1.5 py-0.5">ไม่มีช่อง</span>
+                <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 rounded-full px-1.5 py-0.5">{t("ไม่มีช่อง", "No compartments")}</span>
               )}
             </span>
-            <span className="text-xs text-slate-400">{fitShown ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+            <span className="text-xs text-slate-400">{fitShown ? t("▴ ซ่อน", "▴ Hide") : t("▾ ตั้งค่า", "▾ Settings")}</span>
           </button>
           {fitShown && (
             <div className="border-t border-slate-100 p-3">
-              {!s.fitCheck && <p className="text-[11px] text-slate-400 mb-2">ร้านนี้ยังไม่เปิด "เช็คขนาด" (ข้อมูลร้าน → 📐) — วัดเก็บไว้ก่อนได้</p>}
+              {!s.fitCheck && <p className="text-[11px] text-slate-400 mb-2">{t(`ร้านนี้ยังไม่เปิด "เช็คขนาด" (ข้อมูลร้าน → 📐) — วัดเก็บไว้ก่อนได้`, `This shop hasn't turned on "Fit check" (Shop info → 📐) — you can measure ahead of time`)}</p>}
               <CompartmentsEditor value={comps} parentId={parentId} outer={data.outer ?? null} onSaved={() => void load(true)} />
             </div>
           )}
@@ -1217,14 +1221,14 @@ export function ParentWebListings({
         <div className="rounded-lg border border-slate-200">
           <button type="button" onClick={() => flip(setPrOpen, s.shopId)} className="w-full flex items-center justify-between px-3 py-2 text-left">
             <span className="text-xs font-medium text-slate-600">
-              🖨 ลายรีดบนกระเป๋า (DTF/UV)
+              {t("🖨 ลายรีดบนกระเป๋า (DTF/UV)", "🖨 Bag print transfer (DTF/UV)")}
               {s.webPrint?.enabled && (
                 <span className={`ml-2 text-[10px] rounded-full px-1.5 py-0.5 ${printDesignUsable(s.webPrint) ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>
-                  {printDesignUsable(s.webPrint) ? `เปิดอยู่ · ${s.webPrint.method} · ${s.webPrint.zones.length} ส่วน` : "เปิดแต่ยังตั้งค่าไม่ครบ"}
+                  {printDesignUsable(s.webPrint) ? t(`เปิดอยู่ · ${s.webPrint.method} · ${s.webPrint.zones.length} ส่วน`, `On · ${s.webPrint.method} · ${s.webPrint.zones.length} zones`) : t("เปิดแต่ยังตั้งค่าไม่ครบ", "On but not fully set up")}
                 </span>
               )}
             </span>
-            <span className="text-xs text-slate-400">{prOpen.has(s.shopId) ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+            <span className="text-xs text-slate-400">{prOpen.has(s.shopId) ? t("▴ ซ่อน", "▴ Hide") : t("▾ ตั้งค่า", "▾ Settings")}</span>
           </button>
           {prOpen.has(s.shopId) && (
             <div className="border-t border-slate-100 p-3">
@@ -1235,7 +1239,7 @@ export function ParentWebListings({
                 fallbackImageKey={s.webImages[0] ?? data.variants[0]?.erpImageKey ?? null}
               />
               <p className="text-[11px] text-slate-400 mt-2">
-                ลูกค้าเห็นกล่อง &quot;ออกแบบลายเอง&quot; ในหน้าสินค้า · ออเดอร์ที่มีรูปอัปเองเข้าคิว 🖨 รอตรวจลาย ในแท็บออเดอร์ · กด &quot;บันทึก&quot; ด้านล่างเพื่อใช้งาน
+                {t(`ลูกค้าเห็นกล่อง "ออกแบบลายเอง" ในหน้าสินค้า · ออเดอร์ที่มีรูปอัปเองเข้าคิว 🖨 รอตรวจลาย ในแท็บออเดอร์ · กด "บันทึก" ด้านล่างเพื่อใช้งาน`, `Customers see a "Design your own" box on the product page · orders with uploaded images go to the 🖨 print review queue in the Orders tab · click "Save" below to turn it on`)}
               </p>
             </div>
           )}
@@ -1245,12 +1249,12 @@ export function ParentWebListings({
         <div className="rounded-lg border border-slate-200">
           <button type="button" onClick={() => flip(setPzOpen, s.shopId)} className="w-full flex items-center justify-between px-3 py-2 text-left">
             <span className="text-xs font-medium text-slate-600">
-              🔤 ปั๊มชื่อ (Personalize)
+              {t("🔤 ปั๊มชื่อ (Personalize)", "🔤 Name stamping (Personalize)")}
               {s.webPersonalize?.enabled && (
-                <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">เปิดอยู่ · {s.webPersonalize.positions.filter((p) => p.enabled).length} ตำแหน่ง</span>
+                <span className="ml-2 text-[10px] bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5">{t(`เปิดอยู่ · ${s.webPersonalize.positions.filter((p) => p.enabled).length} ตำแหน่ง`, `On · ${s.webPersonalize.positions.filter((p) => p.enabled).length} positions`)}</span>
               )}
             </span>
-            <span className="text-xs text-slate-400">{pzOpen.has(s.shopId) ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+            <span className="text-xs text-slate-400">{pzOpen.has(s.shopId) ? t("▴ ซ่อน", "▴ Hide") : t("▾ ตั้งค่า", "▾ Settings")}</span>
           </button>
           {pzOpen.has(s.shopId) && (
             <div className="border-t border-slate-100 p-3">
@@ -1263,7 +1267,7 @@ export function ParentWebListings({
                 colors={data.variants.map((v) => ({ id: v.id, label: v.label || v.code, imageKey: s.webSkuImages[v.id]?.[0] ?? v.gallery[0] ?? v.erpImageKey, images: s.webSkuImages[v.id] ?? v.gallery }))}
               />
               <p className="text-[11px] text-slate-400 mt-2">
-                ลูกค้าจะพิมพ์ข้อความ เลือกแบบ และเลือกตำแหน่งได้ในหน้าสินค้า (ชิ้นส่วน &quot;ปั๊มชื่อ&quot; ในส่วนราคา-ตะกร้า) และในบล็อก &quot;ปั๊มชื่อ&quot; ของตัวจัดหน้า · กด &quot;บันทึก&quot; ด้านล่างเพื่อใช้งาน
+                {t(`ลูกค้าจะพิมพ์ข้อความ เลือกแบบ และเลือกตำแหน่งได้ในหน้าสินค้า (ชิ้นส่วน "ปั๊มชื่อ" ในส่วนราคา-ตะกร้า) และในบล็อก "ปั๊มชื่อ" ของตัวจัดหน้า · กด "บันทึก" ด้านล่างเพื่อใช้งาน`, `Customers type text, pick a style and position on the product page (the "Name stamping" part in the price/cart area) and in the page builder's "Name stamping" block · click "Save" below to turn it on`)}
               </p>
             </div>
           )}
@@ -1273,15 +1277,15 @@ export function ParentWebListings({
         <div className="rounded-lg border border-slate-200">
           <button type="button" onClick={() => flip(setBnOpen, s.shopId)} className="w-full flex items-center justify-between px-3 py-2 text-left">
             <span className="text-xs font-medium text-slate-600">
-              🖼 แบนเนอร์หน้าสินค้า
-              {s.webBanners.length > 0 && <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 rounded-full px-1.5 py-0.5">{s.webBanners.length} แบนเนอร์</span>}
+              {t("🖼 แบนเนอร์หน้าสินค้า", "🖼 Product page banners")}
+              {s.webBanners.length > 0 && <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 rounded-full px-1.5 py-0.5">{t(`${s.webBanners.length} แบนเนอร์`, `${s.webBanners.length} banners`)}</span>}
             </span>
-            <span className="text-xs text-slate-400">{bnOpen.has(s.shopId) ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+            <span className="text-xs text-slate-400">{bnOpen.has(s.shopId) ? t("▴ ซ่อน", "▴ Hide") : t("▾ ตั้งค่า", "▾ Settings")}</span>
           </button>
           {bnOpen.has(s.shopId) && (
             <div className="border-t border-slate-100 p-3 space-y-2">
               <p className="text-[11px] text-slate-500">
-                ไม่ตั้ง = ใช้แบนเนอร์กลางของธีม (ดีไซน์ → หน้าสินค้า → ⚙️ แบนเนอร์) · ตั้งแล้วจะโชว์ตามลำดับนี้แทน หลายรูปได้ แต่ละรูปเลือกครึ่งจอ/เต็มจอ ตำแหน่งข้อความ ฟิลด์ และค่ามือถือแยก
+                {t("ไม่ตั้ง = ใช้แบนเนอร์กลางของธีม (ดีไซน์ → หน้าสินค้า → ⚙️ แบนเนอร์) · ตั้งแล้วจะโชว์ตามลำดับนี้แทน หลายรูปได้ แต่ละรูปเลือกครึ่งจอ/เต็มจอ ตำแหน่งข้อความ ฟิลด์ และค่ามือถือแยก", "Not set = theme's central banners (Design → Product page → ⚙️ Banners) · once set, these show in this order instead · several allowed, each with half/full width, text position, fields and separate mobile settings")}
               </p>
               <ProductBannersEditor
                 banners={s.webBanners}
@@ -1298,20 +1302,20 @@ export function ParentWebListings({
         <div className="rounded-lg border border-slate-200">
           <button type="button" onClick={() => flip(setDetailsOpen, s.shopId)} className="w-full flex items-center justify-between px-3 py-2 text-left">
             <span className="text-xs font-medium text-slate-600">
-              📋 จับคู่รายละเอียดหน้าเว็บ
-              {overrideCount > 0 && <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 rounded-full px-1.5 py-0.5">ปรับไว้ {overrideCount} หัวข้อ</span>}
+              {t("📋 จับคู่รายละเอียดหน้าเว็บ", "📋 Web detail mapping")}
+              {overrideCount > 0 && <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 rounded-full px-1.5 py-0.5">{t(`ปรับไว้ ${overrideCount} หัวข้อ`, `${overrideCount} sections adjusted`)}</span>}
             </span>
-            <span className="text-xs text-slate-400">{detailsShown ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+            <span className="text-xs text-slate-400">{detailsShown ? t("▴ ซ่อน", "▴ Hide") : t("▾ ตั้งค่า", "▾ Settings")}</span>
           </button>
           {detailsShown && (
             <div className="border-t border-slate-100 p-3 space-y-2">
               <p className="text-[11px] text-slate-500">
-                หัวข้อมาจาก &quot;ชุดรายละเอียดสินค้า&quot; ของธีม (ดีไซน์ → หน้าสินค้า) — ตั้งเฉพาะรุ่นนี้ว่าจะโชว์/ซ่อน หรือใส่ข้อความเฉพาะรุ่นแทนเนื้อหากลาง ·{" "}
+                {t(`หัวข้อมาจาก "ชุดรายละเอียดสินค้า" ของธีม (ดีไซน์ → หน้าสินค้า) — ตั้งเฉพาะรุ่นนี้ว่าจะโชว์/ซ่อน หรือใส่ข้อความเฉพาะรุ่นแทนเนื้อหากลาง ·`, `Sections come from the theme's "Product detail set" (Design → Product page) — set show/hide for this model only, or enter model-specific text instead of the central content ·`)}{" "}
                 <a href={`/website/${s.slug}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
-                  แก้ชุดรายละเอียดกลาง ↗
+                  {t("แก้ชุดรายละเอียดกลาง ↗", "Edit central detail set ↗")}
                 </a>
               </p>
-              {s.detailItems.length === 0 && <div className="text-xs text-slate-400">ธีมร้านนี้ยังไม่มีหัวข้อรายละเอียด</div>}
+              {s.detailItems.length === 0 && <div className="text-xs text-slate-400">{t("ธีมร้านนี้ยังไม่มีหัวข้อรายละเอียด", "This shop's theme has no detail sections yet")}</div>}
               {s.detailItems.map((it) => {
                 const ov = s.webDetails[it.id];
                 const mode: "default" | "show" | "hide" = ov?.show === true ? "show" : ov?.show === false ? "hide" : "default";
@@ -1321,15 +1325,15 @@ export function ParentWebListings({
                       <div className="min-w-0 flex-1">
                         <div className="text-sm text-slate-800 truncate">{it.label}</div>
                         <div className="text-[11px] text-slate-400">
-                          {SOURCE_LABEL[it.source] ?? it.source} · ค่ากลาง: {it.defaultLabel}
+                          {SOURCE_LABEL[it.source] ?? it.source} · {t("ค่ากลาง:", "Default:")} {it.defaultLabel}
                         </div>
                       </div>
                       <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs shrink-0">
                         {(
                           [
-                            ["default", "ตามค่ากลาง"],
-                            ["show", "โชว์"],
-                            ["hide", "ซ่อน"],
+                            ["default", t("ตามค่ากลาง", "Default")],
+                            ["show", t("โชว์", "Show")],
+                            ["hide", t("ซ่อน", "Hide")],
                           ] as const
                         ).map(([m, label]) => (
                           <button
@@ -1348,7 +1352,7 @@ export function ParentWebListings({
                         value={ov?.text ?? ""}
                         rows={ov?.text ? 3 : 1}
                         onChange={(e) => setDetail(s, it.id, { text: e.target.value })}
-                        placeholder="ข้อความเฉพาะรุ่นนี้ (ว่าง = ใช้เนื้อหาจากแหล่งข้อมูลกลาง)"
+                        placeholder={t("ข้อความเฉพาะรุ่นนี้ (ว่าง = ใช้เนื้อหาจากแหล่งข้อมูลกลาง)", "Text for this model only (empty = use central content)")}
                         className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-orange-400"
                       />
                     )}
@@ -1365,7 +1369,7 @@ export function ParentWebListings({
   /* ───────── ⚠️ ต้องแก้ ───────── */
   const renderFix = (s: ShopState) =>
     s.issues.length === 0 ? (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm text-emerald-700 text-center">✅ ข้อมูลบนเว็บครบแล้ว</div>
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm text-emerald-700 text-center">{t("✅ ข้อมูลบนเว็บครบแล้ว", "✅ Web data is complete")}</div>
     ) : (
       <div className="space-y-2">
         {s.issues.map((x) => (
@@ -1375,32 +1379,32 @@ export function ParentWebListings({
               {x.detail && <p className="text-[11px] text-amber-700 truncate" title={x.detail}>{x.detail}</p>}
             </div>
             {x.key === "swatch_missing" ? (
-              <ColorSwatchButton label="🎨 ผูกจุดสี" focusNames={x.names ?? x.detail?.split(", ")} className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100" />
+              <ColorSwatchButton label={t("🎨 ผูกจุดสี", "🎨 Link color dots")} focusNames={x.names ?? x.detail?.split(", ")} className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100" />
             ) : (
               <button type="button" onClick={() => setTab(s.shopId, FIX_TAB[x.key])} className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100">
-                ไปแก้ →
+                {t("ไปแก้ →", "Fix →")}
               </button>
             )}
           </div>
         ))}
-        <p className="text-[11px] text-slate-400">รายการนี้อัปเดตหลังกด 💾 บันทึก</p>
+        <p className="text-[11px] text-slate-400">{t("รายการนี้อัปเดตหลังกด 💾 บันทึก", "This list updates after you click 💾 Save")}</p>
       </div>
     );
 
   /* ───────── แท็บต่อร้าน ───────── */
   const TABS: { k: Tab; l: (s: ShopState) => string }[] = [
-    { k: "sell", l: () => "🛒 ขายบนเว็บ" },
-    { k: "detail", l: () => "📝 รายละเอียดบนเว็บ" },
-    { k: "extra", l: () => "🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด · 🔗 เกี่ยวข้อง" },
-    { k: "fix", l: (s) => (s.issues.length ? `⚠️ ต้องแก้ (${s.issues.length})` : "✅ ครบแล้ว") },
+    { k: "sell", l: () => t("🛒 ขายบนเว็บ", "🛒 Sell on web") },
+    { k: "detail", l: () => t("📝 รายละเอียดบนเว็บ", "📝 Web details") },
+    { k: "extra", l: () => t("🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด · 🔗 เกี่ยวข้อง", "🔤 Name stamping · Banners · Details · 🔗 Related") },
+    { k: "fix", l: (s) => (s.issues.length ? t(`⚠️ ต้องแก้ (${s.issues.length})`, `⚠️ Needs fixing (${s.issues.length})`) : t("✅ ครบแล้ว", "✅ Complete")) },
   ];
   const renderBody = (s: ShopState) => {
-    const t = tabFor(s.shopId);
+    const cur = tabFor(s.shopId);
     return (
       <div>
         <div className="flex gap-1 overflow-x-auto border-b border-slate-200 mb-3 -mx-0.5 px-0.5" role="tablist">
           {TABS.map((x) => {
-            const on = t === x.k;
+            const on = cur === x.k;
             const warn = x.k === "fix" && s.issues.length > 0;
             return (
               <button
@@ -1416,16 +1420,16 @@ export function ParentWebListings({
             );
           })}
         </div>
-        {t === "sell" && renderSell(s)}
-        {t === "detail" && renderDetail(s)}
-        {t === "extra" && renderExtra(s)}
-        {t === "fix" && renderFix(s)}
+        {cur === "sell" && renderSell(s)}
+        {cur === "detail" && renderDetail(s)}
+        {cur === "extra" && renderExtra(s)}
+        {cur === "fix" && renderFix(s)}
 
         {/* อยู่ในหน้าต่าง (drawer) = ปุ่มบันทึกอยู่แถบล่างแล้ว · เปิดนอก drawer = ปุ่มในกล่องตามเดิม */}
         <div className="mt-3">
           {inFooter ? (
             (dirtyShops.some((d) => d.shopId === s.shopId) || dirtySkus.length > 0) && (
-              <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">มีการแก้ไขที่ยังไม่บันทึก — กด 💾 บันทึก ที่แถบล่าง</div>
+              <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{t("มีการแก้ไขที่ยังไม่บันทึก — กด 💾 บันทึก ที่แถบล่าง", "Unsaved changes — click 💾 Save in the bottom bar")}</div>
             )
           ) : (
             <button
@@ -1433,7 +1437,7 @@ export function ParentWebListings({
               disabled={savingShop === s.shopId || savingSkus}
               className="bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm rounded-lg px-5 py-2"
             >
-              {savingShop === s.shopId || savingSkus ? "กำลังบันทึก…" : "บันทึก"}
+              {savingShop === s.shopId || savingSkus ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}
             </button>
           )}
         </div>
@@ -1448,12 +1452,12 @@ export function ParentWebListings({
       {shopId ? (
         // ✳️ เฉพาะร้านเดียว (drawer หน้า "สินค้าบนเว็บ") — หัว/ปุ่มลิงก์อยู่ที่ drawer แล้ว
         !focus ? (
-          <div className="text-sm text-slate-400 py-8 text-center">ไม่พบร้านนี้</div>
+          <div className="text-sm text-slate-400 py-8 text-center">{t("ไม่พบร้านนี้", "Shop not found")}</div>
         ) : !focus.listed ? (
           <div className="rounded-xl border border-dashed border-slate-300 py-8 text-center space-y-2">
-            <p className="text-sm text-slate-500">รุ่นนี้ยังไม่อยู่ในร้าน {focus.shopName}</p>
+            <p className="text-sm text-slate-500">{t(`รุ่นนี้ยังไม่อยู่ในร้าน ${focus.shopName}`, `This model isn't in ${focus.shopName} yet`)}</p>
             <button onClick={() => addToShop(focus.shopId)} disabled={savingShop === focus.shopId} className="text-sm border border-orange-300 text-orange-600 hover:bg-orange-50 rounded-lg px-3 py-1.5">
-              {savingShop === focus.shopId ? "กำลังเพิ่ม…" : `+ เพิ่มเข้าร้าน ${focus.shopName}`}
+              {savingShop === focus.shopId ? t("กำลังเพิ่ม…", "Adding…") : t(`+ เพิ่มเข้าร้าน ${focus.shopName}`, `+ Add to ${focus.shopName}`)}
             </button>
           </div>
         ) : (
@@ -1462,16 +1466,16 @@ export function ParentWebListings({
       ) : (
         <>
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-xs text-slate-500">ตั้งค่าการขายบนเว็บร้านออนไลน์ — เว้นว่าง = ใช้ชื่อ/รูป/คำอธิบายจาก ERP อัตโนมัติ · ชุดเดียวกับหน้า เว็บไซต์ → สินค้าบนเว็บ</p>
+            <p className="text-xs text-slate-500">{t("ตั้งค่าการขายบนเว็บร้านออนไลน์ — เว้นว่าง = ใช้ชื่อ/รูป/คำอธิบายจาก ERP อัตโนมัติ · ชุดเดียวกับหน้า เว็บไซต์ → สินค้าบนเว็บ", "Online shop selling settings — leave empty = use ERP name/images/description automatically · same as Website → Web products")}</p>
             <a href={data.adminUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
-              หลังบ้านร้าน (จัดการรวม) ↗
+              {t("หลังบ้านร้าน (จัดการรวม) ↗", "Shop admin (manage all) ↗")}
             </a>
           </div>
 
           {/* ร้านที่ยังไม่ขายรุ่นนี้ — รวมเป็นแถวเดียว กดเพิ่มทีละร้าน */}
           {data.shops.some((s) => !s.listed) && (
             <div className="flex items-center gap-2 flex-wrap rounded-xl border border-dashed border-slate-300 px-3 py-2">
-              <span className="text-xs text-slate-500">ยังไม่ขายใน:</span>
+              <span className="text-xs text-slate-500">{t("ยังไม่ขายใน:", "Not sold in:")}</span>
               {data.shops
                 .filter((s) => !s.listed)
                 .map((s) => (
@@ -1479,11 +1483,11 @@ export function ParentWebListings({
                     key={s.shopId}
                     onClick={() => addToShop(s.shopId)}
                     disabled={savingShop === s.shopId}
-                    title={`เพิ่มรุ่นนี้เข้าร้าน ${s.shopName} (ยังปิดอยู่ จนกว่าจะเปิด "ขึ้นเว็บ")`}
+                    title={t(`เพิ่มรุ่นนี้เข้าร้าน ${s.shopName} (ยังปิดอยู่ จนกว่าจะเปิด "ขึ้นเว็บ")`, `Add this model to ${s.shopName} (stays hidden until you turn on "Live")`)}
                     className="text-xs border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-60 rounded-full px-2.5 py-1"
                   >
-                    {savingShop === s.shopId ? "กำลังเพิ่ม…" : `+ ${s.shopName}`}
-                    {s.isDefault && <span className="text-[10px] text-slate-400 ml-1">ร้านหลัก</span>}
+                    {savingShop === s.shopId ? t("กำลังเพิ่ม…", "Adding…") : `+ ${s.shopName}`}
+                    {s.isDefault && <span className="text-[10px] text-slate-400 ml-1">{t("ร้านหลัก", "Main shop")}</span>}
                   </button>
                 ))}
             </div>
@@ -1497,17 +1501,17 @@ export function ParentWebListings({
                 {/* หัวการ์ด: ชื่อร้าน + สถานะ + ยอดขาย + ลิงก์ (สวิตช์ขึ้นเว็บ/แนะนำ อยู่ในแท็บ ขายบนเว็บ) */}
                 <div className="flex items-center gap-x-2 gap-y-1 bg-slate-50 px-3 py-1.5 border-b border-slate-200 flex-wrap">
                   <span className="text-sm font-medium text-slate-800">{s.shopName}</span>
-                  {s.isDefault && <span className="text-[11px] text-slate-400">(ร้านหลัก)</span>}
-                  <span className={`text-[10px] rounded-full px-2 py-0.5 ${s.published ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{s.published ? "ขึ้นเว็บ" : "ซ่อนอยู่"}</span>
-                  {s.featured && <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">★ แนะนำ</span>}
-                  {s.issues.length > 0 && <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800">⚠️ ต้องแก้ {s.issues.length}</span>}
-                  <span className="text-[11px] text-slate-400 ml-auto">ขายผ่านเว็บ {s.soldQty} ชิ้น</span>
+                  {s.isDefault && <span className="text-[11px] text-slate-400">{t("(ร้านหลัก)", "(main shop)")}</span>}
+                  <span className={`text-[10px] rounded-full px-2 py-0.5 ${s.published ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{s.published ? t("ขึ้นเว็บ", "Live") : t("ซ่อนอยู่", "Hidden")}</span>
+                  {s.featured && <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">{t("★ แนะนำ", "★ Featured")}</span>}
+                  {s.issues.length > 0 && <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-800">{t(`⚠️ ต้องแก้ ${s.issues.length}`, `⚠️ Needs fixing ${s.issues.length}`)}</span>}
+                  <span className="text-[11px] text-slate-400 ml-auto">{t(`ขายผ่านเว็บ ${s.soldQty} ชิ้น`, `Sold on web: ${s.soldQty} pcs`)}</span>
                   {s.published && s.productUrl && (
                     <>
                       <a href={s.productUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
-                        ดูหน้าเว็บ ↗
+                        {t("ดูหน้าเว็บ ↗", "View page ↗")}
                       </a>
-                      <CopyButton value={s.productUrl} label="คัดลอกลิงก์" title="คัดลอกลิงก์หน้าสินค้านี้" className="!py-0.5" />
+                      <CopyButton value={s.productUrl} label={t("คัดลอกลิงก์", "Copy link")} title={t("คัดลอกลิงก์หน้าสินค้านี้", "Copy this product page link")} className="!py-0.5" />
                     </>
                   )}
                 </div>
@@ -1523,7 +1527,7 @@ export function ParentWebListings({
         onSelect={onPickImages}
         multiple={!picker?.target.startsWith("banner:")}
         typeFilter="image"
-        title={picker?.target === "gallery" ? "เลือกรูปสินค้าบนเว็บ" : picker?.target.startsWith("banner:") ? "เลือกรูปแบนเนอร์" : "เลือกรูปเว็บของสีนี้ (เลือกได้หลายรูป)"}
+        title={picker?.target === "gallery" ? t("เลือกรูปสินค้าบนเว็บ", "Pick web product images") : picker?.target.startsWith("banner:") ? t("เลือกรูปแบนเนอร์", "Pick a banner image") : t("เลือกรูปเว็บของสีนี้ (เลือกได้หลายรูป)", "Pick web images for this color (multiple)")}
       />
       {/* ช่องเลือกไฟล์ตัวเดียว ใช้ร่วมทุกปุ่ม ⬆ อัปโหลด (รู้เป้าหมายจาก uploadTo) */}
       <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadFiles(e.target.files)} />
@@ -1564,6 +1568,7 @@ function AutoValueRow({
   onUse: () => void;
   onReset: () => void;
 }) {
+  const t = useT();
   return (
     <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 min-w-0">
       <span className="truncate flex-1 min-w-0" title={custom ? undefined : autoText}>
@@ -1579,7 +1584,7 @@ function AutoValueRow({
       {custom ? (
         <button type="button" onClick={onReset} className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50" title={resetTitle}>
           <Icon name="back" className="mr-1 align-[-2px]" />
-          กลับเป็นอัตโนมัติ
+          {t("กลับเป็นอัตโนมัติ", "Back to auto")}
         </button>
       ) : (
         autoText && (
@@ -1629,6 +1634,7 @@ function NumField({ label, value, onChange }: { label: string; value: number | n
 
 /** ตัวเลือกกรอกเอง "1.5 มม., 2.0 มม." — เก็บข้อความระหว่างพิมพ์ แล้วแปลงเป็นรายการตอนออกจากช่อง */
 function ItemsInput({ value, onCommit }: { value: WebOptions; onCommit: (items: OptionItem[]) => void }) {
+  const t = useT();
   const [txt, setTxt] = useState<string | null>(null);
   const shown = (value?.items ?? []).map((i) => i.label).join(", ");
   return (
@@ -1647,7 +1653,7 @@ function ItemsInput({ value, onCommit }: { value: WebOptions; onCommit: (items: 
           );
         setTxt(null);
       }}
-      placeholder="1.5 มม., 2.0 มม., 3.0 มม."
+      placeholder={t("1.5 มม., 2.0 มม., 3.0 มม.", "1.5 mm, 2.0 mm, 3.0 mm")}
       className={inputCls}
     />
   );
@@ -1655,22 +1661,23 @@ function ItemsInput({ value, onCommit }: { value: WebOptions; onCommit: (items: 
 
 /** 🔗 ข้อมูลที่เชื่อม — หน้าเว็บดึงอะไรมาจากไหน + ค่าตอนนี้ · ช่องที่ว่างไปเติมที่ Parent SKU (ข้อมูลจาก lib/website-listing-linked) */
 function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?: () => void }) {
+  const t = useT();
   const missing = rows.flatMap((r) => r.missing ?? []);
   const uniqMissing = [...new Set(missing)];
   const tone: Record<LinkedRow["status"], string> = { ok: "text-emerald-700", empty: "text-rose-600", override: "text-blue-700", hidden: "text-slate-400", none: "text-amber-700" };
   return (
     <details className="rounded-lg border border-slate-200 bg-white px-3 py-2" open={uniqMissing.length > 0}>
       <summary className="cursor-pointer text-xs text-slate-600">
-        🔗 ข้อมูลที่เชื่อม — หน้าเว็บดึงอะไรมาจากไหน
-        {uniqMissing.length > 0 ? <span className="ml-1.5 text-rose-600">· ว่าง {uniqMissing.length} ช่อง</span> : <span className="ml-1.5 text-emerald-700">· ครบ</span>}
+        {t("🔗 ข้อมูลที่เชื่อม — หน้าเว็บดึงอะไรมาจากไหน", "🔗 Linked data — where the web page gets each value")}
+        {uniqMissing.length > 0 ? <span className="ml-1.5 text-rose-600">{t(`· ว่าง ${uniqMissing.length} ช่อง`, `· ${uniqMissing.length} empty`)}</span> : <span className="ml-1.5 text-emerald-700">{t("· ครบ", "· complete")}</span>}
       </summary>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-[11px] text-slate-400">
-              <th className="py-1 pr-2 font-normal">บนเว็บ</th>
-              <th className="py-1 pr-2 font-normal">ดึงจาก (Parent SKU)</th>
-              <th className="py-1 font-normal">ค่าตอนนี้</th>
+              <th className="py-1 pr-2 font-normal">{t("บนเว็บ", "On web")}</th>
+              <th className="py-1 pr-2 font-normal">{t("ดึงจาก (Parent SKU)", "Source (Parent SKU)")}</th>
+              <th className="py-1 font-normal">{t("ค่าตอนนี้", "Current value")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1680,7 +1687,7 @@ function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?:
                 <td className="py-1.5 pr-2 text-slate-500">{r.from}</td>
                 <td className={`py-1.5 ${tone[r.status]}`}>
                   {r.value}
-                  {r.missing?.length ? <span className="block text-[11px] text-rose-600">ว่าง: {r.missing.join(" · ")}</span> : null}
+                  {r.missing?.length ? <span className="block text-[11px] text-rose-600">{t("ว่าง:", "Empty:")} {r.missing.join(" · ")}</span> : null}
                 </td>
               </tr>
             ))}
@@ -1690,12 +1697,12 @@ function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?:
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
         {uniqMissing.length > 0 && (onOpenParent ? (
           <button type="button" onClick={onOpenParent} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-slate-700 hover:border-slate-500">
-            📦 ไปเติมที่ Parent SKU ({uniqMissing.length} ช่องว่าง)
+            {t(`📦 ไปเติมที่ Parent SKU (${uniqMissing.length} ช่องว่าง)`, `📦 Fill in on the Parent SKU (${uniqMissing.length} empty)`)}
           </button>
         ) : (
-          <span>เติมช่องที่ว่างได้ที่แท็บข้อมูลของ Parent SKU นี้</span>
+          <span>{t("เติมช่องที่ว่างได้ที่แท็บข้อมูลของ Parent SKU นี้", "Fill empty fields in this Parent SKU's data tab")}</span>
         ))}
-        <span>สีฟ้า = พิมพ์ทับบนเว็บ · สีส้ม = ไม่มีแหล่งข้อมูล · เปลี่ยนแหล่งข้อมูลได้ที่ เว็บไซต์ → ⚙️ จับคู่ฟิลด์ / 🎨 ดีไซน์ → หน้าสินค้า</span>
+        <span>{t("สีฟ้า = พิมพ์ทับบนเว็บ · สีส้ม = ไม่มีแหล่งข้อมูล · เปลี่ยนแหล่งข้อมูลได้ที่ เว็บไซต์ → ⚙️ จับคู่ฟิลด์ / 🎨 ดีไซน์ → หน้าสินค้า", "Blue = overridden on web · orange = no source · change sources in Website → ⚙️ Field mapping / 🎨 Design → Product page")}</span>
       </div>
     </details>
   );
@@ -1706,6 +1713,7 @@ function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?:
  * + ‹ › เลื่อนทีละช่อง · ✕ เอาออก · รูปแรก = กรอบส้ม (รูปที่โชว์ก่อน) · onAdd = ช่อง + ท้ายแถว (เพิ่มรูป)
  */
 function SortableThumbs({ keys, onChange, size, badge, className = "", onAdd }: { keys: string[]; onChange: (next: string[]) => void; size: string; badge: (i: number) => ReactNode; className?: string; onAdd?: () => void }) {
+  const t = useT();
   const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => onChange(moveItem(keys, from, to)));
   // ปุ่มบนรูปไม่เริ่มลาก (คลิกได้ตามปกติ)
   const noDrag = { onPointerDown: (e: ReactPointerEvent) => e.stopPropagation() };
@@ -1717,29 +1725,30 @@ function SortableThumbs({ keys, onChange, size, badge, className = "", onAdd }: 
           {...rowProps(i)}
           {...handleProps(i)}
           onDragStart={(e) => e.preventDefault()}
-          title="กดค้างแล้วลากไปวางบนรูปอื่น เพื่อสลับตำแหน่ง"
+          title={t("กดค้างแล้วลากไปวางบนรูปอื่น เพื่อสลับตำแหน่ง", "Press and drag onto another image to swap positions")}
           className={`relative group rounded-lg cursor-grab active:cursor-grabbing select-none ${rowCls(i)}`}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={keyUrl(k)} alt="" draggable={false} className={`${size} object-cover rounded-lg border ${i === 0 ? "border-orange-400 ring-1 ring-orange-300" : "border-slate-200"}`} />
           {badge(i)}
           {i > 0 && (
-            <button type="button" {...noDrag} title="เลื่อนไปซ้าย" onClick={() => onChange(moveItem(keys, i, i - 1))} className="absolute bottom-0 left-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">
+            <button type="button" {...noDrag} title={t("เลื่อนไปซ้าย", "Move left")} onClick={() => onChange(moveItem(keys, i, i - 1))} className="absolute bottom-0 left-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">
               ‹
             </button>
           )}
           {i < keys.length - 1 && (
-            <button type="button" {...noDrag} title="เลื่อนไปขวา" onClick={() => onChange(moveItem(keys, i, i + 1))} className="absolute bottom-0 right-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">
+            <button type="button" {...noDrag} title={t("เลื่อนไปขวา", "Move right")} onClick={() => onChange(moveItem(keys, i, i + 1))} className="absolute bottom-0 right-0 bg-white/90 text-slate-700 rounded text-[10px] px-1 opacity-0 group-hover:opacity-100">
               ›
             </button>
           )}
-          <button type="button" {...noDrag} title="เอาออก" onClick={() => onChange(keys.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 text-[10px] leading-none opacity-0 group-hover:opacity-100">
+          <button type="button" {...noDrag} title={t("เอาออก", "Remove")} onClick={() => onChange(keys.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 text-[10px] leading-none opacity-0 group-hover:opacity-100">
             ✕
           </button>
         </div>
       ))}
       {onAdd && (
-        <button type="button" onClick={onAdd} title="เพิ่มรูป (เลือกจากคลัง)" aria-label="เพิ่มรูป" className={`${size} rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:border-slate-400 hover:text-slate-600 flex items-center justify-center`}>
+        <button type="button" onClick={onAdd} title={t("เพิ่มรูป (เลือกจากคลัง)", "Add image (from library)")} aria-label={t("เพิ่มรูป", "Add image")}
+ className={`${size} rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:border-slate-400 hover:text-slate-600 flex items-center justify-center`}>
           <Icon name="add" size={16} />
         </button>
       )}

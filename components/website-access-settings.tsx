@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { SaveBar } from "@/components/save-bar";
 import { UserPicker } from "@/components/pickers";
 import { DESIGN_GROUPS, DESIGN_PAGES } from "@/lib/website-design-nav";
@@ -63,6 +65,7 @@ const topicLabel = (t: DesignTopic) => DESIGN_PAGES[t].label;
 
 /** 👷 ตั้งหัวข้อดีไซน์ + 🗂 แท็บอื่น (หน้าแรก/หน้าเว็บ/รูปบนเว็บ) ที่แก้ได้ของแถวหนึ่ง (ตำแหน่ง/คน) — ติ๊กแล้ว "หน้าตาเว็บ" เป็นดูได้ + บางหัวข้อ */
 function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onPatch: (keys: Record<string, boolean>) => void }) {
+  const t = useT();
   const acc = designAccess(has);
   const topics = acc.full ? [] : acc.topics;
   const tabs = acc.full ? [] : acc.tabs;
@@ -77,9 +80,9 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
   const toggleTab = (t: DesignTabTopic) => set(topics, tabs.includes(t) ? tabs.filter((x) => x !== t) : [...tabs, t]);
   return (
     <div className="space-y-2" data-design-topics-editor>
-      {acc.full && <p className="text-[11px] text-blue-700">ตอนนี้แก้ได้ทุกหัวข้อ (ช่อง “หน้าตาเว็บ” = แก้ได้) — ติ๊กหัวข้อด้านล่างเพื่อจำกัดให้แก้ได้เฉพาะบางหัวข้อ</p>}
+      {acc.full && <p className="text-[11px] text-blue-700">{t("ตอนนี้แก้ได้ทุกหัวข้อ (ช่อง “หน้าตาเว็บ” = แก้ได้) — ติ๊กหัวข้อด้านล่างเพื่อจำกัดให้แก้ได้เฉพาะบางหัวข้อ", "Can edit all topics now (“Design” = Edit) — tick topics below to limit editing to some topics")}</p>}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-slate-500">ชุดสำเร็จรูป:</span>
+        <span className="text-[11px] text-slate-500">{t("ชุดสำเร็จรูป:", "Presets:")}</span>
         {DESIGN_TOPIC_PRESETS.map((p) => (
           <button key={p.label} type="button" onClick={() => set(p.topics, p.tabs ?? [])} className="rounded-full border border-slate-200 px-2.5 py-0.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700">
             {p.label}
@@ -87,7 +90,7 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
         ))}
         {any && (
           <button type="button" onClick={() => set([], [])} className="rounded-full px-2 py-0.5 text-[11px] text-slate-400 hover:text-red-600">
-            ล้าง
+            {t("ล้าง", "Clear")}
           </button>
         )}
       </div>
@@ -109,7 +112,7 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
         })}
         {/* 🗂 แท็บอื่นในกลุ่มหน้าตาเว็บ — ติ๊กแล้วแท็บนั้นแก้ได้ (เผยแพร่ตามช่อง "เผยแพร่เองได้") */}
         <div>
-          <p className="text-[11px] font-medium text-slate-400">แท็บอื่น (นอกหน้าดีไซน์)</p>
+          <p className="text-[11px] font-medium text-slate-400">{t("แท็บอื่น (นอกหน้าดีไซน์)", "Other tabs (outside Design)")}</p>
           {DESIGN_TAB_TOPICS.map((t) => (
             <label key={t} className="flex items-center gap-1.5 py-0.5 text-xs text-slate-700 cursor-pointer">
               <input type="checkbox" checked={tabs.includes(t)} onChange={() => toggleTab(t)} className="h-3.5 w-3.5 accent-blue-600" />
@@ -121,11 +124,11 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
       <div className={`flex flex-wrap gap-x-5 gap-y-1 text-xs ${any ? "text-slate-700" : "text-slate-400"}`}>
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input type="checkbox" disabled={!any} checked={!acc.full && acc.publish} onChange={(e) => set(topics, tabs, e.target.checked, acc.advanced)} className="h-3.5 w-3.5 accent-blue-600" />
-          เผยแพร่เองได้ (ไม่ติ๊ก = บันทึกร่างแล้วส่งให้หัวหน้าเผยแพร่)
+          {t("เผยแพร่เองได้ (ไม่ติ๊ก = บันทึกร่างแล้วส่งให้หัวหน้าเผยแพร่)", "Can publish (unticked = save draft and send to a lead to publish)")}
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input type="checkbox" disabled={!topics.length} checked={!acc.full && acc.advanced} onChange={(e) => set(topics, tabs, acc.publish, e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />
-          โชว์การตั้งค่าละเอียด (ไม่ติ๊ก = แบบง่าย)
+          {t("โชว์การตั้งค่าละเอียด (ไม่ติ๊ก = แบบง่าย)", "Show advanced settings (unticked = simple)")}
         </label>
       </div>
     </div>
@@ -135,10 +138,10 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
 /** สรุปบรรทัดเดียวของแถว */
 function designSummary(has: (k: string) => boolean): { text: string; tone: string } {
   const acc = designAccess(has);
-  if (acc.full) return { text: "แก้ได้ทุกหัวข้อ", tone: "text-blue-700" };
-  if (!acc.topics.length && !acc.tabs.length) return { text: "ไม่ได้แก้หน้าดีไซน์", tone: "text-slate-400" };
+  if (acc.full) return { text: tr("แก้ได้ทุกหัวข้อ", "Can edit all topics"), tone: "text-blue-700" };
+  if (!acc.topics.length && !acc.tabs.length) return { text: tr("ไม่ได้แก้หน้าดีไซน์", "No Design editing"), tone: "text-slate-400" };
   return {
-    text: `แก้ได้: ${[...acc.topics.map(topicLabel), ...acc.tabs.map((t) => `แท็บ${DESIGN_TAB_TOPIC_DEFS[t].label}`)].join(", ")} · ${acc.publish ? "เผยแพร่เองได้" : "ส่งให้หัวหน้าเผยแพร่"}${acc.advanced ? "" : " · แบบง่าย"}`,
+    text: `${tr("แก้ได้", "Can edit")}: ${[...acc.topics.map(topicLabel), ...acc.tabs.map((x) => tr(`แท็บ${DESIGN_TAB_TOPIC_DEFS[x].label}`, `${DESIGN_TAB_TOPIC_DEFS[x].label} tab`))].join(", ")} · ${acc.publish ? tr("เผยแพร่เองได้", "can publish") : tr("ส่งให้หัวหน้าเผยแพร่", "sends to a lead to publish")}${acc.advanced ? "" : tr(" · แบบง่าย", " · simple")}`,
     tone: "text-amber-800",
   };
 }
@@ -152,6 +155,7 @@ const effOf = (role: Set<string> | undefined, ov: Record<string, Mode> | undefin
 
 export function WebsiteAccessSettings() {
   const toast = useToast();
+  const t = useT();
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [roles0, setRoles0] = useState<RoleSets>({});
@@ -165,7 +169,7 @@ export function WebsiteAccessSettings() {
   const [topicsOpen, setTopicsOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const j = await apiFetch("/api/website/access").then((r) => r.json()).catch(() => ({ error: "โหลดไม่สำเร็จ" }));
+    const j = await apiFetch("/api/website/access").then((r) => r.json()).catch(() => ({ error: tr("โหลดไม่สำเร็จ", "Failed to load") }));
     if (j.error) return setErr(j.error);
     const d = j as Data;
     const rs: RoleSets = {};
@@ -250,12 +254,12 @@ export function WebsiteAccessSettings() {
       }).then((r) => r.json());
       if (j.error) setSaveErr(j.error);
       else {
-        toast.success("บันทึกสิทธิ์เว็บไซต์แล้ว — มีผลภายใน ~1 นาที (คนนั้นรีเฟรชหน้า)");
+        toast.success(t("บันทึกสิทธิ์เว็บไซต์แล้ว — มีผลภายใน ~1 นาที (คนนั้นรีเฟรชหน้า)", "Website permissions saved — takes effect within ~1 minute (that person refreshes the page)"));
         setSavedAt(new Date());
       }
       await load();
     } catch {
-      setSaveErr("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง");
+      setSaveErr(t("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", "Save failed, please try again"));
     } finally {
       setSaving(false);
     }
@@ -281,9 +285,9 @@ export function WebsiteAccessSettings() {
           onClick={() => onSet?.(nextWebsiteLevel(g, lv))}
           className={`w-full min-w-[64px] rounded-md border px-1.5 py-1 text-xs ${nTopics ? "border-amber-300 bg-amber-50 text-amber-800" : LEVEL_CLS[lv]} ${onSet ? "hover:brightness-95" : "cursor-default opacity-80"}`}
           data-website-level={nTopics ? "topics" : lv}
-          title={nTopics ? "ดูได้ + แก้บางหัวข้อ (ตั้งที่ส่วน “หน้าดีไซน์แบบง่าย” ด้านล่าง)" : undefined}
+          title={nTopics ? t("ดูได้ + แก้บางหัวข้อ (ตั้งที่ส่วน “หน้าดีไซน์แบบง่าย” ด้านล่าง)", "View + edit some topics (set in “Simple design page” below)") : undefined}
         >
-          {nTopics ? `แก้บางหัวข้อ (${nTopics})` : WEBSITE_LEVEL_LABEL[lv]}
+          {nTopics ? t(`แก้บางหัวข้อ (${nTopics})`, `Some topics (${nTopics})`) : WEBSITE_LEVEL_LABEL[lv]}
         </button>
       </td>
     );
@@ -292,7 +296,7 @@ export function WebsiteAccessSettings() {
     const on = has(websiteShopPerm(s.slug));
     return (
       <td key={s.id} className="px-1 py-1 text-center">
-        <input type="checkbox" checked={on} disabled={!onSet} onChange={(e) => onSet?.(e.target.checked)} className="h-4 w-4 accent-blue-600" aria-label={`เข้าร้าน ${s.name}`} />
+        <input type="checkbox" checked={on} disabled={!onSet} onChange={(e) => onSet?.(e.target.checked)} className="h-4 w-4 accent-blue-600" aria-label={t(`เข้าร้าน ${s.name}`, `Access shop ${s.name}`)} />
       </td>
     );
   };
@@ -307,8 +311,8 @@ export function WebsiteAccessSettings() {
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 space-y-2">
         <p>
-          กดช่องเพื่อสลับ <b className="font-medium">ไม่เห็น → ดูได้ → แก้ได้</b> · ติ๊กร้านที่เข้าได้ · <b className="font-medium">ตำแหน่ง</b> = ค่าเริ่มของทุกคนในตำแหน่งนั้น ·{" "}
-          <b className="font-medium">รายคน</b> = ยกเว้นเฉพาะคน (ชนะตำแหน่ง)
+          {t("กดช่องเพื่อสลับ", "Click a cell to cycle")} <b className="font-medium">{t("ไม่เห็น → ดูได้ → แก้ได้", "Hidden → View → Edit")}</b> · {t("ติ๊กร้านที่เข้าได้", "tick the shops they can open")} · <b className="font-medium">{t("ตำแหน่ง", "Role")}</b> = {t("ค่าเริ่มของทุกคนในตำแหน่งนั้น", "default for everyone in that role")} ·{" "}
+          <b className="font-medium">{t("รายคน", "Per person")}</b> = {t("ยกเว้นเฉพาะคน (ชนะตำแหน่ง)", "individual exception (overrides role)")}
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
           {WEBSITE_GROUPS.map((g) => (
@@ -317,14 +321,14 @@ export function WebsiteAccessSettings() {
             </span>
           ))}
         </div>
-        <p className="text-xs text-slate-400">ผู้ดูแลระบบได้ทุกอย่างเสมอ · ไม่เห็นกลุ่มไหนเลย = เมนูเว็บไซต์หายไปเอง · บันทึกแล้วมีผลภายใน ~1 นาที (คนนั้นรีเฟรชหน้า)</p>
+        <p className="text-xs text-slate-400">{t("ผู้ดูแลระบบได้ทุกอย่างเสมอ · ไม่เห็นกลุ่มไหนเลย = เมนูเว็บไซต์หายไปเอง · บันทึกแล้วมีผลภายใน ~1 นาที (คนนั้นรีเฟรชหน้า)", "Admins can always do everything · No visible groups = the Website menu disappears · Changes take effect within ~1 minute (that person refreshes the page)")}</p>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-sm" data-website-access-table>
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
-              <th className="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-left font-medium">ใคร</th>
+              <th className="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-left font-medium">{t("ใคร", "Who")}</th>
               {WEBSITE_GROUPS.map((g) => (
                 <th key={g.key} className="px-1 py-2 font-medium" title={g.hint}>
                   {g.icon} {g.label}
@@ -340,12 +344,12 @@ export function WebsiteAccessSettings() {
           <tbody>
             <tr className="border-b border-slate-100 bg-slate-50/50">
               <td colSpan={1 + WEBSITE_GROUPS.length + shops.length} className="px-3 pt-2 pb-1 text-[11px] font-medium text-slate-400">
-                ตามตำแหน่ง{!data.canRoles && " (ดูอย่างเดียว — แก้ต้องมีสิทธิ์จัดการตำแหน่ง)"}
+                {t("ตามตำแหน่ง", "By role")}{!data.canRoles && t(" (ดูอย่างเดียว — แก้ต้องมีสิทธิ์จัดการตำแหน่ง)", " (view only — editing needs role-management permission)")}
               </td>
             </tr>
             <tr className="border-b border-slate-100">
               <td className="sticky left-0 z-10 bg-white px-3 py-1.5">
-                ผู้ดูแลระบบ <span className="text-[11px] text-slate-400">ทุกอย่างเสมอ</span>
+                {t("ผู้ดูแลระบบ", "Admin")} <span className="text-[11px] text-slate-400">{t("ทุกอย่างเสมอ", "always everything")}</span>
               </td>
               {rowCells(() => true, null, null)}
             </tr>
@@ -358,7 +362,7 @@ export function WebsiteAccessSettings() {
                   <tr key={r.key} className="border-b border-slate-100" data-role-row={r.key}>
                     <td className="sticky left-0 z-10 bg-white px-3 py-1.5">
                       {r.label}
-                      <span className="ml-1 text-[11px] text-slate-400">{data.users.filter((u) => u.role === r.key && u.active).length} คน</span>
+                      <span className="ml-1 text-[11px] text-slate-400">{t(`${data.users.filter((u) => u.role === r.key && u.active).length} คน`, `${data.users.filter((u) => u.role === r.key && u.active).length} people`)}</span>
                     </td>
                     {rowCells(
                       has,
@@ -371,7 +375,7 @@ export function WebsiteAccessSettings() {
 
             <tr className="border-b border-slate-100 bg-slate-50/50">
               <td colSpan={1 + WEBSITE_GROUPS.length + shops.length} className="px-3 pt-2 pb-1 text-[11px] font-medium text-slate-400">
-                ยกเว้นรายคน
+                {t("ยกเว้นรายคน", "Per-person exceptions")}
               </td>
             </tr>
             {people.map((id) => {
@@ -388,15 +392,15 @@ export function WebsiteAccessSettings() {
                       <span className="shrink-0 text-[11px] text-slate-400">{roleLabel(u.role)}</span>
                     </div>
                     <div className="flex items-center gap-2 text-[11px]">
-                      <span className={n ? "text-amber-700" : "text-slate-400"}>{n ? `ต่างจากตำแหน่ง ${n} ข้อ` : "ตามตำแหน่ง"}</span>
+                      <span className={n ? "text-amber-700" : "text-slate-400"}>{n ? t(`ต่างจากตำแหน่ง ${n} ข้อ`, `${n} differences from role`) : t("ตามตำแหน่ง", "Same as role")}</span>
                       {n > 0 && (
                         <button type="button" onClick={() => resetUser(id)} className="text-slate-500 hover:text-blue-600">
-                          ↺ ตามตำแหน่ง
+                          {t("↺ ตามตำแหน่ง", "↺ Reset to role")}
                         </button>
                       )}
                       {n === 0 && (
                         <button type="button" onClick={() => setPeople((p) => p.filter((x) => x !== id))} className="text-slate-400 hover:text-red-600">
-                          เอาออก
+                          {t("เอาออก", "Remove")}
                         </button>
                       )}
                     </div>
@@ -410,11 +414,11 @@ export function WebsiteAccessSettings() {
                 <div className="max-w-xs">
                   <UserPicker
                     value={null}
-                    placeholder="＋ เพิ่มคนที่ต้องตั้งต่างจากตำแหน่ง..."
+                    placeholder={t("＋ เพิ่มคนที่ต้องตั้งต่างจากตำแหน่ง...", "＋ Add a person with different settings from their role...")}
                     onChange={(v) => {
                       const id = v?.id;
                       if (!id) return;
-                      if (userById.get(id)?.role === "admin") return toast.info("ผู้ดูแลระบบได้ทุกอย่างเสมอ ไม่ต้องตั้ง");
+                      if (userById.get(id)?.role === "admin") return toast.info(t("ผู้ดูแลระบบได้ทุกอย่างเสมอ ไม่ต้องตั้ง", "Admins can always do everything — no need to set"));
                       setPeople((p) => (p.includes(id) ? p : [...p, id]));
                     }}
                   />
@@ -428,14 +432,14 @@ export function WebsiteAccessSettings() {
       {/* 👷 หน้าดีไซน์แบบง่ายสำหรับพนักงาน — แก้ได้บางหัวข้อ */}
       <div className="rounded-xl border border-slate-200 bg-white" data-design-topics>
         <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-medium text-slate-800">หน้าดีไซน์แบบง่ายสำหรับพนักงาน — เลือกหัวข้อที่แก้ได้</p>
+          <p className="text-sm font-medium text-slate-800">{t("หน้าดีไซน์แบบง่ายสำหรับพนักงาน — เลือกหัวข้อที่แก้ได้", "Simple design page for staff — choose editable topics")}</p>
           <p className="text-xs text-slate-500">
-            ติ๊กหัวข้อแล้วคนนั้นเปิดแท็บดีไซน์จะเห็นแค่หัวข้อนั้น · บันทึกได้เฉพาะหัวข้อที่ติ๊ก (ระบบกันฝั่งเซิร์ฟเวอร์) · ไม่ให้เผยแพร่เอง = แก้แล้วกด “ส่งให้หัวหน้าตรวจ” (เด้งกระดิ่งถึงคนที่แก้ดีไซน์ได้ทุกหัวข้อ)
+            {t("ติ๊กหัวข้อแล้วคนนั้นเปิดแท็บดีไซน์จะเห็นแค่หัวข้อนั้น · บันทึกได้เฉพาะหัวข้อที่ติ๊ก (ระบบกันฝั่งเซิร์ฟเวอร์) · ไม่ให้เผยแพร่เอง = แก้แล้วกด “ส่งให้หัวหน้าตรวจ” (เด้งกระดิ่งถึงคนที่แก้ดีไซน์ได้ทุกหัวข้อ)", "Tick topics and that person only sees those topics in the Design tab · Only ticked topics can be saved (enforced on the server) · No publish = they edit, then click “Send to lead for review” (notifies people who can edit all design topics)")}
           </p>
         </div>
         <div className="divide-y divide-slate-100">
           {[
-            ...roles.filter((r) => r.key !== "admin").map((r) => ({ id: `role:${r.key}`, name: r.label, sub: "ตำแหน่ง", has: (k: string) => !!roleSets[r.key]?.has(k), patch: data.canRoles ? (keys: Record<string, boolean>) => patchRole(r.key, keys) : null })),
+            ...roles.filter((r) => r.key !== "admin").map((r) => ({ id: `role:${r.key}`, name: r.label, sub: t("ตำแหน่ง", "Role"), has: (k: string) => !!roleSets[r.key]?.has(k), patch: data.canRoles ? (keys: Record<string, boolean>) => patchRole(r.key, keys) : null })),
             ...people.flatMap((id) => {
               const u = userById.get(id);
               return u ? [{ id: `user:${id}`, name: u.name, sub: roleLabel(u.role), has: effOf(roleSets[u.role ?? ""], ov[id]), patch: (keys: Record<string, boolean>) => patchUser(id, keys) }] : [];
@@ -451,10 +455,10 @@ export function WebsiteAccessSettings() {
                   <span className={`min-w-0 flex-1 truncate text-xs ${sum.tone}`}>{sum.text}</span>
                   {row.patch ? (
                     <button type="button" onClick={() => setTopicsOpen(open ? null : row.id)} className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-700">
-                      {open ? "ปิด" : "ตั้งหัวข้อ"}
+                      {open ? t("ปิด", "Close") : t("ตั้งหัวข้อ", "Set topics")}
                     </button>
                   ) : (
-                    <span className="text-[11px] text-slate-400">ดูอย่างเดียว</span>
+                    <span className="text-[11px] text-slate-400">{t("ดูอย่างเดียว", "View only")}</span>
                   )}
                 </div>
                 {open && row.patch && (
@@ -466,7 +470,7 @@ export function WebsiteAccessSettings() {
             );
           })}
         </div>
-        <p className="px-4 py-2 text-[11px] text-slate-400">ตั้งรายคน: เพิ่มคนในตารางด้านบน (“＋ เพิ่มคนที่ต้องตั้งต่างจากตำแหน่ง”) แล้วเขาจะขึ้นในรายการนี้</p>
+        <p className="px-4 py-2 text-[11px] text-slate-400">{t("ตั้งรายคน: เพิ่มคนในตารางด้านบน (“＋ เพิ่มคนที่ต้องตั้งต่างจากตำแหน่ง”) แล้วเขาจะขึ้นในรายการนี้", "Per person: add people in the table above (“＋ Add a person…”) and they will appear in this list")}</p>
       </div>
 
       <SaveBar
@@ -476,7 +480,7 @@ export function WebsiteAccessSettings() {
         onDiscard={discard}
         error={saveErr}
         savedAt={savedAt}
-        note={dirty ? `${diff.roleChanges.length + diff.userChanges.length} จุดที่เปลี่ยน` : undefined}
+        note={dirty ? t(`${diff.roleChanges.length + diff.userChanges.length} จุดที่เปลี่ยน`, `${diff.roleChanges.length + diff.userChanges.length} changes`) : undefined}
       />
     </div>
   );

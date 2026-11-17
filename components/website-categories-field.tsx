@@ -23,6 +23,7 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { useToast } from "@/components/toast";
 import { categoryTree, categoryPathLabel, topCategories } from "@/lib/website-category-tree";
+import { useT } from "@/components/i18n";
 
 type Cat = { key: string; label: string; parent?: string | null; imageKey?: string | null; icon?: string };
 
@@ -53,6 +54,7 @@ export function WebsiteCategoriesField({
   fieldKey: string;
 }) {
   const toast = useToast();
+  const t = useT();
   // อ่านค่าล่าสุดเสมอ (อัปโหลดใช้เวลา ระหว่างนั้นอาจแก้อย่างอื่น)
   const itemRef = useRef(item);
   itemRef.current = item;
@@ -118,8 +120,8 @@ export function WebsiteCategoriesField({
   };
   const addCycle = (key: string, r2: string) => {
     const cur = cyclesOf(itemRef.current)[key] ?? [];
-    if (cur.includes(r2)) return toast.info("รูปนี้อยู่ในรายการแล้ว");
-    if (cur.length >= CYCLE_MAX) return toast.warning(`ใส่ได้หมวดละ ${CYCLE_MAX} รูป`);
+    if (cur.includes(r2)) return toast.info(t("รูปนี้อยู่ในรายการแล้ว", "This image is already in the list"));
+    if (cur.length >= CYCLE_MAX) return toast.warning(t(`ใส่ได้หมวดละ ${CYCLE_MAX} รูป`, `Up to ${CYCLE_MAX} images per category`));
     setCycle(key, [...cur, r2]);
   };
   /** รูปที่เลือกมา → ลงที่เป้าหมายตอนนี้ (รูปบนการ์ด / รูปวน) */
@@ -128,15 +130,15 @@ export function WebsiteCategoriesField({
 
   const upload = async (key: string, file: File | undefined) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) return toast.error("เลือกได้เฉพาะไฟล์รูป");
+    if (!file.type.startsWith("image/")) return toast.error(t("เลือกได้เฉพาะไฟล์รูป", "Image files only"));
     setBusy(key);
     try {
       const up = await uploadToLibrary(file);
       const cycle = targetRef.current === "cycle";
       applyPick(key, up.key);
-      toast.success(cycle ? "เพิ่มรูปที่วนแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ" : "ตั้งรูปบนการ์ดแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ");
+      toast.success(cycle ? t("เพิ่มรูปที่วนแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ", "Hover image added — Save / Publish to go live") : t("ตั้งรูปบนการ์ดแล้ว — กดบันทึก/เผยแพร่เพื่อขึ้นเว็บ", "Card image set — Save / Publish to go live"));
     } catch (e) {
-      toast.error((e as Error).message || "อัปโหลดไม่สำเร็จ");
+      toast.error((e as Error).message || t("อัปโหลดไม่สำเร็จ", "Upload failed"));
     } finally {
       setBusy(null);
       if (fileRef.current) fileRef.current.value = "";
@@ -150,8 +152,8 @@ export function WebsiteCategoriesField({
   }, {
     accept: "image/",
     disabled: !!busy,
-    onReject: () => toast.error("ลากมาได้เฉพาะไฟล์รูป"),
-    onBusy: () => toast.warning("กำลังอัปโหลดอยู่ — รอสักครู่"),
+    onReject: () => toast.error(t("ลากมาได้เฉพาะไฟล์รูป", "You can only drop image files")),
+    onBusy: () => toast.warning(t("กำลังอัปโหลดอยู่ — รอสักครู่", "Uploading — please wait")),
   });
   const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => setCats(moveItem(value, from, to)));
 
@@ -164,21 +166,21 @@ export function WebsiteCategoriesField({
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <span className="flex-1 text-[11px] text-slate-500">
-          {value.length ? `${value.length} หมวด · เรียงตามนี้บนเว็บ` : `ยังไม่เลือก = โชว์ทุกหมวดหลัก (${tops.length})`}
+          {value.length ? t(`${value.length} หมวด · เรียงตามนี้บนเว็บ`, `${value.length} categories · shown in this order`) : t(`ยังไม่เลือก = โชว์ทุกหมวดหลัก (${tops.length})`, `None picked = show all main categories (${tops.length})`)}
         </span>
         <button type="button" onClick={() => setPickOpen(true)} disabled={!categories.length} className="rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50">
-          ＋ เลือกหมวด
+          {t("＋ เลือกหมวด", "＋ Pick categories")}
         </button>
       </div>
 
-      {!categories.length && <p className="text-xs text-slate-400">ร้านนี้ยังไม่มีหมวด — ตั้งที่แท็บ 📂 หมวดหมู่</p>}
+      {!categories.length && <p className="text-xs text-slate-400">{t("ร้านนี้ยังไม่มีหมวด — ตั้งที่แท็บ 📂 หมวดหมู่", "This shop has no categories yet — set them in the 📂 Categories tab")}</p>}
 
       {/* ยังไม่เลือก: บอกว่าจะโชว์อะไร + ทางลัดเลือกหมวดหลักทั้งหมดมาจัดต่อ (เรียง/ตั้งรูป) */}
       {!value.length && tops.length > 0 && (
         <div className="rounded-lg border border-dashed border-slate-200 px-2.5 py-2">
           <p className="text-[11px] text-slate-500 leading-relaxed">{tops.map((c) => c.label).join(" · ")}</p>
           <button type="button" onClick={() => setCats(tops.map((c) => c.key))} className="mt-1 text-[11px] text-blue-600 hover:underline">
-            เลือกหมวดหลักทั้งหมดมาจัดเอง (เรียงลำดับ / ตั้งรูป)
+            {t("เลือกหมวดหลักทั้งหมดมาจัดเอง (เรียงลำดับ / ตั้งรูป)", "Pick all main categories to arrange yourself (order / images)")}
           </button>
         </div>
       )}
@@ -192,7 +194,7 @@ export function WebsiteCategoriesField({
             const isOpen = openKey === k;
             return (
               <div key={k} {...rowProps(i)} {...drop.zone(k)} className={`relative rounded-lg border bg-white ${isOpen ? "border-blue-300" : "border-slate-200"} ${rowCls(i)}`}>
-                <FileDropHint show={drop.over === k} label={`วางรูปเป็นรูปบนการ์ด ${c?.label ?? k}`} />
+                <FileDropHint show={drop.over === k} label={t(`วางรูปเป็นรูปบนการ์ด ${c?.label ?? k}`, `Drop to set the card image for ${c?.label ?? k}`)} />
                 <div className="flex items-center gap-1.5 px-1.5 py-1.5">
                   <DragHandle {...handleProps(i)} />
                   <span className="w-8 h-8 shrink-0 rounded-md bg-slate-100 overflow-hidden flex items-center justify-center text-sm">
@@ -216,26 +218,26 @@ export function WebsiteCategoriesField({
                         className="w-full rounded border border-blue-400 px-1.5 py-0.5 text-[13px] focus:outline-none"
                       />
                     ) : (
-                      <span className={`block truncate text-[13px] ${c ? "text-slate-800" : "text-red-600"}`}>{c ? names[k] || c.label : `${k} (หมวดถูกลบแล้ว)`}</span>
+                      <span className={`block truncate text-[13px] ${c ? "text-slate-800" : "text-red-600"}`}>{c ? names[k] || c.label : t(`${k} (หมวดถูกลบแล้ว)`, `${k} (category deleted)`)}</span>
                     )}
                     {c && names[k] && editKey !== k ? (
                       <span className="block truncate text-[10px] text-slate-400">
-                        ชื่อเดิม: {c.label}{" "}
+                        {t("ชื่อเดิม:", "Original name:")} {c.label}{" "}
                         <button type="button" onClick={() => setName(k, "")} className="text-blue-600 hover:underline">
-                          ↺ ใช้ชื่อเดิม
+                          {t("↺ ใช้ชื่อเดิม", "↺ Use original name")}
                         </button>
                       </span>
                     ) : (
-                      c?.parent && <span className="block truncate text-[10px] text-slate-400">ใน {byKey.get(c.parent)?.label ?? c.parent}</span>
+                      c?.parent && <span className="block truncate text-[10px] text-slate-400">{t("ใน", "In")} {byKey.get(c.parent)?.label ?? c.parent}</span>
                     )}
                   </span>
-                  {own && <span className="shrink-0 rounded bg-violet-100 px-1.5 text-[10px] text-violet-700">รูปเอง</span>}
-                  {cycleOn && (cycles[k]?.length ?? 0) > 0 && <span className="shrink-0 rounded bg-sky-100 px-1.5 text-[10px] text-sky-700" title="รูปที่วนเมื่อเอาเมาส์วาง">🔁 {cycles[k].length}</span>}
+                  {own && <span className="shrink-0 rounded bg-violet-100 px-1.5 text-[10px] text-violet-700">{t("รูปเอง", "Custom image")}</span>}
+                  {cycleOn && (cycles[k]?.length ?? 0) > 0 && <span className="shrink-0 rounded bg-sky-100 px-1.5 text-[10px] text-sky-700" title={t("รูปที่วนเมื่อเอาเมาส์วาง", "Images cycled on hover")}>🔁 {cycles[k].length}</span>}
                   {c && (
                     <button
                       type="button"
                       onClick={() => setEditKey(editKey === k ? null : k)}
-                      title="แก้ชื่อที่โชว์ของหมวดนี้ (เฉพาะ Section นี้ · ว่าง = ชื่อเดิม)"
+                      title={t("แก้ชื่อที่โชว์ของหมวดนี้ (เฉพาะ Section นี้ · ว่าง = ชื่อเดิม)", "Edit this category's display name (this section only · empty = original name)")}
                       className={`shrink-0 rounded-md px-1.5 py-0.5 text-sm ${names[k] ? "text-blue-600" : "text-slate-500"} hover:bg-slate-100`}
                     >
                       ✏️
@@ -246,13 +248,13 @@ export function WebsiteCategoriesField({
                       type="button"
                       onClick={() => setOpenKey(isOpen ? null : k)}
                       aria-expanded={isOpen}
-                      title={cycleOn ? "ตั้งรูปบนการ์ด + รูปที่วนของหมวดนี้ (เฉพาะ Section นี้)" : "ตั้งรูปบนการ์ดของหมวดนี้ (เฉพาะ Section นี้)"}
+                      title={cycleOn ? t("ตั้งรูปบนการ์ด + รูปที่วนของหมวดนี้ (เฉพาะ Section นี้)", "Set the card image + hover images for this category (this section only)") : t("ตั้งรูปบนการ์ดของหมวดนี้ (เฉพาะ Section นี้)", "Set the card image for this category (this section only)")}
                       className={`shrink-0 rounded-md px-1.5 py-0.5 text-sm ${isOpen ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}
                     >
                       🖼
                     </button>
                   )}
-                  <button type="button" onClick={() => setCats(value.filter((x) => x !== k))} title="เอาหมวดนี้ออกจาก Section" className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600">
+                  <button type="button" onClick={() => setCats(value.filter((x) => x !== k))} title={t("เอาหมวดนี้ออกจาก Section", "Remove this category from the section")} className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600">
                     ✕
                   </button>
                 </div>
@@ -279,21 +281,21 @@ export function WebsiteCategoriesField({
                         }}
                         className={btnCls}
                       >
-                        {busy === k && targetRef.current === "card" ? "กำลังอัปโหลด…" : "⬆ อัปโหลด (หรือลากรูปมาวาง)"}
+                        {busy === k && targetRef.current === "card" ? t("กำลังอัปโหลด…", "Uploading…") : t("⬆ อัปโหลด (หรือลากรูปมาวาง)", "⬆ Upload (or drag an image here)")}
                       </button>
                       <button type="button" disabled={!!busy} onClick={() => ((targetRef.current = "card"), setLibFor(k))} className={btnCls}>
-                        🖼 เลือกจากคลังรูป
+                        {t("🖼 เลือกจากคลังรูป", "🖼 Pick from image library")}
                       </button>
                       <button type="button" disabled={!!busy} onClick={() => ((targetRef.current = "card"), setChooserFor(k))} className={btnCls}>
-                        🛍 เลือกจากรูปสินค้าในหมวด
+                        {t("🛍 เลือกจากรูปสินค้าในหมวด", "🛍 Pick from product images in this category")}
                       </button>
                       {own && (
                         <button type="button" onClick={() => setImg(k, null)} className="text-[11px] text-slate-500 hover:text-blue-600">
-                          ↺ ใช้รูปหมวดเดิม{c.imageKey ? "" : " (ยังไม่มีรูป = ไอคอน)"}
+                          {t("↺ ใช้รูปหมวดเดิม", "↺ Use original category image")}{c.imageKey ? "" : t(" (ยังไม่มีรูป = ไอคอน)", " (no image yet = icon)")}
                         </button>
                       )}
                       <p className="text-[10px] text-slate-400 leading-snug">
-                        {own ? "รูปนี้ใช้เฉพาะ Section นี้" : c.imageKey ? "ตอนนี้ใช้รูปหมวดจากแท็บ 📂 หมวดหมู่" : "หมวดนี้ยังไม่มีรูป — ไม่ตั้ง = ใช้ไอคอน"}
+                        {own ? t("รูปนี้ใช้เฉพาะ Section นี้", "This image is used in this section only") : c.imageKey ? t("ตอนนี้ใช้รูปหมวดจากแท็บ 📂 หมวดหมู่", "Currently using the category image from the 📂 Categories tab") : t("หมวดนี้ยังไม่มีรูป — ไม่ตั้ง = ใช้ไอคอน", "This category has no image — not set = use the icon")}
                       </p>
                     </div>
                   </div>
@@ -302,7 +304,7 @@ export function WebsiteCategoriesField({
                 {/* 🔁 รูปที่วนเมื่อเอาเมาส์วาง (หมวดนี้) */}
                 {isOpen && c && cycleOn && (
                   <div className="border-t border-slate-100 px-2 py-2">
-                    <p className="text-[11px] font-medium text-slate-600">🔁 รูปที่วนเมื่อเอาเมาส์วาง{(cycles[k]?.length ?? 0) > 0 ? ` (${cycles[k].length}/${CYCLE_MAX})` : ""}</p>
+                    <p className="text-[11px] font-medium text-slate-600">🔁 {t("รูปที่วนเมื่อเอาเมาส์วาง", "Images cycled on hover")}{(cycles[k]?.length ?? 0) > 0 ? ` (${cycles[k].length}/${CYCLE_MAX})` : ""}</p>
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {(cycles[k] ?? []).map((r, j, list) => (
                         <span key={r} className="group relative h-12 w-12 overflow-hidden rounded-md bg-slate-100">
@@ -312,7 +314,7 @@ export function WebsiteCategoriesField({
                             <button
                               type="button"
                               onClick={() => setCycle(k, moveItem(list, j, j - 1))}
-                              title="เลื่อนไปก่อน"
+                              title={t("เลื่อนไปก่อน", "Move earlier")}
                               className="absolute bottom-0 left-0 rounded-tr bg-white/90 px-1 text-[10px] leading-4 text-slate-600 opacity-0 group-hover:opacity-100"
                             >
                               ◀
@@ -321,7 +323,7 @@ export function WebsiteCategoriesField({
                           <button
                             type="button"
                             onClick={() => setCycle(k, list.filter((x) => x !== r))}
-                            title="เอารูปนี้ออก"
+                            title={t("เอารูปนี้ออก", "Remove this image")}
                             className="absolute right-0 top-0 rounded-bl bg-white/90 px-1 text-[10px] leading-4 text-red-600 opacity-0 group-hover:opacity-100"
                           >
                             ✕
@@ -338,36 +340,36 @@ export function WebsiteCategoriesField({
                               uploadFor.current = k;
                               fileRef.current?.click();
                             }}
-                            title="อัปโหลดรูป"
+                            title={t("อัปโหลดรูป", "Upload image")}
                             className="flex h-12 w-12 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 text-[10px] leading-tight text-slate-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50"
                           >
-                            {busy === k && targetRef.current === "cycle" ? "…" : <><span className="text-sm">⬆</span>อัปโหลด</>}
+                            {busy === k && targetRef.current === "cycle" ? "…" : <><span className="text-sm">⬆</span>{t("อัปโหลด", "Upload")}</>}
                           </button>
                           <button
                             type="button"
                             disabled={!!busy}
                             onClick={() => ((targetRef.current = "cycle"), setLibFor(k))}
-                            title="เลือกจากคลังรูป"
+                            title={t("เลือกจากคลังรูป", "Pick from image library")}
                             className="flex h-12 w-12 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 text-[10px] leading-tight text-slate-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50"
                           >
-                            <span className="text-sm">🖼</span>คลัง
+                            <span className="text-sm">🖼</span>{t("คลัง", "Library")}
                           </button>
                           <button
                             type="button"
                             disabled={!!busy}
                             onClick={() => ((targetRef.current = "cycle"), setChooserFor(k))}
-                            title="เลือกจากรูปสินค้าในหมวด"
+                            title={t("เลือกจากรูปสินค้าในหมวด", "Pick from product images in this category")}
                             className="flex h-12 w-12 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 text-[10px] leading-tight text-slate-500 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50"
                           >
-                            <span className="text-sm">🛍</span>สินค้า
+                            <span className="text-sm">🛍</span>{t("สินค้า", "Products")}
                           </button>
                         </>
                       )}
                     </div>
                     <p className="mt-1 text-[10px] leading-snug text-slate-400">
                       {(cycles[k]?.length ?? 0) > 0
-                        ? "เริ่มจากรูปบนการ์ด แล้ววนตามลำดับนี้ · ◀ = เลื่อนไปก่อน"
-                        : "ยังไม่ตั้ง = ใช้รูปสินค้าในหมวด 4 รูปแรกอัตโนมัติ"}
+                        ? t("เริ่มจากรูปบนการ์ด แล้ววนตามลำดับนี้ · ◀ = เลื่อนไปก่อน", "Starts with the card image, then cycles in this order · ◀ = move earlier")
+                        : t("ยังไม่ตั้ง = ใช้รูปสินค้าในหมวด 4 รูปแรกอัตโนมัติ", "Not set = automatically use the first 4 product images in the category")}
                     </p>
                   </div>
                 )}
@@ -386,7 +388,7 @@ export function WebsiteCategoriesField({
           open
           onClose={() => setLibFor(null)}
           typeFilter="image"
-          title={`${targetRef.current === "cycle" ? "เพิ่มรูปที่วน" : "เลือกรูปบนการ์ด"} — ${labelOf(libFor)}`}
+          title={`${targetRef.current === "cycle" ? t("เพิ่มรูปที่วน", "Add hover image") : t("เลือกรูปบนการ์ด", "Pick card image")} — ${labelOf(libFor)}`}
           onSelect={(rows) => {
             const key = rows[0]?.r2_key;
             if (key) applyPick(libFor, key);
@@ -398,7 +400,7 @@ export function WebsiteCategoriesField({
         open={!!chooserFor}
         onClose={() => setChooserFor(null)}
         shopSlug={shopSlug}
-        title={`${targetRef.current === "cycle" ? "เพิ่มรูปที่วน" : "รูปบนการ์ด"} — ${chooserFor ? labelOf(chooserFor) : ""}`}
+        title={`${targetRef.current === "cycle" ? t("เพิ่มรูปที่วน", "Add hover image") : t("รูปบนการ์ด", "Card image")} — ${chooserFor ? labelOf(chooserFor) : ""}`}
         initialView="products"
         categoryKeys={chooserFor ? [chooserFor] : undefined}
         categoryLabel={chooserFor ? byKey.get(chooserFor)?.label : undefined}
@@ -427,51 +429,52 @@ function CategoryPickModal({
   onToggle: (key: string) => void;
   onSet: (keys: string[]) => void;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const rows = useMemo(() => categoryTree(categories), [categories]);
-  const t = q.trim().toLowerCase();
-  const shown = t ? rows.filter((r) => `${r.cat.label} ${r.cat.key}`.toLowerCase().includes(t)) : rows;
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? rows.filter((r) => `${r.cat.label} ${r.cat.key}`.toLowerCase().includes(needle)) : rows;
   const tops = rows.filter((r) => r.depth === 0).map((r) => r.cat.key);
   return (
     <ERPModal
       open={open}
       onClose={onClose}
-      title="＋ เลือกหมวดที่โชว์"
+      title={t("＋ เลือกหมวดที่โชว์", "＋ Pick categories to show")}
       size="sm"
       defaultExpanded={false}
       footer={
         <div className="flex w-full items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">{value.length ? `เลือกแล้ว ${value.length} หมวด` : "ยังไม่เลือก = ทุกหมวดหลัก"}</span>
+          <span className="text-xs text-slate-500">{value.length ? t(`เลือกแล้ว ${value.length} หมวด`, `${value.length} categories picked`) : t("ยังไม่เลือก = ทุกหมวดหลัก", "None picked = all main categories")}</span>
           <button type="button" onClick={onClose} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">
-            เสร็จ
+            {t("เสร็จ", "Done")}
           </button>
         </div>
       }
     >
       <div className="space-y-2">
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 ค้นหาหมวด" className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none" />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("🔍 ค้นหาหมวด", "🔍 Search categories")} className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none" />
         <div className="flex flex-wrap gap-2 text-[11px]">
           <button type="button" onClick={() => onSet([...value, ...tops.filter((k) => !value.includes(k))])} className="text-blue-600 hover:underline">
-            ติ๊กหมวดหลักทั้งหมด
+            {t("ติ๊กหมวดหลักทั้งหมด", "Tick all main categories")}
           </button>
           {value.length > 0 && (
             <button type="button" onClick={() => onSet([])} className="text-slate-500 hover:text-red-600">
-              ล้างที่เลือก (กลับไปโชว์ทุกหมวดหลัก)
+              {t("ล้างที่เลือก (กลับไปโชว์ทุกหมวดหลัก)", "Clear selection (back to all main categories)")}
             </button>
           )}
         </div>
         <div className="max-h-[55vh] overflow-y-auto rounded-lg border border-slate-100">
           {shown.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">ไม่พบหมวดที่ค้นหา</p>
+            <p className="py-6 text-center text-sm text-slate-400">{t("ไม่พบหมวดที่ค้นหา", "No matching categories")}</p>
           ) : (
             shown.map(({ cat, depth }) => {
               const i = value.indexOf(cat.key);
               return (
-                <label key={cat.key} className={`flex cursor-pointer items-center gap-2 border-b border-slate-50 py-1.5 pr-2 hover:bg-slate-50 ${depth && !t ? "pl-8" : "pl-2"}`}>
+                <label key={cat.key} className={`flex cursor-pointer items-center gap-2 border-b border-slate-50 py-1.5 pr-2 hover:bg-slate-50 ${depth && !needle ? "pl-8" : "pl-2"}`}>
                   <input type="checkbox" checked={i >= 0} onChange={() => onToggle(cat.key)} className="h-4 w-4 accent-blue-600" />
                   <span className={`flex-1 truncate ${depth ? "text-[13px] text-slate-600" : "text-sm font-medium text-slate-800"}`}>
-                    {depth && !t ? "↳ " : ""}
-                    {t && depth ? categoryPathLabel(categories, cat.key) : cat.label}
+                    {depth && !needle ? "↳ " : ""}
+                    {needle && depth ? categoryPathLabel(categories, cat.key) : cat.label}
                   </span>
                   {i >= 0 && <span className="shrink-0 rounded-full bg-blue-600 px-1.5 text-[10px] font-semibold text-white tabular-nums">{i + 1}</span>}
                 </label>

@@ -13,12 +13,15 @@ import { apiFetch } from "@/lib/api";
 import { WebsiteShopCard, type WebsiteShopCardData } from "@/components/website-shop-card";
 import Link from "next/link";
 import { useAuth } from "@/components/auth";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 export default function WebsiteIndexPage() {
   const [shops, setShops] = useState<WebsiteShopCardData[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const { can } = useAuth();
+  const t = useT();
 
   useEffect(() => {
     apiFetch("/api/website/shops")
@@ -27,7 +30,7 @@ export default function WebsiteIndexPage() {
         if (j.error) setErr(j.error);
         else setShops(j.shops ?? []);
       })
-      .catch(() => setErr("โหลดข้อมูลไม่สำเร็จ"))
+      .catch(() => setErr(tr("โหลดข้อมูลไม่สำเร็จ", "Failed to load data")))
       .finally(() => setLoading(false));
   }, []);
 
@@ -36,15 +39,15 @@ export default function WebsiteIndexPage() {
       <div className="max-w-5xl mx-auto px-5 py-6">
         <div className="mb-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🌐 เว็บไซต์</h1>
+            <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🌐 {t("เว็บไซต์", "Websites")}</h1>
             {can("admin.users") && (
               <Link href="/website/access" className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-600">
-                🔐 ใครทำอะไรได้
+                🔐 {t("ใครทำอะไรได้", "Who can do what")}
               </Link>
             )}
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            เลือกเว็บที่ต้องการจัดการ — แต่ละเว็บมีสินค้า การจับคู่ฟิลด์ และดีไซน์เป็นของตัวเอง
+            {t("เลือกเว็บที่ต้องการจัดการ — แต่ละเว็บมีสินค้า การจับคู่ฟิลด์ และดีไซน์เป็นของตัวเอง", "Pick a website to manage — each site has its own products, field mapping and design")}
           </p>
         </div>
 
@@ -58,7 +61,7 @@ export default function WebsiteIndexPage() {
           <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {err}</div>
         ) : !shops.length ? (
           <div className="rounded-2xl border border-dashed border-slate-300 py-16 text-center text-slate-400 text-sm">
-            ยังไม่มีเว็บร้านที่คุณเข้าได้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ
+            {t("ยังไม่มีเว็บร้านที่คุณเข้าได้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ", "No shop websites you can access yet — ask an admin for access")}
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -71,7 +74,7 @@ export default function WebsiteIndexPage() {
         {/* ลิงก์เว็บจริง (ถ้าตั้งโดเมนไว้) */}
         {shops.some((s) => s.domain) && (
           <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-medium text-slate-500 mb-2">เปิดเว็บจริง</p>
+            <p className="text-xs font-medium text-slate-500 mb-2">{t("เปิดเว็บจริง", "Open live site")}</p>
             <div className="flex flex-wrap gap-2">
               {shops
                 .filter((s) => s.domain)

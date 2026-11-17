@@ -12,6 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ConfirmDialog } from "@/components/modal";
 import { askLeaveUnsaved } from "@/components/modal/ask-dialog";
 import { WebsiteBuilder, type Selection } from "@/components/website-builder";
@@ -22,6 +24,7 @@ import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-p
 
 export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlug: string; shopId: string; dropId: string; onClose: (changed: boolean) => void }) {
   const toast = useToast();
+  const t = useT();
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [siteUrl, setSiteUrl] = useState<string | null>(null);
@@ -41,7 +44,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
   // 🧰 ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง · ที่นี่บอกแค่ยิง API ยังไง
   const dp = useDraftPublish<Block>({
     active: !loading,
-    what: "หน้าชุดนี้",
+    what: t("หน้าชุดนี้", "this drop page"),
     save: async (blocks, mode) => {
       const r = await apiFetch("/api/website/new-drops/page", {
         method: "PUT",
@@ -80,7 +83,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
       resetDraft(initial, d.custom ? d.published : [], Boolean(d.hasDraft));
       setCustom(Boolean(d.custom));
     } catch {
-      toast.error("เปิดหน้าชุดไม่สำเร็จ");
+      toast.error(tr("เปิดหน้าชุดไม่สำเร็จ", "Could not open the drop page"));
       onClose(false);
     } finally {
       setLoading(false);
@@ -97,21 +100,21 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
       const r = await apiFetch(`/api/website/new-drops/page?id=${encodeURIComponent(dropId)}`, { method: "DELETE" });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "ทำไม่สำเร็จ");
+        toast.error(j.error ?? t("ทำไม่สำเร็จ", "Failed"));
         return;
       }
-      toast.success("กลับไปใช้หน้าตาเดิมแล้ว");
+      toast.success(t("กลับไปใช้หน้าตาเดิมแล้ว", "Reverted to the original layout"));
       setChanged(true);
       await load();
       dp.bumpPreview();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Connection failed"));
     }
   };
 
   const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard, dropId }), [shopSlug, shopId, shopName, categories, themeCard, dropId]);
 
-  if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังเปิดหน้าชุด…</div>;
+  if (loading) return <div className="py-16 text-center text-sm text-slate-400">{t("กำลังเปิดหน้าชุด…", "Opening drop page…")}</div>;
 
   const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/new/${encodeURIComponent(dropId)}?preview=1`, previewKey) : null;
   const issues = [...validateBlocks(dp.blocks as never), ...dataIssues];
@@ -120,7 +123,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
     <div className="space-y-3">
       {!custom && (
         <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-800">
-          🧱 ชุดนี้ยังใช้หน้าตาเดิม — เริ่มจากโครงตั้งต้น (Section 🆕 ชุดมาใหม่) แล้วเพิ่ม Section อื่นได้เลย · กด &quot;เผยแพร่หน้าชุดนี้&quot; เมื่อพร้อม (ก่อนนั้นลูกค้ายังเห็นหน้าเดิม)
+          🧱 {t("ชุดนี้ยังใช้หน้าตาเดิม — เริ่มจากโครงตั้งต้น (Section 🆕 ชุดมาใหม่) แล้วเพิ่ม Section อื่นได้เลย · กด \"เผยแพร่หน้าชุดนี้\" เมื่อพร้อม (ก่อนนั้นลูกค้ายังเห็นหน้าเดิม)", "This drop still uses the original layout — start from the default (🆕 New drop section) and add other sections · press \"Publish this drop page\" when ready (until then customers see the old page)")}
         </p>
       )}
       <WebsiteBuilder
@@ -142,16 +145,16 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
                   onClose(changed);
                 }}
                 className="text-xs text-slate-500 hover:text-blue-600 mr-1"
-                title="กลับไปรายการชุดมาใหม่"
+                title={t("กลับไปรายการชุดมาใหม่", "Back to new drops list")}
               >
-                ← ชุดทั้งหมด
+                ← {t("ชุดทั้งหมด", "All drops")}
               </button>
               <span className="text-sm font-medium text-slate-800 truncate max-w-[180px]" title={`/new/${dropId}`}>
                 🆕 {title}
               </span>
               {(custom || dp.hasDraft) && (
-                <button onClick={() => setAskReset(true)} className="h-7 px-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-red-300 hover:text-red-600" title="ล้างหน้าที่จัดไว้ กลับไปใช้หน้าตาเดิม">
-                  ↺ หน้าตาเดิม
+                <button onClick={() => setAskReset(true)} className="h-7 px-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-red-300 hover:text-red-600" title={t("ล้างหน้าที่จัดไว้ กลับไปใช้หน้าตาเดิม", "Clear the custom layout and revert to the original")}>
+                  ↺ {t("หน้าตาเดิม", "Original layout")}
                 </button>
               )}
             </>
@@ -162,7 +165,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
           saving: dp.busy === "draft",
           issues,
           changes: summarizeChanges(dp.blocks, dp.published, types),
-          publishLabel: "เผยแพร่หน้าชุดนี้",
+          publishLabel: t("เผยแพร่หน้าชุดนี้", "Publish this drop page"),
         }}
       />
       <PublishCheckDialog
@@ -170,7 +173,7 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
         onClose={dp.closeCheck}
         onConfirm={() => void dp.publish()}
         issues={issues}
-        what={` หน้าชุด "${title}"`}
+        what={t(` หน้าชุด "${title}"`, ` drop page "${title}"`)}
         busy={dp.busy === "publish"}
         onGoBlock={(id) => setSelection({ blockId: id })}
       />
@@ -178,9 +181,9 @@ export function DropPageBuilder({ shopSlug, shopId, dropId, onClose }: { shopSlu
         open={askReset}
         onClose={() => setAskReset(false)}
         onConfirm={() => void reset()}
-        title="กลับไปใช้หน้าตาเดิม?"
-        message="ล้าง Section ที่จัดไว้ทั้งที่เผยแพร่และร่าง — หน้า /new/<ชุด> กลับเป็นแบบเดิม (แบนเนอร์ชุด + สินค้า / นับถอยหลัง) · ตัวชุดและสินค้าในชุดไม่หาย"
-        confirmText="กลับไปหน้าตาเดิม"
+        title={t("กลับไปใช้หน้าตาเดิม?", "Revert to the original layout?")}
+        message={t("ล้าง Section ที่จัดไว้ทั้งที่เผยแพร่และร่าง — หน้า /new/<ชุด> กลับเป็นแบบเดิม (แบนเนอร์ชุด + สินค้า / นับถอยหลัง) · ตัวชุดและสินค้าในชุดไม่หาย", "Clears all sections, both published and draft — the /new/<drop> page goes back to the original (drop banner + products / countdown) · the drop and its products are kept")}
+        confirmText={t("กลับไปหน้าตาเดิม", "Revert")}
         variant="danger"
       />
     </div>

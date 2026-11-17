@@ -35,6 +35,8 @@ import { PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
 import type { CategoryDef, Listing, ShopInfo } from "@/components/website-listings-panel";
 import { WebsiteListingsImageGrid, type ImageGridHandle } from "@/components/website-listings-image-grid";
 import { WebsiteImageMassUpload } from "@/components/website-image-mass-upload";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 type Level = "product" | "color";
 type Source = "web" | "parent" | "sku";
@@ -92,6 +94,7 @@ export function WebsiteListingsGridEdit({
   onDone: () => void | Promise<void>;
 }) {
   const toast = useToast();
+  const t = useT();
   const { user, can } = useAuth();
   const role = user?.role ?? null;
   const [level, setLevel] = useState<Level>("product");
@@ -151,10 +154,10 @@ export function WebsiteListingsGridEdit({
       const qs = new URLSearchParams({ shopId: shop.id, level: lv, pcols: pcols.join(","), scols: scols.join(",") });
       const r = await apiFetch(`/api/website/listings/grid?${qs}`);
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.error || "โหลดไม่สำเร็จ");
+      if (!r.ok) throw new Error(j?.error || tr("โหลดไม่สำเร็จ", "Load failed"));
       setData((d) => ({ ...d, [lv]: { listings: j.listings ?? [], parents: j.parents ?? [], skus: j.skus ?? [], pcols, scols } }));
     } catch (e) {
-      setLoadErr((e as Error).message || "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่");
+      setLoadErr((e as Error).message || tr("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่", "Couldn't load data, please try again"));
     } finally {
       loadingRef.current = false;
     }
@@ -201,16 +204,18 @@ export function WebsiteListingsGridEdit({
       choices: f.kind === "stock" ? STOCK_STATUS_OPTIONS : undefined,
     }));
     return { product: [...web, ...erpCols("parent", reg.parent)], color: erpCols("sku", reg.sku) };
-  }, [reg, role, can]);
+    // t = รีเฟรชชื่อช่องเว็บเมื่อสลับภาษา
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reg, role, can, t]);
 
   const groupLabels = useMemo(() => {
-    const out: Record<string, string> = { web: `🌐 เว็บร้านนี้ (เฉพาะ ${shop.name})` };
+    const out: Record<string, string> = { web: t(`🌐 เว็บร้านนี้ (เฉพาะ ${shop.name})`, `🌐 This shop's web (${shop.name} only)`) };
     for (const c of [...allCols.product, ...allCols.color] as (Col & { _groupLabel?: string })[]) {
-      if (c.source === "parent") out[c.group] = `📦 Parent SKU · ${c._groupLabel} (ทุกร้านเห็น)`;
-      if (c.source === "sku") out[c.group] = `🎨 SKU ลูก · ${c._groupLabel} (ทุกร้านเห็น)`;
+      if (c.source === "parent") out[c.group] = t(`📦 Parent SKU · ${c._groupLabel} (ทุกร้านเห็น)`, `📦 Parent SKU · ${c._groupLabel} (all shops see it)`);
+      if (c.source === "sku") out[c.group] = t(`🎨 SKU ลูก · ${c._groupLabel} (ทุกร้านเห็น)`, `🎨 Child SKU · ${c._groupLabel} (all shops see it)`);
     }
     return out;
-  }, [allCols, shop.name]);
+  }, [allCols, shop.name, t]);
 
   const cols = allCols[level];
   const colById = useMemo(() => new Map(cols.map((c) => [c.id, c])), [cols]);
@@ -227,7 +232,7 @@ export function WebsiteListingsGridEdit({
     key: c.id,
     label: c.label,
     group: c.group,
-    hint: !c.editable ? "อ่านอย่างเดียว" : c.sensitive ? "🔒 ข้อมูลลับ" : undefined,
+    hint: !c.editable ? t("อ่านอย่างเดียว", "Read only") : c.sensitive ? t("🔒 ข้อมูลลับ", "🔒 Sensitive") : undefined,
   }));
 
   // ---- แถว ----
@@ -372,18 +377,18 @@ export function WebsiteListingsGridEdit({
         put++;
       }),
     );
-    toast.info(`วาง ${put} ช่อง${skip ? ` · ข้าม ${skip} ช่อง (ค่าใช้ไม่ได้/แก้ไม่ได้)` : ""}`);
+    toast.info(t(`วาง ${put} ช่อง${skip ? ` · ข้าม ${skip} ช่อง (ค่าใช้ไม่ได้/แก้ไม่ได้)` : ""}`, `Pasted ${put} cells${skip ? ` · skipped ${skip} (invalid value / not editable)` : ""}`));
   };
   const fillDown = (c: Col) => {
     if (!c.editable || !page.length) return;
     const v = valOf(page[0], c);
-    const shown = Array.isArray(v) ? v.join(", ") : typeof v === "boolean" ? (v ? "✓" : "—") : c.choices?.find((o) => o.value === v)?.label || String(v ?? "") || "(ว่าง)";
+    const shown = Array.isArray(v) ? v.join(", ") : typeof v === "boolean" ? (v ? "✓" : "—") : c.choices?.find((o) => o.value === v)?.label || String(v ?? "") || t("(ว่าง)", "(empty)");
     setAsk({
-      title: `ใช้ค่าแถวแรกทั้งคอลัมน์ "${c.label}"?`,
-      message: `ทุกแถวที่เห็น (${visible.length} แถว) จะเป็น "${shown.length > 60 ? `${shown.slice(0, 60)}…` : shown}" — ยังไม่บันทึกจนกดบันทึก (กด "ยกเลิกที่แก้" ย้อนได้)`,
+      title: t(`ใช้ค่าแถวแรกทั้งคอลัมน์ "${c.label}"?`, `Use the first row's value for the whole "${c.label}" column?`),
+      message: t(`ทุกแถวที่เห็น (${visible.length} แถว) จะเป็น "${shown.length > 60 ? `${shown.slice(0, 60)}…` : shown}" — ยังไม่บันทึกจนกดบันทึก (กด "ยกเลิกที่แก้" ย้อนได้)`, `All visible rows (${visible.length}) will become "${shown.length > 60 ? `${shown.slice(0, 60)}…` : shown}" — not saved until you press Save ("Discard changes" undoes it)`),
       run: () => {
         for (const r of visible) setCell(r, c, v);
-        toast.info(`ใช้ค่าแถวแรกกับ ${visible.length} แถว (ยังไม่บันทึก)`);
+        toast.info(t(`ใช้ค่าแถวแรกกับ ${visible.length} แถว (ยังไม่บันทึก)`, `Applied the first row's value to ${visible.length} rows (not saved yet)`));
       },
     });
   };
@@ -391,13 +396,13 @@ export function WebsiteListingsGridEdit({
   const emptyWithAuto = (c: Col) => visible.filter((r) => valOf(r, c) === "" && autoOf(r, c) !== "");
   const useAutoAll = (c: Col) => {
     const rows = emptyWithAuto(c);
-    if (!rows.length) return toast.info("ไม่มีช่องว่างที่มีค่าตัวจางให้ใช้");
+    if (!rows.length) return toast.info(t("ไม่มีช่องว่างที่มีค่าตัวจางให้ใช้", "No empty cells with an automatic value to use"));
     setAsk({
-      title: `ใช้ค่าตัวจางทั้งคอลัมน์ "${c.label}"?`,
-      message: `จะใส่ค่าตัวจาง (ค่าอัตโนมัติ) ลง ${rows.length} แถวที่ยังว่าง — ช่องที่กรอกไว้แล้วไม่เปลี่ยน · หลังบันทึก ค่าบนเว็บจะคงที่ ไม่เปลี่ยนตาม ERP อีก (แก้เองได้) · ยังไม่บันทึกจนกดบันทึก`,
+      title: t(`ใช้ค่าตัวจางทั้งคอลัมน์ "${c.label}"?`, `Use the automatic values for the whole "${c.label}" column?`),
+      message: t(`จะใส่ค่าตัวจาง (ค่าอัตโนมัติ) ลง ${rows.length} แถวที่ยังว่าง — ช่องที่กรอกไว้แล้วไม่เปลี่ยน · หลังบันทึก ค่าบนเว็บจะคงที่ ไม่เปลี่ยนตาม ERP อีก (แก้เองได้) · ยังไม่บันทึกจนกดบันทึก`, `The automatic (greyed) values will be filled into ${rows.length} empty rows — filled cells stay unchanged · after saving, the web value is fixed and no longer follows the ERP (you can still edit it) · not saved until you press Save`),
       run: () => {
         for (const r of rows) setCell(r, c, autoOf(r, c));
-        toast.info(`ใส่ค่าตัวจาง ${rows.length} แถว (ยังไม่บันทึก)`);
+        toast.info(t(`ใส่ค่าตัวจาง ${rows.length} แถว (ยังไม่บันทึก)`, `Filled automatic values into ${rows.length} rows (not saved yet)`));
       },
     });
   };
@@ -435,7 +440,7 @@ export function WebsiteListingsGridEdit({
           }
           const empty = v === "" || v == null || (Array.isArray(v) && !v.length);
           if (c.required && empty) {
-            errs[ek] = "ช่องบังคับ ห้ามเว้นว่าง";
+            errs[ek] = t("ช่องบังคับ ห้ามเว้นว่าง", "Required — can't be empty");
             continue;
           }
           const w = erpWriteValue(c.kind, v);
@@ -447,15 +452,15 @@ export function WebsiteListingsGridEdit({
     }
     if (Object.keys(errs).length) {
       setErrors(errs);
-      return setErr(`มี ${Object.keys(errs).length} ช่องที่ต้องแก้ก่อนบันทึก (ช่องสีแดง — ชี้เพื่อดูเหตุผล)`);
+      return setErr(t(`มี ${Object.keys(errs).length} ช่องที่ต้องแก้ก่อนบันทึก (ช่องสีแดง — ชี้เพื่อดูเหตุผล)`, `${Object.keys(errs).length} cells need fixing before saving (red cells — hover to see why)`));
     }
-    if (needConfirm && typed !== "CONFIRM") return setErr(`แก้ ${dirtyRows + imgDirty} รายการพร้อมกัน — พิมพ์ CONFIRM ก่อนบันทึก`);
+    if (needConfirm && typed !== "CONFIRM") return setErr(t(`แก้ ${dirtyRows + imgDirty} รายการพร้อมกัน — พิมพ์ CONFIRM ก่อนบันทึก`, `Editing ${dirtyRows + imgDirty} items at once — type CONFIRM before saving`));
 
     const failed: { label: string; error: string }[] = [];
     let ok = 0;
     const doneKeys = new Set<string>();
     if (web.size) {
-      setSaving("กำลังบันทึกช่องเว็บ…");
+      setSaving(t("กำลังบันทึกช่องเว็บ…", "Saving web fields…"));
       try {
         const r = await apiFetch("/api/website/listings/grid", {
           method: "POST",
@@ -463,18 +468,18 @@ export function WebsiteListingsGridEdit({
           body: JSON.stringify({ shopId: shop.id, changes: [...web.entries()].map(([pid, x]) => ({ parentId: pid, patch: webGridPatch(x.row, x.changes as never) })) }),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j?.error || "บันทึกช่องเว็บไม่สำเร็จ");
+        if (!r.ok) throw new Error(j?.error || t("บันทึกช่องเว็บไม่สำเร็จ", "Couldn't save web fields"));
         const bad = new Set(((j.failed ?? []) as { parentId: string }[]).map((f) => f.parentId));
         for (const pid of web.keys()) {
           const code = String(data.product?.parents.find((p) => String(p.id) === pid)?.code ?? pid);
-          if (bad.has(pid)) failed.push({ label: code, error: "บันทึกช่องเว็บไม่สำเร็จ" });
+          if (bad.has(pid)) failed.push({ label: code, error: t("บันทึกช่องเว็บไม่สำเร็จ", "Couldn't save web fields") });
           else {
             ok++;
             doneKeys.add(`web|${pid}`);
           }
         }
       } catch (e) {
-        failed.push({ label: "ช่องเว็บ", error: (e as Error).message });
+        failed.push({ label: t("ช่องเว็บ", "Web fields"), error: (e as Error).message });
       }
     }
     let next = 0;
@@ -482,24 +487,24 @@ export function WebsiteListingsGridEdit({
     const worker = async () => {
       while (next < erp.length) {
         const job = erp[next++];
-        setSaving(`กำลังบันทึก ERP ${++n}/${erp.length}…`);
+        { const at = ++n; setSaving(t(`กำลังบันทึก ERP ${at}/${erp.length}…`, `Saving ERP ${at}/${erp.length}…`)); }
         try {
           const r = await apiFetch(`/api/master-v2/${job.module}/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(job.patch) });
           const j = await r.json().catch(() => ({}));
-          if (!r.ok || j?.error) failed.push({ label: job.label, error: j?.error || "บันทึกไม่สำเร็จ" });
+          if (!r.ok || j?.error) failed.push({ label: job.label, error: j?.error || t("บันทึกไม่สำเร็จ", "Save failed") });
           else {
             ok++;
             doneKeys.add(`${job.module}|${job.id}`);
           }
         } catch {
-          failed.push({ label: job.label, error: "เชื่อมต่อไม่ได้" });
+          failed.push({ label: job.label, error: t("เชื่อมต่อไม่ได้", "Connection failed") });
         }
       }
     };
     await Promise.all(Array.from({ length: SAVE_CONCURRENCY }, worker));
     // 🖼 รูปที่แก้ในแท็บรูปภาพ
     if (imgRef.current?.dirty()) {
-      setSaving("กำลังบันทึกรูป…");
+      setSaving(t("กำลังบันทึกรูป…", "Saving images…"));
       const ir = await imgRef.current.save();
       ok += ir.ok;
       failed.push(...ir.failed);
@@ -524,15 +529,15 @@ export function WebsiteListingsGridEdit({
     });
     setTyped("");
     setResult({ ok, failed });
-    if (failed.length) toast.warning(`บันทึกแล้ว ${ok} รายการ · ไม่สำเร็จ ${failed.length}`);
-    else toast.success(`บันทึก ${ok} รายการแล้ว — เว็บเปลี่ยนตามทันที`);
+    if (failed.length) toast.warning(t(`บันทึกแล้ว ${ok} รายการ · ไม่สำเร็จ ${failed.length}`, `Saved ${ok} items · ${failed.length} failed`));
+    else toast.success(t(`บันทึก ${ok} รายการแล้ว — เว็บเปลี่ยนตามทันที`, `Saved ${ok} items — the website updates right away`));
     setData({});
     void onDone();
   };
 
   const busy = !!saving;
   const close = () => {
-    if (busy) return toast.info("กำลังบันทึกอยู่ รอให้เสร็จก่อน");
+    if (busy) return toast.info(t("กำลังบันทึกอยู่ รอให้เสร็จก่อน", "Saving — please wait until it finishes"));
     onClose();
   };
 
@@ -552,8 +557,8 @@ export function WebsiteListingsGridEdit({
       canUse ? (
         <div className="relative">
           {node}
-          <button type="button" onClick={() => set(ph)} title={`ใช้ค่าตัวจาง: ${ph.length > 80 ? `${ph.slice(0, 80)}…` : ph}`} className="absolute right-1 top-1 h-6 rounded bg-white px-1.5 text-[11px] text-blue-600 ring-1 ring-blue-200 hover:bg-blue-50">
-            ใช้
+          <button type="button" onClick={() => set(ph)} title={`${t("ใช้ค่าตัวจาง", "Use automatic value")}: ${ph.length > 80 ? `${ph.slice(0, 80)}…` : ph}`} className="absolute right-1 top-1 h-6 rounded bg-white px-1.5 text-[11px] text-blue-600 ring-1 ring-blue-200 hover:bg-blue-50">
+            {t("ใช้", "Use")}
           </button>
         </div>
       ) : (
@@ -586,7 +591,7 @@ export function WebsiteListingsGridEdit({
       case "badge":
         return (
           <select value={sv} onChange={(e) => set(e.target.value)} className={cellCls}>
-            <option value="">— ไม่มีป้าย —</option>
+            <option value="">{t("— ไม่มีป้าย —", "— No badge —")}</option>
             {sv && !badges.some((b) => b.name === sv) && <option value={sv}>{sv}</option>}
             {badges.map((b) => (
               <option key={b.name} value={b.name}>
@@ -598,8 +603,8 @@ export function WebsiteListingsGridEdit({
       case "sizeGuide":
         return (
           <select value={sv} onChange={(e) => set(e.target.value)} className={cellCls}>
-            <option value="">อัตโนมัติตามหมวด</option>
-            <option value="none">ไม่แสดง</option>
+            <option value="">{t("อัตโนมัติตามหมวด", "Automatic by category")}</option>
+            <option value="none">{t("ไม่แสดง", "Don't show")}</option>
             {sizeGuides.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
@@ -615,13 +620,13 @@ export function WebsiteListingsGridEdit({
             onChange={(keys) => set(keys)}
             fields={categories.map((x) => ({ key: x.key, label: x.label, icon: x.icon || undefined }))}
             showKeys={false}
-            markFirst="หมวดหลัก"
-            addLabel="＋ หมวด"
-            unit="หมวด"
-            title={`หมวดบนเว็บ — ${r.code}`}
-            description="ตัวแรก = หมวดหลัก"
-            searchPlaceholder="ค้นหาหมวด…"
-            emptyText={listingById.get(r.parentId)?.categories?.length ? "ใช้หมวดเดิม" : undefined}
+            markFirst={t("หมวดหลัก", "Main category")}
+            addLabel={t("＋ หมวด", "＋ Category")}
+            unit={t("หมวด", "categories")}
+            title={t(`หมวดบนเว็บ — ${r.code}`, `Web categories — ${r.code}`)}
+            description={t("ตัวแรก = หมวดหลัก", "First = main category")}
+            searchPlaceholder={t("ค้นหาหมวด…", "Search categories…")}
+            emptyText={listingById.get(r.parentId)?.categories?.length ? t("ใช้หมวดเดิม", "Use current categories") : undefined}
           />
         );
       case "relation":
@@ -640,20 +645,20 @@ export function WebsiteListingsGridEdit({
           <span className="text-slate-600">{saving}</span>
         ) : result ? (
           <span className={result.failed.length ? "text-amber-700" : "text-emerald-700"}>
-            บันทึกแล้ว {result.ok} รายการ{result.failed.length ? ` · ไม่สำเร็จ ${result.failed.length}: ${result.failed.slice(0, 4).map((f) => `${f.label} (${f.error})`).join(" · ")}` : " — เว็บเปลี่ยนตามทันที"}
+            {t(`บันทึกแล้ว ${result.ok} รายการ`, `Saved ${result.ok} items`)}{result.failed.length ? `${t(" · ไม่สำเร็จ", " · failed")} ${result.failed.length}: ${result.failed.slice(0, 4).map((f) => `${f.label} (${f.error})`).join(" · ")}` : t(" — เว็บเปลี่ยนตามทันที", " — the website updates right away")}
           </span>
         ) : (
-          <span className="text-slate-500">{totalDirty ? `แก้${dirtyCells ? ` ข้อมูล ${dirtyCells} ช่อง (${dirtyRows} แถว)` : ""}${imgDirty ? ` รูป ${imgDirty} ช่อง` : ""} — ช่องสีเหลือง = ยังไม่บันทึก` : "ยังไม่ได้แก้อะไร"}</span>
+          <span className="text-slate-500">{totalDirty ? t(`แก้${dirtyCells ? ` ข้อมูล ${dirtyCells} ช่อง (${dirtyRows} แถว)` : ""}${imgDirty ? ` รูป ${imgDirty} ช่อง` : ""} — ช่องสีเหลือง = ยังไม่บันทึก`, `Edited${dirtyCells ? ` ${dirtyCells} data cells (${dirtyRows} rows)` : ""}${imgDirty ? ` ${imgDirty} image slots` : ""} — yellow = not saved yet`) : t("ยังไม่ได้แก้อะไร", "No changes yet")}</span>
         )}
       </div>
-      {needConfirm && !busy && <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์ CONFIRM" className="h-9 w-36 rounded-lg border border-rose-300 px-2 font-mono text-sm" />}
+      {needConfirm && !busy && <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={t("พิมพ์ CONFIRM", "Type CONFIRM")} className="h-9 w-36 rounded-lg border border-rose-300 px-2 font-mono text-sm" />}
       {totalDirty > 0 && !busy && (
         <button type="button" onClick={() => { setDraft({ product: {}, color: {} }); imgRef.current?.discard(); setErrors({}); setErr(null); }} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">
-          ยกเลิกที่แก้
+          {t("ยกเลิกที่แก้", "Discard changes")}
         </button>
       )}
       <button type="button" onClick={() => void save()} disabled={busy || !totalDirty || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-        {busy ? "กำลังบันทึก…" : totalDirty ? `บันทึก ${totalDirty} ช่อง` : "บันทึก"}
+        {busy ? t("กำลังบันทึก…", "Saving…") : totalDirty ? t(`บันทึก ${totalDirty} ช่อง`, `Save ${totalDirty} cells`) : t("บันทึก", "Save")}
       </button>
     </div>
   );
@@ -663,8 +668,8 @@ export function WebsiteListingsGridEdit({
     <ERPModal
       open={open}
       onClose={close}
-      title={`▦ แก้ไขทีละมาก — ${shop.name}`}
-      description={scope ? `เฉพาะ ${scope.size} รายการที่ติ๊กไว้ · ช่องจากทะเบียนฟิลด์กลาง` : "แก้ได้ทุกแถว ค่าต่างกันได้ · ช่องจากทะเบียนฟิลด์กลาง · วางจาก Excel ได้"}
+      title={t(`▦ แก้ไขทีละมาก — ${shop.name}`, `▦ Bulk edit — ${shop.name}`)}
+      description={scope ? t(`เฉพาะ ${scope.size} รายการที่ติ๊กไว้ · ช่องจากทะเบียนฟิลด์กลาง`, `Only the ${scope.size} ticked items · fields from the central field registry`) : t("แก้ได้ทุกแถว ค่าต่างกันได้ · ช่องจากทะเบียนฟิลด์กลาง · วางจาก Excel ได้", "Edit every row with different values · fields from the central field registry · paste from Excel")}
       size="xl"
       hasUnsavedChanges={totalDirty > 0}
       closeOnBackdrop={false}
@@ -676,20 +681,20 @@ export function WebsiteListingsGridEdit({
           <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
             {(["product", "color"] as Level[]).map((lv) => (
               <button key={lv} type="button" onClick={() => { setLevel(lv); setLimit(PAGE); }} className={`px-3 py-1.5 text-xs ${level === lv ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                {lv === "product" ? "ทีละสินค้า" : "ทีละสี (SKU ลูก)"}
+                {lv === "product" ? t("ทีละสินค้า", "By product") : t("ทีละสี (SKU ลูก)", "By color (child SKU)")}
               </button>
             ))}
           </div>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส หรือชื่อ" className="h-8 min-w-[160px] flex-1 rounded-lg border border-slate-200 px-2.5 text-sm outline-none focus:border-blue-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหารหัส หรือชื่อ", "Search code or name")} className="h-8 min-w-[160px] flex-1 rounded-lg border border-slate-200 px-2.5 text-sm outline-none focus:border-blue-400" />
           <label className="flex items-center gap-1.5 text-xs text-slate-600">
             <input type="checkbox" checked={onlyFix} onChange={(e) => setOnlyFix(e.target.checked)} className="h-4 w-4 accent-amber-500" />
-            เฉพาะสินค้าที่ต้องแก้ ({fixSet.size})
+            {t("เฉพาะสินค้าที่ต้องแก้", "Only products that need fixing")} ({fixSet.size})
           </label>
         </div>
 
         {/* แท็บ */}
         <div className="flex gap-1 border-b border-slate-200">
-          {([["data", "▦ ข้อมูล", dirtyCells], ["images", "🖼 รูปภาพ", imgDirty]] as const).map(([k, label, n]) => (
+          {([["data", t("▦ ข้อมูล", "▦ Data"), dirtyCells], ["images", t("🖼 รูปภาพ", "🖼 Images"), imgDirty]] as const).map(([k, label, n]) => (
             <button key={k} type="button" onClick={() => setTab(k)} className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === k ? "border-blue-600 font-medium text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
               {label}
               {n > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">{n}</span>}
@@ -715,9 +720,9 @@ export function WebsiteListingsGridEdit({
         <div className="rounded-xl border border-slate-200 bg-slate-50/60">
           <button type="button" onClick={() => setPickerOpen(!pickerOpen)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700">
             <span className="text-slate-400">{pickerOpen ? "▾" : "▸"}</span>
-            <span className="font-medium">ช่องที่จะแก้ ({shownCols.length}/{cols.length})</span>
+            <span className="font-medium">{t("ช่องที่จะแก้", "Fields to edit")} ({shownCols.length}/{cols.length})</span>
             {!pickerOpen && <span className="truncate text-xs text-slate-500">{shownCols.map((c) => c.label).join(" · ")}</span>}
-            <span className="ml-auto text-[11px] text-slate-400">{pickerOpen ? "พับเก็บ" : "กางเลือกช่อง"}</span>
+            <span className="ml-auto text-[11px] text-slate-400">{pickerOpen ? t("พับเก็บ", "Collapse") : t("กางเลือกช่อง", "Pick fields")}</span>
           </button>
           {pickerOpen && (
             <div className="border-t border-slate-200 px-3 py-2.5">
@@ -728,13 +733,13 @@ export function WebsiteListingsGridEdit({
                 groups={groupLabels}
                 groupToggle
                 showKeys={false}
-                title={level === "product" ? "เลือกช่องที่จะแก้ — ทีละสินค้า" : "เลือกช่องที่จะแก้ — ทีละสี"}
-                description="ทุกช่องมาจากทะเบียนฟิลด์กลาง (เพิ่มช่องที่ทะเบียน = ขึ้นที่นี่เอง) · 🌐 = เฉพาะร้านนี้ · 📦/🎨 = แก้ที่ ERP ทุกร้านเห็น · รูป/แท็ก/รายการย่อย แก้ที่หน้าสินค้า"
-                addLabel="＋ เลือกช่อง…"
-                searchPlaceholder="ค้นหาช่อง เช่น ราคา วัสดุ SEO"
-                unit="ช่อง"
+                title={level === "product" ? t("เลือกช่องที่จะแก้ — ทีละสินค้า", "Pick fields to edit — by product") : t("เลือกช่องที่จะแก้ — ทีละสี", "Pick fields to edit — by color")}
+                description={t("ทุกช่องมาจากทะเบียนฟิลด์กลาง (เพิ่มช่องที่ทะเบียน = ขึ้นที่นี่เอง) · 🌐 = เฉพาะร้านนี้ · 📦/🎨 = แก้ที่ ERP ทุกร้านเห็น · รูป/แท็ก/รายการย่อย แก้ที่หน้าสินค้า", "All fields come from the central field registry (add one there = it shows up here) · 🌐 = this shop only · 📦/🎨 = edits the ERP, every shop sees it · images / tags / sub-lists are edited on the product page")}
+                addLabel={t("＋ เลือกช่อง…", "＋ Pick fields…")}
+                searchPlaceholder={t("ค้นหาช่อง เช่น ราคา วัสดุ SEO", "Search fields, e.g. price, material, SEO")}
+                unit={t("ช่อง", "fields")}
               />
-              <p className="mt-1.5 text-[11px] text-slate-400">ตารางแสดงตามลำดับที่เลือก · จำไว้ต่อคน</p>
+              <p className="mt-1.5 text-[11px] text-slate-400">{t("ตารางแสดงตามลำดับที่เลือก · จำไว้ต่อคน", "The table follows the order you pick · remembered per person")}</p>
             </div>
           )}
         </div>
@@ -744,7 +749,7 @@ export function WebsiteListingsGridEdit({
           <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
             {loadErr}{" "}
             <button type="button" onClick={() => { setLoadErr(null); setData((d) => ({ ...d, [level]: undefined })); }} className="ml-1 underline">
-              ลองใหม่
+              {t("ลองใหม่", "Retry")}
             </button>
           </div>
         ) : !loaded || (level === "product" ? !reg.parent : !reg.sku) ? (
@@ -754,16 +759,16 @@ export function WebsiteListingsGridEdit({
             ))}
           </div>
         ) : !visible.length ? (
-          <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">ไม่พบแถว ลองเปลี่ยนคำค้นหรือเอาตัวกรองออก</div>
+          <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">{t("ไม่พบแถว ลองเปลี่ยนคำค้นหรือเอาตัวกรองออก", "No rows found — try another search or remove filters")}</div>
         ) : !shownCols.length ? (
-          <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">ยังไม่ได้เลือกช่อง — กด "＋ เลือกช่อง…" ด้านบน</div>
+          <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">{t("ยังไม่ได้เลือกช่อง — กด \"＋ เลือกช่อง…\" ด้านบน", "No fields picked — press \"＋ Pick fields…\" above")}</div>
         ) : (
           <div className="max-h-[62vh] overflow-auto rounded-xl border border-slate-200 bg-white">
             <table className="min-w-full border-separate border-spacing-0 text-sm">
               <thead>
                 <tr>
                   <th className="sticky left-0 top-0 z-20 w-56 min-w-[14rem] border-b border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] font-medium text-slate-500">
-                    {level === "product" ? "สินค้า" : "สี / SKU"} ({visible.length})
+                    {level === "product" ? t("สินค้า", "Product") : t("สี / SKU", "Color / SKU")} ({visible.length})
                   </th>
                   {shownCols.map((c) => (
                     <th key={c.id} className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 px-2 py-2 text-left text-[11px] font-medium text-slate-500" style={{ minWidth: WIDTH[c.kind] ?? 160 }}>
@@ -772,13 +777,13 @@ export function WebsiteListingsGridEdit({
                         <span className="truncate">{c.label}</span>
                         {c.required && <span className="text-rose-500">*</span>}
                         {c.editable && c.kind !== "relation" && (
-                          <button type="button" onClick={() => fillDown(c)} title="ใช้ค่าแถวแรกกับทุกแถวที่เห็น (ถามก่อน)" className="ml-auto rounded px-1 text-blue-600 hover:bg-blue-50">
+                          <button type="button" onClick={() => fillDown(c)} title={t("ใช้ค่าแถวแรกกับทุกแถวที่เห็น (ถามก่อน)", "Apply the first row's value to all visible rows (asks first)")} className="ml-auto rounded px-1 text-blue-600 hover:bg-blue-50">
                             ⤓
                           </button>
                         )}
                         {c.editable && emptyWithAuto(c).length > 0 && (
-                          <button type="button" onClick={() => useAutoAll(c)} title="ใส่ค่าตัวจางให้ทุกแถวที่ยังว่าง (ถามก่อน)" className="whitespace-nowrap rounded border border-blue-200 px-1.5 text-[10px] font-normal text-blue-600 hover:bg-blue-50">
-                            ใช้ทั้งหมด ({emptyWithAuto(c).length})
+                          <button type="button" onClick={() => useAutoAll(c)} title={t("ใส่ค่าตัวจางให้ทุกแถวที่ยังว่าง (ถามก่อน)", "Fill automatic values into every empty row (asks first)")} className="whitespace-nowrap rounded border border-blue-200 px-1.5 text-[10px] font-normal text-blue-600 hover:bg-blue-50">
+                            {t("ใช้ทั้งหมด", "Use all")} ({emptyWithAuto(c).length})
                           </button>
                         )}
                       </span>
@@ -822,15 +827,14 @@ export function WebsiteListingsGridEdit({
             {visible.length > page.length && (
               <div className="border-t border-slate-100 p-2 text-center">
                 <button type="button" onClick={() => setLimit((n) => n + PAGE)} className="text-xs text-blue-600 hover:underline">
-                  แสดงเพิ่มอีก {Math.min(PAGE, visible.length - page.length)} แถว (เห็น {page.length}/{visible.length})
+                  {t(`แสดงเพิ่มอีก ${Math.min(PAGE, visible.length - page.length)} แถว (เห็น ${page.length}/${visible.length})`, `Show ${Math.min(PAGE, visible.length - page.length)} more rows (showing ${page.length}/${visible.length})`)}
                 </button>
               </div>
             )}
           </div>
         )}
         <p className="text-[11px] text-slate-400">
-          วางจาก Excel ได้ทีละหลายช่อง (คลิกช่องเริ่มแล้ว Ctrl+V) · ⤓ ที่หัวคอลัมน์ = ใช้ค่าแถวแรกกับทุกแถวที่เห็น · ช่องเว็บว่าง = ใช้ค่าอัตโนมัติ (ตัวจาง) · ช่อง 📦/🎨 แก้ที่ ERP จริง ทุกร้าน/ทุกหน้าเห็นค่าใหม่ ·
-          บันทึกประวัติทุกช่อง
+          {t("วางจาก Excel ได้ทีละหลายช่อง (คลิกช่องเริ่มแล้ว Ctrl+V) · ⤓ ที่หัวคอลัมน์ = ใช้ค่าแถวแรกกับทุกแถวที่เห็น · ช่องเว็บว่าง = ใช้ค่าอัตโนมัติ (ตัวจาง) · ช่อง 📦/🎨 แก้ที่ ERP จริง ทุกร้าน/ทุกหน้าเห็นค่าใหม่ · บันทึกประวัติทุกช่อง", "Paste many cells from Excel (click the starting cell, then Ctrl+V) · ⤓ in a column header = apply the first row's value to all visible rows · empty web cells = automatic value (greyed) · 📦/🎨 cells edit the real ERP, every shop / page sees the new value · every cell change is logged")}
         </p>
         </>)}
         {/* 📁 ลงทั้งโฟลเดอร์ (ระบบ 📸 ลงรูปทีละมากเดิม) → เสร็จแล้วโหลดแผนที่รูปใหม่ */}
@@ -847,8 +851,8 @@ export function WebsiteListingsGridEdit({
           }}
           title={ask?.title ?? ""}
           message={ask?.message ?? ""}
-          confirmText="ใช้ทั้งคอลัมน์"
-          cancelText="ยกเลิก"
+          confirmText={t("ใช้ทั้งคอลัมน์", "Apply to column")}
+          cancelText={t("ยกเลิก", "Cancel")}
         />
       </div>
     </ERPModal>
@@ -857,13 +861,14 @@ export function WebsiteListingsGridEdit({
 
 /** relation: โชว์ชื่อ (จากแถว) · กดแล้วค่อยเปิดตัวเลือกกลาง RelationPicker (ไม่โหลดตัวเลือกทุกช่องพร้อมกัน) */
 function RelationCell({ row, col, value, onChange }: { row: GridRow; col: Col; value: string; onChange: (id: string | null) => void }) {
+  const t = useT();
   const [edit, setEdit] = useState(false);
   const base = (col.column ?? "").replace(/_id$/, "");
   const label = value === String(row.erp[col.column as string] ?? "") ? String(row.erp[`${base}_label`] ?? row.erp[`${base}_name`] ?? "") : "";
   if (!edit || !col.relation)
     return (
       <button type="button" onClick={() => setEdit(true)} className={`${cellCls} truncate text-left`} title={label || value}>
-        {value ? label || "เลือกแล้ว (กดเพื่อดู)" : <span className="text-slate-300">— เลือก —</span>}
+        {value ? label || t("เลือกแล้ว (กดเพื่อดู)", "Picked (click to view)") : <span className="text-slate-300">{t("— เลือก —", "— Pick —")}</span>}
       </button>
     );
   return <RelationPicker value={value || null} onChange={(id) => onChange(id)} config={col.relation} siblingValues={row.erp} />;

@@ -13,6 +13,7 @@ import { categoryTree } from "@/lib/website-category-tree";
 import { loadStorefrontProducts } from "@/lib/website-data";
 import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_COLORS, LISTING_CARD_MODES, LISTING_SKU_ORDERS, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
 import { webForm } from "@/lib/website-form-styles";
+import { useT } from "@/components/i18n";
 
 const box = "rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2";
 type Cat = { key: string; label: string; parent?: string | null };
@@ -25,6 +26,7 @@ const colorCount = (opts: unknown): number => {
 };
 
 export function ListingCardSettings({ value, onChange, categories, shopSlug }: { value: ListingConfig; onChange: (v: ListingConfig) => void; categories: Cat[]; shopSlug?: string }) {
+  const t = useT();
   const set = (p: Partial<ListingConfig>) => onChange({ ...value, ...p });
   const [products, setProducts] = useState<WebProduct[] | null>(null);
   useEffect(() => {
@@ -54,7 +56,7 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
     return out;
   }, [products]);
 
-  const rows = [{ key: LISTING_ALL_KEY, label: "🛍 สินค้าทั้งหมด (/shop)", depth: 0 }, ...categoryTree(categories).map(({ cat, depth }) => ({ key: cat.key, label: cat.label, depth }))];
+  const rows = [{ key: LISTING_ALL_KEY, label: t("🛍 สินค้าทั้งหมด (/shop)", "🛍 All products (/shop)"), depth: 0 }, ...categoryTree(categories).map(({ cat, depth }) => ({ key: cat.key, label: cat.label, depth }))];
   const setCat = (key: string, m: string) => {
     const next = { ...value.cardModeByCat };
     if (m === "parent" || m === "sku") next[key] = m;
@@ -67,7 +69,7 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
 
   return (
     <div className={box}>
-      <p className="text-xs font-semibold text-slate-800">🎨 การ์ดสินค้าในหน้ารายการ — แบบรุ่น / ทีละสี (SKU)</p>
+      <p className="text-xs font-semibold text-slate-800">{t("🎨 การ์ดสินค้าในหน้ารายการ — แบบรุ่น / ทีละสี (SKU)", "🎨 Product cards on listing pages — per model / per color (SKU)")}</p>
       <div className="grid gap-1.5 sm:grid-cols-3">
         {LISTING_CARD_MODES.map((o) => (
           <button
@@ -83,14 +85,14 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
       </div>
       {value.cardMode === "auto" && (
         <div>
-          <span className={webForm.labelPlain}>หมวดที่มีไม่ถึงกี่รุ่น → แตกเป็นทีละสี</span>
-          <RangeInput value={value.cardAutoMax} min={LISTING_CARD_AUTO_RANGE.min} max={LISTING_CARD_AUTO_RANGE.max} step={1} unit=" รุ่น" onChange={(n) => set({ cardAutoMax: n })} />
+          <span className={webForm.labelPlain}>{t("หมวดที่มีไม่ถึงกี่รุ่น → แตกเป็นทีละสี", "Categories with fewer than this many models → split per color")}</span>
+          <RangeInput value={value.cardAutoMax} min={LISTING_CARD_AUTO_RANGE.min} max={LISTING_CARD_AUTO_RANGE.max} step={1} unit={t(" รุ่น", " models")} onChange={(n) => set({ cardAutoMax: n })} />
         </div>
       )}
       {anySku && (
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-700">↕ เรียงการ์ดสี</span>
+            <span className="text-xs text-slate-700">{t("↕ เรียงการ์ดสี", "↕ Color card order")}</span>
             {/* nowrap: ปุ่ม "ตามรหัส SKU" ไม่หักเป็น 3 บรรทัด */}
             <div className="whitespace-nowrap">
               <Seg<ListingConfig["skuOrder"]> value={value.skuOrder} onChange={(v) => set({ skuOrder: v })} options={LISTING_SKU_ORDERS.map((o) => ({ v: o.value, l: o.label }))} />
@@ -98,7 +100,7 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
           </div>
           <p className="text-[11px] text-slate-500" data-sku-order-hint>
             {LISTING_SKU_ORDERS.find((o) => o.value === value.skuOrder)?.hint}
-            {(value.skuOrder === "code" || value.skuOrder === "random") && " · ใช้ตอนเรียงแบบ \"แนะนำ\" — ลูกค้าเลือกเรียงราคา/ใหม่ล่าสุด หรือพิมพ์ค้นหา = เรียงตามนั้น"}
+            {(value.skuOrder === "code" || value.skuOrder === "random") && t(" · ใช้ตอนเรียงแบบ \"แนะนำ\" — ลูกค้าเลือกเรียงราคา/ใหม่ล่าสุด หรือพิมพ์ค้นหา = เรียงตามนั้น", " · Used with \"Featured\" sort — if the customer sorts by price/newest or searches, that order wins")}
           </p>
         </div>
       )}
@@ -106,7 +108,7 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
       {anyParent && (
         <div className="space-y-1" data-card-color>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-700">🎲 สีหน้าการ์ดแบบรุ่น</span>
+            <span className="text-xs text-slate-700">{t("🎲 สีหน้าการ์ดแบบรุ่น", "🎲 Front color on model cards")}</span>
             <div className="whitespace-nowrap">
               <Seg<ListingConfig["cardColor"]> value={value.cardColor} onChange={(v) => set({ cardColor: v })} options={LISTING_CARD_COLORS.map((o) => ({ v: o.value, l: o.label }))} />
             </div>
@@ -116,14 +118,14 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
       )}
 
       <div>
-        <p className="text-xs text-slate-700 mb-1">ตั้งรายหมวด <span className="text-[11px] text-slate-400">(ไม่ตั้ง = ตามค่าทั้งเว็บ)</span></p>
+        <p className="text-xs text-slate-700 mb-1">{t("ตั้งรายหมวด", "Per category")} <span className="text-[11px] text-slate-400">{t("(ไม่ตั้ง = ตามค่าทั้งเว็บ)", "(not set = site default)")}</span></p>
         <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
           <div className="grid grid-cols-[minmax(0,1.6fr)_44px_44px_minmax(0,1.3fr)_minmax(0,1fr)] gap-2 px-2 py-1 text-[10px] text-slate-400">
-            <span>หมวด</span>
-            <span className="text-right">รุ่น</span>
-            <span className="text-right">สี</span>
-            <span>แสดงแบบ</span>
-            <span>ผลบนเว็บ</span>
+            <span>{t("หมวด", "Category")}</span>
+            <span className="text-right">{t("รุ่น", "Models")}</span>
+            <span className="text-right">{t("สี", "Colors")}</span>
+            <span>{t("แสดงแบบ", "Show as")}</span>
+            <span>{t("ผลบนเว็บ", "Result on web")}</span>
           </div>
           {rows.map((r) => {
             const c = counts[r.key];
@@ -137,13 +139,13 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
                 </span>
                 <span className="text-right tabular-nums text-slate-500">{products ? c?.models ?? 0 : "…"}</span>
                 <span className="text-right tabular-nums text-slate-500">{products ? c?.colors ?? 0 : "…"}</span>
-                <select value={own} onChange={(e) => setCat(r.key, e.target.value)} className={webForm.inputXs} aria-label={`แสดงแบบ: ${r.label}`}>
-                  <option value="">ตามค่าทั้งเว็บ</option>
-                  <option value="parent">แบบรุ่น</option>
-                  <option value="sku">แบบทีละสี</option>
+                <select value={own} onChange={(e) => setCat(r.key, e.target.value)} className={webForm.inputXs} aria-label={t(`แสดงแบบ: ${r.label}`, `Show as: ${r.label}`)}>
+                  <option value="">{t("ตามค่าทั้งเว็บ", "Site default")}</option>
+                  <option value="parent">{t("แบบรุ่น", "Per model")}</option>
+                  <option value="sku">{t("แบบทีละสี", "Per color")}</option>
                 </select>
                 <span className={`text-[11px] ${mode === "sku" ? "text-emerald-700" : "text-slate-500"}`}>
-                  {!products ? "" : mode === "sku" ? `${c?.colors ?? 0} การ์ดสี` : `${c?.models ?? 0} การ์ดรุ่น`}
+                  {!products ? "" : mode === "sku" ? t(`${c?.colors ?? 0} การ์ดสี`, `${c?.colors ?? 0} color cards`) : t(`${c?.models ?? 0} การ์ดรุ่น`, `${c?.models ?? 0} model cards`)}
                 </span>
               </div>
             );
@@ -153,10 +155,11 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
 
       <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
         <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.cardSwitch} onChange={(e) => set({ cardSwitch: e.target.checked })} />
-        ให้ลูกค้าสลับเองได้ (ปุ่ม &quot;ดูแบบรุ่น | ดูทีละสี&quot; ข้างช่องเรียง — เริ่มจากแบบที่ตั้งไว้ด้านบน)
+        {t(`ให้ลูกค้าสลับเองได้ (ปุ่ม "ดูแบบรุ่น | ดูทีละสี" ข้างช่องเรียง — เริ่มจากแบบที่ตั้งไว้ด้านบน)`, `Let customers switch (a "By model | By color" button next to sort — starts with the mode set above)`)}
       </label>
       <p className="text-[11px] text-slate-400">
-        การ์ดสี = รูปของสีนั้น · ชื่อ &quot;รุ่น · สี&quot; · กดแล้วเปิดหน้าสินค้าที่เลือกสีไว้ · กรองสีแล้วเหลือเฉพาะการ์ดสีที่ตรง · สินค้าหมด/ราคายังคิดรายรุ่น (เหมือน Section ตารางสินค้า)
+        {t(`การ์ดสี = รูปของสีนั้น · ชื่อ "รุ่น · สี" · กดแล้วเปิดหน้าสินค้าที่เลือกสีไว้ · กรองสีแล้วเหลือเฉพาะการ์ดสีที่ตรง · สินค้าหมด/ราคายังคิดรายรุ่น (เหมือน Section ตารางสินค้า)`, `Color card = that color's image · name "Model · Color" · opens the product with that color picked · color filter keeps only matching cards · sold-out/price still per model (same as the product grid section)`)}
+
       </p>
     </div>
   );

@@ -20,6 +20,8 @@ import { uploadMediaFile } from "@/lib/media-upload";
 import { AssetPicker } from "@/components/asset-picker";
 import { MAX_SKU_WEB_IMAGES, MAX_WEB_IMAGES, isVideoName, type CatalogParent, type HeroPick } from "@/lib/website-image-match";
 import type { Listing } from "@/components/website-listings-panel";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 type Level = "product" | "color";
 type Item = { key: string; kind: "image" | "video" };
@@ -38,14 +40,14 @@ const DRAG_TYPE = "text/x-erp-grid-img";
 const keyUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 const COLS: Record<Level, SlotCol[]> = {
   product: [
-    { id: "h:desktop", label: "Hero คอม", max: 1, hero: true },
-    { id: "h:mobile", label: "Hero มือถือ", max: 1, hero: true },
-    { id: "g", label: `รูปบนเว็บ (≤ ${MAX_WEB_IMAGES})`, max: MAX_WEB_IMAGES, hero: false },
+    { id: "h:desktop", get label() { return tr("Hero คอม", "Hero desktop"); }, max: 1, hero: true },
+    { id: "h:mobile", get label() { return tr("Hero มือถือ", "Hero mobile"); }, max: 1, hero: true },
+    { id: "g", get label() { return tr(`รูปบนเว็บ (≤ ${MAX_WEB_IMAGES})`, `Web images (≤ ${MAX_WEB_IMAGES})`); }, max: MAX_WEB_IMAGES, hero: false },
   ],
   color: [
-    { id: "s", label: `รูปสี (≤ ${MAX_SKU_WEB_IMAGES})`, max: MAX_SKU_WEB_IMAGES, hero: false },
-    { id: "sh:desktop", label: "Hero สี คอม", max: 1, hero: true },
-    { id: "sh:mobile", label: "Hero สี มือถือ", max: 1, hero: true },
+    { id: "s", get label() { return tr(`รูปสี (≤ ${MAX_SKU_WEB_IMAGES})`, `Color images (≤ ${MAX_SKU_WEB_IMAGES})`); }, max: MAX_SKU_WEB_IMAGES, hero: false },
+    { id: "sh:desktop", get label() { return tr("Hero สี คอม", "Color hero desktop"); }, max: 1, hero: true },
+    { id: "sh:mobile", get label() { return tr("Hero สี มือถือ", "Color hero mobile"); }, max: 1, hero: true },
   ],
 };
 const itemOf = (key: string): Item => ({ key, kind: isVideoName(key) ? "video" : "image" });
@@ -68,6 +70,7 @@ export const WebsiteListingsImageGrid = forwardRef<
   }
 >(function WebsiteListingsImageGrid({ shopId, level, listings, rowFilter, onDirtyChange, onOpenFolderUpload, reloadKey }, ref) {
   const toast = useToast();
+  const t = useT();
   const [parents, setParents] = useState<Parent[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, Item[]>>({});
@@ -84,10 +87,10 @@ export const WebsiteListingsImageGrid = forwardRef<
     try {
       const r = await apiFetch(`/api/website/listings/images?shopId=${encodeURIComponent(shopId)}`);
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.error || "โหลดไม่สำเร็จ");
+      if (!r.ok) throw new Error(j?.error || tr("โหลดไม่สำเร็จ", "Load failed"));
       setParents(j.parents ?? []);
     } catch (e) {
-      setLoadErr((e as Error).message || "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่");
+      setLoadErr((e as Error).message || tr("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่", "Couldn't load data, please try again"));
     }
   };
   useEffect(() => {
@@ -145,12 +148,12 @@ export const WebsiteListingsImageGrid = forwardRef<
   const addItems = (sk: string, items: Item[]) => {
     const col = colOfSlot(sk);
     const ok = col.hero ? items : items.filter((x) => x.kind === "image");
-    if (ok.length < items.length) toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
+    if (ok.length < items.length) toast.warning(t("วิดีโอลงได้เฉพาะช่อง Hero", "Videos can only go in Hero slots"));
     if (!ok.length) return;
     const cur = draftRef.current[sk] ?? origOf(sk);
     if (col.hero) return setSlot(sk, [ok[0]]);
     const merged = [...cur, ...ok.filter((x) => !cur.some((y) => y.key === x.key))];
-    if (merged.length > col.max) toast.warning(`ช่องนี้ใส่ได้ ${col.max} รูป — ตัดส่วนเกินออก`);
+    if (merged.length > col.max) toast.warning(t(`ช่องนี้ใส่ได้ ${col.max} รูป — ตัดส่วนเกินออก`, `This slot holds ${col.max} images — extras were dropped`));
     setSlot(sk, merged.slice(0, col.max));
   };
 
@@ -161,7 +164,7 @@ export const WebsiteListingsImageGrid = forwardRef<
     const isVid = (f: File) => f.type.startsWith("video/") || isVideoName(f.name);
     const videos = col.hero ? list.filter(isVid) : [];
     const imgs = list.filter((f) => !isVid(f));
-    if (!col.hero && imgs.length < list.length) toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
+    if (!col.hero && imgs.length < list.length) toast.warning(t("วิดีโอลงได้เฉพาะช่อง Hero", "Videos can only go in Hero slots"));
     const n = videos.length + imgs.length;
     if (!n) return;
     setBusy((b) => ({ ...b, [sk]: (b[sk] ?? 0) + n }));
@@ -170,7 +173,7 @@ export const WebsiteListingsImageGrid = forwardRef<
         try {
           addItems(sk, [{ key: await uploadMediaFile(f, { folder: "storefront-hero" }), kind: "video" }]);
         } catch (e) {
-          toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${(e as Error).message}`);
+          toast.error(t(`อัปโหลด ${f.name} ไม่สำเร็จ: ${(e as Error).message}`, `Upload of ${f.name} failed: ${(e as Error).message}`));
         }
       }
       if (imgs.length) {
@@ -180,16 +183,16 @@ export const WebsiteListingsImageGrid = forwardRef<
           max: 2000,
           target: row ? `${row.code} · ${col.label}` : col.label,
           existingKeys: (draftRef.current[sk] ?? origOf(sk)).map((x) => x.key),
-          onError: (f, e) => toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`),
+          onError: (f, e) => toast.error(t(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`, `Upload of ${f.name} failed: ${e.message}`)),
         });
         if (r?.keys.length) addItems(sk, r.keys.map((key) => ({ key, kind: "image" as const })));
-        else if (r?.skipped) toast.info("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ");
+        else if (r?.skipped) toast.info(t("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ", "These images are already in this slot — not added again"));
       }
     } finally {
       setBusy((b) => ({ ...b, [sk]: Math.max(0, (b[sk] ?? n) - n) }));
     }
   };
-  const drop = useFileDrop((files, sk) => void uploadFiles(sk, files), { accept: ["image/", "video/"], onReject: () => toast.warning("ลากได้เฉพาะรูปหรือวิดีโอ") });
+  const drop = useFileDrop((files, sk) => void uploadFiles(sk, files), { accept: ["image/", "video/"], onReject: () => toast.warning(t("ลากได้เฉพาะรูปหรือวิดีโอ", "You can only drop images or videos")) });
 
   const fromErp = async (r: ImgRow, sk: string) => {
     const [type, id] = r.skuId ? ["skus_v2", r.skuId] : ["parent_skus_v2", r.parentId];
@@ -198,10 +201,10 @@ export const WebsiteListingsImageGrid = forwardRef<
       const keys = ((j?.by_entity?.[id] ?? []) as { file_path: string | null; content_type: string | null }[])
         .filter((a) => a.file_path && (!a.content_type || a.content_type.startsWith("image/")))
         .map((a) => a.file_path as string);
-      if (!keys.length) return toast.info("ใน ERP ยังไม่มีรูปของรายการนี้");
+      if (!keys.length) return toast.info(t("ใน ERP ยังไม่มีรูปของรายการนี้", "No ERP images for this item yet"));
       addItems(sk, keys.map((k) => ({ key: k, kind: "image" })));
     } catch {
-      toast.error("โหลดรูป ERP ไม่สำเร็จ");
+      toast.error(t("โหลดรูป ERP ไม่สำเร็จ", "Couldn't load ERP images"));
     }
   };
 
@@ -221,7 +224,7 @@ export const WebsiteListingsImageGrid = forwardRef<
     if (!it) return true;
     const col = colOfSlot(sk);
     if (it.kind === "video" && !col.hero) {
-      toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
+      toast.warning(t("วิดีโอลงได้เฉพาะช่อง Hero", "Videos can only go in Hero slots"));
       return true;
     }
     if (from === sk) {
@@ -232,7 +235,7 @@ export const WebsiteListingsImageGrid = forwardRef<
     }
     const dst = col.hero ? [] : valOf(sk).filter((x) => x.key !== it.key);
     if (!col.hero && dst.length >= col.max) {
-      toast.warning(`ช่องปลายทางเต็มแล้ว (${col.max})`);
+      toast.warning(t(`ช่องปลายทางเต็มแล้ว (${col.max})`, `Target slot is full (${col.max})`));
       return true;
     }
     dst.splice(before === null ? dst.length : before, 0, it);
@@ -266,13 +269,13 @@ export const WebsiteListingsImageGrid = forwardRef<
       try {
         const r = await apiFetch("/api/website/listings/images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopIds: [shopId], mode: "set", items: [...items.values()] }) });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j?.error || "บันทึกรูปไม่สำเร็จ");
+        if (!r.ok) throw new Error(j?.error || tr("บันทึกรูปไม่สำเร็จ", "Couldn't save images"));
         const bad = new Set(((j.failed ?? []) as { parentId: string }[]).map((f) => f.parentId));
         setDraft((cur) => Object.fromEntries(Object.entries(cur).filter(([sk]) => bad.has(sk.slice(0, sk.indexOf("|"))))));
         void load();
-        return { ok: items.size - bad.size, failed: [...bad].map((pid) => ({ label: byPid.get(pid)?.code ?? pid, error: "บันทึกรูปไม่สำเร็จ" })) };
+        return { ok: items.size - bad.size, failed: [...bad].map((pid) => ({ label: byPid.get(pid)?.code ?? pid, error: tr("บันทึกรูปไม่สำเร็จ", "Couldn't save images") })) };
       } catch (e) {
-        return { ok: 0, failed: [{ label: "รูปภาพ", error: (e as Error).message }] };
+        return { ok: 0, failed: [{ label: tr("รูปภาพ", "Images"), error: (e as Error).message }] };
       }
     },
   }));
@@ -297,7 +300,7 @@ export const WebsiteListingsImageGrid = forwardRef<
         }}
         className={`relative border-b border-slate-100 px-2 py-1.5 align-top ${changed ? "bg-amber-50" : ""}`}
       >
-        <FileDropHint show={drop.over === sk} label={c.hero ? "วางเพื่อตั้ง Hero" : "วางเพื่อเพิ่มรูป"} />
+        <FileDropHint show={drop.over === sk} label={c.hero ? t("วางเพื่อตั้ง Hero", "Drop to set Hero") : t("วางเพื่อเพิ่มรูป", "Drop to add images")} />
         <div className="flex flex-wrap items-start gap-1.5">
           {items.map((it, i) => (
             <div
@@ -319,8 +322,8 @@ export const WebsiteListingsImageGrid = forwardRef<
               <button
                 type="button"
                 onClick={() => setSlot(sk, items.filter((_, j) => j !== i))}
-                aria-label="เอาออก"
-                title="เอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง)"
+                aria-label={t("เอาออก", "Remove")}
+                title={t("เอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง)", "Remove from web (file stays in the library)")}
                 className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-slate-900/80 text-[10px] text-white group-hover:flex"
               >
                 ✕
@@ -330,26 +333,26 @@ export const WebsiteListingsImageGrid = forwardRef<
           {n > 0 && <div className="flex h-16 w-12 items-center justify-center rounded-md border border-dashed border-blue-300 text-[10px] text-blue-600">⏳ {n}</div>}
           {items.length < c.max || c.hero ? (
             <div className="flex flex-wrap items-center gap-1 self-center text-[10px]">
-              <button type="button" onClick={() => { setUploadTo(sk); fileRef.current?.click(); }} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:border-blue-300 hover:text-blue-700" title={c.hero ? "อัปโหลดรูปหรือวิดีโอ" : "อัปโหลดรูป"}>
-                ⬆ อัป
+              <button type="button" onClick={() => { setUploadTo(sk); fileRef.current?.click(); }} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:border-blue-300 hover:text-blue-700" title={c.hero ? t("อัปโหลดรูปหรือวิดีโอ", "Upload image or video") : t("อัปโหลดรูป", "Upload images")}>
+                {t("⬆ อัป", "⬆ Upload")}
               </button>
-              <button type="button" onClick={() => setPicker(sk)} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:border-blue-300 hover:text-blue-700" title="เลือกจากคลัง">
-                📚 คลัง
+              <button type="button" onClick={() => setPicker(sk)} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:border-blue-300 hover:text-blue-700" title={t("เลือกจากคลัง", "Pick from library")}>
+                {t("📚 คลัง", "📚 Library")}
               </button>
               {!c.hero && (
-                <button type="button" onClick={() => void fromErp(r, sk)} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:border-blue-300 hover:text-blue-700" title="ใช้รูปจาก ERP">
+                <button type="button" onClick={() => void fromErp(r, sk)} className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:border-blue-300 hover:text-blue-700" title={t("ใช้รูปจาก ERP", "Use ERP images")}>
                   ERP
                 </button>
               )}
             </div>
           ) : null}
           {items.length > 1 && (
-            <button type="button" onClick={() => setSlot(sk, [])} className="self-center text-[10px] text-slate-400 hover:text-rose-600" title="ล้างช่องนี้ (กลับไปใช้รูป ERP)">
+            <button type="button" onClick={() => setSlot(sk, [])} className="self-center text-[10px] text-slate-400 hover:text-rose-600" title={t("ล้างช่องนี้ (กลับไปใช้รูป ERP)", "Clear this slot (back to ERP images)")}>
               🗑
             </button>
           )}
         </div>
-        {!items.length && !c.hero && <p className="mt-0.5 text-[10px] text-slate-400">ว่าง = ใช้รูป ERP</p>}
+        {!items.length && !c.hero && <p className="mt-0.5 text-[10px] text-slate-400">{t("ว่าง = ใช้รูป ERP", "Empty = use ERP images")}</p>}
       </td>
     );
   };
@@ -359,7 +362,7 @@ export const WebsiteListingsImageGrid = forwardRef<
       <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
         {loadErr}{" "}
         <button type="button" onClick={() => void load()} className="ml-1 underline">
-          ลองใหม่
+          {t("ลองใหม่", "Retry")}
         </button>
       </div>
     );
@@ -376,24 +379,24 @@ export const WebsiteListingsImageGrid = forwardRef<
   return (
     <div {...drop.guard} className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2">
-        <span className="text-xs text-slate-600">ลากรูป/วิดีโอจากเครื่องลงช่องได้เลย · ลากรูปสลับลำดับหรือย้ายข้ามช่อง · รูปแรก = รูปหลัก</span>
+        <span className="text-xs text-slate-600">{t("ลากรูป/วิดีโอจากเครื่องลงช่องได้เลย · ลากรูปสลับลำดับหรือย้ายข้ามช่อง · รูปแรก = รูปหลัก", "Drag images / videos from your computer into a slot · drag to reorder or move between slots · first image = main image")}</span>
         <button
           type="button"
-          onClick={() => (dirty ? toast.info("บันทึกหรือยกเลิกรูปที่แก้ก่อน แล้วค่อยลงทั้งโฟลเดอร์") : onOpenFolderUpload())}
+          onClick={() => (dirty ? toast.info(t("บันทึกหรือยกเลิกรูปที่แก้ก่อน แล้วค่อยลงทั้งโฟลเดอร์", "Save or discard your image changes before uploading a folder")) : onOpenFolderUpload())}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:border-slate-400"
         >
-          📁 ลงทั้งโฟลเดอร์ (จับคู่ชื่อไฟล์)
+          {t("📁 ลงทั้งโฟลเดอร์ (จับคู่ชื่อไฟล์)", "📁 Upload a whole folder (match by file name)")}
         </button>
       </div>
       {!visible.length ? (
-        <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">ไม่พบแถว ลองเปลี่ยนคำค้นหรือเอาตัวกรองออก</div>
+        <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">{t("ไม่พบแถว ลองเปลี่ยนคำค้นหรือเอาตัวกรองออก", "No rows found — try another search or remove filters")}</div>
       ) : (
         <div className="max-h-[62vh] overflow-auto rounded-xl border border-slate-200 bg-white">
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
                 <th className="sticky left-0 top-0 z-20 w-56 min-w-[14rem] border-b border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] font-medium text-slate-500">
-                  {level === "product" ? "สินค้า" : "สี"} ({visible.length})
+                  {level === "product" ? t("สินค้า", "Product") : t("สี", "Color")} ({visible.length})
                 </th>
                 {cols.map((c) => (
                   <th key={c.id} className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 px-2 py-2 text-left text-[11px] font-medium text-slate-500" style={{ minWidth: c.hero ? 130 : 360 }}>
@@ -409,7 +412,7 @@ export const WebsiteListingsImageGrid = forwardRef<
                     <div className="flex items-start gap-2">
                       {r.erpKey && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={keyUrl(r.erpKey, 96)} alt="" title="รูปปกใน ERP (ใช้เมื่อช่องเว็บว่าง)" className="h-10 w-10 shrink-0 rounded object-cover opacity-70" loading="lazy" />
+                        <img src={keyUrl(r.erpKey, 96)} alt="" title={t("รูปปกใน ERP (ใช้เมื่อช่องเว็บว่าง)", "ERP cover image (used when web slots are empty)")} className="h-10 w-10 shrink-0 rounded object-cover opacity-70" loading="lazy" />
                       )}
                       <div className="min-w-0">
                         <div className="text-[13px] font-medium text-slate-800">{r.code}</div>
@@ -427,7 +430,7 @@ export const WebsiteListingsImageGrid = forwardRef<
           {visible.length > page.length && (
             <div className="border-t border-slate-100 p-2 text-center">
               <button type="button" onClick={() => setLimit((x) => x + PAGE)} className="text-xs text-blue-600 hover:underline">
-                แสดงเพิ่มอีก {Math.min(PAGE, visible.length - page.length)} แถว (เห็น {page.length}/{visible.length})
+                {t(`แสดงเพิ่มอีก ${Math.min(PAGE, visible.length - page.length)} แถว (เห็น ${page.length}/${visible.length})`, `Show ${Math.min(PAGE, visible.length - page.length)} more rows (showing ${page.length}/${visible.length})`)}
               </button>
             </div>
           )}
@@ -442,7 +445,7 @@ export const WebsiteListingsImageGrid = forwardRef<
         }}
         multiple={!pickerCol?.hero}
         {...(pickerCol?.hero ? { kinds: ["image", "video"] } : { typeFilter: "image" })}
-        title={pickerCol?.hero ? "เลือกรูปหรือวิดีโอ Hero" : "เลือกรูปบนเว็บ (เลือกได้หลายรูป)"}
+        title={pickerCol?.hero ? t("เลือกรูปหรือวิดีโอ Hero", "Pick Hero image or video") : t("เลือกรูปบนเว็บ (เลือกได้หลายรูป)", "Pick web images (multiple allowed)")}
       />
       <input
         ref={fileRef}

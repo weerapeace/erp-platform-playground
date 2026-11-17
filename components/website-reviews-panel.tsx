@@ -14,6 +14,8 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { REVIEW_STATUSES, type ReviewStatus } from "@/lib/website-reviews";
+import { useT } from "@/components/i18n";
+import { getLang, tr } from "@/lib/lang";
 
 interface Row {
   id: string;
@@ -35,9 +37,10 @@ interface Row {
 }
 
 const stars = (n: number) => "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n);
-const thDate = (iso: string) => new Date(iso).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+const thDate = (iso: string) => new Date(iso).toLocaleString(getLang() === "en" ? "en-GB" : "th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
+  const t = useT();
   const toast = useToast();
   const [status, setStatus] = useState<ReviewStatus>("pending");
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -57,7 +60,7 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
         setCounts(j.counts ?? {});
       })
       .catch(() => {
-        toast.error("โหลดรีวิวไม่สำเร็จ");
+        toast.error(tr("โหลดรีวิวไม่สำเร็จ", "Couldn't load reviews"));
         setRows([]);
       });
   }, [shopSlug, status, toast]);
@@ -69,16 +72,16 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
       const res = await apiFetch("/api/website/reviews", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, shopId, action, text }) });
       const j = await res.json().catch(() => ({}));
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
         return false;
       }
       const msg =
-        action === "approve" ? `ขึ้นเว็บแล้ว${j.points ? ` · ให้ ${j.points} แต้มแก่ลูกค้า` : ""}` : action === "hide" ? "ซ่อนรีวิวแล้ว" : action === "pending" ? "ย้ายกลับไปรอตรวจ" : action === "reply" ? (text?.trim() ? "บันทึกคำตอบแล้ว — ขึ้นใต้รีวิวบนเว็บ" : "ลบคำตอบแล้ว") : "ลบรีวิวแล้ว";
+        action === "approve" ? `${t("ขึ้นเว็บแล้ว", "Now live")}${j.points ? t(` · ให้ ${j.points} แต้มแก่ลูกค้า`, ` · gave the customer ${j.points} points`) : ""}` : action === "hide" ? t("ซ่อนรีวิวแล้ว", "Review hidden") : action === "pending" ? t("ย้ายกลับไปรอตรวจ", "Moved back to pending") : action === "reply" ? (text?.trim() ? t("บันทึกคำตอบแล้ว — ขึ้นใต้รีวิวบนเว็บ", "Reply saved — shows under the review on the site") : t("ลบคำตอบแล้ว", "Reply removed")) : t("ลบรีวิวแล้ว", "Review deleted");
       toast.success(msg);
       load();
       return true;
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
       return false;
     } finally {
       setBusy(false);
@@ -90,7 +93,7 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
     setReply(r.reply ?? "");
   };
 
-  if (rows === null) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  if (rows === null) return <div className="py-16 text-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>;
 
   return (
     <div className="space-y-3">
@@ -108,23 +111,23 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
       </div>
 
       <MiniTable<Row>
-        title="⭐ รีวิวสินค้า"
+        title={t("⭐ รีวิวสินค้า", "⭐ Product reviews")}
         rows={rows}
         rowKey={(r) => r.id}
-        countUnit="รีวิว"
+        countUnit={t("รีวิว", "reviews")}
         searchText={(r) => `${r.parent_code} ${r.product_name ?? ""} ${r.author_name} ${r.body} ${r.order_no ?? ""}`}
-        searchPlaceholder="ค้นหารหัสรุ่น / ชื่อ / ข้อความ / เลขออเดอร์"
+        searchPlaceholder={t("ค้นหารหัสรุ่น / ชื่อ / ข้อความ / เลขออเดอร์", "Search model code / name / text / order no.")}
         onRowClick={openRow}
         emptyText={
           <div className="py-6 text-center">
-            <p className="text-sm text-slate-600">{status === "pending" ? "ไม่มีรีวิวรอตรวจ 🎉" : "ยังไม่มีรีวิวในกลุ่มนี้"}</p>
-            <p className="text-xs text-slate-400 mt-1">เปิดรีวิว/ตั้งแต้ม/อนุมัติอัตโนมัติ ที่แท็บ 🏪 ข้อมูลร้าน › กลุ่ม ⭐ รีวิวสินค้า</p>
+            <p className="text-sm text-slate-600">{status === "pending" ? t("ไม่มีรีวิวรอตรวจ 🎉", "No reviews pending 🎉") : t("ยังไม่มีรีวิวในกลุ่มนี้", "No reviews in this group yet")}</p>
+            <p className="text-xs text-slate-400 mt-1">{t("เปิดรีวิว/ตั้งแต้ม/อนุมัติอัตโนมัติ ที่แท็บ 🏪 ข้อมูลร้าน › กลุ่ม ⭐ รีวิวสินค้า", "Turn on reviews / set points / auto-approve in the 🏪 Shop info tab › ⭐ Product reviews group")}</p>
           </div>
         }
         columns={[
           {
             key: "product",
-            header: "สินค้า",
+            header: t("สินค้า", "Product"),
             width: "1.2fr",
             cell: (r) => (
               <span className="min-w-0">
@@ -134,32 +137,32 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
             ),
             sortValue: (r) => r.parent_code,
           },
-          { key: "rating", header: "ดาว", width: "6rem", cell: (r) => <span className="text-amber-500 tracking-tight">{stars(r.rating)}</span>, sortValue: (r) => r.rating },
+          { key: "rating", header: t("ดาว", "Stars"), width: "6rem", cell: (r) => <span className="text-amber-500 tracking-tight">{stars(r.rating)}</span>, sortValue: (r) => r.rating },
           {
             key: "body",
-            header: "รีวิว",
+            header: t("รีวิว", "Review"),
             width: "2.4fr",
             cell: (r) => (
               <span className="flex items-center gap-2 min-w-0">
                 {r.images[0] && <img src={r2ImageUrl(r.images[0], 96) ?? ""} alt="" className="w-9 h-9 rounded object-cover shrink-0" />}
-                <span className="text-sm text-slate-700 line-clamp-2">{r.body || <span className="text-slate-400">(ให้ดาวอย่างเดียว)</span>}</span>
-                {r.reply && <span className="text-[10px] text-blue-600 shrink-0">💬 ตอบแล้ว</span>}
+                <span className="text-sm text-slate-700 line-clamp-2">{r.body || <span className="text-slate-400">{t("(ให้ดาวอย่างเดียว)", "(stars only)")}</span>}</span>
+                {r.reply && <span className="text-[10px] text-blue-600 shrink-0">{t("💬 ตอบแล้ว", "💬 Replied")}</span>}
               </span>
             ),
           },
           {
             key: "who",
-            header: "ลูกค้า",
+            header: t("ลูกค้า", "Customer"),
             width: "1fr",
             cell: (r) => (
               <span className="text-xs text-slate-600">
                 {r.author_name || "—"}
-                {r.verified ? <span className="ml-1 text-emerald-600" title={r.order_no ? `ออเดอร์ ${r.order_no}` : undefined}>✓ ซื้อจริง</span> : <span className="ml-1 text-slate-400">แขก</span>}
-                {r.points_awarded > 0 && <span className="block text-[10px] text-amber-700">+{r.points_awarded} แต้ม</span>}
+                {r.verified ? <span className="ml-1 text-emerald-600" title={r.order_no ? t(`ออเดอร์ ${r.order_no}`, `Order ${r.order_no}`) : undefined}>{t("✓ ซื้อจริง", "✓ Verified buyer")}</span> : <span className="ml-1 text-slate-400">{t("แขก", "Guest")}</span>}
+                {r.points_awarded > 0 && <span className="block text-[10px] text-amber-700">{t(`+${r.points_awarded} แต้ม`, `+${r.points_awarded} points`)}</span>}
               </span>
             ),
           },
-          { key: "date", header: "เมื่อ", width: "7rem", cell: (r) => <span className="text-[11px] text-slate-500">{thDate(r.created_at)}</span>, sortValue: (r) => r.created_at },
+          { key: "date", header: t("เมื่อ", "When"), width: "7rem", cell: (r) => <span className="text-[11px] text-slate-500">{thDate(r.created_at)}</span>, sortValue: (r) => r.created_at },
           {
             key: "act",
             header: "",
@@ -169,25 +172,25 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
               <span className="inline-flex gap-1" onClick={(e) => e.stopPropagation()}>
                 {r.status !== "approved" && (
                   <button type="button" disabled={busy} onClick={() => void act(r, "approve")} className="h-7 px-2 text-[11px] rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">
-                    ขึ้นเว็บ
+                    {t("ขึ้นเว็บ", "Publish")}
                   </button>
                 )}
                 {r.status !== "hidden" && (
                   <button type="button" disabled={busy} onClick={() => void act(r, "hide")} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 hover:border-slate-400 disabled:opacity-40">
-                    ซ่อน
+                    {t("ซ่อน", "Hide")}
                   </button>
                 )}
               </span>
             ),
           },
         ]}
-        footnote="ขึ้นเว็บ = ลูกค้าเห็นที่หน้าสินค้า + ดาวเฉลี่ยบนการ์ด/ผลค้นหา Google · ซ่อน = ไม่โชว์แต่ยังเก็บไว้ · กดแถวเพื่อดูรูปเต็มและตอบกลับ"
+        footnote={t("ขึ้นเว็บ = ลูกค้าเห็นที่หน้าสินค้า + ดาวเฉลี่ยบนการ์ด/ผลค้นหา Google · ซ่อน = ไม่โชว์แต่ยังเก็บไว้ · กดแถวเพื่อดูรูปเต็มและตอบกลับ", "Publish = customers see it on the product page + average stars on cards/Google results · Hide = not shown but kept · click a row to see full photos and reply")}
       />
 
       <ERPModal
         open={!!open}
         onClose={() => setOpen(null)}
-        title={open ? `รีวิว ${open.parent_code} · ${stars(open.rating)}` : ""}
+        title={open ? t(`รีวิว ${open.parent_code} · ${stars(open.rating)}`, `Review ${open.parent_code} · ${stars(open.rating)}`) : ""}
         size="md"
         defaultExpanded={false}
         hasUnsavedChanges={!!open && reply !== (open.reply ?? "")}
@@ -195,27 +198,27 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
           open && (
             <div className="flex flex-wrap items-center gap-2 w-full">
               <button type="button" onClick={() => setDel(open)} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-red-600 hover:border-red-300">
-                ลบ
+                {t("ลบ", "Delete")}
               </button>
               <span className="flex-1" />
               {open.status !== "pending" && (
                 <button type="button" disabled={busy} onClick={() => void act(open, "pending").then((ok) => ok && setOpen(null))} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:border-slate-400 disabled:opacity-40">
-                  กลับไปรอตรวจ
+                  {t("กลับไปรอตรวจ", "Back to pending")}
                 </button>
               )}
               {open.status !== "hidden" && (
                 <button type="button" disabled={busy} onClick={() => void act(open, "hide").then((ok) => ok && setOpen(null))} className="h-9 px-3 text-sm rounded-lg border border-slate-200 hover:border-slate-400 disabled:opacity-40">
-                  ซ่อน
+                  {t("ซ่อน", "Hide")}
                 </button>
               )}
               {reply !== (open.reply ?? "") && (
                 <button type="button" disabled={busy} onClick={() => void act(open, "reply", reply).then((ok) => ok && setOpen({ ...open, reply: reply.trim() || null }))} className="h-9 px-3 text-sm rounded-lg bg-slate-900 text-white disabled:opacity-40">
-                  บันทึกคำตอบ
+                  {t("บันทึกคำตอบ", "Save reply")}
                 </button>
               )}
               {open.status !== "approved" && (
                 <button type="button" disabled={busy} onClick={() => void act(open, "approve").then((ok) => ok && setOpen(null))} className="h-9 px-4 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">
-                  ขึ้นเว็บ
+                  {t("ขึ้นเว็บ", "Publish")}
                 </button>
               )}
             </div>
@@ -230,13 +233,13 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
                 {open.variant_label ? ` · ${open.variant_label}` : ""}
               </p>
               <p>
-                {open.author_name || "—"} · {open.verified ? `✓ ซื้อจริง${open.order_no ? ` (ออเดอร์ ${open.order_no})` : ""}` : "แขก (ไม่ได้ยืนยันการซื้อ)"} · {thDate(open.created_at)}
+                {open.author_name || "—"} · {open.verified ? `${t("✓ ซื้อจริง", "✓ Verified buyer")}${open.order_no ? t(` (ออเดอร์ ${open.order_no})`, ` (order ${open.order_no})`) : ""}` : t("แขก (ไม่ได้ยืนยันการซื้อ)", "Guest (purchase not verified)")} · {thDate(open.created_at)}
               </p>
-              {open.points_awarded > 0 && <p className="text-amber-700">ให้แต้มแล้ว {open.points_awarded} แต้ม</p>}
-              {open.moderated_by_name && <p>ตรวจล่าสุดโดย {open.moderated_by_name === "auto" ? "ระบบ (อนุมัติอัตโนมัติ)" : open.moderated_by_name}</p>}
+              {open.points_awarded > 0 && <p className="text-amber-700">{t(`ให้แต้มแล้ว ${open.points_awarded} แต้ม`, `Gave ${open.points_awarded} points`)}</p>}
+              {open.moderated_by_name && <p>{t("ตรวจล่าสุดโดย", "Last reviewed by")} {open.moderated_by_name === "auto" ? t("ระบบ (อนุมัติอัตโนมัติ)", "System (auto-approved)") : open.moderated_by_name}</p>}
             </div>
             <p className="text-amber-500 text-lg">{stars(open.rating)}</p>
-            <p className="text-sm text-slate-800 whitespace-pre-line">{open.body || <span className="text-slate-400">(ลูกค้าให้ดาวอย่างเดียว ไม่ได้เขียน)</span>}</p>
+            <p className="text-sm text-slate-800 whitespace-pre-line">{open.body || <span className="text-slate-400">{t("(ลูกค้าให้ดาวอย่างเดียว ไม่ได้เขียน)", "(customer gave stars only, no text)")}</span>}</p>
             {open.images.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {open.images.map((k) => (
@@ -247,14 +250,14 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
               </div>
             )}
             <div>
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">💬 คำตอบจากร้าน (โชว์ใต้รีวิวบนเว็บ · เว้นว่าง = ไม่ตอบ)</label>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">{t("💬 คำตอบจากร้าน (โชว์ใต้รีวิวบนเว็บ · เว้นว่าง = ไม่ตอบ)", "💬 Shop reply (shown under the review on the site · blank = no reply)")}</label>
               <textarea value={reply} onChange={(e) => setReply(e.target.value.slice(0, 1000))} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="เช่น ขอบคุณมากค่ะ ดีใจที่ชอบนะคะ 🙏" />
             </div>
           </div>
         )}
       </ERPModal>
 
-      <ERPModal open={!!zoom} onClose={() => setZoom(null)} title="รูปจากลูกค้า" size="lg" defaultExpanded={false}>
+      <ERPModal open={!!zoom} onClose={() => setZoom(null)} title={t("รูปจากลูกค้า", "Customer photo")} size="lg" defaultExpanded={false}>
         {zoom && <img src={r2ImageUrl(zoom, 1400) ?? ""} alt="" className="w-full h-auto rounded-lg" />}
       </ERPModal>
 
@@ -266,9 +269,9 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
           setDel(null);
         }}
         variant="danger"
-        title="ลบรีวิวนี้ถาวร?"
-        message="รีวิวและรูปจะหายไปเลย (กู้คืนไม่ได้) · ถ้าแค่ไม่อยากให้โชว์ ใช้ปุ่ม &quot;ซ่อน&quot; แทน · แต้มที่ให้ไปแล้วไม่ถูกดึงคืน"
-        confirmText="ลบถาวร"
+        title={t("ลบรีวิวนี้ถาวร?", "Delete this review permanently?")}
+        message={t('รีวิวและรูปจะหายไปเลย (กู้คืนไม่ได้) · ถ้าแค่ไม่อยากให้โชว์ ใช้ปุ่ม "ซ่อน" แทน · แต้มที่ให้ไปแล้วไม่ถูกดึงคืน', 'The review and photos will be gone for good (can\'t be restored) · to just stop showing it, use "Hide" instead · points already given aren\'t taken back')}
+        confirmText={t("ลบถาวร", "Delete permanently")}
       />
     </div>
   );

@@ -9,12 +9,15 @@
  */
 import { useMemo, useState } from "react";
 import { MoneyInput } from "@/components/money-input";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { cutoffText, quoteMethod, visibleMethods, type ShippingConfig } from "@/lib/website-shipping";
 
 const money = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
-const QUICK_POSTALS: [string, string][] = [["10200", "กทม."], ["50000", "เชียงใหม่"], ["84320", "เกาะสมุย"]];
+const quickPostals = (): [string, string][] => [["10200", tr("กทม.", "Bangkok")], ["50000", tr("เชียงใหม่", "Chiang Mai")], ["84320", tr("เกาะสมุย", "Koh Samui")]];
 
 export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConfig; selectedId: string | null }) {
+  const t = useT();
   const [subtotal, setSubtotal] = useState("990");
   const [qty, setQty] = useState("1");
   const [postal, setPostal] = useState("10200");
@@ -30,30 +33,30 @@ export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConf
   return (
     <div className="space-y-3" data-quote-preview>
       <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
-        <div className="mb-2 text-xs font-semibold text-slate-600">🧮 ลองสมมติตะกร้าลูกค้า</div>
+        <div className="mb-2 text-xs font-semibold text-slate-600">{t("🧮 ลองสมมติตะกร้าลูกค้า", "🧮 Try a sample cart")}</div>
         <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
           <label className="space-y-0.5">
-            <span className="block">ยอดสินค้า (บาท)</span>
+            <span className="block">{t("ยอดสินค้า (บาท)", "Subtotal (THB)")}</span>
             <MoneyInput value={subtotal} onChange={setSubtotal} className={`${small} w-full`} />
           </label>
           <label className="space-y-0.5">
-            <span className="block">จำนวนชิ้น</span>
+            <span className="block">{t("จำนวนชิ้น", "Items")}</span>
             <input type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} className={`${small} w-full`} />
           </label>
           <div className="col-span-2 space-y-0.5">
-            <span className="block">รหัสไปรษณีย์ผู้รับ</span>
+            <span className="block">{t("รหัสไปรษณีย์ผู้รับ", "Recipient postcode")}</span>
             <div className="flex flex-wrap items-center gap-1.5">
-              <input value={postal} onChange={(e) => setPostal(e.target.value.replace(/\D/g, "").slice(0, 5))} className={`${small} w-20 font-mono`} aria-label="รหัสไปรษณีย์ผู้รับ" />
-              {QUICK_POSTALS.map(([p, t]) => (
+              <input value={postal} onChange={(e) => setPostal(e.target.value.replace(/\D/g, "").slice(0, 5))} className={`${small} w-20 font-mono`} aria-label={t("รหัสไปรษณีย์ผู้รับ", "Recipient postcode")} />
+              {quickPostals().map(([p, nm]) => (
                 <button key={p} type="button" onClick={() => setPostal(p)}
                   className={`rounded-full border px-2 py-0.5 text-[11px] ${postal === p ? "border-blue-400 bg-white text-blue-700" : "border-slate-200 bg-white/70 text-slate-500 hover:text-slate-700"}`}>
-                  {t}
+                  {nm}
                 </button>
               ))}
             </div>
           </div>
           <label className="col-span-2 inline-flex items-center gap-1.5">
-            <input type="checkbox" checked={cod} onChange={(e) => setCod(e.target.checked)} /> ลูกค้าเลือกเก็บเงินปลายทาง
+            <input type="checkbox" checked={cod} onChange={(e) => setCod(e.target.checked)} /> {t("ลูกค้าเลือกเก็บเงินปลายทาง", "Customer chooses cash on delivery")}
           </label>
         </div>
       </div>
@@ -61,9 +64,9 @@ export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConf
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-shipping-methods-preview>
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h4 className="text-base font-semibold text-slate-900">วิธีจัดส่ง</h4>
-          <span className="text-[10px] uppercase tracking-wider text-slate-400">หน้าชำระเงินของลูกค้า</span>
+          <span className="text-[10px] uppercase tracking-wider text-slate-400">{t("หน้าชำระเงินของลูกค้า", "Customer checkout")}</span>
         </div>
-        {!rows.length && <p className="text-sm text-slate-400">ยังไม่มีวิธีที่เปิดอยู่ — ลูกค้าจะสั่งซื้อไม่ได้</p>}
+        {!rows.length && <p className="text-sm text-slate-400">{t("ยังไม่มีวิธีที่เปิดอยู่ — ลูกค้าจะสั่งซื้อไม่ได้", "No method is on — customers can't order")}</p>}
         <div className="flex flex-col gap-2">
           {rows.map(({ m, q }) => {
             const on = m.id === selectedId;
@@ -98,20 +101,20 @@ export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConf
       {sel && sq && (
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700" data-quote-selected>
           {!sel.enabled ? (
-            <span className="text-slate-400">“{sel.name}” ปิดอยู่ — ลูกค้าไม่เห็นวิธีนี้</span>
+            <span className="text-slate-400">“{sel.name}” {t("ปิดอยู่ — ลูกค้าไม่เห็นวิธีนี้", "is off — customers don't see it")}</span>
           ) : !sq.available ? (
-            <span className="text-rose-700">“{sel.name}”: {sq.reason === "area" ? "ส่งไม่ถึงรหัสไปรษณีย์นี้" : "เก็บเงินปลายทางไม่ได้กับวิธีนี้"}</span>
+            <span className="text-rose-700">“{sel.name}”: {sq.reason === "area" ? t("ส่งไม่ถึงรหัสไปรษณีย์นี้", "Doesn't ship to this postcode") : t("เก็บเงินปลายทางไม่ได้กับวิธีนี้", "COD not available with this method")}</span>
           ) : (
             <>
-              ถ้าลูกค้าเลือก <b>{sel.name}</b>: ค่าส่ง <b className="tabular-nums">{money(sq.fee)}</b>
-              {sq.codFee ? <> + เก็บปลายทาง <b className="tabular-nums">{money(sq.codFee)}</b></> : null}
-              {sq.freeApplied ? " (ได้ส่งฟรีแล้ว)" : ""}
-              {sq.box ? <> · แพ็กกล่อง <b>{sq.box}</b></> : null}
+              {t("ถ้าลูกค้าเลือก", "If the customer picks")} <b>{sel.name}</b>: {t("ค่าส่ง", "shipping")} <b className="tabular-nums">{money(sq.fee)}</b>
+              {sq.codFee ? <> + {t("เก็บปลายทาง", "COD")} <b className="tabular-nums">{money(sq.codFee)}</b></> : null}
+              {sq.freeApplied ? t(" (ได้ส่งฟรีแล้ว)", " (free shipping applied)") : ""}
+              {sq.box ? <> · {t("แพ็กกล่อง", "box")} <b>{sq.box}</b></> : null}
             </>
           )}
         </div>
       )}
-      <p className="text-[11px] text-slate-400">คิดด้วยสูตรเดียวกับเว็บร้านจริงและตอนรับออเดอร์</p>
+      <p className="text-[11px] text-slate-400">{t("คิดด้วยสูตรเดียวกับเว็บร้านจริงและตอนรับออเดอร์", "Calculated with the same formula as the live shop and order intake")}</p>
     </div>
   );
 }

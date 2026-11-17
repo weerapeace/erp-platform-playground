@@ -16,6 +16,7 @@ import { cleanTagRules, hasManualCategories } from "@/lib/website-tag-categories
 import { baseColor, baseColorEn, buildSizeGrid, cleanVariantOff, colorAllOff, type SizeGrid } from "@/lib/website-size-options";
 
 import { PRODUCT_SPEC_FIELDS } from "@/lib/website-theme";
+import { tr } from "@/lib/lang";
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
@@ -34,31 +35,31 @@ export type ImageSource = "parent" | "skus" | "both";
 
 /** ป้ายของแต่ละแหล่งข้อมูล (ของกลาง) — แท็บจับคู่ฟิลด์ (website-field-map-panel) + กล่อง 🔗 ข้อมูลที่เชื่อม (lib/website-listing-linked) */
 export const NAME_SOURCE_OPTIONS: { v: NameSource; l: string }[] = [
-  { v: "name_th", l: "ชื่อไทย (name_th)" },
-  { v: "name_platform", l: "ชื่อแพลตฟอร์ม (name_platform)" },
-  { v: "name_en", l: "ชื่ออังกฤษ (name_en)" },
-  { v: "sku_name", l: "ชื่อ SKU (sku_name)" },
-  { v: "code", l: "รหัสสินค้า (code)" },
+  { v: "name_th", get l() { return tr("ชื่อไทย (name_th)", "Thai name (name_th)"); } },
+  { v: "name_platform", get l() { return tr("ชื่อแพลตฟอร์ม (name_platform)", "Platform name (name_platform)"); } },
+  { v: "name_en", get l() { return tr("ชื่ออังกฤษ (name_en)", "English name (name_en)"); } },
+  { v: "sku_name", get l() { return tr("ชื่อ SKU (sku_name)", "SKU name (sku_name)"); } },
+  { v: "code", get l() { return tr("รหัสสินค้า (code)", "Product code (code)"); } },
 ];
 export const PRICE_SOURCE_OPTIONS: { v: PriceSource; l: string }[] = [
   // 💰 ราคาจาก SKU ลูก = คิดตาม SKU ที่ลูกค้าเลือกจริง (การ์ดโชว์ "เริ่มต้น" ราคาต่ำสุด) · สูงสุด/ต่ำสุด ใช้เฉพาะสินค้าที่ไม่มีตัวเลือก
-  { v: "sku_max", l: "ราคาตาม SKU ที่ลูกค้าเลือก (แนะนำ · ไม่มีตัวเลือก = สูงสุด)" },
-  { v: "sku_min", l: "ราคาตาม SKU ที่ลูกค้าเลือก (ไม่มีตัวเลือก = ต่ำสุด)" },
-  { v: "final_price", l: "ราคาสุทธิ (final_price)" },
-  { v: "sale_price", l: "ราคาขาย (sale_price)" },
-  { v: "fake_price", l: "ราคาก่อนลด (fake_price)" },
+  { v: "sku_max", get l() { return tr("ราคาตาม SKU ที่ลูกค้าเลือก (แนะนำ · ไม่มีตัวเลือก = สูงสุด)", "Price of the SKU the customer picks (recommended · no options = highest)"); } },
+  { v: "sku_min", get l() { return tr("ราคาตาม SKU ที่ลูกค้าเลือก (ไม่มีตัวเลือก = ต่ำสุด)", "Price of the SKU the customer picks (no options = lowest)"); } },
+  { v: "final_price", get l() { return tr("ราคาสุทธิ (final_price)", "Net price (final_price)"); } },
+  { v: "sale_price", get l() { return tr("ราคาขาย (sale_price)", "Selling price (sale_price)"); } },
+  { v: "fake_price", get l() { return tr("ราคาก่อนลด (fake_price)", "Pre-discount price (fake_price)"); } },
 ];
 export const DESC_SOURCE_OPTIONS: { v: DescSource; l: string }[] = [
-  { v: "platform_description", l: "คำโปรยแพลตฟอร์ม (สั้น — แนะนำ)" },
-  { v: "introduction", l: "บทนำ (introduction)" },
-  { v: "description", l: "คำอธิบายเต็ม (description)" },
-  { v: "english_description", l: "คำอธิบายอังกฤษ" },
-  { v: "none", l: "— ไม่ดึง —" },
+  { v: "platform_description", get l() { return tr("คำโปรยแพลตฟอร์ม (สั้น — แนะนำ)", "Platform tagline (short — recommended)"); } },
+  { v: "introduction", get l() { return tr("บทนำ (introduction)", "Introduction (introduction)"); } },
+  { v: "description", get l() { return tr("คำอธิบายเต็ม (description)", "Full description (description)"); } },
+  { v: "english_description", get l() { return tr("คำอธิบายอังกฤษ", "English description"); } },
+  { v: "none", get l() { return tr("— ไม่ดึง —", "— Don't pull —"); } },
 ];
 export const IMAGE_SOURCE_OPTIONS: { v: ImageSource; l: string }[] = [
-  { v: "parent", l: "รูปปก + แกลเลอรี Parent SKU" },
-  { v: "skus", l: "รูปของ SKU ลูกแต่ละสี" },
-  { v: "both", l: "Parent ก่อน แล้วตามด้วยรูปรายสี" },
+  { v: "parent", get l() { return tr("รูปปก + แกลเลอรี Parent SKU", "Parent SKU cover + gallery"); } },
+  { v: "skus", get l() { return tr("รูปของ SKU ลูกแต่ละสี", "Child SKU image per color"); } },
+  { v: "both", get l() { return tr("Parent ก่อน แล้วตามด้วยรูปรายสี", "Parent first, then per-color images"); } },
 ];
 /**
  * หมวดสินค้าบนเว็บ — เป็น "รหัสอะไรก็ได้" ที่เจ้าของตั้งเอง ไม่ใช่รายการตายตัวอีกแล้ว

@@ -12,6 +12,7 @@ import { ERPModal } from "@/components/modal";
 import { ColorInput } from "@/components/color-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import type { CardBadge } from "@/lib/website-card-badges";
+import { useT } from "@/components/i18n";
 
 // แคชต่อร้าน (หน้าต่างเดียวมีหลายช่อง/หลายร้าน — โหลดครั้งเดียว) · บันทึกแล้วล้าง
 const cache = new Map<string, Promise<CardBadge[]>>();
@@ -65,6 +66,7 @@ const CUSTOM = "__custom";
 const MANAGE = "__manage";
 
 export function CardBadgeSelect({ shopId, value, onChange, className = "" }: { shopId: string; value: string; onChange: (v: string) => void; className?: string }) {
+  const t = useT();
   const badges = useCardBadges(shopId);
   const [typing, setTyping] = useState(false);
   const [mgr, setMgr] = useState(false);
@@ -75,9 +77,9 @@ export function CardBadgeSelect({ shopId, value, onChange, className = "" }: { s
     <div className="space-y-1">
       {typing ? (
         <div className="flex gap-1.5">
-          <input autoFocus value={value} maxLength={40} onChange={(e) => onChange(e.target.value)} placeholder="พิมพ์ป้าย" className={cls} />
+          <input autoFocus value={value} maxLength={40} onChange={(e) => onChange(e.target.value)} placeholder={t("พิมพ์ป้าย", "Type a badge")} className={cls} />
           <button type="button" onClick={() => setTyping(false)} className="shrink-0 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">
-            เลือกจากรายการ
+            {t("เลือกจากรายการ", "Pick from list")}
           </button>
         </div>
       ) : (
@@ -91,20 +93,20 @@ export function CardBadgeSelect({ shopId, value, onChange, className = "" }: { s
           }}
           className={cls}
         >
-          <option value="">— ไม่มีป้าย —</option>
+          <option value="">{t("— ไม่มีป้าย —", "— No badge —")}</option>
           {badges.map((b) => (
             <option key={b.id} value={b.name}>
               {b.name}
             </option>
           ))}
-          {!inList && <option value={value}>{value} (พิมพ์เอง)</option>}
-          <option value={CUSTOM}>✏️ พิมพ์เอง…</option>
-          <option value={MANAGE}>⚙ จัดการป้ายของร้าน…</option>
+          {!inList && <option value={value}>{value} {t("(พิมพ์เอง)", "(custom)")}</option>}
+          <option value={CUSTOM}>{t("✏️ พิมพ์เอง…", "✏️ Type your own…")}</option>
+          <option value={MANAGE}>{t("⚙ จัดการป้ายของร้าน…", "⚙ Manage shop badges…")}</option>
         </select>
       )}
       {value.trim() && (
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-          <BadgePill name={value} color={color} /> {inList ? "ตัวอย่างบนการ์ด" : "ป้ายนอกรายการ — ใช้สีป้ายปกติของธีม"}
+          <BadgePill name={value} color={color} /> {inList ? t("ตัวอย่างบนการ์ด", "Card preview") : t("ป้ายนอกรายการ — ใช้สีป้ายปกติของธีม", "Not in list — uses the theme's default badge color")}
         </div>
       )}
       <CardBadgesManager open={mgr} onClose={() => setMgr(false)} shopId={shopId} />
@@ -113,6 +115,7 @@ export function CardBadgeSelect({ shopId, value, onChange, className = "" }: { s
 }
 
 export function CardBadgesManager({ open, onClose, shopId }: { open: boolean; onClose: () => void; shopId: string }) {
+  const t = useT();
   const toast = useToast();
   const [list, setList] = useState<CardBadge[]>([]);
   const [saved, setSaved] = useState("");
@@ -131,17 +134,17 @@ export function CardBadgesManager({ open, onClose, shopId }: { open: boolean; on
   const dup = (i: number) => list.some((b, k) => k !== i && b.name.trim().toLowerCase() === list[i].name.trim().toLowerCase());
 
   const save = async () => {
-    if (list.some((b, i) => !b.name.trim() || dup(i))) return toast.error("ชื่อป้ายต้องไม่ว่างและไม่ซ้ำกัน");
+    if (list.some((b, i) => !b.name.trim() || dup(i))) return toast.error(t("ชื่อป้ายต้องไม่ว่างและไม่ซ้ำกัน", "Badge names must not be empty or duplicated"));
     setSaving(true);
     try {
       const j = await (await apiFetch("/api/website/card-badges", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, badges: list }) })).json();
-      if (!j.ok) return toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+      if (!j.ok) return toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
       publish(shopId, j.badges as CardBadge[]);
       setList(j.badges);
       setSaved(JSON.stringify(j.badges));
-      toast.success(`บันทึกรายการป้ายแล้ว${j.renamed ? ` · เปลี่ยนชื่อป้ายในสินค้า ${j.renamed} รุ่นตาม` : ""}`);
+      toast.success(t(`บันทึกรายการป้ายแล้ว${j.renamed ? ` · เปลี่ยนชื่อป้ายในสินค้า ${j.renamed} รุ่นตาม` : ""}`, `Badge list saved${j.renamed ? ` · renamed the badge on ${j.renamed} models` : ""}`));
     } catch {
-      toast.error("บันทึกไม่สำเร็จ");
+      toast.error(t("บันทึกไม่สำเร็จ", "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -151,13 +154,13 @@ export function CardBadgesManager({ open, onClose, shopId }: { open: boolean; on
     <ERPModal
       open={open}
       onClose={onClose}
-      title="🏷 ป้ายบนการ์ดของร้าน"
-      description="ตั้งชื่อ + สีที่เดียว แล้วเลือกใช้ในสินค้าแต่ละรุ่น / แก้หลายรายการ · เปลี่ยนชื่อป้าย = สินค้าที่ใช้ป้ายนั้นเปลี่ยนตาม"
+      title={t("🏷 ป้ายบนการ์ดของร้าน", "🏷 Shop card badges")}
+      description={t("ตั้งชื่อ + สีที่เดียว แล้วเลือกใช้ในสินค้าแต่ละรุ่น / แก้หลายรายการ · เปลี่ยนชื่อป้าย = สินค้าที่ใช้ป้ายนั้นเปลี่ยนตาม", "Set name + color in one place, then pick it per model / in bulk edit · renaming a badge updates every product using it")}
       size="md"
       hasUnsavedChanges={dirty}
       footer={
         <button type="button" onClick={() => void save()} disabled={!dirty || saving} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-40">
-          {saving ? "กำลังบันทึก…" : "💾 บันทึก"}
+          {saving ? t("กำลังบันทึก…", "Saving…") : t("💾 บันทึก", "💾 Save")}
         </button>
       }
     >
@@ -169,8 +172,8 @@ export function CardBadgesManager({ open, onClose, shopId }: { open: boolean; on
             <div className="w-32 shrink-0">
               <ColorInput value={b.color} onChange={(v) => set(i, { color: v })} allowText={false} />
             </div>
-            <BadgePill name={b.name || "ป้าย"} color={b.color} />
-            <button type="button" onClick={() => setList((l) => l.filter((_, k) => k !== i))} className="text-xs text-rose-500 px-1" title="ลบป้ายนี้ (สินค้าที่ใช้อยู่ยังโชว์ป้ายเดิม แต่ใช้สีปกติ)">
+            <BadgePill name={b.name || t("ป้าย", "Badge")} color={b.color} />
+            <button type="button" onClick={() => setList((l) => l.filter((_, k) => k !== i))} className="text-xs text-rose-500 px-1" title={t("ลบป้ายนี้ (สินค้าที่ใช้อยู่ยังโชว์ป้ายเดิม แต่ใช้สีปกติ)", "Delete this badge (products using it keep the text but use the default color)")}>
               🗑
             </button>
           </li>
@@ -182,7 +185,7 @@ export function CardBadgesManager({ open, onClose, shopId }: { open: boolean; on
         disabled={list.length >= 30}
         className="mt-2 text-sm text-blue-600 hover:underline disabled:opacity-40"
       >
-        + เพิ่มป้าย
+        {t("+ เพิ่มป้าย", "+ Add badge")}
       </button>
     </ERPModal>
   );

@@ -13,6 +13,8 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
 import { sourceLabel, type AbResult, type WebStatsSummary } from "@/lib/website-web-stats";
+import { useT } from "@/components/i18n";
+import { getLang, tr } from "@/lib/lang";
 
 interface Resp {
   since: string;
@@ -24,10 +26,14 @@ interface Resp {
 }
 
 const RANGES = [7, 30, 90] as const;
-const DEVICE_LABEL: Record<string, string> = { mobile: "📱 มือถือ", tablet: "📲 แท็บเล็ต", desktop: "💻 คอมพิวเตอร์" };
+const DEVICE_LABEL: Record<string, string> = {
+  get mobile() { return tr("📱 มือถือ", "📱 Mobile"); },
+  get tablet() { return tr("📲 แท็บเล็ต", "📲 Tablet"); },
+  get desktop() { return tr("💻 คอมพิวเตอร์", "💻 Desktop"); },
+};
 const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(a / b < 0.1 ? 1 : 0)}%` : "–");
 const n = (v: number) => v.toLocaleString("th-TH");
-const thDay = (d: string) => new Date(`${d}T00:00:00+07:00`).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short" });
+const thDay = (d: string) => new Date(`${d}T00:00:00+07:00`).toLocaleDateString(getLang() === "en" ? "en-GB" : "th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short" });
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -50,13 +56,14 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 }
 
 const VERDICT: Record<AbResult["verdict"], { text: string; cls: string }> = {
-  need_more: { text: "⏳ คนยังน้อย — รอให้แต่ละกลุ่มมีคนเห็นอย่างน้อย 100 คน", cls: "bg-slate-100 text-slate-600" },
-  no_diff: { text: "🤝 ยังไม่ต่างกันชัดเจน", cls: "bg-amber-50 text-amber-700" },
-  A: { text: "🏆 แบบ A ขายดีกว่า (มั่นใจ 95%)", cls: "bg-emerald-50 text-emerald-700" },
-  B: { text: "🏆 แบบ B ขายดีกว่า (มั่นใจ 95%)", cls: "bg-emerald-50 text-emerald-700" },
+  need_more: { get text() { return tr("⏳ คนยังน้อย — รอให้แต่ละกลุ่มมีคนเห็นอย่างน้อย 100 คน", "⏳ Not enough visitors — wait until each group has at least 100 viewers"); }, cls: "bg-slate-100 text-slate-600" },
+  no_diff: { get text() { return tr("🤝 ยังไม่ต่างกันชัดเจน", "🤝 No clear difference yet"); }, cls: "bg-amber-50 text-amber-700" },
+  A: { get text() { return tr("🏆 แบบ A ขายดีกว่า (มั่นใจ 95%)", "🏆 Version A sells better (95% confidence)"); }, cls: "bg-emerald-50 text-emerald-700" },
+  B: { get text() { return tr("🏆 แบบ B ขายดีกว่า (มั่นใจ 95%)", "🏆 Version B sells better (95% confidence)"); }, cls: "bg-emerald-50 text-emerald-700" },
 };
 
 export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
+  const t = useT();
   const [days, setDays] = useState<(typeof RANGES)[number]>(30);
   const [data, setData] = useState<Resp | null>(null);
   const [error, setError] = useState("");
@@ -71,20 +78,20 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
         if (j.error) setError(j.error);
         else setData(j);
       })
-      .catch(() => setError("โหลดสถิติไม่สำเร็จ"))
+      .catch(() => setError(tr("โหลดสถิติไม่สำเร็จ", "Couldn't load stats")))
       .finally(() => setLoading(false));
   }, [shopId, days]);
   useEffect(load, [load]);
 
   const s = data?.summary;
-  const t = s?.totals;
-  const funnel = t
+  const tot = s?.totals;
+  const funnel = tot
     ? [
-        { label: "เข้าเว็บ", v: t.sessions },
-        { label: "ดูสินค้า", v: t.viewed },
-        { label: "ใส่ตะกร้า", v: t.carted },
-        { label: "เริ่มชำระเงิน", v: t.checkout },
-        { label: "สั่งซื้อ", v: t.orders },
+        { label: t("เข้าเว็บ", "Visit site"), v: tot.sessions },
+        { label: t("ดูสินค้า", "Viewed product"), v: tot.viewed },
+        { label: t("ใส่ตะกร้า", "Added to cart"), v: tot.carted },
+        { label: t("เริ่มชำระเงิน", "Started checkout"), v: tot.checkout },
+        { label: t("สั่งซื้อ", "Ordered"), v: tot.orders },
       ]
     : [];
   const maxDay = Math.max(1, ...(s?.daily ?? []).map((d) => d.sessions));
@@ -96,69 +103,69 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
           {RANGES.map((r) => (
             <button key={r} onClick={() => setDays(r)} className={`px-3 py-1.5 text-sm rounded-md ${days === r ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-              {r} วัน
+              {t(`${r} วัน`, `${r} days`)}
             </button>
           ))}
         </div>
         <button onClick={load} className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50" disabled={loading}>
-          ↻ โหลดใหม่
+          {t("↻ โหลดใหม่", "↻ Reload")}
         </button>
-        <p className="text-xs text-slate-500">นับเองจากเว็บร้าน (ไม่ต้องตั้ง Google) · นับเป็นตัวเลขรวม ไม่เก็บว่าใครเข้า · "รอบ" = เข้าเว็บ 1 ครั้ง (เงียบเกิน 30 นาที = รอบใหม่)</p>
+        <p className="text-xs text-slate-500">{t("นับเองจากเว็บร้าน (ไม่ต้องตั้ง Google) · นับเป็นตัวเลขรวม ไม่เก็บว่าใครเข้า · \"รอบ\" = เข้าเว็บ 1 ครั้ง (เงียบเกิน 30 นาที = รอบใหม่)", "Counted by the shop site itself (no Google setup) · totals only, doesn't record who visited · \"session\" = 1 visit (over 30 minutes idle = new session)")}</p>
       </div>
 
       {loading && !data ? (
-        <LoadingState label="กำลังโหลดสถิติ…" />
+        <LoadingState label={t("กำลังโหลดสถิติ…", "Loading stats…")} />
       ) : error ? (
         <ErrorState title={error} onRetry={load} />
-      ) : !s || !t ? null : t.sessions === 0 && t.orders === 0 ? (
-        <EmptyState icon="📈" title="ยังไม่มีสถิติในช่วงนี้" hint="ตัวนับเริ่มทำงานหลังอัปเดตเว็บร้านชุดนี้ — ตัวเลขจะขึ้นเมื่อมีลูกค้าเข้าเว็บ (ไม่นับตอนเปิดพรีวิวจาก ERP)" />
+      ) : !s || !tot ? null : tot.sessions === 0 && tot.orders === 0 ? (
+        <EmptyState icon="📈" title={t("ยังไม่มีสถิติในช่วงนี้", "No stats for this period yet")} hint={t("ตัวนับเริ่มทำงานหลังอัปเดตเว็บร้านชุดนี้ — ตัวเลขจะขึ้นเมื่อมีลูกค้าเข้าเว็บ (ไม่นับตอนเปิดพรีวิวจาก ERP)", "The counter starts after this shop site update — numbers appear when customers visit (ERP previews aren't counted)")} />
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            <Kpi label="รอบเข้าเว็บ" value={n(t.sessions)} sub={`เปิดหน้า ${n(t.pageviews)}`} />
-            <Kpi label="ดูสินค้า" value={n(t.viewed)} sub={`${pct(t.viewed, t.sessions)} ของรอบ`} />
-            <Kpi label="ใส่ตะกร้า" value={n(t.carted)} sub={`${pct(t.carted, t.sessions)} ของรอบ`} />
-            <Kpi label="ออเดอร์" value={n(t.orders)} sub="ไม่นับที่ยกเลิก" />
-            <Kpi label="ยอดขาย" value={formatAmount(t.revenue)} sub={t.orders ? `เฉลี่ย ${formatAmount(Math.round(t.revenue / t.orders))}/ออเดอร์` : undefined} />
-            <Kpi label="อัตราซื้อ" value={pct(t.orders, t.sessions)} sub="ออเดอร์ ÷ รอบเข้าเว็บ" />
+            <Kpi label={t("รอบเข้าเว็บ", "Sessions")} value={n(tot.sessions)} sub={t(`เปิดหน้า ${n(tot.pageviews)}`, `${n(tot.pageviews)} page views`)} />
+            <Kpi label={t("ดูสินค้า", "Viewed product")} value={n(tot.viewed)} sub={t(`${pct(tot.viewed, tot.sessions)} ของรอบ`, `${pct(tot.viewed, tot.sessions)} of sessions`)} />
+            <Kpi label={t("ใส่ตะกร้า", "Added to cart")} value={n(tot.carted)} sub={t(`${pct(tot.carted, tot.sessions)} ของรอบ`, `${pct(tot.carted, tot.sessions)} of sessions`)} />
+            <Kpi label={t("ออเดอร์", "Orders")} value={n(tot.orders)} sub={t("ไม่นับที่ยกเลิก", "Excl. cancelled")} />
+            <Kpi label={t("ยอดขาย", "Sales")} value={formatAmount(tot.revenue)} sub={tot.orders ? t(`เฉลี่ย ${formatAmount(Math.round(tot.revenue / tot.orders))}/ออเดอร์`, `Avg ${formatAmount(Math.round(tot.revenue / tot.orders))}/order`) : undefined} />
+            <Kpi label={t("อัตราซื้อ", "Conversion")} value={pct(tot.orders, tot.sessions)} sub={t("ออเดอร์ ÷ รอบเข้าเว็บ", "Orders ÷ sessions")} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="🪜 ขั้นการซื้อ" hint="ลูกค้าหลุดตรงไหนมากที่สุด — แท่งสั้นลงมาก = ขั้นนั้นมีปัญหา">
+            <Section title={t("🪜 ขั้นการซื้อ", "🪜 Purchase funnel")} hint={t("ลูกค้าหลุดตรงไหนมากที่สุด — แท่งสั้นลงมาก = ขั้นนั้นมีปัญหา", "Where customers drop off most — a big drop in bar length = a problem at that step")}>
               <div className="space-y-2">
                 {funnel.map((f, i) => {
                   const prev = i ? funnel[i - 1].v : 0;
-                  const w = t.sessions ? Math.max(2, (f.v / t.sessions) * 100) : 0;
+                  const w = tot.sessions ? Math.max(2, (f.v / tot.sessions) * 100) : 0;
                   return (
                     <div key={f.label} data-funnel-step>
                       <div className="flex items-baseline justify-between text-sm">
                         <span className="text-slate-700">{i + 1}. {f.label}</span>
                         <span className="tabular-nums text-slate-800 font-medium">
-                          {n(f.v)} <span className="text-xs text-slate-400 font-normal">{pct(f.v, t.sessions)}</span>
+                          {n(f.v)} <span className="text-xs text-slate-400 font-normal">{pct(f.v, tot.sessions)}</span>
                         </span>
                       </div>
                       <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden mt-1">
                         <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, w)}%` }} />
                       </div>
-                      {i > 0 && prev > 0 && f.v < prev && <div className="text-[11px] text-rose-500 mt-0.5">หลุด {pct(prev - f.v, prev)} จากขั้นก่อน</div>}
+                      {i > 0 && prev > 0 && f.v < prev && <div className="text-[11px] text-rose-500 mt-0.5">{t(`หลุด ${pct(prev - f.v, prev)} จากขั้นก่อน`, `${pct(prev - f.v, prev)} dropped from previous step`)}</div>}
                     </div>
                   );
                 })}
               </div>
             </Section>
 
-            <Section title="📅 รายวัน" hint="แท่ง = รอบเข้าเว็บ · ตัวเลขบน = ออเดอร์ (ชี้ที่แท่งดูยอด)">
+            <Section title={t("📅 รายวัน", "📅 Daily")} hint={t("แท่ง = รอบเข้าเว็บ · ตัวเลขบน = ออเดอร์ (ชี้ที่แท่งดูยอด)", "Bar = sessions · number on top = orders (hover a bar for sales)")}>
               {s.daily.length ? (
                 <div className="flex items-end gap-[3px] h-40 overflow-x-auto">
                   {s.daily.map((d) => (
-                    <div key={d.day} className="flex-1 min-w-[10px] flex flex-col items-center justify-end h-full" title={`${thDay(d.day)} · ${n(d.sessions)} รอบ · ${n(d.orders)} ออเดอร์ · ${formatAmount(d.revenue)}`}>
+                    <div key={d.day} className="flex-1 min-w-[10px] flex flex-col items-center justify-end h-full" title={t(`${thDay(d.day)} · ${n(d.sessions)} รอบ · ${n(d.orders)} ออเดอร์ · ${formatAmount(d.revenue)}`, `${thDay(d.day)} · ${n(d.sessions)} sessions · ${n(d.orders)} orders · ${formatAmount(d.revenue)}`)}>
                       {d.orders > 0 && <span className="text-[10px] text-emerald-600 font-semibold">{d.orders}</span>}
                       <div className="w-full rounded-t bg-blue-400/80" style={{ height: `${Math.max(2, (d.sessions / maxDay) * 100)}%` }} />
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-slate-400">ยังไม่มีข้อมูล</p>
+                <p className="text-sm text-slate-400">{t("ยังไม่มีข้อมูล", "No data yet")}</p>
               )}
               {s.daily.length > 0 && (
                 <div className="flex justify-between text-[11px] text-slate-400 mt-1">
@@ -170,24 +177,24 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
           </div>
 
           <MiniTable
-            title="🧭 ลูกค้ามาจากไหน"
+            title={t("🧭 ลูกค้ามาจากไหน", "🧭 Traffic sources")}
             rows={s.sources}
             rowKey={(r) => r.source}
             dense
-            countUnit="แหล่ง"
+            countUnit={t("แหล่ง", "sources")}
             columns={[
-              { key: "source", header: "แหล่งที่มา", width: "1.6fr", cell: (r) => sourceLabel(r.source), sortValue: (r) => sourceLabel(r.source) },
-              { key: "sessions", header: "รอบ", align: "right", width: "5rem", cell: (r) => n(r.sessions), sortValue: (r) => r.sessions },
-              { key: "carted", header: "ใส่ตะกร้า", align: "right", width: "6rem", cell: (r) => n(r.carted), sortValue: (r) => r.carted },
-              { key: "orders", header: "ออเดอร์", align: "right", width: "5rem", cell: (r) => n(r.orders), sortValue: (r) => r.orders },
-              { key: "revenue", header: "ยอดขาย", align: "right", width: "7rem", cell: (r) => formatAmount(r.revenue), sortValue: (r) => r.revenue },
-              { key: "conv", header: "อัตราซื้อ", align: "right", width: "6rem", cell: (r) => (r.sessions ? pct(r.orders, r.sessions) : "–"), sortValue: (r) => (r.sessions ? r.orders / r.sessions : -1) },
+              { key: "source", header: t("แหล่งที่มา", "Source"), width: "1.6fr", cell: (r) => sourceLabel(r.source), sortValue: (r) => sourceLabel(r.source) },
+              { key: "sessions", header: t("รอบ", "Sessions"), align: "right", width: "5rem", cell: (r) => n(r.sessions), sortValue: (r) => r.sessions },
+              { key: "carted", header: t("ใส่ตะกร้า", "Added to cart"), align: "right", width: "6rem", cell: (r) => n(r.carted), sortValue: (r) => r.carted },
+              { key: "orders", header: t("ออเดอร์", "Orders"), align: "right", width: "5rem", cell: (r) => n(r.orders), sortValue: (r) => r.orders },
+              { key: "revenue", header: t("ยอดขาย", "Sales"), align: "right", width: "7rem", cell: (r) => formatAmount(r.revenue), sortValue: (r) => r.revenue },
+              { key: "conv", header: t("อัตราซื้อ", "Conversion"), align: "right", width: "6rem", cell: (r) => (r.sessions ? pct(r.orders, r.sessions) : "–"), sortValue: (r) => (r.sessions ? r.orders / r.sessions : -1) },
             ]}
-            footnote="แหล่ง = ลิงก์ที่ลูกค้ากดมา (Google/Facebook/LINE…) หรือรหัส utm_source ในลิงก์โฆษณา · ใส่ ?utm_source=ชื่อ ท้ายลิงก์ที่แชร์ จะแยกได้ละเอียดขึ้น"
+            footnote={t("แหล่ง = ลิงก์ที่ลูกค้ากดมา (Google/Facebook/LINE…) หรือรหัส utm_source ในลิงก์โฆษณา · ใส่ ?utm_source=ชื่อ ท้ายลิงก์ที่แชร์ จะแยกได้ละเอียดขึ้น", "Source = the link customers came from (Google/Facebook/LINE…) or the utm_source code in ad links · add ?utm_source=name to shared links for finer breakdown")}
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Section title="📱 อุปกรณ์">
+            <Section title={t("📱 อุปกรณ์", "📱 Devices")}>
               <div className="space-y-2">
                 {s.devices.length ? (
                   s.devices.map((d) => (
@@ -195,7 +202,7 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
                       <div className="flex justify-between text-sm">
                         <span>{DEVICE_LABEL[d.device] ?? d.device}</span>
                         <span className="tabular-nums">
-                          {n(d.sessions)} <span className="text-xs text-slate-400">{pct(d.sessions, t.sessions)}</span>
+                          {n(d.sessions)} <span className="text-xs text-slate-400">{pct(d.sessions, tot.sessions)}</span>
                         </span>
                       </div>
                       <div className="h-2 rounded-full bg-slate-100 overflow-hidden mt-1">
@@ -204,57 +211,57 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-400">ยังไม่มีข้อมูล</p>
+                  <p className="text-sm text-slate-400">{t("ยังไม่มีข้อมูล", "No data yet")}</p>
                 )}
               </div>
             </Section>
             <MiniTable
-              title="🚪 หน้าแรกที่ลูกค้าเข้า"
+              title={t("🚪 หน้าแรกที่ลูกค้าเข้า", "🚪 Landing pages")}
               rows={s.landing}
               rowKey={(r) => r.path}
               dense
-              countUnit="หน้า"
-              emptyText="ยังไม่มีข้อมูล"
+              countUnit={t("หน้า", "pages")}
+              emptyText={t("ยังไม่มีข้อมูล", "No data yet")}
               columns={[
-                { key: "path", header: "หน้า", width: "1fr", cell: (r) => <span className="font-mono text-xs break-all">{r.path}</span> },
-                { key: "sessions", header: "รอบ", align: "right", width: "5rem", cell: (r) => n(r.sessions), sortValue: (r) => r.sessions },
+                { key: "path", header: t("หน้า", "Page"), width: "1fr", cell: (r) => <span className="font-mono text-xs break-all">{r.path}</span> },
+                { key: "sessions", header: t("รอบ", "Sessions"), align: "right", width: "5rem", cell: (r) => n(r.sessions), sortValue: (r) => r.sessions },
               ]}
             />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <MiniTable
-              title="👀 สินค้าที่ถูกดู"
+              title={t("👀 สินค้าที่ถูกดู", "👀 Viewed products")}
               rows={s.products}
               rowKey={(r) => r.code}
               dense
-              countUnit="รุ่น"
-              emptyText="ยังไม่มีข้อมูล"
+              countUnit={t("รุ่น", "models")}
+              emptyText={t("ยังไม่มีข้อมูล", "No data yet")}
               columns={[
-                { key: "code", header: "รุ่น", width: "1.6fr", cell: (r) => <span><span className="font-mono text-xs text-slate-500">{r.code}</span> {data?.names[r.code] ?? ""}</span>, sortValue: (r) => r.code },
-                { key: "views", header: "ดู", align: "right", width: "4.5rem", cell: (r) => n(r.views), sortValue: (r) => r.views },
-                { key: "carts", header: "ใส่ตะกร้า", align: "right", width: "5.5rem", cell: (r) => n(r.carts), sortValue: (r) => r.carts },
-                { key: "rate", header: "% ใส่", align: "right", width: "4.5rem", cell: (r) => pct(r.carts, r.views), sortValue: (r) => (r.views ? r.carts / r.views : -1) },
+                { key: "code", header: t("รุ่น", "Model"), width: "1.6fr", cell: (r) => <span><span className="font-mono text-xs text-slate-500">{r.code}</span> {data?.names[r.code] ?? ""}</span>, sortValue: (r) => r.code },
+                { key: "views", header: t("ดู", "Views"), align: "right", width: "4.5rem", cell: (r) => n(r.views), sortValue: (r) => r.views },
+                { key: "carts", header: t("ใส่ตะกร้า", "Added to cart"), align: "right", width: "5.5rem", cell: (r) => n(r.carts), sortValue: (r) => r.carts },
+                { key: "rate", header: t("% ใส่", "% added"), align: "right", width: "4.5rem", cell: (r) => pct(r.carts, r.views), sortValue: (r) => (r.views ? r.carts / r.views : -1) },
               ]}
-              footnote="ดูเยอะแต่ใส่ตะกร้าน้อย = ลองเช็กราคา/รูป/รายละเอียดของรุ่นนั้น"
+              footnote={t("ดูเยอะแต่ใส่ตะกร้าน้อย = ลองเช็กราคา/รูป/รายละเอียดของรุ่นนั้น", "Many views but few add-to-carts = check that model's price/photos/details")}
             />
             <MiniTable
-              title="🔍 คำที่ลูกค้าค้น"
+              title={t("🔍 คำที่ลูกค้าค้น", "🔍 Customer searches")}
               rows={data?.terms ?? []}
               rowKey={(r) => r.q}
               dense
-              countUnit="คำ"
-              emptyText="ยังไม่มีคนค้น"
+              countUnit={t("คำ", "terms")}
+              emptyText={t("ยังไม่มีคนค้น", "No searches yet")}
               columns={[
-                { key: "q", header: "คำค้น", width: "1fr", cell: (r) => <span className={r.lastResults === 0 ? "text-rose-600" : ""}>{r.q}</span> },
-                { key: "hits", header: "ครั้ง", align: "right", width: "4.5rem", cell: (r) => n(r.hits), sortValue: (r) => r.hits },
-                { key: "res", header: "เจอ", align: "right", width: "4.5rem", cell: (r) => (r.lastResults === 0 ? <span className="text-rose-600">ไม่เจอ</span> : n(r.lastResults)) },
+                { key: "q", header: t("คำค้น", "Search term"), width: "1fr", cell: (r) => <span className={r.lastResults === 0 ? "text-rose-600" : ""}>{r.q}</span> },
+                { key: "hits", header: t("ครั้ง", "Times"), align: "right", width: "4.5rem", cell: (r) => n(r.hits), sortValue: (r) => r.hits },
+                { key: "res", header: t("เจอ", "Results"), align: "right", width: "4.5rem", cell: (r) => (r.lastResults === 0 ? <span className="text-rose-600">{t("ไม่เจอ", "None found")}</span> : n(r.lastResults)) },
               ]}
-              footnote="สีแดง = ค้นแล้วไม่เจอ → เติมคำพ้องที่ 🏪 ข้อมูลร้าน › 🔍"
+              footnote={t("สีแดง = ค้นแล้วไม่เจอ → เติมคำพ้องที่ 🏪 ข้อมูลร้าน › 🔍", "Red = no results → add synonyms in 🏪 Shop info › 🔍")}
             />
           </div>
 
-          <Section title="🧪 ทดสอบ A/B" hint="ตั้งที่ Section ในหน้าแรก/หน้าเว็บ (🧪 ทดสอบ A/B) — ลูกค้าครึ่งหนึ่งเห็นแบบ A อีกครึ่งเห็นแบบ B แล้วเทียบว่าแบบไหนขายดีกว่า">
+          <Section title={t("🧪 ทดสอบ A/B", "🧪 A/B tests")} hint={t("ตั้งที่ Section ในหน้าแรก/หน้าเว็บ (🧪 ทดสอบ A/B) — ลูกค้าครึ่งหนึ่งเห็นแบบ A อีกครึ่งเห็นแบบ B แล้วเทียบว่าแบบไหนขายดีกว่า", "Set up in a Section on the home page/web pages (🧪 A/B test) — half of customers see version A, the other half version B, then compare which sells better")}>
             {s.ab.length ? (
               <div className="space-y-3">
                 {s.ab.map((x) => (
@@ -266,12 +273,12 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
                     <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
                       {(["A", "B"] as const).map((v) => (
                         <div key={v} className={`rounded-lg p-2 ${x.verdict === v ? "bg-emerald-50" : "bg-slate-50"}`}>
-                          <div className="font-semibold">แบบ {v}</div>
+                          <div className="font-semibold">{t(`แบบ ${v}`, `Version ${v}`)}</div>
                           <div className="text-slate-600 tabular-nums">
-                            เห็น {n(x[v].seen)} · ใส่ตะกร้า {n(x[v].carts)} · ออเดอร์ {n(x[v].orders)}
+                            {t(`เห็น ${n(x[v].seen)} · ใส่ตะกร้า ${n(x[v].carts)} · ออเดอร์ ${n(x[v].orders)}`, `Seen ${n(x[v].seen)} · added to cart ${n(x[v].carts)} · orders ${n(x[v].orders)}`)}
                           </div>
                           <div className="text-slate-800 tabular-nums">
-                            อัตราซื้อ <b>{pct(x[v].orders, x[v].seen)}</b> · {formatAmount(x[v].revenue)}
+                            {t("อัตราซื้อ", "Conversion")} <b>{pct(x[v].orders, x[v].seen)}</b> · {formatAmount(x[v].revenue)}
                           </div>
                         </div>
                       ))}
@@ -280,7 +287,7 @@ export function WebsiteStatsPanel({ shopId }: { shopId: string }) {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-400">ยังไม่มีการทดสอบในช่วงนี้</p>
+              <p className="text-sm text-slate-400">{t("ยังไม่มีการทดสอบในช่วงนี้", "No tests in this period")}</p>
             )}
           </Section>
         </>

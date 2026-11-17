@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { apiFetch } from "@/lib/api";
 import { groupMatches, type GroupMatch, type ProductGroup } from "@/lib/website-promotions";
@@ -62,6 +63,7 @@ export function ProductGroupEditor({
   onSaved: (id: string) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [form, setForm] = useState<Form>(() =>
     initial
       ? {
@@ -95,13 +97,13 @@ export function ProductGroupEditor({
       const r = await apiFetch("/api/website/product-groups", { method: f.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
         return;
       }
-      toast.success(f.id ? `บันทึกกลุ่ม "${f.name}" แล้ว — โปรที่ใช้กลุ่มนี้เปลี่ยนตามภายใน ~1 นาที` : `สร้างกลุ่ม "${f.name}" แล้ว`);
+      toast.success(f.id ? t(`บันทึกกลุ่ม "${f.name}" แล้ว — โปรที่ใช้กลุ่มนี้เปลี่ยนตามภายใน ~1 นาที`, `Group "${f.name}" saved — promotions using it update within ~1 min`) : t(`สร้างกลุ่ม "${f.name}" แล้ว`, `Group "${f.name}" created`));
       onSaved(f.id ?? j.id);
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setSaving(false);
     }
@@ -111,28 +113,28 @@ export function ProductGroupEditor({
     <ERPModal
       open={open}
       onClose={onClose}
-      title={f.id ? `แก้กลุ่ม ${initial?.name ?? ""}` : "สร้างกลุ่มสินค้า"}
+      title={f.id ? t(`แก้กลุ่ม ${initial?.name ?? ""}`, `Edit group ${initial?.name ?? ""}`) : t("สร้างกลุ่มสินค้า", "Create product group")}
       size="md"
       footer={
         <div className="flex items-center gap-2 w-full">
-          <span className="flex-1 text-xs text-slate-500">ตอนนี้ตรง <b className="text-slate-800">{matched.length}</b> รุ่น{f.mode === "smart" ? " · สินค้าเข้าใหม่ที่ตรงเงื่อนไขเข้ากลุ่มเอง" : ""}</span>
-          <button type="button" onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200">ยกเลิก</button>
-          <button type="button" onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm rounded-lg bg-orange-600 text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกกลุ่ม"}</button>
+          <span className="flex-1 text-xs text-slate-500">{t("ตอนนี้ตรง", "Matches now:")} <b className="text-slate-800">{matched.length}</b> {t("รุ่น", "models")}{f.mode === "smart" ? t(" · สินค้าเข้าใหม่ที่ตรงเงื่อนไขเข้ากลุ่มเอง", " · new matching products join automatically") : ""}</span>
+          <button type="button" onClick={onClose} className="h-9 px-4 text-sm rounded-lg border border-slate-200">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm rounded-lg bg-orange-600 text-white disabled:opacity-50">{saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกกลุ่ม", "Save group")}</button>
         </div>
       }
     >
       <div className="space-y-4">
         <div>
-          <label className={labelCls}>ชื่อกลุ่ม (เห็นเฉพาะใน ERP)</label>
-          <input className={inputCls} value={f.name} onChange={(e) => set({ name: e.target.value.slice(0, 60) })} placeholder="เช่น ของขวัญปีใหม่ / กระเป๋าราคากลาง / เคลียร์สต็อก" />
+          <label className={labelCls}>{t("ชื่อกลุ่ม (เห็นเฉพาะใน ERP)", "Group name (ERP only)")}</label>
+          <input className={inputCls} value={f.name} onChange={(e) => set({ name: e.target.value.slice(0, 60) })} placeholder={t("เช่น ของขวัญปีใหม่ / กระเป๋าราคากลาง / เคลียร์สต็อก", "e.g. New Year gifts / mid-price bags / clearance")} />
         </div>
         <div>
-          <label className={labelCls}>แบบของกลุ่ม</label>
+          <label className={labelCls}>{t("แบบของกลุ่ม", "Group type")}</label>
           <div className="grid gap-1.5 sm:grid-cols-2">
             {(
               [
-                ["manual", "✋ เลือกเอง", "หยิบรุ่นใส่กลุ่มทีละตัว"],
-                ["smart", "✨ อัตโนมัติ", "ตามเงื่อนไข — ของเข้าใหม่ที่ตรง เข้ากลุ่มเอง"],
+                ["manual", t("✋ เลือกเอง", "✋ Manual"), t("หยิบรุ่นใส่กลุ่มทีละตัว", "Pick models one by one")],
+                ["smart", t("✨ อัตโนมัติ", "✨ Automatic"), t("ตามเงื่อนไข — ของเข้าใหม่ที่ตรง เข้ากลุ่มเอง", "By conditions — new matching products join automatically")],
               ] as const
             ).map(([k, l, h]) => (
               <button key={k} type="button" onClick={() => set({ mode: k })} className={`text-left rounded-lg border px-3 py-2 ${f.mode === k ? "border-orange-500 bg-orange-50" : "border-slate-200 hover:border-slate-400"}`}>
@@ -145,14 +147,14 @@ export function ProductGroupEditor({
 
         {f.mode === "manual" ? (
           <div>
-            <label className={labelCls}>สินค้าในกลุ่ม</label>
+            <label className={labelCls}>{t("สินค้าในกลุ่ม", "Products in group")}</label>
             <WebsiteProductPicker shopSlug={shopSlug} value={f.codes} max={500} onChange={(codes) => set({ codes })} />
           </div>
         ) : (
           <div className="space-y-3 rounded-lg border border-slate-200 p-3">
-            <p className="text-[11px] text-slate-500">ทุกข้อที่ตั้งต้องตรง · ข้อที่เว้นว่าง = ไม่ใช้</p>
+            <p className="text-[11px] text-slate-500">{t("ทุกข้อที่ตั้งต้องตรง · ข้อที่เว้นว่าง = ไม่ใช้", "All set conditions must match · empty = not used")}</p>
             <div>
-              <label className={labelCls}>อยู่ในหมวด (หมวดใดหมวดหนึ่ง)</label>
+              <label className={labelCls}>{t("อยู่ในหมวด (หมวดใดหมวดหนึ่ง)", "In category (any of)")}</label>
               <div className="flex flex-wrap gap-1.5">
                 {cats.map((c) => {
                   const on = f.categories.includes(c.key);
@@ -162,32 +164,32 @@ export function ProductGroupEditor({
                     </button>
                   );
                 })}
-                {!cats.length && <span className="text-xs text-slate-400">ยังไม่มีหมวดเว็บ — ตั้งที่แท็บ 📂 หมวดหมู่</span>}
+                {!cats.length && <span className="text-xs text-slate-400">{t("ยังไม่มีหมวดเว็บ — ตั้งที่แท็บ 📂 หมวดหมู่", "No web categories yet — set them in the 📂 Categories tab")}</span>}
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
-                <label className={labelCls}>ราคาตั้งแต่ (฿)</label>
-                <input type="number" min={0} className={inputCls} value={f.priceMin} onChange={(e) => set({ priceMin: e.target.value })} placeholder="ไม่จำกัด" />
+                <label className={labelCls}>{t("ราคาตั้งแต่ (฿)", "Price from (฿)")}</label>
+                <input type="number" min={0} className={inputCls} value={f.priceMin} onChange={(e) => set({ priceMin: e.target.value })} placeholder={t("ไม่จำกัด", "No limit")} />
               </div>
               <div>
-                <label className={labelCls}>ราคาไม่เกิน (฿)</label>
-                <input type="number" min={0} className={inputCls} value={f.priceMax} onChange={(e) => set({ priceMax: e.target.value })} placeholder="ไม่จำกัด" />
+                <label className={labelCls}>{t("ราคาไม่เกิน (฿)", "Price up to (฿)")}</label>
+                <input type="number" min={0} className={inputCls} value={f.priceMax} onChange={(e) => set({ priceMax: e.target.value })} placeholder={t("ไม่จำกัด", "No limit")} />
               </div>
               <div>
-                <label className={labelCls}>มาใหม่ภายใน (วัน)</label>
-                <input type="number" min={1} max={365} className={inputCls} value={f.newDays} onChange={(e) => set({ newDays: e.target.value })} placeholder="ไม่ใช้" />
+                <label className={labelCls}>{t("มาใหม่ภายใน (วัน)", "New within (days)")}</label>
+                <input type="number" min={1} max={365} className={inputCls} value={f.newDays} onChange={(e) => set({ newDays: e.target.value })} placeholder={t("ไม่ใช้", "Not used")} />
               </div>
             </div>
             <div>
-              <label className={labelCls}>รหัสรุ่นขึ้นต้นด้วย (หลายแบบคั่นจุลภาค)</label>
-              <input className={inputCls} value={f.prefixes} onChange={(e) => set({ prefixes: e.target.value.slice(0, 200) })} placeholder="เช่น PIX, LM" />
+              <label className={labelCls}>{t("รหัสรุ่นขึ้นต้นด้วย (หลายแบบคั่นจุลภาค)", "Model code starts with (comma-separated)")}</label>
+              <input className={inputCls} value={f.prefixes} onChange={(e) => set({ prefixes: e.target.value.slice(0, 200) })} placeholder={t("เช่น PIX, LM", "e.g. PIX, LM")} />
             </div>
           </div>
         )}
 
         <div>
-          <label className={labelCls}>ตอนนี้ตรง {matched.length} รุ่น</label>
+          <label className={labelCls}>{t(`ตอนนี้ตรง ${matched.length} รุ่น`, `Matches now: ${matched.length} models`)}</label>
           {matched.length ? (
             <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
               {matched.slice(0, 60).map((p) => (
@@ -201,15 +203,15 @@ export function ProductGroupEditor({
                   <span className="font-mono text-slate-700">{p.code}</span>
                 </span>
               ))}
-              {matched.length > 60 && <span className="text-[11px] text-slate-400 self-center">+{matched.length - 60} รุ่น</span>}
+              {matched.length > 60 && <span className="text-[11px] text-slate-400 self-center">+{matched.length - 60} {t("รุ่น", "models")}</span>}
             </div>
           ) : (
-            <p className="text-xs text-slate-400">{f.mode === "smart" ? "ยังไม่มีสินค้าบนเว็บที่ตรงเงื่อนไข — ลองขยายช่วงราคาหรือเลือกหมวดเพิ่ม" : "ยังไม่ได้เลือกสินค้า"}</p>
+            <p className="text-xs text-slate-400">{f.mode === "smart" ? t("ยังไม่มีสินค้าบนเว็บที่ตรงเงื่อนไข — ลองขยายช่วงราคาหรือเลือกหมวดเพิ่ม", "No web products match yet — try widening the price range or adding categories") : t("ยังไม่ได้เลือกสินค้า", "No products selected")}</p>
           )}
         </div>
         <div>
-          <label className={labelCls}>บันทึกช่วยจำ (ไม่บังคับ)</label>
-          <input className={inputCls} value={f.note} onChange={(e) => set({ note: e.target.value.slice(0, 200) })} placeholder="เช่น ใช้กับแคมเปญปลายปี" />
+          <label className={labelCls}>{t("บันทึกช่วยจำ (ไม่บังคับ)", "Note (optional)")}</label>
+          <input className={inputCls} value={f.note} onChange={(e) => set({ note: e.target.value.slice(0, 200) })} placeholder={t("เช่น ใช้กับแคมเปญปลายปี", "e.g. for the year-end campaign")} />
         </div>
       </div>
     </ERPModal>
@@ -235,6 +237,7 @@ export function ProductGroupsPanel({
   onChanged: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [editing, setEditing] = useState<ProductGroupRow | "new" | null>(null);
   const [del, setDel] = useState<ProductGroupRow | null>(null);
   const labelOf = (k: string) => cats.find((c) => c.key === k)?.label ?? k;
@@ -244,9 +247,9 @@ export function ProductGroupsPanel({
     if (!del) return;
     const r = await apiFetch(`/api/website/product-groups?id=${encodeURIComponent(del.id)}`, { method: "DELETE" });
     const j = await r.json().catch(() => ({}));
-    if (!j.ok) toast.error(j.error ?? "ลบไม่สำเร็จ");
+    if (!j.ok) toast.error(j.error ?? t("ลบไม่สำเร็จ", "Delete failed"));
     else {
-      toast.success(`ลบกลุ่ม "${del.name}" แล้ว`);
+      toast.success(t(`ลบกลุ่ม "${del.name}" แล้ว`, `Group "${del.name}" deleted`));
       onChanged();
     }
     setDel(null);
@@ -255,29 +258,29 @@ export function ProductGroupsPanel({
   return (
     <>
       <MiniTable<ProductGroupRow>
-        title="📦 กลุ่มสินค้า"
+        title={t("📦 กลุ่มสินค้า", "📦 Product groups")}
         rows={groups}
         rowKey={(g) => g.id}
-        countUnit="กลุ่ม"
+        countUnit={t("กลุ่ม", "groups")}
         searchText={(g) => `${g.name} ${g.codes.join(" ")} ${g.note}`}
-        searchPlaceholder="ค้นหาชื่อกลุ่ม / รหัสรุ่น"
+        searchPlaceholder={t("ค้นหาชื่อกลุ่ม / รหัสรุ่น", "Search group name / model code")}
         onRowClick={(g) => setEditing(g)}
         actions={
           <button type="button" onClick={() => setEditing("new")} className="h-8 px-3 text-xs font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50">
-            + สร้างกลุ่ม
+            + {t("สร้างกลุ่ม", "Create group")}
           </button>
         }
         emptyText={
           <div className="py-6 text-center">
-            <p className="text-sm text-slate-600">ยังไม่มีกลุ่มสินค้า</p>
-            <p className="text-xs text-slate-400 mt-1">จับกลุ่มไว้ครั้งเดียว แล้วเลือกใช้ในโปรไหนก็ได้ — เช่น "ของขวัญปีใหม่" (เลือกเอง) หรือ "กระเป๋า ฿800–1,500" (อัตโนมัติ)</p>
+            <p className="text-sm text-slate-600">{t("ยังไม่มีกลุ่มสินค้า", "No product groups yet")}</p>
+            <p className="text-xs text-slate-400 mt-1">{t("จับกลุ่มไว้ครั้งเดียว แล้วเลือกใช้ในโปรไหนก็ได้ — เช่น \"ของขวัญปีใหม่\" (เลือกเอง) หรือ \"กระเป๋า ฿800–1,500\" (อัตโนมัติ)", "Group once, then use it in any promotion — e.g. \"New Year gifts\" (manual) or \"Bags ฿800–1,500\" (automatic)")}</p>
           </div>
         }
         columns={[
-          { key: "name", header: "กลุ่ม", width: "1.4fr", cell: (g) => <span className="min-w-0"><span className="block text-sm font-medium text-slate-800">{g.mode === "smart" ? "✨ " : "✋ "}{g.name}</span>{g.note && <span className="block text-[11px] text-slate-400 truncate">{g.note}</span>}</span>, sortValue: (g) => g.name },
-          { key: "rule", header: "สินค้าในกลุ่ม", width: "1.8fr", cell: (g) => <span className="text-xs text-slate-500">{groupSummary(g, labelOf)}</span> },
-          { key: "count", header: "ตอนนี้", align: "right", width: "5rem", cell: (g) => <span className="text-xs tabular-nums">{countOf(g)} รุ่น</span>, sortValue: (g) => countOf(g) },
-          { key: "used", header: "ใช้ในโปร", width: "1.2fr", cell: (g) => <span className="text-xs text-slate-500 line-clamp-2">{usedBy[g.id]?.join(", ") || "—"}</span> },
+          { key: "name", header: t("กลุ่ม", "Group"), width: "1.4fr", cell: (g) => <span className="min-w-0"><span className="block text-sm font-medium text-slate-800">{g.mode === "smart" ? "✨ " : "✋ "}{g.name}</span>{g.note && <span className="block text-[11px] text-slate-400 truncate">{g.note}</span>}</span>, sortValue: (g) => g.name },
+          { key: "rule", header: t("สินค้าในกลุ่ม", "Products in group"), width: "1.8fr", cell: (g) => <span className="text-xs text-slate-500">{groupSummary(g, labelOf)}</span> },
+          { key: "count", header: t("ตอนนี้", "Now"), align: "right", width: "5rem", cell: (g) => <span className="text-xs tabular-nums">{countOf(g)} {t("รุ่น", "models")}</span>, sortValue: (g) => countOf(g) },
+          { key: "used", header: t("ใช้ในโปร", "Used in promotions"), width: "1.2fr", cell: (g) => <span className="text-xs text-slate-500 line-clamp-2">{usedBy[g.id]?.join(", ") || "—"}</span> },
           {
             key: "act",
             header: "",
@@ -285,12 +288,12 @@ export function ProductGroupsPanel({
             align: "right",
             cell: (g) => (
               <span onClick={(e) => e.stopPropagation()}>
-                <button type="button" onClick={() => setDel(g)} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-red-600 hover:border-red-300">ลบ</button>
+                <button type="button" onClick={() => setDel(g)} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-red-600 hover:border-red-300">{t("ลบ", "Delete")}</button>
               </span>
             ),
           },
         ]}
-        footnote="✨ อัตโนมัติ = นับใหม่ทุกครั้งตามสินค้าบนเว็บตอนนั้น · แก้กลุ่มแล้วทุกโปรที่ใช้กลุ่มนี้เปลี่ยนตาม"
+        footnote={t("✨ อัตโนมัติ = นับใหม่ทุกครั้งตามสินค้าบนเว็บตอนนั้น · แก้กลุ่มแล้วทุกโปรที่ใช้กลุ่มนี้เปลี่ยนตาม", "✨ Automatic = recounted each time from current web products · editing a group updates every promotion using it")}
       />
       {editing && (
         <ProductGroupEditor
@@ -312,9 +315,9 @@ export function ProductGroupsPanel({
         onClose={() => setDel(null)}
         onConfirm={() => void remove()}
         variant="danger"
-        title={`ลบกลุ่ม "${del?.name ?? ""}"?`}
-        message={del && usedBy[del.id]?.length ? `กลุ่มนี้ยังใช้อยู่ในโปร: ${usedBy[del.id].join(", ")} — ต้องเอาออกจากโปรก่อน` : "ลบแล้วกู้คืนไม่ได้ (สินค้าไม่ได้ถูกลบ — แค่เลิกจับกลุ่ม)"}
-        confirmText="ลบกลุ่ม"
+        title={t(`ลบกลุ่ม "${del?.name ?? ""}"?`, `Delete group "${del?.name ?? ""}"?`)}
+        message={del && usedBy[del.id]?.length ? t(`กลุ่มนี้ยังใช้อยู่ในโปร: ${usedBy[del.id].join(", ")} — ต้องเอาออกจากโปรก่อน`, `This group is still used in promotions: ${usedBy[del.id].join(", ")} — remove it from them first`) : t("ลบแล้วกู้คืนไม่ได้ (สินค้าไม่ได้ถูกลบ — แค่เลิกจับกลุ่ม)", "Cannot be undone (products are not deleted — only the grouping)")}
+        confirmText={t("ลบกลุ่ม", "Delete group")}
       />
     </>
   );

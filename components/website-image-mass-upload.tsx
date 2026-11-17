@@ -60,6 +60,8 @@ import {
   type PlanDest,
   type PlanFile,
 } from "@/lib/website-image-match";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 type Parent = CatalogParent & { otherShopIds: string[] };
 type Item = {
@@ -88,11 +90,11 @@ type Dup = { where: string };
 /** รูปซ้ำกันเองในชุดที่ลากมา → ชี้ไปรูปแรก (of) ที่แถว destKey ตำแหน่ง num · exact = ไฟล์เดียวกันเป๊ะ (ไม่ใช่แค่หน้าตาเหมือน) */
 type Twin = { of: string; destKey: string; parentId: string; num: number; exact: boolean };
 const ROUND_LABEL: Record<RoundView["status"], { text: string; cls: string; icon?: string }> = {
-  wait: { text: "รอคิว", cls: "text-slate-400" },
-  run: { text: "กำลังลง…", cls: "text-blue-600", icon: "waiting" },
-  ok: { text: "ขึ้นเว็บแล้ว", cls: "text-emerald-700", icon: "done" },
-  part: { text: "ขึ้นเว็บบางส่วน", cls: "text-amber-700", icon: "warning" },
-  fail: { text: "ไม่สำเร็จ", cls: "text-rose-600", icon: "cancel" },
+  wait: { get text() { return tr("รอคิว", "Queued"); }, cls: "text-slate-400" },
+  run: { get text() { return tr("กำลังลง…", "Uploading…"); }, cls: "text-blue-600", icon: "waiting" },
+  ok: { get text() { return tr("ขึ้นเว็บแล้ว", "Live"); }, cls: "text-emerald-700", icon: "done" },
+  part: { get text() { return tr("ขึ้นเว็บบางส่วน", "Partly live"); }, cls: "text-amber-700", icon: "warning" },
+  fail: { get text() { return tr("ไม่สำเร็จ", "Failed"); }, cls: "text-rose-600", icon: "cancel" },
 };
 /** แสดงทีละกี่สินค้า / กี่ไฟล์ในกล่อง "ไฟล์ที่ต้องดู" (ลาก 1,000 รูปแล้วหน้าไม่หนัก) */
 const SHOW_PRODUCTS = 30;
@@ -103,9 +105,9 @@ const OLD_PRINT_MAX = 800;
 /** สลับลำดับแล้วแถวอื่น "ตำแหน่งเดียวกัน" ตามด้วยไหม: แถวเดียว / ทุกสีในรุ่น / ทุกแถวที่ลากมา (ชนิดช่องเดียวกัน) */
 type LinkReorder = "row" | "product" | "all";
 const LINK_OPTS: { v: LinkReorder; label: string }[] = [
-  { v: "row", label: "แถวนี้แถวเดียว" },
-  { v: "product", label: "ทุกสีในรุ่นเดียวกัน" },
-  { v: "all", label: "ทุกแถวที่ลากมา" },
+  { v: "row", get label() { return tr("แถวนี้แถวเดียว", "This row only"); } },
+  { v: "product", get label() { return tr("ทุกสีในรุ่นเดียวกัน", "All colors of the model"); } },
+  { v: "all", get label() { return tr("ทุกแถวที่ลากมา", "All dropped rows"); } },
 ];
 const parseLink = (v: unknown): LinkReorder | null => (v === "row" || v === "product" || v === "all" ? v : null);
 const CONFIRM_OVER = 20;
@@ -158,6 +160,7 @@ export function WebsiteImageMassUpload({
   onDone: () => void | Promise<void>;
 }) {
   const toast = useToast();
+  const t = useT();
   const [catalog, setCatalog] = useState<{ parents: Parent[]; otherShops: { id: string; name: string }[] } | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -221,10 +224,10 @@ export function WebsiteImageMassUpload({
     try {
       const r = await apiFetch(`/api/website/listings/images?shopId=${encodeURIComponent(shop.id)}`);
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.error || "โหลดไม่สำเร็จ");
+      if (!r.ok) throw new Error(j?.error || tr("โหลดไม่สำเร็จ", "Load failed"));
       setCatalog({ parents: j.parents ?? [], otherShops: j.otherShops ?? [] });
     } catch (e) {
-      setLoadErr((e as Error).message || "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่");
+      setLoadErr((e as Error).message || tr("เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่", "Couldn't load data, please try again"));
     }
   };
 
@@ -257,7 +260,7 @@ export function WebsiteImageMassUpload({
     if (m.status === "pick" && !m.parentId && catalog && fullIndex) {
       const full = matchImagePath(path, catalog.parents, fullIndex);
       const p = full.parentId ? catalog.parents.find((x) => x.parentId === full.parentId) : null;
-      if (p) return { ...m, reason: `${p.code} ${scopeLabel ? "ไม่อยู่ในรายการนี้" : "ไม่ได้ติ๊กไว้"} — ข้าม หรือเลือกช่องเอง` };
+      if (p) return { ...m, reason: `${p.code} ${scopeLabel ? tr("ไม่อยู่ในรายการนี้", "isn't in this list") : tr("ไม่ได้ติ๊กไว้", "isn't ticked")} — ${tr("ข้าม หรือเลือกช่องเอง", "skip it or pick a slot yourself")}` };
     }
     // 📥 รุ่นเดียว (ลากใส่แถว / ติ๊กตัวเดียว) + ไม่มีรหัสในร้าน = ของรุ่นนั้น · โฟลเดอร์เลขสี 01/ = สีนั้น
     if (m.status === "pick" && !m.parentId && scope && parents.length === 1) return matchIntoParent(path, parents[0]);
@@ -271,16 +274,16 @@ export function WebsiteImageMassUpload({
     if (!catalog || phase !== "pick") return;
     const isVid = (f: File) => f.type.startsWith("video/") || isVideoName(f.name);
     const imgs = raw.filter((f) => isVid(f) || f.type.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/i.test(f.name));
-    if (!imgs.length) return toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)");
-    if (imgs.some((f) => /\.mov$/i.test(f.name) || f.type === "video/quicktime")) toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
+    if (!imgs.length) return toast.warning(tr("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)", "Only image files (jpg / png / webp) or videos (mp4 / webm)"));
+    if (imgs.some((f) => /\.mov$/i.test(f.name) || f.type === "video/quicktime")) toast.warning(tr("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)", "Some .MOV files don't play on Chrome/Android — converting to MP4 (H.264) is recommended"));
     const have = new Set(itemsRef.current.map((it) => `${it.path}|${it.file.size}`));
     const fresh = imgs.filter((f) => !have.has(`${filePathOf(f)}|${f.size}`));
     const room = MAX_WEB_MASS_FILES - itemsRef.current.length;
-    if (fresh.length > room) toast.warning(`ลงได้ครั้งละไม่เกิน ${MAX_WEB_MASS_FILES.toLocaleString()} ไฟล์ — รับ ${Math.max(0, room)} ไฟล์แรก`);
+    if (fresh.length > room) toast.warning(tr(`ลงได้ครั้งละไม่เกิน ${MAX_WEB_MASS_FILES.toLocaleString()} ไฟล์ — รับ ${Math.max(0, room)} ไฟล์แรก`, `Up to ${MAX_WEB_MASS_FILES.toLocaleString()} files at a time — took the first ${Math.max(0, room)}`));
     const next = fresh.slice(0, Math.max(0, room)).map((file) => {
       const path = filePathOf(file);
       const video = isVid(file);
-      const invalid = video && file.size > BIG_VIDEO_MAX_BYTES ? `วิดีโอใหญ่เกิน ${fileMb(BIG_VIDEO_MAX_BYTES)} (${fileMb(file.size)}) — ตัดคลิปให้สั้นลง/ลดความละเอียด` : undefined;
+      const invalid = video && file.size > BIG_VIDEO_MAX_BYTES ? tr(`วิดีโอใหญ่เกิน ${fileMb(BIG_VIDEO_MAX_BYTES)} (${fileMb(file.size)}) — ตัดคลิปให้สั้นลง/ลดความละเอียด`, `Video is larger than ${fileMb(BIG_VIDEO_MAX_BYTES)} (${fileMb(file.size)}) — trim the clip or lower the resolution`) : undefined;
       const placed = to ? { manual: to, pos: posSeq.current++ } : {};
       return { id: `f${++seq.current}`, file, path, url: URL.createObjectURL(file), match: matchOf(path), video, invalid, ...placed } as Item;
     });
@@ -298,7 +301,7 @@ export function WebsiteImageMassUpload({
     const to = slotOfKey(key);
     const it = itemsRef.current.find((x) => x.id === id);
     if (!to || !it) return;
-    if (it.video && to.target.kind !== "hero" && to.target.kind !== "skuHero") return toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
+    if (it.video && to.target.kind !== "hero" && to.target.kind !== "skuHero") return toast.warning(tr("วิดีโอลงได้เฉพาะช่อง Hero", "Videos can only go in Hero slots"));
     const pos = posSeq.current++;
     setItems((xs) => xs.map((x) => (x.id === id ? { ...x, manual: to, pos, skip: false } : x)));
   };
@@ -312,8 +315,8 @@ export function WebsiteImageMassUpload({
       accept: ["image/", "video/"],
       folders: true,
       disabled: phase !== "pick" || !catalog,
-      onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)"),
-      onBusy: () => toast.info("กำลังอัปโหลดอยู่ รอสักครู่"),
+      onReject: () => toast.warning(tr("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)", "Only image files (jpg / png / webp) or videos (mp4 / webm)")),
+      onBusy: () => toast.info(tr("กำลังอัปโหลดอยู่ รอสักครู่", "Uploading — please wait")),
     }
   );
 
@@ -330,8 +333,8 @@ export function WebsiteImageMassUpload({
     accept: ["image/", "video/"],
     folders: true,
     disabled: phase !== "pick" || !catalog,
-    onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)"),
-    onBusy: () => toast.info(catalog ? "กำลังอัปโหลดอยู่ รอสักครู่" : "กำลังโหลดรายการสินค้า รอสักครู่"),
+    onReject: () => toast.warning(tr("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)", "Only image files (jpg / png / webp) or videos (mp4 / webm)")),
+    onBusy: () => toast.info(catalog ? tr("กำลังอัปโหลดอยู่ รอสักครู่", "Uploading — please wait") : tr("กำลังโหลดรายการสินค้า รอสักครู่", "Loading products — please wait")),
   });
 
   // ผลจับคู่ + ที่เลือกเอง → แผนลงรูป
@@ -463,12 +466,12 @@ export function WebsiteImageMassUpload({
   const oldOf = useMemo(() => {
     const by = new Map<string, { key: string; where: string }[]>();
     for (const p of parents) {
-      const list = p.webImages.map((key, i) => ({ key, where: `รูปบนเว็บ ${p.code} รูปที่ ${i + 1}` }));
-      for (const sk of p.skus) sk.webImages.forEach((key, i) => list.push({ key, where: `รูปสี ${sk.code} รูปที่ ${i + 1}` }));
+      const list = p.webImages.map((key, i) => ({ key, where: t(`รูปบนเว็บ ${p.code} รูปที่ ${i + 1}`, `web image ${p.code} #${i + 1}`) }));
+      for (const sk of p.skus) sk.webImages.forEach((key, i) => list.push({ key, where: t(`รูปสี ${sk.code} รูปที่ ${i + 1}`, `color image ${sk.code} #${i + 1}`) }));
       by.set(p.parentId, list);
     }
     return by;
-  }, [parents]);
+  }, [parents, t]);
   const touchedKey = touched.join(",");
   useEffect(() => {
     if (mode !== "append" || !touchedKey) return;
@@ -578,7 +581,7 @@ export function WebsiteImageMassUpload({
     const d = destByKey.get(destKey);
     const p = d ? byId.get(d.parentId) : undefined;
     if (!d || !p) return "?";
-    if (d.target.kind !== "sku") return d.parentId === fromParentId ? "รูปบนเว็บ" : `${p.code} รูปบนเว็บ`;
+    if (d.target.kind !== "sku") return d.parentId === fromParentId ? t("รูปบนเว็บ", "Web images") : `${p.code} ${t("รูปบนเว็บ", "Web images")}`;
     const skuId = d.target.skuId;
     const code = p.skus.find((x) => x.id === skuId)?.code ?? "?";
     return d.parentId === fromParentId && code.startsWith(p.code) ? code.slice(p.code.length) || code : code;
@@ -605,7 +608,7 @@ export function WebsiteImageMassUpload({
   const skipMany = (ids: string[], what: string) => {
     if (!ids.length) return;
     setSkip(ids, true);
-    toast.action(`ไม่ลง ${ids.length} รูป · ${what} — อยู่ในกล่อง "ข้ามไว้" ด้านล่าง`, "เอากลับ", () => setSkip(ids, false));
+    toast.action(t(`ไม่ลง ${ids.length} รูป · ${what} — อยู่ในกล่อง "ข้ามไว้" ด้านล่าง`, `Skipped ${ids.length} images · ${what} — see the "Skipped" box below`), t("เอากลับ", "Undo"), () => setSkip(ids, false));
   };
   // ↕ สลับลำดับ (เลขตามลำดับใหม่ · ทับเลขท้ายชื่อไฟล์) — แถวอื่นชนิดเดียวกัน "ตำแหน่งเดียวกัน" สลับตามตามที่ตั้งไว้
   const reorderDest = (d: PlanDest, from: number, to: number) => {
@@ -621,7 +624,7 @@ export function WebsiteImageMassUpload({
       n++;
     }
     setItems((xs) => xs.map((it) => (pos.has(it.id) ? { ...it, pos: pos.get(it.id) } : it)));
-    if (n > 1) toast.info(`สลับลำดับพร้อมกัน ${n} แถว (รูปใหม่ลำดับที่ ${from + 1} → ${to + 1})`);
+    if (n > 1) toast.info(t(`สลับลำดับพร้อมกัน ${n} แถว (รูปใหม่ลำดับที่ ${from + 1} → ${to + 1})`, `Reordered ${n} rows together (new image ${from + 1} → ${to + 1})`));
   };
   const linkable = plan.dests.filter((x) => x.fileIds.length > 1).length > 1;
   // ✎ ระบบอ่านชื่อผิด → ย้ายรูปทั้งแถวไปสินค้า/ช่องที่เลือกเอง
@@ -660,23 +663,23 @@ export function WebsiteImageMassUpload({
       })
     );
     setEditDest(null);
-    toast.info(`ย้ายรูป ${moving.size} ไฟล์จาก ${from.code} ไป ${to.code} แล้ว${lost ? ` — ${lost} ไฟล์รุ่นใหม่ไม่มีสีเดียวกัน ให้เลือกช่องในกล่อง "ไฟล์ที่ต้องดู"` : ""}`);
+    toast.info(t(`ย้ายรูป ${moving.size} ไฟล์จาก ${from.code} ไป ${to.code} แล้ว${lost ? ` — ${lost} ไฟล์รุ่นใหม่ไม่มีสีเดียวกัน ให้เลือกช่องในกล่อง "ไฟล์ที่ต้องดู"` : ""}`, `Moved ${moving.size} files from ${from.code} to ${to.code}${lost ? ` — ${lost} files have no matching color in the new model; pick a slot in the "Files to check" box` : ""}`));
   };
   /** ชื่อช่องแบบบอกชัด: ลงที่ไหน · SKU อะไร */
   const destLabel = (t: ImageTarget, p: Parent): { title: string; sub: string } => {
     const sk = (id: string) => p.skus.find((x) => x.id === id);
-    if (t.kind === "gallery") return { title: "🖼 รูปบนเว็บ (รวมทั้งรุ่น)", sub: `${p.code} · โชว์ตอนลูกค้ายังไม่เลือกสี` };
-    if (t.kind === "sku") { const x = sk(t.skuId); return { title: `🎨 รูปสี · ${x?.code ?? "?"}`, sub: x?.label ?? "" }; }
-    if (t.kind === "hero") return { title: `🎬 Hero ${t.slot === "desktop" ? "คอม" : "มือถือ"}`, sub: `รูปเปิดหน้าสินค้า ${p.code}` };
+    if (t.kind === "gallery") return { title: tr("🖼 รูปบนเว็บ (รวมทั้งรุ่น)", "🖼 Web images (whole model)"), sub: `${p.code} · ${tr("โชว์ตอนลูกค้ายังไม่เลือกสี", "shown before a color is picked")}` };
+    if (t.kind === "sku") { const x = sk(t.skuId); return { title: `🎨 ${tr("รูปสี", "Color images")} · ${x?.code ?? "?"}`, sub: x?.label ?? "" }; }
+    if (t.kind === "hero") return { title: `🎬 Hero ${t.slot === "desktop" ? tr("คอม", "desktop") : tr("มือถือ", "mobile")}`, sub: tr(`รูปเปิดหน้าสินค้า ${p.code}`, `Product page opener ${p.code}`) };
     const x = sk(t.skuId);
-    return { title: `🎬 Hero ${t.slot === "desktop" ? "คอม" : "มือถือ"} · ${x?.code ?? "?"}`, sub: `รูปเปิดเมื่อเลือกสี${x?.label ?? ""}` };
+    return { title: `🎬 Hero ${t.slot === "desktop" ? tr("คอม", "desktop") : tr("มือถือ", "mobile")} · ${x?.code ?? "?"}`, sub: tr(`รูปเปิดเมื่อเลือกสี${x?.label ?? ""}`, `Opener when color ${x?.label ?? ""} is picked`) };
   };
   /** ตัวเลือกช่องรูปของสินค้า (value = encT) — ใช้ร่วม: ย้ายทั้งแถว · ไฟล์ที่ต้องดู · ⇄ ย้ายทีละรูป */
   const slotOptionList = (p: Parent, video: boolean): { value: string; label: string }[] => [
-    ...(!video ? [{ value: "g", label: "🖼 รูปบนเว็บ (รวมทั้งรุ่น)" }] : []),
-    ...(!video ? p.skus.map((x) => ({ value: `s:${x.id}`, label: `🎨 รูปสี ${x.code} ${x.label}` })) : []),
-    { value: "h:desktop", label: "🎬 Hero คอม" },
-    { value: "h:mobile", label: "🎬 Hero มือถือ" },
+    ...(!video ? [{ value: "g", label: tr("🖼 รูปบนเว็บ (รวมทั้งรุ่น)", "🖼 Web images (whole model)") }] : []),
+    ...(!video ? p.skus.map((x) => ({ value: `s:${x.id}`, label: `🎨 ${tr("รูปสี", "Color images")} ${x.code} ${x.label}` })) : []),
+    { value: "h:desktop", label: tr("🎬 Hero คอม", "🎬 Hero desktop") },
+    { value: "h:mobile", label: tr("🎬 Hero มือถือ", "🎬 Hero mobile") },
     ...(video ? p.skus.flatMap((x) => (["desktop", "mobile"] as const).map((slot) => ({ value: `sh:${x.id}:${slot}`, label: targetLabel({ kind: "skuHero", skuId: x.id, slot }, p) }))) : []),
   ];
   const slotOptions = (p: Parent, video: boolean) => (
@@ -692,8 +695,8 @@ export function WebsiteImageMassUpload({
     if (runningRef.current) return;
     const prev = retry ? result : null;
     if (retry && !prev?.failed.length) return;
-    if (!retry && !uploadIds.length) return setErr("ยังไม่มีรูปที่จะลง");
-    if (!retry && needConfirm && typed !== "CONFIRM") return setErr(`แทนที่รูป ${touched.length} สินค้าพร้อมกัน — พิมพ์ CONFIRM ก่อน`);
+    if (!retry && !uploadIds.length) return setErr(tr("ยังไม่มีรูปที่จะลง", "No images to upload yet"));
+    if (!retry && needConfirm && typed !== "CONFIRM") return setErr(tr(`แทนที่รูป ${touched.length} สินค้าพร้อมกัน — พิมพ์ CONFIRM ก่อน`, `Replacing images of ${touched.length} products at once — type CONFIRM first`));
     if (!retry) {
       keysRef.current = new Map();
       savedDestRef.current = new Set();
@@ -757,7 +760,7 @@ export function WebsiteImageMassUpload({
       return failList;
     };
     runBackgroundTask({
-      label: `ลงรูปเว็บ ${total} ไฟล์ · ${shop.name}${retry ? " (ลงซ้ำ)" : ""}`,
+      label: tr(`ลงรูปเว็บ ${total} ไฟล์ · ${shop.name}${retry ? " (ลงซ้ำ)" : ""}`, `Web image upload ${total} files · ${shop.name}${retry ? " (retry)" : ""}`),
       total,
       run: async (report) => {
         try {
@@ -769,7 +772,7 @@ export function WebsiteImageMassUpload({
               while (next < ids.length) {
                 const id = ids[next++];
                 const it = files.get(id);
-                if (!it) failed.set(id, "ไม่พบไฟล์ — ลากมาใหม่");
+                if (!it) failed.set(id, tr("ไม่พบไฟล์ — ลากมาใหม่", "File not found — drop it again"));
                 else if (!keysRef.current.has(id)) {
                   try {
                     // วิดีโอ: ตัวอัปกลางตัวเดียวกับช่อง Hero ทีละตัว (≤ 4 MB ผ่าน ERP · ใหญ่กว่านั้นส่งตรงเข้า R2 มีแถบ %)
@@ -800,7 +803,7 @@ export function WebsiteImageMassUpload({
               try {
                 const r = await apiFetch("/api/website/listings/images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopIds, mode: m, items: body }) });
                 const j = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+                if (!r.ok) throw new Error(j?.error || tr("บันทึกไม่สำเร็จ", "Save failed"));
                 updated += Number(j.updated) || 0;
                 const fails: { shopId: string; parentId: string }[] = Array.isArray(j.failed) ? j.failed : [];
                 const mine = new Set(fails.filter((x) => x.shopId === shop.id).map((x) => x.parentId));
@@ -809,34 +812,34 @@ export function WebsiteImageMassUpload({
                 for (const d of group) {
                   const ids2 = got(d);
                   if (!ids2.length) continue;
-                  if (mine.has(d.parentId)) ids2.forEach((id) => failed.set(id, "บันทึกลงเว็บไม่สำเร็จ"));
+                  if (mine.has(d.parentId)) ids2.forEach((id) => failed.set(id, tr("บันทึกลงเว็บไม่สำเร็จ", "Couldn't save to the website")));
                   else {
                     savedDestRef.current.add(d.key);
                     ok += ids2.length;
                   }
                 }
               } catch (e) {
-                for (const d of group) got(d).forEach((id) => failed.set(id, `บันทึกลงเว็บไม่สำเร็จ: ${(e as Error).message}`));
+                for (const d of group) got(d).forEach((id) => failed.set(id, `${tr("บันทึกลงเว็บไม่สำเร็จ", "Couldn't save to the website")}: ${(e as Error).message}`));
               }
             }
             const bad = ids.filter((id) => failed.has(id)).length;
             setStatus(ri, bad === 0 ? "ok" : bad === ids.length ? "fail" : "part");
           }
         } catch (e) {
-          setErr((e as Error).message || "เกิดข้อผิดพลาด");
+          setErr((e as Error).message || tr("เกิดข้อผิดพลาด", "Something went wrong"));
         }
         const failList = finish();
         const runOk = ok - prevOk;
-        if (failList.length || otherShopFails) toast.warning(`ลงรูปเสร็จ แต่ยังไม่ขึ้นเว็บ ${failList.length} ไฟล์ — เปิดหน้าต่าง ลงรูปเว็บทีละมาก แล้วกด "ลงซ้ำเฉพาะที่พลาด"`);
-        else toast.success(`ลงรูป ${runOk} ไฟล์แล้ว — เว็บเปลี่ยนตามทันที`);
-        return { ok: runOk, fail: failList.length, message: failList.length ? `ขึ้นเว็บ ${runOk} · ยังไม่ขึ้น ${failList.length}` : `ลงครบ ${runOk} ไฟล์` };
+        if (failList.length || otherShopFails) toast.warning(tr(`ลงรูปเสร็จ แต่ยังไม่ขึ้นเว็บ ${failList.length} ไฟล์ — เปิดหน้าต่าง ลงรูปเว็บทีละมาก แล้วกด "ลงซ้ำเฉพาะที่พลาด"`, `Upload finished, but ${failList.length} files aren't live yet — open Bulk image upload and press "Retry failed only"`));
+        else toast.success(tr(`ลงรูป ${runOk} ไฟล์แล้ว — เว็บเปลี่ยนตามทันที`, `Uploaded ${runOk} files — the website updates right away`));
+        return { ok: runOk, fail: failList.length, message: failList.length ? tr(`ขึ้นเว็บ ${runOk} · ยังไม่ขึ้น ${failList.length}`, `Live ${runOk} · not yet ${failList.length}`) : tr(`ลงครบ ${runOk} ไฟล์`, `All ${runOk} files uploaded`) };
       },
     });
   };
 
   const busy = phase === "uploading";
   const close = () => {
-    if (busy) toast.info("ลงรูปต่อเบื้องหลัง — ดูความคืบหน้าที่กล่องมุมขวาล่าง (ไปหน้าอื่นได้ แต่อย่าปิดแท็บเบราว์เซอร์)");
+    if (busy) toast.info(t("ลงรูปต่อเบื้องหลัง — ดูความคืบหน้าที่กล่องมุมขวาล่าง (ไปหน้าอื่นได้ แต่อย่าปิดแท็บเบราว์เซอร์)", "Uploading in the background — see progress in the bottom-right box (you can go to other pages, but don't close the browser tab)"));
     onClose();
   };
 
@@ -853,18 +856,18 @@ export function WebsiteImageMassUpload({
     const twin = !dup ? twinOf.get(id) : undefined;
     const myDest = destOfFile.get(id);
     const twinSameRow = !!twin && twin.destKey === myDest;
-    const twinLabel = twin ? (twinSameRow ? `ซ้ำ #${twin.num}` : `= ${rowShort(twin.destKey, destByKey.get(myDest ?? "")?.parentId ?? "")} #${twin.num}`) : "";
+    const twinLabel = twin ? (twinSameRow ? `${t("ซ้ำ", "Dup")} #${twin.num}` : `= ${rowShort(twin.destKey, destByKey.get(myDest ?? "")?.parentId ?? "")} #${twin.num}`) : "";
     const twinTip = twin
-      ? `${twin.exact ? "ไฟล์เดียวกันกับ" : "หน้าตาเหมือน"}${twinSameRow ? "รูปที่ " : `แถว ${rowShort(twin.destKey, "")} รูปที่ `}${twin.num} ในชุดที่ลากมา${twin.exact ? "\nถ้าลงทั้งคู่ ไฟล์นี้อัปครั้งเดียวแล้วใช้ร่วมกัน" : ""}`
+      ? t(`${twin.exact ? "ไฟล์เดียวกันกับ" : "หน้าตาเหมือน"}${twinSameRow ? "รูปที่ " : `แถว ${rowShort(twin.destKey, "")} รูปที่ `}${twin.num} ในชุดที่ลากมา${twin.exact ? "\nถ้าลงทั้งคู่ ไฟล์นี้อัปครั้งเดียวแล้วใช้ร่วมกัน" : ""}`, `${twin.exact ? "Same file as" : "Looks like"} ${twinSameRow ? "image " : `row ${rowShort(twin.destKey, "")} image `}#${twin.num} in this batch${twin.exact ? "\nIf both are uploaded, this file is uploaded once and shared" : ""}`)
       : "";
     // 🔁 มีในคลังแล้ว (ที่อื่น) — กดป้ายสลับ ใช้รูปเดิม ↔ อัปใหม่ · ชี้รูปกลมเล็ก = ดูรูปเดิมในคลัง
     const lib = !dup && !twin && !it.video ? libDup[id] : null;
     const useLib = !!lib && !!reuseOf(id);
     const libTip = lib
-      ? `${lib.kind === "look" ? "รูปหน้าตาเหมือนกัน" : "รูปนี้"}มีในคลังแล้ว: ${lib.match.file_name ?? lib.match.r2_key}${lib.match.usedIn.length ? `\nใช้อยู่ที่ ${lib.match.usedIn.join(", ")}` : ""}${lib.unsure ? "\nรายละเอียดต่างกันนิดหน่อย — ตรวจด้วยตาก่อน" : ""}\n${useLib ? "ตอนลงจะใช้รูปเดิม (ไม่อัปซ้ำ)" : "ตอนลงจะอัปรูปนี้ใหม่"} — กดเพื่อสลับ`
+      ? t(`${lib.kind === "look" ? "รูปหน้าตาเหมือนกัน" : "รูปนี้"}มีในคลังแล้ว: ${lib.match.file_name ?? lib.match.r2_key}${lib.match.usedIn.length ? `\nใช้อยู่ที่ ${lib.match.usedIn.join(", ")}` : ""}${lib.unsure ? "\nรายละเอียดต่างกันนิดหน่อย — ตรวจด้วยตาก่อน" : ""}\n${useLib ? "ตอนลงจะใช้รูปเดิม (ไม่อัปซ้ำ)" : "ตอนลงจะอัปรูปนี้ใหม่"} — กดเพื่อสลับ`, `${lib.kind === "look" ? "A look-alike image" : "This image"} is already in the library: ${lib.match.file_name ?? lib.match.r2_key}${lib.match.usedIn.length ? `\nUsed in ${lib.match.usedIn.join(", ")}` : ""}${lib.unsure ? "\nSlightly different details — check by eye first" : ""}\n${useLib ? "Will use the existing file (no re-upload)" : "Will upload this image again"} — click to switch`)
       : "";
     return (
-      <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={dup ? `${it.path}\nหน้าตาเหมือน${dup.where} (ดูรูปจางด้านซ้าย)` : it.path}>
+      <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={dup ? `${it.path}\n${t(`หน้าตาเหมือน${dup.where} (ดูรูปจางด้านซ้าย)`, `Looks like ${dup.where} (see the faded image on the left)`)}` : it.path}>
         {it.video ? (
           <>
             <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-800" />
@@ -872,11 +875,11 @@ export function WebsiteImageMassUpload({
           </>
         ) : src ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border object-cover bg-slate-100 ${dup ? "border-amber-400" : twin ? (twinSameRow ? "border-rose-400" : "border-amber-400") : useLib ? "border-blue-400" : "border-slate-200"} ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
+          <img src={src} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? t("กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)", "Press and drag = reorder (1 = main image)") : it.path} className={`h-20 w-16 rounded-md border object-cover bg-slate-100 ${dup ? "border-amber-400" : twin ? (twinSameRow ? "border-rose-400" : "border-amber-400") : useLib ? "border-blue-400" : "border-slate-200"} ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
         ) : (
           <div {...(opts.handle ?? {})} className="h-20 w-16 animate-pulse rounded-md border border-slate-200 bg-slate-100" />
         )}
-        {dup && <span className="pointer-events-none absolute right-1 top-1 rounded bg-amber-600 px-1 text-[10px] leading-4 text-white">ซ้ำเดิม</span>}
+        {dup && <span className="pointer-events-none absolute right-1 top-1 rounded bg-amber-600 px-1 text-[10px] leading-4 text-white">{t("ซ้ำเดิม", "Already live")}</span>}
         {twin && (
           <span title={twinTip} className={`absolute right-0.5 top-0.5 max-w-[60px] truncate rounded px-1 text-[10px] leading-4 text-white ${twinSameRow ? "bg-rose-600" : "bg-amber-600"}`}>
             {twinLabel}
@@ -886,7 +889,7 @@ export function WebsiteImageMassUpload({
           <>
             <button type="button" disabled={phase !== "pick"} onPointerDown={(e) => e.stopPropagation()} onClick={() => setLibUse((m) => ({ ...m, [id]: !useLib }))} title={libTip}
               className={`absolute right-0.5 top-0.5 rounded px-1 text-[10px] leading-4 ${useLib ? "bg-blue-600 text-white" : "border border-slate-300 bg-white/95 text-slate-600"}`}>
-              {useLib ? "ใช้รูปเดิม" : "อัปใหม่"}
+              {useLib ? t("ใช้รูปเดิม", "Use existing") : t("อัปใหม่", "Upload new")}
             </button>
             <span className="absolute bottom-[22px] left-0.5 rounded-full border-2 border-white bg-white shadow" onPointerDown={(e) => e.stopPropagation()} title={libTip}>
               <HoverImage url={r2ImageUrl(lib.match.r2_key, 400)} size={18} previewSize={240} rounded="rounded-full" />
@@ -896,8 +899,8 @@ export function WebsiteImageMassUpload({
         {opts.index != null && !it.video && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{opts.index + 1}</span>}
         {opts.onMove && phase === "pick" && (
           <span className="absolute bottom-[22px] right-0.5 flex gap-0.5">
-            {opts.canPrev && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(-1)} aria-label="เลื่อนไปซ้าย" className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">‹</button>}
-            {opts.canNext && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(1)} aria-label="เลื่อนไปขวา" className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">›</button>}
+            {opts.canPrev && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(-1)} aria-label={t("เลื่อนไปซ้าย", "Move left")} className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">‹</button>}
+            {opts.canNext && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(1)} aria-label={t("เลื่อนไปขวา", "Move right")} className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">›</button>}
           </span>
         )}
         <div className="relative">
@@ -908,11 +911,11 @@ export function WebsiteImageMassUpload({
               value=""
               onPointerDown={(e) => e.stopPropagation()}
               onChange={(e) => e.target.value && moveOneTo(id, `${opts.moveIn!.p.parentId}|${e.target.value}`)}
-              aria-label={`ย้าย ${it.path} ไปช่องอื่น`}
-              title="ย้ายรูปนี้ไปสี/ช่องอื่น"
+              aria-label={t(`ย้าย ${it.path} ไปช่องอื่น`, `Move ${it.path} to another slot`)}
+              title={t("ย้ายรูปนี้ไปสี/ช่องอื่น", "Move this image to another color / slot")}
               className="absolute inset-0 h-full w-full cursor-pointer rounded border border-blue-300 bg-white px-0.5 text-[10px] text-blue-700 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
             >
-              <option value="">⇄ ย้ายไป…</option>
+              <option value="">{t("⇄ ย้ายไป…", "⇄ Move to…")}</option>
               {slotOptionList(opts.moveIn.p, it.video).filter((o) => `${opts.moveIn!.p.parentId}|${o.value}` !== opts.moveIn!.current).map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
@@ -920,7 +923,7 @@ export function WebsiteImageMassUpload({
           )}
         </div>
         {opts.onSkip && phase === "pick" && (
-          <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={opts.onSkip} aria-label={`ข้าม ${it.path}`} title="ไม่ลงไฟล์นี้" className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] text-white group-hover:flex">
+          <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={opts.onSkip} aria-label={t(`ข้าม ${it.path}`, `Skip ${it.path}`)} title={t("ไม่ลงไฟล์นี้", "Don't upload this file")} className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] text-white group-hover:flex">
             ✕
           </button>
         )}
@@ -935,43 +938,43 @@ export function WebsiteImageMassUpload({
           <span className="text-rose-600">{err}</span>
         ) : phase === "done" && result ? (
           <span className={result.failed.length || result.otherShopFails ? "text-amber-700" : "text-emerald-700"}>
-            ขึ้นเว็บแล้ว {result.ok} ไฟล์{result.failed.length ? ` · ยังไม่ขึ้น ${result.failed.length}` : ""}
+            {t(`ขึ้นเว็บแล้ว ${result.ok} ไฟล์`, `${result.ok} files live`)}{result.failed.length ? t(` · ยังไม่ขึ้น ${result.failed.length}`, ` · ${result.failed.length} not yet`) : ""}
           </span>
         ) : busy ? (
-          <span className="text-slate-600">กำลังลงรูป {progress.done}/{progress.total} ไฟล์{videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""} · ปิดหน้าต่างได้ ลงต่อเบื้องหลัง</span>
+          <span className="text-slate-600">{t(`กำลังลงรูป ${progress.done}/${progress.total} ไฟล์`, `Uploading ${progress.done}/${progress.total} files`)}{videoPct !== null ? t(` · วิดีโอ ${videoPct}%`, ` · video ${videoPct}%`) : ""} · {t("ปิดหน้าต่างได้ ลงต่อเบื้องหลัง", "you can close this window, it continues in the background")}</span>
         ) : (
           <span className="text-slate-500">
             {uploadIds.length
-              ? `จะลง ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า${touched.length > ROUND_PRODUCTS ? ` (${Math.ceil(touched.length / ROUND_PRODUCTS)} รอบ)` : ""}${alsoShops.size ? ` (+ร้านอื่น ${alsoShops.size})` : ""}${uploadReal < uploadIds.length ? ` · อัปจริง ${uploadReal} ไฟล์` : ""}`
-              : "ยังไม่มีรูปที่จะลง"}
+              ? t(`จะลง ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า${touched.length > ROUND_PRODUCTS ? ` (${Math.ceil(touched.length / ROUND_PRODUCTS)} รอบ)` : ""}${alsoShops.size ? ` (+ร้านอื่น ${alsoShops.size})` : ""}${uploadReal < uploadIds.length ? ` · อัปจริง ${uploadReal} ไฟล์` : ""}`, `Will upload ${uploadIds.length} files → ${touched.length} products${touched.length > ROUND_PRODUCTS ? ` (${Math.ceil(touched.length / ROUND_PRODUCTS)} rounds)` : ""}${alsoShops.size ? ` (+${alsoShops.size} other shops)` : ""}${uploadReal < uploadIds.length ? ` · ${uploadReal} actual uploads` : ""}`)
+              : t("ยังไม่มีรูปที่จะลง", "No images to upload yet")}
           </span>
         )}
       </div>
       {needConfirm && phase === "pick" && (
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์ CONFIRM" className="h-9 w-36 rounded-lg border border-rose-300 px-2 font-mono text-sm" />
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={t("พิมพ์ CONFIRM", "Type CONFIRM")} className="h-9 w-36 rounded-lg border border-rose-300 px-2 font-mono text-sm" />
       )}
       {phase === "done" ? (
         <>
           <button type="button" onClick={() => { clearItems(); setResult(null); setRounds([]); setPhase("pick"); void load(); }} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
-            ลงชุดต่อไป
+            {t("ลงชุดต่อไป", "Next batch")}
           </button>
           <button type="button" onClick={onClose} className="h-9 rounded-lg bg-slate-800 px-4 text-sm text-white">
-            ปิด
+            {t("ปิด", "Close")}
           </button>
         </>
       ) : busy ? (
         <button type="button" onClick={close} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
-          ปิดหน้าต่าง (ลงต่อเบื้องหลัง)
+          {t("ปิดหน้าต่าง (ลงต่อเบื้องหลัง)", "Close window (continues in background)")}
         </button>
       ) : (
         <>
           {items.length > 0 && (
             <button type="button" onClick={clearItems} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">
-              ล้างไฟล์ทั้งหมด
+              {t("ล้างไฟล์ทั้งหมด", "Clear all files")}
             </button>
           )}
           <button type="button" onClick={() => void run()} disabled={!uploadIds.length || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-            {uploadIds.length ? `ลงรูป ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า` : "ลงรูป"}
+            {uploadIds.length ? t(`ลงรูป ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า`, `Upload ${uploadIds.length} files → ${touched.length} products`) : t("ลงรูป", "Upload")}
           </button>
         </>
       )}
@@ -982,8 +985,8 @@ export function WebsiteImageMassUpload({
     <ERPModal
       open={open}
       onClose={close}
-      title={`📸 ลงรูปเว็บทีละมาก — ${shop.name}`}
-      description={scope ? `เฉพาะ ${scopeLabel ?? `${scope.size} รายการที่ติ๊กไว้`} · จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์` : "จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์กับรหัสสินค้าและสี · ตรวจก่อนลงทุกครั้ง"}
+      title={t(`📸 ลงรูปเว็บทีละมาก — ${shop.name}`, `📸 Bulk image upload — ${shop.name}`)}
+      description={scope ? t(`เฉพาะ ${scopeLabel ?? `${scope.size} รายการที่ติ๊กไว้`} · จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์`, `Only ${scopeLabel ?? `the ${scope.size} ticked items`} · matched by file / folder name`) : t("จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์กับรหัสสินค้าและสี · ตรวจก่อนลงทุกครั้ง", "Matches file / folder names to product and color codes · always reviewed before upload")}
       size="xl"
       hasUnsavedChanges={items.length > 0 && phase === "pick"}
       closeOnBackdrop={false}
@@ -994,7 +997,7 @@ export function WebsiteImageMassUpload({
           <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
             {loadErr}{" "}
             <button type="button" onClick={() => void load()} className="ml-1 underline">
-              ลองใหม่
+              {t("ลองใหม่", "Retry")}
             </button>
           </div>
         ) : !catalog ? (
@@ -1004,31 +1007,31 @@ export function WebsiteImageMassUpload({
             ))}
           </div>
         ) : !parents.length ? (
-          <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">ร้านนี้ยังไม่มีสินค้าบนเว็บ — เพิ่มสินค้าเข้าเว็บก่อน แล้วค่อยลงรูป</div>
+          <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">{t("ร้านนี้ยังไม่มีสินค้าบนเว็บ — เพิ่มสินค้าเข้าเว็บก่อน แล้วค่อยลงรูป", "This shop has no web products yet — add products first, then upload images")}</div>
         ) : (
           <>
             {/* ① ที่วางไฟล์ + กติกาตั้งชื่อ */}
             {phase === "pick" && (
               <div {...drop.zone("mass")} className={`relative rounded-xl border-2 border-dashed px-4 py-5 text-center transition ${drop.over === "mass" ? "border-blue-400 bg-blue-50/60" : "border-slate-300 bg-slate-50/50"}`}>
-                <FileDropHint show={drop.over === "mass"} label="วางเพื่อจับคู่รูป" />
+                <FileDropHint show={drop.over === "mass"} label={t("วางเพื่อจับคู่รูป", "Drop to match images")} />
                 <p className="text-sm text-slate-700">
-                  ลากทั้งโฟลเดอร์ หรือหลายไฟล์มาวางที่นี่ ·{" "}
+                  {t("ลากทั้งโฟลเดอร์ หรือหลายไฟล์มาวางที่นี่ ·", "Drop a whole folder or many files here ·")}{" "}
                   <button type="button" onClick={() => fileRef.current?.click()} className="text-blue-600 underline">
-                    เลือกไฟล์
+                    {t("เลือกไฟล์", "Pick files")}
                   </button>{" "}
                   ·{" "}
                   <button type="button" onClick={() => dirRef.current?.click()} className="text-blue-600 underline">
-                    เลือกโฟลเดอร์
+                    {t("เลือกโฟลเดอร์", "Pick folder")}
                   </button>
                 </p>
                 <p className="mt-2 text-[11px] leading-5 text-slate-500">
-                  <code className="rounded bg-white px-1">JEAN08_1.jpg</code> → รูปบนเว็บ · <code className="rounded bg-white px-1">JEAN08-01_2.jpg</code> → รูปสี 01 ·{" "}
-                  <code className="rounded bg-white px-1">JEAN08_hero.jpg</code> → Hero คอม · <code className="rounded bg-white px-1">JEAN08_hero_m.jpg</code> → Hero มือถือ ·{" "}
-                  <code className="rounded bg-white px-1">JEAN08-01_hero.jpg</code> → Hero ของสีนั้น
+                  <code className="rounded bg-white px-1">JEAN08_1.jpg</code> → {t("รูปบนเว็บ", "web images")} · <code className="rounded bg-white px-1">JEAN08-01_2.jpg</code> → {t("รูปสี 01", "color 01 images")} ·{" "}
+                  <code className="rounded bg-white px-1">JEAN08_hero.jpg</code> → {t("Hero คอม", "Hero desktop")} · <code className="rounded bg-white px-1">JEAN08_hero_m.jpg</code> → {t("Hero มือถือ", "Hero mobile")} ·{" "}
+                  <code className="rounded bg-white px-1">JEAN08-01_hero.jpg</code> → {t("Hero ของสีนั้น", "Hero of that color")}
                   <br />
-                  🎬 วิดีโอ (mp4) = Hero อัตโนมัติ: <code className="rounded bg-white px-1">JEAN08.mp4</code> → คอม · <code className="rounded bg-white px-1">JEAN08_m.mp4</code> → มือถือ · ≤ 200 MB (แนะนำ ≤ 15 MB · 6–10 วินาที)
+                  {t("🎬 วิดีโอ (mp4) = Hero อัตโนมัติ:", "🎬 Videos (mp4) = Hero automatically:")} <code className="rounded bg-white px-1">JEAN08.mp4</code> → {t("คอม", "desktop")} · <code className="rounded bg-white px-1">JEAN08_m.mp4</code> → {t("มือถือ · ≤ 200 MB (แนะนำ ≤ 15 MB · 6–10 วินาที)", "mobile · ≤ 200 MB (≤ 15 MB · 6–10 s recommended)")}
                   <br />
-                  หรือแยกโฟลเดอร์ชื่อ <code className="rounded bg-white px-1">JEAN08/</code> · <code className="rounded bg-white px-1">JEAN08-01/</code> ก็ได้ · เลขท้าย _1 _2 (2) = ลำดับรูป · ครั้งละ ≤ {MAX_WEB_MASS_FILES.toLocaleString()} ไฟล์
+                  {t("หรือแยกโฟลเดอร์ชื่อ", "Or use folders named")} <code className="rounded bg-white px-1">JEAN08/</code> · <code className="rounded bg-white px-1">JEAN08-01/</code> {t(`ก็ได้ · เลขท้าย _1 _2 (2) = ลำดับรูป · ครั้งละ ≤ ${MAX_WEB_MASS_FILES.toLocaleString()} ไฟล์`, `· trailing _1 _2 (2) = image order · ≤ ${MAX_WEB_MASS_FILES.toLocaleString()} files at a time`)}
                 </p>
                 <input ref={fileRef} type="file" accept="image/*,video/mp4,video/webm,.mp4,.m4v,.webm,.mov" multiple hidden onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
                 <input ref={dirRef} type="file" multiple hidden {...{ webkitdirectory: "" }} onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
@@ -1039,63 +1042,63 @@ export function WebsiteImageMassUpload({
               <>
                 {/* สรุป */}
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-700">จะลง {countOf("upload")}</span>
-                  {countOf("unmatched") > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-amber-800">ต้องเลือกเอง {countOf("unmatched")}</span>}
-                  {countOf("over") + countOf("dupHero") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">เกิน/ซ้ำ {countOf("over") + countOf("dupHero")}</span>}
-                  {countOf("invalid") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">ลงไม่ได้ {countOf("invalid")}</span>}
-                  {countOf("skip") > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-600">ข้าม {countOf("skip")}</span>}
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-700">{t("จะลง", "To upload")} {countOf("upload")}</span>
+                  {countOf("unmatched") > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-amber-800">{t("ต้องเลือกเอง", "Pick manually")} {countOf("unmatched")}</span>}
+                  {countOf("over") + countOf("dupHero") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">{t("เกิน/ซ้ำ", "Over limit / dup")} {countOf("over") + countOf("dupHero")}</span>}
+                  {countOf("invalid") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">{t("ลงไม่ได้", "Can't upload")} {countOf("invalid")}</span>}
+                  {countOf("skip") > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-600">{t("ข้าม", "Skipped")} {countOf("skip")}</span>}
                   {dupOf.size > 0 && (
-                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800" title="เทียบหน้าตารูปใหม่กับรูปเดิมบนเว็บของสินค้านั้น — เตือนให้ดูด้วยตา ไม่ข้ามเอง">
-                      <Icon name="view" className="mr-0.5 inline-block align-[-2px]" />หน้าตาเหมือนรูปเดิม {dupOf.size}
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800" title={t("เทียบหน้าตารูปใหม่กับรูปเดิมบนเว็บของสินค้านั้น — เตือนให้ดูด้วยตา ไม่ข้ามเอง", "Compares new images with that product's current web images — a warning to check by eye, nothing is skipped automatically")}>
+                      <Icon name="view" className="mr-0.5 inline-block align-[-2px]" />{t("หน้าตาเหมือนรูปเดิม", "Looks like current images")} {dupOf.size}
                     </span>
                   )}
                   {dupSameIds.length > 0 && phase === "pick" && (
-                    <button type="button" onClick={() => skipMany(dupSameIds, "หน้าตาซ้ำรูปเดิม")} className="rounded-full border border-amber-300 bg-white px-2.5 py-0.5 text-amber-800 hover:bg-amber-50">
-                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />ไม่ลงรูปที่ซ้ำทั้งหมด ({dupSameIds.length})
+                    <button type="button" onClick={() => skipMany(dupSameIds, t("หน้าตาซ้ำรูปเดิม", "look like current images"))} className="rounded-full border border-amber-300 bg-white px-2.5 py-0.5 text-amber-800 hover:bg-amber-50">
+                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />{t("ไม่ลงรูปที่ซ้ำทั้งหมด", "Skip all duplicates")} ({dupSameIds.length})
                     </button>
                   )}
                   {twinIds.length > 0 && (
-                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800" title="รูปที่ลากมาซ้ำกันเอง (ไฟล์เดียวกัน หรือหน้าตาเหมือน) — ป้ายบนรูปบอกว่าเหมือนรูปไหน · ซ้ำในแถวเดียวกัน = แดง · ข้ามแถว = เหลือง">
-                      <Icon name="warning" className="mr-0.5 inline-block align-[-2px]" />ซ้ำกันเองในชุดนี้ {twinIds.length}
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800" title={t("รูปที่ลากมาซ้ำกันเอง (ไฟล์เดียวกัน หรือหน้าตาเหมือน) — ป้ายบนรูปบอกว่าเหมือนรูปไหน · ซ้ำในแถวเดียวกัน = แดง · ข้ามแถว = เหลือง", "Dropped images that duplicate each other (same file or look-alike) — the badge shows which image · same row = red · across rows = yellow")}>
+                      <Icon name="warning" className="mr-0.5 inline-block align-[-2px]" />{t("ซ้ำกันเองในชุดนี้", "Duplicates within this batch")} {twinIds.length}
                     </span>
                   )}
                   {sameRowTwinIds.length > 0 && phase === "pick" && (
-                    <button type="button" onClick={() => skipMany(sameRowTwinIds, "ซ้ำในแถวเดียวกัน")} className="rounded-full border border-rose-300 bg-white px-2.5 py-0.5 text-rose-700 hover:bg-rose-50">
-                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />ไม่ลงรูปที่ซ้ำในแถว ({sameRowTwinIds.length})
+                    <button type="button" onClick={() => skipMany(sameRowTwinIds, t("ซ้ำในแถวเดียวกัน", "duplicates in the same row"))} className="rounded-full border border-rose-300 bg-white px-2.5 py-0.5 text-rose-700 hover:bg-rose-50">
+                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />{t("ไม่ลงรูปที่ซ้ำในแถว", "Skip in-row duplicates")} ({sameRowTwinIds.length})
                     </button>
                   )}
                   {uploadReal < uploadIds.length && (
-                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title="ไฟล์เดียวกันเป๊ะอัปครั้งเดียวแล้วใช้ร่วมกัน · รูปที่ใช้รูปเดิมในคลังไม่ต้องอัป">
-                      อัปจริง {uploadReal} จาก {uploadIds.length} ไฟล์
+                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title={t("ไฟล์เดียวกันเป๊ะอัปครั้งเดียวแล้วใช้ร่วมกัน · รูปที่ใช้รูปเดิมในคลังไม่ต้องอัป", "Identical files are uploaded once and shared · images reusing library files aren't uploaded")}>
+                      {t(`อัปจริง ${uploadReal} จาก ${uploadIds.length} ไฟล์`, `Actually uploading ${uploadReal} of ${uploadIds.length} files`)}
                     </span>
                   )}
                   {libIds.length > 0 && (
-                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title="รูปเดียวกันมีในคลังไฟล์แล้ว — ใช้รูปเดิม = ตอนลงไม่ต้องอัปไฟล์ซ้ำ (กดป้ายบนรูปเพื่อสลับทีละรูป)">
-                      <Icon name="library" className="mr-0.5 inline-block align-[-2px]" />มีในคลังแล้ว {libIds.length} · ใช้รูปเดิม {reuseIds.length}
-                      {reuseBytes > 0 ? ` (ไม่ต้องอัป ${formatBytes(reuseBytes)})` : ""}
+                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title={t("รูปเดียวกันมีในคลังไฟล์แล้ว — ใช้รูปเดิม = ตอนลงไม่ต้องอัปไฟล์ซ้ำ (กดป้ายบนรูปเพื่อสลับทีละรูป)", "The same image is already in the file library — Use existing = no re-upload (click the badge on an image to switch it)")}>
+                      <Icon name="library" className="mr-0.5 inline-block align-[-2px]" />{t("มีในคลังแล้ว", "In library")} {libIds.length} · {t("ใช้รูปเดิม", "use existing")} {reuseIds.length}
+                      {reuseBytes > 0 ? t(` (ไม่ต้องอัป ${formatBytes(reuseBytes)})`, ` (saves ${formatBytes(reuseBytes)})`) : ""}
                     </span>
                   )}
                   {phase === "pick" && reuseIds.length < libIds.length && (
                     <button type="button" onClick={() => setLibUseMany(libIds, true)} className="rounded-full border border-blue-300 bg-white px-2.5 py-0.5 text-blue-700 hover:bg-blue-50">
-                      ใช้รูปเดิมทั้งหมด
+                      {t("ใช้รูปเดิมทั้งหมด", "Use existing for all")}
                     </button>
                   )}
                   {phase === "pick" && reuseIds.length > 0 && (
                     <button type="button" onClick={() => setLibUseMany(libIds, false)} className="rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-slate-600 hover:bg-slate-50">
-                      <Icon name="upload" className="mr-0.5 inline-block align-[-2px]" />อัปใหม่ทั้งหมด
+                      <Icon name="upload" className="mr-0.5 inline-block align-[-2px]" />{t("อัปใหม่ทั้งหมด", "Upload all new")}
                     </button>
                   )}
                   {phase === "pick" && libChecked < imgTotal && (
-                    <span className="text-slate-400">ตรวจรูปซ้ำในคลัง {libChecked}/{imgTotal}…</span>
+                    <span className="text-slate-400">{t("ตรวจรูปซ้ำในคลัง", "Checking library duplicates")} {libChecked}/{imgTotal}…</span>
                   )}
                   {phase === "pick" && (imgPrepped < imgTotal || oldPending > 0) && (
                     <span className="text-slate-400">
-                      {imgPrepped < imgTotal ? `กำลังเตรียมรูป ${imgPrepped}/${imgTotal}` : "กำลังโหลดรูปเดิมมาเทียบ"}
-                      {mode === "append" ? " · เทียบหน้าตากับรูปเดิมบนเว็บ…" : "…"}
+                      {imgPrepped < imgTotal ? t(`กำลังเตรียมรูป ${imgPrepped}/${imgTotal}`, `Preparing images ${imgPrepped}/${imgTotal}`) : t("กำลังโหลดรูปเดิมมาเทียบ", "Loading current images to compare")}
+                      {mode === "append" ? t(" · เทียบหน้าตากับรูปเดิมบนเว็บ…", " · comparing with current web images…") : "…"}
                     </span>
                   )}
                   <span className="ml-auto text-slate-400">
-                    {items.length} ไฟล์ · {touched.length} สินค้า
+                    {t(`${items.length} ไฟล์ · ${touched.length} สินค้า`, `${items.length} files · ${touched.length} products`)}
                   </span>
                 </div>
 
@@ -1103,9 +1106,9 @@ export function WebsiteImageMassUpload({
                   <div className="rounded-xl border border-blue-200 bg-blue-50/40 px-3.5 py-2.5 text-xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm font-medium text-slate-800">
-                        {phase === "uploading" ? `กำลังลงรูป ${progress.done}/${progress.total} ไฟล์${videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""}` : "ลงรูปเสร็จแล้ว"}
+                        {phase === "uploading" ? t(`กำลังลงรูป ${progress.done}/${progress.total} ไฟล์${videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""}`, `Uploading ${progress.done}/${progress.total} files${videoPct !== null ? ` · video ${videoPct}%` : ""}`) : t("ลงรูปเสร็จแล้ว", "Upload finished")}
                       </span>
-                      <span className="text-slate-500">ลงทีละรอบ รอบละ {ROUND_PRODUCTS} สินค้า · รอบที่เสร็จขึ้นเว็บทันที</span>
+                      <span className="text-slate-500">{t(`ลงทีละรอบ รอบละ ${ROUND_PRODUCTS} สินค้า · รอบที่เสร็จขึ้นเว็บทันที`, `Uploads in rounds of ${ROUND_PRODUCTS} products · each finished round goes live right away`)}</span>
                     </div>
                     <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
                       <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
@@ -1113,15 +1116,15 @@ export function WebsiteImageMassUpload({
                     <div className="mt-1 divide-y divide-blue-100">
                       {rounds.map((r, i) => (
                         <div key={i} className="flex items-center gap-2 py-1">
-                          <span className="w-12 shrink-0 text-slate-700">รอบ {i + 1}</span>
+                          <span className="w-12 shrink-0 text-slate-700">{t("รอบ", "Round")} {i + 1}</span>
                           <span className="min-w-0 flex-1 truncate text-slate-500" title={r.codes.join(", ")}>
-                            {r.codes.length} สินค้า · {r.files} ไฟล์ · {r.codes.slice(0, 4).join(", ")}{r.codes.length > 4 ? " …" : ""}
+                            {t(`${r.codes.length} สินค้า · ${r.files} ไฟล์`, `${r.codes.length} products · ${r.files} files`)} · {r.codes.slice(0, 4).join(", ")}{r.codes.length > 4 ? " …" : ""}
                           </span>
                           <span className={`shrink-0 ${ROUND_LABEL[r.status].cls}`}>{ROUND_LABEL[r.status].icon && <Icon name={ROUND_LABEL[r.status].icon} className="mr-0.5 inline-block align-[-2px]" />}{ROUND_LABEL[r.status].text}</span>
                         </div>
                       ))}
                     </div>
-                    {phase === "uploading" && <p className="mt-1 text-[11px] text-slate-500">ปิดหน้าต่างนี้ได้ — ลงต่อเบื้องหลัง (ดูกล่องมุมขวาล่าง) · ไปหน้าอื่นใน ERP ได้ แต่อย่าปิดแท็บเบราว์เซอร์จนกว่าจะเสร็จ</p>}
+                    {phase === "uploading" && <p className="mt-1 text-[11px] text-slate-500">{t("ปิดหน้าต่างนี้ได้ — ลงต่อเบื้องหลัง (ดูกล่องมุมขวาล่าง) · ไปหน้าอื่นใน ERP ได้ แต่อย่าปิดแท็บเบราว์เซอร์จนกว่าจะเสร็จ", "You can close this window — it continues in the background (see the bottom-right box) · you can visit other ERP pages, but keep the browser tab open until it finishes")}</p>}
                   </div>
                 )}
 
@@ -1129,13 +1132,13 @@ export function WebsiteImageMassUpload({
                   // ลอยติดขอบบนของหน้าต่างตอนเลื่อน (เปลี่ยนโหมดสลับได้ทุกแถว) — กล่องเลื่อนของ ERPModal ไม่มี overflow ซ้อน
                   // -top-5 = ชิดขอบบนพอดี (ตัวเลื่อนของ ERPModal เว้นบน py-5 · top-0 จะเหลือช่องให้รูปโผล่เหนือแถบ)
                   <div className="sticky -top-5 z-10 flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-slate-200">
-                    <span className="text-slate-700">↕ สลับลำดับรูปแล้ว แถวอื่นตำแหน่งเดียวกันสลับตาม:</span>
+                    <span className="text-slate-700">{t("↕ สลับลำดับรูปแล้ว แถวอื่นตำแหน่งเดียวกันสลับตาม:", "↕ When reordering, the same position in other rows follows:")}</span>
                     {LINK_OPTS.map((o) => (
                       <button key={o.v} type="button" onClick={() => setLinkReorder(o.v)} className={seg(linkReorder === o.v)}>
                         {o.label}
                       </button>
                     ))}
-                    <span className="text-[11px] text-slate-400">เฉพาะแถวชนิดเดียวกัน (รูปสี↔รูปสี) ที่มีรูปถึงตำแหน่งนั้น</span>
+                    <span className="text-[11px] text-slate-400">{t("เฉพาะแถวชนิดเดียวกัน (รูปสี↔รูปสี) ที่มีรูปถึงตำแหน่งนั้น", "Only rows of the same kind (color↔color) that have an image at that position")}</span>
                   </div>
                 )}
 
@@ -1154,11 +1157,11 @@ export function WebsiteImageMassUpload({
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] text-slate-400">
-                            {p.skus.length} สี · ลงที่ร้าน {[shop.name, ...otherShops.filter((o) => alsoShops.has(o.id) && p.otherShopIds.includes(o.id)).map((o) => o.name)].join(" + ")}
+                            {t(`${p.skus.length} สี · ลงที่ร้าน`, `${p.skus.length} colors · shops:`)} {[shop.name, ...otherShops.filter((o) => alsoShops.has(o.id) && p.otherShopIds.includes(o.id)).map((o) => o.name)].join(" + ")}
                           </span>
                           {phase === "pick" && parents.length > 1 && (
-                            <select value="" onChange={(e) => e.target.value && changeProduct(pid, e.target.value)} aria-label={`เปลี่ยนสินค้าของ ${p.code}`} className="h-7 max-w-[13rem] rounded-md border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700">
-                              <option value="">🔁 อ่านผิด? เปลี่ยนสินค้า…</option>
+                            <select value="" onChange={(e) => e.target.value && changeProduct(pid, e.target.value)} aria-label={t(`เปลี่ยนสินค้าของ ${p.code}`, `Change product for ${p.code}`)} className="h-7 max-w-[13rem] rounded-md border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700">
+                              <option value="">{t("🔁 อ่านผิด? เปลี่ยนสินค้า…", "🔁 Misread? Change product…")}</option>
                               {parents.filter((x) => x.parentId !== pid).map((x) => (
                                 <option key={x.parentId} value={x.parentId}>{x.code} · {x.name}</option>
                               ))}
@@ -1169,9 +1172,9 @@ export function WebsiteImageMassUpload({
                               type="button"
                               onClick={() => skipMany(plan.files.filter((f) => f.parentId === pid && f.plan !== "skip").map((f) => f.id), p.code)}
                               className="h-7 rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-600 hover:border-rose-300 hover:text-rose-600"
-                              title="ไม่ลงรูปทั้งหมดของสินค้านี้ (เอากลับได้)"
+                              title={t("ไม่ลงรูปทั้งหมดของสินค้านี้ (เอากลับได้)", "Skip all images of this product (can undo)")}
                             >
-                              ✕ ไม่ลงสินค้านี้
+                              {t("✕ ไม่ลงสินค้านี้", "✕ Skip this product")}
                             </button>
                           )}
                         </div>
@@ -1198,17 +1201,17 @@ export function WebsiteImageMassUpload({
                             {...slotDrop.zone(d.key)}
                             className={`relative mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-start gap-2 rounded-lg border-t border-slate-100 pt-2 ${DROP_OVER_CLS}`}
                           >
-                            <FileDropHint show={slotDrop.over === d.key} label={`วางรูปเข้า ${dl.title.replace(/^\S+\s/, "")}`} />
+                            <FileDropHint show={slotDrop.over === d.key} label={t(`วางรูปเข้า ${dl.title.replace(/^\S+\s/, "")}`, `Drop images into ${dl.title.replace(/^\S+\s/, "")}`)} />
                             <div className="min-w-0">
                               <p className="truncate text-xs font-medium text-slate-700" title={dl.title}>{dl.title}</p>
                               <p className="truncate text-[11px] text-slate-500" title={dl.sub}>{dl.sub}</p>
                               {phase === "pick" && (
                                 <div className="mt-0.5 flex flex-col items-start gap-0.5">
                                   <button type="button" onClick={() => setEditDest(editing ? null : { key: d.key, pid })} className="text-[11px] text-blue-600 hover:underline">
-                                    {editing ? "ปิด" : "✎ ย้ายแถวนี้ (อ่านผิด)"}
+                                    {editing ? t("ปิด", "Close") : t("✎ ย้ายแถวนี้ (อ่านผิด)", "✎ Move this row (misread)")}
                                   </button>
-                                  <button type="button" onClick={() => skipMany(d.fileIds, dl.title.replace(/^\S+\s/, ""))} className="text-[11px] text-slate-500 hover:text-rose-600 hover:underline" title="ไม่ลงรูปทั้งแถวนี้ (เช่น ลงซ้ำของที่มีแล้ว · เอากลับได้)">
-                                    ✕ ไม่ลงแถวนี้
+                                  <button type="button" onClick={() => skipMany(d.fileIds, dl.title.replace(/^\S+\s/, ""))} className="text-[11px] text-slate-500 hover:text-rose-600 hover:underline" title={t("ไม่ลงรูปทั้งแถวนี้ (เช่น ลงซ้ำของที่มีแล้ว · เอากลับได้)", "Skip this whole row (e.g. duplicates of existing images · can undo)")}>
+                                    {t("✕ ไม่ลงแถวนี้", "✕ Skip this row")}
                                   </button>
                                 </div>
                               )}
@@ -1217,11 +1220,11 @@ export function WebsiteImageMassUpload({
                               {twinRow && (
                                 <div className="flex basis-full flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
                                   <Icon name="warning" className="shrink-0" />
-                                  <span className="min-w-[12rem] flex-1">รูปเหมือนแถว {rowShort(twinRow, "")} ทั้งหมด {d.fileIds.length}/{d.fileIds.length} — ตั้งใจใช้รูปชุดเดียวกันไหม? (ถ้าลงทั้งคู่ ไฟล์เดียวกันอัปครั้งเดียว)</span>
+                                  <span className="min-w-[12rem] flex-1">{t(`รูปเหมือนแถว ${rowShort(twinRow, "")} ทั้งหมด ${d.fileIds.length}/${d.fileIds.length} — ตั้งใจใช้รูปชุดเดียวกันไหม? (ถ้าลงทั้งคู่ ไฟล์เดียวกันอัปครั้งเดียว)`, `All ${d.fileIds.length}/${d.fileIds.length} images match row ${rowShort(twinRow, "")} — same set on purpose? (if both are uploaded, identical files upload once)`)}</span>
                                   {phase === "pick" && (
                                     <>
-                                      <button type="button" onClick={() => skipMany(d.fileIds, `${dl.title.replace(/^\S+\s/, "")} (ซ้ำแถวอื่น)`)} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">✕ ไม่ลงแถวนี้</button>
-                                      <button type="button" onClick={() => setEditDest({ key: d.key, pid })} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">✎ ย้ายแถว</button>
+                                      <button type="button" onClick={() => skipMany(d.fileIds, `${dl.title.replace(/^\S+\s/, "")} ${t("(ซ้ำแถวอื่น)", "(duplicate of another row)")}`)} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">{t("✕ ไม่ลงแถวนี้", "✕ Skip this row")}</button>
+                                      <button type="button" onClick={() => setEditDest({ key: d.key, pid })} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">{t("✎ ย้ายแถว", "✎ Move row")}</button>
                                     </>
                                   )}
                                 </div>
@@ -1231,7 +1234,7 @@ export function WebsiteImageMassUpload({
                                   <OldThumbs keys={old} gone={d.replaces} hero={isHero} />
                                   <span className="mb-[18px] flex h-20 flex-col items-center justify-center gap-1 px-0.5 text-[10px] leading-3 text-blue-600" aria-hidden>
                                     <span className="h-full w-px bg-blue-200" />
-                                    {d.replaces ? "แทน" : "ใหม่"}
+                                    {d.replaces ? t("แทน", "Replace") : t("ใหม่", "New")}
                                     <span className="h-full w-px bg-blue-200" />
                                   </span>
                                 </>
@@ -1257,18 +1260,18 @@ export function WebsiteImageMassUpload({
                               <span className={`self-center text-[11px] ${d.replaces ? "text-amber-700" : "text-slate-500"}`}>
                                 {isHero
                                   ? d.replaces
-                                    ? "แทน Hero เดิม"
-                                    : "ใหม่ (เดิมว่าง)"
+                                    ? t("แทน Hero เดิม", "Replaces current Hero")
+                                    : t("ใหม่ (เดิมว่าง)", "New (was empty)")
                                   : d.replaces
-                                    ? `แทนที่รูปเดิม ${d.existing} รูป → เหลือ ${d.total}/${d.limit}`
-                                    : `+${d.fileIds.length} ต่อท้าย${d.existing ? ` (เดิม ${d.existing} → รวม ${d.total}/${d.limit})` : ` (รวม ${d.total}/${d.limit})`}`}
+                                    ? t(`แทนที่รูปเดิม ${d.existing} รูป → เหลือ ${d.total}/${d.limit}`, `Replaces ${d.existing} current images → ${d.total}/${d.limit}`)
+                                    : t(`+${d.fileIds.length} ต่อท้าย${d.existing ? ` (เดิม ${d.existing} → รวม ${d.total}/${d.limit})` : ` (รวม ${d.total}/${d.limit})`}`, `+${d.fileIds.length} appended${d.existing ? ` (was ${d.existing} → total ${d.total}/${d.limit})` : ` (total ${d.total}/${d.limit})`}`)}
                               </span>
                               {dups.length > 0 && (
                                 <span className="flex flex-wrap items-center gap-1.5 self-center">
-                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800"><Icon name="view" className="mr-0.5 inline-block align-[-2px]" />หน้าตาเหมือนรูปเดิม {dups.length}/{d.fileIds.length}</span>
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800"><Icon name="view" className="mr-0.5 inline-block align-[-2px]" />{t("หน้าตาเหมือนรูปเดิม", "Looks like current images")} {dups.length}/{d.fileIds.length}</span>
                                   {phase === "pick" && dupSame.length > 0 && (
-                                    <button type="button" onClick={() => skipMany(dupSame, `ซ้ำรูปเดิม · ${dl.title.replace(/^\S+\s/, "")}`)} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-50">
-                                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />ไม่ลงรูปที่ซ้ำ ({dupSame.length})
+                                    <button type="button" onClick={() => skipMany(dupSame, `${t("ซ้ำรูปเดิม", "duplicates current")} · ${dl.title.replace(/^\S+\s/, "")}`)} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-50">
+                                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />{t("ไม่ลงรูปที่ซ้ำ", "Skip duplicates")} ({dupSame.length})
                                     </button>
                                   )}
                                 </span>
@@ -1276,8 +1279,8 @@ export function WebsiteImageMassUpload({
                             </div>
                             {editing && (
                               <div className="col-span-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-blue-50/70 px-2.5 py-2">
-                                <span className="text-[11px] text-slate-700">ย้ายรูป {d.fileIds.length} รูปในแถวนี้ไป:</span>
-                                <select value={editing.pid} onChange={(e) => setEditDest({ key: d.key, pid: e.target.value })} aria-label="สินค้าปลายทาง" className="h-8 max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 text-xs">
+                                <span className="text-[11px] text-slate-700">{t(`ย้ายรูป ${d.fileIds.length} รูปในแถวนี้ไป:`, `Move the ${d.fileIds.length} images in this row to:`)}</span>
+                                <select value={editing.pid} onChange={(e) => setEditDest({ key: d.key, pid: e.target.value })} aria-label={t("สินค้าปลายทาง", "Target product")} className="h-8 max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 text-xs">
                                   {parents.map((x) => (
                                     <option key={x.parentId} value={x.parentId}>{x.code} · {x.name}</option>
                                   ))}
@@ -1291,14 +1294,14 @@ export function WebsiteImageMassUpload({
                                       moveFiles(d.fileIds, ep.parentId, t);
                                       setEditDest(null);
                                     }}
-                                    aria-label="ช่องรูปปลายทาง"
+                                    aria-label={t("ช่องรูปปลายทาง", "Target image slot")}
                                     className="h-8 max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 text-xs"
                                   >
-                                    <option value="">— เลือกช่องรูป —</option>
+                                    <option value="">{t("— เลือกช่องรูป —", "— Pick image slot —")}</option>
                                     {slotOptions(ep, hasVideo)}
                                   </select>
                                 )}
-                                <span className="text-[11px] text-slate-500">เลือกช่องแล้วย้ายทันที</span>
+                                <span className="text-[11px] text-slate-500">{t("เลือกช่องแล้วย้ายทันที", "Moves as soon as you pick a slot")}</span>
                               </div>
                             )}
                           </div>
@@ -1313,16 +1316,16 @@ export function WebsiteImageMassUpload({
                             {...slotDrop.zone(key)}
                             className={`relative mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-t border-slate-100 pt-2 ${DROP_OVER_CLS}`}
                           >
-                            <FileDropHint show={slotDrop.over === key} label={`วางรูปเข้า รูปสี · ${s.code}`} />
+                            <FileDropHint show={slotDrop.over === key} label={t(`วางรูปเข้า รูปสี · ${s.code}`, `Drop images into color images · ${s.code}`)} />
                             <div className="min-w-0">
-                              <p className="truncate text-xs font-medium text-slate-500" title={s.code}>🎨 รูปสี · {s.code}</p>
+                              <p className="truncate text-xs font-medium text-slate-500" title={s.code}>🎨 {t("รูปสี", "Color images")} · {s.code}</p>
                               <p className="truncate text-[11px] text-slate-400" title={s.label}>{s.label}</p>
                             </div>
                             <div className="flex h-12 items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-200 px-3 text-[11px] text-slate-400">
                               <Icon name="image" size={14} />
                               <span>
-                                ยังไม่มีรูปใหม่ — ลากรูปจากเครื่อง หรือลากรูปจากแถวอื่นมาวางที่นี่
-                                {s.webImages.length > 0 && <span className="text-slate-500"> · บนเว็บมีอยู่แล้ว {s.webImages.length} รูป</span>}
+                                {t("ยังไม่มีรูปใหม่ — ลากรูปจากเครื่อง หรือลากรูปจากแถวอื่นมาวางที่นี่", "No new images yet — drag images from your computer or from another row here")}
+                                {s.webImages.length > 0 && <span className="text-slate-500"> · {t(`บนเว็บมีอยู่แล้ว ${s.webImages.length} รูป`, `${s.webImages.length} already on the web`)}</span>}
                               </span>
                             </div>
                           </div>
@@ -1334,20 +1337,20 @@ export function WebsiteImageMassUpload({
 
                 {touched.length > shown && (
                   <button type="button" onClick={() => setShown((n) => n + SHOW_PRODUCTS)} className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-xs text-slate-600 hover:bg-slate-50">
-                    แสดงอีก {Math.min(SHOW_PRODUCTS, touched.length - shown)} สินค้า (เหลือ {touched.length - shown} จาก {touched.length})
+                    {t(`แสดงอีก ${Math.min(SHOW_PRODUCTS, touched.length - shown)} สินค้า (เหลือ ${touched.length - shown} จาก ${touched.length})`, `Show ${Math.min(SHOW_PRODUCTS, touched.length - shown)} more products (${touched.length - shown} of ${touched.length} left)`)}
                   </button>
                 )}
 
                 {/* ③ ไฟล์ที่ต้องดู */}
                 {needLook.length > 0 && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-2.5">
-                    <p className="mb-1 text-sm font-medium text-slate-800">ไฟล์ที่ต้องดู ({needLook.length})</p>
+                    <p className="mb-1 text-sm font-medium text-slate-800">{t("ไฟล์ที่ต้องดู", "Files to check")} ({needLook.length})</p>
                     {needLook.slice(0, lookShown).map((f) => {
                       const it = itemById.get(f.id)!;
                       const man = it.manual ?? null;
                       const pid = man?.parentId ?? f.parentId ?? "";
                       const p = pid ? byId.get(pid) : undefined;
-                      const why = man && !man.target ? "เลือกช่องรูปต่อ" : f.plan === "unmatched" ? it.match.reason || "ยังไม่ได้เลือกช่อง" : f.note || "";
+                      const why = man && !man.target ? t("เลือกช่องรูปต่อ", "Now pick an image slot") : f.plan === "unmatched" ? it.match.reason || t("ยังไม่ได้เลือกช่อง", "No slot picked yet") : f.note || "";
                       return (
                         <div key={f.id} className="flex flex-wrap items-center gap-2 border-t border-amber-100 py-2 first:border-t-0">
                           {thumb(f.id, { muted: true })}
@@ -1366,9 +1369,9 @@ export function WebsiteImageMassUpload({
                                   setManual(f.id, { parentId: np, target: null });
                                 }}
                                 className="h-8 max-w-[13rem] rounded-lg border border-slate-300 bg-white px-2 text-xs"
-                                aria-label="เลือกสินค้า"
+                                aria-label={t("เลือกสินค้า", "Pick product")}
                               >
-                                <option value="">— เลือกสินค้า —</option>
+                                <option value="">{t("— เลือกสินค้า —", "— Pick product —")}</option>
                                 {parents.map((x) => (
                                   <option key={x.parentId} value={x.parentId}>
                                     {x.code} · {x.name}
@@ -1383,14 +1386,14 @@ export function WebsiteImageMassUpload({
                                     if (t) setManual(f.id, { parentId: p.parentId, target: t });
                                   }}
                                   className="h-8 max-w-[11rem] rounded-lg border border-slate-300 bg-white px-2 text-xs"
-                                  aria-label="เลือกช่องรูป"
+                                  aria-label={t("เลือกช่องรูป", "Pick image slot")}
                                 >
-                                  <option value="">— ช่องรูป —</option>
+                                  <option value="">{t("— ช่องรูป —", "— Image slot —")}</option>
                                   {slotOptions(p, it.video)}
                                 </select>
                               )}
                               <button type="button" onClick={() => setSkip([f.id], true)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">
-                                ข้าม
+                                {t("ข้าม", "Skip")}
                               </button>
                             </div>
                           )}
@@ -1399,7 +1402,7 @@ export function WebsiteImageMassUpload({
                     })}
                     {needLook.length > lookShown && (
                       <button type="button" onClick={() => setLookShown((n) => n + SHOW_LOOK)} className="mt-1 w-full rounded-lg border border-dashed border-amber-300 py-1.5 text-xs text-amber-800 hover:bg-amber-50">
-                        แสดงอีก {Math.min(SHOW_LOOK, needLook.length - lookShown)} ไฟล์ (เหลือ {needLook.length - lookShown})
+                        {t(`แสดงอีก ${Math.min(SHOW_LOOK, needLook.length - lookShown)} ไฟล์ (เหลือ ${needLook.length - lookShown})`, `Show ${Math.min(SHOW_LOOK, needLook.length - lookShown)} more files (${needLook.length - lookShown} left)`)}
                       </button>
                     )}
                   </div>
@@ -1409,16 +1412,16 @@ export function WebsiteImageMassUpload({
                 {skipped.length > 0 && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-700">⏭ ข้ามไว้ — ไม่ลง ({countOf("skip")} รูป)</p>
+                      <p className="text-sm font-medium text-slate-700">{t(`⏭ ข้ามไว้ — ไม่ลง (${countOf("skip")} รูป)`, `⏭ Skipped — not uploading (${countOf("skip")} images)`)}</p>
                       {phase === "pick" && skipped.length > 1 && (
                         <button type="button" onClick={() => setSkip(skipped.flatMap((g) => g.ids), false)} className="text-[11px] text-blue-600 hover:underline">
-                          ↩ เอากลับทั้งหมด
+                          {t("↩ เอากลับทั้งหมด", "↩ Restore all")}
                         </button>
                       )}
                     </div>
                     {skipped.map((g) => {
                       const sp = g.parentId ? byId.get(g.parentId) : undefined;
-                      const label = sp && g.target ? `${sp.code} · ${destLabel(g.target, sp).title}` : sp ? `${sp.code} · ยังไม่ได้เลือกช่อง` : "ไม่พบรหัสสินค้า";
+                      const label = sp && g.target ? `${sp.code} · ${destLabel(g.target, sp).title}` : sp ? `${sp.code} · ${t("ยังไม่ได้เลือกช่อง", "no slot picked yet")}` : t("ไม่พบรหัสสินค้า", "Product code not found");
                       return (
                         <div key={g.key} className="mt-1.5 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-1.5">
                           <span className="w-56 truncate text-xs text-slate-600" title={label}>{label}</span>
@@ -1437,7 +1440,7 @@ export function WebsiteImageMassUpload({
                           </div>
                           {phase === "pick" && (
                             <button type="button" onClick={() => setSkip(g.ids, false)} className="h-7 rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-100">
-                              ↩ เอากลับ {g.ids.length} รูป
+                              {t(`↩ เอากลับ ${g.ids.length} รูป`, `↩ Restore ${g.ids.length} images`)}
                             </button>
                           )}
                         </div>
@@ -1449,19 +1452,19 @@ export function WebsiteImageMassUpload({
                 {/* ④ ตัวเลือก */}
                 <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm text-slate-800">รูปเดิมที่มีอยู่</span>
+                    <span className="text-sm text-slate-800">{t("รูปเดิมที่มีอยู่", "Current images")}</span>
                     <div className="flex gap-1.5">
                       <button type="button" disabled={busy} onClick={() => setMode("append")} className={seg(mode === "append")}>
-                        เพิ่มต่อท้าย
+                        {t("เพิ่มต่อท้าย", "Append")}
                       </button>
                       <button type="button" disabled={busy} onClick={() => setMode("replace")} className={seg(mode === "replace")}>
-                        แทนที่ของเดิม
+                        {t("แทนที่ของเดิม", "Replace current")}
                       </button>
                     </div>
                   </div>
                   {otherShops.length > 0 && (
                     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
-                      <span className="text-sm text-slate-800">ลงที่ร้านอื่นที่มีสินค้านี้ด้วย</span>
+                      <span className="text-sm text-slate-800">{t("ลงที่ร้านอื่นที่มีสินค้านี้ด้วย", "Also upload to other shops with these products")}</span>
                       <div className="flex flex-wrap gap-3">
                         {otherShops.map((s) => (
                           <label key={s.id} className="flex items-center gap-1.5 text-xs text-slate-600">
@@ -1472,7 +1475,7 @@ export function WebsiteImageMassUpload({
                               onChange={() => setAlsoShops((cur) => { const n = new Set(cur); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; })}
                               className="h-4 w-4 accent-blue-600"
                             />
-                            {s.name} (มี {s.has}/{touched.length} ตัว)
+                            {s.name} {t(`(มี ${s.has}/${touched.length} ตัว)`, `(has ${s.has}/${touched.length})`)}
                           </label>
                         ))}
                       </div>
@@ -1480,8 +1483,8 @@ export function WebsiteImageMassUpload({
                   )}
                   <p className={`mt-2 text-[11px] ${mode === "replace" ? "text-rose-600" : "text-slate-500"}`}>
                     {mode === "replace"
-                      ? `โหมดแทนที่: รูปเดิมของช่องที่มีรูปใหม่จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง · ช่องอื่นไม่แตะ)${touched.length > CONFIRM_OVER ? " · เกิน 20 สินค้าต้องพิมพ์ CONFIRM" : ""}`
-                      : "รูปย่อเหลือกว้าง ≤ 2000px อัตโนมัติ · ไฟล์ที่ข้ามจะไม่อัปโหลด · Hero มีช่องละ 1 ไฟล์ รูปหรือวิดีโอ (ไฟล์ใหม่แทนของเดิม) · บันทึกประวัติว่าใครลงรูปอะไร"}
+                      ? t(`โหมดแทนที่: รูปเดิมของช่องที่มีรูปใหม่จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง · ช่องอื่นไม่แตะ)${touched.length > CONFIRM_OVER ? " · เกิน 20 สินค้าต้องพิมพ์ CONFIRM" : ""}`, `Replace mode: current images in slots with new images are removed from the web (files stay in the library · other slots untouched)${touched.length > CONFIRM_OVER ? " · over 20 products requires typing CONFIRM" : ""}`)
+                      : t("รูปย่อเหลือกว้าง ≤ 2000px อัตโนมัติ · ไฟล์ที่ข้ามจะไม่อัปโหลด · Hero มีช่องละ 1 ไฟล์ รูปหรือวิดีโอ (ไฟล์ใหม่แทนของเดิม) · บันทึกประวัติว่าใครลงรูปอะไร", "Images are resized to ≤ 2000px automatically · skipped files aren't uploaded · each Hero slot holds 1 image or video (new replaces old) · every upload is logged")}
                   </p>
                 </div>
 
@@ -1489,26 +1492,26 @@ export function WebsiteImageMassUpload({
                 {phase === "done" && result && (
                   <div className={`rounded-xl border px-3.5 py-3 text-sm ${result.failed.length || result.otherShopFails ? "border-amber-200 bg-amber-50/50" : "border-emerald-200 bg-emerald-50/50"}`}>
                     <p className="font-medium text-slate-800">
-                      <Icon name="done" className="mr-0.5 inline-block align-[-2px]" />ขึ้นเว็บแล้ว {result.ok} ไฟล์ · อัปเดต {result.updated} รายการ — เว็บเปลี่ยนตามทันที
+                      <Icon name="done" className="mr-0.5 inline-block align-[-2px]" />{t(`ขึ้นเว็บแล้ว ${result.ok} ไฟล์ · อัปเดต ${result.updated} รายการ — เว็บเปลี่ยนตามทันที`, `${result.ok} files live · ${result.updated} items updated — the website updates right away`)}
                     </p>
-                    {result.skippedShops > 0 && <p className="mt-1 text-xs text-slate-500">ร้านอื่น: ข้าม {result.skippedShops} รายการที่ไม่มีสินค้านั้นในร้าน</p>}
-                    {result.otherShopFails > 0 && <p className="mt-1 text-xs text-rose-700">ร้านอื่น: บันทึกไม่สำเร็จ {result.otherShopFails} รายการ</p>}
+                    {result.skippedShops > 0 && <p className="mt-1 text-xs text-slate-500">{t(`ร้านอื่น: ข้าม ${result.skippedShops} รายการที่ไม่มีสินค้านั้นในร้าน`, `Other shops: skipped ${result.skippedShops} items not in that shop`)}</p>}
+                    {result.otherShopFails > 0 && <p className="mt-1 text-xs text-rose-700">{t(`ร้านอื่น: บันทึกไม่สำเร็จ ${result.otherShopFails} รายการ`, `Other shops: ${result.otherShopFails} items failed to save`)}</p>}
                     {result.failed.length > 0 && (
                       <div className="mt-1.5 text-xs text-rose-700">
-                        <p>ยังไม่ขึ้นเว็บ {result.failed.length} ไฟล์ — รอบอื่นขึ้นครบแล้ว ไม่ต้องลงใหม่ทั้งชุด</p>
+                        <p>{t(`ยังไม่ขึ้นเว็บ ${result.failed.length} ไฟล์ — รอบอื่นขึ้นครบแล้ว ไม่ต้องลงใหม่ทั้งชุด`, `${result.failed.length} files not live yet — other rounds are done, no need to redo the whole batch`)}</p>
                         {/* จัดกลุ่มตามสาเหตุ — สาเหตุละบรรทัด + ชื่อไฟล์ (เกิน 8 = …) */}
                         <ul className="mt-1 space-y-1">
                           {groupFailures(result.failed).map((g) => (
                             <li key={g.why} className="text-rose-600">
                               <span className="font-medium text-rose-700">{g.why}</span>
-                              <span className="text-rose-500"> · {g.items.length} ไฟล์: {g.items.slice(0, 8).map((x) => x.name).join(", ")}{g.items.length > 8 ? " …" : ""}</span>
+                              <span className="text-rose-500"> · {t(`${g.items.length} ไฟล์`, `${g.items.length} files`)}: {g.items.slice(0, 8).map((x) => x.name).join(", ")}{g.items.length > 8 ? " …" : ""}</span>
                             </li>
                           ))}
                         </ul>
                         <button type="button" onClick={() => void run(true)} className="mt-2 h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700">
-                          <Icon name="refresh" className="mr-0.5 inline-block align-[-2px]" />ลงซ้ำเฉพาะ {result.failed.length} ไฟล์ที่พลาด
+                          <Icon name="refresh" className="mr-0.5 inline-block align-[-2px]" />{t(`ลงซ้ำเฉพาะ ${result.failed.length} ไฟล์ที่พลาด`, `Retry only the ${result.failed.length} failed files`)}
                         </button>
-                        <span className="ml-2 text-[11px] text-slate-500">ไฟล์ที่อัปแล้วไม่อัปใหม่ · แถวที่ขึ้นเว็บบางส่วนแล้ว = ต่อท้าย</span>
+                        <span className="ml-2 text-[11px] text-slate-500">{t("ไฟล์ที่อัปแล้วไม่อัปใหม่ · แถวที่ขึ้นเว็บบางส่วนแล้ว = ต่อท้าย", "Already-uploaded files aren't re-uploaded · rows that are partly live are appended")}</span>
                       </div>
                     )}
                   </div>
@@ -1518,8 +1521,8 @@ export function WebsiteImageMassUpload({
 
             {items.length === 0 && (
               <p className="text-[11px] text-slate-400">
-                ช่องที่ลงได้: รูปบนเว็บ (≤ 12 รูป/สินค้า) · รูปสี (≤ 8 รูป/สี) · Hero คอม/มือถือ ของสินค้าและของแต่ละสี (รูปหรือวิดีโอ) — ช่องที่ไม่มีรูปใหม่ = ไม่แตะ
-                {catalog.parents.length ? ` · ตัวอย่างรหัสในร้าน: ${parents.slice(0, 3).map((p) => p.code).join(", ")}` : ""}
+                {t("ช่องที่ลงได้: รูปบนเว็บ (≤ 12 รูป/สินค้า) · รูปสี (≤ 8 รูป/สี) · Hero คอม/มือถือ ของสินค้าและของแต่ละสี (รูปหรือวิดีโอ) — ช่องที่ไม่มีรูปใหม่ = ไม่แตะ", "Slots: web images (≤ 12 per product) · color images (≤ 8 per color) · Hero desktop/mobile for each product and color (image or video) — slots without new images are untouched")}
+                {catalog.parents.length ? `${t(" · ตัวอย่างรหัสในร้าน:", " · example codes in this shop:")} ${parents.slice(0, 3).map((p) => p.code).join(", ")}` : ""}
               </p>
             )}
           </>
@@ -1533,10 +1536,11 @@ export function WebsiteImageMassUpload({
 /** ↕ แถวรูปของช่องเดียว — กดค้างที่รูปแล้วลาก = สลับลำดับ (ของกลาง useDragReorder · group = ช่องนั้น ลากข้ามแถวไม่ได้) */
 /** รูปเดิมบนเว็บ (จางๆ · ชี้ดูชัด) — gone = โหมดแทนที่/Hero ใหม่ → ขีดฆ่า "จะเอาออก" */
 function OldThumbs({ keys, gone, hero }: { keys: string[]; gone: boolean; hero: boolean }) {
+  const t = useT();
   return (
     <>
       {keys.map((k, i) => {
-        const tip = gone ? "รูปเดิม — จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง)" : `รูปเดิมบนเว็บ ลำดับ ${i + 1} — ไม่ถูกแตะ`;
+        const tip = gone ? t("รูปเดิม — จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง)", "Current image — will be removed from the web (file stays in the library)") : t(`รูปเดิมบนเว็บ ลำดับ ${i + 1} — ไม่ถูกแตะ`, `Current web image #${i + 1} — untouched`);
         return (
           <div key={`${k}:${i}`} className="w-16 shrink-0" title={tip}>
             <div className={`relative h-20 w-16 overflow-hidden rounded-md border border-dashed border-slate-300 transition-opacity hover:opacity-100 ${gone ? "opacity-35" : "opacity-45"}`}>
@@ -1549,11 +1553,11 @@ function OldThumbs({ keys, gone, hero }: { keys: string[]; gone: boolean; hero: 
               {!hero && !gone && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/45 px-1 text-[10px] leading-4 text-white">{i + 1}</span>}
               {gone && (
                 <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <span className="rounded bg-rose-600/85 px-1 text-[10px] leading-4 text-white">✕ ออก</span>
+                  <span className="rounded bg-rose-600/85 px-1 text-[10px] leading-4 text-white">{t("✕ ออก", "✕ Out")}</span>
                 </span>
               )}
             </div>
-            <p className={`mt-0.5 truncate text-[10px] ${gone ? "text-rose-500 line-through" : "text-slate-400"}`}>{gone ? "จะเอาออก" : "รูปเดิม"}</p>
+            <p className={`mt-0.5 truncate text-[10px] ${gone ? "text-rose-500 line-through" : "text-slate-400"}`}>{gone ? t("จะเอาออก", "Removing") : t("รูปเดิม", "Current")}</p>
           </div>
         );
       })}

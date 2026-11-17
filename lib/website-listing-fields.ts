@@ -8,13 +8,14 @@
  * ชื่อ/คำอธิบาย: แก้หลายรายการได้แค่ "ล้างกลับเป็นอัตโนมัติ" (แต่ละรุ่นไม่ควรมีค่าเดียวกัน)
  */
 import type { ListingPatch } from "@/lib/website-listing-patch";
+import { tr } from "@/lib/lang";
 
 export const STOCK_STATUS_OPTIONS = [
-  { value: "in", label: "พร้อมส่ง" },
-  { value: "low", label: "เหลือน้อย" },
-  { value: "preorder", label: "สั่งจอง" },
+  { value: "in", get label() { return tr("พร้อมส่ง", "In stock"); } },
+  { value: "low", get label() { return tr("เหลือน้อย", "Low stock"); } },
+  { value: "preorder", get label() { return tr("สั่งจอง", "Pre-order"); } },
   // 🚫 สินค้าหมด: เว็บโชว์ป้าย "สินค้าหมด" + กดซื้อไม่ได้ + ออเดอร์ถูกปฏิเสธที่เซิร์ฟเวอร์ · หน้ารายการ: ไปท้าย/ซ่อน ตามที่ตั้ง (theme.listing.soldOut)
-  { value: "out", label: "สินค้าหมด" },
+  { value: "out", get label() { return tr("สินค้าหมด", "Sold out"); } },
 ];
 
 export type ListingFieldKind = "choice" | "price" | "categories" | "badge" | "text" | "clear";
@@ -31,15 +32,15 @@ export interface ListingFieldDef {
 }
 
 export const LISTING_FIELDS: ListingFieldDef[] = [
-  { key: "published", label: "ขึ้นเว็บ", kind: "choice", bulk: true, choices: [{ value: "on", label: "ขึ้นเว็บ" }, { value: "off", label: "ซ่อน" }] },
-  { key: "featured", label: "สินค้าแนะนำ", kind: "choice", bulk: true, choices: [{ value: "on", label: "ตั้งแนะนำ" }, { value: "off", label: "เลิกแนะนำ" }] },
-  { key: "price", label: "ราคาเว็บ", kind: "price", bulk: true, hint: "ล้าง = กลับไปใช้ราคาจาก ERP" },
-  { key: "categories", label: "หมวดบนเว็บ", kind: "categories", bulk: true, hint: "เพิ่ม / เอาออก / แทนทั้งชุด / ย้ายหมวด" },
-  { key: "badge", label: "ป้ายบนการ์ด", kind: "badge", bulk: true },
-  { key: "stockStatus", label: "สถานะสต๊อก", kind: "choice", bulk: true, choices: STOCK_STATUS_OPTIONS },
-  { key: "unit", label: "หน่วยขาย", kind: "text", bulk: true, hint: "ว่าง = ใช้หน่วยจาก ERP" },
-  { key: "name", label: "ชื่อบนเว็บ", kind: "clear", bulk: true, hint: "ล้างกลับเป็นชื่ออัตโนมัติ (ตามกฎชื่อร้าน)" },
-  { key: "description", label: "คำอธิบายบนเว็บ", kind: "clear", bulk: true, hint: "ล้างกลับเป็นคำอธิบายจาก ERP" },
+  { key: "published", get label() { return tr("ขึ้นเว็บ", "Live"); }, kind: "choice", bulk: true, choices: [{ value: "on", get label() { return tr("ขึ้นเว็บ", "Live"); } }, { value: "off", get label() { return tr("ซ่อน", "Hidden"); } }] },
+  { key: "featured", get label() { return tr("สินค้าแนะนำ", "Featured"); }, kind: "choice", bulk: true, choices: [{ value: "on", get label() { return tr("ตั้งแนะนำ", "Set featured"); } }, { value: "off", get label() { return tr("เลิกแนะนำ", "Unset featured"); } }] },
+  { key: "price", get label() { return tr("ราคาเว็บ", "Web price"); }, kind: "price", bulk: true, get hint() { return tr("ล้าง = กลับไปใช้ราคาจาก ERP", "Clear = go back to the ERP price"); } },
+  { key: "categories", get label() { return tr("หมวดบนเว็บ", "Web categories"); }, kind: "categories", bulk: true, get hint() { return tr("เพิ่ม / เอาออก / แทนทั้งชุด / ย้ายหมวด", "Add / remove / replace all / move category"); } },
+  { key: "badge", get label() { return tr("ป้ายบนการ์ด", "Card badge"); }, kind: "badge", bulk: true },
+  { key: "stockStatus", get label() { return tr("สถานะสต๊อก", "Stock status"); }, kind: "choice", bulk: true, choices: STOCK_STATUS_OPTIONS },
+  { key: "unit", get label() { return tr("หน่วยขาย", "Sales unit"); }, kind: "text", bulk: true, get hint() { return tr("ว่าง = ใช้หน่วยจาก ERP", "Empty = use the ERP unit"); } },
+  { key: "name", get label() { return tr("ชื่อบนเว็บ", "Web name"); }, kind: "clear", bulk: true, get hint() { return tr("ล้างกลับเป็นชื่ออัตโนมัติ (ตามกฎชื่อร้าน)", "Reset to the automatic name (shop naming rule)"); } },
+  { key: "description", get label() { return tr("คำอธิบายบนเว็บ", "Web description"); }, kind: "clear", bulk: true, get hint() { return tr("ล้างกลับเป็นคำอธิบายจาก ERP", "Reset to the ERP description"); } },
 ];
 export const BULK_FIELDS = LISTING_FIELDS.filter((f) => f.bulk);
 
@@ -66,24 +67,24 @@ export type MassEditValues = Partial<{
 export function massEditPlan(v: MassEditValues): { ok: true; patch: ListingPatch; categories: CategoriesOp | null } | { ok: false; error: string } {
   const patch: ListingPatch = {};
   if (v.published !== undefined) {
-    if (v.published !== "on" && v.published !== "off") return { ok: false, error: "เลือกว่าจะขึ้นเว็บหรือซ่อน" };
+    if (v.published !== "on" && v.published !== "off") return { ok: false, error: tr("เลือกว่าจะขึ้นเว็บหรือซ่อน", "Choose Live or Hidden") };
     patch.isPublished = v.published === "on";
   }
   if (v.featured !== undefined) {
-    if (v.featured !== "on" && v.featured !== "off") return { ok: false, error: "เลือกว่าจะตั้งหรือเลิกแนะนำ" };
+    if (v.featured !== "on" && v.featured !== "off") return { ok: false, error: tr("เลือกว่าจะตั้งหรือเลิกแนะนำ", "Choose set or unset featured") };
     patch.featured = v.featured === "on";
   }
   if (v.price) {
     if (v.price.mode === "clear") patch.webPrice = null;
     else {
       const n = Number(v.price.value);
-      if (!(n > 0)) return { ok: false, error: "ใส่ราคาเว็บให้มากกว่า 0 (หรือเลือก 'ล้าง')" };
+      if (!(n > 0)) return { ok: false, error: tr("ใส่ราคาเว็บให้มากกว่า 0 (หรือเลือก 'ล้าง')", "Enter a web price above 0 (or choose 'Clear')") };
       patch.webPrice = Math.round(n * 100) / 100;
     }
   }
   if (v.badge !== undefined) patch.webBadge = String(v.badge).trim().slice(0, 40);
   if (v.stockStatus !== undefined) {
-    if (!STOCK_STATUS_OPTIONS.some((o) => o.value === v.stockStatus)) return { ok: false, error: "เลือกสถานะสต๊อก" };
+    if (!STOCK_STATUS_OPTIONS.some((o) => o.value === v.stockStatus)) return { ok: false, error: tr("เลือกสถานะสต๊อก", "Choose a stock status") };
     patch.webStockStatus = v.stockStatus;
   }
   if (v.unit !== undefined) patch.webUnit = String(v.unit).trim().slice(0, 40);
@@ -92,19 +93,19 @@ export function massEditPlan(v: MassEditValues): { ok: true; patch: ListingPatch
   let categories: CategoriesOp | null = null;
   if (v.categories) {
     const keys = [...new Set((v.categories.keys ?? []).filter((k) => typeof k === "string" && k))];
-    if (!["add", "remove", "replace", "move"].includes(v.categories.mode)) return { ok: false, error: "เลือกว่าจะเพิ่ม/เอาออก/แทน/ย้ายหมวด" };
+    if (!["add", "remove", "replace", "move"].includes(v.categories.mode)) return { ok: false, error: tr("เลือกว่าจะเพิ่ม/เอาออก/แทน/ย้ายหมวด", "Choose add / remove / replace / move category") };
     if (v.categories.mode === "move") {
       const from = typeof v.categories.from === "string" ? v.categories.from : "";
-      if (!from) return { ok: false, error: "เลือกหมวดต้นทาง (ย้ายจากหมวดไหน)" };
-      if (keys.length !== 1) return { ok: false, error: "เลือกหมวดปลายทาง 1 หมวด" };
-      if (keys[0] === from) return { ok: false, error: "หมวดต้นทางกับปลายทางต้องไม่ใช่หมวดเดียวกัน" };
+      if (!from) return { ok: false, error: tr("เลือกหมวดต้นทาง (ย้ายจากหมวดไหน)", "Pick the source category (move from which one)") };
+      if (keys.length !== 1) return { ok: false, error: tr("เลือกหมวดปลายทาง 1 หมวด", "Pick 1 target category") };
+      if (keys[0] === from) return { ok: false, error: tr("หมวดต้นทางกับปลายทางต้องไม่ใช่หมวดเดียวกัน", "Source and target categories must be different") };
       categories = { mode: "move", keys, from };
     } else {
-      if (v.categories.mode !== "replace" && !keys.length) return { ok: false, error: "เลือกหมวดที่จะเพิ่ม/เอาออกก่อน" };
+      if (v.categories.mode !== "replace" && !keys.length) return { ok: false, error: tr("เลือกหมวดที่จะเพิ่ม/เอาออกก่อน", "Pick the categories to add / remove first") };
       categories = { mode: v.categories.mode, keys };
     }
   }
-  if (!Object.keys(patch).length && !categories) return { ok: false, error: "ติ๊กช่องที่จะแก้อย่างน้อย 1 ช่อง" };
+  if (!Object.keys(patch).length && !categories) return { ok: false, error: tr("ติ๊กช่องที่จะแก้อย่างน้อย 1 ช่อง", "Tick at least 1 field to edit") };
   return { ok: true, patch, categories };
 }
 
@@ -169,22 +170,22 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const seoOf = (r: WebGridRow) => (r.web_seo && typeof r.web_seo === "object" ? (r.web_seo as Record<string, unknown>) : {});
 
 export const WEB_GRID_FIELDS: WebGridField[] = [
-  { key: "published", label: "ขึ้นเว็บ", kind: "bool", read: (r) => !!r.is_published },
-  { key: "featured", label: "สินค้าแนะนำ", kind: "bool", read: (r) => !!r.featured },
-  { key: "webName", label: "ชื่อบนเว็บ", kind: "text", hint: "ว่าง = ชื่ออัตโนมัติตามกฎชื่อร้าน", read: (r) => s(r.web_name) },
-  { key: "webPrice", label: "ราคาเว็บ", kind: "money", hint: "ว่าง = ราคาจาก ERP", read: (r) => (Number(r.web_price) > 0 ? String(Number(r.web_price)) : "") },
-  { key: "webDescription", label: "คำอธิบายบนเว็บ", kind: "textarea", hint: "ว่าง = คำอธิบายจาก ERP", read: (r) => s(r.web_description) },
-  { key: "webUnit", label: "หน่วยขาย", kind: "text", hint: "ว่าง = หน่วยจาก ERP", read: (r) => s(r.web_unit) },
-  { key: "webCategories", label: "หมวดบนเว็บ", kind: "categories", hint: "ตัวแรก = หมวดหลัก", read: (r) => (Array.isArray(r.web_categories) ? r.web_categories : []) },
-  { key: "webBadge", label: "ป้ายบนการ์ด", kind: "badge", read: (r) => s(r.web_badge) },
-  { key: "webStockStatus", label: "สถานะสต๊อก", kind: "stock", read: (r) => s(r.web_stock_status) || "in" },
-  { key: "webSwatch", label: "จุดสีการ์ด", kind: "text", hint: "สี CSS เช่น #222 (ว่าง = ตามสี SKU)", read: (r) => s(r.web_swatch) },
-  { key: "webSizeGuide", label: "ตารางไซส์", kind: "sizeGuide", hint: "ว่าง = อัตโนมัติตามหมวด", read: (r) => s(r.web_size_guide) },
-  { key: "seo.title", label: "SEO ชื่อ", kind: "text", read: (r) => s(seoOf(r).title) },
-  { key: "seo.description", label: "SEO คำอธิบาย", kind: "textarea", read: (r) => s(seoOf(r).description) },
-  { key: "seo.title_en", label: "SEO ชื่อ (EN)", kind: "text", read: (r) => s(seoOf(r).title_en) },
-  { key: "seo.description_en", label: "SEO คำอธิบาย (EN)", kind: "textarea", read: (r) => s(seoOf(r).description_en) },
-  { key: "webRelated", label: "สินค้าที่เกี่ยวข้อง (รหัส)", kind: "codes", hint: "รหัส Parent SKU คั่นด้วย , · ว่าง = ตามกฎกลางของธีม", read: (r) => (Array.isArray(r.web_related) ? r.web_related.join(", ") : "") },
+  { key: "published", get label() { return tr("ขึ้นเว็บ", "Live"); }, kind: "bool", read: (r) => !!r.is_published },
+  { key: "featured", get label() { return tr("สินค้าแนะนำ", "Featured"); }, kind: "bool", read: (r) => !!r.featured },
+  { key: "webName", get label() { return tr("ชื่อบนเว็บ", "Web name"); }, kind: "text", get hint() { return tr("ว่าง = ชื่ออัตโนมัติตามกฎชื่อร้าน", "Empty = automatic name from the shop naming rule"); }, read: (r) => s(r.web_name) },
+  { key: "webPrice", get label() { return tr("ราคาเว็บ", "Web price"); }, kind: "money", get hint() { return tr("ว่าง = ราคาจาก ERP", "Empty = ERP price"); }, read: (r) => (Number(r.web_price) > 0 ? String(Number(r.web_price)) : "") },
+  { key: "webDescription", get label() { return tr("คำอธิบายบนเว็บ", "Web description"); }, kind: "textarea", get hint() { return tr("ว่าง = คำอธิบายจาก ERP", "Empty = ERP description"); }, read: (r) => s(r.web_description) },
+  { key: "webUnit", get label() { return tr("หน่วยขาย", "Sales unit"); }, kind: "text", get hint() { return tr("ว่าง = หน่วยจาก ERP", "Empty = ERP unit"); }, read: (r) => s(r.web_unit) },
+  { key: "webCategories", get label() { return tr("หมวดบนเว็บ", "Web categories"); }, kind: "categories", get hint() { return tr("ตัวแรก = หมวดหลัก", "First = main category"); }, read: (r) => (Array.isArray(r.web_categories) ? r.web_categories : []) },
+  { key: "webBadge", get label() { return tr("ป้ายบนการ์ด", "Card badge"); }, kind: "badge", read: (r) => s(r.web_badge) },
+  { key: "webStockStatus", get label() { return tr("สถานะสต๊อก", "Stock status"); }, kind: "stock", read: (r) => s(r.web_stock_status) || "in" },
+  { key: "webSwatch", get label() { return tr("จุดสีการ์ด", "Card color dot"); }, kind: "text", get hint() { return tr("สี CSS เช่น #222 (ว่าง = ตามสี SKU)", "CSS color, e.g. #222 (empty = follow the SKU color)"); }, read: (r) => s(r.web_swatch) },
+  { key: "webSizeGuide", get label() { return tr("ตารางไซส์", "Size guide"); }, kind: "sizeGuide", get hint() { return tr("ว่าง = อัตโนมัติตามหมวด", "Empty = automatic by category"); }, read: (r) => s(r.web_size_guide) },
+  { key: "seo.title", get label() { return tr("SEO ชื่อ", "SEO title"); }, kind: "text", read: (r) => s(seoOf(r).title) },
+  { key: "seo.description", get label() { return tr("SEO คำอธิบาย", "SEO description"); }, kind: "textarea", read: (r) => s(seoOf(r).description) },
+  { key: "seo.title_en", get label() { return tr("SEO ชื่อ (EN)", "SEO title (EN)"); }, kind: "text", read: (r) => s(seoOf(r).title_en) },
+  { key: "seo.description_en", get label() { return tr("SEO คำอธิบาย (EN)", "SEO description (EN)"); }, kind: "textarea", read: (r) => s(seoOf(r).description_en) },
+  { key: "webRelated", get label() { return tr("สินค้าที่เกี่ยวข้อง (รหัส)", "Related products (codes)"); }, kind: "codes", get hint() { return tr("รหัส Parent SKU คั่นด้วย , · ว่าง = ตามกฎกลางของธีม", "Parent SKU codes separated by , · empty = theme's default rule"); }, read: (r) => (Array.isArray(r.web_related) ? r.web_related.join(", ") : "") },
 ];
 
 /** ช่องของ ListingPatch ที่ API ตารางรับ */
@@ -207,9 +208,9 @@ export const WEB_GRID_PATCH_KEYS = [
 /** ตรวจค่าก่อนบันทึก — คืนข้อความภาษาคน (null = ผ่าน) */
 export function webGridValidate(key: string, v: WebGridValue): string | null {
   const f = WEB_GRID_FIELDS.find((x) => x.key === key);
-  if (!f) return "ไม่รู้จักช่องนี้";
-  if (f.kind === "money" && String(v).trim() !== "" && !(Number(String(v).replace(/,/g, "")) > 0)) return "ราคาต้องเป็นตัวเลขมากกว่า 0 (หรือเว้นว่าง)";
-  if (f.kind === "stock" && !STOCK_STATUS_OPTIONS.some((o) => o.value === v)) return "เลือกสถานะสต๊อก";
+  if (!f) return tr("ไม่รู้จักช่องนี้", "Unknown field");
+  if (f.kind === "money" && String(v).trim() !== "" && !(Number(String(v).replace(/,/g, "")) > 0)) return tr("ราคาต้องเป็นตัวเลขมากกว่า 0 (หรือเว้นว่าง)", "Price must be a number above 0 (or empty)");
+  if (f.kind === "stock" && !STOCK_STATUS_OPTIONS.some((o) => o.value === v)) return tr("เลือกสถานะสต๊อก", "Choose a stock status");
   return null;
 }
 

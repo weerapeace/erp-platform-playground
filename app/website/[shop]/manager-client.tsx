@@ -28,39 +28,42 @@ import { AccessDenied, useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { designAccess, designTabTopicOf, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS, type WebsiteGroup } from "@/lib/website-access";
 import { WebsiteManagerMenu } from "@/components/website-manager-menu";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 // ⚡ โค้ดของแต่ละแท็บโหลดตอนเปิดแท็บนั้น (2026-11-12) — เดิมโหลดครบ 21 แท็บตั้งแต่เปิดหน้า = โค้ด 920KB หนักสุดในระบบ
 //    แท็บยังไม่มา = ข้อความกำลังเปิด (state-views กลาง) · ssr:false เพราะทุกแผงต้องรู้ตัวผู้ใช้/ร้านก่อนอยู่แล้ว
-const WebsiteListingsPanel = dynamic(() => import("@/components/website-listings-panel").then((m) => m.WebsiteListingsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteFieldMapPanel = dynamic(() => import("@/components/website-field-map-panel").then((m) => m.WebsiteFieldMapPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteCategoriesPanel = dynamic(() => import("@/components/website-categories-panel").then((m) => m.WebsiteCategoriesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteCollectionsPanel = dynamic(() => import("@/components/website-collections-panel").then((m) => m.WebsiteCollectionsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteNewDropsPanel = dynamic(() => import("@/components/website-new-drops-panel").then((m) => m.WebsiteNewDropsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteSizeGuidesPanel = dynamic(() => import("@/components/website-size-guides-panel").then((m) => m.WebsiteSizeGuidesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteThemePanel = dynamic(() => import("@/components/website-theme-panel").then((m) => m.WebsiteThemePanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteLayoutPanel = dynamic(() => import("@/components/website-layout-panel").then((m) => m.WebsiteLayoutPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsitePagesPanel = dynamic(() => import("@/components/website-pages-panel").then((m) => m.WebsitePagesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteInfoPanel = dynamic(() => import("@/components/website-info-panel").then((m) => m.WebsiteInfoPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteOrdersPanel = dynamic(() => import("@/components/website-orders-panel").then((m) => m.WebsiteOrdersPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteShippingPanel = dynamic(() => import("@/components/website-shipping-panel").then((m) => m.WebsiteShippingPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteCouponsPanel = dynamic(() => import("@/components/website-coupons-panel").then((m) => m.WebsiteCouponsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteMembersPanel = dynamic(() => import("@/components/website-members-panel").then((m) => m.WebsiteMembersPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteReviewsPanel = dynamic(() => import("@/components/website-reviews-panel").then((m) => m.WebsiteReviewsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteStatsPanel = dynamic(() => import("@/components/website-stats-panel").then((m) => m.WebsiteStatsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteReturnsPanel = dynamic(() => import("@/components/website-returns-panel").then((m) => m.WebsiteReturnsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteImageSetsPanel = dynamic(() => import("@/components/website-image-sets-panel").then((m) => m.WebsiteImageSetsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteSiteImagesPanel = dynamic(() => import("@/components/website-site-images-panel").then((m) => m.WebsiteSiteImagesPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsitePromotionsPanel = dynamic(() => import("@/components/website-promotions-panel").then((m) => m.WebsitePromotionsPanel), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
-const WebsiteTranslationCenter = dynamic(() => import("@/components/website-translation-center").then((m) => m.WebsiteTranslationCenter), { ssr: false, loading: () => <LoadingState label="กำลังเปิดแท็บ…" /> });
+const WebsiteListingsPanel = dynamic(() => import("@/components/website-listings-panel").then((m) => m.WebsiteListingsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteFieldMapPanel = dynamic(() => import("@/components/website-field-map-panel").then((m) => m.WebsiteFieldMapPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteCategoriesPanel = dynamic(() => import("@/components/website-categories-panel").then((m) => m.WebsiteCategoriesPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteCollectionsPanel = dynamic(() => import("@/components/website-collections-panel").then((m) => m.WebsiteCollectionsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteNewDropsPanel = dynamic(() => import("@/components/website-new-drops-panel").then((m) => m.WebsiteNewDropsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteSizeGuidesPanel = dynamic(() => import("@/components/website-size-guides-panel").then((m) => m.WebsiteSizeGuidesPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteThemePanel = dynamic(() => import("@/components/website-theme-panel").then((m) => m.WebsiteThemePanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteLayoutPanel = dynamic(() => import("@/components/website-layout-panel").then((m) => m.WebsiteLayoutPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsitePagesPanel = dynamic(() => import("@/components/website-pages-panel").then((m) => m.WebsitePagesPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteInfoPanel = dynamic(() => import("@/components/website-info-panel").then((m) => m.WebsiteInfoPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteOrdersPanel = dynamic(() => import("@/components/website-orders-panel").then((m) => m.WebsiteOrdersPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteShippingPanel = dynamic(() => import("@/components/website-shipping-panel").then((m) => m.WebsiteShippingPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteCouponsPanel = dynamic(() => import("@/components/website-coupons-panel").then((m) => m.WebsiteCouponsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteMembersPanel = dynamic(() => import("@/components/website-members-panel").then((m) => m.WebsiteMembersPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteReviewsPanel = dynamic(() => import("@/components/website-reviews-panel").then((m) => m.WebsiteReviewsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteStatsPanel = dynamic(() => import("@/components/website-stats-panel").then((m) => m.WebsiteStatsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteReturnsPanel = dynamic(() => import("@/components/website-returns-panel").then((m) => m.WebsiteReturnsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteImageSetsPanel = dynamic(() => import("@/components/website-image-sets-panel").then((m) => m.WebsiteImageSetsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteSiteImagesPanel = dynamic(() => import("@/components/website-site-images-panel").then((m) => m.WebsiteSiteImagesPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsitePromotionsPanel = dynamic(() => import("@/components/website-promotions-panel").then((m) => m.WebsitePromotionsPanel), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
+const WebsiteTranslationCenter = dynamic(() => import("@/components/website-translation-center").then((m) => m.WebsiteTranslationCenter), { ssr: false, loading: () => <LoadingState label={tr("กำลังเปิดแท็บ…", "Opening tab…")} /> });
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
 type PageWidth = (typeof PAGE_WIDTHS)[number];
 const PAGE_WIDTH_CLS: Record<PageWidth, string> = { normal: "max-w-6xl", wide: "max-w-[1680px]", full: "max-w-none" };
-const PAGE_WIDTH_LABEL: Record<PageWidth, string> = { normal: "ปกติ", wide: "กว้าง", full: "เต็มจอ" };
+const PAGE_WIDTH_LABEL: Record<PageWidth, string> = { get normal() { return tr("ปกติ", "Normal"); }, get wide() { return tr("กว้าง", "Wide"); }, get full() { return tr("เต็มจอ", "Full screen"); } };
 
 export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const toast = useToast();
+  const t = useT();
   const [shop, setShop] = useState<ShopInfo | null>(null);
   const { view: pageWidth, setView: setPageWidth, saveDefault: savePageWidth } = useViewPref<PageWidth>("website_manager_width", PAGE_WIDTHS, "wide");
   const [listings, setListings] = useState<Listing[]>([]);
@@ -118,7 +121,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         const j = await loadWebListings<Listing, ShopInfo, CategoryDef>(slug ?? "", true);
         if ((j as { retryable?: boolean }).retryable) {
           // ฐานข้อมูลตอบไม่ทัน → ไม่แตะรายการที่แสดงอยู่ (กันป้าย "ยังไม่มีราคา" ผิดทั้งร้าน) · รู้ร้านแล้วก็เก็บไว้
-          setLoadError(j.error || "โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง");
+          setLoadError(j.error || tr("โหลดข้อมูลสินค้าไม่ครบ — กดลองใหม่อีกครั้ง", "Product data didn't fully load — click retry"));
           if (j.shop) setShop((cur) => cur ?? (j.shop as ShopInfo));
           return;
         }
@@ -139,8 +142,8 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         setListings(j.listings ?? []);
         setCategories(Array.isArray(j.categories) ? j.categories : []);
       } catch {
-        toast.error("โหลดข้อมูลไม่สำเร็จ");
-        setLoadError("โหลดข้อมูลไม่สำเร็จ — เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา");
+        toast.error(tr("โหลดข้อมูลไม่สำเร็จ", "Failed to load data"));
+        setLoadError(tr("โหลดข้อมูลไม่สำเร็จ — เชื่อมต่อไม่ได้หรือเครือข่ายมีปัญหา", "Failed to load data — can't connect or network problem"));
       } finally {
         setLoading(false);
       }
@@ -209,9 +212,9 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
       <PlaygroundShell>
         <div className="max-w-6xl mx-auto px-5 py-6">
           <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
-            ← เว็บไซต์ทั้งหมด
+            ← {t("เว็บไซต์ทั้งหมด", "All websites")}
           </Link>
-          <AccessDenied message={anyGroup ? "คุณไม่มีสิทธิ์จัดการเว็บร้านนี้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ" : "คุณยังไม่มีสิทธิ์ใช้งานเว็บไซต์ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ"} />
+          <AccessDenied message={anyGroup ? t("คุณไม่มีสิทธิ์จัดการเว็บร้านนี้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ", "You don't have access to manage this shop's website — ask an admin") : t("คุณยังไม่มีสิทธิ์ใช้งานเว็บไซต์ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ", "You don't have access to the website yet — ask an admin")} />
         </div>
       </PlaygroundShell>
     );
@@ -233,19 +236,19 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
       <PlaygroundShell>
         <div className="max-w-6xl mx-auto px-5 py-6">
           <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
-            ← เว็บไซต์ทั้งหมด
+            ← {t("เว็บไซต์ทั้งหมด", "All websites")}
           </Link>
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-6 py-10 text-center">
             <p className="text-3xl">🔍</p>
             <p className="mt-3 text-sm text-amber-900">
-              ไม่พบเว็บร้านชื่อ <span className="font-medium">“{shopSlug}”</span>
+              {t("ไม่พบเว็บร้านชื่อ", "No shop website named")} <span className="font-medium">“{shopSlug}”</span>
             </p>
-            <p className="mt-1 text-xs text-amber-700">อาจพิมพ์ที่อยู่ผิด หรือร้านนี้ถูกลบไปแล้ว</p>
+            <p className="mt-1 text-xs text-amber-700">{t("อาจพิมพ์ที่อยู่ผิด หรือร้านนี้ถูกลบไปแล้ว", "The address may be mistyped, or this shop was deleted")}</p>
             <Link
               href="/website"
               className="inline-block mt-4 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
             >
-              เลือกจากเว็บไซต์ทั้งหมด
+              {t("เลือกจากเว็บไซต์ทั้งหมด", "Pick from all websites")}
             </Link>
           </div>
         </div>
@@ -258,13 +261,13 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {/* หัวเรื่อง */}
         <div className="mb-5">
           <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
-            ← เว็บไซต์ทั้งหมด
+            ← {t("เว็บไซต์ทั้งหมด", "All websites")}
           </Link>
           <div className="flex flex-wrap items-center gap-3 mt-1.5">
             <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
-              🌐 {shop?.name ?? "กำลังโหลด…"}
+              🌐 {shop?.name ?? t("กำลังโหลด…", "Loading…")}
               {shop?.isDefault && (
-                <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">ร้านหลัก</span>
+                <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{t("ร้านหลัก", "Main shop")}</span>
               )}
             </h1>
             {/* ปุ่มเปิด/ปิดเว็บชั่วคราว — ค่าเดียวกับช่องในแท็บข้อมูลร้าน */}
@@ -275,12 +278,12 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               </a>
             )}
             {can("admin.users") && (
-              <Link href="/website/access" className="ml-auto text-xs text-slate-500 hover:text-blue-600" title="ตั้งว่าใครเห็น/แก้ส่วนไหนของเว็บ และเข้าร้านไหนได้">
-                🔐 ใครทำอะไรได้
+              <Link href="/website/access" className="ml-auto text-xs text-slate-500 hover:text-blue-600" title={t("ตั้งว่าใครเห็น/แก้ส่วนไหนของเว็บ และเข้าร้านไหนได้", "Set who can see/edit which parts of the website, and which shops they can open")}>
+                🔐 {t("ใครทำอะไรได้", "Who can do what")}
               </Link>
             )}
-            <label className={`${can("admin.users") ? "" : "ml-auto "}flex items-center gap-1.5 text-[11px] text-slate-500`} title="ความกว้างของหน้านี้ (จำไว้ให้ครั้งหน้า)">
-              ↔ ความกว้างหน้า
+            <label className={`${can("admin.users") ? "" : "ml-auto "}flex items-center gap-1.5 text-[11px] text-slate-500`} title={t("ความกว้างของหน้านี้ (จำไว้ให้ครั้งหน้า)", "Width of this page (remembered for next time)")}>
+              ↔ {t("ความกว้างหน้า", "Page width")}
               <WheelSelect
                 value={pageWidth}
                 onChange={(e) => {
@@ -296,7 +299,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             </label>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            กำหนดว่าสินค้าไหนขึ้นเว็บร้านนี้ พร้อมตั้งชื่อ/ราคา/หน่วย/หมวดเฉพาะเว็บ — เว้นว่าง = เติมอัตโนมัติจาก ERP
+            {t("กำหนดว่าสินค้าไหนขึ้นเว็บร้านนี้ พร้อมตั้งชื่อ/ราคา/หน่วย/หมวดเฉพาะเว็บ — เว้นว่าง = เติมอัตโนมัติจาก ERP", "Choose which products go on this shop's site and set web-only name/price/unit/category — leave blank = filled automatically from ERP")}
           </p>
         </div>
 
@@ -315,20 +318,20 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {/* 👁 กลุ่มนี้ดูได้อย่างเดียว — ปุ่มบันทึกยังกดได้ แต่ระบบไม่ให้บันทึก (API ตรวจสิทธิ์) */}
         {shop && know && viewOnlyTab(tab) && tabGroup && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-website-view-only>
-            👁 ส่วน “{websiteGroupDef(tabGroup).label}” คุณ{WEBSITE_LEVEL_LABEL.view}อย่างเดียว — แก้แล้วบันทึกไม่ได้ · ขอสิทธิ์แก้ได้ที่ผู้ดูแลระบบ
+            {t(`👁 ส่วน “${websiteGroupDef(tabGroup).label}” คุณ${WEBSITE_LEVEL_LABEL.view}อย่างเดียว — แก้แล้วบันทึกไม่ได้ · ขอสิทธิ์แก้ได้ที่ผู้ดูแลระบบ`, `👁 You can only view “${websiteGroupDef(tabGroup).label}” — edits can't be saved · ask an admin for edit access`)}
           </div>
         )}
 
         {/* ⚠️ โหลดสินค้าไม่ครบ — ยังไม่เคยโหลดได้เลย = ข้อความเต็ม · มีข้อมูลรอบก่อนอยู่ = แถบเตือน + ลองใหม่ */}
         {loadError && !loading && (!shop || (tab === "listings" && listings.length === 0)) && (
-          <ErrorState title="โหลดข้อมูลสินค้าไม่ครบ" hint={loadError} onRetry={() => void retryLoad()} retrying={retrying} />
+          <ErrorState title={t("โหลดข้อมูลสินค้าไม่ครบ", "Product data didn't fully load")} hint={loadError} onRetry={() => void retryLoad()} retrying={retrying} />
         )}
         {loadError && !loading && shop && !(tab === "listings" && listings.length === 0) && (
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert" data-website-load-error>
-            <span className="flex-1 min-w-[200px]">⚠️ {loadError} · รายการสินค้าที่เห็นเป็นข้อมูลรอบก่อน อาจไม่ใช่ล่าสุด</span>
+            <span className="flex-1 min-w-[200px]">⚠️ {loadError} · {t("รายการสินค้าที่เห็นเป็นข้อมูลรอบก่อน อาจไม่ใช่ล่าสุด", "The products shown are from the previous load and may not be current")}</span>
             <button type="button" onClick={() => void retryLoad()} disabled={retrying}
               className="shrink-0 rounded-md bg-rose-600 px-3 py-1 font-medium text-white hover:bg-rose-700 disabled:opacity-50">
-              {retrying ? "กำลังลองใหม่..." : "↻ ลองใหม่"}
+              {retrying ? t("กำลังลองใหม่...", "Retrying...") : t("↻ ลองใหม่", "↻ Retry")}
             </button>
           </div>
         )}
@@ -341,10 +344,10 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             if (pendingTab) setTab(pendingTab);
             setPendingTab(null);
           }}
-          title="ยังไม่ได้บันทึก"
-          message="คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?"
-          confirmText="ออกโดยไม่บันทึก"
-          cancelText="อยู่ต่อ"
+          title={t("ยังไม่ได้บันทึก", "Not saved yet")}
+          message={t("คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?", "You have unsaved changes. Leave without saving?")}
+          confirmText={t("ออกโดยไม่บันทึก", "Leave without saving")}
+          cancelText={t("อยู่ต่อ", "Stay")}
         />
         <UnsavedGuardProvider value={guard.register}>
         {/* 🖼 รายชื่อชุดรูปของร้าน → ช่องรูปทุกช่องในหน้านี้มีปุ่ม "🔗 ใช้ชุดรูป" */}
@@ -358,6 +361,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
             categories={categories}
             loading={loading || listingsFor !== shopSlug}
             reload={() => load(shop.slug)}
+            onOpenTranslations={levelOfTab("i18n") !== "none" ? () => goTab("i18n") : undefined}
           />
         )}
 

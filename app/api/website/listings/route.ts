@@ -214,6 +214,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       parentId: l.parent_sku_id as string,
       code: p?.code ?? "",
       erpName: p ? displayName(p) : "(ไม่พบสินค้าใน ERP)",
+      /** 🌐 ชื่ออังกฤษของ Parent SKU (โหมด EN ของหน้าจัดการโชว์ชื่อนี้) · ช่องที่ยังเป็นอักษรไทย = ยังไม่มีคำแปล → "" */
+      nameEn: (() => { const v = String(mp?.name_en ?? "").trim(); return v && !/[฀-๿]/.test(v) ? v : ""; })(),
       erpPrice: p ? erpPrice(p) : 0,
       erpDescription: (p?.platform_description ?? p?.description ?? "") || "",
       erpImageKey: p?.cover_image_r2_key ?? null,

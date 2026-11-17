@@ -11,6 +11,8 @@
  * admin มีทุกสิทธิ์เสมอ (erp_can)
  */
 
+import { tr } from "@/lib/lang";
+
 export type WebsiteGroup = "products" | "design" | "orders" | "promos" | "settings" | "stats";
 export type WebsiteLevel = "none" | "view" | "edit";
 
@@ -26,12 +28,12 @@ export interface WebsiteGroupDef {
 }
 
 export const WEBSITE_GROUPS: WebsiteGroupDef[] = [
-  { key: "products", label: "สินค้าบนเว็บ", icon: "🛍", editable: true, tabs: ["listings", "categories", "collections", "newdrops", "sizeguides", "fieldmap", "imagesets"], hint: "สินค้า หมวด คอลเลกชัน มาใหม่ ตารางไซส์ ชุดรูป" },
-  { key: "design", label: "หน้าตาเว็บ", icon: "🎨", editable: true, tabs: ["design", "layout", "pages", "webimages", "i18n"], hint: "ดีไซน์ หน้าแรก หน้าเว็บ รูปบนเว็บ แปลภาษา" },
-  { key: "orders", label: "ออเดอร์และลูกค้า", icon: "🧾", editable: true, tabs: ["orders", "returns", "members", "reviews"], hint: "ออเดอร์ คืน/เปลี่ยน สมาชิก รีวิว (ข้อมูลส่วนตัวลูกค้า)" },
-  { key: "promos", label: "โปรโมชัน", icon: "🏷", editable: true, tabs: ["coupons", "promotions"], hint: "คูปอง โปรโมชัน ระดับสมาชิก" },
-  { key: "settings", label: "ตั้งค่าร้าน", icon: "🏪", editable: true, tabs: ["info", "shipping"], hint: "ข้อมูลร้าน การจัดส่ง การชำระเงิน การเข้าสู่ระบบสมาชิก" },
-  { key: "stats", label: "สถิติ", icon: "📈", editable: false, tabs: ["stats"], hint: "ยอดเข้าชม คำค้นหา" },
+  { key: "products", get label() { return tr("สินค้าบนเว็บ", "Web products"); }, icon: "🛍", editable: true, tabs: ["listings", "categories", "collections", "newdrops", "sizeguides", "fieldmap", "imagesets"], get hint() { return tr("สินค้า หมวด คอลเลกชัน มาใหม่ ตารางไซส์ ชุดรูป", "Products, categories, collections, new drops, size guides, image sets"); } },
+  { key: "design", get label() { return tr("หน้าตาเว็บ", "Design"); }, icon: "🎨", editable: true, tabs: ["design", "layout", "pages", "webimages", "i18n"], get hint() { return tr("ดีไซน์ หน้าแรก หน้าเว็บ รูปบนเว็บ แปลภาษา", "Design, home page, web pages, web images, translations"); } },
+  { key: "orders", get label() { return tr("ออเดอร์และลูกค้า", "Orders and customers"); }, icon: "🧾", editable: true, tabs: ["orders", "returns", "members", "reviews"], get hint() { return tr("ออเดอร์ คืน/เปลี่ยน สมาชิก รีวิว (ข้อมูลส่วนตัวลูกค้า)", "Orders, returns, members, reviews (customer personal data)"); } },
+  { key: "promos", get label() { return tr("โปรโมชัน", "Promotions"); }, icon: "🏷", editable: true, tabs: ["coupons", "promotions"], get hint() { return tr("คูปอง โปรโมชัน ระดับสมาชิก", "Coupons, promotions, member tiers"); } },
+  { key: "settings", get label() { return tr("ตั้งค่าร้าน", "Shop settings"); }, icon: "🏪", editable: true, tabs: ["info", "shipping"], get hint() { return tr("ข้อมูลร้าน การจัดส่ง การชำระเงิน การเข้าสู่ระบบสมาชิก", "Shop info, shipping, payment, member login"); } },
+  { key: "stats", get label() { return tr("สถิติ", "Stats"); }, icon: "📈", editable: false, tabs: ["stats"], get hint() { return tr("ยอดเข้าชม คำค้นหา", "Visits, search terms"); } },
 ];
 
 /**
@@ -49,31 +51,31 @@ export const WEBSITE_GROUP_STYLE: Record<WebsiteGroup, { icon: string; color: st
   stats: { icon: "chart-bar", color: "#d97706" },
 };
 export const WEBSITE_TAB_META: Record<string, { label: string; icon: string }> = {
-  listings: { label: "สินค้าบนเว็บ", icon: "list" },
-  categories: { label: "หมวดหมู่", icon: "folders" },
-  collections: { label: "คอลเลกชัน", icon: "stack-2" },
-  newdrops: { label: "มาใหม่", icon: "sparkles" },
-  sizeguides: { label: "ตารางไซส์", icon: "ruler-measure" },
-  fieldmap: { label: "จับคู่ฟิลด์", icon: "arrows-exchange" },
-  imagesets: { label: "ชุดรูป", icon: "layout-grid" },
-  design: { label: "ดีไซน์", icon: "brush" },
-  layout: { label: "หน้าแรก", icon: "home" },
-  pages: { label: "หน้าเว็บ", icon: "file-text" },
-  webimages: { label: "รูปบนเว็บ", icon: "photo" },
-  i18n: { label: "แปลภาษา", icon: "world" },
-  orders: { label: "ออเดอร์", icon: "receipt" },
-  returns: { label: "คืน/เปลี่ยน", icon: "arrow-back-up" },
-  members: { label: "สมาชิก", icon: "users" },
-  reviews: { label: "รีวิว", icon: "star" },
-  coupons: { label: "คูปอง", icon: "gift" },
-  promotions: { label: "โปรโมชัน", icon: "tag" },
-  info: { label: "ข้อมูลร้าน", icon: "building-store" },
-  shipping: { label: "การจัดส่ง", icon: "truck-delivery" },
-  stats: { label: "สถิติ", icon: "chart-line" },
+  listings: { get label() { return tr("สินค้าบนเว็บ", "Web products"); }, icon: "list" },
+  categories: { get label() { return tr("หมวดหมู่", "Categories"); }, icon: "folders" },
+  collections: { get label() { return tr("คอลเลกชัน", "Collections"); }, icon: "stack-2" },
+  newdrops: { get label() { return tr("มาใหม่", "New drops"); }, icon: "sparkles" },
+  sizeguides: { get label() { return tr("ตารางไซส์", "Size guides"); }, icon: "ruler-measure" },
+  fieldmap: { get label() { return tr("จับคู่ฟิลด์", "Field mapping"); }, icon: "arrows-exchange" },
+  imagesets: { get label() { return tr("ชุดรูป", "Image sets"); }, icon: "layout-grid" },
+  design: { get label() { return tr("ดีไซน์", "Design"); }, icon: "brush" },
+  layout: { get label() { return tr("หน้าแรก", "Home page"); }, icon: "home" },
+  pages: { get label() { return tr("หน้าเว็บ", "Web pages"); }, icon: "file-text" },
+  webimages: { get label() { return tr("รูปบนเว็บ", "Web images"); }, icon: "photo" },
+  i18n: { get label() { return tr("แปลภาษา", "Translations"); }, icon: "world" },
+  orders: { get label() { return tr("ออเดอร์", "Orders"); }, icon: "receipt" },
+  returns: { get label() { return tr("คืน/เปลี่ยน", "Returns"); }, icon: "arrow-back-up" },
+  members: { get label() { return tr("สมาชิก", "Members"); }, icon: "users" },
+  reviews: { get label() { return tr("รีวิว", "Reviews"); }, icon: "star" },
+  coupons: { get label() { return tr("คูปอง", "Coupons"); }, icon: "gift" },
+  promotions: { get label() { return tr("โปรโมชัน", "Promotions"); }, icon: "tag" },
+  info: { get label() { return tr("ข้อมูลร้าน", "Shop info"); }, icon: "building-store" },
+  shipping: { get label() { return tr("การจัดส่ง", "Shipping"); }, icon: "truck-delivery" },
+  stats: { get label() { return tr("สถิติ", "Stats"); }, icon: "chart-line" },
 };
 
 export const WEBSITE_ACCESS_PERM = "website.access";
-export const WEBSITE_LEVEL_LABEL: Record<WebsiteLevel, string> = { none: "ไม่เห็น", view: "ดูได้", edit: "แก้ได้" };
+export const WEBSITE_LEVEL_LABEL: Record<WebsiteLevel, string> = { get none() { return tr("ไม่เห็น", "Hidden"); }, get view() { return tr("ดูได้", "View"); }, get edit() { return tr("แก้ได้", "Edit"); } };
 
 export const websitePerm = (g: WebsiteGroup, level: "view" | "edit") => `website.${g}.${g === "stats" ? "view" : level}`;
 export const websiteShopPerm = (slug: string) => `website.shop.${slug}`;
@@ -185,9 +187,9 @@ export type DesignTopic = (typeof DESIGN_TOPICS)[number];
 export const DESIGN_TAB_TOPICS = ["home", "webpages", "webimages"] as const;
 export type DesignTabTopic = (typeof DESIGN_TAB_TOPICS)[number];
 export const DESIGN_TAB_TOPIC_DEFS: Record<DesignTabTopic, { label: string; tab: string }> = {
-  home: { label: "หน้าแรก", tab: "layout" },
-  webpages: { label: "หน้าเว็บ", tab: "pages" },
-  webimages: { label: "รูปบนเว็บ", tab: "webimages" },
+  home: { get label() { return tr("หน้าแรก", "Home page"); }, tab: "layout" },
+  webpages: { get label() { return tr("หน้าเว็บ", "Web pages"); }, tab: "pages" },
+  webimages: { get label() { return tr("รูปบนเว็บ", "Web images"); }, tab: "webimages" },
 };
 /** แท็บในหน้าร้าน → หัวข้อแท็บ (ไม่ใช่แท็บที่ติ๊กได้ = null) */
 export const designTabTopicOf = (tab: string): DesignTabTopic | null => DESIGN_TAB_TOPICS.find((t) => DESIGN_TAB_TOPIC_DEFS[t].tab === tab) ?? null;
@@ -200,10 +202,10 @@ export const isDesignTabTopic = (k: unknown): k is DesignTabTopic => typeof k ==
 
 /** ชุดสำเร็จรูปในหน้าตั้งสิทธิ์ (กด = แทนหัวข้อ + แท็บทั้งหมด) */
 export const DESIGN_TOPIC_PRESETS: { label: string; topics: DesignTopic[]; tabs?: DesignTabTopic[] }[] = [
-  { label: "ดูแลเมนู/หัวเว็บ", topics: ["logo", "header", "menu", "footer"] },
-  { label: "ดูแลหน้าสินค้า", topics: ["card", "listing", "product", "related"] },
-  { label: "แคมเปญ/ป๊อปอัป", topics: ["campaign", "pages"] },
-  { label: "ดูแลหน้าแรก/หน้าเว็บ", topics: [], tabs: ["home", "webpages", "webimages"] },
+  { get label() { return tr("ดูแลเมนู/หัวเว็บ", "Menu / header"); }, topics: ["logo", "header", "menu", "footer"] },
+  { get label() { return tr("ดูแลหน้าสินค้า", "Product pages"); }, topics: ["card", "listing", "product", "related"] },
+  { get label() { return tr("แคมเปญ/ป๊อปอัป", "Campaigns / popups"); }, topics: ["campaign", "pages"] },
+  { get label() { return tr("ดูแลหน้าแรก/หน้าเว็บ", "Home / web pages"); }, topics: [], tabs: ["home", "webpages", "webimages"] },
 ];
 
 export interface DesignAccess {

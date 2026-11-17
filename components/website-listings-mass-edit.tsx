@@ -14,6 +14,7 @@ import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { CardBadgeSelect } from "@/components/website-card-badges";
 import { BULK_FIELDS, applyCategoriesOp, massEditPlan, type CategoriesOp, type ListingFieldKey, type MassEditValues, type PriceOp } from "@/lib/website-listing-fields";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
+import { useT } from "@/components/i18n";
 
 type Row = { parentId: string; categories: string[] };
 const CONFIRM_OVER = 20;
@@ -40,6 +41,7 @@ export function WebsiteListingsMassEdit({
   preset?: { field: ListingFieldKey; categories?: CategoriesOp } | null;
 }) {
   const toast = useToast();
+  const t = useT();
   const [on, setOn] = useState<Set<ListingFieldKey>>(new Set());
   const [vals, setVals] = useState<MassEditValues>({});
   const [typed, setTyped] = useState("");
@@ -74,7 +76,7 @@ export function WebsiteListingsMassEdit({
   const apply = async () => {
     const plan = massEditPlan(picked());
     if (!plan.ok) return setErr(plan.error);
-    if (needConfirm && typed !== "CONFIRM") return setErr("พิมพ์ CONFIRM เพื่อยืนยันแก้จำนวนมาก");
+    if (needConfirm && typed !== "CONFIRM") return setErr(t("พิมพ์ CONFIRM เพื่อยืนยันแก้จำนวนมาก", "Type CONFIRM to approve a large edit"));
     setBusy(true);
     let ok = 0;
     let failed = 0;
@@ -83,7 +85,7 @@ export function WebsiteListingsMassEdit({
       const ids = rows.map((r) => r.parentId);
       if (Object.keys(plan.patch).length) {
         const j = await post({ shopId, action: "bulk", parentIds: ids, patch: plan.patch });
-        if (!j.ok) throw new Error(j.error ?? "บันทึกไม่สำเร็จ");
+        if (!j.ok) throw new Error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
         ok = j.count ?? ids.length;
         failed = j.failed ?? 0;
       }
@@ -98,7 +100,7 @@ export function WebsiteListingsMassEdit({
           // ไม่มีรุ่นไหนต้องเปลี่ยน (เช่น ไม่มีรุ่นที่อยู่หมวดต้นทาง)
           if (!Object.keys(plan.patch).length) {
             setResult({ ok: 0, failed: 0 });
-            toast.success("ไม่มีรุ่นไหนต้องเปลี่ยนหมวด");
+            toast.success(t("ไม่มีรุ่นไหนต้องเปลี่ยนหมวด", "No models needed a category change"));
             return;
           }
         } else {
@@ -107,16 +109,16 @@ export function WebsiteListingsMassEdit({
         if (!j.ok) {
           const m = String(j.error ?? "").match(/(\d+)\/(\d+)/);
           failed = Math.max(failed, m ? Number(m[2]) - Number(m[1]) : items.length);
-          if (!m) throw new Error(j.error ?? "จัดหมวดไม่สำเร็จ");
+          if (!m) throw new Error(j.error ?? t("จัดหมวดไม่สำเร็จ", "Couldn't update categories"));
         }
         }
       }
       setResult({ ok, failed });
-      if (failed) toast.error(`แก้ไม่สำเร็จ ${failed} รุ่น — ลองอีกครั้ง`);
-      else toast.success(`แก้ ${ok} รุ่นแล้ว`);
+      if (failed) toast.error(t(`แก้ไม่สำเร็จ ${failed} รุ่น — ลองอีกครั้ง`, `${failed} models failed — try again`));
+      else toast.success(t(`แก้ ${ok} รุ่นแล้ว`, `Updated ${ok} models`));
       await onDone();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      setErr(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed"));
     } finally {
       setBusy(false);
     }
@@ -140,10 +142,10 @@ export function WebsiteListingsMassEdit({
         return (
           <div className="flex flex-wrap items-center gap-1.5">
             <button type="button" className={seg(p.mode === "set")} onClick={() => setV("price", { ...p, mode: "set" })}>
-              ตั้งราคา
+              {t("ตั้งราคา", "Set price")}
             </button>
             <button type="button" className={seg(p.mode === "clear")} onClick={() => setV("price", { mode: "clear" })}>
-              ล้าง (ใช้ราคา ERP)
+              {t("ล้าง (ใช้ราคา ERP)", "Clear (use ERP price)")}
             </button>
             {p.mode === "set" && <input type="number" min={1} value={p.value ?? ""} onChange={(e) => setV("price", { mode: "set", value: Number(e.target.value) || undefined })} placeholder="890" className={`${inputCls} w-28`} />}
           </div>
@@ -156,10 +158,10 @@ export function WebsiteListingsMassEdit({
             <div className="flex flex-wrap gap-1.5">
               {(
                 [
-                  ["add", "เพิ่มหมวด"],
-                  ["remove", "เอาหมวดออก"],
-                  ["replace", "แทนทั้งชุด"],
-                  ["move", "↪ ย้ายหมวด"],
+                  ["add", t("เพิ่มหมวด", "Add category")],
+                  ["remove", t("เอาหมวดออก", "Remove category")],
+                  ["replace", t("แทนทั้งชุด", "Replace all")],
+                  ["move", t("↪ ย้ายหมวด", "↪ Move category")],
                 ] as const
               ).map(([m, l]) => (
                 <button key={m} type="button" className={seg(c.mode === m)} onClick={() => setV("categories", { ...c, mode: m })}>
@@ -175,18 +177,18 @@ export function WebsiteListingsMassEdit({
                 return (
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                      <span>จากหมวด</span>
+                      <span>{t("จากหมวด", "From")}</span>
                       <select value={c.from ?? ""} onChange={(e) => setV("categories", { ...c, from: e.target.value || undefined })} className={`${inputCls} w-auto`}>
-                        <option value="">— เลือก —</option>
+                        <option value="">{t("— เลือก —", "— Pick —")}</option>
                         {fromOpts.map((x) => (
                           <option key={x.key} value={x.key}>
                             {categoryChoiceLabel(x)} ({rows.filter((r) => r.categories.includes(x.key)).length})
                           </option>
                         ))}
                       </select>
-                      <span>→ ไปหมวด</span>
+                      <span>{t("→ ไปหมวด", "→ To")}</span>
                       <select value={c.keys[0] ?? ""} onChange={(e) => setV("categories", { ...c, keys: e.target.value ? [e.target.value] : [] })} className={`${inputCls} w-auto`}>
-                        <option value="">— เลือก —</option>
+                        <option value="">{t("— เลือก —", "— Pick —")}</option>
                         {shopCategories.filter((x) => x.key !== c.from).map((x) => (
                           <option key={x.key} value={x.key}>
                             {categoryChoiceLabel(x)}
@@ -195,7 +197,7 @@ export function WebsiteListingsMassEdit({
                       </select>
                     </div>
                     <p className="text-[11px] text-slate-500">
-                      {c.from ? `ย้าย ${inFrom} จาก ${n} รุ่นที่เลือก${n - inFrom > 0 ? ` · อีก ${n - inFrom} รุ่นไม่ได้อยู่หมวดนี้ → ไม่เปลี่ยน` : ""}` : "เลือกหมวดต้นทาง"} · หมวดหลักยังเป็นหมวดหลัก (เปลี่ยนเป็นหมวดใหม่ที่ตำแหน่งเดิม)
+                      {c.from ? t(`ย้าย ${inFrom} จาก ${n} รุ่นที่เลือก${n - inFrom > 0 ? ` · อีก ${n - inFrom} รุ่นไม่ได้อยู่หมวดนี้ → ไม่เปลี่ยน` : ""}`, `Moving ${inFrom} of ${n} picked models${n - inFrom > 0 ? ` · the other ${n - inFrom} aren't in this category → unchanged` : ""}`) : t("เลือกหมวดต้นทาง", "Pick the source category")} · {t("หมวดหลักยังเป็นหมวดหลัก (เปลี่ยนเป็นหมวดใหม่ที่ตำแหน่งเดิม)", "The main category stays main (replaced by the new one in the same position)")}
                     </p>
                   </div>
                 );
@@ -205,13 +207,13 @@ export function WebsiteListingsMassEdit({
               value={c.keys}
               onChange={(keys) => setV("categories", { ...c, keys })}
               fields={shopCategories.map((x) => ({ key: x.key, label: x.label, icon: x.icon || undefined }))}
-              title="เลือกหมวด"
-              description={c.mode === "replace" ? "ทุกรุ่นที่เลือกจะอยู่เฉพาะหมวดเหล่านี้ · ★ = หมวดหลัก" : c.mode === "add" ? "เพิ่มต่อท้ายหมวดเดิมของแต่ละรุ่น (หมวดหลักเดิมไม่เปลี่ยน)" : "เอาหมวดเหล่านี้ออกจากทุกรุ่นที่เลือก"}
-              addLabel="＋ เลือกหมวด"
-              searchPlaceholder="ค้นหาหมวด…"
-              unit="หมวด"
+              title={t("เลือกหมวด", "Pick categories")}
+              description={c.mode === "replace" ? t("ทุกรุ่นที่เลือกจะอยู่เฉพาะหมวดเหล่านี้ · ★ = หมวดหลัก", "Every picked model will be only in these categories · ★ = main category") : c.mode === "add" ? t("เพิ่มต่อท้ายหมวดเดิมของแต่ละรุ่น (หมวดหลักเดิมไม่เปลี่ยน)", "Added after each model's current categories (main category unchanged)") : t("เอาหมวดเหล่านี้ออกจากทุกรุ่นที่เลือก", "Remove these categories from every picked model")}
+              addLabel={t("＋ เลือกหมวด", "＋ Pick categories")}
+              searchPlaceholder={t("ค้นหาหมวด…", "Search categories…")}
+              unit={t("หมวด", "categories")}
               showKeys={false}
-              markFirst={c.mode === "replace" ? "หมวดหลัก" : undefined}
+              markFirst={c.mode === "replace" ? t("หมวดหลัก", "Main category") : undefined}
               compact
             />
             )}
@@ -231,8 +233,8 @@ export function WebsiteListingsMassEdit({
     <ERPModal
       open={open}
       onClose={onClose}
-      title={`✏️ แก้หลายรายการ — ${n} รุ่น`}
-      description="ติ๊กช่องที่จะเปลี่ยน · ช่องที่ไม่ติ๊ก = ไม่แตะ · ทุกการแก้ถูกบันทึกประวัติว่าใครแก้"
+      title={t(`✏️ แก้หลายรายการ — ${n} รุ่น`, `✏️ Bulk edit — ${n} models`)}
+      description={t("ติ๊กช่องที่จะเปลี่ยน · ช่องที่ไม่ติ๊ก = ไม่แตะ · ทุกการแก้ถูกบันทึกประวัติว่าใครแก้", "Tick the fields to change · unticked = untouched · every edit is logged with who made it")}
       size="lg"
       hasUnsavedChanges={on.size > 0 && !result}
       footer={
@@ -242,22 +244,22 @@ export function WebsiteListingsMassEdit({
               <span className="text-rose-600">{err}</span>
             ) : result ? (
               <span className={result.failed ? "text-amber-700" : "text-emerald-700"}>
-                สำเร็จ {result.ok} รุ่น{result.failed ? ` · ไม่สำเร็จ ${result.failed} รุ่น` : ""}
+                {t(`สำเร็จ ${result.ok} รุ่น`, `${result.ok} models done`)}{result.failed ? t(` · ไม่สำเร็จ ${result.failed} รุ่น`, ` · ${result.failed} failed`) : ""}
               </span>
             ) : (
-              <span className="text-slate-500">{on.size ? `จะเปลี่ยน ${on.size} ช่อง × ${n} รุ่น` : "ยังไม่ได้ติ๊กช่องที่จะแก้"}</span>
+              <span className="text-slate-500">{on.size ? t(`จะเปลี่ยน ${on.size} ช่อง × ${n} รุ่น`, `Will change ${on.size} fields × ${n} models`) : t("ยังไม่ได้ติ๊กช่องที่จะแก้", "No fields ticked yet")}</span>
             )}
           </div>
           {needConfirm && !result && (
-            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์ CONFIRM" className="h-9 w-36 rounded-lg border border-rose-300 px-2 text-sm font-mono" />
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={t("พิมพ์ CONFIRM", "Type CONFIRM")} className="h-9 w-36 rounded-lg border border-rose-300 px-2 text-sm font-mono" />
           )}
           {result ? (
             <button type="button" onClick={onClose} className="h-9 rounded-lg bg-slate-800 px-4 text-sm text-white">
-              ปิด
+              {t("ปิด", "Close")}
             </button>
           ) : (
             <button type="button" onClick={() => void apply()} disabled={!on.size || busy || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-              {busy ? "กำลังบันทึก…" : on.size ? `บันทึก ${on.size} ช่อง × ${n} รุ่น` : "บันทึก"}
+              {busy ? t("กำลังบันทึก…", "Saving…") : on.size ? t(`บันทึก ${on.size} ช่อง × ${n} รุ่น`, `Save ${on.size} fields × ${n} models`) : t("บันทึก", "Save")}
             </button>
           )}
         </div>
@@ -277,8 +279,8 @@ export function WebsiteListingsMassEdit({
           );
         })}
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">ไม่เปิดแก้หลายรายการ: รูป · รูปรายสี · แบนเนอร์ · ปั๊มชื่อ · รายละเอียดเฉพาะรุ่น (เป็นของแต่ละรุ่น — แก้ในหน้าต่างสินค้า)</p>
-      {needConfirm && !result && <p className="mt-1 text-[11px] text-rose-600">⚠️ แก้ {n} รุ่นพร้อมกัน — ต้องพิมพ์ CONFIRM ที่แถบล่างก่อนบันทึก</p>}
+      <p className="mt-2 text-[11px] text-slate-400">{t("ไม่เปิดแก้หลายรายการ: รูป · รูปรายสี · แบนเนอร์ · ปั๊มชื่อ · รายละเอียดเฉพาะรุ่น (เป็นของแต่ละรุ่น — แก้ในหน้าต่างสินค้า)", "Not available in bulk edit: images · per-color images · banners · name stamping · model-specific details (edit these in the product window)")}</p>
+      {needConfirm && !result && <p className="mt-1 text-[11px] text-rose-600">{t(`⚠️ แก้ ${n} รุ่นพร้อมกัน — ต้องพิมพ์ CONFIRM ที่แถบล่างก่อนบันทึก`, `⚠️ Editing ${n} models at once — type CONFIRM in the bottom bar before saving`)}</p>}
     </ERPModal>
   );
 }

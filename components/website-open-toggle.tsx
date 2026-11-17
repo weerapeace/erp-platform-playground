@@ -12,9 +12,11 @@ import { apiFetch } from "@/lib/api";
 import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { useT } from "@/components/i18n";
 
 export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+  const t = useT();
   const [info, setInfo] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -45,8 +47,8 @@ export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shop
     const next = !closed;
     const ok = await askConfirm(
       next
-        ? { title: "ปิดเว็บชั่วคราว?", message: "ลูกค้าทั่วไปจะเห็นแค่หน้า \"เร็ว ๆ นี้\" (ทุกโดเมนของร้านนี้) · คุณยังดูพรีวิวใน ERP ได้ตามปกติ", variant: "danger", confirmText: "ปิดเว็บ" }
-        : { title: "เปิดเว็บให้ลูกค้าเข้าได้?", confirmText: "เปิดเว็บ" }
+        ? { title: t("ปิดเว็บชั่วคราว?", "Close the site temporarily?"), message: t("ลูกค้าทั่วไปจะเห็นแค่หน้า \"เร็ว ๆ นี้\" (ทุกโดเมนของร้านนี้) · คุณยังดูพรีวิวใน ERP ได้ตามปกติ", "Customers will only see the \"Coming soon\" page (all domains of this shop) · You can still preview it in the ERP"), variant: "danger", confirmText: t("ปิดเว็บ", "Close site") }
+        : { title: t("เปิดเว็บให้ลูกค้าเข้าได้?", "Open the site to customers?"), confirmText: t("เปิดเว็บ", "Open site") }
     );
     if (!ok) return;
     setBusy(true);
@@ -58,14 +60,14 @@ export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shop
       });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
         return;
       }
       setInfo(j.info as Record<string, unknown>);
       window.dispatchEvent(new Event("website-info-saved"));
-      toast.success(next ? "ปิดเว็บแล้ว — ลูกค้าจะเห็นหน้า \"เร็ว ๆ นี้\"" : "เปิดเว็บแล้ว — ลูกค้าเข้าได้ตามปกติ");
+      toast.success(next ? t("ปิดเว็บแล้ว — ลูกค้าจะเห็นหน้า \"เร็ว ๆ นี้\"", "Site closed — customers will see the \"Coming soon\" page") : t("เปิดเว็บแล้ว — ลูกค้าเข้าได้ตามปกติ", "Site opened — customers can visit as usual"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
     }
@@ -75,13 +77,13 @@ export function WebsiteOpenToggle({ shopSlug, shopId }: { shopSlug: string; shop
     <button
       onClick={() => void toggle()}
       disabled={busy}
-      title={closed ? "ตอนนี้ลูกค้าเห็นหน้า 'เร็ว ๆ นี้' — กดเพื่อเปิดเว็บ" : "ตอนนี้เว็บเปิดให้ลูกค้าเข้าได้ — กดเพื่อปิดชั่วคราว"}
+      title={closed ? t("ตอนนี้ลูกค้าเห็นหน้า 'เร็ว ๆ นี้' — กดเพื่อเปิดเว็บ", "Customers now see the 'Coming soon' page — click to open the site") : t("ตอนนี้เว็บเปิดให้ลูกค้าเข้าได้ — กดเพื่อปิดชั่วคราว", "The site is open to customers — click to close temporarily")}
       className={`inline-flex items-center gap-2 h-9 px-3.5 rounded-lg border text-sm font-medium transition disabled:opacity-50 ${
         closed ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
       }`}
     >
       <span className={`w-2 h-2 rounded-full ${closed ? "bg-amber-500" : "bg-emerald-500"}`} />
-      {busy ? "กำลังบันทึก…" : closed ? "ปิดเว็บอยู่ · กดเพื่อเปิด" : "เว็บเปิดอยู่ · กดเพื่อปิดชั่วคราว"}
+      {busy ? t("กำลังบันทึก…", "Saving…") : closed ? t("ปิดเว็บอยู่ · กดเพื่อเปิด", "Site closed · click to open") : t("เว็บเปิดอยู่ · กดเพื่อปิดชั่วคราว", "Site open · click to close temporarily")}
     </button>
   );
 }

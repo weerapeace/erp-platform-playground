@@ -37,6 +37,8 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { colorWebImages, listingIssues, type HealthColor, type ListingIssue } from "@/lib/website-listing-health";
 import { WEB_FIX_PRINT_STORE, type WebFixGroupKey, type WebFixPayload, type WebFixRow } from "@/lib/website-fix-print-payload";
 import { Icon } from "@/components/icon";
+import { useT } from "@/components/i18n";
+import { getLang, tr } from "@/lib/lang";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
 import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit";
@@ -86,6 +88,8 @@ export type Listing = {
   parentId: string;
   code: string;
   erpName: string;
+  /** 🌐 ชื่ออังกฤษ (Parent SKU name_en) · "" = ยังไม่มี → โหมด EN โชว์ชื่อไทย + ป้าย "No EN name" */
+  nameEn?: string;
   erpPrice: number;
   erpDescription: string;
   erpImageKey: string | null;
@@ -128,13 +132,13 @@ const BULK_CONFIRM = 20;
 const BULK_TYPED = 100;
 /** ↕ เรียงในตาราง (ดูอย่างเดียว ไม่เปลี่ยนลำดับบนเว็บ) · "" = ลำดับบนเว็บ (ลาก ⠿ ได้) — ค่า = `${key}:${dir}` ของ SortState */
 const SORT_OPTS = [
-  { v: "", label: "ลำดับบนเว็บ (ลาก ⠿ ได้)" },
-  { v: "code:asc", label: "รหัส SKU A→Z" },
-  { v: "code:desc", label: "รหัส SKU Z→A" },
-  { v: "status:asc", label: "สถานะ: ขึ้นเว็บก่อน" },
-  { v: "status:desc", label: "สถานะ: ซ่อนอยู่ก่อน" },
-  { v: "price:asc", label: "ราคา: ถูก→แพง" },
-  { v: "price:desc", label: "ราคา: แพง→ถูก" },
+  { v: "", get label() { return tr("ลำดับบนเว็บ (ลาก ⠿ ได้)", "Web order (drag ⠿)"); } },
+  { v: "code:asc", get label() { return tr("รหัส SKU A→Z", "SKU code A→Z"); } },
+  { v: "code:desc", get label() { return tr("รหัส SKU Z→A", "SKU code Z→A"); } },
+  { v: "status:asc", get label() { return tr("สถานะ: ขึ้นเว็บก่อน", "Status: live first"); } },
+  { v: "status:desc", get label() { return tr("สถานะ: ซ่อนอยู่ก่อน", "Status: hidden first"); } },
+  { v: "price:asc", get label() { return tr("ราคา: ถูก→แพง", "Price: low→high"); } },
+  { v: "price:desc", get label() { return tr("ราคา: แพง→ถูก", "Price: high→low"); } },
 ];
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
@@ -142,7 +146,7 @@ const inputCls = webForm.input;
 const keyUrl = (key: string, w = 120) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
 /** ชื่อ/ราคาที่โชว์ในรายการ = ที่ลูกค้าเห็นจริง (เดิมโชว์ชื่อดิบ ERP + ราคา Parent ซึ่งเป็น ฿0) */
-const shownName = (l: Listing) => l.display?.name || l.webName || l.mapped?.name || l.erpName;
+const shownName = (l: Listing) => (getLang() === "en" && l.nameEn) || l.display?.name || l.webName || l.mapped?.name || l.erpName;
 const shownPrice = (l: Listing) => l.display?.price ?? l.webPrice ?? l.mapped?.price ?? l.erpPrice;
 const issuesOf = (l: Listing): ListingIssue[] =>
   l.display
@@ -154,6 +158,7 @@ const sortVal = (l: Listing, key: string) =>
 
 /** จุดสี · 🖼 สีที่ยังไม่ได้ลงรูปเว็บ = วงรอบจุด (เหลือง = ตอนนี้ใช้รูปปก SKU แทน · แดง = SKU ก็ไม่มีรูป) */
 function ColorDots({ colors, max = 5 }: { colors: HealthColor[]; max?: number }) {
+  const t = useT();
   if (!colors.length) return <span className="text-[11px] text-slate-300">—</span>;
   const miss = new Set(colorWebImages(colors).missing.map((c) => c.label));
   return (
@@ -163,7 +168,7 @@ function ColorDots({ colors, max = 5 }: { colors: HealthColor[]; max?: number })
         return (
           <span
             key={`${c.label}-${i}`}
-            title={m ? `${c.label} — ยังไม่มีรูปบนเว็บ${c.img === "none" ? " (SKU ก็ไม่มีรูป)" : " (ตอนนี้ใช้รูปปก SKU แทน)"}` : c.label}
+            title={m ? t(`${c.label} — ยังไม่มีรูปบนเว็บ${c.img === "none" ? " (SKU ก็ไม่มีรูป)" : " (ตอนนี้ใช้รูปปก SKU แทน)"}`, `${c.label} — no web image yet${c.img === "none" ? " (the SKU has no image either)" : " (using the SKU cover for now)"}`) : c.label}
             className={`inline-block w-3 h-3 rounded-full ${c.swatch ? "ring-1 ring-black/10" : "border border-dashed border-slate-400"} ${
               m ? `ring-2 ring-offset-1 ${c.img === "none" ? "!ring-rose-500" : "!ring-amber-400"}` : ""
             }`}
@@ -177,6 +182,7 @@ function ColorDots({ colors, max = 5 }: { colors: HealthColor[]; max?: number })
 }
 
 function Thumb({ l, size = 48 }: { l: Listing; size?: number }) {
+  const t = useT();
   const key = l.display?.imageKey ?? l.erpImageKey;
   const n = l.display?.imageCount ?? 0;
   return (
@@ -187,9 +193,9 @@ function Thumb({ l, size = 48 }: { l: Listing; size?: number }) {
       )}
       {/* 🖼 ยังไม่มีรูปเลย — กรอบประแดง (กดรูป = เปิดหน้าแก้ไปเพิ่มรูป) */}
       {!key && !l.webSwatch && (
-        <span className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed border-rose-300 bg-rose-50 text-[10px] leading-none text-rose-600" title="ยังไม่มีรูป — กดเพื่อเพิ่มรูป">
+        <span className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed border-rose-300 bg-rose-50 text-[10px] leading-none text-rose-600" title={t("ยังไม่มีรูป — กดเพื่อเพิ่มรูป", "No image yet — click to add")}>
           <Icon name="image" size={size >= 64 ? 18 : 14} />
-          <span>เพิ่มรูป</span>
+          <span>{t("เพิ่มรูป", "Add image")}</span>
         </span>
       )}
       {n > 0 && <span className="absolute bottom-0.5 right-0.5 rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{n}</span>}
@@ -199,18 +205,19 @@ function Thumb({ l, size = 48 }: { l: Listing; size?: number }) {
 
 /** ▸ แถว SKU ย่อยใต้รุ่น — คอลัมน์ตรงกับแถวรุ่น (ชื่อ · ราคา · ✏️) · กดแถว = เปิดแก้ที่ drawer เลื่อนไป SKU นั้น */
 function SubSkuRows({ rows, onOpen, onRetry }: { rows: SubSku[] | "loading" | "error" | undefined; onOpen: (skuId: string) => void; onRetry: () => void }) {
+  const t = useT();
   const pad = "pl-10 md:pl-24 pr-3";
-  if (rows === undefined || rows === "loading") return <div className={`${pad} pb-2.5 text-xs text-slate-400`}>กำลังโหลด SKU…</div>;
+  if (rows === undefined || rows === "loading") return <div className={`${pad} pb-2.5 text-xs text-slate-400`}>{t("กำลังโหลด SKU…", "Loading SKUs…")}</div>;
   if (rows === "error")
     return (
       <div className={`${pad} pb-2.5 text-xs text-rose-600`}>
-        โหลด SKU ไม่สำเร็จ{" "}
+        {t("โหลด SKU ไม่สำเร็จ", "Failed to load SKUs")}{" "}
         <button type="button" onClick={onRetry} className="underline hover:text-rose-800">
-          ลองใหม่
+          {t("ลองใหม่", "Retry")}
         </button>
       </div>
     );
-  if (!rows.length) return <div className={`${pad} pb-2.5 text-xs text-slate-400`}>รุ่นนี้ยังไม่มี SKU ที่ใช้งานอยู่</div>;
+  if (!rows.length) return <div className={`${pad} pb-2.5 text-xs text-slate-400`}>{t("รุ่นนี้ยังไม่มี SKU ที่ใช้งานอยู่", "This model has no active SKUs yet")}</div>;
   return (
     <ul className="pb-1.5 bg-slate-50/60 border-t border-slate-100">
       {rows.map((k) => {
@@ -219,7 +226,7 @@ function SubSkuRows({ rows, onOpen, onRetry }: { rows: SubSku[] | "loading" | "e
         const price = k.list_price === undefined ? null : Number(k.list_price) || 0;
         return (
           <li key={k.id}>
-            <button type="button" onClick={() => onOpen(k.id)} className={`group w-full flex items-center gap-3 py-1.5 text-left hover:bg-white ${pad}`} title={`แก้ SKU ${k.code ?? ""}`}>
+            <button type="button" onClick={() => onOpen(k.id)} className={`group w-full flex items-center gap-3 py-1.5 text-left hover:bg-white ${pad}`} title={t(`แก้ SKU ${k.code ?? ""}`, `Edit SKU ${k.code ?? ""}`)}>
               <span className="w-12 shrink-0 flex justify-center">
                 {k.cover_image_r2_key ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -233,19 +240,19 @@ function SubSkuRows({ rows, onOpen, onRetry }: { rows: SubSku[] | "loading" | "e
                 <span className="block md:inline truncate font-mono text-slate-500">{k.code}</span>
                 <span className="hidden md:inline text-slate-300"> · </span>
                 <span className="block md:inline truncate text-slate-700">
-                  {th || en || "ไม่มีชื่อสี"}
+                  {th || en || t("ไม่มีชื่อสี", "No color name")}
                   {th && en && en !== th && <span className="text-slate-400"> / {en}</span>}
                 </span>
               </span>
               <span className="hidden md:block w-24" />
               <span
                 className={`md:w-24 text-right text-xs tabular-nums ${price === null ? "text-slate-300" : price > 0 ? "text-slate-700" : "text-rose-500"}`}
-                title={price === null ? "ไม่มีสิทธิ์ดูราคา" : undefined}
+                title={price === null ? t("ไม่มีสิทธิ์ดูราคา", "No permission to view price") : undefined}
               >
-                {price === null ? "—" : price > 0 ? baht(price) : "ยังไม่มีราคา"}
+                {price === null ? "—" : price > 0 ? baht(price) : t("ยังไม่มีราคา", "No price yet")}
               </span>
               <span className="hidden md:block w-28" />
-              <span className="w-16 shrink-0 text-center text-[11px] text-slate-400 group-hover:text-blue-700">✏️ แก้</span>
+              <span className="w-16 shrink-0 text-center text-[11px] text-slate-400 group-hover:text-blue-700">{t("✏️ แก้", "✏️ Edit")}</span>
             </button>
           </li>
         );
@@ -261,6 +268,7 @@ export function WebsiteListingsPanel({
   categories,
   loading,
   reload,
+  onOpenTranslations,
 }: {
   shop: ShopInfo;
   listings: Listing[];
@@ -268,7 +276,12 @@ export function WebsiteListingsPanel({
   categories: CategoryDef[];
   loading: boolean;
   reload: () => Promise<void> | void;
+  /** 🌐 ไปแท็บ "แปลภาษา" (ไม่มีสิทธิ์ = ไม่ส่งมา → ไม่โชว์ลิงก์) */
+  onOpenTranslations?: () => void;
 }) {
+  const t = useT();
+  const isEn = getLang() === "en";
+  const noEnCount = useMemo(() => listings.filter((l) => !l.nameEn).length, [listings]);
   const toast = useToast();
   const [saving, setSaving] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -299,9 +312,9 @@ export function WebsiteListingsPanel({
   const rowDrop = useFileDrop(
     (files, parentId) => {
       const l = listings.find((x) => x.parentId === parentId);
-      if (l) openImgMass([parentId], `รุ่น ${l.code} (ลากมาวางที่แถว)`, files);
+      if (l) openImgMass([parentId], t(`รุ่น ${l.code} (ลากมาวางที่แถว)`, `Model ${l.code} (dropped on row)`), files);
     },
-    { accept: ["image/", "video/"], folders: true, onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)") }
+    { accept: ["image/", "video/"], folders: true, onReject: () => toast.warning(t("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)", "Only image (jpg / png / webp) or video (mp4 / webm) files can be dropped")) }
   );
   // ▦ แก้ไขทีละมาก (ตาราง) — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก
   const [gridEdit, setGridEdit] = useState<string[] | null>(null);
@@ -404,7 +417,7 @@ export function WebsiteListingsPanel({
       const j = await post({ shopId: shop.id, action: "reorder", order: next.map((l) => l.parentId) });
       if (!j.ok) throw new Error(j.error);
     } catch {
-      toast.error("เรียงลำดับไม่สำเร็จ — โหลดลำดับเดิมคืน");
+      toast.error(t("เรียงลำดับไม่สำเร็จ — โหลดลำดับเดิมคืน", "Reorder failed — restored the previous order"));
       await reload();
     }
   };
@@ -452,10 +465,10 @@ export function WebsiteListingsPanel({
             : l
         )
       );
-      toast.success(`${msg} ${ids.length} รายการแล้ว`);
+      toast.success(t(`${msg} ${ids.length} รายการแล้ว`, `${msg}: ${ids.length} items done`));
       setSel(new Set());
     } catch {
-      toast.error("ทำรายการไม่สำเร็จ");
+      toast.error(t("ทำรายการไม่สำเร็จ", "Action failed"));
     } finally {
       setBulkBusy(false);
     }
@@ -466,12 +479,12 @@ export function WebsiteListingsPanel({
     try {
       const j = await post({ shopId: shop.id, parentId: l.parentId, action: "remove" });
       if (j.ok) {
-        toast.success("เอาออกแล้ว");
+        toast.success(t("เอาออกแล้ว", "Removed"));
         setListings((ls) => ls.filter((x) => x.parentId !== l.parentId));
         setOpen(null);
-      } else toast.error(j.error ?? "เอาออกไม่สำเร็จ");
+      } else toast.error(j.error ?? t("เอาออกไม่สำเร็จ", "Remove failed"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setSaving(null);
       setRemoving(null);
@@ -482,10 +495,10 @@ export function WebsiteListingsPanel({
     const next = !l.published;
     patch(l.parentId, { published: next });
     const j = await post({ shopId: shop.id, parentId: l.parentId, patch: { isPublished: next } }).catch(() => ({ ok: false }));
-    if (j.ok) toast.success(next ? "ขึ้นเว็บแล้ว" : "ซ่อนจากเว็บแล้ว");
+    if (j.ok) toast.success(next ? t("ขึ้นเว็บแล้ว", "Now live") : t("ซ่อนจากเว็บแล้ว", "Hidden from web"));
     else {
       patch(l.parentId, { published: !next });
-      toast.error("เปลี่ยนสถานะไม่สำเร็จ");
+      toast.error(t("เปลี่ยนสถานะไม่สำเร็จ", "Status change failed"));
     }
   };
   const toggleFeatured = async (l: Listing) => {
@@ -494,7 +507,7 @@ export function WebsiteListingsPanel({
     const j = await post({ shopId: shop.id, parentId: l.parentId, patch: { featured: next } }).catch(() => ({ ok: false }));
     if (!j.ok) {
       patch(l.parentId, { featured: !next });
-      toast.error("บันทึกไม่สำเร็จ");
+      toast.error(t("บันทึกไม่สำเร็จ", "Save failed"));
     }
   };
 
@@ -536,15 +549,15 @@ export function WebsiteListingsPanel({
   const imgFilter = (k: "noimg" | "partimg", label: string, title: string) =>
     counts[k] > 0 || filter === k ? [{ k: k as Filter, label, title, warn: true }] : [];
   const FILTERS: { k: Filter; label: string; warn?: boolean; title?: string }[] = [
-    { k: "all", label: "ทั้งหมด" },
-    { k: "pub", label: "ขึ้นเว็บ" },
-    { k: "hide", label: "ซ่อนอยู่" },
-    { k: "feat", label: "⭐ แนะนำ" },
-    { k: "fix", label: "⚠️ ต้องแก้", warn: true },
+    { k: "all", label: t("ทั้งหมด", "All") },
+    { k: "pub", label: t("ขึ้นเว็บ", "Live") },
+    { k: "hide", label: t("ซ่อนอยู่", "Hidden") },
+    { k: "feat", label: t("⭐ แนะนำ", "⭐ Featured") },
+    { k: "fix", label: t("⚠️ ต้องแก้", "⚠️ Needs fixing"), warn: true },
     // 📐 โผล่เมื่อร้านเปิดเช็คขนาดและยังมีรุ่นที่ไม่ได้วัด (วัดครบ = หายไปเอง)
-    ...(counts.fit > 0 || filter === "fit" ? [{ k: "fit" as Filter, label: "📐 ยังไม่วัดช่อง", warn: true }] : []),
-    ...imgFilter("noimg", "ยังไม่มีรูปบนเว็บเลย", "ยังไม่ได้ลงรูปเว็บสักสี — ตอนนี้ลูกค้าเห็นรูปปก SKU สีละ 1 รูป (หรือช่องว่างถ้า SKU ก็ไม่มีรูป)"),
-    ...imgFilter("partimg", "บางสียังไม่มีรูปเว็บ", "ลงรูปเว็บไว้บางสีแล้ว แต่บางสียังไม่ได้ลง"),
+    ...(counts.fit > 0 || filter === "fit" ? [{ k: "fit" as Filter, label: t("📐 ยังไม่วัดช่อง", "📐 Compartments not measured"), warn: true }] : []),
+    ...imgFilter("noimg", t("ยังไม่มีรูปบนเว็บเลย", "No web images at all"), t("ยังไม่ได้ลงรูปเว็บสักสี — ตอนนี้ลูกค้าเห็นรูปปก SKU สีละ 1 รูป (หรือช่องว่างถ้า SKU ก็ไม่มีรูป)", "No web images for any color — customers now see 1 SKU cover per color (or a blank if the SKU has no image)")),
+    ...imgFilter("partimg", t("บางสียังไม่มีรูปเว็บ", "Some colors lack web images"), t("ลงรูปเว็บไว้บางสีแล้ว แต่บางสียังไม่ได้ลง", "Some colors have web images, others don't yet")),
   ];
 
   // 🖨 เช็กลิสต์ "ต้องแก้" ของรุ่นที่เห็นอยู่ (ตามตัวกรอง/ค้นหา/หมวด) → หน้าพิมพ์ /print/website-fix (lib/website-fix-print · เจ้าของ 2026-11-10)
@@ -561,9 +574,9 @@ export function WebsiteListingsPanel({
         issues: iss.map((i) => ({ key: i.key, label: i.label, detail: i.detail })),
       }];
     });
-    if (!rows.length) { toast.warning("รุ่นที่เห็นอยู่ไม่มีเรื่องที่ต้องแก้"); return; }
-    const fLabel = (FILTERS.find((x) => x.k === filter)?.label ?? "ทั้งหมด").replace(/^[^\p{L}\p{N}]+/u, "");
-    const scope = [`ตัวกรอง ${fLabel}`, q.trim() ? `ค้นหา "${q.trim()}"` : "", cat ? `หมวด ${cat === "__none" ? "ยังไม่อยู่หมวด" : catLabel(cat)}` : ""].filter(Boolean).join(" · ");
+    if (!rows.length) { toast.warning(t("รุ่นที่เห็นอยู่ไม่มีเรื่องที่ต้องแก้", "The models shown have nothing to fix")); return; }
+    const fLabel = (FILTERS.find((x) => x.k === filter)?.label ?? t("ทั้งหมด", "All")).replace(/^[^\p{L}\p{N}]+/u, "");
+    const scope = [t(`ตัวกรอง ${fLabel}`, `Filter ${fLabel}`), q.trim() ? t(`ค้นหา "${q.trim()}"`, `Search "${q.trim()}"`) : "", cat ? t(`หมวด ${cat === "__none" ? "ยังไม่อยู่หมวด" : catLabel(cat)}`, `Category ${cat === "__none" ? "no category" : catLabel(cat)}`) : ""].filter(Boolean).join(" · ");
     const focus: WebFixGroupKey | null = filter === "noimg" ? "web_none" : filter === "partimg" ? "web_part" : filter === "fit" ? "no_compartments" : null;
     const key = Date.now().toString(36);
     try {
@@ -575,20 +588,20 @@ export function WebsiteListingsPanel({
       const payload: WebFixPayload = { shop: shop.name, scope, focus, rows, at: Date.now() };
       localStorage.setItem(WEB_FIX_PRINT_STORE + key, JSON.stringify(payload));
     } catch {
-      toast.error("เปิดหน้าพิมพ์ไม่สำเร็จ — พื้นที่เก็บในเบราว์เซอร์เต็ม ลองกรองให้น้อยลง");
+      toast.error(t("เปิดหน้าพิมพ์ไม่สำเร็จ — พื้นที่เก็บในเบราว์เซอร์เต็ม ลองกรองให้น้อยลง", "Couldn't open the print page — browser storage is full. Try filtering to fewer items"));
       return;
     }
     window.open(`/print/website-fix?k=${key}`, "_blank");
   };
 
-  const priceText = (l: Listing) => (shownPrice(l) > 0 ? `${l.display?.priceVaries ? "เริ่ม " : ""}${baht(shownPrice(l))}` : "—");
+  const priceText = (l: Listing) => (shownPrice(l) > 0 ? `${l.display?.priceVaries ? t("เริ่ม ", "from ") : ""}${baht(shownPrice(l))}` : "—");
 
   return (
     <div>
       {/* แถบสรุป + ปุ่มเพิ่ม */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          {view === "sort" && <span className="text-sm text-slate-600">🗂 จัดหมวดสินค้าทั้งร้าน ({listings.length} ตัว)</span>}
+          {view === "sort" && <span className="text-sm text-slate-600">{t(`🗂 จัดหมวดสินค้าทั้งร้าน (${listings.length} ตัว)`, `🗂 Sort all shop products into categories (${listings.length})`)}</span>}
           {view !== "sort" && FILTERS.map((f) => {
             const on = filter === f.k;
             const n = counts[f.k];
@@ -614,43 +627,43 @@ export function WebsiteListingsPanel({
         <div className="flex items-center gap-2">
           {/* 🎨 ทะเบียนสีกลาง (จุดสีทุกร้าน) — เดิมต้องเข้าแท็บดีไซน์ → การ์ดสินค้า */}
           <ColorSwatchButton
-            label="🎨 ทะเบียนสี"
-            title="ผูกจุดสีให้ชื่อสีของสินค้า (ใช้ทุกร้าน)"
+            label={t("🎨 ทะเบียนสี", "🎨 Color registry")}
+            title={t("ผูกจุดสีให้ชื่อสีของสินค้า (ใช้ทุกร้าน)", "Link color swatches to product color names (all shops)")}
             onClosed={() => void reload()}
             className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
           />
           {listings.length > 0 && (
             <button
               onClick={() => setGridEdit([])}
-              title="แก้หลายสินค้าในตารางเดียว — เลือกได้ทุกช่องจากทะเบียนฟิลด์ · วางจาก Excel ได้"
+              title={t("แก้หลายสินค้าในตารางเดียว — เลือกได้ทุกช่องจากทะเบียนฟิลด์ · วางจาก Excel ได้", "Edit many products in one table — any field from the field registry · paste from Excel")}
               className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
             >
-              ▦ แก้ไขทีละมาก
+              {t("▦ แก้ไขทีละมาก", "▦ Bulk edit")}
             </button>
           )}
           {listings.length > 0 && (
             <button
               onClick={() => openImgMass([])}
-              title="ลากโฟลเดอร์รูปมาวาง — จับคู่ชื่อไฟล์กับรหัสสินค้า/สีให้อัตโนมัติ"
+              title={t("ลากโฟลเดอร์รูปมาวาง — จับคู่ชื่อไฟล์กับรหัสสินค้า/สีให้อัตโนมัติ", "Drop an image folder — file names are matched to product/color codes automatically")}
               className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
             >
-              📸 ลงรูปทีละมาก
+              {t("📸 ลงรูปทีละมาก", "📸 Bulk image upload")}
             </button>
           )}
           {fixShown > 0 && (
             <button
               onClick={printFixList}
-              title={`พิมพ์เช็กลิสต์เรื่องที่ต้องแก้ของ ${fixShown} รุ่นที่เห็นอยู่ (ตามตัวกรอง/ค้นหา/หมวดที่เลือก) — แยกตามเรื่องหรือ 1 แถวต่อรุ่น · บันทึก PDF/JPG ได้`}
+              title={t(`พิมพ์เช็กลิสต์เรื่องที่ต้องแก้ของ ${fixShown} รุ่นที่เห็นอยู่ (ตามตัวกรอง/ค้นหา/หมวดที่เลือก) — แยกตามเรื่องหรือ 1 แถวต่อรุ่น · บันทึก PDF/JPG ได้`, `Print a fix checklist for the ${fixShown} models shown (by current filter/search/category) — grouped by issue or 1 row per model · save as PDF/JPG`)}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
             >
-              <Icon value="i:printer" /> พิมพ์เช็กลิสต์ ({fixShown})
+              <Icon value="i:printer" /> {t(`พิมพ์เช็กลิสต์ (${fixShown})`, `Print checklist (${fixShown})`)}
             </button>
           )}
           <button
             onClick={() => setShowAdd(true)}
             className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
           >
-            + เพิ่มสินค้าเข้าเว็บ
+            {t("+ เพิ่มสินค้าเข้าเว็บ", "+ Add products")}
           </button>
         </div>
       </div>
@@ -660,15 +673,15 @@ export function WebsiteListingsPanel({
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <Icon name="image" size={14} />
           <span className="flex-1 min-w-[14rem]">
-            {shown.length} รุ่นที่{filter === "noimg" ? "ยังไม่มีรูปบนเว็บเลย" : "บางสียังไม่มีรูปเว็บ"} — ลากโฟลเดอร์รูปมาทีเดียว ระบบจับคู่ชื่อไฟล์/โฟลเดอร์กับรหัสสีให้ (เช่น <span className="font-mono">MGN364-02/1.jpg</span>) แล้วลงเฉพาะรุ่นเหล่านี้ · ตรวจก่อนลงทุกครั้ง
+            {t(`${shown.length} รุ่นที่${filter === "noimg" ? "ยังไม่มีรูปบนเว็บเลย" : "บางสียังไม่มีรูปเว็บ"} — ลากโฟลเดอร์รูปมาทีเดียว ระบบจับคู่ชื่อไฟล์/โฟลเดอร์กับรหัสสีให้ (เช่น`, `${shown.length} models ${filter === "noimg" ? "with no web images at all" : "where some colors lack web images"} — drop one image folder and file/folder names are matched to color codes (e.g.`)} <span className="font-mono">MGN364-02/1.jpg</span>{t(") แล้วลงเฉพาะรุ่นเหล่านี้ · ตรวจก่อนลงทุกครั้ง", ") and only these models get uploaded · always reviewed before upload")}
           </span>
           <button
             type="button"
-            onClick={() => openImgMass(shown.map((l) => l.parentId), `${shown.length} รุ่นที่${filter === "noimg" ? "ยังไม่มีรูปบนเว็บเลย" : "บางสียังไม่มีรูปเว็บ"}`)}
+            onClick={() => openImgMass(shown.map((l) => l.parentId), t(`${shown.length} รุ่นที่${filter === "noimg" ? "ยังไม่มีรูปบนเว็บเลย" : "บางสียังไม่มีรูปเว็บ"}`, `${shown.length} models ${filter === "noimg" ? "with no web images" : "missing some color images"}`))}
             className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600"
           >
             <Icon name="camera" size={14} />
-            ลงรูปรุ่นที่กรองอยู่ ({shown.length})
+            {t(`ลงรูปรุ่นที่กรองอยู่ (${shown.length})`, `Upload images for filtered models (${shown.length})`)}
           </button>
         </div>
       )}
@@ -695,19 +708,30 @@ export function WebsiteListingsPanel({
       {/* ➕ ป๊อปเพิ่มสินค้า: แท็บ 🎯 SKU การตลาด / ☰ รายการสินค้า · ติ๊กหลายรุ่น · ค่าเริ่มต้นซ่อนไว้ก่อน */}
       <WebsiteAddProductsModal open={showAdd} onClose={() => setShowAdd(false)} shop={shop} onAdded={reload} />
 
+      {/* 🌐 โหมด EN: บอกว่ามีกี่รุ่นยังไม่มีชื่ออังกฤษ → พาไปแท็บแปลภาษา (มี AI แปลอยู่แล้ว ไม่สร้างตัวแปลใหม่) */}
+      {isEn && noEnCount > 0 && listings.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <Icon value="i:world" size={15} />
+          <span>{noEnCount} products have no English name yet — they show the Thai name for now.</span>
+          {onOpenTranslations && (
+            <button type="button" onClick={onOpenTranslations} className="font-medium underline hover:text-blue-900">Translate in the Translations tab →</button>
+          )}
+        </div>
+      )}
+
       {/* ค้นหา + หมวด + มุมมอง */}
       {listings.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
           {view === "sort" ? <span className="flex-1" /> : <>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ หรือ รหัส เช่น BBP10" className={`${inputCls} flex-1 min-w-[180px]`} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาชื่อ หรือ รหัส เช่น BBP10", "Search name or code, e.g. BBP10")} className={`${inputCls} flex-1 min-w-[180px]`} />
           <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${inputCls} !w-auto`}>
-            <option value="">ทุกหมวด</option>
+            <option value="">{t("ทุกหมวด", "All categories")}</option>
             {categories.map((c) => (
               <option key={c.key} value={c.key}>
                 {c.label}
               </option>
             ))}
-            <option value="__none">ไม่อยู่หมวดไหน</option>
+            <option value="__none">{t("ไม่อยู่หมวดไหน", "No category")}</option>
           </select>
           <select
             value={sort ? `${sort.key}:${sort.dir}` : ""}
@@ -715,18 +739,18 @@ export function WebsiteListingsPanel({
               const [key, dir] = e.target.value.split(":");
               setSort(key ? { key, dir: dir === "desc" ? "desc" : "asc" } : null);
             }}
-            title="เรียงรายการที่เห็น — ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน"
-            aria-label="เรียงตาม"
+            title={t("เรียงรายการที่เห็น — ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน", "Sort the visible list — view only, web order doesn't change")}
+            aria-label={t("เรียงตาม", "Sort by")}
             className={`${inputCls} !w-auto ${sort ? "!border-blue-400 !text-blue-700" : ""}`}
           >
             {SORT_OPTS.map((o) => (
               <option key={o.v} value={o.v}>
-                เรียง: {o.label}
+                {t("เรียง:", "Sort:")} {o.label}
               </option>
             ))}
           </select>
-          <ToggleSwitch on={hideOff} onChange={setHideOff} size="sm" label={<span className="text-xs text-slate-600 whitespace-nowrap">ซ่อนรายการที่ไม่ขึ้นเว็บ</span>}
-            title="ไม่โชว์รุ่นที่ปิดจากเว็บ และไม่นับในต้องแก้/เช็กลิสต์ (จำค่าไว้ให้คุณ)" />
+          <ToggleSwitch on={hideOff} onChange={setHideOff} size="sm" label={<span className="text-xs text-slate-600 whitespace-nowrap">{t("ซ่อนรายการที่ไม่ขึ้นเว็บ", "Hide items not live")}</span>}
+            title={t("ไม่โชว์รุ่นที่ปิดจากเว็บ และไม่นับในต้องแก้/เช็กลิสต์ (จำค่าไว้ให้คุณ)", "Don't show models turned off on the web, and don't count them in Needs fixing / checklist (remembered for you)")} />
           </>}
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
             {VIEWS.map((v) => (
@@ -737,10 +761,10 @@ export function WebsiteListingsPanel({
                   setView(v);
                   void saveDefault(v);
                 }}
-                title={v === "list" ? "มุมมองรายการ" : v === "grid" ? "มุมมองการ์ด (แบบหน้าเว็บ)" : "จัดหมวดแบบเร็ว — ใส่หมวดหลักจาก ERP + กระดานจัดหมวดย่อย"}
+                title={v === "list" ? t("มุมมองรายการ", "List view") : v === "grid" ? t("มุมมองการ์ด (แบบหน้าเว็บ)", "Card view (like the website)") : t("จัดหมวดแบบเร็ว — ใส่หมวดหลักจาก ERP + กระดานจัดหมวดย่อย", "Quick categorize — main categories from ERP + subcategory board")}
                 className={`px-3 py-1.5 text-xs ${view === v ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
               >
-                {v === "list" ? "☰ รายการ" : v === "grid" ? "▦ การ์ด" : "🗂 จัดหมวด"}
+                {v === "list" ? t("☰ รายการ", "☰ List") : v === "grid" ? t("▦ การ์ด", "▦ Cards") : t("🗂 จัดหมวด", "🗂 Categorize")}
               </button>
             ))}
           </div>
@@ -750,9 +774,9 @@ export function WebsiteListingsPanel({
       {/* 🙈 บอกเสมอว่าซ่อนอะไรไว้ (กันคนอื่นงงว่าสินค้าหายไปไหน) */}
       {hideOff && counts.hide > 0 && filter !== "hide" && view !== "sort" && !loading && (
         <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
-          <Icon value="i:eye-off" /> ไม่โชว์ {counts.hide} รายการที่ปิดจากเว็บ — ไม่นับใน “ต้องแก้” และไม่อยู่ในเช็กลิสต์
-          <button type="button" onClick={() => setFilter("hide")} className="underline hover:text-slate-900">ดูรายการที่ซ่อน</button>
-          <button type="button" onClick={() => setHideOff(false)} className="underline hover:text-slate-900">โชว์ทั้งหมด</button>
+          <Icon value="i:eye-off" /> {t(`ไม่โชว์ ${counts.hide} รายการที่ปิดจากเว็บ — ไม่นับใน “ต้องแก้” และไม่อยู่ในเช็กลิสต์`, `${counts.hide} items turned off on the web are hidden — not counted in “Needs fixing” and not in the checklist`)}
+          <button type="button" onClick={() => setFilter("hide")} className="underline hover:text-slate-900">{t("ดูรายการที่ซ่อน", "View hidden items")}</button>
+          <button type="button" onClick={() => setHideOff(false)} className="underline hover:text-slate-900">{t("โชว์ทั้งหมด", "Show all")}</button>
         </div>
       )}
 
@@ -766,9 +790,9 @@ export function WebsiteListingsPanel({
         </div>
       ) : !listings.length ? (
         <div className="rounded-xl border border-dashed border-slate-300 py-14 text-center">
-          <p className="text-slate-400 text-sm">ยังไม่มีสินค้าบนเว็บร้านนี้</p>
+          <p className="text-slate-400 text-sm">{t("ยังไม่มีสินค้าบนเว็บร้านนี้", "No products on this shop's website yet")}</p>
           <button onClick={() => setShowAdd(true)} className="mt-3 text-sm text-blue-600 hover:underline">
-            + เพิ่มสินค้าเข้าเว็บ
+            {t("+ เพิ่มสินค้าเข้าเว็บ", "+ Add products")}
           </button>
         </div>
       ) : view === "sort" ? (
@@ -783,7 +807,7 @@ export function WebsiteListingsPanel({
         />
       ) : !shown.length ? (
         <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center">
-          <p className="text-slate-400 text-sm">ไม่พบสินค้า ลองเปลี่ยนคำค้นหรือตัวกรอง</p>
+          <p className="text-slate-400 text-sm">{t("ไม่พบสินค้า ลองเปลี่ยนคำค้นหรือตัวกรอง", "No products found. Try a different search or filter")}</p>
           <button
             onClick={() => {
               setFilter("all");
@@ -792,7 +816,7 @@ export function WebsiteListingsPanel({
             }}
             className="mt-2 text-sm text-blue-600 hover:underline"
           >
-            ล้างตัวกรอง
+            {t("ล้างตัวกรอง", "Clear filters")}
           </button>
         </div>
       ) : view === "grid" ? (
@@ -813,8 +837,8 @@ export function WebsiteListingsPanel({
                     <img src={keyUrl(key, 360)} alt="" className="w-full h-full object-cover" loading="lazy" />
                   )}
                   <div className="absolute top-1.5 left-1.5 flex flex-wrap gap-1">
-                    {!l.published && <span className="rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] text-white">ซ่อนอยู่</span>}
-                    {l.display?.hero && <span className="rounded-full bg-violet-600/90 px-2 py-0.5 text-[10px] text-white">🎬 รูปเปิด</span>}
+                    {!l.published && <span className="rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] text-white">{t("ซ่อนอยู่", "Hidden")}</span>}
+                    {l.display?.hero && <span className="rounded-full bg-violet-600/90 px-2 py-0.5 text-[10px] text-white">{t("🎬 รูปเปิด", "🎬 Hero")}</span>}
                     {l.featured && <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] text-amber-950">⭐</span>}
                   </div>
                   {iss.length > 0 && (
@@ -838,20 +862,20 @@ export function WebsiteListingsPanel({
         <div {...rowDrop.guard} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
           {/* หัวตาราง */}
           <div className="hidden md:flex items-center gap-3 px-3 py-2 border-b border-slate-100 bg-slate-50/70 text-[11px] text-slate-500">
-            <input type="checkbox" checked={allPageSelected} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label="เลือกทั้งหน้านี้" title="เลือกทั้งหน้านี้ (เลือกทุกรุ่นที่ตรงตัวกรองได้ที่แถบล่าง)" />
+            <input type="checkbox" checked={allPageSelected} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label={t("เลือกทั้งหน้านี้", "Select this page")} title={t("เลือกทั้งหน้านี้ (เลือกทุกรุ่นที่ตรงตัวกรองได้ที่แถบล่าง)", "Select this page (select all filtered models from the bottom bar)")} />
             <span className="w-3" />
             <span className="w-5" />
             <span className="w-12" />
             <span className="flex-1">
-              <SortButton label="สินค้า · รหัส SKU" k="code" sort={sort} onSort={setSort} title="กดเรียงตามรหัส SKU (กดซ้ำ = กลับด้าน · กดครั้งที่ 3 = กลับลำดับบนเว็บ)" />
-              <span> (ชื่อที่ลูกค้าเห็นจริง · กดชื่อเพื่อแก้ · ▸ ดู SKU ย่อย)</span>
+              <SortButton label={t("สินค้า · รหัส SKU", "Product · SKU code")} k="code" sort={sort} onSort={setSort} title={t("กดเรียงตามรหัส SKU (กดซ้ำ = กลับด้าน · กดครั้งที่ 3 = กลับลำดับบนเว็บ)", "Click to sort by SKU code (again = reverse · 3rd click = back to web order)")} />
+              <span>{t(" (ชื่อที่ลูกค้าเห็นจริง · กดชื่อเพื่อแก้ · ▸ ดู SKU ย่อย)", " (name customers actually see · click name to edit · ▸ view sub-SKUs)")}</span>
             </span>
-            <span className="w-24">สี</span>
+            <span className="w-24">{t("สี", "Colors")}</span>
             <span className="w-24 text-right">
-              <SortButton label="ราคา" k="price" sort={sort} onSort={setSort} title="กดเรียงตามราคา (ถูก→แพง · กดซ้ำ = แพง→ถูก)" />
+              <SortButton label={t("ราคา", "Price")} k="price" sort={sort} onSort={setSort} title={t("กดเรียงตามราคา (ถูก→แพง · กดซ้ำ = แพง→ถูก)", "Click to sort by price (low→high · again = high→low)")} />
             </span>
             <span className="w-28 text-center">
-              <SortButton label="ขึ้นเว็บ / แนะนำ" k="status" sort={sort} onSort={setSort} title="กดเรียงตามสถานะ (ขึ้นเว็บก่อน · กดซ้ำ = ซ่อนอยู่ก่อน)" />
+              <SortButton label={t("ขึ้นเว็บ / แนะนำ", "Live / Featured")} k="status" sort={sort} onSort={setSort} title={t("กดเรียงตามสถานะ (ขึ้นเว็บก่อน · กดซ้ำ = ซ่อนอยู่ก่อน)", "Click to sort by status (live first · again = hidden first)")} />
             </span>
             <span className="w-16" />
           </div>
@@ -872,30 +896,30 @@ export function WebsiteListingsPanel({
                     {...rowDrop.zone(l.parentId)}
                     className={`relative flex flex-wrap md:flex-nowrap items-center gap-3 px-3 py-2.5 hover:bg-slate-50/70 ${l.published ? "" : "bg-slate-50/60"}`}
                   >
-                    <FileDropHint show={rowDrop.over === l.parentId} label={`วางรูปลงรุ่น ${l.code} — โฟลเดอร์ 01/ 02/ = รูปของสีนั้น · ตรวจก่อนลง`} />
+                    <FileDropHint show={rowDrop.over === l.parentId} label={t(`วางรูปลงรุ่น ${l.code} — โฟลเดอร์ 01/ 02/ = รูปของสีนั้น · ตรวจก่อนลง`, `Drop images onto ${l.code} — folders 01/ 02/ = images of that color · reviewed before upload`)} />
                     <input
                       type="checkbox"
                       checked={sel.has(l.parentId)}
                       onChange={() => toggleSel(l.parentId)}
                       className="w-4 h-4 accent-blue-600"
-                      aria-label={`เลือก ${l.code}`}
+                      aria-label={t(`เลือก ${l.code}`, `Select ${l.code}`)}
                     />
                     {!canDrag ? (
-                      <span className="w-3 text-slate-200 select-none" title={sort ? 'เลือก "เรียง: ลำดับบนเว็บ" ก่อน จึงจะลากเรียงลำดับได้' : "ล้างตัวกรองก่อน จึงจะลากเรียงลำดับได้"}>⠿</span>
+                      <span className="w-3 text-slate-200 select-none" title={sort ? t('เลือก "เรียง: ลำดับบนเว็บ" ก่อน จึงจะลากเรียงลำดับได้', 'Pick "Sort: Web order" first to drag-reorder') : t("ล้างตัวกรองก่อน จึงจะลากเรียงลำดับได้", "Clear filters first to drag-reorder")}>⠿</span>
                     ) : (
-                      <DragHandle {...drag.handleProps(idx)} title="ลากเพื่อเรียงลำดับบนเว็บ" className="w-3" />
+                      <DragHandle {...drag.handleProps(idx)} title={t("ลากเพื่อเรียงลำดับบนเว็บ", "Drag to reorder on the web")} className="w-3" />
                     )}
                     <button
                       type="button"
                       onClick={() => toggleExpand(l.parentId)}
                       aria-expanded={isExp}
-                      aria-label={`${isExp ? "ซ่อน" : "ดู"} SKU ย่อยของ ${l.code}`}
-                      title={isExp ? "ซ่อน SKU ย่อย" : "ดู SKU ย่อยของรุ่นนี้"}
+                      aria-label={isExp ? t(`ซ่อน SKU ย่อยของ ${l.code}`, `Hide sub-SKUs of ${l.code}`) : t(`ดู SKU ย่อยของ ${l.code}`, `Show sub-SKUs of ${l.code}`)}
+                      title={isExp ? t("ซ่อน SKU ย่อย", "Hide sub-SKUs") : t("ดู SKU ย่อยของรุ่นนี้", "Show this model's sub-SKUs")}
                       className={`w-5 h-6 shrink-0 rounded text-xs leading-none transition-transform ${isExp ? "rotate-90 text-slate-700" : "text-slate-400 hover:text-slate-700"}`}
                     >
                       ▶
                     </button>
-                    <button type="button" onClick={() => openWeb(l.parentId)} className={`shrink-0 ${l.published ? "" : "opacity-50"}`} title="เปิดแก้ไข" aria-label={`เปิดแก้ไข ${l.code}`}>
+                    <button type="button" onClick={() => openWeb(l.parentId)} className={`shrink-0 ${l.published ? "" : "opacity-50"}`} title={t("เปิดแก้ไข", "Open to edit")} aria-label={t(`เปิดแก้ไข ${l.code}`, `Edit ${l.code}`)}>
                       <Thumb l={l} />
                     </button>
 
@@ -905,26 +929,27 @@ export function WebsiteListingsPanel({
                         type="button"
                         onClick={() => openWeb(l.parentId)}
                         className={`block max-w-full text-left text-sm font-medium truncate hover:text-blue-700 hover:underline ${l.published ? "text-slate-800" : "text-slate-500"}`}
-                        title={`${shownName(l)} — กดเพื่อแก้ไข`}
+                        title={t(`${shownName(l)} — กดเพื่อแก้ไข`, `${shownName(l)} — click to edit`)}
                       >
                         {shownName(l)}
                       </button>
+                      {isEn && !l.nameEn && <span className="ml-1 inline-block rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] leading-4 text-amber-700 align-middle">{t("ยังไม่มีชื่ออังกฤษ", "No EN name")}</span>}
                       <p className="text-[11px] text-slate-400 truncate">
                         {l.code}
                         {(l.categories ?? []).length > 0 ? ` · ${l.categories.map(catLabel).join(", ")}` : ""}
-                        {l.webBadge ? ` · ป้าย "${l.webBadge}"` : ""}
+                        {l.webBadge ? t(` · ป้าย "${l.webBadge}"`, ` · badge "${l.webBadge}"`) : ""}
                       </p>
                       {(l.display?.hero || iss.length > 0) && (
                         <div className="mt-1 flex flex-wrap gap-1">
-                          {l.display?.hero && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">🎬 รูปเปิด</span>}
+                          {l.display?.hero && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">{t("🎬 รูปเปิด", "🎬 Hero")}</span>}
                           {iss.map((x) =>
                             x.key === "swatch_missing" ? (
                               // 🎨 กดป้าย = เปิดทะเบียนสี เลือกสีของสินค้านี้ที่ยังไม่ได้ตั้งไว้ก่อน · ปิดแล้วโหลดจุดสี/ป้ายใหม่
                               <ColorSwatchButton
                                 key={x.key}
-                                label={`🎨 ${x.label} — กดเพื่อผูก`}
+                                label={t(`🎨 ${x.label} — กดเพื่อผูก`, `🎨 ${x.label} — click to link`)}
                                 focusNames={x.names}
-                                title={x.detail ? `สีที่ยังไม่ผูก: ${x.detail}` : undefined}
+                                title={x.detail ? t(`สีที่ยังไม่ผูก: ${x.detail}`, `Unlinked colors: ${x.detail}`) : undefined}
                                 onClosed={() => void reload()}
                                 className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 hover:border-amber-400"
                               />
@@ -934,7 +959,7 @@ export function WebsiteListingsPanel({
                                 key={x.key}
                                 type="button"
                                 onClick={() => openWeb(l.parentId, x.skuId)}
-                                title={`${x.detail ?? x.label} — กดเพื่อไปเพิ่มรูป`}
+                                title={t(`${x.detail ?? x.label} — กดเพื่อไปเพิ่มรูป`, `${x.detail ?? x.label} — click to add images`)}
                                 className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${
                                   x.key === "color_no_web_image" ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
                                 }`}
@@ -942,9 +967,9 @@ export function WebsiteListingsPanel({
                                 <Icon name="image" size={11} />
                                 {x.label}
                                 {x.key === "color_no_web_image" && x.names?.length && imgById.get(l.parentId) === "part"
-                                  ? ` · ${x.names.slice(0, 2).join(", ")}${x.names.length > 2 ? ` +${x.names.length - 2}` : ""} ยังไม่มี`
+                                  ? t(` · ${x.names.slice(0, 2).join(", ")}${x.names.length > 2 ? ` +${x.names.length - 2}` : ""} ยังไม่มี`, ` · ${x.names.slice(0, 2).join(", ")}${x.names.length > 2 ? ` +${x.names.length - 2}` : ""} missing`)
                                   : ""}{" "}
-                                · เพิ่มรูป
+                                {t("· เพิ่มรูป", "· Add image")}
                               </button>
                             ) : (
                               <span key={x.key} title={x.detail} className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] text-amber-800">
@@ -965,7 +990,7 @@ export function WebsiteListingsPanel({
                       <button
                         type="button"
                         onClick={() => void togglePublish(l)}
-                        title={l.published ? "กำลังแสดงบนเว็บ — กดเพื่อซ่อน" : "ซ่อนอยู่ — กดเพื่อขึ้นเว็บ"}
+                        title={l.published ? t("กำลังแสดงบนเว็บ — กดเพื่อซ่อน", "Live on the web — click to hide") : t("ซ่อนอยู่ — กดเพื่อขึ้นเว็บ", "Hidden — click to go live")}
                         className={`shrink-0 w-10 h-[22px] rounded-full transition relative ${l.published ? "bg-emerald-500" : "bg-slate-300"}`}
                       >
                         <span className={`absolute top-0.5 w-[18px] h-[18px] bg-white rounded-full transition-all ${l.published ? "left-5" : "left-0.5"}`} />
@@ -973,7 +998,7 @@ export function WebsiteListingsPanel({
                       <button
                         type="button"
                         onClick={() => void toggleFeatured(l)}
-                        title={l.featured ? "สินค้าแนะนำ — กดเพื่อยกเลิก" : "ตั้งเป็นสินค้าแนะนำ"}
+                        title={l.featured ? t("สินค้าแนะนำ — กดเพื่อยกเลิก", "Featured — click to unfeature") : t("ตั้งเป็นสินค้าแนะนำ", "Set as featured")}
                         className={`text-lg leading-none ${l.featured ? "text-amber-400" : "text-slate-300 hover:text-amber-300"}`}
                       >
                         ★
@@ -984,7 +1009,7 @@ export function WebsiteListingsPanel({
                       onClick={() => openWeb(l.parentId)}
                       className={`w-16 shrink-0 px-2 py-1.5 rounded-lg border text-xs ${isOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
                     >
-                      ✏️ แก้
+                      {t("✏️ แก้", "✏️ Edit")}
                     </button>
                   </div>
 
@@ -1003,7 +1028,7 @@ export function WebsiteListingsPanel({
             page={curPage}
             pageSize={pageSize}
             total={shown.length}
-            unitLabel="รุ่น"
+            unitLabel={t("รุ่น", "models")}
             onPage={(p) => { setPage(p); listTopRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }); }}
             pageSizes={PAGE_SIZES.map(Number)}
             onPageSize={(s) => { const v = String(s) as (typeof PAGE_SIZES)[number]; pageSizePref.setView(v); void pageSizePref.saveDefault(v); }}
@@ -1013,61 +1038,61 @@ export function WebsiteListingsPanel({
 
       {listings.length > 0 && !loading && (
         <p className="mt-2 text-[11px] text-slate-400">
-          {pageCount > 1 ? `หน้า ${curPage + 1}/${pageCount} · ` : ""}ตรงตัวกรอง {shown.length} จาก {listings.length} รายการ ·{" "}
+          {pageCount > 1 ? t(`หน้า ${curPage + 1}/${pageCount} · `, `Page ${curPage + 1}/${pageCount} · `) : ""}{t(`ตรงตัวกรอง ${shown.length} จาก ${listings.length} รายการ`, `${shown.length} of ${listings.length} items match`)} ·{" "}
           {sort ? (
             <>
-              เรียงตาม{sortLabel} (ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน){" "}
+              {t(`เรียงตาม${sortLabel} (ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน)`, `Sorted by ${sortLabel} (view only, web order unchanged)`)}{" "}
               <button type="button" onClick={() => setSort(null)} className="underline hover:text-slate-600">
-                กลับลำดับบนเว็บ
+                {t("กลับลำดับบนเว็บ", "Back to web order")}
               </button>
             </>
           ) : filtered ? (
-            "ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ"
+            t("ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ", "Clear filters to drag ⠿ and reorder on the web")
           ) : pageCount > 1 ? (
-            `ลาก ⠿ เรียงลำดับบนเว็บได้ภายในหน้าเดียวกัน (ย้ายข้ามหน้า: ตั้ง ${PAGE_SIZES[PAGE_SIZES.length - 1]} ต่อหน้าก่อน)`
+            t(`ลาก ⠿ เรียงลำดับบนเว็บได้ภายในหน้าเดียวกัน (ย้ายข้ามหน้า: ตั้ง ${PAGE_SIZES[PAGE_SIZES.length - 1]} ต่อหน้าก่อน)`, `Drag ⠿ to reorder within the same page (to move across pages, set ${PAGE_SIZES[PAGE_SIZES.length - 1]} per page first)`)
           ) : (
-            "ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ"
+            t("ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ", "Drag ⠿ to set the order shown on the web")
           )}{" "}
-          · ติ๊กหลายรายการเพื่อทำพร้อมกัน{view === "list" ? " · ลากโฟลเดอร์รูปมาวางบนแถว = ลงรูปรุ่นนั้น" : ""}
+          · {t("ติ๊กหลายรายการเพื่อทำพร้อมกัน", "Tick several items to act on them together")}{view === "list" ? t(" · ลากโฟลเดอร์รูปมาวางบนแถว = ลงรูปรุ่นนั้น", " · Drop an image folder on a row = upload to that model") : ""}
         </p>
       )}
 
       {/* ☑️ ทำหลายรายการพร้อมกัน — แถบลอยล่างจอ (ของกลาง) */}
       <BulkActionBar
         count={view === "sort" ? 0 : sel.size}
-        unit="รายการ"
+        unit={t("รายการ", "items")}
         onClear={() => setSel(new Set())}
         extra={
           !allShownSelected && shown.length > sel.size ? (
             <button type="button" onClick={toggleAllShown} className="underline text-white/80 hover:text-white">
-              เลือกทั้งหมดที่ตรงตัวกรอง ({shown.length}{pageCount > 1 ? ` · ทุกหน้า` : ""})
+              {t(`เลือกทั้งหมดที่ตรงตัวกรอง (${shown.length}${pageCount > 1 ? " · ทุกหน้า" : ""})`, `Select all matching filter (${shown.length}${pageCount > 1 ? " · all pages" : ""})`)}
             </button>
           ) : null
         }
       >
-        <button disabled={bulkBusy} onClick={() => void bulk({ isPublished: true }, "ขึ้นเว็บ")} className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600 disabled:opacity-50">
-          ขึ้นเว็บ
+        <button disabled={bulkBusy} onClick={() => void bulk({ isPublished: true }, t("ขึ้นเว็บ", "Publish"))} className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600 disabled:opacity-50">
+          {t("ขึ้นเว็บ", "Publish")}
         </button>
-        <button disabled={bulkBusy} onClick={() => void bulk({ isPublished: false }, "ซ่อน")} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
-          ซ่อน
+        <button disabled={bulkBusy} onClick={() => void bulk({ isPublished: false }, t("ซ่อน", "Hide"))} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
+          {t("ซ่อน", "Hide")}
         </button>
-        <button disabled={bulkBusy} onClick={() => void bulk({ featured: true }, "ตั้งแนะนำ")} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
-          ⭐ ตั้งแนะนำ
+        <button disabled={bulkBusy} onClick={() => void bulk({ featured: true }, t("ตั้งแนะนำ", "Feature"))} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
+          {t("⭐ ตั้งแนะนำ", "⭐ Feature")}
         </button>
-        <button disabled={bulkBusy} onClick={() => void bulk({ featured: false }, "เลิกแนะนำ")} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
-          เลิกแนะนำ
+        <button disabled={bulkBusy} onClick={() => void bulk({ featured: false }, t("เลิกแนะนำ", "Unfeature"))} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
+          {t("เลิกแนะนำ", "Unfeature")}
         </button>
         <button disabled={bulkBusy || !categories.length} onClick={() => { setMassPreset({ field: "categories", categories: { mode: "move", keys: [] } }); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
-          📂 ย้ายหมวด
+          {t("📂 ย้ายหมวด", "📂 Move category")}
         </button>
         <button disabled={bulkBusy} onClick={() => openImgMass([...sel])} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
-          📸 ลงรูป
+          {t("📸 ลงรูป", "📸 Upload images")}
         </button>
         <button disabled={bulkBusy} onClick={() => setGridEdit([...sel])} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
-          ▦ แก้แบบตาราง
+          {t("▦ แก้แบบตาราง", "▦ Table edit")}
         </button>
         <button disabled={bulkBusy} onClick={() => { setMassPreset(null); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-medium hover:bg-slate-100 disabled:opacity-50">
-          ✏️ แก้หลายรายการ
+          {t("✏️ แก้หลายรายการ", "✏️ Bulk edit")}
         </button>
       </BulkActionBar>
 
@@ -1096,11 +1121,11 @@ export function WebsiteListingsPanel({
           <>
             {webL && (
               <button onClick={() => setRemoving(webL)} className="mr-auto text-xs text-red-500 hover:text-red-700 hover:underline">
-                🗑 เอาออกจากเว็บร้านนี้
+                {t("🗑 เอาออกจากเว็บร้านนี้", "🗑 Remove from this shop's site")}
               </button>
             )}
             <button onClick={() => goWeb(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
-              ปิด
+              {t("ปิด", "Close")}
             </button>
             <FooterSaveButton host={webSave} />
           </>
@@ -1113,11 +1138,11 @@ export function WebsiteListingsPanel({
               <Thumb l={webL} size={64} />
               <div className="flex-1 min-w-0 space-y-1.5">
                 <div className="flex flex-wrap gap-1">
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${webL.published ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{webL.published ? "ขึ้นเว็บอยู่" : "ซ่อนอยู่"}</span>
-                  {webL.featured && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">★ แนะนำ</span>}
-                  {webL.display?.hero && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">🎬 รูปเปิด</span>}
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${webL.published ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{webL.published ? t("ขึ้นเว็บอยู่", "Live") : t("ซ่อนอยู่", "Hidden")}</span>
+                  {webL.featured && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">{t("★ แนะนำ", "★ Featured")}</span>}
+                  {webL.display?.hero && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">{t("🎬 รูปเปิด", "🎬 Hero")}</span>}
                   {(issuesById.get(webL.parentId) ?? []).length > 0 && (
-                    <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] text-amber-800">⚠️ ต้องแก้ {(issuesById.get(webL.parentId) ?? []).length}</span>
+                    <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] text-amber-800">⚠️ {t("ต้องแก้", "Needs fixing")} {(issuesById.get(webL.parentId) ?? []).length}</span>
                   )}
                   <ColorDots colors={webL.display?.colors ?? []} max={8} />
                 </div>
@@ -1125,33 +1150,33 @@ export function WebsiteListingsPanel({
                   {webL.display?.productUrl && (
                     <>
                       <a href={webL.display.productUrl} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:border-slate-400">
-                        👁 ดูบนเว็บ ↗
+                        {t("👁 ดูบนเว็บ ↗", "👁 View on web ↗")}
                       </a>
-                      <CopyButton value={webL.display.productUrl} label="คัดลอกลิงก์" title="คัดลอกลิงก์หน้าสินค้านี้" className="!py-1" />
+                      <CopyButton value={webL.display.productUrl} label={t("คัดลอกลิงก์", "Copy link")} title={t("คัดลอกลิงก์หน้าสินค้านี้", "Copy this product page link")} className="!py-1" />
                     </>
                   )}
                   <button
                     type="button"
                     onClick={() => {
                       if (webSave.anyDirty) {
-                        toast.info("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU");
+                        toast.info(t("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU", "Save your changes before opening the Parent SKU"));
                         return;
                       }
                       setParentOpen(webL.parentId);
                     }}
-                    title="เปิดข้อมูลสินค้าเต็ม (หน้าต่างเดียวกับหน้า Parent SKU — ทุกแท็บ)"
+                    title={t("เปิดข้อมูลสินค้าเต็ม (หน้าต่างเดียวกับหน้า Parent SKU — ทุกแท็บ)", "Open full product data (same window as the Parent SKU page — all tabs)")}
                     className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:border-slate-500"
                   >
-                    📦 เปิด Parent SKU
+                    {t("📦 เปิด Parent SKU", "📦 Open Parent SKU")}
                   </button>
-                  {!webL.published && <span className="text-[11px] text-slate-400">ซ่อนอยู่ — ลูกค้าเปิดหน้านี้ไม่ได้จนกว่าจะขึ้นเว็บ</span>}
+                  {!webL.published && <span className="text-[11px] text-slate-400">{t("ซ่อนอยู่ — ลูกค้าเปิดหน้านี้ไม่ได้จนกว่าจะขึ้นเว็บ", "Hidden — customers can't open this page until it's live")}</span>}
                 </div>
               </div>
               <div className="flex gap-1 shrink-0">
-                <button type="button" disabled={navIdx <= 0} onClick={() => openWeb(shown[navIdx - 1].parentId)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวก่อนหน้า" aria-label="ตัวก่อนหน้า">
+                <button type="button" disabled={navIdx <= 0} onClick={() => openWeb(shown[navIdx - 1].parentId)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title={t("ตัวก่อนหน้า", "Previous")} aria-label={t("ตัวก่อนหน้า", "Previous")}>
                   ◀
                 </button>
-                <button type="button" disabled={navIdx < 0 || navIdx >= shown.length - 1} onClick={() => openWeb(shown[navIdx + 1].parentId)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวถัดไป" aria-label="ตัวถัดไป">
+                <button type="button" disabled={navIdx < 0 || navIdx >= shown.length - 1} onClick={() => openWeb(shown[navIdx + 1].parentId)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title={t("ตัวถัดไป", "Next")} aria-label={t("ตัวถัดไป", "Next")}>
                   ▶
                 </button>
               </div>
@@ -1170,7 +1195,7 @@ export function WebsiteListingsPanel({
                 }}
                 onOpenParent={() => {
                   if (webSave.anyDirty) {
-                    toast.info("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU");
+                    toast.info(t("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU", "Save your changes before opening the Parent SKU"));
                     return;
                   }
                   setParentOpen(webL.parentId);
@@ -1187,10 +1212,10 @@ export function WebsiteListingsPanel({
           setOpen(pendingNav?.to ?? null);
           setPendingNav(null);
         }}
-        title="มีข้อมูลที่ยังไม่บันทึก"
-        message="ต้องการออกโดยไม่บันทึกหรือไม่? (กด ยกเลิก แล้วกด 💾 บันทึก ที่แถบล่างก่อนได้)"
-        confirmText="ออกโดยไม่บันทึก"
-        cancelText="อยู่ต่อ"
+        title={t("มีข้อมูลที่ยังไม่บันทึก", "You have unsaved changes")}
+        message={t("ต้องการออกโดยไม่บันทึกหรือไม่? (กด ยกเลิก แล้วกด 💾 บันทึก ที่แถบล่างก่อนได้)", "Leave without saving? (Click Cancel, then 💾 Save in the bottom bar first)")}
+        confirmText={t("ออกโดยไม่บันทึก", "Leave without saving")}
+        cancelText={t("อยู่ต่อ", "Stay")}
         variant="danger"
       />
 
@@ -1213,12 +1238,12 @@ export function WebsiteListingsPanel({
         open={!!bulkAsk}
         onClose={() => setBulkAsk(null)}
         onConfirm={() => { const a = bulkAsk; setBulkAsk(null); if (a) void bulk(a.p, a.msg, true); }}
-        title={`${bulkAsk?.msg ?? ""} ${sel.size} รุ่นพร้อมกัน?`}
+        title={t(`${bulkAsk?.msg ?? ""} ${sel.size} รุ่นพร้อมกัน?`, `${bulkAsk?.msg ?? ""} ${sel.size} models at once?`)}
         message={bulkAsk?.p.isPublished
-          ? `ทั้ง ${sel.size} รุ่นจะโชว์บนเว็บ ${shop.name} ให้ลูกค้าเห็นทันทีที่ร้านเปิด (ตอนนี้ขึ้นเว็บอยู่ ${counts.pub} จาก ${listings.length} รุ่น)${sel.size >= BULK_TYPED ? " — พิมพ์ CONFIRM เพื่อยืนยัน" : ""}`
-          : `ทั้ง ${sel.size} รุ่นจะหายจากหน้าเว็บ ${shop.name} (สินค้าและข้อมูลไม่หาย เปิดกลับได้)${sel.size >= BULK_TYPED ? " — พิมพ์ CONFIRM เพื่อยืนยัน" : ""}`}
-        confirmText={`${bulkAsk?.msg ?? ""} ${sel.size} รุ่น`}
-        cancelText="ยกเลิก"
+          ? t(`ทั้ง ${sel.size} รุ่นจะโชว์บนเว็บ ${shop.name} ให้ลูกค้าเห็นทันทีที่ร้านเปิด (ตอนนี้ขึ้นเว็บอยู่ ${counts.pub} จาก ${listings.length} รุ่น)${sel.size >= BULK_TYPED ? " — พิมพ์ CONFIRM เพื่อยืนยัน" : ""}`, `All ${sel.size} models will show on ${shop.name} for customers as soon as the shop is open (currently ${counts.pub} of ${listings.length} models live)${sel.size >= BULK_TYPED ? " — type CONFIRM to confirm" : ""}`)
+          : t(`ทั้ง ${sel.size} รุ่นจะหายจากหน้าเว็บ ${shop.name} (สินค้าและข้อมูลไม่หาย เปิดกลับได้)${sel.size >= BULK_TYPED ? " — พิมพ์ CONFIRM เพื่อยืนยัน" : ""}`, `All ${sel.size} models will disappear from ${shop.name} (products and data are kept, can be turned back on)${sel.size >= BULK_TYPED ? " — type CONFIRM to confirm" : ""}`)}
+        confirmText={t(`${bulkAsk?.msg ?? ""} ${sel.size} รุ่น`, `${bulkAsk?.msg ?? ""} ${sel.size} models`)}
+        cancelText={t("ยกเลิก", "Cancel")}
         variant={bulkAsk?.p.isPublished ? "default" : "danger"}
         requireTyped={sel.size >= BULK_TYPED ? "CONFIRM" : undefined}
         loading={bulkBusy}
@@ -1228,10 +1253,10 @@ export function WebsiteListingsPanel({
         open={!!removing}
         onClose={() => setRemoving(null)}
         onConfirm={() => removing && void removeProduct(removing)}
-        title="เอาออกจากเว็บร้านนี้?"
-        message={removing ? `"${shownName(removing)}" จะหายจากเว็บ ${shop.name} (สินค้าใน ERP ไม่หาย · เพิ่มกลับได้ภายหลัง)` : ""}
-        confirmText="เอาออก"
-        cancelText="ยกเลิก"
+        title={t("เอาออกจากเว็บร้านนี้?", "Remove from this shop's site?")}
+        message={removing ? t(`"${shownName(removing)}" จะหายจากเว็บ ${shop.name} (สินค้าใน ERP ไม่หาย · เพิ่มกลับได้ภายหลัง)`, `"${shownName(removing)}" will disappear from ${shop.name} (the ERP product is kept · can be added back later)`) : ""}
+        confirmText={t("เอาออก", "Remove")}
+        cancelText={t("ยกเลิก", "Cancel")}
         variant="danger"
         loading={!!removing && saving === removing.parentId}
       />
