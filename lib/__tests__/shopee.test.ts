@@ -4,7 +4,7 @@ import {
   shopeeSignBase, shopeeSign, shopeeAuthUrl, shopeeCallbackParams, shopeeConfigured, shopeeEnv, shopeeHost,
   shopeeErrorText, shopeeIsRateLimit, ShopeeApiError, shopeeTokenOf, shopeeTokenTimes, shopeeReconnectBy, shopeeShopInfoOf,
   SHOPEE_HOSTS, SHOPEE_REFRESH_TTL_MS, shopeeItemListOf, shopeeModelsToSlim, shopeeItemToCatalogItem, shopeeListingStatus, SHOPEE_PULL_STATUSES,
-  shopeeOrderListOf, shopeeOrderToPlatformOrder, SHOPEE_ORDER_FIELDS, shopeeUploadImageOf,
+  shopeeOrderListOf, shopeeOrderToPlatformOrder, SHOPEE_ORDER_FIELDS, shopeeUploadImageOf, shopeeTrackingOf,
 } from "@/lib/shopee";
 import { summarizeListing, countsAsDuplicate } from "@/lib/platform-listing-health";
 import { shopeeToInternal, isShopManaged, checkTransition, shopManagedName, needsAction, countsAsSale } from "@/lib/platform-order-status";

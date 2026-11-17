@@ -412,12 +412,31 @@ export function shopeeOrderToPlatformOrder(o: Obj, toInternal: (code: string | n
           status, update_time: num(o.update_time), pay_time: num(o.pay_time), ship_by_date: num(o.ship_by_date), days_to_ship: num(o.days_to_ship),
           cod, payment_method: str(o.payment_method), shipping_carrier: str(o.shipping_carrier),
           cancel_by: str(o.cancel_by), cancel_reason: str(o.cancel_reason), buyer_cancel_reason: str(o.buyer_cancel_reason),
+          message_to_seller: str(o.message_to_seller),   // ข้อความลูกค้าถึงร้าน (ช่องปกติของ get_order_detail ไม่ต้องขอเพิ่ม) — โชว์ที่สถานีแพ็ค
           packages: pkgs.map((p) => ({ package_number: str(p.package_number), logistics_status: str(p.logistics_status) })).filter((p) => p.package_number),
         },
       },
     },
     items: [...byKey.values()],
   };
+}
+
+// ───────── เลขพัสดุ (อ่านอย่างเดียว · สถานีแพ็คยิงใบปะหน้า) ─────────
+/** สถานะร้านที่ น่าจะมีเลขพัสดุแล้ว — จัดส่งแล้ว (PROCESSED) มาก่อน · READY_TO_SHIP = อาจยังไม่ได้กดจัดส่ง (ยังไม่มีเลข) */
+export const SHOPEE_TRACKING_STATUSES = ["PROCESSED", "RETRY_SHIP", "READY_TO_SHIP", "SHIPPED"] as const;
+
+/** อ่านคำตอบ get_tracking_number → เลขพัสดุ (ว่าง = ยังไม่ได้กดจัดส่ง/ยังไม่ออกเลข) */
+export function shopeeTrackingOf(j: Obj): string | null {
+  const r = respOf(j);
+  return str(r.tracking_number) ?? str(r.last_mile_tracking_number) ?? null;
+}
+
+/** v2.logistics.get_tracking_number — ทีละ 1 ออเดอร์ (ส่ง package_number ถ้ามี · ออเดอร์แยกกล่อง) · ⚠️ อ่านอย่างเดียว */
+export async function shopeeGetTrackingNumber(accessToken: string, shopId: string | number, orderSn: string, packageNumber?: string | null): Promise<string | null> {
+  return shopeeTrackingOf(await shopeeFetch("/api/v2/logistics/get_tracking_number", {
+    accessToken, shopId,
+    query: { order_sn: orderSn, ...(packageNumber ? { package_number: packageNumber } : {}), response_optional_fields: "last_mile_tracking_number" },
+  }));
 }
 
 // ───────── แก้สินค้าบนร้าน (เฟส 4 · ผู้เรียกต้องถามเจ้าของก่อน + ลงประวัติ) ─────────

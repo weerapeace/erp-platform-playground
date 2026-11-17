@@ -431,7 +431,7 @@ export function PackingStation({ packerName }: { packerName: string }) {
                   <Icon name="package" className="text-5xl text-slate-300" />
                   <p className="mt-2 text-xl font-semibold text-slate-700">ยิงใบปะหน้า หรือเลขออเดอร์ เพื่อเริ่ม</p>
                   <p className="mt-1 text-sm text-slate-500">กล้องจะเริ่มอัดทันที (ไม่เกิน {CLIP_MAX_SEC} วิ) · ยิงใบถัดไป = จบใบเดิมอัตโนมัติ</p>
-                  <p className="mt-1 text-xs text-slate-400">Shopee ตอนนี้ยิงเลขออเดอร์บนใบปะหน้า (เลขพัสดุยังไม่ได้ดึงเข้าระบบ)</p>
+                  <p className="mt-1 text-xs text-slate-400">ยิงได้ทั้งเลขพัสดุและเลขออเดอร์ · Shopee เลขพัสดุเข้าระบบหลังกดจัดส่งแล้ว (รอบดึงทุก 15 นาที)</p>
                 </div>
               </div>
             )}

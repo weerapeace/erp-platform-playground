@@ -24,7 +24,7 @@ import { syncTiktokOrders, TTS_ORDER_SOURCE } from "../../tiktok-shop/orders-syn
 import { syncTiktokProductsChanged } from "../../tiktok-shop/products-sync";
 import { shopeeConfigured } from "@/lib/shopee";
 import { shopeeTokenOrReason } from "../../shopee/shared";
-import { syncShopeeOrders, shopeeConnectedBrandIds, SHOPEE_ORDER_SOURCE } from "../../shopee/orders-sync";
+import { syncShopeeOrders, shopeeConnectedBrandIds, fillShopeeTracking, SHOPEE_ORDER_SOURCE } from "../../shopee/orders-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -80,7 +80,7 @@ async function handle(request: NextRequest): Promise<NextResponse> {
     }
   }
   // ── Shopee: ออเดอร์ที่เปลี่ยนสถานะใน 3 ชม.ล่าสุด (เวลาที่เหลือของรอบ · ≤ 30 วิ/แบรนด์) ──
-  const shopee: { brand_id: string; ok: boolean; created?: number; updated?: number; error?: string }[] = [];
+  const shopee: { brand_id: string; ok: boolean; created?: number; updated?: number; tracking_filled?: number; tracking_error?: string; error?: string }[] = [];
   if (spId) {
     const nowSec = Math.floor(Date.now() / 1000);
     // เวลาที่เหลือของรอบ (maxDuration 120 วิ · เผื่อ 10 วิให้ recordWorkerRun ทำงานเสมอ) — TikTok ใช้ได้ถึง ~85 วิ/แบรนด์ (session TikTok เตือน 2026-11-14)
@@ -92,7 +92,10 @@ async function handle(request: NextRequest): Promise<NextResponse> {
       const budget = Math.min(30_000, leftMs() - 10_000);
       if (budget < 5_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก — ย้อน 3 ชม.)" }); continue; }
       const r = await syncShopeeOrders(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, window: { field: "update_time", from: nowSec - SHOPEE_WINDOW_SEC, to: nowSec }, timeBudgetMs: budget });
-      shopee.push({ brand_id: brandId, ok: !r.stop_reason, created: r.created, updated: r.updated, ...(r.stop_reason ? { error: `Shopee: ${r.stop_reason}` } : {}) });
+      // เลขพัสดุ (สถานีแพ็คยิงใบปะหน้า) — เวลาที่เหลือ ≤ 20 วิ · พลาดไม่ทำให้รอบนี้ล้ม (รอบหน้าทำต่อ)
+      const tb = Math.min(20_000, leftMs() - 10_000);
+      const tr = tb > 3_000 ? await fillShopeeTracking(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, timeBudgetMs: tb }) : null;
+      shopee.push({ brand_id: brandId, ok: !r.stop_reason, created: r.created, updated: r.updated, tracking_filled: tr?.filled ?? 0, ...(tr?.error ? { tracking_error: tr.error } : {}), ...(r.stop_reason ? { error: `Shopee: ${r.stop_reason}` } : {}) });
       if (r.created > 0 || r.stop_reason) {
         const { sample: _s, ...counts } = r;
         await writeAudit(admin, {
@@ -110,7 +113,9 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const updated = results.reduce((a, x) => a + (x.updated ?? 0), 0);
   const spCreated = shopee.reduce((a, x) => a + (x.created ?? 0), 0);
   const spUpdated = shopee.reduce((a, x) => a + (x.updated ?? 0), 0);
-  const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated}${spFailed.length ? ` ⚠️ ${spFailed.map((f) => f.error).join(" · ").slice(0, 160)}` : ""}` : "";
+  const spTrack = shopee.reduce((a, x) => a + (x.tracking_filled ?? 0), 0);
+  const spTrackErr = shopee.find((x) => x.tracking_error)?.tracking_error;
+  const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated} เลขพัสดุ +${spTrack}${spTrackErr ? ` (เลขพัสดุ: ${spTrackErr.slice(0, 80)})` : ""}${spFailed.length ? ` ⚠️ ${spFailed.map((f) => f.error).join(" · ").slice(0, 160)}` : ""}` : "";
   await recordWorkerRun(admin, "tiktok-orders", {
     ok: failed.length === 0, warn: spFailed.length > 0,
     summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote,

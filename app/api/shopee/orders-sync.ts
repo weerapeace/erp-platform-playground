@@ -8,7 +8,7 @@
 // ไม่เก็บที่อยู่/เบอร์ผู้รับ (PII ปิด) · ⚠️ อ่านอย่างเดียว ไม่แก้อะไรบนร้าน
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { shopeeToInternal } from "@/lib/platform-order-status";
-import { shopeeErrorText, shopeeGetOrderDetail, shopeeGetOrderList, shopeeIsRateLimit, shopeeOrderToPlatformOrder, type ShopeeOrderMapped } from "@/lib/shopee";
+import { shopeeErrorText, shopeeGetOrderDetail, shopeeGetOrderList, shopeeGetTrackingNumber, shopeeIsRateLimit, shopeeOrderToPlatformOrder, SHOPEE_TRACKING_STATUSES, type ShopeeOrderMapped } from "@/lib/shopee";
 
 export const SHOPEE_ORDER_SOURCE = "shopee_api";
 const PAGE = 100;
@@ -124,4 +124,46 @@ export async function syncShopeeOrders(admin: SupabaseClient, args: {
 export async function shopeeConnectedBrandIds(admin: SupabaseClient, platformId: string): Promise<string[]> {
   const { data } = await admin.from("platform_credentials").select("brand_id, meta").eq("platform_id", platformId);
   return ((data ?? []) as { brand_id: string; meta: { stage?: string } | null }[]).filter((r) => r.meta?.stage === "connected").map((r) => r.brand_id);
+}
+
+export type ShopeeTrackingFillResult = { checked: number; filled: number; error: string | null };
+
+/**
+ * เติมเลขพัสดุให้ออเดอร์ Shopee ที่ยังไม่มี (สถานีแพ็คยิงบาร์โค้ดใบปะหน้า) — เจ้าของสั่ง 2026-11-17
+ * เลือกออเดอร์ 14 วันล่าสุดที่ tracking_no ว่าง และสถานะร้าน "น่าจะมีเลขแล้ว" (จัดส่งแล้วก่อน) · ทีละ ≤ limit ใบ/รอบ
+ * เขียนเฉพาะช่องที่ยังว่าง (ไม่ทับเลขที่มีอยู่) · ⚠️ อ่านจาก Shopee อย่างเดียว ไม่แก้อะไรบนร้าน
+ * โดนจำกัดความถี่ / ไม่มีสิทธิ์ = หยุดรอบนี้ คืนเหตุผล (รอบหน้าทำต่อ) · ไม่ทำให้การดึงออเดอร์ล้ม
+ */
+export async function fillShopeeTracking(admin: SupabaseClient, args: {
+  platformId: string; brandId: string; accessToken: string; shopId: string; timeBudgetMs: number; limit?: number;
+}): Promise<ShopeeTrackingFillResult> {
+  const started = Date.now();
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const { data, error } = await admin.from("platform_orders")
+    .select("id, external_order_id, package_no, platform_status, ship_by_at")
+    .eq("platform_id", args.platformId).eq("brand_id", args.brandId).eq("source", SHOPEE_ORDER_SOURCE)
+    .is("tracking_no", null).in("platform_status", [...SHOPEE_TRACKING_STATUSES]).gte("ordered_at", since)
+    .order("ship_by_at", { ascending: true, nullsFirst: false }).limit(200);
+  if (error) return { checked: 0, filled: 0, error: `อ่านออเดอร์ที่ไม่มีเลขพัสดุไม่สำเร็จ: ${error.message}` };
+  const rank = (s: string | null) => { const i = SHOPEE_TRACKING_STATUSES.indexOf((s ?? "") as (typeof SHOPEE_TRACKING_STATUSES)[number]); return i < 0 ? 99 : i; };
+  const todo = ((data ?? []) as { id: string; external_order_id: string; package_no: string | null; platform_status: string | null }[])
+    .sort((a, b) => rank(a.platform_status) - rank(b.platform_status)).slice(0, args.limit ?? 40);
+  let checked = 0, filled = 0, errors = 0, stop: string | null = null;
+  for (let i = 0; i < todo.length && !stop; i += 4) {
+    if (Date.now() - started > args.timeBudgetMs) break;
+    await Promise.all(todo.slice(i, i + 4).map(async (o) => {
+      try {
+        const tn = await shopeeGetTrackingNumber(args.accessToken, args.shopId, o.external_order_id, o.package_no);
+        checked++;
+        if (!tn) return;
+        const { error: upErr } = await admin.from("platform_orders").update({ tracking_no: tn }).eq("id", o.id).is("tracking_no", null);
+        if (!upErr) filled++;
+      } catch (e) {
+        checked++; errors++;
+        // ถูกจำกัดความถี่ / ไม่มีสิทธิ์ / ผิดซ้ำหลายใบ (เช่นยังไม่ได้เปิดสิทธิ์ logistics) = หยุดรอบนี้
+        if (shopeeIsRateLimit(e) || /permission|auth/i.test(String((e as { code?: string })?.code ?? "")) || errors >= 8) stop = shopeeErrorText(e);
+      }
+    }));
+  }
+  return { checked, filled, error: stop };
 }
