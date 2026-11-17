@@ -55,3 +55,15 @@ export function splitGroups(assign: readonly string[], kids: readonly SplitSku[]
   }
   return groups.map((g, i) => ({ ...g, name: bumpProductName(baseName, i) }));
 }
+
+/**
+ * ลากโฟลเดอร์ที่มีโฟลเดอร์ย่อย → แยกอัลบั้มตามโฟลเดอร์ (ข้อเสนอ 1 · 2026-11-17)
+ * คืน { folders: ชื่อโฟลเดอร์สุดท้ายของแต่ละกลุ่ม (ตามลำดับที่เจอ), index: รูปที่ i อยู่กลุ่มไหน } · โฟลเดอร์เดียว/ไม่มีโฟลเดอร์ = null
+ */
+export function folderGroups(paths: readonly string[]): { folders: string[]; index: number[] } | null {
+  const dirs = paths.map((p) => { const i = p.lastIndexOf("/"); return i > 0 ? p.slice(0, i) : ""; });
+  const order: string[] = [];
+  for (const d of dirs) if (!order.includes(d)) order.push(d);
+  if (order.length < 2) return null;
+  return { folders: order.map((d) => d.split("/").pop() || "—"), index: dirs.map((d) => order.indexOf(d)) };
+}

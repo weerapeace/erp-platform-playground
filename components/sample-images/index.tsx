@@ -25,7 +25,8 @@ import { ConfirmDialog } from "@/components/modal";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { filePathOf, useFileDrop } from "@/components/file-drop";
 import { useMarqueeSelect } from "@/lib/use-marquee-select";
-import { DropAlbumDialog, commonFolderName, type DropMode, type DropPlan } from "./drop-album-dialog";
+import { DropAlbumDialog, commonFolderName, type DropMode, type DropPlan, type DropSplit } from "./drop-album-dialog";
+import { folderGroups } from "@/lib/sample-sku-split";
 import { LinkProductDialog } from "./link-product-dialog";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { BulkActionBar } from "@/components/bulk-action-bar";
@@ -123,7 +124,8 @@ export function SampleImagesPage() {
   const [dropFiles, setDropFiles] = useState<File[] | null>(null);
   const [dropPref, setDropPref] = useUserPref<DropMode>("sample_images_drop_mode", "new", (r) => (r === "new" || r === "here" ? r : null));
   const [dropMode, setDropMode] = useState<DropMode>("new");
-  const [lastParent, setLastParent] = useUserPref<string>("sample_images_last_parent", "", strPref);   // Parent ล่าสุดที่เลือกในป๊อปลงรูป
+  const [lastParent, setLastParent] = useUserPref<string>("sample_images_last_parent", "", strPref);
+  const [dropSplit, setDropSplit] = useUserPref<DropSplit>("sample_images_drop_split", "one", (r) => (r === "one" || r === "sku" || r === "album" ? r : null));   // แบบแบ่งรูปล่าสุด   // Parent ล่าสุดที่เลือกในป๊อปลงรูป
   // เชื่อมสินค้า (2026-11-17): ป๊อปเชื่อม + รูปที่มีอยู่แล้วของสินค้าที่อัลบั้มเชื่อม (ไว้เทียบ)
   const [linking, setLinking] = useState(false);
   const [linkedImgs, setLinkedImgs] = useState<{ key: string; label: string }[]>([]);   // แผงเลือกอัลบั้มปลายทาง
@@ -235,7 +237,9 @@ export function SampleImagesPage() {
   const dropName = useMemo(() => {
     if (!dropFiles) return "";
     const openNow = albums?.find((a) => a.id === albumId);
-    return commonFolderName(splitSampleFiles(dropFiles).ok.map(filePathOf)) ?? nextProductName(albums ?? [], openNow?.brand_id ?? null);
+    const paths = splitSampleFiles(dropFiles).ok.map(filePathOf);
+    // มีโฟลเดอร์ย่อย = แยกหลายอัลบั้มตามโฟลเดอร์ → ชื่อ Product ### นับต่อ (ไม่ใช้ชื่อโฟลเดอร์บนสุด)
+    return (folderGroups(paths) ? null : commonFolderName(paths)) ?? nextProductName(albums ?? [], openNow?.brand_id ?? null);
   }, [dropFiles, albums, albumId]);
   // แผนจากป๊อป: ใส่อัลบั้มนี้ / สร้าง 1 อัลบั้มขึ้นไป (แยกตาม SKU) แต่ละอัลบั้มเชื่อม Parent + SKU (เจ้าของเลือก 2026-11-17)
   const confirmDrop = async (plan: DropPlan) => {
@@ -243,6 +247,7 @@ export function SampleImagesPage() {
     setDropFiles(null);
     if (!files) return;
     setDropPref(plan.mode === "here" ? "here" : "new");
+    if (plan.mode === "new") setDropSplit(plan.split);
     if (plan.mode === "here" || !parent) { void upload(files); return; }
     for (const g of plan.groups) {
       if (!g.files.length) continue;
@@ -718,7 +723,7 @@ export function SampleImagesPage() {
       )}
 
       <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
-        defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null}
+        defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null} defaultSplit={dropSplit}
         onCancel={() => setDropFiles(null)} onConfirm={(plan) => void confirmDrop(plan)} />
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}
