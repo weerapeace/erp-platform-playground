@@ -45,6 +45,7 @@ import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { cleanNestUsage, setNestEntry, type NestEntry, type NestUsage } from "@/lib/nest-usage";
 import { NestUsageChip } from "./nest-usage-chip";
+import { GroupFabricLayout } from "./group-fabric-layout";
 import { CostSummaryCard } from "./cost-summary-card";
 import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OrderQtyBar, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
 import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, packSuggestions, pickBag, type CostPreset, type OverheadCfg, type PackRef, type PresetKind } from "@/lib/design-cost-presets";
@@ -1288,6 +1289,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   };
   const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
   const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
+  const [fabricCalcInit, setFabricCalcInit] = useState<{ mat: string; qty: number } | null>(null);   // เปิดจากผังวางบนผ้าที่หัวกลุ่ม → เลือกวัสดุ/จำนวนไว้ให้
   const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
   const [toQuote, setToQuote] = useState(false);       // ส่งไปใบเสนอราคา (ระบบขาย)
   const [quoteBatch, setQuoteBatch] = useState<PresetQuoteLine[] | null>(null);   // ส่งเป็นชุดจากตารางตีราคาจากร้าน
@@ -2818,6 +2820,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <NestUsageChip entry={nestMap[costParent]?.[nestId]} estimate={Math.round(est!.qty * 1000) / 1000} unit={est!.unit} editable={canEdit}
                       userName={user?.name ?? user?.email ?? null} onChange={(e) => setNestUsage(nestId, e)} />
                   ) : null;
+                  // 🧵 วางบนผ้า (จำลองวางชิ้นจริง · lib/group-fabric-layout) — วัสดุตัวเดียวที่มีกว้าง×ยาว · ต่อใบ + รวมตามจำนวนสั่งของแท็บ
+                  const nestItem = nestId ? priceItemById.get(nestId) : undefined;
+                  const layoutChip = nestId && est ? (
+                    <GroupFabricLayout name={nestItem?.name ?? rows[0]?.item_name ?? ""} unit={est.unit} orderQty={orderQty} estimate={Math.round(est.qty * 1000) / 1000}
+                      sheet={rows.some((r) => rowIsPiece(r)) && nestItem ? { width_cm: nestItem.width_cm ?? null, length_cm: nestItem.length_cm ?? null } : null}
+                      lines={rows.map((r) => ({ key: r.key, width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces, face_width_cm: r.face_width_cm, waste_percent: r.waste_percent, divisor: r.divisor }))}
+                      onApply={canEdit ? (perUnit) => setNestUsage(nestId, { qty: perUnit, unit: est.unit, note: t(`จากผังวางบนผ้า (${orderQty ?? 100} ใบ)`, `From fabric layout (${orderQty ?? 100} units)`), ...(user?.name ?? user?.email ? { by: (user?.name ?? user?.email)! } : {}), at: new Date().toISOString() }) : undefined}
+                      onOpenFull={(q) => { setFabricCalcInit({ mat: (rows[0]?.item_name ?? nestItem?.name ?? "").trim(), qty: q }); setFabricCalc(true); }} />
+                  ) : null;
                   if (!parts.length && !missing) return nestChip;
                   const sheetHow = u.sheets
                     ? (() => {
@@ -2831,6 +2842,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <span className="text-emerald-700" title={sheetHow}>
                       {parts.length > 0 && <>{t("· ใช้ต่อใบ ≈", "· Per sheet ≈")} <span className="font-semibold tabular-nums">{parts.join(" + ")}</span></>}
                       {u.sheets?.perSheet ? <span className="text-slate-500">{t(` · 1 ${u.sheets.unit} ทำได้ ~${u.sheets.perSheet} ใบ`, ` · 1 ${u.sheets.unit} makes ~${u.sheets.perSheet} sheets`)}</span> : null}
+                      {layoutChip && <span className="ml-1.5 inline-flex align-middle">{layoutChip}</span>}
                       {nestChip && <span className="ml-1.5 inline-flex align-middle">{nestChip}</span>}
                       {missing > 0 && <span className="text-amber-600">{t(` · ${missing} บรรทัดคิดเป็นผืนไม่ได้ (วัสดุไม่มีขนาดผืนในทะเบียนวัสดุตีราคา)`, ` · ${missing} lines can't be converted to sheets (material has no sheet size in the costing materials register)`)}</span>}
                     </span>
@@ -3216,7 +3228,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* 🧵 คำนวณจำนวนผ้า — จำลองวางชิ้นบนหน้าผ้า (ดูได้ทั้งโหมดดู/แก้ไข ไม่แก้ข้อมูล) */}
       {fabricCalc && (
-        <FabricCalcModal onClose={() => setFabricCalc(false)}
+        <FabricCalcModal onClose={() => { setFabricCalc(false); setFabricCalcInit(null); }} initialMaterial={fabricCalcInit?.mat} initialQty={fabricCalcInit?.qty}
           lines={curLines.map((r) => ({
             key: r.key, item_id: r.item_id, item_name: r.item_name,
             width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces,

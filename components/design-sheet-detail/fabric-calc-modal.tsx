@@ -29,7 +29,9 @@ export type CalcLine = {
 const n = (v: unknown) => Number(v) || 0;
 const fmt = (v: number, d = 2) => (Math.round(v * 10 ** d) / 10 ** d).toLocaleString("th-TH");
 
-export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose: () => void }) {
+export function FabricCalcModal({ lines, onClose, initialMaterial, initialQty }: { lines: CalcLine[]; onClose: () => void;
+  /** เปิดมาเลือกวัสดุนี้ไว้ (ชื่อวัสดุ) — จากปุ่มในป๊อปผังวางบนผ้าที่หัวกลุ่ม */ initialMaterial?: string | null;
+  /** จำนวนใบตั้งต้น */ initialQty?: number | null }) {
   const t = useT();
   // วัสดุที่เลือกได้ = บรรทัดที่มีกว้าง×ยาว (ตัดได้จริง) จัดกลุ่มตามชื่อวัสดุ
   const materials = useMemo(() => {
@@ -43,15 +45,15 @@ export function FabricCalcModal({ lines, onClose }: { lines: CalcLine[]; onClose
     return [...m.values()].sort((a, b) => b.lines.length - a.lines.length);
   }, [lines, t]);
 
-  const [matName, setMatName] = useState(materials[0]?.name ?? "");
+  const [matName, setMatName] = useState((initialMaterial && materials.some((m) => m.name === initialMaterial) ? initialMaterial : null) ?? materials[0]?.name ?? "");
   const cur = materials.find((x) => x.name === matName) ?? materials[0];
 
-  const [orderQty, setOrderQty] = useState(1);            // ผลิตกี่ใบ
+  const [orderQty, setOrderQty] = useState(Math.max(1, Math.round(initialQty || 1)));            // ผลิตกี่ใบ
   const [mode, setMode] = useState<"roll" | "sheet">("roll");
-  const [faceWidth, setFaceWidth] = useState<number>(() => n(materials[0]?.lines.find((l) => n(l.face_width_cm) > 0)?.face_width_cm) || 100);
+  const [faceWidth, setFaceWidth] = useState<number>(() => n((materials.find((m) => m.name === matName) ?? materials[0])?.lines.find((l) => n(l.face_width_cm) > 0)?.face_width_cm) || 100);
   const [sheetLength, setSheetLength] = useState(180);     // ผ้าผืน: ยาวต่อผืน
   const [rotate, setRotate] = useState(true);             // ผ้าไม่มีลายทิศทาง → หมุนชิ้นได้
-  const [waste, setWaste] = useState<number>(() => n(materials[0]?.lines[0]?.waste_percent) || 10);
+  const [waste, setWaste] = useState<number>(() => n((materials.find((m) => m.name === matName) ?? materials[0])?.lines[0]?.waste_percent) || 10);
   const [gap, setGap] = useState(0.5);                    // เว้นรอยตัด
   const [showLayout, setShowLayout] = useState(true);     // โชว์ภาพผังการวาง
 
