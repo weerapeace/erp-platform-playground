@@ -102,3 +102,9 @@
 - แท็บภาพรวม Parent → "รายการที่เชื่อมกับสินค้านี้" เห็นอัลบั้ม SAMPLE (lib/parent-links-registry key sample_albums)
 - รูป SAMPLE ไม่ปนแกลเลอรี/รูปปกสินค้า (เจ้าของเลือกแบบ A)
 - API: GET ?children_of=<parent id> · GET ?product=parent:<id>|sku:<id> · POST {action:"link"} · server lib/sample-product-links
+
+## ป๊อปลงรูป: เลือก SKU + แยกหลายอัลบั้มตาม SKU (2026-11-17 · ชื่อแบบ A + ข้อ 1-5)
+
+- ป๊อปวางรูป (`drop-album-dialog`) มีตัวเลือก Parent SKU กลาง · ตั้งต้น = Parent ที่อัลบั้มแม่เชื่อมไว้ ไม่งั้นตัวล่าสุด (pref `sample_images_last_parent`)
+- ไม่แยก = 1 อัลบั้ม เชื่อม Parent + SKU ที่ติ๊ก · แยกตาม SKU = กดรูปแล้วกดชิป / ลากรูปไปวางบนชิป → อัลบั้มละ SKU ชื่อ Product 005, 006… · ไม่ระบุ SKU = อัลบั้มทั้งรุ่น 1 อัลบั้ม
+- เดา SKU จากชื่อไฟล์/โฟลเดอร์ (ตัวจับคู่รหัสของจัดรูปหลายโฟลเดอร์ + ชื่อสี) · ตรรกะ `lib/sample-sku-split` (เทสต์)

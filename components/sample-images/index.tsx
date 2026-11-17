@@ -25,7 +25,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { filePathOf, useFileDrop } from "@/components/file-drop";
 import { useMarqueeSelect } from "@/lib/use-marquee-select";
-import { DropAlbumDialog, commonFolderName, type DropMode } from "./drop-album-dialog";
+import { DropAlbumDialog, commonFolderName, type DropMode, type DropPlan } from "./drop-album-dialog";
 import { LinkProductDialog } from "./link-product-dialog";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { BulkActionBar } from "@/components/bulk-action-bar";
@@ -36,6 +36,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
 import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, productLinkLabel, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
+import { linkAlbumProduct } from "./api";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, reorderAlbums, reorderPhotos, restoreSample, saveAlbumNote, setAlbumBrand, trashSample, uploadSample } from "./api";
 
 /** ลากสลับลำดับ: ตำแหน่งที่ชี้บนรูป/การ์ด — ขอบซ้าย 30% = วางก่อน · ขอบขวา 30% = วางหลัง · กลาง = รวม/ย้ายเข้า (แบบเดิม) */
@@ -122,6 +123,7 @@ export function SampleImagesPage() {
   const [dropFiles, setDropFiles] = useState<File[] | null>(null);
   const [dropPref, setDropPref] = useUserPref<DropMode>("sample_images_drop_mode", "new", (r) => (r === "new" || r === "here" ? r : null));
   const [dropMode, setDropMode] = useState<DropMode>("new");
+  const [lastParent, setLastParent] = useUserPref<string>("sample_images_last_parent", "", strPref);   // Parent ล่าสุดที่เลือกในป๊อปลงรูป
   // เชื่อมสินค้า (2026-11-17): ป๊อปเชื่อม + รูปที่มีอยู่แล้วของสินค้าที่อัลบั้มเชื่อม (ไว้เทียบ)
   const [linking, setLinking] = useState(false);
   const [linkedImgs, setLinkedImgs] = useState<{ key: string; label: string }[]>([]);   // แผงเลือกอัลบั้มปลายทาง
@@ -235,16 +237,21 @@ export function SampleImagesPage() {
     const openNow = albums?.find((a) => a.id === albumId);
     return commonFolderName(splitSampleFiles(dropFiles).ok.map(filePathOf)) ?? nextProductName(albums ?? [], openNow?.brand_id ?? null);
   }, [dropFiles, albums, albumId]);
-  const confirmDrop = async (name: string | null) => {
+  // แผนจากป๊อป: ใส่อัลบั้มนี้ / สร้าง 1 อัลบั้มขึ้นไป (แยกตาม SKU) แต่ละอัลบั้มเชื่อม Parent + SKU (เจ้าของเลือก 2026-11-17)
+  const confirmDrop = async (plan: DropPlan) => {
     const files = dropFiles; const parent = albums?.find((a) => a.id === albumId) ?? null;
     setDropFiles(null);
     if (!files) return;
-    setDropPref(name === null ? "here" : "new");
-    if (name === null || !parent) { void upload(files); return; }
-    try {
-      const made = await createSubAlbum(parent.id, name);
-      await upload(files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
-    } catch (e) { pushToast("error", (e as Error).message); }
+    setDropPref(plan.mode === "here" ? "here" : "new");
+    if (plan.mode === "here" || !parent) { void upload(files); return; }
+    for (const g of plan.groups) {
+      if (!g.files.length) continue;
+      try {
+        const made = await createSubAlbum(parent.id, g.name);
+        if (g.parentCode) { await linkAlbumProduct(made.id, [g.parentCode], g.skuCodes); setLastParent(g.parentCode); }
+        await upload(g.files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
+      } catch (e) { pushToast("error", t(`สร้าง "${g.name}" ไม่สำเร็จ — ${(e as Error).message}`, `Could not create "${g.name}" — ${(e as Error).message}`)); break; }
+    }
   };
   const drop = useFileDrop((files) => onDropFiles(files), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
 
@@ -711,7 +718,8 @@ export function SampleImagesPage() {
       )}
 
       <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
-        onCancel={() => setDropFiles(null)} onConfirm={(name) => void confirmDrop(name)} />
+        defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null}
+        onCancel={() => setDropFiles(null)} onConfirm={(plan) => void confirmDrop(plan)} />
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}
         initialBrand={albumBrand?.name ?? null}
