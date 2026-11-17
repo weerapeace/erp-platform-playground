@@ -4,7 +4,8 @@
  *   แท็บ 🎯 SKU การตลาด = การ์ดรูป: แยกแบรนด์ · กรองป้ายหลัก (นับว่าเพิ่มไปแล้วกี่รุ่น) · ป้ายเสริม · 🎨 สีที่เหลือ
  *   แท็บ ☰ รายการสินค้า = ตาราง: ค้นหา · แบรนด์ · หมวด ERP (ถ้าส่งหมวดมา)
  *   ติ๊กได้หลายรุ่น (จำข้ามแท็บ/หน้า) → กดยืนยันทีเดียว · รุ่นที่ "เพิ่มไปแล้ว" (takenIds) ติ๊กซ้ำไม่ได้
- * ใช้ที่: ➕ เพิ่มสินค้าเข้าเว็บ (website-add-products-modal) · 🛠 เพิ่มรุ่นเข้างาน (โหมดทำงาน หน้า SKU การตลาด)
+ * single = เลือกได้รุ่นเดียว (กดการ์ด = เลือกแทนตัวเดิม) · initialSelected = ติ๊กไว้ก่อน · below = ส่วนเสริมใต้ตาราง (เช่น ติ๊ก SKU ลูกของรุ่นที่เลือก)
+ * ใช้ที่: 🔗 เชื่อมอัลบั้ม SAMPLE กับสินค้า (single) · ➕ เพิ่มสินค้าเข้าเว็บ (website-add-products-modal) · 🛠 เพิ่มรุ่นเข้างาน (โหมดทำงาน หน้า SKU การตลาด)
  * ข้อมูล: ผู้เรียกส่ง load() มา (ตัวโหลดกลาง lib/marketing/sku-list-db เบื้องหลัง) · ป๊อปนี้ไม่บันทึกอะไรเอง → onConfirm(ids)
  * ของกลาง: ERPModal · Pager · useViewPref · r2ImageUrl · GalleryColumns (จำนวนการ์ดต่อแถว จำรายคน)
  */
@@ -47,7 +48,7 @@ const chip = (on: boolean) =>
 
 export function MarketingSkuPickerModal({
   open, onClose, title, description: descriptionProp,
-  load, takenIds, taken: takenProp, startBrandId = null, warn, footerExtra,
+  load, takenIds, taken: takenProp, startBrandId = null, warn, footerExtra, single = false, initialSelected, below,
   confirmText, busyText: busyTextProp, onConfirm, tabPrefKey, colsPrefKey, showFullPageLink = true,
 }: {
   open: boolean;
@@ -65,6 +66,12 @@ export function MarketingSkuPickerModal({
   warn?: { label: RegExp; note: string };
   /** ตัวเลือกเพิ่มในแถบล่าง (เช่น ซ่อนไว้ก่อน/ขึ้นเว็บทันที) */
   footerExtra?: ReactNode;
+  /** เลือกได้รุ่นเดียว */
+  single?: boolean;
+  /** รุ่นที่ติ๊กไว้ก่อนตอนเปิด (parent_sku_id) */
+  initialSelected?: string[];
+  /** ส่วนเสริมใต้ตาราง ตามรุ่นที่เลือกอยู่ */
+  below?: (selected: SkuPickerItem[]) => ReactNode;
   /** ข้อความปุ่มยืนยัน ตามจำนวนที่เลือก (0 = ยังไม่เลือก) */
   confirmText: (n: number) => string;
   busyText?: string;
@@ -91,7 +98,7 @@ export function MarketingSkuPickerModal({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   // ▦ การ์ดต่อแถว (dropdown · จำรายคน) — มือถือ 2 ใบเสมอ
-  const { cols, setCols, wheelRef: gridWheelRef } = useGalleryColumns(colsPrefKey, 6);
+  const { cols, setCols, wheelRef: gridWheelRef } = useGalleryColumns(colsPrefKey, 6, "0.75rem", { ctrlWheel: true });   // Ctrl + ลูกกลิ้ง = ย่อ/ขยาย
 
   const doLoad = useCallback(async () => {
     setErr(null);
@@ -105,7 +112,7 @@ export function MarketingSkuPickerModal({
   }, [load, startBrandId]);
   useEffect(() => {
     if (!open) return;
-    setSel(new Set());
+    setSel(new Set(initialSelected ?? []));
     setQ("");
     setLabel(ALL);
     setCategory(ALL);
@@ -159,8 +166,12 @@ export function MarketingSkuPickerModal({
   const itemById = useMemo(() => new Map((cat?.items ?? []).map((i) => [i.parent_sku_id, i])), [cat]);
   const selItems = [...sel].map((id) => itemById.get(id)).filter((x): x is SkuPickerItem => !!x);
   const warnItems = warn ? selItems.filter((i) => i.label_id && warn.label.test(labelMap.get(i.label_id)?.name ?? "")) : [];
+  // รุ่นที่ติ๊กไว้ก่อนมาถึงทีหลัง (หา id จากรหัสเสร็จหลังเปิด) → ติ๊กให้
+  const initKey = (initialSelected ?? []).join(",");
+  useEffect(() => { if (open && initKey) setSel(new Set(initKey.split(","))); }, [open, initKey]);
   const toggle = (id: string) => {
     if (onShop.has(id)) return;
+    if (single) { setSel((s) => (s.has(id) ? new Set() : new Set([id]))); return; }
     setSel((s) => {
       const n = new Set(s);
       if (n.has(id)) n.delete(id);
@@ -216,7 +227,7 @@ export function MarketingSkuPickerModal({
       title={title}
       description={description}
       size="xl"
-      hasUnsavedChanges={sel.size > 0}
+      hasUnsavedChanges={!single && sel.size > 0}
       footer={
         <div className="flex w-full flex-wrap items-center gap-2">
           <div className="flex-1 min-w-[12rem]">
@@ -351,7 +362,7 @@ export function MarketingSkuPickerModal({
               {taken.hide}
             </label>
             {tab === "mkt" && <GalleryColumnsControl as="select" cols={cols} onChange={setCols} />}
-            {pageSelectable.length > 0 && (
+            {!single && pageSelectable.length > 0 && (
               <button type="button" onClick={togglePage} className="text-xs text-blue-600 hover:underline">
                 {pageAllOn ? t("เอาติ๊กหน้านี้ออก", "Untick this page") : t(`ติ๊กทั้งหน้านี้ (${pageSelectable.length})`, `Tick this page (${pageSelectable.length})`)}
               </button>
@@ -409,7 +420,7 @@ export function MarketingSkuPickerModal({
           ) : (
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <div className={`grid ${listCols} items-center gap-2 border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500`}>
-                <input type="checkbox" checked={pageAllOn} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label={t("ติ๊กทั้งหน้า", "Tick whole page")} />
+                {single ? <span /> : <input type="checkbox" checked={pageAllOn} onChange={togglePage} className="w-4 h-4 accent-blue-600" aria-label={t("ติ๊กทั้งหน้า", "Tick whole page")} />}
                 <span />
                 <span>{t("รุ่น", "Model")}</span>
                 <span>{t("ป้ายการตลาด", "Marketing label")}</span>
@@ -448,6 +459,7 @@ export function MarketingSkuPickerModal({
             </div>
           )}
           {filtered.length > PAGE_SIZE && <Pager page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} unitLabel={t("รุ่น", "models")} />}
+          {below?.(selItems)}
         </div>
       )}
     </ERPModal>

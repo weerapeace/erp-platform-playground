@@ -1196,7 +1196,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "marketing-sku-picker", label: "ป๊อปเลือกรุ่นแบบการ์ดรูป", code: "MarketingSkuPickerModal", category: "pick",
     source: { path: "components/marketing-sku-picker-modal" },
-    what: "เลือกหลายรุ่นจากการ์ดรูป แยกแบรนด์ กรองป้าย (แบบหน้า SKU การตลาด)",
+    what: "เลือกรุ่นจากการ์ดรูป แยกแบรนด์ กรองป้าย (แบบหน้า SKU การตลาด) · หลายรุ่น หรือ single = รุ่นเดียว + below = ส่วนเสริมใต้ตาราง (เช่น ติ๊ก SKU ลูก · ใช้ที่เชื่อมอัลบั้ม SAMPLE)",
     notWhen: "เลือกรุ่นเดียวในช่องฟอร์ม ให้ใช้ ParentSkuPicker",
   },
 

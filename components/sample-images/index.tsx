@@ -143,7 +143,7 @@ export function SampleImagesPage() {
   const [dropKind, setDropKind] = useUserPref<"one" | "many">("sample_images_drop_kind", "one", (r) => (r === "one" || r === "many" ? r : null));   // โหมดลงรูป (ลงชุดเดียว / ลงหลายอัลบั้ม)
   const [, setDropSplit] = useUserPref<DropSplit>("sample_images_drop_split", "one", (r) => (r === "one" || r === "sku" || r === "album" ? r : null));   // แบบแบ่งรูปล่าสุด   // Parent ล่าสุดที่เลือกในป๊อปลงรูป
   // เชื่อมสินค้า (2026-11-17): ป๊อปเชื่อม + รูปที่มีอยู่แล้วของสินค้าที่อัลบั้มเชื่อม (ไว้เทียบ)
-  const [linking, setLinking] = useState(false);
+  const [linkTarget, setLinkTarget] = useState<SampleAlbum | null>(null);   // หน้าเชื่อมสินค้า (อัลบั้มที่เปิด / การ์ดไหนก็ได้)
   const [linkedImgs, setLinkedImgs] = useState<{ key: string; label: string }[]>([]);   // แผงเลือกอัลบั้มปลายทาง
   const [up, setUp] = useState<UploadProgressState | null>(null);
   const cancelRef = useRef(false);
@@ -740,9 +740,9 @@ export function SampleImagesPage() {
                   )}
                   {!trashView && (canEdit || productLinkLabel(album)) && (
                     productLinkLabel(album)
-                      ? <button type="button" onClick={() => canEdit && setLinking(true)} title={canEdit ? t("แก้การเชื่อมสินค้า", "Edit product link") : undefined}
+                      ? <button type="button" onClick={() => canEdit && setLinkTarget(album)} title={canEdit ? t("แก้การเชื่อมสินค้า", "Edit product link") : undefined}
                           className="inline-flex h-8 max-w-[16rem] items-center gap-1 truncate rounded-full bg-violet-100 px-3 text-[12px] font-medium text-violet-800 hover:bg-violet-200"><Icon value="i:link" />{productLinkLabel(album)}</button>
-                      : <button type="button" onClick={() => setLinking(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:link" />{t("เชื่อม SKU / Parent", "Link SKU / Parent")}</button>
+                      : <button type="button" onClick={() => setLinkTarget(album)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:link" />{t("เชื่อม SKU / Parent", "Link SKU / Parent")}</button>
                   )}
                   {canUpload && !trashView && (
                     <button type="button" onClick={() => void createSub([])} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:folders" />{t("อัลบั้มย่อย", "Sub-album")}</button>
@@ -847,7 +847,7 @@ export function SampleImagesPage() {
                             {parentGroupOf(c) || t("ยังไม่เชื่อมสินค้า", "No product linked")} <span className="font-normal text-slate-400">{shownChildren.filter((x) => parentGroupOf(x) === parentGroupOf(c)).length}</span>
                           </div>
                         )}
-                        <SampleAlbumCard sub album={c} order={ci + 1} bigOrder={orderMode}
+                        <SampleAlbumCard sub album={c} order={ci + 1} bigOrder={orderMode} onLink={canEdit ? () => setLinkTarget(c) : undefined}
                           onShift={orderMode ? (d) => { const nb = shownChildren[ci + d]; if (nb) void moveAlbumOrder(c.id, nb.id, d < 0 ? "before" : "after"); } : undefined}
                           selected={selAlbums.has(c.id)} onOpen={() => (orderMode ? undefined : selAlbums.size ? toggleAlbum(c.id) : void openAlbum(c.id))} highlight={overKey === `al:${c.id}`}
                           edge={overKey === `alo:${c.id}:before` ? "before" : overKey === `alo:${c.id}:after` ? "after" : null}
@@ -857,6 +857,7 @@ export function SampleImagesPage() {
                             { label: t(`ย้ายออก 1 ชั้น (ไป ${upTarget(c) ? nameOf(upTarget(c)) : "ชั้นบนสุด"})`, "Move up one level"), icon: "i:arrow-back-up",
                               onClick: () => moveAlbum(c.id, upTarget(c) ?? null) },
                             { label: t("ย้ายไป…", "Move to…"), icon: "i:transfer-out", onClick: () => { setSelAlbums(new Set([c.id])); setChooser("albums"); } },
+                            { label: (c.parent_sku_codes ?? []).length ? t("แก้การเชื่อมสินค้า", "Edit product link") : t("เชื่อมสินค้า", "Link product"), icon: "i:link", onClick: () => setLinkTarget(c) },
                             { label: isAutoAlbumName(c.name) ? t("ตั้งชื่อ", "Name it") : t("เปลี่ยนชื่อ", "Rename"), icon: "i:pencil", onClick: () => void renameById(c.id, isAutoAlbumName(c.name) ? "" : c.name, album.id) },
                           ] : undefined} />
                       </Fragment>))}
@@ -937,6 +938,11 @@ export function SampleImagesPage() {
                         <SampleAlbumCard key={it.album.id} sub album={it.album} order={i + 1 - bItems.filter((x) => x.kind === "loose").length}
                           dateTag={it.day ? albumCardLabel(it.day) : thaiShortDate(new Date(it.album.created_at))}
                           onOpen={() => void openAlbum(it.album.id)} highlight={overKey === `al:${it.album.id}`} dropLabel={cardDropLabel(it.album)}
+                          onLink={canEdit ? () => setLinkTarget(it.album) : undefined}
+                          menu={canEdit ? [
+                            { label: (it.album.parent_sku_codes ?? []).length ? t("แก้การเชื่อมสินค้า", "Edit product link") : t("เชื่อมสินค้า", "Link product"), icon: "i:link", onClick: () => setLinkTarget(it.album) },
+                            { label: isAutoAlbumName(it.album.name) ? t("ตั้งชื่อ", "Name it") : t("เปลี่ยนชื่อ", "Rename"), icon: "i:pencil", onClick: () => void renameById(it.album.id, isAutoAlbumName(it.album.name) ? "" : it.album.name, null) },
+                          ] : undefined}
                           extra={{ ...dragProps(() => ({ kind: "album", id: it.album.id })), ...withFileDrop(it.album.id, dropOnAlbumCard(it.album)) }} />
                       ))}
                     </div>
@@ -975,13 +981,14 @@ export function SampleImagesPage() {
         {trashView && canEdit && <button type="button" onClick={() => void doRestore()} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:arrow-back-up" />{t("เอากลับ", "Restore")}</button>}
       </BulkActionBar>
 
-      {album && (
-        <LinkProductDialog open={linking} albumId={album.id} albumName={nameOf(album)} parentCodes={album.parent_sku_codes ?? []} skuCodes={album.sku_codes ?? []}
-          onClose={() => setLinking(false)}
+      {linkTarget && (
+        <LinkProductDialog open albumId={linkTarget.id} albumName={nameOf(linkTarget)} brandId={linkTarget.brand_id} parentCodes={linkTarget.parent_sku_codes ?? []} skuCodes={linkTarget.sku_codes ?? []}
+          onClose={() => setLinkTarget(null)}
           onSaved={(r) => {
-            setAlbums((as) => as && as.map((a) => (a.id === album.id ? { ...a, ...r } : a)));
+            const id = linkTarget.id;
+            setAlbums((as) => as && as.map((a) => (a.id === id ? { ...a, ...r } : a)));
             pushToast("success", r.parent_sku_codes.length ? t(`เชื่อมกับ ${r.parent_sku_codes.join(", ")} แล้ว — รูปโชว์ที่หน้าสินค้าในส่วน "รูป SAMPLE"`, "Linked") : t("เลิกเชื่อมสินค้าแล้ว", "Unlinked"));
-            void reload(album.id);
+            void reload(albumId);
           }} />
       )}
 
