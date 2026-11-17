@@ -507,7 +507,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "file-drop", label: "ลากไฟล์มาวาง", code: "useFileDrop", category: "file",
     source: { path: "components/file-drop" },
-    what: "ให้กล่องไหนก็ได้รับไฟล์ที่ลากมาวาง · ชี้เมาส์ที่กล่องแล้ว Ctrl+V วางรูปจากคลิปบอร์ดได้ทุกกล่อง (paste:false = ปิด) · ลากทั้งโฟลเดอร์ (folders:true)",
+    what: "ให้กล่องไหนก็ได้รับไฟล์ที่ลากมาวาง · ชี้เมาส์ที่กล่องแล้ว Ctrl+V วางรูปจากคลิปบอร์ดได้ทุกกล่อง (paste:false = ปิด) · ลากทั้งโฟลเดอร์ได้ทุกกล่อง (folders:false = ปิด)",
     when: "ทุกจุดที่อัปโหลดได้",
     doc: "file-drop.md",
   },

@@ -13,7 +13,7 @@
  * - accept = ขึ้นต้นชนิดไฟล์ (เช่น "image/" หรือ ["image/", "video/"]) · ไม่มีไฟล์ที่รับได้เลย = เรียก onReject
  * - ช่องซ้อนกัน (เช่น ช่อง Hero อยู่ในแถวสีที่ลากวางได้) = ช่องในสุดรับไป ช่องนอกไม่รับซ้ำ (ดู defaultPrevented)
  * - disabled = ไม่รับ (เช่น กำลังอัปโหลดอยู่) — ไม่ไฮไลต์ · วางแล้วเรียก onBusy ถ้ามี (ไว้บอก "รอสักครู่")
- * - folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ทุกชั้น) · path "โฟลเดอร์/ชื่อไฟล์" อ่านด้วย filePathOf(file) — ใช้ที่ 📸 ลงรูปเว็บทีละมาก
+ * - folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ทุกชั้น · ค่าเริ่ม เปิดทุกกล่องตั้งแต่ 2026-11-17 · folders:false = ปิด) · path "โฟลเดอร์/ชื่อไฟล์" อ่านด้วย filePathOf(file)
  * - 📋 วางจากคลิปบอร์ด (2026-11-17): ชี้เมาส์ที่ช่อง (หรือคลิกในช่อง) แล้วกด Ctrl+V = ส่งรูป/ไฟล์ที่คัดลอกไว้ให้ช่องนั้น — ทุกช่องได้เอง
  *   ไฟล์จากคลิปบอร์ดตั้งชื่อใหม่ "วางรูป-YYYYMMDD-HHMMSS.png" (กันชื่อซ้ำ image.png) · ปิดได้ด้วย opts.paste = false
  *   หาช่องจาก data-file-drop-* (ไม่แตะ ref/onMouseEnter ของหน้า) + ตำแหน่งเมาส์ล่าสุด
@@ -154,7 +154,7 @@ export function useFileDrop(
       }
       const info = { shiftKey: e.shiftKey };
       // รายการต้องหยิบตอนนี้เลย (หลังจบ event เบราว์เซอร์ล้างทิ้ง) แล้วค่อยไล่อ่านโฟลเดอร์
-      const entries = opts.folders
+      const entries = opts.folders !== false   // ลากทั้งโฟลเดอร์ได้ทุกกล่อง (2026-11-17 · folders:false = ปิด)
         ? Array.from(e.dataTransfer.items ?? [])
             .map((it) => (it.kind === "file" ? (it.webkitGetAsEntry?.() as FsEntry | null) : null))
             .filter((x): x is FsEntry => !!x)
