@@ -101,7 +101,7 @@ export function FileInput({
 
   // ลากไฟล์มาวาง (ของกลาง) — กำลังอัป = ไม่รับ
   const drop = useFileDrop((files) => { void handleFiles(files); }, {
-    accept: ACCEPT_DROP, disabled: uploading || uploadDisabled || !!disabled,
+    accept: ACCEPT_DROP, disabled: uploading || uploadDisabled || !!disabled, paste: false,   // มีตัววางคลิปบอร์ดของตัวเอง (filePasteOwner) แล้ว
     onReject: () => setErr("รับเฉพาะรูป (JPG/PNG/WebP) หรือ PDF"),
     onBusy: () => setErr(uploading ? "กำลังอัปโหลดไฟล์ก่อนหน้า — รอสักครู่" : uploadDeniedMessage ?? "ช่องนี้ยังแนบไฟล์ไม่ได้"),
   });

@@ -23,16 +23,25 @@ import {
   type DocBorder, type DocPrintPrefs, type DocPrintStyle,
 } from "@/lib/doc-print-prefs";
 import type { ReportTemplateRow } from "@/app/api/admin/report-templates/route";
+import { readLastPrint, rememberLastPrint } from "@/lib/print-last-used";
 
-/** โหลด/เก็บค่าตั้งค่าการพิมพ์ของเอกสารชนิดหนึ่ง · saved = ค่าที่บันทึกไว้ล่าสุด (ใช้ปุ่ม "คืนค่าที่บันทึกไว้") */
+/** โหลด/เก็บค่าตั้งค่าการพิมพ์ของเอกสารชนิดหนึ่ง · saved = ค่าที่บันทึกไว้ล่าสุด (ใช้ปุ่ม "คืนค่าที่บันทึกไว้")
+ *  2026-11-17: จำ "ตัวเลือกที่ใช้ล่าสุด" ต่อคน ต่อชนิดเอกสาร (ในเครื่อง · lib/print-last-used) — เปิดใหม่ได้แบบที่ปรับไว้ครั้งก่อน
+ *  แอดมินเปลี่ยนค่ากลางเมื่อไหร่ ค่าล่าสุดของคนเดิมถูกทิ้ง (ใช้ค่ากลางใหม่) · ปุ่ม "คืนค่าที่บันทึกไว้" = กลับค่ากลาง */
 export function useDocPrintPrefs(entityType: string) {
   const [prefs, setPrefs] = useState<DocPrintPrefs | null>(null);
   const [saved, setSaved] = useState<DocPrintPrefs | null>(null);
+  // จำค่าล่าสุดทุกครั้งที่ปรับ (เท่าค่ากลาง = ลบที่จำ)
+  useEffect(() => { if (prefs && saved) rememberLastPrint(`doc:${entityType}`, saved, prefs); }, [prefs, saved, entityType]);
 
   const reload = useCallback(() => {
     apiFetch(`/api/ui-config?key=${encodeURIComponent(prefsKey(entityType))}`)
       .then((r) => r.json())
-      .then((j) => { const p = normalizePrefs(entityType, j?.value); setPrefs(p); setSaved(p); })
+      .then((j) => {
+        const p = normalizePrefs(entityType, j?.value);
+        const last = readLastPrint(`doc:${entityType}`, p);
+        setPrefs(last ? normalizePrefs(entityType, last) : p); setSaved(p);
+      })
       .catch(() => { const p = defaultPrefs(entityType); setPrefs(p); setSaved(p); });   // โหลดไม่ได้ = ใช้ค่าเริ่มต้น ไม่ให้หน้าพิมพ์พัง
   }, [entityType]);
 

@@ -20,6 +20,9 @@ import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
 import { FooterSaveProvider, FooterSaveButton, FooterSaveRegistrar, useFooterSaveHost } from "@/components/footer-save";
 import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
+import { escLayerCount } from "@/lib/esc-stack";
+import { isTypingTarget, navArrowDir } from "@/lib/record-nav-keys";
+import { buildDuplicateValues } from "@/lib/record-duplicate";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
@@ -566,6 +569,10 @@ export type MasterCRUDConfig = {
   headerActions?: () => React.ReactNode;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
+  /** ปุ่ม "⧉ ทำสำเนา" ในลิ้นชัก (ค่าเริ่ม เปิด เมื่อมีสิทธิ์สร้าง) · false = ปิด (เช่น โมดูลมีปุ่มคัดลอกของตัวเองแล้ว) */
+  duplicate?: boolean;
+  /** ช่องที่ไม่ต้องคัดลอกตอนทำสำเนา (นอกจากรหัส/ช่องห้ามซ้ำที่ระบบตัดให้อยู่แล้ว) */
+  duplicateExcludeKeys?: string[];
   /** entity_type สำหรับ audit log export */
   exportEntityType?: string;
   /** searchableKeys */
@@ -1471,7 +1478,22 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     setDrawerMode("edit");   // F24: กดเพิ่ม → เข้าฟอร์มกรอกเลย (ไม่ใช่ view)
     setModalOpen(true);
   };
-  useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
+  useNewParam(canCreate, openCreate);
+  /** ⧉ ทำสำเนา — เปิดฟอร์ม "เพิ่มใหม่" พร้อมค่าจากรายการที่ดูอยู่ (รหัส/ช่องห้ามซ้ำ เว้นว่าง) · ยังไม่บันทึกจนกดเอง */
+  const startDuplicate = () => {
+    if (!canCreate) return;
+    const { values, cleared } = buildDuplicateValues(form, effectiveFields, { uniqueKey: config.uniqueKey ?? "code", excludeKeys: config.duplicateExcludeKeys });
+    setEditingId(null); openIdRef.current = null;
+    setForm({ ...emptyForm, ...values, [activeField]: true });
+    setFormErr(null); setDirty(true);
+    setDrawerMode("edit");
+    const names = effectiveFields.filter((f) => cleared.includes(f.key)).map((f) => f.label);
+    flash(names.length
+      ? tr(`สำเนาแล้ว — เว้นว่างให้ใส่ใหม่: ${names.join(", ")} · ยังไม่บันทึกจนกด "บันทึก"`, `Copied — left blank: ${names.join(", ")} · not saved yet`)
+      : tr(`สำเนาแล้ว — ยังไม่บันทึกจนกด "บันทึก"`, "Copied — not saved yet"));
+  };
+  const hasOwnCopyAction = (config.extraRowActions ?? []).some((a) => /คัดลอก|สำเนา|duplicate|clone/i.test(String(a.label ?? "")));
+  const canDuplicate = canCreate && config.duplicate !== false && !hasOwnCopyAction;   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
   // F10a: open edit drawer — fetch full row จาก /[id] เพื่อได้ทุก field
   // (sync wrapper เพื่อให้ rowActions/onRowClick type ตรง — fetch ผ่าน .then ภายใน)
   const openEdit = (r: Row) => {
@@ -1730,6 +1752,29 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } finally { setM2mSaving(false); }
   };
   const inlineM2mLabel = effectiveFields.filter((fd) => inlineM2mDirtyKeys.includes(fd.key)).map((fd) => fd.label).join(", ");
+  // ⌨️ ลูกศร ← → ในโหมดดู = เปิดรายการก่อนหน้า/ถัดไปในลิสต์ที่แสดงอยู่ (เหมือนกดปุ่ม ◀ ▶ ล่างลิ้นชัก)
+  //   ไม่ทำงาน: กำลังพิมพ์ในช่อง · มีป๊อป/ดูรูปซ้อนอยู่ข้างบน (นับชั้นจากกอง Esc กลาง) · กดพร้อม Ctrl/Alt/Shift
+  const navKeyRef = useRef<(dir: 1 | -1) => void>(() => {});
+  navKeyRef.current = (dir) => {
+    const list = navRowsRef.current;
+    const idx = list.findIndex((r) => String(r.id) === String(editingId));
+    const nxt = idx >= 0 ? list[idx + dir] : undefined;
+    if (!nxt) return;
+    if (footerSave.anyDirty) setPendingNav(nxt); else openEdit(nxt);
+  };
+  const navKeysOn = modalOpen && drawerMode === "view" && !!editingId;
+  useEffect(() => {
+    if (!navKeysOn) return;
+    const base = escLayerCount();   // ชั้นของลิ้นชักนี้ (ลูกวาดก่อน → ลงทะเบียนแล้ว)
+    const onKey = (e: KeyboardEvent) => {
+      const dir = navArrowDir(e);
+      if (!dir || e.defaultPrevented || isTypingTarget(e.target) || escLayerCount() > base) return;
+      e.preventDefault();
+      navKeyRef.current(dir);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navKeysOn]);
   // Ctrl+S (⌘S) ในโหมดแก้ไข = กดปุ่ม "บันทึก" ล่างลิ้นชัก (ของกลาง useSaveShortcut · แป้นไทยใช้ได้) — โหมดดู ใช้ FooterSaveButton แทน
   useSaveShortcut(async () => { await footerSave.saveDirty(); await save(); }, { enabled: !saving && !footerSave.saving, active: modalOpen && drawerMode === "edit" });
 
@@ -3254,9 +3299,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <div className="mr-auto flex items-center gap-1">
                     {/* 📱 มือถือ: ปุ่มลูกศรสี่เหลี่ยม 44px กดง่าย (ไม่มีคำ) */}
                     <button onClick={() => go(-1)} disabled={idx <= 0} aria-label={tr("รายการก่อนหน้า", "Previous record")}
-                      className={`${isPhone ? "h-11 w-11 justify-center" : "h-9 px-3"} inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40`} title={tr("รายการก่อนหน้า", "Previous record")}>{isPhone ? "◀" : tr("◀ ก่อนหน้า", "◀ Previous")}</button>
+                      className={`${isPhone ? "h-11 w-11 justify-center" : "h-9 px-3"} inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40`} title={tr("รายการก่อนหน้า (ปุ่ม ←)", "Previous record (←)")}>{isPhone ? "◀" : tr("◀ ก่อนหน้า", "◀ Previous")}</button>
                     <button onClick={() => go(1)} disabled={idx < 0 || idx >= list.length - 1} aria-label={tr("รายการถัดไป", "Next record")}
-                      className={`${isPhone ? "h-11 w-11 justify-center" : "h-9 px-3"} inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40`} title={tr("รายการถัดไป", "Next record")}>{isPhone ? "▶" : tr("ถัดไป ▶", "Next ▶")}</button>
+                      className={`${isPhone ? "h-11 w-11 justify-center" : "h-9 px-3"} inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40`} title={tr("รายการถัดไป (ปุ่ม →)", "Next record (→)")}>{isPhone ? "▶" : tr("ถัดไป ▶", "Next ▶")}</button>
                     {idx >= 0 && <span className="text-xs text-slate-400 ml-1">{idx + 1}/{list.length}</span>}
                   </div>
                 );
@@ -3265,7 +3310,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               {editingId && isPhone && (() => {
                 const extras = (config.extraRowActions ?? []).filter((a) => !a.show || a.show({ ...form, id: editingId }));
                 const canDel = canEdit && !config.hideActiveStatus;
-                if (extras.length === 0 && !canDel) return null;
+                if (extras.length === 0 && !canDel && !canDuplicate) return null;
                 return (
                   <Popover align="left" panelClassName="w-56 p-1"
                     trigger={(toggle, open) => (
@@ -3280,6 +3325,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                             {a.icon ? `${a.icon} ` : ""}{a.label}
                           </button>
                         ))}
+                        {canDuplicate && (
+                          <button type="button" onClick={() => { close(); startDuplicate(); }}
+                            className="w-full text-left px-3 py-2.5 rounded-md text-slate-700 hover:bg-slate-50">{tr("⧉ ทำสำเนา", "⧉ Duplicate")}</button>
+                        )}
                         {canDel && (
                           <button type="button" onClick={() => { close(); openDelete({ ...form, id: editingId }); }}
                             className="w-full text-left px-3 py-2.5 rounded-md text-rose-600 hover:bg-rose-50">{tr("🗑 ลบ (กู้คืนได้)", "🗑 Delete (restorable)")}</button>
@@ -3297,6 +3346,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     {a.icon ? `${a.icon} ` : ""}{a.label}
                   </button>
                 ))}
+              {editingId && canDuplicate && !isPhone && (
+                <button onClick={startDuplicate} title={tr("สร้างรายการใหม่จากรายการนี้ (รหัสเว้นว่างให้ใส่ใหม่)", "Create a new record from this one (code left blank)")}
+                  className="h-9 px-3 text-sm border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1">{tr("⧉ ทำสำเนา", "⧉ Duplicate")}</button>
+              )}
               {editingId && canEdit && !config.hideActiveStatus && !isPhone && (
                 <button onClick={() => openDelete({ ...form, id: editingId })} title={tr("ลบ (เก็บในถังขยะ · กู้คืนได้)", "Delete (goes to trash · restorable)")}
                   className="h-9 px-3 text-sm border border-rose-300 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5">{tr("🗑 ลบ", "🗑 Delete")}</button>

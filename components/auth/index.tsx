@@ -417,6 +417,11 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
+/** แบบไม่บังคับ — อยู่นอก AuthProvider (หน้าสาธารณะ) ได้ null แทนการพัง · ของกลางที่ใช้ได้ทั้งในและนอกระบบใช้ตัวนี้ */
+export function useAuthOptional(): AuthState | null {
+  return useContext(AuthContext);
+}
+
 export function usePermission(perm: Permission): boolean {
   return useAuth().can(perm);
 }

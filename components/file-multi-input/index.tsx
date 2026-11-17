@@ -107,7 +107,7 @@ export function FileMultiInput({
 
   // ลากไฟล์มาวาง (ของกลาง) — กำลังอัป = ไม่รับ
   const drop = useFileDrop((files) => { void handleFiles(files); }, {
-    accept: ACCEPT_DROP, disabled: blocked,
+    accept: ACCEPT_DROP, disabled: blocked, paste: false,   // มีตัววางคลิปบอร์ดของตัวเอง (filePasteOwner) แล้ว
     onReject: () => setErr("รับเฉพาะรูป (JPG/PNG/WebP) หรือ PDF"),
     onBusy: () => setErr(uploading ? "กำลังอัปโหลดไฟล์ก่อนหน้า — รอสักครู่" : keys.length >= max ? `แนบได้สูงสุด ${max} ไฟล์` : uploadDeniedMessage ?? "ช่องนี้ยังแนบไฟล์ไม่ได้"),
   });

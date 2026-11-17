@@ -30,6 +30,10 @@
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useT } from "@/components/i18n";
 import { FloatingDropdown } from "@/components/floating-dropdown";
+import { useAuthOptional } from "@/components/auth";
+import { useToast } from "@/components/toast";
+import { exportTable } from "@/lib/export";
+import { buildMiniExport } from "@/lib/mini-table-export";
 
 export type MiniColumn<T> = {
   key: string;
@@ -45,6 +49,11 @@ export type MiniColumn<T> = {
   locked?: boolean;                     // ซ่อนไม่ได้
   defaultHidden?: boolean;              // ซ่อนไว้ก่อน (ผู้ใช้เปิดเองได้)
   isNew?: boolean;                      // ป้าย "ใหม่" ในเมนู
+  // ส่งออก Excel (ใช้เมื่อเปิด exportOpts) — ไม่ใส่ = ใช้ sortValue หรือข้อความในช่อง · ช่องที่เป็นปุ่ม/รูป ไม่ส่งออก
+  exportValue?: (row: T) => string | number | null | undefined;
+  noExport?: boolean;
+  /** สิทธิ์ที่ต้องมีถึงจะส่งออกคอลัมน์นี้ (เช่น ทุน "products.cost.view") — ไม่มีสิทธิ์ = ตัดคอลัมน์ทิ้งตอนส่งออก */
+  exportPermission?: string;
 };
 /** ช่องแถวสรุปของกลุ่ม: column key → ยอดรวมจากแถวในกลุ่ม (ดู prop groupCells) */
 export type MiniGroupCells<T> = Record<string, (rows: T[]) => ReactNode>;
@@ -160,6 +169,9 @@ export type MiniTableProps<T> = {
   /** เมนูที่หัวคอลัมน์ (ปุ่ม ⋮) — เรียง (คอลัมน์ที่เรียงได้) · พอดีเนื้อหา/คืนความกว้าง (เมื่อ resizable) · ย้ายซ้าย/ขวา + ซ่อน (เมื่อส่งตัวจัดการมา)
    *  ตารางไม่ได้ถือรายการคอลัมน์เอง → ย้าย/ซ่อน ให้หน้าเจ้าของเป็นคนเปลี่ยน columns (เช่น เก็บลงมุมมอง) */
   columnMenu?: { onMove?: (key: string, dir: -1 | 1) => void; onHide?: (key: string) => void; canHide?: (key: string) => boolean };
+  /** ปุ่ม "⬇ Excel" ในแถบเครื่องมือ (opt-in) — ส่งออกแถวที่เห็น (หรือที่ติ๊กไว้) · ตัดคอลัมน์ที่ไม่มีสิทธิ์ · บันทึกประวัติการส่งออก
+   *  filename = ชื่อไฟล์ (ไม่ต้องใส่ .xlsx) · entityType = ชื่อชนิดข้อมูลในประวัติ · permission = สิทธิ์ส่งออก (ไม่มี = ไม่โชว์ปุ่ม) */
+  exportOpts?: { filename: string; entityType: string; permission?: string; format?: "excel" | "csv" };
 };
 
 type Dir = "asc" | "desc";
@@ -174,7 +186,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, cardPick, extraSorts, maxHeightClass = "", className = "", footnote,
     resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent, lazyRows, columnMenu,
+    exportOpts,
   } = props;
+  const auth = useAuthOptional();
+  const can = (perm: string) => !!auth?.can(perm as Parameters<NonNullable<typeof auth>["can"]>[0]);
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
+  const canExport = !!exportOpts && (!exportOpts.permission || can(exportOpts.permission));
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
   const t = useT();
   const searchPlaceholder = searchPlaceholderProp ?? t("ค้นหา…", "Search…");
@@ -590,7 +608,23 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   ) : null;
 
   const total = rows.length, shown = sorted.length;
-  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy) && total > 0;
+  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy || canExport) && total > 0;
+  const doExport = async () => {
+    if (!exportOpts || exporting) return;
+    const picked = selectable && selected && selected.size > 0 ? sorted.filter((r) => selected.has(rowKey(r))) : sorted;
+    const built = buildMiniExport(columns, picked);
+    setExporting(true);
+    try {
+      const res = await exportTable({
+        format: exportOpts.format ?? "excel", filename: exportOpts.filename, rows: built.rows, columns: built.columns,
+        context: { entityType: exportOpts.entityType, mode: picked === sorted ? "visible" : "selected", totalRows: picked.length, filterDesc: q || undefined },
+        can,
+      });
+      toast.success(t(`ส่งออกแล้ว ${res.exported} รายการ`, `Exported ${res.exported} rows`) + (res.blocked.length ? t(` (ไม่มีสิทธิ์ ${res.blocked.length} คอลัมน์)`, ` (${res.blocked.length} columns hidden)`) : ""));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("ส่งออกไม่สำเร็จ", "Export failed"), { details: e });
+    } finally { setExporting(false); }
+  };
   const actionsInToolbar = !!inlineActions && toolbarOn;   // แถวเดียว: เรียง/จัดกลุ่ม … ปุ่มของผู้เรียกชิดขวา
   const onScroll = onScrollTop ? (e: React.UIEvent<HTMLDivElement>) => onScrollTop(e.currentTarget.scrollTop, e.currentTarget) : undefined;
 
@@ -632,6 +666,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
           {CollapseBtns}
           {resizable && Object.keys(widths).length > 0 && (
             <button onClick={resetWidths} title={t("คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น", "Reset column widths to default")} className="h-8 px-2 text-xs text-slate-400 hover:text-slate-600 underline">{t("รีเซ็ตความกว้าง", "Reset widths")}</button>
+          )}
+          {canExport && (
+            <button type="button" onClick={() => void doExport()} disabled={exporting}
+              title={selectable && selected && selected.size > 0 ? t(`ส่งออก ${selected.size} แถวที่ติ๊ก`, `Export ${selected.size} selected rows`) : t("ส่งออกแถวที่เห็นเป็น Excel", "Export visible rows to Excel")}
+              className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50">
+              {exporting ? t("กำลังส่งออก…", "Exporting…") : "⬇ Excel"}
+            </button>
           )}
           {actionsInToolbar && <div className="ml-auto">{actions}</div>}
         </div>

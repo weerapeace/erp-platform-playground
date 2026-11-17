@@ -6,6 +6,8 @@ import { useAuth } from "@/components/auth";
 import { ImageThumbnail } from "@/components/image-manager";
 import { FloatingDropdown, PICKER_PANEL, PICKER_PANEL_WIDE, PICKER_NAME_CLASS } from "@/components/floating-dropdown";
 import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" (ของกลาง)
+import { useScanInBox } from "@/components/scan-input/use-scan-in-box";   // ยิงบาร์โค้ดเข้าช่องค้น (แป้นไทยก็ถูก)
+import { exactScanMatch } from "@/lib/scan-burst";
 
 // ---- Icons ----
 
@@ -198,6 +200,7 @@ function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
     image_url: skuImageUrl(imageKey),
     sale_ok: typeof row.sale_ok === "boolean" ? row.sale_ok : null,
     parent_sku_id: row.parent_sku_id == null ? null : String(row.parent_sku_id),
+    barcode: row.barcode == null ? null : String(row.barcode),
     parent_code: row.parent_code == null ? null : String(row.parent_code),
     parent_name: row.parent_name == null ? null : String(row.parent_name),
   };
@@ -255,6 +258,12 @@ export function SkuPicker({
     setQuery("");
   }, [onChange, remember]);
 
+  // 🔫 ยิงบาร์โค้ดเข้าช่องค้น → ค้นด้วยรหัสที่ถูกต้อง (แป้นไทยก็ได้ตัวอังกฤษ) · ตรงเป๊ะตัวเดียว = เลือกให้เลย
+  const scan = useScanInBox((code) => {
+    setQuery(code);
+    void fetchPage(code, 0).then(({ rows }) => { const hit = exactScanMatch(rows, code); if (hit) select(hit); }).catch(() => {});
+  });
+
   // ยังไม่พิมพ์ค้นหา → โชว์ "เคยใช้ล่าสุด" ไว้บนสุด (ไม่ซ้ำกับรายการด้านล่าง)
   const recentShown = query.trim() ? [] : recent;
   const recentIds = new Set(recentShown.map((r) => r.id));
@@ -280,8 +289,8 @@ export function SkuPicker({
         <div className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
           <div className="p-2 border-b border-slate-100 relative">
             <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconSearch /></span>
-            <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
-              placeholder="ค้นหา SKU / ชื่อสินค้า..."
+            <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={scan.onKeyDown}
+              placeholder="ค้นหา SKU / ชื่อสินค้า / ยิงบาร์โค้ด..."
               className="w-full h-8 pl-7 pr-3 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
 

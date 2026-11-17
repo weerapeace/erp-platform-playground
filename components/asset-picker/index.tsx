@@ -14,6 +14,9 @@
  *    (components/sample-images/picker · โหลดแยกชิ้นตอนกดแท็บ) · เลือกข้ามอัลบั้ม/ข้ามแท็บได้ · ตอนกดใช้ → ดึงแถวคลังจริง (/api/assets?ids=)
  *    ซ่อนเมื่อ: ช่องวิดีโอ/เอกสารอย่างเดียว · ล็อกอัลบั้ม · ต้องมีโฟลเดอร์ Drive
  *
+ * ⏱ แท็บ "ใช้ล่าสุด" (2026-11-17) = รูปที่ฉันกด "ใช้" ล่าสุด 30 รูป (จำในเครื่อง · lib/recent-picks RECENT_KEYS.assets) · ไม่มีประวัติ = ไม่โชว์แท็บ
+ * 🔢 เลือกหลายรูป: ลำดับที่ส่งให้โมดูล = ลำดับที่คลิก · ช่องรูปโชว์เลข 1, 2, 3 …
+ *
  * ตัวอย่าง:
  *   <AssetPicker open={open} onClose={...} multiple typeFilter="image"
  *     contextLabel="ใบเสนอสินค้า OS-2026-0012"
@@ -36,6 +39,9 @@ import {
   PARENT_ATT_PREFIX, PARENT_IMAGE_GROUP_LABEL, isPendingParentImage, type ParentImageGroup, type ParentImageHit,
 } from "@/lib/parent-sku-images";
 import type { SamplePhoto } from "@/lib/sample-images";
+import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
+
+const RECENT_ASSET_LIMIT = 30;
 
 // 📸 แท็บ SAMPLE Images — โหลดโค้ดเฉพาะตอนกดแท็บ (19 ช่องรูปที่ใช้ตัวเลือกนี้ไม่ต้องแบกโค้ดส่วนนี้)
 const SamplePickerPanel = dynamic(() => import("@/components/sample-images/picker"), {
@@ -82,7 +88,9 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const firstKind = typeFilter ?? kinds?.[0] ?? "";
   const kindTabs = !typeFilter && (kinds?.length ?? 0) > 1 ? kinds! : null;
   const toast = useToast();
-  const [tab, setTab] = useState<"library" | "upload" | "sample">("library");
+  const [tab, setTab] = useState<"library" | "upload" | "sample" | "recent">("library");
+  const [recentAssets, setRecentAssets] = useState<AssetRow[]>([]);
+  useEffect(() => { if (open) setRecentAssets(loadRecent<AssetRow>(RECENT_KEYS.assets)); }, [open]);
   // 📸 SAMPLE Images: ช่องที่รับรูปได้เท่านั้น (ไม่ใช่ช่องวิดีโอ/เอกสารอย่างเดียว · ไม่ล็อกอัลบั้ม · ไม่บังคับโฟลเดอร์ Drive)
   const sampleOk = !lockCollectionName && !requireDriveFolder && (!typeFilter || typeFilter === "image") && (!kinds || kinds.includes("image"));
   const fromSample = useRef<Set<string>>(new Set());   // id ที่เลือกมาจากแท็บ SAMPLE (ตอนกดใช้ ดึงแถวคลังจริงมาแทน)
@@ -252,9 +260,14 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         return;
       } finally { setConfirming(false); }
     }
+    // ⏱ จำไว้ในแท็บ "ใช้ล่าสุด" (ตัวแรกที่เลือก = บนสุด)
+    for (const a of [...final].reverse()) pushRecent(RECENT_KEYS.assets, a, RECENT_ASSET_LIMIT);
     onSelect(final);
     onClose();
   };
+  // ใช้ล่าสุด — กรองให้ตรงชนิดที่ช่องนี้รับ
+  const recentShown = recentAssets.filter((a) => (typeFilter ? a.asset_type === typeFilter : kindTabs ? kindTabs.includes(a.asset_type as AssetType) : true));
+  const orderOf = (id: string) => (multiple ? Array.from(selected.keys()).indexOf(id) + 1 : 0);
   const unitType = tab === "sample" ? "image" : type;   // คำในปุ่ม/ตัวนับ: รูป · คลิป · ไฟล์
 
   if (!open) return null;
@@ -278,6 +291,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         {sampleOk && (
           <button onClick={() => setTab("sample")}
             className={`pb-2 text-sm inline-flex items-center gap-1 ${tab === "sample" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}><Icon value="i:camera" /> SAMPLE Images</button>
+        )}
+        {recentShown.length > 0 && !lockCollectionName && (
+          <button onClick={() => setTab("recent")}
+            className={`pb-2 text-sm ${tab === "recent" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⏱ ใช้ล่าสุด</button>
         )}
         {!lockCollectionName && (
           <button onClick={() => setTab("upload")}
@@ -351,7 +368,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
             <>
             {parentEnabled && parentHits.length > 0 && <p className="mb-1.5 text-[12px] text-slate-500">รูปในคลัง (ชื่อไฟล์ / แท็ก ตรงคำค้น) · {total}</p>}
             <div className="grid gap-2 max-h-[360px] overflow-auto pr-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
-              {rows.map((a) => <AssetTile key={a.id} a={a} on={selected.has(a.id)} onPick={pick} />)}
+              {rows.map((a) => <AssetTile key={a.id} a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />)}
               {rows.length < total && (
                 <div style={{ gridColumn: "1 / -1" }} className="flex justify-center py-2">
                   <button onClick={() => void loadMore()} disabled={loadingMore}
@@ -364,6 +381,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
             </>
           )}
         </>
+      ) : tab === "recent" ? (
+        <div className="grid gap-2 max-h-[420px] overflow-auto pr-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
+          {recentShown.map((a) => <AssetTile key={a.id} a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />)}
+        </div>
       ) : tab === "sample" ? (
         <SamplePickerPanel multiple={multiple} isSelected={(id) => selected.has(id)} onToggle={pickSample} onPickMany={pickSampleMany} />
       ) : (
@@ -387,11 +408,11 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
 }
 
 /** ช่องรูป 1 ใบในตารางเลือก (ใช้ทั้งรูปในคลัง + รูปจาก Parent SKU) · badge = ป้ายบอกว่าเป็นรูปของใคร เช่น PIX22-01 */
-function AssetTile({ a, on, onPick, badge }: { a: AssetRow; on: boolean; onPick: (a: AssetRow) => void; badge?: string }) {
+function AssetTile({ a, on, onPick, badge, order = 0 }: { a: AssetRow; on: boolean; onPick: (a: AssetRow) => void; badge?: string; order?: number }) {
   return (
     <button onClick={() => onPick(a)}
       className={`relative rounded-lg border overflow-hidden text-left ${on ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-slate-300"}`}>
-      {on && <span className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">✓</span>}
+      {on && <span className="absolute top-1 right-1 z-10 min-w-4 h-4 px-0.5 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center tabular-nums" title={order > 0 ? `ลำดับที่ ${order}` : undefined}>{order > 0 ? order : "✓"}</span>}
       {/* ชี้เมาส์ที่รูป = เด้งรูปใหญ่ลอยข้าง ๆ (ของกลาง HoverPreview) — คลิกยังเป็นการ "เลือกรูป" เหมือนเดิม
           📱 ทัช (มือถือ/แท็บเล็ต) ไม่เด้ง เพราะของกลางกันไว้ด้วย useCanHover */}
       {a.asset_type === "image" ? (

@@ -24,6 +24,7 @@ import { SecurityDevices } from "@/components/security-devices";
 import { ERPModal } from "@/components/modal";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { getTheme, setTheme } from "@/lib/theme";
+import { HOVER_DELAY_CHOICES, readHoverDelay, setHoverDelay } from "@/lib/hover-delay";
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, useCanPreviewDevice, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { DevicePreviewModal } from "@/components/device-preview";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
@@ -42,6 +43,25 @@ const MENU_W = 288;   // กว้างเท่ากันทุกที่ 
 const ROW = "flex w-full items-center gap-1.5 text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100";
 
 /** หัวหมวดในเมนู (แถบเทาบาง ๆ) */
+function HoverDelayRow() {
+  const t = useT();
+  const [ms, setMs] = useState(0);
+  useEffect(() => setMs(readHoverDelay()), []);
+  return (
+    <div className="px-3 py-1.5 flex items-center justify-between gap-2 border-t border-slate-100 max-md:hidden">
+      <span className="text-xs text-slate-700 flex items-center gap-1.5"><Icon value="🖼️" /> {t("ชี้รูป: หน่วงก่อนโชว์", "Image hover delay")}</span>
+      <div className="flex gap-0.5">
+        {HOVER_DELAY_CHOICES.map((v) => (
+          <button key={v} type="button" onClick={() => { setHoverDelay(v); setMs(v); }}
+            className={`h-6 px-1.5 rounded text-[10px] ${ms === v ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+            {v === 0 ? t("ทันที", "None") : `${(v / 1000).toFixed(1)}s`}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MenuSection({ label }: { label: string }) {
   return <div className="px-3 pt-2 pb-1 text-[10px] font-medium text-slate-400 bg-slate-50/70 border-t border-slate-100">{label}</div>;
 }
@@ -206,6 +226,8 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
         <span className="text-xs text-slate-700 flex items-center gap-1.5"><Icon value="🌐" /> ภาษา / Language</span>
         <LangToggle />
       </div>
+      {/* ชี้รูปแล้วเห็นรูปใหญ่ — หน่วงก่อนโชว์ (ของกลาง HoverImage · lib/hover-delay) · มือถือไม่มีชี้ ซ่อนไว้ */}
+      <HoverDelayRow />
       {/* คีย์ลัด — มีประโยชน์เฉพาะจอที่มีคีย์บอร์ด (ซ่อนบนมือถือ) */}
       <button type="button" onClick={() => { close(); setKeysOpen(true); }} className={`${ROW} max-md:hidden`}>
         <Icon value="⌨️" /> <span className="flex-1">{t("คีย์ลัด (Keyboard Shortcuts)", "Keyboard shortcuts")}</span>

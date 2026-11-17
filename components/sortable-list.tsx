@@ -28,8 +28,14 @@
 //   นิ้ว (มือถือ) = กดค้าง ~0.35 วิ แล้วค่อยลาก (ปัดเร็ว ๆ = เลื่อนหน้าเหมือนเดิม) · เมาส์ = กดแล้วลากได้เลย
 //   คลิกเฉย ๆ ยังทำงาน (เช่น เปิดรูปใหญ่) · ลากเสร็จ = กันคลิกที่ตามมา · ใส่ draggable={false} ที่ <img> กันเบราว์เซอร์ลากรูปเอง
 //   ใช้ร่วมกับ handleProps ได้ (หูจับยังใช้ได้ตามเดิม)
+//
+// 2026-11-17: แตะ/คลิกหูจับ ⠿ (ไม่ลาก) = เมนู ↑ ขึ้น · ↓ ลง · ⤒ บนสุด · ⤓ ล่างสุด — มือถือไม่ต้องลาก · ไม่ต้องแก้หน้าที่เรียก
+//   หูจับรู้ลำดับ/จำนวนจาก data-reorder-id + data-reorder-index ที่ handleProps/rowProps ใส่ให้ (นับแถวในหน้า) → เรียก onReorder(from, to) ตัวเดิม
+//   เฉพาะ <DragHandle> เท่านั้น (ตัวที่เอา handleProps ไปใส่รูป/ปุ่มเอง แตะ = ทำงานเดิม)
 
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import { useEscLayer } from "@/components/modal/esc-layer";
 
 /** ย้ายสมาชิกในอาเรย์ from → to (คืนอาเรย์ใหม่) */
 export function moveItem<T>(arr: T[], from: number, to: number): T[] {
@@ -44,6 +50,18 @@ const ROW_ATTR = "data-reorder-row";
 const GROUP_ATTR = "data-reorder-group";
 const DROP_ATTR = "data-reorder-drop";
 const DROP_OVER_ATTR = "data-drop-over";
+const ID_ATTR = "data-reorder-id";
+const INDEX_ATTR = "data-reorder-index";
+
+/** ลิสต์ที่เปิดอยู่ → ตัวย้าย (ให้ DragHandle เรียกตอนกดเมนู ขึ้น/ลง/บนสุด/ล่างสุด) */
+const reorderRegistry = new Map<string, (from: number, to: number) => void>();
+
+/** ปลายทางของคำสั่งเมนู (pure เทสต์ได้) · คืน null = ย้ายไม่ได้ (อยู่สุดแล้ว) */
+export function reorderTarget(action: "up" | "down" | "top" | "bottom", i: number, count: number): number | null {
+  const to = action === "up" ? i - 1 : action === "down" ? i + 1 : action === "top" ? 0 : count - 1;
+  if (to < 0 || to >= count || to === i) return null;
+  return to;
+}
 
 export function useDragReorder(onReorder: (from: number, to: number) => void, opts: { group?: string; onDropTarget?: (from: number, key: string) => void } = {}) {
   const group = opts.group;
@@ -54,10 +72,16 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
   onReorderRef.current = onReorder;
   const onDropTargetRef = useRef(opts.onDropTarget);
   onDropTargetRef.current = opts.onDropTarget;
+  const listId = useId();
+  useEffect(() => {
+    reorderRegistry.set(listId, (from, to) => onReorderRef.current(from, to));
+    return () => { reorderRegistry.delete(listId); };
+  }, [listId]);
 
   // props ของ "แถว" = พื้นที่วาง (drop target) — ใส่ data attribute ไว้ให้หาเจอตอนลาก
   const rowProps = (i: number) => ({
     [ROW_ATTR]: i,
+    [ID_ATTR]: listId,
     ...(group ? { [GROUP_ATTR]: group } : {}),
     "data-drag-over": overIdx === i && dragIdx !== i ? "true" : undefined,
   });
@@ -163,6 +187,8 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
       track(i, e.clientX, e.clientY, "move");
     },
     style: { touchAction: "none" } as const,
+    [ID_ATTR]: listId,
+    [INDEX_ATTR]: i,
   });
 
   // props ของ "ตัวแถวทั้งตัว" (เช่น การ์ดรูป) = กดค้างแล้วลาก — นิ้ว: ค้าง holdMs ก่อน · เมาส์: ลากได้เลย · คลิกเฉย ๆ ยังทำงาน
@@ -181,14 +207,67 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
   return { rowProps, handleProps, holdProps, rowCls, dragIdx, overIdx };
 }
 
-/** หูจับสำหรับลาก (วางไว้หัวแถว) — กระจาย props จาก handleProps(i) */
-export function DragHandle({ title, className = "", ...rest }: { title?: string; className?: string } & Record<string, unknown>) {
+/** หูจับสำหรับลาก (วางไว้หัวแถว) — กระจาย props จาก handleProps(i)
+ *  แตะ/คลิกเฉย ๆ (ไม่ลาก) = เมนู ขึ้น / ลง / บนสุด / ล่างสุด (มือถือใช้แทนการลาก) · menu={false} = ปิดเมนู */
+export function DragHandle({ title, className = "", menu = true, ...rest }: { title?: string; className?: string; menu?: boolean } & Record<string, unknown>) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const down = useRef<{ x: number; y: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; i: number; count: number } | null>(null);
+  const listId = rest[ID_ATTR] as string | undefined;
+  const index = rest[INDEX_ATTR] as number | undefined;
+  const userDown = rest.onPointerDown as ((e: ReactPointerEvent<HTMLElement>) => void) | undefined;
+  const canMenu = menu && !!listId && typeof index === "number";
+  useEscLayer(!!pos, () => setPos(null));
+  useEffect(() => {
+    if (!pos) return;
+    const close = (e: PointerEvent) => { if (!(e.target as HTMLElement | null)?.closest?.("[data-reorder-menu]")) setPos(null); };
+    const t = setTimeout(() => window.addEventListener("pointerdown", close, true), 0);
+    return () => { clearTimeout(t); window.removeEventListener("pointerdown", close, true); };
+  }, [pos]);
+  const openMenu = () => {
+    if (!canMenu || !ref.current) return;
+    const count = document.querySelectorAll(`[${ROW_ATTR}][${ID_ATTR}="${CSS.escape(listId!)}"]`).length;
+    if (count < 2) return;
+    const r = ref.current.getBoundingClientRect();
+    setPos({ left: Math.min(r.left, window.innerWidth - 168), top: r.bottom + 160 > window.innerHeight ? r.top - 156 : r.bottom + 4, i: index!, count });
+  };
+  const pick = (action: "up" | "down" | "top" | "bottom") => {
+    if (!pos) return;
+    const to = reorderTarget(action, pos.i, pos.count);
+    setPos(null);
+    if (to != null) reorderRegistry.get(listId!)?.(pos.i, to);
+  };
+  const items: { a: "up" | "down" | "top" | "bottom"; label: string }[] = [
+    { a: "top", label: "⤒ ไปบนสุด" }, { a: "up", label: "↑ ขึ้น 1 ช่อง" }, { a: "down", label: "↓ ลง 1 ช่อง" }, { a: "bottom", label: "⤓ ไปล่างสุด" },
+  ];
   return (
-    <span
-      {...rest}
-      title={title ?? "ลากเพื่อจัดลำดับ"}
-      className={`shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 select-none leading-none px-0.5 ${className}`}
-      aria-label={title ?? "ลากเพื่อจัดลำดับ"}
-    >⠿</span>
+    <>
+      <span
+        {...rest}
+        ref={ref}
+        onPointerDown={(e: ReactPointerEvent<HTMLElement>) => { down.current = { x: e.clientX, y: e.clientY }; userDown?.(e); }}
+        onPointerUp={(e: ReactPointerEvent<HTMLElement>) => {
+          const d = down.current; down.current = null;
+          if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) openMenu();   // แตะเฉย ๆ = เมนู
+        }}
+        title={title ?? (canMenu ? "ลากเพื่อจัดลำดับ · แตะ = เมนูขึ้น/ลง" : "ลากเพื่อจัดลำดับ")}
+        className={`shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 select-none leading-none px-0.5 ${className}`}
+        aria-label={title ?? "ลากเพื่อจัดลำดับ"}
+      >⠿</span>
+      {pos && typeof document !== "undefined" && createPortal(
+        <div data-reorder-menu style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 10050 }}
+          className="w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-xl" role="menu">
+          <div className="px-2 py-1 text-[11px] text-slate-400">ลำดับที่ {pos.i + 1} / {pos.count}</div>
+          {items.map((it) => {
+            const off = reorderTarget(it.a, pos.i, pos.count) == null;
+            return (
+              <button key={it.a} type="button" role="menuitem" disabled={off} onClick={() => pick(it.a)}
+                className="flex h-9 w-full items-center rounded-md px-2 text-left text-sm text-slate-700 hover:bg-violet-50 disabled:opacity-30 disabled:hover:bg-transparent">{it.label}</button>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

@@ -14,9 +14,21 @@
  * - ช่องซ้อนกัน (เช่น ช่อง Hero อยู่ในแถวสีที่ลากวางได้) = ช่องในสุดรับไป ช่องนอกไม่รับซ้ำ (ดู defaultPrevented)
  * - disabled = ไม่รับ (เช่น กำลังอัปโหลดอยู่) — ไม่ไฮไลต์ · วางแล้วเรียก onBusy ถ้ามี (ไว้บอก "รอสักครู่")
  * - folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ทุกชั้น) · path "โฟลเดอร์/ชื่อไฟล์" อ่านด้วย filePathOf(file) — ใช้ที่ 📸 ลงรูปเว็บทีละมาก
+ * - 📋 วางจากคลิปบอร์ด (2026-11-17): ชี้เมาส์ที่ช่อง (หรือคลิกในช่อง) แล้วกด Ctrl+V = ส่งรูป/ไฟล์ที่คัดลอกไว้ให้ช่องนั้น — ทุกช่องได้เอง
+ *   ไฟล์จากคลิปบอร์ดตั้งชื่อใหม่ "วางรูป-YYYYMMDD-HHMMSS.png" (กันชื่อซ้ำ image.png) · ปิดได้ด้วย opts.paste = false
+ *   หาช่องจาก data-file-drop-* (ไม่แตะ ref/onMouseEnter ของหน้า) + ตำแหน่งเมาส์ล่าสุด
  * ไม่ทำ: อัปโหลดเอง (ส่งไฟล์ให้ callback ของหน้า — หน้าใช้ uploadResizedImage/ช่องทางเดิมของมัน)
  */
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useId, useRef, useState, type DragEvent } from "react";
+import { pastedFileName } from "@/lib/paste-files";
+
+// ตำแหน่งเมาส์ล่าสุด (ทั้งหน้า ตัวเดียว) — ใช้หาว่า Ctrl+V ตอนชี้ช่องไหน
+const mouse = { x: -1, y: -1, on: false };
+function trackMouse() {
+  if (mouse.on || typeof window === "undefined") return;
+  mouse.on = true;
+  window.addEventListener("mousemove", (e) => { mouse.x = e.clientX; mouse.y = e.clientY; }, { passive: true });
+}
 import { typeFromName } from "@/lib/media-upload-limits";
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
@@ -58,8 +70,40 @@ export function useFileDrop(
   /** info.shiftKey = กด Shift ค้างตอนวาง (หน้าใช้สลับโหมดครั้งเดียวได้) */
   onFiles: (files: File[], key: string, info?: { shiftKey: boolean }) => void,
   /** folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ข้างในทุกชั้น · path อ่านด้วย filePathOf) */
-  opts: { accept?: string | string[]; disabled?: boolean; onReject?: () => void; onBusy?: () => void; folders?: boolean } = {}
+  opts: { accept?: string | string[]; disabled?: boolean; onReject?: () => void; onBusy?: () => void; folders?: boolean; paste?: boolean } = {}
 ) {
+  const hookId = useId();
+  const onFilesRef = useRef(onFiles);
+  onFilesRef.current = onFiles;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+  const pasteOn = opts.paste !== false;
+  useEffect(() => {
+    if (!pasteOn) return;
+    trackMouse();
+    const mine = (el: Element | null) => {
+      const z = el?.closest?.("[data-file-drop-id]") as HTMLElement | null;
+      return z && z.getAttribute("data-file-drop-id") === hookId ? z.getAttribute("data-file-drop-key") : null;
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented) return;
+      const raw = Array.from(e.clipboardData?.files ?? []);
+      if (!raw.length) return;   // วางข้อความ = ไม่ยุ่ง
+      // ช่องที่มีเคอร์เซอร์อยู่ข้างใน ก่อน · ไม่งั้นช่องที่เมาส์ชี้อยู่
+      const key = mine(document.activeElement) ?? (mouse.x >= 0 ? mine(document.elementFromPoint(mouse.x, mouse.y)) : null);
+      if (key == null) return;
+      e.preventDefault();
+      const o = optsRef.current;
+      if (o.disabled) { o.onBusy?.(); return; }
+      const now = new Date();
+      const files = raw.map((f, i) => new File([f], pastedFileName(f, now, i), { type: f.type, lastModified: now.getTime() })).filter(accepts);
+      if (files.length) onFilesRef.current(files, key, { shiftKey: false });
+      else o.onReject?.();
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pasteOn, hookId]);
   const [over, setOver] = useState<string | null>(null);
   const overRef = useRef<string | null>(null);
   const setOverKey = (k: string | null) => {
@@ -76,6 +120,8 @@ export function useFileDrop(
   };
 
   const zone = (key: string) => ({
+    "data-file-drop-id": hookId,
+    "data-file-drop-key": key,
     onDragOver: (e: DragEvent<HTMLElement>) => {
       if (!hasFiles(e)) return;
       // ช่องข้างใน (อีกตัวรับลากวาง) รับไปแล้ว = ช่องนี้ไม่ไฮไลต์/ไม่รับซ้ำ

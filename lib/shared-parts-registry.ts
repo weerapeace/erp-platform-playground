@@ -118,7 +118,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "master-crud", label: "หน้าจัดการข้อมูลหลัก", code: "MasterCRUD", category: "table",
     source: { path: "components/master-crud" },
-    what: "สร้างหน้า ตาราง + ลิ้นชักดู/แก้ ครบชุดจากการตั้งค่า (ฟิลด์ สิทธิ์ ประวัติ ไฟล์แนบ) ไม่ต้องเขียนหน้าเอง",
+    what: "สร้างหน้า ตาราง + ลิ้นชักดู/แก้ ครบชุดจากการตั้งค่า (ฟิลด์ สิทธิ์ ประวัติ ไฟล์แนบ) ไม่ต้องเขียนหน้าเอง · ลิ้นชัก: ลูกศร ← → เปิดรายการก่อน/ถัดไป · ⧉ ทำสำเนา (รหัส/ช่องห้ามซ้ำเว้นว่าง · ปิดด้วย duplicate:false) · Ctrl+S บันทึก",
     when: "หน้าข้อมูลหลัก เช่น ลูกค้า คลัง หน่วย แผนก สินค้า",
     notWhen: "หน้าที่มีขั้นตอนเฉพาะมาก เช่น บอร์ดจ่ายงาน หน้าแดชบอร์ด",
     doc: "crud-complete.md",
@@ -126,7 +126,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "mini-table", label: "ตารางเล็ก", code: "MiniTable", category: "table",
     source: { path: "components/mini-table" },
-    what: "ตารางย่อยในป๊อปอัป แผงข้าง แท็บ มีค้นหา เรียง จัดกลุ่ม ติ๊กเลือก กางแถว ในตัว",
+    what: "ตารางย่อยในป๊อปอัป แผงข้าง แท็บ มีค้นหา เรียง จัดกลุ่ม ติ๊กเลือก กางแถว ในตัว · ปุ่ม ⬇ Excel ในตัว (exportOpts · ตัดคอลัมน์ไม่มีสิทธิ์ exportPermission · บันทึกประวัติส่งออก)",
     when: "ตารางย่อยที่ไม่ต้องกรองละเอียดหรือส่งออก",
     notWhen: "หน้ารายการหลักที่ต้องมีมุมมอง/ส่งออก ให้ใช้ตารางกลาง (DataTable)",
     doc: "mini-table.md",
@@ -309,7 +309,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sku-picker", label: "เลือกสินค้า (SKU)", code: "SkuPicker", category: "pick",
     source: { path: "components/pickers", names: ["SkuPicker"] },
-    what: "ค้นหาสินค้าด้วยรหัสหรือชื่อ มีรูปย่อ จำตัวที่เลือกล่าสุด",
+    what: "ค้นหาสินค้าด้วยรหัสหรือชื่อ มีรูปย่อ จำตัวที่เลือกล่าสุด · ยิงบาร์โค้ดเข้าช่องค้นได้ (แป้นไทยก็ถูก · ตรงเป๊ะตัวเดียว = เลือกให้เลย · useScanInBox)",
     when: "ทุกช่องที่ต้องเลือกสินค้า 1 ตัว",
     notWhen: "เลือกหลายตัวพร้อมกัน ให้ใช้ SkuMultiPicker",
     note: "ตัวที่ใช้จริงทั้งระบบ — ProductPicker ตัวเก่า (สินค้าชุดทดลอง) ลบแล้ว 2026-11-07",
@@ -430,7 +430,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "asset-picker", label: "เลือกรูปจากคลังกลาง", code: "AssetPicker", category: "file",
     source: { path: "components/asset-picker" },
-    what: "เปิดคลังรูป/วิดีโอแล้วเลือกมาใช้ ไม่ต้องอัปโหลดซ้ำ · มีแท็บ SAMPLE Images (อัลบั้มรูปตัวอย่างประจำแบรนด์ หน้าตาเดียวกับหน้า /tasks/samples)",
+    what: "เปิดคลังรูป/วิดีโอแล้วเลือกมาใช้ ไม่ต้องอัปโหลดซ้ำ · มีแท็บ SAMPLE Images (อัลบั้มรูปตัวอย่างประจำแบรนด์ หน้าตาเดียวกับหน้า /tasks/samples) · แท็บ ⏱ ใช้ล่าสุด (30 รูป จำในเครื่อง) · เลือกหลายรูปโชว์เลขลำดับตามที่คลิก",
     when: "ทุกช่องรูปที่น่าจะมีรูปในคลังอยู่แล้ว",
   },
   {
@@ -507,7 +507,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "file-drop", label: "ลากไฟล์มาวาง", code: "useFileDrop", category: "file",
     source: { path: "components/file-drop" },
-    what: "ให้กล่องไหนก็ได้รับไฟล์ที่ลากมาวาง",
+    what: "ให้กล่องไหนก็ได้รับไฟล์ที่ลากมาวาง · ชี้เมาส์ที่กล่องแล้ว Ctrl+V วางรูปจากคลิปบอร์ดได้ทุกกล่อง (paste:false = ปิด) · ลากทั้งโฟลเดอร์ (folders:true)",
     when: "ทุกจุดที่อัปโหลดได้",
     doc: "file-drop.md",
   },
@@ -1016,7 +1016,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sortable-list", label: "ลากจัดลำดับรายการ", code: "SortableList", category: "table",
     source: { path: "components/sortable-list" },
-    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ) · ลากที่หูจับ (handleProps) หรือกดค้างที่ตัวการ์ดแล้วลาก (holdProps — นิ้วค้าง ~0.35 วิ · เมาส์ลากได้เลย · คลิกเฉย ๆ ยังทำงาน)",
+    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ) · ลากที่หูจับ (handleProps) หรือกดค้างที่ตัวการ์ดแล้วลาก (holdProps — นิ้วค้าง ~0.35 วิ · เมาส์ลากได้เลย · คลิกเฉย ๆ ยังทำงาน) · แตะหูจับ ⠿ = เมนู ขึ้น/ลง/บนสุด/ล่างสุด (มือถือไม่ต้องลาก)",
     when: "ทุกที่ที่ให้คนเรียงลำดับเอง · การ์ดรูป/ไทล์ที่ควรกดค้างลากได้ทั้งใบ = holdProps",
   },
   {
@@ -1204,7 +1204,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "hover-image", label: "ชี้รูปแล้วเห็นรูปใหญ่", code: "HoverImage", category: "file",
     source: { path: "components/hover-image" },
-    what: "รูปย่อ ชี้เมาส์แล้วรูปใหญ่ลอยทับทุกอย่าง (ไม่โดนกรอบตัด) มือถือแตะได้",
+    what: "รูปย่อ ชี้เมาส์แล้วรูปใหญ่ลอยทับทุกอย่าง (ไม่โดนกรอบตัด) มือถือแตะได้ · หมุนล้อเมาส์ = ซูมรูปลอย · หน่วงก่อนโชว์ตั้งต่อคนที่เมนูโปรไฟล์ (lib/hover-delay) หรือ prop delay",
     when: "รูปในตาราง/การ์ดทุกที่",
   },
   {
