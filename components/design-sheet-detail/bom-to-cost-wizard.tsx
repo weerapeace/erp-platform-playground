@@ -20,6 +20,8 @@ import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import type { BomVersion } from "@/app/api/bom/versions/route";
 import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
+import { groupLabel, groupsOf } from "@/lib/cost-line-pick";
+import { ALL_GROUPS, PickGroupChips } from "./pick-group-chips";
 
 // บรรทัดโครงที่ดึงจาก BOM → ส่งให้หน้าหลักแปลงเป็นบรรทัดตีราคา
 export type BomPulledLine = {
@@ -53,6 +55,7 @@ export function BomToCostWizard({
   const [verId, setVerId] = useState<string>("");
   const [lines, setLines] = useState<BomPulledLine[]>([]);
   const [include, setInclude] = useState<boolean[]>([]);
+  const [grp, setGrp] = useState<string>(ALL_GROUPS);   // ปุ่มกรองชนิด (เจ้าของขอ 2026-11-17)
   const [loadingVers, setLoadingVers] = useState(false);
   const [loadingLines, setLoadingLines] = useState(false);
 
@@ -105,6 +108,10 @@ export function BomToCostWizard({
   }, [verId]);
 
   const chosen = useMemo(() => lines.filter((_, i) => include[i] ?? true), [lines, include]);
+  const groups = useMemo(() => groupsOf(lines.map((l) => l.material_type)), [lines]);
+  const visible = useMemo(() => lines.map((_, i) => i).filter((i) => grp === ALL_GROUPS || groupLabel(lines[i].material_type) === grp), [lines, grp]);
+  const allOn = visible.length > 0 && visible.every((i) => include[i] ?? true);
+  useEffect(() => { setGrp(ALL_GROUPS); }, [verId]);
   const curVer = versions.find((v) => v.id === verId) ?? null;
 
   const apply = () => {
@@ -175,11 +182,14 @@ export function BomToCostWizard({
             ) : lines.length === 0 ? (
               <div className="px-3 py-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">{t("สูตรนี้ยังไม่มีบรรทัดให้ดึง", "This BOM has no lines to copy yet")}</div>
             ) : (
+              <>
+              <div className="mb-2"><PickGroupChips groups={groups} value={grp} onChange={setGrp} pickedOf={(g) => lines.reduce((s, l, i) => s + ((include[i] ?? true) && groupLabel(l.material_type) === g ? 1 : 0), 0)} /></div>
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-slate-500 text-[11px] uppercase">
-                      <th className="w-8 px-2 py-1.5"></th>
+                      <th className="w-8 px-2 py-1.5 text-center"><input type="checkbox" checked={allOn} aria-label={grp === ALL_GROUPS ? t("เลือกทั้งหมด", "Select all") : t(`เลือกทั้งชนิด ${grp}`, `Select all ${grp}`)}
+                        onChange={() => setInclude((a) => lines.map((_, i) => (visible.includes(i) ? !allOn : (a[i] ?? true))))} /></th>
                       <th className="px-2 py-1.5 text-left font-medium">{t("ชนิด", "Type")}</th>
                       <th className="px-2 py-1.5 text-right font-medium">{t("กว้าง", "Width")}</th>
                       <th className="px-2 py-1.5 text-right font-medium">{t("ยาว", "Length")}</th>
@@ -187,7 +197,8 @@ export function BomToCostWizard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {lines.map((r, i) => {
+                    {visible.map((i) => {
+                      const r = lines[i];
                       const on = include[i] ?? true;
                       return (
                         <tr key={i} className={on ? "" : "opacity-40"}>
@@ -208,6 +219,7 @@ export function BomToCostWizard({
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
         )}

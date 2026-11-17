@@ -502,6 +502,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const priceItemById = useMemo(() => new Map(priceItems.map((it) => [it.id, it])), [priceItems]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [copyFromOpen, setCopyFromOpen] = useState(false);   // โมดอลคัดลอกตีราคาจากใบงานอื่น
+  const [copyTab, setCopyTab] = useState<string | null>(null);   // ☑️ คัดลอกจากแท็บอื่นของใบนี้ → เปิดป๊อปเลือกบรรทัด (pull-cost-modal preset)
   const [partsOpen, setPartsOpen] = useState(false);         // 🧷 ป๊อปเพิ่มอะไหล่ (ตะกร้า · components/parts-cart-modal)
   // ✏️ ตีราคาดูได้ 2 แบบ: ตาราง ↔ แบบวาด (กระดานชิ้นวัสดุ · แก้แล้วตารางเปลี่ยนตามทันที) — จำแบบที่เลือกไว้ในเครื่อง
   const [costView, setCostViewState] = useState<"table" | "draw">(() => { try { return localStorage.getItem("ds-cost-view") === "draw" ? "draw" : "table"; } catch { return "table"; } });
@@ -740,6 +741,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [curLines, t]);
   // ชื่อแท็บ "ทั่วไป" ของใบนี้ (ตั้งเองได้ · ว่าง = ทั่วไป) — ของกลาง lib/design-sheet-cost-labels
   const generalLabel = generalLabelOf(form?.cost_general_label);
+  // ☑️ ต้นทางของป๊อปคัดลอกจากแท็บอื่น (คงตัวตอนป๊อปเปิด — จับภาพบรรทัด ณ ตอนกด ไม่ให้ติ๊กหลุดเมื่อแก้ตาราง)
+  const copyTabPreset = useMemo(() => (copyTab == null ? null : {
+    label: costTabLabel(copyTab, generalLabel),
+    lines: costLines.filter((r) => pkey(r.parent_code) === copyTab) as CostLine[],
+    extra: costExtraMap[copyTab] ?? [],
+  }), [copyTab]);   // eslint-disable-line react-hooks/exhaustive-deps -- จับภาพตอนเปิด
   // แท็บ Parent ในแท็บตีราคา: ทั่วไป + รหัสจริง + ร่าง + parent_code ที่มีบรรทัดแต่หลุดจากลิสต์ (กันงานหาย)
   const costParentTabs = useMemo(() => {
     const codes = form?.parent_sku_codes ?? [];
@@ -2612,15 +2619,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   const ensureEdit = () => { if (!fullEdit) setEditing(true); };
                   const sources = costParentTabs.filter((tb) => tb.key !== costParent);   // แท็บอื่น = ต้นทางที่คัดลอกมาได้
                   const copyFrom = (source: string) => {
-                    // คัดลอก "จาก" source → "มาใส่" แท็บปัจจุบัน (costParent) แทนที่ของเดิมในแท็บนี้
-                    const src = costLines.filter((r) => pkey(r.parent_code) === source);
-                    if (src.length === 0) { toast.info(t(`"${costTabLabel(source, generalLabel)}" ยังไม่มีบรรทัดให้คัดลอก`, `"${costTabLabel(source, generalLabel)}" has no lines to copy`)); return; }
-                    ensureEdit();
-                    const cloned = src.map((r, i) => recomputeRow({ ...r, key: `cp${Date.now()}_${i}`, parent_code: costParent || null }));
-                    setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned]);
-                    setCostExtraMap((m) => ({ ...m, [costParent]: (m[source] ?? []).map((c) => ({ ...c })) }));
-                    setCostDirty(true);
-                    toast.success(t(`คัดลอกตีราคาจาก "${costTabLabel(source, generalLabel)}" มาแล้ว (${cloned.length} บรรทัด) — กด บันทึกตีราคา`, `Copied costing from "${costTabLabel(source, generalLabel)}" (${cloned.length} lines) — press Save costing`));
+                    // คัดลอก "จาก" source → "มาใส่" แท็บปัจจุบัน — เปิดป๊อปให้ติ๊กเลือกบรรทัด/ต่อท้ายหรือแทนที่ก่อน (เจ้าของขอ 2026-11-17)
+                    const n = costLines.filter((r) => pkey(r.parent_code) === source).length;
+                    if (n === 0) { toast.info(t(`"${costTabLabel(source, generalLabel)}" ยังไม่มีบรรทัดให้คัดลอก`, `"${costTabLabel(source, generalLabel)}" has no lines to copy`)); return; }
+                    setCopyTab(source);
                   };
                   // ล้างหมายเหตุทุกบรรทัดของแท็บที่ดูอยู่ (เช่น "อ้างอิง BOM: …" ที่ดึงมา) — โหมดแก้ไข: ค้างให้กดบันทึก · โหมดดู: บันทึกทันที
                   const noteCount = curLines.filter((r) => (r.note ?? "").trim()).length;
@@ -2634,7 +2636,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   const pull: MenuItem[] = [
                     ...(canEdit && sources.length > 0 ? [{ type: "submenu" as const, key: "copy", icon: "copy", label: t("คัดลอกตีราคาจากแท็บอื่น", "Copy costing from another tab"), width: 240,
                       items: [
-                        { type: "section" as const, key: "h", label: t("คัดลอกจากแท็บไหน (มาแทนที่แท็บนี้)", "Copy from which tab (replaces this tab)") },
+                        { type: "section" as const, key: "h", label: t("คัดลอกจากแท็บไหน (เลือกบรรทัดได้)", "Copy from which tab (pick lines)") },
                         ...sources.map((tb): MenuItem => {
                           const n = costLines.filter((r) => pkey(r.parent_code) === tb.key).length;
                           return { key: tb.key || "__gen__", label: tb.kind === "draft" ? `✎ ${tb.label}` : tb.label, disabled: n === 0,
@@ -3433,8 +3435,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       )}
       {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
       {form?.id && (
-        <PullCostFromSheetModal open={copyFromOpen} excludeId={form.id} targetLabel={costTabLabel(costParent, generalLabel)} targetCount={curLines.length}
-          onClose={() => setCopyFromOpen(false)}
+        <PullCostFromSheetModal open={copyFromOpen || copyTabPreset != null} excludeId={form.id} targetLabel={costTabLabel(costParent, generalLabel)} targetCount={curLines.length}
+          targetLines={curLines} preset={copyTabPreset ?? undefined}
+          onClose={() => { setCopyFromOpen(false); setCopyTab(null); }}
           onApply={(srcLines, srcExtra, mode, label) => {
             const stamp = Date.now();
             // เป็นบรรทัดใหม่ของใบนี้: ไม่เอา id / ประวัติเปลี่ยนวัสดุ / การรับทราบราคา ของใบต้นทางมาด้วย
@@ -3442,7 +3445,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             setCostLines((prev) => (mode === "replace" ? [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned] : [...prev, ...cloned]));
             if (srcExtra) setCostExtraMap((m) => ({ ...m, [costParent]: srcExtra.map((c) => ({ ...c })) }));
             if (!fullEdit) setEditing(true);   // ดึงมาแล้วตรวจ/แก้ต่อ แล้วกดบันทึกเอง (เหมือนปุ่ม ＋ เพิ่มวัตถุดิบ)
-            setCostDirty(true); setCopyFromOpen(false);
+            setCostDirty(true); setCopyFromOpen(false); setCopyTab(null);
             toast.success(t(`ดึงจาก "${label}" มา ${cloned.length} บรรทัด${srcExtra ? " + ค่าใช้จ่ายเพิ่ม" : ""} — ตรวจแล้วกด 💾 บันทึกตีราคา`, `Pulled ${cloned.length} lines from "${label}"${srcExtra ? " + additional costs" : ""} — review, then press 💾 Save costing`));
           }} />
       )}

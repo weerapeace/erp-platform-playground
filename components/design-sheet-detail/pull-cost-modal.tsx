@@ -2,6 +2,8 @@
 // ป๊อป "📄 ดึงวัตถุดิบตีราคาจากใบงานอื่น" (ไม่ใช่จาก SKU)
 // ค้นใบงาน → เลือกแท็บต้นทาง (ทั่วไป / เวอร์ชัน / ไซส์) → ติ๊กวัตถุดิบที่ต้องการ → เพิ่มต่อท้าย หรือ แทนที่ทั้งแท็บที่กำลังดู
 // (แทนโมดอล "คัดลอกตีราคาจากใบอื่น" เดิม ที่ดึงได้แค่แท็บทั่วไปทั้งก้อน + โผล่เฉพาะโหมดแก้ไข)
+// preset = ข้ามขั้นค้นใบ ใช้บรรทัดที่ส่งมาเลย — เมนู "คัดลอกตีราคาจากแท็บอื่น" ของใบเดียวกัน (เจ้าของขอ 2026-11-17 ให้เลือกได้ว่าจะดึงอะไร)
+// ขั้นเลือกบรรทัด: ปุ่มกรองชนิด (PickGroupChips) · บรรทัดที่ซ้ำกับแท็บปลายทาง = ป้าย "มีแล้ว" ไม่ติ๊กให้ก่อน (lib/cost-line-pick) · ค่าเริ่ม = เพิ่มต่อท้าย
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
@@ -10,6 +12,8 @@ import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { cleanExtra, type SnapExtra } from "@/lib/design-sheet-cost-snapshot";
+import { dupIndexes, groupLabel, groupsOf } from "@/lib/cost-line-pick";
+import { ALL_GROUPS, PickGroupChips } from "./pick-group-chips";
 
 export type PullExtra = SnapExtra;   // คงแบบ "หารจำนวนสั่ง" (ค่าบล็อก) มาด้วย
 export type PullMode = "append" | "replace";
@@ -24,11 +28,15 @@ const arrOf = (a: unknown): PullExtra[] => (Array.isArray(a) ? a : [])
 const extraOf = (raw: unknown, key: string): PullExtra[] =>
   raw && !Array.isArray(raw) && typeof raw === "object" ? arrOf((raw as Record<string, unknown>)[key]) : key === "" ? arrOf(raw) : [];
 
-export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCount, onClose, onApply }: {
+export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCount, targetLines = [], preset, onClose, onApply }: {
   open: boolean;
   excludeId: string | null;
   targetLabel: string;     // ชื่อแท็บปลายทาง (แท็บที่กำลังดู)
   targetCount: number;     // จำนวนบรรทัดที่มีอยู่แล้วในแท็บปลายทาง
+  /** บรรทัดในแท็บปลายทาง — ไว้บอก "มีแล้ว" (ไม่ติ๊กให้ก่อน) */
+  targetLines?: CostLine[];
+  /** ต้นทางสำเร็จรูป (แท็บอื่นของใบเดียวกัน) → ข้ามขั้นค้นใบงาน */
+  preset?: { label: string; lines: CostLine[]; extra: PullExtra[] };
   onClose: () => void;
   onApply: (lines: CostLine[], extra: PullExtra[] | null, mode: PullMode, sourceLabel: string) => void;
 }) {
@@ -44,11 +52,19 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
   const [picked, setPicked] = useState<Set<number>>(new Set());   // index ในบรรทัดของแท็บต้นทาง
   const [withExtra, setWithExtra] = useState(false);
   const [mode, setMode] = useState<PullMode>("append");
+  const [grp, setGrp] = useState<string>(ALL_GROUPS);
 
   // เปิดใหม่ = เริ่มจากค้นใบงาน
-  useEffect(() => { if (!open) { setQ(""); setRows(null); setSrc(null); setErr(null); setMode("append"); setWithExtra(false); } }, [open]);
+  useEffect(() => { if (!open) { setQ(""); setRows(null); setSrc(null); setErr(null); setMode("append"); setWithExtra(false); setGrp(ALL_GROUPS); } }, [open]);
+  // ต้นทางสำเร็จรูป: เปิดมา = ติ๊กทุกบรรทัดยกเว้นที่มีแล้ว + ติ๊กค่าใช้จ่ายเพิ่ม (เหมือนคัดลอกแท็บแบบเดิม)
   useEffect(() => {
-    if (!open || src) return;
+    if (!open || !preset) return;
+    const dup = dupIndexes(preset.lines, targetLines);
+    setPicked(new Set(preset.lines.map((_, i) => i).filter((i) => !dup.has(i))));
+    setWithExtra(preset.extra.length > 0); setGrp(ALL_GROUPS);
+  }, [open, preset]);   // eslint-disable-line react-hooks/exhaustive-deps -- ตั้งครั้งเดียวตอนเปิด
+  useEffect(() => {
+    if (!open || src || preset) return;
     setLoading(true);
     const timer = setTimeout(() => {
       apiFetch(`/api/design-sheets?limit=40${q ? `&search=${encodeURIComponent(q)}` : ""}`).then((r) => r.json())
@@ -56,9 +72,12 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
         .catch(() => setRows([])).finally(() => setLoading(false));
     }, 250);
     return () => clearTimeout(timer);
-  }, [open, q, excludeId, src]);
+  }, [open, q, excludeId, src, preset]);
 
-  const tabLines = useMemo(() => (src ? src.lines.filter((l) => pkey(l.parent_code) === tab) : []), [src, tab]);
+  const tabLines = useMemo(() => (preset ? preset.lines : src ? src.lines.filter((l) => pkey(l.parent_code) === tab) : []), [preset, src, tab]);
+  const dups = useMemo(() => dupIndexes(tabLines, targetLines), [tabLines, targetLines]);
+  const groups = useMemo(() => groupsOf(tabLines.map((l) => l.group_name)), [tabLines]);
+  const visible = useMemo(() => tabLines.map((_, i) => i).filter((i) => grp === ALL_GROUPS || groupLabel(tabLines[i].group_name) === grp), [tabLines, grp]);
   // แท็บต้นทาง: ทั่วไปก่อน → รหัส Parent → เวอร์ชัน → ที่เหลือ (เฉพาะที่มีบรรทัด)
   const srcTabs = useMemo(() => {
     if (!src) return [];
@@ -67,7 +86,7 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
     const order = ["", ...src.codes, ...src.drafts, ...counts.keys()];
     return [...new Set(order)].filter((k) => counts.has(k)).map((k) => ({ key: k, label: costTabLabel(k, src.generalLabel), n: counts.get(k) ?? 0 }));
   }, [src]);
-  const tabExtra = useMemo(() => (src ? extraOf(src.extra, tab) : []), [src, tab]);
+  const tabExtra = useMemo(() => (preset ? preset.extra : src ? extraOf(src.extra, tab) : []), [preset, src, tab]);
 
   const choose = async (s: DesignSheetListItem) => {
     setBusyId(s.id); setErr(null);
@@ -91,25 +110,28 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
   };
   const pickTab = (s: Source, key: string) => {
     setTab(key);
-    setPicked(new Set(s.lines.filter((l) => pkey(l.parent_code) === key).map((_, i) => i)));   // เริ่มต้น = ติ๊กทุกบรรทัด
-    setWithExtra(false);
+    const ls = s.lines.filter((l) => pkey(l.parent_code) === key);
+    const dup = dupIndexes(ls, targetLines);
+    setPicked(new Set(ls.map((_, i) => i).filter((i) => !dup.has(i))));   // เริ่มต้น = ติ๊กทุกบรรทัด ยกเว้นที่มีแล้วในแท็บนี้
+    setWithExtra(false); setGrp(ALL_GROUPS);
   };
   const toggle = (i: number) => setPicked((p) => { const n = new Set(p); if (n.has(i)) n.delete(i); else n.add(i); return n; });
-  const allOn = tabLines.length > 0 && picked.size === tabLines.length;
+  const allOn = visible.length > 0 && visible.every((i) => picked.has(i));
+  const toggleVisible = () => setPicked((p) => { const n = new Set(p); for (const i of visible) { if (allOn) n.delete(i); else n.add(i); } return n; });
 
   const apply = () => {
-    if (!src) return;
+    if (!src && !preset) return;
     const lines = tabLines.filter((_, i) => picked.has(i));
     if (lines.length === 0 && !(withExtra && tabExtra.length)) return;
-    onApply(lines, withExtra ? tabExtra : null, mode, `${src.sheet.code} · ${costTabLabel(tab, src.generalLabel)}`);
+    onApply(lines, withExtra ? tabExtra : null, mode, preset ? preset.label : `${src!.sheet.code} · ${costTabLabel(tab, src!.generalLabel)}`);
   };
   const pickedTotal = tabLines.reduce((s, l, i) => s + (picked.has(i) ? Number(l.amount) || 0 : 0), 0);
   const shown = (rows ?? []).filter((s) => !onlyCosted || s.has_cost);
 
   return (
-    <ERPModal open={open} onClose={onClose} size="xl" title={t("📄 ดึงวัตถุดิบตีราคาจากใบงานอื่น", "📄 Pull costing materials from another design sheet")}
-      description={src ? t(`เลือกวัตถุดิบจาก ${src.sheet.code} มาใส่แท็บ "${targetLabel}"`, `Pick materials from ${src.sheet.code} into tab "${targetLabel}"`) : t(`ค้นใบงานต้นทาง — วัตถุดิบที่เลือกจะมาอยู่ในแท็บ "${targetLabel}" ที่กำลังดู`, `Find the source design sheet — picked materials go into the current tab "${targetLabel}"`)}
-      footer={src ? (
+    <ERPModal open={open} onClose={onClose} size="xl" title={preset ? t(`คัดลอกตีราคาจากแท็บ "${preset.label}"`, `Copy costing from tab "${preset.label}"`) : t("📄 ดึงวัตถุดิบตีราคาจากใบงานอื่น", "📄 Pull costing materials from another design sheet")}
+      description={preset ? t(`เลือกบรรทัดที่จะมาใส่แท็บ "${targetLabel}" ที่กำลังดู`, `Pick the lines to bring into the current tab "${targetLabel}"`) : src ? t(`เลือกวัตถุดิบจาก ${src.sheet.code} มาใส่แท็บ "${targetLabel}"`, `Pick materials from ${src.sheet.code} into tab "${targetLabel}"`) : t(`ค้นใบงานต้นทาง — วัตถุดิบที่เลือกจะมาอยู่ในแท็บ "${targetLabel}" ที่กำลังดู`, `Find the source design sheet — picked materials go into the current tab "${targetLabel}"`)}
+      footer={src || preset ? (
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-slate-500">{t(`เลือก ${picked.size}/${tabLines.length} บรรทัด · รวม ${fmt(pickedTotal)} บาท`, `${picked.size}/${tabLines.length} lines selected · total ${fmt(pickedTotal)} THB`)}</span>
           <div className="flex gap-2">
@@ -121,7 +143,7 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
           </div>
         </div>
       ) : undefined}>
-      {!src ? (
+      {!src && !preset ? (
         <>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาเลขใบ / ชื่องาน...", "Search sheet no. / job name...")}
@@ -152,13 +174,13 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
         </>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
+          {src && <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => setSrc(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">{t("‹ เลือกใบอื่น", "‹ Pick another sheet")}</button>
             <span className="truncate text-sm font-medium text-slate-800">{src.sheet.code} · {src.sheet.name}</span>
-          </div>
-          {srcTabs.length === 0 ? <div className="py-8 text-center text-sm text-slate-400">{t("ใบนี้ยังไม่มีบรรทัดตีราคา", "This sheet has no costing lines yet")}</div> : (
+          </div>}
+          {tabLines.length === 0 ? <div className="py-8 text-center text-sm text-slate-400">{t("ใบนี้ยังไม่มีบรรทัดตีราคา", "This sheet has no costing lines yet")}</div> : (
             <>
-              <div className="flex flex-wrap items-center gap-1">
+              {src && <div className="flex flex-wrap items-center gap-1">
                 <span className="mr-1 text-[11px] text-slate-400">{t("แท็บต้นทาง:", "Source tab:")}</span>
                 {srcTabs.map((st) => (
                   <button key={st.key || "__gen__"} type="button" onClick={() => pickTab(src, st.key)}
@@ -166,13 +188,15 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
                     {st.label}<span className={`rounded-full px-1 text-[10px] ${tab === st.key ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{st.n}</span>
                   </button>
                 ))}
-              </div>
+              </div>}
+              <PickGroupChips groups={groups} value={grp} onChange={setGrp} pickedOf={(g) => tabLines.reduce((s, l, i) => s + (picked.has(i) && groupLabel(l.group_name) === g ? 1 : 0), 0)} />
+              {dups.size > 0 && <p className="text-[11px] text-amber-700">{t(`${dups.size} บรรทัดมีอยู่แล้วในแท็บ "${targetLabel}" (วัสดุ+ขนาดเดียวกัน) — ไม่ได้ติ๊กไว้ ติ๊กเองได้ถ้าต้องการซ้ำ`, `${dups.size} lines already exist in tab "${targetLabel}" (same material+size) — left unticked, tick them if you want duplicates`)}</p>}
               <div className="max-h-[42vh] overflow-auto rounded-lg border border-slate-200">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-slate-50 text-slate-500">
                     <tr>
                       <th className="w-8 px-2 py-1.5 text-left">
-                        <input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(tabLines.map((_, i) => i)))} className="h-4 w-4 accent-blue-600" title={t("เลือกทั้งหมด", "Select all")} />
+                        <input type="checkbox" checked={allOn} onChange={toggleVisible} className="h-4 w-4 accent-blue-600" title={grp === ALL_GROUPS ? t("เลือกทั้งหมด", "Select all") : t(`เลือกทั้งชนิด ${grp}`, `Select all ${grp}`)} />
                       </th>
                       <th className="px-2 py-1.5 text-left">{t("วัสดุ", "Material")}</th>
                       <th className="px-2 py-1.5 text-left">{t("ขนาด", "Dimensions")}</th>
@@ -182,11 +206,11 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
                     </tr>
                   </thead>
                   <tbody>
-                    {tabLines.map((l, i) => (
+                    {visible.map((i) => { const l = tabLines[i]; return (
                       <tr key={l.id ?? i} onClick={() => toggle(i)} className={`cursor-pointer border-t border-slate-100 ${picked.has(i) ? "bg-blue-50/40" : "hover:bg-slate-50"}`}>
                         <td className="px-2 py-1.5"><input type="checkbox" readOnly checked={picked.has(i)} className="pointer-events-none h-4 w-4 accent-blue-600" /></td>
                         <td className="px-2 py-1.5">
-                          <div className="text-slate-800">{l.item_name || l.item_sku_code || "—"}</div>
+                          <div className="text-slate-800">{l.item_name || l.item_sku_code || "—"}{dups.has(i) && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 text-[10px] text-amber-700">{t("มีแล้ว", "Exists")}</span>}</div>
                           {(l.group_name || l.note) && <div className="text-[10px] text-slate-400">{[l.group_name, l.note].filter(Boolean).join(" · ")}</div>}
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-slate-500">
@@ -196,7 +220,7 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
                         <td className="whitespace-nowrap px-2 py-1.5 text-right text-slate-600">{fmt(l.unit_price)}</td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-slate-800">{fmt(l.amount)}</td>
                       </tr>
-                    ))}
+                    ); })}
                   </tbody>
                 </table>
               </div>
