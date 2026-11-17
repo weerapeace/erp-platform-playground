@@ -10,6 +10,7 @@
  *   - Sort คลิกหัวคอลัมน์ (none → ▲ → ▼)
  *   - Group by + [เฟส 2] หัวกลุ่ม "พับ/ขยายได้" + บอกจำนวน + "รวมยอด" คอลัมน์ที่ summable
  *   - [เฟส 2] แก้ค่าที่หัวกลุ่ม → ทุกบรรทัดในกลุ่มเปลี่ยนตาม (คอลัมน์ที่มี setValue)
+ *   - selectable + bulkBar: ติ๊กแถว/ติ๊กทั้งกลุ่ม → แถบคำสั่งลอยติดขอบล่าง (sticky) ท้ายตาราง
  *   - [เฟส 2] ปรับขนาดคอลัมน์ (ลากขอบหัวคอลัมน์) + จำค่าไว้ (localStorage ถ้ามี storageKey)
  *   - ลากเรียงลำดับ (dnd-kit) เมื่อไม่ sort/group · เพิ่ม/ลบบรรทัด · readonly
  *   - readonly + onRequestEdit: ดับเบิลคลิกแถว → ขอเข้าโหมดแก้ แล้ววางเคอร์เซอร์ที่ช่องที่คลิก
@@ -172,6 +173,11 @@ export function LineItemsGrid<T>({
 
   const selectedRows = useMemo(() => rows.filter((r) => selected.has(rowId(r))), [rows, selected]); // eslint-disable-line react-hooks/exhaustive-deps
   const clearSel = useCallback(() => setSelected(new Set()), []);
+  // ติ๊กทั้งกลุ่ม (หัวกลุ่ม · เจ้าของขอ 2026-11-17) — ติ๊กครบแล้ว = เอาออกทั้งกลุ่ม
+  const toggleSelGroup = (groupRows: T[]) => setSelected((s) => {
+    const ids = groupRows.map(rowId); const all = ids.length > 0 && ids.every((id) => s.has(id));
+    const n = new Set(s); for (const id of ids) { if (all) n.delete(id); else n.add(id); } return n;
+  });
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const allRowIds = rows.map(rowId);
   const allSelected = allRowIds.length > 0 && allRowIds.every((id) => selected.has(id));
@@ -346,6 +352,12 @@ export function LineItemsGrid<T>({
             {display.map((d, i) =>
               d.type === "group" ? (
                 <div key={`g${i}`} className="flex items-center gap-2 bg-slate-100/70 border-b border-slate-200 px-2 py-1.5 text-xs">
+                  {selectable && !readonly && (() => {
+                    const ids = d.rows.map(rowId); const n = ids.filter((id) => selected.has(id)).length;
+                    return <input type="checkbox" checked={n > 0 && n === ids.length} ref={(el) => { if (el) el.indeterminate = n > 0 && n < ids.length; }}
+                      onChange={() => toggleSelGroup(d.rows)} aria-label={`ติ๊กทั้งกลุ่ม ${d.label}`} title="ติ๊ก/เอาออก ทุกบรรทัดในกลุ่มนี้"
+                      className="h-4 w-4 shrink-0 accent-indigo-600 cursor-pointer" />;
+                  })()}
                   <button type="button" onClick={() => toggleCollapse(d.label)} className="w-5 h-5 flex items-center justify-center text-slate-500 hover:bg-slate-200 rounded">
                     {collapsed.has(d.label) ? "▸" : "▾"}
                   </button>
@@ -405,15 +417,6 @@ export function LineItemsGrid<T>({
         </div>
       )}
 
-      {/* แถบเครื่องมือ mass — โผล่เมื่อมีแถวถูกเลือก */}
-      {selectable && bulkBar && selected.size > 0 && !readonly && (
-        <div className="flex items-center gap-2 flex-wrap bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
-          <span className="text-sm font-medium text-indigo-700">✓ เลือก {selected.size} บรรทัด</span>
-          <span className="w-px h-5 bg-indigo-200" />
-          {bulkBar(selectedRows, clearSel)}
-          <button type="button" onClick={clearSel} className="ml-auto h-8 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-white">ยกเลิก</button>
-        </div>
-      )}
 
       {rows.length === 0 ? (
         <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-lg">
@@ -464,6 +467,19 @@ export function LineItemsGrid<T>({
             {addExtra}
           </div>
           {footer}
+        </div>
+      )}
+      {/* แถบเครื่องมือ mass — โผล่เมื่อมีแถวถูกเลือก · ลอยติดขอบล่างของหน้าจอ/หน้าต่างที่เลื่อนอยู่ (sticky) เลื่อนไปไหนก็เห็น (เจ้าของขอ 2026-11-17)
+          อยู่ท้ายตาราง → ตอนเลื่อนพ้นตารางแล้ว แถบจะหยุดอยู่ใต้ตาราง ไม่ลอยทับส่วนอื่น · ห้าม ancestor มี overflow-hidden (sticky จะไม่ทำงาน) */}
+      {selectable && bulkBar && selected.size > 0 && !readonly && (
+        <div className="sticky bottom-3 z-30 flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 shadow-xl shadow-slate-900/15 backdrop-blur animate-[ligbar-in_.15s_ease-out]">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700">
+            <span className="flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-indigo-600 px-1.5 text-xs text-white">{selected.size}</span>บรรทัดที่เลือก
+          </span>
+          <span className="w-px h-5 bg-indigo-200" />
+          {bulkBar(selectedRows, clearSel)}
+          <button type="button" onClick={clearSel} className="ml-auto h-8 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <style>{`@keyframes ligbar-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}`}</style>
         </div>
       )}
       {/* ดูอย่างเดียว + onRequestEdit: ปุ่มเพิ่มบรรทัดยังอยู่ (กด = เข้าโหมดแก้ + เพิ่มบรรทัดในคลิกเดียว) */}
