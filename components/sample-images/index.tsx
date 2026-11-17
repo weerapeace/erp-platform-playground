@@ -256,8 +256,10 @@ export function SampleImagesPage() {
         const made = await createSubAlbum(parent.id, g.name);
         if (g.parentCode) { await linkAlbumProduct(made.id, [g.parentCode], g.skuCodes); setLastParent(g.parentCode); }
         await upload(g.files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
-      } catch (e) { pushToast("error", t(`สร้าง "${g.name}" ไม่สำเร็จ — ${(e as Error).message}`, `Could not create "${g.name}" — ${(e as Error).message}`)); break; }
+      } catch (e) { pushToast("error", t(`สร้าง "${g.name}" ไม่สำเร็จ — ${(e as Error).message}`, `Could not create "${g.name}" — ${(e as Error).message}`)); return; }
     }
+    // รูปที่ยังไม่จัด (แบบแยกหลายอัลบั้ม) → ลงอัลบั้มที่เปิดอยู่ตรง ๆ
+    if (plan.rest?.length) await upload(plan.rest, { id: parent.id, name: parent.name, brand_id: parent.brand_id }, parent.id);
   };
   const drop = useFileDrop((files) => onDropFiles(files), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
 

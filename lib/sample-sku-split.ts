@@ -67,3 +67,17 @@ export function folderGroups(paths: readonly string[]): { folders: string[]; ind
   if (order.length < 2) return null;
   return { folders: order.map((d) => d.split("/").pop() || "—"), index: dirs.map((d) => order.indexOf(d)) };
 }
+
+/**
+ * แบ่งตามเวลาถ่าย (ข้อเสนอ 3 · 2026-11-17): เรียงตามเวลา แล้วตัดกลุ่มเมื่อห่างกันเกิน gapMs (ค่าเริ่ม 2 นาที)
+ * คืน index กลุ่มของแต่ละรูป (กลุ่ม 0 = ถ่ายก่อนสุด) · เวลาใช้ไม่ได้ (เท่ากันหมด/ไม่มี) หรือได้กลุ่มเดียว = null
+ */
+export function timeGroups(times: readonly number[], gapMs = 120_000): number[] | null {
+  if (times.length < 2 || times.some((t) => !Number.isFinite(t) || t <= 0)) return null;
+  const order = times.map((t, i) => [t, i] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (order[order.length - 1][0] === order[0][0]) return null;
+  const out = new Array<number>(times.length);
+  let g = 0;
+  order.forEach(([t, i], k) => { if (k > 0 && t - order[k - 1][0] > gapMs) g++; out[i] = g; });
+  return g > 0 ? out : null;
+}

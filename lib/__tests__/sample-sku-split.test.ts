@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bumpProductName, folderGroups, guessSku, splitGroups } from "../sample-sku-split";
+import { bumpProductName, folderGroups, guessSku, splitGroups, timeGroups } from "../sample-sku-split";
 
 const parent = { id: "p1", code: "GG-TOTE24", name: "กระเป๋าผ้าโท้ท" };
 const kids = [
@@ -43,5 +43,17 @@ describe("แยกอัลบั้มตามโฟลเดอร์ย่�
   it("โฟลเดอร์เดียว / ไฟล์หลวม = null", () => {
     expect(folderGroups(["shoot/1.jpg", "shoot/2.jpg"])).toBeNull();
     expect(folderGroups(["1.jpg", "2.jpg"])).toBeNull();
+  });
+});
+
+describe("แบ่งตามเวลาถ่าย", () => {
+  const m = 60_000;
+  it("ห่างเกิน 2 นาที = กลุ่มใหม่ · เรียงตามเวลา", () => {
+    expect(timeGroups([10 * m, 1 * m, 1.5 * m, 10.5 * m, 30 * m])).toEqual([1, 0, 0, 1, 2]);
+  });
+  it("เวลาเท่ากันหมด / ไม่มีเวลา / กลุ่มเดียว = null", () => {
+    expect(timeGroups([5, 5, 5])).toBeNull();
+    expect(timeGroups([0, 1000])).toBeNull();
+    expect(timeGroups([m, 2 * m])).toBeNull();
   });
 });
