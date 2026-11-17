@@ -102,8 +102,10 @@ function NoteMark({ note }: { note: string }) {
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
+  /** ถูกเลือกอยู่ (ลากกรอบเลือก) — กรอบม่วง + ติ๊ก */
+  selected?: boolean;
   /** ลากสลับลำดับ: โชว์เส้นตำแหน่งที่จะวาง (ก่อน = ซ้าย · หลัง = ขวา) */
   edge?: "before" | "after" | null;
   /** ผลค้นหาที่เป็นอัลบั้มย่อย → บอกว่าอยู่ในอัลบั้มไหน (เช่น "Good Goods · 15 พ.ย. 2569") */
@@ -114,8 +116,9 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   const bar = edge ? <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1 rounded-full bg-violet-500 ${edge === "before" ? "-left-2" : "-right-2"}`} /> : null;
   if (sub) return (
     <button type="button" onClick={onOpen} {...extra}
-      className={`relative overflow-visible rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : "border-slate-200 hover:border-slate-300"}`}>
+      className={`relative overflow-visible rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : selected ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200 hover:border-slate-300"}`}>
       {bar}
+      {selected && <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
       <div className="overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} /></div>
       <div className="space-y-1 p-2.5">
         <div className="flex items-center gap-1 truncate text-[13px] font-medium text-slate-800"><Icon value="i:folder" />{a.name}</div>

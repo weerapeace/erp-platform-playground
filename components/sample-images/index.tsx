@@ -23,7 +23,9 @@ import { useAuth } from "@/components/auth";
 import { usePushToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
-import { useFileDrop } from "@/components/file-drop";
+import { filePathOf, useFileDrop } from "@/components/file-drop";
+import { useMarqueeSelect } from "@/lib/use-marquee-select";
+import { DropAlbumDialog, commonFolderName, type DropMode } from "./drop-album-dialog";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
@@ -113,7 +115,12 @@ export function SampleImagesPage() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const dragRef = useRef<DragItem | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);   // ที่ที่กำลังลากผ่าน (ไฮไลต์)
-  const [chooser, setChooser] = useState<null | "photos" | "album">(null);   // แผงเลือกอัลบั้มปลายทาง
+  const [chooser, setChooser] = useState<null | "photos" | "album" | "albums">(null);
+  const [selAlbums, setSelAlbums] = useState<Set<string>>(new Set());   // อัลบั้มย่อยที่ลากกรอบเลือก (ย้ายพร้อมกัน)
+  // วางรูปตอนเปิดอัลบั้ม → ป๊อปสร้างอัลบั้มย่อยใหม่ (เจ้าของเลือก 2026-11-17) · จำทางที่เลือกล่าสุดรายคน
+  const [dropFiles, setDropFiles] = useState<File[] | null>(null);
+  const [dropPref, setDropPref] = useUserPref<DropMode>("sample_images_drop_mode", "new", (r) => (r === "new" || r === "here" ? r : null));
+  const [dropMode, setDropMode] = useState<DropMode>("new");   // แผงเลือกอัลบั้มปลายทาง
   const [up, setUp] = useState<UploadProgressState | null>(null);
   const cancelRef = useRef(false);
   const [picking, setPicking] = useState(false);
@@ -170,7 +177,8 @@ export function SampleImagesPage() {
   // ── แบรนด์ที่จะลงรูป: แท็บแบรนด์ = แบรนด์นั้น · ไม่ระบุแบรนด์ = ไม่มี · ทุกแบรนด์ = ปุ่มเลือกในกรอบวางรูป (จำล่าสุด) ──
   const uploadBrandId: string | null = tab === NONE ? null : tab !== ALL ? tab : (brandOf(lastBrand)?.id ?? brands[0]?.id ?? null);
 
-  const upload = async (files: File[]) => {
+  /** into = ลงอัลบั้มนี้แทนอัลบั้มที่เปิดอยู่ · stayOn = หลังลงเสร็จเปิดอัลบั้มไหน (ไม่ส่ง = อัลบั้มที่ลง) */
+  const upload = async (files: File[], into?: { id: string; name: string; brand_id: string | null }, stayOn?: string) => {
     if (!canUpload) { pushToast("error", t("คุณไม่มีสิทธิ์ลงรูป", "You can't upload images")); return; }
     if (up) { pushToast("info", t("กำลังลงรูปชุดก่อนอยู่ — รอสักครู่", "Still uploading — please wait")); return; }
     const { ok, unsupported, notImage } = splitSampleFiles(files);
@@ -178,7 +186,7 @@ export function SampleImagesPage() {
     if (notImage.length) pushToast("warning", t(`ข้าม ${notImage.length} ไฟล์ที่ไม่ใช่รูป`, `Skipped ${notImage.length} non-image files`));
     if (!ok.length) return;
     // เปิดอัลบั้มอยู่ = เพิ่มเข้าอัลบั้มนั้น (เหมือนวางของลงแฟ้ม · เจ้าของเลือก 2026-11-14) · หน้าแฟ้ม = อัลบั้มของแบรนด์ + วันนี้
-    const openNow = albums?.find((a) => a.id === albumId) ?? null;
+    const openNow = into ?? albums?.find((a) => a.id === albumId) ?? null;
     const brandId = openNow ? openNow.brand_id : uploadBrandId;
     cancelRef.current = false;
     let done = 0, dup = 0;
@@ -198,7 +206,7 @@ export function SampleImagesPage() {
       const nextTab = tab === ALL ? ALL : brandId ?? NONE;
       if (nextTab !== tab) setTab(nextTab);
       setTrashView(false); setQuery("");   // ลงรูปใหม่ = โชว์ทั้งอัลบั้ม (ไม่ให้รูปที่เพิ่งลงโดนคำค้นซ่อน)
-      await reload(album.id, nextTab);
+      await reload(stayOn ?? album.id, nextTab);
       if (done) pushToast("success", t(`ลง ${done} รูปใน ${album.name} แล้ว${dup ? ` (${dup} รูปเคยลงไว้ ใช้รูปเดิม)` : ""}`, `Added ${done} image(s) to ${album.name}`));
       if (fails.length) pushToast("error", t(`ลงไม่สำเร็จ ${fails.length} รูป — ${fails[0]}`, `${fails.length} failed — ${fails[0]}`));
       if (cancelRef.current) pushToast("info", t("หยุดลงรูปแล้ว", "Upload stopped"));
@@ -206,7 +214,29 @@ export function SampleImagesPage() {
       pushToast("error", (e as Error).message);
     } finally { setUp(null); }
   };
-  const drop = useFileDrop((files) => void upload(files), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
+  // เปิดอัลบั้มอยู่ → ถามก่อน: สร้างอัลบั้มย่อยใหม่ (Product ### นับต่อทั้งแบรนด์ / ชื่อโฟลเดอร์ที่ลากมา) หรือใส่อัลบั้มนี้ · หน้ารวมอัลบั้ม = ลงอัลบั้มของวันนี้ทันที (เจ้าของเลือก)
+  const onDropFiles = (files: File[]) => {
+    const openNow = albums?.find((a) => a.id === albumId) ?? null;
+    if (!openNow || trashView || !canUpload || !splitSampleFiles(files).ok.length) { void upload(files); return; }
+    setDropMode(dropPref); setDropFiles(files);
+  };
+  const dropName = useMemo(() => {
+    if (!dropFiles) return "";
+    const openNow = albums?.find((a) => a.id === albumId);
+    return commonFolderName(splitSampleFiles(dropFiles).ok.map(filePathOf)) ?? nextProductName(albums ?? [], openNow?.brand_id ?? null);
+  }, [dropFiles, albums, albumId]);
+  const confirmDrop = async (name: string | null) => {
+    const files = dropFiles; const parent = albums?.find((a) => a.id === albumId) ?? null;
+    setDropFiles(null);
+    if (!files) return;
+    setDropPref(name === null ? "here" : "new");
+    if (name === null || !parent) { void upload(files); return; }
+    try {
+      const made = await createSubAlbum(parent.id, name);
+      await upload(files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
+  const drop = useFileDrop((files) => onDropFiles(files), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
 
   // ── รายการ ──
   const album = albums?.find((a) => a.id === albumId) ?? null;
@@ -226,6 +256,23 @@ export function SampleImagesPage() {
   const selected = list.filter((p) => sel.has(p.id));
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const allOn = list.length > 0 && list.every((p) => sel.has(p.id));
+  // ลากกรอบจากที่ว่าง = เลือกหลายรูป + การ์ดอัลบั้มย่อย (เจ้าของขอ 2026-11-17 · ของกลาง lib/use-marquee-select) · id = "p:<รูป>" / "a:<อัลบั้ม>"
+  const mq = useMarqueeSelect({
+    disabled: !album,
+    getSelected: () => [...[...sel].map((id) => `p:${id}`), ...[...selAlbums].map((id) => `a:${id}`)],
+    setSelected: (ids) => {
+      setSel(new Set(ids.filter((x) => x.startsWith("p:")).map((x) => x.slice(2))));
+      setSelAlbums(new Set(trashView ? [] : ids.filter((x) => x.startsWith("a:")).map((x) => x.slice(2))));
+    },
+  });
+  useEffect(() => { setSelAlbums(new Set()); }, [albumId, trashView, albums]);
+  const toggleAlbum = (id: string) => setSelAlbums((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const selAttr = (id: string) => ({ "data-select-id": id }) as Record<string, string>;
+  const moveAlbums = (ids: string[], toParent: SampleAlbum | null) => {
+    const bad = ids.filter((id) => !canMoveAlbum(tree, id, toParent?.id ?? null));
+    if (bad.length) { pushToast("warning", t("ย้ายอัลบั้มเข้าไปในตัวเอง หรือในอัลบั้มย่อยของตัวเองไม่ได้", "Can't move an album into itself")); return; }
+    void act(async () => { for (const id of ids) await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้าย ${ids.length} อัลบั้ม${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, `Moved ${ids.length} album(s)`); }, albumId);
+  };
 
   // ── ส่งเข้าใบงาน / ลบ / เอากลับ / ย้ายอัลบั้มเข้าแบรนด์ ──
   const doMove = async (sheet: PickedDesignSheet) => {
@@ -408,7 +455,7 @@ export function SampleImagesPage() {
   const albumLabel = albumCardLabel;
 
   return (
-    <div {...drop.guard} className="space-y-4 px-4 py-5 sm:px-8">
+    <div {...drop.guard} ref={album ? wheelRef : albumGrid.wheelRef} className="space-y-4 px-4 py-5 sm:px-8">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="flex items-center gap-2 text-xl font-bold text-slate-900"><Icon value="i:camera" /> SAMPLE Images</h1>
@@ -430,7 +477,8 @@ export function SampleImagesPage() {
             {/* แถบแบรนด์ (ชิ้นส่วนร่วม ./parts — ใช้ในตัวเลือกไฟล์กลางด้วย) */}
             <SampleBrandBar brands={brands} albums={albums} tab={tab} onTab={switchTab} />
 
-            <div className="min-w-0 space-y-3">
+            <div ref={mq.ref} className="relative min-w-0 space-y-3">
+              {mq.box && <div style={mq.box} className="rounded-sm border border-violet-500 bg-violet-500/10" />}
               {!album && (
                 <>
                   <SampleSearchSort query={query} onQuery={setQuery} placeholder={t("ค้นชื่ออัลบั้ม / วันที่ / แบรนด์…", "Search album / date / brand…")}
@@ -530,13 +578,14 @@ export function SampleImagesPage() {
                 {chooser && (
                   <div className="rounded-lg border border-slate-200 bg-white p-2 text-[12px]">
                     <div className="mb-1.5 flex items-center gap-2">
-                      <span className="font-medium text-slate-700">{chooser === "photos" ? t(`ย้าย ${selected.length} รูปไปอัลบั้มไหน?`, `Move ${selected.length} image(s) to which album?`) : t(`ย้ายอัลบั้ม "${album.name}" ไปไว้ที่ไหน?`, `Move "${album.name}" where?`)}</span>
+                      <span className="font-medium text-slate-700">{chooser === "photos" ? t(`ย้าย ${selected.length} รูปไปอัลบั้มไหน?`, `Move ${selected.length} image(s) to which album?`) : chooser === "albums" ? t(`ย้าย ${selAlbums.size} อัลบั้มไปไว้ที่ไหน?`, `Move ${selAlbums.size} album(s) where?`) : t(`ย้ายอัลบั้ม "${album.name}" ไปไว้ที่ไหน?`, `Move "${album.name}" where?`)}</span>
                       <button type="button" onClick={() => setChooser(null)} aria-label={t("ปิด", "Close")} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"><Icon value="i:x" /></button>
                     </div>
                     <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">
+                      {chooser === "albums" && <button type="button" disabled={busy} onClick={() => moveAlbums([...selAlbums], null)} className="inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 hover:border-violet-300"><Icon value="i:layout-grid" />{t("ชั้นบนสุด (หน้าแฟ้ม)", "Top level")}</button>}
                       {chooser === "album" && album.parent_id && <button type="button" disabled={busy} onClick={() => moveAlbum(album.id, null)} className="inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 hover:border-violet-300"><Icon value="i:layout-grid" />{t("ชั้นบนสุด (หน้าแฟ้ม)", "Top level")}</button>}
-                      {(albums ?? []).filter((a) => a.brand_id === album.brand_id && (chooser === "photos" ? a.id !== album.id : a.id !== album.parent_id && canMoveAlbum(tree, album.id, a.id))).slice(0, 60).map((a) => (
-                        <button key={a.id} type="button" disabled={busy} onClick={() => (chooser === "photos" ? movePhotos(selected.map((p) => p.id), a) : moveAlbum(album.id, a))}
+                      {(albums ?? []).filter((a) => a.brand_id === album.brand_id && (chooser === "photos" ? a.id !== album.id : chooser === "albums" ? a.id !== album.id && !selAlbums.has(a.id) && [...selAlbums].every((id) => canMoveAlbum(tree, id, a.id)) : a.id !== album.parent_id && canMoveAlbum(tree, album.id, a.id))).slice(0, 60).map((a) => (
+                        <button key={a.id} type="button" disabled={busy} onClick={() => (chooser === "photos" ? movePhotos(selected.map((p) => p.id), a) : chooser === "albums" ? moveAlbums([...selAlbums], a) : moveAlbum(album.id, a))}
                           className="inline-flex h-8 max-w-full items-center gap-1 truncate rounded-full border border-slate-200 bg-white px-3 text-slate-700 hover:border-violet-300 disabled:opacity-60">
                           <Icon value="i:folder" />{albumPath(tree, a.id).map((id) => nameOf(albums?.find((x) => x.id === id))).join(" › ")}
                         </button>
@@ -550,11 +599,11 @@ export function SampleImagesPage() {
                 {shownChildren.length > 0 && !trashView && (
                   <div>
                     <div className="mb-1.5 text-[12px] font-medium text-slate-400">{t(`อัลบั้มย่อย (${shownChildren.length})`, `Sub-albums (${shownChildren.length})`)}</div>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    <div className="grid max-sm:!grid-cols-2" style={gridStyle}>
                       {shownChildren.map((c) => (
-                        <SampleAlbumCard key={c.id} sub album={c} onOpen={() => void openAlbum(c.id)} highlight={overKey === `al:${c.id}`}
+                        <SampleAlbumCard key={c.id} sub album={c} selected={selAlbums.has(c.id)} onOpen={() => (selAlbums.size ? toggleAlbum(c.id) : void openAlbum(c.id))} highlight={overKey === `al:${c.id}`}
                           edge={overKey === `alo:${c.id}:before` ? "before" : overKey === `alo:${c.id}:after` ? "after" : null}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...subAlbumDrop(c) }} />
+                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...subAlbumDrop(c), ...selAttr(`a:${c.id}`) }} />
                       ))}
                     </div>
                   </div>
@@ -571,7 +620,7 @@ export function SampleImagesPage() {
                       title={trashView ? t("ถังขยะว่าง", "Trash is empty") : t("ยังไม่มีรูปในอัลบั้มนี้", "No images yet")}
                       hint={trashView ? undefined : t("ลากรูปมาวางด้านบนได้เลย", "Drop images above")} />)
                   : (
-                    <div ref={wheelRef} className="grid" style={gridStyle}>
+                    <div className="grid" style={gridStyle}>
                       {list.map((p) => {
                         const on = sel.has(p.id);
                         const zone = overKey?.startsWith(`ph:${p.id}:`) ? (overKey.slice(`ph:${p.id}:`.length) as DropZone) : null;
@@ -579,7 +628,7 @@ export function SampleImagesPage() {
                         const idx = list.indexOf(p);
                         return (
                           <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over}
-                            extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : photoDrop(p.id)) }}>
+                            extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : photoDrop(p.id)), ...selAttr(`p:${p.id}`) }}>
                             {over && <span className="pointer-events-none absolute inset-x-1.5 top-1.5 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-center text-[11px] text-white">{t("ปล่อย = รวมเป็นอัลบั้มใหม่", "Drop to make an album")}</span>}
                             {(zone === "before" || zone === "after") && <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1.5 rounded-full bg-violet-500 ${zone === "before" ? "left-0" : "right-0"}`} />}
                             {photoSort === "manual" && !searching && !trashView && <span className="pointer-events-none absolute bottom-[34px] left-1.5 rounded-md bg-white/90 px-1.5 text-[10.5px] font-medium text-slate-600 shadow-sm">{idx === 0 ? t("ปก", "Cover") : idx + 1}</span>}
@@ -595,7 +644,7 @@ export function SampleImagesPage() {
               ) : (
                 /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
                 /* จำนวนการ์ดต่อแถวตามที่เลือก (Ctrl + ลูกกลิ้ง / ▦) · มือถือคงไว้ 1–2 ต่อแถวเหมือนเดิม */
-                <div ref={albumGrid.wheelRef} style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
+                <div style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
                   {cards.map(({ album: a, inside }) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} inside={inside} onOpen={() => void openAlbum(a.id)} />)}
                 </div>
               )}
@@ -603,8 +652,14 @@ export function SampleImagesPage() {
           </>
         )}
 
-      <BulkActionBar count={selected.length} unit={t("รูป", "images")} onClear={() => setSel(new Set())}>
-        {!trashView && (
+      <BulkActionBar count={selected.length + selAlbums.size}
+        unit={selAlbums.size && !selected.length ? t("อัลบั้ม", "albums") : selAlbums.size ? t("รายการ", "items") : t("รูป", "images")}
+        onClear={() => { setSel(new Set()); setSelAlbums(new Set()); }}>
+        {selAlbums.size > 0 && canEdit && (
+          <button type="button" onClick={() => setChooser("albums")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:transfer-out" />{t(`ย้าย ${selAlbums.size} อัลบั้มไป…`, `Move ${selAlbums.size} album(s)…`)}</button>
+        )}
+        {selAlbums.size > 0 && selected.length > 0 && <span className="text-[12px] text-slate-500">{t("เลือกทั้งรูปและอัลบั้ม — ทำกับรูปได้เมื่อเลือกแต่รูป", "Photos and albums selected — photo actions need photos only")}</span>}
+        {!trashView && !selAlbums.size && (
           <>
             {album && canUpload && <button type="button" onClick={() => void createSub(selected.map((p) => p.id))} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:folders" />{t("สร้างอัลบั้มจากที่เลือก", "New album from selection")}</button>}
             {album && canEdit && <button type="button" onClick={() => setChooser("photos")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:transfer-out" />{t("ย้ายไปอัลบั้ม…", "Move to album…")}</button>}
@@ -615,6 +670,9 @@ export function SampleImagesPage() {
         )}
         {trashView && canEdit && <button type="button" onClick={() => void doRestore()} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:arrow-back-up" />{t("เอากลับ", "Restore")}</button>}
       </BulkActionBar>
+
+      <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
+        onCancel={() => setDropFiles(null)} onConfirm={(name) => void confirmDrop(name)} />
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}
         initialBrand={albumBrand?.name ?? null}
