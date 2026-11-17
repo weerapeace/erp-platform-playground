@@ -104,7 +104,7 @@ function NoteMark({ note }: { note: string }) {
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
   /** ถูกเลือกอยู่ (ลากกรอบเลือก) — กรอบม่วง + ติ๊ก */
   selected?: boolean;
@@ -114,6 +114,8 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   inside?: string | null;
   /** เมนู ⋯ บนการ์ดอัลบั้มย่อย (เช่น "ย้ายออก 1 ชั้น") */
   menu?: { label: string; icon?: string; onClick: () => void }[];
+  /** ลากไฟล์จากเครื่องมาค้างบนการ์ด → ป้ายทับ "วางเพื่อลงรูปใน …" */
+  dropLabel?: string | null;
 }) {
   const t = useT();
   const a = album;
@@ -123,6 +125,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
       className={`relative overflow-visible rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : selected ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200 hover:border-slate-300"}`}>
       {bar}
       {selected && <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
+      {dropLabel && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{dropLabel}</span>}
       <div className="overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} /></div>
       <div className="space-y-1 p-2.5">
         <div className="flex items-center gap-1 text-[13px] font-medium text-slate-800">
@@ -154,7 +157,8 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   );
   return (
     <button type="button" onClick={onOpen} {...extra}
-      className={`overflow-hidden rounded-xl border bg-white text-left transition hover:shadow-md ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : "border-slate-200 hover:border-slate-300"}`}>
+      className={`relative overflow-hidden rounded-xl border bg-white text-left transition hover:shadow-md ${highlight || dropLabel ? "border-emerald-400 ring-2 ring-emerald-300" : "border-slate-200 hover:border-slate-300"}`}>
+      {dropLabel && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{dropLabel}</span>}
       <AlbumCover keys={a.preview_keys} total={a.deep.photos} />
       <div className="space-y-1.5 p-3">
         <div className="font-medium text-slate-800">{albumCardLabel(a)}</div>

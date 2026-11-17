@@ -55,7 +55,8 @@ async function readEntries(entries: FsEntry[], limit = 2000): Promise<File[]> {
 }
 
 export function useFileDrop(
-  onFiles: (files: File[], key: string) => void,
+  /** info.shiftKey = กด Shift ค้างตอนวาง (หน้าใช้สลับโหมดครั้งเดียวได้) */
+  onFiles: (files: File[], key: string, info?: { shiftKey: boolean }) => void,
   /** folders = ลากทั้งโฟลเดอร์ได้ (ไล่ไฟล์ข้างในทุกชั้น · path อ่านด้วย filePathOf) */
   opts: { accept?: string | string[]; disabled?: boolean; onReject?: () => void; onBusy?: () => void; folders?: boolean } = {}
 ) {
@@ -105,6 +106,7 @@ export function useFileDrop(
         opts.onBusy?.();
         return;
       }
+      const info = { shiftKey: e.shiftKey };
       // รายการต้องหยิบตอนนี้เลย (หลังจบ event เบราว์เซอร์ล้างทิ้ง) แล้วค่อยไล่อ่านโฟลเดอร์
       const entries = opts.folders
         ? Array.from(e.dataTransfer.items ?? [])
@@ -114,13 +116,13 @@ export function useFileDrop(
       if (entries.some((x) => x.isDirectory)) {
         void readEntries(entries).then((all) => {
           const files = all.filter(accepts);
-          if (files.length) onFiles(files, key);
+          if (files.length) onFiles(files, key, info);
           else opts.onReject?.();
         });
         return;
       }
       const files = Array.from(e.dataTransfer.files).filter(accepts);
-      if (files.length) onFiles(files, key);
+      if (files.length) onFiles(files, key, info);
       else opts.onReject?.();
     },
   });

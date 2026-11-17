@@ -35,7 +35,7 @@ import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
-import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, productLinkLabel, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
+import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, nextVersionName, productLinkLabel, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
 import { linkAlbumProduct } from "./api";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, reorderAlbums, reorderPhotos, restoreSample, saveAlbumNote, setAlbumBrand, trashSample, uploadSample } from "./api";
@@ -126,7 +126,8 @@ export function SampleImagesPage() {
   const [dropPref, setDropPref] = useUserPref<DropMode>("sample_images_drop_mode", "new", (r) => (r === "new" || r === "here" ? r : null));
   const [dropMode, setDropMode] = useState<DropMode>("new");
   const [lastParent, setLastParent] = useUserPref<string>("sample_images_last_parent", "", strPref);
-  const [dropSplit, setDropSplit] = useUserPref<DropSplit>("sample_images_drop_split", "one", (r) => (r === "one" || r === "sku" || r === "album" ? r : null));   // แบบแบ่งรูปล่าสุด   // Parent ล่าสุดที่เลือกในป๊อปลงรูป
+  const [dropKind, setDropKind] = useUserPref<"one" | "many">("sample_images_drop_kind", "one", (r) => (r === "one" || r === "many" ? r : null));   // โหมดลงรูป (ลงชุดเดียว / ลงหลายอัลบั้ม)
+  const [, setDropSplit] = useUserPref<DropSplit>("sample_images_drop_split", "one", (r) => (r === "one" || r === "sku" || r === "album" ? r : null));   // แบบแบ่งรูปล่าสุด   // Parent ล่าสุดที่เลือกในป๊อปลงรูป
   // เชื่อมสินค้า (2026-11-17): ป๊อปเชื่อม + รูปที่มีอยู่แล้วของสินค้าที่อัลบั้มเชื่อม (ไว้เทียบ)
   const [linking, setLinking] = useState(false);
   const [linkedImgs, setLinkedImgs] = useState<{ key: string; label: string }[]>([]);   // แผงเลือกอัลบั้มปลายทาง
@@ -193,13 +194,13 @@ export function SampleImagesPage() {
   const uploadBrandId: string | null = tab === NONE ? null : tab !== ALL ? tab : (brandOf(lastBrand)?.id ?? brands[0]?.id ?? null);
 
   /** into = ลงอัลบั้มนี้แทนอัลบั้มที่เปิดอยู่ · stayOn = หลังลงเสร็จเปิดอัลบั้มไหน (ไม่ส่ง = อัลบั้มที่ลง) */
-  const upload = async (files: File[], into?: { id: string; name: string; brand_id: string | null }, stayOn?: string) => {
-    if (!canUpload) { pushToast("error", t("คุณไม่มีสิทธิ์ลงรูป", "You can't upload images")); return; }
-    if (up) { pushToast("info", t("กำลังลงรูปชุดก่อนอยู่ — รอสักครู่", "Still uploading — please wait")); return; }
+  const upload = async (files: File[], into?: { id: string; name: string; brand_id: string | null }, stayOn?: string, quiet?: boolean): Promise<number> => {
+    if (!canUpload) { pushToast("error", t("คุณไม่มีสิทธิ์ลงรูป", "You can't upload images")); return 0; }
+    if (up) { pushToast("info", t("กำลังลงรูปชุดก่อนอยู่ — รอสักครู่", "Still uploading — please wait")); return 0; }
     const { ok, unsupported, notImage } = splitSampleFiles(files);
     if (unsupported.length) pushToast("warning", t(`ข้าม ${unsupported.length} ไฟล์ (RAW/ไฟล์งาน แปลงเป็น JPEG ในเว็บไม่ได้ — ลง JPG/PNG/HEIC แทน)`, `Skipped ${unsupported.length} RAW/work files`));
     if (notImage.length) pushToast("warning", t(`ข้าม ${notImage.length} ไฟล์ที่ไม่ใช่รูป`, `Skipped ${notImage.length} non-image files`));
-    if (!ok.length) return;
+    if (!ok.length) return 0;
     // เปิดอัลบั้มอยู่ = เพิ่มเข้าอัลบั้มนั้น (เหมือนวางของลงแฟ้ม · เจ้าของเลือก 2026-11-14) · หน้าแฟ้ม = อัลบั้มของแบรนด์ + วันนี้
     const openNow = into ?? albums?.find((a) => a.id === albumId) ?? null;
     const brandId = openNow ? openNow.brand_id : uploadBrandId;
@@ -222,25 +223,79 @@ export function SampleImagesPage() {
       if (nextTab !== tab) setTab(nextTab);
       setTrashView(false); setQuery("");   // ลงรูปใหม่ = โชว์ทั้งอัลบั้ม (ไม่ให้รูปที่เพิ่งลงโดนคำค้นซ่อน)
       await reload(stayOn ?? album.id, nextTab);
-      if (done) pushToast("success", t(`ลง ${done} รูปใน ${album.name} แล้ว${dup ? ` (${dup} รูปเคยลงไว้ ใช้รูปเดิม)` : ""}`, `Added ${done} image(s) to ${album.name}`));
+      if (done && !quiet) pushToast("success", t(`ลง ${done} รูปใน ${album.name} แล้ว${dup ? ` (${dup} รูปเคยลงไว้ ใช้รูปเดิม)` : ""}`, `Added ${done} image(s) to ${album.name}`));
       if (fails.length) pushToast("error", t(`ลงไม่สำเร็จ ${fails.length} รูป — ${fails[0]}`, `${fails.length} failed — ${fails[0]}`));
       if (cancelRef.current) pushToast("info", t("หยุดลงรูปแล้ว", "Upload stopped"));
     } catch (e) {
       pushToast("error", (e as Error).message);
     } finally { setUp(null); }
+    return done;
   };
-  // เปิดอัลบั้มอยู่ → ถามก่อน: สร้างอัลบั้มย่อยใหม่ (Product ### นับต่อทั้งแบรนด์ / ชื่อโฟลเดอร์ที่ลากมา) หรือใส่อัลบั้มนี้ · หน้ารวมอัลบั้ม = ลงอัลบั้มของวันนี้ทันที (เจ้าของเลือก)
-  const onDropFiles = (files: File[]) => {
+  // ชื่ออัลบั้มย่อยตั้งต้น: ในอัลบั้มของวัน = Product ### (นับต่อทั้งแบรนด์) · ในอัลบั้มสินค้า = Version N (2026-11-17)
+  // ⚠️ ต้องประกาศก่อน dropName (useMemo เรียกตอน render)
+  const subNameFor = (p: SampleAlbum) => (isDayAlbum(p) ? nextProductName(albums ?? [], p.brand_id) : nextVersionName(albums ?? [], p.id));
+  // ลงรูปตอนเปิดอัลบั้มอยู่ — 2 โหมด (เจ้าของเลือก 2026-11-17 · จำรายคน pref sample_images_drop_kind):
+  //   ลงชุดเดียว (ค่าเริ่ม) = สร้างอัลบั้มย่อยใหม่ (ชื่อโฟลเดอร์ / Product ### / Version N) แล้วลงทันที ไม่มีป๊อป
+  //   ลงหลายอัลบั้ม = เปิดหน้าจัดรูป · กด Shift ค้างตอนวาง = ใช้อีกโหมดครั้งเดียว
+  // วางบนการ์ดอัลบั้ม (key "card:<id>") = ลงอัลบั้มนั้นตรง ๆ · หน้ารวมอัลบั้ม (ไม่ได้เปิดอัลบั้ม) = ลงอัลบั้มของวันนี้ (แบบเดิม)
+  const onDropFiles = (files: File[], key = "main", info?: { shiftKey: boolean }) => {
+    if (key.startsWith("card:")) { void dropOnCard(key.slice(5), files); return; }
     const openNow = albums?.find((a) => a.id === albumId) ?? null;
     if (!openNow || trashView || !canUpload || !splitSampleFiles(files).ok.length) { void upload(files); return; }
-    setDropMode(dropPref); setDropFiles(files);
+    const kind = info?.shiftKey ? (dropKind === "one" ? "many" : "one") : dropKind;
+    if (kind === "many") { setDropMode("new"); setDropFiles(files); return; }
+    void quickAlbum(openNow, files);
   };
+  const quickAlbum = async (parent: SampleAlbum, files: File[]) => {
+    const name = commonFolderName(splitSampleFiles(files).ok.map(filePathOf)) ?? subNameFor(parent);
+    let made: { id: string; name: string };
+    try { made = await createSubAlbum(parent.id, name); }
+    catch (e) { pushToast("error", t(`สร้างอัลบั้ม "${name}" ไม่สำเร็จ — ${(e as Error).message}`, `Could not create "${name}"`)); return; }
+    const done = await upload(files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id, true);
+    if (!done) return;
+    toast.action(t(`ลง ${done} รูปในอัลบั้มใหม่ "${made.name}" แล้ว`, `Added ${done} to new album "${made.name}"`), t("ย้อนกลับ", "Undo"),
+      // ย้อนกลับ = รูปกลับไปอยู่อัลบั้มแม่ + ลบอัลบั้มใหม่ที่ว่างแล้ว
+      () => void act(async () => {
+        const d = await loadSamples(made.id);
+        const ids = (d.photos ?? []).map((p) => p.id);
+        if (ids.length) await movePhotosTo(ids, made.id, parent.id);
+        await deleteEmptyAlbum(made.id);
+        return t(`ย้อนกลับแล้ว — รูปอยู่ใน "${nameOf(parent)}" ตามเดิม`, "Undone");
+      }, parent.id),
+      { ms: 12000, more: [
+        { label: t("เปิดอัลบั้ม", "Open"), onClick: () => void openAlbum(made.id) },
+        { label: t("เปลี่ยนชื่อ", "Rename"), onClick: () => void renameById(made.id, made.name, parent.id) },
+      ] });
+  };
+  const renameById = async (id: string, current: string, stayOn: string | null) => {
+    const name = await askText({ title: t("เปลี่ยนชื่ออัลบั้ม", "Rename album"), initial: current, required: true, confirmText: t("บันทึก", "Save") });
+    if (!name?.trim() || name.trim() === current) return;
+    await act(async () => { await renameAlbum(id, name.trim()); return t("เปลี่ยนชื่ออัลบั้มแล้ว", "Album renamed"); }, stayOn);
+  };
+  const dropOnCard = async (id: string, files: File[]) => {
+    const target = albums?.find((a) => a.id === id);
+    if (!target || !canUpload) return;
+    const done = await upload(files, { id: target.id, name: nameOf(target), brand_id: target.brand_id }, albumId ?? "", true);
+    if (done) toast.action(t(`ลง ${done} รูปใน "${nameOf(target)}" แล้ว`, `Added ${done} to "${nameOf(target)}"`), t("เปิดอัลบั้ม", "Open"), () => void openAlbum(target.id), { ms: 8000 });
+  };
+  // การ์ดอัลบั้ม: รับไฟล์จากเครื่อง (useFileDrop zone "card:<id>") + ลากภายในหน้า (ย้าย/สลับลำดับ) ในตัวเดียว
+  type DragH = { onDragOver?: (e: React.DragEvent<HTMLElement>) => void; onDragLeave?: (e: React.DragEvent<HTMLElement>) => void; onDrop?: (e: React.DragEvent<HTMLElement>) => void };
+  const withFileDrop = (id: string, inner: DragH = {}) => {
+    if (!canUpload || trashView) return inner;
+    const z = drop.zone(`card:${id}`);
+    return {
+      onDragOver: (e: React.DragEvent<HTMLElement>) => { z.onDragOver(e); if (!e.defaultPrevented) inner.onDragOver?.(e); },
+      onDragLeave: (e: React.DragEvent<HTMLElement>) => { z.onDragLeave(e); inner.onDragLeave?.(e); },
+      onDrop: (e: React.DragEvent<HTMLElement>) => { z.onDrop(e); if (!e.defaultPrevented) inner.onDrop?.(e); },
+    };
+  };
+  const cardDropLabel = (a: SampleAlbum) => (drop.over === `card:${a.id}` ? t(`วางเพื่อลงรูปใน "${nameOf(a)}"`, `Drop to add to "${nameOf(a)}"`) : null);
   const dropName = useMemo(() => {
     if (!dropFiles) return "";
     const openNow = albums?.find((a) => a.id === albumId);
     const paths = splitSampleFiles(dropFiles).ok.map(filePathOf);
     // มีโฟลเดอร์ย่อย = แยกหลายอัลบั้มตามโฟลเดอร์ → ชื่อ Product ### นับต่อ (ไม่ใช้ชื่อโฟลเดอร์บนสุด)
-    return (folderGroups(paths) ? null : commonFolderName(paths)) ?? nextProductName(albums ?? [], openNow?.brand_id ?? null);
+    return (folderGroups(paths) ? null : commonFolderName(paths)) ?? (openNow ? subNameFor(openNow) : nextProductName(albums ?? [], null));
   }, [dropFiles, albums, albumId]);
   // แผนจากป๊อป: ใส่อัลบั้มนี้ / สร้าง 1 อัลบั้มขึ้นไป (แยกตาม SKU) แต่ละอัลบั้มเชื่อม Parent + SKU (เจ้าของเลือก 2026-11-17)
   const confirmDrop = async (plan: DropPlan) => {
@@ -261,7 +316,7 @@ export function SampleImagesPage() {
     // รูปที่ยังไม่จัด (แบบแยกหลายอัลบั้ม) → ลงอัลบั้มที่เปิดอยู่ตรง ๆ
     if (plan.rest?.length) await upload(plan.rest, { id: parent.id, name: parent.name, brand_id: parent.brand_id }, parent.id);
   };
-  const drop = useFileDrop((files) => onDropFiles(files), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
+  const drop = useFileDrop((files, key, info) => onDropFiles(files, key, info), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
 
   // ── รายการ ──
   const album = albums?.find((a) => a.id === albumId) ?? null;
@@ -365,7 +420,7 @@ export function SampleImagesPage() {
   const createSub = async (ids: string[]) => {
     if (!album) return;
     // ชื่อสำเร็จรูป "Product 001" นับต่อจากเลขสูงสุดของแบรนด์นี้ (เจ้าของเลือก 2026-11-16) — แก้ชื่อเองได้
-    const name = await askText({ title: ids.length ? t(`รวม ${ids.length} รูปเป็นอัลบั้มใหม่`, `New album from ${ids.length} image(s)`) : t("สร้างอัลบั้มย่อย", "New sub-album"), message: t(`อยู่ใน ${nameOf(album)}`, `Inside ${nameOf(album)}`), initial: nextProductName(albums ?? [], album.brand_id), required: true, confirmText: t("สร้างอัลบั้ม", "Create album") });
+    const name = await askText({ title: ids.length ? t(`รวม ${ids.length} รูปเป็นอัลบั้มใหม่`, `New album from ${ids.length} image(s)`) : t("สร้างอัลบั้มย่อย", "New sub-album"), message: t(`อยู่ใน ${nameOf(album)}`, `Inside ${nameOf(album)}`), initial: subNameFor(album), required: true, confirmText: t("สร้างอัลบั้ม", "Create album") });
     if (!name?.trim()) return;
     await act(async () => { const r = await createSubAlbum(album.id, name.trim(), ids, album.id); setChooser(null); return t(`สร้างอัลบั้ม "${r.name}" แล้ว${r.moved ? ` · ย้าย ${r.moved} รูปเข้าไป` : ""}`, `Album "${r.name}" created`); }, album.id);
   };
@@ -540,12 +595,25 @@ export function SampleImagesPage() {
               {up ? <UploadProgress {...up} onCancel={() => { cancelRef.current = true; }} />
                 : canUpload && (
                   <div {...drop.zone("main")} className={`rounded-xl border-2 border-dashed px-4 py-4 text-center text-sm transition ${drop.over === "main" ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
+                    {album && !trashView && (
+                      // สวิตช์โหมดลงรูป (จำรายคน) — ลงชุดเดียว = สร้างอัลบั้มให้เลย · ลงหลายอัลบั้ม = เปิดหน้าจัดรูป
+                      <div role="radiogroup" className="mb-2 inline-flex overflow-hidden rounded-lg border border-slate-200 text-left text-[12px]">
+                        {([["one", "ลงชุดเดียว", "สร้างอัลบั้มให้เลย", "One set", "auto new album"], ["many", "ลงหลายอัลบั้ม", "เปิดหน้าจัดรูปก่อน", "Many albums", "sort first"]] as const).map(([k, th, subTh, en, subEn]) => (
+                          <button key={k} type="button" role="radio" aria-checked={dropKind === k} onClick={() => setDropKind(k)}
+                            className={`px-3 py-1.5 ${dropKind === k ? "bg-violet-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                            <span className="block font-medium">{t(th, en)}</span><span className={`block text-[10.5px] ${dropKind === k ? "text-violet-100" : "text-slate-400"}`}>{t(subTh, subEn)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <button type="button" onClick={() => fileRef.current?.click()} className="w-full">
                       <div className="text-2xl text-slate-400"><Icon value="i:upload" /></div>
                       {t("ลากรูปมาวางได้ทีละหลายรูป (ทั้งโฟลเดอร์ก็ได้) หรือกดเพื่อเลือก", "Drag in many photos (or a whole folder), or click to choose")}
                       <div className="mt-0.5 text-[12px] text-slate-400">
                         {album
-                          ? t(`เพิ่มเข้าอัลบั้มนี้ (${albumBrand ? albumBrand.name + " · " : ""}${albumLabel(album)}) · ย่อไม่เกิน 2,400px + แปลงเป็น JPEG ให้เอง`, "Adds to this album · shrunk to ≤2,400px JPEG")
+                          ? (dropKind === "one"
+                            ? t(`สร้าง "${subNameFor(album)}" ใน ${albumLabel(album)} แล้วลงทันที · วางบนการ์ดอัลบั้ม = ลงอัลบั้มนั้น · Shift ค้าง = ใช้อีกโหมด`, `Creates "${subNameFor(album)}" and adds · drop on a card = add there · hold Shift = other mode`)
+                            : t(`เปิดหน้าจัดรูปลงหลายอัลบั้มใน ${albumLabel(album)} · วางบนการ์ดอัลบั้ม = ลงอัลบั้มนั้น · Shift ค้าง = ใช้อีกโหมด`, "Opens the sorter · drop on a card = add there · hold Shift = other mode"))
                           : t(`เข้าอัลบั้ม ${brandOf(uploadBrandId)?.name ?? "ไม่ระบุแบรนด์"} · ${thaiShortDate(new Date())} · ย่อไม่เกิน 2,400px + แปลงเป็น JPEG ให้เอง`, `Goes into ${brandOf(uploadBrandId)?.name ?? "no brand"} · today · shrunk to ≤2,400px JPEG`)}
                       </div>
                     </button>
@@ -669,7 +737,8 @@ export function SampleImagesPage() {
                       {shownChildren.map((c) => (
                         <SampleAlbumCard key={c.id} sub album={c} selected={selAlbums.has(c.id)} onOpen={() => (selAlbums.size ? toggleAlbum(c.id) : void openAlbum(c.id))} highlight={overKey === `al:${c.id}`}
                           edge={overKey === `alo:${c.id}:before` ? "before" : overKey === `alo:${c.id}:after` ? "after" : null}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...subAlbumDrop(c), ...selAttr(`a:${c.id}`) }}
+                          dropLabel={cardDropLabel(c)}
+                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...withFileDrop(c.id, subAlbumDrop(c)), ...selAttr(`a:${c.id}`) }}
                           menu={canEdit ? [
                             { label: t(`ย้ายออก 1 ชั้น (ไป ${upTarget(c) ? nameOf(upTarget(c)) : "ชั้นบนสุด"})`, "Move up one level"), icon: "i:arrow-back-up",
                               onClick: () => moveAlbum(c.id, upTarget(c) ?? null) },
@@ -716,7 +785,7 @@ export function SampleImagesPage() {
                 /* หน้าแฟ้ม: การ์ดอัลบั้ม ปกรวมรูปแบบปรับตามจำนวนรูป (ของกลาง AlbumCover — แบบ C ที่เจ้าของเลือก) */
                 /* จำนวนการ์ดต่อแถวตามที่เลือก (Ctrl + ลูกกลิ้ง / ▦) · มือถือคงไว้ 1–2 ต่อแถวเหมือนเดิม */
                 <div style={albumGrid.gridStyle} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
-                  {cards.map(({ album: a, inside }) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} inside={inside} onOpen={() => void openAlbum(a.id)} />)}
+                  {cards.map(({ album: a, inside }) => <SampleAlbumCard key={a.id} album={a} brand={brandOf(a.brand_id)} inside={inside} onOpen={() => void openAlbum(a.id)} dropLabel={cardDropLabel(a)} extra={withFileDrop(a.id)} />)}
                 </div>
               )}
             </div>
@@ -732,7 +801,7 @@ export function SampleImagesPage() {
         {selAlbums.size > 0 && selected.length > 0 && <span className="text-[12px] text-slate-500">{t("เลือกทั้งรูปและอัลบั้ม — ทำกับรูปได้เมื่อเลือกแต่รูป", "Photos and albums selected — photo actions need photos only")}</span>}
         {!trashView && !selAlbums.size && (
           <>
-            {album && canUpload && <button type="button" onClick={() => void createSub(selected.map((p) => p.id))} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:folders" />{t("สร้างอัลบั้มจากที่เลือก", "New album from selection")}</button>}
+            {album && canUpload && <button type="button" onClick={() => void createSub(selected.map((p) => p.id))} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:folders" />{!isDayAlbum(album) ? t("สร้าง Version จากที่เลือก", "New version from selection") : t("สร้างอัลบั้มจากที่เลือก", "New album from selection")}</button>}
             {album && canEdit && <button type="button" onClick={() => setChooser("photos")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:transfer-out" />{t("ย้ายไปอัลบั้ม…", "Move to album…")}</button>}
             {canMove && <button type="button" onClick={() => setPicking(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:arrow-right" />{t("ส่งไป Design Dashboard", "Send to Design Dashboard")}</button>}
             {canDelete && <button type="button" onClick={() => setAskDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-sm text-rose-600 hover:bg-rose-50"><Icon value="i:trash" />{t("ลบ (ไปถังขยะ)", "Delete (to trash)")}</button>}
@@ -753,7 +822,7 @@ export function SampleImagesPage() {
       )}
 
       <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
-        defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null} defaultSplit={dropSplit}
+        defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null} defaultSplit="album"
         onCancel={() => setDropFiles(null)} onConfirm={(plan) => void confirmDrop(plan)} />
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}

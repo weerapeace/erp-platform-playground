@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 
 type Variant = "success" | "error" | "warning" | "info";
 type ToastAction = { label: string; onClick: () => void };
-type ToastItem = { id: number; msg: string; variant: Variant; action?: ToastAction; until?: number };
+type ToastItem = { id: number; msg: string; variant: Variant; action?: ToastAction; more?: ToastAction[]; until?: number };
 
 export type ToastApi = {
   show: (msg: string, variant?: Variant) => void;
@@ -21,7 +21,8 @@ export type ToastApi = {
   warning: (msg: string) => void;
   info: (msg: string) => void;
   /** แจ้ง + ปุ่มทำต่อ (เช่น "ย้อนกลับ") — ค่าเริ่ม: สีสำเร็จ อยู่ 10 วินาที */
-  action: (msg: string, label: string, onClick: () => void, opts?: { variant?: Variant; ms?: number }) => void;
+  /** more = ปุ่มเพิ่มเติมต่อท้าย (เช่น [เปิดอัลบั้ม] [เปลี่ยนชื่อ]) — ปุ่มหลัก (label) นับถอยหลัง */
+  action: (msg: string, label: string, onClick: () => void, opts?: { variant?: Variant; ms?: number; more?: ToastAction[] }) => void;
 };
 
 export type ToastVariant = Variant;
@@ -63,11 +64,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { setMounted(true); }, []);
 
   const remove = useCallback((id: number) => setItems((p) => p.filter((t) => t.id !== id)), []);
-  const show = useCallback((msg: string, variant: Variant = "info", action?: ToastAction, ms?: number) => {
+  const show = useCallback((msg: string, variant: Variant = "info", action?: ToastAction, ms?: number, more?: ToastAction[]) => {
     if (!msg) return;
     const id = ++idRef.current;
     const life = ms ?? (action ? 10000 : variant === "error" ? 6000 : 3500);
-    setItems((p) => [...p, { id, msg, variant, action, until: action ? Date.now() + life : undefined }]);
+    setItems((p) => [...p, { id, msg, variant, action, more, until: action ? Date.now() + life : undefined }]);
     setTimeout(() => remove(id), life);
   }, [remove]);
 
@@ -77,7 +78,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     error:   (m) => show(m, "error"),
     warning: (m) => show(m, "warning"),
     info:    (m) => show(m, "info"),
-    action:  (m, label, onClick, o) => show(m, o?.variant ?? "success", { label, onClick }, o?.ms),
+    action:  (m, label, onClick, o) => show(m, o?.variant ?? "success", { label, onClick }, o?.ms, o?.more),
   }), [show]);
 
   return (
@@ -96,6 +97,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   {t.action.label}{t.until ? <Countdown until={t.until} /> : null}
                 </button>
               )}
+              {t.more?.map((a) => (
+                <button key={a.label} type="button" onClick={(e) => { e.stopPropagation(); remove(t.id); a.onClick(); }}
+                  className="-my-1 flex-shrink-0 rounded-md bg-white/20 px-2.5 py-1 text-[13px] font-semibold hover:bg-white/30">{a.label}</button>
+              ))}
               <span className="opacity-60 flex-shrink-0">✕</span>
             </div>
           ))}

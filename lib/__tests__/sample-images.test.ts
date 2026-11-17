@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextProductName, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
+import { nextProductName, nextVersionName, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -281,5 +281,13 @@ describe("เชื่อมสินค้า (2026-11-17)", () => {
     expect(albumMatches(a, "GG-BAG24")).toBe(true);
     expect(albumMatches(a, "GG-BAG24-CR")).toBe(true);
     expect(albumMatches({ ...base }, "GG-BAG24")).toBe(false);
+  });
+});
+
+describe("nextVersionName — อัลบั้มย่อยในอัลบั้มสินค้า", () => {
+  it("นับต่อจาก Version สูงสุดของพี่น้องในอัลบั้มเดียวกัน", () => {
+    const list = [{ name: "Version 1", parent_id: "p" }, { name: "version 3", parent_id: "p" }, { name: "Version 9", parent_id: "q" }, { name: "Product 005", parent_id: "p" }];
+    expect(nextVersionName(list, "p")).toBe("Version 4");
+    expect(nextVersionName(list, "z")).toBe("Version 1");
   });
 });

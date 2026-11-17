@@ -76,6 +76,17 @@ export function nextProductName(albums: readonly Pick<SampleAlbum, "name" | "bra
   return `Product ${String(max + 1).padStart(3, "0")}`;
 }
 
+/** อัลบั้มย่อยในอัลบั้มสินค้า (ไม่ใช่อัลบั้มของวัน) = รุ่นของสินค้านั้น → "Version 1, 2…" นับต่อจากพี่น้องในอัลบั้มเดียวกัน (เจ้าของขอ 2026-11-17) */
+export function nextVersionName(albums: readonly Pick<SampleAlbum, "name" | "parent_id">[], parentId: string): string {
+  let max = 0;
+  for (const a of albums) {
+    if (a.parent_id !== parentId) continue;
+    const m = /^version\s*#?\s*(\d+)$/i.exec(a.name.trim());
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `Version ${max + 1}`;
+}
+
 /** ลำดับแบบจัดเอง: มีเลขก่อน (น้อย → มาก) · ไม่มีเลข = ต่อท้าย · เท่ากัน = fallback */
 const byManual = (a: { sort_order?: number | null }, b: { sort_order?: number | null }) => {
   const x = a.sort_order ?? null, y = b.sort_order ?? null;
