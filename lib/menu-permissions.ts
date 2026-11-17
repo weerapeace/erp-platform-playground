@@ -50,6 +50,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/brand-hub", keys: ["products.platforms.view"] },
   // สตูดิโอแพทเทิร์น (แอปหลัก) — ดู / สร้าง-แก้ / ลบแพทเทิร์น
   { href: "/pattern-studio", prefixes: ["pattern_studio."] },
+  // 📦 แพ็คสินค้า — แพ็ค / ดูคลิป / แดชบอร์ดคนแพ็ค / ตั้งค่า (docs/packing-station.md · 2026-11-17)
+  { href: "/packing", prefixes: ["packing."] },
 ];
 
 /** หมวดสิทธิ์ของแอปที่ไม่ผูกกับเมนูไหน (โชว์เป็นกลุ่ม "อื่น ๆ ของแอปนี้" กันตกหล่น) */

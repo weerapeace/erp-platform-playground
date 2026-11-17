@@ -28,7 +28,9 @@ type CamState = "off" | "starting" | "on" | "error";
 type DetectedBarcode = { rawValue: string };
 type BarcodeDetectorLike = { detect: (src: CanvasImageSource) => Promise<DetectedBarcode[]> };
 type BarcodeDetectorCtor = new (opts?: { formats?: string[] }) => BarcodeDetectorLike;
-const getBarcodeDetector = (): BarcodeDetectorCtor | undefined =>
+/** ใช้ร่วม: ตัวอ่านบาร์โค้ดในตัวเบราว์เซอร์ (Android/Chrome) · iPhone ไม่มี = undefined — สถานีแพ็คใช้อ่านจากกล้องที่อัดคลิปอยู่ */
+export type { BarcodeDetectorLike, BarcodeDetectorCtor };
+export const getBarcodeDetector = (): BarcodeDetectorCtor | undefined =>
   (globalThis as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
 
 /** กันอ่านซ้ำรัว ๆ — รหัสเดิมภายใน 2.5 วิ ถือว่าเป็นการอ่านครั้งเดิม */

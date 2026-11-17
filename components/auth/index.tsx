@@ -70,6 +70,7 @@ export type Permission =
   | "tasks.view" | "tasks.create" | "tasks.edit" | "tasks.delete"   // แอปจัดการงาน (แผนงานทีม / Creative) — สิทธิ์จริงอ่านจาก DB
   // ↓ คืนจาก commit 6895c54d (ไฟล์นี้เคยถูกทับด้วยฉบับเก่า 2026-07-01) — ใช้จริงในหลายหน้า · สิทธิ์จริงอ่านจาก DB (erp_my_permissions)
   | "products.platforms.view" | "products.platforms.edit" | "products.platforms.publish" | "products.platforms.manage_accounts" | "platform_orders.view" | "platform_orders.manage"
+  | "packing.pack" | "packing.view_video" | "packing.dashboard" | "packing.manage"   // สถานีแพ็คสินค้า (/packing) — สิทธิ์จริงอ่านจาก DB (migration 202612190300)
   | "work_board.dispatch" | "production.piecework" | "qc.view" | "qc.receive" | "qc.move" | "qc.ship"
   | "work_board.catch_up" | "work_board.catch_up_direct" | "work_board.catch_up_approve"
   | "qc.defect" | "qc.repair" | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory"

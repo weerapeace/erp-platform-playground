@@ -25,3 +25,33 @@ export function shortcutKey(e: Pick<KeyboardEvent, "key" | "code">): string {
   if (PUNCT[code]) return PUNCT[code];
   return key.toLowerCase();
 }
+
+const SHIFT_DIGIT = ")!@#$%^&*(";
+const SHIFT_PUNCT: Record<string, string> = {
+  Slash: "?", Period: ">", Comma: "<", Minus: "_", Equal: "+", Semicolon: ":", Quote: "\"",
+  BracketLeft: "{", BracketRight: "}", Backslash: "|", Backquote: "~",
+};
+
+/**
+ * ตัวอักษรที่ "เครื่องยิงบาร์โค้ด" ตั้งใจพิมพ์ — ไม่ขึ้นกับภาษาแป้นพิมพ์ (คืน "" = ไม่ใช่ตัวอักษร)
+ * ปัญหา: เครื่องยิงทำตัวเป็นคีย์บอร์ด ถ้าเครื่องเปิดภาษาไทยอยู่ ยิง "TH123" ได้ "ฮ๊ๅ/-" → ค้นไม่เจอ
+ * แก้: ดูตำแหน่งปุ่มจริง e.code + Shift ก่อนเสมอ (เครื่องยิงส่งปุ่มตามแป้นอังกฤษ US · ไม่สน Caps Lock)
+ *      ⚠️ ห้ามเชื่อ e.key แม้เป็นตัวอังกฤษ — แป้นไทยปุ่มเลข 2 ได้ "/" · เลข 3 ได้ "-" (เป็นตัวอังกฤษแต่ผิด)
+ *      ไม่รู้ตำแหน่งปุ่ม (e.code ว่าง/ปุ่มแปลก) ค่อยใช้ e.key · แป้น AZERTY/Dvorak ไม่รองรับ (ไม่มีใช้ในร้าน)
+ * ใช้ที่: useScanGun (ของกลางจับเครื่องยิง) — ห้ามใช้กับช่องพิมพ์ของคน
+ */
+export function typedChar(e: Pick<KeyboardEvent, "key" | "code" | "shiftKey">): string {
+  const key = e.key ?? "";
+  const code = e.code ?? "";
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return e.shiftKey ? letter[1] : letter[1].toLowerCase();
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return e.shiftKey ? SHIFT_DIGIT[Number(digit[1])] : digit[1];
+  const num = /^Numpad([0-9])$/.exec(code);
+  if (num) return num[1];
+  if (code === "Space") return " ";
+  if (SHIFT_PUNCT[code]) return e.shiftKey ? SHIFT_PUNCT[code] : PUNCT[code];
+  const numOp: Record<string, string> = { NumpadAdd: "+", NumpadSubtract: "-", NumpadMultiply: "*", NumpadDivide: "/", NumpadDecimal: "." };
+  if (numOp[code]) return numOp[code];
+  return key.length === 1 && key >= " " && key <= "~" ? key : "";
+}
