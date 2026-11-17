@@ -868,7 +868,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "account-menu", label: "เมนูบัญชีผู้ใช้", code: "AccountMenu", category: "layout",
     source: { path: "components/account-menu" },
-    what: "เมนูโปรไฟล์ตัวเดียวทั้งระบบ กดรูป/ชื่อผู้ใช้แล้วได้ โปรไฟล์ รหัสผ่าน ความปลอดภัย สีธีม ภาษา ป๊อปเตือนงาน ติดตั้งแอป ออกจากระบบ (แถบบนและการ์ดชื่อในแถบข้างใช้ตัวนี้ตัวเดียว)",
+    what: "เมนูโปรไฟล์ตัวเดียวทั้งระบบ กดรูป/ชื่อผู้ใช้แล้วได้ โปรไฟล์ รหัสผ่าน ความปลอดภัย สีธีม ภาษา เปิด/ซ่อนตัว Pet (ค่าตั้งอื่นของ Pet อยู่ที่ตัว Pet — คลิกขวา) ติดตั้งแอป ดูแบบ iPhone/iPad ออกจากระบบ (แถบบนและการ์ดชื่อในแถบข้างใช้ตัวนี้ตัวเดียว)",
     when: "ทุกเปลือกหน้าที่มีปุ่มผู้ใช้ · แถบบนใช้ค่าเริ่ม · การ์ดชื่อล่างแถบข้างใส่ placement=\"sidebar\" · โหมดแอปส่ง onDark + device · เพิ่มแถวตั้งค่าส่วนตัวใหม่ = เพิ่มในไฟล์นี้ที่เดียว",
     notWhen: "อย่าเขียนเมนูโปรไฟล์/ปุ่มออกจากระบบแยกในเปลือกใหม่ · หน้าเดียวกันมี AccountMenu 2 ตัว ให้ตัวที่ 2 ใส่ sync={false} (กันซิงก์สีธีมซ้ำ)",
     doc: "account-menu.md",
@@ -888,6 +888,14 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "device-view", label: "ดูแบบ จอคอม / แท็บเล็ต / มือถือ", code: "DeviceView", category: "layout",
     source: { path: "components/device-view" },
     what: "ให้แดชบอร์ดหรือบอร์ดสลับดูตามขนาดจอได้ + รู้ว่าจอที่เปิดอยู่เป็นแบบไหน",
+    doc: "device-view.md",
+  },
+  {
+    key: "device-preview", label: "หน้าต่างลอย ดูแบบ iPhone / iPad", code: "DevicePreviewModal", category: "layout",
+    source: { path: "components/device-preview", names: ["DevicePreviewModal", "DevicePreviewButton"] },
+    what: "หน้าต่างลอยโชว์หน้าที่เปิดอยู่ในขนาดจอ iPhone หรือ iPad ไม่บังหน้า PC ลากย้ายได้ หมุนจอ ย่อกรอบ 50-100% เปลี่ยนหน้าบน PC แล้วกรอบเปลี่ยนตาม จำตำแหน่ง/เครื่องต่อเครื่อง",
+    when: "อยากดูหน้าเว็บปกติแบบมือถือ/แท็บเล็ตเทียบกับจอคอม (ปุ่มอยู่ในเมนูโปรไฟล์แล้ว ทุกหน้าใช้ได้เลย)",
+    notWhen: "หน้าที่ต้องเปลี่ยนหน้าตาตามโหมดเอง ใช้ useDeviceMode / useIpadMode (device-view) · โหมดแอป /app/<key> ใช้ชุดมุมมองอุปกรณ์ในเมนูโปรไฟล์ · อย่าเขียนกรอบ iframe มือถือเอง",
     doc: "device-view.md",
   },
   {

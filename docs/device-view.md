@@ -131,3 +131,11 @@ if (ipad.framePreview) return <IpadPreview view={ipad.view === "ipadP" ? "ipadP"
 - เว็บปกติ: เมนูโปรไฟล์ → "อุปกรณ์และแอป" → **📱 ดูหน้านี้แบบแท็บเล็ต / มือถือ** (`DevicePreviewModal` ใน `components/device-preview` · กรอบ iframe `?embed=1` + ปุ่ม 📷 QR) — เดิมเป็นปุ่มท้ายเมนูซ้าย (เอาออกแล้ว)
 - โหมดแอป `/app/<key>`: เมนูโปรไฟล์ → "มุมมองอุปกรณ์" เหมือนเดิม
 - Design Dashboard ยังอ่าน `?device=` (ลิงก์เก่า/QR) และครอบ `DevicePreviewFrame` เหมือนเดิม แค่ไม่มีปุ่มบนหัวแล้ว
+
+## 2026-11-17 — "ดูหน้านี้แบบ iPhone / iPad" เป็นหน้าต่างลอย
+- เจ้าของสั่ง: "อยากได้ VIEW แบบ IPHONE/IPAD แบบกดแล้วจะเป็นหน้าต่างลอยขึ้นมา จะได้ดูเทียบกันไปได้ด้วย" · เลือกข้อเสนอ 1-4 ใน widget
+- `DevicePreviewModal` (components/device-preview) เดิมเป็นกรอบเต็มจอทำให้หน้าหลักมืด → ตอนนี้ใช้ของกลาง `FloatingPanel` แบบ `autoSize` (เพิ่ม prop ใหม่: กล่องโตตามเนื้อหา ไม่มีมุมปรับขนาด) — ไม่บังหน้า PC ลากย้าย/ย่อเก็บได้ Esc ปิด
+- iPhone 390×844 / iPad 820×1180 · หมุนแนวนอน · ย่อกรอบ 50/75/100% (iframe ขนาดจริงแล้ว scale — หน้าในเห็นจอเท่าเครื่องจริง) · ยังไม่เคยเลือก = เลือกขนาดใหญ่สุดที่พอดีความสูงจอ
+- เปลี่ยนหน้าบน PC → กรอบเปลี่ยนตาม (เช็ก URL ทุก 0.8 วิ เพราะ Next เปลี่ยนหน้าด้วย pushState ไม่มีอีเวนต์ · ไม่ใช้ useSearchParams ในเชลล์) · ปุ่มรีโหลด · QR · เปิดแท็บใหม่
+- จำตำแหน่ง = `localStorage floating-panel:device-preview` · จำเครื่อง/แนว/ขนาด = `device-preview-window` (ต่อเครื่อง) · กติกาล้วน `lib/device-preview.ts` + เทสต์ `lib/__tests__/device-preview.test.ts`
+- ลงทะเบียนของกลาง key `device-preview`

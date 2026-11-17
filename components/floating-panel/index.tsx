@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 
 type Pos = { x: number; y: number };
 
-export function FloatingPanel({ open, onClose, title, icon, children, width = 440, height, footer, storageKey }: {
+export function FloatingPanel({ open, onClose, title, icon, children, width = 440, height, footer, storageKey, autoSize = false, headerExtra }: {
   open: boolean;
   onClose: () => void;
   title: string;
@@ -29,6 +29,10 @@ export function FloatingPanel({ open, onClose, title, icon, children, width = 44
   footer?: ReactNode;
   /** จำตำแหน่ง/ขนาดต่อเครื่อง (localStorage) — ไม่ส่ง = ไม่จำ */
   storageKey?: string;
+  /** กล่องโตตามเนื้อหา (ไม่มีมุมลากปรับขนาด · ไม่มีปุ่มขยายเต็มจอ) — เช่น หน้าต่างดูแบบ iPhone/iPad ที่ขนาดมาจากเครื่องที่เลือก · จำแค่ตำแหน่ง */
+  autoSize?: boolean;
+  /** ปุ่มเพิ่มบนหัว (ก่อนปุ่มย่อ) */
+  headerExtra?: ReactNode;
 }) {
   const [mounted, setMounted] = useState(false);
   const [pos, setPos] = useState<Pos | null>(null);
@@ -101,11 +105,12 @@ export function FloatingPanel({ open, onClose, title, icon, children, width = 44
 
   if (!open || !mounted || !pos || !size) return null;
 
-  const full = phone || maximized;
+  const full = phone || (maximized && !autoSize);
   const style: React.CSSProperties = full
     ? { left: 0, top: 0, width: "100vw", height: "100dvh", borderRadius: 0 }
     : minimized
       ? { right: 16, bottom: 16, width: "auto" }
+      : autoSize ? { left: pos.x, top: pos.y, maxWidth: `calc(100vw - ${Math.max(0, pos.x)}px)`, maxHeight: `calc(100dvh - ${pos.y}px)` }
       : { left: pos.x, top: pos.y, width: size.w, height: size.h };
 
   return createPortal(
@@ -114,11 +119,12 @@ export function FloatingPanel({ open, onClose, title, icon, children, width = 44
         className={`flex h-11 shrink-0 select-none items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 ${full || minimized ? "" : "cursor-move"}`}>
         {icon && <span className="text-base">{icon}</span>}
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{title}</span>
+        {headerExtra}
         {!phone && (
           <>
             <button type="button" onClick={() => { setMinimized((m) => !m); setMaximized(false); }} title={minimized ? "ขยายกลับ" : "ย่อเก็บ"}
               className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-200">{minimized ? "▢" : "▁"}</button>
-            {!minimized && (
+            {!minimized && !autoSize && (
               <button type="button" onClick={() => setMaximized((m) => !m)} title={maximized ? "กลับขนาดเดิม" : "ขยายเต็มจอ"}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-200">{maximized ? "🗗" : "⛶"}</button>
             )}
@@ -128,9 +134,9 @@ export function FloatingPanel({ open, onClose, title, icon, children, width = 44
       </div>
       {!minimized && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
+          <div className={autoSize ? "min-h-0 overflow-auto overscroll-contain" : "min-h-0 flex-1 overflow-y-auto overscroll-contain"}>{children}</div>
           {footer && <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-2">{footer}</div>}
-          {!full && (
+          {!full && !autoSize && (
             <div onPointerDown={onResizeDown} onPointerMove={onResizeMove} onPointerUp={onResizeUp} title="ลากเพื่อปรับขนาด"
               className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize text-slate-300" style={{ background: "linear-gradient(135deg, transparent 50%, #cbd5e1 50%)" }} />
           )}

@@ -213,7 +213,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
       </button>
 
       <MenuSection label={t("การแจ้งเตือน", "Notifications")} />
-      {/* ป๊อปเตือนงาน (ลอยมุมจอ) — เปิด/ซ่อน + มุมจอ · จำต่อคน */}
+      {/* ตัว Pet ศูนย์แจ้งเตือน — บรรทัดเดียว (เปิด/ซ่อน) · ค่าตั้งอื่นย้ายไปที่ตัว Pet (คลิกขวา) เจ้าของสั่ง 2026-11-17 */}
       <WorkPopupFloatToggle />
       {/* ป๊อปเตือนงานเด้งเป็นแจ้งเตือนของเบราว์เซอร์ (มุมจอ) — ตั้งรายเครื่อง */}
       <BrowserPushToggle />
@@ -221,10 +221,10 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
       <MenuSection label={t("อุปกรณ์และแอป", "Devices and app")} />
       {/* ติดตั้งแอปบนเครื่อง — โหมดแอปมีชุดมุมมองอุปกรณ์ด้านล่างแทน */}
       {!device && <InstallAppMenuItem onClick={() => { close(); setInstallOpen(true); }} />}
-      {/* ดูหน้านี้แบบแท็บเล็ต/มือถือ (กรอบจำลอง + QR) — เว็บปกติ · โหมดแอปใช้ "มุมมองอุปกรณ์" ด้านล่างแทน */}
+      {/* ดูหน้านี้แบบ iPhone/iPad (หน้าต่างลอย ไม่บังหน้า PC · เจ้าของสั่ง 2026-11-17) — เว็บปกติ · โหมดแอปใช้ "มุมมองอุปกรณ์" ด้านล่างแทน */}
       {!device && canPreview && (
         <button type="button" className={ROW} onClick={() => { close(); setPreviewOpen(true); }}>
-          <Icon value="📱" /> {t("ดูหน้านี้แบบแท็บเล็ต / มือถือ", "Preview this page as tablet / phone")}
+          <Icon value="📱" /> <span className="flex-1">{t("ดูหน้านี้แบบ iPhone / iPad", "Preview this page as iPhone / iPad")}</span><span className="text-[10px] text-slate-400">{t("หน้าต่างลอย", "floating")}</span>
         </button>
       )}
       {/* มุมมองอุปกรณ์ (โหมดแอปเท่านั้น) — ดูแอปนี้แบบแท็บเล็ต/มือถือบนจอคอม (กรอบจำลอง) + QR สแกนเปิดบนเครื่องจริง */}

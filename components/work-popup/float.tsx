@@ -170,7 +170,8 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
   if (minimized) {
     return (<>
       <FloatingPet source={petPref.source} size={petPref.size} mood={pet.mood} badge={pet.badge} bubble={pet.bubble} stickyBubble={pet.stickyBubble}
-        anchor={anchor} onDrop={(a) => setPref({ ...pref, anchor: a })} onClick={onExpand} label="ศูนย์แจ้งเตือน" />
+        anchor={anchor} onDrop={(a) => setPref({ ...pref, anchor: a })} onClick={() => { setLayoutOpen(false); onExpand(); }}
+        onSettings={() => { setLayoutOpen(true); onExpand(); }} label="ศูนย์แจ้งเตือน" />
       {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
     </>);
   }
@@ -193,7 +194,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
       </ScrollTabs>
     </div>
   );
-  const sub = layoutOpen ? "จัดแท็บ · ความกว้าง · การแสดงผล" : cur?.subtitle ?? "";
+  const sub = layoutOpen ? "ตั้งค่าตัว Pet · แท็บ · การแสดงผล" : cur?.subtitle ?? "";
   return (
     <>
     <div ref={boxRef} role={drawer ? "complementary" : "dialog"} aria-label="ศูนย์แจ้งเตือน"
@@ -220,7 +221,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
           <button type="button" data-no-drag onClick={() => setWidth(nextWidthPreset(width, room))} aria-label="สลับความกว้าง"
             title={`สลับความกว้าง แคบ / กลาง / กว้าง (ตอนนี้ ${width}px) — หรือลากขอบกล่อง`} className={HEAD_BTN}><Icon value="i:arrows-exchange" /></button>
           <button type="button" data-no-drag onClick={() => setLayoutOpen((v) => !v)} aria-pressed={layoutOpen} aria-label="จัดศูนย์แจ้งเตือน"
-            title="จัดแท็บ (ลากสลับที่ · เปิด/ปิด) · ความกว้าง · การแสดงผล"
+            title="ตั้งค่าตัว Pet · จัดแท็บ (ลากสลับที่ · เปิด/ปิด) · ความกว้าง · การแสดงผล (หรือคลิกขวาที่ตัว Pet)"
             className={`${HEAD_BTN} ${layoutOpen ? "bg-indigo-50 text-indigo-700" : ""}`}><Icon value="i:adjustments-horizontal" /></button>
           <button type="button" data-no-drag onClick={switchMode} aria-label={drawer ? "สลับเป็นการ์ดลอย" : "สลับเป็นแถบข้าง"}
             title={drawer ? "สลับเป็นการ์ดลอย (กดข้างนอก = ซ่อน)" : "สลับเป็นแถบข้าง (เปิดค้างจนกด ✕)"} className={HEAD_BTN}>
@@ -272,9 +273,27 @@ function CenterLayoutPanel({ pref, setPref, tabs, width, room, level, onDone, on
     const next = on ? [...hidden].filter((k) => k !== key) : [...hidden, key];
     setPref({ ...pref, tabHidden: next.length ? next : undefined });
   };
+  const [petPref] = useFloatingPetPref();
   const nearest = FLOAT_WIDTH_PRESETS.reduce((b, p, i) => (Math.abs(p - width) < Math.abs(FLOAT_WIDTH_PRESETS[b] - width) ? i : b), 0);
   return (
     <div className="space-y-3 py-2.5">
+      {/* ตัว Pet — ย้ายมาจากเมนูโปรไฟล์ (เจ้าของสั่ง 2026-11-17 "ไปตั้งค่าที่ตัว GIF แทน") */}
+      <section className="space-y-1.5 px-3">
+        <h3 className="text-xs font-semibold text-slate-700">ตัว Pet</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-2 text-[13px] text-slate-700"><PetArt source={petPref.source} size={28} /> ตัว / ขนาด</span>
+          <button type="button" onClick={onPet} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-600 hover:bg-slate-50">เปลี่ยนตัว Pet</button>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[13px] text-slate-700">ลอยที่</span>
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5">
+            {([["br", "ขวาล่าง"], ["tr", "ขวาบน"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setPref({ ...pref, position: k, anchor: null })} className={SEG(!pref.anchor && pref.position === k)}>{l}</button>
+            ))}
+            {pref.anchor && <span className={SEG(true)} title="ลากตัว Pet / หัวการ์ดไปวางเองไว้ · กดมุมเพื่อกลับไปมุมนั้น">ที่ลากไว้</span>}
+          </div>
+        </div>
+      </section>
       <section>
         <div className="flex flex-wrap items-baseline justify-between gap-x-2 px-3 pb-1.5">
           <h3 className="text-xs font-semibold text-slate-700">แท็บ</h3>
@@ -326,10 +345,13 @@ function CenterLayoutPanel({ pref, setPref, tabs, width, room, level, onDone, on
       <section className="flex flex-wrap gap-1.5 px-3">
         <button type="button" onClick={onNotify} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2.5 text-xs text-slate-600 hover:bg-slate-50">
           <Icon name="notify" /> ตั้งค่าว่าจะเตือนเรื่องไหน</button>
-        <button type="button" onClick={onPet} className="h-7 rounded-md border border-slate-200 px-2.5 text-xs text-slate-600 hover:bg-slate-50">เปลี่ยนตัว Pet</button>
+        <button type="button" onClick={() => setPref({ ...pref, enabled: false, minimized: false })}
+          title="ตัว Pet หายจากจอ (ทุกเครื่องของคุณ) · เปิดคืนได้ที่เมนูโปรไฟล์"
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-rose-200 px-2.5 text-xs text-rose-600 hover:bg-rose-50">
+          <Icon value="i:eye-off" /> ซ่อนตัว Pet</button>
       </section>
       <p className="mx-3 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] leading-snug text-slate-500">
-        กด ✕ = ซ่อนเป็นตัว Pet · ลากที่หัวเพื่อย้ายที่ · กดรูป Pet = เปลี่ยนตัว · {WORK_POPUP_HIDE_HINT}
+        กด ✕ = ยุบเป็นตัว Pet · ลากที่หัวเพื่อย้ายที่ · คลิกขวาที่ตัว Pet = เปิดหน้านี้ · {WORK_POPUP_HIDE_HINT}
       </p>
       <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 pt-2">
         <button type="button" onClick={() => setPref({ ...pref, width: undefined, tabOrder: undefined, tabHidden: undefined, hideImg: undefined })}
@@ -340,60 +362,28 @@ function CenterLayoutPanel({ pref, setPref, tabs, width, room, level, onDone, on
   );
 }
 
-/** สวิตช์ในเมนูโปรไฟล์ — เปิด/ซ่อนป๊อปเตือนงาน + เลือกมุม (ใช้ใน AccountMenu) */
+/** บรรทัดเดียวในเมนูโปรไฟล์ — เปิด/ซ่อนตัว Pet (ทางเปิดคืนเมื่อซ่อนไปแล้ว) · ค่าตั้งอื่นทั้งหมดอยู่ที่ตัว Pet
+ *  (เจ้าของสั่ง 2026-11-17: เอาส่วนตั้งค่าป๊อปเตือนงานออกจากเมนู → คลิกขวา/ปุ่มเฟือง/กดค้างที่ตัว Pet → หน้า "จัดศูนย์แจ้งเตือน")
+ *  จอแคบ (ไม่มีตัว Pet ลอย) = ปุ่ม "ตั้งค่า" เปิดหน้าต่างตั้งค่าการแจ้งเตือนแทน */
 export function WorkPopupFloatToggle() {
   const [pref, setPref] = useWorkPopupFloatPref();
-  const [petPref] = useFloatingPetPref();
-  const [pickOpen, setPickOpen] = useState<false | "pet" | "notify">(false);
+  const wide = useFloatScreen();
+  const [pickOpen, setPickOpen] = useState(false);
   return (
     <div className="px-3 py-2 border-t border-slate-100">
       <label className="flex items-center gap-2 cursor-pointer">
-        <span className="flex-1 text-xs text-slate-700">🔔 ป๊อปเตือนงาน <span className="text-[10px] text-slate-400">(ตอนเข้า ERP)</span></span>
+        <Icon value="i:bell" />
+        <span className="flex-1 min-w-0 text-xs text-slate-700 leading-tight">ตัว Pet ศูนย์แจ้งเตือน
+          <span className="block text-[10px] text-slate-400">{!pref.enabled ? "ซ่อนอยู่ — เปิดสวิตช์เพื่อโชว์ (ทุกเครื่องของคุณ)" : wide ? "ตั้งค่า: คลิกขวาที่ตัว Pet" : "จอนี้ไม่มีตัว Pet ลอย — เตือนเป็นหน้าต่างกลางจอ"}</span>
+        </span>
         <input type="checkbox" className="sr-only peer" checked={pref.enabled}
           onChange={(e) => setPref({ ...pref, enabled: e.target.checked, minimized: false })} />
-        <span aria-hidden className="relative w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-blue-600 transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
+        <span aria-hidden className="relative shrink-0 w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-blue-600 transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
       </label>
-      {pref.enabled ? (<>
-        {/* หัวข้อซ้ายกว้างเท่ากันทุกแถว · ปุ่มไม่หักบรรทัดในตัว (เมนูแคบ/ตัวอักษรใหญ่ = ปุ่มขึ้นบรรทัดใหม่ทั้งปุ่ม ไม่ทับกัน) */}
-        <div className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5">
-          <span className="whitespace-nowrap text-[11px] text-slate-400">แบบ</span>
-          <div className="flex flex-wrap gap-1">
-            {([["card", "▢ การ์ดลอย"], ["drawer", "▕ แถบข้าง"]] as const).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setPref({ ...pref, mode: k, minimized: false })}
-                title={k === "drawer" ? "แถบข้างขวา เปิดค้างจนกด ✕" : "การ์ดลอย ลากย้ายได้ กดข้างนอก = ซ่อน"}
-                className={`min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border text-[11px] ${(pref.mode ?? "card") === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
-            ))}
-          </div>
-          <span className="whitespace-nowrap text-[11px] text-slate-400">ลอยที่</span>
-          <div className="flex flex-wrap gap-1">
-            {([["br", "↘ ขวาล่าง"], ["tr", "↗ ขวาบน"]] as const).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setPref({ ...pref, position: k, anchor: null })}
-                className={`min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border text-[11px] ${!pref.anchor && pref.position === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
-            ))}
-            {pref.anchor && <span title="ลากป๊อปไปวางเองไว้ · กดมุมสำเร็จรูปเพื่อกลับไปมุมนั้น" className="inline-flex min-h-6 items-center whitespace-nowrap px-2 py-0.5 rounded-md border border-blue-300 bg-blue-50 text-blue-700 font-medium text-[11px]">📍 ที่ลากไว้</span>}
-          </div>
-          <span className="whitespace-nowrap text-[11px] text-slate-400">ตัว Pet</span>
-          <div className="flex items-center gap-1.5">
-            <PetArt source={petPref.source} size={24} />
-            <button type="button" onClick={() => setPickOpen("pet")} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">เปลี่ยน</button>
-          </div>
-          {/* แท็บที่ซ่อนไว้ในหน้า "จัดศูนย์แจ้งเตือน" — ทางกลับเผื่อซ่อนจนหาไม่เจอ */}
-          {!!pref.tabHidden?.length && (<>
-            <span className="whitespace-nowrap text-[11px] text-slate-400">แท็บ</span>
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-              ซ่อนไว้ {pref.tabHidden.length} แท็บ
-              <button type="button" onClick={() => setPref({ ...pref, tabHidden: undefined })} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">โชว์ทั้งหมด</button>
-            </div>
-          </>)}
-          <span className="whitespace-nowrap text-[11px] text-slate-400">เตือนอะไร</span>
-          <div>
-            <button type="button" onClick={() => setPickOpen("notify")} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ตั้งค่าการแจ้งเตือน</button>
-          </div>
-        </div>
-        {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
-      </>) : (
-        <p className="mt-1 text-[11px] text-slate-400">ปิดอยู่ (ค่าเริ่มต้น) — ไม่มีตัว Pet / ป๊อปไม่เด้ง · เปิดสวิตช์เพื่อโชว์ (ทุกเครื่องของคุณ)</p>
+      {pref.enabled && !wide && (
+        <button type="button" onClick={() => setPickOpen(true)} className="mt-1 ml-6 min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ตั้งค่าการแจ้งเตือน</button>
       )}
+      {pickOpen && <PetPickerModal open initialTab="notify" onClose={() => setPickOpen(false)} />}
     </div>
   );
 }

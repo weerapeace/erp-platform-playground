@@ -28,7 +28,7 @@ export const workPopupAnchor = (p: WorkPopupFloatPref): CornerAnchor => p.anchor
 /** จอแคบกว่านี้ = หน้าต่างกลางจอแบบเดิม (ERP มีแถบเมนูล่าง ลอยแล้วบังงาน) */
 export const FLOAT_MIN_WIDTH = 1280;
 /** ข้อความบอกวิธีปิดถาวร — ปิดได้ที่เดียวคือเมนูโปรไฟล์ (✕ บนการ์ด = แค่ซ่อนเป็นปุ่มเล็ก) */
-export const WORK_POPUP_HIDE_HINT = "ปิดป๊อปนี้ได้ที่ เมนูโปรไฟล์ (กดที่ชื่อคุณ) → 🔔 ป๊อปเตือนงาน";
+export const WORK_POPUP_HIDE_HINT = "ซ่อนตัว Pet ได้ที่ คลิกขวาที่ตัว Pet → ซ่อนตัว Pet · เปิดคืนที่เมนูโปรไฟล์ (กดที่ชื่อคุณ)";
 
 // ── ความกว้าง: ยิ่งกว้าง แถวยิ่งเตี้ย (แคบ 3 บรรทัดต่องาน · กลาง 2 · กว้าง 1 บรรทัดแบบตาราง) ──
 export const FLOAT_WIDTH_MIN = 360;

@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useUserPref } from "@/lib/use-user-pref";
+import { Icon } from "@/components/icon";
 import { anchorFromRect, cornerStyle, viewportSize, type CornerAnchor } from "@/lib/use-corner-drag";
 import {
   FLOATING_PET_DEFAULT, FLOATING_PET_KEY, PET_PX, parseFloatingPetPref, petFileUrl,
@@ -86,7 +87,7 @@ export function PetArt({ source, size }: { source: PetSource; size: number }) {
   return <BuiltinArt id={source.id} size={size} />;
 }
 
-export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBubble, anchor, onDrop, onClick, label }: {
+export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBubble, anchor, onDrop, onClick, onSettings, label }: {
   source: PetSource;
   size?: PetSize;
   mood: PetMood;
@@ -100,6 +101,8 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBub
   /** ลากวางแล้ว → มุม + ระยะจากมุม (ผู้เรียกบันทึกต่อคน) */
   onDrop: (a: CornerAnchor) => void;
   onClick: () => void;
+  /** เปิดแผงตั้งค่าตัว Pet — คลิกขวา · ปุ่มเฟืองตอนชี้เมาส์ · กดค้าง (นิ้ว) (เจ้าของสั่ง 2026-11-17 ย้ายมาจากเมนูโปรไฟล์) */
+  onSettings?: () => void;
   label: string;
 }) {
   const px = PET_PX[size];
@@ -107,7 +110,7 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBub
   // ตำแหน่งที่เพิ่งลากวาง — ใช้ทันทีจนกว่าค่าที่บันทึกตามมา (กันเด้งกลับที่เดิมแวบหนึ่ง)
   const [local, setLocal] = useState<CornerAnchor | null>(null);
   useEffect(() => { setLocal(null); }, [anchor.h, anchor.v, anchor.x, anchor.y]);
-  const drag = useRef<{ sx: number; sy: number; dx: number; dy: number; moved: boolean; raf: number; rect: DOMRect } | null>(null);
+  const drag = useRef<{ sx: number; sy: number; dx: number; dy: number; moved: boolean; raf: number; rect: DOMRect; hold: number; held: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const paint = () => {
@@ -119,13 +122,16 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBub
   const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0 || !ref.current) return;
     ref.current.setPointerCapture(e.pointerId);
-    drag.current = { sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, moved: false, raf: 0, rect: ref.current.getBoundingClientRect() };
+    const d = { sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, moved: false, raf: 0, rect: ref.current.getBoundingClientRect(), hold: 0, held: false };
+    // กดค้างด้วยนิ้ว (ไม่ขยับ) = เปิดแผงตั้งค่า — แทนคลิกขวาบนจอสัมผัส
+    if (onSettings && e.pointerType !== "mouse") d.hold = window.setTimeout(() => { if (!d.moved) { d.held = true; onSettings(); } }, 550);
+    drag.current = d;
   };
   const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const d = drag.current; if (!d) return;
     const rx = e.clientX - d.sx, ry = e.clientY - d.sy;
     if (!d.moved && Math.abs(rx) + Math.abs(ry) < 5) return;
-    if (!d.moved) { d.moved = true; setDragging(true); }
+    if (!d.moved) { d.moved = true; setDragging(true); if (d.hold) clearTimeout(d.hold); }
     // ไม่ให้หลุดจอ
     const vp = viewportSize();
     d.dx = Math.max(-d.rect.left, Math.min(rx, vp.w - d.rect.right));
@@ -137,6 +143,8 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBub
     drag.current = null;
     if (!d || !el) return;
     if (d.raf) cancelAnimationFrame(d.raf);
+    if (d.hold) clearTimeout(d.hold);
+    if (d.held) return;
     if (!d.moved) { if (!cancelled) onClick(); return; }
     el.style.transform = `translate3d(${d.dx}px, ${d.dy}px, 0)`;
     const vp = viewportSize();
@@ -149,16 +157,26 @@ export function FloatingPet({ source, size = "m", mood, badge, bubble, stickyBub
   const at = local ?? anchor;
   const anim = mood === "alert" ? "ov-pet-alert" : mood === "idle" ? "ov-pet-float" : "fpet-sleep";
   return (
-    <button ref={ref} type="button" aria-label={label} title={`${label} — กดเพื่อเปิด · ลากเพื่อย้ายที่`}
+    <button ref={ref} type="button" aria-label={label} title={`${label} — กดเพื่อเปิด · ลากเพื่อย้ายที่${onSettings ? " · คลิกขวา = ตั้งค่า" : ""}`}
+      onContextMenu={onSettings ? (e) => { e.preventDefault(); onSettings(); } : undefined}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => finish(false)} onPointerCancel={() => finish(true)}
       // กด Enter/Space จากคีย์บอร์ด (detail = 0) — คลิกเมาส์/นิ้วจัดการใน finish แล้ว
       onClick={(e) => { if (e.detail === 0) onClick(); }}
       style={{ ...cornerStyle(at, { w: px, h: px }), width: px, height: px, touchAction: "none", willChange: dragging ? "transform" : undefined }}
-      className={`fpet fixed z-[45] select-none bg-transparent p-0 border-0 outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded-2xl ${dragging ? "cursor-grabbing" : "cursor-grab"}`}>
+      className={`fpet group fixed z-[45] select-none bg-transparent p-0 border-0 outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded-2xl ${dragging ? "cursor-grabbing" : "cursor-grab"}`}>
       <span className={`block ${dragging ? "" : anim}`} style={{ width: px, height: px }}><PetArt source={source} size={px} /></span>
       {mood === "sleep" && <span aria-hidden className="fpet-z absolute -top-1 right-1 text-xs font-semibold text-slate-400">z</span>}
       {badge && (
         <span className={`absolute -top-1 -right-1 min-w-[22px] h-[22px] px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-semibold flex items-center justify-center shadow ${mood === "alert" ? "ov-badge-pulse" : ""}`}>{badge}</span>
+      )}
+      {/* ปุ่มเฟือง (โผล่ตอนชี้เมาส์) — span ไม่ใช่ button เพราะอยู่ในปุ่มตัว Pet · หยุด pointerdown ไม่ให้เริ่มลาก */}
+      {onSettings && !dragging && (
+        <span role="button" tabIndex={-1} aria-label="ตั้งค่าตัว Pet" title="ตั้งค่าตัว Pet"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => { e.stopPropagation(); onSettings(); }}
+          className={`absolute -bottom-1 h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow hover:text-slate-900 hidden group-hover:flex ${at.h === "r" ? "-left-1" : "-right-1"}`}>
+          <Icon value="i:settings" />
+        </span>
       )}
       {bubble && (mood === "alert" || stickyBubble) && !dragging && (
         <span className={`ov-bubble-pop absolute whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-lg ${at.v === "b" ? "bottom-full mb-1.5" : "top-full mt-1.5"} ${at.h === "r" ? "right-0" : "left-0"}`}>{bubble}</span>
