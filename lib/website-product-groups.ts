@@ -8,6 +8,7 @@
  * ตัวตัดสินว่าสินค้าอยู่ในกลุ่มไหม = groupMatches ใน lib/website-promotions (มิเรอร์เว็บร้าน → ตะกร้ากับออเดอร์คิดตรงกัน)
  * ตาราง store_product_groups · API /api/website/product-groups · หน้าจอ components/website-product-groups.tsx
  */
+import { tr } from "@/lib/lang";
 import type { GroupMatch, ProductGroup } from "@/lib/website-promotions";
 
 export type ProductGroupRow = ProductGroup & { note: string; updatedAt: string | null };
@@ -62,14 +63,14 @@ export function groupFromRow(r: Record<string, unknown>): ProductGroupRow {
 
 /** สรุปกลุ่มเป็นภาษาคน เช่น "หมวด กระเป๋า · ราคา ฿800–1,500 · มาใหม่ 30 วัน" (labelOf = ชื่อหมวดจากรหัสหมวด) */
 export function groupSummary(g: Pick<ProductGroup, "mode" | "codes" | "match">, labelOf: (cat: string) => string = (c) => c): string {
-  if (g.mode !== "smart") return `เลือกเอง ${g.codes.length} รุ่น`;
+  if (g.mode !== "smart") return tr(`เลือกเอง ${g.codes.length} รุ่น`, `Picked manually · ${g.codes.length} models`);
   const m = g.match ?? {};
   const parts: string[] = [];
-  if (m.categories?.length) parts.push(`หมวด ${m.categories.map(labelOf).join(" / ")}`);
-  if (m.priceMin != null && m.priceMax != null) parts.push(`ราคา ${money(m.priceMin)}–${money(m.priceMax).slice(1)}`);
-  else if (m.priceMin != null) parts.push(`ราคาตั้งแต่ ${money(m.priceMin)}`);
-  else if (m.priceMax != null) parts.push(`ราคาไม่เกิน ${money(m.priceMax)}`);
-  if (m.newDays) parts.push(`มาใหม่ ${m.newDays} วัน`);
-  if (m.codePrefixes?.length) parts.push(`รหัสขึ้นต้น ${m.codePrefixes.join(" / ")}`);
-  return parts.join(" · ") || "ยังไม่ตั้งเงื่อนไข";
+  if (m.categories?.length) parts.push(`${tr("หมวด", "Category")} ${m.categories.map(labelOf).join(" / ")}`);
+  if (m.priceMin != null && m.priceMax != null) parts.push(`${tr("ราคา", "Price")} ${money(m.priceMin)}–${money(m.priceMax).slice(1)}`);
+  else if (m.priceMin != null) parts.push(`${tr("ราคาตั้งแต่", "Price from")} ${money(m.priceMin)}`);
+  else if (m.priceMax != null) parts.push(`${tr("ราคาไม่เกิน", "Price up to")} ${money(m.priceMax)}`);
+  if (m.newDays) parts.push(tr(`มาใหม่ ${m.newDays} วัน`, `New in ${m.newDays} days`));
+  if (m.codePrefixes?.length) parts.push(`${tr("รหัสขึ้นต้น", "Code starts with")} ${m.codePrefixes.join(" / ")}`);
+  return parts.join(" · ") || tr("ยังไม่ตั้งเงื่อนไข", "No conditions set");
 }

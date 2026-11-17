@@ -32,32 +32,35 @@ import {
   type FrameShape,
   type SavedFrame,
 } from "@/lib/website-frames";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-schema-en";
 
 const imgUrl = (key: string, w = 600) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
 /** ทรงที่ "ประกอบเอง" เลือกได้ (ทรงที่วาดเส้นขอบตามทรงได้) */
 const BUILD_SHAPES: { v: string; l: string }[] = [
-  { v: "rect", l: "เหลี่ยม" },
-  { v: "rounded", l: "มุมมน" },
-  { v: "ellipse", l: "วงรี" },
-  { v: "arch", l: "โค้งประตู" },
-  { v: "heart", l: "หัวใจ" },
-  { v: "star", l: "ดาว" },
-  { v: "hexagon", l: "หกเหลี่ยม" },
-  { v: "cloud", l: "ก้อนเมฆ" },
-  { v: "blob", l: "ทรงอิสระ" },
+  { v: "rect", get l() { return tr("เหลี่ยม", "Rectangle"); } },
+  { v: "rounded", get l() { return tr("มุมมน", "Rounded"); } },
+  { v: "ellipse", get l() { return tr("วงรี", "Oval"); } },
+  { v: "arch", get l() { return tr("โค้งประตู", "Arch"); } },
+  { v: "heart", get l() { return tr("หัวใจ", "Heart"); } },
+  { v: "star", get l() { return tr("ดาว", "Star"); } },
+  { v: "hexagon", get l() { return tr("หกเหลี่ยม", "Hexagon"); } },
+  { v: "cloud", get l() { return tr("ก้อนเมฆ", "Cloud"); } },
+  { v: "blob", get l() { return tr("ทรงอิสระ", "Freeform"); } },
 ];
 const BORDERS: { v: FrameDef["border"]; l: string }[] = [
-  { v: "none", l: "ไม่มี" },
-  { v: "line", l: "เส้น" },
-  { v: "dotted", l: "จุดไข่ปลา" },
-  { v: "double", l: "เส้นคู่" },
+  { v: "none", get l() { return tr("ไม่มี", "None"); } },
+  { v: "line", get l() { return tr("เส้น", "Line"); } },
+  { v: "dotted", get l() { return tr("จุดไข่ปลา", "Dotted"); } },
+  { v: "double", get l() { return tr("เส้นคู่", "Double line"); } },
 ];
 /** ทรงตัวอย่าง (ลองดูก่อนอัปไฟล์จริง) — วาดในกรอบ 0–100 */
 const SAMPLE_SHAPES: { v: string; l: string; shape: FrameShape }[] = [
-  { v: "bag", l: "ทรงกระเป๋า", shape: { vb: [0, 0, 100, 100], parts: [{ d: "M10 100L18 36H82L90 100Z M33 37V26A17 17 0 0 1 67 26V37H60V26A10 10 0 0 0 40 26V37Z", rule: "evenodd" }] } },
-  { v: "letter", l: "ตัวอักษร L", shape: { vb: [0, 0, 100, 100], parts: [{ d: "M14 0H42V72H88V100H14Z" }] } },
-  { v: "bow", l: "โบว์", shape: { vb: [0, 0, 100, 70], parts: [{ d: "M50 35C38 18 8 2 4 12 0 22 2 48 6 58 10 68 38 52 50 35Z M50 35C62 18 92 2 96 12 100 22 98 48 94 58 90 68 62 52 50 35Z M44 28H56V42H44Z" }] } },
+  { v: "bag", get l() { return tr("ทรงกระเป๋า", "Bag shape"); }, shape: { vb: [0, 0, 100, 100], parts: [{ d: "M10 100L18 36H82L90 100Z M33 37V26A17 17 0 0 1 67 26V37H60V26A10 10 0 0 0 40 26V37Z", rule: "evenodd" }] } },
+  { v: "letter", get l() { return tr("ตัวอักษร L", "Letter L"); }, shape: { vb: [0, 0, 100, 100], parts: [{ d: "M14 0H42V72H88V100H14Z" }] } },
+  { v: "bow", get l() { return tr("โบว์", "Bow"); }, shape: { vb: [0, 0, 100, 70], parts: [{ d: "M50 35C38 18 8 2 4 12 0 22 2 48 6 58 10 68 38 52 50 35Z M50 35C62 18 92 2 96 12 100 22 98 48 94 58 90 68 62 52 50 35Z M44 28H56V42H44Z" }] } },
 ];
 
 export type FrameSwatch = { v: string; hex: string };
@@ -169,6 +172,7 @@ export function FrameBuilder({
   onSaved: (frame: SavedFrame, apply: boolean) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [def, setDef] = useState<FrameDef>(DEFAULT_FRAME_DEF);
   const [name, setName] = useState("");
   const [allShops, setAllShops] = useState(true);
@@ -211,23 +215,23 @@ export function FrameBuilder({
     setNote(null);
     const isSvg = file.type === "image/svg+xml" || /\.svg$/i.test(file.name);
     if (isSvg) {
-      if (file.size > 1024 * 1024) return setErr("ไฟล์ SVG ใหญ่เกิน 1 MB — ลองลดจุดของเส้น/รวมรูปทรงก่อนส่งออก");
+      if (file.size > 1024 * 1024) return setErr(t("ไฟล์ SVG ใหญ่เกิน 1 MB — ลองลดจุดของเส้น/รวมรูปทรงก่อนส่งออก", "SVG file is over 1 MB — try reducing path points/merging shapes before export"));
       const res = svgTextToFrameShape(await file.text());
-      if (!res.shape) return setErr(res.error ?? "ใช้ไฟล์นี้ไม่ได้");
+      if (!res.shape) return setErr(res.error ?? t("ใช้ไฟล์นี้ไม่ได้", "Can't use this file"));
       set({ frame: "custom", shape: res.shape, maskKey: null });
-      setNote(res.warning ?? `ได้ทรงจาก ${file.name} แล้ว`);
+      setNote(res.warning ?? t(`ได้ทรงจาก ${file.name} แล้ว`, `Got the shape from ${file.name}`));
       if (!name) setName(file.name.replace(/\.[^.]+$/, "").slice(0, 60));
       return;
     }
-    if (!/^image\/(png|webp)$/.test(file.type)) return setErr("รับ SVG หรือ PNG / WebP พื้นใส");
+    if (!/^image\/(png|webp)$/.test(file.type)) return setErr(t("รับ SVG หรือ PNG / WebP พื้นใส", "Accepts SVG or transparent PNG / WebP"));
     setUploading(true);
     try {
       const up = await uploadToLibrary(file);
       set({ frame: "custom", shape: null, maskKey: up.key, border: "none" });
-      setNote("ทรงจากรูป PNG: ส่วนทึบ = เห็นรูป · ส่วนใส = ตัดทิ้ง (เส้นขอบใช้ได้เฉพาะไฟล์ SVG)");
+      setNote(t("ทรงจากรูป PNG: ส่วนทึบ = เห็นรูป · ส่วนใส = ตัดทิ้ง (เส้นขอบใช้ได้เฉพาะไฟล์ SVG)", "Shape from PNG: solid = image visible · transparent = cut away (borders only work with SVG files)"));
       if (!name) setName(file.name.replace(/\.[^.]+$/, "").slice(0, 60));
     } catch (e) {
-      setErr((e as Error).message || "อัปโหลดไม่สำเร็จ");
+      setErr((e as Error).message || t("อัปโหลดไม่สำเร็จ", "Upload failed"));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -236,14 +240,14 @@ export function FrameBuilder({
   const drop = useFileDrop((files) => void importShape(files[0]), {
     accept: ["image/"],
     disabled: uploading,
-    onReject: () => toast.error("ลากมาได้เฉพาะไฟล์ SVG / PNG / WebP"),
+    onReject: () => toast.error(tr("ลากมาได้เฉพาะไฟล์ SVG / PNG / WebP", "Only SVG / PNG / WebP files can be dropped")),
   });
 
   const save = async (apply: boolean) => {
     const n = name.trim();
-    if (!n) return setErr("ตั้งชื่อกรอบก่อนบันทึก");
-    if (def.mode === "mask" && !def.shape && !def.maskKey) return setErr("ยังไม่ได้อัปทรง — อัป SVG / PNG หรือเลือกทรงตัวอย่าง");
-    if (def.mode === "overlay" && !def.overlayKey) return setErr("ยังไม่ได้เลือกรูปกรอบ (PNG ตรงกลางใส)");
+    if (!n) return setErr(t("ตั้งชื่อกรอบก่อนบันทึก", "Name the frame before saving"));
+    if (def.mode === "mask" && !def.shape && !def.maskKey) return setErr(t("ยังไม่ได้อัปทรง — อัป SVG / PNG หรือเลือกทรงตัวอย่าง", "No shape uploaded — upload SVG / PNG or pick a sample shape"));
+    if (def.mode === "overlay" && !def.overlayKey) return setErr(t("ยังไม่ได้เลือกรูปกรอบ (PNG ตรงกลางใส)", "No frame image picked (PNG with transparent center)"));
     setBusy(true);
     try {
       const body = { name: n, def, shopId: allShops ? null : shopId };
@@ -253,8 +257,8 @@ export function FrameBuilder({
         body: JSON.stringify(editing ? { id: editing.id, ...body } : body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.frame) throw new Error(j.error ?? "บันทึกไม่สำเร็จ");
-      toast.success(editing ? "บันทึกกรอบแล้ว" : apply ? "บันทึกกรอบ + ใช้กับรูปนี้แล้ว" : "เพิ่มกรอบเข้าคลังแล้ว");
+      if (!r.ok || !j.frame) throw new Error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
+      toast.success(editing ? t("บันทึกกรอบแล้ว", "Frame saved") : apply ? t("บันทึกกรอบ + ใช้กับรูปนี้แล้ว", "Frame saved + applied to this image") : t("เพิ่มกรอบเข้าคลังแล้ว", "Frame added to library"));
       onSaved(j.frame as SavedFrame, apply);
       onClose();
     } catch (e) {
@@ -267,14 +271,14 @@ export function FrameBuilder({
   const canBorder = frameDefCanBorder(def);
   const dirty = open && JSON.stringify({ d: def, n: name }) !== initial;
   const MODES: { v: FrameMode; t: string; s: string }[] = [
-    { v: "build", t: "🧩 ประกอบเอง", s: "ทรงที่มี + เส้นขอบ" },
-    { v: "mask", t: "✂️ อัปทรงตัดรูป", s: "SVG / PNG พื้นใส" },
-    { v: "overlay", t: "🖼 อัปกรอบวางทับ", s: "PNG ตรงกลางใส" },
+    { v: "build", t: t("🧩 ประกอบเอง", "🧩 Build your own"), s: t("ทรงที่มี + เส้นขอบ", "Preset shapes + border") },
+    { v: "mask", t: t("✂️ อัปทรงตัดรูป", "✂️ Upload cut-out shape"), s: t("SVG / PNG พื้นใส", "SVG / transparent PNG") },
+    { v: "overlay", t: t("🖼 อัปกรอบวางทับ", "🖼 Upload overlay frame"), s: t("PNG ตรงกลางใส", "PNG with transparent center") },
   ];
 
   const borderControls = (
     <>
-      <Lbl>เส้นขอบ</Lbl>
+      <Lbl>{t("เส้นขอบ", "Border")}</Lbl>
       <div className="flex flex-wrap gap-1.5">
         {BORDERS.map((b) => (
           <button key={b.v} type="button" className={chip(def.border === b.v)} onClick={() => set({ border: b.v })}>
@@ -284,21 +288,21 @@ export function FrameBuilder({
       </div>
       {def.border !== "none" && (
         <>
-          <Lbl>สีเส้น</Lbl>
+          <Lbl>{t("สีเส้น", "Line color")}</Lbl>
           <div className="flex flex-wrap items-center gap-1.5">
             {CANVAS_COLORS.filter((c) => c.v !== "custom").map((c) => (
               <button
                 key={c.v}
                 type="button"
-                title={c.l}
-                aria-label={c.l}
+                title={labelEn(c.l)}
+                aria-label={labelEn(c.l)}
                 onClick={() => set({ borderColor: c.v })}
                 className={`w-6 h-6 rounded-full border ${def.borderColor === c.v ? "ring-2 ring-blue-500 ring-offset-1" : "border-slate-300"}`}
                 style={{ background: colorOf(swatches, c.v, "") }}
               />
             ))}
             <button type="button" className={chip(def.borderColor === "custom")} onClick={() => set({ borderColor: "custom", borderHex: def.borderHex || "#b76e79" })}>
-              สีเอง…
+              {t("สีเอง…", "Custom…")}
             </button>
             {def.borderColor === "custom" && (
               <div className="w-32">
@@ -306,9 +310,9 @@ export function FrameBuilder({
               </div>
             )}
           </div>
-          <Lbl>ความหนา</Lbl>
+          <Lbl>{t("ความหนา", "Thickness")}</Lbl>
           <RangeInput value={def.borderWidth} onChange={(v) => set({ borderWidth: v })} min={1} max={10} hardMax={16} unit="px" />
-          <Lbl>ระยะห่างจากรูป</Lbl>
+          <Lbl>{t("ระยะห่างจากรูป", "Gap from image")}</Lbl>
           <RangeInput value={def.borderGap} onChange={(v) => set({ borderGap: v })} min={0} max={40} hardMax={80} unit="px" />
         </>
       )}
@@ -319,28 +323,28 @@ export function FrameBuilder({
     <ERPModal
       open={open}
       onClose={onClose}
-      title={editing ? `แก้กรอบ "${editing.name}"` : "🖼 สร้างกรอบเอง"}
+      title={editing ? t(`แก้กรอบ "${editing.name}"`, `Edit frame "${editing.name}"`) : t("🖼 สร้างกรอบเอง", "🖼 Create your own frame")}
       size="xl"
       hasUnsavedChanges={dirty}
       footer={
         <div className="flex w-full flex-wrap items-center gap-2">
-          <input value={name} onChange={(e) => (setName(e.target.value), setErr(null))} maxLength={60} placeholder="ชื่อกรอบ เช่น วงรีลูกไม้ทอง" className="h-8 flex-1 min-w-[160px] rounded-lg border border-slate-300 px-2.5 text-sm" />
+          <input value={name} onChange={(e) => (setName(e.target.value), setErr(null))} maxLength={60} placeholder={t("ชื่อกรอบ เช่น วงรีลูกไม้ทอง", "Frame name, e.g. Gold lace oval")} className="h-8 flex-1 min-w-[160px] rounded-lg border border-slate-300 px-2.5 text-sm" />
           <label className="flex items-center gap-1 text-xs text-slate-600">
-            <input type="radio" checked={allShops} onChange={() => setAllShops(true)} /> ใช้ได้ทุกร้าน
+            <input type="radio" checked={allShops} onChange={() => setAllShops(true)} /> {t("ใช้ได้ทุกร้าน", "All shops")}
           </label>
           <label className="flex items-center gap-1 text-xs text-slate-600">
-            <input type="radio" checked={!allShops} onChange={() => setAllShops(false)} /> เฉพาะร้านนี้
+            <input type="radio" checked={!allShops} onChange={() => setAllShops(false)} /> {t("เฉพาะร้านนี้", "This shop only")}
           </label>
           <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm">
-            ยกเลิก
+            {t("ยกเลิก", "Cancel")}
           </button>
           {!editing && (
             <button type="button" disabled={busy} onClick={() => void save(false)} className="px-3 py-1.5 rounded-lg border border-blue-500 text-blue-700 text-sm disabled:opacity-50">
-              💾 บันทึกเข้าคลัง
+              {t("💾 บันทึกเข้าคลัง", "💾 Save to library")}
             </button>
           )}
           <button type="button" disabled={busy} onClick={() => void save(!editing)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-50">
-            {busy ? "กำลังบันทึก…" : editing ? "💾 บันทึก" : "💾 บันทึก + ใช้กับรูปนี้"}
+            {busy ? t("กำลังบันทึก…", "Saving…") : editing ? t("💾 บันทึก", "💾 Save") : t("💾 บันทึก + ใช้กับรูปนี้", "💾 Save + apply to this image")}
           </button>
         </div>
       }
@@ -359,7 +363,7 @@ export function FrameBuilder({
           <div className="min-w-0">
             {def.mode === "build" && (
               <>
-                <Lbl>ทรงพื้นฐาน</Lbl>
+                <Lbl>{t("ทรงพื้นฐาน", "Basic shapes")}</Lbl>
                 <div className="flex flex-wrap gap-1.5">
                   {BUILD_SHAPES.map((s) => (
                     <button key={s.v} type="button" className={chip(def.frame === s.v)} onClick={() => set({ frame: s.v, shape: null, maskKey: null })}>
@@ -373,17 +377,17 @@ export function FrameBuilder({
 
             {def.mode === "mask" && (
               <>
-                <Lbl>อัปไฟล์ทรง (SVG แนะนำ · PNG / WebP พื้นใสก็ได้)</Lbl>
+                <Lbl>{t("อัปไฟล์ทรง (SVG แนะนำ · PNG / WebP พื้นใสก็ได้)", "Upload shape file (SVG recommended · transparent PNG / WebP also OK)")}</Lbl>
                 <div {...drop.zone("shape")} className="relative">
-                  <FileDropHint show={drop.over === "shape"} label="วางไฟล์ทรงเพื่ออัป" />
+                  <FileDropHint show={drop.over === "shape"} label={t("วางไฟล์ทรงเพื่ออัป", "Drop the shape file to upload")} />
                   <input ref={fileRef} type="file" accept=".svg,image/svg+xml,image/png,image/webp" className="hidden" onChange={(e) => void importShape(e.target.files?.[0])} />
                   <button type="button" onClick={() => fileRef.current?.click()} className="w-full rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center hover:border-blue-400">
                     <div className="text-xl">✂️</div>
-                    <div className="text-sm font-medium text-slate-700">{uploading ? "กำลังอัปโหลด…" : "ลากไฟล์มาวาง หรือกดเลือกไฟล์"}</div>
-                    <div className="text-[11px] text-slate-400">ทำใน Canva / Illustrator / Photoshop · ส่วนทึบ = ส่วนที่เห็นรูป</div>
+                    <div className="text-sm font-medium text-slate-700">{uploading ? t("กำลังอัปโหลด…", "Uploading…") : t("ลากไฟล์มาวาง หรือกดเลือกไฟล์", "Drag a file here, or tap to choose")}</div>
+                    <div className="text-[11px] text-slate-400">{t("ทำใน Canva / Illustrator / Photoshop · ส่วนทึบ = ส่วนที่เห็นรูป", "Made in Canva / Illustrator / Photoshop · solid = visible part of the image")}</div>
                   </button>
                 </div>
-                <Lbl>หรือลองด้วยทรงตัวอย่าง</Lbl>
+                <Lbl>{t("หรือลองด้วยทรงตัวอย่าง", "Or try a sample shape")}</Lbl>
                 <div className="flex flex-wrap gap-1.5">
                   {SAMPLE_SHAPES.map((s) => (
                     <button key={s.v} type="button" className={chip(JSON.stringify(def.shape) === JSON.stringify(s.shape))} onClick={() => (set({ frame: "custom", shape: s.shape, maskKey: null }), setNote(null))}>
@@ -391,26 +395,26 @@ export function FrameBuilder({
                     </button>
                   ))}
                 </div>
-                {canBorder ? borderControls : <p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-800">ทรงจากรูป PNG ใส่เส้นขอบไม่ได้ — อยากได้เส้นขอบตามทรง ให้อัปเป็น SVG</p>}
+                {canBorder ? borderControls : <p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-800">{t("ทรงจากรูป PNG ใส่เส้นขอบไม่ได้ — อยากได้เส้นขอบตามทรง ให้อัปเป็น SVG", "PNG shapes can't have a border — upload SVG for a border that follows the shape")}</p>}
               </>
             )}
 
             {def.mode === "overlay" && (
               <>
-                <Lbl>รูปกรอบ (PNG ที่ตรงกลางใส)</Lbl>
+                <Lbl>{t("รูปกรอบ (PNG ที่ตรงกลางใส)", "Frame image (PNG with transparent center)")}</Lbl>
                 <div className="flex items-center gap-2">
                   {def.overlayKey && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={imgUrl(def.overlayKey, 200)} alt="" className="w-14 h-14 rounded object-contain border border-slate-200 bg-[repeating-conic-gradient(#f8fafc_0_25%,#fff_0_50%)] bg-[length:12px_12px]" />
                   )}
                   <button type="button" onClick={() => setLibOpen(true)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:border-blue-500">
-                    {def.overlayKey ? "เปลี่ยนรูปกรอบ…" : "📁 เลือก / อัปโหลดรูปกรอบ…"}
+                    {def.overlayKey ? t("เปลี่ยนรูปกรอบ…", "Change frame image…") : t("📁 เลือก / อัปโหลดรูปกรอบ…", "📁 Pick / upload frame image…")}
                   </button>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">เช่น กรอบลายดอกไม้ กรอบรูปทอง โพลารอยด์ติดเทป (ทำใน Canva แล้วส่งออก PNG พื้นใส)</p>
-                <Lbl>รูปห่างขอบกรอบ</Lbl>
+                <p className="mt-1 text-[11px] text-slate-400">{t("เช่น กรอบลายดอกไม้ กรอบรูปทอง โพลารอยด์ติดเทป (ทำใน Canva แล้วส่งออก PNG พื้นใส)", "e.g. floral frame, gold frame, taped polaroid (make in Canva and export transparent PNG)")}</p>
+                <Lbl>{t("รูปห่างขอบกรอบ", "Image inset from frame")}</Lbl>
                 <RangeInput value={def.overlayInset} onChange={(v) => set({ overlayInset: v })} min={0} max={40} unit="%" />
-                <Lbl>ทรงของรูปข้างใน</Lbl>
+                <Lbl>{t("ทรงของรูปข้างใน", "Inner image shape")}</Lbl>
                 <div className="flex flex-wrap gap-1.5">
                   {BUILD_SHAPES.slice(0, 4).map((s) => (
                     <button key={s.v} type="button" className={chip(def.frame === s.v)} onClick={() => set({ frame: s.v, shape: null, maskKey: null })}>
@@ -426,11 +430,11 @@ export function FrameBuilder({
           </div>
 
           <div>
-            <Lbl>พรีวิว {imageKey ? "(รูปที่เลือกอยู่)" : "(รูปตัวอย่าง)"}</Lbl>
+            <Lbl>{t("พรีวิว", "Preview")} {imageKey ? t("(รูปที่เลือกอยู่)", "(selected image)") : t("(รูปตัวอย่าง)", "(sample image)")}</Lbl>
             <div className="rounded-xl bg-slate-50 border border-slate-200 p-6 flex justify-center">
               <FramePreview def={def} imageKey={imageKey} w={190} h={240} swatches={swatches} k={0.6} />
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-400 leading-snug">บันทึกแล้วกรอบอยู่ในตัวเลือก &quot;กรอบรูป&quot; ของทุกผืนผ้าใบ · ใช้แล้ว = คัดลอกค่าไป (แก้กรอบในคลังทีหลัง รูปเดิมไม่เปลี่ยน)</p>
+            <p className="mt-1.5 text-[11px] text-slate-400 leading-snug">{t('บันทึกแล้วกรอบอยู่ในตัวเลือก "กรอบรูป" ของทุกผืนผ้าใบ · ใช้แล้ว = คัดลอกค่าไป (แก้กรอบในคลังทีหลัง รูปเดิมไม่เปลี่ยน)', 'Saved frames appear in the "Image frame" options of every canvas · applying copies the values (editing the frame later won\'t change existing images)')}</p>
           </div>
         </div>
       </div>
@@ -492,6 +496,7 @@ export function CustomFrameGrid({
   onPatchItem: (patch: Record<string, unknown>) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const { frames, setFrames } = useShopFrames(shopSlug);
   const [builder, setBuilder] = useState<{ editing: SavedFrame | null } | null>(null);
   const [del, setDel] = useState<SavedFrame | null>(null);
@@ -503,20 +508,20 @@ export function CustomFrameGrid({
     setDel(null);
     const r = await apiFetch(`/api/website/frames?id=${encodeURIComponent(f.id)}`, { method: "DELETE" });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return toast.error(j.error ?? "ลบไม่สำเร็จ");
+    if (!r.ok) return toast.error(j.error ?? t("ลบไม่สำเร็จ", "Delete failed"));
     setFrames((all) => all.filter((x) => x.id !== f.id));
-    toast.success(`ลบกรอบ "${f.name}" แล้ว (รูปที่ใช้ไปแล้วไม่เปลี่ยน)`);
+    toast.success(t(`ลบกรอบ "${f.name}" แล้ว (รูปที่ใช้ไปแล้วไม่เปลี่ยน)`, `Frame "${f.name}" deleted (images already using it unchanged)`));
   };
 
   return (
     <div>
-      <div className="text-[11px] font-semibold text-slate-500 mb-1">กรอบของฉัน</div>
+      <div className="text-[11px] font-semibold text-slate-500 mb-1">{t("กรอบของฉัน", "My frames")}</div>
       <div className="grid grid-cols-3 gap-1.5">
         {frames.map((f) => {
           const on = sameAsItem(f.def, item);
           return (
             <div key={f.id} className={`group relative flex flex-col items-center gap-1 rounded-lg border py-2 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}>
-              <button type="button" onClick={() => onPatchItem(frameDefCanvasPatch(f.def))} className="flex flex-col items-center gap-1 w-full" title={`ใช้กรอบ "${f.name}"`}>
+              <button type="button" onClick={() => onPatchItem(frameDefCanvasPatch(f.def))} className="flex flex-col items-center gap-1 w-full" title={t(`ใช้กรอบ "${f.name}"`, `Use frame "${f.name}"`)}>
                 <FramePreview def={f.def} w={30} h={38} swatches={swatches} k={0.12} />
                 <span className="text-[10px] text-slate-600 truncate max-w-full px-1">
                   {f.shopId === null ? "" : "🏪 "}
@@ -524,10 +529,10 @@ export function CustomFrameGrid({
                 </span>
               </button>
               <div className="absolute right-0.5 top-0.5 hidden gap-0.5 group-hover:flex">
-                <button type="button" onClick={() => setBuilder({ editing: f })} className="rounded bg-white/90 px-1 text-[10px] text-slate-500 shadow hover:text-blue-600" title="แก้กรอบนี้">
+                <button type="button" onClick={() => setBuilder({ editing: f })} className="rounded bg-white/90 px-1 text-[10px] text-slate-500 shadow hover:text-blue-600" title={t("แก้กรอบนี้", "Edit this frame")}>
                   ✎
                 </button>
-                <button type="button" onClick={() => setDel(f)} className="rounded bg-white/90 px-1 text-[10px] text-slate-500 shadow hover:text-rose-600" title="ลบจากคลัง">
+                <button type="button" onClick={() => setDel(f)} className="rounded bg-white/90 px-1 text-[10px] text-slate-500 shadow hover:text-rose-600" title={t("ลบจากคลัง", "Remove from library")}>
                   ✕
                 </button>
               </div>
@@ -536,7 +541,7 @@ export function CustomFrameGrid({
         })}
         <button type="button" onClick={() => setBuilder({ editing: null })} className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 py-2 text-slate-500 hover:border-blue-500 hover:text-blue-600">
           <span className="text-lg leading-none">＋</span>
-          <span className="text-[10px]">สร้างกรอบเอง</span>
+          <span className="text-[10px]">{t("สร้างกรอบเอง", "Create frame")}</span>
         </button>
       </div>
       <FrameBuilder
@@ -555,9 +560,9 @@ export function CustomFrameGrid({
         open={!!del}
         onClose={() => setDel(null)}
         onConfirm={() => void remove()}
-        title="ลบกรอบนี้จากคลัง?"
-        message={del ? `"${del.name}" จะหายจากตัวเลือกกรอบ — รูปที่ใช้กรอบนี้ไปแล้วยังอยู่เหมือนเดิม` : ""}
-        confirmText="ลบ"
+        title={t("ลบกรอบนี้จากคลัง?", "Remove this frame from the library?")}
+        message={del ? t(`"${del.name}" จะหายจากตัวเลือกกรอบ — รูปที่ใช้กรอบนี้ไปแล้วยังอยู่เหมือนเดิม`, `"${del.name}" will disappear from the frame options — images already using it stay the same`) : ""}
+        confirmText={t("ลบ", "Delete")}
         variant="danger"
       />
     </div>

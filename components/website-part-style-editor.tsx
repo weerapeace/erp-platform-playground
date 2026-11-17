@@ -19,26 +19,31 @@ import { PART_COLOR_KEYS, PART_COLOR_TOKENS, PART_RANGES, type PartColorToken, t
 import { PART_COLOR_LABEL, PART_GROUP_FIELDS, PART_GROUP_LABEL, PART_SLIDER, type PartDef } from "@/lib/website-page-parts";
 import { sendToPreview, usePreviewMessages } from "@/lib/storefront-preview-bus";
 import { useDesignMode } from "@/components/website-design/mode";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-schema-en";
 
 type Device = "all" | "mobile";
 type Field = keyof PartStyleValue;
 
-const TOKEN_LABEL: Record<PartColorToken, string> = {
-  brand: "สีหลัก",
-  brandDeep: "สีหลักเข้ม",
-  brandSoft: "สีหลักอ่อน",
-  tint: "สีหลักจาง",
-  ink: "ตัวอักษรเข้ม",
-  inkSoft: "ตัวอักษรรอง",
-  slate: "ตัวอักษรเทา",
-  muted: "ตัวอักษรจาง",
-  line: "เส้น",
-  surface: "พื้นการ์ด",
-  paper: "พื้นหน้า",
-  onBrand: "ตัวอักษรบนสีหลัก",
-  white: "ขาว",
-  black: "ดำ",
+// ป้ายสี 2 ภาษา (getter = อ่านภาษาตอนวาด)
+const TOKEN_TH_EN: Record<PartColorToken, [string, string]> = {
+  brand: ["สีหลัก", "Main color"],
+  brandDeep: ["สีหลักเข้ม", "Dark main color"],
+  brandSoft: ["สีหลักอ่อน", "Soft main color"],
+  tint: ["สีหลักจาง", "Faint main color"],
+  ink: ["ตัวอักษรเข้ม", "Dark text"],
+  inkSoft: ["ตัวอักษรรอง", "Secondary text"],
+  slate: ["ตัวอักษรเทา", "Gray text"],
+  muted: ["ตัวอักษรจาง", "Faint text"],
+  line: ["เส้น", "Line"],
+  surface: ["พื้นการ์ด", "Card background"],
+  paper: ["พื้นหน้า", "Page background"],
+  onBrand: ["ตัวอักษรบนสีหลัก", "Text on main color"],
+  white: ["ขาว", "White"],
+  black: ["ดำ", "Black"],
 };
+const tokenLabel = (t: PartColorToken) => tr(TOKEN_TH_EN[t][0], TOKEN_TH_EN[t][1]);
 
 /** ผสมสี hex (โชว์สีตัวอย่างของสีที่เว็บร้านคำนวณเอง เช่น สีหลักอ่อน) */
 function mix(a: string, b: string, t: number): string {
@@ -73,11 +78,11 @@ export function partPalette(c: SiteTheme["colors"]): Record<PartColorToken, stri
   };
 }
 
-const FONT_OPTIONS: FontOption[] = [
-  { value: "", label: "ค่ากลาง (ตามร้าน)", group: "ของร้าน" },
-  { value: "display", label: "ฟอนต์หัวข้อของร้าน", group: "ของร้าน" },
-  { value: "body", label: "ฟอนต์เนื้อหาของร้าน", group: "ของร้าน" },
-  ...GOOGLE_FONTS.map((f) => ({ value: f.name, label: f.name, family: `"${f.name}"`, group: f.thai ? "ไทย + อังกฤษ" : "อังกฤษ (ไทยใช้ฟอนต์สำรอง)" })),
+const fontOptions = (): FontOption[] => [
+  { value: "", label: tr("ค่ากลาง (ตามร้าน)", "Default (shop)"), group: tr("ของร้าน", "Shop") },
+  { value: "display", label: tr("ฟอนต์หัวข้อของร้าน", "Shop heading font"), group: tr("ของร้าน", "Shop") },
+  { value: "body", label: tr("ฟอนต์เนื้อหาของร้าน", "Shop body font"), group: tr("ของร้าน", "Shop") },
+  ...GOOGLE_FONTS.map((f) => ({ value: f.name, label: f.name, family: `"${f.name}"`, group: f.thai ? tr("ไทย + อังกฤษ", "Thai + English") : tr("อังกฤษ (ไทยใช้ฟอนต์สำรอง)", "English (Thai uses fallback font)") })),
 ];
 const FONT_NAMES = GOOGLE_FONTS.map((f) => f.name);
 
@@ -97,22 +102,23 @@ function Chips<T extends string | number | boolean>({ value, options, onChange }
 
 function ColorField({ value, onChange, palette, allowNone }: { value: string | undefined; onChange: (v: string | undefined) => void; palette: Record<PartColorToken, string>; allowNone: boolean }) {
   const custom = value?.startsWith("#") ? value : "";
+  const tx = useT();
   return (
     <div className="flex flex-wrap items-center gap-1">
       <button type="button" className={chip(value === undefined)} onClick={() => onChange(undefined)}>
-        ค่ากลาง
+        {tx("ค่ากลาง", "Default")}
       </button>
       {allowNone && (
         <button type="button" className={chip(value === "none")} onClick={() => onChange("none")}>
-          ไม่มี
+          {tx("ไม่มี", "None")}
         </button>
       )}
       {PART_COLOR_TOKENS.map((t) => (
         <button
           key={t}
           type="button"
-          title={TOKEN_LABEL[t]}
-          aria-label={TOKEN_LABEL[t]}
+          title={tokenLabel(t)}
+          aria-label={tokenLabel(t)}
           onClick={() => onChange(t)}
           className={`w-6 h-6 rounded-md border ${value === t ? "ring-2 ring-blue-500 ring-offset-1" : "border-slate-300"}`}
           style={{ background: palette[t] }}
@@ -126,6 +132,7 @@ function ColorField({ value, onChange, palette, allowNone }: { value: string | u
 }
 
 export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 ปรับละเอียดทีละชิ้น" }: { parts: PartDef[]; value: PartStyles; onChange: (v: PartStyles) => void; colors: SiteTheme["colors"]; title?: string }) {
+  const tx = useT();
   const [sel, setSel] = useState(parts[0]?.key ?? "");
   const [device, setDevice] = useState<Device>("all");
   const [pick, setPick] = useState(true);
@@ -168,9 +175,9 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
   const label = (k: Field, text: string) => (
     <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
       {text}
-      {inherited(k) && <span className="text-[10px] text-slate-400">(ใช้ค่าทุกจอ)</span>}
+      {inherited(k) && <span className="text-[10px] text-slate-400">{tx("(ใช้ค่าทุกจอ)", "(uses all-screens value)")}</span>}
       {bucket[k] !== undefined && (
-        <button type="button" className="text-[10px] text-blue-600 hover:underline" onClick={() => setField(k, undefined)} title="กลับค่ากลาง">
+        <button type="button" className="text-[10px] text-blue-600 hover:underline" onClick={() => setField(k, undefined)} title={tx("กลับค่ากลาง", "Back to default")}>
           ↺
         </button>
       )}
@@ -181,38 +188,42 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
     if (k === "font")
       return (
         <div key={k} className="grid gap-1">
-          {label(k, "ฟอนต์")}
-          <FontSelect value={String(shown(k) ?? "")} onChange={(v) => setField("font", v || undefined)} options={FONT_OPTIONS} googleFonts={FONT_NAMES} size="sm" />
+          {label(k, tx("ฟอนต์", "Font"))}
+          <FontSelect value={String(shown(k) ?? "")} onChange={(v) => setField("font", v || undefined)} options={fontOptions()} googleFonts={FONT_NAMES} size="sm" />
         </div>
       );
     if ((PART_COLOR_KEYS as readonly string[]).includes(k))
       return (
         <div key={k} className="grid gap-1 sm:col-span-2">
-          {label(k, PART_COLOR_LABEL[k] ?? k)}
+          {label(k, labelEn(PART_COLOR_LABEL[k]) ?? k)}
           <ColorField value={shown(k) as string | undefined} onChange={(v) => setField(k, v)} palette={palette} allowNone={k === "bg" || k === "activeBg" || k === "borderColor"} />
         </div>
       );
     if (k === "align")
       return (
         <div key={k} className="grid gap-1">
-          {label(k, "จัดวาง")}
-          <Chips value={shown(k) as string | undefined} onChange={(v) => setField(k, v)} options={[{ v: undefined, l: "ค่ากลาง" }, { v: "left", l: "ซ้าย" }, { v: "center", l: "กลาง" }, { v: "right", l: "ขวา" }]} />
+          {label(k, tx("จัดวาง", "Align"))}
+          <Chips value={shown(k) as string | undefined} onChange={(v) => setField(k, v)} options={[{ v: undefined, l: tx("ค่ากลาง", "Default") }, { v: "left", l: tx("ซ้าย", "Left") }, { v: "center", l: tx("กลาง", "Center") }, { v: "right", l: tx("ขวา", "Right") }]} />
         </div>
       );
     if (k === "upper" || k === "italic" || k === "hidden") {
-      const names = { upper: ["ตัวพิมพ์", "ปกติ", "ตัวใหญ่ (EN)"], italic: ["ตัวเอียง", "ตรง", "เอียง"], hidden: ["การแสดง", "โชว์", "ซ่อน"] }[k];
+      const names = {
+        upper: [tx("ตัวพิมพ์", "Case"), tx("ปกติ", "Normal"), tx("ตัวใหญ่ (EN)", "Uppercase (EN)")],
+        italic: [tx("ตัวเอียง", "Italic"), tx("ตรง", "Upright"), tx("เอียง", "Italic")],
+        hidden: [tx("การแสดง", "Display"), tx("โชว์", "Show"), tx("ซ่อน", "Hide")],
+      }[k];
       return (
         <div key={k} className="grid gap-1">
           {label(k, names[0])}
-          <Chips value={shown(k) as boolean | undefined} onChange={(v) => setField(k, v)} options={[{ v: undefined, l: "ค่ากลาง" }, { v: false, l: names[1] }, { v: true, l: names[2] }]} />
+          <Chips value={shown(k) as boolean | undefined} onChange={(v) => setField(k, v)} options={[{ v: undefined, l: tx("ค่ากลาง", "Default") }, { v: false, l: names[1] }, { v: true, l: names[2] }]} />
         </div>
       );
     }
     if (k === "shadow")
       return (
         <div key={k} className="grid gap-1">
-          {label(k, "เงา")}
-          <Chips value={shown(k) as number | undefined} onChange={(v) => setField(k, v)} options={[{ v: undefined, l: "ค่ากลาง" }, { v: 0, l: "ไม่มี" }, { v: 1, l: "บาง" }, { v: 2, l: "กลาง" }, { v: 3, l: "ลึก" }]} />
+          {label(k, tx("เงา", "Shadow"))}
+          <Chips value={shown(k) as number | undefined} onChange={(v) => setField(k, v)} options={[{ v: undefined, l: tx("ค่ากลาง", "Default") }, { v: 0, l: tx("ไม่มี", "None") }, { v: 1, l: tx("บาง", "Light") }, { v: 2, l: tx("กลาง", "Medium") }, { v: 3, l: tx("ลึก", "Deep") }]} />
         </div>
       );
     const sl = PART_SLIDER[k];
@@ -221,14 +232,14 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
     const range = PART_RANGES[k as keyof typeof PART_RANGES];
     return (
       <div key={k} className="grid gap-1">
-        {label(k, `${sl.label}${cur === undefined ? " · ค่ากลาง" : ""}`)}
+        {label(k, `${labelEn(sl.label)}${cur === undefined ? tx(" · ค่ากลาง", " · default") : ""}`)}
         <div className="flex items-center gap-2">
           <div className={`flex-1 ${cur === undefined ? "opacity-50" : ""}`}>
-            <RangeInput value={cur ?? sl.hint ?? sl.min} onChange={(v) => setField(k, v)} min={sl.min} max={sl.max} step={sl.step ?? 1} hardMin={range?.[0]} hardMax={range?.[1]} unit={sl.unit} ariaLabel={sl.label} />
+            <RangeInput value={cur ?? sl.hint ?? sl.min} onChange={(v) => setField(k, v)} min={sl.min} max={sl.max} step={sl.step ?? 1} hardMin={range?.[0]} hardMax={range?.[1]} unit={sl.unit} ariaLabel={labelEn(sl.label)} />
           </div>
           {k === "radius" && (
             <button type="button" className={chip(cur === 999)} onClick={() => setField("radius", 999)}>
-              เม็ดยา
+              {tx("เม็ดยา", "Pill")}
             </button>
           )}
         </div>
@@ -239,25 +250,25 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
   return (
     <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3 space-y-3" data-part-editor>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold text-slate-800">{title}</span>
+        <span className="text-sm font-semibold text-slate-800">{title === "🎨 ปรับละเอียดทีละชิ้น" ? tx("🎨 ปรับละเอียดทีละชิ้น", "🎨 Fine-tune each part") : labelEn(title)}</span>
         <div className="flex gap-1 ml-auto">
           <button type="button" className={chip(device === "all")} onClick={() => setDevice("all")}>
-            🖥 ทุกจอ
+            {tx("🖥 ทุกจอ", "🖥 All screens")}
           </button>
           <button type="button" className={chip(device === "mobile")} onClick={() => setDevice("mobile")}>
-            📱 เฉพาะมือถือ
+            {tx("📱 เฉพาะมือถือ", "📱 Phone only")}
           </button>
-          <button type="button" className={chip(pick)} onClick={() => setPick((v) => !v)} title="คลิกชิ้นส่วนในพรีวิวเพื่อเลือก">
-            🎯 คลิกเลือกในพรีวิว
+          <button type="button" className={chip(pick)} onClick={() => setPick((v) => !v)} title={tx("คลิกชิ้นส่วนในพรีวิวเพื่อเลือก", "Click a part in the preview to select it")}>
+            {tx("🎯 คลิกเลือกในพรีวิว", "🎯 Pick in preview")}
           </button>
         </div>
       </div>
-      {device === "mobile" && <p className="text-[11px] rounded-md bg-amber-50 border border-amber-200 text-amber-800 px-2 py-1">📱 ค่าที่ตั้งตอนนี้ใช้เฉพาะจอมือถือ — ช่องที่ไม่ได้แตะใช้ค่าทุกจอ (ดูในพรีวิวโหมดมือถือ)</p>}
+      {device === "mobile" && <p className="text-[11px] rounded-md bg-amber-50 border border-amber-200 text-amber-800 px-2 py-1">{tx("📱 ค่าที่ตั้งตอนนี้ใช้เฉพาะจอมือถือ — ช่องที่ไม่ได้แตะใช้ค่าทุกจอ (ดูในพรีวิวโหมดมือถือ)", "📱 Values set now apply to phone only — untouched fields use the all-screens value (check the phone preview)")}</p>}
 
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="ชิ้นส่วน">
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label={tx("ชิ้นส่วน", "Parts")}>
         {parts.map((p) => (
           <button key={p.key} type="button" role="tab" aria-selected={p.key === part.key} onClick={() => setSel(p.key)} className={`h-7 px-2.5 rounded-full border text-xs ${p.key === part.key ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} data-part-chip={p.key}>
-            {p.label}
+            {labelEn(p.label)}
             {customized(p.key) && <span className={`ml-1 inline-block w-1.5 h-1.5 rounded-full align-middle ${p.key === part.key ? "bg-white" : "bg-blue-500"}`} />}
           </button>
         ))}
@@ -265,28 +276,28 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
 
       <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <b className="text-sm text-slate-800">{part.label}</b>
-          {part.hint && <span className="text-[11px] text-slate-400">{part.hint}</span>}
+          <b className="text-sm text-slate-800">{labelEn(part.label)}</b>
+          {part.hint && <span className="text-[11px] text-slate-400">{labelEn(part.hint)}</span>}
           <span className="ml-auto flex gap-1">
-            <button type="button" className={chip(false)} onClick={() => setClip({ ...(entry.all ?? {}), ...(device === "mobile" ? entry.mobile ?? {} : {}) })} title="คัดลอกสไตล์ชิ้นนี้">
-              📋 คัดลอก
+            <button type="button" className={chip(false)} onClick={() => setClip({ ...(entry.all ?? {}), ...(device === "mobile" ? entry.mobile ?? {} : {}) })} title={tx("คัดลอกสไตล์ชิ้นนี้", "Copy this part's style")}>
+              {tx("📋 คัดลอก", "📋 Copy")}
             </button>
-            <button type="button" className={chip(false)} disabled={!clip} onClick={() => clip && writeEntry(part.key, device === "mobile" ? { all: entry.all, mobile: { ...clip } } : { all: { ...clip }, mobile: entry.mobile })} title="วางสไตล์ที่คัดลอกไว้">
-              📌 วาง
+            <button type="button" className={chip(false)} disabled={!clip} onClick={() => clip && writeEntry(part.key, device === "mobile" ? { all: entry.all, mobile: { ...clip } } : { all: { ...clip }, mobile: entry.mobile })} title={tx("วางสไตล์ที่คัดลอกไว้", "Paste copied style")}>
+              {tx("📌 วาง", "📌 Paste")}
             </button>
-            <button type="button" className={chip(false)} onClick={resetPart} title={device === "mobile" ? "ลบค่าเฉพาะมือถือของชิ้นนี้" : "ชิ้นนี้กลับค่ากลางทั้งหมด"}>
-              ↺ กลับค่ากลาง
+            <button type="button" className={chip(false)} onClick={resetPart} title={device === "mobile" ? tx("ลบค่าเฉพาะมือถือของชิ้นนี้", "Remove this part's phone-only values") : tx("ชิ้นนี้กลับค่ากลางทั้งหมด", "Reset this part to default")}>
+              {tx("↺ กลับค่ากลาง", "↺ Reset")}
             </button>
           </span>
         </div>
         {part.groups.map((g) => (
           <div key={g} className="space-y-2 border-t border-slate-100 pt-2">
-            <p className="text-xs font-semibold text-slate-600">{PART_GROUP_LABEL[g]}</p>
+            <p className="text-xs font-semibold text-slate-600">{labelEn(PART_GROUP_LABEL[g])}</p>
             <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2.5">{PART_GROUP_FIELDS[g].filter((k, i, a) => a.indexOf(k) === i).map((k) => fieldEl(k))}</div>
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-slate-500">ไม่ตั้ง = ใช้ค่ากลางของร้าน (หน้าตาเดิม) · สีจากชุดสีร้านจะเปลี่ยนตามเมื่อเปลี่ยนสีร้าน · กดเผยแพร่ของแท็บดีไซน์เพื่อขึ้นเว็บจริง</p>
+      <p className="text-[11px] text-slate-500">{tx("ไม่ตั้ง = ใช้ค่ากลางของร้าน (หน้าตาเดิม) · สีจากชุดสีร้านจะเปลี่ยนตามเมื่อเปลี่ยนสีร้าน · กดเผยแพร่ของแท็บดีไซน์เพื่อขึ้นเว็บจริง", "Not set = shop default (original look) · colors from the shop palette follow shop color changes · publish from the Design tab to go live")}</p>
     </div>
   );
 }
@@ -300,6 +311,7 @@ export function PartStyleFold({ parts, value, onChange, colors, onOpen, hint, te
   const [open, setOpen] = useState(false);
   // 👷 หน้าดีไซน์แบบง่าย (พนักงานไม่มีสิทธิ์โชว์การตั้งค่าละเอียด) = ซ่อนปรับละเอียดทีละชิ้น
   const { simple } = useDesignMode();
+  const tx = useT();
   const n = Object.keys(value).length;
   if (simple) return null;
   return (
@@ -312,8 +324,8 @@ export function PartStyleFold({ parts, value, onChange, colors, onOpen, hint, te
         }}
         className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm font-medium text-slate-700"
       >
-        <span className="min-w-0">🎨 ปรับละเอียดทีละชิ้น{hint ? <span className="font-normal text-slate-500"> ({hint})</span> : null}</span>
-        <span className="ml-auto shrink-0 text-xs text-slate-400">{n ? `ปรับแล้ว ${n} ชิ้น` : "ยังไม่ได้ปรับ"}</span>
+        <span className="min-w-0">{tx("🎨 ปรับละเอียดทีละชิ้น", "🎨 Fine-tune each part")}{hint ? <span className="font-normal text-slate-500"> ({labelEn(hint)})</span> : null}</span>
+        <span className="ml-auto shrink-0 text-xs text-slate-400">{n ? tx(`ปรับแล้ว ${n} ชิ้น`, `${n} parts changed`) : tx("ยังไม่ได้ปรับ", "Not changed")}</span>
         <span className="text-slate-400">{open ? "▾" : "▸"}</span>
       </button>
       {open && (

@@ -22,10 +22,13 @@ import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 import { VersionHistoryDrawer } from "@/components/website-version-history";
 import { useDesignTabAccess } from "@/components/website-tab-review";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 /** focusBlockId = เปิดมาแล้วเลือก Section นี้ให้เลย (เช่น 🗂 รูปบนเว็บ → "✏️ ไปแก้") · onFocused = เลือกแล้ว (ล้างคำขอ) */
 export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }: { shopSlug: string; shopId: string; focusBlockId?: string | null; onFocused?: () => void }) {
   const toast = useToast();
+  const t = useT();
   const tabAcc = useDesignTabAccess("home", shopId);
 
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
@@ -81,7 +84,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
       setShopName(j.shop?.name ?? "");
       setNeverSet(Boolean(j.neverSet));
     } catch {
-      toast.error("โหลดโครงหน้าไม่สำเร็จ");
+      toast.error(tr("โหลดโครงหน้าไม่สำเร็จ", "Couldn't load the page layout"));
     } finally {
       setLoading(false);
     }
@@ -106,20 +109,20 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
   }, [loading, focusBlockId, dp.blocks, onFocused]);
 
   const discard = async () => {
-    if (!(await askConfirm({ title: "ละทิ้งการเปลี่ยนแปลงทั้งหมด?", message: "ร่างหน้าแรกจะหาย กลับไปใช้หน้าที่เผยแพร่อยู่", variant: "danger", confirmText: "ละทิ้ง" }))) return;
+    if (!(await askConfirm({ title: t("ละทิ้งการเปลี่ยนแปลงทั้งหมด?", "Discard all changes?"), message: t("ร่างหน้าแรกจะหาย กลับไปใช้หน้าที่เผยแพร่อยู่", "The home page draft will be lost and the published page will be used"), variant: "danger", confirmText: t("ละทิ้ง", "Discard") }))) return;
     try {
       await apiFetch(`/api/website/layout?shopId=${encodeURIComponent(shopId)}`, { method: "DELETE" });
     } catch {
       /* ignore */
     }
     await load();
-    toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
+    toast.info(t("ละทิ้งการเปลี่ยนแปลงแล้ว", "Changes discarded"));
   };
 
   const previewSrc = siteUrl ? withPreviewKey(`${siteUrl}/?preview=1`, previewKey) : null;
   const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
-  if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  if (loading) return <div className="py-16 text-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>;
 
   return (
     <div className="space-y-3">
@@ -135,7 +138,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
         previewVersion={dp.previewVersion}
         toolbar={{
           ...dp.toolbar,
-          statusNote: `${dp.blocks.length} Section · เปิดใช้ ${dp.blocks.filter((b) => b.enabled).length}${neverSet ? " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)" : ""}`,
+          statusNote: t(`${dp.blocks.length} Section · เปิดใช้ ${dp.blocks.filter((b) => b.enabled).length}${neverSet ? " · ยังไม่เคยจัดหน้า (โครงเริ่มต้น)" : ""}`, `${dp.blocks.length} sections · ${dp.blocks.filter((b) => b.enabled).length} on${neverSet ? " · Never arranged (default layout)" : ""}`),
           saving: dp.autosaving || dp.busy === "draft",
           issues,
           changes,
@@ -144,7 +147,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
           onHistory: tabAcc.full ? () => setShowVersions(true) : undefined,
           onDiscard: tabAcc.full ? () => void discard() : undefined,
           // 👷 เผยแพร่เองไม่ได้ → บันทึกร่างแล้วส่งให้หัวหน้าตรวจ
-          ...(tabAcc.canPublish ? {} : { publishLabel: tabAcc.reviewing ? "กำลังส่ง…" : "ส่งให้หัวหน้าตรวจ", onPublish: () => void tabAcc.requestReview(dp.saveDraft) }),
+          ...(tabAcc.canPublish ? {} : { publishLabel: tabAcc.reviewing ? t("กำลังส่ง…", "Sending…") : t("ส่งให้หัวหน้าตรวจ", "Send for review"), onPublish: () => void tabAcc.requestReview(dp.saveDraft) }),
         }}
       />
 
@@ -153,7 +156,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
         onClose={dp.closeCheck}
         onConfirm={() => void dp.publish()}
         issues={issues}
-        what="หน้าแรก"
+        what={t("หน้าแรก", "home page")}
         busy={dp.busy === "publish"}
         onGoBlock={(id) => setSelection({ blockId: id })}
       />
@@ -162,7 +165,7 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
       <VersionHistoryDrawer<Block>
         open={showVersions}
         onClose={() => setShowVersions(false)}
-        what="หน้าแรก"
+        what={t("หน้าแรก", "home page")}
         listUrl={`/api/website/layout/versions?shop=${encodeURIComponent(shopSlug)}`}
         restoreUrl="/api/website/layout/versions"
         restoreBody={(versionNo) => ({ shopId, versionNo })}

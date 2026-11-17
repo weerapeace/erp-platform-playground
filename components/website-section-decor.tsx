@@ -33,31 +33,34 @@ import {
   type DecorScreen,
 } from "@/lib/website-blocks";
 import { webForm } from "@/lib/website-form-styles";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-schema-en";
 
 const labelCls = webForm.label;
 /** ลายที่ยืด/หดสัดส่วนได้ (ลายไอคอน เช่น โบว์/หัวใจ คงรูปเสมอ) */
 const FREE_RATIO = ["pearls", "lace", "scallop", "wave", "line", "arch", "rect", "ellipse"];
 const ANIM_OPTS: { v: DecorAnim; l: string }[] = [
-  { v: "none", l: "นิ่ง" },
-  { v: "float", l: "ลอย" },
-  { v: "sway", l: "แกว่ง" },
-  { v: "pulse", l: "เต้น" },
-  { v: "spin", l: "หมุน" },
-  { v: "twinkle", l: "กะพริบ" },
-  { v: "bounce", l: "เด้ง" },
+  { v: "none", get l() { return tr("นิ่ง", "Still"); } },
+  { v: "float", get l() { return tr("ลอย", "Float"); } },
+  { v: "sway", get l() { return tr("แกว่ง", "Sway"); } },
+  { v: "pulse", get l() { return tr("เต้น", "Pulse"); } },
+  { v: "spin", get l() { return tr("หมุน", "Spin"); } },
+  { v: "twinkle", get l() { return tr("กะพริบ", "Twinkle"); } },
+  { v: "bounce", get l() { return tr("เด้ง", "Bounce"); } },
 ];
 const LAYER_OPTS: { v: DecorLayer; l: string }[] = [
-  { v: "back", l: "หลังเนื้อหา" },
-  { v: "front", l: "หน้าเนื้อหา" },
+  { v: "back", get l() { return tr("หลังเนื้อหา", "Behind content"); } },
+  { v: "front", get l() { return tr("หน้าเนื้อหา", "In front of content"); } },
 ];
 
 /** 📱 จอที่ปรับแยกได้ (ตรงกับปุ่มจอของพรีวิว) */
 const SCREENS: { v: DecorScreen; icon: string; l: string }[] = [
-  { v: "desktop", icon: "🖥️", l: "คอม" },
-  { v: "tablet", icon: "📱", l: "แท็บเล็ต" },
-  { v: "mobile", icon: "📲", l: "มือถือ" },
+  { v: "desktop", icon: "🖥️", get l() { return tr("คอม", "Desktop"); } },
+  { v: "tablet", icon: "📱", get l() { return tr("แท็บเล็ต", "Tablet"); } },
+  { v: "mobile", icon: "📲", get l() { return tr("มือถือ", "Phone"); } },
 ];
-const screenName = (s: DecorScreen) => SCREENS.find((x) => x.v === s)?.l ?? "คอม";
+const screenName = (s: DecorScreen) => SCREENS.find((x) => x.v === s)?.l ?? tr("คอม", "Desktop");
 
 const imgUrl = (key: string, w = 160) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
@@ -85,7 +88,7 @@ function Thumb({ d, theme, fontNames }: { d: DecorItem; theme: ThemeColors; font
 }
 
 const nameOf = (d: DecorItem) =>
-  d.kind === "image" ? "รูป" : d.kind === "text" ? `“${d.text}”` : d.pattern ? `🎨 ${d.pattern.name || "ลายของร้าน"}` : CANVAS_SHAPE_LABEL[d.shape] ?? "ลาย";
+  d.kind === "image" ? tr("รูป", "Image") : d.kind === "text" ? `“${d.text}”` : d.pattern ? `🎨 ${d.pattern.name || tr("ลายของร้าน", "Shop pattern")}` : labelEn(CANVAS_SHAPE_LABEL[d.shape]) ?? tr("ลาย", "Pattern");
 
 export function SectionDecorPanel({
   value,
@@ -110,6 +113,7 @@ export function SectionDecorPanel({
   screen?: DecorScreen;
   onScreen?: (s: DecorScreen) => void;
 }) {
+  const t = useT();
   const [libOpen, setLibOpen] = useState(false);
   const [fontOpen, setFontOpen] = useState(false);
   const [localScreen, setLocalScreen] = useState<DecorScreen>("desktop");
@@ -149,24 +153,24 @@ export function SectionDecorPanel({
           type="button"
           disabled={full || !shopId}
           onClick={() => setLibOpen(true)}
-          title={shopId ? "ลายในตัว · ของร้าน (อัปโหลด / เลือกจากคลังไฟล์)" : "ต้องเลือกร้านก่อน"}
+          title={shopId ? t("ลายในตัว · ของร้าน (อัปโหลด / เลือกจากคลังไฟล์)", "Built-in patterns · shop's own (upload / pick from file library)") : t("ต้องเลือกร้านก่อน", "Pick a shop first")}
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:border-blue-500 disabled:opacity-50"
         >
-          🎀 เพิ่มลาย / รูป
+          {t("🎀 เพิ่มลาย / รูป", "🎀 Add pattern / image")}
         </button>
         <button type="button" disabled={full} onClick={() => add(newDecor("text", {}, value.length))} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:border-blue-500 disabled:opacity-50">
-          🔤 เพิ่มข้อความ
+          {t("🔤 เพิ่มข้อความ", "🔤 Add text")}
         </button>
         <span className="ml-auto text-[11px] text-slate-400">
-          {value.length}/{DECOR_MAX} ชิ้น
+          {value.length}/{DECOR_MAX} {t("ชิ้น", "items")}
         </span>
       </div>
       <p className="text-[11px] text-slate-500 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5">
-        💡 ในพรีวิว: <b>ลากชิ้น</b> = ย้าย · <b>ลากมุม</b> = ย่อ/ขยาย · <b>ลากปุ่ม ↻</b> = หมุน (กด Shift = ทีละ 15°) · ตำแหน่ง/ขนาดยืดตามความกว้างจอ
+        {t("💡 ในพรีวิว:", "💡 In the preview:")} <b>{t("ลากชิ้น", "drag item")}</b> = {t("ย้าย", "move")} · <b>{t("ลากมุม", "drag corner")}</b> = {t("ย่อ/ขยาย", "resize")} · <b>{t("ลากปุ่ม ↻", "drag ↻")}</b> = {t("หมุน (กด Shift = ทีละ 15°) · ตำแหน่ง/ขนาดยืดตามความกว้างจอ", "rotate (Shift = 15° steps) · position/size scale with screen width")}
       </p>
 
       {value.length === 0 ? (
-        <p className="py-6 text-center text-xs text-slate-400">ยังไม่มีของตกแต่ง — กด &quot;🎀 เพิ่มลาย / รูป&quot; หรือ &quot;🔤 เพิ่มข้อความ&quot;</p>
+        <p className="py-6 text-center text-xs text-slate-400">{t('ยังไม่มีของตกแต่ง — กด "🎀 เพิ่มลาย / รูป" หรือ "🔤 เพิ่มข้อความ"', 'No decorations yet — tap "🎀 Add pattern / image" or "🔤 Add text"')}</p>
       ) : (
         <ul className="space-y-1">
           {value.map((d, i) => (
@@ -181,26 +185,26 @@ export function SectionDecorPanel({
               <span className="min-w-0 flex-1 truncate text-xs text-slate-700">
                 {nameOf(d)}
                 <span className="ml-1 text-[10px] text-slate-400">
-                  {d.layer === "front" ? "· หน้าเนื้อหา" : ""}
+                  {d.layer === "front" ? t("· หน้าเนื้อหา", "· in front") : ""}
                   {d.anim !== "none" ? ` · ${ANIM_OPTS.find((o) => o.v === d.anim)?.l}` : ""}
                   {(() => {
                     const hid = SCREENS.filter((s) => d[decorHideKey(s.v)]).map((s) => s.l);
                     const own = SCREENS.filter((s) => s.v !== "desktop" && decorIsCustom(d, s.v)).map((s) => s.l);
-                    return `${hid.length ? ` · ซ่อน${hid.join("/")}` : ""}${own.length ? ` · ปรับแยก${own.join("/")}` : ""}`;
+                    return `${hid.length ? t(` · ซ่อน${hid.join("/")}`, ` · hidden on ${hid.join("/")}`) : ""}${own.length ? t(` · ปรับแยก${own.join("/")}`, ` · separate on ${own.join("/")}`) : ""}`;
                   })()}
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-slate-500" onClick={(e) => e.stopPropagation()}>
-                <button type="button" title="ไว้ล่าง (ถูกชิ้นอื่นทับ)" disabled={i === 0} onClick={() => move(i, -1)} className="h-6 w-6 rounded hover:bg-slate-100 disabled:opacity-30">
+                <button type="button" title={t("ไว้ล่าง (ถูกชิ้นอื่นทับ)", "Send back (others on top)")} disabled={i === 0} onClick={() => move(i, -1)} className="h-6 w-6 rounded hover:bg-slate-100 disabled:opacity-30">
                   ↑
                 </button>
-                <button type="button" title="ไว้บน (ทับชิ้นอื่น)" disabled={i === value.length - 1} onClick={() => move(i, 1)} className="h-6 w-6 rounded hover:bg-slate-100 disabled:opacity-30">
+                <button type="button" title={t("ไว้บน (ทับชิ้นอื่น)", "Bring forward (on top of others)")} disabled={i === value.length - 1} onClick={() => move(i, 1)} className="h-6 w-6 rounded hover:bg-slate-100 disabled:opacity-30">
                   ↓
                 </button>
-                <button type="button" title="ทำซ้ำ" disabled={full} onClick={() => dup(d)} className="h-6 w-6 rounded hover:bg-slate-100 disabled:opacity-30">
+                <button type="button" title={t("ทำซ้ำ", "Duplicate")} disabled={full} onClick={() => dup(d)} className="h-6 w-6 rounded hover:bg-slate-100 disabled:opacity-30">
                   ⧉
                 </button>
-                <button type="button" title="เอาออก" onClick={() => remove(d.id)} className="h-6 w-6 rounded text-red-600 hover:bg-red-50">
+                <button type="button" title={t("เอาออก", "Remove")} onClick={() => remove(d.id)} className="h-6 w-6 rounded text-red-600 hover:bg-red-50">
                   ✕
                 </button>
               </span>
@@ -211,10 +215,10 @@ export function SectionDecorPanel({
 
       {sel && (
         <div className="space-y-3 rounded-lg border border-blue-200 bg-white p-3">
-          <p className="text-xs font-semibold text-slate-700">แก้ชิ้นที่เลือก: {nameOf(sel)}</p>
+          <p className="text-xs font-semibold text-slate-700">{t("แก้ชิ้นที่เลือก:", "Editing:")} {nameOf(sel)}</p>
           {/* 📱 ตำแหน่ง/ขนาด/มุม แยกตามจอ — สลับแล้วพรีวิวสลับจอตาม */}
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-1.5">
-            <p className="text-[11px] font-medium text-slate-500">ตำแหน่ง / ขนาด / มุม ของจอ</p>
+            <p className="text-[11px] font-medium text-slate-500">{t("ตำแหน่ง / ขนาด / มุม ของจอ", "Position / size / angle per screen")}</p>
             <div className="flex gap-1">
               {SCREENS.map((s) => (
                 <button
@@ -224,39 +228,39 @@ export function SectionDecorPanel({
                   className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] ${screen === s.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}
                 >
                   {s.icon} {s.l}
-                  {s.v !== "desktop" && decorIsCustom(sel, s.v) && <span className="ml-1 text-[9px] text-emerald-600">● แยก</span>}
+                  {s.v !== "desktop" && decorIsCustom(sel, s.v) && <span className="ml-1 text-[9px] text-emerald-600">{t("● แยก", "● separate")}</span>}
                 </button>
               ))}
             </div>
             {screen === "desktop" ? (
-              <p className="text-[11px] text-slate-500">ค่าหลัก — แท็บเล็ต/มือถือที่ยังไม่ปรับแยกจะใช้ค่านี้ตาม</p>
+              <p className="text-[11px] text-slate-500">{t("ค่าหลัก — แท็บเล็ต/มือถือที่ยังไม่ปรับแยกจะใช้ค่านี้ตาม", "Main values — tablet/phone without separate values follow these")}</p>
             ) : decorIsCustom(sel, screen) ? (
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <span className="text-emerald-700">✓ {screenName(screen)}ปรับแยกแล้ว (แก้คอมแล้วจอนี้ไม่เปลี่ยนตาม)</span>
+                <span className="text-emerald-700">✓ {t(`${screenName(screen)}ปรับแยกแล้ว (แก้คอมแล้วจอนี้ไม่เปลี่ยนตาม)`, `${screenName(screen)} has separate values (desktop edits won't change it)`)}</span>
                 <button type="button" onClick={() => onChange(value.map((d) => (d.id === sel.id ? resetDecorPlace(d, screen) : d)))} className="text-blue-600 hover:underline">
-                  ↩ กลับไปใช้ตามคอม
+                  {t("↩ กลับไปใช้ตามคอม", "↩ Follow desktop again")}
                 </button>
               </div>
             ) : (
-              <p className="text-[11px] text-slate-500">ตอนนี้{screenName(screen)}ใช้ตามคอม — ลากในพรีวิว (จอ{screenName(screen)}) หรือเลื่อนแถบด้านล่าง = ปรับแยกให้จอนี้เลย</p>
+              <p className="text-[11px] text-slate-500">{t(`ตอนนี้${screenName(screen)}ใช้ตามคอม — ลากในพรีวิว (จอ${screenName(screen)}) หรือเลื่อนแถบด้านล่าง = ปรับแยกให้จอนี้เลย`, `${screenName(screen)} currently follows desktop — drag in the preview (${screenName(screen)} screen) or move the sliders below = separate values for this screen`)}</p>
             )}
-            {sel[decorHideKey(screen)] && <p className="text-[11px] text-amber-700">⚠️ ชิ้นนี้ซ่อนบน{screenName(screen)}อยู่ — ในพรีวิวจอนี้จะไม่เห็น (เปิดได้ที่ &quot;แสดงบน&quot; ด้านล่าง)</p>}
+            {sel[decorHideKey(screen)] && <p className="text-[11px] text-amber-700">{t(`⚠️ ชิ้นนี้ซ่อนบน${screenName(screen)}อยู่ — ในพรีวิวจอนี้จะไม่เห็น (เปิดได้ที่ "แสดงบน" ด้านล่าง)`, `⚠️ This item is hidden on ${screenName(screen)} — not visible in this screen's preview (turn on under "Show on" below)`)}</p>}
           </div>
           {sel.kind === "text" && (
             <>
               <div>
-                <label className={labelCls}>ข้อความ</label>
+                <label className={labelCls}>{t("ข้อความ", "Text")}</label>
                 <input value={sel.text} maxLength={120} onChange={(e) => patch(sel.id, { text: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm" />
-                {!sel.text.trim() && <p className="mt-1 text-[11px] text-red-600">ข้อความว่าง — ตอนบันทึกชิ้นนี้จะถูกเอาออก</p>}
+                {!sel.text.trim() && <p className="mt-1 text-[11px] text-red-600">{t("ข้อความว่าง — ตอนบันทึกชิ้นนี้จะถูกเอาออก", "Empty text — this item will be removed on save")}</p>}
               </div>
               <div>
                 <button type="button" onClick={() => setFontOpen((v) => !v)} className={labelCls + " hover:text-slate-800"}>
-                  {fontOpen ? "▾" : "▸"} ฟอนต์: <span style={{ fontFamily: `"${fontFamilyOf(sel.font, fontNames)}", sans-serif` }}>{fontFamilyOf(sel.font, fontNames)}</span>
+                  {fontOpen ? "▾" : "▸"} {t("ฟอนต์:", "Font:")} <span style={{ fontFamily: `"${fontFamilyOf(sel.font, fontNames)}", sans-serif` }}>{fontFamilyOf(sel.font, fontNames)}</span>
                 </button>
                 {fontOpen && <FontPickList value={sel.font} onPick={(v) => patch(sel.id, { font: v })} fontNames={fontNames} sample={sel.text || "Aa ก ข"} />}
               </div>
               <div>
-                <label className={labelCls}>ขนาดตัวอักษร · {screenName(screen)} (จอแคบกว่า 1200px ย่อตามความกว้างจอ)</label>
+                <label className={labelCls}>{t("ขนาดตัวอักษร", "Font size")} · {screenName(screen)} {t("(จอแคบกว่า 1200px ย่อตามความกว้างจอ)", "(screens narrower than 1200px scale down)")}</label>
                 <RangeInput value={place!.size} min={10} max={240} step={2} unit="px" onChange={(v) => setPlace({ size: v })} />
               </div>
             </>
@@ -270,66 +274,66 @@ export function SectionDecorPanel({
           )}
           {sel.kind !== "image" && !sel.pattern && !(sel.kind === "shape" && canvasShapeHasLine(sel.shape)) && (
             <div>
-              <label className={labelCls}>สี</label>
+              <label className={labelCls}>{t("สี", "Color")}</label>
               <ColorSwatches theme={theme} value={sel.color === "auto" ? "brand" : sel.color} hex={sel.colorHex} onPick={(v, hex) => patch(sel.id, v === "custom" ? { color: v, colorHex: hex ?? sel.colorHex } : { color: v })} />
             </div>
           )}
           {sel.kind === "shape" && !sel.pattern && CANVAS_LINE_ONLY_SHAPES.includes(sel.shape) && (
             <div>
-              <label className={labelCls}>ความหนาเส้น</label>
+              <label className={labelCls}>{t("ความหนาเส้น", "Line thickness")}</label>
               <RangeInput value={sel.strokeWidth} min={0.5} max={12} step={0.5} hardMax={24} unit="px" onChange={(v) => patch(sel.id, { strokeWidth: v })} />
             </div>
           )}
           {sel.kind !== "text" && (
             <div>
-              <label className={labelCls}>ความกว้าง (% ของ Section) · {screenName(screen)}</label>
+              <label className={labelCls}>{t("ความกว้าง (% ของ Section)", "Width (% of section)")} · {screenName(screen)}</label>
               <RangeInput value={place!.w} min={1} max={80} step={0.5} hardMax={100} unit="%" onChange={(v) => setPlace({ w: v })} />
             </div>
           )}
           {sel.kind === "shape" && FREE_RATIO.includes(sel.shape) && (
             <div>
-              <label className={labelCls}>ความสูงเทียบความกว้าง</label>
+              <label className={labelCls}>{t("ความสูงเทียบความกว้าง", "Height relative to width")}</label>
               <RangeInput value={Math.round(sel.ratio * 100)} min={2} max={200} step={1} hardMax={400} unit="%" onChange={(v) => patch(sel.id, { ratio: v / 100 })} />
               <button type="button" onClick={() => patch(sel.id, { ratio: DECOR_SHAPE_RATIO[sel.shape] ?? 1 })} className="mt-1 text-[11px] text-blue-600 hover:underline">
-                คืนสัดส่วนเดิม
+                {t("คืนสัดส่วนเดิม", "Reset ratio")}
               </button>
             </div>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className={labelCls}>ซ้าย ↔ ขวา · {screenName(screen)}</label>
+              <label className={labelCls}>{t("ซ้าย ↔ ขวา", "Left ↔ right")} · {screenName(screen)}</label>
               <RangeInput value={place!.x} min={0} max={100} step={0.5} hardMin={-20} hardMax={120} unit="%" onChange={(v) => setPlace({ x: v })} />
             </div>
             <div>
-              <label className={labelCls}>บน ↕ ล่าง · {screenName(screen)}</label>
+              <label className={labelCls}>{t("บน ↕ ล่าง", "Top ↕ bottom")} · {screenName(screen)}</label>
               <RangeInput value={place!.y} min={0} max={100} step={0.5} hardMin={-20} hardMax={120} unit="%" onChange={(v) => setPlace({ y: v })} />
             </div>
             <div>
-              <label className={labelCls}>หมุน · {screenName(screen)}</label>
+              <label className={labelCls}>{t("หมุน", "Rotate")} · {screenName(screen)}</label>
               <RangeInput value={place!.rotate} min={-180} max={180} step={1} unit="°" onChange={(v) => setPlace({ rotate: v })} />
             </div>
             <div>
-              <label className={labelCls}>ความทึบ</label>
+              <label className={labelCls}>{t("ความทึบ", "Opacity")}</label>
               <RangeInput value={sel.opacity} min={5} max={100} step={5} unit="%" onChange={(v) => patch(sel.id, { opacity: v })} />
             </div>
           </div>
           <div>
-            <label className={labelCls}>ชั้น</label>
+            <label className={labelCls}>{t("ชั้น", "Layer")}</label>
             <Seg<DecorLayer> value={sel.layer} onChange={(v) => patch(sel.id, { layer: v })} options={LAYER_OPTS} />
-            <p className="mt-1 text-[11px] text-slate-400">{sel.layer === "front" ? "ทับสินค้า/ข้อความได้ (ลูกค้ายังกดของข้างใต้ได้ตามปกติ)" : "อยู่หลังสินค้า/ข้อความ ทับแค่พื้นหลัง"}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{sel.layer === "front" ? t("ทับสินค้า/ข้อความได้ (ลูกค้ายังกดของข้างใต้ได้ตามปกติ)", "Can cover products/text (customers can still tap what's underneath)") : t("อยู่หลังสินค้า/ข้อความ ทับแค่พื้นหลัง", "Behind products/text, covers only the background")}</p>
           </div>
           <div>
-            <label className={labelCls}>ขยับตลอดเวลา</label>
+            <label className={labelCls}>{t("ขยับตลอดเวลา", "Animate continuously")}</label>
             <Seg<DecorAnim> value={sel.anim} onChange={(v) => patch(sel.id, { anim: v })} options={ANIM_OPTS} />
           </div>
           <div className="flex flex-wrap gap-4 text-xs text-slate-700">
             <label className="inline-flex items-center gap-1.5">
               <input type="checkbox" checked={sel.flip} onChange={(e) => patch(sel.id, { flip: e.target.checked })} />
-              กลับซ้าย-ขวา
+              {t("กลับซ้าย-ขวา", "Flip left-right")}
             </label>
           </div>
           <div>
-            <label className={labelCls}>แสดงบน</label>
+            <label className={labelCls}>{t("แสดงบน", "Show on")}</label>
             <div className="flex flex-wrap gap-4 text-xs text-slate-700">
               {SCREENS.map((s) => (
                 <label key={s.v} className="inline-flex items-center gap-1.5">

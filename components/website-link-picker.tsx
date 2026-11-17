@@ -13,16 +13,18 @@ import { BASE_PAGES, categoryHref, productHref, sectionHref, categoryKeyOf, cate
 import { loadWebNewDrops } from "@/lib/website-data";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import { categoryChoiceLabel } from "@/lib/website-category-tree";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 type Kind = "none" | "page" | "category" | "product" | "section" | "url";
 
-const KINDS: { v: Kind; l: string }[] = [
-  { v: "none", l: "ไม่มีลิงก์" },
-  { v: "page", l: "หน้าในเว็บ" },
-  { v: "category", l: "หมวดสินค้า" },
-  { v: "product", l: "สินค้า (รุ่น)" },
-  { v: "section", l: "เลื่อนไปส่วนอื่นในหน้านี้" },
-  { v: "url", l: "ลิงก์ภายนอก / อีเมล / โทร" },
+const KINDS = (): { v: Kind; l: string }[] => [
+  { v: "none", l: tr("ไม่มีลิงก์", "No link") },
+  { v: "page", l: tr("หน้าในเว็บ", "Page on the site") },
+  { v: "category", l: tr("หมวดสินค้า", "Product category") },
+  { v: "product", l: tr("สินค้า (รุ่น)", "Product (model)") },
+  { v: "section", l: tr("เลื่อนไปส่วนอื่นในหน้านี้", "Scroll to a section on this page") },
+  { v: "url", l: tr("ลิงก์ภายนอก / อีเมล / โทร", "External link / email / phone") },
 ];
 
 const clsMd =
@@ -63,6 +65,7 @@ function loadNewDrops(shopSlug: string) {
 }
 
 export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext; /** sm = ช่องเตี้ยตัวเล็ก (แผงตั้งค่าแน่น) */ size?: "sm" | "md" }) {
+  const t = useT();
   const cls = size === "sm" ? clsSm : clsMd;
   const [kind, setKind] = useState<Kind>(() => kindOf(value));
   const [storePages, setStorePages] = useState<{ slug: string; title: string }[]>([]);
@@ -84,7 +87,7 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
   const pages = useMemo(
     () => [
       ...BASE_PAGES,
-      ...drops.map((d) => ({ href: newDropHref(d.id), label: `🆕 ชุด: ${d.title}` })),
+      ...drops.map((d) => ({ href: newDropHref(d.id), label: tr(`🆕 ชุด: ${d.title}`, `🆕 Drop: ${d.title}`) })),
       ...storePages.map((p) => ({ href: `/${p.slug}`, label: `📄 ${p.title || p.slug}` })),
     ],
     [storePages, drops]
@@ -106,7 +109,7 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
   return (
     <div className="space-y-1.5">
       <select className={cls} value={kind} onChange={(e) => pickKind(e.target.value as Kind)}>
-        {KINDS.map((k) => (
+        {KINDS().map((k) => (
           <option key={k.v} value={k.v}>
             {k.l}
           </option>
@@ -128,7 +131,7 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
         (ctx.categories.length ? (
           <>
             <select className={cls} value={catKey} onChange={(e) => onChange(categoryHref(e.target.value, catAlso))}>
-              {!catKey && <option value="">— เลือกหมวด —</option>}
+              {!catKey && <option value="">{t("— เลือกหมวด —", "— Pick a category —")}</option>}
               {ctx.categories.map((c) => (
                 <option key={c.key} value={c.key}>
                   {categoryChoiceLabel(c)}
@@ -141,22 +144,22 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
                 className={`${cls} ${catAlso ? "" : "text-slate-400"}`}
                 value={catAlso}
                 onChange={(e) => onChange(categoryHref(catKey, e.target.value))}
-                title="โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด"
+                title={t("โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด", "Show only products in both categories")}
               >
-                <option value="">＋ และต้องอยู่ในหมวด… (ไม่บังคับ)</option>
+                <option value="">{t("＋ และต้องอยู่ในหมวด… (ไม่บังคับ)", "＋ And also in category… (optional)")}</option>
                 {ctx.categories
                   .filter((c) => c.key !== catKey)
                   .map((c) => (
                     <option key={c.key} value={c.key}>
-                      และอยู่ใน: {categoryChoiceLabel(c)}
+                      {t("และอยู่ใน:", "And in:")} {categoryChoiceLabel(c)}
                     </option>
                   ))}
               </select>
             )}
-            {catAlso && <p className="text-[10px] text-slate-500">โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด</p>}
+            {catAlso && <p className="text-[10px] text-slate-500">{t("โชว์เฉพาะสินค้าที่อยู่ทั้ง 2 หมวด", "Show only products in both categories")}</p>}
           </>
         ) : (
-          <p className="text-[11px] text-amber-600">ร้านนี้ยังไม่ได้ตั้งหมวดสินค้าบนเว็บ (แท็บจับคู่ฟิลด์)</p>
+          <p className="text-[11px] text-amber-600">{t("ร้านนี้ยังไม่ได้ตั้งหมวดสินค้าบนเว็บ (แท็บจับคู่ฟิลด์)", "This shop has no web categories yet (Field mapping tab)")}</p>
         ))}
 
       {kind === "product" && (
@@ -171,14 +174,14 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
               onChange(code ? productHref(code) : "");
             }}
           />
-          {value.startsWith("/product/") && <p className="text-[11px] text-slate-500">ตอนนี้ลิงก์ไปที่ {value}</p>}
+          {value.startsWith("/product/") && <p className="text-[11px] text-slate-500">{t("ตอนนี้ลิงก์ไปที่", "Currently links to")} {value}</p>}
         </div>
       )}
 
       {kind === "section" &&
         (ctx.sections?.length ? (
           <select className={cls} value={value} onChange={(e) => onChange(e.target.value)}>
-            {!ctx.sections.some((x) => sectionHref(x.id) === value) && <option value={value}>{value || "— เลือกส่วน —"}</option>}
+            {!ctx.sections.some((x) => sectionHref(x.id) === value) && <option value={value}>{value || t("— เลือกส่วน —", "— Pick a section —")}</option>}
             {ctx.sections.map((x) => (
               <option key={x.id} value={sectionHref(x.id)}>
                 {x.label}
@@ -186,11 +189,11 @@ export function LinkTargetPicker({ value, onChange, ctx, size = "md" }: { value:
             ))}
           </select>
         ) : (
-          <p className="text-[11px] text-slate-400">ใช้ได้ในตัวจัดหน้าเท่านั้น</p>
+          <p className="text-[11px] text-slate-400">{t("ใช้ได้ในตัวจัดหน้าเท่านั้น", "Only available in the page builder")}</p>
         ))}
 
       {kind === "url" && (
-        <input className={cls} value={value} placeholder="https://… หรือ mailto:… หรือ tel:…" maxLength={300} onChange={(e) => onChange(e.target.value.trim())} />
+        <input className={cls} value={value} placeholder={t("https://… หรือ mailto:… หรือ tel:…", "https://… or mailto:… or tel:…")} maxLength={300} onChange={(e) => onChange(e.target.value.trim())} />
       )}
     </div>
   );

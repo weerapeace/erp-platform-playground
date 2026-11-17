@@ -3,6 +3,7 @@
  * ใช้ทั้งปุ่มกรองในแท็บ 👥 สมาชิก และ /api/website/members/export (ส่งออกได้เฉพาะคนที่ยินยอมรับข่าวสาร — PDPA)
  */
 
+import { tr } from "@/lib/lang";
 export interface SegmentMember {
   marketingOptIn: boolean;
   orderCount: number;
@@ -11,11 +12,11 @@ export interface SegmentMember {
 }
 
 export const MEMBER_SEGMENTS = [
-  { key: "all", label: "ทั้งหมด", hint: "" },
-  { key: "optin", label: "📬 รับข่าวสาร", hint: "ยินยอมรับข่าวสาร — ส่งโปรได้" },
-  { key: "repeat", label: "🔁 ซื้อซ้ำ", hint: "สั่ง 2 ครั้งขึ้นไป" },
-  { key: "new", label: "🆕 ยังไม่เคยซื้อ", hint: "สมัครแล้วแต่ยังไม่สั่ง — ส่งโค้ดต้อนรับ" },
-  { key: "lapsed", label: "💤 ห่างหาย 90 วัน", hint: "เคยซื้อ แต่ไม่ได้สั่งมา 90 วันขึ้นไป — ชวนกลับมา" },
+  { key: "all", get label() { return tr("ทั้งหมด", "All"); }, hint: "" },
+  { key: "optin", get label() { return tr("📬 รับข่าวสาร", "📬 Opted in"); }, get hint() { return tr("ยินยอมรับข่าวสาร — ส่งโปรได้", "Agreed to receive news — OK to send promos"); } },
+  { key: "repeat", get label() { return tr("🔁 ซื้อซ้ำ", "🔁 Repeat buyers"); }, get hint() { return tr("สั่ง 2 ครั้งขึ้นไป", "Ordered 2+ times"); } },
+  { key: "new", get label() { return tr("🆕 ยังไม่เคยซื้อ", "🆕 Never bought"); }, get hint() { return tr("สมัครแล้วแต่ยังไม่สั่ง — ส่งโค้ดต้อนรับ", "Signed up but no orders yet — send a welcome code"); } },
+  { key: "lapsed", get label() { return tr("💤 ห่างหาย 90 วัน", "💤 Lapsed 90 days"); }, get hint() { return tr("เคยซื้อ แต่ไม่ได้สั่งมา 90 วันขึ้นไป — ชวนกลับมา", "Bought before, no order in 90+ days — win them back"); } },
 ] as const;
 export type SegmentKey = (typeof MEMBER_SEGMENTS)[number]["key"] | `tier:${string}`;
 

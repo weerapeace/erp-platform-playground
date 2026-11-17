@@ -12,6 +12,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { useT } from "@/components/i18n";
+import { getLang } from "@/lib/lang";
+import { labelEn } from "@/lib/website-canvas-en";
 import { apiFetch } from "@/lib/api";
 import { CanvasMiniPreview } from "@/components/website-canvas-mini";
 import { CANVAS_STARTER_TEMPLATES } from "@/lib/website-canvas";
@@ -23,7 +26,7 @@ type Confirm = null | { kind: "apply" | "overwrite" | "delete"; name: string; da
 
 const fmtDate = (s: string) => {
   try {
-    return new Date(s).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+    return new Date(s).toLocaleDateString(getLang() === "en" ? "en-GB" : "th-TH", { day: "numeric", month: "short", year: "2-digit" });
   } catch {
     return "";
   }
@@ -49,6 +52,7 @@ export function CanvasTemplates({
   onApply: (data: Record<string, unknown>) => void;
 }) {
   const toast = useToast();
+  const tx = useT();
   const [list, setList] = useState<CanvasTemplate[] | null>(null);
   const [loadErr, setLoadErr] = useState(false);
   const [scope, setScope] = useState<"shop" | "all">("shop");
@@ -80,20 +84,20 @@ export function CanvasTemplates({
   const save = async () => {
     const n = name.trim();
     if (!n) {
-      toast.warning("ตั้งชื่อแม่แบบก่อน เช่น “หัวเว็บคอลเลกชันฤดูร้อน”");
+      toast.warning(tx("ตั้งชื่อแม่แบบก่อน เช่น “หัวเว็บคอลเลกชันฤดูร้อน”", "Name the template first, e.g. “Summer collection header”"));
       return;
     }
     setSaving(true);
     try {
       const r = await apiFetch("/api/website/canvas-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, name: n, block }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
-      toast.success(`บันทึกแม่แบบ “${n}” แล้ว`);
+      if (!r.ok) throw new Error(j?.error || tx("บันทึกไม่สำเร็จ", "Save failed"));
+      toast.success(tx(`บันทึกแม่แบบ “${n}” แล้ว`, `Saved template “${n}”`));
       setName("");
       setScope("shop");
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : tx("บันทึกไม่สำเร็จ", "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -104,12 +108,12 @@ export function CanvasTemplates({
     try {
       const r = await apiFetch("/api/website/canvas-templates", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok) throw new Error(j?.error || tx("บันทึกไม่สำเร็จ", "Save failed"));
       toast.success(okMsg);
       await load();
       return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : tx("บันทึกไม่สำเร็จ", "Save failed"));
       return false;
     } finally {
       setBusy(false);
@@ -123,11 +127,11 @@ export function CanvasTemplates({
       onApply(c.data);
       setConfirm(null);
       onClose();
-      toast.success(`ใช้แม่แบบ “${c.name}” แล้ว — ย้อนกลับได้ด้วยปุ่ม ↶`);
+      toast.success(tx(`ใช้แม่แบบ “${c.name}” แล้ว — ย้อนกลับได้ด้วยปุ่ม ↶`, `Applied template “${labelEn(c.name)}” — undo with ↶`));
       return;
     }
     if (c.kind === "overwrite" && c.id) {
-      if (await patch(c.id, { block }, `บันทึกทับ “${c.name}” ด้วยผืนนี้แล้ว`)) setConfirm(null);
+      if (await patch(c.id, { block }, tx(`บันทึกทับ “${c.name}” ด้วยผืนนี้แล้ว`, `Overwrote “${c.name}” with this canvas`))) setConfirm(null);
       return;
     }
     if (c.kind === "delete" && c.id) {
@@ -135,12 +139,12 @@ export function CanvasTemplates({
       try {
         const r = await apiFetch(`/api/website/canvas-templates?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j?.error || "ลบไม่สำเร็จ");
-        toast.success(`ลบแม่แบบ “${c.name}” แล้ว`);
+        if (!r.ok) throw new Error(j?.error || tx("ลบไม่สำเร็จ", "Delete failed"));
+        toast.success(tx(`ลบแม่แบบ “${c.name}” แล้ว`, `Deleted template “${c.name}”`));
         setConfirm(null);
         await load();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ");
+        toast.error(e instanceof Error ? e.message : tx("ลบไม่สำเร็จ", "Delete failed"));
       } finally {
         setBusy(false);
       }
@@ -153,7 +157,7 @@ export function CanvasTemplates({
     else {
       onApply(data);
       onClose();
-      toast.success(`ใช้แม่แบบ “${tplName}” แล้ว`);
+      toast.success(tx(`ใช้แม่แบบ “${tplName}” แล้ว`, `Applied template “${labelEn(tplName)}”`));
     }
   };
 
@@ -163,16 +167,16 @@ export function CanvasTemplates({
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="📐 แม่แบบผืน" size="lg" defaultExpanded={false} resizable={false}>
+      <ERPModal open={open} onClose={onClose} title={tx("📐 แม่แบบผืน", "📐 Canvas templates")} size="lg" defaultExpanded={false} resizable={false}>
         <div className="space-y-5">
           {/* บันทึกผืนนี้ */}
           <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2">
-            <p className="text-sm font-semibold text-slate-800">บันทึกผืนนี้เป็นแม่แบบ</p>
-            <p className="text-[11px] text-slate-500">เก็บทั้งผืน (ชิ้นส่วน · ตำแหน่งคอม/มือถือ · ความสูง · พื้นหลัง) ไว้ใช้ซ้ำกับผืนอื่น หน้าอื่น หรือร้านอื่น</p>
+            <p className="text-sm font-semibold text-slate-800">{tx("บันทึกผืนนี้เป็นแม่แบบ", "Save this canvas as a template")}</p>
+            <p className="text-[11px] text-slate-500">{tx("เก็บทั้งผืน (ชิ้นส่วน · ตำแหน่งคอม/มือถือ · ความสูง · พื้นหลัง) ไว้ใช้ซ้ำกับผืนอื่น หน้าอื่น หรือร้านอื่น", "Saves the whole canvas (items · desktop/mobile positions · height · background) to reuse on other canvases, pages or shops")}</p>
             <div className="flex gap-2">
               <input
                 className="flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                placeholder="ชื่อแม่แบบ เช่น หัวเว็บคอลเลกชันฤดูร้อน"
+                placeholder={tx("ชื่อแม่แบบ เช่น หัวเว็บคอลเลกชันฤดูร้อน", "Template name, e.g. Summer collection header")}
                 maxLength={80}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -181,33 +185,33 @@ export function CanvasTemplates({
                 }}
               />
               <button onClick={() => void save()} disabled={saving || !itemCount} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-40">
-                {saving ? "กำลังบันทึก…" : "💾 บันทึก"}
+                {saving ? tx("กำลังบันทึก…", "Saving…") : tx("💾 บันทึก", "💾 Save")}
               </button>
             </div>
-            {!itemCount && <p className="text-[11px] text-amber-600">ผืนนี้ยังว่าง — วางชิ้นก่อนแล้วค่อยบันทึก</p>}
+            {!itemCount && <p className="text-[11px] text-amber-600">{tx("ผืนนี้ยังว่าง — วางชิ้นก่อนแล้วค่อยบันทึก", "This canvas is empty — add items before saving")}</p>}
           </div>
 
           {/* แม่แบบที่บันทึกไว้ */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <p className="flex-1 text-sm font-semibold text-slate-800">แม่แบบที่บันทึกไว้</p>
+              <p className="flex-1 text-sm font-semibold text-slate-800">{tx("แม่แบบที่บันทึกไว้", "Saved templates")}</p>
               {(["shop", "all"] as const).map((s) => (
                 <button key={s} onClick={() => setScope(s)} className={`rounded-full border px-2.5 py-1 text-[11px] ${scope === s ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
-                  {s === "shop" ? "ร้านนี้" : "ทุกร้าน"}
+                  {s === "shop" ? tx("ร้านนี้", "This shop") : tx("ทุกร้าน", "All shops")}
                 </button>
               ))}
             </div>
             {list === null ? (
-              <p className="py-6 text-center text-xs text-slate-400">กำลังโหลด…</p>
+              <p className="py-6 text-center text-xs text-slate-400">{tx("กำลังโหลด…", "Loading…")}</p>
             ) : loadErr ? (
               <div className="py-6 text-center text-xs text-red-600">
-                โหลดแม่แบบไม่สำเร็จ{" "}
+                {tx("โหลดแม่แบบไม่สำเร็จ", "Couldn't load templates")}{" "}
                 <button onClick={() => void load()} className="underline">
-                  ลองใหม่
+                  {tx("ลองใหม่", "Retry")}
                 </button>
               </div>
             ) : !shown.length ? (
-              <p className="py-6 text-center text-xs text-slate-400">{scope === "shop" ? "ร้านนี้ยังไม่มีแม่แบบ — บันทึกผืนที่ชอบไว้ด้านบน หรือดู “ทุกร้าน”" : "ยังไม่มีแม่แบบ"}</p>
+              <p className="py-6 text-center text-xs text-slate-400">{scope === "shop" ? tx("ร้านนี้ยังไม่มีแม่แบบ — บันทึกผืนที่ชอบไว้ด้านบน หรือดู “ทุกร้าน”", "This shop has no templates — save a canvas you like above, or view “All shops”") : tx("ยังไม่มีแม่แบบ", "No templates yet")}</p>
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 {shown.map((t) => (
@@ -222,11 +226,11 @@ export function CanvasTemplates({
                           value={renaming.name}
                           onChange={(e) => setRenaming({ id: t.id, name: e.target.value })}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") void patch(t.id, { name: renaming.name }, "เปลี่ยนชื่อแล้ว").then((ok) => ok && setRenaming(null));
+                            if (e.key === "Enter") void patch(t.id, { name: renaming.name }, tx("เปลี่ยนชื่อแล้ว", "Renamed")).then((ok) => ok && setRenaming(null));
                             if (e.key === "Escape") setRenaming(null);
                           }}
                         />
-                        <button disabled={busy || !renaming.name.trim()} onClick={() => void patch(t.id, { name: renaming.name }, "เปลี่ยนชื่อแล้ว").then((ok) => ok && setRenaming(null))} className={small}>
+                        <button disabled={busy || !renaming.name.trim()} onClick={() => void patch(t.id, { name: renaming.name }, tx("เปลี่ยนชื่อแล้ว", "Renamed")).then((ok) => ok && setRenaming(null))} className={small}>
                           ✓
                         </button>
                         <button onClick={() => setRenaming(null)} className={small}>
@@ -237,22 +241,22 @@ export function CanvasTemplates({
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-slate-800 truncate">{t.name}</p>
                         <p className="text-[10px] text-slate-400 truncate">
-                          {t.shopId === shopId ? "ร้านนี้" : t.shopName ?? "ร้านอื่น"} · {fmtDate(t.updatedAt)}
+                          {t.shopId === shopId ? tx("ร้านนี้", "This shop") : t.shopName ?? tx("ร้านอื่น", "Other shop")} · {fmtDate(t.updatedAt)}
                           {t.createdByName ? ` · ${t.createdByName}` : ""}
                         </p>
                       </div>
                     )}
                     <div className="flex flex-wrap gap-1">
                       <button onClick={() => use(t.name, t.data)} className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] text-white hover:bg-blue-700">
-                        ใช้แบบนี้
+                        {tx("ใช้แบบนี้", "Use this")}
                       </button>
-                      <button disabled={busy} onClick={() => setRenaming({ id: t.id, name: t.name })} className={small} title="แก้ชื่อ">
-                        ✏️ ชื่อ
+                      <button disabled={busy} onClick={() => setRenaming({ id: t.id, name: t.name })} className={small} title={tx("แก้ชื่อ", "Rename")}>
+                        {tx("✏️ ชื่อ", "✏️ Name")}
                       </button>
-                      <button disabled={busy || !itemCount} onClick={() => setConfirm({ kind: "overwrite", id: t.id, name: t.name })} className={small} title="แทนเนื้อแม่แบบด้วยผืนที่กำลังแก้">
-                        💾 บันทึกทับ
+                      <button disabled={busy || !itemCount} onClick={() => setConfirm({ kind: "overwrite", id: t.id, name: t.name })} className={small} title={tx("แทนเนื้อแม่แบบด้วยผืนที่กำลังแก้", "Replace the template with the canvas being edited")}>
+                        {tx("💾 บันทึกทับ", "💾 Overwrite")}
                       </button>
-                      <button disabled={busy} onClick={() => setConfirm({ kind: "delete", id: t.id, name: t.name })} className={`${small} text-red-600`} title="ลบแม่แบบ">
+                      <button disabled={busy} onClick={() => setConfirm({ kind: "delete", id: t.id, name: t.name })} className={`${small} text-red-600`} title={tx("ลบแม่แบบ", "Delete template")}>
                         🗑
                       </button>
                     </div>
@@ -264,15 +268,15 @@ export function CanvasTemplates({
 
           {/* แม่แบบตั้งต้น */}
           <div className="space-y-2">
-            <p className="text-sm font-semibold text-slate-800">แบบสำเร็จของระบบ</p>
-            <p className="text-[11px] text-slate-500 -mt-1">ไม่มีรูป ใช้สีตามธีมร้าน — ใส่แล้วแก้ข้อความ/เพิ่มรูปต่อได้</p>
+            <p className="text-sm font-semibold text-slate-800">{tx("แบบสำเร็จของระบบ", "Built-in templates")}</p>
+            <p className="text-[11px] text-slate-500 -mt-1">{tx("ไม่มีรูป ใช้สีตามธีมร้าน — ใส่แล้วแก้ข้อความ/เพิ่มรูปต่อได้", "No images, uses the shop theme colors — edit text / add images after applying")}</p>
             <div className="grid grid-cols-3 gap-3">
               {CANVAS_STARTER_TEMPLATES.map((t) => (
                 <div key={t.key} className={card}>
                   <CanvasMiniPreview data={t.data} theme={theme} fontNames={fontNames} width={190} />
-                  <p className="text-xs font-medium text-slate-700 truncate">{t.name}</p>
+                  <p className="text-xs font-medium text-slate-700 truncate">{labelEn(t.name)}</p>
                   <button onClick={() => use(t.name, t.data)} className="rounded-md border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-50">
-                    ใช้แบบนี้
+                    {tx("ใช้แบบนี้", "Use this")}
                   </button>
                 </div>
               ))}
@@ -287,15 +291,15 @@ export function CanvasTemplates({
         onConfirm={() => void doConfirm()}
         loading={busy}
         variant={confirm?.kind === "delete" ? "danger" : undefined}
-        title={confirm?.kind === "apply" ? "แทนที่ผืนนี้ด้วยแม่แบบ?" : confirm?.kind === "overwrite" ? "บันทึกทับแม่แบบ?" : "ลบแม่แบบนี้?"}
+        title={confirm?.kind === "apply" ? tx("แทนที่ผืนนี้ด้วยแม่แบบ?", "Replace this canvas with the template?") : confirm?.kind === "overwrite" ? tx("บันทึกทับแม่แบบ?", "Overwrite template?") : tx("ลบแม่แบบนี้?", "Delete this template?")}
         message={
           confirm?.kind === "apply"
-            ? `ชิ้นที่วางอยู่ ${itemCount} ชิ้นจะถูกแทนด้วยแม่แบบ “${confirm?.name ?? ""}” (กด ↶ ย้อนกลับได้)`
+            ? tx(`ชิ้นที่วางอยู่ ${itemCount} ชิ้นจะถูกแทนด้วยแม่แบบ “${confirm?.name ?? ""}” (กด ↶ ย้อนกลับได้)`, `The ${itemCount} items on the canvas will be replaced by template “${labelEn(confirm?.name ?? "")}” (undo with ↶)`)
             : confirm?.kind === "overwrite"
-              ? `เนื้อแม่แบบ “${confirm?.name ?? ""}” จะถูกแทนด้วยผืนที่กำลังแก้ (ผืนที่เคยใช้แม่แบบนี้ไปแล้วไม่เปลี่ยน)`
-              : `“${confirm?.name ?? ""}” จะหายจากรายการถาวร (ผืนที่เคยใช้แม่แบบนี้ไปแล้วไม่กระทบ)`
+              ? tx(`เนื้อแม่แบบ “${confirm?.name ?? ""}” จะถูกแทนด้วยผืนที่กำลังแก้ (ผืนที่เคยใช้แม่แบบนี้ไปแล้วไม่เปลี่ยน)`, `Template “${confirm?.name ?? ""}” will be replaced by the canvas being edited (canvases that already used it won't change)`)
+              : tx(`“${confirm?.name ?? ""}” จะหายจากรายการถาวร (ผืนที่เคยใช้แม่แบบนี้ไปแล้วไม่กระทบ)`, `“${confirm?.name ?? ""}” will be removed permanently (canvases that already used it are not affected)`)
         }
-        confirmText={confirm?.kind === "apply" ? "แทนที่" : confirm?.kind === "overwrite" ? "บันทึกทับ" : "ลบ"}
+        confirmText={confirm?.kind === "apply" ? tx("แทนที่", "Replace") : confirm?.kind === "overwrite" ? tx("บันทึกทับ", "Overwrite") : tx("ลบ", "Delete")}
       />
     </>
   );

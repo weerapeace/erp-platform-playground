@@ -11,6 +11,8 @@ import { useEffect, useState } from "react";
 import { ConfirmDialog, Drawer } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
+import { tr, getLang } from "@/lib/lang";
 import type { WebVersion } from "@/lib/website-versions";
 
 export function VersionHistoryDrawer<B>({
@@ -33,6 +35,7 @@ export function VersionHistoryDrawer<B>({
   onRestored: (blocks: B[], versionNo: number) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [versions, setVersions] = useState<WebVersion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ask, setAsk] = useState<WebVersion | null>(null);
@@ -50,7 +53,7 @@ export function VersionHistoryDrawer<B>({
         if (j.error) setError(j.error);
         else setVersions(j.versions ?? []);
       })
-      .catch(() => alive && setError("โหลดประวัติไม่สำเร็จ"));
+      .catch(() => alive && setError(tr("โหลดประวัติไม่สำเร็จ", "Couldn't load history")));
     return () => {
       alive = false;
     };
@@ -63,31 +66,31 @@ export function VersionHistoryDrawer<B>({
       const r = await apiFetch(restoreUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(restoreBody(ask.versionNo)) });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "กู้คืนไม่สำเร็จ");
+        toast.error(j.error ?? tr("กู้คืนไม่สำเร็จ", "Restore failed"));
         return;
       }
       onRestored(j.blocks as B[], ask.versionNo);
-      toast.success(`ดึงเวอร์ชัน #${ask.versionNo} กลับมาเป็นร่างแล้ว — เว็บจริงยังไม่เปลี่ยน กด "เผยแพร่" เมื่อพร้อม (กด ↶ ย้อนได้)`);
+      toast.success(tr(`ดึงเวอร์ชัน #${ask.versionNo} กลับมาเป็นร่างแล้ว — เว็บจริงยังไม่เปลี่ยน กด "เผยแพร่" เมื่อพร้อม (กด ↶ ย้อนได้)`, `Version #${ask.versionNo} restored as draft — the live site hasn't changed. Press "Publish" when ready (↶ to undo)`));
       setAsk(null);
       onClose();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
     }
   };
 
-  const when = (iso: string) => new Date(iso).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+  const when = (iso: string) => new Date(iso).toLocaleString(getLang() === "en" ? "en-GB" : "th-TH", { dateStyle: "medium", timeStyle: "short" });
 
   return (
     <>
-      <Drawer open={open} onClose={onClose} title={`ประวัติ${what}ที่เผยแพร่`} description="บันทึกให้อัตโนมัติทุกครั้งที่กดเผยแพร่ · กู้คืน = ดึงกลับมาเป็นร่างก่อน (ยังไม่ขึ้นเว็บ)" size="md" storageKey="erp-web-versions-width">
+      <Drawer open={open} onClose={onClose} title={t(`ประวัติ${what}ที่เผยแพร่`, `Publish history: ${what}`)} description={t("บันทึกให้อัตโนมัติทุกครั้งที่กดเผยแพร่ · กู้คืน = ดึงกลับมาเป็นร่างก่อน (ยังไม่ขึ้นเว็บ)", "Saved automatically on every publish · Restore = bring back as a draft first (not live yet)")} size="md" storageKey="erp-web-versions-width">
         {error ? (
           <p className="py-10 text-center text-sm text-red-600">{error}</p>
         ) : versions === null ? (
-          <p className="py-10 text-center text-sm text-slate-400">กำลังโหลด…</p>
+          <p className="py-10 text-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>
         ) : !versions.length ? (
-          <p className="py-10 text-center text-sm text-slate-400">ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่</p>
+          <p className="py-10 text-center text-sm text-slate-400">{t("ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่", "No history yet — saved on every publish")}</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {versions.map((v, i) => (
@@ -97,7 +100,7 @@ export function VersionHistoryDrawer<B>({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-slate-700">
                       {v.blocks} Section
-                      {i === 0 && <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200">ออนไลน์อยู่ตอนนี้</span>}
+                      {i === 0 && <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] border border-emerald-200">{t("ออนไลน์อยู่ตอนนี้", "Live now")}</span>}
                     </p>
                     <p className="text-[11px] text-slate-400 truncate">
                       {when(v.createdAt)}
@@ -105,7 +108,7 @@ export function VersionHistoryDrawer<B>({
                     </p>
                   </div>
                   <button type="button" onClick={() => setAsk(v)} className="text-xs text-blue-600 hover:underline whitespace-nowrap">
-                    กู้คืนเป็นร่าง
+                    {t("กู้คืนเป็นร่าง", "Restore as draft")}
                   </button>
                 </div>
                 {v.labels.length > 0 && (
@@ -128,15 +131,15 @@ export function VersionHistoryDrawer<B>({
         onClose={() => !busy && setAsk(null)}
         onConfirm={() => void restore()}
         loading={busy}
-        title={`ดึงเวอร์ชัน #${ask?.versionNo ?? ""} กลับมาเป็นร่าง?`}
+        title={t(`ดึงเวอร์ชัน #${ask?.versionNo ?? ""} กลับมาเป็นร่าง?`, `Restore version #${ask?.versionNo ?? ""} as draft?`)}
         message={
           <>
-            ร่างที่แก้ค้างอยู่ตอนนี้จะถูกแทนด้วยเวอร์ชันนี้ (กด ↶ ย้อนกลับได้)
+            {t("ร่างที่แก้ค้างอยู่ตอนนี้จะถูกแทนด้วยเวอร์ชันนี้ (กด ↶ ย้อนกลับได้)", "Your current unsaved draft will be replaced by this version (↶ to undo)")}
             <br />
-            เว็บจริงยังไม่เปลี่ยน จนกว่าจะกด &quot;เผยแพร่&quot;
+            {t("เว็บจริงยังไม่เปลี่ยน จนกว่าจะกด \"เผยแพร่\"", "The live site won't change until you press \"Publish\"")}
           </>
         }
-        confirmText="กู้คืนเป็นร่าง"
+        confirmText={t("กู้คืนเป็นร่าง", "Restore as draft")}
       />
     </>
   );

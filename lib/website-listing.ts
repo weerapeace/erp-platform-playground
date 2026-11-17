@@ -10,8 +10,6 @@
  *           ตามสินค้าไปด้วยตอนลูกค้าเรียง/กรองได้ (anchorFollow) · ตำแหน่งคิดที่ resolveInsertAt (ใช้ร่วมเว็บร้าน)
  * 🎬 วิดีโอ (videoKey / mobileVideoKey) เล่นแทนรูปได้ · รูป = ภาพปกระหว่างโหลด
  */
-import { tr } from "@/lib/lang";
-
 export type ListingInsertSize = "1x1" | "2x1" | "2x2" | "full";
 export type ListingInsertScope = "all" | "shop" | "categories";
 export type ListingTextPos = "bottom-left" | "bottom-center" | "center" | "top-left";
@@ -113,18 +111,18 @@ export interface ListingConfig {
  */
 export type ListingCardMode = "parent" | "sku" | "auto";
 export const LISTING_CARD_MODES: { value: ListingCardMode; label: string; hint: string }[] = [
-  { value: "parent", get label() { return tr("แบบรุ่น (เดิม)", "By model (classic)"); }, get hint() { return tr("1 การ์ด / รุ่น · มีจุดสีใต้การ์ด", "1 card per model · color dots under the card"); } },
-  { value: "sku", get label() { return tr("แบบทีละสี ทุกหมวด", "One card per color, all categories"); }, get hint() { return tr("1 การ์ด / สี · รูปของสีนั้น · ชื่อ \"รุ่น · สี\"", "1 card per color · that color's image · name \"Model · Color\""); } },
-  { value: "auto", get label() { return tr("อัตโนมัติ (หมวดของน้อย)", "Auto (small categories)"); }, get hint() { return tr("หมวดที่มีรุ่นไม่ถึงที่ตั้ง = แตกเป็นทีละสี", "Categories with fewer models than the setting = split by color"); } },
+  { value: "parent", label: "แบบรุ่น (เดิม)", hint: "1 การ์ด / รุ่น · มีจุดสีใต้การ์ด" },
+  { value: "sku", label: "แบบทีละสี ทุกหมวด", hint: "1 การ์ด / สี · รูปของสีนั้น · ชื่อ \"รุ่น · สี\"" },
+  { value: "auto", label: "อัตโนมัติ (หมวดของน้อย)", hint: "หมวดที่มีรุ่นไม่ถึงที่ตั้ง = แตกเป็นทีละสี" },
 ];
 export const LISTING_CARD_AUTO_RANGE = { min: 2, max: 30 } as const;
 /** ↕ เรียงการ์ดทีละสี — code/random ใช้ตอนลูกค้าเรียงแบบ "แนะนำ" และไม่ได้ค้นหา (เลือกเรียงราคา/ใหม่ล่าสุด = เรียงตามนั้น) */
 export type ListingSkuOrder = "mix" | "group" | "code" | "random";
 export const LISTING_SKU_ORDERS: { value: ListingSkuOrder; label: string; hint: string }[] = [
-  { value: "mix", get label() { return tr("สลับรุ่น", "Mix models"); }, get hint() { return tr("สีแรกของทุกรุ่นก่อน แล้วสีที่ 2 …", "First color of every model first, then the 2nd color …"); } },
-  { value: "group", get label() { return tr("ทีละรุ่น", "Group by model"); }, get hint() { return tr("ทุกสีของรุ่นเดียวกันอยู่ติดกัน", "All colors of the same model stay together"); } },
-  { value: "code", get label() { return tr("ตามรหัส SKU", "By SKU code"); }, get hint() { return tr("เรียงรหัส A→Z เช่น PIX24-01, PIX24-02 … PIX34-01", "Codes A→Z, e.g. PIX24-01, PIX24-02 … PIX34-01"); } },
-  { value: "random", get label() { return tr("สุ่ม", "Random"); }, get hint() { return tr("ลูกค้าเข้าแต่ละครั้งเห็นลำดับใหม่ (เลื่อนดู/ดูเพิ่ม/กลับจากหน้าสินค้า ลำดับไม่สลับ)", "New order on each visit (order stays the same when scrolling, loading more or coming back from a product)"); } },
+  { value: "mix", label: "สลับรุ่น", hint: "สีแรกของทุกรุ่นก่อน แล้วสีที่ 2 …" },
+  { value: "group", label: "ทีละรุ่น", hint: "ทุกสีของรุ่นเดียวกันอยู่ติดกัน" },
+  { value: "code", label: "ตามรหัส SKU", hint: "เรียงรหัส A→Z เช่น PIX24-01, PIX24-02 … PIX34-01" },
+  { value: "random", label: "สุ่ม", hint: "ลูกค้าเข้าแต่ละครั้งเห็นลำดับใหม่ (เลื่อนดู/ดูเพิ่ม/กลับจากหน้าสินค้า ลำดับไม่สลับ)" },
 ];
 /**
  * 🎲 สีหน้าการ์ดแบบรุ่น (2026-11-01 · เจ้าของ: "อยากให้สินค้าที่โชว์สุ่มสีมาโชว์") — เว็บร้าน src/lib/sku-cards.ts randomCardColor
@@ -133,8 +131,8 @@ export const LISTING_SKU_ORDERS: { value: ListingSkuOrder; label: string; hint: 
  */
 export type ListingCardColor = "main" | "random";
 export const LISTING_CARD_COLORS: { value: ListingCardColor; label: string; hint: string }[] = [
-  { value: "main", get label() { return tr("สีหลัก (เดิม)", "Main color (classic)"); }, get hint() { return tr("ทุกคนเห็นสี ★ หลัก / รูปแรกของรุ่น", "Everyone sees the ★ main color / first image of the model"); } },
-  { value: "random", get label() { return tr("สุ่มสี", "Random color"); }, get hint() { return tr("แต่ละการ์ดสุ่ม 1 สีมาโชว์ — เข้าใหม่เห็นสีใหม่ · ตัวที่ตั้ง ★ สีหลักไว้ใช้สีหลักเสมอ · สินค้าหมด = เหมือนเดิม", "Each card shows 1 random color — new visit, new color · models with a ★ main color always use it · sold out = unchanged"); } },
+  { value: "main", label: "สีหลัก (เดิม)", hint: "ทุกคนเห็นสี ★ หลัก / รูปแรกของรุ่น" },
+  { value: "random", label: "สุ่มสี", hint: "แต่ละการ์ดสุ่ม 1 สีมาโชว์ — เข้าใหม่เห็นสีใหม่ · ตัวที่ตั้ง ★ สีหลักไว้ใช้สีหลักเสมอ · สินค้าหมด = เหมือนเดิม" },
 ];
 /** รหัสหน้า "สินค้าทั้งหมด" ในการตั้งรายหมวด */
 export const LISTING_ALL_KEY = "all";
@@ -148,9 +146,9 @@ export function listingCardModeFor(cfg: Pick<ListingConfig, "cardMode" | "cardAu
 }
 export type ListingSoldOut = "normal" | "last" | "hide";
 export const LISTING_SOLD_OUT: { value: ListingSoldOut; label: string; hint: string }[] = [
-  { value: "last", get label() { return tr("ไปไว้ท้ายรายการ", "Move to the end"); }, get hint() { return tr("ยังเห็นได้ แต่ไม่บังของที่ซื้อได้", "Still visible, but doesn't push down items in stock"); } },
-  { value: "hide", get label() { return tr("ซ่อนจากหน้ารายการ", "Hide from the list"); }, get hint() { return tr("ลิงก์ตรงเข้าหน้าสินค้ายังได้", "Direct links to the product page still work"); } },
-  { value: "normal", get label() { return tr("ตามลำดับปกติ", "Normal order"); }, get hint() { return tr("อยู่ที่เดิม มีป้ายสินค้าหมด", "Stays in place with a sold-out badge"); } },
+  { value: "last", label: "ไปไว้ท้ายรายการ", hint: "ยังเห็นได้ แต่ไม่บังของที่ซื้อได้" },
+  { value: "hide", label: "ซ่อนจากหน้ารายการ", hint: "ลิงก์ตรงเข้าหน้าสินค้ายังได้" },
+  { value: "normal", label: "ตามลำดับปกติ", hint: "อยู่ที่เดิม มีป้ายสินค้าหมด" },
 ];
 
 export interface ListingColumns {
@@ -171,19 +169,19 @@ export interface ListingHeader {
   showCount: boolean;
 }
 export const LISTING_PAGINGS: { value: ListingPaging; label: string; hint: string }[] = [
-  { value: "all", get label() { return tr("โชว์ทั้งหมด", "Show all"); }, get hint() { return tr("เหมือนเดิม — สินค้าทุกชิ้นในหน้าเดียว", "As before — every product on one page"); } },
-  { value: "more", get label() { return tr("ปุ่ม \"ดูเพิ่ม\"", "\"Load more\" button"); }, get hint() { return tr("โชว์ทีละชุด กดปุ่มเพื่อดูชุดถัดไป", "Show one batch at a time, click to see the next batch"); } },
-  { value: "infinite", get label() { return tr("เลื่อนแล้วโหลดเอง", "Infinite scroll"); }, get hint() { return tr("เลื่อนถึงท้ายรายการ ชุดถัดไปขึ้นเอง", "Next batch loads when you reach the end"); } },
-  { value: "pages", get label() { return tr("เลขหน้า", "Page numbers"); }, get hint() { return tr("‹ 1 2 3 › ทีละหน้า", "‹ 1 2 3 › one page at a time"); } },
+  { value: "all", label: "โชว์ทั้งหมด", hint: "เหมือนเดิม — สินค้าทุกชิ้นในหน้าเดียว" },
+  { value: "more", label: "ปุ่ม \"ดูเพิ่ม\"", hint: "โชว์ทีละชุด กดปุ่มเพื่อดูชุดถัดไป" },
+  { value: "infinite", label: "เลื่อนแล้วโหลดเอง", hint: "เลื่อนถึงท้ายรายการ ชุดถัดไปขึ้นเอง" },
+  { value: "pages", label: "เลขหน้า", hint: "‹ 1 2 3 › ทีละหน้า" },
 ];
 export const LISTING_PAGE_SIZES = [12, 16, 20, 24, 30, 32, 36, 40, 48, 60, 72, 96] as const;
 export const LISTING_SORTS: { value: ListingSort; label: string; hint?: string }[] = [
-  { value: "featured", get label() { return tr("แนะนำ", "Featured"); }, get hint() { return tr("ลำดับที่จัดไว้ (ลากเรียงในหน้าสินค้าบนเว็บ)", "Your arranged order (drag to sort in Web products)"); } },
-  { value: "newest", get label() { return tr("ใหม่ล่าสุด", "Newest"); } },
-  { value: "best", get label() { return tr("ขายดี", "Best selling"); }, get hint() { return tr("โชว์เมื่อมีข้อมูลยอดขาย", "Shown when there is sales data"); } },
-  { value: "price-asc", get label() { return tr("ราคาน้อย → มาก", "Price low → high"); } },
-  { value: "price-desc", get label() { return tr("ราคามาก → น้อย", "Price high → low"); } },
-  { value: "name", get label() { return tr("ชื่อ ก–ฮ", "Name A–Z"); } },
+  { value: "featured", label: "แนะนำ", hint: "ลำดับที่จัดไว้ (ลากเรียงในหน้าสินค้าบนเว็บ)" },
+  { value: "newest", label: "ใหม่ล่าสุด" },
+  { value: "best", label: "ขายดี", hint: "โชว์เมื่อมีข้อมูลยอดขาย" },
+  { value: "price-asc", label: "ราคาน้อย → มาก" },
+  { value: "price-desc", label: "ราคามาก → น้อย" },
+  { value: "name", label: "ชื่อ ก–ฮ" },
 ];
 const SORT_KEYS = LISTING_SORTS.map((s) => s.value);
 export const DEFAULT_LISTING_HEADER: ListingHeader = { eyebrow: "", title: "", subtitle: "", showSearch: true, showCount: true };
@@ -315,21 +313,21 @@ export const MAX_LISTING_INSERTS = 20;
 export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last", stickyBar: false, cardMode: "parent", cardAutoMax: 6, skuOrder: "mix", cardModeByCat: {}, cardSwitch: false, cardColor: "main" };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
-  { value: "1x1", get label() { return tr("1 ช่อง (เท่าการ์ดสินค้า)", "1 slot (same as a product card)"); }, get hint() { return tr("มือถือ: 1 ช่อง", "Mobile: 1 slot"); } },
-  { value: "2x1", get label() { return tr("กว้าง 2 ช่อง", "2 slots wide"); }, get hint() { return tr("มือถือ: เต็มแถว", "Mobile: full row"); } },
-  { value: "2x2", get label() { return tr("ใหญ่ 2×2 ช่อง", "Large 2×2 slots"); }, get hint() { return tr("มือถือ: เต็มแถว", "Mobile: full row"); } },
-  { value: "full", get label() { return tr("เต็มแถว", "Full row"); }, get hint() { return tr("สัดส่วนตามที่ตั้งด้านล่าง", "Ratio as set below"); } },
+  { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
+  { value: "2x1", label: "กว้าง 2 ช่อง", hint: "มือถือ: เต็มแถว" },
+  { value: "2x2", label: "ใหญ่ 2×2 ช่อง", hint: "มือถือ: เต็มแถว" },
+  { value: "full", label: "เต็มแถว", hint: "สัดส่วนตามที่ตั้งด้านล่าง" },
 ];
 export const LISTING_SCOPES: { value: ListingInsertScope; label: string }[] = [
-  { value: "all", get label() { return tr("ทุกหน้า (ทั้งหมด + ทุกหมวด)", "Every page (All + every category)"); } },
-  { value: "shop", get label() { return tr("เฉพาะหน้า \"ทั้งหมด\"", "Only the \"All\" page"); } },
-  { value: "categories", get label() { return tr("เลือกหมวด…", "Pick categories…"); } },
+  { value: "all", label: "ทุกหน้า (ทั้งหมด + ทุกหมวด)" },
+  { value: "shop", label: "เฉพาะหน้า \"ทั้งหมด\"" },
+  { value: "categories", label: "เลือกหมวด…" },
 ];
 export const LISTING_TEXT_POS: { value: ListingTextPos; label: string }[] = [
-  { value: "bottom-left", get label() { return tr("ล่างซ้าย", "Bottom left"); } },
-  { value: "bottom-center", get label() { return tr("ล่างกลาง", "Bottom center"); } },
-  { value: "center", get label() { return tr("กลางรูป", "Center"); } },
-  { value: "top-left", get label() { return tr("บนซ้าย", "Top left"); } },
+  { value: "bottom-left", label: "ล่างซ้าย" },
+  { value: "bottom-center", label: "ล่างกลาง" },
+  { value: "center", label: "กลางรูป" },
+  { value: "top-left", label: "บนซ้าย" },
 ];
 export const LISTING_RATIOS = ["3:1", "21:9", "2:1", "16:9"] as const;
 export const LISTING_RATIOS_MOBILE = ["4:5", "1:1", "3:4", "16:9"] as const;

@@ -11,11 +11,12 @@
  *   3) ไม่เจอ → สร้างสมาชิกใหม่
  *   อีเมลที่ไม่ได้ยืนยัน ห้ามใช้ผูกบัญชีเด็ดขาด (กันคนอื่นตั้งอีเมลเราแล้วเข้าบัญชีเรา)
  */
+import { tr } from "@/lib/lang";
 import { validBirthday } from "@/lib/website-birthday";
 
 export type MemberProvider = "google" | "line" | "facebook" | "password";
 export const MEMBER_PROVIDERS: readonly MemberProvider[] = ["google", "line", "facebook", "password"];
-export const PROVIDER_LABEL: Record<MemberProvider, string> = { google: "Google", line: "LINE", facebook: "Facebook", password: "อีเมล" };
+export const PROVIDER_LABEL: Record<MemberProvider, string> = { google: "Google", line: "LINE", facebook: "Facebook", get password() { return tr("อีเมล", "Email"); } };
 
 export interface MemberLoginInput {
   provider: MemberProvider;

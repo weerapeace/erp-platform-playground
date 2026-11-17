@@ -16,10 +16,10 @@ import { ImageUploadField } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
-  GIFT_AREAS,
-  GIFT_FONTS,
+  GIFT_AREAS as GIFT_AREAS_TH,
+  GIFT_FONTS as GIFT_FONTS_TH,
   GIFT_FONTS_HREF,
-  GIFT_SIZE_PRESETS,
+  GIFT_SIZE_PRESETS as GIFT_SIZE_PRESETS_TH,
   giftCardHtml,
   normalizeGiftCards,
   type GiftCardConfig,
@@ -27,6 +27,11 @@ import {
   type GiftFontKey,
   type GiftWrapStyle,
 } from "@/lib/website-gift-cards";
+import { localizedOpts } from "@/lib/website-admin-en";
+// 🌐 ป้ายจากไฟล์มิเรอร์หน้าร้าน (แก้ที่ต้นทางไม่ได้) → แปลตอนแสดงผล
+const GIFT_AREAS = localizedOpts(GIFT_AREAS_TH);
+const GIFT_FONTS = localizedOpts(GIFT_FONTS_TH);
+const GIFT_SIZE_PRESETS = localizedOpts(GIFT_SIZE_PRESETS_TH);
 import { webForm } from "@/lib/website-form-styles";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";

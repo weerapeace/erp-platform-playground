@@ -11,18 +11,20 @@ import { apiFetch } from "@/lib/api";
 import { loadWebSettings } from "@/lib/website-data";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 type SocialKey = "social_facebook" | "social_instagram" | "social_tiktok" | "social_x" | "social_pinterest" | "social_youtube" | "contact_line_url" | "social_shopee" | "social_lazada";
 const SOCIALS: { key: SocialKey; label: string; icon: string; placeholder: string }[] = [
-  { key: "social_instagram", label: "Instagram", icon: "📸", placeholder: "https://instagram.com/ชื่อบัญชี" },
-  { key: "social_facebook", label: "Facebook", icon: "📘", placeholder: "https://facebook.com/ชื่อเพจ" },
-  { key: "social_tiktok", label: "TikTok", icon: "🎵", placeholder: "https://tiktok.com/@ชื่อบัญชี" },
-  { key: "social_x", label: "X (Twitter)", icon: "✖️", placeholder: "https://x.com/ชื่อบัญชี" },
-  { key: "social_pinterest", label: "Pinterest", icon: "📌", placeholder: "https://pinterest.com/ชื่อบัญชี" },
-  { key: "social_youtube", label: "YouTube", icon: "▶️", placeholder: "https://youtube.com/@ชื่อช่อง" },
+  { key: "social_instagram", label: "Instagram", icon: "📸", get placeholder() { return tr("https://instagram.com/ชื่อบัญชี", "https://instagram.com/account"); } },
+  { key: "social_facebook", label: "Facebook", icon: "📘", get placeholder() { return tr("https://facebook.com/ชื่อเพจ", "https://facebook.com/page"); } },
+  { key: "social_tiktok", label: "TikTok", icon: "🎵", get placeholder() { return tr("https://tiktok.com/@ชื่อบัญชี", "https://tiktok.com/@account"); } },
+  { key: "social_x", label: "X (Twitter)", icon: "✖️", get placeholder() { return tr("https://x.com/ชื่อบัญชี", "https://x.com/account"); } },
+  { key: "social_pinterest", label: "Pinterest", icon: "📌", get placeholder() { return tr("https://pinterest.com/ชื่อบัญชี", "https://pinterest.com/account"); } },
+  { key: "social_youtube", label: "YouTube", icon: "▶️", get placeholder() { return tr("https://youtube.com/@ชื่อช่อง", "https://youtube.com/@channel"); } },
   { key: "contact_line_url", label: "LINE Official", icon: "💬", placeholder: "https://lin.ee/xxxx" },
-  { key: "social_shopee", label: "Shopee", icon: "🛍️", placeholder: "https://shopee.co.th/ชื่อร้าน" },
-  { key: "social_lazada", label: "Lazada", icon: "🛒", placeholder: "https://lazada.co.th/shop/ชื่อร้าน" },
+  { key: "social_shopee", label: "Shopee", icon: "🛍️", get placeholder() { return tr("https://shopee.co.th/ชื่อร้าน", "https://shopee.co.th/shop"); } },
+  { key: "social_lazada", label: "Lazada", icon: "🛒", get placeholder() { return tr("https://lazada.co.th/shop/ชื่อร้าน", "https://lazada.co.th/shop/shop-name"); } },
 ];
 type Links = Record<SocialKey, string>;
 const EMPTY = Object.fromEntries(SOCIALS.map((s) => [s.key, ""])) as Links;
@@ -31,6 +33,7 @@ const EMPTY = Object.fromEntries(SOCIALS.map((s) => [s.key, ""])) as Links;
 const badLink = (v: string) => v.trim() !== "" && !/^https?:\/\/\S+$/i.test(v.trim());
 
 export function SocialLinksModal({ open, onClose, shopSlug, shopId, onSaved }: { open: boolean; onClose: () => void; shopSlug: string; shopId: string; onSaved?: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [saved, setSaved] = useState<Links>(EMPTY);
   const [links, setLinks] = useState<Links>(EMPTY);
@@ -53,7 +56,7 @@ export function SocialLinksModal({ open, onClose, shopSlug, shopId, onSaved }: {
         setSaved(v);
         setLinks(v);
       })
-      .catch(() => alive && setErr("โหลดข้อมูลร้านไม่สำเร็จ"))
+      .catch(() => alive && setErr(tr("โหลดข้อมูลร้านไม่สำเร็จ", "Couldn't load shop info")))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -72,16 +75,16 @@ export function SocialLinksModal({ open, onClose, shopSlug, shopId, onSaved }: {
       const r = await apiFetch("/api/website/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, patch }) });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
         return;
       }
       setSaved(links);
       window.dispatchEvent(new Event("website-info-saved"));
-      toast.success("บันทึกโซเชียลแล้ว — เว็บจะอัปเดตภายใน 1 นาที");
+      toast.success(t("บันทึกโซเชียลแล้ว — เว็บจะอัปเดตภายใน 1 นาที", "Social links saved — the site updates within 1 minute"));
       onSaved?.();
       onClose();
     } catch {
-      toast.error("บันทึกไม่สำเร็จ");
+      toast.error(t("บันทึกไม่สำเร็จ", "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -91,20 +94,20 @@ export function SocialLinksModal({ open, onClose, shopSlug, shopId, onSaved }: {
     <ERPModal
       open={open}
       onClose={onClose}
-      title="🌐 โซเชียลมีเดียของร้าน"
-      description="ใส่ลิงก์ช่องทางของร้าน — ช่องที่ว่างจะไม่โชว์ · ใช้ร่วมกันที่หัวเว็บ (ชิ้น “โซเชียล”) · ท้ายเว็บ · หน้าติดต่อ · เมนูมือถือ · บันทึกแล้วขึ้นเว็บเลย (ไม่ต้องกดเผยแพร่)"
+      title={t("🌐 โซเชียลมีเดียของร้าน", "🌐 Shop social media")}
+      description={t("ใส่ลิงก์ช่องทางของร้าน — ช่องที่ว่างจะไม่โชว์ · ใช้ร่วมกันที่หัวเว็บ (ชิ้น “โซเชียล”) · ท้ายเว็บ · หน้าติดต่อ · เมนูมือถือ · บันทึกแล้วขึ้นเว็บเลย (ไม่ต้องกดเผยแพร่)", "Add your shop's channel links — empty ones are hidden · shared by the header (“Social” item) · footer · contact page · mobile menu · goes live on save (no need to publish)")}
       size="lg"
       defaultExpanded={false}
       loading={loading}
       hasUnsavedChanges={dirty}
       footer={
         <div className="flex items-center gap-2 w-full">
-          <span className="text-xs text-slate-500 mr-auto">ใส่แล้ว {filled}/{SOCIALS.length} ช่องทาง</span>
+          <span className="text-xs text-slate-500 mr-auto">{t("ใส่แล้ว", "Filled")} {filled}/{SOCIALS.length} {t("ช่องทาง", "channels")}</span>
           <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
-            ยกเลิก
+            {t("ยกเลิก", "Cancel")}
           </button>
           <button type="button" onClick={save} disabled={!dirty || invalid.length > 0 || saving} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-40">
-            {saving ? "กำลังบันทึก…" : "บันทึก"}
+            {saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}
           </button>
         </div>
       }
@@ -130,21 +133,21 @@ export function SocialLinksModal({ open, onClose, shopSlug, shopId, onSaved }: {
                     onChange={(e) => setLinks((p) => ({ ...p, [s.key]: e.target.value }))}
                     placeholder={s.placeholder}
                     className={`flex-1 min-w-0 rounded-lg border px-2.5 py-1.5 text-sm outline-none bg-white ${bad ? "border-rose-400 focus:border-rose-500" : "border-slate-200 focus:border-blue-400"}`}
-                    aria-label={`ลิงก์ ${s.label}`}
+                    aria-label={t(`ลิงก์ ${s.label}`, `${s.label} link`)}
                   />
                   {v.trim() && !bad ? (
-                    <a href={v.trim()} target="_blank" rel="noopener noreferrer" className="shrink-0 text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" title="ลองเปิดลิงก์">
-                      ↗ ลองเปิด
+                    <a href={v.trim()} target="_blank" rel="noopener noreferrer" className="shrink-0 text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" title={t("ลองเปิดลิงก์", "Try opening the link")}>
+                      {t("↗ ลองเปิด", "↗ Try it")}
                     </a>
                   ) : (
                     <span className="shrink-0 w-[68px]" />
                   )}
                 </div>
-                {bad && <p className="text-[11px] text-rose-600 mt-0.5 ml-[120px]">ลิงก์ต้องขึ้นต้นด้วย https:// เช่น {s.placeholder}</p>}
+                {bad && <p className="text-[11px] text-rose-600 mt-0.5 ml-[120px]">{t("ลิงก์ต้องขึ้นต้นด้วย https:// เช่น", "Link must start with https://, e.g.")} {s.placeholder}</p>}
               </div>
             );
           })}
-          <p className="text-[11px] text-slate-400 pt-1">ไอคอนบนหัวเว็บซ่อนบนมือถือ (บนมือถือโชว์ในเมนู ☰ แทน) · LINE ID / เบอร์โทร / อีเมล แก้ที่แท็บ 🏪 ข้อมูลร้าน</p>
+          <p className="text-[11px] text-slate-400 pt-1">{t("ไอคอนบนหัวเว็บซ่อนบนมือถือ (บนมือถือโชว์ในเมนู ☰ แทน) · LINE ID / เบอร์โทร / อีเมล แก้ที่แท็บ 🏪 ข้อมูลร้าน", "Header icons are hidden on mobile (shown in the ☰ menu instead) · LINE ID / phone / email are edited in 🏪 Shop info")}</p>
         </div>
       )}
     </ERPModal>

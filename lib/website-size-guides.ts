@@ -10,6 +10,7 @@
  * 🌐 ช่องข้อความมีคู่ <key>_en (เว็บหน้า /en สลับให้เอง)
  */
 
+import { tr } from "@/lib/lang";
 export const SIZE_GUIDES_KEY = "size_guides";
 export const MAX_GUIDES = 20;
 export const MAX_COLUMNS = 6;
@@ -175,7 +176,7 @@ export function publicSizeGuide(g: SizeGuide) {
 export const SIZE_GUIDE_TEMPLATES: { key: string; label: string; make: () => Omit<SizeGuide, "id"> }[] = [
   {
     key: "belt",
-    label: "เข็มขัด (รอบเอว)",
+    get label() { return tr("เข็มขัด (รอบเอว)", "Belt (waist)"); },
     make: () => ({
       name: "ตารางไซส์เข็มขัด",
       name_en: "Belt size guide",
@@ -202,7 +203,7 @@ export const SIZE_GUIDE_TEMPLATES: { key: string; label: string; make: () => Omi
   },
   {
     key: "blank",
-    label: "ตารางว่าง",
+    get label() { return tr("ตารางว่าง", "Blank table"); },
     make: () => ({
       name: "ตารางไซส์ใหม่",
       categories: [],

@@ -7,6 +7,7 @@
  */
 
 /** ตัวนับที่เว็บร้านส่งได้ — อย่างอื่นทิ้ง */
+import { tr } from "@/lib/lang";
 export const STAT_METRICS = {
   session: "รอบเข้าเว็บ (มิติ = แหล่งที่มา)",
   device: "อุปกรณ์ของรอบ (mobile/tablet/desktop)",
@@ -105,7 +106,7 @@ export function cleanStatEvents(raw: unknown): StatEvent[] {
 /* ─────────── ชื่อแหล่งที่มา (โชว์ใน ERP) ─────────── */
 
 export const SOURCE_LABELS: Record<string, string> = {
-  direct: "พิมพ์เข้าเอง / บุ๊กมาร์ก",
+  get direct() { return tr("พิมพ์เข้าเอง / บุ๊กมาร์ก", "Typed in / bookmark"); },
   google: "Google",
   facebook: "Facebook",
   instagram: "Instagram",
@@ -117,8 +118,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   shopee: "Shopee",
   lazada: "Lazada",
   bing: "Bing",
-  email: "อีเมล",
-  unknown: "ไม่ทราบ (ออเดอร์ก่อนเริ่มเก็บ)",
+  get email() { return tr("อีเมล", "Email"); },
+  get unknown() { return tr("ไม่ทราบ (ออเดอร์ก่อนเริ่มเก็บ)", "Unknown (orders before tracking)"); },
 };
 export const sourceLabel = (s: string) => SOURCE_LABELS[s] ?? s;
 

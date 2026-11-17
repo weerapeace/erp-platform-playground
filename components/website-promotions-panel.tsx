@@ -25,13 +25,16 @@ import {
   itemDealPrice,
   promoBadge,
   PRICE_ROUNDS,
-  PROMO_KINDS,
+  PROMO_KINDS as PROMO_KINDS_TH,
   type DiscountKind,
   type ItemDealKind,
   type Promotion,
   type PromoKind,
   type PromoScope,
 } from "@/lib/website-promotions";
+import { localizedOpts } from "@/lib/website-admin-en";
+// 🌐 ป้ายจากไฟล์มิเรอร์หน้าร้าน (แก้ที่ต้นทางไม่ได้) → แปลตอนแสดงผล
+const PROMO_KINDS = localizedOpts(PROMO_KINDS_TH);
 import { groupSummary, type ProductGroupRow } from "@/lib/website-product-groups";
 import { webForm } from "@/lib/website-form-styles";
 import { useT } from "@/components/i18n";

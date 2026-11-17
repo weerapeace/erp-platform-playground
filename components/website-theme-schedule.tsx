@@ -32,12 +32,17 @@ import {
 } from "@/lib/website-theme-schedule";
 import { webForm } from "@/lib/website-form-styles";
 import { DesignCard } from "@/components/website-design/design-card";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 const API = "/api/website/theme/schedules";
 const inputCls = webForm.inputBasic;
 const labelCls = webForm.labelRoomy;
 
-const FESTIVE_NAME: Record<string, string> = { snow: "❄️ หิมะ", petals: "🌸 กลีบดอกไม้", confetti: "🎊 กระดาษสี", hearts: "❤️ หัวใจ", water: "💧 หยดน้ำ", leaves: "🍂 ใบไม้", stars: "✨ ประกาย", lantern: "🏮 โคมแดง", flags: "🚩 ธงราว" };
+const festiveName = (k: string): string | undefined => ({ snow: tr("❄️ หิมะ", "❄️ Snow"), petals: tr("🌸 กลีบดอกไม้", "🌸 Petals"), confetti: tr("🎊 กระดาษสี", "🎊 Confetti"), hearts: tr("❤️ หัวใจ", "❤️ Hearts"), water: tr("💧 หยดน้ำ", "💧 Water drops"), leaves: tr("🍂 ใบไม้", "🍂 Leaves"), stars: tr("✨ ประกาย", "✨ Sparkles"), lantern: tr("🏮 โคมแดง", "🏮 Red lanterns"), flags: tr("🚩 ธงราว", "🚩 Bunting") } as Record<string, string>)[k];
+const campaignStateLabel = (st: string): string => (({ active: tr(CAMPAIGN_STATE_LABEL.active, "Running"), upcoming: tr(CAMPAIGN_STATE_LABEL.upcoming, "Upcoming"), ended: tr(CAMPAIGN_STATE_LABEL.ended, "Ended"), cancelled: tr(CAMPAIGN_STATE_LABEL.cancelled, "Cancelled") } as Record<string, string>)[st] ?? (CAMPAIGN_STATE_LABEL as Record<string, string>)[st]);
+/** หน่วยเวลา "น." ต่อท้ายเวลา (อังกฤษไม่ใส่) */
+const hrs = () => tr(" น.", "");
 const STATE_CLS: Record<string, string> = { active: "bg-emerald-50 text-emerald-700", upcoming: "bg-blue-50 text-blue-700", ended: "bg-slate-100 text-slate-500", cancelled: "bg-slate-100 text-slate-400" };
 
 export function useThemeSchedules(shopSlug: string) {
@@ -58,6 +63,7 @@ const tomorrowMidnight = () => `${isoToThaiLocal(new Date(Date.now() + 864e5).to
 /** ⏰ ตั้งเวลาเผยแพร่ร่างที่เห็นอยู่ */
 export function SchedulePublishModal({ open, onClose, shopId, theme, pending, onDone }: { open: boolean; onClose: () => void; shopId: string; theme: unknown; pending: ThemeSchedule | null; onDone: () => void }) {
   const toast = useToast();
+  const t = useT();
   const [when, setWhen] = useState(tomorrowMidnight);
   const [includeHome, setIncludeHome] = useState(false);
   const [note, setNote] = useState("");
@@ -72,18 +78,18 @@ export function SchedulePublishModal({ open, onClose, shopId, theme, pending, on
   }, [open]);
   const submit = async () => {
     const at = thaiLocalToIso(when);
-    if (!at) return setErr("เลือกวันและเวลาก่อน");
-    if (Date.parse(at) < Date.now() + 60e3) return setErr("เวลาต้องอยู่ในอนาคตอย่างน้อย 1 นาที");
+    if (!at) return setErr(tr("เลือกวันและเวลาก่อน", "Pick a date and time first"));
+    if (Date.parse(at) < Date.now() + 60e3) return setErr(tr("เวลาต้องอยู่ในอนาคตอย่างน้อย 1 นาที", "The time must be at least 1 minute in the future"));
     setBusy(true);
     try {
       const r = await apiFetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, kind: "publish", theme, at, includeHome, note }) });
       const j = await r.json();
-      if (!j.ok) return setErr(j.error ?? "ตั้งเวลาไม่สำเร็จ");
-      toast.success(`ตั้งเวลาแล้ว — ระบบจะเผยแพร่ ${fmtThaiDateTime(at)} น.`);
+      if (!j.ok) return setErr(j.error ?? tr("ตั้งเวลาไม่สำเร็จ", "Scheduling failed"));
+      toast.success(tr(`ตั้งเวลาแล้ว — ระบบจะเผยแพร่ ${fmtThaiDateTime(at)} น.`, `Scheduled — will publish at ${fmtThaiDateTime(at)}`));
       onDone();
       onClose();
     } catch {
-      setErr("เชื่อมต่อไม่ได้");
+      setErr(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
     }
@@ -92,34 +98,34 @@ export function SchedulePublishModal({ open, onClose, shopId, theme, pending, on
     <ERPModal
       open={open}
       onClose={onClose}
-      title="⏰ ตั้งเวลาเผยแพร่"
+      title={t("⏰ ตั้งเวลาเผยแพร่", "⏰ Schedule publish")}
       size="sm"
       footer={
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700">ยกเลิก</button>
-          <button type="button" onClick={() => void submit()} disabled={busy} className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">{busy ? "กำลังบันทึก…" : "ยืนยันตั้งเวลา"}</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={() => void submit()} disabled={busy} className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("ยืนยันตั้งเวลา", "Confirm schedule")}</button>
         </div>
       }
     >
       <div className="space-y-4">
-        <p className="text-sm text-slate-600">ระบบเก็บหน้าตาที่เห็นในพรีวิวตอนนี้ไว้ แล้วเผยแพร่ให้เองตามเวลาที่เลือก (เว็บเปลี่ยนภายใน ~1–2 นาทีหลังถึงเวลา)</p>
+        <p className="text-sm text-slate-600">{t("ระบบเก็บหน้าตาที่เห็นในพรีวิวตอนนี้ไว้ แล้วเผยแพร่ให้เองตามเวลาที่เลือก (เว็บเปลี่ยนภายใน ~1–2 นาทีหลังถึงเวลา)", "The look you see in the preview now is stored and published automatically at the chosen time (the site changes ~1–2 minutes after)")}</p>
         <div>
-          <label className={labelCls}>วันและเวลา (เวลาไทย · 24 ชม.)</label>
+          <label className={labelCls}>{t("วันและเวลา (เวลาไทย · 24 ชม.)", "Date and time (Thai time · 24h)")}</label>
           <ERPDateTime24 value={when} onChange={(v) => { setWhen(v); setErr(""); }} defaultTime="00:00" />
         </div>
         <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
           <input type="checkbox" className="w-4 h-4 mt-0.5 accent-blue-600" checked={includeHome} onChange={(e) => { setIncludeHome(e.target.checked); setErr(""); }} />
           <span>
-            เผยแพร่ <b>หน้าแรกที่ร่างไว้</b> พร้อมกันด้วย
-            <span className="block text-[11px] text-slate-400">เช่น เปลี่ยนแบนเนอร์หน้าแรกตอนเปิดโปร (ต้องบันทึกร่างหน้าแรกไว้ก่อน)</span>
+            {t("เผยแพร่", "Also publish the")} <b>{t("หน้าแรกที่ร่างไว้", "drafted home page")}</b> {t("พร้อมกันด้วย", "at the same time")}
+            <span className="block text-[11px] text-slate-400">{t("เช่น เปลี่ยนแบนเนอร์หน้าแรกตอนเปิดโปร (ต้องบันทึกร่างหน้าแรกไว้ก่อน)", "e.g. change the home banner when a promo starts (save the home page draft first)")}</span>
           </span>
         </label>
         <div>
-          <label className={labelCls}>หมายเหตุ (ไม่บังคับ)</label>
-          <input className={inputCls} value={note} maxLength={300} placeholder="เปิดโปร 11.11" onChange={(e) => setNote(e.target.value)} />
+          <label className={labelCls}>{t("หมายเหตุ (ไม่บังคับ)", "Note (optional)")}</label>
+          <input className={inputCls} value={note} maxLength={300} placeholder={t("เปิดโปร 11.11", "11.11 promo start")} onChange={(e) => setNote(e.target.value)} />
         </div>
-        {pending && <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">มีที่ตั้งไว้แล้ว ({fmtThaiDateTime(pending.startsAt)}) — ยืนยันแล้วจะแทนที่อันเดิม</p>}
-        <p className="text-[11px] text-slate-400">ถ้ากดเผยแพร่อย่างอื่นก่อนถึงเวลา ชุดที่ตั้งไว้จะทับตอนถึงเวลา · เผยแพร่แล้วย้อนได้ที่แท็บประวัติ</p>
+        {pending && <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">{t("มีที่ตั้งไว้แล้ว", "Already scheduled")} ({fmtThaiDateTime(pending.startsAt)}) — {t("ยืนยันแล้วจะแทนที่อันเดิม", "confirming replaces it")}</p>}
+        <p className="text-[11px] text-slate-400">{t("ถ้ากดเผยแพร่อย่างอื่นก่อนถึงเวลา ชุดที่ตั้งไว้จะทับตอนถึงเวลา · เผยแพร่แล้วย้อนได้ที่แท็บประวัติ", "If you publish something else before then, the scheduled set overwrites it at that time · you can roll back in the History tab")}</p>
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
     </ERPModal>
@@ -128,28 +134,29 @@ export function SchedulePublishModal({ open, onClose, shopId, theme, pending, on
 
 /** แถบ "ตั้งเวลาเผยแพร่ไว้ …" (บนหน้าดีไซน์) */
 export function ScheduleBanner({ pending, onCancel }: { pending: ThemeSchedule | null; onCancel: (s: ThemeSchedule) => void }) {
+  const t = useT();
   if (!pending) return null;
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 text-sm text-amber-800" data-schedule-banner>
-      <span>⏰ ตั้งเวลาเผยแพร่ <b>{pending.includeHome ? "ธีม + หน้าแรก" : "ธีม"}</b> ไว้ {fmtThaiDateTime(pending.startsAt)} น.{pending.note ? ` · ${pending.note}` : ""}</span>
-      <button type="button" onClick={() => onCancel(pending)} className="ml-auto text-xs underline hover:no-underline">ยกเลิกการตั้งเวลา</button>
+      <span>⏰ {t("ตั้งเวลาเผยแพร่", "Scheduled publish of")} <b>{pending.includeHome ? t("ธีม + หน้าแรก", "theme + home page") : t("ธีม", "theme")}</b> {t("ไว้", "at")} {fmtThaiDateTime(pending.startsAt)}{hrs()}{pending.note ? ` · ${pending.note}` : ""}</span>
+      <button type="button" onClick={() => onCancel(pending)} className="ml-auto text-xs underline hover:no-underline">{t("ยกเลิกการตั้งเวลา", "Cancel schedule")}</button>
     </div>
   );
 }
 
 /** ⏰ ยกเลิกงานตั้งเวลา (ถามก่อน) */
 export async function cancelSchedule(s: ThemeSchedule, toast: ReturnType<typeof useToast>): Promise<boolean> {
-  if (!(await askConfirm({ title: "ยกเลิกการตั้งเวลา?", message: `เว็บจะไม่เผยแพร่ตอน ${fmtThaiDateTime(s.startsAt)} น. (ร่างยังอยู่ แก้ต่อได้)`, confirmText: "ยกเลิกการตั้งเวลา", cancelText: "เก็บไว้" }))) return false;
+  if (!(await askConfirm({ title: tr("ยกเลิกการตั้งเวลา?", "Cancel the schedule?"), message: tr(`เว็บจะไม่เผยแพร่ตอน ${fmtThaiDateTime(s.startsAt)} น. (ร่างยังอยู่ แก้ต่อได้)`, `The site won't publish at ${fmtThaiDateTime(s.startsAt)} (the draft stays; you can keep editing)`), confirmText: tr("ยกเลิกการตั้งเวลา", "Cancel schedule"), cancelText: tr("เก็บไว้", "Keep") }))) return false;
   try {
     const j = await (await apiFetch(`${API}?id=${encodeURIComponent(s.id)}`, { method: "DELETE" })).json();
     if (!j.ok) {
-      toast.error(j.error ?? "ยกเลิกไม่สำเร็จ");
+      toast.error(j.error ?? tr("ยกเลิกไม่สำเร็จ", "Cancel failed"));
       return false;
     }
-    toast.success("ยกเลิกการตั้งเวลาแล้ว");
+    toast.success(tr("ยกเลิกการตั้งเวลาแล้ว", "Schedule cancelled"));
     return true;
   } catch {
-    toast.error("เชื่อมต่อไม่ได้");
+    toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     return false;
   }
 }
@@ -183,6 +190,7 @@ const payloadOf = (d: CampaignDraft) => ({ id: d.id, name: d.name, startsAt: tha
 /** 🎪 ป๊อปสร้าง/แก้แคมเปญ */
 function CampaignModal({ open, onClose, shopId, initial, list, savedThemes, onSaved }: { open: boolean; onClose: () => void; shopId: string; initial: CampaignDraft; list: ThemeSchedule[]; savedThemes: SavedTheme[]; onSaved: () => void }) {
   const toast = useToast();
+  const t = useT();
   const [d, setD] = useState(initial);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -209,12 +217,12 @@ function CampaignModal({ open, onClose, shopId, initial, list, savedThemes, onSa
     try {
       const r = await apiFetch(API, { method: d.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, kind: "campaign", ...p }) });
       const j = await r.json();
-      if (!j.ok) return setErr(j.error ?? "บันทึกไม่สำเร็จ");
-      toast.success(d.id ? "แก้แคมเปญแล้ว" : "สร้างแคมเปญแล้ว — เว็บเปลี่ยนเองเมื่อถึงวันเริ่ม");
+      if (!j.ok) return setErr(j.error ?? tr("บันทึกไม่สำเร็จ", "Save failed"));
+      toast.success(d.id ? tr("แก้แคมเปญแล้ว", "Campaign updated") : tr("สร้างแคมเปญแล้ว — เว็บเปลี่ยนเองเมื่อถึงวันเริ่ม", "Campaign created — the site switches on the start date"));
       onSaved();
       onClose();
     } catch {
-      setErr("เชื่อมต่อไม่ได้");
+      setErr(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
     }
@@ -223,58 +231,58 @@ function CampaignModal({ open, onClose, shopId, initial, list, savedThemes, onSa
     <ERPModal
       open={open}
       onClose={onClose}
-      title={d.id ? "🎪 แก้แคมเปญ" : "🎪 แคมเปญใหม่"}
+      title={d.id ? t("🎪 แก้แคมเปญ", "🎪 Edit campaign") : t("🎪 แคมเปญใหม่", "🎪 New campaign")}
       size="md"
       hasUnsavedChanges={dirty}
       defaultExpanded={false}
       footer={
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700">ยกเลิก</button>
-          <button type="button" onClick={() => void submit()} disabled={busy} className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึกแคมเปญ"}</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={() => void submit()} disabled={busy} className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกแคมเปญ", "Save campaign")}</button>
         </div>
       }
     >
       <div className="space-y-4">
         <div>
-          <label className={labelCls}>ชื่อแคมเปญ</label>
-          <input className={inputCls} value={d.name} maxLength={80} placeholder="11.11 ลดใหญ่" onChange={(e) => set({ name: e.target.value })} />
+          <label className={labelCls}>{t("ชื่อแคมเปญ", "Campaign name")}</label>
+          <input className={inputCls} value={d.name} maxLength={80} placeholder={t("11.11 ลดใหญ่", "11.11 big sale")} onChange={(e) => set({ name: e.target.value })} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>เริ่ม (เวลาไทย)</label>
+            <label className={labelCls}>{t("เริ่ม (เวลาไทย)", "Start (Thai time)")}</label>
             <ERPDateTime24 value={d.starts} onChange={(starts) => set({ starts })} defaultTime="00:00" />
           </div>
           <div>
-            <label className={labelCls}>จบ (เวลาไทย)</label>
+            <label className={labelCls}>{t("จบ (เวลาไทย)", "End (Thai time)")}</label>
             <ERPDateTime24 value={d.ends} onChange={(ends) => set({ ends })} defaultTime="23:59" />
           </div>
         </div>
         <div>
-          <label className={labelCls}>หน้าตาช่วงแคมเปญ (จาก 💾 ธีมที่บันทึกไว้ · แท็บสี)</label>
+          <label className={labelCls}>{t("หน้าตาช่วงแคมเปญ (จาก 💾 ธีมที่บันทึกไว้ · แท็บสี)", "Look during the campaign (from 💾 saved themes · Colors tab)")}</label>
           <select className={inputCls} value={d.savedThemeId} onChange={(e) => set({ savedThemeId: e.target.value })}>
-            <option value="">ไม่เปลี่ยนสี/หน้าตา</option>
-            {savedGone && <option value={d.savedThemeId}>(ธีมเดิมที่ตั้งไว้ — ถูกลบจากรายการแล้ว แคมเปญยังใช้สำเนาเดิม)</option>}
+            <option value="">{t("ไม่เปลี่ยนสี/หน้าตา", "Don't change colors/look")}</option>
+            {savedGone && <option value={d.savedThemeId}>{t("(ธีมเดิมที่ตั้งไว้ — ถูกลบจากรายการแล้ว แคมเปญยังใช้สำเนาเดิม)", "(Previously set theme — removed from the list; the campaign still uses its copy)")}</option>}
             {mine.length > 0 && (
-              <optgroup label="ธีมของร้านนี้">
-                {mine.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name} · {t.scope === "full" ? "ทั้งชุด" : "เฉพาะสี"}</option>
+              <optgroup label={t("ธีมของร้านนี้", "This shop's themes")}>
+                {mine.map((th) => (
+                  <option key={th.id} value={th.id}>{th.name} · {th.scope === "full" ? t("ทั้งชุด", "Full set") : t("เฉพาะสี", "Colors only")}</option>
                 ))}
               </optgroup>
             )}
             {other.length > 0 && (
-              <optgroup label="ธีมจากร้านอื่น">
-                {other.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name} · {t.scope === "full" ? "ทั้งชุด" : "เฉพาะสี"}{t.shopName ? ` (${t.shopName})` : ""}</option>
+              <optgroup label={t("ธีมจากร้านอื่น", "Themes from other shops")}>
+                {other.map((th) => (
+                  <option key={th.id} value={th.id}>{th.name} · {th.scope === "full" ? t("ทั้งชุด", "Full set") : t("เฉพาะสี", "Colors only")}{th.shopName ? ` (${th.shopName})` : ""}</option>
                 ))}
               </optgroup>
             )}
           </select>
-          <p className="text-[11px] text-slate-400 mt-1">{savedThemes.length ? "ระบบเก็บสำเนาธีมไว้ตอนบันทึก (แก้/ลบธีมต้นทางทีหลังไม่กระทบแคมเปญ) · โลโก้ เมนู ท้ายเว็บ ป้าย ป๊อปอัป คงตามธีมปกติ" : "ยังไม่มีธีมที่บันทึกไว้ — ไปแท็บสี › 💾 บันทึกธีมนี้ไว้ ก่อน (หรือใช้แค่ของตกแต่ง)"}</p>
+          <p className="text-[11px] text-slate-400 mt-1">{savedThemes.length ? t("ระบบเก็บสำเนาธีมไว้ตอนบันทึก (แก้/ลบธีมต้นทางทีหลังไม่กระทบแคมเปญ) · โลโก้ เมนู ท้ายเว็บ ป้าย ป๊อปอัป คงตามธีมปกติ", "A copy of the theme is stored on save (editing/deleting the source later doesn't affect the campaign) · logo, menu, footer, badges, popups follow the normal theme") : t("ยังไม่มีธีมที่บันทึกไว้ — ไปแท็บสี › 💾 บันทึกธีมนี้ไว้ ก่อน (หรือใช้แค่ของตกแต่ง)", "No saved themes yet — go to Colors › 💾 Save this theme first (or use decorations only)")}</p>
         </div>
         <div>
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
             <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={d.festiveOn} onChange={(e) => set({ festiveOn: e.target.checked })} />
-            🎄 ของตกแต่งเฉพาะช่วงแคมเปญ (ไม่ติ๊ก = ตามธีมปกติ)
+            {t("🎄 ของตกแต่งเฉพาะช่วงแคมเปญ (ไม่ติ๊ก = ตามธีมปกติ)", "🎄 Decorations only during the campaign (unchecked = follow the normal theme)")}
           </label>
           {d.festiveOn && (
             <div className="mt-2 pl-6">
@@ -283,10 +291,10 @@ function CampaignModal({ open, onClose, shopId, initial, list, savedThemes, onSa
           )}
         </div>
         <div>
-          <label className={labelCls}>หมายเหตุ (ไม่บังคับ)</label>
+          <label className={labelCls}>{t("หมายเหตุ (ไม่บังคับ)", "Note (optional)")}</label>
           <input className={inputCls} value={d.note} maxLength={300} onChange={(e) => set({ note: e.target.value })} />
         </div>
-        {overlaps.length > 0 && <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">ช่วงเวลาทับกับ {overlaps.map((o) => `"${o.name}"`).join(", ")} — ช่วงที่ทับ เว็บใช้แคมเปญที่เริ่มทีหลัง</p>}
+        {overlaps.length > 0 && <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">{t("ช่วงเวลาทับกับ", "Overlaps with")} {overlaps.map((o) => `"${o.name}"`).join(", ")} — {t("ช่วงที่ทับ เว็บใช้แคมเปญที่เริ่มทีหลัง", "during the overlap the site uses the campaign that starts later")}</p>}
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
     </ERPModal>
@@ -314,6 +322,7 @@ export function CampaignTab({
   previewing: string | null;
 }) {
   const toast = useToast();
+  const t = useT();
   const [saved, setSaved] = useState<SavedTheme[]>([]);
   const [editing, setEditing] = useState<CampaignDraft | null>(null);
   useEffect(() => {
@@ -327,33 +336,33 @@ export function CampaignTab({
   const history = list.filter((s) => s.kind === "publish" && s.status !== "pending").slice(0, 5);
   const campaigns = list.filter((s) => s.kind === "campaign");
   const removeCampaign = async (c: ThemeSchedule) => {
-    if (!(await askConfirm({ title: `ลบแคมเปญ "${c.name}"?`, message: campaignState(c) === "active" ? "แคมเปญนี้กำลังทำงานอยู่ — ลบแล้วเว็บกลับเป็นธีมปกติภายใน ~1 นาที" : "ลบแล้วกู้คืนไม่ได้ (มีบันทึกในประวัติการใช้งาน)", variant: "danger", confirmText: "ลบแคมเปญ" }))) return;
+    if (!(await askConfirm({ title: tr(`ลบแคมเปญ "${c.name}"?`, `Delete campaign "${c.name}"?`), message: campaignState(c) === "active" ? tr("แคมเปญนี้กำลังทำงานอยู่ — ลบแล้วเว็บกลับเป็นธีมปกติภายใน ~1 นาที", "This campaign is running — after deleting, the site returns to the normal theme within ~1 minute") : tr("ลบแล้วกู้คืนไม่ได้ (มีบันทึกในประวัติการใช้งาน)", "Can't be undone (logged in the activity history)"), variant: "danger", confirmText: tr("ลบแคมเปญ", "Delete campaign") }))) return;
     try {
       const j = await (await apiFetch(`${API}?id=${encodeURIComponent(c.id)}`, { method: "DELETE" })).json();
-      if (!j.ok) return toast.error(j.error ?? "ลบไม่สำเร็จ");
-      toast.success("ลบแคมเปญแล้ว");
+      if (!j.ok) return toast.error(j.error ?? tr("ลบไม่สำเร็จ", "Delete failed"));
+      toast.success(tr("ลบแคมเปญแล้ว", "Campaign deleted"));
       if (previewing === c.id) onPreview(null);
       reload();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     }
   };
   return (
     <div className="space-y-4">
       {/* ── ⏰ ตั้งเวลาเผยแพร่ ── */}
-      <DesignCard title="⏰ ตั้งเวลาเผยแพร่" hint="แต่งร่างไว้ล่วงหน้า แล้วให้ระบบเผยแพร่เองตามเวลา (มีปุ่มเดียวกันที่แถบล่าง ข้างปุ่มเผยแพร่)" right={<><button type="button" onClick={onSchedule} className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">ตั้งเวลาเผยแพร่ร่างนี้</button></>}>
+      <DesignCard title={t("⏰ ตั้งเวลาเผยแพร่", "⏰ Schedule publish")} hint={t("แต่งร่างไว้ล่วงหน้า แล้วให้ระบบเผยแพร่เองตามเวลา (มีปุ่มเดียวกันที่แถบล่าง ข้างปุ่มเผยแพร่)", "Prepare a draft ahead and let the system publish it on time (same button in the bottom bar, next to Publish)")} right={<><button type="button" onClick={onSchedule} className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">{t("ตั้งเวลาเผยแพร่ร่างนี้", "Schedule this draft")}</button></>}>
         {schedules === null ? (
-          <p className="text-xs text-slate-400">กำลังโหลด…</p>
+          <p className="text-xs text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>
         ) : (
           <>
             <ScheduleBanner pending={pending} onCancel={async (s) => (await cancelSchedule(s, toast)) && reload()} />
-            {!pending && <p className="text-xs text-slate-400">ยังไม่มีที่ตั้งเวลาไว้</p>}
+            {!pending && <p className="text-xs text-slate-400">{t("ยังไม่มีที่ตั้งเวลาไว้", "Nothing scheduled")}</p>}
             {history.length > 0 && (
               <ul className="mt-3 space-y-1 text-xs text-slate-500">
                 {history.map((h) => (
                   <li key={h.id}>
-                    {h.status === "done" ? "✅ เผยแพร่แล้ว" : "⚠️ เผยแพร่ไม่สำเร็จ"} · ตั้งไว้ {fmtThaiDateTime(h.startsAt)} น.{h.versionNo ? ` · เวอร์ชัน ${h.versionNo}` : ""} · {h.includeHome ? "ธีม + หน้าแรก" : "ธีม"}
-                    {h.createdByName ? ` · โดย ${h.createdByName}` : ""}
+                    {h.status === "done" ? t("✅ เผยแพร่แล้ว", "✅ Published") : t("⚠️ เผยแพร่ไม่สำเร็จ", "⚠️ Publish failed")} · {t("ตั้งไว้", "Scheduled")} {fmtThaiDateTime(h.startsAt)}{hrs()}{h.versionNo ? ` · ${t("เวอร์ชัน", "version")} ${h.versionNo}` : ""} · {h.includeHome ? t("ธีม + หน้าแรก", "theme + home page") : t("ธีม", "theme")}
+                    {h.createdByName ? ` · ${t("โดย", "by")} ${h.createdByName}` : ""}
                   </li>
                 ))}
               </ul>
@@ -363,9 +372,9 @@ export function CampaignTab({
       </DesignCard>
 
       {/* ── 🎪 แคมเปญ ── */}
-      <DesignCard title="🎪 ธีมแคมเปญตามช่วงวันที่" hint={<>ช่วงแคมเปญ เว็บใช้หน้าตา/ของตกแต่งที่เลือก พอหมดช่วงกลับธีมปกติเอง · <b>บันทึกแล้วมีผลทันที</b>ไม่ต้องกดเผยแพร่ · ระหว่างแคมเปญแก้ธีมปกติได้ตามเดิม</>} right={<><button type="button" onClick={() => setEditing(emptyDraft())} className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ แคมเปญใหม่</button></>}>
+      <DesignCard title={t("🎪 ธีมแคมเปญตามช่วงวันที่", "🎪 Campaign themes by date range")} hint={<>{t("ช่วงแคมเปญ เว็บใช้หน้าตา/ของตกแต่งที่เลือก พอหมดช่วงกลับธีมปกติเอง · ", "During a campaign the site uses the chosen look/decorations, then returns to the normal theme · ")}<b>{t("บันทึกแล้วมีผลทันที", "Takes effect on save")}</b>{t("ไม่ต้องกดเผยแพร่ · ระหว่างแคมเปญแก้ธีมปกติได้ตามเดิม", " — no need to publish · you can still edit the normal theme meanwhile")}</>} right={<><button type="button" onClick={() => setEditing(emptyDraft())} className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">{t("+ แคมเปญใหม่", "+ New campaign")}</button></>}>
         {campaigns.length === 0 ? (
-          <p className="text-xs text-slate-400">ยังไม่มีแคมเปญ</p>
+          <p className="text-xs text-slate-400">{t("ยังไม่มีแคมเปญ", "No campaigns yet")}</p>
         ) : (
           <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
             {campaigns.map((c) => {
@@ -374,21 +383,21 @@ export function CampaignTab({
                 <li key={c.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5" data-campaign={st}>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-slate-800 font-medium">
-                      {c.name} <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${STATE_CLS[st]}`}>{CAMPAIGN_STATE_LABEL[st]}</span>
+                      {c.name} <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${STATE_CLS[st]}`}>{campaignStateLabel(st)}</span>
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      {fmtThaiDateTime(c.startsAt)} – {fmtThaiDateTime(c.endsAt)} · {c.look ? `ธีม ${c.look.name}` : "สีเดิม"} · {c.festive && c.festive.kind !== "none" ? FESTIVE_NAME[c.festive.kind] : c.festive ? "ไม่ตกแต่ง" : "ตกแต่งตามธีมปกติ"}
+                      {fmtThaiDateTime(c.startsAt)} – {fmtThaiDateTime(c.endsAt)} · {c.look ? `${t("ธีม", "Theme")} ${c.look.name}` : t("สีเดิม", "Current colors")} · {c.festive && c.festive.kind !== "none" ? festiveName(c.festive.kind) : c.festive ? t("ไม่ตกแต่ง", "No decorations") : t("ตกแต่งตามธีมปกติ", "Decorations from the normal theme")}
                     </p>
                   </div>
                   {st !== "ended" && (
                     <>
                       <button type="button" onClick={() => onPreview(previewing === c.id ? null : { id: c.id, name: c.name, theme: applyCampaign(theme, c) })} className={`text-xs px-2.5 py-1 rounded-lg border ${previewing === c.id ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-300 text-slate-600 hover:border-slate-500"}`}>
-                        👁 {previewing === c.id ? "กำลังดู" : "ดูตัวอย่าง"}
+                        👁 {previewing === c.id ? t("กำลังดู", "Viewing") : t("ดูตัวอย่าง", "Preview")}
                       </button>
-                      <button type="button" onClick={() => setEditing(draftOf(c))} className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:border-slate-500">แก้</button>
+                      <button type="button" onClick={() => setEditing(draftOf(c))} className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:border-slate-500">{t("แก้", "Edit")}</button>
                     </>
                   )}
-                  <button type="button" onClick={() => void removeCampaign(c)} className="text-xs px-2.5 py-1 rounded-lg text-red-600 hover:bg-red-50">ลบ</button>
+                  <button type="button" onClick={() => void removeCampaign(c)} className="text-xs px-2.5 py-1 rounded-lg text-red-600 hover:bg-red-50">{t("ลบ", "Delete")}</button>
                 </li>
               );
             })}
@@ -397,12 +406,12 @@ export function CampaignTab({
       </DesignCard>
 
       {/* ── 🎄 ของตกแต่ง (ธีมปกติ) ── */}
-      <DesignCard title="🎄 ของตกแต่งเทศกาล (ธีมปกติ)" hint="ติดไว้ตลอดจนกว่าจะเอาออก · อยากให้มีแค่ช่วงเทศกาล = ตั้งในแคมเปญแทน · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)">
+      <DesignCard title={t("🎄 ของตกแต่งเทศกาล (ธีมปกติ)", "🎄 Festive decorations (normal theme)")} hint={t("ติดไว้ตลอดจนกว่าจะเอาออก · อยากให้มีแค่ช่วงเทศกาล = ตั้งในแคมเปญแทน · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)", "Stays on until removed · for a festive period only, set it in a campaign · part of the theme draft (Save draft / Publish)")}>
         <FestiveSetting value={theme.page.festive} onChange={(festive) => onPage({ festive })} />
       </DesignCard>
 
       {/* ── 👀🔥 ป้ายคนดู / ขายแล้ว ── */}
-      <DesignCard title="👀 ป้ายคนดู / 🔥 ขายแล้ว" hint="โชว์ใต้ราคาในหน้าสินค้า · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)">
+      <DesignCard title={t("👀 ป้ายคนดู / 🔥 ขายแล้ว", "👀 Viewers / 🔥 Sold badges")} hint={t("โชว์ใต้ราคาในหน้าสินค้า · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)", "Shown under the price on the product page · part of the theme draft (Save draft / Publish)")}>
         <ProofSetting value={theme.page.proof} onChange={(proof) => onPage({ proof })} />
       </DesignCard>
 

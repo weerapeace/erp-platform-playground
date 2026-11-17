@@ -13,6 +13,7 @@
 import type { ReactNode } from "react";
 import { Seg } from "@/components/website-block-editor";
 import { RangeInput } from "@/components/range-input";
+import { useT } from "@/components/i18n";
 import { ShopPatternArt } from "@/components/website-canvas-shapes";
 import { ColorSwatches, swatchesOf, type ThemeColors } from "@/components/website-text-pickers";
 import { PATTERN_MODE_OPTIONS } from "@/lib/website-schema";
@@ -81,21 +82,22 @@ export function FillLineControls({
   widthStep?: number;
   forceWidth?: boolean;
 }) {
+  const t = useT();
   const v = fillLineView(it);
   const sw = Number(it.strokeWidth) > 0 ? Number(it.strokeWidth) : 2;
   return (
     <>
       <div>
-        <H>สีพื้น</H>
+        <H>{t("สีพื้น", "Fill color")}</H>
         <ColorSwatches theme={theme} allowNone value={v.fill} hex={v.fillHex} onPick={(c, hex) => onPatch(fillLinePick(it, "fill", c, hex))} />
       </div>
       <div>
-        <H>สีเส้น</H>
+        <H>{t("สีเส้น", "Line color")}</H>
         <ColorSwatches theme={theme} allowNone value={v.line} hex={v.lineHex} onPick={(c, hex) => onPatch(fillLinePick(it, "line", c, hex))} />
       </div>
       {(forceWidth || v.line !== "none") && (
         <div>
-          <H>ความหนาเส้น</H>
+          <H>{t("ความหนาเส้น", "Line width")}</H>
           <RangeInput value={sw} min={minWidth} max={24} step={widthStep} unit="px" onChange={(n) => onPatch({ strokeWidth: n })} />
         </div>
       )}
@@ -125,6 +127,7 @@ export function ShopPatternControls({
   minWidth?: number;
   widthStep?: number;
 }) {
+  const t = useT();
   const pattern = normalizeShopPattern(it.pattern);
   if (!pattern) return null;
   const colors = shopPatternColors(pattern);
@@ -162,16 +165,16 @@ export function ShopPatternControls({
           <ShopPatternBox it={it} theme={theme} w={boxW} h={boxH} />
         </span>
         <span className="min-w-0 text-[11px] leading-snug text-slate-600">
-          <b className="block truncate text-slate-800">🎨 {pattern.name || "ลายของร้าน"}</b>
-          {pattern.parts.length} ชิ้นส่วน · {colors.length} สีในไฟล์
+          <b className="block truncate text-slate-800">🎨 {pattern.name || t("ลายของร้าน", "Shop pattern")}</b>
+          {pattern.parts.length} {t("ชิ้นส่วน", "parts")} · {colors.length} {t("สีในไฟล์", "colors in file")}
         </span>
       </div>
       <div>
-        <H>สีของลาย</H>
+        <H>{t("สีของลาย", "Pattern colors")}</H>
         <Seg<ShopPatternMode> value={mode} onChange={(v) => onPatch({ patMode: v })} options={modes} />
       </div>
 
-      {mode === "orig" && <p className="text-[11px] text-slate-500">ใช้สีตามไฟล์ที่ออกแบบมา — อยากเปลี่ยนสี เลือก &quot;สีเดียวทั้งลาย&quot; หรือ &quot;แยกตามสีในไฟล์&quot;</p>}
+      {mode === "orig" && <p className="text-[11px] text-slate-500">{t("ใช้สีตามไฟล์ที่ออกแบบมา — อยากเปลี่ยนสี เลือก \"สีเดียวทั้งลาย\" หรือ \"แยกตามสีในไฟล์\"", "Uses the colors from the design file — to change them, pick \"One color\" or \"Per file color\"")}</p>}
 
       {mode === "one" && <FillLineControls it={it} theme={theme} onPatch={onPatch} minWidth={minWidth} widthStep={widthStep} forceWidth={lineOnly} />}
 
@@ -181,27 +184,27 @@ export function ShopPatternControls({
             {colors.slice(0, SHOP_PATTERN_LIMITS.colors).map((c, i) => (
               <div key={c}>
                 <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
-                  สี {i + 1}
-                  <span className="inline-block h-3 w-3 rounded-full border border-slate-300" style={{ background: c }} title={`สีในไฟล์ ${c}`} />
-                  <span className="font-normal text-slate-400">ในไฟล์</span>
+                  {t("สี", "Color")} {i + 1}
+                  <span className="inline-block h-3 w-3 rounded-full border border-slate-300" style={{ background: c }} title={t(`สีในไฟล์ ${c}`, `File color ${c}`)} />
+                  <span className="font-normal text-slate-400">{t("ในไฟล์", "in file")}</span>
                   {slots[i] && (
                     <button type="button" onClick={() => setSlot(i, "")} className="ml-auto font-normal text-blue-600 hover:underline">
-                      ↺ สีเดิม
+                      {t("↺ สีเดิม", "↺ Original")}
                     </button>
                   )}
                 </div>
                 <ColorSwatches theme={theme} value={swatchVal(slots[i] ?? "")} hex={slots[i]?.startsWith("#") ? slots[i] : c} onPick={(v, hex) => setSlot(i, v === "custom" ? hex ?? c : v)} />
               </div>
             ))}
-            {colors.length > SHOP_PATTERN_LIMITS.colors && <p className="text-[11px] text-amber-700">ไฟล์มี {colors.length} สี — สีที่เกิน {SHOP_PATTERN_LIMITS.colors} สีแรกคงสีเดิม</p>}
+            {colors.length > SHOP_PATTERN_LIMITS.colors && <p className="text-[11px] text-amber-700">{t(`ไฟล์มี ${colors.length} สี — สีที่เกิน ${SHOP_PATTERN_LIMITS.colors} สีแรกคงสีเดิม`, `The file has ${colors.length} colors — colors beyond the first ${SHOP_PATTERN_LIMITS.colors} keep their original color`)}</p>}
           </div>
-          {lineRow("เส้นขอบเพิ่ม (ชิ้นที่ไม่มีเส้นในไฟล์)")}
+          {lineRow(t("เส้นขอบเพิ่ม (ชิ้นที่ไม่มีเส้นในไฟล์)", "Extra outline (parts without lines in the file)"))}
         </>
       )}
 
       {showWidth && (
         <div>
-          <H>ความหนาเส้น</H>
+          <H>{t("ความหนาเส้น", "Line width")}</H>
           <RangeInput value={sw} min={minWidth} max={24} step={widthStep} unit="px" onChange={(v) => onPatch({ strokeWidth: v })} />
         </div>
       )}

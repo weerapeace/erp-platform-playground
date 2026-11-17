@@ -11,7 +11,12 @@ import { Seg } from "@/components/website-block-editor";
 import { RangeInput } from "@/components/range-input";
 import { categoryTree } from "@/lib/website-category-tree";
 import { loadStorefrontProducts } from "@/lib/website-data";
-import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_COLORS, LISTING_CARD_MODES, LISTING_SKU_ORDERS, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
+import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_COLORS as LISTING_CARD_COLORS_TH, LISTING_CARD_MODES as LISTING_CARD_MODES_TH, LISTING_SKU_ORDERS as LISTING_SKU_ORDERS_TH, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
+import { localizedOpts } from "@/lib/website-admin-en";
+// 🌐 ป้ายจากไฟล์มิเรอร์หน้าร้าน (แก้ที่ต้นทางไม่ได้) → แปลตอนแสดงผล
+const LISTING_CARD_COLORS = localizedOpts(LISTING_CARD_COLORS_TH);
+const LISTING_CARD_MODES = localizedOpts(LISTING_CARD_MODES_TH);
+const LISTING_SKU_ORDERS = localizedOpts(LISTING_SKU_ORDERS_TH);
 import { webForm } from "@/lib/website-form-styles";
 import { useT } from "@/components/i18n";
 

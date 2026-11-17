@@ -17,6 +17,8 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { GROUP_ORDER, SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { FIELD_GROUP_LABEL, fieldChanged, matchShowIf, type FieldDef, type FieldGroup, type SectionSchema } from "@/lib/website-schema";
 import { SplitHandle, useSplitWidth } from "@/components/split-handle";
+import { useT } from "@/components/i18n";
+import { labelEn } from "@/lib/website-schema-en";
 
 type Nav = FieldGroup | "style" | "motion" | "items";
 type StudioDevice = { k: string; w: number; h: number; icon: string; label: string };
@@ -32,7 +34,8 @@ const FIELDS_MIN = 320;
 const SPLIT_W = 14;
 
 const visibleFields = (fields: FieldDef[], value: Record<string, unknown>) => fields.filter((fd) => !fd.hidden && matchShowIf(fd, value));
-const hay = (fd: FieldDef) => [fd.label, fd.hint ?? "", ...(fd.options ?? []).map((o) => o.l)].join(" ").toLowerCase();
+// ค้นได้ทั้งไทย + คำแปลอังกฤษ (โหมด EN)
+const hay = (fd: FieldDef) => [fd.label, fd.hint ?? "", ...(fd.options ?? []).map((o) => o.l)].flatMap((x) => [x, labelEn(x)]).join(" ").toLowerCase();
 
 export function SectionStudio({
   open,
@@ -82,6 +85,7 @@ export function SectionStudio({
   /** เลขโหลดพรีวิวหลักใหม่ — เปลี่ยน = พรีวิวหน้าใหญ่โหลดใหม่ตาม (Section ที่เซิร์ฟเวอร์ต้องดึงข้อมูลใหม่หลังบันทึกร่าง) */
   reloadKey?: number;
 }) {
+  const t = useT();
   const value = block as Record<string, unknown>;
   const visible = useMemo(() => visibleFields(schema.fields, value), [schema.fields, value]);
   const groups = useMemo(() => GROUP_ORDER.filter((g) => visible.some((fd) => (fd.group ?? "content") === g)), [visible]);
@@ -108,7 +112,11 @@ export function SectionStudio({
   const resetGroup = async (g: FieldGroup) => {
     const list = visible.filter((fd) => (fd.group ?? "content") === g && changedKeys.has(fd.key) && fd.default !== undefined);
     if (!list.length) return;
-    const ok = await askConfirm({ title: `คืนค่าเริ่มต้นหมวด "${FIELD_GROUP_LABEL[g]}"?`, message: `${list.length} ช่องจะกลับเป็นค่าเริ่มต้น (ยังไม่ขึ้นเว็บจนกว่าจะบันทึกร่าง/เผยแพร่)`, confirmText: "คืนค่าเริ่มต้น" });
+    const ok = await askConfirm({
+      title: t(`คืนค่าเริ่มต้นหมวด "${FIELD_GROUP_LABEL[g]}"?`, `Reset group "${labelEn(FIELD_GROUP_LABEL[g])}" to default?`),
+      message: t(`${list.length} ช่องจะกลับเป็นค่าเริ่มต้น (ยังไม่ขึ้นเว็บจนกว่าจะบันทึกร่าง/เผยแพร่)`, `${list.length} fields will go back to default (not live until you save draft/publish)`),
+      confirmText: t("คืนค่าเริ่มต้น", "Reset"),
+    });
     if (ok) onPatch(Object.fromEntries(list.map((fd) => [fd.key, fd.default])));
   };
 
@@ -189,7 +197,7 @@ export function SectionStudio({
     >
       <span className="min-w-0 truncate">
         {label}
-        {changed ? <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-orange-500 align-middle" title="แก้แล้ว" /> : null}
+        {changed ? <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-orange-500 align-middle" title={t("แก้แล้ว", "Changed")} /> : null}
       </span>
       {count != null && <span className="shrink-0 text-[11px] text-slate-400">{count}</span>}
     </button>
@@ -202,8 +210,8 @@ export function SectionStudio({
     <ERPModal
       open={open}
       onClose={onClose}
-      title={`${schema.meta.icon} ${schema.meta.label} · แก้แบบหน้าใหญ่`}
-      description="ค่าเปลี่ยนสดเหมือนแผงขวา — บันทึกร่าง/เผยแพร่ที่แถบบนของตัวจัดหน้าเหมือนเดิม · Esc ปิด"
+      title={`${schema.meta.icon} ${labelEn(schema.meta.label)} · ${t("แก้แบบหน้าใหญ่", "Large editor")}`}
+      description={t("ค่าเปลี่ยนสดเหมือนแผงขวา — บันทึกร่าง/เผยแพร่ที่แถบบนของตัวจัดหน้าเหมือนเดิม · Esc ปิด", "Changes apply live like the right panel — save draft/publish from the page builder's top bar as usual · Esc to close")}
       size="xl"
       defaultExpanded
       storageKey="website-section-studio"
@@ -218,14 +226,14 @@ export function SectionStudio({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="🔍 ค้นหาช่อง… เช่น ซูม"
+            placeholder={t("🔍 ค้นหาช่อง… เช่น ซูม", "🔍 Search fields… e.g. zoom")}
             className="mb-1 h-8 w-full min-w-[140px] rounded-lg border border-slate-300 px-2.5 text-xs focus:border-blue-500 focus:outline-none"
           />
-          {groups.map((g) => navBtn(g, FIELD_GROUP_LABEL[g], visible.filter((fd) => (fd.group ?? "content") === g).length, groupChanged(g)))}
-          {navBtn("style", "รูปลักษณ์", null, styleChanged)}
-          {navBtn("motion", "ลูกเล่น", null, motionChanged)}
+          {groups.map((g) => navBtn(g, labelEn(FIELD_GROUP_LABEL[g]), visible.filter((fd) => (fd.group ?? "content") === g).length, groupChanged(g)))}
+          {navBtn("style", t("รูปลักษณ์", "Style"), null, styleChanged)}
+          {navBtn("motion", t("ลูกเล่น", "Motion"), null, motionChanged)}
           {items && navBtn("items", `${items.icon} ${items.label}`, items.list.length, false)}
-          <p className="hidden lg:block mt-auto pt-3 text-[11px] leading-relaxed text-slate-400">จุดส้ม = แก้จากค่าเริ่มแล้ว · ค้นหาได้เฉพาะช่องของ Section (ไม่รวมรูปลักษณ์/ลูกเล่น)</p>
+          <p className="hidden lg:block mt-auto pt-3 text-[11px] leading-relaxed text-slate-400">{t("จุดส้ม = แก้จากค่าเริ่มแล้ว · ค้นหาได้เฉพาะช่องของ Section (ไม่รวมรูปลักษณ์/ลูกเล่น)", "Orange dot = changed from default · search covers section fields only (not style/motion)")}</p>
         </nav>
 
         {/* กลาง: ช่องตั้งค่า */}
@@ -236,7 +244,7 @@ export function SectionStudio({
               shownFields.length ? (
                 <SchemaForm fields={shownFields} value={value} onChange={onPatch} ctx={ctx} marks={changedKeys} />
               ) : (
-                <p className="text-sm text-slate-400 py-6 text-center">ไม่เจอช่องที่มีคำว่า &quot;{q.trim()}&quot;</p>
+                <p className="text-sm text-slate-400 py-6 text-center">{t(`ไม่เจอช่องที่มีคำว่า "${q.trim()}"`, `No fields matching "${q.trim()}"`)}</p>
               )
             ) : nav === "style" ? (
               styleBody
@@ -244,15 +252,15 @@ export function SectionStudio({
               motionBody
             ) : nav === "items" && items ? (
               <div className="space-y-1.5">
-                <p className="text-xs text-slate-500">กดรายการที่จะแก้ → ปิดหน้าใหญ่แล้วเปิดชิ้นนั้นในแผงขวา</p>
+                <p className="text-xs text-slate-500">{t("กดรายการที่จะแก้ → ปิดหน้าใหญ่แล้วเปิดชิ้นนั้นในแผงขวา", "Tap an item to edit → closes the large editor and opens it in the right panel")}</p>
                 {items.list.map((it, i) => (
                   <button key={it.id} type="button" onClick={() => onPickItem?.(it.id)} className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm text-slate-700 hover:border-blue-300 hover:bg-blue-50/40">
                     <span className="text-[11px] text-slate-400 w-5">{i + 1}</span>
                     <span className="min-w-0 flex-1 truncate">{it.label || "—"}</span>
-                    <span className="text-[11px] text-blue-600">แก้ →</span>
+                    <span className="text-[11px] text-blue-600">{t("แก้ →", "Edit →")}</span>
                   </button>
                 ))}
-                {!items.list.length && <p className="text-sm text-slate-400">ยังไม่มีรายการ — เพิ่มได้จากแผงขวา</p>}
+                {!items.list.length && <p className="text-sm text-slate-400">{t("ยังไม่มีรายการ — เพิ่มได้จากแผงขวา", "No items yet — add them from the right panel")}</p>}
               </div>
             ) : (
               <>
@@ -262,7 +270,7 @@ export function SectionStudio({
             )}
             {isFieldNav && groupChanged(nav as FieldGroup) > 0 && (
               <button type="button" onClick={() => resetGroup(nav as FieldGroup)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-600 hover:border-slate-400">
-                ↺ คืนค่าเริ่มต้นหมวดนี้ ({groupChanged(nav as FieldGroup)})
+                {t("↺ คืนค่าเริ่มต้นหมวดนี้", "↺ Reset this group")} ({groupChanged(nav as FieldGroup)})
               </button>
             )}
           </div>
@@ -275,13 +283,13 @@ export function SectionStudio({
         <div className="flex min-h-[360px] min-w-0 flex-col">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <span className="text-xs text-slate-500">
-              พรีวิวสด <span className="text-slate-400">· {Math.round(scale * 100)}%</span>
+              {t("พรีวิวสด", "Live preview")} <span className="text-slate-400">· {Math.round(scale * 100)}%</span>
             </span>
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={split.toggleMax}
-                title={split.isMax ? "คืนความกว้างพรีวิวเริ่มต้น" : "พรีวิวกว้างสุด (ช่องตั้งค่าแคบลง) — หรือลากเส้นแบ่งเอง"}
+                title={split.isMax ? t("คืนความกว้างพรีวิวเริ่มต้น", "Reset preview width") : t("พรีวิวกว้างสุด (ช่องตั้งค่าแคบลง) — หรือลากเส้นแบ่งเอง", "Widest preview (narrower settings) — or drag the divider")}
                 className={`hidden lg:inline-flex h-7 items-center rounded-md px-2 text-xs ${split.isMax ? "bg-blue-600 text-white" : "border border-slate-200 text-slate-600 hover:border-slate-400"}`}
               >
                 ⇔
@@ -291,7 +299,7 @@ export function SectionStudio({
                   {d.icon}
                 </button>
               ))}
-              <button type="button" onClick={() => setNonce((n) => n + 1)} title="โหลดพรีวิวใหม่" className="h-7 rounded-md border border-slate-200 px-2 text-xs text-slate-600 hover:border-slate-400">
+              <button type="button" onClick={() => setNonce((n) => n + 1)} title={t("โหลดพรีวิวใหม่", "Reload preview")} className="h-7 rounded-md border border-slate-200 px-2 text-xs text-slate-600 hover:border-slate-400">
                 ↻
               </button>
             </div>
@@ -302,13 +310,13 @@ export function SectionStudio({
                 <iframe
                   ref={frameRef}
                   src={`${previewSrc}&_r=studio${nonce}`}
-                  title="พรีวิว Section"
+                  title={t("พรีวิว Section", "Section preview")}
                   className="block border-0 bg-white"
                   style={{ width: device.w, height: box.h / scale, transform: `scale(${scale})`, transformOrigin: "top left", pointerEvents: split.dragging ? "none" : undefined }}
                 />
               </div>
             ) : (
-              <p className="p-6 text-center text-sm text-slate-400">ยังไม่มีพรีวิว (ร้านนี้ยังไม่ได้ผูกโดเมนเว็บ)</p>
+              <p className="p-6 text-center text-sm text-slate-400">{t("ยังไม่มีพรีวิว (ร้านนี้ยังไม่ได้ผูกโดเมนเว็บ)", "No preview yet (this shop has no website domain linked)")}</p>
             )}
           </div>
         </div>

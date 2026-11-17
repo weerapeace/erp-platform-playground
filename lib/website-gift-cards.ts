@@ -10,7 +10,6 @@
  *
  * ตัววาด giftCardHtml(): ขนาดทุกอย่างเป็น % / cqw (ตามความกว้างการ์ด) → HTML เดียวใช้ได้ทั้งพรีวิวเล็กบนจอและพิมพ์ขนาดจริง (มม.)
  */
-import { tr } from "@/lib/lang";
 
 export type GiftFontKey = "hand" | "cute" | "clean";
 export type GiftCardArea = "full" | "center" | "bottom" | "top" | "left" | "right";
@@ -71,28 +70,28 @@ export interface OrderGiftCard {
 }
 
 export const GIFT_FONTS: { key: GiftFontKey; label: string; family: string; scale: number }[] = [
-  { key: "hand", get label() { return tr("ลายมือ", "Handwriting"); }, family: "'Charm', cursive", scale: 1.15 },
-  { key: "cute", get label() { return tr("น่ารัก", "Cute"); }, family: "'Itim', sans-serif", scale: 1 },
-  { key: "clean", get label() { return tr("เรียบ", "Clean"); }, family: "'Sarabun', sans-serif", scale: 0.95 },
+  { key: "hand", label: "ลายมือ", family: "'Charm', cursive", scale: 1.15 },
+  { key: "cute", label: "น่ารัก", family: "'Itim', sans-serif", scale: 1 },
+  { key: "clean", label: "เรียบ", family: "'Sarabun', sans-serif", scale: 0.95 },
 ];
 /** ฟอนต์ทั้ง 3 แบบ (Google Fonts) — หน้าที่วาดการ์ดต้องโหลด */
 export const GIFT_FONTS_HREF = "https://fonts.googleapis.com/css2?family=Charm:wght@400;700&family=Itim&family=Sarabun:wght@400;500&display=swap";
 
 export const GIFT_SIZE_PRESETS: { key: GiftCardSizePreset; label: string; w: number; h: number }[] = [
-  { key: "a6", get label() { return tr("A6 (14.8 × 10.5 ซม.)", "A6 (14.8 × 10.5 cm)"); }, w: 148, h: 105 },
-  { key: "a7", get label() { return tr("A7 (10.5 × 7.4 ซม.)", "A7 (10.5 × 7.4 cm)"); }, w: 105, h: 74 },
-  { key: "card", get label() { return tr("นามบัตร (9 × 5.5 ซม.)", "Business card (9 × 5.5 cm)"); }, w: 90, h: 55 },
-  { key: "square", get label() { return tr("จัตุรัส (10 × 10 ซม.)", "Square (10 × 10 cm)"); }, w: 100, h: 100 },
-  { key: "custom", get label() { return tr("กำหนดเอง", "Custom"); }, w: 148, h: 105 },
+  { key: "a6", label: "A6 (14.8 × 10.5 ซม.)", w: 148, h: 105 },
+  { key: "a7", label: "A7 (10.5 × 7.4 ซม.)", w: 105, h: 74 },
+  { key: "card", label: "นามบัตร (9 × 5.5 ซม.)", w: 90, h: 55 },
+  { key: "square", label: "จัตุรัส (10 × 10 ซม.)", w: 100, h: 100 },
+  { key: "custom", label: "กำหนดเอง", w: 148, h: 105 },
 ];
 
 export const GIFT_AREAS: { key: GiftCardArea; label: string }[] = [
-  { key: "full", get label() { return tr("เต็มการ์ด", "Full card"); } },
-  { key: "center", get label() { return tr("กลาง (เว้นขอบกว้าง)", "Center (wide margin)"); } },
-  { key: "bottom", get label() { return tr("ครึ่งล่าง", "Bottom half"); } },
-  { key: "top", get label() { return tr("ครึ่งบน", "Top half"); } },
-  { key: "left", get label() { return tr("ครึ่งซ้าย", "Left half"); } },
-  { key: "right", get label() { return tr("ครึ่งขวา", "Right half"); } },
+  { key: "full", label: "เต็มการ์ด" },
+  { key: "center", label: "กลาง (เว้นขอบกว้าง)" },
+  { key: "bottom", label: "ครึ่งล่าง" },
+  { key: "top", label: "ครึ่งบน" },
+  { key: "left", label: "ครึ่งซ้าย" },
+  { key: "right", label: "ครึ่งขวา" },
 ];
 
 /** ระยะเว้นของพื้นที่ข้อความ (% ของการ์ด) [บน, ขวา, ล่าง, ซ้าย] */

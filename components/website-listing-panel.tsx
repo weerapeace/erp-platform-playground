@@ -20,9 +20,14 @@ import { WebsiteVideoField } from "@/components/website-video-field";
 import { ListingCardSettings } from "@/components/website-listing-cards";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import {
-  LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
+  LISTING_SIZES as LISTING_SIZES_TH, LISTING_SCOPES as LISTING_SCOPES_TH, LISTING_TEXT_POS as LISTING_TEXT_POS_TH, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
   newListingInsert, type ListingConfig, type ListingInsert,
 } from "@/lib/website-listing";
+import { localizedOpts } from "@/lib/website-admin-en";
+// 🌐 ป้ายจากไฟล์มิเรอร์หน้าร้าน (แก้ที่ต้นทางไม่ได้) → แปลตอนแสดงผล
+const LISTING_SIZES = localizedOpts(LISTING_SIZES_TH);
+const LISTING_SCOPES = localizedOpts(LISTING_SCOPES_TH);
+const LISTING_TEXT_POS = localizedOpts(LISTING_TEXT_POS_TH);
 import { webForm } from "@/lib/website-form-styles";
 import { useT } from "@/components/i18n";
 

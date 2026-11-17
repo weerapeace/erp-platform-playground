@@ -19,6 +19,8 @@ import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { VideoThumb } from "@/components/video-thumb";
 import { CustomFrameGrid } from "@/components/website-frame-builder";
 import { RangeInput } from "@/components/range-input";
+import { useT } from "@/components/i18n";
+import { labelEn } from "@/lib/website-canvas-en";
 import {
   CANVAS_BUTTON_VARIANTS,
   CANVAS_FRAME_PRESETS,
@@ -82,11 +84,12 @@ export function gradThemeOf(t: ThemeColors): GradThemeHex {
 
 /** ตัวเลือกแบบปุ่มหลายช่อง (การเคลื่อนไหว) */
 function Chips({ options, value, onPick }: { options: { v: string; l: string }[]; value: string; onPick: (v: string) => void }) {
+  useT();
   return (
     <div className="grid grid-cols-3 gap-1">
       {options.map((o) => (
         <button key={o.v || "none"} type="button" onClick={() => onPick(o.v)} className={`px-1.5 py-1.5 text-[11px] rounded-md border ${value === o.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
-          {o.l}
+          {labelEn(o.l)}
         </button>
       ))}
     </div>
@@ -177,6 +180,7 @@ export function CanvasInspector({
   onReplaceVideo?: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
+  const t = useT();
   const spec = SECTION_SCHEMAS.canvas.children!;
   const custom = block.mobileMode === "custom";
   const mobileEditing = custom && mobile?.device === "mobile";
@@ -191,48 +195,48 @@ export function CanvasInspector({
       <div className="space-y-4">
         <div>
           <p className="text-sm font-semibold text-slate-800">
-            เลือก {multi.length} ชิ้น {grouped && <span className="text-[11px] font-normal text-blue-700">· ⛓ กลุ่มเดียวกัน</span>}
+            {t(`เลือก ${multi.length} ชิ้น`, `${multi.length} items selected`)} {grouped && <span className="text-[11px] font-normal text-blue-700">{t("· ⛓ กลุ่มเดียวกัน", "· ⛓ Same group")}</span>}
           </p>
-          <p className="text-[11px] text-slate-500">Shift/Ctrl+คลิก = เพิ่ม/เอาออก · ลากที่ว่างบนผืนเป็นกรอบ = เลือกหลายชิ้น · ลากชิ้นใดก็ได้ = ย้ายทั้งชุด</p>
+          <p className="text-[11px] text-slate-500">{t("Shift/Ctrl+คลิก = เพิ่ม/เอาออก · ลากที่ว่างบนผืนเป็นกรอบ = เลือกหลายชิ้น · ลากชิ้นใดก็ได้ = ย้ายทั้งชุด", "Shift/Ctrl+click = add/remove · drag a box on empty canvas = select many · drag any item = move the whole set")}</p>
         </div>
         <button onClick={() => onMulti?.(grouped ? "ungroup" : "group")} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100">
-          {grouped ? "✂ แยกกลุ่ม" : "⛓ จับกลุ่ม (คลิกทีเดียวได้ทั้งชุด)"}
+          {grouped ? t("✂ แยกกลุ่ม", "✂ Ungroup") : t("⛓ จับกลุ่ม (คลิกทีเดียวได้ทั้งชุด)", "⛓ Group (one click selects the set)")}
         </button>
         <button onClick={() => onMulti?.("stagger")} className="w-full rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm text-violet-700 hover:bg-violet-100">
-          ✨ ให้โผล่ทีละชิ้นตามลำดับ (บน→ล่าง)
+          {t("✨ ให้โผล่ทีละชิ้นตามลำดับ (บน→ล่าง)", "✨ Reveal one by one (top→bottom)")}
         </button>
         <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
-          <H>จัดชิดกัน (เทียบกรอบรวม)</H>
+          <H>{t("จัดชิดกัน (เทียบกรอบรวม)", "Align together (to combined box)")}</H>
           <div className="grid grid-cols-2 gap-1.5 -mt-1">
-            <button className={arr} onClick={() => onAlign("top")}>⤒ ชิดบน</button>
-            <button className={arr} onClick={() => onAlign("left")}>⇤ ชิดซ้าย</button>
-            <button className={arr} onClick={() => onAlign("middle")}>⇕ กลางแนวตั้ง</button>
-            <button className={arr} onClick={() => onAlign("center")}>⇔ กลางแนวนอน</button>
-            <button className={arr} onClick={() => onAlign("bottom")}>⤓ ชิดล่าง</button>
-            <button className={arr} onClick={() => onAlign("right")}>⇥ ชิดขวา</button>
+            <button className={arr} onClick={() => onAlign("top")}>{t("⤒ ชิดบน", "⤒ Top")}</button>
+            <button className={arr} onClick={() => onAlign("left")}>{t("⇤ ชิดซ้าย", "⇤ Left")}</button>
+            <button className={arr} onClick={() => onAlign("middle")}>{t("⇕ กลางแนวตั้ง", "⇕ Middle")}</button>
+            <button className={arr} onClick={() => onAlign("center")}>{t("⇔ กลางแนวนอน", "⇔ Center")}</button>
+            <button className={arr} onClick={() => onAlign("bottom")}>{t("⤓ ชิดล่าง", "⤓ Bottom")}</button>
+            <button className={arr} onClick={() => onAlign("right")}>{t("⇥ ชิดขวา", "⇥ Right")}</button>
           </div>
           {multi.length >= 3 && (
             <>
-              <H>กระจายระยะห่างเท่ากัน</H>
+              <H>{t("กระจายระยะห่างเท่ากัน", "Distribute evenly")}</H>
               <div className="grid grid-cols-2 gap-1.5 -mt-1">
-                <button className={arr} onClick={() => onAlign("distribute-h")}>↔ แนวนอน</button>
-                <button className={arr} onClick={() => onAlign("distribute-v")}>↕ แนวตั้ง</button>
+                <button className={arr} onClick={() => onAlign("distribute-h")}>{t("↔ แนวนอน", "↔ Horizontal")}</button>
+                <button className={arr} onClick={() => onAlign("distribute-v")}>{t("↕ แนวตั้ง", "↕ Vertical")}</button>
               </div>
             </>
           )}
-          <H>ชั้น</H>
+          <H>{t("ชั้น", "Layer")}</H>
           <div className="grid grid-cols-2 gap-1.5 -mt-1">
-            <button className={arr} onClick={() => onMulti?.("front")}>⤒ หน้าสุด</button>
-            <button className={arr} onClick={() => onMulti?.("back")}>⤓ หลังสุด</button>
+            <button className={arr} onClick={() => onMulti?.("front")}>{t("⤒ หน้าสุด", "⤒ Bring to front")}</button>
+            <button className={arr} onClick={() => onMulti?.("back")}>{t("⤓ หลังสุด", "⤓ Send to back")}</button>
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <button className={seg(allHidden)} onClick={() => onMulti?.(allHidden ? "showMobile" : "hideMobile")}>{allHidden ? "📵 ซ่อนบนมือถือ" : "📲 โชว์บนมือถือ"}</button>
-          <button className={seg(allLocked)} onClick={() => onMulti?.(allLocked ? "unlock" : "lock")}>{allLocked ? "🔒 ล็อกอยู่" : "🔓 ไม่ล็อก"}</button>
+          <button className={seg(allHidden)} onClick={() => onMulti?.(allHidden ? "showMobile" : "hideMobile")}>{allHidden ? t("📵 ซ่อนบนมือถือ", "📵 Hidden on mobile") : t("📲 โชว์บนมือถือ", "📲 Shown on mobile")}</button>
+          <button className={seg(allLocked)} onClick={() => onMulti?.(allLocked ? "unlock" : "lock")}>{allLocked ? t("🔒 ล็อกอยู่", "🔒 Locked") : t("🔓 ไม่ล็อก", "🔓 Unlocked")}</button>
         </div>
         <div className="flex gap-1.5">
-          <button className={seg(false)} onClick={() => onMulti?.("duplicate")}>⧉ ทำสำเนาทั้งหมด</button>
-          <button className="flex-1 px-2 py-1.5 text-xs rounded-md border border-red-200 text-red-600 hover:bg-red-50" onClick={() => onMulti?.("delete")}>🗑 ลบ {multi.length} ชิ้น</button>
+          <button className={seg(false)} onClick={() => onMulti?.("duplicate")}>{t("⧉ ทำสำเนาทั้งหมด", "⧉ Duplicate all")}</button>
+          <button className="flex-1 px-2 py-1.5 text-xs rounded-md border border-red-200 text-red-600 hover:bg-red-50" onClick={() => onMulti?.("delete")}>{t(`🗑 ลบ ${multi.length} ชิ้น`, `🗑 Delete ${multi.length} items`)}</button>
         </div>
       </div>
     );
@@ -246,32 +250,32 @@ export function CanvasInspector({
     const hasSaved = items.some((x) => Number(x.mw) > 0);
     return (
       <div className="space-y-4">
-        <p className="text-sm font-semibold text-slate-800">ทั้งผืน</p>
-        <p className="text-[11px] text-slate-500 -mt-2">คลิกชิ้นบนผืนเพื่อแก้ทีละชิ้น · คลิกที่ว่างเพื่อกลับมาตรงนี้</p>
-        <Slider label="ความสูงผืน" value={Number(block.height) || 560} min={120} max={CANVAS_MAX_HEIGHT} step={10} onChange={(n) => onPatchBlock({ height: n })} />
+        <p className="text-sm font-semibold text-slate-800">{t("ทั้งผืน", "Whole canvas")}</p>
+        <p className="text-[11px] text-slate-500 -mt-2">{t("คลิกชิ้นบนผืนเพื่อแก้ทีละชิ้น · คลิกที่ว่างเพื่อกลับมาตรงนี้", "Click an item on the canvas to edit it · click empty space to come back here")}</p>
+        <Slider label={t("ความสูงผืน", "Canvas height")} value={Number(block.height) || 560} min={120} max={CANVAS_MAX_HEIGHT} step={10} onChange={(n) => onPatchBlock({ height: n })} />
         <div>
-          <H>ความกว้างผืน (คอม)</H>
+          <H>{t("ความกว้างผืน (คอม)", "Canvas width (desktop)")}</H>
           <div className="flex gap-1.5">
             {CANVAS_WIDTHS.map((w) => {
               const cur = CANVAS_WIDTHS.some((x) => x.v === block.width) ? block.width : "normal";
               return (
-                <button key={w.v} type="button" title={w.l} className={seg(cur === w.v)} onClick={() => onPatchBlock({ width: w.v })}>
-                  {w.v === "normal" ? "ปกติ 1200" : w.v === "wide" ? "กว้าง 1600" : "↔️ เต็มจอ"}
+                <button key={w.v} type="button" title={labelEn(w.l)} className={seg(cur === w.v)} onClick={() => onPatchBlock({ width: w.v })}>
+                  {w.v === "normal" ? t("ปกติ 1200", "Normal 1200") : w.v === "wide" ? t("กว้าง 1600", "Wide 1600") : t("↔️ เต็มจอ", "↔️ Full screen")}
                 </button>
               );
             })}
           </div>
-          <p className="mt-1 text-[10px] text-slate-400">กว้างขึ้น = ทุกชิ้นขยายตามจอ ตำแหน่งที่จัดไว้ไม่เพี้ยน (จอใหญ่ตัวหนังสือใหญ่ตาม) · มือถือไม่มีผล</p>
+          <p className="mt-1 text-[10px] text-slate-400">{t("กว้างขึ้น = ทุกชิ้นขยายตามจอ ตำแหน่งที่จัดไว้ไม่เพี้ยน (จอใหญ่ตัวหนังสือใหญ่ตาม) · มือถือไม่มีผล", "Wider = every item scales with the screen, positions stay put (bigger screen, bigger text) · no effect on mobile")}</p>
         </div>
         <div>
-          <H>สีพื้นผืน (เต็มความกว้างจอ)</H>
+          <H>{t("สีพื้นผืน (เต็มความกว้างจอ)", "Canvas background (full screen width)")}</H>
           <div className="flex flex-wrap gap-1.5">
             {[
-              { v: "auto", l: "ตามหน้า", hex: theme.page },
-              { v: "page", l: "พื้นเว็บ", hex: theme.page },
-              { v: "surface", l: "พื้นการ์ด", hex: theme.surface },
-              { v: "brand", l: "แบรนด์", hex: theme.brand },
-              { v: "ink", l: "เข้ม", hex: theme.ink },
+              { v: "auto", l: t("ตามหน้า", "Match page"), hex: theme.page },
+              { v: "page", l: t("พื้นเว็บ", "Page"), hex: theme.page },
+              { v: "surface", l: t("พื้นการ์ด", "Card"), hex: theme.surface },
+              { v: "brand", l: t("แบรนด์", "Brand"), hex: theme.brand },
+              { v: "ink", l: t("เข้ม", "Dark"), hex: theme.ink },
             ].map((o) => (
               <button key={o.v} title={o.l} onClick={() => onPatchBlock({ style: { ...style, bg: o.v } })} className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${bg === o.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
                 <span className="w-3.5 h-3.5 rounded-full border border-black/10" style={{ background: o.hex }} />
@@ -280,16 +284,16 @@ export function CanvasInspector({
             ))}
             <label className={`relative flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] cursor-pointer ${bg === "custom" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
               <span className="w-3.5 h-3.5 rounded-full border border-black/10" style={{ background: bg === "custom" ? String(style.bgColor || "#fff") : "conic-gradient(#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa,#f472b6,#f87171)" }} />
-              สีเอง
+              {t("สีเอง", "Custom")}
               <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={String(style.bgColor || "#ffffff")} onChange={(e) => onPatchBlock({ style: { ...style, bg: "custom", bgColor: e.target.value } })} />
             </label>
             <button
-              title="ไล่สี"
+              title={t("ไล่สี", "Gradient")}
               onClick={() => onPatchBlock({ style: { ...style, bg: "gradient", bgGrad: style.bgGrad ?? GRADIENT_PRESETS[0].g } })}
               className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${bg === "gradient" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}
             >
               <span className="w-3.5 h-3.5 rounded-full border border-black/10" style={{ background: `linear-gradient(180deg, ${softOf(theme.brand)}, ${theme.brand})` }} />
-              ไล่สี
+              {t("ไล่สี", "Gradient")}
             </button>
           </div>
           {bg === "gradient" && (
@@ -299,7 +303,7 @@ export function CanvasInspector({
           )}
         </div>
         <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-2.5 space-y-2">
-          <H>✨ การเคลื่อนไหวทั้งผืน</H>
+          <H>{t("✨ การเคลื่อนไหวทั้งผืน", "✨ Whole-canvas animation")}</H>
           <button
             onClick={() => {
               onPatchBlock({ items: canvasStagger(items) });
@@ -307,18 +311,18 @@ export function CanvasInspector({
             }}
             className="w-full rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
           >
-            ✨ ให้ทุกชิ้นโผล่ทีละชิ้น (บน→ล่าง)
+            {t("✨ ให้ทุกชิ้นโผล่ทีละชิ้น (บน→ล่าง)", "✨ Reveal every item one by one (top→bottom)")}
           </button>
           <div className="flex gap-1.5">
-            <button className={seg(false)} onClick={() => onReplay?.()}>▶ ดูตัวอย่าง</button>
+            <button className={seg(false)} onClick={() => onReplay?.()}>{t("▶ ดูตัวอย่าง", "▶ Preview")}</button>
             <button className={seg(false)} disabled={!items.some((x) => x.anim || x.loop || x.hover)} onClick={() => onPatchBlock({ items: items.map((x) => ({ ...x, anim: "", animDelay: 0, loop: "", hover: "" })) })}>
-              ล้างทั้งหมด
+              {t("ล้างทั้งหมด", "Clear all")}
             </button>
           </div>
-          <p className="text-[10px] text-slate-500">ตั้งทีละชิ้นได้ที่ &quot;✨ เคลื่อนไหว&quot; บนแถบลอย หรือแผงนี้ตอนเลือกชิ้น</p>
+          <p className="text-[10px] text-slate-500">{t("ตั้งทีละชิ้นได้ที่ \"✨ เคลื่อนไหว\" บนแถบลอย หรือแผงนี้ตอนเลือกชิ้น", "Set per item via \"✨ Animate\" on the floating bar, or this panel when an item is selected")}</p>
           {/* 🌀 ขยับตามการเลื่อนจอ ทั้งผืน */}
           <div className="border-t border-violet-200 pt-2 space-y-1.5">
-            <H>🌀 ตอนเลื่อนจอ (รูปขยับเร็ว-ช้าไม่เท่ากัน)</H>
+            <H>{t("🌀 ตอนเลื่อนจอ (รูปขยับเร็ว-ช้าไม่เท่ากัน)", "🌀 On scroll (images move at different speeds)")}</H>
             <button
               onClick={() => {
                 onPatchBlock({ items: canvasScrollGallery(items) });
@@ -326,29 +330,29 @@ export function CanvasInspector({
               }}
               className="w-full rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
             >
-              🌀 ทำทั้งผืนแบบเลื่อนแล้วมีมิติ (แบบนิตยสาร)
+              {t("🌀 ทำทั้งผืนแบบเลื่อนแล้วมีมิติ (แบบนิตยสาร)", "🌀 Make the whole canvas parallax (magazine style)")}
             </button>
             <div className="flex gap-1.5">
               <button className={seg(scrollPreview)} onClick={() => onScrollPreview?.(!scrollPreview)}>
-                {scrollPreview ? "⏸ หยุดลองเลื่อน" : "▶ ลองเลื่อนดู"}
+                {scrollPreview ? t("⏸ หยุดลองเลื่อน", "⏸ Stop scroll test") : t("▶ ลองเลื่อนดู", "▶ Try scrolling")}
               </button>
               <button className={seg(false)} disabled={!items.some(canvasHasScrollFx)} onClick={() => onPatchBlock({ items: canvasScrollClear(items) })}>
-                ล้างการขยับ
+                {t("ล้างการขยับ", "Clear motion")}
               </button>
             </div>
             <p className="text-[10px] text-slate-500">
-              ลองเลื่อนดู = เลื่อนพรีวิวขึ้น-ลงเพื่อดูของจริง (ระหว่างนี้ลากชิ้นไม่ได้) · ได้ผลดีกับผืนสูงหลายจอ วางรูปกระจายซ้าย-ขวา · ตัวหนังสือใหญ่ (≥ 72) จะค้างเป็นหัวข้อพื้นหลัง
+              {t("ลองเลื่อนดู = เลื่อนพรีวิวขึ้น-ลงเพื่อดูของจริง (ระหว่างนี้ลากชิ้นไม่ได้) · ได้ผลดีกับผืนสูงหลายจอ วางรูปกระจายซ้าย-ขวา · ตัวหนังสือใหญ่ (≥ 72) จะค้างเป็นหัวข้อพื้นหลัง", "Try scrolling = scroll the preview up/down to see the real effect (items can't be dragged meanwhile) · works best on tall canvases with images spread left/right · large text (≥ 72) stays as a background heading")}
             </p>
           </div>
           {/* 🎬 ฉากค้าง (แบบเว็บ Apple) ทั้งผืน */}
           <div className="border-t border-violet-200 pt-2 space-y-1.5">
-            <H>🎬 ฉากค้าง (แบบเว็บ Apple)</H>
+            <H>{t("🎬 ฉากค้าง (แบบเว็บ Apple)", "🎬 Pinned scene (Apple-style)")}</H>
             <button className={`${seg(block.scene === true)} w-full`} onClick={() => onPatchBlock({ scene: !block.scene })}>
-              {block.scene ? "🎬 เปิดฉากค้างอยู่ (กดเพื่อปิด)" : "🎬 เปิดฉากค้าง — ผืนค้างบนจอ ชิ้นเล่นท่าทีละจังหวะ"}
+              {block.scene ? t("🎬 เปิดฉากค้างอยู่ (กดเพื่อปิด)", "🎬 Pinned scene on (click to turn off)") : t("🎬 เปิดฉากค้าง — ผืนค้างบนจอ ชิ้นเล่นท่าทีละจังหวะ", "🎬 Turn on pinned scene — canvas stays on screen, items animate step by step")}
             </button>
             {block.scene === true && (
               <>
-                <Slider label="ความยาวฉาก (ต้องเลื่อนกี่จอ)" value={Math.round((Number(block.sceneLen) || 200) / 10) / 10} min={0.5} max={8} step={0.5} unit=" จอ" onChange={(n) => onPatchBlock({ sceneLen: Math.round(n * 100) })} />
+                <Slider label={t("ความยาวฉาก (ต้องเลื่อนกี่จอ)", "Scene length (screens to scroll)")} value={Math.round((Number(block.sceneLen) || 200) / 10) / 10} min={0.5} max={8} step={0.5} unit={t(" จอ", " screens")} onChange={(n) => onPatchBlock({ sceneLen: Math.round(n * 100) })} />
                 <button
                   onClick={() => {
                     onPatchBlock({ items: canvasScenePreset(items) });
@@ -356,37 +360,37 @@ export function CanvasInspector({
                   }}
                   className="w-full rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-100"
                 >
-                  🎬 จัดฉากให้ทั้งผืน (เข้าทีละจังหวะ บน→ล่าง)
+                  {t("🎬 จัดฉากให้ทั้งผืน (เข้าทีละจังหวะ บน→ล่าง)", "🎬 Auto-stage the whole canvas (enter step by step, top→bottom)")}
                 </button>
                 <div className="flex gap-1.5">
                   <button className={seg(scrollPreview)} onClick={() => onScrollPreview?.(!scrollPreview)}>
-                    {scrollPreview ? "⏸ หยุดลองเลื่อน" : "▶ ลองเลื่อนดู"}
+                    {scrollPreview ? t("⏸ หยุดลองเลื่อน", "⏸ Stop scroll test") : t("▶ ลองเลื่อนดู", "▶ Try scrolling")}
                   </button>
                   <button className={seg(false)} disabled={!items.some(canvasHasSceneFx)} onClick={() => onPatchBlock({ items: canvasSceneClear(items) })}>
-                    ล้างท่าในฉาก
+                    {t("ล้างท่าในฉาก", "Clear scene moves")}
                   </button>
                 </div>
                 {block.mobileMode !== "custom" && (
-                  <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">มือถือแบบเรียงอัตโนมัติจะไม่ค้าง (เห็นท่าสุดท้าย) — อยากให้ค้างบนมือถือ เลือก &quot;✋ จัดเอง&quot; ในส่วนมือถือด้านล่าง</p>
+                  <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">{t("มือถือแบบเรียงอัตโนมัติจะไม่ค้าง (เห็นท่าสุดท้าย) — อยากให้ค้างบนมือถือ เลือก \"✋ จัดเอง\" ในส่วนมือถือด้านล่าง", "Auto-stacked mobile doesn't pin (shows the final pose) — to pin on mobile, pick \"✋ Arrange myself\" in the mobile section below")}</p>
                 )}
-                <p className="text-[10px] text-slate-500">ตั้งท่าทีละชิ้น: คลิกชิ้น → &quot;🎬 ในฉากค้าง&quot; · ระหว่างค้าง ผืนย่อให้พอดีความสูงจอ · เปิดฉากแล้ว &quot;ตอนเลื่อนจอ&quot; แบบเดิมของผืนนี้ไม่ทำงาน</p>
+                <p className="text-[10px] text-slate-500">{t("ตั้งท่าทีละชิ้น: คลิกชิ้น → \"🎬 ในฉากค้าง\" · ระหว่างค้าง ผืนย่อให้พอดีความสูงจอ · เปิดฉากแล้ว \"ตอนเลื่อนจอ\" แบบเดิมของผืนนี้ไม่ทำงาน", "Set moves per item: click an item → \"🎬 In pinned scene\" · while pinned, the canvas shrinks to fit the screen height · with the scene on, this canvas's regular \"On scroll\" effects are off")}</p>
               </>
             )}
           </div>
         </div>
         <div>
-          <H>รูปพื้นหลังผืน</H>
+          <H>{t("รูปพื้นหลังผืน", "Canvas background image")}</H>
           <div className="flex items-center gap-2">
             {block.bgImageKey ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={`/api/r2-image?key=${encodeURIComponent(String(block.bgImageKey))}&w=200`} alt="" className="w-16 h-10 rounded object-cover border border-slate-200" />
             ) : (
-              <span className="w-16 h-10 rounded border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">ไม่มี</span>
+              <span className="w-16 h-10 rounded border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">{t("ไม่มี", "None")}</span>
             )}
-            <button onClick={onPickBgImage} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs hover:border-blue-500">{block.bgImageKey ? "เปลี่ยนรูป" : "เลือกรูป"}</button>
+            <button onClick={onPickBgImage} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs hover:border-blue-500">{block.bgImageKey ? t("เปลี่ยนรูป", "Change image") : t("เลือกรูป", "Pick image")}</button>
             {Boolean(block.bgImageKey) && (
               <button onClick={() => onPatchBlock({ bgImageKey: null })} className="text-xs text-red-600 hover:underline">
-                เอาออก
+                {t("เอาออก", "Remove")}
               </button>
             )}
           </div>
@@ -397,31 +401,31 @@ export function CanvasInspector({
           )}
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
-          <H>📲 มือถือ</H>
+          <H>{t("📲 มือถือ", "📲 Mobile")}</H>
           <div className="flex gap-1.5 -mt-1">
-            <button className={seg(!custom)} onClick={() => mobile?.onAuto()}>เรียงอัตโนมัติ</button>
+            <button className={seg(!custom)} onClick={() => mobile?.onAuto()}>{t("เรียงอัตโนมัติ", "Auto stack")}</button>
             <button className={seg(custom)} onClick={() => (custom ? undefined : hasSaved ? mobile?.onUseSaved() : mobile?.onFreeze())}>
-              ✋ จัดเอง
+              {t("✋ จัดเอง", "✋ Arrange myself")}
             </button>
           </div>
           {custom ? (
             <>
-              <p className="text-[11px] text-slate-500">ผืนมือถือแยกจากคอม — {mobile?.device === "mobile" ? "ลาก/ย่อ/หมุนบนผืนได้เลย ไม่กระทบหน้าคอม" : "กด 📲 มือถือ ด้านบนเพื่อจัด"}</p>
-              <Slider label="ความสูงผืนมือถือ" value={Number(block.mobileHeight) || 800} min={120} max={3000} step={10} onChange={(n) => onPatchBlock({ mobileHeight: n })} />
+              <p className="text-[11px] text-slate-500">{t("ผืนมือถือแยกจากคอม — ", "Mobile canvas is separate from desktop — ")}{mobile?.device === "mobile" ? t("ลาก/ย่อ/หมุนบนผืนได้เลย ไม่กระทบหน้าคอม", "drag/resize/rotate on the canvas, desktop is not affected") : t("กด 📲 มือถือ ด้านบนเพื่อจัด", "click 📲 Mobile above to arrange")}</p>
+              <Slider label={t("ความสูงผืนมือถือ", "Mobile canvas height")} value={Number(block.mobileHeight) || 800} min={120} max={3000} step={10} onChange={(n) => onPatchBlock({ mobileHeight: n })} />
               <button onClick={() => mobile?.onFreeze()} className="text-[11px] text-slate-500 hover:text-blue-600">
-                ↺ เริ่มจัดใหม่จากแบบเรียงอัตโนมัติ
+                {t("↺ เริ่มจัดใหม่จากแบบเรียงอัตโนมัติ", "↺ Restart from the auto-stacked layout")}
               </button>
             </>
           ) : (
             <>
-              <p className="text-[11px] text-slate-500">เรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง · กด &quot;จัดเอง&quot; = ใช้ที่เรียงไว้ตอนนี้เป็นจุดเริ่ม แล้วลากต่อเองได้</p>
+              <p className="text-[11px] text-slate-500">{t("เรียงชิ้นลงมาตามตำแหน่ง บน→ล่าง · กด \"จัดเอง\" = ใช้ที่เรียงไว้ตอนนี้เป็นจุดเริ่ม แล้วลากต่อเองได้", "Items stack by position, top→bottom · \"Arrange myself\" = start from the current stack, then drag freely")}</p>
               <div className="flex gap-1.5">
-                <button className={seg(block.mobileAlign !== "left")} onClick={() => onPatchBlock({ mobileAlign: "center" })}>จัดกึ่งกลาง</button>
-                <button className={seg(block.mobileAlign === "left")} onClick={() => onPatchBlock({ mobileAlign: "left" })}>ชิดซ้าย</button>
+                <button className={seg(block.mobileAlign !== "left")} onClick={() => onPatchBlock({ mobileAlign: "center" })}>{t("จัดกึ่งกลาง", "Center")}</button>
+                <button className={seg(block.mobileAlign === "left")} onClick={() => onPatchBlock({ mobileAlign: "left" })}>{t("ชิดซ้าย", "Left")}</button>
               </div>
               {hasSaved && (
                 <button onClick={() => mobile?.onFreeze()} className="text-[11px] text-slate-500 hover:text-blue-600">
-                  ✋ จัดเองใหม่จากแบบเรียงอัตโนมัติ (ทิ้งที่เคยจัด)
+                  {t("✋ จัดเองใหม่จากแบบเรียงอัตโนมัติ (ทิ้งที่เคยจัด)", "✋ Re-arrange from the auto stack (discard saved layout)")}
                 </button>
               )}
             </>
@@ -444,20 +448,20 @@ export function CanvasInspector({
   const chip = (on: boolean) => `px-2 py-1 text-[11px] rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
   const gradRow = (
     <div>
-      <H>ไล่สี</H>
+      <H>{t("ไล่สี", "Gradient")}</H>
       <div className="flex flex-wrap gap-1">
         <button className={chip(!str("grad"))} onClick={() => onPatchItem({ grad: "" })}>
-          สีเดียว
+          {t("สีเดียว", "Solid")}
         </button>
         {GRAD_DIRS.map((d) => (
           <button key={d.v} className={chip(str("grad") === d.v)} onClick={() => onPatchItem({ grad: d.v })}>
-            {d.l}
+            {labelEn(d.l)}
           </button>
         ))}
       </div>
       {str("grad") && (
         <div className="mt-2">
-          <H>สีปลาย</H>
+          <H>{t("สีปลาย", "End color")}</H>
           <Swatches theme={theme} value={str("color2") || "brandSoft"} hex={str("color2Hex")} onPick={colorPick("color2", "color2Hex")} />
         </div>
       )}
@@ -469,20 +473,20 @@ export function CanvasInspector({
       {mobile?.device === "mobile" &&
         (mobileEditing ? (
           <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-2.5 space-y-2">
-            <p className="text-[11px] font-semibold text-violet-800">📲 กำลังจัดหน้ามือถือ — ลาก/ย่อบนผืนได้เลย ไม่กระทบหน้าคอม</p>
+            <p className="text-[11px] font-semibold text-violet-800">{t("📲 กำลังจัดหน้ามือถือ — ลาก/ย่อบนผืนได้เลย ไม่กระทบหน้าคอม", "📲 Arranging mobile — drag/resize on the canvas, desktop is not affected")}</p>
             {(kind === "text" || kind === "button") && (
-              <Slider label="ขนาดตัวอักษร (มือถือ)" value={mb.msize} min={8} max={kind === "button" ? 32 : 96} onChange={(n) => onPatchItem({ ...mb, msize: n })} />
+              <Slider label={t("ขนาดตัวอักษร (มือถือ)", "Text size (mobile)")} value={mb.msize} min={8} max={kind === "button" ? 32 : 96} onChange={(n) => onPatchItem({ ...mb, msize: n })} />
             )}
             {kind === "text" && (
               <div>
-                <H>จัดข้อความ (มือถือ)</H>
+                <H>{t("จัดข้อความ (มือถือ)", "Text align (mobile)")}</H>
                 <div className="flex gap-1">
                   {(
                     [
-                      ["", "เหมือนคอม"],
-                      ["left", "ซ้าย"],
-                      ["center", "กลาง"],
-                      ["right", "ขวา"],
+                      ["", t("เหมือนคอม", "Same as desktop")],
+                      ["left", t("ซ้าย", "Left")],
+                      ["center", t("กลาง", "Center")],
+                      ["right", t("ขวา", "Right")],
                     ] as const
                   ).map(([v, l]) => (
                     <button key={v || "same"} className={seg(str("malign") === v)} onClick={() => onPatchItem({ malign: v })}>
@@ -494,67 +498,67 @@ export function CanvasInspector({
             )}
           </div>
         ) : (
-          <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] text-amber-800">มือถือเรียงชิ้นให้อัตโนมัติอยู่ — อยากวางเองบนมือถือ กด &quot;← ทั้งผืน&quot; แล้วเลือก ✋ จัดเอง</p>
+          <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] text-amber-800">{t("มือถือเรียงชิ้นให้อัตโนมัติอยู่ — อยากวางเองบนมือถือ กด \"← ทั้งผืน\" แล้วเลือก ✋ จัดเอง", "Mobile is auto-stacked — to place items yourself, click \"← Whole canvas\" and pick ✋ Arrange myself")}</p>
         ))}
 
       {Boolean(item.group) && (
         <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-2.5 py-1.5">
-          <span className="flex-1 text-[11px] text-blue-800">⛓ อยู่ในกลุ่ม — คลิกบนผืน = เลือกทั้งกลุ่ม · คลิกซ้ำ = ชิ้นเดียว</span>
+          <span className="flex-1 text-[11px] text-blue-800">{t("⛓ อยู่ในกลุ่ม — คลิกบนผืน = เลือกทั้งกลุ่ม · คลิกซ้ำ = ชิ้นเดียว", "⛓ In a group — click on canvas = select group · click again = single item")}</span>
           <button onClick={() => onPatchItem({ group: "" })} className="text-[11px] text-blue-700 hover:underline">
-            เอาออกจากกลุ่ม
+            {t("เอาออกจากกลุ่ม", "Remove from group")}
           </button>
         </div>
       )}
 
       {/* จัดวาง (Arrange) — ชั้น + จัดชิดผืน */}
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 space-y-2">
-        <H>ชั้น</H>
+        <H>{t("ชั้น", "Layer")}</H>
         <div className="grid grid-cols-2 gap-1.5 -mt-1">
-          <button className={arr} onClick={() => onLayer("up")}>↑ ขึ้นหน้า 1 ชั้น</button>
-          <button className={arr} onClick={() => onLayer("down")}>↓ ถอยหลัง 1 ชั้น</button>
-          <button className={arr} onClick={() => onLayer("front")}>⤒ หน้าสุด</button>
-          <button className={arr} onClick={() => onLayer("back")}>⤓ หลังสุด</button>
+          <button className={arr} onClick={() => onLayer("up")}>{t("↑ ขึ้นหน้า 1 ชั้น", "↑ Bring forward")}</button>
+          <button className={arr} onClick={() => onLayer("down")}>{t("↓ ถอยหลัง 1 ชั้น", "↓ Send backward")}</button>
+          <button className={arr} onClick={() => onLayer("front")}>{t("⤒ หน้าสุด", "⤒ Bring to front")}</button>
+          <button className={arr} onClick={() => onLayer("back")}>{t("⤓ หลังสุด", "⤓ Send to back")}</button>
         </div>
-        <H>จัดชิดผืน</H>
+        <H>{t("จัดชิดผืน", "Align to canvas")}</H>
         <div className="grid grid-cols-2 gap-1.5 -mt-1">
-          <button className={arr} onClick={() => onAlign("top")}>⤒ ชิดบน</button>
-          <button className={arr} onClick={() => onAlign("left")}>⇤ ชิดซ้าย</button>
-          <button className={arr} onClick={() => onAlign("middle")}>⇕ กลางแนวตั้ง</button>
-          <button className={arr} onClick={() => onAlign("center")}>⇔ กลางแนวนอน</button>
-          <button className={arr} onClick={() => onAlign("bottom")}>⤓ ชิดล่าง</button>
-          <button className={arr} onClick={() => onAlign("right")}>⇥ ชิดขวา</button>
+          <button className={arr} onClick={() => onAlign("top")}>{t("⤒ ชิดบน", "⤒ Top")}</button>
+          <button className={arr} onClick={() => onAlign("left")}>{t("⇤ ชิดซ้าย", "⇤ Left")}</button>
+          <button className={arr} onClick={() => onAlign("middle")}>{t("⇕ กลางแนวตั้ง", "⇕ Middle")}</button>
+          <button className={arr} onClick={() => onAlign("center")}>{t("⇔ กลางแนวนอน", "⇔ Center")}</button>
+          <button className={arr} onClick={() => onAlign("bottom")}>{t("⤓ ชิดล่าง", "⤓ Bottom")}</button>
+          <button className={arr} onClick={() => onAlign("right")}>{t("⇥ ชิดขวา", "⇥ Right")}</button>
         </div>
       </div>
 
       {(kind === "image" || kind === "shape" || kind === "video") && (
         <div>
-          <H>พลิก</H>
+          <H>{t("พลิก", "Flip")}</H>
           <div className="flex gap-1.5">
-            <button className={seg(item.flipH === true)} onClick={() => onPatchItem({ flipH: !item.flipH })}>⇋ ซ้าย-ขวา</button>
-            <button className={seg(item.flipV === true)} onClick={() => onPatchItem({ flipV: !item.flipV })}>⇅ บน-ล่าง</button>
+            <button className={seg(item.flipH === true)} onClick={() => onPatchItem({ flipH: !item.flipH })}>{t("⇋ ซ้าย-ขวา", "⇋ Horizontal")}</button>
+            <button className={seg(item.flipV === true)} onClick={() => onPatchItem({ flipV: !item.flipV })}>{t("⇅ บน-ล่าง", "⇅ Vertical")}</button>
           </div>
           <button className={`${seg(item.bleed === true)} mt-1.5 w-full`} onClick={() => onPatchItem({ bleed: !item.bleed })}>
-            ⟷ {item.bleed ? "ยืดเต็มความกว้างจออยู่ (กดเพื่อเลิก)" : "ยืดเต็มความกว้างจอ"}
+            ⟷ {item.bleed ? t("ยืดเต็มความกว้างจออยู่ (กดเพื่อเลิก)", "Stretched to full screen width (click to undo)") : t("ยืดเต็มความกว้างจอ", "Stretch to full screen width")}
           </button>
-          {item.bleed === true && <p className="text-[10px] text-slate-400 mt-1">กว้างซ้ายสุด–ขวาสุดของจอทุกขนาด · ลากได้แค่ขึ้น-ลง · ปรับสูงด้วยจุดจับบน/ล่าง</p>}
+          {item.bleed === true && <p className="text-[10px] text-slate-400 mt-1">{t("กว้างซ้ายสุด–ขวาสุดของจอทุกขนาด · ลากได้แค่ขึ้น-ลง · ปรับสูงด้วยจุดจับบน/ล่าง", "Spans edge to edge on every screen · drag up/down only · resize height with the top/bottom handles")}</p>}
         </div>
       )}
 
       {kind === "image" && Boolean(item.imageKey) && (
         <div>
           <div className="flex items-center justify-between">
-            <H>ครอป (ซูม/เลื่อนรูปในกรอบ)</H>
-            <button onClick={onCrop} className="text-[11px] text-blue-600 hover:underline">✂️ ลากบนผืน</button>
+            <H>{t("ครอป (ซูม/เลื่อนรูปในกรอบ)", "Crop (zoom/pan image in frame)")}</H>
+            <button onClick={onCrop} className="text-[11px] text-blue-600 hover:underline">{t("✂️ ลากบนผืน", "✂️ Drag on canvas")}</button>
           </div>
-          <Slider label="ซูม" value={num("cropZoom", 100)} min={100} max={400} step={5} unit="%" onChange={(n) => onPatchItem({ cropZoom: n })} />
+          <Slider label={t("ซูม", "Zoom")} value={num("cropZoom", 100)} min={100} max={400} step={5} unit="%" onChange={(n) => onPatchItem({ cropZoom: n })} />
           <div className="grid grid-cols-2 gap-2">
-            <Slider label="ซ้าย ↔ ขวา" value={num("cropX", 50)} min={0} max={100} unit="%" onChange={(n) => onPatchItem({ cropX: n })} />
-            <Slider label="บน ↕ ล่าง" value={num("cropY", 50)} min={0} max={100} unit="%" onChange={(n) => onPatchItem({ cropY: n })} />
+            <Slider label={t("ซ้าย ↔ ขวา", "Left ↔ right")} value={num("cropX", 50)} min={0} max={100} unit="%" onChange={(n) => onPatchItem({ cropX: n })} />
+            <Slider label={t("บน ↕ ล่าง", "Top ↕ bottom")} value={num("cropY", 50)} min={0} max={100} unit="%" onChange={(n) => onPatchItem({ cropY: n })} />
           </div>
           {(num("cropZoom", 100) !== 100 || num("cropX", 50) !== 50 || num("cropY", 50) !== 50) && (
-            <button onClick={() => onPatchItem({ cropZoom: 100, cropX: 50, cropY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">↺ รีเซ็ตครอป</button>
+            <button onClick={() => onPatchItem({ cropZoom: 100, cropX: 50, cropY: 50 })} className="text-[11px] text-slate-500 hover:text-blue-600">{t("↺ รีเซ็ตครอป", "↺ Reset crop")}</button>
           )}
-          <p className="text-[10px] text-slate-400 mt-1">ตัดขอบรูป = ลากจุดจับที่มุม/ขอบของกรอบ · ซูม/เลื่อน = ตรงนี้ หรือกด &quot;ลากบนผืน&quot;</p>
+          <p className="text-[10px] text-slate-400 mt-1">{t("ตัดขอบรูป = ลากจุดจับที่มุม/ขอบของกรอบ · ซูม/เลื่อน = ตรงนี้ หรือกด \"ลากบนผืน\"", "Trim = drag the frame's corner/edge handles · zoom/pan = here, or click \"Drag on canvas\"")}</p>
         </div>
       )}
 
@@ -564,20 +568,20 @@ export function CanvasInspector({
             {item.videoKey ? (
               <VideoThumb url={`/api/r2-image?key=${encodeURIComponent(str("videoKey"))}`} className="w-24 h-16 rounded-lg border border-slate-200" />
             ) : (
-              <span className="w-24 h-16 rounded-lg border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">ยังไม่มีคลิป</span>
+              <span className="w-24 h-16 rounded-lg border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">{t("ยังไม่มีคลิป", "No clip yet")}</span>
             )}
-            <button onClick={() => onReplaceVideo?.()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:border-blue-500">🎬 {item.videoKey ? "เปลี่ยนคลิป" : "เลือกคลิป"}</button>
+            <button onClick={() => onReplaceVideo?.()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:border-blue-500">🎬 {item.videoKey ? t("เปลี่ยนคลิป", "Change clip") : t("เลือกคลิป", "Pick clip")}</button>
           </div>
-          <p className="text-[10px] text-slate-400">เล่นเองแบบเงียบ วนซ้ำ (เบราว์เซอร์บังคับให้เงียบถ้าเล่นเอง) · รูปปกก่อนเล่น + ตำแหน่งเป๊ะ ๆ = &quot;ตั้งค่าละเอียด&quot; ด้านล่าง</p>
+          <p className="text-[10px] text-slate-400">{t("เล่นเองแบบเงียบ วนซ้ำ (เบราว์เซอร์บังคับให้เงียบถ้าเล่นเอง) · รูปปกก่อนเล่น + ตำแหน่งเป๊ะ ๆ = \"ตั้งค่าละเอียด\" ด้านล่าง", "Autoplays muted on loop (browsers require mute for autoplay) · poster image + exact position = \"Advanced settings\" below")}</p>
           <div>
-            <H>ทรงคลิป</H>
+            <H>{t("ทรงคลิป", "Clip shape")}</H>
             <div className="flex flex-wrap gap-1">
               {(
                 [
-                  ["rect", "สี่เหลี่ยม"],
-                  ["rounded", "มุมมน"],
-                  ["ellipse", "วงรี"],
-                  ["arch", "โค้งประตู"],
+                  ["rect", t("สี่เหลี่ยม", "Rectangle")],
+                  ["rounded", t("มุมมน", "Rounded")],
+                  ["ellipse", t("วงรี", "Oval")],
+                  ["arch", t("โค้งประตู", "Arch")],
                 ] as const
               ).map(([v, l]) => (
                 <button key={v} className={seg(str("frame") === v)} onClick={() => onPatchItem({ frame: v })}>
@@ -587,8 +591,8 @@ export function CanvasInspector({
             </div>
           </div>
           <div className="flex gap-1">
-            <button className={seg(str("fit") !== "contain")} onClick={() => onPatchItem({ fit: "cover" })}>เต็มกรอบ</button>
-            <button className={seg(str("fit") === "contain")} onClick={() => onPatchItem({ fit: "contain" })}>ทั้งคลิป (ไม่ตัด)</button>
+            <button className={seg(str("fit") !== "contain")} onClick={() => onPatchItem({ fit: "cover" })}>{t("เต็มกรอบ", "Fill frame")}</button>
+            <button className={seg(str("fit") === "contain")} onClick={() => onPatchItem({ fit: "contain" })}>{t("ทั้งคลิป (ไม่ตัด)", "Whole clip (no crop)")}</button>
           </div>
         </div>
       )}
@@ -596,8 +600,8 @@ export function CanvasInspector({
       {(kind === "image" || kind === "video") && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-2.5 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="flex-1 text-[11px] font-semibold text-emerald-800">🛍 สินค้าใน{kind === "video" ? "คลิป" : "รูป"}นี้</span>
-            {Array.isArray(item.products) && item.products.length > 0 && <span className="text-[10px] text-emerald-700">{item.products.length} ตัว</span>}
+            <span className="flex-1 text-[11px] font-semibold text-emerald-800">{kind === "video" ? t("🛍 สินค้าในคลิปนี้", "🛍 Products in this clip") : t("🛍 สินค้าในรูปนี้", "🛍 Products in this image")}</span>
+            {Array.isArray(item.products) && item.products.length > 0 && <span className="text-[10px] text-emerald-700">{t(`${item.products.length} ตัว`, `${item.products.length} items`)}</span>}
           </div>
           <WebsiteProductPicker
             shopSlug={ctx.shopSlug}
@@ -605,10 +609,10 @@ export function CanvasInspector({
             max={6}
             onChange={(codes) => onPatchItem({ products: codes })}
           />
-          <p className="text-[10px] text-slate-500">ลูกค้ากด{kind === "video" ? "คลิป" : "รูป"}นี้ = การ์ดสินค้าเด้งขึ้นมา (หลายตัวเลื่อนดู ‹ 1/3 ›) · มีสินค้าแล้ว &quot;กดแล้วไปที่&quot; จะไม่ใช้</p>
+          <p className="text-[10px] text-slate-500">{t(`ลูกค้ากด${kind === "video" ? "คลิป" : "รูป"}นี้ = การ์ดสินค้าเด้งขึ้นมา (หลายตัวเลื่อนดู ‹ 1/3 ›) · มีสินค้าแล้ว "กดแล้วไปที่" จะไม่ใช้`, `Customer clicks this ${kind === "video" ? "clip" : "image"} = product card pops up (swipe through several ‹ 1/3 ›) · with products set, "Link to" is ignored`)}</p>
           {Array.isArray(item.products) && item.products.length > 0 && (
             <label className="flex items-center gap-1.5 text-xs text-slate-600">
-              <input type="checkbox" className="accent-emerald-600" checked={item.shopIcon !== false} onChange={(e) => onPatchItem({ shopIcon: e.target.checked })} /> ไอคอน 🛍 มุม{kind === "video" ? "คลิป" : "รูป"} (บอกลูกค้าว่ากดซื้อได้)
+              <input type="checkbox" className="accent-emerald-600" checked={item.shopIcon !== false} onChange={(e) => onPatchItem({ shopIcon: e.target.checked })} /> {t(`ไอคอน 🛍 มุม${kind === "video" ? "คลิป" : "รูป"} (บอกลูกค้าว่ากดซื้อได้)`, `🛍 icon in the ${kind === "video" ? "clip" : "image"} corner (tells customers it's shoppable)`)}
             </label>
           )}
         </div>
@@ -618,10 +622,10 @@ export function CanvasInspector({
       {(kind === "image" || kind === "video") && (
         <div className="rounded-lg border border-sky-200 bg-sky-50/40 p-2.5 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="flex-1 text-[11px] font-semibold text-sky-800">🔍 กด{kind === "video" ? "คลิป" : "รูป"}แล้วขยาย</span>
+            <span className="flex-1 text-[11px] font-semibold text-sky-800">{kind === "video" ? t("🔍 กดคลิปแล้วขยาย", "🔍 Click clip to expand") : t("🔍 กดรูปแล้วขยาย", "🔍 Click image to expand")}</span>
             {str("expand") && (
               <button onClick={() => onExpandDemo?.(item.id)} className="text-[11px] text-sky-700 hover:underline">
-                ▶ ลองกดดู
+                {t("▶ ลองกดดู", "▶ Try it")}
               </button>
             )}
           </div>
@@ -634,16 +638,16 @@ export function CanvasInspector({
             }}
           />
           {str("expand") === "full" && (!str("href").startsWith("/") || item.newTab === true) && (
-            <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">ตั้ง &quot;กดแล้วไปที่&quot; (ด้านล่าง) เป็นหน้าในเว็บ ไม่เปิดแท็บใหม่ — ไม่งั้นบนเว็บจริงกดแล้วจะไม่ขยาย</p>
+            <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">{t("ตั้ง \"กดแล้วไปที่\" (ด้านล่าง) เป็นหน้าในเว็บ ไม่เปิดแท็บใหม่ — ไม่งั้นบนเว็บจริงกดแล้วจะไม่ขยาย", "Set \"Link to\" (below) to a page on this site, not a new tab — otherwise it won't expand on the live site")}</p>
           )}
-          {str("expand") === "full" && <p className="text-[10px] text-slate-500">{kind === "video" ? "คลิป" : "รูป"}ค่อย ๆ ขยายเต็มจอ แล้วเปลี่ยนเป็นหน้าที่ลิงก์ไว้ใต้ภาพ</p>}
+          {str("expand") === "full" && <p className="text-[10px] text-slate-500">{t(`${kind === "video" ? "คลิป" : "รูป"}ค่อย ๆ ขยายเต็มจอ แล้วเปลี่ยนเป็นหน้าที่ลิงก์ไว้ใต้ภาพ`, `The ${kind === "video" ? "clip" : "image"} grows to full screen, then becomes the linked page underneath`)}</p>}
           {str("expand") === "story" && (
             <>
-              <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("expTitle")} maxLength={120} placeholder="หัวข้อ เช่น คอลเลกชันฤดูร้อน (ว่าง = ใช้คำบรรยายรูป)" onChange={(e) => onPatchItem({ expTitle: e.target.value })} />
-              <textarea className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" rows={4} value={str("expText")} maxLength={1500} placeholder="เล่าเรื่องสั้น ๆ ของภาพนี้" onChange={(e) => onPatchItem({ expText: e.target.value })} />
-              <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("expCta")} maxLength={40} placeholder="ข้อความบนปุ่ม (ว่าง = ดูเพิ่มเติม)" onChange={(e) => onPatchItem({ expCta: e.target.value })} />
+              <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("expTitle")} maxLength={120} placeholder={t("หัวข้อ เช่น คอลเลกชันฤดูร้อน (ว่าง = ใช้คำบรรยายรูป)", "Title, e.g. Summer collection (empty = use image caption)")} onChange={(e) => onPatchItem({ expTitle: e.target.value })} />
+              <textarea className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" rows={4} value={str("expText")} maxLength={1500} placeholder={t("เล่าเรื่องสั้น ๆ ของภาพนี้", "A short story about this image")} onChange={(e) => onPatchItem({ expText: e.target.value })} />
+              <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("expCta")} maxLength={40} placeholder={t("ข้อความบนปุ่ม (ว่าง = ดูเพิ่มเติม)", "Button text (empty = See more)")} onChange={(e) => onPatchItem({ expCta: e.target.value })} />
               <p className="text-[10px] text-slate-500">
-                {kind === "video" ? "คลิป" : "รูป"}ขยายเต็มครึ่งซ้ายของจอ (มือถือ = ครึ่งบน) เนื้อหาขึ้นอีกฝั่ง · สินค้าใน{kind === "video" ? "คลิป" : "รูป"}ด้านบนจะขึ้นในนั้นด้วย · ปุ่มพาไปที่ &quot;กดแล้วไปที่&quot; (ไม่ตั้ง = ไม่มีปุ่ม)
+                {t(`${kind === "video" ? "คลิป" : "รูป"}ขยายเต็มครึ่งซ้ายของจอ (มือถือ = ครึ่งบน) เนื้อหาขึ้นอีกฝั่ง · สินค้าใน${kind === "video" ? "คลิป" : "รูป"}ด้านบนจะขึ้นในนั้นด้วย · ปุ่มพาไปที่ "กดแล้วไปที่" (ไม่ตั้ง = ไม่มีปุ่ม)`, `The ${kind === "video" ? "clip" : "image"} fills the left half of the screen (mobile = top half) with the content on the other side · products set above appear there too · the button goes to "Link to" (not set = no button)`)}
               </p>
             </>
           )}
@@ -657,12 +661,12 @@ export function CanvasInspector({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={`/api/r2-image?key=${encodeURIComponent(str("imageKey"))}&w=200`} alt="" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
             ) : (
-              <span className="w-16 h-16 rounded-lg border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">ยังไม่มีรูป</span>
+              <span className="w-16 h-16 rounded-lg border border-dashed border-slate-300 text-[10px] text-slate-400 flex items-center justify-center">{t("ยังไม่มีรูป", "No image yet")}</span>
             )}
-            <button onClick={onReplaceImage} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:border-blue-500">🖼 เปลี่ยนรูป</button>
+            <button onClick={onReplaceImage} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:border-blue-500">{t("🖼 เปลี่ยนรูป", "🖼 Change image")}</button>
           </div>
           <div>
-            <H>กรอบรูป</H>
+            <H>{t("กรอบรูป", "Frame")}</H>
             <div className="grid grid-cols-3 gap-1.5">
               {CANVAS_FRAME_PRESETS.map((p) => {
                 const exact = CANVAS_FRAME_PRESETS.find((q) => q.patch.frame === item.frame && q.patch.border === item.border);
@@ -670,7 +674,7 @@ export function CanvasInspector({
                 return (
                   <button key={p.key} onClick={() => onPatchItem(p.patch)} className={`flex flex-col items-center gap-1 rounded-lg border py-2 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}>
                     <span style={framePreview(p.key)} />
-                    <span className="text-[10px] text-slate-600">{p.label}</span>
+                    <span className="text-[10px] text-slate-600">{labelEn(p.label)}</span>
                   </button>
                 );
               })}
@@ -680,14 +684,14 @@ export function CanvasInspector({
           <CustomFrameGrid item={item} shopSlug={ctx.shopSlug} shopId={ctx.shopId} swatches={swatchesOf(theme).map((x) => ({ v: x.v, hex: x.hex }))} onPatchItem={onPatchItem} />
           {!noLineFrame && (
             <div>
-              <H>เส้นรอบกรอบ</H>
+              <H>{t("เส้นรอบกรอบ", "Frame outline")}</H>
               <div className="flex gap-1">
                 {(
                   [
-                    ["none", "ไม่มี"],
-                    ["line", "เส้น"],
-                    ["dotted", "จุด"],
-                    ["double", "เส้นคู่"],
+                    ["none", t("ไม่มี", "None")],
+                    ["line", t("เส้น", "Line")],
+                    ["dotted", t("จุด", "Dots")],
+                    ["double", t("เส้นคู่", "Double")],
                   ] as const
                 ).map(([v, l]) => (
                   <button key={v} className={seg(str("border") === v)} onClick={() => onPatchItem({ border: v })}>
@@ -699,9 +703,9 @@ export function CanvasInspector({
           )}
           <div className="rounded-lg border border-slate-200 p-2.5 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="flex-1 text-[11px] font-semibold text-slate-500">กรอบจากรูปของร้าน (PNG วางทับรูป)</span>
+              <span className="flex-1 text-[11px] font-semibold text-slate-500">{t("กรอบจากรูปของร้าน (PNG วางทับรูป)", "Shop frame image (PNG overlay)")}</span>
               <button onClick={() => onPickFrame?.()} className="rounded-md border border-slate-300 px-2 py-1 text-[11px] hover:border-blue-500">
-                {item.overlayKey ? "เปลี่ยน…" : "เลือก/อัปโหลด…"}
+                {item.overlayKey ? t("เปลี่ยน…", "Change…") : t("เลือก/อัปโหลด…", "Pick/upload…")}
               </button>
             </div>
             {Boolean(item.overlayKey) && (
@@ -710,33 +714,33 @@ export function CanvasInspector({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/api/r2-image?key=${encodeURIComponent(str("overlayKey"))}&w=200`} alt="" className="w-12 h-12 rounded object-contain border border-slate-200 bg-[repeating-conic-gradient(#f8fafc_0_25%,#fff_0_50%)] bg-[length:12px_12px]" />
                   <button onClick={() => onPatchItem({ overlayKey: null })} className="text-[11px] text-red-600 hover:underline">
-                    เอากรอบรูปออก
+                    {t("เอากรอบรูปออก", "Remove frame")}
                   </button>
                 </div>
-                <Slider label="รูปห่างขอบกรอบ" value={num("overlayInset", 12)} min={0} max={40} unit="%" onChange={(n) => onPatchItem({ overlayInset: n })} />
+                <Slider label={t("รูปห่างขอบกรอบ", "Image inset from frame")} value={num("overlayInset", 12)} min={0} max={40} unit="%" onChange={(n) => onPatchItem({ overlayInset: n })} />
               </>
             )}
           </div>
           {str("border") && str("border") !== "none" && !noLineFrame && (
             <>
               <div>
-                <H>สีเส้นกรอบ</H>
+                <H>{t("สีเส้นกรอบ", "Outline color")}</H>
                 <Swatches theme={theme} value={str("borderColor")} hex={str("borderHex")} onPick={colorPick("borderColor", "borderHex")} />
               </div>
-              <Slider label="ความหนาเส้น" value={num("borderWidth", 2)} min={1} max={16} onChange={(n) => onPatchItem({ borderWidth: n })} />
-              <Slider label="ระยะห่างกรอบกับรูป" value={num("borderGap", 12)} min={0} max={60} onChange={(n) => onPatchItem({ borderGap: n })} />
+              <Slider label={t("ความหนาเส้น", "Line thickness")} value={num("borderWidth", 2)} min={1} max={16} onChange={(n) => onPatchItem({ borderWidth: n })} />
+              <Slider label={t("ระยะห่างกรอบกับรูป", "Gap between outline and image")} value={num("borderGap", 12)} min={0} max={60} onChange={(n) => onPatchItem({ borderGap: n })} />
             </>
           )}
           <div>
-            <H>การจัดรูปในกรอบ</H>
+            <H>{t("การจัดรูปในกรอบ", "Image fit")}</H>
             <div className="flex gap-1.5">
-              <button className={seg(str("fit") !== "contain")} onClick={() => onPatchItem({ fit: "cover" })}>เต็มกรอบ</button>
-              <button className={seg(str("fit") === "contain")} onClick={() => onPatchItem({ fit: "contain" })}>ทั้งรูป</button>
+              <button className={seg(str("fit") !== "contain")} onClick={() => onPatchItem({ fit: "cover" })}>{t("เต็มกรอบ", "Fill frame")}</button>
+              <button className={seg(str("fit") === "contain")} onClick={() => onPatchItem({ fit: "contain" })}>{t("ทั้งรูป", "Whole image")}</button>
             </div>
           </div>
           <div>
-            <H>คำบรรยายรูป (มีผลกับ Google)</H>
-            <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("alt")} maxLength={200} placeholder="เช่น กระเป๋าสีชมพูพาสเทล" onChange={(e) => onPatchItem({ alt: e.target.value })} />
+            <H>{t("คำบรรยายรูป (มีผลกับ Google)", "Image caption (affects Google)")}</H>
+            <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("alt")} maxLength={200} placeholder={t("เช่น กระเป๋าสีชมพูพาสเทล", "e.g. Pastel pink bag")} onChange={(e) => onPatchItem({ alt: e.target.value })} />
           </div>
         </>
       )}
@@ -744,31 +748,31 @@ export function CanvasInspector({
       {kind === "text" && (
         <>
           <div>
-            <H>ข้อความ (ดับเบิลคลิกบนผืนเพื่อพิมพ์ตรงนั้นก็ได้)</H>
+            <H>{t("ข้อความ (ดับเบิลคลิกบนผืนเพื่อพิมพ์ตรงนั้นก็ได้)", "Text (or double-click on the canvas to type there)")}</H>
             <textarea className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" rows={3} value={str("text")} maxLength={2000} onChange={(e) => onPatchItem({ text: e.target.value })} />
           </div>
-          <Slider label="ขนาดตัวอักษร" value={num("size", 40)} min={8} max={160} onChange={(n) => onPatchItem({ size: n })} />
+          <Slider label={t("ขนาดตัวอักษร", "Text size")} value={num("size", 40)} min={8} max={160} onChange={(n) => onPatchItem({ size: n })} />
           <div>
-            <H>สีตัวอักษร</H>
+            <H>{t("สีตัวอักษร", "Text color")}</H>
             <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
           </div>
           {gradRow}
           <div>
-            <H>จัดข้อความ</H>
+            <H>{t("จัดข้อความ", "Text align")}</H>
             <div className="flex gap-1.5">
               {(["left", "center", "right"] as const).map((a) => (
                 <button key={a} className={seg(str("align") === a)} onClick={() => onPatchItem({ align: a })}>
-                  {a === "left" ? "ชิดซ้าย" : a === "center" ? "กลาง" : "ชิดขวา"}
+                  {a === "left" ? t("ชิดซ้าย", "Left") : a === "center" ? t("กลาง", "Center") : t("ชิดขวา", "Right")}
                 </button>
               ))}
             </div>
           </div>
           <div className="flex gap-1.5">
-            <button className={seg(item.italic === true)} onClick={() => onPatchItem({ italic: !item.italic })}><i>เอียง</i></button>
-            <button className={seg(item.uppercase === true)} onClick={() => onPatchItem({ uppercase: !item.uppercase })}>ABC ตัวใหญ่</button>
+            <button className={seg(item.italic === true)} onClick={() => onPatchItem({ italic: !item.italic })}><i>{t("เอียง", "Italic")}</i></button>
+            <button className={seg(item.uppercase === true)} onClick={() => onPatchItem({ uppercase: !item.uppercase })}>{t("ABC ตัวใหญ่", "ABC Uppercase")}</button>
           </div>
           <div>
-            <H>แถบพื้นหลังข้อความ</H>
+            <H>{t("แถบพื้นหลังข้อความ", "Text highlight")}</H>
             <Swatches theme={theme} value={str("bg") || "none"} hex={str("bgHex")} onPick={colorPick("bg", "bgHex")} allowNone />
           </div>
         </>
@@ -777,41 +781,41 @@ export function CanvasInspector({
       {kind === "button" && (
         <>
           <div>
-            <H>ข้อความบนปุ่ม</H>
+            <H>{t("ข้อความบนปุ่ม", "Button text")}</H>
             <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={str("label")} maxLength={60} onChange={(e) => onPatchItem({ label: e.target.value })} />
           </div>
           <div>
-            <H>แบบปุ่ม</H>
+            <H>{t("แบบปุ่ม", "Button style")}</H>
             <div className="grid grid-cols-2 gap-1.5">
               {CANVAS_BUTTON_VARIANTS.map((v) => (
                 <button key={v.v} className={seg(str("variant") === v.v)} onClick={() => onPatchItem({ variant: v.v })}>
-                  {v.l}
+                  {labelEn(v.l)}
                 </button>
               ))}
             </div>
           </div>
           {str("variant") !== "brand" && (
             <div>
-              <H>สีปุ่ม/ตัวอักษร</H>
+              <H>{t("สีปุ่ม/ตัวอักษร", "Button/text color")}</H>
               <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
             </div>
           )}
-          <Slider label="ขนาดตัวอักษร" value={num("size", 16)} min={10} max={40} onChange={(n) => onPatchItem({ size: n })} />
+          <Slider label={t("ขนาดตัวอักษร", "Text size")} value={num("size", 16)} min={10} max={40} onChange={(n) => onPatchItem({ size: n })} />
         </>
       )}
 
       {(kind === "text" || kind === "button") && (
         <>
           <div>
-            <H>ฟอนต์</H>
-            <FontPickList value={str("font")} onPick={(v) => onPatchItem({ font: v })} fontNames={fontNames} sample={kind === "button" ? str("label") || "ปุ่ม" : "Aa ก ข ค"} />
+            <H>{t("ฟอนต์", "Font")}</H>
+            <FontPickList value={str("font")} onPick={(v) => onPatchItem({ font: v })} fontNames={fontNames} sample={kind === "button" ? str("label") || t("ปุ่ม", "Button") : "Aa ก ข ค"} />
           </div>
           <div>
-            <H>ความหนา</H>
+            <H>{t("ความหนา", "Weight")}</H>
             <div className="flex gap-1">
               {CANVAS_WEIGHTS.map((w) => (
                 <button key={w.v} className={seg(str("weight") === w.v)} style={{ fontWeight: Number(w.v) }} onClick={() => onPatchItem({ weight: w.v })}>
-                  {w.l}
+                  {labelEn(w.l)}
                 </button>
               ))}
             </div>
@@ -824,10 +828,10 @@ export function CanvasInspector({
       {kind === "shape" && !item.pattern && (
         <>
           <div>
-            <H>ลาย</H>
+            <H>{t("ลาย", "Pattern")}</H>
             <div className="grid grid-cols-4 gap-1.5">
               {CANVAS_SHAPES.map((o) => (
-                <button key={o.v} title={o.l} onClick={() => onPatchItem({ shape: o.v })} className={`h-12 rounded-lg border p-1.5 ${str("shape") === o.v ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}>
+                <button key={o.v} title={labelEn(o.l)} onClick={() => onPatchItem({ shape: o.v })} className={`h-12 rounded-lg border p-1.5 ${str("shape") === o.v ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}>
                   <CanvasShape it={{ shape: o.v, w: 60, h: 40, outline: o.v === "rect" || o.v === "ellipse" || o.v === "arch", strokeWidth: 2 }} color={theme.brand} />
                 </button>
               ))}
@@ -838,13 +842,13 @@ export function CanvasInspector({
             <FillLineControls it={item as PatternFields} theme={theme} onPatch={onPatchItem} />
           ) : (
             <div>
-              <H>สี</H>
+              <H>{t("สี", "Color")}</H>
               <Swatches theme={theme} value={str("color")} hex={str("colorHex")} onPick={colorPick("color", "colorHex")} />
             </div>
           )}
           {gradRow}
           {CANVAS_LINE_ONLY_SHAPES.includes(str("shape")) && (
-            <Slider label="ความหนาเส้น" value={num("strokeWidth", 2)} min={1} max={16} onChange={(n) => onPatchItem({ strokeWidth: n })} />
+            <Slider label={t("ความหนาเส้น", "Line thickness")} value={num("strokeWidth", 2)} min={1} max={16} onChange={(n) => onPatchItem({ strokeWidth: n })} />
           )}
         </>
       )}
@@ -852,15 +856,15 @@ export function CanvasInspector({
       {/* การเคลื่อนไหว (ทุกชนิด) */}
       <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
         <div className="flex items-center">
-          <span className="flex-1 text-[11px] font-semibold text-violet-800">✨ เคลื่อนไหว</span>
+          <span className="flex-1 text-[11px] font-semibold text-violet-800">{t("✨ เคลื่อนไหว", "✨ Animate")}</span>
           {str("anim") && (
             <button onClick={() => onReplay?.([item.id])} className="text-[11px] text-violet-700 hover:underline">
-              ▶ ดูอีกครั้ง
+              {t("▶ ดูอีกครั้ง", "▶ Replay")}
             </button>
           )}
         </div>
         <div>
-          <H>โผล่ตอนเลื่อนมาเจอ</H>
+          <H>{t("โผล่ตอนเลื่อนมาเจอ", "Reveal on scroll")}</H>
           <Chips
             options={canvasEntrancesFor(kind)}
             value={str("anim")}
@@ -872,128 +876,128 @@ export function CanvasInspector({
         </div>
         {str("anim") && (
           <>
-            <Slider label="หน่วงเวลาก่อนโผล่" value={Math.round(num("animDelay", 0) / 100) / 10} min={0} max={3} step={0.1} unit=" วิ" onChange={(n) => onPatchItem({ animDelay: Math.round(n * 1000) })} />
+            <Slider label={t("หน่วงเวลาก่อนโผล่", "Delay before reveal")} value={Math.round(num("animDelay", 0) / 100) / 10} min={0} max={3} step={0.1} unit={t(" วิ", " s")} onChange={(n) => onPatchItem({ animDelay: Math.round(n * 1000) })} />
             <div className="flex gap-1">
               {CANVAS_SPEEDS.map((o) => (
                 <button key={o.v} className={seg((str("animSpeed") || "normal") === o.v)} onClick={() => onPatchItem({ animSpeed: o.v })}>
-                  {o.l}
+                  {labelEn(o.l)}
                 </button>
               ))}
             </div>
           </>
         )}
         <div>
-          <H>ขยับตลอดเวลา</H>
+          <H>{t("ขยับตลอดเวลา", "Continuous motion")}</H>
           <Chips options={CANVAS_LOOPS.filter((o) => o.v !== "shine" || kind === "image" || kind === "button")} value={str("loop")} onPick={(v) => onPatchItem({ loop: v })} />
         </div>
         {str("loop") && (
           <div className="flex gap-1">
             {CANVAS_SPEEDS.map((o) => (
               <button key={o.v} className={seg((str("loopSpeed") || "normal") === o.v)} onClick={() => onPatchItem({ loopSpeed: o.v })}>
-                {o.l}
+                {labelEn(o.l)}
               </button>
             ))}
           </div>
         )}
         <div>
-          <H>ตอนเอาเมาส์ชี้ (คอม · ลองชี้ที่ชิ้นบนผืนได้เลย)</H>
+          <H>{t("ตอนเอาเมาส์ชี้ (คอม · ลองชี้ที่ชิ้นบนผืนได้เลย)", "On hover (desktop · try hovering the item on the canvas)")}</H>
           <Chips options={canvasHoversFor(kind)} value={str("hover")} onPick={(v) => onPatchItem({ hover: v })} />
         </div>
-        {str("anim") === "type" && <p className="text-[10px] text-violet-700">พิมพ์ทีละตัว: ความเร็ว = เร็ว/ปกติ/ช้า ด้านบน · ข้อความยาวเกิน 400 ตัวจะใช้ &quot;ค่อย ๆ ขึ้นมา&quot; แทน</p>}
+        {str("anim") === "type" && <p className="text-[10px] text-violet-700">{t("พิมพ์ทีละตัว: ความเร็ว = เร็ว/ปกติ/ช้า ด้านบน · ข้อความยาวเกิน 400 ตัวจะใช้ \"ค่อย ๆ ขึ้นมา\" แทน", "Typewriter: speed = Fast/Normal/Slow above · text over 400 characters uses \"Fade up\" instead")}</p>}
         {/* 🎬 ในฉากค้าง (ผืนเปิดฉากค้าง · เว็บร้าน lib/canvas-scene) */}
         {block.scene === true ? (
           <div className="border-t border-violet-200 pt-2 space-y-2">
             <div className="flex items-center">
-              <span className="flex-1 text-[11px] font-semibold text-violet-800">🎬 ในฉากค้าง</span>
+              <span className="flex-1 text-[11px] font-semibold text-violet-800">{t("🎬 ในฉากค้าง", "🎬 In pinned scene")}</span>
               <button onClick={() => onScrollPreview?.(!scrollPreview)} className="text-[11px] text-violet-700 hover:underline">
-                {scrollPreview ? "⏸ หยุดลอง" : "▶ ลองเลื่อนดู"}
+                {scrollPreview ? t("⏸ หยุดลอง", "⏸ Stop test") : t("▶ ลองเลื่อนดู", "▶ Try scrolling")}
               </button>
             </div>
             <div>
-              <H>ท่าเข้า</H>
+              <H>{t("ท่าเข้า", "Enter move")}</H>
               <Chips options={canvasSceneInsFor(kind)} value={str("scIn")} onPick={(v) => onPatchItem(v === "scrub" ? { scIn: v, scFrom: 0, scTo: 100 } : { scIn: v })} />
             </div>
             {str("scIn") && (
               <div className="grid grid-cols-2 gap-2">
-                <Slider label="เริ่มที่" value={num("scFrom", 0)} min={0} max={99} unit="%" onChange={(n) => onPatchItem({ scFrom: n, ...(n >= num("scTo", 30) ? { scTo: Math.min(100, n + 5) } : null) })} />
-                <Slider label="เสร็จที่" value={num("scTo", 30)} min={1} max={100} unit="%" onChange={(n) => onPatchItem({ scTo: Math.max(n, num("scFrom", 0) + 1) })} />
+                <Slider label={t("เริ่มที่", "Start at")} value={num("scFrom", 0)} min={0} max={99} unit="%" onChange={(n) => onPatchItem({ scFrom: n, ...(n >= num("scTo", 30) ? { scTo: Math.min(100, n + 5) } : null) })} />
+                <Slider label={t("เสร็จที่", "Finish at")} value={num("scTo", 30)} min={1} max={100} unit="%" onChange={(n) => onPatchItem({ scTo: Math.max(n, num("scFrom", 0) + 1) })} />
               </div>
             )}
             {str("scIn") === "scrub" && <CanvasScrubPrep item={item} onPatch={onPatchItem} />}
-            {str("scIn") === "fill" && <p className="text-[10px] text-slate-500">ขยายจากที่วางไว้จนเต็มจอ · ข้อความที่อยู่ชั้นบนกว่าจะโผล่ทับรูปได้ (จัดชั้นด้านบน)</p>}
+            {str("scIn") === "fill" && <p className="text-[10px] text-slate-500">{t("ขยายจากที่วางไว้จนเต็มจอ · ข้อความที่อยู่ชั้นบนกว่าจะโผล่ทับรูปได้ (จัดชั้นด้านบน)", "Grows from its spot to full screen · text on a higher layer can show on top (set layers above)")}</p>}
             <div>
-              <H>ท่าออก</H>
+              <H>{t("ท่าออก", "Exit move")}</H>
               <Chips options={CANVAS_SCENE_OUTS} value={str("scOut")} onPick={(v) => onPatchItem({ scOut: v })} />
             </div>
             {str("scOut") && (
               <div className="grid grid-cols-2 gap-2">
-                <Slider label="เริ่มออกที่" value={num("scOutFrom", 85)} min={0} max={99} unit="%" onChange={(n) => onPatchItem({ scOutFrom: n, ...(n >= num("scOutTo", 100) ? { scOutTo: Math.min(100, n + 5) } : null) })} />
-                <Slider label="หายหมดที่" value={num("scOutTo", 100)} min={1} max={100} unit="%" onChange={(n) => onPatchItem({ scOutTo: Math.max(n, num("scOutFrom", 85) + 1) })} />
+                <Slider label={t("เริ่มออกที่", "Start exit at")} value={num("scOutFrom", 85)} min={0} max={99} unit="%" onChange={(n) => onPatchItem({ scOutFrom: n, ...(n >= num("scOutTo", 100) ? { scOutTo: Math.min(100, n + 5) } : null) })} />
+                <Slider label={t("หายหมดที่", "Gone at")} value={num("scOutTo", 100)} min={1} max={100} unit="%" onChange={(n) => onPatchItem({ scOutTo: Math.max(n, num("scOutFrom", 85) + 1) })} />
               </div>
             )}
-            <p className="text-[10px] text-slate-500">% = ช่วงของฉาก (0 = เริ่มค้าง · 100 = จบฉาก) · บนผืนที่จัดอยู่ ชิ้นอยู่ท่าสุดท้ายเสมอ (วางตามที่อยากให้จบ)</p>
+            <p className="text-[10px] text-slate-500">{t("% = ช่วงของฉาก (0 = เริ่มค้าง · 100 = จบฉาก) · บนผืนที่จัดอยู่ ชิ้นอยู่ท่าสุดท้ายเสมอ (วางตามที่อยากให้จบ)", "% = point in the scene (0 = pin starts · 100 = scene ends) · in the editor, items always show their final pose (place them where they should end)")}</p>
           </div>
         ) : (
-          <p className="text-[10px] text-slate-500 border-t border-violet-200 pt-2">🎬 อยากได้ท่าแบบเว็บ Apple (ผืนค้างแล้วชิ้นเข้าทีละจังหวะ · สว่างทีละคำ · ขยายเต็มจอ · คลิปเล่นตามการเลื่อน) — เปิด &quot;ฉากค้าง&quot; ที่แผงทั้งผืน</p>
+          <p className="text-[10px] text-slate-500 border-t border-violet-200 pt-2">{t("🎬 อยากได้ท่าแบบเว็บ Apple (ผืนค้างแล้วชิ้นเข้าทีละจังหวะ · สว่างทีละคำ · ขยายเต็มจอ · คลิปเล่นตามการเลื่อน) — เปิด \"ฉากค้าง\" ที่แผงทั้งผืน", "🎬 Want Apple-style moves (pinned canvas, items enter step by step · word-by-word light up · expand to full screen · clip plays with scroll)? Turn on \"Pinned scene\" in the whole-canvas panel")}</p>
         )}
         {/* 🌀 ขยับตามการเลื่อนจอ (เว็บร้าน lib/canvas-scroll) */}
         <div className="border-t border-violet-200 pt-2 space-y-2">
           <div className="flex items-center">
-            <span className="flex-1 text-[11px] font-semibold text-violet-800">🌀 ตอนเลื่อนจอ</span>
+            <span className="flex-1 text-[11px] font-semibold text-violet-800">{t("🌀 ตอนเลื่อนจอ", "🌀 On scroll")}</span>
             <button onClick={() => onScrollPreview?.(!scrollPreview)} className="text-[11px] text-violet-700 hover:underline">
-              {scrollPreview ? "⏸ หยุดลอง" : "▶ ลองเลื่อนดู"}
+              {scrollPreview ? t("⏸ หยุดลอง", "⏸ Stop test") : t("▶ ลองเลื่อนดู", "▶ Try scrolling")}
             </button>
           </div>
           <div>
-            <H>ความเร็วเทียบการเลื่อนหน้าเว็บ</H>
+            <H>{t("ความเร็วเทียบการเลื่อนหน้าเว็บ", "Speed relative to page scroll")}</H>
             <div className="grid grid-cols-5 gap-1">
               {CANVAS_SFX_SPEED_PRESETS.map((o) => (
                 <button key={o.v} type="button" onClick={() => onPatchItem({ sfxSpeed: o.v })} className={`px-1 py-1.5 text-[11px] rounded-md border ${num("sfxSpeed", 0) === o.v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
-                  {o.l}
+                  {labelEn(o.l)}
                 </button>
               ))}
             </div>
-            <Slider label="ปรับละเอียด (ลบ = ช้ากว่า · บวก = เร็วกว่า)" value={num("sfxSpeed", 0)} min={-100} max={100} step={5} onChange={(n) => onPatchItem({ sfxSpeed: n })} />
+            <Slider label={t("ปรับละเอียด (ลบ = ช้ากว่า · บวก = เร็วกว่า)", "Fine tune (minus = slower · plus = faster)")} value={num("sfxSpeed", 0)} min={-100} max={100} step={5} onChange={(n) => onPatchItem({ sfxSpeed: n })} />
           </div>
           <div>
-            <H>จางตามตำแหน่งบนจอ</H>
+            <H>{t("จางตามตำแหน่งบนจอ", "Fade by screen position")}</H>
             <Chips options={CANVAS_SFX_FADES} value={str("sfxFade")} onPick={(v) => onPatchItem({ sfxFade: v })} />
           </div>
           <div>
-            <H>ซูมตามการเลื่อน</H>
+            <H>{t("ซูมตามการเลื่อน", "Zoom on scroll")}</H>
             <Chips options={CANVAS_SFX_ZOOMS} value={str("sfxZoom")} onPick={(v) => onPatchItem({ sfxZoom: v })} />
           </div>
-          <Slider label="หมุนตามการเลื่อน (ต่อ 1 จอ)" value={num("sfxRotate", 0)} min={-90} max={90} step={5} unit="°" onChange={(n) => onPatchItem({ sfxRotate: n })} />
+          <Slider label={t("หมุนตามการเลื่อน (ต่อ 1 จอ)", "Rotate on scroll (per screen)")} value={num("sfxRotate", 0)} min={-90} max={90} step={5} unit="°" onChange={(n) => onPatchItem({ sfxRotate: n })} />
           <button className={`${seg(item.sfxPin === true)} w-full`} onClick={() => onPatchItem({ sfxPin: !item.sfxPin })}>
-            📌 {item.sfxPin ? "ค้างอยู่กับที่ระหว่างเลื่อนผืน (กดเพื่อเลิก)" : "ค้างอยู่กับที่ระหว่างเลื่อนผืน"}
+            📌 {item.sfxPin ? t("ค้างอยู่กับที่ระหว่างเลื่อนผืน (กดเพื่อเลิก)", "Pinned while the canvas scrolls (click to undo)") : t("ค้างอยู่กับที่ระหว่างเลื่อนผืน", "Pin while the canvas scrolls")}
           </button>
           <p className="text-[10px] text-slate-500">
-            ค้าง = อยู่ที่เดิมบนจอจนเลื่อนพ้นผืน (เหมาะกับหัวข้อตัวใหญ่ด้านหลัง) · มือถือขยับครึ่งเดียวให้เอง · ลูกค้าที่ตั้งเครื่อง &quot;ลดการเคลื่อนไหว&quot; จะเห็นนิ่ง
+            {t("ค้าง = อยู่ที่เดิมบนจอจนเลื่อนพ้นผืน (เหมาะกับหัวข้อตัวใหญ่ด้านหลัง) · มือถือขยับครึ่งเดียวให้เอง · ลูกค้าที่ตั้งเครื่อง \"ลดการเคลื่อนไหว\" จะเห็นนิ่ง", "Pin = stays in place on screen until the canvas scrolls past (good for big background headings) · mobile moves half as much automatically · customers with \"Reduce motion\" see it still")}
           </p>
         </div>
       </div>
 
       {/* ทุกชนิด */}
       <div>
-        <H>กดแล้วไปที่</H>
+        <H>{t("กดแล้วไปที่", "Link to")}</H>
         <LinkTargetPicker value={str("href")} onChange={(href) => onPatchItem({ href })} ctx={ctx} />
         {str("href") && (
           <label className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-600">
-            <input type="checkbox" className="accent-blue-600" checked={item.newTab === true} onChange={(e) => onPatchItem({ newTab: e.target.checked })} /> เปิดในแท็บใหม่
+            <input type="checkbox" className="accent-blue-600" checked={item.newTab === true} onChange={(e) => onPatchItem({ newTab: e.target.checked })} /> {t("เปิดในแท็บใหม่", "Open in new tab")}
           </label>
         )}
       </div>
-      <Slider label="ความทึบ" value={num("opacity", 100)} min={5} max={100} step={5} unit="%" onChange={(n) => onPatchItem({ opacity: n })} />
-      <Slider label="หมุน" value={num("rotate", 0)} min={-180} max={180} unit="°" onChange={(n) => onPatchItem({ rotate: n })} />
+      <Slider label={t("ความทึบ", "Opacity")} value={num("opacity", 100)} min={5} max={100} step={5} unit="%" onChange={(n) => onPatchItem({ opacity: n })} />
+      <Slider label={t("หมุน", "Rotate")} value={num("rotate", 0)} min={-180} max={180} unit="°" onChange={(n) => onPatchItem({ rotate: n })} />
       <div className="flex flex-wrap gap-1.5">
-        <button className={seg(item.hideMobile === true)} onClick={() => onPatchItem({ hideMobile: !item.hideMobile })}>{item.hideMobile ? "📵 ซ่อนบนมือถือ" : "📲 โชว์บนมือถือ"}</button>
-        <button className={seg(item.locked === true)} onClick={() => onPatchItem({ locked: !item.locked })}>{item.locked ? "🔒 ล็อกอยู่" : "🔓 ไม่ล็อก"}</button>
-        <button className={seg(false)} onClick={() => onAlign("center")}>↔ กึ่งกลางผืน</button>
+        <button className={seg(item.hideMobile === true)} onClick={() => onPatchItem({ hideMobile: !item.hideMobile })}>{item.hideMobile ? t("📵 ซ่อนบนมือถือ", "📵 Hidden on mobile") : t("📲 โชว์บนมือถือ", "📲 Shown on mobile")}</button>
+        <button className={seg(item.locked === true)} onClick={() => onPatchItem({ locked: !item.locked })}>{item.locked ? t("🔒 ล็อกอยู่", "🔒 Locked") : t("🔓 ไม่ล็อก", "🔓 Unlocked")}</button>
+        <button className={seg(false)} onClick={() => onAlign("center")}>{t("↔ กึ่งกลางผืน", "↔ Center on canvas")}</button>
       </div>
 
       <div className="border-t border-slate-200 pt-3">
         <button onClick={() => setAdvanced((v) => !v)} className="text-xs text-blue-600 hover:underline">
-          {advanced ? "▾" : "▸"} ตั้งค่าละเอียด (ตำแหน่งเป๊ะ ๆ · ทุกช่อง)
+          {advanced ? "▾" : "▸"} {t("ตั้งค่าละเอียด (ตำแหน่งเป๊ะ ๆ · ทุกช่อง)", "Advanced settings (exact position · all fields)")}
         </button>
         {advanced && (
           <div className="mt-3">

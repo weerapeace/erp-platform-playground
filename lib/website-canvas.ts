@@ -13,6 +13,8 @@
  * ⚠️ ค่า (v) ทุกตัวต้องตรงกับเว็บร้าน src/lib/canvas.ts — เปลี่ยนชื่อ = เว็บวาดไม่ถูก
  */
 import type { FieldOption } from "@/lib/website-schema";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-canvas-en";
 
 /** ความกว้างผืนตอนออกแบบ (หน่วยของ x/y/w/h ทั้งหมด) */
 export const CANVAS_WIDTH = 1200;
@@ -665,6 +667,7 @@ export function canvasImageKeys(blocks: unknown): string[] {
 }
 
 const s = (v: unknown) => String(v ?? "").trim();
+// ข้อความสรุป/ตรวจด้านล่าง = หน้าแอดมิน ERP เท่านั้น → แปลตอนเรียก (tr) · ป้ายตารางตัวเลือกแปลด้วย labelEn
 
 /** สรุปชิ้น 1 ชิ้น (ต้นไม้ด้านซ้ายของตัวจัดหน้า) */
 export function canvasItemSummary(it: Record<string, unknown>): string {
@@ -672,15 +675,15 @@ export function canvasItemSummary(it: Record<string, unknown>): string {
   const icon = CANVAS_KIND_ICON[kind] ?? "🧩";
   // 🌀 ขยับตามการเลื่อน · 🔍 กดแล้วขยาย — ต่อท้ายให้เห็นในต้นไม้ว่าชิ้นไหนมีลูกเล่น
   const lock = `${canvasHasSceneFx(it) ? " 🎬" : ""}${canvasHasScrollFx(it) ? " 🌀" : ""}${(kind === "image" || kind === "video") && s(it.expand) ? " 🔍" : ""}${it.locked ? " 🔒" : ""}`;
-  if (kind === "text") return `${icon} ${s(it.text).split("\n")[0].slice(0, 40) || "(ข้อความว่าง)"}${lock}`;
-  if (kind === "button") return `${icon} ${s(it.label) || "(ปุ่มไม่มีข้อความ)"}${s(it.href) ? ` → ${s(it.href)}` : ""}${lock}`;
+  if (kind === "text") return `${icon} ${s(it.text).split("\n")[0].slice(0, 40) || tr("(ข้อความว่าง)", "(empty text)")}${lock}`;
+  if (kind === "button") return `${icon} ${s(it.label) || tr("(ปุ่มไม่มีข้อความ)", "(button without text)")}${s(it.href) ? ` → ${s(it.href)}` : ""}${lock}`;
   const shop = Array.isArray(it.products) && it.products.length ? ` · 🛍 ${it.products.length}` : "";
-  if (kind === "image") return `${icon} ${s(it.alt) || (it.imageKey ? "รูป" : "(ยังไม่ใส่รูป)")}${shop}${lock}`;
-  if (kind === "video") return `${icon} ${it.videoKey ? "วิดีโอ" : "(ยังไม่ใส่คลิป)"}${shop}${lock}`;
+  if (kind === "image") return `${icon} ${s(it.alt) || (it.imageKey ? tr("รูป", "Image") : tr("(ยังไม่ใส่รูป)", "(no image yet)"))}${shop}${lock}`;
+  if (kind === "video") return `${icon} ${it.videoKey ? tr("วิดีโอ", "Video") : tr("(ยังไม่ใส่คลิป)", "(no clip yet)")}${shop}${lock}`;
   // 🎨 ลายของร้าน (SVG ที่อัป) — ชื่อไฟล์
   const pat = it.pattern && typeof it.pattern === "object" ? (it.pattern as { name?: unknown }) : null;
-  if (pat) return `🎨 ${s(pat.name) || "ลายของร้าน"}${lock}`;
-  return `${icon} ${CANVAS_SHAPE_LABEL[s(it.shape)] ?? "ของตกแต่ง"}${lock}`;
+  if (pat) return `🎨 ${s(pat.name) || tr("ลายของร้าน", "Shop pattern")}${lock}`;
+  return `${icon} ${CANVAS_SHAPE_LABEL[s(it.shape)] ? labelEn(CANVAS_SHAPE_LABEL[s(it.shape)]) : tr("ของตกแต่ง", "Decoration")}${lock}`;
 }
 
 /** ตรวจก่อนเผยแพร่ — ข้อความภาษาคน */
@@ -688,38 +691,38 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
   const out: { level: "error" | "warning"; message: string }[] = [];
   const items = Array.isArray(b.items) ? (b.items as Record<string, unknown>[]).filter((it) => it.enabled !== false) : [];
   const height = Number(b.height) || 0;
-  if (!items.length) out.push({ level: "warning", message: `${label}: ยังไม่มีชิ้นส่วนบนผืน` });
+  if (!items.length) out.push({ level: "warning", message: `${label}: ${tr("ยังไม่มีชิ้นส่วนบนผืน", "no items on the canvas yet")}` });
   // 🎬 ฉากค้าง: ตั้งท่าไว้แต่ไม่ได้เปิด · เปิดแล้วไม่มีท่า · มือถือแบบเรียงอัตโนมัติไม่ค้าง
   const sceneItems = items.filter(canvasHasSceneFx);
-  if (b.scene !== true && sceneItems.length) out.push({ level: "warning", message: `${label}: ตั้งท่าในฉากค้างไว้ ${sceneItems.length} ชิ้น แต่ผืนยังไม่ได้เปิด "🎬 ฉากค้าง" — ท่าเหล่านี้ยังไม่ทำงาน` });
-  if (b.scene === true && !sceneItems.length) out.push({ level: "warning", message: `${label}: เปิดฉากค้างแล้วแต่ยังไม่มีชิ้นไหนมีท่า — ผืนจะค้างเฉย ๆ (กด "จัดฉากให้ทั้งผืน" เป็นจุดเริ่มได้)` });
-  if (b.scene === true && b.mobileMode !== "custom") out.push({ level: "warning", message: `${label}: มือถือแบบเรียงอัตโนมัติจะไม่ค้าง (ชิ้นโชว์ท่าสุดท้าย) — อยากให้ค้างบนมือถือด้วย ให้เลือก "มือถือ: จัดเอง"` });
+  if (b.scene !== true && sceneItems.length) out.push({ level: "warning", message: `${label}: ${tr(`ตั้งท่าในฉากค้างไว้ ${sceneItems.length} ชิ้น แต่ผืนยังไม่ได้เปิด "🎬 ฉากค้าง" — ท่าเหล่านี้ยังไม่ทำงาน`, `${sceneItems.length} items have pinned-scene moves but the canvas hasn't turned on "🎬 Pinned scene" — these moves don't run yet`)}` });
+  if (b.scene === true && !sceneItems.length) out.push({ level: "warning", message: `${label}: ${tr('เปิดฉากค้างแล้วแต่ยังไม่มีชิ้นไหนมีท่า — ผืนจะค้างเฉย ๆ (กด "จัดฉากให้ทั้งผืน" เป็นจุดเริ่มได้)', 'Pinned scene is on but no item has a move — the canvas will just pin (use "Auto-stage the whole canvas" as a start)')}` });
+  if (b.scene === true && b.mobileMode !== "custom") out.push({ level: "warning", message: `${label}: ${tr('มือถือแบบเรียงอัตโนมัติจะไม่ค้าง (ชิ้นโชว์ท่าสุดท้าย) — อยากให้ค้างบนมือถือด้วย ให้เลือก "มือถือ: จัดเอง"', 'Auto-stacked mobile won\'t pin (items show their final pose) — to pin on mobile too, choose "Mobile: Arrange myself"')}` });
   items.forEach((it, i) => {
-    const name = `${label} ชิ้นที่ ${i + 1} (${canvasItemSummary(it)})`;
+    const name = `${label} ${tr("ชิ้นที่", "item")} ${i + 1} (${canvasItemSummary(it)})`;
     const kind = s(it.kind);
-    if (kind === "image" && !it.imageKey) out.push({ level: "warning", message: `${name}: ยังไม่ได้ใส่รูป` });
-    if (kind === "image" && it.imageKey && !s(it.alt)) out.push({ level: "warning", message: `${name}: รูปยังไม่มีคำบรรยาย (Alt) — มีผลกับ SEO` });
-    if (kind === "video" && !it.videoKey) out.push({ level: "warning", message: `${name}: ยังไม่ได้ใส่คลิป` });
-    if (kind === "button" && !s(it.label)) out.push({ level: "error", message: `${name}: ปุ่มยังไม่มีข้อความ` });
-    if (kind === "button" && !s(it.href)) out.push({ level: "warning", message: `${name}: ปุ่มยังไม่ได้ตั้ง "กดแล้วไปที่"` });
-    if (kind === "text" && !s(it.text)) out.push({ level: "warning", message: `${name}: ข้อความว่าง` });
+    if (kind === "image" && !it.imageKey) out.push({ level: "warning", message: `${name}: ${tr("ยังไม่ได้ใส่รูป", "no image yet")}` });
+    if (kind === "image" && it.imageKey && !s(it.alt)) out.push({ level: "warning", message: `${name}: ${tr("รูปยังไม่มีคำบรรยาย (Alt) — มีผลกับ SEO", "image has no caption (Alt) — affects SEO")}` });
+    if (kind === "video" && !it.videoKey) out.push({ level: "warning", message: `${name}: ${tr("ยังไม่ได้ใส่คลิป", "no clip yet")}` });
+    if (kind === "button" && !s(it.label)) out.push({ level: "error", message: `${name}: ${tr("ปุ่มยังไม่มีข้อความ", "button has no text")}` });
+    if (kind === "button" && !s(it.href)) out.push({ level: "warning", message: `${name}: ${tr('ปุ่มยังไม่ได้ตั้ง "กดแล้วไปที่"', 'button has no "Link to" set')}` });
+    if (kind === "text" && !s(it.text)) out.push({ level: "warning", message: `${name}: ${tr("ข้อความว่าง", "empty text")}` });
     // 🔍 กดแล้วขยาย: เต็มจอต้องมีหน้าปลายทางในเว็บ · ครึ่งจอต้องมีอะไรให้ดู
     const media = kind === "image" || kind === "video";
     const href = s(it.href);
     if (media && it.expand === "full" && (!href.startsWith("/") || it.newTab === true))
-      out.push({ level: "warning", message: `${name}: "ขยายเต็มจอแล้วไปหน้าที่ลิงก์ไว้" ต้องตั้ง "กดแล้วไปที่" เป็นหน้าในเว็บ (ไม่เปิดแท็บใหม่) — ตอนนี้กดแล้วจะไม่ขยาย` });
+      out.push({ level: "warning", message: `${name}: ${tr('"ขยายเต็มจอแล้วไปหน้าที่ลิงก์ไว้" ต้องตั้ง "กดแล้วไปที่" เป็นหน้าในเว็บ (ไม่เปิดแท็บใหม่) — ตอนนี้กดแล้วจะไม่ขยาย', '"Full screen → go to link" needs "Link to" set to a page on this site (not a new tab) — right now clicking won\'t expand')}` });
     if (media && it.expand === "story" && !s(it.expTitle) && !s(it.expText) && !(Array.isArray(it.products) && it.products.length) && !href)
-      out.push({ level: "warning", message: `${name}: "ขยายครึ่งจอ + เรื่องราว" ยังไม่มีหัวข้อ/ข้อความ/สินค้า — ฝั่งขวาจะว่าง` });
+      out.push({ level: "warning", message: `${name}: ${tr('"ขยายครึ่งจอ + เรื่องราว" ยังไม่มีหัวข้อ/ข้อความ/สินค้า — ฝั่งขวาจะว่าง', '"Half screen + story" has no title/text/products — the right side will be empty')}` });
     if (b.scene === true && kind === "video" && it.scIn === "scrub") {
       const ready = s(it.scrubKey) && Number(it.scrubCount) > 1;
-      if (!ready) out.push({ level: "warning", message: `${name}: คลิปเล่นตามการเลื่อนยังไม่ได้ "เตรียมให้เลื่อนลื่น" — บนมือถือบางรุ่นจะกระตุก` });
-      else if (s(it.scrubFor) && s(it.scrubFor) !== s(it.videoKey)) out.push({ level: "warning", message: `${name}: เปลี่ยนคลิปหลังเตรียมเฟรมแล้ว — กด "เตรียมใหม่" (ตอนนี้เว็บเลื่อนเวลาคลิปตรง ๆ แทน)` });
+      if (!ready) out.push({ level: "warning", message: `${name}: ${tr('คลิปเล่นตามการเลื่อนยังไม่ได้ "เตรียมให้เลื่อนลื่น" — บนมือถือบางรุ่นจะกระตุก', 'scroll-played clip isn\'t "prepared for smooth scrolling" — it will stutter on some phones')}` });
+      else if (s(it.scrubFor) && s(it.scrubFor) !== s(it.videoKey)) out.push({ level: "warning", message: `${name}: ${tr('เปลี่ยนคลิปหลังเตรียมเฟรมแล้ว — กด "เตรียมใหม่" (ตอนนี้เว็บเลื่อนเวลาคลิปตรง ๆ แทน)', 'clip changed after frames were prepared — click "Prepare again" (the site scrubs the clip time directly for now)')}` });
     }
     const x = Number(it.x) || 0;
     const y = Number(it.y) || 0;
     const w = Number(it.w) || 0;
     if ((!it.bleed && (x >= CANVAS_WIDTH || x + w <= 0)) || (height && y >= height))
-      out.push({ level: "warning", message: `${name}: อยู่นอกผืนทั้งชิ้น — ลูกค้าจะมองไม่เห็น` });
+      out.push({ level: "warning", message: `${name}: ${tr("อยู่นอกผืนทั้งชิ้น — ลูกค้าจะมองไม่เห็น", "entirely outside the canvas — customers won't see it")}` });
     // มือถือแบบจัดเอง: ชิ้นที่ยังไม่ได้จัด/หลุดผืนมือถือ
     if (b.mobileMode === "custom" && !it.hideMobile) {
       const mw = Number(it.mw) || 0;
@@ -727,7 +730,7 @@ export function validateCanvas(b: Record<string, unknown>, label: string): { lev
       const my = Number(it.my) || 0;
       const mh = Number(b.mobileHeight) || 0;
       if (mw > 0 && ((!it.bleed && (mx >= CANVAS_MOBILE_WIDTH || mx + mw <= 0)) || (mh && my >= mh)))
-        out.push({ level: "warning", message: `${name}: อยู่นอกผืนมือถือ — ลูกค้าที่ใช้มือถือจะมองไม่เห็น` });
+        out.push({ level: "warning", message: `${name}: ${tr("อยู่นอกผืนมือถือ — ลูกค้าที่ใช้มือถือจะมองไม่เห็น", "outside the mobile canvas — mobile customers won't see it")}` });
     }
   });
   return out;
@@ -746,9 +749,9 @@ export function validateCanvasFolders(b: Record<string, unknown>, label: string)
   const folderOf = (it: Record<string, unknown>) => Math.max(1, Number(it.folder) || 1);
   const out: { level: "warning" | "error"; message: string }[] = [];
   const empty = Array.from({ length: count }, (_, i) => i + 1).filter((n) => !items.some((it) => folderOf(it) === n));
-  if (empty.length) out.push({ level: "warning", message: `${label}: แฟ้ม ${empty.join(", ")} ยังว่าง (เปิดแฟ้มนั้นในพรีวิวแล้วเพิ่มรูป/ข้อความ)` });
+  if (empty.length) out.push({ level: "warning", message: `${label}: ${tr(`แฟ้ม ${empty.join(", ")} ยังว่าง (เปิดแฟ้มนั้นในพรีวิวแล้วเพิ่มรูป/ข้อความ)`, `folder ${empty.join(", ")} is empty (open it in the preview and add images/text)`)}` });
   const lost = items.filter((it) => folderOf(it) > count).length;
-  if (lost) out.push({ level: "warning", message: `${label}: ${lost} ชิ้นอยู่แฟ้มที่เกินจำนวนแฟ้ม (ไม่ขึ้นเว็บ) — เพิ่มจำนวนแฟ้ม หรือย้ายชิ้นไปแฟ้มอื่น` });
+  if (lost) out.push({ level: "warning", message: `${label}: ${tr(`${lost} ชิ้นอยู่แฟ้มที่เกินจำนวนแฟ้ม (ไม่ขึ้นเว็บ) — เพิ่มจำนวนแฟ้ม หรือย้ายชิ้นไปแฟ้มอื่น`, `${lost} items are in folders beyond the folder count (not shown on the site) — add folders or move the items`)}` });
   return out;
 }
 

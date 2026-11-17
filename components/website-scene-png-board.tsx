@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { loadStorefrontProducts } from "@/lib/website-data";
 import { PngSlot } from "@/components/png-slot";
+import { useT } from "@/components/i18n";
 import { SCENE_TAB_DEFAULTS, sceneTabCandidates, sceneTabCount, scenePngOf, sceneTabSource, type SceneProductLike, type SceneTabN, type SceneTabsLike } from "@/lib/website-scene";
 
 type Item = SceneProductLike & { id: string; code: string; name: string; images?: string[] };
@@ -38,6 +39,7 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
   /** รูปที่เพิ่งใส่/เอาออกในแผงนี้ (id รุ่น → key | null) — ทับค่าจาก API */
   const [over, setOver] = useState<Record<string, string | null>>({});
   const [rev, setRev] = useState(0);
+  const tx = useT();
   useEffect(() => {
     let alive = true;
     loadProducts(shopSlug, rev > 0).then((l) => alive && setItems(l));
@@ -68,7 +70,7 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
       body: JSON.stringify({ parentId: p.id, key }),
     });
     const j = await res.json().catch(() => ({}));
-    if (!res.ok || j.error) return j.error || `บันทึกไม่สำเร็จ (${res.status})`;
+    if (!res.ok || j.error) return j.error || tx(`บันทึกไม่สำเร็จ (${res.status})`, `Save failed (${res.status})`);
     setOver((o) => ({ ...o, [p.id]: key }));
     onSaved?.();
     return null;
@@ -77,8 +79,8 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
   return (
     <details open={missing > 0 || undefined} className="rounded-xl border border-indigo-200 bg-indigo-50/40">
       <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-xs font-semibold text-indigo-900">
-        <span>🖼 รูป PNG ของสินค้า</span>
-        {items && <span className={`rounded px-1.5 text-[10px] font-medium ${missing ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700"}`}>{missing ? `ขาด ${missing} รูป` : "ครบ"}</span>}
+        <span>{tx("🖼 รูป PNG ของสินค้า", "🖼 Product PNG images")}</span>
+        {items && <span className={`rounded px-1.5 text-[10px] font-medium ${missing ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700"}`}>{missing ? tx(`ขาด ${missing} รูป`, `${missing} missing`) : tx("ครบ", "Complete")}</span>}
         <button
           type="button"
           onClick={(e) => {
@@ -87,16 +89,16 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
             setRev((r) => r + 1);
           }}
           className="ml-auto rounded px-1.5 text-[11px] font-normal text-indigo-700 hover:bg-indigo-100"
-          title="โหลดรายการสินค้าใหม่"
+          title={tx("โหลดรายการสินค้าใหม่", "Reload product list")}
         >
           ↻
         </button>
       </summary>
       <div className="space-y-4 px-3 pb-3">
         <p className="text-[11px] leading-snug text-slate-600">
-          {pngOnly ? "สินค้าที่ไม่มีรูป PNG จะไม่โชว์ในแท็บ" : "ตั้ง \"รูปเดิมทุกตัว\" อยู่ — ตอนนี้ยังไม่ได้ใช้รูป PNG"} · ใส่ตรงนี้ = บันทึกลง &ldquo;รูปตัดพื้น (PNG)&rdquo; ของ Parent SKU (ใช้ได้ทุก Section/ทุกร้าน)
+          {pngOnly ? tx("สินค้าที่ไม่มีรูป PNG จะไม่โชว์ในแท็บ", "Products without a PNG image are hidden from the tab") : tx("ตั้ง \"รูปเดิมทุกตัว\" อยู่ — ตอนนี้ยังไม่ได้ใช้รูป PNG", "Set to \"Original images for all\" — PNG images are not used right now")} · {tx("ใส่ตรงนี้ = บันทึกลง “รูปตัดพื้น (PNG)” ของ Parent SKU (ใช้ได้ทุก Section/ทุกร้าน)", "Adding here = saves to the Parent SKU's “Cutout image (PNG)” (used in every section/shop)")}
         </p>
-        {!items && <p className="text-xs text-slate-400">กำลังโหลดสินค้า…</p>}
+        {!items && <p className="text-xs text-slate-400">{tx("กำลังโหลดสินค้า…", "Loading products…")}</p>}
         {items &&
           tabs.map((t) => {
             const have = t.list.filter((p) => pngKey(p)).length;
@@ -104,11 +106,11 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
               <div key={t.n}>
                 <div className="mb-1.5 flex items-center gap-2 text-xs">
                   <span className="font-semibold text-slate-700">
-                    {tabs.length > 1 ? `แท็บ ${t.n} · ` : ""}
+                    {tabs.length > 1 ? tx(`แท็บ ${t.n} · `, `Tab ${t.n} · `) : ""}
                     {t.label}
                   </span>
                   <span className="text-slate-500">
-                    มี PNG {have}/{t.list.length}
+                    {tx(`มี PNG ${have}/${t.list.length}`, `PNG ${have}/${t.list.length}`)}
                   </span>
                 </div>
                 {t.list.length ? (
@@ -125,7 +127,7 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
                           caption={
                             <div className={`text-[10px] leading-tight ${k ? "text-slate-700" : "text-slate-400"}`} title={p.name}>
                               <div className="font-mono">{p.code}</div>
-                              <div className="truncate">{k ? p.name : "ไม่โชว์ · ยังไม่มี PNG"}</div>
+                              <div className="truncate">{k ? p.name : tx("ไม่โชว์ · ยังไม่มี PNG", "Hidden · no PNG yet")}</div>
                             </div>
                           }
                         />
@@ -133,7 +135,7 @@ export function ScenePngBoard({ block, shopSlug, onSaved }: { block: SceneTabsLi
                     })}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-slate-400">{t.pick ? "ยังไม่ได้เลือกสินค้าของแท็บนี้" : "ไม่มีสินค้า"}</p>
+                  <p className="text-[11px] text-slate-400">{t.pick ? tx("ยังไม่ได้เลือกสินค้าของแท็บนี้", "No products picked for this tab yet") : tx("ไม่มีสินค้า", "No products")}</p>
                 )}
               </div>
             );

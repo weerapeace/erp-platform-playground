@@ -72,9 +72,12 @@ import {
 import { webForm } from "@/lib/website-form-styles";
 import { FontSelect } from "@/components/font-select";
 import { DEFAULT_FONT_NAMES, canvasFontNames, canvasFontOptions, fontFamilyOf } from "@/components/website-text-pickers";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-schema-en";
 
-/** 🔤 ฟอนต์ลิงก์/หัวข้อในแผงเมนู (ชุดเดียวกับ CANVAS_FONTS · auto = ตามเมนู) */
-const LINK_FONT_OPTIONS = canvasFontOptions(DEFAULT_FONT_NAMES, "ตามเมนู");
+/** 🔤 ฟอนต์ลิงก์/หัวข้อในแผงเมนู (ชุดเดียวกับ CANVAS_FONTS · auto = ตามเมนู) — เรียกตอนวาด (ป้าย 2 ภาษา) */
+const linkFontOptions = () => canvasFontOptions(DEFAULT_FONT_NAMES, tr("ตามเมนู", "Follow menu")).map((o) => ({ ...o, label: labelEn(o.label) }));
 const LINK_FONT_NAMES = canvasFontNames(DEFAULT_FONT_NAMES);
 const fontFamilyCss = (f: string) => `"${fontFamilyOf(f, DEFAULT_FONT_NAMES)}", sans-serif`;
 
@@ -100,16 +103,17 @@ const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i)
 /* ───────── ช่องลิงก์แบบย่อ: โชว์ปลายทาง · กด = เปิดตัวเลือกลิงก์กลาง ───────── */
 function LinkField({ value, onChange, ctx }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext }) {
   const [open, setOpen] = useState(false);
+  const tx = useT();
   return (
     <div className="min-w-0">
-      <button type="button" onClick={() => setOpen((v) => !v)} className={`${mini} w-full text-left truncate ${value ? "text-blue-700" : "text-slate-400"}`} title={value || "ยังไม่ได้ใส่ลิงก์"}>
-        🔗 {value || "ใส่ลิงก์…"}
+      <button type="button" onClick={() => setOpen((v) => !v)} className={`${mini} w-full text-left truncate ${value ? "text-blue-700" : "text-slate-400"}`} title={value || tx("ยังไม่ได้ใส่ลิงก์", "No link yet")}>
+        🔗 {value || tx("ใส่ลิงก์…", "Add link…")}
       </button>
       {open && (
         <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
           <LinkTargetPicker value={value} onChange={onChange} ctx={ctx} size="sm" />
           <button type="button" onClick={() => setOpen(false)} className="mt-1 text-[11px] text-blue-600 hover:underline">
-            เสร็จ
+            {tx("เสร็จ", "Done")}
           </button>
         </div>
       )}
@@ -129,11 +133,12 @@ type IssueSets = { categories: Set<string>; products: Set<string>; pages: Set<st
 const IssueCtx = createContext<IssueSets | null>(null);
 function IssueBadge({ href }: { href: string }) {
   const sets = useContext(IssueCtx);
+  const tx = useT();
   const msg = sets ? megaLinkIssue(href, sets) : null;
   if (!msg || msg === "ยังไม่ได้ใส่ลิงก์") return null;
   return (
-    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="ลิงก์นี้อาจพา ลูกค้าไปหน้าที่ไม่มีแล้ว — แก้ลิงก์ใหม่">
-      ⚠️ {msg}
+    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title={tx("ลิงก์นี้อาจพา ลูกค้าไปหน้าที่ไม่มีแล้ว — แก้ลิงก์ใหม่", "This link may take customers to a page that no longer exists — fix the link")}>
+      ⚠️ {labelEn(msg)}
     </span>
   );
 }
@@ -160,18 +165,19 @@ function panelIssues(p: MegaPanel, sets: IssueSets): number {
 /* ───────── วัน-เวลาแสดง (เวลาไทย) ───────── */
 export function ShowWindowFields({ from, until, onChange }: { from: string; until: string; onChange: (p: { showFrom?: string; showUntil?: string }) => void }) {
   const live = inShowWindow(from, until);
+  const tx = useT();
   // ค่าเก่าที่ยังไม่มีช่องนี้ = ว่าง
   const dt = (v: string | undefined) => (!v ? "" : v.length === 10 ? `${v}T00:00` : v);
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-      <span>⏰ แสดงช่วง</span>
-      <input type="datetime-local" className={`${mini} w-[11.5rem]`} value={dt(from)} onChange={(e) => onChange({ showFrom: e.target.value })} aria-label="เริ่มแสดง" />
-      <span>ถึง</span>
-      <input type="datetime-local" className={`${mini} w-[11.5rem]`} value={dt(until)} onChange={(e) => onChange({ showUntil: e.target.value })} aria-label="หยุดแสดง" />
+      <span>{tx("⏰ แสดงช่วง", "⏰ Show from")}</span>
+      <input type="datetime-local" className={`${mini} w-[11.5rem]`} value={dt(from)} onChange={(e) => onChange({ showFrom: e.target.value })} aria-label={tx("เริ่มแสดง", "Start showing")} />
+      <span>{tx("ถึง", "to")}</span>
+      <input type="datetime-local" className={`${mini} w-[11.5rem]`} value={dt(until)} onChange={(e) => onChange({ showUntil: e.target.value })} aria-label={tx("หยุดแสดง", "Stop showing")} />
       {(from || until) && (
         <>
-          <span className={`px-1.5 py-0.5 rounded ${live ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{live ? "กำลังแสดง" : "ยังไม่แสดง/หมดเวลา"}</span>
-          <button type="button" className="text-slate-400 hover:text-rose-600" onClick={() => onChange({ showFrom: "", showUntil: "" })} title="ล้าง = แสดงตลอด">
+          <span className={`px-1.5 py-0.5 rounded ${live ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{live ? tx("กำลังแสดง", "Showing now") : tx("ยังไม่แสดง/หมดเวลา", "Not yet / expired")}</span>
+          <button type="button" className="text-slate-400 hover:text-rose-600" onClick={() => onChange({ showFrom: "", showUntil: "" })} title={tx("ล้าง = แสดงตลอด", "Clear = always show")}>
             ✕
           </button>
         </>
@@ -183,6 +189,7 @@ export function ShowWindowFields({ from, until, onChange }: { from: string; unti
 /* ───────── รายการลิงก์ ───────── */
 function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, plainOnly = false, cols = 1 }: { links: MegaLink[]; style: MegaLinkStyle; onChange: (links: MegaLink[]) => void; ctx: MegaEditorCtx; max?: number; plainOnly?: boolean; /** แบ่งคอลัมน์ย่อย (≥2 = แต่ละลิงก์เลือกคอลัมน์ได้) */ cols?: number }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(links, from, to)));
+  const tx = useT();
   const [moreId, setMoreId] = useState<string | null>(null);
   const set = (id: string, p: Partial<MegaLink>) => onChange(links.map((l) => (l.id === id ? { ...l, ...p } : l)));
   const st = plainOnly ? "plain" : style;
@@ -244,18 +251,18 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
             className={`${mini} w-[5.5rem] shrink-0 ${l.col ? "border-blue-300 text-blue-700" : "text-slate-500"}`}
             value={l.col > cols ? cols : l.col}
             onChange={(e) => set(l.id, { col: Number(e.target.value) })}
-            title="แถวนี้อยู่คอลัมน์ไหน (ตอนแบ่งคอลัมน์ย่อย)"
+            title={tx("แถวนี้อยู่คอลัมน์ไหน (ตอนแบ่งคอลัมน์ย่อย)", "Which column this row is in (when split into sub-columns)")}
           >
-            <option value={0}>คอลัมน์: อัตโนมัติ</option>
+            <option value={0}>{tx("คอลัมน์: อัตโนมัติ", "Column: auto")}</option>
             {Array.from({ length: cols }, (_, c) => (
               <option key={c} value={c + 1}>
-                คอลัมน์ {c + 1}
+                {tx("คอลัมน์", "Column")} {c + 1}
               </option>
             ))}
           </select>
         );
         const delBtn = (
-          <button type="button" onClick={() => onChange(links.filter((x) => x.id !== l.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">
+          <button type="button" onClick={() => onChange(links.filter((x) => x.id !== l.id))} className="text-slate-300 hover:text-rose-600 px-1" title={tx("ลบ", "Delete")}>
             ✕
           </button>
         );
@@ -265,7 +272,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
             <div key={l.id} {...drag.rowProps(i)} data-mega-sep={kind} className={`rounded-md border border-dashed border-slate-300 bg-slate-50/60 px-1.5 py-1 ${drag.rowCls(i)}`}>
               <div className="flex items-center gap-1">
                 <DragHandle {...drag.handleProps(i)} />
-                <span className="shrink-0 text-[11px] text-slate-600">{kind === "divider" ? "➖ เส้นคั่น" : "↕ เว้นบรรทัด"}</span>
+                <span className="shrink-0 text-[11px] text-slate-600">{kind === "divider" ? tx("➖ เส้นคั่น", "➖ Divider") : tx("↕ เว้นบรรทัด", "↕ Blank line")}</span>
                 <span className="flex-1 min-w-0 px-2" aria-hidden>
                   {kind === "divider" ? <span className="block border-t border-slate-400" /> : <span className="block h-2" />}
                 </span>
@@ -281,8 +288,8 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
             <div className="flex items-center gap-1">
               <DragHandle {...drag.handleProps(i)} />
               {heading && (
-                <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700" title={l.href.trim() ? "หัวข้อ — ลูกค้ากดแล้วไปลิงก์ที่ตั้งไว้" : "หัวข้อ — ตัวหนังสือหัวกลุ่ม ยังไม่ใส่ลิงก์ = ลูกค้ากดไม่ได้"}>
-                  🔤 หัวข้อ
+                <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700" title={l.href.trim() ? tx("หัวข้อ — ลูกค้ากดแล้วไปลิงก์ที่ตั้งไว้", "Heading — customers tap to go to the set link") : tx("หัวข้อ — ตัวหนังสือหัวกลุ่ม ยังไม่ใส่ลิงก์ = ลูกค้ากดไม่ได้", "Heading — group heading text, no link = not tappable")}>
+                  {tx("🔤 หัวข้อ", "🔤 Heading")}
                 </span>
               )}
               {(() => {
@@ -296,19 +303,19 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                       obj={l}
                       k="label"
                       maxLength={60}
-                      placeholder={c ? `${c.label}` : heading ? "ข้อความหัวข้อ" : "ชื่อลิงก์"}
+                      placeholder={c ? `${c.label}` : heading ? tx("ข้อความหัวข้อ", "Heading text") : tx("ชื่อลิงก์", "Link name")}
                       // ชื่อตามหมวด (ไม่ได้ตั้งเอง) → โหมด EN เห็นชื่อหมวดภาษาอังกฤษเป็นตัวจาง
                       enPlaceholder={c ? String((c as { label_en?: string }).label_en || c.label) : undefined}
-                      title={auto ? "ชื่อตามหมวด — เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · พิมพ์ทับ = ตั้งชื่อเอง" : undefined}
+                      title={auto ? tx("ชื่อตามหมวด — เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · พิมพ์ทับ = ตั้งชื่อเอง", "Name follows category — rename the category and the menu follows · type over = custom name") : undefined}
                       onPatch={(p) => set(l.id, p)}
                     />
                     {auto ? (
-                      <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700" title="ชื่อตามหมวด (ไทย/อังกฤษ) — เปลี่ยนชื่อหมวดในแท็บ 📂 หมวดหมู่ แล้วเมนูเปลี่ยนตามเอง">
-                        🔗 ตามหมวด
+                      <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700" title={tx("ชื่อตามหมวด (ไทย/อังกฤษ) — เปลี่ยนชื่อหมวดในแท็บ 📂 หมวดหมู่ แล้วเมนูเปลี่ยนตามเอง", "Name follows category (Thai/English) — rename the category in the 📂 Categories tab and the menu follows")}>
+                        {tx("🔗 ตามหมวด", "🔗 From category")}
                       </span>
                     ) : (
                       c && (
-                        <button type="button" onClick={() => followCategory(new Set([l.id]))} className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:text-emerald-700" title={`กลับไปใช้ชื่อหมวด (${c.label})`}>
+                        <button type="button" onClick={() => followCategory(new Set([l.id]))} className="shrink-0 rounded px-1 text-[11px] text-slate-400 hover:text-emerald-700" title={tx(`กลับไปใช้ชื่อหมวด (${c.label})`, `Use category name again (${c.label})`)}>
                           ↺
                         </button>
                       )
@@ -319,14 +326,14 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
               {(!heading || !!l.href.trim()) && <IssueBadge href={l.href} />}
               {/* ลิงก์ที่ไม่ใส่ปลายทาง (เคยใช้ทำหัวข้อ เช่น NEW ARRIVAL ตัวหนา) → เปลี่ยนเป็นหัวข้อจริงได้คลิกเดียว */}
               {!heading && !l.href.trim() && !!l.label.trim() && (
-                <button type="button" onClick={() => set(l.id, { kind: "heading", href: "" })} className="shrink-0 rounded border border-violet-200 px-1.5 h-7 text-[10px] text-violet-700 hover:bg-violet-50" title="ลิงก์นี้ยังไม่มีปลายทาง — เปลี่ยนเป็นหัวข้อ (ตัวหนังสือ ลูกค้ากดไม่ได้)" data-to-heading>
-                  → 🔤 หัวข้อ
+                <button type="button" onClick={() => set(l.id, { kind: "heading", href: "" })} className="shrink-0 rounded border border-violet-200 px-1.5 h-7 text-[10px] text-violet-700 hover:bg-violet-50" title={tx("ลิงก์นี้ยังไม่มีปลายทาง — เปลี่ยนเป็นหัวข้อ (ตัวหนังสือ ลูกค้ากดไม่ได้)", "This link has no destination — turn it into a heading (text, not tappable)")} data-to-heading>
+                  {tx("→ 🔤 หัวข้อ", "→ 🔤 Heading")}
                 </button>
               )}
               {/* แบ่งคอลัมน์ย่อย: เลือกว่าลิงก์นี้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า (megaSplitColumns) */}
               {colPick}
               {/* 🔗 ลิงก์ (หัวข้อ: ไม่ใส่ = กดไม่ได้) — ตัวเลือกลิงก์กลางตัวเดียวกับลิงก์อื่น */}
-              <div className="w-36 shrink-0" title={heading ? "ลิงก์ของหัวข้อ — ไม่ใส่ = ตัวหนังสือกดไม่ได้" : undefined}>
+              <div className="w-36 shrink-0" title={heading ? tx("ลิงก์ของหัวข้อ — ไม่ใส่ = ตัวหนังสือกดไม่ได้", "Heading link — none = text not tappable") : undefined}>
                 <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
               </div>
               {!plainOnly && (
@@ -334,7 +341,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                   type="button"
                   onClick={() => setMoreId(more ? null : l.id)}
                   className={`h-7 px-1.5 rounded-md border text-[11px] ${more ? "border-blue-500 text-blue-700 bg-blue-50" : extras ? "border-blue-200 text-blue-700" : "border-slate-200 text-slate-500"}`}
-                  title="รูปตอนชี้ · ตัวหนา/สี · ✨ เอฟเฟกต์/ฟอนต์/ลูกศร/เส้นใต้ · ตั้งเวลาแสดง"
+                  title={tx("รูปตอนชี้ · ตัวหนา/สี · ✨ เอฟเฟกต์/ฟอนต์/ลูกศร/เส้นใต้ · ตั้งเวลาแสดง", "Hover image · bold/color · ✨ effect/font/arrow/underline · show schedule")}
                 >
                   ⋯{extras ? ` ${extras}` : ""}
                 </button>
@@ -351,11 +358,11 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                 )}
                 {st === "thumb" && (
                   <span className="w-40">
-                    <ImageUploadField label="รูปเล็ก" value={l.imageKey} onChange={(k) => set(l.id, { imageKey: k })} height={36} />
+                    <ImageUploadField label={tx("รูปเล็ก", "Small image")} value={l.imageKey} onChange={(k) => set(l.id, { imageKey: k })} height={36} />
                   </span>
                 )}
-                <LangInput className={`${mini} flex-1 min-w-[8rem]`} obj={l} k="desc" maxLength={120} placeholder="คำอธิบายสั้น (ไม่ใส่ก็ได้)" onPatch={(p) => set(l.id, p)} />
-                <LangInput className={`${mini} w-20`} obj={l} k="badge" maxLength={20} placeholder="ป้าย" title="ป้ายเล็ก เช่น ใหม่ / ลด" onPatch={(p) => set(l.id, p)} />
+                <LangInput className={`${mini} flex-1 min-w-[8rem]`} obj={l} k="desc" maxLength={120} placeholder={tx("คำอธิบายสั้น (ไม่ใส่ก็ได้)", "Short description (optional)")} onPatch={(p) => set(l.id, p)} />
+                <LangInput className={`${mini} w-20`} obj={l} k="badge" maxLength={20} placeholder={tx("ป้าย", "Badge")} title={tx("ป้ายเล็ก เช่น ใหม่ / ลด", "Small badge, e.g. New / Sale")} onPatch={(p) => set(l.id, p)} />
               </div>
             )}
             {more && (
@@ -363,21 +370,21 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                 <div className="flex flex-wrap items-start gap-3">
                   {!heading && (
                     <span className="w-44">
-                      <ImageUploadField label="🖼 รูปตอนชี้ (เปลี่ยนรูปเด่นในแผง)" value={l.hoverImageKey} onChange={(k) => set(l.id, { hoverImageKey: k })} height={44} />
+                      <ImageUploadField label={tx("🖼 รูปตอนชี้ (เปลี่ยนรูปเด่นในแผง)", "🖼 Hover image (changes the featured image in the panel)")} value={l.hoverImageKey} onChange={(k) => set(l.id, { hoverImageKey: k })} height={44} />
                     </span>
                   )}
                   <div className="space-y-1.5">
                     <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
                       <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={l.bold} onChange={(e) => set(l.id, { bold: e.target.checked })} />
-                      ตัวหนา
+                      {tx("ตัวหนา", "Bold")}
                     </label>
                     <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
-                      สีตัวอักษร
+                      {tx("สีตัวอักษร", "Text color")}
                       <span className="w-28">
                         <ColorInput value={l.textColor} onChange={(v) => set(l.id, { textColor: v })} />
                       </span>
                       {l.textColor && (
-                        <button type="button" className="text-slate-400 hover:text-rose-600" onClick={() => set(l.id, { textColor: "" })} title="กลับเป็นสีปกติ">
+                        <button type="button" className="text-slate-400 hover:text-rose-600" onClick={() => set(l.id, { textColor: "" })} title={tx("กลับเป็นสีปกติ", "Back to normal color")}>
                           ✕
                         </button>
                       )}
@@ -387,38 +394,38 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                 {/* ✨ หน้าตาตัวอักษร: เอฟเฟกต์ · ฟอนต์ · ลูกศรท้ายชื่อ · เส้นใต้ (ค่าเริ่ม = เหมือนเดิม) */}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-slate-600" data-mega-link-look>
                   <label className="flex items-center gap-1">
-                    ✨ เอฟเฟกต์
+                    {tx("✨ เอฟเฟกต์", "✨ Effect")}
                     <select className={`${mini} w-[7.5rem] ${l.effect ? "border-blue-300 text-blue-700" : ""}`} value={l.effect ?? ""} onChange={(e) => set(l.id, { effect: e.target.value as MegaLinkEffect })}>
                       {MEGA_LINK_EFFECTS.map((o) => (
                         <option key={o.value} value={o.value}>
-                          {o.label}
+                          {labelEn(o.label)}
                         </option>
                       ))}
                     </select>
                   </label>
                   <span className="flex items-center gap-1">
-                    🔤 ฟอนต์
+                    {tx("🔤 ฟอนต์", "🔤 Font")}
                     <span className="w-44">
-                      <FontSelect size="sm" value={l.font || "auto"} options={LINK_FONT_OPTIONS} googleFonts={LINK_FONT_NAMES} onChange={(v) => set(l.id, { font: v === "auto" ? "" : v })} />
+                      <FontSelect size="sm" value={l.font || "auto"} options={linkFontOptions()} googleFonts={LINK_FONT_NAMES} onChange={(v) => set(l.id, { font: v === "auto" ? "" : v })} />
                     </span>
                   </span>
                   <span className="flex items-center gap-1">
-                    ลูกศร
+                    {tx("ลูกศร", "Arrow")}
                     {(["", "right", "up-right", "chevron"] as const).map((a) => (
                       <button
                         key={a || "none"}
                         type="button"
                         onClick={() => set(l.id, { arrow: a })}
                         className={`h-7 min-w-[1.9rem] rounded-md border px-1.5 ${(l.arrow ?? "") === a ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
-                        title={a ? `ลูกศร ${MEGA_ARROW_CHAR[a]} ท้ายชื่อ (ชี้แล้วขยับ)` : "ไม่มีลูกศร"}
+                        title={a ? tx(`ลูกศร ${MEGA_ARROW_CHAR[a]} ท้ายชื่อ (ชี้แล้วขยับ)`, `Arrow ${MEGA_ARROW_CHAR[a]} after name (moves on hover)`) : tx("ไม่มีลูกศร", "No arrow")}
                       >
-                        {a ? MEGA_ARROW_CHAR[a] : "ไม่มี"}
+                        {a ? MEGA_ARROW_CHAR[a] : tx("ไม่มี", "None")}
                       </button>
                     ))}
                   </span>
                   <label className="flex items-center gap-1 cursor-pointer">
                     <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={!!l.underline} onChange={(e) => set(l.id, { underline: e.target.checked })} />
-                    เส้นใต้
+                    {tx("เส้นใต้", "Underline")}
                   </label>
                 </div>
                 {/* 🌐 ชื่อภาษาอังกฤษของลิงก์ (หน้า /en) — ว่าง = ลิงก์หมวดใช้ชื่ออังกฤษของหมวด · ลิงก์อื่นใช้ชื่อไทย */}
@@ -427,12 +434,12 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                   const c = catOf(l.href);
                   return (
                     <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
-                      <span className="shrink-0">🇬🇧 ชื่ออังกฤษ</span>
+                      <span className="shrink-0">{tx("🇬🇧 ชื่ออังกฤษ", "🇬🇧 English name")}</span>
                       <input
                         className={`${mini} flex-1 min-w-0`}
                         value={x.label_en ?? ""}
                         maxLength={90}
-                        placeholder={!l.label.trim() && c ? `${c.label_en || c.label} (ตามหมวด)` : "ว่าง = ใช้ชื่อไทย"}
+                        placeholder={!l.label.trim() && c ? `${c.label_en || c.label} ${tx("(ตามหมวด)", "(from category)")}` : tx("ว่าง = ใช้ชื่อไทย", "Empty = use Thai name")}
                         onChange={(e) => onChange(links.map((y) => (y.id === l.id ? ({ ...y, ...translationPatch(y as unknown as Record<string, unknown>, "label", y.label, e.target.value, false) } as MegaLink) : y)))}
                       />
                     </label>
@@ -446,39 +453,39 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
       })}
       <div className="flex flex-wrap gap-3 pt-0.5">
         <button type="button" disabled={links.length >= max} onClick={() => onChange([...links, newMegaLink()])} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40">
-          ＋ เพิ่มลิงก์
+          {tx("＋ เพิ่มลิงก์", "＋ Add link")}
         </button>
         {/* ➖ ตัวคั่น / 🔤 หัวข้อ — ต่อท้ายรายการ แล้วลากไปวางตรงที่ต้องการ */}
         {!plainOnly &&
           MEGA_LINK_KINDS.map((k) => (
-            <button key={k.value} type="button" disabled={links.length >= max} onClick={() => onChange([...links, newMegaRow(k.value)])} className="text-[11px] text-slate-600 hover:text-blue-700 hover:underline disabled:opacity-40" title={`${k.hint} — เพิ่มท้ายรายการ แล้วลากไปวางตรงที่ต้องการ`} data-add-row={k.value}>
-              ＋ {k.label}
+            <button key={k.value} type="button" disabled={links.length >= max} onClick={() => onChange([...links, newMegaRow(k.value)])} className="text-[11px] text-slate-600 hover:text-blue-700 hover:underline disabled:opacity-40" title={`${labelEn(k.hint)} — ${tx("เพิ่มท้ายรายการ แล้วลากไปวางตรงที่ต้องการ", "added at the end of the list, then drag it where you want")}`} data-add-row={k.value}>
+              ＋ {labelEn(k.label)}
             </button>
           ))}
         {copiedNames.length > 0 && (
-          <button type="button" onClick={() => followCategory(new Set(copiedNames.map((l) => l.id)))} className="text-[11px] text-emerald-700 hover:underline" title="ลิงก์หมวดที่ชื่อเหมือนชื่อหมวด (คัดลอกมา) → ให้ใช้ชื่อหมวดปัจจุบัน เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · ชื่อที่ตั้งเองอย่างอื่นไม่แตะ">
-            🔗 ให้ใช้ชื่อหมวด ({copiedNames.length})
+          <button type="button" onClick={() => followCategory(new Set(copiedNames.map((l) => l.id)))} className="text-[11px] text-emerald-700 hover:underline" title={tx("ลิงก์หมวดที่ชื่อเหมือนชื่อหมวด (คัดลอกมา) → ให้ใช้ชื่อหมวดปัจจุบัน เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · ชื่อที่ตั้งเองอย่างอื่นไม่แตะ", "Category links named the same as the category (copied) → use the live category name, so renaming the category updates the menu · other custom names untouched")}>
+            {tx("🔗 ให้ใช้ชื่อหมวด", "🔗 Use category names")} ({copiedNames.length})
           </button>
         )}
         {ctx.categories.length > 0 && (
-          <button type="button" onClick={() => (catPick ? setCatPick(null) : openCatPick())} className={`text-[11px] hover:underline ${catPick ? "text-slate-500" : "text-blue-600"}`} title="ติ๊กเลือกหมวดของร้าน (หลายหมวด · มีหมวดย่อย) ที่จะเป็นลิงก์ในรายการนี้">
-            {catPick ? "ปิดตัวเลือกหมวด" : "☑ เลือกหมวดของร้าน (ติ๊กได้หลายหมวด)"}
+          <button type="button" onClick={() => (catPick ? setCatPick(null) : openCatPick())} className={`text-[11px] hover:underline ${catPick ? "text-slate-500" : "text-blue-600"}`} title={tx("ติ๊กเลือกหมวดของร้าน (หลายหมวด · มีหมวดย่อย) ที่จะเป็นลิงก์ในรายการนี้", "Tick shop categories (several · with subcategories) to become links in this list")}>
+            {catPick ? tx("ปิดตัวเลือกหมวด", "Close category picker") : tx("☑ เลือกหมวดของร้าน (ติ๊กได้หลายหมวด)", "☑ Pick shop categories (tick several)")}
           </button>
         )}
       </div>
       {/* ☑ แผงติ๊กหมวด (ของกลาง CategoryCheckList) */}
       {catPick && (
         <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-2 space-y-2">
-          <p className="text-[11px] text-slate-600">ติ๊กหมวดที่จะเป็นลิงก์ในรายการนี้ — หมวดย่อยอยู่เยื้องใต้หมวดแม่ · เอาติ๊กออก = ลบลิงก์หมวดนั้น (ลิงก์ที่ใส่เองไม่หาย)</p>
+          <p className="text-[11px] text-slate-600">{tx("ติ๊กหมวดที่จะเป็นลิงก์ในรายการนี้ — หมวดย่อยอยู่เยื้องใต้หมวดแม่ · เอาติ๊กออก = ลบลิงก์หมวดนั้น (ลิงก์ที่ใส่เองไม่หาย)", "Tick categories to become links in this list — subcategories are indented under their parent · untick = remove that category link (manual links stay)")}</p>
           <CategoryCheckList categories={ctx.categories} value={catPick} onChange={setCatPick} />
           <div className="flex items-center gap-2">
-            {catPickTotal > max && <span className="text-[11px] text-amber-700">⚠ เกิน {max} ลิงก์ — ส่วนเกินจะไม่ถูกเพิ่ม</span>}
+            {catPickTotal > max && <span className="text-[11px] text-amber-700">{tx(`⚠ เกิน ${max} ลิงก์ — ส่วนเกินจะไม่ถูกเพิ่ม`, `⚠ Over ${max} links — the extra won't be added`)}</span>}
             <span className="flex-1" />
             <button type="button" onClick={() => setCatPick(null)} className="h-7 px-2.5 rounded-md text-[11px] text-slate-600 hover:bg-slate-100">
-              ยกเลิก
+              {tx("ยกเลิก", "Cancel")}
             </button>
             <button type="button" onClick={applyCatPick} className="h-7 px-3 rounded-md bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700">
-              ใช้ {catPick.length} หมวด
+              {tx(`ใช้ ${catPick.length} หมวด`, `Use ${catPick.length} categories`)}
             </button>
           </div>
         </div>
@@ -491,17 +498,18 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
 function CardsEditor({ cards, onChange, ctx }: { cards: MegaCard[]; onChange: (cards: MegaCard[]) => void; ctx: MegaEditorCtx }) {
   const drag = useDragReorder((from, to) => onChange(moveItem(cards, from, to)));
   const set = (id: string, p: Partial<MegaCard>) => onChange(cards.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  const tx = useT();
   return (
     <div className="space-y-1">
       {cards.map((c, i) => (
         <div key={c.id} {...drag.rowProps(i)} className={`rounded-md border border-slate-200 bg-white p-1.5 flex gap-2 ${drag.rowCls(i)}`}>
           <DragHandle {...drag.handleProps(i)} />
           <div className="w-28 shrink-0">
-            <ImageUploadField label="รูป" value={c.imageKey} onChange={(k) => set(c.id, { imageKey: k })} height={44} />
+            <ImageUploadField label={tx("รูป", "Image")} value={c.imageKey} onChange={(k) => set(c.id, { imageKey: k })} height={44} />
           </div>
           <div className="flex-1 min-w-0 space-y-1">
-            <LangInput className={`${mini} w-full`} obj={c} k="title" maxLength={60} placeholder="ชื่อ เช่น Alpha Bravo" onPatch={(p) => set(c.id, p)} />
-            <LangInput className={`${mini} w-full`} obj={c} k="desc" maxLength={160} placeholder="คำอธิบายสั้น" onPatch={(p) => set(c.id, p)} />
+            <LangInput className={`${mini} w-full`} obj={c} k="title" maxLength={60} placeholder={tx("ชื่อ เช่น Alpha Bravo", "Name, e.g. Alpha Bravo")} onPatch={(p) => set(c.id, p)} />
+            <LangInput className={`${mini} w-full`} obj={c} k="desc" maxLength={160} placeholder={tx("คำอธิบายสั้น", "Short description")} onPatch={(p) => set(c.id, p)} />
             <div className="flex items-center gap-1">
               <div className="flex-1 min-w-0">
                 <LinkField value={c.href} onChange={(href) => set(c.id, { href })} ctx={ctx.link} />
@@ -509,13 +517,13 @@ function CardsEditor({ cards, onChange, ctx }: { cards: MegaCard[]; onChange: (c
               <IssueBadge href={c.href} />
             </div>
           </div>
-          <button type="button" onClick={() => onChange(cards.filter((x) => x.id !== c.id))} className="self-start text-slate-300 hover:text-rose-600 px-1" title="ลบ">
+          <button type="button" onClick={() => onChange(cards.filter((x) => x.id !== c.id))} className="self-start text-slate-300 hover:text-rose-600 px-1" title={tx("ลบ", "Delete")}>
             ✕
           </button>
         </div>
       ))}
       <button type="button" disabled={cards.length >= MEGA_LIMITS.cards} onClick={() => onChange([...cards, newMegaCard()])} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40">
-        ＋ เพิ่มการ์ด
+        {tx("＋ เพิ่มการ์ด", "＋ Add card")}
       </button>
     </div>
   );
@@ -525,15 +533,16 @@ const check = "flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer
 
 /* ───────── กล่อง 1 คอลัมน์ ───────── */
 function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>) => void; ctx: MegaEditorCtx }) {
+  const tx = useT();
   // หัวคอลัมน์กดได้ + "ดูทั้งหมด" ท้ายคอลัมน์ (ทุกชนิด)
   const head = (
     <div className="flex flex-wrap items-center gap-1.5 pb-2 mb-2 border-b border-dashed border-slate-200">
-      <span className="text-[11px] text-slate-500 shrink-0">ลิงก์หัวคอลัมน์</span>
+      <span className="text-[11px] text-slate-500 shrink-0">{tx("ลิงก์หัวคอลัมน์", "Column title link")}</span>
       <div className="w-40">
         <LinkField value={b.titleHref} onChange={(titleHref) => set({ titleHref })} ctx={ctx.link} />
       </div>
       <IssueBadge href={b.titleHref} />
-      <LangInput className={`${mini} flex-1 min-w-[9rem]`} obj={b} k="moreLabel" maxLength={40} placeholder='ท้ายคอลัมน์ เช่น "ดูทั้งหมด →" (ไปลิงก์หัวคอลัมน์)' onPatch={set} />
+      <LangInput className={`${mini} flex-1 min-w-[9rem]`} obj={b} k="moreLabel" maxLength={40} placeholder={tx('ท้ายคอลัมน์ เช่น "ดูทั้งหมด →" (ไปลิงก์หัวคอลัมน์)', 'Column footer, e.g. "See all →" (goes to the column title link)')} onPatch={set} />
     </div>
   );
   switch (b.kind) {
@@ -545,45 +554,48 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
           {head}
           <div className="flex flex-wrap items-end gap-3">
             <div>
-              <span className={lbl}>รูปแบบรายการ</span>
-              <Seg value={b.style} onChange={(v) => set({ style: v })} options={MEGA_LINK_STYLES.map((o) => ({ v: o.value, l: o.label }))} />
+              <span className={lbl}>{tx("รูปแบบรายการ", "List style")}</span>
+              <Seg value={b.style} onChange={(v) => set({ style: v })} options={MEGA_LINK_STYLES.map((o) => ({ v: o.value, l: labelEn(o.label) }))} />
             </div>
             <label className="block">
-              <span className={lbl}>แบ่งคอลัมน์ย่อย</span>
+              <span className={lbl}>{tx("แบ่งคอลัมน์ย่อย", "Sub-columns")}</span>
               <WheelSelect value={b.cols} onChange={(e) => set({ cols: Number(e.target.value) })}>
                 {[1, 2, 3].map((n) => (
-                  <option key={n} value={n}>{n === 1 ? "ไม่แบ่ง" : `${n} คอลัมน์`}</option>
+                  <option key={n} value={n}>{n === 1 ? tx("ไม่แบ่ง", "None") : tx(`${n} คอลัมน์`, `${n} columns`)}</option>
                 ))}
               </WheelSelect>
             </label>
-            <label className={`${check} pb-1.5`} title="ลิงก์ไปหมวด/คอลเลกชัน ต่อท้ายด้วยจำนวนสินค้า เช่น กระเป๋าเป้ (7)">
+            <label className={`${check} pb-1.5`} title={tx("ลิงก์ไปหมวด/คอลเลกชัน ต่อท้ายด้วยจำนวนสินค้า เช่น กระเป๋าเป้ (7)", "Category/collection links followed by product count, e.g. Backpacks (7)")}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={b.showCount} onChange={(e) => set({ showCount: e.target.checked })} />
-              โชว์จำนวนสินค้า
+              {tx("โชว์จำนวนสินค้า", "Show product count")}
             </label>
           </div>
           <div>
-            <span className={lbl}>รายการ</span>
-            <Seg value={b.auto} onChange={(v) => set({ auto: v })} options={MEGA_AUTOS.map((a) => ({ v: a.value, l: a.value ? `⚡ ${a.label}` : a.label }))} />
+            <span className={lbl}>{tx("รายการ", "Items")}</span>
+            <Seg value={b.auto} onChange={(v) => set({ auto: v })} options={MEGA_AUTOS.map((a) => ({ v: a.value, l: a.value ? `⚡ ${labelEn(a.label)}` : labelEn(a.label) }))} />
             {auto?.value && (
               <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md bg-blue-50/60 border border-blue-100 px-2 py-1.5">
-                <span className="text-[11px] text-blue-800">⚡ {auto.hint}</span>
+                <span className="text-[11px] text-blue-800">⚡ {labelEn(auto.hint)}</span>
                 <span className="flex-1" />
                 <label className="flex items-center gap-1 text-[11px] text-slate-600">
-                  สูงสุด
+                  {tx("สูงสุด", "Max")}
                   <WheelSelect value={b.autoMax} onChange={(e) => set({ autoMax: Number(e.target.value) })}>
                     {[4, 6, 8, 10, 12, 16, 20, 30].map((n) => (
-                      <option key={n} value={n}>{n} รายการ</option>
+                      <option key={n} value={n}>{tx(`${n} รายการ`, `${n} items`)}</option>
                     ))}
                   </WheelSelect>
                 </label>
-                <span className="text-[11px] text-slate-500">ตอนนี้ได้ {autoCount} รายการ</span>
+                <span className="text-[11px] text-slate-500">{tx(`ตอนนี้ได้ ${autoCount} รายการ`, `Currently ${autoCount} items`)}</span>
               </div>
             )}
           </div>
-          {b.auto && <p className="text-[11px] text-slate-500">ลิงก์ที่ใส่เองด้านล่าง (ถ้ามี) จะขึ้นก่อนรายการอัตโนมัติ เช่น “ดูทั้งหมด” “มาใหม่”</p>}
+          {b.auto && <p className="text-[11px] text-slate-500">{tx("ลิงก์ที่ใส่เองด้านล่าง (ถ้ามี) จะขึ้นก่อนรายการอัตโนมัติ เช่น “ดูทั้งหมด” “มาใหม่”", "Manual links below (if any) show before the auto list, e.g. “See all” “New”")}</p>}
           {b.cols > 1 && (
             <p className="text-[11px] text-slate-500">
-              แบ่ง {b.cols} คอลัมน์: เลือกช่อง <b>“คอลัมน์”</b> ของแต่ละลิงก์ว่าให้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า{b.auto ? " (รายการ ⚡ อัตโนมัติก็เช่นกัน)" : ""} · ไม่เลือกเลยสักลิงก์ = เรียงต่อกันเองแบบเดิม
+              {tx(
+                `แบ่ง ${b.cols} คอลัมน์: เลือกช่อง “คอลัมน์” ของแต่ละลิงก์ว่าให้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า${b.auto ? " (รายการ ⚡ อัตโนมัติก็เช่นกัน)" : ""} · ไม่เลือกเลยสักลิงก์ = เรียงต่อกันเองแบบเดิม`,
+                `${b.cols} columns: use each link's “Column” field to choose its column · auto = goes to the shorter column${b.auto ? " (⚡ auto items too)" : ""} · none chosen = flows in order as before`,
+              )}
             </p>
           )}
           <LinksEditor links={b.links} style={b.style} onChange={(links) => set({ links })} ctx={ctx} cols={b.cols} />
@@ -602,31 +614,31 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
       return (
         <div className="space-y-2">
           {head}
-          <Seg value={b.source} onChange={(v) => set({ source: v })} options={[{ v: "auto", l: "อัตโนมัติจากหมวด" }, { v: "pick", l: "เลือกเอง" }]} />
+          <Seg value={b.source} onChange={(v) => set({ source: v })} options={[{ v: "auto", l: tx("อัตโนมัติจากหมวด", "Auto from category") }, { v: "pick", l: tx("เลือกเอง", "Pick manually") }]} />
           {b.source === "auto" ? (
             <div className="flex flex-wrap items-end gap-2">
               <label className="block">
-                <span className={lbl}>หมวด</span>
+                <span className={lbl}>{tx("หมวด", "Category")}</span>
                 <select className={mini} value={b.category} onChange={(e) => set({ category: e.target.value })}>
-                  <option value="">ทุกหมวด</option>
+                  <option value="">{tx("ทุกหมวด", "All categories")}</option>
                   {ctx.categories.map((c) => (
                     <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>
                   ))}
                 </select>
               </label>
               <label className="block">
-                <span className={lbl}>เรียงตาม</span>
+                <span className={lbl}>{tx("เรียงตาม", "Sort by")}</span>
                 <select className={mini} value={b.sort} onChange={(e) => set({ sort: e.target.value as MegaBlock["sort"] })}>
                   {MEGA_SORTS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                    <option key={o.value} value={o.value}>{labelEn(o.label)}</option>
                   ))}
                 </select>
               </label>
               <label className="block">
-                <span className={lbl}>จำนวน</span>
+                <span className={lbl}>{tx("จำนวน", "Count")}</span>
                 <WheelSelect value={b.count} onChange={(e) => set({ count: Number(e.target.value) })}>
                   {range(MEGA_LIMITS.count[0], MEGA_LIMITS.count[1]).map((n) => (
-                    <option key={n} value={n}>{n} ชิ้น</option>
+                    <option key={n} value={n}>{tx(`${n} ชิ้น`, `${n} items`)}</option>
                   ))}
                 </WheelSelect>
               </label>
@@ -638,8 +650,8 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
                 shopSlug={ctx.link.shopSlug}
                 value={b.codes}
                 max={MEGA_LIMITS.codes}
-                imageLabel="รูปบนการ์ด"
-                defaultImageLabel="รูปแรกของสินค้า"
+                imageLabel={tx("รูปบนการ์ด", "Card image")}
+                defaultImageLabel={tx("รูปแรกของสินค้า", "First product image")}
                 onChange={(codes) => {
                   // เอารุ่นออก = ล้างรูปที่ตั้งไว้ของรุ่นนั้นด้วย
                   const keep = new Set(codes.map((c) => c.toUpperCase()));
@@ -660,45 +672,45 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
                   },
                 }}
               />
-              <p className="mt-1 text-[10px] text-slate-400">🖼 ที่แถว = เลือกรูปที่โชว์บนการ์ด (รูปของสีไหน กดการ์ดแล้วเปิดหน้าสินค้าที่สีนั้น) · สินค้าที่ร้านนี้ไม่มี (เช่น มาจากแม่แบบร้านอื่น) จะไม่โชว์เอง</p>
+              <p className="mt-1 text-[10px] text-slate-400">{tx("🖼 ที่แถว = เลือกรูปที่โชว์บนการ์ด (รูปของสีไหน กดการ์ดแล้วเปิดหน้าสินค้าที่สีนั้น) · สินค้าที่ร้านนี้ไม่มี (เช่น มาจากแม่แบบร้านอื่น) จะไม่โชว์เอง", "🖼 on a row = pick the card image (whichever color's image, tapping the card opens the product in that color) · products this shop doesn't have (e.g. from another shop's template) are hidden automatically")}</p>
             </div>
           )}
           <div className="flex flex-wrap items-end gap-3">
             <label className="block">
-              <span className={lbl}>การ์ดต่อแถว</span>
+              <span className={lbl}>{tx("การ์ดต่อแถว", "Cards per row")}</span>
               <WheelSelect value={b.perRow} onChange={(e) => set({ perRow: Number(e.target.value) })}>
                 {range(MEGA_LIMITS.perRow[0], MEGA_LIMITS.perRow[1]).map((n) => (
-                  <option key={n} value={n}>{n} ใบ</option>
+                  <option key={n} value={n}>{tx(`${n} ใบ`, `${n} cards`)}</option>
                 ))}
               </WheelSelect>
             </label>
             <label className="block">
-              <span className={lbl}>สัดส่วนรูป</span>
+              <span className={lbl}>{tx("สัดส่วนรูป", "Image ratio")}</span>
               <select className={mini} value={b.ratio} onChange={(e) => set({ ratio: e.target.value as MegaBlock["ratio"] })}>
                 {MEGA_RATIOS.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
+                  <option key={r.value} value={r.value}>{labelEn(r.label)}</option>
                 ))}
               </select>
             </label>
             <label className={`${check} pb-1.5`}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={b.showPrice} onChange={(e) => set({ showPrice: e.target.checked })} />
-              ราคา
+              {tx("ราคา", "Price")}
             </label>
             <label className={`${check} pb-1.5`}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={b.showBadge} onChange={(e) => set({ showBadge: e.target.checked })} />
-              ป้าย
+              {tx("ป้าย", "Badge")}
             </label>
             <label className={`${check} pb-1.5`}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={b.hoverSwap} onChange={(e) => set({ hoverSwap: e.target.checked })} />
-              ชี้แล้วสลับรูป
+              {tx("ชี้แล้วสลับรูป", "Swap image on hover")}
             </label>
             <label className={`${check} pb-1.5`}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={b.onSale} onChange={(e) => set({ onSale: e.target.checked })} />
-              เฉพาะที่ลดราคา
+              {tx("เฉพาะที่ลดราคา", "On sale only")}
             </label>
           </div>
           <p className={`text-[11px] ${preview.length ? "text-slate-500" : "text-amber-700"}`}>
-            {preview.length ? `👁 จะโชว์ ${preview.length} ชิ้น: ${preview.slice(0, 4).map((p) => p.name).join(" · ")}${preview.length > 4 ? " …" : ""}` : "⚠️ ตอนนี้ไม่มีสินค้าที่ตรงเงื่อนไข — กล่องนี้จะไม่โชว์บนเว็บ"}
+            {preview.length ? `${tx(`👁 จะโชว์ ${preview.length} ชิ้น:`, `👁 Will show ${preview.length} items:`)} ${preview.slice(0, 4).map((p) => p.name).join(" · ")}${preview.length > 4 ? " …" : ""}` : tx("⚠️ ตอนนี้ไม่มีสินค้าที่ตรงเงื่อนไข — กล่องนี้จะไม่โชว์บนเว็บ", "⚠️ No products match right now — this box won't show on the site")}
           </p>
         </div>
       );
@@ -708,9 +720,9 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
         <div>
           {head}
           <div className="grid gap-2 sm:grid-cols-[9rem_1fr]">
-            <ImageUploadField label="รูปเด่น" value={b.imageKey} onChange={(k) => set({ imageKey: k })} height={72} />
+            <ImageUploadField label={tx("รูปเด่น", "Featured image")} value={b.imageKey} onChange={(k) => set({ imageKey: k })} height={72} />
             <div className="space-y-1.5">
-              <LangInput className={`${mini} w-full`} obj={b} k="caption" maxLength={120} placeholder="ข้อความบนรูป เช่น “The Valérie” ดูคอลเลกชัน" onPatch={set} />
+              <LangInput className={`${mini} w-full`} obj={b} k="caption" maxLength={120} placeholder={tx("ข้อความบนรูป เช่น “The Valérie” ดูคอลเลกชัน", "Text on image, e.g. “The Valérie” View collection")} onPatch={set} />
               <div className="flex items-center gap-1">
                 <div className="flex-1 min-w-0">
                   <LinkField value={b.href} onChange={(href) => set({ href })} ctx={ctx.link} />
@@ -718,16 +730,16 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
                 <IssueBadge href={b.href} />
               </div>
               <label className="block">
-                <span className={lbl}>สัดส่วนรูป</span>
+                <span className={lbl}>{tx("สัดส่วนรูป", "Image ratio")}</span>
                 <select className={mini} value={b.ratio} onChange={(e) => set({ ratio: e.target.value as MegaBlock["ratio"] })}>
                   {MEGA_RATIOS.map((r) => (
-                    <option key={r.value} value={r.value}>{r.label}</option>
+                    <option key={r.value} value={r.value}>{labelEn(r.label)}</option>
                   ))}
                 </select>
               </label>
-              <label className={check} title="ลิงก์ที่ตั้ง “รูปตอนชี้” ไว้ (หรือหมวด/คอลเลกชันอัตโนมัติที่มีรูป) — ชี้แล้วรูปนี้เปลี่ยนตาม">
+              <label className={check} title={tx("ลิงก์ที่ตั้ง “รูปตอนชี้” ไว้ (หรือหมวด/คอลเลกชันอัตโนมัติที่มีรูป) — ชี้แล้วรูปนี้เปลี่ยนตาม", "Links with a “hover image” (or auto categories/collections with images) — hovering changes this image")}>
                 <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={b.swapOnHover} onChange={(e) => set({ swapOnHover: e.target.checked })} />
-                เปลี่ยนรูปตามลิงก์ที่ชี้ในแผง
+                {tx("เปลี่ยนรูปตามลิงก์ที่ชี้ในแผง", "Change image with the hovered link")}
               </label>
             </div>
           </div>
@@ -746,18 +758,19 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
 function GroupsEditor({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>) => void; ctx: MegaEditorCtx }) {
   const drag = useDragReorder((from, to) => set({ groups: moveItem(b.groups, from, to) }));
   const setG = (id: string, p: Partial<MegaBlock["groups"][number]>) => set({ groups: b.groups.map((g) => (g.id === id ? { ...g, ...p } : g)) });
+  const tx = useT();
   return (
     <div className="space-y-1.5">
       {b.groups.map((g, i) => (
         <div key={g.id} {...drag.rowProps(i)} className={`rounded-md border border-slate-200 bg-slate-50/60 p-1.5 ${drag.rowCls(i)}`}>
           <div className="flex items-center gap-1">
             <DragHandle {...drag.handleProps(i)} />
-            <LangInput className={`${mini} flex-1 min-w-0 font-medium`} obj={g} k="label" maxLength={60} placeholder="หัวข้อ เช่น กระเป๋าผู้หญิง" onPatch={(p) => setG(g.id, p)} />
+            <LangInput className={`${mini} flex-1 min-w-0 font-medium`} obj={g} k="label" maxLength={60} placeholder={tx("หัวข้อ เช่น กระเป๋าผู้หญิง", "Heading, e.g. Women's bags")} onPatch={(p) => setG(g.id, p)} />
             <IssueBadge href={g.href} />
             <div className="w-36 shrink-0">
               <LinkField value={g.href} onChange={(href) => setG(g.id, { href })} ctx={ctx.link} />
             </div>
-            <button type="button" onClick={() => set({ groups: b.groups.filter((x) => x.id !== g.id) })} className="text-slate-300 hover:text-rose-600 px-1" title="ลบหัวข้อ">
+            <button type="button" onClick={() => set({ groups: b.groups.filter((x) => x.id !== g.id) })} className="text-slate-300 hover:text-rose-600 px-1" title={tx("ลบหัวข้อ", "Delete heading")}>
               ✕
             </button>
           </div>
@@ -767,7 +780,7 @@ function GroupsEditor({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBloc
         </div>
       ))}
       <button type="button" disabled={b.groups.length >= MEGA_LIMITS.groups} onClick={() => set({ groups: [...b.groups, newMegaGroup()] })} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40">
-        ＋ เพิ่มหัวข้อ
+        {tx("＋ เพิ่มหัวข้อ", "＋ Add heading")}
       </button>
     </div>
   );
@@ -789,6 +802,7 @@ function readClip(): MegaBlock | null {
 /* ───────── แผงแบบคอลัมน์ ───────── */
 function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: MegaPanel) => void; ctx: MegaEditorCtx }) {
   const toast = useToast();
+  const tx = useT();
   const blocks = panel.blocks;
   const setBlocks = (next: MegaBlock[]) => onChange({ ...panel, blocks: next });
   const drag = useDragReorder((from, to) => setBlocks(moveItem(blocks, from, to)));
@@ -816,22 +830,22 @@ function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p
     try {
       localStorage.setItem(CLIP_KEY, JSON.stringify(b));
       window.dispatchEvent(new Event("mega-clip"));
-      toast.success("คัดลอกคอลัมน์แล้ว — ไปที่เมนูอื่นแล้วกด “📋 วางคอลัมน์”");
+      toast.success(tx("คัดลอกคอลัมน์แล้ว — ไปที่เมนูอื่นแล้วกด “📋 วางคอลัมน์”", "Column copied — go to another menu and tap “📋 Paste column”"));
     } catch {
-      toast.error("คัดลอกไม่ได้");
+      toast.error(tx("คัดลอกไม่ได้", "Can't copy"));
     }
   };
   const totalSpan = blocks.reduce((s, b) => s + b.span, 0);
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center gap-1 text-[10px] text-slate-400" title="สัดส่วนความกว้างของแต่ละคอลัมน์ในแผง (ซ้าย → ขวา)">
+      <div className="flex items-center gap-1 text-[10px] text-slate-400" title={tx("สัดส่วนความกว้างของแต่ละคอลัมน์ในแผง (ซ้าย → ขวา)", "Width ratio of each column in the panel (left → right)")}>
         {blocks.map((b) => (
           <span key={b.id} className="h-4 rounded bg-slate-200 text-slate-600 inline-flex items-center justify-center truncate px-1" style={{ flex: b.span }}>
-            {KIND_ICON[b.kind]} {b.title || MEGA_BLOCK_KINDS.find((k) => k.value === b.kind)?.label}
+            {KIND_ICON[b.kind]} {b.title || labelEn(MEGA_BLOCK_KINDS.find((k) => k.value === b.kind)?.label)}
           </span>
         ))}
-        {!blocks.length && <span>ยังไม่มีคอลัมน์</span>}
-        {totalSpan > 0 && <span className="shrink-0 pl-1">{totalSpan} ส่วน</span>}
+        {!blocks.length && <span>{tx("ยังไม่มีคอลัมน์", "No columns yet")}</span>}
+        {totalSpan > 0 && <span className="shrink-0 pl-1">{tx(`${totalSpan} ส่วน`, `${totalSpan} parts`)}</span>}
       </div>
       {blocks.map((b, i) => {
         const open = openId === b.id;
@@ -840,26 +854,26 @@ function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p
           <div key={b.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
             <div className="flex items-center gap-1.5 px-2 py-1.5">
               <DragHandle {...drag.handleProps(i)} />
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0" title={kind?.hint}>
-                {KIND_ICON[b.kind]} {kind?.label}
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0" title={labelEn(kind?.hint)}>
+                {KIND_ICON[b.kind]} {labelEn(kind?.label)}
                 {b.kind === "links" && b.auto ? " ⚡" : ""}
               </span>
-              <LangInput className={`${mini} flex-1 min-w-0`} obj={b} k="title" maxLength={60} placeholder="หัวคอลัมน์ (ไม่ใส่ก็ได้)" onPatch={(p) => set(b.id, p)} />
-              <WheelSelect value={b.span} onChange={(e) => set(b.id, { span: Number(e.target.value) })} title="ความกว้างของคอลัมน์นี้ (ชี้แล้วหมุนลูกกลิ้งได้)">
+              <LangInput className={`${mini} flex-1 min-w-0`} obj={b} k="title" maxLength={60} placeholder={tx("หัวคอลัมน์ (ไม่ใส่ก็ได้)", "Column title (optional)")} onPatch={(p) => set(b.id, p)} />
+              <WheelSelect value={b.span} onChange={(e) => set(b.id, { span: Number(e.target.value) })} title={tx("ความกว้างของคอลัมน์นี้ (ชี้แล้วหมุนลูกกลิ้งได้)", "Width of this column (hover and scroll the wheel)")}>
                 {range(MEGA_LIMITS.span[0], MEGA_LIMITS.span[1]).map((n) => (
-                  <option key={n} value={n}>กว้าง {n} ส่วน</option>
+                  <option key={n} value={n}>{tx(`กว้าง ${n} ส่วน`, `Width ${n} parts`)}</option>
                 ))}
               </WheelSelect>
-              <button type="button" disabled={full} onClick={() => duplicate(i)} className="text-xs w-7 h-7 rounded-md border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-700 disabled:opacity-40" title="ทำซ้ำคอลัมน์นี้">
+              <button type="button" disabled={full} onClick={() => duplicate(i)} className="text-xs w-7 h-7 rounded-md border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-700 disabled:opacity-40" title={tx("ทำซ้ำคอลัมน์นี้", "Duplicate this column")}>
                 ⧉
               </button>
-              <button type="button" onClick={() => copy(b)} className="text-xs w-7 h-7 rounded-md border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-700" title="คัดลอกไปวางเมนูอื่น">
+              <button type="button" onClick={() => copy(b)} className="text-xs w-7 h-7 rounded-md border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-700" title={tx("คัดลอกไปวางเมนูอื่น", "Copy to paste into another menu")}>
                 📋
               </button>
               <button type="button" onClick={() => setOpenId(open ? null : b.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500"}`}>
                 {open ? "▲" : "▼"}
               </button>
-              <button type="button" onClick={() => setBlocks(blocks.filter((x) => x.id !== b.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบคอลัมน์">
+              <button type="button" onClick={() => setBlocks(blocks.filter((x) => x.id !== b.id))} className="text-slate-300 hover:text-rose-600 px-1" title={tx("ลบคอลัมน์", "Delete column")}>
                 ✕
               </button>
             </div>
@@ -872,13 +886,13 @@ function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p
         );
       })}
       <div className="flex flex-wrap items-center gap-1.5 pt-1">
-        <span className="text-[11px] text-slate-500">＋ เพิ่มคอลัมน์:</span>
+        <span className="text-[11px] text-slate-500">{tx("＋ เพิ่มคอลัมน์:", "＋ Add column:")}</span>
         {MEGA_BLOCK_KINDS.map((k) => (
           <button
             key={k.value}
             type="button"
             disabled={full}
-            title={k.hint}
+            title={labelEn(k.hint)}
             onClick={() => {
               const nb = newMegaBlock(k.value);
               setBlocks([...blocks, nb]);
@@ -886,7 +900,7 @@ function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p
             }}
             className="text-[11px] px-2 h-6 rounded-md border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-700 disabled:opacity-40"
           >
-            {KIND_ICON[k.value]} {k.label}
+            {KIND_ICON[k.value]} {labelEn(k.label)}
           </button>
         ))}
         {clip && (
@@ -899,9 +913,9 @@ function BlocksEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p
               setOpenId(c.id);
             }}
             className="text-[11px] px-2 h-6 rounded-md border border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-40"
-            title={`วาง: ${clip.title || MEGA_BLOCK_KINDS.find((k) => k.value === clip.kind)?.label}`}
+            title={`${tx("วาง:", "Paste:")} ${clip.title || labelEn(MEGA_BLOCK_KINDS.find((k) => k.value === clip.kind)?.label)}`}
           >
-            📋 วางคอลัมน์ ({clip.title || MEGA_BLOCK_KINDS.find((k) => k.value === clip.kind)?.label})
+            {tx("📋 วางคอลัมน์", "📋 Paste column")} ({clip.title || labelEn(MEGA_BLOCK_KINDS.find((k) => k.value === clip.kind)?.label)})
           </button>
         )}
       </div>
@@ -916,34 +930,35 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
   const drag = useDragReorder((from, to) => setTabs(moveItem(tabs, from, to)));
   const [openId, setOpenId] = useState<string | null>(tabs[0]?.id ?? null);
   const set = (id: string, p: Partial<MegaPanel["tabs"][number]>) => setTabs(tabs.map((t) => (t.id === id ? { ...t, ...p } : t)));
+  const tx = useT();
   return (
     <div className="space-y-1.5">
       <label className="flex items-center gap-2">
-        <span className="text-[11px] text-slate-500">การ์ดต่อแถว</span>
+        <span className="text-[11px] text-slate-500">{tx("การ์ดต่อแถว", "Cards per row")}</span>
         <WheelSelect value={panel.cardsPerRow} onChange={(e) => onChange({ ...panel, cardsPerRow: Number(e.target.value) })}>
-          <option value={0}>อัตโนมัติ</option>
+          <option value={0}>{tx("อัตโนมัติ", "Auto")}</option>
           {range(MEGA_LIMITS.cardsPerRow[0], MEGA_LIMITS.cardsPerRow[1]).map((n) => (
-            <option key={n} value={n}>{n} ใบ</option>
+            <option key={n} value={n}>{tx(`${n} ใบ`, `${n} cards`)}</option>
           ))}
         </WheelSelect>
-        {panel.cardsPerRow === 0 && <span className="text-[10px] text-slate-400">เต็มแถวพอดีจำนวนการ์ดของแต่ละแท็บ (2 ใบ = เต็ม 2 · 3 ใบ = เต็ม 3 · สูงสุด 6)</span>}
+        {panel.cardsPerRow === 0 && <span className="text-[10px] text-slate-400">{tx("เต็มแถวพอดีจำนวนการ์ดของแต่ละแท็บ (2 ใบ = เต็ม 2 · 3 ใบ = เต็ม 3 · สูงสุด 6)", "Fills the row to fit each tab's card count (2 cards = 2 wide · 3 cards = 3 wide · max 6)")}</span>}
       </label>
       {/* ➕ การ์ด "ดูทั้งหมด" ต่อท้ายทุกแท็บ — ไปที่ลิงก์ของแท็บนั้น (นับรวมในการ์ดต่อแถวอัตโนมัติ) */}
       <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-1.5 space-y-1.5">
         <label className="flex items-center gap-2 text-xs text-slate-700">
           <input type="checkbox" checked={!!panel.viewAllCard} onChange={(e) => onChange({ ...panel, viewAllCard: e.target.checked })} />
-          ➕ การ์ด &quot;ดูทั้งหมด&quot; ท้ายทุกแท็บ
-          <span className="text-[10px] text-slate-400">กดแล้วไปที่ลิงก์ของแท็บนั้น</span>
+          {tx('➕ การ์ด "ดูทั้งหมด" ท้ายทุกแท็บ', '➕ "See all" card at the end of every tab')}
+          <span className="text-[10px] text-slate-400">{tx("กดแล้วไปที่ลิงก์ของแท็บนั้น", "Goes to that tab's link")}</span>
         </label>
         {panel.viewAllCard && (
           <div className="flex items-start gap-2">
-            <LangInput className={`${mini} flex-1 min-w-0`} obj={panel} k="viewAllCardLabel" maxLength={40} placeholder='ข้อความบนการ์ด (ไม่ใส่ = "ดูทั้งหมด")' onPatch={(p) => onChange({ ...panel, ...p })} />
+            <LangInput className={`${mini} flex-1 min-w-0`} obj={panel} k="viewAllCardLabel" maxLength={40} placeholder={tx('ข้อความบนการ์ด (ไม่ใส่ = "ดูทั้งหมด")', 'Card text (empty = "See all")')} onPatch={(p) => onChange({ ...panel, ...p })} />
             <div className="w-44 shrink-0">
-              <ImageUploadField label="รูปพื้นการ์ด (ไม่ใส่ก็ได้)" value={panel.viewAllCardImageKey ?? null} onChange={(k) => onChange({ ...panel, viewAllCardImageKey: k })} height={44} />
+              <ImageUploadField label={tx("รูปพื้นการ์ด (ไม่ใส่ก็ได้)", "Card background image (optional)")} value={panel.viewAllCardImageKey ?? null} onChange={(k) => onChange({ ...panel, viewAllCardImageKey: k })} height={44} />
             </div>
           </div>
         )}
-        {panel.viewAllCard && tabs.some((t) => !t.href) && <p className="text-[10px] text-amber-600">แท็บที่ยังไม่ใส่ลิงก์ = การ์ดดูทั้งหมดไปที่ลิงก์ของเมนูนี้แทน</p>}
+        {panel.viewAllCard && tabs.some((t) => !t.href) && <p className="text-[10px] text-amber-600">{tx("แท็บที่ยังไม่ใส่ลิงก์ = การ์ดดูทั้งหมดไปที่ลิงก์ของเมนูนี้แทน", "Tabs without a link = the see-all card goes to this menu's link instead")}</p>}
       </div>
       {tabs.map((t, i) => {
         const open = openId === t.id;
@@ -951,18 +966,18 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
           <div key={t.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
             <div className="flex items-center gap-1.5 px-2 py-1.5">
               <DragHandle {...drag.handleProps(i)} />
-              <LangInput className={`${mini} flex-1 min-w-0 font-medium`} obj={t} k="label" maxLength={40} placeholder="ชื่อแท็บ เช่น EVERYDAY" onPatch={(p) => set(t.id, p)} />
+              <LangInput className={`${mini} flex-1 min-w-0 font-medium`} obj={t} k="label" maxLength={40} placeholder={tx("ชื่อแท็บ เช่น EVERYDAY", "Tab name, e.g. EVERYDAY")} onPatch={(p) => set(t.id, p)} />
               <IssueBadge href={t.href} />
               <div className="w-36 shrink-0">
                 <LinkField value={t.href} onChange={(href) => set(t.id, { href })} ctx={ctx.link} />
               </div>
               <span className="text-[10px] text-slate-400 shrink-0">
-                {t.cards.length} การ์ด{panel.viewAllCard ? " + ดูทั้งหมด" : ""}
+                {t.cards.length} {tx("การ์ด", "cards")}{panel.viewAllCard ? tx(" + ดูทั้งหมด", " + see all") : ""}
               </span>
               <button type="button" onClick={() => setOpenId(open ? null : t.id)} className={`text-xs px-1.5 h-7 rounded-md border ${open ? "border-blue-500 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-500"}`}>
                 {open ? "▲" : "▼"}
               </button>
-              <button type="button" onClick={() => setTabs(tabs.filter((x) => x.id !== t.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบแท็บ">
+              <button type="button" onClick={() => setTabs(tabs.filter((x) => x.id !== t.id))} className="text-slate-300 hover:text-rose-600 px-1" title={tx("ลบแท็บ", "Delete tab")}>
                 ✕
               </button>
             </div>
@@ -985,7 +1000,7 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
           }}
           className="text-[11px] text-blue-600 hover:underline disabled:opacity-40"
         >
-          ＋ เพิ่มแท็บ
+          {tx("＋ เพิ่มแท็บ", "＋ Add tab")}
         </button>
         {ctx.categories.length > 0 && (
           <button
@@ -998,7 +1013,7 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
             }}
             className="text-[11px] text-blue-600 hover:underline disabled:opacity-40"
           >
-            ＋ เติมแท็บจากหมวดของร้าน
+            {tx("＋ เติมแท็บจากหมวดของร้าน", "＋ Fill tabs from shop categories")}
           </button>
         )}
       </div>
@@ -1009,28 +1024,29 @@ function TabsEditor({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: 
 /* ───────── ⚙️ หน้าตาแผง ───────── */
 function PanelLook({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: MegaPanel) => void; ctx: MegaEditorCtx }) {
   const [open, setOpen] = useState(false);
+  const tx = useT();
   const changed = (panel.width !== "full" ? 1 : 0) + (panel.bg ? 1 : 0) + (panel.divider ? 1 : 0) + (panel.promo ? 1 : 0) + (panel.mobileHideMedia ? 1 : 0);
   return (
     <div className="rounded-md border border-slate-200 bg-white">
       <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] text-slate-600">
-        <span>⚙️ หน้าตาแผง {changed > 0 && <span className="ml-1 text-blue-600">· ปรับแล้ว {changed}</span>}</span>
+        <span>{tx("⚙️ หน้าตาแผง", "⚙️ Panel look")} {changed > 0 && <span className="ml-1 text-blue-600">· {tx("ปรับแล้ว", "changed")} {changed}</span>}</span>
         <span>{open ? "▲" : "▼"}</span>
       </button>
       {open && (
         <div className="px-2.5 pb-2.5 space-y-2 border-t border-slate-100 pt-2">
           <div className="flex flex-wrap items-end gap-3">
             <div>
-              <span className={lbl}>ขนาดแผง</span>
-              <Seg value={panel.width} onChange={(v) => onChange({ ...panel, width: v })} options={[{ v: "full", l: "เต็มความกว้างจอ" }, { v: "box", l: "กล่องลอยใต้เมนู" }]} />
+              <span className={lbl}>{tx("ขนาดแผง", "Panel size")}</span>
+              <Seg value={panel.width} onChange={(v) => onChange({ ...panel, width: v })} options={[{ v: "full", l: tx("เต็มความกว้างจอ", "Full screen width") }, { v: "box", l: tx("กล่องลอยใต้เมนู", "Floating box under menu") }]} />
             </div>
             <div>
-              <span className={lbl}>สีพื้นแผง</span>
+              <span className={lbl}>{tx("สีพื้นแผง", "Panel background")}</span>
               <div className="flex items-center gap-1">
                 <span className="w-32">
                   <ColorInput value={panel.bg} onChange={(v) => onChange({ ...panel, bg: v })} />
                 </span>
                 {panel.bg && (
-                  <button type="button" className="text-[11px] text-slate-400 hover:text-rose-600" onClick={() => onChange({ ...panel, bg: "" })} title="กลับเป็นสีพื้นการ์ดของธีม">
+                  <button type="button" className="text-[11px] text-slate-400 hover:text-rose-600" onClick={() => onChange({ ...panel, bg: "" })} title={tx("กลับเป็นสีพื้นการ์ดของธีม", "Back to theme card background")}>
                     ✕
                   </button>
                 )}
@@ -1038,12 +1054,12 @@ function PanelLook({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: M
             </div>
             <label className={`${check} pb-1.5`}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={panel.divider} onChange={(e) => onChange({ ...panel, divider: e.target.checked })} />
-              เส้นคั่นระหว่างคอลัมน์
+              {tx("เส้นคั่นระหว่างคอลัมน์", "Dividers between columns")}
             </label>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-500 shrink-0">แถบข้อความใต้แผง</span>
-            <LangInput className={`${mini} flex-1 min-w-[10rem]`} obj={panel} k="promo" maxLength={120} placeholder="เช่น ส่งฟรีเมื่อครบ ฿1,500 · ผ่อน 0% 10 เดือน" onPatch={(p) => onChange({ ...panel, ...p })} />
+            <span className="text-[11px] text-slate-500 shrink-0">{tx("แถบข้อความใต้แผง", "Text bar under panel")}</span>
+            <LangInput className={`${mini} flex-1 min-w-[10rem]`} obj={panel} k="promo" maxLength={120} placeholder={tx("เช่น ส่งฟรีเมื่อครบ ฿1,500 · ผ่อน 0% 10 เดือน", "e.g. Free shipping over ฿1,500 · 0% installments for 10 months")} onPatch={(p) => onChange({ ...panel, ...p })} />
             {panel.promo && (
               <div className="w-40">
                 <LinkField value={panel.promoHref} onChange={(promoHref) => onChange({ ...panel, promoHref })} ctx={ctx.link} />
@@ -1052,7 +1068,7 @@ function PanelLook({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: M
           </div>
           <label className={check}>
             <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={panel.mobileHideMedia} onChange={(e) => onChange({ ...panel, mobileHideMedia: e.target.checked })} />
-            📱 มือถือ: ซ่อนการ์ดสินค้า / รูปเด่น / การ์ดรูป (เหลือแต่ลิงก์ · เมนูโหลดเร็ว)
+            {tx("📱 มือถือ: ซ่อนการ์ดสินค้า / รูปเด่น / การ์ดรูป (เหลือแต่ลิงก์ · เมนูโหลดเร็ว)", "📱 Phone: hide product cards / featured image / image cards (links only · menu loads faster)")}
           </label>
         </div>
       )}
@@ -1062,9 +1078,12 @@ function PanelLook({ panel, onChange, ctx }: { panel: MegaPanel; onChange: (p: M
 
 /* ───────── แม่แบบที่บันทึก ───────── */
 const panelSummary = (p: MegaPanel) => (p.layout === "tabs" ? `${p.tabs.length} แท็บ` : `${p.blocks.length} คอลัมน์`);
+/** ข้อความสรุปที่โชว์บนจอ (2 ภาษา) — ชื่อแม่แบบที่บันทึกยังใช้ panelSummary ไทย */
+const panelSummaryText = (p: MegaPanel) => (p.layout === "tabs" ? tr(`${p.tabs.length} แท็บ`, `${p.tabs.length} tabs`) : tr(`${p.blocks.length} คอลัมน์`, `${p.blocks.length} columns`));
 
 function SaveTemplateDialog({ open, onClose, shopId, panel, rename, onSaved }: { open: boolean; onClose: () => void; shopId: string; panel?: MegaPanel | null; rename?: MenuTemplate | null; onSaved?: () => void }) {
   const toast = useToast();
+  const tx = useT();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -1078,14 +1097,14 @@ function SaveTemplateDialog({ open, onClose, shopId, panel, rename, onSaved }: {
       const r = await apiFetch(API, { method: rename ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rename ? { id: rename.id, name: n } : { shopId, name: n, panel }) });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? tx("บันทึกไม่สำเร็จ", "Save failed"));
         return;
       }
-      toast.success(rename ? "แก้ชื่อแม่แบบแล้ว" : `บันทึกแม่แบบ “${n}” แล้ว — ใช้ได้กับทุกเมนูและทุกร้าน`);
+      toast.success(rename ? tx("แก้ชื่อแม่แบบแล้ว", "Template renamed") : tx(`บันทึกแม่แบบ “${n}” แล้ว — ใช้ได้กับทุกเมนูและทุกร้าน`, `Template “${n}” saved — usable in every menu and shop`));
       onSaved?.();
       onClose();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tx("เชื่อมต่อไม่ได้", "Can't connect"));
     } finally {
       setBusy(false);
     }
@@ -1094,22 +1113,22 @@ function SaveTemplateDialog({ open, onClose, shopId, panel, rename, onSaved }: {
     <ERPModal
       open={open}
       onClose={onClose}
-      title={rename ? "แก้ชื่อแม่แบบเมนู" : "💾 บันทึกแผงเมนูเป็นแม่แบบ"}
-      description={rename ? undefined : "เก็บทั้งคอลัมน์ ลิงก์ ไอคอน รูป และแท็บ ไว้ใช้กับเมนูอื่นหรือร้านอื่น (ใช้แล้วได้สำเนา แก้แยกกันได้)"}
+      title={rename ? tx("แก้ชื่อแม่แบบเมนู", "Rename menu template") : tx("💾 บันทึกแผงเมนูเป็นแม่แบบ", "💾 Save menu panel as template")}
+      description={rename ? undefined : tx("เก็บทั้งคอลัมน์ ลิงก์ ไอคอน รูป และแท็บ ไว้ใช้กับเมนูอื่นหรือร้านอื่น (ใช้แล้วได้สำเนา แก้แยกกันได้)", "Keeps columns, links, icons, images and tabs for other menus or shops (using it makes a copy you can edit separately)")}
       size="sm"
       defaultExpanded={false}
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button type="button" onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">
-            ยกเลิก
+            {tx("ยกเลิก", "Cancel")}
           </button>
           <button type="button" disabled={busy || !name.trim()} onClick={() => void save()} className="h-9 px-4 text-sm font-medium text-white rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
-            {busy ? "กำลังบันทึก…" : rename ? "บันทึกชื่อ" : "💾 บันทึกแม่แบบ"}
+            {busy ? tx("กำลังบันทึก…", "Saving…") : rename ? tx("บันทึกชื่อ", "Save name") : tx("💾 บันทึกแม่แบบ", "💾 Save template")}
           </button>
         </div>
       }
     >
-      <label className="block text-[11px] font-medium text-slate-500 mb-1">ชื่อแม่แบบ</label>
+      <label className="block text-[11px] font-medium text-slate-500 mb-1">{tx("ชื่อแม่แบบ", "Template name")}</label>
       <input
         autoFocus
         className="w-full h-9 rounded-lg border border-slate-200 px-3 text-sm"
@@ -1119,7 +1138,7 @@ function SaveTemplateDialog({ open, onClose, shopId, panel, rename, onSaved }: {
         onKeyDown={(e) => {
           if (e.key === "Enter") void save();
         }}
-        placeholder="เช่น เมนูกระเป๋า แบบไอคอน"
+        placeholder={tx("เช่น เมนูกระเป๋า แบบไอคอน", "e.g. Bags menu, icon style")}
       />
     </ERPModal>
   );
@@ -1131,6 +1150,7 @@ function MenuTemplatesModal({ open, onClose, shopId, onUse }: { open: boolean; o
   const [renaming, setRenaming] = useState<MenuTemplate | null>(null);
   const [deleting, setDeleting] = useState<MenuTemplate | null>(null);
   const [busy, setBusy] = useState(false);
+  const tx = useT();
   const load = useCallback(() => {
     apiFetch(API)
       .then((r) => r.json())
@@ -1146,14 +1166,14 @@ function MenuTemplatesModal({ open, onClose, shopId, onUse }: { open: boolean; o
     try {
       const r = await apiFetch(`${API}?id=${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
       const j = await r.json();
-      if (!j.ok) toast.error(j.error ?? "ลบไม่สำเร็จ");
+      if (!j.ok) toast.error(j.error ?? tx("ลบไม่สำเร็จ", "Delete failed"));
       else {
-        toast.success("ลบแม่แบบแล้ว — เมนูที่เคยใช้ไปแล้วไม่กระทบ");
+        toast.success(tx("ลบแม่แบบแล้ว — เมนูที่เคยใช้ไปแล้วไม่กระทบ", "Template deleted — menus that already used it are unaffected"));
         setDeleting(null);
         load();
       }
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tx("เชื่อมต่อไม่ได้", "Can't connect"));
     } finally {
       setBusy(false);
     }
@@ -1166,39 +1186,39 @@ function MenuTemplatesModal({ open, onClose, shopId, onUse }: { open: boolean; o
       <span className="flex-1 min-w-0">
         <span className="block text-sm text-slate-800 truncate">{t.name}</span>
         <span className="block text-[11px] text-slate-400 truncate">
-          {MEGA_TEMPLATES.find((x) => x.value === t.template)?.label} · {panelSummary(t.panel)}
-          {t.shopId !== shopId && ` · จากร้าน ${t.shopName ?? "อื่น"}`}
+          {labelEn(MEGA_TEMPLATES.find((x) => x.value === t.template)?.label)} · {panelSummaryText(t.panel)}
+          {t.shopId !== shopId && tx(` · จากร้าน ${t.shopName ?? "อื่น"}`, ` · from shop ${t.shopName ?? "other"}`)}
         </span>
       </span>
-      <button type="button" onClick={() => setRenaming(t)} title="แก้ชื่อ" className="w-7 h-7 text-xs text-slate-400 hover:text-slate-800">
+      <button type="button" onClick={() => setRenaming(t)} title={tx("แก้ชื่อ", "Rename")} className="w-7 h-7 text-xs text-slate-400 hover:text-slate-800">
         ✏️
       </button>
-      <button type="button" onClick={() => setDeleting(t)} title="ลบแม่แบบ" className="w-7 h-7 text-xs text-slate-400 hover:text-red-600">
+      <button type="button" onClick={() => setDeleting(t)} title={tx("ลบแม่แบบ", "Delete template")} className="w-7 h-7 text-xs text-slate-400 hover:text-red-600">
         🗑️
       </button>
       <button type="button" onClick={() => onUse(t)} className="h-8 px-3 rounded-lg border border-blue-200 text-xs font-medium text-blue-700 hover:bg-blue-50">
-        ใช้แม่แบบนี้
+        {tx("ใช้แม่แบบนี้", "Use this template")}
       </button>
     </div>
   );
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="📂 แม่แบบแผงเมนูที่บันทึกไว้" description="ใช้แล้วได้สำเนา แก้ต่อได้ — แทนแผงเดิมของเมนูนี้" size="md" defaultExpanded={false}>
+      <ERPModal open={open} onClose={onClose} title={tx("📂 แม่แบบแผงเมนูที่บันทึกไว้", "📂 Saved menu panel templates")} description={tx("ใช้แล้วได้สำเนา แก้ต่อได้ — แทนแผงเดิมของเมนูนี้", "Using one makes an editable copy — replaces this menu's current panel")} size="md" defaultExpanded={false}>
         {list === null ? (
-          <p className="text-sm text-slate-400 py-6 text-center">กำลังโหลด…</p>
+          <p className="text-sm text-slate-400 py-6 text-center">{tx("กำลังโหลด…", "Loading…")}</p>
         ) : !list.length ? (
-          <p className="text-sm text-slate-400 py-6 text-center">ยังไม่มีแม่แบบ — จัดแผงเมนูจนพอใจแล้วกด “💾 บันทึกเป็นแม่แบบ”</p>
+          <p className="text-sm text-slate-400 py-6 text-center">{tx("ยังไม่มีแม่แบบ — จัดแผงเมนูจนพอใจแล้วกด “💾 บันทึกเป็นแม่แบบ”", "No templates yet — set up a menu panel you like, then tap “💾 Save as template”")}</p>
         ) : (
           <div className="space-y-3">
             {mine.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] font-medium text-slate-500">ร้านนี้</p>
+                <p className="text-[11px] font-medium text-slate-500">{tx("ร้านนี้", "This shop")}</p>
                 {mine.map(row)}
               </div>
             )}
             {other.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] font-medium text-slate-500">จากร้านอื่น</p>
+                <p className="text-[11px] font-medium text-slate-500">{tx("จากร้านอื่น", "From other shops")}</p>
                 {other.map(row)}
               </div>
             )}
@@ -1212,9 +1232,9 @@ function MenuTemplatesModal({ open, onClose, shopId, onUse }: { open: boolean; o
         onConfirm={() => void remove()}
         loading={busy}
         variant="danger"
-        title={`ลบแม่แบบ “${deleting?.name ?? ""}”?`}
-        message="เมนูที่เคยใช้แม่แบบนี้ไปแล้วจะไม่เปลี่ยน (เป็นสำเนาแยก) — ลบแล้วแม่แบบนี้จะหายจากทุกร้าน"
-        confirmText="ลบแม่แบบ"
+        title={tx(`ลบแม่แบบ “${deleting?.name ?? ""}”?`, `Delete template “${deleting?.name ?? ""}”?`)}
+        message={tx("เมนูที่เคยใช้แม่แบบนี้ไปแล้วจะไม่เปลี่ยน (เป็นสำเนาแยก) — ลบแล้วแม่แบบนี้จะหายจากทุกร้าน", "Menus that already used this template won't change (they're separate copies) — deleting removes it from every shop")}
+        confirmText={tx("ลบแม่แบบ", "Delete template")}
       />
     </>
   );
@@ -1226,6 +1246,7 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
   const [tplOpen, setTplOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const toast = useToast();
+  const tx = useT();
 
   // 👁 พรีวิว: เปิดแผงของเมนูนี้ค้างไว้ระหว่างแก้ (หน้าดีไซน์รับ event แล้วส่งต่อให้เว็บร้าน)
   const hasPanel = !!panel;
@@ -1242,7 +1263,7 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
     if (megaHasContent(panel)) setConfirm({ next, title });
     else onChange(next);
   };
-  const pickTemplate = (t: MegaTemplate) => change(megaPreset(t, { categories: ctx.categories }), `เปลี่ยนเป็นแบบ ${t}?`);
+  const pickTemplate = (t: MegaTemplate) => change(megaPreset(t, { categories: ctx.categories }), tx(`เปลี่ยนเป็นแบบ ${t}?`, `Switch to style ${t}?`));
   // 🔎 ชุดตรวจลิงก์เสีย (หมวด/สินค้า/หน้า/คอลเลกชันที่มีอยู่จริง)
   const sets = useMemo<IssueSets>(
     () => ({
@@ -1258,29 +1279,29 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
   return (
     <div className="space-y-2">
       <div>
-        <span className="block text-[11px] text-slate-500 mb-1">หน้าตาเมนูย่อย</span>
+        <span className="block text-[11px] text-slate-500 mb-1">{tx("หน้าตาเมนูย่อย", "Submenu look")}</span>
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
-            onClick={() => panel && change(null, "กลับไปใช้เมนูย่อยธรรมดา?")}
+            onClick={() => panel && change(null, tx("กลับไปใช้เมนูย่อยธรรมดา?", "Go back to a plain submenu?"))}
             className={`text-[11px] px-2 h-7 rounded-md border ${!panel ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
-            title="รายการเลื่อนลง / แผงรูปหมวด (แบบเดิม)"
+            title={tx("รายการเลื่อนลง / แผงรูปหมวด (แบบเดิม)", "Dropdown list / category image panel (classic)")}
           >
-            เมนูย่อยธรรมดา
+            {tx("เมนูย่อยธรรมดา", "Plain submenu")}
           </button>
           {MEGA_TEMPLATES.map((t) => (
             <button
               key={t.value}
               type="button"
-              title={t.hint}
+              title={labelEn(t.hint)}
               onClick={() => panel?.template !== t.value && pickTemplate(t.value)}
               className={`text-[11px] px-2 h-7 rounded-md border ${panel?.template === t.value ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
             >
-              แบบ {t.value} · {t.label}
+              {tx("แบบ", "Style")} {t.value} · {labelEn(t.label)}
             </button>
           ))}
           <button type="button" onClick={() => setTplOpen(true)} className="text-[11px] px-2 h-7 rounded-md border border-dashed border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700">
-            📂 แม่แบบที่บันทึก…
+            {tx("📂 แม่แบบที่บันทึก…", "📂 Saved templates…")}
           </button>
         </div>
       </div>
@@ -1288,18 +1309,18 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
       {panel && (
         <IssueCtx.Provider value={sets}>
         <div className="rounded-lg border border-blue-100 bg-blue-50/30 p-2 space-y-2">
-          {issues > 0 && <p className="text-[11px] rounded-md bg-amber-50 border border-amber-200 text-amber-800 px-2 py-1">⚠️ มีลิงก์ที่อาจเสีย {issues} จุด (หมวด/หน้า/สินค้าที่ไม่มีแล้ว) — ดูป้าย ⚠️ ในรายการด้านล่าง</p>}
+          {issues > 0 && <p className="text-[11px] rounded-md bg-amber-50 border border-amber-200 text-amber-800 px-2 py-1">{tx(`⚠️ มีลิงก์ที่อาจเสีย ${issues} จุด (หมวด/หน้า/สินค้าที่ไม่มีแล้ว) — ดูป้าย ⚠️ ในรายการด้านล่าง`, `⚠️ ${issues} possibly broken links (categories/pages/products that no longer exist) — see the ⚠️ badges below`)}</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-blue-800">👁 พรีวิวด้านขวาเปิดแผงนี้ค้างไว้ (ดูที่จอคอม)</span>
+            <span className="text-[11px] text-blue-800">{tx("👁 พรีวิวด้านขวาเปิดแผงนี้ค้างไว้ (ดูที่จอคอม)", "👁 The preview on the right keeps this panel open (view on desktop)")}</span>
             <span className="flex-1" />
             <button type="button" disabled={!megaHasContent(panel)} onClick={() => setSaveOpen(true)} className="text-[11px] px-2 h-7 rounded-md border border-slate-200 bg-white text-slate-700 hover:border-blue-400 disabled:opacity-40">
-              💾 บันทึกเป็นแม่แบบ
+              {tx("💾 บันทึกเป็นแม่แบบ", "💾 Save as template")}
             </button>
           </div>
           {panel.layout === "tabs" ? <TabsEditor panel={panel} onChange={onChange} ctx={ctx} /> : <BlocksEditor panel={panel} onChange={onChange} ctx={ctx} />}
           <label className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-500 shrink-0">ลิงก์ท้ายแผง</span>
-            <LangInput className={`${mini} flex-1`} obj={panel} k="viewAllLabel" maxLength={40} placeholder='เช่น "ดูสินค้าทั้งหมด →" (ไม่ใส่ = ไม่โชว์ · ไปที่ลิงก์ของเมนูนี้)' onPatch={(p) => onChange({ ...panel, ...p })} />
+            <span className="text-[11px] text-slate-500 shrink-0">{tx("ลิงก์ท้ายแผง", "Panel footer link")}</span>
+            <LangInput className={`${mini} flex-1`} obj={panel} k="viewAllLabel" maxLength={40} placeholder={tx('เช่น "ดูสินค้าทั้งหมด →" (ไม่ใส่ = ไม่โชว์ · ไปที่ลิงก์ของเมนูนี้)', 'e.g. "See all products →" (empty = hidden · goes to this menu\'s link)')} onPatch={(p) => onChange({ ...panel, ...p })} />
           </label>
           <PanelLook panel={panel} onChange={onChange} ctx={ctx} />
         </div>
@@ -1312,8 +1333,8 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
         shopId={ctx.shopId}
         onUse={(t) => {
           setTplOpen(false);
-          change(JSON.parse(JSON.stringify(t.panel)) as MegaPanel, `ใช้แม่แบบ “${t.name}”?`);
-          if (!megaHasContent(panel)) toast.success(`ใช้แม่แบบ “${t.name}” แล้ว — แก้ต่อได้ · กด ↶ เพื่อย้อนกลับ`);
+          change(JSON.parse(JSON.stringify(t.panel)) as MegaPanel, tx(`ใช้แม่แบบ “${t.name}”?`, `Use template “${t.name}”?`));
+          if (!megaHasContent(panel)) toast.success(tx(`ใช้แม่แบบ “${t.name}” แล้ว — แก้ต่อได้ · กด ↶ เพื่อย้อนกลับ`, `Template “${t.name}” applied — keep editing · tap ↶ to undo`));
         }}
       />
       <SaveTemplateDialog open={saveOpen} onClose={() => setSaveOpen(false)} shopId={ctx.shopId} panel={panel} />
@@ -1325,8 +1346,8 @@ export function MegaMenuEditor({ itemId, panel, onChange, ctx }: { itemId: strin
           setConfirm(null);
         }}
         title={confirm?.title ?? ""}
-        message="แผงเมนูเดิม (คอลัมน์/ลิงก์/รูปที่จัดไว้) จะถูกแทน — ยังไม่ขึ้นเว็บจนกดเผยแพร่ และกด ↶ ย้อนได้"
-        confirmText="แทนเลย"
+        message={tx("แผงเมนูเดิม (คอลัมน์/ลิงก์/รูปที่จัดไว้) จะถูกแทน — ยังไม่ขึ้นเว็บจนกดเผยแพร่ และกด ↶ ย้อนได้", "The current menu panel (columns/links/images) will be replaced — not live until you publish, and ↶ can undo")}
+        confirmText={tx("แทนเลย", "Replace")}
       />
     </div>
   );

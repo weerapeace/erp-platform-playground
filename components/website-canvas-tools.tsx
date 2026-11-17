@@ -22,6 +22,7 @@ import { CANVAS_MAX_HEIGHT, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH } from "@/lib/webs
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 import { sanitizeField } from "@/lib/website-blocks";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
+import { useT } from "@/components/i18n";
 
 const clampInt = (v: unknown, min: number, max: number): number | null => {
   const n = Number(v);
@@ -228,22 +229,23 @@ const chip = "flex-1 min-w-[64px] rounded-lg border border-slate-200 bg-white px
 /** แผงขวาของตัวจัดหน้าเมื่อเลือกผืน: ปุ่มเปิดแก้เต็มจอ (แนะนำ) + ทางลัดเพิ่มชิ้น (เปิดป๊อปอัปไปที่เครื่องมือนั้นเลย) */
 export function CanvasAddBar({ onOpen, count, max, mobileCustom }: { onOpen: (action?: string) => void; count: number; max: number; mobileCustom?: boolean }) {
   const full = count >= max;
+  const t = useT();
   return (
     <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2.5">
       <button onClick={() => onOpen()} className="w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
-        ✏️ แก้แบบเต็มจอ
+        {t("✏️ แก้แบบเต็มจอ", "✏️ Edit full screen")}
       </button>
       <button onClick={() => onOpen("templates")} className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 hover:border-blue-400">
-        📐 แม่แบบ — เริ่มจากแบบสำเร็จ / บันทึกผืนนี้ไว้ใช้ซ้ำ
+        {t("📐 แม่แบบ — เริ่มจากแบบสำเร็จ / บันทึกผืนนี้ไว้ใช้ซ้ำ", "📐 Templates — start from a ready-made one / save this canvas for reuse")}
       </button>
-      <p className="text-xs font-medium text-slate-700">เพิ่มบนผืน {full && <span className="text-red-600">(ครบ {max} ชิ้นแล้ว)</span>}</p>
+      <p className="text-xs font-medium text-slate-700">{t("เพิ่มบนผืน", "Add to canvas")} {full && <span className="text-red-600">{t(`(ครบ ${max} ชิ้นแล้ว)`, `(limit of ${max} reached)`)}</span>}</p>
       <div className="flex flex-wrap gap-1.5">
         {(
           [
-            ["add-image", "🖼️ รูป"],
-            ["add-text", "🔤 ข้อความ"],
-            ["add-button", "🔘 ปุ่ม"],
-            ["add-shape", "🎀 ของตกแต่ง"],
+            ["add-image", t("🖼️ รูป", "🖼️ Image")],
+            ["add-text", t("🔤 ข้อความ", "🔤 Text")],
+            ["add-button", t("🔘 ปุ่ม", "🔘 Button")],
+            ["add-shape", t("🎀 ของตกแต่ง", "🎀 Decoration")],
           ] as [string, string][]
         ).map(([a, l]) => (
           <button key={a} disabled={full} onClick={() => onOpen(a)} className={`${chip} disabled:opacity-40`}>
@@ -252,9 +254,9 @@ export function CanvasAddBar({ onOpen, count, max, mobileCustom }: { onOpen: (ac
         ))}
       </div>
       <p className="text-[11px] text-slate-500 leading-relaxed">
-        ดับเบิลคลิกที่ว่างบนผืนในพรีวิวก็เปิดแก้เต็มจอได้ · คลิกชิ้นในพรีวิวจะมีแถบเครื่องมือลอย (เปลี่ยนรูป/กรอบ/สี/ลิงก์) · Shift+คลิก หรือลากกรอบ = เลือกหลายชิ้น
+        {t("ดับเบิลคลิกที่ว่างบนผืนในพรีวิวก็เปิดแก้เต็มจอได้ · คลิกชิ้นในพรีวิวจะมีแถบเครื่องมือลอย (เปลี่ยนรูป/กรอบ/สี/ลิงก์) · Shift+คลิก หรือลากกรอบ = เลือกหลายชิ้น", "Double-click empty canvas in the preview to open full-screen editing too · clicking an item in the preview shows a floating toolbar (image/frame/color/link) · Shift+click or drag a box = select multiple")}
         <br />
-        {mobileCustom ? `มือถือ: จัดเอง (ผืนมือถือกว้าง ${CANVAS_MOBILE_WIDTH}) — สลับเป็นมือถือในหน้าแก้เต็มจอเพื่อจัด` : "มือถือ: เรียงชิ้นลงมาให้อัตโนมัติตามตำแหน่ง บน→ล่าง (จัดเองได้ในหน้าแก้เต็มจอ → 📲 มือถือ)"}
+        {mobileCustom ? t(`มือถือ: จัดเอง (ผืนมือถือกว้าง ${CANVAS_MOBILE_WIDTH}) — สลับเป็นมือถือในหน้าแก้เต็มจอเพื่อจัด`, `Mobile: arranged manually (mobile canvas ${CANVAS_MOBILE_WIDTH} wide) — switch to mobile in full-screen editing to arrange`) : t("มือถือ: เรียงชิ้นลงมาให้อัตโนมัติตามตำแหน่ง บน→ล่าง (จัดเองได้ในหน้าแก้เต็มจอ → 📲 มือถือ)", "Mobile: items auto-stack by position, top→bottom (arrange manually in full-screen editing → 📲 Mobile)")}
       </p>
     </div>
   );
@@ -275,20 +277,21 @@ export function CanvasItemTools({
 }) {
   const w = Number(item.w) || 0;
   const btn = "rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 hover:border-slate-400 disabled:opacity-40";
+  const t = useT();
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-2">
       <div className="flex flex-wrap items-center gap-1">
-        <span className="text-[11px] text-slate-500 mr-1">ชั้น {index + 1}/{count}</span>
-        <button className={btn} disabled={index === count - 1} onClick={() => onLayer("front")} title="ไว้หน้าสุด">⤒ หน้าสุด</button>
-        <button className={btn} disabled={index === count - 1} onClick={() => onLayer("up")} title="ขึ้นมาหนึ่งชั้น">↑</button>
-        <button className={btn} disabled={index === 0} onClick={() => onLayer("down")} title="ลงไปหนึ่งชั้น">↓</button>
-        <button className={btn} disabled={index === 0} onClick={() => onLayer("back")} title="ไว้หลังสุด">⤓ หลังสุด</button>
+        <span className="text-[11px] text-slate-500 mr-1">{t(`ชั้น ${index + 1}/${count}`, `Layer ${index + 1}/${count}`)}</span>
+        <button className={btn} disabled={index === count - 1} onClick={() => onLayer("front")} title={t("ไว้หน้าสุด", "Bring to front")}>{t("⤒ หน้าสุด", "⤒ Front")}</button>
+        <button className={btn} disabled={index === count - 1} onClick={() => onLayer("up")} title={t("ขึ้นมาหนึ่งชั้น", "Bring forward")}>↑</button>
+        <button className={btn} disabled={index === 0} onClick={() => onLayer("down")} title={t("ลงไปหนึ่งชั้น", "Send backward")}>↓</button>
+        <button className={btn} disabled={index === 0} onClick={() => onLayer("back")} title={t("ไว้หลังสุด", "Send to back")}>{t("⤓ หลังสุด", "⤓ Back")}</button>
       </div>
       <div className="flex flex-wrap items-center gap-1">
-        <button className={btn} onClick={() => onPatch({ x: Math.round((CANVAS_WIDTH - w) / 2) })} title="วางกึ่งกลางผืนตามแนวนอน">↔ กึ่งกลางผืน</button>
-        <button className={btn} onClick={() => onPatch({ rotate: 0 })} disabled={!Number(item.rotate)}>⟲ เลิกหมุน</button>
-        <button className={btn} onClick={() => onPatch({ locked: !item.locked })}>{item.locked ? "🔓 ปลดล็อก" : "🔒 ล็อก"}</button>
-        <button className={btn} onClick={() => onPatch({ hideMobile: !item.hideMobile })}>{item.hideMobile ? "📲 โชว์บนมือถือ" : "📵 ซ่อนบนมือถือ"}</button>
+        <button className={btn} onClick={() => onPatch({ x: Math.round((CANVAS_WIDTH - w) / 2) })} title={t("วางกึ่งกลางผืนตามแนวนอน", "Center horizontally on canvas")}>{t("↔ กึ่งกลางผืน", "↔ Center on canvas")}</button>
+        <button className={btn} onClick={() => onPatch({ rotate: 0 })} disabled={!Number(item.rotate)}>{t("⟲ เลิกหมุน", "⟲ Reset rotation")}</button>
+        <button className={btn} onClick={() => onPatch({ locked: !item.locked })}>{item.locked ? t("🔓 ปลดล็อก", "🔓 Unlock") : t("🔒 ล็อก", "🔒 Lock")}</button>
+        <button className={btn} onClick={() => onPatch({ hideMobile: !item.hideMobile })}>{item.hideMobile ? t("📲 โชว์บนมือถือ", "📲 Show on mobile") : t("📵 ซ่อนบนมือถือ", "📵 Hide on mobile")}</button>
       </div>
     </div>
   );

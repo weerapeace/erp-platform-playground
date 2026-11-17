@@ -50,6 +50,9 @@ import { DropInsertsField } from "@/components/website-drop-inserts-field";
 import { coverageOf, hasText, type ContentLang } from "@/lib/content-i18n";
 import { translateContent } from "@/lib/content-translate";
 import { applySlotTranslations, collectTextSlots, previewInEnglish, slotSourceTexts, slotValueFrom, type TextSlot } from "@/lib/website-i18n";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn, messageEn } from "@/lib/website-schema-en";
 
 /** URL พรีวิวฉบับภาษาอังกฤษ — ของกลางย้ายไป lib/website-i18n (หน้าดีไซน์ใช้ด้วย) · ส่งต่อชื่อเดิมไว้ */
 export { previewInEnglish };
@@ -69,9 +72,9 @@ const PREVIEW_TIMEOUT_MS = 20_000;
 const PREVIEW_SLOW_MS = 8_000;
 
 export const DEVICES: { k: Device; w: number; h: number; icon: string; label: string }[] = [
-  { k: "desktop", w: 1440, h: 900, icon: "🖥️", label: "คอมพิวเตอร์" },
-  { k: "tablet", w: 768, h: 1024, icon: "📱", label: "แท็บเล็ต" },
-  { k: "mobile", w: 390, h: 844, icon: "📲", label: "มือถือ" },
+  { k: "desktop", w: 1440, h: 900, icon: "🖥️", get label() { return tr("คอมพิวเตอร์", "Desktop"); } },
+  { k: "tablet", w: 768, h: 1024, icon: "📱", get label() { return tr("แท็บเล็ต", "Tablet"); } },
+  { k: "mobile", w: 390, h: 844, icon: "📲", get label() { return tr("มือถือ", "Phone"); } },
 ];
 
 /** สรุปว่าร่างต่างจากที่เผยแพร่ตรงไหน (เป็นชื่อ Section ที่อ่านออก — ตัวที่เรียกใช้คำนวณให้) */
@@ -134,9 +137,9 @@ const inInput = (el: EventTarget | null) => {
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 };
 const DEVICE_OPTS = [
-  { k: "desktop" as const, l: "🖥️ คอม" },
-  { k: "tablet" as const, l: "📱 แท็บเล็ต" },
-  { k: "mobile" as const, l: "📲 มือถือ" },
+  { k: "desktop" as const, get l() { return tr("🖥️ คอม", "🖥️ Desktop"); } },
+  { k: "tablet" as const, get l() { return tr("📱 แท็บเล็ต", "📱 Tablet"); } },
+  { k: "mobile" as const, get l() { return tr("📲 มือถือ", "📲 Phone"); } },
 ];
 
 type Drag =
@@ -238,6 +241,7 @@ export function WebsiteBuilder({
   /** ป๊อปถามยืนยันเปิดอยู่ → พักคีย์ลัดของตัวจัดหน้า */
   const askingRef = useRef(false);
   const toast = useToast();
+  const t = useT();
 
   // ⚡ พรีวิวสด: เว็บร้านตอบ storefront-live-ready → ส่งโครงหน้าล่าสุดไปวาดทันทีทุกครั้งที่แก้ (ไม่ต้องรอบันทึกร่าง/โหลดหน้าใหม่)
   // บันทึกร่างแล้ว → โหลดพรีวิวใหม่ "เฉพาะสิ่งที่พรีวิวทำเองไม่ได้" (lib/website-live-preview.ts)
@@ -368,7 +372,8 @@ export function WebsiteBuilder({
       if (!b) return;
       const name = cleanBlockName(raw);
       const typeLabel = SECTION_SCHEMAS[b.type]?.meta.label ?? b.type;
-      if (!name || name === typeLabel) {
+      // ชื่อชนิดที่โชว์ในโหมด EN ก็นับเป็น "ชื่อชนิด" (กดบันทึกโดยไม่แก้ = ไม่เก็บชื่ออังกฤษเป็นชื่อเอง)
+      if (!name || name === typeLabel || name === labelEn(typeLabel)) {
         if (!("name" in b)) return;
         onChange(blocksRef.current.map((x) => { if (x.id !== id) return x; const c = { ...x }; delete c.name; return c; }));
         return;
@@ -403,11 +408,11 @@ export function WebsiteBuilder({
   const removeSection = useCallback(
     async (id: string) => {
       const b = blocksRef.current.find((x) => x.id === id);
-      const label = types.find((t) => t.type === b?.type)?.label ?? "บล็อก";
+      const label = labelEn(types.find((x) => x.type === b?.type)?.label) ?? tr("บล็อก", "Block");
       // ระหว่างถาม ปิดคีย์ลัดของตัวจัดหน้า (Esc ยกเลิกป๊อป ≠ ออกจากเต็มจอ · Delete ซ้ำไม่เปิดป๊อปซ้อน)
       // ปลดหลังจบการกดปุ่มนั้นทั้งหมด (setTimeout) — ป๊อปปิดก่อนที่ window จะได้ Esc ตัวเดียวกัน
       askingRef.current = true;
-      const ok = await askConfirm({ title: `ลบ "${label}" ออกจากหน้า?`, variant: "danger", confirmText: "ลบ" }).finally(() =>
+      const ok = await askConfirm({ title: tr(`ลบ "${label}" ออกจากหน้า?`, `Remove "${label}" from the page?`), variant: "danger", confirmText: tr("ลบ", "Delete") }).finally(() =>
         setTimeout(() => (askingRef.current = false), 0)
       );
       if (!ok) return;
@@ -819,7 +824,7 @@ export function WebsiteBuilder({
     const active = overIdx === idx;
     return (
       <li className={`rounded transition-all ${active ? "h-7 border-2 border-dashed border-blue-500 bg-blue-50 flex items-center justify-center" : "h-1.5"}`}>
-        {active && <span className="text-[10px] font-medium text-blue-600">วางตรงนี้</span>}
+        {active && <span className="text-[10px] font-medium text-blue-600">{t("วางตรงนี้", "Drop here")}</span>}
       </li>
     );
   };
@@ -845,13 +850,13 @@ export function WebsiteBuilder({
     try {
       parsed = JSON.parse(raw);
     } catch {
-      setAiError("อ่าน JSON ไม่ออก — ให้ AI ตอบเป็น JSON array ล้วน ๆ (เริ่มด้วย [ จบด้วย ])");
+      setAiError(t("อ่าน JSON ไม่ออก — ให้ AI ตอบเป็น JSON array ล้วน ๆ (เริ่มด้วย [ จบด้วย ])", "Can't read the JSON — ask the AI to reply with a plain JSON array only (start with [ and end with ])"));
       return;
     }
     const list = Array.isArray(parsed) ? parsed : [parsed];
     const known = list.filter((b) => b && typeof b === "object" && SECTION_SCHEMAS[String((b as { type?: string }).type)]);
     if (!known.length) {
-      setAiError("ไม่พบ Section ชนิดที่ระบบรู้จักใน JSON นี้ (ดูรายการชนิดในคำสั่ง)");
+      setAiError(t("ไม่พบ Section ชนิดที่ระบบรู้จักใน JSON นี้ (ดูรายการชนิดในคำสั่ง)", "No known section types found in this JSON (see the type list in the prompt)"));
       return;
     }
     const fresh = normalizeBlocks(known).map((b) => {
@@ -865,14 +870,14 @@ export function WebsiteBuilder({
     onSelect({ blockId: fresh[0].id });
     setShowAi(false);
     setAiJson("");
-    if (known.length < list.length) toast.warning(`เพิ่ม ${fresh.length} Section แล้ว · ข้าม ${list.length - known.length} ก้อนที่ระบบไม่รู้จัก`);
+    if (known.length < list.length) toast.warning(t(`เพิ่ม ${fresh.length} Section แล้ว · ข้าม ${list.length - known.length} ก้อนที่ระบบไม่รู้จัก`, `Added ${fresh.length} sections · skipped ${list.length - known.length} unknown items`));
   };
 
   /* ── คลัง Section ── */
   const allowedTypes = useMemo(() => new Set<string>(types.map((t) => t.type)), [types]);
   const grouped = useMemo(() => {
     const q = libQuery.trim().toLowerCase();
-    const hit = types.filter((t) => !q || t.label.toLowerCase().includes(q) || t.hint.toLowerCase().includes(q) || t.type.includes(q));
+    const hit = types.filter((t) => !q || t.label.toLowerCase().includes(q) || t.hint.toLowerCase().includes(q) || t.type.includes(q) || labelEn(t.label).toLowerCase().includes(q) || labelEn(t.hint).toLowerCase().includes(q));
     const map = new Map<string, BlockTypeInfo[]>();
     for (const t of hit) {
       const g = t.group ?? "อื่น ๆ";
@@ -906,10 +911,12 @@ export function WebsiteBuilder({
   const convertToFolders = async (b: Block) => {
     const g = b as unknown as Record<string, unknown>;
     const ok = await askConfirm({
-      title: "แปลงเป็น 🗂 แฟ้มวางอิสระ?",
-      message:
+      title: t("แปลงเป็น 🗂 แฟ้มวางอิสระ?", "Convert to 🗂 Free folders?"),
+      message: t(
         "รูป/คลิป หัวข้อ คำอธิบาย ลิงก์ ป้ายบนหู สีแฟ้ม และหน้าตาแฟ้มทั้งหมด ย้ายไปครบ — จากนั้นแต่ละแฟ้มเพิ่มข้อความ รูป วิดีโอ ปุ่ม ของตกแต่ง ได้อิสระ · Section แกลเลอรีเดิมถูกแทนที่ (กด ↶ ย้อนกลับได้ · ยังไม่ขึ้นเว็บจนกว่าจะเผยแพร่)",
-      confirmText: "แปลงเลย",
+        "Images/clips, titles, descriptions, links, tab labels, folder colors and the whole folder look all move over — then each folder can freely get text, images, video, buttons, decorations · the original gallery section is replaced (↶ to undo · not live until you publish)",
+      ),
+      confirmText: t("แปลงเลย", "Convert"),
     });
     if (!ok) return;
     // ช่องที่ใช้รูปจากสินค้า (ไม่ได้ใส่รูปเอง) → หารูปแรก/ชื่อ/ลิงก์ของสินค้า
@@ -937,7 +944,7 @@ export function WebsiteBuilder({
     onSelect({ blockId: fresh.id });
     setPropTab("content");
     setExpanded((x) => new Set(x).add(fresh.id));
-    toast.success(`แปลงเป็นแฟ้มวางอิสระแล้ว (${res.folders} แฟ้ม) — กด "✏️ แก้แบบเต็มจอ" แล้วเปิดแฟ้มไหน ของใหม่ลงแฟ้มนั้น`);
+    toast.success(t(`แปลงเป็นแฟ้มวางอิสระแล้ว (${res.folders} แฟ้ม) — กด "✏️ แก้แบบเต็มจอ" แล้วเปิดแฟ้มไหน ของใหม่ลงแฟ้มนั้น`, `Converted to free folders (${res.folders} folders) — tap "✏️ Full-screen edit"; new items go into whichever folder is open`));
     for (const w of res.warnings) toast.warning(w);
   };
 
@@ -984,11 +991,11 @@ export function WebsiteBuilder({
       });
       const out = await translateContent(texts, "en", { place: "website" });
       const results = todo.map((slot, k) => ({ slot, en: slotValueFrom(slot, out.slice(at[k][0], at[k][0] + at[k][1])) })).filter((r) => hasText(r.en));
-      if (!results.length) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
+      if (!results.length) throw new Error(t("แปลไม่สำเร็จ ลองใหม่อีกครั้ง", "Translation failed, please try again"));
       onChange(applySlotTranslations(blocksRef.current, results, true));
-      if (results.length < todo.length) setTxError({ scope, msg: `แปลได้ ${results.length}/${todo.length} ช่อง — กดอีกครั้งเพื่อแปลส่วนที่เหลือ` });
+      if (results.length < todo.length) setTxError({ scope, msg: t(`แปลได้ ${results.length}/${todo.length} ช่อง — กดอีกครั้งเพื่อแปลส่วนที่เหลือ`, `Translated ${results.length}/${todo.length} fields — tap again to translate the rest`) });
     } catch (e) {
-      setTxError({ scope, msg: e instanceof Error ? e.message : "แปลไม่สำเร็จ" });
+      setTxError({ scope, msg: e instanceof Error ? e.message : t("แปลไม่สำเร็จ", "Translation failed") });
     } finally {
       setTxBusy(null);
     }
@@ -1040,37 +1047,37 @@ export function WebsiteBuilder({
           <button
             onClick={() => setShowChanges((v) => !v)}
             className={`text-xs px-2.5 py-1 rounded-full font-medium border ${toolbar.dirty ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
-            title={toolbar.dirty ? "กดดูว่าเปลี่ยนอะไรไปบ้าง" : "ตรงกับเว็บจริงแล้ว"}
+            title={toolbar.dirty ? t("กดดูว่าเปลี่ยนอะไรไปบ้าง", "See what changed") : t("ตรงกับเว็บจริงแล้ว", "Matches the live site")}
           >
-            {toolbar.dirty ? "● ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
+            {toolbar.dirty ? t("● ยังไม่เผยแพร่", "● Not published") : t("✓ เผยแพร่แล้ว", "✓ Published")}
           </button>
           {showChanges && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowChanges(false)} />
               <div className="absolute left-0 top-8 z-20 w-72 rounded-xl border border-slate-200 bg-white shadow-lg p-3 text-xs space-y-1.5">
-                <p className="font-medium text-slate-800">{toolbar.dirty ? "สิ่งที่ต่างจากเว็บจริง" : "ตรงกับเว็บจริงแล้ว"}</p>
+                <p className="font-medium text-slate-800">{toolbar.dirty ? t("สิ่งที่ต่างจากเว็บจริง", "Differences from the live site") : t("ตรงกับเว็บจริงแล้ว", "Matches the live site")}</p>
                 {hasChanges ? (
                   <>
-                    {toolbar.changes!.added.length > 0 && <p className="text-emerald-700">+ เพิ่ม: {toolbar.changes!.added.join(", ")}</p>}
-                    {toolbar.changes!.removed.length > 0 && <p className="text-red-600">− ลบ: {toolbar.changes!.removed.join(", ")}</p>}
-                    {toolbar.changes!.changed.length > 0 && <p className="text-blue-700">✎ แก้: {toolbar.changes!.changed.join(", ")}</p>}
+                    {toolbar.changes!.added.length > 0 && <p className="text-emerald-700">{t("+ เพิ่ม:", "+ Added:")} {toolbar.changes!.added.map((x) => labelEn(x)).join(", ")}</p>}
+                    {toolbar.changes!.removed.length > 0 && <p className="text-red-600">{t("− ลบ:", "− Removed:")} {toolbar.changes!.removed.map((x) => labelEn(x)).join(", ")}</p>}
+                    {toolbar.changes!.changed.length > 0 && <p className="text-blue-700">{t("✎ แก้:", "✎ Edited:")} {toolbar.changes!.changed.map((x) => labelEn(x)).join(", ")}</p>}
                   </>
                 ) : (
-                  <p className="text-slate-500">{toolbar.dirty ? "มีร่างที่บันทึกไว้ (เนื้อหาเหมือนที่เผยแพร่)" : "ไม่มีการเปลี่ยนแปลงค้างอยู่"}</p>
+                  <p className="text-slate-500">{toolbar.dirty ? t("มีร่างที่บันทึกไว้ (เนื้อหาเหมือนที่เผยแพร่)", "A saved draft exists (content same as published)") : t("ไม่มีการเปลี่ยนแปลงค้างอยู่", "No pending changes")}</p>
                 )}
-                {toolbar.dirty && <p className="text-slate-400 pt-1">กด &quot;เผยแพร่&quot; เพื่อให้ขึ้นเว็บจริง</p>}
+                {toolbar.dirty && <p className="text-slate-400 pt-1">{t('กด "เผยแพร่" เพื่อให้ขึ้นเว็บจริง', 'Tap "Publish" to put it on the live site')}</p>}
               </div>
             </>
           )}
         </div>
       )}
       {toolbar?.statusNote && <span className="hidden md:inline text-[11px] text-slate-400">{toolbar.statusNote}</span>}
-      {toolbar && <span className="text-[11px] text-slate-400">{toolbar.saving ? "กำลังบันทึก…" : toolbar.savedText ?? ""}</span>}
+      {toolbar && <span className="text-[11px] text-slate-400">{toolbar.saving ? t("กำลังบันทึก…", "Saving…") : toolbar.savedText ?? ""}</span>}
       {toolbar && (errors.length > 0 || warnings.length > 0) && (
         <div className="relative">
-          <button onClick={() => setShowIssues((v) => !v)} className={`text-[11px] px-2 py-1 rounded-full border ${errors.length ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`} title="กดดูรายละเอียด">
-            {errors.length ? `⚠️ ควรแก้ ${errors.length} จุด` : `💡 แนะนำ ${warnings.length}`}
-            {errors.length > 0 && warnings.length > 0 && ` · เตือน ${warnings.length}`}
+          <button onClick={() => setShowIssues((v) => !v)} className={`text-[11px] px-2 py-1 rounded-full border ${errors.length ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`} title={t("กดดูรายละเอียด", "See details")}>
+            {errors.length ? t(`⚠️ ควรแก้ ${errors.length} จุด`, `⚠️ ${errors.length} to fix`) : t(`💡 แนะนำ ${warnings.length}`, `💡 ${warnings.length} tips`)}
+            {errors.length > 0 && warnings.length > 0 && t(` · เตือน ${warnings.length}`, ` · ${warnings.length} warnings`)}
           </button>
           {showIssues && (
             <>
@@ -1079,10 +1086,10 @@ export function WebsiteBuilder({
                 {toolbar.issues.map((it, i) => (
                   <li key={i} className="flex items-start gap-2 text-xs px-1 py-1">
                     <span className={it.level === "error" ? "text-red-600" : "text-amber-600"}>{it.level === "error" ? "✕" : "!"}</span>
-                    <span className="flex-1 text-slate-700">{it.message}</span>
+                    <span className="flex-1 text-slate-700">{messageEn(it.message)}</span>
                     {it.fix && (
                       <a href={it.fix} target="_blank" rel="noopener" className="text-blue-600 hover:underline whitespace-nowrap">
-                        ไปแก้ ↗
+                        {t("ไปแก้ ↗", "Fix ↗")}
                       </a>
                     )}
                     {it.blockId && (
@@ -1095,7 +1102,7 @@ export function WebsiteBuilder({
                         }}
                         className="text-blue-600 hover:underline whitespace-nowrap"
                       >
-                        ไปที่
+                        {t("ไปที่", "Go")}
                       </button>
                     )}
                   </li>
@@ -1111,24 +1118,24 @@ export function WebsiteBuilder({
           <button
             onClick={() => setShowLang((v) => !v)}
             className={`text-[11px] px-2 py-1 rounded-full border ${contentLang === "en" ? "bg-indigo-50 text-indigo-700 border-indigo-200" : pageCov.missing ? "bg-white text-slate-600 border-slate-200 hover:bg-slate-50" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
-            title="ภาษาอังกฤษของหน้านี้ — กดดูส่วนที่ยังขาด / แปลทีเดียวทั้งหน้า"
+            title={t("ภาษาอังกฤษของหน้านี้ — กดดูส่วนที่ยังขาด / แปลทีเดียวทั้งหน้า", "English for this page — see what's missing / translate the whole page at once")}
           >
             🌐 EN {pageCov.ready}/{pageCov.total}
-            {pageCov.aiPending > 0 && <span className="text-violet-700"> · รอตรวจ {pageCov.aiPending}</span>}
+            {pageCov.aiPending > 0 && <span className="text-violet-700"> · {t("รอตรวจ", "to review")} {pageCov.aiPending}</span>}
           </button>
           {showLang && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowLang(false)} />
               <div className="absolute left-0 top-8 z-20 w-80 rounded-xl border border-slate-200 bg-white shadow-lg p-3 space-y-2">
-                <p className="text-xs font-medium text-slate-800">ภาษาอังกฤษของหน้านี้</p>
+                <p className="text-xs font-medium text-slate-800">{t("ภาษาอังกฤษของหน้านี้", "English for this page")}</p>
                 {txBar(pageSlots, "page")}
                 {missingBySection.length > 0 ? (
                   <ul className="max-h-48 overflow-y-auto space-y-0.5">
                     {missingBySection.map((s) => (
                       <li key={s.id} className="flex items-center gap-2 text-xs px-1 py-0.5">
                         <span>{s.icon}</span>
-                        <span className="flex-1 min-w-0 truncate text-slate-700">{s.label}</span>
-                        <span className="text-amber-700 tabular-nums">ขาด {s.n}</span>
+                        <span className="flex-1 min-w-0 truncate text-slate-700">{labelEn(s.label)}</span>
+                        <span className="text-amber-700 tabular-nums">{t("ขาด", "missing")} {s.n}</span>
                         <button
                           onClick={() => {
                             onSelect({ blockId: s.id });
@@ -1139,16 +1146,19 @@ export function WebsiteBuilder({
                           }}
                           className="text-blue-600 hover:underline whitespace-nowrap"
                         >
-                          ไปที่
+                          {t("ไปที่", "Go")}
                         </button>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-[11px] text-emerald-700">ทุกข้อความในหน้านี้มีภาษาอังกฤษแล้ว</p>
+                  <p className="text-[11px] text-emerald-700">{t("ทุกข้อความในหน้านี้มีภาษาอังกฤษแล้ว", "All text on this page has English")}</p>
                 )}
                 <p className="text-[11px] leading-relaxed text-slate-400">
-                  คำแปลจาก AI ติดป้าย &quot;รอตรวจ&quot; — อ่านแล้วกด ✓ ตรวจแล้ว หรือแก้เองได้ · ขึ้นเว็บเมื่อกด &quot;เผยแพร่&quot; · พรีวิวโชว์หน้า /en เมื่อสลับแผงเป็น EN · ลูกค้าเห็นเมื่อเปิด &quot;🌐 เปิดภาษาอังกฤษบนเว็บ&quot; ในแท็บข้อมูลร้าน
+                  {t(
+                    'คำแปลจาก AI ติดป้าย "รอตรวจ" — อ่านแล้วกด ✓ ตรวจแล้ว หรือแก้เองได้ · ขึ้นเว็บเมื่อกด "เผยแพร่" · พรีวิวโชว์หน้า /en เมื่อสลับแผงเป็น EN · ลูกค้าเห็นเมื่อเปิด "🌐 เปิดภาษาอังกฤษบนเว็บ" ในแท็บข้อมูลร้าน',
+                    'AI translations are tagged "to review" — read and tap ✓ Reviewed, or edit them yourself · goes live when you tap "Publish" · preview shows the /en page when the panel is switched to EN · customers see it once "🌐 English on website" is on in the Shop info tab',
+                  )}
                 </p>
               </div>
             </>
@@ -1160,8 +1170,8 @@ export function WebsiteBuilder({
 
       {toolbar && (
         <>
-          <button onClick={toolbar.onUndo} disabled={!toolbar.canUndo} title="ย้อนกลับ (Ctrl+Z)" className={iconBtn}>↶</button>
-          <button onClick={toolbar.onRedo} disabled={!toolbar.canRedo} title="ทำซ้ำ (Ctrl+Shift+Z)" className={iconBtn}>↷</button>
+          <button onClick={toolbar.onUndo} disabled={!toolbar.canUndo} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} className={iconBtn}>↶</button>
+          <button onClick={toolbar.onRedo} disabled={!toolbar.canRedo} title={t("ทำซ้ำ (Ctrl+Shift+Z)", "Redo (Ctrl+Shift+Z)")} className={iconBtn}>↷</button>
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
         </>
       )}
@@ -1170,29 +1180,29 @@ export function WebsiteBuilder({
           {d.icon}
         </button>
       ))}
-      <select value={String(zoom)} onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))} className="h-8 rounded-lg border border-slate-200 px-1.5 text-xs text-slate-700" title="ซูมพรีวิว">
-        <option value="fit">พอดี</option>
+      <select value={String(zoom)} onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))} className="h-8 rounded-lg border border-slate-200 px-1.5 text-xs text-slate-700" title={t("ซูมพรีวิว", "Preview zoom")}>
+        <option value="fit">{t("พอดี", "Fit")}</option>
         <option value="0.5">50%</option>
         <option value="0.75">75%</option>
         <option value="1">100%</option>
       </select>
-      <button onClick={reloadPreview} title="โหลดพรีวิวใหม่" className={iconBtn}>↻</button>
-      <button onClick={() => setFullscreen(true)} title="พรีวิวเต็มจอ (Esc ออก)" className={iconBtn}>⤢</button>
-      {previewSrc && <a href={shownSrc ?? previewSrc} target="_blank" rel="noreferrer" title="เปิดพรีวิวในแท็บใหม่" className={iconBtn}>↗</a>}
+      <button onClick={reloadPreview} title={t("โหลดพรีวิวใหม่", "Reload preview")} className={iconBtn}>↻</button>
+      <button onClick={() => setFullscreen(true)} title={t("พรีวิวเต็มจอ (Esc ออก)", "Full-screen preview (Esc to exit)")} className={iconBtn}>⤢</button>
+      {previewSrc && <a href={shownSrc ?? previewSrc} target="_blank" rel="noreferrer" title={t("เปิดพรีวิวในแท็บใหม่", "Open preview in new tab")} className={iconBtn}>↗</a>}
       {toolbar && (
         <>
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
-          {toolbar.onHistory && <button onClick={toolbar.onHistory} title="ประวัติเวอร์ชันที่เผยแพร่" className={iconBtn}>🕘</button>}
+          {toolbar.onHistory && <button onClick={toolbar.onHistory} title={t("ประวัติเวอร์ชันที่เผยแพร่", "Published version history")} className={iconBtn}>🕘</button>}
           {toolbar.onAutoSave && (
-            <label className="hidden xl:flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer" title="บันทึกร่างอัตโนมัติหลังหยุดแก้ 1.5 วิ แล้วพรีวิวอัปเดตเอง">
+            <label className="hidden xl:flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer" title={t("บันทึกร่างอัตโนมัติหลังหยุดแก้ 1.5 วิ แล้วพรีวิวอัปเดตเอง", "Auto-save draft 1.5 s after you stop editing, and the preview updates itself")}>
               <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={toolbar.autoSave} onChange={(e) => toolbar.onAutoSave?.(e.target.checked)} />
-              อัตโนมัติ
+              {t("อัตโนมัติ", "Auto")}
             </label>
           )}
-          {toolbar.onDiscard && toolbar.dirty && <button onClick={toolbar.onDiscard} className="px-2.5 h-8 rounded-lg text-xs text-slate-500 hover:text-slate-800" title="ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ที่เผยแพร่อยู่">ละทิ้ง</button>}
-          <button onClick={toolbar.onSaveDraft} disabled={toolbar.saving || toolbar.busy} className="px-3 h-8 rounded-lg border border-slate-300 text-xs text-slate-700 hover:border-slate-500 disabled:opacity-50">บันทึกร่าง</button>
+          {toolbar.onDiscard && toolbar.dirty && <button onClick={toolbar.onDiscard} className="px-2.5 h-8 rounded-lg text-xs text-slate-500 hover:text-slate-800" title={t("ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ที่เผยแพร่อยู่", "Discard all changes, go back to the published version")}>{t("ละทิ้ง", "Discard")}</button>}
+          <button onClick={toolbar.onSaveDraft} disabled={toolbar.saving || toolbar.busy} className="px-3 h-8 rounded-lg border border-slate-300 text-xs text-slate-700 hover:border-slate-500 disabled:opacity-50">{t("บันทึกร่าง", "Save draft")}</button>
           <button onClick={toolbar.onPublish} disabled={toolbar.busy} className="px-4 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
-            {toolbar.busy ? "กำลังเผยแพร่…" : toolbar.publishLabel ?? "เผยแพร่"}
+            {toolbar.busy ? t("กำลังเผยแพร่…", "Publishing…") : toolbar.publishLabel ?? t("เผยแพร่", "Publish")}
           </button>
         </>
       )}
@@ -1208,7 +1218,7 @@ export function WebsiteBuilder({
             <iframe
               ref={iframeRef}
               src={`${shownSrc}&_r=${nonce}`}
-              title="พรีวิวหน้าเว็บ"
+              title={t("พรีวิวหน้าเว็บ", "Web page preview")}
               className="bg-white border-0 shadow-sm"
               style={{ width: dev.w, height: dev.h, transform: `scale(${scale})`, transformOrigin: "top left", flexShrink: 0, display: "block" }}
             />
@@ -1216,26 +1226,26 @@ export function WebsiteBuilder({
         </div>
       ) : (
         <div className="h-full flex flex-col items-center justify-center text-sm text-slate-400 px-6 text-center gap-1">
-          <span>ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</span>
-          <span className="text-[11px]">เมื่อเว็บร้านขึ้น Vercel แล้ว ใส่โดเมนในตาราง shop_domains พรีวิวจะขึ้นที่นี่</span>
+          <span>{t("ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้", "No website domain linked to this shop yet")}</span>
+          <span className="text-[11px]">{t("เมื่อเว็บร้านขึ้น Vercel แล้ว ใส่โดเมนในตาราง shop_domains พรีวิวจะขึ้นที่นี่", "Once the shop site is on Vercel, add its domain to the shop_domains table and the preview shows here")}</span>
         </div>
       )}
       {/* ⏳ กำลังโหลด (ไม่บังพรีวิว) · ❗ โหลดไม่ขึ้นหลังลองเองแล้ว → ปุ่มลองใหม่ / เปิดแท็บใหม่ */}
       {previewSrc && previewPhase === "loading" && showLoading && (
         <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-slate-900/80 px-3 py-1 text-xs text-white shadow">
           <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400 align-middle" />
-          กำลังโหลดพรีวิว…{autoRetried.current ? " (ลองโหลดใหม่ให้แล้ว)" : loadSlow ? " (เว็บร้านช้ากว่าปกติ)" : ""}
+          {t("กำลังโหลดพรีวิว…", "Loading preview…")}{autoRetried.current ? t(" (ลองโหลดใหม่ให้แล้ว)", " (retried once)") : loadSlow ? t(" (เว็บร้านช้ากว่าปกติ)", " (shop site slower than usual)") : ""}
         </div>
       )}
       {previewSrc && previewPhase === "failed" && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70 p-4">
           <div className="max-w-sm rounded-xl border border-slate-200 bg-white p-4 text-center shadow-lg">
-            <p className="text-sm font-medium text-slate-800">พรีวิวโหลดไม่ขึ้น</p>
-            <p className="mt-1 text-xs text-slate-500">เว็บร้านตอบช้าหรือค้าง (ลองโหลดใหม่ให้แล้ว 1 ครั้ง) — กดลองใหม่ หรือเปิดดูในแท็บใหม่</p>
+            <p className="text-sm font-medium text-slate-800">{t("พรีวิวโหลดไม่ขึ้น", "Preview failed to load")}</p>
+            <p className="mt-1 text-xs text-slate-500">{t("เว็บร้านตอบช้าหรือค้าง (ลองโหลดใหม่ให้แล้ว 1 ครั้ง) — กดลองใหม่ หรือเปิดดูในแท็บใหม่", "The shop site is slow or stuck (already retried once) — tap retry or open in a new tab")}</p>
             <div className="mt-3 flex justify-center gap-2">
-              <button onClick={reloadPreview} className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700">↻ ลองใหม่</button>
-              <a href={shownSrc ?? previewSrc} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50">↗ เปิดในแท็บใหม่</a>
-              <button onClick={() => setPreviewPhase("ready")} className="h-8 rounded-lg px-2 text-xs text-slate-400 hover:text-slate-700" title="ซ่อนข้อความนี้">ปิด</button>
+              <button onClick={reloadPreview} className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700">{t("↻ ลองใหม่", "↻ Retry")}</button>
+              <a href={shownSrc ?? previewSrc} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50">{t("↗ เปิดในแท็บใหม่", "↗ Open in new tab")}</a>
+              <button onClick={() => setPreviewPhase("ready")} className="h-8 rounded-lg px-2 text-xs text-slate-400 hover:text-slate-700" title={t("ซ่อนข้อความนี้", "Hide this message")}>{t("ปิด", "Close")}</button>
             </div>
           </div>
         </div>
@@ -1243,7 +1253,7 @@ export function WebsiteBuilder({
       {/* แผ่นใสทับพรีวิวตอนลาก — iframe รับเหตุการณ์เมาส์เองไม่ได้ ต้องให้แผ่นนี้รับแทนแล้วส่งพิกัดเข้าไป */}
       {drag && drag.kind !== "child" && previewSrc && (
         <div className={`absolute inset-0 z-10 ${overPreview ? "ring-4 ring-inset ring-blue-500/70 bg-blue-500/5" : ""}`}>
-          {overPreview && <span className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-600 text-white text-xs shadow">ปล่อยเพื่อวาง {drag.label} ตรงเส้นฟ้า</span>}
+          {overPreview && <span className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-600 text-white text-xs shadow">{t(`ปล่อยเพื่อวาง ${drag.label} ตรงเส้นฟ้า`, `Release to drop ${drag.label} at the blue line`)}</span>}
         </div>
       )}
     </div>
@@ -1254,7 +1264,7 @@ export function WebsiteBuilder({
     const isSel = selection?.blockId === b.id && selection?.childId === it.id;
     const dragging = drag?.kind === "child" && drag.childId === it.id;
     const over = drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === idx;
-    const label = c.spec.summary(it) || c.spec.itemLabel;
+    const label = labelEn(c.spec.summary(it) || c.spec.itemLabel);
     return (
       <Fragment key={it.id}>
         {over && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
@@ -1265,12 +1275,12 @@ export function WebsiteBuilder({
           onClick={() => { if (didDragRef.current) return; onSelect({ blockId: b.id, childId: it.id }); setPropTab("content"); setPane("props"); }}
           className={`group ml-7 mr-1 flex items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer text-[11px] ${dragging ? "opacity-40" : ""} ${isSel ? "bg-orange-50 text-orange-800 ring-1 ring-orange-200" : "text-slate-600 hover:bg-slate-50"}`}
         >
-          <span className="cursor-grab text-slate-300 select-none" style={{ touchAction: "none" }} title="ลากเพื่อเรียง">⠿</span>
+          <span className="cursor-grab text-slate-300 select-none" style={{ touchAction: "none" }} title={t("ลากเพื่อเรียง", "Drag to reorder")}>⠿</span>
           <span className={`flex-1 truncate ${it.enabled === false ? "line-through text-slate-400" : ""}`}>{label}</span>
           <span className="hidden group-hover:flex items-center">
-            <button onClick={(e) => { e.stopPropagation(); patchChild(b.id, it.id, { enabled: it.enabled === false }); }} title={it.enabled === false ? "แสดง" : "ซ่อน"} className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800">{it.enabled === false ? "🚫" : "👁️"}</button>
-            <button onClick={(e) => { e.stopPropagation(); duplicateChild(b.id, it.id); }} disabled={c.list.length >= c.spec.max} title="ทำสำเนา" className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800 disabled:opacity-30">📑</button>
-            <button onClick={(e) => { e.stopPropagation(); removeChild(b.id, it.id); }} title="ลบ" className="w-5 h-5 text-[10px] text-slate-400 hover:text-red-500">🗑️</button>
+            <button onClick={(e) => { e.stopPropagation(); patchChild(b.id, it.id, { enabled: it.enabled === false }); }} title={it.enabled === false ? t("แสดง", "Show") : t("ซ่อน", "Hide")} className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800">{it.enabled === false ? "🚫" : "👁️"}</button>
+            <button onClick={(e) => { e.stopPropagation(); duplicateChild(b.id, it.id); }} disabled={c.list.length >= c.spec.max} title={t("ทำสำเนา", "Duplicate")} className="w-5 h-5 text-[10px] text-slate-400 hover:text-slate-800 disabled:opacity-30">📑</button>
+            <button onClick={(e) => { e.stopPropagation(); removeChild(b.id, it.id); }} title={t("ลบ", "Delete")} className="w-5 h-5 text-[10px] text-slate-400 hover:text-red-500">🗑️</button>
           </span>
         </li>
       </Fragment>
@@ -1280,8 +1290,8 @@ export function WebsiteBuilder({
   const tree = (
     <div className="relative h-full flex flex-col">
       <div className="flex items-center gap-1 mb-2">
-        <button onClick={() => setShowLib(true)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">+ เพิ่ม Section</button>
-        <button onClick={() => setShowAi(true)} title="ให้ AI ช่วยออกแบบ แล้ววาง JSON กลับมา" className={`${iconBtn} !border-violet-200 !bg-violet-50 !text-violet-700 hover:!bg-violet-100`}>🤖</button>
+        <button onClick={() => setShowLib(true)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">{t("+ เพิ่ม Section", "+ Add section")}</button>
+        <button onClick={() => setShowAi(true)} title={t("ให้ AI ช่วยออกแบบ แล้ววาง JSON กลับมา", "Let AI design it, then paste the JSON back")} className={`${iconBtn} !border-violet-200 !bg-violet-50 !text-violet-700 hover:!bg-violet-100`}>🤖</button>
       </div>
 
       <ul ref={treeListRef} className={`flex-1 overflow-y-auto pr-0.5 ${drag && drag.kind !== "child" ? "space-y-0" : "space-y-0.5"}`}>
@@ -1292,7 +1302,7 @@ export function WebsiteBuilder({
           const isSel = selection?.blockId === b.id && !selection.childId;
           const isOpen = expanded.has(b.id);
           const hasIssue = errors.some((x) => x.blockId === b.id);
-          const label = info?.label ?? b.type;
+          const label = labelEn(info?.label ?? b.type);
           const own = cleanBlockName(b.name);
           const icon = info?.icon ?? "🧩";
           return (
@@ -1309,12 +1319,12 @@ export function WebsiteBuilder({
                   onClick={() => { if (didDragRef.current) return; onSelect({ blockId: b.id }); setPropTab("content"); setPane("props"); }}
                   className={`group flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 cursor-pointer ${isSel ? "bg-blue-50 ring-1 ring-blue-200" : selection?.blockId === b.id ? "bg-blue-50/40" : "hover:bg-slate-50"}`}
                 >
-                  <span className="cursor-grab text-slate-300 select-none text-xs" style={{ touchAction: "none" }} title="ลากเพื่อย้าย">⠿</span>
+                  <span className="cursor-grab text-slate-300 select-none text-xs" style={{ touchAction: "none" }} title={t("ลากเพื่อย้าย", "Drag to move")}>⠿</span>
                   {c ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; }); }}
                       className="w-3.5 text-[9px] text-slate-400 hover:text-slate-800"
-                      title={isOpen ? "พับ" : `ดู${c.spec.label}`}
+                      title={isOpen ? t("พับ", "Collapse") : t(`ดู${c.spec.label}`, `View ${labelEn(c.spec.label)}`)}
                     >
                       {isOpen ? "▾" : "▸"}
                     </button>
@@ -1341,19 +1351,19 @@ export function WebsiteBuilder({
                     )}
                     <span className="block text-[10px] text-slate-400 truncate">
                       {own && `${label} · `}
-                      {schema ? blockSummary(b) : "บล็อกของระบบเดิม"}
-                      {c && !isOpen && ` · ${c.spec.itemLabel} ${c.list.length}`}
+                      {schema ? labelEn(blockSummary(b)) : t("บล็อกของระบบเดิม", "Legacy block")}
+                      {c && !isOpen && ` · ${labelEn(c.spec.itemLabel)} ${c.list.length}`}
                       {visibilityLabel(b.visibility) && ` · ${visibilityLabel(b.visibility)}`}
-                      {abOf(b) && ` · 🧪 ${abOf(b)!.exp} แบบ ${abOf(b)!.variant}`}
+                      {abOf(b) && ` · 🧪 ${abOf(b)!.exp} ${t("แบบ", "variant")} ${abOf(b)!.variant}`}
                     </span>
                   </span>
-                  {hasIssue && <span className="text-[10px] text-red-500" title="มีจุดที่ควรแก้">●</span>}
+                  {hasIssue && <span className="text-[10px] text-red-500" title={t("มีจุดที่ควรแก้", "Has issues to fix")}>●</span>}
                   <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                    <button onClick={(e) => { e.stopPropagation(); patchBlock(b.id, { enabled: !b.enabled }); }} title={b.enabled ? "ซ่อน" : "แสดง"} className={miniBtn}>{b.enabled ? "👁️" : "🚫"}</button>
-                    <button onClick={(e) => { e.stopPropagation(); duplicateSection(b.id); }} title="ทำสำเนา (Ctrl+D)" className={miniBtn}>📑</button>
-                    <button onClick={(e) => { e.stopPropagation(); onSelect({ blockId: b.id }); setMenu({ id: b.id, x: e.clientX, y: e.clientY }); }} title="เพิ่มเติม" className={miniBtn}>⋯</button>
+                    <button onClick={(e) => { e.stopPropagation(); patchBlock(b.id, { enabled: !b.enabled }); }} title={b.enabled ? t("ซ่อน", "Hide") : t("แสดง", "Show")} className={miniBtn}>{b.enabled ? "👁️" : "🚫"}</button>
+                    <button onClick={(e) => { e.stopPropagation(); duplicateSection(b.id); }} title={t("ทำสำเนา (Ctrl+D)", "Duplicate (Ctrl+D)")} className={miniBtn}>📑</button>
+                    <button onClick={(e) => { e.stopPropagation(); onSelect({ blockId: b.id }); setMenu({ id: b.id, x: e.clientX, y: e.clientY }); }} title={t("เพิ่มเติม", "More")} className={miniBtn}>⋯</button>
                   </span>
-                  <span className={`group-hover:hidden w-1.5 h-1.5 rounded-full shrink-0 ${b.enabled ? "bg-emerald-500" : "bg-slate-300"}`} title={b.enabled ? "แสดงอยู่" : "ซ่อนอยู่"} />
+                  <span className={`group-hover:hidden w-1.5 h-1.5 rounded-full shrink-0 ${b.enabled ? "bg-emerald-500" : "bg-slate-300"}`} title={b.enabled ? t("แสดงอยู่", "Shown") : t("ซ่อนอยู่", "Hidden")} />
                 </div>
 
                 {c && isOpen && (
@@ -1362,11 +1372,11 @@ export function WebsiteBuilder({
                     {drag?.kind === "child" && drag.blockId === b.id && childOver?.blockId === b.id && childOver.idx === c.list.length && <li className="h-1 rounded bg-blue-500 ml-7 mr-1" />}
                     <li className="ml-7 flex flex-wrap gap-x-3">
                       <button onClick={() => addChild(b.id)} disabled={c.list.length >= c.spec.max} className="text-[10px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
-                        + เพิ่ม{c.spec.itemLabel} ({c.list.length}/{c.spec.max})
+                        {t(`+ เพิ่ม${c.spec.itemLabel}`, `+ Add ${labelEn(c.spec.itemLabel)}`)} ({c.list.length}/{c.spec.max})
                       </button>
                       {c.spec.addOptions?.map((o) => (
                         <button key={o.label} onClick={() => addChild(b.id, o)} disabled={c.list.length >= c.spec.max} className="text-[10px] text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">
-                          + {o.icon ? `${o.icon} ` : ""}เพิ่ม{o.label}
+                          + {o.icon ? `${o.icon} ` : ""}{t(`เพิ่ม${o.label}`, `Add ${labelEn(o.label)}`)}
                         </button>
                       ))}
                     </li>
@@ -1379,44 +1389,44 @@ export function WebsiteBuilder({
         {dropLine(blocks.length)}
         {!blocks.length && (
           <li className={`rounded-xl border-2 border-dashed py-10 text-center text-xs transition ${drag && overIdx === 0 ? "border-blue-500 bg-blue-50 text-blue-600" : "border-slate-300 text-slate-400"}`}>
-            {drag ? "วางตรงนี้เพื่อเริ่มจัดหน้า" : 'ยังไม่มี Section — กด "+ เพิ่ม Section"'}
+            {drag ? t("วางตรงนี้เพื่อเริ่มจัดหน้า", "Drop here to start building the page") : t('ยังไม่มี Section — กด "+ เพิ่ม Section"', 'No sections yet — tap "+ Add section"')}
           </li>
         )}
       </ul>
-      <p className="mt-1 text-[10px] text-slate-400 leading-snug">กดค้างแล้วลากเพื่อเรียง · คลิกขวาเปิดเมนู · Delete ลบ · Ctrl+D สำเนา</p>
+      <p className="mt-1 text-[10px] text-slate-400 leading-snug">{t("กดค้างแล้วลากเพื่อเรียง · คลิกขวาเปิดเมนู · Delete ลบ · Ctrl+D สำเนา", "Press and drag to reorder · right-click for menu · Delete to remove · Ctrl+D to duplicate")}</p>
 
       {/* คลัง Section — เลื่อนออกมาทับแผงซ้าย */}
       {showLib && (
         <div className="absolute inset-0 z-20 rounded-xl border border-blue-200 bg-white shadow-xl flex flex-col p-2.5">
           <div className="flex items-center gap-1.5 mb-2">
-            <input className="flex-1 min-w-0 h-8 rounded-lg border border-slate-200 px-2.5 text-xs" value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder="ค้นหา เช่น รูป สินค้า คำถาม" autoFocus />
-            <button onClick={() => { setShowLib(false); setLibQuery(""); }} className={iconBtn} title="ปิด (Esc)">✕</button>
+            <input className="flex-1 min-w-0 h-8 rounded-lg border border-slate-200 px-2.5 text-xs" value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder={t("ค้นหา เช่น รูป สินค้า คำถาม", "Search, e.g. image, product, question")} autoFocus />
+            <button onClick={() => { setShowLib(false); setLibQuery(""); }} className={iconBtn} title={t("ปิด (Esc)", "Close (Esc)")}>✕</button>
           </div>
           <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
             <SectionTemplateGroup shopId={ctx.shopId} query={libQuery} allowedTypes={allowedTypes} onUse={(b) => insertTemplate(b)} />
             {grouped.length === 0 ? (
-              <p className="py-6 text-center text-xs text-slate-400">ไม่พบ Section ที่ค้นหา</p>
+              <p className="py-6 text-center text-xs text-slate-400">{t("ไม่พบ Section ที่ค้นหา", "No matching sections")}</p>
             ) : (
               grouped.map(([group, list]) => (
                 <div key={group}>
-                  <p className="text-[10px] font-medium text-slate-500 mb-1">{group}</p>
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">{group === "อื่น ๆ" ? t("อื่น ๆ", "Other") : labelEn(group)}</p>
                   <div className="grid gap-1">
                     {list.map((t) => (
                       <div
                         key={t.type}
                         role="button"
                         tabIndex={0}
-                        onPointerDown={(e) => startDrag(e, { kind: "new", type: t.type, label: t.label, icon: t.icon })}
+                        onPointerDown={(e) => startDrag(e, { kind: "new", type: t.type, label: labelEn(t.label), icon: t.icon })}
                         onClick={() => { if (!didDragRef.current) addSection(t.type); }}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addSection(t.type); } }}
-                        title={`${t.label} — ${t.hint}\nกดเพื่อเพิ่มต่อท้าย หรือกดค้างแล้วลากไปวางในโครง/พรีวิว`}
+                        title={`${labelEn(t.label)} — ${labelEn(t.hint)}\n${tr("กดเพื่อเพิ่มต่อท้าย หรือกดค้างแล้วลากไปวางในโครง/พรีวิว", "Tap to add at the end, or press and drag into the outline/preview")}`}
                         className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left cursor-grab active:cursor-grabbing select-none hover:border-blue-400 hover:bg-blue-50/40 ${drag?.kind === "new" && drag.type === t.type ? "border-blue-500 opacity-50" : "border-slate-200"}`}
                         style={{ touchAction: "none" }}
                       >
                         <span className="text-base leading-none">{t.icon}</span>
                         <span className="min-w-0">
-                          <span className="block text-xs text-slate-800">{t.label}</span>
-                          <span className="block text-[10px] text-slate-400 truncate">{t.hint}</span>
+                          <span className="block text-xs text-slate-800">{labelEn(t.label)}</span>
+                          <span className="block text-[10px] text-slate-400 truncate">{labelEn(t.hint)}</span>
                         </span>
                       </div>
                     ))}
@@ -1425,15 +1435,15 @@ export function WebsiteBuilder({
                         key={`preset-${pr.id}`}
                         type="button"
                         onClick={() => addPreset(pr)}
-                        title={`${pr.label} — ${pr.hint}\nกดเพื่อเพิ่มต่อท้าย (มีตัวอย่างให้แก้)`}
+                        title={`${labelEn(pr.label)} — ${labelEn(pr.hint)}\n${t("กดเพื่อเพิ่มต่อท้าย (มีตัวอย่างให้แก้)", "Tap to add at the end (comes with sample content to edit)")}`}
                         className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-left hover:border-blue-400 hover:bg-blue-50/40"
                       >
                         <span className="text-base leading-none">{pr.icon}</span>
                         <span className="min-w-0">
                           <span className="block text-xs text-slate-800">
-                            {pr.label} <span className="ml-1 rounded bg-amber-100 px-1 text-[9px] text-amber-700">มีตัวอย่าง</span>
+                            {labelEn(pr.label)} <span className="ml-1 rounded bg-amber-100 px-1 text-[9px] text-amber-700">{t("มีตัวอย่าง", "Sample")}</span>
                           </span>
-                          <span className="block text-[10px] text-slate-400 truncate">{pr.hint}</span>
+                          <span className="block text-[10px] text-slate-400 truncate">{labelEn(pr.hint)}</span>
                         </span>
                       </button>
                     ))}
@@ -1442,7 +1452,7 @@ export function WebsiteBuilder({
               ))
             )}
           </div>
-          <p className="mt-2 text-[10px] text-slate-400 leading-snug">กด = เพิ่มต่อท้าย · กดค้างแล้วลากไปวางในพรีวิวได้</p>
+          <p className="mt-2 text-[10px] text-slate-400 leading-snug">{t("กด = เพิ่มต่อท้าย · กดค้างแล้วลากไปวางในพรีวิวได้", "Tap = add at the end · press and drag to drop into the preview")}</p>
         </div>
       )}
     </div>
@@ -1457,14 +1467,14 @@ export function WebsiteBuilder({
       <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
       <div className="fixed z-50 w-52 rounded-xl border border-slate-200 bg-white shadow-lg py-1" style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 220)), top: Math.max(4, Math.min(menu.y, window.innerHeight - 330)) }}>
         {SECTION_SCHEMAS[menuBlock.type] && (
-          <button className={menuItem} onClick={() => { setRenameReq({ id: menuBlock.id, n: Date.now() }); setMenu(null); }}>🏷 ตั้งชื่อ <span className="ml-auto text-slate-400">ดับเบิลคลิก</span></button>
+          <button className={menuItem} onClick={() => { setRenameReq({ id: menuBlock.id, n: Date.now() }); setMenu(null); }}>{t("🏷 ตั้งชื่อ", "🏷 Rename")} <span className="ml-auto text-slate-400">{t("ดับเบิลคลิก", "Double-click")}</span></button>
         )}
-        <button className={menuItem} onClick={() => { duplicateSection(menuBlock.id); setMenu(null); }}>📑 ทำสำเนา <span className="ml-auto text-slate-400">Ctrl+D</span></button>
-        <button className={menuItem} onClick={() => { patchBlock(menuBlock.id, { enabled: !menuBlock.enabled }); setMenu(null); }}>{menuBlock.enabled ? "🚫 ซ่อน Section" : "👁️ แสดง Section"}</button>
-        <button className={menuItem} disabled={menuIdx <= 0} onClick={() => { moveSection(menuBlock.id, -1); setMenu(null); }}>▲ เลื่อนขึ้น</button>
-        <button className={menuItem} disabled={menuIdx >= blocks.length - 1} onClick={() => { moveSection(menuBlock.id, 1); setMenu(null); }}>▼ เลื่อนลง</button>
+        <button className={menuItem} onClick={() => { duplicateSection(menuBlock.id); setMenu(null); }}>{t("📑 ทำสำเนา", "📑 Duplicate")} <span className="ml-auto text-slate-400">Ctrl+D</span></button>
+        <button className={menuItem} onClick={() => { patchBlock(menuBlock.id, { enabled: !menuBlock.enabled }); setMenu(null); }}>{menuBlock.enabled ? t("🚫 ซ่อน Section", "🚫 Hide section") : t("👁️ แสดง Section", "👁️ Show section")}</button>
+        <button className={menuItem} disabled={menuIdx <= 0} onClick={() => { moveSection(menuBlock.id, -1); setMenu(null); }}>{t("▲ เลื่อนขึ้น", "▲ Move up")}</button>
+        <button className={menuItem} disabled={menuIdx >= blocks.length - 1} onClick={() => { moveSection(menuBlock.id, 1); setMenu(null); }}>{t("▼ เลื่อนลง", "▼ Move down")}</button>
         <div className="border-t border-slate-100 my-1" />
-        <p className="px-3 py-0.5 text-[10px] text-slate-400">แสดงบนอุปกรณ์</p>
+        <p className="px-3 py-0.5 text-[10px] text-slate-400">{t("แสดงบนอุปกรณ์", "Show on devices")}</p>
         {DEVICE_OPTS.map((d) => (
           <label key={d.k} className="flex items-center gap-2 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer">
             <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={{ ...ALL_VISIBLE, ...menuBlock.visibility }[d.k]} onChange={(e) => setVis(menuBlock.id, d.k, e.target.checked)} />
@@ -1472,7 +1482,7 @@ export function WebsiteBuilder({
           </label>
         ))}
         <div className="border-t border-slate-100 my-1" />
-        <button className={`${menuItem} !text-red-600 hover:!bg-red-50`} onClick={() => { setMenu(null); removeSection(menuBlock.id); }}>🗑️ ลบ Section <span className="ml-auto text-red-300">Delete</span></button>
+        <button className={`${menuItem} !text-red-600 hover:!bg-red-50`} onClick={() => { setMenu(null); removeSection(menuBlock.id); }}>{t("🗑️ ลบ Section", "🗑️ Delete section")} <span className="ml-auto text-red-300">Delete</span></button>
       </div>
     </>
   );
@@ -1484,12 +1494,12 @@ export function WebsiteBuilder({
   const tabBtn = (k: PropTab, l: string, dot?: boolean) => (
     <button onClick={() => setPropTab(k)} className={`flex-1 py-2 text-xs border-b-2 -mb-px ${propTab === k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
       {l}
-      {dot && <span className="ml-1 text-[8px] text-blue-500 align-middle" title="ปรับแล้ว">●</span>}
+      {dot && <span className="ml-1 text-[8px] text-blue-500 align-middle" title={t("ปรับแล้ว", "Changed")}>●</span>}
     </button>
   );
   const visibilityRow = (v: Visibility | undefined, onChangeVis: (k: keyof Visibility, val: boolean) => void) => (
     <div className="pt-3 border-t border-slate-200">
-      <p className="text-[11px] font-medium text-slate-500 mb-1.5">แสดงบนอุปกรณ์</p>
+      <p className="text-[11px] font-medium text-slate-500 mb-1.5">{t("แสดงบนอุปกรณ์", "Show on devices")}</p>
       <div className="flex flex-wrap gap-3">
         {DEVICE_OPTS.map((d) => (
           <label key={d.k} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
@@ -1505,23 +1515,23 @@ export function WebsiteBuilder({
     const ab = abOf(b);
     const seg = (v: "A" | "B") => (
       <button key={v} onClick={() => ab && patchBlock(b.id, { ab: { ...ab, variant: v } })} className={`px-3 py-1 text-xs rounded-md ${ab?.variant === v ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
-        แบบ {v}
+        {t("แบบ", "Variant")} {v}
       </button>
     );
     return (
       <div className="pt-3 border-t border-slate-200 space-y-2" data-ab-settings>
-        <p className="text-[11px] font-medium text-slate-500">🧪 ทดสอบ A/B</p>
+        <p className="text-[11px] font-medium text-slate-500">{t("🧪 ทดสอบ A/B", "🧪 A/B test")}</p>
         {!ab ? (
           <>
-            <p className="text-[11px] text-slate-500 leading-relaxed">ลองแบบใหม่โดยไม่เสี่ยง — ลูกค้าครึ่งหนึ่งเห็น Section นี้ (แบบ A) อีกครึ่งเห็นสำเนาที่แก้แล้ว (แบบ B) · ดูว่าแบบไหนขายดีกว่าที่แท็บ 📈 สถิติ</p>
+            <p className="text-[11px] text-slate-500 leading-relaxed">{t("ลองแบบใหม่โดยไม่เสี่ยง — ลูกค้าครึ่งหนึ่งเห็น Section นี้ (แบบ A) อีกครึ่งเห็นสำเนาที่แก้แล้ว (แบบ B) · ดูว่าแบบไหนขายดีกว่าที่แท็บ 📈 สถิติ", "Try a new version risk-free — half of customers see this section (variant A), the other half see an edited copy (variant B) · see which sells better in the 📈 Stats tab")}</p>
             <button onClick={() => makeAbPair(b.id)} className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100">
-              🧪 สร้างแบบ B จาก Section นี้
+              {t("🧪 สร้างแบบ B จาก Section นี้", "🧪 Create variant B from this section")}
             </button>
           </>
         ) : (
           <>
             <label className="block">
-              <span className="block text-[11px] text-slate-500 mb-1">ชื่อการทดสอบ (อังกฤษ/ตัวเลข · ชื่อนี้ขึ้นในแท็บสถิติ)</span>
+              <span className="block text-[11px] text-slate-500 mb-1">{t("ชื่อการทดสอบ (อังกฤษ/ตัวเลข · ชื่อนี้ขึ้นในแท็บสถิติ)", "Test name (English/numbers · shown in the Stats tab)")}</span>
               <input
                 value={ab.exp}
                 onChange={(e) => renameAb(ab.exp, e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 30))}
@@ -1529,8 +1539,8 @@ export function WebsiteBuilder({
               />
             </label>
             <div className="inline-flex rounded-lg border border-slate-200 p-0.5">{seg("A")}{seg("B")}</div>
-            <p className="text-[11px] text-slate-500 leading-relaxed">จบการทดสอบ: ลบ Section แบบที่แพ้ แล้วกด "เลิกทดสอบ" ที่แบบที่ชนะ (ทุกคนจะเห็นแบบนั้น)</p>
-            <button onClick={() => patchBlock(b.id, { ab: undefined })} className="text-xs text-rose-600 hover:underline">เลิกทดสอบ Section นี้</button>
+            <p className="text-[11px] text-slate-500 leading-relaxed">{t('จบการทดสอบ: ลบ Section แบบที่แพ้ แล้วกด "เลิกทดสอบ" ที่แบบที่ชนะ (ทุกคนจะเห็นแบบนั้น)', 'To end the test: delete the losing variant, then tap "Stop test" on the winner (everyone will see it)')}</p>
+            <button onClick={() => patchBlock(b.id, { ab: undefined })} className="text-xs text-rose-600 hover:underline">{t("เลิกทดสอบ Section นี้", "Stop test for this section")}</button>
           </>
         )}
       </div>
@@ -1553,7 +1563,8 @@ export function WebsiteBuilder({
       {isGalleryFolders(b as unknown as Record<string, unknown>) && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
           <p className="text-xs leading-relaxed text-slate-700">
-            <b>🗂 อยากใส่ข้อความ / รูป / วิดีโอ เพิ่มในแต่ละแฟ้ม?</b> แปลงเป็น &quot;แฟ้มวางอิสระ&quot; — ของเดิมย้ายไปครบ แล้วของที่เพิ่มอยู่ในแฟ้มของมัน (ปิดแฟ้ม = ซ่อนไปด้วย)
+            <b>{t("🗂 อยากใส่ข้อความ / รูป / วิดีโอ เพิ่มในแต่ละแฟ้ม?", "🗂 Want to add text / images / video to each folder?")}</b>{" "}
+            {t('แปลงเป็น "แฟ้มวางอิสระ" — ของเดิมย้ายไปครบ แล้วของที่เพิ่มอยู่ในแฟ้มของมัน (ปิดแฟ้ม = ซ่อนไปด้วย)', 'Convert to "Free folders" — everything moves over, and new items live in their folder (closed folder = hidden too)')}
           </p>
           <button
             type="button"
@@ -1561,9 +1572,9 @@ export function WebsiteBuilder({
             onClick={() => void convertToFolders(b)}
             className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
-            🗂 แปลงเป็นแฟ้มวางอิสระ
+            {t("🗂 แปลงเป็นแฟ้มวางอิสระ", "🗂 Convert to free folders")}
           </button>
-          {!allowedTypes.has("canvas") && <p className="text-[11px] text-amber-700">ร้านนี้ยังไม่ได้เปิดใช้ &quot;ผืนผ้าใบอิสระ&quot; (ต้องเปิดก่อนถึงแปลงได้)</p>}
+          {!allowedTypes.has("canvas") && <p className="text-[11px] text-amber-700">{t('ร้านนี้ยังไม่ได้เปิดใช้ "ผืนผ้าใบอิสระ" (ต้องเปิดก่อนถึงแปลงได้)', 'This shop has not enabled "Free canvas" (enable it first to convert)')}</p>}
         </div>
       )}
       {/* 🎞️ การ์ดบนฉาก: ช่องใหญ่ใส่ PNG รายสินค้าของแต่ละแท็บ (ไม่มี PNG = ไม่โชว์) */}
@@ -1578,8 +1589,8 @@ export function WebsiteBuilder({
         {b.type === "drop" && <DropInsertsField ctx={formCtx} which={String((b as Record<string, unknown>).which ?? "this")} onSaved={reloadPreview} />}
         {sch?.meta.manage && (
           <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">
-            <span className="min-w-0 flex-1">{sch.meta.manage.hint ?? "ข้อมูลของ Section นี้ตั้งค่าที่หน้าหลังบ้านแยก"}</span>
-            <a href={sch.meta.manage.href} target="_blank" rel="noreferrer" className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">{sch.meta.manage.label}</a>
+            <span className="min-w-0 flex-1">{labelEn(sch.meta.manage.hint) ?? t("ข้อมูลของ Section นี้ตั้งค่าที่หน้าหลังบ้านแยก", "This section's data is set on a separate admin page")}</span>
+            <a href={sch.meta.manage.href} target="_blank" rel="noreferrer" className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">{labelEn(sch.meta.manage.label)}</a>
           </div>
         )}
       </>
@@ -1619,23 +1630,23 @@ export function WebsiteBuilder({
   const props = !selBlock ? (
     <div className="h-full flex flex-col items-center justify-center text-center text-sm text-slate-400 px-6 gap-1">
       <span className="text-3xl">👆</span>
-      <p>เลือก Section ทางซ้าย หรือคลิกในพรีวิว</p>
-      <p className="text-[11px]">ค่าต่าง ๆ ของสิ่งที่เลือกจะมาอยู่ตรงนี้</p>
+      <p>{t("เลือก Section ทางซ้าย หรือคลิกในพรีวิว", "Pick a section on the left, or click in the preview")}</p>
+      <p className="text-[11px]">{t("ค่าต่าง ๆ ของสิ่งที่เลือกจะมาอยู่ตรงนี้", "Settings of what you pick will show here")}</p>
     </div>
   ) : !selSchema ? (
     <div className="m-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-800">
-      บล็อกชนิด <code>{selBlock.type}</code> เป็นของระบบเดิม แก้ในตัวจัดหน้านี้ไม่ได้ (ยังอยู่บนเว็บตามเดิม)
+      {t("บล็อกชนิด", "Block type")} <code>{selBlock.type}</code> {t("เป็นของระบบเดิม แก้ในตัวจัดหน้านี้ไม่ได้ (ยังอยู่บนเว็บตามเดิม)", "is from the legacy system and can't be edited in this page builder (it stays on the site as before)")}
     </div>
   ) : selChild ? (
     <div className="flex flex-col h-full">
       <div className="px-3 py-2.5 border-b border-slate-200">
-        <button onClick={() => onSelect({ blockId: selBlock.id })} className="text-[11px] text-slate-500 hover:text-blue-600">← {selSchema.meta.icon} {selSchema.meta.label}</button>
+        <button onClick={() => onSelect({ blockId: selBlock.id })} className="text-[11px] text-slate-500 hover:text-blue-600">← {selSchema.meta.icon} {labelEn(selSchema.meta.label)}</button>
         <div className="flex items-center gap-1 mt-0.5">
           <span className="text-base">{selSchema.children!.icon}</span>
-          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate">{selSchema.children!.itemLabelOf?.(selChild) ?? selSchema.children!.itemLabel}: {selSchema.children!.summary(selChild) || "—"}</span>
-          <button onClick={() => patchChild(selBlock.id, selChild.id, { enabled: selChild.enabled === false })} title={selChild.enabled === false ? "แสดง" : "ซ่อน"} className={iconBtn}>{selChild.enabled === false ? "🚫" : "👁️"}</button>
-          <button onClick={() => duplicateChild(selBlock.id, selChild.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
-          <button onClick={() => removeChild(selBlock.id, selChild.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
+          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate">{labelEn(selSchema.children!.itemLabelOf?.(selChild) ?? selSchema.children!.itemLabel)}: {labelEn(selSchema.children!.summary(selChild)) || "—"}</span>
+          <button onClick={() => patchChild(selBlock.id, selChild.id, { enabled: selChild.enabled === false })} title={selChild.enabled === false ? t("แสดง", "Show") : t("ซ่อน", "Hide")} className={iconBtn}>{selChild.enabled === false ? "🚫" : "👁️"}</button>
+          <button onClick={() => duplicateChild(selBlock.id, selChild.id)} title={t("ทำสำเนา (Ctrl+D)", "Duplicate (Ctrl+D)")} className={iconBtn}>📑</button>
+          <button onClick={() => removeChild(selBlock.id, selChild.id)} title={t("ลบ (Delete)", "Delete (Delete)")} className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
@@ -1658,37 +1669,37 @@ export function WebsiteBuilder({
       <div className="px-3 pt-2.5 border-b border-slate-200">
         <div className="flex items-center gap-1">
           <span className="text-base">{selSchema.meta.icon}</span>
-          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate" title={selSchema.meta.hint}>{selSchema.meta.label}</span>
+          <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate" title={labelEn(selSchema.meta.hint)}>{labelEn(selSchema.meta.label)}</span>
           <button
             onClick={() => setStudio(true)}
-            title={`แก้แบบหน้าใหญ่ — เห็นทุกช่องเรียงเป็นหมวด + ค้นหา + พรีวิวสด (${selFieldCount} ช่อง)`}
+            title={t(`แก้แบบหน้าใหญ่ — เห็นทุกช่องเรียงเป็นหมวด + ค้นหา + พรีวิวสด (${selFieldCount} ช่อง)`, `Edit in large view — all fields by group + search + live preview (${selFieldCount} fields)`)}
             className={`${iconBtn} ${selFieldCount >= STUDIO_SUGGEST_FIELDS ? "!border-blue-300 !bg-blue-50 !text-blue-700" : ""}`}
           >
             ⤢
           </button>
-          <button onClick={() => patchBlock(selBlock.id, { enabled: !selBlock.enabled })} title={selBlock.enabled ? "ซ่อน Section" : "แสดง Section"} className={iconBtn}>{selBlock.enabled ? "👁️" : "🚫"}</button>
-          <button onClick={() => duplicateSection(selBlock.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
-          <button onClick={() => setTplSave(selBlock)} title="บันทึกเป็นแม่แบบ (ใช้ซ้ำกับหน้าอื่น/ร้านอื่น)" className={iconBtn}>💾</button>
-          <button onClick={() => removeSection(selBlock.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
+          <button onClick={() => patchBlock(selBlock.id, { enabled: !selBlock.enabled })} title={selBlock.enabled ? t("ซ่อน Section", "Hide section") : t("แสดง Section", "Show section")} className={iconBtn}>{selBlock.enabled ? "👁️" : "🚫"}</button>
+          <button onClick={() => duplicateSection(selBlock.id)} title={t("ทำสำเนา (Ctrl+D)", "Duplicate (Ctrl+D)")} className={iconBtn}>📑</button>
+          <button onClick={() => setTplSave(selBlock)} title={t("บันทึกเป็นแม่แบบ (ใช้ซ้ำกับหน้าอื่น/ร้านอื่น)", "Save as template (reuse on other pages/shops)")} className={iconBtn}>💾</button>
+          <button onClick={() => removeSection(selBlock.id)} title={t("ลบ (Delete)", "Delete (Delete)")} className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
         </div>
         <div data-sec-name-field className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
-          <span className="shrink-0">🏷 ชื่อ</span>
+          <span className="shrink-0">{t("🏷 ชื่อ", "🏷 Name")}</span>
           <span className="flex-1 min-w-0 flex text-xs">
             <InlineEdit
               dense
               value={cleanBlockName(selBlock.name)}
               maxLength={BLOCK_NAME_MAX}
-              placeholder="ตั้งชื่อไว้หาเอง (ลูกค้าไม่เห็น)"
+              placeholder={t("ตั้งชื่อไว้หาเอง (ลูกค้าไม่เห็น)", "Name it for yourself (customers don't see it)")}
               onSave={(v) => renameSection(selBlock.id, v)}
               className="text-slate-700 font-medium"
             />
           </span>
         </div>
-        {!selBlock.enabled && <p className="mt-1 text-[11px] text-amber-600">Section นี้ซ่อนอยู่ — ไม่แสดงบนเว็บ</p>}
+        {!selBlock.enabled && <p className="mt-1 text-[11px] text-amber-600">{t("Section นี้ซ่อนอยู่ — ไม่แสดงบนเว็บ", "This section is hidden — not shown on the site")}</p>}
         <div className="flex mt-1.5">
-          {tabBtn("content", "เนื้อหา")}
-          {tabBtn("style", "รูปลักษณ์", styleTouched(styleOf(selBlock)))}
-          {tabBtn("motion", "ลูกเล่น", motionTouched(styleOf(selBlock)))}
+          {tabBtn("content", t("เนื้อหา", "Content"))}
+          {tabBtn("style", t("รูปลักษณ์", "Style"), styleTouched(styleOf(selBlock)))}
+          {tabBtn("motion", t("ลูกเล่น", "Motion"), motionTouched(styleOf(selBlock)))}
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
@@ -1699,11 +1710,11 @@ export function WebsiteBuilder({
             {contentBottomOf(selBlock)}
             {selSchema.children && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">
-                {selSchema.children.icon} {selSchema.children.label}: {childrenOf(selBlock)?.list.length ?? 0} รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)
-                <button onClick={() => addChild(selBlock.id)} className="ml-2 text-blue-600 hover:underline">+ เพิ่ม{selSchema.children.itemLabel}</button>
+                {selSchema.children.icon} {labelEn(selSchema.children.label)}: {childrenOf(selBlock)?.list.length ?? 0} {t("รายการ — แก้ทีละชิ้นจากต้นไม้ทางซ้าย (กด ▸)", "items — edit each one from the tree on the left (tap ▸)")}
+                <button onClick={() => addChild(selBlock.id)} className="ml-2 text-blue-600 hover:underline">{t(`+ เพิ่ม${selSchema.children.itemLabel}`, `+ Add ${labelEn(selSchema.children.itemLabel)}`)}</button>
                 {selSchema.children.addOptions?.map((o) => (
                   <button key={o.label} onClick={() => addChild(selBlock.id, o)} className="ml-2 text-blue-600 hover:underline">
-                    + {o.icon ? `${o.icon} ` : ""}เพิ่ม{o.label}
+                    + {o.icon ? `${o.icon} ` : ""}{t(`เพิ่ม${o.label}`, `Add ${labelEn(o.label)}`)}
                   </button>
                 ))}
               </div>
@@ -1726,9 +1737,9 @@ export function WebsiteBuilder({
         {topbar}
         {/* จอแคบ: สลับแผง */}
         <div className="lg:hidden flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
-          {paneBtn("tree", "โครง")}
-          {paneBtn("preview", "พรีวิว")}
-          {paneBtn("props", "ตั้งค่า")}
+          {paneBtn("tree", t("โครง", "Outline"))}
+          {paneBtn("preview", t("พรีวิว", "Preview"))}
+          {paneBtn("props", t("ตั้งค่า", "Settings"))}
         </div>
         <div className="grid gap-2 lg:grid-cols-[230px_minmax(0,1fr)_330px] items-stretch">
           <aside className={`${pane === "tree" ? "" : "hidden"} lg:block min-w-0 rounded-xl border border-slate-200 bg-white p-2`} style={{ height: previewHeight }}>{tree}</aside>
@@ -1760,9 +1771,9 @@ export function WebsiteBuilder({
           items={
             selSchema.children
               ? {
-                  label: selSchema.children.label,
+                  label: labelEn(selSchema.children.label),
                   icon: selSchema.children.icon,
-                  list: (childrenOf(selBlock)?.list ?? []).map((it) => ({ id: it.id, label: selSchema.children!.summary(it) || selSchema.children!.itemLabel })),
+                  list: (childrenOf(selBlock)?.list ?? []).map((it) => ({ id: it.id, label: labelEn(selSchema.children!.summary(it) || selSchema.children!.itemLabel) })),
                 }
               : undefined
           }
@@ -1784,32 +1795,32 @@ export function WebsiteBuilder({
 
       {contextMenu}
 
-      <ERPModal open={showAi} onClose={() => setShowAi(false)} title="🤖 ให้ AI ช่วยออกแบบ Section" size="lg">
+      <ERPModal open={showAi} onClose={() => setShowAi(false)} title={t("🤖 ให้ AI ช่วยออกแบบ Section", "🤖 Let AI design sections")} size="lg">
         <div className="space-y-4 text-sm">
           <ol className="list-decimal pl-5 text-slate-600 space-y-1 text-xs">
-            <li>บอกโจทย์สั้น ๆ (ไม่บังคับ) แล้วกด &quot;คัดลอกคำสั่ง&quot;</li>
-            <li>ไปวางใน ChatGPT / Claude / Gemini แล้วรอคำตอบ</li>
-            <li>ก๊อปคำตอบ (JSON) มาวางในช่องล่าง กด &quot;เพิ่มลงหน้า&quot; — ทุกช่องแก้ต่อได้ในแผงขวา</li>
+            <li>{t('บอกโจทย์สั้น ๆ (ไม่บังคับ) แล้วกด "คัดลอกคำสั่ง"', 'Write a short brief (optional) and tap "Copy prompt"')}</li>
+            <li>{t("ไปวางใน ChatGPT / Claude / Gemini แล้วรอคำตอบ", "Paste it into ChatGPT / Claude / Gemini and wait for the answer")}</li>
+            <li>{t('ก๊อปคำตอบ (JSON) มาวางในช่องล่าง กด "เพิ่มลงหน้า" — ทุกช่องแก้ต่อได้ในแผงขวา', 'Copy the answer (JSON) into the box below and tap "Add to page" — every field can be edited in the right panel')}</li>
           </ol>
           <div>
-            <label className="block text-[11px] font-medium text-slate-500 mb-1">โจทย์ที่อยากได้ (ไม่บังคับ)</label>
-            <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={aiBrief} onChange={(e) => setAiBrief(e.target.value)} placeholder="เช่น หน้าแรกร้านกระเป๋าหนัง เน้นงานไทย โทนหรู มี FAQ และรีวิว" />
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">{t("โจทย์ที่อยากได้ (ไม่บังคับ)", "Brief (optional)")}</label>
+            <input className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm" value={aiBrief} onChange={(e) => setAiBrief(e.target.value)} placeholder={t("เช่น หน้าแรกร้านกระเป๋าหนัง เน้นงานไทย โทนหรู มี FAQ และรีวิว", "e.g. Home page for a leather bag shop, Thai craft, luxury tone, with FAQ and reviews")} />
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-medium text-slate-500">คำสั่งสำหรับ AI (สร้างจากรายการ Section ที่ระบบรู้จัก)</span>
-              <button onClick={() => void copyPrompt()} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">{copied ? "✓ คัดลอกแล้ว" : "คัดลอกคำสั่ง"}</button>
+              <span className="text-[11px] font-medium text-slate-500">{t("คำสั่งสำหรับ AI (สร้างจากรายการ Section ที่ระบบรู้จัก)", "Prompt for AI (built from the known section types)")}</span>
+              <button onClick={() => void copyPrompt()} className="px-3 py-1 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">{copied ? t("✓ คัดลอกแล้ว", "✓ Copied") : t("คัดลอกคำสั่ง", "Copy prompt")}</button>
             </div>
             <textarea readOnly className="w-full h-28 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-[11px] text-slate-600" value={aiPrompt} onFocus={(e) => e.currentTarget.select()} />
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-slate-500 mb-1">วาง JSON ที่ AI ตอบกลับมา</label>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">{t("วาง JSON ที่ AI ตอบกลับมา", "Paste the JSON the AI returned")}</label>
             <textarea className="w-full h-36 rounded-lg border border-slate-200 px-2.5 py-1.5 font-mono text-xs" value={aiJson} onChange={(e) => setAiJson(e.target.value)} placeholder='[ { "type": "hero", ... } ]' spellCheck={false} />
             {aiError && <p className="mt-1 text-xs text-red-600">{aiError}</p>}
           </div>
           <div className="flex justify-end gap-2">
-            <button onClick={() => setShowAi(false)} className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">ปิด</button>
-            <button onClick={importAiJson} disabled={!aiJson.trim()} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">เพิ่มลงหน้า</button>
+            <button onClick={() => setShowAi(false)} className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">{t("ปิด", "Close")}</button>
+            <button onClick={importAiJson} disabled={!aiJson.trim()} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">{t("เพิ่มลงหน้า", "Add to page")}</button>
           </div>
         </div>
       </ERPModal>
@@ -1820,9 +1831,9 @@ export function WebsiteBuilder({
             {DEVICES.map((d) => (
               <button key={d.k} onClick={() => setDevice(d.k)} className={`${iconBtn} ${device === d.k ? "!bg-slate-900 !text-white !border-slate-900" : ""}`}>{d.icon}</button>
             ))}
-            <button onClick={reloadPreview} className={iconBtn} title="โหลดใหม่">↻</button>
+            <button onClick={reloadPreview} className={iconBtn} title={t("โหลดใหม่", "Reload")}>↻</button>
             <span className="flex-1" />
-            <button onClick={() => setFullscreen(false)} className={iconBtn} title="ออกจากเต็มจอ (Esc)">✕</button>
+            <button onClick={() => setFullscreen(false)} className={iconBtn} title={t("ออกจากเต็มจอ (Esc)", "Exit full screen (Esc)")}>✕</button>
           </div>
           <div className="flex-1 min-h-0">{previewFrame("100%")}</div>
         </div>

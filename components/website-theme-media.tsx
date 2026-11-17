@@ -14,6 +14,9 @@ import { useFileDrop } from "@/components/file-drop";
 import { removeBackground, type RemoveBgStage } from "@/lib/remove-bg";
 import { ImageSetsContext } from "@/components/website-image-sets-context";
 import { imgSetIdOf, imgSetRef } from "@/lib/website-image-sets";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-admin-en";
 
 // คลังรูปเป็นตัวใหญ่ — โหลดตอนกดเปิดเท่านั้น ไม่ถ่วงหน้าตั้งค่า
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
@@ -23,7 +26,7 @@ export const keyUrl = (key: string | null, w = 200) =>
 
 /** พื้นตารางหมากรุก = เห็นว่าส่วนไหนของรูปใส */
 const CHECKER = "repeating-conic-gradient(#e5e7eb 0% 25%, #ffffff 0% 50%) 50% / 12px 12px";
-const CUT_STAGE: Record<RemoveBgStage, string> = { model: "กำลังโหลดตัว AI…", cutting: "กำลังตัดพื้น…", saving: "กำลังบันทึก…" };
+const cutStageLabel = (s: RemoveBgStage): string => ({ model: tr("กำลังโหลดตัว AI…", "Loading AI model…"), cutting: tr("กำลังตัดพื้น…", "Removing background…"), saving: tr("กำลังบันทึก…", "Saving…") })[s];
 
 export function ImageUploadField({
   label,
@@ -47,6 +50,7 @@ export function ImageUploadField({
   removeBg?: boolean;
 }) {
   const toast = useToast();
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
@@ -72,7 +76,7 @@ export function ImageUploadField({
   const [setOpen, setSetOpen] = useState(false);
 
   /** อัปเข้า R2 (+ ลงคลังกลางเอง) → คืน r2_key · ไม่สำเร็จ = null */
-  const upload = async (file: File, okMsg = "อัปโหลดแล้ว"): Promise<string | null> => {
+  const upload = async (file: File, okMsg = tr("อัปโหลดแล้ว", "Uploaded")): Promise<string | null> => {
     setBusy(true);
     try {
       const fd = new FormData();
@@ -85,9 +89,9 @@ export function ImageUploadField({
         toast.success(okMsg);
         return j.r2_key as string;
       }
-      toast.error(j.error ?? "อัปโหลดไม่สำเร็จ");
+      toast.error(j.error ?? tr("อัปโหลดไม่สำเร็จ", "Upload failed"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -102,10 +106,10 @@ export function ImageUploadField({
     try {
       const file = await removeBackground(`/api/r2-image?key=${encodeURIComponent(from)}&w=1600`, { trim: true, onStage: setCutStage });
       setCutStage(null);
-      const to = await upload(file, "ตัดพื้นแล้ว — รูปเดิมยังอยู่ในคลังรูป");
+      const to = await upload(file, tr("ตัดพื้นแล้ว — รูปเดิมยังอยู่ในคลังรูป", "Background removed — the original stays in the image library"));
       if (to) setCut({ from, to });
     } catch {
-      toast.error("ตัดพื้นไม่สำเร็จ — ลองใหม่อีกครั้ง (ครั้งแรกต้องโหลดตัว AI ~25MB ใช้เน็ตสักครู่)");
+      toast.error(tr("ตัดพื้นไม่สำเร็จ — ลองใหม่อีกครั้ง (ครั้งแรกต้องโหลดตัว AI ~25MB ใช้เน็ตสักครู่)", "Background removal failed — try again (the first time downloads a ~25MB AI model)"));
     } finally {
       setCutStage(null);
     }
@@ -116,15 +120,15 @@ export function ImageUploadField({
   const drop = useFileDrop((files) => void upload(files[0]), {
     accept: "image/",
     disabled: working,
-    onReject: () => toast.error("ลากได้เฉพาะไฟล์รูป (PNG / JPG / WebP / GIF)"),
-    onBusy: () => toast.info("กำลังอัปโหลดอยู่ — รอสักครู่แล้วลากใหม่"),
+    onReject: () => toast.error(tr("ลากได้เฉพาะไฟล์รูป (PNG / JPG / WebP / GIF)", "Only image files can be dropped (PNG / JPG / WebP / GIF)")),
+    onBusy: () => toast.info(tr("กำลังอัปโหลดอยู่ — รอสักครู่แล้วลากใหม่", "Upload in progress — wait a moment and drop again")),
   });
   const dropping = drop.over === "img";
-  const emptyText = dropping ? "วางเพื่ออัปโหลด" : "ยังไม่มีรูป · ลากมาวางได้";
+  const emptyText = dropping ? t("วางเพื่ออัปโหลด", "Drop to upload") : t("ยังไม่มีรูป · ลากมาวางได้", "No image · drag & drop");
 
   const url = keyUrl(setId ? linked?.desk ?? linked?.mob ?? null : value, 300);
   const previewStyle = removeBg && value ? CHECKER : previewBg;
-  const cutBtnLabel = cutStage ? CUT_STAGE[cutStage] : "✂️ ตัดพื้น (AI)";
+  const cutBtnLabel = cutStage ? cutStageLabel(cutStage) : t("✂️ ตัดพื้น (AI)", "✂️ Remove background (AI)");
 
   const fileInput = (
     <input
@@ -144,26 +148,26 @@ export function ImageUploadField({
     <div className="relative mb-1">
       {setId ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] text-violet-800">
-          <span className="min-w-0 truncate font-medium">🔗 ชุดรูป: {linked ? linked.name : setsCtx.loaded ? "ชุดนี้ถูกลบแล้ว" : "…"}</span>
+          <span className="min-w-0 truncate font-medium">🔗 {t("ชุดรูป", "Image set")}: {linked ? linked.name : setsCtx.loaded ? t("ชุดนี้ถูกลบแล้ว", "This set was deleted") : "…"}</span>
           <button type="button" onClick={() => setSetOpen((v) => !v)} className="hover:underline">
-            เปลี่ยนชุด
+            {t("เปลี่ยนชุด", "Change set")}
           </button>
-          <button type="button" onClick={() => onChange(linked?.desk ?? null)} className="hover:underline" title="ช่องนี้กลับไปใช้รูปของตัวเอง (เริ่มจากรูปปัจจุบันของชุด)">
-            เลิกผูก
+          <button type="button" onClick={() => onChange(linked?.desk ?? null)} className="hover:underline" title={t("ช่องนี้กลับไปใช้รูปของตัวเอง (เริ่มจากรูปปัจจุบันของชุด)", "This field goes back to its own image (starting from the set's current image)")}>
+            {t("เลิกผูก", "Unlink")}
           </button>
         </div>
       ) : (
-        <button type="button" onClick={() => setSetOpen((v) => !v)} className="text-[11px] text-violet-700 hover:underline" title="เลือกชุดรูป — เปลี่ยนรูปของชุดทีเดียว ทุกที่ที่ผูกเปลี่ยนตาม (คอม + มือถือ)">
-          🔗 ใช้ชุดรูป
+        <button type="button" onClick={() => setSetOpen((v) => !v)} className="text-[11px] text-violet-700 hover:underline" title={t("เลือกชุดรูป — เปลี่ยนรูปของชุดทีเดียว ทุกที่ที่ผูกเปลี่ยนตาม (คอม + มือถือ)", "Pick an image set — change the set once and every linked spot updates (desktop + mobile)")}>
+          🔗 {t("ใช้ชุดรูป", "Use image set")}
         </button>
       )}
       {setOpen && (
         <div className="absolute left-0 z-30 mt-1 max-h-64 w-64 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
           {setsCtx.sets.length === 0 ? (
-            <p className="p-2 text-[11px] text-slate-500">ยังไม่มีชุดรูป — สร้างได้ที่แท็บ 🖼 ชุดรูป</p>
+            <p className="p-2 text-[11px] text-slate-500">{t("ยังไม่มีชุดรูป — สร้างได้ที่แท็บ 🖼 ชุดรูป", "No image sets yet — create one in the 🖼 Image sets tab")}</p>
           ) : (
             setsCtx.sets.map((x) => {
-              const t = keyUrl(x.desk ?? x.mob, 120);
+              const thumb = keyUrl(x.desk ?? x.mob, 120);
               return (
                 <button
                   key={x.id}
@@ -171,13 +175,13 @@ export function ImageUploadField({
                   onClick={() => {
                     onChange(imgSetRef(x.id));
                     setSetOpen(false);
-                    toast.success(`ผูกชุด “${x.name}” แล้ว`);
+                    toast.success(tr(`ผูกชุด “${x.name}” แล้ว`, `Linked set “${x.name}”`));
                   }}
                   className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-50 ${x.id === setId ? "bg-violet-50" : ""}`}
                 >
                   <span className="flex h-8 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-slate-100">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {t ? <img src={t} alt="" className="h-full w-full object-cover" /> : <span className="text-[9px] text-slate-400">ไม่มีรูป</span>}
+                    {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : <span className="text-[9px] text-slate-400">{t("ไม่มีรูป", "No image")}</span>}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{x.name}</span>
                   {x.id === setId && <span className="text-violet-700">✓</span>}
@@ -193,8 +197,8 @@ export function ImageUploadField({
   return (
     <div ref={boxRef} {...drop.zone("img")} className={`min-w-0 rounded-lg transition-shadow ${dropping ? "ring-2 ring-blue-400 ring-offset-2 bg-blue-50/50" : ""}`}>
       <label className="block text-[11px] font-medium text-slate-500 mb-1">
-        {label}
-        {hint && <span className="text-slate-400"> · {hint}</span>}
+        {labelEn(label)}
+        {hint && <span className="text-slate-400"> · {labelEn(hint)}</span>}
       </label>
       {setBar}
 
@@ -204,37 +208,37 @@ export function ImageUploadField({
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            title="เลือกจากคลังรูป"
+            title={t("เลือกจากคลังรูป", "Pick from image library")}
             className="w-full rounded-lg border border-slate-200 flex items-center justify-center overflow-hidden hover:border-blue-400"
             style={{ height, background: previewStyle }}
           >
             {url ? (
               /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={url} alt={label} style={{ maxHeight: height - 6, maxWidth: "94%", objectFit: "contain" }} />
+              <img src={url} alt={labelEn(label)} style={{ maxHeight: height - 6, maxWidth: "94%", objectFit: "contain" }} />
             ) : (
               <span className={`px-1 text-center text-[10px] leading-tight ${dropping ? "font-medium text-blue-600" : "text-slate-400"}`}>{emptyText}</span>
             )}
           </button>
           <div className="flex flex-wrap gap-1">
-            <button type="button" onClick={() => setPickerOpen(true)} className={`${smallBtn} hover:border-blue-400 hover:text-blue-700`} title="เลือกจากคลังรูป">
-              🖼 คลัง
+            <button type="button" onClick={() => setPickerOpen(true)} className={`${smallBtn} hover:border-blue-400 hover:text-blue-700`} title={t("เลือกจากคลังรูป", "Pick from image library")}>
+              🖼 {t("คลัง", "Library")}
             </button>
-            <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} className={`${smallBtn} hover:border-slate-500 disabled:opacity-50`} title={value ? "อัปโหลดรูปใหม่" : "อัปโหลดรูป"}>
-              {busy ? "…" : "⬆ อัปโหลด"}
+            <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} className={`${smallBtn} hover:border-slate-500 disabled:opacity-50`} title={value ? t("อัปโหลดรูปใหม่", "Upload new image") : t("อัปโหลดรูป", "Upload image")}>
+              {busy ? "…" : t("⬆ อัปโหลด", "⬆ Upload")}
             </button>
             {value && (
-              <button type="button" onClick={() => onChange(null)} className={`${smallBtn} text-red-500 hover:border-red-300`} title="เอารูปออก">
+              <button type="button" onClick={() => onChange(null)} className={`${smallBtn} text-red-500 hover:border-red-300`} title={t("เอารูปออก", "Remove image")}>
                 ✕
               </button>
             )}
             {removeBg && value && !setId && (
-              <button type="button" onClick={cutBackground} disabled={working} className={`${smallBtn} hover:border-violet-400 hover:text-violet-700 disabled:opacity-60`} title="ตัดพื้นหลังออกด้วย AI (รูปคน)">
+              <button type="button" onClick={cutBackground} disabled={working} className={`${smallBtn} hover:border-violet-400 hover:text-violet-700 disabled:opacity-60`} title={t("ตัดพื้นหลังออกด้วย AI (รูปคน)", "Remove background with AI (people photos)")}>
                 {cutBtnLabel}
               </button>
             )}
             {removeBg && canUndo && (
-              <button type="button" onClick={() => { onChange(cut!.from); setCut(null); }} className={`${smallBtn} hover:border-slate-500`} title="กลับไปใช้รูปก่อนตัดพื้น">
-                ↩ รูปเดิม
+              <button type="button" onClick={() => { onChange(cut!.from); setCut(null); }} className={`${smallBtn} hover:border-slate-500`} title={t("กลับไปใช้รูปก่อนตัดพื้น", "Go back to the image before background removal")}>
+                ↩ {t("รูปเดิม", "Original")}
               </button>
             )}
           </div>
@@ -248,7 +252,7 @@ export function ImageUploadField({
         >
           {url ? (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={url} alt={label} style={{ maxHeight: height - 8, maxWidth: 88, objectFit: "contain" }} />
+            <img src={url} alt={labelEn(label)} style={{ maxHeight: height - 8, maxWidth: 88, objectFit: "contain" }} />
           ) : (
             <span className={`px-1 text-center text-[10px] leading-tight ${dropping ? "font-medium text-blue-600" : "text-slate-400"}`}>{emptyText}</span>
           )}
@@ -259,14 +263,14 @@ export function ImageUploadField({
             onClick={() => setPickerOpen(true)}
             className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700"
           >
-            🖼 เลือกจากคลังรูป
+            🖼 {t("เลือกจากคลังรูป", "Pick from image library")}
           </button>
           <button
             onClick={() => inputRef.current?.click()}
             disabled={busy}
             className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500 disabled:opacity-50"
           >
-            {busy ? "กำลังอัปโหลด…" : value ? "อัปโหลดรูปใหม่" : "อัปโหลดรูป"}
+            {busy ? t("กำลังอัปโหลด…", "Uploading…") : value ? t("อัปโหลดรูปใหม่", "Upload new image") : t("อัปโหลดรูป", "Upload image")}
           </button>
           {removeBg && value && !setId && (
             <button
@@ -274,19 +278,19 @@ export function ImageUploadField({
               onClick={cutBackground}
               disabled={working}
               className="px-3 py-1.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:border-violet-400 disabled:opacity-60"
-              title="ตัดพื้นหลังออกด้วย AI ในเครื่อง — ได้รูปพื้นใสใหม่ รูปเดิมไม่หาย"
+              title={t("ตัดพื้นหลังออกด้วย AI ในเครื่อง — ได้รูปพื้นใสใหม่ รูปเดิมไม่หาย", "Remove the background with on-device AI — creates a new transparent image; the original is kept")}
             >
               {cutBtnLabel}
             </button>
           )}
           {removeBg && canUndo && (
             <button type="button" onClick={() => { onChange(cut!.from); setCut(null); }} className="text-[11px] text-slate-600 hover:underline text-left">
-              ↩ กลับไปใช้รูปเดิม (ก่อนตัดพื้น)
+              {t("↩ กลับไปใช้รูปเดิม (ก่อนตัดพื้น)", "↩ Use the original (before background removal)")}
             </button>
           )}
           {value && (
             <button onClick={() => onChange(null)} className="text-[11px] text-red-500 hover:underline text-left">
-              เอารูปออก
+              {t("เอารูปออก", "Remove image")}
             </button>
           )}
         </div>
@@ -301,12 +305,12 @@ export function ImageUploadField({
           open
           onClose={() => setPickerOpen(false)}
           typeFilter="image"
-          title={`เลือกรูป — ${label}`}
+          title={t(`เลือกรูป — ${labelEn(label)}`, `Pick image — ${labelEn(label)}`)}
           onSelect={(rows) => {
             const key = rows[0]?.r2_key;
             if (key) {
               onChange(key);
-              toast.success("เลือกรูปแล้ว");
+              toast.success(tr("เลือกรูปแล้ว", "Image selected"));
             }
             setPickerOpen(false);
           }}

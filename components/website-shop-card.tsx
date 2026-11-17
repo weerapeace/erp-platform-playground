@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { SiteThumb } from "@/components/website-site-thumb";
+import { useT } from "@/components/i18n";
 
 export type WebsiteShopCardData = {
   id: string;
@@ -57,6 +58,7 @@ export function ShopLogo({ s, big }: { s: WebsiteShopCardData; big?: boolean }) 
 }
 
 export function WebsiteShopCard({ s, index }: { s: WebsiteShopCardData; index: number }) {
+  const t = useT();
   return (
     <Link
       href={`/website/${encodeURIComponent(s.slug)}`}
@@ -68,7 +70,7 @@ export function WebsiteShopCard({ s, index }: { s: WebsiteShopCardData; index: n
           <span className="h-1.5 w-1.5 rounded-full bg-rose-300" />
           <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-          <span className="ml-1.5 truncate text-[9px] text-slate-400">{s.domain ?? "ยังไม่ผูกโดเมน"}</span>
+          <span className="ml-1.5 truncate text-[9px] text-slate-400">{s.domain ?? t("ยังไม่ผูกโดเมน", "No domain yet")}</span>
         </div>
         <div
           className="absolute inset-x-0 bottom-0 top-5 flex items-center justify-center pb-8"
@@ -80,7 +82,7 @@ export function WebsiteShopCard({ s, index }: { s: WebsiteShopCardData; index: n
         </div>
         {s.siteUrl && (
           <div className="absolute inset-x-0 bottom-0 top-5 z-[1] transition-transform duration-500 group-hover:scale-[1.02]">
-            <SiteThumb url={withPreviewKey(`${s.siteUrl}/`, s.previewKey)} title={`ตัวอย่างเว็บ ${s.name}`} />
+            <SiteThumb url={withPreviewKey(`${s.siteUrl}/`, s.previewKey)} title={t(`ตัวอย่างเว็บ ${s.name}`, `Site preview: ${s.name}`)} />
           </div>
         )}
         {/* แถบล่าง: โลโก้ + ชื่อร้าน + ป้าย */}
@@ -92,8 +94,8 @@ export function WebsiteShopCard({ s, index }: { s: WebsiteShopCardData; index: n
             <span className="truncate text-base font-semibold text-white drop-shadow">{s.name}</span>
           </span>
           <span className="flex shrink-0 gap-1">
-            {s.status !== "active" && <span className="rounded-full bg-amber-400/90 px-2 py-0.5 text-[10px] text-amber-950">ปิดอยู่</span>}
-            {s.isDefault && <span className="rounded-full bg-white/25 px-2 py-0.5 text-[10px] text-white backdrop-blur-sm">ร้านหลัก</span>}
+            {s.status !== "active" && <span className="rounded-full bg-amber-400/90 px-2 py-0.5 text-[10px] text-amber-950">{t("ปิดอยู่", "Closed")}</span>}
+            {s.isDefault && <span className="rounded-full bg-white/25 px-2 py-0.5 text-[10px] text-white backdrop-blur-sm">{t("ร้านหลัก", "Main shop")}</span>}
           </span>
         </div>
       </div>
@@ -102,16 +104,16 @@ export function WebsiteShopCard({ s, index }: { s: WebsiteShopCardData; index: n
         <div className="flex items-center gap-4 text-sm">
           <div>
             <p className="text-lg font-semibold leading-none text-slate-900">{s.total}</p>
-            <p className="mt-1 text-[11px] text-slate-500">สินค้าบนเว็บ</p>
+            <p className="mt-1 text-[11px] text-slate-500">{t("สินค้าบนเว็บ", "Web products")}</p>
           </div>
           <div>
             <p className="text-lg font-semibold leading-none text-emerald-600">{s.published}</p>
-            <p className="mt-1 text-[11px] text-slate-500">เผยแพร่แล้ว</p>
+            <p className="mt-1 text-[11px] text-slate-500">{t("เผยแพร่แล้ว", "Published")}</p>
           </div>
         </div>
         <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
           <span className="truncate text-xs text-slate-400">{s.slug}</span>
-          <span className="text-xs text-blue-600 group-hover:underline">จัดการ →</span>
+          <span className="text-xs text-blue-600 group-hover:underline">{t("จัดการ →", "Manage →")}</span>
         </div>
       </div>
     </Link>

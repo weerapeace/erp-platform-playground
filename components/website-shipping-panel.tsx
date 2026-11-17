@@ -48,6 +48,12 @@ import {
 } from "@/lib/website-shipping-checks";
 import { webForm } from "@/lib/website-form-styles";
 
+/** สรุปค่าส่งในหน้าจัดการ — ข้อความไทยมาจาก feeSummary (ไฟล์นี้ถูกก๊อปไปหน้าร้าน แก้ที่ต้นทางไม่ได้) → แปลตอนแสดง */
+function feeSummaryUi(m: ShippingMethod, t: (th: string, en: string) => string): string {
+  const th = feeSummary(m);
+  return t(th, th.replace(/^ฟรี$/, "Free").replace(/ ตามจำนวนชิ้น$/, " by item count"));
+}
+
 type Meta = {
   carriers: { key: string; label: string }[];
   boxes: { name: string; size: string }[];
@@ -436,7 +442,7 @@ function MethodCard({ m, active, isDefault, serious, rowProps, rowCls, handle, o
           )}
         </div>
         <div className={`text-xs tabular-nums ${m.enabled ? "text-slate-500" : "text-slate-400"}`}>
-          {feeSummary(m)}
+          {feeSummaryUi(m, t)}
           {m.eta ? ` · ${m.eta}` : ""}
         </div>
         {(!m.enabled || tags.length > 0 || serious > 0) && (
@@ -561,7 +567,7 @@ function MethodDetail({ m, index, meta, issues, remoteCount, canDuplicate, onCha
           </span>
         </div>
         <p className="text-xs tabular-nums text-slate-500">
-          {t(`ลำดับที่ ${index + 1} ที่ลูกค้าเห็น`, `Position ${index + 1} for customers`)} · {feeSummary(m)}
+          {t(`ลำดับที่ ${index + 1} ที่ลูกค้าเห็น`, `Position ${index + 1} for customers`)} · {feeSummaryUi(m, t)}
           {m.freeMin > 0 ? ` · ${t("ส่งฟรีเมื่อ", "free over")} ${money(m.freeMin)}` : ""}
         </p>
       </div>

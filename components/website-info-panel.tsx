@@ -23,6 +23,9 @@ import { coverageOf, needsTranslation, readMeta, translationPatch, translationSt
 import { translateContent } from "@/lib/content-translate";
 import { webForm } from "@/lib/website-form-styles";
 import { FeedCheckCard } from "@/components/website-feed-check";
+import { useT } from "@/components/i18n";
+import { tr, getLang } from "@/lib/lang";
+import { labelEn } from "@/lib/website-admin-en";
 
 type FieldDef = {
   key: string;
@@ -44,15 +47,16 @@ const cardCls = webForm.card;
 
 /** แท็บรายชื่อ (ไม่ใช่ช่องตั้งค่า) — ต่อท้ายแท็บหมวดข้อมูลร้าน */
 const LIST_TABS = [
-  { key: "messages", label: "📨 ข้อความลูกค้า" },
-  { key: "subscribers", label: "📬 รับข่าวสาร" },
-  { key: "restock", label: "🔔 รอแจ้งของเข้า" },
+  { key: "messages", get label() { return tr("📨 ข้อความลูกค้า", "📨 Customer messages"); } },
+  { key: "subscribers", get label() { return tr("📬 รับข่าวสาร", "📬 Newsletter"); } },
+  { key: "restock", get label() { return tr("🔔 รอแจ้งของเข้า", "🔔 Restock alerts"); } },
 ];
 /** จำแท็บล่าสุด (เครื่องนี้) — เปิดมาอีกครั้งอยู่แท็บเดิม */
 const TAB_KEY = "website-info-tab";
 
 export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+  const t = useT();
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [groups, setGroups] = useState<GroupDef[]>([]);
   const [saved, setSaved] = useState<Info>({});
@@ -79,7 +83,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       setPrefix(j.effectiveOrderPrefix ?? "");
       setSiteUrl(j.siteUrl ?? null);
     } catch {
-      toast.error("โหลดข้อมูลร้านไม่สำเร็จ");
+      toast.error(tr("โหลดข้อมูลร้านไม่สำเร็จ", "Couldn't load shop info"));
     } finally {
       setLoading(false);
     }
@@ -126,16 +130,16 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? t("บันทึกไม่สำเร็จ", "Couldn't save"));
         return;
       }
       setSaved(j.info);
       setInfo(j.info);
       setPrefix(j.effectiveOrderPrefix ?? "");
       window.dispatchEvent(new Event("website-info-saved"));
-      toast.success("บันทึกข้อมูลร้านแล้ว — เว็บจะอัปเดตภายใน 1 นาที");
+      toast.success(t("บันทึกข้อมูลร้านแล้ว — เว็บจะอัปเดตภายใน 1 นาที", "Shop info saved — the site updates within 1 minute"));
     } catch {
-      toast.error("บันทึกไม่สำเร็จ");
+      toast.error(t("บันทึกไม่สำเร็จ", "Couldn't save"));
     } finally {
       setSaving(false);
     }
@@ -166,21 +170,21 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
         });
         return next;
       });
-      if (out.filter((x) => x.trim()).length < todo.length) setTxError("แปลไม่ครบบางช่อง — กดอีกครั้งเพื่อแปลส่วนที่เหลือ");
+      if (out.filter((x) => x.trim()).length < todo.length) setTxError(t("แปลไม่ครบบางช่อง — กดอีกครั้งเพื่อแปลส่วนที่เหลือ", "Some fields weren't translated — press again to translate the rest"));
     } catch (e) {
-      setTxError(e instanceof Error ? e.message : "แปลไม่สำเร็จ");
+      setTxError(e instanceof Error ? e.message : t("แปลไม่สำเร็จ", "Translation failed"));
     } finally {
       setTxBusy(false);
     }
   };
 
-  if (loading) return <p className="text-sm text-slate-500 py-8 text-center">กำลังโหลดข้อมูลร้าน…</p>;
+  if (loading) return <p className="text-sm text-slate-500 py-8 text-center">{t("กำลังโหลดข้อมูลร้าน…", "Loading shop info…")}</p>;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-500">
-          ข้อมูลพวกนี้ขึ้นที่ท้ายเว็บ หน้า /contact และหน้าชำระเงินของเว็บร้าน · เว้นว่างช่องไหน เว็บจะไม่โชว์ช่องนั้น
+          {t("ข้อมูลพวกนี้ขึ้นที่ท้ายเว็บ หน้า /contact และหน้าชำระเงินของเว็บร้าน · เว้นว่างช่องไหน เว็บจะไม่โชว์ช่องนั้น", "This info shows in the site footer, the /contact page and checkout · Empty fields are hidden on the site")}
         </p>
         <div className="flex items-center gap-2">
           {dirty && (
@@ -188,7 +192,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
               onClick={() => setInfo(saved)}
               className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100"
             >
-              ละทิ้งการเปลี่ยนแปลง
+              {t("ละทิ้งการเปลี่ยนแปลง", "Discard changes")}
             </button>
           )}
           <button
@@ -196,7 +200,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
             disabled={!dirty || saving}
             className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
           >
-            {saving ? "กำลังบันทึก…" : "บันทึก"}
+            {saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}
           </button>
         </div>
       </div>
@@ -206,24 +210,24 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       <ContentLangProvider>
       {i18nSlots.length > 0 && (
         <div className={`${cardCls} !p-3`}>
-          <p className="text-[11px] text-slate-500 mb-2">🌐 ข้อความร้านภาษาอังกฤษ (หน้าเว็บ /en) — สลับเป็น EN เพื่อกรอก/ตรวจทีละช่อง · ช่องที่ว่าง ลูกค้าเห็นภาษาไทยแทน</p>
+          <p className="text-[11px] text-slate-500 mb-2">{t("🌐 ข้อความร้านภาษาอังกฤษ (หน้าเว็บ /en) — สลับเป็น EN เพื่อกรอก/ตรวจทีละช่อง · ช่องที่ว่าง ลูกค้าเห็นภาษาไทยแทน", "🌐 English shop text (/en pages) — switch to EN to fill in/check each field · Empty fields show Thai to customers")}</p>
           <TranslationBar coverage={coverageOf(i18nSlots)} busy={txBusy} error={txError} onTranslateMissing={() => void translateMissing()} />
         </div>
       )}
       {/* 🗂 แถบแท็บ (ของกลาง ScrollTabs) — หมวดข้อมูลร้าน + รายชื่อ · ● = แก้แล้วยังไม่บันทึก */}
       <ScrollTabs activeKey={active} className="border-b border-slate-200">
-        {[...groupTabs.map((g) => ({ key: g.key, label: g.label, dot: groupDirty(g.key) })), ...LIST_TABS.map((l) => ({ ...l, dot: false }))].map((t) => (
+        {[...groupTabs.map((g) => ({ key: g.key, label: labelEn(g.label), dot: groupDirty(g.key) })), ...LIST_TABS.map((l) => ({ key: l.key, label: l.label, dot: false }))].map((tb) => (
           <button
-            key={t.key}
+            key={tb.key}
             type="button"
-            data-tab-key={t.key}
-            onClick={() => setTab(t.key)}
+            data-tab-key={tb.key}
+            onClick={() => setTab(tb.key)}
             className={`shrink-0 px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
-              active === t.key ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
+              active === tb.key ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
             }`}
           >
-            {t.label}
-            {t.dot && <span className="ml-1 text-amber-500" title="มีการแก้ที่ยังไม่บันทึก">●</span>}
+            {tb.label}
+            {tb.dot && <span className="ml-1 text-amber-500" title={t("มีการแก้ที่ยังไม่บันทึก", "Unsaved changes")}>●</span>}
           </button>
         ))}
       </ScrollTabs>
@@ -238,18 +242,18 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
           if (g.key !== active) return null;
           return (
             <section key={g.key} className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800">{g.label}</h3>
-              <p className="text-[11px] text-slate-500 mt-0.5 mb-3">{g.hint}</p>
+              <h3 className="text-sm font-semibold text-slate-800">{labelEn(g.label)}</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5 mb-3">{labelEn(g.hint)}</p>
               <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
                 {list.map((f) =>
                   f.i18n ? (
                     <BilingualText
                       key={f.key}
-                      label={f.label}
-                      hint={f.hint}
+                      label={labelEn(f.label)}
+                      hint={f.hint ? labelEn(f.hint) : f.hint}
                       wide={f.type === "textarea"}
                       multiline={f.type === "textarea"}
-                      placeholder={f.placeholder}
+                      placeholder={f.placeholder ? labelEn(f.placeholder) : f.placeholder}
                       value={info}
                       fieldKey={f.key}
                       onPatch={(patch) => setInfo((p) => ({ ...p, ...patch }))}
@@ -261,9 +265,9 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
               </div>
               {g.key === "gift" && (
                 <div className="mt-3 rounded-lg bg-pink-50 px-3 py-2 flex flex-wrap items-center gap-2">
-                  <p className="flex-1 min-w-[12rem] text-[11px] text-pink-800">🎴 การ์ดของขวัญ: ลายการ์ดของร้าน · ขนาด · โอกาส + ไอเดียข้อความ (ใช้เมื่อเปิด &quot;ให้ลูกค้าเขียนข้อความบนการ์ด&quot;) · 🎀 แบบห่อหลายแบบ (ชื่อ/รูป/ราคา)</p>
+                  <p className="flex-1 min-w-[12rem] text-[11px] text-pink-800">{t("🎴 การ์ดของขวัญ: ลายการ์ดของร้าน · ขนาด · โอกาส + ไอเดียข้อความ (ใช้เมื่อเปิด \"ให้ลูกค้าเขียนข้อความบนการ์ด\") · 🎀 แบบห่อหลายแบบ (ชื่อ/รูป/ราคา)", "🎴 Gift cards: shop card designs · sizes · occasions + message ideas (used when \"Let customers write a card message\" is on) · 🎀 Multiple wrap styles (name/image/price)")}</p>
                   <button type="button" onClick={() => setCardsOpen(true)} className="px-3 py-1.5 rounded-lg border border-pink-300 bg-white text-xs text-pink-700 hover:bg-pink-100">
-                    ⚙ ตั้งค่าการ์ด + แบบห่อ
+                    {t("⚙ ตั้งค่าการ์ด + แบบห่อ", "⚙ Card + wrap settings")}
                   </button>
                 </div>
               )}
@@ -272,8 +276,8 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
               {g.key === "search" && <SearchTermsBox shopId={shopId} />}
               {g.key === "order" && (
                 <p className="text-[11px] text-slate-500 mt-3 rounded-lg bg-slate-50 px-3 py-2">
-                  เลขที่ออเดอร์ของร้านนี้จะขึ้นต้นด้วย <span className="font-mono font-semibold text-slate-800">{prefix}-</span>{" "}
-                  ตามด้วยปี พ.ศ. + เดือน และลำดับ 5 หลัก เช่น {prefix}-{new Date().getFullYear() + 543}
+                  {t("เลขที่ออเดอร์ของร้านนี้จะขึ้นต้นด้วย", "Order numbers for this shop start with")} <span className="font-mono font-semibold text-slate-800">{prefix}-</span>{" "}
+                  {t("ตามด้วยปี พ.ศ. + เดือน และลำดับ 5 หลัก เช่น", "followed by the Thai (BE) year + month and a 5-digit sequence, e.g.")} {prefix}-{new Date().getFullYear() + 543}
                   {String(new Date().getMonth() + 1).padStart(2, "0")}-00001
                 </p>
               )}
@@ -284,24 +288,25 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
       </ContentLangProvider>
 
       {/* 💾 แถบบันทึก (ของกลาง) — หน้านี้ยาว ปุ่มบนสุดเลื่อนหายไป */}
-      <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => setInfo(saved)} note="บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที" />
+      <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => setInfo(saved)} note={t("บันทึกแล้วเว็บร้านเปลี่ยนภายใน ~1 นาที", "The site updates ~1 minute after saving")} />
     </div>
   );
 }
 
 /** 📦 ฟีดสินค้า (เว็บร้าน /feeds/*.xml — รูปแบบ Google ที่ Meta/TikTok รับได้) — ลิงก์ไปวางใน Merchant Center / Commerce Manager / TikTok Catalog */
 const FEEDS = [
-  { file: "google.xml", label: "Google Merchant Center", where: "Merchant Center › ผลิตภัณฑ์ › ฟีด › เพิ่มฟีด › ดึงข้อมูลตามกำหนดเวลา (วันละครั้ง)" },
-  { file: "facebook.xml", label: "Meta (Facebook/IG) Catalog", where: "Commerce Manager › แคตตาล็อก › แหล่งข้อมูล › ฟีดข้อมูล › URL ตามกำหนดเวลา" },
+  { file: "google.xml", label: "Google Merchant Center", get where() { return tr("Merchant Center › ผลิตภัณฑ์ › ฟีด › เพิ่มฟีด › ดึงข้อมูลตามกำหนดเวลา (วันละครั้ง)", "Merchant Center › Products › Feeds › Add feed › Scheduled fetch (daily)"); } },
+  { file: "facebook.xml", label: "Meta (Facebook/IG) Catalog", get where() { return tr("Commerce Manager › แคตตาล็อก › แหล่งข้อมูล › ฟีดข้อมูล › URL ตามกำหนดเวลา", "Commerce Manager › Catalog › Data sources › Data feed › Scheduled URL"); } },
   { file: "tiktok.xml", label: "TikTok Catalog", where: "TikTok Ads Manager › Assets › Catalogs › Add products › Data feed (URL)" },
 ];
 function FeedLinks({ siteUrl }: { siteUrl: string | null }) {
   const toast = useToast();
-  if (!siteUrl) return <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">📦 ฟีดสินค้า: ร้านนี้ยังไม่ได้ผูกโดเมน — ผูกโดเมนก่อนแล้วลิงก์ฟีดจะขึ้นตรงนี้</p>;
+  const t = useT();
+  if (!siteUrl) return <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">{t("📦 ฟีดสินค้า: ร้านนี้ยังไม่ได้ผูกโดเมน — ผูกโดเมนก่อนแล้วลิงก์ฟีดจะขึ้นตรงนี้", "📦 Product feeds: this shop has no domain yet — connect a domain and the feed links will appear here")}</p>;
   const base = siteUrl.replace(/\/$/, "");
   return (
     <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2.5 space-y-2">
-      <p className="text-[11px] font-semibold text-slate-700">📦 ฟีดสินค้า (อัปเดตเองตามสินค้าที่เผยแพร่ · ราคา/สต็อก/รูปทุกสี)</p>
+      <p className="text-[11px] font-semibold text-slate-700">{t("📦 ฟีดสินค้า (อัปเดตเองตามสินค้าที่เผยแพร่ · ราคา/สต็อก/รูปทุกสี)", "📦 Product feeds (auto-updated from published products · price/stock/images for every color)")}</p>
       {FEEDS.map((f) => {
         const url = `${base}/feeds/${f.file}`;
         return (
@@ -310,16 +315,16 @@ function FeedLinks({ siteUrl }: { siteUrl: string | null }) {
             <code className="flex-1 min-w-[12rem] truncate rounded bg-white border border-slate-200 px-2 py-1 text-[11px] text-slate-800">{url}</code>
             <button
               type="button"
-              onClick={() => navigator.clipboard?.writeText(url).then(() => toast.success("คัดลอกลิงก์ฟีดแล้ว"), () => toast.error("คัดลอกไม่สำเร็จ"))}
+              onClick={() => navigator.clipboard?.writeText(url).then(() => toast.success(t("คัดลอกลิงก์ฟีดแล้ว", "Feed link copied")), () => toast.error(t("คัดลอกไม่สำเร็จ", "Couldn't copy")))}
               className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] hover:border-blue-500"
             >
-              📋 คัดลอก
+              {t("📋 คัดลอก", "📋 Copy")}
             </button>
             <p className="basis-full pl-0 sm:pl-[11.5rem] text-[10px] text-slate-500">{f.where}</p>
           </div>
         );
       })}
-      <p className="text-[10px] text-slate-500">ร้านปิดเว็บชั่วคราวอยู่ = ฟีดว่าง (ไม่ยิงแอดไปหน้าที่ลูกค้าเข้าไม่ได้)</p>
+      <p className="text-[10px] text-slate-500">{t("ร้านปิดเว็บชั่วคราวอยู่ = ฟีดว่าง (ไม่ยิงแอดไปหน้าที่ลูกค้าเข้าไม่ได้)", "While the site is temporarily closed the feed is empty (no ads to pages customers can't open)")}</p>
     </div>
   );
 }
@@ -327,6 +332,7 @@ function FeedLinks({ siteUrl }: { siteUrl: string | null }) {
 /** 🔍 คำที่ลูกค้าค้นบนเว็บ 30 วันล่าสุด (/api/website/search-terms) — หาไม่เจอ = ไว้เติมคำพ้อง/เพิ่มสินค้า */
 function SearchTermsBox({ shopId }: { shopId: string }) {
   const toast = useToast();
+  const t = useT();
   const [notFound, setNotFound] = useState(true);
   const [terms, setTerms] = useState<{ q: string; hits: number; lastResults: number; lastDay: string }[] | null>(null);
   useEffect(() => {
@@ -343,7 +349,7 @@ function SearchTermsBox({ shopId }: { shopId: string }) {
   return (
     <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="flex-1 text-[11px] font-semibold text-slate-700">🔍 คำที่ลูกค้าค้น (30 วันล่าสุด)</p>
+        <p className="flex-1 text-[11px] font-semibold text-slate-700">{t("🔍 คำที่ลูกค้าค้น (30 วันล่าสุด)", "🔍 Customer searches (last 30 days)")}</p>
         {(["notFound", "all"] as const).map((k) => (
           <button
             key={k}
@@ -351,31 +357,31 @@ function SearchTermsBox({ shopId }: { shopId: string }) {
             onClick={() => setNotFound(k === "notFound")}
             className={`rounded-md border px-2 py-0.5 text-[11px] ${notFound === (k === "notFound") ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-600"}`}
           >
-            {k === "notFound" ? "หาไม่เจอ" : "ทั้งหมด"}
+            {k === "notFound" ? t("หาไม่เจอ", "Not found") : t("ทั้งหมด", "All")}
           </button>
         ))}
       </div>
       {terms === null ? (
-        <p className="mt-2 text-[11px] text-slate-400">กำลังโหลด…</p>
+        <p className="mt-2 text-[11px] text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>
       ) : terms.length === 0 ? (
-        <p className="mt-2 text-[11px] text-slate-500">{notFound ? "ยังไม่มีคำที่ค้นแล้วไม่เจอ 👍" : "ยังไม่มีคนค้นในช่วงนี้"}</p>
+        <p className="mt-2 text-[11px] text-slate-500">{notFound ? t("ยังไม่มีคำที่ค้นแล้วไม่เจอ 👍", "No searches without results 👍") : t("ยังไม่มีคนค้นในช่วงนี้", "No searches in this period")}</p>
       ) : (
         <ul className="mt-2 flex flex-wrap gap-1.5">
-          {terms.map((t) => (
-            <li key={t.q}>
+          {terms.map((term) => (
+            <li key={term.q}>
               <button
                 type="button"
-                title={`ค้น ${t.hits} ครั้ง · ครั้งล่าสุด ${t.lastDay} เจอ ${t.lastResults} ชิ้น — กดเพื่อคัดลอกไปใส่คำพ้อง`}
-                onClick={() => navigator.clipboard?.writeText(t.q).then(() => toast.success(`คัดลอก "${t.q}" แล้ว`), () => undefined)}
-                className={`rounded-full border bg-white px-2 py-0.5 text-[11px] hover:border-blue-500 ${t.lastResults === 0 ? "border-red-200 text-red-700" : "border-slate-200 text-slate-700"}`}
+                title={t(`ค้น ${term.hits} ครั้ง · ครั้งล่าสุด ${term.lastDay} เจอ ${term.lastResults} ชิ้น — กดเพื่อคัดลอกไปใส่คำพ้อง`, `Searched ${term.hits} times · last on ${term.lastDay}, ${term.lastResults} results — click to copy for synonyms`)}
+                onClick={() => navigator.clipboard?.writeText(term.q).then(() => toast.success(t(`คัดลอก "${term.q}" แล้ว`, `Copied "${term.q}"`)), () => undefined)}
+                className={`rounded-full border bg-white px-2 py-0.5 text-[11px] hover:border-blue-500 ${term.lastResults === 0 ? "border-red-200 text-red-700" : "border-slate-200 text-slate-700"}`}
               >
-                {t.q} <span className="text-slate-400">×{t.hits}</span>
+                {term.q} <span className="text-slate-400">×{term.hits}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
-      <p className="mt-2 text-[10px] text-slate-500">สีแดง = ครั้งล่าสุดหาไม่เจอ · เอาคำนี้ไปจับคู่กับคำที่มีในชื่อสินค้าในช่องคำพ้องด้านบน หรือเพิ่มสินค้าที่ลูกค้าตามหา · ไม่เก็บว่าใครค้น</p>
+      <p className="mt-2 text-[10px] text-slate-500">{t("สีแดง = ครั้งล่าสุดหาไม่เจอ · เอาคำนี้ไปจับคู่กับคำที่มีในชื่อสินค้าในช่องคำพ้องด้านบน หรือเพิ่มสินค้าที่ลูกค้าตามหา · ไม่เก็บว่าใครค้น", "Red = no results last time · Map these words to words in product names in the synonyms field above, or add the products customers want · Who searched is not stored")}</p>
     </div>
   );
 }
@@ -393,21 +399,21 @@ function Field({
     return (
       <label className="sm:col-span-2 flex items-center gap-2 text-sm text-slate-800 py-1 cursor-pointer">
         <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} className="w-4 h-4" />
-        <span>{f.label}</span>
-        {f.hint && <span className="text-[11px] text-slate-400">— {f.hint}</span>}
+        <span>{labelEn(f.label)}</span>
+        {f.hint && <span className="text-[11px] text-slate-400">— {labelEn(f.hint)}</span>}
       </label>
     );
   }
   const wide = f.type === "textarea" ? "sm:col-span-2" : "";
   return (
     <div className={wide}>
-      <label className={labelCls}>{f.label}</label>
+      <label className={labelCls}>{labelEn(f.label)}</label>
       {f.type === "textarea" ? (
         <textarea
           rows={3}
           className={inputCls}
           value={String(value ?? "")}
-          placeholder={f.placeholder}
+          placeholder={f.placeholder ? labelEn(f.placeholder) : f.placeholder}
           onChange={(e) => onChange(e.target.value)}
         />
       ) : (
@@ -417,11 +423,11 @@ function Field({
           min={f.type === "number" ? 0 : undefined}
           className={inputCls}
           value={String(value ?? "")}
-          placeholder={f.placeholder}
+          placeholder={f.placeholder ? labelEn(f.placeholder) : f.placeholder}
           onChange={(e) => onChange(f.type === "number" ? e.target.value : e.target.value)}
         />
       )}
-      {f.hint && <p className="text-[11px] text-slate-400 mt-1">{f.hint}</p>}
+      {f.hint && <p className="text-[11px] text-slate-400 mt-1">{labelEn(f.hint)}</p>}
     </div>
   );
 }
@@ -431,6 +437,7 @@ type Subscriber = { id: string; email: string; source: string; created_at: strin
 /** รายชื่อสมัครรับข่าวสาร (จากบล็อก "สมัครรับข่าวสาร" บนเว็บ) — ดู/ลบ/ก๊อปอีเมล */
 function SubscribersCard({ shopSlug, defaultOpen = false }: { shopSlug: string; defaultOpen?: boolean }) {
   const toast = useToast();
+  const t = useT();
   const [rows, setRows] = useState<Subscriber[]>([]);
   const [total, setTotal] = useState(0);
   const [open, setOpen] = useState(defaultOpen);
@@ -444,7 +451,7 @@ function SubscribersCard({ shopSlug, defaultOpen = false }: { shopSlug: string; 
       setTotal(j.total ?? 0);
       setNote(j.error ?? null);
     } catch {
-      setNote("โหลดรายชื่อไม่สำเร็จ");
+      setNote(tr("โหลดรายชื่อไม่สำเร็จ", "Couldn't load the list"));
     }
   }, [shopSlug]);
 
@@ -453,34 +460,34 @@ function SubscribersCard({ shopSlug, defaultOpen = false }: { shopSlug: string; 
   }, [load]);
 
   const remove = async (s: Subscriber) => {
-    if (!(await askConfirm({ title: `ลบ ${s.email} ออกจากรายชื่อรับข่าวสาร?`, variant: "danger", confirmText: "ลบ" }))) return;
+    if (!(await askConfirm({ title: t(`ลบ ${s.email} ออกจากรายชื่อรับข่าวสาร?`, `Remove ${s.email} from the newsletter list?`), variant: "danger", confirmText: t("ลบ", "Delete") }))) return;
     const r = await apiFetch(`/api/website/subscribers?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
     const j = await r.json();
-    if (!j.ok) return toast.error(j.error ?? "ลบไม่สำเร็จ");
-    toast.success("ลบแล้ว");
+    if (!j.ok) return toast.error(j.error ?? t("ลบไม่สำเร็จ", "Couldn't delete"));
+    toast.success(t("ลบแล้ว", "Deleted"));
     void load();
   };
 
   const copyAll = async () => {
     try {
       await navigator.clipboard.writeText(rows.map((r) => r.email).join("\n"));
-      toast.success(`คัดลอก ${rows.length} อีเมลแล้ว`);
+      toast.success(t(`คัดลอก ${rows.length} อีเมลแล้ว`, `Copied ${rows.length} emails`));
     } catch {
-      toast.error("คัดลอกไม่สำเร็จ");
+      toast.error(t("คัดลอกไม่สำเร็จ", "Couldn't copy"));
     }
   };
 
   return (
     <section className={cardCls}>
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold text-slate-800">📬 รายชื่อรับข่าวสาร</h3>
-        <span className="text-xs text-slate-500">{total} รายชื่อ (จากบล็อก &quot;สมัครรับข่าวสาร&quot; บนเว็บ)</span>
+        <h3 className="text-sm font-semibold text-slate-800">{t("📬 รายชื่อรับข่าวสาร", "📬 Newsletter subscribers")}</h3>
+        <span className="text-xs text-slate-500">{t(`${total} รายชื่อ (จากบล็อก "สมัครรับข่าวสาร" บนเว็บ)`, `${total} subscribers (from the "Newsletter signup" block on the site)`)}</span>
         <div className="ml-auto flex gap-2">
           {rows.length > 0 && (
-            <button onClick={copyAll} className="px-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">คัดลอกอีเมลทั้งหมด</button>
+            <button onClick={copyAll} className="px-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">{t("คัดลอกอีเมลทั้งหมด", "Copy all emails")}</button>
           )}
           <button onClick={() => setOpen((v) => !v)} className="px-3 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
-            {open ? "ซ่อน" : "ดูรายชื่อ"}
+            {open ? t("ซ่อน", "Hide") : t("ดูรายชื่อ", "View list")}
           </button>
         </div>
       </div>
@@ -491,21 +498,21 @@ function SubscribersCard({ shopSlug, defaultOpen = false }: { shopSlug: string; 
             rows={rows}
             rowKey={(r) => r.id}
             dense
-            countUnit="รายชื่อ"
-            emptyText="ยังไม่มีใครสมัคร — เพิ่มบล็อก 'สมัครรับข่าวสาร' ในหน้าแรกได้ที่แท็บหน้าแรก"
+            countUnit={t("รายชื่อ", "subscribers")}
+            emptyText={t("ยังไม่มีใครสมัคร — เพิ่มบล็อก 'สมัครรับข่าวสาร' ในหน้าแรกได้ที่แท็บหน้าแรก", "No subscribers yet — add a 'Newsletter signup' block in the Home page tab")}
             searchText={(r) => r.email}
             maxHeightClass="max-h-80"
             columns={[
-              { key: "email", header: "อีเมล", width: "1fr", cell: (r) => <span className="text-sm">{r.email}</span>, sortValue: (r) => r.email },
-              { key: "src", header: "ที่มา", width: "6rem", cell: (r) => <span className="text-xs text-slate-500">{r.source}</span> },
+              { key: "email", header: t("อีเมล", "Email"), width: "1fr", cell: (r) => <span className="text-sm">{r.email}</span>, sortValue: (r) => r.email },
+              { key: "src", header: t("ที่มา", "Source"), width: "6rem", cell: (r) => <span className="text-xs text-slate-500">{r.source}</span> },
               {
                 key: "at",
-                header: "สมัครเมื่อ",
+                header: t("สมัครเมื่อ", "Signed up"),
                 width: "9rem",
-                cell: (r) => <span className="text-xs text-slate-500">{new Date(r.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</span>,
+                cell: (r) => <span className="text-xs text-slate-500">{new Date(r.created_at).toLocaleString(getLang() === "en" ? "en-GB" : "th-TH", { dateStyle: "short", timeStyle: "short" })}</span>,
                 sortValue: (r) => r.created_at,
               },
-              { key: "del", header: "", width: "3rem", cell: (r) => <button onClick={() => void remove(r)} className="text-xs text-red-500 hover:underline">ลบ</button> },
+              { key: "del", header: "", width: "3rem", cell: (r) => <button onClick={() => void remove(r)} className="text-xs text-red-500 hover:underline">{t("ลบ", "Delete")}</button> },
             ]}
           />
         </div>

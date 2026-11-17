@@ -6,11 +6,12 @@
  * ตรวจค่า "บอกว่าขาดอะไร ไม่เดาค่าให้" · ข้อความ error 2 ภาษา (ตามหน้าที่ลูกค้าใช้)
  */
 
+import { tr } from "@/lib/lang";
 export type ContactStatus = "new" | "done" | "spam";
 export const CONTACT_STATUSES: { key: ContactStatus; label: string; tone: string }[] = [
-  { key: "new", label: "ใหม่", tone: "bg-blue-50 text-blue-700" },
-  { key: "done", label: "ตอบแล้ว", tone: "bg-emerald-50 text-emerald-700" },
-  { key: "spam", label: "สแปม", tone: "bg-slate-100 text-slate-500" },
+  { key: "new", get label() { return tr("ใหม่", "New"); }, tone: "bg-blue-50 text-blue-700" },
+  { key: "done", get label() { return tr("ตอบแล้ว", "Replied"); }, tone: "bg-emerald-50 text-emerald-700" },
+  { key: "spam", get label() { return tr("สแปม", "Spam"); }, tone: "bg-slate-100 text-slate-500" },
 ];
 export const contactStatusLabel = (s: string) => CONTACT_STATUSES.find((x) => x.key === s)?.label ?? s;
 

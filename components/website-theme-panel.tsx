@@ -50,17 +50,20 @@ import { DesignOverview } from "@/components/website-design/overview";
 import { DesignCard, DesignCardsProvider, DesignCardsToggleAll } from "@/components/website-design/design-card";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import { Icon } from "@/components/icon";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-admin-en";
 import { SPLIT_HANDLE_W, SplitHandle, useSplitWidth } from "@/components/split-handle";
 import { DESIGN_GROUPS, DESIGN_PAGES, PREVIEW_PART_RULES, designGroupOf, dirtyDesignPages, isDesignPageKey, normTitle, previewFocusOf, previewRuleOf, searchDesign, type DesignPageKey } from "@/lib/website-design-nav";
-const FINE_COLOR_LABEL = "สีละเอียด";
+const fineColorLabel = () => tr("สีละเอียด", "Fine colors");
 /** หน้าในแท็บดีไซน์ = ทะเบียนกลาง lib/website-design-nav (เมนูซ้ายจัดหมวด) */
 type TabKey = DesignPageKey;
 type Device = "desktop" | "tablet" | "mobile";
 
 const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[] = [
-  { k: "desktop", label: "คอมพิวเตอร์", w: 1440, h: 900, icon: "🖥️" },
-  { k: "tablet", label: "แท็บเล็ต", w: 768, h: 1024, icon: "📱" },
-  { k: "mobile", label: "มือถือ", w: 390, h: 844, icon: "📲" },
+  { k: "desktop", get label() { return tr("คอมพิวเตอร์", "Desktop"); }, w: 1440, h: 900, icon: "🖥️" },
+  { k: "tablet", get label() { return tr("แท็บเล็ต", "Tablet"); }, w: 768, h: 1024, icon: "📱" },
+  { k: "mobile", get label() { return tr("มือถือ", "Mobile"); }, w: 390, h: 844, icon: "📲" },
 ];
 
 /** path พรีวิว + ?preview=1 (path มี ?query อยู่แล้ว เช่น หน้าขอบคุณ = ต่อด้วย &) */
@@ -76,24 +79,25 @@ const ZOOM_MAX = 1.5;
 const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout", pages: "/zz-page-not-found", campaign: "/" };
 
 const PAGES = [
-  { path: "/", label: "หน้าแรก" },
-  { path: "/shop", label: "สินค้าทั้งหมด (ร้านค้า)" },
-  { path: "/contact", label: "ติดต่อ" },
-  { path: "/cart", label: "ตะกร้า (เต็มหน้า)" },
-  { path: "/new", label: "มาใหม่" },
-  { path: "/checkout", label: "หน้าชำระเงิน" },
-  { path: "/checkout?pv=thanks", label: "หน้าขอบคุณ (หลังสั่ง)" },
-  { path: "/zz-page-not-found", label: "หน้า 404 (ไม่พบหน้า)" },
-  { path: "/?pv=popup", label: "ป๊อปอัปรับส่วนลด (ตัวอย่าง)" },
-  { path: "/account/login", label: "หน้าเข้าสู่ระบบ" },
+  { path: "/", get label() { return tr("หน้าแรก", "Home"); } },
+  { path: "/shop", get label() { return tr("สินค้าทั้งหมด (ร้านค้า)", "All products (shop)"); } },
+  { path: "/contact", get label() { return tr("ติดต่อ", "Contact"); } },
+  { path: "/cart", get label() { return tr("ตะกร้า (เต็มหน้า)", "Cart (full page)"); } },
+  { path: "/new", get label() { return tr("มาใหม่", "New drops"); } },
+  { path: "/checkout", get label() { return tr("หน้าชำระเงิน", "Checkout"); } },
+  { path: "/checkout?pv=thanks", get label() { return tr("หน้าขอบคุณ (หลังสั่ง)", "Thank-you page (after order)"); } },
+  { path: "/zz-page-not-found", get label() { return tr("หน้า 404 (ไม่พบหน้า)", "404 page (not found)"); } },
+  { path: "/?pv=popup", get label() { return tr("ป๊อปอัปรับส่วนลด (ตัวอย่าง)", "Discount popup (sample)"); } },
+  { path: "/account/login", get label() { return tr("หน้าเข้าสู่ระบบ", "Login page"); } },
 ];
 
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 /** กฎป้ายในพรีวิว (prefix → "แก้: <ชื่อ>") ส่งให้เว็บร้านตอนเปิดโหมดคลิกเลือกส่วน */
-const AREA_RULES = PREVIEW_PART_RULES.map(({ prefix, label }) => ({ prefix, label }));
+const areaRulesAll = () => PREVIEW_PART_RULES.map(({ prefix, label }) => ({ prefix, label: labelEn(label) }));
 
 export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+  const t = useT();
 
   const [theme, setTheme] = useState<Theme | null>(null);
   const [published, setPublished] = useState<Theme | null>(null);
@@ -136,7 +140,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (limited && !allowedPage(tab)) setTabState(access.topics[0]);
   }, [limited, allowedPage, tab, access.topics]);
   // 🎯 คลิกเลือกส่วนในพรีวิว: เฉพาะส่วนของหัวข้อที่แก้ได้
-  const areaRules = useMemo(() => (limited ? PREVIEW_PART_RULES.filter((r) => allowedPage(r.page)).map(({ prefix, label }) => ({ prefix, label })) : AREA_RULES), [limited, allowedPage]);
+  const areaRules = useMemo(() => (limited ? PREVIEW_PART_RULES.filter((r) => allowedPage(r.page)).map(({ prefix, label }) => ({ prefix, label: labelEn(label) })) : areaRulesAll()), [limited, allowedPage]);
   const areaRulesRef = useRef(areaRules);
   areaRulesRef.current = areaRules;
   // 🔎 ไปหน้า + การ์ดที่ค้นเจอ → เลื่อนให้เห็นแล้วกะพริบกรอบ (หาจากหัวการ์ดบนจอ)
@@ -279,7 +283,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (d.type !== "storefront-area-picked" || typeof d.part !== "string") return;
     const rule = previewRuleOf(d.part);
     if (!rule) return;
-    if (!allowedPage(rule.page)) return toast.info(`หัวข้อ “${DESIGN_PAGES[rule.page as Exclude<TabKey, "overview">]?.label ?? rule.label}” ไม่ได้รับสิทธิ์แก้`);
+    if (!allowedPage(rule.page)) return toast.info(tr(`หัวข้อ “${DESIGN_PAGES[rule.page as Exclude<TabKey, "overview">]?.label ?? rule.label}” ไม่ได้รับสิทธิ์แก้`, `No permission to edit “${labelEn(DESIGN_PAGES[rule.page as Exclude<TabKey, "overview">]?.label ?? rule.label)}”`));
     if (rule.page !== tab) fromPick.current = true;
     goTo(rule.page, rule.card);
   });
@@ -372,7 +376,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       undoStack.current = [];
       redoStack.current = [];
     } catch {
-      toast.error("โหลดธีมไม่สำเร็จ");
+      toast.error(tr("โหลดธีมไม่สำเร็จ", "Couldn't load theme"));
     } finally {
       setLoading(false);
     }
@@ -578,30 +582,30 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (!theme || !base) return [] as string[];
     const out: string[] = [];
     for (const f of COLOR_FIELDS) if (theme.colors[f.key] !== base.colors[f.key]) out.push(f.label);
-    if (FINE_COLOR_KEYS.some((k) => theme.colors[k] !== base.colors[k])) out.push(FINE_COLOR_LABEL);
-    if (theme.fonts.display !== base.fonts.display) out.push("ฟอนต์หัวข้อ");
-    if (theme.fonts.body !== base.fonts.body) out.push("ฟอนต์เนื้อหา");
-    if (theme.fonts.displayLatin !== base.fonts.displayLatin || theme.fonts.bodyLatin !== base.fonts.bodyLatin) out.push("ฟอนต์อังกฤษ");
-    if (theme.radius !== base.radius) out.push("ความมนขอบ");
-    if (!eq(theme.typography, base.typography)) out.push("ตัวอักษร");
-    if (!eq(theme.shape, base.shape)) out.push("รูปทรง");
+    if (FINE_COLOR_KEYS.some((k) => theme.colors[k] !== base.colors[k])) out.push(fineColorLabel());
+    if (theme.fonts.display !== base.fonts.display) out.push(tr("ฟอนต์หัวข้อ", "Heading font"));
+    if (theme.fonts.body !== base.fonts.body) out.push(tr("ฟอนต์เนื้อหา", "Body font"));
+    if (theme.fonts.displayLatin !== base.fonts.displayLatin || theme.fonts.bodyLatin !== base.fonts.bodyLatin) out.push(tr("ฟอนต์อังกฤษ", "English font"));
+    if (theme.radius !== base.radius) out.push(tr("ความมนขอบ", "Corner radius"));
+    if (!eq(theme.typography, base.typography)) out.push(tr("ตัวอักษร", "Typography"));
+    if (!eq(theme.shape, base.shape)) out.push(tr("รูปทรง", "Shape"));
     {
       const { placeholder: ph, ...lg } = theme.logo;
       const { placeholder: php, ...lgp } = base.logo;
-      if (!eq(lg, lgp)) out.push("โลโก้");
-      if (!eq(ph, php)) out.push("รอรูปโหลด");
+      if (!eq(lg, lgp)) out.push(tr("โลโก้", "Logo"));
+      if (!eq(ph, php)) out.push(tr("รอรูปโหลด", "Image placeholder"));
     }
     if (!eq(theme.header, base.header)) out.push("Header");
-    if (!eq(theme.menu, base.menu)) out.push("เมนู");
+    if (!eq(theme.menu, base.menu)) out.push(tr("เมนู", "Menu"));
     if (!eq(theme.footer, base.footer)) out.push("Footer");
-    if (!eq(theme.listing, base.listing)) out.push("หน้ารายการสินค้า");
-    if (!eq(theme.card, base.card)) out.push("การ์ดสินค้า");
+    if (!eq(theme.listing, base.listing)) out.push(tr("หน้ารายการสินค้า", "Product listing"));
+    if (!eq(theme.card, base.card)) out.push(tr("การ์ดสินค้า", "Product card"));
     // หน้าสินค้า (Style/ชุดรายละเอียด/⚙️/ขนาดตัวอักษร/ค่ามือถือ) — เดิมไม่ถูกนับ ทำให้แถบล่างบอก "ไม่มีการเปลี่ยนแปลง" ทั้งที่แก้แล้ว
-    if (!eq(theme.product, base.product)) out.push("หน้าสินค้า");
-    if (!eq(theme.cart, base.cart)) out.push("ตะกร้า");
-    if (!eq(theme.checkout, base.checkout)) out.push("หน้าชำระเงิน");
+    if (!eq(theme.product, base.product)) out.push(tr("หน้าสินค้า", "Product page"));
+    if (!eq(theme.cart, base.cart)) out.push(tr("ตะกร้า", "Cart"));
+    if (!eq(theme.checkout, base.checkout)) out.push(tr("หน้าชำระเงิน", "Checkout"));
     // ✨ การเคลื่อนไหว + 🧱 ทั้งเว็บ (แท็บรูปทรง) — เดิมไม่ถูกนับ
-    if (!eq(theme.page, base.page)) out.push("ทั้งเว็บ (รูปทรง)");
+    if (!eq(theme.page, base.page)) out.push(tr("ทั้งเว็บ (รูปทรง)", "Whole site (shape)"));
     return out;
   }, [theme, saved]);
 
@@ -624,8 +628,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     // 👷 บางหัวข้อ: ส่งเฉพาะหัวข้อที่แก้ (และมีสิทธิ์) — เซิร์ฟเวอร์คัดค่าซ้ำอีกชั้น
     const changed = limited ? dirtyDesignPages(theme, mode === "publish" ? published : saved) : [];
     const pages = changed.filter((k) => allowedPage(k));
-    if (limited && !pages.length) return toast.info(changed.length ? "ส่วนที่แก้ไม่อยู่ในหัวข้อที่ได้รับสิทธิ์ — บันทึกไม่ได้" : "ยังไม่มีอะไรเปลี่ยน");
-    if (mode === "publish" && !confirm(limited ? `ยืนยันเผยแพร่หัวข้อ ${pages.map((k) => DESIGN_PAGES[k].label).join(", ")} ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที` : "ยืนยันเผยแพร่ธีมนี้ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที")) return;
+    if (limited && !pages.length) return toast.info(changed.length ? tr("ส่วนที่แก้ไม่อยู่ในหัวข้อที่ได้รับสิทธิ์ — บันทึกไม่ได้", "Your changes are outside the topics you can edit — can't save") : tr("ยังไม่มีอะไรเปลี่ยน", "Nothing changed yet"));
+    if (mode === "publish" && !confirm(limited ? tr(`ยืนยันเผยแพร่หัวข้อ ${pages.map((k) => DESIGN_PAGES[k].label).join(", ")} ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที`, `Publish ${pages.map((k) => labelEn(DESIGN_PAGES[k].label)).join(", ")} to the live site?\nVisitors will see the change within about 1 minute`) : tr("ยืนยันเผยแพร่ธีมนี้ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที", "Publish this theme to the live site?\nVisitors will see the change within about 1 minute"))) return;
     // ค่าที่ส่งจริง — ถ้าแก้ต่อระหว่างรอบันทึก ส่วนที่แก้เพิ่มยังนับเป็น "ยังไม่บันทึก"
     const sent = theme;
     setBusy(mode);
@@ -637,7 +641,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? tr("บันทึกไม่สำเร็จ", "Save failed"));
         return;
       }
       if (limited) {
@@ -649,12 +653,12 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           setPublished(j.theme);
           setHadDraft(Boolean(j.draft));
           setLastVersion({ version_no: j.version, created_at: new Date().toISOString() });
-          toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บจะอัปเดตภายใน ~1 นาที`);
+          toast.success(tr(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บจะอัปเดตภายใน ~1 นาที`, `Published (version ${j.version}) — the site updates within ~1 minute`));
         } else {
           setHadDraft(true);
-          toast.success(access.publish ? "บันทึกร่างแล้ว — เว็บไซต์จริงยังไม่เปลี่ยน" : "บันทึกร่างแล้ว — แก้เสร็จกด “ส่งให้หัวหน้าตรวจ”");
+          toast.success(access.publish ? tr("บันทึกร่างแล้ว — เว็บไซต์จริงยังไม่เปลี่ยน", "Draft saved — the live site hasn't changed") : tr("บันทึกร่างแล้ว — แก้เสร็จกด “ส่งให้หัวหน้าตรวจ”", "Draft saved — when done, click “Send for review”"));
         }
-        if (changed.length > pages.length) toast.info("บางส่วนที่แก้ไม่อยู่ในหัวข้อที่ได้รับสิทธิ์ — ไม่ถูกบันทึก");
+        if (changed.length > pages.length) toast.info(tr("บางส่วนที่แก้ไม่อยู่ในหัวข้อที่ได้รับสิทธิ์ — ไม่ถูกบันทึก", "Some changes are outside your topics — not saved"));
         return;
       }
       setSaved(sent);
@@ -662,13 +666,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         setPublished(j.theme);
         setHadDraft(false);
         setLastVersion({ version_no: j.version, created_at: new Date().toISOString() });
-        toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บจะอัปเดตภายใน ~1 นาที`);
+        toast.success(tr(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บจะอัปเดตภายใน ~1 นาที`, `Published (version ${j.version}) — the site updates within ~1 minute`));
       } else {
         setHadDraft(true);
-        toast.success("บันทึกร่างแล้ว — เว็บไซต์จริงยังไม่เปลี่ยน");
+        toast.success(tr("บันทึกร่างแล้ว — เว็บไซต์จริงยังไม่เปลี่ยน", "Draft saved — the live site hasn't changed"));
       }
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(null);
     }
@@ -677,18 +681,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const discard = async () => {
     // 👷 บางหัวข้อ: ทิ้งเฉพาะที่ยังไม่บันทึก (ร่างในระบบมีงานคนอื่นด้วย — ละทิ้งทั้งก้อนต้องเป็นหัวหน้า)
     if (limited) {
-      if (!confirm("ทิ้งที่แก้ (ยังไม่บันทึก) แล้วโหลดร่างล่าสุด?")) return;
+      if (!confirm(tr("ทิ้งที่แก้ (ยังไม่บันทึก) แล้วโหลดร่างล่าสุด?", "Discard unsaved changes and reload the latest draft?"))) return;
       await load();
-      return toast.info("โหลดร่างล่าสุดแล้ว");
+      return toast.info(tr("โหลดร่างล่าสุดแล้ว", "Latest draft loaded"));
     }
-    if (!confirm("ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ธีมที่เผยแพร่อยู่?")) return;
+    if (!confirm(tr("ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ธีมที่เผยแพร่อยู่?", "Discard all changes and go back to the published theme?"))) return;
     try {
       await apiFetch(`/api/website/theme?shopId=${encodeURIComponent(shopId)}`, { method: "DELETE" });
     } catch {
       /* ignore */
     }
     await load();
-    toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
+    toast.info(tr("ละทิ้งการเปลี่ยนแปลงแล้ว", "Changes discarded"));
   };
 
   // 👷 ส่งร่างให้หัวหน้าตรวจ (กระดิ่ง · /api/website/theme/review) — หัวข้อที่ร่างต่างจากเว็บจริง
@@ -696,8 +700,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const requestReview = async () => {
     if (!saved || !published) return;
     const pages = dirtyDesignPages(saved, published).filter((k) => allowedPage(k));
-    if (!pages.length) return toast.info("ร่างยังไม่ต่างจากเว็บจริง — แก้แล้วบันทึกร่างก่อน");
-    const note = window.prompt(`ส่งให้หัวหน้าตรวจหัวข้อ: ${pages.map((k) => DESIGN_PAGES[k].label).join(", ")}\nฝากข้อความถึงหัวหน้า (ไม่ใส่ก็ได้)`, "");
+    if (!pages.length) return toast.info(tr("ร่างยังไม่ต่างจากเว็บจริง — แก้แล้วบันทึกร่างก่อน", "The draft is the same as the live site — edit and save a draft first"));
+    const note = window.prompt(tr(`ส่งให้หัวหน้าตรวจหัวข้อ: ${pages.map((k) => DESIGN_PAGES[k].label).join(", ")}\nฝากข้อความถึงหัวหน้า (ไม่ใส่ก็ได้)`, `Send for review: ${pages.map((k) => labelEn(DESIGN_PAGES[k].label)).join(", ")}\nNote to your manager (optional)`), "");
     if (note === null) return;
     setReviewing(true);
     try {
@@ -706,10 +710,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shopId, pages, note }),
       }).then((r) => r.json());
-      if (!j.ok) toast.error(j.error ?? "ส่งไม่สำเร็จ");
-      else toast.success(j.sent ? `ส่งให้หัวหน้าแล้ว (${j.sent} คน) — รอหัวหน้าเผยแพร่` : "บันทึกคำขอแล้ว แต่ยังไม่มีหัวหน้าที่เข้าร้านนี้ได้ — แจ้งผู้ดูแลระบบ");
+      if (!j.ok) toast.error(j.error ?? tr("ส่งไม่สำเร็จ", "Send failed"));
+      else toast.success(j.sent ? tr(`ส่งให้หัวหน้าแล้ว (${j.sent} คน) — รอหัวหน้าเผยแพร่`, `Sent to ${j.sent} manager(s) — waiting for them to publish`) : tr("บันทึกคำขอแล้ว แต่ยังไม่มีหัวหน้าที่เข้าร้านนี้ได้ — แจ้งผู้ดูแลระบบ", "Request saved, but no manager has access to this shop — tell your admin"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setReviewing(false);
     }
@@ -721,7 +725,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       const j = await r.json();
       setVersions(j.versions ?? []);
     } catch {
-      toast.error("โหลดประวัติไม่สำเร็จ");
+      toast.error(tr("โหลดประวัติไม่สำเร็จ", "Couldn't load history"));
     }
   }, [shopSlug, toast]);
 
@@ -730,7 +734,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   }, [tab, loadVersions]);
 
   const restore = async (versionNo: number) => {
-    if (!confirm(`ดึงเวอร์ชัน ${versionNo} กลับมาเป็นร่าง?\n(ยังไม่เปลี่ยนเว็บจริงจนกว่าจะกดเผยแพร่)`)) return;
+    if (!confirm(tr(`ดึงเวอร์ชัน ${versionNo} กลับมาเป็นร่าง?\n(ยังไม่เปลี่ยนเว็บจริงจนกว่าจะกดเผยแพร่)`, `Restore version ${versionNo} as a draft?\n(The live site won't change until you publish)`))) return;
     try {
       const r = await apiFetch("/api/website/theme/versions", {
         method: "POST",
@@ -743,15 +747,15 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         setSaved(j.theme); // เซิร์ฟเวอร์บันทึกเป็นร่างให้แล้ว
         setHadDraft(true);
         setTab("colors");
-        toast.success(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว`);
-      } else toast.error(j.error ?? "กู้คืนไม่สำเร็จ");
+        toast.success(tr(`กู้คืนเวอร์ชัน ${versionNo} เป็นร่างแล้ว`, `Version ${versionNo} restored as a draft`));
+      } else toast.error(j.error ?? tr("กู้คืนไม่สำเร็จ", "Restore failed"));
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     }
   };
 
-  if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
-  if (!theme || !published || !choices) return <div className="py-16 text-center text-sm text-slate-400">โหลดธีมไม่สำเร็จ</div>;
+  if (loading) return <div className="py-16 text-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>;
+  if (!theme || !published || !choices) return <div className="py-16 text-center text-sm text-slate-400">{t("โหลดธีมไม่สำเร็จ", "Couldn't load theme")}</div>;
 
   const dev = DEVICES.find((d) => d.k === device)!;
   const previewSrcTh = siteUrl ? `${siteUrl}${withPreview(page, previewKey)}` : null;
@@ -767,11 +771,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // 🧭 เมนูซ้ายจัดหมวด (ของกลาง SettingsNavLayout) — ภาพรวม + 5 หมวด
   //    👷 บางหัวข้อ = เฉพาะหัวข้อที่แก้ได้ (ไม่มีภาพรวม/ประวัติ)
   const navGroups: SettingsNavGroup<TabKey>[] = [
-    ...(limited ? [] : [{ label: "", items: [{ key: "overview" as TabKey, label: "ภาพรวม", desc: "สถานะ · สิ่งที่ควรทำ · ทางลัด", icon: <Icon name="home" /> }] }]),
+    ...(limited ? [] : [{ label: "", items: [{ key: "overview" as TabKey, label: t("ภาพรวม", "Overview"), desc: t("สถานะ · สิ่งที่ควรทำ · ทางลัด", "Status · to-dos · shortcuts"), icon: <Icon name="home" /> }] }]),
     ...DESIGN_GROUPS.filter((g) => g.pages.some((k) => allowedPage(k))).map((g) => ({
-      label: g.label,
+      label: labelEn(g.label),
       icon: <Icon name={g.icon} />,
-      items: g.pages.filter((k) => allowedPage(k)).map((k) => ({ key: k, label: DESIGN_PAGES[k].label, desc: DESIGN_PAGES[k].desc, keywords: `${DESIGN_PAGES[k].keywords ?? ""} ${DESIGN_PAGES[k].cards.map((c) => c.title).join(" ")}`, dot: dirtyPages.includes(k) })),
+      items: g.pages.filter((k) => allowedPage(k)).map((k) => ({ key: k, label: labelEn(DESIGN_PAGES[k].label), desc: labelEn(DESIGN_PAGES[k].desc), keywords: `${DESIGN_PAGES[k].keywords ?? ""} ${DESIGN_PAGES[k].cards.map((c) => c.title).join(" ")}`, dot: dirtyPages.includes(k) })),
     })),
   ];
   const curPage = tab === "overview" ? null : DESIGN_PAGES[tab];
@@ -798,11 +802,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             isDirty || hadDraft ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
           }`}
         >
-          {isDirty ? "● มีการแก้ไขที่ยังไม่บันทึก" : hadDraft ? "● มีร่างที่ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
+          {isDirty ? t("● มีการแก้ไขที่ยังไม่บันทึก", "● Unsaved changes") : hadDraft ? t("● มีร่างที่ยังไม่เผยแพร่", "● Unpublished draft") : t("✓ เผยแพร่แล้ว", "✓ Published")}
         </span>
         <span className="text-[11px] text-slate-500">
-          กำลังแก้ธีมของเว็บจริง · “บันทึกร่าง” ยังไม่เปลี่ยนหน้าเว็บ จนกว่า{limited && !access.publish ? "หัวหน้าจะกด" : "จะกด"} “เผยแพร่”
-          {lastVersion && <span className="text-slate-400"> · เผยแพร่ล่าสุด เวอร์ชัน {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}</span>}
+          {limited && !access.publish
+            ? t("กำลังแก้ธีมของเว็บจริง · “บันทึกร่าง” ยังไม่เปลี่ยนหน้าเว็บ จนกว่าหัวหน้าจะกด “เผยแพร่”", "Editing the live site theme · “Save draft” doesn't change the site until a manager clicks “Publish”")
+            : t("กำลังแก้ธีมของเว็บจริง · “บันทึกร่าง” ยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด “เผยแพร่”", "Editing the live site theme · “Save draft” doesn't change the site until you click “Publish”")}
+          {lastVersion && <span className="text-slate-400"> · {t("เผยแพร่ล่าสุด เวอร์ชัน", "Last published: version")} {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}</span>}
         </span>
         <div className="ml-auto flex items-center gap-1">
           {/* 🌐 ข้อความในธีมภาษาอังกฤษ (เมนู · ท้ายเว็บ · แผงเมนู · หัวเว็บ · หน้าสินค้า · ตะกร้า) — ตารางคำแปลของกลาง */}
@@ -812,11 +818,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             onChange={(next) => apply(next)}
             keys={THEME_TEXT_KEYS}
             crumbOf={themeCrumb}
-            title="ข้อความในธีม — เมนู · ท้ายเว็บ · แผงเมนูใหญ่ · หัวเว็บ · หน้าสินค้า · ตะกร้า"
-            description="แก้แล้วกด บันทึกร่าง / เผยแพร่ ของหน้านี้ตามปกติ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
+            title={t("ข้อความในธีม — เมนู · ท้ายเว็บ · แผงเมนูใหญ่ · หัวเว็บ · หน้าสินค้า · ตะกร้า", "Theme text — menu · footer · mega menu · header · product page · cart")}
+            description={t("แก้แล้วกด บันทึกร่าง / เผยแพร่ ของหน้านี้ตามปกติ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน", "After editing, click Save draft / Publish on this page as usual · empty fields show Thai to /en customers")}
           />
-          <button onClick={undo} disabled={!undoStack.current.length} title="ย้อนกลับ (Ctrl+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
-          <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
+          <button onClick={undo} disabled={!undoStack.current.length} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
+          <button onClick={redo} disabled={!redoStack.current.length} title={t("ทำซ้ำ", "Redo")} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
         </div>
       </div>
 
@@ -826,8 +832,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         onSelect={(k) => setTab(k)}
         showHeader={false}
         compact
-        searchPlaceholder="ค้นหา เช่น โลโก้ ส่งฟรี favicon"
-        searchHits={(q) => searchDesign(q).filter((h) => h.card && allowedPage(h.page)).map((h) => ({ id: `${h.page}|${h.card}`, label: h.label, crumb: h.crumb, onPick: () => goTo(h.page, h.card) }))}
+        searchPlaceholder={t("ค้นหา เช่น โลโก้ ส่งฟรี favicon", "Search e.g. logo, free shipping, favicon")}
+        searchHits={(q) => searchDesign(q).filter((h) => h.card && allowedPage(h.page)).map((h) => ({ id: `${h.page}|${h.card}`, label: labelEn(h.label), crumb: h.crumb.split(" › ").map(labelEn).join(" › "), onPick: () => goTo(h.page, h.card) }))}
       >
       <div ref={split.containerRef} className="grid gap-4 xl:gap-x-0 xl:grid-cols-[minmax(0,1fr)_14px_var(--pv-w)] items-start" style={split.style("minmax(320px,40%)")}>
         {/* ── ซ้าย: ตั้งค่า ── */}
@@ -836,17 +842,17 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           <DesignCardsProvider page={tab}>
           {limited && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-design-limited>
-              <b className="font-medium">โหมดแก้บางหัวข้อ</b> — แก้ได้ {access.topics.map((k) => DESIGN_PAGES[k].label).join(", ")}
-              {access.publish ? " · เผยแพร่เองได้ (เฉพาะหัวข้อของคุณ)" : " · แก้เสร็จกด “บันทึกร่าง” แล้ว “ส่งให้หัวหน้าตรวจ” — ลูกค้ายังไม่เห็นจนหัวหน้าเผยแพร่"}
-              {designMode.simple && " · แบบง่าย (ซ่อนการตั้งค่าละเอียด)"}
+              <b className="font-medium">{t("โหมดแก้บางหัวข้อ", "Limited edit mode")}</b> — {t("แก้ได้", "You can edit")} {access.topics.map((k) => labelEn(DESIGN_PAGES[k].label)).join(", ")}
+              {access.publish ? t(" · เผยแพร่เองได้ (เฉพาะหัวข้อของคุณ)", " · You can publish (your topics only)") : t(" · แก้เสร็จกด “บันทึกร่าง” แล้ว “ส่งให้หัวหน้าตรวจ” — ลูกค้ายังไม่เห็นจนหัวหน้าเผยแพร่", " · When done, click “Save draft” then “Send for review” — customers won't see it until a manager publishes")}
+              {designMode.simple && t(" · แบบง่าย (ซ่อนการตั้งค่าละเอียด)", " · Simple (advanced settings hidden)")}
             </div>
           )}
           {curPage && (
             <div className="flex items-end gap-2">
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-slate-400">{designGroupOf(tab)?.label} ›</p>
-                <h2 className="text-lg font-semibold text-slate-800 leading-tight">{curPage.label}</h2>
-                <p className="text-xs text-slate-500">{curPage.desc}</p>
+                <p className="text-xs text-slate-400">{labelEn(designGroupOf(tab)?.label ?? "")} ›</p>
+                <h2 className="text-lg font-semibold text-slate-800 leading-tight">{labelEn(curPage.label)}</h2>
+                <p className="text-xs text-slate-500">{labelEn(curPage.desc)}</p>
               </div>
               <DesignCardsToggleAll />
             </div>
@@ -856,7 +862,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           <PathsLangBar value={theme} onChange={(next) => apply(next)} keys={THEME_TEXT_KEYS} />
           {contentLang === "en" && (
             <p className="text-[11px] text-indigo-700 bg-indigo-50/60 border border-indigo-100 rounded-lg px-2.5 py-1.5">
-              🌐 กำลังแก้ภาษาอังกฤษ — ช่องกรอบม่วง = ข้อความที่ลูกค้าหน้า /en เห็น · ช่องที่ยังว่าง ลูกค้าเห็นภาษาไทย (ตัวจางในช่อง) · สี / รูป / สวิตช์ ใช้ร่วมกันทั้ง 2 ภาษา · พรีวิวขวาเป็นหน้า /en
+              {t("🌐 กำลังแก้ภาษาอังกฤษ — ช่องกรอบม่วง = ข้อความที่ลูกค้าหน้า /en เห็น · ช่องที่ยังว่าง ลูกค้าเห็นภาษาไทย (ตัวจางในช่อง) · สี / รูป / สวิตช์ ใช้ร่วมกันทั้ง 2 ภาษา · พรีวิวขวาเป็นหน้า /en", "🌐 Editing English — purple fields = text /en customers see · empty fields show Thai (faded in the field) · colors / images / switches are shared by both languages · preview on the right is the /en page")}
             </p>
           )}
 
@@ -891,7 +897,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── รูปทรง ── */}
           {/* ── หน้ารายการสินค้า: รูปแทรกในกริด ── */}
           {tab === "listing" && (
-            <DesignCard title="หน้ารายการสินค้า" hint="หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง · ตัวกรอง · รูปแทรก" defaultOpen>
+            <DesignCard title={t("หน้ารายการสินค้า", "Product listing")} hint={t("หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง · ตัวกรอง · รูปแทรก", "Page header · per row · pagination · sorting · filters · inserted images")} defaultOpen>
               <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} linkCtx={linkCtx} cardColumns={theme.card.columns} shopSlug={shopSlug} />
             </DesignCard>
           )}
@@ -941,56 +947,56 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </button>
             ))}
             <select value={page} onChange={(e) => setPage(e.target.value)} className={inputCls} style={{ width: "auto" }}>
-              {[...PAGES, ...(sampleProduct ? [{ path: `/product/${sampleProduct}`, label: "หน้าสินค้า (ตัวอย่าง)" }] : [])].map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
+              {[...PAGES, ...(sampleProduct ? [{ path: `/product/${sampleProduct}`, label: t("หน้าสินค้า (ตัวอย่าง)", "Product page (sample)") }] : [])].map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
             </select>
             {/* 🔍 ซูมพรีวิว: − ขนาด + (Ctrl+ลูกกลิ้ง/บีบนิ้วบนพรีวิวก็ได้) */}
             <div className="inline-flex items-center rounded-lg border border-slate-200" data-preview-zoom>
-              <button type="button" onClick={() => zoomBy(-0.1)} title="ย่อพรีวิว (หรือ Ctrl+เลื่อนลูกกลิ้งลงบนพรีวิว)" className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900">−</button>
+              <button type="button" onClick={() => zoomBy(-0.1)} title={t("ย่อพรีวิว (หรือ Ctrl+เลื่อนลูกกลิ้งลงบนพรีวิว)", "Zoom out (or Ctrl+scroll down on the preview)")} className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900">−</button>
               <select
                 value={zoom === "fit" ? "fit" : String(zoom)}
                 onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : Number(e.target.value))}
-                title="ขนาดที่แสดง · Ctrl+เลื่อนลูกกลิ้งบนพรีวิวเพื่อซูม"
+                title={t("ขนาดที่แสดง · Ctrl+เลื่อนลูกกลิ้งบนพรีวิวเพื่อซูม", "Display size · Ctrl+scroll on the preview to zoom")}
                 className="border-x border-slate-200 px-1.5 py-1 text-xs text-slate-700 bg-white"
               >
-                <option value="fit">พอดีจอ</option>
+                <option value="fit">{t("พอดีจอ", "Fit")}</option>
                 {zoom !== "fit" && ![0.5, 0.75, 1].includes(zoom) && <option value={String(zoom)}>{Math.round(zoom * 100)}%</option>}
                 <option value="0.5">50%</option>
                 <option value="0.75">75%</option>
                 <option value="1">100%</option>
               </select>
-              <button type="button" onClick={() => zoomBy(0.1)} title="ขยายพรีวิว (หรือ Ctrl+เลื่อนลูกกลิ้งขึ้นบนพรีวิว)" className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900">+</button>
+              <button type="button" onClick={() => zoomBy(0.1)} title={t("ขยายพรีวิว (หรือ Ctrl+เลื่อนลูกกลิ้งขึ้นบนพรีวิว)", "Zoom in (or Ctrl+scroll up on the preview)")} className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900">+</button>
             </div>
-            <button type="button" onClick={split.toggleMax} title={split.isMax ? "คืนความกว้างพรีวิวเริ่มต้น" : "พรีวิวกว้างสุด — หรือลากเส้นแบ่งเอง"} className={`hidden xl:inline-flex px-2.5 py-1 rounded-lg border text-xs ${split.isMax ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+            <button type="button" onClick={split.toggleMax} title={split.isMax ? t("คืนความกว้างพรีวิวเริ่มต้น", "Reset preview width") : t("พรีวิวกว้างสุด — หรือลากเส้นแบ่งเอง", "Widest preview — or drag the divider")} className={`hidden xl:inline-flex px-2.5 py-1 rounded-lg border text-xs ${split.isMax ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
               ⇔
             </button>
             {campPreview && (
-              <button type="button" onClick={() => setCampPreview(null)} className="px-2.5 py-1 rounded-lg border border-blue-400 bg-blue-50 text-xs text-blue-700" title="กลับไปดูธีมปกติ" data-camp-preview>
-                👁 ตัวอย่างแคมเปญ &quot;{campPreview.name}&quot; ✕
+              <button type="button" onClick={() => setCampPreview(null)} className="px-2.5 py-1 rounded-lg border border-blue-400 bg-blue-50 text-xs text-blue-700" title={t("กลับไปดูธีมปกติ", "Back to the normal theme")} data-camp-preview>
+                👁 {t("ตัวอย่างแคมเปญ", "Campaign preview")} &quot;{campPreview.name}&quot; ✕
               </button>
             )}
             {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>}
             {/* โหลดใหม่ = ตั้ง src ซ้ำ (เว็บร้านอยู่คนละโดเมน — contentWindow.location.reload() ถูกเบราว์เซอร์บล็อก) */}
-            <button onClick={() => { if (iframeRef.current) iframeRef.current.src = iframeRef.current.src; }} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
+            <button onClick={() => { if (iframeRef.current) iframeRef.current.src = iframeRef.current.src; }} title={t("โหลดใหม่", "Reload")} className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
             {previewSrc && (
               <button
                 type="button"
                 onClick={() => setAreaPick((v) => !v)}
                 aria-pressed={areaPick}
-                title="เปิดแล้วคลิกส่วนในพรีวิว (หัวเว็บ · เมนู · การ์ดสินค้า · ท้ายเว็บ ฯลฯ) → ไปหน้าตั้งค่าของส่วนนั้น"
+                title={t("เปิดแล้วคลิกส่วนในพรีวิว (หัวเว็บ · เมนู · การ์ดสินค้า · ท้ายเว็บ ฯลฯ) → ไปหน้าตั้งค่าของส่วนนั้น", "Turn on, then click a part of the preview (header · menu · product card · footer…) → go to its settings")}
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs transition ${areaPick ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
                 data-area-pick-btn
               >
                 <Icon name="target" />
-                คลิกเลือกส่วน
+                {t("คลิกเลือกส่วน", "Click to pick a part")}
               </button>
             )}
-            <span className="text-[10px] text-slate-400 ml-auto cursor-pointer" title="ดับเบิลคลิก = พอดีจอ" onDoubleClick={() => setZoom("fit")}>
+            <span className="text-[10px] text-slate-400 ml-auto cursor-pointer" title={t("ดับเบิลคลิก = พอดีจอ", "Double-click = fit")} onDoubleClick={() => setZoom("fit")}>
               {dev.w}px · {Math.round(scale * 100)}%
             </span>
           </div>
           {areaPick && (
             <p className="mb-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] text-blue-800">
-              <Icon name="target" /> ชี้ส่วนในพรีวิวแล้วคลิก → เมนูซ้ายไปหน้าตั้งค่านั้น + กางการ์ดให้ · ลิงก์ในส่วนที่มีกรอบจะไม่เปลี่ยนหน้าระหว่างนี้ · กดปุ่มอีกครั้งเพื่อปิด
+              <Icon name="target" /> {t("ชี้ส่วนในพรีวิวแล้วคลิก → เมนูซ้ายไปหน้าตั้งค่านั้น + กางการ์ดให้ · ลิงก์ในส่วนที่มีกรอบจะไม่เปลี่ยนหน้าระหว่างนี้ · กดปุ่มอีกครั้งเพื่อปิด", "Point at a part of the preview and click → the left menu opens its settings and expands the card · links in outlined parts won't navigate meanwhile · click the button again to turn off")}
             </p>
           )}
 
@@ -998,16 +1004,16 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {previewSrc && (
             <div className="mb-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-500 shrink-0">🔗 ลิงก์พรีวิว</span>
+                <span className="text-xs text-slate-500 shrink-0">🔗 {t("ลิงก์พรีวิว", "Preview link")}</span>
                 <input readOnly value={previewSrc} onFocus={(e) => e.currentTarget.select()}
                   className="min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600" />
-                <CopyButton value={previewSrc} label="คัดลอก" title="คัดลอกลิงก์พรีวิว (ส่งให้ทีม หรือเปิดในมือถือ)" />
-                <a href={previewSrc} target="_blank" rel="noreferrer" title="เปิดในแท็บใหม่" className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-slate-400">↗</a>
+                <CopyButton value={previewSrc} label={t("คัดลอก", "Copy")} title={t("คัดลอกลิงก์พรีวิว (ส่งให้ทีม หรือเปิดในมือถือ)", "Copy preview link (send to the team or open on a phone)")} />
+                <a href={previewSrc} target="_blank" rel="noreferrer" title={t("เปิดในแท็บใหม่", "Open in new tab")} className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-slate-400">↗</a>
               </div>
               <p className={`mt-1 text-[10px] ${isDirty ? "text-amber-700" : "text-slate-400"}`}>
                 {isDirty
-                  ? "⚠️ มีการแก้ที่ยังไม่ได้กด \"บันทึกร่าง\" — คนเปิดลิงก์จะยังไม่เห็นส่วนนี้"
-                  : "คนเปิดลิงก์จะเห็นร่างล่าสุดที่บันทึกไว้ (ยังไม่เผยแพร่) · ลูกค้าทั่วไปยังเห็นแบบเดิม"}
+                  ? t("⚠️ มีการแก้ที่ยังไม่ได้กด \"บันทึกร่าง\" — คนเปิดลิงก์จะยังไม่เห็นส่วนนี้", "⚠️ Some changes aren't saved as a draft yet — people opening the link won't see them")
+                  : t("คนเปิดลิงก์จะเห็นร่างล่าสุดที่บันทึกไว้ (ยังไม่เผยแพร่) · ลูกค้าทั่วไปยังเห็นแบบเดิม", "People opening the link see the latest saved draft (unpublished) · regular customers still see the current site")}
               </p>
             </div>
           )}
@@ -1024,7 +1030,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       setPreviewFrame(el);
                     }}
                     src={previewSrc}
-                    title="พรีวิวเว็บไซต์"
+                    title={t("พรีวิวเว็บไซต์", "Website preview")}
                     className="bg-white border-0 shadow-sm"
                     style={{
                       width: dev.w,
@@ -1043,12 +1049,12 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
                 <span className="text-3xl">🔗</span>
-                <p className="text-sm text-slate-500">ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้</p>
+                <p className="text-sm text-slate-500">{t("ยังไม่ได้ผูกโดเมนเว็บกับร้านนี้", "No website domain linked to this shop yet")}</p>
               </div>
             )}
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-            สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล · Ctrl+เลื่อนลูกกลิ้ง = ซูมพรีวิว · กดลูกกลิ้งค้างแล้วลาก = เลื่อนดู · ลากเส้นแบ่งซ้าย = ปรับความกว้าง
+            {t("สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล · Ctrl+เลื่อนลูกกลิ้ง = ซูมพรีวิว · กดลูกกลิ้งค้างแล้วลาก = เลื่อนดู · ลากเส้นแบ่งซ้าย = ปรับความกว้าง", "Colors/fonts update instantly · logo/header/card: click ↻ after saving a draft · Ctrl+scroll = zoom preview · hold the wheel and drag = pan · drag the left divider = resize")}
           </p>
         </div>
       </div>
@@ -1075,40 +1081,40 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         <span className="text-xs text-slate-500">
           {isDirty ? (
             <>
-              มีการแก้ไขที่ยังไม่บันทึก <span className="font-medium text-amber-700">{dirtyPages.length || dirtyFields.length} หัวข้อ</span>
+              {t("มีการแก้ไขที่ยังไม่บันทึก", "Unsaved changes")} <span className="font-medium text-amber-700">{dirtyPages.length || dirtyFields.length} {t("หัวข้อ", "topic(s)")}</span>
               {/* กดชื่อหัวข้อ = ไปหน้านั้น */}
               {dirtyPages.map((k) => (
                 <button key={k} type="button" onClick={() => setTab(k)} className="ml-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 hover:border-amber-400">
-                  {DESIGN_PAGES[k].label}
+                  {labelEn(DESIGN_PAGES[k].label)}
                 </button>
               ))}
             </>
-          ) : hadDraft ? "มีร่างบันทึกไว้ — ยังไม่เผยแพร่" : "ไม่มีการเปลี่ยนแปลง"}
+          ) : hadDraft ? t("มีร่างบันทึกไว้ — ยังไม่เผยแพร่", "Draft saved — not published yet") : t("ไม่มีการเปลี่ยนแปลง", "No changes")}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => void discard()} disabled={!isDirty && !hadDraft} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40 whitespace-nowrap"><span className="hidden sm:inline">ละทิ้งการเปลี่ยนแปลง</span><span className="sm:hidden">ละทิ้ง</span></button>
+          <button onClick={() => void discard()} disabled={!isDirty && !hadDraft} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40 whitespace-nowrap"><span className="hidden sm:inline">{t("ละทิ้งการเปลี่ยนแปลง", "Discard changes")}</span><span className="sm:hidden">{t("ละทิ้ง", "Discard")}</span></button>
           <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50 whitespace-nowrap">
-            {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
+            {busy === "draft" ? t("กำลังบันทึก…", "Saving…") : t("บันทึกร่าง", "Save draft")}
           </button>
           {!limited && (
-            <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title="ตั้งเวลาให้ระบบเผยแพร่เอง" className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap" data-schedule-btn>
-              ⏰ ตั้งเวลา
+            <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title={t("ตั้งเวลาให้ระบบเผยแพร่เอง", "Schedule an automatic publish")} className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap" data-schedule-btn>
+              ⏰ {t("ตั้งเวลา", "Schedule")}
             </button>
           )}
           {access.publish ? (
             <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">
-              {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
+              {busy === "publish" ? t("กำลังเผยแพร่…", "Publishing…") : t("เผยแพร่", "Publish")}
             </button>
           ) : (
             limited && (
               <button
                 onClick={() => void requestReview()}
                 disabled={busy !== null || reviewing || isDirty || !hadDraft}
-                title={isDirty ? "บันทึกร่างก่อน แล้วค่อยส่ง" : !hadDraft ? "ยังไม่มีร่าง — แก้แล้วบันทึกร่างก่อน" : "แจ้งหัวหน้าให้เปิดดูร่างแล้วเผยแพร่"}
+                title={isDirty ? t("บันทึกร่างก่อน แล้วค่อยส่ง", "Save the draft first, then send") : !hadDraft ? t("ยังไม่มีร่าง — แก้แล้วบันทึกร่างก่อน", "No draft yet — edit and save a draft first") : t("แจ้งหัวหน้าให้เปิดดูร่างแล้วเผยแพร่", "Ask a manager to review the draft and publish")}
                 className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
                 data-review-btn
               >
-                {reviewing ? "กำลังส่ง…" : "ส่งให้หัวหน้าตรวจ"}
+                {reviewing ? t("กำลังส่ง…", "Sending…") : t("ส่งให้หัวหน้าตรวจ", "Send for review")}
               </button>
             )
           )}

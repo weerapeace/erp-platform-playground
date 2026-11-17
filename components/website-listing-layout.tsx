@@ -8,9 +8,14 @@
 import { WheelSelect } from "@/components/wheel-select";
 import { Seg } from "@/components/website-block-editor";
 import {
-  LISTING_PAGINGS, LISTING_PAGE_SIZES, LISTING_SORTS, LISTING_SOLD_OUT, listingColumnsFrom,
+  LISTING_PAGINGS as LISTING_PAGINGS_TH, LISTING_PAGE_SIZES, LISTING_SORTS as LISTING_SORTS_TH, LISTING_SOLD_OUT as LISTING_SOLD_OUT_TH, listingColumnsFrom,
   type ListingColumns, type ListingConfig, type ListingHeader, type ListingSort,
 } from "@/lib/website-listing";
+import { localizedOpts } from "@/lib/website-admin-en";
+// 🌐 ป้ายจากไฟล์มิเรอร์หน้าร้าน (แก้ที่ต้นทางไม่ได้) → แปลตอนแสดงผล
+const LISTING_PAGINGS = localizedOpts(LISTING_PAGINGS_TH);
+const LISTING_SORTS = localizedOpts(LISTING_SORTS_TH);
+const LISTING_SOLD_OUT = localizedOpts(LISTING_SOLD_OUT_TH);
 import { webForm } from "@/lib/website-form-styles";
 import { useT } from "@/components/i18n";
 

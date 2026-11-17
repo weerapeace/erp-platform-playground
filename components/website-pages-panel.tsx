@@ -21,6 +21,8 @@ import { useDesignTabAccess } from "@/components/website-tab-review";
 import { ERPDateTime24 } from "@/components/form";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { webForm } from "@/lib/website-form-styles";
+import { useT } from "@/components/i18n";
+import { tr, getLang } from "@/lib/lang";
 
 type PageRow = {
   id: string;
@@ -60,7 +62,7 @@ const EMPTY_META: Meta = { title: "", description: "", title_en: "", description
 /** ISO ↔ "YYYY-MM-DDTHH:mm" เวลาไทย (ช่อง ERPDateTime24) */
 const isoToLocal = (iso: string) => (iso ? new Date(new Date(iso).getTime() + 7 * 3600e3).toISOString().slice(0, 16) : "");
 const localToIso = (v: string) => (v ? new Date(`${v}:00+07:00`).toISOString() : "");
-const thWhen = (iso: string) => new Date(iso).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+const thWhen = (iso: string) => new Date(iso).toLocaleString(getLang() === "en" ? "en-GB" : "th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 
 const inputCls = webForm.input;
 const labelCls = webForm.label;
@@ -82,6 +84,7 @@ function groupPages(pages: PageRow[]): { name: string; kind: "plain" | "posts" |
 
 export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+  const t = useT();
   // 👷 ติ๊กหัวข้อแท็บ "หน้าเว็บ": สร้าง/แก้ร่างได้ · เผยแพร่ไม่ได้ = ส่งหัวหน้า (ชื่อหน้า/SEO ขึ้นเว็บทันที จึงล็อก) · ลบ/สลับลำดับ/ประวัติ = แก้ได้ทั้งหมด
   const tabAcc = useDesignTabAccess("webpages", shopId);
 
@@ -132,7 +135,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       setPreviewKey(j.shop?.previewKey ?? null);
       setShopName(j.shop?.name ?? "");
     } catch {
-      toast.error("โหลดรายการหน้าไม่สำเร็จ");
+      toast.error(tr("โหลดรายการหน้าไม่สำเร็จ", "Couldn't load the page list"));
     } finally {
       setLoading(false);
     }
@@ -145,7 +148,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   // 🧰 ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง · บันทึกอัตโนมัติส่งแค่ Section · กดเอง = ส่งชื่อหน้า + SEO ไปด้วย
   const dp = useDraftPublish<Block>({
     active: editId !== null,
-    what: "หน้านี้",
+    what: t("หน้านี้", "this page"),
     save: async (blocks, mode, { auto }) => {
       const body = auto ? { pageId: editId, blocks, mode } : { pageId: editId, blocks, seo, title: editTitle, mode };
       const r = await apiFetch("/api/website/pages", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -180,7 +183,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       if (j.categories) setCategories(j.categories);
       if (j.themeCard) setThemeCard(j.themeCard);
     } catch {
-      toast.error("เปิดหน้าไม่สำเร็จ");
+      toast.error(t("เปิดหน้าไม่สำเร็จ", "Couldn't open the page"));
     }
   };
 
@@ -205,17 +208,17 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "สร้างหน้าไม่สำเร็จ");
+        toast.error(j.error ?? t("สร้างหน้าไม่สำเร็จ", "Couldn't create the page"));
         return;
       }
-      toast.success(newType === "post" ? "สร้างบทความแล้ว — ใส่รูปปก/สรุปที่ ⚙ ตั้งค่าหน้า แล้วเพิ่มเนื้อหาเป็น Section" : "สร้างหน้าแล้ว — เพิ่ม Section ได้เลย");
+      toast.success(newType === "post" ? t("สร้างบทความแล้ว — ใส่รูปปก/สรุปที่ ⚙ ตั้งค่าหน้า แล้วเพิ่มเนื้อหาเป็น Section", "Post created — add a cover/summary in ⚙ Page settings, then add content as sections") : t("สร้างหน้าแล้ว — เพิ่ม Section ได้เลย", "Page created — you can add sections now"));
       setShowNew(false);
       setNewSlug("");
       setNewTitle("");
       await loadList();
       await openPage(j.pageId);
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
     }
   };
 
@@ -223,14 +226,14 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   const [creatingHelp, setCreatingHelp] = useState(false);
   const createHelpCenter = async () => {
     const ok = await askConfirm({
-      title: "สร้างชุดศูนย์ช่วยเหลือ?",
+      title: t("สร้างชุดศูนย์ช่วยเหลือ?", "Create the help center set?"),
       message: (
         <div className="space-y-1">
-          <p>จะสร้างหน้า: นโยบายความเป็นส่วนตัว · ข้อกำหนดและเงื่อนไข · คำถามที่พบบ่อย · ติดตามคำสั่งซื้อ · ติดต่อเรา · การจัดส่งและการคืนสินค้า (ไทย + อังกฤษ)</p>
-          <p>หน้าที่มีอยู่แล้วจะไม่ถูกแตะ · ทุกหน้าเป็นร่าง ตรวจแล้วกดเผยแพร่เอง</p>
+          <p>{t("จะสร้างหน้า: นโยบายความเป็นส่วนตัว · ข้อกำหนดและเงื่อนไข · คำถามที่พบบ่อย · ติดตามคำสั่งซื้อ · ติดต่อเรา · การจัดส่งและการคืนสินค้า (ไทย + อังกฤษ)", "Pages to create: Privacy policy · Terms and conditions · FAQ · Track order · Contact us · Shipping and returns (Thai + English)")}</p>
+          <p>{t("หน้าที่มีอยู่แล้วจะไม่ถูกแตะ · ทุกหน้าเป็นร่าง ตรวจแล้วกดเผยแพร่เอง", "Existing pages are left untouched · All pages are drafts — review and publish them yourself")}</p>
         </div>
       ),
-      confirmText: "สร้าง",
+      confirmText: t("สร้าง", "Create"),
     });
     if (!ok) return;
     setCreatingHelp(true);
@@ -238,13 +241,13 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       const r = await apiFetch("/api/website/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, template: "help-center" }) });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "สร้างไม่สำเร็จ");
+        toast.error(j.error ?? t("สร้างไม่สำเร็จ", "Couldn't create"));
         return;
       }
-      toast.success(j.created?.length ? `สร้าง ${j.created.length} หน้าแล้ว (ร่าง) — เปิดตรวจแล้วกดเผยแพร่ได้เลย` : "มีครบทุกหน้าอยู่แล้ว ไม่ได้สร้างเพิ่ม");
+      toast.success(j.created?.length ? t(`สร้าง ${j.created.length} หน้าแล้ว (ร่าง) — เปิดตรวจแล้วกดเผยแพร่ได้เลย`, `Created ${j.created.length} pages (draft) — open, review and publish`) : t("มีครบทุกหน้าอยู่แล้ว ไม่ได้สร้างเพิ่ม", "All pages already exist — nothing created"));
       await loadList();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
     } finally {
       setCreatingHelp(false);
     }
@@ -266,30 +269,30 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       );
       await loadList();
     } catch {
-      toast.error("ย้ายลำดับไม่สำเร็จ");
+      toast.error(t("ย้ายลำดับไม่สำเร็จ", "Couldn't reorder"));
     }
   };
 
   const removePage = async (p: PageRow) => {
-    if (!(await askConfirm({ title: `ลบหน้า "${p.title}" (/${p.slug}) ถาวร?`, message: "ลบแล้วกู้คืนไม่ได้", variant: "danger", confirmText: "ลบถาวร" }))) return;
+    if (!(await askConfirm({ title: t(`ลบหน้า "${p.title}" (/${p.slug}) ถาวร?`, `Permanently delete page "${p.title}" (/${p.slug})?`), message: t("ลบแล้วกู้คืนไม่ได้", "This can't be undone"), variant: "danger", confirmText: t("ลบถาวร", "Delete permanently") }))) return;
     try {
       const r = await apiFetch(`/api/website/pages?pageId=${encodeURIComponent(p.id)}`, { method: "DELETE" });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "ลบไม่สำเร็จ");
+        toast.error(j.error ?? t("ลบไม่สำเร็จ", "Couldn't delete"));
         return;
       }
-      toast.success("ลบหน้าแล้ว");
+      toast.success(t("ลบหน้าแล้ว", "Page deleted"));
       if (editId === p.id) setEditId(null);
       await loadList();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(t("เชื่อมต่อไม่ได้", "Can't connect"));
     }
   };
 
   const ctx = useMemo(() => ({ shopSlug, shopId, shopName, categories, themeCard }), [shopSlug, shopId, shopName, categories, themeCard]);
 
-  if (loading) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  if (loading) return <div className="py-16 text-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>;
 
   /* ── หน้าจอแก้ไขหน้าเดียว ── */
   if (editId) {
@@ -301,18 +304,18 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       <div className="space-y-3">
         {showSeo && (
           <fieldset disabled={!tabAcc.canPublish} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-            {!tabAcc.canPublish && <p className="text-[11px] rounded-lg bg-amber-50 text-amber-800 px-3 py-2">ชื่อหน้า / กลุ่ม / SEO ขึ้นเว็บทันทีเมื่อบันทึก (ไม่มีร่าง) — คุณยังเผยแพร่เองไม่ได้ จึงแก้ช่องเหล่านี้ไม่ได้ · ฝากหัวหน้าแก้ตอนส่งให้ตรวจ</p>}
+            {!tabAcc.canPublish && <p className="text-[11px] rounded-lg bg-amber-50 text-amber-800 px-3 py-2">{t("ชื่อหน้า / กลุ่ม / SEO ขึ้นเว็บทันทีเมื่อบันทึก (ไม่มีร่าง) — คุณยังเผยแพร่เองไม่ได้ จึงแก้ช่องเหล่านี้ไม่ได้ · ฝากหัวหน้าแก้ตอนส่งให้ตรวจ", "Page name / group / SEO go live as soon as they're saved (no draft) — you can't publish yet, so these fields are locked · Ask your lead to edit them when you send for review")}</p>}
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
-                <label className={labelCls}>ชื่อหน้า (ไทย)</label>
+                <label className={labelCls}>{t("ชื่อหน้า (ไทย)", "Page name (Thai)")}</label>
                 <input className={inputCls} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
               </div>
               <div>
-                <label className={labelCls}>ชื่อหน้า (อังกฤษ · หน้า /en)</label>
-                <input className={inputCls} value={seo.name_en} maxLength={120} onChange={(e) => setSeo({ ...seo, name_en: e.target.value })} placeholder="เช่น Privacy Policy" />
+                <label className={labelCls}>{t("ชื่อหน้า (อังกฤษ · หน้า /en)", "Page name (English · /en pages)")}</label>
+                <input className={inputCls} value={seo.name_en} maxLength={120} onChange={(e) => setSeo({ ...seo, name_en: e.target.value })} placeholder={t("เช่น Privacy Policy", "e.g. Privacy Policy")} />
               </div>
               <div>
-                <label className={labelCls}>ที่อยู่หน้า (แก้ไม่ได้หลังสร้าง)</label>
+                <label className={labelCls}>{t("ที่อยู่หน้า (แก้ไม่ได้หลังสร้าง)", "Page URL (can't change after creating)")}</label>
                 <input className={inputCls} value={`/${editType === "post" ? "blog/" : ""}${editSlug}`} disabled />
               </div>
             </div>
@@ -320,16 +323,16 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             {/* ⏰ ตั้งเวลาเผยแพร่ (ทุกหน้า) + 🎯 Landing (หน้าเว็บ) */}
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 grid gap-3 sm:grid-cols-2">
               <div>
-                <label className={labelCls}>⏰ เผยแพร่เมื่อ (เวลาไทย · ว่าง = ทันทีที่กดเผยแพร่)</label>
+                <label className={labelCls}>{t("⏰ เผยแพร่เมื่อ (เวลาไทย · ว่าง = ทันทีที่กดเผยแพร่)", "⏰ Publish at (Thai time · empty = as soon as you publish)")}</label>
                 <ERPDateTime24 value={isoToLocal(seo.publishAt)} onChange={(v) => setSeo({ ...seo, publishAt: localToIso(v) })} defaultTime="09:00" />
-                <p className="text-[11px] text-slate-500 mt-1">กด &quot;เผยแพร่&quot; ไว้ก่อนได้เลย — เว็บจะซ่อนหน้านี้จนถึงเวลา (พรีวิวยังเห็น)</p>
+                <p className="text-[11px] text-slate-500 mt-1">{t("กด \"เผยแพร่\" ไว้ก่อนได้เลย — เว็บจะซ่อนหน้านี้จนถึงเวลา (พรีวิวยังเห็น)", "You can press \"Publish\" now — the site hides this page until that time (preview still shows it)")}</p>
               </div>
               {editType === "static" && (
                 <label className="flex items-start gap-2 text-sm text-slate-700 pt-5">
                   <input type="checkbox" checked={seo.bare} onChange={(e) => setSeo({ ...seo, bare: e.target.checked })} className="mt-1" />
                   <span>
-                    🎯 หน้า Landing (ซ่อนหัวเว็บ/ท้ายเว็บ)
-                    <span className="block text-[11px] text-slate-500">สำหรับหน้าแคมเปญ/โฆษณา ให้ลูกค้าโฟกัสที่โปร · ไม่ขึ้นเมนูก็เข้าได้ด้วยลิงก์</span>
+                    {t("🎯 หน้า Landing (ซ่อนหัวเว็บ/ท้ายเว็บ)", "🎯 Landing page (hide header/footer)")}
+                    <span className="block text-[11px] text-slate-500">{t("สำหรับหน้าแคมเปญ/โฆษณา ให้ลูกค้าโฟกัสที่โปร · ไม่ขึ้นเมนูก็เข้าได้ด้วยลิงก์", "For campaign/ad pages so customers focus on the offer · Not in the menu but reachable by link")}</span>
                   </span>
                 </label>
               )}
@@ -338,27 +341,27 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             {/* 📝 บทความ: รูปปก · สรุป · แท็ก · ผู้เขียน (การ์ดในหน้า /blog + แชร์โซเชียล) */}
             {editType === "post" && (
               <div className="rounded-lg bg-amber-50/60 border border-amber-200 p-3 space-y-3">
-                <p className="text-xs font-medium text-amber-900">📝 ข้อมูลบทความ (การ์ดในหน้า /blog · รูปตอนแชร์)</p>
+                <p className="text-xs font-medium text-amber-900">{t("📝 ข้อมูลบทความ (การ์ดในหน้า /blog · รูปตอนแชร์)", "📝 Post info (card on /blog · share image)")}</p>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr]">
-                  <ImageUploadField label="รูปปก" hint="แนะนำแนวนอน 1200×630" value={seo.cover || null} onChange={(k) => setSeo({ ...seo, cover: k ?? "" })} height={110} />
+                  <ImageUploadField label={t("รูปปก", "Cover image")} hint={t("แนะนำแนวนอน 1200×630", "Landscape 1200×630 recommended")} value={seo.cover || null} onChange={(k) => setSeo({ ...seo, cover: k ?? "" })} height={110} />
                   <div className="space-y-3">
                     <div>
-                      <label className={labelCls}>สรุปสั้น (โชว์ใต้หัวข้อในการ์ด · ว่าง = ใช้คำอธิบาย SEO)</label>
+                      <label className={labelCls}>{t("สรุปสั้น (โชว์ใต้หัวข้อในการ์ด · ว่าง = ใช้คำอธิบาย SEO)", "Short summary (under the title on the card · empty = use SEO description)")}</label>
                       <textarea className={inputCls} rows={2} maxLength={400} value={seo.excerpt} onChange={(e) => setSeo({ ...seo, excerpt: e.target.value })} />
                     </div>
                     <div>
-                      <label className={labelCls}>สรุปสั้น (อังกฤษ)</label>
+                      <label className={labelCls}>{t("สรุปสั้น (อังกฤษ)", "Short summary (English)")}</label>
                       <textarea className={inputCls} rows={2} maxLength={400} value={seo.excerpt_en} onChange={(e) => setSeo({ ...seo, excerpt_en: e.target.value })} />
                     </div>
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <label className={labelCls}>แท็ก (คั่นด้วย , · ลูกค้ากดดูบทความแท็กเดียวกันได้)</label>
-                    <input className={inputCls} value={seo.tags.join(", ")} onChange={(e) => setSeo({ ...seo, tags: e.target.value.split(",").map((t) => t.trimStart()).slice(0, 10) })} placeholder="วิธีดูแลหนัง, ไอเดียของขวัญ" />
+                    <label className={labelCls}>{t("แท็ก (คั่นด้วย , · ลูกค้ากดดูบทความแท็กเดียวกันได้)", "Tags (comma-separated · customers can browse posts with the same tag)")}</label>
+                    <input className={inputCls} value={seo.tags.join(", ")} onChange={(e) => setSeo({ ...seo, tags: e.target.value.split(",").map((x) => x.trimStart()).slice(0, 10) })} placeholder={t("วิธีดูแลหนัง, ไอเดียของขวัญ", "Leather care, Gift ideas")} />
                   </div>
                   <div>
-                    <label className={labelCls}>ผู้เขียน (ไม่ใส่ก็ได้)</label>
+                    <label className={labelCls}>{t("ผู้เขียน (ไม่ใส่ก็ได้)", "Author (optional)")}</label>
                     <input className={inputCls} value={seo.author} maxLength={60} onChange={(e) => setSeo({ ...seo, author: e.target.value })} />
                   </div>
                 </div>
@@ -368,12 +371,12 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             {/* 🧭 ศูนย์ช่วยเหลือ: อยู่ในกลุ่ม = เว็บวาดเมนูซ้าย (หน้าอื่นในกลุ่ม) + เนื้อหาขวา · ไม่ขึ้นเมนูหลักอัตโนมัติ */}
             {editType === "static" && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-              <p className="text-xs font-medium text-slate-700">🧭 ศูนย์ช่วยเหลือ</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">ใส่กลุ่ม = หน้านี้โชว์แบบเมนูซ้าย (หน้าอื่นในกลุ่มเดียวกัน) + เนื้อหาขวา และไม่ขึ้นเมนูหลักเอง · ท้ายเว็บใช้คอลัมน์ “ศูนย์ช่วยเหลือ (อัตโนมัติ)” ดึงทั้งกลุ่ม</p>
+              <p className="text-xs font-medium text-slate-700">{t("🧭 ศูนย์ช่วยเหลือ", "🧭 Help center")}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">{t("ใส่กลุ่ม = หน้านี้โชว์แบบเมนูซ้าย (หน้าอื่นในกลุ่มเดียวกัน) + เนื้อหาขวา และไม่ขึ้นเมนูหลักเอง · ท้ายเว็บใช้คอลัมน์ “ศูนย์ช่วยเหลือ (อัตโนมัติ)” ดึงทั้งกลุ่ม", "With a group, this page shows a left menu (other pages in the group) + content on the right and isn't added to the main menu · The footer's “Help center (auto)” column pulls the whole group")}</p>
               <div className="grid gap-3 sm:grid-cols-2 mt-2">
                 <div>
-                  <label className={labelCls}>กลุ่ม (ไทย) — ว่าง = หน้าธรรมดา</label>
-                  <input className={inputCls} list="help-groups" value={seo.help} maxLength={40} onChange={(e) => setSeo({ ...seo, help: e.target.value })} placeholder="เช่น ข้อกฎหมาย · ช่วยเหลือ" />
+                  <label className={labelCls}>{t("กลุ่ม (ไทย) — ว่าง = หน้าธรรมดา", "Group (Thai) — empty = normal page")}</label>
+                  <input className={inputCls} list="help-groups" value={seo.help} maxLength={40} onChange={(e) => setSeo({ ...seo, help: e.target.value })} placeholder={t("เช่น ข้อกฎหมาย · ช่วยเหลือ", "e.g. Legal · Help")} />
                   <datalist id="help-groups">
                     {[...new Set(pages.map((p) => p.help).filter(Boolean))].map((g) => (
                       <option key={g} value={g} />
@@ -381,8 +384,8 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                   </datalist>
                 </div>
                 <div>
-                  <label className={labelCls}>กลุ่ม (อังกฤษ)</label>
-                  <input className={inputCls} value={seo.help_en} maxLength={40} disabled={!seo.help.trim()} onChange={(e) => setSeo({ ...seo, help_en: e.target.value })} placeholder="เช่น Legal · Support" />
+                  <label className={labelCls}>{t("กลุ่ม (อังกฤษ)", "Group (English)")}</label>
+                  <input className={inputCls} value={seo.help_en} maxLength={40} disabled={!seo.help.trim()} onChange={(e) => setSeo({ ...seo, help_en: e.target.value })} placeholder={t("เช่น Legal · Support", "e.g. Legal · Support")} />
                 </div>
               </div>
             </div>
@@ -390,23 +393,23 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className={labelCls}>ชื่อหน้าใน Google (SEO title)</label>
+                <label className={labelCls}>{t("ชื่อหน้าใน Google (SEO title)", "Title in Google (SEO title)")}</label>
                 <input className={inputCls} value={seo.title} onChange={(e) => setSeo({ ...seo, title: e.target.value })} placeholder={editTitle} />
               </div>
               <div>
-                <label className={labelCls}>คำอธิบายใน Google (SEO description)</label>
-                <input className={inputCls} value={seo.description} onChange={(e) => setSeo({ ...seo, description: e.target.value })} placeholder="สรุปเนื้อหาหน้านี้สั้น ๆ" />
+                <label className={labelCls}>{t("คำอธิบายใน Google (SEO description)", "Description in Google (SEO description)")}</label>
+                <input className={inputCls} value={seo.description} onChange={(e) => setSeo({ ...seo, description: e.target.value })} placeholder={t("สรุปเนื้อหาหน้านี้สั้น ๆ", "Short summary of this page")} />
               </div>
               <div>
-                <label className={labelCls}>SEO title (อังกฤษ)</label>
+                <label className={labelCls}>{t("SEO title (อังกฤษ)", "SEO title (English)")}</label>
                 <input className={inputCls} value={seo.title_en} onChange={(e) => setSeo({ ...seo, title_en: e.target.value })} placeholder={seo.name_en || "English title"} />
               </div>
               <div>
-                <label className={labelCls}>SEO description (อังกฤษ)</label>
+                <label className={labelCls}>{t("SEO description (อังกฤษ)", "SEO description (English)")}</label>
                 <input className={inputCls} value={seo.description_en} onChange={(e) => setSeo({ ...seo, description_en: e.target.value })} placeholder="Short English summary" />
               </div>
             </div>
-            <p className="text-[11px] text-slate-400">ชื่อหน้า / กลุ่ม / SEO บันทึกพร้อมปุ่ม “บันทึกร่าง” หรือ “เผยแพร่”</p>
+            <p className="text-[11px] text-slate-400">{t("ชื่อหน้า / กลุ่ม / SEO บันทึกพร้อมปุ่ม “บันทึกร่าง” หรือ “เผยแพร่”", "Page name / group / SEO are saved with “Save draft” or “Publish”")}</p>
           </fieldset>
         )}
 
@@ -429,27 +432,27 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                     setEditId(null);
                   }}
                   className="text-xs text-slate-500 hover:text-blue-600 mr-1"
-                  title="กลับไปรายการหน้าทั้งหมด"
+                  title={t("กลับไปรายการหน้าทั้งหมด", "Back to all pages")}
                 >
-                  ← หน้าทั้งหมด
+                  {t("← หน้าทั้งหมด", "← All pages")}
                 </button>
                 <span className="text-sm font-medium text-slate-800 truncate max-w-[180px]" title={`/${editSlug}`}>{editTitle}</span>
-                <button onClick={() => setShowSeo((v) => !v)} className={`h-7 px-2 rounded-lg border text-[11px] ${showSeo ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} title="ชื่อหน้า 2 ภาษา · กลุ่มศูนย์ช่วยเหลือ · SEO">
-                  ⚙ ตั้งค่าหน้า
+                <button onClick={() => setShowSeo((v) => !v)} className={`h-7 px-2 rounded-lg border text-[11px] ${showSeo ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} title={t("ชื่อหน้า 2 ภาษา · กลุ่มศูนย์ช่วยเหลือ · SEO", "Page name in 2 languages · Help center group · SEO")}>
+                  {t("⚙ ตั้งค่าหน้า", "⚙ Page settings")}
                 </button>
-                {seo.help && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="อยู่ในศูนย์ช่วยเหลือ">🧭 {seo.help}</span>}
+                {seo.help && <span className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title={t("อยู่ในศูนย์ช่วยเหลือ", "In the help center")}>🧭 {seo.help}</span>}
               </>
             ),
             ...dp.toolbar,
             dirty: unpublished,
-            statusNote: `${dp.blocks.length} Section`,
+            statusNote: t(`${dp.blocks.length} Section`, `${dp.blocks.length} sections`),
             saving: dp.busy === "draft",
             issues,
             changes: summarizeChanges(dp.blocks, dp.published, types),
             onHistory: tabAcc.full ? () => setShowVersions(true) : undefined,
-            publishLabel: "เผยแพร่หน้านี้",
+            publishLabel: t("เผยแพร่หน้านี้", "Publish this page"),
             // 👷 เผยแพร่เองไม่ได้ → บันทึกร่างแล้วส่งให้หัวหน้าตรวจ
-            ...(tabAcc.canPublish ? {} : { publishLabel: tabAcc.reviewing ? "กำลังส่ง…" : "ส่งให้หัวหน้าตรวจ", onPublish: () => void tabAcc.requestReview(dp.saveDraft, editTitle || editSlug) }),
+            ...(tabAcc.canPublish ? {} : { publishLabel: tabAcc.reviewing ? t("กำลังส่ง…", "Sending…") : t("ส่งให้หัวหน้าตรวจ", "Send for review"), onPublish: () => void tabAcc.requestReview(dp.saveDraft, editTitle || editSlug) }),
           }}
         />
         <PublishCheckDialog
@@ -457,14 +460,14 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
           onClose={dp.closeCheck}
           onConfirm={() => void dp.publish()}
           issues={issues}
-          what={` "${editTitle || "หน้านี้"}"`}
+          what={` "${editTitle || t("หน้านี้", "this page")}"`}
           busy={dp.busy === "publish"}
           onGoBlock={(id) => setSelection({ blockId: id })}
         />
         <VersionHistoryDrawer<Block>
           open={showVersions}
           onClose={() => setShowVersions(false)}
-          what={` "${editTitle || "หน้านี้"}"`}
+          what={` "${editTitle || t("หน้านี้", "this page")}"`}
           listUrl={`/api/website/pages/versions?pageId=${encodeURIComponent(editId)}`}
           restoreUrl="/api/website/pages/versions"
           restoreBody={(versionNo) => ({ pageId: editId, versionNo })}
@@ -478,23 +481,23 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
   return (
     <div className="space-y-3">
       <div className="rounded-xl bg-blue-50/60 border border-blue-200 px-4 py-2.5">
-        <p className="text-sm text-slate-700">สร้างหน้าเพิ่มเองได้ เช่น โปรโมชัน · วิธีสั่งซื้อ · นโยบายจัดส่ง · เกี่ยวกับเรา</p>
-        <p className="text-xs text-slate-500 mt-0.5">หน้าแรกจัดที่แท็บ &quot;🧱 หน้าแรก&quot; · หน้าที่สร้างจะขึ้นเป็นเมนูบนเว็บอัตโนมัติเมื่อเผยแพร่ (ยกเว้นหน้าในศูนย์ช่วยเหลือ — ใช้คอลัมน์ท้ายเว็บ “ศูนย์ช่วยเหลือ” แทน)</p>
+        <p className="text-sm text-slate-700">{t("สร้างหน้าเพิ่มเองได้ เช่น โปรโมชัน · วิธีสั่งซื้อ · นโยบายจัดส่ง · เกี่ยวกับเรา", "Create your own pages, e.g. Promotions · How to order · Shipping policy · About us")}</p>
+        <p className="text-xs text-slate-500 mt-0.5">{t("หน้าแรกจัดที่แท็บ \"🧱 หน้าแรก\" · หน้าที่สร้างจะขึ้นเป็นเมนูบนเว็บอัตโนมัติเมื่อเผยแพร่ (ยกเว้นหน้าในศูนย์ช่วยเหลือ — ใช้คอลัมน์ท้ายเว็บ “ศูนย์ช่วยเหลือ” แทน)", "Arrange the home page in the \"🧱 Home page\" tab · New pages are added to the site menu automatically when published (except help center pages — use the footer's “Help center” column instead)")}</p>
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <span className="text-sm text-slate-500">{pages.length} หน้า</span>
+        <span className="text-sm text-slate-500">{t(`${pages.length} หน้า`, `${pages.length} pages`)}</span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => void createHelpCenter()}
             disabled={creatingHelp}
             className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm hover:bg-indigo-100 disabled:opacity-50"
-            title="สร้างหน้า Privacy / Terms / FAQ / ติดตามคำสั่งซื้อ / ติดต่อเรา / จัดส่ง-คืนสินค้า (ไทย+อังกฤษ) เป็นร่าง"
+            title={t("สร้างหน้า Privacy / Terms / FAQ / ติดตามคำสั่งซื้อ / ติดต่อเรา / จัดส่ง-คืนสินค้า (ไทย+อังกฤษ) เป็นร่าง", "Create Privacy / Terms / FAQ / Track order / Contact us / Shipping & returns pages (Thai+English) as drafts")}
           >
-            {creatingHelp ? "กำลังสร้าง…" : "🧭 สร้างชุดศูนย์ช่วยเหลือ"}
+            {creatingHelp ? t("กำลังสร้าง…", "Creating…") : t("🧭 สร้างชุดศูนย์ช่วยเหลือ", "🧭 Create help center")}
           </button>
           <button onClick={() => setShowNew((v) => !v)} className="px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
-            {showNew ? "ปิด" : "+ สร้างหน้าใหม่"}
+            {showNew ? t("ปิด", "Close") : t("+ สร้างหน้าใหม่", "+ New page")}
           </button>
         </div>
       </div>
@@ -502,7 +505,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
       {showNew && (
         <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
           <div className="sm:col-span-3 flex flex-wrap gap-1.5">
-            {([["static", "📄 หน้าเว็บ", "เช่น โปรโมชัน · วิธีสั่งซื้อ · เกี่ยวกับเรา (ขึ้นเมนูอัตโนมัติ)"], ["post", "📝 บทความ (บล็อก)", "อยู่ที่ /blog · มีรูปปก/สรุป/แท็ก · ช่วย SEO ดึงคนจาก Google"]] as const).map(([k, l, h]) => (
+            {([["static", t("📄 หน้าเว็บ", "📄 Web page"), t("เช่น โปรโมชัน · วิธีสั่งซื้อ · เกี่ยวกับเรา (ขึ้นเมนูอัตโนมัติ)", "e.g. Promotions · How to order · About us (added to menu automatically)")], ["post", t("📝 บทความ (บล็อก)", "📝 Post (blog)"), t("อยู่ที่ /blog · มีรูปปก/สรุป/แท็ก · ช่วย SEO ดึงคนจาก Google", "Lives at /blog · cover/summary/tags · helps SEO bring visitors from Google")]] as const).map(([k, l, h]) => (
               <button key={k} type="button" onClick={() => setNewType(k)} className={`text-left rounded-lg border px-3 py-2 ${newType === k ? "border-blue-500 bg-white" : "border-slate-200 bg-white/60 hover:border-slate-400"}`}>
                 <span className="block text-sm font-medium text-slate-800">{l}</span>
                 <span className="block text-[11px] text-slate-500">{h}</span>
@@ -510,40 +513,40 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             ))}
           </div>
           <div>
-            <label className={labelCls}>{newType === "post" ? "หัวข้อบทความ" : "ชื่อหน้า"}</label>
-            <input className={inputCls} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={newType === "post" ? "เช่น 5 วิธีดูแลกระเป๋าหนังให้อยู่นาน" : "เช่น โปรโมชันเดือนนี้"} />
+            <label className={labelCls}>{newType === "post" ? t("หัวข้อบทความ", "Post title") : t("ชื่อหน้า", "Page name")}</label>
+            <input className={inputCls} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={newType === "post" ? t("เช่น 5 วิธีดูแลกระเป๋าหนังให้อยู่นาน", "e.g. 5 ways to make a leather bag last") : t("เช่น โปรโมชันเดือนนี้", "e.g. This month's promotion")} />
           </div>
           <div>
-            <label className={labelCls}>ที่อยู่หน้า (ภาษาอังกฤษ)</label>
+            <label className={labelCls}>{t("ที่อยู่หน้า (ภาษาอังกฤษ)", "Page URL (English)")}</label>
             <input className={inputCls} value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="promotion" />
           </div>
-          <button onClick={() => void createPage()} className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-black">สร้าง</button>
-          {newSlug && <p className="sm:col-span-3 text-[11px] text-slate-500">หน้านี้จะอยู่ที่ /{newType === "post" ? "blog/" : ""}{newSlug.toLowerCase().replace(/[^a-z0-9-]/g, "")}</p>}
+          <button onClick={() => void createPage()} className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-black">{t("สร้าง", "Create")}</button>
+          {newSlug && <p className="sm:col-span-3 text-[11px] text-slate-500">{t("หน้านี้จะอยู่ที่", "This page will be at")} /{newType === "post" ? "blog/" : ""}{newSlug.toLowerCase().replace(/[^a-z0-9-]/g, "")}</p>}
         </div>
       )}
 
       {!pages.length ? (
         <div className="rounded-xl border border-dashed border-slate-300 py-14 text-center">
-          <p className="text-sm text-slate-400">ยังไม่มีหน้าที่สร้างเอง</p>
-          <button onClick={() => setShowNew(true)} className="mt-3 text-sm text-blue-600 hover:underline">+ สร้างหน้าแรกของคุณ</button>
+          <p className="text-sm text-slate-400">{t("ยังไม่มีหน้าที่สร้างเอง", "No custom pages yet")}</p>
+          <button onClick={() => setShowNew(true)} className="mt-3 text-sm text-blue-600 hover:underline">{t("+ สร้างหน้าแรกของคุณ", "+ Create your first page")}</button>
         </div>
       ) : (
         groupPages(pages).map((g) => (
         <div key={g.kind + (g.name || "")} className="space-y-2">
           {g.kind === "help" ? (
-            <p className="pt-2 text-xs font-medium text-indigo-700">🧭 ศูนย์ช่วยเหลือ · {g.name} <span className="font-normal text-slate-400">— ลำดับนี้ = เมนูซ้ายบนเว็บ (กด ↑↓ ย้าย)</span></p>
+            <p className="pt-2 text-xs font-medium text-indigo-700">{t("🧭 ศูนย์ช่วยเหลือ", "🧭 Help center")} · {g.name} <span className="font-normal text-slate-400">{t("— ลำดับนี้ = เมนูซ้ายบนเว็บ (กด ↑↓ ย้าย)", "— this order = left menu on the site (use ↑↓ to move)")}</span></p>
           ) : g.kind === "posts" ? (
-            <p className="pt-2 text-xs font-medium text-amber-800">📝 บทความ (บล็อก) <span className="font-normal text-slate-400">— อยู่ที่ /blog · ใหม่สุดก่อน · ไม่ขึ้นเมนูเอง (ใส่ลิงก์ /blog ในเมนูได้)</span></p>
+            <p className="pt-2 text-xs font-medium text-amber-800">{t("📝 บทความ (บล็อก)", "📝 Posts (blog)")} <span className="font-normal text-slate-400">{t("— อยู่ที่ /blog · ใหม่สุดก่อน · ไม่ขึ้นเมนูเอง (ใส่ลิงก์ /blog ในเมนูได้)", "— at /blog · newest first · not added to the menu (you can add a /blog link)")}</span></p>
           ) : (
-            <p className="pt-2 text-xs font-medium text-slate-500">📄 หน้าทั่วไป</p>
+            <p className="pt-2 text-xs font-medium text-slate-500">{t("📄 หน้าทั่วไป", "📄 General pages")}</p>
           )}
         <ul className="space-y-2">
           {g.pages.map((p, i) => (
             <li key={p.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
               {g.kind === "help" && tabAcc.full ? (
                 <span className="flex flex-col -my-1">
-                  <button type="button" disabled={i === 0} onClick={() => void movePage(g.pages, i, -1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title="ย้ายขึ้น">▲</button>
-                  <button type="button" disabled={i === g.pages.length - 1} onClick={() => void movePage(g.pages, i, 1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title="ย้ายลง">▼</button>
+                  <button type="button" disabled={i === 0} onClick={() => void movePage(g.pages, i, -1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title={t("ย้ายขึ้น", "Move up")}>▲</button>
+                  <button type="button" disabled={i === g.pages.length - 1} onClick={() => void movePage(g.pages, i, 1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title={t("ย้ายลง", "Move down")}>▼</button>
                 </span>
               ) : (
                 <span className="text-lg">{p.pageType === "post" ? "📝" : "📄"}</span>
@@ -552,20 +555,20 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <span className="block text-sm font-medium text-slate-800 truncate">{p.title}</span>
                 <span className="block text-[11px] text-slate-400">
                   /{p.pageType === "post" ? "blog/" : ""}{p.slug} · {p.blocks} Section
-                  {p.hasDraft && " · มีร่าง"}
+                  {p.hasDraft && t(" · มีร่าง", " · has draft")}
                 </span>
               </button>
               {p.publishAt && new Date(p.publishAt).getTime() > Date.now() && (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200" title="เว็บจะโชว์เมื่อถึงเวลานี้ (ต้องกดเผยแพร่ไว้แล้ว)">⏰ {thWhen(p.publishAt)}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200" title={t("เว็บจะโชว์เมื่อถึงเวลานี้ (ต้องกดเผยแพร่ไว้แล้ว)", "Shows on the site at this time (must already be published)")}>⏰ {thWhen(p.publishAt)}</span>
               )}
               <span className={`text-[11px] px-2 py-0.5 rounded-full ${p.status === "published" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>
-                {p.status === "published" ? "เผยแพร่แล้ว" : "ร่าง"}
+                {p.status === "published" ? t("เผยแพร่แล้ว", "Published") : t("ร่าง", "Draft")}
               </span>
               {siteUrl && p.status === "published" && (
-                <a href={`${siteUrl}/${p.pageType === "post" ? "blog/" : ""}${p.slug}`} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-blue-600" title="เปิดหน้าจริง">↗</a>
+                <a href={`${siteUrl}/${p.pageType === "post" ? "blog/" : ""}${p.slug}`} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-blue-600" title={t("เปิดหน้าจริง", "Open live page")}>↗</a>
               )}
-              <button onClick={() => void openPage(p.id)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">แก้ไข</button>
-              {tabAcc.full && <button onClick={() => void removePage(p)} className="text-xs text-red-500 hover:underline">ลบ</button>}
+              <button onClick={() => void openPage(p.id)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">{t("แก้ไข", "Edit")}</button>
+              {tabAcc.full && <button onClick={() => void removePage(p)} className="text-xs text-red-500 hover:underline">{t("ลบ", "Delete")}</button>}
             </li>
           ))}
         </ul>

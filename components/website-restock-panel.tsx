@@ -201,7 +201,7 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
               const shown = formatRestockContact(r.contact_type, r.contact);
               return (
                 <div className="min-w-0 flex items-center gap-1.5">
-                  <span title={ct?.label}>{ct?.icon}</span>
+                  <span title={ct ? t(ct.label, ct.value === "email" ? "Email" : ct.value === "phone" ? "Phone" : ct.label) : undefined}>{ct?.icon}</span>
                   {r.contact_type === "email" ? (
                     <a href={`mailto:${r.contact}`} className="text-xs text-blue-700 hover:underline truncate">{shown}</a>
                   ) : r.contact_type === "phone" ? (
@@ -245,7 +245,7 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
             cell: (r: Row) => (
               <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_CLS[r.status]}`} title={r.notified_at ? t(`แจ้งเมื่อ ${dt(r.notified_at)}${r.notified_by ? ` โดย ${r.notified_by}` : ""}`, `Notified ${dt(r.notified_at)}${r.notified_by ? ` by ${r.notified_by}` : ""}`) : undefined}>
                 {r.auto_channel ? "🤖 " : ""}
-                {RESTOCK_STATUS_LABEL[r.status]}
+                {t(RESTOCK_STATUS_LABEL[r.status] ?? r.status, ({ pending: "Pending", notified: "Notified", cancelled: "Cancelled" } as Record<string, string>)[r.status] ?? RESTOCK_STATUS_LABEL[r.status] ?? r.status)}
               </span>
             ),
           },

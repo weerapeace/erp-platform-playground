@@ -7,12 +7,13 @@
  * - ขึ้นเว็บเฉพาะ approved · อนุมัติอัตโนมัติได้เฉพาะ "ซื้อจริง + 4–5 ดาว" เมื่อร้านเปิด reviews_auto_approve
  * - แต้ม: สมาชิกที่ซื้อจริง ได้ครั้งเดียวต่อรีวิวเมื่ออนุมัติ (reviews_points + reviews_photo_points ถ้ามีรูป) · ร้านต้องเปิดระบบแต้ม
  */
+import { tr } from "@/lib/lang";
 export type ReviewStatus = "pending" | "approved" | "hidden";
 
 export const REVIEW_STATUSES: { key: ReviewStatus; label: string; tone: string }[] = [
-  { key: "pending", label: "รอตรวจ", tone: "bg-amber-100 text-amber-800" },
-  { key: "approved", label: "ขึ้นเว็บแล้ว", tone: "bg-emerald-100 text-emerald-800" },
-  { key: "hidden", label: "ซ่อนอยู่", tone: "bg-slate-200 text-slate-700" },
+  { key: "pending", get label() { return tr("รอตรวจ", "Pending review"); }, tone: "bg-amber-100 text-amber-800" },
+  { key: "approved", get label() { return tr("ขึ้นเว็บแล้ว", "Live"); }, tone: "bg-emerald-100 text-emerald-800" },
+  { key: "hidden", get label() { return tr("ซ่อนอยู่", "Hidden"); }, tone: "bg-slate-200 text-slate-700" },
 ];
 
 export const REVIEW_MAX_IMAGES = 4;

@@ -6,6 +6,7 @@
  * ระดับ: ยอดซื้อ (ออเดอร์สำเร็จ ไม่รวมค่าส่ง) ย้อนหลัง 12 เดือน ≥ minSpend ของระดับ → ระดับสูงสุดที่ถึง
  * เงินคิดด้วย lib/money (สตางค์) · ข้อความภาษาคน
  */
+import { tr } from "@/lib/lang";
 import { money, toMajor } from "@/lib/money";
 
 export interface PointsConfig {
@@ -121,8 +122,8 @@ export function sanitizeTiers(raw: unknown): { ok: true; tiers: MemberTier[] } |
   const names = new Set<string>();
   for (const r of list) {
     const name = String(r?.name ?? "").trim().slice(0, 30);
-    if (!name) return { ok: false, error: "ระดับต้องมีชื่อ" };
-    if (names.has(name.toLowerCase())) return { ok: false, error: `ชื่อระดับซ้ำ: ${name}` };
+    if (!name) return { ok: false, error: tr("ระดับต้องมีชื่อ", "Each tier needs a name") };
+    if (names.has(name.toLowerCase())) return { ok: false, error: tr(`ชื่อระดับซ้ำ: ${name}`, `Duplicate tier name: ${name}`) };
     names.add(name.toLowerCase());
     let key = keyOf(r?.key) || keyOf(name);
     if (!key || (!keyOf(r?.key) && taken.has(key))) {
@@ -130,16 +131,16 @@ export function sanitizeTiers(raw: unknown): { ok: true; tiers: MemberTier[] } |
       while (taken.has(`t${i}`) || seen.has(`t${i}`)) i++;
       key = `t${i}`;
     }
-    if (seen.has(key)) return { ok: false, error: `ชื่อระดับซ้ำ: ${name}` };
+    if (seen.has(key)) return { ok: false, error: tr(`ชื่อระดับซ้ำ: ${name}`, `Duplicate tier name: ${name}`) };
     seen.add(key);
     taken.add(key);
     const minSpend = Number(r?.minSpend);
     const mult = Number(r?.earnMultiplier);
-    if (!(minSpend >= 0)) return { ok: false, error: `${name}: ยอดซื้อขั้นต่ำต้องเป็นตัวเลข ≥ 0` };
-    if (!(mult >= 1 && mult <= 10)) return { ok: false, error: `${name}: ตัวคูณแต้มต้องอยู่ระหว่าง 1–10` };
+    if (!(minSpend >= 0)) return { ok: false, error: tr(`${name}: ยอดซื้อขั้นต่ำต้องเป็นตัวเลข ≥ 0`, `${name}: minimum spend must be a number ≥ 0`) };
+    if (!(mult >= 1 && mult <= 10)) return { ok: false, error: tr(`${name}: ตัวคูณแต้มต้องอยู่ระหว่าง 1–10`, `${name}: points multiplier must be 1–10`) };
     const color = /^#[0-9a-fA-F]{6}$/.test(String(r?.color ?? "")) ? String(r.color) : "#9CA3AF";
     const discountPct = r?.discountPct === undefined || r?.discountPct === "" ? 0 : Number(r.discountPct);
-    if (!(discountPct >= 0 && discountPct <= 50)) return { ok: false, error: `${name}: ส่วนลดสมาชิกต้องอยู่ระหว่าง 0–50%` };
+    if (!(discountPct >= 0 && discountPct <= 50)) return { ok: false, error: tr(`${name}: ส่วนลดสมาชิกต้องอยู่ระหว่าง 0–50%`, `${name}: member discount must be 0–50%`) };
     out.push({ key, name, minSpend, earnMultiplier: mult, color, discountPct: Math.round(discountPct * 100) / 100, freeShipping: r?.freeShipping === true });
   }
   return { ok: true, tiers: out.sort((a, b) => a.minSpend - b.minSpend) };

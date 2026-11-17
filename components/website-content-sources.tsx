@@ -32,6 +32,7 @@ import {
   type ShippingAutoKey,
 } from "@/lib/website-content-sources";
 import { webForm } from "@/lib/website-form-styles";
+import { useT } from "@/components/i18n";
 
 const inputCls = webForm.input;
 const groupCls = "text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-1 mb-1";
@@ -55,6 +56,7 @@ export interface ContentSourcesModalProps {
 }
 
 export function ContentSourcesModal({ open, onClose, sources, onChange, items, productSources, shippingAuto, focusId, pickFor, onPick }: ContentSourcesModalProps) {
+  const t = useT();
   const [sel, setSel] = useState<string>(focusId || SHIPPING_SOURCE_ID);
   const [focusLine, setFocusLine] = useState<string | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
@@ -104,14 +106,14 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
       <ERPModal
         open={open}
         onClose={onClose}
-        title="⚙ จัดการแหล่งข้อมูล"
-        description={'แหล่งที่หัวข้อรายละเอียดสินค้าเลือกได้ในช่อง "เอาข้อมูลจาก" — เพิ่ม / แก้ / ลบ ได้ที่นี่'}
+        title={t("⚙ จัดการแหล่งข้อมูล", "⚙ Manage content sources")}
+        description={t('แหล่งที่หัวข้อรายละเอียดสินค้าเลือกได้ในช่อง "เอาข้อมูลจาก" — เพิ่ม / แก้ / ลบ ได้ที่นี่', 'Sources that product detail sections can pick in "Take content from" — add / edit / delete here')}
         size="xl"
         defaultExpanded={false}
         footer={
           <div className="flex items-center justify-between gap-3 w-full">
-            <p className="text-[11px] text-slate-400">แก้แล้วจะบันทึกไปพร้อมธีม — กด &quot;บันทึกร่าง&quot; / &quot;เผยแพร่&quot; ตามปกติ</p>
-            <button onClick={onClose} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">เสร็จ</button>
+            <p className="text-[11px] text-slate-400">{t("แก้แล้วจะบันทึกไปพร้อมธีม — กด \"บันทึกร่าง\" / \"เผยแพร่\" ตามปกติ", "Changes are saved with the theme — press \"Save draft\" / \"Publish\" as usual")}</p>
+            <button onClick={onClose} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700">{t("เสร็จ", "Done")}</button>
           </div>
         }
       >
@@ -119,10 +121,10 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
           {/* ── ซ้าย: รายการแหล่ง ── */}
           <div className="space-y-4">
             <div>
-              <p className={groupCls}>ดึงจากสินค้า · ลบไม่ได้</p>
+              <p className={groupCls}>{t("ดึงจากสินค้า · ลบไม่ได้", "From products · can't delete")}</p>
               <ul className="space-y-0.5">
                 {productSources.map((p) => (
-                  <li key={p.value} className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-500" title="ข้อมูลมาจากสินค้าแต่ละตัว — แก้ที่หน้าสินค้า">
+                  <li key={p.value} className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-500" title={t("ข้อมูลมาจากสินค้าแต่ละตัว — แก้ที่หน้าสินค้า", "Comes from each product — edit it on the product page")}>
                     <span aria-hidden>🔒</span>
                     <span className="truncate">{p.label}</span>
                   </li>
@@ -130,7 +132,7 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
               </ul>
             </div>
             <div>
-              <p className={groupCls}>ข้อความของร้าน</p>
+              <p className={groupCls}>{t("ข้อความของร้าน", "Shop text")}</p>
               <ul className="space-y-1">
                 {[shipping, ...custom].map((s) => {
                   const on = s.id === current.id;
@@ -141,10 +143,10 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
                         onClick={() => setSel(s.id)}
                         className={`w-full text-left rounded-lg border px-2.5 py-1.5 text-sm ${on ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-200 text-slate-700 hover:border-slate-400"}`}
                       >
-                        <span className="block truncate">{s.id === SHIPPING_SOURCE_ID ? `🚚 ${SHIPPING_SOURCE_NAME}` : s.name || "(ไม่มีชื่อ)"}</span>
+                        <span className="block truncate">{s.id === SHIPPING_SOURCE_ID ? `🚚 ${SHIPPING_SOURCE_NAME}` : s.name || t("(ไม่มีชื่อ)", "(Untitled)")}</span>
                         <span className="block text-[11px] text-slate-400">
-                          {s.id === SHIPPING_SOURCE_ID ? "อัตโนมัติ + " : ""}
-                          {s.lines.filter((l) => l.text.trim()).length} บรรทัด · {n ? `ใช้ใน ${n} หัวข้อ` : "ยังไม่ได้ใช้"}
+                          {s.id === SHIPPING_SOURCE_ID ? t("อัตโนมัติ + ", "Auto + ") : ""}
+                          {s.lines.filter((l) => l.text.trim()).length} {t("บรรทัด", "lines")} · {n ? t(`ใช้ใน ${n} หัวข้อ`, `Used in ${n} section(s)`) : t("ยังไม่ได้ใช้", "Not used yet")}
                         </span>
                       </button>
                     </li>
@@ -156,9 +158,9 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
                 disabled={custom.length >= MAX_CONTENT_SOURCES - 1}
                 className="mt-2 w-full rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-sm text-slate-600 hover:border-blue-400 hover:text-blue-700 disabled:opacity-40"
               >
-                ＋ เพิ่มแหล่งใหม่
+                {t("＋ เพิ่มแหล่งใหม่", "＋ Add source")}
               </button>
-              <p className="text-[11px] text-slate-400 mt-1 px-1">เช่น การรับประกัน · การคืนสินค้า · วิธีดูแล</p>
+              <p className="text-[11px] text-slate-400 mt-1 px-1">{t("เช่น การรับประกัน · การคืนสินค้า · วิธีดูแล", "e.g. Warranty · Returns · Care guide")}</p>
             </div>
           </div>
 
@@ -167,20 +169,20 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
             {isShipping ? (
               <div className="mb-3">
                 <p className="text-sm font-semibold text-slate-800">🚚 {SHIPPING_SOURCE_NAME}</p>
-                <p className="text-[11px] text-slate-500 mt-0.5">บรรทัด 🔒 มาจากแท็บ &quot;ข้อมูลร้าน&quot; (ค่าส่ง / ส่งฟรี / ช่องทางจ่าย) — เปลี่ยนที่นั่นแล้วอัปเดตเอง · กด 👁 เพื่อซ่อน</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">{t("บรรทัด 🔒 มาจากแท็บ \"ข้อมูลร้าน\" (ค่าส่ง / ส่งฟรี / ช่องทางจ่าย) — เปลี่ยนที่นั่นแล้วอัปเดตเอง · กด 👁 เพื่อซ่อน", "🔒 lines come from the \"Site info\" tab (shipping fee / free shipping / payment methods) — change them there and they update here · press 👁 to hide")}</p>
               </div>
             ) : (
               <div className="mb-3">
-                <label htmlFor="content-source-name" className="block text-[11px] font-medium text-slate-500 mb-1">ชื่อแหล่ง (เห็นแค่ในหลังบ้าน)</label>
-                <input id="content-source-name" className={inputCls} value={current.name} maxLength={CONTENT_NAME_MAX} onChange={(e) => save({ ...current, name: e.target.value })} placeholder="เช่น การรับประกัน" />
+                <label htmlFor="content-source-name" className="block text-[11px] font-medium text-slate-500 mb-1">{t("ชื่อแหล่ง (เห็นแค่ในหลังบ้าน)", "Source name (admin only)")}</label>
+                <input id="content-source-name" className={inputCls} value={current.name} maxLength={CONTENT_NAME_MAX} onChange={(e) => save({ ...current, name: e.target.value })} placeholder={t("เช่น การรับประกัน", "e.g. Warranty")} />
               </div>
             )}
 
             <p className="text-[11px] text-slate-500 mb-2">
-              {usedBy.length ? <>ใช้อยู่ใน: <b className="text-slate-700">{usedBy.join(" · ")}</b></> : <>ยังไม่มีหัวข้อไหนใช้ — เลือกได้ที่ช่อง &quot;เอาข้อมูลจาก&quot; ของหัวข้อ</>}
+              {usedBy.length ? <>{t("ใช้อยู่ใน:", "Used in:")} <b className="text-slate-700">{usedBy.join(" · ")}</b></> : <>{t("ยังไม่มีหัวข้อไหนใช้ — เลือกได้ที่ช่อง \"เอาข้อมูลจาก\" ของหัวข้อ", "No section uses it yet — pick it in a section's \"Take content from\" field")}</>}
             </p>
 
-            <p className="block text-[11px] font-medium text-slate-500 mb-1">บรรทัดที่โชว์บนเว็บ (แต่ละบรรทัด = 1 จุด •)</p>
+            <p className="block text-[11px] font-medium text-slate-500 mb-1">{t("บรรทัดที่โชว์บนเว็บ (แต่ละบรรทัด = 1 จุด •)", "Lines shown on the site (each line = 1 bullet •)")}</p>
             <ul className="space-y-1.5">
               {isShipping &&
                 SHIPPING_AUTO_LINES.map((a) => {
@@ -188,16 +190,16 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
                   const hidden = (shipping.hideAuto ?? []).includes(a.key);
                   return (
                     <li key={a.key} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5">
-                      <span className="text-xs" aria-hidden title="อัตโนมัติจากข้อมูลร้าน">🔒</span>
+                      <span className="text-xs" aria-hidden title={t("อัตโนมัติจากข้อมูลร้าน", "Automatic from site info")}>🔒</span>
                       <span className={`flex-1 min-w-0 text-sm ${hidden || !text ? "text-slate-400" : "text-slate-700"} ${hidden ? "line-through" : ""}`}>
-                        {text || <span className="italic">{a.label} — ยังไม่ได้ตั้งในข้อมูลร้าน (ไม่โชว์)</span>}
+                        {text || <span className="italic">{a.label} — {t("ยังไม่ได้ตั้งในข้อมูลร้าน (ไม่โชว์)", "not set in site info (hidden)")}</span>}
                       </span>
                       <button
                         onClick={() => toggleAuto(a.key)}
                         className={`shrink-0 h-7 px-2 rounded-lg border text-xs ${hidden ? "border-amber-300 text-amber-700 bg-amber-50" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
-                        title={hidden ? "กำลังซ่อน — กดเพื่อโชว์" : "กดเพื่อซ่อนบรรทัดนี้"}
+                        title={hidden ? t("กำลังซ่อน — กดเพื่อโชว์", "Hidden — click to show") : t("กดเพื่อซ่อนบรรทัดนี้", "Click to hide this line")}
                       >
-                        {hidden ? "🙈 ซ่อนอยู่" : "👁 โชว์"}
+                        {hidden ? t("🙈 ซ่อนอยู่", "🙈 Hidden") : t("👁 โชว์", "👁 Shown")}
                       </button>
                     </li>
                   );
@@ -211,7 +213,7 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
                     k="text"
                     maxLength={CONTENT_LINE_MAX}
                     autoFocus={focusLine === l.id}
-                    placeholder={isShipping ? "เช่น จัดส่งภายใน 1–2 วันทำการ" : "พิมพ์ข้อความ 1 บรรทัด"}
+                    placeholder={isShipping ? t("เช่น จัดส่งภายใน 1–2 วันทำการ", "e.g. Ships within 1–2 business days") : t("พิมพ์ข้อความ 1 บรรทัด", "Type one line of text")}
                     onPatch={(p) => setLines(current.lines.map((x) => (x.id === l.id ? { ...x, ...p } : x)))}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.nativeEvent.isComposing) {
@@ -219,13 +221,13 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
                         addLine(i);
                       }
                     }}
-                    aria-label={`บรรทัดที่ ${i + 1}`}
+                    aria-label={t(`บรรทัดที่ ${i + 1}`, `Line ${i + 1}`)}
                   />
                   <button
                     onClick={() => setLines(current.lines.filter((x) => x.id !== l.id))}
                     className="shrink-0 w-8 h-8 rounded-lg border border-slate-200 text-xs text-slate-400 hover:text-red-600 hover:border-red-300"
-                    title="ลบบรรทัดนี้"
-                    aria-label={`ลบบรรทัดที่ ${i + 1}`}
+                    title={t("ลบบรรทัดนี้", "Delete this line")}
+                    aria-label={t(`ลบบรรทัดที่ ${i + 1}`, `Delete line ${i + 1}`)}
                   >
                     🗑️
                   </button>
@@ -237,20 +239,20 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
               disabled={current.lines.length >= MAX_CONTENT_LINES}
               className="mt-2 text-xs px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700 disabled:opacity-40"
             >
-              ＋ เพิ่มบรรทัด
+              {t("＋ เพิ่มบรรทัด", "＋ Add line")}
             </button>
-            <p className="text-[11px] text-slate-400 mt-1">กด Enter = ขึ้นบรรทัดใหม่ · ลาก ⠿ เพื่อสลับลำดับ · บรรทัดว่างไม่โชว์ · ภาษาอังกฤษแปลได้ที่แท็บ 🌐 แปลภาษา</p>
-            {isShipping && <p className="text-[11px] text-amber-700 mt-2">มีผลทั้งหัวข้อในรายละเอียดสินค้า และข้อความใต้ปุ่มใส่ตะกร้า (ถ้าตั้งให้โชว์การจัดส่ง)</p>}
+            <p className="text-[11px] text-slate-400 mt-1">{t("กด Enter = ขึ้นบรรทัดใหม่ · ลาก ⠿ เพื่อสลับลำดับ · บรรทัดว่างไม่โชว์ · ภาษาอังกฤษแปลได้ที่แท็บ 🌐 แปลภาษา", "Enter = new line · drag ⠿ to reorder · empty lines are hidden · English goes in the 🌐 Translations tab")}</p>
+            {isShipping && <p className="text-[11px] text-amber-700 mt-2">{t("มีผลทั้งหัวข้อในรายละเอียดสินค้า และข้อความใต้ปุ่มใส่ตะกร้า (ถ้าตั้งให้โชว์การจัดส่ง)", "Applies to the product detail section and the text under the add-to-cart button (if shipping is set to show)")}</p>}
 
             <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-slate-100">
               {pickFor && onPick && pickFor.value !== pickValue && (
                 <button onClick={() => { onPick(pickValue); onClose(); }} className="text-xs px-2.5 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-                  ✓ ใช้แหล่งนี้กับหัวข้อ &quot;{pickFor.label}&quot;
+                  {t("✓ ใช้แหล่งนี้กับหัวข้อ", "✓ Use this source for section")} &quot;{pickFor.label}&quot;
                 </button>
               )}
               {!isShipping && (
                 <button onClick={() => setDelId(current.id)} className="ml-auto text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-300">
-                  🗑 ลบแหล่งนี้
+                  {t("🗑 ลบแหล่งนี้", "🗑 Delete this source")}
                 </button>
               )}
             </div>
@@ -267,15 +269,15 @@ export function ContentSourcesModal({ open, onClose, sources, onChange, items, p
           setSel(SHIPPING_SOURCE_ID);
           setDelId(null);
         }}
-        title={`ลบแหล่ง "${delSrc?.name ?? ""}"?`}
+        title={t(`ลบแหล่ง "${delSrc?.name ?? ""}"?`, `Delete source "${delSrc?.name ?? ""}"?`)}
         message={
           delUsed.length ? (
-            <>มีหัวข้อที่ใช้แหล่งนี้อยู่ <b>{delUsed.length}</b> หัวข้อ ({delUsed.join(" · ")}) — ลบแล้วหัวข้อเหล่านั้นจะไม่โชว์บนเว็บ จนกว่าจะเลือกแหล่งใหม่</>
+            <>{t("มีหัวข้อที่ใช้แหล่งนี้อยู่", "Sections using this source:")} <b>{delUsed.length}</b> {t("หัวข้อ", "")} ({delUsed.join(" · ")}) — {t("ลบแล้วหัวข้อเหล่านั้นจะไม่โชว์บนเว็บ จนกว่าจะเลือกแหล่งใหม่", "after deleting, those sections won't show on the site until you pick a new source")}</>
           ) : (
-            "ยังไม่มีหัวข้อไหนใช้แหล่งนี้ ลบได้เลย"
+            t("ยังไม่มีหัวข้อไหนใช้แหล่งนี้ ลบได้เลย", "No section uses this source — safe to delete")
           )
         }
-        confirmText="ลบแหล่ง"
+        confirmText={t("ลบแหล่ง", "Delete source")}
         variant="danger"
       />
     </>

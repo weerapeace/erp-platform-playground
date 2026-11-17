@@ -13,6 +13,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { imageIconValue, lineIconValue, parseSiteIcon, searchSiteIcons } from "@/lib/website-icons";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
+import { useT } from "@/components/i18n";
+import { labelEn } from "@/lib/website-admin-en";
 
 const QUICK_EMOJI = ["🔒", "🚚", "↩️", "✅", "🛡️", "💳", "📦", "🎁", "⭐", "💬", "📞", "⏱️", "✨", "❤️", "🏷️", "🌿"];
 type Tab = "line" | "emoji" | "img";
@@ -39,7 +41,9 @@ export function SiteIcon({ value, size = 18, className }: { value: string | null
   );
 }
 
-export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: { value: string; onChange: (v: string) => void; label?: string }) {
+export function SiteIconPicker({ value, onChange, label }: { value: string; onChange: (v: string) => void; label?: string }) {
+  const t = useT();
+  const pickTitle = label ? t(`เลือก${label}`, `Choose ${labelEn(label)}`) : t("เลือกไอคอน", "Choose icon");
   const cur = parseSiteIcon(value);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("line");
@@ -67,8 +71,8 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
     }
     setOpen(!open);
   };
-  const tabBtn = (t: Tab, l: string) => (
-    <button type="button" onClick={() => setTab(t)} className={`flex-1 h-7 rounded-md text-[11px] ${tab === t ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+  const tabBtn = (k: Tab, l: string) => (
+    <button type="button" onClick={() => setTab(k)} className={`flex-1 h-7 rounded-md text-[11px] ${tab === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
       {l}
     </button>
   );
@@ -78,8 +82,8 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
       <button
         type="button"
         onClick={toggle}
-        title={`เลือก${label}`}
-        aria-label={`เลือก${label}`}
+        title={pickTitle}
+        aria-label={pickTitle}
         aria-expanded={open}
         data-site-icon-picker
         className="h-8 w-14 inline-flex items-center justify-center gap-0.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm hover:border-slate-400 focus:outline-none focus:border-blue-400"
@@ -92,9 +96,9 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute z-50 left-0 top-full mt-1 w-[300px] rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl space-y-2" data-site-icon-pop>
             <div className="flex gap-1 rounded-lg bg-slate-50 p-0.5">
-              {tabBtn("line", "〰 ไอคอนเส้น")}
-              {tabBtn("emoji", "😀 อีโมจิ")}
-              {tabBtn("img", "⬆ อัปโหลด")}
+              {tabBtn("line", t("〰 ไอคอนเส้น", "〰 Line icons"))}
+              {tabBtn("emoji", t("😀 อีโมจิ", "😀 Emoji"))}
+              {tabBtn("img", t("⬆ อัปโหลด", "⬆ Upload"))}
             </div>
 
             {tab === "line" && (
@@ -103,7 +107,7 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
                   autoFocus
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="ค้นหา เช่น ส่ง, ปลอดภัย, คืน, lock…"
+                  placeholder={t("ค้นหา เช่น ส่ง, ปลอดภัย, คืน, lock…", "Search, e.g. ship, secure, return, lock…")}
                   className="w-full h-8 rounded-lg border border-slate-200 px-2.5 text-xs focus:outline-none focus:border-blue-400"
                 />
                 <div className="grid grid-cols-8 gap-1 max-h-48 overflow-y-auto pr-0.5">
@@ -113,8 +117,8 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
                       <button
                         key={ic.key}
                         type="button"
-                        title={ic.label}
-                        aria-label={ic.label}
+                        title={labelEn(ic.label)}
+                        aria-label={labelEn(ic.label)}
                         onClick={() => pick(lineIconValue(ic.key))}
                         className={`h-8 rounded-md border inline-flex items-center justify-center text-slate-700 ${on ? "border-blue-500 bg-blue-50" : "border-transparent hover:border-slate-300 hover:bg-slate-50"}`}
                       >
@@ -123,8 +127,8 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
                     );
                   })}
                 </div>
-                {!icons.length && <p className="text-[11px] text-slate-400 text-center py-2">ไม่พบไอคอน — ลองคำอื่น หรือใช้อีโมจิ/อัปโหลดเอง</p>}
-                <p className="text-[10px] text-slate-400">ไอคอนเส้นเปลี่ยนสีตามธีมร้านเอง · คมทุกขนาด</p>
+                {!icons.length && <p className="text-[11px] text-slate-400 text-center py-2">{t("ไม่พบไอคอน — ลองคำอื่น หรือใช้อีโมจิ/อัปโหลดเอง", "No icons found — try another word, or use emoji/upload your own")}</p>}
+                <p className="text-[10px] text-slate-400">{t("ไอคอนเส้นเปลี่ยนสีตามธีมร้านเอง · คมทุกขนาด", "Line icons follow the shop theme color · sharp at any size")}</p>
               </>
             )}
 
@@ -143,11 +147,11 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
                     maxLength={8}
                     onChange={(e) => setEmoji(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && emoji.trim() && pick(emoji.trim())}
-                    placeholder="พิมพ์/วางอีโมจิเอง"
+                    placeholder={t("พิมพ์/วางอีโมจิเอง", "Type/paste an emoji")}
                     className="flex-1 min-w-0 h-8 rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:border-blue-400"
                   />
                   <button type="button" disabled={!emoji.trim()} onClick={() => pick(emoji.trim())} className="h-8 px-3 rounded-lg bg-slate-800 text-white text-xs disabled:opacity-40">
-                    ใช้
+                    {t("ใช้", "Use")}
                   </button>
                 </div>
               </>
@@ -155,8 +159,8 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
 
             {tab === "img" && (
               <ImageUploadField
-                label="อัปโหลดไอคอนเอง (PNG/SVG พื้นใส)"
-                hint="รูปไม่เปลี่ยนสีตามธีม — ใช้ไอคอนเส้นถ้าอยากให้สีเข้ากับร้าน"
+                label={t("อัปโหลดไอคอนเอง (PNG/SVG พื้นใส)", "Upload your own icon (transparent PNG/SVG)")}
+                hint={t("รูปไม่เปลี่ยนสีตามธีม — ใช้ไอคอนเส้นถ้าอยากให้สีเข้ากับร้าน", "Images don't follow the theme color — use line icons to match the shop")}
                 value={cur?.kind === "img" ? cur.key : null}
                 onChange={(k) => onChange(k ? imageIconValue(k) : "")}
                 height={40}
@@ -165,10 +169,10 @@ export function SiteIconPicker({ value, onChange, label = "ไอคอน" }: {
 
             <div className="flex justify-between pt-1 border-t border-slate-100">
               <button type="button" onClick={() => pick("")} className="text-[11px] text-slate-500 hover:text-red-600">
-                ไม่มีไอคอน
+                {t("ไม่มีไอคอน", "No icon")}
               </button>
               <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-blue-600 hover:underline">
-                เสร็จ
+                {t("เสร็จ", "Done")}
               </button>
             </div>
           </div>

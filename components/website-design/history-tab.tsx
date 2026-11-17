@@ -4,13 +4,15 @@
 import { timeAgo } from "./shared";
 import { useDesign } from "./context";
 import { DesignCard } from "./design-card";
+import { useT } from "@/components/i18n";
 
 export function HistoryTab() {
   const { versions, restore } = useDesign();
+  const t = useT();
   return (
-    <DesignCard title="ประวัติการเผยแพร่" summary={versions.length ? `${versions.length} เวอร์ชัน — กดกู้คืนเป็นร่างได้` : "ยังไม่มีประวัติ"}>
+    <DesignCard title="ประวัติการเผยแพร่" summary={versions.length ? t(`${versions.length} เวอร์ชัน — กดกู้คืนเป็นร่างได้`, `${versions.length} versions — click to restore as draft`) : t("ยังไม่มีประวัติ", "No history yet")}>
       {!versions.length ? (
-        <p className="py-8 text-center text-sm text-slate-400">ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่</p>
+        <p className="py-8 text-center text-sm text-slate-400">{t("ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่", "No history yet — saved every time you publish")}</p>
       ) : (
         <ul className="divide-y divide-slate-100">
           {versions.map((v) => (
@@ -24,7 +26,7 @@ export function HistoryTab() {
               <span className="flex-1 text-xs text-slate-600">
                 {v.theme.fonts.display} / {v.theme.fonts.body} · {timeAgo(v.createdAt)}
               </span>
-              <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline">กู้คืนเป็นร่าง</button>
+              <button onClick={() => void restore(v.versionNo)} className="text-xs text-blue-600 hover:underline">{t("กู้คืนเป็นร่าง", "Restore as draft")}</button>
             </li>
           ))}
         </ul>

@@ -7,15 +7,19 @@ import { SiteControlsSetting, SiteMotionSetting, SitePageSetting, SiteSalesSetti
 import { labelCls, ResetBtn } from "./shared";
 import { useDesign } from "./context";
 import { DesignCard } from "./design-card";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-admin-en";
 
 export function ShapeTab() {
+  const t = useT();
   const { theme, published, choices, apply, setShape } = useDesign();
   return (
     <>
       {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
       <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
       <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
-      <DesignCard title="ความมนของขอบ (ค่ารวมทั้งเว็บ)" summary={choices.radius.find((o) => o.value === theme.radius)?.label ?? theme.radius}>
+      <DesignCard title={t("ความมนของขอบ (ค่ารวมทั้งเว็บ)", "Corner roundness (whole site)")} summary={labelEn(choices.radius.find((o) => o.value === theme.radius)?.label ?? theme.radius)}>
         <div className="flex flex-wrap gap-2">
           {choices.radius.map((o) => (
             <button
@@ -24,63 +28,63 @@ export function ShapeTab() {
               className={`px-4 py-3 border text-sm transition ${theme.radius === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
               style={{ borderRadius: o.value === "sharp" ? 2 : o.value === "soft" ? 12 : 22 }}
             >
-              {o.label}
+              {labelEn(o.label)}
             </button>
           ))}
           <ResetBtn show={theme.radius !== published.radius} onClick={() => apply({ ...theme, radius: published.radius })} />
         </div>
         <div className="grid gap-3 sm:grid-cols-3 mt-4 pt-3 border-t border-slate-100">
           {([
-            ["cardRadius", "ขอบการ์ด/กล่อง"],
-            ["imageRadius", "ขอบรูปบนการ์ด"],
-            ["inputRadius", "ขอบช่องกรอก"],
+            ["cardRadius", t("ขอบการ์ด/กล่อง", "Card/box corners")],
+            ["imageRadius", t("ขอบรูปบนการ์ด", "Card image corners")],
+            ["inputRadius", t("ขอบช่องกรอก", "Input corners")],
           ] as const).map(([k, label]) => (
             <div key={k}>
               <label className={labelCls}>{label}</label>
               <WheelSelect value={theme.shape[k] == null ? "" : String(theme.shape[k])} onChange={(e) => setShape({ [k]: e.target.value === "" ? null : Number(e.target.value) } as Partial<Shape>)}>
-                <option value="">ตามค่ารวม</option>
-                {RADIUS_PX_CHOICES.map((n) => <option key={n} value={n}>{n === 0 ? "เหลี่ยม (0)" : `${n} px`}</option>)}
+                <option value="">{t("ตามค่ารวม", "Same as site-wide")}</option>
+                {RADIUS_PX_CHOICES.map((n) => <option key={n} value={n}>{n === 0 ? t("เหลี่ยม (0)", "Square (0)") : `${n} px`}</option>)}
               </WheelSelect>
             </div>
           ))}
         </div>
       </DesignCard>
 
-      <DesignCard title="ปุ่ม · เส้นขอบ · เงา">
+      <DesignCard title={t("ปุ่ม · เส้นขอบ · เงา", "Buttons · borders · shadows")}>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>รูปทรงปุ่ม</label>
+            <label className={labelCls}>{t("รูปทรงปุ่ม", "Button shape")}</label>
             <div className="flex flex-wrap gap-2">
               {BUTTON_SHAPES.map((o) => (
                 <button key={o.value} onClick={() => setShape({ button: o.value })} className={`px-3.5 py-2 border text-xs transition ${theme.shape.button === o.value ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`} style={{ borderRadius: o.value === "pill" ? 99 : o.value === "rounded" ? 10 : 2 }}>
-                  {o.label}
+                  {labelEn(o.label)}
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className={labelCls}>ขนาดปุ่ม</label>
+            <label className={labelCls}>{t("ขนาดปุ่ม", "Button size")}</label>
             <WheelSelect value={theme.shape.buttonSize} onChange={(e) => setShape({ buttonSize: e.target.value as Shape["buttonSize"] })}>
-              {BUTTON_SIZES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {BUTTON_SIZES.map((o) => <option key={o.value} value={o.value}>{labelEn(o.label)}</option>)}
             </WheelSelect>
           </div>
           <div>
-            <label className={labelCls}>ความหนาเส้นขอบ (การ์ด/ช่องกรอก)</label>
+            <label className={labelCls}>{t("ความหนาเส้นขอบ (การ์ด/ช่องกรอก)", "Border thickness (cards/inputs)")}</label>
             <WheelSelect value={theme.shape.borderWidth} onChange={(e) => setShape({ borderWidth: Number(e.target.value) === 2 ? 2 : 1 })}>
-              <option value={1}>บาง (1 px)</option>
-              <option value={2}>หนา (2 px)</option>
+              <option value={1}>{t("บาง (1 px)", "Thin (1 px)")}</option>
+              <option value={2}>{t("หนา (2 px)", "Thick (2 px)")}</option>
             </WheelSelect>
           </div>
           <div>
-            <label className={labelCls}>เงาของการ์ด</label>
+            <label className={labelCls}>{t("เงาของการ์ด", "Card shadow")}</label>
             <WheelSelect value={theme.shape.shadow} onChange={(e) => setShape({ shadow: e.target.value as Shape["shadow"] })}>
-              {SHADOW_LEVELS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {SHADOW_LEVELS.map((o) => <option key={o.value} value={o.value}>{labelEn(o.label)}</option>)}
             </WheelSelect>
           </div>
         </div>
 
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <p className={labelCls}>ตัวอย่าง (ปุ่ม · ช่องกรอก · การ์ด)</p>
+          <p className={labelCls}>{t("ตัวอย่าง (ปุ่ม · ช่องกรอก · การ์ด)", "Preview (button · input · card)")}</p>
           <div className="flex flex-wrap items-center gap-3 rounded-xl p-4" style={{ background: theme.colors.page }}>
             {(() => {
               const r = theme.radius === "sharp" ? { sm: 2, lg: 4 } : theme.radius === "soft" ? { sm: 8, lg: 20 } : { sm: 14, lg: 30 };
@@ -108,22 +112,23 @@ export function ShapeTab() {
 }
 
 /** ✨ ลูกเล่นและการเคลื่อนไหว — เปลี่ยนหน้า · เลื่อนนุ่ม · Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · ปุ่มกลับขึ้นบน */
-const TRANSITION_LABEL: Record<string, string> = { fade: "จาง", rise: "เลื่อนขึ้น", curtain: "ม่านสีแบรนด์", logo: "โลโก้วาบ", zoom: "ซูมเข้า", none: "ไม่มี" };
+const TRANSITION_LABEL = (): Record<string, string> => ({ fade: tr("จาง", "Fade"), rise: tr("เลื่อนขึ้น", "Rise"), curtain: tr("ม่านสีแบรนด์", "Brand curtain"), logo: tr("โลโก้วาบ", "Logo flash"), zoom: tr("ซูมเข้า", "Zoom in"), none: tr("ไม่มี", "None") });
 
 export function MotionTab() {
+  const t = useT();
   const { theme, apply } = useDesign();
   return (
     <>
       {/* ✨ การเคลื่อนไหวทั้งเว็บ — เว็บร้าน: PageMotion + ::view-transition (globals.css) */}
-      <DesignCard title="✨ การเคลื่อนไหวทั้งเว็บ" summary={`เปลี่ยนหน้า: ${TRANSITION_LABEL[theme.page.transition] ?? theme.page.transition}${theme.page.smoothScroll ? " · เลื่อนจอนุ่ม" : ""}`} hint="ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ">
+      <DesignCard title={t("✨ การเคลื่อนไหวทั้งเว็บ", "✨ Site-wide motion")} summary={`${t("เปลี่ยนหน้า", "Page change")}: ${TRANSITION_LABEL()[theme.page.transition] ?? theme.page.transition}${theme.page.smoothScroll ? t(" · เลื่อนจอนุ่ม", " · smooth scroll") : ""}`} hint={t("ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ", "When shoppers go to another page · shoppers who set their device to reduce motion never see animations")}>
         <div className="flex flex-wrap gap-2 mb-3">
           {([
-            ["fade", "จางเปลี่ยนหน้า", "หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)"],
-            ["rise", "เลื่อนขึ้น", "หน้าใหม่ลอยขึ้นพร้อมจางเข้า ดูหรูขึ้น"],
-            ["curtain", "ม่านสีแบรนด์", "ม่านสีหลักปาดขึ้นปิดจอ แล้วเปิดเป็นหน้าใหม่"],
-            ["logo", "โลโก้วาบ", "จอเป็นสีพื้นพร้อมโลโก้กลางจอ แล้วเปิดหน้าใหม่"],
-            ["zoom", "ซูมเข้า", "หน้าใหม่ซูมเข้าเบา ๆ พร้อมจาง"],
-            ["none", "ไม่มี", "เปลี่ยนหน้าทันที"],
+            ["fade", t("จางเปลี่ยนหน้า", "Fade between pages"), t("หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)", "Old page fades out, new page fades in (recommended)")],
+            ["rise", t("เลื่อนขึ้น", "Rise"), t("หน้าใหม่ลอยขึ้นพร้อมจางเข้า ดูหรูขึ้น", "New page floats up while fading in, feels more premium")],
+            ["curtain", t("ม่านสีแบรนด์", "Brand curtain"), t("ม่านสีหลักปาดขึ้นปิดจอ แล้วเปิดเป็นหน้าใหม่", "A brand-color curtain sweeps up over the screen, then reveals the new page")],
+            ["logo", t("โลโก้วาบ", "Logo flash"), t("จอเป็นสีพื้นพร้อมโลโก้กลางจอ แล้วเปิดหน้าใหม่", "Screen turns solid with the logo in the center, then opens the new page")],
+            ["zoom", t("ซูมเข้า", "Zoom in"), t("หน้าใหม่ซูมเข้าเบา ๆ พร้อมจาง", "New page zooms in gently while fading")],
+            ["none", t("ไม่มี", "None"), t("เปลี่ยนหน้าทันที", "Change page instantly")],
           ] as const).map(([v, l, d]) => (
             <button
               key={v}
@@ -138,9 +143,9 @@ export function MotionTab() {
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.page.smoothScroll} onChange={(e) => apply({ ...theme, page: { ...theme.page, smoothScroll: e.target.checked } })} />
-          เลื่อนจอนุ่ม (Smooth scroll)
+          {t("เลื่อนจอนุ่ม (Smooth scroll)", "Smooth scroll")}
         </label>
-        <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
+        <p className="text-[11px] text-slate-400 mt-1">{t("เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง", "Scrolling the mouse wheel glides smoothly like luxury brand sites · for computers with a mouse/touchpad (mobile scrolls normally) · doesn't work in this preview — check the live site")}</p>
       </DesignCard>
       {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
       <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />

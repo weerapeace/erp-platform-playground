@@ -12,6 +12,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useUserPref } from "@/lib/use-user-pref";
 import { normTitle } from "@/lib/website-design-nav";
 import { cardHiddenIn, useDesignMode } from "./mode";
+import { useT } from "@/components/i18n";
+import { labelEn } from "@/lib/website-admin-en";
 
 type OpenMap = Record<string, boolean>;
 interface CardsCtx {
@@ -60,13 +62,14 @@ export const useInDesignCards = () => useContext(Ctx) !== null;
 /** ปุ่ม "กางทั้งหมด / พับทั้งหมด" ของหน้าที่เปิดอยู่ — ไม่โชว์ถ้าการ์ดพับได้ไม่ถึง 2 ใบ */
 export function DesignCardsToggleAll({ className = "" }: { className?: string }) {
   const c = useContext(Ctx);
+  const t = useT();
   if (!c || c.mounted.current.size < 2) return null;
   const entries = [...c.mounted.current.entries()];
   const allOpen = entries.every(([k, fb]) => effectiveOpen(c, k, fb));
   const setAll = (open: boolean) => c.setSaved({ ...c.saved, ...Object.fromEntries(entries.map(([k]) => [k, open])) });
   return (
     <button type="button" onClick={() => setAll(!allOpen)} className={`shrink-0 text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg border border-slate-200 bg-white hover:border-slate-400 ${className}`} data-design-toggle-all>
-      {allOpen ? "พับทั้งหมด" : "กางทั้งหมด"}
+      {allOpen ? t("พับทั้งหมด", "Collapse all") : t("กางทั้งหมด", "Expand all")}
     </button>
   );
 }
@@ -93,6 +96,9 @@ export function DesignCard({
   className?: string;
 }) {
   const ctx = useContext(Ctx);
+  const t = useT();
+  // หัวการ์ดเป็นคีย์ (จำพับ/ค้นหา/ระดับสิทธิ์) — แปลเฉพาะตอนแสดงผล
+  const shownTitle = labelEn(title);
   // 👷 พนักงานแก้บางหัวข้อ: การ์ดที่ใช้สิทธิ์เต็ม / การตั้งค่าละเอียด (แบบง่าย) ซ่อน — ไม่ลงทะเบียน (ใบแรกที่กางเองยังถูก)
   const hidden = cardHiddenIn(useDesignMode(), title);
   const key = ctx ? `${ctx.page}:${normTitle(title)}` : "";
@@ -120,7 +126,7 @@ export function DesignCard({
       <div className={`rounded-xl border border-slate-200 bg-white p-4 ${className}`} data-design-card={title}>
         <div className="flex items-start gap-2 mb-3">
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+            <h3 className="text-sm font-semibold text-slate-800">{shownTitle}</h3>
             {hint && <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p>}
           </div>
           {right}
@@ -136,7 +142,7 @@ export function DesignCard({
         <button
           type="button"
           aria-expanded={open}
-          aria-label={open ? `พับ ${title}` : `กาง ${title}`}
+          aria-label={open ? t(`พับ ${shownTitle}`, `Collapse ${shownTitle}`) : t(`กาง ${shownTitle}`, `Expand ${shownTitle}`)}
           onClick={(e) => {
             e.stopPropagation();
             setOpen(!open);
@@ -146,7 +152,7 @@ export function DesignCard({
           ▶
         </button>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{shownTitle}</h3>
           {open ? hint && <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p> : brief && <p className="text-[11px] text-slate-500 mt-0.5 truncate">{brief}</p>}
         </div>
         {right && (

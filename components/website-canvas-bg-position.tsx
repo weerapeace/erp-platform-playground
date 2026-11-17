@@ -14,6 +14,7 @@
  */
 import { ImageCropBox } from "@/components/image-crop-box";
 import { RangeInput } from "@/components/range-input";
+import { useT } from "@/components/i18n";
 import { CANVAS_BG_DEFAULT, CANVAS_BG_REF_PHONE, CANVAS_BG_REF_WIDTH, CANVAS_MAX_HEIGHT, CANVAS_MOBILE_WIDTH, CANVAS_WIDTH, canvasMaxPx } from "@/lib/website-canvas";
 
 export interface CanvasBgPos {
@@ -69,6 +70,7 @@ export function CanvasBgPositioner({
   onChange: (p: BgPatch) => void;
 }) {
   const imageKey = String(block.bgImageKey ?? "");
+  const t = useT();
   const mobile = device === "mobile";
   const mobileCustomLayout = block.mobileMode === "custom";
   const split = block.bgMCustom === true;
@@ -88,27 +90,27 @@ export function CanvasBgPositioner({
     <div className="space-y-2">
       {mobile ? (
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 space-y-1.5">
-          <p className="text-[11px] font-semibold text-amber-800">📲 กำลังปรับของมือถือ</p>
+          <p className="text-[11px] font-semibold text-amber-800">{t("📲 กำลังปรับของมือถือ", "📲 Adjusting for mobile")}</p>
           <div className="flex gap-1.5">
             <button type="button" className={seg(!split)} onClick={() => onChange({ bgMCustom: false })}>
-              ใช้ตามคอม
+              {t("ใช้ตามคอม", "Same as desktop")}
             </button>
             <button type="button" className={seg(split)} onClick={() => !split && set({})}>
-              ปรับแยก
+              {t("ปรับแยก", "Adjust separately")}
             </button>
           </div>
-          {!split && <p className="text-[10px] text-amber-700">ตอนนี้ใช้ตำแหน่งเดียวกับคอม — ลาก/ซูมด้านล่างเพื่อเริ่มปรับแยก (คอมไม่เปลี่ยน)</p>}
+          {!split && <p className="text-[10px] text-amber-700">{t("ตอนนี้ใช้ตำแหน่งเดียวกับคอม — ลาก/ซูมด้านล่างเพื่อเริ่มปรับแยก (คอมไม่เปลี่ยน)", "Currently uses the desktop position — drag/zoom below to start adjusting separately (desktop stays the same)")}</p>}
         </div>
       ) : (
-        split && <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">📲 มือถือปรับแยกไว้แล้ว — กด &quot;📲 มือถือ&quot; ด้านบนเพื่อแก้ของมือถือ</p>
+        split && <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">{t("📲 มือถือปรับแยกไว้แล้ว — กด \"📲 มือถือ\" ด้านบนเพื่อแก้ของมือถือ", "📲 Mobile is adjusted separately — click \"📲 Mobile\" above to edit it")}</p>
       )}
 
       <div className="flex gap-1.5">
         <button type="button" className={seg(cover)} onClick={() => set({ fit: "cover" })}>
-          เต็มผืน
+          {t("เต็มผืน", "Fill canvas")}
         </button>
         <button type="button" className={seg(!cover)} onClick={() => set({ fit: "contain" })}>
-          เห็นทั้งรูป
+          {t("เห็นทั้งรูป", "Show whole image")}
         </button>
       </div>
 
@@ -120,16 +122,16 @@ export function CanvasBgPositioner({
             box={box}
             value={value}
             onChange={(p) => set(p)}
-            label={mobile ? "📲 มือถือ" : "🖥 คอม"}
+            label={mobile ? t("📲 มือถือ", "📲 Mobile") : t("🖥 คอม", "🖥 Desktop")}
             tone={mobile ? "amber" : "white"}
             extraBox={!mobile && !split ? phone : null}
           />
           <p className="text-[10px] text-slate-500">
             {mobile
-              ? `ลากกรอบ (หรือคลิกตรงไหนของรูป) = ส่วนที่เห็นบนมือถือ${mobileCustomLayout ? "" : " · ผืนเรียงอัตโนมัติ: กรอบคิดจากจอโทรศัพท์ (สูงจริงตามจำนวนชิ้น)"}`
-              : "ลากกรอบขาว (หรือคลิกตรงไหนของรูป) = ส่วนที่เห็นบนจอคอม · เส้นประ = มือถือ (ถ้าไม่ปรับแยก)"}
+              ? t("ลากกรอบ (หรือคลิกตรงไหนของรูป) = ส่วนที่เห็นบนมือถือ", "Drag the box (or click anywhere on the image) = the part shown on mobile") + (mobileCustomLayout ? "" : t(" · ผืนเรียงอัตโนมัติ: กรอบคิดจากจอโทรศัพท์ (สูงจริงตามจำนวนชิ้น)", " · auto-stacked canvas: box based on a phone screen (real height depends on item count)"))
+              : t("ลากกรอบขาว (หรือคลิกตรงไหนของรูป) = ส่วนที่เห็นบนจอคอม · เส้นประ = มือถือ (ถ้าไม่ปรับแยก)", "Drag the white box (or click anywhere on the image) = the part shown on desktop · dashed line = mobile (if not adjusted separately)")}
           </p>
-          <Range label="ซูม" value={value.zoom} min={100} max={300} step={5} onChange={(z) => set({ zoom: z })} />
+          <Range label={t("ซูม", "Zoom")} value={value.zoom} min={100} max={300} step={5} onChange={(z) => set({ zoom: z })} />
         </>
       ) : (
         <>
@@ -141,17 +143,17 @@ export function CanvasBgPositioner({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imgUrl(imageKey, 600)} alt="" draggable={false} className="absolute inset-0 w-full h-full" style={{ objectFit: "contain", objectPosition: `${value.x}% ${value.y}%` }} />
           </div>
-          <p className="text-[10px] text-slate-500">เห็นทั้งรูป ไม่ถูกตัด · ที่ว่างรอบรูปเป็น &quot;สีพื้นผืน&quot; ด้านบน</p>
+          <p className="text-[10px] text-slate-500">{t("เห็นทั้งรูป ไม่ถูกตัด · ที่ว่างรอบรูปเป็น \"สีพื้นผืน\" ด้านบน", "Whole image, not cropped · space around it uses the \"Canvas background\" color above")}</p>
         </>
       )}
 
-      <Range label="ซ้าย ↔ ขวา" value={value.x} min={0} max={100} onChange={(x) => set({ x })} />
-      <Range label="บน ↕ ล่าง" value={value.y} min={0} max={100} onChange={(y) => set({ y })} />
+      <Range label={t("ซ้าย ↔ ขวา", "Left ↔ right")} value={value.x} min={0} max={100} onChange={(x) => set({ x })} />
+      <Range label={t("บน ↕ ล่าง", "Top ↕ bottom")} value={value.y} min={0} max={100} onChange={(y) => set({ y })} />
       <div className="flex items-center justify-between">
         <button type="button" className="text-[11px] text-slate-500 hover:text-blue-600" onClick={() => set({ x: 50, y: 50, zoom: 100 })}>
-          ↺ กลับกลางรูป
+          {t("↺ กลับกลางรูป", "↺ Recenter image")}
         </button>
-        {cover && <span className="text-[10px] text-slate-400">อยากเห็นรูปมากขึ้น = เพิ่ม &quot;ความสูงผืน&quot;</span>}
+        {cover && <span className="text-[10px] text-slate-400">{t("อยากเห็นรูปมากขึ้น = เพิ่ม \"ความสูงผืน\"", "To show more of the image, increase \"Canvas height\"")}</span>}
       </div>
     </div>
   );

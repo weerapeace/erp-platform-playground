@@ -29,6 +29,19 @@ import { WebsiteVideoField } from "@/components/website-video-field";
 import { ImageSizeNote } from "@/components/image-size-note";
 import { RangeInput } from "@/components/range-input";
 import { webForm } from "@/lib/website-form-styles";
+import { useT } from "@/components/i18n";
+import { labelEn } from "@/lib/website-schema-en";
+
+/** 🌐 ป้ายของช่อง (ไทยจาก schema) → แปลตอนวาด (โหมด EN) · ไม่แตะ key/ค่าเริ่มต้น */
+function fdEn(fd: FieldDef): FieldDef {
+  return {
+    ...fd,
+    label: labelEn(fd.label),
+    hint: labelEn(fd.hint),
+    placeholder: labelEn(fd.placeholder),
+    options: fd.options?.map((o) => ({ ...o, l: labelEn(o.l), hint: labelEn(o.hint) })),
+  };
+}
 
 export interface SchemaFormContext {
   shopSlug: string;
@@ -157,29 +170,31 @@ function SchemaFontField({ fd, value, onChange, ctx }: { fd: FieldDef; value: st
 }
 
 function LinkPair({ value, onChange, ctx }: { value: { text?: string; href?: string } | undefined; onChange: (v: { text: string; href: string }) => void; ctx: SchemaFormContext }) {
+  const t = useT();
   const v = value ?? { text: "", href: "" };
   return (
     <div className="space-y-1.5">
-      <input className={inputCls} placeholder="ข้อความปุ่ม (ว่าง = ไม่มีปุ่ม)" value={v.text ?? ""} onChange={(e) => onChange({ text: e.target.value, href: v.href ?? "" })} />
+      <input className={inputCls} placeholder={t("ข้อความปุ่ม (ว่าง = ไม่มีปุ่ม)", "Button text (empty = no button)")} value={v.text ?? ""} onChange={(e) => onChange({ text: e.target.value, href: v.href ?? "" })} />
       <LinkTargetPicker value={v.href ?? ""} onChange={(href) => onChange({ text: v.text ?? "", href })} ctx={ctx} />
     </div>
   );
 }
 
 function ListEditor({ items, placeholder, max, onChange }: { items: string[]; placeholder?: string; max?: number; onChange: (v: string[]) => void }) {
+  const t = useT();
   return (
     <div className="space-y-1.5">
       {items.map((it, i) => (
         <div key={i} className="flex gap-1.5">
           <input className={inputCls} value={it} placeholder={placeholder} onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))} />
-          <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="shrink-0 w-8 rounded-lg border border-slate-200 text-slate-400 hover:text-red-500 text-sm" title="ลบรายการนี้">
+          <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="shrink-0 w-8 rounded-lg border border-slate-200 text-slate-400 hover:text-red-500 text-sm" title={t("ลบรายการนี้", "Remove this item")}>
             ×
           </button>
         </div>
       ))}
       {(!max || items.length < max) && (
         <button type="button" onClick={() => onChange([...items, ""])} className="text-xs text-blue-600 hover:underline">
-          + เพิ่มรายการ
+          {t("+ เพิ่มรายการ", "+ Add item")}
         </button>
       )}
     </div>
@@ -188,6 +203,7 @@ function ListEditor({ items, placeholder, max, onChange }: { items: string[]; pl
 
 /** ช่อง crop: ลากกรอบเลือกส่วนที่เห็น + ซูม (ของกลาง ImageCropBox) — กรอบตามสัดส่วนที่ตั้งใน Section แม่ */
 function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
+  const t = useT();
   const key = fd.cropImage ? item?.[fd.cropImage] : null;
   // สัดส่วนกรอบ: จาก Section แม่ (ช่องในชิ้นย่อย) หรือจากตัวเอง (ช่องใน Section)
   const fromSec = fd.cropRatio ? parent?.[fd.cropRatio] ?? item?.[fd.cropRatio] : null;
@@ -196,16 +212,16 @@ function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value:
   const o = (value ?? {}) as Record<string, unknown>;
   const v = { x: Number(o.x ?? 50), y: Number(o.y ?? 50), zoom: Number(o.zoom ?? 100) };
   const m = /^(\d+):(\d+)$/.exec(ratio);
-  if (typeof key !== "string" || !key) return <Field label={fd.label} wide><p className="text-xs text-slate-400">เลือกรูปก่อน แล้วค่อยเลือกส่วนที่เห็น</p></Field>;
-  if (!m) return <Field label={fd.label} wide><p className="text-xs text-slate-400">สัดส่วน &quot;ตามรูปจริง&quot; = เห็นทั้งรูป ไม่ต้องเลือกส่วน</p></Field>;
+  if (typeof key !== "string" || !key) return <Field label={fd.label} wide><p className="text-xs text-slate-400">{t("เลือกรูปก่อน แล้วค่อยเลือกส่วนที่เห็น", "Pick an image first, then choose the visible area")}</p></Field>;
+  if (!m) return <Field label={fd.label} wide><p className="text-xs text-slate-400">{t('สัดส่วน "ตามรูปจริง" = เห็นทั้งรูป ไม่ต้องเลือกส่วน', 'Ratio "Original" = whole image shown, no area to choose')}</p></Field>;
   return (
-    <Field label={fd.label} hint="ลากกรอบ (หรือคลิกตรงไหนของรูป) = ส่วนที่โชว์บนเว็บ" wide>
+    <Field label={fd.label} hint={t("ลากกรอบ (หรือคลิกตรงไหนของรูป) = ส่วนที่โชว์บนเว็บ", "Drag the frame (or click anywhere on the image) = the part shown on the site")} wide>
       <div className="space-y-2">
         <ImageCropBox imageKey={key} box={{ w: Number(m[1]), h: Number(m[2]) }} value={v} onChange={(p) => onChange({ ...v, ...p })} />
         <CropZoom value={v.zoom} onChange={(z) => onChange({ ...v, zoom: z })} />
         {(v.x !== 50 || v.y !== 50 || v.zoom !== 100) && (
           <button type="button" className="text-[11px] text-slate-500 hover:text-blue-600" onClick={() => onChange({ x: 50, y: 50, zoom: 100 })}>
-            ↺ กลับกลางรูป
+            {t("↺ กลับกลางรูป", "↺ Back to center")}
           </button>
         )}
       </div>
@@ -215,6 +231,7 @@ function CropField({ fd, value, onChange, item, parent }: { fd: FieldDef; value:
 
 /** 📍 จุดบนรูป (ช่องชนิด point) — คลิกบนรูปของ Section แม่ (pointImage) เพื่อวางจุด · เก็บเป็น % */
 function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value: unknown; onChange: (v: unknown) => void; item?: Record<string, unknown>; parent?: Record<string, unknown> }) {
+  const t = useT();
   // ลุคที่ (pointLook) → รูป `${pointImage}${n}` ของ Section แม่ (ลุค 1 = pointImage เดิม)
   const look = fd.pointLook ? String(item?.[fd.pointLook] ?? "1") : "1";
   const imgKey = fd.pointImage ? (look !== "1" ? `${fd.pointImage}${look}` : fd.pointImage) : null;
@@ -243,7 +260,7 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
   if (typeof key !== "string" || !key)
     return (
       <Field label={fd.label} wide>
-        <p className="text-xs text-slate-400">{look !== "1" ? `ใส่ "รูปลุค ${look}" ของ Section ก่อน แล้วค่อยคลิกวางจุด` : "เลือกรูปของ Section ก่อน แล้วค่อยคลิกวางจุด"}</p>
+        <p className="text-xs text-slate-400">{look !== "1" ? t(`ใส่ "รูปลุค ${look}" ของ Section ก่อน แล้วค่อยคลิกวางจุด`, `Add "Look image ${look}" in the section first, then click to place the dot`) : t("เลือกรูปของ Section ก่อน แล้วค่อยคลิกวางจุด", "Pick the section image first, then click to place the dot")}</p>
       </Field>
     );
   const pick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -252,12 +269,12 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
     onChange({ x: round(((e.clientX - r.left) / r.width) * 100), y: round(((e.clientY - r.top) / r.height) * 100) });
   };
   return (
-    <Field label={fd.label} hint="คลิกบนรูปตรงตำแหน่งสินค้า = วางจุด (คลิกใหม่เพื่อย้าย)" wide>
+    <Field label={fd.label} hint={t("คลิกบนรูปตรงตำแหน่งสินค้า = วางจุด (คลิกใหม่เพื่อย้าย)", "Click the product on the image = place dot (click again to move)")} wide>
       <div className="relative inline-block max-w-full cursor-crosshair select-none rounded-lg overflow-hidden border border-slate-200" onClick={pick}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`/api/r2-image?key=${encodeURIComponent(key)}&w=800`} alt="" className="block max-h-72 w-auto max-w-full" draggable={false} />
         {siblings.map((p, i) => (
-          <span key={i} className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-white/70 border border-slate-500/60 pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title="จุดอื่น" />
+          <span key={i} className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-white/70 border border-slate-500/60 pointer-events-none" style={{ left: `${p.x}%`, top: `${p.y}%` }} title={t("จุดอื่น", "Other dot")} />
         ))}
         <span
           className="absolute w-6 h-6 -ml-3 -mt-3 rounded-full bg-white border-2 border-slate-900 shadow flex items-center justify-center pointer-events-none"
@@ -267,7 +284,7 @@ function PointField({ fd, value, onChange, item, parent }: { fd: FieldDef; value
         </span>
       </div>
       <p className="text-[11px] text-slate-500 mt-1">
-        ตำแหน่ง: ซ้าย {v.x}% · บน {v.y}%
+        {t("ตำแหน่ง: ซ้าย", "Position: left")} {v.x}% · {t("บน", "top")} {v.y}%
       </p>
     </Field>
   );
@@ -292,6 +309,7 @@ function SchemaBilingual({
   const en = englishValue(fd, item);
   const status = translationStatus(th, en, readMeta(item)[fd.key]);
   const tx = useTranslateOne();
+  const t = useT();
   const thList = Array.isArray(th) ? th : [];
   const enList = Array.isArray(en) ? en : [];
   const enStr = typeof en === "string" ? en : "";
@@ -307,7 +325,7 @@ function SchemaBilingual({
           ))}
         </div>
       ) : (
-        <p className="text-xs text-slate-400">ยังไม่มีรายการ — เพิ่มที่โหมดภาษาไทยก่อน</p>
+        <p className="text-xs text-slate-400">{t("ยังไม่มีรายการ — เพิ่มที่โหมดภาษาไทยก่อน", "No items yet — add them in Thai mode first")}</p>
       )
     ) : fd.type === "textarea" ? (
       <textarea className={inputCls} rows={fd.max && fd.max > 1000 ? 6 : 3} value={enStr} placeholder="English" maxLength={enMax} onChange={(e) => setEn(e.target.value)} />
@@ -324,7 +342,7 @@ function SchemaBilingual({
       thRef={Array.isArray(th) ? th.filter((x) => x.trim()).join("\n") : th}
       thNode={thNode}
       enNode={enNode}
-      enNote={fd.type === "link" ? "ลิงก์ปลายทางใช้ร่วมกับภาษาไทย" : fd.type === "list" ? "จำนวน/ลำดับรายการตามภาษาไทย" : undefined}
+      enNote={fd.type === "link" ? t("ลิงก์ปลายทางใช้ร่วมกับภาษาไทย", "Destination link is shared with Thai") : fd.type === "list" ? t("จำนวน/ลำดับรายการตามภาษาไทย", "Item count/order follows Thai") : undefined}
       busy={tx.busy}
       error={tx.error}
       onTranslate={() =>
@@ -338,7 +356,7 @@ function SchemaBilingual({
 }
 
 /** ช่องเดียวตาม schema */
-export function SchemaField(props: {
+export function SchemaField(rawProps: {
   fd: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
@@ -351,11 +369,14 @@ export function SchemaField(props: {
   onPatch?: (patch: Record<string, unknown>) => void;
 }) {
   const { enabled } = useContentLang();
+  const t = useT();
+  // 🌐 ป้าย/คำอธิบาย/ตัวเลือก แปลตอนวาด (โหมด EN) — ส่งต่อให้ช่องย่อยทุกตัว
+  const props = { ...rawProps, fd: fdEn(rawProps.fd) };
   const { fd, item, onPatch } = props;
   // 📂 หมวดที่โชว์ + รูปรายหมวด (แก้ 2 ช่องพร้อมกัน: cats + catImg) — ตัวเลือกหมวดของกลาง
   if (fd.type === "categories" && onPatch && item)
     return (
-      <FieldBox label={fd.label} hint={fd.hint ?? "ไม่เลือก = ทุกหมวด"} wide>
+      <FieldBox label={fd.label} hint={fd.hint ?? t("ไม่เลือก = ทุกหมวด", "None picked = all categories")} wide>
         <WebsiteCategoriesField shopSlug={props.ctx.shopSlug} categories={props.ctx.categories} value={Array.isArray(props.value) ? (props.value as string[]) : []} item={item} onPatch={onPatch} fieldKey={fd.key} />
       </FieldBox>
     );
@@ -441,13 +462,14 @@ function SchemaFieldInner({
   /** true = ช่องกรอกล้วน ไม่มีหัวข้อ/คำแนะนำ (widget 2 ภาษาวาดหัวให้เอง) */
   bare?: boolean;
 }) {
+  const t = useT();
   // ช่องข้อความใน widget 2 ภาษา: วาดเฉพาะช่องกรอก (หัวข้อ + ป้ายสถานะ + คำแนะนำ อยู่ใน BilingualField)
   const Field = bare ? BareField : FieldBox;
   if (fd.type === "crop") return <CropField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
   if (fd.type === "point") return <PointField fd={fd} value={value} onChange={onChange} item={item} parent={parent} />;
   if (fd.type === "datetime")
     return (
-      <Field label={fd.label} hint={fd.hint ?? "เวลาไทย · พิมพ์เวลาแบบ 24 ชม. เช่น 20:00"} wide={fd.wide}>
+      <Field label={fd.label} hint={fd.hint ?? t("เวลาไทย · พิมพ์เวลาแบบ 24 ชม. เช่น 20:00", "Thai time · 24-hour format, e.g. 20:00")} wide={fd.wide}>
         <ERPDateTime24 value={typeof value === "string" ? value : ""} onChange={(v) => onChange(v)} defaultTime="00:00" />
       </Field>
     );
@@ -477,12 +499,12 @@ function SchemaFieldInner({
             rows={14}
             spellCheck={false}
             value={s}
-            placeholder={fd.placeholder ?? "<style>\n  .promo { padding: 40px; text-align: center; }\n</style>\n<section class=\"promo\">\n  <h2>หัวข้อ</h2>\n</section>"}
+            placeholder={fd.placeholder ?? `<style>\n  .promo { padding: 40px; text-align: center; }\n</style>\n<section class="promo">\n  <h2>${t("หัวข้อ", "Title")}</h2>\n</section>`}
             maxLength={fd.max}
             onChange={(e) => onChange(e.target.value)}
           />
           <p className="mt-1 text-[11px] text-slate-400">
-            {s.length.toLocaleString()} / {(fd.max ?? 40000).toLocaleString()} ตัวอักษร · script/iframe/onclick จะถูกถอดอัตโนมัติตอนบันทึก
+            {s.length.toLocaleString()} / {(fd.max ?? 40000).toLocaleString()} {t("ตัวอักษร · script/iframe/onclick จะถูกถอดอัตโนมัติตอนบันทึก", "characters · script/iframe/onclick are stripped automatically on save")}
           </p>
         </Field>
       );
@@ -609,7 +631,7 @@ function SchemaFieldInner({
         <div className={fd.wide !== false ? "sm:col-span-2" : ""}>
           <ImageUploadField label={fd.label} hint={fd.hint} value={(value as string | null) ?? null} onChange={(k) => onChange(k)} height={80} removeBg={fd.removeBg} />
           {/* 📏 ขนาดจริงของรูป + เตือนเมื่อเล็กไป (ช่องที่ตั้ง minPx เช่น รูปสไลด์/แบนเนอร์เต็มจอ) */}
-          {fd.minPx ? <ImageSizeNote imageKey={(value as string | null) ?? null} minPx={fd.minPx} what={fd.minPx >= 2000 ? "แสดงเต็มจอคอม" : "จอมือถือ"} /> : null}
+          {fd.minPx ? <ImageSizeNote imageKey={(value as string | null) ?? null} minPx={fd.minPx} what={fd.minPx >= 2000 ? t("แสดงเต็มจอคอม", "full desktop screen") : t("จอมือถือ", "phone screen")} /> : null}
         </div>
       );
     case "videoFile":
@@ -652,7 +674,7 @@ function SchemaFieldInner({
       // หลายหมวด เรียงตามลำดับที่กด · ไม่เลือก = ทุกหมวด
       const cur = Array.isArray(value) ? (value as string[]) : [];
       return (
-        <Field label={fd.label} hint={fd.hint ?? "ไม่เลือก = ทุกหมวด"} wide>
+        <Field label={fd.label} hint={fd.hint ?? t("ไม่เลือก = ทุกหมวด", "None picked = all categories")} wide>
           {ctx.categories.length ? (
             <div className="flex flex-wrap gap-1.5">
               {ctx.categories.map((c) => {
@@ -671,16 +693,16 @@ function SchemaFieldInner({
               })}
             </div>
           ) : (
-            <p className="text-xs text-slate-400">ร้านนี้ยังไม่มีหมวด — ตั้งที่แท็บ 📂 หมวดหมู่</p>
+            <p className="text-xs text-slate-400">{t("ร้านนี้ยังไม่มีหมวด — ตั้งที่แท็บ 📂 หมวดหมู่", "This shop has no categories yet — set them in the 📂 Categories tab")}</p>
           )}
         </Field>
       );
     }
     case "category":
       return (
-        <Field label={fd.label} hint={fd.hint ?? "รายการหมวดตั้งที่แท็บ ⚙️ จับคู่ฟิลด์"} wide={fd.wide}>
+        <Field label={fd.label} hint={fd.hint ?? t("รายการหมวดตั้งที่แท็บ ⚙️ จับคู่ฟิลด์", "Category list is set in the ⚙️ Field mapping tab")} wide={fd.wide}>
           <select className={inputCls} value={s} onChange={(e) => onChange(e.target.value)}>
-            <option value="">— เลือกหมวด —</option>
+            <option value="">{t("— เลือกหมวด —", "— Pick a category —")}</option>
             {ctx.categories.map((c) => (
               <option key={c.key} value={c.key}>{categoryChoiceLabel(c)}</option>
             ))}
@@ -714,6 +736,7 @@ export function SchemaForm({
   /** key ของช่องที่ขึ้นจุดส้ม "แก้แล้ว" (หน้าใหญ่) */
   marks?: Set<string>;
 }) {
+  const t = useT();
   // showIfParent = ช่องของชิ้นย่อยที่โชว์ตามค่าของ Section แม่ (เช่น "อยู่ลุคที่" เฉพาะลุคบุ๊กแบบหลายลุค)
   const visible = useMemo(
     () => fields.filter((fd) => !fd.hidden && matchShowIf(fd, value) && (!fd.showIfParent || matchShowIf({ ...fd, showIf: fd.showIfParent }, parent ?? {}))),
@@ -728,19 +751,19 @@ export function SchemaForm({
     return GROUP_ORDER.filter((g) => map.has(g)).map((g) => [g, map.get(g)!] as const);
   }, [visible]);
 
-  if (!visible.length) return <p className="text-xs text-slate-400 py-2">บล็อกนี้ไม่มีค่าให้ตั้ง</p>;
+  if (!visible.length) return <p className="text-xs text-slate-400 py-2">{t("บล็อกนี้ไม่มีค่าให้ตั้ง", "This block has no settings")}</p>;
 
   return (
     <div className="space-y-4">
       {groups.map(([g, list]) => (
         <section key={g}>
           {!compact && groups.length > 1 && (
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">{FIELD_GROUP_LABEL[g]}</p>
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">{labelEn(FIELD_GROUP_LABEL[g])}</p>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             {list.map((fd) =>
               marks?.has(fd.key) ? (
-                <div key={fd.key} className={MARK_CLS} title="แก้จากค่าเริ่มแล้ว">
+                <div key={fd.key} className={MARK_CLS} title={t("แก้จากค่าเริ่มแล้ว", "Changed from default")}>
                   <SchemaField fd={fd} value={value[fd.key]} onChange={(v) => onChange({ [fd.key]: v })} onPatch={onChange} ctx={ctx} item={value} parent={parent} />
                 </div>
               ) : (

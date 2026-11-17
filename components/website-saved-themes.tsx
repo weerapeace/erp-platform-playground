@@ -12,8 +12,15 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { SAVED_THEME_SCOPES, savedThemeSwatch, type SavedTheme, type SavedThemeScope } from "@/lib/website-saved-themes";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 const API = "/api/website/saved-themes";
+/** คำอังกฤษของตัวเลือก "บันทึกอะไรบ้าง" (ป้ายไทยอยู่ใน lib/website-saved-themes) */
+const SCOPE_EN: Record<SavedThemeScope, { label: string; hint: string }> = {
+  full: { label: "Full look", hint: "Colors, fonts, typography, buttons/shape, product card, header, product page look" },
+  colors: { label: "Colors only", hint: "Main + fine colors (buttons, borders, links, prices, stock) + sale badge color" },
+};
 
 function SaveThemeDialog({
   open,
@@ -31,6 +38,7 @@ function SaveThemeDialog({
   onSaved: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [name, setName] = useState("");
   const [scope, setScope] = useState<SavedThemeScope>("full");
   const [busy, setBusy] = useState(false);
@@ -52,14 +60,14 @@ function SaveThemeDialog({
       });
       const j = await r.json();
       if (!j.ok) {
-        toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        toast.error(j.error ?? tr("บันทึกไม่สำเร็จ", "Save failed"));
         return;
       }
-      toast.success(rename ? "แก้ชื่อธีมแล้ว" : `บันทึกธีม “${n}” แล้ว — ใช้ได้ทุกร้าน`);
+      toast.success(rename ? tr("แก้ชื่อธีมแล้ว", "Theme renamed") : tr(`บันทึกธีม “${n}” แล้ว — ใช้ได้ทุกร้าน`, `Theme “${n}” saved — usable in every shop`));
       onSaved();
       onClose();
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
     }
@@ -69,22 +77,22 @@ function SaveThemeDialog({
     <ERPModal
       open={open}
       onClose={onClose}
-      title={rename ? "แก้ชื่อธีม" : "💾 บันทึกธีมนี้"}
-      description={rename ? undefined : "เก็บหน้าตาที่ปรับไว้ (รวมค่าที่ยังไม่เผยแพร่) ไว้ใช้ซ้ำ หรือใช้กับร้านอื่น — ไม่เก็บโลโก้ เมนู ท้ายเว็บ และเนื้อหาร้าน"}
+      title={rename ? t("แก้ชื่อธีม", "Rename theme") : t("💾 บันทึกธีมนี้", "💾 Save this theme")}
+      description={rename ? undefined : t("เก็บหน้าตาที่ปรับไว้ (รวมค่าที่ยังไม่เผยแพร่) ไว้ใช้ซ้ำ หรือใช้กับร้านอื่น — ไม่เก็บโลโก้ เมนู ท้ายเว็บ และเนื้อหาร้าน", "Keep this look (including unpublished changes) to reuse or use in another shop — logo, menu, footer and shop content aren't saved")}
       size="sm"
       defaultExpanded={false}
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button type="button" onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">
-            ยกเลิก
+            {t("ยกเลิก", "Cancel")}
           </button>
           <button type="button" disabled={busy || !name.trim()} onClick={() => void save()} className="h-9 px-4 text-sm font-medium text-white rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
-            {busy ? "กำลังบันทึก…" : rename ? "บันทึกชื่อ" : "💾 บันทึกธีม"}
+            {busy ? t("กำลังบันทึก…", "Saving…") : rename ? t("บันทึกชื่อ", "Save name") : t("💾 บันทึกธีม", "💾 Save theme")}
           </button>
         </div>
       }
     >
-      <label className="block text-[11px] font-medium text-slate-500 mb-1">ชื่อธีม</label>
+      <label className="block text-[11px] font-medium text-slate-500 mb-1">{t("ชื่อธีม", "Theme name")}</label>
       <input
         autoFocus
         className="w-full h-9 rounded-lg border border-slate-200 px-3 text-sm"
@@ -94,17 +102,17 @@ function SaveThemeDialog({
         onKeyDown={(e) => {
           if (e.key === "Enter") void save();
         }}
-        placeholder="เช่น ธีมปีใหม่ ทองแดง"
+        placeholder={t("เช่น ธีมปีใหม่ ทองแดง", "e.g. New Year copper theme")}
       />
       {!rename && (
         <div className="mt-3 grid gap-2">
-          <span className="block text-[11px] font-medium text-slate-500">บันทึกอะไรบ้าง</span>
+          <span className="block text-[11px] font-medium text-slate-500">{t("บันทึกอะไรบ้าง", "What to save")}</span>
           {SAVED_THEME_SCOPES.map((o) => (
             <label key={o.value} className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer ${scope === o.value ? "border-blue-500 bg-blue-50/50" : "border-slate-200 hover:border-slate-400"}`}>
               <input type="radio" name="saved-theme-scope" className="mt-0.5" checked={scope === o.value} onChange={() => setScope(o.value)} />
               <span>
-                <span className="block text-sm text-slate-800">{o.label}</span>
-                <span className="block text-[11px] text-slate-500">{o.hint}</span>
+                <span className="block text-sm text-slate-800">{t(o.label, SCOPE_EN[o.value]?.label ?? o.label)}</span>
+                <span className="block text-[11px] text-slate-500">{t(o.hint, SCOPE_EN[o.value]?.hint ?? o.hint)}</span>
               </span>
             </label>
           ))}
@@ -132,6 +140,7 @@ function ThemeSwatch({ theme, scope }: { theme: unknown; scope: SavedThemeScope 
 
 export function SavedThemesCard({ shopId, theme, onApply }: { shopId: string; theme: unknown; onApply: (saved: SavedTheme) => void }) {
   const toast = useToast();
+  const t = useT();
   const [list, setList] = useState<SavedTheme[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [renaming, setRenaming] = useState<SavedTheme | null>(null);
@@ -153,14 +162,14 @@ export function SavedThemesCard({ shopId, theme, onApply }: { shopId: string; th
     try {
       const r = await apiFetch(`${API}?id=${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
       const j = await r.json();
-      if (!j.ok) toast.error(j.error ?? "ลบไม่สำเร็จ");
+      if (!j.ok) toast.error(j.error ?? tr("ลบไม่สำเร็จ", "Delete failed"));
       else {
-        toast.success("ลบธีมแล้ว — ร้านที่เคยใช้ไปแล้วไม่กระทบ");
+        toast.success(tr("ลบธีมแล้ว — ร้านที่เคยใช้ไปแล้วไม่กระทบ", "Theme deleted — shops already using it aren't affected"));
         setDeleting(null);
         load();
       }
     } catch {
-      toast.error("เชื่อมต่อไม่ได้");
+      toast.error(tr("เชื่อมต่อไม่ได้", "Connection failed"));
     } finally {
       setBusy(false);
     }
@@ -169,33 +178,33 @@ export function SavedThemesCard({ shopId, theme, onApply }: { shopId: string; th
   const mine = (list ?? []).filter((t) => t.shopId === shopId);
   const other = (list ?? []).filter((t) => t.shopId !== shopId);
 
-  const item = (t: SavedTheme) => (
-    <div key={t.id} className="group rounded-xl border border-slate-200 p-2 hover:border-slate-400">
-      <ThemeSwatch theme={t.theme} scope={t.scope} />
+  const item = (th: SavedTheme) => (
+    <div key={th.id} className="group rounded-xl border border-slate-200 p-2 hover:border-slate-400">
+      <ThemeSwatch theme={th.theme} scope={th.scope} />
       <div className="mt-1.5 flex items-start gap-1">
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-slate-800 truncate" title={t.name}>{t.name}</p>
+          <p className="text-sm text-slate-800 truncate" title={th.name}>{th.name}</p>
           <p className="text-[10px] text-slate-400 truncate">
-            {t.scope === "full" ? "ทั้งชุดหน้าตา" : "เฉพาะสี"}
-            {t.shopId !== shopId && ` · จากร้าน ${t.shopName ?? "อื่น"}`}
+            {th.scope === "full" ? t("ทั้งชุดหน้าตา", "Full look") : t("เฉพาะสี", "Colors only")}
+            {th.shopId !== shopId && (th.shopName ? ` · ${t("จากร้าน", "from shop")} ${th.shopName}` : ` · ${t("จากร้านอื่น", "from another shop")}`)}
           </p>
         </div>
-        <button type="button" onClick={() => setRenaming(t)} title="แก้ชื่อ" className="w-6 h-6 text-[11px] text-slate-400 hover:text-slate-800 opacity-60 group-hover:opacity-100">
+        <button type="button" onClick={() => setRenaming(th)} title={t("แก้ชื่อ", "Rename")} className="w-6 h-6 text-[11px] text-slate-400 hover:text-slate-800 opacity-60 group-hover:opacity-100">
           ✏️
         </button>
-        <button type="button" onClick={() => setDeleting(t)} title="ลบธีม" className="w-6 h-6 text-[11px] text-slate-400 hover:text-red-600 opacity-60 group-hover:opacity-100">
+        <button type="button" onClick={() => setDeleting(th)} title={t("ลบธีม", "Delete theme")} className="w-6 h-6 text-[11px] text-slate-400 hover:text-red-600 opacity-60 group-hover:opacity-100">
           🗑️
         </button>
       </div>
       <button
         type="button"
         onClick={() => {
-          onApply(t);
-          toast.success(`ใช้ธีม "${t.name}" แล้ว — ยังไม่ขึ้นเว็บจนกดเผยแพร่ · กด ↶ เพื่อย้อนกลับ`);
+          onApply(th);
+          toast.success(t(`ใช้ธีม "${th.name}" แล้ว — ยังไม่ขึ้นเว็บจนกดเผยแพร่ · กด ↶ เพื่อย้อนกลับ`, `Theme "${th.name}" applied — not live until you publish · press ↶ to undo`));
         }}
         className="mt-1.5 w-full h-8 rounded-lg border border-blue-200 text-xs font-medium text-blue-700 hover:bg-blue-50"
       >
-        ใช้ธีมนี้
+        {t("ใช้ธีมนี้", "Use this theme")}
       </button>
     </div>
   );
@@ -203,21 +212,21 @@ export function SavedThemesCard({ shopId, theme, onApply }: { shopId: string; th
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between gap-2 mb-1">
-        <h3 className="text-sm font-semibold text-slate-800">💾 ธีมที่บันทึกไว้</h3>
+        <h3 className="text-sm font-semibold text-slate-800">{t("💾 ธีมที่บันทึกไว้", "💾 Saved themes")}</h3>
         <button type="button" onClick={() => setSaving(true)} className="shrink-0 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
-          💾 บันทึกธีมนี้
+          {t("💾 บันทึกธีมนี้", "💾 Save this theme")}
         </button>
       </div>
-      <p className="text-[11px] text-slate-500 mb-3">เก็บหน้าตาที่ปรับไว้ใช้ซ้ำ หรือเอาไปใช้กับร้านอื่น — ใช้แล้วไม่แตะโลโก้/เมนู/ท้ายเว็บ/เนื้อหาร้าน · ↶ ย้อนได้ก่อนบันทึก</p>
+      <p className="text-[11px] text-slate-500 mb-3">{t("เก็บหน้าตาที่ปรับไว้ใช้ซ้ำ หรือเอาไปใช้กับร้านอื่น — ใช้แล้วไม่แตะโลโก้/เมนู/ท้ายเว็บ/เนื้อหาร้าน · ↶ ย้อนได้ก่อนบันทึก", "Keep this look to reuse or use in another shop — applying doesn't touch logo/menu/footer/shop content · ↶ undo before saving")}</p>
       {list === null ? (
-        <p className="text-xs text-slate-400">กำลังโหลด…</p>
+        <p className="text-xs text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>
       ) : !list.length ? (
-        <p className="text-xs text-slate-400 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center">ยังไม่มีธีมที่บันทึกไว้ — ปรับหน้าตาจนพอใจแล้วกด “💾 บันทึกธีมนี้”</p>
+        <p className="text-xs text-slate-400 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center">{t("ยังไม่มีธีมที่บันทึกไว้ — ปรับหน้าตาจนพอใจแล้วกด “💾 บันทึกธีมนี้”", "No saved themes yet — adjust the look, then click “💾 Save this theme”")}</p>
       ) : (
         <>
           {mine.length > 0 && (
             <>
-              <p className="text-[10px] font-medium text-slate-500 mb-1">ร้านนี้</p>
+              <p className="text-[10px] font-medium text-slate-500 mb-1">{t("ร้านนี้", "This shop")}</p>
               <div className="grid gap-2 grid-cols-2 lg:grid-cols-4">
                 {mine.map(item)}
               </div>
@@ -226,7 +235,7 @@ export function SavedThemesCard({ shopId, theme, onApply }: { shopId: string; th
           {other.length > 0 && (
             <div className={mine.length ? "mt-3" : ""}>
               <button type="button" onClick={() => setShowOther((v) => !v)} className="text-[11px] font-medium text-slate-500 hover:text-slate-800 mb-1">
-                {showOther || !mine.length ? "▾" : "▸"} จากร้านอื่น ({other.length})
+                {showOther || !mine.length ? "▾" : "▸"} {t("จากร้านอื่น", "From other shops")} ({other.length})
               </button>
               {(showOther || !mine.length) && (
                 <div className="grid gap-2 grid-cols-2 lg:grid-cols-4">
@@ -245,9 +254,9 @@ export function SavedThemesCard({ shopId, theme, onApply }: { shopId: string; th
         onConfirm={() => void remove()}
         loading={busy}
         variant="danger"
-        title={`ลบธีม “${deleting?.name ?? ""}”?`}
-        message="ร้านที่เคยใช้ธีมนี้ไปแล้วจะไม่เปลี่ยน (ค่าถูกคัดลอกไปแล้ว) — ลบแล้วธีมนี้จะหายจากรายการทุกร้าน"
-        confirmText="ลบธีม"
+        title={t(`ลบธีม “${deleting?.name ?? ""}”?`, `Delete theme “${deleting?.name ?? ""}”?`)}
+        message={t("ร้านที่เคยใช้ธีมนี้ไปแล้วจะไม่เปลี่ยน (ค่าถูกคัดลอกไปแล้ว) — ลบแล้วธีมนี้จะหายจากรายการทุกร้าน", "Shops already using this theme won't change (values were copied) — it will disappear from the list for every shop")}
+        confirmText={t("ลบธีม", "Delete theme")}
       />
     </div>
   );

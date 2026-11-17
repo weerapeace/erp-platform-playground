@@ -19,12 +19,15 @@ import { RATIO_CSS } from "./sample-card";
 import { keyUrl } from "@/components/website-theme-media";
 import { contrastRatio } from "@/lib/color-utils";
 import { useDesign } from "./context";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
+import { labelEn } from "@/lib/website-admin-en";
 
 type PageKey = Exclude<DesignPageKey, "overview">;
 
-const labelOf = <T,>(list: { value: T; label: string }[] | undefined, v: T) => list?.find((o) => o.value === v)?.label ?? String(v);
-const TRANSITION_LABEL: Record<string, string> = { fade: "จางเปลี่ยนหน้า", rise: "เลื่อนขึ้น", curtain: "ม่านสีแบรนด์", logo: "โลโก้วาบ", zoom: "ซูมเข้า", none: "ไม่มีเอฟเฟกต์" };
-const CHECKOUT_LAYOUT_LABEL: Record<string, string> = { right: "สรุปอยู่ขวา", left: "สรุปอยู่ซ้าย", top: "สรุปอยู่บน" };
+const labelOf = <T,>(list: { value: T; label: string }[] | undefined, v: T) => labelEn(list?.find((o) => o.value === v)?.label ?? String(v));
+const transitionLabel = (): Record<string, string> => ({ fade: tr("จางเปลี่ยนหน้า", "Fade"), rise: tr("เลื่อนขึ้น", "Rise"), curtain: tr("ม่านสีแบรนด์", "Brand curtain"), logo: tr("โลโก้วาบ", "Logo flash"), zoom: tr("ซูมเข้า", "Zoom in"), none: tr("ไม่มีเอฟเฟกต์", "No effect") });
+const checkoutLayoutLabel = (): Record<string, string> => ({ right: tr("สรุปอยู่ขวา", "Summary on right"), left: tr("สรุปอยู่ซ้าย", "Summary on left"), top: tr("สรุปอยู่บน", "Summary on top") });
 const Swatch = ({ c }: { c: string }) => <span className="inline-block w-3 h-3 rounded border border-black/10 align-middle" style={{ background: c }} />;
 
 /** สรุปค่าปัจจุบันของแต่ละหน้า (บรรทัดเดียว) */
@@ -37,7 +40,7 @@ function pageSummary(k: PageKey, theme: Theme, choices: Choices, extra: { schedu
           <Swatch c={theme.colors.brand} />
           <Swatch c={theme.colors.ink} />
           <Swatch c={theme.colors.page} />
-          <span className="ml-1">{preset ? preset.label : "สีของร้าน"}</span>
+          <span className="ml-1">{preset ? labelEn(preset.label) : tr("สีของร้าน", "Shop colors")}</span>
         </span>
       );
     }
@@ -46,39 +49,39 @@ function pageSummary(k: PageKey, theme: Theme, choices: Choices, extra: { schedu
     case "shape":
       return labelOf(choices.radius, theme.radius);
     case "motion":
-      return `${TRANSITION_LABEL[theme.page.transition] ?? theme.page.transition}${theme.page.smoothScroll ? " · เลื่อนนุ่ม" : ""}`;
+      return `${transitionLabel()[theme.page.transition] ?? theme.page.transition}${theme.page.smoothScroll ? tr(" · เลื่อนนุ่ม", " · Smooth scroll") : ""}`;
     case "mobile":
-      return `แถบล่าง ${theme.page.mobileNav.items.length} ปุ่ม`;
+      return tr(`แถบล่าง ${theme.page.mobileNav.items.length} ปุ่ม`, `Bottom bar ${theme.page.mobileNav.items.length} buttons`);
     case "logo":
-      return `${labelOf(choices.logoModes, theme.logo.mode)} · สูง ${theme.logo.height}px`;
+      return `${labelOf(choices.logoModes, theme.logo.mode)} · ${tr("สูง", "height")} ${theme.logo.height}px`;
     case "header":
-      return `${labelOf(choices.headerBg, theme.header.bg)} · สูง ${theme.header.height}px${theme.header.sticky ? " · ตรึงด้านบน" : ""}`;
+      return `${labelOf(choices.headerBg, theme.header.bg)} · ${tr("สูง", "height")} ${theme.header.height}px${theme.header.sticky ? tr(" · ตรึงด้านบน", " · Sticky") : ""}`;
     case "menu": {
       const items = theme.menu.items;
-      if (!items) return "เมนูอัตโนมัติ";
+      if (!items) return tr("เมนูอัตโนมัติ", "Auto menu");
       const panels = items.filter((i) => i.panel || i.mega).length;
-      return `${items.length} เมนู${panels ? ` · แผงใหญ่ ${panels}` : ""}`;
+      return tr(`${items.length} เมนู${panels ? ` · แผงใหญ่ ${panels}` : ""}`, `${items.length} menus${panels ? ` · ${panels} mega panels` : ""}`);
     }
     case "footer":
-      return theme.footer.columns ? `${theme.footer.columns.length} คอลัมน์` : "คอลัมน์อัตโนมัติ";
+      return theme.footer.columns ? tr(`${theme.footer.columns.length} คอลัมน์`, `${theme.footer.columns.length} columns`) : tr("คอลัมน์อัตโนมัติ", "Auto columns");
     case "card":
-      return `${labelOf(choices.cardPresets, theme.card.preset)} · รูป ${theme.card.imageRatio}`;
+      return `${labelOf(choices.cardPresets, theme.card.preset)} · ${tr("รูป", "image")} ${theme.card.imageRatio}`;
     case "listing":
-      return `${theme.listing.pageSize} ชิ้นต่อหน้า`;
+      return tr(`${theme.listing.pageSize} ชิ้นต่อหน้า`, `${theme.listing.pageSize} per page`);
     case "product":
       return `Style ${labelOf(choices.productLayouts, theme.product.layout)}`;
     case "related":
-      return theme.product.hidden.includes("related") ? "ปิด “คุณอาจชอบ”" : "เปิด “คุณอาจชอบ”";
+      return theme.product.hidden.includes("related") ? tr("ปิด “คุณอาจชอบ”", "“You may like” off") : tr("เปิด “คุณอาจชอบ”", "“You may like” on");
     case "cart":
-      return `${labelOf(CART_STYLES, theme.cart.style)}${theme.cart.freeShip ? " · แถบส่งฟรี" : ""}`;
+      return `${labelOf(CART_STYLES, theme.cart.style)}${theme.cart.freeShip ? tr(" · แถบส่งฟรี", " · Free-shipping bar") : ""}`;
     case "checkout":
-      return CHECKOUT_LAYOUT_LABEL[theme.checkout.layout] ?? theme.checkout.layout;
+      return checkoutLayoutLabel()[theme.checkout.layout] ?? theme.checkout.layout;
     case "pages":
-      return "404 · ขอบคุณ · ป๊อปอัป · เข้าสู่ระบบ";
+      return tr("404 · ขอบคุณ · ป๊อปอัป · เข้าสู่ระบบ", "404 · Thank you · Popup · Sign in");
     case "campaign":
-      return extra.schedules ? `${extra.schedules} รายการรอทำงาน` : "ยังไม่มีตั้งเวลา/แคมเปญ";
+      return extra.schedules ? tr(`${extra.schedules} รายการรอทำงาน`, `${extra.schedules} scheduled`) : tr("ยังไม่มีตั้งเวลา/แคมเปญ", "No schedules/campaigns yet");
     case "history":
-      return extra.lastVersion ? `ล่าสุด เวอร์ชัน ${extra.lastVersion.version_no} · ${timeAgo(extra.lastVersion.created_at)}` : "ยังไม่เคยเผยแพร่";
+      return extra.lastVersion ? tr(`ล่าสุด เวอร์ชัน ${extra.lastVersion.version_no} · ${timeAgo(extra.lastVersion.created_at)}`, `Latest: version ${extra.lastVersion.version_no} · ${timeAgo(extra.lastVersion.created_at)}`) : tr("ยังไม่เคยเผยแพร่", "Never published");
   }
 }
 
@@ -98,34 +101,35 @@ export function DesignOverview({
   onEnglish: () => void;
 }) {
   const { theme, choices, schedules, sampleItems } = useDesign();
+  const t = useT();
   const failCount = useMemo(() => colorChecks(theme).filter((c) => c.level === "fail").length, [theme]);
   const enMissing = useMemo(() => coverageOf(collectTextPaths(theme, THEME_TEXT_KEYS)).missing, [theme]);
   const pending = (schedules ?? []).filter((s) => s.status === "pending").length;
   const todos: { key: string; text: string; tone: "warn" | "en"; onClick: () => void }[] = [];
-  if (failCount) todos.push({ key: "wcag", text: `ข้อความอ่านยาก ${failCount} คู่สี`, tone: "warn", onClick: () => onGo("colors", "ตรวจความอ่านง่าย (WCAG)") });
-  if (!theme.logo.faviconKey) todos.push({ key: "favicon", text: "ยังไม่มีไอคอนแท็บเบราว์เซอร์ (Favicon)", tone: "warn", onClick: () => onGo("logo", "รูปโลโก้ & ไอคอน") });
-  if (enMissing) todos.push({ key: "en", text: `ข้อความภาษาอังกฤษยังขาด ${enMissing} ช่อง`, tone: "en", onClick: onEnglish });
+  if (failCount) todos.push({ key: "wcag", text: t(`ข้อความอ่านยาก ${failCount} คู่สี`, `Hard-to-read text: ${failCount} color pairs`), tone: "warn", onClick: () => onGo("colors", "ตรวจความอ่านง่าย (WCAG)") });
+  if (!theme.logo.faviconKey) todos.push({ key: "favicon", text: t("ยังไม่มีไอคอนแท็บเบราว์เซอร์ (Favicon)", "No browser tab icon (favicon) yet"), tone: "warn", onClick: () => onGo("logo", "รูปโลโก้ & ไอคอน") });
+  if (enMissing) todos.push({ key: "en", text: t(`ข้อความภาษาอังกฤษยังขาด ${enMissing} ช่อง`, `English text missing in ${enMissing} fields`), tone: "en", onClick: onEnglish });
 
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
         <div>
           <p className="text-sm font-semibold text-slate-800">
-            {dirty.length ? `แก้แล้ว ${dirty.length} หัวข้อ ยังไม่บันทึก` : hadDraft ? "มีร่างที่ยังไม่เผยแพร่" : "เผยแพร่ล่าสุดแล้ว ไม่มีอะไรค้าง"}
+            {dirty.length ? t(`แก้แล้ว ${dirty.length} หัวข้อ ยังไม่บันทึก`, `${dirty.length} sections edited, not saved`) : hadDraft ? t("มีร่างที่ยังไม่เผยแพร่", "Unpublished draft") : t("เผยแพร่ล่าสุดแล้ว ไม่มีอะไรค้าง", "Published, nothing pending")}
           </p>
-          <p className="text-xs text-slate-500">{lastVersion ? `เว็บจริงใช้เวอร์ชัน ${lastVersion.version_no} · ${timeAgo(lastVersion.created_at)}` : "ยังไม่เคยเผยแพร่"}</p>
+          <p className="text-xs text-slate-500">{lastVersion ? t(`เว็บจริงใช้เวอร์ชัน ${lastVersion.version_no} · ${timeAgo(lastVersion.created_at)}`, `Live site uses version ${lastVersion.version_no} · ${timeAgo(lastVersion.created_at)}`) : t("ยังไม่เคยเผยแพร่", "Never published")}</p>
         </div>
         {todos.length > 0 && (
           <div className="flex flex-wrap gap-1.5" data-design-todos>
-            {todos.map((t) => (
+            {todos.map((td) => (
               <button
-                key={t.key}
+                key={td.key}
                 type="button"
-                onClick={t.onClick}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${t.tone === "warn" ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-400" : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-400"}`}
+                onClick={td.onClick}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${td.tone === "warn" ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-400" : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-400"}`}
               >
-                <Icon name={t.tone === "warn" ? "warning" : "web"} />
-                {t.text}
+                <Icon name={td.tone === "warn" ? "warning" : "web"} />
+                {td.text}
               </button>
             ))}
           </div>
@@ -138,8 +142,8 @@ export function DesignOverview({
           <section key={g.key} className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-design-group={g.key}>
             <button type="button" onClick={() => onGo(g.pages[0])} className="w-full flex items-center gap-1.5 px-3.5 pt-3 pb-2 text-left text-xs font-semibold text-slate-500 hover:text-slate-800">
               <Icon name={g.icon} />
-              {g.label}
-              {g.pages.some((k) => dirty.includes(k)) && <span className="ml-1 w-2 h-2 rounded-full bg-amber-500" title="มีหัวข้อที่แก้แล้ว ยังไม่บันทึก" />}
+              {labelEn(g.label)}
+              {g.pages.some((k) => dirty.includes(k)) && <span className="ml-1 w-2 h-2 rounded-full bg-amber-500" title={t("มีหัวข้อที่แก้แล้ว ยังไม่บันทึก", "Has edited sections not saved")} />}
             </button>
             <GroupPreview group={g.key} theme={theme} sampleItems={sampleItems} onGo={onGo} />
             <div className="mt-1">
@@ -151,9 +155,9 @@ export function DesignOverview({
                   data-design-tile={k}
                   className="w-full flex items-center gap-2 px-3.5 py-1.5 border-t border-slate-100 text-left hover:bg-slate-50"
                 >
-                  <span className="text-sm font-medium text-slate-800 whitespace-nowrap">{DESIGN_PAGES[k].label}</span>
+                  <span className="text-sm font-medium text-slate-800 whitespace-nowrap">{labelEn(DESIGN_PAGES[k].label)}</span>
                   <span className="ml-auto min-w-0 truncate text-xs text-slate-500 text-right">{pageSummary(k, theme, choices, { schedules: pending, lastVersion })}</span>
-                  {dirty.includes(k) && <span className="w-2 h-2 shrink-0 rounded-full bg-amber-500" title="แก้แล้ว ยังไม่บันทึก" />}
+                  {dirty.includes(k) && <span className="w-2 h-2 shrink-0 rounded-full bg-amber-500" title={t("แก้แล้ว ยังไม่บันทึก", "Edited, not saved")} />}
                 </button>
               ))}
             </div>
@@ -173,12 +177,13 @@ const fontOf = (name: string) => `"${name}", sans-serif`;
 
 /** 👁 ตัวอย่างหน้าตาจริงย่อ ๆ ของหมวด — กดตรงไหนไปหน้านั้น (หมวดที่ไม่มีภาพ = ไม่มีตัวอย่าง) */
 function GroupPreview({ group, theme, sampleItems, onGo }: { group: string; theme: Theme; sampleItems: SampleItem[]; onGo: (page: PageKey) => void }) {
+  const t = useT();
   const c = theme.colors;
   const box = "mx-3.5 mb-2 rounded-lg border border-slate-200 p-2.5 cursor-pointer hover:border-blue-400 transition";
   if (group === "site") {
     const btnRadius = theme.shape.button === "pill" ? 999 : theme.shape.button === "rounded" ? 8 : 2;
     return (
-      <div className={box} style={{ background: c.page }} onClick={() => onGo("colors")} title="สีและธีม">
+      <div className={box} style={{ background: c.page }} onClick={() => onGo("colors")} title={labelEn("สีและธีม")}>
         <div className="flex gap-1">
           {[c.brand, c.brandDeep, c.ink, c.muted, c.surface].map((x, i) => (
             <span key={i} className="h-5 flex-1 rounded border border-black/10" style={{ background: x }} />
@@ -189,7 +194,7 @@ function GroupPreview({ group, theme, sampleItems, onGo }: { group: string; them
             Aa กข
           </span>
           <span className="shrink-0 whitespace-nowrap px-3 py-1 text-xs" style={{ background: c.brand, color: resolveOnBrand(c), borderRadius: btnRadius, fontFamily: fontOf(theme.fonts.body) }}>
-            ปุ่มหลัก
+            {t("ปุ่มหลัก", "Main button")}
           </span>
           <span className="ml-auto min-w-0 text-[11px] truncate" style={{ color: c.muted, fontFamily: fontOf(theme.fonts.body) }}>
             {theme.fonts.display} / {theme.fonts.body}
@@ -209,13 +214,13 @@ function GroupPreview({ group, theme, sampleItems, onGo }: { group: string; them
     const logoImg = theme.logo.mode === "image" && theme.logo.imageKey ? keyUrl(theme.logo.imageKey, 160) : null;
     return (
       <div className="mx-3.5 mb-2 rounded-lg border border-slate-200 overflow-hidden" style={{ background: c.page }}>
-        <div className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:opacity-90" style={{ background: headBg, color: headFg }} onClick={() => onGo("header")} title="หัวเว็บ">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:opacity-90" style={{ background: headBg, color: headFg }} onClick={() => onGo("header")} title={labelEn("หัวเว็บ")}>
           <span
             onClick={(e) => {
               e.stopPropagation();
               onGo("logo");
             }}
-            title="โลโก้"
+            title={labelEn("โลโก้")}
             className="shrink-0"
           >
             {logoImg ? (
@@ -230,17 +235,17 @@ function GroupPreview({ group, theme, sampleItems, onGo }: { group: string; them
               e.stopPropagation();
               onGo("menu");
             }}
-            title="เมนู"
+            title={labelEn("เมนู")}
             className="min-w-0 truncate text-[10px] opacity-90"
           >
-            {menu.length ? menu.join(" · ") : "เมนูอัตโนมัติ"}
+            {menu.length ? menu.join(" · ") : t("เมนูอัตโนมัติ", "Auto menu")}
           </span>
           <span className="ml-auto shrink-0 opacity-80">
             <Icon name="cart" />
           </span>
         </div>
         <div className="h-5" />
-        <div className="flex items-end gap-1.5 px-2.5 py-1.5 cursor-pointer hover:opacity-90" style={{ background: footBg }} onClick={() => onGo("footer")} title="ท้ายเว็บ">
+        <div className="flex items-end gap-1.5 px-2.5 py-1.5 cursor-pointer hover:opacity-90" style={{ background: footBg }} onClick={() => onGo("footer")} title={labelEn("ท้ายเว็บ")}>
           {Array.from({ length: Math.min(6, Math.max(2, f.columns?.length ?? 3)) }, (_, i) => (
             <span key={i} className="h-1.5 flex-1 rounded-full" style={{ background: footFg, opacity: 0.45 }} />
           ))}
@@ -253,7 +258,7 @@ function GroupPreview({ group, theme, sampleItems, onGo }: { group: string; them
     const r = theme.shape.cardRadius ?? RADIUS_PX[theme.radius] ?? 10;
     const items = Array.from({ length: 4 }, (_, i) => sampleItems[i] ?? null);
     return (
-      <div className={box} style={{ background: c.page }} onClick={() => onGo("card")} title="การ์ดสินค้า">
+      <div className={box} style={{ background: c.page }} onClick={() => onGo("card")} title={labelEn("การ์ดสินค้า")}>
         <div className="grid grid-cols-4 gap-1.5">
           {items.map((it, i) => (
             <div key={i} className="min-w-0">

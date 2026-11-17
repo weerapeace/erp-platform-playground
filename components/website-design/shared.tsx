@@ -13,13 +13,15 @@ import { PartStyleFold } from "@/components/website-part-style-editor";
 import { type PartDef } from "@/lib/website-page-parts";
 import { type PartArea } from "@/lib/website-site-design";
 import { useDesign } from "./context";
+import { useT } from "@/components/i18n";
+import { tr, getLang } from "@/lib/lang";
 
 /** 🔠 ขนาดตัวอักษรหน้าสินค้า — ตัวเลือก % */
 export const FONT_LABELS: { k: keyof ProductFonts; label: string; hint: string }[] = [
-  { k: "title", label: "ชื่อรุ่น", hint: "หัวเรื่องใหญ่ + ชื่อรอง" },
-  { k: "price", label: "ราคา", hint: "ตัวเลขราคา" },
-  { k: "heading", label: "หัวข้อ", hint: "หัวข้อพับเก็บ/แท็บ · แบนเนอร์ · คุณอาจชอบ" },
-  { k: "body", label: "เนื้อหา", hint: "คำอธิบาย · รายละเอียด · ข้อความแบนเนอร์" },
+  { k: "title", get label() { return tr("ชื่อรุ่น", "Model name"); }, get hint() { return tr("หัวเรื่องใหญ่ + ชื่อรอง", "Main title + subtitle"); } },
+  { k: "price", get label() { return tr("ราคา", "Price"); }, get hint() { return tr("ตัวเลขราคา", "Price figures"); } },
+  { k: "heading", get label() { return tr("หัวข้อ", "Headings"); }, get hint() { return tr("หัวข้อพับเก็บ/แท็บ · แบนเนอร์ · คุณอาจชอบ", "Collapsible/tab headings · banners · You may also like"); } },
+  { k: "body", get label() { return tr("เนื้อหา", "Body"); }, get hint() { return tr("คำอธิบาย · รายละเอียด · ข้อความแบนเนอร์", "Description · details · banner text"); } },
 ];
 export const FONT_SIZES = [70, 80, 90, 100, 110, 120, 130, 150];
 /** ชนิดข้อมูลธีม = ของกลาง lib/website-theme (เดิมประกาศซ้ำในไฟล์นี้) */
@@ -70,16 +72,16 @@ export const FINE_COLOR_KEYS = Object.keys(FINE_COLOR_DEFAULTS) as (keyof typeof
 /** บทบาทตัวอักษร — ธีมเก่าที่ยังไม่มีบทบาทใหม่ (เช่น เมนูย่อย) = ค่าเริ่มต้น */
 export const roleOf = (t: { typography: Partial<Typography> }, k: TextRoleKey): TextRole => t.typography[k] ?? defaultTextRole(k);
 export const COLOR_FIELDS: { key: ColorKey; label: string; hint: string }[] = [
-  { key: "brand", label: "สีหลักแบรนด์", hint: "ปุ่มหลัก ราคา ลิงก์สำคัญ" },
-  { key: "brandDeep", label: "สีหลักเข้ม", hint: "ตอนชี้เมาส์ปุ่ม" },
-  { key: "ink", label: "สีตัวอักษรหลัก", hint: "หัวข้อและเนื้อหา" },
-  { key: "muted", label: "สีตัวอักษรรอง", hint: "คำอธิบายจาง ๆ" },
-  { key: "page", label: "สีพื้นหลังเว็บ", hint: "พื้นหลังทั้งหน้า" },
-  { key: "surface", label: "สีพื้นการ์ด", hint: "กล่อง/การ์ดสินค้า" },
+  { key: "brand", get label() { return tr("สีหลักแบรนด์", "Brand color"); }, get hint() { return tr("ปุ่มหลัก ราคา ลิงก์สำคัญ", "Main buttons, prices, key links"); } },
+  { key: "brandDeep", get label() { return tr("สีหลักเข้ม", "Brand dark"); }, get hint() { return tr("ตอนชี้เมาส์ปุ่ม", "Button hover"); } },
+  { key: "ink", get label() { return tr("สีตัวอักษรหลัก", "Main text"); }, get hint() { return tr("หัวข้อและเนื้อหา", "Headings and body"); } },
+  { key: "muted", get label() { return tr("สีตัวอักษรรอง", "Secondary text"); }, get hint() { return tr("คำอธิบายจาง ๆ", "Faded descriptions"); } },
+  { key: "page", get label() { return tr("สีพื้นหลังเว็บ", "Page background"); }, get hint() { return tr("พื้นหลังทั้งหน้า", "Whole page background"); } },
+  { key: "surface", get label() { return tr("สีพื้นการ์ด", "Card background"); }, get hint() { return tr("กล่อง/การ์ดสินค้า", "Boxes / product cards"); } },
 ];
 export const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<Theme["fonts"], "display" | "body">; radius: Radius } }[] = [
   {
-    name: "IG ส้มคลาสสิก",
+    get name() { return tr("IG ส้มคลาสสิก", "IG classic orange"); },
     theme: {
       colors: { brand: "#E2540F", brandDeep: "#B8420A", ink: "#141517", page: "#FAFAF9", surface: "#FFFFFF", muted: "#9BA1A9" },
       fonts: { display: "Kanit", body: "Noto Sans Thai" },
@@ -87,7 +89,7 @@ export const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<T
     },
   },
   {
-    name: "ดำอุตสาหกรรม",
+    get name() { return tr("ดำอุตสาหกรรม", "Industrial black"); },
     theme: {
       colors: { brand: "#F59E0B", brandDeep: "#B45309", ink: "#0B0C0E", page: "#F4F4F5", surface: "#FFFFFF", muted: "#8B8F96" },
       fonts: { display: "Prompt", body: "Sarabun" },
@@ -95,7 +97,7 @@ export const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<T
     },
   },
   {
-    name: "ขาวมินิมอล",
+    get name() { return tr("ขาวมินิมอล", "Minimal white"); },
     theme: {
       colors: { brand: "#111827", brandDeep: "#000000", ink: "#111827", page: "#FFFFFF", surface: "#FAFAFA", muted: "#9CA3AF" },
       fonts: { display: "IBM Plex Sans Thai", body: "IBM Plex Sans Thai" },
@@ -103,7 +105,7 @@ export const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<T
     },
   },
   {
-    name: "น้ำเงินหรู",
+    get name() { return tr("น้ำเงินหรู", "Luxury navy"); },
     theme: {
       colors: { brand: "#1E3A5F", brandDeep: "#132639", ink: "#0F172A", page: "#F8FAFC", surface: "#FFFFFF", muted: "#94A3B8" },
       fonts: { display: "Kanit", body: "Sarabun" },
@@ -111,7 +113,7 @@ export const PRESETS: { name: string; theme: { colors: BaseColors; fonts: Pick<T
     },
   },
   {
-    name: "เบจอบอุ่น",
+    get name() { return tr("เบจอบอุ่น", "Warm beige"); },
     theme: {
       colors: { brand: "#A87C4F", brandDeep: "#7A5734", ink: "#2E2A26", page: "#FBF8F4", surface: "#FFFFFF", muted: "#A9A096" },
       fonts: { display: "Prompt", body: "Noto Sans Thai" },
@@ -125,25 +127,26 @@ export const labelCls = "block text-[11px] font-medium text-slate-500 mb-1";
 export const cardCls = "rounded-xl border border-slate-200 bg-white p-4";
 export const timeAgo = (iso: string) => {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return "เมื่อสักครู่";
-  if (m < 60) return `${m} นาทีที่แล้ว`;
+  if (m < 1) return tr("เมื่อสักครู่", "Just now");
+  if (m < 60) return tr(`${m} นาทีที่แล้ว`, `${m} min ago`);
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ชั่วโมงที่แล้ว`;
-  return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+  if (h < 24) return tr(`${h} ชั่วโมงที่แล้ว`, `${h} h ago`);
+  return new Date(iso).toLocaleDateString(getLang() === "en" ? "en-GB" : "th-TH", { day: "numeric", month: "short", year: "2-digit" });
 };
 /* ─────────── สีแบบเลือกได้/ล้างได้ (ตามธีม) — ใช้ในแท็บตัวอักษร ─────────── */
-export function ColorField({ label, value, onChange, emptyLabel = "ตามธีม" }: { label: string; value: string; onChange: (hex: string) => void; emptyLabel?: string }) {
+export function ColorField({ label, value, onChange, emptyLabel }: { label: string; value: string; onChange: (hex: string) => void; emptyLabel?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <div>
       {label && <label className={labelCls}>{label}</label>}
       <div className="flex items-center gap-1.5">
-        <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 hover:border-slate-400 bg-white" title="เลือกสี">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 hover:border-slate-400 bg-white" title={t("เลือกสี", "Pick color")}>
           <span className="inline-block w-4 h-4 rounded border border-black/10" style={{ backgroundColor: value || "transparent", backgroundImage: value ? undefined : "linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%),linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%)", backgroundSize: "8px 8px", backgroundPosition: "0 0,4px 4px" }} />
-          {value || emptyLabel}
+          {value || (emptyLabel ?? t("ตามธีม", "Theme default"))}
         </button>
         {value && (
-          <button type="button" onClick={() => { onChange(""); setOpen(false); }} className="text-xs text-slate-400 hover:text-red-600 px-1" title="ล้าง → ตามธีม">✕</button>
+          <button type="button" onClick={() => { onChange(""); setOpen(false); }} className="text-xs text-slate-400 hover:text-red-600 px-1" title={t("ล้าง → ตามธีม", "Clear → theme default")}>✕</button>
         )}
       </div>
       {open && (
@@ -168,7 +171,7 @@ export function useAreaFold() {
 /** ↺ คืนค่าที่เผยแพร่อยู่ (โชว์เฉพาะตอนค่าต่างจากที่เผยแพร่) */
 export const ResetBtn = ({ onClick, show }: { onClick: () => void; show: boolean }) =>
   show ? (
-    <button onClick={onClick} title="คืนค่าที่เผยแพร่อยู่" className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-400 text-xs">
+    <button onClick={onClick} title={tr("คืนค่าที่เผยแพร่อยู่", "Restore published value")} className="shrink-0 w-7 h-7 rounded-lg border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-400 text-xs">
       ↺
     </button>
   ) : null;

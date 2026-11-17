@@ -17,6 +17,8 @@ import { apiFetch } from "@/lib/api";
 import { CANVAS_FONTS } from "@/lib/website-canvas";
 import { GOOGLE_FONTS } from "@/lib/website-theme";
 import type { FontOption } from "@/components/font-select";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 /** ฟอนต์ทั้งหมดที่ธีมเว็บร้านเลือกได้ (Google Fonts) */
 export const WEB_FONT_NAMES = GOOGLE_FONTS.map((f) => f.name);
@@ -24,7 +26,7 @@ export const WEB_FONT_NAMES = GOOGLE_FONTS.map((f) => f.name);
 export function webFontOptions(first: FontOption[] = []): FontOption[] {
   return [
     ...first,
-    ...GOOGLE_FONTS.map((f) => ({ value: f.name, label: f.name, family: `"${f.name}", sans-serif`, group: f.thai ? "ไทย + อังกฤษ" : "อังกฤษ (ตัวไทยใช้ฟอนต์สำรอง)" })),
+    ...GOOGLE_FONTS.map((f) => ({ value: f.name, label: f.name, family: `"${f.name}", sans-serif`, group: f.thai ? tr("ไทย + อังกฤษ", "Thai + English") : tr("อังกฤษ (ตัวไทยใช้ฟอนต์สำรอง)", "English (Thai uses fallback font)") })),
   ];
 }
 /** 🔤 ตัวเลือก "ฟอนต์ตัวอังกฤษแยก" (ธีม fonts.displayLatin / bodyLatin) — เฉพาะฟอนต์อังกฤษ · "" = ใช้ฟอนต์เดียวกับตัวไทย */
@@ -62,14 +64,14 @@ export function softOf(hex: string): string {
 
 export function swatchesOf(t: ThemeColors): { v: string; label: string; hex: string }[] {
   return [
-    { v: "ink", label: "ตัวอักษรหลัก", hex: t.ink },
-    { v: "brand", label: "แบรนด์", hex: t.brand },
-    { v: "brandDeep", label: "แบรนด์เข้ม", hex: t.brandDeep },
-    { v: "brandSoft", label: "แบรนด์จาง", hex: softOf(t.brand) },
-    { v: "muted", label: "ตัวอักษรรอง", hex: t.muted },
-    { v: "page", label: "พื้นเว็บ", hex: t.page },
-    { v: "surface", label: "พื้นการ์ด", hex: t.surface },
-    { v: "white", label: "ขาว", hex: "#ffffff" },
+    { v: "ink", label: tr("ตัวอักษรหลัก", "Main text"), hex: t.ink },
+    { v: "brand", label: tr("แบรนด์", "Brand"), hex: t.brand },
+    { v: "brandDeep", label: tr("แบรนด์เข้ม", "Brand dark"), hex: t.brandDeep },
+    { v: "brandSoft", label: tr("แบรนด์จาง", "Brand light"), hex: softOf(t.brand) },
+    { v: "muted", label: tr("ตัวอักษรรอง", "Muted text"), hex: t.muted },
+    { v: "page", label: tr("พื้นเว็บ", "Page background"), hex: t.page },
+    { v: "surface", label: tr("พื้นการ์ด", "Card background"), hex: t.surface },
+    { v: "white", label: tr("ขาว", "White"), hex: "#ffffff" },
   ];
 }
 
@@ -158,6 +160,7 @@ export function ColorSwatches({
   allowNone?: boolean;
   autoLabel?: string;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {autoLabel && (
@@ -171,7 +174,7 @@ export function ColorSwatches({
         </button>
       )}
       {allowNone && (
-        <button type="button" title="ไม่มี" onClick={() => onPick("none")} className={`w-7 h-7 rounded-full border text-[10px] text-slate-400 ${value === "none" ? "ring-2 ring-blue-500 ring-offset-1" : "border-slate-300"}`}>
+        <button type="button" title={t("ไม่มี", "None")} onClick={() => onPick("none")} className={`w-7 h-7 rounded-full border text-[10px] text-slate-400 ${value === "none" ? "ring-2 ring-blue-500 ring-offset-1" : "border-slate-300"}`}>
           ∅
         </button>
       )}
@@ -179,7 +182,7 @@ export function ColorSwatches({
         <button key={s.v} type="button" title={s.label} onClick={() => onPick(s.v)} className={`w-7 h-7 rounded-full border border-black/10 ${value === s.v ? "ring-2 ring-blue-500 ring-offset-1" : ""}`} style={{ background: s.hex }} />
       ))}
       <label
-        title="สีเอง"
+        title={t("สีเอง", "Custom color")}
         className={`relative w-7 h-7 rounded-full border border-black/10 overflow-hidden cursor-pointer ${value === "custom" ? "ring-2 ring-blue-500 ring-offset-1" : ""}`}
         style={{ background: value === "custom" && hex ? hex : "conic-gradient(#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa,#f472b6,#f87171)" }}
       >

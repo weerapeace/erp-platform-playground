@@ -42,6 +42,8 @@ import type { SchemaFormContext } from "@/components/website-schema-form";
 import type { Block, ChildBlock } from "@/components/website-block-editor";
 import type { Selection } from "@/components/website-builder";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
+import { useT } from "@/components/i18n";
+import { labelEn } from "@/lib/website-canvas-en";
 
 /** เปิดป๊อปอัปพร้อมคำสั่งแรก (เช่น กด "รูป" ในแผงตัวจัดหน้า → เปิดมาที่หน้าต่างเลือกรูปเลย) */
 export interface CanvasEditorTarget {
@@ -103,6 +105,7 @@ export function CanvasEditor({
   const selItem = selection?.blockId === blockId && selection.childId ? items.find((it) => it.id === selection.childId) ?? null : null;
   /** เลือกหลายชิ้น (ตัวท้าย = ชิ้นหลัก) — ใช้ได้เมื่อชิ้นหลักตรงกับ selection (ไม่งั้นถือว่าเลือกชิ้นเดียวไปแล้ว) */
   const [multi, setMulti] = useState<string[]>([]);
+  const t = useT();
   const multiOk = multi.length > 1 && !!selItem && multi.includes(selItem.id);
   const multiItems = multiOk ? items.filter((it) => multi.includes(it.id)) : [];
   /** ชุดที่พรีวิวบอกมาล่าสุด — ไม่ส่งซ้ำกลับไป (กันวนเลือก) */
@@ -381,48 +384,48 @@ export function CanvasEditor({
 
   return (
     <>
-      <ERPModal open onClose={onClose} title="🎨 แก้ผืนผ้าใบ" size="xl" defaultExpanded resizable={false}>
+      <ERPModal open onClose={onClose} title={t("🎨 แก้ผืนผ้าใบ", "🎨 Edit canvas")} size="xl" defaultExpanded resizable={false}>
         <div className="-mx-5 -my-4 flex flex-col bg-slate-50" style={{ height: "calc(100% + 2rem)" }}>
           {/* แถบบน */}
           <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-200 bg-white">
-            <button onClick={onUndo} disabled={!canUndo} title="ย้อนกลับ (Ctrl+Z)" className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40">↶</button>
-            <button onClick={onRedo} disabled={!canRedo} title="ทำซ้ำ (Ctrl+Shift+Z)" className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40">↷</button>
+            <button onClick={onUndo} disabled={!canUndo} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40">↶</button>
+            <button onClick={onRedo} disabled={!canRedo} title={t("ทำซ้ำ (Ctrl+Shift+Z)", "Redo (Ctrl+Shift+Z)")} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40">↷</button>
             <span className="w-px h-5 bg-slate-200 mx-1" />
-            <button onClick={() => setDevice("desktop")} className={`h-8 px-3 rounded-lg border text-xs ${device === "desktop" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>🖥️ คอม</button>
-            <button onClick={() => setDevice("mobile")} className={`h-8 px-3 rounded-lg border text-xs ${device === "mobile" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>📲 มือถือ</button>
+            <button onClick={() => setDevice("desktop")} className={`h-8 px-3 rounded-lg border text-xs ${device === "desktop" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>{t("🖥️ คอม", "🖥️ Desktop")}</button>
+            <button onClick={() => setDevice("mobile")} className={`h-8 px-3 rounded-lg border text-xs ${device === "mobile" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600"}`}>{t("📲 มือถือ", "📲 Mobile")}</button>
             <span className="w-px h-5 bg-slate-200 mx-1" />
             <button onClick={() => setTemplatesOpen(true)} className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-blue-400">
-              📐 แม่แบบ
+              {t("📐 แม่แบบ", "📐 Templates")}
             </button>
-            <button onClick={() => replay()} title="เล่น “โผล่ตอนเลื่อนมาเจอ” ของทุกชิ้นอีกครั้ง" className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-violet-400">
-              ▶ ดูตัวอย่าง
+            <button onClick={() => replay()} title={t("เล่น “โผล่ตอนเลื่อนมาเจอ” ของทุกชิ้นอีกครั้ง", "Replay “Reveal on scroll” for every item")} className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-violet-400">
+              {t("▶ ดูตัวอย่าง", "▶ Preview")}
             </button>
             <span className="hidden md:inline text-[11px] text-slate-400 ml-2 truncate">
               {device === "mobile"
                 ? block?.mobileMode === "custom"
-                  ? "ผืนมือถือแยกจากคอม — ลาก/ย่อ/หมุนได้ ไม่กระทบหน้าคอม"
-                  : "มือถือเรียงชิ้นลงมาให้อัตโนมัติ (ดูอย่างเดียว)"
-                : "ลากย้าย · มุม = ย่อ-ขยาย · Shift+คลิก/ลากกรอบ = หลายชิ้น · ดับเบิลคลิกข้อความเพื่อพิมพ์ · บันทึกร่างอัตโนมัติ"}
+                  ? t("ผืนมือถือแยกจากคอม — ลาก/ย่อ/หมุนได้ ไม่กระทบหน้าคอม", "Mobile canvas is separate from desktop — drag/resize/rotate without affecting desktop")
+                  : t("มือถือเรียงชิ้นลงมาให้อัตโนมัติ (ดูอย่างเดียว)", "Mobile auto-stacks items (view only)")
+                : t("ลากย้าย · มุม = ย่อ-ขยาย · Shift+คลิก/ลากกรอบ = หลายชิ้น · ดับเบิลคลิกข้อความเพื่อพิมพ์ · บันทึกร่างอัตโนมัติ", "Drag to move · corners = resize · Shift+click/drag a box = multiple · double-click text to type · drafts save automatically")}
             </span>
             <span className="flex-1" />
-            <button onClick={onClose} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">เสร็จ</button>
+            <button onClick={onClose} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">{t("เสร็จ", "Done")}</button>
           </div>
 
           <div className="flex-1 min-h-0 grid grid-cols-[84px_minmax(0,1fr)_300px]">
             {/* ซ้าย: เพิ่มชิ้น */}
             <div className="relative border-r border-slate-200 bg-white p-1.5 space-y-1">
-              {railBtn("🖼️", "รูป", () => setChooser({ mode: "add" }))}
-              {railBtn("🎬", "วิดีโอ", () => setVideoPick({ mode: "add" }))}
-              {railBtn("🔤", "ข้อความ", () => setPanel((p) => (p === "text" ? null : "text")), panel === "text")}
-              {railBtn("🔘", "ปุ่ม", () => setPanel((p) => (p === "button" ? null : "button")), panel === "button")}
-              {railBtn("🎀", "ตกแต่ง", () => setDecorOpen(true))}
+              {railBtn("🖼️", t("รูป", "Image"), () => setChooser({ mode: "add" }))}
+              {railBtn("🎬", t("วิดีโอ", "Video"), () => setVideoPick({ mode: "add" }))}
+              {railBtn("🔤", t("ข้อความ", "Text"), () => setPanel((p) => (p === "text" ? null : "text")), panel === "text")}
+              {railBtn("🔘", t("ปุ่ม", "Button"), () => setPanel((p) => (p === "button" ? null : "button")), panel === "button")}
+              {railBtn("🎀", t("ตกแต่ง", "Decor"), () => setDecorOpen(true))}
               <div className="h-px bg-slate-200 my-1" />
-              {railBtn("🗂️", "ชั้น", () => setPanel((p) => (p === "layers" ? null : "layers")), panel === "layers")}
+              {railBtn("🗂️", t("ชั้น", "Layers"), () => setPanel((p) => (p === "layers" ? null : "layers")), panel === "layers")}
 
               {panel && (
                 <div className="absolute left-full top-1.5 z-20 ml-1.5 w-64 rounded-xl border border-slate-200 bg-white shadow-xl p-2.5">
                   <div className="flex items-center mb-2">
-                    <p className="flex-1 text-xs font-semibold text-slate-700">{panel === "text" ? "เพิ่มข้อความ" : panel === "button" ? "เพิ่มปุ่ม" : "ชั้น (บน = อยู่หน้าสุด)"}</p>
+                    <p className="flex-1 text-xs font-semibold text-slate-700">{panel === "text" ? t("เพิ่มข้อความ", "Add text") : panel === "button" ? t("เพิ่มปุ่ม", "Add button") : t("ชั้น (บน = อยู่หน้าสุด)", "Layers (top = front)")}</p>
                     <button onClick={() => setPanel(null)} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
                   </div>
                   {panel === "text" &&
@@ -446,7 +449,7 @@ export function CanvasEditor({
                         >
                           {p.sample}
                         </span>
-                        <span className="block text-[10px] text-slate-400 mt-0.5">{p.label}</span>
+                        <span className="block text-[10px] text-slate-400 mt-0.5">{labelEn(p.label)}</span>
                       </button>
                     ))}
                   {panel === "button" &&
@@ -471,12 +474,12 @@ export function CanvasEditor({
                         >
                           {String(p.patch.label)}
                         </span>
-                        <span className="text-[10px] text-slate-400">{p.label}</span>
+                        <span className="text-[10px] text-slate-400">{labelEn(p.label)}</span>
                       </button>
                     ))}
                   {panel === "layers" && (
                     <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                      <p className="text-[10px] text-slate-400 -mt-1 mb-1">ลาก ⠿ เพื่อสลับชั้น · Ctrl/Shift+คลิก = เลือกหลายชิ้น</p>
+                      <p className="text-[10px] text-slate-400 -mt-1 mb-1">{t("ลาก ⠿ เพื่อสลับชั้น · Ctrl/Shift+คลิก = เลือกหลายชิ้น", "Drag ⠿ to reorder layers · Ctrl/Shift+click = select multiple")}</p>
                       {[...items].reverse().map((it, shownIdx) => {
                         const idx = items.findIndex((x) => x.id === it.id);
                         const on = selItem?.id === it.id || (multiOk && multi.includes(it.id));
@@ -486,7 +489,7 @@ export function CanvasEditor({
                             {...layerDrag.rowProps(shownIdx)}
                             className={`flex items-center gap-1 rounded-lg border px-1.5 py-1.5 ${on ? "border-blue-500 bg-blue-50" : "border-slate-200"} ${layerDrag.rowCls(shownIdx)}`}
                           >
-                            <DragHandle {...layerDrag.handleProps(shownIdx)} title="ลากเพื่อสลับชั้น" />
+                            <DragHandle {...layerDrag.handleProps(shownIdx)} title={t("ลากเพื่อสลับชั้น", "Drag to reorder")} />
                             <button
                               onClick={(e) => {
                                 if (e.ctrlKey || e.metaKey || e.shiftKey) {
@@ -499,13 +502,13 @@ export function CanvasEditor({
                               {it.group ? "⛓ " : ""}
                               {canvasItemSummary(it)}
                             </button>
-                            <button title="ขึ้นหน้า" disabled={idx === items.length - 1} onClick={() => patchBlock(blockId, { items: reorderLayer(items, it.id, "up") })} className="text-xs text-slate-400 hover:text-slate-800 disabled:opacity-30">↑</button>
-                            <button title="ลงหลัง" disabled={idx === 0} onClick={() => patchBlock(blockId, { items: reorderLayer(items, it.id, "down") })} className="text-xs text-slate-400 hover:text-slate-800 disabled:opacity-30">↓</button>
-                            <button title={it.locked ? "ปลดล็อก" : "ล็อก"} onClick={() => patchChild(blockId, it.id, { locked: !it.locked })} className="text-xs">{it.locked ? "🔒" : "🔓"}</button>
+                            <button title={t("ขึ้นหน้า", "Forward")} disabled={idx === items.length - 1} onClick={() => patchBlock(blockId, { items: reorderLayer(items, it.id, "up") })} className="text-xs text-slate-400 hover:text-slate-800 disabled:opacity-30">↑</button>
+                            <button title={t("ลงหลัง", "Backward")} disabled={idx === 0} onClick={() => patchBlock(blockId, { items: reorderLayer(items, it.id, "down") })} className="text-xs text-slate-400 hover:text-slate-800 disabled:opacity-30">↓</button>
+                            <button title={it.locked ? t("ปลดล็อก", "Unlock") : t("ล็อก", "Lock")} onClick={() => patchChild(blockId, it.id, { locked: !it.locked })} className="text-xs">{it.locked ? "🔒" : "🔓"}</button>
                           </div>
                         );
                       })}
-                      {!items.length && <p className="text-xs text-slate-400 py-2">ยังไม่มีชิ้นบนผืน</p>}
+                      {!items.length && <p className="text-xs text-slate-400 py-2">{t("ยังไม่มีชิ้นบนผืน", "No items on the canvas yet")}</p>}
                     </div>
                   )}
                 </div>
@@ -516,16 +519,16 @@ export function CanvasEditor({
             <div ref={centerRef} className="relative min-w-0 overflow-hidden" onClick={() => setPanel(null)}>
               {device === "mobile" && block.mobileMode !== "custom" && (
                 <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 shadow-sm">
-                  <span className="text-[11px] text-amber-800">มือถือเรียงอัตโนมัติ (ดูอย่างเดียว)</span>
+                  <span className="text-[11px] text-amber-800">{t("มือถือเรียงอัตโนมัติ (ดูอย่างเดียว)", "Mobile auto-stacked (view only)")}</span>
                   <button onClick={() => (items.some((x) => Number(x.mw) > 0) ? mobileCtl.onUseSaved() : freezeMobile())} className="rounded-full bg-amber-500 px-2.5 py-0.5 text-[11px] text-white hover:bg-amber-600">
-                    ✋ จัดเองบนมือถือ
+                    {t("✋ จัดเองบนมือถือ", "✋ Arrange on mobile")}
                   </button>
                 </div>
               )}
               <div className="mx-auto mt-3" style={{ width: base * scale, height: box.h - 24, overflow: "hidden" }}>
                 <iframe
                   ref={iframeRef}
-                  title="แก้ผืนผ้าใบ"
+                  title={t("แก้ผืนผ้าใบ", "Edit canvas")}
                   src={withPreviewKey(`${previewOrigin}/canvas-edit?preview=1&block=${encodeURIComponent(blockId)}`, previewKey)}
                   className="border-0 bg-white rounded-lg shadow-sm"
                   style={{ width: base, height: (box.h - 24) / scale, transform: `scale(${scale})`, transformOrigin: "top left", display: "block" }}
@@ -538,18 +541,18 @@ export function CanvasEditor({
               <div className="px-3 py-2.5 border-b border-slate-200 flex items-center gap-1">
                 {multiOk ? (
                   <>
-                    <button onClick={() => selectMany([])} className="text-[11px] text-slate-500 hover:text-blue-600">← ทั้งผืน</button>
-                    <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate ml-1">หลายชิ้น ({multiItems.length})</span>
+                    <button onClick={() => selectMany([])} className="text-[11px] text-slate-500 hover:text-blue-600">{t("← ทั้งผืน", "← Whole canvas")}</button>
+                    <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate ml-1">{t(`หลายชิ้น (${multiItems.length})`, `Multiple (${multiItems.length})`)}</span>
                   </>
                 ) : selItem ? (
                   <>
-                    <button onClick={() => selectMany([])} className="text-[11px] text-slate-500 hover:text-blue-600">← ทั้งผืน</button>
+                    <button onClick={() => selectMany([])} className="text-[11px] text-slate-500 hover:text-blue-600">{t("← ทั้งผืน", "← Whole canvas")}</button>
                     <span className="flex-1 min-w-0 text-sm font-semibold text-slate-800 truncate ml-1">{canvasItemSummary(selItem)}</span>
-                    <button title="ทำสำเนา" onClick={() => duplicateChild(blockId, selItem.id)} className="w-7 h-7 rounded-md border border-slate-200 text-xs">⧉</button>
-                    <button title="ลบ" onClick={() => removeChild(blockId, selItem.id)} className="w-7 h-7 rounded-md border border-slate-200 text-xs text-red-600">🗑</button>
+                    <button title={t("ทำสำเนา", "Duplicate")} onClick={() => duplicateChild(blockId, selItem.id)} className="w-7 h-7 rounded-md border border-slate-200 text-xs">⧉</button>
+                    <button title={t("ลบ", "Delete")} onClick={() => removeChild(blockId, selItem.id)} className="w-7 h-7 rounded-md border border-slate-200 text-xs text-red-600">🗑</button>
                   </>
                 ) : (
-                  <span className="text-sm font-semibold text-slate-800">ตั้งค่า</span>
+                  <span className="text-sm font-semibold text-slate-800">{t("ตั้งค่า", "Settings")}</span>
                 )}
               </div>
               <div className="flex-1 overflow-y-auto p-3">
@@ -596,7 +599,7 @@ export function CanvasEditor({
           open
           onClose={() => setVideoPick(null)}
           typeFilter="video"
-          title={videoPick.mode === "replace" ? "เปลี่ยนคลิป" : "เพิ่มวิดีโอบนผืน"}
+          title={videoPick.mode === "replace" ? t("เปลี่ยนคลิป", "Change clip") : t("เพิ่มวิดีโอบนผืน", "Add video to canvas")}
           onSelect={(assets) => void onVideoPicked(assets)}
         />
       )}
@@ -604,7 +607,7 @@ export function CanvasEditor({
         open={!!chooser}
         onClose={() => setChooser(null)}
         shopSlug={ctx.shopSlug}
-        title={chooser?.mode === "replace" ? "เปลี่ยนรูป" : chooser?.mode === "bg" ? "รูปพื้นหลังผืน" : "เพิ่มรูป"}
+        title={chooser?.mode === "replace" ? t("เปลี่ยนรูป", "Change image") : chooser?.mode === "bg" ? t("รูปพื้นหลังผืน", "Canvas background image") : t("เพิ่มรูป", "Add image")}
         onPick={onPicked}
       />
       <DecorLibrary
@@ -639,14 +642,14 @@ export function CanvasEditor({
           patchChild(blockId, frameFor, { overlayKey: img.key, overlayInset: Number(cur?.overlayInset) > 0 ? Number(cur?.overlayInset) : 12 });
         }}
       />
-      <ERPModal open={!!linkItem} onClose={() => setLinkFor(null)} title="กดแล้วไปที่" size="md" defaultExpanded={false} resizable={false} footer={<button onClick={() => setLinkFor(null)} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm">เสร็จ</button>}>
+      <ERPModal open={!!linkItem} onClose={() => setLinkFor(null)} title={t("กดแล้วไปที่", "Link to")} size="md" defaultExpanded={false} resizable={false} footer={<button onClick={() => setLinkFor(null)} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm">{t("เสร็จ", "Done")}</button>}>
         {linkItem && (
           <div className="space-y-3">
             <p className="text-xs text-slate-500">{canvasItemSummary(linkItem)}</p>
             <LinkTargetPicker value={String(linkItem.href ?? "")} onChange={(href) => patchChild(blockId, linkItem.id, { href })} ctx={ctx} />
             {Boolean(linkItem.href) && (
               <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                <input type="checkbox" className="accent-blue-600" checked={linkItem.newTab === true} onChange={(e) => patchChild(blockId, linkItem.id, { newTab: e.target.checked })} /> เปิดในแท็บใหม่
+                <input type="checkbox" className="accent-blue-600" checked={linkItem.newTab === true} onChange={(e) => patchChild(blockId, linkItem.id, { newTab: e.target.checked })} /> {t("เปิดในแท็บใหม่", "Open in new tab")}
               </label>
             )}
           </div>
