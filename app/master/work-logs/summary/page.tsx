@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
-import { DateInput } from "@/components/date-input";
+import { DateRangeInput } from "@/components/date-input/range";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import {
   demoStatEntries, durationLabel, fmtHours, personStats, stepStats, VERDICT_LABEL, MIN_SAMPLES, STANDARD_SAMPLE,
@@ -123,8 +123,8 @@ export default function WorkLogSummaryPage() {
       )}
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3">
-        <label className="text-xs text-slate-500">ตั้งแต่<div className="w-36"><DateInput value={from} onChange={setFrom} disabled={demo} /></div></label>
-        <label className="text-xs text-slate-500">ถึง<div className="w-36"><DateInput value={to} onChange={setTo} disabled={demo} /></div></label>
+        {/* ช่วงวันที่ในปฏิทินเดียว (ของกลาง DateRangeInput) — คลิกวันแรก/วันสุดท้าย หรือลาก · มีปุ่ม 7 วัน/เดือนนี้/เดือนก่อน */}
+        <div className="text-xs text-slate-500">ช่วงวันที่<div className="mt-0.5"><DateRangeInput value={{ from, to }} onChange={(r) => { setFrom(r.from); setTo(r.to); }} disabled={demo} allowClear={false} /></div></div>
         <div className="text-xs text-slate-500">จัดกลุ่มขั้นตอน
           <div className="mt-0.5 flex rounded-lg border border-slate-200 p-0.5">
             <button onClick={() => setMode("step")} className={`h-8 rounded-md px-3 text-sm ${mode === "step" ? "bg-slate-800 text-white" : "text-slate-600"}`}>แยกตามสินค้า</button>

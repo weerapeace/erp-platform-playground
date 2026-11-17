@@ -118,7 +118,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "master-crud", label: "หน้าจัดการข้อมูลหลัก", code: "MasterCRUD", category: "table",
     source: { path: "components/master-crud" },
-    what: "สร้างหน้า ตาราง + ลิ้นชักดู/แก้ ครบชุดจากการตั้งค่า (ฟิลด์ สิทธิ์ ประวัติ ไฟล์แนบ) ไม่ต้องเขียนหน้าเอง · ลิ้นชัก: ลูกศร ← → เปิดรายการก่อน/ถัดไป · ⧉ ทำสำเนา (รหัส/ช่องห้ามซ้ำเว้นว่าง · ปิดด้วย duplicate:false) · Ctrl+S บันทึก",
+    what: "สร้างหน้า ตาราง + ลิ้นชักดู/แก้ ครบชุดจากการตั้งค่า (ฟิลด์ สิทธิ์ ประวัติ ไฟล์แนบ) ไม่ต้องเขียนหน้าเอง · ลิ้นชัก: ลูกศร ← → เปิดรายการก่อน/ถัดไป · ⧉ ทำสำเนา (รหัส/ช่องห้ามซ้ำเว้นว่าง · ปิดด้วย duplicate:false) · Ctrl+S บันทึก · ลบชั่วคราว = แจ้ง + ปุ่มย้อนกลับ 5 วินาที (toast.undo) · กู้ข้อมูลที่พิมพ์ค้าง (formDraft:false = ปิด)",
     when: "หน้าข้อมูลหลัก เช่น ลูกค้า คลัง หน่วย แผนก สินค้า",
     notWhen: "หน้าที่มีขั้นตอนเฉพาะมาก เช่น บอร์ดจ่ายงาน หน้าแดชบอร์ด",
     doc: "crud-complete.md",
@@ -178,7 +178,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "modal", label: "หน้าต่างเด้ง + ยืนยัน + ลิ้นชัก", code: "ERPModal · ConfirmDialog · Drawer · BottomSheet", category: "popup",
     source: { path: "components/modal" },
-    what: "ป๊อปอัปกลางทุกแบบ ถามก่อนปิดเมื่อมีข้อมูลยังไม่บันทึก มีแบบปุ่มอันตราย จำขนาดที่ผู้ใช้ลากไว้ · BottomSheet = แผ่นเลื่อนจากล่างสำหรับจอมือถือ · Esc ปิดทีละชั้น (กองกลาง lib/esc-stack ร่วมกับดูรูปเต็มจอ/แผ่นล่าง — ชั้นลอยใหม่ใช้ useEscLayer)",
+    what: "ป๊อปอัปกลางทุกแบบ ถามก่อนปิดเมื่อมีข้อมูลยังไม่บันทึก มีแบบปุ่มอันตราย จำขนาดที่ผู้ใช้ลากไว้ · BottomSheet = แผ่นเลื่อนจากล่างสำหรับจอมือถือ · Esc ปิดทีละชั้น (กองกลาง lib/esc-stack ร่วมกับดูรูปเต็มจอ/แผ่นล่าง — ชั้นลอยใหม่ใช้ useEscLayer) · ปุ่ม ➖ ย่อเป็นแถบมุมจอ ดูหน้าข้างหลังแล้วกลับมาทำต่อ (ข้อมูลไม่หาย · ป๊อปเล็ก size=sm ไม่มี)",
     when: "ทุกป๊อปอัป ทุกการยืนยันลบ / อนุมัติ / ยกเลิก ทุกลิ้นชักด้านข้าง",
     notWhen: "ห้ามเขียนป๊อปอัปเองในหน้า",
     doc: "popup-policy.md", sameJob: "popup", primary: true, legacyKey: "erp_modal",
@@ -225,7 +225,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "form", label: "ฟอร์มกลาง", code: "ERPForm", category: "input",
     source: { path: "components/form" },
-    what: "ฟอร์มพร้อมตรวจข้อมูล ช่องบังคับ ข้อความผิดพลาด บันทึกร่าง กันกดซ้ำ สิทธิ์รายช่อง · Ctrl+S บันทึก (useSaveShortcut ใช้ร่วมกับ SaveBar/ลิ้นชัก MasterCRUD)",
+    what: "ฟอร์มพร้อมตรวจข้อมูล ช่องบังคับ ข้อความผิดพลาด บันทึกร่าง กันกดซ้ำ สิทธิ์รายช่อง · Ctrl+S บันทึก (useSaveShortcut ใช้ร่วมกับ SaveBar/ลิ้นชัก MasterCRUD) · กู้ข้อมูลที่พิมพ์ค้าง useFormDraft (เก็บในเครื่อง ไม่เก็บช่องลับ · ลิ้นชัก MasterCRUD ใช้แล้ว)",
     when: "ฟอร์มสร้าง/แก้ข้อมูลที่ไม่ได้อยู่ใน MasterCRUD",
     legacyKey: "erp_form",
   },
@@ -240,7 +240,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "date-input", label: "ช่องวันที่", code: "DateInput", category: "input",
     source: { path: "components/date-input" },
-    what: "ช่องเลือกวันที่/เวลา แบบ 24 ชั่วโมง ใช้เหมือนกันทุกหน้า · คลิกช่องมีปุ่มลัด วันนี้/พรุ่งนี้/+7 วัน/สิ้นเดือน (เวลาไทย)",
+    what: "ช่องเลือกวันที่/เวลา แบบ 24 ชั่วโมง ใช้เหมือนกันทุกหน้า · คลิกช่องมีปุ่มลัด วันนี้/พรุ่งนี้/+7 วัน/สิ้นเดือน (เวลาไทย) · เลือกช่วงวันที่ในปฏิทินเดียว = DateRangeInput (components/date-input/range · คลิก/ลาก + ปุ่ม 7 วัน/เดือนนี้/เดือนก่อน)",
     when: "ทุกช่องวันที่",
   },
   {
@@ -284,7 +284,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "searchable-select", label: "ช่องเลือกแบบพิมพ์ค้นหา", code: "SearchableSelect · SearchableMultiSelect", category: "input",
     source: { path: "components/searchable-select" },
-    what: "dropdown ที่พิมพ์กรองรายการได้ ใช้แทน select ธรรมดา · แบบเลือกหลายค่า (SearchableMultiSelect) = ติ๊กได้หลายตัว ชิปไม่กางเต็มจอ (+N) ป้ายค่าที่ระบบแนะนำ พิมพ์ค่าเองได้",
+    what: "dropdown ที่พิมพ์กรองรายการได้ ใช้แทน select ธรรมดา · แบบเลือกหลายค่า (SearchableMultiSelect) = ติ๊กได้หลายตัว ชิปไม่กางเต็มจอ (+N) ป้ายค่าที่ระบบแนะนำ พิมพ์ค่าเองได้ · ค้นไม่ต้องตรงเป๊ะ (lib/fuzzy-rank: เป๊ะก่อน · ข้ามตัวคั่น · ลืมสลับแป้นไทย/อังกฤษ) · ปุ่ม + สร้างใหม่ท้ายรายการ (onCreate + createPermission · Enter สร้าง)",
     when: "รายการตัวเลือกยาวกว่า ~10 ตัว · ช่องเลือกหลายค่า เช่น คุณลักษณะของหมวดร้านค้า (LazadaAttrField ใช้อยู่)",
     notWhen: "เลือกข้อมูลหลัก (สินค้า ร้าน ลูกค้า) ให้ใช้ Picker เฉพาะของมัน",
     sameJob: "select", primary: true,
@@ -317,7 +317,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sku-multi-picker", label: "เลือกสินค้าหลายตัว", code: "SkuMultiPickerModal", category: "pick",
     source: { path: "components/sku-multi-picker" },
-    what: "ป๊อปเลือกสินค้าหลายตัวพร้อมกัน กรองตามแท็ก/แบรนด์",
+    what: "ป๊อปเลือกสินค้าหลายตัวพร้อมกัน กรองตามแท็ก/แบรนด์ · วางรหัสหลายตัวจาก Excel ในช่องค้น → ติ๊กให้ + บอกรหัสที่ไม่พบ (POST /api/pickers/skus { codes })",
     when: "ส่งสินค้าหลายตัวเข้าเอกสารหรือแผน",
   },
   {
@@ -1016,7 +1016,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sortable-list", label: "ลากจัดลำดับรายการ", code: "SortableList", category: "table",
     source: { path: "components/sortable-list" },
-    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ) · ลากที่หูจับ (handleProps) หรือกดค้างที่ตัวการ์ดแล้วลาก (holdProps — นิ้วค้าง ~0.35 วิ · เมาส์ลากได้เลย · คลิกเฉย ๆ ยังทำงาน) · แตะหูจับ ⠿ = เมนู ขึ้น/ลง/บนสุด/ล่างสุด (มือถือไม่ต้องลาก)",
+    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ) · ลากที่หูจับ (handleProps) หรือกดค้างที่ตัวการ์ดแล้วลาก (holdProps — นิ้วค้าง ~0.35 วิ · เมาส์ลากได้เลย · คลิกเฉย ๆ ยังทำงาน) · แตะหูจับ ⠿ = เมนู ขึ้น/ลง/บนสุด/ล่างสุด (มือถือไม่ต้องลาก) · เลือกหลายรายการ (Ctrl/Shift+คลิกหูจับ หรือเมนู ☑) แล้วลาก/เมนู ย้ายพร้อมกัน (lib/reorder-many)",
     when: "ทุกที่ที่ให้คนเรียงลำดับเอง · การ์ดรูป/ไทล์ที่ควรกดค้างลากได้ทั้งใบ = holdProps",
   },
   {

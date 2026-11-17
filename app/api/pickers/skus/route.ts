@@ -151,7 +151,29 @@ export async function GET(request: NextRequest) {
     : await query.order(orderCol, { ascending: sortAsc }).order("id", { ascending: true }).range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
 
-  let rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
+  let rows = ((data ?? []) as unknown as SkuPickerRow[]).map(toPickerRow);
+
+  if (searching) {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
+    const S = norm(search);
+    const nTokens = tokens.map(norm).filter(Boolean);
+    const scoreOf = (r: { code: string; name: string }): number => {
+      const code = norm(r.code), name = norm(r.name);
+      if (S && code === S) return 1_000_000;
+      if (S && code.startsWith(S)) return 900_000 - code.length;
+      if (S && code.includes(S)) return 800_000 - code.length;
+      let s = 0; nTokens.forEach((t, i) => { if (code.startsWith(t)) s += 200 - i * 5; else if (code.includes(t)) s += 120 - i * 5; else if (name.includes(t)) s += 40; });
+      return s;
+    };
+    const ranked = rows.map((r) => ({ r, s: scoreOf(r) })).sort((a, b) => b.s - a.s || a.r.code.localeCompare(b.r.code, "th")).map((x) => x.r);
+    return NextResponse.json({ data: ranked.slice(offset, offset + limit), total: ranked.length, error: null });
+  }
+
+  return NextResponse.json({ data: rows, total: count ?? rows.length, error: null });
+}
+
+/** แถวฐานข้อมูล → แถวตัวเลือก (ใช้ทั้งค้นหา GET และหาจากรหัสหลายตัว POST) */
+function toPickerRow(row: SkuPickerRow) {
     const uom = Array.isArray(row.uom) ? row.uom[0] : row.uom;
     const parent = Array.isArray(row.parent_skus_v2) ? row.parent_skus_v2[0] : row.parent_skus_v2;
     const cat = parent ? (Array.isArray(parent.product_categories) ? parent.product_categories[0] : parent.product_categories) : null;
@@ -176,23 +198,46 @@ export async function GET(request: NextRequest) {
       parent_code: parent?.code ?? null,
       parent_name: parent?.name_th ?? null,
     };
-  });
+}
 
-  if (searching) {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
-    const S = norm(search);
-    const nTokens = tokens.map(norm).filter(Boolean);
-    const scoreOf = (r: { code: string; name: string }): number => {
-      const code = norm(r.code), name = norm(r.name);
-      if (S && code === S) return 1_000_000;
-      if (S && code.startsWith(S)) return 900_000 - code.length;
-      if (S && code.includes(S)) return 800_000 - code.length;
-      let s = 0; nTokens.forEach((t, i) => { if (code.startsWith(t)) s += 200 - i * 5; else if (code.includes(t)) s += 120 - i * 5; else if (name.includes(t)) s += 40; });
-      return s;
-    };
-    const ranked = rows.map((r) => ({ r, s: scoreOf(r) })).sort((a, b) => b.s - a.s || a.r.code.localeCompare(b.r.code, "th")).map((x) => x.r);
-    return NextResponse.json({ data: ranked.slice(offset, offset + limit), total: ranked.length, error: null });
+/**
+ * POST { codes: string[] } — หาสินค้าจาก "รหัสหลายตัว" ทีเดียว (วางจาก Excel ในตัวเลือกหลาย SKU)
+ * ตรงรหัส หรือ บาร์โค้ด (ไม่สนตัวพิมพ์เล็ก/ใหญ่) · สูงสุด 500 รหัส · ใช้ POST เพราะรหัสมี "#" ได้ (GET ตัด # ทิ้ง) และรายการยาว
+ * คืน { data: แถวที่เจอ, missing: รหัสที่ไม่พบ }
+ */
+export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "products.view");
+  if (denied) return denied;
+  const body = await request.json().catch(() => ({})) as { codes?: unknown; sales_only?: boolean };
+  const raw = Array.isArray(body.codes) ? body.codes.map((c) => String(c ?? "").trim()).filter(Boolean) : [];
+  const codes = [...new Set(raw)].slice(0, 500);
+  if (!codes.length) return NextResponse.json({ data: [], missing: [], error: null });
+  const variants = [...new Set(codes.flatMap((c) => [c, c.toUpperCase(), c.toLowerCase()]))];
+  const sb = supabaseFromRequest(request);
+  const select = `id, code, barcode, parent_sku_id, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, sale_ok, is_active,
+      parent_skus_v2 ( id, code, name_th, cover_image_r2_key, product_categories ( name ) ),
+      uom:uoms!uom_id ( name )`;
+  const found: SkuPickerRow[] = [];
+  for (let i = 0; i < variants.length; i += 300) {
+    const chunk = variants.slice(i, i + 300);
+    const [byCode, byBarcode] = await Promise.all([
+      sb.from("skus_v2").select(select).eq("is_active", true).in("code", chunk).limit(1000),
+      sb.from("skus_v2").select(select).eq("is_active", true).in("barcode", chunk).limit(1000),
+    ]);
+    if (byCode.error) return NextResponse.json({ data: [], missing: [], error: byCode.error.message }, { status: 500 });
+    found.push(...((byCode.data ?? []) as unknown as SkuPickerRow[]), ...((byBarcode.data ?? []) as unknown as SkuPickerRow[]));
   }
-
-  return NextResponse.json({ data: rows, total: count ?? rows.length, error: null });
+  let rows = [...new Map(found.map((r) => [r.id, r])).values()].map(toPickerRow);
+  if (body.sales_only) rows = rows.filter((r) => r.sale_ok !== false);
+  // เรียงตามลำดับที่วางมา + บอกรหัสที่ไม่พบ
+  const key = (v: string | null | undefined) => String(v ?? "").toLowerCase();
+  const out: typeof rows = [];
+  const missing: string[] = [];
+  const used = new Set<string>();
+  for (const c of codes) {
+    const hit = rows.find((r) => key(r.code) === key(c)) ?? rows.find((r) => key(r.barcode) === key(c));
+    if (!hit) { missing.push(c); continue; }
+    if (!used.has(hit.id)) { used.add(hit.id); out.push(hit); }
+  }
+  return NextResponse.json({ data: out, missing, error: null });
 }

@@ -23,6 +23,8 @@ import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
 import { escLayerCount } from "@/lib/esc-stack";
 import { isTypingTarget, navArrowDir } from "@/lib/record-nav-keys";
 import { buildDuplicateValues } from "@/lib/record-duplicate";
+import { useFormDraft } from "@/components/form/use-form-draft";
+import { draftDiffers } from "@/lib/form-draft";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
@@ -569,6 +571,8 @@ export type MasterCRUDConfig = {
   headerActions?: () => React.ReactNode;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
+  /** 💾 กู้ข้อมูลที่พิมพ์ค้าง (เก็บในเครื่อง) — ค่าเริ่ม เปิด · false = ปิด (เช่น ฟอร์มที่มีข้อมูลลับมาก) */
+  formDraft?: boolean;
   /** ปุ่ม "⧉ ทำสำเนา" ในลิ้นชัก (ค่าเริ่ม เปิด เมื่อมีสิทธิ์สร้าง) · false = ปิด (เช่น โมดูลมีปุ่มคัดลอกของตัวเองแล้ว) */
   duplicate?: boolean;
   /** ช่องที่ไม่ต้องคัดลอกตอนทำสำเนา (นอกจากรหัส/ช่องห้ามซ้ำที่ระบบตัดให้อยู่แล้ว) */
@@ -1492,6 +1496,26 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       ? tr(`สำเนาแล้ว — เว้นว่างให้ใส่ใหม่: ${names.join(", ")} · ยังไม่บันทึกจนกด "บันทึก"`, `Copied — left blank: ${names.join(", ")} · not saved yet`)
       : tr(`สำเนาแล้ว — ยังไม่บันทึกจนกด "บันทึก"`, "Copied — not saved yet"));
   };
+  // 💾 กู้ข้อมูลที่พิมพ์ค้าง (เผลอปิด/รีเฟรช) — เก็บในเครื่อง ไม่เก็บช่องลับ (sensitive + ชื่อแนวรหัสผ่าน/บัญชี) · ปิดได้ config.formDraft = false
+  const draftKey = config.formDraft === false ? null : `${user?.id ?? "anon"}:${config.moduleKey ?? config.apiPath}:${editingId ?? "new"}`;
+  const formDraft = useFormDraft({
+    key: draftKey, values: form, dirty: dirty && drawerMode === "edit", active: modalOpen,
+    sensitiveKeys: effectiveFields.filter((f) => f.sensitive).map((f) => f.key),
+  });
+  const draftUseful = !!formDraft.pending && draftDiffers(formDraft.pending.values, form);
+  const restoreDraft = () => {
+    const v = formDraft.take();
+    if (!v) return;
+    setForm((p) => ({ ...p, ...v })); setDirty(true); setDrawerMode("edit");
+    flash(tr("กู้ข้อมูลที่พิมพ์ค้างไว้แล้ว — ตรวจแล้วกด \"บันทึก\"", "Draft restored — review and press Save"));
+  };
+  const draftBannerEl = draftUseful && formDraft.pending ? (
+    <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-2 flex-wrap">
+      <span className="flex-1 min-w-0">💾 {tr("มีข้อมูลที่พิมพ์ค้างไว้ (ยังไม่ได้บันทึก) เมื่อ", "You have unsaved typing from")} {new Date(formDraft.pending.at).toLocaleString("th-TH", { hour12: false, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+      <button type="button" onClick={restoreDraft} className="h-7 px-3 rounded-md bg-amber-600 text-white font-medium hover:bg-amber-700">{tr("กู้คืน", "Restore")}</button>
+      <button type="button" onClick={formDraft.discard} className="h-7 px-2 rounded-md text-amber-700 hover:bg-amber-100">{tr("ทิ้ง", "Discard")}</button>
+    </div>
+  ) : null;
   const hasOwnCopyAction = (config.extraRowActions ?? []).some((a) => /คัดลอก|สำเนา|duplicate|clone/i.test(String(a.label ?? "")));
   const canDuplicate = canCreate && config.duplicate !== false && !hasOwnCopyAction;   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
   // F10a: open edit drawer — fetch full row จาก /[id] เพื่อได้ทุก field
@@ -1934,7 +1958,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       const res = await apiFetch(url, { method: "DELETE" });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash(deleteMode === "hard" ? tr("ลบถาวรแล้ว", "Permanently deleted") : tr("ลบแล้ว (กู้คืนได้)", "Deleted (can be restored)"));
+      // ลบชั่วคราว (ไม่ได้ลบของพ่วง) = แจ้ง + ปุ่ม "ย้อนกลับ" นับ 5 วินาที (ของกลาง toast.undo) — กด = เปิดใช้งานคืน
+      const undoable = deleteMode !== "hard" && !(config.deleteExtras && Object.values(deleteOpts).some(Boolean));
+      const removed = deleteTarget;
+      if (deleteMode === "hard") flash(tr("ลบถาวรแล้ว", "Permanently deleted"));
+      else if (undoable) notify.undo(tr(`ลบ "${rowLabel(removed)}" แล้ว (อยู่ในถังขยะ)`, `Deleted "${rowLabel(removed)}" (in trash)`), () => restore(removed), { label: tr("ย้อนกลับ", "Undo") });
+      else flash(tr("ลบแล้ว (กู้คืนได้)", "Deleted (can be restored)"));
       // ถ้ากำลังลบ record ที่เปิดใน drawer อยู่ → ปิด drawer หลังลบเสร็จ
       if (modalOpen && editingId != null && String(deleteTarget.id) === String(editingId)) setModalOpen(false);
       setDeleteTarget(null); setDeleteMode("soft"); setDeleteText("");
@@ -2123,15 +2152,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         onClick: async (selected: Row[]) => {
           if (!confirm(tr(`ลบชั่วคราว ${selected.length} ราย? (ซ่อนไว้ กู้คืนได้)`, `Delete ${selected.length} item(s) temporarily? (hidden, can be restored)`))) return;
           // เก็บผลรายตัว — พังบางรายต้องบอก (เดิมขึ้น "สำเร็จ" เสมอแม้พัง)
-          let ok = 0; const fails: string[] = [];
+          let ok = 0; const fails: string[] = []; const done: Row[] = [];
           for (const r of selected) {
             try {
               const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
               const j = await res.json().catch(() => ({}));
-              if (j.error) fails.push(String(j.error)); else ok++;
+              if (j.error) fails.push(String(j.error)); else { ok++; done.push(r); }
             } catch (e) { fails.push(String((e as Error).message ?? e)); }
           }
-          flash(tr(`ลบชั่วคราว ${ok} ราย`, `Deleted ${ok} item(s) temporarily`) + (fails.length ? tr(` · ล้มเหลว ${fails.length}`, ` · failed ${fails.length}`) : ""));
+          const msg = tr(`ลบชั่วคราว ${ok} ราย`, `Deleted ${ok} item(s) temporarily`) + (fails.length ? tr(` · ล้มเหลว ${fails.length}`, ` · failed ${fails.length}`) : "");
+          // ปุ่ม "ย้อนกลับ" 5 วินาที = เปิดใช้งานคืนทุกตัวที่เพิ่งลบ
+          if (done.length) notify.undo(msg, async () => { for (const r of done) await restore(r); }, { label: tr("ย้อนกลับ", "Undo") });
+          else flash(msg);
           if (fails.length) fail(tr(`ลบไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`, `Delete failed for ${fails.length} item(s): ${fails[0]}`));
           await refreshData();
         },
@@ -3670,6 +3702,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap"><span className="flex-1 min-w-0">⚠ {formErr}</span>{dupBtn}</div>
                 )}
                 {/* Layout คุมทุก field (รวม core) */}
+                {draftBannerEl}
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? (modePanelEl ?? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />)
@@ -3686,6 +3719,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {drawerMode === "edit" && formErr && (
                   <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap"><span className="flex-1 min-w-0">⚠ {formErr}</span>{dupBtn}</div>
                 )}
+                {draftBannerEl}
                 {createHeaderEl}
                 {drawerMode === "view"
                   ? (modePanelEl ?? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} extraTabs={boundExtraTabs} sectionMode={config.formLayout === "sections"} />)
@@ -3866,6 +3900,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {drawerMode === "edit" && formErr && (
                   <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2 flex-wrap"><span className="flex-1 min-w-0">⚠ {formErr}</span>{dupBtn}</div>
                 )}
+                {draftBannerEl}
                 {createHeaderEl}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"

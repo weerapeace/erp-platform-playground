@@ -32,10 +32,16 @@
 // 2026-11-17: แตะ/คลิกหูจับ ⠿ (ไม่ลาก) = เมนู ↑ ขึ้น · ↓ ลง · ⤒ บนสุด · ⤓ ล่างสุด — มือถือไม่ต้องลาก · ไม่ต้องแก้หน้าที่เรียก
 //   หูจับรู้ลำดับ/จำนวนจาก data-reorder-id + data-reorder-index ที่ handleProps/rowProps ใส่ให้ (นับแถวในหน้า) → เรียก onReorder(from, to) ตัวเดิม
 //   เฉพาะ <DragHandle> เท่านั้น (ตัวที่เอา handleProps ไปใส่รูป/ปุ่มเอง แตะ = ทำงานเดิม)
+//
+// 2026-11-17: เลือกหลายรายการแล้วย้ายพร้อมกัน — Ctrl/⌘+คลิกหูจับ = เลือก/เลิกเลือก · Shift+คลิก = เลือกเป็นช่วง · มือถือ: เมนูหูจับ "☑ เลือก"
+//   ลากตัวที่เลือกอยู่ = ย้ายทั้งกลุ่ม (ลำดับในกลุ่มคงเดิม) · เมนู ขึ้น/ลง/บนสุด/ล่างสุด ย้ายทั้งกลุ่ม · Esc = ล้างที่เลือก
+//   หน้าเดิมไม่ต้องแก้: ระบบแตกเป็น onReorder(from, to) ทีละตัวตามลำดับ (lib/reorder-many) รอให้หน้าอัปเดตทีละครั้ง
+//   แถวที่เลือกไฮไลต์ผ่าน rowCls(i) อัตโนมัติ
 
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useEscLayer } from "@/components/modal/esc-layer";
+import { blockMoveOrder, groupMenuOrder, indexRange, planSingleMoves } from "@/lib/reorder-many";
 
 /** ย้ายสมาชิกในอาเรย์ from → to (คืนอาเรย์ใหม่) */
 export function moveItem<T>(arr: T[], from: number, to: number): T[] {
@@ -53,8 +59,17 @@ const DROP_OVER_ATTR = "data-drop-over";
 const ID_ATTR = "data-reorder-id";
 const INDEX_ATTR = "data-reorder-index";
 
-/** ลิสต์ที่เปิดอยู่ → ตัวย้าย (ให้ DragHandle เรียกตอนกดเมนู ขึ้น/ลง/บนสุด/ล่างสุด) */
-const reorderRegistry = new Map<string, (from: number, to: number) => void>();
+/** ลิสต์ที่เปิดอยู่ → ตัวย้าย + ที่เลือกไว้ (ให้ DragHandle เรียกตอนกดเมนู ขึ้น/ลง/บนสุด/ล่างสุด/เลือก) */
+type ListEntry = {
+  move: (from: number, to: number) => void;
+  selected: () => number[];
+  toggle: (i: number) => void;
+  runOrder: (finalOrder: number[]) => void;
+};
+const reorderRegistry = new Map<string, ListEntry>();
+const countRows = (listId: string) =>
+  typeof document === "undefined" ? 0 : document.querySelectorAll(`[${ROW_ATTR}][${ID_ATTR}="${CSS.escape(listId)}"]`).length;
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** ปลายทางของคำสั่งเมนู (pure เทสต์ได้) · คืน null = ย้ายไม่ได้ (อยู่สุดแล้ว) */
 export function reorderTarget(action: "up" | "down" | "top" | "bottom", i: number, count: number): number | null {
@@ -67,14 +82,45 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
   const group = opts.group;
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  // ☑ เลือกหลายรายการ (ตำแหน่งในลิสต์ที่แสดง)
+  const [sel, setSel] = useState<Set<number>>(() => new Set());
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  const lastPick = useRef<number | null>(null);
+  const busy = useRef(false);
+  const toggleSel = (i: number) => { lastPick.current = i; setSel((p) => { const n = new Set(p); if (n.has(i)) n.delete(i); else n.add(i); return n; }); };
+  const rangeSel = (i: number) => {
+    const from = lastPick.current ?? i;
+    setSel((p) => { const n = new Set(p); for (const k of indexRange(from, i)) n.add(k); return n; });
+  };
+  const clearSel = () => { lastPick.current = null; setSel(new Set()); };
+  useEscLayer(sel.size > 0, clearSel);
+  /** ย้ายตามลำดับปลายทาง: แตกเป็นการย้ายทีละตัว รอหน้าอัปเดตระหว่างครั้ง */
+  const runOrder = async (finalOrder: number[]) => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      const moves = planSingleMoves(finalOrder);
+      for (let k = 0; k < moves.length; k++) {
+        onReorderRef.current(moves[k][0], moves[k][1]);
+        if (k < moves.length - 1) await wait(40);
+      }
+    } finally { busy.current = false; clearSel(); }
+  };
   const overRef = useRef<number | null>(null);
   const onReorderRef = useRef(onReorder);
   onReorderRef.current = onReorder;
   const onDropTargetRef = useRef(opts.onDropTarget);
   onDropTargetRef.current = opts.onDropTarget;
   const listId = useId();
+  const runOrderRef = useRef<(o: number[]) => Promise<void>>(async () => {});
   useEffect(() => {
-    reorderRegistry.set(listId, (from, to) => onReorderRef.current(from, to));
+    reorderRegistry.set(listId, {
+      move: (from, to) => onReorderRef.current(from, to),
+      selected: () => [...selRef.current],
+      toggle: (i) => toggleSel(i),
+      runOrder: (o) => { void runOrderRef.current(o); },
+    });
     return () => { reorderRegistry.delete(listId); };
   }, [listId]);
 
@@ -82,6 +128,7 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
   const rowProps = (i: number) => ({
     [ROW_ATTR]: i,
     [ID_ATTR]: listId,
+    "data-reorder-selected": sel.has(i) ? "true" : undefined,
     ...(group ? { [GROUP_ATTR]: group } : {}),
     "data-drag-over": overIdx === i && dragIdx !== i ? "true" : undefined,
   });
@@ -166,7 +213,11 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
           window.addEventListener("click", eat, { capture: true, once: true });
           setTimeout(() => window.removeEventListener("click", eat, { capture: true }), 0);
         }
-        if (active && to !== null && to !== i) onReorderRef.current(i, to);
+        const group = selRef.current;
+        if (active && to !== null && to !== i && group.size > 1 && group.has(i)) {
+          // ลากตัวที่เลือกอยู่ = ย้ายทั้งกลุ่ม
+          void runOrderRef.current(blockMoveOrder(countRows(listId), [...group], to));
+        } else if (active && to !== null && to !== i) onReorderRef.current(i, to);
         else if (active && to === null && dropKey) onDropTargetRef.current?.(i, dropKey);
         cancelled = true;
         active = false;
@@ -180,9 +231,13 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
   };
 
   // props ของ "หูจับ" = ตัวเริ่มลาก (ขยับเกิน 4px)
+  runOrderRef.current = runOrder;
   const handleProps = (i: number) => ({
     onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
       if (e.button !== 0) return;
+      // Ctrl/⌘+คลิก = เลือก/เลิกเลือก · Shift+คลิก = เลือกเป็นช่วง (ไม่เริ่มลาก)
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); toggleSel(i); return; }
+      if (e.shiftKey) { e.preventDefault(); rangeSel(i); return; }
       e.preventDefault();
       track(i, e.clientX, e.clientY, "move");
     },
@@ -202,9 +257,9 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
   });
 
   /** คลาสไฮไลต์แถว (กำลังลาก / กำลังจะวางตรงนี้) — ต่อท้าย className ของแถว */
-  const rowCls = (i: number) => `${dragIdx === i ? "opacity-40" : ""} ${overIdx === i && dragIdx !== i ? "ring-2 ring-violet-300" : ""}`;
+  const rowCls = (i: number) => `${dragIdx === i || (dragIdx != null && sel.size > 1 && sel.has(dragIdx) && sel.has(i)) ? "opacity-40" : ""} ${overIdx === i && dragIdx !== i ? "ring-2 ring-violet-300" : ""} ${sel.has(i) ? "bg-violet-50 ring-1 ring-violet-300" : ""}`;
 
-  return { rowProps, handleProps, holdProps, rowCls, dragIdx, overIdx };
+  return { rowProps, handleProps, holdProps, rowCls, dragIdx, overIdx, selected: sel, clearSelection: clearSel };
 }
 
 /** หูจับสำหรับลาก (วางไว้หัวแถว) — กระจาย props จาก handleProps(i)
@@ -231,12 +286,18 @@ export function DragHandle({ title, className = "", menu = true, ...rest }: { ti
     const r = ref.current.getBoundingClientRect();
     setPos({ left: Math.min(r.left, window.innerWidth - 168), top: r.bottom + 160 > window.innerHeight ? r.top - 156 : r.bottom + 4, i: index!, count });
   };
+  const entry = listId ? reorderRegistry.get(listId) : undefined;
+  const groupSel = pos && entry ? entry.selected() : [];
+  const inGroup = !!pos && groupSel.length > 1 && groupSel.includes(pos.i);
   const pick = (action: "up" | "down" | "top" | "bottom") => {
     if (!pos) return;
-    const to = reorderTarget(action, pos.i, pos.count);
     setPos(null);
-    if (to != null) reorderRegistry.get(listId!)?.(pos.i, to);
+    if (inGroup) { const o = groupMenuOrder(pos.count, groupSel, action); if (o) entry?.runOrder(o); return; }
+    const to = reorderTarget(action, pos.i, pos.count);
+    if (to != null) entry?.move(pos.i, to);
   };
+  const disabledFor = (a: "up" | "down" | "top" | "bottom") =>
+    !pos ? true : inGroup ? groupMenuOrder(pos.count, groupSel, a) == null : reorderTarget(a, pos.i, pos.count) == null;
   const items: { a: "up" | "down" | "top" | "bottom"; label: string }[] = [
     { a: "top", label: "⤒ ไปบนสุด" }, { a: "up", label: "↑ ขึ้น 1 ช่อง" }, { a: "down", label: "↓ ลง 1 ช่อง" }, { a: "bottom", label: "⤓ ไปล่างสุด" },
   ];
@@ -257,14 +318,21 @@ export function DragHandle({ title, className = "", menu = true, ...rest }: { ti
       {pos && typeof document !== "undefined" && createPortal(
         <div data-reorder-menu style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 10050 }}
           className="w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-xl" role="menu">
-          <div className="px-2 py-1 text-[11px] text-slate-400">ลำดับที่ {pos.i + 1} / {pos.count}</div>
+          <div className="px-2 py-1 text-[11px] text-slate-400">{inGroup ? `ย้าย ${groupSel.length} รายการที่เลือก` : `ลำดับที่ ${pos.i + 1} / ${pos.count}`}</div>
           {items.map((it) => {
-            const off = reorderTarget(it.a, pos.i, pos.count) == null;
+            const off = disabledFor(it.a);
             return (
               <button key={it.a} type="button" role="menuitem" disabled={off} onClick={() => pick(it.a)}
                 className="flex h-9 w-full items-center rounded-md px-2 text-left text-sm text-slate-700 hover:bg-violet-50 disabled:opacity-30 disabled:hover:bg-transparent">{it.label}</button>
             );
           })}
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" role="menuitemcheckbox" aria-checked={groupSel.includes(pos.i)}
+            onClick={() => { entry?.toggle(pos.i); setPos(null); }}
+            className="flex h-9 w-full items-center rounded-md px-2 text-left text-sm text-slate-700 hover:bg-violet-50">
+            {groupSel.includes(pos.i) ? "☐ เลิกเลือกรายการนี้" : "☑ เลือกรายการนี้"}
+          </button>
+          <div className="px-2 pb-1 text-[10px] text-slate-400">เลือกหลายรายการ = ย้ายพร้อมกัน · คอม: Ctrl+คลิก ⠿</div>
         </div>,
         document.body,
       )}

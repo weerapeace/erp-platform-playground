@@ -6,6 +6,7 @@ import { refreshIfDirty, triggerRefresh } from "@/lib/refresh-bus";
 import { tr } from "@/lib/lang";   // ข้อความระบบ 2 ภาษา (ภาษาเปลี่ยน = รีโหลดหน้า → อ่านตอน render พอ)
 import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncLayoutPrefs } from "@/lib/modal-layout-pref";
 import { useEscLayer } from "./esc-layer";
+import { MinimizedModalBar, useMinimizedSlot } from "./minimized";
 
 // ตั้งขนาดป๊อปตามที่จำไว้ "ก่อนวาดจอ" (ไม่กระพริบ) — ฝั่ง server ไม่มีจอ ใช้ useEffect แทน
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -287,6 +288,11 @@ export function ERPModal({
   dockWRef.current = dockW;
   const [dockHint, setDockHint] = useState<"l" | "r" | null>(null);
   const docked = !!dock && canDrag;
+  // ➖ ย่อเป็นแถบเล็กมุมจอ (2026-11-17) — ดูหน้าข้างหลังได้ แล้วกดกลับมาทำต่อ ข้อมูลในป๊อปไม่หาย (ป๊อปยังเปิดค้างแค่ซ่อนไว้)
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => { if (!open) setMinimized(false); }, [open]);
+  const minSlot = useMinimizedSlot(open && minimized && !embedded);
+  const canMinimize = size !== "sm" && !embedded;
 
   useEffect(() => { setMounted(true); prefetchLayoutPrefs(); }, []);
   useRefreshOnClose(open);
@@ -496,7 +502,7 @@ export function ERPModal({
     }
   }, [hasUnsavedChanges, onClose]);
 
-  const isTopEsc = useEscTop(open);
+  const isTopEsc = useEscTop(open && !minimized);   // ย่ออยู่ = ไม่รับ Esc (หน้าข้างหลังใช้ Esc ได้)
   useEffect(() => {
     if (!open) { setShowUnsavedWarning(false); return; }
     const handler = (e: KeyboardEvent) => {
@@ -504,7 +510,7 @@ export function ERPModal({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, handleClose]);
+  }, [open, handleClose, minimized]);
 
   // closeOnBackdrop=false = กดนอกกล่องไม่ปิดจริง (เดิมยังปิดได้ถ้าไม่มีข้อมูลค้าง) — ป๊อปยืนยันอันตราย/ป๊อปที่ต้องกดปุ่ม · ปุ่ม ✕ / Esc ยังปิดได้
   const backdropDismiss = useBackdropDismiss(!closeOnBackdrop ? undefined : hasUnsavedChanges ? handleClose : onClose);
@@ -546,9 +552,18 @@ export function ERPModal({
         }
       : undefined;
 
+  const bar = minimized ? (
+    <MinimizedModalBar slot={minSlot} title={title} unsaved={hasUnsavedChanges}
+      onRestore={() => setMinimized(false)}
+      onClose={() => { setMinimized(false); handleClose(); }} />
+  ) : null;
+
   return createPortal(
-    <div data-erp-modal
-      className={docked
+    <>
+    {bar}
+    <div {...(minimized ? {} : { "data-erp-modal": true })}
+      aria-hidden={minimized || undefined}
+      className={minimized ? "hidden" : docked
         ? `fixed inset-0 z-50 flex ${dock === "r" ? "justify-end" : "justify-start"} pointer-events-none`
         : "fixed inset-0 z-50 flex items-center justify-center p-4"}
       style={zIndex ? { zIndex } : undefined}
@@ -607,6 +622,16 @@ export function ERPModal({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="4" y="6" width="16" height="12" rx="2" /><path d="M9 3h6" />
                 </svg>
+              </button>
+            )}
+            {canMinimize && (
+              <button
+                onClick={() => setMinimized(true)}
+                title={tr("ย่อเป็นแถบเล็กมุมจอ — ดูหน้าข้างหลังได้ แล้วกดกลับมาทำต่อ (ข้อมูลไม่หาย)", "Minimize to a small bar — look at the page behind, then come back (nothing is lost)")}
+                aria-label={tr("ย่อเก็บ", "Minimize")}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 19h14" /></svg>
               </button>
             )}
             {canReset && (
@@ -710,7 +735,8 @@ export function ERPModal({
           </>
         )}
       </div>
-    </div>,
+    </div>
+    </>,
     document.body
   );
 }

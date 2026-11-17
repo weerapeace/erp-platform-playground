@@ -13,18 +13,33 @@
  * <SearchableMultiSelect values={["a","b"]} options={…} onChange={(vals) => …} maxChips={2} highlight={["a"]} onCreate={(q) => …} />
  *   ปุ่มโชว์ค่าที่เลือกเป็นชิป (เกิน maxChips = "+N") · กดแล้วติ๊กได้หลายตัว + พิมพ์ค้น · ค่าที่ไม่อยู่ในรายการ (กำหนดเอง) ยังโชว์/เอาออกได้
  *   highlight = ค่าที่ระบบแนะนำ (ป้าย "แนะนำ") · onCreate = อนุญาตพิมพ์ค่าใหม่เอง
+ *
+ * ค้นแบบไม่ต้องตรงเป๊ะ (2026-11-17 · lib/fuzzy-rank): ตรงเป๊ะขึ้นก่อน → ขึ้นต้น → มีคำ → ทุกคำครบ → ตัวอักษรตามลำดับ
+ *   ข้ามตัวคั่นได้ ("pix 22" = "PIX-22") · ลืมสลับแป้นไทย/อังกฤษก็เจอ ("ยรป" = "pix")
+ * ปุ่ม "+ สร้างใหม่" ท้ายรายการ (onCreate): พิมพ์ชื่อ → กดปุ่ม หรือ Enter · createPermission = ซ่อนปุ่มถ้าไม่มีสิทธิ์
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/components/i18n";
+import { useAuthOptional } from "@/components/auth";
+import { rankOptions } from "@/lib/fuzzy-rank";
+
+/** มีสิทธิ์สร้างไหม (ไม่ระบุสิทธิ์ = ได้ · อยู่นอกระบบล็อกอิน = ไม่ได้) */
+function useCanCreate(perm?: string): boolean {
+  const auth = useAuthOptional();
+  if (!perm) return true;
+  return !!auth?.can(perm as Parameters<NonNullable<typeof auth>["can"]>[0]);
+}
 
 export type SelectOption = { value: string; label: string; badge?: string; sub?: string; searchText?: string };
 
 type Pos = { left: number; top: number; width: number; openUp: boolean };
 
 export function SearchableSelect({
-  value, options, onChange, placeholder: placeholderProp, disabled, className, onCreate, createLabel: createLabelProp, initialQuery,
+  value, options, onChange, placeholder: placeholderProp, disabled, className, onCreate: onCreateProp, createLabel: createLabelProp, initialQuery, createPermission,
 }: {
+  /** สิทธิ์ที่ต้องมีถึงจะเห็นปุ่ม "+ สร้างใหม่" (เช่น "products.create") */
+  createPermission?: string;
   value: string;
   options: SelectOption[];
   onChange: (v: string) => void;
@@ -40,6 +55,8 @@ export function SearchableSelect({
   const t = useT();
   const placeholder = placeholderProp ?? t("— เลือก —", "— Select —");
   const createLabel = createLabelProp ?? t("เพิ่มใหม่", "Add new");
+  const canCreate = useCanCreate(createPermission);
+  const onCreate = canCreate ? onCreateProp : undefined;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const openMenu = () => { setQ(initialQuery ?? ""); setOpen(true); };   // seed คำค้นทุกครั้งที่เปิด
@@ -47,17 +64,8 @@ export function SearchableSelect({
   const btnRef = useRef<HTMLButtonElement>(null);
   const cur = options.find((o) => o.value === value);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return options;
-    // value ที่เป็น uuid ไม่เอามาค้น — hex + "-" ทำให้คำสั้น ๆ (เช่น "C-") จับติดทุกแถว
-    const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-    return options.filter((o) =>
-      o.label.toLowerCase().includes(s) ||
-      (!isUuid(o.value) && o.value.toLowerCase().includes(s)) ||
-      (o.sub ?? "").toLowerCase().includes(s) ||
-      (o.searchText ?? "").toLowerCase().includes(s));
-  }, [q, options]);
+  // ค้นแบบไม่ต้องตรงเป๊ะ + จัดอันดับ (value ที่เป็น uuid ไม่เอามาค้น — ตัดใน lib/fuzzy-rank)
+  const filtered = useMemo(() => rankOptions(options, q), [q, options]);
 
   const close = () => { setOpen(false); setQ(""); };
 
@@ -95,7 +103,14 @@ export function SearchableSelect({
           <div className="fixed z-[1001] bg-white border border-slate-200 rounded-lg shadow-xl"
             style={{ left: pos.left, top: pos.top, width: pos.width, transform: pos.openUp ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
             <div className="p-2 border-b border-slate-100">
-              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหา…", "Search…")}
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={onCreate ? t("ค้นหา หรือพิมพ์ชื่อใหม่…", "Search or type a new name…") : t("ค้นหา…", "Search…")}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  // Enter = เลือกตัวบนสุด · ไม่มีผล + สร้างได้ = สร้างใหม่
+                  if (filtered[0]) { onChange(filtered[0].value); close(); }
+                  else if (onCreate && q.trim()) { onCreate(q.trim()); close(); }
+                }}
                 className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div className="max-h-60 overflow-y-auto py-1">
@@ -114,6 +129,12 @@ export function SearchableSelect({
                   className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-100 flex items-center gap-1.5">
                   <span className="text-base leading-none">＋</span> {createLabel}: <strong>&ldquo;{q.trim()}&rdquo;</strong>
                 </button>
+              )}
+              {/* ยังไม่พิมพ์ → บอกว่าเพิ่มใหม่ได้ (ปุ่มท้ายรายการ) */}
+              {onCreate && !q.trim() && (
+                <div className="px-3 py-2 text-xs text-emerald-700/80 border-t border-slate-100 flex items-center gap-1.5">
+                  <span className="text-base leading-none">＋</span> {t("พิมพ์ชื่อในช่องค้นหาเพื่อ", "Type a name above to")} {createLabel}
+                </div>
               )}
             </div>
           </div>
@@ -179,7 +200,7 @@ export function SearchableMultiSelect({
   const extra: SelectOption[] = values.filter((v) => !options.some((o) => o.value === v)).map((v) => ({ value: v, label: v, sub: t("ค่ากำหนดเอง", "Custom") }));
   const all = [...extra, ...options];
   const s = q.trim().toLowerCase();
-  const filtered = s ? all.filter((o) => o.label.toLowerCase().includes(s) || (o.sub ?? "").toLowerCase().includes(s) || (o.searchText ?? "").toLowerCase().includes(s)) : all;
+  const filtered = s ? rankOptions(all, s) : all;
   const toggle = (v: string) => onChange(set.has(v) ? values.filter((x) => x !== v) : [...values, v]);
   const close = () => { setOpen(false); setQ(""); };
   const chips = values.slice(0, maxChips);

@@ -7,12 +7,16 @@
  * - ค้นหาผ่าน /api/pickers/skus (ของกลาง)
  * - excludeIds: ซ่อน/กันเลือกซ้ำกับที่มีอยู่แล้ว
  * - onConfirm คืน SkuPickerValue[] ที่เลือก
+ * - 📋 วางรหัสหลายตัวในช่องค้นหา (คัดลอกคอลัมน์จาก Excel / คั่นด้วย , ;) → ติ๊กให้ทุกตัวที่เจอ + บอกรหัสที่ไม่พบ (คัดลอกไปเช็กต่อได้)
+ *   หาด้วยรหัสหรือบาร์โค้ด · POST /api/pickers/skus { codes } (lib/parse-pasted-codes)
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import type { SkuPickerValue } from "@/components/pickers";
+import { looksLikeCodeList, parsePastedCodes } from "@/lib/parse-pasted-codes";
 
 const imgUrl = (key: string | null | undefined) =>
   key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null;
@@ -66,6 +70,28 @@ export function SkuMultiPickerModal({
   const [picked, setPicked] = useState<Map<string, SkuPickerValue>>(new Map());
 
   const excluded = useMemo(() => new Set(excludeIds), [excludeIds]);
+  const toast = useToast();
+  // 📋 ผลการวางรหัสหลายตัว
+  const [pasteMsg, setPasteMsg] = useState<{ added: number; already: number; missing: string[] } | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const pasteCodes = async (text: string) => {
+    const codes = parsePastedCodes(text);
+    if (!codes.length) return;
+    setPasting(true);
+    try {
+      const res = await apiFetch("/api/pickers/skus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes, sales_only: salesOnly }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "หาไม่สำเร็จ");
+      const rows = (j.data ?? []) as SkuPickerValue[];
+      const already = rows.filter((r) => excluded.has(r.id)).length;
+      const fresh = rows.filter((r) => !excluded.has(r.id) && !picked.has(r.id));
+      setPicked((prev) => { const next = new Map(prev); for (const r of fresh) next.set(r.id, r); return next; });
+      setPasteMsg({ added: fresh.length, already, missing: (j.missing ?? []) as string[] });
+    } catch (e) {
+      setPasteMsg({ added: 0, already: 0, missing: [] });
+      toast.error(e instanceof Error ? e.message : "หาไม่สำเร็จ", { details: e });
+    } finally { setPasting(false); }
+  };
 
   // ค่าที่เลือกได้ในตัวกรอง (โหลดจากทั้งฐานข้อมูล ครั้งเดียวตอนเปิด)
   const [facets, setFacets] = useState<{ categories: string[]; colors: string[]; uoms: string[] }>({ categories: [], colors: [], uoms: [] });
@@ -118,7 +144,7 @@ export function SkuMultiPickerModal({
   }, [open]);
 
   useEffect(() => {
-    if (open) { setQuery(""); setPicked(new Map()); setSortKey("name"); setSortDir("asc"); setGroupKey(""); setFilterField(""); setFilterValue(""); }
+    if (open) { setQuery(""); setPicked(new Map()); setPasteMsg(null); setSortKey("name"); setSortDir("asc"); setGroupKey(""); setFilterField(""); setFilterValue(""); }
   }, [open]);
 
   const toggle = (sku: SkuPickerValue) => {
@@ -217,8 +243,30 @@ export function SkuMultiPickerModal({
       }>
       <div className="space-y-3">
         <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="🔍 ค้นหา SKU / ชื่อสินค้า..."
+          onPaste={(e) => {
+            const text = e.clipboardData.getData("text");
+            if (!looksLikeCodeList(text)) return;   // ตัวเดียว = ค้นหาปกติ
+            e.preventDefault();
+            void pasteCodes(text);
+          }}
+          placeholder="🔍 ค้นหา SKU / ชื่อสินค้า... · วางรหัสหลายตัวจาก Excel ได้"
           className="h-10 w-full rounded-lg border border-pink-200 px-3 text-sm outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-100" />
+        {pasting && <div className="text-xs text-slate-500">กำลังหารหัสที่วาง…</div>}
+        {pasteMsg && !pasting && (
+          <div className={`rounded-lg border px-3 py-2 text-xs ${pasteMsg.missing.length ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>📋 ติ๊กให้แล้ว {pasteMsg.added} รายการ</span>
+              {pasteMsg.already > 0 && <span>เพิ่มไว้แล้ว {pasteMsg.already}</span>}
+              {pasteMsg.missing.length > 0 && <span className="font-medium">ไม่พบ {pasteMsg.missing.length} รหัส</span>}
+              {pasteMsg.missing.length > 0 && (
+                <button type="button" onClick={() => void navigator.clipboard?.writeText(pasteMsg.missing.join("\n"))}
+                  className="rounded border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">คัดลอกรหัสที่ไม่พบ</button>
+              )}
+              <button type="button" onClick={() => setPasteMsg(null)} className="ml-auto text-slate-400 hover:text-slate-600" aria-label="ปิด">✕</button>
+            </div>
+            {pasteMsg.missing.length > 0 && <div className="mt-1 break-words font-mono text-[11px]">{pasteMsg.missing.slice(0, 40).join(", ")}{pasteMsg.missing.length > 40 ? " …" : ""}</div>}
+          </div>
+        )}
 
         {/* แถบ จัดกลุ่ม / เรียง / กรอง (ทำบนรายการที่โหลดมา) */}
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
