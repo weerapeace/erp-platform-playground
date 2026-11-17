@@ -36,6 +36,7 @@ import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/des
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
 import { AlbumCover } from "@/components/album-cover";
+import { AlbumDropDialog } from "./album-drop-dialog";
 import { brandCards, brandViewItems, albumMonthKey } from "@/lib/sample-images";
 import { SAMPLE_SUB_SORTS, isAutoAlbumName, isSubSort, sortSubAlbums, parentGroupOf, type SampleSubSort } from "@/lib/sample-images";
 import { SampleAlbumPickerModal } from "./album-picker";
@@ -134,7 +135,8 @@ export function SampleImagesPage() {
   // อัลบั้มย่อย: เรียง (จัดเอง / ตาม Parent SKU / ใหม่สุด) · โหมดจัดลำดับ (← →) · โน้ตข้าง ๆ (เจ้าของเลือก 2026-11-17)
   const [subSort, setSubSort] = useUserPref<SampleSubSort>("sample_images_sub_sort", "manual", (r) => (isSubSort(r) ? r : null));
   const [orderMode, setOrderMode] = useState(false);
-  const [month, setMonth] = useState<string | null>(null);   // หน้าแบรนด์: กรองเดือนที่ลง
+  const [month, setMonth] = useState<string | null>(null);
+  const [albumDrop, setAlbumDrop] = useState<{ src: SampleAlbum; dst: SampleAlbum } | null>(null);   // ลากอัลบั้มวางบนอัลบั้ม → ถามรวม/ใส่ข้างใน   // หน้าแบรนด์: กรองเดือนที่ลง
   const [dropHost, setDropHost] = useState<SampleAlbum | null>(null);   // อัลบั้มแม่ของป๊อปลงรูป (อัลบั้มที่เปิด / อัลบั้มของวันนี้ตอนลงจากหน้าแบรนด์)
   const [noteOpen, setNoteOpen] = useState(false);
   const isLg = useMediaQuery("(min-width: 1024px)");
@@ -548,6 +550,40 @@ export function SampleImagesPage() {
     (d) => (d.kind === "photos" ? target.id !== album?.id : canMoveAlbum(tree, d.id, target.id) && albums?.find((a) => a.id === d.id)?.parent_id !== target.id),
     (d) => (d.kind === "photos" ? movePhotos(d.ids, target) : moveAlbum(d.id, target)));
 
+  /** ปล่อยบนการ์ดอัลบั้ม: รูป = ย้ายเข้า · อัลบั้ม = ถามก่อน "รวมเป็นอัลบั้มเดียว / ใส่ไว้ข้างใน" (เจ้าของเลือก 2026-11-17) — ชื่อในเส้นทางยังย้ายเข้าตรง ๆ */
+  const dropOnAlbumCard = (target: SampleAlbum) => dropProps(`al:${target.id}`,
+    (d) => (d.kind === "photos" ? target.id !== album?.id : canMoveAlbum(tree, d.id, target.id) && albums?.find((a) => a.id === d.id)?.parent_id !== target.id),
+    (d) => {
+      if (d.kind === "photos") { movePhotos(d.ids, target); return; }
+      const src = albums?.find((a) => a.id === d.id);
+      if (src) setAlbumDrop({ src, dst: target });
+    });
+  /** รวมอัลบั้ม: รูป + อัลบั้มย่อยของ src ย้ายเข้า dst · สินค้าที่เชื่อม: ใช้ของ dst (ว่าง = เอาของ src) · ลบ src ที่ว่างแล้ว · ย้อนกลับ = สร้าง src คืน ย้ายของกลับ */
+  const mergeAlbums = (src: SampleAlbum, dst: SampleAlbum) => {
+    let moved: string[] = [], kids: string[] = [], linked = false, deleted = false;
+    void act(async () => {
+      const d = await loadSamples(src.id);
+      moved = (d.photos ?? []).map((p) => p.id);
+      if (moved.length) await movePhotosTo(moved, src.id, dst.id);
+      kids = (albums ?? []).filter((a) => a.parent_id === src.id).map((a) => a.id);
+      for (const k of kids) await moveAlbumTo(k, dst.id);
+      if (!(dst.parent_sku_codes ?? []).length && (src.parent_sku_codes ?? []).length) { await linkAlbumProduct(dst.id, src.parent_sku_codes ?? [], src.sku_codes ?? []); linked = true; }
+      try { await deleteEmptyAlbum(src.id); deleted = true; } catch { /* มีรูปในถังขยะ = เก็บอัลบั้มไว้ */ }
+      return t(`รวม "${nameOf(src)}" เข้า "${nameOf(dst)}" แล้ว (${moved.length} รูป)${deleted ? "" : " · อัลบั้มเดิมยังมีรูปในถังขยะ เลยเก็บไว้"}`, `Merged into "${nameOf(dst)}"`);
+    }, albumId, async () => {
+      let back = src.id;
+      if (deleted) {
+        const made = await createSubAlbum(src.parent_id ?? dst.id, src.name);
+        back = made.id;
+        if (!src.parent_id) await moveAlbumTo(made.id, null);
+        if ((src.parent_sku_codes ?? []).length) await linkAlbumProduct(made.id, src.parent_sku_codes ?? [], src.sku_codes ?? []);
+      }
+      if (moved.length) await movePhotosTo(moved, dst.id, back);
+      for (const k of kids) await moveAlbumTo(k, back);
+      if (linked) await linkAlbumProduct(dst.id, [], []);
+    });
+  };
+
   /** ปล่อยบนรูป: ขอบซ้าย/ขวา = สลับลำดับ · กลาง = รวมเป็นอัลบั้มใหม่ (แบบเดิม) */
   const photoDrop = (id: string) => {
     const zoneHere = (e: React.DragEvent): DropZone => (canReorder ? zoneOf(e) : "merge");
@@ -567,7 +603,7 @@ export function SampleImagesPage() {
   };
   /** ปล่อยบนการ์ดอัลบั้มย่อย: ลากอัลบั้มพี่น้องมาที่ขอบ = สลับลำดับ · กลาง (หรือลากรูปมา) = ย้ายเข้า (แบบเดิม) */
   const subAlbumDrop = (target: SampleAlbum) => {
-    const into = dropOnAlbum(target);
+    const into = dropOnAlbumCard(target);
     const sibling = (d: DragItem | null) => d?.kind === "album" && d.id !== target.id && albums?.find((a) => a.id === d.id)?.parent_id === target.parent_id;
     const zoneHere = (e: React.DragEvent): DropZone => { const d = dragRef.current; return canReorder && (orderMode || subSort === "manual") && sibling(d) ? zoneOf(e) : "merge"; };
     return {
@@ -888,7 +924,7 @@ export function SampleImagesPage() {
                   : (
                     <div style={albumGrid.gridStyle} {...albumGrid.compactAttr} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
                       {bItems.map((it, i) => it.kind === "loose" ? (
-                        <button key={`l:${it.album.id}`} type="button" onClick={() => void openAlbum(it.album.id)} {...withFileDrop(it.album.id, dropOnAlbum(it.album))}
+                        <button key={`l:${it.album.id}`} type="button" onClick={() => void openAlbum(it.album.id)} {...withFileDrop(it.album.id, dropOnAlbumCard(it.album))}
                           className={`relative overflow-hidden rounded-xl border-2 border-dashed bg-white text-left transition hover:shadow-md ${overKey === `al:${it.album.id}` || cardDropLabel(it.album) ? "border-emerald-400" : "border-amber-300"}`}>
                           {cardDropLabel(it.album) && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{cardDropLabel(it.album)}</span>}
                           <AlbumCover keys={it.album.preview_keys} total={it.count} />
@@ -901,7 +937,7 @@ export function SampleImagesPage() {
                         <SampleAlbumCard key={it.album.id} sub album={it.album} order={i + 1 - bItems.filter((x) => x.kind === "loose").length}
                           dateTag={it.day ? albumCardLabel(it.day) : thaiShortDate(new Date(it.album.created_at))}
                           onOpen={() => void openAlbum(it.album.id)} highlight={overKey === `al:${it.album.id}`} dropLabel={cardDropLabel(it.album)}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: it.album.id })), ...withFileDrop(it.album.id, dropOnAlbum(it.album)) }} />
+                          extra={{ ...dragProps(() => ({ kind: "album", id: it.album.id })), ...withFileDrop(it.album.id, dropOnAlbumCard(it.album)) }} />
                       ))}
                     </div>
                   )}
@@ -954,6 +990,10 @@ export function SampleImagesPage() {
         existing={dropFiles && dropHost ? (albums ?? []).filter((a) => a.id !== dropHost.id && (a.brand_id ?? null) === (dropHost.brand_id ?? null)) : []}
         defaultParentCode={dropHost?.parent_sku_codes?.[0] || lastParent || null} defaultSplit="album"
         onCancel={() => { setDropFiles(null); setDropHost(null); }} onConfirm={(plan) => void confirmDrop(plan)} />
+
+      <AlbumDropDialog src={albumDrop?.src ?? null} dst={albumDrop?.dst ?? null} nameOf={(a) => nameOf(a)} onClose={() => setAlbumDrop(null)}
+        onMerge={() => { const x = albumDrop; setAlbumDrop(null); if (x) mergeAlbums(x.src, x.dst); }}
+        onNest={() => { const x = albumDrop; setAlbumDrop(null); if (x) moveAlbum(x.src.id, x.dst); }} />
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}
         initialBrand={albumBrand?.name ?? null}
