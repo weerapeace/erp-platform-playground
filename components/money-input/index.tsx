@@ -14,9 +14,14 @@
  *
  * วิธีใช้:
  *   <MoneyInput value={amount} onChange={(raw) => setAmount(raw)} className="..." />
+ *
+ * พิมพ์สูตรได้ (2026-11-17): เช่น 1200*3+50 → กด Enter หรือออกจากช่อง = 3,650
+ *   รองรับ + - * / ( ) · สูตรผิด = คืนค่าเดิม · ปิดได้ด้วย formula={false}
+ *   ตัวคำนวณ = lib/calc-expression (ไม่ใช้ eval)
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { evalExpression, looksLikeFormula } from "@/lib/calc-expression";
 
 /** ตัดให้เหลือเฉพาะรูปแบบตัวเลขที่บันทึกได้: เครื่องหมายลบนำหน้า + ตัวเลข + จุดทศนิยมตัวเดียว */
 export function sanitizeNumeric(raw: string): string {
@@ -58,10 +63,12 @@ export type MoneyInputProps = {
   onBlur?: (raw: string) => void;
   /** ดักปุ่มเอง (เช่น Enter = บันทึก, Escape = ยกเลิก) — เรียกก่อน logic ภายใน */
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  /** พิมพ์สูตรคำนวณได้ (ค่าเริ่ม true) */
+  formula?: boolean;
 };
 
 export function MoneyInput({
-  value, onChange, disabled, placeholder, className = "", style, id, title, autoFocus, onBlur, onKeyDown,
+  value, onChange, disabled, placeholder, className = "", style, id, title, autoFocus, onBlur, onKeyDown, formula = true,
 }: MoneyInputProps) {
   const ref = useRef<HTMLInputElement>(null);
   const caretRef = useRef<number | null>(null);
@@ -109,7 +116,21 @@ export function MoneyInput({
   };
 
   // กด Backspace ตรงหน้าลูกน้ำ → ให้ลบ "ตัวเลข" ก่อนหน้าลูกน้ำ (ไม่ใช่ลบลูกน้ำเปล่า ๆ แล้วไม่มีอะไรเกิดขึ้น)
+  const isFormula = formula && looksLikeFormula(text);
+  const preview = isFormula ? evalExpression(text) : null;
+
+  /** สูตรที่พิมพ์ค้าง → คำนวณแล้วตั้งค่า (สูตรผิด = คืนค่าเดิม) · คืนค่าดิบสุดท้าย */
+  const commitFormula = (): string => {
+    const v = evalExpression(text);
+    const raw = v == null ? sanitizeNumeric(lastEmitRef.current) : sanitizeNumeric(String(v));
+    lastEmitRef.current = raw;
+    setText(groupThousands(raw));
+    onChange(raw);
+    return raw;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isFormula && e.key === "Enter") { e.preventDefault(); commitFormula(); return; }
     onKeyDown?.(e);
     const el = ref.current;
     if (!el || e.defaultPrevented || e.key !== "Backspace") return;
@@ -123,7 +144,7 @@ export function MoneyInput({
     <input
       ref={ref}
       id={id}
-      title={title}
+      title={isFormula ? (preview == null ? "สูตรยังไม่ครบ" : `= ${groupThousands(String(preview))} (กด Enter)`) : title}
       autoFocus={autoFocus}
       type="text"
       inputMode="decimal"
@@ -133,9 +154,15 @@ export function MoneyInput({
       placeholder={placeholder}
       style={style}
       className={className}
-      onChange={(e) => apply(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+      onChange={(e) => {
+        const v = e.target.value;
+        // พิมพ์สูตร → เก็บข้อความตามที่พิมพ์ ยังไม่ส่งค่า (คำนวณตอน Enter / ออกจากช่อง)
+        if (formula && looksLikeFormula(v)) { setText(v.replace(/[^0-9.,+\-*/()×÷xX\s]/g, "")); return; }
+        apply(v, e.target.selectionStart ?? v.length);
+      }}
       onKeyDown={handleKeyDown}
       onBlur={() => {
+        if (isFormula) { const raw = commitFormula(); onBlur?.(raw); return; }
         // ออกจากช่อง → เก็บกวาดค่าที่พิมพ์ค้าง เช่น "1234." → "1234"
         const raw = sanitizeNumeric(text).replace(/\.$/, "");
         lastEmitRef.current = raw;

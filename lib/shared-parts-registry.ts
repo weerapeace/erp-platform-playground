@@ -178,7 +178,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "modal", label: "หน้าต่างเด้ง + ยืนยัน + ลิ้นชัก", code: "ERPModal · ConfirmDialog · Drawer · BottomSheet", category: "popup",
     source: { path: "components/modal" },
-    what: "ป๊อปอัปกลางทุกแบบ ถามก่อนปิดเมื่อมีข้อมูลยังไม่บันทึก มีแบบปุ่มอันตราย จำขนาดที่ผู้ใช้ลากไว้ · BottomSheet = แผ่นเลื่อนจากล่างสำหรับจอมือถือ",
+    what: "ป๊อปอัปกลางทุกแบบ ถามก่อนปิดเมื่อมีข้อมูลยังไม่บันทึก มีแบบปุ่มอันตราย จำขนาดที่ผู้ใช้ลากไว้ · BottomSheet = แผ่นเลื่อนจากล่างสำหรับจอมือถือ · Esc ปิดทีละชั้น (กองกลาง lib/esc-stack ร่วมกับดูรูปเต็มจอ/แผ่นล่าง — ชั้นลอยใหม่ใช้ useEscLayer)",
     when: "ทุกป๊อปอัป ทุกการยืนยันลบ / อนุมัติ / ยกเลิก ทุกลิ้นชักด้านข้าง",
     notWhen: "ห้ามเขียนป๊อปอัปเองในหน้า",
     doc: "popup-policy.md", sameJob: "popup", primary: true, legacyKey: "erp_modal",
@@ -225,14 +225,14 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "form", label: "ฟอร์มกลาง", code: "ERPForm", category: "input",
     source: { path: "components/form" },
-    what: "ฟอร์มพร้อมตรวจข้อมูล ช่องบังคับ ข้อความผิดพลาด บันทึกร่าง กันกดซ้ำ สิทธิ์รายช่อง",
+    what: "ฟอร์มพร้อมตรวจข้อมูล ช่องบังคับ ข้อความผิดพลาด บันทึกร่าง กันกดซ้ำ สิทธิ์รายช่อง · Ctrl+S บันทึก (useSaveShortcut ใช้ร่วมกับ SaveBar/ลิ้นชัก MasterCRUD)",
     when: "ฟอร์มสร้าง/แก้ข้อมูลที่ไม่ได้อยู่ใน MasterCRUD",
     legacyKey: "erp_form",
   },
   {
     key: "money-input", label: "ช่องจำนวนเงิน", code: "MoneyInput", category: "input",
     source: { path: "components/money-input" },
-    what: "ใส่คอมมาให้ ปัดทศนิยม กันพิมพ์ผิด",
+    what: "ใส่คอมมาให้ ปัดทศนิยม กันพิมพ์ผิด · พิมพ์สูตรได้ เช่น 1200*3+50 แล้ว Enter (lib/calc-expression ไม่ใช้ eval)",
     when: "ทุกช่องที่เป็นเงิน",
     notWhen: "ช่องจำนวนชิ้น ให้ใช้ StepInput หรือช่องตัวเลขปกติ",
     doc: "money-input.md",
@@ -240,7 +240,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "date-input", label: "ช่องวันที่", code: "DateInput", category: "input",
     source: { path: "components/date-input" },
-    what: "ช่องเลือกวันที่/เวลา แบบ 24 ชั่วโมง ใช้เหมือนกันทุกหน้า",
+    what: "ช่องเลือกวันที่/เวลา แบบ 24 ชั่วโมง ใช้เหมือนกันทุกหน้า · คลิกช่องมีปุ่มลัด วันนี้/พรุ่งนี้/+7 วัน/สิ้นเดือน (เวลาไทย)",
     when: "ทุกช่องวันที่",
   },
   {
@@ -261,7 +261,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "save-bar", label: "แถบบันทึกติดขอบล่างหน้า", code: "SaveBar", category: "input",
     source: { path: "components/save-bar" },
-    what: "ปุ่มบันทึก/ยกเลิก โผล่ติดขอบล่างเมื่อมีการแก้ไข",
+    what: "ปุ่มบันทึก/ยกเลิก โผล่ติดขอบล่างเมื่อมีการแก้ไข · Ctrl+S = บันทึก (แป้นไทยใช้ได้)",
     when: "หน้าตั้งค่า/หน้าแก้ข้อมูลเต็มหน้า",
     notWhen: "แท็บย่อยในป๊อปอัปหรือลิ้นชัก ให้ใช้ FooterSave",
     doc: "save-bar.md",
@@ -593,7 +593,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "state-views", label: "กำลังโหลด / ว่าง / โหลดพลาด", code: "LoadingState · EmptyState · ErrorState", category: "state",
     source: { path: "components/state-views" },
-    what: "กล่องมาตรฐานตอนโหลด ไม่มีข้อมูล หรือโหลดพลาด พร้อมปุ่มลองใหม่",
+    what: "กล่องมาตรฐานตอนโหลด ไม่มีข้อมูล หรือโหลดพลาด พร้อมปุ่มลองใหม่ · ตอนโหลดเป็นโครงสีเทา (skeleton) · กล่องว่างมีปุ่มล้างตัวกรอง/สร้างใหม่ (onClearFilters/onCreate)",
     when: "ทุกหน้าและทุกแผงที่โหลดข้อมูล",
     notWhen: "ห้ามเขียนข้อความกำลังโหลดเอง",
     doc: "state-views.md",
@@ -608,7 +608,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "toast", label: "แจ้งผลลอยมุมจอ", code: "Toast", category: "state",
     source: { path: "components/toast" },
-    what: "ข้อความ สำเร็จ / ผิดพลาด / เตือน ลอยมุมขวาบน",
+    what: "ข้อความ สำเร็จ / ผิดพลาด / เตือน ลอยมุมขวาบน · ผิดพลาดมีปุ่มคัดลอกรายละเอียด · toast.undo() ปุ่มย้อนกลับนับ 5 วินาที หลังลบ/ย้าย",
     when: "หลังบันทึก ลบ ส่ง ทุกครั้ง",
   },
 
@@ -1041,7 +1041,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "color-picker", label: "เลือกสี", code: "ColorPicker / ColorInput", category: "input",
     source: { path: "components/color-picker" },
-    what: "แผงเลือกสีแบบลากได้ + ช่องรหัสสี ใช้ง่ายกว่าช่องสีของเบราว์เซอร์",
+    what: "แผงเลือกสีแบบลากได้ + ช่องรหัสสี ใช้ง่ายกว่าช่องสีของเบราว์เซอร์ · สีที่ใช้ล่าสุด 8 สี (จำในเครื่อง) · 💧 ดูดสีจากจอ (Chrome/Edge)",
   },
   {
     key: "bilingual-field", label: "ช่องกรอก 2 ภาษา", code: "BilingualField", category: "input",

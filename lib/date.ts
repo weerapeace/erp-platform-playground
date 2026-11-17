@@ -49,3 +49,20 @@ export function addDaysYmd(ymd: string, n: number): string {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
+
+/** วันสุดท้ายของเดือนของวันที่ "YYYY-MM-DD" — คิดแบบ UTC (ไม่เพี้ยนตามเขตเวลา) */
+export function endOfMonthYmd(ymd: string): string {
+  const [y, m] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/** ปุ่มลัดช่องวันที่ (ของกลาง DateInput): วันนี้ / พรุ่งนี้ / +7 วัน / สิ้นเดือน — อิงวันนี้ตามเวลาไทย */
+export function dateShortcuts(now: Date = new Date()): { key: string; label: string; ymd: string }[] {
+  const today = todayBangkok(now);
+  return [
+    { key: "today", label: "วันนี้", ymd: today },
+    { key: "tomorrow", label: "พรุ่งนี้", ymd: addDaysYmd(today, 1) },
+    { key: "plus7", label: "+7 วัน", ymd: addDaysYmd(today, 7) },
+    { key: "eom", label: "สิ้นเดือน", ymd: endOfMonthYmd(today) },
+  ];
+}

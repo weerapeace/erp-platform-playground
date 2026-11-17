@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
 
 // ---- Icons ----
 
@@ -430,9 +431,12 @@ export function ERPForm({
     e.preventDefault();
     onSubmit(e);
   };
+  // Ctrl+S (⌘S) = กดบันทึก (ส่งฟอร์มผ่านปุ่ม submit ปกติ → validation เดิมทำงานครบ)
+  const formRef = useRef<HTMLFormElement>(null);
+  useSaveShortcut(() => formRef.current?.requestSubmit(), { enabled: !loading, active: !readonly });
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
       {readonly && (
         <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-600">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

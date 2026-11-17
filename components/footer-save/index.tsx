@@ -12,6 +12,7 @@
  * ปุ่มล่าง: ไม่มีอะไรเปลี่ยน = จาง "บันทึก" · มีของค้าง = "💾 บันทึก" กดแล้วบันทึกทุกแท็บที่ค้าง
  */
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
 
 export interface FooterSaveSlot {
   /** ชื่อส่วนที่บันทึก (โชว์ใน tooltip) เช่น "เว็บไซต์" */
@@ -79,6 +80,8 @@ export type FooterSaveHost = ReturnType<typeof useFooterSaveHost>;
 
 /** ปุ่มบนแถบล่าง (ไม่มีแท็บฝาก = ไม่โชว์) */
 export function FooterSaveButton({ host, className }: { host: FooterSaveHost; className?: string }) {
+  // Ctrl+S (⌘S) = บันทึกทุกแท็บที่ค้าง (เหมือนกดปุ่มนี้)
+  useSaveShortcut(host.has ? host.saveDirty : null, { enabled: host.anyDirty && !host.saving });
   if (!host.has) return null;
   const labels = host.slots.filter((x) => x.dirty && x.label).map((x) => x.label);
   return (

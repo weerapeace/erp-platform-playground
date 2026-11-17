@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { formatDate } from "@/lib/date";
+import { formatDate, dateShortcuts } from "@/lib/date";
 
 // ============================================================
 // DateInput กลาง — ช่องกรอกวันที่ที่ "โชว์ DD/MM/YYYY เสมอ"
 // ไม่ขึ้นกับภาษาของเบราว์เซอร์/Windows (ต่างจาก <input type="date"> เดิม)
 // value/onChange ใช้รูปแบบ ISO "YYYY-MM-DD" (เหมือนเดิม เก็บลง DB ได้ตรง)
 // มีปุ่มปฏิทิน 📅 เปิดตัวเลือกวันที่ของระบบให้กดง่าย
+// ปุ่มลัด (2026-11-17): คลิกในช่อง → แถบลอยใต้ช่อง [วันนี้] [พรุ่งนี้] [+7 วัน] [สิ้นเดือน]
+//   คิดวันตามเวลาไทยเสมอ (lib/date dateShortcuts) · ลอยทับ ไม่ดันหน้าเลื่อน · ปิดได้ quick={false}
 // ============================================================
 
 /** parse "DD/MM/YYYY" → ISO "YYYY-MM-DD" (คืน null ถ้าไม่ถูกรูปแบบ) */
@@ -25,15 +27,18 @@ function parseDMY(s: string): string | null {
 }
 
 export function DateInput({
-  value, onChange, disabled, placeholder, className,
+  value, onChange, disabled, placeholder, className, quick = true,
 }: {
   value: string | null | undefined;          // ISO "YYYY-MM-DD" หรือ ""
   onChange: (iso: string) => void;            // ส่งกลับเป็น ISO
   disabled?: boolean;
   placeholder?: string;
   className?: string;
+  /** แถบปุ่มลัดวันที่ตอนคลิกช่อง (ค่าเริ่ม true) */
+  quick?: boolean;
 }) {
   const [text, setText] = useState(() => formatDate(value));
+  const [focused, setFocused] = useState(false);
   const nativeRef = useRef<HTMLInputElement>(null);
 
   // sync เมื่อ value ภายนอกเปลี่ยน (เช่น โหลดข้อมูลเดิม / reset form)
@@ -63,7 +68,9 @@ export function DateInput({
         value={text}
         placeholder={placeholder ?? "วว/ดด/ปปปป"}
         onChange={(e) => commit(e.target.value)}
-        onBlur={() => setText(formatDate(value))}  // normalize กลับเป็นรูปแบบมาตรฐาน
+        onFocus={() => setFocused(true)}
+        onBlur={() => { setFocused(false); setText(formatDate(value)); }}  // normalize กลับเป็นรูปแบบมาตรฐาน
+        onKeyDown={(e) => { if (e.key === "Escape" && focused) setFocused(false); }}
         className="w-full h-9 px-3 pr-9 text-sm border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
       />
       <button
@@ -76,6 +83,19 @@ export function DateInput({
       >
         📅
       </button>
+      {quick && focused && !disabled && (
+        <div className="absolute left-0 top-full z-30 mt-1 flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-lg" role="group" aria-label="ปุ่มลัดวันที่">
+          {dateShortcuts().map((q) => (
+            <button key={q.key} type="button" tabIndex={-1}
+              // mousedown + preventDefault = ช่องไม่หลุดโฟกัสก่อนคลิกติด
+              onMouseDown={(e) => { e.preventDefault(); onChange(q.ymd); setText(formatDate(q.ymd)); setFocused(false); }}
+              title={formatDate(q.ymd)}
+              className={`h-7 whitespace-nowrap rounded-md px-2 text-xs font-medium ${value === q.ymd ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}>
+              {q.label}
+            </button>
+          ))}
+        </div>
+      )}
       {/* native date input (ซ่อน) — ใช้เป็นตัวเปิดปฏิทินระบบ + รับค่า ISO ตรง ๆ */}
       <input
         ref={nativeRef}

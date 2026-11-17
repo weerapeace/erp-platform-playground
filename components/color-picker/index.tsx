@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { readRecentColors, rememberColor } from "@/lib/recent-colors";
 
 // ── hex ↔ hsv ──
 function clamp(n: number, lo = 0, hi = 1) { return Math.max(lo, Math.min(hi, n)); }
@@ -63,6 +64,12 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
   // เช็กหลัง mount (ฝั่งเซิร์ฟเวอร์ไม่มี window → กัน hydration ไม่ตรง)
   const [canDrop, setCanDrop] = useState(false);
   useEffect(() => setCanDrop(!!eyeDropperCtor()), []);
+  // สีที่ใช้ล่าสุด 8 สี (จำในเครื่อง) — จดตอนปล่อยเมาส์ / ดูดสี / พิมพ์ hex ครบ / กดสีล่าสุด
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => setRecent(readRecentColors()), []);
+  const lastRef = useRef<string>(normHex(value) ?? "");
+  const remember = (hex?: string) => { const h = hex ?? lastRef.current; if (h) setRecent(rememberColor(h)); };
+  const applyHex = (nh: string) => { const x = hexToHsv(nh); setH(x.h); setS(x.s); setV(x.v); setHexText(nh); lastRef.current = nh; onChange(nh); };
   /** 💧 ดูดสีจากจุดไหนก็ได้บนจอ (กด Esc = ยกเลิก) */
   const pickFromScreen = async () => {
     const Ctor = eyeDropperCtor();
@@ -71,12 +78,8 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
       const { sRGBHex } = await new Ctor().open();
       const nh = normHex(sRGBHex) ?? rgbToHex(sRGBHex);
       if (!nh) return;
-      const x = hexToHsv(nh);
-      setH(x.h);
-      setS(x.s);
-      setV(x.v);
-      setHexText(nh);
-      onChange(nh);
+      applyHex(nh);
+      remember(nh);
     } catch {
       /* กด Esc / ปิดตัวดูดสี = ไม่เปลี่ยน */
     }
@@ -89,7 +92,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  const emit = (nh: number, ns: number, nv: number) => { const hex = hsvToHex(nh, ns, nv); setHexText(hex); onChange(hex); };
+  const emit = (nh: number, ns: number, nv: number) => { const hex = hsvToHex(nh, ns, nv); setHexText(hex); lastRef.current = hex; onChange(hex); };
 
   // ลาก: อ่าน element จาก e.currentTarget (ได้ตัวจริงเสมอ ไม่พึ่ง ref ที่ null ตอน render แรก)
   //       + setPointerCapture + window listener จน pointerup → ลากได้ลื่นทั้งกล่อง แม้เมาส์ออกนอกกรอบ
@@ -103,7 +106,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
     };
     move(e.clientX, e.clientY);
     const mv = (ev: PointerEvent) => move(ev.clientX, ev.clientY);
-    const up = () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
+    const up = () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); remember(); };
     window.addEventListener("pointermove", mv);
     window.addEventListener("pointerup", up);
   };
@@ -122,9 +125,18 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
         style={{ background: "linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)" }}>
         <span className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow" style={{ left: `${(h / 360) * 100}%`, background: hsvToHex(h, 1, 1) }} />
       </div>
+      {recent.length > 0 && (
+        <div className="mt-2 flex items-center gap-1" title="สีที่ใช้ล่าสุด">
+          {recent.map((c) => (
+            <button key={c} type="button" onClick={() => { applyHex(c); remember(c); }} title={c}
+              className={`h-5 w-5 shrink-0 rounded border ${c === normHex(hexText) ? "border-blue-500 ring-1 ring-blue-400" : "border-slate-200"}`} style={{ background: c }} />
+          ))}
+        </div>
+      )}
       <div className="mt-2 flex items-center gap-2">
         <span className="h-7 w-7 shrink-0 rounded border border-slate-200" style={{ background: hsvToHex(h, s, v) }} />
-        <input value={hexText} onChange={(e) => { setHexText(e.target.value); const nh = normHex(e.target.value); if (nh) { const x = hexToHsv(nh); setH(x.h); setS(x.s); setV(x.v); onChange(nh); } }}
+        <input value={hexText} onBlur={() => { const nh = normHex(hexText); if (nh) remember(nh); }}
+          onChange={(e) => { setHexText(e.target.value); const nh = normHex(e.target.value); if (nh) { const x = hexToHsv(nh); setH(x.h); setS(x.s); setV(x.v); lastRef.current = nh; onChange(nh); } }}
           className="h-7 flex-1 min-w-0 px-2 text-xs font-mono border border-slate-200 rounded" />
         {canDrop && (
           <button type="button" onClick={() => void pickFromScreen()} title="ดูดสีจากหน้าจอ — คลิกจุดไหนก็ได้ รวมในพรีวิวเว็บร้าน (Esc = ยกเลิก)"

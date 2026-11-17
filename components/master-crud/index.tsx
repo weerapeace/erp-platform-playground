@@ -19,6 +19,7 @@ import { DataTable, StatusModuleContext, type CardConfig, type DataTableView, ty
 import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
 import { FooterSaveProvider, FooterSaveButton, FooterSaveRegistrar, useFooterSaveHost } from "@/components/footer-save";
+import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
@@ -1729,6 +1730,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     } finally { setM2mSaving(false); }
   };
   const inlineM2mLabel = effectiveFields.filter((fd) => inlineM2mDirtyKeys.includes(fd.key)).map((fd) => fd.label).join(", ");
+  // Ctrl+S (⌘S) ในโหมดแก้ไข = กดปุ่ม "บันทึก" ล่างลิ้นชัก (ของกลาง useSaveShortcut · แป้นไทยใช้ได้) — โหมดดู ใช้ FooterSaveButton แทน
+  useSaveShortcut(async () => { await footerSave.saveDirty(); await save(); }, { enabled: !saving && !footerSave.saving, active: modalOpen && drawerMode === "edit" });
 
   const save = async () => {
     // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน

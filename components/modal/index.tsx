@@ -5,6 +5,7 @@ import { createPortal, flushSync } from "react-dom";
 import { refreshIfDirty, triggerRefresh } from "@/lib/refresh-bus";
 import { tr } from "@/lib/lang";   // ข้อความระบบ 2 ภาษา (ภาษาเปลี่ยน = รีโหลดหน้า → อ่านตอน render พอ)
 import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncLayoutPrefs } from "@/lib/modal-layout-pref";
+import { useEscLayer } from "./esc-layer";
 
 // ตั้งขนาดป๊อปตามที่จำไว้ "ก่อนวาดจอ" (ไม่กระพริบ) — ฝั่ง server ไม่มีจอ ใช้ useEffect แทน
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -99,21 +100,9 @@ export type ModalSize = "sm" | "md" | "lg" | "xl";
  * ป๊อป/drawer ซ้อนกัน → กด Esc ปิดเฉพาะชั้นบนสุด (เดิมทุกชั้นฟัง keydown บน document เลยปิดพร้อมกันหมด)
  * ชั้นที่เปิดทีหลัง = อยู่บน (portal ต่อท้าย body) → จดลำดับตอนเปิด
  */
-const escStack: number[] = [];
-let escSeq = 0;
+// กองกลางกองเดียวทั้งระบบ (lib/esc-stack) — ใช้ร่วมกับแผ่นล่าง / ดูรูปเต็มจอ / แผงลอยอื่น ๆ ที่เรียก useEscLayer
 function useEscTop(open: boolean): () => boolean {
-  const id = useRef(0);
-  useEffect(() => {
-    if (!open) return;
-    const my = ++escSeq;
-    id.current = my;
-    escStack.push(my);
-    return () => {
-      const i = escStack.lastIndexOf(my);
-      if (i >= 0) escStack.splice(i, 1);
-    };
-  }, [open]);
-  return () => escStack[escStack.length - 1] === id.current;
+  return useEscLayer(open);
 }
 
 export interface ERPModalProps {
@@ -511,7 +500,7 @@ export function ERPModal({
   useEffect(() => {
     if (!open) { setShowUnsavedWarning(false); return; }
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isTopEsc()) handleClose();
+      if (e.key === "Escape" && !e.defaultPrevented && isTopEsc()) { e.preventDefault(); handleClose(); }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -754,7 +743,7 @@ export function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isTopEsc()) onClose();
+      if (e.key === "Escape" && !e.defaultPrevented && isTopEsc()) { e.preventDefault(); onClose(); }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -913,7 +902,7 @@ export function Drawer({
   useEffect(() => {
     if (!open) { setShowUnsavedWarning(false); return; }
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isTopEsc()) handleClose();
+      if (e.key === "Escape" && !e.defaultPrevented && isTopEsc()) { e.preventDefault(); handleClose(); }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -1028,6 +1017,7 @@ export function DrawerShell({ open = true, onClose, width, className = "", style
       if (e.key !== "Escape" || e.defaultPrevented || !isTopEsc()) return;
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      e.preventDefault();
       onClose();
     };
     document.addEventListener("keydown", handler);

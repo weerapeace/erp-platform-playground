@@ -12,7 +12,8 @@
  * - หัว = ขีดจับ + ชื่อ + ปุ่มปิด · footer ติดล่างเสมอ (เผื่อขอบจอ iPhone) · เนื้อหายาว = เลื่อนในแผ่น
  * - จอคอม/ป๊อปทั่วไป → ใช้ ERPModal · ลิ้นชักข้าง → Drawer
  */
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
+import { useEscLayer } from "./esc-layer";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { useBackClose } from "@/lib/use-back-close";
@@ -37,18 +38,8 @@ export function BottomSheet({ open, onClose, title, subtitle, children, footer, 
 }) {
   const t = useT();
   useBackClose(open, onClose, backKey);
-  const idRef = useRef(0);
-  if (!idRef.current) idRef.current = ++seq;
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    if (!open) return;
-    const id = idRef.current;
-    openStack.push(id);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && openStack[openStack.length - 1] === id) closeRef.current(); };
-    window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("keydown", onKey); const i = openStack.lastIndexOf(id); if (i >= 0) openStack.splice(i, 1); };
-  }, [open]);
+  // Esc ปิดเฉพาะชั้นบนสุด — กองกลางเดียวกับป๊อป/ลิ้นชัก/ดูรูปเต็มจอ (lib/esc-stack)
+  useEscLayer(open, onClose);
   if (!open) return null;
   return (
     <div className="fixed inset-0 flex items-end bg-black/40" style={{ zIndex }} onClick={onClose} role="presentation">

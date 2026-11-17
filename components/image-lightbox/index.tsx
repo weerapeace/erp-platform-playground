@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent as RWheelEvent, type MouseEvent as RMouseEvent, type TouchEvent as RTouchEvent } from "react";
 import { createPortal } from "react-dom";
+import { useEscLayer } from "@/components/modal/esc-layer";
 import { copyImageToClipboard, downloadImageAsJpg, canCopyImage } from "@/lib/image-clipboard";
 
 export type LightboxImage = {
@@ -64,6 +65,8 @@ export function ImageLightbox({ images, index, onClose, onIndex, footer, groups,
   const [copyState, setCopyState] = useState<"idle" | "ok" | "err">("idle");
 
   const reset = useCallback(() => { setScale(1); setTx(0); setTy(0); }, []);
+  // Esc ปิดทีละชั้น (เปิดดูรูปจากในป๊อป → Esc แรกปิดแค่รูป ป๊อปยังอยู่)
+  useEscLayer(open, onClose);
   const go = useCallback((delta: number) => {
     if (images.length < 2) return;
     reset();

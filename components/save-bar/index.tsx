@@ -11,10 +11,12 @@
  * ใช้: <SaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={reset} />
  *      <SaveBar mode="auto" dirty={pending} saving={saving} error={err} savedAt={at} onSave={saveNow} />
  * หน้าแม่ที่มีแท็บ: const guard = useUnsavedGuardHost() → <UnsavedGuardProvider value={guard.register}> · ก่อนสลับแท็บเช็ก guard.anyDirty()
+ * Ctrl+S (⌘S) = บันทึก อัตโนมัติ (useSaveShortcut — ฟอร์มอื่นเรียก hook นี้เองได้)
  * หน้าที่มีแถบบันทึกของตัวเองอยู่แล้ว (เช่น ดีไซน์) ใช้ useReportUnsaved(dirty) แจ้ง guard อย่างเดียวได้
  */
 import { createContext, useCallback, useContext, useEffect, useId, useRef, type ReactNode } from "react";
 import { useLang, useT } from "@/components/i18n";
+import { useSaveShortcut } from "./use-save-shortcut";
 
 /* ── UnsavedGuard: หน้าแม่รู้ว่ามีแท็บไหนยังไม่บันทึก ── */
 type Register = (id: string, dirty: boolean) => void;
@@ -101,6 +103,8 @@ export function SaveBar({
     </span>
   );
   const canSave = (alwaysEnabled || dirty || !!error) && !saving;
+  // Ctrl+S (⌘S) = กดปุ่มบันทึก (แป้นไทยใช้ได้)
+  useSaveShortcut(onSave, { enabled: canSave });
   return (
     <div className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-xl px-4 py-3 shadow-sm" role="region" aria-label={t("บันทึก", "Save")}>
       <span className="text-xs">{status}</span>
