@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { COST_PERM, costRestricted } from "@/lib/cost-access";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
+import { parseSetItems, type SetItem } from "@/lib/parts-cart";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,6 +28,7 @@ export type PriceItem = {
   sku_latest_date: string | null;    // วันรับของของราคาซื้อจริงล่าสุด (ใช้บอก "ราคาซื้อจริงปรับตั้งแต่…")
   used_lines?: number;               // ใช้ในบรรทัดตีราคากี่บรรทัด (หน้าค่าตัดตามวัตถุดิบ เรียงที่ใช้บ่อยก่อน)
   used_pieces?: number;              // รวมกี่ชิ้นวัตถุดิบ
+  set_items?: SetItem[];             // 🧷 ชุดอะไหล่ที่มาพร้อมวัสดุนี้ (ป๊อปเพิ่มอะไหล่ถามก่อนลง · lib/parts-cart)
 };
 
 // กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง + ราคาซื้อจริงล่าสุด (GR→PO)
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   if (!(await apiCan(request, COST_PERM))) return costRestricted({ groups: [] });   // ไม่มีสิทธิ์ดูต้นทุน → ว่าง
   const { data, error } = await supabaseAdmin().from("design_price_items")
-    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, cut_rate, updated_at, price_updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
+    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, cut_rate, set_items, updated_at, price_updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
     .eq("is_active", true).order("name", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
@@ -66,6 +68,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       sku_max_price: null, sku_min_price: null, last_used_price: null,
       // วันปรับราคา (trigger ตั้งให้เมื่อ price_per_unit เปลี่ยน) — รายการเก่าก่อนมี trigger ยังไม่มีค่า → null (ไม่โชว์วัน)
       price_updated_at: (r.price_updated_at as string) ?? null, sku_latest_date: null,
+      set_items: parseSetItems(r.set_items, String(r.id)),
     };
   });
   const admin = supabaseAdmin();

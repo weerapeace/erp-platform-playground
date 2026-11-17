@@ -66,6 +66,8 @@ import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import dynamic from "next/dynamic";
 import { DblClickToEdit } from "@/components/dbl-click-edit";
 import { DriveUploadBox } from "@/components/drive-upload-box";
+import { PartsCartModal } from "@/components/parts-cart-modal";
+import { applyCartToLines, type CartEntry } from "@/lib/parts-cart";
 import { fetchSheetDriveFolder, startSheetDriveUpload } from "@/lib/design-sheet-drive-client";
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
@@ -499,6 +501,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const priceItemById = useMemo(() => new Map(priceItems.map((it) => [it.id, it])), [priceItems]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [copyFromOpen, setCopyFromOpen] = useState(false);   // โมดอลคัดลอกตีราคาจากใบงานอื่น
+  const [partsOpen, setPartsOpen] = useState(false);         // 🧷 ป๊อปเพิ่มอะไหล่ (ตะกร้า · components/parts-cart-modal)
   // ✏️ ตีราคาดูได้ 2 แบบ: ตาราง ↔ แบบวาด (กระดานชิ้นวัสดุ · แก้แล้วตารางเปลี่ยนตามทันที) — จำแบบที่เลือกไว้ในเครื่อง
   const [costView, setCostViewState] = useState<"table" | "draw">(() => { try { return localStorage.getItem("ds-cost-view") === "draw" ? "draw" : "table"; } catch { return "table"; } });
   const setCostView = (v: "table" | "draw") => { setCostViewState(v); try { localStorage.setItem("ds-cost-view", v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
@@ -549,6 +552,19 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }), [costLines.length, costParent]);
   const [noteOpen, setNoteOpen] = useState(false);   // 📝 ป๊อปอ่านจากรูปโน้ต (AI)
   const addCostRow = useCallback(() => { setCostLines((prev) => [...prev, newCostRow()]); setCostDirty(true); }, [newCostRow]);
+  // 🧷 ตะกร้าอะไหล่ → บรรทัดตีราคาของแท็บที่ดู (มีอะไหล่ตัวเดียวกันแล้ว = บวกเข้าบรรทัดเดิม · lib/parts-cart) แล้วเข้าโหมดแก้ไขให้ตรวจ+บันทึก
+  const applyPartsCart = (cart: CartEntry[]) => {
+    const stamp = Date.now();
+    const res = applyCartToLines(curLines, cart, priceItemById, (base, idx): CostRow => ({ ...newCostRow(), ...base, key: `pc${stamp}_${idx}`, parent_code: costParent || null }));
+    if (!res.added && !res.merged) return;
+    const others = costLines.filter((r) => pkey(r.parent_code) !== costParent);
+    setCostLines([...others, ...res.lines]); setCostDirty(true); setEditing(true);
+    toast.success(t(`ลงอะไหล่แล้ว: บรรทัดใหม่ ${res.added}${res.merged ? ` · บวกเข้าบรรทัดเดิม ${res.merged}` : ""} — ตรวจแล้วกดบันทึก`, `Parts added: ${res.added} new${res.merged ? ` · ${res.merged} merged` : ""} — check, then save`));
+  };
+  const reloadPriceItems = () => {
+    apiFetch("/api/design-sheets/price-items").then((r) => r.json())
+      .then((j) => { if (!j.error) { setPriceItems((j.data ?? []) as PriceItem[]); setPriceGroups((j.groups ?? []) as PriceGroup[]); } }).catch(() => {});
+  };
   // ✏️ เปิด "แบบวาด" ของแท็บที่ดูอยู่: บรรทัดที่วาดไว้ = รูปทรงจริง (รวมบรรทัดชิ้นเดียวกันด้วย pid) · บรรทัดแบบเดิมที่มีกว้าง×ยาว = สี่เหลี่ยม
   //   บรรทัดที่ไม่มีกว้าง×ยาว (อะไหล่ นับชิ้น · สาย/เทป คิดตามยาว) ไม่ขึ้นกระดาน (บอกจำนวนไว้)
   const openBoard = useCallback((selKey?: string | null) => {
@@ -2794,7 +2810,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 onAdd={newCostRow}
                 addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
-                addExtra={<><button type="button" onClick={() => openBoardRef.current(null)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                addExtra={<><button type="button" onClick={() => setPartsOpen(true)} className="inline-flex items-center gap-1 text-sm font-medium text-amber-600 hover:text-amber-800"
+                  title={t("เลือกอะไหล่ ซิป เทป แบบตะกร้า (ตาราง/การ์ด) → ลงตารางทีเดียว · ซิปที่ตั้งชุดไว้จะถามหัวซิป/หางซิปให้", "Pick parts, zips, tapes into a cart (table/grid) → add to the table at once · zips with a set ask for sliders/stops")}>
+                  <Icon value="i:paperclip" className="text-[14px]" />{t("เพิ่มอะไหล่", "Add parts")}</button>
+                <button type="button" onClick={() => openBoardRef.current(null)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
                   title={t("วาดชิ้นวัสดุ (สี่เหลี่ยม วงกลม ปากกา) หรือก๊อปจาก Illustrator มาวาง → ได้บรรทัดใหม่พร้อมกว้าง×ยาว", "Draw pieces (rectangle, circle, pen) or paste from Illustrator → new lines with width×length")}>
                   <Icon value="i:vector-bezier" className="text-[14px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
                 <button type="button" onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
@@ -2806,6 +2825,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   <div className="flex flex-wrap justify-center gap-2">
                     {!fullEdit && <button type="button" onClick={() => { setEditing(true); addCostRow(); }}
                       className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}</button>}
+                    <button type="button" onClick={() => setPartsOpen(true)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-700 hover:bg-amber-50"><Icon value="i:paperclip" className="text-[15px]" />{t("เพิ่มอะไหล่", "Add parts")}</button>
                     <button type="button" onClick={() => setCopyFromOpen(true)}
                       className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">{t("📄 ดึงจากใบงานอื่น", "📄 Pull from another sheet")}</button>
                     <button type="button" onClick={() => openBoardRef.current(null)}
@@ -3360,6 +3381,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             setCostDirty(true); setEditing(true); setNoteOpen(false);
             toast.success(t(`เพิ่ม ${lines.length} บรรทัดจากรูปโน้ตแล้ว — ตรวจแล้วกดบันทึก`, `Added ${lines.length} lines from the note — check them, then save`));
           }} />
+      )}
+      {/* 🧷 เพิ่มอะไหล่ · ซิป · เทป แบบตะกร้า → ลงตารางตีราคาของแท็บที่ดู */}
+      {form?.id && partsOpen && (
+        <PartsCartModal open={partsOpen} onClose={() => setPartsOpen(false)} items={priceItems} canEdit={canEdit}
+          onConfirm={applyPartsCart} onItemsChanged={reloadPriceItems} />
       )}
       {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
       {form?.id && (

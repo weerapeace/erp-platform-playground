@@ -22,12 +22,12 @@ import { apiFetch } from "@/lib/api";
 import { createDesignMaterial, similarMaterials, type QuickMaterial } from "@/lib/material-quick-create";
 
 type Mat = { id: string; name: string; sub?: string | null };
-type Group = { id: string; name: string };
+type Group = { id: string; name: string; calc_method?: string | null };
 
 let groupCache: Promise<Group[]> | null = null;
 function loadGroups(): Promise<Group[]> {
   groupCache ??= apiFetch("/api/bom/material-groups").then((r) => r.json())
-    .then((j) => (Array.isArray(j?.data) ? (j.data as Group[]).map((g) => ({ id: String(g.id), name: String(g.name) })) : []))
+    .then((j) => (Array.isArray(j?.data) ? (j.data as Group[]).map((g) => ({ id: String(g.id), name: String(g.name), calc_method: g.calc_method ?? null })) : []))
     .catch(() => { groupCache = null; return []; });
   return groupCache;
 }
@@ -35,12 +35,16 @@ function loadGroups(): Promise<Group[]> {
 /** ผู้ใช้คนนี้เพิ่มวัสดุใหม่ได้ไหม (สิทธิ์เดียวกับ API สร้างข้อมูลหลัก) */
 export function useCanCreateMaterial(): boolean { return usePermission("products.create"); }
 
-export function MaterialQuickCreate({ name: name0, materials, onCreated, onPickExisting, onCancel }: {
+export function MaterialQuickCreate({ name: name0, materials, onCreated, onPickExisting, onCancel, groupFilter, saveLabel }: {
   name: string;
   materials: Mat[];
   onCreated: (m: QuickMaterial) => void;
   onPickExisting?: (m: Mat) => void;
   onCancel: () => void;
+  /** โชว์เฉพาะชนิดที่ผ่าน (เช่น ป๊อปเพิ่มอะไหล่ = กลุ่มนับชิ้น/ตามยาว) · ไม่ส่ง = ทุกชนิด */
+  groupFilter?: (g: { id: string; name: string; calc_method?: string | null }) => boolean;
+  /** ข้อความปุ่มบันทึก (ค่าเริ่ม "เพิ่ม + เลือกให้ชิ้นนี้") */
+  saveLabel?: string;
 }) {
   const t = useT();
   const [name, setName] = useState(name0);
@@ -48,7 +52,7 @@ export function MaterialQuickCreate({ name: name0, materials, onCreated, onPickE
   const [grp, setGrp] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { let alive = true; void loadGroups().then((g) => { if (alive) setGroups(g); }); return () => { alive = false; }; }, []);
+  useEffect(() => { let alive = true; void loadGroups().then((g) => { if (alive) setGroups(groupFilter ? g.filter(groupFilter) : g); }); return () => { alive = false; }; }, []);   // eslint-disable-line react-hooks/exhaustive-deps -- ตัวกรองอ่านครั้งเดียวตอนเปิด
   const similar = similarMaterials(name, materials);
   const save = async () => {
     setBusy(true); setErr(null);
@@ -87,7 +91,7 @@ export function MaterialQuickCreate({ name: name0, materials, onCreated, onPickE
       </div>
       {err && <p className="rounded bg-red-50 px-2 py-1 text-red-700">{err}</p>}
       <div className="flex flex-wrap gap-1.5">
-        <button type="button" data-material-quick-save disabled={busy || !name.trim()} onClick={() => void save()} className="h-7 rounded-md bg-blue-600 px-2.5 text-white hover:bg-blue-700 disabled:opacity-50">{busy ? t("กำลังเพิ่ม…", "Adding…") : t("เพิ่ม + เลือกให้ชิ้นนี้", "Add + use for this piece")}</button>
+        <button type="button" data-material-quick-save disabled={busy || !name.trim()} onClick={() => void save()} className="h-7 rounded-md bg-blue-600 px-2.5 text-white hover:bg-blue-700 disabled:opacity-50">{busy ? t("กำลังเพิ่ม…", "Adding…") : (saveLabel ?? t("เพิ่ม + เลือกให้ชิ้นนี้", "Add + use for this piece"))}</button>
         <button type="button" onClick={onCancel} className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
       </div>
       <p className="text-[11px] text-slate-500">{t("ราคา/หน้ากว้าง ใส่ทีหลังที่หน้าวัสดุตีราคา", "Price/width can be set later on the costing materials page")}</p>

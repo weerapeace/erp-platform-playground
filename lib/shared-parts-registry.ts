@@ -413,6 +413,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "material-quick-create.md",
   },
   {
+    key: "parts-cart-modal", label: "เพิ่มอะไหล่ · ซิป · เทป แบบตะกร้า (+ ชุดอะไหล่)", code: "PartsCartModal · lib/parts-cart", category: "pick",
+    source: { path: "components/parts-cart-modal", names: ["PartsCartModal"] },
+    what: "ป๊อปเลือกวัสดุตีราคาเฉพาะกลุ่มนับชิ้น/ตามยาว (อะไหล่ ซิป เทป) แบบช้อปปิ้ง: ตาราง ↔ การ์ด (จำต่อคน) · ใส่ตะกร้า ปรับจำนวน/ยาวต่อเส้น → ลงตารางทีเดียว (ตัวเดียวกันบวกเข้าบรรทัดเดิม) · ชุด (design_price_items.set_items) ถามหัวซิป/หางซิปให้ติ๊ก · เพิ่ม (MaterialQuickCreate) / แก้ชื่อ-ราคา-หน่วย / เอาออก (ปิดใช้งาน) / ตั้งชุด ผ่าน API กลาง master-v2",
+    when: "ตารางตีราคาที่อยากลงอะไหล่หลายตัวพร้อมกัน — ใบงานออกแบบ (ปุ่ม เพิ่มอะไหล่)",
+    notWhen: "วัสดุชิ้นตัด/ผ้าที่มีขนาด → ช่องวัสดุในตาราง / MaterialAddSelect · ซิปตามขอบบนกระดานแพทเทิร์น → TrimsModal",
+    doc: "parts-cart.md",
+  },
+  {
     key: "mo-picker", label: "เลือกใบสั่งผลิต", code: "MoMultiPickerModal", category: "pick",
     source: { path: "components/mo-picker" },
     what: "ป๊อปเลือกใบสั่งผลิตได้หลายใบ ค้นหา/กรองได้",
