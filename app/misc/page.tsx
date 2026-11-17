@@ -8,6 +8,7 @@
  * "เพิ่มแอป" = สร้างไอคอน+ชื่อ + หน้าเปล่า /misc/<slug> (ฟังก์ชันจริงเติมด้วยโค้ดทีหลัง)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -169,7 +170,7 @@ export default function MiscPortalPage() {
           </div>
 
           {loading ? (
-            <div className="py-16 text-center text-pink-300 text-sm">กำลังโหลด…</div>
+            <LoadingState />
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {shown.map((m) => (

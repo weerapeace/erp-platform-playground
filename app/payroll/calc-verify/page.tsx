@@ -5,6 +5,7 @@
  * รันสูตรใหม่ (lib/payroll-calc) บน payroll_lines จริง เทียบกับที่แอปเก่าคำนวณไว้
  * ใช้ของกลาง: Universal DataTable (master-crud) + แถบสรุป
  */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -13,7 +14,7 @@ import { usePayrollPeriod, type PayrollPeriod } from "@/components/payroll/payro
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const money = (v: unknown) => {

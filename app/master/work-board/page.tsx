@@ -7,6 +7,7 @@
  * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีแบรนด์ + ปุ่มตั้งสี
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useDeferredValue, Suspense, type PointerEvent as RPE } from "react";
 import { useSearchParams } from "next/navigation";
@@ -287,7 +288,7 @@ type Zone = { key: string; label: string; kind: "pending" | "dept"; dept?: Dept;
 export default function WorkBoardPage() {
   // ห่อ Suspense เพราะ WorkBoardPageInner ใช้ useSearchParams (เปิดงานจาก ?mo=)
   return (
-    <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}>
+    <Suspense fallback={<LoadingState />}>
       <WorkBoardPageInner />
     </Suspense>
   );
@@ -1709,7 +1710,7 @@ function WorkBoardPageInner() {
       </div>
       )}
 
-      {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div>
+      {loading ? <LoadingState />
         : loadError ? (
         <div className="text-center py-20">
           <div className="text-4xl mb-3">⚠️</div>
@@ -2546,7 +2547,7 @@ function WorkBoardPageInner() {
                       <WorkStepsTab moId={checklistMO.id} bomCode={clStepsBom ?? checklistMO.bom_code ?? null} pieceRows={clPieceRows} canEdit={canEdit}
                         steps={clSteps} onSteps={(s, b) => { setClSteps(s); if (b) setClStepsBom(b); }} />
                     ) : (clTab === "prep" || clTab === "cut" || clTab === "piece") && clLoading ? (
-                      <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
+                      <LoadingState />
                     ) : clTab === "prep" ? (
                       clSummary.length === 0 && clMaterials.length === 0 ? (
                         <div className="text-center py-6">
@@ -2829,7 +2830,7 @@ function WorkBoardPageInner() {
               placeholder="ชื่อแผนกใหม่…" className="flex-1 h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             <button onClick={() => void addDept()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap">＋ เพิ่มแผนก</button>
           </div>
-          {deptLoading ? <div className="text-center py-6 text-slate-400 text-sm">กำลังโหลด…</div>
+          {deptLoading ? <LoadingState />
             : deptList.length === 0 ? <div className="text-center py-6 text-slate-300 text-sm">ยังไม่มีแผนก</div>
               : (
                 <div className="border border-slate-100 rounded-lg divide-y divide-slate-50 max-h-[54vh] overflow-y-auto">
@@ -3236,7 +3237,7 @@ function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, craft
 }
 
 function PurchTab({ rows }: { rows: PurchaseStatusRow[] | null }) {
-  if (rows === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>;
+  if (rows === null) return <LoadingState />;
   if (rows.length === 0) return <div className="text-center py-8 text-slate-300 text-sm">ยังไม่มีรายการสั่งซื้อสำหรับงานนี้</div>;
   return (
     <div className="border border-slate-100 rounded-lg overflow-hidden">
@@ -3292,7 +3293,7 @@ function IssueTab({ issues, canEdit, issType, setIssType, issSev, setIssSev, iss
           <button onClick={onAdd} className="h-8 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">＋</button>
         </div>
       )}
-      {issues === null ? <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
+      {issues === null ? <LoadingState />
         : issues.length === 0 ? <div className="text-center py-6 text-slate-300 text-sm">ยังไม่มีปัญหาในงานนี้</div>
           : (
             <div className="border border-slate-100 rounded-lg overflow-hidden">

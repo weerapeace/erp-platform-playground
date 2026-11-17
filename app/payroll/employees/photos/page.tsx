@@ -10,6 +10,7 @@
  * อัปโหลดผ่านของกลาง: ImageInput (รายคน) / /api/admin/upload (ยกชุด) → ได้ R2 key
  * บันทึกที่ employees.profile_photo_key ผ่าน PATCH /api/payroll/core/employees/<id>
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -208,7 +209,7 @@ export default function EmployeePhotosPage() {
         </div>
 
         {loading ? (
-          <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+          <LoadingState />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {shown.map((e) => (

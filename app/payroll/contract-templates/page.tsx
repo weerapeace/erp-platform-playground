@@ -7,6 +7,7 @@
  * แก้แม่แบบ: เปลี่ยนชื่อ · แก้ค่าที่เป็นข้อความ/ตัวเลข (กดที่ค่า) · เอาค่าออก (✕) · ลบแม่แบบ
  * ค่าที่เป็นตัวเลือก (เช่น ตารางเวลาทำงาน) แก้ที่ฟอร์มเพิ่มสัญญา: เลือกแม่แบบ → ปรับค่า → "บันทึกทับแม่แบบนี้"
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { InlineEdit } from "@/components/inline-edit";
@@ -111,7 +112,7 @@ export default function ContractTemplatesPage() {
         {err && <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{err}</div>}
         {msg && <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{msg}</div>}
 
-        {!rows && !err && <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-400">กำลังโหลด...</div>}
+        {!rows && !err && <LoadingState />}
 
         {rows && rows.length === 0 && (
           <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-400">

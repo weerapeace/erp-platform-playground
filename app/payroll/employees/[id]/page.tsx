@@ -10,6 +10,7 @@
  * บันทึกผ่านของเดิม PATCH /api/payroll/core/employees/<id>
  * แท็บสัญญา/รายการประจำ/ใบเตือน ใช้ของกลาง EmployeeRecordsPanel (เพิ่ม/แก้/ลบ ได้)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -366,7 +367,7 @@ export default function EmployeeProfilePage() {
   };
 
   if (err && !p) return <div className="p-8"><div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm">{err}</div></div>;
-  if (!p) return <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>;
+  if (!p) return <LoadingState />;
 
   const statusKey = s(emp.employment_status);
   const ctype = s(emp.current_contract_type);
@@ -626,7 +627,7 @@ function PayHistory({ employeeId, kind }: { employeeId: string; kind: "payroll-l
   };
 
   if (err) return <div className="rounded-lg bg-red-50 text-red-700 px-4 py-2.5 text-sm">{err}</div>;
-  if (!rows) return <div className="py-8 text-center text-sm text-slate-400">กำลังโหลด…</div>;
+  if (!rows) return <LoadingState />;
   if (rows.length === 0) {
     return <div className="py-8 text-center text-sm text-slate-400">{kind === "payslips" ? "ยังไม่มีสลิปของคนนี้" : "ยังไม่มีผลคำนวณเงินเดือนของคนนี้"}</div>;
   }

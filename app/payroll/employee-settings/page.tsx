@@ -4,12 +4,13 @@
  * Payroll module — ตั้งค่าเงินเดือนรายคน (employee_payroll_settings)
  * คุมการคำนวณ: ประกันสังคม/ภาษี/OT/รายชิ้น/เบี้ยขยัน/เบิกล่วงหน้า (เหมือนแท็บ "เงินเดือน" แอปเก่า)
  */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const fmtBaht = (v: unknown) => {

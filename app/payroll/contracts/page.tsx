@@ -5,6 +5,7 @@
  * ต่อตาราง employee_contracts จริง (78 สัญญา) ผ่านของกลาง master-crud
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { relLink } from "@/components/payroll/cells";
@@ -20,7 +21,7 @@ const COMPANY_NAMES = ["ไอ.เอส.จี. เทรดดิ้ง", "ห
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const STATUS_LABEL: Record<string, { th: string; cls: string }> = {

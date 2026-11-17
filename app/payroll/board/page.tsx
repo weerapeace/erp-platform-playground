@@ -11,6 +11,7 @@
  *   · drawer มีแท็บ รายการประจำ / ใบเตือน / สัญญา ที่ "เพิ่ม-แก้-ลบ" ได้ (ของกลาง EmployeeRecordsPanel)
  *   · ตั้งหัวหน้าประจำแผนก (⭐) และเลือกหัวหน้าของแต่ละคนได้จาก drawer
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState, useCallback, useMemo, useRef, type PointerEvent as RPE } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -276,7 +277,7 @@ export default function PayrollBoardPage() {
 
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">{err}</div>}
       {loading ? (
-        <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+        <LoadingState />
       ) : (
         <div className="overflow-x-auto pb-2">
           <div className="flex items-stretch gap-4 w-max h-[calc(100vh-240px)] min-h-[440px]">

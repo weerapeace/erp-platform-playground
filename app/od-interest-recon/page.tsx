@@ -7,13 +7,14 @@
  * ต่างเกิน 100 บาท หรือ 1% = ต้องตรวจสอบ · ยอมรับส่วนต่างใหญ่ต้องใส่ "เหตุผล"
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { ReconBuildButton } from "./build-button";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const STATUS: Record<string, [string, string]> = {

@@ -4,6 +4,7 @@
  * Payroll module — ภาพรวม (Dashboard) / Phase 4
  * สรุปตัวเลขจาก /api/payroll/dashboard + ลิงก์ไปแต่ละหน้า
  */
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 
@@ -39,7 +40,7 @@ export default function PayrollDashboardPage() {
       <p className="text-sm text-slate-500 mb-6">สรุปข้อมูลจริงจากระบบ — โมดูล Payroll (ใช้ของกลาง erp)</p>
 
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">เกิดข้อผิดพลาด: {err}</div>}
-      {!s && !err && <div className="text-slate-400 py-10 text-center">กำลังโหลด...</div>}
+      {!s && !err && <LoadingState />}
 
       {s && (
         <>

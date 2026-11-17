@@ -10,6 +10,7 @@
  * เปิดที่ /offer-sheets (หรือในแอปเดี่ยว /app/misc)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
@@ -148,7 +149,7 @@ function OfferList({ canEdit, onNew, onOpen }: {
       <div className="bg-white rounded-2xl border border-pink-100 shadow-sm overflow-hidden">
         {err && <div className="p-4 text-sm text-red-500 bg-red-50">{err}</div>}
         {loading ? (
-          <div className="p-10 text-center text-pink-300 text-sm">กำลังโหลด…</div>
+          <LoadingState />
         ) : rows.length === 0 ? (
           <div className="p-12 text-center text-pink-300">
             <div className="text-4xl mb-2">🛍️</div>
@@ -431,7 +432,7 @@ function OfferEditor({ id, canEdit, onBack }: {
     onBack();
   };
 
-  if (loading) return <div className="p-10 text-center text-pink-300 text-sm">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
 
   return (
     <div className="max-w-5xl mx-auto p-5 sm:p-8">

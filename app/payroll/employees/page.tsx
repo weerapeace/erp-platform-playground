@@ -11,6 +11,7 @@
  * ใน Supabase เดียวกับที่ payroll app ใช้อยู่ (cyivhke...) — ดู docs/migration-payroll-to-erp.md
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { money, statusBadge, PAY_STATUS } from "@/components/payroll/cells";
@@ -62,7 +63,7 @@ const EMPLOYMENT_STATUS = ["active", "inactive", "resigned", "suspended"];
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const STATUS_LABEL: Record<string, { th: string; cls: string }> = {

@@ -1,13 +1,14 @@
 "use client";
 
 /** Payroll module — เวลาเข้าออก (Phase 3) — อ่านอย่างเดียว (attendance_entries 242) */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { money, statusBadge, PAY_STATUS } from "@/components/payroll/cells";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 const ENTRY_TYPE: Record<string, string> = { attendance: "มาทำงาน", absence: "ขาด", late: "สาย", leave: "ลา", overtime: "OT" };
