@@ -25,10 +25,14 @@ import { useGalleryColumns } from "@/components/gallery-columns";
 import { useMarqueeSelect } from "@/lib/use-marquee-select";
 import { bumpProductName, folderGroups, guessSku, splitGroups, timeGroups } from "@/lib/sample-sku-split";
 import { loadChildSkus, type ChildSku } from "./api";
+import { AlbumCover } from "@/components/album-cover";
+import { albumFullName, albumMatches, descendantIds, productLinkLabel, type SampleAlbum } from "@/lib/sample-images";
+import { sampleImgUrl } from "./parts";
 
 export type DropMode = "new" | "here";
 export type DropSplit = "one" | "sku" | "album";
-export type DropGroup = { name: string; files: File[]; parentCode: string | null; skuCodes: string[] };
+/** existingId = ใส่อัลบั้มที่มีอยู่แล้ว (ไม่สร้างใหม่) · rename = เปลี่ยนชื่อด้วย · relink = ผู้ใช้แก้สินค้าที่เชื่อม (ไม่แก้ = คงของเดิม) */
+export type DropGroup = { name: string; files: File[]; parentCode: string | null; skuCodes: string[]; existingId?: string; rename?: boolean; relink?: boolean };
 /** rest = รูปที่ยังไม่จัด → ลงอัลบั้มที่เปิดอยู่ตรง ๆ */
 export type DropPlan = { mode: "here" } | { mode: "new"; split: DropSplit; groups: DropGroup[]; rest?: File[] };
 
@@ -70,19 +74,27 @@ function SkuToggleChips({ parent, kids, value, onChange }: { parent: ParentSkuPi
   );
 }
 
-type AlbumGroup = { key: number; name: string; hint?: string; parent: ParentSkuPickerValue | null; skus: string[] };
+type ExistingInfo = { id: string; name: string; keys: string[]; total: number; link: string | null };
+type AlbumGroup = { key: number; name: string; hint?: string; parent: ParentSkuPickerValue | null; skus: string[]; existing?: ExistingInfo; linkTouched?: boolean };
 
 /** การ์ดอัลบั้มในแถบซ้าย (แบบแยกหลายอัลบั้ม) — กด/ลากรูปมาวาง = ใส่รูปที่เลือก · ชื่อ + Parent + SKU ของอัลบั้มนั้น */
-function AlbumSideCard({ g, color, count, previews, selCount, dropOver, drop, onPut, onChange, onRemove }: {
+function AlbumSideCard({ g, color, count, previews, selCount, dropOver, drop, onPut, onChange, onRemove, compact }: {
   g: AlbumGroup; color: string; count: number;
   /** รูปตัวอย่าง (4 รูปแรกของอัลบั้ม) — รู้ทันทีว่าอัลบั้มไหนคือสินค้าอะไร */
   previews: (string | null)[];
   selCount: number; dropOver: boolean;
   drop: { onDragOver: (e: DragEvent) => void; onDragLeave: () => void; onDrop: (e: DragEvent) => void };
   onPut: () => void; onChange: (p: Partial<AlbumGroup>) => void; onRemove: () => void;
+  /** อัลบั้มเยอะ (>8) = การ์ดเตี้ยลง */
+  compact?: boolean;
 }) {
   const t = useT();
   const kids = useKids(g.parent);
+  const ex = g.existing;
+  const box = compact ? "h-8 w-8" : "h-11 w-11";
+  // อัลบั้มเดิม: รูปเดิม (สูงสุด 3) ตามด้วยรูปที่จะเพิ่ม
+  const oldThumbs = ex ? ex.keys.slice(0, 3).map((k) => sampleImgUrl(k, 120)) : [];
+  const newThumbs = previews.slice(0, Math.max(0, (compact ? 4 : 4) - oldThumbs.length));
   const [editLink, setEditLink] = useState(false);   // ส่วนเชื่อมสินค้า: ย่อเป็นบรรทัดเดียว กด "แก้" ถึงกาง
   const skuShort = g.parent ? g.skus.map((c) => shortCode(g.parent!.code, c)).join(", ") : "";
   return (
@@ -91,14 +103,31 @@ function AlbumSideCard({ g, color, count, previews, selCount, dropOver, drop, on
         <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: color }} />
         <input value={g.name} onChange={(e) => onChange({ name: e.target.value })} maxLength={120} aria-label={t("ชื่ออัลบั้ม", "Album name")}
           className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-white px-1 text-sm font-semibold text-slate-800 hover:border-slate-200 focus:border-violet-400 focus:outline-none" />
-        <span className="shrink-0 rounded-full bg-violet-100 px-2 text-[12px] font-semibold tabular-nums text-violet-800">{count}</span>
+        {ex && <span className="shrink-0 rounded-full bg-sky-100 px-1.5 text-[10.5px] font-medium text-sky-800">{t("มีอยู่แล้ว", "existing")}</span>}
+        <span className="shrink-0 rounded-full bg-violet-100 px-2 text-[12px] font-semibold tabular-nums text-violet-800">{ex ? `+${count}` : count}</span>
         <button type="button" onClick={onRemove} title={t("เอาอัลบั้มนี้ออก (รูปกลับไปกองยังไม่จัด)", "Remove (photos go back to unsorted)")}
           className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600"><Icon value="i:x" /></button>
       </div>
-      {count > 0 ? (
+      {ex ? (
+        <div className="flex items-center gap-1">
+          {oldThumbs.map((u, i) => (
+            <span key={`o${i}`} className={`relative ${box} shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white opacity-80`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={u} alt="" draggable={false} loading="lazy" className="absolute inset-0 h-full w-full object-contain" />
+            </span>
+          ))}
+          {newThumbs.map((u, i) => (
+            <span key={`n${i}`} className={`relative ${box} shrink-0 overflow-hidden rounded-md border-2 border-dashed border-violet-300 bg-white`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {u ? <img src={u} alt="" draggable={false} className="absolute inset-0 h-full w-full object-contain" /> : null}
+            </span>
+          ))}
+          <span className="pl-0.5 text-[11.5px] text-slate-500">{t(`เดิม ${ex.total}`, `had ${ex.total}`)}{count ? t(` · เพิ่ม ${count}`, ` · +${count}`) : ""}</span>
+        </div>
+      ) : count > 0 ? (
         <div className="flex items-center gap-1">
           {previews.map((u, i) => (
-            <span key={i} className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+            <span key={i} className={`relative ${box} shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white`}>
               {u
                 // eslint-disable-next-line @next/next/no-img-element
                 ? <img src={u} alt="" draggable={false} className="absolute inset-0 h-full w-full object-contain" />
@@ -111,18 +140,20 @@ function AlbumSideCard({ g, color, count, previews, selCount, dropOver, drop, on
       {g.hint && <p className="text-[11px] text-slate-400">{t(`จากโฟลเดอร์ ${g.hint}`, `From folder ${g.hint}`)}</p>}
       {editLink ? (
         <div className="space-y-1.5 border-t border-dashed border-slate-200 pt-2">
-          <ParentSkuPicker value={g.parent} onChange={(v) => onChange({ parent: v, skus: [] })} placeholder={t("Parent SKU (ไม่บังคับ)", "Parent SKU (optional)")} disableCreate />
-          {g.parent && <SkuToggleChips parent={g.parent} kids={kids} value={g.skus} onChange={(skus) => onChange({ skus })} />}
+          <ParentSkuPicker value={g.parent} onChange={(v) => onChange({ parent: v, skus: [], linkTouched: true })} placeholder={t("Parent SKU (ไม่บังคับ)", "Parent SKU (optional)")} disableCreate />
+          {g.parent && <SkuToggleChips parent={g.parent} kids={kids} value={g.skus} onChange={(skus) => onChange({ skus, linkTouched: true })} />}
           <button type="button" onClick={() => setEditLink(false)} className="text-[12px] font-medium text-violet-700 hover:underline">{t("เสร็จ", "Done")}</button>
         </div>
       ) : (
         <div className="flex items-start gap-2 border-t border-dashed border-slate-200 pt-1.5 text-[12px]">
           <span className="min-w-0 flex-1 text-slate-500">
-            {g.parent
+            {ex && !g.linkTouched
+              ? (ex.link ? <>{t("สินค้า: ", "Product: ")}<b className="font-medium text-slate-800">{ex.link}</b></> : t("ยังไม่เชื่อมสินค้า", "No product linked"))
+              : g.parent
               ? <>{t("สินค้า: ", "Product: ")}<b className="font-medium text-slate-800">{g.parent.code}</b> <span className="text-slate-600">{g.parent.name}</span>{t(` · SKU ${skuShort || "ทั้งรุ่น"}`, ` · SKU ${skuShort || "all"}`)}</>
               : t("ยังไม่เชื่อมสินค้า", "No product linked")}
           </span>
-          <button type="button" onClick={() => setEditLink(true)} className="shrink-0 font-medium text-violet-700 hover:underline">{g.parent ? t("แก้", "Edit") : t("＋ เชื่อม Parent", "＋ Link")}</button>
+          <button type="button" onClick={() => setEditLink(true)} className="shrink-0 font-medium text-violet-700 hover:underline">{g.parent || (ex && !g.linkTouched && ex.link) ? t("แก้", "Edit") : t("＋ เชื่อม Parent", "＋ Link")}</button>
         </div>
       )}
       {selCount > 0 && (
@@ -133,7 +164,12 @@ function AlbumSideCard({ g, color, count, previews, selCount, dropOver, drop, on
   );
 }
 
-export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode, defaultSplit = "one", mode, onMode, onCancel, onConfirm }: {
+export function DropAlbumDialog({ files, inside, insideId, existing = [], brandName, defaultName, defaultParentCode, defaultSplit = "one", mode, onMode, onCancel, onConfirm }: {
+  /** id อัลบั้มที่เปิดอยู่ — หน้าต่าง "ใส่อัลบั้มที่มีอยู่" โชว์อัลบั้มย่อยทุกชั้นของอัลบั้มนี้ก่อน */
+  insideId?: string | null;
+  /** อัลบั้มที่เลือกใส่ได้ (แบรนด์เดียวกัน) — ค้นได้ทั้งแบรนด์ */
+  existing?: SampleAlbum[];
+  brandName?: string | null;
   files: File[] | null;
   /** ชื่ออัลบั้มที่เปิดอยู่ (อัลบั้มใหม่จะอยู่ข้างใน) */
   inside: string;
@@ -265,6 +301,23 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
     setAlbumOf((a) => a.map((k) => (k === key ? UNSORTED : k)));
   };
   const patchAlbum = (key: number, p: Partial<AlbumGroup>) => setAlbums((a) => a.map((x) => (x.key === key ? { ...x, ...p } : x)));
+  // ── ใส่อัลบั้มที่มีอยู่แล้ว (เจ้าของเลือก 2026-11-17 ข้อ 1-4) ──
+  const [picking2, setPicking2] = useState(false);
+  const [pickQ, setPickQ] = useState("");
+  const usedIds = new Set(albums.flatMap((a) => (a.existing ? [a.existing.id] : [])));
+  const pickList = useMemo(() => {
+    if (!picking2) return [];
+    const q = pickQ.trim();
+    const base = q ? existing.filter((a) => albumMatches(a, q, brandName)) : insideId ? (() => { const ids = new Set(descendantIds(existing, insideId)); return existing.filter((a) => ids.has(a.id)); })() : existing;
+    return base.filter((a) => !usedIds.has(a.id)).slice(0, 120);
+  }, [picking2, pickQ, existing, insideId, brandName, albums]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const addExisting = (a: SampleAlbum) => {
+    const key = nextKey.current++;
+    const nm = albumFullName(a, brandName);
+    setAlbums((list) => [...list, { key, name: nm, parent: null, skus: [], existing: { id: a.id, name: nm, keys: a.preview_keys ?? [], total: a.deep?.photos ?? 0, link: productLinkLabel(a) } }]);
+    if (sel.size) toAlbum(key);
+    setPicking2(false); setPickQ("");
+  };
 
   // ปุ่ม N = อัลบั้มใหม่จากที่เลือก (ไม่ทำงานตอนพิมพ์ในช่อง)
   const newRef = useRef(newAlbumFromSel); newRef.current = newAlbumFromSel;
@@ -288,6 +341,7 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
       if (used.some((a) => !a.name.trim())) { setErr(t("ตั้งชื่อทุกอัลบั้มที่มีรูปก่อน", "Name every album that has photos")); return; }
       onConfirm({ mode: "new", split, rest: list.filter((_, i) => albumOf[i] === UNSORTED), groups: used.map((a) => ({
         name: a.name.trim(), files: list.filter((_, i) => albumOf[i] === a.key), parentCode: a.parent?.code ?? null, skuCodes: a.parent ? a.skus : [],
+        ...(a.existing ? { existingId: a.existing.id, rename: a.name.trim() !== a.existing.name, relink: !!a.linkTouched } : {}),
       })) });
       return;
     }
@@ -419,12 +473,25 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
           // ── จัดรูปเยอะ: แถบอัลบั้ม (ซ้าย · มือถืออยู่บน) + กริดรูปเล็ก ──
           <div className="grid gap-3 sm:grid-cols-[290px_minmax(0,1fr)]">
             <aside className="max-h-[230px] space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-2 sm:max-h-[62vh]">
-              {albums.length === 0 && <p className="p-1 text-[12px] text-slate-500">{t("ยังไม่มีอัลบั้ม — เลือกรูปแล้วกด \"＋ อัลบั้มใหม่จากที่เลือก\" หรือ \"แบ่งตามเวลาถ่าย\"", "No albums yet — pick photos then \"＋ New album from selection\"")}</p>}
-              {albums.map((a) => (
-                <AlbumSideCard key={a.key} g={a} color={albumColor(a.key)} count={albumCount(a.key)} previews={previewsOf(a.key)} selCount={sel.size}
-                  dropOver={overChip === `a:${a.key}`} drop={chipDrop(`a:${a.key}`, (x) => toAlbum(a.key, x))}
-                  onPut={() => toAlbum(a.key)} onChange={(p) => patchAlbum(a.key, p)} onRemove={() => removeAlbum(a.key)} />
-              ))}
+              {/* 2 หมวด: อัลบั้มใหม่ / ใส่อัลบั้มที่มีอยู่ · เกิน 8 อัลบั้ม = การ์ดเตี้ยลง */}
+              {([["new", t("อัลบั้มใหม่", "New albums")], ["old", t("ใส่อัลบั้มที่มีอยู่", "Existing albums")]] as const).map(([sec, label]) => {
+                const rows = albums.filter((a) => (sec === "old") === !!a.existing);
+                return (
+                  <div key={sec} className="space-y-2">
+                    <div className="px-1 pt-0.5 text-[11.5px] font-semibold text-slate-500">{label} <span className="font-normal text-slate-400">{rows.length || ""}</span></div>
+                    {sec === "new" && !rows.length && <p className="px-1 text-[12px] text-slate-400">{t("เลือกรูปแล้วกด \"＋ อัลบั้มใหม่จากที่เลือก\" หรือ \"แบ่งตามเวลาถ่าย\"", "Pick photos then \"＋ New album from selection\"")}</p>}
+                    {rows.map((a) => (
+                      <AlbumSideCard key={a.key} g={a} color={albumColor(a.key)} count={albumCount(a.key)} previews={previewsOf(a.key)} selCount={sel.size} compact={albums.length > 8}
+                        dropOver={overChip === `a:${a.key}`} drop={chipDrop(`a:${a.key}`, (x) => toAlbum(a.key, x))}
+                        onPut={() => toAlbum(a.key)} onChange={(p) => patchAlbum(a.key, p)} onRemove={() => removeAlbum(a.key)} />
+                    ))}
+                    {sec === "old" && (
+                      <button type="button" onClick={() => setPicking2(true)} className="flex h-9 w-full items-center justify-center gap-1 rounded-xl border border-dashed border-violet-300 bg-violet-50/50 text-[12.5px] font-medium text-violet-700 hover:bg-violet-50">
+                        <Icon value="i:plus" />{sel.size ? t(`ใส่ ${sel.size} รูปลงอัลบั้มที่มีอยู่แล้ว…`, `Put ${sel.size} into an existing album…`) : t("ใส่อัลบั้มที่มีอยู่แล้ว…", "Use an existing album…")}</button>
+                    )}
+                  </div>
+                );
+              })}
             </aside>
             <div className="flex min-w-0 flex-col gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -457,6 +524,34 @@ export function DropAlbumDialog({ files, inside, defaultName, defaultParentCode,
             {mq.box && <div style={mq.box} className="rounded border border-violet-400 bg-violet-400/10" />}
           </div>
         )}
+
+        {/* หน้าต่างเลือกอัลบั้มที่มีอยู่ — ปกรูป + ชื่อ + จำนวนรูป + ค้นได้ทั้งแบรนด์ */}
+        <ERPModal open={picking2} onClose={() => { setPicking2(false); setPickQ(""); }} size="lg" storageKey="sample-drop-pick-existing"
+          title={t("เลือกอัลบั้มที่มีอยู่แล้ว", "Pick an existing album")}
+          description={pickQ.trim() ? t(`ค้นทั้งแบรนด์${brandName ? ` ${brandName}` : ""}`, "Searching the whole brand") : t(`อัลบั้มย่อยใน ${inside} (พิมพ์ค้น = ทั้งแบรนด์)`, `Sub-albums of ${inside} (type to search the brand)`)}>
+          <div className="space-y-2.5">
+            <input value={pickQ} onChange={(e) => setPickQ(e.target.value)} autoFocus placeholder={t("ค้นชื่ออัลบั้ม / รหัสสินค้า…", "Search album / product code…")}
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm focus:border-violet-400 focus:outline-none" />
+            {pickList.length === 0
+              ? <p className="py-8 text-center text-[13px] text-slate-400">{pickQ.trim() ? t("ไม่พบอัลบั้มที่ตรงคำค้น", "No matching albums") : t("อัลบั้มนี้ยังไม่มีอัลบั้มย่อย — พิมพ์ค้นทั้งแบรนด์ได้", "No sub-albums — type to search the brand")}</p>
+              : (
+                <div className="grid max-h-[60vh] grid-cols-2 gap-2.5 overflow-y-auto sm:grid-cols-4">
+                  {pickList.map((a) => (
+                    <button key={a.id} type="button" onClick={() => addExisting(a)} className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left hover:border-violet-400 hover:shadow-md">
+                      <AlbumCover keys={a.preview_keys ?? []} total={a.deep?.photos} />
+                      <div className="space-y-0.5 p-2">
+                        <div className="truncate text-[13px] font-medium text-slate-800">{albumFullName(a, brandName)}</div>
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                          <span>{t(`${a.deep?.photos ?? 0} รูป`, `${a.deep?.photos ?? 0} photos`)}</span>
+                          {productLinkLabel(a) && <span className="truncate rounded-full bg-violet-100 px-1.5 text-violet-800">{productLinkLabel(a)}</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+          </div>
+        </ERPModal>
 
         {bySku && skuGroups.length > 0 && (
           <div className="rounded-lg bg-violet-50/60 px-3 py-2 text-[12px] text-violet-900">

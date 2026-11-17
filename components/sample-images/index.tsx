@@ -308,6 +308,14 @@ export function SampleImagesPage() {
     for (const g of plan.groups) {
       if (!g.files.length) continue;
       try {
+        if (g.existingId) {
+          // ใส่อัลบั้มที่มีอยู่แล้ว — เปลี่ยนชื่อ/สินค้าที่เชื่อม เฉพาะเมื่อผู้ใช้แก้
+          const ex = albums?.find((a) => a.id === g.existingId);
+          if (g.rename) await renameAlbum(g.existingId, g.name);
+          if (g.relink) { await linkAlbumProduct(g.existingId, g.parentCode ? [g.parentCode] : [], g.parentCode ? g.skuCodes : []); if (g.parentCode) setLastParent(g.parentCode); }
+          await upload(g.files, { id: g.existingId, name: g.name, brand_id: ex?.brand_id ?? parent.brand_id }, parent.id);
+          continue;
+        }
         const made = await createSubAlbum(parent.id, g.name);
         if (g.parentCode) { await linkAlbumProduct(made.id, [g.parentCode], g.skuCodes); setLastParent(g.parentCode); }
         await upload(g.files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
@@ -822,6 +830,8 @@ export function SampleImagesPage() {
       )}
 
       <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
+        insideId={album?.id ?? null} brandName={albumBrand?.name ?? null}
+        existing={dropFiles && album ? (albums ?? []).filter((a) => a.id !== album.id && (a.brand_id ?? null) === (album.brand_id ?? null)) : []}
         defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null} defaultSplit="album"
         onCancel={() => setDropFiles(null)} onConfirm={(plan) => void confirmDrop(plan)} />
 
