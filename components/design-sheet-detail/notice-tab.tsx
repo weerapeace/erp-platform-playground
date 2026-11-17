@@ -30,7 +30,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import type { SheetSize } from "@/lib/cost-usage";
 import {
   buildNoticeHtml, cleanNotice, cleanNoticeDisplay, computeNotice, DEFAULT_NOTICE_DISPLAY, newNoticeDoc, noticeCompanyFrom, noticeDateText,
-  noticeHasCalc, noticeKindMeta, noticeMaterialsFromCost, noticeRowsFromMaterial, noticeTabRow, noticeTabsFor, NOTICE_KINDS,
+  noticeHasCalc, noticeKindMeta, noticeLotNeed, noticeMaterialsFromCost, noticeRowsFromMaterial, noticeTabRow, noticeTabsFor, NOTICE_KINDS,
   type NoticeCostLine, type NoticeCostTab, type NoticeDisplay, type NoticeDoc, type NoticeImage, type NoticeKind, type NoticeRecord, type NoticeRow,
 } from "@/lib/design-sheet-notice";
 import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
@@ -39,7 +39,7 @@ import { SheetImagePicker } from "./sheet-image-picker";
 type Draft = NoticeDoc & { id: string | null; created_by_name: string | null; created_at: string | null };
 type GridRow = NoticeRow & { _k: string };
 
-const KIND_ICON: Record<NoticeKind, string> = { yield: "cut", usage: "ruler", free: "chat" };
+const KIND_ICON: Record<NoticeKind, string> = { yield: "cut", usage: "ruler", need: "calc", free: "chat" };
 const snap = (d: Draft | null) => (d ? JSON.stringify(cleanNotice(d)) : "");
 const toDraft = (r: NoticeRecord): Draft => ({ ...r, id: r.id, created_by_name: r.created_by_name, created_at: r.created_at });
 const fmtN = (n: number | null | undefined, d = 2) => (n == null ? "—" : (Math.round(n * 10 ** d) / 10 ** d).toLocaleString("th-TH"));
@@ -192,6 +192,17 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
     const u = curMatBase.units.find((x) => x.unit === cur.calc.unit);
     return u ? { ...curMatBase, unit: u.unit, perTab: u.perTab, note: u.note } : curMatBase;
   }, [curMatBase, cur]);
+  // แบบ need: ผ้ารวมทั้งล็อตของแต่ละไซส์จากการวางชิ้นบนผ้า (lib noticeLotNeed) — คิดใหม่เมื่อเปลี่ยนวัตถุดิบ/หน่วย/ไซส์/จำนวนสั่ง
+  const lotSig = cur && cur.kind === "need" && curMatBase && canEdit && editing ? JSON.stringify([curMatBase.key, cur.calc.unit, cur.calc.rows.map((r) => [r.key, r.order])]) : "";
+  useEffect(() => {
+    if (!lotSig || !cur || !curMatBase) return;
+    const rows = cur.calc.rows.map((r) => {
+      const lot = noticeLotNeed(costLines, curMatBase.key, r.key, cur.calc.unit, r.order, sheetOf);
+      return (r.lot ?? null) === lot ? r : { ...r, lot };
+    });
+    if (rows.some((r, i) => r !== cur.calc.rows[i])) patchCalc({ rows });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotSig, costLines, sheetOf]);
   const curMatTabs = useMemo(() => (curMat ? noticeTabsFor(curMat, costTabs).all : []), [curMat, costTabs]);
   const toggleTab = (tb: NoticeCostTab) => {
     if (!cur || !curMat) return;
@@ -299,7 +310,10 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
       render: (r, up, readonly) => <NumIn value={r.use} disabled={readonly} onChange={(v) => up({ use: v })} className="w-full" /> },
     { key: "order", header: t("จำนวนสั่ง (ใบ)", "Order (pcs)"), width: 130, align: "right",
       render: (r, up, readonly) => <NumIn value={r.order} step="1" disabled={readonly} onChange={(v) => up({ order: v == null ? null : Math.round(v) })} className="w-full" /> },
-  ], [t, cur?.calc.unit]);
+    // แบบ need: ผ้ารวมทั้งล็อตจากการวางบนผ้า (คิดให้เอง · อ่านอย่างเดียว) — ไม่มีขนาดชิ้น = ใช้ต่อใบ × จำนวน
+    ...(cur?.kind === "need" ? [{ key: "lot", header: t(`วางบนผ้า รวม (${cur.calc.unit || "หลา"})`, `Laid out total (${cur.calc.unit || "yd"})`), width: 140, align: "right" as const,
+      render: (r: GridRow) => <span className="block px-2 text-right text-sm tabular-nums text-indigo-700" title={t("จำลองวางชิ้นจริงบนผ้าทั้งล็อต (ยังไม่รวมเผื่อเสียของใบแจ้ง)", "Simulated layout for the whole lot (before the notice's waste %)")}>{r.lot != null ? fmtN(r.lot) : <span className="text-slate-300">{t("ใช้/ใบ × จำนวน", "per unit × qty")}</span>}</span> }] : []),
+  ], [t, cur?.calc.unit, cur?.kind]);
 
   if (list == null) return <p className="text-sm text-slate-400 py-6 text-center">{t("กำลังโหลดใบแจ้ง…", "Loading notices…")}</p>;
 
@@ -471,7 +485,9 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                 />
                 {res && res.rows.length > 0 && (
                   <p className="text-xs text-slate-500">
-                    {cur.kind === "usage"
+                    {cur.kind === "need"
+                      ? t(`รวมต้องเตรียมผ้า ${Math.ceil(res.need - 1e-9).toLocaleString("th-TH")} ${cur.calc.unit} (ปัดขึ้น · ก่อนปัด ${fmtN(res.need)})`, `Total to prepare ${Math.ceil(res.need - 1e-9)} ${cur.calc.unit} (rounded up from ${fmtN(res.need)})`)
+                      : cur.kind === "usage"
                       ? t(`ต้องเตรียมผ้ารวม ${fmtN(res.need)} ${cur.calc.unit}`, `Total needed ${fmtN(res.need)} ${cur.calc.unit}`)
                       : res.enough == null ? t(`ต้องใช้ผ้ารวม ${fmtN(res.need)} ${cur.calc.unit} — ใส่ "ผ้าที่ได้รับ" เพื่อคิดว่าทำได้กี่ใบ`, `Needs ${fmtN(res.need)} ${cur.calc.unit} — enter received to calculate`)
                       : res.enough ? t(`ผ้าพอ · เหลือ ${fmtN(res.left)} ${cur.calc.unit}`, `Enough · ${fmtN(res.left)} left`)

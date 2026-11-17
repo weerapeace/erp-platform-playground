@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
-import { cleanNotice, cleanNoticeDisplay } from "@/lib/design-sheet-notice";
+import { cleanNotice, cleanNoticeDisplay, noticeDbKind } from "@/lib/design-sheet-notice";
 import { NOTICE_COLS, noticeActor, noticeFromRow } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     patch.show = cleanNoticeDisplay(body.display);
   } else {
     const doc = cleanNotice(body);   // ช่องที่ไม่ส่งมา cleanNotice ใส่ค่าตั้งต้น → หยิบเฉพาะช่องที่ส่งมา
-    if (sent.includes("kind")) patch.kind = doc.kind;
+    if (sent.includes("kind")) patch.kind = noticeDbKind(doc.kind);
     if (sent.includes("title")) patch.title = doc.title;
     if (sent.includes("images")) patch.images = doc.images;
     if (sent.includes("img_cols")) patch.img_cols = doc.img_cols;

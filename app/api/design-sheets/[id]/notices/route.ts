@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { cleanNotice } from "@/lib/design-sheet-notice";
+import { cleanNotice, noticeDbKind } from "@/lib/design-sheet-notice";
 import { NOTICE_COLS, noticeActor, noticeFromRow } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!sheet) return NextResponse.json({ error: "ไม่พบใบงานนี้" }, { status: 404 });
   const actor = await noticeActor(request, admin);
   const { data, error } = await admin.from("design_sheet_notices").insert({
-    sheet_id: id, kind: doc.kind, title: doc.title, images: doc.images, img_cols: doc.img_cols, calc: doc.calc, note: doc.note || null,
+    sheet_id: id, kind: noticeDbKind(doc.kind), title: doc.title, images: doc.images, img_cols: doc.img_cols, calc: doc.calc, note: doc.note || null,
     show: doc.display, created_by: actor.id, created_by_name: actor.name, updated_by: actor.id,
   }).select(NOTICE_COLS).single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

@@ -4,7 +4,7 @@
 import type { NextRequest } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { cleanNoticeCalc, cleanNoticeDisplay, cleanNoticeImages, noticeKindOf, type NoticeRecord } from "@/lib/design-sheet-notice";
+import { cleanNoticeCalc, cleanNoticeDisplay, cleanNoticeImages, noticeKindFromDb, type NoticeRecord } from "@/lib/design-sheet-notice";
 
 export const NOTICE_COLS = "id, sheet_id, kind, title, images, img_cols, calc, note, show, created_by_name, created_at, updated_at";
 
@@ -12,7 +12,7 @@ export const NOTICE_COLS = "id, sheet_id, kind, title, images, img_cols, calc, n
 export function noticeFromRow(r: Record<string, unknown>): NoticeRecord {
   const cols = Number(r.img_cols);
   return {
-    id: String(r.id), sheet_id: String(r.sheet_id), kind: noticeKindOf(r.kind),
+    id: String(r.id), sheet_id: String(r.sheet_id), kind: noticeKindFromDb(r.kind, r.calc),
     title: String(r.title ?? ""), images: cleanNoticeImages(r.images),
     img_cols: cols >= 1 && cols <= 4 ? cols : 2,
     calc: cleanNoticeCalc(r.calc), note: String(r.note ?? ""), display: cleanNoticeDisplay(r.show),

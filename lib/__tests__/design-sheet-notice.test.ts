@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildNoticeHtml, cleanNotice, computeNotice, DEFAULT_NOTICE_DISPLAY, newNoticeDoc, noticeMaterialsFromCost,
+  buildNoticeHtml, cleanNotice, computeNotice, DEFAULT_NOTICE_DISPLAY, EMPTY_CALC, newNoticeDoc, noticeDbKind, noticeKindFromDb, noticeKindMeta, noticeLotNeed, noticeMaterialsFromCost,
   noticeRowsFromMaterial, noticeTabsFor, presetShow, type NoticeCalc, type NoticeContext,
 } from "@/lib/design-sheet-notice";
 
@@ -152,5 +152,48 @@ describe("วางจริงแทนค่าประมาณ (เจ้�
     const ms = noticeMaterialsFromCost([L("S", 1.125)], () => null, {});
     expect(ms[0].perTab.S).toBeCloseTo(1.125, 4);
     expect(ms[0].note).not.toContain("วางผ้าจริง");
+  });
+});
+
+describe("แบบ need: ต้องใช้ผ้ากี่หลาตามจำนวนสั่ง (เจ้าของขอ 2026-11-17)", () => {
+  it("lot มี = ใช้ lot × เผื่อเสีย · ไม่มี = ใช้ต่อใบ × จำนวน", () => {
+    const r = computeNotice({ ...EMPTY_CALC, waste_pct: 10, rows: [
+      { key: "S", label: "S", use: 1, order: 100, lot: 90 },
+      { key: "M", label: "M", use: 2, order: 10 },
+    ] });
+    expect(r.rows[0].need).toBeCloseTo(99, 6);
+    expect(r.rows[0].usePlus).toBeCloseTo(0.99, 6);
+    expect(r.rows[1].need).toBeCloseTo(22, 6);
+    expect(r.need).toBeCloseTo(121, 6);
+  });
+  it("noticeLotNeed: ผ้าม้วนวางทั้งล็อต · ไม่มีขนาด = null · cleanNotice เก็บ lot + kind", () => {
+    const L = (w: number | null) => ({ parent_code: "S", item_id: "cv", item_name: "ผ้า", group_name: "ผ้า", qty: 0.2, uom: "หลา", piece: false, width_cm: w, length_cm: 50, pieces: 2, face_width_cm: 150, waste_percent: 10, divisor: 90 });
+    const lot = noticeLotNeed([L(40)], "cv", "S", "หลา", 100);
+    expect(lot).toBeGreaterThan(0);
+    expect(noticeLotNeed([L(null)], "cv", "S", "หลา", 100)).toBeNull();
+    expect(noticeLotNeed([L(40)], "cv", "S", "หลา", null)).toBeNull();
+    const d = cleanNotice({ kind: "need", calc: { rows: [{ key: "S", label: "S", use: 1, order: 5, lot: 4.5 }] } });
+    expect(d.kind).toBe("need");
+    expect(d.calc.rows[0].lot).toBe(4.5);
+    expect(noticeKindMeta("free").key).toBe("free");
+  });
+  it("ใบพิมพ์: กล่องสรุปปัดขึ้นหลาเต็ม", () => {
+    const doc = { ...newNoticeDoc("need"), calc: { ...EMPTY_CALC, rows: [{ key: "S", label: "S", use: 1.01, order: 100 }] } };
+    const html = buildNoticeHtml(doc, { sheetCode: "DS", sheetName: "x", brandName: "", company: null, senderName: "", dateText: "" });
+    expect(html).toContain("รวมต้องเตรียมผ้า");
+    expect(html).toContain("101 หลา");
+  });
+});
+
+describe("need เก็บเป็น usage + view (ไม่แก้ฐานข้อมูล)", () => {
+  it("เขียน/อ่าน ไป-กลับ", () => {
+    const d = cleanNotice({ kind: "need", calc: { rows: [] } });
+    expect(noticeDbKind(d.kind)).toBe("usage");
+    expect(d.calc.view).toBe("need");
+    expect(noticeKindFromDb("usage", d.calc)).toBe("need");
+    expect(noticeKindFromDb("usage", {})).toBe("usage");
+    const u = cleanNotice({ kind: "usage", calc: { view: "need", rows: [] } });   // เปลี่ยนกลับเป็น usage
+    expect(u.kind).toBe("usage");
+    expect(u.calc.view).toBeUndefined();
   });
 });

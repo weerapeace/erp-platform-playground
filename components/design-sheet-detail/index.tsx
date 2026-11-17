@@ -743,6 +743,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const noticeCostLines = useMemo(() => costLines.map((r) => ({
     parent_code: pkey(r.parent_code), item_id: r.item_id, item_sku_id: r.item_sku_id ?? null, item_name: r.item_name,
     group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r), amount: r.amount,
+    width_cm: r.width_cm, length_cm: r.length_cm, pieces: r.pieces, face_width_cm: r.face_width_cm, waste_percent: r.waste_percent, divisor: r.divisor,   // วางบนผ้าทั้งล็อต (ใบแจ้งแบบ need)
   })), [costLines]);
   const noticeSheetOf = useCallback((id: string) => priceItemById.get(id), [priceItemById]);
   const noticeOrderOf = useCallback((key: string) => {

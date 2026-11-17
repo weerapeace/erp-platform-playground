@@ -4,6 +4,7 @@
  * 3 แบบแจ้ง (เพิ่มแบบใหม่ที่ NOTICE_KINDS ที่เดียว):
  *   • yield = ผ้าที่ลูกค้าส่งมา ทำได้กี่ใบ — "แบ่งตามที่สั่ง" (ลดทุกไซส์ลงสัดส่วนเดียวกัน) หรือ "ถ้าทำไซส์เดียว"
  *   • usage = ใช้ผ้ากี่หลาต่อใบ + ต้องเตรียมผ้ารวมเท่าไหร่ตามจำนวนสั่ง
+ *   • need  = ต้องใช้ผ้ากี่หลา (ตามจำนวนสั่ง) — เน้นยอดรวม · ผ้ารวมคิดจาก "วางบนผ้า" ทั้งล็อต (lot · lib/group-fabric-layout) เมื่อบรรทัดตีราคามีขนาดชิ้น · กล่องสรุปปัดขึ้นเป็นหน่วยเต็ม (เจ้าของขอ 2026-11-17)
  *   • free  = แจ้งทั่วไป (รูป + คำอธิบายใต้รูป + ข้อความ)
  * ตัวเลขปัดลงเสมอ (ไม่สัญญาลูกค้าเกินที่ทำได้จริง) · "เผื่อเสีย %" คูณเพิ่มจากใช้ต่อใบ
  *
@@ -14,26 +15,34 @@
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import { costUsagePerUnit, type SheetSize } from "@/lib/cost-usage";
 import type { NestUsage } from "@/lib/nest-usage";
+import { groupFabricLayout } from "@/lib/group-fabric-layout";
 import { formatThaiAddress } from "@/lib/thai-address";
 import { r2ImageUrl } from "@/lib/r2-image";
 
 // ─────────────────────────── ชนิดใบแจ้ง ───────────────────────────
-export type NoticeKind = "yield" | "usage" | "free";
+export type NoticeKind = "yield" | "usage" | "need" | "free";
 export const NOTICE_KINDS: { key: NoticeKind; label: string; title: string; note: string }[] = [
   { key: "yield", label: "ผ้าที่มา ทำได้กี่ใบ", title: "แจ้งจำนวนที่ผลิตได้จากผ้าที่ได้รับ",
     note: "ผ้าที่ได้รับมาไม่พอสำหรับจำนวนที่สั่งทั้งหมด รบกวนแจ้งว่าต้องการส่งผ้าเพิ่ม หรือให้ผลิตตามจำนวนที่ทำได้ครับ" },
   { key: "usage", label: "ใช้ผ้ากี่หลาต่อใบ", title: "แจ้งปริมาณผ้าที่ใช้ต่อใบ",
     note: "แจ้งปริมาณผ้าที่ใช้ต่อใบ เพื่อให้ลูกค้าเตรียมผ้าได้พอดีครับ" },
+  { key: "need", label: "ต้องใช้ผ้ากี่หลา (ตามจำนวนสั่ง)", title: "แจ้งปริมาณผ้าที่ต้องเตรียมตามจำนวนสั่ง",
+    note: "แจ้งปริมาณผ้าที่ต้องเตรียมตามจำนวนที่สั่ง เพื่อให้ลูกค้าเตรียมผ้าได้พอดีครับ" },
   { key: "free", label: "แจ้งทั่วไป", title: "แจ้งรายละเอียดงาน", note: "" },
 ];
-export const noticeKindOf = (k: unknown): NoticeKind => (k === "yield" || k === "usage" ? k : "free");
-export const noticeKindMeta = (k: NoticeKind) => NOTICE_KINDS.find((x) => x.key === k) ?? NOTICE_KINDS[2];
+export const noticeKindOf = (k: unknown): NoticeKind => (k === "yield" || k === "usage" || k === "need" ? k : "free");
+export const noticeKindMeta = (k: NoticeKind) => NOTICE_KINDS.find((x) => x.key === k) ?? NOTICE_KINDS[NOTICE_KINDS.length - 1];
 export const noticeHasCalc = (k: NoticeKind) => k !== "free";
+/** ช่อง kind ในตาราง design_sheet_notices ยอมแค่ yield/usage/free → แบบ need เก็บเป็น "usage" + calc.view = "need" (ไม่ต้องแก้ฐานข้อมูล) */
+export const noticeDbKind = (k: NoticeKind): "yield" | "usage" | "free" => (k === "need" ? "usage" : k);
+export const noticeKindFromDb = (kind: unknown, calc: unknown): NoticeKind =>
+  kind === "usage" && (calc as { view?: unknown } | null)?.view === "need" ? "need" : noticeKindOf(kind);
 
 // ─────────────────────────── ข้อมูลในใบ ───────────────────────────
 export type NoticeImage = { url: string; key: string | null; caption: string };
 /** 1 แถว = 1 ไซส์ (key = รหัสแท็บตีราคา ถ้าดึงมา · พิมพ์เองได้) */
-export type NoticeRow = { key: string; label: string; use: number | null; order: number | null };
+/** lot = ผ้ารวมทั้งล็อตของไซส์นี้จากการวางชิ้นบนผ้า (แบบ need · ยังไม่รวมเผื่อเสียของใบแจ้ง) · ไม่มี = ใช้ต่อใบ × จำนวน */
+export type NoticeRow = { key: string; label: string; use: number | null; order: number | null; lot?: number | null };
 export type NoticeCalc = {
   material: string;        // ชื่อวัตถุดิบที่แจ้ง เช่น "ผ้าลายสก็อตแดง (ลูกค้าส่งมา)"
   unit: string;            // หน่วย (ตั้งต้น หลา)
@@ -42,6 +51,8 @@ export type NoticeCalc = {
   mode: "ratio" | "single";
   waste_pct: number;       // เผื่อเสีย % (0 = ไม่เผื่อ)
   rows: NoticeRow[];
+  /** "need" = ใบแบบ ต้องใช้ผ้ากี่หลา (เก็บในฐานข้อมูลเป็น kind usage) */
+  view?: "need";
 };
 export const EMPTY_CALC: NoticeCalc = { material: "", unit: "หลา", unit_note: "", received: null, mode: "ratio", waste_pct: 0, rows: [] };
 
@@ -124,7 +135,8 @@ export function cleanNoticeCalc(raw: unknown): NoticeCalc {
   const o = (raw ?? {}) as Record<string, unknown>;
   const rows = (Array.isArray(o.rows) ? o.rows : []).slice(0, 20).map((r, i) => {
     const x = (r ?? {}) as Record<string, unknown>;
-    return { key: txt(x.key, 80) || `row${i + 1}`, label: txt(x.label, 60), use: numOrNull(x.use, 0, 1e6), order: numOrNull(x.order, 0, 1e9) };
+    const lot = numOrNull(x.lot, 0, 1e9);
+    return { key: txt(x.key, 80) || `row${i + 1}`, label: txt(x.label, 60), use: numOrNull(x.use, 0, 1e6), order: numOrNull(x.order, 0, 1e9), ...(lot != null ? { lot } : {}) };
   });
   return {
     material: txt(o.material, 200),
@@ -134,6 +146,7 @@ export function cleanNoticeCalc(raw: unknown): NoticeCalc {
     mode: o.mode === "single" ? "single" : "ratio",
     waste_pct: numOrNull(o.waste_pct, 0, 100) ?? 0,
     rows,
+    ...(o.view === "need" ? { view: "need" as const } : {}),
   };
 }
 
@@ -158,14 +171,17 @@ export function cleanNoticeDisplay(raw: unknown): NoticeDisplay {
 /** ตรวจทั้งใบ — API ต้องเรียกก่อนบันทึกเสมอ */
 export function cleanNotice(raw: unknown): NoticeDoc {
   const o = (raw ?? {}) as Record<string, unknown>;
-  const kind = noticeKindOf(o.kind);
+  const kind = noticeKindOf(o.kind);   // ฝั่งหน้าเว็บส่ง "need" มาตรง ๆ · อ่านจากฐานข้อมูลใช้ noticeKindFromDb
   const cols = Math.round(Number(o.img_cols));
+  const calc = cleanNoticeCalc(o.calc);
+  if (kind === "need") calc.view = "need";
+  else if (o.kind !== undefined) delete calc.view;   // ส่งชนิดอื่นมา = ไม่ใช่ need แล้ว
   return {
     kind,
     title: txt(o.title, 200) || noticeKindMeta(kind).title,
     images: cleanNoticeImages(o.images),
     img_cols: cols >= 1 && cols <= 4 ? cols : 2,
-    calc: cleanNoticeCalc(o.calc),
+    calc,
     note: txt(o.note, 5000),
     display: cleanNoticeDisplay(o.display),
   };
@@ -193,8 +209,9 @@ const EPS = 1e-9;
 export function computeNotice(calc: NoticeCalc): NoticeResult {
   const w = 1 + (Number(calc.waste_pct) || 0) / 100;
   const base = calc.rows.map((r) => {
-    const usePlus = r.use != null && r.use > 0 ? r.use * w : null;
-    const need = usePlus != null && r.order != null ? usePlus * r.order : null;
+    const lot = r.lot != null && r.lot > 0 && r.order != null && r.order > 0 ? r.lot * w : null;   // วางบนผ้าทั้งล็อต (แม่นกว่าต่อใบ × จำนวน)
+    const usePlus = lot != null ? lot / r.order! : r.use != null && r.use > 0 ? r.use * w : null;
+    const need = lot ?? (usePlus != null && r.order != null ? usePlus * r.order : null);
     return { r, usePlus, need };
   });
   const need = base.reduce((a, x) => a + (x.need ?? 0), 0);
@@ -221,6 +238,9 @@ export type NoticeCostLine = {
   parent_code: string | null; item_id: string | null; item_sku_id?: string | null; item_name: string | null;
   group_name: string | null; qty: number | null; uom: string | null; piece: boolean;
   amount?: number | null;   // ต้นทุนต่อใบของบรรทัด (ใช้หา "ผ้าหลัก" = ผ้าที่แพงสุด)
+  /** ขนาดชิ้น (ไว้วางบนผ้าทั้งล็อต — แบบ need) */
+  width_cm?: number | null; length_cm?: number | null; pieces?: number | null;
+  face_width_cm?: number | null; waste_percent?: number | null; divisor?: number | null;
 };
 /** ใช้ต่อใบในหน่วยหนึ่ง (ผ้าแบบผืนมีได้ 2 หน่วย: หลา (แปลงจากหน้ากว้าง) กับ ผืน) */
 export type NoticeUnitOption = { unit: string; perTab: Record<string, number>; note: string };
@@ -304,6 +324,34 @@ export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemI
   return out.sort((a, b) => Number(b.fabric) - Number(a.fabric) || b.cost - a.cost || total(b) - total(a) || a.name.localeCompare(b.name, "th"));
 }
 
+/**
+ * ผ้ารวมทั้งล็อตของ 1 ไซส์ จากการวางชิ้นบนผ้า (แบบ need · เจ้าของขอ 2026-11-17) — ตัววางชิ้นกลาง lib/group-fabric-layout
+ *   หน่วย "หลา" = ผ้าม้วน (หน้ากว้างในบรรทัด · ผ้าแบบผืนใช้หน้ากว้างผืน) หาร 90 ซม. เหมือนตารางตีราคา
+ *   หน่วยผืน/แผ่น = จำนวนผืนที่ต้องสั่ง · หน่วยอื่น / ไม่มีขนาดชิ้น = null (ใช้ต่อใบ × จำนวนแทน)
+ */
+export function noticeLotNeed(lines: NoticeCostLine[], materialKey: string, rowKey: string, unit: string, qty: number | null,
+  sheetOf: (itemId: string) => SheetSize | null | undefined = () => null): number | null {
+  if (!qty || qty <= 0) return null;
+  const tab = rowKey === "general" ? "" : rowKey;
+  const ls = lines.filter((l) => matKey(l) === materialKey && (l.parent_code ?? "") === tab
+    && Number(l.width_cm) > 0 && Number(l.length_cm) > 0 && Number(l.pieces) > 0);
+  if (!ls.length) return null;
+  const itemId = ls.find((l) => l.item_id)?.item_id ?? null;
+  const sh = itemId ? sheetOf(itemId) : null;
+  const base = ls.map((l, i) => ({ key: `l${i}`, width_cm: l.width_cm ?? null, length_cm: l.length_cm ?? null, pieces: l.pieces ?? null, waste_percent: l.waste_percent ?? null }));
+  if (unit === "หลา") {
+    const face = ls.map((l) => Number(l.face_width_cm)).find((v) => v > 0) ?? (Number(sh?.width_cm) || 0);
+    if (!(face > 0)) return null;
+    const g = groupFabricLayout(base.map((b, i) => ({ ...b, face_width_cm: face, divisor: Number(ls[i].divisor) > 0 ? ls[i].divisor : NOTICE_YARD_CM })), { qty });
+    return g ? Math.round(g.total * 100) / 100 : null;
+  }
+  if (sh?.width_cm && sh?.length_cm && ls.some((l) => l.piece)) {
+    const g = groupFabricLayout(base, { qty, sheet: sh });
+    return g ? g.total : null;
+  }
+  return null;
+}
+
 /** แถว 1 ไซส์ จากแท็บตีราคา */
 export const noticeTabRow = (m: NoticeMaterialOption, t: NoticeCostTab, orderOf: (tabKey: string) => number | null = () => null): NoticeRow =>
   ({ key: t.key || "general", label: t.label, use: m.perTab[t.key] ?? null, order: orderOf(t.key) });
@@ -348,6 +396,11 @@ function tableHtml(doc: NoticeDoc, res: NoticeResult): string {
   if (single) {
     if (sh.c_use) cols.push({ h: `ใช้ผ้า/ใบ (${unit})`, f: (r) => (r.usePlus != null ? f2(r.usePlus) : dash) });
     if (sh.c_can) cols.push({ h: "ถ้าใช้ผ้าทั้งหมดทำไซส์นี้", f: (r) => (r.single != null ? `${f0(r.single)} ใบ` : dash), b: true });
+  } else if (doc.kind === "need") {
+    // เน้นยอดรวม: จำนวนสั่ง → ใช้/ใบ (เล็ก) → ผ้าที่ต้องใช้ (ตัวหนา)
+    if (sh.c_order) cols.push({ h: "จำนวนสั่ง", f: (r) => (r.order != null ? f0(r.order) : dash), t: f0(res.order) });
+    if (sh.c_use) cols.push({ h: `ใช้/ใบ (${unit})`, f: (r) => (r.usePlus != null ? `<span class="nt-s">${f2(r.usePlus)}</span>` : dash) });
+    if (sh.c_need) cols.push({ h: `ผ้าที่ต้องใช้ (${unit})`, f: (r) => (r.need != null ? f2(r.need) : dash), t: f2(res.need), b: true });
   } else {
     if (sh.c_use) cols.push({ h: `ใช้ผ้า/ใบ (${unit})`, f: (r) => (r.usePlus != null ? f2(r.usePlus) : dash) });
     if (sh.c_order) cols.push({ h: "จำนวนสั่ง", f: (r) => (r.order != null ? f0(r.order) : dash), t: f0(res.order) });
@@ -364,6 +417,12 @@ function tableHtml(doc: NoticeDoc, res: NoticeResult): string {
 
 function summaryHtml(doc: NoticeDoc, res: NoticeResult): string {
   const c = doc.calc, unit = esc(c.unit || "หลา");
+  if (doc.kind === "need") {
+    if (!doc.display.show.summary || !(res.need > 0)) return "";
+    const lotUsed = res.rows.some((r) => r.lot != null && r.lot > 0);
+    const how = [lotUsed ? "คิดจากการวางชิ้นบนผ้าทั้งล็อต" : "คิดจากใช้ต่อใบ × จำนวนสั่ง", (c.waste_pct || 0) > 0 ? `รวมเผื่อเสีย ${f2(c.waste_pct)}% แล้ว` : "", `ปัดขึ้นเป็น${unit}เต็ม`].filter(Boolean).join(" · ");
+    return `<div class="nt-box nt-info nt-need"><span>รวมต้องเตรียมผ้า</span><b>${f0(Math.ceil(res.need - EPS))} ${unit}</b><small>${how}</small></div>`;
+  }
   if (doc.kind !== "yield" || !doc.display.show.summary || c.received == null) return "";
   if (c.mode === "single") return `<div class="nt-box nt-info">ผ้าที่ได้รับ ${f2(c.received)} ${unit} (คิดทีละไซส์ ไม่รวมกัน)</div>`;
   if (res.enough) return `<div class="nt-box nt-ok">ผ้าที่ได้รับ ${f2(c.received)} ${unit} <b>พอ</b> สำหรับจำนวนที่สั่ง · เหลือประมาณ ${f2(res.left)} ${unit}</div>`;
@@ -394,6 +453,9 @@ export const NOTICE_CSS = `
   .nt-box { margin-top:3mm; padding:3mm 4mm; border-radius:6px; font-size:12.5px; line-height:1.6; }
   .nt-ok { background:#ecfdf5; color:#065f46; } .nt-bad { background:#fef2f2; color:#991b1b; } .nt-info { background:#eff6ff; color:#1e3a8a; }
   .nt-waste { margin-top:1.5mm; font-size:11px; color:#64748b; }
+  .nt-table .nt-s { font-size:11px; color:#64748b; }
+  .nt-need { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:1mm 4mm; }
+  .nt-need b { font-size:22px; } .nt-need small { width:100%; font-size:11px; opacity:.85; }
   .nt-note { margin-top:5mm; font-size:13px; line-height:1.7; white-space:pre-wrap; color:#0f172a; }
   .nt-sign { display:flex; justify-content:flex-end; margin-top:12mm; }
   .nt-sign div { width:60mm; text-align:center; font-size:11.5px; color:#475569; }
