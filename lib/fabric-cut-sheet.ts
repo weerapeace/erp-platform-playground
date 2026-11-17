@@ -217,6 +217,7 @@ export const CUT_SHEET_CSS = `@page{size:A4;margin:9mm}
   .mk{margin-bottom:6px}.mh{font-size:12px;margin:6px 0 2px}.rep{font-size:14px;font-weight:700;color:#4338ca}
   .seg{break-inside:avoid;margin-bottom:4px}.sl{font-size:9px;color:#64748b}.cont{font-size:11px;font-weight:700;color:#c2410c;margin:2px 0}
   .warn{background:#fffbeb;border:1px solid #fcd34d;border-radius:4px;padding:4px 8px;color:#92400e}
+  @media screen{html{background:#e2e8f0}body{padding:6mm 0}.pg{box-sizing:border-box;width:210mm;min-height:297mm;margin:0 auto 6mm;padding:9mm;background:#fff;box-shadow:0 1px 4px rgba(15,23,42,.18)}}
   .sign{display:flex;justify-content:space-between;gap:12px;margin-top:10px;break-inside:avoid}.sign span{font-size:9.5px;color:#64748b}`;
 
 /** ใบวิธีตัดหลายผ้าในไฟล์เดียว (1 ผ้า = เริ่มหน้าใหม่) */

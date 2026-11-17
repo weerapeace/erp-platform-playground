@@ -222,6 +222,8 @@ const CSS = `
     .thg{display:grid;gap:4mm;align-items:start}.th{margin:0;break-inside:avoid}.th svg{display:block}.th figcaption{font-size:9px;color:#64748b;margin-top:1mm;text-align:center}
     .po td{padding:4px}.po .big{font-size:14px;font-weight:700;color:#3730a3;white-space:nowrap}.po .big small{font-size:10px;font-weight:400;color:#475569}
     .po .enough td{color:#64748b}.po .enough .big{color:#166534;font-size:11px}.po .blank{width:28mm}
+    @media screen{html{background:#e2e8f0}body{padding:6mm 0}.pg{box-sizing:border-box;width:210mm;min-height:297mm;margin:0 auto 6mm;padding:10mm;background:#fff;box-shadow:0 1px 4px rgba(15,23,42,.18)}}
+    @media print{.pg{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}}
     .po tfoot td{border-top:0.3mm solid #0f172a;border-bottom:0;font-size:12px}
     ${SIGNOFF_CSS}`;
 
